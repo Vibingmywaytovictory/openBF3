@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["crates/superbundle_bf3", "crates/ebx_bf3", "crates/bf3_install", "."]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+superbundle_bf3 = { path = "crates/superbundle_bf3" }
+ebx_bf3 = { path = "crates/ebx_bf3" }
+bf3_install = { path = "crates/bf3_install" }
+
+[workspace.lints.clippy]
+
+[package]
+name = "ebx-dump"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+superbundle_bf3.workspace = true
+ebx_bf3.workspace = true
+bf3_install.workspace = true
+serde_json = "1"
+
+[profile.release]
+debug = false
