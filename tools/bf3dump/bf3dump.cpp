@@ -34,6 +34,7 @@
 //                              one resolved WeaponDef (a variant or a blueprint) with the level's
 //                              body multipliers for its projectile
 //   weapons [--level <sb>]     one TSV row per SoldierWeaponUnlockAsset under weapons/
+// Text database (text_commands.cpp): text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -47,6 +48,7 @@
 #include "bf3/core/thread_pool.h"
 #include "ebx_commands.h"
 #include "weapon_commands.h"
+#include "text_commands.h"
 #include "json_number.h"
 
 #include <fcntl.h>
@@ -469,6 +471,7 @@ void usage() {
 			"  numcheck\n"
 			"  weapon <partition> [--unlock <u_..>]... [--level <sb>]\n"
 			"  weapons [--level <sb>]\n");
+			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n");
 }
 
 } // namespace
@@ -547,6 +550,15 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "weapons") {
 		return bf3dump::cmd_weapons(ebx_ctx, rest);
+	}
+	if (cmd == "text" && rest.size() >= 1 && rest[0] == "--census" && rest.size() <= 2) {
+		return bf3dump::cmd_text_census(ebx_ctx, rest.size() == 2 ? rest[1] : std::string());
+	}
+	if (cmd == "text" && rest.size() == 2 && rest[0] == "--tsv") {
+		return bf3dump::cmd_text_tsv(ebx_ctx, rest[1]);
+	}
+	if (cmd == "text" && !rest.empty() && rest[0].rfind("--", 0) != 0) {
+		return bf3dump::cmd_text_lookup(ebx_ctx, rest);
 	}
 	usage();
 	return 2;
