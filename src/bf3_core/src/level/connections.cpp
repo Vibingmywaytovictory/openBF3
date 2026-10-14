@@ -12,6 +12,8 @@ namespace {
 constexpr uint32_t kResolveDepth = 32;
 // Steps one resolution may take (see Scopes::budget_); retail resolutions take a few dozen.
 constexpr uint32_t kResolveBudget = 1u << 16;
+// Longest sub-world BundleName looked up (retail names are under 100 characters).
+constexpr size_t kMaxBundleName = 1024;
 
 std::string_view trim(std::string_view p_text) {
 	const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; };
@@ -140,10 +142,18 @@ Connections Connections::of(const EbxResolver &p_db, const EbxInstance &p_bluepr
 				continue;
 			}
 			const Connection c{ *source, id(kLists[slot].source_field), *target, id(kLists[slot].target_field) };
+			if (slot == 0) {
+				out.property_index_[FieldKey{ InstanceKey::of(c.target), c.target_field }].push_back(uint32_t(out.property.size()));
+			}
 			(slot == 0 ? out.property : slot == 1 ? out.link : out.event).push_back(c);
 		}
 	}
 	return out;
+}
+
+const std::vector<uint32_t> *Connections::property_into(const EbxInstance &p_target, int32_t p_field) const {
+	const auto found = property_index_.find(FieldKey{ InstanceKey::of(p_target), p_field });
+	return found == property_index_.end() ? nullptr : &found->second;
 }
 
 // --- Property ----------------------------------------------------------------------------------
@@ -375,6 +385,9 @@ std::optional<EbxInstance> Scopes::referenced_blueprint(const EbxInstance &p_ref
 		if (!bundle) {
 			return std::nullopt;
 		}
+		if (bundle->size() > kMaxBundleName) {
+			return std::nullopt; // no partition has such a name; do not copy it on every hop
+		}
 		std::string name(*bundle);
 		for (char &c : name) {
 			if (c == '\\') {
@@ -417,14 +430,27 @@ const Connections &Scopes::connections_of(const EbxInstance &p_blueprint) const 
 	return extra->second;
 }
 
-std::vector<std::pair<EbxInstance, int32_t>> Scopes::sources_into(const EbxInstance &p_blueprint, const EbxInstance &p_target, int32_t p_field) const {
-	std::vector<std::pair<EbxInstance, int32_t>> out;
-	for (const Connection &c : connections_of(p_blueprint).property) {
-		if (same(c.target, p_target) && c.target_field == p_field) {
-			out.emplace_back(c.source, c.source_field);
+std::optional<EbxValue> Scopes::descriptor_field(const EbxInstance &p_descriptor, int32_t p_field) const {
+	const std::optional<EbxValue> fields = p_descriptor.get("Fields");
+	const OptionalEbxArray array = fields ? fields->as_array() : OptionalEbxArray();
+	if (!array) {
+		return std::nullopt;
+	}
+	const InstanceKey key = InstanceKey::of(p_descriptor);
+	auto index = descriptor_fields_.find(key);
+	if (index == descriptor_fields_.end()) {
+		index = descriptor_fields_.emplace(key, std::unordered_map<int32_t, uint32_t>()).first;
+		uint32_t at = 0;
+		for (const EbxValue entry : *array) {
+			const std::optional<EbxValue> id = entry.get("Id");
+			if (const std::optional<int32_t> i = id ? id->as_i32() : std::nullopt) {
+				index->second.emplace(*i, at); // the first entry with the id decides, as Rust's find
+			}
+			++at;
 		}
 	}
-	return out;
+	const auto found = index->second.find(p_field);
+	return found == index->second.end() ? std::nullopt : array->get(found->second);
 }
 
 std::optional<Property> Scopes::property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth) const {
@@ -433,9 +459,17 @@ std::optional<Property> Scopes::property_in(const Frame &p_frame, const EbxInsta
 	}
 	const uint32_t depth = p_depth - 1;
 	const EbxInstance blueprint = p_frame.scope ? scopes_[*p_frame.scope].blueprint : p_frame.blueprint;
-	for (const auto &[source, source_field] : sources_into(blueprint, p_target, p_field)) {
-		if (std::optional<Property> v = source_value(p_frame, source, source_field, depth)) {
-			return v;
+	const Connections &connections = connections_of(blueprint);
+	if (const std::vector<uint32_t> *into = connections.property_into(p_target, p_field)) {
+		for (const uint32_t at : *into) {
+			if (budget_ == 0) {
+				++exhausted_; // the rest would each be cut short; do not walk them
+				break;
+			}
+			const Connection &c = connections.property[at];
+			if (std::optional<Property> v = source_value(p_frame, c.source, c.source_field, depth)) {
+				return v;
+			}
 		}
 	}
 	return std::nullopt;
@@ -450,6 +484,7 @@ std::optional<Property> Scopes::source_value(const Frame &p_frame, const EbxInst
 		return std::nullopt;
 	}
 	--budget_;
+	++hops_;
 	const uint32_t depth = p_depth - 1;
 	const EbxInstance blueprint = p_frame.scope ? scopes_[*p_frame.scope].blueprint : p_frame.blueprint;
 	const std::optional<EbxInstance> descriptor = db_->follow(blueprint.data(), "Descriptor");
@@ -462,9 +497,17 @@ std::optional<Property> Scopes::source_value(const Frame &p_frame, const EbxInst
 			child.parent = &p_frame;
 			child.reference = p_source;
 			child.blueprint = *inner;
-			for (const auto &[source, source_field] : sources_into(*inner, *inner_descriptor, p_field)) {
-				if (std::optional<Property> v = source_value(child, source, source_field, depth)) {
-					return v;
+			const Connections &connections = connections_of(*inner);
+			if (const std::vector<uint32_t> *into = connections.property_into(*inner_descriptor, p_field)) {
+				for (const uint32_t at : *into) {
+					if (budget_ == 0) {
+						++exhausted_;
+						break;
+					}
+					const Connection &c = connections.property[at];
+					if (std::optional<Property> v = source_value(child, c.source, c.source_field, depth)) {
+						return v;
+					}
 				}
 			}
 		}
@@ -508,23 +551,14 @@ std::optional<Property> Scopes::interface_in(const Frame &p_frame, int32_t p_fie
 	if (!descriptor) {
 		return std::nullopt;
 	}
-	const std::optional<EbxValue> fields = descriptor->get("Fields");
-	const OptionalEbxArray array = fields ? fields->as_array() : OptionalEbxArray();
-	if (!array) {
+	const std::optional<EbxValue> entry = descriptor_field(*descriptor, p_field);
+	if (!entry) {
 		return std::nullopt;
 	}
-	for (const EbxValue entry : *array) {
-		const std::optional<EbxValue> id = entry.get("Id");
-		const std::optional<int32_t> i = id ? id->as_i32() : std::nullopt;
-		if (i != p_field) {
-			continue;
-		}
-		// The first entry with the id decides, as Rust's find + and_then.
-		const std::optional<EbxValue> value = entry.get("Value");
-		const std::optional<std::string_view> text = value ? value->as_str() : std::nullopt;
-		return text ? Property::parse(*text) : std::nullopt;
-	}
-	return std::nullopt;
+	// The first entry with the id decides, as Rust's find + and_then.
+	const std::optional<EbxValue> value = entry->get("Value");
+	const std::optional<std::string_view> text = value ? value->as_str() : std::nullopt;
+	return text ? Property::parse(*text) : std::nullopt;
 }
 
 } // namespace bf3::core::level

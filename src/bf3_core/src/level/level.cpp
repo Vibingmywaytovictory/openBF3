@@ -224,7 +224,7 @@ EbxInstance LoadedLevel::root() const {
 	return db_.partition_by_name(root_name)->primary(); // load_level checked it
 }
 
-bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode) {
+bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, size_t *r_slots) {
 	const std::optional<EbxValue> auto_load = p_reference.get("AutoLoad");
 	if (!(auto_load ? auto_load->as_bool() : std::nullopt).value_or(false)) {
 		return false;
@@ -232,6 +232,11 @@ bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::stri
 	const std::optional<EbxInstance> settings = p_db.follow(p_reference.data(), "InclusionSettings");
 	if (!settings) {
 		return true;
+	}
+	if (r_slots) {
+		const std::optional<EbxValue> list = settings->get("Settings");
+		const OptionalEbxArray slots = list ? list->as_array() : OptionalEbxArray();
+		*r_slots += slots ? slots->size() : 0;
 	}
 	for (const EbxInstance &setting : p_db.follow_all(settings->data(), "Settings")) {
 		const std::optional<EbxInstance> criterion = p_db.follow(setting.data(), "Criterion");
@@ -243,6 +248,9 @@ bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::stri
 		const std::optional<EbxValue> options = setting.get("EnabledOptions");
 		const OptionalEbxArray array = options ? options->as_array() : OptionalEbxArray();
 		if (array) {
+			if (r_slots) {
+				*r_slots += array->size();
+			}
 			for (const EbxValue option : *array) {
 				const std::optional<std::string_view> text = option.as_str();
 				if (text && mode_matches(p_mode, *text)) {

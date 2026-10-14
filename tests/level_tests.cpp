@@ -143,14 +143,15 @@ private:
 // A hostile partition read through its own descriptors: a WorldPartData (the primary) whose
 // Objects list p_objects entries, each an internal reference to instance 1 (a
 // WorldPartReferenceObjectData whose Blueprint is the WorldPartData itself) or, for 2, to instance 2
-// (a StaticModelGroupEntityData with no members).
-std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects) {
+// (a StaticModelGroupEntityData whose MemberDatas holds p_members members that place nothing:
+// no InstanceCount, MemberType or MeshEntityType).
+std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects, uint32_t p_members = 0) {
 	using Bytes = std::vector<uint8_t>;
 	const auto put32 = [](Bytes &r_out, size_t p_at, uint32_t p_value) { std::memcpy(r_out.data() + p_at, &p_value, 4); };
 	const auto put16 = [](Bytes &r_out, size_t p_at, uint16_t p_value) { std::memcpy(r_out.data() + p_at, &p_value, 2); };
 	const auto align16 = [](size_t p_at) { return (p_at + 15) & ~size_t(15); };
 	const char *names[] = { "DataContainer", "$", "WorldPartData", "Objects", "WorldPartReferenceObjectData", "Blueprint", "array", "member",
-		"StaticModelGroupEntityData" };
+		"StaticModelGroupEntityData", "MemberDatas", "StaticModelGroupMemberData", "Unused" };
 	std::string name_table;
 	for (const char *n : names) {
 		name_table += n;
@@ -168,7 +169,10 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects) {
 		{ "member", ebx_code::kClass, 0, 0 }, // array (2)
 		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartReferenceObjectData (3, 4)
 		{ "Blueprint", ebx_code::kClass, 0, 8 },
-		{ "$", ebx_code::kVoid, 0, 0 }, // StaticModelGroupEntityData (5)
+		{ "$", ebx_code::kVoid, 0, 0 }, // StaticModelGroupEntityData (5, 6)
+		{ "MemberDatas", ebx_code::kArray, 5, 8 },
+		{ "member", ebx_code::kValueType, 6, 0 }, // array (7)
+		{ "Unused", ebx_code::kUInt32, 0, 0 }, // StaticModelGroupMemberData (8)
 	};
 	struct C {
 		const char *name;
@@ -182,7 +186,9 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects) {
 		{ "WorldPartData", 0, 2, ebx_code::kClass, 16 },
 		{ "array", 2, 1, ebx_code::kArray, 4 },
 		{ "WorldPartReferenceObjectData", 3, 2, ebx_code::kClass, 16 },
-		{ "StaticModelGroupEntityData", 5, 1, ebx_code::kClass, 16 },
+		{ "StaticModelGroupEntityData", 5, 2, ebx_code::kClass, 16 },
+		{ "array", 7, 1, ebx_code::kArray, 4 },
+		{ "StaticModelGroupMemberData", 8, 1, ebx_code::kValueType, 4 },
 	};
 	const uint32_t repeaters[3][3] = { { 0, 1, 1 }, { 0, 1, 3 }, { 0, 1, 4 } }; // internal, count, complex
 	const size_t names_at = 80;
@@ -190,11 +196,12 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects) {
 	const size_t complexes_at = align16(fields_at + std::size(fields) * 16);
 	const size_t instance_repeaters_at = complexes_at + std::size(complexes) * 16;
 	const size_t array_repeaters_at = align16(instance_repeaters_at + std::size(repeaters) * 12);
-	const size_t meta_size = align16(array_repeaters_at + 12);
+	const size_t meta_size = align16(array_repeaters_at + 2 * 12);
 	const size_t instances_at = meta_size; // no strings
 	const size_t instance_payload = 3 * (16 + 16);
 	const size_t arrays_at = instances_at + instance_payload;
-	const size_t total = arrays_at + 4 + 4 * p_objects.size();
+	const size_t members_at = align16(4 + 4 * p_objects.size() + 4); // array 1, after its count
+	const size_t total = arrays_at + members_at + 4 * size_t(p_members);
 	Bytes b(total, 0);
 	put32(b, 0x00, 0x0FB2D1CE);
 	put32(b, 0x04, uint32_t(meta_size));
@@ -203,7 +210,7 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects) {
 	put32(b, 0x18, uint32_t(std::size(complexes)));
 	put32(b, 0x1C, uint32_t(std::size(fields)));
 	put32(b, 0x20, uint32_t(name_table.size()));
-	put32(b, 0x28, 1);
+	put32(b, 0x28, 2);
 	put32(b, 0x2C, uint32_t(instance_payload));
 	const Guid partition = *Guid::parse("5e1f0000-0000-4000-8000-000000000001");
 	const Guid instance_guids[3] = { *Guid::parse("5e1f0000-0000-4000-8000-000000000010"), *Guid::parse("5e1f0000-0000-4000-8000-000000000011"),
@@ -232,18 +239,25 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects) {
 			put32(b, instance_repeaters_at + i * 12 + j * 4, repeaters[i][j]);
 		}
 	}
-	put32(b, array_repeaters_at, 4); // array 0: count at section+0, elements at section+4
+	// Array 0 (Objects): count at section+0, elements at section+4. Array 1 (MemberDatas): count
+	// just before members_at, elements at members_at.
+	put32(b, array_repeaters_at, 4);
 	put32(b, array_repeaters_at + 4, uint32_t(p_objects.size()));
 	put32(b, array_repeaters_at + 8, 2);
+	put32(b, array_repeaters_at + 12, uint32_t(members_at));
+	put32(b, array_repeaters_at + 16, p_members);
+	put32(b, array_repeaters_at + 20, 5);
 	for (size_t i = 0; i < 3; ++i) {
 		std::memcpy(b.data() + instances_at + i * 32, instance_guids[i].bytes.data(), 16);
 	}
 	put32(b, instances_at + 16 + 8, 0); // WorldPartData.Objects: array 0
 	put32(b, instances_at + 32 + 16 + 8, 1); // WorldPartReferenceObjectData.Blueprint: internal, instance 0
+	put32(b, instances_at + 64 + 16 + 8, 1); // StaticModelGroupEntityData.MemberDatas: array 1
 	put32(b, arrays_at, uint32_t(p_objects.size()));
 	for (size_t i = 0; i < p_objects.size(); ++i) {
 		put32(b, arrays_at + 4 + 4 * i, p_objects[i] + 1); // internal references
 	}
+	put32(b, arrays_at + members_at - 4, p_members);
 	return b;
 }
 
@@ -563,9 +577,9 @@ TEST_SUITE("level") {
 		}
 		Result<LevelMount> mount = install->mount_level("MP_Subway");
 		REQUIRE(mount.ok());
-		const auto run = [&](const std::vector<uint32_t> &p_objects) {
+		const auto run = [&](const std::vector<uint32_t> &p_objects, uint32_t p_members) {
 			EbxDb db;
-			Result<bool> inserted = db.parse_insert("levels/hostile/part", self_listing_part(p_objects));
+			Result<bool> inserted = db.parse_insert("levels/hostile/part", self_listing_part(p_objects, p_members));
 			REQUIRE_MESSAGE(inserted.ok(), (inserted.ok() ? std::string() : inserted.error().message));
 			const EbxPartition *part = db.partition_by_name("levels/hostile/part");
 			REQUIRE(part != nullptr);
@@ -573,13 +587,53 @@ TEST_SUITE("level") {
 			return World::traverse(db, part->primary(), *mount, "TeamDeathMatch0");
 		};
 		{
-			Result<std::unique_ptr<World>> world = run({ 1 });
+			Result<std::unique_ptr<World>> world = run({ 1 }, 0);
 			REQUIRE(world.ok());
 			CHECK((*world)->objects.empty());
 			CHECK((*world)->stats.depth_limited == 1);
 		}
-		for (const std::vector<uint32_t> &objects : { std::vector<uint32_t>{ 1, 1 }, std::vector<uint32_t>{ 1, 2, 1 } }) {
-			Result<std::unique_ptr<World>> world = run(objects);
+		{
+			Result<std::unique_ptr<World>> world = run({ 1, 1 }, 0);
+			REQUIRE_FALSE(world.ok());
+			CHECK(world.error().message.find("steps") != std::string::npos);
+		}
+		{
+			// With a group in the loop the 2^16 group cap is reached before the step budget.
+			Result<std::unique_ptr<World>> world = run({ 1, 2, 1 }, 0);
+			REQUIRE_FALSE(world.ok());
+			CHECK(world.error().message.find("static model groups") != std::string::npos);
+		}
+	}
+
+	TEST_CASE("level: static model group members cost steps, placed or not") {
+		// Members that place nothing still cost their lookups, so each costs a step: one group with
+		// 1,000 empty members takes at least 1,000 steps, and [self, self, group of 200,000 empty
+		// members] fails on the step budget after about 20 group expansions instead of running for
+		// hours (uncharged, it allowed about 2^22 expansions of O(members) work each).
+		const std::shared_ptr<Install> install = open_or_skip();
+		if (!install) {
+			return;
+		}
+		Result<LevelMount> mount = install->mount_level("MP_Subway");
+		REQUIRE(mount.ok());
+		const auto run = [&](const std::vector<uint32_t> &p_objects, uint32_t p_members) {
+			EbxDb db;
+			Result<bool> inserted = db.parse_insert("levels/hostile/part", self_listing_part(p_objects, p_members));
+			REQUIRE_MESSAGE(inserted.ok(), (inserted.ok() ? std::string() : inserted.error().message));
+			const EbxPartition *part = db.partition_by_name("levels/hostile/part");
+			REQUIRE(part != nullptr);
+			return World::traverse(db, part->primary(), *mount, "TeamDeathMatch0");
+		};
+		{
+			Result<std::unique_ptr<World>> world = run({ 2 }, 1000);
+			REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
+			REQUIRE((*world)->groups.size() == 1);
+			CHECK((*world)->groups[0].members == 1000);
+			CHECK((*world)->groups[0].instances == 0);
+			CHECK((*world)->stats.steps >= 1000);
+		}
+		{
+			Result<std::unique_ptr<World>> world = run({ 1, 1, 2 }, 200000);
 			REQUIRE_FALSE(world.ok());
 			CHECK(world.error().message.find("steps") != std::string::npos);
 		}

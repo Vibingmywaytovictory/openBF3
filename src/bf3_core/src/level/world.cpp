@@ -6,15 +6,23 @@ namespace bf3::core::level {
 namespace {
 
 constexpr uint32_t kMaxDepth = 48;
-// Placed objects and scopes one traversal may create. The depth limit bounds nesting, not fan-out:
-// a hostile prefab listing itself many times would otherwise grow without bound. Retail levels
-// place at most 15,178 objects in 773 scopes (all 230 level x mode runs).
+// Placed objects, scopes and static model groups one traversal may create. The depth limit bounds
+// nesting, not fan-out: a hostile prefab listing itself many times would otherwise grow without
+// bound. Retail levels place at most 15,178 objects in 773 scopes and 3 groups (all 230 level x
+// mode runs).
 constexpr size_t kMaxObjects = size_t(1) << 20;
 constexpr size_t kMaxScopes = size_t(1) << 18;
-// Steps one traversal may take: each visit, each object of a visited container, each group
-// instance and each variation database entry read costs one. The object and scope caps do not
-// bound a WorldPart that lists a reference back to itself twice (2^depth visits that place
-// nothing), so this does. Retail levels take at most 17,478 steps.
+constexpr size_t kMaxGroups = size_t(1) << 16;
+// Skipped and absent sub-world names kept in WorldStats (retail levels list about a dozen), and
+// the bytes kept of each (retail names are under 100).
+constexpr size_t kMaxNamedSubworlds = 4096;
+constexpr size_t kMaxSubworldName = 1024;
+// Steps one traversal may take. Every loop over data costs one step per slot it walks, whether the
+// slot places anything or not: each visit, each Objects slot of a visited container, each member and
+// each instance slot of a static model group, each inclusion setting and variation database slot
+// read, and each connection hop of a property resolution. The caps above do not bound a WorldPart
+// that lists a reference back to itself twice (2^depth visits that place nothing), so this does.
+// Retail levels take at most 18,395 (18,006 steps and 389 hops on MP_Subway RushLarge0).
 constexpr size_t kMaxSteps = size_t(1) << 22;
 
 struct KindName {
@@ -173,6 +181,9 @@ MeshVariationDb MeshVariationDb::read(const EbxResolver &p_db, const EbxInstance
 	MeshVariationDb out;
 	out.database_ = p_database;
 	for (const char *list : { "Entries", "RedirectEntries" }) {
+		const std::optional<EbxValue> slots = p_database.get(list);
+		const OptionalEbxArray slot_array = slots ? slots->as_array() : OptionalEbxArray();
+		out.scanned_ += slot_array ? slot_array->size() : 0;
 		for (const EbxInstance &entry : p_db.follow_all(p_database.data(), list)) {
 			const std::optional<EbxInstance> mesh = p_db.follow(entry.data(), "Mesh");
 			if (!mesh) {
@@ -242,12 +253,9 @@ public:
 			++world_.stats.depth_limited;
 			return Status::success();
 		}
-		if (world_.objects.size() > kMaxObjects || world_.scopes.size() > kMaxScopes) {
-			return make_error("level traversal: more than " + std::to_string(kMaxObjects) + " placed objects or " + std::to_string(kMaxScopes) +
-					" scopes");
-		}
-		for (const EbxInstance &object : objects(p_container)) {
-			BF3_TRY(charge(1));
+		std::vector<EbxInstance> container_objects;
+		BF3_TRY(objects(p_container, container_objects));
+		for (const EbxInstance &object : container_objects) {
 			if (object.is_a("WorldPartReferenceObjectData")) {
 				if (excluded(p_scope, object)) {
 					continue;
@@ -274,40 +282,51 @@ public:
 	}
 
 private:
+	// Charges p_steps and checks every budget. The property resolutions between two charges are
+	// bounded by their own budget, so their hops are charged here, after the fact.
 	Status charge(size_t p_steps) {
 		world_.stats.steps += p_steps;
-		if (world_.stats.steps > kMaxSteps) {
+		world_.stats.resolve_hops = world_.scopes.hops();
+		if (world_.stats.steps + world_.stats.resolve_hops > kMaxSteps) {
 			return make_error("level traversal: more than " + std::to_string(kMaxSteps) + " steps (a blueprint graph that fans out)");
+		}
+		if (world_.objects.size() > kMaxObjects || world_.scopes.size() > kMaxScopes || world_.groups.size() > kMaxGroups) {
+			return make_error("level traversal: more than " + std::to_string(kMaxObjects) + " placed objects, " + std::to_string(kMaxScopes) +
+					" scopes or " + std::to_string(kMaxGroups) + " static model groups");
 		}
 		return Status::success();
 	}
 
-	std::vector<EbxInstance> objects(const EbxInstance &p_container) {
-		std::vector<EbxInstance> out;
+	// The resolved Objects of p_container; each slot costs a step, null or unresolved ones too.
+	Status objects(const EbxInstance &p_container, std::vector<EbxInstance> &r_out) {
 		const std::optional<EbxValue> list = p_container.get("Objects");
 		const OptionalEbxArray array = list ? list->as_array() : OptionalEbxArray();
 		if (!array) {
-			return out;
+			return Status::success();
 		}
-		out.reserve(array->size());
+		BF3_TRY(charge(array->size()));
+		r_out.reserve(array->size());
 		for (const EbxValue value : *array) {
 			const std::optional<EbxRef> ref = value.as_ref();
 			if (!ref || ref->is_null()) {
 				continue;
 			}
 			if (const std::optional<EbxInstance> object = db_.resolve(p_container.partition(), *ref)) {
-				out.push_back(*object);
+				r_out.push_back(*object);
 			} else {
 				++world_.stats.unresolved_objects;
 			}
 		}
-		return out;
+		return Status::success();
 	}
 
 	Status enter_subworld(const EbxInstance &p_reference, uint32_t p_scope, const LevelTransform &p_frame, uint32_t p_subworld, uint32_t p_depth) {
-		const std::string name(str_field(p_reference, "BundleName").value_or(""));
-		if (!includes(db_, p_reference, mode_)) {
-			world_.stats.skipped_subworlds.push_back(name);
+		const std::string_view name = str_field(p_reference, "BundleName").value_or("");
+		size_t slots = 0;
+		const bool included = includes(db_, p_reference, mode_, &slots);
+		BF3_TRY(charge(slots));
+		if (!included) {
+			note_subworld(world_.stats.skipped_subworlds, name);
 			return Status::success();
 		}
 		if (excluded(p_scope, p_reference)) {
@@ -315,15 +334,26 @@ private:
 		}
 		const std::optional<EbxInstance> data = world_.scopes.referenced_blueprint(p_reference);
 		if (!data) {
-			world_.stats.absent_subworlds.push_back(name);
+			note_subworld(world_.stats.absent_subworlds, name);
 			return Status::success();
 		}
 		const LevelTransform frame = blueprint_transform(p_scope, p_reference).in_parent(p_frame);
 		const uint32_t child = uint32_t(world_.subworlds.size());
 		const uint32_t child_scope = world_.scopes.push(*data, p_reference, p_scope, frame, child, 0);
 		world_.subworlds.push_back(read_subworld(db_, *data, p_reference, p_subworld, child_scope));
-		BF3_TRY(charge(world_.subworlds.back().variations.size()));
+		BF3_TRY(charge(world_.subworlds.back().variations.scanned()));
 		return visit(*data, child_scope, frame, child, 0, p_depth + 1);
+	}
+
+	// Records a skipped or absent sub-world's BundleName. A hostile graph can reach the same
+	// reference millions of times, so the lists keep the first kMaxNamedSubworlds names, each cut
+	// to kMaxSubworldName bytes.
+	void note_subworld(std::vector<std::string> &r_names, std::string_view p_name) {
+		if (r_names.size() < kMaxNamedSubworlds) {
+			r_names.emplace_back(p_name.substr(0, kMaxSubworldName));
+		} else {
+			++world_.stats.unnamed_subworlds;
+		}
 	}
 
 	Status place_reference(const EbxInstance &p_reference, uint32_t p_scope, const LevelTransform &p_frame, uint32_t p_subworld, uint32_t p_variation,
@@ -409,6 +439,8 @@ private:
 		const std::optional<EbxValue> member_list = p_group.get("MemberDatas");
 		const OptionalEbxArray member_array = member_list ? member_list->as_array() : OptionalEbxArray();
 		if (member_array) {
+			// Each member slot costs a step: members that place nothing still cost their lookups.
+			BF3_TRY(charge(member_array->size()));
 			for (const EbxValue m : *member_array) {
 				if (const std::optional<EbxStruct> s = m.as_struct()) {
 					members.push_back(*s);
@@ -445,6 +477,7 @@ private:
 			const size_t transform_count = transforms ? transforms->size() : 0;
 
 			for (uint32_t instance = 0; instance < count; ++instance) {
+				BF3_TRY(charge(1)); // every instance slot, placed or not
 				const std::optional<EbxValue> explicit_value = instance < transform_count ? transforms->get(instance) : std::nullopt;
 				const auto explicit_rows = explicit_value ? explicit_value->as_transform() : std::nullopt;
 				LevelTransform local;
@@ -480,7 +513,6 @@ private:
 				const uint32_t variation = (variation_value ? variation_value->as_u32() : std::nullopt).value_or(0);
 				local.scale = local.scale * scale;
 
-				BF3_TRY(charge(1));
 				PlacedObject placed;
 				if (mesh) {
 					MeshObject m;
@@ -593,6 +625,7 @@ Result<std::unique_ptr<World>> World::traverse(const EbxResolver &p_db, const Eb
 	world->subworlds.push_back(read_subworld(db, root, std::nullopt, std::nullopt, scope));
 	Walker walker(db, p_mount, p_mode, *world);
 	BF3_TRY(walker.visit(root, scope, LevelTransform::identity(), 0, 0, 0));
+	world->stats.resolve_hops = world->scopes.hops();
 	for (size_t at = 0; at < world->objects.size(); ++at) {
 		const PlacedObject &object = world->objects[at];
 		world->placed_.emplace(PlacedKey{ object.scope, InstanceKey::of(object.entity) }, uint32_t(at));

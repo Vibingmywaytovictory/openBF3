@@ -56,6 +56,23 @@ struct Connections {
 	size_t unresolved = 0; // connections with an end that does not resolve in the loaded partitions
 
 	static Connections of(const EbxResolver &p_db, const EbxInstance &p_blueprint);
+
+	// Indices into `property` of the connections into p_field of p_target, in list order; nullptr
+	// when there are none.
+	const std::vector<uint32_t> *property_into(const EbxInstance &p_target, int32_t p_field) const;
+
+private:
+	struct FieldKey {
+		InstanceKey target;
+		int32_t field = 0;
+		bool operator==(const FieldKey &) const = default;
+	};
+	struct FieldKeyHash {
+		size_t operator()(const FieldKey &p_key) const noexcept { return InstanceKeyHash()(p_key.target) ^ (size_t(uint32_t(p_key.field)) << 7); }
+	};
+	// A resolution looks connections up by target once per hop; a scan of the whole list per hop
+	// would let a blueprint with many connections multiply the cost of every step.
+	std::unordered_map<FieldKey, std::vector<uint32_t>, FieldKeyHash> property_index_;
 };
 
 // A value fed into a field through a PropertyConnection: an interface constant or the data field
@@ -127,12 +144,15 @@ public:
 	std::optional<Property> interface(uint32_t p_scope, int32_t p_field) const;
 	// Resolutions cut short by the step budget (hostile connection graphs; 0 on retail levels).
 	size_t budget_exhausted() const { return exhausted_; }
+	// Connection hops taken by every resolution so far (a traversal charges them to its budget).
+	size_t hops() const { return hops_; }
 
 private:
 	struct Frame;
 
 	const Connections &connections_of(const EbxInstance &p_blueprint) const;
-	std::vector<std::pair<EbxInstance, int32_t>> sources_into(const EbxInstance &p_blueprint, const EbxInstance &p_target, int32_t p_field) const;
+	// The first entry of p_descriptor's Fields with Id p_field, through a per-descriptor index.
+	std::optional<EbxValue> descriptor_field(const EbxInstance &p_descriptor, int32_t p_field) const;
 	std::optional<Property> property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth) const;
 	std::optional<Property> source_value(const Frame &p_frame, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth) const;
 	std::optional<Property> interface_in(const Frame &p_frame, int32_t p_field, uint32_t p_depth) const;
@@ -143,6 +163,8 @@ private:
 	std::unordered_map<InstanceKey, uint32_t, InstanceKeyHash> by_blueprint_;
 	// Connections of blueprints no scope instantiates (child prefabs seen through output ports).
 	mutable std::unordered_map<InstanceKey, Connections, InstanceKeyHash> extra_;
+	// Interface descriptors' Fields: the first index of each Id.
+	mutable std::unordered_map<InstanceKey, std::unordered_map<int32_t, uint32_t>, InstanceKeyHash> descriptor_fields_;
 	struct ChildKey {
 		uint32_t scope;
 		InstanceKey reference;
@@ -156,6 +178,7 @@ private:
 	// bounds the chain length, not the fan-out, which a hostile blueprint can make exponential.
 	mutable uint32_t budget_ = 0;
 	mutable size_t exhausted_ = 0;
+	mutable size_t hops_ = 0;
 };
 
 } // namespace bf3::core::level

@@ -264,11 +264,16 @@ row-vector product); there is no IW conversion.
   object's physics asset prebaked closest to its scale, with the frame the res's shapes go through). The decoders of
   `include/bf3/core/res/` turn those res into triangles and convex pieces.
 * Hostile data fails with an error or is cut short, never crashes or hangs: depth limits (48 blueprint levels, 8 layer
-  levels, 32 connection hops) plus step budgets for fan-out (the traversal itself: 2^22 steps of visits, container
-  objects, group instances and variation entries read, where retail levels take at most 17.5 k; connection resolution;
-  layer search), caps of 1 M placed objects and 256 k scopes, each group res parsed once per traversal, and a static
-  model group whose instances need more subparts than its res holds is an error. A WorldPart that lists a reference
-  back to itself twice (2^48 visits that place nothing) fails on the step budget (`core.level` builds one).
+  levels, 32 connection hops) plus step budgets for fan-out (the traversal itself: 2^22 steps, where every loop over
+  data costs a step per slot whether it places anything or not: visits, `Objects` slots, group members and instance
+  slots, inclusion-setting and variation-database slots, and the connection hops of property resolutions; retail
+  levels take at most 18.4 k; each resolution: 2^16 hops; layer search), caps of 1 M placed objects, 256 k scopes and
+  64 k static model groups (retail: 15.2 k, 773 and 3), each group res parsed once per traversal, and a static model
+  group whose instances need more subparts than its res holds is an error. Property connections and interface fields
+  are looked up through per-blueprint indices, so a long connection list does not multiply the cost of a step.
+  `core.level` builds hostile partitions: a WorldPart that lists a reference back to itself twice (2^48 visits that
+  place nothing) and the same with a static model group of 200 k empty members; both fail on a budget in under a
+  second.
 * A `World` is not thread-safe: `Scopes` keeps resolution state in its const methods (`property`, `interface`,
   `starts_hidden` through them). `mesh_census` only reads the partitions and the mount in its parallel part.
 

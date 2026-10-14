@@ -114,8 +114,9 @@ private:
 Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_id);
 
 // Whether a SubWorldReferenceObjectData loads in p_mode (see the header comment). A setting whose
-// criterion is not loaded counts as a GameMode one, the only criterion levels use.
-bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode);
+// criterion is not loaded counts as a GameMode one, the only criterion levels use. r_slots, when
+// given, gets the Settings and EnabledOptions slots read (what the check cost).
+bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, size_t *r_slots = nullptr);
 
 // LevelInfo of a loaded root (the level partition and its description_win32 must be in p_db).
 LevelInfo read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, std::string_view p_root_name, std::string_view p_level_id);

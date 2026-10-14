@@ -16,8 +16,8 @@
 //       members), InstanceScale in `scale`, InstanceObjectVariation as the variation
 //     any other object: placed at its Transform (x) frame
 // Excluded, BlueprintTransform and Transform can be fed by PropertyConnections (Scopes::property).
-// Depth is limited to 48 blueprint levels; fan-out by a step budget, objects to 2^20 and scopes to
-// 2^18 (a traversal past any of them fails).
+// Depth is limited to 48 blueprint levels; fan-out by a step budget, objects to 2^20, scopes to 2^18
+// and static model groups to 2^16 (a traversal past any of them fails).
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -122,6 +122,8 @@ public:
 	std::optional<EbxInstance> database() const { return database_; }
 	size_t size() const { return entries_.size(); }
 	size_t variant_count() const;
+	// Entries and RedirectEntries slots read, kept or not (what the read cost).
+	size_t scanned() const { return scanned_; }
 	// The MeshVariationDatabaseEntry for exactly this mesh and variation.
 	std::optional<EbxInstance> entry(const EbxInstance &p_mesh, uint32_t p_variation) const;
 
@@ -129,6 +131,7 @@ private:
 	using Key = std::tuple<Guid, Guid, uint32_t>; // mesh partition, mesh instance, variation hash
 	std::optional<EbxInstance> database_;
 	std::map<Key, EbxInstance> entries_;
+	size_t scanned_ = 0;
 };
 
 struct SubWorld {
@@ -164,11 +167,14 @@ struct WorldStats {
 	size_t unresolved_objects = 0; // Objects entries that do not resolve in the loaded partitions
 	size_t missing_blueprints = 0;
 	size_t depth_limited = 0;
-	// Traversal steps taken (visits, container objects, group instances, variation entries read);
-	// a traversal fails past 2^22, which only a hostile blueprint graph reaches.
+	// Traversal steps taken: visits, Objects slots, group members and instances, variation database
+	// slots read. Steps plus resolve_hops past 2^22 fail the traversal, which only a hostile
+	// blueprint graph reaches.
 	size_t steps = 0;
+	size_t resolve_hops = 0; // connection hops of the property resolutions (Scopes::hops)
 	std::vector<std::string> skipped_subworlds; // BundleNames the mode does not include
 	std::vector<std::string> absent_subworlds; // included sub-worlds whose partition is not loaded
+	size_t unnamed_subworlds = 0; // skipped or absent past the 4,096 names the lists keep
 };
 
 class World {
