@@ -12,6 +12,7 @@
 #include <winioctl.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -704,6 +705,7 @@ TEST_CASE("cache: concurrent puts and gets, same-key puts deduplicated") {
 
 TEST_CASE("cache: LRU eviction order, pins and in-use entries") {
 	Scratch t;
+	Scratch t2; // declared before the cache: its tree is removed only after the cache has closed
 	const std::vector<uint8_t> data = payload(1000, 1);
 	const uint64_t entry = data.size() + kCacheEntryHeaderSize;
 	const CacheKey a = key("mesh", 1), b = key("mesh", 2), c = key("mesh", 3), d = key("mesh", 4), e = key("mesh", 5);
@@ -751,7 +753,6 @@ TEST_CASE("cache: LRU eviction order, pins and in-use entries") {
 	cache.close();
 
 	// Recency and pins survive a reopen (touch and pin records).
-	Scratch t2;
 	o = t2.options();
 	REQUIRE(cache.open(o) == CacheStatus::Ok);
 	for (const CacheKey &k : { a, b, c, d }) {
@@ -769,4 +770,184 @@ TEST_CASE("cache: LRU eviction order, pins and in-use entries") {
 	CHECK(r.evicted[1] == a.digest);
 	CHECK(r.evicted[2] == b.digest);
 	CHECK(cache.contains(c));
+}
+
+TEST_CASE("cache: close and reopen while other threads put, get, evict and remove") {
+	Scratch t;
+	Cache cache;
+	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
+	constexpr int kThreads = 8;
+	constexpr uint32_t kKeys = 64;
+	auto data_for = [](uint32_t p_n) { return payload(1000 + p_n * 37, p_n); };
+	std::atomic<bool> stop{ false };
+	std::atomic<int> failures{ 0 };
+	std::atomic<int> closed_seen{ 0 };
+	std::atomic<int> ok_reads{ 0 };
+	std::atomic<int> ok_puts{ 0 };
+	auto expect = [&](bool p_good) {
+		if (!p_good) {
+			failures.fetch_add(1);
+		}
+	};
+	auto check_entry = [&](const GetResult &p_got, uint32_t p_n) {
+		if (p_got.status == CacheStatus::Closed) {
+			closed_seen.fetch_add(1);
+			std::this_thread::yield();
+			return;
+		}
+		if (p_got.status != CacheStatus::Ok) {
+			expect(p_got.status == CacheStatus::Miss);
+			return;
+		}
+		const std::vector<uint8_t> want = data_for(p_n);
+		expect(p_got.entry.payload().size() == want.size() && std::memcmp(p_got.entry.payload().data(), want.data(), want.size()) == 0);
+		ok_reads.fetch_add(1);
+	};
+	std::vector<std::thread> threads;
+	for (int ti = 0; ti < kThreads; ++ti) {
+		threads.emplace_back([&, ti] {
+			uint32_t x = uint32_t(ti) * 7919u + 1;
+			while (!stop.load()) {
+				x = x * 1664525u + 1013904223u;
+				const uint32_t n = (x >> 8) % kKeys;
+				const CacheKey k = key("race", n);
+				switch ((x >> 20) % 8) {
+					case 0:
+					case 1: {
+						const PutResult p = cache.put(k, data_for(n));
+						expect(p.status == CacheStatus::Ok || p.status == CacheStatus::Closed);
+						ok_puts.fetch_add(p.written ? 1 : 0);
+						break;
+					}
+					case 2:
+					case 3:
+						check_entry(cache.get(k), n);
+						break;
+					case 4:
+						check_entry(cache.get_or_put(k, [&](std::vector<uint8_t> &r_out) {
+							r_out = data_for(n);
+							return true;
+						}),
+								n);
+						break;
+					case 5: {
+						const CacheStatus st = cache.remove(k);
+						expect(st == CacheStatus::Ok || st == CacheStatus::Miss || st == CacheStatus::Busy || st == CacheStatus::Closed);
+						break;
+					}
+					case 6: {
+						const EvictResult r = cache.evict_to(uint64_t(kKeys) * 1500);
+						expect(r.status == CacheStatus::Ok || r.status == CacheStatus::Closed);
+						expect(r.delete_failures == 0);
+						break;
+					}
+					default: {
+						const CacheStatus st = cache.set_pinned(k, (x & 1) != 0);
+						expect(st == CacheStatus::Ok || st == CacheStatus::Miss || st == CacheStatus::Closed);
+						(void)cache.contains(k);
+						(void)cache.stats();
+						break;
+					}
+				}
+			}
+		});
+	}
+	for (int round = 0; round < 24; ++round) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(8));
+		if (round % 4 == 3) {
+			// Two closers at once: both return after the handles are closed, neither double-closes.
+			std::thread other([&] { cache.close(); });
+			cache.close();
+			other.join();
+		} else {
+			cache.close();
+		}
+		CHECK(!cache.is_open());
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		std::string why;
+		const CacheStatus st = cache.open(t.options(), &why);
+		CHECK_MESSAGE(st == CacheStatus::Ok, why);
+		CHECK(!cache.stats().recovered_unclean); // every close wrote its close record last
+		CHECK(cache.stats().journal_torn_bytes == 0);
+	}
+	stop.store(true);
+	for (std::thread &th : threads) {
+		th.join();
+	}
+	CHECK(failures.load() == 0);
+	MESSAGE("entries written: ", ok_puts.load(), ", reads ok: ", ok_reads.load(), ", reads that saw Closed: ", closed_seen.load());
+	CHECK(ok_reads.load() > 0);
+	CHECK(ok_puts.load() > 0);
+
+	// Whatever survived is intact and fully accounted for.
+	cache.close();
+	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
+	const CacheStats s = cache.stats();
+	CHECK(s.adopted == 0);
+	CHECK(s.missing_dropped == 0);
+	CHECK(s.corrupt_dropped == 0);
+	uint64_t found = 0;
+	for (uint32_t n = 0; n < kKeys; ++n) {
+		GetResult g = cache.get(key("race", n), true);
+		if (g.status == CacheStatus::Ok) {
+			++found;
+			const std::vector<uint8_t> want = data_for(n);
+			CHECK(g.entry.payload().size() == want.size());
+			CHECK(std::memcmp(g.entry.payload().data(), want.data(), want.size()) == 0);
+		} else {
+			CHECK(g.status == CacheStatus::Miss);
+			CHECK(!g.dropped_corrupt);
+		}
+	}
+	CHECK(found == s.entries);
+	cache.close();
+	CHECK(files_with_suffix(t.root, L".tmp").empty());
+}
+
+TEST_CASE("cache: a hand-built key naming one digest under two kinds is rejected") {
+	Scratch t;
+	Cache cache;
+	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
+	const CacheKey k = key("mesh", 1);
+	REQUIRE(cache.put(k, payload(100, 1)).written);
+	CacheKey other = k;
+	other.kind = "nav";
+	const PutResult p = cache.put(other, payload(100, 2));
+	CHECK(p.status == CacheStatus::InvalidArgument);
+	CHECK(!p.reused);
+	bool ran = false;
+	const GetResult g = cache.get_or_put(other, [&](std::vector<uint8_t> &r_out) {
+		ran = true;
+		r_out = payload(100, 2);
+		return true;
+	});
+	CHECK(g.status == CacheStatus::InvalidArgument);
+	CHECK(!ran);
+	CHECK(cache.get(other).status == CacheStatus::Miss);
+	CHECK(cache.get(k).status == CacheStatus::Ok);
+	cache.close();
+}
+
+TEST_CASE("cache: a hard link planted at a journaled entry name is never served or deleted") {
+	Scratch t;
+	const auto before = t.install_snapshot();
+	Cache cache;
+	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
+	// Same file size as the install file, so the open-time scan's size check accepts the record.
+	const CacheKey k = key("mesh", 7);
+	REQUIRE(cache.put(k, payload(4096 - kCacheEntryHeaderSize, 7)).written);
+	cache.close();
+	REQUIRE(DeleteFileW(t.entry_path(k).c_str()));
+	REQUIRE(CreateHardLinkW(t.entry_path(k).c_str(), t.install_file.c_str(), nullptr));
+	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
+	const GetResult g = cache.get(k);
+	CHECK(g.status == CacheStatus::Miss);
+	CHECK(g.dropped_corrupt);
+	CHECK(cache.stats().refused >= 1); // the delete of the link was refused
+	CHECK(!cache.contains(k));
+	CHECK(fs::exists(t.entry_path(k))); // left alone
+	CHECK(fs::exists(t.install_file));
+	CHECK(t.install_snapshot() == before);
+	cache.close();
+	DeleteFileW(t.entry_path(k).c_str());
 }

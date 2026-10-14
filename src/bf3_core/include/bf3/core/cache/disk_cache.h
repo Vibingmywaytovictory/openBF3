@@ -16,17 +16,24 @@
 //   relative to its parent handle without following reparse points (a junction or symlink inside
 //   the tree is refused), the target directory's final path is checked again, and the temp file is
 //   created and renamed relative to that verified handle. Swapping a path component for a junction
-//   after the check therefore cannot move the write. Hard-linked or reparse-point targets are
-//   refused, and deletes go through the same handle checks.
+//   after the check therefore cannot move the write. The held directory handles do not share
+//   delete access, so a verified directory cannot be renamed away meanwhile. Hard-linked or
+//   reparse-point targets are refused (never replaced, served, adopted or deleted), and deletes go
+//   through the same handle checks.
 // * Entries are validated when read (magic, version, CRC, key, kind, size; the payload SHA-256 on
 //   first use per process or on demand). A damaged or partial entry is deleted and reported as a
 //   miss.
 // * open() recovers from a crash: stray temp files are removed, a torn journal tail is discarded,
 //   the journal is reconciled with the files on disk (entries without a record are adopted as the
 //   least recently used, records without a file are dropped) and rewritten when needed.
-// * Thread safety: all methods may be called from any thread. Puts of the same key are
-//   deduplicated (one writer, the others wait and reuse its entry); different keys proceed in
-//   parallel (file I/O runs outside the index lock).
+// * Thread safety: every method, open() and close() included, may be called concurrently from any
+//   thread. The open state is held in an atomic shared pointer; close() stops new operations
+//   (they return Closed), waits for in-flight file I/O (puts, reads, deletes, producers) to finish
+//   and only then closes the directory handles, so no handle is closed while another thread uses
+//   it. Puts of the same key are deduplicated (one writer, the others wait and reuse its entry);
+//   different keys proceed in parallel (file I/O runs outside the index lock). As for any object,
+//   destroying or move-assigning a Cache must not overlap a call on that same object: join the
+//   threads using it first (close() alone may overlap anything).
 // * Eviction is explicit (gap load §6.4: at round end, never mid-round): least recently used first,
 //   skipping persistent pins and entries with a live CacheEntry view.
 
@@ -34,6 +41,7 @@
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/path_guard.h"
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -162,10 +170,12 @@ public:
 	// Opens (and creates) the cache under p_options.root, recovers from a previous crash.
 	CacheStatus open(CacheOptions p_options, std::string *r_detail = nullptr);
 	bool is_open() const;
-	// Writes pending LRU updates and a clean-close record. Live CacheEntry views stay readable.
+	// Waits for in-flight operations, then writes pending LRU updates and a clean-close record.
+	// Calls racing it return Closed. Live CacheEntry views stay readable.
 	void close();
 
 	// Stores p_payload under p_key unless the key is present already (then reused = true).
+	// InvalidArgument when the digest is stored under another kind (only a hand-built key can).
 	PutResult put(const CacheKey &p_key, std::span<const uint8_t> p_payload);
 	// Maps the entry. p_verify forces a payload hash for this read.
 	GetResult get(const CacheKey &p_key, bool p_verify = false);
@@ -195,7 +205,9 @@ public:
 	struct State;
 
 private:
-	std::shared_ptr<State> state_;
+	static GetResult get_in(const std::shared_ptr<State> &p_state, const CacheKey &p_key, bool p_verify);
+
+	std::atomic<std::shared_ptr<State>> state_; // null when closed
 };
 
 } // namespace bf3::core

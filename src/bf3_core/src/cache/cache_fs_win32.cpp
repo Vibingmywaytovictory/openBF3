@@ -147,7 +147,10 @@ Handle open_dir_path(const std::filesystem::path &p_path, uint32_t &r_err) {
 }
 
 Handle open_child_dir(const Handle &p_parent, std::wstring_view p_name, bool p_create, uint32_t &r_err) {
-	HANDLE h = open_relative(p_parent.get(), p_name, kDirAccess, FILE_ATTRIBUTE_NORMAL, kShareAll, p_create ? FILE_OPEN_IF : FILE_OPEN,
+	// No FILE_SHARE_DELETE: while we hold a verified directory handle, nobody can rename or move
+	// that directory elsewhere (e.g. into the install) between the final-path check and the write.
+	HANDLE h = open_relative(p_parent.get(), p_name, kDirAccess, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE,
+			p_create ? FILE_OPEN_IF : FILE_OPEN,
 			FILE_DIRECTORY_FILE, r_err);
 	return refuse_reparse(h, r_err);
 }

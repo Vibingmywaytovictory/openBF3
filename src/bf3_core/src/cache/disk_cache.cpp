@@ -126,6 +126,41 @@ struct Cache::State {
 	uint64_t total = 0;
 	CacheStats stats;
 	bool open = false;
+	bool closing = false; // close() has started: no new operations
+	uint32_t inflight = 0; // reads using the directory handles outside mu (puts and deletes use busy)
+
+	// New operations start only while open and not closing (caller holds mu).
+	bool accepting() const { return open && !closing; }
+
+	// Stops new operations, waits for the in-flight ones (busy keys, reads, producers), then writes
+	// the close record and closes the handles. Safe to call from several threads.
+	void shutdown() {
+		std::unique_lock lk(mu);
+		if (!open) {
+			return;
+		}
+		if (closing) {
+			cv.wait(lk, [&] { return !open; }); // another thread is closing: wait until it is done
+			return;
+		}
+		closing = true;
+		cv.notify_all(); // wake waiters so they observe closing and return Closed
+		cv.wait(lk, [&] { return busy.empty() && inflight == 0; });
+		flush_touches_locked();
+		std::vector<uint8_t> rec;
+		cd::journal_close(rec, clock);
+		append_locked(rec);
+		uint32_t err = 0;
+		if (journal.valid()) {
+			cd::flush(journal, err);
+		}
+		journal.reset();
+		lock.reset();
+		vdir.reset();
+		root.reset();
+		open = false;
+		cv.notify_all();
+	}
 
 	// ---- file operations (no lock needed: they touch only handles and the immutable options)
 
@@ -551,12 +586,14 @@ Cache::~Cache() {
 }
 
 Cache::Cache(Cache &&p_other) noexcept :
-		state_(std::move(p_other.state_)) {}
+		state_(p_other.state_.exchange(nullptr)) {}
 
 Cache &Cache::operator=(Cache &&p_other) noexcept {
 	if (this != &p_other) {
-		close();
-		state_ = std::move(p_other.state_);
+		const std::shared_ptr<State> old = state_.exchange(p_other.state_.exchange(nullptr));
+		if (old) {
+			old->shutdown();
+		}
 	}
 	return *this;
 }
@@ -673,50 +710,35 @@ CacheStatus Cache::open(CacheOptions p_options, std::string *r_detail) {
 		s->stats.journal_records = replayed_records;
 	}
 	s->open = true;
-	state_ = std::move(s);
+	// Publish. A Cache opened concurrently by another open() on this object is closed, not leaked.
+	const std::shared_ptr<State> old = state_.exchange(std::move(s));
+	if (old) {
+		old->shutdown();
+	}
 	return CacheStatus::Ok;
 }
 
 bool Cache::is_open() const {
-	if (!state_) {
+	const std::shared_ptr<State> s = state_.load();
+	if (!s) {
 		return false;
 	}
-	std::lock_guard lk(state_->mu);
-	return state_->open;
+	std::lock_guard lk(s->mu);
+	return s->accepting();
 }
 
 void Cache::close() {
-	if (!state_) {
-		return;
+	// Unpublish first, so new calls see a closed Cache; calls that loaded the state already either
+	// finish before the handles close (shutdown waits for them) or observe closing.
+	const std::shared_ptr<State> s = state_.exchange(nullptr);
+	if (s) {
+		s->shutdown();
 	}
-	State &s = *state_;
-	{
-		std::unique_lock lk(s.mu);
-		if (s.open) {
-			// Let in-flight writers finish so their records land before the close marker.
-			s.cv.wait(lk, [&] { return s.busy.empty(); });
-			s.flush_touches_locked();
-			std::vector<uint8_t> rec;
-			cd::journal_close(rec, s.clock);
-			s.append_locked(rec);
-			uint32_t err = 0;
-			if (s.journal.valid()) {
-				cd::flush(s.journal, err);
-			}
-			s.open = false;
-			s.journal.reset();
-			s.lock.reset();
-			s.vdir.reset();
-			s.root.reset();
-		}
-		s.cv.notify_all();
-	}
-	state_.reset();
 }
 
 PutResult Cache::put(const CacheKey &p_key, std::span<const uint8_t> p_payload) {
 	PutResult r;
-	const std::shared_ptr<State> s = state_;
+	const std::shared_ptr<State> s = state_.load();
 	if (!s) {
 		return r;
 	}
@@ -727,10 +749,15 @@ PutResult Cache::put(const CacheKey &p_key, std::span<const uint8_t> p_payload) 
 	std::unique_lock lk(s->mu);
 	bool waited = false;
 	for (;;) {
-		if (!s->open) {
+		if (!s->accepting()) {
 			return r;
 		}
-		if (s->index.count(p_key.digest) != 0) {
+		const auto it = s->index.find(p_key.digest);
+		if (it != s->index.end() && it->second.kind != p_key.kind) {
+			r.status = CacheStatus::InvalidArgument; // a hand-built key: one digest, two kinds
+			return r;
+		}
+		if (it != s->index.end()) {
 			++s->stats.dedup_reused;
 			r.status = CacheStatus::Ok;
 			r.reused = true;
@@ -756,14 +783,18 @@ PutResult Cache::put(const CacheKey &p_key, std::span<const uint8_t> p_payload) 
 }
 
 GetResult Cache::get(const CacheKey &p_key, bool p_verify) {
+	return get_in(state_.load(), p_key, p_verify);
+}
+
+GetResult Cache::get_in(const std::shared_ptr<State> &p_state, const CacheKey &p_key, bool p_verify) {
+	const std::shared_ptr<State> &s = p_state;
 	GetResult r;
-	const std::shared_ptr<State> s = state_;
 	if (!s) {
 		return r;
 	}
 	std::unique_lock lk(s->mu);
-	s->cv.wait(lk, [&] { return !s->open || s->busy.count(p_key.digest) == 0; });
-	if (!s->open) {
+	s->cv.wait(lk, [&] { return !s->accepting() || s->busy.count(p_key.digest) == 0; });
+	if (!s->accepting()) {
 		return r;
 	}
 	auto it = s->index.find(p_key.digest);
@@ -776,6 +807,7 @@ GetResult Cache::get(const CacheKey &p_key, bool p_verify) {
 	++slot.refs;
 	const uint64_t generation = slot.generation;
 	const bool hash = p_verify || s->options.verify == CacheVerify::Always || (s->options.verify == CacheVerify::FirstUse && !slot.verified);
+	++s->inflight; // close() waits for this before it closes the directory handles
 	lk.unlock();
 
 	// Map and validate outside the lock.
@@ -791,6 +823,8 @@ GetResult Cache::get(const CacheKey &p_key, bool p_verify) {
 			st = is_not_found(r.win32_error) || r.win32_error == cd::kErrReparsePoint ? CacheStatus::Miss : CacheStatus::Io;
 		} else if (!cd::query_info(file, info, r.win32_error)) {
 			st = CacheStatus::Io;
+		} else if (info.links > 1) {
+			bad = true; // never serve a hard link (its other name could be anywhere); dropped below
 		} else if (info.size < kCacheEntryHeaderSize) {
 			bad = true;
 		} else {
@@ -813,6 +847,10 @@ GetResult Cache::get(const CacheKey &p_key, bool p_verify) {
 	}
 
 	lk.lock();
+	--s->inflight;
+	if (s->closing) {
+		s->cv.notify_all();
+	}
 	if (bad || st != CacheStatus::Ok) {
 		cd::unmap(view);
 		auto again = s->index.find(p_key.digest);
@@ -876,7 +914,7 @@ GetResult Cache::get(const CacheKey &p_key, bool p_verify) {
 }
 
 GetResult Cache::get_or_put(const CacheKey &p_key, const std::function<bool(std::vector<uint8_t> &r_payload)> &p_produce) {
-	const std::shared_ptr<State> s = state_;
+	const std::shared_ptr<State> s = state_.load();
 	if (!s) {
 		return {};
 	}
@@ -886,20 +924,26 @@ GetResult Cache::get_or_put(const CacheKey &p_key, const std::function<bool(std:
 		return r;
 	}
 	for (;;) {
-		GetResult got = get(p_key);
+		GetResult got = get_in(s, p_key, false);
 		if (got.status != CacheStatus::Miss) {
 			return got;
 		}
 		std::unique_lock lk(s->mu);
-		if (!s->open) {
+		if (!s->accepting()) {
 			return {};
 		}
-		if (s->index.count(p_key.digest) != 0) {
+		const auto it = s->index.find(p_key.digest);
+		if (it != s->index.end()) {
+			if (it->second.kind != p_key.kind) {
+				GetResult r;
+				r.status = CacheStatus::InvalidArgument; // a hand-built key: one digest, two kinds
+				return r;
+			}
 			continue; // another thread just put it
 		}
 		if (s->busy.count(p_key.digest) != 0) {
 			++s->stats.dedup_waits;
-			s->cv.wait(lk, [&] { return !s->open || s->busy.count(p_key.digest) == 0; });
+			s->cv.wait(lk, [&] { return !s->accepting() || s->busy.count(p_key.digest) == 0; });
 			continue;
 		}
 		s->busy.insert(p_key.digest);
@@ -927,19 +971,20 @@ GetResult Cache::get_or_put(const CacheKey &p_key, const std::function<bool(std:
 			r.win32_error = put.win32_error;
 			return r;
 		}
-		GetResult out = get(p_key);
+		GetResult out = get_in(s, p_key, false);
 		out.produced = true;
 		return out;
 	}
 }
 
 bool Cache::contains(const CacheKey &p_key) const {
-	if (!state_) {
+	const std::shared_ptr<State> s = state_.load();
+	if (!s) {
 		return false;
 	}
-	std::lock_guard lk(state_->mu);
-	auto it = state_->index.find(p_key.digest);
-	return state_->open && it != state_->index.end() && it->second.kind == p_key.kind;
+	std::lock_guard lk(s->mu);
+	auto it = s->index.find(p_key.digest);
+	return s->accepting() && it != s->index.end() && it->second.kind == p_key.kind;
 }
 
 CacheStatus Cache::verify(const CacheKey &p_key) {
@@ -947,13 +992,13 @@ CacheStatus Cache::verify(const CacheKey &p_key) {
 }
 
 CacheStatus Cache::remove(const CacheKey &p_key) {
-	const std::shared_ptr<State> s = state_;
+	const std::shared_ptr<State> s = state_.load();
 	if (!s) {
 		return CacheStatus::Closed;
 	}
 	std::unique_lock lk(s->mu);
-	s->cv.wait(lk, [&] { return !s->open || s->busy.count(p_key.digest) == 0; });
-	if (!s->open) {
+	s->cv.wait(lk, [&] { return !s->accepting() || s->busy.count(p_key.digest) == 0; });
+	if (!s->accepting()) {
 		return CacheStatus::Closed;
 	}
 	auto it = s->index.find(p_key.digest);
@@ -975,12 +1020,13 @@ CacheStatus Cache::remove(const CacheKey &p_key) {
 }
 
 CacheStatus Cache::set_pinned(const CacheKey &p_key, bool p_pinned) {
-	if (!state_) {
+	const std::shared_ptr<State> sp = state_.load();
+	if (!sp) {
 		return CacheStatus::Closed;
 	}
-	State &s = *state_;
+	State &s = *sp;
 	std::lock_guard lk(s.mu);
-	if (!s.open) {
+	if (!s.accepting()) {
 		return CacheStatus::Closed;
 	}
 	auto it = s.index.find(p_key.digest);
@@ -998,7 +1044,7 @@ CacheStatus Cache::set_pinned(const CacheKey &p_key, bool p_pinned) {
 
 EvictResult Cache::evict_to(uint64_t p_target_bytes) {
 	EvictResult r;
-	const std::shared_ptr<State> s = state_;
+	const std::shared_ptr<State> s = state_.load();
 	if (!s) {
 		return r;
 	}
@@ -1009,7 +1055,7 @@ EvictResult Cache::evict_to(uint64_t p_target_bytes) {
 	std::vector<Victim> victims;
 	{
 		std::lock_guard lk(s->mu);
-		if (!s->open) {
+		if (!s->accepting()) {
 			return r;
 		}
 		std::vector<std::pair<uint64_t, Sha256Digest>> candidates;
@@ -1053,30 +1099,34 @@ EvictResult Cache::evict_to(uint64_t p_target_bytes) {
 }
 
 EvictResult Cache::enforce_budget() {
+	const std::shared_ptr<State> s = state_.load();
 	uint64_t budget = 0;
 	uint64_t total = 0;
 	uint32_t permille = 900;
-	if (state_) {
-		std::lock_guard lk(state_->mu);
-		budget = state_->options.budget_bytes;
-		total = state_->total;
-		permille = state_->options.low_watermark_permille > 1000 ? 1000 : state_->options.low_watermark_permille;
+	bool accepting = false;
+	if (s) {
+		std::lock_guard lk(s->mu);
+		accepting = s->accepting();
+		budget = s->options.budget_bytes;
+		total = s->total;
+		permille = s->options.low_watermark_permille > 1000 ? 1000 : s->options.low_watermark_permille;
 	}
-	if (!state_ || budget == 0 || total <= budget) {
+	if (!accepting || budget == 0 || total <= budget) {
 		EvictResult r;
-		r.status = state_ ? CacheStatus::Ok : CacheStatus::Closed;
+		r.status = accepting ? CacheStatus::Ok : CacheStatus::Closed;
 		return r;
 	}
 	return evict_to(budget / 1000 * permille + budget % 1000 * permille / 1000);
 }
 
 CacheStatus Cache::flush() {
-	if (!state_) {
+	const std::shared_ptr<State> sp = state_.load();
+	if (!sp) {
 		return CacheStatus::Closed;
 	}
-	State &s = *state_;
+	State &s = *sp;
 	std::lock_guard lk(s.mu);
-	if (!s.open) {
+	if (!s.accepting()) {
 		return CacheStatus::Closed;
 	}
 	s.flush_touches_locked();
@@ -1085,12 +1135,13 @@ CacheStatus Cache::flush() {
 }
 
 CacheStatus Cache::compact_journal() {
-	if (!state_) {
+	const std::shared_ptr<State> sp = state_.load();
+	if (!sp) {
 		return CacheStatus::Closed;
 	}
-	State &s = *state_;
+	State &s = *sp;
 	std::lock_guard lk(s.mu);
-	if (!s.open) {
+	if (!s.accepting()) {
 		return CacheStatus::Closed;
 	}
 	uint32_t err = 0;
@@ -1098,26 +1149,28 @@ CacheStatus Cache::compact_journal() {
 }
 
 CacheStats Cache::stats() const {
-	if (!state_) {
+	const std::shared_ptr<State> s = state_.load();
+	if (!s) {
 		return {};
 	}
-	std::lock_guard lk(state_->mu);
-	CacheStats out = state_->stats;
-	out.entries = state_->index.size();
-	out.bytes = state_->total;
+	std::lock_guard lk(s->mu);
+	CacheStats out = s->stats;
+	out.entries = s->index.size();
+	out.bytes = s->total;
 	out.pinned = 0;
-	for (const auto &[key, slot] : state_->index) {
+	for (const auto &[key, slot] : s->index) {
 		out.pinned += slot.pinned ? 1 : 0;
 	}
 	return out;
 }
 
 fs::path Cache::root() const {
-	if (!state_) {
+	const std::shared_ptr<State> s = state_.load();
+	if (!s) {
 		return {};
 	}
-	std::lock_guard lk(state_->mu);
-	return state_->root_final;
+	std::lock_guard lk(s->mu);
+	return s->root_final;
 }
 
 } // namespace bf3::core

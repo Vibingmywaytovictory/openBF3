@@ -72,7 +72,8 @@ bool valid_component(std::wstring_view p_name);
 // Opens an existing directory by absolute path, following links (only for the cache root and its
 // ancestors, which may legitimately be redirected, e.g. a moved AppData).
 Handle open_dir_path(const std::filesystem::path &p_path, uint32_t &r_err);
-// Opens (or creates) a child directory; refuses reparse points (kErrReparsePoint).
+// Opens (or creates) a child directory; refuses reparse points (kErrReparsePoint). The handle does
+// not share delete access, so the directory cannot be renamed or moved while it is held.
 Handle open_child_dir(const Handle &p_parent, std::wstring_view p_name, bool p_create, uint32_t &r_err);
 // Creates a new file for writing (fails if the name exists). Access includes DELETE for rename.
 Handle create_child_file(const Handle &p_dir, std::wstring_view p_name, uint32_t &r_err);

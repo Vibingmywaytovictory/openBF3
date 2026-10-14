@@ -107,9 +107,12 @@ opens a root at a time; a second `open` gets `Busy`.
   * The temp file is created relative to that verified handle, written and flushed. It is then renamed with
     `NtSetInformationFile(FileRenameInformationEx, RootDirectory = that handle, replace)`.
 
-  So a junction swapped in after the check cannot move the write. Hard-linked, directory and reparse-point
-  targets are refused. Deletes (eviction, damaged entries, temp files) open the name relative to the verified
-  handle and check the link count and the final path of the handle they delete through.
+  So a junction swapped in after the check cannot move the write. The directory handles below the root do not
+  share delete access, so a verified directory cannot be renamed or moved while the cache holds it.
+  Hard-linked, directory and reparse-point targets are refused. A hard-linked file is never adopted, served,
+  replaced or deleted, whether or not the journal names it: `get` treats it as damaged (miss) and the delete is
+  refused. Deletes (eviction, damaged entries, temp files) open the name relative to the verified handle and
+  check the link count and the final path of the handle they delete through.
 
   Do not use `SetFileInformationByHandle(FileRenameInfo)` here: it rejects a non-NULL `RootDirectory`. With a
   NULL one, it resolves a bare name against the process's current directory.
@@ -124,9 +127,12 @@ opens a root at a time; a second `open` gets `Busy`.
     if it is single-linked and its header names its key. A record without a file is dropped. A size mismatch is
     deleted.
   * The journal is rewritten atomically whenever anything was repaired or it holds over 2× garbage.
-* **Concurrency.** Any thread may call any method. File I/O runs outside the index lock. Puts of the same key are
-  deduplicated: one writer runs, the others wait and get `reused`. `get_or_put` runs its producer once per key
-  across threads.
+* **Concurrency.** Any thread may call any method, `open` and `close` included. The open state sits behind an
+  atomic `shared_ptr`. `close` stops new calls (they return `Closed`), waits for in-flight puts, reads, deletes
+  and producers, and only then writes the close record and closes the directory handles. File I/O runs outside
+  the index lock. Puts of the same key are deduplicated: one writer runs, the others wait and get `reused`.
+  `get_or_put` runs its producer once per key across threads. As with any C++ object, destroying or
+  move-assigning a `Cache` must not overlap another call on that same object.
 * **Eviction** is explicit (`evict_to`, `enforce_budget`: above the budget, evict down to 90 %), meant for round
   end and never mid-round. It removes the least recently used entries first and skips persistent pins
   (`set_pinned`) and entries with a live `CacheEntry` view. LRU recency is persisted as touch records at
