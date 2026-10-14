@@ -632,6 +632,18 @@ bool budget_error(const Error &p_error) {
 	return p_error.message.find("work steps") != std::string::npos;
 }
 
+// The string offset EBX uses for a null string.
+constexpr uint32_t kNullText = 0xFFFFFFFFu;
+
+// A level partition holding only a LevelData root, for read_level_info.
+SynthPartition level_root(uint32_t p_seed) {
+	SynthPartition part(p_seed);
+	hostile_types(part);
+	part.declare("LevelData", ebx_code::kClass, "DataContainer", {});
+	part.add("LevelData");
+	return part;
+}
+
 // What every hostile case below must stay under: the uncharged walks they reproduce took minutes
 // to hours; the charged ones end in well under a second (dev) on the budget error.
 constexpr double kHostileSeconds = 60.0;
@@ -861,7 +873,9 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: level info charges categories that share one mode list") {
-		// K GameMode categories sharing one N-name Mode array: uncharged, K x N mode strings.
+		// K GameMode categories sharing one N-slot Mode array (null names, read as empty ones):
+		// uncharged, K x N slots. Charged, the first category pays N, and its names end the read on
+		// the mode-count cap (or the budget, whichever comes first).
 		SynthPartition root_part(4);
 		hostile_types(root_part);
 		root_part.declare("LevelData", ebx_code::kClass, "DataContainer", {});
@@ -870,8 +884,8 @@ TEST_SUITE("level_unit") {
 		SynthPartition description(5);
 		hostile_types(description);
 		const uint32_t asset = description.add("LevelDescriptionAsset");
-		const uint32_t game_mode = description.string("GameMode"), mode = description.string("ConquestLarge0");
-		const uint32_t modes = description.array("LevelDescriptionInclusionCategory", "Mode", 1u << 16, [&](uint32_t, uint32_t) { return mode; });
+		const uint32_t game_mode = description.string("GameMode");
+		const uint32_t modes = description.array("LevelDescriptionInclusionCategory", "Mode", 1u << 16, [&](uint32_t, uint32_t) { return kNullText; });
 		description.set(asset, "Categories",
 				description.array("LevelDescriptionAsset", "Categories", 1u << 16, [&](uint32_t, uint32_t p_word) { return p_word == 0 ? game_mode : modes; }));
 		EbxDb db;
@@ -881,7 +895,9 @@ TEST_SUITE("level_unit") {
 		Result<LevelInfo> info = LevelInfo();
 		const double seconds = timed([&] { info = read_level_info(db, level.primary(), "levels/hostile/hostile", "Hostile", budget); });
 		REQUIRE_FALSE(info.ok());
-		CHECK(budget_error(info.error()));
+		INFO(info.error().message);
+		CHECK((budget_error(info.error()) || info.error().message.find("game modes") != std::string::npos));
+		CHECK(budget.spent() < (size_t(1) << 18)); // the categories, one category's slots, the names kept
 		CHECK(seconds < kHostileSeconds);
 	}
 
@@ -921,6 +937,151 @@ TEST_SUITE("level_unit") {
 		CHECK(checks == WorkBudget::kDefaultLimit / kConnections - 1); // the push paid for one list
 		CHECK(budget_error(starts_hidden(world, placed).error()));
 		CHECK(seconds < kHostileSeconds);
+	}
+
+	TEST_CASE("level_unit: strings decode without scanning them") {
+		// N slots naming one L-byte string. A decode that scanned to the NUL cost N x L at parse
+		// (validation decodes every slot) and again on every read: 2^16 x 1 MB = 64 GB here.
+		SynthPartition part(20);
+		hostile_types(part);
+		const uint32_t asset = part.add("LevelDescriptionAsset");
+		constexpr uint32_t kSlots = 1u << 16;
+		constexpr size_t kLength = size_t(1) << 20;
+		const uint32_t text = part.string(std::string(kLength, 'm'));
+		const uint32_t game_mode = part.string("GameMode");
+		const uint32_t modes = part.array("LevelDescriptionInclusionCategory", "Mode", kSlots, [&](uint32_t, uint32_t) { return text; });
+		part.set(asset, "Categories", part.array("LevelDescriptionAsset", "Categories", 1, [&](uint32_t, uint32_t p_word) { return p_word == 0 ? game_mode : modes; }));
+		const std::vector<uint8_t> bytes = part.bytes();
+		Result<EbxPartition> parsed = make_error("not parsed");
+		const double parse_seconds = timed([&] { parsed = EbxPartition::parse(bytes); });
+		REQUIRE(parsed.ok());
+		size_t decoded = 0, total = 0;
+		const double read_seconds = timed([&] {
+			const std::optional<EbxValue> categories = parsed->primary().get("Categories");
+			const OptionalEbxArray list = categories ? categories->as_array() : OptionalEbxArray();
+			REQUIRE(list);
+			const std::optional<EbxValue> mode_list = list->get(0)->get("Mode");
+			const OptionalEbxArray mode_array = mode_list ? mode_list->as_array() : OptionalEbxArray();
+			REQUIRE(mode_array);
+			for (const EbxValue v : *mode_array) {
+				if (const std::optional<std::string_view> t = v.as_str()) {
+					++decoded;
+					total += t->size();
+				}
+			}
+		});
+		CHECK(decoded == kSlots);
+		CHECK(total == size_t(kSlots) * kLength);
+		MESSAGE("2^16 slots of one 1 MB string: parse ", parse_seconds, " s, decode ", read_seconds, " s");
+		CHECK(parse_seconds + read_seconds < kHostileSeconds);
+		// Offsets that are not a string's start still decode as the rest of that string, or fail.
+		const std::optional<std::optional<std::string_view>> tail = parsed->string(text + 1);
+		REQUIRE(tail);
+		REQUIRE(*tail);
+		CHECK((*tail)->size() == kLength - 1);
+		CHECK_FALSE(parsed->string(uint32_t(1u << 30)));
+		const std::optional<std::optional<std::string_view>> null_text = parsed->string(kNullText);
+		REQUIRE(null_text);
+		CHECK_FALSE(*null_text);
+	}
+
+	TEST_CASE("level_unit: level info charges every mode name it copies") {
+		// One GameMode category whose Mode array names one 1 MB string N times: uncharged, N copies
+		// of 1 MB (N = 512 took 512 MB for 513 units).
+		SynthPartition root_part = level_root(21);
+		SynthPartition description(22);
+		hostile_types(description);
+		const uint32_t asset = description.add("LevelDescriptionAsset");
+		const uint32_t game_mode = description.string("GameMode");
+		const uint32_t text = description.string(std::string(size_t(1) << 20, 'm'));
+		const uint32_t modes = description.array("LevelDescriptionInclusionCategory", "Mode", 1u << 16, [&](uint32_t, uint32_t) { return text; });
+		description.set(asset, "Categories",
+				description.array("LevelDescriptionAsset", "Categories", 1, [&](uint32_t, uint32_t p_word) { return p_word == 0 ? game_mode : modes; }));
+		EbxDb db;
+		const EbxPartition &level = insert(db, "levels/hostile/hostile", root_part);
+		insert(db, "levels/hostile/hostile/description_win32", description);
+		WorkBudget budget;
+		Result<LevelInfo> info = LevelInfo();
+		const double seconds = timed([&] { info = read_level_info(db, level.primary(), "levels/hostile/hostile", "Hostile", budget); });
+		REQUIRE_FALSE(info.ok());
+		CHECK(budget_error(info.error()));
+		CHECK(seconds < kHostileSeconds);
+
+		// A few long names are fine; more than kMaxModes names fail on the count.
+		SynthPartition counted(23);
+		hostile_types(counted);
+		const uint32_t counted_asset = counted.add("LevelDescriptionAsset");
+		const uint32_t counted_game_mode = counted.string("GameMode"), name = counted.string("ConquestLarge0");
+		const uint32_t named = counted.array("LevelDescriptionInclusionCategory", "Mode", 8192, [&](uint32_t, uint32_t) { return name; });
+		counted.set(counted_asset, "Categories",
+				counted.array("LevelDescriptionAsset", "Categories", 1, [&](uint32_t, uint32_t p_word) { return p_word == 0 ? counted_game_mode : named; }));
+		EbxDb counted_db;
+		const EbxPartition &counted_level = insert(counted_db, "levels/hostile/hostile", root_part);
+		insert(counted_db, "levels/hostile/hostile/description_win32", counted);
+		WorkBudget counted_budget;
+		const Result<LevelInfo> many = read_level_info(counted_db, counted_level.primary(), "levels/hostile/hostile", "Hostile", counted_budget);
+		REQUIRE_FALSE(many.ok());
+		CHECK(many.error().message.find("game modes") != std::string::npos);
+	}
+
+	TEST_CASE("level_unit: inclusion settings charge the names they read") {
+		// K settings listing one setting whose criterion name and only EnabledOptions entry are one
+		// 4 MB string: each check charges the text, so the budget ends the scan after a few.
+		SynthPartition part(24);
+		hostile_types(part);
+		part.declare("SubWorldInclusionCriterion", ebx_code::kClass, "DataContainer", { SynthPartition::Field{ "Name", ebx_code::kCString } });
+		part.add("WorldPartData");
+		const uint32_t settings = part.add("SubWorldInclusionSettings");
+		const uint32_t setting = part.add("SubWorldInclusionSetting");
+		const uint32_t criterion = part.add("SubWorldInclusionCriterion");
+		const uint32_t reference = part.add("SubWorldReferenceObjectData");
+		const uint32_t text = part.string(std::string(size_t(4) << 20, 'g'));
+		part.set(criterion, "Name", text);
+		part.set_ref(setting, "Criterion", criterion);
+		part.set(setting, "EnabledOptions", part.array("SubWorldInclusionSetting", "EnabledOptions", 1, [&](uint32_t, uint32_t) { return text; }));
+		part.set(settings, "Settings", part.array("SubWorldInclusionSettings", "Settings", 4096, [&](uint32_t, uint32_t) { return SynthPartition::ref(setting); }));
+		part.set(reference, "AutoLoad", 1);
+		part.set_ref(reference, "InclusionSettings", settings);
+		EbxDb db;
+		const EbxPartition &partition = insert(db, "levels/hostile/part", part);
+		{
+			// A long criterion name that is not GameMode skips the setting: charged all the same.
+			WorkBudget budget;
+			Result<bool> included = false;
+			const double seconds = timed([&] { included = includes(db, *partition.instance(reference), "TeamDeathMatch0", budget); });
+			REQUIRE_FALSE(included.ok());
+			CHECK(budget_error(included.error()));
+			CHECK(seconds < kHostileSeconds);
+		}
+	}
+
+	TEST_CASE("level_unit: resolver hops through a sub-world reference charge its BundleName") {
+		// R a SubWorldReferenceObjectData with a 1 MB BundleName; R.F <- R.F three times and
+		// R.Excluded <- R.F. Every hop looks R up as a sub-world by name: each one is charged the
+		// name, so the first resolution already ends on the budget.
+		SynthPartition part(25);
+		hostile_types(part);
+		const uint32_t blueprint = part.add("WorldPartData");
+		const uint32_t r = part.add("SubWorldReferenceObjectData");
+		part.set(r, "BundleName", part.string(std::string(size_t(1) << 20, 'b')));
+		const uint32_t f = 0x12345u, excluded = ebx_name_hash("Excluded");
+		const std::array<uint32_t, 4> loop = { SynthPartition::ref(r), SynthPartition::ref(r), f, f };
+		part.set(blueprint, "PropertyConnections",
+				part.array("WorldPartData", "PropertyConnections", 4, connections({ loop, loop, loop, { SynthPartition::ref(r), SynthPartition::ref(r), f, excluded } })));
+		EbxDb db;
+		const EbxPartition &partition = insert(db, "levels/hostile/part", part);
+		World world(db, std::make_shared<WorkBudget>());
+		const Result<uint32_t> scope = world.scopes.push(partition.primary(), std::nullopt, std::nullopt, LevelTransform::identity(), 0, 0);
+		REQUIRE(scope.ok());
+		Result<std::optional<Property>> resolved = std::optional<Property>();
+		const double seconds = timed([&] { resolved = world.scopes.property(*scope, *partition.instance(r), field_id("Excluded")); });
+		REQUIRE_FALSE(resolved.ok());
+		CHECK(budget_error(resolved.error()));
+		CHECK(world.scopes.hops() < 128); // about limit / text_units(1 MB)
+		CHECK(seconds < kHostileSeconds);
+		const Result<std::optional<EbxInstance>> after = world.scopes.referenced_blueprint(*partition.instance(r));
+		REQUIRE_FALSE(after.ok());
+		CHECK(budget_error(after.error()));
 	}
 
 	TEST_CASE("level_unit: self-referencing connection loops end on the budget") {
@@ -1374,6 +1535,61 @@ TEST_SUITE("level") {
 			REQUIRE(collision_world.ok());
 			Result<std::vector<CollisionPlacement>> collision = std::vector<CollisionPlacement>();
 			seconds = timed([&] { collision = collision_placements(db, *mount, **collision_world); });
+			REQUIRE_FALSE(collision.ok());
+			CHECK(budget_error(collision.error()));
+			CHECK(seconds < kHostileSeconds);
+		}
+		{
+			// Round 5, string length: Objects [S] x N, S a SubWorldReferenceObjectData with AutoLoad
+			// false and an L-byte BundleName. Each slot decoded (memchr) and used the name for 1 unit:
+			// N = 262,144, L = 4 MB ran 62.5 s and succeeded.
+			SynthPartition part(17);
+			hostile_types(part);
+			const uint32_t root = part.add("WorldPartData");
+			const uint32_t s = part.add("SubWorldReferenceObjectData");
+			part.set(s, "BundleName", part.string(std::string(size_t(4) << 20, 'n')));
+			part.set(root, "Objects", part.array("WorldPartData", "Objects", 1u << 18, [&](uint32_t, uint32_t) { return SynthPartition::ref(s); }));
+			EbxDb db;
+			insert(db, "levels/hostile/part", part);
+			expect_budget_error("2^18 slots naming one 4 MB BundleName", db);
+		}
+		{
+			// The fan-out form: Objects [R, R, S x 64] with R a world part reference back to the
+			// root (2^48 paths, cut by the budget) and S as above with a 1 MB name (202 s before).
+			SynthPartition part(18);
+			hostile_types(part);
+			const uint32_t root = part.add("WorldPartData");
+			const uint32_t r = part.add("WorldPartReferenceObjectData");
+			const uint32_t s = part.add("SubWorldReferenceObjectData");
+			part.set_ref(r, "Blueprint", root);
+			part.set(s, "BundleName", part.string(std::string(size_t(1) << 20, 'n')));
+			part.set(root, "Objects", part.array("WorldPartData", "Objects", 66, [&](uint32_t p_i, uint32_t) { return SynthPartition::ref(p_i < 2 ? r : s); }));
+			EbxDb db;
+			insert(db, "levels/hostile/part", part);
+			expect_budget_error("self-listing fan-out over a 1 MB BundleName", db);
+		}
+		{
+			// Collision: 64 placements whose physics lists one asset with a 4 MB Name 4,096 times.
+			// Names over 1,024 bytes are skipped, but only after they are charged.
+			SynthPartition part(19);
+			hostile_types(part);
+			const uint32_t root = part.add("WorldPartData");
+			const uint32_t entity = part.add("StaticModelEntityData");
+			const uint32_t mesh = part.add("CompositeMeshAsset");
+			const uint32_t physics = part.add("PhysicsEntityData");
+			const uint32_t asset = part.add("CompositeMeshAsset");
+			part.set_ref(entity, "Mesh", mesh);
+			part.set_ref(entity, "PhysicsData", physics);
+			part.set(asset, "Name", part.string(std::string(size_t(4) << 20, 'c')));
+			part.set(physics, "ScaledAssets", part.array("PhysicsEntityData", "ScaledAssets", 4096, [&](uint32_t, uint32_t) { return SynthPartition::ref(asset); }));
+			part.set(root, "Objects", part.array("WorldPartData", "Objects", 64, [&](uint32_t, uint32_t) { return SynthPartition::ref(entity); }));
+			EbxDb db;
+			insert(db, "levels/hostile/part", part);
+			Result<std::unique_ptr<World>> world = walk(db);
+			REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
+			Result<std::vector<CollisionPlacement>> collision = std::vector<CollisionPlacement>();
+			const double seconds = timed([&] { collision = collision_placements(db, *mount, **world); });
+			MESSAGE("collision over 64 x 4,096 4 MB names: ", (collision.ok() ? std::string("ok") : collision.error().message), " in ", seconds, " s");
 			REQUIRE_FALSE(collision.ok());
 			CHECK(budget_error(collision.error()));
 			CHECK(seconds < kHostileSeconds);

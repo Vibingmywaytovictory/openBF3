@@ -30,6 +30,32 @@ Status WorkBudget::status() const {
 	return exhausted() ? Status(error()) : Status::success();
 }
 
+Result<std::optional<std::string_view>> charged_str(const std::optional<EbxValue> &p_value, WorkBudget &r_budget) {
+	BF3_TRY(r_budget.status());
+	const std::optional<std::string_view> text = p_value ? p_value->as_str() : std::nullopt;
+	if (text) {
+		BF3_TRY(r_budget.charge(text_units(text->size())));
+	}
+	return text;
+}
+
+Result<std::optional<std::string_view>> charged_str(const EbxStruct &p_object, std::string_view p_field, WorkBudget &r_budget) {
+	return charged_str(p_object.get(p_field), r_budget);
+}
+
+Result<std::optional<std::string_view>> charged_enum_name(const std::optional<EbxValue> &p_value, WorkBudget &r_budget) {
+	BF3_TRY(r_budget.status());
+	const std::optional<std::string_view> name = p_value ? p_value->enum_name() : std::nullopt;
+	if (name) {
+		BF3_TRY(r_budget.charge(text_units(name->size())));
+	}
+	return name;
+}
+
+Status charge_text(WorkBudget &r_budget, std::string_view p_text) {
+	return r_budget.charge(text_units(p_text.size()));
+}
+
 size_t array_length(const EbxStruct &p_object, std::string_view p_field) {
 	const std::optional<EbxValue> v = p_object.get(p_field);
 	const OptionalEbxArray array = v ? v->as_array() : OptionalEbxArray();

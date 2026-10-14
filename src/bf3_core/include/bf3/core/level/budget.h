@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -46,6 +47,30 @@ private:
 	std::atomic<size_t> spent_{ 0 };
 	std::atomic<bool> exhausted_{ false };
 };
+
+// Text. Decoding a string or enum name is O(log n) whatever its length (EbxPartition indexes its
+// string table; names are spans), but copying, keying, hashing, comparing it with other data,
+// parsing or printing it costs its length, and many slots can name one long string. So every
+// data-controlled text the level code uses is taken through the helpers below, which charge
+// text_units(length) before handing it out: total text work and every kept copy are bounded by
+// kTextBytesPerUnit bytes per unit (64 MB over the default budget). They fail with the budget
+// error once it is exhausted, whatever the value.
+inline constexpr size_t kTextBytesPerUnit = 16;
+constexpr size_t text_units(size_t p_length) {
+	return 1 + p_length / kTextBytesPerUnit;
+}
+
+// A string value's text after charging it; nullopt (charged nothing) for no value, a null string
+// or another kind.
+Result<std::optional<std::string_view>> charged_str(const std::optional<EbxValue> &p_value, WorkBudget &r_budget);
+// charged_str of p_object.get(p_field).
+Result<std::optional<std::string_view>> charged_str(const EbxStruct &p_object, std::string_view p_field, WorkBudget &r_budget);
+// An enum value's enumerator name after charging it (names come from the partition's name table,
+// so their length is data-controlled too).
+Result<std::optional<std::string_view>> charged_enum_name(const std::optional<EbxValue> &p_value, WorkBudget &r_budget);
+// Charges text_units(p_text.size()) for other data-controlled text about to be used (type names
+// a listing prints, a second lookup of a charged name).
+Status charge_text(WorkBudget &r_budget, std::string_view p_text);
 
 // The raw element count of array field p_field of p_object (null and unresolved slots included);
 // 0 when the object has no such array.

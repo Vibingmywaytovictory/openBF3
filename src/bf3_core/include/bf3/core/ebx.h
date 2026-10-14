@@ -403,7 +403,8 @@ public:
 	std::string_view complex_name(uint32_t p_complex) const;
 	std::string_view field_name(uint32_t p_field) const;
 	bool derives_from(uint32_t p_complex, uint32_t p_hash, std::string_view p_type_name) const;
-	// nullopt = offset outside the table; inner nullopt = the null string.
+	// nullopt = offset outside the table; inner nullopt = the null string. O(log n) in the table's
+	// string count, whatever the string's length (the parser indexes the NULs).
 	std::optional<std::optional<std::string_view>> string(uint32_t p_offset) const;
 	std::optional<EbxRef> reference(uint32_t p_raw) const;
 	std::optional<std::string_view> enumerator(uint32_t p_complex, int32_t p_value) const;
@@ -433,6 +434,7 @@ private:
 	size_t names_len_ = 0;
 	size_t strings_at_ = 0; // string table
 	size_t strings_len_ = 0;
+	std::vector<uint32_t> string_ends_; // offsets of the string table's NULs, ascending
 	std::vector<Field> fields_;
 	std::vector<Complex> complexes_;
 	std::vector<InstanceEntry> instances_;

@@ -418,15 +418,20 @@ std::optional<uint32_t> Scopes::child(uint32_t p_scope, const EbxInstance &p_ref
 	return found == children_.end() ? std::nullopt : std::optional<uint32_t>(found->second);
 }
 
-std::optional<EbxInstance> Scopes::referenced_blueprint(const EbxInstance &p_reference) const {
+Result<std::optional<EbxInstance>> Scopes::referenced_blueprint(const EbxInstance &p_reference) const {
 	if (p_reference.is_a("SubWorldReferenceObjectData")) {
-		const std::optional<EbxValue> v = p_reference.get("BundleName");
-		const std::optional<std::string_view> bundle = v ? v->as_str() : std::nullopt;
+		// Charged before it is copied and looked up: a resolution may meet this reference on every
+		// hop, and many references may name one long string.
+		const Result<std::optional<std::string_view>> charged = charged_str(p_reference.data(), "BundleName", *budget_);
+		if (!charged) {
+			return charged.error();
+		}
+		const std::optional<std::string_view> bundle = *charged;
 		if (!bundle) {
-			return std::nullopt;
+			return std::optional<EbxInstance>();
 		}
 		if (bundle->size() > kMaxBundleName) {
-			return std::nullopt; // no partition has such a name; do not copy it on every hop
+			return std::optional<EbxInstance>(); // no partition has such a name
 		}
 		std::string name(*bundle);
 		for (char &c : name) {
@@ -440,7 +445,7 @@ std::optional<EbxInstance> Scopes::referenced_blueprint(const EbxInstance &p_ref
 	if (p_reference.is_a("ReferenceObjectData")) {
 		return db_->follow(p_reference.data(), "Blueprint");
 	}
-	return std::nullopt;
+	return std::optional<EbxInstance>();
 }
 
 Result<std::optional<Property>> Scopes::property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const {
@@ -554,7 +559,11 @@ std::optional<Property> Scopes::source_value(const Frame &p_frame, const EbxInst
 	if (descriptor && same(*descriptor, p_source)) {
 		return interface_in(p_frame, p_field, depth);
 	}
-	if (const std::optional<EbxInstance> inner = referenced_blueprint(p_source)) {
+	const Result<std::optional<EbxInstance>> referenced = referenced_blueprint(p_source);
+	if (!referenced) {
+		return std::nullopt; // the budget is exhausted; the resolution reports it
+	}
+	if (const std::optional<EbxInstance> inner = *referenced) {
 		if (const std::optional<EbxInstance> inner_descriptor = db_->follow(inner->data(), "Descriptor")) {
 			Frame child;
 			child.parent = &p_frame;
@@ -621,12 +630,12 @@ std::optional<Property> Scopes::interface_in(const Frame &p_frame, int32_t p_fie
 		return std::nullopt;
 	}
 	// The first entry with the id decides, as Rust's find + and_then.
-	const std::optional<EbxValue> value = entry->get("Value");
-	const std::optional<std::string_view> text = value ? value->as_str() : std::nullopt;
-	if (!text || !budget_->charge(1 + text->size() / 64)) {
-		return std::nullopt; // parsing reads the whole constant: a unit per 64 bytes
+	// Parsing reads the whole constant: charged its text units first.
+	const Result<std::optional<std::string_view>> text = charged_str(entry->get("Value"), *budget_);
+	if (!text || !*text) {
+		return std::nullopt; // a failed charge: the resolution reports the exhausted budget
 	}
-	return Property::parse(*text);
+	return Property::parse(**text);
 }
 
 } // namespace bf3::core::level

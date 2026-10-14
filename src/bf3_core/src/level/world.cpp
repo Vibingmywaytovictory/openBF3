@@ -4,28 +4,42 @@
 // the property resolver and every helper run on the World. Each unit is charged BEFORE its work,
 // at the place the work happens; an exhausted budget fails every later charge (sticky), so the
 // walk and each helper end with the budget error, and World::traverse checks it once more after
-// the walk returns. Every loop reachable from the public entry points, and what bounds it:
+// the walk returns.
+// Text: a data string or name costs its length to copy, key, hash, compare with other data, parse
+// or print, and any number of slots may name one long string. Decoding one is O(log n) whatever
+// its length (EbxPartition::string looks the NUL up in an index built at parse; names are spans),
+// and the level code takes every data-controlled text through charged_str / charged_enum_name /
+// charge_text (budget.h), which charge text_units = 1 + length/16 before handing it out; no other
+// code in src/level reads EbxValue::as_str or enum_name (Property::as_str, a view for callers that
+// charge it themselves, is not called by the walk). So text work and every kept copy are at most
+// 16 bytes per unit, and long names that are then skipped (over 1,024 bytes) are paid first.
+// Every loop reachable from the public entry points, and what bounds it:
 //   load_level, level_info (level.cpp)
 //     subworld_references: 1 per container visited, then the raw length of its Objects before the
 //       slots are resolved; also at most 2^16 containers per search, layers 8 deep.
 //     includes: the raw length of InclusionSettings.Settings, then of each setting's
 //       EnabledOptions, each before it is scanned (shared arrays are charged per scan).
-//     each BundleName a reference wants: 1 + length/64 before it is keyed or copied. A sub-world
-//       bundle loads once per key, so bundle reads and partition parsing are bounded by the
-//       superbundle (each bundle at most once), not by the graph; find_bundle scans the mount's
-//       bundle list (install-bound) once per new key.
+//     includes also charges the text of every criterion Name and EnabledOptions entry it reads.
+//     each BundleName a reference wants: its text before it is keyed or copied, then one hash
+//       lookup in the mount's bundle index (built once per load from the install's names). A
+//       sub-world bundle loads once per key, so bundle reads and partition parsing are bounded by
+//       the superbundle (each bundle at most once), not by the graph.
 //     read_level_info: the raw lengths of Categories, of each category's Mode array and of both
-//       Components arrays, each before it is scanned; count_imports: once over every import.
+//       Components arrays, each before it is scanned; the text of every Category and Mode name
+//       read (each mode kept is a charged copy, at most 4,096 of them) and of Name / Description;
+//       count_imports: once over every import.
 //   Walker (this file)
 //     visit: 1 per call, then the raw length of Objects before it is scanned; recursion depth is at
 //       most 48. Every object slot then does a constant amount of EBX work (is_a against two fixed
 //       tables, get, follow), plus what the branch below charges.
 //     excluded, blueprint_transform, entity_transform: Scopes::property (below).
-//     enter_subworld: includes() as above; then the sub-world's MeshVariationDatabase raw Entries +
+//     enter_subworld: the BundleName's text, includes() as above, referenced_blueprint (its text
+//       again, then one lookup); then the sub-world's MeshVariationDatabase raw Entries +
 //       RedirectEntries before they are read (re-read and re-charged on every entry).
 //     place_reference: its slot and the resolver; a prefab recurses into visit.
-//     expand_group: 1 per Havok res read (each distinct res name is read and parsed once per
-//       traversal; names over 1,024 bytes fail before they are copied); the raw length of
+//     expand_group: the PhysicsData asset name's text on every visit (it is hashed into the res
+//       cache each time; names over 1,024 bytes fail once charged); 1 per Havok res read (each
+//       distinct res name is read and parsed once per traversal); the raw length of
 //       MemberDatas before the members are copied; 1 per instance slot before it is placed (a
 //       hostile InstanceCount past the Havok subparts is counted, not walked).
 //     emit / classify: constant.
@@ -33,11 +47,12 @@
 //     property / interface: 1 per connection candidate examined, before it is followed (hop()),
 //       also capped at 2^16 per resolution and depth 32. Between two hops a resolution does a
 //       constant amount of work: hash lookups, the Descriptor follow, data_field (at most 32 types
-//       of 255 field descriptors, compared by stored hash).
+//       of 255 field descriptors, compared by stored hash); a hop whose source is a sub-world
+//       reference charges its BundleName's text before the name is copied and looked up.
 //     Connections::of: the raw lengths of a blueprint's three connection lists, once per blueprint
 //       per traversal (cached by scope push and by connections_of).
 //     descriptor_field: the raw length of a descriptor's Fields, once per descriptor (cached).
-//     an interface constant: 1 + length/64 before Property::parse reads it.
+//     an interface constant: its text before Property::parse reads it.
 //   Helpers run on the World (census.cpp), the World's budget:
 //     starts_hidden: the number of connections into (reference, Visible) before they are checked.
 //     hidden_parts: the raw length of each Components and HealthStates array before it is
@@ -47,12 +62,16 @@
 //       lengths of the asset's Materials and the entry's Materials, and 1 per triangle examined,
 //       paid in doubling blocks before each block (at most twice what is examined). Each distinct
 //       MeshSet is read and decoded once (install-bound).
-//     collision_placements: per non-group mesh object the raw RigidBodies and ScaledAssets
-//       lengths, and 1 + length/64 per asset name looked up (names over 1,024 bytes are skipped).
+//     collision_placements: per group its res name's text; per non-group mesh object the raw
+//       RigidBodies and ScaledAssets lengths, each body's enumerator name, and each asset name's
+//       text twice (read, then looked up and copied; names over 1,024 bytes are skipped, charged).
+//   bf3dump level (tools/bf3dump/level_commands.cpp) charges the type names it prints.
 // Constant factors: an EBX get / is_a / follow walks at most 32 types of at most 255 field
-// descriptors and never hashes data; compares against fixed names stop at the length check.
+// descriptors, never hashes data and decodes a string in O(log n); compares against fixed names
+// stop at the fixed name's length. An enumerator name is found among at most 255 descriptors.
 // Structural caps beside the budget: objects 2^20, scopes 2^18, static model groups 2^16, kept
-// sub-world names 4,096 of at most 1,024 bytes, BundleName lookups 1,024 bytes.
+// sub-world names 4,096 of at most 1,024 bytes, BundleName and res lookups 1,024 bytes, level
+// description modes 4,096.
 // Retail use (all 230 level x mode runs of the 29 MP levels): see README "Level traversal".
 #include "bf3/core/level/world.h"
 
@@ -113,11 +132,6 @@ constexpr MeshEntityName kMeshEntities[7] = {
 	{ "MeshProxyEntityData", MeshEntityType::MeshProxy },
 	{ "VehicleEntityData", MeshEntityType::Vehicle },
 };
-
-std::optional<std::string_view> str_field(const EbxInstance &p_object, std::string_view p_field) {
-	const std::optional<EbxValue> v = p_object.get(p_field);
-	return v ? v->as_str() : std::nullopt;
-}
 
 std::optional<uint32_t> u32_of(const std::optional<EbxValue> &p_value) {
 	return p_value ? p_value->as_u32() : std::nullopt;
@@ -191,8 +205,12 @@ std::string_view mesh_entity_type_name(MeshEntityType p_type) {
 	}
 }
 
-std::string_view MeshObject::name() const {
-	return str_field(asset, "Name").value_or("");
+Result<std::string_view> MeshObject::name(WorkBudget &r_budget) const {
+	const Result<std::optional<std::string_view>> name = charged_str(asset.data(), "Name", r_budget);
+	if (!name) {
+		return name.error();
+	}
+	return name->value_or("");
 }
 
 std::string_view PlacedObject::label() const {
@@ -382,7 +400,11 @@ private:
 	}
 
 	Status enter_subworld(const EbxInstance &p_reference, uint32_t p_scope, const LevelTransform &p_frame, uint32_t p_subworld, uint32_t p_depth) {
-		const std::string_view name = str_field(p_reference, "BundleName").value_or("");
+		const Result<std::optional<std::string_view>> bundle_name = charged_str(p_reference.data(), "BundleName", *world_.budget);
+		if (!bundle_name) {
+			return bundle_name.error();
+		}
+		const std::string_view name = bundle_name->value_or("");
 		const Result<bool> included = includes(db_, p_reference, mode_, *world_.budget);
 		if (!included) {
 			return included.error();
@@ -398,7 +420,11 @@ private:
 		if (*skip) {
 			return Status::success();
 		}
-		const std::optional<EbxInstance> data = world_.scopes.referenced_blueprint(p_reference);
+		const Result<std::optional<EbxInstance>> referenced = world_.scopes.referenced_blueprint(p_reference);
+		if (!referenced) {
+			return referenced.error();
+		}
+		const std::optional<EbxInstance> data = *referenced;
 		if (!data) {
 			note_subworld(world_.stats.absent_subworlds, name);
 			return Status::success();
@@ -494,7 +520,11 @@ private:
 		group.transform = transform;
 		if (const std::optional<EbxInstance> physics = db_.follow(p_group.data(), "PhysicsData")) {
 			if (const std::optional<EbxInstance> asset = db_.follow(physics->data(), "Asset")) {
-				if (const std::optional<std::string_view> name = str_field(*asset, "Name")) {
+				const Result<std::optional<std::string_view>> asset_name = charged_str(asset->data(), "Name", *world_.budget);
+				if (!asset_name) {
+					return asset_name.error();
+				}
+				if (const std::optional<std::string_view> name = *asset_name) {
 					if (name->size() > kMaxResName) {
 						// No res has such a name; do not copy it on every visit.
 						return make_error("static model group " + p_group.guid().to_string() + ": PhysicsData asset name of " + std::to_string(name->size()) +

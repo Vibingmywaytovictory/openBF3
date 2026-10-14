@@ -341,6 +341,17 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 	}
 	p.strings_at_ = strings_at;
 	p.strings_len_ = strings_len;
+	// Every NUL of the string table, so a string decodes in O(log n) whatever its length: many
+	// fields may name one long string, and a scan per decode would cost fields x length.
+	for (size_t at = 0; at < strings_len;) {
+		const void *nul = std::memchr(bytes.data() + strings_at + at, 0, strings_len - at);
+		if (nul == nullptr) {
+			break;
+		}
+		const size_t found = static_cast<size_t>(static_cast<const uint8_t *>(nul) - (bytes.data() + strings_at));
+		p.string_ends_.push_back(static_cast<uint32_t>(found));
+		at = found + 1;
+	}
 
 	const size_t payload_at = strings_at + strings_len;
 	const uint64_t payload_end = uint64_t(payload_at) + instance_payload_len;
@@ -759,11 +770,11 @@ std::optional<std::optional<std::string_view>> EbxPartition::string(uint32_t p_o
 	if (!char_boundary(table, p_offset)) {
 		return std::nullopt;
 	}
-	const void *nul = std::memchr(table.data() + p_offset, 0, table.size() - p_offset);
-	if (nul == nullptr) {
+	const auto nul = std::lower_bound(string_ends_.begin(), string_ends_.end(), p_offset);
+	if (nul == string_ends_.end()) {
 		return std::nullopt;
 	}
-	const size_t len = static_cast<const uint8_t *>(nul) - (table.data() + p_offset);
+	const size_t len = *nul - p_offset;
 	return std::optional<std::string_view>(std::string_view(reinterpret_cast<const char *>(table.data()) + p_offset, len));
 }
 

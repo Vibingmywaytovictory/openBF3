@@ -101,6 +101,10 @@ Result<std::string> hidden_label(const EbxResolver &p_db, const World &p_world, 
 }
 
 Result<std::string> placement_line(const EbxResolver &p_db, const World &p_world, const PlacedObject &p_object) {
+	// The type name comes from the partition's name table (data-controlled length) and is printed
+	// once or twice per line: charged like any other text the traversal copies.
+	BF3_TRY(charge_text(*p_world.budget, p_object.entity.type_name()));
+	BF3_TRY(charge_text(*p_world.budget, p_object.label()));
 	std::string line = "P " + std::string(p_object.label()) + " " + id(p_db, p_object.entity) + " " + std::string(p_object.entity.type_name()) + " ref " +
 			opt_id(p_db, p_object.reference) + " sw " + std::to_string(p_object.subworld) + " var " + hex32(p_object.variation);
 	if (p_object.group) {

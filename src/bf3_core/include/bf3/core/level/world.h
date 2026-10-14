@@ -79,7 +79,8 @@ struct MeshObject {
 	// Havok res instead.
 	std::optional<EbxInstance> physics;
 
-	std::string_view name() const; // MeshAsset.Name
+	// MeshAsset.Name, charged to r_budget (text_units) before it is handed out.
+	Result<std::string_view> name(WorkBudget &r_budget) const;
 };
 
 // Where a static model group instance came from.

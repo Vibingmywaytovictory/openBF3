@@ -99,6 +99,8 @@ struct Property {
 	std::optional<bool> as_bool() const;
 	std::optional<int64_t> as_i64() const;
 	std::optional<float> as_f32() const;
+	// A view of the text (O(1)); its length is data-controlled, so a caller that copies, keys or
+	// compares it charges charge_text first. The walk itself never reads it.
 	std::optional<std::string_view> as_str() const;
 	std::optional<uint32_t> as_team() const;
 	std::optional<LevelTransform> as_transform() const;
@@ -141,8 +143,9 @@ public:
 	// The scope that p_reference, an object of p_scope, instantiated.
 	std::optional<uint32_t> child(uint32_t p_scope, const EbxInstance &p_reference) const;
 	// The prefab or sub-world blueprint a reference instantiates (a sub-world reference names its
-	// SubWorldData by bundle, not by pointer).
-	std::optional<EbxInstance> referenced_blueprint(const EbxInstance &p_reference) const;
+	// SubWorldData by bundle, not by pointer). A BundleName is charged to the budget before it is
+	// copied and looked up; fails only with the budget error.
+	Result<std::optional<EbxInstance>> referenced_blueprint(const EbxInstance &p_reference) const;
 	// The value a PropertyConnection of p_scope feeds into p_field of p_target, an object of that
 	// scope, resolved down to a constant or a data field; the budget error once it is exhausted.
 	Result<std::optional<Property>> property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const;

@@ -62,11 +62,6 @@ std::string instance_id(const EbxResolver &p_db, const EbxInstance &p_instance) 
 	return std::string(p_db.name_of(p_instance.partition().guid()).value_or("?")) + "#" + std::to_string(p_instance.index());
 }
 
-// The units a string of p_length bytes costs to key, copy or look up.
-size_t text_units(size_t p_length) {
-	return 1 + p_length / 64;
-}
-
 // Per MeshAsset.Materials slot: whether its shader draws (IW4L materials.rs slots + resolve).
 Status drawn_slots(const EbxResolver &p_db, const EbxInstance &p_asset, const std::optional<EbxInstance> &p_entry, WorkBudget &r_budget,
 		std::vector<bool> &r_out) {
@@ -619,9 +614,12 @@ Result<std::vector<CollisionPlacement>> collision_placements(const EbxResolver &
 		std::vector<EbxInstance> rigid_bodies;
 		BF3_TRY(charged_follow_all(db, physics.data(), "RigidBodies", budget, rigid_bodies));
 		for (const EbxInstance &body : rigid_bodies) {
-			const std::optional<EbxValue> type = body.get("RigidBodyType");
-			const std::optional<std::string_view> name = type ? type->enum_name() : std::nullopt;
-			c.bodies.push_back(name.value_or("?"));
+			// Charged: callers copy or print the enumerator names.
+			const Result<std::optional<std::string_view>> name = charged_enum_name(body.get("RigidBodyType"), budget);
+			if (!name) {
+				return name.error();
+			}
+			c.bodies.push_back(name->value_or("?"));
 		}
 		// pick_asset: the asset prebaked closest to the placement's scale that the bundles carry.
 		const Vec3f s = object.transform.axis_scales();
@@ -633,13 +631,16 @@ Result<std::vector<CollisionPlacement>> collision_placements(const EbxResolver &
 			candidates.push_back(*asset);
 		}
 		for (const EbxInstance &asset : candidates) {
-			const std::optional<EbxValue> name_value = asset.get("Name");
-			const std::optional<std::string_view> name = name_value ? name_value->as_str() : std::nullopt;
+			const Result<std::optional<std::string_view>> charged = charged_str(asset.data(), "Name", budget);
+			if (!charged) {
+				return charged.error();
+			}
+			const std::optional<std::string_view> name = *charged;
 			if (!name || name->size() > kMaxResName) {
 				continue;
 			}
-			// Looked up (hashed) up to twice below, and copied once if chosen.
-			BF3_TRY(budget.charge(2 * text_units(name->size())));
+			// Looked up (hashed) up to twice below and copied once if chosen: one more charge.
+			BF3_TRY(charge_text(budget, *name));
 			const std::optional<EbxValue> scale_value = asset.get("Scale");
 			std::optional<float> scale = scale_value ? scale_value->as_f32() : std::nullopt;
 			if (!scale || !(*scale > 0.0f)) {

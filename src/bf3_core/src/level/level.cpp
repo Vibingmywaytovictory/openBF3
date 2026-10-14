@@ -6,12 +6,15 @@
 
 #include <chrono>
 #include <deque>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace bf3::core::level {
 
 namespace {
 
+// Game modes a level description may list (retail levels list at most 15).
+constexpr size_t kMaxModes = 4096;
 // Layers searched for sub-world references (WorldPartReferenceObjectData nesting).
 constexpr uint32_t kLayerDepth = 8;
 // Containers one search may visit: the depth limit bounds nesting, not fan-out (a hostile layer
@@ -60,11 +63,6 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-std::optional<std::string_view> str_field(const EbxStruct &p_object, std::string_view p_field) {
-	const std::optional<EbxValue> v = p_object.get(p_field);
-	return v ? v->as_str() : std::nullopt;
-}
-
 Status search_layers(const EbxResolver &p_db, const EbxInstance &p_container, uint32_t p_depth, size_t &r_containers, WorkBudget &r_budget,
 		std::vector<EbxInstance> &r_out) {
 	if (r_containers == 0) {
@@ -84,11 +82,6 @@ Status search_layers(const EbxResolver &p_db, const EbxInstance &p_container, ui
 		}
 	}
 	return Status::success();
-}
-
-// The units a string of p_length bytes costs to key, copy or parse.
-size_t text_units(size_t p_length) {
-	return 1 + p_length / 64;
 }
 
 std::string join_names(const std::vector<std::string> &p_names) {
@@ -181,6 +174,26 @@ std::optional<std::string> find_bundle(const std::vector<std::string> &p_names, 
 	return std::nullopt;
 }
 
+// The mount's bundle names by bundle_key, keeping the first name of each key (the one find_bundle
+// picks). Built once per load, so a sub-world key costs a lookup of its (charged) length instead
+// of a pass over every bundle name.
+class BundleIndex {
+public:
+	explicit BundleIndex(const std::vector<std::string> &p_names) {
+		for (const std::string &name : p_names) {
+			by_key_.emplace(bundle_key(name), name);
+		}
+	}
+
+	std::optional<std::string> find(const std::string &p_key) const {
+		const auto found = by_key_.find(p_key);
+		return found == by_key_.end() ? std::nullopt : std::optional<std::string>(found->second);
+	}
+
+private:
+	std::unordered_map<std::string, std::string> by_key_;
+};
+
 std::optional<Minimap> read_minimap(const EbxInstance &p_component) {
 	const std::optional<EbxValue> data = p_component.get("MinimapData");
 	if (!data) {
@@ -252,7 +265,14 @@ Result<bool> includes(const EbxResolver &p_db, const EbxInstance &p_reference, s
 	BF3_TRY(charged_follow_all(p_db, settings->data(), "Settings", r_budget, setting_list));
 	for (const EbxInstance &setting : setting_list) {
 		const std::optional<EbxInstance> criterion = p_db.follow(setting.data(), "Criterion");
-		const std::optional<std::string_view> name = criterion ? str_field(criterion->data(), "Name") : std::nullopt;
+		std::optional<std::string_view> name;
+		if (criterion) {
+			const Result<std::optional<std::string_view>> text = charged_str(criterion->data(), "Name", r_budget);
+			if (!text) {
+				return text.error();
+			}
+			name = *text;
+		}
 		if (name && !iequals_ascii(*name, "GameMode")) {
 			continue;
 		}
@@ -262,8 +282,11 @@ Result<bool> includes(const EbxResolver &p_db, const EbxInstance &p_reference, s
 		if (array) {
 			BF3_TRY(r_budget.charge(array->size()));
 			for (const EbxValue option : *array) {
-				const std::optional<std::string_view> text = option.as_str();
-				if (text && mode_matches(p_mode, *text)) {
+				const Result<std::optional<std::string_view>> text = charged_str(option, r_budget);
+				if (!text) {
+					return text.error();
+				}
+				if (*text && mode_matches(p_mode, **text)) {
 					enabled = true;
 					break;
 				}
@@ -280,7 +303,11 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 		WorkBudget &r_budget) {
 	LevelInfo info;
 	std::string_view id = p_level_id;
-	if (const std::optional<std::string_view> name = str_field(p_root.data(), "Name")) {
+	const Result<std::optional<std::string_view>> root_name = charged_str(p_root.data(), "Name", r_budget);
+	if (!root_name) {
+		return root_name.error();
+	}
+	if (const std::optional<std::string_view> name = *root_name) {
 		const size_t slash = name->find_last_of("/\\");
 		const std::string_view last = slash == std::string_view::npos ? *name : name->substr(slash + 1);
 		if (!last.empty()) {
@@ -289,10 +316,13 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 	}
 	info.id = std::string(id);
 	const std::optional<EbxValue> description = p_root.get("LevelDescription");
-	const auto text = [&](std::string_view p_field) -> std::string {
-		const std::optional<EbxValue> v = description ? description->get(p_field) : std::nullopt;
-		const std::optional<std::string_view> s = v ? v->as_str() : std::nullopt;
-		return std::string(s.value_or(""));
+	const auto text = [&](std::string_view p_field, std::string &r_out) -> Status {
+		const Result<std::optional<std::string_view>> s = charged_str(description ? description->get(p_field) : std::nullopt, r_budget);
+		if (!s) {
+			return s.error();
+		}
+		r_out = std::string(s->value_or(""));
+		return Status::success();
 	};
 	info.display_name = std::string(level_display_name(info.id));
 
@@ -304,9 +334,11 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 		if (array) {
 			BF3_TRY(r_budget.charge(array->size()));
 			for (const EbxValue category : *array) {
-				const std::optional<EbxValue> kind = category.get("Category");
-				const std::optional<std::string_view> kind_name = kind ? kind->as_str() : std::nullopt;
-				if (!kind_name || !iequals_ascii(*kind_name, "GameMode")) {
+				const Result<std::optional<std::string_view>> kind_name = charged_str(category.get("Category"), r_budget);
+				if (!kind_name) {
+					return kind_name.error();
+				}
+				if (!*kind_name || !iequals_ascii(**kind_name, "GameMode")) {
 					continue;
 				}
 				const std::optional<EbxValue> modes = category.get("Mode");
@@ -316,9 +348,18 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 				}
 				BF3_TRY(r_budget.charge(mode_array->size())); // categories may share one array
 				for (const EbxValue mode : *mode_array) {
-					if (const std::optional<std::string_view> m = mode.as_str()) {
-						info.modes.emplace_back(*m);
+					// Each copy is charged its length: N elements may name one long string.
+					const Result<std::optional<std::string_view>> m = charged_str(mode, r_budget);
+					if (!m) {
+						return m.error();
 					}
+					if (!*m) {
+						continue;
+					}
+					if (info.modes.size() >= kMaxModes) {
+						return make_error("level description lists more than " + std::to_string(kMaxModes) + " game modes");
+					}
+					info.modes.emplace_back(**m);
 				}
 			}
 		}
@@ -346,8 +387,8 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 	}
 
 	info.zone = zone_name(info.id);
-	info.name_sid = text("Name");
-	info.description = text("Description");
+	BF3_TRY(text("Name", info.name_sid));
+	BF3_TRY(text("Description", info.description));
 	const std::optional<EbxValue> size = p_root.get("WorldSizeXZ");
 	info.world_size_xz = (size ? size->as_f32() : std::nullopt).value_or(0.0f);
 	return info;
@@ -368,11 +409,11 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 	}
 	auto loaded = std::make_unique<LoadedLevel>(std::move(*mount));
 	loaded->mode = std::string(p_mode);
-	const std::vector<std::string> names = loaded->mount_.bundle_names();
+	const BundleIndex names(loaded->mount_.bundle_names());
 	const std::string id = to_lower_ascii(p_level_id);
 	loaded->root_name = "levels/" + id + "/" + id;
 	const std::string &root_name = loaded->root_name;
-	const std::optional<std::string> level_bundle = find_bundle(names, root_name);
+	const std::optional<std::string> level_bundle = names.find(root_name);
 	if (!level_bundle) {
 		return make_error("unknown level " + std::string(p_level_id));
 	}
@@ -390,7 +431,7 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 	BundleSet &bundles = loaded->bundles;
 	bundles.level = *level_bundle;
 	for (const char *suffix : { "settings_win32", "gameconfiglight_win32" }) {
-		if (std::optional<std::string> bundle = find_bundle(names, root_name + "_" + suffix)) {
+		if (std::optional<std::string> bundle = names.find(root_name + "_" + suffix)) {
 			bundles.settings.push_back(std::move(*bundle));
 		}
 	}
@@ -419,16 +460,19 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 			if (!*included) {
 				continue;
 			}
-			const std::optional<std::string_view> name = str_field(reference.data(), "BundleName");
+			const Result<std::optional<std::string_view>> bundle_name = charged_str(reference.data(), "BundleName", budget);
+			if (!bundle_name) {
+				return bundle_name.error();
+			}
+			const std::optional<std::string_view> name = *bundle_name;
 			if (!name) {
 				continue;
 			}
-			BF3_TRY(budget.charge(text_units(name->size())));
 			const std::string key = bundle_key(*name);
 			if (!seen.insert(key).second) {
 				continue;
 			}
-			if (std::optional<std::string> bundle = find_bundle(names, key)) {
+			if (std::optional<std::string> bundle = names.find(key)) {
 				batch.push_back(std::move(*bundle));
 				pending.push_back(key);
 			} else {
