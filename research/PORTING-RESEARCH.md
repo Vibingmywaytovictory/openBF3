@@ -2,7 +2,9 @@
 
 ## 0. Header
 
-**Date** 2026-10-10. **Engine** Godot 4.8 dev7 (`v4.8.dev7.official.c971f93e7`, single precision); the RC/stable replaces
+**Date** 2026-10-10; **revised 2026-10-14 (round 1)** with five gap reports (`topics/gap-r1-*`): measurement
+harness, level logic, audio, load/cache/memory/rotation, UI/HUD/minimap/localisation; **revised 2026-10-14 (round 2)**
+with the visual-effects gap report (`topics/gap-r2-vfx-effects-system.md`: §3.14, new D19). **Engine** Godot 4.8 dev7 (`v4.8.dev7.official.c971f93e7`, single precision); the RC/stable replaces
 it later. **Language** C++ only (GDExtension through godot-cpp pinned to the exact build).
 
 **Scope.** Battlefield 3 **multiplayer only** (no campaign or co-op), playable offline and on servers with bots as fill,
@@ -25,6 +27,21 @@ contract.
   uses the verifier's version. Unverifiable load-bearing claims become risks (§5).
 * Three hands-on probes (`probes/`): an EBX data dump of the whole install, a full Ant animation decode rendered in
   Godot, and a godot-cpp toolchain and engine-API measurement probe.
+* Round 1 (2026-10-14): five gap reports that closed holes a completeness critique found. Each ran its own read-only
+  tools over the install (data kept in the session scratch folder, cited by path in each report) and ends with a
+  second-source re-check of its five most load-bearing claims:
+  [measurement harness](topics/gap-r1-measurement-harness.md) (§3.13),
+  [level logic](topics/gap-r1-level-logic-schematics.md) (§3.11, D12 re-decided),
+  [audio](topics/gap-r1-audio-system.md) (§3.10),
+  [load/cache/memory/rotation](topics/gap-r1-load-cache-memory-rotation.md) (§3.12),
+  [UI/HUD/minimap/localisation](topics/gap-r1-ui-hud-minimap-localisation.md) (§3.8). Their tags are kept: the audio and
+  UI reports write [V]/[RC]/[I] (or [R]), which this document renders as [verified]/[report claim]/[inferred].
+* Round 2 (2026-10-14): one gap report, [visual effects](topics/gap-r2-vfx-effects-system.md) (§3.14, D19 new),
+  which closed the plan's last unplanned presentation subsystem (r1 only had "effects as GPUParticles" in M6 and "FX" in
+  M7). It ran a read-only census of all 5,420 effect partitions over the MP install, decoded the per-level emitter
+  atlas, solved the impact lookup in the material grid, benchmarked Godot dev7 particle options on this PC and ends
+  with a second-source re-check of its five most load-bearing claims. D12 is unchanged in r2 (no level-logic report
+  this round).
 * My own re-check of 31 Godot API names against `godot-api/extension_api.json` (python, 2026-10-10). All exist except
   `RenderingServer.instance_set_interpolated` and `PhysicsServer3D.space_step`, which are absent as the topics state.
   No Godot class name contains "Jolt" [verified].
@@ -35,7 +52,7 @@ nobody re-checked; **[inferred]** = a reading or design choice. Frostbite type a
 EBX descriptors (PascalCase); the VU-Docs schema writes the same fields lowerCamel.
 
 **Reading order.** §1 (one page) → §2.1 (the read-as-is contract) → §6 (milestones) → §5 (risks) → the §3 subsystem
-you are building, then its topic report → §7 (oracles) while testing.
+you are building, then its topic or gap report → §7 (oracles) while testing.
 
 ---
 
@@ -46,12 +63,17 @@ read-only (base + `Update\Patch` + `Update\Xpack1–5`), parses toc/sb/cas, EBX 
 descriptors, and yields engine-free data: level scenes, collision, gameplay constants, weapon/soldier/vehicle tables
 and Ant animation clips. Godot-independent libraries build the game on top of it: `bf3_anim` (pose evaluation, hit
 capsules), `bf3_sim` (an authoritative fixed-tick simulation on its **own pinned Jolt** with soldiers, weapons,
-vehicles, destruction, modes, Detour navigation and bots), `bf3_net` (own snapshot protocol over upstream ENet) and
-`bf3_host` (server and client sessions). The authoritative server runs at 60 Hz on its own `std::thread` (listen
+vehicles, destruction, native mode entities, a whitelisted interpreter for each level's own logic graph, Detour
+navigation and bots), `bf3_net` (own snapshot protocol over upstream ENet) and
+`bf3_host` (server and client sessions, map rotation and level loading). The authoritative server runs at 60 Hz on its own `std::thread` (listen
 server) or in the same binary under `--headless` (dedicated). The local player is an ordinary client over an
 in-process loopback. One GDExtension (`bf3_godot`) is the only code that touches Godot. It converts data into
-RenderingServer instances, skeletons, materials, audio and HUD, and caches derived data under
-`user://bf3cache/<digest>`. It reads input and presents interpolated, predicted state. Godot's physics, navigation and
+RenderingServer instances, skeletons, materials and a Control-based HUD (BF3's own textures, strings and fonts read at
+runtime), runs BF3's sound graphs in its own C++ mixer inside one `AudioStreamPlayback`, draws BF3's own particle
+effects (EBX emitter graphs compiled and simulated on the CPU by the Godot-free, client-only `bf3_fx`) as MultiMesh
+batches with a pooled set of effect lights, and caches derived data under
+`user://bf3cache/<digest>` (textures are decoded from the install at load, not cached, by default). It reads input and
+presents interpolated, predicted state. Godot's physics, navigation and
 high-level multiplayer stay out of the gameplay path. Clients prove they read identical data by exchanging digests
 built from the SHA1s already in each install's manifests; the network never carries BF3 content.
 
@@ -61,7 +83,8 @@ built from the SHA1s already in each install's manifests; the network never carr
  ================|===================================================== read-as-is boundary ==========
                  v
   bf3_core  (no Godot)  layout.toc/cas.cat/sb -> bundles -> EBX/res/chunks -> scene, collision, gameplay tables,
-                        weapon/soldier/vehicle defs, material grid, Ant clips; source digests from manifest SHA1s
+                        weapon/soldier/vehicle defs, material grid, Ant clips, logic graphs, sound graphs + XAS,
+                        UI text DB / minimap / icon atlases / fonts; source digests from manifest SHA1s
      |              |                        |                                  |
      v              v                        v                                  v
   bf3_anim       bf3_sim (no Godot)        bf3_net (no Godot)                user://bf3cache/<digest>/...
@@ -69,7 +92,8 @@ built from the SHA1s already in each install's manifests; the network never carr
   capsules       Server/Prediction/        ghosts, priority, acked           mesh blobs, Jolt shape streams,
      |           Cosmetic (shared static   baselines, handshake digests      Detour tiles, decoded clips)
      |           shapes); soldier motor,         |                                  ^
-     |           weapons, vehicles, rules,       |                                  |
+     |           weapons, vehicles, mode         |                                  |
+     |           entities + logic interpreter,   |                                  |
      |           destruction, Detour, bots       |                                  |
      +-------------+-------------+---------------+                                  |
                    v             v                                                  |
@@ -79,7 +103,9 @@ built from the SHA1s already in each install's manifests; the network never carr
  ==================|=================================================== Godot boundary ============|====
                    v                                                                               |
   bf3_godot (GDExtension, main thread + WorkerThreadPool): RenderingServer instances, Skeleton3D/RS skeletons,
-  material-family shaders, StreamedTexture2D (GSTF), AudioStreamPlayer3D, Camera3D, HUD, input -> Command,
+  material-family shaders, resident BC textures (GSTF optional), own audio mixer in one AudioStreamPlayback,
+  bf3_fx effects -> MultiMesh batches + effect-light pool (client only),
+  Camera3D, Control HUD + Translation subclass, loading screen, input -> Command,
   DedicatedMainLoop (--headless, no render resources), shot harness            ---- writes only to ----+
 ```
 
@@ -98,9 +124,14 @@ built from the SHA1s already in each install's manifests; the network never carr
 | D9 | Vehicles | One data-driven vehicle from `VehicleEntityData` on `JPH::VehicleConstraint` (wheeled/tracked/motorcycle controllers) plus own rotor, wing and float models; damage from health zones × material grid; driver prediction with Jolt save/restore and ε reconciliation |
 | D10 | Networking | Own ghost/snapshot protocol (priority, per-client acked baselines, quantisation, ≤ 1,200 B datagrams) over **upstream ENet 1.3.18** linked into `bf3_net`; not SceneMultiplayer |
 | D11 | Bots and navigation | Server-side fake clients emitting the same `Command` as humans; **Recast/Detour** navmeshes per agent class baked from the character-collision set; ROAD areas from BF3's `RoadData`; 2.5-D clearance grid for aircraft; fun-bots ideas only |
-| D12 | Game modes | Constants resolved from EBX through the interface → `PropertyConnection` chain; rules (bleed, capture, MCOM, spawn) written in C++; no event-graph VM |
-| D13 | Presentation | RenderingServer instances (no node per placement); resident BC textures first, then a GSTF `.stex` streaming cache loaded with `StreamedTexture2D`; 1p weapon via `fov_override`/`z_clip_scale` in the same HDR frame |
+| D12 | Game modes and level logic (**revised r1**) | Native C++ gameplay entities (capture points, ticket/life/kill counters, spawners, combat areas …) **plus a deterministic, server-side interpreter for 48 whitelisted primitive logic types** that runs each level×mode's own EBX wiring, plus a replicated logic ghost; constants still resolved through interface → `PropertyConnection`; unknown types logged as no-ops |
+| D13 | Presentation | RenderingServer instances (no node per placement); **resident BC textures decoded from the install at load (default, no texture cache)**, GSTF `.stex` streaming only as an option; 1p weapon via `fov_override`/`z_clip_scale` in the same HDR frame |
 | D14 | Legal hygiene | Zero BF3 bytes in repo/releases/CI; no EA marks in the project name; only MIT/BSD/zlib code (MIT for our code); never disassemble `bf3.exe`; never copy Rime, fun-bots or IceBloc code |
+| D15 | Audio (new r1) | Interpret BF3's own `SoundPatchAsset` graphs (control program + compiled FourCC plugin chains) in an own C++ mixer inside one `AudioStreamPlayback._mix`: HDR loudness window, per-voice biquads, 2-slot convolution reverb, listener-side `AreaType`; XAS kept compressed and decoded per voice |
+| D16 | UI, HUD, minimap, strings (new r1) | Route **A+**: own C++ `Control` layout fed by BF3's `UI*CompData` signal names; BF3's minimap, icon atlases, strings (`UITextDatabase`) and `DefineFont3` fonts read from the install at runtime; no SWF/AVM1 renderer |
+| D17 | Level load, cache, rotation (new r1) | Convert per level on demand (no mandatory prepare pass; optional "Prepare levels"); 64 m tiled Jolt shapes; servers pre-bake every rotation level at startup; BF3-style MapList with `RoundOver.next` pre-conversion and a `Loading` state with slot hold, stall timeout and deadline; ENet serviced on the net thread |
+| D18 | Reference measurements (new r1) | One observe-only VU server-mod harness on a separate clean instance, knowledge only: numbers into `research/measurements`, install manifest checked before/after every session; Session 1 during M0 |
+| D19 | Visual effects (new r2) | Compile BF3's own `EffectBlueprint`/`EmitterDocument` graphs (all 32 processors, 10 evaluators) into cached EffectDefs; own C++ CPU particle simulation (`bf3_fx`, Godot-free, client only) drawn as RenderingServer MultiMesh batches with custom shaders and the per-level emitter atlas; ≤ 64 pooled effect lights; impacts and decals from the material grid by `PhysicsMaterialIndex`; separate client-only instancer, no network ids; GPUParticles3D only as fallback |
 
 **Top risks** (register in §5).
 1. **64-player server CPU at 60 Hz.** Soldier motor sweeps, bot perception rays, Jolt steps and per-client encoding
@@ -113,12 +144,21 @@ built from the SHA1s already in each install's manifests; the network never carr
 4. **Prediction and reconciliation with Jolt.** Replay matches the server only within ε (different worlds, quantised
    snapshots). Neither soldier (`CharacterVirtual`) nor vehicle replay has been run.
 5. **Mechanics whose semantics the data does not give**: spread distribution, recoil recovery, falloff shape, ticket
-   bleed scaling, capture timing, `DamageProtectionThreshold`. A measurement pass in the user's BF3/VU is needed
-   (knowledge only).
+   bleed scaling, capture timing, `DamageProtectionThreshold`. The measurement pass is now designed as an observe-only
+   VU harness (§3.13, D18): feasible on this PC, about 0.6–0.8 agent slice plus 4–5 h of the user's attended time;
+   it depends on VU's Zeus backend being reachable.
 6. **Navigation from the right collision set.** Metro's navmesh splits where human traces walk through objects. BF3's
    own 0.3 m step makes the split worse on the IW4L soup, so collision must be rebuilt per Havok body type.
 7. **Engine churn and legal exposure.** dev7 → RC API changes (`STREAMING_UV` → `STREAMING_LOD`, hash changes, GSTF
    version); trademark or IP letters if branding or content ever leaks.
+8. **Level logic semantics (new r1).** Every level×mode switches spawners, vehicles, flags and scripted events through
+   its own graph (median 56, max 560 level-owned server edges per row). The interpreter is small, but event ordering,
+   re-entrancy, `Sequence` timing and late-join replay are inferred, not documented (§3.11, spike S4).
+9. **Effects fidelity and cost (new r2).** 3,410 emitters need all 32 processor types; several semantics
+   (`BaseEmitterData`, `MaxInstanceCount` scope, alpha-level erosion, turbulence) are inferred. A 64-bot firefight
+   produces ≈ 80–110 short-lived effect lights; lit transparent particles × many omni lights is the GPU risk
+   (+3.0 ms GPU at 256 lights on the RX 9070 XT), and Godot's per-system particle overhead rules out one
+   GPUParticles3D per emitter (§3.14, R19).
 
 ---
 
@@ -135,6 +175,8 @@ built from the SHA1s already in each install's manifests; the network never carr
 | No original executable | `bf3.exe` is never started, hooked or disassembled. VU and fun-bots are documentation, and observing the user's own BF3/VU is reference measurement only (EU Directive 2009/24 Art 5(3)) [verified law text; inferred application] | [topics/08](topics/08-prior-art-legal.md) §1.1, §3.5 |
 | No content over the wire | Every machine (client, listen host, dedicated server) reads **its own** install. The handshake compares digests (§2.7); a modified or mismatched install is rejected, never "fixed" [inferred design] | [topics/05](topics/05-networking.md) §7.6 |
 | Caches are private | Converted textures, meshes and clips are private copies of copyrighted works. They are never uploaded, synced or distributed, and CI artefacts and repo fixtures hold numbers (counts, hashes) only [inferred] | [topics/08](topics/08-prior-art-legal.md) §3.8 items 1–3; [topics/07](topics/07-godot-engine.md) verification "principle" |
+| UI art, strings and fonts are runtime reads too | Minimap images, icon atlases, `UITextDatabase` strings and `DefineFont3` glyphs are read from the install like meshes; a converted font (TTF or MSDF atlas) lives only in `user://`, never in the repo or anything that leaves the machine; never used for the project's own branding; own fallback art, a system font and the raw SID when an item is missing [verified data; inferred policy] | [gap UI](topics/gap-r1-ui-hud-minimap-localisation.md) §7 |
+| Reference measurements never enter the product | The VU harness is a private server mod in a separate VU instance folder, observe-only (no data edits, hooks pass through); it logs numbers and ids only into `research/measurements`; an install manifest (sizes, mtimes, SHA-256 of index files) is compared before and after every session, and a difference stops the campaign. The retrospective census found 0 of 2,101 install items written after the EA-app install despite earlier VU sessions [verified] | [gap harness](topics/gap-r1-measurement-harness.md) §3.2, §4.2 |
 | Optional user-supplied inputs stay optional | A user's own fun-bots `.map` traces may be read as a validation oracle; they are never required, cached for redistribution or shipped (no licence) [verified licence state] | [topics/06](topics/06-bots.md) §1.13, §2.9 |
 
 What the install holds [verified, 08 §4.2 + verification K11]: Origin build 1147186; `Update\Patch` manifest
@@ -146,13 +188,14 @@ any subset: list only levels whose packages exist and whose `RequireVersion` the
 
 | library | Godot? | owns | key inputs → outputs | source |
 |---|---|---|---|---|
-| `bf3_core` | no | install mount (layout, Patch/Xpack layering, cas.cat, superbundles, delta bundles, chunks), EBX through its own descriptors, resources (MeshSet, DxTexture, Havok, terrain, XAS), level traversal, gameplay table readers, Ant GenericData reader + codecs, manifest digests | the install → POD data | handoff §3 (port the Rust crates `asset_transport/bf3`, `superbundle_bf3`, `ebx_bf3`, `resource_bf3`, `level_bf3`, `bf3_scene`) |
+| `bf3_core` | no | install mount (layout, Patch/Xpack layering, cas.cat, superbundles, delta bundles, chunks), EBX through its own descriptors, resources (MeshSet, DxTexture, Havok, terrain, XAS), level traversal, gameplay table readers, Ant GenericData reader + codecs, blueprint/logic-graph instantiation data, `bf3_audio` (XAS decoder, sound-graph compiler into control program + plugin plan), UI readers (text DB, minimap/SDF textures, `hud3dicons` UVs, SWF symbol table, `DefineFont3`), manifest digests, digest-keyed cache with atomic writes | the install → POD data | handoff §3 (port the Rust crates `asset_transport/bf3`, `superbundle_bf3`, `ebx_bf3`, `resource_bf3`, `level_bf3`, `bf3_scene`); gap audio §11.1; gap UI §8; gap load §6.4 |
 | `bf3_anim` | no | skeletons from EBX + Ant rig defaults, clip sampling, blending, two-bone IK, temporal LOD, reduced server pose for hit capsules | clips, signals → poses, capsules | [topics/03](topics/03-animation.md) §6.2; [probes/ant](probes/ant-animation-probe.md) §9 |
-| `bf3_sim` | no | own Jolt (static world, soldiers, vehicles, projectiles as queries, destructible pieces), soldier motor, weapons, damage, vehicles, destruction, modes, spawns, scoring, Detour nav, bots, lag-compensation history | commands, tables → world state, events | [topics/02](topics/02-soldier-kits-modes.md), [01](topics/01-weapons.md), [04](topics/04-vehicles.md), [06](topics/06-bots.md) |
+| `bf3_sim` | no | own Jolt (static world, soldiers, vehicles, projectiles as queries, destructible pieces), soldier motor, weapons, damage, vehicles, destruction, native mode/gameplay entities, level-logic interpreter (48 whitelisted primitive types, FIFO event drain per tick), spawns, scoring, Detour nav, bots, lag-compensation history | commands, tables, logic graphs → world state, events, logic ghost | [topics/02](topics/02-soldier-kits-modes.md), [01](topics/01-weapons.md), [04](topics/04-vehicles.md), [06](topics/06-bots.md), [gap logic](topics/gap-r1-level-logic-schematics.md) §7 |
 | `bf3_net` | no | upstream ENet 1.3.18 wrapper, loopback transport, netsim (BF3's own knobs), bit packing, ghosts, protocol, handshake digests, replays | state → datagrams | [topics/05](topics/05-networking.md) §9 |
-| `bf3_host` | no | `ServerHost` (thread, fixed tick, sessions, bot fill, job pool, admin), `ClientSession` (prediction, reconciliation, interpolation buffers, double-buffered presentation state) | — | [topics/05](topics/05-networking.md) §4.3, §9 |
-| `bf3_godot` | **yes** (only this) | registration, RS bridge, cache, material families, viewmodel, audio, HUD, input → `Command`, `GameSession` node, `DedicatedMainLoop`, test runner, debug overlays | POD → RIDs, nodes | [topics/07](topics/07-godot-engine.md) §6–§7 |
-| tools | no | `bf3dump` CLI, cache inspector, `bf3nav` bake/coverage CLI, `loadbot` headless clients, master/introducer service | — | [topics/05](topics/05-networking.md) §9; [06](topics/06-bots.md) §5 B0 |
+| `bf3_host` | no | `ServerHost` (thread, fixed tick, sessions, bot fill, job pool, admin, MapList rotation, startup pre-bake, loading-state tracking with slot hold), `ClientSession` (prediction, reconciliation, interpolation buffers, double-buffered presentation state, intermission pre-conversion) | — | [topics/05](topics/05-networking.md) §4.3, §9; [gap load](topics/gap-r1-load-cache-memory-rotation.md) §6 |
+| `bf3_fx` (new r2) | no | effect compiler (`EffectBlueprint`/`EmitterDocument` → flat EffectDef/EmitterDef, digest-cached), CPU particle simulator (32 processors, 10 evaluators, spawn/age semantics), client-only instancer (instance pools, quality tiers, seeds from event ids), impact selection from the material grid, effect-light merge; never linked into the dedicated server's work path | effect partitions, material grid, trigger events → particle vertex streams, light list, decal requests | [gap VFX](topics/gap-r2-vfx-effects-system.md) §2, §7, §8 |
+| `bf3_godot` | **yes** (only this) | registration, RS bridge, cache, material families, viewmodel, audio mixer (`AudioStreamPlayback` subclass), FX renderer (emitter atlas, MultiMesh batches per shader class × blend, CPU back-to-front sort, ≤ 64-light omni pool, pooled `Decal`s), Control HUD + minimap + spawn/score screens, `Translation` subclass, font conversion, loading screen, input → `Command`, `GameSession` node, `DedicatedMainLoop`, test runner, debug overlays | POD → RIDs, nodes | [topics/07](topics/07-godot-engine.md) §6–§7; gap audio §11.2; gap UI §6; gap VFX §6, §8.2 |
+| tools | no | `bf3dump` CLI (incl. `bf3dump prepare`), cache inspector, `bf3nav` bake/coverage CLI, `loadbot` headless clients, master/introducer service; research only (never shipped): the VU harness Lua and its extractor in `probes/tools/vu-harness` (planned) | — | [topics/05](topics/05-networking.md) §9; [06](topics/06-bots.md) §5 B0; gap load §6.3; gap harness §3.3 |
 
 Third-party code, all permissive [verified licences in 05 §3.3, 06 §2.7, 08 §3.8]: godot-cpp (MIT), Jolt 5.x (MIT),
 ENet 1.3.18 (MIT), Recast/Detour (zlib), doctest, zlib-ng or libdeflate. Optional with MIT notices:
@@ -164,10 +207,13 @@ NicknineTheEagle/Frostbite-Scripts. **Never copied**: Rime (no licence), fun-bot
 | thread | runs | rules |
 |---|---|---|
 | Godot main | input → `Command`; client prediction and reconciliation (same `bf3_sim` code in the client's Prediction world); interpolation; pushes `instance_set_transform`, skeleton bones, audio parameters, HUD | Godot API calls only here (plus the documented exceptions); 3D physics interpolation is node-only, so RS-instance entities are interpolated by our code [verified: `instance_set_interpolated` absent] |
-| server (`std::thread`, not a WorkerThreadPool task) | 60 Hz: ENet service → commands → bots → sim (own Jolt `Update`) → destruction → rules → lag-comp history → ghost scoping/encoding → send | calls no Godot API [inferred design, 05 §6.4]; joined in `NOTIFICATION_PREDELETE` and in extension deinit before Godot singletons go away |
+| server (`std::thread`, not a WorkerThreadPool task) | 60 Hz: ENet service → commands → bots → sim (own Jolt `Update`) → destruction → rules/entities emit events → **logic drain** (FIFO to a fixed point; `Enabled`/spawn effects apply next tick) → lag-comp history → ghost scoping/encoding → send | calls no Godot API [inferred design, 05 §6.4]; joined in `NOTIFICATION_PREDELETE` and in extension deinit before Godot singletons go away |
 | server job pool | bot perception and brains, per-client snapshot encoding, Jolt jobs | between steps only; Jolt refuses queries during a step [verified, probe §6.2] |
 | Godot WorkerThreadPool | rendering, texture streaming, pose evaluation (`add_group_task`), resource creation | `mesh_create_from_surfaces` and `texture_*_create` run on the calling thread; `mesh_add_surface`, `shader_create`, `material_create` from a worker are queued to the main thread [verified source, 07 verification K11/extra-2] |
-| loader threads | `bf3_core` decode, conversion into `user://bf3cache` | never touch the install for writing |
+| loader threads | `bf3_core` decode, conversion into `user://bf3cache` | never touch the install for writing; stream per mesh and per texture (peak ≤ 0.2 GiB, not the prototype's 1.0–1.6 GiB whole-scene build); low priority, ≤ 4 threads during intermission pre-conversion [verified peaks; inferred policy, gap load §6.6] |
+| client network thread (`bf3_net`) | ENet service, keepalive, `Loading` progress sends | never the Godot main thread, so a busy load cannot trip ENet's 5–30 s peer timeout [verified ENet constants; inferred design, gap load §6.2] |
+| Godot WorkerThreadPool, FX jobs (new r2) | `bf3_fx` particle simulation for live emitters (≈ 25 ns/particle/frame single-threaded, 16k particles ≈ 0.4 ms on one core, ≈ 0.1 ms on 4 jobs), then sort and fill MultiMesh buffers | simulate on workers, upload buffers and set lights on the main thread; client only, the dedicated server runs no FX [verified C++ microbenchmark; inferred design, gap VFX §6.2, §7] |
+| Godot audio thread | our mixer's `AudioStreamPlayback::_mix` (512-frame blocks, fixed in dev7): XAS decode, plugin chains, HDR window, convolution | the game thread posts parameters and events into a lock-free ring once per tick [verified block size; inferred design, gap audio §11.2] |
 
 Why not Godot's physics for the server [verified, 05 §6.1, 07 §4.2, with corrections]: `PhysicsServer3D` exposes no
 per-space step or save/restore; the engine steps all active spaces from `Main::iteration` after `_physics_process`.
@@ -184,25 +230,33 @@ through `flush_pending_objects()`. The decisive reason is the step, not the quer
 2. **Resolve** level + mode: sub-worlds included by `SubWorldInclusionSetting` (handoff 04 §1); weapons are read from
    the level's own main bundle, since every level carries a copy (`weapons/m16a4/m16a4` in 47 superbundles) [verified].
    The soldier, kits and teams come from the mode bundles [verified].
-3. **Derive** (cached by digest): collision → Jolt shape streams (`Shape::SaveWithChildren`, regenerate when Jolt
-   changes); render meshes → Godot surface blobs; textures → resident BC or GSTF `.stex`; Detour tiles; resolved
-   WeaponDef/VehicleDef/ModeConstants blobs; decoded clip tables (optional: DCT is cheap enough to sample directly).
-4. **Simulate** (`bf3_sim` on the server thread): commands in, state out; bots write commands one tick ahead.
+3. **Derive** (cached by digest): collision → Jolt shape streams in 64 m tiles (`Shape::SaveWithChildren`, regenerate
+   when Jolt changes); render meshes → Godot surface blobs; textures → resident BC decoded from the install at every
+   load (2.1–2.5 s per level on 16 threads, not cached) or optionally GSTF `.stex`; Detour tiles; resolved
+   WeaponDef/VehicleDef/ModeConstants blobs; compiled sound-graph programs; compiled EffectDefs (r2); decoded clip tables (optional: DCT is cheap
+   enough to sample directly). Never cached: decoded audio (XAS stays compressed) and decoded Ant clips. Measured cold
+   conversion: client ≈ 10–11 s, host/server ≈ 17–27 s per level with Jolt cook and nav [verified per stage, gap load
+   §2]. Whole cache for 29 levels ≈ 2–4 GiB (≈ 10–12 GiB with GSTF) [verified parts; inferred totals, gap load §3].
+4. **Simulate** (`bf3_sim` on the server thread): commands in, state out; bots write commands one tick ahead; the
+   level's logic graph drains once per tick.
 5. **Replicate** (`bf3_net`): ghosts per client by priority within 1,200 B; reliable events on ch1; destruction rows
-   in the world ghost.
+   and the logic ghost (SyncedBool bitset, SyncedTransforms, sequence start ticks) in the world ghost.
 6. **Present** (`bf3_godot`): predicted own soldier/vehicle, interpolated others (render time = server time − ~75–100
-   ms), animation evaluated on workers, pushed to RS on the main thread.
+   ms), animation evaluated on workers, pushed to RS on the main thread. Effects are started on the client only, from
+   events and replicated state (shots, impacts, detonations, vehicle state, destruction transitions, client-realm logic),
+   never replicated themselves (§3.14).
 
 ### 2.5 Where Godot is used and where it is bypassed
 
 | need | Godot 4.8 used | bypassed by | why |
 |---|---|---|---|
 | world drawing | `RenderingServer.instance_create2`, `mesh_create_from_surfaces`, material-family `.gdshader`s, `OccluderInstance3D`/`occluder_set_mesh`, `CompositorEffect` | — | ~1 µs per instance; Forward+ batches identical surfaces automatically (10k instances of one mesh = 6 draw calls) [verified, probe §6.1] |
-| textures | `ImageTexture`/`texture_2d_create` (resident), `StreamedTexture2D.load` of GSTF files (streaming), `TextureStreaming` overrides | — | only file-loaded GSTF streams; `texture_configure_streaming` is not bound [verified] |
+| textures | `ImageTexture`/`texture_2d_create` (resident, default), `StreamedTexture2D.load` of GSTF files (optional streaming), `TextureStreaming` overrides | — | only file-loaded GSTF streams; `texture_configure_streaming` is not bound [verified]; GSTF copies 7.5 GiB of BC for 29 levels and buys streaming, not load speed [verified census, gap load §2.3] |
 | 1p weapon | `BaseMaterial3D.fov_override`, `z_clip_scale`; `PROJECTION_MATRIX`/`Z_CLIP_SCALE`/`IN_SHADOW_PASS` in our shaders | — | same HDR frame (handoff decision 2) [verified] |
 | skinned soldiers | `Skeleton3D` + one shared `Skin`, or RS `skeleton_*` | `AnimationTree`/`AnimationPlayer` for the crowd | 64 × 213 bones: AnimationTree ~30–35 ms/frame vs own C++ 0.41–0.46 ms [verified, 03 §4.7 + C13] |
-| audio | `AudioStreamPlayer3D` (`pitch_scale`, doppler), `AudioStreamSynchronized`/`Interactive` | — | EA-XAS decoded by `bf3_core` (handoff 04 §4.4) |
-| input, UI, HUD, cameras | Godot input, `Camera3D`, Control/2D | — | — |
+| audio | one `AudioStreamPlayer` whose stream is our `AudioStream`/`AudioStreamPlayback` subclass (`_mix` virtual), Godot buses only for device output and volume sliders; `AudioStreamPlayer3D` for UI/menu sounds at most | `AudioStreamPlayer3D` per voice, Godot `AudioEffect`s | per playback Godot gives one high-shelf attenuation filter and ≤ 6 buses, no convolution reverb, no global loudness pass, no EA-XAS format; each 3D player runs `intersect_point` per physics tick [verified dev7 source + API, gap audio §10] |
+| input, UI, HUD, cameras | Godot input, `Camera3D`, `Control` widgets, `CanvasItem` drawing + a `canvas_item` SDF shader for the minimap, `AtlasTexture` regions, `Image.create_from_data` (L8/DXT5), `Translation._get_message` subclass, `FontFile` (in-memory TTF or MSDF glyphs), `Camera3D.unproject_position` for world icons | BF3's Scaleform SWFs and UI graphs (AS2 logic needs an AVM1 interpreter) | all APIs present in dev7 [verified API, gap UI §6] |
+| particle effects (r2) | `RenderingServer` MultiMesh (`multimesh_set_buffer` per frame) with custom spatial shaders (atlas flipbook, HDR colour, soft fade via depth, custom `light()` wrap), `OmniLight3D`/RS omni lights from a ≤ 64 pool without shadows, `Decal` pool for impacts | `GPUParticles3D` per emitter, `ParticleProcessMaterial` | `ParticleProcessMaterial` cannot express BF3's rate vs `MaxCount` cap, evaluator trees or emitter-time inputs; each particles instance costs its own compute dispatch: 1,000 one-shot systems × 16 particles = 9.9 ms/frame (RS CPU 2.0 ms) vs 16k quads in one MultiMesh 0.57 ms [verified benchmark + source, gap VFX §6] |
 | gameplay physics | — | own Jolt in `bf3_sim` | no per-space step, no save/restore, no Jolt vehicle/character classes exposed [verified] |
 | navigation | (optional debug drawing only) | Recast/Detour in `bf3_sim` | NavigationServer3D: 4–9 ms per path query on Metro vs ~0.1–0.17 ms for Detour; no area types; 6 s map rebuild per region change with default edge connections [verified, 06 §2.4 + C7/C8] |
 | multiplayer | `UPNP`, optionally `Crypto` for identity keys | SceneMultiplayer, `MultiplayerSynchronizer`, Godot's ENet | full Variant state per synchronizer, no acked baselines or priority, main thread; Godot's ENet socket ignores RCVBUF (39–94.5 % loss on bursts) [verified] |
@@ -218,8 +272,11 @@ through `flush_pending_objects()`. The decisive reason is the step, not the quer
   subclass registered by the extension). The editor/console binary accepts `--main-loop <class>` when the project has
   a main scene. Export templates built with the default `disable_path_overrides=true` ignore `--main-loop`, so they use
   `application/run/main_loop_type` [verified, 07 K16]. It loads only collision, gameplay EBX, destruction tables and
-  nav: no textures, meshes, Enlighten, audio or scatter. Target server load ≤ 2 s from cache [inferred]. The operator
-  needs their own BF3 install, read as-is [inferred from the principle].
+  nav: no textures, meshes, Enlighten, audio, effects (r2: no EffectBlueprint has a network id) or scatter. Server load ≤ 2 s holds only **warm** [inferred]; a cold level
+  needs ≈ 10 s (Caspian: collision 2.1 + tiled Jolt 1.6 + nav 5.2) to ≈ 16 s (Kharg) on 16 threads, so the server
+  pre-bakes every `MapList` level at startup (current first) and never bakes in the round gap [verified stages; inferred
+  policy, gap load §6.5]. Steady RAM ≈ 250–400 MiB per 64-slot instance (headless baseline 90 MiB measured) [inferred
+  from measured parts, gap load §4.2]. The operator needs their own BF3 install, read as-is [inferred from the principle].
 * **Standalone escape hatch**: `bf3_core + bf3_sim + bf3_net + bf3_host` link into a console executable with no Godot
   [inferred]. Whether that still counts as "in Godot" is the user's call.
 * Godot settings: keep `physics/3d/run_on_separate_thread = false`; render thread model "Safe" (Separate is
@@ -231,17 +288,34 @@ through `flush_pending_objects()`. The decisive reason is the step, not the quer
 C→S ch1  Hello      {proto_ver, game_build, digest_scheme, client_pubkey, name}
 S→C ch1  Challenge  {nonce, server_pubkey}
 C→S ch1  Auth       {sign(nonce)}                                   identity only, per-install keypair in user://
-S→C ch1  MatchInfo  {level, mode, sim_hz, snap_div, required_xpacks, source_digest, sim_digest, component digests, round_id, slot}
+S→C ch1  MatchInfo  {level, mode, sim_hz, snap_div, required_xpacks, source_digest, sim_digest, component digests, round_id, slot,
+                     phase: Loading|PreRound|InRound|RoundOver, next?: {level, mode, source_digest}}
+C→S ch1  Loading    {round_id, stage: mount|db|textures|meshes|shapes|nav|upload, progress_permille, eta_s,
+                     cache: warm|partial|cold}                       every 0.5–1 s while not Ready
 C→S ch1  Ready      {source_digest, sim_digest, component digests}  or  Mismatch{components}
-S→C ch2  FullSync   {destruction rows, scores, flags}, then ghosts on ch0
+S→C ch2  FullSync   {destruction rows, logic ghost (SyncedBool bitset, SyncedTransforms, sequence start ticks), scores, flags}, then ghosts on ch0
+--- level change (gap load §6.1–§6.2) ---
+S→C ch1  RoundOver  {winner, scores, next{level, mode, source_digest, sim_digest, required_xpacks}, intermission_s}
+C→S ch1  Prepare    {next_source_digest, state: ready|converting|missing_xpack|mismatch, progress_permille}
+S→C ch1  LevelChange{level, mode, sim_digest, round_id, load_deadline_s}
+S→C ch1  Kick       {reason: LoadTimeout|LoadStalled|Mismatch|MissingXpack, detail}
 ```
+
+* **Loading rules** [inferred design, gap load §6.2]: a loading client keeps its slot, team and squad (bot fill counts
+  it as occupied); kick after 30 s without progress; `load_deadline_s` 120 s (IW4L's value), 300 s for a client that
+  reported `cache: cold`; mid-round joins use the same state; loading humans do not block the PreRound countdown.
+  `RoundOver.next` lets clients pre-convert during the intermission (default 45 s) on ≤ 4 low-priority threads.
 
 * `source_digest` = hash over the sorted `(bundle name, bundle digest)` of every bundle the level+mode mounts, where a
   bundle digest hashes its manifest entries `(ebx name, sha1)`, `(res name, resType, sha1)`, `(chunk id, sha1)`.
   Nothing is re-hashed and nothing is written [verified that the SHA1 fields exist, handoff 01 §5; scheme inferred].
-* Language bundles (`Loc/*`) are excluded so English and German installs play together [inferred, 05 §7.6].
+* Language bundles (`Loc/*`) are excluded so English and German installs play together [inferred, 05 §7.6]. Note:
+  `Loc\en.toc` declares **0 bundles and 4,285 chunks** (a chunk-only superbundle: VO streams plus the text database
+  pair, patched copy in `Update\Patch\Data\Win32\Loc\en.toc`, 5 chunks), so it contributes no bundle manifest at all;
+  the 11 `UITextDatabase` EBX sit in `Win32/Globals` [verified, gap audio §8, gap UI §4].
 * `sim_digest` = hash of the derived tables the server simulation uses: collision soup, destruction slot table,
-  spawns/flags/combat areas, vehicle spawners, soldier/weapon/vehicle/projectile stats, converter version.
+  spawns/flags/combat areas, vehicle spawners, soldier/weapon/vehicle/projectile stats, the instantiated logic graph
+  (types + connections, gap logic §9.1), converter version.
 * **What it is not** [verified, 05 K15]: a consistency check, not anti-cheat. Manifest SHA1s prove the manifests match
   (patch level, XPacks), not the payload bytes, and a client can echo any digest. Delta-patched bundles (XP2–4
   levels, `Loc/*`) need base+delta reconstruction before their SHA1 table exists. Anti-cheat is server authority (§3.5).
@@ -317,7 +391,9 @@ measure short sweeps on our own Jolt (S1 in §6) [inferred, 02 C15].
 
 **Open.** Semantics of `AccelerationGain 0.35`, `DecelerationGain −15`, `SprintGain`; the soldier gravity value;
 `FreeFallVelocity` and the Falling velocity; the prone proxy; regen delay 10 s (data) vs 16 s (community); BF3's
-respawn delay base behind `vars.playerRespawnTime`.
+respawn delay base behind `vars.playerRespawnTime`. All but the prone proxy are harness items (§3.13): H:S3 in
+scenario S-B (feeds M1's motor, so Session 1 runs during M0), H:S1/H:S2/H:S4 in S-A. Footstep audio triggers: Ant step events
+or a velocity-period fallback (walk 0.3 s above 1.0 m/s, run 0.2 s above 5.5 m/s) [verified data, gap audio §3].
 
 ### 3.2 Weapons, ballistics and damage ([topics/01](topics/01-weapons.md); [probes/ebx](probes/ebx-data-probe.md) §2–§4)
 
@@ -385,6 +461,13 @@ No-spread cheats remain possible because clients must know the RNG to predict tr
 **Replicated.** `ShotEvent {shooter, weapon, shotSeq, t, origin, quantised dir}` to remote clients, who play tracers
 and effects deterministically. Projectile ghosts for grenades, rockets and shells.
 
+**Effects and impacts (r2, §3.14).** `FireEffects1p/3p` (+ `WeaponFiringEffectsModifier` for attachments such as
+suppressors) start on the predicted shot (1p) or the `ShotEvent` (3p); `BulletEntityData.TrailEffect` rides the visual
+bullet. **The material grid has two index spaces** [verified, gap VFX §3]: damage reads rows/columns by
+`PhysicsPropertyIndex` (as above), while impact effects, impact sounds and decals read them by
+`PhysicsMaterialIndex` through the same `MaterialIndexMap[idx & 0xFF]`; with the property index the 5.56 row has zero
+effect cells. The surface material comes from the same per-triangle Havok material the bullet ray already returns.
+
 **Test oracles.** §7.1 (roster numbers, Symthic 50/62 match, grid multipliers, ROF, drop, shots to kill).
 
 **Open.** Recoil recovery (`RecoilAmplitudeDecreaseFactor` as rate vs exponential; `ShootingRecoilDecreaseScale`
@@ -392,8 +475,10 @@ and effects deterministically. Projectile ghosts for grenades, rockets and shell
 application; `DamageProtectionThreshold` and `DamagePenetrationMultiplier`; whether bullets pass through soldiers;
 falloff distance basis; `ClientFireRateMultiplier 0.67`; `ReloadThreshold` semantics (0.85 rifles, 0.75 M9: plausibly
 the fraction of the clip after which the magazine counts as refilled [inferred, Ant probe §5]); RPG direct hit
-`MissileEntityData.Damage 225` vs community "100"; weapon sound-graph environment selection; whether
-`RenderFov 55` is vertical.
+`MissileEntityData.Damage 225` vs community "100"; whether `RenderFov 55` is vertical (not observable through VU;
+oracle = user screenshots). Harness mapping (§3.13): spread disc H:W1, spread growth/decay H:W2, recoil recovery
+H:W3, first-shot re-arm H:W4, falloff H:W5, threshold/penetration H:W6, RPG H:W7, `ClientFireRateMultiplier` H:W8,
+`ReloadThreshold` H:W9, zoom FOV H:W10. **Solved in r1:** weapon sound environment selection is a listener-side global `AreaType` (§3.10).
 
 ### 3.3 Animation ([topics/03](topics/03-animation.md); [probes/ant-animation-probe](probes/ant-animation-probe.md))
 
@@ -523,9 +608,11 @@ reactive armour) until measured, not as a 175-point pool [report claim + inferre
 over [report claim]. Cameras: `StaticCameraData` free-look 120/120/85/40–45 with `LoosePartPhysics` shake springs,
 `ChaseCameraData` spring camera, alternate views (FOV 15 zoom; FLIR is a separate FOV-55 view [verified, 04 C14]).
 Rendering: one RS instance per rigid part group (wheels, turret rings, rotor states, flaps); CPU skinning cost IW4L
-2.4 ms vs 0.13 ms for rigid parts [report claim]; tracks via an RS skeleton + UV scroll (`ScrollFactor`). Audio:
-handoff 04 §4.4's hand-tuned mixer (gear bands, rpm targets) from replicated rpm/throttle/slip; the patch graph is
-never evaluated.
+2.4 ms vs 0.13 ms for rigid parts [report claim]; tracks via an RS skeleton + UV scroll (`ScrollFactor`). Audio
+(**revised r1**): interpret the vehicle's own patch, e.g. `m1a2_abrams` (219 nodes, 30 voices, doppler 1.0) driven by
+10 named game parameters RPM, Throttle, Velocity, Gear, Load, Tilt, Contact, Slip, Boost, Health plus Start/Stop, fed
+from replicated state; the patch also drives `CameraShake` [verified data, gap audio §2]. Handoff 04 §4.4's hand-tuned
+mixer stays only as a fallback (slice A6, §3.10).
 
 **Networking** (04 §5, corrected by C15). The driver predicts in a small `PredictionWorld` (static shapes shared, own
 vehicle dynamic, others kinematic) with `SaveState`/`RestoreState` of body + `VehicleConstraint` + controller and
@@ -547,7 +634,10 @@ vehicle costs nothing after its first send (IW4L) [report claim]; moving ≈ 25�
 **Open.** Units of `ForwardGearSpeeds`, `MaxVelocity`, `VelocityDamageThreshold`, the jet speed axis,
 `PowerFadeOutRange`; BF3's tyre, rotor and wing force laws; the turret controller law; the damage-angle function,
 `DamageProtectionThreshold`, cells without damage data, splash split across zones; `WeaponInputRouterComponentData`;
-AC-130 orbit logic; the 40 mm grid row.
+AC-130 orbit logic; the 40 mm grid row; the in-vehicle logic graphs (57 `VehicleBlueprint`s carry 7,188 connections
+and the jets' `SyncedSequence`s, probably gear and canopy; not analysed) [verified counts, gap logic §5.3]. Harness
+mapping (§3.13): H:V1 wheeled, H:V2 tracked, H:V3 turrets, H:V4 damage, H:V5 heli, H:V6 jet, H:V7 boats, H:V8 AC-130; rpm, gear and
+clutch are not observable through VU (only as acceleration kinks).
 
 ### 3.5 Networking ([topics/05](topics/05-networking.md))
 
@@ -574,6 +664,10 @@ into `in_bandwidth` [verified, probe §6.6, 05 extra-2, 08 K13]. Used from Godot
   events, kill feed, score, chat, level change); ch2 reliable bulk (join-time destruction rows). Never cap reliable
   traffic (IW4L's 64-pending limit failed sessions [verified, 05 K16]). GameNetworkingSockets (BSD-3) is the upgrade
   path if encryption + ICE are ever needed.
+* **Effects carry no network state (r2, §3.14)**: no `EffectBlueprint` needs a network id. The events that already
+  exist drive them: `ShotEvent`, hit events, a detonation event that must carry `{position, normal, surface
+  material}` so clients pick the grid effect and decal, vehicle and destruction state, and the logic ghost. Effect
+  randomness uses `seed = hash(event id)`; late joiners re-derive loops from state [inferred design, gap VFX §7].
 * **Tick**: 60 Hz sim, 30 Hz snapshots, configurable `{sim_hz 30/60, snapshot_divisor}`, fixed per match; integer
   ticks; the server repeats the last command when one is late. Clock: client runs ahead by RTT/2 + buffer, nudged
   ±5 % from a per-snapshot "ticks early" byte (BF3's `TimeNudgeBias` role).
@@ -588,6 +682,15 @@ into `in_bandwidth` [verified, probe §6.6, 05 extra-2, 08 K13]. Used from Godot
   ~1.5 km or spotted.
 * **Quantisation**: position 1/256 m (x,z) and 1/128 m (y); soldier yaw/pitch 14/12 bits; vehicle orientation
   smallest-three 35 bits; moving soldier delta ≈ 10–14 B; moving vehicle ≈ 25–35 B [inferred].
+* **Logic ghost and networked events (new r1, gap logic §9.1)** [inferred design on verified counts]: the world ghost
+  carries the level's `SyncedBool` bitset (sorted by blueprint instance path + entity guid; max 259 bits = 33 B per
+  level×mode row), `SyncedTransform`s (≤ 4 per row) and the start ticks of ClientAndServer `Sequence`s gated by synced
+  state; changes go as `(index u16, value)` rows reliably on ch1, the full set on join on ch2 with the destruction rows.
+  EventConnections whose `TargetType` is NetworkedClient/NetworkedClientAndServer (1,639 unique edges, ≈ 9 % of event
+  edges) become ch1 reliable `{tick, connection index u32}` messages; they are not replayed to late joiners.
+* **Level change and loading**: `Loading`/`Prepare`/`RoundOver.next`/`LevelChange`/`Kick` as in §2.7; ENet serviced
+  on the `bf3_net` thread on clients and server. ENet 1.3.18 drops a silent peer after `TIMEOUT_MINIMUM 5000` to
+  `TIMEOUT_MAXIMUM 30000` ms (`TIMEOUT_LIMIT 32`, ping 500 ms) [verified, enet.h via gap load §5].
 * **Session**: tiny C++ master (heartbeat list, UDP hole-punch introducer, optional relay); UPnP; per-install keypair;
   no EA/Origin accounts or ownership calls; server authority as anti-cheat; demos from server spectator streams
   (`{proto_ver, source_digest, sim_digest, level, mode, sim_hz, root_seed}`). BF3's kill cam is a camera move to the
@@ -602,9 +705,10 @@ every bot is a ghost in each human's snapshot. Server tick estimate 4–6 ms of 
 ms RTT on two PCs; mismatched install rejected with a reason; 64 connections ≤ 36 KB/s/client with server tick < 8 ms;
 vehicles without visible corrections on flat ground at 100 ms RTT; late joiner sees an RPG hole identically.
 
-**Open.** Which BF3 rate pair is effective and in what units; BF3's interpolation delay; real bandwidth and CPU; the
-language-bundle exclusion list; the Linux coexistence of a second Jolt (and Recast) with Godot's; `CharacterVirtual`
-replay across corrections.
+**Open.** Which BF3 rate pair is effective and in what units; BF3's interpolation delay (harness H:N1, knowledge only);
+real bandwidth and CPU; the language-bundle exclusion list; the Linux coexistence of a second Jolt (and Recast) with
+Godot's; `CharacterVirtual` replay across corrections; whether a late-joining BF3 client fires `OnTrue` for
+SyncedBools already true and what "Networked" delivery guarantees (gap logic §12).
 
 ### 3.6 Bots and navigation ([topics/06](topics/06-bots.md))
 
@@ -635,7 +739,10 @@ vertices), Recast winding, edge connections off, AABB grown by `border_size` per
   **exactly the set the character collides with** (Collision + Character Havok bodies, PLAYERCLIP, terrain with
   holes; never foliage or scatter), cached as `user://bf3cache/nav/<collision digest>-<params>.bin`. Measured
   [verified]: Metro bake 3.7 s on 1 thread / 0.5–0.7 s on 16, 2.6 MiB; synthetic 2 km terrain 8.3–9.7 s on 16
-  threads, 3.1 MiB; busiest tile rebake 110–163 ms, swap 0.3–0.6 ms. One navmesh per vehicle hull class with ROAD areas
+  threads, 3.1 MiB; busiest tile rebake 110–163 ms, swap 0.3–0.6 ms. **Real big maps with the BF3 capsule on the
+  level_bf3 soup (16 threads, gap load §2.7)**: Caspian 5.18 s (47.9 s on 1 thread), 6.1 MiB; Kharg 11.84 s, 20.0 MiB;
+  Bandar 11.39 s, 12.5 MiB; Nebandan 1.68 s; queries 0.03–0.92 ms mean, ≤ 4.5 ms max; tile rebake 74–153 ms. Bake per
+  level over the union of its modes' combat areas, keyed by collision digest, so modes share tiles. One navmesh per vehicle hull class with ROAD areas
   stamped from `RoadData`; off-mesh links for drops, jumps and ladders; dirty-tile rebake on destruction. Aircraft: a
   2.5-D max-height clearance grid (8–16 m cells).
 * **Brains** (`bf3_sim/bots`, reads an immutable `ISimView`, writes `Command`s only): team Director (1–2 Hz, objective
@@ -658,9 +765,11 @@ component with the BF3 capsule on the IW4L soup [verified, 06 C11]. B2–B10 cri
 by tickets with each flag changing hands ≥ 2×; bots-only server has kills (unlike fun-bots without humans); ≥ 3 of 4
 jeeps taken within 30 s; 0 terrain crashes in 10 min of bot flight; 64 bots ≤ 2 ms/tick p99.
 
-**Open.** What the solid objects at Metro's split points are (gates, kiosks, Raycast-only shells); ladder entities
-in MP data; `RoadData` junction topology and drivability; real Caspian bake time; per-bot brain/motor cost; Linux
-symbol clash with Godot's Recast.
+**Open.** What the solid objects at Metro's split points are (gates, kiosks, Raycast-only shells): the split also
+appears on the independently built level_bf3 soup (largest component 23 % with the BF3 capsule), so it is not an IW4L
+artefact [verified, gap load §2.7]; ladder entities in MP data; `RoadData` junction topology and drivability; bake
+time and count of vehicle hull classes (only infantry baked); per-bot brain/motor cost; Linux symbol clash with
+Godot's Recast. (Real Caspian bake time: answered above.)
 
 ### 3.7 Game modes, spawns, kits, scoring ([topics/02](topics/02-soldier-kits-modes.md) §2–§3; handoff 04 §1–§2)
 
@@ -696,37 +805,100 @@ captures [inferred] / 1200 s [inferred]; Scavenger runs Domination logic with 5 
 * Scoring: 71 `ScoringTypeData` (kill 100, headshot +10, revive 100/110, CQ capture 250, MCOM destroyed 500, CTF capture
   500, suppression assist 50, spot assist 10…).
 
-**C++ design.** `ModeConstants` resolved per level×mode by a resolver that walks interface → `PropertyConnection` →
-entity field (handoff 04 §2.1 link walker). `GameMode` subclasses (Conquest family incl. Domination/TS/AS/Scavenger;
-Rush/Squad Rush; TDM/SQDM; Gun Master; CTF) built from shared parts: `CapturePointSet` (polygon + height volume per
-tick), `TicketCounter`, `LifeCounter`, `KillCounter`, `SpawnDirector`, `Scoreboard`, `RoundFlow`, `AutoBalance`. No
+**Level logic decides what is on and when (new r1, details §3.11).** The mode rules are native entities in BF3 too,
+but which spawners, vehicles, flags, combat areas, scripted events and destruction a level×mode enables, and when, is
+wired in each level's schematic, across up to four blueprint boundaries, by designer-named ports that survive only as
+hashes [verified, gap logic §1, §4]. Examples: Metro Rush's 8 character spawners start `Enabled=False` and are opened by
+`SyncedBool` wiring as bases fall; Caspian CQL's jets and tanks follow flag ownership; Kharg Rush's LCAC delivers
+vehicles; Bandar's gunship spawns when flag F is captured.
+
+**C++ design (revised r1, D12).** `ModeConstants` resolved per level×mode by a resolver that walks interface →
+`PropertyConnection` → entity field (handoff 04 §2.1 link walker); the interpreter pushes the same PropertyConnections
+at instantiation, so the resolver stays. Native **gameplay entities** with ports addressed by hash: `CapturePoint`
+(polygon + height volume per tick), `TicketCounter`, `LifeCounter`, `KillCounter`, Character/Vehicle/AlternateSpawn,
+`CombatArea`, RoundOver, Damage/ClearArea, Interaction, `SpawnDirector`, `Scoreboard`, `RoundFlow`, `AutoBalance`. The
+**logic interpreter** instantiates blueprints from EBX and runs the level's own wiring (§3.11). `GameMode` subclasses
+(Conquest family incl. Domination/TS/AS/Scavenger; Rush/Squad Rush; TDM/SQDM; Gun Master; CTF) become thin. No
 progression: every `SelectableUnlocks` entry is available and the loadout is stored in `user://loadout.json`.
-Server-side knobs mirror BF3's `vars.*` (tickets %, respawn %, friendly fire, kill cam, 3D spotting).
+Server-side knobs mirror BF3's `vars.*` (tickets %, respawn %, friendly fire, kill cam, 3D spotting). Rotation follows
+BF3's RCON model: `MapList` of `{level, mode, rounds}`, `setNextMapIndex`, `endRound`, `runNextRound`, `restartRound`,
+`roundStartPlayerCount`/`roundRestartPlayerCount`/`roundLockdownCountdown` (bots count toward player counts)
+[verified R25 PDF text; inferred mapping, gap load §6.1].
 
 **Replicated.** Tickets/lives/kills per team, flag owner + progress (i8), MCOM state, active base, CTF carrier, GM
 level per player, round phase/timer; kill feed and score events on ch1.
 
-**Test oracles.** §7.3. **Open.** Bleed scaling and `TicketLossStart`/`controlledAreaValue` semantics; capture timing
-(do lose + get add for a flip); whether an interface field with no value pushes a default (Bazaar Rush arm time, disarm
-override); Gun Master demotion; squad-spawn conditions; `settings_win32` per level (only Metro read); respawn delay base.
+**Test oracles.** §7.3, §7.6. **Open.** Bleed scaling and `TicketLossStart`/`controlledAreaValue` semantics (harness
+item H:M1, scenario M-A); capture timing, do lose + get add for a flip (H:M2, M-B; model under test T = 20 / min(1 +
+0.34 (n−1), 4) → 20.0/14.9/9.9 s for n = 1/2/4 [inferred arithmetic]); whether an interface field with no value pushes
+a default (Bazaar Rush arm time, disarm override; H:M3); Gun Master demotion and squad-spawn conditions (H:M4);
+`settings_win32` per level (only Metro read); respawn delay base (H:S4); Scavenger weapon-pickup and Gun Master
+progression wiring (not traced).
 
-### 3.8 HUD, UI, audio (as far as researched)
+### 3.8 HUD, UI, minimap, localisation ([gap UI](topics/gap-r1-ui-hud-minimap-localisation.md); revised r1, D16)
 
-* HUD data [verified]: weapon `HudData {CrosshairScaleMin 0, CrosshairScaleMax 5, LowAmmoWarning 0.3,
-  ReloadPrompt 0.3}` (crosshair presumably follows current spread [inferred]); vehicle `VehicleHudData.MinimapIcon`
-  (Jeep … StaticAA classes), per-seat `EntryComponentHudData`, camera `HudData` flags (range meter, velocity vector,
-  climb rate, g-force, locking), `WarningSystemComponentData` lock warnings; `SoldierEntityData.LowHealthThreshold 30`.
+Audio moved to §3.10. The r0 text chose "own Godot UI, no EA art" without an inventory; the gap report reverses the
+"no EA art" half **for in-game use** (still never for branding).
+
+**What BF3 ships** [verified unless tagged].
+* **HUD data**: weapon `HudData {CrosshairScaleMin 0, CrosshairScaleMax 5, LowAmmoWarning 0.3, ReloadPrompt 0.3}`
+  (crosshair presumably follows current spread [inferred]); vehicle `VehicleHudData.MinimapIcon` (`UIHudIcon` enum) and
+  `texture`; per-seat `EntryComponentHudData`; camera `HudData` flags (range meter, velocity vector, climb rate,
+  g-force, locking, aim warning); `WarningSystemComponentData` lock warnings; `SoldierEntityData.LowHealthThreshold 30`.
   IW4L's vehicle HUD layout (health, km/h, heat/reload, altitude, rotor %, top-down outline with turret limits) is a
-  good default (handoff 04 §4.5). Minimap: `UILevelDescriptionComponent.MinimapData` (`WorldCenter`, `WorldSize`); the
-  square is not the play area; minimap images were never drawn (handoff 04 §2.5).
-* UI: BF3's Scaleform/Gameface menus are skipped; our own Godot UI with nominative "requires your copy of Battlefield 3"
-  text and no EA art (08 §3.7–§3.8).
-* Audio [verified]: EA-XAS v1 ADPCM waves (handoff 02/04). A weapon `SoundPatchAsset` (M16A3: 107 graph nodes, 12
-  crossfader groups with distance fades 0–20 … 300–301 m, noise layers × 6 environments, reflections, shell casings,
-  handling) is a graph we do not evaluate. Start with distance crossfades + environment noise layers + per-shot
-  one-shots; vehicle audio per handoff 04 §4.4 mixer; footsteps and impacts from the grid's sound relations. In Godot:
-  `AudioStreamPlayer3D` per layer with `pitch_scale`, doppler on `Camera3D`. Environment selection per shot is not
-  determined (01 §4).
+  good default (handoff 04 §4.5).
+* **The data model**: `ui/flow/state/ingamestatemp` lists 58 UI components; each `UI*CompData` (84 types) declares
+  its `DataSources`, the exact signals BF3's HUD consumes, e.g. `UIWeaponCompData` (63: ammo, clip, reload percent,
+  firing mode, dispersion/crosshair scale, heat, hit indicator…), `UISoldierCompData` (16), `UIVehicleCompData` (82),
+  `UICapturepointCompData`, `UITicketCounterCompData`, `UIKillCounterCompData`, `UIMessageCompData` (kill feed,
+  score, out-of-bounds…), `UIMinimapCompData`, `UISpawnPointCompData`, `UISpawnLogicCompData`, `UIKillCardCompData`,
+  `UITeamCompData`, `UISquadCompData`, `UIEndOfRoundCompData` (full list: gap UI §5). Our sim/HUD bridge exposes the
+  same names.
+* **Menus and HUD are Scaleform GFx v8 with AS2 logic**: 434 `SwfMovie` res (220 `CFX` zlib / 45 `GFX` in the 265
+  censused), ≈ 1.1 MB of AS2 bytecode, 0 `DoABC` (no AS3); `crosshairdefault` has 0 shapes and 10 KB of AS2, so BF3
+  draws the crosshair in code. Art lives in external DxTexture atlases (`ui/assets/<swf>/<swf>_iN`) cut by
+  `GFX_DefineSubImage` rectangles (`iconsingame`: 4096×128 DXT5, 162 rectangles, 427 frame labels).
+* **Icons outside SWFs**: `ui/static/hud3dicons` holds 161 `UIHudIcon` types (93 with UV states Friendly/Enemy/
+  Squad/Neutral/Default) on `hud3diconswin32` (ARGB8888 256×1024): players, flags, every vehicle class, kits, gadgets,
+  MCOM, CTF. Weapon icons are standalone DxTextures named by `UIWeaponDescription.IconTexturePath`
+  (`UI/Art/Persistence/Weapons/<w>_small`, DXT5 64×16; the kill-feed use is [inferred, strong]).
+* **Minimap (solved; corrects handoff 04 §2.5 "never drawn")**: all 29 MP levels have an L8 `_satellite` (512–2048²;
+  XP2_Skybar's sits at `levels/xp2_skybar/ui/xp2_skybar_satellite`), detail and vegetation SDFs (L8 1024²) and 499
+  per-mode combat-area masks (`VeniceUICombatAreaAsset` → `UIDistanceFieldAsset` → L8 128² SDF; inside below
+  `CombatAreaAlphaThreshold 0.496`). Read `UIMinimapData` from the level's own `LevelData` (`levels/<L>/<L>`), never
+  from `description_win32` (defaults only). Mapping `u = 0.5 − (x − WorldCenter.x)/WorldSize`,
+  `v = 0.5 − (z − WorldCenter.y)/WorldSize` (both axes mirrored), confirmed 12/12 flags/HQs and 100 % of fun-bots
+  waypoints on 4 level×mode pairs. Metro (0, −162)/1024; Caspian (0, 0)/2048; Bazaar (0, 0)/512; `AirRadarRange 700`.
+* **Strings (solved)**: `localization/us_loc` (`UITextDatabase`, `Win32/Globals`) points to two chunks in `Loc\en.sb`;
+  the patch copy wins. Binary `0x39000` + histogram `0x39001`; 15,515 entries keyed by the SID hash
+  `h = 0xFFFFFFFF; h = h·33 + c` (additive, unlike BF1's xor); 1,247/1,271 EBX-referenced SIDs resolve (the rest are
+  missing or `<MISSING>`). Layout matches flamethrower's independent BF1 `localization.py`. Take SIDs from EBX fields,
+  never by guessing (`ID_P_WNAME_M16A4` → "M16A3").
+* **Fonts**: SWF `DefineFont3` outlines, not TTF/OTF: Purista EA Medium/Semibold (443 glyphs), Venice-Medium/SemiBold
+  (33 HUD glyphs), mapped to `$MENU_*`/`$HUD_*` by `UIFontMappingCollection`.
+* **Flows**: spawn screen `spawnscreenpc` (KitBar, OverviewMap = the minimap, SpawnPointList); death → "Disable
+  GameInput" → KillScreen; kill cam = client prefab `killer_camera` with `Delay 4.0` and
+  `BFServer.IsKillerCameraEnabled`; scoreboard graph binds `UITeamComp`/`UISquadComp`.
+
+**Godot 4.8 realisation** [verified API]. `Image.create_from_data` with `FORMAT_L8`/`DXT1`/`DXT5`/`RGBA8` (no
+transcoding); `AtlasTexture` regions for hud3dicons UVs and SWF sub-images; minimap via `CanvasItem` draw calls and
+one `canvas_item` shader (`alpha = smoothstep(thr − w, thr + w, sdf)`); `Control`/`Theme`/`NinePatchRect` (BF3
+`DefineScalingGrid` analogue); `Camera3D.unproject_position` for world icons and name tags; a GDExtension
+`Translation` subclass overriding `_get_message` resolves `tr("ID_…")` lazily, registered with
+`TranslationServer.add_translation`; fonts via `FontFile.set_data` (in-memory TTF) or hand-built MSDF glyphs.
+
+**C++ design (route A+, D16).** Own C++ `Control` layout fed by a sim-side data model named after BF3's `DataSources`;
+art read at runtime (satellite, SDFs, hud3dicons, `_small` icons, SWF atlases cut by label through a ≈ 400-LOC SWF
+symbol-table reader); text DB reader ≈ 150 LOC; `DefineFont3` → in-memory TTF (or MSDF), ≈ 600–900 LOC, cached only in
+`user://`; procedural crosshair and compass where BF3 draws in AS2; each flow (spawn, death, kill card, scoreboard,
+end of round) a small C++ state machine, not an interpreter of BF3's UI graphs. Own fallback art, system font and raw
+SID when an item is missing. Cost ≈ 6–8 developer-weeks [inferred]. Rejected: a SWF renderer + AVM1 + UI-graph bridge
+(≈ 2–3 + 4–9 months); own-art-only (route C) stays the per-item fallback.
+
+**Test oracles.** §7.8. **Open.** Kill-feed `KillMessage` payload; 169 of 434 SWFs not censused; full frame-label →
+rectangle map for `iconsingame`; exact HUD positions (needs `PlaceObject` matrices from root timelines); whether the
+`DefineFont3` code table is UCS-2 covering Latin-1 (`É` in MÉTRO); behaviour on non-English installs; 24 SIDs without
+text (probably cut content).
 
 ### 3.9 Destruction in multiplayer (brief; handoff `sections\04-gameplay-sim.md` §5–§6)
 
@@ -742,11 +914,317 @@ breakable part, numbered in object × component order (identical on every machin
 * **Network**: sorted `(slot, state)` rows in the world ghost, reliable by ack; late join gets the full set on ch2
   (worst case 13.8 k rows ≈ 28 KB). Clients adopt rows before prediction and derive FX/sound/debris from transitions
   with `seed = hash(slot, state, server_tick)`. Destruction is not rewound for lag compensation [inferred].
+* **Destruction FX (r2)**: destruction prefabs reference their effects as `ReferenceObjectData.Blueprint →
+  EffectBlueprint` (~6,000 references), plus `DebrisClusterData.Effect` (75) and vegetation `StemRip/TreeFall/…` (69);
+  destruction is the largest effect class (375 effects, Σ `MaxCount` p50 68, max 1,550). They start on the client from
+  slot transitions; aftermath loops are re-derived from the rows on late join [verified refs; inferred design,
+  gap VFX §1.4, §7]. Slice VFX6 in M6 replaces r1's "effects as GPUParticles".
 * **Prediction world caveat**: bodies added or removed inside a rollback window break `RestoreState`, so the client
   prediction world updates compound sub-shapes only at snapshot boundaries and holds no debris [verified, 04 C5].
 * **Nav**: dirty-tile Detour rebake on the job pool, swapped at a tick boundary.
 * Collapse rule (`hkdBuildingController`) is not in data; IW4L's flood fill + "rests on" graph is the fallback
   (handoff 04 §5.5).
+* **Destruction wiring runs through the logic interpreter (r1)**: server-side destruction coupling is the largest
+  function class in the level logic (65,381 level-owned + 109,536 shared weighted edges over 230 rows), e.g. Bandar's
+  gas-station chain (`OnDestroyed` → `RandomDelay 0.1–2 s` → neighbour `Destroy`), Talah's pillar, Metro's park event
+  (`Predestruction.Enable`, `DamageArea`); M6 reuses the §3.11 interpreter's Delay/RandomDelay/EventSplitter/Sequence
+  [verified counts; function labels heuristic ±10–20 %, gap logic §6].
+
+### 3.10 Audio ([gap audio](topics/gap-r1-audio-system.md); new r1, D15)
+
+**What BF3 ships** [verified unless tagged].
+* **Census** (MP/XP levels + Globals + UI, 3,319 sound partitions): 1,879 `SoundWaveAsset` (4,720.9 MiB, 123,074 s;
+  1,205 mono, 357 stereo, 315 quad); 833 `SoundPatchAsset` + 1 master; 462 patch configurations; 79 BigWorld
+  settings; 19 mixers; 17 `ImpulseResponseAsset` (`irf1`, 2 ch, 48 kHz); 33 scopes; 3 stream pools; no
+  `AudioSettings` instance ships, so voice caps and cache sizes are code defaults we cannot read.
+* **Patches are dataflow graphs over a per-instance value array**: 32,113 node instances of 46 types in patches
+  (58 types incl. master/mixers). Control-rate nodes (SimpleTransform 7,639, ScaleClamp 5,096, NumberGenerator,
+  MultiCrossfader with distance bands, WaveSwitcher, Condition/Logical/DeMux, ADSR, LFO, Timer, `Physics.Distance`…)
+  feed **compiled audio-rate plugin chains** in `SoundGraphInfo.Voices[].Plugins[]` (FourCC: `SnP1` player, `Rsp0`
+  resampler, `Gai0`, biquads `HI20 PI20 HS20 LI20 BI20 LS20`, `LPB0` HF damping, `Pn21` panner, `Sen0` send…; 26 kinds,
+  11 dominant). Coverage: 17 types → 52.2 % of patches, 30 → 82 %, 37 → 98.1 %, 46 → 100 %; weapons need 32 types.
+  Parameter/event names are djb2-xor hashes; ≈ 150 stay unresolved, and binding by hash makes that harmless.
+* **M16A3** (`weapon_assaultrifle_m16a4_02`): 107 node instances (163 partition instances; both earlier figures are
+  right), 30 voices, 152 plugins, loudness 110 dB; 13 samplers with pitch `U[1.21, 1.262] × LFO[0.96, 1.0] @ 4 Hz`; an
+  `LtRelease` loop stepped per round for auto fire; 8 distance crossfaders (0–20 m cosine … 250–300 m far layer);
+  `IsFirstPerson` swaps gains; Cone output curve 0/19.8/54.6/91.2/120.4/179 m → 0/−17.9/−34.6/−41.1/−47.0/−67.1 dB.
+* **Environment selection (solves 01 §4)**: per level, a client-side ambient schematic's `SoundAreaEntityData`
+  volumes output `Proximity` 0..1 → `MathOp Add` per class → `areatype_mixer` inputs (max-accumulated, weights Urban 1.3,
+  Indoor_Garage 1.5, Urban_Alley 1.4, Desert 1.2, Forest 1.1, idx6 1.6) → arg-max against 0.7 "openfield" →
+  `AreaType` 0..6, read by 214 patches through `MixerReceive` into `WaveSwitcher.Index` (noise, reflections, shell
+  casings). **It is one global value per client, evaluated at the listener, not at the shooter** [verified wiring on
+  Metro and Seine; consequence inferred].
+* **Mixer as shipped**: 10 master busses (game mix 4.0 + LFE, Dialog, Reverb, Music…); `IrReverb` with 2 slots
+  (max 2.0 s), zones from `SoundArea.Proximity → IrReverbEntityData.Volume`; `MasterUnit` presets (HiFi default,
+  Wartapes…); 88 mix groups; 14 sound states with low-pass cutoffs (ManDown 950 Hz, Flashbang 50 Hz for 5 s,
+  ImpairedHearing 90 Hz…); one `HdrSetting` (`WindowSize 45`, `WindowMinTop 80`, top attack 0.05 s, release
+  0.035–0.85 s, plus `CompressFactor`/`DischargeFactor`/`MaxAllowedEnergy` whose formulas are not public). The HDR
+  loudness window is BF3's voice-culling mechanism (GDC 2009 Clerwall [report claim]); 811 of 1,295 patches and
+  configurations, including all handheld weapons, have no scope, so HDR is their only limit.
+* **Footsteps and impacts**: `mpsoldier`'s footstep patch takes `SoundMaterialId` from the ground material's
+  `MaterialPropertySoundData.MaterialSoundId` (16-entry wave table), `Pose`, Ant step events; the material grid's 313
+  `MaterialRelationSoundData` pairs (Caspian) give impact sounds, from the same grid bullets already read, but indexed by
+  `PhysicsMaterialIndex` (impact effects/sounds/decals), not the damage row's `PhysicsPropertyIndex` (r2, gap VFX §3,
+  §8 C47).
+* **Effect sounds (r2)**: 319 `SoundEffectEntityData` inside 302 `EffectBlueprint`s are started by the FX instancer
+  (§3.14) and play through this mixer; explosion camera shake has no entity in effects, and `CameraShakeNodeData` is an
+  audio-graph node, consistent with the `CameraShake` routing below [verified schema + counts; path inferred].
+* **VO**: `Loc\en.sb` is a chunk-only superbundle: 4,285 chunks, 15,806 streams, 10.09 h (48 kHz mono, 16 kHz mono
+  radio, a few multichannel). 393 MP VO waves in level bundles map into it through per-language `Localization[]`;
+  7 `VoiceOverLogicAsset`s (comrose, autotriggers with 14 events, game-mode VO) are value-connection graphs.
+* **Waves and cost**: per level×mode ≈ 178–247 MiB of non-VO, non-streamed XAS resident (Caspian TDM … Metro CQL;
+  the load census counts 220–309 MiB with a different scope, §8 C44), 3.37× as PCM16; XAS decodes at
+  0.117–0.120 ms per channel-second on one 5800X core (0 frame mismatches), so 128 mono voices cost ≈ 1.5 % of a core.
+
+**Godot 4.8 realisation** [verified dev7 source + API]. `AudioStream._instantiate_playback` and
+`AudioStreamPlayback._mix` are GDExtension virtuals; the mix block is hard-coded to 512 frames; default mix rate 44,100
+(set 48,000, BF3's rate), output latency 15 ms; per playback ≤ 6 buses and one high-shelf "attenuation filter"; no
+convolution reverb class; no XAS in `AudioStreamWAV`.
+
+**C++ design (D15).** `bf3_audio` in `bf3_core` (Godot-free, headless-testable) compiles each patch once into a
+control program (topologically ordered nodes over a float register file of `ValueCount` entries + event pulses) and an
+audio plan (one plugin chain per voice with its bus connections), cached in `user://` by partition digest. One C++
+mixer in an `AudioStreamPlayback` subclass on the audio thread: per voice `SnP1 → Rsp0 → biquads → Gai0 → LPB0 → Pn21
+→ Sen0`; HDR window (MinTop, Size, attack, release, headroom first); scopes (Closest_N, Max_N, DuplicateSpawn); 128-voice
+hard cap, ≈ 64 audible, pre-cull at the previous window bottom − 3 dB, loops pending, one-shots dropped; master busses
+collapsed to 4.0 or stereo + reverb send; 2-slot partitioned FFT convolution; MasterUnit preset; sound-state low-pass.
+The game thread posts parameters/events into a lock-free ring once per tick; 1p fire triggers on the client's predicted
+shot. `CameraShake`/`PadRumble` nodes feed the camera. Server: dummy audio, no audio work. Estimated cost 7.5–9 % of a
+core for 128 voices, latency ≈ 26–43 ms [inferred, not measured]. Phasing: weapons (32 types) in M2a, HDR in M2b,
+areas/AreaType/IR + footsteps/impacts in M3, vehicles in M5, VO + sound states in M7 (slices A1–A7, §6).
+
+**Test oracles.** §7.7. **Open.** HDR extra-field formulas and the top-release curve; `irf1` layout beyond its header;
+`AudioCurve` X units (metres assumed); Sampler segment-stepping semantics; ambient-type mixer names and whether
+Desert/Forest are fed on any MP level; what drives the area `FloatEntityData`; real BF3 voice counts at 64 players;
+measured mixer cost (slice A3).
+
+### 3.11 Level logic (schematics) ([gap logic](topics/gap-r1-level-logic-schematics.md); new r1, D12 revised)
+
+**What BF3 ships** [verified unless tagged]. Census over the 230 level×mode rows (2,710 reachable partitions):
+* Connections live only in sub-world roots and prefab blueprints; `*_schematic` layers hold the **nodes**, their
+  parent sub-world the **wires**. Level-owned data holds 2,099 of 5,066 primitive nodes and 44,234 of 58,593
+  connections; r0's D12 rested on the shared `gameplay/*` prefabs only.
+* Per row: primitive instances median 649 (max 2,082), server-realm median 170 (max 1,036), `SyncedBool` median 17
+  (max 259); level-owned server logic without destruction/constants/links median 56, mean 110, max 560
+  (xp3_valley RushLarge0); 73 rows ≥ 100 such edges, 24 rows ≥ 300.
+* **The vocabulary is small and closed**: 55 primitive types reachable, 48 in a server-capable realm; 20 types cover
+  94.7 % of server-capable unique instances (SyncedBool, Delay, And, Bool, TeamFilter, EventGate, Not, PlayerFilter,
+  Message, Sequence, BoolToEvent, RandomDelay, CompareInt, EventSplitter, Compare, Int, ConsoleCommandTrigger, Or,
+  PropertyGate, Float), 36 types 99 %. No `SyncedInt`/`SyncedFloat` in MP level logic; `SyncedTransform` 8 unique;
+  `SyncedSequence` 66, 62 of them inside vehicle blueprints. 42 reachable gameplay entity types.
+* `EventConnection.TargetType`: Client 5,565 · Server 5,522 · ClientAndServer 5,183 · NetworkedClient 1,175 ·
+  NetworkedClientAndServer 464 unique edges. "Networked" = fired on the server and delivered to clients [inferred].
+  Pure logic classes have no realm prefix in VU, synced and gameplay entities exist as Server/Client pairs, so
+  `SyncedBool` is the designers' tool for state server, clients and late joiners must agree on [inferred].
+* Port hashes: entity ports resolve 87–98 %, but prefab/interface ports only 7–51 %, and `DataField` stores no name,
+  so designer-named ports are not recoverable from data. An interpreter binds by hash and does not care.
+* Traced rows (Metro Rush, Caspian CQL, Kharg Rush, Bandar CQS, Nebandan CTF/AS, Talah Scavenger, Palace DOM) all
+  switch character/vehicle/alternate spawners, capture-point `Enabled`/`AreaValue`, combat-area volumes,
+  predestruction, damage areas, effects, VO/UI from level schematics.
+
+**C++ design (D12 revised; option A of gap logic §7).** Instantiate blueprints from EBX (reference objects, prefab
+interface forwarding by hash, sub-world inclusion by `GameMode` criterion); run the 48 server-capable primitive types;
+gameplay entities stay native C++ classes exposing ports by hash. Determinism: server only, fixed tick, FIFO event
+queue drained to a fixed point once per tick (cap ≈ 10 k events/tick), stable order = connection array order, `Delay`
+in ticks (`ceil(delay × hz)`), `RandomDelay`/`RandomEvent` from `hash(root_seed, entity guid, fire count)`,
+properties propagate on change; `Enabled`/spawn effects apply next tick (16.7 ms). Cost ≤ 1,036 primitives and ≤ 3,898
+edges per row, well under 0.1 ms/tick [inferred]. Replication: the logic ghost and networked events (§3.5). Late join:
+apply the bitset, fire `OnTrue` locally for presentation only (policy to confirm), resume sequences at
+`now − start_tick`. Client-realm presentation graphs (ambient sound areas, cameras, FX sequences) later through the
+same interpreter in the client realm; for effects that realm only calls `start/stop` on level-placed
+`EffectReferenceObjectData` (5,714 in levels; Metro's park event fires ~20 `.Start`), while the effects themselves run in
+the separate `bf3_fx` instancer, since no `EffectBlueprint` has internal event wiring (`InterfaceHasConnections False`
+on all 1,101) (r2, §3.14). Unknown types are logged and treated as no-ops. Size ≈ 5–8 k LOC vs ≈ 15–45 k LOC
+plus per-level reverse engineering for hand-written rules (option B) [inferred].
+
+**Test oracles.** §7.6 and spike S4 (§6). **Open.** Event re-entrancy and ordering, `removeDuplicateEvents`, same-tick
+property propagation, `Sequence` track-boundary timing, `PropertyGate`/`PropertyCast` edge cases; BF3 late-join
+behaviour; "Networked" reliability/ordering; designer-hash meanings (#963802567 "base fell" [inferred]); in-vehicle
+(7,188 connections) and soldier (389) graphs; Scavenger pickups and Gun Master progression wiring. These need VU
+observation (knowledge only) or careful reading of data.
+
+### 3.12 Level load, cache, memory budgets, rotation ([gap load](topics/gap-r1-load-cache-memory-rotation.md); new r1, D17)
+
+**Measured on this PC** (Ryzen 7 5800X 16 threads, 63.9 GiB, RX 9070 XT, NVMe; warm or possibly-warm OS cache)
+[verified unless tagged]:
+* Mount + database + traverse for one level×mode: 0.2–0.45 s (5 levels).
+* Per level×mode content (unique by CAS SHA1): 2D textures 1,571–1,796 MiB, of which only 306–584 MiB is drawn by the
+  static world; weapons 512 MiB, characters ≈ 389 MiB, vehicles up to 294 MiB are in every bundle set but should load
+  on first use. Caspian CQL: 1,371 unique 2D textures = 1,658 MiB, 415 MiB drawn (corrects R10's "4,545 images").
+* Texture decode for a whole level: 2.0–2.5 s on 16 threads (≈ 0.23 GB/s per thread; stops scaling past ~4 threads
+  [inferred]); + GSTF write 2.6–3.1 s; converter peak RSS 162–198 MB with per-texture streaming.
+* Scene build (level_bf3 prototype, mostly single-threaded): 4.0 s Metro, 7.1–7.9 s big maps; peak RSS 1.05–1.58 GiB
+  because it builds the whole scene in memory (the C++ port must stream).
+* Jolt static cook (Godot dev7's Jolt as proxy, Caspian 2.54 M tris): one `MeshShape` 2.9 s, ≈ 41 MiB resident, ≈ +560
+  MiB transient; **928 tiled 64 m shapes 1.6 s, ≈ 31 MiB, ≈ +31 MiB transient** (single method: process private
+  bytes).
+* Detour bake: see §3.6 (Caspian 5.2 s, Kharg 11.8 s on 16 threads, per hull class).
+* 29-level union by SHA1: GSTF 7.50 GiB (+ 0.40 GiB globals); mesh blobs 1.42 GiB; audio XAS 2.23 GiB; Ant 0.11 GiB.
+
+**Design (D17)** [inferred on measured parts]:
+* Convert per level on demand: cold client ≈ 10–11 s, host/server ≈ 17–27 s; optional "Prepare levels" (menu + CLI
+  `bf3dump prepare`, ≈ 3.5–4 min for 29 levels client-side, + 3–6 min nav server-side), deduped by key, each key
+  committed atomically.
+* Cache layout `user://bf3cache/v<fmt>/<kind>/<k[0:2]>/<key>.<ext>`, key = input CAS SHA1 + converter version + Godot
+  commit (+ Jolt version, + Recast params); per-level manifests; append-only journal index; resident route unlimited
+  (≈ 2–4 GiB total), GSTF route 12 GiB default; LRU eviction at round end only, never of the current, next, MapList
+  (servers) or global keys; free disk < 2 GiB → stop caching GSTF. Never cache decoded audio or Ant clips.
+* Budgets at Caspian CQL, 64 players, resident route, 1440p: **client VRAM ≈ 1.5–2.5 GiB, RAM ≈ 1.0–1.5 GiB**;
+  **dedicated server ≈ 250–400 MiB**. BF3 itself needed 2 GB RAM / 512 MB VRAM minimum by streaming [report claim].
+* Server pre-bake and rotation (§2.6, §2.7, §3.7); load threading per stage (gap load §6.6): instancing on the main
+  thread batched ≤ 2 ms per frame (~20 k placements ≈ 20–30 ms total).
+* Load-time targets (replace 07 §6.3): client cold ≤ 15 s (16 threads), cold inside intermission ≤ 40 s (4
+  low-priority threads), warm ≤ 5 s; host/server cold ≤ 25 s, server warm ≤ 2 s.
+
+**Open.** Cold-disk (HDD/SATA) times; the warm end-to-end load inside Godot (GPU upload, `mesh_create_from_surfaces`
+for ~1.2 k meshes, 20 k instances); render-target/shadow and compute-skinning VRAM; Jolt shape-stream size and
+Jolt-side memory; vehicle hull nav bakes; scene/gameplay blob sizes; 1.96–2.51 GiB of unresolved audio chunk refs
+per level; BF3's own intermission length; dev7 `low_priority_thread_ratio` default.
+
+### 3.13 Measurement pass: the VU harness ([gap harness](topics/gap-r1-measurement-harness.md); new r1, D18)
+
+Harness item ids are written **H:<id>** in this document (H:W1–W10 weapons, H:S1–S4 soldier, H:M1–M4 modes,
+H:V1–V8 vehicles, H:N1, H:T1) so they do not clash with milestone (M) and spike (S) ids.
+
+**Feasibility** [verified]. VU client and server build 20682 (VeniceEXT 1.15.0) are installed, a server instance with
+`server.key` exists, and a server start + local client join already ran on 2026-06-28. VU did not write into the
+install (0 of 2,101 items written after the EA-app install). VU exposes per-update `GunSway` dispersion/recoil/random
+sample state, `Soldier:Damage` (pre/post health), `BulletEntity:Collision`, `TicketCounterEntity`
+(`ticketCount`, `controlledAreaValue`) and a float `TicketManager:GetTicketCount`, `CapturePointEntity` progress,
+vehicle velocities and per-part transforms, `Vehicle:Damage`, and server-side test bots driven through `EntryInput`.
+Not observable: rpm/gear/clutch, the viewmodel `RenderFov`, Ant internals, BF3's force laws as such. A VU server
+needs internet (Zeus) at least at start.
+
+**Design.** A private VU server mod (Lua, ≈ 700–900 lines; research tooling under `probes/tools/vu-harness`, never
+shipped) on a **separate clean instance** (`Documents\Battlefield 3\ServerMeasure`, only the harness loaded, neutral
+`Startup.txt`, passworded, `-unlisted`): the user's normal instance loads unfun-bots, which rewrites game data in
+memory (client damage arbitration around bot bullets, AA dispersion), so it would contaminate results. Observe-only
+rules: no data edits, hooks pass through, fixtures limited to own test bots (never fun-bots code), no personal data.
+One JSON row per tick or event (`MH1 <json>`), extracted by a `python -I` script into `research/measurements/<run>/`
+with an install manifest before and after. All oracles at 30 Hz (BF3's own rate); a `-high60` repeat (H:T1) probes
+tick coupling for D4 (VU changeset 20056 fixed high-frequency acceleration and damage-expiry differences).
+
+**Scenarios and decision rules** (gap harness §3.5–§3.6): W-A fixed wall (spread disc by a KS test of
+uniform-area vs uniform-radius, growth/decay, recoil recovery fit, first-shot re-arm), W-A60, S-B movement (gains,
+gravity, fall damage), W-B falloff (piecewise fit, residual < 0.1 hp), S-A health/regen/immunity, M-A bleed (states
+0–0 … 3–0 held 150 s on Metro CQS and Bazaar CQL), M-B capture (n = 1–5 attackers), V-A ground drives (profiles P1–P6),
+V-B turrets, then P1 W-C explosives, V-C vehicle damage, A-A helicopter, A-B jet; P2/P3 W-D client, A-C boats/AC-130,
+M-C mode details, N-A replication. Phase 0 checks whether bot bullets damage soldiers under the shipped client
+arbitration (fun-bots implies not); if not, the user is the shooter in damage scenarios.
+
+**Cost and order.** ≈ 0.6–0.8 agent slice + ≈ 4–5 h attended and ≈ 6 h unattended user time over three sessions:
+Session 1 (weapons, soldier, modes) **during M0**, Session 2 (ground vehicles) before M4, Session 3 (air, sea,
+details) before M5. **Without VU** (Zeus down, activation lost) nothing replaces it fully: Symthic archives never
+settled the disc or the recovery law; frame-counted videos can time bleed, capture and vehicle speeds (+0.5 slice each
+for M2a/M4 tuning, L confidence); D7 then ships uniform-area disc + linear recovery marked "unmeasured".
+
+**Legal** (not legal advice): observing the running program is EU 2009/24 Art 5(3) territory; the exposure is
+contractual (EA User Agreement §7(C)); nothing from VU (code, docs text, type yaml, logs) is copied into the product;
+product code cites measured values through `research/measurements/SOURCES.md`. VU's own terms of service were not read.
+
+**Open** (gap harness §9): units of `randomAngle`/`randomRadius`/`seed`; whether `GunSway:Update` fires per tick on the
+server; whether bot bullets damage soldiers; whether a VU server advances with no human connected; whether
+`GetPartTransform` is world- or vehicle-local; sharing one `server.key` across two non-concurrent instances; selecting
+the reactive-armour unlock for a target vehicle without data edits; VU log line limits; how long Zeus and EA
+activation stay available.
+
+### 3.14 Visual effects ([gap VFX](topics/gap-r2-vfx-effects-system.md); new r2, D19)
+
+**What BF3 ships** [verified unless tagged; census over `@all-mp`, 5,420 partitions, second-sourced against an
+independent type census].
+* **Containers**: 1,101 `EffectBlueprint` (1,101 `EffectEntityData`), 3,410 `EmitterDocument`/`EmitterTemplateData`,
+  4,353 `EmitterEntityData`, 29 `EmitterSystemAsset` (one per level). An effect's `Components` hold only emitters
+  (4,353), `SoundEffectEntityData` (319) and `VisualEnvironmentEffectEntityData` (88): **no light, decal or camera-shake
+  entity sits in any effect**, nesting is flat, and all 1,101 have `NeedNetworkId False` and
+  `InterfaceHasConnections False`. Folders: ambient 416, destruction 332, vehicles 127, weapons 108, impacts 80.
+* **Emitters are processor chains** (`RootProcessor` → `NextProcessor`, median 21 links, max 26) with evaluator trees
+  through `Pre`. 32 processor types and 10 evaluator types; covering 99.5 % of emitters needs 31, 100 % needs 32, so
+  **all are implemented** (each a few lines [inferred]). `EmitterData.EmitterAssets[]` (174 emitters) = child emitters;
+  `BaseEmitterData.EmitterAsset` (121) = derived emitter over a base document, with an unreachable orphan processor
+  copy whose role is unknown. **No collision processor exists**: shells and debris fall and die by age.
+* Template flags: ScreenAlignedQuad 1,899, ParticleMesh 931, DirectionAlignedQuad 558, Quad 18, WorldAlignedQuad 4
+  (Trail/Point unused); `LocalSpace` 563; `ActAsPointLight` 367; `Emissive` 382; `Opaque` 661; `ForceFullRes` 344 (the
+  rest render half-res in BF3); soft particles 180; scene-lit 3,348. Quality twins: `HighEndPc False` 616, `LowEndPc
+  False` 1,031, so instancing filters by tier.
+* **Counts**: `MaxCount` per emitter p50 13, p99 200, max 1,051; per effect Σ p50 46, p99 894, max 3,000
+  (`fx_mp1_hurricanrain_cameraattached`); `MaxInstanceCount` 1 on 850 effects, up to 100.
+* **Semantics solved from data** [verified statistics; meanings inferred]: `EmitterTemplateData.Lifetime` = spawn
+  window (0.1 s bursts on 1,654, 0 = continuous on 468); `UpdateAgeData.Lifetime` = particle life, `t = age/life`;
+  `SpawnRate` = particles per second with `MaxCount` an independent hard cap (continuous emitters satisfy
+  `MaxCount ≈ rate × life + 1`; bursts are huge rates capped by `MaxCount`); at least one particle spawns.
+  **`PolynomialData.Coefficients (x,y,z,w) = (c3,c2,c1,c0)`, `f(t) = ((x·t + y)·t + z)·t + w`**: over 16,410 instances
+  the non-zero x,y,z patterns are only z, yz, xyz or constant, the signature of fitted degree-1/2/3 curves; output
+  `clamp(f, MinClamp, MaxClamp) × ScaleValue` (clamp active on 9,815). `PolynomialColorInterpData` = `lerp(Color1,
+  Color0, clamp(f,0,1))` (bright→dim in 689 of 846 directed cases). Colours are HDR linear (muzzle 125–250, sparks
+  4,000).
+* **Worked examples**: the M16A3 1p muzzle (`fx_muzz_generic_rifle_1p` + fillout + `fx_shellejection_m`) draws ≈ 10
+  particles and **two point lights (p 0.75 each)** per shot; tracer `fx_tracer_generic_parent` is one mesh particle.
+  The M67/RPG-7/M320-LVG blast is **two effects**: `fx_grenade_frag_01` (smoke, shrapnel sprites with a 30 m light,
+  sound) plus the **material-grid impact effect of the explosion's own material pair** against the hit surface
+  (`fx_impact_generic_01_m`, gravel, concrete + `decal_concrete_l_01`, metal, vehicle, soldier; mostly
+  `decal_scorchmark_m_01`): the look comes mainly from the surface.
+* **Impacts**: grid cell `PhysicsMaterialProperties` hold Effect (1,947 on Caspian), Sound (1,976), Decal (814) and
+  Vehicle (284); `PhysicsPropertyProperties` hold Damage, Penetration, TerrainDestruction. So effects index by
+  `PhysicsMaterialIndex`, damage by `PhysicsPropertyIndex` (§3.2, C47). `MaterialRelationEffectData {ImpactEffects[],
+  ImpactDebris, ImpactEffectMaxSpreadAngle, MirrorImpactDirection}` + `MaterialRelationDecalData → DecalTemplateData`;
+  5.56 on Caspian/Metro gives ~15 distinct impacts (concrete, metal, cloth, grass, gravel, sand, wood, glass, tarmac,
+  water, soldier body, brick decal on Metro). Vehicles use `MaterialRelationVehicleData` wheel/ground/track/chassis.
+* **Lights** are only `ActAsPointLight` particles (radius, HDR colour, cubic intensity over t, random min/max): one
+  light per live particle [inferred]. The 1,726 point and 373 spot lights in the census are level/object lights.
+  **Decals** come only from the grid (123 on Caspian); `DecalSettings` suggests a vertex ring buffer [inferred].
+  `VisualEnvironmentEffectEntityData` (88) drive colour grading/vignette/grain curves. Explosion `CameraShockwaveRadius`
+  is 0 for M67/RPG/40 mm.
+* **Emitter atlas per level**: `EmitterSystemAsset.TextureInfos[] {TextureName, MinUv, MaxUv}` over
+  `emittertexturebase_win32` (DXT5 sRGB, 4096², 13 mips) and `emittertexturenormal_win32` (NormalDXT5RGA, linear,
+  1024×2048); the list mixes base-atlas and normal-atlas UVs by name suffix (layout solved on Metro, 52 entries, 3 px
+  gutters). Normal decode `x = 2R−1, y = 2A−1, z = √(1−x²−y²)` [inferred; y sign unknown]; only ≈ 650 of 2,479
+  textured emitters use a real normal map. Flipbooks: frame count × columns inside the entry's rect.
+* **Triggers** (39,946 references into `fx/`): weapon `FireEffects1p/3p` 443/442 + attachment modifiers 304; projectile
+  trails 113 bullets, 28/24 missiles; impacts 7,639 `ImpactEffects[]`; detonations 75; vehicles 702
+  `EffectComponentData` + damage/overheat states; destruction ≈ 6,000; level `EffectReferenceObjectData` 5,714. All
+  logic inside `fx/` prefabs is `Realm_Client` except 4 `Delay` and 5 `Locator`.
+
+**Godot 4.8 realisation** [verified API/source + benchmark on this PC, gap VFX §6]. RenderingServer has 49
+`particles_*` calls and custom particle shaders (`start()`/`process()`, 6 USERDATA vec4s) could express every BF3
+processor, but `ParticleProcessMaterial` cannot (rate tied to amount/lifetime, no evaluator trees or emitter-time
+inputs), and **each particles instance runs its own compute dispatches** (`particles_storage.cpp:1442-1624`). Benchmark
+(Vulkan Forward+, RX 9070 XT, 1080p): 1,000 one-shot GPUParticles3D × 16 = 9.87 ms/frame (RS CPU 2.02 ms) vs one
+MultiMesh of 16,000 quads uploaded per frame 0.57 ms (lit + soft 1.05 ms); + 64 omni lights +0.67 ms GPU, + 256 +3.0 ms.
+A C++ CPU simulation of a BF3-like chain costs 24.7 ns/particle/frame (16k ≈ 0.4 ms on one core). VIEW_DEPTH sorting
+works inside one particles instance only. Forward+ clusters hold `max_clustered_elements` 512 lights+decals+probes by
+default; extra elements are dropped.
+
+**C++ design (D19; option (c) of gap VFX §8.1)** [inferred on the measured parts].
+* `bf3_fx` (Godot-free): compile every `EmitterDocument`/`EffectBlueprint` into a flat EffectDef/EmitterDef (32
+  processors, 10 evaluators, the polynomial and spawn rules above, child/base emitters, local space, tiers), cached by
+  partition digest under `user://`; simulate live emitters on worker jobs.
+* `bf3_godot`: one MultiMesh per (shader class × blend), CPU back-to-front sort, spatial shaders for atlas rect +
+  flipbook, HDR colour, alpha-level min/max/scale, soft fade from depth, wrap/vertex-pixel lighting, SAQ/DAQ/mesh
+  particles; 1p effects in the viewmodel pass (`fov_override`). Emitter atlas read from the install per level (BC3 base
+  resident, ≈ 21 MiB with mips [inferred arithmetic]).
+* **Lights**: `ActAsPointLight` particles merged per emitter instance (centroid, summed intensity) into a pool of
+  ≤ 64 omni lights without shadows (estimate for a 64-bot firefight ≈ 80–110 raw, ≈ 50–70 merged). **Decals**: grid
+  decals as a pooled `Decal` set, later an own mesh ring buffer.
+* **Instancer**: separate from the S4 interpreter; honours `MaxInstanceCount` and `ResetInstanceWhenStarted` (scope
+  unknown: start with a global steal-oldest pool per blueprint), `SpawnProbability`, `StartDelay`, `CullDistance`.
+  Triggers: predicted shot / `ShotEvent` (1p/3p muzzle, shells), visual bullet (tracer), client bullet re-fly or
+  server hit event (impact by `PhysicsMaterialIndex` + decal + A5 sound), replicated detonation `{position, normal,
+  surface material}` (detonation + grid effect + scorch), vehicle state (health zone, speed, contact material),
+  destruction transitions, client-realm logic (`EffectReferenceObjectData.Start/Stop`, `AutoStart` ambients).
+* **Network**: effects never feed gameplay and carry no network ids, so the server instantiates no emitters and a
+  dedicated server skips `bf3_fx`. Random choices use `seed = hash(event id)` (shotSeq, detonation id, slot
+  transition), so clients agree without bit-exactness. Late join replays no one-shots and re-derives loops from state
+  (ambients, destruction aftermath, vehicle damage, logic ghost); decals are local.
+* Fallback: option (b), pooled GPUParticles3D with generated particle shaders fed by `particles_emit`, for emitters
+  above ≈ 1,000 particles (weather) if the CPU path is too slow there (not measured from C++).
+* Phasing: slices VFX1–VFX7 (§6), ≈ 7 slices and ≈ 9–12 k LOC, new work beyond 08's "Audio/FX 6–8 w" (C49).
+
+**Test oracles.** §7.10. **Open** (gap VFX §10): `BaseEmitterData` runtime semantics; `EmitterData` child timing;
+`MaxInstanceCount` scope and what `ResetInstanceWhenStarted` steals; clamp/scale order, `DefaultValues` combination,
+alpha-level erosion math, `UpdateClipScale`, `ZOcclusionLookup`, `DistributeOverDistance`/`TrailSegmentLength`,
+`Turbulance` noise; whether `PointLightRadius` scales with particle size and BF3's light units; NormalDXT5RGA y sign
+and the role of G/B; BF3's half-res compositing and its real particle/light counts at 64 players; `Quad`/
+`WorldAlignedQuad` orientation; the cost of option (b) driven from C++.
 
 ---
 
@@ -760,17 +1238,22 @@ unmeasured inference.
 | D1 | BF3 data access | VU runtime; Frosty-style repack; extract once to a project folder; **read as-is + user:// cache** | read as-is at runtime, cache under `user://bf3cache/` keyed by CAS SHA1 + versions | user principle; 08 §3.2 (BYOD survivors ship nothing); 07 §6.2; EBX probe (73,371 partitions, 0 failures, read-only) | H | debug self-test: install file sizes/mtimes unchanged after a session; cache invalidates when a digest changes |
 | D2 | Godot integration | engine module; custom engine build; **GDExtension** | GDExtension, godot-cpp ≥ `b051e694` + exe-dumped API and interface JSON, single precision | probe: built 140 s, ran headless/D3D12/Vulkan, exit 0; 07 §2.5 (module wins only cacheless streaming and Godot's own Jolt) | H | S0: extension loads in dev7; RC procedure `--validate-extension-api` |
 | D3 | Code layout | one big extension; **Godot-free libraries + one extension** | `bf3_core/anim/sim/net/host` + `bf3_godot` | 07 §7; 05 §9; enables doctest, headless tests and a standalone server | M | doctest suite runs without Godot from slice one |
-| D4 | Authority and tick | BF3's 30 Hz client arbitration; 20 Hz (IW4L); **60 Hz authoritative** | 60 Hz sim / 30 Hz snapshots, configurable; per-second rates; server on its own thread | BF3 `MaxSimFps 30`; DICE BF4 PDF (≤ 60 Hz for 64 players; 30 Hz tuning artefacts); IW4L 20–26 ms frame spikes with the tick in the frame | M | S1: 64 walkers at 60 Hz p99 ≤ 8 ms; else 30 Hz |
-| D5 | Gameplay physics | Godot PhysicsServer3D; engine module into Godot's Jolt; **own Jolt**; tuned `VehicleBody3D` | own pinned Jolt with `CROSS_PLATFORM_DETERMINISTIC`, shared static shapes across Server/Prediction/Cosmetic worlds | API has no space step or save/restore and no Jolt classes; `VehicleBody3D` = btRaycastVehicle; Jolt docs: only shapes are shareable across systems | H (premises) / M (cost) | S0 link test (two Jolts in one process); measure Caspian static-world memory with two systems |
+| D4 | Authority and tick | BF3's 30 Hz client arbitration; 20 Hz (IW4L); **60 Hz authoritative** | 60 Hz sim / 30 Hz snapshots, configurable; per-second rates; server on its own thread | BF3 `MaxSimFps 30`; DICE BF4 PDF (≤ 60 Hz for 64 players; 30 Hz tuning artefacts); IW4L 20–26 ms frame spikes with the tick in the frame | M | S1: 64 walkers at 60 Hz p99 ≤ 8 ms; else 30 Hz; harness H:T1 (30 vs 60 Hz in VU) shows which BF3 quantities are tick-coupled |
+| D5 | Gameplay physics | Godot PhysicsServer3D; engine module into Godot's Jolt; **own Jolt**; tuned `VehicleBody3D` | own pinned Jolt with `CROSS_PLATFORM_DETERMINISTIC`, shared static shapes across Server/Prediction/Cosmetic worlds; static world as **64 m tiled shapes** (r1) | API has no space step or save/restore and no Jolt classes; `VehicleBody3D` = btRaycastVehicle; Jolt docs: only shapes are shareable across systems; Caspian static world ≈ 31 MiB tiled / 41 MiB one shape, tiled cooks 1.8× faster without the ≈ 0.5 GiB transient (gap load §2.6, Godot's Jolt as proxy) | H (premises) / M (cost) | S0 link test (two Jolts in one process); re-measure Caspian static-world memory on our own Jolt with two systems |
 | D6 | Soldier controller | `CharacterBody3D`; **custom motor** (own collide-and-slide or `CharacterVirtual`) | custom POD-state motor over own Jolt behind `ICollisionWorld` | `move_and_slide` hidden floor state (02 C15); BF3 states (vault curves, ladders, swim, parachute) are data | M | M1: replay determinism within ε; S1: sweep cost for 64 soldiers |
 | D7 | Weapons and hits | BF3 client arbitration (0.85 s); pure server rewind; **server-validated client hits** | seeded shared fire sim; server re-flies bullets; validates reported render samples ≤ 250 ms | 01 §3, 05 §5.4; BF4 "dying behind cover" posts; IW4L provenance code | M | M2 + M3: two-PC hit-reg test at 100 ms RTT; trade-window test |
 | D8 | Animation | **A decode Ant**; B procedural 1p + CC0 3p; C hybrid | Route A clean-room C++ (DCT/Raw/Frame), own graph, Frame poses for VBR | Ant probe: 3,778/3,778 DCT, 5,592 clips mapped, renders; 03 verification extra-8 | H (decode) / L (graph, rig ops) | M0: M9 reload from C++; S3: 64 soldiers within 2 ms |
 | D9 | Vehicles | custom raycast vehicle over Godot physics; engine module; **own Jolt `VehicleConstraint`**; `VehicleBody3D` | data-driven vehicle on own Jolt; own rotor/wing/float models; BF3 damage tables | 04 §1.4–1.5, C1–C5, C7–C8 | M | S2: Humvee replay bit-compare; M4 handling vs reference clips |
 | D10 | Transport and replication | SceneMultiplayer; Godot ENet; **upstream ENet**; GNS; yojimbo | own ghosts over upstream ENet 1.3.18 | 05 K8 (SceneMultiplayer), probe §6.6 + 05 extra-2 (Godot ENet RCVBUF), 05 K17 (yojimbo ≤ 100 players, GNS heavy deps) | M | M3: loadbots to 64, ≤ 36 KB/s/client |
 | D11 | Bots and navigation | NavigationServer3D; **Recast/Detour**; IW4L walk graph; fun-bots traces | Detour per agent class + ROAD areas + clearance grid; bots emit `Command`s | 06 §2.4 measurements, C7–C10; fun-bots unlicensed | H (nav) / M (behaviour) | S1: Metro bake with all flags in one component; B-step criteria |
-| D12 | Game modes | event-graph VM; **resolved constants + C++ rules** | interface → PropertyConnection resolver; C++ rule classes | 02 §3.1, C8; handoff 04 §1 | M | M2/M4: resolved constants match §7.3; bleed measured once |
-| D13 | Presentation | nodes per placement; MultiMesh only; **RS instances**; resident vs streamed textures | RS instances, MultiMesh for scatter/debris; resident BC first, GSTF streaming later; viewmodel by `fov_override` | probe §6.1 (6 draws for 10k instances), §6.4 (GSTF streams), 07 §1.3 | H | M1 Metro frame time; GSTF cache on Caspian (4,545 images) |
+| D12 (**revised r1**) | Game modes and level logic | (a) event-graph VM for everything; (b) resolved constants + hand-written C++ rules (r0 choice); **(c) native gameplay entities + deterministic server-side interpreter for 48 whitelisted primitive types + logic ghost** | (c): entities CapturePoint, Ticket/Life/Kill counters, Character/Vehicle/AlternateSpawn, CombatArea, RoundOver, Damage/ClearArea, Interaction stay C++; the level's own wiring runs in the interpreter; constants still resolved through interface → PropertyConnection; client-realm presentation graphs later through the same interpreter; unknown types logged as no-ops | gap logic §3–§7: level-owned 2,099/5,066 primitives and 44,234/58,593 connections; all 7 traced rows switch spawners/vehicles/flags/events from level schematics; 20 types = 94.7 %, 36 = 99 %; interface ports only 7–51 % nameable; ≈ 5–8 k LOC vs ≈ 15–45 k LOC for (b) | M–H | **S4**: Metro RushLarge0 + Caspian CQL headless; spawner/vehicle `Enabled` timelines; identical event-trace hash across 2 runs; 0 unknown types; fail → (b) for those rows only |
+| D13 | Presentation | nodes per placement; MultiMesh only; **RS instances**; resident vs streamed textures | RS instances, MultiMesh for scatter/debris; **resident BC decoded from the install at load as the default (no texture cache)**; GSTF streaming optional; weapon/character/vehicle textures on first use; viewmodel by `fov_override` | probe §6.1 (6 draws for 10k instances), §6.4 (GSTF streams), 07 §1.3; gap load §2.2–§2.4 (level decode 2.1–2.5 s; GSTF 7.5 GiB for 29 levels buys only streaming; Caspian static world draws 415 of 1,658 MiB) | H | M1 Metro frame time and load ≤ 15 s cold / ≤ 5 s warm; M4 VRAM ≤ 2.5 GiB on Caspian |
 | D14 | Legal hygiene | ship extracted data; port community code; **BYOD engine, own code** | zero BF3 bytes, no EA marks, MIT, no disassembly, no unlicensed/GPL code | 08 §3 (OpenMW/CorsixTH vs re3/Revive); EU 2009/24 Arts 1(2), 5(3), 6, 8; US §1201(f) | M (not legal advice) | before any public repo: name, NOTICE, CI that rejects binary BF3-like files |
+| D15 (new r1) | Audio | hand mixer per category (IW4L); N × `AudioStreamPlayer3D`; **interpret BF3's sound graphs in an own C++ mixer** | `bf3_audio` compiles each `SoundPatchAsset` into a control program + per-voice FourCC plugin plan; one mixer in an `AudioStreamPlayback` subclass with HDR window, scopes, 128-voice cap, biquads, 2-slot convolution, listener-side `AreaType`; XAS resident and decoded per voice; IW4L vehicle mixer only as fallback | gap audio §1–§11: 46 node types (37 cover 98.1 %), compiled plugin chains in data, XAS 0.12 ms per channel-second, Godot ≤ 6 buses and 1 filter per playback, no convolution | M | A1/A2 in M2a (frame counts for 908 Metro waves; M16A3 oracles §7.7); A3 in M2b: 64 bots firing, audio thread < 10 % of a core, no xruns |
+| D16 (new r1) | UI, HUD, minimap, strings | B SWF + AVM1 renderer; C own art only (r0); **A+ own `Control` layout + BF3 art, strings and fonts read at runtime** | A+: data model named after BF3's `UI*CompData` sources; minimap satellite + SDF masks, hud3dicons, `_small` weapon icons, SWF atlases via a symbol-table reader, `UITextDatabase` through a `Translation` subclass, `DefineFont3` → in-memory font; procedural crosshair; C per item as fallback | gap UI §1–§8: strings and minimap mapping solved and second-sourced; SWFs are AS2-only (AVM1 needed for B: months); all needed Godot APIs present | M–H | M2a/M3: weapon names resolve (`ID_P_WNAME_M16A4` → "M16A3"); flags and HQs land on the Metro/Caspian satellites inside the CQS masks |
+| D17 (new r1) | Level load, cache, rotation | mandatory "prepare install" pass; **convert per level on demand + optional prepare**; GSTF-first | on demand with per-item streaming converters; tiled Jolt; server pre-bake of the MapList at startup; BF3-style rotation with `RoundOver.next` pre-conversion, `Loading` state, slot hold, 30 s stall kick, 120/300 s deadline; ENet on the net thread; LRU only at round end | gap load §2–§6: cold client ≈ 10–11 s, host ≈ 17–27 s; cache ≈ 2–4 GiB for 29 levels; ENet peer timeout 5–30 s | M | M1 loading screen (cold ≤ 15 s, warm ≤ 5 s, converter RSS ≤ 0.5 GiB); M3 three-level rotation with one empty-cache client and no kicks |
+| D18 (new r1) | Reference measurements | none (tune by feel); Symthic archives; frame-counted videos; **observe-only VU harness** | private VU server mod on a separate clean instance; own test bots; numbers only into `research/measurements`; install manifest compared before/after; 30 Hz oracles + 60 Hz probe | gap harness §0–§8: VU installed and used on this PC; `GunSway`, damage, ticket, capture and vehicle state observable; VU wrote nothing into the install | M | Phase 0 shakedown (≈ 30–45 min): census, bot-damage test, log extraction, manifest unchanged |
+| D19 (new r2) | Visual effects | (a) GPUParticles3D per emitter with generated `ParticleProcessMaterial` (r1's M6 assumption, handoff 04 §6.2 compiler); (b) GPUParticles3D with generated particle shaders, one pooled system per emitter definition fed by `particles_emit`; **(c) own C++ CPU emitter simulation (`bf3_fx`, Godot-free) feeding RS MultiMesh batches with custom spatial shaders**; effects through the S4 interpreter vs **a separate client-only instancer** | (c) + instancer: EffectDef/EmitterDef compiler (32 processors, 10 evaluators, `(c3,c2,c1,c0)` polynomials, rate/s + `MaxCount` cap, child/base emitters, tiers) cached by digest; simulation on worker jobs; MultiMesh per shader class × blend with CPU sort; emitter atlas read from the install; `ActAsPointLight` merged per emitter into ≤ 64 pooled omni lights (no shadows); grid decals as a pooled `Decal` set; impacts by `PhysicsMaterialIndex`; client-only triggers from shots, projectiles, impacts, detonations, vehicle state, destruction transitions and client-realm logic, re-derived on late join; (b) as fallback for > 1,000-particle ambient emitters | gap VFX §1–§7: all 32 processors needed (31 → 99.5 %); `ParticleProcessMaterial` cannot express rate ≠ amount/lifetime or evaluator trees; 1,000 GPUParticles3D systems 9.9 ms/frame (RS CPU 2.0 ms) vs 16k quads in one MultiMesh 0.57 ms; C++ sim 24.7 ns/particle; 64 vs 256 omni lights +0.67 / +3.0 ms GPU; no effect has a network id | M | VFX1 doctest goldens (3,410/3,410 emitters, 0 unknown types); VFX3 64-bot Metro firefight: FX ≤ 1 ms main thread, ≤ 2 ms GPU at 1440p, ≤ 64 effect lights |
 
 ---
 
@@ -780,18 +1263,23 @@ unmeasured inference.
 |---|---|---|---|---|---|
 | R1 | 64-player server tick over budget at 60 Hz (motor sweeps ≈ 19k/s, bot rays ≈ 7.7k/s, Jolt, encode for 63 clients) | M | H | job pool between steps; staggered bots; priority-limited encode; 30 Hz sim fallback with per-second rates; own BVH behind `ICollisionWorld` if Jolt sweeps are slow | **S1** headless 64 walkers on Metro and Caspian collision, p99 ≤ 8 ms |
 | R2 | 3p animation system: replacing the Ant graph, rig-op twist joints, VBR, 64-soldier render cost | M | H | own small state logic; Frame poses for VBR; temporal LOD tiers from data; skin only referenced bones or GPU skinning | **S3** 64 soldiers with decoded clips, windowed, ≤ 2 ms main thread; user judges the shoulder pinch |
-| R3 | Vehicle/flight feel diverges from BF3 (force laws not in data) | H | M | start from IW4L's tuned controllers; swap constants one by one; reference clips recorded by the user in BF3/VU (knowledge only) | Humvee 0–60, braking, turning circle vs reference in M4 |
+| R3 | Vehicle/flight feel diverges from BF3 (force laws not in data) | H | M | start from IW4L's tuned controllers; swap constants one by one; reference time series from the VU harness (knowledge only; driver bots with exact input profiles) | **S5** Sessions 2–3 (V-A, V-B, A-A, A-B) before M4/M5; Humvee 0–60, braking, turning circle vs those in M4 |
 | R4 | Prediction corrections visible (Jolt replay only within ε; `CharacterVirtual` untested) | M | H | full-precision own-state block for the owner; same BodyIDs; ε above quantisation; visual smoothing; prediction world free of debris | **S2** vehicle replay bit-compare; M1 soldier replay at rest under 150 ms/2 % netsim |
-| R5 | Mechanic semantics wrong (spread disc, recoil recovery, falloff shape, bleed scaling, capture timing, damage threshold, reactive armour) | H | M | swappable functions behind tables; one measurement pass in BF3/VU (fixed-wall shot harness, timed bleed, MCOM timings) before tuning | measurement pass scheduled before M2 tuning and M4 |
-| R6 | Navmesh from the wrong collision set (Metro split; BF3 0.3 m step worse on the IW4L soup) | H | M | rebuild collision per Havok body type (Raycast vs Collision vs Character); fun-bots traces as opt-in oracle; off-mesh links | **S1** B0 criterion: all flags, HQs, spawns in one component |
+| R5 | Mechanic semantics wrong (spread disc, recoil recovery, falloff shape, bleed scaling, capture timing, damage threshold, reactive armour) | H | M | swappable functions behind tables; the observe-only VU harness (§3.13) with written decision rules per item; without VU: uniform-area disc + linear recovery marked "unmeasured", video-timed bleed/capture | **S5** Session 1 (W-A, W-B, S-A, S-B, M-A, M-B) run **during M0** |
+| R6 | Navmesh from the wrong collision set (Metro split; BF3 0.3 m step worse on the IW4L soup; **r1: reproduced on the independent level_bf3 soup, largest component 23 %**) | H | M | rebuild collision per Havok body type (Raycast vs Collision vs Character); fun-bots traces as opt-in oracle; off-mesh links | **S1** B0 criterion: all flags, HQs, spawns in one component |
 | R7 | Engine churn dev7→RC/stable (`STREAMING_UV`→`STREAMING_LOD`, 9 changed hashes 4.7→dev7, GSTF format, Jolt version in shape caches) | H | M | pin exe SHA256 + JSON dumps; rebuild per bump; key caches by engine/Jolt/format version; probe-load one GSTF at startup | at RC: `--validate-extension-api`, rebuild, rerun headless suite |
 | R8 | Second Jolt / Recast copy clashes with Godot's on Linux (symbol interposition) | L | M | hidden visibility, version script, namespaces | link + run test on Linux in S0 |
-| R9 | Data-identity gaps: delta-patched bundles (XP2–4, `Loc/*`) need reconstruction before their SHA1 table exists; language bundle list unknown | M | M | reconstruct base+delta in `bf3_core` (needed anyway to read them); enumerate `Loc/*` from layout | M3 handshake between two installs with different languages (if available) |
-| R10 | Texture streaming at scale (4,545 textures on Caspian; per-*material* feedback slot; D3D12 fragmentation untested) | M | M | resident BC first (fits 12–16 GB GPUs, ≈ 1.56 GiB likely BC bytes); GSTF behind a setting; raise `max_ops_per_second` during load | GSTF cache on Caspian in the look track |
+| R9 | Data-identity gaps: delta-patched bundles (XP2–4) need reconstruction before their SHA1 table exists; language bundle list unknown (r1: `Loc\en` is chunk-only with 0 bundles, so it adds no bundle manifest) | M | M | reconstruct base+delta in `bf3_core` (needed anyway to read them); enumerate `Loc/*` from layout | M3 handshake between two installs with different languages (if available) |
+| R10 | Texture memory and streaming at scale (r1: Caspian CQL 1,371 unique 2D textures = 1,658 MiB, of which 415 MiB drawn by the static world; per-*material* feedback slot; D3D12 fragmentation untested) | M | M | resident BC as default, world textures at load, weapon/character/vehicle textures on first use; GSTF behind a setting; raise `max_ops_per_second` during load | M4 budget check: VRAM ≤ 2.5 GiB at Caspian CQL with 64 players |
 | R11 | Legal: trademark/IP letter; accidental redistribution of BF3 bytes or caches | L | H | D14; NOTICE; no assets in repo or CI; comply on branding immediately | before going public |
 | R12 | Scope: 29 levels × 16 mode ids, ~80 infantry items, 49 vehicle blueprints | H | M | everything data-driven; MVP on 2–3 levels; breadth only after the loop is proven | milestone exit criteria |
 | R13 | Godot crowd/skeleton cost with rendering (skin compute, shadows) unmeasured | M | M | one Skin per soldier; RS skeletons; bone-texture GPU skinning for far LODs | S3 |
 | R14 | Pose-history rewind cost and capsule accuracy for lag compensation (server must animate 64 soldiers) | M | M | reduced skeleton for 9 capsules; recompute on demand from root/stance/aim/phase history | M2 hit-reg tests |
+| R15 (r1) | Level-logic semantics wrong (event ordering, re-entrancy, `removeDuplicateEvents`, `Sequence` timing, late-join replay, "Networked" delivery) or a needed primitive missing, so spawners, vehicles or scripted events misfire silently | M | H | whitelist + log unknown types; deterministic drain with a trace hash; per-row fallback to hand-written rules; VU observation of the traced events (knowledge only) | **S4** Metro RushLarge0 + Caspian CQL: spawner/vehicle timelines, park event 10 s after base 1, identical trace hash across runs |
+| R16 (r1) | Audio fidelity and cost: HDR extra fields (`CompressFactor`, `DischargeFactor`, `MaxAllowedEnergy`) and `irf1` layout unknown; mixer cost and voice counts at 64 players estimated only; 512-frame block fixed in dev7 | M | M | implement MinTop/Size/attack/release/headroom first; 128-voice cap with loudness culling; IW4L vehicle mixer fallback; per-voice profiler counters | slice A3 in M2b: 64 bots firing on Metro, audio thread < 10 % of a core, no xruns |
+| R17 (r1) | VU unavailable for the measurement pass (Zeus outage, activation lost, auto-update) or contaminated by mods | M | M | separate clean instance with only the harness; record the VU build per run; run Session 1 early (M0); fallbacks: archives, frame-counted videos (L confidence) | Phase 0 shakedown before Session 1 |
+| R18 (r1) | Load and rotation stalls: cold conversion on slow or HDD machines, nav bakes of 5–12 s per hull class on big maps (≈ 50–110 s on one core), ENet timeouts during loading | M | M | on-demand conversion with optional prepare pass; server pre-bake of the MapList; `RoundOver.next` pre-conversion; `Loading` state with slot hold, stall timeout and deadline; ENet on the net thread | M1 loading oracles; S1 Caspian ≤ 6 s / Kharg ≤ 13 s nav; M3 three-level rotation with an empty-cache client |
+| R19 (r2) | Effects wrong or too expensive: inferred semantics (`BaseEmitterData` base vs orphan chain, `MaxInstanceCount` scope, alpha-level erosion, clip scale, turbulence, light units) make effects look off; ≈ 80–110 effect lights and lit soft transparent particles in a 64-bot firefight overrun the GPU or the 512-element Forward+ cluster; weather emitters (up to 3,000 particles per effect) overrun the CPU path | M | M | compile all 32 processors with goldens; light pool ≤ 64 with per-emitter merge, no shadows; quality-tier filter; `MaxInstanceCount` pools; half-res or cheaper shading for non-`ForceFullRes` emitters; option (b) pooled GPUParticles3D for the largest emitters; frame-match key effects against footage or the S5 harness | VFX1 goldens (M2a); VFX3 64-bot Metro firefight within D19 budget (M2a); VFX7 Kharg/Alborz weather within budget (M7) |
 
 ---
 
@@ -809,26 +1297,46 @@ walkable milestone (the handoff had networking at M6); the animation route is al
 the probe); collision moves into our own Jolt (handoff §6 had `StaticBody3D`); NavigationServer3D is replaced by
 Detour; soldiers and weapons come before vehicles because every vehicle needs seats, weapons and hits.
 
+What round 1 changed [inferred from the gap reports]: a **level-logic spike S4** before M4 (D12 revised); the
+measurement pass became **S5**, an agent-built VU harness with three user sessions, Session 1 already during M0;
+audio slices A1–A7 (gap audio §11.6) and UI work by route A+ (≈ 6–8 developer-weeks) are now sized inside M2a–M7
+instead of "minimal HUD and weapon audio"; loading, cache and rotation work is placed in M0/M1/S1/M3/M4/M7 with
+measured oracles (gap load §7). The two gap reports both proposed the id "S4"; here S4 = level-logic spike and S5 =
+measurement pass (§8 C43).
+
+What round 2 changed [inferred from the VFX gap report, §8.2 there]: visual effects are planned as slices
+**VFX1–VFX7** (≈ 7 slices: M2a +3.5, M3 +0.5, M4 +1, M6 +1, M7 +1) instead of r1's "effects as GPUParticles" (M6)
+and "FX" (M7). The M2a infantry loop now shows BF3's own muzzle flashes, tracers, impacts and decals from the start,
+because impacts share the bullet's grid lookup and shots already carry seeds. VFX1–VFX3 need no new spike: their
+cost risk is tested by the VFX3 64-bot firefight oracle inside M2a.
+
 | step | slices | content | exit criteria (in the running game unless noted) |
 |---|---|---|---|
 | **S0 Toolchain and skeleton** | 1 | repo layout (§2.2), pinned godot-cpp + JSON dumps, own Jolt, upstream ENet, Recast/Detour, doctest, `DedicatedMainLoop`/test runner, `InstallReader` with the read-only self-test, short build root, `--import` in CI | extension loads in dev7 headless and windowed; a Jolt world steps on a `std::thread` while Godot renders; ENet loopback ping; two Jolt copies coexist (Windows; Linux link test); install mtimes unchanged |
-| **M0 Data layer in C++** | 4–6 | port `asset_transport/bf3`, `superbundle_bf3`, `ebx_bf3`, needed parts of `resource_bf3`/`level_bf3`; gameplay table readers (WeaponDef resolver, soldier, kits, mode constants, material grid, vehicle defs); Havok collision; skinned MeshSet; Ant GD reader + DCT/Raw/Frame + channel map | **M9 1p empty reload plays in Godot from C++ reading the install** on BF3 arms + M9 meshes with `fov_override`; an in-game inspector prints the resolved M16A3/M16A4-burst WeaponDef matching §7.1; Metro collision drawn as a debug overlay; handoff §9 counts pass in doctest |
-| **M1 Metro walkable through the loopback server** | 5–7 | Metro static world (minimal look: RS instances, basic materials, sun); static world in own Jolt; `SoldierMotor` with BF3 numbers; `ServerHost` 60 Hz + loopback `ClientSession`; command/snapshot path; own-soldier prediction; free camera; shot harness | walk/sprint/crouch/prone/jump match §7.2 (6.5 m/s, 0.6 m, transition times, fall-damage thresholds); no rubber-banding at rest under 150 ms / 2 % netsim; spawn settle works on all Metro TDM points |
-| **S1 Server scale spike** | 1 | Detour bake from the character-collision set (fix the Metro split); 64 headless bot walkers (motor + Detour) on Metro and Caspian collision at 60 Hz | p99 tick ≤ 8 ms with 64 walkers; all flags, HQs, spawns in one nav component; sweep cost measured. **Fail →** 30 Hz sim, fewer sweeps, own BVH |
+| **M0 Data layer in C++** | 4–6 | port `asset_transport/bf3`, `superbundle_bf3`, `ebx_bf3`, needed parts of `resource_bf3`/`level_bf3`; gameplay table readers (WeaponDef resolver, soldier, kits, mode constants, material grid, vehicle defs); Havok collision; skinned MeshSet; Ant GD reader + DCT/Raw/Frame + channel map; digest-keyed cache module (atomic writes, journal) with per-item streaming converters and `bf3dump prepare`; `UITextDatabase` reader | **M9 1p empty reload plays in Godot from C++ reading the install** on BF3 arms + M9 meshes with `fov_override`; an in-game inspector prints the resolved M16A3/M16A4-burst WeaponDef matching §7.1 and its localised name; Metro collision drawn as a debug overlay; handoff §9 counts pass in doctest; text DB 15,515 entries, 0 errors |
+| **S5 Measurement pass** (runs beside M0–M5) | 0.6–0.8 agent + user 3 sessions | VU harness mod, extractor and install-manifest wrapper (§3.13); Phase 0 shakedown; **Session 1 (weapons, soldier, modes) during M0**, Session 2 (ground vehicles) before M4, Session 3 (air, sea, details) before M5; analysis into `research/measurements/SOURCES.md` | every P0 item has a run and a `SOURCES.md` row; the D7 disc/recovery/first-shot switches, the D12 bleed/capture functions and the soldier-motor gains have their chosen variant; install manifest unchanged after every session |
+| **M1 Metro walkable through the loopback server** | 5–7 | Metro static world (minimal look: RS instances, basic materials, sun; resident textures); static world in own Jolt (64 m tiles); `SoldierMotor` with BF3 numbers (and S5 Session 1 gains); `ServerHost` 60 Hz + loopback `ClientSession`; command/snapshot path; own-soldier prediction; free camera; shot harness; loading screen with stage/progress | walk/sprint/crouch/prone/jump match §7.2 (6.5 m/s, 0.6 m, transition times, fall-damage thresholds); no rubber-banding at rest under 150 ms / 2 % netsim; spawn settle works on all Metro TDM points; Metro load cold ≤ 15 s, warm ≤ 5 s, converter peak RSS ≤ 0.5 GiB |
+| **S1 Server scale spike** | 1 | Detour bake from the character-collision set (fix the Metro split); 64 headless bot walkers (motor + Detour) on Metro and Caspian collision at 60 Hz; tiled Jolt shapes; Caspian + Kharg nav bakes with the BF3 capsule as timing oracles | p99 tick ≤ 8 ms with 64 walkers; all flags, HQs, spawns in one nav component; sweep cost measured; nav bake Caspian ≤ 6 s, Kharg ≤ 13 s on 16 threads. **Fail →** 30 Hz sim, fewer sweeps, own BVH |
 | **S2 Vehicle replay spike** | 1 | Humvee on `VehicleConstraint` in ServerWorld + PredictionWorld; same BodyIDs; full-precision save/restore; recorded command log | free driving bit-identical in both worlds for 60 s; corrections < 2 cm at contacts with quantised snapshots. **Fail →** IW4L-style kinematic integrator querying the static world (04 §1.5) |
 | **S3 Crowd animation spike** | 1 | `bf3_anim` with decoded `b_BasicAssetsMP` clips: 64 3p soldiers (run blend + upper-body reload), windowed on the RX 9070 XT; temporal LOD tiers from `GameAnimationSettings` | main-thread animation + skeleton ≤ 2 ms at 1440p; frame budget held; shoulder pinch judged by the user (decides whether rig ops are needed now) |
-| *measurement pass* | (user, ~1) | in the user's BF3/VU, knowledge only: fixed-wall spread/recoil plots, falloff at distances, timed ticket bleed at 2/3 and 3/3 flags, capture times, Humvee/tank/heli/jet reference clips, turret traverse | numbers recorded in `SOURCES.md`; nothing touches the install |
-| **M2a Infantry gunplay** | 6–9 | weapon sim (sub-tick, seeded), ballistics, material-grid damage, hit capsules from the server pose, server-validated hits; 1p viewmodel with Ant clips (deploy/fire/reload/zoom; VBR stand-in), springs; ADS; 4 kits × 1 primary + pistol + knife + M67; minimal HUD and weapon audio | shooting stationary bot targets on Metro reproduces §7.1: 800 RPM = 75 ms, 1.60 m drop at 300 m, shots-to-kill table, headshot ×2.0/2.35; 1p reload timing vs `ReloadTime` |
-| **M2b Metro TDM with bots** | 5–8 | 3p soldiers, health/regen/death/respawn, kill feed, scoreboard; TDM rules; bots B2–B4 (walk, perceive, aim, fight, revive) | a TDM round to 100 kills against 16 bots on Metro; bots-only server produces kills; team K/D ≈ 1 |
-| **M3 Two machines and scale** | 3–4 | ENet transport, digests handshake, ghosts with priority/quantisation, dedicated `--headless`, loadbots to 32 then 64, bandwidth overlay, master + UPnP | two PCs fight with correct hit-reg at 100 ms simulated RTT; a mismatched install is rejected with a reason; 64 connections ≤ 36 KB/s/client and tick < 8 ms |
-| **M4 Caspian Conquest with land vehicles (MVP)** | 8–13 | terrain/look track for Caspian; Conquest Small/Large rules (resolver, flags, bleed, spawns, HQs, combat area); Humvee and T-90/M1A2 with seats, turrets, HMG/cannon, damage grid, disabled/decay/regen, wrecks and respawn; bots board and drive (hull-class navmesh + ROAD areas) | full Conquest Small round on Caspian with bots; Humvee and tank handling vs reference clips; RPG/tank-shell damage percentages vs reference; ≥ 3 of 4 jeeps taken by bots within 30 s |
-| **M5 Air and sea** | 10–16 | AH-1Z/Mi-28 (rotor model, rockets, gunner, TV missile as a remote vehicle, flares/ECM, locks), F/A-18/Su-35 (wings, afterburner, gear, stall), RHIB/AAV (buoyancy), AA vehicles; bots fly (clearance grid + PIDs) | hover/climb/speed oracles; turn-rate peak near 305 on the flap curve; flare breaks a lock; 0 terrain crashes in 10 min of bot flight |
-| **M6 Destruction** | 6–10 | slots/states/parts, wiring (`OnDestroyed`), collapse fallback, debris in the cosmetic world, effects as GPUParticles, destruction rows, dirty-tile nav rebake | an RPG hole appears identically for a late joiner; walking through a fresh hole predicts correctly; bots path through new openings |
-| **M7 Breadth and 64 on Caspian (v1)** | 25–45 | all kits and gadgets (incl. MAV/EOD/T-UGS/M224 as vehicles), spotting, suppression, squads and beacons, attachments; remaining modes (Rush, SQDM, Domination, TS, AS, CTF, GM, Scavenger); remaining vehicle roster; remaining levels; audio/FX; server ops | a full 64-slot Conquest Large round on Caspian with bot fill inside §3.5 budgets; every vehicle spawns, drives/flies, fires, dies, respawns on its levels |
+| **S4 Level-logic interpreter spike** (new r1) | 1–2 | blueprint instantiation from EBX (reference objects, prefab interface forwarding by hash, sub-world inclusion), FIFO drain, the 48 server-capable primitives, port adapters for spawners/capture points, logic ghost; headless (gap logic §9.2) | Metro RushLarge0 loads its full graph headless; the 8 Rush spawners open in base order when MCOMs are forced destroyed; the park event fires 10 s after base 1; two runs give an identical event-trace hash; 0 unknown types on Metro/Caspian. **Fail →** hand-written rules (old D12) for those rows only |
+| **M2a Infantry gunplay** | 10.5–14.5 (r1: 7–11) | weapon sim (sub-tick, seeded), ballistics, material-grid damage, hit capsules from the server pose, server-validated hits; 1p viewmodel with Ant clips (deploy/fire/reload/zoom; VBR stand-in), springs; ADS; 4 kits × 1 primary + pistol + knife + M67; minimal HUD (route A+: ammo, crosshair, hit indicator, localised names); audio **A1** (XAS voices, resident chunk store, mixer) and **A2** (weapon patch interpreter, 32 node types, AreaType stubbed to 0); effects **VFX1** (compiler + simulator, 1.5), **VFX2** (renderer, emitter atlas, 1) and **VFX3** (muzzle/shell/tracer triggers, grid impacts + decals + impact sound, light pool, instance pools, 1) | shooting stationary bot targets on Metro reproduces §7.1: 800 RPM = 75 ms, 1.60 m drop at 300 m, shots-to-kill table, headshot ×2.0/2.35; 1p reload timing vs `ReloadTime`; disc/recovery variants chosen from S5 Session 1; decoded frame counts equal header frames for all 908 Metro waves, decode ≤ 0.2 ms per channel-second; M16A3 audio oracles §7.7 items 1–4; VFX oracles §7.10 items 1–8 (3,410/3,410 emitters compile, all 52 Metro atlas entries resolve, 5.56 impacts by surface, 64-bot firefight FX ≤ 1 ms main thread / ≤ 2 ms GPU / ≤ 64 lights) |
+| **M2b Metro TDM with bots** | 6–9 | 3p soldiers, health/regen/death/respawn, kill feed, scoreboard, kill card, spawn screen; TDM through the S4 interpreter (TDM rows: median 59 server primitives); bots B2–B4 (walk, perceive, aim, fight, revive); audio **A3** (HDR window, scopes, 128-voice cap, profiler) | a TDM round to 100 kills against 16 bots on Metro; bots-only server produces kills; team K/D ≈ 1; 64 bots firing: audio thread < 10 % of a core, no xruns |
+| **M3 Two machines and scale** | 5.5–7.5 (r1: 5–7) | ENet transport (serviced on the net thread), digests handshake (incl. logic-graph digest), ghosts with priority/quantisation, logic ghost + networked events, dedicated `--headless` with startup pre-bake, `Loading`/`Prepare`/`RoundOver.next`/`LevelChange` with slot hold, stall kick and deadline, loadbots to 32 then 64, bandwidth overlay, master + UPnP; minimap with satellite, SDF masks and hud3dicons; audio **A4** (areas, AreaType, IR reverb) and **A5** (footsteps, impacts); **VFX4** (effect seeds from event ids, late-join derivation, dedicated server excludes `bf3_fx`, 0.5) | two PCs see the same muzzle/tracer/impact choices for one burst, a late joiner sees running loops and no stale one-shots; two PCs fight with correct hit-reg at 100 ms simulated RTT; a mismatched install is rejected with a reason; 64 connections ≤ 36 KB/s/client and tick < 8 ms; a 3-level rotation with 2 clients, one with an empty cache, and no kicks; flags/HQs land inside the mode masks on the satellite; AreaType and active IR match §7.7 item 5 on Metro and Seine |
+| **M4 Caspian Conquest with land vehicles (MVP)** | 9–14 (r1: 8–13) | terrain/look track for Caspian; Conquest Small/Large (native entities + level graph: capture-gated jets and tanks come from Caspian's schematic; bleed/capture functions from S5); spawn screen with flags; Humvee and T-90/M1A2 with seats, turrets, HMG/cannon, damage grid, disabled/decay/regen, wrecks and respawn; bots board and drive (hull-class navmesh + ROAD areas); memory budget check; **VFX5** (detonation + grid effect by explosion material + scorch decal, VisualEnvironment effects, audio-graph camera shake, vehicle wheel/track/ground/chassis and damage-state effects, missile trails, 1) | M67 on Caspian gravel → `fx_grenade_frag_01` + `fx_impact_gravel_m` + `decal_scorchmark_m_01`; full Conquest Small round on Caspian with bots; Humvee and tank handling vs S5 Session 2 time series; RPG/tank-shell damage percentages vs reference; ≥ 3 of 4 jeeps taken by bots within 30 s; client VRAM ≤ 2.5 GiB, client RAM ≤ 1.5 GiB, server ≤ 0.4 GiB at 64 slots |
+| **M5 Air and sea** | 10–17 | AH-1Z/Mi-28 (rotor model, rockets, gunner, TV missile as a remote vehicle, flares/ECM, locks), F/A-18/Su-35 (wings, afterburner, gear, stall), RHIB/AAV (buoyancy), AA vehicles; bots fly (clearance grid + PIDs); audio **A6** (vehicle patches with their game parameters, replaces the IW4L hand mixer) | hover/climb/speed oracles from S5 Session 3; turn-rate peak near 305 on the flap curve; flare breaks a lock; 0 terrain crashes in 10 min of bot flight; M1A2 RPM sweep reproduces the crossfade order |
+| **M6 Destruction** | 6–10 (r1: 5–9) | slots/states/parts, wiring (`OnDestroyed`) through the S4 interpreter (Delay/RandomDelay/EventSplitter chains), collapse fallback, debris in the cosmetic world, **VFX6** destruction effects through `bf3_fx` (prefab `ReferenceObjectData → EffectBlueprint` on slot transitions, DebrisCluster and vegetation effects, aftermath loops; replaces r1's "effects as GPUParticles", 1), destruction rows, dirty-tile nav rebake | an RPG hole appears identically for a late joiner and plays the same blueprint on two clients, the late joiner sees the aftermath loop; walking through a fresh hole predicts correctly; bots path through new openings; Bandar gas-station chain fires as wired |
+| **M7 Breadth and 64 on Caspian (v1)** | 24–43 (r1: 23–42) | all kits and gadgets (incl. MAV/EOD/T-UGS/M224 as vehicles), spotting, suppression, squads and beacons, attachments; remaining modes (Rush, SQDM, Domination, TS, AS, CTF, GM, Scavenger) as entity classes + level data through the interpreter; remaining vehicle roster; remaining levels; **VFX7** (5,714 level `EffectReferenceObjectData` via `AutoStart` + client-realm logic, camera-proximity weather, VisualEnvironment effects, quality tiers, option-(b) fallback for the largest emitters, 1); audio **A7** (VO, sound states, MasterUnit presets); end-of-round screen and remaining UI; full MapList admin, "Prepare levels" UI, LRU eviction and GSTF budget; server ops | a full 64-slot Conquest Large round on Caspian with bot fill inside §3.5 budgets; every vehicle spawns, drives/flies, fires, dies, respawns on its levels; all 230 level×mode rows instantiate with 0 unknown logic types; all 29 levels instantiate their ambient effects with 0 unknown types and Kharg/Alborz weather stays within the D19 budget |
 
-Totals [inferred]: MVP (through M4) ≈ 35–51 slices plus the remaining look slices, in line with 08 §5.1's 40–65
-developer-weeks once the animation row shrinks; v1 (M5–M7) ≈ 41–71 further slices (08: 50–85 w). The S1–S3 spikes
-come right after M1 because they need the collision world and decide D4, D9 and the animation budget.
+Totals [inferred]: MVP (through M4) ≈ **46–65** slices plus the remaining look slices (r1: 41–60, r0: 35–51; r1 added
+S4, the agent share of S5, audio A1–A5, route-A+ UI and the loading/rotation protocol; r2 adds VFX1–VFX5 = 5 slices),
+against 08 §5.1's 40–65 developer-weeks once the animation row shrinks; v1 (M5–M7) ≈ **40–70** further slices (r1:
+38–68, r0: 41–71; M7 shrinks from 25–45 to 22–40 per gap logic §9.2 because remaining modes become entity classes +
+data, then grows by A7, UI screens and rotation tooling; M6 reuses the interpreter; r2 adds VFX6–VFX7 = 2 slices)
+(08: 50–85 w). VFX is ≈ 9–12 k LOC (compiler 1.5 k, simulator 3–4 k, renderer + shaders 2–2.5 k, instancer 1.2 k,
+lights + decals 1.3 k, trigger glue ≈ 1 k) [inferred, gap VFX §8.2]. The S1–S4 spikes come right after M1 because they need the
+collision world and decide D4, D9, D12 and the animation budget; S5 runs beside the gameplay track and needs none of
+our code.
 
 ---
 
@@ -837,7 +1345,10 @@ come right after M1 because they need the collision world and decide D4, D9 and 
 Sources: W = [topics/01](topics/01-weapons.md); S = [topics/02](topics/02-soldier-kits-modes.md); A =
 [topics/03](topics/03-animation.md) + [Ant probe](probes/ant-animation-probe.md); V = [topics/04](topics/04-vehicles.md);
 N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G = [topics/07](topics/07-godot-engine.md)
-+ [toolchain probe](probes/godot-gdextension-probe.md); E = [EBX probe](probes/ebx-data-probe.md).
++ [toolchain probe](probes/godot-gdextension-probe.md); E = [EBX probe](probes/ebx-data-probe.md); r1 gap reports:
+LL = [level logic](topics/gap-r1-level-logic-schematics.md), AU = [audio](topics/gap-r1-audio-system.md), UI =
+[UI/HUD](topics/gap-r1-ui-hud-minimap-localisation.md), LD = [load/cache](topics/gap-r1-load-cache-memory-rotation.md),
+MH = [measurement harness](topics/gap-r1-measurement-harness.md); r2: FX = [visual effects](topics/gap-r2-vfx-effects-system.md).
 
 ### 7.1 Weapons [verified data unless tagged]
 
@@ -893,7 +1404,7 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
 | AH-1Z | lift spring 40000 / damping 20000; `CollectiveInputIdle` 0.9 (engine) and 0.99 (`RotorParameters`); tail ×75; rotor parts 10/11 (tail 15/16) | V C11 |
 | jets | pitch flap authority (250,1.75)(305,1.7)(320,1.05); lift peaks 18° (roll pair) / 24° (pitch flap wing); afterburner 1.5, `DissipationTime 9999` | V C12 |
 | turrets | M1A2 ring lock 0.0001 (T-90 0.0), gun 0.85 (T-90 1.0), HMG 1.0; MBT gun −20…0° (T-90 −20…4°) | V C13 |
-| IW4L feel targets | Humvee 68 km/h at 6 s, braking ~10 m/s²; T-90 pivot 65° in 2 s; heli 159 km/h at 25° nose-down | V §2 [report claim] |
+| IW4L feel targets | Humvee 68 km/h at 6 s, braking ~10 m/s²; T-90 pivot 65° in 2 s; heli 159 km/h at 25° nose-down; **to be replaced by S5 Sessions 2–3 outputs** (H:V1–V6) | V §2 [report claim]; MH §3.6 |
 
 ### 7.5 Networking, animation, navigation, engine [verified unless tagged]
 
@@ -904,6 +1415,7 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
 | Ant decode | 322 packages, 0 parse errors; 3,778/3,778 DCT clips bit-exact in 1.7 s (C#); 5,592/5,592 clips and 684,459 channels mapped; M9 frame 0 vs IdlePose 0.07° / 0.4 mm | A, probe §4–§5 |
 | anim cost | 64 × 213 bones: own C++ 0.41–0.46 ms; AnimationPlayer ~10 ms; AnimationTree ~30–35 ms/frame | A C13 |
 | Detour (Metro, 743,835 tris) | 14,797 polys, 2.6 MiB, 3.7 s on 1 thread, queries 0.06–0.17 ms mean; tile rebake 110–163 ms, swap 0.3–0.6 ms | B C7, C10 |
+| Detour, big maps (BF3 capsule, level_bf3 soup, 16 threads) | Caspian 5.18 s (1 thread 47.9 s), 6.1 MiB; Kharg 11.84 s, 20.0 MiB; Bandar 11.39 s, 12.5 MiB; Nebandan 1.68 s; Metro largest component 23 % (split reproduced) | LD §2.7 |
 | Godot nav (Metro) | 55,319 polys; queries 4–9 ms mean; region swap ≈ 6 s with edge connections, 28–96 ms without | B C7–C8 |
 | Godot rays (Jolt) | `intersect_ray` 1.5–2.2 µs; `intersect_ray_into` 0.53–0.99 µs; 4 threads 3.8–3.9k rays/ms; `body_test_motion` 24–30 µs (long sweep) | G probe §6.2 |
 | RS | `instance_create2` 1.0–1.2 µs; 10k instances of 1 mesh = 6 draws (1.5 ms frame D3D12); 10k over 1,000 meshes = 2,748 draws | G probe §6.1 |
@@ -911,6 +1423,69 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
 | godot-cpp build | 139.7 s debug, 127.6 s release, 12.5 s incremental | G probe §4 |
 | install read | 73,371 partitions, 0 failures; one level 2.2 s; all MP/XP + global 32 s | E §0 |
 | precision | max infantry distance 2,252 m (XP5_002; median 476 m); float32 ulp 244 µm at 2–4 km ≈ 1 px viewmodel error at 1440p/90° | G K9–K10 |
+
+### 7.6 Level logic [verified data unless tagged]
+
+| item | value | src |
+|---|---|---|
+| census | 230 level×mode rows over 29 levels, 2,710 reachable partitions; level-owned 2,099/5,066 primitives, 44,234/58,593 connections | LL §2, §3.1 |
+| per row | primitives median 649 / max 2,082; server median 170 / max 1,036; `SyncedBool` median 17 / max 259; level server logic (no destruction) median 56 / max 560 | LL §3.2 |
+| vocabulary | 55 primitive types, 48 server-capable; 20 types = 94.7 %, 36 = 99 % of server-capable unique instances; 0 unknown types after S4 on Metro/Caspian | LL §3.3 |
+| Metro RushLarge0 | 8 `CharacterSpawnReferenceObjectData` start `Enabled=False`, opened per base by `SyncedBool.Out → Enabled`; park event `EventGate → Delay 10 s → SyncedBool.SetTrue` after base 1; `BaseCount 4`, arm 2.5, lives 100 pushed by interface | LL §4, §10 |
+| Caspian ConquestLarge0 | `SyncedBool.Out` → `dynamicspawn_f18`/`su35` `.Enabled` (jets follow flag ownership); `Bool.Value` → M1A2/T-90 spawner `.Enabled` | LL §4, §10 |
+| determinism | two runs of the same row and inputs give an identical event-trace hash | LL §9.2 [inferred criterion] |
+| hash | port ids = djb2-xor (`h = 5381; h = h·33 ^ byte`), e.g. `Out` = 193453899 | LL §2, §10 |
+
+### 7.7 Audio [verified data unless tagged]
+
+| item | value | src |
+|---|---|---|
+| census | 833 patches + 1 master, 32,113 node instances (46 types), 7,322 voices; 1,879 waves | AU §1 |
+| M16A3 bands | close layer cosine 1 → 0 over 0–20 m; far layer fades in over 250–300 m; handling 1–15/1–17/1–19 m | AU §12.1 |
+| M16A3 pitch / HPF | pitch U[1.21, 1.262] × LFO[0.96, 1.0] at 4 Hz; distant HPF = `ScaleClamp(dist 17..200 → 0..310 Hz)` | AU §12.2 |
+| other bands | M98B tail 300–350 m; RPG-7 45–90 m; M1A2 engine 15–50 and 80–100 m | AU §12.3 |
+| Cone curve | 19.8/54.6/91.2/120.4/179 m → −17.9/−34.6/−41.1/−47.0/−67.1 dB (X in metres [inferred]) | AU §12.4 |
+| AreaType | arg-max of `[0.7, 1.3·U, 1.5·IG, 1.4·UA, 1.2·D, 1.1·F, 1.6·idx6]`; Metro `ir_indoor_garage` zone → AreaType 2, `shellcasings_762_indoor`, IR −20 dB | AU §12.5 |
+| footsteps | SoundMaterialId 8 water, 13 snow, 15 glass; walk/run at 1.0/5.5 m/s, periods 0.3/0.2 s; inaudible beyond ≈ 45 m | AU §3, §12.6 |
+| HDR | only a 71 dB footstep: window top 80 / bottom 35; after a 110 dB shot the top attacks to 110 in 0.05 s and a 63 dB source is suspended | AU §12.7 [inferred from data + GDC09] |
+| XAS decode | 0.117–0.120 ms per channel-second, 0 frame mismatches (Metro sample, all of Loc/en); slice A1 target ≤ 0.2 | AU §9 |
+| mixer cost | 128 voices ≤ 10 % of one core on the audio thread, no xruns at 512-frame blocks (A3) | AU §11.6 [inferred target] |
+
+### 7.8 UI, minimap, strings [verified data unless tagged]
+
+| item | value | src |
+|---|---|---|
+| text DB | `us_loc` 15,515 entries, tag "Global", 0 decode errors; 1,247/1,271 EBX SIDs resolve; `ID_H_US_A` → `34a54e7a`, `ID_H_US_B` → `34a54e7b`; `ID_P_WNAME_M16A4` → hash `0fd83dfa` → "M16A3" | UI §4, §7 |
+| minimap mapping | `u = 0.5 − (x − Cx)/S`, `v = 0.5 − (z − Cz)/S`; Metro 5/5 and Caspian 7/7 flags/HQs inside the CQS mask union; 100 % of fun-bots waypoints on 4 level×mode pairs (opt-in oracle); Metro TDM mask IoU 0.70 vs 0.00 for other mappings | UI §2 |
+| minimap data | Metro (0, −162)/1024, satellite 2048²; Caspian (0, 0)/2048, 2048²; Bazaar (0, 0)/512, 512²; mask threshold 0.496; 499 combat-area masks | UI §2 |
+| icons and fonts | 161 `UIHudIcon` types (93 with UV states) on a 256×1024 atlas; `iconsingame` 162 rectangles / 427 labels; Purista 443 glyphs, Venice 33 | UI §1, §3, §6 |
+
+### 7.9 Load, cache, memory [verified unless tagged]
+
+| item | value | src |
+|---|---|---|
+| mount + db + traverse | 0.2–0.45 s per level×mode | LD §2.1 |
+| textures | Caspian CQL 1,371 unique 2D = 1,658 MiB (415 MiB drawn by the static world); decode 2.13–2.20 s on 16 threads; 29-level GSTF union 7.50 GiB (+0.40 GiB globals) | LD §2.2–§2.4 |
+| Jolt static (Godot's Jolt proxy) | Caspian 2.54 M tris: tiled 64 m 1.6 s / ≈ 31 MiB; one shape 2.9 s / ≈ 41 MiB + ≈ 560 MiB transient | LD §2.6 |
+| load targets | client cold ≤ 15 s (16 threads), cold in intermission ≤ 40 s, warm ≤ 5 s; host/server cold ≤ 25 s, server warm ≤ 2 s; converter peak RSS ≤ 0.5 GiB | LD §6.7 [inferred targets on measured stages] |
+| budgets (Caspian CQL, 64 players) | client VRAM ≤ 2.5 GiB, RAM ≤ 1.5 GiB; dedicated server ≤ 0.4 GiB; headless baseline 90 MiB | LD §4 [inferred from measured parts] |
+| cache | 29 levels ≈ 2–4 GiB resident route, ≈ 10–12 GiB with GSTF | LD §3 |
+| rotation | 3 levels, 2 clients (one empty cache), 0 kicks; stall kick 30 s; deadline 120 s (300 s cold) | LD §6.2, §7 [inferred criteria] |
+
+### 7.10 Visual effects (new r2) [verified data unless tagged]
+
+| # | item | value | src |
+|---|---|---|---|
+| 1 | census / compile | 1,101 `EffectBlueprint`, 3,410 emitters, 4,353 `EmitterEntityData`, 32 processor + 10 evaluator types over `@all-mp`; VFX1 compiles 3,410/3,410 and 1,101/1,101 with 0 unknown types | FX §1 |
+| 2 | polynomial | `f(t) = ((x·t + y)·t + z)·t + w`, so f(0) = w and f(1) = x+y+z+w; then `clamp(MinClamp, MaxClamp) × ScaleValue` [order inferred]; 1p flash alpha `{w 1, y 0.953, z −1.95}` → 1 → 0 | FX §2.2 |
+| 3 | 1p muzzle golden (`fx_muzz_generic_rifle_1p`) | `_1p_flash`: p 0.75, 1 particle, emitter 0.1 s / particle 0.05 s, size 0.4·U[0.8,1]·P(t), start frame ∈ [1,16] of `muzzleflash_01` (16 frames, 4 cols); `_1p_light_01/02`: radius 0.2 / 2.5, colour (1000,395,66) / (5,1.9,0.3); a 1p shot ≈ 10 particles + 2 lights (p 0.75 each) | FX §2.3 |
+| 4 | continuous steady state | `em_amb_mp12_oilfire_l_fire_01` 16/s × 5 s → 80 ± 1 live (cap `MaxCount` 81) | FX §2.1, §8.2 [inferred criterion] |
+| 5 | impacts (5.56, grid by `PhysicsMaterialIndex`) | Metro: concrete → `fx_impact_concrete_01_s(_xp2)` + `decal_concrete_s_01` (spread 30°), brick → `decal_brick_s_01`, soldier → `fx_impact_soldier_body_s` (spread 90°, no decal), water → `fx_impact_water_s`; Caspian generic default `fx_impact_generic_01_s` on 63 surface materials | FX §3 |
+| 6 | atlas | Metro `emittersystem_win32` 52 `TextureInfos` resolve; base 4096² DXT5 sRGB 13 mips, normal 1024×2048 NormalDXT5RGA 12 mips | FX §5 |
+| 7 | firefight budget | 64-bot Metro firefight: FX ≤ 1 ms main thread, ≤ 2 ms GPU at 1440p, ≤ 64 effect lights (raw estimate ≈ 80–110, merged ≈ 50–70); 16k particles ≤ 0.3 ms GPU | FX §4, §8.1 [inferred targets on measured parts] |
+| 8 | Godot reference cost (RX 9070 XT, 1080p) | 1,000 GPUParticles3D × 16: 9.87 ms frame / 2.02 ms RS CPU; one MultiMesh 16k quads 0.57 ms (lit + soft 1.05); +64 omni +0.67 ms GPU, +256 +3.0 ms; C++ sim 24.7 ns/particle/frame | FX §6.2 |
+| 9 | explosions | M67 on Caspian gravel → `fx_grenade_frag_01` + `fx_impact_gravel_m` + `decal_scorchmark_m_01`; RPG on concrete → `fx_grenade_frag_01` + `fx_impact_concrete_01_m` + `decal_concrete_l_01`; `CameraShockwaveRadius 0` | FX §2.4 |
+| 10 | network | two clients pick the same muzzle/tracer/impact variants for one burst (`seed = hash(event id)`); a late joiner sees running loops (burning wrecks, ambients), no stale one-shots; dedicated server instantiates 0 emitters | FX §7 [inferred criteria] |
 
 ---
 
@@ -952,21 +1527,42 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
 | C32 | Bandwidth "bots cost no bandwidth"; "BF3 capped 128 kbit/s [verified]" | 05 §7.4 vs 05 K14, extra-3 | Bots cost no connection or upstream but are ghosts downstream; BF3's 128000 has unknown units |
 | C33 | Weapon EBX "3,497 partitions in Metro" | 01 §0 vs 01 C1 | 3,497 entries = 2,795 EBX + 702 res |
 | C34 | GDExtension interface JSON "identical" | 07 §2.1 vs 07 K5, probe §2 | ABI-equivalent, not identical (one argument type); generate from the exe's own dump |
+| C35 (r1) | D12 "resolved constants + C++ rules, no event-graph VM" vs the level-logic census | r0 §4 D12 (02 §3.1, handoff 04 §1) vs gap logic §1, §3, §7 | r0 looked only at the shared `gameplay/*` prefabs; level-owned schematics hold 44,234 of 58,593 connections and switch spawners, vehicles, flags and events on every traced row. D12 revised to native entities + whitelisted interpreter + logic ghost; validated by S4 |
+| C36 (r1) | Caspian textures "4,545 images, ≈ 1.56 GiB" | R10, 07 §4.5, handoff vs gap load §2.2, §9 | 1,371 unique 2D textures = 1,658 MiB for CQL (1,496 over all modes); only 415 MiB drawn by the static world, the rest weapons/characters/vehicles. No unique count matches 4,545 (origin not determined) |
+| C37 (r1) | Nav bake "4–6 s per level" (IW4L) | 07 §6.2 vs gap load §2.7 | 5–12 s on 16 threads for big maps (≈ 48–110 s on one core), per hull class; Metro 0.17 s |
+| C38 (r1) | Dedicated server load "≤ 2 s from cache" | §2.6, 07 §6.3 vs gap load §6.5 | Holds warm only; a cold level costs ≈ 10–16 s, so the server pre-bakes its MapList at startup |
+| C39 (r1) | UI "own Godot UI … no EA art" | r0 §3.8, 08 §3.7–§3.8 vs gap UI §0, §7–§8 | Route A+: BF3's minimap, icons, strings and fonts read at runtime for in-game use (same legal position as meshes, 08 §3.8 #2); never for branding or in the repo; own art only as per-item fallback |
+| C40 (r1) | Weapon sound graph "we do not evaluate"; environment selection "not determined"; vehicles via the IW4L hand mixer; `AudioStreamPlayer3D` per layer | r0 §3.8, 01 §4, handoff 04 §4.4 vs gap audio §0, §5, §10 | Interpret the graphs (46 types, compiled plugin chains in data) in an own mixer; environment = listener-side global `AreaType` from sound areas; vehicle patches take named game parameters; Godot 3D players lack HDR, biquad chains and convolution |
+| C41 (r1) | Minimap "images never drawn"; XP2_Skybar without a satellite (critic scan) | handoff 04 §2.5, critic-r1 vs gap UI §1–§2 | All 29 levels have a satellite (Skybar's outside `minimap/`); 499 combat-area SDF masks; mapping solved with both axes mirrored and second-sourced |
+| C42 (r1) | Measurement pass "(user, ~1)", "before M2 tuning" | r0 §6, R5 vs gap harness §0.7–§0.8, §7 | Needs an agent-built harness (0.6–0.8 slice) plus three user sessions (≈ 4–5 h attended); Session 1 runs during M0 because the motor gains feed M1 |
+| C43 (r1) | Both gap reports name a new step "S4" (level-logic spike vs measurement pass); harness item ids M1–M4/S1–S4 clash with milestones and spikes | gap logic §9.2 vs gap harness §7, §1.1 | S4 = level-logic spike, S5 = measurement pass; harness items written H:W1, H:S3, H:M1 … in this document |
+| C44 (r1) | Per-level audio XAS 178–247 MiB vs 220–309 MiB | gap audio §9 vs gap load §2.2 | Different scopes: audio counts non-VO, non-stream-pool waves of the level+mode bundle sets; load counts every SoundDataAsset chunk resolving in the mounted bundles. Both stand; plan RAM with ≈ 220–310 MiB |
+| C45 (r1) | `Loc\en` chunk classes: 4,280 XAS streams + 5 other vs 3,483 SNR-headed + 803 continuations; R9 lists `Loc/*` among delta-patched bundles | gap audio §8 vs gap UI §4; R9 | Same 4,285 chunks classified by different tests (decodable stream vs header framing); both find a chunk-only superbundle (0 bundles) of VO plus the text-DB pair, patched copy winning. `Loc` therefore has no bundle manifest to reconstruct; R9 narrowed to XP2–4 |
+| C46 (r1) | M16A3 patch "107 graph nodes" vs "163 nodes" | r0 §3.8 vs 01 §4 | Both right: 107 node instances of 163 partition instances |
+| C47 (r2) | Impact sounds/effects use "the same lookup bullets already do" (the damage row by `PhysicsPropertyIndex`) | r1 §3.10 (gap audio §3) vs gap VFX §3 | The grid has two index spaces: `PhysicsPropertyProperties` (Damage, Penetration, TerrainDestruction) are read by `PhysicsPropertyIndex`; `PhysicsMaterialProperties` (Effect, Sound, Decal, Vehicle) by `PhysicsMaterialIndex`, through the same `MaterialIndexMap`. With the property index the 5.56 row has 0 effect cells; with the material index ~15 impacts. Second source: IW4L `level_bf3/src/collision/material.rs:131`. Same grid and ray, different index |
+| C48 (r2) | Effects "as GPUParticles" via an emitter→GPUParticles3D compiler | r1 §6 M6, 01 §616-620, handoff 04 §6.2, 08 §5.1 vs gap VFX §6, §8 | Untested assumption, refuted for the default path: `ParticleProcessMaterial` cannot express BF3's rate vs `MaxCount` cap or evaluator trees, and one particles instance per emitter costs 9.9 ms/frame at 1,000 systems. D19: CPU simulation into MultiMesh batches; pooled GPUParticles3D with generated shaders only as fallback for very large emitters |
+| C49 (r2) | FX budget inside "Audio/FX 6–8 w" | 08 §5.1 vs gap VFX §8.2 | Audio (A1–A7) already uses that budget; VFX is ≈ 7 further slices (≈ 9–12 k LOC), now in §6 |
 
 ---
 
 ## 9. Open questions and next experiments
 
-**Measurement pass in the user's BF3 or VU** (knowledge only, offline, nothing written to the install; EU Art 5(3)):
-1. Fixed-wall shot plots (Symthic style) for 3 rifles, one LMG, one bolt action: spread disc distribution, minimum rise
-   on state change, recoil recovery (rate vs exponential), when the first-shot multiplier re-arms.
-2. Damage at 5/20/40/60 m on a friendly target with hit markers: falloff shape and distance basis.
-3. Timed bleed at 2-of-3 and 3-of-3 flags; capture flip time with 1, 2 and 4 attackers; regen onset after damage.
-4. RPG direct hit on infantry; tank shell on MBT front/side/rear with and without reactive armour.
-5. Vehicle reference clips at fixed spots: Humvee 0–60, braking, full-lock circle; T-90 vs M1A2 top speed and pivot;
-   AH-1Z hover, climb, 25°/36° dive speeds; F/A-18 turn rate vs HUD speed (settles the speed-axis units); turret
-   traverse rates.
-6. ADS zoom FOVs on screen (whether `RenderFov`/`FieldOfView` are vertical).
+**Measurement pass = S5, the VU harness** (§3.13; knowledge only, nothing written to the install, manifest checked
+before/after; EU Art 5(3); a VU server needs internet for Zeus at start, so "offline" is not possible):
+1. Fixed-wall shots (scenario W-A, + W-A60 for H:T1) for M16A3 in 3 stances × hip/ADS and AK-74M, M416, M249, M98B:
+   spread disc distribution, minimum rise on state change, recoil recovery (rate vs exponential), first-shot re-arm
+   (H:W1–W4).
+2. Damage at 5–175 m on target bots (W-B): falloff shape and distance basis, pass-through and penetration (H:W5–W6).
+3. Timed bleed per flag state on Metro CQS and Bazaar CQL (M-A); capture time with 1–5 attackers and flips (M-B);
+   regen onset, suppression abort, spawn immunity (S-A); movement gains, gravity and fall damage (S-B).
+4. RPG/SMAW/M320/M67 on infantry (W-C); tank shell, RPG, HMG and 25 mm on MBT front/side/rear, reactive armour if the
+   unlock can be selected without data edits, collision damage (V-C).
+5. Vehicle time series with driver bots (V-A: Humvee/Vodnik/LAV, M1A2, T-90, quad; profiles P1–P6), turrets (V-B),
+   AH-1Z hover/climb/dive (A-A), F/A-18 turn rate vs speed and stall (A-B), boats and AC-130 (A-C).
+6. ADS zoom FOVs through `WorldToScreen` (W-D); the viewmodel `RenderFov 55` needs user screenshots instead.
+6a. (r2, optional, low priority) Effects as frame-matched references: capture the M16A3 1p/3p muzzle, a 5.56 concrete
+    impact and an M67 blast on gravel, and if VU exposes them, live particle and effect-light counts in a bot
+    firefight (gap VFX §10: effects are observable there).
 
 **Data experiments** (read-only tools in scratch):
 7. Rebuild collision per Havok body type (Raycast / Collision / Character) and re-run the Metro nav coverage; identify
@@ -978,10 +1574,29 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
     `TrimOffset`; DeltaTraj DOFs; the 0x1548 id prefix; `RagdollResource` (try the Havok reader).
 11. Remaining open fields: `ForwardGearSpeeds`, `MaxVelocity`, `PowerFadeOutRange`, `VelocityDamageThreshold` units;
     `WeaponInputRouterComponentData`; the 40 mm grid row; `UsePrediction` on the remaining jets and helicopters;
-    `RoadData` junctions; weapon sound-graph environment selection.
+    `RoadData` junctions. (Weapon sound environment selection: solved in r1, §3.10.)
+11a. **Level logic (r1)**: exact event semantics (re-entrancy, ordering, `removeDuplicateEvents`, same-tick property
+    propagation, `Sequence` track timing, `PropertyGate`/`PropertyCast` edges) by careful data reading or VU
+    observation; BF3 late-join behaviour for true SyncedBools and running sequences; "Networked" delivery; in-vehicle
+    (7,188 connections) and soldier (389) graphs; Scavenger pickups and Gun Master progression wiring.
+11b. **Audio (r1)**: `irf1` IR chunk layout; HDR `CompressFactor`/`DischargeFactor`/`MaxAllowedEnergy`/
+    `AllowedOvershoot` and the top-release curve; `AudioCurve` X units; Sampler segment stepping; ambient-type mixer
+    names and Desert/Forest usage on other levels; area `FloatEntityData` drivers; the 5 non-sound `Loc/en` chunks.
+11c. **UI (r1)**: the 169 uncensused SWFs; `iconsingame` label → rectangle map; HUD positions from root-timeline
+    `PlaceObject` matrices; kill-feed `KillMessage` payload; `DefineFont3` code-table coverage; a non-English install.
+11d. **Load and memory (r1)**: cold-disk (HDD/SATA) load times; Jolt shape-stream size and Jolt-side memory on our own
+    Jolt; unresolved SoundDataAsset chunk refs (1.96–2.51 GiB per level); vehicle hull-class nav bakes; scene/gameplay
+    blob sizes; the origin of the handoff's "4,545 images".
+11e. **Visual effects (r2)**: `BaseEmitterData` runtime semantics (base chain vs orphan copy vs merge) and
+    `EmitterData` child timing; `MaxInstanceCount` scope and `ResetInstanceWhenStarted`; clamp/scale order,
+    `DefaultValues` × evaluator rules, `AlphaLevelMin/Max/Scale` erosion with `Exponent`, `UpdateClipScale.Lookup`,
+    `ZOcclusionLookup`, `DistributeOverDistance`/`TrailSegmentLength`, `Turbulance` noise; `PointLightRadius` vs particle
+    size and BF3 light units; NormalDXT5RGA y sign and the G/B channels; `Quad`/`WorldAlignedQuad` orientation; BF3's
+    half-res particle compositing and `ForceNiceSorting`.
 
 **Engine experiments**:
-12. Two Jolt copies (and Recast) in one process on Linux; own-Jolt static world memory for Caspian with two systems.
+12. Two Jolt copies (and Recast) in one process on Linux; own-Jolt static world memory for Caspian with two systems
+    (r1 proxy on Godot's Jolt: ≈ 31 MiB tiled, ≈ 41 MiB as one shape; gap load §2.6).
 13. Soldier motor sweep cost on own Jolt at 64 soldiers; `CharacterVirtual` replay within ε across corrections.
 14. Vehicle replay bit-compare between ServerWorld and PredictionWorld (S2).
 15. 64 skinned soldiers with rendering and shadows on the RX 9070 XT (S3); viewmodel with TAA/FSR and SSAO/SSR.
@@ -990,6 +1605,14 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
 17. At the RC: re-dump, `--validate-extension-api`, rebuild, check the 9 changed method hashes, `STREAMING_LOD`.
 18. `mesh_create_from_surfaces` from worker threads at level load (code-read only so far); the ENet `create_server`
     argument mix-up at runtime (only relevant if Godot's ENet is ever used).
+18a. (r1) Warm end-to-end level load inside Godot (BC upload, ~1.2 k meshes, ~20 k instances); render-target, shadow
+    and compute-skinning VRAM for 64 soldiers; `threading/worker_pool/low_priority_thread_ratio` default in dev7.
+18b. (r1) C++ mixer microbenchmark and a 64-bot Metro audio capture (slice A3); whether the 512-frame block or
+    `AudioStreamPlayback` virtuals change before 4.8 stable.
+18c. (r2) FX from C++: the MultiMesh path with CPU sort, soft lit shaders and the ≤ 64 light pool at 1440p in a 64-bot
+    Metro firefight (VFX3); option (b), pooled GPUParticles3D with generated particle shaders fed by `particles_emit`
+    from C++ (the r2 benchmark used GDScript-driven nodes and a stock `ParticleProcessMaterial`); raising
+    `rendering/limits/cluster_builder/max_clustered_elements` above 512 if lights and decals share the cluster.
 
 **Decisions for the user**:
 19. Licence for our code (MIT recommended; GPL-3.0 if forks must stay open) before the first outside contribution;
@@ -997,6 +1620,11 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
 20. Whether a standalone `bf3_server` executable (no Godot) is acceptable as the dedicated server.
 21. Whether to ask the fun-bots authors for permission to use their traces as a shipped validation set (optional; not
     needed for the plan).
+22. (r1) Approve the S5 measurement sessions (≈ 4–5 h attended, ≈ 6 h unattended, over three sessions) and a second,
+    clean VU server instance (`Documents\Battlefield 3\ServerMeasure`; reuse the existing key sequentially or request a
+    second one); read VU's terms of service first.
+23. (r1) Confirm route A+ for UI: BF3's own UI textures, strings and fonts drawn in-game from the user's install
+    (never in the repo, releases or branding).
 
 ---
 
@@ -1012,14 +1640,21 @@ N = [topics/05](topics/05-networking.md); B = [topics/06](topics/06-bots.md); G 
 | [topics/06-bots.md](topics/06-bots.md) | fun-bots in depth (licence, traces, control), Detour vs NavigationServer3D measured on Metro, bot behaviour design, budgets, B0–B10 plan |
 | [topics/07-godot-engine.md](topics/07-godot-engine.md) | Godot 4.8 status, texture streaming (GSTF), godot-cpp v10 pinning, precision, threading rules, dedicated server, runtime cache formats, repo/CMake/CI |
 | [topics/08-prior-art-legal.md](topics/08-prior-art-legal.md) | VU, Rime, Frosty, Frostbite scripts, BYOD precedents, EU/US law, EA User Agreement, trademark practice, the user's install, MVP/v1 scope |
+| [topics/gap-r1-measurement-harness.md](topics/gap-r1-measurement-harness.md) | r1: the measurement pass as an observe-only VU server-mod harness: open items → VU observables, harness spec, output format, 17 scenarios with decision rules, feasibility on this PC, install before/after check, fallbacks, cost (§3.13, D18) |
+| [topics/gap-r1-level-logic-schematics.md](topics/gap-r1-level-logic-schematics.md) | r1: census of per-level logic graphs over 230 level×mode rows, node vocabulary, realms and networked events, seven traced rows, interpreter vs hand-written rules, revised D12, spike S4 (§3.11) |
+| [topics/gap-r1-audio-system.md](topics/gap-r1-audio-system.md) | r1: sound-graph census and node semantics, compiled plugin chains, AreaType environment selection, master mixer and HDR, footsteps/impacts, VO and `Loc/en`, XAS memory and decode cost, Godot audio limits, slices A1–A7 (§3.10, D15) |
+| [topics/gap-r1-load-cache-memory-rotation.md](topics/gap-r1-load-cache-memory-rotation.md) | r1: measured mount/decode/scene/Jolt/nav times on five levels, 29-level SHA1 sharing, `user://` footprint, client and server memory budgets, rotation flow and loading protocol, cache eviction, server pre-bake (§3.12, D17) |
+| [topics/gap-r1-ui-hud-minimap-localisation.md](topics/gap-r1-ui-hud-minimap-localisation.md) | r1: UI data inventory, minimap decode and world mapping, Scaleform SWF census (AS2 only), text DB format and SID hash, `UI*CompData` HUD signals and flows, Godot APIs, route A+ (§3.8, D16) |
+| [topics/gap-r2-vfx-effects-system.md](topics/gap-r2-vfx-effects-system.md) | r2: effect/emitter census over `@all-mp` (1,101 effects, 3,410 emitters, 32 processors), spawn/polynomial/colour semantics, M16A3 muzzle and M67/RPG blast checks, impact selection by `PhysicsMaterialIndex`, lights/decals/sounds in effects, emitter atlas layout, Godot particle options and benchmark, triggers/network/late join, D19 and slices VFX1–VFX7 (§3.14) |
 | [probes/ebx-data-probe.md](probes/ebx-data-probe.md) | Whole-install EBX dump (73,371 partitions): weapons, soldier, kits, material grid, vehicle AI, spawners, animation resources |
-| [probes/ebx/](probes/ebx/) | Curated JSON dumps: 10 weapon closures + `_summary.json`, soldier/kits/teams, damage multipliers, Humvee/M1/AH-1Z, spawn refs, skeletons and Ant packages |
+| `probes/ebx/` (local only, not in git) | Curated JSON dumps: 10 weapon closures + `_summary.json`, soldier/kits/teams, damage multipliers, Humvee/M1/AH-1Z, spawn refs, skeletons and Ant packages. BF3-derived data, so removed from the repo and its history on 2026-10-14 (D14); local copy in `..\..\research-data\probes\ebx\`, regenerate with `probes/tools/ebx-dump` |
 | [probes/ant-animation-probe.md](probes/ant-animation-probe.md) | Ant decode verdict: container format, bit-exact DCT spec, channel mapping, mesh binding, VBR findings, Godot renders, C++ port sizing |
-| [probes/ant/](probes/ant/) | Census, layouts of `s_basicassets`, validation logs, mapping checks, decoded M9/3p clips as JSON oracles, skeleton comparisons, `shots/` renders |
+| `probes/ant/` (local only, not in git) | Census, layouts of `s_basicassets`, validation logs, mapping checks, decoded M9/3p clips as JSON oracles, skeleton comparisons, `shots/` renders. BF3-derived data, so removed from the repo and its history on 2026-10-14 (D14); local copy in `..\..\research-data\probes\ant\` |
 | [probes/godot-gdextension-probe.md](probes/godot-gdextension-probe.md) | godot-cpp toolchain against dev7: commands, build times, errors and workarounds, RS/Jolt/nav/ENet/streaming measurements, setup gotchas |
 | [probes/tools/ebx-dump/](probes/tools/ebx-dump/) | Read-only Rust EBX dumper (copies of the IW4L crates) and its scripts |
-| [probes/tools/ant-probe/](probes/tools/ant-probe/) | C# Ant probe over a scratch Rime clone: bank census, parameterised DCT decoder, mapping solver, mesh export, throwaway Godot viewer |
+| `probes/tools/ant-probe/` (local only, not in git) | C# Ant probe over a scratch Rime clone: bank census, parameterised DCT decoder, mapping solver, mesh export, throwaway Godot viewer. Its DCT decoder was written from Rime's unlicensed `Decompressor.cs`, so the tool was removed from the repo and its history on 2026-10-14 (D14, clean-room); local copy in `..\..\research-data\probes\tools\ant-probe\`. The C++ port works from the written spec in the probe report |
 | [probes/tools/gdext-probe/](probes/tools/gdext-probe/) | Minimal C++ GDExtension probe (CMake, sources, project files) used for the toolchain and API measurements |
+| `probes/tools/vu-harness/` and `measurements/` (planned, not yet created) | S5 harness master copy (research tooling, never shipped) and its extracted runs (`<run>/raw.jsonl`, `meta.json`, install manifests) plus `measurements/SOURCES.md`; numbers and ids only, no BF3 content |
 | [godot-api/extension_api.json](godot-api/extension_api.json) | Full extension API of `v4.8.dev7.official.c971f93e7` (single precision), byte-identical to a fresh dump; use it to verify any Godot claim |
 | [godot-api/gdextension_interface.h](godot-api/gdextension_interface.h) | GDExtension C interface header of the same build |
 | `C:\Users\olku\iw4L\context\artifacts\2026-09-30-bf3-maps\15-GODOT-HANDOFF\HANDOFF.md` (+ `sections\01`–`04`) | The IW4L handoff: decisions already made, coordinates, Godot mapping for the level/look pipeline, lessons, golden counts; `04-gameplay-sim.md` covers modes, collision, vehicles, destruction, bots, networking lessons |

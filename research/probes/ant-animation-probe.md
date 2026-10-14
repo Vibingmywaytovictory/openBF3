@@ -1,5 +1,11 @@
 # Probe: BF3 Ant animations decoded from the unmodified install
 
+> **Repo note (2026-10-14):** the probe's outputs (`research\probes\ant\`: decoded clips, logs, renders) are BF3-derived
+> data, and its tool (`research\probes\tools\ant-probe\`) contains a DCT decoder written from Rime's unlicensed
+> `Decompressor.cs`. Both were removed from the git repo and its history (decision D14). Local copies are in
+> `C:\Users\olku\BF3 reimplementation\research-data\probes\` (outside the repo). The clean-room C++ port must be written
+> from the format and DCT specification in this report, not from that tool's code.
+
 Date: 2026-10-10. Probe source: `research\probes\tools\ant-probe\`; it is C# against a scratch clone of Rime, and
 its viewer is GDScript. Outputs: `research\probes\ant\`, with shots in `ant\shots\`.
 

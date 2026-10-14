@@ -1,5 +1,10 @@
 # EBX data probe: soldiers, weapons, kits, vehicle AI (read from the retail install)
 
+> **Repo note (2026-10-14):** the dumps this report cites under `research\probes\ebx\` are BF3-derived data. They were
+> removed from the git repo and its history (decision D14: no BF3 bytes in the repo). A local copy is in
+> `C:\Users\olku\BF3 reimplementation\research-data\probes\ebx\`, outside the repo. Regenerate them with
+> `research\probes\tools\ebx-dump` (README) against your own install.
+
 Probe run 2026-10-10 against `C:\Program Files\EA Games\Battlefield 3` (base + `Update\Patch` + `Update\Xpack1..5`),
 **read-only**: the tool opens files for reading and writes only under the scratch folder and `research\probes`.
 Tags: **[V]** verified here (in data read by the tool, or a primary source read), **[R]** report claim (a source not

@@ -14,3 +14,9 @@ export_credentials.cfg
 .mono/
 data_*/
 mono_crash.*.json
+
+# BF3-derived data and code derived from unlicensed tools must never be committed (research decision D14).
+# Probe outputs stay local (see research/probes/*.md); regenerate them from your own install.
+research/probes/ebx/
+research/probes/ant/
+research/probes/tools/ant-probe/
