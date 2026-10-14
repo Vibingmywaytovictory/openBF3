@@ -104,3 +104,35 @@ if(OPENBF3_ASAN)
     set_tests_properties(core.ui.text.unit core.ui.text core.ui.text.fuzz
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_text_cl_dir}")
 endif()
+# bf3_anim (skeletons, poses, skinning binds): anim.unit needs no data; anim reads the install (Ant banks,
+# EBX skeletons, the 1P arms and M9 meshes) and exits 77 = skipped without one. With OPENBF3_ANT_ORACLE it
+# also compares model-space poses against the Ant probe's ReloadEmpty JSON.
+openbf3_test(test_anim test_main.cpp anim_tests.cpp test_support.h)
+target_link_libraries(test_anim PRIVATE bf3_anim antdump_lib)
+add_test(NAME anim.unit COMMAND test_anim --test-suite=anim-unit)
+add_test(NAME anim COMMAND test_anim --test-suite=anim)
+set_tests_properties(anim PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(anim.unit anim PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_anim_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(anim.unit anim PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_anim_cl_dir}")
+endif()
+# bf3_render (Godot-free preparation for the Godot bridge): render.unit needs no data; render loads the M9
+# viewmodel asset set from the install and exits 77 = skipped without one.
+openbf3_test(test_render test_main.cpp render_tests.cpp test_support.h)
+target_link_libraries(test_render PRIVATE bf3_render)
+add_test(NAME render.unit COMMAND test_render --test-suite=render-unit)
+add_test(NAME render COMMAND test_render --test-suite=render)
+set_tests_properties(render PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(render.unit render PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_render_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.unit render PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_render_cl_dir}")
+endif()
+# The Godot-side M9 reload check (res://scenes/m9_reload.tscn -- --m9-reload-check): Skeleton3D poses vs bf3_anim
+# and the probe JSON, skin, materials, install unchanged. Runs when OPENBF3_GODOT names the Godot console exe;
+# exits 77 = skipped otherwise or without an install. Needs the bf3_godot DLL (built with the default preset).
+if(OPENBF3_BUILD_GODOT)
+    add_test(NAME godot.m9_reload COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m9_reload.cmake)
+    set_tests_properties(godot.m9_reload PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+endif()

@@ -10,8 +10,14 @@ add_library(bf3_godot SHARED
     src/s0_selftest.h
     src/godot_util.cpp
     src/godot_util.h
+    src/render_bridge.cpp
+    src/render_bridge.h
+    src/viewmodel_demo.cpp
+    src/viewmodel_demo.h
+    src/m9_reload_check.cpp
+    src/m9_reload_check.h
 )
-target_link_libraries(bf3_godot PRIVATE godot-cpp bf3_host bf3_core bf3_sim bf3_net)
+target_link_libraries(bf3_godot PRIVATE godot-cpp bf3_host bf3_core bf3_sim bf3_net bf3_anim bf3_render)
 openbf3_module(bf3_godot)
 # No incremental linking: keeps the .ilk out of the project's bin/ and the DLL self-contained.
 target_link_options(bf3_godot PRIVATE /INCREMENTAL:NO)
