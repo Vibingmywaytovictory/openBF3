@@ -22,6 +22,9 @@ target_link_libraries(test_host PRIVATE bf3_host)
 openbf3_test(test_ant test_main.cpp ant_tests.cpp test_support.h)
 target_link_libraries(test_ant PRIVATE bf3_core antdump_lib)
 
+openbf3_test(test_res test_main.cpp res_tests.cpp test_support.h)
+target_link_libraries(test_res PRIVATE bf3_core)
+
 add_test(NAME core.guard COMMAND test_core --test-suite-exclude=install,containers,fuzz)
 # Container readers on synthetic bytes (no install).
 add_test(NAME core.formats COMMAND test_core --test-suite=containers)
@@ -34,6 +37,11 @@ set_tests_properties(core.fuzz PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME core.cache COMMAND test_cache --test-suite-exclude=cache_data)
 # Real payloads exported outside the repo (OPENBF3_CACHE_TESTDATA); exits 77 = skipped without them.
 add_test(NAME core.cache_data COMMAND test_cache --test-suite=cache_data)
+# Resource decoders: synthetic cases, then the sample the parity oracle exported from the install
+# (OPENBF3_RES_DATA, see README "Resource decoders"); exits 77 = skipped without it.
+add_test(NAME core.res.unit COMMAND test_res --test-suite=res_unit)
+add_test(NAME core.res COMMAND test_res --test-suite=res)
+set_tests_properties(core.res PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME sim.jolt COMMAND test_sim)
 add_test(NAME net.enet COMMAND test_net)
 add_test(NAME host.server COMMAND test_host)
@@ -48,9 +56,10 @@ set_tests_properties(core.guard core.formats core.install core.fuzz core.cache s
 # core.install also reads every bundle manifest and decodes sample payloads (slower in Debug).
 set_tests_properties(core.install PROPERTIES TIMEOUT 600)
 set_tests_properties(core.cache_data PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+set_tests_properties(core.res.unit core.res PROPERTIES TIMEOUT 300)
 if(OPENBF3_ASAN)
     # The ASan runtime DLL ships next to cl.exe; put it on the tests' PATH.
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant
+    set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant core.res.unit core.res
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
