@@ -16,6 +16,7 @@
 #include "test_support.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -409,9 +410,88 @@ TEST_SUITE("ant-unit") {
 		sample_clip_seconds(c, 1.0f / 30.0f, 30.0f, pose); // frame 1
 		CHECK(pose.vec3s[0].x == doctest::Approx(1.0));
 		DecodedClip dense;
-		bake_frames(c, dense);
+		REQUIRE(bake_frames(c, dense).ok());
 		CHECK(dense.num_keys == 5);
 		CHECK(dense.vec3(3, 0).z == doctest::Approx(-3.0));
+	}
+
+	TEST_CASE("ant: bake_frames and sample_clip reject untrusted frame ranges and inconsistent clips") {
+		DecodedClip c;
+		c.codec = ClipCodec::Raw;
+		c.num_keys = 1;
+		c.num_quats = 1;
+		c.key_times = { 0 };
+		c.quats = { Quat{} };
+		DecodedClip dense;
+		for (uint32_t end : { 0xFFFFFFFFu, 0x7FFFFFFFu, 0x10000u }) {
+			c.end_frame = end; // used to wrap num_keys to 0 and write past key_times (verifier PoC)
+			CHECK(bake_frames(c, dense).status == AntStatus::Malformed);
+			CHECK(dense.num_keys == 0);
+			CHECK(dense.key_times.empty());
+		}
+		c.end_frame = kMaxFrame; // the largest legal range: 65536 frames
+		REQUIRE(bake_frames(c, dense).ok());
+		CHECK(dense.num_keys == 65536);
+		CHECK(dense.key_times.back() == 65535);
+		CHECK(dense.consistent());
+		c.end_frame = 0;
+		c.key_times = { 3, 1 };
+		c.num_keys = 2;
+		c.quats = { Quat{}, Quat{} };
+		CHECK(bake_frames(c, dense).status == AntStatus::Malformed); // unsorted key times
+		c.quats = { Quat{} }; // arrays shorter than num_keys * channels
+		CHECK_FALSE(c.consistent());
+		CHECK(bake_frames(c, dense).status == AntStatus::Malformed);
+		ClipPose pose;
+		CHECK_FALSE(sample_clip(c, 1.0f, pose));
+		REQUIRE(pose.quats.size() == 1);
+		CHECK(pose.quats[0].w == 1.0f);
+		DecodedClip empty;
+		CHECK(bake_frames(empty, dense).status == AntStatus::Malformed);
+	}
+
+	TEST_CASE("ant: DCT 32-bit catch-all coefficient plus DeltaBase does not overflow") {
+		// One vec3 DOF with one sub-block; 9 keys = 2 blocks, so block 1 stores a DC term. X uses the
+		// catch-all width (32 bits) and holds INT32_MAX; DeltaBaseX = 32767 pushes the sum past INT32_MAX.
+		const uint16_t key_times[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+		const uint8_t desc[1] = { 0x10 };
+		const int16_t dx[1] = { 32767 }, dy[1] = { -32768 }, dz[1] = { 0 }, dw[1] = { 0 };
+		const uint16_t widths[1] = { 0xFF00 };
+		BitWriter w;
+		w.put(INT32_MAX, 32); // block 1, X
+		w.put(INT32_MIN, 32); // block 1, Y (catch-all as well)
+		DctInput in;
+		in.num_keys = 9;
+		in.num_vec3s = 1;
+		in.quantize_mult_block = 1;
+		in.catch_all_bit_count = 32;
+		in.key_times = key_times;
+		in.dof_table_desc = desc;
+		in.delta_base[0] = dx;
+		in.delta_base[1] = dy;
+		in.delta_base[2] = dz;
+		in.delta_base[3] = dw;
+		in.bits_per_subblock = widths;
+		in.data = w.bytes;
+		DecodedClip out;
+		const AntResult r = decode_dct(in, out);
+		REQUIRE_MESSAGE(r.ok(), r.message);
+		CHECK(out.vec3(0, 0).x == doctest::Approx(32767.0 * 0.25));
+		CHECK(out.vec3(8, 0).x == doctest::Approx((double(INT32_MAX) + 32767.0) * 0.25).epsilon(1e-7));
+		CHECK(out.vec3(8, 0).y == doctest::Approx((double(INT32_MIN) - 32768.0) * 0.25).epsilon(1e-7));
+
+		// KeyTimes must ascend.
+		const uint16_t unsorted[9] = { 0, 1, 2, 3, 5, 4, 6, 7, 8 };
+		in.key_times = unsorted;
+		CHECK(decode_dct(in, out).status == AntStatus::Malformed);
+		// keys * channels is bounded before anything is allocated (2^20 keys * 17 vec3 channels).
+		std::vector<uint16_t> many(size_t(1) << 20, 0);
+		in.key_times = many;
+		in.num_keys = uint32_t(many.size());
+		in.num_vec3s = 17;
+		const AntResult big = decode_dct(in, out);
+		CHECK(big.status == AntStatus::Malformed);
+		CHECK(big.message.find("bound") != std::string::npos);
 	}
 }
 

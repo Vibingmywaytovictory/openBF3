@@ -51,7 +51,7 @@ struct AntDof {
 
 struct AntJoint {
 	std::string_view name;
-	int32_t parent = -1;
+	int32_t parent = -1; // validated: -1 (root) or an index into AntRig::joints
 	int32_t type = 0;
 	float rest_t[3] = { 0.0f, 0.0f, 0.0f };
 	float rest_q[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -61,7 +61,8 @@ struct AntRig {
 	std::string_view name; // RigAsset name, e.g. "Venice1pAntSke01"
 	std::string_view skeleton_name; // Ant SkeletonAsset name, e.g. "Venice1pAntSke01_New"
 	std::vector<AntJoint> joints;
-	std::unordered_map<std::string_view, int32_t> joint_index;
+	std::unordered_map<std::string_view, int32_t> joint_index; // named joints only
+	uint32_t bad_parents = 0; // ParentIndex values outside [-1, joint count), reset to -1
 	std::vector<uint32_t> hierarchies; // static reference indices of every LayoutHierarchyAsset under DofSetLists
 	std::vector<uint32_t> layouts; // sorted reference indices of the LayoutAssets those hierarchies use
 
@@ -87,6 +88,7 @@ struct ClipBinding {
 	float fps = 30.0f;
 	float fps_scale = 1.0f;
 	float num_ticks = 0.0f;
+	// Points into AntLibrary::rigs(): valid until the library's next set_static() (or its destruction).
 	const AntRig *rig = nullptr;
 	uint32_t rig_layout_hits = 0; // target layouts that the chosen rig's DOF sets use
 	std::vector<AntDof> dofs;
@@ -103,7 +105,8 @@ public:
 	AntLibrary(const AntLibrary &) = delete;
 	AntLibrary &operator=(const AntLibrary &) = delete;
 
-	// Takes the parsed static package (s_BasicAssets) and indexes its rigs.
+	// Takes the parsed static package (s_BasicAssets) and indexes its rigs. Invalidates the rig pointers
+	// of every ClipBinding made before.
 	AntResult set_static(std::unique_ptr<AntPackage> p_static);
 	const AntPackage *static_package() const { return static_.get(); }
 	const std::vector<AntRig> &rigs() const { return rigs_; }

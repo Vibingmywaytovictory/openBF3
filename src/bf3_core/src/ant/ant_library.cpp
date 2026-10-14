@@ -74,6 +74,9 @@ DofKind dof_kind_from_slot_type(uint32_t p_type) {
 }
 
 int32_t AntRig::find_joint(std::string_view p_name) const {
+	if (p_name.empty()) {
+		return -1; // unnamed joints are never indexed
+	}
 	const auto it = joint_index.find(p_name);
 	return it == joint_index.end() ? -1 : it->second;
 }
@@ -140,8 +143,17 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 				if (info.read_int("JointType", v)) {
 					joint.type = int32_t(v);
 				}
-				r.joint_index.emplace(joint.name, int32_t(r.joints.size()));
+				if (!joint.name.empty()) {
+					r.joint_index.emplace(joint.name, int32_t(r.joints.size()));
+				}
 				r.joints.push_back(joint);
+			}
+			// ParentIndex comes from the data: anything outside [-1, joint count) becomes -1 (root) and is counted.
+			for (AntJoint &joint : r.joints) {
+				if (joint.parent < -1 || joint.parent >= int32_t(r.joints.size())) {
+					joint.parent = -1;
+					++r.bad_parents;
+				}
 			}
 		}
 		// Rest pose from the rig's DOF defaults ("<Layout>.<Joint>.q/.t"); the first entry per joint wins.
@@ -157,6 +169,9 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 				}
 				const std::string_view slot = strip_layout(dof_name);
 				const std::string_view joint = joint_of_slot(slot);
+				if (joint.empty()) {
+					continue; // no "<Joint>.q|t|s" slot (joint_of_slot guarantees slot.size() > 2 otherwise)
+				}
 				const int32_t ji = r.find_joint(joint);
 				if (ji < 0 || !seen.emplace(slot, 1).second) {
 					continue;

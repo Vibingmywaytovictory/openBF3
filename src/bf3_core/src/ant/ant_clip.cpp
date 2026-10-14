@@ -12,6 +12,9 @@ namespace {
 
 constexpr uint32_t kDctBlock = 8;
 constexpr uint32_t kMaxKeys = 1u << 20; // sanity bound for allocations driven by data
+// Bound on keys * channels of one decoded or baked clip (16 Mi channel-keys, <= 256 MiB of quaternions).
+// The largest retail clip is far below it; it stops a small crafted bank from requesting gigabytes.
+constexpr uint64_t kMaxChannelKeys = uint64_t(1) << 24;
 
 // MSB-first bit reader over a byte array (no word swapping, §4.1). Widths 0..32.
 class BitReader {
@@ -182,6 +185,14 @@ AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_st
 	if (p_in.key_times.size() != keys) {
 		return AntResult::fail(AntStatus::Malformed, "DCT: KeyTimes size != NumKeys");
 	}
+	for (uint32_t k = 1; k < keys; ++k) {
+		if (p_in.key_times[k] < p_in.key_times[k - 1]) {
+			return AntResult::fail(AntStatus::Malformed, "DCT: KeyTimes not ascending");
+		}
+	}
+	if (uint64_t(keys) * (uint64_t(nq) + nv + nf) > kMaxChannelKeys) {
+		return AntResult::fail(AntStatus::Malformed, "DCT: NumKeys * channels exceeds the decode bound");
+	}
 	if (uint64_t(nf) > 4ull * p_in.num_float_vecs) {
 		return AntResult::fail(AntStatus::Malformed, "DCT: NumFloat exceeds 4 * NumFloatVec");
 	}
@@ -241,7 +252,8 @@ AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_st
 		const uint32_t block_keys = std::min(kDctBlock, keys - first_key);
 		for (uint64_t d = 0; d < dofs; ++d) {
 			const uint32_t sub = p_in.dof_table_desc[size_t(d)] >> 4;
-			int32_t c[kDctBlock][4] = {};
+			// 64-bit: a CatchAllBitCount-wide (up to 32-bit) coefficient plus DeltaBase must not overflow.
+			int64_t c[kDctBlock][4] = {};
 			// Block 0 does not store the DC coefficient (j = 0).
 			for (uint32_t j = (b == 0 ? 1u : 0u); j < sub; ++j) {
 				const uint16_t widths = p_in.bits_per_subblock[first_width[size_t(d)] + j];
@@ -357,7 +369,8 @@ AntResult decode_float_object(const GdStruct &p_clip, ClipCodec p_codec, Decoded
 	} else {
 		key_times.assign(1, 0);
 	}
-	if (keys == 0 || keys > kMaxKeys || nq > kMaxKeys || nv > kMaxKeys || nf > kMaxKeys) {
+	if (keys == 0 || keys > kMaxKeys || nq > kMaxKeys || nv > kMaxKeys || nf > kMaxKeys ||
+			uint64_t(keys) * (uint64_t(nq) + nv + nf) > kMaxChannelKeys) {
 		return AntResult::fail(AntStatus::Malformed, "bad key or channel count");
 	}
 	const GdArray data = p_clip.array("Data");
@@ -429,6 +442,9 @@ AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r
 	if (!p_clip.valid() || !read_clip_header(p_clip, header)) {
 		return AntResult::fail(AntStatus::Malformed, "not an AnimationAsset (missing base fields)");
 	}
+	if (header.end_frame > kMaxFrame) {
+		return AntResult::fail(AntStatus::Malformed, "EndFrame " + std::to_string(header.end_frame) + " exceeds the 16-bit frame range");
+	}
 	AntResult r;
 	switch (header.codec) {
 		case ClipCodec::Dct:
@@ -446,6 +462,10 @@ AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r
 			return AntResult::fail(AntStatus::Unsupported, "unknown codec " + std::string(p_clip.type_name()));
 	}
 	if (r.ok()) {
+		if (!r_out.key_times.empty() && header.end_frame < r_out.key_times.back()) {
+			// Keys past EndFrame would make the dense frame table shorter than the keyed range.
+			return AntResult::fail(AntStatus::Malformed, "EndFrame " + std::to_string(header.end_frame) + " before the last key time");
+		}
 		r_out.end_frame = header.end_frame;
 		r_out.additive = header.additive;
 	}
@@ -484,15 +504,21 @@ Quat quat_slerp(const Quat &p_a, const Quat &p_b, float p_t) {
 	return Quat{ float(x / len), float(y / len), float(z / len), float(w / len) };
 }
 
-void sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose) {
+bool DecodedClip::consistent() const {
+	const uint64_t k = num_keys;
+	return key_times.size() == k && quats.size() == k * num_quats && vec3s.size() == k * num_vec3s && floats.size() == k * num_floats;
+}
+
+bool sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose) {
 	r_pose.quats.resize(p_clip.num_quats);
 	r_pose.vec3s.resize(p_clip.num_vec3s);
 	r_pose.floats.resize(p_clip.num_floats);
-	if (p_clip.num_keys == 0) {
+	const bool consistent = p_clip.consistent();
+	if (p_clip.num_keys == 0 || !consistent) {
 		std::fill(r_pose.quats.begin(), r_pose.quats.end(), Quat{});
 		std::fill(r_pose.vec3s.begin(), r_pose.vec3s.end(), Vec3{});
 		std::fill(r_pose.floats.begin(), r_pose.floats.end(), 0.0f);
-		return;
+		return consistent;
 	}
 	// Surrounding keys by key time (frames).
 	uint32_t k0 = 0, k1 = 0;
@@ -521,31 +547,50 @@ void sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose) {
 		const float a = p_clip.value(k0, c);
 		r_pose.floats[c] = a + (p_clip.value(k1, c) - a) * t;
 	}
+	return true;
 }
 
-void bake_frames(const DecodedClip &p_clip, DecodedClip &r_out) {
-	const uint32_t last = p_clip.key_times.empty() ? 0 : std::max<uint32_t>(p_clip.end_frame, p_clip.key_times.back());
+AntResult bake_frames(const DecodedClip &p_clip, DecodedClip &r_out) {
 	r_out = {};
+	// The clip may come from anywhere (not only decode_clip): validate before allocating or indexing.
+	if (!p_clip.consistent() || p_clip.num_keys == 0) {
+		return AntResult::fail(AntStatus::Malformed, "bake: clip has no keys or inconsistent array sizes");
+	}
+	for (size_t k = 1; k < p_clip.key_times.size(); ++k) {
+		if (p_clip.key_times[k] < p_clip.key_times[k - 1]) {
+			return AntResult::fail(AntStatus::Malformed, "bake: key times not ascending");
+		}
+	}
+	if (p_clip.end_frame > kMaxFrame) {
+		return AntResult::fail(AntStatus::Malformed, "bake: EndFrame " + std::to_string(p_clip.end_frame) + " exceeds the 16-bit frame range");
+	}
+	// Both bounds are <= kMaxFrame, so frames <= 65536 and frame numbers fit in uint16_t.
+	const uint32_t last = std::max<uint32_t>(p_clip.end_frame, p_clip.key_times.back());
+	const uint64_t frames = uint64_t(last) + 1;
+	if (frames * p_clip.channel_count() > kMaxChannelKeys) {
+		return AntResult::fail(AntStatus::Malformed, "bake: frames * channels exceeds the decode bound");
+	}
 	r_out.codec = p_clip.codec;
-	r_out.num_keys = last + 1;
+	r_out.num_keys = uint32_t(frames);
 	r_out.num_quats = p_clip.num_quats;
 	r_out.num_vec3s = p_clip.num_vec3s;
 	r_out.num_floats = p_clip.num_floats;
 	r_out.end_frame = p_clip.end_frame;
 	r_out.cycle = p_clip.cycle;
 	r_out.additive = p_clip.additive;
-	r_out.key_times.resize(r_out.num_keys);
-	r_out.quats.reserve(size_t(r_out.num_keys) * r_out.num_quats);
-	r_out.vec3s.reserve(size_t(r_out.num_keys) * r_out.num_vec3s);
-	r_out.floats.reserve(size_t(r_out.num_keys) * r_out.num_floats);
+	r_out.key_times.resize(size_t(frames));
+	r_out.quats.reserve(size_t(frames) * r_out.num_quats);
+	r_out.vec3s.reserve(size_t(frames) * r_out.num_vec3s);
+	r_out.floats.reserve(size_t(frames) * r_out.num_floats);
 	ClipPose pose;
-	for (uint32_t f = 0; f <= last; ++f) {
+	for (uint32_t f = 0; f < uint32_t(frames); ++f) {
 		r_out.key_times[f] = uint16_t(f);
 		sample_clip(p_clip, float(f), pose);
 		r_out.quats.insert(r_out.quats.end(), pose.quats.begin(), pose.quats.end());
 		r_out.vec3s.insert(r_out.vec3s.end(), pose.vec3s.begin(), pose.vec3s.end());
 		r_out.floats.insert(r_out.floats.end(), pose.floats.begin(), pose.floats.end());
 	}
+	return {};
 }
 
 } // namespace bf3::core::ant

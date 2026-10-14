@@ -43,6 +43,10 @@ enum class ClipCodec {
 	Curve,
 };
 
+// Largest frame number a clip may use: key times are 16-bit, so EndFrame must fit too (decode_clip
+// rejects larger EndFrame values as Malformed).
+constexpr uint32_t kMaxFrame = 0xFFFF;
+
 const char *codec_name(ClipCodec p_codec); // layout name, e.g. "DctAnimationAsset"
 // Codec of an AnimationAsset object, by its layout name ("Unknown" for anything else).
 ClipCodec clip_codec(const GdStruct &p_clip);
@@ -89,7 +93,9 @@ struct DecodedClip {
 	std::vector<Vec3> vec3s;
 	std::vector<float> floats;
 
-	uint32_t channel_count() const { return num_quats + num_vec3s + num_floats; }
+	uint64_t channel_count() const { return uint64_t(num_quats) + num_vec3s + num_floats; }
+	// Array sizes agree with num_keys and the channel counts (always true for decode_clip output).
+	bool consistent() const;
 	const Quat &quat(uint32_t p_key, uint32_t p_channel) const { return quats[size_t(p_key) * num_quats + p_channel]; }
 	const Vec3 &vec3(uint32_t p_key, uint32_t p_channel) const { return vec3s[size_t(p_key) * num_vec3s + p_channel]; }
 	float value(uint32_t p_key, uint32_t p_channel) const { return floats[size_t(p_key) * num_floats + p_channel]; }
@@ -139,14 +145,17 @@ struct ClipPose {
 };
 
 // Samples at a frame (fractional frames interpolate between the surrounding keys: slerp for quaternions,
-// lerp otherwise). Frames before the first / after the last key clamp.
-void sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose);
+// lerp otherwise). Frames before the first / after the last key clamp. Returns false (and an identity
+// pose) when the clip's arrays are inconsistent (see DecodedClip::consistent()).
+bool sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose);
 // Samples at a time in seconds; p_frames_per_second is the controller's FPS (30 for the MP clips).
 inline void sample_clip_seconds(const DecodedClip &p_clip, float p_seconds, float p_frames_per_second, ClipPose &r_pose) {
 	sample_clip(p_clip, p_seconds * p_frames_per_second, r_pose);
 }
-// Resamples to one key per integer frame 0..end_frame (a dense frame table).
-void bake_frames(const DecodedClip &p_clip, DecodedClip &r_out);
+// Resamples to one key per integer frame 0..max(end_frame, last key time) (a dense frame table).
+// Fails (Malformed) for an inconsistent or keyless clip, unsorted key times, EndFrame > kMaxFrame, or a
+// table larger than the decode bound; r_out is then empty.
+AntResult bake_frames(const DecodedClip &p_clip, DecodedClip &r_out);
 
 Quat quat_slerp(const Quat &p_a, const Quat &p_b, float p_t);
 
