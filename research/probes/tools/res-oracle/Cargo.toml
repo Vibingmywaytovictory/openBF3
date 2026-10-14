@@ -1,0 +1,18 @@
+# Parity oracle for the C++ resource decoders (bf3_core/res, tools/resdump). Research tool, not
+# shipped. Path dependencies: the install readers of ../ebx-dump and IW4L's resource_bf3 crate
+# (Apache-2.0) from a local IW4L checkout; adjust that path to yours.
+[workspace]
+resolver = "3"
+
+[package]
+name = "res-oracle"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+bf3_install = { path = "../ebx-dump/crates/bf3_install" }
+resource_bf3 = { path = "C:/Users/olku/iw4L/crates/resource_bf3" }
+
+[profile.release]
+debug = false

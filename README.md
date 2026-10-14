@@ -46,8 +46,9 @@ characters below the checkout (`b\release\gcpp\...plane_tracking.cpp.obj`), so k
 Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C++ exceptions off
 (`_HAS_EXCEPTIONS=0`). This covers godot-cpp, Jolt, ENet, Recast and doctest.
 
-`ctest` runs `core.guard`, `core.install`, `sim.jolt`, `net.enet` and `host.server`. `core.install` reports
-*Skipped* when no install is found.
+`ctest` runs `core.guard`, `core.install`, `core.res.unit`, `core.res`, `sim.jolt`, `net.enet` and `host.server`.
+`core.install` reports *Skipped* when no install is found, `core.res` when `OPENBF3_RES_DATA` does not point at an
+exported resource sample (see "Resource decoders").
 
 ## Run
 
@@ -79,16 +80,71 @@ first call. So on every engine bump (dev → RC → stable): dump both JSONs int
 `engine-api/<version>.<hash>/` folder, run `<godot> --headless --validate-extension-api <old extension_api.json>`,
 point `OPENBF3_ENGINE_API` at the new folder and rebuild from clean.
 
+## Resource decoders (`bf3_core`, `include/bf3/core/res/`)
+
+C++ port of IW4L `resource_bf3` (Apache-2.0) for the binary `res` payloads: `MeshSet` (rigid, skinned, composite:
+LODs, subsets, vertex declarations, index buffers, UV sets, colour, tangents/binormal signs, bone indices/weights,
+bone tables, part bounds/transforms), `DxTexture` (formats, sRGB flag, mips, face-major chunks, ranged
+`logicalOffset` views, a reference CPU decode for L8/L16/ARGB8888/DXT1/DXT5/DXT5A) and Havok `HavokPhysicsData` /
+`HavokDestructionPhysicsData` (packfile + external fixups, the shape tree Mopp / List / ConvexTranslate /
+ConvexTransform / ExtendedMesh / CompressedMesh / Box / Sphere / Capsule / Cylinder / ConvexVertices, convex radius,
+part connections, static-model-group subparts, triangle and convex-piece extraction). Namespace `bf3::core::res`.
+The decoders take spans (`res` payload, 16-byte `resMeta`, decompressed chunk); they never open files, so the
+container layer only hands them bytes. Every offset/length read from the data is bounds-checked; failures are
+`ResError` values (no exceptions) with the same texts as IW4L. BF3's texture format table has no BC6H/BC7.
+
+**Parity.** `research/probes/tools/res-oracle` (Rust, path-depends on IW4L `resource_bf3` and the `ebx-dump` install
+readers) exports a sample from your install and prints a canonical summary per resource (counts, declarations,
+FNV-1a hashes of every decoded position/normal/tangent/UV/colour/part/bone/index array, mip bytes, texels, the full
+Havok shape tree, tessellated triangles and convex pieces). `tools/resdump` prints the same summary through the C++
+decoders. The exported bytes stay outside the repo (they are BF3 data):
+
+```bat
+set CARGO_TARGET_DIR=<scratch>\target
+cargo build --release --manifest-path research\probes\tools\res-oracle\Cargo.toml
+res-oracle export Win32/Levels/MP_Subway/MP_Subway subway <data>
+res-oracle export Win32/Levels/XP2_Skybar/XP2_Skybar skybar <data>
+res-oracle summary <data> subway skybar > rust.txt   &  b\dev\tools\resdump\resdump.exe <data> subway skybar > cpp.txt
+res-oracle trunc   <data> subway skybar > rust_t.txt &  b\dev\tools\resdump\resdump.exe --trunc <data> subway skybar > cpp_t.txt
+set OPENBF3_RES_DATA=<data>& ctest --preset dev -R core.res
+```
+
+Result on 2026-10-14: every MeshSet, DxTexture and Havok res of MP_Subway (1,341 / 1,717 / 730 + 9 destruction) and
+of the patched expansion level XP2_Skybar (824 / 1,138 / 253 + 23), 2.46 GB of chunks: the 109,001-line summaries are
+byte-identical, and so are the 46,534 lines of the damaged-input run (payloads cut at 1/4, 1/2, 3/4, len-1;
+geometry and texture chunks cut short; a view at a logicalOffset between mips). Floats are bit-identical because the
+port keeps IW4L's operation order and float literals and the hull keeps Rust's tie-breaks. Decoded: 13,966 subsets,
+9.96 M triangles, 29,180 mip images, 1,522 Havok roots. `core.res` also runs 8,256 randomly damaged decodes. Timing
+(16 threads shared with other builds, so noisy; resdump `--time`, chunk files read before the clock): MeshSet parse +
+decode of all subsets 0.87-1.0 s for 2,165 res; DxTexture parse + mip split 0.01 s for 2,855; Havok parse + shape
+tree + all triangles (hulls included) 0.97-1.15 s for 1,015. Whole summary pass (decode + hashing): C++ 10.4-14.8 s
+over two runs, Rust 15.5 s (warm cache).
+
+**Skinned meshes (for the M9 integration).** Measured on all 561 skinned MeshSets (1,679 LODs) of the sample:
+
+* A vertex's BoneIndices lane `l` (UByte4) selects `subset.bone_slots[l]`, which is a **skeleton bone index**
+  (`MeshLod::skeleton_bone`). Every weighted lane is `< bone_slots.size()`, and every slot value appears in the LOD's
+  bone table `MeshLod::bones` = `{skeleton index, name hash}` (`find_bone`). BoneWeights are UByte4N and sum to 1.
+  `bones_per_vertex` is 1 (3,607 subsets), 2 (172) or 4 (461).
+* Bone name hash = `hash_quick(lowercase(name))`: matched for `Wep_Root`, `Wep_Trigger`, `Wep_Slide`, `Wep_Mag`,
+  `Wep_Extra1` and the biped names (`Hips`, `Spine`, `Spine2`, `Neck`, `Head`, `LeftHand`, `RightForeArm`, ...).
+* `weapons/m9/m9_1p_mesh`: 1 LOD, 5 bones (skeleton 1 Wep_Root, 3 Wep_Trigger, 4 Wep_Slide, 7 Wep_Mag, 9 = hash
+  `0xa6d64831`, name not found yet), 2 subsets (one ZOnly), 6,705 vertices, 1 bone per vertex. `m9_3p_mesh`: 5 LODs
+  with 5/4/3 bones. 1p arms (`arms1p_bareglove03`, `arms1p_rus`): 69/70 bones, skeleton indices up to 150, 4 bones per
+  vertex. 3p soldiers are split into upperbody / lowerbody / head / headgear meshes (59-64 bones, skeleton indices up
+  to 208). The decoder does not skin: positions are the bind pose in mesh space.
+
 ## Layout and pinned third-party code
 
 | path | what |
 |---|---|
-| `src/bf3_core` | `InstallReader`, `ReadOnlyFile`, `PathGuard`, install snapshot (Godot-free) |
+| `src/bf3_core` | `InstallReader`, `ReadOnlyFile`, `PathGuard`, install snapshot; `res/` resource decoders (Godot-free) |
 | `src/bf3_sim` | own Jolt world at a fixed 60 Hz, Recast/Detour link check (Godot-free) |
 | `src/bf3_net` | upstream ENet wrapper, loopback ping (Godot-free) |
 | `src/bf3_host` | `ServerHost` on its own `std::thread`, `LoopbackClient` (Godot-free) |
 | `src/bf3_godot` | the GDExtension: `GameSession`, `DedicatedMainLoop`, S0 self-test (the only Godot code) |
 | `tests/` | doctest executables run by ctest |
+| `tools/resdump` | canonical summary of exported resources through `bf3::core::res` (parity with the Rust oracle) |
 | `bf3-opensource/` | the Godot project (Forward+, D3D12, Jolt); `scenes/main.tscn` is the main scene |
 
 | submodule | pin | licence |
