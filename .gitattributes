@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Engine API dumps are pinned byte-for-byte (SHA-256 in engine-api/*/VERSION.txt).
+engine-api/** -text

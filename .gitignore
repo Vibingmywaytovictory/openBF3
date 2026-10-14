@@ -20,3 +20,16 @@ mono_crash.*.json
 research/probes/ebx/
 research/probes/ant/
 research/probes/tools/ant-probe/
+
+# Build trees (CMakePresets.json binaryDir = b/<preset>; kept short for MAX_PATH) and outputs.
+/b/
+/out/
+/build/
+bf3-opensource/bin/
+*.dll
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.obj
+CMakeUserPresets.json

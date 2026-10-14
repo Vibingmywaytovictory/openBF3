@@ -1,0 +1,45 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/b/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "dev: optimised, godot-cpp template_debug (day-to-day)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GODOTCPP_TARGET": "template_debug" }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "debug: unoptimised (/MTd), godot-cpp template_debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "GODOTCPP_TARGET": "template_debug" }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "release: optimised, godot-cpp template_release (shipping)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GODOTCPP_TARGET": "template_release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }
+  ]
+}

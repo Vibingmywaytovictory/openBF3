@@ -1,0 +1,15 @@
+[submodule "extern/godot-cpp"]
+	path = extern/godot-cpp
+	url = https://github.com/godotengine/godot-cpp
+[submodule "extern/JoltPhysics"]
+	path = extern/JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics
+[submodule "extern/enet"]
+	path = extern/enet
+	url = https://github.com/lsalzman/enet
+[submodule "extern/recastnavigation"]
+	path = extern/recastnavigation
+	url = https://github.com/recastnavigation/recastnavigation
+[submodule "extern/doctest"]
+	path = extern/doctest
+	url = https://github.com/doctest/doctest

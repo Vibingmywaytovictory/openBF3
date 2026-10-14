@@ -1,0 +1,62 @@
+[gd_scene load_steps=9 format=3]
+
+[sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("sky_mat")
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+sky = SubResource("sky")
+tonemap_mode = 2
+
+[sub_resource type="BoxShape3D" id="ground_shape"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="StandardMaterial3D" id="ground_mat"]
+albedo_color = Color(0.35, 0.38, 0.33, 1)
+
+[sub_resource type="BoxMesh" id="ground_mesh"]
+material = SubResource("ground_mat")
+size = Vector3(40, 1, 40)
+
+[sub_resource type="BoxShape3D" id="box_shape"]
+
+[sub_resource type="StandardMaterial3D" id="box_mat"]
+albedo_color = Color(0.2, 0.45, 0.9, 1)
+
+[sub_resource type="BoxMesh" id="box_mesh"]
+material = SubResource("box_mat")
+
+[node name="Main" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.768221, -0.504536, 0.394055, 0, 0.615534, 0.78811, -0.640184, -0.605443, 0.472866, 0, 10, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.902861, -0.155149, 0.400963, 0, 0.932617, 0.360867, -0.429934, -0.325813, 0.842023, 5.5, 5.5, 10.5)
+current = true
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("ground_shape")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("ground_mesh")
+
+[node name="FallingBox" type="RigidBody3D" parent="."]
+transform = Transform3D(0.92388, 0, 0.382683, 0.146447, 0.92388, -0.353553, -0.353553, 0.382683, 0.853553, -2, 6, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="FallingBox"]
+shape = SubResource("box_shape")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="FallingBox"]
+mesh = SubResource("box_mesh")
+
+[node name="GameSession" type="GameSession" parent="."]

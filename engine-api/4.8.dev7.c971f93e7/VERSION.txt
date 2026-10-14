@@ -1,0 +1,5 @@
+engine     4.8.dev7.official.c971f93e7 (version_info.hash c971f93e7e76b0ef919bf6009e7b868bea04db7f, precision single)
+dumped     2026-10-14 with Godot_v4.8-dev7_win64_console.exe --headless --dump-extension-api --dump-gdextension-interface-json
+sha256     b9b10796e8806e0e83ea4601b3f4c97e07406accedaf598937050b4abf59afa1  extension_api.json
+sha256     24bf12720a6fdef3f9d270c792c5abe9ef5f645d67335615383d7e42d77143f3  gdextension_interface.json
+used by    CMakeLists.txt (OPENBF3_ENGINE_API -> GODOTCPP_CUSTOM_API_FILE + GODOTCPP_GDEXTENSION_DIR)
