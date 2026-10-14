@@ -18,6 +18,10 @@ target_link_libraries(test_net PRIVATE bf3_net)
 openbf3_test(test_host test_main.cpp host_tests.cpp test_support.h)
 target_link_libraries(test_host PRIVATE bf3_host)
 
+# Ant animation reader (bf3_core/ant) + the antdump support library used for census and JSON comparison.
+openbf3_test(test_ant test_main.cpp ant_tests.cpp test_support.h)
+target_link_libraries(test_ant PRIVATE bf3_core antdump_lib)
+
 add_test(NAME core.guard COMMAND test_core --test-suite-exclude=install,containers,fuzz)
 # Container readers on synthetic bytes (no install).
 add_test(NAME core.formats COMMAND test_core --test-suite=containers)
@@ -35,13 +39,18 @@ add_test(NAME net.enet COMMAND test_net)
 add_test(NAME host.server COMMAND test_host)
 # bf3dump's JSON number text (the probe's f32/f64 rules) on synthetic values; no install needed.
 add_test(NAME tools.numtext COMMAND bf3dump numcheck)
-set_tests_properties(core.guard core.formats core.install core.fuzz core.cache sim.jolt net.enet host.server tools.numtext PROPERTIES TIMEOUT 120)
+# core.ant reads an Ant export directory (OPENBF3_ANT_DATA) and the probe's clip JSONs (OPENBF3_ANT_ORACLE);
+# exits 77 = skipped when they are absent. core.ant.unit needs no data.
+add_test(NAME core.ant.unit COMMAND test_ant --test-suite=ant-unit)
+add_test(NAME core.ant COMMAND test_ant --test-suite=ant)
+set_tests_properties(core.ant PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.guard core.formats core.install core.fuzz core.cache sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant PROPERTIES TIMEOUT 120)
 # core.install also reads every bundle manifest and decodes sample payloads (slower in Debug).
 set_tests_properties(core.install PROPERTIES TIMEOUT 600)
 set_tests_properties(core.cache_data PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 if(OPENBF3_ASAN)
     # The ASan runtime DLL ships next to cl.exe; put it on the tests' PATH.
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext
+    set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()

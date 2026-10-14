@@ -125,6 +125,7 @@ add_subdirectory(src/bf3_net)
 add_subdirectory(src/bf3_host)
 # Command-line tools (link the Godot-free libraries only).
 add_subdirectory(tools/bf3dump)
+add_subdirectory(tools/antdump) # Godot-free CLI over bf3_core's Ant reader
 if(OPENBF3_BUILD_GODOT)
     add_subdirectory(src/bf3_godot)
 endif()
