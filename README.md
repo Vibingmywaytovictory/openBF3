@@ -51,7 +51,7 @@ Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C
 `ctest` runs `core.guard`, `core.formats` (container and EBX readers on synthetic bytes), `core.install`,
 `core.cache`, `core.cache_data`, `core.ant.unit`, `core.ant`, `core.res.unit`, `core.res`, `sim.jolt`, `net.enet` and
 `host.server`. `core.install` reports *Skipped* when no install is found, `core.cache_data` when
-`OPENBF3_CACHE_TESTDATA` is unset, `core.ant` without its export data and `core.res` when `OPENBF3_RES_DATA` does not
+`OPENBF3_CACHE_TESTDATA` is unset, `core.ant` without an install (see `tools/antdump/README.md`) and `core.res` when `OPENBF3_RES_DATA` does not
 point at an exported resource sample (see "Resource decoders"). With an install `core.install` also
 reads every bundle manifest of the 53 non-chunk superbundles and checks SHA1s through the CAS, binary, delta and
 tail-only paths, and parses every EBX partition of `@all-mp` (50,486) with spot checks of known field values.
@@ -235,6 +235,14 @@ over two runs, Rust 15.5 s (warm cache).
   with 5/4/3 bones. 1p arms (`arms1p_bareglove03`, `arms1p_rus`): 69/70 bones, skeleton indices up to 150, 4 bones per
   vertex. 3p soldiers are split into upperbody / lowerbody / head / headgear meshes (59-64 bones, skeleton indices up
   to 208). The decoder does not skin: positions are the bind pose in mesh space.
+
+## Ant animations (`bf3_core`, `include/bf3/core/ant/`)
+
+`AntInstallSource` reads the Ant animation banks from the install as is: every `AntPackageAsset` and AssetBank res
+of the 53 non-chunk superbundles (first superbundle in layout order wins), res by name and Chunk packages by
+`StreamingGuid`, in about 1 s; `AntPackage`/`AntLibrary` parse them and decode DCT, Raw and Frame clips. `antdump`
+(`tools/antdump/README.md`) runs the census, clip dumps and oracle comparisons on `--install`, and documents the
+M9 1P empty reload clip and its mapping onto the 1P skeleton for Godot playback.
 
 ## Layout and pinned third-party code
 
