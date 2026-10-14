@@ -1,19 +1,28 @@
-// resdump: canonical text summary of exported BF3 resources (MeshSet, DxTexture, Havok) through the
+// resdump: canonical text summary of BF3 resources (MeshSet, DxTexture, Havok) through the
 // bf3::core::res decoders. The same summary is printed by the Rust oracle (IW4L resource_bf3) over
-// the same files, so `diff` of the two outputs is the parity check (README "Resource decoders").
+// the files it exported, so `diff` of the two outputs is the parity check (README "Resource decoders").
 //
 //   resdump [--time | --trunc | --skin] <data_dir> <tag>...
+//   resdump [--time | --trunc | --skin] --install <superbundle> <tag> [<superbundle> <tag>]...
 //
-// Input (written by the oracle's `export` from the user's install; never part of the repo):
+// Exported input (written by the oracle's `export` from the user's install; never part of the repo):
 //   <data_dir>/<tag>/index.tsv          "<file>\t<name>\t<res type hex>" per res
 //   <data_dir>/<tag>/res/<file>         "BF3R" u32 1, u32 resType, u8[16] resMeta, u32 viewLogicalOffset,
 //                                       u32 nameLen, name, u64 payloadLen, payload
 //   <data_dir>/chunks/<32 hex>.chunk    decompressed full chunk named by its raw GUID bytes
+// --install reads the same res and chunks straight from the install (read-only; located like bf3dump:
+// OPENBF3_INSTALL or the default path) through bf3/core/res/res_loader.h, in the export's order (one
+// name per lowercase spelling, sorted), so its output equals the oracle's summary of an export of
+// that superbundle; <tag> only names the "## <tag>" heading.
 // Output: the summary on stdout; per-type timings on stderr (--time adds a decode-only pass).
 
+#include "bf3/core/install.h"
+#include "bf3/core/install_reader.h"
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/res/havok.h"
 #include "bf3/core/res/mesh_set.h"
+#include "bf3/core/res/res_loader.h"
+#include "bf3/core/superbundle_mount.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -27,6 +36,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -154,10 +164,43 @@ bool load_res(const std::string &p_path, Res &r_res) {
 	return true;
 }
 
+// Where res and chunks come from: an exported directory, or a superbundle mounted from the install.
 std::string g_data;
+const bf3::core::LevelMount *g_mount = nullptr;
 
-bool load_chunk(const ChunkId &p_id, std::vector<uint8_t> &r_out) {
+// The whole decompressed chunk; r_view (when given) receives the level bundle's ranged-view
+// logicalOffset in install mode and is left alone for an export (the res file carries it).
+bool load_chunk(const ChunkId &p_id, std::vector<uint8_t> &r_out, uint32_t *r_view = nullptr) {
+	if (g_mount != nullptr) {
+		bf3::core::Result<RawChunk> chunk = read_raw_chunk(*g_mount, p_id);
+		if (!chunk) {
+			std::fprintf(stderr, "chunk %s: %s\n", p_id.to_hex().c_str(), chunk.error().message.c_str());
+			r_out.clear();
+			return false;
+		}
+		r_out = std::move(chunk->bytes);
+		if (r_view != nullptr) {
+			*r_view = chunk->view_offset;
+		}
+		return true;
+	}
 	return read_file(g_data + "/chunks/" + p_id.to_hex() + ".chunk", r_out);
+}
+
+// One res of the mounted superbundle, as the oracle's export would have written it.
+bool load_install_res(const std::string &p_name, Res &r_res) {
+	bf3::core::Result<RawRes> raw = read_raw_res(*g_mount, p_name);
+	if (!raw) {
+		std::fprintf(stderr, "res %s: %s\n", p_name.c_str(), raw.error().message.c_str());
+		return false;
+	}
+	r_res.name = raw->name;
+	r_res.res_type = raw->res_type;
+	r_res.meta = raw->res_meta;
+	r_res.view = UINT32_MAX; // texture_summary takes it from the chunk
+	r_res.file = std::move(raw->payload);
+	r_res.payload = Bytes(r_res.file.data(), r_res.file.size());
+	return true;
 }
 
 template <typename T, typename F>
@@ -345,7 +388,8 @@ void texture_summary(std::string &o, const Res &r) {
 		return;
 	}
 	std::vector<uint8_t> chunk;
-	if (!load_chunk(tex.chunk_id, chunk)) {
+	uint32_t view = r.view;
+	if (!load_chunk(tex.chunk_id, chunk, &view)) {
 		o += "chunk missing\n";
 		return;
 	}
@@ -371,8 +415,8 @@ void texture_summary(std::string &o, const Res &r) {
 			}
 		}
 	}
-	if (r.view != UINT32_MAX && r.view != 0) {
-		const uint64_t lo = r.view;
+	if (view != UINT32_MAX && view != 0) {
+		const uint64_t lo = view;
 		const int first_mip = tex.first_mip_at(lo);
 		const std::string first = first_mip < 0 ? std::string("-") : fmt("%d", first_mip);
 		if (lo > chunk.size()) {
@@ -912,6 +956,18 @@ const char *type_label(uint32_t p_type) {
 	}
 }
 
+// One "## <tag>" section: the res of an export's index.tsv, or of a mounted superbundle.
+struct Section {
+	std::string tag;
+	std::unique_ptr<bf3::core::LevelMount> mount; // install mode
+	std::vector<std::string> keys; // res file paths (export) or res names (install)
+};
+
+bool load_item(const Section &p_section, const std::string &p_key, Res &r_res) {
+	g_mount = p_section.mount.get();
+	return g_mount != nullptr ? load_install_res(p_key, r_res) : load_res(p_key, r_res);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -929,41 +985,86 @@ int main(int argc, char **argv) {
 		skin = true;
 		arg++;
 	}
-	if (argc - arg < 2) {
-		std::fprintf(stderr, "usage: resdump [--time | --trunc | --skin] <data_dir> <tag>...\n");
+	const bool install_mode = arg < argc && std::strcmp(argv[arg], "--install") == 0;
+	if (install_mode) {
+		arg++;
+	}
+	if (argc - arg < 2 || (install_mode && (argc - arg) % 2 != 0)) {
+		std::fprintf(stderr, "usage: resdump [--time | --trunc | --skin] <data_dir> <tag>...\n"
+							 "       resdump [--time | --trunc | --skin] --install <superbundle> <tag> [<superbundle> <tag>]...\n");
 		return 2;
 	}
-	g_data = argv[arg++];
 	_setmode(_fileno(stdout), _O_BINARY); // LF line ends, like the Rust oracle
-	using Clock = std::chrono::steady_clock;
-	std::map<std::string, std::pair<size_t, double>> timing, decode_timing;
-	std::vector<std::pair<std::string, std::string>> all; // (tag, res path)
-	for (; arg < argc; arg++) {
-		const std::string tag = argv[arg];
-		std::fprintf(stdout, "## %s\n", tag.c_str());
-		std::vector<uint8_t> index;
-		if (!read_file(g_data + "/" + tag + "/index.tsv", index)) {
-			std::fprintf(stderr, "no index for %s\n", tag.c_str());
+	std::vector<Section> sections;
+	std::shared_ptr<bf3::core::Install> install;
+	if (install_mode) {
+		bf3::core::InstallReader reader;
+		if (!reader.locate({})) {
+			std::fprintf(stderr, "no install: %s\n", reader.describe().c_str());
 			return 1;
 		}
-		size_t line_start = 0;
-		for (size_t i = 0; i <= index.size(); i++) {
-			if (i < index.size() && index[i] != '\n') {
-				continue;
-			}
-			std::string line(reinterpret_cast<const char *>(index.data()) + line_start, i - line_start);
-			line_start = i + 1;
-			if (line.empty()) {
-				continue;
-			}
-			const std::string file = line.substr(0, line.find('\t'));
-			const std::string path = g_data + "/" + tag + "/res/" + file;
-			Res r;
-			if (!load_res(path, r)) {
-				std::fprintf(stderr, "bad res file %s\n", path.c_str());
+		bf3::core::Result<std::shared_ptr<bf3::core::Install>> opened = bf3::core::Install::open(reader);
+		if (!opened) {
+			std::fprintf(stderr, "%s\n", opened.error().message.c_str());
+			return 1;
+		}
+		install = *opened;
+		for (; arg + 1 < argc; arg += 2) {
+			bf3::core::Result<bf3::core::LevelMount> mount = install->mount_superbundle(argv[arg]);
+			if (!mount) {
+				std::fprintf(stderr, "%s: %s\n", argv[arg], mount.error().message.c_str());
 				return 1;
 			}
-			all.emplace_back(tag, path);
+			const bf3::core::Status loaded = mount->load_all_bundles();
+			if (!loaded) {
+				std::fprintf(stderr, "%s: %s\n", argv[arg], loaded.error().message.c_str());
+				return 1;
+			}
+			Section section;
+			section.tag = argv[arg + 1];
+			section.mount = std::make_unique<bf3::core::LevelMount>(std::move(*mount));
+			section.keys = decodable_res_names(*section.mount);
+			sections.push_back(std::move(section));
+		}
+	} else {
+		g_data = argv[arg++];
+		for (; arg < argc; arg++) {
+			Section section;
+			section.tag = argv[arg];
+			std::vector<uint8_t> index;
+			if (!read_file(g_data + "/" + section.tag + "/index.tsv", index)) {
+				std::fprintf(stderr, "no index for %s\n", section.tag.c_str());
+				return 1;
+			}
+			size_t line_start = 0;
+			for (size_t i = 0; i <= index.size(); i++) {
+				if (i < index.size() && index[i] != '\n') {
+					continue;
+				}
+				std::string line(reinterpret_cast<const char *>(index.data()) + line_start, i - line_start);
+				line_start = i + 1;
+				if (!line.empty()) {
+					section.keys.push_back(g_data + "/" + section.tag + "/res/" + line.substr(0, line.find('\t')));
+				}
+			}
+			sections.push_back(std::move(section));
+		}
+	}
+	using Clock = std::chrono::steady_clock;
+	std::map<std::string, std::pair<size_t, double>> timing, decode_timing;
+	size_t unreadable = 0;
+	for (const Section &section : sections) {
+		std::fprintf(stdout, "## %s\n", section.tag.c_str());
+		for (const std::string &key : section.keys) {
+			Res r;
+			if (!load_item(section, key, r)) {
+				if (!install_mode) {
+					std::fprintf(stderr, "bad res file %s\n", key.c_str());
+					return 1;
+				}
+				unreadable++; // the oracle's export skips it too
+				continue;
+			}
 			if (trunc || skin) {
 				std::string o;
 				if (trunc) {
@@ -992,13 +1093,20 @@ int main(int argc, char **argv) {
 	for (const auto &[label, t] : timing) {
 		std::fprintf(stderr, "%s: %zu res, %.3f s (decode + hash)\n", label.c_str(), t.first, t.second);
 	}
+	if (unreadable > 0) {
+		std::fprintf(stderr, "%zu res could not be read\n", unreadable);
+	}
 	if (time_pass) {
-		for (const auto &[tag, path] : all) {
-			Res r;
-			load_res(path, r);
-			auto &t = decode_timing[type_label(r.res_type)];
-			t.first++;
-			t.second += decode_only(r);
+		for (const Section &section : sections) {
+			for (const std::string &key : section.keys) {
+				Res r;
+				if (!load_item(section, key, r)) {
+					continue;
+				}
+				auto &t = decode_timing[type_label(r.res_type)];
+				t.first++;
+				t.second += decode_only(r);
+			}
 		}
 		for (const auto &[label, t] : decode_timing) {
 			std::fprintf(stderr, "%s: %zu res, %.3f s (decode only)\n", label.c_str(), t.first, t.second);

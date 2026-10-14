@@ -195,11 +195,52 @@ The decoders take spans (`res` payload, 16-byte `resMeta`, decompressed chunk); 
 container layer only hands them bytes. Every offset/length read from the data is bounds-checked; failures are
 `ResError` values (no exceptions) with the same texts as IW4L. BF3's texture format table has no BC6H/BC7.
 
+**Loading from the install (`res/res_loader.h`).** The API the Godot bridge calls: given a `LevelMount` whose bundles
+are indexed (`load_all_bundles` / `load_bundles`) and a res name (matched like `read_res`: case-insensitive, `\` =
+`/`), it reads the payload and `resMeta` (`LevelMount::read_res`), every chunk the res names
+(`LevelMount::read_chunk`, always the *whole* chunk: a level bundle's ranged tail is completed from the CAS or the
+chunk tocs) and the ranged view's `logicalOffset` (`chunk_info`), and decodes:
+
+```cpp
+Result<LoadedMeshSet> m = load_mesh_set(mount, "weapons/m9/m9_1p_mesh"); // MeshSet + its LOD chunks
+m->decode(0, SubsetFilter::Drawn, subsets);                               // LOD 0 without ZOnly subsets
+Result<LoadedTexture> t = load_texture(mount, "weapons/m9/m9_d");        // DxTexture + whole chunk; t->mips(...)
+Result<LoadedHavok> h = load_havok(mount, name);                          // either Havok type, root shapes decoded
+```
+
+Each `Loaded*` owns every byte its data refers to (`RawRes::payload`, `RawChunk::bytes`); the only views,
+`MipSlice::data` and the spans from `geometry()` / `whole()`, point into those vectors and stay valid while the object
+lives (moving it keeps them; nothing stores a view, so copies are safe). Errors are `Result` values: container
+failures keep `LevelMount`'s message, decode failures read `res <name>: <ResError text>`; a res whose chunk cannot be
+read fails as a whole. `read_raw_res` / `read_raw_chunk` give the bytes alone, and `decodable_res_names` lists a
+mount's MeshSet / DxTexture / Havok res the way the oracle's export does (first spelling per lowercase name, sorted).
+Loading is thread-safe across res (`LevelMount` reads are). `core.res.install` (exit 77 = skipped without an install)
+loads every MeshSet, DxTexture and Havok res of MP_Subway straight from the install on all cores, decodes every LOD,
+mip chain (and the 1,313 ranged views at their `logicalOffset`) and shape tree with triangles, convex pieces,
+part connections and group subparts: 0 errors, 1,341 / 1,717 / 730 + 9 res, 9,263 subsets, 5,366,947 triangles,
+17,545 mip images, 1,130 Havok roots (the totals `core.res` gets from the export), plus the M9 1p mesh checks below;
+about 2 s in the dev preset with a warm file cache.
+
+**Hostile input.** Besides bounds-checking every read, the walks are bounded. The Havok shape graph is a DAG in the
+file but a tree in memory, so a shared child is decoded once per use: `shapes()` refuses cycles (`shape cycle`),
+nesting past 64 (retail: 4), a decoded tree larger than 128 bytes per packfile data byte + 64 MiB (`shape tree
+size`; retail peak 28.6 per byte, XP3_Alborz's static model group: 107 MB from 3.76 MB, 187,197 nodes) and convex hull
+work (sum of n^2 over the leaves `havok_triangles` hulls) past 64 per data byte + 32 M (`convex hull work`; retail
+peak 19.1 M), so the triangles and convex pieces of an accepted tree are bounded too. `group_subparts` walks
+breadth first with parent links: cycles and more than data / 4 + 4,096 visits are errors (a self-listing ListShape
+used to double its pending list per level). `MeshLod::decode` refuses subsets whose ranges add up to more than 8x the
+LOD's vertex or index region (retail: 2x, double-sided foliage), and `split_mips` an empty mip. The budgets were
+measured on every res of the 29 multiplayer levels (14,472 Havok res, 31,984 MeshSets): none comes near them, and the
+parity summaries below are unchanged. `core.res.unit` builds hostile packfiles in memory (a list listing itself, a
+two-list cycle, a 1,000-deep MOPP chain, a 16-wide 12-deep DAG of lists, a 1,024-point convex leaf listed 4,096
+times): each fails with its error in well under a second.
+
 **Parity.** `research/probes/tools/res-oracle` (Rust, path-depends on IW4L `resource_bf3` and the `ebx-dump` install
 readers) exports a sample from your install and prints a canonical summary per resource (counts, declarations,
 FNV-1a hashes of every decoded position/normal/tangent/UV/colour/part/bone/index array, mip bytes, texels, the full
 Havok shape tree, tessellated triangles and convex pieces). `tools/resdump` prints the same summary through the C++
-decoders. The exported bytes stay outside the repo (they are BF3 data):
+decoders, either over an export or straight from the install (`--install <superbundle> <tag>...`, through
+`res_loader.h`, in the export's order). The exported bytes stay outside the repo (they are BF3 data):
 
 ```bat
 set CARGO_TARGET_DIR=<scratch>\target
@@ -209,6 +250,9 @@ res-oracle export Win32/Levels/XP2_Skybar/XP2_Skybar skybar <data>
 res-oracle summary <data> subway skybar > rust.txt   &  b\dev\tools\resdump\resdump.exe <data> subway skybar > cpp.txt
 res-oracle trunc   <data> subway skybar > rust_t.txt &  b\dev\tools\resdump\resdump.exe --trunc <data> subway skybar > cpp_t.txt
 set OPENBF3_RES_DATA=<data>& ctest --preset dev -R core.res
+rem no export needed: the same two summaries from the install
+resdump.exe --install Win32/Levels/MP_Subway/MP_Subway subway Win32/Levels/XP2_Skybar/XP2_Skybar skybar > inst.txt
+resdump.exe --trunc --install Win32/Levels/MP_Subway/MP_Subway subway Win32/Levels/XP2_Skybar/XP2_Skybar skybar > inst_t.txt
 ```
 
 Result on 2026-10-14: every MeshSet, DxTexture and Havok res of MP_Subway (1,341 / 1,717 / 730 + 9 destruction) and
@@ -220,7 +264,10 @@ port keeps IW4L's operation order and float literals and the hull keeps Rust's t
 (16 threads shared with other builds, so noisy; resdump `--time`, chunk files read before the clock): MeshSet parse +
 decode of all subsets 0.87-1.0 s for 2,165 res; DxTexture parse + mip split 0.01 s for 2,855; Havok parse + shape
 tree + all triangles (hulls included) 0.97-1.15 s for 1,015. Whole summary pass (decode + hashing): C++ 10.4-14.8 s
-over two runs, Rust 15.5 s (warm cache).
+over two runs, Rust 15.5 s (warm cache). Install mode (2026-10-14, after the hostile-input bounds above): both
+`resdump --install` outputs are byte-identical to the oracle's summary and damaged-input run of the export (109,001 and
+46,534 lines, SHA-256 `42ffd1a3...` and `f04df8c4...`), and to a fresh oracle build's; the summary pass reads the 2.46 GB
+of chunks from the install in 16 s, the damaged-input pass takes 6 s.
 
 **Skinned meshes (for the M9 integration).** Measured on all 561 skinned MeshSets (1,679 LODs) of the sample:
 
