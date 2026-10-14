@@ -18,10 +18,28 @@ namespace {
 constexpr uint8_t kMagic[8] = { 0x57, 0xE0, 0xE0, 0x57, 0x10, 0xC0, 0xC0, 0x10 };
 constexpr uint64_t kSectionHeaderBytes = 48;
 constexpr uint32_t kMaxShapeDepth = 64;
-// Shapes are a DAG in the file; a hostile one could make the depth-limited walk exponential. No
-// retail res comes near this (the largest static model group has ~25k nodes); 2^18 nodes keeps the
-// hostile peak (each node owns vectors) around 100 MB instead of ~1 GB.
-constexpr uint64_t kMaxShapeNodes = uint64_t(1) << 18;
+// Shapes are a DAG in the file but a tree in memory: a shared child is decoded once per use, so a
+// hostile file (a List whose children all point at one heavy shape, or at a List like itself) could
+// make the walk exponential. Two budgets bound it, scaled by the packfile's data section plus a
+// floor. Measured on every Havok res of the 29 multiplayer levels (14,472 res, 2026-10-14):
+// * tree bytes (shape nodes, their arrays, chunk geometry counted again per chunk reusing it): at
+//   most 28.6 per data byte, the largest being XP3_Alborz's static model group (107 MB, 187,197
+//   nodes, from 3.76 MB of data); the budget allows 128 per data byte + 64 MiB (544 MB there);
+// * hull work (sum of n^2 over the convex leaves, n = the points havok_triangles hulls): at most
+//   19.1 M (the same res), under the floor alone; the budget is 64 per data byte + 32 M.
+// Retail depth is at most 4; a cycle is reported as such before the depth limit is reached.
+constexpr uint64_t kTreeBytesPerDataByte = 128;
+constexpr uint64_t kTreeBytesFloor = uint64_t(64) << 20;
+constexpr uint64_t kHullWorkPerDataByte = 64;
+constexpr uint64_t kHullWorkFloor = uint64_t(1) << 25;
+// Hull input points of the convex primitives (havok_geometry.cpp): a capsule or sphere is two caps
+// of three 12-point rings and a pole, a cylinder two rings, a box its corners.
+constexpr uint64_t kCapsulePoints = 2 * (3 * 12 + 1);
+constexpr uint64_t kCylinderPoints = 2 * 12;
+constexpr uint64_t kBoxPoints = 8;
+// group_subparts visits at most data / 4 + this many pointer slots: without sharing every visit
+// is a distinct 4-byte slot of the data section (retail trees hold at most 0.073 nodes per byte).
+constexpr uint64_t kGroupVisitsFloor = 4096;
 
 // A pointer slot at p_base + p_stride * p_index can only be a field inside the data section; loops
 // that only look up fixups stop there instead of spinning through a hostile element count.
@@ -45,15 +63,32 @@ int32_t opt16(uint16_t p_value) {
 class PackReader {
 public:
 	PackReader(const Packfile &p_pack) :
-			pack(p_pack), r(Bytes(p_pack.data.data(), p_pack.data.size())) {}
+			pack(p_pack), r(Bytes(p_pack.data.data(), p_pack.data.size())) {
+		tree_budget = kTreeBytesFloor + kTreeBytesPerDataByte * uint64_t(p_pack.data.size());
+		hull_budget = kHullWorkFloor + kHullWorkPerDataByte * uint64_t(p_pack.data.size());
+	}
 
 	const Packfile &pack;
 	Reader r;
-	uint64_t nodes = 0;
+	uint64_t tree_bytes = 0;
+	uint64_t tree_budget = 0;
+	uint64_t hull_work = 0;
+	uint64_t hull_budget = 0;
+	std::array<uint32_t, kMaxShapeDepth + 1> path{}; // object offsets from the root to the current shape
 
 	bool ok() const { return r.ok(); }
 	ResError error() const { return r.error(); }
 	bool fail(const ResError &p_e) { return r.fail(p_e); }
+	// Charges p_bytes of decoded tree; false (the error kept) once the budget is spent.
+	bool spend(uint64_t p_bytes, uint64_t p_at) {
+		tree_bytes += p_bytes;
+		return tree_bytes <= tree_budget || r.fail(ResError::malformed("shape tree size", p_at));
+	}
+	// Charges the hull of a convex leaf with p_points input points.
+	bool spend_hull(uint64_t p_points, uint64_t p_at) {
+		hull_work += p_points * p_points;
+		return hull_work <= hull_budget || r.fail(ResError::malformed("convex hull work", p_at));
+	}
 	bool array(uint32_t p_field, uint32_t &r_data, uint32_t &r_count) {
 		if (!r.ok()) {
 			return false;
@@ -63,7 +98,7 @@ public:
 	}
 	bool u16_array(uint32_t p_field, std::vector<uint16_t> &r_out) {
 		uint32_t data = 0, count = 0;
-		if (!array(p_field, data, count)) {
+		if (!array(p_field, data, count) || !spend(2 * uint64_t(count), p_field)) {
 			return false;
 		}
 		for (uint32_t i = 0; i < count; i++) {
@@ -90,8 +125,17 @@ public:
 };
 
 ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
-	if (p_depth > kMaxShapeDepth || ++nodes > kMaxShapeNodes) {
+	if (p_depth > kMaxShapeDepth) {
 		return ResError::malformed("shape nesting", p_at);
+	}
+	for (uint32_t d = 0; d < p_depth; d++) {
+		if (path[d] == p_at) {
+			return ResError::malformed("shape cycle", p_at);
+		}
+	}
+	path[p_depth] = p_at;
+	if (!spend(sizeof(Shape), p_at)) {
+		return r.error();
 	}
 	const std::string *cls = pack.class_at(p_at);
 	if (cls == nullptr) {
@@ -111,7 +155,7 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 	} else if (c == "hkpListShape") {
 		s.type = ShapeType::List;
 		uint32_t data = 0, count = 0;
-		if (!array(p_at + 24, data, count)) {
+		if (!array(p_at + 24, data, count) || !spend(4 * uint64_t(count), p_at)) {
 			return r.error();
 		}
 		for (uint32_t i = 0; i < count; i++) {
@@ -149,16 +193,19 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 		s.half_extents = r.vec3(uint32_t(p_at + 32));
 		s.radius = r.f32(uint32_t(p_at + 16));
 		s.user_data = user_data;
+		spend_hull(kBoxPoints, p_at);
 	} else if (c == "hkpSphereShape") {
 		s.type = ShapeType::Sphere;
 		s.radius = r.f32(uint32_t(p_at + 16));
 		s.user_data = user_data;
+		spend_hull(kCapsulePoints, p_at);
 	} else if (c == "hkpCapsuleShape") {
 		s.type = ShapeType::Capsule;
 		s.a = r.vec3(uint32_t(p_at + 32));
 		s.b = r.vec3(uint32_t(p_at + 48));
 		s.radius = r.f32(uint32_t(p_at + 16));
 		s.user_data = user_data;
+		spend_hull(kCapsulePoints, p_at);
 	} else if (c == "hkpCylinderShape") {
 		s.type = ShapeType::Cylinder;
 		s.a = r.vec3(uint32_t(p_at + 32));
@@ -166,6 +213,7 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 		s.cylinder_radius = r.f32(uint32_t(p_at + 20));
 		s.radius = r.f32(uint32_t(p_at + 16));
 		s.user_data = user_data;
+		spend_hull(kCylinderPoints, p_at);
 	} else if (c == "hkpConvexVerticesShape") {
 		s.type = ShapeType::ConvexVertices;
 		uint32_t rotated = 0, blocks = 0;
@@ -180,6 +228,9 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 		if (count > uint32_t(4 * blocks)) {
 			return ResError::malformed("convex vertex count", uint64_t(p_at) + 76);
 		}
+		if (!spend(12 * uint64_t(count), p_at) || !spend_hull(count, p_at)) {
+			return r.error();
+		}
 		for (uint32_t i = 0; i < count; i++) {
 			const uint32_t block = rotated + 48 * (i / 4);
 			const uint32_t lane = 4 * (i % 4);
@@ -190,7 +241,7 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 			s.points.push_back(p);
 		}
 		uint32_t planes_at = 0, plane_count = 0;
-		if (!array(p_at + 80, planes_at, plane_count)) {
+		if (!array(p_at + 80, planes_at, plane_count) || !spend(16 * uint64_t(plane_count), p_at)) {
 			return r.error();
 		}
 		for (uint32_t i = 0; i < plane_count; i++) {
@@ -222,7 +273,8 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 
 ResError PackReader::compressed_mesh(uint32_t p_at, CompressedMesh &r_mesh) {
 	uint32_t transforms_at = 0, transform_count = 0;
-	if (!array(p_at + 84, transforms_at, transform_count)) {
+	if (!spend(sizeof(CompressedMesh), p_at) || !array(p_at + 84, transforms_at, transform_count) ||
+			!spend(sizeof(Transform) * uint64_t(transform_count), p_at)) {
 		return r.error();
 	}
 	for (uint32_t i = 0; i < transform_count; i++) {
@@ -236,7 +288,7 @@ ResError PackReader::compressed_mesh(uint32_t p_at, CompressedMesh &r_mesh) {
 		r_mesh.transforms.push_back(Transform::from_translation_rotation_scale(translation, rotation, scale));
 	}
 	uint32_t vertices_at = 0, vertex_count = 0;
-	if (!array(p_at + 96, vertices_at, vertex_count)) {
+	if (!array(p_at + 96, vertices_at, vertex_count) || !spend(12 * uint64_t(vertex_count), p_at)) {
 		return r.error();
 	}
 	for (uint32_t i = 0; i < vertex_count; i++) {
@@ -247,7 +299,7 @@ ResError PackReader::compressed_mesh(uint32_t p_at, CompressedMesh &r_mesh) {
 		r_mesh.big_vertices.push_back(v);
 	}
 	uint32_t triangles_at = 0, triangle_count = 0;
-	if (!array(p_at + 108, triangles_at, triangle_count)) {
+	if (!array(p_at + 108, triangles_at, triangle_count) || !spend(sizeof(BigTriangle) * uint64_t(triangle_count), p_at)) {
 		return r.error();
 	}
 	for (uint32_t i = 0; i < triangle_count; i++) {
@@ -270,7 +322,7 @@ ResError PackReader::compressed_mesh(uint32_t p_at, CompressedMesh &r_mesh) {
 	for (uint32_t i = 0; i < chunk_count; i++) {
 		const uint32_t c = chunks_at + 80 * i;
 		std::vector<uint16_t> packed;
-		if (!u16_array(c + 16, packed)) {
+		if (!spend(sizeof(CompressedChunk), c) || !u16_array(c + 16, packed)) {
 			return r.error();
 		}
 		if (packed.size() % 3 != 0) {
@@ -299,6 +351,15 @@ ResError PackReader::compressed_mesh(uint32_t p_at, CompressedMesh &r_mesh) {
 		}
 		r_mesh.chunks.push_back(std::move(chunk));
 	}
+	// A chunk that reuses another one's geometry yields its triangles again (havok_triangles).
+	for (const CompressedChunk &chunk : r_mesh.chunks) {
+		if (chunk.reference >= 0 && size_t(chunk.reference) < r_mesh.chunks.size()) {
+			const CompressedChunk &g = r_mesh.chunks[size_t(chunk.reference)];
+			if (!spend(6 * uint64_t(g.vertices.size()) + 2 * uint64_t(g.indices.size() + g.strip_lengths.size()), p_at)) {
+				return r.error();
+			}
+		}
+	}
 	r_mesh.error = r.f32(uint32_t(p_at + 144));
 	r_mesh.bounds_min = r.vec3(uint32_t(p_at + 160));
 	r_mesh.bounds_max = r.vec3(uint32_t(p_at + 176));
@@ -317,7 +378,7 @@ ResError PackReader::extended_mesh(uint32_t p_at, bool p_storage, uint32_t p_dep
 	for (uint32_t i = 0; i < shape_count; i++) {
 		const uint32_t subpart = shapes_at + 64 * i;
 		uint32_t children_at = 0, child_count = 0;
-		if (!array(subpart + 20, children_at, child_count)) {
+		if (!array(subpart + 20, children_at, child_count) || !spend(sizeof(ShapesSubpart), subpart)) {
 			return r.error();
 		}
 		ShapesSubpart out;
@@ -348,6 +409,9 @@ ResError PackReader::extended_mesh(uint32_t p_at, bool p_storage, uint32_t p_dep
 	}
 	for (uint32_t i = 0; i < triangle_count; i++) {
 		const uint32_t subpart = triangles_at + 112 * i;
+		if (!spend(sizeof(TrianglesSubpart), subpart)) {
+			return r.error();
+		}
 		const Vec3 translation = r.vec3(uint32_t(subpart + 64));
 		const Vec4 rotation = r.vec4(uint32_t(subpart + 80));
 		const Vec3 scale = r.vec3(uint32_t(subpart + 96));
@@ -382,7 +446,7 @@ ResError PackReader::fill_storage(uint32_t p_subpart, uint32_t p_mesh, Triangles
 	}
 	const uint32_t triangle_count = raw_triangles < 0 ? 0u : uint32_t(raw_triangles);
 	uint32_t vertices_at = 0, vertex_count = 0;
-	if (!array(p_mesh + 8, vertices_at, vertex_count)) {
+	if (!array(p_mesh + 8, vertices_at, vertex_count) || !spend(12 * uint64_t(vertex_count), p_mesh)) {
 		return r.error();
 	}
 	for (uint32_t i = 0; i < vertex_count; i++) {
@@ -445,6 +509,9 @@ ResError PackReader::fill_storage(uint32_t p_subpart, uint32_t p_mesh, Triangles
 		if (tri[0] >= vertex_count || tri[1] >= vertex_count || tri[2] >= vertex_count) {
 			return ResError::malformed("triangle vertex beyond storage", t);
 		}
+		if (!spend(12, p_subpart)) {
+			return r.error();
+		}
 		r_out.triangles.push_back(tri);
 	}
 	uint32_t materials_at = 0, material_count = 0;
@@ -452,6 +519,9 @@ ResError PackReader::fill_storage(uint32_t p_subpart, uint32_t p_mesh, Triangles
 		return r.error();
 	}
 	if (material_count == triangle_count) {
+		if (!spend(4 * uint64_t(material_count), p_mesh)) {
+			return r.error();
+		}
 		for (uint32_t i = 0; i < material_count; i++) {
 			const uint8_t m = r.u8(uint32_t(materials_at + i));
 			if (!r.ok()) {
@@ -863,16 +933,48 @@ ResError HavokPhysicsData::part_connections(std::vector<std::array<uint32_t, 2>>
 
 ResError HavokPhysicsData::group_subparts(std::vector<SubpartTransform> &r_subparts) const {
 	r_subparts.clear();
-	std::vector<uint32_t> pending;
-	ResError e = packfile.root_shapes(pending);
+	std::vector<uint32_t> roots;
+	ResError e = packfile.root_shapes(roots);
 	if (!e.ok()) {
 		return e;
 	}
+	// Breadth first through MoppBvTree / List children (the first extended mesh in that order is
+	// the group). Every visit remembers its parent: a child equal to one of its ancestors is a
+	// cycle, and the visits of a DAG with heavy sharing are capped (see kGroupVisitsFloor).
+	constexpr uint32_t kNoParent = UINT32_MAX;
+	struct Visit {
+		uint32_t offset = 0;
+		uint32_t parent = kNoParent; // index into visits
+	};
+	const uint64_t max_visits = kGroupVisitsFloor + uint64_t(packfile.data.size()) / 4;
+	if (roots.size() > max_visits) {
+		return ResError::malformed("shape tree size", packfile.contents_offset);
+	}
+	std::vector<Visit> visits;
+	for (uint32_t root : roots) {
+		visits.push_back({ root, kNoParent });
+	}
+	auto visit = [&](size_t p_parent, uint32_t p_child) -> ResError {
+		for (uint32_t a = uint32_t(p_parent); a != kNoParent; a = visits[a].parent) {
+			if (visits[a].offset == p_child) {
+				return ResError::malformed("shape cycle", p_child);
+			}
+		}
+		if (visits.size() >= max_visits) {
+			return ResError::malformed("shape tree size", p_child);
+		}
+		visits.push_back({ p_child, uint32_t(p_parent) });
+		return ResError();
+	};
 	Reader r(Bytes(packfile.data.data(), packfile.data.size()));
-	uint32_t depth = 0;
-	while (!pending.empty() && depth < kMaxShapeDepth) {
-		std::vector<uint32_t> next;
-		for (uint32_t offset : pending) {
+	size_t level_begin = 0;
+	size_t level_end = visits.size();
+	for (uint32_t depth = 0; level_begin < level_end; depth++) {
+		if (depth > kMaxShapeDepth) {
+			return ResError::malformed("shape nesting", visits[level_begin].offset);
+		}
+		for (size_t v = level_begin; v < level_end; v++) {
+			const uint32_t offset = visits[v].offset;
 			const std::string *cls = packfile.class_at(offset);
 			if (cls == nullptr) {
 				continue;
@@ -900,24 +1002,24 @@ ResError HavokPhysicsData::group_subparts(std::vector<SubpartTransform> &r_subpa
 			if (*cls == "hkpMoppBvTreeShape") {
 				uint32_t child = 0;
 				if (packfile.pointer(offset + 68, child)) {
-					next.push_back(child);
+					e = visit(v, child);
 				}
 			} else if (*cls == "hkpListShape") {
 				uint32_t data = 0, count = 0;
 				e = packfile.array(offset + 24, data, count);
-				if (!e.ok()) {
-					return e;
-				}
-				for (uint32_t i = 0; i < count && slot_in_data(packfile, data, 16, i); i++) {
+				for (uint32_t i = 0; e.ok() && i < count && slot_in_data(packfile, data, 16, i); i++) {
 					uint32_t child = 0;
 					if (packfile.pointer(data + 16 * i, child)) {
-						next.push_back(child);
+						e = visit(v, child);
 					}
 				}
 			}
+			if (!e.ok()) {
+				return e;
+			}
 		}
-		pending = std::move(next);
-		depth++;
+		level_begin = level_end;
+		level_end = visits.size();
 	}
 	return ResError();
 }

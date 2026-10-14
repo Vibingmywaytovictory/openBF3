@@ -92,3 +92,10 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/res/dx_texture.h
     include/bf3/core/res/havok.h
 )
+
+# Resource loading from a LevelMount (res payload + resMeta + chunks -> decoded MeshSet / DxTexture /
+# Havok); see include/bf3/core/res/res_loader.h. The API the Godot bridge calls.
+target_sources(bf3_core PRIVATE
+    src/res/res_loader.cpp
+    include/bf3/core/res/res_loader.h
+)

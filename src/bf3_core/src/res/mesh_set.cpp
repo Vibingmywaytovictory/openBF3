@@ -18,6 +18,7 @@ namespace {
 constexpr uint32_t kLodSlots = 5;
 constexpr uint64_t kSubsetBytes = 148;
 constexpr uint64_t kPartMaskBytes = 24;
+constexpr uint64_t kSubsetOverlap = 8; // MeshLod::decode: decoded ranges per region byte
 
 // Rust `f as u16` / `f as u8`: saturating, NaN to 0.
 template <typename T>
@@ -678,14 +679,30 @@ ResError MeshLod::inline_geometry(Bytes p_res, Bytes &r_geometry) const {
 
 ResError MeshLod::decode(Bytes p_geometry, SubsetFilter p_filter, std::vector<DecodedSubset> &r_out) const {
 	r_out.clear();
+	// Subsets may share vertex and index ranges, and each decoded subset owns copies, so a hostile
+	// LOD whose subsets all name its whole regions would multiply them by the subset count. Retail
+	// ranges sum to at most 2x the regions (31,984 MeshSets of all 29 levels; double-sided foliage
+	// such as xp4_leaves_01_mesh); refuse more than kSubsetOverlap times.
+	uint64_t vertex_bytes = 0, index_bytes = 0;
 	for (size_t index = 0; index < subsets.size(); index++) {
-		if (p_filter == SubsetFilter::Drawn && subsets[index].is_z_only()) {
+		const MeshSubset &subset = subsets[index];
+		if (p_filter == SubsetFilter::Drawn && subset.is_z_only()) {
 			continue;
 		}
 		DecodedSubset decoded;
 		const ResError e = decode_subset(p_geometry, index, decoded);
 		if (!e.ok()) {
+			r_out.clear();
 			return e;
+		}
+		// decode_subset checked both ranges against the regions, so these sums cannot overflow.
+		const uint64_t elements = subset.primitive_type == PrimitiveType::TriangleStrip ? uint64_t(subset.primitive_count) + 2
+																						 : uint64_t(subset.primitive_count) * 3;
+		vertex_bytes += uint64_t(subset.vertex_count) * subset.vertex_stride;
+		index_bytes += elements * uint64_t(index_format_bytes(index_format));
+		if (vertex_bytes > kSubsetOverlap * uint64_t(vertex_data_size) || index_bytes > kSubsetOverlap * uint64_t(index_data_size)) {
+			r_out.clear();
+			return ResError::malformed("subset ranges overlap", index);
 		}
 		r_out.push_back(std::move(decoded));
 	}

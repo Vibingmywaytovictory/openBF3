@@ -183,11 +183,15 @@ struct HavokPhysicsData {
 
 	static ResError parse(Bytes p_res, const ResMeta &p_res_meta, HavokPhysicsData &r_data);
 
-	// One root shape per rigid body, in PhysicsEntityData.RigidBodies order.
+	// One root shape per rigid body, in PhysicsEntityData.RigidBodies order. A shape shared in the
+	// file is decoded once per use; the walk is bounded (depth 64, cycles refused, decoded size and
+	// convex hull work budgeted per byte of packfile data, havok.cpp), so havok_triangles and
+	// havok_convex_pieces of an accepted tree are bounded too.
 	ResError shapes(std::vector<Shape> &r_shapes) const;
 	// Pairs of parts joined in the first hkdBreakableShapeConnectionList; empty when none.
 	ResError part_connections(std::vector<std::array<uint32_t, 2>> &r_pairs) const;
-	// Instance transforms of a static model group, in subpart order; empty when none.
+	// Instance transforms of a static model group, in subpart order; empty when none. Found breadth
+	// first through MoppBvTree / List children (cycles and runaway sharing refused).
 	ResError group_subparts(std::vector<SubpartTransform> &r_subparts) const;
 };
 

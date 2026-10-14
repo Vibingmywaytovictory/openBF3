@@ -63,3 +63,14 @@ if(OPENBF3_ASAN)
     set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant core.res.unit core.res
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
+
+# Resource decoders fed straight from the install through bf3/core/res/res_loader.h (read-only):
+# every MeshSet / DxTexture / Havok res of MP_Subway and the M9 1p mesh; exits 77 = skipped without
+# an install.
+openbf3_test(test_res_install test_main.cpp res_install_tests.cpp test_support.h)
+target_link_libraries(test_res_install PRIVATE bf3_core)
+add_test(NAME core.res.install COMMAND test_res_install)
+set_tests_properties(core.res.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(core.res.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
+endif()
