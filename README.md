@@ -49,10 +49,13 @@ Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C
 (`_HAS_EXCEPTIONS=0`). This covers godot-cpp, Jolt, ENet, Recast, libdeflate and doctest.
 
 `ctest` runs `core.guard`, `core.formats` (container and EBX readers on synthetic bytes), `core.install`,
-`core.cache`, `core.cache_data`, `core.ant.unit`, `core.ant`, `core.res.unit`, `core.res`, `sim.jolt`, `net.enet` and
-`host.server`. `core.install` reports *Skipped* when no install is found, `core.cache_data` when
-`OPENBF3_CACHE_TESTDATA` is unset, `core.ant` without an install (see `tools/antdump/README.md`) and `core.res` when `OPENBF3_RES_DATA` does not
-point at an exported resource sample (see "Resource decoders"). With an install `core.install` also
+`core.fuzz`, `core.cache`, `core.cache_data`, `core.ant.unit`, `core.ant`, `core.res.unit`, `core.res`,
+`core.res.install`, `core.gameplay.unit`, `core.gameplay.weapons`, `core.gameplay.fuzz`, `core.ui.text.unit`,
+`core.ui.text`, `core.ui.text.fuzz`, `sim.jolt`, `net.enet`, `host.server` and `tools.numtext`. The `*.unit`
+tests, `core.guard`, `core.formats` and `tools.numtext` need no data. The install tests report *Skipped* when no
+install is found; `core.cache_data` is skipped when `OPENBF3_CACHE_TESTDATA` is unset and `core.res` when
+`OPENBF3_RES_DATA` does not point at an exported resource sample (see "Resource decoders"; `core.res.install` covers
+the same decoders straight from the install). With an install `core.install` also
 reads every bundle manifest of the 53 non-chunk superbundles and checks SHA1s through the CAS, binary, delta and
 tail-only paths, and parses every EBX partition of `@all-mp` (50,486) with spot checks of known field values.
 `core.fuzz` (also skipped without an install) feeds seeded mutations of real partitions, stored payloads and a

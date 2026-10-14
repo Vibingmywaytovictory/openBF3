@@ -470,7 +470,7 @@ void usage() {
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
 			"  numcheck\n"
 			"  weapon <partition> [--unlock <u_..>]... [--level <sb>]\n"
-			"  weapons [--level <sb>]\n");
+			"  weapons [--level <sb>]\n"
 			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n");
 }
 
