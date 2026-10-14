@@ -7,8 +7,10 @@
 //
 // Units: one per EBX array element scanned (null and unresolvable entries included), per reference
 // resolved or connection hop taken, per object or table entry examined, one per kBytesPerUnit bytes
-// of a string copied, and one per kFieldsPerUnit fields of a wide type each time an instance or
-// struct of it is examined (charge_type). Callers charge BEFORE the work, at the place it happens.
+// of a string copied, and one per kFieldsPerUnit descriptors of a wide type (its chain, the
+// enumerators of its enum fields and its inline struct types: EbxPartition::lookup_width) each time
+// an instance or struct of it is examined (charge_type). Callers charge BEFORE the work, at the
+// place it happens.
 // Once a charge would pass the limit the budget is exhausted for good: every later charge fails at
 // once with the same error, so loops and recursions stop at their next charge, and each public
 // reader ends with status() so a helper that returned early (an empty list, nullopt) never yields a
@@ -50,25 +52,19 @@ public:
 	// A string of p_bytes about to be copied: one unit plus one per kBytesPerUnit bytes.
 	Status charge_bytes(size_t p_bytes) { return charge(1 + p_bytes / kBytesPerUnit); }
 	bool take(size_t p_units) { return charge(p_units).ok(); }
-	// An instance or struct about to be examined (a few field lookups or one fields() pass). A
-	// lookup scans the whole type chain, at most 255 fields x kBaseDepth (32) base types, so a type
-	// wider than kFieldsPerUnit fields costs one more unit per kFieldsPerUnit fields; retail types
-	// are narrower or about as wide, and cost nothing extra.
+	// An instance or struct about to be examined: a few field lookups, each a path of at most
+	// EbxPartition::kLookupDepth segments through its inline (ValueType) fields, or one fields()
+	// pass. Each such access scans at most type_width descriptors (the type chain, the enumerators
+	// of its enum fields and the deepest inline field types; up to 255 fields x kBaseDepth (32) base
+	// types per level), so a type wider than kFieldsPerUnit costs one more unit per kFieldsPerUnit;
+	// retail types are narrower or about as wide, and cost nothing or a unit extra. A struct reached
+	// through an inline field of a charged one is covered by that charge; one reached any other way
+	// (an array element, a reference) is charged itself.
 	Status charge_type(const EbxStruct &p_data) { return charge(type_width(p_data) / kFieldsPerUnit); }
 	bool take_type(const EbxStruct &p_data) { return charge_type(p_data).ok(); }
 
-	// Field descriptors of a type and its bases (at most 255 x kBaseDepth; costs <= kBaseDepth steps).
-	static size_t type_width(const EbxStruct &p_data) {
-		const EbxPartition &partition = p_data.partition();
-		size_t width = 0;
-		std::optional<uint32_t> complex = p_data.complex();
-		for (size_t depth = 0; complex && depth < EbxPartition::kBaseDepth && *complex < partition.complex_descs().size(); ++depth) {
-			const EbxPartition::Complex &desc = partition.complex_descs()[*complex];
-			width += desc.field_end - desc.field_start;
-			complex = desc.base;
-		}
-		return width;
-	}
+	// EbxPartition::lookup_width of the struct's type (precomputed when the partition was parsed).
+	static size_t type_width(const EbxStruct &p_data) { return p_data.partition().lookup_width(p_data.complex()); }
 
 	// The budget error once exhausted, else success.
 	Status status() const { return exhausted_ ? Status(error()) : Status::success(); }

@@ -217,6 +217,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		return make_error("vehicle: no partition `" + name + "`");
 	}
 	const EbxInstance blueprint = partition->primary();
+	BF3_TRY(budget.charge_type(blueprint.data()));
 	const std::optional<EbxInstance> entity = p_db.follow(blueprint.data(), "Object");
 	if (!entity || !entity->is_a("VehicleEntityData")) {
 		return make_error("vehicle: `" + name + "` has no VehicleEntityData (primary " + std::string(blueprint.type_name()) + ")");

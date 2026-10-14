@@ -409,14 +409,23 @@ public:
 	std::optional<std::string_view> enumerator(uint32_t p_complex, int32_t p_value) const;
 	uint32_t stride(uint32_t p_field) const;
 	std::optional<EbxValue> decode(uint32_t p_field, size_t p_at) const;
+	// An upper bound on the descriptors one access to a struct of this type scans: one fields() pass,
+	// or one get_path of up to kLookupDepth segments through inline (ValueType) fields, decoding
+	// included. It is the descriptor count of the type chain plus the enumerators of its enum fields
+	// (decoding an enum scans its enumerators), plus the most any one inline field's type adds one
+	// segment further down (computed when the partition is parsed, linear in the descriptor count).
+	// 0 for an index out of range.
+	uint32_t lookup_width(uint32_t p_complex) const { return p_complex < lookup_widths_.size() ? lookup_widths_[p_complex] : 0; }
 
 	static constexpr size_t kBaseDepth = 32;
+	static constexpr size_t kLookupDepth = 4;
 
 private:
 	EbxPartition() = default;
 	friend class EbxValidator;
 
 	Status link_complexes();
+	void compute_lookup_widths();
 	Result<std::optional<uint32_t>> check_members(uint32_t p_complex) const;
 	Status check_element(uint32_t p_complex, uint32_t p_member);
 	Result<uint32_t> array_member(uint32_t p_complex) const;
@@ -433,6 +442,8 @@ private:
 	size_t names_len_ = 0;
 	size_t strings_at_ = 0; // string table
 	size_t strings_len_ = 0;
+	std::vector<uint32_t> string_ends_; // offsets of the string table's NUL bytes, ascending
+	std::vector<uint32_t> lookup_widths_; // per complex (lookup_width)
 	std::vector<Field> fields_;
 	std::vector<Complex> complexes_;
 	std::vector<InstanceEntry> instances_;

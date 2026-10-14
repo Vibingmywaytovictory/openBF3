@@ -260,10 +260,13 @@ Every reader runs on one `WorkBudget` (`work_budget.h`, default 1M units): the w
 set, sub-world inclusion test and array scan of the read is charged before it is done (null and unresolvable array
 entries, repeated references to one object, arrays shared by many instances, connection loops and wide type chains
 all count), so hostile data ends with "work budget of N units exhausted" within a second instead of running for
-minutes. A caller can pass one budget to several reads (`bf3dump kits` shares one between the mode, the progression
-tables and every kit). Retail needs at most 16,063 units for a mode (XP3_Shield Rush), 20,904 for `kits` with every
-kit, 3,632 for the soldier and 797 for a vehicle; the walk caps `max_walk_steps` / `max_query_steps` stay on top
-(retail: under 8k and 4k steps). Indexes keyed by data (connection targets, unlock GUIDs) are sorted or ordered, and
+minutes. An instance or struct costs its `EbxPartition::lookup_width`, computed once per type when the partition is
+parsed: its type chain, the enumerators its enum fields decode against, and its inline (value-type) fields' types
+four levels down, so a narrow class with wide inline structs pays for them too. String decodes are a binary search
+over the string table's NUL offsets, never a scan of the string. A caller can pass one budget to several reads
+(`bf3dump kits` shares one between the mode, the progression tables and every kit). Retail needs at most 17,322
+units for a mode (XP3_Shield Rush), 23,700 for `kits` with every kit, 3,675 for the soldier and 855 for a vehicle;
+the walk caps `max_walk_steps` / `max_query_steps` stay on top (retail: under 8k and 4k steps). Indexes keyed by data (connection targets, unlock GUIDs) are sorted or ordered, and
 the hash maps of GUIDs, SHA1s and instance keys hash with a per-process random seed (`ids.h` `hash_keyed`), so crafted
 keys cannot pile into one bucket and make a charged entry cost O(N). The cost model is written down at the top of
 `src/gameplay/logic_world.cpp`; bf3dump prints the units a command used on stderr.

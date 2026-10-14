@@ -276,9 +276,14 @@ const EbxPartition &insert_graph(EbxDb &r_db, const std::vector<SynthNode> &p_no
 // derives from DataContainer (size 8) or from a class listed before it (`base`) and has one 4-byte
 // slot per field after its base; a value type has its slots from offset 0. Field kinds: 'b' Boolean, 'i' Int32, 'r' class reference, 's'
 // CString, 'a' array of references, 'v' array of the value type `elem`, 'g' Guid (its 16 bytes are
-// this slot's word and the next three slots, which must be 'i' fields holding the rest). A field value is the raw
-// word, except 's' (an index into `strings`) and 'a' / 'v' (an index into `arrays`; arrays may be
-// shared by any number of fields, as EBX allows). Unset strings are null, unset arrays empty.
+// this slot's word and the next three slots, which must be 'i' fields holding the rest), 'S' an
+// inline struct of the value type `elem` (written as zeros; it must fit the slot, see `overlap`),
+// 'e' an Enum of the enum type `elem`, 'w' array of CStrings. A field value is the raw word, except
+// 's' (an index into `strings`) and 'a' / 'v' / 'w' (an index into `arrays`; arrays may be shared by
+// any number of fields, as EBX allows). Unset strings are null, unset arrays empty. An `overlap`
+// type is 4 bytes with every field (and its base) at offset 0, as EBX allows; a value type may then
+// have a base. An `enum_type` lists its enumerators as fields, valued 1, 2, 3, ... (a zero field
+// names none, so decoding it scans them all).
 struct SynField {
 	std::string name;
 	char kind = 'i';
@@ -290,14 +295,18 @@ struct SynType {
 	std::vector<SynField> fields;
 	bool value_type = false;
 	std::string base; // a class listed earlier; empty: DataContainer
+	bool overlap = false;
+	bool enum_type = false;
 };
 
 using SynValues = std::vector<std::pair<std::string, uint32_t>>;
 
 struct SynArray {
-	std::string elem; // the value type of a struct array, empty for references
-	std::vector<uint32_t> refs;
+	std::string elem; // the value type of a struct array, empty for references, kStrings for CStrings
+	std::vector<uint32_t> refs; // references, or for kStrings indices into `strings`
 	std::vector<SynValues> structs;
+
+	static constexpr const char *kStrings = "*CString";
 };
 
 struct SynInstance {
@@ -354,8 +363,9 @@ std::vector<uint8_t> SynPartition::build() const {
 		add_name(t.name);
 		for (const SynField &f : t.fields) {
 			add_name(f.name);
-			if (f.kind == 'v' && std::find(elems.begin(), elems.end(), f.elem) == elems.end()) {
-				elems.push_back(f.elem);
+			const std::string elem = f.kind == 'w' ? std::string(SynArray::kStrings) : f.elem;
+			if ((f.kind == 'v' || f.kind == 'w') && std::find(elems.begin(), elems.end(), elem) == elems.end()) {
+				elems.push_back(elem);
 			}
 		}
 	}
@@ -394,14 +404,21 @@ std::vector<uint8_t> SynPartition::build() const {
 	std::vector<uint32_t> sizes;
 	for (const SynType &t : types) {
 		const uint32_t base = t.value_type ? 0 : (t.base.empty() ? 8 : sizes[type_at(t.base)]);
-		sizes.push_back(base + static_cast<uint32_t>(4 * t.fields.size()));
+		sizes.push_back((t.overlap || t.enum_type) ? 4u : base + static_cast<uint32_t>(4 * t.fields.size()));
 	}
 	const auto base_of = [&](const SynType &p_type) -> uint32_t {
-		return p_type.value_type ? 0 : (p_type.base.empty() ? 8 : sizes[type_at(p_type.base)]);
+		return (p_type.value_type || p_type.overlap) ? 0 : (p_type.base.empty() ? 8 : sizes[type_at(p_type.base)]);
 	};
 	for (const SynType &t : types) {
 		const uint32_t start = static_cast<uint32_t>(fields.size());
-		if (!t.value_type) {
+		if (t.enum_type) {
+			for (size_t k = 0; k < t.fields.size(); ++k) {
+				fields.push_back({ t.fields[k].name, ebx_code::kVoid, 0, static_cast<uint32_t>(k + 1) });
+			}
+			complexes.push_back({ t.name, start, static_cast<uint8_t>(fields.size() - start), ebx_code::kEnum, 4 });
+			continue;
+		}
+		if (!t.value_type || !t.base.empty()) {
 			fields.push_back({ "$", ebx_code::kVoid, static_cast<uint16_t>(t.base.empty() ? 0 : 1 + type_at(t.base)), 0 });
 		}
 		for (size_t k = 0; k < t.fields.size(); ++k) {
@@ -421,22 +438,32 @@ std::vector<uint8_t> SynPartition::build() const {
 				case 'g':
 					code = ebx_code::kGuid;
 					break;
+				case 'S':
+					code = ebx_code::kValueType;
+					ref = static_cast<uint16_t>(1 + type_at(f.elem));
+					break;
+				case 'e':
+					code = ebx_code::kEnum;
+					ref = static_cast<uint16_t>(1 + type_at(f.elem));
+					break;
 				case 'a':
 				case 'v':
+				case 'w':
 					code = ebx_code::kArray;
-					ref = array_complex(f.kind == 'a' ? std::string() : f.elem);
+					ref = array_complex(f.kind == 'a' ? std::string() : f.kind == 'w' ? std::string(SynArray::kStrings) : f.elem);
 					break;
 				default:
 					break;
 			}
-			fields.push_back({ f.name, code, ref, base_of(t) + static_cast<uint32_t>(4 * k) });
+			fields.push_back({ f.name, code, ref, t.overlap ? 0u : base_of(t) + static_cast<uint32_t>(4 * k) });
 		}
 		complexes.push_back({ t.name, start, static_cast<uint8_t>(fields.size() - start), t.value_type ? ebx_code::kValueType : ebx_code::kClass,
-				static_cast<uint16_t>(base_of(t) + 4 * t.fields.size()) });
+				static_cast<uint16_t>(t.overlap ? 4 : base_of(t) + 4 * t.fields.size()) });
 	}
 	for (const std::string &e : elems) {
 		const uint32_t start = static_cast<uint32_t>(fields.size());
-		fields.push_back({ "member", e.empty() ? ebx_code::kClass : ebx_code::kValueType, static_cast<uint16_t>(e.empty() ? 0 : 1 + type_at(e)), 0 });
+		const uint8_t code = e.empty() ? ebx_code::kClass : e == SynArray::kStrings ? ebx_code::kCString : ebx_code::kValueType;
+		fields.push_back({ "member", code, static_cast<uint16_t>(code == ebx_code::kValueType ? 1 + type_at(e) : 0), 0 });
 		complexes.push_back({ "array", start, 1, ebx_code::kArray, 4 });
 	}
 
@@ -468,10 +495,11 @@ std::vector<uint8_t> SynPartition::build() const {
 		instance_payload += 16 + complexes[1 + type_at(i.type)].size;
 	}
 	const size_t arrays_at = instances_at + instance_payload;
-	const auto stride = [&](const SynArray &p_array) -> size_t { return p_array.elem.empty() ? 4 : complexes[1 + type_at(p_array.elem)].size; };
+	const auto by_refs = [](const SynArray &p_array) { return p_array.elem.empty() || p_array.elem == SynArray::kStrings; };
+	const auto stride = [&](const SynArray &p_array) -> size_t { return by_refs(p_array) ? 4 : complexes[1 + type_at(p_array.elem)].size; };
 	size_t array_bytes = 0;
 	for (const SynArray &a : all) {
-		array_bytes += 4 + (a.elem.empty() ? a.refs.size() : a.structs.size()) * stride(a);
+		array_bytes += 4 + (by_refs(a) ? a.refs.size() : a.structs.size()) * stride(a);
 	}
 	const size_t total = arrays_at + array_bytes;
 
@@ -519,6 +547,9 @@ std::vector<uint8_t> SynPartition::build() const {
 	std::memcpy(b.data() + strings_at, string_table.data(), string_table.size());
 	// The fields of one object (instance data or array element) at p_at, base types first.
 	std::function<void(const SynType &, const SynValues &, size_t)> write = [&](const SynType &p_type, const SynValues &p_values, size_t p_at) {
+		if (p_type.overlap) {
+			return; // all zero
+		}
 		if (!p_type.value_type && !p_type.base.empty()) {
 			write(types[type_at(p_type.base)], p_values, p_at);
 		}
@@ -533,8 +564,8 @@ std::vector<uint8_t> SynPartition::build() const {
 			}
 			if (f.kind == 's') {
 				put32(b, at, word ? string_at[*word] : 0xFFFFFFFFu);
-			} else if (f.kind == 'a' || f.kind == 'v') {
-				const std::string elem = f.kind == 'a' ? std::string() : f.elem;
+			} else if (f.kind == 'a' || f.kind == 'v' || f.kind == 'w') {
+				const std::string elem = f.kind == 'a' ? std::string() : f.kind == 'w' ? std::string(SynArray::kStrings) : f.elem;
 				put32(b, at, word ? *word : static_cast<uint32_t>(empty_at + (std::find(elems.begin(), elems.end(), elem) - elems.begin())));
 			} else if (f.kind == 'b') {
 				b[at] = static_cast<uint8_t>(word.value_or(0) != 0);
@@ -556,7 +587,7 @@ std::vector<uint8_t> SynPartition::build() const {
 	size_t array_at = 0;
 	for (size_t i = 0; i < all.size(); ++i) {
 		const SynArray &a = all[i];
-		const size_t count = a.elem.empty() ? a.refs.size() : a.structs.size();
+		const size_t count = by_refs(a) ? a.refs.size() : a.structs.size();
 		const size_t rep = array_repeaters_at + i * 12;
 		put32(b, rep, static_cast<uint32_t>(array_at + 4));
 		put32(b, rep + 4, static_cast<uint32_t>(count));
@@ -566,6 +597,8 @@ std::vector<uint8_t> SynPartition::build() const {
 			const size_t element_at = arrays_at + array_at + 4 + k * stride(a);
 			if (a.elem.empty()) {
 				put32(b, element_at, a.refs[k]);
+			} else if (a.elem == SynArray::kStrings) {
+				put32(b, element_at, string_at[a.refs[k]]);
 			} else {
 				write(types[type_at(a.elem)], a.structs[k], element_at);
 			}
@@ -611,6 +644,22 @@ std::vector<SynType> world_types() {
 		{ "TeamEntityData", { { "Team", 'r' } } },
 		{ "TeamData", { { "SoldierCustomization", 'a' }, { "VehicleCustomization", 'a' } } },
 	};
+}
+
+// Adds the widest type the parser accepts as p_levels value types (W0 <- W1 <- ...; 255 descriptors
+// each, the base link included), 4 bytes with every field at offset 0, and returns the most derived.
+// As an inline field it makes a narrow class as costly to look into as the widest class.
+std::string add_wide_value_type(SynPartition &r_syn, int p_levels) {
+	std::string base;
+	for (int level = 0; level < p_levels; ++level) {
+		SynType t{ "W" + std::to_string(level), {}, true, base, true };
+		for (int k = 0; k < (base.empty() ? 255 : 254); ++k) {
+			t.fields.push_back({ "Pad" + std::to_string(level) + "_" + std::to_string(k), 'i', {} });
+		}
+		r_syn.types.push_back(t);
+		base = t.name;
+	}
+	return base;
 }
 
 // One world part whose Objects hold p_k references to one WorldPartReferenceObjectData, whose part
@@ -1092,6 +1141,309 @@ TEST_SUITE("gameplay_unit") {
 		options.max_walk_steps = SIZE_MAX;
 		const auto start = std::chrono::steady_clock::now();
 		Result<LogicWorld> world = LogicWorld::build(many_db, many->primary(), options);
+		REQUIRE_FALSE(world.ok());
+		CHECK(budget_error(world.error()));
+		CHECK(seconds_since(start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: lookup_width counts enumerators and inline types, nested cycles included") {
+		// Inline value types may nest in a cycle (sizes are declared, not derived; the validator only
+		// rejects one an instance holds); the width unrolls the nesting kLookupDepth (4) levels:
+		// V1 = 2, 2 + 2, 2 + 4, 2 + 6 = 8 descriptors.
+		SynPartition s;
+		s.types = {
+			{ "Choice", { { "One", 'i' }, { "Two", 'i' }, { "Three", 'i' } }, false, {}, false, true },
+			{ "V1", { { "x", 'i' }, { "next", 'S', "V2" } }, true, {}, true },
+			{ "V2", { { "y", 'i' }, { "next", 'S', "V1" } }, true, {}, true },
+			{ "V3", { { "z", 'i' }, { "w", 'i' } }, true },
+			{ "Holder", { { "Inline", 'S', "V3" }, { "Pick", 'e', "Choice" } } },
+		};
+		const uint32_t holder = s.add({ "Holder", {} });
+		EbxDb db;
+		const EbxPartition *p = insert_syn(db, "levels/synthetic/widths", s);
+		if (p == nullptr) {
+			return;
+		}
+		CHECK(WorkBudget::type_width(EbxStruct(p, 2, 0)) == 8); // complex 0 is DataContainer, 1 Choice
+		CHECK(WorkBudget::type_width(EbxStruct(p, 3, 0)) == 8);
+		const std::optional<EbxInstance> h = p->instance(holder);
+		REQUIRE(h.has_value());
+		const std::optional<EbxValue> inline_value = h->get("Inline");
+		REQUIRE(inline_value.has_value());
+		REQUIRE(inline_value->as_struct().has_value());
+		CHECK(WorkBudget::type_width(*inline_value->as_struct()) == 2);
+		// Holder: '$' + Inline + Pick, the enum's 3 enumerators, and V3 one level down.
+		CHECK(WorkBudget::type_width(h->data()) == 3 + 3 + 2);
+		// Pick is 0, which names no enumerator (they are 1, 2, 3).
+		const std::optional<EbxValue> pick = h->get("Pick");
+		REQUIRE(pick.has_value());
+		CHECK_FALSE(pick->enum_name().has_value());
+		CHECK(h->get_path("Inline.w").has_value());
+	}
+
+	TEST_CASE("gameplay: round 5 repro - wide inline structs in a narrow pose (read_soldier_def)") {
+		// Poses: N references to one narrow CharacterPoseData whose inline EyePosition,
+		// CollisionBoxMin/MaxExpand and LookConstraints have the widest value type (31 x 255
+		// descriptors). read_pose makes 11 lookups into them per pose, but the pose was charged for its
+		// own 6 descriptors only: N = 450k (2 MB) ran 28 s inside the budget, 600k 37 s before the
+		// budget error. lookup_width counts the inline types, so a pose now costs ~124 units more.
+		const auto build = [](size_t p_poses) {
+			SynPartition s;
+			const std::string wide = add_wide_value_type(s, 31);
+			s.types.push_back({ "SoldierBlueprint", { { "Object", 'r' } } });
+			s.types.push_back({ "SoldierEntityData", { { "CharacterPhysics", 'r' } } });
+			s.types.push_back({ "CharacterPhysicsData", { { "Poses", 'a' } } });
+			s.types.push_back({ "CharacterPoseData", { { "EyePosition", 'S', wide }, { "CollisionBoxMinExpand", 'S', wide },
+															 { "CollisionBoxMaxExpand", 'S', wide }, { "LookConstraints", 'S', wide }, { "Height", 'i' } } });
+			const uint32_t blueprint = s.add({ "SoldierBlueprint", {} });
+			const uint32_t entity = s.add({ "SoldierEntityData", {} });
+			const uint32_t physics = s.add({ "CharacterPhysicsData", {} });
+			const uint32_t pose = s.add({ "CharacterPoseData", {} });
+			s.instances[blueprint].values = { { "Object", SynPartition::ref(entity) } };
+			s.instances[entity].values = { { "CharacterPhysics", SynPartition::ref(physics) } };
+			s.instances[physics].values = { { "Poses", s.add_refs(p_poses, SynPartition::ref(pose)) } };
+			return s;
+		};
+		constexpr size_t kPoseWidth = 6 + 31 * 255;
+		const char *name = "characters/soldiers/syn";
+		{
+			// Inside the budget: every pose pays for its inline types.
+			constexpr size_t kPoses = 4000;
+			EbxDb db;
+			const EbxPartition *p = insert_syn(db, name, build(kPoses));
+			if (p == nullptr) {
+				return;
+			}
+			const std::optional<EbxInstance> pose = p->instance(3);
+			REQUIRE(pose.has_value());
+			CHECK(WorkBudget::type_width(pose->data()) == kPoseWidth);
+			WorkBudget budget;
+			const auto start = std::chrono::steady_clock::now();
+			Result<SoldierDef> soldier = read_soldier_def(db, name, &budget);
+			REQUIRE(soldier.ok());
+			CHECK(soldier->poses.size() == kPoses);
+			CHECK(budget.used() >= kPoses * (kPoseWidth / WorkBudget::kFieldsPerUnit));
+			CHECK(seconds_since(start) < kFastSeconds);
+		}
+		EbxDb db;
+		if (insert_syn(db, name, build(450000)) == nullptr) {
+			return;
+		}
+		const auto start = std::chrono::steady_clock::now();
+		Result<SoldierDef> soldier = read_soldier_def(db, name);
+		REQUIRE_FALSE(soldier.ok());
+		CHECK(budget_error(soldier.error()));
+		CHECK(seconds_since(start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: round 5 repro - K prefabs sharing one EventConnections array with wide inline events") {
+		// get_path("SourceEvent.Id") and ("TargetEvent.Id") look into inline structs; the connection
+		// struct was charged for its own 4 descriptors only: K = 100 prefabs sharing N = 9000 entries
+		// (354 KB) ran 9.8 s inside the budget. array_cost now counts the inline types.
+		const auto run = [](EbxDb &r_db, size_t p_prefabs, size_t p_connections, WorkBudget &r_budget) -> Result<LogicWorld> {
+			SynPartition root;
+			root.seed = 1;
+			root.types = {
+				{ "LevelData", { { "Objects", 'a' } } },
+				{ "SubWorldReferenceObjectData", { { "AutoLoad", 'b' }, { "BundleName", 's' } } },
+			};
+			const uint32_t level = root.add({ "LevelData", {} });
+			const uint32_t sub_ref = root.add({ "SubWorldReferenceObjectData", { { "AutoLoad", 1 }, { "BundleName", root.add_string("levels/synthetic/events_sub") } } });
+			root.instances[level].values = { { "Objects", root.add_refs(1, SynPartition::ref(sub_ref)) } };
+			SynPartition sub;
+			sub.seed = 2;
+			const std::string wide = add_wide_value_type(sub, 31);
+			sub.types.push_back({ "EventConnection", { { "Source", 'r' }, { "Target", 'r' }, { "SourceEvent", 'S', wide }, { "TargetEvent", 'S', wide } }, true });
+			sub.types.push_back({ "SubWorldData", { { "Objects", 'a' } } });
+			sub.types.push_back({ "ReferenceObjectData", { { "Blueprint", 'r' }, { "Excluded", 'b' } } });
+			sub.types.push_back({ "PrefabBlueprint", { { "Objects", 'a' }, { "EventConnections", 'v', "EventConnection" } } });
+			const uint32_t world = sub.add({ "SubWorldData", {} });
+			SynArray events{ "EventConnection", {}, {} };
+			SynArray objects;
+			std::vector<uint32_t> prefabs;
+			for (size_t i = 0; i < p_prefabs; ++i) {
+				prefabs.push_back(sub.add({ "PrefabBlueprint", {} }));
+			}
+			for (size_t i = 0; i < p_prefabs; ++i) {
+				objects.refs.push_back(SynPartition::ref(sub.add({ "ReferenceObjectData", { { "Blueprint", SynPartition::ref(prefabs[i]) } } })));
+			}
+			for (size_t i = 0; i < p_connections; ++i) {
+				events.structs.push_back({ { "Source", SynPartition::ref(prefabs[0]) }, { "Target", SynPartition::ref(prefabs[0]) } });
+			}
+			const uint32_t shared = sub.add_array(events);
+			for (const uint32_t prefab : prefabs) {
+				sub.instances[prefab].values = { { "EventConnections", shared } };
+			}
+			sub.instances[world].values = { { "Objects", sub.add_array(objects) } };
+			const EbxPartition *p = insert_syn(r_db, "levels/synthetic/events", root);
+			if (p == nullptr || insert_syn(r_db, "levels/synthetic/events_sub", sub) == nullptr) {
+				return make_error("synthetic partition did not parse");
+			}
+			LogicWorldOptions options;
+			options.budget = &r_budget;
+			return LogicWorld::build(r_db, p->primary(), options);
+		};
+		constexpr size_t kEntryWidth = 4 + 31 * 255;
+		{
+			EbxDb db;
+			WorkBudget budget;
+			const auto start = std::chrono::steady_clock::now();
+			Result<LogicWorld> world = run(db, 100, 70, budget);
+			REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
+			CHECK(world->scopes().size() == 102);
+			CHECK(budget.used() >= 100 * 70 * (kEntryWidth / WorkBudget::kFieldsPerUnit));
+			CHECK(seconds_since(start) < kFastSeconds);
+		}
+		EbxDb db;
+		WorkBudget budget;
+		const auto start = std::chrono::steady_clock::now();
+		Result<LogicWorld> world = run(db, 1000, 70, budget);
+		REQUIRE_FALSE(world.ok());
+		CHECK(budget_error(world.error()));
+		CHECK(seconds_since(start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: enum fields pay for the enumerators they decode against (soldier states)") {
+		// Decoding an enum looks its value up among its enum's (<= 255) enumerators, so one fields()
+		// pass over 31 x 254 enum fields whose values name none scans 2M enumerators, while the state
+		// was charged ~123 units: K = 3000 states naming one fitted the budget (6G compares).
+		// lookup_width counts the enumerators: a state costs ~31.5k units, the read ends after ~30.
+		constexpr size_t kStates = 3000;
+		SynPartition s;
+		SynType choice{ "WideEnum", {}, false, {}, false, true };
+		for (int k = 0; k < 255; ++k) {
+			choice.fields.push_back({ "Value" + std::to_string(k), 'i', {} });
+		}
+		s.types.push_back(choice);
+		std::string base;
+		for (int level = 0; level < 31; ++level) { // 31 levels + DataContainer: the deepest chain the parser accepts
+			SynType t{ "EnumState" + std::to_string(level), {}, false, base };
+			for (int k = 0; k < 254; ++k) {
+				t.fields.push_back({ "E" + std::to_string(k), 'e', "WideEnum" });
+			}
+			s.types.push_back(t);
+			base = t.name;
+		}
+		s.types.push_back({ "SoldierBlueprint", { { "Object", 'r' } } });
+		s.types.push_back({ "SoldierEntityData", { { "CharacterPhysics", 'r' } } });
+		s.types.push_back({ "CharacterPhysicsData", { { "States", 'a' } } });
+		const uint32_t blueprint = s.add({ "SoldierBlueprint", {} });
+		const uint32_t entity = s.add({ "SoldierEntityData", {} });
+		const uint32_t physics = s.add({ "CharacterPhysicsData", {} });
+		const uint32_t state = s.add({ base, {} });
+		s.instances[blueprint].values = { { "Object", SynPartition::ref(entity) } };
+		s.instances[entity].values = { { "CharacterPhysics", SynPartition::ref(physics) } };
+		s.instances[physics].values = { { "States", s.add_refs(kStates, SynPartition::ref(state)) } };
+		EbxDb db;
+		const EbxPartition *p = insert_syn(db, "characters/soldiers/syn", s);
+		if (p == nullptr) {
+			return;
+		}
+		const std::optional<EbxInstance> wide = p->instance(state);
+		REQUIRE(wide.has_value());
+		CHECK(WorkBudget::type_width(wide->data()) == 31 * (255 + 254 * 255));
+		const auto start = std::chrono::steady_clock::now();
+		Result<SoldierDef> soldier = read_soldier_def(db, "characters/soldiers/syn");
+		REQUIRE_FALSE(soldier.ok());
+		CHECK(budget_error(soldier.error()));
+		CHECK(seconds_since(start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: one long string named by many fields decodes without a rescan") {
+		// A string decode used to scan for its NUL, so N EnabledOptions naming one long string cost N
+		// times its length when the partition was parsed (the validator decodes each) and again per
+		// inclusion test: 100k of 1 MiB took 15 s, the 200k of 2 MiB here ~1.2 TB of scanning. The
+		// parser now records the NULs once; a decode is a binary search.
+		constexpr size_t kOptions = 200000;
+		constexpr size_t kLength = size_t(2) << 20;
+		SynPartition s;
+		s.types = world_types();
+		s.types.push_back({ "SubWorldInclusionSetting", { { "Criterion", 'r' }, { "EnabledOptions", 'w' } } });
+		const uint32_t root = s.add({ "LevelData", {} });
+		const uint32_t reference = s.add({ "SubWorldReferenceObjectData", {} });
+		const uint32_t settings = s.add({ "SubWorldInclusionSettings", {} });
+		const uint32_t setting = s.add({ "SubWorldInclusionSetting", {} });
+		const uint32_t text = s.add_string(std::string(kLength, 'a'));
+		const uint32_t mode = s.add_string("ConquestLarge0");
+		std::vector<uint32_t> options(kOptions, text);
+		options.push_back(mode);
+		s.instances[setting].values = { { "EnabledOptions", s.add_array(SynArray{ SynArray::kStrings, options, {} }) } };
+		s.instances[settings].values = { { "Settings", s.add_refs(1, SynPartition::ref(setting)) } };
+		s.instances[reference].values = { { "AutoLoad", 1 }, { "InclusionSettings", SynPartition::ref(settings) } };
+		s.instances[root].values = { { "Objects", s.add_refs(1, SynPartition::ref(reference)) } };
+		const auto start = std::chrono::steady_clock::now();
+		EbxDb db;
+		const EbxPartition *p = insert_syn(db, "levels/synthetic/strings", s);
+		if (p == nullptr) {
+			return;
+		}
+		const std::optional<EbxInstance> placed = p->instance(reference);
+		REQUIRE(placed.has_value());
+		WorkBudget budget;
+		const Result<bool> included = subworld_included(db, *placed, "ConquestLarge0", budget);
+		REQUIRE(included.ok());
+		CHECK(*included);
+		const Result<bool> other = subworld_included(db, *placed, "RushLarge0", budget);
+		REQUIRE(other.ok());
+		CHECK_FALSE(*other);
+		CHECK(seconds_since(start) < kFastSeconds);
+		// Both ends of the table decode to the right lengths.
+		const std::optional<EbxValue> list = p->instance(setting)->get("EnabledOptions");
+		REQUIRE(list.has_value());
+		const OptionalEbxArray array = list->as_array();
+		REQUIRE(array.has_value());
+		REQUIRE(array->size() == kOptions + 1);
+		CHECK(array->get(0)->as_str()->size() == kLength);
+		CHECK(*array->get(kOptions)->as_str() == "ConquestLarge0");
+	}
+
+	TEST_CASE("gameplay: K references to one wide blueprint pay for its lookups (place_reference)") {
+		// Every placed ReferenceObjectData looks into the ObjectBlueprint it names, and any number may
+		// name one: with Object at the root of the widest class chain, each Object lookup scans 7905
+		// descriptors while the reference itself cost ~2 units, so 400k references fitted the budget.
+		// place_reference now charges the blueprint's width per reference.
+		constexpr size_t kReferences = 400000;
+		SynPartition s;
+		s.types = world_types();
+		std::string base;
+		for (int level = 0; level < 30; ++level) {
+			SynType t{ "WideBlueprint" + std::to_string(level), {}, false, base };
+			if (level == 0) {
+				t.fields.push_back({ "Object", 'r', {} });
+			}
+			while (t.fields.size() < 254) {
+				t.fields.push_back({ "Pad" + std::to_string(t.fields.size()), 'i', {} });
+			}
+			s.types.push_back(t);
+			base = t.name;
+		}
+		SynType blueprint_type{ "ObjectBlueprint", {}, false, base };
+		for (int k = 0; k < 254; ++k) {
+			blueprint_type.fields.push_back({ "Top" + std::to_string(k), 'i', {} });
+		}
+		s.types.push_back(blueprint_type);
+		const uint32_t root = s.add({ "LevelData", {} });
+		const uint32_t reference = s.add({ "ReferenceObjectData", {} });
+		const uint32_t blueprint = s.add({ "ObjectBlueprint", {} });
+		const uint32_t object = s.add({ "TeamData", {} });
+		s.instances[root].values = { { "Objects", s.add_refs(kReferences, SynPartition::ref(reference)) } };
+		s.instances[reference].values = { { "Blueprint", SynPartition::ref(blueprint) } };
+		s.instances[blueprint].values = { { "Object", SynPartition::ref(object) } };
+		EbxDb db;
+		const EbxPartition *p = insert_syn(db, "levels/synthetic/blueprints", s);
+		if (p == nullptr) {
+			return;
+		}
+		const std::optional<EbxInstance> bp = p->instance(blueprint);
+		REQUIRE(bp.has_value());
+		CHECK(WorkBudget::type_width(bp->data()) == 31 * 255);
+		const std::optional<EbxValue> named = bp->get("Object");
+		REQUIRE(named.has_value());
+		CHECK(named->as_ref() == EbxRef::internal(object));
+		LogicWorldOptions options;
+		options.expand_root_objects = true;
+		const auto start = std::chrono::steady_clock::now();
+		Result<LogicWorld> world = LogicWorld::build(db, p->primary(), options);
 		REQUIRE_FALSE(world.ok());
 		CHECK(budget_error(world.error()));
 		CHECK(seconds_since(start) < kFastSeconds);

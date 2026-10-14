@@ -328,10 +328,13 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 		return make_error("soldier: no partition `" + name + "`");
 	}
 	const EbxInstance blueprint = partition->primary();
+	BF3_TRY(budget.charge_type(blueprint.data()));
 	const std::optional<EbxInstance> entity = p_db.follow(blueprint.data(), "Object");
 	if (!entity || !entity->is_a("SoldierEntityData")) {
 		return make_error("soldier: `" + name + "` has no SoldierEntityData (primary " + std::string(blueprint.type_name()) + ")");
 	}
+	// Each instance examined below is charged its type width first (its inline structs included).
+	BF3_TRY(budget.charge_type(entity->data()));
 	SoldierDef out;
 	out.blueprint = name;
 	const EbxStruct e = entity->data();
@@ -341,7 +344,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 	out.regeneration_delay_modifier = static_cast<float>(number_or(e, "RegenerationDelayModifier", 1));
 	out.use_prediction = boolean(e, "UsePrediction").value_or(false);
 
-	if (const std::optional<EbxInstance> health = p_db.follow(e, "HealthModule")) {
+	if (const std::optional<EbxInstance> health = p_db.follow(e, "HealthModule"); health && budget.take_type(health->data())) {
 		const EbxStruct h = health->data();
 		out.regeneration_delay = static_cast<float>(number_or(h, "RegenerationDelay", 0));
 		out.regeneration_rate = static_cast<float>(number_or(h, "RegenerationRate", 0));
@@ -360,7 +363,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 		}
 	}
 
-	if (const std::optional<EbxInstance> physics = p_db.follow(e, "CharacterPhysics")) {
+	if (const std::optional<EbxInstance> physics = p_db.follow(e, "CharacterPhysics"); physics && budget.take_type(physics->data())) {
 		const EbxStruct p = physics->data();
 		out.physics = partition_name(budget, p_db, *physics);
 		out.mass = static_cast<float>(number_or(p, "Mass", 0));
@@ -375,7 +378,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 		out.radius_to_predict_collision_on_characters = static_cast<float>(number_or(p, "RadiusToPredictCollisionOnCharacters", 0));
 		out.allow_pose_change_during_transition = boolean(p, "AllowPoseChangeDuringTransition").value_or(false);
 		out.default_state = text(budget, p, "DefaultState");
-		if (const std::optional<EbxInstance> sprint = p_db.follow(p, "Sprint")) {
+		if (const std::optional<EbxInstance> sprint = p_db.follow(p, "Sprint"); sprint && budget.take_type(sprint->data())) {
 			const EbxStruct s = sprint->data();
 			out.continuous_sprint = boolean(s, "AllowContinousSprinting").value_or(false);
 			out.sprint_power_decrease_per_second = static_cast<float>(number_or(s, "SprintPowerDecreasePerSecond", 0));
@@ -396,7 +399,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 		}
 	}
 
-	if (const std::optional<EbxInstance> collision = p_db.follow(e, "CollisionInfo")) {
+	if (const std::optional<EbxInstance> collision = p_db.follow(e, "CollisionInfo"); collision && budget.take_type(collision->data())) {
 		out.fall_damage_vertical = read_value_at_x(budget, collision->data(), "DamageAtVerticalVelocity");
 		out.fall_damage_horizontal = read_value_at_x(budget, collision->data(), "DamageAtHorizVelocity");
 	}
@@ -442,7 +445,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 		}
 		BF3_TRY(budget.charge_type(asset->data()));
 		bool squad = false;
-		if (const std::optional<EbxInstance> user = p_db.follow(asset->data(), "UnlockUserData")) {
+		if (const std::optional<EbxInstance> user = p_db.follow(asset->data(), "UnlockUserData"); user && budget.take_type(user->data())) {
 			squad = boolean(user->data(), "CheckSquad").value_or(false);
 		}
 		const std::vector<UnlockTarget> targets = unlock_targets(budget, connections, unlock);

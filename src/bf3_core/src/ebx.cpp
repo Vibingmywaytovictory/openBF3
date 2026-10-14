@@ -341,6 +341,21 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 	}
 	p.strings_at_ = strings_at;
 	p.strings_len_ = strings_len;
+	// Where each string ends, found once: decoding a string is then a binary search, not a scan to
+	// its NUL (one long string can be referenced by any number of fields).
+	{
+		const std::span<const uint8_t> table = bytes.subspan(strings_at, strings_len);
+		size_t nuls = 0;
+		for (const uint8_t c : table) {
+			nuls += c == 0;
+		}
+		p.string_ends_.reserve(nuls);
+		for (size_t i = 0; i < table.size(); ++i) {
+			if (table[i] == 0) {
+				p.string_ends_.push_back(static_cast<uint32_t>(i));
+			}
+		}
+	}
 
 	const size_t payload_at = strings_at + strings_len;
 	const uint64_t payload_end = uint64_t(payload_at) + instance_payload_len;
@@ -350,6 +365,7 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 
 	p.arrays_.reserve(array_repeaters.size());
 	BF3_TRY(p.link_complexes());
+	p.compute_lookup_widths();
 
 	size_t at = payload_at;
 	for (const auto &[internal, count, complex] : instance_repeaters) {
@@ -482,6 +498,76 @@ Status EbxPartition::link_complexes() {
 		}
 	}
 	return Status::success();
+}
+
+// lookup_width of every complex. Runs after link_complexes, so every base chain is shorter than
+// kBaseDepth (no cycles), every ValueType field names a ValueType complex and every Enum field an
+// Enum complex. Inline types may nest in a cycle (sizes are declared, not derived), so the nesting
+// is unrolled kLookupDepth levels instead of followed. Each level folds the chains once per complex
+// (memoised): O(kLookupDepth x (fields + complexes)).
+void EbxPartition::compute_lookup_widths() {
+	const size_t n = complexes_.size();
+	// p_combine(own value of a complex, folded value of its base) for every complex, bases first.
+	const auto fold = [&](const std::vector<uint64_t> &p_own, auto p_combine) {
+		std::vector<uint64_t> out(n, 0);
+		std::vector<uint8_t> done(n, 0);
+		std::vector<uint32_t> path;
+		for (uint32_t c = 0; c < n; ++c) {
+			std::optional<uint32_t> at = c;
+			path.clear();
+			while (at && !done[*at] && path.size() <= kBaseDepth) {
+				path.push_back(*at);
+				at = complexes_[*at].base;
+			}
+			for (size_t i = path.size(); i-- > 0;) {
+				const std::optional<uint32_t> base = complexes_[path[i]].base;
+				out[path[i]] = base ? p_combine(p_own[path[i]], out[*base]) : p_own[path[i]];
+				done[path[i]] = 1;
+			}
+		}
+		return out;
+	};
+	const auto is = [&](uint32_t p_complex, uint8_t p_code) { return p_complex < n && complexes_[p_complex].code == p_code; };
+	// Level 0: the chain's descriptors, plus the enumerators an enum field decode may scan.
+	std::vector<uint64_t> own(n, 0);
+	for (uint32_t c = 0; c < n; ++c) {
+		const Complex &desc = complexes_[c];
+		uint64_t width = desc.field_end - desc.field_start;
+		if (desc.code == kClass || desc.code == kValueType) {
+			for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
+				if (fields_[f].code == kEnum && is(fields_[f].reference, kEnum)) {
+					const Complex &e = complexes_[fields_[f].reference];
+					width += e.field_end - e.field_start;
+				}
+			}
+		}
+		own[c] = width;
+	}
+	const std::vector<uint64_t> chain = fold(own, [](uint64_t a, uint64_t b) { return a + b; });
+	std::vector<uint64_t> width = chain;
+	// Level k: plus the most an inline field anywhere up the chain costs at level k - 1.
+	for (size_t level = 1; level < kLookupDepth; ++level) {
+		std::vector<uint64_t> nested(n, 0);
+		for (uint32_t c = 0; c < n; ++c) {
+			const Complex &desc = complexes_[c];
+			if (desc.code != kClass && desc.code != kValueType) {
+				continue;
+			}
+			for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
+				if (fields_[f].code == kValueType && is(fields_[f].reference, kValueType)) {
+					nested[c] = std::max(nested[c], width[fields_[f].reference]);
+				}
+			}
+		}
+		const std::vector<uint64_t> deepest = fold(nested, [](uint64_t a, uint64_t b) { return std::max(a, b); });
+		for (size_t c = 0; c < n; ++c) {
+			width[c] = chain[c] + deepest[c];
+		}
+	}
+	lookup_widths_.resize(n);
+	for (size_t c = 0; c < n; ++c) {
+		lookup_widths_[c] = static_cast<uint32_t>(std::min<uint64_t>(width[c], std::numeric_limits<uint32_t>::max()));
+	}
 }
 
 Result<std::optional<uint32_t>> EbxPartition::check_members(uint32_t p_complex) const {
@@ -759,11 +845,12 @@ std::optional<std::optional<std::string_view>> EbxPartition::string(uint32_t p_o
 	if (!char_boundary(table, p_offset)) {
 		return std::nullopt;
 	}
-	const void *nul = std::memchr(table.data() + p_offset, 0, table.size() - p_offset);
-	if (nul == nullptr) {
+	// The first NUL at or after the offset (string_ends_ holds every NUL of the table, ascending).
+	const auto nul = std::lower_bound(string_ends_.begin(), string_ends_.end(), p_offset);
+	if (nul == string_ends_.end()) {
 		return std::nullopt;
 	}
-	const size_t len = static_cast<const uint8_t *>(nul) - (table.data() + p_offset);
+	const size_t len = *nul - p_offset;
 	return std::optional<std::string_view>(std::string_view(reinterpret_cast<const char *>(table.data()) + p_offset, len));
 }
 

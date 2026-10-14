@@ -67,7 +67,7 @@ std::vector<KitSlot> read_table(WorkBudget &r_budget, const EbxResolver &p_db, c
 		const UnlockProgression &p_progression) {
 	std::vector<KitSlot> out;
 	const std::optional<EbxInstance> table = p_db.follow(p_kit, p_field);
-	if (!table) {
+	if (!table || !r_budget.take_type(table->data())) {
 		return out;
 	}
 	for (const EbxInstance &part : follow_all(r_budget, p_db, table->data(), "UnlockParts")) {
@@ -191,6 +191,7 @@ Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, c
 	}
 	KitDef out;
 	out.asset = name;
+	BF3_TRY(budget.charge_type(kit.data()));
 	out.label_sid = text(budget, kit.data(), "LabelSid");
 	out.hud_icon = text(budget, kit.data(), "UIHudIcon");
 	out.progression_known = p_progression->known();

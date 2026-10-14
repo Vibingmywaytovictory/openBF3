@@ -155,6 +155,7 @@ std::string scope_prefab(const LogicWorld &p_world, uint32_t p_scope) {
 Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 	WorkBudget &budget = p_world.budget();
 	const LogicScope &scope = p_world.scopes()[p_scope];
+	BF3_TRY(budget.charge_type(scope.blueprint.data())); // crate scopes may share one blueprint
 	const std::optional<EbxInstance> descriptor = p_world.db().follow(scope.blueprint.data(), "Descriptor");
 	if (!descriptor) {
 		return Status::success();
@@ -183,8 +184,11 @@ Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 		bool value = false;
 		if (const std::optional<PropertyValue> v = p_world.interface_value(p_scope, feed.source_field); v && v->as_bool()) {
 			value = *v->as_bool();
-		} else if (const std::optional<EbxValue> stored = synced.get("In")) {
-			value = stored->as_bool().value_or(false);
+		} else {
+			BF3_TRY(budget.charge_type(synced.data())); // many feeds may name one SyncedBool
+			if (const std::optional<EbxValue> stored = synced.get("In")) {
+				value = stored->as_bool().value_or(false);
+			}
 		}
 		// Several feeds may drive the same SyncedBool: each (SyncedBool, value) is followed once.
 		const auto [memo, added] = fuse_after[value ? 1 : 0].emplace(InstanceKey::of(synced), std::nullopt);
@@ -391,6 +395,7 @@ Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::strin
 	if (!partition) {
 		return out;
 	}
+	BF3_TRY(budget.charge_type(partition->primary().data()));
 	if (const OptionalEbxArray array = array_of(budget, partition->primary().data(), "Categories")) {
 		for (const EbxValue category_value : *array) {
 			const std::optional<EbxStruct> category = category_value.as_struct();
@@ -443,6 +448,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 
 	ModeDef out;
 	out.level_id = std::string(p_level_id);
+	BF3_TRY(budget.charge_type(root->primary().data()));
 	if (const std::optional<EbxValue> name = root->primary().get("Name"); name && name->as_str()) {
 		const std::string_view n = *name->as_str();
 		const size_t slash = n.find_last_of("/\\");
@@ -467,6 +473,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		if (!scope.reference || !scope.reference->is_a("SubWorldReferenceObjectData")) {
 			continue;
 		}
+		BF3_TRY(budget.charge_type(scope.blueprint.data())); // scopes may share one blueprint
 		const std::optional<EbxInstance> descriptor = p_db.follow(scope.blueprint.data(), "Descriptor");
 		if (!descriptor) {
 			continue;

@@ -5,8 +5,10 @@
 // The readers that scan an array, copy a string or follow a list of references take the read's
 // WorkBudget and charge it before the work (see work_budget.h and the cost model in
 // logic_world.cpp). Once the budget is exhausted they return an empty value at once; the public
-// reader that called them reports the budget error. The others read one field of an instance or
-// struct the caller has charged (WorkBudget::charge_type covers the lookups of a wide type).
+// reader that called them reports the budget error. The others read one field (or a dotted path
+// through inline fields) of an instance or struct the caller has charged: WorkBudget::charge_type
+// and array_cost charge EbxPartition::lookup_width, which covers the lookups of a wide type and of
+// its inline struct types alike.
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -86,7 +88,8 @@ inline std::string text(WorkBudget &r_budget, const EbxStruct &p_object, std::st
 }
 
 // The units a scan of p_array costs: its raw element count, times one more per kFieldsPerUnit
-// fields of a wide struct element type (see WorkBudget::charge_type).
+// descriptors of a wide struct element type, its inline struct fields included (see
+// WorkBudget::charge_type).
 inline size_t array_cost(const EbxArray &p_array) {
 	size_t extra = 0; // every element has the array's member type
 	if (const std::optional<EbxValue> first = p_array.size() > 0 ? p_array.get(0) : std::nullopt) {

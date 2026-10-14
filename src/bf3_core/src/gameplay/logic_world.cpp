@@ -10,17 +10,28 @@
 // done, where it is done; once the budget is exhausted every charge fails at once, every loop below
 // stops at its next charge, and every entry point returns the budget error (it checks status()
 // after the walk and again before it returns, so a helper that returned early with an empty value
-// never yields a result). Retail reads use at most ~21k units of the default 1M (README).
+// never yields a result). Retail reads use at most ~24k units of the default 1M (README).
 //
-// Unit costs. A field lookup or is_a reads at most 255 fields x kBaseDepth (32) type descriptors;
-// every instance or struct a loop examines is charged its type width (WorkBudget::charge_type: one
-// extra unit per 64 fields, nothing for retail types), so the lookups a unit pays for stay a small
-// constant. data_field and field_name_of match the descriptors' stored name hashes and never hash
-// a name. A reference resolve is one hash lookup (a lazy EbxLibrary parses a partition at most once
-// in its lifetime, so parsing is bounded by the install, not by the walk). A string copied or
-// lowercased costs one unit per WorkBudget::kBytesPerUnit bytes, charged before the copy; string
-// compares stop at the shorter side, and every compare below has a short side of fixed size (a type
-// or field name literal, the mode id) unless it is charged.
+// Unit costs. An access to a struct (a field lookup, a dotted path through its inline ValueType
+// fields such as "SourceEvent.Id" or vec3() of one, a fields() pass) scans at most
+// EbxPartition::lookup_width descriptors: the type chain (<= 255 fields x kBaseDepth (32)), the
+// enumerators its enum fields decode against (<= 255 each), and the widest inline field type's own
+// width, kLookupDepth levels down (inline types nest, and may be as wide as any class). The parser
+// computes it once per type, linear in the descriptors. The access rule: every instance a reader
+// or loop looks into is charged its width (WorkBudget::charge_type, take_type, follow_all) right
+// before it is looked into, every struct array is charged raw size x element width (array_cost,
+// array_of) before its scan, and a struct reached through an inline field of either is covered by
+// that charge (its own lookups are at most kLookupDepth - 1 levels further down; every reader path
+// has at most 2 segments). So each unit pays for at most 64 x (the few lookups one examination
+// makes) descriptors, whatever the types: retail types cost nothing or a unit extra, a wide type's
+// lookups cost its width. An is_a reads <= kBaseDepth descriptors. data_field and field_name_of
+// match the descriptors' stored name hashes and never hash a name. Decoding a string is a binary
+// search over the partition's NUL offsets (EbxPartition::string), never a scan of the string. A
+// reference resolve is one hash lookup (a lazy EbxLibrary parses a partition at most once in its
+// lifetime, so parsing is bounded by the install, not by the walk). A string copied or lowercased
+// costs one unit per WorkBudget::kBytesPerUnit bytes, charged before the copy; string compares stop
+// at the shorter side, and every compare below has a short side of fixed size (a type or field
+// name literal, the mode id) unless it is charged.
 //
 // Indexes. A per-entry charge only bounds the work if each insert and lookup is cheap whatever the
 // keys, and many keys come from the data (field ids, GUIDs). So no index keyed by data is a hash
@@ -49,7 +60,9 @@
 //                                 each option compare stops at |mode| bytes
 //   LogicWalker::note             bundle name copy charged by length; lists capped at 4096 names
 //   referenced_blueprint          bundle name lowercase copy charged by length
-//   LogicConnections::of          raw size of each connection array; the by-target index is a stable
+//   LogicConnections::of          the blueprint's type width, then raw size x entry width (array_cost,
+//                                 the inline SourceEvent / TargetEvent types included) of each
+//                                 connection array; the by-target index is a stable
 //                                 sort of the charged entries (n log n compares), looked up by binary
 //                                 search, so crafted field ids cannot collide it into O(n^2)
 //   LogicWorld::connection_set    memoised per blueprint: of() runs once per blueprint, a lookup is
@@ -57,31 +70,44 @@
 //   property_in, source_value,    recursion; 1 unit per call (query_step), depth <= kResolveDepth,
 //   interface_in                  <= kQuerySteps per query; each loop over property_into() checks
 //                                 query_spent() first, and interface_in charges each Fields entry
+//                                 (its width too); source_value charges the blueprint, the source and
+//                                 a child prefab's blueprint before their lookups
+//   LogicWorld::effective         the property query, then the entity's type width before the stored
+//                                 lookup (any number of queries may ask one entity)
+//   LogicWalker::place_reference  the referenced blueprint's type width before its lookups (any
+//                                 number of references may name one blueprint)
 //   PropertyValue::parse          charged by the constant's length before it is parsed
 //   data_field                    one pass over the source's type chain (its width charged by the
 //                                 query step that asks)
 // mode_def.cpp
 //   level_modes                   raw Categories size, raw Mode size per category, names by length
-//   read_mode_def                 per sub-world scope the descriptor's type width and the Fields scan
+//   read_mode_def                 the level's type width; per sub-world scope the blueprint's and the
+//                                 descriptor's type width and the Fields scan
 //                                 (raw size x entry width, array_cost; at most 65536 entries in all),
 //                                 1 unit per object of the world and per crate interaction, names
 //                                 copied by length, every effective()/interface_value() a charged query
 //   location_sid                  <= 64 interface_value() queries (charged) up the scope chain
 //   read_team_data (kit_def.cpp)  once per TeamEntityData object: raw size of both customization lists
-//   read_fuse                     per crate scope: the descriptor's type width, raw event list size
-//                                 (index; hash keyed by the process seed), raw property list size
-//                                 (feeds), and each source's event list size before it is scanned
+//   read_fuse                     per crate scope: the blueprint's and descriptor's type width, raw
+//                                 event list size (index; hash keyed by the process seed), raw property
+//                                 list size (feeds), each fed SyncedBool's and each gate's type width,
+//                                 and each source's event list size before it is scanned
 //   read_size                     instance count of settings_win32, raw Information / Sizes / Teams sizes
 //   read_scoring                  instance count, 1 unit per ScoringTypeData, names by length
 // kit_def.cpp
 //   read_unlock_progression       instance count of each table, raw UnlockInfos / Unlocks sizes; one
 //                                 O(log n) gates insert per charged entry
-//   read_kit_def / read_table     raw UnlockParts size, raw SelectableUnlocks size per part (a part
-//                                 listed K times is charged K times), names by length
+//   read_kit_def / read_table     the kit's and each table's type width, raw UnlockParts size, raw
+//                                 SelectableUnlocks size per part (a part listed K times is charged K
+//                                 times; follow_all charges each resolved part and unlock its width),
+//                                 names by length
 // soldier_def.cpp
 //   collect_components            recursion, depth <= 16, at most 4096 components; raw Components
 //                                 size charged per visit
-//   curves, poses, states         raw size of every array read
+//   read_soldier_def              the blueprint, entity, health, physics, sprint, collision and each
+//                                 unlock's asset and user data: type width before their lookups
+//   curves, poses, states         raw size x element width of every array read; each pose, state and
+//                                 pose info its type width (follow_all), its inline structs included
 //   first_of / unlock loop        over the (<= 4096) collected components, charged once per pass
 //   unlock_targets                <= 4 hops; raw property connection count charged per hop; hub
 //                                 frontier lookups are hash probes; each target name copy charged
@@ -91,10 +117,18 @@
 //   Layout::walk                  recursion, depth <= 32, at most 8192 components; raw Components
 //                                 size charged per visit
 //   seat / turret association     child tables built in one pass, then O(depth <= 33) per component
-//   seat sort, per-node readers   1 unit per node, names by length
+//   seat sort, per-node readers   1 unit per node, names by length; each node's type width was
+//                                 charged by the walk (follow_all), the blueprint's, entity's, config's,
+//                                 body's and camera's before their lookups
+// ebx.cpp (core, reached through every lookup above)
+//   EbxPartition::string          binary search over the NUL offsets found once at parse time
+//   EbxPartition::enumerator      <= 255 enumerators per enum decode (counted in lookup_width)
+//   compute_lookup_widths         at parse time: kLookupDepth folds over the complexes, each complex
+//                                 once per fold (memoised), plus one pass over the field descriptors
 #include "bf3/core/gameplay/logic_world.h"
 
 #include "bf3/core/ids.h"
+#include "gameplay_read.h"
 
 #include <algorithm>
 #include <charconv>
@@ -390,6 +424,7 @@ Result<LogicConnections> LogicConnections::of(const EbxResolver &p_db, const Ebx
 		{ "EventConnections", "SourceEvent.Id", "TargetEvent.Id", &out.event },
 	};
 	const EbxPartition &partition = p_blueprint.partition();
+	BF3_TRY(r_budget.charge_type(p_blueprint.data())); // the three list lookups below
 	for (const List &list : lists) {
 		const std::optional<EbxValue> array_value = p_blueprint.get(list.name);
 		const OptionalEbxArray array = array_value ? array_value->as_array() : OptionalEbxArray();
@@ -397,14 +432,9 @@ Result<LogicConnections> LogicConnections::of(const EbxResolver &p_db, const Ebx
 			continue;
 		}
 		// Every entry costs two resolves, whether or not they succeed, and one array may serve many
-		// blueprints: charge them all before the scan (a wide connection struct type costs more).
-		size_t extra = 0;
-		if (const std::optional<EbxValue> first = array->size() > 0 ? array->get(0) : std::nullopt) {
-			if (const std::optional<EbxStruct> element = first->as_struct()) {
-				extra = WorkBudget::type_width(*element) / WorkBudget::kFieldsPerUnit;
-			}
-		}
-		BF3_TRY(r_budget.charge(array->size() * (1 + extra)));
+		// blueprints: charge them all before the scan (a wide connection struct type, its inline
+		// SourceEvent / TargetEvent types included, costs more).
+		BF3_TRY(r_budget.charge(detail::array_cost(*array)));
 		list.into->reserve(array->size());
 		for (const EbxValue entry : *array) {
 			const auto end = [&](const char *p_field) -> std::optional<EbxInstance> {
@@ -744,6 +774,8 @@ private:
 			++world_.stats_.missing_blueprints;
 			return emit(p_reference, std::nullopt, p_scope);
 		}
+		// Any number of references may name one blueprint: each pays for the Object lookup below.
+		BF3_TRY(budget_.charge_type(blueprint->data()));
 		if (blueprint->is_a("PrefabBlueprint")) {
 			if (on_path(*blueprint)) {
 				return Status::success();
@@ -914,6 +946,10 @@ std::optional<PropertyValue> LogicWorld::effective(uint32_t p_scope, const EbxIn
 	if (std::optional<PropertyValue> v = property(p_scope, p_entity, field_id(p_field))) {
 		return v;
 	}
+	// Any number of queries may ask one entity: each stored lookup is charged.
+	if (!budget_->take_type(p_entity.data())) {
+		return std::nullopt;
+	}
 	const std::optional<EbxValue> stored = p_entity.get(p_field);
 	return stored ? std::optional<PropertyValue>(PropertyValue::of_field(*stored)) : std::nullopt;
 }
@@ -927,6 +963,9 @@ std::optional<PropertyValue> LogicWorld::effective(const LogicObject &p_object, 
 		if (std::optional<PropertyValue> v = property(p_object.scope, *p_object.reference, id)) {
 			return v;
 		}
+	}
+	if (!budget_->take_type(p_object.entity.data())) {
+		return std::nullopt;
 	}
 	const std::optional<EbxValue> stored = p_object.entity.get(p_field);
 	return stored ? std::optional<PropertyValue>(PropertyValue::of_field(*stored)) : std::nullopt;
@@ -980,6 +1019,9 @@ std::optional<PropertyValue> LogicWorld::source_value(const Frame &p_frame, cons
 	// A child prefab's or sub-world's output port: continue inside it from its interface.
 	{
 		const std::optional<EbxInstance> inner = referenced_blueprint(p_source);
+		if (inner && !budget_->take_type(inner->data())) { // its Descriptor lookup
+			return std::nullopt;
+		}
 		const std::optional<EbxInstance> descriptor = inner ? db_->follow(inner->data(), "Descriptor") : std::nullopt;
 		if (descriptor) {
 			Frame child;
