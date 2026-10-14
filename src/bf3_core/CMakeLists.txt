@@ -92,3 +92,12 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/res/dx_texture.h
     include/bf3/core/res/havok.h
 )
+
+# UI readers (plan §2.2, §3.8): the UITextDatabase string table and the EBX SID census, clean-room from
+# research/topics/gap-r1-ui-hud-minimap-localisation.md §4.
+target_sources(bf3_core PRIVATE
+    src/ui/text_db.cpp
+    src/ui/text_census.cpp
+    include/bf3/core/ui/text_db.h
+    include/bf3/core/ui/text_census.h
+)

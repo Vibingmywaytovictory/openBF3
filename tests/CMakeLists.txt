@@ -63,3 +63,19 @@ if(OPENBF3_ASAN)
     set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant core.res.unit core.res
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
+
+# UITextDatabase reader and EBX SID census (bf3_core ui/). core.ui.text.unit is synthetic (no data);
+# core.ui.text checks the retail database (plan §7.8) and core.ui.text.fuzz mutates its chunks in memory;
+# both exit 77 = skipped without an install.
+openbf3_test(test_text test_main.cpp text_tests.cpp test_support.h)
+target_link_libraries(test_text PRIVATE bf3_core)
+add_test(NAME core.ui.text.unit COMMAND test_text --test-suite=text-unit)
+add_test(NAME core.ui.text COMMAND test_text --test-suite=text)
+add_test(NAME core.ui.text.fuzz COMMAND test_text --test-suite=text-fuzz)
+set_tests_properties(core.ui.text core.ui.text.fuzz PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.ui.text.unit core.ui.text core.ui.text.fuzz PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_text_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.ui.text.unit core.ui.text core.ui.text.fuzz
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_text_cl_dir}")
+endif()

@@ -29,6 +29,7 @@
 //   ebxload <sb> [--walk]      bulk-parse every partition (timing, failures, bytes); --walk also
 //                              decodes every value of every instance
 //   numcheck                   self-check of the probe's JSON number text (no install needed)
+// Text database (text_commands.cpp): text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -41,6 +42,7 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/thread_pool.h"
 #include "ebx_commands.h"
+#include "text_commands.h"
 #include "json_number.h"
 
 #include <fcntl.h>
@@ -460,7 +462,8 @@ void usage() {
 			"  types <sb[,sb..]|@all-mp> <Type>...\n"
 			"  dump <sb[,sb..]|@all-mp> <out_dir> <depth> <follow> <root>...\n"
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
-			"  numcheck\n");
+			"  numcheck\n"
+			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n");
 }
 
 } // namespace
@@ -533,6 +536,15 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "ebxload" && (rest.size() == 1 || (rest.size() == 2 && rest[1] == "--walk"))) {
 		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], rest.size() == 2);
+	}
+	if (cmd == "text" && rest.size() >= 1 && rest[0] == "--census" && rest.size() <= 2) {
+		return bf3dump::cmd_text_census(ebx_ctx, rest.size() == 2 ? rest[1] : std::string());
+	}
+	if (cmd == "text" && rest.size() == 2 && rest[0] == "--tsv") {
+		return bf3dump::cmd_text_tsv(ebx_ctx, rest[1]);
+	}
+	if (cmd == "text" && !rest.empty() && rest[0].rfind("--", 0) != 0) {
+		return bf3dump::cmd_text_lookup(ebx_ctx, rest);
 	}
 	usage();
 	return 2;

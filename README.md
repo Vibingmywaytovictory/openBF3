@@ -236,6 +236,56 @@ over two runs, Rust 15.5 s (warm cache).
   vertex. 3p soldiers are split into upperbody / lowerbody / head / headgear meshes (59-64 bones, skeleton indices up
   to 208). The decoder does not skin: positions are the bind pose in mesh space.
 
+## Text database
+
+`bf3_core` `ui/text_db.h` (namespace `bf3::core::ui`) reads BF3's localised UI strings from the install at runtime,
+clean-room from `research/topics/gap-r1-ui-hud-minimap-localisation.md` §4 (plan §3.8, §7.8):
+
+* **Locating.** `localization/localization` (`LocalizationAsset`, `Win32/Globals`) lists 11 `UITextDatabase`
+  partitions. Each names a binary chunk and a histogram chunk with their decoded sizes. The chunks are toc-level
+  chunks of the chunk-only superbundle `Win32/Loc/<lang>` (`en` is the only one installed), read through
+  `Install::chunk_toc` (the patch toc wins over the base toc). `open_text_database(install)` takes the first listed
+  database whose chunks are installed (`localization/us_loc` on an English install); `load_text_database` takes a
+  partition name or an `EbxResolver` you already have.
+* **Format.** Binary `0x00039000`: header, NUL-terminated tag, `count × (u32 hash, u32 offset)`, NUL-terminated
+  strings. Histogram `0x00039001`: `u16` code units. A byte below 0x80 is ASCII, otherwise the histogram gives the code
+  unit or a page selected by the next byte. Strings are kept as UTF-8. `TextDatabase::parse` checks every header
+  field, table bound, string offset and terminator, and bounds the total decoding work. Malformed sequences inside a
+  string are counted (`decode_errors`) and do not fail the parse.
+* **Keys.** `text_hash(sid)`: `h = 0xFFFFFFFF; h = h * 33 + c` over the SID exactly as written (additive, unlike the
+  xor hash of EBX names). Use `find(hash)`, `find_sid(sid)`, `resolves(sid)` and `translate(sid)`. `translate`
+  returns the SID itself when there is no usable entry (plan §2.1).
+* **SID census** (`ui/text_census.h`). A SID is a CString field value that is entirely `ID_[A-Z0-9_]*`.
+  `sid_census` collects the distinct SIDs of a partition set and counts how many resolve.
+  `research_census_partitions()` holds the 28 partitions with SIDs out of the 170 the research dumped.
+
+`bf3dump text <sid-or-hash>...` prints `input  hash  text`. A hash is 8 hex digits or `0x…`, and an absent key prints
+`absent -> <fallback>`. `bf3dump text --census [<sb-spec>]` prints the database partition, language and Loc
+superbundle; both chunk GUIDs, sizes and SHA-1s; the entry count, tag, decode errors and duplicate hashes; then the
+EBX SID census, listing each SID that does not resolve. Without `<sb-spec>` the census uses the research set; with
+one (for example `@all-mp`) it loads and scans every partition of those superbundles.
+`bf3dump text --tsv <out.tsv>` writes every entry as `hash \t text`, escaping `\\ \t \n \r`. The output is BF3 text,
+so keep it outside the repo.
+
+Tests: `core.ui.text.unit` builds synthetic databases with no data. It covers the hash, direct, paged and
+surrogate-pair decoding, every malformed-sequence and header error, duplicates, the fallback, the overlap bound and
+2,000 mutants. `core.ui.text` reads the retail database and `core.ui.text.fuzz` feeds 300 seeded in-memory mutants of
+the retail chunks to the parser. Both report *Skipped* (77) without an install.
+
+**Parity** (2026-10-14, against the research decoder and its outputs, kept outside the repo):
+
+* `us_loc` has 15,515 entries, tag `Global`, 0 decode errors and 0 duplicate hashes. Both chunk SHA-1s equal the
+  research's extracted chunks.
+* `bf3dump text --tsv` is identical to the Python decoder's output for all 15,515 strings, after both are escaped the
+  same way.
+* `ID_H_US_A` → `34a54e7a`, `ID_H_US_B` → `34a54e7b`, `ID_P_WNAME_M16A4` → `0fd83dfa` → "M16A3".
+* The EBX census finds 1,271 distinct SIDs, of which 1,247 resolve. That is the research set exactly. The research
+  collected every whole-string `ID_…` value in its UI-mapping JSON dumps (the Grand Bazaar level dump came after the
+  count).
+* Two corrections to the research table. First, the 24 SIDs that do not resolve have **no entry at all**: no entry
+  holds `<MISSING>`, which was the research script's placeholder. Second, `ID_P_WNAME_M16` does exist and resolves to
+  "M16A4".
+
 ## Layout and pinned third-party code
 
 | path | what |
