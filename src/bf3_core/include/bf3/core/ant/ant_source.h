@@ -64,6 +64,8 @@ private:
 // "b_sp", "b_coop", "b_faceposer", "b_vo"). The static package counts as MP-relevant.
 bool is_mp_relevant(std::string_view p_short_name);
 
+// Reads a whole file of the export directory (dev/test source; Windows file API, never the install --
+// install files go through InstallReader / ReadOnlyFile).
 bool read_whole_file(const std::filesystem::path &p_path, std::vector<uint8_t> &r_bytes, std::string &r_error);
 
 } // namespace bf3::core::ant

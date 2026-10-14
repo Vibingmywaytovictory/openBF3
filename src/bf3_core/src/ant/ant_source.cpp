@@ -36,6 +36,24 @@ std::string short_name_of(std::string_view p_path) {
 	return lower(slash == std::string_view::npos ? p_path : p_path.substr(slash + 1));
 }
 
+// A file name from res.tsv / packages.tsv must stay inside the export directory: relative, no root,
+// no ".." component (the tsv files are data, so they are checked like any other input).
+bool is_contained_relative(std::string_view p_name) {
+	if (p_name.empty() || p_name.find(':') != std::string_view::npos) {
+		return false;
+	}
+	const std::filesystem::path path{ std::u8string(p_name.begin(), p_name.end()) };
+	if (path.has_root_name() || path.has_root_directory()) {
+		return false;
+	}
+	for (const std::filesystem::path &part : path) {
+		if (part == "..") {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool read_lines(const std::filesystem::path &p_path, std::vector<std::string> &r_lines, std::string &r_error) {
 	std::vector<uint8_t> bytes;
 	if (!read_whole_file(p_path, bytes, r_error)) {
@@ -116,6 +134,10 @@ bool AntExportDirSource::open(const std::filesystem::path &p_dir, std::string &r
 			r_error = "res.tsv: bad row " + std::to_string(i);
 			return false;
 		}
+		if (!is_contained_relative(cols[1])) {
+			r_error = "res.tsv: file name escapes the export directory in row " + std::to_string(i);
+			return false;
+		}
 		res_.push_back(ResEntry{ lower(cols[0]), std::string(cols[1]) });
 	}
 	if (!read_lines(p_dir / "packages.tsv", lines, r_error)) {
@@ -149,6 +171,10 @@ bool AntExportDirSource::open(const std::filesystem::path &p_dir, std::string &r
 			}
 		}
 		info.short_name = short_name_of(info.name.empty() ? info.partition : info.name);
+		if (!cols[4].empty() && !is_contained_relative(cols[4])) {
+			r_error = "packages.tsv: file name escapes the export directory in row " + std::to_string(i);
+			return false;
+		}
 		packages_.push_back(info);
 		chunk_files_.push_back(std::string(cols[4]));
 	}
