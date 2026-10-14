@@ -117,6 +117,7 @@ Status drawn_slots(const EbxResolver &p_db, const EbxInstance &p_asset, const st
 		if (!name) {
 			continue;
 		}
+		BF3_TRY(charge_text(r_budget, *name)); // searched for each undrawn-shader word
 		for (std::string_view word : kUndrawnShaders) {
 			if (name->find(word) != std::string_view::npos) {
 				out[slot] = false;
@@ -402,6 +403,7 @@ Result<MeshCensus> mesh_census(const EbxResolver &p_db, const LevelMount &p_moun
 			variant = found->second;
 		} else {
 			variant = uint32_t(census.meshes.size());
+			BF3_TRY(budget.charge(text_units(name->size()))); // the name is copied and keyed
 			SceneMesh mesh;
 			mesh.asset = asset;
 			mesh.name = std::string(*name);
@@ -490,6 +492,11 @@ Result<MeshCensus> mesh_census(const EbxResolver &p_db, const LevelMount &p_moun
 						const SceneMesh &mesh = census.meshes[variants[v]];
 						bool draws = false;
 						for (const res::DecodedSubset &subset : subsets) {
+							// 1 per subset examined, so variants x subsets that draw nothing are paid too.
+							if (!budget.charge(1)) {
+								r.out_of_budget = true;
+								return r;
+							}
 							const bool slot_draws = subset.material_index < slots[v].size() ? slots[v][subset.material_index] : true;
 							if (!slot_draws) {
 								continue;

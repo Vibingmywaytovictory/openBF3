@@ -331,42 +331,18 @@ std::optional<level::Vec3> Property::as_vec3() const {
 }
 
 std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field) {
-	// The order of EbxStruct::fields() (base types first, undecodable fields skipped), but compared
-	// by the descriptors' stored name hash: the parser resolved each field's name through that hash,
-	// so it is ebx_name_hash of the name, and no (possibly huge, hostile) name is hashed again. The
-	// cost is at most kBaseDepth types of 255 fields each, whatever the data.
+	// The first field of that name hash in EbxStruct::fields() order (base types first), compared by
+	// the descriptors' stored hash: the parser resolved each field's name through that hash, so it is
+	// ebx_name_hash of the name, and no (possibly huge, hostile) name is hashed again. One search in
+	// the type's lookup table (EbxPartition::lookup, O(log n) whatever the layout). fields() skips
+	// fields that do not decode, but an instance's fields all decode: the parser validated each.
 	const EbxPartition &p = p_object.partition();
 	const EbxStruct data = p_object.data();
-	std::array<std::pair<uint32_t, uint32_t>, EbxPartition::kBaseDepth> chain{}; // (complex, offset), derived first
-	size_t depth = 0;
-	std::optional<std::pair<uint32_t, uint32_t>> next = std::make_pair(data.complex(), data.offset());
-	while (next && depth < chain.size() && next->first < p.complex_descs().size()) {
-		chain[depth++] = *next;
-		const EbxPartition::Complex &desc = p.complex_descs()[next->first];
-		std::optional<std::pair<uint32_t, uint32_t>> base;
-		for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
-			const EbxPartition::Field &member = p.field_descs()[f];
-			if (member.code == ebx_code::kVoid) {
-				base = std::make_pair(uint32_t(member.reference), next->second + uint32_t(member.offset));
-				break;
-			}
-		}
-		next = base;
+	const EbxPartition::Lookup *found = p.lookup(data.complex(), uint32_t(p_field));
+	if (found == nullptr) {
+		return std::nullopt;
 	}
-	while (depth > 0) {
-		const auto [complex, at] = chain[--depth];
-		const EbxPartition::Complex &desc = p.complex_descs()[complex];
-		for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
-			const EbxPartition::Field &member = p.field_descs()[f];
-			if (member.code == ebx_code::kVoid || int32_t(member.hash) != p_field) {
-				continue;
-			}
-			if (std::optional<EbxValue> v = p.decode(f, size_t(at) + size_t(int64_t(member.offset)))) {
-				return v;
-			}
-		}
-	}
-	return std::nullopt;
+	return p.decode(found->first_field, size_t(data.offset()) + found->first_offset);
 }
 
 // --- Scopes ------------------------------------------------------------------------------------

@@ -292,6 +292,7 @@ public:
 		uint8_t code = ebx_code::kUInt32;
 		std::string type; // kValueType: its type; kArray of kValueType: the element type
 		uint8_t element = ebx_code::kClass; // kArray: the element code
+		bool overlap = false; // shares one slot with the type's other overlapping fields (same size)
 	};
 
 	explicit SynthPartition(uint32_t p_seed) :
@@ -309,6 +310,7 @@ public:
 			Layout l;
 			l.name = f.name;
 			l.code = f.code;
+			l.overlap = f.overlap;
 			if (f.code == ebx_code::kArray) {
 				l.stride = f.element == ebx_code::kValueType ? types_[find(f.type)].size : 4;
 				l.ref = uint32_t(complexes_.size());
@@ -329,9 +331,16 @@ public:
 		} else if (p_code == ebx_code::kClass) {
 			offset = 8;
 		}
+		std::optional<uint32_t> shared_at;
 		for (Layout &l : layout) {
-			l.offset = offset;
-			offset += l.code == ebx_code::kValueType ? types_[find(fields_type(p_fields, l.name))].size : 4;
+			const uint32_t size = l.code == ebx_code::kValueType ? types_[find(fields_type(p_fields, l.name))].size : 4;
+			if (l.overlap && shared_at) {
+				l.offset = *shared_at;
+			} else {
+				l.offset = offset;
+				offset += size;
+				shared_at = l.overlap ? std::optional<uint32_t>(l.offset) : shared_at;
+			}
 			descs_.push_back({ l.name, l.code, l.ref, l.offset });
 		}
 		t.size = offset;
@@ -365,6 +374,11 @@ public:
 
 	void set(uint32_t p_instance, const std::string &p_field, uint32_t p_raw) {
 		const size_t at = offset_of(types_[instance_types_[p_instance]].name, p_field);
+		std::memcpy(instances_[p_instance].second.data() + at, &p_raw, 4);
+	}
+	// Field p_field as base type p_type declares it (a derived type may redeclare the name).
+	void set_as(uint32_t p_instance, const std::string &p_type, const std::string &p_field, uint32_t p_raw) {
+		const size_t at = offset_of(p_type, p_field);
 		std::memcpy(instances_[p_instance].second.data() + at, &p_raw, 4);
 	}
 	void set_ref(uint32_t p_instance, const std::string &p_field, uint32_t p_target) { set(p_instance, p_field, p_target + 1); }
@@ -506,6 +520,7 @@ private:
 		uint32_t ref = 0; // array complex, or the value type's complex
 		uint32_t offset = 0;
 		uint32_t stride = 4; // arrays
+		bool overlap = false;
 	};
 	struct Type {
 		std::string name;
@@ -642,6 +657,34 @@ SynthPartition level_root(uint32_t p_seed) {
 	part.declare("LevelData", ebx_code::kClass, "DataContainer", {});
 	part.add("LevelData");
 	return part;
+}
+
+// p_depth types, each deriving from the previous (the first from p_base) and adding p_pads 4-byte
+// fields that overlap in one slot, named Pad0..Pad3 (so the lookup tables stay small while each
+// type's descriptors do not). Returns the last type's name (p_base when p_depth is 0).
+std::string padded_chain(SynthPartition &r_part, const std::string &p_prefix, const std::string &p_base, uint8_t p_code, int p_depth, int p_pads) {
+	std::string base = p_base;
+	for (int d = 1; d <= p_depth; ++d) {
+		std::vector<SynthPartition::Field> pads;
+		for (int i = 0; i < p_pads; ++i) {
+			pads.push_back(SynthPartition::Field{ "Pad" + std::to_string(i % 4), ebx_code::kUInt32, "", ebx_code::kClass, true });
+		}
+		const std::string name = p_prefix + std::to_string(d);
+		r_part.declare(name, p_code, base, pads);
+		base = name;
+	}
+	return base;
+}
+
+// A LinearTransform-shaped value type whose rows and their x/y/z sit p_depth types deep under
+// p_pads padding fields per type; returns its name.
+std::string padded_transform(SynthPartition &r_part, int p_depth, int p_pads) {
+	using F = SynthPartition::Field;
+	using namespace ebx_code;
+	r_part.declare("V0", kValueType, "", { F{ "x", kFloat32 }, F{ "y", kFloat32 }, F{ "z", kFloat32 } });
+	const std::string vec = padded_chain(r_part, "V", "V0", kValueType, p_depth, p_pads);
+	r_part.declare("LT0", kValueType, "", { F{ "right", kValueType, vec }, F{ "up", kValueType, vec }, F{ "forward", kValueType, vec }, F{ "trans", kValueType, vec } });
+	return padded_chain(r_part, "LT", "LT0", kValueType, p_depth, p_pads);
 }
 
 // What every hostile case below must stay under: the uncharged walks they reproduce took minutes
@@ -1082,6 +1125,131 @@ TEST_SUITE("level_unit") {
 		const Result<std::optional<EbxInstance>> after = world.scopes.referenced_blueprint(*partition.instance(r));
 		REQUIRE_FALSE(after.ok());
 		CHECK(budget_error(after.error()));
+	}
+
+	TEST_CASE("level_unit: field lookups take the most derived field, data_field the first") {
+		// One search in the type's flattened table (EbxPartition::lookup) must give what the walk
+		// over the base chain gave: get() the most derived declaration (the first within its type),
+		// data_field the first in fields() order (base types first).
+		using F = SynthPartition::Field;
+		using namespace ebx_code;
+		SynthPartition part(30);
+		part.declare("Base", kClass, "DataContainer", { F{ "Excluded", kUInt32 }, F{ "A", kUInt32 } });
+		part.declare("Mid", kClass, "Base", { F{ "B", kUInt32 }, F{ "B", kUInt32 } });
+		part.declare("Top", kClass, "Mid", { F{ "Excluded", kUInt32 }, F{ "C", kUInt32 } });
+		std::string deep = "DataContainer";
+		for (int d = 1; d <= 30; ++d) {
+			const std::string name = "D" + std::to_string(d);
+			part.declare(name, kClass, deep, d == 1 ? std::vector<F>{ F{ "Deep", kUInt32 } } : std::vector<F>{ F{ "Pad" + std::to_string(d), kUInt32 } });
+			deep = name;
+		}
+		const uint32_t top = part.add("Top");
+		part.set_as(top, "Base", "Excluded", 11);
+		part.set(top, "Excluded", 22);
+		part.set(top, "A", 33);
+		part.set(top, "B", 44); // the first B
+		part.set(top, "C", 55);
+		const uint32_t bottom = part.add(deep);
+		part.set(bottom, "Deep", 77);
+		part.set(bottom, "Pad30", 78);
+		EbxDb db;
+		const EbxPartition &p = insert(db, "levels/lookup/part", part);
+		const EbxInstance t = *p.instance(top);
+		CHECK(t.get("Excluded")->as_u32() == 22u);
+		CHECK(data_field(t, int32_t(ebx_name_hash("Excluded")))->as_u32() == 11u);
+		CHECK(t.get("A")->as_u32() == 33u);
+		CHECK(t.get("B")->as_u32() == 44u);
+		CHECK(data_field(t, int32_t(ebx_name_hash("B")))->as_u32() == 44u);
+		CHECK(t.get("C")->as_u32() == 55u);
+		CHECK(data_field(t, int32_t(ebx_name_hash("C")))->as_u32() == 55u);
+		CHECK_FALSE(t.get("Missing"));
+		CHECK_FALSE(t.get("$"));
+		CHECK_FALSE(data_field(t, int32_t(ebx_name_hash("Missing"))));
+		for (const EbxField &field : t.fields()) {
+			if (field.name == "Excluded") {
+				CHECK(field.value.as_u32() == 11u); // fields() meets Base's first, as data_field does
+				break;
+			}
+		}
+		const EbxInstance b = *p.instance(bottom);
+		CHECK(b.is_a("D1"));
+		CHECK(b.get("Deep")->as_u32() == 77u);
+		CHECK(b.get("Pad30")->as_u32() == 78u);
+		CHECK(data_field(b, int32_t(ebx_name_hash("Deep")))->as_u32() == 77u);
+	}
+
+	TEST_CASE("level_unit: type layouts past the parser's caps are rejected") {
+		using F = SynthPartition::Field;
+		const auto wide = [](uint32_t p_seed, int p_levels, int p_derived) {
+			// p_levels types of 250 fields each (251 descriptors per level with the base), then
+			// p_derived types each adding one field to the last.
+			SynthPartition part(p_seed);
+			std::string base = "DataContainer";
+			for (int l = 1; l <= p_levels; ++l) {
+				std::vector<F> fields;
+				for (int i = 0; i < 250; ++i) {
+					fields.push_back(F{ "W" + std::to_string(l) + "_" + std::to_string(i), ebx_code::kUInt32 });
+				}
+				const std::string name = "Wide" + std::to_string(l);
+				part.declare(name, ebx_code::kClass, base, fields);
+				base = name;
+			}
+			for (int d = 0; d < p_derived; ++d) {
+				part.declare("Derived" + std::to_string(d), ebx_code::kClass, base, { F{ "Own" + std::to_string(d), ebx_code::kUInt32 } });
+			}
+			part.add(base);
+			return EbxPartition::parse(part.bytes());
+		};
+		const Result<EbxPartition> fits = wide(31, 4, 4); // 1,004 descriptors along the chain, about 6.5k lookups
+		CHECK_MESSAGE(fits.ok(), (fits.ok() ? std::string() : fits.error().message));
+		const Result<EbxPartition> long_chain = wide(32, 5, 0); // 1,255 descriptors
+		REQUIRE_FALSE(long_chain.ok());
+		CHECK(long_chain.error().message.find("along its base chain") != std::string::npos);
+		const Result<EbxPartition> many = wide(33, 4, 64); // 64 x 1,005 lookups from about 1,200 descriptors
+		REQUIRE_FALSE(many.ok());
+		CHECK(many.error().message.find("field lookups") != std::string::npos);
+		// The verifier's deep form: value types 30 deep with 254 fields each (7,620 descriptors).
+		SynthPartition deep(34);
+		padded_transform(deep, 30, 254);
+		deep.add("DataContainer");
+		const Result<EbxPartition> rejected = EbxPartition::parse(deep.bytes());
+		REQUIRE_FALSE(rejected.ok());
+		CHECK(rejected.error().message.find("along its base chain") != std::string::npos);
+	}
+
+	TEST_CASE("level_unit: partition checks pay for wide overlapping types") {
+		// B0 has 255 overlapping 4-byte fields, each Bk 255 overlapping Bk-1 (k = 1..6), and a Holder
+		// carries one B6 beside a 16 MB string that buys check budget. The check ends on its budget
+		// either way; when an object paid 1 whatever its width, each unit cost 255 field scans and
+		// this partition took 88 s to fail.
+		using F = SynthPartition::Field;
+		using namespace ebx_code;
+		SynthPartition part(35);
+		std::vector<F> leaf;
+		for (int i = 0; i < 255; ++i) {
+			leaf.push_back(F{ "Pad" + std::to_string(i), kUInt32, "", kClass, true });
+		}
+		part.declare("B0", kValueType, "", leaf);
+		std::string prev = "B0";
+		for (int l = 1; l <= 6; ++l) {
+			std::vector<F> fields;
+			for (int i = 0; i < 255; ++i) {
+				fields.push_back(F{ "Pad" + std::to_string(i), kValueType, prev, kClass, true });
+			}
+			const std::string name = "B" + std::to_string(l);
+			part.declare(name, kValueType, "", fields);
+			prev = name;
+		}
+		part.declare("Holder", kClass, "DataContainer", { F{ "V", kValueType, prev }, F{ "S", kCString } });
+		const uint32_t holder = part.add("Holder");
+		part.set_string(holder, "S", std::string(size_t(16) << 20, 's'));
+		const std::vector<uint8_t> bytes = part.bytes();
+		Result<EbxPartition> parsed = make_error("not parsed");
+		const double seconds = timed([&] { parsed = EbxPartition::parse(bytes); });
+		MESSAGE("16 MB partition of 255-wide overlapping types: ", (parsed.ok() ? std::string("ok") : parsed.error().message), " in ", seconds, " s");
+		REQUIRE_FALSE(parsed.ok());
+		CHECK(parsed.error().message.find("overlap") != std::string::npos);
+		CHECK(seconds < kHostileSeconds);
 	}
 
 	TEST_CASE("level_unit: self-referencing connection loops end on the budget") {
@@ -1594,6 +1762,69 @@ TEST_SUITE("level") {
 			CHECK(budget_error(collision.error()));
 			CHECK(seconds < kHostileSeconds);
 		}
+	}
+
+	TEST_CASE("level: deep and wide type layouts cost what shallow ones do") {
+		// Round 7: Objects [R] x 8, R.Blueprint the root (a fan-out the budget cuts), R a world part
+		// reference 27 types deep whose BlueprintTransform is a LinearTransform 30 types deep with
+		// rows 30 types deep, every type 32 descriptors wide. Each R slot reads Excluded, Blueprint,
+		// BlueprintTransform and its 16 row fields; walking base chains, 254-wide types made one unit
+		// cost about 130k descriptor steps (197 s for 360 KB). Field lookups are one search in a
+		// table flattened at parse, so the deep form must run at the shallow form's rate.
+		const std::shared_ptr<Install> install = open_or_skip();
+		if (!install) {
+			return;
+		}
+		Result<LevelMount> mount = install->mount_level("MP_Subway");
+		REQUIRE(mount.ok());
+		using F = SynthPartition::Field;
+		constexpr size_t kLimit = size_t(1) << 20;
+		const auto fan_out = [&](uint32_t p_seed, int p_depth, int p_pads) {
+			SynthPartition part(p_seed);
+			hostile_types(part);
+			const std::string transform = padded_transform(part, p_depth, p_pads);
+			const std::string base = padded_chain(part, "R", "WorldPartReferenceObjectData", ebx_code::kClass, p_depth == 0 ? 0 : 27, p_pads);
+			part.declare("RTop", ebx_code::kClass, base, { F{ "BlueprintTransform", ebx_code::kValueType, transform } });
+			const uint32_t root = part.add("WorldPartData");
+			const uint32_t r = part.add("RTop");
+			part.set_ref(r, "Blueprint", root);
+			part.set(root, "Objects", part.array("WorldPartData", "Objects", 8, [&](uint32_t, uint32_t) { return SynthPartition::ref(r); }));
+			EbxDb db;
+			insert(db, "levels/hostile/part", part);
+			auto budget = std::make_shared<WorkBudget>(kLimit);
+			Result<std::unique_ptr<World>> world = std::unique_ptr<World>();
+			const double seconds = timed([&] { world = World::traverse(db, db.partition_by_name("levels/hostile/part")->primary(), *mount, "TeamDeathMatch0", budget); });
+			MESSAGE("fan-out, types ", p_depth, " deep x ", p_pads, " wide: ", (world.ok() ? std::string("ok") : world.error().message), " in ", seconds, " s");
+			REQUIRE_FALSE(world.ok());
+			CHECK(budget_error(world.error()));
+			return seconds;
+		};
+		const double shallow = fan_out(40, 0, 0);
+		const double deep = fan_out(41, 30, 32);
+		CHECK(deep < 3 * shallow + 0.5);
+		CHECK(deep < kHostileSeconds);
+
+		// Objects [R, R, E x 64] with E a plain entity 29 types deep whose Transform is the deep
+		// LinearTransform: every E is emitted, so the walk ends on the placed-object cap (103 s and
+		// 302 MB at the old 2^20 cap with 254-wide types).
+		SynthPartition part(42);
+		hostile_types(part);
+		const std::string transform = padded_transform(part, 30, 32);
+		const std::string base = padded_chain(part, "E", "DataContainer", ebx_code::kClass, 29, 32);
+		part.declare("ETop", ebx_code::kClass, base, { F{ "Transform", ebx_code::kValueType, transform } });
+		const uint32_t root = part.add("WorldPartData");
+		const uint32_t r = part.add("WorldPartReferenceObjectData");
+		const uint32_t e = part.add("ETop");
+		part.set_ref(r, "Blueprint", root);
+		part.set(root, "Objects", part.array("WorldPartData", "Objects", 66, [&](uint32_t p_i, uint32_t) { return SynthPartition::ref(p_i < 2 ? r : e); }));
+		EbxDb db;
+		insert(db, "levels/hostile/part", part);
+		Result<std::unique_ptr<World>> world = std::unique_ptr<World>();
+		const double seconds = timed([&] { world = World::traverse(db, db.partition_by_name("levels/hostile/part")->primary(), *mount, "TeamDeathMatch0"); });
+		MESSAGE("deep entities emitted: ", (world.ok() ? std::string("ok") : world.error().message), " in ", seconds, " s");
+		REQUIRE_FALSE(world.ok());
+		CHECK(world.error().message.find("placed objects") != std::string::npos);
+		CHECK(seconds < kHostileSeconds);
 	}
 
 	TEST_CASE("level: modes and unknown levels") {

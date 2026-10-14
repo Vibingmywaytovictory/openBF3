@@ -16,7 +16,7 @@
 //       members), InstanceScale in `scale`, InstanceObjectVariation as the variation
 //     any other object: placed at its Transform (x) frame
 // Excluded, BlueprintTransform and Transform can be fed by PropertyConnections (Scopes::property).
-// Depth is limited to 48 blueprint levels, objects to 2^20, scopes to 2^18 and static model groups
+// Depth is limited to 48 blueprint levels, objects to 2^18, scopes to 2^18 and static model groups
 // to 2^16; all work (walk, resolver, and the helpers later run on the World) is charged to one
 // WorkBudget (budget.h; cost model in world.cpp). A traversal past any of them fails.
 

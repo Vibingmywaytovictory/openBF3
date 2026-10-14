@@ -13,6 +13,9 @@
 // code in src/level reads EbxValue::as_str or enum_name (Property::as_str, a view for callers that
 // charge it themselves, is not called by the walk). So text work and every kept copy are at most
 // 16 bytes per unit, and long names that are then skipped (over 1,024 bytes) are paid first.
+// Partition names come from the bundle manifests, not the EBX bytes, but are text all the same:
+// read_subworld charges the sub-world's name before copying it, the census each mesh name it copies
+// and keys and each shader name it searches, and bf3dump level each partition name it prints.
 // Every loop reachable from the public entry points, and what bounds it:
 //   load_level, level_info (level.cpp)
 //     subworld_references: 1 per container visited, then the raw length of its Objects before the
@@ -46,8 +49,8 @@
 //   Scopes (connections.cpp)
 //     property / interface: 1 per connection candidate examined, before it is followed (hop()),
 //       also capped at 2^16 per resolution and depth 32. Between two hops a resolution does a
-//       constant amount of work: hash lookups, the Descriptor follow, data_field (at most 32 types
-//       of 255 field descriptors, compared by stored hash); a hop whose source is a sub-world
+//       constant amount of work: hash lookups, the Descriptor follow, data_field (one search in
+//       the source type's lookup table, by stored hash); a hop whose source is a sub-world
 //       reference charges its BundleName's text before the name is copied and looked up.
 //     Connections::of: the raw lengths of a blueprint's three connection lists, once per blueprint
 //       per traversal (cached by scope push and by connections_of).
@@ -57,19 +60,31 @@
 //     starts_hidden: the number of connections into (reference, Visible) before they are checked.
 //     hidden_parts: the raw length of each Components and HealthStates array before it is
 //       scanned; at most 4,096 components per call.
+//     drawn_slots: the shader's partition name text per drawn material slot.
 //     mesh_census: legacy variation databases as above; per mesh object 1 for the variation
 //       lookup (a parent chain of at most 49 sub-worlds) plus hidden_parts; per variant the raw
-//       lengths of the asset's Materials and the entry's Materials, and 1 per triangle examined,
+//       lengths of the asset's Materials and the entry's Materials, 1 per LOD subset examined
+//       (before it is examined), and 1 per triangle examined,
 //       paid in doubling blocks before each block (at most twice what is examined). Each distinct
 //       MeshSet is read and decoded once (install-bound).
 //     collision_placements: per group its res name's text; per non-group mesh object the raw
 //       RigidBodies and ScaledAssets lengths, each body's enumerator name, and each asset name's
 //       text twice (read, then looked up and copied; names over 1,024 bytes are skipped, charged).
-//   bf3dump level (tools/bf3dump/level_commands.cpp) charges the type names it prints.
-// Constant factors: an EBX get / is_a / follow walks at most 32 types of at most 255 field
-// descriptors, never hashes data and decodes a string in O(log n); compares against fixed names
-// stop at the fixed name's length. An enumerator name is found among at most 255 descriptors.
-// Structural caps beside the budget: objects 2^20, scopes 2^18, static model groups 2^16, kept
+//   bf3dump level (tools/bf3dump/level_commands.cpp) charges the type and partition names it prints.
+// Constant factors, which bound the EBX work one unit pays for whatever the type layouts (each
+// object slot, hop or text charge does a fixed number of these accesses; LevelTransform reads are
+// 16 gets): EbxStruct::get / follow / data_field / as_vec3 / as_transform are one binary search
+// per get in the type's lookup table, which EbxPartition::parse flattens along the base chain
+// (O(log n), n at most 1,024: no walk over base types or descriptors); is_a walks at most 32 base
+// types by stored hash; an enumerator name is one binary search; a string decodes in O(log n);
+// compares against fixed names stop at the fixed name's length; no data is hashed. The parser
+// rejects types with more than 1,024 descriptors along their base chain and type tables of more
+// than 4 lookups per descriptor (retail: 96 and 1.96), and its validation pays for each type's
+// descriptors before scanning them (at most 16 steps per partition byte), so a partition's parse
+// is linear in its size; each bundle is parsed once per load. Before the lookup tables, a hostile
+// type 30 deep and 254 wide made each unit cost about 130k descriptor steps (197 s for a 360 KB
+// partition); now deep, wide and shallow layouts run at the same rate (1.3-1.4 s at the full budget).
+// Structural caps beside the budget: objects 2^18, scopes 2^18, static model groups 2^16, kept
 // sub-world names 4,096 of at most 1,024 bytes, BundleName and res lookups 1,024 bytes, level
 // description modes 4,096.
 // Retail use (all 230 level x mode runs of the 29 MP levels): see README "Level traversal".
@@ -83,8 +98,8 @@ constexpr uint32_t kMaxDepth = 48;
 // Placed objects, scopes and static model groups one traversal may create. The depth limit bounds
 // nesting, not fan-out: a hostile prefab listing itself many times would otherwise grow without
 // bound. Retail levels place at most 15,178 objects in 773 scopes and 3 groups (all 230 level x
-// mode runs).
-constexpr size_t kMaxObjects = size_t(1) << 20;
+// mode runs); 2^18 objects keep a hostile World under about 80 MB (2^20 reached 300 MB).
+constexpr size_t kMaxObjects = size_t(1) << 18;
 constexpr size_t kMaxScopes = size_t(1) << 18;
 constexpr size_t kMaxGroups = size_t(1) << 16;
 // Skipped and absent sub-world names kept in WorldStats (retail levels list about a dozen), and
@@ -165,7 +180,10 @@ void classify(const EbxResolver &p_db, const EbxInstance &p_entity, PlacedObject
 Result<SubWorld> read_subworld(const EbxResolver &p_db, const EbxInstance &p_data, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent,
 		uint32_t p_scope, WorkBudget &r_budget) {
 	SubWorld sw;
-	sw.name = std::string(p_db.name_of(p_data.partition().guid()).value_or(""));
+	// The partition name comes from the bundle manifest: charged before it is copied and extended.
+	const std::string_view name = p_db.name_of(p_data.partition().guid()).value_or("");
+	BF3_TRY(charge_text(r_budget, name));
+	sw.name = std::string(name);
 	sw.data = p_data;
 	sw.reference = p_reference;
 	sw.parent = p_parent;

@@ -361,6 +361,7 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 
 	p.arrays_.reserve(array_repeaters.size());
 	BF3_TRY(p.link_complexes());
+	BF3_TRY(p.build_lookups());
 
 	size_t at = payload_at;
 	for (const auto &[internal, count, complex] : instance_repeaters) {
@@ -495,6 +496,82 @@ Status EbxPartition::link_complexes() {
 	return Status::success();
 }
 
+Status EbxPartition::build_lookups() {
+	// Every chain ends within kBaseDepth types (link_complexes). A type's table is its base type's,
+	// shifted by the base's offset, merged with its own fields, so types are built base first.
+	std::array<std::vector<uint32_t>, kBaseDepth + 1> by_depth;
+	for (uint32_t complex = 0; complex < complexes_.size(); ++complex) {
+		if (complexes_[complex].code == kEnum) {
+			// Enumerators by value, then declaration order: a value names its first enumerator.
+			const Complex &desc = complexes_[complex];
+			complexes_[complex].lookup_start = static_cast<uint32_t>(enumerators_.size());
+			for (uint32_t field = desc.field_start; field < desc.field_end; ++field) {
+				enumerators_.emplace_back(fields_[field].offset, field);
+			}
+			std::sort(enumerators_.begin() + desc.lookup_start, enumerators_.end());
+			complexes_[complex].lookup_end = static_cast<uint32_t>(enumerators_.size());
+			continue;
+		}
+		if (complexes_[complex].code != kClass && complexes_[complex].code != kValueType) {
+			continue;
+		}
+		size_t chain = 0, depth = 0;
+		for (std::optional<uint32_t> at = complex; at && depth < kBaseDepth; at = complexes_[*at].base) {
+			chain += complexes_[*at].field_end - complexes_[*at].field_start;
+			++depth;
+		}
+		if (chain > kChainFields) {
+			return make_error("type `" + std::string(complex_name(complex)) + "` has more than " + std::to_string(kChainFields) +
+					" field descriptors along its base chain");
+		}
+		by_depth[depth].push_back(complex);
+	}
+	const size_t limit = kLookupsPerDescriptor * (fields_.size() + complexes_.size()) + kLookupSlack;
+	std::vector<Lookup> own, merged;
+	for (const std::vector<uint32_t> &level : by_depth) {
+		for (const uint32_t complex : level) {
+			const Complex &desc = complexes_[complex];
+			own.clear();
+			uint32_t base_offset = 0;
+			for (uint32_t field = desc.field_start; field < desc.field_end; ++field) {
+				const Field &member = fields_[field];
+				if (member.code == kVoid) {
+					base_offset = static_cast<uint32_t>(member.offset);
+				} else {
+					own.push_back(Lookup{ member.hash, field, static_cast<uint32_t>(member.offset), field, static_cast<uint32_t>(member.offset) });
+				}
+			}
+			// By hash, then declaration order; the first declaration of a name in a type wins.
+			std::sort(own.begin(), own.end(), [](const Lookup &a, const Lookup &b) { return a.hash != b.hash ? a.hash < b.hash : a.field < b.field; });
+			own.erase(std::unique(own.begin(), own.end(), [](const Lookup &a, const Lookup &b) { return a.hash == b.hash; }), own.end());
+			merged.clear();
+			size_t i = 0, j = desc.base ? complexes_[*desc.base].lookup_start : 0;
+			const size_t base_end = desc.base ? complexes_[*desc.base].lookup_end : 0;
+			while (i < own.size() || j < base_end) {
+				if (j < base_end && (i == own.size() || lookups_[j].hash < own[i].hash)) {
+					const Lookup &b = lookups_[j++];
+					merged.push_back(Lookup{ b.hash, b.field, b.offset + base_offset, b.first_field, b.first_offset + base_offset });
+				} else if (j < base_end && lookups_[j].hash == own[i].hash) {
+					// Redeclared: get() takes this type's field, fields() order the base type's.
+					const Lookup &b = lookups_[j++];
+					merged.push_back(Lookup{ own[i].hash, own[i].field, own[i].offset, b.first_field, b.first_offset + base_offset });
+					++i;
+				} else {
+					merged.push_back(own[i++]);
+				}
+			}
+			if (lookups_.size() + merged.size() > limit) {
+				return make_error("type layouts need more than " + std::to_string(limit) + " field lookups (" + std::to_string(fields_.size()) +
+						" field and " + std::to_string(complexes_.size()) + " type descriptors)");
+			}
+			complexes_[complex].lookup_start = static_cast<uint32_t>(lookups_.size());
+			lookups_.insert(lookups_.end(), merged.begin(), merged.end());
+			complexes_[complex].lookup_end = static_cast<uint32_t>(lookups_.size());
+		}
+	}
+	return Status::success();
+}
+
 Result<std::optional<uint32_t>> EbxPartition::check_members(uint32_t p_complex) const {
 	const Complex &desc = complexes_[p_complex];
 	std::optional<uint32_t> base;
@@ -569,7 +646,9 @@ Status EbxPartition::check_element(uint32_t p_complex, uint32_t p_member) {
 }
 
 // Checks every reference, array index and string offset once, so decoding never meets a bad one.
-// Arrays are visited once each; the budget bounds descriptors that overlap on purpose.
+// Arrays are visited once each; the budget bounds descriptors that overlap on purpose. Each object
+// pays for its field descriptors before they are scanned (wide types of overlapping scalars would
+// otherwise cost 255 scans per unit), so a check is at most 16 steps per partition byte.
 class EbxValidator {
 public:
 	explicit EbxValidator(const EbxPartition &p_partition) :
@@ -579,8 +658,8 @@ public:
 	}
 
 	Status object(uint32_t p_complex, size_t p_at, size_t p_depth) {
-		BF3_TRY(spend(p_depth));
 		const EbxPartition::Complex &desc = p_.complexes_[p_complex];
+		BF3_TRY(spend(p_depth, 1 + size_t(desc.field_end - desc.field_start)));
 		for (uint32_t field = desc.field_start; field < desc.field_end; ++field) {
 			const EbxPartition::Field &member = p_.fields_[field];
 			const size_t field_at = p_at + static_cast<size_t>(member.offset);
@@ -621,14 +700,15 @@ public:
 private:
 	enum class Visit : uint8_t { New, Open, Done };
 
-	Status spend(size_t p_depth) {
+	Status spend(size_t p_depth, size_t p_units = 1) {
 		if (p_depth > kNestDepth) {
 			return too_deep();
 		}
-		if (budget_ == 0) {
+		if (budget_ < p_units) {
+			budget_ = 0;
 			return overlapping();
 		}
-		--budget_;
+		budget_ -= p_units;
 		return Status::success();
 	}
 
@@ -800,12 +880,24 @@ std::optional<std::string_view> EbxPartition::enumerator(uint32_t p_complex, int
 		return std::nullopt;
 	}
 	const Complex &desc = complexes_[p_complex];
-	for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
-		if (fields_[f].offset == p_value) {
-			return name(fields_[f].name_start, fields_[f].name_end);
-		}
+	const auto first = enumerators_.begin() + desc.lookup_start;
+	const auto last = enumerators_.begin() + desc.lookup_end;
+	const auto it = std::lower_bound(first, last, p_value, [](const std::pair<int32_t, uint32_t> &e, int32_t v) { return e.first < v; });
+	if (it == last || it->first != p_value) {
+		return std::nullopt;
 	}
-	return std::nullopt;
+	return name(fields_[it->second].name_start, fields_[it->second].name_end);
+}
+
+const EbxPartition::Lookup *EbxPartition::lookup(uint32_t p_complex, uint32_t p_hash) const {
+	if (p_complex >= complexes_.size()) {
+		return nullptr;
+	}
+	const Complex &desc = complexes_[p_complex];
+	const auto first = lookups_.begin() + desc.lookup_start;
+	const auto last = lookups_.begin() + desc.lookup_end;
+	const auto it = std::lower_bound(first, last, p_hash, [](const Lookup &l, uint32_t h) { return l.hash < h; });
+	return (it != last && it->hash == p_hash) ? &*it : nullptr;
 }
 
 uint32_t EbxPartition::stride(uint32_t p_field) const {
@@ -1182,32 +1274,12 @@ bool EbxStruct::is_a(std::string_view p_type_name) const {
 }
 
 std::optional<EbxValue> EbxStruct::get(std::string_view p_field) const {
-	const uint32_t hash = ebx_name_hash(p_field);
-	const EbxPartition &p = *partition_;
-	uint32_t complex = complex_;
-	size_t at = offset_;
-	for (size_t depth = 0; depth < EbxPartition::kBaseDepth; ++depth) {
-		if (complex >= p.complex_descs().size()) {
-			return std::nullopt;
-		}
-		const EbxPartition::Complex &desc = p.complex_descs()[complex];
-		std::optional<std::pair<uint32_t, size_t>> base;
-		for (uint32_t index = desc.field_start; index < desc.field_end; ++index) {
-			const EbxPartition::Field &member = p.field_descs()[index];
-			const size_t member_at = at + static_cast<size_t>(static_cast<int64_t>(member.offset));
-			if (member.code == kVoid) {
-				base = std::make_pair(static_cast<uint32_t>(member.reference), member_at);
-			} else if (member.hash == hash && p.name(member.name_start, member.name_end) == p_field) {
-				return p.decode(index, member_at);
-			}
-		}
-		if (!base) {
-			return std::nullopt;
-		}
-		complex = base->first;
-		at = base->second;
+	// The parser resolved each field's name through its hash, so one hash names one name.
+	const EbxPartition::Lookup *found = partition_->lookup(complex_, ebx_name_hash(p_field));
+	if (found == nullptr || partition_->field_name(found->field) != p_field) {
+		return std::nullopt;
 	}
-	return std::nullopt;
+	return partition_->decode(found->field, size_t(offset_) + found->offset);
 }
 
 std::optional<EbxValue> EbxStruct::get_path(std::string_view p_path) const {

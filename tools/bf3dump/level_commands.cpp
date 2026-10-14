@@ -19,6 +19,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -67,6 +69,17 @@ std::string opt_id(const EbxResolver &p_db, const std::optional<EbxInstance> &p_
 	return p_instance ? id(p_db, *p_instance) : "-";
 }
 
+// The partition names id() prints come from the bundle manifests, and any number of lines may print
+// one long name: charged like the other printed text before a line uses them.
+Status charge_ids(const EbxResolver &p_db, WorkBudget &r_budget, std::initializer_list<std::optional<EbxInstance>> p_instances) {
+	for (const std::optional<EbxInstance> &instance : p_instances) {
+		if (instance) {
+			BF3_TRY(charge_text(r_budget, p_db.name_of(instance->partition().guid()).value_or("?")));
+		}
+	}
+	return Status::success();
+}
+
 template <class T>
 std::string opt_num(const std::optional<T> &p_value) {
 	return p_value ? std::to_string(*p_value) : "-";
@@ -105,6 +118,7 @@ Result<std::string> placement_line(const EbxResolver &p_db, const World &p_world
 	// once or twice per line: charged like any other text the traversal copies.
 	BF3_TRY(charge_text(*p_world.budget, p_object.entity.type_name()));
 	BF3_TRY(charge_text(*p_world.budget, p_object.label()));
+	BF3_TRY(charge_ids(p_db, *p_world.budget, { p_object.entity, p_object.reference }));
 	std::string line = "P " + std::string(p_object.label()) + " " + id(p_db, p_object.entity) + " " + std::string(p_object.entity.type_name()) + " ref " +
 			opt_id(p_db, p_object.reference) + " sw " + std::to_string(p_object.subworld) + " var " + hex32(p_object.variation);
 	if (p_object.group) {
@@ -120,6 +134,7 @@ Result<std::string> placement_line(const EbxResolver &p_db, const World &p_world
 		if (!hidden) {
 			return hidden.error();
 		}
+		BF3_TRY(charge_ids(p_db, *p_world.budget, { mesh.asset, mesh.physics }));
 		line += " mesh " + id(p_db, mesh.asset) + " " + std::string(mesh_entity_type_name(mesh.entity_type)) + " phys " + opt_id(p_db, mesh.physics) +
 				" hid " + *hidden;
 	} else {
@@ -208,6 +223,7 @@ Result<std::string> listing(const LoadedLevel &p_level, const World &p_world, co
 		for (bool l : mesh.lods) {
 			lods += l ? '1' : '0';
 		}
+		BF3_TRY(charge_ids(db, *p_world.budget, { mesh.asset, mesh.entry }));
 		lines.push_back("V " + id(db, mesh.asset) + " entry " + opt_id(db, mesh.entry) + " hid [" + join_u16(mesh.hidden) + "] bake " + bake + " n " +
 				std::to_string(mesh.placements) + " radius " + hex(mesh.radius) + " kind " + (mesh.world_kind ? "world" : "model") + " lods " + lods +
 				" kept " + (mesh.kept ? "1" : "0"));
@@ -226,6 +242,7 @@ Result<std::string> listing(const LoadedLevel &p_level, const World &p_world, co
 			continue;
 		}
 		const PlacedObject &object = p_world.objects[c.index];
+		BF3_TRY(charge_ids(db, *p_world.budget, { object.entity }));
 		std::string bodies;
 		for (size_t i = 0; i < c.bodies.size(); ++i) {
 			bodies += (i ? "," : "") + std::string(c.bodies[i]);

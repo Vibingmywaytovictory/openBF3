@@ -271,16 +271,23 @@ row-vector product); there is no IW conversion.
   triangle the census examines, and 1 + length/16 for every data string or name it copies, keys, compares, parses or
   prints (`charged_str`, `charged_enum_name`, `charge_text`; nothing else in `src/level` reads string values), so text
   work and kept copies are at most 16 bytes per unit whatever one string's length or how many slots name it.
-  `EbxPartition` indexes its string table's NULs at parse, so decoding a string is O(log n), not a scan. Once a charge
+  `EbxPartition` indexes its string table's NULs at parse, so decoding a string is O(log n), not a scan, and it
+  flattens each type's fields along its base chain into one table sorted by name hash, so a field lookup (`get`,
+  `follow`, a transform's 16 row reads, the resolver's `data_field`) and an enumerator name are one binary search,
+  whatever the type layout: a deep or wide hostile type costs a unit what a shallow one does. The parser rejects types
+  with more than 1,024 descriptors along their base chain and tables of more than 4 lookups per descriptor (retail,
+  all 501,952 partitions of the 53 non-chunk superbundles: at most 96 and 1.96), and its check pays for each type's
+  descriptors before scanning them, so parsing is linear in the partition's size. Once a charge
   fails the budget stays exhausted, every later call returns the budget error, and `World::traverse` checks it again
   after the walk. The comment block at the top of `src/level/world.cpp` is the cost model: every loop reachable from
   the public entry points and what bounds it. Beside the budget: depth limits (48 blueprint levels, 8 layer levels,
-  32 connection hops and 2^16 hops per resolution), caps of 1 M placed objects, 256 k scopes, 64 k static model
+  32 connection hops and 2^16 hops per resolution), caps of 256 k placed objects, 256 k scopes, 64 k static model
   groups, 4,096 kept sub-world names and 4,096 level-description modes, 1,024-byte names for lookups, each group res
   parsed once per traversal, and a static model group whose instances need more subparts than its res holds is an
   error. Retail use over all 230 level x mode runs: at most 26.9 k units for load + walk (MP_Subway RushLarge0: 19.0 k
-  walker steps, 542 resolve hops at most on any run, no resolution capped) and 258 k for everything `bf3dump level`
-  does (load, walk, census, collision, listing; MP_003 RushLarge0), 16 times below the budget. `core.level.unit` and `core.level` build
+  walker steps, 542 resolve hops at most on any run, no resolution capped) and 412 k for everything `bf3dump level`
+  does (load, walk, census, collision, listing with every printed name charged; MP_Subway RushLarge0), 10 times below
+  the budget. `core.level.unit` and `core.level` build
   hostile partitions for every shape found so far, and each one ends on the budget in under a second in the dev
   build: a WorldPart listing itself twice, the same with a static model group of 200 k empty members, 10,000 objects
   whose `Excluded` is fed by self-looping connections, a loop through a prefab's interface, K references to one
@@ -288,7 +295,9 @@ row-vector product); there is no IW conversion.
   `HealthStates`, `RigidBodies`, level-description `Mode` lists), K start-hidden checks over M connections, and K
   slots naming one long string (a 4 MB `BundleName` on 2^18 sub-world slots and on a self-listing fan-out, 2^16 mode
   names of one 1 MB string, long inclusion criteria and options, a 1 MB `BundleName` on a self-looping resolver hop,
-  4 MB collision asset names).
+  4 MB collision asset names), deep and wide type layouts (a fan-out through types 27-30 deep and 32 descriptors wide
+  runs at the shallow form's rate; layouts past the parser's caps fail to parse) and a 16 MB partition of 255-wide
+  overlapping value types, whose check fails in under a second (88 s before).
 * A `World` is not thread-safe: `Scopes` keeps resolution state in its const methods (`property`, `interface`). The
   `WorkBudget` itself is atomic; `mesh_census` charges it from its parallel part, which otherwise only reads the
   partitions and the mount.
