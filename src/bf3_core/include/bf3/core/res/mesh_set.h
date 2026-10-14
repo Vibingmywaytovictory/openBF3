@@ -215,7 +215,8 @@ struct MeshLod {
 
 	// The inline geometry inside p_res (empty span and ok for a chunk LOD).
 	ResError inline_geometry(Bytes p_res, Bytes &r_geometry) const;
-	// p_geometry: the decompressed chunk or inline_geometry().
+	// p_geometry: the decompressed chunk or inline_geometry(). Refuses subsets whose vertex or index
+	// ranges add up to more than 8x the LOD's regions (retail: at most 2x); r_out is then empty.
 	ResError decode(Bytes p_geometry, SubsetFilter p_filter, std::vector<DecodedSubset> &r_out) const;
 	ResError decode_subset(Bytes p_geometry, size_t p_index, DecodedSubset &r_out) const;
 	// Skinned: skeleton bone index of bone lane value p_lane in subset p_subset, or -1.

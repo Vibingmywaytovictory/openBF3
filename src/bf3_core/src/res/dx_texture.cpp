@@ -337,6 +337,14 @@ ResError DxTexture::split_mips(Bytes p_chunk, uint64_t p_logical_offset, std::ve
 	if (chain == 0 && mip_count > 0) {
 		return ResError::malformed("empty mip chain", 0);
 	}
+	// Likewise an empty mip: with every mip at least one byte, each slice takes a byte of the chunk,
+	// so the slice count is bounded by the chunk size (a hostile header with one byte-sized mip and
+	// 65535 slices would otherwise yield 15 slices per chunk byte). No retail mip is empty.
+	for (uint8_t mip = 0; mip < mip_count && mip < mip_sizes.size(); mip++) {
+		if (mip_sizes[mip] == 0) {
+			return ResError::malformed("empty mip", mip);
+		}
+	}
 	Reader r(p_chunk);
 	for (uint32_t face = 0; face < faces(); face++) {
 		uint64_t at = uint64_t(face) * chain;

@@ -10,6 +10,7 @@
 #include "test_support.h"
 
 #include <bit>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -212,6 +213,134 @@ uint32_t xorshift(uint32_t &r_state) {
 	return r_state;
 }
 
+// A minimal HavokPhysicsData res around a hand-built 32-bit packfile: no part tables, the packfile
+// at 0x40, the external fixups in the tail. Objects live in `data`; arrays and pointers become the
+// fixup entries Packfile::parse reads. The contents root holds one variant, the
+// HavokPhysicsContainer, whose shape array lists `roots`.
+struct SyntheticHavok {
+	std::vector<uint8_t> data;
+	std::vector<std::pair<uint32_t, uint32_t>> arrays; // field -> element data
+	std::vector<std::pair<uint32_t, uint32_t>> pointers; // slot -> object
+	std::vector<std::pair<uint32_t, std::string>> objects; // offset, class
+	std::vector<uint32_t> roots;
+
+	uint32_t alloc(size_t p_bytes) {
+		const uint32_t at = uint32_t((data.size() + 15) / 16 * 16);
+		data.resize(at + p_bytes, 0);
+		return at;
+	}
+	uint32_t object(const char *p_class, size_t p_bytes) {
+		const uint32_t at = alloc(p_bytes);
+		objects.emplace_back(at, p_class);
+		return at;
+	}
+	void array(uint32_t p_field, uint32_t p_elements, uint32_t p_count) {
+		put32(data, p_field + 4, p_count);
+		arrays.emplace_back(p_field, p_elements);
+	}
+	void pointer(uint32_t p_slot, uint32_t p_object) { pointers.emplace_back(p_slot, p_object); }
+	// An hkpListShape whose children are p_children (16-byte child entries).
+	uint32_t list(const std::vector<uint32_t> &p_children) {
+		const uint32_t at = object("hkpListShape", 48);
+		const uint32_t entries = alloc(16 * p_children.size());
+		array(at + 24, entries, uint32_t(p_children.size()));
+		for (size_t i = 0; i < p_children.size(); i++) {
+			pointer(entries + uint32_t(16 * i), p_children[i]);
+		}
+		return at;
+	}
+	uint32_t box(float p_half) {
+		const uint32_t at = object("hkpBoxShape", 48);
+		for (int k = 0; k < 3; k++) {
+			put32(data, at + 32 + 4 * k, std::bit_cast<uint32_t>(p_half));
+		}
+		return at;
+	}
+
+	std::vector<uint8_t> res(ResMeta &r_meta) {
+		// Contents: variant array -> container -> root shape array.
+		const uint32_t contents = alloc(16);
+		const uint32_t variants = alloc(12);
+		const uint32_t container = object("HavokPhysicsContainer", 32);
+		const uint32_t shapes = alloc(4 * roots.size());
+		array(contents, variants, 1);
+		pointer(variants + 8, container);
+		array(container + 8, shapes, uint32_t(roots.size()));
+		for (size_t i = 0; i < roots.size(); i++) {
+			pointer(shapes + uint32_t(4 * i), roots[i]);
+		}
+		alloc(16); // data ends after the last object
+
+		std::vector<uint8_t> pack(160, 0);
+		const uint8_t magic[8] = { 0x57, 0xE0, 0xE0, 0x57, 0x10, 0xC0, 0xC0, 0x10 };
+		std::memcpy(pack.data(), magic, 8);
+		pack[16] = 4;
+		pack[17] = 1;
+		put32(pack, 20, 2); // sections
+		put32(pack, 24, 1); // contents section: __data__
+		put32(pack, 28, contents);
+		std::memcpy(&pack[40], "hk_2010.2.0-r1", 14);
+		// Class names: u32 signature, 0x09, name, NUL; keys are the name offsets.
+		const uint32_t names_at = uint32_t(pack.size());
+		std::map<std::string, uint32_t> keys;
+		for (const auto &[offset, cls] : objects) {
+			if (!keys.contains(cls)) {
+				const size_t at = pack.size();
+				pack.resize(at + 5 + cls.size() + 1, 0);
+				pack[at + 4] = 0x09;
+				std::memcpy(&pack[at + 5], cls.data(), cls.size());
+				keys[cls] = uint32_t(at + 5 - names_at);
+			}
+		}
+		pack.push_back(0xFF);
+		const uint32_t names_len = uint32_t(pack.size() - names_at);
+		pack.resize((pack.size() + 15) / 16 * 16, 0);
+		const uint32_t data_at = uint32_t(pack.size());
+		pack.insert(pack.end(), data.begin(), data.end());
+		for (const auto &[offset, cls] : objects) {
+			const size_t at = pack.size();
+			pack.resize(at + 12, 0);
+			put32(pack, at, offset);
+			put32(pack, at + 8, keys[cls]);
+		}
+		const uint32_t table_len = uint32_t(12 * objects.size());
+		std::vector<uint8_t> fixups(8 * arrays.size() + 12 * pointers.size(), 0);
+		for (size_t i = 0; i < arrays.size(); i++) {
+			put32(fixups, 8 * i, arrays[i].first);
+			put32(fixups, 8 * i + 4, arrays[i].second);
+		}
+		for (size_t i = 0; i < pointers.size(); i++) {
+			put32(fixups, 8 * arrays.size() + 12 * i, pointers[i].first);
+			put32(fixups, 8 * arrays.size() + 12 * i + 8, pointers[i].second);
+		}
+		auto section = [&](size_t p_index, const char *p_tag, const std::array<uint32_t, 7> &p_fields) {
+			const size_t at = 64 + 48 * p_index;
+			std::memcpy(&pack[at], p_tag, std::strlen(p_tag));
+			for (size_t k = 0; k < 7; k++) {
+				put32(pack, at + 20 + 4 * k, p_fields[k]);
+			}
+		};
+		section(0, "__classnames__", { names_at, 0, 0, 0, 0, 0, names_len });
+		section(1, "__data__", { data_at, uint32_t(fixups.size()), uint32_t(8 * arrays.size()), uint32_t(data.size()),
+									   uint32_t(data.size()) + table_len, 0, 0 });
+
+		std::vector<uint8_t> res(0x40, 0);
+		put32(res, 0x08, 0x40); // part translations at 0x40 (none): the 0x40-byte header
+		res.insert(res.end(), pack.begin(), pack.end());
+		const size_t tail = res.size();
+		res.resize(tail + 8, 0);
+		put32(res, tail, uint32_t(fixups.size()));
+		res.insert(res.end(), fixups.begin(), fixups.end());
+		const uint32_t meta[4] = { 0x40, uint32_t(pack.size()), 0, uint32_t(8 + fixups.size()) };
+		std::memcpy(r_meta.data(), meta, 16);
+		return res;
+	}
+};
+
+double seconds_since(std::chrono::steady_clock::time_point p_start) {
+	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
+}
+
 } // namespace
 
 TEST_SUITE("res_unit") {
@@ -410,6 +539,180 @@ TEST_SUITE("res_unit") {
 		HavokPhysicsData hk;
 		std::vector<uint8_t> junk(96, 0);
 		CHECK(!HavokPhysicsData::parse(junk, ResMeta{}, hk).ok());
+	}
+
+	TEST_CASE("res: synthetic havok packfile, shared shapes") {
+		// The builder itself: a list sharing one box twice decodes (sharing is legal) and the
+		// group walk finds no extended mesh.
+		SyntheticHavok b;
+		const uint32_t box = b.box(0.5f);
+		b.roots = { b.list({ box, box }) };
+		ResMeta meta;
+		const std::vector<uint8_t> res = b.res(meta);
+		HavokPhysicsData hk;
+		REQUIRE(HavokPhysicsData::parse(res, meta, hk).ok());
+		CHECK(hk.packfile.version == "hk_2010.2.0-r1");
+		std::vector<Shape> shapes;
+		REQUIRE(hk.shapes(shapes).ok());
+		REQUIRE(shapes.size() == 1);
+		REQUIRE(shapes[0].type == ShapeType::List);
+		REQUIRE(shapes[0].children.size() == 2);
+		CHECK(shapes[0].children[1].type == ShapeType::Box);
+		CHECK(havok_triangles(shapes[0], Transform::identity()).size() == 24);
+		std::vector<SubpartTransform> group;
+		CHECK(hk.group_subparts(group).ok());
+		CHECK(group.empty());
+	}
+
+	TEST_CASE("res: hostile havok shape graphs fail fast") {
+		// Review repro: a ListShape listing itself made group_subparts' pending list double per
+		// level (2^64 entries); the shape walk's depth limit alone let a wide DAG run exponentially.
+		// Each case must end in an error, quickly, without large allocations.
+		auto run = [](SyntheticHavok &p_b, std::string &r_shapes_error, std::string &r_group_error) {
+			ResMeta meta;
+			const std::vector<uint8_t> res = p_b.res(meta);
+			HavokPhysicsData hk;
+			REQUIRE(HavokPhysicsData::parse(res, meta, hk).ok());
+			std::vector<Shape> shapes;
+			std::vector<SubpartTransform> group;
+			r_shapes_error = hk.shapes(shapes).message();
+			CHECK(shapes.empty());
+			r_group_error = hk.group_subparts(group).message();
+			CHECK(group.empty());
+		};
+		std::string se, ge;
+
+		// A list whose two children are the list itself, and a two-list cycle under a MOPP root.
+		{
+			const auto t0 = std::chrono::steady_clock::now();
+			SyntheticHavok b;
+			const uint32_t self = b.object("hkpListShape", 48);
+			const uint32_t entries = b.alloc(32);
+			b.array(self + 24, entries, 2);
+			b.pointer(entries, self);
+			b.pointer(entries + 16, self);
+			b.roots = { self };
+			run(b, se, ge);
+			CHECK(se == "malformed shape cycle at " + std::to_string(self));
+			CHECK(ge == "malformed shape cycle at " + std::to_string(self));
+			CHECK(seconds_since(t0) < 5.0);
+		}
+		{
+			SyntheticHavok b;
+			const uint32_t a = b.object("hkpListShape", 48);
+			const uint32_t a_entries = b.alloc(16);
+			const uint32_t c = b.list({ a });
+			b.array(a + 24, a_entries, 1);
+			b.pointer(a_entries, c);
+			const uint32_t mopp = b.object("hkpMoppBvTreeShape", 80);
+			b.pointer(mopp + 68, a);
+			b.roots = { mopp };
+			run(b, se, ge);
+			CHECK(se == "malformed shape cycle at " + std::to_string(a));
+			CHECK(ge == "malformed shape cycle at " + std::to_string(a));
+		}
+
+		// A chain of MOPP shapes: 64 levels below the root are fine, 65 are not.
+		for (const uint32_t length : { 65u, 66u, 1000u }) {
+			SyntheticHavok b;
+			uint32_t next = b.box(1.0f);
+			for (uint32_t i = 1; i < length; i++) {
+				const uint32_t mopp = b.object("hkpMoppBvTreeShape", 80);
+				b.pointer(mopp + 68, next);
+				next = mopp;
+			}
+			b.roots = { next };
+			ResMeta meta;
+			const std::vector<uint8_t> res = b.res(meta);
+			HavokPhysicsData hk;
+			REQUIRE(HavokPhysicsData::parse(res, meta, hk).ok());
+			std::vector<Shape> shapes;
+			std::vector<SubpartTransform> group;
+			const ResError e = hk.shapes(shapes);
+			const ResError g = hk.group_subparts(group);
+			if (length == 65) {
+				CHECK(e.ok());
+				CHECK(g.ok());
+				CHECK(havok_triangles(shapes[0], Transform::identity()).size() == 12);
+			} else {
+				CHECK(e.message().rfind("malformed shape nesting at ", 0) == 0);
+				CHECK(g.message().rfind("malformed shape nesting at ", 0) == 0);
+			}
+		}
+
+		// A wide DAG without cycles: 12 lists in a row, each listing the next one 16 times, over a
+		// box: 16^12 paths. Both walks stop at their budgets.
+		{
+			const auto t0 = std::chrono::steady_clock::now();
+			SyntheticHavok b;
+			uint32_t next = b.box(1.0f);
+			for (int level = 0; level < 12; level++) {
+				next = b.list(std::vector<uint32_t>(16, next));
+			}
+			b.roots = { next };
+			run(b, se, ge);
+			CHECK(se.rfind("malformed shape tree size at ", 0) == 0);
+			CHECK(ge.rfind("malformed shape tree size at ", 0) == 0);
+			MESSAGE("wide DAG rejected in " << seconds_since(t0) << " s");
+			CHECK(seconds_since(t0) < 20.0);
+		}
+
+		// One heavy convex leaf (1,024 points) listed 4,096 times: the hull work budget refuses it
+		// long before havok_triangles would hull it 4,096 times.
+		{
+			const auto t0 = std::chrono::steady_clock::now();
+			SyntheticHavok b;
+			const uint32_t convex = b.object("hkpConvexVerticesShape", 96);
+			const uint32_t blocks = b.alloc(48 * 256);
+			b.array(convex + 64, blocks, 256);
+			put32(b.data, convex + 76, 1024);
+			b.roots = { b.list(std::vector<uint32_t>(4096, convex)) };
+			run(b, se, ge);
+			CHECK(se.rfind("malformed convex hull work at ", 0) == 0);
+			CHECK(ge.empty()); // no extended mesh, no cycle: the group walk is cheap and finds nothing
+			CHECK(seconds_since(t0) < 5.0);
+		}
+	}
+
+	TEST_CASE("res: overlapping subsets and empty mips") {
+		// Subsets that all name the LOD's whole vertex and index regions: up to 8x is accepted
+		// (retail reaches 2x), more is refused instead of copying the regions once per subset.
+		MeshLod lod;
+		lod.vertex_data_size = 12;
+		lod.index_data_size = 6;
+		MeshSubset sub;
+		sub.vertex_count = 3;
+		sub.vertex_stride = 4;
+		sub.primitive_count = 1;
+		sub.primitive_type = PrimitiveType::TriangleList;
+		sub.declaration.element_count = 1;
+		sub.declaration.elements[0] = { VertexUsage::Position, VertexFormat::Float, 0, 0 };
+		std::vector<uint8_t> geometry(18, 0);
+		put16(geometry, 14, 1);
+		put16(geometry, 16, 2);
+		lod.subsets.assign(8, sub);
+		std::vector<DecodedSubset> out;
+		REQUIRE(lod.decode(geometry, SubsetFilter::All, out).ok());
+		CHECK(out.size() == 8);
+		lod.subsets.assign(9, sub);
+		CHECK(lod.decode(geometry, SubsetFilter::All, out).message() == "malformed subset ranges overlap at 8");
+		CHECK(out.empty());
+		DecodedSubset one;
+		CHECK(lod.decode_subset(geometry, 8, one).ok()); // a single subset is still fine
+
+		// A texture whose second mip is empty: refused (each slice must take chunk bytes).
+		std::vector<uint8_t> h(128, 0);
+		put32(h, 0x00, 10);
+		put16(h, 0x10, 8);
+		put16(h, 0x12, 8);
+		put16(h, 0x14, 1);
+		h[0x1A] = 2;
+		put32(h, 0x2C, 32);
+		DxTexture t;
+		REQUIRE(DxTexture::parse(h, t).ok());
+		std::vector<uint8_t> chunk(40, 0);
+		std::vector<MipSlice> mips;
+		CHECK(t.split_mips(chunk, 0, mips).message() == "malformed empty mip at 1");
 	}
 }
 
