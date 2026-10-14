@@ -257,7 +257,8 @@ field's effective value along those chains (depth and step limits, cycle safe). 
 target fields through Float/IntHub entities whose port ids are designer hashes; the reader matches each pair to the
 target field with the longest common name prefix (`UnderslungBoostL1` -> `UnderslungGrenadeIncrease`).
 The walk also has a total work budget (`max_walk_steps`, `max_query_steps`; retail modes need under 8k and 4k steps),
-so a hostile graph of nested world parts ends with an error instead of running for ever.
+so a hostile graph of nested world parts or of huge Objects arrays (null entries count too) ends with an error
+instead of running for ever.
 
 The kit tables have no "default" flag, so a slot's default is its first unlock that none of the four persistence
 progression tables grants (rank, licence, award or scoring-bucket unlock) and that is not an ammo/scope variant

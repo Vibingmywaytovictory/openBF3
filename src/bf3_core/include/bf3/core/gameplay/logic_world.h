@@ -152,12 +152,15 @@ struct LogicWorldOptions {
 	uint32_t max_depth = 48;
 	size_t max_scopes = 200000;
 	size_t max_objects = 4000000;
-	// Work the whole walk may do: one step per container visited and per Objects entry examined,
-	// plus the resolver steps of every Excluded query. World parts push no scope or object, so
+	// Work the whole walk may do: one step per container visited and per Objects entry examined
+	// (null and unresolvable entries included), one per inclusion setting and enabled option of
+	// every sub-world reference reached, plus the resolver steps of every Excluded query. World parts push no scope or object, so
 	// without this a fan-out of nested world parts would run k^max_depth visits.
 	size_t max_walk_steps = 2000000; // retail levels need at most ~7k (MP_Subway Rush)
-	// Resolver steps all queries on the built world may take together (each one is also capped at
-	// kQuerySteps). Once spent, queries return nullopt and query_budget_spent() is true.
+	// Resolver steps all queries may take together, the walk's own Excluded queries included (each
+	// query is also capped at kQuerySteps). The budget is checked before each query, so the total
+	// can overshoot it by up to kQuerySteps. Once spent, queries return nullopt and
+	// query_budget_spent() is true; a walk that spends it fails with an error.
 	size_t max_query_steps = 2000000; // a retail mode read needs < 4k (fields scanned included)
 };
 
@@ -168,6 +171,8 @@ struct LogicWorldStats {
 	size_t depth_limited = 0;
 	size_t cycles = 0; // references to a blueprint already being walked (skipped)
 	size_t walk_steps = 0; // against LogicWorldOptions::max_walk_steps
+	// Each name list below keeps at most this many entries (far more than a level references).
+	static constexpr size_t kMaxListedSubworlds = 4096;
 	std::vector<std::string> subworlds; // included sub-world bundle names, in visit order
 	std::vector<std::string> skipped_subworlds; // sub-worlds the mode does not include
 	std::vector<std::string> absent_subworlds; // included but not in the resolver
@@ -246,5 +251,7 @@ std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field)
 // setting whose criterion does not resolve counts as a GameMode one, the only criterion levels use.
 // An empty p_mode accepts every auto-loaded sub-world.
 bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode);
+// The same, adding one step per inclusion setting and per enabled option scanned to r_steps.
+bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, size_t &r_steps);
 
 } // namespace bf3::core::gameplay

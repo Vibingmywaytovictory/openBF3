@@ -343,6 +343,11 @@ std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field)
 }
 
 bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode) {
+	size_t steps = 0;
+	return subworld_included(p_db, p_reference, p_mode, steps);
+}
+
+bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, size_t &r_steps) {
 	const std::optional<EbxValue> auto_load = p_reference.get("AutoLoad");
 	if (!auto_load || !auto_load->as_bool().value_or(false)) {
 		return false;
@@ -354,7 +359,9 @@ bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, 
 	if (!settings) {
 		return true;
 	}
-	for (const EbxInstance &setting : p_db.follow_all(settings->data(), "Settings")) {
+	const std::vector<EbxInstance> list = p_db.follow_all(settings->data(), "Settings");
+	r_steps += list.size();
+	for (const EbxInstance &setting : list) {
 		const std::optional<EbxInstance> criterion = p_db.follow(setting.data(), "Criterion");
 		if (criterion) {
 			const std::optional<EbxValue> name = criterion->get("Name");
@@ -366,6 +373,7 @@ bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, 
 		bool enabled = false;
 		const std::optional<EbxValue> options = setting.get("EnabledOptions");
 		if (const OptionalEbxArray array = options ? options->as_array() : OptionalEbxArray()) {
+			r_steps += array->size();
 			for (const EbxValue option : *array) {
 				const std::optional<std::string_view> text = option.as_str();
 				if (text && iequals_ascii(*text, p_mode)) {
@@ -425,6 +433,15 @@ private:
 		return Status::success();
 	}
 
+	// Records a sub-world bundle name in a stats list. A list keeps at most kMaxListedSubworlds
+	// names (later ones are dropped), so a reference reached through a fan-out cannot grow it
+	// without bound.
+	static void note(std::vector<std::string> &r_list, std::string_view p_name) {
+		if (r_list.size() < LogicWorldStats::kMaxListedSubworlds) {
+			r_list.emplace_back(p_name);
+		}
+	}
+
 	// Whether p_blueprint is a container on the current walk path (a reference cycle).
 	bool on_path(const EbxInstance &p_blueprint) {
 		const InstanceKey key = InstanceKey::of(p_blueprint);
@@ -437,9 +454,11 @@ private:
 
 	Status visit_objects(const EbxInstance &p_container, uint32_t p_scope, uint32_t p_depth) {
 		const bool root = p_scope == 0;
-		const std::vector<EbxInstance> list = objects(p_container);
-		BF3_TRY(step(list.size()));
-		for (const EbxInstance &object : list) {
+		Result<std::vector<EbxInstance>> list = objects(p_container);
+		if (!list) {
+			return list.error();
+		}
+		for (const EbxInstance &object : *list) {
 			if (object.is_a("WorldPartReferenceObjectData")) {
 				Result<bool> skip = excluded(p_scope, object);
 				if (!skip) {
@@ -474,13 +493,17 @@ private:
 		return Status::success();
 	}
 
-	std::vector<EbxInstance> objects(const EbxInstance &p_container) {
+	// The resolved Objects of a container. Every array entry is charged to the walk budget before
+	// any is examined, null and unresolvable ones included: each costs a resolve, and a part reached
+	// through a fan-out re-scans its whole array on every visit.
+	Result<std::vector<EbxInstance>> objects(const EbxInstance &p_container) {
 		std::vector<EbxInstance> out;
 		const std::optional<EbxValue> value = p_container.get("Objects");
 		const OptionalEbxArray array = value ? value->as_array() : OptionalEbxArray();
 		if (!array) {
 			return out;
 		}
+		BF3_TRY(step(array->size()));
 		out.reserve(array->size());
 		for (const EbxValue element : *array) {
 			const std::optional<EbxRef> r = element.as_ref();
@@ -498,9 +521,12 @@ private:
 
 	Status enter_subworld(const EbxInstance &p_reference, uint32_t p_scope, uint32_t p_depth) {
 		const std::optional<EbxValue> bundle = p_reference.get("BundleName");
-		const std::string name(bundle ? bundle->as_str().value_or(std::string_view()) : std::string_view());
-		if (!subworld_included(world_.db(), p_reference, options_.mode)) {
-			world_.stats_.skipped_subworlds.push_back(name);
+		const std::string_view name = bundle ? bundle->as_str().value_or(std::string_view()) : std::string_view();
+		size_t steps = 0;
+		const bool included = subworld_included(world_.db(), p_reference, options_.mode, steps);
+		BF3_TRY(step(steps));
+		if (!included) {
+			note(world_.stats_.skipped_subworlds, name);
 			return Status::success();
 		}
 		Result<bool> skip = excluded(p_scope, p_reference);
@@ -512,13 +538,13 @@ private:
 		}
 		const std::optional<EbxInstance> data = world_.referenced_blueprint(p_reference);
 		if (!data) {
-			world_.stats_.absent_subworlds.push_back(name);
+			note(world_.stats_.absent_subworlds, name);
 			return Status::success();
 		}
 		if (on_path(*data)) {
 			return Status::success();
 		}
-		world_.stats_.subworlds.push_back(name);
+		note(world_.stats_.subworlds, name);
 		Result<uint32_t> child = push(*data, p_reference, p_scope);
 		if (!child) {
 			return child.error();
@@ -575,6 +601,11 @@ private:
 		size_t steps = 0;
 		const std::optional<PropertyValue> v = world_.property_counted(p_scope, p_reference, field_id("Excluded"), steps);
 		BF3_TRY(step(steps));
+		// With the query budget spent the connected value is unknown; the stored field below could
+		// then be wrong, so the walk fails instead.
+		if (world_.query_budget_spent()) {
+			return make_error("logic world: query budget of " + std::to_string(world_.max_query_steps_) + " steps spent during the walk");
+		}
 		if (v && v->as_bool()) {
 			value = *v->as_bool();
 		} else if (const std::optional<EbxValue> stored = p_reference.get("Excluded")) {

@@ -320,6 +320,50 @@ TEST_SUITE("gameplay_unit") {
 		CHECK(fine->stats().cycles == 0);
 	}
 
+	TEST_CASE("gameplay: LogicWorld walk budget counts null Objects entries") {
+		// One part whose Objects hold 120000 null refs: they yield no object but are scanned, so they
+		// must be charged to the budget. (The EBX parser already rejects internal refs to no
+		// instance, so unresolvable entries only come from imports and take the same path.)
+		std::vector<SynthNode> nodes(1);
+		for (uint32_t k = 0; k < 120000; ++k) {
+			nodes[0].objects.push_back(0xFFFFFFFFu); // written as 0: a null ref
+		}
+		EbxDb db;
+		const EbxPartition &p = insert_graph(db, nodes);
+		Result<LogicWorld> whole = LogicWorld::build(db, p.primary(), {});
+		REQUIRE(whole.ok());
+		CHECK(whole->stats().walk_steps == 1 + 120000);
+		LogicWorldOptions options;
+		options.max_walk_steps = 100000;
+		Result<LogicWorld> world = LogicWorld::build(db, p.primary(), options);
+		REQUIRE_FALSE(world.ok());
+		CHECK(world.error().message.find("walk exceeds 100000 steps") != std::string::npos);
+
+		// The same leaf at the end of a fan-out (2^21 leaf visits) ends with the default budget
+		// after a few leaf scans instead of re-scanning the array on every visit.
+		std::vector<SynthNode> fan = fan_chain(22, 2);
+		for (uint32_t k = 0; k < 100000; ++k) {
+			fan[21].objects.push_back(0xFFFFFFFFu);
+		}
+		EbxDb fan_db;
+		const EbxPartition &f = insert_graph(fan_db, fan);
+		Result<LogicWorld> fanned = LogicWorld::build(fan_db, f.primary(), {});
+		REQUIRE_FALSE(fanned.ok());
+		CHECK(fanned.error().message.find("walk exceeds 2000000 steps") != std::string::npos);
+	}
+
+	TEST_CASE("gameplay: LogicWorld walk fails when the query budget runs out") {
+		// Every reference is an Excluded query of at least one resolver step; with a query budget of
+		// 1 the walk must fail rather than fall back to the stored Excluded field.
+		EbxDb db;
+		const EbxPartition &p = insert_graph(db, fan_chain(4, 2));
+		LogicWorldOptions options;
+		options.max_query_steps = 1;
+		Result<LogicWorld> world = LogicWorld::build(db, p.primary(), options);
+		REQUIRE_FALSE(world.ok());
+		CHECK(world.error().message.find("query budget") != std::string::npos);
+	}
+
 	TEST_CASE("gameplay: LogicWorld depth limit on a long world-part chain") {
 		EbxDb db;
 		const EbxPartition &p = insert_graph(db, fan_chain(80, 1));

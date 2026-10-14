@@ -78,7 +78,8 @@ struct KitDef {
 
 	const KitSlot *slot(WeaponSlot p_slot) const;
 	// The first ungated, non-variant unlock of a slot (see the header comment); nullptr when the slot
-	// has none (assault gadget 1: every launcher is unlocked by score) or progression is unknown.
+	// has none (assault gadget 1: every launcher is unlocked by score) or progression is unknown. A
+	// slot can list unlocks and still have no default, so a loadout UI must start such a slot empty.
 	const KitUnlock *default_unlock(WeaponSlot p_slot) const;
 };
 

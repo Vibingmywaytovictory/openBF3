@@ -44,6 +44,10 @@ constexpr ModeAlias kModeAliases[] = {
 	{ "AS", "AirSuperiority0" },
 };
 
+// Interface constants a mode may list in all (retail modes list under 100). Every Fields entry
+// read becomes one, so the cap also bounds the scan when sub-world scopes repeat a large array.
+constexpr size_t kMaxInterfaceConstants = 65536;
+
 // Interface field names worth printing by name (their ids are ebx_name_hash of the name).
 constexpr const char *kKnownInterfaceNames[] = {
 	"InitialTicketCount",
@@ -450,6 +454,9 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		const OptionalEbxArray array = fields ? fields->as_array() : OptionalEbxArray();
 		if (!array) {
 			continue;
+		}
+		if (array->size() > kMaxInterfaceConstants - out.interface_constants.size()) {
+			return make_error("mode: level " + id + " lists more than " + std::to_string(kMaxInterfaceConstants) + " interface constants");
 		}
 		for (const EbxValue field : *array) {
 			InterfaceConstantDef c;
