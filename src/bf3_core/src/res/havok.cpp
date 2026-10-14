@@ -18,6 +18,15 @@ namespace {
 constexpr uint8_t kMagic[8] = { 0x57, 0xE0, 0xE0, 0x57, 0x10, 0xC0, 0xC0, 0x10 };
 constexpr uint64_t kSectionHeaderBytes = 48;
 constexpr uint32_t kMaxShapeDepth = 64;
+// Shapes are a DAG in the file; a hostile one could make the depth-limited walk exponential. No
+// retail res comes near this (the largest static model group has ~25k nodes).
+constexpr uint64_t kMaxShapeNodes = uint64_t(1) << 22;
+
+// A pointer slot at p_base + p_stride * p_index can only be a field inside the data section; loops
+// that only look up fixups stop there instead of spinning through a hostile element count.
+bool slot_in_data(const Packfile &p_pack, uint32_t p_base, uint64_t p_stride, uint64_t p_index) {
+	return uint64_t(p_base) + p_stride * p_index < p_pack.data.size();
+}
 
 int32_t le_i32(const uint8_t *p) {
 	return int32_t(uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24));
@@ -39,6 +48,7 @@ public:
 
 	const Packfile &pack;
 	Reader r;
+	uint64_t nodes = 0;
 
 	bool ok() const { return r.ok(); }
 	ResError error() const { return r.error(); }
@@ -79,7 +89,7 @@ public:
 };
 
 ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
-	if (p_depth > kMaxShapeDepth) {
+	if (p_depth > kMaxShapeDepth || ++nodes > kMaxShapeNodes) {
 		return ResError::malformed("shape nesting", p_at);
 	}
 	const std::string *cls = pack.class_at(p_at);
@@ -326,17 +336,10 @@ ResError PackReader::extended_mesh(uint32_t p_at, bool p_storage, uint32_t p_dep
 		r_mesh.shape_subparts.push_back(std::move(out));
 	}
 
-	// Storage meshes per triangle subpart; a null slot carries no data.
-	std::vector<int64_t> storage;
-	if (p_storage) {
-		uint32_t storage_at = 0, storage_count = 0;
-		if (!array(p_at + 240, storage_at, storage_count)) {
-			return r.error();
-		}
-		for (uint32_t i = 0; i < storage_count; i++) {
-			uint32_t mesh = 0;
-			storage.push_back(pack.pointer(storage_at + 4 * i, mesh) ? int64_t(mesh) : -1);
-		}
+	// Storage meshes per triangle subpart (looked up per subpart); a null slot carries no data.
+	uint32_t storage_at = 0, storage_count = 0;
+	if (p_storage && !array(p_at + 240, storage_at, storage_count)) {
+		return r.error();
 	}
 	uint32_t triangles_at = 0, triangle_count = 0;
 	if (!array(p_at + 184, triangles_at, triangle_count)) {
@@ -356,8 +359,9 @@ ResError PackReader::extended_mesh(uint32_t p_at, bool p_storage, uint32_t p_dep
 		if (!r.ok()) {
 			return r.error();
 		}
-		if (i < storage.size() && storage[i] >= 0) {
-			const ResError e = fill_storage(subpart, uint32_t(storage[i]), out);
+		uint32_t mesh = 0;
+		if (i < storage_count && pack.pointer(storage_at + 4 * i, mesh)) {
+			const ResError e = fill_storage(subpart, mesh, out);
 			if (!e.ok()) {
 				return e;
 			}
@@ -654,7 +658,7 @@ ResError Packfile::root_shapes(std::vector<uint32_t> &r_roots) const {
 	}
 	bool found = false;
 	uint32_t container = 0;
-	for (uint32_t i = 0; i < count && !found; i++) {
+	for (uint32_t i = 0; i < count && !found && slot_in_data(*this, variants + 8, 12, i); i++) {
 		uint32_t object = 0;
 		if (pointer(variants + 12 * i + 8, object)) {
 			const std::string *cls = class_at(object);
@@ -829,7 +833,7 @@ ResError HavokPhysicsData::part_connections(std::vector<std::array<uint32_t, 2>>
 		r_some = r.ok();
 		return r.ok();
 	};
-	for (uint32_t entry = 0; entry < count; entry++) {
+	for (uint32_t entry = 0; entry < count && slot_in_data(packfile, entries + 52, 64, entry); entry++) {
 		const uint32_t at = entries + 64 * entry;
 		bool some_a = false, some_b = false;
 		uint32_t a = 0, b = 0;
@@ -891,7 +895,7 @@ ResError HavokPhysicsData::group_subparts(std::vector<SubpartTransform> &r_subpa
 				if (!e.ok()) {
 					return e;
 				}
-				for (uint32_t i = 0; i < count; i++) {
+				for (uint32_t i = 0; i < count && slot_in_data(packfile, data, 16, i); i++) {
 					uint32_t child = 0;
 					if (packfile.pointer(data + 16 * i, child)) {
 						next.push_back(child);

@@ -704,12 +704,20 @@ ResError MeshLod::decode_subset(Bytes p_geometry, size_t p_index, DecodedSubset 
 	return decode_indices(subset, index_region, index_format, r_out.indices);
 }
 
-const SkeletonBone *MeshLod::resolve_bone(size_t p_subset, uint16_t p_slot) const {
-	if (p_subset >= subsets.size() || p_slot >= subsets[p_subset].bone_slots.size()) {
-		return nullptr;
+int64_t MeshLod::skeleton_bone(size_t p_subset, uint16_t p_lane) const {
+	if (p_subset >= subsets.size() || p_lane >= subsets[p_subset].bone_slots.size()) {
+		return -1;
 	}
-	const uint16_t bone = subsets[p_subset].bone_slots[p_slot];
-	return bone < bones.size() ? &bones[bone] : nullptr;
+	return subsets[p_subset].bone_slots[p_lane];
+}
+
+const SkeletonBone *MeshLod::find_bone(uint32_t p_skeleton_index) const {
+	for (const SkeletonBone &bone : bones) {
+		if (bone.index == p_skeleton_index) {
+			return &bone;
+		}
+	}
+	return nullptr;
 }
 
 } // namespace bf3::core::res

@@ -5,12 +5,15 @@
 // relocTableSize, 0x00940070]. A LOD's geometry is `vertices || indices || pad to 16`, either in the
 // chunk named by MeshLod::geometry.chunk (all-zero id = inline) or inline in the res.
 //
-// Skinned meshes (M9 integration notes; facts measured on MP_Subway + XP2_Skybar, see README):
-// * MeshLod::bones is the LOD's skeleton table: bones[i].index = skeleton bone index,
-//   bones[i].name_hash = hash of the bone name; both u32 arrays at MeshLayout +0x98 / +0xA0.
-// * A vertex's BoneIndices lane is a *slot*: subset.bone_slots[slot] -> index into MeshLod::bones
-//   (resolve_bone()). bones_per_vertex is the number of meaningful lanes (UByte4 indices +
-//   UByte4N weights). Composite meshes reuse BoneIndices byte 0 as the part index instead.
+// Skinned meshes (M9 integration notes; measured on every skinned MeshSet of MP_Subway and
+// XP2_Skybar: 561 meshes, 1,679 LODs, see README "Resource decoders"):
+// * Vertex bone lane -> subset.bone_slots[lane] = *skeleton* bone index (skeleton_bone()); every
+//   weighted lane is < bone_slots.size() and every slot value appears in MeshLod::bones.
+// * MeshLod::bones is the LOD's table {skeleton index, name hash} (u32 arrays at MeshLayout +0x98
+//   and +0xA0); name_hash = hash_quick(lowercase(bone name)), e.g. "Wep_Root", "LeftHand".
+//   find_bone() maps a skeleton index to its entry.
+// * BoneIndices are UByte4, BoneWeights UByte4N (weights sum to 1); bones_per_vertex is 1, 2 or 4.
+//   Composite meshes reuse BoneIndices byte 0 as the part index instead.
 // * Skinning is not applied by the decoder: positions are the bind pose in mesh space.
 
 #include "bf3/core/res/res_math.h"
@@ -152,7 +155,7 @@ struct MeshSubset {
 	uint32_t vertex_count = 0;
 	uint8_t vertex_stride = 0; // authoritative (not the element sum)
 	uint8_t bones_per_vertex = 0;
-	// Skinned: vertex bone slot -> index into MeshLod::bones. Composite: the parts this subset draws.
+	// Skinned: vertex bone lane -> skeleton bone index. Composite: the parts this subset draws.
 	std::vector<uint16_t> bone_slots;
 	// Composite: bit p set when part p has geometry in this subset.
 	std::array<uint32_t, 6> part_mask{};
@@ -188,7 +191,7 @@ struct DecodedSubset {
 	std::optional<std::vector<std::array<uint8_t, 4>>> colors; // R, G, B, A bytes
 	std::optional<std::vector<uint16_t>> parts; // composite: the part of each vertex
 	// Skinned/composite bone channels as their decoded lanes (extension over IW4L, which leaves
-	// them undecoded): indices are slots (see header comment), weights normalized.
+	// them undecoded): indices index bone_slots (see header comment), weights normalized.
 	std::optional<std::vector<std::array<uint16_t, 4>>> bone_indices;
 	std::optional<std::vector<std::array<uint16_t, 4>>> bone_indices2;
 	std::optional<std::vector<Vec4>> bone_weights;
@@ -215,8 +218,10 @@ struct MeshLod {
 	// p_geometry: the decompressed chunk or inline_geometry().
 	ResError decode(Bytes p_geometry, SubsetFilter p_filter, std::vector<DecodedSubset> &r_out) const;
 	ResError decode_subset(Bytes p_geometry, size_t p_index, DecodedSubset &r_out) const;
-	// Skinned: skeleton bone of a vertex's slot lane in subset p_subset, or nullptr.
-	const SkeletonBone *resolve_bone(size_t p_subset, uint16_t p_slot) const;
+	// Skinned: skeleton bone index of bone lane value p_lane in subset p_subset, or -1.
+	int64_t skeleton_bone(size_t p_subset, uint16_t p_lane) const;
+	// The bone table entry of a skeleton bone index, or nullptr.
+	const SkeletonBone *find_bone(uint32_t p_skeleton_index) const;
 };
 
 struct MeshSet {

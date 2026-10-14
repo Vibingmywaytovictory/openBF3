@@ -2,7 +2,7 @@
 // bf3::core::res decoders. The same summary is printed by the Rust oracle (IW4L resource_bf3) over
 // the same files, so `diff` of the two outputs is the parity check (README "Resource decoders").
 //
-//   resdump [--time | --trunc] <data_dir> <tag>...
+//   resdump [--time | --trunc | --skin] <data_dir> <tag>...
 //
 // Input (written by the oracle's `export` from the user's install; never part of the repo):
 //   <data_dir>/<tag>/index.tsv          "<file>\t<name>\t<res type hex>" per res
@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <bit>
+#include <cctype>
+#include <cmath>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -802,6 +804,101 @@ void trunc_report(std::string &o, const Res &r) {
 	}
 }
 
+// Skinned-mesh facts for the M9 integration (--skin): per skinned MeshSet and LOD the bone table
+// size, the slot range the vertices use, bones per vertex, weight sums and which candidate bone
+// names hash to the table's name hashes (hash_quick, also over the lowercased name).
+const char *kBoneNames[] = { "Reference", "Hips", "Spine", "Spine1", "Spine2", "Spine3", "Neck", "Neck1", "Head", "HeadEnd",
+	"LeftShoulder", "LeftArm", "LeftArmRoll", "LeftForeArm", "LeftForeArmRoll", "LeftHand", "LeftHandThumb1", "LeftHandThumb2",
+	"LeftHandThumb3", "LeftHandIndex1", "LeftHandIndex2", "LeftHandIndex3", "LeftHandMiddle1", "LeftHandRing1", "LeftHandPinky1",
+	"RightShoulder", "RightArm", "RightArmRoll", "RightForeArm", "RightForeArmRoll", "RightHand", "RightHandThumb1",
+	"RightHandIndex1", "RightHandMiddle1", "RightHandRing1", "RightHandPinky1", "LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase",
+	"RightUpLeg", "RightLeg", "RightFoot", "RightToeBase", "Wep_Root", "Wep_Trigger", "Wep_Slide", "Wep_Mag", "Wep_Bolt",
+	"Wep_Hammer", "Wep_Grip", "Wep_Mag_Release", "Wep_Belt", "Wep_Scope", "Wep_Aim", "Wep_Barrel", "Wep_Extra1", "Wep_Bullet1",
+	"Camera", "CameraBase", "CameraJoint", "IK_Joint_LeftHand", "IK_Joint_RightHand", "Trajectory", "TrajectoryEnd", "AITrajectory",
+	"Wep_Muzzle", "Wep_Stock", "Wep_Charge", "Wep_Safety", "Wep_SlideStop", "Wep_Magazine", "Wep_Gizmo", "Wep_Root_Gizmo" };
+
+void skin_report(std::string &o, const Res &r) {
+	if (r.res_type != kResTypeMeshSet) {
+		return;
+	}
+	MeshSet mesh;
+	if (!MeshSet::parse(r.payload, r.meta, mesh).ok() || mesh.kind != MeshKind::Skinned) {
+		return;
+	}
+	o += fmt("skin %s lods=%zu\n", r.name.c_str(), mesh.lods.size());
+	for (size_t li = 0; li < mesh.lods.size(); li++) {
+		const MeshLod &lod = mesh.lods[li];
+		uint32_t max_skel = 0;
+		for (const SkeletonBone &b : lod.bones) {
+			max_skel = std::max(max_skel, b.index);
+		}
+		std::string named;
+		for (const SkeletonBone &b : lod.bones) {
+			for (const char *n : kBoneNames) {
+				std::string lower(n);
+				for (char &c : lower) {
+					c = char(std::tolower(uint8_t(c)));
+				}
+				if (hash_quick(n) == b.name_hash) {
+					named += fmt(" %u=%s", b.index, n);
+				} else if (hash_quick(lower) == b.name_hash) {
+					named += fmt(" %u=lc:%s", b.index, n);
+				}
+			}
+		}
+		size_t slot_not_in_table = 0, max_slot_value = 0, max_lane = 0, bad_slot = 0, weight_not_one = 0, vertices = 0;
+		std::string bpv, formats;
+		std::vector<uint8_t> chunk;
+		Bytes g;
+		bool have = lod.geometry.is_inline ? lod.inline_geometry(r.payload, g).ok() : load_chunk(lod.geometry.chunk, chunk);
+		if (!lod.geometry.is_inline && have) {
+			g = Bytes(chunk.data(), chunk.size());
+		}
+		for (size_t si = 0; si < lod.subsets.size(); si++) {
+			const MeshSubset &s = lod.subsets[si];
+			for (uint16_t v : s.bone_slots) {
+				max_slot_value = std::max<size_t>(max_slot_value, v);
+				bool in_table = false;
+				for (const SkeletonBone &b : lod.bones) {
+					in_table = in_table || b.index == v;
+				}
+				slot_not_in_table += in_table ? 0 : 1;
+			}
+			bpv += fmt("%s%u", si ? "," : "", unsigned(s.bones_per_vertex));
+			const VertexElement *bi = s.declaration.find(VertexUsage::BoneIndices);
+			const VertexElement *bw = s.declaration.find(VertexUsage::BoneWeights);
+			if (si == 0) {
+				formats = fmt("bi=%d bw=%d", bi ? int(bi->format) : -1, bw ? int(bw->format) : -1);
+			}
+			DecodedSubset d;
+			if (!have || !lod.decode_subset(g, si, d).ok() || !d.bone_indices) {
+				continue;
+			}
+			for (size_t v = 0; v < d.positions.size(); v++) {
+				vertices++;
+				float sum = 0.0f;
+				for (size_t k = 0; k < 4; k++) {
+					const float w = d.bone_weights ? (*d.bone_weights)[v][k] : (k == 0 ? 1.0f : 0.0f);
+					sum += w;
+					if (w > 0.0f) {
+						const uint16_t slot = (*d.bone_indices)[v][k];
+						max_lane = std::max<size_t>(max_lane, slot);
+						if (slot >= s.bone_slots.size()) {
+							bad_slot++;
+						}
+					}
+				}
+				if (std::abs(sum - 1.0f) > 0.01f) {
+					weight_not_one++;
+				}
+			}
+		}
+		o += fmt("  lod %zu bones=%zu max_skeleton_index=%u slots_max_value=%zu max_weighted_lane=%zu lane_beyond_slots=%zu slot_not_in_table=%zu verts=%zu weight_sum_off=%zu bpv=%s %s named:%s\n",
+				li, lod.bones.size(), max_skel, max_slot_value, max_lane, bad_slot, slot_not_in_table, vertices, weight_not_one, bpv.c_str(), formats.c_str(),
+				named.c_str());
+	}
+}
+
 const char *type_label(uint32_t p_type) {
 	switch (p_type) {
 		case kResTypeMeshSet:
@@ -821,15 +918,19 @@ int main(int argc, char **argv) {
 	int arg = 1;
 	bool time_pass = false;
 	bool trunc = false;
+	bool skin = false;
 	if (arg < argc && std::strcmp(argv[arg], "--time") == 0) {
 		time_pass = true;
 		arg++;
 	} else if (arg < argc && std::strcmp(argv[arg], "--trunc") == 0) {
 		trunc = true;
 		arg++;
+	} else if (arg < argc && std::strcmp(argv[arg], "--skin") == 0) {
+		skin = true;
+		arg++;
 	}
 	if (argc - arg < 2) {
-		std::fprintf(stderr, "usage: resdump [--time | --trunc] <data_dir> <tag>...\n");
+		std::fprintf(stderr, "usage: resdump [--time | --trunc | --skin] <data_dir> <tag>...\n");
 		return 2;
 	}
 	g_data = argv[arg++];
@@ -863,9 +964,13 @@ int main(int argc, char **argv) {
 				return 1;
 			}
 			all.emplace_back(tag, path);
-			if (trunc) {
+			if (trunc || skin) {
 				std::string o;
-				trunc_report(o, r);
+				if (trunc) {
+					trunc_report(o, r);
+				} else {
+					skin_report(o, r);
+				}
 				std::fwrite(o.data(), 1, o.size(), stdout);
 				continue;
 			}
