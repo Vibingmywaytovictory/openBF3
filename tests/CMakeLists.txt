@@ -104,3 +104,28 @@ if(OPENBF3_ASAN)
     set_tests_properties(core.ui.text.unit core.ui.text core.ui.text.fuzz
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_text_cl_dir}")
 endif()
+# WeaponDef block and weapon catalog shared by bf3dump and the in-game inspector (bf3_core gameplay/
+# weapon_format.h, weapon_catalog.h). core.gameplay.inspect.unit is synthetic; core.gameplay.inspect reads
+# MP_Subway and the text database from the install (exits 77 = skipped without one).
+openbf3_test(test_inspect test_main.cpp inspect_tests.cpp test_support.h)
+target_link_libraries(test_inspect PRIVATE bf3_core)
+add_test(NAME core.gameplay.inspect.unit COMMAND test_inspect --test-suite=inspect-unit)
+add_test(NAME core.gameplay.inspect COMMAND test_inspect --test-suite=inspect)
+set_tests_properties(core.gameplay.inspect PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.gameplay.inspect.unit core.gameplay.inspect PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_inspect_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.gameplay.inspect.unit core.gameplay.inspect
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_inspect_cl_dir}")
+endif()
+# The Godot project run headless (OPENBF3_GODOT = the console executable; exits 77 = skipped when unset):
+# godot.s0_selftest (S0 self-test) and godot.inspector (M0 exit: the inspector's M16A3/M16A4-burst check
+# against plan §7.1 and their localised names). Both use the project and its DLL, so they never run at once.
+# cmake_language(EXIT) needs CMake 3.29.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.s0_selftest COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DUSER_ARGS=--s0-selftest
+        "-DPASS_LINE=S0 SELFTEST: PASS" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_check.cmake)
+    add_test(NAME godot.inspector COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DUSER_ARGS=--m0-inspector-check
+        "-DPASS_LINE=M0 INSPECTOR CHECK: PASS" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_check.cmake)
+    set_tests_properties(godot.s0_selftest godot.inspector PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project)
+endif()

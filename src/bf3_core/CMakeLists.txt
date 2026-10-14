@@ -131,3 +131,12 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/text_db.h
     include/bf3/core/ui/text_census.h
 )
+
+# The WeaponDef text block and the weapon sources/catalog shared by bf3dump and the in-game inspector
+# (plan §6 M0 exit: the inspector prints the resolved M16A3/M16A4-burst WeaponDef and its localised name).
+target_sources(bf3_core PRIVATE
+    src/gameplay/weapon_format.cpp
+    src/gameplay/weapon_catalog.cpp
+    include/bf3/core/gameplay/weapon_format.h
+    include/bf3/core/gameplay/weapon_catalog.h
+)

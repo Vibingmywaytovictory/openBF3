@@ -74,6 +74,11 @@ set "GODOT=C:\path\to\Godot_v4.8-dev7_win64_console.exe"
 "%GODOT%" --path bf3-opensource [-- --quit-after=10 --screenshot=C:\temp\s0.png]
 :: dedicated server: no scene, no renderer
 "%GODOT%" --headless --path bf3-opensource --main-loop DedicatedMainLoop -- --dedicated-seconds=10
+:: weapon inspector (README "Weapon inspector and localisation"): F2 in game; the M0 exit check (PASS/FAIL, exit 0/1);
+:: one weapon's block on stdout
+"%GODOT%" --path bf3-opensource -- --inspector [--inspector-select=weapons/m16a4/u_m16_burst]
+"%GODOT%" --headless --path bf3-opensource -- --m0-inspector-check
+"%GODOT%" --headless --path bf3-opensource -- --inspect-weapon=weapons/m16a4/u_m16a4 [--unlock=u_m16a4_bipod]...
 ```
 
 Known issue: on a project that has never been opened, the first `--import` registers the extension and writes
@@ -408,6 +413,50 @@ the retail chunks to the parser. Both report *Skipped* (77) without an install.
 * Two corrections to the research table. First, the 24 SIDs that do not resolve have **no entry at all**: no entry
   holds `<MISSING>`, which was the research script's placeholder. Second, `ID_P_WNAME_M16` does exist and resolves to
   "M16A4".
+
+## Weapon inspector and localisation
+
+The M0 exit criterion "an in-game inspector prints the resolved M16A3/M16A4-burst WeaponDef matching §7.1 and its
+localised name" (plan §6), with the localisation of plan §2.5 / §3.8.
+
+* **One block for the tool and the game.** `bf3_core` `gameplay/weapon_format.h` holds the WeaponDef text block that
+  `bf3dump weapon` used to build itself (`format_weapon`, moved without changing a byte: the stdout and stderr of
+  `bf3dump weapon` for 14 cases, including a blueprint, attachments, a missile, a shotgun, a pistol, a UGL, delta and
+  base levels and an unknown partition, and of `bf3dump weapons` on MP_Subway and XP2_Palace, are identical before and
+  after). Given a text database it adds a `name` line after `name sid`: the SID's text, or the SID itself and
+  `(not in the text database)`. `bf3dump weapon <partition> --name` prints it (`ID_P_WNAME_M16A4` -> `M16A3`,
+  u_m16_burst's `ID_P_WNAME_M16` -> `M16A4`). `gameplay/weapon_catalog.h` holds the sources both use: the level's
+  `EbxLibrary` (default MP_Subway) plus Win32/UI, the level's material grid (MP_Subway's container as the fallback on
+  the delta levels) and the hit capsules; a blueprint resolves through its base variant. `WeaponCatalog` parses the
+  level once, lists its variants and resolves any of them thread-safely.
+* **Localisation.** `Bf3Localisation` (a node in `main.tscn`) locates the install like `GameSession`, opens it and
+  loads `localization/us_loc` on its own thread, then, on the main thread, registers a `Bf3Translation` (a
+  `Translation` whose `_get_message` looks the SID up in bf3_core's `TextDatabase`) for locale `en` with the
+  `TranslationServer`. `tr("ID_P_WNAME_M16A4")` returns "M16A3"; a message that is not a SID (`ID_[A-Z0-9_]*`) or
+  that the database does not resolve gets no answer from it, so `tr()` returns the SID itself (plan §2.1). Load time
+  on this machine: 0.07 s.
+* **Inspector.** `Bf3WeaponInspector` (a `CanvasLayer` in `main.tscn`) toggles with **F2**. On first use it builds a
+  `WeaponCatalog` on a worker thread from the install `Bf3Localisation` opened (MP_Subway: 12,524 partitions, 172
+  variants, all resolved, 0.15-0.4 s warm) and lists the M16A3 (`weapons/m16a4/m16a4`, through `u_m16a4`) and the
+  M16A4 burst (`weapons/m16a4/u_m16_burst`) first, then every variant by partition. Names in the list and the title go
+  through `tr()`; variants whose SID has no text (the M26 MASS underslung variants) show their SID. The right side
+  shows the block, the same text `bf3dump weapon --name` prints. User args: `--inspector` (show at start),
+  `--inspector-select=<partition>`, `--inspector-level=<superbundle>`, `--inspect-weapon=<partition>
+  [--unlock=<u_..>]...` (prints the block to stdout and quits, 1 on error; identical to `bf3dump weapon ... --name`
+  for the M16A4 with suppressor and bipod) and `--m0-inspector-check`.
+* **The check.** `--m0-inspector-check` resolves both weapons through the same worker path as the panel and compares
+  them with §7.1: 800 RPM / 75 ms, mag 31 x 5, reload 1.8/2.37, v0 650, 25 -> 18.4 over 8-50 m, g -15, hip 2.5-7
+  +0.1, ADS 0.2-3 +0.1, recoil 0.26 up, -0.4..0.1, decrease 18, FSRM 2.5, deploy 0.67; burst 3 @ 800, ADS min 0.1,
+  horizontal 0.075 left / 0.3 right; names "M16A3" / "M16A4" through `tr()` and in the block; `tr()` of an unknown
+  SID; 15,515 strings; every variant resolves; the install snapshot (sizes and mtimes of `layout.toc`, `cas.cat`
+  and every `.toc`/`.sb`) unchanged. It prints both blocks and one `M0 CHECK PASS|FAIL` line per item, then
+  `M0 INSPECTOR CHECK: PASS (54/54)`, and exits 0 or 1 (also 54/54 with `--inspector-level` XP2_Palace).
+
+Tests: `core.gameplay.inspect.unit` (the `name` line on a synthetic WeaponDef and text database, no install) and
+`core.gameplay.inspect` (WeaponCatalog over MP_Subway with the retail text database; 77 = skipped without an
+install). `godot.inspector` and `godot.s0_selftest` run the Godot project headless (`--m0-inspector-check`,
+`--s0-selftest`) through `tests/godot_check.cmake` when `OPENBF3_GODOT` names the console executable, and are
+skipped (77) otherwise; they share a resource lock, since both use the project and its DLL (CMake 3.29+).
 
 ## Layout and pinned third-party code
 

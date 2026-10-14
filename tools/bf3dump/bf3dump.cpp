@@ -30,9 +30,9 @@
 //                              decodes every value of every instance
 //   numcheck                   self-check of the probe's JSON number text (no install needed)
 // Weapons (bf3_core gameplay readers; README "Weapon tables"):
-//   weapon <partition> [--unlock <u_..>]... [--level <sb>]
+//   weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]
 //                              one resolved WeaponDef (a variant or a blueprint) with the level's
-//                              body multipliers for its projectile
+//                              body multipliers for its projectile; --name adds the localised name
 //   weapons [--level <sb>]     one TSV row per SoldierWeaponUnlockAsset under weapons/
 // Text database (text_commands.cpp): text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>
 //
@@ -469,7 +469,7 @@ void usage() {
 			"  dump <sb[,sb..]|@all-mp> <out_dir> <depth> <follow> <root>...\n"
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
 			"  numcheck\n"
-			"  weapon <partition> [--unlock <u_..>]... [--level <sb>]\n"
+			"  weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]\n"
 			"  weapons [--level <sb>]\n"
 			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n");
 }

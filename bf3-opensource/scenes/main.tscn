@@ -60,3 +60,7 @@ shape = SubResource("box_shape")
 mesh = SubResource("box_mesh")
 
 [node name="GameSession" type="GameSession" parent="."]
+
+[node name="Localisation" type="Bf3Localisation" parent="."]
+
+[node name="WeaponInspector" type="Bf3WeaponInspector" parent="."]

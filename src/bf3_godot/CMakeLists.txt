@@ -11,6 +11,15 @@ add_library(bf3_godot SHARED
     src/godot_util.cpp
     src/godot_util.h
 )
+# Localisation (Translation backed by bf3_core's TextDatabase) and the WeaponDef inspector (M0 exit).
+target_sources(bf3_godot PRIVATE
+    src/bf3_localisation.cpp
+    src/bf3_localisation.h
+    src/weapon_inspector.cpp
+    src/weapon_inspector.h
+    src/m0_inspector_check.cpp
+    src/m0_inspector_check.h
+)
 target_link_libraries(bf3_godot PRIVATE godot-cpp bf3_host bf3_core bf3_sim bf3_net)
 openbf3_module(bf3_godot)
 # No incremental linking: keeps the .ilk out of the project's bin/ and the DLL self-contained.
