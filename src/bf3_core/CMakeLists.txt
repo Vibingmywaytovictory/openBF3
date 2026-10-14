@@ -92,3 +92,20 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/res/dx_texture.h
     include/bf3/core/res/havok.h
 )
+
+# Gameplay table readers: WeaponDef resolver (variants, modifiers, gun sway, projectiles) and the
+# level material grid / soldier hit capsules (plan §3.2, topics/01). Reads through EbxResolver.
+target_sources(bf3_core PRIVATE
+    src/gameplay/ebx_fields.h
+    src/gameplay/ebx_fields.cpp
+    src/gameplay/weapon_readers.h
+    src/gameplay/weapon_def.cpp
+    src/gameplay/weapon_firing.cpp
+    src/gameplay/weapon_projectile.cpp
+    src/gameplay/weapon_sway.cpp
+    src/gameplay/weapon_resolver.cpp
+    src/gameplay/material_grid.cpp
+    include/bf3/core/gameplay/weapon_def.h
+    include/bf3/core/gameplay/weapon_resolver.h
+    include/bf3/core/gameplay/material_grid.h
+)
