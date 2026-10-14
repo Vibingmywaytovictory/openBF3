@@ -7,7 +7,11 @@
 #include "gameplay_read.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace bf3::core::gameplay {
 
@@ -149,6 +153,17 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 		return;
 	}
 	const LogicConnections &set = p_world.connections(p_scope);
+	// Event connections by source, so each step below only looks at one entity's outputs.
+	std::unordered_map<InstanceKey, std::vector<uint32_t>, InstanceKeyHash> events_from;
+	for (uint32_t i = 0; i < set.event.size(); ++i) {
+		events_from[InstanceKey::of(set.event[i].source)].push_back(i);
+	}
+	const auto from = [&](const EbxInstance &p_source) -> const std::vector<uint32_t> & {
+		static const std::vector<uint32_t> none;
+		const auto it = events_from.find(InstanceKey::of(p_source));
+		return it == events_from.end() ? none : it->second;
+	};
+	std::array<std::unordered_map<InstanceKey, std::optional<double>, InstanceKeyHash>, 2> fuse_after; // by SyncedBool value
 	const int32_t in = field_id("In");
 	for (const LogicConnection &feed : set.property) {
 		if (feed.source != *descriptor || feed.target_field != in || !feed.target.is_a("SyncedBoolEntityData")) {
@@ -161,28 +176,48 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 		} else if (const std::optional<EbxValue> stored = synced.get("In")) {
 			value = stored->as_bool().value_or(false);
 		}
+		// Several feeds may drive the same SyncedBool: each (SyncedBool, value) is followed once.
+		const auto [memo, added] = fuse_after[value ? 1 : 0].emplace(InstanceKey::of(synced), std::nullopt);
+		if (!added) {
+			if (memo->second) {
+				r_mcom.fuse = memo->second;
+				r_mcom.long_fuse_switch = value;
+				return;
+			}
+			continue;
+		}
 		const int32_t fired = value ? field_id("OnTrue") : field_id("OnFalse");
-		std::optional<double> fuse;
-		for (const LogicConnection &edge : set.event) {
-			if (edge.source != synced || !edge.target.is_a("EventGateEntityData")) {
+		// The gates the SyncedBool drives, in first-seen order, with their state after it fires:
+		// Default, then its Open/Close inputs from the fired output in connection order.
+		std::vector<EbxInstance> gates;
+		std::unordered_map<InstanceKey, bool, InstanceKeyHash> gate_open;
+		for (const uint32_t edge_at : from(synced)) {
+			const LogicConnection &edge = set.event[edge_at];
+			if (!edge.target.is_a("EventGateEntityData")) {
 				continue;
 			}
-			const EbxInstance gate = edge.target;
-			bool open = gate.get("Default") ? gate.get("Default")->as_bool().value_or(false) : false;
-			for (const LogicConnection &e : set.event) {
-				if (e.source == synced && e.target == gate && e.source_field == fired) {
-					if (e.target_field == field_id("Open")) {
-						open = true;
-					} else if (e.target_field == field_id("Close")) {
-						open = false;
-					}
+			const EbxInstance &gate = edge.target;
+			auto [it, first] = gate_open.emplace(InstanceKey::of(gate), false);
+			if (first) {
+				it->second = gate.get("Default") ? gate.get("Default")->as_bool().value_or(false) : false;
+				gates.push_back(gate);
+			}
+			if (edge.source_field == fired) {
+				if (edge.target_field == field_id("Open")) {
+					it->second = true;
+				} else if (edge.target_field == field_id("Close")) {
+					it->second = false;
 				}
 			}
-			if (!open) {
+		}
+		std::optional<double> fuse;
+		for (const EbxInstance &gate : gates) {
+			if (!gate_open[InstanceKey::of(gate)]) {
 				continue;
 			}
-			for (const LogicConnection &out : set.event) {
-				if (out.source == gate && out.source_field == field_id("Out") && out.target.is_a("DelayTriggerEntityData") &&
+			for (const uint32_t out_at : from(gate)) {
+				const LogicConnection &out = set.event[out_at];
+				if (out.source_field == field_id("Out") && out.target.is_a("DelayTriggerEntityData") &&
 						out.target_field == field_id("Trigger")) {
 					if (const std::optional<double> delay = eff_opt(p_world, p_scope, out.target, "Delay")) {
 						fuse = delay;
@@ -194,6 +229,7 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 				break;
 			}
 		}
+		memo->second = fuse;
 		if (fuse) {
 			r_mcom.fuse = fuse;
 			r_mcom.long_fuse_switch = value;
@@ -398,6 +434,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	}
 	out.scopes = world.scopes().size();
 	out.objects = world.objects().size();
+	out.walk_steps = world.stats().walk_steps;
 	for (uint32_t s = 0; s < world.scopes().size(); ++s) {
 		out.unresolved_connections += world.connections(s).unresolved;
 	}
@@ -431,8 +468,10 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		}
 	}
 
-	// MCOM crates: the scopes that hold IET_RushCrate* interactions, in scope order.
-	std::vector<uint32_t> crate_scopes;
+	// MCOM crates: the scopes that hold IET_RushCrate* interactions, in first-seen order, with the
+	// interactions of each (collected here so the crates need no second pass over every object).
+	std::vector<std::pair<uint32_t, std::vector<const LogicObject *>>> crates;
+	std::unordered_map<uint32_t, size_t> crate_at;
 	for (const LogicObject &object : world.objects()) {
 		const EbxInstance &e = object.entity;
 		const std::string prefab = scope_prefab(world, object.scope);
@@ -506,9 +545,11 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		} else if (e.is_a("GameInteractionEntityData")) {
 			const std::string type = eff_enum(world, object, "InteractionEntityType");
 			if (type == "IET_RushCrateArm" || type == "IET_RushCrateDisarm") {
-				if (std::find(crate_scopes.begin(), crate_scopes.end(), object.scope) == crate_scopes.end()) {
-					crate_scopes.push_back(object.scope);
+				const auto [it, added] = crate_at.emplace(object.scope, crates.size());
+				if (added) {
+					crates.push_back({ object.scope, {} });
 				}
+				crates[it->second].second.push_back(&object);
 			}
 		} else if (e.is_a("VehicleSpawnReferenceObjectData")) {
 			VehicleSpawnDef v;
@@ -520,13 +561,11 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 			out.vehicle_spawns.push_back(std::move(v));
 		}
 	}
-	for (const uint32_t scope : crate_scopes) {
+	for (const auto &[scope, interactions] : crates) {
 		McomDef m;
 		m.prefab = scope_prefab(world, scope);
-		for (const LogicObject &object : world.objects()) {
-			if (object.scope != scope || !object.entity.is_a("GameInteractionEntityData")) {
-				continue;
-			}
+		for (const LogicObject *crate_object : interactions) {
+			const LogicObject &object = *crate_object;
 			const std::string type = eff_enum(world, object, "InteractionEntityType");
 			const std::optional<PropertyValue> hold = world.effective(object, "HoldToInteractTime");
 			const std::optional<double> time = hold ? hold->as_f64() : std::nullopt;
@@ -540,6 +579,10 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		}
 		read_fuse(world, scope, m);
 		out.mcoms.push_back(std::move(m));
+	}
+	out.query_steps = world.query_steps();
+	if (world.query_budget_spent()) {
+		return make_error("mode " + id + " " + mode + ": property queries exceed " + std::to_string(options.max_query_steps) + " resolver steps");
 	}
 	// Data order follows the blueprint walk; present per-team lists by team number (stable).
 	const auto by_team = [](const auto &p_a, const auto &p_b) { return p_a.team < p_b.team; };

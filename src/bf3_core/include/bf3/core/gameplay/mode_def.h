@@ -137,6 +137,8 @@ struct ModeDef {
 	std::vector<InterfaceConstantDef> interface_constants;
 	size_t scopes = 0;
 	size_t objects = 0;
+	size_t walk_steps = 0; // LogicWorld walk work (LogicWorldOptions::max_walk_steps bounds it)
+	size_t query_steps = 0; // resolver steps of every property query (max_query_steps bounds it)
 	size_t unresolved_connections = 0;
 
 	const TicketCounterDef *tickets(int p_team) const;

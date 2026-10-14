@@ -152,6 +152,13 @@ struct LogicWorldOptions {
 	uint32_t max_depth = 48;
 	size_t max_scopes = 200000;
 	size_t max_objects = 4000000;
+	// Work the whole walk may do: one step per container visited and per Objects entry examined,
+	// plus the resolver steps of every Excluded query. World parts push no scope or object, so
+	// without this a fan-out of nested world parts would run k^max_depth visits.
+	size_t max_walk_steps = 2000000; // retail levels need at most ~7k (MP_Subway Rush)
+	// Resolver steps all queries on the built world may take together (each one is also capped at
+	// kQuerySteps). Once spent, queries return nullopt and query_budget_spent() is true.
+	size_t max_query_steps = 2000000; // a retail mode read needs < 4k (fields scanned included)
 };
 
 struct LogicWorldStats {
@@ -159,6 +166,8 @@ struct LogicWorldStats {
 	size_t unresolved_objects = 0; // Objects entries that do not resolve
 	size_t missing_blueprints = 0;
 	size_t depth_limited = 0;
+	size_t cycles = 0; // references to a blueprint already being walked (skipped)
+	size_t walk_steps = 0; // against LogicWorldOptions::max_walk_steps
 	std::vector<std::string> subworlds; // included sub-world bundle names, in visit order
 	std::vector<std::string> skipped_subworlds; // sub-worlds the mode does not include
 	std::vector<std::string> absent_subworlds; // included but not in the resolver
@@ -182,7 +191,8 @@ public:
 	std::string_view scope_name(uint32_t p_scope) const;
 
 	// The value a PropertyConnection of p_scope feeds into p_field of p_target, an object of that
-	// scope. Not thread-safe (it caches connection sets of prefabs it passes through).
+	// scope. Not thread-safe (it caches connection sets of prefabs it passes through): every query
+	// method may modify that cache, so a LogicWorld must not be shared between threads.
 	std::optional<PropertyValue> property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const;
 	// Interface field p_field of the scope's blueprint for this instance: what the parent connects
 	// into the instantiating reference, else the descriptor's constant.
@@ -196,6 +206,11 @@ public:
 	// SubWorldData by bundle).
 	std::optional<EbxInstance> referenced_blueprint(const EbxInstance &p_reference) const;
 
+	// Resolver steps the queries have taken so far, and whether LogicWorldOptions::max_query_steps
+	// ran out (later answers are then missing, so callers should report an error).
+	size_t query_steps() const { return query_steps_; }
+	bool query_budget_spent() const { return query_steps_ >= max_query_steps_; }
+
 	// Resolver steps a single query may take before it gives up (bounds hostile graphs).
 	static constexpr uint32_t kResolveDepth = 32;
 	static constexpr size_t kQuerySteps = 200000;
@@ -205,6 +220,8 @@ private:
 	LogicWorld() = default;
 
 	uint32_t connection_set(const EbxInstance &p_blueprint) const;
+	// property() that adds the resolver steps it took to r_steps (the walker's budget).
+	std::optional<PropertyValue> property_counted(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field, size_t &r_steps) const;
 	std::optional<PropertyValue> property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth, size_t &r_steps) const;
 	std::optional<PropertyValue> source_value(const Frame &p_frame, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth, size_t &r_steps) const;
 	std::optional<PropertyValue> interface_in(const Frame &p_frame, int32_t p_field, uint32_t p_depth, size_t &r_steps) const;
@@ -213,6 +230,8 @@ private:
 	std::vector<LogicScope> scopes_;
 	std::vector<LogicObject> objects_;
 	LogicWorldStats stats_;
+	size_t max_query_steps_ = 0;
+	mutable size_t query_steps_ = 0;
 	mutable std::deque<LogicConnections> sets_; // deque: references stay valid while prefabs are added
 	mutable std::unordered_map<InstanceKey, uint32_t, InstanceKeyHash> set_by_blueprint_;
 

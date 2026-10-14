@@ -4,6 +4,7 @@
 // "gameplay" suite skips (exit 77).
 #include <doctest/doctest.h>
 
+#include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/gameplay/logic_world.h"
@@ -15,6 +16,8 @@
 #include "test_support.h"
 
 #include <cstddef>
+#include <cstring>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -104,9 +107,249 @@ void check_mbt_health(const VehicleDef &p_v) {
 	CHECK(p_v.seats[1].seat_type == "EST_Gunner");
 }
 
+// A synthetic world-part graph as an EBX partition (no install needed), for hostile LogicWorld
+// inputs. Node i is instance i: a WorldPartData whose Objects are the listed instances, or a
+// WorldPartReferenceObjectData whose Blueprint is instance `target`. Instance 0 is the primary.
+//   DataContainer (class, 8); WorldPartData : DataContainer (16): Objects array@8;
+//   WorldPartReferenceObjectData : DataContainer (16): Blueprint Class@8; array (member Class)
+struct SynthNode {
+	bool part = true;
+	std::vector<uint32_t> objects; // part: instance indices
+	uint32_t target = 0; // reference: instance index
+};
+
+void put32(std::vector<uint8_t> &r_out, size_t p_at, uint32_t p_value) {
+	std::memcpy(r_out.data() + p_at, &p_value, 4);
+}
+
+Guid synth_guid(uint32_t p_n) {
+	Guid g{};
+	std::memcpy(g.bytes.data(), &p_n, 4);
+	g.bytes[15] = 0x5a;
+	return g;
+}
+
+std::vector<uint8_t> build_world_graph(const std::vector<SynthNode> &p_nodes) {
+	const char *names[] = { "DataContainer", "$", "WorldPartData", "Objects", "WorldPartReferenceObjectData", "Blueprint", "array", "member" };
+	std::string name_table;
+	for (const char *n : names) {
+		name_table += n;
+		name_table += '\0';
+	}
+	struct F {
+		const char *name;
+		uint8_t code;
+		uint16_t ref;
+		uint32_t offset;
+	};
+	const F fields[] = {
+		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartData (0, 1)
+		{ "Objects", ebx_code::kArray, 3, 8 },
+		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartReferenceObjectData (2, 3)
+		{ "Blueprint", ebx_code::kClass, 0, 8 },
+		{ "member", ebx_code::kClass, 0, 0 }, // array (4)
+	};
+	struct C {
+		const char *name;
+		uint32_t field_start;
+		uint8_t count;
+		uint8_t code;
+		uint16_t size;
+	};
+	const C complexes[] = {
+		{ "DataContainer", 0, 0, ebx_code::kClass, 8 },
+		{ "WorldPartData", 0, 2, ebx_code::kClass, 16 },
+		{ "WorldPartReferenceObjectData", 2, 2, ebx_code::kClass, 16 },
+		{ "array", 4, 1, ebx_code::kArray, 4 },
+	};
+	const auto align16 = [](size_t p_at) { return (p_at + 15) & ~size_t(15); };
+	size_t part_count = 0, array_bytes = 0;
+	for (const SynthNode &n : p_nodes) {
+		if (n.part) {
+			++part_count;
+			array_bytes += 4 + n.objects.size() * 4;
+		}
+	}
+	const size_t names_at = 80;
+	const size_t fields_at = names_at + name_table.size();
+	const size_t complexes_at = align16(fields_at + std::size(fields) * 16);
+	const size_t instance_repeaters_at = complexes_at + std::size(complexes) * 16;
+	const size_t array_repeaters_at = align16(instance_repeaters_at + p_nodes.size() * 12);
+	const size_t meta_size = align16(array_repeaters_at + part_count * 12);
+	const size_t instances_at = meta_size; // no strings
+	const size_t instance_payload = p_nodes.size() * (16 + 16);
+	const size_t arrays_at = instances_at + instance_payload;
+	const size_t total = arrays_at + array_bytes;
+
+	std::vector<uint8_t> b(total, 0);
+	put32(b, 0x00, 0x0FB2D1CE);
+	put32(b, 0x04, static_cast<uint32_t>(meta_size));
+	put32(b, 0x08, static_cast<uint32_t>(total - meta_size));
+	put32(b, 0x14, static_cast<uint32_t>(p_nodes.size()));
+	put32(b, 0x18, static_cast<uint32_t>(std::size(complexes)));
+	put32(b, 0x1C, static_cast<uint32_t>(std::size(fields)));
+	put32(b, 0x20, static_cast<uint32_t>(name_table.size()));
+	put32(b, 0x28, static_cast<uint32_t>(part_count));
+	put32(b, 0x2C, static_cast<uint32_t>(instance_payload));
+	const Guid partition = synth_guid(0xFFFFFFFFu);
+	const Guid primary = synth_guid(0);
+	std::memcpy(b.data() + 0x30, partition.bytes.data(), 16);
+	std::memcpy(b.data() + 0x40, primary.bytes.data(), 16);
+	std::memcpy(b.data() + names_at, name_table.data(), name_table.size());
+	for (size_t i = 0; i < std::size(fields); ++i) {
+		const size_t at = fields_at + i * 16;
+		put32(b, at, ebx_name_hash(fields[i].name));
+		const uint16_t flags = static_cast<uint16_t>(fields[i].code << 4);
+		std::memcpy(b.data() + at + 4, &flags, 2);
+		std::memcpy(b.data() + at + 6, &fields[i].ref, 2);
+		put32(b, at + 8, fields[i].offset);
+	}
+	for (size_t i = 0; i < std::size(complexes); ++i) {
+		const size_t at = complexes_at + i * 16;
+		put32(b, at, ebx_name_hash(complexes[i].name));
+		put32(b, at + 4, complexes[i].field_start);
+		b[at + 8] = complexes[i].count;
+		b[at + 9] = 4;
+		const uint16_t flags = static_cast<uint16_t>(complexes[i].code << 4);
+		std::memcpy(b.data() + at + 10, &flags, 2);
+		std::memcpy(b.data() + at + 12, &complexes[i].size, 2);
+	}
+	size_t array_index = 0, array_at = 0;
+	for (size_t i = 0; i < p_nodes.size(); ++i) {
+		const SynthNode &n = p_nodes[i];
+		// One repeater per instance: {internal 0, count 1, complex}.
+		put32(b, instance_repeaters_at + i * 12 + 4, 1);
+		put32(b, instance_repeaters_at + i * 12 + 8, n.part ? 1 : 2);
+		const size_t at = instances_at + i * 32;
+		const Guid g = synth_guid(static_cast<uint32_t>(i));
+		std::memcpy(b.data() + at, g.bytes.data(), 16);
+		const size_t data = at + 16;
+		if (!n.part) {
+			put32(b, data + 8, n.target + 1); // internal reference
+			continue;
+		}
+		put32(b, data + 8, static_cast<uint32_t>(array_index));
+		const size_t rep = array_repeaters_at + array_index * 12;
+		put32(b, rep, static_cast<uint32_t>(array_at + 4)); // elements after the stored count
+		put32(b, rep + 4, static_cast<uint32_t>(n.objects.size()));
+		put32(b, rep + 8, 3);
+		put32(b, arrays_at + array_at, static_cast<uint32_t>(n.objects.size()));
+		for (size_t k = 0; k < n.objects.size(); ++k) {
+			put32(b, arrays_at + array_at + 4 + k * 4, n.objects[k] + 1);
+		}
+		array_at += 4 + n.objects.size() * 4;
+		++array_index;
+	}
+	return b;
+}
+
+// A chain of p_parts world parts, each holding p_fan references to the next one.
+std::vector<SynthNode> fan_chain(uint32_t p_parts, uint32_t p_fan) {
+	std::vector<SynthNode> nodes(p_parts);
+	for (uint32_t i = 0; i + 1 < p_parts; ++i) {
+		for (uint32_t k = 0; k < p_fan; ++k) {
+			SynthNode r;
+			r.part = false;
+			r.target = i + 1;
+			nodes[i].objects.push_back(static_cast<uint32_t>(nodes.size()));
+			nodes.push_back(r);
+		}
+	}
+	return nodes;
+}
+
+const EbxPartition &insert_graph(EbxDb &r_db, const std::vector<SynthNode> &p_nodes) {
+	Result<bool> inserted = r_db.parse_insert("levels/synthetic/graph", build_world_graph(p_nodes));
+	REQUIRE_MESSAGE(inserted.ok(), (inserted.ok() ? std::string() : inserted.error().message));
+	const EbxPartition *p = r_db.partition_by_name("levels/synthetic/graph");
+	REQUIRE(p != nullptr);
+	return *p;
+}
+
 } // namespace
 
 TEST_SUITE("gameplay_unit") {
+	TEST_CASE("gameplay: LogicWorld skips world parts that contain themselves") {
+		// Part 0 holds two references back to itself; part 1 <-> part 2 reference each other.
+		std::vector<SynthNode> nodes(3);
+		for (const uint32_t target : { 0u, 0u, 2u }) {
+			SynthNode r;
+			r.part = false;
+			r.target = target;
+			nodes[target == 2 ? 1 : 0].objects.push_back(static_cast<uint32_t>(nodes.size()));
+			nodes.push_back(r);
+		}
+		{
+			SynthNode back;
+			back.part = false;
+			back.target = 1;
+			nodes[2].objects.push_back(static_cast<uint32_t>(nodes.size()));
+			nodes.push_back(back);
+			SynthNode into;
+			into.part = false;
+			into.target = 1;
+			nodes[0].objects.push_back(static_cast<uint32_t>(nodes.size()));
+			nodes.push_back(into);
+		}
+		EbxDb db;
+		const EbxPartition &p = insert_graph(db, nodes);
+		Result<LogicWorld> world = LogicWorld::build(db, p.primary(), {});
+		REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
+		CHECK(world->stats().cycles == 3); // 0 -> 0 twice, 0 -> 1 -> 2 -> 1 once
+		CHECK(world->stats().depth_limited == 0);
+		CHECK(world->stats().walk_steps < 100);
+	}
+
+	TEST_CASE("gameplay: LogicWorld walk budget stops a nested world-part fan-out") {
+		// 40 distinct parts, each referencing the next twice: 2^39 visits without a budget.
+		EbxDb db;
+		const EbxPartition &p = insert_graph(db, fan_chain(40, 2));
+		LogicWorldOptions options;
+		options.max_walk_steps = 100000;
+		Result<LogicWorld> world = LogicWorld::build(db, p.primary(), options);
+		REQUIRE_FALSE(world.ok());
+		CHECK(world.error().message.find("walk exceeds 100000 steps") != std::string::npos);
+		// The default budget also ends it with an error (in about two million steps).
+		Result<LogicWorld> by_default = LogicWorld::build(db, p.primary(), {});
+		CHECK_FALSE(by_default.ok());
+		// A short fan-out stays inside the budget and completes.
+		EbxDb small_db;
+		const EbxPartition &small = insert_graph(small_db, fan_chain(6, 2));
+		Result<LogicWorld> fine = LogicWorld::build(small_db, small.primary(), {});
+		REQUIRE(fine.ok());
+		CHECK(fine->stats().cycles == 0);
+	}
+
+	TEST_CASE("gameplay: LogicWorld depth limit on a long world-part chain") {
+		EbxDb db;
+		const EbxPartition &p = insert_graph(db, fan_chain(80, 1));
+		Result<LogicWorld> world = LogicWorld::build(db, p.primary(), {});
+		REQUIRE(world.ok());
+		CHECK(world->stats().depth_limited == 1);
+	}
+
+	TEST_CASE("gameplay: kit default skips gated and variant unlocks") {
+		KitDef kit;
+		kit.weapon_slots.resize(kWeaponSlotCount);
+		KitSlot &knife = kit.weapon_slots[static_cast<size_t>(WeaponSlot::Knife)];
+		KitUnlock razor{ "weapons/xp2_knife_razorblade/u_knife_razor", "SoldierWeaponUnlockAsset", "weapons/xp2_knife_razorblade/knife_razorblade",
+			UnlockGate::Licence, false };
+		KitUnlock stock{ "weapons/knife/u_knife", "SoldierWeaponUnlockAsset", "weapons/knife/knife", UnlockGate::Free, false };
+		knife.unlocks = { razor, stock };
+		KitSlot &launcher = kit.weapon_slots[static_cast<size_t>(WeaponSlot::Gadget1)];
+		KitUnlock he{ "weapons/gadgets/m320/u_m320_he", "SoldierWeaponUnlockAsset", "weapons/gadgets/m320/m320", UnlockGate::ScoringBucket, false };
+		KitUnlock shg{ "weapons/gadgets/m320/u_m320_shg", "SoldierWeaponUnlockAsset", "weapons/gadgets/m320/m320", UnlockGate::Free, true };
+		launcher.unlocks = { he, shg };
+		// Without the progression tables nothing is a known default.
+		CHECK(kit.default_unlock(WeaponSlot::Knife) == nullptr);
+		kit.progression_known = true;
+		REQUIRE(kit.default_unlock(WeaponSlot::Knife) != nullptr);
+		CHECK(kit.default_unlock(WeaponSlot::Knife)->unlock == "weapons/knife/u_knife");
+		CHECK(kit.default_unlock(WeaponSlot::Gadget1) == nullptr);
+		CHECK(kit.default_unlock(WeaponSlot::Primary) == nullptr);
+		CHECK(std::string(unlock_gate_name(UnlockGate::Licence)) == "licence");
+	}
+
 	TEST_CASE("gameplay: interface constants parse by their type word") {
 		std::optional<PropertyValue> v = PropertyValue::parse("Int32 250");
 		REQUIRE(v.has_value());
@@ -416,19 +659,44 @@ TEST_SUITE("gameplay") {
 		}
 		const std::unique_ptr<EbxLibrary> lib = open_level(m, "MP_001");
 		const ModeDef cqs = mode(*lib, "MP_001", "CQS");
+		const UnlockProgression progression = read_unlock_progression(*lib);
+		CHECK(progression.tables == 4);
+		CHECK(progression.gates.size() > 500);
+		// Starting loadouts (research/topics/02-soldier-kits-modes.md §2.2, the bold column entries):
+		// per slot the weapon partition, "" for an unlock without a weapon (nogadget), nullptr for no
+		// default (every entry gated, or an empty slot).
 		struct Expect {
 			int team;
 			const char *kit;
 			const char *primary;
 			const char *sidearm;
+			const char *gadget1;
+			const char *kit_item;
+			const char *gadget2;
 		};
 		const Expect expected[] = {
-			{ 1, "gameplay/kits/usassault", "weapons/m16a4/m16a4", "weapons/m9/m9" },
-			{ 1, "gameplay/kits/usengineer", "weapons/m4a1/m4a1", "weapons/m9/m9" },
-			{ 1, "gameplay/kits/ussupport", "weapons/m27iar/m27iar", "weapons/m9/m9" },
-			{ 1, "gameplay/kits/usrecon", "weapons/mk11/mk11", "weapons/m9/m9" },
-			{ 2, "gameplay/kits/ruassault", "weapons/ak74m/ak74", "weapons/mp443/mp443" },
-			{ 2, "gameplay/kits/ruengineer", "weapons/aks74u/aks74u", "weapons/mp443/mp443" },
+			{ 1, "gameplay/kits/usassault", "weapons/m16a4/m16a4", "weapons/m9/m9", nullptr, "weapons/gadgets/medicbag/medicbag", "" },
+			{ 1, "gameplay/kits/usengineer", "weapons/m4a1/m4a1", "weapons/m9/m9", "weapons/smaw/smaw", nullptr,
+				"weapons/gadgets/repairtool/repairtool" },
+			{ 1, "gameplay/kits/ussupport", "weapons/m27iar/m27iar", "weapons/m9/m9", nullptr, "weapons/gadgets/ammobag/ammobag", "" },
+			{ 1, "gameplay/kits/usrecon", "weapons/mk11/mk11", "weapons/m9/m9", "", nullptr, "weapons/gadgets/radiobeacon/radio_beacon" },
+			{ 2, "gameplay/kits/ruassault", "weapons/ak74m/ak74", "weapons/mp443/mp443", nullptr, "weapons/gadgets/medicbag/medicbag", "" },
+			{ 2, "gameplay/kits/ruengineer", "weapons/aks74u/aks74u", "weapons/mp443/mp443", "weapons/rpg7/rpg7", nullptr,
+				"weapons/gadgets/repairtool/repairtool" },
+			{ 2, "gameplay/kits/rusupport", "weapons/rpk/rpk", "weapons/mp443/mp443", nullptr, "weapons/gadgets/ammobag/ammobag", "" },
+			{ 2, "gameplay/kits/rurecon", "weapons/svd/svd", "weapons/mp443/mp443", "", nullptr, "weapons/gadgets/radiobeacon/radio_beacon" },
+		};
+		const auto check_slot = [](const KitDef &p_kit, WeaponSlot p_slot, const char *p_weapon) {
+			CAPTURE(weapon_slot_name(p_slot));
+			const KitUnlock *u = p_kit.default_unlock(p_slot);
+			if (p_weapon == nullptr) {
+				CHECK(u == nullptr);
+				return;
+			}
+			REQUIRE(u != nullptr);
+			CHECK(u->weapon == p_weapon);
+			CHECK(u->gate == UnlockGate::Free);
+			CHECK_FALSE(u->variant);
 		};
 		for (const Expect &e : expected) {
 			CAPTURE(e.kit);
@@ -439,22 +707,39 @@ TEST_SUITE("gameplay") {
 				listed = listed || k == e.kit;
 			}
 			CHECK(listed);
-			Result<KitDef> kit = read_kit_def(*lib, e.kit);
+			Result<KitDef> kit = read_kit_def(*lib, e.kit, &progression);
 			REQUIRE_MESSAGE(kit.ok(), (kit.ok() ? std::string() : kit.error().message));
-			const KitUnlock *primary = kit->default_unlock(WeaponSlot::Primary);
-			const KitUnlock *sidearm = kit->default_unlock(WeaponSlot::Sidearm);
-			const KitUnlock *grenade = kit->default_unlock(WeaponSlot::Grenade);
-			const KitUnlock *knife = kit->default_unlock(WeaponSlot::Knife);
-			REQUIRE(primary != nullptr);
-			REQUIRE(sidearm != nullptr);
-			REQUIRE(grenade != nullptr);
-			REQUIRE(knife != nullptr);
-			CHECK(primary->weapon == e.primary);
-			CHECK(sidearm->weapon == e.sidearm);
-			CHECK(grenade->weapon == "weapons/m67/m67");
-			CHECK(!knife->weapon.empty());
-			CHECK(kit->default_unlock(WeaponSlot::Gadget2) != nullptr);
+			CHECK(kit->progression_known);
+			check_slot(*kit, WeaponSlot::Primary, e.primary);
+			check_slot(*kit, WeaponSlot::Sidearm, e.sidearm);
+			check_slot(*kit, WeaponSlot::Gadget1, e.gadget1);
+			check_slot(*kit, WeaponSlot::KitItem, e.kit_item);
+			check_slot(*kit, WeaponSlot::Gadget2, e.gadget2);
+			check_slot(*kit, WeaponSlot::Grenade, "weapons/m67/m67");
+			// The razor knife is listed first but is a licence unlock (mpstaticunlocks).
+			check_slot(*kit, WeaponSlot::Knife, "weapons/knife/knife");
+			const KitSlot *knives = kit->slot(WeaponSlot::Knife);
+			REQUIRE(knives != nullptr);
+			REQUIRE(knives->unlocks.size() == 2);
+			CHECK(knives->unlocks[0].unlock == "weapons/xp2_knife_razorblade/u_knife_razor");
+			CHECK(knives->unlocks[0].gate == UnlockGate::Licence);
 		}
+		// Without a progression table read here, read_kit_def reads one itself.
+		Result<KitDef> own = read_kit_def(*lib, "gameplay/kits/usassault");
+		REQUIRE(own.ok());
+		REQUIRE(own->default_unlock(WeaponSlot::Knife) != nullptr);
+		CHECK(own->default_unlock(WeaponSlot::Knife)->weapon == "weapons/knife/knife");
+		// Underslung ammo variants carry an Extra unlock, are in no progression table and are never a
+		// default; the two scoped crossbows are variants too (award-gated).
+		const KitSlot *launchers = own->slot(WeaponSlot::Gadget1);
+		REQUIRE(launchers != nullptr);
+		size_t variants = 0, free_variants = 0;
+		for (const KitUnlock &u : launchers->unlocks) {
+			variants += u.variant ? 1 : 0;
+			free_variants += (u.variant && u.gate == UnlockGate::Free) ? 1 : 0;
+		}
+		CHECK(variants == 8);
+		CHECK(free_variants == 6); // M320 SHG/SMK/LVG, M26 flechette/frag/slug
 	}
 
 	TEST_CASE("gameplay: VehicleDef (plan §7.4)") {

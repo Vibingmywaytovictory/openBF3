@@ -246,7 +246,7 @@ its own `characters/`, `gameplay/`, `vehicles/`, `settings_win32` and `persisten
 |---|---|---|
 | `read_soldier_def` | `characters/soldiers/mpsoldier` (SoldierBlueprint) | health, regen, spawn immunity, man-down/revive, capsule, poses (height, eye, step, transitions), per-state per-pose speeds and direction factors, sprint, jump, swim/ladder/parachute, fall-damage curve, suppression, spotting, the 18 specialization values and the field each one feeds |
 | `read_mode_def` | `levels/<id>/<id>` LevelData + its sub-worlds for the mode, `settings_win32`, `description_win32` | teams and their kits, ticket counters, capture points (HQs flagged), Rush life counters and MCOMs (arm, disarm, radius, fuse), kill counters, vehicle spawns, player count, rounds, squad size, the sub-world interface constants |
-| `read_kit_def`, `read_team_data` | `gameplay/kits/*`, `gameplay/teams/*` | the 8 weapon slots of a kit with their unlock lists (the first unlock is the default), specializations, visual unlocks |
+| `read_kit_def`, `read_team_data`, `read_unlock_progression` | `gameplay/kits/*`, `gameplay/teams/*`, `persistence/ranks/rankparams`, `persistence/unlocks/mpstaticunlocks`, `persistence/awards/awards`, `persistence/scoring/scoring` | the 8 weapon slots of a kit with their unlock lists, which progression table gates each unlock, the starting default per slot, specializations, visual unlocks |
 | `read_vehicle_def` | a VehicleBlueprint | mass, gravity modifier, inertia, the four health zones (health, shield, angle, multiplier), disabled / emergency / regeneration / decay values, armour multiplier, seats with weapons and cameras, turrets with limits and world-space lock |
 | `read_scoring` | `persistence/scoring/scoring` | score per event SID |
 
@@ -256,6 +256,14 @@ connections/world/level, Apache-2.0) walks the included sub-worlds and their pre
 field's effective value along those chains (depth and step limits, cycle safe). Specialization pairs reach their
 target fields through Float/IntHub entities whose port ids are designer hashes; the reader matches each pair to the
 target field with the longest common name prefix (`UnderslungBoostL1` -> `UnderslungGrenadeIncrease`).
+The walk also has a total work budget (`max_walk_steps`, `max_query_steps`; retail modes need under 8k and 4k steps),
+so a hostile graph of nested world parts ends with an error instead of running for ever.
+
+The kit tables have no "default" flag, so a slot's default is its first unlock that none of the four persistence
+progression tables grants (rank, licence, award or scoring-bucket unlock) and that is not an ammo/scope variant
+(`Extra` set). That gives the starting loadouts: US assault m16a4, m9, medkit, m67 and the stock knife (the razor
+knife listed first is a licence unlock); engineer SMAW/RPG-7 and repair tool; support ammo box; recon radio beacon;
+assault gadget 1 has no default (every launcher is score-gated). Without those tables the default is unknown.
 
 Inspect with bf3dump (`<sb>` as for the EBX commands; `mode` and `kits` open the level's superbundle):
 
@@ -263,7 +271,7 @@ Inspect with bf3dump (`<sb>` as for the EBX commands; `mode` and `kits` open the
 |---|---|
 | `soldier [<sb>]` | the SoldierDef of MP_001's `mpsoldier` (or the given superbundles) |
 | `mode <level> [<mode>]` | the mode list, or the ModeDef of one mode (`CQS`, `CQL`, `RL`, `SR`, `TDM`, `SQDM`, `DOM`, `GM`, `TS`, `SCV`, `CTF`, `AS` or the full id) |
-| `kits <level> <mode> [--all]` | per team, each kit's slots with the default unlock and weapon (`--all` lists every option) |
+| `kits <level> <mode> [--all]` | per team, each kit's slots with the default unlock and weapon (`--all` lists every option with its gate) |
 | `vehicle <partition> [<sb>]` | the VehicleDef (default `@all-mp`) |
 | `scoring [<sb>]` | the scoring table |
 

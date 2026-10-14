@@ -167,8 +167,8 @@ int cmd_mode(const EbxContext &p_ctx, const std::string &p_level, const std::str
 	}
 	std::fprintf(stderr, "resolved in %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
 	const ModeDef &m = *mode;
-	std::printf("level\t%s\nmode\t%s\nscopes\t%zu\nobjects\t%zu\nunresolved_connections\t%zu\n", m.level_id.c_str(), m.mode_id.c_str(), m.scopes,
-			m.objects, m.unresolved_connections);
+	std::printf("level\t%s\nmode\t%s\nscopes\t%zu\nobjects\t%zu\nwalk_steps\t%zu\nquery_steps\t%zu\nunresolved_connections\t%zu\n", m.level_id.c_str(),
+			m.mode_id.c_str(), m.scopes, m.objects, m.walk_steps, m.query_steps, m.unresolved_connections);
 	for (const std::string &s : m.subworlds) {
 		std::printf("subworld\t%s\n", s.c_str());
 	}
@@ -236,11 +236,13 @@ int cmd_kits(const EbxContext &p_ctx, const std::string &p_level, const std::str
 		std::fprintf(stderr, "%s\n", mode.error().message.c_str());
 		return 1;
 	}
+	const UnlockProgression progression = read_unlock_progression(*lib);
+	std::printf("progression\t%zu tables\t%zu gated unlocks\n", progression.tables, progression.gates.size());
 	int failed = 0;
 	for (const TeamDef &t : mode->teams) {
 		std::printf("team\t%d\t%s\t%s\tsoldier %s\n", t.team, t.team_data.c_str(), t.faction.c_str(), t.soldier.c_str());
 		for (const std::string &asset : t.kits) {
-			Result<KitDef> kit = read_kit_def(*lib, asset);
+			Result<KitDef> kit = read_kit_def(*lib, asset, &progression);
 			if (!kit) {
 				std::printf("kit\t%s\terror: %s\n", asset.c_str(), kit.error().message.c_str());
 				++failed;
@@ -255,12 +257,14 @@ int cmd_kits(const EbxContext &p_ctx, const std::string &p_level, const std::str
 					std::printf("slot\t%zu\t%s\t-\n", i, slot_name);
 					continue;
 				}
-				const KitUnlock &d = slot.unlocks.front();
-				std::printf("slot\t%zu\t%s\t%zu options\tdefault %s\t%s\t%s\n", i, slot_name, slot.unlocks.size(), d.unlock.c_str(),
-						d.weapon.empty() ? "-" : d.weapon.c_str(), slot.ui_category_sid.c_str());
+				const KitUnlock *d = i < kWeaponSlotCount ? kit->default_unlock(static_cast<WeaponSlot>(i)) : nullptr;
+				const char *none = kit->progression_known ? "none" : "unknown";
+				std::printf("slot\t%zu\t%s\t%zu options\tdefault %s\t%s\t%s\n", i, slot_name, slot.unlocks.size(), d ? d->unlock.c_str() : none,
+						(d && !d->weapon.empty()) ? d->weapon.c_str() : "-", slot.ui_category_sid.c_str());
 				if (p_all) {
 					for (const KitUnlock &u : slot.unlocks) {
-						std::printf("unlock\t%zu\t%s\t%s\t%s\n", i, u.unlock.c_str(), u.type.c_str(), u.weapon.empty() ? "-" : u.weapon.c_str());
+						std::printf("unlock\t%zu\t%s\t%s\t%s\t%s%s\n", i, u.unlock.c_str(), u.type.c_str(), u.weapon.empty() ? "-" : u.weapon.c_str(),
+								unlock_gate_name(u.gate), u.variant ? " variant" : "");
 					}
 				}
 			}

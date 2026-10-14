@@ -388,20 +388,72 @@ public:
 	LogicWalker(LogicWorld &r_world, const LogicWorldOptions &p_options) :
 			world_(r_world), options_(p_options) {}
 
+	// Walks p_container's Objects. Every container on the current path is on path_, so a blueprint
+	// that (directly or through others) contains itself is skipped instead of being re-entered.
 	Status visit(const EbxInstance &p_container, uint32_t p_scope, uint32_t p_depth) {
 		if (p_depth > options_.max_depth) {
 			++world_.stats_.depth_limited;
 			return Status::success();
 		}
+		BF3_TRY(step(1));
+		path_.push_back(InstanceKey::of(p_container));
+		const Status status = visit_objects(p_container, p_scope, p_depth);
+		path_.pop_back();
+		return status;
+	}
+
+	Result<uint32_t> push(const EbxInstance &p_blueprint, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent) {
+		if (world_.scopes_.size() >= options_.max_scopes) {
+			return make_error("logic world: more than " + std::to_string(options_.max_scopes) + " scopes");
+		}
+		LogicScope scope;
+		scope.blueprint = p_blueprint;
+		scope.reference = p_reference;
+		scope.parent = p_parent;
+		scope.depth = p_parent ? world_.scopes_[*p_parent].depth + 1 : 0;
+		scope.connections = world_.connection_set(p_blueprint);
+		world_.scopes_.push_back(scope);
+		return static_cast<uint32_t>(world_.scopes_.size() - 1);
+	}
+
+private:
+	Status step(size_t p_count) {
+		world_.stats_.walk_steps += p_count;
+		if (world_.stats_.walk_steps > options_.max_walk_steps) {
+			return make_error("logic world: walk exceeds " + std::to_string(options_.max_walk_steps) + " steps");
+		}
+		return Status::success();
+	}
+
+	// Whether p_blueprint is a container on the current walk path (a reference cycle).
+	bool on_path(const EbxInstance &p_blueprint) {
+		const InstanceKey key = InstanceKey::of(p_blueprint);
+		if (std::find(path_.begin(), path_.end(), key) == path_.end()) {
+			return false;
+		}
+		++world_.stats_.cycles;
+		return true;
+	}
+
+	Status visit_objects(const EbxInstance &p_container, uint32_t p_scope, uint32_t p_depth) {
 		const bool root = p_scope == 0;
-		for (const EbxInstance &object : objects(p_container)) {
+		const std::vector<EbxInstance> list = objects(p_container);
+		BF3_TRY(step(list.size()));
+		for (const EbxInstance &object : list) {
 			if (object.is_a("WorldPartReferenceObjectData")) {
-				if (excluded(p_scope, object)) {
+				Result<bool> skip = excluded(p_scope, object);
+				if (!skip) {
+					return skip.error();
+				}
+				if (*skip) {
 					continue;
 				}
 				const std::optional<EbxInstance> part = world_.db().follow(object.data(), "Blueprint");
 				if (!part) {
 					++world_.stats_.missing_blueprints;
+					continue;
+				}
+				if (on_path(*part)) {
 					continue;
 				}
 				BF3_TRY(visit(*part, p_scope, p_depth + 1));
@@ -422,21 +474,6 @@ public:
 		return Status::success();
 	}
 
-	Result<uint32_t> push(const EbxInstance &p_blueprint, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent) {
-		if (world_.scopes_.size() >= options_.max_scopes) {
-			return make_error("logic world: more than " + std::to_string(options_.max_scopes) + " scopes");
-		}
-		LogicScope scope;
-		scope.blueprint = p_blueprint;
-		scope.reference = p_reference;
-		scope.parent = p_parent;
-		scope.depth = p_parent ? world_.scopes_[*p_parent].depth + 1 : 0;
-		scope.connections = world_.connection_set(p_blueprint);
-		world_.scopes_.push_back(scope);
-		return static_cast<uint32_t>(world_.scopes_.size() - 1);
-	}
-
-private:
 	std::vector<EbxInstance> objects(const EbxInstance &p_container) {
 		std::vector<EbxInstance> out;
 		const std::optional<EbxValue> value = p_container.get("Objects");
@@ -466,12 +503,19 @@ private:
 			world_.stats_.skipped_subworlds.push_back(name);
 			return Status::success();
 		}
-		if (excluded(p_scope, p_reference)) {
+		Result<bool> skip = excluded(p_scope, p_reference);
+		if (!skip) {
+			return skip.error();
+		}
+		if (*skip) {
 			return Status::success();
 		}
 		const std::optional<EbxInstance> data = world_.referenced_blueprint(p_reference);
 		if (!data) {
 			world_.stats_.absent_subworlds.push_back(name);
+			return Status::success();
+		}
+		if (on_path(*data)) {
 			return Status::success();
 		}
 		world_.stats_.subworlds.push_back(name);
@@ -483,7 +527,11 @@ private:
 	}
 
 	Status place_reference(const EbxInstance &p_reference, uint32_t p_scope, uint32_t p_depth) {
-		if (excluded(p_scope, p_reference)) {
+		Result<bool> skip = excluded(p_scope, p_reference);
+		if (!skip) {
+			return skip.error();
+		}
+		if (*skip) {
 			return Status::success();
 		}
 		if (p_reference.is_a("SpawnReferenceObjectData")) {
@@ -495,6 +543,9 @@ private:
 			return emit(p_reference, std::nullopt, p_scope);
 		}
 		if (blueprint->is_a("PrefabBlueprint")) {
+			if (on_path(*blueprint)) {
+				return Status::success();
+			}
 			Result<uint32_t> child = push(*blueprint, p_reference, p_scope);
 			if (!child) {
 				return child.error();
@@ -517,9 +568,14 @@ private:
 		return Status::success();
 	}
 
-	bool excluded(uint32_t p_scope, const EbxInstance &p_reference) {
+	// Whether a reference is Excluded (connected value, else its own field); the query's resolver
+	// steps count against the walk budget.
+	Result<bool> excluded(uint32_t p_scope, const EbxInstance &p_reference) {
 		bool value = false;
-		if (const std::optional<PropertyValue> v = world_.property(p_scope, p_reference, field_id("Excluded")); v && v->as_bool()) {
+		size_t steps = 0;
+		const std::optional<PropertyValue> v = world_.property_counted(p_scope, p_reference, field_id("Excluded"), steps);
+		BF3_TRY(step(steps));
+		if (v && v->as_bool()) {
 			value = *v->as_bool();
 		} else if (const std::optional<EbxValue> stored = p_reference.get("Excluded")) {
 			value = stored->as_bool().value_or(false);
@@ -532,6 +588,7 @@ private:
 
 	LogicWorld &world_;
 	const LogicWorldOptions &options_;
+	std::vector<InstanceKey> path_; // containers being walked, outermost first (at most max_depth + 1)
 };
 
 // --- LogicWorld ----------------------------------------------------------------------------------
@@ -539,6 +596,7 @@ private:
 Result<LogicWorld> LogicWorld::build(const EbxResolver &p_db, const EbxInstance &p_root, const LogicWorldOptions &p_options) {
 	LogicWorld world;
 	world.db_ = &p_db;
+	world.max_query_steps_ = p_options.max_query_steps;
 	LogicWalker walker(world, p_options);
 	Result<uint32_t> root = walker.push(p_root, std::nullopt, std::nullopt);
 	if (!root) {
@@ -601,19 +659,29 @@ struct LogicWorld::Frame {
 };
 
 std::optional<PropertyValue> LogicWorld::property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const {
-	if (p_scope >= scopes_.size()) {
+	size_t steps = 0;
+	return property_counted(p_scope, p_target, p_field, steps);
+}
+
+std::optional<PropertyValue> LogicWorld::property_counted(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field, size_t &r_steps) const {
+	if (p_scope >= scopes_.size() || query_budget_spent()) {
 		return std::nullopt;
 	}
 	size_t steps = 0;
-	return property_in(Frame::of_scope(p_scope), p_target, p_field, kResolveDepth, steps);
+	std::optional<PropertyValue> out = property_in(Frame::of_scope(p_scope), p_target, p_field, kResolveDepth, steps);
+	r_steps += steps;
+	query_steps_ += steps;
+	return out;
 }
 
 std::optional<PropertyValue> LogicWorld::interface_value(uint32_t p_scope, int32_t p_field) const {
-	if (p_scope >= scopes_.size()) {
+	if (p_scope >= scopes_.size() || query_budget_spent()) {
 		return std::nullopt;
 	}
 	size_t steps = 0;
-	return interface_in(Frame::of_scope(p_scope), p_field, kResolveDepth, steps);
+	std::optional<PropertyValue> out = interface_in(Frame::of_scope(p_scope), p_field, kResolveDepth, steps);
+	query_steps_ += steps;
+	return out;
 }
 
 std::optional<PropertyValue> LogicWorld::effective(uint32_t p_scope, const EbxInstance &p_entity, std::string_view p_field) const {
@@ -719,6 +787,10 @@ std::optional<PropertyValue> LogicWorld::interface_in(const Frame &p_frame, int3
 		return std::nullopt;
 	}
 	for (const EbxValue entry : *array) {
+		// Each field scanned is a step, so a huge Fields array cannot multiply the query cost.
+		if (++r_steps > kQuerySteps) {
+			return std::nullopt;
+		}
 		const std::optional<EbxValue> id = entry.get("Id");
 		if (!id || id->as_i32() != p_field) {
 			continue;
