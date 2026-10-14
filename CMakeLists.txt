@@ -100,6 +100,7 @@ add_subdirectory(src/bf3_host)
 if(OPENBF3_BUILD_GODOT)
     add_subdirectory(src/bf3_godot)
 endif()
+add_subdirectory(tools/antdump) # Godot-free CLI over bf3_core's Ant reader
 
 if(OPENBF3_BUILD_TESTS)
     enable_testing()
