@@ -3,8 +3,11 @@
 // comparison against such a JSON. Used by the antdump CLI and by the core.ant tests. Godot-free.
 // Clean-room implementation from research/probes/ant-animation-probe.md.
 
+#include "ant_export_source.h"
+#include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/ant/ant_library.h"
 #include "bf3/core/ant/ant_source.h"
+#include "bf3/core/install.h"
 
 #include <cstdint>
 #include <map>
@@ -15,6 +18,36 @@
 namespace bf3::tools::antdump {
 
 using namespace bf3::core::ant;
+
+// The input of every command and of the core.ant tests: the install (AntInstallSource, located like the game:
+// the given directory, else OPENBF3_INSTALL, else the default path) or an export directory (AntExportDirSource).
+struct SourceOptions {
+	bool install = false;
+	std::string install_dir; // install: "" = locate as the game does
+	std::string export_dir; // !install
+};
+struct OpenedSource {
+	std::unique_ptr<AntPackageSource> source;
+	std::shared_ptr<const bf3::core::Install> install; // install input only
+	std::string description; // one line for logs
+};
+// r_unavailable (optional) is set when the input does not exist (no install found / no export manifests),
+// as opposed to an input that exists but fails to open.
+bool open_source(const SourceOptions &p_options, OpenedSource &r_opened, std::string &r_error, bool *r_unavailable = nullptr);
+
+// Parity of two sources (e.g. the install against an export directory): the same packages and banks
+// (every AntPackageInfo field, provenance included) and, with p_payloads, byte-identical payloads for every
+// bank and every Chunk package (read in parallel).
+struct ParityResult {
+	size_t packages_a = 0, packages_b = 0, package_rows_equal = 0;
+	size_t banks_a = 0, banks_b = 0, bank_rows_equal = 0;
+	size_t payloads = 0, payloads_equal = 0, payload_errors = 0;
+	uint64_t payload_bytes = 0;
+	std::vector<std::string> differences; // the first few
+	bool ok() const;
+};
+void compare_sources(const AntPackageSource &p_a, const AntPackageSource &p_b, bool p_payloads, ParityResult &r_result);
+std::string format_parity(const ParityResult &p_result);
 
 // Loads s_BasicAssets into a library. Returns false (with a message) when the export lacks it.
 bool load_library(const AntPackageSource &p_source, AntLibrary &r_library, std::string &r_error);
