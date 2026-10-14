@@ -47,8 +47,9 @@ add_test(NAME net.enet COMMAND test_net)
 add_test(NAME host.server COMMAND test_host)
 # bf3dump's JSON number text (the probe's f32/f64 rules) on synthetic values; no install needed.
 add_test(NAME tools.numtext COMMAND bf3dump numcheck)
-# core.ant reads an Ant export directory (OPENBF3_ANT_DATA) and the probe's clip JSONs (OPENBF3_ANT_ORACLE);
-# exits 77 = skipped when they are absent. core.ant.unit needs no data.
+# core.ant reads the Ant banks from the install (or the export directory OPENBF3_ANT_DATA) and, when
+# OPENBF3_ANT_ORACLE is set, the probe's clip JSONs; exits 77 = skipped when neither input exists. core.ant.unit
+# needs no data.
 add_test(NAME core.ant.unit COMMAND test_ant --test-suite=ant-unit)
 add_test(NAME core.ant COMMAND test_ant --test-suite=ant)
 set_tests_properties(core.ant PROPERTIES SKIP_RETURN_CODE 77)

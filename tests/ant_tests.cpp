@@ -2,13 +2,15 @@
 // research/probes/ant-animation-probe.md; these tests use only the probe's numeric outputs as oracles.
 //
 // Suite "ant-unit": synthetic inputs, always runs.
-// Suite "ant": reads an export directory of Ant package payloads (OPENBF3_ANT_DATA, see
-// bf3/core/ant/ant_source.h) and, for the value-by-value check, the probe's clip JSONs (OPENBF3_ANT_ORACLE).
-// Without them every case skips (exit 77). Asserts numbers only; nothing from BF3 is stored in the repo.
+// Suite "ant": reads the Ant banks from the install (AntInstallSource; located like the game: OPENBF3_INSTALL,
+// else the default path) or, when OPENBF3_ANT_DATA names one, from an export directory of Ant payloads
+// (tools/antdump/README.md), and for the value-by-value check the probe's clip JSONs (OPENBF3_ANT_ORACLE).
+// Without either input every case skips (exit 77). Asserts numbers only; nothing from BF3 is stored in the repo.
 #include <doctest/doctest.h>
 
 #include "antdump_lib.h"
 #include "bf3/core/ant/ant_clip.h"
+#include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/ant/ant_library.h"
 #include "bf3/core/ant/ant_package.h"
 #include "bf3/core/ant/ant_source.h"
@@ -16,12 +18,14 @@
 #include "test_support.h"
 
 #include <chrono>
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <numbers>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -236,28 +240,61 @@ std::string env_var(const char *p_name) {
 }
 
 struct AntData {
-	AntExportDirSource source;
+	antdump::OpenedSource opened;
 	AntLibrary library;
 	bool ok = false;
+	std::string why; // when !ok
+	const AntPackageSource &source() const { return *opened.source; }
 };
 
+// OPENBF3_ANT_DATA names an export directory: that; else (unset, or no export there) the install. With neither
+// the cases skip; an input that exists but does not open fails.
 AntData *ant_data() {
 	static AntData *data = [] {
 		auto *d = new AntData();
-		const std::string dir = env_var("OPENBF3_ANT_DATA");
+		antdump::SourceOptions options;
+		options.export_dir = env_var("OPENBF3_ANT_DATA");
 		std::string error;
-		if (!dir.empty() && d->source.open(dir, error) && antdump::load_library(d->source, d->library, error)) {
-			d->ok = true;
+		bool unavailable = true;
+		bool opened = false;
+		if (!options.export_dir.empty()) {
+			opened = antdump::open_source(options, d->opened, error, &unavailable);
+			if (!opened && unavailable) {
+				MESSAGE("OPENBF3_ANT_DATA: " << error << "; trying the install");
+			}
 		}
+		if (!opened && unavailable) {
+			options.install = true;
+			opened = antdump::open_source(options, d->opened, error, &unavailable);
+		}
+		if (!opened) {
+			d->why = error;
+			if (!unavailable) {
+				FAIL_CHECK("Ant input does not open: " << error);
+			}
+			return d;
+		}
+		MESSAGE("Ant input: " << d->opened.description);
+		if (!antdump::load_library(d->source(), d->library, error)) {
+			FAIL_CHECK("s_basicassets: " << error);
+			return d;
+		}
+		d->ok = true;
 		return d;
 	}();
 	return data;
 }
 
+// An optional input of one case is missing (the oracle JSONs, or the export next to the install): the case does
+// not run, but the suite still counts as run (exit 77 is only for "no Ant input at all").
+void optional_input_missing(const char *p_why) {
+	std::printf("NOT RUN: %s\n", p_why);
+}
+
 AntData *data_or_skip() {
 	AntData *d = ant_data();
 	if (!d->ok) {
-		bf3::test::skip_install_case("OPENBF3_ANT_DATA does not name an Ant export directory");
+		bf3::test::skip_install_case(d->why.empty() ? "the Ant input did not open" : d->why.c_str());
 		return nullptr;
 	}
 	return d;
@@ -509,9 +546,9 @@ TEST_SUITE("ant") {
 		CHECK(s.byte_size() == 22481708);
 		uint32_t parsed = 0, failed = 0, sets = 0, chunk_ok = 0, chunks = 0;
 		const auto t0 = std::chrono::steady_clock::now();
-		for (const AntPackageInfo &info : d->source.all_banks()) {
+		for (const AntPackageInfo &info : d->source().all_banks()) {
 			std::string error;
-			auto p = antdump::load_package(d->source, info, error);
+			auto p = antdump::load_package(d->source(), info, error);
 			if (!p) {
 				++failed;
 				MESSAGE(error);
@@ -524,10 +561,10 @@ TEST_SUITE("ant") {
 				CHECK(p->byte_size() == 15929912);
 			}
 		}
-		for (const AntPackageInfo &info : d->source.packages()) {
+		for (const AntPackageInfo &info : d->source().packages()) {
 			if (info.packaging == AntPackagingType::Chunk) {
 				std::string error;
-				auto p = antdump::load_package(d->source, info, error);
+				auto p = antdump::load_package(d->source(), info, error);
 				++chunks;
 				chunk_ok += (p && p->byte_size() == info.chunk_size) ? 1 : 0;
 				if (p && info.short_name == "m9") {
@@ -542,7 +579,7 @@ TEST_SUITE("ant") {
 		CHECK(parsed == 397); // 1 static + 233 bundle + 163 animation-set banks
 		CHECK(chunks == 88);
 		CHECK(chunk_ok == 88);
-		CHECK(d->source.packages().size() == 322);
+		CHECK(d->source().packages().size() == 322);
 	}
 
 	TEST_CASE("ant: census of the MP-relevant packages equals the probe's") {
@@ -552,7 +589,7 @@ TEST_SUITE("ant") {
 		}
 		antdump::Census c;
 		std::string error;
-		REQUIRE(antdump::run_census(d->source, d->library, true, c, error));
+		REQUIRE(antdump::run_census(d->source(), d->library, true, c, error));
 		MESSAGE(antdump::format_census(c));
 		CHECK(c.packages == 125);
 		CHECK(c.packages_failed == 0);
@@ -606,7 +643,7 @@ TEST_SUITE("ant") {
 		}
 		antdump::Census c;
 		std::string error;
-		REQUIRE(antdump::run_census(d->source, d->library, false, c, error));
+		REQUIRE(antdump::run_census(d->source(), d->library, false, c, error));
 		MESSAGE(antdump::format_census(c));
 		CHECK(c.packages == 321);
 		CHECK(c.packages_failed == 0);
@@ -639,10 +676,10 @@ TEST_SUITE("ant") {
 		if (!d) {
 			return;
 		}
-		const AntPackageInfo *info = d->source.find("m9");
+		const AntPackageInfo *info = d->source().find("m9");
 		REQUIRE(info != nullptr);
 		std::string error;
-		auto m9 = antdump::load_package(d->source, *info, error);
+		auto m9 = antdump::load_package(d->source(), *info, error);
 		REQUIRE(m9);
 		DecodedClip idle, undeploy;
 		REQUIRE(decode_clip(AntLibrary::find_clip(*m9, "IdlePose Anim"), idle).ok());
@@ -689,7 +726,7 @@ TEST_SUITE("ant") {
 		}
 		const std::string oracle_dir = env_var("OPENBF3_ANT_ORACLE");
 		if (oracle_dir.empty() || !std::filesystem::is_directory(oracle_dir)) {
-			bf3::test::skip_install_case("OPENBF3_ANT_ORACLE does not name the probe's output directory");
+			optional_input_missing("OPENBF3_ANT_ORACLE does not name the probe's output directory");
 			return;
 		}
 		int compared = 0;
@@ -698,14 +735,14 @@ TEST_SUITE("ant") {
 			CAPTURE(file);
 			std::vector<uint8_t> bytes;
 			std::string error;
-			REQUIRE(read_whole_file(std::filesystem::path(oracle_dir) / file, bytes, error));
+			REQUIRE(antdump::read_whole_file(std::filesystem::path(oracle_dir) / file, bytes, error));
 			const std::string oracle(bytes.begin(), bytes.end());
 			std::string package;
 			REQUIRE(antdump::oracle_package(oracle, package, error));
 			std::unique_ptr<AntPackage> holder;
 			const AntPackage *p = d->library.static_package();
 			if (package != "s_basicassets") {
-				holder = antdump::load_package(d->source, *d->source.find(package), error);
+				holder = antdump::load_package(d->source(), *d->source().find(package), error);
 				p = holder.get();
 			}
 			REQUIRE(p != nullptr);
@@ -735,7 +772,7 @@ TEST_SUITE("ant") {
 		}
 		std::vector<uint8_t> bytes;
 		std::string error;
-		REQUIRE(d->source.read(*d->source.find("m9"), bytes, error));
+		REQUIRE(d->source().read(*d->source().find("m9"), bytes, error));
 		uint32_t decoded = 0;
 		auto exercise = [&](std::vector<uint8_t> p_bytes) {
 			AntPackage p;
@@ -763,5 +800,106 @@ TEST_SUITE("ant") {
 		}
 		MESSAGE("clips still decodable after corruption: " << decoded);
 		CHECK(true);
+	}
+
+	// M0 exit: the next wave plays this clip on a Skeleton3D (tools/antdump/README.md "M9 1P empty reload").
+	TEST_CASE("ant: M9 1P ReloadEmpty decodes and binds to the 1P rig") {
+		AntData *d = data_or_skip();
+		if (!d) {
+			return;
+		}
+		const AntPackageInfo *info = d->source().find("m9");
+		REQUIRE(info != nullptr);
+		CHECK(info->packaging == AntPackagingType::Chunk);
+		CHECK(info->chunk_size == 51948);
+		std::string error;
+		auto m9 = antdump::load_package(d->source(), *info, error);
+		REQUIRE_MESSAGE(m9, error);
+		CHECK(m9->byte_size() == 51948);
+		const GdStruct clip = AntLibrary::find_clip(*m9, "ReloadEmpty Anim");
+		REQUIRE(clip.valid());
+		DecodedClip c;
+		REQUIRE(decode_clip(clip, c).ok());
+		CHECK(c.codec == ClipCodec::Dct);
+		CHECK(c.num_keys == 57);
+		CHECK(c.end_frame == 65);
+		REQUIRE(c.key_times.size() == 57);
+		CHECK(c.key_times.front() == 0);
+		CHECK(c.key_times.back() == 65);
+		CHECK(c.num_quats == 96);
+		CHECK(c.num_vec3s == 39);
+		CHECK(c.num_floats == 0);
+		CHECK_FALSE(c.cycle);
+		CHECK_FALSE(c.additive);
+		ClipBinding b;
+		REQUIRE(d->library.bind(*m9, clip, b).ok());
+		CHECK(b.controller_name == "ReloadEmpty");
+		CHECK(b.target_name == "1P_Upperbody_DOF");
+		CHECK(b.fps == 30.0f);
+		CHECK(b.fps_scale == 0.5f);
+		CHECK(b.num_ticks == 130.0f);
+		REQUIRE(b.rig != nullptr);
+		CHECK(b.rig->name == "Venice1pAntSke01");
+		CHECK(b.rig->joints.size() == 181);
+		REQUIRE(b.tracks.size() == 135);
+		// Every channel lands on a joint of the 1P rig, on a DOF of its own kind; no joint is driven twice per kind.
+		std::set<std::pair<int32_t, char>> driven;
+		uint32_t on_joint = 0;
+		for (const ChannelTrack &t : b.tracks) {
+			on_joint += (t.joint >= 0 && t.kind_ok) ? 1 : 0;
+			driven.insert({ t.joint, t.kind });
+		}
+		CHECK(on_joint == 135);
+		CHECK(driven.size() == 135);
+		CHECK(b.kind_mismatches == 0);
+		CHECK(b.delta_traj_channels == 0);
+		// The weapon parts that move in the reload are joints of the 1P rig (the m9 mesh skins to them by name).
+		for (std::string_view joint : { "Wep_Root", "Wep_Slide", "Wep_Mag", "LeftHand", "RightHand", "CameraJoint" }) {
+			CAPTURE(joint);
+			const int32_t j = b.rig->find_joint(joint);
+			CHECK(j >= 0);
+			CHECK(driven.contains({ j, 'q' }));
+		}
+		// The clip ends where it starts: last key vs first key, every rotation (the reload returns to idle).
+		double max_deg = 0.0;
+		for (uint32_t q = 0; q < c.num_quats; ++q) {
+			max_deg = std::max(max_deg, quat_angle_deg(c.quat(0, q), c.quat(c.num_keys - 1, q)));
+		}
+		MESSAGE("ReloadEmpty first vs last key: max " << max_deg << " deg");
+		CHECK(max_deg < 1.0);
+	}
+
+	// The install source selects exactly what the research export holds (runs when both are present).
+	TEST_CASE("ant: the install source equals the export directory") {
+		const std::string dir = env_var("OPENBF3_ANT_DATA");
+		antdump::OpenedSource exported, install;
+		antdump::SourceOptions export_options, install_options;
+		export_options.export_dir = dir;
+		install_options.install = true;
+		std::string error;
+		bool unavailable = false;
+		if (dir.empty() || !antdump::open_source(export_options, exported, error) || !antdump::open_source(install_options, install, error, &unavailable)) {
+			optional_input_missing("the install-vs-export case needs both OPENBF3_ANT_DATA and the install");
+			return;
+		}
+		antdump::ParityResult r;
+		antdump::compare_sources(*install.source, *exported.source, false, r);
+		MESSAGE(antdump::format_parity(r));
+		CHECK(r.packages_a == 322);
+		CHECK(r.banks_a == 397);
+		CHECK(r.ok());
+		// Payload bytes of the packages the M0 tests lean on (the antdump parity command compares all of them).
+		for (const char *name : { "s_basicassets", "b_basicassetsmp", "m9" }) {
+			CAPTURE(name);
+			const AntPackageInfo *a = install.source->find(name), *b = exported.source->find(name);
+			REQUIRE(a != nullptr);
+			REQUIRE(b != nullptr);
+			std::vector<uint8_t> ba, bb;
+			REQUIRE(install.source->read(*a, ba, error));
+			REQUIRE(exported.source->read(*b, bb, error));
+			CHECK(ba.size() == bb.size());
+			CHECK(ba == bb);
+		}
+		CHECK(install.source->find("s_basicassets")->superbundle == "Win32/Globals");
 	}
 }

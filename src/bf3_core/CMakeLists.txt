@@ -77,6 +77,12 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ant/ant_source.h
 )
 
+# Ant banks read from the install (res by name, chunk by GUID) with the research export's selection rules.
+target_sources(bf3_core PRIVATE
+    src/ant/ant_install_source.cpp
+    include/bf3/core/ant/ant_install_source.h
+)
+
 # Resource decoders (MeshSet, DxTexture, Havok physics) over caller-supplied bytes; see
 # include/bf3/core/res/res_types.h. Port of IW4L resource_bf3.
 target_sources(bf3_core PRIVATE
