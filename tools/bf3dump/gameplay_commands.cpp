@@ -1,6 +1,6 @@
 // bf3dump gameplay commands: print the soldier, mode, kit, vehicle and scoring tables that
 // bf3_core's gameplay readers resolve (include/bf3/core/gameplay/*). The output is BF3 data: keep it
-// out of the repo.
+// out of the repo. Each command runs on one WorkBudget and reports the units it used on stderr.
 //
 //   soldier [<sb>]                 SoldierDef of characters/soldiers/mpsoldier (default sb: MP_001)
 //   mode <level> [<mode>]          without a mode: the level's GameMode options; else the ModeDef
@@ -83,11 +83,13 @@ int cmd_soldier(const EbxContext &p_ctx, const std::string &p_spec) {
 	if (!lib) {
 		return 1;
 	}
-	Result<SoldierDef> s = read_soldier_def(*lib);
+	WorkBudget budget;
+	Result<SoldierDef> s = read_soldier_def(*lib, "characters/soldiers/mpsoldier", &budget);
 	if (!s) {
 		std::fprintf(stderr, "%s\n", s.error().message.c_str());
 		return 1;
 	}
+	std::fprintf(stderr, "work %zu of %zu units\n", budget.used(), budget.limit());
 	std::printf("blueprint\t%s\nphysics\t%s\n", s->blueprint.c_str(), s->physics.c_str());
 	std::printf("max_health\t%g\nlow_health_threshold\t%g\nexplosion_damage_modifier\t%g\nregeneration_delay_modifier\t%g\nuse_prediction\t%d\n",
 			s->max_health, s->low_health_threshold, s->explosion_damage_modifier, s->regeneration_delay_modifier, s->use_prediction ? 1 : 0);
@@ -154,18 +156,25 @@ int cmd_mode(const EbxContext &p_ctx, const std::string &p_level, const std::str
 		return 1;
 	}
 	if (!p_mode) {
-		for (const std::string &m : level_modes(*lib, p_level)) {
+		Result<std::vector<std::string>> modes = level_modes(*lib, p_level);
+		if (!modes) {
+			std::fprintf(stderr, "%s\n", modes.error().message.c_str());
+			return 1;
+		}
+		for (const std::string &m : *modes) {
 			std::printf("%s\n", m.c_str());
 		}
 		return 0;
 	}
 	const auto start = std::chrono::steady_clock::now();
-	Result<ModeDef> mode = read_mode_def(*lib, p_level, *p_mode);
+	WorkBudget budget;
+	Result<ModeDef> mode = read_mode_def(*lib, p_level, *p_mode, &budget);
 	if (!mode) {
 		std::fprintf(stderr, "%s\n", mode.error().message.c_str());
 		return 1;
 	}
-	std::fprintf(stderr, "resolved in %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+	std::fprintf(stderr, "resolved in %.2f s, work %zu of %zu units\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
+			budget.used(), budget.limit());
 	const ModeDef &m = *mode;
 	std::printf("level\t%s\nmode\t%s\nscopes\t%zu\nobjects\t%zu\nwalk_steps\t%zu\nquery_steps\t%zu\nunresolved_connections\t%zu\n", m.level_id.c_str(),
 			m.mode_id.c_str(), m.scopes, m.objects, m.walk_steps, m.query_steps, m.unresolved_connections);
@@ -231,18 +240,25 @@ int cmd_kits(const EbxContext &p_ctx, const std::string &p_level, const std::str
 	if (!lib) {
 		return 1;
 	}
-	Result<ModeDef> mode = read_mode_def(*lib, p_level, p_mode);
+	// One budget for the mode, the progression tables and every kit the teams list.
+	WorkBudget budget;
+	Result<ModeDef> mode = read_mode_def(*lib, p_level, p_mode, &budget);
 	if (!mode) {
 		std::fprintf(stderr, "%s\n", mode.error().message.c_str());
 		return 1;
 	}
-	const UnlockProgression progression = read_unlock_progression(*lib);
+	Result<UnlockProgression> read_progression = read_unlock_progression(*lib, &budget);
+	if (!read_progression) {
+		std::fprintf(stderr, "%s\n", read_progression.error().message.c_str());
+		return 1;
+	}
+	const UnlockProgression &progression = *read_progression;
 	std::printf("progression\t%zu tables\t%zu gated unlocks\n", progression.tables, progression.gates.size());
 	int failed = 0;
 	for (const TeamDef &t : mode->teams) {
 		std::printf("team\t%d\t%s\t%s\tsoldier %s\n", t.team, t.team_data.c_str(), t.faction.c_str(), t.soldier.c_str());
 		for (const std::string &asset : t.kits) {
-			Result<KitDef> kit = read_kit_def(*lib, asset, &progression);
+			Result<KitDef> kit = read_kit_def(*lib, asset, &progression, &budget);
 			if (!kit) {
 				std::printf("kit\t%s\terror: %s\n", asset.c_str(), kit.error().message.c_str());
 				++failed;
@@ -275,6 +291,7 @@ int cmd_kits(const EbxContext &p_ctx, const std::string &p_level, const std::str
 			}
 		}
 	}
+	std::fprintf(stderr, "work %zu of %zu units\n", budget.used(), budget.limit());
 	return failed == 0 ? 0 : 1;
 }
 
@@ -283,11 +300,13 @@ int cmd_vehicle(const EbxContext &p_ctx, const std::string &p_partition, const s
 	if (!lib) {
 		return 1;
 	}
-	Result<VehicleDef> v = read_vehicle_def(*lib, p_partition);
+	WorkBudget budget;
+	Result<VehicleDef> v = read_vehicle_def(*lib, p_partition, &budget);
 	if (!v) {
 		std::fprintf(stderr, "%s\n", v.error().message.c_str());
 		return 1;
 	}
+	std::fprintf(stderr, "work %zu of %zu units\n", budget.used(), budget.limit());
 	std::printf("blueprint\t%s\nname_sid\t%s\nminimap_icon\t%s\ncomponents\t%zu\n", v->blueprint.c_str(), v->name_sid.c_str(), v->minimap_icon.c_str(),
 			v->components);
 	std::printf("body_mass\t%g\ngravity_modifier\t%g\ncenter_of_mass\t%g %g %g\ninertia_modifier\t%g %g %g\n", v->body_mass, v->gravity_modifier,

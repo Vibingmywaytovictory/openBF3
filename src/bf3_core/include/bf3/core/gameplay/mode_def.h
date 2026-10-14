@@ -19,6 +19,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/kit_def.h"
+#include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/result.h"
 
 #include <cstdint>
@@ -139,6 +140,7 @@ struct ModeDef {
 	size_t objects = 0;
 	size_t walk_steps = 0; // LogicWorld walk work (LogicWorldOptions::max_walk_steps bounds it)
 	size_t query_steps = 0; // resolver steps of every property query (max_query_steps bounds it)
+	size_t work = 0; // WorkBudget units used by the whole read (walk, queries, the reader's own loops)
 	size_t unresolved_connections = 0;
 
 	const TicketCounterDef *tickets(int p_team) const;
@@ -154,9 +156,12 @@ struct ModeDef {
 // "CQS" -> "ConquestSmall0" etc. (CQL, CQS, CQAL, CQAS, RL, SR/SQR, TDM, TDMC, SDM/SQDM, DOM, GM,
 // TS, SCV, CTF, AS); anything else is returned unchanged.
 std::string canonical_mode_id(std::string_view p_mode);
-// The GameMode options levels/<id>/<id>/description_win32 lists for the level.
-std::vector<std::string> level_modes(const EbxResolver &p_db, std::string_view p_level_id);
-Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode);
+// The GameMode options levels/<id>/<id>/description_win32 lists for the level. p_budget: the
+// work budget to charge (a WorkBudget of the default limit when null).
+Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::string_view p_level_id, WorkBudget *p_budget = nullptr);
+// p_budget: one budget for the whole read, walk and queries included (a WorkBudget of the default
+// limit when null); hostile data that exceeds it fails with the budget error.
+Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode, WorkBudget *p_budget = nullptr);
 
 struct ScoringEntryDef {
 	std::string sid; // DescriptionSid, e.g. ID_SCORE_KILL
@@ -172,6 +177,6 @@ struct ScoringTable {
 };
 
 // The ScoringTypeData of a ScoringData partition (persistence/scoring/scoring).
-Result<ScoringTable> read_scoring(const EbxResolver &p_db, std::string_view p_partition = "persistence/scoring/scoring");
+Result<ScoringTable> read_scoring(const EbxResolver &p_db, std::string_view p_partition = "persistence/scoring/scoring", WorkBudget *p_budget = nullptr);
 
 } // namespace bf3::core::gameplay

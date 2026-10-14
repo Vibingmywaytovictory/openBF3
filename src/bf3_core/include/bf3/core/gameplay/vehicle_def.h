@@ -15,6 +15,7 @@
 // Engine, wheel, rotor and wing models are not read here (M0 scope).
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -121,6 +122,7 @@ struct VehicleDef {
 };
 
 // Reads a VehicleBlueprint partition (e.g. vehicles/m1a2/m1abrams).
-Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_blueprint);
+// p_budget: the work budget to charge (a WorkBudget of the default limit when null).
+Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_blueprint, WorkBudget *p_budget = nullptr);
 
 } // namespace bf3::core::gameplay

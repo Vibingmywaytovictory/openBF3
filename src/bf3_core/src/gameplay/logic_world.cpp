@@ -1,5 +1,79 @@
 // Blueprint scopes and the property resolver. Ported from IW4L level_bf3 (connections.rs,
 // world.rs, level.rs), Apache-2.0; see the header for what is and is not carried over.
+//
+// --- Cost model (hostile input) ------------------------------------------------------------------
+// Every public entry point of the gameplay readers runs on ONE WorkBudget (work_budget.h): the
+// caller's, or one of WorkBudget::kDefaultLimit units it makes for the call. The entry points are
+// LogicWorld::build and every later query on that world, subworld_included, read_mode_def (with
+// level_modes, its team, size and fuse helpers), read_scoring, read_unlock_progression,
+// read_kit_def, read_team_data, read_soldier_def and read_vehicle_def. Work is charged BEFORE it is
+// done, where it is done; once the budget is exhausted every charge fails at once, every loop below
+// stops at its next charge, and every entry point returns the budget error (it checks status()
+// after the walk and again before it returns, so a helper that returned early with an empty value
+// never yields a result). Retail reads use at most ~21k units of the default 1M (README).
+//
+// Unit costs. A field lookup or is_a reads at most 255 fields x kBaseDepth (32) type descriptors;
+// every instance or struct a loop examines is charged its type width (WorkBudget::charge_type: one
+// extra unit per 64 fields, nothing for retail types), so the lookups a unit pays for stay a small
+// constant. data_field and field_name_of match the descriptors' stored name hashes and never hash
+// a name. A reference resolve is one hash lookup (a lazy EbxLibrary parses a partition at most once
+// in its lifetime, so parsing is bounded by the install, not by the walk). A string copied or
+// lowercased costs one unit per WorkBudget::kBytesPerUnit bytes, charged before the copy; string
+// compares stop at the shorter side, and every compare below has a short side of fixed size (a type
+// or field name literal, the mode id) unless it is charged.
+//
+// Each loop or recursion reachable from those entry points, and what bounds it ("raw size" is the
+// element count of an EBX array, null and unresolvable entries included, charged before the scan;
+// arrays and strings can be shared by any number of instances, so no scan is assumed to be paid by
+// the input size alone):
+// logic_world.cpp
+//   LogicWalker::visit            recursion; 1 unit per visit; depth <= max_depth
+//   LogicWalker::objects          raw Objects size (the walk's emit() calls are one per charged entry),
+//                                 then each resolved object's type width before its lookups
+//   LogicWalker::on_path          std::find over path_ (<= max_depth + 1 entries) per charged entry
+//   subworld_included             raw Settings size, then raw EnabledOptions size of each setting;
+//                                 each option compare stops at |mode| bytes
+//   LogicWalker::note             bundle name copy charged by length; lists capped at 4096 names
+//   referenced_blueprint          bundle name lowercase copy charged by length
+//   LogicConnections::of          raw size of each connection array; the by-target index is built in
+//                                 one pass over the charged entries
+//   LogicWorld::connection_set    memoised per blueprint: of() runs once per blueprint, a lookup is
+//                                 one hash probe made after a charged step
+//   property_in, source_value,    recursion; 1 unit per call (query_step), depth <= kResolveDepth,
+//   interface_in                  <= kQuerySteps per query; each loop over property_into() checks
+//                                 query_spent() first, and interface_in charges each Fields entry
+//   PropertyValue::parse          charged by the constant's length before it is parsed
+//   data_field                    one pass over the source's type chain (its width charged by the
+//                                 query step that asks)
+// mode_def.cpp
+//   level_modes                   raw Categories size, raw Mode size per category, names by length
+//   read_mode_def                 per sub-world scope the raw Fields size (and at most 65536 in all),
+//                                 1 unit per object of the world and per crate interaction, names
+//                                 copied by length, every effective()/interface_value() a charged query
+//   location_sid                  <= 64 interface_value() queries (charged) up the scope chain
+//   read_team_data (kit_def.cpp)  once per TeamEntityData object: raw size of both customization lists
+//   read_fuse                     per crate scope: raw event list size (index), raw property list size
+//                                 (feeds), and each source's event list size before it is scanned
+//   read_size                     instance count of settings_win32, raw Information / Sizes / Teams sizes
+//   read_scoring                  instance count, 1 unit per ScoringTypeData, names by length
+// kit_def.cpp
+//   read_unlock_progression       instance count of each table, raw UnlockInfos / Unlocks sizes
+//   read_kit_def / read_table     raw UnlockParts size, raw SelectableUnlocks size per part (a part
+//                                 listed K times is charged K times), names by length
+// soldier_def.cpp
+//   collect_components            recursion, depth <= 16, at most 4096 components; raw Components
+//                                 size charged per visit
+//   curves, poses, states         raw size of every array read
+//   first_of / unlock loop        over the (<= 4096) collected components, charged once per pass
+//   unlock_targets                <= 4 hops; raw property connection count charged per hop; hub
+//                                 frontier lookups are hash probes; each target name copy charged
+//   specialization pairs          raw UnlockValues size; per pair, 1 unit plus the compared bytes
+//                                 per target
+// vehicle_def.cpp
+//   Layout::walk                  recursion, depth <= 32, at most 8192 components; raw Components
+//                                 size charged per visit
+//   seat / turret association     child tables built in one pass, then O(depth <= 33) per component
+//   seat sort, per-node readers   1 unit per node, names by length
 #include "bf3/core/gameplay/logic_world.h"
 
 #include "bf3/core/ids.h"
@@ -272,7 +346,7 @@ std::optional<EbxRef> PropertyValue::as_ref() const {
 
 // --- LogicConnections ----------------------------------------------------------------------------
 
-LogicConnections LogicConnections::of(const EbxResolver &p_db, const EbxInstance &p_blueprint) {
+Result<LogicConnections> LogicConnections::of(const EbxResolver &p_db, const EbxInstance &p_blueprint, WorkBudget &r_budget) {
 	LogicConnections out;
 	struct List {
 		const char *name;
@@ -292,6 +366,15 @@ LogicConnections LogicConnections::of(const EbxResolver &p_db, const EbxInstance
 		if (!array) {
 			continue;
 		}
+		// Every entry costs two resolves, whether or not they succeed, and one array may serve many
+		// blueprints: charge them all before the scan (a wide connection struct type costs more).
+		size_t extra = 0;
+		if (const std::optional<EbxValue> first = array->size() > 0 ? array->get(0) : std::nullopt) {
+			if (const std::optional<EbxStruct> element = first->as_struct()) {
+				extra = WorkBudget::type_width(*element) / WorkBudget::kFieldsPerUnit;
+			}
+		}
+		BF3_TRY(r_budget.charge(array->size() * (1 + extra)));
 		list.into->reserve(array->size());
 		for (const EbxValue entry : *array) {
 			const auto end = [&](const char *p_field) -> std::optional<EbxInstance> {
@@ -313,41 +396,59 @@ LogicConnections LogicConnections::of(const EbxResolver &p_db, const EbxInstance
 			list.into->push_back({ *source, id(list.source_field), *target, id(list.target_field) });
 		}
 	}
-	out.by_target_.reserve(out.property.size());
+	// Indices are appended in connection order, so each list is sorted (the IW4L resolver's order).
 	for (uint32_t i = 0; i < out.property.size(); ++i) {
-		out.by_target_.emplace(TargetKey{ InstanceKey::of(out.property[i].target), out.property[i].target_field }, i);
+		out.by_target_[TargetKey{ InstanceKey::of(out.property[i].target), out.property[i].target_field }].push_back(i);
 	}
 	return out;
 }
 
-std::vector<uint32_t> LogicConnections::property_into(const EbxInstance &p_target, int32_t p_field) const {
-	std::vector<uint32_t> out;
-	const auto range = by_target_.equal_range(TargetKey{ InstanceKey::of(p_target), p_field });
-	for (auto it = range.first; it != range.second; ++it) {
-		out.push_back(it->second);
-	}
-	// Connection order, as the IW4L resolver tries them.
-	std::sort(out.begin(), out.end());
-	return out;
+std::span<const uint32_t> LogicConnections::property_into(const EbxInstance &p_target, int32_t p_field) const {
+	const auto it = by_target_.find(TargetKey{ InstanceKey::of(p_target), p_field });
+	return it == by_target_.end() ? std::span<const uint32_t>() : std::span<const uint32_t>(it->second);
 }
 
 // --- helpers ------------------------------------------------------------------------------------
 
 std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field) {
-	for (const EbxField &f : p_object.fields()) {
-		if (field_id(f.name) == p_field) {
-			return f.value;
+	// The fields() order (base types first, declaration order, '$' base links skipped), matched by
+	// the descriptor's name hash: the parser keeps each field's ebx_name_hash, so no name is hashed
+	// again here (a name can be as long as the partition's name table).
+	const EbxPartition &partition = p_object.partition();
+	const std::vector<EbxPartition::Complex> &complexes = partition.complex_descs();
+	const std::vector<EbxPartition::Field> &fields = partition.field_descs();
+	std::array<std::pair<uint32_t, size_t>, EbxPartition::kBaseDepth> chain{};
+	size_t depth = 0;
+	std::optional<std::pair<uint32_t, size_t>> next = std::make_pair(p_object.data().complex(), size_t(p_object.data().offset()));
+	while (next && depth < chain.size() && next->first < complexes.size()) {
+		chain[depth++] = *next;
+		const EbxPartition::Complex &desc = complexes[next->first];
+		std::optional<std::pair<uint32_t, size_t>> base;
+		for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
+			if (fields[f].code == ebx_code::kVoid) {
+				base = std::make_pair(static_cast<uint32_t>(fields[f].reference), next->second + static_cast<size_t>(static_cast<int64_t>(fields[f].offset)));
+				break;
+			}
+		}
+		next = base;
+	}
+	while (depth > 0) {
+		const auto [complex, at] = chain[--depth];
+		const EbxPartition::Complex &desc = complexes[complex];
+		for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
+			const EbxPartition::Field &member = fields[f];
+			if (member.code == ebx_code::kVoid || static_cast<int32_t>(member.hash) != p_field) {
+				continue;
+			}
+			if (std::optional<EbxValue> value = partition.decode(f, at + static_cast<size_t>(static_cast<int64_t>(member.offset)))) {
+				return value;
+			}
 		}
 	}
 	return std::nullopt;
 }
 
-bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode) {
-	size_t steps = 0;
-	return subworld_included(p_db, p_reference, p_mode, steps);
-}
-
-bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, size_t &r_steps) {
+Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget) {
 	const std::optional<EbxValue> auto_load = p_reference.get("AutoLoad");
 	if (!auto_load || !auto_load->as_bool().value_or(false)) {
 		return false;
@@ -359,11 +460,25 @@ bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, 
 	if (!settings) {
 		return true;
 	}
-	const std::vector<EbxInstance> list = p_db.follow_all(settings->data(), "Settings");
-	r_steps += list.size();
-	for (const EbxInstance &setting : list) {
+	const std::optional<EbxValue> list_value = settings->get("Settings");
+	const OptionalEbxArray list = list_value ? list_value->as_array() : OptionalEbxArray();
+	if (!list) {
+		return true;
+	}
+	// Every entry is charged before the scan, null and unresolvable ones included: one reference
+	// can be placed any number of times, and its settings array shared by any number of them.
+	BF3_TRY(r_budget.charge(list->size()));
+	for (const EbxValue entry : *list) {
+		const std::optional<EbxRef> r = entry.as_ref();
+		const std::optional<EbxInstance> resolved = r ? p_db.resolve(settings->partition(), *r) : std::nullopt;
+		if (!resolved) {
+			continue;
+		}
+		const EbxInstance &setting = *resolved;
+		BF3_TRY(r_budget.charge_type(setting.data()));
 		const std::optional<EbxInstance> criterion = p_db.follow(setting.data(), "Criterion");
 		if (criterion) {
+			BF3_TRY(r_budget.charge_type(criterion->data()));
 			const std::optional<EbxValue> name = criterion->get("Name");
 			const std::optional<std::string_view> text = name ? name->as_str() : std::nullopt;
 			if (text && !iequals_ascii(*text, "GameMode")) {
@@ -373,7 +488,7 @@ bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, 
 		bool enabled = false;
 		const std::optional<EbxValue> options = setting.get("EnabledOptions");
 		if (const OptionalEbxArray array = options ? options->as_array() : OptionalEbxArray()) {
-			r_steps += array->size();
+			BF3_TRY(r_budget.charge(array->size()));
 			for (const EbxValue option : *array) {
 				const std::optional<std::string_view> text = option.as_str();
 				if (text && iequals_ascii(*text, p_mode)) {
@@ -394,7 +509,7 @@ bool subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, 
 class LogicWalker {
 public:
 	LogicWalker(LogicWorld &r_world, const LogicWorldOptions &p_options) :
-			world_(r_world), options_(p_options) {}
+			world_(r_world), options_(p_options), budget_(*r_world.budget_) {}
 
 	// Walks p_container's Objects. Every container on the current path is on path_, so a blueprint
 	// that (directly or through others) contains itself is skipped instead of being re-entered.
@@ -414,18 +529,24 @@ public:
 		if (world_.scopes_.size() >= options_.max_scopes) {
 			return make_error("logic world: more than " + std::to_string(options_.max_scopes) + " scopes");
 		}
+		const std::optional<uint32_t> set = world_.connection_set(p_blueprint);
+		if (!set) {
+			return budget_.error(); // the connection arrays did not fit the budget
+		}
 		LogicScope scope;
 		scope.blueprint = p_blueprint;
 		scope.reference = p_reference;
 		scope.parent = p_parent;
 		scope.depth = p_parent ? world_.scopes_[*p_parent].depth + 1 : 0;
-		scope.connections = world_.connection_set(p_blueprint);
+		scope.connections = *set;
 		world_.scopes_.push_back(scope);
 		return static_cast<uint32_t>(world_.scopes_.size() - 1);
 	}
 
 private:
-	Status step(size_t p_count) {
+	// Adds walk steps (the max_walk_steps cap) for work already charged to the budget where it was
+	// done (queries, inclusion tests).
+	Status count(size_t p_count) {
 		world_.stats_.walk_steps += p_count;
 		if (world_.stats_.walk_steps > options_.max_walk_steps) {
 			return make_error("logic world: walk exceeds " + std::to_string(options_.max_walk_steps) + " steps");
@@ -433,13 +554,22 @@ private:
 		return Status::success();
 	}
 
+	// Walk steps for work about to be done: counted, and charged to the budget first.
+	Status step(size_t p_count) {
+		BF3_TRY(count(p_count));
+		return budget_.charge(p_count);
+	}
+
 	// Records a sub-world bundle name in a stats list. A list keeps at most kMaxListedSubworlds
-	// names (later ones are dropped), so a reference reached through a fan-out cannot grow it
-	// without bound.
-	static void note(std::vector<std::string> &r_list, std::string_view p_name) {
-		if (r_list.size() < LogicWorldStats::kMaxListedSubworlds) {
-			r_list.emplace_back(p_name);
+	// names (later ones are dropped), and each copy is charged by its length, so a reference reached
+	// through a fan-out cannot grow the lists or the copying without bound.
+	Status note(std::vector<std::string> &r_list, std::string_view p_name) {
+		if (r_list.size() >= LogicWorldStats::kMaxListedSubworlds) {
+			return Status::success();
 		}
+		BF3_TRY(budget_.charge_bytes(p_name.size()));
+		r_list.emplace_back(p_name);
+		return Status::success();
 	}
 
 	// Whether p_blueprint is a container on the current walk path (a reference cycle).
@@ -459,6 +589,7 @@ private:
 			return list.error();
 		}
 		for (const EbxInstance &object : *list) {
+			BF3_TRY(budget_.charge_type(object.data())); // its field lookups below
 			if (object.is_a("WorldPartReferenceObjectData")) {
 				Result<bool> skip = excluded(p_scope, object);
 				if (!skip) {
@@ -493,8 +624,8 @@ private:
 		return Status::success();
 	}
 
-	// The resolved Objects of a container. Every array entry is charged to the walk budget before
-	// any is examined, null and unresolvable ones included: each costs a resolve, and a part reached
+	// The resolved Objects of a container. Every array entry is charged to the walk before any is
+	// examined, null and unresolvable ones included: each costs a resolve, and a part reached
 	// through a fan-out re-scans its whole array on every visit.
 	Result<std::vector<EbxInstance>> objects(const EbxInstance &p_container) {
 		std::vector<EbxInstance> out;
@@ -522,12 +653,16 @@ private:
 	Status enter_subworld(const EbxInstance &p_reference, uint32_t p_scope, uint32_t p_depth) {
 		const std::optional<EbxValue> bundle = p_reference.get("BundleName");
 		const std::string_view name = bundle ? bundle->as_str().value_or(std::string_view()) : std::string_view();
-		size_t steps = 0;
-		const bool included = subworld_included(world_.db(), p_reference, options_.mode, steps);
-		BF3_TRY(step(steps));
+		// The inclusion test charges the budget itself (before each array scan); its work also
+		// counts as walk steps.
+		const size_t before = budget_.used();
+		const Result<bool> included = subworld_included(world_.db(), p_reference, options_.mode, budget_);
+		BF3_TRY(count(budget_.used() - before));
 		if (!included) {
-			note(world_.stats_.skipped_subworlds, name);
-			return Status::success();
+			return included.error();
+		}
+		if (!*included) {
+			return note(world_.stats_.skipped_subworlds, name);
 		}
 		Result<bool> skip = excluded(p_scope, p_reference);
 		if (!skip) {
@@ -537,14 +672,14 @@ private:
 			return Status::success();
 		}
 		const std::optional<EbxInstance> data = world_.referenced_blueprint(p_reference);
+		BF3_TRY(budget_.status()); // nullopt above may mean the name copy did not fit
 		if (!data) {
-			note(world_.stats_.absent_subworlds, name);
-			return Status::success();
+			return note(world_.stats_.absent_subworlds, name);
 		}
 		if (on_path(*data)) {
 			return Status::success();
 		}
-		note(world_.stats_.subworlds, name);
+		BF3_TRY(note(world_.stats_.subworlds, name));
 		Result<uint32_t> child = push(*data, p_reference, p_scope);
 		if (!child) {
 			return child.error();
@@ -594,14 +729,15 @@ private:
 		return Status::success();
 	}
 
-	// Whether a reference is Excluded (connected value, else its own field); the query's resolver
-	// steps count against the walk budget.
+	// Whether a reference is Excluded (connected value, else its own field). The query charges the
+	// budget step by step; its steps also count as walk steps.
 	Result<bool> excluded(uint32_t p_scope, const EbxInstance &p_reference) {
 		bool value = false;
 		size_t steps = 0;
 		const std::optional<PropertyValue> v = world_.property_counted(p_scope, p_reference, field_id("Excluded"), steps);
-		BF3_TRY(step(steps));
-		// With the query budget spent the connected value is unknown; the stored field below could
+		BF3_TRY(count(steps));
+		BF3_TRY(budget_.status());
+		// With the query cap spent the connected value is unknown; the stored field below could
 		// then be wrong, so the walk fails instead.
 		if (world_.query_budget_spent()) {
 			return make_error("logic world: query budget of " + std::to_string(world_.max_query_steps_) + " steps spent during the walk");
@@ -619,6 +755,7 @@ private:
 
 	LogicWorld &world_;
 	const LogicWorldOptions &options_;
+	WorkBudget &budget_;
 	std::vector<InstanceKey> path_; // containers being walked, outermost first (at most max_depth + 1)
 };
 
@@ -628,23 +765,36 @@ Result<LogicWorld> LogicWorld::build(const EbxResolver &p_db, const EbxInstance 
 	LogicWorld world;
 	world.db_ = &p_db;
 	world.max_query_steps_ = p_options.max_query_steps;
+	if (p_options.budget != nullptr) {
+		world.budget_ = p_options.budget;
+	} else {
+		world.own_budget_ = std::make_unique<WorkBudget>(p_options.max_work);
+		world.budget_ = world.own_budget_.get();
+	}
+	BF3_TRY(world.budget_->status());
 	LogicWalker walker(world, p_options);
 	Result<uint32_t> root = walker.push(p_root, std::nullopt, std::nullopt);
 	if (!root) {
 		return root.error();
 	}
 	BF3_TRY(walker.visit(p_root, *root, 0));
+	// A helper that ran out of budget returns an empty answer; the walk must still end in the error.
+	BF3_TRY(world.budget_->status());
 	return world;
 }
 
-uint32_t LogicWorld::connection_set(const EbxInstance &p_blueprint) const {
+std::optional<uint32_t> LogicWorld::connection_set(const EbxInstance &p_blueprint) const {
 	const InstanceKey key = InstanceKey::of(p_blueprint);
 	const auto it = set_by_blueprint_.find(key);
 	if (it != set_by_blueprint_.end()) {
 		return it->second;
 	}
+	Result<LogicConnections> set = LogicConnections::of(*db_, p_blueprint, *budget_);
+	if (!set) {
+		return std::nullopt; // the budget is spent (for good): the caller reports its error
+	}
 	const uint32_t at = static_cast<uint32_t>(sets_.size());
-	sets_.push_back(LogicConnections::of(*db_, p_blueprint));
+	sets_.push_back(std::move(*set));
 	set_by_blueprint_.emplace(key, at);
 	return at;
 }
@@ -661,6 +811,10 @@ std::optional<EbxInstance> LogicWorld::referenced_blueprint(const EbxInstance &p
 		const std::optional<EbxValue> bundle = p_reference.get("BundleName");
 		const std::optional<std::string_view> text = bundle ? bundle->as_str() : std::nullopt;
 		if (!text || text->empty()) {
+			return std::nullopt;
+		}
+		// The lowercase copy (and the resolver's own) costs the name's length.
+		if (!budget_->take(1 + text->size() / WorkBudget::kBytesPerUnit)) {
 			return std::nullopt;
 		}
 		std::string name = to_lower_ascii(*text);
@@ -737,15 +891,30 @@ std::optional<PropertyValue> LogicWorld::effective(const LogicObject &p_object, 
 	return stored ? std::optional<PropertyValue>(PropertyValue::of_field(*stored)) : std::nullopt;
 }
 
+bool LogicWorld::query_step(size_t &r_steps) const {
+	if (++r_steps > kQuerySteps) {
+		return false;
+	}
+	return budget_->take(1);
+}
+
 std::optional<PropertyValue> LogicWorld::property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth, size_t &r_steps) const {
-	if (p_depth == 0 || ++r_steps > kQuerySteps) {
+	if (p_depth == 0 || !query_step(r_steps)) {
 		return std::nullopt;
 	}
 	const uint32_t depth = p_depth - 1;
 	const EbxInstance blueprint = p_frame.child ? p_frame.blueprint : scopes_[p_frame.scope].blueprint;
-	const LogicConnections &set = sets_[connection_set(blueprint)];
+	const std::optional<uint32_t> set_at = connection_set(blueprint);
+	if (!set_at) {
+		return std::nullopt;
+	}
+	// A deque keeps `set` (and the index the span views) valid while source_value adds sets.
+	const LogicConnections &set = sets_[*set_at];
 	for (const uint32_t at : set.property_into(p_target, p_field)) {
-		// Copy: source_value may add connection sets (a deque keeps `set` valid, the copy is cheap).
+		// Many connections may feed one field: stop as soon as the next step would fail.
+		if (query_spent(r_steps)) {
+			return std::nullopt;
+		}
 		const LogicConnection connection = set.property[at];
 		if (std::optional<PropertyValue> v = source_value(p_frame, connection.source, connection.source_field, depth, r_steps)) {
 			return v;
@@ -755,11 +924,15 @@ std::optional<PropertyValue> LogicWorld::property_in(const Frame &p_frame, const
 }
 
 std::optional<PropertyValue> LogicWorld::source_value(const Frame &p_frame, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth, size_t &r_steps) const {
-	if (p_depth == 0 || ++r_steps > kQuerySteps) {
+	if (p_depth == 0 || !query_step(r_steps)) {
 		return std::nullopt;
 	}
 	const uint32_t depth = p_depth - 1;
 	const EbxInstance blueprint = p_frame.child ? p_frame.blueprint : scopes_[p_frame.scope].blueprint;
+	// Field lookups on the blueprint and the source (data_field, referenced_blueprint).
+	if (!budget_->take_type(blueprint.data()) || !budget_->take_type(p_source.data())) {
+		return std::nullopt;
+	}
 	if (const std::optional<EbxInstance> descriptor = db_->follow(blueprint.data(), "Descriptor"); descriptor && *descriptor == p_source) {
 		return interface_in(p_frame, p_field, depth, r_steps);
 	}
@@ -773,8 +946,15 @@ std::optional<PropertyValue> LogicWorld::source_value(const Frame &p_frame, cons
 			child.child = true;
 			child.reference = p_source;
 			child.blueprint = *inner;
-			const LogicConnections &set = sets_[connection_set(*inner)];
+			const std::optional<uint32_t> set_at = connection_set(*inner);
+			if (!set_at) {
+				return std::nullopt;
+			}
+			const LogicConnections &set = sets_[*set_at];
 			for (const uint32_t at : set.property_into(*descriptor, p_field)) {
+				if (query_spent(r_steps)) {
+					return std::nullopt;
+				}
 				const LogicConnection connection = set.property[at];
 				if (std::optional<PropertyValue> v = source_value(child, connection.source, connection.source_field, depth, r_steps)) {
 					return v;
@@ -790,7 +970,7 @@ std::optional<PropertyValue> LogicWorld::source_value(const Frame &p_frame, cons
 }
 
 std::optional<PropertyValue> LogicWorld::interface_in(const Frame &p_frame, int32_t p_field, uint32_t p_depth, size_t &r_steps) const {
-	if (p_depth == 0 || ++r_steps > kQuerySteps) {
+	if (p_depth == 0 || !query_step(r_steps)) {
 		return std::nullopt;
 	}
 	// What the parent connects into the instantiating reference.
@@ -808,8 +988,11 @@ std::optional<PropertyValue> LogicWorld::interface_in(const Frame &p_frame, int3
 	}
 	// Else the descriptor's constant.
 	const EbxInstance blueprint = p_frame.child ? p_frame.blueprint : scopes_[p_frame.scope].blueprint;
+	if (!budget_->take_type(blueprint.data())) {
+		return std::nullopt;
+	}
 	const std::optional<EbxInstance> descriptor = db_->follow(blueprint.data(), "Descriptor");
-	if (!descriptor) {
+	if (!descriptor || !budget_->take_type(descriptor->data())) {
 		return std::nullopt;
 	}
 	const std::optional<EbxValue> fields = descriptor->get("Fields");
@@ -817,9 +1000,15 @@ std::optional<PropertyValue> LogicWorld::interface_in(const Frame &p_frame, int3
 	if (!array) {
 		return std::nullopt;
 	}
+	size_t entry_extra = 0; // a wide DataField struct type costs more per entry
+	if (const std::optional<EbxValue> first = array->size() > 0 ? array->get(0) : std::nullopt) {
+		if (const std::optional<EbxStruct> element = first->as_struct()) {
+			entry_extra = WorkBudget::type_width(*element) / WorkBudget::kFieldsPerUnit;
+		}
+	}
 	for (const EbxValue entry : *array) {
 		// Each field scanned is a step, so a huge Fields array cannot multiply the query cost.
-		if (++r_steps > kQuerySteps) {
+		if (!query_step(r_steps) || !budget_->take(entry_extra)) {
 			return std::nullopt;
 		}
 		const std::optional<EbxValue> id = entry.get("Id");
@@ -828,6 +1017,10 @@ std::optional<PropertyValue> LogicWorld::interface_in(const Frame &p_frame, int3
 		}
 		const std::optional<EbxValue> value = entry.get("Value");
 		if (const std::optional<std::string_view> text = value ? value->as_str() : std::nullopt) {
+			// Parsing reads the whole constant.
+			if (!budget_->take(1 + text->size() / WorkBudget::kBytesPerUnit)) {
+				return std::nullopt;
+			}
 			if (std::optional<PropertyValue> parsed = PropertyValue::parse(*text)) {
 				return parsed;
 			}

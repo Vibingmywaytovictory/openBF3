@@ -16,6 +16,7 @@
 // Units as in the data: metres, seconds, m/s, degrees, kg, hit points.
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -160,6 +161,7 @@ struct SoldierDef {
 };
 
 // Reads the SoldierBlueprint partition (default characters/soldiers/mpsoldier) through p_db.
-Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_blueprint = "characters/soldiers/mpsoldier");
+// p_budget: the work budget to charge (a WorkBudget of the default limit when null).
+Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_blueprint = "characters/soldiers/mpsoldier", WorkBudget *p_budget = nullptr);
 
 } // namespace bf3::core::gameplay

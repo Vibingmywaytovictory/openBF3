@@ -107,4 +107,5 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/kit_def.h
     include/bf3/core/gameplay/mode_def.h
     include/bf3/core/gameplay/vehicle_def.h
+    include/bf3/core/gameplay/work_budget.h
 )

@@ -22,6 +22,7 @@
 // the tables the default is unknown (nullptr).
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/ids.h"
 #include "bf3/core/result.h"
 
@@ -52,7 +53,8 @@ struct UnlockProgression {
 };
 
 // Reads the four progression tables named above; a missing table is skipped (tables counts them).
-UnlockProgression read_unlock_progression(const EbxResolver &p_db);
+// p_budget: the work budget to charge (a WorkBudget of the default limit when null).
+Result<UnlockProgression> read_unlock_progression(const EbxResolver &p_db, WorkBudget *p_budget = nullptr);
 
 struct KitUnlock {
 	std::string unlock; // unlock asset partition, e.g. weapons/m16a4/u_m16a4
@@ -92,9 +94,11 @@ struct TeamDef {
 	std::vector<std::string> vehicle_customizations;
 };
 
-// p_progression: the tables from read_unlock_progression (read here when null).
-Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, const UnlockProgression *p_progression = nullptr);
+// p_progression: the tables from read_unlock_progression (read here when null). p_budget: the work
+// budget to charge, e.g. one shared by every kit of a mode (a WorkBudget of the default limit when null).
+Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, const UnlockProgression *p_progression = nullptr,
+		WorkBudget *p_budget = nullptr);
 // A TeamData asset (gameplay/teams/us).
-Result<TeamDef> read_team_data(const EbxResolver &p_db, const EbxInstance &p_team_data);
+Result<TeamDef> read_team_data(const EbxResolver &p_db, const EbxInstance &p_team_data, WorkBudget *p_budget = nullptr);
 
 } // namespace bf3::core::gameplay

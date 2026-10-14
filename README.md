@@ -256,9 +256,15 @@ connections/world/level, Apache-2.0) walks the included sub-worlds and their pre
 field's effective value along those chains (depth and step limits, cycle safe). Specialization pairs reach their
 target fields through Float/IntHub entities whose port ids are designer hashes; the reader matches each pair to the
 target field with the longest common name prefix (`UnderslungBoostL1` -> `UnderslungGrenadeIncrease`).
-The walk also has a total work budget (`max_walk_steps`, `max_query_steps`; retail modes need under 8k and 4k steps),
-so a hostile graph of nested world parts or of huge Objects arrays (null entries count too) ends with an error
-instead of running for ever.
+Every reader runs on one `WorkBudget` (`work_budget.h`, default 1M units): the walk, every property query, connection
+set, sub-world inclusion test and array scan of the read is charged before it is done (null and unresolvable array
+entries, repeated references to one object, arrays shared by many instances, connection loops and wide type chains
+all count), so hostile data ends with "work budget of N units exhausted" within a second instead of running for
+minutes. A caller can pass one budget to several reads (`bf3dump kits` shares one between the mode, the progression
+tables and every kit). Retail needs at most 16,063 units for a mode (XP3_Shield Rush), 20,904 for `kits` with every
+kit, 3,632 for the soldier and 797 for a vehicle; the walk caps `max_walk_steps` / `max_query_steps` stay on top
+(retail: under 8k and 4k steps). The cost model is written down at the top of `src/gameplay/logic_world.cpp`; bf3dump
+prints the units a command used on stderr.
 
 The kit tables have no "default" flag, so a slot's default is its first unlock that none of the four persistence
 progression tables grants (rank, licence, award or scoring-bucket unlock) and that is not an ammo/scope variant

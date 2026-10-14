@@ -1,4 +1,5 @@
-// KitDef / TeamDef readers (research/topics/02-soldier-kits-modes.md §2).
+// KitDef / TeamDef readers (research/topics/02-soldier-kits-modes.md §2). Every array scan and
+// name copy is charged to the read's WorkBudget first (cost model: logic_world.cpp).
 #include "bf3/core/gameplay/kit_def.h"
 
 #include "bf3/core/ids.h"
@@ -32,31 +33,27 @@ void add_unlock_info(UnlockProgression &r_progression, const EbxValue &p_info, U
 
 // UnlockInfos[] (RankLevelData, StaticUnlockList, AwardData) and Unlocks[].UnlockInfo
 // (ScoringBucketData) of one instance.
-void add_instance(UnlockProgression &r_progression, const EbxInstance &p_instance, UnlockGate p_gate) {
-	if (const std::optional<EbxValue> infos = p_instance.get("UnlockInfos")) {
-		if (const OptionalEbxArray array = infos->as_array()) {
-			for (const EbxValue info : *array) {
-				add_unlock_info(r_progression, info, p_gate);
-			}
+void add_instance(WorkBudget &r_budget, UnlockProgression &r_progression, const EbxInstance &p_instance, UnlockGate p_gate) {
+	if (const OptionalEbxArray array = array_of(r_budget, p_instance.get("UnlockInfos"))) {
+		for (const EbxValue info : *array) {
+			add_unlock_info(r_progression, info, p_gate);
 		}
 	}
-	if (const std::optional<EbxValue> unlocks = p_instance.get("Unlocks")) {
-		if (const OptionalEbxArray array = unlocks->as_array()) {
-			for (const EbxValue entry : *array) {
-				if (const std::optional<EbxValue> info = entry.get("UnlockInfo")) {
-					add_unlock_info(r_progression, *info, p_gate);
-				}
+	if (const OptionalEbxArray array = array_of(r_budget, p_instance.get("Unlocks"))) {
+		for (const EbxValue entry : *array) {
+			if (const std::optional<EbxValue> info = entry.get("UnlockInfo")) {
+				add_unlock_info(r_progression, *info, p_gate);
 			}
 		}
 	}
 }
 
-KitUnlock read_unlock(const EbxResolver &p_db, const EbxInstance &p_unlock, const UnlockProgression &p_progression) {
+KitUnlock read_unlock(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_unlock, const UnlockProgression &p_progression) {
 	KitUnlock out;
-	out.unlock = partition_name(p_db, p_unlock);
-	out.type = std::string(p_unlock.type_name());
+	out.unlock = partition_name(r_budget, p_db, p_unlock);
+	out.type = copy_text(r_budget, p_unlock.type_name());
 	if (p_unlock.is_a("SoldierWeaponUnlockAsset")) {
-		out.weapon = ref_name(p_db, p_unlock.data(), "Weapon");
+		out.weapon = ref_name(r_budget, p_db, p_unlock.data(), "Weapon");
 	}
 	out.gate = p_progression.gate(p_unlock.guid());
 	const std::optional<EbxValue> extra = p_unlock.get("Extra");
@@ -65,17 +62,19 @@ KitUnlock read_unlock(const EbxResolver &p_db, const EbxInstance &p_unlock, cons
 	return out;
 }
 
-std::vector<KitSlot> read_table(const EbxResolver &p_db, const EbxStruct &p_kit, std::string_view p_field, const UnlockProgression &p_progression) {
+// The parts of a CustomizationTable. A part listed K times is read (and charged) K times.
+std::vector<KitSlot> read_table(WorkBudget &r_budget, const EbxResolver &p_db, const EbxStruct &p_kit, std::string_view p_field,
+		const UnlockProgression &p_progression) {
 	std::vector<KitSlot> out;
 	const std::optional<EbxInstance> table = p_db.follow(p_kit, p_field);
 	if (!table) {
 		return out;
 	}
-	for (const EbxInstance &part : p_db.follow_all(table->data(), "UnlockParts")) {
+	for (const EbxInstance &part : follow_all(r_budget, p_db, table->data(), "UnlockParts")) {
 		KitSlot slot;
-		slot.ui_category_sid = text(part.data(), "UICategorySid");
-		for (const EbxInstance &unlock : p_db.follow_all(part.data(), "SelectableUnlocks")) {
-			slot.unlocks.push_back(read_unlock(p_db, unlock, p_progression));
+		slot.ui_category_sid = text(r_budget, part.data(), "UICategorySid");
+		for (const EbxInstance &unlock : follow_all(r_budget, p_db, part.data(), "SelectableUnlocks")) {
+			slot.unlocks.push_back(read_unlock(r_budget, p_db, unlock, p_progression));
 		}
 		out.push_back(std::move(slot));
 	}
@@ -132,7 +131,9 @@ UnlockGate UnlockProgression::gate(const Guid &p_unlock) const {
 	return it == gates.end() ? UnlockGate::Free : it->second;
 }
 
-UnlockProgression read_unlock_progression(const EbxResolver &p_db) {
+Result<UnlockProgression> read_unlock_progression(const EbxResolver &p_db, WorkBudget *p_budget) {
+	WorkBudget own;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
 	UnlockProgression out;
 	for (const ProgressionTable &table : kProgressionTables) {
 		const EbxPartition *partition = p_db.partition_by_name(table.partition);
@@ -140,11 +141,16 @@ UnlockProgression read_unlock_progression(const EbxResolver &p_db) {
 			continue;
 		}
 		++out.tables;
+		BF3_TRY(budget.charge(partition->instance_count()));
 		for (size_t i = 0; i < partition->instance_count(); ++i) {
 			if (const std::optional<EbxInstance> instance = partition->instance(i)) {
-				add_instance(out, *instance, table.gate);
+				BF3_TRY(budget.charge_type(instance->data()));
+				add_instance(budget, out, *instance, table.gate);
 			}
 		}
+	}
+	if (const Status spent = budget.status(); !spent) {
+		return error_at("unlock progression", spent.error());
 	}
 	return out;
 }
@@ -162,7 +168,9 @@ const KitUnlock *KitDef::default_unlock(WeaponSlot p_slot) const {
 	return nullptr;
 }
 
-Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, const UnlockProgression *p_progression) {
+Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, const UnlockProgression *p_progression, WorkBudget *p_budget) {
+	WorkBudget own_budget;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own_budget;
 	const std::string name = to_lower_ascii(p_asset);
 	const EbxPartition *partition = p_db.partition_by_name(name);
 	if (!partition) {
@@ -174,41 +182,52 @@ Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, c
 	}
 	UnlockProgression own;
 	if (!p_progression) {
-		own = read_unlock_progression(p_db);
+		Result<UnlockProgression> read = read_unlock_progression(p_db, &budget);
+		if (!read) {
+			return error_at("kit " + name, read.error());
+		}
+		own = std::move(*read);
 		p_progression = &own;
 	}
 	KitDef out;
 	out.asset = name;
-	out.label_sid = text(kit.data(), "LabelSid");
-	out.hud_icon = text(kit.data(), "UIHudIcon");
+	out.label_sid = text(budget, kit.data(), "LabelSid");
+	out.hud_icon = text(budget, kit.data(), "UIHudIcon");
 	out.progression_known = p_progression->known();
-	out.weapon_slots = read_table(p_db, kit.data(), "WeaponTable", *p_progression);
-	for (KitSlot &slot : read_table(p_db, kit.data(), "SpecializationTable", *p_progression)) {
+	out.weapon_slots = read_table(budget, p_db, kit.data(), "WeaponTable", *p_progression);
+	for (KitSlot &slot : read_table(budget, p_db, kit.data(), "SpecializationTable", *p_progression)) {
 		for (KitUnlock &u : slot.unlocks) {
 			out.specializations.push_back(std::move(u));
 		}
 	}
-	for (const KitSlot &slot : read_table(p_db, kit.data(), "VisualTable", *p_progression)) {
+	for (const KitSlot &slot : read_table(budget, p_db, kit.data(), "VisualTable", *p_progression)) {
 		out.visual_unlocks += slot.unlocks.size();
+	}
+	if (const Status spent = budget.status(); !spent) {
+		return error_at("kit " + name, spent.error());
 	}
 	return out;
 }
 
-Result<TeamDef> read_team_data(const EbxResolver &p_db, const EbxInstance &p_team_data) {
+Result<TeamDef> read_team_data(const EbxResolver &p_db, const EbxInstance &p_team_data, WorkBudget *p_budget) {
+	WorkBudget own;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
 	if (!p_team_data.is_a("TeamData")) {
 		return make_error("team: " + std::string(p_team_data.type_name()) + " is not a TeamData");
 	}
+	BF3_TRY(budget.charge_type(p_team_data.data()));
 	TeamDef out;
 	const EbxStruct t = p_team_data.data();
-	out.team_data = partition_name(p_db, p_team_data);
-	out.faction = text(t, "Faction");
-	out.soldier = ref_name(p_db, t, "Soldier");
-	for (const EbxInstance &kit : p_db.follow_all(t, "SoldierCustomization")) {
-		out.kits.push_back(partition_name(p_db, kit));
+	out.team_data = partition_name(budget, p_db, p_team_data);
+	out.faction = text(budget, t, "Faction");
+	out.soldier = ref_name(budget, p_db, t, "Soldier");
+	for (const EbxInstance &kit : follow_all(budget, p_db, t, "SoldierCustomization")) {
+		out.kits.push_back(partition_name(budget, p_db, kit));
 	}
-	for (const EbxInstance &v : p_db.follow_all(t, "VehicleCustomization")) {
-		out.vehicle_customizations.push_back(partition_name(p_db, v));
+	for (const EbxInstance &v : follow_all(budget, p_db, t, "VehicleCustomization")) {
+		out.vehicle_customizations.push_back(partition_name(budget, p_db, v));
 	}
+	BF3_TRY(budget.status());
 	return out;
 }
 

@@ -1,6 +1,8 @@
 // VehicleDef reader. The component walk and the seat/turret association rules are ported from
 // IW4L level_bf3 (vehicles/layout.rs, vehicles/mod.rs describe()), Apache-2.0, without meshes,
-// transforms, wheels and sounds.
+// transforms, wheels and sounds. Every array scan and name copy is charged to the read's WorkBudget
+// first; the association rules run on child tables built once, O(depth) per component (cost
+// model: logic_world.cpp).
 #include "bf3/core/gameplay/vehicle_def.h"
 
 #include "bf3/core/ids.h"
@@ -61,11 +63,12 @@ class Layout {
 public:
 	std::vector<Node> nodes;
 
-	void walk(const EbxResolver &p_db, const EbxInstance &p_container, int p_parent, size_t p_depth) {
+	// Each visit charges its whole Components array (a component listed K times is scanned K times).
+	void walk(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_parent, size_t p_depth) {
 		if (p_depth > kMaxDepth) {
 			return;
 		}
-		for (const EbxInstance &component : p_db.follow_all(p_container.data(), "Components")) {
+		for (const EbxInstance &component : follow_all(r_budget, p_db, p_container.data(), "Components")) {
 			if (nodes.size() >= kMaxComponents) {
 				return;
 			}
@@ -74,11 +77,28 @@ public:
 			}
 			const int at = static_cast<int>(nodes.size());
 			nodes.push_back({ component, p_parent, role_of(p_db, component) });
-			walk(p_db, component, at, p_depth + 1);
+			walk(r_budget, p_db, component, at, p_depth + 1);
 		}
 	}
 
-	// The nearest enclosing node of a role, p_at itself excluded.
+	// The first seat and the first turret among each node's children (index parent + 1, so the
+	// top-level components are at 0), in one pass: the rules below then take O(depth) per node
+	// instead of a scan of every node per step.
+	void index_children() {
+		first_seat_.assign(nodes.size() + 1, -1);
+		first_turret_.assign(nodes.size() + 1, -1);
+		for (size_t i = 0; i < nodes.size(); ++i) {
+			const size_t slot = static_cast<size_t>(nodes[i].parent + 1);
+			if (nodes[i].role == Role::Seat && first_seat_[slot] < 0) {
+				first_seat_[slot] = static_cast<int>(i);
+			} else if (nodes[i].role == Role::Turret && first_turret_[slot] < 0) {
+				first_turret_[slot] = static_cast<int>(i);
+			}
+		}
+	}
+
+	// The nearest enclosing node of a role, p_at itself excluded (a parent chain is at most
+	// kMaxDepth + 1 long: each node's parent is one walk level up).
 	int enclosing(int p_at, Role p_role) const {
 		for (int up = nodes[p_at].parent; up >= 0; up = nodes[up].parent) {
 			if (nodes[up].role == p_role) {
@@ -88,17 +108,11 @@ public:
 		return -1;
 	}
 
-	// The deepest turret down the first-turret chain below p_at.
+	// The deepest turret down the first-turret chain below p_at (each step goes one level down).
 	int innermost(int p_at) const {
 		int current = p_at;
-		for (size_t guard = 0; guard < nodes.size(); ++guard) {
-			int child = -1;
-			for (size_t i = 0; i < nodes.size(); ++i) {
-				if (nodes[i].parent == current && nodes[i].role == Role::Turret) {
-					child = static_cast<int>(i);
-					break;
-				}
-			}
+		for (size_t guard = 0; guard <= kMaxDepth + 1; ++guard) {
+			const int child = first_turret_[static_cast<size_t>(current + 1)];
 			if (child < 0) {
 				break;
 			}
@@ -114,13 +128,8 @@ public:
 		if (up >= 0) {
 			return up;
 		}
-		const int parent = nodes[p_at].parent;
-		for (size_t i = 0; i < nodes.size(); ++i) {
-			if (nodes[i].parent == parent && nodes[i].role == Role::Turret) {
-				return innermost(static_cast<int>(i));
-			}
-		}
-		return -1;
+		const int beside = first_turret_[static_cast<size_t>(nodes[p_at].parent + 1)];
+		return beside >= 0 ? innermost(beside) : -1;
 	}
 
 	// The seat that works the component at p_at: the component itself, a seat beside it, else the
@@ -132,15 +141,17 @@ public:
 				return current;
 			}
 			const int parent = nodes[current].parent;
-			for (size_t i = 0; i < nodes.size(); ++i) {
-				if (nodes[i].parent == parent && nodes[i].role == Role::Seat) {
-					return static_cast<int>(i);
-				}
+			if (const int beside = first_seat_[static_cast<size_t>(parent + 1)]; beside >= 0) {
+				return beside;
 			}
 			current = parent;
 		}
 		return -1;
 	}
+
+private:
+	std::vector<int> first_seat_;
+	std::vector<int> first_turret_;
 };
 
 VehicleHealthZoneDef read_zone(const EbxStruct &p_entity, std::string_view p_field) {
@@ -158,14 +169,14 @@ VehicleHealthZoneDef read_zone(const EbxStruct &p_entity, std::string_view p_fie
 	return out;
 }
 
-VehicleCameraDef read_camera(const EbxResolver &p_db, const EbxInstance &p_component) {
+VehicleCameraDef read_camera(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_component) {
 	VehicleCameraDef out;
 	const EbxStruct c = p_component.data();
 	out.field_of_view = static_cast<float>(number_or(c, "FieldOfView", 0));
 	out.first_person = boolean(c, "IsFirstPerson").value_or(false);
-	if (const std::optional<EbxInstance> camera = p_db.follow(c, "Camera")) {
-		out.camera_type = std::string(camera->type_name());
-		out.camera = partition_name(p_db, *camera);
+	if (const std::optional<EbxInstance> camera = p_db.follow(c, "Camera"); camera && r_budget.take_type(camera->data())) {
+		out.camera_type = copy_text(r_budget, camera->type_name());
+		out.camera = partition_name(r_budget, p_db, *camera);
 		if (camera->is_a("StaticCameraData")) {
 			const EbxStruct s = camera->data();
 			out.left_yaw = static_cast<float>(number_or(s, "LeftYawAngle", 0));
@@ -174,7 +185,7 @@ VehicleCameraDef read_camera(const EbxResolver &p_db, const EbxInstance &p_compo
 			out.down_pitch = static_cast<float>(number_or(s, "DownPitchAngle", 0));
 		}
 	}
-	if (const std::optional<EbxInstance> alternate = p_db.follow(c, "AlternateView")) {
+	if (const std::optional<EbxInstance> alternate = p_db.follow(c, "AlternateView"); alternate && r_budget.take_type(alternate->data())) {
 		if (const std::optional<double> fov = number(alternate->data(), "FieldOfView")) {
 			out.zoom_field_of_view = static_cast<float>(*fov);
 		}
@@ -197,7 +208,9 @@ const VehicleSeatDef *VehicleDef::driver() const {
 	return nullptr;
 }
 
-Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_blueprint) {
+Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_blueprint, WorkBudget *p_budget) {
+	WorkBudget own;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
 	const std::string name = to_lower_ascii(p_blueprint);
 	const EbxPartition *partition = p_db.partition_by_name(name);
 	if (!partition) {
@@ -208,12 +221,13 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	if (!entity || !entity->is_a("VehicleEntityData")) {
 		return make_error("vehicle: `" + name + "` has no VehicleEntityData (primary " + std::string(blueprint.type_name()) + ")");
 	}
+	BF3_TRY(budget.charge_type(entity->data()));
 	VehicleDef out;
 	out.blueprint = name;
 	const EbxStruct e = entity->data();
-	out.name_sid = text(e, "NameSid");
-	out.minimap_icon = text(e, "HudData.MinimapIcon");
-	out.controllable_type = text(e, "ControllableType");
+	out.name_sid = text(budget, e, "NameSid");
+	out.minimap_icon = text(budget, e, "HudData.MinimapIcon");
+	out.controllable_type = text(budget, e, "ControllableType");
 	out.front = read_zone(e, "FrontHealthZone");
 	out.rear = read_zone(e, "RearHealthZone");
 	out.left = read_zone(e, "LeftHealthZone");
@@ -238,14 +252,17 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	out.use_prediction = boolean(e, "UsePrediction").value_or(false);
 
 	Layout layout;
-	layout.walk(p_db, *entity, -1, 0);
+	layout.walk(budget, p_db, *entity, -1, 0);
 	out.components = layout.nodes.size();
+	// Each pass below looks at every node once (the nodes were charged by the walk); charge the passes.
+	BF3_TRY(budget.charge(4 * layout.nodes.size()));
+	layout.index_children();
 
 	for (const Node &node : layout.nodes) {
 		if (node.role != Role::Chassis) {
 			continue;
 		}
-		if (const std::optional<EbxInstance> config = p_db.follow(node.data.data(), "VehicleConfig")) {
+		if (const std::optional<EbxInstance> config = p_db.follow(node.data.data(), "VehicleConfig"); config && budget.take_type(config->data())) {
 			const EbxStruct c = config->data();
 			out.body_mass = static_cast<float>(number_or(c, "BodyMass", 0));
 			out.gravity_modifier = static_cast<float>(number_or(c, "GravityModifier", 1));
@@ -255,31 +272,29 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		}
 	}
 
-	// Seats sorted by EntryOrderNumber (stable: depth-first order breaks ties).
+	// Seats sorted by EntryOrderNumber (stable: depth-first order breaks ties). The keys are read
+	// once, not per comparison.
 	std::vector<int> seat_nodes;
+	std::vector<double> order(layout.nodes.size(), 0);
 	for (size_t i = 0; i < layout.nodes.size(); ++i) {
 		if (layout.nodes[i].role == Role::Seat) {
 			seat_nodes.push_back(static_cast<int>(i));
+			const std::optional<double> n = number(layout.nodes[i].data.data(), "EntryOrderNumber");
+			order[i] = n ? *n : std::numeric_limits<double>::max();
 		}
 	}
-	const auto order_of = [&](int p_node) {
-		const std::optional<double> n = number(layout.nodes[p_node].data.data(), "EntryOrderNumber");
-		return n ? *n : std::numeric_limits<double>::max();
-	};
-	std::stable_sort(seat_nodes.begin(), seat_nodes.end(), [&](int a, int b) { return order_of(a) < order_of(b); });
-	const auto seat_index = [&](int p_node) {
-		if (p_node < 0) {
-			return -1;
-		}
-		const auto it = std::find(seat_nodes.begin(), seat_nodes.end(), p_node);
-		return it == seat_nodes.end() ? -1 : static_cast<int>(it - seat_nodes.begin());
-	};
+	std::stable_sort(seat_nodes.begin(), seat_nodes.end(), [&](int a, int b) { return order[static_cast<size_t>(a)] < order[static_cast<size_t>(b)]; });
+	std::vector<int> seat_at(layout.nodes.size(), -1); // node -> seat index
+	for (size_t i = 0; i < seat_nodes.size(); ++i) {
+		seat_at[static_cast<size_t>(seat_nodes[i])] = static_cast<int>(i);
+	}
+	const auto seat_index = [&](int p_node) { return p_node < 0 ? -1 : seat_at[static_cast<size_t>(p_node)]; };
 	for (const int node : seat_nodes) {
 		const EbxInstance &d = layout.nodes[node].data;
 		VehicleSeatDef seat;
 		seat.entry_order = static_cast<int>(number_or(d.data(), "EntryOrderNumber", 0));
-		seat.seat_type = text(d.data(), "HudData.SeatType");
-		seat.component_type = std::string(d.type_name());
+		seat.seat_type = text(budget, d.data(), "HudData.SeatType");
+		seat.component_type = copy_text(budget, d.type_name());
 		seat.entry_radius = static_cast<float>(number_or(d.data(), "EntryRadius", 0));
 		seat.shows_soldier = boolean(d.data(), "ShowSoldierInEntry").value_or(false);
 		seat.own_weapon = d.is_a("SoldierEntryComponentData");
@@ -287,26 +302,22 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	}
 
 	std::vector<int> turret_nodes;
+	std::vector<int> turret_at(layout.nodes.size(), -1); // node -> turret index
 	for (size_t i = 0; i < layout.nodes.size(); ++i) {
 		if (layout.nodes[i].role == Role::Turret) {
+			turret_at[i] = static_cast<int>(turret_nodes.size());
 			turret_nodes.push_back(static_cast<int>(i));
 		}
 	}
-	const auto turret_index = [&](int p_node) {
-		if (p_node < 0) {
-			return -1;
-		}
-		const auto it = std::find(turret_nodes.begin(), turret_nodes.end(), p_node);
-		return it == turret_nodes.end() ? -1 : static_cast<int>(it - turret_nodes.begin());
-	};
+	const auto turret_index = [&](int p_node) { return p_node < 0 ? -1 : turret_at[static_cast<size_t>(p_node)]; };
 	for (const int node : turret_nodes) {
 		VehicleTurretDef t;
 		t.parent = turret_index(layout.enclosing(node, Role::Turret));
 		t.seat = seat_index(layout.seat_of(node));
-		if (const std::optional<EbxInstance> body = p_db.follow(layout.nodes[node].data.data(), "MovingBody")) {
+		if (const std::optional<EbxInstance> body = p_db.follow(layout.nodes[node].data.data(), "MovingBody"); body && budget.take_type(body->data())) {
 			const EbxStruct b = body->data();
 			t.rotation_axis = static_cast<int>(number_or(b, "RotationAxis", 1));
-			t.rotation_input = text(b, "RotationInput");
+			t.rotation_input = text(budget, b, "RotationInput");
 			t.constrained = boolean(b, "UseAngularConstraint").value_or(false);
 			t.min_angle = static_cast<float>(number_or(b, "AngularConstraintMin", 0));
 			t.max_angle = static_cast<float>(number_or(b, "AngularConstraintMax", 0));
@@ -326,9 +337,9 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		if (node.role == Role::Weapon) {
 			VehicleWeaponDef w;
 			const EbxStruct d = node.data.data();
-			w.damage_giver_name = text(d, "DamageGiverName");
-			w.firing = ref_name(p_db, d, "WeaponFiring");
-			w.classification = text(d, "Classification");
+			w.damage_giver_name = text(budget, d, "DamageGiverName");
+			w.firing = ref_name(budget, p_db, d, "WeaponFiring");
+			w.classification = text(budget, d, "Classification");
 			w.seat = seat_index(layout.seat_of(at));
 			w.turret = turret_index(layout.aiming(at));
 			w.damage_multiplier = static_cast<float>(number_or(d, "DamageMultiplier", 1));
@@ -340,9 +351,12 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		} else if (node.role == Role::Camera) {
 			const int seat = seat_index(layout.seat_of(at));
 			if (seat >= 0) {
-				out.seats[static_cast<size_t>(seat)].cameras.push_back(read_camera(p_db, node.data));
+				out.seats[static_cast<size_t>(seat)].cameras.push_back(read_camera(budget, p_db, node.data));
 			}
 		}
+	}
+	if (const Status spent = budget.status(); !spent) {
+		return error_at("vehicle " + name, spent.error());
 	}
 	return out;
 }

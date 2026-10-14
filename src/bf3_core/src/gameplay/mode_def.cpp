@@ -1,5 +1,6 @@
 // ModeDef reader: a LogicWorld over the level's included sub-worlds, then the gameplay entities in
-// it with their effective values (research/topics/02-soldier-kits-modes.md §3.1-§3.12).
+// it with their effective values (research/topics/02-soldier-kits-modes.md §3.1-§3.12). The walk,
+// every query and every loop here draw from one WorkBudget (cost model: logic_world.cpp).
 #include "bf3/core/gameplay/mode_def.h"
 
 #include "bf3/core/gameplay/logic_world.h"
@@ -118,10 +119,10 @@ std::string eff_enum(const LogicWorld &p_world, const LogicObject &p_object, std
 		return {};
 	}
 	if (const std::optional<std::string_view> e = v->enum_name()) {
-		return std::string(*e);
+		return copy_text(p_world.budget(), *e);
 	}
 	if (const std::optional<std::string_view> s = v->as_str()) {
-		return std::string(*s);
+		return copy_text(p_world.budget(), *s);
 	}
 	return {};
 }
@@ -138,7 +139,7 @@ std::string location_sid(const LogicWorld &p_world, uint32_t p_scope) {
 		const std::optional<PropertyValue> v = p_world.interface_value(*at, field_id("LocationTextSid"));
 		const std::optional<std::string_view> s = v ? v->as_str() : std::nullopt;
 		if (s && usable_sid(*s)) {
-			return std::string(*s);
+			return copy_text(p_world.budget(), *s);
 		}
 		at = p_world.scopes()[*at].parent;
 	}
@@ -146,18 +147,21 @@ std::string location_sid(const LogicWorld &p_world, uint32_t p_scope) {
 }
 
 std::string scope_prefab(const LogicWorld &p_world, uint32_t p_scope) {
-	return std::string(p_world.scope_name(p_scope));
+	return copy_text(p_world.budget(), p_world.scope_name(p_scope));
 }
 
-// The fuse of a Rush crate prefab scope (see the header).
-void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
+// The fuse of a Rush crate prefab scope (see the header). Every crate scope of one prefab shares
+// its connection set, so each pass over it is charged again.
+Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
+	WorkBudget &budget = p_world.budget();
 	const LogicScope &scope = p_world.scopes()[p_scope];
 	const std::optional<EbxInstance> descriptor = p_world.db().follow(scope.blueprint.data(), "Descriptor");
 	if (!descriptor) {
-		return;
+		return Status::success();
 	}
 	const LogicConnections &set = p_world.connections(p_scope);
 	// Event connections by source, so each step below only looks at one entity's outputs.
+	BF3_TRY(budget.charge(set.event.size()));
 	std::unordered_map<InstanceKey, std::vector<uint32_t>, InstanceKeyHash> events_from;
 	for (uint32_t i = 0; i < set.event.size(); ++i) {
 		events_from[InstanceKey::of(set.event[i].source)].push_back(i);
@@ -169,6 +173,7 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 	};
 	std::array<std::unordered_map<InstanceKey, std::optional<double>, InstanceKeyHash>, 2> fuse_after; // by SyncedBool value
 	const int32_t in = field_id("In");
+	BF3_TRY(budget.charge(set.property.size()));
 	for (const LogicConnection &feed : set.property) {
 		if (feed.source != *descriptor || feed.target_field != in || !feed.target.is_a("SyncedBoolEntityData")) {
 			continue;
@@ -186,7 +191,7 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 			if (memo->second) {
 				r_mcom.fuse = memo->second;
 				r_mcom.long_fuse_switch = value;
-				return;
+				return Status::success();
 			}
 			continue;
 		}
@@ -195,6 +200,7 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 		// Default, then its Open/Close inputs from the fired output in connection order.
 		std::vector<EbxInstance> gates;
 		std::unordered_map<InstanceKey, bool, InstanceKeyHash> gate_open;
+		BF3_TRY(budget.charge(from(synced).size()));
 		for (const uint32_t edge_at : from(synced)) {
 			const LogicConnection &edge = set.event[edge_at];
 			if (!edge.target.is_a("EventGateEntityData")) {
@@ -203,6 +209,7 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 			const EbxInstance &gate = edge.target;
 			auto [it, first] = gate_open.emplace(InstanceKey::of(gate), false);
 			if (first) {
+				BF3_TRY(budget.charge_type(gate.data()));
 				it->second = gate.get("Default") ? gate.get("Default")->as_bool().value_or(false) : false;
 				gates.push_back(gate);
 			}
@@ -219,6 +226,7 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 			if (!gate_open[InstanceKey::of(gate)]) {
 				continue;
 			}
+			BF3_TRY(budget.charge(from(gate).size()));
 			for (const uint32_t out_at : from(gate)) {
 				const LogicConnection &out = set.event[out_at];
 				if (out.source_field == field_id("Out") && out.target.is_a("DelayTriggerEntityData") &&
@@ -237,30 +245,31 @@ void read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 		if (fuse) {
 			r_mcom.fuse = fuse;
 			r_mcom.long_fuse_switch = value;
-			return;
+			return Status::success();
 		}
 	}
+	return Status::success();
 }
 
-std::optional<GameModeSizeDef> read_size(const EbxResolver &p_db, const std::string &p_level, std::string_view p_mode) {
+// Every array is charged before its scan; nullopt once the budget is spent (the caller checks it).
+std::optional<GameModeSizeDef> read_size(const EbxResolver &p_db, const std::string &p_level, std::string_view p_mode, WorkBudget &r_budget) {
 	const EbxPartition *partition = p_db.partition_by_name("levels/" + p_level + "/" + p_level + "/settings_win32");
-	if (!partition) {
+	if (!partition || !r_budget.take(partition->instance_count())) {
 		return std::nullopt;
 	}
 	std::string_view stem = p_mode;
 	while (!stem.empty() && stem.back() >= '0' && stem.back() <= '9') {
 		stem.remove_suffix(1);
 	}
-	const auto read = [](const EbxStruct &p_size, bool p_fallback) {
+	const auto read = [&](const EbxStruct &p_size, bool p_fallback) {
 		GameModeSizeDef out;
-		out.name = text(p_size, "Name");
-		out.short_name = text(p_size, "ShortName");
+		out.name = text(r_budget, p_size, "Name");
+		out.short_name = text(r_budget, p_size, "ShortName");
 		out.fallback = p_fallback;
 		out.player_count = static_cast<int64_t>(number_or(p_size, "PlayerCount", 0));
 		out.rounds_per_map = static_cast<int64_t>(number_or(p_size, "RoundsPerMap", 0));
 		out.force_squad = boolean(p_size, "ForceSquad").value_or(false);
-		const std::optional<EbxValue> teams = p_size.get("Teams");
-		if (const OptionalEbxArray array = teams ? teams->as_array() : OptionalEbxArray()) {
+		if (const OptionalEbxArray array = array_of(r_budget, p_size, "Teams")) {
 			for (const EbxValue t : *array) {
 				if (const std::optional<EbxStruct> s = t.as_struct()) {
 					out.teams.push_back({ static_cast<int64_t>(number_or(*s, "PlayerCount", 0)), static_cast<int64_t>(number_or(*s, "SquadSize", 0)) });
@@ -270,21 +279,22 @@ std::optional<GameModeSizeDef> read_size(const EbxResolver &p_db, const std::str
 		return out;
 	};
 	for (const EbxInstance &settings : partition->instances_of("GameModeSettings")) {
-		const std::optional<EbxValue> information = settings.get("Information");
-		const OptionalEbxArray infos = information ? information->as_array() : OptionalEbxArray();
+		if (!r_budget.take_type(settings.data())) {
+			return std::nullopt;
+		}
+		const OptionalEbxArray infos = array_of(r_budget, settings.data(), "Information");
 		if (!infos) {
 			continue;
 		}
 		for (const EbxValue info_value : *infos) {
 			const std::optional<EbxStruct> info = info_value.as_struct();
-			if (!info || text(*info, "Platform") != "GamePlatform_Win32") {
+			if (!info || text_view(*info, "Platform") != "GamePlatform_Win32") {
 				continue;
 			}
-			const std::optional<EbxValue> sizes = info->get("Sizes");
-			if (const OptionalEbxArray array = sizes ? sizes->as_array() : OptionalEbxArray()) {
+			if (const OptionalEbxArray array = array_of(r_budget, *info, "Sizes")) {
 				for (const EbxValue size_value : *array) {
 					const std::optional<EbxStruct> size = size_value.as_struct();
-					if (size && (iequals_ascii(text(*size, "Name"), stem) || iequals_ascii(text(*size, "MetaIdentifier"), stem))) {
+					if (size && (iequals_ascii(text_view(*size, "Name"), stem) || iequals_ascii(text_view(*size, "MetaIdentifier"), stem))) {
 						return read(*size, false);
 					}
 				}
@@ -371,39 +381,44 @@ std::string canonical_mode_id(std::string_view p_mode) {
 	return std::string(p_mode);
 }
 
-std::vector<std::string> level_modes(const EbxResolver &p_db, std::string_view p_level_id) {
+Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::string_view p_level_id, WorkBudget *p_budget) {
+	WorkBudget own;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
 	std::vector<std::string> out;
 	const std::string id = to_lower_ascii(p_level_id);
 	const EbxPartition *partition = p_db.partition_by_name("levels/" + id + "/" + id + "/description_win32");
 	if (!partition) {
 		return out;
 	}
-	const std::optional<EbxValue> categories = partition->primary().get("Categories");
-	const OptionalEbxArray array = categories ? categories->as_array() : OptionalEbxArray();
-	if (!array) {
-		return out;
-	}
-	for (const EbxValue category_value : *array) {
-		const std::optional<EbxStruct> category = category_value.as_struct();
-		if (!category || !iequals_ascii(text(*category, "Category"), "GameMode")) {
-			continue;
-		}
-		const std::optional<EbxValue> modes = category->get("Mode");
-		if (const OptionalEbxArray list = modes ? modes->as_array() : OptionalEbxArray()) {
-			for (const EbxValue m : *list) {
-				if (const std::optional<std::string_view> s = m.as_str()) {
-					out.emplace_back(*s);
+	if (const OptionalEbxArray array = array_of(budget, partition->primary().data(), "Categories")) {
+		for (const EbxValue category_value : *array) {
+			const std::optional<EbxStruct> category = category_value.as_struct();
+			if (!category || !iequals_ascii(text_view(*category, "Category"), "GameMode")) {
+				continue;
+			}
+			if (const OptionalEbxArray list = array_of(budget, category->get("Mode"))) {
+				for (const EbxValue m : *list) {
+					if (const std::optional<std::string_view> s = m.as_str()) {
+						out.push_back(copy_text(budget, *s));
+					}
 				}
 			}
 		}
 	}
+	BF3_TRY(budget.status());
 	return out;
 }
 
-Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode) {
+Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode, WorkBudget *p_budget) {
+	WorkBudget own;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
 	const std::string id = to_lower_ascii(p_level_id);
 	std::string mode = canonical_mode_id(p_mode);
-	for (const std::string &listed : level_modes(p_db, id)) {
+	Result<std::vector<std::string>> listed_modes = level_modes(p_db, id, &budget);
+	if (!listed_modes) {
+		return error_at("mode " + id, listed_modes.error());
+	}
+	for (const std::string &listed : *listed_modes) {
 		if (iequals_ascii(listed, mode)) {
 			mode = listed; // the spelling the data uses
 		}
@@ -418,6 +433,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	}
 	LogicWorldOptions options;
 	options.mode = mode;
+	options.budget = &budget;
 	Result<LogicWorld> built = LogicWorld::build(p_db, root->primary(), options);
 	if (!built) {
 		return error_at("mode " + id + " " + mode, built.error());
@@ -445,6 +461,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 
 	// The sub-worlds' own interface constants.
 	for (uint32_t s = 1; s < world.scopes().size(); ++s) {
+		BF3_TRY(budget.charge(1));
 		const LogicScope &scope = world.scopes()[s];
 		if (!scope.reference || !scope.reference->is_a("SubWorldReferenceObjectData")) {
 			continue;
@@ -458,13 +475,14 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		if (array->size() > kMaxInterfaceConstants - out.interface_constants.size()) {
 			return make_error("mode: level " + id + " lists more than " + std::to_string(kMaxInterfaceConstants) + " interface constants");
 		}
+		BF3_TRY(budget.charge(array->size()));
 		for (const EbxValue field : *array) {
 			InterfaceConstantDef c;
-			c.subworld = std::string(world.scope_name(s));
+			c.subworld = copy_text(budget, world.scope_name(s));
 			const std::optional<EbxValue> fid = field.get("Id");
 			c.id = fid ? fid->as_i32().value_or(0) : 0;
 			const std::optional<EbxValue> value = field.get("Value");
-			c.value = std::string(value ? value->as_str().value_or(std::string_view()) : std::string_view());
+			c.value = copy_text(budget, value ? value->as_str().value_or(std::string_view()) : std::string_view());
 			for (const char *known : kKnownInterfaceNames) {
 				if (field_id(known) == c.id) {
 					c.name = known;
@@ -480,8 +498,9 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	std::vector<std::pair<uint32_t, std::vector<const LogicObject *>>> crates;
 	std::unordered_map<uint32_t, size_t> crate_at;
 	for (const LogicObject &object : world.objects()) {
+		BF3_TRY(budget.charge(1));
+		BF3_TRY(budget.charge_type(object.entity.data()));
 		const EbxInstance &e = object.entity;
-		const std::string prefab = scope_prefab(world, object.scope);
 		if (e.is_a("TeamEntityData")) {
 			const std::optional<PropertyValue> team_value = world.effective(object, "Team");
 			std::optional<EbxInstance> team_data;
@@ -493,7 +512,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 			if (!team_data) {
 				continue;
 			}
-			Result<TeamDef> team = read_team_data(p_db, *team_data);
+			Result<TeamDef> team = read_team_data(p_db, *team_data, &budget);
 			if (!team) {
 				continue;
 			}
@@ -511,11 +530,11 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 			t.loss_when_lost_all_control_points = eff_number(world, object, "TicketLossWhenLostAllControlsPoint", 0);
 			t.halt_on_equal_point_count = eff_bool(world, object, "HaltTicketLossOnEqualPointCount", false);
 			t.decrease_tickets = eff_enum(world, object, "DecreaseTickets");
-			t.prefab = prefab;
+			t.prefab = scope_prefab(world, object.scope);
 			out.ticket_counters.push_back(std::move(t));
 		} else if (e.is_a("CapturePointEntityData")) {
 			CapturePointDef c;
-			c.prefab = prefab;
+			c.prefab = scope_prefab(world, object.scope);
 			c.location_sid = location_sid(world, object.scope);
 			c.capturable_type = eff_enum(world, object, "CapturableType");
 			c.initial_owner = eff_team(world, object, "InitialOwnerTeam");
@@ -539,15 +558,15 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 			l.base_count = eff_int(world, object, "BaseCount", 0);
 			l.fallback_time = eff_number(world, object, "FallbackTime", 0);
 			l.simple_reinforce = eff_bool(world, object, "SimpleReinforce", false);
-			l.prefab = prefab;
+			l.prefab = scope_prefab(world, object.scope);
 			out.life_counters.push_back(std::move(l));
 		} else if (e.is_a("KillCounterEntityData")) {
 			KillCounterDef k;
 			k.team = eff_team(world, object, "TeamId");
 			k.max_kills = eff_int(world, object, "MaxKillCount", 0);
 			k.enemy_weight = eff_number(world, object, "EnemyWeight", 0);
-			k.type = std::string(e.type_name());
-			k.prefab = prefab;
+			k.type = copy_text(budget, e.type_name());
+			k.prefab = scope_prefab(world, object.scope);
 			out.kill_counters.push_back(std::move(k));
 		} else if (e.is_a("GameInteractionEntityData")) {
 			const std::string type = eff_enum(world, object, "InteractionEntityType");
@@ -560,7 +579,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 			}
 		} else if (e.is_a("VehicleSpawnReferenceObjectData")) {
 			VehicleSpawnDef v;
-			v.blueprint = ref_name(p_db, e.data(), "Blueprint");
+			v.blueprint = ref_name(budget, p_db, e.data(), "Blueprint");
 			v.team = eff_team(world, object, "Team");
 			v.spawn_delay = eff_number(world, object, "SpawnDelay", 0);
 			v.initial_spawn_delay = eff_number(world, object, "InitialSpawnDelay", 0);
@@ -569,6 +588,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		}
 	}
 	for (const auto &[scope, interactions] : crates) {
+		BF3_TRY(budget.charge(1 + interactions.size()));
 		McomDef m;
 		m.prefab = scope_prefab(world, scope);
 		for (const LogicObject *crate_object : interactions) {
@@ -584,10 +604,14 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 				m.disarm_time = time;
 			}
 		}
-		read_fuse(world, scope, m);
+		BF3_TRY(read_fuse(world, scope, m));
 		out.mcoms.push_back(std::move(m));
 	}
 	out.query_steps = world.query_steps();
+	// A query or copy that ran out of budget answered nullopt / empty: fail instead.
+	if (const Status spent = budget.status(); !spent) {
+		return error_at("mode " + id + " " + mode, spent.error());
+	}
 	if (world.query_budget_spent()) {
 		return make_error("mode " + id + " " + mode + ": property queries exceed " + std::to_string(options.max_query_steps) + " resolver steps");
 	}
@@ -597,7 +621,11 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	std::stable_sort(out.ticket_counters.begin(), out.ticket_counters.end(), by_team);
 	std::stable_sort(out.life_counters.begin(), out.life_counters.end(), by_team);
 	std::stable_sort(out.kill_counters.begin(), out.kill_counters.end(), by_team);
-	out.size = read_size(p_db, id, mode);
+	out.size = read_size(p_db, id, mode, budget);
+	if (const Status spent = budget.status(); !spent) {
+		return error_at("mode " + id + " " + mode, spent.error());
+	}
+	out.work = budget.used();
 	return out;
 }
 
@@ -610,20 +638,27 @@ std::optional<double> ScoringTable::score(std::string_view p_sid) const {
 	return std::nullopt;
 }
 
-Result<ScoringTable> read_scoring(const EbxResolver &p_db, std::string_view p_partition) {
+Result<ScoringTable> read_scoring(const EbxResolver &p_db, std::string_view p_partition, WorkBudget *p_budget) {
+	WorkBudget own;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
 	const std::string name = to_lower_ascii(p_partition);
 	const EbxPartition *partition = p_db.partition_by_name(name);
 	if (!partition) {
 		return make_error("scoring: no partition `" + name + "`");
 	}
 	ScoringTable out;
+	BF3_TRY(budget.charge(partition->instance_count()));
 	for (const EbxInstance &t : partition->instances_of("ScoringTypeData")) {
+		BF3_TRY(budget.charge_type(t.data()));
 		ScoringEntryDef e;
-		e.sid = text(t.data(), "DescriptionSid");
+		e.sid = text(budget, t.data(), "DescriptionSid");
 		e.score = number_or(t.data(), "Score", 0);
-		e.measuring = text(t.data(), "Measuring");
-		e.bucket = text(t.data(), "Bucket");
+		e.measuring = text(budget, t.data(), "Measuring");
+		e.bucket = text(budget, t.data(), "Bucket");
 		out.entries.push_back(std::move(e));
+	}
+	if (const Status spent = budget.status(); !spent) {
+		return error_at("scoring " + name, spent.error());
 	}
 	return out;
 }
