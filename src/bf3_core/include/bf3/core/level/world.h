@@ -16,7 +16,8 @@
 //       members), InstanceScale in `scale`, InstanceObjectVariation as the variation
 //     any other object: placed at its Transform (x) frame
 // Excluded, BlueprintTransform and Transform can be fed by PropertyConnections (Scopes::property).
-// Depth is limited to 48 blueprint levels.
+// Depth is limited to 48 blueprint levels; fan-out by a step budget, objects to 2^20 and scopes to
+// 2^18 (a traversal past any of them fails).
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -163,6 +164,9 @@ struct WorldStats {
 	size_t unresolved_objects = 0; // Objects entries that do not resolve in the loaded partitions
 	size_t missing_blueprints = 0;
 	size_t depth_limited = 0;
+	// Traversal steps taken (visits, container objects, group instances, variation entries read);
+	// a traversal fails past 2^22, which only a hostile blueprint graph reaches.
+	size_t steps = 0;
 	std::vector<std::string> skipped_subworlds; // BundleNames the mode does not include
 	std::vector<std::string> absent_subworlds; // included sub-worlds whose partition is not loaded
 };
@@ -170,7 +174,10 @@ struct WorldStats {
 class World {
 public:
 	// Walks p_level from its LevelData. Fails when a static model group's Havok res is missing or
-	// unreadable, or holds fewer subparts than its members need. p_level must outlive the World.
+	// unreadable, or holds fewer subparts than its members need, or when the blueprint graph exceeds
+	// the step, object or scope budget. p_level must outlive the World.
+	// A World is not safe to share across threads: Scopes keeps resolution state in its const
+	// methods (property, interface, and through them starts_hidden).
 	static Result<std::unique_ptr<World>> traverse(const LoadedLevel &p_level);
 	// The same over any partition set (p_root: the LevelData; static model group res are read
 	// from p_mount). p_db and p_mount must outlive the World.

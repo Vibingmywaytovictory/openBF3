@@ -8,9 +8,14 @@ namespace {
 constexpr uint32_t kMaxDepth = 48;
 // Placed objects and scopes one traversal may create. The depth limit bounds nesting, not fan-out:
 // a hostile prefab listing itself many times would otherwise grow without bound. Retail levels
-// place at most ~16k objects in ~650 scopes.
-constexpr size_t kMaxObjects = size_t(1) << 22;
-constexpr size_t kMaxScopes = size_t(1) << 20;
+// place at most 15,178 objects in 773 scopes (all 230 level x mode runs).
+constexpr size_t kMaxObjects = size_t(1) << 20;
+constexpr size_t kMaxScopes = size_t(1) << 18;
+// Steps one traversal may take: each visit, each object of a visited container, each group
+// instance and each variation database entry read costs one. The object and scope caps do not
+// bound a WorldPart that lists a reference back to itself twice (2^depth visits that place
+// nothing), so this does. Retail levels take at most 17,478 steps.
+constexpr size_t kMaxSteps = size_t(1) << 22;
 
 struct KindName {
 	std::string_view type;
@@ -232,6 +237,7 @@ public:
 
 	Status visit(const EbxInstance &p_container, uint32_t p_scope, const LevelTransform &p_frame, uint32_t p_subworld, uint32_t p_variation,
 			uint32_t p_depth) {
+		BF3_TRY(charge(1));
 		if (p_depth > kMaxDepth) {
 			++world_.stats.depth_limited;
 			return Status::success();
@@ -241,6 +247,7 @@ public:
 					" scopes");
 		}
 		for (const EbxInstance &object : objects(p_container)) {
+			BF3_TRY(charge(1));
 			if (object.is_a("WorldPartReferenceObjectData")) {
 				if (excluded(p_scope, object)) {
 					continue;
@@ -267,6 +274,14 @@ public:
 	}
 
 private:
+	Status charge(size_t p_steps) {
+		world_.stats.steps += p_steps;
+		if (world_.stats.steps > kMaxSteps) {
+			return make_error("level traversal: more than " + std::to_string(kMaxSteps) + " steps (a blueprint graph that fans out)");
+		}
+		return Status::success();
+	}
+
 	std::vector<EbxInstance> objects(const EbxInstance &p_container) {
 		std::vector<EbxInstance> out;
 		const std::optional<EbxValue> list = p_container.get("Objects");
@@ -307,6 +322,7 @@ private:
 		const uint32_t child = uint32_t(world_.subworlds.size());
 		const uint32_t child_scope = world_.scopes.push(*data, p_reference, p_scope, frame, child, 0);
 		world_.subworlds.push_back(read_subworld(db_, *data, p_reference, p_subworld, child_scope));
+		BF3_TRY(charge(world_.subworlds.back().variations.size()));
 		return visit(*data, child_scope, frame, child, 0, p_depth + 1);
 	}
 
@@ -362,23 +378,31 @@ private:
 			}
 		}
 		const std::string group_name = group.physics_asset.value_or(p_group.guid().to_string());
-		std::vector<res::SubpartTransform> subparts;
+		const std::vector<res::SubpartTransform> *subparts_of = &kNoSubparts;
 		if (group.physics_asset) {
-			Result<std::pair<ResInfo, std::vector<uint8_t>>> res = mount_.read_res(*group.physics_asset);
-			if (!res) {
-				return error_at("res " + *group.physics_asset, res.error());
+			// Each res is read and parsed once per traversal, however often the group is visited.
+			auto cached = havok_.find(*group.physics_asset);
+			if (cached == havok_.end()) {
+				Result<std::pair<ResInfo, std::vector<uint8_t>>> res = mount_.read_res(*group.physics_asset);
+				if (!res) {
+					return error_at("res " + *group.physics_asset, res.error());
+				}
+				auto havok = std::make_shared<res::HavokPhysicsData>();
+				const res::ResError parsed = res::HavokPhysicsData::parse(res->second, res->first.res_meta, *havok);
+				if (!parsed.ok()) {
+					return make_error(*group.physics_asset + ": " + parsed.message());
+				}
+				std::vector<res::SubpartTransform> listed_subparts;
+				const res::ResError listed = havok->group_subparts(listed_subparts);
+				if (!listed.ok()) {
+					return make_error(group_name + ": " + listed.message());
+				}
+				cached = havok_.emplace(*group.physics_asset, ParsedHavok{ std::move(havok), std::move(listed_subparts) }).first;
 			}
-			auto havok = std::make_shared<res::HavokPhysicsData>();
-			const res::ResError parsed = res::HavokPhysicsData::parse(res->second, res->first.res_meta, *havok);
-			if (!parsed.ok()) {
-				return make_error(*group.physics_asset + ": " + parsed.message());
-			}
-			const res::ResError listed = havok->group_subparts(subparts);
-			if (!listed.ok()) {
-				return make_error(group_name + ": " + listed.message());
-			}
-			group.havok = std::move(havok);
+			group.havok = cached->second.havok;
+			subparts_of = &cached->second.subparts;
 		}
+		const std::vector<res::SubpartTransform> &subparts = *subparts_of;
 
 		const uint32_t index = uint32_t(world_.groups.size());
 		std::vector<EbxStruct> members;
@@ -456,6 +480,7 @@ private:
 				const uint32_t variation = (variation_value ? variation_value->as_u32() : std::nullopt).value_or(0);
 				local.scale = local.scale * scale;
 
+				BF3_TRY(charge(1));
 				PlacedObject placed;
 				if (mesh) {
 					MeshObject m;
@@ -543,10 +568,17 @@ private:
 		return LevelTransform::from_rows(*rows);
 	}
 
+	struct ParsedHavok {
+		std::shared_ptr<const res::HavokPhysicsData> havok;
+		std::vector<res::SubpartTransform> subparts;
+	};
+	static inline const std::vector<res::SubpartTransform> kNoSubparts;
+
 	const EbxResolver &db_;
 	const LevelMount &mount_;
 	std::string_view mode_;
 	World &world_;
+	std::unordered_map<std::string, ParsedHavok> havok_; // by res name
 };
 
 Result<std::unique_ptr<World>> World::traverse(const LoadedLevel &p_level) {

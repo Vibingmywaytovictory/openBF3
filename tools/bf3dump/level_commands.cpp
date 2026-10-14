@@ -252,7 +252,8 @@ int cmd_level(const std::shared_ptr<Install> &p_install, const std::string &p_le
 		std::fprintf(stderr, "traverse %s %s: %s\n", p_level.c_str(), p_mode.c_str(), world.error().message.c_str());
 		return 1;
 	}
-	std::fprintf(stderr, "traversed %zu objects in %.3f s\n", (*world)->objects.size(), seconds_since(start));
+	std::fprintf(stderr, "traversed %zu objects (%zu scopes, %zu steps) in %.3f s\n", (*world)->objects.size(), (*world)->scopes.size(),
+			(*world)->stats.steps, seconds_since(start));
 	start = std::chrono::steady_clock::now();
 	CensusOptions options;
 	options.legacy_variations = p_legacy_mvdb;

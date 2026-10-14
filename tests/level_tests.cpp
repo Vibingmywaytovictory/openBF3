@@ -7,8 +7,13 @@
 // the IW4L geometry builder's counts at bab7c1a, which mesh_census reproduces (Bazaar with
 // legacy_variations; the current MeshVariationDatabase rule gives 613). Caspian ConquestSmall0
 // "20,311 placements on 2,277 meshes, 12,725 placed hidden" is the IW engine's later world report
-// (static-model instances after destruction states, projected decals and scatter models were added
-// as instances), not a traversal count: the traversal places 6,847 mesh objects there.
+// ("bf3 static models: ... 12725 placed hidden for destruction"), counted after IW4L's geometry
+// builder gave each destruction state's part an instance of its own, hidden until the state shows:
+// a renderer count, not a traversal count. The traversal places 6,847 mesh objects there; the
+// report's 20,311 - 12,725 = 7,586 shown instances exceed that by 739, which is not attributed here.
+// Metro: sections/03's "Metro 702" composite placements hiding parts is Metro ConquestSmall0
+// (8-RENDER-DESTRUCTION-PART probe geom_MP_Subway_ConquestSmall0.txt); TDM's is 710
+// (3-CONVERTER-PART/geometry.md and geom_MP_Subway_TeamDeathMatch0.txt).
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -134,6 +139,113 @@ private:
 	std::unordered_map<Guid, uint32_t, GuidHash> by_guid_;
 	std::unordered_map<std::string, uint32_t> by_name_;
 };
+
+// A hostile partition read through its own descriptors: a WorldPartData (the primary) whose
+// Objects list p_objects entries, each an internal reference to instance 1 (a
+// WorldPartReferenceObjectData whose Blueprint is the WorldPartData itself) or, for 2, to instance 2
+// (a StaticModelGroupEntityData with no members).
+std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects) {
+	using Bytes = std::vector<uint8_t>;
+	const auto put32 = [](Bytes &r_out, size_t p_at, uint32_t p_value) { std::memcpy(r_out.data() + p_at, &p_value, 4); };
+	const auto put16 = [](Bytes &r_out, size_t p_at, uint16_t p_value) { std::memcpy(r_out.data() + p_at, &p_value, 2); };
+	const auto align16 = [](size_t p_at) { return (p_at + 15) & ~size_t(15); };
+	const char *names[] = { "DataContainer", "$", "WorldPartData", "Objects", "WorldPartReferenceObjectData", "Blueprint", "array", "member",
+		"StaticModelGroupEntityData" };
+	std::string name_table;
+	for (const char *n : names) {
+		name_table += n;
+		name_table += '\0';
+	}
+	struct F {
+		const char *name;
+		uint8_t code;
+		uint16_t ref;
+		uint32_t offset;
+	};
+	const F fields[] = {
+		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartData (0, 1)
+		{ "Objects", ebx_code::kArray, 2, 8 },
+		{ "member", ebx_code::kClass, 0, 0 }, // array (2)
+		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartReferenceObjectData (3, 4)
+		{ "Blueprint", ebx_code::kClass, 0, 8 },
+		{ "$", ebx_code::kVoid, 0, 0 }, // StaticModelGroupEntityData (5)
+	};
+	struct C {
+		const char *name;
+		uint32_t field_start;
+		uint8_t count;
+		uint8_t code;
+		uint16_t size;
+	};
+	const C complexes[] = {
+		{ "DataContainer", 0, 0, ebx_code::kClass, 8 },
+		{ "WorldPartData", 0, 2, ebx_code::kClass, 16 },
+		{ "array", 2, 1, ebx_code::kArray, 4 },
+		{ "WorldPartReferenceObjectData", 3, 2, ebx_code::kClass, 16 },
+		{ "StaticModelGroupEntityData", 5, 1, ebx_code::kClass, 16 },
+	};
+	const uint32_t repeaters[3][3] = { { 0, 1, 1 }, { 0, 1, 3 }, { 0, 1, 4 } }; // internal, count, complex
+	const size_t names_at = 80;
+	const size_t fields_at = names_at + name_table.size();
+	const size_t complexes_at = align16(fields_at + std::size(fields) * 16);
+	const size_t instance_repeaters_at = complexes_at + std::size(complexes) * 16;
+	const size_t array_repeaters_at = align16(instance_repeaters_at + std::size(repeaters) * 12);
+	const size_t meta_size = align16(array_repeaters_at + 12);
+	const size_t instances_at = meta_size; // no strings
+	const size_t instance_payload = 3 * (16 + 16);
+	const size_t arrays_at = instances_at + instance_payload;
+	const size_t total = arrays_at + 4 + 4 * p_objects.size();
+	Bytes b(total, 0);
+	put32(b, 0x00, 0x0FB2D1CE);
+	put32(b, 0x04, uint32_t(meta_size));
+	put32(b, 0x08, uint32_t(total - meta_size));
+	put32(b, 0x14, uint32_t(std::size(repeaters)));
+	put32(b, 0x18, uint32_t(std::size(complexes)));
+	put32(b, 0x1C, uint32_t(std::size(fields)));
+	put32(b, 0x20, uint32_t(name_table.size()));
+	put32(b, 0x28, 1);
+	put32(b, 0x2C, uint32_t(instance_payload));
+	const Guid partition = *Guid::parse("5e1f0000-0000-4000-8000-000000000001");
+	const Guid instance_guids[3] = { *Guid::parse("5e1f0000-0000-4000-8000-000000000010"), *Guid::parse("5e1f0000-0000-4000-8000-000000000011"),
+		*Guid::parse("5e1f0000-0000-4000-8000-000000000012") };
+	std::memcpy(b.data() + 0x30, partition.bytes.data(), 16);
+	std::memcpy(b.data() + 0x40, instance_guids[0].bytes.data(), 16);
+	std::memcpy(b.data() + names_at, name_table.data(), name_table.size());
+	for (size_t i = 0; i < std::size(fields); ++i) {
+		const size_t at = fields_at + i * 16;
+		put32(b, at, ebx_name_hash(fields[i].name));
+		put16(b, at + 4, uint16_t(fields[i].code << 4));
+		put16(b, at + 6, fields[i].ref);
+		put32(b, at + 8, fields[i].offset);
+	}
+	for (size_t i = 0; i < std::size(complexes); ++i) {
+		const size_t at = complexes_at + i * 16;
+		put32(b, at, ebx_name_hash(complexes[i].name));
+		put32(b, at + 4, complexes[i].field_start);
+		b[at + 8] = complexes[i].count;
+		b[at + 9] = 4;
+		put16(b, at + 10, uint16_t(complexes[i].code << 4));
+		put16(b, at + 12, complexes[i].size);
+	}
+	for (size_t i = 0; i < std::size(repeaters); ++i) {
+		for (size_t j = 0; j < 3; ++j) {
+			put32(b, instance_repeaters_at + i * 12 + j * 4, repeaters[i][j]);
+		}
+	}
+	put32(b, array_repeaters_at, 4); // array 0: count at section+0, elements at section+4
+	put32(b, array_repeaters_at + 4, uint32_t(p_objects.size()));
+	put32(b, array_repeaters_at + 8, 2);
+	for (size_t i = 0; i < 3; ++i) {
+		std::memcpy(b.data() + instances_at + i * 32, instance_guids[i].bytes.data(), 16);
+	}
+	put32(b, instances_at + 16 + 8, 0); // WorldPartData.Objects: array 0
+	put32(b, instances_at + 32 + 16 + 8, 1); // WorldPartReferenceObjectData.Blueprint: internal, instance 0
+	put32(b, arrays_at, uint32_t(p_objects.size()));
+	for (size_t i = 0; i < p_objects.size(); ++i) {
+		put32(b, arrays_at + 4 + 4 * i, p_objects[i] + 1); // internal references
+	}
+	return b;
+}
 
 } // namespace
 
@@ -272,6 +384,7 @@ TEST_SUITE("level") {
 		CHECK(world.stats.excluded_overrides == 8);
 		CHECK(world.stats.unresolved_objects == 0);
 		CHECK(world.stats.depth_limited == 0);
+		CHECK(world.stats.steps < (size_t(1) << 15)); // far below the 2^22 step budget
 		CHECK(count_mesh_objects(world) == 10873);
 		// Static model groups (sections/03 §2.3): the level's and the TDM sub-world's.
 		REQUIRE(world.groups.size() == 2);
@@ -430,6 +543,46 @@ TEST_SUITE("level") {
 		MESSAGE("mutated partitions that parsed: ", mutated, ", traversals: ", traversed, " ok / ", failed, " failed");
 		CHECK(mutated > 0);
 		CHECK(traversed + failed == kSeeds);
+	}
+
+	TEST_CASE("level: Metro ConquestSmall0 composites (sections/03 \"Metro 702\")") {
+		const std::shared_ptr<Install> install = open_or_skip();
+		if (!install) {
+			return;
+		}
+		const Traversed t = traverse(install, "MP_Subway", "ConquestSmall0");
+		CHECK(composite_hiding(*t.level, *t.world) == 702);
+	}
+
+	TEST_CASE("level: self-listing WorldPart fails on the step budget, never hangs") {
+		// A WorldPartData listing a reference to itself twice: 2^48 visits that place nothing, so
+		// only the step budget stops it. With one reference it is a chain cut at the depth limit.
+		const std::shared_ptr<Install> install = open_or_skip();
+		if (!install) {
+			return;
+		}
+		Result<LevelMount> mount = install->mount_level("MP_Subway");
+		REQUIRE(mount.ok());
+		const auto run = [&](const std::vector<uint32_t> &p_objects) {
+			EbxDb db;
+			Result<bool> inserted = db.parse_insert("levels/hostile/part", self_listing_part(p_objects));
+			REQUIRE_MESSAGE(inserted.ok(), (inserted.ok() ? std::string() : inserted.error().message));
+			const EbxPartition *part = db.partition_by_name("levels/hostile/part");
+			REQUIRE(part != nullptr);
+			REQUIRE(part->primary().is_a("WorldPartData"));
+			return World::traverse(db, part->primary(), *mount, "TeamDeathMatch0");
+		};
+		{
+			Result<std::unique_ptr<World>> world = run({ 1 });
+			REQUIRE(world.ok());
+			CHECK((*world)->objects.empty());
+			CHECK((*world)->stats.depth_limited == 1);
+		}
+		for (const std::vector<uint32_t> &objects : { std::vector<uint32_t>{ 1, 1 }, std::vector<uint32_t>{ 1, 2, 1 } }) {
+			Result<std::unique_ptr<World>> world = run(objects);
+			REQUIRE_FALSE(world.ok());
+			CHECK(world.error().message.find("steps") != std::string::npos);
+		}
 	}
 
 	TEST_CASE("level: modes and unknown levels") {

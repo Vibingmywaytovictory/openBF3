@@ -263,9 +263,14 @@ row-vector product); there is no IW conversion.
   and `collision_placements` (each static model group's Havok res at the group transform, and each placed mesh
   object's physics asset prebaked closest to its scale, with the frame the res's shapes go through). The decoders of
   `include/bf3/core/res/` turn those res into triangles and convex pieces.
-* Hostile data fails with an error or is cut short, never crashes: depth limits (48 blueprint levels, 8 layer levels,
-  32 connection hops) plus step budgets for fan-out (connection resolution, layer search), a cap of 4 M placed
-  objects, and a static model group whose instances need more subparts than its res holds is an error.
+* Hostile data fails with an error or is cut short, never crashes or hangs: depth limits (48 blueprint levels, 8 layer
+  levels, 32 connection hops) plus step budgets for fan-out (the traversal itself: 2^22 steps of visits, container
+  objects, group instances and variation entries read, where retail levels take at most 17.5 k; connection resolution;
+  layer search), caps of 1 M placed objects and 256 k scopes, each group res parsed once per traversal, and a static
+  model group whose instances need more subparts than its res holds is an error. A WorldPart that lists a reference
+  back to itself twice (2^48 visits that place nothing) fails on the step budget (`core.level` builds one).
+* A `World` is not thread-safe: `Scopes` keeps resolution state in its const methods (`property`, `interface`,
+  `starts_hidden` through them). `mesh_census` only reads the partitions and the mount in its parallel part.
 
 `bf3dump level <LEVEL> <MODE> [--legacy-mvdb]` prints the canonical listing (sub-worlds, groups, every placement with
 its transform as f32 bit patterns, the mesh census variants and totals, the collision placements; every section
@@ -299,7 +304,10 @@ run, median 0.24 s (warm file cache, 16 threads shared with other builds). Hando
   20311 placements on 2277 meshes (... 12725 placed hidden for destruction)` in its world report), after the
   geometry builder had gained destruction views: each destruction state's part is drawn by an instance of its own,
   hidden until the state shows. That is a renderer count, not a traversal one; the per-state expansion belongs to the
-  destruction work, not to this traversal.
+  destruction work, not to this traversal. Its 20,311 - 12,725 = 7,586 shown instances are 739 more than the
+  traversal's 6,847 mesh placements; that remainder is not attributed.
+* sections/03's "Metro 702" composite placements that hide parts is Metro ConquestSmall0 (IW4L probe
+  `geom_MP_Subway_ConquestSmall0.txt`); Metro TDM's is 710 (`3-CONVERTER-PART/geometry.md`), which `core.level` asserts.
 
 ## Layout and pinned third-party code
 

@@ -97,7 +97,9 @@ struct Scope {
 	uint32_t connections = 0;
 };
 
-// Every scope of a traversal, and the property resolver over them.
+// Every scope of a traversal, and the property resolver over them. The const resolvers keep
+// mutable state (the step budget, the child-prefab connection cache), so a Scopes must not be used
+// from several threads at once.
 class Scopes {
 public:
 	explicit Scopes(const EbxResolver &p_db) :
