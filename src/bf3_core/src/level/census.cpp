@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <unordered_map>
 
 namespace bf3::core::level {
 
@@ -21,6 +22,8 @@ constexpr size_t kMaxLods = 4;
 constexpr float kWorldRadius = 16.0f;
 constexpr size_t kWorldMaxPlacements = 4;
 constexpr size_t kMaxComponents = 4096;
+// Longest physics asset name looked up (retail names are under 100 bytes).
+constexpr size_t kMaxResName = 1024;
 constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
 
 using Vec3f = std::array<float, 3>;
@@ -59,14 +62,22 @@ std::string instance_id(const EbxResolver &p_db, const EbxInstance &p_instance) 
 	return std::string(p_db.name_of(p_instance.partition().guid()).value_or("?")) + "#" + std::to_string(p_instance.index());
 }
 
+// The units a string of p_length bytes costs to key, copy or look up.
+size_t text_units(size_t p_length) {
+	return 1 + p_length / 64;
+}
+
 // Per MeshAsset.Materials slot: whether its shader draws (IW4L materials.rs slots + resolve).
-std::vector<bool> drawn_slots(const EbxResolver &p_db, const EbxInstance &p_asset, const std::optional<EbxInstance> &p_entry) {
-	const std::vector<EbxInstance> materials = p_db.follow_all(p_asset.data(), "Materials");
+Status drawn_slots(const EbxResolver &p_db, const EbxInstance &p_asset, const std::optional<EbxInstance> &p_entry, WorkBudget &r_budget,
+		std::vector<bool> &r_out) {
+	std::vector<EbxInstance> materials;
+	BF3_TRY(charged_follow_all(p_db, p_asset.data(), "Materials", r_budget, materials));
 	std::vector<EbxStruct> variations;
 	if (p_entry) {
 		const std::optional<EbxValue> list = p_entry->get("Materials");
 		const OptionalEbxArray array = list ? list->as_array() : OptionalEbxArray();
 		if (array) {
+			BF3_TRY(r_budget.charge(array->size()));
 			for (const EbxValue v : *array) {
 				if (const std::optional<EbxStruct> s = v.as_struct()) {
 					variations.push_back(*s);
@@ -74,18 +85,24 @@ std::vector<bool> drawn_slots(const EbxResolver &p_db, const EbxInstance &p_asse
 			}
 		}
 	}
+	// The first variation naming each material, as the Rust find over the list picks it; indexed
+	// once instead of searched per slot (slots x variations on a hostile mesh).
+	std::unordered_map<InstanceKey, size_t, InstanceKeyHash> first_naming;
+	for (size_t i = 0; i < variations.size(); ++i) {
+		if (const std::optional<EbxInstance> named = p_db.follow(variations[i], "Material")) {
+			first_naming.emplace(InstanceKey::of(*named), i);
+		}
+	}
 	const size_t count = std::max(materials.size(), variations.size());
-	std::vector<bool> out(count, true);
+	std::vector<bool> &out = r_out;
+	out.assign(count, true);
 	for (size_t slot = 0; slot < count; ++slot) {
 		const std::optional<EbxInstance> material = slot < materials.size() ? std::optional<EbxInstance>(materials[slot]) : std::nullopt;
 		std::optional<EbxStruct> variation;
 		if (material) {
-			for (const EbxStruct &v : variations) {
-				const std::optional<EbxInstance> named = p_db.follow(v, "Material");
-				if (named && *named == *material) {
-					variation = v;
-					break;
-				}
+			const auto found = first_naming.find(InstanceKey::of(*material));
+			if (found != first_naming.end()) {
+				variation = variations[found->second];
 			}
 		}
 		if (!variation && slot < variations.size()) {
@@ -112,12 +129,15 @@ std::vector<bool> drawn_slots(const EbxResolver &p_db, const EbxInstance &p_asse
 			}
 		}
 	}
-	return out;
+	return Status::success();
 }
 
 // Whether one triangle of the decoded subset survives the hidden parts and the degenerate test
-// (IW4L geometry/meshes.rs surfaces).
-bool draws_triangle(const res::DecodedSubset &p_subset, const std::vector<uint16_t> &p_hidden) {
+// (IW4L geometry/meshes.rs surfaces). A unit per triangle examined, paid in doubling blocks before
+// each block (so at most twice what is examined): a mesh is tested once per variant, and a hostile
+// level can place one large mesh as many variants.
+Status draws_triangle(const res::DecodedSubset &p_subset, const std::vector<uint16_t> &p_hidden, WorkBudget &r_budget, bool &r_draws) {
+	r_draws = false;
 	const auto hidden = [&](uint32_t p_index) {
 		if (!p_subset.parts || p_index >= p_subset.parts->size()) {
 			return false;
@@ -125,16 +145,25 @@ bool draws_triangle(const res::DecodedSubset &p_subset, const std::vector<uint16
 		return std::binary_search(p_hidden.begin(), p_hidden.end(), (*p_subset.parts)[p_index]);
 	};
 	const std::vector<uint32_t> &indices = p_subset.indices;
-	for (size_t i = 0; i + 3 <= indices.size(); i += 3) {
+	const size_t triangles = indices.size() / 3;
+	size_t paid = 0;
+	for (size_t t = 0; t < triangles; ++t) {
+		if (t == paid) {
+			const size_t block = std::min(std::max<size_t>(paid, 1), triangles - t);
+			BF3_TRY(r_budget.charge(block));
+			paid += block;
+		}
+		const size_t i = t * 3;
 		const uint32_t a = indices[i], b = indices[i + 1], c = indices[i + 2];
 		if (!p_hidden.empty() && (hidden(a) || hidden(b) || hidden(c))) {
 			continue;
 		}
 		if (a != b && b != c && a != c) {
-			return true;
+			r_draws = true;
+			return Status::success();
 		}
 	}
-	return false;
+	return Status::success();
 }
 
 // Rust f32::total_cmp as an integer key.
@@ -148,15 +177,17 @@ struct MeshResult {
 	float radius = 0.0f; // of the MeshSet's bounding box
 	std::vector<std::vector<bool>> lods; // per variant of this mesh, per LOD
 	std::string error;
+	bool out_of_budget = false; // the census fails with the budget error, not as a mesh failure
 };
 
 } // namespace
 
-std::optional<std::vector<uint16_t>> hidden_parts(const EbxResolver &p_db, const EbxInstance &p_entity) {
+Result<std::optional<std::vector<uint16_t>>> hidden_parts(const EbxResolver &p_db, const EbxInstance &p_entity, WorkBudget &r_budget) {
 	std::vector<uint16_t> intact;
 	std::vector<uint16_t> damaged;
 	bool found = false;
-	std::vector<EbxInstance> pending = p_db.follow_all(p_entity.data(), "Components");
+	std::vector<EbxInstance> pending;
+	BF3_TRY(charged_follow_all(p_db, p_entity.data(), "Components", r_budget, pending));
 	size_t seen = 0;
 	while (!pending.empty()) {
 		const EbxInstance component = pending.back();
@@ -164,7 +195,9 @@ std::optional<std::vector<uint16_t>> hidden_parts(const EbxResolver &p_db, const
 		if (++seen > kMaxComponents) {
 			break;
 		}
-		for (const EbxInstance &child : p_db.follow_all(component.data(), "Components")) {
+		std::vector<EbxInstance> children;
+		BF3_TRY(charged_follow_all(p_db, component.data(), "Components", r_budget, children));
+		for (const EbxInstance &child : children) {
 			if (pending.size() >= kMaxComponents) {
 				break; // more than the walk can visit (a hostile, self-listing component tree)
 			}
@@ -174,7 +207,8 @@ std::optional<std::vector<uint16_t>> hidden_parts(const EbxResolver &p_db, const
 			continue;
 		}
 		found = true;
-		const std::vector<EbxInstance> states = p_db.follow_all(component.data(), "HealthStates");
+		std::vector<EbxInstance> states;
+		BF3_TRY(charged_follow_all(p_db, component.data(), "HealthStates", r_budget, states));
 		for (size_t state = 0; state < states.size(); ++state) {
 			const std::optional<EbxValue> v = states[state].get("PartIndex");
 			const std::optional<int64_t> part = v ? v->as_i64() : std::nullopt;
@@ -186,21 +220,32 @@ std::optional<std::vector<uint16_t>> hidden_parts(const EbxResolver &p_db, const
 	}
 	std::sort(damaged.begin(), damaged.end());
 	damaged.erase(std::unique(damaged.begin(), damaged.end()), damaged.end());
-	std::erase_if(damaged, [&](uint16_t p_part) { return std::find(intact.begin(), intact.end(), p_part) != intact.end(); });
+	std::sort(intact.begin(), intact.end());
+	std::erase_if(damaged, [&](uint16_t p_part) { return std::binary_search(intact.begin(), intact.end(), p_part); });
 	if (!found) {
-		return std::nullopt;
+		return std::optional<std::vector<uint16_t>>();
 	}
-	return damaged;
+	return std::optional<std::vector<uint16_t>>(std::move(damaged));
 }
 
-bool starts_hidden(const World &p_world, const PlacedObject &p_object) {
+Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object) {
+	WorkBudget &budget = *p_world.budget;
+	BF3_TRY(budget.status());
 	if (!p_object.reference) {
 		return false;
 	}
-	const int32_t visible = field_id("Visible");
+	// The connections into the reference's Visible, through the index; any one of them in list
+	// order decides, as the scan over the whole list did.
+	const Connections &connections = p_world.scopes.connections(p_object.scope);
+	const std::vector<uint32_t> *into = connections.property_into(*p_object.reference, field_id("Visible"));
+	if (!into) {
+		return false;
+	}
+	BF3_TRY(budget.charge(into->size()));
 	const int32_t value = field_id("Value");
-	for (const Connection &c : p_world.scopes.connections(p_object.scope).property) {
-		if (c.target == *p_object.reference && c.target_field == visible && c.source.is_a("BoolEntityData") && c.source_field == value) {
+	for (const uint32_t at : *into) {
+		const Connection &c = connections.property[at];
+		if (c.source.is_a("BoolEntityData") && c.source_field == value) {
 			const std::optional<EbxValue> d = c.source.get("DefaultValue");
 			if ((d ? d->as_bool() : std::nullopt) == false) {
 				return true;
@@ -259,19 +304,29 @@ std::array<int32_t, 9> bake_key(const std::array<std::array<float, 3>, 3> &p_lin
 	return key;
 }
 
-MeshCensus mesh_census(const LoadedLevel &p_level, const World &p_world, const CensusOptions &p_options) {
+Result<MeshCensus> mesh_census(const LoadedLevel &p_level, const World &p_world, const CensusOptions &p_options) {
 	return mesh_census(p_level.db(), p_level.mount(), p_world, p_options);
 }
 
-MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world, const CensusOptions &p_options) {
+Result<MeshCensus> mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world, const CensusOptions &p_options) {
 	const EbxResolver &db = p_db;
+	WorkBudget &budget = *p_world.budget;
+	BF3_TRY(budget.status());
 	MeshCensus census;
 
 	// Legacy lookup: every sub-world's database read again keeping empty entries.
 	std::vector<MeshVariationDb> legacy;
 	if (p_options.legacy_variations) {
 		for (const SubWorld &sw : p_world.subworlds) {
-			legacy.push_back(sw.variations.database() ? MeshVariationDb::read(db, *sw.variations.database(), true) : MeshVariationDb());
+			if (!sw.variations.database()) {
+				legacy.emplace_back();
+				continue;
+			}
+			Result<MeshVariationDb> read = MeshVariationDb::read(db, *sw.variations.database(), budget, true);
+			if (!read) {
+				return read.error();
+			}
+			legacy.push_back(std::move(*read));
 		}
 	}
 	const auto variation_entry = [&](uint32_t p_subworld, const EbxInstance &p_mesh, uint32_t p_variation) -> std::optional<EbxInstance> {
@@ -329,10 +384,15 @@ MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const
 		if (!name) {
 			continue;
 		}
+		BF3_TRY(budget.charge(1)); // the variation lookup: at most 49 sub-worlds, twice
 		const std::optional<EbxInstance> entry = variation_entry(object.subworld, asset, object.variation);
 		std::vector<uint16_t> hidden;
 		if (asset.is_a("CompositeMeshAsset")) {
-			hidden = hidden_parts(db, object.entity).value_or(std::vector<uint16_t>());
+			Result<std::optional<std::vector<uint16_t>>> parts = hidden_parts(db, object.entity, budget);
+			if (!parts) {
+				return parts.error();
+			}
+			hidden = (*parts).value_or(std::vector<uint16_t>());
 		}
 		const BakeSplit split = bake_split(object.transform);
 		++census.placements;
@@ -372,6 +432,7 @@ MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const
 	for (const auto &entry : by_name) {
 		names.push_back(&entry);
 	}
+	BF3_TRY(budget.charge(names.size())); // a read and decode per distinct MeshSet (install-bound)
 	const LevelMount &mount = p_mount;
 	std::vector<MeshResult> results = parallel_map<MeshResult>(
 			names.size(),
@@ -400,7 +461,10 @@ MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const
 				std::vector<std::vector<bool>> slots(variants.size());
 				for (size_t v = 0; v < variants.size(); ++v) {
 					const SceneMesh &mesh = census.meshes[variants[v]];
-					slots[v] = drawn_slots(db, mesh.asset, mesh.entry);
+					if (!drawn_slots(db, mesh.asset, mesh.entry, budget, slots[v])) {
+						r.out_of_budget = true;
+						return r;
+					}
 				}
 				for (size_t l = 0; l < set.lods.size() && l < kMaxLods; ++l) {
 					const res::MeshLod &lod = set.lods[l];
@@ -432,8 +496,14 @@ MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const
 						bool draws = false;
 						for (const res::DecodedSubset &subset : subsets) {
 							const bool slot_draws = subset.material_index < slots[v].size() ? slots[v][subset.material_index] : true;
-							if (slot_draws && draws_triangle(subset, mesh.hidden)) {
-								draws = true;
+							if (!slot_draws) {
+								continue;
+							}
+							if (!draws_triangle(subset, mesh.hidden, budget, draws)) {
+								r.out_of_budget = true;
+								return r;
+							}
+							if (draws) {
 								break;
 							}
 						}
@@ -450,6 +520,7 @@ MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const
 				return r;
 			},
 			p_options.threads);
+	BF3_TRY(budget.status()); // a lane that ran out of budget left its mesh undecided
 
 	for (size_t i = 0; i < names.size(); ++i) {
 		const MeshResult &r = results[i];
@@ -509,19 +580,22 @@ MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const
 	return census;
 }
 
-std::vector<CollisionPlacement> collision_placements(const LoadedLevel &p_level, const World &p_world) {
+Result<std::vector<CollisionPlacement>> collision_placements(const LoadedLevel &p_level, const World &p_world) {
 	return collision_placements(p_level.db(), p_level.mount(), p_world);
 }
 
-std::vector<CollisionPlacement> collision_placements(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world) {
+Result<std::vector<CollisionPlacement>> collision_placements(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world) {
 	const EbxResolver &db = p_db;
 	const LevelMount &mount = p_mount;
+	WorkBudget &budget = *p_world.budget;
+	BF3_TRY(budget.status());
 	std::vector<CollisionPlacement> out;
 	for (size_t at = 0; at < p_world.groups.size(); ++at) {
 		const StaticModelGroup &group = p_world.groups[at];
 		if (!group.physics_asset) {
 			continue;
 		}
+		BF3_TRY(budget.charge(text_units(group.physics_asset->size()))); // the res lookup
 		CollisionPlacement c;
 		c.kind = CollisionPlacement::Kind::Group;
 		c.index = uint32_t(at);
@@ -542,7 +616,9 @@ std::vector<CollisionPlacement> collision_placements(const EbxResolver &p_db, co
 		CollisionPlacement c;
 		c.kind = CollisionPlacement::Kind::Object;
 		c.index = uint32_t(at);
-		for (const EbxInstance &body : db.follow_all(physics.data(), "RigidBodies")) {
+		std::vector<EbxInstance> rigid_bodies;
+		BF3_TRY(charged_follow_all(db, physics.data(), "RigidBodies", budget, rigid_bodies));
+		for (const EbxInstance &body : rigid_bodies) {
 			const std::optional<EbxValue> type = body.get("RigidBodyType");
 			const std::optional<std::string_view> name = type ? type->enum_name() : std::nullopt;
 			c.bodies.push_back(name.value_or("?"));
@@ -551,16 +627,19 @@ std::vector<CollisionPlacement> collision_placements(const EbxResolver &p_db, co
 		const Vec3f s = object.transform.axis_scales();
 		const float placed = std::fmax(std::cbrt(std::fabs(s[0] * s[1] * s[2])), 1e-6f);
 		std::vector<std::pair<std::string_view, float>> assets;
-		std::vector<EbxInstance> candidates = db.follow_all(physics.data(), "ScaledAssets");
+		std::vector<EbxInstance> candidates;
+		BF3_TRY(charged_follow_all(db, physics.data(), "ScaledAssets", budget, candidates));
 		if (const std::optional<EbxInstance> asset = db.follow(physics.data(), "Asset")) {
 			candidates.push_back(*asset);
 		}
 		for (const EbxInstance &asset : candidates) {
 			const std::optional<EbxValue> name_value = asset.get("Name");
 			const std::optional<std::string_view> name = name_value ? name_value->as_str() : std::nullopt;
-			if (!name) {
+			if (!name || name->size() > kMaxResName) {
 				continue;
 			}
+			// Looked up (hashed) up to twice below, and copied once if chosen.
+			BF3_TRY(budget.charge(2 * text_units(name->size())));
 			const std::optional<EbxValue> scale_value = asset.get("Scale");
 			std::optional<float> scale = scale_value ? scale_value->as_f32() : std::nullopt;
 			if (!scale || !(*scale > 0.0f)) {

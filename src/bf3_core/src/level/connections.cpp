@@ -1,6 +1,7 @@
 // Connections and the property resolver: port of IW4L level_bf3 connections.rs (Apache-2.0).
 #include "bf3/core/level/connections.h"
 
+#include <array>
 #include <charconv>
 #include <string>
 
@@ -10,8 +11,9 @@ namespace {
 
 // Resolution depth: each hop through a connection or an interface costs one.
 constexpr uint32_t kResolveDepth = 32;
-// Steps one resolution may take (see Scopes::budget_); retail resolutions take a few dozen.
-constexpr uint32_t kResolveBudget = 1u << 16;
+// Hops one resolution may take (see Scopes::resolve_left_); retail resolutions take a few dozen.
+// The traversal's WorkBudget bounds the sum over all resolutions.
+constexpr uint32_t kResolveCap = 1u << 16;
 // Longest sub-world BundleName looked up (retail names are under 100 characters).
 constexpr size_t kMaxBundleName = 1024;
 
@@ -107,7 +109,7 @@ int32_t field_id(std::string_view p_name) {
 
 // --- Connections -------------------------------------------------------------------------------
 
-Connections Connections::of(const EbxResolver &p_db, const EbxInstance &p_blueprint) {
+Result<Connections> Connections::of(const EbxResolver &p_db, const EbxInstance &p_blueprint, WorkBudget &r_budget) {
 	Connections out;
 	const EbxPartition &partition = p_blueprint.partition();
 	struct List {
@@ -118,6 +120,9 @@ Connections Connections::of(const EbxResolver &p_db, const EbxInstance &p_bluepr
 		{ "LinkConnections", "SourceFieldId", "TargetFieldId" },
 		{ "EventConnections", "SourceEvent.Id", "TargetEvent.Id" },
 	};
+	for (const List &list : kLists) {
+		BF3_TRY(r_budget.charge(array_length(p_blueprint.data(), list.name)));
+	}
 	for (size_t slot = 0; slot < 3; ++slot) {
 		const std::optional<EbxValue> list = p_blueprint.get(kLists[slot].name);
 		const OptionalEbxArray array = list ? list->as_array() : OptionalEbxArray();
@@ -326,9 +331,39 @@ std::optional<level::Vec3> Property::as_vec3() const {
 }
 
 std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field) {
-	for (const EbxField &f : p_object.fields()) {
-		if (field_id(f.name) == p_field) {
-			return f.value;
+	// The order of EbxStruct::fields() (base types first, undecodable fields skipped), but compared
+	// by the descriptors' stored name hash: the parser resolved each field's name through that hash,
+	// so it is ebx_name_hash of the name, and no (possibly huge, hostile) name is hashed again. The
+	// cost is at most kBaseDepth types of 255 fields each, whatever the data.
+	const EbxPartition &p = p_object.partition();
+	const EbxStruct data = p_object.data();
+	std::array<std::pair<uint32_t, uint32_t>, EbxPartition::kBaseDepth> chain{}; // (complex, offset), derived first
+	size_t depth = 0;
+	std::optional<std::pair<uint32_t, uint32_t>> next = std::make_pair(data.complex(), data.offset());
+	while (next && depth < chain.size() && next->first < p.complex_descs().size()) {
+		chain[depth++] = *next;
+		const EbxPartition::Complex &desc = p.complex_descs()[next->first];
+		std::optional<std::pair<uint32_t, uint32_t>> base;
+		for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
+			const EbxPartition::Field &member = p.field_descs()[f];
+			if (member.code == ebx_code::kVoid) {
+				base = std::make_pair(uint32_t(member.reference), next->second + uint32_t(member.offset));
+				break;
+			}
+		}
+		next = base;
+	}
+	while (depth > 0) {
+		const auto [complex, at] = chain[--depth];
+		const EbxPartition::Complex &desc = p.complex_descs()[complex];
+		for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
+			const EbxPartition::Field &member = p.field_descs()[f];
+			if (member.code == ebx_code::kVoid || int32_t(member.hash) != p_field) {
+				continue;
+			}
+			if (std::optional<EbxValue> v = p.decode(f, size_t(at) + size_t(int64_t(member.offset)))) {
+				return v;
+			}
 		}
 	}
 	return std::nullopt;
@@ -345,7 +380,7 @@ struct Scopes::Frame {
 	EbxInstance blueprint;
 };
 
-uint32_t Scopes::push(const EbxInstance &p_blueprint, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent,
+Result<uint32_t> Scopes::push(const EbxInstance &p_blueprint, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent,
 		const LevelTransform &p_transform, uint32_t p_subworld, uint32_t p_variation) {
 	const InstanceKey key = InstanceKey::of(p_blueprint);
 	uint32_t connections = 0;
@@ -353,8 +388,13 @@ uint32_t Scopes::push(const EbxInstance &p_blueprint, std::optional<EbxInstance>
 	if (found != by_blueprint_.end()) {
 		connections = found->second;
 	} else {
+		// Each blueprint's lists are read once per traversal, however many scopes instantiate it.
+		Result<Connections> read = Connections::of(*db_, p_blueprint, *budget_);
+		if (!read) {
+			return read.error();
+		}
 		connections = uint32_t(connections_.size());
-		connections_.push_back(Connections::of(*db_, p_blueprint));
+		connections_.push_back(std::move(*read));
 		by_blueprint_.emplace(key, connections);
 	}
 	const uint32_t at = uint32_t(scopes_.size());
@@ -403,31 +443,54 @@ std::optional<EbxInstance> Scopes::referenced_blueprint(const EbxInstance &p_ref
 	return std::nullopt;
 }
 
-std::optional<Property> Scopes::property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const {
-	budget_ = kResolveBudget;
+Result<std::optional<Property>> Scopes::property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const {
+	BF3_TRY(budget_->status());
+	resolve_left_ = kResolveCap;
 	Frame frame;
 	frame.scope = p_scope;
-	return property_in(frame, p_target, p_field, kResolveDepth);
+	std::optional<Property> v = property_in(frame, p_target, p_field, kResolveDepth);
+	BF3_TRY(budget_->status()); // a resolution the budget cut short has no answer
+	return v;
 }
 
-std::optional<Property> Scopes::interface(uint32_t p_scope, int32_t p_field) const {
-	budget_ = kResolveBudget;
+Result<std::optional<Property>> Scopes::interface(uint32_t p_scope, int32_t p_field) const {
+	BF3_TRY(budget_->status());
+	resolve_left_ = kResolveCap;
 	Frame frame;
 	frame.scope = p_scope;
-	return interface_in(frame, p_field, kResolveDepth);
+	std::optional<Property> v = interface_in(frame, p_field, kResolveDepth);
+	BF3_TRY(budget_->status());
+	return v;
 }
 
-const Connections &Scopes::connections_of(const EbxInstance &p_blueprint) const {
+bool Scopes::hop() const {
+	if (resolve_left_ == 0) {
+		++capped_;
+		return false;
+	}
+	if (!budget_->charge(1)) {
+		return false;
+	}
+	--resolve_left_;
+	++hops_;
+	return true;
+}
+
+const Connections *Scopes::connections_of(const EbxInstance &p_blueprint) const {
 	const InstanceKey key = InstanceKey::of(p_blueprint);
 	const auto found = by_blueprint_.find(key);
 	if (found != by_blueprint_.end()) {
-		return connections_[found->second];
+		return &connections_[found->second];
 	}
 	auto extra = extra_.find(key);
 	if (extra == extra_.end()) {
-		extra = extra_.emplace(key, Connections::of(*db_, p_blueprint)).first;
+		Result<Connections> read = Connections::of(*db_, p_blueprint, *budget_);
+		if (!read) {
+			return nullptr; // the budget is exhausted; the resolution reports it
+		}
+		extra = extra_.emplace(key, std::move(*read)).first;
 	}
-	return extra->second;
+	return &extra->second;
 }
 
 std::optional<EbxValue> Scopes::descriptor_field(const EbxInstance &p_descriptor, int32_t p_field) const {
@@ -439,6 +502,9 @@ std::optional<EbxValue> Scopes::descriptor_field(const EbxInstance &p_descriptor
 	const InstanceKey key = InstanceKey::of(p_descriptor);
 	auto index = descriptor_fields_.find(key);
 	if (index == descriptor_fields_.end()) {
+		if (!budget_->charge(array->size())) {
+			return std::nullopt; // the resolution reports the exhausted budget
+		}
 		index = descriptor_fields_.emplace(key, std::unordered_map<int32_t, uint32_t>()).first;
 		uint32_t at = 0;
 		for (const EbxValue entry : *array) {
@@ -459,14 +525,16 @@ std::optional<Property> Scopes::property_in(const Frame &p_frame, const EbxInsta
 	}
 	const uint32_t depth = p_depth - 1;
 	const EbxInstance blueprint = p_frame.scope ? scopes_[*p_frame.scope].blueprint : p_frame.blueprint;
-	const Connections &connections = connections_of(blueprint);
-	if (const std::vector<uint32_t> *into = connections.property_into(p_target, p_field)) {
+	const Connections *connections = connections_of(blueprint);
+	if (!connections) {
+		return std::nullopt;
+	}
+	if (const std::vector<uint32_t> *into = connections->property_into(p_target, p_field)) {
 		for (const uint32_t at : *into) {
-			if (budget_ == 0) {
-				++exhausted_; // the rest would each be cut short; do not walk them
-				break;
+			if (!hop()) {
+				break; // capped or out of budget: the rest would each be cut short
 			}
-			const Connection &c = connections.property[at];
+			const Connection &c = connections->property[at];
 			if (std::optional<Property> v = source_value(p_frame, c.source, c.source_field, depth)) {
 				return v;
 			}
@@ -476,15 +544,10 @@ std::optional<Property> Scopes::property_in(const Frame &p_frame, const EbxInsta
 }
 
 std::optional<Property> Scopes::source_value(const Frame &p_frame, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth) const {
+	// The caller charged this hop.
 	if (p_depth == 0) {
 		return std::nullopt;
 	}
-	if (budget_ == 0) {
-		++exhausted_;
-		return std::nullopt;
-	}
-	--budget_;
-	++hops_;
 	const uint32_t depth = p_depth - 1;
 	const EbxInstance blueprint = p_frame.scope ? scopes_[*p_frame.scope].blueprint : p_frame.blueprint;
 	const std::optional<EbxInstance> descriptor = db_->follow(blueprint.data(), "Descriptor");
@@ -497,14 +560,16 @@ std::optional<Property> Scopes::source_value(const Frame &p_frame, const EbxInst
 			child.parent = &p_frame;
 			child.reference = p_source;
 			child.blueprint = *inner;
-			const Connections &connections = connections_of(*inner);
-			if (const std::vector<uint32_t> *into = connections.property_into(*inner_descriptor, p_field)) {
+			const Connections *connections = connections_of(*inner);
+			if (!connections) {
+				return std::nullopt;
+			}
+			if (const std::vector<uint32_t> *into = connections->property_into(*inner_descriptor, p_field)) {
 				for (const uint32_t at : *into) {
-					if (budget_ == 0) {
-						++exhausted_;
+					if (!hop()) {
 						break;
 					}
-					const Connection &c = connections.property[at];
+					const Connection &c = connections->property[at];
 					if (std::optional<Property> v = source_value(child, c.source, c.source_field, depth)) {
 						return v;
 					}
@@ -558,7 +623,10 @@ std::optional<Property> Scopes::interface_in(const Frame &p_frame, int32_t p_fie
 	// The first entry with the id decides, as Rust's find + and_then.
 	const std::optional<EbxValue> value = entry->get("Value");
 	const std::optional<std::string_view> text = value ? value->as_str() : std::nullopt;
-	return text ? Property::parse(*text) : std::nullopt;
+	if (!text || !budget_->charge(1 + text->size() / 64)) {
+		return std::nullopt; // parsing reads the whole constant: a unit per 64 bytes
+	}
+	return Property::parse(*text);
 }
 
 } // namespace bf3::core::level

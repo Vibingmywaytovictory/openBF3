@@ -89,15 +89,18 @@ void flush(std::string &r_out, std::vector<std::string> &p_lines) {
 	p_lines.clear();
 }
 
-std::string hidden_label(const EbxResolver &p_db, const MeshObject &p_mesh, const EbxInstance &p_entity) {
+Result<std::string> hidden_label(const EbxResolver &p_db, const World &p_world, const MeshObject &p_mesh, const EbxInstance &p_entity) {
 	if (!p_mesh.asset.is_a("CompositeMeshAsset")) {
-		return "-";
+		return std::string("-");
 	}
-	const std::optional<std::vector<uint16_t>> parts = hidden_parts(p_db, p_entity);
-	return parts ? "[" + join_u16(*parts) + "]" : "noparts";
+	const Result<std::optional<std::vector<uint16_t>>> parts = hidden_parts(p_db, p_entity, *p_world.budget);
+	if (!parts) {
+		return parts.error();
+	}
+	return *parts ? "[" + join_u16(**parts) + "]" : std::string("noparts");
 }
 
-std::string placement_line(const EbxResolver &p_db, const World &p_world, const PlacedObject &p_object) {
+Result<std::string> placement_line(const EbxResolver &p_db, const World &p_world, const PlacedObject &p_object) {
 	std::string line = "P " + std::string(p_object.label()) + " " + id(p_db, p_object.entity) + " " + std::string(p_object.entity.type_name()) + " ref " +
 			opt_id(p_db, p_object.reference) + " sw " + std::to_string(p_object.subworld) + " var " + hex32(p_object.variation);
 	if (p_object.group) {
@@ -109,16 +112,24 @@ std::string placement_line(const EbxResolver &p_db, const World &p_world, const 
 	}
 	if (p_object.kind == ObjectKind::Mesh && p_object.mesh) {
 		const MeshObject &mesh = *p_object.mesh;
+		const Result<std::string> hidden = hidden_label(p_db, p_world, mesh, p_object.entity);
+		if (!hidden) {
+			return hidden.error();
+		}
 		line += " mesh " + id(p_db, mesh.asset) + " " + std::string(mesh_entity_type_name(mesh.entity_type)) + " phys " + opt_id(p_db, mesh.physics) +
-				" hid " + hidden_label(p_db, mesh, p_object.entity);
+				" hid " + *hidden;
 	} else {
 		line += " mesh -";
 	}
-	line += std::string(" start_hidden ") + (starts_hidden(p_world, p_object) ? "1" : "0") + " t " + transform_hex(p_object.transform);
+	const Result<bool> start_hidden = starts_hidden(p_world, p_object);
+	if (!start_hidden) {
+		return start_hidden.error();
+	}
+	line += std::string(" start_hidden ") + (*start_hidden ? "1" : "0") + " t " + transform_hex(p_object.transform);
 	return line;
 }
 
-std::string listing(const LoadedLevel &p_level, const World &p_world, const MeshCensus &p_census, const std::vector<CollisionPlacement> &p_collision) {
+Result<std::string> listing(const LoadedLevel &p_level, const World &p_world, const MeshCensus &p_census, const std::vector<CollisionPlacement> &p_collision) {
 	const EbxResolver &db = p_level.db();
 	std::string out;
 	std::vector<std::string> lines;
@@ -167,7 +178,11 @@ std::string listing(const LoadedLevel &p_level, const World &p_world, const Mesh
 
 	lines.reserve(p_world.objects.size());
 	for (const PlacedObject &object : p_world.objects) {
-		lines.push_back(placement_line(db, p_world, object));
+		Result<std::string> line = placement_line(db, p_world, object);
+		if (!line) {
+			return line.error();
+		}
+		lines.push_back(std::move(*line));
 	}
 	flush(out, lines);
 
@@ -252,17 +267,32 @@ int cmd_level(const std::shared_ptr<Install> &p_install, const std::string &p_le
 		std::fprintf(stderr, "traverse %s %s: %s\n", p_level.c_str(), p_mode.c_str(), world.error().message.c_str());
 		return 1;
 	}
-	std::fprintf(stderr, "traversed %zu objects (%zu scopes, %zu groups, %zu steps, %zu resolve hops) in %.3f s\n", (*world)->objects.size(),
-			(*world)->scopes.size(), (*world)->groups.size(), (*world)->stats.steps, (*world)->stats.resolve_hops, seconds_since(start));
+	const WorldStats &stats = (*world)->stats;
+	std::fprintf(stderr, "traversed %zu objects (%zu scopes, %zu groups, %zu steps, %zu resolve hops, %zu capped, work %zu) in %.3f s\n",
+			(*world)->objects.size(), (*world)->scopes.size(), (*world)->groups.size(), stats.steps, stats.resolve_hops, stats.capped_resolutions, stats.work,
+			seconds_since(start));
 	start = std::chrono::steady_clock::now();
 	CensusOptions options;
 	options.legacy_variations = p_legacy_mvdb;
-	const MeshCensus census = mesh_census(level, **world, options);
-	const std::vector<CollisionPlacement> collision = collision_placements(level, **world);
-	std::fprintf(stderr, "census: %zu placements -> %zu meshes (%zu model, %zu world), %zu instances, %zu failures in %.3f s\n", census.placements,
-			census.scene_meshes, census.model_meshes, census.world_meshes, census.scene_instances, census.failures.size(), seconds_since(start));
-	const std::string text = listing(level, **world, census, collision);
-	std::fwrite(text.data(), 1, text.size(), stdout);
+	const Result<MeshCensus> census = mesh_census(level, **world, options);
+	if (!census) {
+		std::fprintf(stderr, "census %s %s: %s\n", p_level.c_str(), p_mode.c_str(), census.error().message.c_str());
+		return 1;
+	}
+	const Result<std::vector<CollisionPlacement>> collision = collision_placements(level, **world);
+	if (!collision) {
+		std::fprintf(stderr, "collision %s %s: %s\n", p_level.c_str(), p_mode.c_str(), collision.error().message.c_str());
+		return 1;
+	}
+	std::fprintf(stderr, "census: %zu placements -> %zu meshes (%zu model, %zu world), %zu instances, %zu failures in %.3f s\n", census->placements,
+			census->scene_meshes, census->model_meshes, census->world_meshes, census->scene_instances, census->failures.size(), seconds_since(start));
+	const Result<std::string> text = listing(level, **world, *census, *collision);
+	if (!text) {
+		std::fprintf(stderr, "listing %s %s: %s\n", p_level.c_str(), p_mode.c_str(), text.error().message.c_str());
+		return 1;
+	}
+	std::fprintf(stderr, "work budget: %zu of %zu units spent\n", level.budget->spent(), level.budget->limit());
+	std::fwrite(text->data(), 1, text->size(), stdout);
 	return 0;
 }
 

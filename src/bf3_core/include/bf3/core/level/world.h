@@ -16,11 +16,13 @@
 //       members), InstanceScale in `scale`, InstanceObjectVariation as the variation
 //     any other object: placed at its Transform (x) frame
 // Excluded, BlueprintTransform and Transform can be fed by PropertyConnections (Scopes::property).
-// Depth is limited to 48 blueprint levels; fan-out by a step budget, objects to 2^20, scopes to 2^18
-// and static model groups to 2^16 (a traversal past any of them fails).
+// Depth is limited to 48 blueprint levels, objects to 2^20, scopes to 2^18 and static model groups
+// to 2^16; all work (walk, resolver, and the helpers later run on the World) is charged to one
+// WorkBudget (budget.h; cost model in world.cpp). A traversal past any of them fails.
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/level/budget.h"
 #include "bf3/core/level/connections.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/level_transform.h"
@@ -117,7 +119,8 @@ struct PlacedObject {
 // handoff's Bazaar counts were taken with).
 class MeshVariationDb {
 public:
-	static MeshVariationDb read(const EbxResolver &p_db, const EbxInstance &p_database, bool p_keep_empty = false);
+	// Charges the Entries and RedirectEntries raw lengths to r_budget before reading them.
+	static Result<MeshVariationDb> read(const EbxResolver &p_db, const EbxInstance &p_database, WorkBudget &r_budget, bool p_keep_empty = false);
 
 	std::optional<EbxInstance> database() const { return database_; }
 	size_t size() const { return entries_.size(); }
@@ -167,11 +170,12 @@ struct WorldStats {
 	size_t unresolved_objects = 0; // Objects entries that do not resolve in the loaded partitions
 	size_t missing_blueprints = 0;
 	size_t depth_limited = 0;
-	// Traversal steps taken: visits, Objects slots, group members and instances, variation database
-	// slots read. Steps plus resolve_hops past 2^22 fail the traversal, which only a hostile
-	// blueprint graph reaches.
+	// Walker steps charged: visits, Objects slots, group members and instances, inclusion setting
+	// and variation database slots, Havok res reads.
 	size_t steps = 0;
 	size_t resolve_hops = 0; // connection hops of the property resolutions (Scopes::hops)
+	size_t capped_resolutions = 0; // resolutions cut short by the per-resolution cap (0 on retail)
+	size_t work = 0; // the WorkBudget's total when the traversal ended (load + walk + resolver)
 	std::vector<std::string> skipped_subworlds; // BundleNames the mode does not include
 	std::vector<std::string> absent_subworlds; // included sub-worlds whose partition is not loaded
 	size_t unnamed_subworlds = 0; // skipped or absent past the 4,096 names the lists keep
@@ -179,19 +183,26 @@ struct WorldStats {
 
 class World {
 public:
-	// Walks p_level from its LevelData. Fails when a static model group's Havok res is missing or
-	// unreadable, or holds fewer subparts than its members need, or when the blueprint graph exceeds
-	// the step, object or scope budget. p_level must outlive the World.
+	// Walks p_level from its LevelData, charging p_level's WorkBudget (which its load already
+	// charged). Fails when a static model group's Havok res is missing or unreadable, or holds
+	// fewer subparts than its members need, or when the blueprint graph exceeds the work budget or
+	// the object, scope or group caps. p_level must outlive the World.
 	// A World is not safe to share across threads: Scopes keeps resolution state in its const
-	// methods (property, interface, and through them starts_hidden).
+	// methods (property, interface).
 	static Result<std::unique_ptr<World>> traverse(const LoadedLevel &p_level);
 	// The same over any partition set (p_root: the LevelData; static model group res are read
-	// from p_mount). p_db and p_mount must outlive the World.
-	static Result<std::unique_ptr<World>> traverse(const EbxResolver &p_db, const EbxInstance &p_root, const LevelMount &p_mount, std::string_view p_mode);
+	// from p_mount), charging p_budget (a fresh WorkBudget when null). p_db and p_mount must
+	// outlive the World.
+	static Result<std::unique_ptr<World>> traverse(const EbxResolver &p_db, const EbxInstance &p_root, const LevelMount &p_mount, std::string_view p_mode,
+			std::shared_ptr<WorkBudget> p_budget = nullptr);
 
-	explicit World(const EbxResolver &p_db) :
-			scopes(p_db) {}
+	World(const EbxResolver &p_db, std::shared_ptr<WorkBudget> p_budget) :
+			budget(std::move(p_budget)), scopes(p_db, *budget) {}
 
+	// The traversal's work budget. The helpers run on the World (starts_hidden, hidden_parts,
+	// mesh_census, collision_placements) charge it too, so it bounds everything done with it; once
+	// exhausted, each of them fails at once with its error.
+	std::shared_ptr<WorkBudget> budget;
 	std::vector<PlacedObject> objects;
 	Scopes scopes;
 	std::vector<SubWorld> subworlds; // the level itself first
@@ -202,7 +213,8 @@ public:
 	// reference holding its blueprint (a group member's entity answers with its first instance).
 	const PlacedObject *placed(uint32_t p_scope, const EbxInstance &p_object) const;
 	// The MeshVariationDatabaseEntry that textures p_mesh placed in p_subworld: that sub-world's
-	// database first, then its parents', the exact variation before the default one.
+	// database first, then its parents', the exact variation before the default one. Sub-worlds
+	// nest at most 49 deep (each is a blueprint level of the walk), which bounds the chain.
 	std::optional<EbxInstance> mesh_variation(uint32_t p_subworld, const EbxInstance &p_mesh, uint32_t p_variation) const;
 
 private:

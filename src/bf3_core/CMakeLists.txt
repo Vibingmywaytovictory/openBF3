@@ -97,11 +97,13 @@ target_sources(bf3_core PRIVATE
 # mesh census and the collision placements. Port of IW4L level_bf3; see include/bf3/core/level/.
 target_sources(bf3_core PRIVATE
     src/level/level_transform.cpp
+    src/level/budget.cpp
     src/level/connections.cpp
     src/level/level.cpp
     src/level/world.cpp
     src/level/census.cpp
     include/bf3/core/level/level_transform.h
+    include/bf3/core/level/budget.h
     include/bf3/core/level/connections.h
     include/bf3/core/level/level.h
     include/bf3/core/level/world.h

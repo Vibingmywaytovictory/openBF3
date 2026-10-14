@@ -23,6 +23,8 @@
 // handoff. Bazaar CQL gives 613 meshes / 5,783 instances; the handoff's 620 is reproduced with
 // legacy_variations (IW4L before 066d34c, 2026-10-07, still used an entry with an empty Materials
 // list).
+// Every function here charges the World's WorkBudget (or the one given) before each list it scans
+// (cost model in src/level/world.cpp) and fails with the budget error once it is exhausted.
 
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
@@ -38,12 +40,12 @@
 namespace bf3::core::level {
 
 // The parts of p_entity's composite mesh its first health state does not show, sorted; none when
-// the entity has no PartComponentData (every part drawn).
-std::optional<std::vector<uint16_t>> hidden_parts(const EbxResolver &p_db, const EbxInstance &p_entity);
+// the entity has no PartComponentData (every part drawn). At most 4,096 components are walked.
+Result<std::optional<std::vector<uint16_t>>> hidden_parts(const EbxResolver &p_db, const EbxInstance &p_entity, WorkBudget &r_budget);
 
 // Whether the placement starts invisible: its reference's Visible is fed by a BoolEntityData whose
 // DefaultValue is false (destruction ruins, Metro's backdrop_park / backdrop_city prefabs).
-bool starts_hidden(const World &p_world, const PlacedObject &p_object);
+Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object);
 
 // A uniformly scaled rotation the instance carries, plus the 3x3 linear map baked into the mesh
 // (rows: baked = linear * p) when the transform is not one; IW4L geometry/meshes.rs Bake::split.
@@ -91,10 +93,10 @@ struct MeshCensus {
 	size_t scene_instances = 0; // kept placements + terrain + water
 };
 
-// Reads (read-only) and decodes every placed MeshSet of the level; never fails as a whole (a mesh
-// that does not decode is listed in failures and has no instance).
-MeshCensus mesh_census(const LoadedLevel &p_level, const World &p_world, const CensusOptions &p_options = {});
-MeshCensus mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world, const CensusOptions &p_options = {});
+// Reads (read-only) and decodes every placed MeshSet of the level. A mesh that does not decode is
+// listed in failures and has no instance; only an exhausted work budget fails the census.
+Result<MeshCensus> mesh_census(const LoadedLevel &p_level, const World &p_world, const CensusOptions &p_options = {});
+Result<MeshCensus> mesh_census(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world, const CensusOptions &p_options = {});
 
 // One collision placement: a static model group's Havok res at the group transform (instances at
 // the res's ShapesSubparts), or a placed mesh object's PhysicsEntityData asset.
@@ -114,8 +116,9 @@ struct CollisionPlacement {
 
 // Groups with a physics asset, then every non-group mesh object with PhysicsData, in object order.
 // Objects take the asset of ScaledAssets/Asset prebaked closest to the placement's scale that the
-// bundles carry (IW4L collision pick_asset).
-std::vector<CollisionPlacement> collision_placements(const LoadedLevel &p_level, const World &p_world);
-std::vector<CollisionPlacement> collision_placements(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world);
+// bundles carry (IW4L collision pick_asset); an asset name over 1,024 bytes (no res has one) is
+// skipped. Fails only on an exhausted work budget.
+Result<std::vector<CollisionPlacement>> collision_placements(const LoadedLevel &p_level, const World &p_world);
+Result<std::vector<CollisionPlacement>> collision_placements(const EbxResolver &p_db, const LevelMount &p_mount, const World &p_world);
 
 } // namespace bf3::core::level

@@ -10,9 +10,12 @@
 // iff AutoLoad and the mode is in EnabledOptions of every GameMode inclusion setting (no settings =
 // included). A sub-world bundle the superbundle lacks is recorded as absent (Metro has no
 // Conquest_Large: ConquestLarge0 = Conquest_Small + Teams_Large).
+// The load charges its sub-world search to the level's WorkBudget (budget.h), which the traversal
+// and the helpers run on its World then keep charging.
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
+#include "bf3/core/level/budget.h"
 #include "bf3/core/result.h"
 #include "bf3/core/superbundle_mount.h"
 
@@ -81,7 +84,8 @@ struct LoadOptions {
 class LoadedLevel;
 
 // Mounts p_level_id (MP_Subway, XP2_Palace, ...) read-only, selects the bundles of p_mode and
-// parses their partitions. Fails for an unknown level or a level partition that is not LevelData.
+// parses their partitions. Fails for an unknown level, a level partition that is not LevelData, or
+// a sub-world graph that exhausts the work budget.
 Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p_install, std::string_view p_level_id, std::string_view p_mode,
 		const LoadOptions &p_options = {});
 
@@ -102,6 +106,9 @@ public:
 	BundleSet bundles;
 	PartitionStats stats;
 	std::string root_name; // levels/<id>/<id>
+	// The work budget of this level: the load charged it, World::traverse(*this) and the helpers on
+	// that World charge it on.
+	std::shared_ptr<WorkBudget> budget = std::make_shared<WorkBudget>();
 
 private:
 	friend Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p_install, std::string_view p_level_id,
@@ -114,11 +121,18 @@ private:
 Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_id);
 
 // Whether a SubWorldReferenceObjectData loads in p_mode (see the header comment). A setting whose
-// criterion is not loaded counts as a GameMode one, the only criterion levels use. r_slots, when
-// given, gets the Settings and EnabledOptions slots read (what the check cost).
-bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, size_t *r_slots = nullptr);
+// criterion is not loaded counts as a GameMode one, the only criterion levels use. The Settings and
+// each EnabledOptions list are charged to r_budget (raw length) before they are scanned.
+Result<bool> includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget);
 
-// LevelInfo of a loaded root (the level partition and its description_win32 must be in p_db).
-LevelInfo read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, std::string_view p_root_name, std::string_view p_level_id);
+// Every SubWorldReferenceObjectData among p_container's Objects and, through world parts, its
+// layers (8 deep, at most 2^16 containers per search), in object order. Each container visited
+// costs 1 and the raw length of its Objects, charged before they are resolved.
+Status subworld_references(const EbxResolver &p_db, const EbxInstance &p_container, WorkBudget &r_budget, std::vector<EbxInstance> &r_out);
+
+// LevelInfo of a loaded root (the level partition and its description_win32 must be in p_db). Each
+// list it scans is charged to r_budget first.
+Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, std::string_view p_root_name, std::string_view p_level_id,
+		WorkBudget &r_budget);
 
 } // namespace bf3::core::level

@@ -10,10 +10,13 @@
 // the resolver follows the scope's interface into the parent scopes and the output ports of child
 // prefabs (handoff sections/03 §2.1: Metro's TICKET_HALL flagpole moves 18.4 m this way).
 // Field ids are ebx_name_hash of the field name, as i32.
+// Every connection list scanned and every hop taken is charged to the traversal's WorkBudget first.
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/level/budget.h"
 #include "bf3/core/level/level_transform.h"
+#include "bf3/core/result.h"
 
 #include <cstdint>
 #include <optional>
@@ -55,7 +58,8 @@ struct Connections {
 	std::vector<Connection> event;
 	size_t unresolved = 0; // connections with an end that does not resolve in the loaded partitions
 
-	static Connections of(const EbxResolver &p_db, const EbxInstance &p_blueprint);
+	// The connections of p_blueprint; the three lists' raw lengths are charged to r_budget first.
+	static Result<Connections> of(const EbxResolver &p_db, const EbxInstance &p_blueprint, WorkBudget &r_budget);
 
 	// Indices into `property` of the connections into p_field of p_target, in list order; nullptr
 	// when there are none.
@@ -115,14 +119,17 @@ struct Scope {
 };
 
 // Every scope of a traversal, and the property resolver over them. The const resolvers keep
-// mutable state (the step budget, the child-prefab connection cache), so a Scopes must not be used
-// from several threads at once.
+// mutable state (the per-resolution cap, the child-prefab connection and descriptor caches), so a
+// Scopes must not be used from several threads at once. Every connection candidate a resolution
+// examines costs one hop of r_budget, charged before it is followed; once the budget is exhausted
+// every resolution returns its error at once.
 class Scopes {
 public:
-	explicit Scopes(const EbxResolver &p_db) :
-			db_(&p_db) {}
+	Scopes(const EbxResolver &p_db, WorkBudget &r_budget) :
+			db_(&p_db), budget_(&r_budget) {}
 
-	uint32_t push(const EbxInstance &p_blueprint, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent,
+	// Fails when the budget cannot pay for the blueprint's connection lists.
+	Result<uint32_t> push(const EbxInstance &p_blueprint, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent,
 			const LevelTransform &p_transform, uint32_t p_subworld, uint32_t p_variation);
 
 	const EbxResolver &db() const { return *db_; }
@@ -137,27 +144,32 @@ public:
 	// SubWorldData by bundle, not by pointer).
 	std::optional<EbxInstance> referenced_blueprint(const EbxInstance &p_reference) const;
 	// The value a PropertyConnection of p_scope feeds into p_field of p_target, an object of that
-	// scope, resolved down to a constant or a data field.
-	std::optional<Property> property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const;
+	// scope, resolved down to a constant or a data field; the budget error once it is exhausted.
+	Result<std::optional<Property>> property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const;
 	// Interface field p_field of the scope's blueprint for this instance: what the parent connects
 	// into the instantiating reference, else the descriptor's constant.
-	std::optional<Property> interface(uint32_t p_scope, int32_t p_field) const;
-	// Resolutions cut short by the step budget (hostile connection graphs; 0 on retail levels).
-	size_t budget_exhausted() const { return exhausted_; }
-	// Connection hops taken by every resolution so far (a traversal charges them to its budget).
+	Result<std::optional<Property>> interface(uint32_t p_scope, int32_t p_field) const;
+	// Resolutions cut short by the per-resolution cap (hostile connection graphs; 0 on retail).
+	size_t capped_resolutions() const { return capped_; }
+	// Connection hops charged by every resolution so far.
 	size_t hops() const { return hops_; }
 
 private:
 	struct Frame;
 
-	const Connections &connections_of(const EbxInstance &p_blueprint) const;
-	// The first entry of p_descriptor's Fields with Id p_field, through a per-descriptor index.
+	// Charges one hop: false when the per-resolution cap or the total budget is spent.
+	bool hop() const;
+	// Null once the budget cannot pay for the blueprint's connection lists.
+	const Connections *connections_of(const EbxInstance &p_blueprint) const;
+	// The first entry of p_descriptor's Fields with Id p_field, through a per-descriptor index
+	// (built once per descriptor, its Fields' raw length charged first).
 	std::optional<EbxValue> descriptor_field(const EbxInstance &p_descriptor, int32_t p_field) const;
 	std::optional<Property> property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth) const;
 	std::optional<Property> source_value(const Frame &p_frame, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth) const;
 	std::optional<Property> interface_in(const Frame &p_frame, int32_t p_field, uint32_t p_depth) const;
 
 	const EbxResolver *db_;
+	WorkBudget *budget_;
 	std::vector<Scope> scopes_;
 	std::vector<Connections> connections_;
 	std::unordered_map<InstanceKey, uint32_t, InstanceKeyHash> by_blueprint_;
@@ -174,10 +186,10 @@ private:
 		size_t operator()(const ChildKey &p_key) const noexcept { return InstanceKeyHash()(p_key.reference) ^ (size_t(p_key.scope) << 1); }
 	};
 	std::unordered_map<ChildKey, uint32_t, ChildKeyHash> children_;
-	// Steps left in the current resolution: each connection hop costs one. The depth limit alone
-	// bounds the chain length, not the fan-out, which a hostile blueprint can make exponential.
-	mutable uint32_t budget_ = 0;
-	mutable size_t exhausted_ = 0;
+	// Hops left in the current resolution. The depth limit alone bounds the chain length, not the
+	// fan-out, which a hostile blueprint can make exponential; the total budget bounds the sum.
+	mutable uint32_t resolve_left_ = 0;
+	mutable size_t capped_ = 0;
 	mutable size_t hops_ = 0;
 };
 

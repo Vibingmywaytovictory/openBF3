@@ -15,7 +15,8 @@ namespace {
 // Layers searched for sub-world references (WorldPartReferenceObjectData nesting).
 constexpr uint32_t kLayerDepth = 8;
 // Containers one search may visit: the depth limit bounds nesting, not fan-out (a hostile layer
-// listing itself many times); retail levels visit at most a few dozen.
+// listing itself many times); retail levels visit at most a few dozen. The work budget bounds the
+// slots they list.
 constexpr size_t kLayerBudget = size_t(1) << 16;
 
 struct DisplayName {
@@ -64,21 +65,30 @@ std::optional<std::string_view> str_field(const EbxStruct &p_object, std::string
 	return v ? v->as_str() : std::nullopt;
 }
 
-// Every SubWorldReferenceObjectData among p_container's objects and, through world parts, its layers.
-void subworld_references(const EbxResolver &p_db, const EbxInstance &p_container, uint32_t p_depth, size_t &r_budget, std::vector<EbxInstance> &r_out) {
-	if (r_budget == 0) {
-		return;
+Status search_layers(const EbxResolver &p_db, const EbxInstance &p_container, uint32_t p_depth, size_t &r_containers, WorkBudget &r_budget,
+		std::vector<EbxInstance> &r_out) {
+	if (r_containers == 0) {
+		return Status::success();
 	}
-	--r_budget;
-	for (const EbxInstance &object : p_db.follow_all(p_container.data(), "Objects")) {
+	--r_containers;
+	BF3_TRY(r_budget.charge(1));
+	std::vector<EbxInstance> objects;
+	BF3_TRY(charged_follow_all(p_db, p_container.data(), "Objects", r_budget, objects));
+	for (const EbxInstance &object : objects) {
 		if (object.is_a("SubWorldReferenceObjectData")) {
 			r_out.push_back(object);
 		} else if (object.is_a("WorldPartReferenceObjectData") && p_depth < kLayerDepth) {
 			if (const std::optional<EbxInstance> part = p_db.follow(object.data(), "Blueprint")) {
-				subworld_references(p_db, *part, p_depth + 1, r_budget, r_out);
+				BF3_TRY(search_layers(p_db, *part, p_depth + 1, r_containers, r_budget, r_out));
 			}
 		}
 	}
+	return Status::success();
+}
+
+// The units a string of p_length bytes costs to key, copy or parse.
+size_t text_units(size_t p_length) {
+	return 1 + p_length / 64;
 }
 
 std::string join_names(const std::vector<std::string> &p_names) {
@@ -224,7 +234,12 @@ EbxInstance LoadedLevel::root() const {
 	return db_.partition_by_name(root_name)->primary(); // load_level checked it
 }
 
-bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, size_t *r_slots) {
+Status subworld_references(const EbxResolver &p_db, const EbxInstance &p_container, WorkBudget &r_budget, std::vector<EbxInstance> &r_out) {
+	size_t containers = kLayerBudget;
+	return search_layers(p_db, p_container, 0, containers, r_budget, r_out);
+}
+
+Result<bool> includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget) {
 	const std::optional<EbxValue> auto_load = p_reference.get("AutoLoad");
 	if (!(auto_load ? auto_load->as_bool() : std::nullopt).value_or(false)) {
 		return false;
@@ -233,12 +248,9 @@ bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::stri
 	if (!settings) {
 		return true;
 	}
-	if (r_slots) {
-		const std::optional<EbxValue> list = settings->get("Settings");
-		const OptionalEbxArray slots = list ? list->as_array() : OptionalEbxArray();
-		*r_slots += slots ? slots->size() : 0;
-	}
-	for (const EbxInstance &setting : p_db.follow_all(settings->data(), "Settings")) {
+	std::vector<EbxInstance> setting_list;
+	BF3_TRY(charged_follow_all(p_db, settings->data(), "Settings", r_budget, setting_list));
+	for (const EbxInstance &setting : setting_list) {
 		const std::optional<EbxInstance> criterion = p_db.follow(setting.data(), "Criterion");
 		const std::optional<std::string_view> name = criterion ? str_field(criterion->data(), "Name") : std::nullopt;
 		if (name && !iequals_ascii(*name, "GameMode")) {
@@ -248,9 +260,7 @@ bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::stri
 		const std::optional<EbxValue> options = setting.get("EnabledOptions");
 		const OptionalEbxArray array = options ? options->as_array() : OptionalEbxArray();
 		if (array) {
-			if (r_slots) {
-				*r_slots += array->size();
-			}
+			BF3_TRY(r_budget.charge(array->size()));
 			for (const EbxValue option : *array) {
 				const std::optional<std::string_view> text = option.as_str();
 				if (text && mode_matches(p_mode, *text)) {
@@ -266,7 +276,8 @@ bool includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::stri
 	return true;
 }
 
-LevelInfo read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, std::string_view p_root_name, std::string_view p_level_id) {
+Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, std::string_view p_root_name, std::string_view p_level_id,
+		WorkBudget &r_budget) {
 	LevelInfo info;
 	std::string_view id = p_level_id;
 	if (const std::optional<std::string_view> name = str_field(p_root.data(), "Name")) {
@@ -291,6 +302,7 @@ LevelInfo read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, st
 		const std::optional<EbxValue> categories = asset->get("Categories");
 		const OptionalEbxArray array = categories ? categories->as_array() : OptionalEbxArray();
 		if (array) {
+			BF3_TRY(r_budget.charge(array->size()));
 			for (const EbxValue category : *array) {
 				const std::optional<EbxValue> kind = category.get("Category");
 				const std::optional<std::string_view> kind_name = kind ? kind->as_str() : std::nullopt;
@@ -302,6 +314,7 @@ LevelInfo read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, st
 				if (!mode_array) {
 					continue;
 				}
+				BF3_TRY(r_budget.charge(mode_array->size())); // categories may share one array
 				for (const EbxValue mode : *mode_array) {
 					if (const std::optional<std::string_view> m = mode.as_str()) {
 						info.modes.emplace_back(*m);
@@ -313,14 +326,14 @@ LevelInfo read_level_info(const EbxResolver &p_db, const EbxInstance &p_root, st
 
 	std::vector<EbxInstance> components;
 	if (const std::optional<EbxStruct> d = description ? description->as_struct() : std::nullopt) {
-		components = p_db.follow_all(*d, "Components");
+		BF3_TRY(charged_follow_all(p_db, *d, "Components", r_budget, components));
 	}
 	if (asset) {
 		const std::optional<EbxValue> asset_description = asset->get("Description");
 		if (const std::optional<EbxStruct> d = asset_description ? asset_description->as_struct() : std::nullopt) {
-			for (const EbxInstance &c : p_db.follow_all(*d, "Components")) {
-				components.push_back(c);
-			}
+			std::vector<EbxInstance> more;
+			BF3_TRY(charged_follow_all(p_db, *d, "Components", r_budget, more));
+			components.insert(components.end(), more.begin(), more.end());
 		}
 	}
 	for (const EbxInstance &component : components) {
@@ -383,6 +396,7 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 	}
 	BF3_TRY(loader.load(bundles.settings));
 
+	WorkBudget &budget = *loaded->budget;
 	std::unordered_set<std::string> seen;
 	std::deque<std::string> pending{ root_name };
 	while (!pending.empty()) {
@@ -393,20 +407,24 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 			continue;
 		}
 		std::vector<EbxInstance> references;
-		size_t budget = kLayerBudget;
-		subworld_references(loaded->db_, partition->primary(), 0, budget, references);
-		std::vector<std::string> wanted;
+		BF3_TRY(subworld_references(loaded->db_, partition->primary(), budget, references));
+		// Keyed one reference at a time: many references naming one long BundleName cost its
+		// length each (charged), but only a new key is kept.
+		std::vector<std::string> batch;
 		for (const EbxInstance &reference : references) {
-			if (!includes(loaded->db_, reference, p_mode)) {
+			Result<bool> included = includes(loaded->db_, reference, p_mode, budget);
+			if (!included) {
+				return included.error();
+			}
+			if (!*included) {
 				continue;
 			}
-			if (const std::optional<std::string_view> bundle = str_field(reference.data(), "BundleName")) {
-				wanted.emplace_back(*bundle);
+			const std::optional<std::string_view> name = str_field(reference.data(), "BundleName");
+			if (!name) {
+				continue;
 			}
-		}
-		std::vector<std::string> batch;
-		for (const std::string &name : wanted) {
-			const std::string key = bundle_key(name);
+			BF3_TRY(budget.charge(text_units(name->size())));
+			const std::string key = bundle_key(*name);
 			if (!seen.insert(key).second) {
 				continue;
 			}
@@ -414,7 +432,7 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 				batch.push_back(std::move(*bundle));
 				pending.push_back(key);
 			} else {
-				bundles.absent.push_back(name);
+				bundles.absent.emplace_back(*name);
 			}
 		}
 		BF3_TRY(loader.load(batch));
@@ -422,7 +440,11 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 	}
 
 	loader.count_imports();
-	loaded->info = read_level_info(loaded->db_, loaded->root(), root_name, p_level_id);
+	Result<LevelInfo> info = read_level_info(loaded->db_, loaded->root(), root_name, p_level_id, budget);
+	if (!info) {
+		return info.error();
+	}
+	loaded->info = std::move(*info);
 	return loaded;
 }
 
@@ -462,7 +484,8 @@ Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_
 	if (!root) {
 		return make_error("missing partition " + root_name);
 	}
-	return read_level_info(db, root->primary(), root_name, p_level_id);
+	WorkBudget budget;
+	return read_level_info(db, root->primary(), root_name, p_level_id, budget);
 }
 
 } // namespace bf3::core::level
