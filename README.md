@@ -46,8 +46,8 @@ characters below the checkout (`b\release\gcpp\...plane_tracking.cpp.obj`), so k
 Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C++ exceptions off
 (`_HAS_EXCEPTIONS=0`). This covers godot-cpp, Jolt, ENet, Recast and doctest.
 
-`ctest` runs `core.guard`, `core.install`, `sim.jolt`, `net.enet` and `host.server`. `core.install` reports
-*Skipped* when no install is found.
+`ctest` runs `core.guard`, `core.install`, `core.cache`, `core.cache_data`, `sim.jolt`, `net.enet` and `host.server`.
+`core.install` reports *Skipped* when no install is found, `core.cache_data` when `OPENBF3_CACHE_TESTDATA` is unset.
 
 ## Run
 
@@ -79,11 +79,70 @@ first call. So on every engine bump (dev → RC → stable): dump both JSONs int
 `engine-api/<version>.<hash>/` folder, run `<godot> --headless --validate-extension-api <old extension_api.json>`,
 point `OPENBF3_ENGINE_API` at the new folder and rebuild from clean.
 
+## Derived-data cache
+
+`bf3_core` `Cache` (`include/bf3/core/cache/`, plan §2.1/§2.4, gap load §6.4) stores converted blobs under one
+absolute root. `bf3_godot` passes the globalised `user://bf3cache` and `InstallReader::write_guard()`. One process
+opens a root at a time; a second `open` gets `Busy`.
+
+```
+<root>/v1/lock                         held exclusively while open
+<root>/v1/index.log                    append-only journal: put / touch / remove / pin / close
+<root>/v1/<kind>/<k[0:2]>/<k>.bin      128-byte header (magic, version, key, kind, payload size,
+                                       payload SHA-256, CRC) + payload, payload 64-byte aligned
+```
+
+* **Key** (`make_cache_key`): `k` is the SHA-256 of a length-prefixed encoding of the kind, the source digests
+  (the CAS SHA-1s the bundle manifests carry, in converter order), the converter version, the engine
+  version+commit, the blob format version, and optionally the Jolt version and other parameters. Content changes
+  and tool changes both produce new keys. Old blobs are never looked up again and age out through LRU. SHA-1 and
+  SHA-256 come from Windows CNG (BCrypt) behind a portable `Hasher` interface. A changed key encoding needs a new
+  `v<n>`; a doctest pins one key value to catch accidental changes.
+* **Writes cannot reach the install.**
+  * The guard checks the textual path first.
+  * The root is opened as a handle, and its *final* path (after links) must lie outside every protected root.
+  * Every directory below the root is opened relative to its parent handle, with `NtCreateFile`, and never through
+    a reparse point: a junction or symlink inside the tree is refused.
+  * The target directory's final path is checked again.
+  * The temp file is created relative to that verified handle, written and flushed. It is then renamed with
+    `NtSetInformationFile(FileRenameInformationEx, RootDirectory = that handle, replace)`.
+
+  So a junction swapped in after the check cannot move the write. Hard-linked, directory and reparse-point
+  targets are refused. Deletes (eviction, damaged entries, temp files) open the name relative to the verified
+  handle and check the link count and the final path of the handle they delete through.
+
+  Do not use `SetFileInformationByHandle(FileRenameInfo)` here: it rejects a non-NULL `RootDirectory`. With a
+  NULL one, it resolves a bare name against the process's current directory.
+* **Atomic and validated.** Readers see either the old state or a complete entry. `get` maps the file read-only and
+  checks magic, version, CRC, key, kind and size. It checks the payload SHA-256 on first use in each process, on
+  every read (`CacheVerify::Always`), or when asked (`get(key, true)`, `verify`). A damaged or partial entry is
+  deleted and reported as a miss (`dropped_corrupt`).
+* **Crash recovery at `open`.**
+  * Stray `*.tmp` files are deleted.
+  * Journal replay stops at the first short or CRC-failing record.
+  * The tree is reconciled with the journal. A file without a record is adopted as least recently used, but only
+    if it is single-linked and its header names its key. A record without a file is dropped. A size mismatch is
+    deleted.
+  * The journal is rewritten atomically whenever anything was repaired or it holds over 2× garbage.
+* **Concurrency.** Any thread may call any method. File I/O runs outside the index lock. Puts of the same key are
+  deduplicated: one writer runs, the others wait and get `reused`. `get_or_put` runs its producer once per key
+  across threads.
+* **Eviction** is explicit (`evict_to`, `enforce_budget`: above the budget, evict down to 90 %), meant for round
+  end and never mid-round. It removes the least recently used entries first and skips persistent pins
+  (`set_pinned`) and entries with a live `CacheEntry` view. LRU recency is persisted as touch records at
+  `flush`/`close`; after a crash, recency since the last flush is lost.
+
+Tests: `core.cache` (scratch trees in `%TEMP%`; a temp directory plays the protected install) and `core.cache_data`.
+`core.cache_data` reads real payloads from `OPENBF3_CACHE_TESTDATA`, checks BCrypt SHA-1 against the manifest SHA-1
+of every stored payload, and round-trips the decoded payloads. It reports *Skipped* without the variable. That data is
+exported from your own install by the research `ebx-dump` tool (`export <superbundle> <out_dir> <max_mb>`, an
+addition in a scratch copy) and never enters the repo.
+
 ## Layout and pinned third-party code
 
 | path | what |
 |---|---|
-| `src/bf3_core` | `InstallReader`, `ReadOnlyFile`, `PathGuard`, install snapshot (Godot-free) |
+| `src/bf3_core` | `InstallReader`, `ReadOnlyFile`, `PathGuard`, install snapshot, derived-data `Cache` (Godot-free) |
 | `src/bf3_sim` | own Jolt world at a fixed 60 Hz, Recast/Detour link check (Godot-free) |
 | `src/bf3_net` | upstream ENet wrapper, loopback ping (Godot-free) |
 | `src/bf3_host` | `ServerHost` on its own `std::thread`, `LoopbackClient` (Godot-free) |
