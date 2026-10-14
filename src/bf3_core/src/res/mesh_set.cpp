@@ -351,6 +351,11 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 			if (!e.ok()) {
 				return e;
 			}
+			// The part index is the element's first byte; a 0-byte element (VertexFormat::None) has
+			// none (IW4L panics indexing the empty slice). Reject it before reading.
+			if (size < 1) {
+				return ResError::unsupported("part index vertex format", uint32_t(bone_indices->format));
+			}
 		}
 		parts.reserve(size_t(vr.count));
 		for (uint64_t v = 0; v < vr.count; v++) {

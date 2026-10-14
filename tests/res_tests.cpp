@@ -281,6 +281,32 @@ TEST_SUITE("res_unit") {
 			REQUIRE(huge.lods[0].inline_geometry(hostile, geometry).ok());
 			CHECK(huge.lods[0].decode_subset(geometry, 0, d).message() == "malformed vertex element outside its stride at 0");
 		}
+
+		// Composite part channel: the part index is the BoneIndices element's first byte, so a
+		// 0-byte (None) element at offset == stride, ending exactly at the buffer end, must be
+		// rejected instead of reading one byte past it (ASan heap-buffer-overflow before the fix).
+		{
+			MeshLod parts_lod;
+			parts_lod.vertex_data_size = 4;
+			MeshSubset sub;
+			sub.vertex_count = 1;
+			sub.vertex_stride = 4;
+			sub.primitive_type = PrimitiveType::TriangleList;
+			sub.declaration.element_count = 2;
+			sub.declaration.elements[0] = { VertexUsage::Position, VertexFormat::Float, 0, 0 };
+			sub.declaration.elements[1] = { VertexUsage::BoneIndices, VertexFormat::None, 4, 0 };
+			sub.part_mask[0] = 1;
+			parts_lod.subsets.push_back(sub);
+			const std::vector<uint8_t> one = { 0x00, 0x00, 0x80, 0x3F };
+			DecodedSubset pd;
+			CHECK(parts_lod.decode_subset(one, 0, pd).message() == "unsupported part index vertex format 0x0");
+			// The same subset with a 1-byte-or-more element at offset 0 still yields its part.
+			parts_lod.subsets[0].declaration.elements[1] = { VertexUsage::BoneIndices, VertexFormat::UByte4, 0, 0 };
+			const std::vector<uint8_t> two = { 0x05, 0x00, 0x00, 0x00 };
+			REQUIRE(parts_lod.decode_subset(two, 0, pd).ok());
+			REQUIRE(pd.parts);
+			CHECK(*pd.parts == std::vector<uint16_t>{ 5 });
+		}
 	}
 
 	TEST_CASE("res: synthetic DxTexture, mips and ranged views") {
@@ -573,6 +599,87 @@ TEST_SUITE("res") {
 		std::vector<std::array<uint32_t, 2>> pairs;
 		REQUIRE(hk.part_connections(pairs).ok());
 		CHECK(pairs.size() == 22);
+	}
+
+	TEST_CASE("res: hostile havok storage subpart") {
+		std::string data;
+		if (!data_or_skip(data)) {
+			return;
+		}
+		// Verifier repro: index striding 0 repeats triangle 0, so raw i32 counts of 0x7FFFFFFF used
+		// to push ~2^31 triangles from a small packfile. Array counts are now bounded by the bytes
+		// behind them, and a zero stride needs its whole index array inside the data section.
+		// Host: the first sample res with a storage extended mesh whose subpart 0 has storage.
+		HavokPhysicsData good;
+		uint32_t subpart = 0, mesh = 0;
+		bool found = false;
+		for (const auto &[name, path] : load_index(data, "subway")) {
+			Sample s;
+			good = HavokPhysicsData();
+			if (!load_sample(path, s) || (s.res_type != kResTypeHavokPhysicsData && s.res_type != kResTypeHavokDestructionPhysicsData) ||
+					!HavokPhysicsData::parse(s.payload, s.meta, good).ok()) {
+				continue;
+			}
+			for (const PackObject &o : good.packfile.objects) {
+				uint32_t storage_at = 0, storage_count = 0, triangles_at = 0, triangle_count = 0;
+				if (o.class_name == "hkpStorageExtendedMeshShape" && good.packfile.array(o.offset + 240, storage_at, storage_count).ok() &&
+						good.packfile.array(o.offset + 184, triangles_at, triangle_count).ok() && storage_count > 0 && triangle_count > 0 &&
+						good.packfile.pointer(storage_at, mesh)) {
+					subpart = triangles_at;
+					found = true;
+					break;
+				}
+			}
+			if (found) {
+				break;
+			}
+		}
+		REQUIRE(found);
+		if (!found) {
+			return;
+		}
+		std::vector<Shape> shapes;
+		REQUIRE(good.shapes(shapes).ok());
+		const uint8_t striding = good.packfile.data[subpart + 46];
+		REQUIRE((striding >= 1 && striding <= 3));
+		const uint32_t width = striding == 1 ? 1u : (striding == 2 ? 2u : 4u);
+		const uint32_t field = mesh + (striding == 1 ? 20u : (striding == 2 ? 32u : 44u));
+		uint32_t indices_at = 0, index_count = 0;
+		REQUIRE(good.packfile.array(field, indices_at, index_count).ok());
+		REQUIRE(index_count >= 3);
+		HavokPhysicsData bad = good;
+		put32(bad.packfile.data, subpart + 20, 0x7FFFFFFFu); // triangle count
+		put16(bad.packfile.data, subpart + 44, 0); // index striding
+		put32(bad.packfile.data, field + 4, 0x7FFFFFFFu); // index count
+		CHECK(bad.packfile.array(field, indices_at, index_count).message() == "malformed array count beyond data at " + std::to_string(field));
+		CHECK(bad.shapes(shapes).message() == "malformed array count beyond data at " + std::to_string(field));
+		CHECK(shapes.empty());
+		// The largest count the one-byte bound lets through: refused when width > 1 (the indices
+		// would run past the data); with width 1 the triangle count cannot exceed it.
+		REQUIRE(good.packfile.array(field, indices_at, index_count).ok());
+		const uint32_t backed = uint32_t(bad.packfile.data.size() - indices_at);
+		put32(bad.packfile.data, field + 4, backed);
+		const std::string got = bad.shapes(shapes).message();
+		if (width > 1) {
+			CHECK(got.rfind("needed ", 0) == 0);
+		} else {
+			CHECK(got == "malformed triangle index beyond storage at " + std::to_string(backed));
+		}
+		// Every array field of the packfile with a hostile count: refused, never allocated.
+		size_t arrays = 0;
+		for (uint32_t f = 0; f + 8 <= good.packfile.data.size(); f += 4) {
+			uint32_t at = 0, count = 0;
+			if (!good.packfile.array(f, at, count).ok() || count == 0) {
+				continue;
+			}
+			arrays++;
+			HavokPhysicsData probe = good;
+			put32(probe.packfile.data, f + 4, 0x7FFFFFFFu);
+			CHECK(!probe.packfile.array(f, at, count).ok());
+			probe.shapes(shapes);
+		}
+		MESSAGE(arrays << " hostile array counts refused");
+		CHECK(arrays > 3);
 	}
 
 	TEST_CASE("res: corrupted payloads fail cleanly") {

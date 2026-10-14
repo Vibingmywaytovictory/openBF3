@@ -19,8 +19,9 @@ constexpr uint8_t kMagic[8] = { 0x57, 0xE0, 0xE0, 0x57, 0x10, 0xC0, 0xC0, 0x10 }
 constexpr uint64_t kSectionHeaderBytes = 48;
 constexpr uint32_t kMaxShapeDepth = 64;
 // Shapes are a DAG in the file; a hostile one could make the depth-limited walk exponential. No
-// retail res comes near this (the largest static model group has ~25k nodes).
-constexpr uint64_t kMaxShapeNodes = uint64_t(1) << 22;
+// retail res comes near this (the largest static model group has ~25k nodes); 2^18 nodes keeps the
+// hostile peak (each node owns vectors) around 100 MB instead of ~1 GB.
+constexpr uint64_t kMaxShapeNodes = uint64_t(1) << 18;
 
 // A pointer slot at p_base + p_stride * p_index can only be a field inside the data section; loops
 // that only look up fixups stop there instead of spinning through a hostile element count.
@@ -422,9 +423,15 @@ ResError PackReader::fill_storage(uint32_t p_subpart, uint32_t p_mesh, Triangles
 	};
 	const uint32_t stride_elements = index_striding / width;
 	// A zero stride repeats triangle 0; refuse counts the index array cannot back (IW4L would
-	// allocate them all).
-	if (stride_elements == 0 && triangle_count > index_count) {
-		return ResError::malformed("triangle index beyond storage", index_count);
+	// allocate them all). The indices must also lie inside the data section: index_count alone is
+	// only bounded by Packfile::array to one byte per element, so check width * count here.
+	if (stride_elements == 0) {
+		if (!r.has(indices_at, uint64_t(width) * index_count)) {
+			return r.error();
+		}
+		if (triangle_count > index_count) {
+			return ResError::malformed("triangle index beyond storage", index_count);
+		}
 	}
 	for (uint32_t t = 0; t < triangle_count; t++) {
 		const uint32_t first = t * stride_elements;
@@ -633,6 +640,12 @@ ResError Packfile::array(uint32_t p_field, uint32_t &r_data, uint32_t &r_count) 
 	const auto it = array_fixups_.find(p_field);
 	if (it == array_fixups_.end()) {
 		return ResError::malformed("array without data", p_field);
+	}
+	// Every element takes at least one byte of the data section, so a count the bytes behind the
+	// array cannot back is hostile; refusing it here bounds every loop and allocation driven by an
+	// array count (a zero index stride in fill_storage would otherwise repeat triangle 0 count times).
+	if (uint64_t(it->second) + uint64_t(count) > data.size()) {
+		return ResError::malformed("array count beyond data", p_field);
 	}
 	r_data = it->second;
 	r_count = uint32_t(count);

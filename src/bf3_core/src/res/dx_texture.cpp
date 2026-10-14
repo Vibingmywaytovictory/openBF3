@@ -332,6 +332,11 @@ ResError DxTexture::split_mips(Bytes p_chunk, uint64_t p_logical_offset, std::ve
 	for (uint32_t size : mip_sizes) {
 		chain += size;
 	}
+	// An all-empty chain carries no texels but would still yield faces * mips empty slices (about
+	// 1M for a hostile 65535-slice header); every retail texture has non-empty mips.
+	if (chain == 0 && mip_count > 0) {
+		return ResError::malformed("empty mip chain", 0);
+	}
 	Reader r(p_chunk);
 	for (uint32_t face = 0; face < faces(); face++) {
 		uint64_t at = uint64_t(face) * chain;
