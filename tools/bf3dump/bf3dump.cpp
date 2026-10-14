@@ -41,6 +41,7 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/thread_pool.h"
 #include "ebx_commands.h"
+#include "gameplay_commands.h"
 #include "json_number.h"
 
 #include <fcntl.h>
@@ -461,6 +462,7 @@ void usage() {
 			"  dump <sb[,sb..]|@all-mp> <out_dir> <depth> <follow> <root>...\n"
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
 			"  numcheck\n");
+	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 }
 
 } // namespace
@@ -533,6 +535,9 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "ebxload" && (rest.size() == 1 || (rest.size() == 2 && rest[1] == "--walk"))) {
 		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], rest.size() == 2);
+	}
+	if (const int rc = bf3dump::dispatch_gameplay(ebx_ctx, cmd, rest); rc >= 0) {
+		return rc;
 	}
 	usage();
 	return 2;

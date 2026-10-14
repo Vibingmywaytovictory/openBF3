@@ -57,9 +57,18 @@ set_tests_properties(core.guard core.formats core.install core.fuzz core.cache s
 set_tests_properties(core.install PROPERTIES TIMEOUT 600)
 set_tests_properties(core.cache_data PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 set_tests_properties(core.res.unit core.res PROPERTIES TIMEOUT 300)
+# Gameplay tables (bf3_core/gameplay): soldier, kits, mode constants, vehicles. core.gameplay.unit needs
+# no data; core.gameplay.tables reads the retail install (plan §7.2-§7.4), exits 77 = skipped without one.
+openbf3_test(test_gameplay test_main.cpp gameplay_tests.cpp test_support.h)
+target_link_libraries(test_gameplay PRIVATE bf3_core)
+add_test(NAME core.gameplay.unit COMMAND test_gameplay --test-suite=gameplay_unit)
+add_test(NAME core.gameplay.tables COMMAND test_gameplay --test-suite=gameplay)
+set_tests_properties(core.gameplay.tables PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.gameplay.unit core.gameplay.tables PROPERTIES TIMEOUT 600)
 if(OPENBF3_ASAN)
     # The ASan runtime DLL ships next to cl.exe; put it on the tests' PATH.
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant core.res.unit core.res
+        core.gameplay.unit core.gameplay.tables
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()

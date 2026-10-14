@@ -236,6 +236,48 @@ over two runs, Rust 15.5 s (warm cache).
   vertex. 3p soldiers are split into upperbody / lowerbody / head / headgear meshes (59-64 bones, skeleton indices up
   to 208). The decoder does not skin: positions are the bind pose in mesh space.
 
+## Soldier, kit, mode and vehicle tables
+
+`bf3_core` reads the gameplay numbers straight from EBX (namespace `bf3::core::gameplay`,
+`include/bf3/core/gameplay/`). Every reader takes an `EbxResolver`; a level superbundle is enough because it carries
+its own `characters/`, `gameplay/`, `vehicles/`, `settings_win32` and `persistence/scoring` partitions.
+
+| reader | source | holds |
+|---|---|---|
+| `read_soldier_def` | `characters/soldiers/mpsoldier` (SoldierBlueprint) | health, regen, spawn immunity, man-down/revive, capsule, poses (height, eye, step, transitions), per-state per-pose speeds and direction factors, sprint, jump, swim/ladder/parachute, fall-damage curve, suppression, spotting, the 18 specialization values and the field each one feeds |
+| `read_mode_def` | `levels/<id>/<id>` LevelData + its sub-worlds for the mode, `settings_win32`, `description_win32` | teams and their kits, ticket counters, capture points (HQs flagged), Rush life counters and MCOMs (arm, disarm, radius, fuse), kill counters, vehicle spawns, player count, rounds, squad size, the sub-world interface constants |
+| `read_kit_def`, `read_team_data` | `gameplay/kits/*`, `gameplay/teams/*` | the 8 weapon slots of a kit with their unlock lists (the first unlock is the default), specializations, visual unlocks |
+| `read_vehicle_def` | a VehicleBlueprint | mass, gravity modifier, inertia, the four health zones (health, shield, angle, multiplier), disabled / emergency / regeneration / decay values, armour multiplier, seats with weapons and cameras, turrets with limits and world-space lock |
+| `read_scoring` | `persistence/scoring/scoring` | score per event SID |
+
+Mode constants are mostly not on the entities: the level's sub-world interface (e.g. CQS `InitialTicketCount
+Int32 250`) feeds them through PropertyConnections and prefab ports. `LogicWorld` (a port of IW4L `level_bf3`
+connections/world/level, Apache-2.0) walks the included sub-worlds and their prefabs into scopes and resolves a
+field's effective value along those chains (depth and step limits, cycle safe). Specialization pairs reach their
+target fields through Float/IntHub entities whose port ids are designer hashes; the reader matches each pair to the
+target field with the longest common name prefix (`UnderslungBoostL1` -> `UnderslungGrenadeIncrease`).
+
+Inspect with bf3dump (`<sb>` as for the EBX commands; `mode` and `kits` open the level's superbundle):
+
+| command | output |
+|---|---|
+| `soldier [<sb>]` | the SoldierDef of MP_001's `mpsoldier` (or the given superbundles) |
+| `mode <level> [<mode>]` | the mode list, or the ModeDef of one mode (`CQS`, `CQL`, `RL`, `SR`, `TDM`, `SQDM`, `DOM`, `GM`, `TS`, `SCV`, `CTF`, `AS` or the full id) |
+| `kits <level> <mode> [--all]` | per team, each kit's slots with the default unlock and weapon (`--all` lists every option) |
+| `vehicle <partition> [<sb>]` | the VehicleDef (default `@all-mp`) |
+| `scoring [<sb>]` | the scoring table |
+
+`ctest -R core.gameplay` runs `core.gameplay.unit` (no data) and `core.gameplay.tables` (needs the install, exits 77
+without it). Checked on 2026-10-14 against the research values: soldier 100 hp, regen 5/s after 10 s, 2 s spawn
+immunity, 13 s man-down; walk 4, sprint 6.5, crouch 2, prone 0.9, swim 3, ladder 1.32, parachute 9 m/s; jump 0.6 m;
+fall damage 0 below 13.9 m/s up to 100 at 30 m/s. Modes: MP_001 CQS 250 tickets / AreaValue 51 / 3 flags / 32 players,
+CQL 400/34/5/64, Rush 75 attacker lives, MCOM arm 2.5 s, disarm 5 s, fuse 25 s, Squad Rush 20 lives, TDM 100 kills,
+SQDM 4 x 50; Metro CQS 350/55; Caspian CQL 300/34. Vehicles: M1A2/T-90 5000 kg, gravity 1.6, 1000 hp per zone, rear
+x2.75 below 36 deg, sides x1.8, disabled at 500, M1A2 ring lock 0.0001 and gun 0.85 (T-90 0 and 1, gun -20..4 deg);
+helicopters 5000 kg / 500 hp / disabled 170; jets 10000 kg, regen 18/s after 10 s; Humvee 1500 kg / 1.85; buggies
+800 / 1.65; RHIB 1000 / 1.25; C-RAM and Pantsir armour multiplier 99999. The tables read the data as it is: values the
+round logic changes at run time (which Rush bases are active, scripted ticket bleed) are not evaluated.
+
 ## Layout and pinned third-party code
 
 | path | what |

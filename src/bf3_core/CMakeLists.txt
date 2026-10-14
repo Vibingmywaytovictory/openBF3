@@ -92,3 +92,19 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/res/dx_texture.h
     include/bf3/core/res/havok.h
 )
+
+# Gameplay tables (plan §3.1, §3.4, §3.7): soldier, kits, mode constants resolved through the level's
+# interfaces (logic_world, ported from IW4L level_bf3), minimal vehicle defs.
+target_sources(bf3_core PRIVATE
+    src/gameplay/gameplay_read.h
+    src/gameplay/logic_world.cpp
+    src/gameplay/soldier_def.cpp
+    src/gameplay/kit_def.cpp
+    src/gameplay/mode_def.cpp
+    src/gameplay/vehicle_def.cpp
+    include/bf3/core/gameplay/logic_world.h
+    include/bf3/core/gameplay/soldier_def.h
+    include/bf3/core/gameplay/kit_def.h
+    include/bf3/core/gameplay/mode_def.h
+    include/bf3/core/gameplay/vehicle_def.h
+)
