@@ -2,6 +2,7 @@
 
 #include "dedicated_main_loop.h"
 #include "game_session.h"
+#include "viewmodel_demo.h"
 
 #include "bf3/host/loopback_client.h"
 #include "bf3/host/server_host.h"
@@ -20,6 +21,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(bf3::godot_side::GameSession);
 	GDREGISTER_CLASS(bf3::godot_side::DedicatedMainLoop);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

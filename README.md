@@ -74,6 +74,8 @@ set "GODOT=C:\path\to\Godot_v4.8-dev7_win64_console.exe"
 "%GODOT%" --path bf3-opensource [-- --quit-after=10 --screenshot=C:\temp\s0.png]
 :: dedicated server: no scene, no renderer
 "%GODOT%" --headless --path bf3-opensource --main-loop DedicatedMainLoop -- --dedicated-seconds=10
+:: M9 1P empty reload on BF3 arms ("Viewmodel (M9 reload)"); headless check: --headless ... -- --m9-reload-check
+"%GODOT%" --path bf3-opensource res://scenes/m9_reload.tscn -- --quit-after=10 [--screenshot=C:\temp\m9.png --shot-times=0.1,1.2,1.3]
 ```
 
 Known issue: on a project that has never been opened, the first `--import` registers the extension and writes
@@ -408,6 +410,96 @@ the retail chunks to the parser. Both report *Skipped* (77) without an install.
 * Two corrections to the research table. First, the 24 SIDs that do not resolve have **no entry at all**: no entry
   holds `<MISSING>`, which was the research script's placeholder. Second, `ID_P_WNAME_M16` does exist and resolves to
   "M16A4".
+
+## Viewmodel (M9 reload)
+
+The M0 exit demo (plan §6 M0): BF3's M9 empty reload plays in Godot on BF3's 1P arms and M9 meshes, read from the
+install by C++ at runtime, with `fov_override`. Three pieces, two of them Godot-free:
+
+* **`bf3_anim`** (`src/bf3_anim`, plan §2.2): `Skeleton` from the Ant rig (`skeleton_from_rig`: the 181 joints of
+  `Venice1pAntSke01`, rest = rig defaults) or from an EBX `SkeletonAsset` (`read_ebx_skeleton`: BoneNames, Hierarchy,
+  LocalPose, ModelPose); `bind_clip_tracks` maps a bound clip's channels to bones by name; `sample_pose` (rest +
+  `sample_clip`), `model_pose` (local -> model space), `pose_diff`; `SkinBinds` maps a skinned LOD's bone slots
+  (EBX skeleton indices) to the posed skeleton by name, with inverse bind = inverse(EBX `ModelPose`), in one list
+  that several meshes share; `skin_matrices`; `load_ant_library` / `load_clip` (a package's clip, decoded and bound).
+* **`bf3_render`** (`src/bf3_render`): what the Godot bridge uploads, prepared on loader threads.
+  * `prepare_mesh` gives the ArrayMesh layout: positions and normals 1:1, tangent + binormal sign as Godot's
+    `ARRAY_TANGENT`, UVs as stored, colours, 4 bones/weights per vertex as skin bind indices. Every triangle is
+    emitted as (i0, i2, i1) because Godot's front faces are clockwise. One-bone subsets such as the M9's store
+    all-zero weights and get weight 1.
+  * `prepare_texture` keeps the stored BC1/BC2/BC3/BC4/BC5 blocks with all mips. Godot dev7 wants the chain down
+    to 1x1 (12 levels for 2048²), which BF3 stores; a shorter chain is completed. Normal maps are handed out as X/Y
+    in R/G because Godot's material reads only `.xy`: NormalDXN/DXN and NormalDXT1 as stored, NormalDXT5 (X in
+    alpha, Y in green) transcoded to BC5.
+  * `mesh_materials` reads a MeshAsset's `Materials`, their shader graph and vector parameters, and the textures of
+    the level's `MeshVariationDatabase` entry for the mesh and variation (a minimal port of IW4L `level_bf3`
+    materials.rs).
+  * `load_viewmodel` puts it together from `Win32/Levels/MP_Subway/MP_Subway`: the 1P arms of the US assault
+    appearance (`persistence/unlocks/soldiers/visual/mp/us/upperbody/mp_us_assault_upperbody01` ->
+    `arms1p_bareglove03_mesh`, variation `arms1p_bareglove03_afro`, skeleton `venice1pske01`),
+    `weapons/m9/m9_1p_mesh` (skeleton `weaponske01`), their materials and Diffuse/Normal textures, the `m9`
+    package's `ReloadEmpty Anim`, and the M9 WeaponDef (`weapons/m9/u_m9`: `RenderFov` 55, empty reload 1.60 s).
+* **`bf3_godot`**: `render_bridge.*` is generic: `make_texture` (`Image::create_from_data` with the prepared chain),
+  `make_array_mesh`, `make_skeleton`, `make_skin`, `make_standard_material` (Diffuse -> albedo, Normal -> normal
+  map, `DiffuseDarkening` tints, `SmoothnessRegular` -> roughness; viewmodel flags `use_fov_override` with the
+  weapon's `RenderFov` and `use_z_clip_scale` 0.25). `Bf3ViewmodelDemo` (`viewmodel_demo.*`, scene
+  `scenes/m9_reload.tscn`) loads on a `std::thread` behind a progress label. The main thread then builds one
+  `Skeleton3D` from the rig, one `Skin` (74 binds: 69 arms + 5 M9) shared by both `MeshInstance3D`s, the materials,
+  and a camera on `CameraJoint` turned 180 deg about Y (Frostbite looks down +Z). It plays the clip at 30 fps in a
+  loop (65 frames, 2.167 s) and sets only the 96 rotation and 39 translation bones the clip drives. User args:
+  `--quit-after`, `--screenshot`, `--shot-times=<clip seconds,...>` (holds each pose 4 frames and saves
+  `<stem>_t<time>.png`), `--clip-speed`, `--m9-reload-check`, `--bf3-install`.
+
+**Check** (`-- --m9-reload-check`; ctest `godot.m9_reload` runs it when `OPENBF3_GODOT` names the console exe and
+reports *Skipped* otherwise). Measured 2026-10-15 with `OPENBF3_ANT_ORACLE` set:
+
+| check | result |
+|---|---|
+| Skeleton3D global poses vs `bf3_anim` model space, 9 frames x 181 bones | max 4e-5 deg, 0.0004 mm |
+| Skeleton3D vs the Ant probe's `m9_ReloadEmpty_Anim.json` (an independent decode), 57 keys x 181 bones | max 0.0039 deg, 0.056 mm (the JSON has 5 decimals) |
+| Godot bone pose x `Skin` bind vs `bf3_anim::skin_matrices`, 74 binds | max 4.9e-7 |
+| grip and camera | RightHand 7.3 cm from Wep_Root; Wep_Root at camera (0.07, -0.09, -0.34) m; skinned M9 vertices at camera z -0.58..-0.30 m; right elbow at camera x +0.28, left -0.02 (not mirrored) |
+| motion | Wep_Mag up to 27.2 cm from the gun (frame 16), seated again at frame 65 (0.00 mm); the slide moves 36.1 mm from frame 0 (locked back) to 65 |
+| materials | 5 of 5 drawn surfaces with fov_override 55 (from `RenderFov`) and z_clip_scale; 5 albedo textures, 4 normal maps (the M9's variation entry lists only Diffuse and Specular) |
+| install | 256 index files: sizes and mtimes equal |
+
+Windowed (RX 9070 XT, 1152x648, D3D12): load 1.3-1.7 s (Ant banks 1.0-1.3 s, EBX 0.12-0.16 s, meshes 4-6 ms, eight
+2048² textures 20 ms, warm file cache), then 0.03-0.07 s upload. Frame time with vsync 5.56 ms (the 180 Hz display);
+with `--disable-vsync` mean 0.55 ms, p99 1.39 ms; sampling, bone upload and camera take 14-23 µs per frame.
+Screenshots at clip times 0.1 s (magazine sliding out, slide locked back), 1.2 s (left hand seating the new
+magazine) and 1.3 s (slide released, two-hand grip) show textured gloves, skin and pistol, no inside-out faces, the
+arms drawn over world props, and the same motion as the Ant probe's renders.
+
+**Tests.**
+* `anim.unit` (no data): quaternion and matrix algebra, model pose, clip channels by name, skin binds.
+* `anim` (install; *Skipped* without one):
+  * the rig skeleton and its 135 bound channels;
+  * Undeploy frame 0 vs IdlePose in model space: 0.126 deg / 0.64 mm (probe, local: 0.07 deg / 0.4 mm);
+  * rig rest vs `venice1pske01` LocalPose: 168 / 167 of 179 bones (probe: 168 / 167);
+  * the arms (69 bones) and the M9 (5: Wep_Root, Wep_Trigger, Wep_Slide, Wep_Mag, Wep_Physic1 = hash `0xa6d64831`)
+    bind by name. At the rig rest pose all 69 arm skin matrices are the identity within 2.3e-6, so the rig and
+    `venice1pske01` share model space;
+  * the reload keeps the hand on the grip and closes its loop (0.30 deg, 1.9 mm without the slide);
+  * with `OPENBF3_ANT_ORACLE`, model space equals the probe JSON within 0.004 deg / 0.06 mm.
+* `render.unit` (no data): Godot mip chain lengths, BC4 encode/decode, the BC3 normal -> BC5 transcode.
+* `render` (install): the whole viewmodel loads (counts, formats, every vertex skinned to a valid bind, every chain
+  of Godot's length), plus the NormalDXT5RGA census below.
+
+**NormalDXT5RGA** (open in the handoff). MP_Subway has two such textures, both particle/UI smoke normals
+(`emittertexturenormal_win32`, `smoke_normal_02`); no mesh material there uses the format. Over texels with
+A >= 0.5, G matches the reconstructed Z: mean |G - (z+1)/2| is 0.015 for X,Y = R,B, 0.025 for B,A and 0.144 for R,A.
+A behaves like coverage and B is far from centred (mean 0.13). The layout is not settled, so such textures are
+uploaded as stored BC3 and not reinterpreted. MP_Subway has no NormalDXT5 texture: the arms use NormalDXN, the
+sleeves NormalDXT1.
+
+**Not done yet.**
+* Roll/twist joints driven by rig ops are not computed (probe §8): the forearm skin twists slightly at the left
+  wrist in the slide-release frames.
+* The specular, smoothness/fresnel, AO, camo-mask and detail textures are not used: StandardMaterial3D gets
+  albedo, a normal map and a roughness from `SmoothnessRegular`. Reading `DiffuseDarkening` as an albedo
+  multiplier is inferred.
+* The normal maps use the data's own tangent frame (Godot's binormal = cross(normal, tangent) x sign, as in
+  Frostbite); this was judged visually only.
 
 ## Layout and pinned third-party code
 
