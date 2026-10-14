@@ -75,3 +75,17 @@ set_tests_properties(core.res.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600
 if(OPENBF3_ASAN)
     set_tests_properties(core.res.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
+# Weapon tables (bf3_core/gameplay): unit arithmetic, then the §7.1 oracles read from the install
+# (exits 77 = skipped without one) and seeded mutations of the M16A4 partitions (meant for asan).
+openbf3_test(test_gameplay test_main.cpp gameplay_tests.cpp test_support.h)
+target_link_libraries(test_gameplay PRIVATE bf3_core)
+add_test(NAME core.gameplay.unit COMMAND test_gameplay --test-suite=gameplay-unit)
+add_test(NAME core.gameplay.weapons COMMAND test_gameplay --test-suite=gameplay)
+add_test(NAME core.gameplay.fuzz COMMAND test_gameplay --test-suite=gameplay-fuzz)
+set_tests_properties(core.gameplay.weapons core.gameplay.fuzz PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.gameplay.unit core.gameplay.weapons core.gameplay.fuzz PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_gameplay_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.gameplay.unit core.gameplay.weapons core.gameplay.fuzz
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_gameplay_cl_dir}")
+endif()

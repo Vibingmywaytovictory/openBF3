@@ -2,3 +2,5 @@
 add_executable(bf3dump bf3dump.cpp ebx_commands.cpp ebx_commands.h json_number.cpp json_number.h)
 target_link_libraries(bf3dump PRIVATE bf3_core)
 openbf3_module(bf3dump)
+# Weapon tables (bf3_core gameplay readers).
+target_sources(bf3dump PRIVATE weapon_commands.cpp weapon_commands.h)

@@ -29,6 +29,11 @@
 //   ebxload <sb> [--walk]      bulk-parse every partition (timing, failures, bytes); --walk also
 //                              decodes every value of every instance
 //   numcheck                   self-check of the probe's JSON number text (no install needed)
+// Weapons (bf3_core gameplay readers; README "Weapon tables"):
+//   weapon <partition> [--unlock <u_..>]... [--level <sb>]
+//                              one resolved WeaponDef (a variant or a blueprint) with the level's
+//                              body multipliers for its projectile
+//   weapons [--level <sb>]     one TSV row per SoldierWeaponUnlockAsset under weapons/
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -41,6 +46,7 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/thread_pool.h"
 #include "ebx_commands.h"
+#include "weapon_commands.h"
 #include "json_number.h"
 
 #include <fcntl.h>
@@ -460,7 +466,9 @@ void usage() {
 			"  types <sb[,sb..]|@all-mp> <Type>...\n"
 			"  dump <sb[,sb..]|@all-mp> <out_dir> <depth> <follow> <root>...\n"
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
-			"  numcheck\n");
+			"  numcheck\n"
+			"  weapon <partition> [--unlock <u_..>]... [--level <sb>]\n"
+			"  weapons [--level <sb>]\n");
 }
 
 } // namespace
@@ -533,6 +541,12 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "ebxload" && (rest.size() == 1 || (rest.size() == 2 && rest[1] == "--walk"))) {
 		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], rest.size() == 2);
+	}
+	if (cmd == "weapon" && !rest.empty()) {
+		return bf3dump::cmd_weapon(ebx_ctx, rest);
+	}
+	if (cmd == "weapons") {
+		return bf3dump::cmd_weapons(ebx_ctx, rest);
 	}
 	usage();
 	return 2;
