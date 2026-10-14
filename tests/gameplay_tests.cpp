@@ -25,6 +25,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -274,7 +275,8 @@ const EbxPartition &insert_graph(EbxDb &r_db, const std::vector<SynthNode> &p_no
 // A general synthetic EBX partition for the hostile-input cases of every gameplay reader. Each class
 // derives from DataContainer (size 8) or from a class listed before it (`base`) and has one 4-byte
 // slot per field after its base; a value type has its slots from offset 0. Field kinds: 'b' Boolean, 'i' Int32, 'r' class reference, 's'
-// CString, 'a' array of references, 'v' array of the value type `elem`. A field value is the raw
+// CString, 'a' array of references, 'v' array of the value type `elem`, 'g' Guid (its 16 bytes are
+// this slot's word and the next three slots, which must be 'i' fields holding the rest). A field value is the raw
 // word, except 's' (an index into `strings`) and 'a' / 'v' (an index into `arrays`; arrays may be
 // shared by any number of fields, as EBX allows). Unset strings are null, unset arrays empty.
 struct SynField {
@@ -415,6 +417,9 @@ std::vector<uint8_t> SynPartition::build() const {
 					break;
 				case 's':
 					code = ebx_code::kCString;
+					break;
+				case 'g':
+					code = ebx_code::kGuid;
 					break;
 				case 'a':
 				case 'v':
@@ -1090,6 +1095,133 @@ TEST_SUITE("gameplay_unit") {
 		REQUIRE_FALSE(world.ok());
 		CHECK(budget_error(world.error()));
 		CHECK(seconds_since(start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: round 4 repro - crafted target field ids do not flood the connection index") {
+		// TargetFieldId = (t * G) >> 1 cancelled bits 1-32 of the former by-target hash
+		// (InstanceKeyHash(t) ^ field << 1), so every key shared one bucket and each insert scanned it
+		// all, within one budget unit per entry: N = 100k took ~30 s, 1M (inside the budget) hours.
+		// The index is now a sorted vector: n log n whatever the keys.
+		constexpr size_t kConnections = 100000;
+		constexpr uint64_t kGolden = 0x9E3779B97F4A7C15ull;
+		SynPartition s;
+		s.types = world_types();
+		const uint32_t root = s.add({ "PrefabBlueprint", {} });
+		std::vector<uint32_t> targets;
+		std::vector<int32_t> fields;
+		std::vector<SynValues> connections;
+		for (size_t i = 0; i < kConnections; ++i) {
+			const uint32_t t = s.add({ "WorldPartData", {} });
+			targets.push_back(t);
+			fields.push_back(static_cast<int32_t>(static_cast<uint32_t>((uint64_t(t) * kGolden) >> 1)));
+			connections.push_back({ { "Source", SynPartition::ref(t) }, { "Target", SynPartition::ref(t) }, { "SourceFieldId", 1 },
+					{ "TargetFieldId", static_cast<uint32_t>(fields.back()) } });
+		}
+		// Two more feeds of the first (target, field): property_into keeps connection order.
+		for (uint32_t k = 0; k < 2; ++k) {
+			connections.push_back({ { "Source", SynPartition::ref(targets[1 + k]) }, { "Target", SynPartition::ref(targets[0]) }, { "SourceFieldId", 2 + k },
+					{ "TargetFieldId", static_cast<uint32_t>(fields[0]) } });
+		}
+		s.instances[root].values = { { "PropertyConnections", s.add_array(SynArray{ "PropertyConnection", {}, connections }) } };
+		EbxDb db;
+		const EbxPartition *p = insert_syn(db, "levels/synthetic/collide", s);
+		if (p == nullptr) {
+			return;
+		}
+		const auto start = std::chrono::steady_clock::now();
+		WorkBudget budget;
+		Result<LogicConnections> set = LogicConnections::of(db, p->primary(), budget);
+		REQUIRE(set.ok());
+		CHECK(seconds_since(start) < kFastSeconds);
+		REQUIRE(set->property.size() == kConnections + 2);
+		const auto into = [&](uint32_t p_target, int32_t p_field) {
+			const std::optional<EbxInstance> target = p->instance(p_target);
+			REQUIRE(target.has_value());
+			const std::span<const uint32_t> at = set->property_into(*target, p_field);
+			return std::vector<uint32_t>(at.begin(), at.end());
+		};
+		CHECK(into(targets[0], fields[0]) == std::vector<uint32_t>{ 0, kConnections, kConnections + 1 });
+		for (size_t i = 1; i < kConnections; i += 997) {
+			CHECK(into(targets[i], fields[i]) == std::vector<uint32_t>{ static_cast<uint32_t>(i) });
+		}
+		CHECK(into(targets[5], fields[6]).empty());
+		const auto world_start = std::chrono::steady_clock::now();
+		Result<LogicWorld> world = LogicWorld::build(db, p->primary(), {});
+		REQUIRE(world.ok());
+		CHECK(seconds_since(world_start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: round 4 repro - crafted unlock GUIDs do not flood the progression gates") {
+		// GUIDs with a = b * G (a, b: bytes 0-7, 8-15) all hashed to 0 under the former GuidHash
+		// (a ^ b * G): N = 100k gates took ~21 s within one unit each, 250k over 2 min. gates is now a
+		// std::map, and GuidHash is keyed with the process seed.
+		constexpr size_t kUnlocks = 250000;
+		constexpr uint64_t kGolden = 0x9E3779B97F4A7C15ull;
+		SynPartition s;
+		s.types = {
+			{ "BasicUnlockInfo", { { "UnlockGuid", 'g' }, { "W1", 'i' }, { "W2", 'i' }, { "W3", 'i' } }, true },
+			{ "RankLevelData", { { "UnlockInfos", 'v', "BasicUnlockInfo" } } },
+		};
+		const uint32_t root = s.add({ "RankLevelData", {} });
+		std::vector<Guid> guids;
+		std::vector<SynValues> infos;
+		for (size_t i = 0; i < kUnlocks; ++i) {
+			const uint64_t b = i + 1, a = b * kGolden;
+			Guid g;
+			std::memcpy(g.bytes.data(), &a, 8);
+			std::memcpy(g.bytes.data() + 8, &b, 8);
+			guids.push_back(g);
+			infos.push_back({ { "UnlockGuid", uint32_t(a) }, { "W1", uint32_t(a >> 32) }, { "W2", uint32_t(b) }, { "W3", uint32_t(b >> 32) } });
+		}
+		s.instances[root].values = { { "UnlockInfos", s.add_array(SynArray{ "BasicUnlockInfo", {}, infos }) } };
+		EbxDb db;
+		if (insert_syn(db, "persistence/ranks/rankparams", s) == nullptr) {
+			return;
+		}
+		const auto start = std::chrono::steady_clock::now();
+		Result<UnlockProgression> progression = read_unlock_progression(db);
+		REQUIRE(progression.ok());
+		CHECK(seconds_since(start) < kFastSeconds);
+		CHECK(progression->gates.size() == kUnlocks);
+		for (size_t i = 0; i < kUnlocks; i += 997) {
+			CHECK(progression->gate(guids[i]) == UnlockGate::Rank);
+		}
+		CHECK(progression->gate(Guid{}) == UnlockGate::Free);
+	}
+
+	TEST_CASE("gameplay: keyed hashes spread keys crafted against a fixed mixer") {
+		// Hash containers of data-controlled keys (core GUID / SHA1 maps, the InstanceKey sets) hash
+		// with the per-process seed of ids.h: keys lined up for the former mixers spread evenly (under
+		// those, all of them shared one bucket).
+		constexpr size_t kKeys = 20000;
+		constexpr uint64_t kGolden = 0x9E3779B97F4A7C15ull;
+		const auto max_bucket = [](const auto &p_map) {
+			size_t most = 0;
+			for (size_t i = 0; i < p_map.bucket_count(); ++i) {
+				most = std::max(most, p_map.bucket_size(i));
+			}
+			return most;
+		};
+		std::unordered_map<Guid, uint32_t, GuidHash> guids;
+		std::unordered_map<Sha1, uint32_t, Sha1Hash> sha1s;
+		std::unordered_map<InstanceKey, uint32_t, InstanceKeyHash> instances;
+		for (uint32_t i = 0; i < kKeys; ++i) {
+			const uint64_t b = uint64_t(i) + 1, a = b * kGolden;
+			Guid g;
+			std::memcpy(g.bytes.data(), &a, 8);
+			std::memcpy(g.bytes.data() + 8, &b, 8);
+			guids.emplace(g, i);
+			Sha1 h; // differs only in bytes 16-19; the former Sha1Hash read bytes 0-7 alone
+			std::memcpy(h.bytes.data() + 16, &i, 4);
+			sha1s.emplace(h, i);
+			instances.emplace(InstanceKey{ nullptr, i }, i);
+		}
+		REQUIRE(guids.size() == kKeys);
+		REQUIRE(sha1s.size() == kKeys);
+		CHECK(max_bucket(guids) < 32);
+		CHECK(max_bucket(sha1s) < 32);
+		CHECK(max_bucket(instances) < 32);
+		CHECK(GuidHash()(guids.begin()->first) == GuidHash()(guids.begin()->first)); // stable within a run
 	}
 
 	TEST_CASE("gameplay: kit default skips gated and variant unlocks") {

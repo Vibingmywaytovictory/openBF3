@@ -159,6 +159,7 @@ Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 	if (!descriptor) {
 		return Status::success();
 	}
+	BF3_TRY(budget.charge_type(descriptor->data()));
 	const LogicConnections &set = p_world.connections(p_scope);
 	// Event connections by source, so each step below only looks at one entity's outputs.
 	BF3_TRY(budget.charge(set.event.size()));
@@ -467,7 +468,11 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 			continue;
 		}
 		const std::optional<EbxInstance> descriptor = p_db.follow(scope.blueprint.data(), "Descriptor");
-		const std::optional<EbxValue> fields = descriptor ? descriptor->get("Fields") : std::nullopt;
+		if (!descriptor) {
+			continue;
+		}
+		BF3_TRY(budget.charge_type(descriptor->data()));
+		const std::optional<EbxValue> fields = descriptor->get("Fields");
 		const OptionalEbxArray array = fields ? fields->as_array() : OptionalEbxArray();
 		if (!array) {
 			continue;
@@ -475,7 +480,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		if (array->size() > kMaxInterfaceConstants - out.interface_constants.size()) {
 			return make_error("mode: level " + id + " lists more than " + std::to_string(kMaxInterfaceConstants) + " interface constants");
 		}
-		BF3_TRY(budget.charge(array->size()));
+		BF3_TRY(budget.charge(array_cost(*array))); // a wide entry type costs more per entry
 		for (const EbxValue field : *array) {
 			InterfaceConstantDef c;
 			c.subworld = copy_text(budget, world.scope_name(s));

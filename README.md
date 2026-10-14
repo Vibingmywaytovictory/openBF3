@@ -263,8 +263,10 @@ all count), so hostile data ends with "work budget of N units exhausted" within 
 minutes. A caller can pass one budget to several reads (`bf3dump kits` shares one between the mode, the progression
 tables and every kit). Retail needs at most 16,063 units for a mode (XP3_Shield Rush), 20,904 for `kits` with every
 kit, 3,632 for the soldier and 797 for a vehicle; the walk caps `max_walk_steps` / `max_query_steps` stay on top
-(retail: under 8k and 4k steps). The cost model is written down at the top of `src/gameplay/logic_world.cpp`; bf3dump
-prints the units a command used on stderr.
+(retail: under 8k and 4k steps). Indexes keyed by data (connection targets, unlock GUIDs) are sorted or ordered, and
+the hash maps of GUIDs, SHA1s and instance keys hash with a per-process random seed (`ids.h` `hash_keyed`), so crafted
+keys cannot pile into one bucket and make a charged entry cost O(N). The cost model is written down at the top of
+`src/gameplay/logic_world.cpp`; bf3dump prints the units a command used on stderr.
 
 The kit tables have no "default" flag, so a slot's default is its first unlock that none of the four persistence
 progression tables grants (rank, licence, award or scoring-bucket unlock) and that is not an ammo/scope variant

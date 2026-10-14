@@ -85,6 +85,18 @@ inline std::string text(WorkBudget &r_budget, const EbxStruct &p_object, std::st
 	return copy_text(r_budget, text_view(p_object, p_path));
 }
 
+// The units a scan of p_array costs: its raw element count, times one more per kFieldsPerUnit
+// fields of a wide struct element type (see WorkBudget::charge_type).
+inline size_t array_cost(const EbxArray &p_array) {
+	size_t extra = 0; // every element has the array's member type
+	if (const std::optional<EbxValue> first = p_array.size() > 0 ? p_array.get(0) : std::nullopt) {
+		if (const std::optional<EbxStruct> element = first->as_struct()) {
+			extra = WorkBudget::type_width(*element) / WorkBudget::kFieldsPerUnit;
+		}
+	}
+	return p_array.size() * (1 + extra);
+}
+
 // The array a field holds, its element count charged before any element is looked at (struct
 // elements of a wide type cost more, see WorkBudget::charge_type). No array (absent, another type,
 // or the budget spent) is an empty OptionalEbxArray.
@@ -93,13 +105,7 @@ inline OptionalEbxArray array_of(WorkBudget &r_budget, const std::optional<EbxVa
 	if (!out) {
 		return OptionalEbxArray();
 	}
-	size_t extra = 0; // every element has the array's member type
-	if (const std::optional<EbxValue> first = out->size() > 0 ? out->get(0) : std::nullopt) {
-		if (const std::optional<EbxStruct> element = first->as_struct()) {
-			extra = WorkBudget::type_width(*element) / WorkBudget::kFieldsPerUnit;
-		}
-	}
-	if (!r_budget.take(out->size() * (1 + extra))) {
+	if (!r_budget.take(array_cost(*out))) {
 		return OptionalEbxArray();
 	}
 	return out;

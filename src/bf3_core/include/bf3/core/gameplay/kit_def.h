@@ -27,10 +27,10 @@
 #include "bf3/core/result.h"
 
 #include <array>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace bf3::core::gameplay {
@@ -45,7 +45,9 @@ const char *unlock_gate_name(UnlockGate p_gate);
 
 // The unlock instance GUIDs the persistence progression tables grant.
 struct UnlockProgression {
-	std::unordered_map<Guid, UnlockGate, GuidHash> gates;
+	// Ordered: the GUIDs come from the data, and a tree costs O(log n) per insert or lookup whatever
+	// they are (a hash index could be flooded by crafted GUIDs).
+	std::map<Guid, UnlockGate> gates;
 	size_t tables = 0; // progression partitions found (4 in an MP level superbundle)
 
 	bool known() const { return tables != 0; }

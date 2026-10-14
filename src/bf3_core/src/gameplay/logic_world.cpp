@@ -22,21 +22,36 @@
 // compares stop at the shorter side, and every compare below has a short side of fixed size (a type
 // or field name literal, the mode id) unless it is charged.
 //
+// Indexes. A per-entry charge only bounds the work if each insert and lookup is cheap whatever the
+// keys, and many keys come from the data (field ids, GUIDs). So no index keyed by data is a hash
+// with a fixed function: LogicConnections' by-target index is a sorted vector and
+// UnlockProgression::gates a std::map (O(log n) worst case); the InstanceKey hash sets and maps
+// (connection sets per blueprint, events_from / fuse_after / gate_open in read_fuse, the hub frontier
+// in unlock_targets) and the core GUID / SHA1 maps the resolver probes (EbxDb, EbxLibrary,
+// LevelMount, CasCatalog) hash with the per-process seed of ids.h (hash_keyed), so crafted keys
+// cannot be lined up in one bucket. read_mode_def's crate_at is keyed by scope indices the walker
+// assigns (0, 1, 2, ...), not by data. Name-keyed core maps (EbxDb / EbxLibrary by name) are filled
+// when the install is mounted, never from the contents of a partition the walk reads; the walk only
+// probes them.
+//
 // Each loop or recursion reachable from those entry points, and what bounds it ("raw size" is the
 // element count of an EBX array, null and unresolvable entries included, charged before the scan;
 // arrays and strings can be shared by any number of instances, so no scan is assumed to be paid by
 // the input size alone):
 // logic_world.cpp
-//   LogicWalker::visit            recursion; 1 unit per visit; depth <= max_depth
+//   LogicWalker::visit            recursion; 1 unit plus the container's type width per visit;
+//                                 depth <= max_depth
 //   LogicWalker::objects          raw Objects size (the walk's emit() calls are one per charged entry),
 //                                 then each resolved object's type width before its lookups
 //   LogicWalker::on_path          std::find over path_ (<= max_depth + 1 entries) per charged entry
-//   subworld_included             raw Settings size, then raw EnabledOptions size of each setting;
+//   subworld_included             the settings' type width and raw Settings size, then per setting
+//                                 its (and its criterion's) type width and raw EnabledOptions size;
 //                                 each option compare stops at |mode| bytes
 //   LogicWalker::note             bundle name copy charged by length; lists capped at 4096 names
 //   referenced_blueprint          bundle name lowercase copy charged by length
-//   LogicConnections::of          raw size of each connection array; the by-target index is built in
-//                                 one pass over the charged entries
+//   LogicConnections::of          raw size of each connection array; the by-target index is a stable
+//                                 sort of the charged entries (n log n compares), looked up by binary
+//                                 search, so crafted field ids cannot collide it into O(n^2)
 //   LogicWorld::connection_set    memoised per blueprint: of() runs once per blueprint, a lookup is
 //                                 one hash probe made after a charged step
 //   property_in, source_value,    recursion; 1 unit per call (query_step), depth <= kResolveDepth,
@@ -47,17 +62,20 @@
 //                                 query step that asks)
 // mode_def.cpp
 //   level_modes                   raw Categories size, raw Mode size per category, names by length
-//   read_mode_def                 per sub-world scope the raw Fields size (and at most 65536 in all),
+//   read_mode_def                 per sub-world scope the descriptor's type width and the Fields scan
+//                                 (raw size x entry width, array_cost; at most 65536 entries in all),
 //                                 1 unit per object of the world and per crate interaction, names
 //                                 copied by length, every effective()/interface_value() a charged query
 //   location_sid                  <= 64 interface_value() queries (charged) up the scope chain
 //   read_team_data (kit_def.cpp)  once per TeamEntityData object: raw size of both customization lists
-//   read_fuse                     per crate scope: raw event list size (index), raw property list size
+//   read_fuse                     per crate scope: the descriptor's type width, raw event list size
+//                                 (index; hash keyed by the process seed), raw property list size
 //                                 (feeds), and each source's event list size before it is scanned
 //   read_size                     instance count of settings_win32, raw Information / Sizes / Teams sizes
 //   read_scoring                  instance count, 1 unit per ScoringTypeData, names by length
 // kit_def.cpp
-//   read_unlock_progression       instance count of each table, raw UnlockInfos / Unlocks sizes
+//   read_unlock_progression       instance count of each table, raw UnlockInfos / Unlocks sizes; one
+//                                 O(log n) gates insert per charged entry
 //   read_kit_def / read_table     raw UnlockParts size, raw SelectableUnlocks size per part (a part
 //                                 listed K times is charged K times), names by length
 // soldier_def.cpp
@@ -85,6 +103,18 @@
 namespace bf3::core::gameplay {
 
 namespace {
+
+// The order of LogicConnections' by-target index: (partition address, instance index, field).
+struct TargetOrder {
+	uintptr_t partition = 0;
+	uint32_t index = 0;
+	int32_t field = 0;
+	auto operator<=>(const TargetOrder &) const = default;
+};
+
+TargetOrder target_order(const EbxInstance &p_target, int32_t p_field) {
+	return { reinterpret_cast<uintptr_t>(&p_target.partition()), p_target.index(), p_field };
+}
 
 std::string_view trim(std::string_view p_text) {
 	const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
@@ -396,16 +426,25 @@ Result<LogicConnections> LogicConnections::of(const EbxResolver &p_db, const Ebx
 			list.into->push_back({ *source, id(list.source_field), *target, id(list.target_field) });
 		}
 	}
-	// Indices are appended in connection order, so each list is sorted (the IW4L resolver's order).
+	// Stable: within one (target, field) the indices stay in connection order (the IW4L resolver's
+	// order). n log n compares for n charged entries, whatever the keys.
+	out.by_target_.resize(out.property.size());
 	for (uint32_t i = 0; i < out.property.size(); ++i) {
-		out.by_target_[TargetKey{ InstanceKey::of(out.property[i].target), out.property[i].target_field }].push_back(i);
+		out.by_target_[i] = i;
 	}
+	std::stable_sort(out.by_target_.begin(), out.by_target_.end(), [&](uint32_t a, uint32_t b) {
+		return target_order(out.property[a].target, out.property[a].target_field) < target_order(out.property[b].target, out.property[b].target_field);
+	});
 	return out;
 }
 
 std::span<const uint32_t> LogicConnections::property_into(const EbxInstance &p_target, int32_t p_field) const {
-	const auto it = by_target_.find(TargetKey{ InstanceKey::of(p_target), p_field });
-	return it == by_target_.end() ? std::span<const uint32_t>() : std::span<const uint32_t>(it->second);
+	const TargetOrder key = target_order(p_target, p_field);
+	const auto lo = std::lower_bound(by_target_.begin(), by_target_.end(), key,
+			[&](uint32_t p_at, const TargetOrder &p_key) { return target_order(property[p_at].target, property[p_at].target_field) < p_key; });
+	const auto hi = std::upper_bound(lo, by_target_.end(), key,
+			[&](const TargetOrder &p_key, uint32_t p_at) { return p_key < target_order(property[p_at].target, property[p_at].target_field); });
+	return std::span<const uint32_t>(lo, hi);
 }
 
 // --- helpers ------------------------------------------------------------------------------------
@@ -460,6 +499,7 @@ Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_ref
 	if (!settings) {
 		return true;
 	}
+	BF3_TRY(r_budget.charge_type(settings->data()));
 	const std::optional<EbxValue> list_value = settings->get("Settings");
 	const OptionalEbxArray list = list_value ? list_value->as_array() : OptionalEbxArray();
 	if (!list) {
@@ -519,6 +559,7 @@ public:
 			return Status::success();
 		}
 		BF3_TRY(step(1));
+		BF3_TRY(budget_.charge_type(p_container.data())); // its Objects lookup scans the type chain
 		path_.push_back(InstanceKey::of(p_container));
 		const Status status = visit_objects(p_container, p_scope, p_depth);
 		path_.pop_back();

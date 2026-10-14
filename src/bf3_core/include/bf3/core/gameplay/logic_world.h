@@ -20,6 +20,7 @@
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/ids.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -50,9 +51,10 @@ struct InstanceKey {
 	bool operator==(const InstanceKey &) const = default;
 };
 
+// Keyed with the process seed (ids.h), like every hash of data-controlled keys.
 struct InstanceKeyHash {
 	size_t operator()(const InstanceKey &p_key) const noexcept {
-		return std::hash<const void *>()(p_key.partition) ^ (static_cast<size_t>(p_key.index) * 0x9E3779B97F4A7C15ull);
+		return static_cast<size_t>(hash_keyed(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p_key.partition)), p_key.index));
 	}
 };
 
@@ -121,15 +123,10 @@ struct LogicConnections {
 	std::span<const uint32_t> property_into(const EbxInstance &p_target, int32_t p_field) const;
 
 private:
-	struct TargetKey {
-		InstanceKey target;
-		int32_t field = 0;
-		bool operator==(const TargetKey &) const = default;
-	};
-	struct TargetKeyHash {
-		size_t operator()(const TargetKey &p_key) const noexcept { return InstanceKeyHash()(p_key.target) ^ (static_cast<size_t>(static_cast<uint32_t>(p_key.field)) << 1); }
-	};
-	std::unordered_map<TargetKey, std::vector<uint32_t>, TargetKeyHash> by_target_;
+	// Indices into `property` ordered by (target, field), within one key in connection order: a
+	// stable sort, O(n log n) whatever the keys. The field ids come from the data, so a hash index
+	// here could be flooded (crafted ids that cancel the target's hash bits).
+	std::vector<uint32_t> by_target_;
 };
 
 struct LogicScope {
