@@ -369,12 +369,20 @@ bool MipSlice::texels(TextureFormat p_format, std::vector<std::array<float, 4>> 
 		const size_t at = p_y * pitch;
 		return at <= data.size() && p_bytes <= data.size() - at ? data.data() + at : nullptr;
 	};
+	// Every row the decode reads must be backed by `data` before the output is allocated: the
+	// dimensions come from untrusted u16 header fields (65535 x 65535 would be ~68 GB of texels).
+	auto backed = [&](size_t p_rows, size_t p_row_bytes) {
+		return p_rows == 0 || row(p_rows - 1, p_row_bytes) != nullptr;
+	};
 	switch (p_format) {
 		case TextureFormat::L8:
 		case TextureFormat::L16:
 		case TextureFormat::Argb8888: {
-			std::vector<std::array<float, 4>> out(w * h, std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f });
 			const size_t size = size_t(texture_pixel_bytes(p_format));
+			if (!backed(h, w * size)) {
+				return false;
+			}
+			std::vector<std::array<float, 4>> out(w * h, std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f });
 			for (size_t y = 0; y < h; y++) {
 				const uint8_t *bytes = row(y, w * size);
 				if (bytes == nullptr) {
@@ -397,9 +405,12 @@ bool MipSlice::texels(TextureFormat p_format, std::vector<std::array<float, 4>> 
 		case TextureFormat::Dxt1:
 		case TextureFormat::Dxt5:
 		case TextureFormat::Dxt5A: {
-			std::vector<std::array<float, 4>> out(w * h, std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f });
 			const size_t block_bytes = size_t(texture_block_bytes(p_format));
 			const size_t blocks_x = (w + 3) / 4;
+			if (!backed((h + 3) / 4, blocks_x * block_bytes)) {
+				return false;
+			}
+			std::vector<std::array<float, 4>> out(w * h, std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f });
 			for (size_t by = 0; by < (h + 3) / 4; by++) {
 				const uint8_t *blocks = row(by, blocks_x * block_bytes);
 				if (blocks == nullptr) {

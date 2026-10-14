@@ -267,6 +267,20 @@ TEST_SUITE("res_unit") {
 		ResMeta bad_meta = meta;
 		bad_meta[4] = 48; // inline size disagrees with the LOD
 		CHECK(MeshSet::parse(b, bad_meta, cut).message() == "malformed inline geometry size at 512");
+
+		// Hostile counts: stride 0 makes the vertex range check vacuous; a u32 count of 0xFFFFFFFF
+		// must be rejected before anything is reserved (it used to commit ~48 GB), also for a
+		// 0-byte (None) element that would otherwise loop over every "vertex".
+		for (const uint8_t format : { uint8_t(8), uint8_t(0) }) {
+			std::vector<uint8_t> hostile = b;
+			put32(hostile, 0x110 + 0x20, 0xFFFFFFFFu);
+			hostile[0x110 + 0x24] = 0;
+			hostile[0x110 + 0x31] = format;
+			MeshSet huge;
+			REQUIRE(MeshSet::parse(hostile, meta, huge).ok());
+			REQUIRE(huge.lods[0].inline_geometry(hostile, geometry).ok());
+			CHECK(huge.lods[0].decode_subset(geometry, 0, d).message() == "malformed vertex element outside its stride at 0");
+		}
 	}
 
 	TEST_CASE("res: synthetic DxTexture, mips and ranged views") {
@@ -310,6 +324,28 @@ TEST_SUITE("res_unit") {
 		CHECK(t.split_mips(Bytes(chunk).first(30), 0, mips).message() == "needed 32 bytes at 0 of a 30-byte payload");
 		put32(h, 0x00, 9);
 		CHECK(DxTexture::parse(h, t).message() == "unsupported texture version 0x9");
+
+		// Hostile dimensions (u16 header fields) over a short span: rejected before the texel
+		// buffer is allocated (65535 x 65535 used to zero-fill ~68 GB first).
+		const std::vector<uint8_t> tiny(16, 0x80);
+		for (const TextureFormat format : { TextureFormat::L8, TextureFormat::Argb8888, TextureFormat::Dxt1, TextureFormat::Dxt5 }) {
+			MipSlice slice;
+			slice.width = 65535;
+			slice.height = 65535;
+			slice.data = tiny;
+			CHECK(!slice.texels(format, texels));
+			CHECK(texels.empty());
+		}
+		// The exact minimum (last row without its pitch padding) still decodes: 3 x 2 L8 has a
+		// 4-byte pitch, so 4 + 3 bytes are enough.
+		MipSlice small;
+		small.width = 3;
+		small.height = 2;
+		small.data = Bytes(tiny).first(7);
+		REQUIRE(small.texels(TextureFormat::L8, texels));
+		CHECK(texels.size() == 6);
+		small.data = Bytes(tiny).first(6);
+		CHECK(!small.texels(TextureFormat::L8, texels));
 	}
 
 	TEST_CASE("res: convex tessellation and planes") {

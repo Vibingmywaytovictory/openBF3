@@ -210,7 +210,10 @@ struct VertexReader {
 		if (r_size < 0) {
 			return ResError::unsupported("vertex format", uint32_t(p_e.format));
 		}
-		if (uint64_t(p_e.offset) + uint64_t(r_size) > stride) {
+		// stride == 0 (only reached with count > 0) makes decode_vertices' range check vacuous and
+		// would leave the u32 count unbounded; IW4L fails here for every sized element too, and for
+		// a 0-byte element it would spin through billions of vertices, so reject it with the same text.
+		if (stride == 0 || uint64_t(p_e.offset) + uint64_t(r_size) > stride) {
 			return ResError::malformed("vertex element outside its stride", p_e.offset);
 		}
 		return ResError();
@@ -223,8 +226,6 @@ struct VertexReader {
 		if (p_e == nullptr) {
 			return ResError();
 		}
-		std::vector<std::array<float, N>> out;
-		out.reserve(size_t(count));
 		int size = 0;
 		if (count > 0) {
 			const ResError e = check(*p_e, size);
@@ -232,6 +233,10 @@ struct VertexReader {
 				return e;
 			}
 		}
+		// Reserve only after check(): count is then bounded by region size / stride (stride > 0),
+		// never by the raw u32 header field alone.
+		std::vector<std::array<float, N>> out;
+		out.reserve(size_t(count));
 		for (uint64_t v = 0; v < count; v++) {
 			Vec4 lanes;
 			vertex_format_decode(p_e->format, element(*p_e, v, size), lanes);
@@ -306,7 +311,6 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 	}
 	if (const VertexElement *color = decl.find(VertexUsage::Color0)) {
 		std::vector<std::array<uint8_t, 4>> colors;
-		colors.reserve(size_t(vr.count));
 		int size = 0;
 		if (vr.count > 0) {
 			e = vr.check(*color, size);
@@ -314,6 +318,7 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 				return e;
 			}
 		}
+		colors.reserve(size_t(vr.count));
 		const bool raw = color->format == VertexFormat::UByte4N || color->format == VertexFormat::UByte4;
 		for (uint64_t v = 0; v < vr.count; v++) {
 			const Bytes b = vr.element(*color, v, size);
@@ -340,7 +345,6 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 	const VertexElement *bone_indices = decl.find(VertexUsage::BoneIndices);
 	if (bone_indices != nullptr && any_part) {
 		std::vector<uint16_t> parts;
-		parts.reserve(size_t(vr.count));
 		int size = 0;
 		if (vr.count > 0) {
 			e = vr.check(*bone_indices, size);
@@ -348,6 +352,7 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 				return e;
 			}
 		}
+		parts.reserve(size_t(vr.count));
 		for (uint64_t v = 0; v < vr.count; v++) {
 			parts.push_back(vr.element(*bone_indices, v, size)[0]);
 		}
