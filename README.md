@@ -236,6 +236,71 @@ over two runs, Rust 15.5 s (warm cache).
   vertex. 3p soldiers are split into upperbody / lowerbody / head / headgear meshes (59-64 bones, skeleton indices up
   to 208). The decoder does not skin: positions are the bind pose in mesh space.
 
+## Weapon tables (`bf3_core`, `include/bf3/core/gameplay/`)
+
+The first gameplay table readers (plan §3.2, `research/topics/01-weapons.md`). Namespace `bf3::core::gameplay`; they
+read through any `EbxResolver` (an `EbxLibrary` over the level superbundle, since every MP level's main bundle carries
+the full weapon EBX) and return plain data that no longer points into a partition.
+
+* `resolve_weapon(db, partition, {unlocks, ui})` -> `WeaponDef`. `partition` is a variant
+  (`SoldierWeaponUnlockAsset`, e.g. `weapons/m16a4/u_m16_burst`) or a blueprint. Chain: unlock -> blueprint ->
+  `SoldierWeaponData` -> `WeaponFiringData` (deploy) -> `FiringFunctionData` (fire modes, rate of fire, burst, bolt
+  action, hold-and-release, ammo, reload tactical/empty/per-shell with delay and `ReloadThreshold`, overheat, shot
+  speed/position, pellets, pellet cone) -> projectile (`BulletEntityData` damage and falloff, gravity, TTL, arming;
+  `MissileEntityData` engine, max speed, direct damage; `GrenadeEntityData` bounce and fuse; explosion and dud
+  explosion; `WeaponSuppressionData`; material pair) and `GunSwayData` (per stance x zoom x move state
+  min/max/+shot/-second, recoil up/left/right/max/decrease, first-shot recoil multiplier, stance transitions,
+  suppression modifiers, camera spring). The weapon-name SID comes from `ui/uiweaponmetadata` (Win32/UI) by the
+  unlock identifier, with its text-database hash (`ID_P_WNAME_M16A4` -> `0fd83dfa`).
+* Unlocks: the variant and its `Extra` chain plus requested attachments are active. A `WeaponFiringDataModifier`
+  replaces the firing data (and with it the gun sway), the other modifiers patch fields in array order (shot,
+  projectile, magazine, deploy, zoom FOV, misc flags OR-ed, class, aiming controller, sound, anim type), and
+  `GunSwayModifierData` of an active unlock multiply the sway (a `MaxAngleModifier` or `Lag*Mod` of 0 = unset; bipod
+  and laser modifiers are kept as `conditional`). The AI firing data in the same partition is never applied unless
+  asked for. The rule is [inferred] in topics/01 §1.5; the Symthic match below supports it.
+* `MaterialGrid` reads the level's `MaterialGridData` (found through `LevelData.RuntimeMaterialGrid`) and its
+  `materials/materialcontainer`: `damage(projectile property, target property)` gives the
+  `MaterialRelationDamageData`/`PenetrationData` cell, row = `MaterialIndexMap[PhysicsPropertyIndex & 0xFF]`.
+  `read_hit_capsules` reads the 13 soldier capsules and `body_multipliers` the head/body/chest/legs
+  `DamageProtectionMultiplier` for a projectile. On the delta levels (XP2-XP4) the level's own container copy lacks
+  pairs the patched grid uses (measured: 3,839 on every XP2 level, 1,775 on XP3, 1,071 on XP4; the handoff quotes 3,842
+  for XP2_Palace), so `load` takes fallback resolvers (any base level, e.g. MP_Subway); after it 0 pairs stay
+  unresolved and the body multipliers equal Metro's.
+
+`bf3dump weapon <partition> [--unlock <u_..>]... [--level <sb>]` prints one resolved WeaponDef with the derived
+numbers (shot interval, effective RPM, max range, drop at 100/300 m) and the level's body multipliers for its
+projectile; a blueprint resolves through its base variant. `bf3dump weapons [--level <sb>]` prints one TSV row per
+weapon variant. The level defaults to MP_Subway. Examples: `bf3dump weapon weapons/m16a4/m16a4` (M16A3),
+`bf3dump weapon weapons/m16a4/u_m16_burst` (M16A4: burst 3 @ 800, ADS 0.1, horizontal -0.3..0.075),
+`bf3dump weapon weapons/m16a4/u_m16a4 --unlock u_m16a4_sound_suppressor --unlock u_m16a4_bipod`.
+
+**Tests.** `core.gameplay.unit` (no install: falloff, interval, drop, SID hash, modifier math);
+`core.gameplay.weapons` (exits 77 without an install) asserts the §7.1 rows on MP_Subway: M16A3, M16A4 burst,
+AK-74M, M249, M98B and JNG-90/L96/M40A5/SV98 (46.2/43.5/54.5/48 RPM), AN-94 (2 @ 1200), 870MCS (12 pellets, 125 RPM,
+3 deg cone, 1.15 + 0.67/shell), M9, RPG-7/SMAW, M320 HE/M67, attachments, the UGL variant; the body multipliers on
+Metro, MP_001, Caspian and XP2_Palace (bullet 2.0/1.0/1.0/0.91, Sniper 2.35/1.0/1.25/0.91, .338 2.35/1.0/1.06/0.91,
+buckshot 1.0/1.0/1.0/0.91, flechette 1.0, melee 0.67/0.5, missile/40 mm 2.5, grenade 0); the arithmetic checks
+(75 ms, 1.60 m at 300 m, 975 m and 3,250 m ranges, shots to kill, one-shot ranges 17.5/15/20/50.8/16.3 m); and that
+every weapon variant of all 29 MP levels resolves (5,053 resolutions, 0 errors, about 7 s). `core.gameplay.fuzz`
+pushes seeded mutations of the M16A4 partitions and of the Metro grid through the readers (no crash under ASan).
+
+**Parity, measured 2026-10-14** (comparison scripts and data stay outside the repo):
+
+* EBX probe (`research/probes/ebx-data-probe.md` §3, its 10-weapon summary): 158 of 158 compared fields identical.
+* topics/01 roster (Rime dump, 172 unlock assets, base firing data): 101 identical; the other 71 are variants whose
+  modifiers the roster did not apply (UGL and M26 underslung variants, silenced pistols, M16A4/M4 burst, G17, the
+  standalone M320/M26 ammo variants) plus 4 launchers whose direct-hit damage the roster put in the bullet-damage
+  column.
+* Symthic Aftermath chart (62 rows, 16 fields, topics/01 C6): base blueprints 50/62 identical, the same 12
+  differences as topics/01 §2.8. Resolving the variants (u_m16_burst, u_m4, u_glock17) brings 52/62, and Symthic's
+  bolt-action convention (effective RPM, hip recoil block) 57/62. The 5 left: M93R and UMP-45 SIPS, SKS recoil
+  decrease (Symthic shows the NoZoom 15, data Zoom 9), LSAT ADS 0.4 vs 0.5, M4 empty reload 2.6 (the burst firing data
+  of u_m4) vs Symthic 2.48 (the M4A1 base value): post-Aftermath patches or chart errors; the install is the final
+  patch. Max range = v0 x TTL on 62/62.
+* Every MP level carries the same data: the 172 variants shared by all 29 levels resolve to identical rows; XP2 and
+  XP4 levels add 8 gun-master/premium variants, MP_012 adds the M136.
+* §7.1 quotes the M98B drop at 300 m as 1.05 m; the arithmetic gives 1.045 m (the test checks 1.0447).
+
 ## Layout and pinned third-party code
 
 | path | what |
