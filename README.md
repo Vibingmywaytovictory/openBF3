@@ -236,6 +236,71 @@ over two runs, Rust 15.5 s (warm cache).
   vertex. 3p soldiers are split into upperbody / lowerbody / head / headgear meshes (59-64 bones, skeleton indices up
   to 208). The decoder does not skin: positions are the bind pose in mesh space.
 
+## Level traversal (`bf3_core`, `include/bf3/core/level/`)
+
+C++ port of IW4L `level_bf3` (Apache-2.0: `level.rs`, `mode.rs`, `info.rs`, `world.rs`, `transform.rs`,
+`variations.rs`, `connections.rs` and the counting parts of `geometry/` and `collision/`), namespace
+`bf3::core::level`. Everything stays in Frostbite space (metres, Y up, rows right/up/forward/trans, child-in-parent =
+row-vector product); there is no IW conversion.
+
+* `load_level(install, "MP_Subway", "TeamDeathMatch0")` mounts the level read-only and picks the mode's bundles: the
+  level bundle, its `_settings_win32` / `_gameconfiglight_win32` bundles, then breadth-first every
+  `SubWorldReferenceObjectData` the mode includes (`AutoLoad` and the mode in `EnabledOptions` of every `GameMode`
+  inclusion setting), nested ones too; absent bundles are listed (Metro has no `Conquest_Large`). Every partition is
+  parsed into one `EbxDb`. `level_info` gives names, `WorldSizeXZ`, the modes and the minimap without the rest.
+* `World::traverse` walks `LevelData`: layers (`WorldPartReferenceObjectData`), sub-worlds (own scope and
+  `MeshVariationDatabase`), `ReferenceObjectData` -> `ObjectBlueprint` objects / prefab scopes, spawn references,
+  `StaticModelGroupEntityData` members (from `InstanceTransforms`, else the next `ShapesSubpart` of the group's
+  `HavokPhysicsData`, one cursor over the members, `InstanceScale`, per-instance variation), other entities at their
+  `Transform`. `Excluded`, `BlueprintTransform` and `Transform` fed by `PropertyConnection`s are resolved through the
+  scope interfaces and child-prefab output ports (`Scopes::property`). Each `PlacedObject` has its kind, world
+  transform, entity, reference, sub-world, scope, variation hash, group slot and, for meshes, the `MeshAsset`, entity
+  type and `PhysicsData`.
+* `census.h`: `hidden_parts` (composite parts only later health states show), `starts_hidden` (`Visible` fed by a
+  `BoolEntityData` with `DefaultValue` false: ruins, Metro's backdrops), `mesh_census` (the scene meshes and
+  instances the placements need: one mesh per (asset, variation entry, hidden parts, bake of a non-uniform transform),
+  dropped when no LOD draws a triangle, world kind when placed at most 4 times with a placed radius of at least 16 m)
+  and `collision_placements` (each static model group's Havok res at the group transform, and each placed mesh
+  object's physics asset prebaked closest to its scale, with the frame the res's shapes go through). The decoders of
+  `include/bf3/core/res/` turn those res into triangles and convex pieces.
+* Hostile data fails with an error or is cut short, never crashes: depth limits (48 blueprint levels, 8 layer levels,
+  32 connection hops) plus step budgets for fan-out (connection resolution, layer search), a cap of 4 M placed
+  objects, and a static model group whose instances need more subparts than its res holds is an error.
+
+`bf3dump level <LEVEL> <MODE> [--legacy-mvdb]` prints the canonical listing (sub-worlds, groups, every placement with
+its transform as f32 bit patterns, the mesh census variants and totals, the collision placements; every section
+sorted); `bf3dump levelmodes <LEVEL>` lists a level's modes. **Parity**: `research/probes/tools/level-oracle` (Rust,
+path-depends on IW4L `level_bf3`/`ebx_bf3`/`resource_bf3` and the `ebx-dump` install readers) prints the same listing
+through IW4L's own traversal:
+
+```bat
+set CARGO_TARGET_DIR=<scratch>\target
+cargo build --release --manifest-path research\probes\tools\level-oracle\Cargo.toml
+level-oracle level MP_Subway TeamDeathMatch0 > rust.txt  &  b\dev\tools\bf3dump\bf3dump.exe level MP_Subway TeamDeathMatch0 > cpp.txt
+```
+
+Result on 2026-10-14: every mode of every one of the 29 MP levels (230 level x mode runs, 5.7 k-18.3 k lines each) is
+byte-identical, transforms bit for bit; no MeshSet failed to decode. Load + traverse + census take 0.15-3.4 s per
+run, median 0.24 s (warm file cache, 16 threads shared with other builds). Handoff §9 / sections/03 against `ctest -R core.level`:
+
+| level x mode | handoff | measured |
+|---|---|---|
+| Metro TDM | 10,873 placements -> 842 meshes (762 model, 80 world), 10,571 instances | identical; groups 499 / 7,869 / 877 explicit / 6,992 Havok, 0 `user_data` mismatches; 710 composite placements hide parts; 64 start hidden (42 + 22 backdrops); 12,315 partitions |
+| Bazaar CQL | 620 meshes, 5,783 instances | 5,783 instances; 613 meshes with today's variation lookup, **620 (579 / 41) with `--legacy-mvdb`** (see below); group 381 / 3,646 / 3,292 |
+| Caspian CQS | 20,311 placements on 2,277 meshes, 12,725 placed hidden | traversal: 6,847 mesh placements -> 304 meshes, 6,846 instances; group 170 / 4,444 / 4,264; 538 composite placements hide parts (sections/03 §2.5) |
+| Palace Domination (IW4L geometry report) | 4,175 placements, 704 meshes (632 / 72), 4,131 instances | identical with `--legacy-mvdb` (701 without) |
+
+* The Metro and Bazaar mesh counts are IW4L's geometry builder at commit bab7c1a (2026-10-01). On 2026-10-07
+  (066d34c) IW4L stopped using a `MeshVariationDatabase` entry with an empty `Materials` list (the mesh falls back
+  to its default entry; Caspian's service buildings had gone white), which merges variants: Bazaar 620 -> 613
+  meshes, Palace 704 -> 701. The C++ follows today's rule; `CensusOptions::legacy_variations` / `--legacy-mvdb`
+  reproduce the handoff.
+* Caspian's 20,311 / 2,277 / 12,725 are the IW engine's static-model count of a later IW4L build (`bf3 static models:
+  20311 placements on 2277 meshes (... 12725 placed hidden for destruction)` in its world report), after the
+  geometry builder had gained destruction views: each destruction state's part is drawn by an instance of its own,
+  hidden until the state shows. That is a renderer count, not a traversal one; the per-state expansion belongs to the
+  destruction work, not to this traversal.
+
 ## Layout and pinned third-party code
 
 | path | what |

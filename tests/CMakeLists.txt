@@ -63,3 +63,15 @@ if(OPENBF3_ASAN)
     set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant core.res.unit core.res
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
+
+# Level traversal (bf3_core/level): level_unit on synthetic values; core.level reads the install
+# (read-only) against handoff §9 counts and exits 77 = skipped without one.
+openbf3_test(test_level test_main.cpp level_tests.cpp test_support.h)
+target_link_libraries(test_level PRIVATE bf3_core)
+add_test(NAME core.level.unit COMMAND test_level --test-suite=level_unit)
+add_test(NAME core.level COMMAND test_level --test-suite=level)
+set_tests_properties(core.level PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.level.unit core.level PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(core.level.unit core.level PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
+endif()
