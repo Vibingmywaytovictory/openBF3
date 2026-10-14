@@ -13,3 +13,6 @@
 [submodule "extern/doctest"]
 	path = extern/doctest
 	url = https://github.com/doctest/doctest
+[submodule "extern/libdeflate"]
+	path = extern/libdeflate
+	url = https://github.com/ebiggers/libdeflate

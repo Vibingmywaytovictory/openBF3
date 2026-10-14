@@ -17,6 +17,10 @@ namespace bf3::core {
 // components are appended lexically.
 std::optional<std::filesystem::path> canonicalize_path(const std::filesystem::path &p_path);
 
+// The "\\?\" (or "\\?\UNC\") form of p_path made absolute, so file APIs accept names longer than
+// MAX_PATH. Check targets with PathGuard first; this only changes how an allowed path is opened.
+std::filesystem::path to_extended_length(const std::filesystem::path &p_path);
+
 // True when p_child equals p_root or lies below it. Both must be canonical. Component-wise and
 // case-insensitive (so "Battlefield 3x" is not inside "Battlefield 3").
 bool path_is_within(const std::filesystem::path &p_child, const std::filesystem::path &p_root);

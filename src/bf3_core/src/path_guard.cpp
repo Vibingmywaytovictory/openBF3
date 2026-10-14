@@ -34,6 +34,25 @@ std::wstring strip_verbatim(std::wstring p_path) {
 	return p_path;
 }
 
+} // namespace
+
+std::filesystem::path to_extended_length(const std::filesystem::path &p_path) {
+	const std::wstring &raw = p_path.native();
+	if (raw.rfind(L"\\\\?\\", 0) == 0) {
+		return p_path;
+	}
+	const std::wstring full = full_path_name(raw);
+	if (full.empty()) {
+		return p_path;
+	}
+	if (full.rfind(L"\\\\", 0) == 0) {
+		return std::filesystem::path(L"\\\\?\\UNC\\" + full.substr(2));
+	}
+	return std::filesystem::path(L"\\\\?\\" + full);
+}
+
+namespace {
+
 bool exists_no_follow_fail(const std::wstring &p_path) {
 	return GetFileAttributesW(p_path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }

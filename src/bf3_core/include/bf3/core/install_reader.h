@@ -63,6 +63,8 @@ public:
 	// Install-relative access ('/' or '\' separated; absolute names, "..", ':' are refused).
 	bool exists(std::string_view p_relative) const;
 	ReadOnlyFile open(std::string_view p_relative) const;
+	// Names of the sub-directories of an install-relative directory, sorted (byte order).
+	std::vector<std::string> list_subdirectories(std::string_view p_relative) const;
 
 	// A guard that refuses every write target inside this install and inside kDefaultRoot, so it is
 	// never empty even when nothing is mounted.

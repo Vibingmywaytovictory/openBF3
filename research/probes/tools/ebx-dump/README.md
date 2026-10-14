@@ -52,4 +52,5 @@ ebx-dump chunk Win32/Levels/MP_Subway/MP_Subway 54620b35-bdb6-a4f1-c73a-44712121
 ```
 
 Timing on the user's machine: `list` 3.3 s; loading one level superbundle's ~12.5 k partitions 2.2 s; `@all-mp`
-(50,486 unique partitions) 32 s.
+(50,486 unique partitions) 32 s on a cold file cache, about 2.5 s warm (`types @all-mp LevelData`,
+2026-10-14; the C++ `bf3dump ebxload @all-mp --walk` takes about 1.2 s warm).

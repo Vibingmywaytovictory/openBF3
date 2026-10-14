@@ -192,6 +192,28 @@ ReadOnlyFile InstallReader::open(std::string_view p_relative) const {
 	return ReadOnlyFile::open_absolute(p);
 }
 
+std::vector<std::string> InstallReader::list_subdirectories(std::string_view p_relative) const {
+	std::vector<std::string> out;
+	std::filesystem::path dir;
+	if (!resolve(p_relative, dir)) {
+		return out;
+	}
+	WIN32_FIND_DATAW fd{};
+	HANDLE h = FindFirstFileExW((dir / L"*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+	if (h == INVALID_HANDLE_VALUE) {
+		return out;
+	}
+	do {
+		const std::wstring_view name(fd.cFileName);
+		if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && name != L"." && name != L"..") {
+			out.push_back(detail::narrow(name));
+		}
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
 void InstallReader::read_manifest(std::string_view p_relative, std::vector<std::pair<std::string, std::string>> &r_pairs) const {
 	ReadOnlyFile f = open(p_relative);
 	if (!f.is_open() || f.size() > 64 * 1024) {

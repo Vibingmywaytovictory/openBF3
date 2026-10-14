@@ -32,6 +32,20 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# AddressSanitizer build of the Godot-free libraries, tools and tests (preset `asan`). MSVC's
+# ASan rejects the /RTC run-time checks, so they are stripped from every configuration's flags.
+option(OPENBF3_ASAN "Build with /fsanitize=address (tests and tools only; not with the GDExtension)" OFF)
+if(OPENBF3_ASAN)
+    if(OPENBF3_BUILD_GODOT)
+        message(FATAL_ERROR "OPENBF3_ASAN needs OPENBF3_BUILD_GODOT=OFF (use the asan preset).")
+    endif()
+    foreach(_var CMAKE_C_FLAGS CMAKE_CXX_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG)
+        string(REGEX REPLACE "/RTC[1csu]+" "" ${_var} "${${_var}}")
+    endforeach()
+    add_compile_options(/fsanitize=address /Zi)
+    add_link_options(/DEBUG /INCREMENTAL:NO)
+endif()
+
 # ---------------------------------------------------------------------------------------------
 # Third-party (git submodules, pinned; see README.md). All permissive: MIT / zlib.
 
@@ -67,6 +81,18 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_subdirectory(extern/recastnavigation recast EXCLUDE_FROM_ALL)
 unset(CMAKE_POLICY_VERSION_MINIMUM)
 
+# libdeflate 1.26: inflate of the zlib-framed BF3 payload blocks (bf3_core payload.cpp).
+set(LIBDEFLATE_BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
+set(LIBDEFLATE_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(LIBDEFLATE_GZIP_SUPPORT OFF CACHE BOOL "" FORCE)
+set(LIBDEFLATE_BUILD_GZIP OFF CACHE BOOL "" FORCE)
+set(LIBDEFLATE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LIBDEFLATE_INSTALL OFF CACHE BOOL "" FORCE)
+# It declares cmake_minimum_required(3.10); 3.15 makes it honour CMAKE_MSVC_RUNTIME_LIBRARY (CMP0091).
+set(CMAKE_POLICY_VERSION_MINIMUM 3.15)
+add_subdirectory(extern/libdeflate libdeflate EXCLUDE_FROM_ALL)
+unset(CMAKE_POLICY_VERSION_MINIMUM)
+
 if(OPENBF3_BUILD_TESTS)
     set(DOCTEST_WITH_TESTS OFF CACHE BOOL "" FORCE)
     set(DOCTEST_NO_INSTALL ON CACHE BOOL "" FORCE)
@@ -97,6 +123,8 @@ add_subdirectory(src/bf3_core)
 add_subdirectory(src/bf3_sim)
 add_subdirectory(src/bf3_net)
 add_subdirectory(src/bf3_host)
+# Command-line tools (link the Godot-free libraries only).
+add_subdirectory(tools/bf3dump)
 if(OPENBF3_BUILD_GODOT)
     add_subdirectory(src/bf3_godot)
 endif()

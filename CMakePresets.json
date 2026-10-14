@@ -30,16 +30,24 @@
       "inherits": "base",
       "displayName": "release: optimised, godot-cpp template_release (shipping)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GODOTCPP_TARGET": "template_release" }
+    },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "displayName": "asan: optimised + /fsanitize=address, tests and tools only (no GDExtension)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "OPENBF3_ASAN": "ON", "OPENBF3_BUILD_GODOT": "OFF" }
     }
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev" },
     { "name": "debug", "configurePreset": "debug" },
-    { "name": "release", "configurePreset": "release" }
+    { "name": "release", "configurePreset": "release" },
+    { "name": "asan", "configurePreset": "asan" }
   ],
   "testPresets": [
     { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
-    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
+    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } }
   ]
 }
