@@ -620,7 +620,7 @@ building): every row passed except `godot.m1` (E1 teleport: "the soldier did not
 Godot-side change). After this design commit the full ctest ran again: 57/57 passed (55 passed, `core.cache_data` and
 `core.res` skipped for their unset sample variables), including `godot.m1` (344 s) and `godot.m1_load` (50 s) and the
 new `fx.contract`; total 798 s. The earlier two failures were most likely load on the shared machine (same code, now passing) [inferred].
-Revision 2 (headers changed, no Godot-side change): `toolsuild.cmd dev` built with no warnings, each of the 8 headers compiles standalone under /W4 /permissive-, and the full ctest with OPENBF3_GODOT set passed 57/57 (55 passed, the same 2 skips), `godot.m1` 351 s, `godot.m1_load` 56 s, `fx.contract` 0.02 s, total 877 s on the shared machine.
+Revision 2 (headers changed, no Godot-side change): `tools\build.cmd dev` built with no warnings, each of the 8 headers compiles standalone under /W4 /permissive-, and the full ctest with OPENBF3_GODOT set passed 57/57 (55 passed, the same 2 skips), `godot.m1` 351 s, `godot.m1_load` 56 s, `fx.contract` 0.02 s, total 877 s on the shared machine.
 
 ## 17. Revision 2 (review response)
 
