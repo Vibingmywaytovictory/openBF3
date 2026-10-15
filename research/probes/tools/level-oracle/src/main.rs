@@ -8,6 +8,8 @@
 //!   levels                  every MP level id of the install, one per line
 //!   collision <LEVEL> <MODE>
 //!                           the collision soup's placements, tiles and totals (src/collision.rs)
+//!   static-models <LEVEL> <MODE>
+//!                           the handoff §9 renderer count, decomposed (src/static_models.rs)
 //!
 //! Listing (every section sorted bytewise; floats as f32 bit patterns, 8 lowercase hex digits):
 //!   level / bundle / settings / subworld-bundle / absent / partitions / world / skipped lines,
@@ -36,6 +38,7 @@ use level_bf3::{
 use resource_bf3::{GeometrySource, MeshSet, SubsetFilter};
 
 mod collision;
+mod static_models;
 
 const ROOT: &str = r"C:\Program Files\EA Games\Battlefield 3";
 
@@ -109,12 +112,13 @@ fn main() {
             }
         }
         (Some("collision"), 4) => print!("{}", collision::run(&install, &args[2], &args[3])),
+        (Some("static-models"), 4) => print!("{}", static_models::run(&install, &args[2], &args[3])),
         (Some("levels"), 2) => {
             for level in install.levels() {
                 println!("{}", level.id);
             }
         }
-        _ => fail("usage: level-oracle level <LEVEL> <MODE> | modes <LEVEL> | levels | collision <LEVEL> <MODE>"),
+        _ => fail("usage: level-oracle level <LEVEL> <MODE> | modes <LEVEL> | levels | collision <LEVEL> <MODE> | static-models <LEVEL> <MODE>"),
     }
 }
 

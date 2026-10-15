@@ -15,6 +15,7 @@ bf3_install = { path = "../ebx-dump/crates/bf3_install" }
 level_bf3 = { path = "C:/Users/olku/iw4L/crates/level_bf3" }
 ebx_bf3 = { path = "C:/Users/olku/iw4L/crates/ebx_bf3" }
 resource_bf3 = { path = "C:/Users/olku/iw4L/crates/resource_bf3" }
+bf3_scene = { path = "C:/Users/olku/iw4L/crates/bf3_scene" }
 
 [profile.release]
 debug = false

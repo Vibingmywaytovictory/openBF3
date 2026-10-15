@@ -65,6 +65,7 @@ name = "level-oracle"
 version = "0.1.0"
 dependencies = [
  "bf3_install",
+ "bf3_scene",
  "ebx_bf3",
  "level_bf3",
  "resource_bf3",
