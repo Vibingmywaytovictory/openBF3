@@ -65,6 +65,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
+M2a VFX1 adds `fx.contract` (the bf3_fx interface: record sizes, type vocabularies, polynomial goldens; no data); see "Effects (M2a VFX1)".
 
 ## Run
 
@@ -1251,3 +1252,14 @@ README's "Text database" already said so.
 
 **Caspian §9 counts.** The handoff count is reproduced exactly and attributed; see "Level traversal". The oracle is
 `level-oracle static-models MP_007 ConquestSmall0`.
+
+## Effects (M2a VFX1)
+
+`bf3_fx` (`src/bf3_fx`, Godot-free, client only) is BF3's visual-effects core: the compiler from `EffectBlueprint` /
+`EmitterDocument` EBX into flat, digest-cached `EffectDef`s (all 32 processor and 10 evaluator types), the
+deterministic CPU particle simulator `FxWorld`, the per-level emitter atlas and the impact table from the material
+grid. The design, exit gates (census 1,101/1,101 effects and 3,410/3,410 emitters with 0 unknown types, the 1p muzzle
+and oilfire goldens, Metro / Caspian impacts, Metro's 52 atlas entries, cost per particle) and the seams for the
+renderer (VFX2), triggers (VFX3) and audio are in [docs/design/m2a-vfx1.md](docs/design/m2a-vfx1.md). The interface
+headers are in the tree; `ctest -R fx.contract` checks them without data. The `bf3dump fx` commands and the
+`fx.unit` / `fx.install` / `fx.fuzz` / `tools.fx_bench` tests come with the implementation.

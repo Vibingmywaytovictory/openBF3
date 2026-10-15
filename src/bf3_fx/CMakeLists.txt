@@ -1,0 +1,18 @@
+# bf3_fx: BF3's visual effects, Godot-free and client only (plan §2.2, §3.14, D19; docs/design/m2a-vfx1.md): the
+# effect compiler (EffectBlueprint / EmitterDocument -> EffectDef, digest-cached), the CPU particle simulator, the
+# per-level emitter atlas and the impact table from the material grid. Reads through bf3_core only. Never linked into
+# bf3_sim, bf3_net or bf3_host: a dedicated server runs no effects.
+add_library(bf3_fx STATIC
+    src/fx_types.cpp
+    include/bf3/fx/fx_types.h
+    include/bf3/fx/effect_def.h
+    include/bf3/fx/effect_compiler.h
+    include/bf3/fx/effect_cache.h
+    include/bf3/fx/effect_library.h
+    include/bf3/fx/emitter_atlas.h
+    include/bf3/fx/impact_table.h
+    include/bf3/fx/simulator.h
+)
+target_include_directories(bf3_fx PUBLIC include)
+target_link_libraries(bf3_fx PUBLIC bf3_core)
+openbf3_module(bf3_fx)

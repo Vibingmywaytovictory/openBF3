@@ -366,3 +366,14 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
         set_tests_properties(tools.ebx_memory PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hymem_cl_dir}")
     endif()
 endif()
+
+# M2a VFX1 (docs/design/m2a-vfx1.md §11): fx.contract pins the bf3_fx interface (record sizes, the 32 processor and 10
+# evaluator vocabularies, name tables, the polynomial / colour / random-number goldens). No data, no Godot.
+openbf3_test(test_fx_contract test_main.cpp fx_contract_tests.cpp test_support.h)
+target_link_libraries(test_fx_contract PRIVATE bf3_fx)
+add_test(NAME fx.contract COMMAND test_fx_contract --test-suite=fx-contract)
+set_tests_properties(fx.contract PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
+endif()
