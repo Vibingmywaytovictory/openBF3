@@ -151,6 +151,21 @@ struct RangePerfResult {
 core::Result<RangePerfResult> run_range_perf(const WeaponTable &p_table, const CollisionWorld &p_world, std::span<const SpawnPoint> p_spawns,
 		float p_eye_height, uint16_t p_weapon, uint32_t p_shooters = 64, uint32_t p_ticks = 600, uint64_t p_match_seed = 1);
 
+// The weapon alone (W1, W6): p_scenario's script drives step_soldier_weapons at a fixed eye (feet at the origin,
+// facing +Z, the shooter pose's eye height p_eye_height) with no world, projectiles or targets. As in run_range,
+// idle ticks run the deploy first, then p_scenario.ticks script ticks and p_scenario.settle_ticks idle ticks.
+// Every ShotEvent and timed phase event is kept with the per-tick states, so the gates read exact times.
+struct FireTimingResult {
+	std::vector<ShotEvent> shots;
+	std::vector<TimedWeaponEvent> timed;
+	std::vector<Tick> presses; // ticks whose command pressed fire (a rising edge)
+	std::vector<SoldierWeaponsState> states; // after every tick, the deploy included
+	Tick first_script_tick = 0; // the script's first command
+	uint32_t refused_shots = 0;
+	uint32_t timed_dropped = 0;
+};
+core::Result<FireTimingResult> run_fire_timing(const WeaponTable &p_table, const RangeScenario &p_scenario, float p_eye_height = 1.6f);
+
 // FNV-1a 64 over every ShotEvent field (identical shot lists for identical seeds, §1 W7).
 uint64_t shot_list_hash(std::span<const ShotEvent> p_shots);
 uint64_t impact_list_hash(std::span<const ImpactEvent> p_impacts);

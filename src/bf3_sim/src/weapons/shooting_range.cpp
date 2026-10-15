@@ -81,6 +81,56 @@ const core::gameplay::PoseDef *pose_def(const core::gameplay::SoldierDef &p_sold
 	return p_soldier.pose(core::gameplay::SoldierPose(std::min<size_t>(size_t(p_pose), kPoseCount - 1)));
 }
 
+// The command's weapon fields for script tick p_index of p_scenario (p_script false: an idle command).
+WeaponInput script_input(const WeaponTable &p_table, const RangeScenario &p_scenario, const SoldierWeaponsState &p_state, Tick p_tick, bool p_script,
+		uint32_t p_index, bool p_prev_fire) {
+	WeaponInput in;
+	in.zoom = p_scenario.ads;
+	if (!p_script) {
+		return in;
+	}
+	const WeaponSlotState &s = p_state.current();
+	switch (p_scenario.script) {
+		case FireScript::Hold:
+			in.fire = true;
+			break;
+		case FireScript::Tap: {
+			// Pinned to the tick that contains the ready time (docs §10): press in command T when the weapon is ready
+			// before tick_end(T), release in command T + 1.
+			if (p_prev_fire) {
+				break;
+			}
+			const SimTime end = tick_end(p_tick);
+			const bool ammo = p_table.infinite_magazine || s.magazine > 0;
+			bool ready = false;
+			switch (s.phase) {
+				case WeaponPhase::Ready:
+					ready = s.next_shot_time < end && s.burst_left == 0;
+					break;
+				case WeaponPhase::Bolt:
+				case WeaponPhase::Deploying:
+					ready = (s.flags & slot_flags::kBoltWaitsRelease) == 0 && s.phase_end < end && s.next_shot_time < end;
+					break;
+				default:
+					break;
+			}
+			in.fire = ammo && ready;
+			break;
+		}
+		case FireScript::TapEvery:
+			in.fire = (p_index % std::max<uint32_t>(1, p_scenario.tap_period)) == 0;
+			break;
+		case FireScript::ReloadAt:
+			in.fire = true;
+			in.reload = p_index == p_scenario.reload_tick;
+			break;
+		case FireScript::Throw:
+			in.fire = p_index < p_scenario.hold_ticks;
+			break;
+	}
+	return in;
+}
+
 } // namespace
 
 std::optional<RangeLane> find_range_lane(const CollisionWorld &p_world, std::span<const SpawnPoint> p_spawns, float p_eye_height, float p_min_length,
@@ -114,8 +164,8 @@ std::vector<StaticTriangle> range_wall_triangles(std::span<const float> p_wall_d
 		float p_wall_half_width, uint32_t p_material_value) {
 	std::vector<StaticTriangle> out;
 	const float slab_y = p_eye_height - p_depth;
-	// The slab in 100 m quads (a few large triangles per 64 m tile rather than one triangle spanning kilometres).
-	constexpr float kCell = 100.0f;
+	// The slab in 500 m quads (a few dozen triangles rather than two spanning kilometres).
+	constexpr float kCell = 500.0f;
 	const float lo = -100.0f;
 	const int cells = int(std::ceil((p_extent - lo) / kCell));
 	for (int ix = 0; ix < cells && ix < 1000; ++ix) {
@@ -227,48 +277,7 @@ core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionW
 			c.yaw = p_lane.yaw;
 			c.pitch = 0;
 		}
-		WeaponInput in;
-		in.zoom = p_scenario.ads;
-		if (p_script) {
-			const WeaponSlotState &s = st.current();
-			switch (p_scenario.script) {
-				case FireScript::Hold:
-					in.fire = true;
-					break;
-				case FireScript::Tap: {
-					if (prev_fire) {
-						in.fire = false;
-						break;
-					}
-					const SimTime end = tick_end(tick);
-					const bool ammo = p_table.infinite_magazine || s.magazine > 0;
-					bool ready = false;
-					switch (s.phase) {
-						case WeaponPhase::Ready:
-							ready = s.next_shot_time < end && s.burst_left == 0;
-							break;
-						case WeaponPhase::Bolt:
-						case WeaponPhase::Deploying:
-							ready = (s.flags & slot_flags::kBoltWaitsRelease) == 0 && s.phase_end < end && s.next_shot_time < end;
-							break;
-						default:
-							break;
-					}
-					in.fire = ammo && ready;
-					break;
-				}
-				case FireScript::TapEvery:
-					in.fire = (p_index % std::max<uint32_t>(1, p_scenario.tap_period)) == 0;
-					break;
-				case FireScript::ReloadAt:
-					in.fire = true;
-					in.reload = p_index == p_scenario.reload_tick;
-					break;
-				case FireScript::Throw:
-					in.fire = p_index < p_scenario.hold_ticks;
-					break;
-			}
-		}
+		const WeaponInput in = script_input(p_table, p_scenario, st, tick, p_script, p_index, prev_fire);
 		prev_fire = in.fire;
 		c.buttons = with_weapon_input(0, in);
 		ctx.yaw = c.yaw;
@@ -424,6 +433,59 @@ core::Result<RangePerfResult> run_range_perf(const WeaponTable &p_table, const C
 	r.p50_ms = rank(0.50);
 	r.p99_ms = rank(0.99);
 	r.max_ms = sorted.back();
+	return r;
+}
+
+core::Result<FireTimingResult> run_fire_timing(const WeaponTable &p_table, const RangeScenario &p_scenario, float p_eye_height) {
+	if (p_scenario.weapon >= p_table.defs.size()) {
+		return core::make_error("run_fire_timing: weapon " + std::to_string(p_scenario.weapon) + " is not in the table");
+	}
+	if (p_scenario.ticks > 60 * 60 * int(kSimHz) || p_scenario.settle_ticks > 60 * 60 * int(kSimHz)) {
+		return core::make_error("run_fire_timing: a run longer than an hour");
+	}
+	FireTimingResult r;
+	SoldierWeaponsState st;
+	st.player_slot = p_scenario.player_slot;
+	const uint16_t loadout[1] = { p_scenario.weapon };
+	if (core::Status s = spawn_soldier_weapons(st, p_table, loadout, 0, 0); !s.ok()) {
+		return s.error();
+	}
+	WeaponContext ctx;
+	ctx.eye_start = { 0, p_eye_height, 0 };
+	ctx.eye_end = ctx.eye_start;
+	ctx.sway.stance = Stance(std::min<size_t>(size_t(p_scenario.shooter_pose), 2));
+	ctx.sway.zoom = p_scenario.ads ? Zoom::Zoom : Zoom::NoZoom;
+	WeaponTickOutput out;
+	Tick tick = 0;
+	bool prev_fire = false;
+	auto run_tick = [&](bool p_script, uint32_t p_index) {
+		++tick;
+		Command c;
+		c.tick = tick;
+		c.pose = p_scenario.shooter_pose;
+		const WeaponInput in = script_input(p_table, p_scenario, st, tick, p_script, p_index, prev_fire);
+		if (in.fire && !prev_fire) {
+			r.presses.push_back(tick);
+		}
+		prev_fire = in.fire;
+		c.buttons = with_weapon_input(0, in);
+		step_soldier_weapons(p_table, st, c, ctx, p_scenario.match_seed, out);
+		r.shots.insert(r.shots.end(), out.shots.begin(), out.shots.begin() + out.shot_count);
+		r.timed.insert(r.timed.end(), out.timed.begin(), out.timed.begin() + out.timed_count);
+		r.refused_shots += out.refused_shots;
+		r.timed_dropped += out.timed_dropped;
+		r.states.push_back(st);
+	};
+	for (uint32_t i = 0; i < 60 * kSimHz && st.current().phase != WeaponPhase::Ready; ++i) {
+		run_tick(false, 0);
+	}
+	r.first_script_tick = tick + 1;
+	for (uint32_t i = 0; i < p_scenario.ticks; ++i) {
+		run_tick(true, i);
+	}
+	for (uint32_t i = 0; i < p_scenario.settle_ticks; ++i) {
+		run_tick(false, 0);
+	}
 	return r;
 }
 
