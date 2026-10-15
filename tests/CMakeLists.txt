@@ -377,3 +377,28 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_ui1_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(ui1.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui1_cl_dir}")
 endif()
+# UI ui1 implementation (docs/design/ui-swf-fonts.md §14): test_ui1 runs the SWF and font suites. core.ui.swf.unit
+# and core.ui.font.unit are synthetic (tests/ui_swf_writer.h); core.ui.swf, core.ui.swf.fuzz and core.ui.font read
+# the install (read-only) and exit 77 = skipped without one. godot.ui_fonts runs res://scenes/ui_fonts.tscn
+# -- --ui-check headless; godot.ui_fonts_shots runs it windowed with --shot-dir (OPENBF3_UI1_SHOTS) and exits 77
+# without a window.
+openbf3_test(test_ui1 test_main.cpp ui_swf_tests.cpp ui_font_tests.cpp ui_swf_writer.h test_support.h)
+target_link_libraries(test_ui1 PRIVATE bf3_core)
+add_test(NAME core.ui.swf.unit COMMAND test_ui1 --test-suite=ui-swf-unit)
+add_test(NAME core.ui.font.unit COMMAND test_ui1 --test-suite=ui-font-unit)
+add_test(NAME core.ui.swf COMMAND test_ui1 --test-suite=ui-swf)
+add_test(NAME core.ui.swf.fuzz COMMAND test_ui1 --test-suite=ui-swf-fuzz)
+add_test(NAME core.ui.font COMMAND test_ui1 --test-suite=ui-font)
+set_tests_properties(core.ui.swf core.ui.swf.fuzz core.ui.font PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.ui.swf.unit core.ui.font.unit core.ui.swf core.ui.swf.fuzz core.ui.font PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui1_impl_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.ui.swf.unit core.ui.font.unit core.ui.swf core.ui.swf.fuzz core.ui.font
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui1_impl_cl_dir}")
+    set_tests_properties(core.ui.swf.unit core.ui.swf.fuzz PROPERTIES TIMEOUT 1800)
+endif()
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.ui_fonts COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui_fonts.cmake)
+    add_test(NAME godot.ui_fonts_shots COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui_fonts_shots.cmake)
+    set_tests_properties(godot.ui_fonts godot.ui_fonts_shots PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 360 RESOURCE_LOCK openbf3_godot_project)
+endif()
