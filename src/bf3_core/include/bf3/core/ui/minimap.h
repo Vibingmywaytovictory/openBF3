@@ -93,7 +93,7 @@ struct MinimapData {
 	std::string fade_texture; // ui/hud/minimap/minimapmask
 	std::string air_radar_fade_texture;
 	bool use_combat_area_texture = true;
-	bool use_streaming_minimap = false; // the XP2 floors (not drawn in this wave, design §11)
+	bool use_streaming_minimap = false; // the XP2 floors (not drawn in this wave, design §14)
 };
 
 // ---- mapping (inline: the contract both the readers and the Godot side use) ---------------------------------------
@@ -289,19 +289,21 @@ Result<MinimapImages> load_minimap_images(const LevelMount &p_mount, const Minim
 // 2048² image does not alias at 300 px). p_image is mip 0.
 std::vector<L8Image> l8_mip_chain(const L8Image &p_image);
 
-// ---- gates (design §1: M1..M4 are computed with these) ---------------------------------------------------------------
+// ---- gates (design §1: G3..G5 are computed with these) ---------------------------------------------------------------
 
 // Union of the masks: inside any of them (all must share one size; an empty image is skipped).
 Result<std::vector<bool>> combat_area_union(std::span<const L8Image> p_masks, float p_threshold);
 // IoU of a mask and an axis-aligned world box rasterised at the mask's texel centres through one mapping variant.
 double mask_box_iou(const std::vector<bool> &p_mask, uint32_t p_side, const MinimapMapping &p_mapping, uint8_t p_variant,
 		std::array<float, 4> p_box_x0_x1_z0_z1);
+// The same against a closed world polygon (x, z) (even-odd rule): the gameplay combat area's VolumeVectorShapeData
+// (design §5.3: Metro TDM's 23-point area gives IoU 1.000 through variant 0 and 0.000 through the other seven).
+double mask_polygon_iou(const std::vector<bool> &p_mask, uint32_t p_side, const MinimapMapping &p_mapping, uint8_t p_variant,
+		std::span<const std::array<float, 2>> p_polygon);
 
 // ---- cache (design §8) ------------------------------------------------------------------------------------------------
-inline constexpr std::string_view kMinimapCacheKind = "ui-minimap";
-inline constexpr uint32_t kMinimapBlobVersion = 1; // "OBF3MMAP"
-inline constexpr uint32_t kMinimapConverterVersion = 1;
-std::vector<uint8_t> encode_minimap_level(const MinimapLevel &p_level);
-Result<MinimapLevel> decode_minimap_level(std::span<const uint8_t> p_blob);
+// Nothing here is cached: Metro's load_level + traverse take 0.34 s + 0.04 s (bf3dump level, warm OS cache), the
+// minimap reads after them resolve a handful of instances, and the textures are decoded at every load. The loader runs
+// after the session's LoadStage::Done, so it adds nothing to the M1 load gates.
 
 } // namespace bf3::core::ui

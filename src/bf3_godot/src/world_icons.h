@@ -1,12 +1,13 @@
 #pragma once
 // Bf3WorldIcons: flag and HQ icons in the 3D view (docs/design/ui-minimap-icons.md §10.3; gap UI §6). Main thread.
 //
-// Each frame, for each objective: p = objective position + (0, kIconLift, 0); skipped when
+// Each frame, for each objective: p = objective position + (0, lift, 0); skipped when
 // Camera3D::is_position_behind(p); else Camera3D::unproject_position(p) gives the canvas point, where the hud3dicons
 // frame (UIHudIcon_NeutralFlag / _Friendly / _Enemy, UIHudIcon_Base) is drawn with draw_texture_rect_region, scaled
 // with distance like UICapturepointtagCompData (IconSize 30, ScaleDistance 500, MaxScaleMod 0.4, FadeDistance 200 -
-// FadeEndDistance 800, MaxFarFade 0.5: the component's own fields, read from ui/uicomponents/uicapturepointtagcomp
-// [semantics inferred]), with the label letter and the distance in metres under it. Off-screen icons are not clamped
+// FadeEndDistance 800, MaxFarFade 0.5, VerticalOffset 5.5, PixelOffset (0, -28): the component's own fields, read from
+// ui/uicomponents/uicapturepointtagcomp [values verified, semantics inferred]), with the label letter and the distance
+// in metres under it. Off-screen icons are not clamped
 // to the edge in this wave (SnapIcons: M2b).
 
 #include "minimap_control.h"
@@ -28,7 +29,8 @@ struct WorldIconStyle {
 	float fade_distance = 200.0f; // FadeDistance
 	float fade_end_distance = 800.0f; // FadeEndDistance
 	float max_far_fade = 0.5f; // MaxFarFade
-	float lift = 3.0f; // metres above the capture point's origin [inferred]
+	float lift = 5.5f; // VerticalOffset: metres above the capture point's origin [inferred]
+	float pixel_offset_y = -28.0f; // PixelOffset.y, canvas pixels
 };
 
 class Bf3WorldIcons : public godot::Control {

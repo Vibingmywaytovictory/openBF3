@@ -8,7 +8,8 @@
 //   _ready: finds the session (session_path, default "../Session"); does nothing more when the session is headless or
 //     has no scene (--headless, --m1-check): the dummy renderer would keep CPU copies of the images.
 //   loader std::thread (no Godot API): opens its own Install from the session's InstallReader, then
-//     ui::load_minimap_level (load_level + traverse + read) or a "ui-minimap" cache hit (design §8),
+//     ui::load_minimap_level (load_level + traverse + read; not cached, design §8), after the session reached
+//     LoadStage::Done so the M1 load gates (E4 / E5) see no extra work,
 //     ui::load_minimap_images (satellite, detail SDF, combat-area SDFs; L8), the mip chain of the satellite,
 //     Win32/UI: read_hud_icon_atlas + load_hud_icon_texture (RGBA8). Publishes once with a release store.
 //   main thread, after the publish: Image::create_from_data (FORMAT_L8 with the box-filtered chain, FORMAT_RGBA8), the
@@ -58,7 +59,6 @@ struct MinimapAssets {
 	std::vector<bf3::core::ui::L8Image> satellite_mips; // the box-filtered chain, mip 0 first
 	bf3::core::ui::HudIconAtlas atlas;
 	bf3::core::ui::Rgba8Image atlas_image;
-	std::string cache_result; // hit / converted / uncached (design §8)
 	double seconds = 0.0; // loader wall time
 	std::string error; // non-empty: nothing to draw (logged once)
 };

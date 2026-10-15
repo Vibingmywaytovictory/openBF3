@@ -34,10 +34,10 @@ inline constexpr uint32_t kHudModelVersion = 1;
 
 // ---- caps (fixed size) ----------------------------------------------------------------------------------------------
 inline constexpr size_t kHudMaxPlayers = 64; // plan §3.5: 64-player servers
-inline constexpr size_t kHudMaxCapturePoints = 16; // Metro CQS 5, Caspian CQS 7 (flags + HQs); the census maximum is asserted, design §7.2
+inline constexpr size_t kHudMaxCapturePoints = 16; // Metro CQS 5, Caspian CQS 7 (flags + HQs)
 inline constexpr size_t kHudMaxSpawnPoints = 64;
 inline constexpr size_t kHudMaxSquads = 32; // UISquadCompData names Squad1..Squad32 (Alpha..Celeste)
-inline constexpr size_t kHudSquadSize = 4; // §7.3: squad size 4
+inline constexpr size_t kHudSquadSize = 4; // BF3 squads hold 4
 inline constexpr size_t kHudKillFeedSize = 8;
 inline constexpr size_t kHudChatLines = 8;
 inline constexpr size_t kHudNameBytes = 32; // UTF-8, NUL padded

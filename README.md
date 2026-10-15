@@ -65,6 +65,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
+UI ui2 adds `ui2.contract` (the minimap / HUD icon / HUD model headers and their inline helpers, no data); see "UI minimap, HUD icons and HUD model (ui2)".
 
 ## Run
 
@@ -1251,3 +1252,16 @@ README's "Text database" already said so.
 
 **Caspian §9 counts.** The handoff count is reproduced exactly and attributed; see "Level traversal". The oracle is
 `level-oracle static-models MP_007 ConquestSmall0`.
+
+## UI minimap, HUD icons and HUD model (ui2)
+
+Design: [docs/design/ui-minimap-icons.md](docs/design/ui-minimap-icons.md) (plan §3.8, D16, §7.8). This wave puts the
+interfaces in the tree: `bf3_core` `ui/minimap.h` (BF3's `UIMinimapData` from each level's LevelData partition, the
+mode's combat-area masks and objectives, the minimap mapping `u = 0.5 - (x - Cx)/S`, `v = 0.5 - (z - Cz)/S` and the
+on-screen view), `ui/hud_icons.h` (the hud3dicons atlas, the `_small` item icons, vehicle HUD icons),
+`ui/hud_sources.h` (the HUD DataSources table, generated from the install at run time and never stored) and
+`ui/hud_model.h` (`HudModel`, named after BF3's DataSources, and the 235 binding rows of the 11 bound component
+types); `bf3_godot` `minimap_hud.h`, `minimap_control.h`, `world_icons.h`, `minimap_check.h` (the in-game minimap
+node and its check). `ctest -R ui2.contract` checks the binding counts and the inline mapping, view and icon helpers.
+The readers, the bf3dump commands, the install tests and the in-game node follow in the implementation wave (design
+§15).

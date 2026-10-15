@@ -7,10 +7,12 @@
 //      metre x WorldSize / image side), then draw_texture_rect_region of the satellite placed so that texel (u, v)
 //      lands where minimap_project puts its world point (minimap.h); the ShaderMaterial (kMinimapShader below) tints
 //      the L8 satellite with DetailTextureTint and shades everything outside the mode's combat area with
-//      CombatAreaColor: alpha = smoothstep(thr - w, thr + w, sdf), thr = CombatAreaAlphaThreshold (0.496), w = the
-//      SDF's texel-to-metre width (1.5 texels of the 128² field, design §5.5). Two or more masks (CQS: one per team)
+//      CombatAreaColor: alpha = smoothstep(thr - w, thr + w, sdf), thr = CombatAreaAlphaThreshold (0.496), w = 0.01
+//      in distance-field units (edge_width, design §5.5). Two or more masks (CQS: one per team)
 //      are combined into one R8 union texture on the loader thread (minimum of the distance values).
-//   2. the circular frame: the control clips to a circle (shader discard past radius) like BF3's minimapmask.
+//      The map is drawn by an inner child canvas item that carries the ShaderMaterial (a CanvasItem material applies
+//      to all of its item's draws); the icons below are drawn by a second child above it, without material.
+//   2. the circular frame: the map item clips to a circle (shader discard past radius) like BF3's minimapmask.
 //   3. objectives: flags (UIHudIcon_NeutralFlag / FriendlyFlag / EnemyFlag by initial owner) and HQs (UIHudIcon_Base
 //      Friendly / Enemy) from the hud3dicons atlas with draw_texture_rect_region (the state's frame rect,
 //      hud_icon_rect), at minimap_project(objective), clamped to the rim when outside; label letters through tr().

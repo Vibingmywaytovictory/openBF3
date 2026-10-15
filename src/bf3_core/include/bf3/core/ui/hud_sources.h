@@ -13,8 +13,8 @@
 // 16, UIVehicleCompData 82, UISettingsCompData 89, UICustomizationCompData 59, UIEndOfRoundCompData 52, ... (0 for
 // the 8 components that bind nothing).
 //
-// The repo never stores this table (it is BF3 data): it is generated at run time (bf3dump hud-sources, the ctests)
-// and cached under the kind "hud-sources". The repo holds only hud_model.h's binding rows, the names the HudModel
+// The repo never stores this table (it is BF3 data): it is generated at run time (bf3dump hud-sources, the ctests),
+// never cached. The repo holds only hud_model.h's binding rows, the names the HudModel
 // binds, which the install test checks against this table in both directions.
 
 #include "bf3/core/ebx_db.h"
@@ -50,7 +50,7 @@ struct HudComponentType {
 	std::string update_type; // UIUpdateType_Even
 	int32_t updates_per_second = 0; // -1 = every frame
 	std::vector<std::string> sources; // DataSources, data order
-	Sha1 sha1{}; // manifest SHA-1 of the partition (the cache key's source)
+	Sha1 sha1{}; // manifest SHA-1 of the partition (printed by bf3dump hud-sources: which data the table came from)
 };
 
 struct HudSourceTable {
@@ -73,12 +73,9 @@ std::vector<std::string> hud_component_partitions(std::span<const LevelMount *co
 Result<HudSourceTable> read_hud_source_table(const EbxResolver &p_ui, std::span<const std::string> p_component_partitions,
 		gameplay::WorkBudget *p_budget = nullptr, std::string_view p_state_partition = kInGameStatePartition);
 
-// Blob "OBF3HUDS": every field in declaration order; decode(encode(t)) == t; decode checks every count against the
-// bytes left before it allocates and refuses trailing bytes.
-inline constexpr std::string_view kHudSourcesCacheKind = "hud-sources";
+// The table is built only by bf3dump hud-sources and ctest ui.hud.sources (the game binds kHudBindings, never the
+// table), so it is not cached (design §8). version lets a TSV say which code wrote it.
 inline constexpr uint32_t kHudSourceTableVersion = 1;
-std::vector<uint8_t> encode_hud_source_table(const HudSourceTable &p_table);
-Result<HudSourceTable> decode_hud_source_table(std::span<const uint8_t> p_blob);
 
 // TSV for bf3dump hud-sources: "type  partition  update_type  updates_per_second  in_state  count  sources(,)".
 std::string format_hud_source_table(const HudSourceTable &p_table);

@@ -1,5 +1,5 @@
 #pragma once
-// The in-game minimap gates (docs/design/ui-minimap-icons.md §1 G9-G11, §14): `-- --minimap-check`, windowed, on
+// The in-game minimap gates (docs/design/ui-minimap-icons.md §1 G9-G11, §10.4, §13): `-- --minimap-check`, windowed, on
 // res://scenes/m1_metro.tscn after LoadStage::Done. Prints one "UI2 CHECK PASS|FAIL <row> <detail>" line per row and
 // "UI2 MINIMAP CHECK: PASS (n/n)", then ends the run through Bf3LevelSession::finish (exit 0 or 1).
 //

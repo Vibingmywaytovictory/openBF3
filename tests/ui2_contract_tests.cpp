@@ -215,10 +215,7 @@ TEST_SUITE("ui2-contract") {
 		CHECK(icon.state(ui::HudIconState::Enemy) == nullptr);
 	}
 
-	TEST_CASE("cache kinds and versions are distinct and non-zero") {
-		CHECK(ui::kMinimapCacheKind != ui::kHudSourcesCacheKind);
-		CHECK(ui::kMinimapBlobVersion > 0);
-		CHECK(ui::kMinimapConverterVersion > 0);
+	TEST_CASE("versions are non-zero") {
 		CHECK(ui::kHudSourceTableVersion > 0);
 		CHECK(ui::kHudModelVersion > 0);
 	}
