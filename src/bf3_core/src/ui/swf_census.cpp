@@ -200,8 +200,25 @@ Result<SwfCensus> run_swf_census(const SwfLibrary &p_movies, const SwfCensusOpti
 				}
 			}
 		}
-		for (const std::string &n : lane.font_names) {
-			font_names.insert(std::string(font_name_count_key(n)));
+		const bool is_library = c.name.rfind("ui/static/", 0) == 0 && c.name.size() > 8 && c.name.compare(c.name.size() - 8, 8, "_fontlib") == 0;
+		const bool own_library = p_options.font_mapping != nullptr && c.name == p_options.font_mapping->font_library;
+		if (!is_library || own_library) {
+			for (const std::string &n : lane.font_names) {
+				font_names.insert(std::string(font_name_count_key(n)));
+			}
+		} else if (p_options.library_mappings != nullptr) {
+			const FontMappingCollection *own = nullptr;
+			for (const FontMappingCollection &fm : *p_options.library_mappings) {
+				own = fm.font_library == c.name ? &fm : own;
+			}
+			for (const std::string &n : lane.font_names) {
+				t.library_font_names++;
+				const bool exact = own != nullptr && resolve_font_name(*own, n).how == FontResolution::Exact;
+				t.library_font_names_exact += exact ? 1 : 0;
+				if (!exact) {
+					t.library_font_names_not_exact.push_back(c.name + ": " + n);
+				}
+			}
 		}
 		t.movies++;
 		const bool ok = c.body_bytes != 0;
@@ -315,6 +332,12 @@ std::string format_census_totals(const SwfCensus &p_census) {
 		out += buf;
 		for (const auto &[name, how] : t.font_names) {
 			out += "  font name " + name + " -> " + font_resolution_name(how) + "\n";
+		}
+		std::snprintf(buf, sizeof(buf), "other font libraries: %u names, %u Exact under their own collection\n", t.library_font_names,
+				t.library_font_names_exact);
+		out += buf;
+		for (const std::string &n : t.library_font_names_not_exact) {
+			out += "  not exact: " + n + "\n";
 		}
 		out += "G6 family-inferred:";
 		for (const std::string &n : t.family_names) {

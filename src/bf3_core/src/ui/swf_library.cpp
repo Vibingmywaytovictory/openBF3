@@ -99,6 +99,7 @@ struct SwfLibrary::Impl {
 	std::unordered_map<std::string, size_t> by_name;
 	std::vector<std::unique_ptr<Holder>> holders;
 	std::unordered_map<std::string, size_t> holder_of; // superbundle -> holders index
+	std::unordered_map<std::string, std::vector<uint8_t>> memory; // from_memory payloads by name
 	mutable std::mutex parsed_mutex;
 	mutable std::unordered_map<std::string, std::shared_ptr<Parsed>> parsed;
 	double open_seconds = 0.0;
@@ -228,6 +229,29 @@ Result<SwfLibrary> SwfLibrary::open(std::shared_ptr<const Install> p_install, co
 	return lib;
 }
 
+SwfLibrary SwfLibrary::from_memory(std::vector<std::pair<std::string, std::vector<uint8_t>>> p_payloads) {
+	auto impl = std::make_unique<Impl>();
+	std::map<std::string, std::vector<uint8_t>> sorted;
+	for (auto &[name, bytes] : p_payloads) {
+		sorted.emplace(asset_key(name), std::move(bytes));
+	}
+	for (auto &[name, bytes] : sorted) {
+		SwfMovieSource s;
+		s.name = name;
+		s.superbundle = "memory";
+		s.bundle = "memory";
+		s.size = bytes.size();
+		s.holders = 1;
+		s.distinct_sha1s = 1;
+		impl->by_name[name] = impl->movies.size();
+		impl->movies.push_back(std::move(s));
+		impl->memory.emplace(name, std::move(bytes));
+	}
+	SwfLibrary lib;
+	lib.impl_ = std::move(impl);
+	return lib;
+}
+
 const std::shared_ptr<const Install> &SwfLibrary::install() const {
 	return impl_->install;
 }
@@ -245,6 +269,9 @@ Result<std::vector<uint8_t>> SwfLibrary::read_payload(std::string_view p_name) c
 	const SwfMovieSource *source = find(p_name);
 	if (source == nullptr) {
 		return make_error("swf " + asset_key(p_name) + ": no such SwfMovie in the install");
+	}
+	if (const auto it = impl_->memory.find(source->name); it != impl_->memory.end()) {
+		return it->second;
 	}
 	Result<const LevelMount *> mount = impl_->holder_mount(*source);
 	if (!mount) {

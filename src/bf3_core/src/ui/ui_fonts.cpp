@@ -149,6 +149,22 @@ Result<std::vector<std::string>> font_mapping_partitions(const EbxResolver &p_eb
 	return out;
 }
 
+Result<std::vector<FontMappingCollection>> read_all_font_mappings(const EbxResolver &p_ebx) {
+	Result<std::vector<std::string>> names = font_mapping_partitions(p_ebx);
+	if (!names) {
+		return names.error();
+	}
+	std::vector<FontMappingCollection> out;
+	for (const std::string &name : *names) {
+		Result<FontMappingCollection> c = read_font_mapping(p_ebx, name);
+		if (!c) {
+			return c.error();
+		}
+		out.push_back(std::move(*c));
+	}
+	return out;
+}
+
 Result<FontMappingCollection> font_mapping_for_text_database(const EbxResolver &p_ebx, std::string_view p_text_database) {
 	Result<std::vector<std::string>> names = font_mapping_partitions(p_ebx);
 	if (!names) {

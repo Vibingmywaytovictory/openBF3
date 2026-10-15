@@ -99,6 +99,12 @@ struct SwfCensusTotals {
 	std::vector<std::string> family_names;
 	// Every distinct counted name with its FontResolution, sorted by name (empty without a font mapping).
 	std::vector<std::pair<std::string, FontResolution>> font_names;
+	// The other font libraries' own edit-text fonts (ja's DFP_sougeitai_W5, the EULA and store fonts, ...) are not
+	// counted against font_mapping; with library_mappings each is resolved against the collection that maps that
+	// library (distinct (library, name) pairs; all Exact on retail).
+	uint32_t library_font_names = 0;
+	uint32_t library_font_names_exact = 0;
+	std::vector<std::string> library_font_names_not_exact; // "<library>: <name>"
 	size_t max_atlas_budget_used = 0; // build_atlas_map over the atlas movies (kSwfAtlasBudgetUnits each)
 };
 
@@ -112,8 +118,11 @@ struct SwfCensusOptions {
 	unsigned threads = 0; // 0 = all cores
 	bool check_atlas_textures = true; // reads each atlas DxTexture header (not its chunk)
 	bool build_atlas_maps = true; // build_atlas_map of every movie with an external image
-	// The collection the font names are resolved with (G6: the en one); null: font names are not counted.
+	// The collection the font names are resolved with (G6: the en one); null: font names are not counted. The names
+	// are those of every movie except the font libraries other than font_mapping's own (see library_font_names).
 	const FontMappingCollection *font_mapping = nullptr;
+	// Every UIFontMappingCollection (for library_font_names); may be null.
+	const std::vector<FontMappingCollection> *library_mappings = nullptr;
 };
 
 Result<SwfCensus> run_swf_census(const SwfLibrary &p_movies, const SwfCensusOptions &p_options = {});

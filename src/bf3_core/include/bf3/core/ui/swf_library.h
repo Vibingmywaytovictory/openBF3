@@ -71,6 +71,9 @@ class SwfLibrary {
 public:
 	// Lists every SwfMovie of the install (manifests only; no payload is read).
 	static Result<SwfLibrary> open(std::shared_ptr<const Install> p_install, const SwfLibraryOptions &p_options = {});
+	// A library over in-memory payloads (name, res payload) with no install: the unit tests' synthetic movies and the
+	// fuzz suite's mutants. read_payload / load work as above; load_atlas_texture and read_atlas_texture_header fail.
+	static SwfLibrary from_memory(std::vector<std::pair<std::string, std::vector<uint8_t>>> p_payloads);
 
 	SwfLibrary();
 	~SwfLibrary();

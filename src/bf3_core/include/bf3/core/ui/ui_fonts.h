@@ -65,6 +65,8 @@ struct FontMappingCollection {
 Result<FontMappingCollection> read_font_mapping(const EbxResolver &p_ebx, std::string_view p_partition);
 // Every UIFontMappingCollection partition of p_ebx (Win32/UI), sorted.
 Result<std::vector<std::string>> font_mapping_partitions(const EbxResolver &p_ebx);
+// Every collection of font_mapping_partitions(), read (the census checks each font library against its own).
+Result<std::vector<FontMappingCollection>> read_all_font_mappings(const EbxResolver &p_ebx);
 // The collection whose TextDatabase is p_text_database ("localization/us_loc" -> the en collection).
 Result<FontMappingCollection> font_mapping_for_text_database(const EbxResolver &p_ebx, std::string_view p_text_database);
 

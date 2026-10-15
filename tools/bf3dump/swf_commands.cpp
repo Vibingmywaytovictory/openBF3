@@ -99,6 +99,7 @@ int cmd_census(const InstallReader &p_reader, const std::shared_ptr<Install> &p_
 		return 1;
 	}
 	std::optional<FontMappingCollection> mapping;
+	std::vector<FontMappingCollection> all;
 	if (Result<std::unique_ptr<EbxLibrary>> ui = open_ui_ebx(p_install); ui) {
 		Result<FontMappingCollection> m = font_mapping_for_text_database(**ui, "localization/us_loc");
 		if (m) {
@@ -106,10 +107,14 @@ int cmd_census(const InstallReader &p_reader, const std::shared_ptr<Install> &p_
 		} else {
 			std::fprintf(stderr, "swf census: font mapping: %s\n", m.error().message.c_str());
 		}
+		if (Result<std::vector<FontMappingCollection>> a = read_all_font_mappings(**ui); a) {
+			all = std::move(*a);
+		}
 	}
 	SwfCensusOptions options;
 	options.threads = threads;
 	options.font_mapping = mapping ? &*mapping : nullptr;
+	options.library_mappings = &all;
 	Result<SwfCensus> census = run_swf_census(*lib, options);
 	if (!census) {
 		std::fprintf(stderr, "swf census: %s\n", census.error().message.c_str());
@@ -438,6 +443,8 @@ int cmd_fonts(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 	co.check_atlas_textures = false;
 	co.build_atlas_maps = false;
 	co.font_mapping = &m;
+	Result<std::vector<FontMappingCollection>> all = read_all_font_mappings(**ui);
+	co.library_mappings = all ? &*all : nullptr;
 	Result<SwfCensus> census = run_swf_census(*lib, co);
 	if (!census) {
 		std::fprintf(stderr, "swf fonts: %s\n", census.error().message.c_str());
