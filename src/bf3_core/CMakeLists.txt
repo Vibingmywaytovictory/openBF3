@@ -200,3 +200,9 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/weapon_blob.h
 )
 set_source_files_properties(src/cache/cached_convert.cpp PROPERTIES COMPILE_DEFINITIONS "OPENBF3_ENGINE_ID=\"${OPENBF3_ENGINE_ID}\"")
+
+# M1 level inputs (docs/design/m1.md §10, §12): the mode's spawn points and the level source digest.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/level/spawn_points.h
+    include/bf3/core/level/source_digest.h
+)

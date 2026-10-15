@@ -235,6 +235,12 @@ struct SoupOptions {
 	SoupProgress *progress = nullptr;
 };
 
+// The soup algorithm's version: bump it whenever the same install gives different soup triangles, tags or
+// tiles (terrain handling, body / layer split, destroyed-part rule, quantisation). Derived caches built from the
+// soup without hashing its triangles (bf3_sim's "jolt-world" entries) put it in their keys (docs/design/m1.md
+// §5.5).
+inline constexpr uint32_t kCollisionSoupVersion = 1;
+
 // Retail Metro TDM holds 1.11 M triangles (0.17 M of them terrain); a soup past this fails (each triangle costs 48 bytes).
 inline constexpr size_t kMaxSoupTriangles = size_t(1) << 25;
 
