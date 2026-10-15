@@ -23,12 +23,14 @@ target_sources(bf3_sim PRIVATE
     src/collision_world_internal.h
 )
 
-# M1 T1 (world; docs/design/m1.md §5): the static world's Jolt shapes, the per-owner CollisionWorld and its queries,
-# and the process-wide Jolt runtime that PhysicsWorld, the shapes and every CollisionWorld share.
+# M1 T1 (world; docs/design/m1.md §5): the static world's Jolt shapes and their cache entries (static_world_cache.cpp),
+# the per-owner CollisionWorld and its queries, and the process-wide Jolt runtime that PhysicsWorld, the shapes and
+# every CollisionWorld share.
 target_sources(bf3_sim PRIVATE
     src/jolt_runtime.cpp
     src/jolt_runtime.h
     src/static_world.cpp
     src/static_world_internal.h
+    src/static_world_cache.cpp
     src/collision_world.cpp
 )

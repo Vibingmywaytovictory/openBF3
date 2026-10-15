@@ -2,8 +2,10 @@
 // The source digest of a loaded level x mode (plan §2.7 "source_digest"; docs/design/m1.md §5.5): one SHA-256 over
 // the sorted (bundle name, bundle digest) of every bundle the mode mounts (LoadedLevel::bundles: the level bundle,
 // its settings bundles, the included sub-worlds), where a bundle digest hashes its manifest entries
-// (ebx name, sha1), (res name, resType, sha1), (chunk id, sha1), each list sorted. Nothing is re-hashed from the
-// payloads and nothing is written: the SHA1s are the ones the manifests carry (LevelMount::read_manifest).
+// (ebx name, sha1), (res name, resType, resMeta, sha1), (chunk id, sha1, range, tail-only), each list sorted
+// (resMeta and the chunk range change how a payload decodes without changing its SHA1). Nothing is re-hashed from
+// the payloads and nothing is written: the SHA1s are the ones the manifests carry (LevelMount::read_manifest); an
+// entry stored inline in a CAS manifest with a zero SHA1 is hashed by its inline bytes, which the manifest holds.
 //
 // M1 uses it as the key of the static world's "jolt-world" cache entry (bf3_sim static_world.h): equal digests
 // mean the soup would be built from the same bytes. M3 sends it in MatchInfo/Ready (the data-identity handshake).

@@ -1,10 +1,11 @@
-// The static level world as Jolt MeshShapes (docs/design/m1.md §5.1-§5.3): tiles cooked in parallel, one shape
-// per (tile, layer), per-triangle user data = the tile's tag index. T1 phase 1: the soup and loose-triangle builds;
-// the cache path (blobs, keys, load_static_world_cached) is phase 2.
+// The static level world as Jolt MeshShapes (docs/design/m1.md §5.1-§5.3, §5.5): tiles cooked in parallel, one
+// shape per (tile, layer), per-triangle user data = the tile's tag index; the soup and loose-triangle builds and
+// the per-tile "jolt-tile" cache loop. The blobs, keys and load_static_world_cached are in static_world_cache.cpp.
 #include "static_world_internal.h"
 
 #include "jolt_runtime.h"
 
+#include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/thread_pool.h"
@@ -78,42 +79,6 @@ core::Status check_options(const StaticWorldBuildOptions &p_options) {
 		return core::make_error("static world: active_edge_degrees " + std::to_string(p_options.active_edge_degrees) + " is outside 0..180");
 	}
 	return core::Status::success();
-}
-
-// Cooks every tile on the build lanes; tile i's triangles come from p_tile_triangles(i, r_scratch) (a span that
-// stays valid until the next call on the same lane). The first error in tile order wins.
-template <class F>
-core::Result<std::shared_ptr<const StaticWorldShapes>> cook_tiles(const std::vector<std::array<int32_t, 2>> &p_keys, F &&p_tile_triangles,
-		const StaticWorldBuildOptions &p_options, std::shared_ptr<void> p_runtime) {
-	const Clock::time_point start = Clock::now();
-	std::vector<std::optional<core::Result<StaticWorldShapes::Impl::Tile>>> cooked(p_keys.size());
-	core::parallel_for(
-			p_keys.size(),
-			[&](size_t p_index) {
-				std::vector<StaticTriangle> scratch;
-				const core::Result<std::span<const StaticTriangle>> triangles = p_tile_triangles(p_index, scratch);
-				if (!triangles.ok()) {
-					cooked[p_index].emplace(triangles.error());
-				} else {
-					cooked[p_index].emplace(cook_static_tile(p_keys[p_index][0], p_keys[p_index][1], *triangles, p_options));
-				}
-				if (p_options.tiles_done != nullptr) {
-					p_options.tiles_done->fetch_add(1, std::memory_order_relaxed);
-				}
-			},
-			p_options.threads);
-	auto impl = std::make_unique<StaticWorldShapes::Impl>();
-	impl->runtime = std::move(p_runtime);
-	impl->tiles.reserve(p_keys.size());
-	for (std::optional<core::Result<StaticWorldShapes::Impl::Tile>> &tile : cooked) {
-		if (!tile->ok()) {
-			return tile->error();
-		}
-		impl->tiles.push_back(std::move(tile->value()));
-	}
-	impl->stats.tiles_cooked = impl->tiles.size();
-	impl->stats.seconds_cook = seconds_since(start);
-	return StaticWorldBuilder::finish(std::move(impl));
 }
 
 } // namespace
@@ -198,22 +163,24 @@ std::shared_ptr<const StaticWorldShapes> StaticWorldBuilder::finish(std::unique_
 		}
 		any = true;
 	}
-	s.seconds_total = s.seconds_soup + s.seconds_cook + s.seconds_restore;
+	if (s.seconds_total == 0.0) {
+		s.seconds_total = s.seconds_soup + s.seconds_cook + s.seconds_restore;
+	}
 	return std::shared_ptr<const StaticWorldShapes>(new StaticWorldShapes(std::move(p_impl)));
 }
 
 // ---- one tile ---------------------------------------------------------------------------------------------
 
-core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(int32_t p_x, int32_t p_z, std::span<const StaticTriangle> p_triangles,
-		const StaticWorldBuildOptions &p_options) {
+core::Result<StaticTileInput> prepare_static_tile(int32_t p_x, int32_t p_z, std::span<const StaticTriangle> p_triangles) {
 	const std::string where = "static tile (" + std::to_string(p_x) + ", " + std::to_string(p_z) + ")";
-	StaticWorldShapes::Impl::Tile tile;
+	StaticTileInput tile;
 	tile.info.x = p_x;
 	tile.info.z = p_z;
 
 	// Tags, bounds and the content digest over every input triangle, in input order.
 	std::unordered_map<uint64_t, uint32_t> tag_index;
-	std::vector<uint32_t> triangle_tags(p_triangles.size());
+	std::vector<uint32_t> &triangle_tags = tile.triangle_tags;
+	triangle_tags.resize(p_triangles.size());
 	core::Hasher hasher(core::HashAlgorithm::Sha256);
 	std::vector<uint8_t> chunk;
 	chunk.reserve(64 * 1024);
@@ -260,9 +227,22 @@ core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(int32_t p_x, int32_
 		return core::make_error(where + ": SHA-256 failed");
 	}
 	tile.info.tags = uint32_t(tile.tags.size());
+	return tile;
+}
+
+core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(StaticTileInput p_input, std::span<const StaticTriangle> p_triangles,
+		const StaticWorldBuildOptions &p_options) {
+	const std::string where = "static tile (" + std::to_string(p_input.info.x) + ", " + std::to_string(p_input.info.z) + ")";
+	if (p_input.triangle_tags.size() != p_triangles.size()) {
+		return core::make_error(where + ": the prepared input does not match the triangles");
+	}
+	const std::vector<uint32_t> &triangle_tags = p_input.triangle_tags;
+	StaticWorldShapes::Impl::Tile tile;
+	tile.info = p_input.info;
+	tile.tags = std::move(p_input.tags);
 
 	// One MeshShape per present layer; vertices relative to the tile origin, deduplicated by exact bit pattern.
-	const JPH::Vec3 origin = static_tile_origin(p_x, p_z);
+	const JPH::Vec3 origin = static_tile_origin(tile.info.x, tile.info.z);
 	const float cos_threshold = std::cos(p_options.active_edge_degrees * (3.14159265358979323846f / 180.0f));
 	for (size_t layer = 0; layer < kStaticLayerCount; ++layer) {
 		if (layer == size_t(StaticLayer::Raycast) && !p_options.include_raycast) {
@@ -309,9 +289,145 @@ core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(int32_t p_x, int32_
 	return tile;
 }
 
+core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(int32_t p_x, int32_t p_z, std::span<const StaticTriangle> p_triangles,
+		const StaticWorldBuildOptions &p_options) {
+	core::Result<StaticTileInput> input = prepare_static_tile(p_x, p_z, p_triangles);
+	if (!input) {
+		return input.error();
+	}
+	return cook_static_tile(std::move(*input), p_triangles, p_options);
+}
+
+core::Status soup_tile_triangles(const core::level::SoupTile &p_tile, std::vector<StaticTriangle> &r_out) {
+	r_out.clear();
+	r_out.reserve(p_tile.triangles.size());
+	for (const core::level::SoupTriangle &s : p_tile.triangles) {
+		if (s.body >= kStaticLayerCount) {
+			return core::make_error("static tile (" + std::to_string(p_tile.x) + ", " + std::to_string(p_tile.z) + "): soup body " +
+					std::to_string(int(s.body)) + " has no layer");
+		}
+		StaticTriangle t;
+		t.v = s.v;
+		t.tag.material = s.material;
+		t.tag.surface = s.surface;
+		t.tag.body = s.body;
+		t.tag.flags = s.flags;
+		t.layer = StaticLayer(s.body);
+		r_out.push_back(t);
+	}
+	return core::Status::success();
+}
+
+// ---- the tile loop ----------------------------------------------------------------------------------------
+
+namespace {
+
+// One tile through its "jolt-tile" entry: decode a hit (it must be this input's tile), else cook and put.
+core::Result<StaticWorldShapes::Impl::Tile> cached_static_tile(core::Cache &r_cache, int32_t p_x, int32_t p_z, std::span<const StaticTriangle> p_triangles,
+		const StaticWorldBuildOptions &p_options, core::CachedItem &r_item) {
+	core::Result<StaticTileInput> input = prepare_static_tile(p_x, p_z, p_triangles);
+	if (!input) {
+		return input.error();
+	}
+	const std::optional<core::CacheKey> key = core::make_cache_key(static_tile_key_inputs(input->info.content, p_options));
+	if (!key) {
+		return core::make_error("static tile: no cache key");
+	}
+	std::optional<StaticWorldShapes::Impl::Tile> tile;
+	const auto accept = [&](std::span<const uint8_t> p_blob) -> core::Status {
+		core::Result<StaticWorldShapes::Impl::Tile> decoded = decode_static_tile(p_blob);
+		if (!decoded) {
+			return decoded.error();
+		}
+		const StaticTileInfo &a = decoded->info;
+		const StaticTileInfo &b = input->info;
+		bool same = a.x == b.x && a.z == b.z && a.content == b.content && a.min == b.min && a.max == b.max && decoded->tags == input->tags;
+		for (size_t layer = 0; layer < kStaticLayerCount && same; ++layer) {
+			const bool wanted = layer != size_t(StaticLayer::Raycast) || p_options.include_raycast;
+			same = wanted || decoded->shapes[layer] == nullptr;
+		}
+		if (!same) {
+			return core::make_error("jolt-tile entry describes another tile");
+		}
+		tile = std::move(*decoded);
+		return core::Status::success();
+	};
+	const auto produce = [&]() -> core::Result<std::vector<uint8_t>> {
+		core::Result<StaticWorldShapes::Impl::Tile> cooked = cook_static_tile(std::move(*input), p_triangles, p_options);
+		if (!cooked) {
+			return cooked.error();
+		}
+		tile = std::move(*cooked);
+		return encode_static_tile(*tile);
+	};
+	core::Result<core::CachedItem> item = core::cached_convert(&r_cache, *key, accept, produce);
+	if (!item) {
+		return item.error();
+	}
+	r_item = *item;
+	if (!tile) {
+		return core::make_error("static tile: the cache gave no tile");
+	}
+	return std::move(*tile);
+}
+
+} // namespace
+
+core::Result<std::unique_ptr<StaticWorldShapes::Impl>> cook_static_tiles(core::Cache *p_cache, const std::vector<std::array<int32_t, 2>> &p_keys,
+		const StaticTileSource &p_source, const StaticWorldBuildOptions &p_options, std::shared_ptr<void> p_runtime, bool *r_stored) {
+	const Clock::time_point start = Clock::now();
+	core::Cache *cache = (p_cache != nullptr && p_cache->is_open()) ? p_cache : nullptr;
+	std::vector<std::optional<core::Result<StaticWorldShapes::Impl::Tile>>> cooked(p_keys.size());
+	std::vector<core::CachedItem> items(p_keys.size());
+	core::parallel_for(
+			p_keys.size(),
+			[&](size_t p_index) {
+				std::vector<StaticTriangle> scratch;
+				const core::Result<std::span<const StaticTriangle>> triangles = p_source(p_index, scratch);
+				if (!triangles.ok()) {
+					cooked[p_index].emplace(triangles.error());
+				} else if (cache != nullptr) {
+					cooked[p_index].emplace(cached_static_tile(*cache, p_keys[p_index][0], p_keys[p_index][1], *triangles, p_options, items[p_index]));
+				} else {
+					cooked[p_index].emplace(cook_static_tile(p_keys[p_index][0], p_keys[p_index][1], *triangles, p_options));
+				}
+				if (p_options.tiles_done != nullptr) {
+					p_options.tiles_done->fetch_add(1, std::memory_order_relaxed);
+				}
+			},
+			p_options.threads);
+	auto impl = std::make_unique<StaticWorldShapes::Impl>();
+	impl->runtime = std::move(p_runtime);
+	impl->tiles.reserve(p_keys.size());
+	bool stored = cache != nullptr;
+	for (size_t i = 0; i < cooked.size(); ++i) {
+		if (!cooked[i]->ok()) {
+			return cooked[i]->error();
+		}
+		impl->tiles.push_back(std::move(cooked[i]->value()));
+		if (cache == nullptr) {
+			++impl->stats.tiles_cooked;
+			continue;
+		}
+		const core::CachedItem &item = items[i];
+		impl->stats.cache_bytes += item.payload_bytes;
+		if (item.outcome == core::CacheOutcome::Hit) {
+			++impl->stats.tiles_hit;
+		} else {
+			++impl->stats.tiles_cooked;
+		}
+		stored = stored && item.outcome != core::CacheOutcome::Uncached;
+	}
+	if (r_stored != nullptr) {
+		*r_stored = stored;
+	}
+	impl->stats.seconds_cook = seconds_since(start);
+	return impl;
+}
+
 // ---- builds -----------------------------------------------------------------------------------------------
 
-core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(std::span<const StaticTriangle> p_triangles,
+core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world_cached(core::Cache *p_cache, std::span<const StaticTriangle> p_triangles,
 		const StaticWorldBuildOptions &p_options) {
 	BF3_TRY(check_options(p_options));
 	std::shared_ptr<void> runtime = jolt_runtime_acquire();
@@ -342,8 +458,8 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(std::s
 		}
 	}
 	first.push_back(keyed.size());
-	return cook_tiles(
-			keys,
+	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles(
+			p_cache, keys,
 			[&](size_t p_tile, std::vector<StaticTriangle> &r_scratch) -> core::Result<std::span<const StaticTriangle>> {
 				r_scratch.clear();
 				for (size_t i = first[p_tile]; i < first[p_tile + 1]; ++i) {
@@ -352,6 +468,15 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(std::s
 				return std::span<const StaticTriangle>(r_scratch);
 			},
 			p_options, std::move(runtime));
+	if (!impl) {
+		return impl.error();
+	}
+	return StaticWorldBuilder::finish(std::move(*impl));
+}
+
+core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(std::span<const StaticTriangle> p_triangles,
+		const StaticWorldBuildOptions &p_options) {
+	return build_static_world_cached(nullptr, p_triangles, p_options);
 }
 
 core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(const core::level::CollisionSoup &p_soup, const StaticWorldBuildOptions &p_options) {
@@ -362,29 +487,17 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(const 
 	for (const core::level::SoupTile &tile : p_soup.tiles) {
 		keys.push_back({ tile.x, tile.z });
 	}
-	return cook_tiles(
-			keys,
+	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles(
+			nullptr, keys,
 			[&](size_t p_tile, std::vector<StaticTriangle> &r_scratch) -> core::Result<std::span<const StaticTriangle>> {
-				const core::level::SoupTile &tile = p_soup.tiles[p_tile];
-				r_scratch.clear();
-				r_scratch.reserve(tile.triangles.size());
-				for (const core::level::SoupTriangle &s : tile.triangles) {
-					if (s.body >= kStaticLayerCount) {
-						return core::make_error("static tile (" + std::to_string(tile.x) + ", " + std::to_string(tile.z) + "): soup body " +
-								std::to_string(int(s.body)) + " has no layer");
-					}
-					StaticTriangle t;
-					t.v = s.v;
-					t.tag.material = s.material;
-					t.tag.surface = s.surface;
-					t.tag.body = s.body;
-					t.tag.flags = s.flags;
-					t.layer = StaticLayer(s.body);
-					r_scratch.push_back(t);
-				}
+				BF3_TRY(soup_tile_triangles(p_soup.tiles[p_tile], r_scratch));
 				return std::span<const StaticTriangle>(r_scratch);
 			},
 			p_options, std::move(runtime));
+	if (!impl) {
+		return impl.error();
+	}
+	return StaticWorldBuilder::finish(std::move(*impl));
 }
 
 } // namespace bf3::sim

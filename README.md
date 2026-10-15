@@ -963,3 +963,49 @@ Measured (dev build, 16 threads, RX 9070 XT, D3D12, 1152×648, warm file cache, 
 
 Follow-ups: GitHub Actions CI (configure, build, ctest, headless self-test without an install); the Linux build and
 its symbol-visibility test for our Jolt next to Godot's.
+
+## M1 static world (T1)
+
+The collision soup (above) becomes Jolt shapes: one `MeshShape` per 64 m tile and layer (Collision, Raycast,
+Character), the triangle's `SurfaceTag` (material, surface, body, flags) in its per-triangle user data. The shapes
+are built once per process (`StaticWorldShapes`, immutable, shared) and every `CollisionWorld` (server, client)
+puts one static body per shape into its own `PhysicsSystem`. Design: docs/design/m1.md §5.
+
+```
+bf3dump shapes MP_Subway TeamDeathMatch0 [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]
+bf3dump prepare MP_Subway TeamDeathMatch0 --shapes      # meshes + weapons, then the shapes, into the same root
+```
+
+Both print the cache result, the per-phase times, the shape counts and bytes, the peak working set and an
+`install.unchanged` row (exit 1 if the install changed). `--tiles` lists every tile (x, z, triangles per layer,
+tags, content digest).
+
+Cache entries (in the derived-data cache root, never in the repo):
+* `jolt-tile`: one tile's tag table and the `Shape::SaveBinaryState` stream of each layer's MeshShape, keyed by a
+  SHA-256 of the tile's input triangles, so modes that share a tile share the entry (Metro ConquestLarge0 after
+  TeamDeathMatch0: 160 of 170 tiles hit). Every stream's Jolt tree is walked and checked before Jolt restores it.
+* `jolt-world`: the tile list of a level × mode, keyed by the source digest (SHA-256 over the SHA1s of every
+  manifest entry in the bundles the mode mounts) and `kCollisionSoupVersion`. A warm load reads it and restores the
+  tiles without building the soup.
+
+Measured on Metro TDM (dev build, 16 threads, 2026-10-15; timings noisy, other builds ran in parallel):
+
+| | |
+|---|---|
+| shapes | 170 tiles, 291 MeshShapes (= bodies per CollisionWorld), 1,903 tags; 969,031 collision, 142,908 raycast, 2,232 character triangles |
+| resident shapes | 22.55 MiB (21.2 B per triangle; the design estimated ≈ 14 MiB) |
+| cache entries | 22.6 MiB in 171 entries; soup (cold only, freed) 51.0 MiB |
+| cold | 0.66–0.70 s: soup 0.37 s, cook + cache writes 0.26–0.30 s (0.12 s with `--no-cache`) |
+| warm | 0.035–0.038 s: source digest ≈ 25 ms (4 bundles, 21,030 entries), restore 0.011 s, no soup |
+| `prepare --shapes` peak (E6) | cold 332–338 MiB (≤ 512 MiB), warm 199.6 MiB with 1,134 of 1,134 hits |
+| soup sources outside the digest | 0 (155 EBX, 121 res, 10 chunks) |
+
+Tests: `sim.world.unit` (synthetic worlds; tile and world blob round trips, hostile blobs and 2,000 mutated Jolt
+trees, cache keys, cold / warm / damaged / closed-cache builds), `sim.world` (Metro from the install into a scratch
+root: cold versus warm byte-identical and answering 1,000 rays alike, the source coverage, rays, capsule and box
+overlaps and capsule sweeps against a brute-force double-precision reference over the soup triangles,
+`install.unchanged`), `tools.m1_prepare` (E6 and an all-hits second run). The parity case on Metro: 1,728 ray hits
+and 272 misses with the reference, the tag equal on all 1,523 distinct hit triangles; capsule overlaps 785 / 214;
+box overlaps 366 / 104; sweeps 322 hits, 78 clear, the time of impact inside 3 mm; 0 disagreements. Samples too close
+to call are counted as ambiguous and not judged: a capsule within 2 mm of touching (1), a box within 4 cm (30;
+Jolt rounds the box's corners by its convex radius), a ray with several triangles in reach.

@@ -1,8 +1,11 @@
 // bf3dump prepare (plan §3.12 "Prepare levels": CLI `bf3dump prepare`; M0 "per-item streaming converters").
 #include "prepare_commands.h"
 
+#include "shapes_commands.h"
+
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/cache/disk_cache.h"
+#include "bf3/core/install_snapshot.h"
 #include "bf3/render/level_prepare.h"
 
 #include <windows.h>
@@ -10,6 +13,7 @@
 #include <psapi.h>
 
 #include <charconv>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -31,6 +35,14 @@ std::string path_utf8(const std::filesystem::path &p_path) {
 	return std::string(s.begin(), s.end());
 }
 
+double mib(uint64_t p_bytes) {
+	return double(p_bytes) / (1024.0 * 1024.0);
+}
+
+void print_totals(const char *p_what, const bf3::render::PrepareTotals &p_t);
+
+} // namespace
+
 // Godot's OS_Windows::get_user_data_dir for a project without a custom user dir:
 // %APPDATA%/Godot/app_userdata/<project name>; the project is named "bf3-opensource" (project.godot).
 std::filesystem::path default_cache_root() {
@@ -42,9 +54,7 @@ std::filesystem::path default_cache_root() {
 	return std::filesystem::path(std::wstring(buf, n)) / L"Godot" / L"app_userdata" / L"bf3-opensource" / L"bf3cache";
 }
 
-double mib(uint64_t p_bytes) {
-	return double(p_bytes) / (1024.0 * 1024.0);
-}
+namespace {
 
 void print_totals(const char *p_what, const bf3::render::PrepareTotals &p_t) {
 	const uint64_t misses = p_t.converted + p_t.reused + p_t.uncached;
@@ -62,6 +72,7 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 	std::vector<std::string> positional;
 	std::filesystem::path root;
 	bf3::render::PrepareOptions options;
+	bool shapes = false; // M1 T1: --shapes
 	for (const std::string &a : p_args) {
 		if (a.rfind("--cache=", 0) == 0) {
 			root = utf8_path(std::string_view(a).substr(8));
@@ -78,6 +89,8 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 			options.weapons = false;
 		} else if (a == "--no-meshes") {
 			options.meshes = false;
+		} else if (a == "--shapes") {
+			shapes = true;
 		} else if (a.rfind("--", 0) == 0) {
 			std::fprintf(stderr, "prepare: unknown option %s\n", a.c_str());
 			return 2;
@@ -86,7 +99,7 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 		}
 	}
 	if (positional.size() != 2) {
-		std::fprintf(stderr, "usage: bf3dump prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes]\n");
+		std::fprintf(stderr, "usage: bf3dump prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes] [--shapes]\n");
 		return 2;
 	}
 	if (root.empty()) {
@@ -103,6 +116,7 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 		return 2;
 	}
 
+	const InstallSnapshot snapshot_before = shapes ? p_reader.snapshot() : InstallSnapshot();
 	Cache cache;
 	CacheOptions cache_options;
 	cache_options.root = root;
@@ -135,6 +149,20 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 	for (const auto &[item, error] : r.failures) {
 		std::printf("issue    %s: %s\n", item.c_str(), error.c_str());
 	}
+	// M1 T1: the static world in a second, sequential pass (prepare_level keeps neither the level nor the World).
+	bool shapes_failed = false;
+	double seconds_shapes = 0.0;
+	if (shapes) {
+		const auto shapes_start = std::chrono::steady_clock::now();
+		Result<ShapesPass> pass = run_shapes_pass(p_install, positional[0], positional[1], &cache, options.threads, true);
+		seconds_shapes = std::chrono::duration<double>(std::chrono::steady_clock::now() - shapes_start).count();
+		if (!pass) {
+			std::printf("issue    shapes: %s\n", pass.error().message.c_str());
+			shapes_failed = true;
+		} else {
+			print_shapes_pass(*pass);
+		}
+	}
 	const CacheStats after = cache.stats();
 	cache.close();
 	PROCESS_MEMORY_COUNTERS_EX pmc{};
@@ -145,8 +173,16 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 			static_cast<unsigned long long>(after.puts - before.puts), static_cast<unsigned long long>(after.hits - before.hits),
 			static_cast<unsigned long long>(after.misses - before.misses), static_cast<unsigned long long>(after.dedup_reused - before.dedup_reused),
 			static_cast<unsigned long long>(after.corrupt_dropped));
-	std::printf("total    %.3f s; peak working set %.1f MiB, peak private bytes %.1f MiB\n", r.seconds_total, mib(pmc.PeakWorkingSetSize), mib(pmc.PeakPagefileUsage));
-	const bool failed = r.meshes.failed > 0 || r.weapons.failed > 0;
+	std::printf("total    %.3f s; peak working set %.1f MiB, peak private bytes %.1f MiB\n", r.seconds_total + seconds_shapes, mib(pmc.PeakWorkingSetSize),
+			mib(pmc.PeakPagefileUsage));
+	bool failed = r.meshes.failed > 0 || r.weapons.failed > 0 || shapes_failed;
+	if (shapes) {
+		const SnapshotDiff diff = diff_snapshots(snapshot_before, p_reader.snapshot());
+		const bool clean = snapshot_before.valid && diff.clean();
+		std::printf("install.unchanged %s\n",
+				clean ? ("yes (" + std::to_string(snapshot_before.files.size()) + " files: sizes and mtimes equal)").c_str() : ("NO: " + diff.summary()).c_str());
+		failed = failed || !clean;
+	}
 	return failed ? 1 : 0;
 }
 

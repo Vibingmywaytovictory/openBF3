@@ -231,13 +231,26 @@ target_link_libraries(test_m1_contract PRIVATE bf3_host bf3_render)
 add_test(NAME m1.contract COMMAND test_m1_contract)
 # M1 T1 (world; docs/design/m1.md §5, §14): sim.world.unit builds synthetic static worlds and checks the
 # CollisionWorld queries and the CollisionWorld::Impl seam (it includes bf3_sim's internal headers and links Jolt for
-# that); no data.
-openbf3_test(test_sim_world test_main.cpp sim_world_tests.cpp test_support.h)
+# that), the tile / world-index blobs (round trips, hostile bytes), the cache keys and the content-keyed tile cache on
+# scratch roots; no data. sim.world reads Metro from the install (read-only) into a scratch cache: cold then warm,
+# the source digest's coverage of the soup's sources, CollisionWorld answers against a brute-force reference over the
+# soup triangles, install.unchanged; exits 77 = skipped without an install.
+openbf3_test(test_sim_world test_main.cpp sim_world_tests.cpp sim_world_cache_tests.cpp sim_world_install_tests.cpp sim_world_support.h test_support.h)
 target_link_libraries(test_sim_world PRIVATE bf3_sim Jolt)
 target_include_directories(test_sim_world PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
 add_test(NAME sim.world.unit COMMAND test_sim_world --test-suite=sim-world-unit)
 set_tests_properties(sim.world.unit PROPERTIES TIMEOUT 300)
+add_test(NAME sim.world COMMAND test_sim_world --test-suite=sim-world)
+set_tests_properties(sim.world PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_world_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(sim.world.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_world_cl_dir}")
+    set_tests_properties(sim.world.unit sim.world PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_world_cl_dir}")
+    set_tests_properties(sim.world PROPERTIES TIMEOUT 1800)
+endif()
+# tools.m1_prepare (E6, docs §1, §12.4): `bf3dump prepare MP_Subway TeamDeathMatch0 --shapes` on a fresh scratch root,
+# then again: the cold peak working set <= 512 MiB, the second run all hits; exits 77 = skipped without an install.
+# RUN_SERIAL so a ctest -j neighbour cannot skew the peak. cmake_language(EXIT) needs CMake 3.29.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME tools.m1_prepare COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -P ${CMAKE_CURRENT_SOURCE_DIR}/m1_prepare.cmake)
+    set_tests_properties(tools.m1_prepare PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
 endif()

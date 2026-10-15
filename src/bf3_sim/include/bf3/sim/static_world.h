@@ -13,7 +13,7 @@
 // server world and the client prediction world of a listen host hold one copy of the static shapes (plan D5).
 //
 // Cache (bf3_core Cache, docs §5.5): two kinds.
-//   "jolt-tile"  one tile's shapes and tag table, Shape::SaveWithChildren streams. Key: sources none; params =
+//   "jolt-tile"  one tile's shapes and tag table, Shape::SaveBinaryState streams. Key: sources none; params =
 //                SHA-256 of the tile's exact input (every triangle's float bits, tag, layer, in soup order) +
 //                the build parameters; converter kStaticWorldConverterVersion; jolt_version = jolt_build_id().
 //                Content keyed, so modes and levels that share a tile share its entry.
@@ -21,7 +21,7 @@
 //                level x mode's source digest (bf3_core level/source_digest.h: manifest SHA1s of every bundle
 //                the mode mounts) + bf3_core kCollisionSoupVersion + the soup options + the build parameters;
 //                same versions. (The tile keys hash the soup's output, so they need no soup version.)
-// Warm load: source digest -> "jolt-world" -> every "jolt-tile" -> sRestoreWithChildren; no soup, no Havok
+// Warm load: source digest -> "jolt-world" -> every "jolt-tile" -> sRestoreFromBinaryState; no soup, no Havok
 // decode. Cold (or any tile missing): build the soup, cook the tiles on all lanes, put tiles then the world.
 
 #include "bf3/core/cache/cached_convert.h"
@@ -112,7 +112,7 @@ struct StaticWorldStats {
 	bool world_hit = false; // the "jolt-world" entry was found (warm path, no soup built)
 	double seconds_soup = 0.0; // build_collision_soup (cold path only)
 	double seconds_cook = 0.0; // MeshShape builds (all lanes, wall time)
-	double seconds_restore = 0.0; // sRestoreWithChildren (all lanes, wall time)
+	double seconds_restore = 0.0; // tile restores (all lanes, wall time)
 	double seconds_total = 0.0;
 };
 
@@ -181,9 +181,11 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 		const core::level::World &p_world, const StaticWorldLoadOptions &p_options = {});
 
 // ---- blobs (exposed for the tests: round trips, hostile input, key changes) --------------------------------
-// "OBF3JTIL" v1: tile x, z, tag table, then per layer present: layer id, triangle count, the SaveWithChildren
-// stream of its shape. Decoding checks every count against the bytes left, the tag indices the restored shape
-// can name, and refuses trailing bytes. "OBF3JWLD" v1: tile count, per tile (x, z, content digest, per-layer
+// "OBF3JTIL" v1: tile x, z, content digest, bounds, tag table, then per layer present: layer id, input and Jolt
+// triangle counts, the Shape::SaveBinaryState stream of its MeshShape (no children, no materials; the layout is in
+// src/static_world_cache.cpp). Decoding checks every count against the bytes left, walks the whole Jolt tree
+// (offsets, depth, vertex indices, the tag indices the shape can name) before Jolt restores it, and refuses
+// trailing bytes. "OBF3JWLD" v1: tile count, per tile (x, z, content digest, per-layer
 // triangle counts, tag count), the soup's sum and triangle total.
 std::vector<uint8_t> encode_static_tile_blob(const StaticWorldShapes &p_world, size_t p_tile);
 core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_tile_blobs(std::span<const std::span<const uint8_t>> p_tiles);
