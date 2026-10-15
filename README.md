@@ -1162,7 +1162,7 @@ percentiles and generous maxima are gated):
 | gate | ctest | pass threshold | measured 2026-10-15 |
 |---|---|---|---|
 | G1 Metro RushLarge0 full graph | `logic.metro` | builds; 549 scopes, 7,299 objects, 145 SyncedBool, 0 unknown / unimplemented connected nodes, 0 unbound event edges, work <= 1 M | met: 549 / 7,299 / 145, 0 / 0, 0 unbound event edges, 4,841 params equal `LogicWorld::effective`, work 95,181, build 13 ms |
-| G2 Rush spawners in base order | `logic.metro` | 8 spawners open as 4 Team1+Team2 groups, group g between base g-1's and base g's fall | met: bases fall at 3,661 / 9,067 / 14,473 / 19,879, groups open at 62 / 3,668 / 9,074 / 14,480 and close at fall + 1,802 |
+| G2 Rush spawners in base order | `logic.metro` | 8 spawners open as 4 Team1+Team2 groups, group g between base g-1's and base g's fall | met: bases fall at 3,661 / 9,067 / 14,473 / 19,879, groups open at 62 / 3,668 / 9,074 / 14,480 and close 7 ticks after their base's fall (3,668 / 9,074 / 14,480 / 19,886; the judge's bound is fall + 1,802) |
 | G3 park event | `logic.metro` | park SyncedBool SetTrue exactly 600 ticks after base 1 falls | met: SetTrue at 4,261 = 3,661 + 600 |
 | G4 determinism | `logic.metro` | 2 in-process runs and 1 `bf3dump logic trace` run: equal trace hashes | met: 843761c3205e74bb, 11,386 records, all three |
 | G5 0 unknown types | `logic.types` | 14 Metro + Caspian rows: 0 unknown, 0 unimplemented connected server nodes (unconnected ones are info) | met on all 14 rows |
@@ -1174,6 +1174,6 @@ One command per gate: `ctest --preset dev -R "^logic\.metro$"` (G1-G4), `-R "^lo
 `-R "^logic\.caspian$"` (G6), `-R "^logic\.perf$"` (G7), `-R "^logic\.census$"` (I1); the same numbers from
 `bf3dump logic stats MP_Subway RushLarge0`, `bf3dump logic run MP_Subway RushLarge0 --script rush` (G2/G3 verdicts),
 `bf3dump logic trace MP_Subway RushLarge0 --script rush` (G4 hash), `bf3dump logic run MP_007 ConquestLarge0
---script conquest` (G6) and `bf3dump logic census [LEVEL...] [--out FILE]` (I1/G5 TSV). `logic.fuzz` is meant for
-`ctest --preset asan`. Full results, the as-built semantics (round start forced at tick 1, silent init settle) and
+--script conquest` (G6) and `bf3dump logic census [LEVEL...] [--out FILE]` (I1/G5 TSV). `logic.unit` has a Builder-graph case
+with exact ticks for every primitive row of docs/design/s4.md §6.2; `logic.fuzz` is meant for `ctest --preset asan`. Full results, the as-built semantics (round start forced at tick 1, silent init settle) and
 the fallback rule are in docs/design/s4.md §1.1, §7, §9.1 and §14.
