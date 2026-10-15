@@ -25,9 +25,11 @@
 
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill.h"
+#include "bf3/host/game_server.h"
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -139,6 +141,11 @@ struct ScaleReport {
 	uint64_t server_working_set = 0;
 	bool install_unchanged = true;
 };
+
+// The bench's statistics, exposed for host.scale.unit: nearest-rank percentiles (p = the smallest value with at
+// least that share of the samples at or below it) and the tail split of docs §14 over per-tick parts.
+Percentiles percentiles_of(std::vector<double> p_values);
+TailShares tail_shares(std::span<const GameServerTickTimes> p_ticks, double p_p99);
 
 core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p_install, const ScaleBenchOptions &p_options);
 // The report as the text `bf3dump bots` and host.scale print (one "key value" per line, the gate rows marked).

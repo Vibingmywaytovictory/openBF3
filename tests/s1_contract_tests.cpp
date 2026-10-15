@@ -61,8 +61,8 @@ TEST_CASE("s1 contract: nav defaults are the plan's and the soldier's") {
 	CHECK(std::sqrt(2.0f * 9.81f * p.drop_max) < 13.9f);
 	CHECK(p == sim::NavParams{});
 	// The input box must reach past a drop link's check sweep (nav_input_border, docs §5.3): with the default params
-	// the sweep reaches drop_reach + radius = 1.35 m past the edge, Recast's border ceil(0.35 / 0.25) + 3 = 5 cells
-	// = 1.25 m does not, so the border rule's sweep term (1.6 m) is the one that applies.
+	// the sweep reaches drop_reach + radius = 1.85 m past the edge, Recast's border ceil(0.35 / 0.25) + 3 = 5 cells
+	// = 1.25 m does not, so the border rule's sweep term (2.1 m) is the one that applies.
 	const float recast_border = (std::ceil(p.agent_radius / p.cell_size) + 3.0f) * p.cell_size;
 	CHECK(recast_border < p.drop_reach + p.agent_radius);
 	// G4's timed span is input + bake (lanes incl. link checks) + assemble.

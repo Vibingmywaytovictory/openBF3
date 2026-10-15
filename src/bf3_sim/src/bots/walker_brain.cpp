@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace bf3::sim::bots {
 
@@ -246,6 +248,9 @@ struct WalkerBrain::Impl {
 			const bool moved_enough = horizontal(pos, anchor) >= params.stuck_progress;
 			if (moving_ticks * 2 >= stuck_ticks && !moved_enough) {
 				++stats.stuck_events;
+				if (std::getenv("OPENBF3_BOT_DEBUG")) {
+					std::printf("BOT %u stuck at (%.2f %.2f %.2f) goal (%.2f %.2f %.2f) corners %u idx %u c0 (%.2f %.2f %.2f) flags %u pose %d mode %d grounded %d vel (%.2f %.2f) repaths %u\n", slot, pos[0], pos[1], pos[2], goal.position[0], goal.position[1], goal.position[2], corner_count, corner_index, corners[corner_index].position[0], corners[corner_index].position[1], corners[corner_index].position[2], unsigned(corners[corner_index].flags), int(p_self.pose), int(p_self.mode), int((p_self.flags & soldier_flags::kGrounded) != 0), p_self.velocity[0], p_self.velocity[2], repaths_in_row);
+				}
 				if (repaths_in_row >= params.max_repaths) {
 					abandon();
 					anchor = pos;

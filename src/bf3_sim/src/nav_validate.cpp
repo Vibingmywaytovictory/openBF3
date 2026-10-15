@@ -154,13 +154,24 @@ core::Status validate_detour_tile(std::span<const uint8_t> p_data, const NavPara
 			if (uint64_t(d.vertBase) + d.vertCount > uint64_t(h.detailVertCount) || uint64_t(d.triBase) + d.triCount > uint64_t(h.detailTriCount)) {
 				return core::make_error(where + ": detail mesh " + std::to_string(i) + " is outside the detail arrays");
 			}
+			// Detour's closest-point search over the boundary edges of the detail triangles dereferences the edge it
+			// found, so a poly needs at least one triangle and one boundary edge (found by the sim.nav.unit fuzz:
+			// cleared edge flags crashed dtNavMesh::closestPointOnPoly inside addTile).
+			bool boundary = false;
+			if (d.triCount == 0) {
+				return core::make_error(where + ": poly " + std::to_string(i) + " has no detail triangle");
+			}
 			for (unsigned t = 0; t < d.triCount; ++t) {
 				const uint8_t *tri = &dtris[(size_t(d.triBase) + t) * 4];
 				for (int k = 0; k < 3; ++k) {
 					if (tri[k] >= p.vertCount + d.vertCount) {
 						return core::make_error(where + ": detail triangle of poly " + std::to_string(i) + " names vertex " + std::to_string(tri[k]));
 					}
+					boundary = boundary || (dtGetDetailTriEdgeFlags(tri[3], k) & DT_DETAIL_EDGE_BOUNDARY) != 0;
 				}
+			}
+			if (!boundary) {
+				return core::make_error(where + ": the detail triangles of poly " + std::to_string(i) + " have no boundary edge");
 			}
 		}
 	}

@@ -104,9 +104,12 @@ struct NavParams {
 	NavPartition partition = NavPartition::Watershed;
 	// Drop-down links (docs §5.3): from a border edge, a landing up to drop_max lower within drop_reach outward.
 	// 4.9 m is IW4L's 192 in; a 4.9 m fall lands at 9.8 m/s, below the 13.9 m/s damage knee (fall-damage curve).
+	// drop_reach is the farthest the landing may lie from the poly edge: the edge sits the erosion (0.5 m) plus up to
+	// the contour error (1.3 cells) inside the real ledge, and the landing must be a capsule radius and a cell past
+	// the ledge, so 1.5 m (implementation: revision 3's fixed 1.0 m put the falling capsule on the lip, sim.nav.unit).
 	bool drop_links = true;
 	float drop_max = 4.9f;
-	float drop_reach = 1.0f;
+	float drop_reach = 1.5f;
 	float drop_sample_spacing = 1.0f;
 	float region_margin = 32.0f; // combat-area margin of the baked tiles (gap load §2.7: area + 32 m)
 
@@ -143,7 +146,7 @@ using NavTileKey = std::array<int32_t, 2>; // (x, z) on the soup's 64 m grid
 
 // How far past its 64 m square a tile's input box reaches (metres): the larger of Recast's border (walkable radius
 // in cells + 3 cells, as Sample_TileMesh; 0.5 + 0.75 = 1.25 m at the defaults) and, when drop_links is on, the reach
-// of a drop link's check sweep (drop_reach + agent_radius + one cell = 1.0 + 0.35 + 0.25 = 1.6 m). So the input
+// of a drop link's check sweep (drop_reach + agent_radius + one cell = 1.5 + 0.35 + 0.25 = 2.1 m). So the input
 // digest covers every triangle the tile's raster and its link sweeps can touch (review of revision 1: the sweep
 // reached 1.35 m past a 1.25 m border). The Recast heightfield border itself stays walkable radius + 3 cells.
 float nav_input_border(const NavParams &p_params);

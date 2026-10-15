@@ -63,7 +63,7 @@ double thread_cpu_seconds() {
 	return double(to100ns(kernel) + to100ns(user)) * 1e-7;
 }
 
-Percentiles percentiles(std::vector<double> p_values) {
+Percentiles percentiles_impl(std::vector<double> p_values) {
 	Percentiles p;
 	if (p_values.empty()) {
 		return p;
@@ -127,6 +127,44 @@ std::string percentile_text(const Percentiles &p_p) {
 }
 
 } // namespace
+
+Percentiles percentiles_of(std::vector<double> p_values) {
+	return percentiles_impl(std::move(p_values));
+}
+
+TailShares tail_shares(std::span<const GameServerTickTimes> p_ticks, double p_p99) {
+	TailShares tail;
+	for (const GameServerTickTimes &t : p_ticks) {
+		if (t.tick_ms >= p_p99) {
+			++tail.ticks;
+			tail.tick_ms += t.tick_ms;
+			tail.commands_ms += t.commands_ms;
+			tail.sources_ms += t.sources_ms;
+			tail.step_ms += t.step_ms;
+			tail.rules_ms += t.rules_ms;
+			tail.encode_ms += t.encode_ms;
+		}
+	}
+	if (tail.ticks == 0) {
+		return tail;
+	}
+	const double n = double(tail.ticks);
+	tail.tick_ms /= n;
+	tail.commands_ms /= n;
+	tail.sources_ms /= n;
+	tail.step_ms /= n;
+	tail.rules_ms /= n;
+	tail.encode_ms /= n;
+	if (tail.tick_ms > 0.0) {
+		tail.commands = tail.commands_ms / tail.tick_ms;
+		tail.sources = tail.sources_ms / tail.tick_ms;
+		tail.step = tail.step_ms / tail.tick_ms;
+		tail.rules = tail.rules_ms / tail.tick_ms;
+		tail.encode = tail.encode_ms / tail.tick_ms;
+		tail.other = std::max(0.0, 1.0 - tail.commands - tail.sources - tail.step - tail.rules - tail.encode);
+	}
+	return tail;
+}
 
 core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p_install, const ScaleBenchOptions &p_options) {
 	if (p_install == nullptr) {
@@ -259,13 +297,15 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 			spawn_ticks.push_back(tt.tick_ms);
 		}
 	}
-	report.spawn_tick_ms = percentiles(spawn_ticks);
+	report.spawn_tick_ms = percentiles_impl(spawn_ticks);
 
 	// ---- the gate window ---------------------------------------------------------------------------------------------
 	const GameServerStats before = server.stats();
 	const uint64_t window_ticks = uint64_t(std::llround(p_options.seconds * double(sim::kSimHz)));
 	std::vector<double> v_tick, v_commands, v_sources, v_step, v_rules, v_encode;
 	std::vector<double> v_paths;
+	std::vector<GameServerTickTimes> window;
+	window.reserve(window_ticks);
 	v_tick.reserve(window_ticks);
 	v_commands.reserve(window_ticks);
 	v_sources.reserve(window_ticks);
@@ -299,6 +339,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 			server.tick(out);
 			const Clock::time_point after = Clock::now();
 			const GameServerTickTimes &tt = server.last_tick_times();
+			window.push_back(tt);
 			v_tick.push_back(tt.tick_ms);
 			v_commands.push_back(tt.commands_ms);
 			v_sources.push_back(tt.sources_ms);
@@ -354,47 +395,17 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	report.cpu_share = report.window_wall_seconds > 0.0 ? report.window_cpu_seconds / report.window_wall_seconds : 0.0;
 	const GameServerStats after = server.stats();
 	report.ticks = window_ticks;
-	report.tick_ms = percentiles(v_tick);
-	report.commands_ms = percentiles(v_commands);
-	report.sources_ms = percentiles(v_sources);
-	report.step_ms = percentiles(v_step);
-	report.rules_ms = percentiles(v_rules);
-	report.encode_ms = percentiles(v_encode);
+	report.tick_ms = percentiles_impl(v_tick);
+	report.commands_ms = percentiles_impl(v_commands);
+	report.sources_ms = percentiles_impl(v_sources);
+	report.step_ms = percentiles_impl(v_step);
+	report.rules_ms = percentiles_impl(v_rules);
+	report.encode_ms = percentiles_impl(v_encode);
 	report.bot_budget_ok = report.sources_ms.p99 <= kBotBudgetP99Ms;
 	report.respawns_in_window = respawns;
 
 	// Tail shares (docs §14): the ticks at or above the p99.
-	{
-		TailShares &tail = report.tail;
-		for (size_t i = 0; i < v_tick.size(); ++i) {
-			if (v_tick[i] >= report.tick_ms.p99) {
-				++tail.ticks;
-				tail.tick_ms += v_tick[i];
-				tail.commands_ms += v_commands[i];
-				tail.sources_ms += v_sources[i];
-				tail.step_ms += v_step[i];
-				tail.rules_ms += v_rules[i];
-				tail.encode_ms += v_encode[i];
-			}
-		}
-		if (tail.ticks > 0) {
-			const double n = double(tail.ticks);
-			tail.tick_ms /= n;
-			tail.commands_ms /= n;
-			tail.sources_ms /= n;
-			tail.step_ms /= n;
-			tail.rules_ms /= n;
-			tail.encode_ms /= n;
-			if (tail.tick_ms > 0.0) {
-				tail.commands = tail.commands_ms / tail.tick_ms;
-				tail.sources = tail.sources_ms / tail.tick_ms;
-				tail.step = tail.step_ms / tail.tick_ms;
-				tail.rules = tail.rules_ms / tail.tick_ms;
-				tail.encode = tail.encode_ms / tail.tick_ms;
-				tail.other = std::max(0.0, 1.0 - tail.commands - tail.sources - tail.step - tail.rules - tail.encode);
-			}
-		}
-	}
+	report.tail = tail_shares(window, report.tick_ms.p99);
 
 	// Motor (G3).
 	report.motor_steps = motor_steps;
@@ -492,7 +503,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 			}
 		}
 		report.paced_ticks = paced_ticks;
-		report.paced_tick_ms = percentiles(std::move(v));
+		report.paced_tick_ms = percentiles_impl(std::move(v));
 	}
 
 	// ---- direct query costs (G3, docs §6.3) ---------------------------------------------------------------------------
@@ -515,7 +526,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 				const Clock::time_point b = Clock::now();
 				e.push_back(ms_between(a, b) * 1000.0);
 			}
-			overhead = percentiles(e).mean;
+			overhead = percentiles_impl(e).mean;
 		}
 		std::vector<double> us_sweep, us_overlap;
 		us_sweep.reserve(samples.size());
@@ -541,8 +552,8 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 			us_overlap.push_back(std::max(0.0, ms_between(a, b) * 1000.0 - overhead));
 		}
 		report.sweep_samples = uint32_t(samples.size());
-		report.us_sweep = percentiles(std::move(us_sweep));
-		report.us_overlap = percentiles(std::move(us_overlap));
+		report.us_sweep = percentiles_impl(std::move(us_sweep));
+		report.us_overlap = percentiles_impl(std::move(us_overlap));
 	}
 	report.peak_working_set = peak_working_set();
 	return report;

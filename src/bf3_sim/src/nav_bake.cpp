@@ -62,10 +62,40 @@ struct DropLink {
 	float end[3];
 };
 
+// The ground of one heightfield column below p_max_y (the highest span top at most p_max_y): found, its height, and
+// whether it was walkable before the erosion. inside = the column lies in the compact heightfield.
+struct Column {
+	bool inside = false;
+	bool found = false;
+	bool walkable = false;
+	float top = 0.0f;
+};
+Column ground_below(const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas, float p_x, float p_z, float p_max_y) {
+	Column out;
+	const int cx = int(std::floor((p_x - p_chf.bmin[0]) / p_chf.cs));
+	const int cz = int(std::floor((p_z - p_chf.bmin[2]) / p_chf.cs));
+	if (cx < 0 || cz < 0 || cx >= p_chf.width || cz >= p_chf.height) {
+		return out;
+	}
+	out.inside = true;
+	const rcCompactCell &cell = p_chf.cells[size_t(cx) + size_t(cz) * size_t(p_chf.width)];
+	for (unsigned int s = cell.index; s < cell.index + cell.count; ++s) {
+		const float top = p_chf.bmin[1] + float(p_chf.spans[s].y) * p_chf.ch;
+		if (top <= p_max_y && (!out.found || top > out.top)) {
+			out.found = true;
+			out.top = top;
+			out.walkable = p_areas[s] != RC_NULL_AREA;
+		}
+	}
+	return out;
+}
+
 // The drop-down links of one tile (docs §5.3 "Drop links"): every border edge of the poly mesh without a neighbour
-// (not a tile portal), sampled every drop_sample_spacing; a landing drop_reach outward, found in the compact
-// heightfield's columns (areas as they were before the erosion), more than the climb and at most drop_max lower;
-// with p_world, a stand-capsule sweep out over the edge and one down to the landing must both be clear.
+// (not a tile portal), sampled every drop_sample_spacing; outward from each sample, the ledge (the first column whose
+// ground lies more than a climb lower, cell by cell) and the landing a capsule radius and a cell beyond it, within
+// drop_reach, found in the compact heightfield's columns (areas as they were before the erosion), more than the climb
+// and at most drop_max lower; with p_world, a stand-capsule sweep out to the landing and one down to it must both be
+// clear.
 void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas, const NavParams &p_params,
 		const NavCells &p_cells, const CollisionWorld *p_world, NavTileBake &r_bake, std::vector<DropLink> &r_links) {
 	const int nvp = p_mesh.nvp;
@@ -115,31 +145,42 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 				}
 				const float t = (float(k) + 0.5f) / float(samples);
 				const float sx = ax + ex * t, sy = ay + (by - ay) * t, sz = az + ez * t;
-				const float px = sx + nx * p_params.drop_reach, pz = sz + nz * p_params.drop_reach;
-				const int cxi = int(std::floor((px - p_chf.bmin[0]) / cs));
-				const int czi = int(std::floor((pz - p_chf.bmin[2]) / cs));
-				if (cxi < 0 || czi < 0 || cxi >= p_chf.width || czi >= p_chf.height) {
-					continue;
-				}
-				// The highest surface in the landing column at most a climb above the start: the ground beyond the edge.
-				const rcCompactCell &cell = p_chf.cells[size_t(cxi) + size_t(czi) * size_t(p_chf.width)];
-				float best = -1e30f;
-				bool best_walkable = false;
-				for (unsigned int s = cell.index; s < cell.index + cell.count; ++s) {
-					const float top = p_chf.bmin[1] + float(p_chf.spans[s].y) * ch;
-					if (top <= sy + climb && top > best) {
-						best = top;
-						best_walkable = p_areas[s] != RC_NULL_AREA;
+				// Walk outward one cell at a time to the ledge: the first column whose ground (the highest surface at
+				// most a climb above the start) is more than a climb below the start, or has none. The poly edge lies
+				// the erosion (walkable radius) plus up to the contour error inside the real ledge, so a fixed reach
+				// would put the landing capsule over the ledge's lip (found by sim.nav.unit's 3 m ledge).
+				float ledge = -1.0f;
+				for (float d = 0.5f * cs; d <= p_params.drop_reach; d += cs) {
+					const Column c = ground_below(p_chf, p_areas, sx + nx * d, sz + nz * d, sy + climb);
+					if (!c.inside) {
+						break;
+					}
+					if (!c.found || sy - c.top > climb + 0.5f * ch) {
+						ledge = d;
+						break;
 					}
 				}
-				const float drop = sy - best;
-				if (!best_walkable || drop <= climb + ch || drop > p_params.drop_max) {
+				if (ledge < 0.0f) {
+					continue;
+				}
+				// The landing: a capsule radius and a cell beyond the ledge, so the fall clears the lip.
+				const float reach = ledge + p_params.agent_radius + cs;
+				if (reach > p_params.drop_reach) {
+					continue;
+				}
+				const float px = sx + nx * reach, pz = sz + nz * reach;
+				const Column land = ground_below(p_chf, p_areas, px, pz, sy + climb);
+				if (!land.inside || !land.found || !land.walkable) {
+					continue;
+				}
+				const float drop = sy - land.top;
+				if (drop <= climb + 0.5f * ch || drop > p_params.drop_max) {
 					continue;
 				}
 				++r_bake.link_candidates;
 				if (p_world != nullptr) {
 					const Vec3 feet{ sx, sy + kSweepLift, sz };
-					const Vec3 out{ nx * p_params.drop_reach, 0.0f, nz * p_params.drop_reach };
+					const Vec3 out{ nx * reach, 0.0f, nz * reach };
 					++r_bake.link_sweeps;
 					if (p_world->sweep_capsule(feet, p_params.agent_radius, p_params.agent_height, out, query_mask::kMovement)) {
 						++r_bake.links_rejected;
@@ -158,7 +199,7 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 				link.start[1] = sy;
 				link.start[2] = sz;
 				link.end[0] = px;
-				link.end[1] = best;
+				link.end[1] = land.top;
 				link.end[2] = pz;
 				r_links.push_back(link);
 			}

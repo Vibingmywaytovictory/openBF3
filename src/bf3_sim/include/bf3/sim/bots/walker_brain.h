@@ -55,7 +55,10 @@ struct WalkerParams {
 	float sprint_share = 0.4f; // legs walked sprinting where the path allows it
 	float crouch_share = 0.15f; // legs walked crouching
 	float yaw_rate_deg_s = 540.0f; // view turn limit (research topics/06 §1: about 550 deg/s)
-	float corner_lookahead = 1.5f; // metres: start turning towards the next corner this far before the corner
+	// Metres: start turning towards the next corner this far before the corner. Corners lie on the eroded mesh edge,
+	// 0.5 m off walls, so leaving one earlier cuts into a door jamb (host.scale.unit: 1.5 m left bots sliding along
+	// the jambs of 2 m doors until the stuck rule fired).
+	float corner_lookahead = 0.4f;
 	float stuck_seconds = 2.0f; // IW4L bots controller.rs STUCK_TICKS 40 at 20 Hz
 	float stuck_progress = 0.5f; // metres of progress expected over stuck_seconds while moving
 	uint32_t max_repaths = 3; // repaths in a row before the goal is abandoned
