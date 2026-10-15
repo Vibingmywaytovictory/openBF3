@@ -21,3 +21,7 @@ target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `
 # M1 T2 (motor; docs/design/m1.md §10.1): `spawns <LEVEL> <MODE>`, the spawn points and spawners as TSV (bf3_sim from
 # T1's block above).
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
+# M2a audio (docs/design/m2a-audio.md §1, §9): `audio waves|loc|census|render`, the drivers of gates G1-G4 and the
+# offline render through bf3_audio's mixer core.
+target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_render_commands.cpp)
+target_link_libraries(bf3dump PRIVATE bf3_audio)

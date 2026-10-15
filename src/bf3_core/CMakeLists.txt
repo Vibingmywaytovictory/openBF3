@@ -219,10 +219,12 @@ target_sources(bf3_core PRIVATE
 )
 
 # M2a audio (docs/design/m2a-audio.md §5, §6): sound stream codecs (EA-XAS v1), SoundWaveAsset reader, the resident
-# wave bank, the sound-graph node type table and the SoundPatchAsset compiler. Interfaces; sound_types.cpp is the
-# only implementation so far (A1/A2 waves add the rest).
+# wave bank, the sound-graph node type table and the SoundPatchAsset compiler.
 target_sources(bf3_core PRIVATE
+    src/audio/sound_stream.cpp
     src/audio/sound_types.cpp
+    src/audio/sound_wave.cpp
+    src/audio/wave_bank.cpp
     include/bf3/core/audio/sound_program.h
     include/bf3/core/audio/sound_stream.h
     include/bf3/core/audio/sound_types.h
