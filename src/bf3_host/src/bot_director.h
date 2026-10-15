@@ -24,6 +24,8 @@ public:
 	std::unique_ptr<CommandSource> source(uint32_t p_index);
 	sim::Command command(uint32_t p_index, sim::Tick p_tick, const sim::SoldierState &p_state);
 	BotFillStats stats() const;
+	// PathService::run's cumulative milliseconds (GameServerTickTimes::paths_ms is its delta over a tick).
+	double paths_ms_total() const;
 	const sim::bots::WalkerBrain &brain(uint32_t p_index) const;
 
 private:

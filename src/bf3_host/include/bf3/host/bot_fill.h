@@ -15,16 +15,27 @@
 #include "bf3/host/bot_fill_stats.h"
 #include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/nav.h"
+#include "bf3/sim/nav_query.h"
+#include "bf3/sim/spawn.h"
 
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace bf3::core {
 class Cache;
 }
+namespace bf3::core::level {
+struct LevelCombatTiles;
+struct ModeObjectiveDef;
+} // namespace bf3::core::level
+namespace bf3::sim {
+class CollisionWorld;
+class SoldierMotor;
+} // namespace bf3::sim
 
 namespace bf3::host {
 
@@ -44,6 +55,7 @@ struct BotPointRow {
 	// on_mesh and check.weak_component == the main component's weak component: a row with in_main_weak and not
 	// in_main is reachable one way only (a drop), one with neither is truly disconnected (docs §5.5, the R6 class).
 	bool in_main_weak = false;
+	bool settled = false; // spawns: settle_spawn succeeded (else the raw point was checked)
 };
 
 // Where the bots spawn (docs §8 "Bot spawns"; review of revision 2: G1 must not depend on G2). Built by
@@ -84,6 +96,12 @@ struct BotLoadOptions {
 	unsigned threads = 0; // nav bake lanes
 	sim::NavParams params; // nav_params_from_motor(SharedLevel::motor) by default (load_bot_level fills it when unset)
 	bool params_from_motor = true;
+	// BotSpawns step 3 (no spawn point in the main component): how many seeded main-component points to make.
+	uint32_t synthetic_spawns = 64;
+	uint64_t seed = 1; // of the synthetic points
+	// The caller's level_combat_tiles (the one it built the terrain cover from), or null: then computed here (every
+	// MP mode loaded and traversed again, about 0.3 s per mode).
+	const core::level::LevelCombatTiles *combat = nullptr;
 };
 
 // On the loader thread that owns p_db (World is not thread-safe). p_shared must be the static world built with the
@@ -92,6 +110,25 @@ struct BotLoadOptions {
 // (NavBakeOptions::link_shapes, one CollisionWorld per bake lane).
 core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase &p_db, const SharedLevel &p_shared, const BotLoadOptions &p_options,
 		LoadProgress *p_progress);
+
+// The pieces of load_bot_level, exposed for sim.nav (G2 per mode) and host.scale.unit (the spawn filter on synthetic
+// worlds). docs §5.5 radii: spawn 1.0 m horizontal / 1.0 m vertical at settled feet, MCOM 2.0 m, flag and HQ 5.0 m
+// (vertical 3.0 m).
+float bot_point_radius(BotPointRow::Kind p_kind);
+float bot_point_vertical(BotPointRow::Kind p_kind);
+struct BotRowsResult {
+	std::vector<BotPointRow> points; // objectives in order, then every spawn point
+	std::vector<sim::bots::BotGoal> objectives; // the in_main rows as goals
+};
+// Settles every spawn point with p_motor on p_world (the server's static world) and checks every row.
+BotRowsResult bot_point_rows(const sim::NavWorld &p_nav, const sim::NavComponents &p_components, uint32_t p_main,
+		std::span<const core::level::ModeObjectiveDef> p_objectives, std::span<const sim::SpawnPoint> p_spawns, const sim::SoldierMotor &p_motor,
+		const sim::CollisionWorld &p_world);
+// BotSpawns' three steps (above) from the rows.
+BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const sim::SpawnPoint> p_spawns, const sim::NavComponents &p_components,
+		uint32_t p_main, sim::NavQuery &p_query, const sim::SoldierMotor &p_motor, const sim::CollisionWorld &p_world, uint32_t p_synthetic, uint64_t p_seed);
+// The weak component of the main SCC (UINT32_MAX when it has no poly).
+uint32_t main_weak_component(const sim::NavComponents &p_components, uint32_t p_main);
 
 struct BotFillConfig {
 	std::shared_ptr<const BotLevel> level;

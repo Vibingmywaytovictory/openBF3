@@ -34,4 +34,7 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/bot_fill.h
     include/bf3/host/bot_fill_stats.h
     include/bf3/host/scale_bench.h
+    src/bot_director.h
+    src/bot_fill.cpp
+    src/scale_bench.cpp
 )

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <optional>
 
 namespace bf3::host {
 
@@ -27,18 +28,6 @@ double seconds_since(Clock::time_point p_start) {
 
 double ms_since(Clock::time_point p_start) {
 	return std::chrono::duration<double, std::milli>(Clock::now() - p_start).count();
-}
-
-// docs §5.5: the on-mesh radius and the search box of each kind.
-float kind_radius(BotPointRow::Kind p_kind) {
-	switch (p_kind) {
-		case BotPointRow::Kind::Spawn:
-			return 1.0f;
-		case BotPointRow::Kind::Mcom:
-			return 2.0f;
-		default:
-			return 5.0f;
-	}
 }
 
 sim::bots::BotGoal::Kind goal_kind(BotPointRow::Kind p_kind) {
@@ -69,6 +58,30 @@ private:
 
 } // namespace
 
+float bot_point_radius(BotPointRow::Kind p_kind) {
+	switch (p_kind) {
+		case BotPointRow::Kind::Spawn:
+			return 1.0f;
+		case BotPointRow::Kind::Mcom:
+			return 2.0f;
+		default:
+			return 5.0f;
+	}
+}
+
+float bot_point_vertical(BotPointRow::Kind p_kind) {
+	return p_kind == BotPointRow::Kind::Spawn ? 1.0f : 3.0f;
+}
+
+uint32_t main_weak_component(const sim::NavComponents &p_components, uint32_t p_main) {
+	for (size_t i = 0; i < p_components.component.size() && i < p_components.weak_component.size(); ++i) {
+		if (p_components.component[i] == p_main) {
+			return p_components.weak_component[i];
+		}
+	}
+	return UINT32_MAX;
+}
+
 core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase &p_db, const SharedLevel &p_shared, const BotLoadOptions &p_options,
 		LoadProgress *p_progress) {
 	(void)p_progress;
@@ -82,9 +95,15 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 
 	// The region: the combat-area tiles of every MP mode (+ margin); the static world must have that cover.
 	Clock::time_point clock = Clock::now();
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(p_db.install, p_shared.level, params.region_margin);
-	if (!combat) {
-		return core::error_at("load_bot_level: combat areas", combat.error());
+	std::optional<core::level::LevelCombatTiles> own_combat;
+	const core::level::LevelCombatTiles *combat = p_options.combat;
+	if (combat == nullptr) {
+		core::Result<core::level::LevelCombatTiles> c = core::level::level_combat_tiles(p_db.install, p_shared.level, params.region_margin);
+		if (!c) {
+			return core::error_at("load_bot_level: combat areas", c.error());
+		}
+		own_combat = std::move(*c);
+		combat = &*own_combat;
 	}
 	out->seconds_areas = seconds_since(clock);
 	if (combat->tiles.empty()) {
@@ -119,53 +138,125 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	out->main_component = out->components.largest;
 	out->seconds_components = seconds_since(clock);
 
-	// The rows: the mode's flags, HQs and MCOMs, and every spawn point at its settled feet.
 	core::Result<core::level::ModeAreas> areas = core::level::read_mode_areas(*p_db.world);
 	if (!areas) {
 		return core::error_at("load_bot_level: mode areas", areas.error());
 	}
-	for (size_t i = 0; i < areas->objectives.size(); ++i) {
-		const core::level::ModeObjectiveDef &o = areas->objectives[i];
+	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(p_shared.static_world);
+	if (!world) {
+		return core::error_at("load_bot_level: settle world", world.error());
+	}
+	sim::SoldierMotor motor;
+	BF3_TRY(motor.init(**world, p_shared.motor));
+	BotRowsResult rows = bot_point_rows(*out->nav, out->components, out->main_component, areas->objectives, p_shared.spawns, motor, **world);
+	out->points = std::move(rows.points);
+	out->objectives = std::move(rows.objectives);
+
+	// Where bot slots spawn (docs §8 "Bot spawns").
+	core::Result<std::unique_ptr<sim::NavQuery>> query = sim::NavQuery::create(out->nav);
+	if (!query) {
+		return core::error_at("load_bot_level: query", query.error());
+	}
+	out->spawns = make_bot_spawns(out->points, p_shared.spawns, out->components, out->main_component, **query, motor, **world, p_options.synthetic_spawns,
+			p_options.seed);
+	return std::shared_ptr<const BotLevel>(std::move(out));
+}
+
+BotRowsResult bot_point_rows(const sim::NavWorld &p_nav, const sim::NavComponents &p_components, uint32_t p_main,
+		std::span<const core::level::ModeObjectiveDef> p_objectives, std::span<const sim::SpawnPoint> p_spawns, const sim::SoldierMotor &p_motor,
+		const sim::CollisionWorld &p_world) {
+	BotRowsResult out;
+	for (size_t i = 0; i < p_objectives.size(); ++i) {
+		const core::level::ModeObjectiveDef &o = p_objectives[i];
 		BotPointRow row;
 		row.kind = o.kind == core::level::ModeObjectiveDef::Kind::Hq ? BotPointRow::Kind::Hq
 				: o.kind == core::level::ModeObjectiveDef::Kind::Mcom	 ? BotPointRow::Kind::Mcom
 																		 : BotPointRow::Kind::Flag;
 		row.index = uint32_t(i);
 		row.point = { float(o.position[0]), float(o.position[1]), float(o.position[2]) };
-		out->points.push_back(row);
+		out.points.push_back(row);
 	}
-	{
-		core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(p_shared.static_world);
-		if (!world) {
-			return core::error_at("load_bot_level: settle world", world.error());
-		}
-		sim::SoldierMotor motor;
-		BF3_TRY(motor.init(**world, p_shared.motor));
-		for (size_t i = 0; i < p_shared.spawns.size(); ++i) {
-			BotPointRow row;
-			row.kind = BotPointRow::Kind::Spawn;
-			row.index = uint32_t(i);
-			const sim::SettleResult r = sim::settle_spawn(motor, **world, p_shared.spawns[i], 1, 0);
-			row.point = r.ok ? r.state.position : p_shared.spawns[i].position;
-			out->points.push_back(row);
-		}
+	for (size_t i = 0; i < p_spawns.size(); ++i) {
+		BotPointRow row;
+		row.kind = BotPointRow::Kind::Spawn;
+		row.index = uint32_t(i);
+		const sim::SettleResult r = sim::settle_spawn(p_motor, p_world, p_spawns[i], 1, 0);
+		row.settled = r.ok;
+		row.point = r.ok ? r.state.position : p_spawns[i].position;
+		out.points.push_back(row);
 	}
-	for (BotPointRow &row : out->points) {
-		const float radius = kind_radius(row.kind);
-		const float vertical = row.kind == BotPointRow::Kind::Spawn ? 1.0f : 3.0f;
-		row.check = sim::nav_check_point(*out->nav, out->components, row.point, { radius + 1.0f, vertical + 1.0f, radius + 1.0f });
+	const uint32_t main_weak = main_weak_component(p_components, p_main);
+	for (BotPointRow &row : out.points) {
+		const float radius = bot_point_radius(row.kind);
+		const float vertical = bot_point_vertical(row.kind);
+		row.check = sim::nav_check_point(p_nav, p_components, row.point, { radius + 1.0f, vertical + 1.0f, radius + 1.0f });
 		row.on_mesh = row.check.poly != 0 && row.check.horizontal <= radius && std::fabs(row.check.vertical) <= vertical;
-		row.in_main = row.on_mesh && row.check.component == out->main_component;
+		row.in_main = row.on_mesh && row.check.component == p_main;
+		row.in_main_weak = row.on_mesh && main_weak != UINT32_MAX && row.check.weak_component == main_weak;
 		if (row.in_main) {
 			sim::bots::BotGoal g;
 			g.kind = goal_kind(row.kind);
 			g.position = row.check.nearest;
 			g.poly = row.check.poly;
 			g.index = row.index;
-			out->objectives.push_back(g);
+			out.objectives.push_back(g);
 		}
 	}
-	return std::shared_ptr<const BotLevel>(std::move(out));
+	return out;
+}
+
+BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const sim::SpawnPoint> p_spawns, const sim::NavComponents &p_components,
+		uint32_t p_main, sim::NavQuery &p_query, const sim::SoldierMotor &p_motor, const sim::CollisionWorld &p_world, uint32_t p_synthetic, uint64_t p_seed) {
+	BotSpawns out;
+	out.level_points = uint32_t(p_spawns.size());
+	// 1. the level's points whose settled feet are in main.
+	for (const BotPointRow &row : p_rows) {
+		if (row.kind == BotPointRow::Kind::Spawn && row.in_main && row.index < p_spawns.size()) {
+			out.points.push_back(p_spawns[row.index]);
+		}
+	}
+	out.in_main = uint32_t(out.points.size());
+	out.excluded = out.level_points - out.in_main;
+	// 2. a team without a point of its own (or a neutral one): every point becomes neutral.
+	const auto has_team = [&](int p_team) {
+		for (const sim::SpawnPoint &p : out.points) {
+			if (p.team == p_team || p.team == 0) {
+				return true;
+			}
+		}
+		return false;
+	};
+	if (!out.points.empty() && (!has_team(1) || !has_team(2))) {
+		out.teams_merged = true;
+		for (sim::SpawnPoint &p : out.points) {
+			p.team = 0;
+		}
+	}
+	// 3. none at all: seeded settled points of the main component.
+	if (out.points.empty()) {
+		uint64_t rng = p_seed ^ 0x5DEECE66Dull;
+		uint32_t made = 0;
+		for (uint32_t attempts = 0; made < p_synthetic && attempts < p_synthetic * 8u; ++attempts) {
+			sim::NavPolyRef poly = 0;
+			sim::Vec3 at{};
+			if (!p_query.random_point(rng, p_components, p_main, &poly, &at)) {
+				break;
+			}
+			sim::SpawnPoint sp;
+			sp.position = at;
+			sp.yaw = uint16_t(rng >> 48);
+			sp.team = 0;
+			sp.index = UINT32_MAX - made;
+			const sim::SettleResult r = sim::settle_spawn(p_motor, p_world, sp, 1, 0);
+			if (!r.ok) {
+				continue;
+			}
+			out.points.push_back(sp);
+			++made;
+		}
+		out.synthetic = made;
+	}
+	return out;
 }
 
 // ---- BotDirector --------------------------------------------------------------------------------------------------
@@ -245,6 +336,10 @@ BotFillStats BotDirector::stats() const {
 	s.paths = paths_->stats();
 	s.query = query_->stats();
 	return s;
+}
+
+double BotDirector::paths_ms_total() const {
+	return paths_->stats().ms_run;
 }
 
 const sim::bots::WalkerBrain &BotDirector::brain(uint32_t p_index) const {
