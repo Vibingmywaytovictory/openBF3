@@ -65,6 +65,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
+UI ui1 adds `ui1.contract` (the SWF, atlas and font interface headers compile and keep their contract, no data); the ui1 implementation adds `core.ui.swf.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font.unit`, `core.ui.font`, `godot.ui_fonts` and `godot.ui_fonts_shots`; see "UI groundwork 1 (ui1)".
 
 ## Run
 
@@ -1251,3 +1252,21 @@ README's "Text database" already said so.
 
 **Caspian §9 counts.** The handoff count is reproduced exactly and attributed; see "Level traversal". The oracle is
 `level-oracle static-models MP_007 ConquestSmall0`.
+
+## UI groundwork 1 (ui1)
+
+Design: [docs/design/ui-swf-fonts.md](docs/design/ui-swf-fonts.md). BF3's SwfMovie res (434 movies) are read at run
+time as symbol tables (no SWF renderer, no ActionScript): timelines, labels, placements, exports and imports, the
+Scaleform external-image atlases and their sub-images, edit texts, scaling grids and `DefineFont3` fonts. The atlas
+cutter maps labels and symbols to atlas rectangles (Godot `AtlasTexture`); the fonts are converted to in-memory
+TrueType for `FontFile.set_data` and cached (cache kind `ui-font`, converter version in the key);
+`UIFontMappingCollection` resolves `$MENU_*` / `$HUD_*`; the HUD screens' widget positions are read from their
+1280 x 720 stages.
+
+Design stage: the interface headers are in `src/bf3_core/include/bf3/core/ui/` (`swf_movie.h`, `swf_library.h`,
+`swf_census.h`, `swf_atlas.h`, `swf_font.h`, `font_ttf.h`, `ui_fonts.h`, `swf_layout.h`) and
+`src/bf3_godot/src/ui_assets.h`, `ui_font_check.h`; `ctest -R ui1.contract` checks that they compile and keep their
+contract. The exit gates, each with its command and threshold, are the design's §1: G1 census of all 434 movies, G2
+the iconsingame map, G3 / G4 / G5 font conversion, Godot load and screenshots in `b\shots\ui1\`, G6 font mapping,
+G7 HUD positions, G8 asan, G9 install unchanged; timing gates T1 (census <= 15 s) and T2 (font load cold <= 1.0 s,
+warm <= 0.25 s), each measured and printed by its ctest on a shared, noisy machine.

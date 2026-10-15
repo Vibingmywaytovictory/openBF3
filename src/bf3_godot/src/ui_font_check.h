@@ -11,9 +11,11 @@
 // the distinct codes; has_char for each), fonts.contours (TextServer.font_get_glyph_contours for every glyph:
 // the same contour count and orientation as the TrueType writer's, i.e. no inverted contour), fonts.metrics
 // (ascent / descent / advances of "MÉTRO" and "0123456789" at 64 px against the source layout, within 1 px),
-// fonts.metro (U+00C9 shapes to a real glyph, not .notdef), fonts.mapping (every $-name of the census resolves),
-// atlas.iconsingame (162 regions inside 4096 x 128, the label counts of swf_atlas.h), atlas.textures (the
-// uploaded ImageTexture sizes), hud.table (86 placements on the 14 screens), install.unchanged.
+// fonts.kerning (Purista "AV" narrower than "A" + "V" by the kern pair, within 1 px), fonts.metro (U+00C9 shapes
+// to a real glyph, not .notdef), fonts.mapping (every $-name of the census resolves), fonts.coverage (reported),
+// atlas.iconsingame (162 regions inside 4096 x 128, the label counts of swf_atlas.h), atlas.regions (AtlasTexture
+// rectangles of the design's spot checks; the uploaded ImageTexture sizes), hud.table (86 placements on the 14
+// screens), install.unchanged. The row list in docs/design/ui-swf-fonts.md §11.1 is authoritative.
 //
 // The screens drawn for the shots: sample strings in each font at 16 / 32 / 64 px on a dark background
 // ("OPERATION MÉTRO", the alphabet, "31 / 155", the Venice digits), the coverage table (every code of each font in
