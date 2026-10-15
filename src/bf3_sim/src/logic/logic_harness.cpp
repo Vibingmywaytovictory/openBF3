@@ -277,6 +277,9 @@ core::Result<LogicRunReport> run_logic_script(std::shared_ptr<const LogicGraph> 
 	if (!p_graph) {
 		return core::make_error("logic script: no graph");
 	}
+	if (p_options.ticks > kMaxLogicScriptTicks) {
+		return core::make_error("logic script: " + std::to_string(p_options.ticks) + " ticks is more than " + std::to_string(kMaxLogicScriptTicks));
+	}
 	const LogicGraph &g = *p_graph;
 	core::Result<LogicRuntime> created = LogicRuntime::create(p_graph, p_options.runtime);
 	if (!created) {

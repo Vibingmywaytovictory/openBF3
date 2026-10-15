@@ -396,6 +396,10 @@ int cmd_run(const LogicGraph &p_graph_ref, const std::vector<std::string> &p_arg
 		if (a == "--script" && has_value) {
 			script = p_args[++i];
 		} else if (a == "--ticks" && has_value && parse_u64(p_args[i + 1], v)) {
+			if (v > lg::kMaxLogicScriptTicks) {
+				std::fprintf(stderr, "logic run: --ticks %llu is more than %u\n", static_cast<unsigned long long>(v), lg::kMaxLogicScriptTicks);
+				return 2;
+			}
 			ticks = v;
 			++i;
 		} else if (a == "--seed" && has_value && parse_u64(p_args[i + 1], v)) {

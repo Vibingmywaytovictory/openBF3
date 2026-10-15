@@ -719,6 +719,10 @@ void LogicGraph::Builder::add_input(uint32_t p_node, int32_t p_port, const Logic
 	parts_->inputs.emplace_back(p_node, in);
 }
 
+uint32_t LogicGraph::Builder::add_text(std::string_view p_text) {
+	return parts_->intern(p_text);
+}
+
 void LogicGraph::Builder::add_event(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port, LogicEventTarget p_target_type,
 		uint64_t p_connection) {
 	parts_->add_edge(parts_->events, p_source, p_source_port, p_target, p_target_port, p_target_type, networked_to_clients(p_target_type), p_connection);

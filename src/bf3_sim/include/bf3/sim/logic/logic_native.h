@@ -76,6 +76,9 @@ std::optional<NativePortBinding> native_port(LogicTypeId p_type, NativePortDir p
 // filtered by node and kind. A stub starts from its node's own params (Enabled: the entity's Enabled field, e.g. true
 // on every Caspian VehicleSpawn), and an entry is written only when a value actually changes; an Input entry is
 // written for every Recorded input.
+// The timeline is bounded: past kMaxNativeTimelineEntries entries apply() fails (a hostile graph that toggles a
+// native every tick cannot grow it without limit).
+inline constexpr size_t kMaxNativeTimelineEntries = size_t(1) << 22;
 struct NativeTimelineEntry {
 	Tick tick = 0;
 	uint32_t node = 0;

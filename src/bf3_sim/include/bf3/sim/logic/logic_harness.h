@@ -39,6 +39,9 @@ enum class LogicScriptKind : uint8_t {
 	ConquestCaptures, // the captures of conquest_order at their ticks
 };
 
+// The longest scripted run (19.4 h at 60 Hz): run_logic_script keeps one drain-time sample per tick, so it refuses more.
+inline constexpr Tick kMaxLogicScriptTicks = Tick(1) << 22;
+
 struct LogicScriptOptions {
 	LogicScriptKind kind = LogicScriptKind::Idle;
 	Tick ticks = 60 * 60 * 10; // ticks stepped after start() (10 min at 60 Hz)

@@ -264,6 +264,8 @@ public:
 		uint32_t add_node(LogicTypeId p_type, LogicRealm p_realm, uint32_t p_scope, const Guid &p_guid);
 		void add_param(uint32_t p_node, int32_t p_field, const LogicValue &p_value, uint16_t p_element = 0);
 		void add_input(uint32_t p_node, int32_t p_port, const LogicValue &p_value);
+		// Interns p_text into texts(); the index is a Text value's `i` (Compare Operator, Setting names, strings).
+		uint32_t add_text(std::string_view p_text);
 		void add_event(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port,
 				LogicEventTarget p_target_type = LogicEventTarget::Server, uint64_t p_connection = 0);
 		// A networked event this side fires but does not deliver (see networked_edges()); p_target may be kNoLogicIndex.

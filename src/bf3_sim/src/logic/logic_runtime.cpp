@@ -118,6 +118,7 @@ constexpr int32_t kTransform = gp::logic_port_id("Transform");
 
 // Out0..Out9 and In0..In9 (EventSwitch, RandomMultiEvent, IntHub, MathOp).
 constexpr size_t kMaxOutputs = 10;
+static_assert(kMaxOutputs < 64, "RandomMultiEvent keeps its fired outputs in a uint64_t mask");
 constexpr int32_t kOutN[kMaxOutputs] = { gp::logic_port_id("Out0"), gp::logic_port_id("Out1"), gp::logic_port_id("Out2"), gp::logic_port_id("Out3"),
 	gp::logic_port_id("Out4"), gp::logic_port_id("Out5"), gp::logic_port_id("Out6"), gp::logic_port_id("Out7"), gp::logic_port_id("Out8"),
 	gp::logic_port_id("Out9") };

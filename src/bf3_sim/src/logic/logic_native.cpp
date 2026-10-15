@@ -122,6 +122,7 @@ struct LogicNativeStubs::State {
 	std::shared_ptr<const gp::LogicGraph> graph;
 	std::vector<std::optional<NativeStubState>> stubs; // per node; set for Native nodes
 	std::vector<NativeTimelineEntry> timeline;
+	bool timeline_full = false; // a note() was refused at kMaxNativeTimelineEntries; apply() then fails
 	Tick tick = 0; // the last tick applied
 	struct Pending {
 		Tick tick = 0;
@@ -136,6 +137,10 @@ struct LogicNativeStubs::State {
 		e.node = p_node;
 		e.what = p_what;
 		e.value = p_value;
+		if (timeline.size() >= kMaxNativeTimelineEntries) {
+			timeline_full = true;
+			return;
+		}
 		timeline.push_back(e);
 	}
 
@@ -245,6 +250,9 @@ core::Status LogicNativeStubs::apply(Tick p_tick, std::span<const LogicEffect> p
 				s.note(e.node, NativeTimelineEntry::What::Input, e.port);
 				break;
 		}
+	}
+	if (s.timeline_full) {
+		return core::make_error("logic natives: the timeline holds more than " + std::to_string(kMaxNativeTimelineEntries) + " entries");
 	}
 	return core::Status::success();
 }
