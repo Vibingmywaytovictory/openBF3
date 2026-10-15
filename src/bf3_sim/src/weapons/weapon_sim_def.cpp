@@ -7,8 +7,10 @@
 #include "weapons_internal.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <string>
+#include <system_error>
 
 namespace bf3::sim::weapons {
 
@@ -23,6 +25,26 @@ constexpr SimTime kMinInterval = kTimeUnitsPerTick / kMaxShotsPerTick;
 constexpr float kMaxDistance = 100'000.0f; // m: falloff distances
 constexpr float kMaxFactor = 10'000.0f; // dimensionless multipliers (sway modifiers, recoil scales)
 constexpr float kMaxOffset = kMaxRadius; // m: ShotConfigData.InitialPosition components
+
+// The decimal the data's author wrote for a float: the shortest decimal that reads back as the same float
+// (std::to_chars, an exactly specified algorithm, so every machine gets the same digits), read back as a double.
+// The data's 1.8 s is the float 1.79999995..., 107,999,997 units when converted as it stands; its shortest decimal is
+// "1.8", exactly 108,000,000 units, the number the plan's oracles quote (1.3 s bolt = 78,000,000, 0.48 s pump =
+// 28,800,000, 3.6 s fuse = 216,000,000). Every data time, rate and fraction goes through this once, in the def
+// build; the resulting integers are what the simulation adds and hashes.
+double data_decimal(float p_value) {
+	if (!std::isfinite(p_value)) {
+		return double(p_value);
+	}
+	char buf[48];
+	const std::to_chars_result w = std::to_chars(buf, buf + sizeof(buf), p_value);
+	if (w.ec != std::errc()) {
+		return double(p_value);
+	}
+	double out = 0;
+	const std::from_chars_result r = std::from_chars(buf, w.ptr, out);
+	return r.ec == std::errc() && r.ptr == w.ptr ? out : double(p_value);
+}
 
 // Collects the first violated bound as "<variant>: <field> <what>".
 class Checker {
@@ -58,7 +80,7 @@ public:
 	}
 	// Seconds of data in [0, 60] -> units.
 	SimTime time(float p_seconds, const std::string &p_field) {
-		return seconds_to_units(double(range(p_seconds, 0.0f, float(units_to_seconds(kMaxDefTime)), p_field)));
+		return seconds_to_units(data_decimal(range(p_seconds, 0.0f, float(units_to_seconds(kMaxDefTime)), p_field)));
 	}
 	// A time that saturates at 60 s instead of being refused (HoldAndReleaseData.MaxHoldTime: the M67's 9999 means
 	// "no limit").
@@ -67,7 +89,7 @@ public:
 			fail(p_field, std::isfinite(p_seconds) ? "is negative" : "is not finite");
 			return 0;
 		}
-		return seconds_to_units(double(std::min(p_seconds, float(units_to_seconds(kMaxDefTime)))));
+		return seconds_to_units(data_decimal(std::min(p_seconds, float(units_to_seconds(kMaxDefTime)))));
 	}
 	float angle(float p_degrees, const std::string &p_field) { return range(p_degrees, 0.0f, kMaxAngle, p_field); }
 	float signed_angle(float p_degrees, const std::string &p_field) { return range(p_degrees, -kMaxAngle, kMaxAngle, p_field); }
@@ -414,7 +436,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 		if (!(rof > 0)) {
 			c.fail("RateOfFire", "must be > 0");
 		}
-		m.interval = rpm_to_interval(double(rof));
+		m.interval = rpm_to_interval(data_decimal(rof));
 		if (m.interval < kMinInterval) {
 			c.fail("RateOfFire", "= " + std::to_string(rof) + " gives an interval below tick / " + std::to_string(kMaxShotsPerTick));
 		}
@@ -423,7 +445,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 			if (!(burst > 0)) {
 				c.fail("RateOfFireForBurst", "must be > 0 for a burst mode");
 			}
-			m.burst_interval = rpm_to_interval(double(burst));
+			m.burst_interval = rpm_to_interval(data_decimal(burst));
 			if (m.burst_interval < kMinInterval) {
 				c.fail("RateOfFireForBurst", "= " + std::to_string(burst) + " gives an interval below tick / " + std::to_string(kMaxShotsPerTick));
 			}
@@ -438,8 +460,8 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	}
 	d.mode_count = uint8_t(logics.size());
 
-	d.bolt_cycle = seconds_to_units(double(c.range(f.bolt_action_delay, 0.0f, 60.0f, "BoltActionDelay")) +
-			double(c.range(f.bolt_action_time, 0.0f, 60.0f, "BoltActionTime")));
+	d.bolt_cycle = seconds_to_units(data_decimal(c.range(f.bolt_action_delay, 0.0f, 60.0f, "BoltActionDelay")) +
+			data_decimal(c.range(f.bolt_action_time, 0.0f, 60.0f, "BoltActionTime")));
 	if (d.bolt_cycle >= kMaxDefTime) {
 		c.fail("BoltActionDelay + BoltActionTime", "is above 60 s");
 	}
@@ -502,8 +524,8 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 			}
 			break;
 	}
-	d.reload_commit_tactical = scale_units(d.reload_tactical, double(d.reload_threshold));
-	d.reload_commit_empty = scale_units(d.reload_empty, double(d.reload_threshold));
+	d.reload_commit_tactical = scale_units(d.reload_tactical, data_decimal(d.reload_threshold));
+	d.reload_commit_empty = scale_units(d.reload_empty, data_decimal(d.reload_threshold));
 	d.switch_cancels_reload = f.reload_logic == "rlWeaponSwitchCancelsUnfinishedReload";
 	d.always_auto_reload = f.always_auto_reload;
 	d.hold_off_reload_until_fire_release = f.hold_off_reload_until_fire_release;
@@ -597,7 +619,7 @@ core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<con
 	table->materials = std::move(p_materials);
 	table->mechanics = p_options.mechanics;
 	table->infinite_magazine = p_options.infinite_magazine;
-	table->sprint_recover_time = seconds_to_units(double(p_options.sprint_recover_seconds));
+	table->sprint_recover_time = seconds_to_units(data_decimal(p_options.sprint_recover_seconds));
 	table->hash = weapon_table_hash(*table);
 	return std::shared_ptr<const WeaponTable>(std::move(table));
 }

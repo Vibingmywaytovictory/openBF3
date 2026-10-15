@@ -303,7 +303,8 @@ void check_bursts(Rows &r_rows, const WeaponCheckInputs &p_in) {
 			r_rows.add("W1", c.name, false, "variant missing", "");
 			continue;
 		}
-		const std::optional<FireTimingResult> t = timing(*p_in.table, *id, FireScript::Tap, 120, 0, p_in.eye_height, p_in.match_seed);
+		// 30 settle ticks: a burst pressed in the script's last ticks completes after it (the burst runs without fire).
+		const std::optional<FireTimingResult> t = timing(*p_in.table, *id, FireScript::Tap, 120, 30, p_in.eye_height, p_in.match_seed);
 		if (!t) {
 			continue;
 		}

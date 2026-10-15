@@ -378,3 +378,12 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_wp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.weapons.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
 endif()
+# M2a weapons: sim.weapons.unit runs the oracle rows (weapon_checks.h) on synthetic defs carrying the 7.1 numbers plus
+# the unit rows (fire modes, spread / recoil, reloads, determinism, hostile bounds, capsules, damage, explosives). No data.
+openbf3_test(test_weapons test_main.cpp weapons_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_weapons PRIVATE bf3_sim)
+add_test(NAME sim.weapons.unit COMMAND test_weapons --test-suite=weapons-unit)
+set_tests_properties(sim.weapons.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    set_tests_properties(sim.weapons.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()

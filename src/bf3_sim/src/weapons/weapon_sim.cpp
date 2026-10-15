@@ -218,8 +218,10 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 			case WeaponPhase::Reloading:
 			case WeaponPhase::ReloadShell:
 				if (p_d.reload_type == ReloadType::SingleBullet) {
-					// Fire between shells ends the reload with the shells loaded so far [inferred].
-					if (pending && r_s.magazine > 0 && !p_blocked) {
+					// Fire between shells ends the reload with the shells loaded so far [inferred]. Not while the reload
+					// request is held: Ready would start the reload again at once and the two would alternate for the
+					// rest of the tick (found by the W8 random-command invariants: 48 dropped timed events).
+					if (pending && r_s.magazine > 0 && !p_blocked && !r_io.in.reload) {
 						offer(now, Action::InterruptReload);
 					}
 					offer(std::max(now, r_s.phase_end), r_s.phase == WeaponPhase::Reloading ? Action::ShellStart : Action::ShellLoaded);
