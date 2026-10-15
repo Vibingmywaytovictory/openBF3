@@ -202,4 +202,54 @@ bool WaveBank::resident(WaveId p_wave) const {
 	return false;
 }
 
+Result<std::shared_ptr<const WaveBank>> WaveBank::from_memory(std::vector<SoundWaveInfo> p_waves, std::vector<std::vector<std::vector<uint8_t>>> p_chunks,
+		std::string_view p_language) {
+	if (p_chunks.size() != p_waves.size()) {
+		return make_error("wave bank: " + std::to_string(p_chunks.size()) + " chunk lists for " + std::to_string(p_waves.size()) + " waves");
+	}
+	std::shared_ptr<WaveBank> bank(new WaveBank());
+	bank->waves_ = std::move(p_waves);
+	bank->wave_chunks_.resize(bank->waves_.size());
+	bank->stats_.waves = bank->waves_.size();
+	uint64_t total = 0;
+	for (size_t w = 0; w < bank->waves_.size(); ++w) {
+		const SoundWaveInfo &wave = bank->waves_[w];
+		if (p_chunks[w].size() != wave.chunks.size()) {
+			return make_error("wave bank: " + wave.name + ": chunk count");
+		}
+		if (!bank->by_partition_.emplace(wave.partition, WaveId(w)).second) {
+			return make_error("wave bank: " + wave.name + ": duplicate partition");
+		}
+		for (size_t c = 0; c < wave.chunks.size(); ++c) {
+			if (p_chunks[w][c].size() != wave.chunks[c].size) {
+				return make_error("wave bank: " + wave.name + ": chunk " + std::to_string(c) + " size");
+			}
+			bank->wave_chunks_[w].push_back(uint32_t(bank->chunk_bytes_.size()));
+			total += p_chunks[w][c].size();
+			bank->chunk_bytes_.push_back(std::move(p_chunks[w][c]));
+		}
+		++bank->stats_.resident_waves;
+		const std::optional<std::pair<uint32_t, uint32_t>> range = playable_variations(wave, p_language);
+		if (!range) {
+			continue;
+		}
+		for (uint32_t v = range->first; v < range->first + range->second; ++v) {
+			const WaveVariation &var = wave.variations[v];
+			if (var.chunk_index >= bank->wave_chunks_[w].size()) {
+				return make_error("wave bank: " + wave.name + ": chunk index");
+			}
+			const std::vector<uint8_t> &bytes = bank->chunk_bytes_[bank->wave_chunks_[w][var.chunk_index]];
+			for (size_t s = 0; s < var.segments.size(); ++s) {
+				Result<SoundStreamHeader> h = parse_stream_header(bytes, var.segments[s].samples_offset);
+				if (!h) {
+					return make_error("wave bank: " + wave.name + " segment " + std::to_string(s) + ": " + h.error().message);
+				}
+			}
+		}
+	}
+	bank->stats_.chunks = bank->chunk_bytes_.size();
+	bank->stats_.resident_bytes = total;
+	return std::shared_ptr<const WaveBank>(std::move(bank));
+}
+
 } // namespace bf3::core::audio

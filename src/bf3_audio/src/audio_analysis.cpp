@@ -153,8 +153,10 @@ std::vector<uint64_t> detect_onsets(std::span<const float> p_interleaved, uint32
 				peak = std::max(peak, std::fabs(x[k]));
 			}
 			uint64_t onset = i;
+			const float bed = float(double(p_options.bed_sigma) * std::sqrt(std::max(floor, 0.0)));
+			const float threshold = std::max(0.1f * peak, std::min(bed, peak));
 			for (uint64_t k = lo; k <= i; ++k) {
-				if (std::fabs(x[k]) >= 0.1f * peak) {
+				if (std::fabs(x[k]) >= threshold) {
 					onset = k;
 					break;
 				}

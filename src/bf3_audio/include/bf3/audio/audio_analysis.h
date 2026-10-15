@@ -14,8 +14,10 @@ namespace bf3::audio {
 //     envelope of a noisy tail swings by more than 12 dB, so a minimum floor fires inside the M16A3 corebass tails;
 //     measured on the G7 render: 11-14 onsets per 10-round burst with the minimum, exactly 10 with the mean);
 //   an onset is the first frame n where e[n] >= floor[n] x 10^(rise_db / 10) (and e[n] above silence_dbfs), refined
-//   back to the first frame in [n - window, n] whose |x| reaches -20 dB of the largest |x| in [n - window, n + window];
-//   then nothing for min_gap_ms.
+//   back to the first frame in [n - window, n] whose |x| reaches -20 dB of the largest |x| in [n - window, n + window]
+//   and bed_sigma x the floor's RMS (sqrt(floor[n])): without the second bound, a bed only 20 dB under the peak has
+//   samples above -20 dB of it in nearly every window and the refinement lands on the bed up to a window early
+//   (measured by audio.dsp.unit: 78-80 frames early on the click train); then nothing for min_gap_ms.
 // audio.dsp.unit tests it on a synthetic 75 ms click train over a sustained noise bed 20 dB down: exactly the clicks,
 // each within 2 frames.
 struct OnsetOptions {
@@ -24,6 +26,7 @@ struct OnsetOptions {
 	float rise_db = 12.0f;
 	float silence_dbfs = -90.0f;
 	float min_gap_ms = 30.0f; // refractory period
+	float bed_sigma = 4.0f; // refinement threshold over the floor's RMS (Gaussian bed: 6e-5 per frame above it)
 };
 
 // Frames (into the mono sum of p_interleaved) where a transient starts.

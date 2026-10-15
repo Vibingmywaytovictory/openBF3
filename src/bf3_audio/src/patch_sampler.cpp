@@ -344,11 +344,14 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 				next.segment = pick_loop_segment(*this, s);
 			}
 			if (next.play) {
-				const uint16_t previous = play.segment;
-				(void)previous;
+				// The new segment's first sample enters history[3], two input positions ahead of history[1] where
+				// the next output frame (p_frame) reads at play.frac: it is heard ceil((2 - frac) / ratio) output
+				// frames later (2 at ratio 1), the frame the trace reports as its start.
+				const double ratio_now = std::max(1e-9, double(play.rate) / double(mix_rate) * double(s.pitch));
+				const uint64_t heard = p_frame + uint64_t(std::max(0.0, std::ceil((2.0 - play.frac) / ratio_now - 1e-9)));
 				if (open_segment(*this, s, play, next.segment)) {
 					s.last_segment = next.segment;
-					trace_entry(p_frame, node, uint8_t(p_slot), next.segment, next.kind, s.pitch, p_frame);
+					trace_entry(heard, node, uint8_t(p_slot), next.segment, next.kind, s.pitch, heard);
 					continue;
 				}
 				++stats.decode_errors;

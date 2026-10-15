@@ -61,6 +61,11 @@ public:
 	static Result<std::shared_ptr<const WaveBank>> load(const Install &p_install, const LevelMount &p_mount, std::vector<SoundWaveInfo> p_waves,
 			const WaveBankOptions &p_options);
 
+	// A bank from bytes already in memory (unit tests, tools): p_chunks[w][c] are the bytes of wave w's chunk c, each
+	// as long as its ChunkSize. The same checks as load() (sizes, every playable segment's header).
+	static Result<std::shared_ptr<const WaveBank>> from_memory(std::vector<SoundWaveInfo> p_waves, std::vector<std::vector<std::vector<uint8_t>>> p_chunks,
+			std::string_view p_language = "English");
+
 	const std::vector<SoundWaveInfo> &waves() const { return waves_; }
 	std::optional<WaveId> find(const Guid &p_partition) const; // by the wave partition's GUID
 	// The bytes of a wave's chunk; empty when that wave is not resident.
