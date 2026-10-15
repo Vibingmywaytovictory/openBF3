@@ -29,6 +29,7 @@ namespace bf3::render {
 struct PreparedSurface {
 	size_t subset = 0;
 	uint32_t material_index = 0; // into MeshAsset.Materials
+	std::string material_name; // the MeshSet subset's material name (MeshMaterial binding, for logs and caches)
 	std::optional<core::res::SubsetCategory> category;
 	std::vector<float> positions; // xyz per vertex
 	std::vector<float> normals; // xyz (empty when the subset has none)
@@ -38,6 +39,7 @@ struct PreparedSurface {
 	std::vector<uint8_t> colors; // rgba
 	std::vector<int32_t> bones; // 4 per vertex (skinned only)
 	std::vector<float> weights; // 4 per vertex (skinned only)
+	std::vector<uint16_t> parts; // composite meshes: the part of each vertex (hidden-part filtering), else empty
 	std::vector<int32_t> indices; // clockwise triangles
 	std::array<float, 3> aabb_min{};
 	std::array<float, 3> aabb_max{};

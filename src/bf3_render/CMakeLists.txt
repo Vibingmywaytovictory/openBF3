@@ -15,3 +15,11 @@ add_library(bf3_render STATIC
 target_include_directories(bf3_render PUBLIC include)
 target_link_libraries(bf3_render PUBLIC bf3_core bf3_anim)
 openbf3_module(bf3_render)
+
+# Prepared meshes through the derived-data cache and `bf3dump prepare` (plan §2.4 step 3, §3.12).
+target_sources(bf3_render PRIVATE
+    src/mesh_cache.cpp
+    src/level_prepare.cpp
+    include/bf3/render/mesh_cache.h
+    include/bf3/render/level_prepare.h
+)

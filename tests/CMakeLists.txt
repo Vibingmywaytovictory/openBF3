@@ -175,3 +175,17 @@ set_tests_properties(core.level.unit core.level PROPERTIES TIMEOUT 600)
 if(OPENBF3_ASAN)
     set_tests_properties(core.level.unit core.level PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
+# Converters through the derived-data cache and `bf3dump prepare` (bf3_core cache/cached_convert.h, gameplay/
+# weapon_blob.h; bf3_render mesh_cache.h, level_prepare.h). prepare.unit: blob round trips, hostile blobs, keys,
+# prepare twice / damaged entries on scratch roots (no data). prepare: the M9 viewmodel meshes and weapons from the
+# install into a scratch cache root (exits 77 = skipped without an install).
+openbf3_test(test_prepare test_main.cpp prepare_tests.cpp test_support.h)
+target_link_libraries(test_prepare PRIVATE bf3_render)
+add_test(NAME prepare.unit COMMAND test_prepare --test-suite=prepare-unit)
+add_test(NAME prepare COMMAND test_prepare --test-suite=prepare)
+set_tests_properties(prepare PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(prepare.unit prepare PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_prepare_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(prepare.unit prepare PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_prepare_cl_dir}")
+endif()

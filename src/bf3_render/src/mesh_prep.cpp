@@ -25,6 +25,7 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 		PreparedSurface s;
 		s.subset = d.subset;
 		s.material_index = d.material_index;
+		s.material_name = p_mesh.mesh.lods[p_lod].subsets[d.subset].material_name;
 		s.category = d.category;
 		const size_t n = d.positions.size();
 		if (n == 0 || d.indices.size() < 3) {
@@ -72,6 +73,9 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 			for (const std::array<uint8_t, 4> &c : *d.colors) {
 				s.colors.insert(s.colors.end(), c.begin(), c.end());
 			}
+		}
+		if (d.parts && d.parts->size() == n) {
+			s.parts = *d.parts;
 		}
 		if (p_lane_binds != nullptr) {
 			if (d.subset >= p_lane_binds->size() || !d.bone_indices || d.bone_indices->size() != n) {

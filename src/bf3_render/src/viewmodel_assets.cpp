@@ -6,6 +6,7 @@
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/render/mesh_cache.h"
 
 #include <chrono>
 #include <cstdio>
@@ -120,7 +121,8 @@ const PreparedTexture *ViewmodelAssets::texture(const std::string &p_name) const
 	return nullptr;
 }
 
-core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::InstallReader &p_install, const ViewmodelSpec &p_spec, LoadProgress *r_progress) {
+core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::InstallReader &p_install, const ViewmodelSpec &p_spec, LoadProgress *r_progress,
+		core::Cache *p_cache) {
 	const Clock::time_point start = Clock::now();
 	auto progress = [&](const char *p_stage, int p_step) {
 		if (r_progress != nullptr) {
@@ -223,23 +225,41 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 	progress("decoding meshes", 5);
 	t0 = Clock::now();
 	const core::LevelMount &mount = lib.mount(0);
+	// The res alone (a few KB) gives the LOD's bone slots and the cache key; the geometry chunk is read only
+	// when the cache has no entry.
 	for (auto [part, skeleton] : { std::pair{ &a->arms, &a->arms_skeleton }, std::pair{ &a->weapon, &a->weapon_skeleton } }) {
-		core::Result<core::res::LoadedMeshSet> mesh = core::res::load_mesh_set(mount, part->mesh);
-		if (!mesh) {
-			return mesh.error();
+		const Clock::time_point tm = Clock::now();
+		core::Result<MeshHead> head = read_mesh_head(mount, part->mesh);
+		if (!head) {
+			return head.error();
 		}
-		if (mesh->mesh.lods.empty()) {
+		if (head->mesh.lods.empty()) {
 			return core::make_error(part->mesh + ": no LODs");
 		}
-		core::Result<std::vector<std::vector<int32_t>>> lanes = a->binds.bind_lod(mesh->mesh.lods[0], *skeleton, a->rig);
+		core::Result<std::vector<std::vector<int32_t>>> lanes = a->binds.bind_lod(head->mesh.lods[0], *skeleton, a->rig);
 		if (!lanes) {
 			return core::error_at(part->mesh, lanes.error());
 		}
-		core::Result<PreparedMesh> prepared = prepare_mesh(*mesh, 0, core::res::SubsetFilter::Drawn, &*lanes);
-		if (!prepared) {
-			return prepared.error();
+		MeshRequest request;
+		request.lods = { 0 };
+		request.filter = core::res::SubsetFilter::Drawn;
+		request.lane_binds = &*lanes;
+		core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, mount, *head, request);
+		if (!mesh) {
+			return mesh.error();
 		}
-		part->prepared = std::move(*prepared);
+		if (mesh->mesh.meshes.size() != 1) {
+			return core::make_error(part->mesh + ": no LOD 0 prepared");
+		}
+		part->prepared = std::move(mesh->mesh.meshes[0]);
+		part->cache = mesh->item;
+		part->seconds_mesh = since(tm);
+		char line[320];
+		std::snprintf(line, sizeof(line), "mesh %s: %s (%.1f KiB blob%s%s%s) in %.2f ms", part->mesh.c_str(),
+				p_cache != nullptr && p_cache->is_open() ? core::cache_outcome_name(part->cache.outcome) : "no cache", double(part->cache.payload_bytes) / 1024.0,
+				part->cache.dropped_corrupt ? ", damaged entry dropped" : "", part->cache.cache_error.empty() ? "" : ", ", part->cache.cache_error.c_str(),
+				part->seconds_mesh * 1000.0);
+		a->notes.push_back(line);
 	}
 	a->seconds_meshes = since(t0);
 

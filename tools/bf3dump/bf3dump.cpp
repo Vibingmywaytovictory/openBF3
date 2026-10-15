@@ -38,6 +38,8 @@
 //   level <LEVEL> <MODE> [--legacy-mvdb]  canonical placement listing of one level x mode
 //                              (level_commands.cpp; parity with research/probes/tools/level-oracle)
 //   levelmodes <LEVEL>         the modes a level offers
+//   prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N]
+//                              placed meshes + weapon variants into the derived-data cache (prepare_commands.cpp)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -54,6 +56,7 @@
 #include "text_commands.h"
 #include "json_number.h"
 #include "level_commands.h"
+#include "prepare_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -477,7 +480,8 @@ void usage() {
 			"  weapons [--level <sb>]\n"
 			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n"
 			"  level <LEVEL> <MODE> [--legacy-mvdb]\n"
-			"  levelmodes <LEVEL>\n");
+			"  levelmodes <LEVEL>\n"
+			"  prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes]\n");
 }
 
 } // namespace
@@ -568,6 +572,9 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "level" && (rest.size() == 2 || (rest.size() == 3 && rest[2] == "--legacy-mvdb"))) {
 		return bf3dump::cmd_level(ctx.install, rest[0], rest[1], rest.size() == 3);
+	}
+	if (cmd == "prepare") {
+		return bf3dump::cmd_prepare(ctx.reader, ctx.install, rest);
 	}
 	if (cmd == "levelmodes" && rest.size() == 1) {
 		return bf3dump::cmd_level_modes(ctx.install, rest[0]);

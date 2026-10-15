@@ -851,4 +851,33 @@ Result<std::vector<uint8_t>> LevelMount::read_stored(const EntryRef &p_entry) co
 	return impl_->read_stored_bytes(*s);
 }
 
+std::vector<Sha1> LevelMount::chunk_source_sha1s(const Guid &p_id) const {
+	// Mirrors read_chunk's choice of bytes.
+	std::optional<Sha1> record_sha1;
+	bool tail_only = false;
+	{
+		std::shared_lock lock(impl_->mutex);
+		const auto it = impl_->index.chunks.find(p_id);
+		if (it != impl_->index.chunks.end()) {
+			record_sha1 = it->second.stored.sha1;
+			tail_only = it->second.tail_only;
+		}
+	}
+	std::vector<Sha1> out;
+	if (record_sha1 && (!tail_only || impl_->install->cas().contains(*record_sha1))) {
+		out.push_back(*record_sha1);
+		return out;
+	}
+	const TocChunkSite *site = impl_->toc_chunk(p_id);
+	if (record_sha1) {
+		out.push_back(*record_sha1);
+	}
+	if (site != nullptr) {
+		out.push_back(site->sha1);
+	} else {
+		out.clear(); // read_chunk fails too
+	}
+	return out;
+}
+
 } // namespace bf3::core

@@ -78,6 +78,8 @@ set "GODOT=C:\path\to\Godot_v4.8-dev7_win64_console.exe"
 "%GODOT%" --headless --path bf3-opensource --main-loop DedicatedMainLoop -- --dedicated-seconds=10
 :: M9 1P empty reload on BF3 arms ("Viewmodel (M9 reload)"); headless check: --headless ... -- --m9-reload-check
 "%GODOT%" --path bf3-opensource res://scenes/m9_reload.tscn -- --quit-after=10 [--screenshot=C:\temp\m9.png --shot-times=0.1,1.2,1.3]
+:: derived-data cache (README "Preparing the cache"): convert a level x mode's meshes + weapons into user://bf3cache
+b\dev\tools\bf3dump\bf3dump.exe prepare MP_Subway TeamDeathMatch0 [--cache=<dir>] [--threads=N]
 :: weapon inspector (README "Weapon inspector and localisation"): F2 in game; the M0 exit check (PASS/FAIL, exit 0/1);
 :: one weapon's block on stdout
 "%GODOT%" --path bf3-opensource -- --inspector [--inspector-select=weapons/m16a4/u_m16_burst]
@@ -193,6 +195,122 @@ Tests: `core.cache` (scratch trees in `%TEMP%`; a temp directory plays the prote
 of every stored payload, and round-trips the decoded payloads. It reports *Skipped* without the variable. That data is
 exported from your own install by the research `ebx-dump` tool (`export <superbundle> <out_dir> <max_mb>`, an
 addition in a scratch copy) and never enters the repo.
+
+## Preparing the cache
+
+Plan §2.4 step 3 and §3.12: converted data goes into the `Cache` above, one item at a time, keyed by content.
+Two converters exist so far. Both are Godot-free and stream per item: a lane holds one item's arrays and frees them
+before it takes the next.
+
+* **Render meshes** (`bf3_render` `mesh_cache.h`). One item is one MeshSet res plus a request: the LODs, the subset
+  filter and, for skinned meshes, the skin lane binds. It yields one `PreparedMesh` per LOD, exactly what
+  `prepare_mesh` returns: the ArrayMesh-layout arrays of every surface and its material binding
+  (`MeshAsset.Materials` index and the subset's material name). Composite meshes also get the part of each vertex
+  (`PreparedSurface::parts`), so hidden destruction parts can be dropped when a level is instanced.
+  * Variation textures, hidden parts and baked transforms are applied per placement, so one blob serves every variant
+    and every level whose bytes are the same.
+  * Key: kind `mesh`. The sources are the manifest SHA-1 of the res, then of every chunk the requested LODs read
+    (`LevelMount::chunk_source_sha1s`, which mirrors `read_chunk`'s choice of bytes). It also covers the converter
+    version, the engine id, the blob format and `lods=..;filter=..;binds=<SHA-256 of the lane binds | none>`.
+  * The key comes from the few-KB res payload alone (`read_mesh_head`). A hit reads no chunk. A miss reads only the
+    chunks of LODs `0..max(requested)`.
+  * Blob `OBF3MESH` v1, layout in the header. `decode_mesh_blob` checks every count against the bytes left before it
+    allocates. It also checks the index range, the bone signs, the category and the mask bits, and refuses trailing
+    bytes.
+* **WeaponDefs** (`bf3_core` `gameplay/weapon_blob.h`). The blob `OBF3WDEF` v1 is every field in declaration order;
+  `encode(decode(b)) == b`.
+  * The sources are the EBX partitions the resolver touched, known only after it runs. A recording `EbxResolver`
+    lists them, absent names included.
+  * The list is stored under `weapon-deps`, keyed by the variant partition's SHA-1. The def is stored under `weapon`,
+    keyed by the current SHA-1 of every listed partition (zero for an absent one) and the list's SHA-256.
+  * A warm lookup reads the list and takes each SHA-1 from the mount's manifests: no EBX is parsed or resolved.
+* `cached_convert` (`cache/cached_convert.h`) runs one item:
+  * **hit**: the entry passed the cache's checks and the decoder;
+  * **converted**: this call wrote the entry;
+  * **reused**: another writer stored the same key meanwhile;
+  * **uncached**: no cache, or the put failed.
+  A blob that passes the SHA-256 but not the decoder is removed and reconverted, like a damaged one
+  (`dropped_corrupt`).
+* The engine id in every key is the pinned engine API folder, `4.8.dev7.c971f93e7`. The game and `bf3dump` therefore
+  compute the same keys, and an engine bump re-converts everything.
+* Textures are not cached (plan §2.4: resident BC data is decoded from the install at every load).
+
+`bf3dump prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes]` does the following:
+
+* Loads and traverses the level x mode and takes the mesh census.
+* Converts each distinct MeshSet of a kept scene mesh: the census's LODs (at most 4), or LOD 0 when every kept variant
+  is world kind. Drawn subsets, unskinned.
+* Converts every `SoldierWeaponUnlockAsset` under `weapons/` of the level database, with Win32/UI for the name SID.
+* Prints items, hits, misses (converted, reused, uncached), failures, dropped entries, bytes written and read, the
+  cache's entries and bytes before and after, timings and peak working set.
+
+Lanes default to all cores. The root defaults to the folder Godot's `user://bf3cache` resolves to for this project,
+`%APPDATA%\Godot\app_userdata\bf3-opensource\bf3cache`. This was checked: the game's log prints
+`C:\Users\<you>\AppData\Roaming\Godot\app_userdata\bf3-opensource\bf3cache`, and `bf3dump prepare` then opened the 2
+entries the game had written there. Writes go through `InstallReader::write_guard()`.
+
+**In the game** (`bf3_godot` `godot_cache.h`):
+
+* `acquire_cache` opens the root on the calling loader thread, so journal replay and the tree scan stay off the main
+  thread. Every holder in the process shares one `Cache`, which closes when the last holder releases it.
+* If the root is held by another process (`Busy`) or refused, the loaders convert without a cache.
+* The viewmodel demo's loader reads each mesh's res, binds its LOD to the shared skin and calls `load_mesh_cached`.
+  The status label's second line and the log show `converted` on a cold cache and `hit` on a warm one.
+* `--bf3-cache=<dir>` picks another root; `--no-cache` turns the cache off.
+* `--m9-reload-check` adds two rows:
+  * `cache.meshes`: both meshes went through the cache;
+  * `cache.equal_fresh`: the meshes the bridge drew equal a fresh conversion from the install, array for array.
+
+**Measured 2026-10-15** (Ryzen 7 5800X, 16 threads, NVMe, warm OS file cache, dev preset; scratch roots):
+
+| run | Metro TDM (MP_Subway TeamDeathMatch0) |
+|---|---|
+| items | 619 MeshSets (840 kept census variants, 10,873 placements; 921,956 vertices, 715,047 triangles over the prepared LODs) + 172 weapon variants = 963 entries (with 172 dependency lists) |
+| cold, 16 lanes (3 runs) | total 1.25-1.46 s: load + traverse 0.19-0.21 s, census 0.04 s, meshes 0.57-0.66 s, weapons 0.23-0.42 s; 963 puts |
+| warm, 16 lanes (3 runs) | total 0.68-0.91 s: 963 of 963 hits, 0 puts, 0 misses; meshes 0.04-0.13 s (53.6 MiB read, SHA-256 checked, decoded), weapons 0.03-0.05 s |
+| cold / warm, 4 lanes | 1.65-2.07 s / 0.95-1.32 s |
+| peak working set | 182-190 MiB cold, 174-181 MiB warm (target §7.9: converter peak RSS <= 0.5 GiB) |
+| cache size | 54.2 MiB in 963 entries (53.6 MiB of mesh blobs, 0.4 MiB of WeaponDefs) |
+
+* Caspian CQL (MP_007 ConquestLarge0): 251 MeshSets, 58.2 MiB, cold 0.70 s, warm 0.29 s with 595 of 595 hits;
+  peak 217 MiB.
+* XP3_Alborz CQL into the same root: 19 of 146 meshes were already there (same bytes as Caspian's). 7 of 172
+  weapons were hits; the other 165 differ because XP3 ships its own copies of the weapon partitions. Warm: 490 of
+  490 hits.
+* A second run over a prepared root writes no entry. The journal still gains its touch records (LRU recency) and a
+  close record.
+* Plan §7.9's load targets (client cold <= 15 s, warm <= 5 s) cover a whole level load inside Godot, which does not
+  exist yet. The prepare stage measured here is 1.3-2.1 s cold and 0.7-1.3 s warm on Metro.
+
+The viewmodel demo, windowed (RX 9070 XT, D3D12, fresh scratch root, then the same root again):
+
+* Cold: load 1.34 s, meshes 39 ms (arms converted 25.1 ms, M9 14.1 ms, including the flushed puts).
+* Warm: load 1.29 s, meshes 2.1 ms (hits in 1.40 ms and 0.65 ms).
+* Uncached conversion takes 3.3 ms and 1.2 ms. The Ant banks (1.0 s) dominate the load either way.
+* The cold and warm screenshots at clip time 1.2 s are pixel-identical below the status label.
+
+**Tests.**
+
+* `prepare.unit`, no data:
+  * mesh and WeaponDef blobs round-trip bit for bit (NaN and -0 included); every proper prefix is refused, and so are
+    hostile counts (2^60 LODs or surfaces, 4 G vertices), a bad magic or version, unknown mask bits, an index past
+    the vertices and a negative bone;
+  * a key changes with the converter version, a changed or reordered source SHA-1, the LODs, the filter and the lane
+    binds; a weapon key changes when a dependency is patched or an absent one appears;
+  * 48 items prepared twice give 48 hits and 0 puts;
+  * a flipped payload byte on disk and a blob that passes the SHA-256 but not the decoder are both dropped and
+    reconverted, and the next run is all hits;
+  * a root under the protected root is refused and the items convert uncached.
+* `prepare`, install; 77 = skipped without one:
+  * the arms, `m9_1p_mesh` and the 5 LODs of `m9_3p_mesh` go into a scratch root: converted, then hits, both equal
+    to a fresh conversion; a damaged M9 entry is dropped, reconverted, then a hit;
+  * the skinned viewmodel meshes through `load_viewmodel`: cold and warm equal the uncached load;
+  * all 172 MP_Subway WeaponDefs round-trip their blob, and `u_m9` and `u_m16_burst` give the same block cold and
+    warm;
+  * the install snapshot is unchanged.
+  * About 6 s.
+* `godot.m9_reload` runs with the default root.
+* `prepare.unit` and `prepare` also pass under the `asan` preset.
 
 ## Resource decoders (`bf3_core`, `include/bf3/core/res/`)
 

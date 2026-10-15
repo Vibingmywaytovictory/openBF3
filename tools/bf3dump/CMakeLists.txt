@@ -7,3 +7,6 @@ openbf3_module(bf3dump)
 target_sources(bf3dump PRIVATE weapon_commands.cpp weapon_commands.h)
 # Level traversal listing (bf3_core/level), parity with research/probes/tools/level-oracle.
 target_sources(bf3dump PRIVATE level_commands.cpp level_commands.h)
+# Derived-data cache preparation of one level x mode (bf3_render level_prepare.h).
+target_sources(bf3dump PRIVATE prepare_commands.cpp prepare_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_render psapi)

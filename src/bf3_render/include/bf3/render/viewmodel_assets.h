@@ -16,6 +16,8 @@
 #include "bf3/anim/pose.h"
 #include "bf3/anim/skeleton.h"
 #include "bf3/anim/skinning.h"
+#include "bf3/core/cache/cached_convert.h"
+#include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/result.h"
@@ -66,6 +68,8 @@ struct ViewmodelPart {
 	uint32_t variation_hash = 0;
 	MeshMaterials materials;
 	PreparedMesh prepared;
+	core::CachedItem cache; // how the prepared mesh was obtained (hit, converted, ... uncached without a cache)
+	double seconds_mesh = 0.0; // res read + key + cache lookup or conversion
 };
 
 struct ViewmodelAssets {
@@ -88,7 +92,10 @@ struct ViewmodelAssets {
 	const PreparedTexture *texture(const std::string &p_name) const;
 };
 
-// Loads and prepares everything. Texture decode runs on all cores (bf3::core::parallel_for).
-core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::InstallReader &p_install, const ViewmodelSpec &p_spec, LoadProgress *r_progress);
+// Loads and prepares everything. Texture decode runs on all cores (bf3::core::parallel_for). With p_cache (open),
+// the two meshes come from the derived-data cache when their keys match and are converted and put otherwise
+// (bf3/render/mesh_cache.h); textures are always decoded from the install (plan §2.4).
+core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::InstallReader &p_install, const ViewmodelSpec &p_spec, LoadProgress *r_progress,
+		core::Cache *p_cache = nullptr);
 
 } // namespace bf3::render

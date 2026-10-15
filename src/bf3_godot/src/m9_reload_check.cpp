@@ -6,6 +6,8 @@
 
 #include "bf3/anim/pose.h"
 #include "bf3/anim/skinning.h"
+#include "bf3/core/install.h"
+#include "bf3/render/mesh_cache.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
@@ -183,6 +185,53 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 	add("meshes", (vertices > 0 && bound_vertices == vertices) ? 0 : 1,
 			fmt("arms %s: %zu v / %zu t; M9: %zu v / %zu t; %zu drawn surfaces, every vertex skinned", a.arms.mesh.substr(a.arms.mesh.rfind('/') + 1).c_str(),
 					a.arms.prepared.vertices, a.arms.prepared.triangles, a.weapon.prepared.vertices, a.weapon.prepared.triangles, surfaces));
+
+	// Derived-data cache: the meshes the bridge built came from the cache (hit) or were converted and put; either
+	// way they must equal a conversion straight from the install, array for array.
+	{
+		const bool used = p_demo.cache_used();
+		const bool stored = a.arms.cache.outcome != bf3::core::CacheOutcome::Uncached && a.weapon.cache.outcome != bf3::core::CacheOutcome::Uncached;
+		add("cache.meshes", used ? (stored ? 0 : 1) : 2,
+				fmt("%s; arms %s %.2f ms, M9 %s %.2f ms", p_demo.cache_summary().c_str(), bf3::core::cache_outcome_name(a.arms.cache.outcome),
+						a.arms.seconds_mesh * 1000.0, bf3::core::cache_outcome_name(a.weapon.cache.outcome), a.weapon.seconds_mesh * 1000.0));
+		std::string detail;
+		bool same = false;
+		bf3::core::Result<std::shared_ptr<bf3::core::Install>> install = bf3::core::Install::open(p_demo.install());
+		if (install) {
+			bf3::core::Result<bf3::core::LevelMount> mount = (*install)->mount_superbundle(p_demo.spec().superbundle);
+			if (mount && mount->load_all_bundles().ok()) {
+				bf3::anim::SkinBinds binds; // bound in the loader's order, so the bind indices agree
+				same = true;
+				for (auto [part, skeleton] : { std::pair{ &a.arms, &a.arms_skeleton }, std::pair{ &a.weapon, &a.weapon_skeleton } }) {
+					bf3::core::Result<bf3::render::MeshHead> head = bf3::render::read_mesh_head(*mount, part->mesh);
+					if (!head || head->mesh.lods.empty()) {
+						same = false;
+						detail = part->mesh + ": no res";
+						break;
+					}
+					bf3::core::Result<std::vector<std::vector<int32_t>>> lanes = binds.bind_lod(head->mesh.lods[0], *skeleton, a.rig);
+					bf3::render::MeshRequest request;
+					request.lane_binds = lanes ? &*lanes : nullptr;
+					bf3::core::Result<bf3::render::CachedMesh> fresh = lanes ? bf3::render::load_mesh_cached(nullptr, *mount, *head, request)
+																			 : bf3::core::Result<bf3::render::CachedMesh>(lanes.error());
+					if (!fresh || fresh->mesh.meshes.size() != 1 || !bf3::render::same_prepared(fresh->mesh.meshes[0], part->prepared)) {
+						same = false;
+						detail = part->mesh + (fresh ? ": arrays differ" : ": " + fresh.error().message);
+						break;
+					}
+				}
+				if (same) {
+					detail = fmt("arms and M9: every array bit-identical to a fresh conversion from the install (%zu + %zu vertices)", a.arms.prepared.vertices,
+							a.weapon.prepared.vertices);
+				}
+			} else {
+				detail = mount ? "bundles did not load" : mount.error().message;
+			}
+		} else {
+			detail = install.error().message;
+		}
+		add("cache.equal_fresh", same ? 0 : 1, detail);
+	}
 
 	// Materials: 1P FOV from the weapon data, z clip scale, textures bound.
 	{
