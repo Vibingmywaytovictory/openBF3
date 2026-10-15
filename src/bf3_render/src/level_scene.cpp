@@ -351,6 +351,8 @@ SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world)
 std::string material_key(const MaterialSlot &p_slot) {
 	std::string key = p_slot.shader;
 	key += '\x01';
+	key += p_slot.variation_shader; // L1: the variation's own graph (empty on M1-era slots)
+	key += '\x01';
 	for (const auto &[name, texture] : p_slot.textures) {
 		key += lower(name);
 		key += '=';
@@ -368,10 +370,74 @@ std::string material_key(const MaterialSlot &p_slot) {
 	return key;
 }
 
+// The L1 resolver's answer as part of a material's dedupe key (the neighbour tier depends on the mesh name).
+std::string look_key(const LookMaterial &p_look) {
+	std::string key;
+	for (const std::optional<LookTexture> *t : { &p_look.color, &p_look.normal }) {
+		key += '\x03';
+		if (*t) {
+			key += (*t)->name;
+			key += char('0' + (*t)->channel);
+			char bits[4];
+			std::memcpy(bits, &(*t)->scale, 4);
+			key.append(bits, 4);
+		}
+	}
+	key += char('0' + int(p_look.blend));
+	key += p_look.double_sided ? 'd' : 's';
+	key += p_look.glass ? 'g' : '-';
+	return key;
+}
+
 struct PlanBuilder {
 	LevelScenePlan &plan;
 	std::unordered_map<std::string, uint32_t> material_by_key;
 	std::unordered_map<std::string, uint32_t> texture_by_name;
+	LookResolver *resolver = nullptr; // L1
+
+	// L1: the material of a slot as the look resolver draws it, or kSceneUndrawnMaterial.
+	uint32_t look_material(const MaterialSlot &p_slot, std::string_view p_mesh) {
+		LookMaterial look = resolver->resolve(p_slot, p_mesh);
+		if (!look.drawn) {
+			return kSceneUndrawnMaterial;
+		}
+		const std::string key = material_key(p_slot) + '\x04' + look_key(look);
+		const auto found = material_by_key.find(key);
+		if (found != material_by_key.end()) {
+			return found->second;
+		}
+		SceneMaterialPlan m;
+		m.slot = p_slot;
+		m.textures.assign(p_slot.textures.size(), -1);
+		m.alpha_test = look.blend == LookBlend::AlphaTest;
+		m.blend = look.blend == LookBlend::Blend;
+		m.double_sided = look.double_sided;
+		m.glass = look.glass;
+		const auto bind = [&](const LookTexture &p_t, TextureRole p_role) {
+			const int32_t at = int32_t(texture(p_t.name, p_role));
+			for (size_t i = 0; i < p_slot.textures.size(); ++i) {
+				if (!p_t.parameter.empty() && p_slot.textures[i].first == p_t.parameter && lower(p_slot.textures[i].second) == p_t.name) {
+					m.textures[i] = at;
+				}
+			}
+			return at;
+		};
+		if (look.color) {
+			m.albedo = bind(*look.color, TextureRole::Color);
+			m.albedo_uv = look.color->channel;
+			m.albedo_scale = look.color->scale;
+		}
+		if (look.normal) {
+			m.normal = bind(*look.normal, TextureRole::Normal);
+			m.normal_uv = look.normal->channel;
+			m.normal_scale = look.normal->scale;
+		}
+		m.look = std::move(look);
+		const uint32_t at = uint32_t(plan.materials.size());
+		plan.materials.push_back(std::move(m));
+		material_by_key.emplace(key, at);
+		return at;
+	}
 
 	uint32_t texture(const std::string &p_name, TextureRole p_role) {
 		const auto found = texture_by_name.find(p_name);
@@ -729,7 +795,20 @@ std::vector<SceneMeshRequest> scene_mesh_requests(const MeshCensus &p_census) {
 core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, const World &p_world, const MeshCensus &p_census, const ScenePlanOptions &p_options) {
 	const Clock::time_point start = Clock::now();
 	LevelScenePlan plan;
-	PlanBuilder builder{ plan, {}, {} };
+	plan.look = p_options.look;
+	PlanBuilder builder{ plan, {}, {}, nullptr };
+	std::unique_ptr<LookResolver> resolver;
+	if (p_options.look == SceneLook::L1) {
+		if (p_options.mount != nullptr) {
+			resolver = LookResolver::open(*p_options.mount);
+			for (const auto &[item, error] : resolver->failures()) {
+				plan.failures.emplace_back(item, error);
+			}
+			builder.resolver = resolver.get();
+		} else {
+			plan.failures.emplace_back("look", "L1 materials need the level mount; M1 materials used");
+		}
+	}
 	plan.requests = scene_mesh_requests(p_census);
 	std::vector<uint32_t> request_of(p_census.meshes.size(), UINT32_MAX);
 	for (uint32_t r = 0; r < plan.requests.size(); ++r) {
@@ -779,7 +858,11 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 		if (materials) {
 			mesh.surface_materials.reserve(materials->slots.size());
 			for (const MaterialSlot &slot : materials->slots) {
-				mesh.surface_materials.push_back(scene_internal::shader_flags(slot.shader).drawn ? builder.material(slot) : kSceneUndrawnMaterial);
+				if (builder.resolver != nullptr) {
+					mesh.surface_materials.push_back(builder.look_material(slot, m.name));
+				} else {
+					mesh.surface_materials.push_back(scene_internal::shader_flags(slot.shader).drawn ? builder.material(slot) : kSceneUndrawnMaterial);
+				}
 			}
 		} else {
 			// Drawn untextured rather than dropped: one neutral material for every slot the asset lists.
@@ -822,13 +905,34 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 		}
 	}
 	plan.environment = read_environment(p_resolver, p_world);
+	if (resolver != nullptr) {
+		plan.look_stats = resolver->stats();
+		core::Result<LookEnvironment> env = read_look_environment(p_resolver, p_world);
+		if (env) {
+			plan.look_environment = std::move(*env);
+			decode_look_textures(*p_options.mount, plan.look_environment);
+			const LookEnvState &base = plan.look_environment.base;
+			const auto sky_texture = [&](const std::string &p_name) { return p_name.empty() ? -1 : int32_t(builder.texture(p_name, TextureRole::Color)); };
+			if (base.sky) {
+				plan.sky_panorama = sky_texture(base.panorama);
+				plan.sky_panorama_alpha = sky_texture(base.panorama_alpha);
+				plan.sky_gradient = sky_texture(base.gradient);
+			}
+		} else {
+			plan.failures.emplace_back("look environment", env.error().message);
+		}
+	}
 	plan.seconds = since(start);
 	return plan;
 }
 
 core::Result<LevelScenePlan> plan_level_scene(const core::level::LoadedLevel &p_level, const World &p_world, const MeshCensus &p_census,
 		const ScenePlanOptions &p_options) {
-	return plan_level_scene(p_level.db(), p_world, p_census, p_options);
+	ScenePlanOptions options = p_options;
+	if (options.mount == nullptr) {
+		options.mount = &p_level.mount();
+	}
+	return plan_level_scene(p_level.db(), p_world, p_census, options);
 }
 
 // ---- items --------------------------------------------------------------------------------------------------------

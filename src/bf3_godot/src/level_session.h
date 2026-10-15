@@ -45,9 +45,12 @@
 //                                               down +Z, 90 down +X; pitch + up)
 //   --shot-spawns=<i>[:stand|crouch|prone|walk],...  first-person screenshots at spawn points (SpawnAt)
 //   --shot-dir=<dir>                            where --shot-spawns writes spawn_<i>_<pose>.png
+//   --shot-settle=<s> / --shot-measure=<n>      L1 look: free shots wait s seconds (auto exposure), then time n frames
 //   --quit-after=<s>                            quit s seconds after Done
 //   --no-hud                                    hide the HUD
-//   --fog                                       draw the plan's depth fog (off by default: see build_environment)
+//   --fog                                       M1 look: draw the plan's depth fog (off by default: see build_environment)
+//   --look=l1|m1                                L1 look (default; README "L1 look") or the M1 look (before / after
+//                                               shots and the godot.l1_look frame-time A/B)
 // Controls: WASD move, Shift sprint, Space jump, Ctrl crouch, Z prone, mouse look, F6 free camera (Q/E down/up,
 // wheel speed), Esc releases the mouse, a click captures it.
 
@@ -55,6 +58,7 @@
 #include "input_mapper.h"
 #include "level_upload.h"
 #include "loading_screen.h"
+#include "look_bridge.h"
 
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
@@ -148,6 +152,7 @@ public:
 	const LevelUpload &upload() const { return upload_; }
 	std::optional<bf3::render::SceneLaneStats> lane_stats() const;
 	std::string cache_summary() const;
+	std::string look_summary() const { return look_.built() ? look_.describe() : std::string("look M1"); }
 	const std::vector<float> &frame_ms_after_done() const { return frame_ms_after_done_; }
 	uint64_t others_presented() const { return others_presented_; }
 	uint64_t others_extrapolated() const { return others_extrapolated_; }
@@ -194,6 +199,7 @@ private:
 	bool hud_enabled_ = true;
 	bool headless_ = false;
 	bool scene_ = true;
+	bf3::render::SceneLook look_mode_ = bf3::render::SceneLook::L1; // --look
 
 	// Install.
 	bf3::core::InstallReader install_;
@@ -232,6 +238,7 @@ private:
 	LoadingScreen loading_;
 	godot::DirectionalLight3D *sun_ = nullptr;
 	godot::WorldEnvironment *environment_ = nullptr;
+	LookBridge look_; // L1
 	godot::Ref<godot::CapsuleMesh> capsule_;
 	std::vector<godot::RID> other_instances_;
 	godot::Label *hud_ = nullptr;

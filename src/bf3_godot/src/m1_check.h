@@ -86,6 +86,11 @@ public:
 	bool empty() const { return free_.empty() && spawn_.empty(); }
 	// Every frame after Done; true when every shot was taken (or failed).
 	bool frame(uint64_t p_now_ns);
+	// L1 look: each free shot waits p_settle_s as well as 30 frames (auto exposure), then times p_measure frames.
+	void set_timing(double p_settle_s, uint32_t p_measure) {
+		settle_s_ = p_settle_s;
+		measure_frames_ = p_measure;
+	}
 	size_t saved() const { return saved_; }
 	size_t failed() const { return failed_; }
 	const std::vector<std::string> &lines() const { return lines_; }
@@ -104,6 +109,13 @@ private:
 	size_t saved_ = 0;
 	size_t failed_ = 0;
 	std::vector<std::string> lines_;
+	// L1 look: settle and frame timing of the free shots.
+	double settle_s_ = 0.0;
+	uint32_t measure_frames_ = 0;
+	uint32_t measured_ = 0;
+	uint64_t last_ns_ = 0;
+	double view_cpu_ms_ = 0.0, view_gpu_ms_ = 0.0, total_cpu_ms_ = 0.0, total_gpu_ms_ = 0.0;
+	uint64_t total_frames_ = 0;
 };
 
 class M1Check {

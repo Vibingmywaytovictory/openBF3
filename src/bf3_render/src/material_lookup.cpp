@@ -141,6 +141,15 @@ core::Result<MeshMaterials> materials_of(const EbxResolver &p_db, const EbxInsta
 			chosen = &variations[i];
 		}
 		if (chosen != nullptr) {
+			// L1 look: the variation's own shader graph and vector parameters (its values before the material's).
+			if (const std::optional<EbxInstance> variation = p_db.follow(*chosen, "MaterialVariation")) {
+				const std::optional<EbxValue> vshader_value = variation->get("Shader");
+				if (const std::optional<EbxStruct> vshader = vshader_value ? vshader_value->as_struct() : std::nullopt) {
+					if (const std::optional<EbxInstance> graph = p_db.follow(*vshader, "Shader")) {
+						out.slots[i].variation_shader = partition_name(p_db, *graph);
+					}
+				}
+			}
 			std::vector<std::pair<std::string, std::string>> textures = texture_parameters(p_db, *chosen);
 			if (!textures.empty()) {
 				out.slots[i].textures = std::move(textures);

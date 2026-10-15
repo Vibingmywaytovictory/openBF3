@@ -28,6 +28,8 @@
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/level/level_transform.h"
 #include "bf3/core/result.h"
+#include "bf3/render/look_environment.h"
+#include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/texture_prep.h"
@@ -62,10 +64,22 @@ struct SceneMeshRequest {
 };
 std::vector<SceneMeshRequest> scene_mesh_requests(const core::level::MeshCensus &p_census);
 
+// L1 look (README "L1 look"): which look the plan describes. M1 = the minimal look of docs/design/m1.md §11.3/§11.4,
+// kept for the A/B frame-time gate and the before/after shots (`--look=m1`); L1 = materials through the level shader
+// database (look_materials.h) and the environment read per component with its areas (look_environment.h).
+enum class SceneLook : uint8_t {
+	M1,
+	L1,
+};
+
 struct ScenePlanOptions {
 	bool include_hidden_start = false; // placements that start invisible (starts_hidden) stay out (default)
 	uint32_t max_lod = 0; // M1: LOD 0 only
 	bool include_terrain = true;
+	SceneLook look = SceneLook::L1;
+	// L1: the mount the shader database and texture headers are read from (the LoadedLevel overload sets it; without
+	// one the L1 materials fall back to the M1 rule and the plan lists a failure).
+	const core::LevelMount *mount = nullptr;
 };
 
 // One TerrainEntityData to draw (docs §11.2).
@@ -95,6 +109,15 @@ struct SceneMaterialPlan {
 	int32_t normal = -1;
 	bool alpha_test = false; // the shader family's alpha (foliage, fences); M1 decides by shader name, docs §11.3
 	bool double_sided = false;
+	// L1 look: how the two textures are sampled (look_materials.h kLookUv*: UV set; a multiplier), alpha blending
+	// (the shader database's transparent surface types) and glass (drawn translucent at a fixed opacity).
+	uint8_t albedo_uv = kLookUv0;
+	float albedo_scale = 1.0f;
+	uint8_t normal_uv = kLookUv0;
+	float normal_scale = 1.0f;
+	bool blend = false;
+	bool glass = false;
+	std::optional<LookMaterial> look; // the resolver's answer (L1 only), for the census
 };
 
 // SceneMeshPlan::surface_materials entry of a slot whose shader does not draw (the census's undrawn shader words):
@@ -141,6 +164,12 @@ struct LevelScenePlan {
 	SceneEnvironment environment;
 	std::vector<std::pair<std::string, std::string>> failures; // (item, error): materials not found, ...
 	double seconds = 0.0;
+	SceneLook look = SceneLook::L1;
+	LookStats look_stats; // L1: shader database and resolver figures
+	// L1: the visual environment with its areas, horizon colours and LUTs decoded, and the base sky's textures as
+	// indices into `textures` (-1 none).
+	LookEnvironment look_environment;
+	int32_t sky_panorama = -1, sky_panorama_alpha = -1, sky_gradient = -1;
 };
 
 // On the loader thread that owns the level database (World is not thread-safe). Materials come from each

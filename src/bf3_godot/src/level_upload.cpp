@@ -117,6 +117,66 @@ void fragment() {
 	return code;
 }
 
+// L1 look (README "L1 look"): one spatial shader per (opaque, alpha scissor, alpha blend) x (culled, double-sided).
+// Each texture is sampled with its own UV set and tiling (look_materials.h: UV0, UV1, or world-projected on the
+// dominant axis of the world normal as IW4L's planar(), times the graph's 1 / factor); a blend material draws its
+// colour alpha, or glass_opacity when it is glass without colour alpha.
+std::string shader_code_l1(int p_alpha_mode, bool p_double_sided) {
+	std::string code = "shader_type spatial;\n";
+	code += std::string("render_mode blend_mix, ") + (p_alpha_mode == 2 ? "depth_draw_never" : "depth_draw_opaque") +
+			", diffuse_burley, specular_schlick_ggx, " + (p_double_sided ? "cull_disabled" : "cull_back") + ";\n";
+	code += R"(uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform bool has_albedo = false;
+uniform bool has_normal = false;
+uniform int albedo_uv = 0;
+uniform float albedo_scale = 1.0;
+uniform int normal_uv = 0;
+uniform float normal_scale = 1.0;
+uniform vec3 albedo_tint : source_color = vec3(0.55);
+uniform float roughness_value = 0.6;
+uniform float glass_opacity = 0.0;
+varying vec3 world_pos;
+varying vec3 world_nrm;
+void vertex() {
+	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	world_nrm = mat3(MODEL_MATRIX) * NORMAL;
+}
+vec2 look_uv(int p_set, float p_scale, vec2 p_uv0, vec2 p_uv1) {
+	if (p_set == 1) {
+		return p_uv1 * p_scale;
+	}
+	if (p_set == 3) {
+		vec3 n = abs(world_nrm);
+		vec2 p = (n.y >= n.x && n.y >= n.z) ? world_pos.xz : (n.x >= n.z ? vec2(world_pos.z, -world_pos.y) : vec2(world_pos.x, -world_pos.y));
+		return p * p_scale;
+	}
+	return p_uv0 * p_scale;
+}
+void fragment() {
+	vec4 c = has_albedo ? texture(albedo_tex, look_uv(albedo_uv, albedo_scale, UV, UV2)) : vec4(1.0);
+	ALBEDO = c.rgb * albedo_tint;
+	ROUGHNESS = roughness_value;
+	METALLIC = 0.0;
+	SPECULAR = 0.5;
+	if (has_normal) {
+		NORMAL_MAP = vec3(texture(normal_tex, look_uv(normal_uv, normal_scale, UV, UV2)).rg, 1.0);
+	}
+)";
+	if (p_alpha_mode == 1) {
+		code += "\tALPHA = c.a;\n\tALPHA_SCISSOR_THRESHOLD = 0.5;\n";
+	} else if (p_alpha_mode == 2) {
+		code += "\tALPHA = glass_opacity > 0.0 ? glass_opacity : c.a;\n";
+	}
+	code += "}\n";
+	return code;
+}
+
+// Opacity of glass without colour alpha [inferred: BF3 computes it in the compiled shader (OpacityMul, Fresnel)].
+constexpr float kGlassOpacity = 0.3f;
+// The tint of glass without a colour map [inferred].
+constexpr float kGlassTint = 0.25f;
+
 Transform3D instance_transform(const bf3::core::level::LevelTransform &p_t) {
 	// Frostbite rows right, up, forward, trans: a local point p maps to p.x right + p.y up + p.z forward + trans (scaled),
 	// so Godot's basis columns are the three axes (render_bridge.h: transforms map 1:1).
@@ -273,10 +333,18 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 		}
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
-	for (int v = 0; v < 4; ++v) {
-		const RID shader = rs->shader_create();
-		rs->shader_set_code(shader, to_godot(shader_code((v & 2) != 0, (v & 1) != 0)));
-		shaders_.push_back(shader);
+	if (plan.look == render::SceneLook::L1) {
+		for (int v = 0; v < 6; ++v) { // L1: (opaque, scissor, blend) x (culled, double-sided), index 2 * mode + sides
+			const RID shader = rs->shader_create();
+			rs->shader_set_code(shader, to_godot(shader_code_l1(v / 2, (v & 1) != 0)));
+			shaders_.push_back(shader);
+		}
+	} else {
+		for (int v = 0; v < 4; ++v) {
+			const RID shader = rs->shader_create();
+			rs->shader_set_code(shader, to_godot(shader_code((v & 2) != 0, (v & 1) != 0)));
+			shaders_.push_back(shader);
+		}
 	}
 	if (progress_ != nullptr) {
 		progress_->begin(LoadStage::Materials, uint32_t(plan.materials.size() + plan.terrains.size()));
@@ -443,7 +511,19 @@ void LevelUpload::create_materials(double p_deadline_us) {
 		const RID m = rs->material_create();
 		if (next_material_ < plan.materials.size()) {
 			const render::SceneMaterialPlan &mp = plan.materials[next_material_];
-			rs->material_set_shader(m, shaders_[(mp.alpha_test ? 2 : 0) + (mp.double_sided ? 1 : 0)]);
+			if (plan.look == render::SceneLook::L1) {
+				const int mode = mp.blend ? 2 : (mp.alpha_test ? 1 : 0);
+				rs->material_set_shader(m, shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
+				rs->material_set_param(m, "albedo_uv", int64_t(mp.albedo_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.albedo_uv));
+				rs->material_set_param(m, "albedo_scale", mp.albedo_scale);
+				rs->material_set_param(m, "normal_uv", int64_t(mp.normal_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.normal_uv));
+				rs->material_set_param(m, "normal_scale", mp.normal_scale);
+				if (mp.glass) {
+					rs->material_set_param(m, "glass_opacity", kGlassOpacity); // glass has no colour alpha (look_materials.cpp)
+				}
+			} else {
+				rs->material_set_shader(m, shaders_[(mp.alpha_test ? 2 : 0) + (mp.double_sided ? 1 : 0)]);
+			}
 			// make_standard_material's reading (render_bridge.cpp): DiffuseDarkening tints, SmoothnessRegular -> roughness.
 			Color tint = mp.albedo >= 0 ? Color(1, 1, 1) : Color(0.55f, 0.55f, 0.55f);
 			if (const std::array<float, 4> *dark = mp.slot.vector("DiffuseDarkening")) {
@@ -452,6 +532,12 @@ void LevelUpload::create_materials(double p_deadline_us) {
 			float roughness = 0.6f;
 			if (const std::array<float, 4> *smooth = mp.slot.vector("SmoothnessRegular")) {
 				roughness = std::clamp(1.0f - (*smooth)[0], 0.05f, 1.0f);
+			}
+			if (plan.look == render::SceneLook::L1 && mp.glass) {
+				roughness = 0.1f;
+				if (mp.albedo < 0) {
+					tint = Color(kGlassTint, kGlassTint, kGlassTint);
+				}
 			}
 			rs->material_set_param(m, "albedo_tint", tint);
 			rs->material_set_param(m, "roughness_value", roughness);

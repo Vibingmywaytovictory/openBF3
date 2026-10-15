@@ -12,6 +12,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -524,10 +525,37 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		session_.cameras().place_free(Vector3(shot.view[0], shot.view[1], shot.view[2]), mapper.free_view().yaw, mapper.free_view().pitch);
 		frames_ = 0;
 		state_ = 1;
+		state_ns_ = p_now_ns; // L1 look: the settle time runs from here
 		return false;
 	}
-	if (frames_ < 30) {
+	if (frames_ < 30 || seconds_between(state_ns_, p_now_ns) < settle_s_) {
+		last_ns_ = p_now_ns;
 		return false;
+	}
+	// L1 look: --shot-measure=<n> frames timed at each view before its screenshot (frame interval and the viewport's
+	// GPU render time; README "L1 look", ctest godot.l1_look).
+	if (measure_frames_ > 0 && measured_ < measure_frames_) {
+		RenderingServer *rs = RenderingServer::get_singleton();
+		const RID viewport = session_.get_viewport()->get_viewport_rid();
+		if (measured_ == 0) {
+			rs->viewport_set_measure_render_time(viewport, true);
+			view_cpu_ms_ = view_gpu_ms_ = 0.0;
+		} else {
+			view_cpu_ms_ += double(p_now_ns - last_ns_) / 1e6;
+			view_gpu_ms_ += rs->viewport_get_measured_render_time_gpu(viewport);
+		}
+		last_ns_ = p_now_ns;
+		++measured_;
+		return false;
+	}
+	if (measure_frames_ > 0) {
+		const double n = double(measure_frames_ - 1);
+		total_cpu_ms_ += view_cpu_ms_;
+		total_gpu_ms_ += view_gpu_ms_;
+		total_frames_ += measure_frames_ - 1;
+		UtilityFunctions::print(to_godot(fmt("[look] frame time at %s: %.3f ms per frame (interval), GPU %.3f ms, over %u frames", shot.path.c_str(),
+				view_cpu_ms_ / n, view_gpu_ms_ / n, measure_frames_ - 1)));
+		measured_ = 0;
 	}
 	if (session_.save_screenshot(shot.path)) {
 		++saved_;
@@ -538,11 +566,16 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		lines_.push_back("screenshot failed: " + shot.path);
 	}
 	UtilityFunctions::print(to_godot("[m1] shot " + lines_.back()));
+	UtilityFunctions::print(to_godot("[m1] shot " + session_.look_summary()));
 	++next_;
 	state_ = 0;
 	if (next_ >= total) {
 		mapper.set_free_camera(false);
 		session_.cameras().set_free(false);
+		if (measure_frames_ > 0 && total_frames_ > 0) {
+			UtilityFunctions::print(to_godot(fmt("[look] frame time mean: %.3f ms per frame (interval), GPU %.3f ms, %llu frames at %zu views",
+					total_cpu_ms_ / double(total_frames_), total_gpu_ms_ / double(total_frames_), (unsigned long long)total_frames_, free_.size())));
+		}
 	}
 	return next_ >= total;
 }

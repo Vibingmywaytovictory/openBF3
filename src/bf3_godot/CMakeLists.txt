@@ -72,3 +72,9 @@ target_sources(bf3_godot PRIVATE
     src/m1_check.h
 )
 target_link_libraries(bf3_godot PRIVATE psapi)
+
+# L1 look (README "L1 look"): the visual environment on Godot (sun, sky shader, ambient, fog, exposure, LUTs).
+target_sources(bf3_godot PRIVATE
+    src/look_bridge.cpp
+    src/look_bridge.h
+)

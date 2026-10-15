@@ -22,6 +22,10 @@
 // reads them. A material without an albedo texture draws flat grey (the T5 note: 273 of Metro's 602 materials name no
 // texture); a texture that fails to prepare is listed and its materials draw flat (docs §11.3 "never fails the load").
 // Terrains draw with one flat material each (the plan's colour).
+// L1 look (the plan's default, README "L1 look"): six shaders instead, (opaque, scissor, blend) x (culled,
+// double-sided), each texture sampled on its own UV set and scale (albedo_uv / albedo_scale, normal_uv / normal_scale;
+// a projected mapping uses the world normal's dominant axis), glass blended at kGlassOpacity [inferred]; --look=m1
+// keeps the four M1 shaders above.
 //
 // Surface layout (Godot 4.2+ "version 2", uncompressed; verified against mesh_add_surface_from_arrays by
 // --m1-check's upload.surface_format row): vertex_data = positions (12 B each) followed by one interleaved

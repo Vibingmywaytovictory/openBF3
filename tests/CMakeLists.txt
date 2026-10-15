@@ -341,3 +341,27 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.m1_load COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1_load.cmake)
     set_tests_properties(godot.m1_load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
+
+# L1 look (README "L1 look"): render.look.unit, the shader database reader on a synthetic res (fields, every
+# truncation, single-byte mutations, the work budget), the look resolver's tiers and rules on a synthetic lookup, and
+# the visual environment arithmetic (fog fit, area weights, blend, grade); no data. render.look: Metro TDM's shader
+# database parsed with its work units, the resolver and the environment read, install.unchanged (77 without one).
+openbf3_test(test_look test_main.cpp look_tests.cpp test_support.h)
+target_link_libraries(test_look PRIVATE bf3_render)
+add_test(NAME render.look.unit COMMAND test_look --test-suite=render-look-unit)
+add_test(NAME render.look COMMAND test_look --test-suite=render-look)
+set_tests_properties(render.look PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(render.look.unit render.look PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_look_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.look.unit render.look PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_look_cl_dir}")
+endif()
+
+# L1 look (README "L1 look"): godot.l1_look alternates windowed fullscreen --look=m1 / --look=l1 runs of
+# res://scenes/m1_metro.tscn (vsync off, 4 free views, 300 timed frames each) for 3 rounds; gate: the median L1 frame
+# interval <= 1.10 x the median M1 one (GPU render time reported). Screenshots to $OPENBF3_LOOK_SHOTS when set (never
+# commit them). Exits 77 like godot.m1_load; RUN_SERIAL (timing).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.l1_look COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_l1_look.cmake)
+    set_tests_properties(godot.l1_look PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1500 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()
