@@ -17,3 +17,10 @@ target_sources(bf3_net PRIVATE
     include/bf3/net/protocol.h
     include/bf3/net/netsim.h
 )
+
+# M1 T3 net (docs/design/m1.md §7, §15): the bodies of bit_stream.h, protocol.h and netsim.h.
+target_sources(bf3_net PRIVATE
+    src/bit_stream.cpp
+    src/protocol.cpp
+    src/netsim.cpp
+)

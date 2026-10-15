@@ -229,3 +229,17 @@ endif()
 openbf3_test(test_m1_contract test_main.cpp m1_contract_tests.cpp test_support.h)
 target_link_libraries(test_m1_contract PRIVATE bf3_host bf3_render)
 add_test(NAME m1.contract COMMAND test_m1_contract)
+
+# M1 T3 net (docs/design/m1.md §7, §14): bit packing, the protocol's messages (round trips, every truncation,
+# fuzzed bytes, unsequenced ENet loopback) and the seeded netsim. No data; meant for the asan preset too.
+openbf3_test(test_net_proto test_main.cpp net_proto_tests.cpp test_support.h)
+target_link_libraries(test_net_proto PRIVATE bf3_net)
+add_test(NAME net.bits.unit COMMAND test_net_proto --test-suite=net-bits)
+add_test(NAME net.proto.unit COMMAND test_net_proto --test-suite=net-proto)
+add_test(NAME net.netsim.unit COMMAND test_net_proto --test-suite=net-netsim)
+set_tests_properties(net.bits.unit net.proto.unit net.netsim.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_t3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(net.bits.unit net.proto.unit net.netsim.unit
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t3_cl_dir}")
+endif()

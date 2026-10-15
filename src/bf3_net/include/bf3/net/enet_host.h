@@ -39,6 +39,16 @@ public:
 	// Waits up to p_timeout_ms for one event. Returns 1 with r_event filled, 0 if none, -1 on error.
 	int service(uint32_t p_timeout_ms, Event &r_event);
 	bool send(uint32_t p_peer, uint8_t p_channel, const void *p_data, size_t p_size, bool p_reliable);
+	// M1 (docs/design/m1.md §7.1): how a packet goes out. Sequenced is ENet's plain unreliable mode (flag 0: a
+	// packet older than the newest one received on its channel is dropped), what send(..., false) does.
+	// Unsequenced (ENET_PACKET_FLAG_UNSEQUENCED) delivers every packet that arrives, late or not: channel 0's
+	// snapshots and command packets, where a late CommandPacket still carries commands the server has not seen.
+	// An unsequenced packet longer than one ENet fragment is refused (returns false) instead of being sent as
+	// reliable fragments, which is what ENet does with an oversized unreliable packet.
+	enum class SendMode : uint8_t { Sequenced, Reliable, Unsequenced };
+	bool send(uint32_t p_peer, uint8_t p_channel, const void *p_data, size_t p_size, SendMode p_mode);
+	// The largest packet that leaves as one unfragmented ENet command to this peer (0 when not connected).
+	size_t max_unfragmented_bytes(uint32_t p_peer) const;
 	void flush();
 	void disconnect_all();
 	uint32_t peer_rtt_ms(uint32_t p_peer) const; // ENet's smoothed round trip time
