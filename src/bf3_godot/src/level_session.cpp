@@ -12,6 +12,11 @@
 #include "bf3/host/game_server.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/netsim.h"
+// S1
+#include "bf3/core/level/mode_areas.h"
+#include "bf3/host/bot_fill.h"
+#include "bf3/sim/nav.h"
+#include <godot_cpp/classes/input_event_key.hpp>
 
 #include <godot_cpp/classes/capsule_mesh.hpp>
 #include <godot_cpp/classes/directional_light3d.hpp>
@@ -147,6 +152,7 @@ void Bf3LevelSession::shutdown() {
 		}
 		other_instances_.clear();
 		upload_.free_all();
+		nav_draw_.free_all(); // S1
 	}
 	if (loading_display_) {
 		set_loading_display(false);
@@ -184,6 +190,13 @@ void Bf3LevelSession::parse_args() {
 	const std::string quit_after = user_arg_value("quit-after");
 	quit_after_ = quit_after.empty() ? 0.0 : std::atof(quit_after.c_str());
 	hud_enabled_ = !has_user_arg("no-hud");
+	// S1 (docs/design/s1.md §12).
+	if (has_user_arg("bots")) {
+		bots_ = uint32_t(std::clamp(std::atoi(user_arg_value("bots").c_str()), 0, 120));
+	}
+	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
+	const std::string shot_delay = user_arg_value("shot-delay");
+	shot_delay_ = shot_delay.empty() ? 0.0 : std::clamp(std::atof(shot_delay.c_str()), 0.0, 600.0);
 }
 
 void Bf3LevelSession::_ready() {
@@ -222,6 +235,9 @@ void Bf3LevelSession::_ready() {
 		motor_tuning_source_ = "(missing: built-in defaults)";
 	}
 	UtilityFunctions::print(to_godot("[m1] motor tuning " + motor_tuning_source_));
+	if (bots_ > 0) { // S1
+		UtilityFunctions::print(to_godot("[s1] bots " + std::to_string(bots_) + (nav_overlay_ ? ", nav overlay on (F7)" : "")));
+	}
 
 	mapper_.install_actions();
 	cameras_.attach(this);
@@ -353,6 +369,19 @@ void Bf3LevelSession::run_loader() {
 		}
 		shared_options.tuning = *tuning;
 	}
+	// S1 (docs/design/s1.md §12): with --bots the static world carries the terrain cover and the water rule of the
+	// level's combat-area tiles (every MP mode), the same the navmesh is baked from.
+	std::optional<lvl::LevelCombatTiles> s1_combat;
+	if (bots_ > 0) {
+		bf3::core::Result<lvl::LevelCombatTiles> combat = lvl::level_combat_tiles(*install, level_, sim::NavParams().region_margin);
+		if (!combat) {
+			fail("combat areas: " + combat.error().message);
+			return;
+		}
+		s1_combat = std::move(*combat);
+		shared_options.terrain_cover = s1_combat->tiles;
+		shared_options.cover_water = s1_combat->water;
+	}
 	bf3::core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, shared_options, &progress_);
 	if (!shared) {
 		fail(shared.error().message);
@@ -366,6 +395,32 @@ void Bf3LevelSession::run_loader() {
 	shared_ready_.store(true, std::memory_order_release);
 	if (stop_.load(std::memory_order_acquire)) {
 		return;
+	}
+	// S1: the bot level (navmesh through the cache, components, goals, bot spawns) and the overlay's arrays.
+	if (bots_ > 0) {
+		host::BotLoadOptions bot_options;
+		bot_options.cache = cache.get();
+		bot_options.threads = scene_ ? std::min(8u, half) : 0;
+		bot_options.combat = &*s1_combat;
+		bot_options.seed = seed_;
+		bot_options.synthetic_spawns = bots_;
+		const uint64_t t0 = now_us();
+		bf3::core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*db, **shared, bot_options, &progress_);
+		if (!bots) {
+			fail("bots: " + bots.error().message);
+			return;
+		}
+		bot_level_ = *bots;
+		const sim::NavStats &ns = bot_level_->nav->stats();
+		char line[512];
+		std::snprintf(line, sizeof(line), "[s1] bot level %.2f s: nav %zu polys (%s), main component %u, %zu goals, spawns %u of %u in main%s",
+				double(now_us() - t0) / 1e6, ns.polys, ns.world_hit ? "cache hit" : "baked", bot_level_->main_component, bot_level_->objectives.size(),
+				bot_level_->spawns.in_main, bot_level_->spawns.level_points, bot_level_->spawns.synthetic > 0 ? " (synthetic spawns)" : "");
+		bots_line_ = line;
+		if (nav_overlay_ && scene_) {
+			nav_arrays_ = prepare_nav_overlay(sim::nav_debug_mesh(*bot_level_->nav, &bot_level_->components), bot_level_->main_component);
+			nav_ready_.store(true, std::memory_order_release);
+		}
 	}
 	// Phase D: the server and the client, while the lanes still run (docs §12.1).
 	std::string error;
@@ -422,6 +477,14 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 	game->walkers = walkers_;
 	game->dev_commands = true; // M1 is a local listen session: the checks and the shot harness use SpawnAt / Teleport / Trace
 	game->seed = seed_;
+	if (bot_level_ != nullptr) { // S1 (docs/design/s1.md §12): the walkers, every slot spawning in the main component
+		auto fill = std::make_shared<host::BotFillConfig>();
+		fill->level = bot_level_;
+		fill->count = bots_;
+		fill->spawn_in_main = true;
+		game->bots = fill;
+		game->max_slots = uint32_t(bf3::net::kMaxSlots);
+	}
 	host::ServerConfig sc;
 	sc.tick_hz = int(sim::kSimHz);
 	sc.game = game;
@@ -633,6 +696,12 @@ void Bf3LevelSession::update_hud(double p_delta) {
 	if (done_ && hud_timer_ >= 0.1) {
 		hud_timer_ = 0.0;
 		hud_->set_text(get_status_text());
+		if (bots_ > 0) { // S1: the snapshot carries the nearest others; the rest are not drawn
+			const uint32_t total = bots_ + walkers_;
+			const uint32_t shown = std::min(frame_->other_count, total);
+			hud_->set_text(get_status_text() + to_godot(" | S1 bots " + std::to_string(bots_) + ", others in the snapshot " + std::to_string(shown) + " of " +
+					std::to_string(total) + (nav_draw_.uploaded() ? (nav_draw_.visible() ? ", nav overlay (F7)" : ", nav overlay hidden (F7)") : "")));
+		}
 	}
 }
 
@@ -714,6 +783,9 @@ void Bf3LevelSession::try_done() {
 			cache_warmth_name(host::CacheWarmth(progress_.warmth.load())), mib(peak_working_set_bytes()));
 	UtilityFunctions::print(line);
 	UtilityFunctions::print(to_godot("[m1] " + cache_summary()));
+	if (!bots_line_.empty()) { // S1
+		UtilityFunctions::print(to_godot(bots_line_));
+	}
 	if (m1_check_) {
 		uint32_t courses = 6;
 		if (has_user_arg("m1-courses")) {
@@ -730,6 +802,12 @@ void Bf3LevelSession::_unhandled_input(const Ref<InputEvent> &p_event) {
 		return;
 	}
 	mapper_.handle_event(p_event);
+	// S1: F7 toggles the nav overlay.
+	if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
+		if (k->is_pressed() && !k->is_echo() && k->get_keycode() == KEY_F7 && nav_draw_.uploaded()) {
+			nav_draw_.set_visible(!nav_draw_.visible());
+		}
+	}
 	if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
 		if (mb->is_pressed() && mapper_.free_camera()) {
 			if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP) {
@@ -811,6 +889,8 @@ void Bf3LevelSession::_process(double p_delta) {
 	}
 	draw_others(now_ns);
 	update_hud(p_delta);
+	s1_upload_overlay(); // S1
+	s1_report_others(now_ns); // S1
 
 	if (check_ != nullptr) {
 		if (check_->frame(now_ns)) {
@@ -822,6 +902,10 @@ void Bf3LevelSession::_process(double p_delta) {
 		if (load_check_runner_->frame(now_ns, p_delta)) {
 			finish(load_check_runner_->exit_code());
 		}
+		return;
+	}
+	// S1: --shot-delay holds the shots (and the quit after them) until the bots have spread out.
+	if (shot_delay_ > 0.0 && since_done_ < shot_delay_ && shots_ != nullptr && !shots_->empty()) {
 		return;
 	}
 	bool shots_done = true;
@@ -874,6 +958,52 @@ void Bf3LevelSession::finish(int p_code) {
 	UtilityFunctions::print(to_godot("[m1] peak working set " + std::to_string(int(mib(peak_working_set_bytes()) + 0.5)) + " MiB, exit " + std::to_string(p_code)));
 	shutdown();
 	get_tree()->quit(p_code);
+}
+
+} // namespace bf3::godot_side
+
+// ---- S1 (docs/design/s1.md §12) ---------------------------------------------------------------------------------
+
+namespace bf3::godot_side {
+
+void Bf3LevelSession::s1_upload_overlay() {
+	if (!scene_ || nav_draw_.uploaded() || !nav_ready_.load(std::memory_order_acquire)) {
+		return;
+	}
+	if (nav_draw_.upload(nav_arrays_, get_world_3d()->get_scenario(), true)) {
+		char line[256];
+		std::snprintf(line, sizeof(line), "[s1] nav overlay: %zu main-component triangles, %zu other, %zu drop links", nav_arrays_.triangles_main,
+				nav_arrays_.triangles_other, nav_arrays_.links);
+		UtilityFunctions::print(line);
+	}
+	nav_arrays_ = NavOverlayArrays(); // the RenderingServer holds the copy
+}
+
+// Once, when the shots start (or 10 s after Done): how many others are presented, how far they walked from their
+// spawns is not known here, so their positions' spread and a few positions (evidence for the shots, docs §12).
+void Bf3LevelSession::s1_report_others(uint64_t p_now_ns) {
+	if (bots_ == 0 || s1_reported_ || since_done_ < std::max(shot_delay_, 10.0) || !frame_->valid) {
+		return;
+	}
+	s1_reported_ = true;
+	std::array<host::PresentedSoldier, bf3::net::kMaxSlots> out{};
+	const size_t n = host::present_others(*frame_, p_now_ns, out, nullptr);
+	float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+	size_t moving = 0;
+	for (size_t i = 0; i < n; ++i) {
+		for (int k = 0; k < 3; ++k) {
+			lo[k] = std::min(lo[k], out[i].position[size_t(k)]);
+			hi[k] = std::max(hi[k], out[i].position[size_t(k)]);
+		}
+		moving += std::hypot(out[i].velocity[0], out[i].velocity[2]) > 0.5f ? 1 : 0;
+	}
+	char line[768];
+	int w = std::snprintf(line, sizeof(line), "[s1] %.1f s after done: %zu others presented, %zu moving (> 0.5 m/s), feet within (%.0f %.0f %.0f)..(%.0f %.0f %.0f);",
+			since_done_, n, moving, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+	for (size_t i = 0; i < std::min<size_t>(n, 8) && w > 0 && size_t(w) < sizeof(line); ++i) {
+		w += std::snprintf(line + w, sizeof(line) - size_t(w), " (%.1f %.1f %.1f)", out[i].position[0], out[i].position[1], out[i].position[2]);
+	}
+	UtilityFunctions::print(line);
 }
 
 } // namespace bf3::godot_side

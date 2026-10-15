@@ -72,3 +72,9 @@ target_sources(bf3_godot PRIVATE
     src/m1_check.h
 )
 target_link_libraries(bf3_godot PRIVATE psapi)
+
+# S1 (docs/design/s1.md §12): the navmesh overlay of --bots=N --nav-overlay (Bf3LevelSession).
+target_sources(bf3_godot PRIVATE
+    src/nav_overlay.cpp
+    src/nav_overlay.h
+)

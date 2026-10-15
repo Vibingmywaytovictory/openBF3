@@ -50,11 +50,19 @@
 //   --fog                                       draw the plan's depth fog (off by default: see build_environment)
 // Controls: WASD move, Shift sprint, Space jump, Ctrl crouch, Z prone, mouse look, F6 free camera (Q/E down/up,
 // wheel speed), Esc releases the mouse, a click captures it.
+//
+// S1 (docs/design/s1.md §12), user args:
+//   --bots=<n>                                  n walker bots on the server (0..120; with them the static world carries
+//                                               the terrain cover and the water rule, the loader bakes the navmesh)
+//   --nav-overlay                               draw the navmesh (nav_overlay.h); F7 toggles
+//   --shot-delay=<s>                            take the --shots s seconds after Done (the bots spread out first)
 
 #include "fp_camera.h"
 #include "input_mapper.h"
 #include "level_upload.h"
 #include "loading_screen.h"
+// S1
+#include "nav_overlay.h"
 
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
@@ -88,6 +96,11 @@ namespace bf3::core {
 class Cache;
 class Install;
 } // namespace bf3::core
+
+// S1
+namespace bf3::host {
+struct BotLevel;
+} // namespace bf3::host
 
 namespace bf3::godot_side {
 
@@ -254,6 +267,19 @@ private:
 	std::unique_ptr<M1Check> check_;
 	std::unique_ptr<M1LoadCheck> load_check_runner_;
 	std::unique_ptr<ShotRunner> shots_;
+
+	// S1 (docs/design/s1.md §12): walker bots and the nav overlay.
+	void s1_upload_overlay(); // main thread
+	void s1_report_others(uint64_t p_now_ns); // main thread
+	uint32_t bots_ = 0;
+	bool nav_overlay_ = false;
+	double shot_delay_ = 0.0;
+	std::shared_ptr<const bf3::host::BotLevel> bot_level_; // loader thread until session_ready_
+	NavOverlayArrays nav_arrays_; // written by the loader before nav_ready_ (release)
+	std::atomic<bool> nav_ready_{ false };
+	NavOverlay nav_draw_;
+	std::string bots_line_; // written by the loader before session_ready_
+	bool s1_reported_ = false;
 };
 
 } // namespace bf3::godot_side
