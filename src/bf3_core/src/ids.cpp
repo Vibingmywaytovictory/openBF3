@@ -2,7 +2,9 @@
 #include "bf3/core/ids.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <random>
 
 namespace bf3::core {
 
@@ -36,6 +38,18 @@ char lower(char p_c) {
 }
 
 } // namespace
+
+uint64_t hash_seed() {
+	// Drawn once per process (thread-safe static init): the OS generator, the clock and an address.
+	static const uint64_t seed = [] {
+		std::random_device device;
+		uint64_t s = (static_cast<uint64_t>(device()) << 32) ^ static_cast<uint64_t>(device());
+		s ^= hash_mix(static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
+		s ^= hash_mix(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&device)));
+		return hash_mix(s);
+	}();
+	return seed;
+}
 
 Guid Guid::from_bytes(const uint8_t *p_bytes) {
 	Guid g;

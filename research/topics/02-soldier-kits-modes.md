@@ -241,6 +241,10 @@ A kit is a `VeniceSoldierCustomizationAsset` (`gameplay/kits/{us,ru}{assault,eng
 | Support | 26 (LMGs …) | – | **ammo box** | C4, claymore, M224 mortar, XBOW ×2, none | same |
 | Recon | 26 (snipers …) | T-UGS, SOFLAM, MAV, XBOW ×2, none | – | **radio beacon** | same |
 
+Bold marks the items of the minimum viable set (§2.5), not a fresh soldier's start: by the persistence progression
+tables (`KitDef::default_unlock`) the defibrillator is a scoring-bucket unlock, so assault slot 5 starts as
+`weapons/common/nogadget2`, and assault slot 2 (M320/M26 score-gated, the rest ammo variants) has no default [V].
+
 Slot 1: 18 sidearms. Medkit (slot 4) and the M320/M26 (slot 2) share the UI "Gadget 1" choice — the player carries one
 or the other ([Battlefield Wiki, Assault (BF3)](https://battlefield.fandom.com/wiki/Assault/Battlefield_3)) [R]; the data
 keeps them in separate slots. XBOW = `weapons/xp4_crossbow_prototype/u_crossbow_scoped_cobra`/`_riflescope`

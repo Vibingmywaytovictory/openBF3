@@ -51,7 +51,7 @@ Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C
 `ctest` runs `core.guard`, `core.formats` (container and EBX readers on synthetic bytes), `core.install`,
 `core.fuzz`, `core.cache`, `core.cache_data`, `core.ant.unit`, `core.ant`, `core.res.unit`, `core.res`,
 `core.res.install`, `core.gameplay.unit`, `core.gameplay.weapons`, `core.gameplay.fuzz`, `core.gameplay.inspect.unit`,
-`core.gameplay.inspect`, `core.ui.text.unit`, `core.ui.text`, `core.ui.text.fuzz`, `anim.unit`, `anim`, `render.unit`,
+`core.gameplay.inspect`, `core.gameplay.tables.unit`, `core.gameplay.tables`, `core.ui.text.unit`, `core.ui.text`, `core.ui.text.fuzz`, `anim.unit`, `anim`, `render.unit`,
 `render`, `sim.jolt`, `net.enet`, `host.server`, `tools.numtext` and, when `OPENBF3_GODOT` names the Godot console
 executable, the headless project checks `godot.s0_selftest`, `godot.inspector` and `godot.m9_reload`. The `*.unit`
 tests, `core.guard`, `core.formats` and `tools.numtext` need no data. The install tests report *Skipped* when no
@@ -654,6 +654,72 @@ run, median 0.24 s (warm file cache, 16 threads shared with other builds). Hando
   traversal's 6,847 mesh placements; that remainder is not attributed.
 * sections/03's "Metro 702" composite placements that hide parts is Metro ConquestSmall0 (IW4L probe
   `geom_MP_Subway_ConquestSmall0.txt`); Metro TDM's is 710 (`3-CONVERTER-PART/geometry.md`), which `core.level` asserts.
+
+## Soldier, kit, mode and vehicle tables
+
+`bf3_core` reads the gameplay numbers straight from EBX (namespace `bf3::core::gameplay`,
+`include/bf3/core/gameplay/`). Every reader takes an `EbxResolver`; a level superbundle is enough because it carries
+its own `characters/`, `gameplay/`, `vehicles/`, `settings_win32` and `persistence/scoring` partitions.
+
+| reader | source | holds |
+|---|---|---|
+| `read_soldier_def` | `characters/soldiers/mpsoldier` (SoldierBlueprint) | health, regen, spawn immunity, man-down/revive, capsule, poses (height, eye, step, transitions), per-state per-pose speeds and direction factors, sprint, jump, swim/ladder/parachute, fall-damage curve, suppression, spotting, the 18 specialization values and the field each one feeds |
+| `read_mode_def` | `levels/<id>/<id>` LevelData + its sub-worlds for the mode, `settings_win32`, `description_win32` | teams and their kits, ticket counters, capture points (HQs flagged), Rush life counters and MCOMs (arm, disarm, radius, fuse), kill counters, vehicle spawns, player count, rounds, squad size, the sub-world interface constants |
+| `read_kit_def`, `read_team_data`, `read_unlock_progression` | `gameplay/kits/*`, `gameplay/teams/*`, `persistence/ranks/rankparams`, `persistence/unlocks/mpstaticunlocks`, `persistence/awards/awards`, `persistence/scoring/scoring` | the 8 weapon slots of a kit with their unlock lists, which progression table gates each unlock, the starting default per slot, specializations, visual unlocks |
+| `read_vehicle_def` | a VehicleBlueprint | mass, gravity modifier, inertia, the four health zones (health, shield, angle, multiplier), disabled / emergency / regeneration / decay values, armour multiplier, seats with weapons and cameras, turrets with limits and world-space lock |
+| `read_scoring` | `persistence/scoring/scoring` | score per event SID |
+
+Mode constants are mostly not on the entities: the level's sub-world interface (e.g. CQS `InitialTicketCount
+Int32 250`) feeds them through PropertyConnections and prefab ports. `LogicWorld` (a port of IW4L `level_bf3`
+connections/world/level, Apache-2.0) walks the included sub-worlds and their prefabs into scopes and resolves a
+field's effective value along those chains (depth and step limits, cycle safe). Specialization pairs reach their
+target fields through Float/IntHub entities whose port ids are designer hashes; the reader matches each pair to the
+target field with the longest common name prefix (`UnderslungBoostL1` -> `UnderslungGrenadeIncrease`).
+Every reader runs on one `WorkBudget` (`work_budget.h`, default 1M units): the walk, every property query, connection
+set, sub-world inclusion test and array scan of the read is charged before it is done (null and unresolvable array
+entries, repeated references to one object, arrays shared by many instances and connection loops all count), so
+hostile data ends with "work budget of N units exhausted" within a second instead of running for minutes. The rule
+is that total work stays O((budget + input size) x log(input size)): every loop iteration and every recursive call
+over the data charges at least one unit before it runs (the property resolver never calls itself at depth 0, where a
+call would return uncharged, and charges each connection it follows), and everything one iteration does is O(log n)
+or charged by its size. The EBX reader makes that possible: every field lookup, enum decode and string decode is a
+binary search in tables built at parse time (see "Level traversal"), and type chains wider than 1,024 descriptors are
+rejected, so examining an instance costs one unit whatever its type's layout, an array its raw element count, a
+`fields()` pass 1 + descriptors / 8 and a string copy its length / 64. A caller can pass one budget to several reads
+(`bf3dump kits` shares one between the mode, the progression tables and every kit). Retail needs at most 26,121
+units for a mode (MP_Subway Rush), 32,929 for `kits` with every kit, 3,958 for the soldier and 1,554 for a vehicle
+(30x headroom or more); the walk caps `max_walk_steps` / `max_query_steps` stay on top (retail: under 8k and 4k
+steps). Indexes keyed by data (connection targets, unlock GUIDs) are sorted or ordered, and
+the hash maps of GUIDs, SHA1s and instance keys hash with a per-process random seed (`ids.h` `hash_keyed`), so crafted
+keys cannot pile into one bucket and make a charged entry cost O(N). The cost model is written down at the top of
+`src/gameplay/logic_world.cpp`; bf3dump prints the units a command used on stderr.
+
+The kit tables have no "default" flag, so a slot's default is its first unlock that none of the four persistence
+progression tables grants (rank, licence, award or scoring-bucket unlock) and that is not an ammo/scope variant
+(`Extra` set). That gives the starting loadouts: US assault m16a4, m9, medkit, m67 and the stock knife (the razor
+knife listed first is a licence unlock); engineer SMAW/RPG-7 and repair tool; support ammo box; recon radio beacon;
+assault gadget 1 has no default (every launcher is score-gated). Without those tables the default is unknown.
+
+Inspect with bf3dump (`<sb>` as for the EBX commands; `mode` and `kits` open the level's superbundle):
+
+| command | output |
+|---|---|
+| `soldier [<sb>]` | the SoldierDef of MP_001's `mpsoldier` (or the given superbundles) |
+| `mode <level> [<mode>]` | the mode list, or the ModeDef of one mode (`CQS`, `CQL`, `RL`, `SR`, `TDM`, `SQDM`, `DOM`, `GM`, `TS`, `SCV`, `CTF`, `AS` or the full id) |
+| `kits <level> <mode> [--all]` | per team, each kit's slots with the default unlock and weapon (`--all` lists every option with its gate) |
+| `vehicle <partition> [<sb>]` | the VehicleDef (default `@all-mp`) |
+| `scoring [<sb>]` | the scoring table |
+
+`ctest -R core.gameplay.tables` runs `core.gameplay.tables.unit` (no data) and `core.gameplay.tables` (needs the install, exits 77
+without it). Checked on 2026-10-14 against the research values: soldier 100 hp, regen 5/s after 10 s, 2 s spawn
+immunity, 13 s man-down; walk 4, sprint 6.5, crouch 2, prone 0.9, swim 3, ladder 1.32, parachute 9 m/s; jump 0.6 m;
+fall damage 0 below 13.9 m/s up to 100 at 30 m/s. Modes: MP_001 CQS 250 tickets / AreaValue 51 / 3 flags / 32 players,
+CQL 400/34/5/64, Rush 75 attacker lives, MCOM arm 2.5 s, disarm 5 s, fuse 25 s, Squad Rush 20 lives, TDM 100 kills,
+SQDM 4 x 50; Metro CQS 350/55; Caspian CQL 300/34. Vehicles: M1A2/T-90 5000 kg, gravity 1.6, 1000 hp per zone, rear
+x2.75 below 36 deg, sides x1.8, disabled at 500, M1A2 ring lock 0.0001 and gun 0.85 (T-90 0 and 1, gun -20..4 deg);
+helicopters 5000 kg / 500 hp / disabled 170; jets 10000 kg, regen 18/s after 10 s; Humvee 1500 kg / 1.85; buggies
+800 / 1.65; RHIB 1000 / 1.25; C-RAM and Pantsir armour multiplier 99999. The tables read the data as it is: values the
+round logic changes at run time (which Rush bases are active, scripted ticket bleed) are not evaluated.
 
 ## Layout and pinned third-party code
 

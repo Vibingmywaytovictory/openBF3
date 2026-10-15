@@ -175,3 +175,17 @@ set_tests_properties(core.level.unit core.level PROPERTIES TIMEOUT 600)
 if(OPENBF3_ASAN)
     set_tests_properties(core.level.unit core.level PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
+# Soldier, kit, mode and vehicle tables (bf3_core/gameplay). core.gameplay.tables.unit is synthetic (no
+# data, incl. the hostile work-budget cases); core.gameplay.tables reads the retail install (plan §7.2-§7.4),
+# exits 77 = skipped without one.
+openbf3_test(test_gameplay_tables test_main.cpp gameplay_tables_tests.cpp test_support.h)
+target_link_libraries(test_gameplay_tables PRIVATE bf3_core)
+add_test(NAME core.gameplay.tables.unit COMMAND test_gameplay_tables --test-suite=tables-unit)
+add_test(NAME core.gameplay.tables COMMAND test_gameplay_tables --test-suite=tables)
+set_tests_properties(core.gameplay.tables PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.gameplay.tables.unit core.gameplay.tables PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_tables_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.gameplay.tables.unit core.gameplay.tables
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tables_cl_dir}")
+endif()

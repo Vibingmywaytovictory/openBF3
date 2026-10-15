@@ -40,20 +40,46 @@ struct Sha1 {
 	auto operator<=>(const Sha1 &) const = default;
 };
 
+// Hash containers keyed by values a file controls (GUIDs, SHA1s, instance keys) hash them keyed
+// with a per-process random seed. A fixed mixer, however strong, lets crafted keys be lined up in
+// one bucket offline (hash flooding: N inserts then cost O(N^2) and stay within any per-entry
+// budget); with an unknown seed they cannot. Not cryptographic. The iteration order of such a
+// container differs between runs, so nothing may print or decide in that order.
+uint64_t hash_seed();
+
+// murmur3 fmix64: a bijective 64-bit finaliser with full avalanche.
+inline uint64_t hash_mix(uint64_t p_x) {
+	p_x ^= p_x >> 33;
+	p_x *= 0xFF51AFD7ED558CCDull;
+	p_x ^= p_x >> 33;
+	p_x *= 0xC4CEB9FE1A85EC53ull;
+	p_x ^= p_x >> 33;
+	return p_x;
+}
+
+// Two words, keyed with hash_seed(); every input bit reaches every output bit.
+inline uint64_t hash_keyed(uint64_t p_a, uint64_t p_b) {
+	return hash_mix(hash_mix(p_a ^ hash_seed()) ^ p_b);
+}
+
 struct GuidHash {
 	size_t operator()(const Guid &p_guid) const noexcept {
 		uint64_t a, b;
 		std::memcpy(&a, p_guid.bytes.data(), 8);
 		std::memcpy(&b, p_guid.bytes.data() + 8, 8);
-		return static_cast<size_t>(a ^ (b * 0x9E3779B97F4A7C15ull));
+		return static_cast<size_t>(hash_keyed(a, b));
 	}
 };
 
 struct Sha1Hash {
 	size_t operator()(const Sha1 &p_sha1) const noexcept {
-		uint64_t a; // a SHA1 is already uniformly distributed
+		// All 20 bytes: a catalog may hold crafted values that are not digests of anything.
+		uint64_t a, b;
+		uint32_t c;
 		std::memcpy(&a, p_sha1.bytes.data(), 8);
-		return static_cast<size_t>(a);
+		std::memcpy(&b, p_sha1.bytes.data() + 8, 8);
+		std::memcpy(&c, p_sha1.bytes.data() + 16, 4);
+		return static_cast<size_t>(hash_mix(hash_keyed(a, b) ^ c));
 	}
 };
 

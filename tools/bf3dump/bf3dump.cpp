@@ -52,6 +52,7 @@
 #include "ebx_commands.h"
 #include "weapon_commands.h"
 #include "text_commands.h"
+#include "gameplay_commands.h"
 #include "json_number.h"
 #include "level_commands.h"
 
@@ -478,6 +479,7 @@ void usage() {
 			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n"
 			"  level <LEVEL> <MODE> [--legacy-mvdb]\n"
 			"  levelmodes <LEVEL>\n");
+	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 }
 
 } // namespace
@@ -571,6 +573,9 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "levelmodes" && rest.size() == 1) {
 		return bf3dump::cmd_level_modes(ctx.install, rest[0]);
+	}
+	if (const int rc = bf3dump::dispatch_gameplay(ebx_ctx, cmd, rest); rc >= 0) {
+		return rc;
 	}
 	usage();
 	return 2;
