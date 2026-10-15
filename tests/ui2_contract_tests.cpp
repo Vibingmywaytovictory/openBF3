@@ -189,6 +189,82 @@ TEST_SUITE("ui2-contract") {
 		CHECK(img.at_uv({ 2.0f, 2.0f }) == 4); // clamped
 		CHECK(img.at_uv({ -1.0f, -1.0f }) == 1);
 		CHECK(ui::L8Image{}.at_uv({ 0.5f, 0.5f }) == 255); // empty: outside
+		CHECK(img.at_uv({ std::nanf(""), 0.5f }) == 255); // non-finite: outside, no float -> integer conversion
+		CHECK(img.at_uv({ 0.5f, INFINITY }) == 255);
+	}
+
+	TEST_CASE("debug UV packing: round trip within half a step, edges, hostile values") {
+		for (float u : { 0.0f, 1.0f, 0.5f, 0.605498f, 0.123456f, 0.999f }) {
+			for (float v : { 0.0f, 1.0f, 0.485840f, 0.25f, 0.0001f }) {
+				const ui::MinimapUv d = ui::decode_minimap_debug_uv(ui::encode_minimap_debug_uv({ u, v }));
+				CHECK(near(d.u, u, 0.5f / ui::kMinimapDebugUvSteps + 1e-6f));
+				CHECK(near(d.v, v, 0.5f / ui::kMinimapDebugUvSteps + 1e-6f));
+				// At most a quarter texel of Metro's 2048² satellite, well inside the gate's 1 texel.
+				CHECK(ui::minimap_uv_error_texels(d, { u, v }, 2048) <= 0.26f);
+			}
+		}
+		const ui::MinimapDebugUvPixel top = ui::encode_minimap_debug_uv({ 1.0f, 1.0f });
+		CHECK(top.r == 255);
+		CHECK(top.g == 255);
+		CHECK(top.b == 255);
+		const ui::MinimapDebugUvPixel bad = ui::encode_minimap_debug_uv({ std::nanf(""), -3.0f });
+		CHECK(bad.r == 0);
+		CHECK(bad.g == 0);
+		CHECK(bad.b == 0);
+	}
+
+	TEST_CASE("expected UV under a screen point: centre = the player's texel, mirrored variants miss") {
+		ui::MinimapView view;
+		view.center_x = 128.0f;
+		view.center_y = 128.0f;
+		view.pixels_per_metre = 0.85f;
+		view.player_x = -108.03f; // Metro's US HQ as a stand-in spawn
+		view.player_z = -147.5f;
+		for (bool rotate : { false, true }) {
+			view.rotate = rotate;
+			view.heading = rotate ? kPi / 2.0f : 0.3f;
+			const ui::MinimapUv c = ui::minimap_expected_uv(view, kMetro, { 128.0f, 128.0f });
+			const ui::MinimapUv own = ui::world_to_minimap_uv(kMetro, view.player_x, view.player_z);
+			CHECK(ui::minimap_uv_error_texels(c, own, 2048) < 1e-2f);
+			// A ring of 16 samples 100 units from the centre (the gate's rule): for every other variant the largest miss
+			// over the ring exceeds the 10-texel control bound.
+			for (uint8_t v = 1; v < ui::kMinimapMappingVariants; ++v) {
+				INFO(int(v));
+				float worst = 0.0f;
+				for (int i = 0; i < 16; ++i) {
+					const float a = 2.0f * kPi * float(i) / 16.0f;
+					const ui::ScreenPoint ring{ 128.0f + 100.0f * std::cos(a), 128.0f + 100.0f * std::sin(a) };
+					const ui::MinimapUv r0 = ui::minimap_expected_uv(view, kMetro, ring);
+					const float e = ui::minimap_uv_error_texels(ui::minimap_expected_uv(view, kMetro, ring, v), r0, 2048);
+					worst = e > worst ? e : worst;
+				}
+				CHECK(worst > ui::kMinimapUvMirrorTexels);
+			}
+		}
+		// Rotating: the sample straight above the centre is ahead of the player.
+		view.rotate = true;
+		view.heading = kPi / 2.0f; // looking down +X
+		const std::array<float, 2> ahead = ui::minimap_unproject(view, { 128.0f, 128.0f - 85.0f });
+		CHECK(near(ahead[0], view.player_x + 100.0f, 1e-2f));
+		CHECK(near(ahead[1], view.player_z, 1e-2f));
+	}
+
+	TEST_CASE("icon choice relative to the local team") {
+		using S = ui::HudIconState;
+		CHECK(ui::objective_icon(false, 0, 1).icon == "UIHudIcon_NeutralFlag");
+		CHECK(ui::objective_icon(false, 0, 1).state == S::Neutral);
+		CHECK(ui::objective_icon(false, 1, 1).icon == "UIHudIcon_FriendlyFlag");
+		CHECK(ui::objective_icon(false, 1, 1).state == S::Friendly);
+		CHECK(ui::objective_icon(false, 2, 1).icon == "UIHudIcon_EnemyFlag");
+		CHECK(ui::objective_icon(false, 2, 1).state == S::Enemy);
+		CHECK(ui::objective_icon(true, 1, 1).icon == "UIHudIcon_Base");
+		CHECK(ui::objective_icon(true, 1, 1).state == S::Friendly);
+		CHECK(ui::objective_icon(true, 2, 1).state == S::Enemy);
+		CHECK(ui::soldier_icon(true, 1, 1).icon == "UIHudIcon_LocalPlayer");
+		CHECK(ui::soldier_icon(true, 1, 1).state == S::Default);
+		CHECK(ui::soldier_icon(false, 2, 1).state == S::Enemy);
+		CHECK(ui::soldier_icon(false, 1, 1).state == S::Friendly);
+		CHECK(ui::soldier_icon(false, 0, 1).state == S::Neutral);
 	}
 
 	TEST_CASE("hud icon rects and frames") {

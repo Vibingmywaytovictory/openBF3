@@ -2,8 +2,9 @@
 // Bf3WorldIcons: flag and HQ icons in the 3D view (docs/design/ui-minimap-icons.md §10.3; gap UI §6). Main thread.
 //
 // Each frame, for each objective: p = objective position + (0, lift, 0); skipped when
-// Camera3D::is_position_behind(p); else Camera3D::unproject_position(p) gives the canvas point, where the hud3dicons
-// frame (UIHudIcon_NeutralFlag / _Friendly / _Enemy, UIHudIcon_Base) is drawn with draw_texture_rect_region, scaled
+// Camera3D::is_position_behind(p); else the icon centre is Camera3D::unproject_position(p) + (0, pixel_offset_y) in
+// canvas units, where the hud3dicons frame (objective_icon in hud_icons.h: UIHudIcon_NeutralFlag / FriendlyFlag /
+// EnemyFlag, UIHudIcon_Base) is drawn with draw_texture_rect_region, scaled
 // with distance like UICapturepointtagCompData (IconSize 30, ScaleDistance 500, MaxScaleMod 0.4, FadeDistance 200 -
 // FadeEndDistance 800, MaxFarFade 0.5, VerticalOffset 5.5, PixelOffset (0, -28): the component's own fields, read from
 // ui/uicomponents/uicapturepointtagcomp [values verified, semantics inferred]), with the label letter and the distance
@@ -43,8 +44,12 @@ public:
 	// Every frame: the camera that renders (first person or free) and the icons.
 	void update(const godot::Camera3D *p_camera, std::vector<MinimapIconDraw> p_icons);
 
-	// For the check: canvas points of the icons drawn last frame (NaN for skipped ones).
+	// For the check: icon centres drawn last frame (unproject_position(lifted) + pixel offset; NaN for skipped ones).
+	// Gate G10 compares them with the check's own pinhole projection of the same lifted point (the camera's
+	// get_camera_projection() and global transform, multiplied out in the check) plus the same offset, so a wrong lift,
+	// offset or camera shows; and a pixel test that the icon is in the viewport image there (minimap_check.h).
 	const std::vector<bf3::core::ui::ScreenPoint> &last_points() const { return last_points_; }
+	const WorldIconStyle &style() const { return style_; }
 
 protected:
 	static void _bind_methods();

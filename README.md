@@ -1262,6 +1262,8 @@ on-screen view), `ui/hud_icons.h` (the hud3dicons atlas, the `_small` item icons
 `ui/hud_sources.h` (the HUD DataSources table, generated from the install at run time and never stored) and
 `ui/hud_model.h` (`HudModel`, named after BF3's DataSources, and the 235 binding rows of the 11 bound component
 types); `bf3_godot` `minimap_hud.h`, `minimap_control.h`, `world_icons.h`, `minimap_check.h` (the in-game minimap
-node and its check). `ctest -R ui2.contract` checks the binding counts and the inline mapping, view and icon helpers.
-The readers, the bf3dump commands, the install tests and the in-game node follow in the implementation wave (design
-§15).
+node and its check). `ctest -R ui2.contract` checks the binding counts and the inline mapping, view, debug-UV packing
+and icon helpers. The readers, the bf3dump commands, the install tests and the in-game node follow in the
+implementation wave (design §15). The in-game check (`godot.ui2`) measures the drawn map on the viewport image: the
+shader's `debug_uv` mode writes the sampled texture coordinate, which must match the mapping within one satellite
+texel (design §10.4, gate G9).

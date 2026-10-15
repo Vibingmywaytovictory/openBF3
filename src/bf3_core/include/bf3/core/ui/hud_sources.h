@@ -10,8 +10,11 @@
 //
 // Verified 2026-10-15 (design §4): 84 partitions under ui/uicomponents/ over "Win32/UI,@all-mp", 84 distinct
 // primary types; the 58 in-game ones all resolve in Win32/UI. Source counts: UIWeaponCompData 63, UISoldierCompData
-// 16, UIVehicleCompData 82, UISettingsCompData 89, UICustomizationCompData 59, UIEndOfRoundCompData 52, ... (0 for
-// the 8 components that bind nothing).
+// 16, UIVehicleCompData 82, UISettingsCompData 89, UICustomizationCompData 59, UIEndOfRoundCompData 52, ...; 10 of the
+// 84 types have an empty DataSources list, 7 of them among the 58 in-game components (HudCameraShakeData,
+// UIDataInterfaceCompData, UIDirectAccessCompData, UIScreenEventCompData, UIWidgetEventCompData,
+// UITextureStreamingComponentData, UILocalizeCompData; the other three are DiscComponentData, UINametagSPCompData,
+// UIOnDemandFontComponentData).
 //
 // The repo never stores this table (it is BF3 data): it is generated at run time (bf3dump hud-sources, the ctests),
 // never cached. The repo holds only hud_model.h's binding rows, the names the HudModel

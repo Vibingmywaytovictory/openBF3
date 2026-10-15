@@ -14,9 +14,13 @@
 // * Item icons (kill feed, kill card, loadout): UIWeaponDescription (ui/uiweaponmetadata, 111 entries) and
 //   UIKitItemDescription (ui/uikititemmetadata, 17) carry ItemIds (the unlock identifiers) and IconTexturePath
 //   ("UI/Art/Persistence/Weapons/M16A4_small"); the path lowercased is the TextureAsset / DxTexture res name in
-//   Win32/UI (DXT5 64 x 16, one mip). Of MP_Subway's 172 catalog variants, 158 find their icon through the weapon
-//   metadata and the other 14 (gadgets and the M67) through the kit-item metadata [the 14: inferred from the ItemIds
-//   lists, to be measured by the implementation]. UIVehicleDescription (ui/uivehiclemetadata, 56) has TexturePath only.
+//   Win32/UI (DXT5 64 x 16, one mip, for the weapons). ItemIds holds SoldierWeaponUnlockAsset.Identifier values
+//   (WeaponDef::unlock_identifier). Verified 2026-10-15 by identifier, not by name: of MP_Subway's 172 catalog
+//   variants, 158 find their icon through the weapon metadata (the description's Name equals the variant's name SID
+//   on all 158) and the other 14 (13 gadgets, ui/art/persistence/kititem/*_small, and the M67,
+//   ui/art/persistence/weapons/grenade_small) through the kit-item metadata; every one of the 172 textures exists in
+//   Win32/UI; 2 ids are listed by two descriptions (the first wins). UIVehicleDescription (ui/uivehiclemetadata, 56)
+//   has TexturePath only.
 // * Vehicles: VehicleEntityData.HudData (VehicleHudData) {MinimapIcon (UIHudIcon_*), Texture (TextureAsset, null on
 //   e.g. the Tunguska), VehicleItemHash}.
 //
@@ -142,6 +146,38 @@ struct Rgba8Image {
 };
 // p_mount: a mount of the superbundle holding the atlas texture (Win32/UI).
 Result<Rgba8Image> load_hud_icon_texture(const LevelMount &p_mount, const HudIconAtlas &p_atlas);
+
+// ---- which atlas entry an object shows (design §10.2; M1 has one local team, kM1LocalTeam in minimap_hud.h) -------
+// Retail states of the entries used (bf3dump dump ui/static/hud3dicons, 2026-10-15): LocalPlayer {Default, Squad},
+// Player {Friendly, Enemy, Squad, Neutral}, NeutralFlag {Blink, Neutral}, FriendlyFlag {Friendly, Blink, Neutral},
+// EnemyFlag {Enemy, Blink, Neutral}, Base {Friendly, Enemy}; FriendlyBase {Friendly, Neutral} and EnemyBase {Default,
+// Neutral} are not used. Team 0 is neutral; an owner equal to the local team is friendly, any other non-zero owner is
+// enemy. Blink (a flag being captured) needs the capture logic (M4).
+struct HudIconChoice {
+	std::string_view icon;
+	HudIconState state = HudIconState::Default;
+};
+// A flag or HQ on the minimap and in the world (p_hq: CapturableType CTUnableToChangeTeam).
+constexpr HudIconChoice objective_icon(bool p_hq, int32_t p_owner_team, int32_t p_local_team) {
+	if (p_hq) {
+		return { "UIHudIcon_Base", p_owner_team != 0 && p_owner_team == p_local_team ? HudIconState::Friendly : HudIconState::Enemy };
+	}
+	if (p_owner_team == 0) {
+		return { "UIHudIcon_NeutralFlag", HudIconState::Neutral };
+	}
+	return p_owner_team == p_local_team ? HudIconChoice{ "UIHudIcon_FriendlyFlag", HudIconState::Friendly }
+										: HudIconChoice{ "UIHudIcon_EnemyFlag", HudIconState::Enemy };
+}
+// The local player (always LocalPlayer Default until squads exist) and the other soldiers.
+constexpr HudIconChoice soldier_icon(bool p_local, int32_t p_team, int32_t p_local_team) {
+	if (p_local) {
+		return { "UIHudIcon_LocalPlayer", HudIconState::Default };
+	}
+	if (p_team == 0) {
+		return { "UIHudIcon_Player", HudIconState::Neutral };
+	}
+	return { "UIHudIcon_Player", p_team == p_local_team ? HudIconState::Friendly : HudIconState::Enemy };
+}
 
 // ---- item icons -------------------------------------------------------------------------------------------------------
 

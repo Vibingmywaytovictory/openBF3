@@ -188,6 +188,56 @@ inline float minimap_marker_angle(const MinimapView &p_view) {
 	return p_view.rotate ? 0.0f : -p_view.heading;
 }
 
+// ---- the UV read-back the in-game check uses (design §10.4, gate G9) -----------------------------------------------
+// With the shader's debug_uv uniform set, the map item writes the texture coordinate it sampled into the pixel instead
+// of the satellite colour: u and v quantised to 12 bits each (1/4095: half a texel of a 2048² satellite), packed into
+// R, G, B with alpha 1 (R = u >> 4, G = (u & 15) << 4 | v >> 8, B = v & 255). The shader in minimap_control.h does the
+// same packing; ui2.contract checks the round trip. The check reads these pixels back from the viewport image and
+// compares them with minimap_expected_uv of the same pixel, so the satellite's placement (draw_set_transform, the
+// source rect, the rotation, the mirror) is measured, not assumed.
+inline constexpr uint32_t kMinimapDebugUvSteps = 4095;
+struct MinimapDebugUvPixel {
+	uint8_t r = 0;
+	uint8_t g = 0;
+	uint8_t b = 0;
+};
+inline MinimapDebugUvPixel encode_minimap_debug_uv(MinimapUv p_uv) {
+	const auto quantise = [](float p_x) -> uint32_t {
+		if (!std::isfinite(p_x) || p_x <= 0.0f) {
+			return 0;
+		}
+		if (p_x >= 1.0f) {
+			return kMinimapDebugUvSteps;
+		}
+		return uint32_t(std::floor(p_x * float(kMinimapDebugUvSteps) + 0.5f));
+	};
+	const uint32_t qu = quantise(p_uv.u);
+	const uint32_t qv = quantise(p_uv.v);
+	return { uint8_t(qu >> 4), uint8_t(((qu & 15u) << 4) | (qv >> 8)), uint8_t(qv & 255u) };
+}
+inline MinimapUv decode_minimap_debug_uv(MinimapDebugUvPixel p_pixel) {
+	const uint32_t qu = (uint32_t(p_pixel.r) << 4) | (uint32_t(p_pixel.g) >> 4);
+	const uint32_t qv = ((uint32_t(p_pixel.g) & 15u) << 8) | uint32_t(p_pixel.b);
+	return { float(qu) / float(kMinimapDebugUvSteps), float(qv) / float(kMinimapDebugUvSteps) };
+}
+// The satellite UV that must be under screen point p_screen (control-local canvas units) when the map is drawn right:
+// the world point minimap_unproject gives, through the mapping (variant 0 = world_to_minimap_uv). The check compares
+// the decoded read-back against this for variant 0 (within kMinimapUvCheckTexels) and, as a control, for the other
+// seven (each must miss by more than kMinimapUvMirrorTexels at some sample).
+inline MinimapUv minimap_expected_uv(const MinimapView &p_view, const MinimapMapping &p_mapping, ScreenPoint p_screen, uint8_t p_variant = 0) {
+	const std::array<float, 2> w = minimap_unproject(p_view, p_screen);
+	return world_to_minimap_uv_variant(p_mapping, w[0], w[1], p_variant);
+}
+inline constexpr float kMinimapUvCheckTexels = 1.0f; // pass: |decoded - expected| <= 1 satellite texel per axis (the
+                                                       // 12-bit packing costs at most 0.25 texel on a 2048² image)
+inline constexpr float kMinimapUvMirrorTexels = 10.0f; // the 7 other variants must miss by more than this somewhere
+// The larger per-axis error in texels of a side p_side image.
+inline float minimap_uv_error_texels(MinimapUv p_a, MinimapUv p_b, uint32_t p_side) {
+	const float du = std::fabs(p_a.u - p_b.u) * float(p_side);
+	const float dv = std::fabs(p_a.v - p_b.v) * float(p_side);
+	return du > dv ? du : dv;
+}
+
 // ---- combat areas and objectives ----------------------------------------------------------------------------------
 
 // One VeniceUICombatAreaAsset the mode places (through a UICombatAreaEntityData).
@@ -239,8 +289,12 @@ Result<CombatAreaMask> read_combat_area(const EbxResolver &p_db, std::string_vie
 Result<MinimapLevel> read_minimap_level(const level::LoadedLevel &p_level, const level::World &p_world);
 
 struct MinimapLoadOptions {
-	unsigned threads = 0; // partition parse lanes (level::LoadOptions::threads); 0 = all cores
+	// Partition parse lanes (level::LoadOptions::threads); 0 = all cores. The in-game HUD passes
+	// kMinimapHudLoaderThreads (plan §2.3: loader work stays off the cores the frame and the 60 Hz server need);
+	// bf3dump and the install tests pass 0.
+	unsigned threads = 0;
 };
+inline constexpr unsigned kMinimapHudLoaderThreads = 2;
 // load_level + World::traverse + read_minimap_level (the minimap node's loader thread, bf3dump minimap).
 Result<MinimapLevel> load_minimap_level(std::shared_ptr<const Install> p_install, std::string_view p_level_id, std::string_view p_mode,
 		const MinimapLoadOptions &p_options = {});
@@ -254,9 +308,10 @@ struct L8Image {
 	std::vector<uint8_t> texels; // width * height
 
 	bool empty() const { return texels.empty(); }
-	// Nearest texel at (u, v), clamped to the edges.
+	// Nearest texel at (u, v), clamped to the edges; 255 (outside any combat area) for an empty image or a non-finite
+	// coordinate, so hostile positions never reach the float -> integer conversion.
 	uint8_t at_uv(MinimapUv p_uv) const {
-		if (empty()) {
+		if (empty() || !std::isfinite(p_uv.u) || !std::isfinite(p_uv.v)) {
 			return 255;
 		}
 		const float fx = std::floor(p_uv.u * float(width));
@@ -298,8 +353,21 @@ double mask_box_iou(const std::vector<bool> &p_mask, uint32_t p_side, const Mini
 		std::array<float, 4> p_box_x0_x1_z0_z1);
 // The same against a closed world polygon (x, z) (even-odd rule): the gameplay combat area's VolumeVectorShapeData
 // (design §5.3: Metro TDM's 23-point area gives IoU 1.000 through variant 0 and 0.000 through the other seven).
+// Cost side² x points: refused (NaN) past kMaxIouSide or kMaxAreaPolygonPoints.
 double mask_polygon_iou(const std::vector<bool> &p_mask, uint32_t p_side, const MinimapMapping &p_mapping, uint8_t p_variant,
 		std::span<const std::array<float, 2>> p_polygon);
+
+inline constexpr uint32_t kMaxIouSide = 1024; // retail masks 128²
+inline constexpr size_t kMaxAreaPolygonPoints = 1024; // retail: Metro TDM's gameplay area has 23
+
+// G5's reference polygon: the (x, z) of the Points of the one ObjectKind::VolumeVectorShape placement of p_world whose
+// entity lives in partition p_partition (Metro TDM: levels/mp_subway/teamdeathmatch/layer0_teamdeathmatch_logic, whose
+// only VolumeVectorShapeData, #104 in the traversal, c304182e-..., is the area the TDM sub-world links to the
+// CombatAreaTriggerEntityData of gameplay/gamemodes/deathmatch; design §4.2), each point through the placed transform
+// (identity on Metro). Fails on 0 or more than one such placement, a non-finite point, fewer than 3 points or more than
+// kMaxAreaPolygonPoints; charges p_world's budget per point.
+Result<std::vector<std::array<float, 2>>> read_area_polygon(const level::LoadedLevel &p_level, const level::World &p_world,
+		std::string_view p_partition);
 
 // ---- cache (design §8) ------------------------------------------------------------------------------------------------
 // Nothing here is cached: Metro's load_level + traverse take 0.34 s + 0.04 s (bf3dump level, warm OS cache), the
