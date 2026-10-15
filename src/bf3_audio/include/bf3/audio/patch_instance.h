@@ -92,6 +92,7 @@ struct BusBuffers {
 // thread (no blocking, no allocation). The M16A3 "core" tap is voices 26-29 (the stepped corebassdistant and
 // corebassclose samplers), the "noise" tap voice 14 (the submix behind the distance HPF v46).
 inline constexpr size_t kMaxTapVoices = 16;
+inline constexpr size_t kMaxVoiceTaps = 4; // taps per instance (the M16A3 check uses two: core and noise)
 class VoiceTap {
 public:
 	virtual ~VoiceTap() = default;
@@ -108,6 +109,11 @@ struct SamplerTraceEntry {
 	uint16_t segment = 0;
 	SamplerTraceKind kind = SamplerTraceKind::Trigger;
 	float pitch = 1.0f;
+	// Advance / Tail on the same slot: the frame the previous segment's last output frame was followed by this
+	// segment's first (equal to `frame`: the resampler crosses the boundary without a gap); 0 otherwise.
+	uint64_t prev_end = 0;
+	core::audio::WaveId wave = core::audio::kNoWave; // the bank wave and variation the segment belongs to
+	uint32_t variation = 0;
 };
 // Caller-owned trace storage: entries is sized before use and never grows; the audio side writes entries[count++]
 // and counts dropped once it is full.
@@ -140,6 +146,8 @@ struct PatchInstanceStats {
 	uint64_t deferred_events = 0; // events past kMaxEventsPerBlock
 	uint64_t starved_slots = 0; // a sampler slot whose wave is not resident (counted, silent)
 	uint64_t decode_errors = 0; // a stream that failed mid-play (counted, slot stops)
+	uint64_t sampler_triggers = 0; // Sampler Trigger events taken (the mixer returns a never-stopped one-shot once it has played)
+	uint64_t unknown_inputs = 0; // set_parameter / post_event with a hash the program does not have
 };
 
 class PatchInstance {
@@ -183,7 +191,9 @@ public:
 	// Analysis hooks (gates G7/G8), same threading rule. p_voices is copied (at most kMaxTapVoices). p_tap and
 	// r_trace are caller-owned and must outlive the instance's time in the mixer; the caller reads the trace once
 	// the instance is finished (it outlives the instance, which reclaim() destroys).
-	void set_voice_tap(std::span<const uint16_t> p_voices, VoiceTap *p_tap);
+	void set_voice_tap(std::span<const uint16_t> p_voices, VoiceTap *p_tap); // replaces every tap with this one
+	void add_voice_tap(std::span<const uint16_t> p_voices, VoiceTap *p_tap); // up to kMaxVoiceTaps; more are ignored
+	bool stop_seen() const; // the program's stop event has pulsed (true when it has none)
 	void set_sampler_trace(SamplerTrace *r_trace);
 	const core::audio::SoundProgram &program() const;
 	const PatchInstanceStats &stats() const;
@@ -191,10 +201,13 @@ public:
 	PatchInstance(const PatchInstance &) = delete;
 	PatchInstance &operator=(const PatchInstance &) = delete;
 
+	struct State; // patch_state.h (internal)
+
 private:
 	PatchInstance() = default;
-	struct State;
+	void render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frames, BusBuffers &r_buses);
 	std::unique_ptr<State> state_;
+	mutable std::vector<SamplerSlotState> slot_views_; // sampler_slots() storage, sized in create()
 };
 
 } // namespace bf3::audio

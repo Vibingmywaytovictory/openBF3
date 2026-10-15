@@ -53,6 +53,7 @@ struct CheckSegment {
 	uint32_t bursts = 1;
 	uint64_t seed = 0; // burst b of the segment uses seed + b
 	bool pin_distance_hpfs = false; // kM16NoiseHpf and kM16CoreHpf pinned to 0 Hz
+	bool pin_noise_hpf = false; // kM16NoiseHpf only pinned to 0 Hz (G7 row f: a 0 Hz high-pass is the identity)
 };
 
 struct CheckScript {
@@ -64,7 +65,12 @@ struct CheckScript {
 	double start_s = 0.25;
 	WeaponFireMode fire_mode = WeaponFireMode::Automatic;
 	double expected_spacing_frames = 3600.0;
-	double spacing_tolerance_frames = 48.0; // 1 ms
+	// 2 ms. The data's own onset jitter is up to 65 frames [measured on the G7 render]: 22 of the 24
+	// corebassdistant_lmg_04 loop segments open with a 64-frame lead at -35..-60 dB before their transient while
+	// segments 0 and 1 have none, and corebassclose_lmg_08 segments carry a late re-attack up to 1.4 ms before the next
+	// round. 96 frames still fails any block-quantised or missed event (>= 512 / 3600 frames); the exact scheduling
+	// check is row (e), where every Step starts on its round frame with 0 frames error.
+	double spacing_tolerance_frames = 96.0;
 };
 
 // near 0.5 m x 2, mid 60 m x 2, far 150 m x 2, far_pinned 150 m x 1 (seed of far's first burst); third person;
@@ -135,7 +141,7 @@ struct CheckReport {
 
 // The rules G7 and G8 share (design §10.4):
 //   onsets: per burst, on the core tap: exactly `rounds` onsets in [first_round_frame - 10 ms, stop_frame), each gap
-//     expected_spacing_frames +- spacing_tolerance_frames;
+//     expected_spacing_frames +- spacing_tolerance_frames (96 frames, see CheckScript);
 //   levels: full-mix RMS over the burst windows, mean per segment: near > mid > far, each step >= 3 dB;
 //   HPF (full mix): 20-100 Hz band energy of far's first burst window >= 10 dB below far_pinned's;
 //   HPF (noise tap, voice 14): the same comparison on the tap >= 10 dB, and the far tap's measured band energy within
@@ -143,5 +149,39 @@ struct CheckReport {
 // p_mix_stereo, p_core_tap and p_noise_tap start at the driver's start frame.
 CheckReport analyse_check(const CheckScript &p_script, std::span<const ScheduledBurst> p_bursts, std::span<const float> p_mix_stereo,
 		std::span<const float> p_core_tap, std::span<const float> p_noise_tap, float p_far_noise_hpf_hz, uint32_t p_rate, const AudioTuning &p_tuning);
+
+// The offline render of a check script through MixerCore (G7, and G8's in-process replay): the driver pumped
+// before every mix() call, a WavRecorder on the mixer. p_call_frames cycles the mix() call sizes (the grid makes
+// the output independent of them; G7 renders once with varying sizes to show it).
+struct OfflineCheckOptions {
+	uint64_t start_frame = 0; // 0: the mixer's earliest_frame() before the first mix
+	std::vector<uint32_t> call_frames{ kBlockFrames };
+	MixerConfig mixer;
+};
+struct OfflineCheck {
+	std::vector<ScheduledBurst> bursts;
+	uint64_t start_frame = 0;
+	uint64_t total_frames = 0;
+	std::vector<float> mix; // stereo interleaved, [start_frame, start_frame + total_frames)
+	std::vector<float> core_tap, noise_tap; // mono, same span
+	std::vector<SamplerTrace> traces; // per burst
+	float far_noise_hpf_hz = 0.0f;
+	uint64_t short_blocks = 0, late_commands = 0, ring_overflows = 0, starved_voices = 0, decode_errors = 0, deferred_events = 0;
+	uint64_t tap_dropped = 0, trace_dropped = 0, record_dropped = 0;
+	CheckReport report; // analyse_check over the render
+};
+core::Result<OfflineCheck> run_check_offline(const CheckScript &p_script, std::shared_ptr<const core::audio::SoundProgram> p_program,
+		std::shared_ptr<const core::audio::WaveBank> p_bank, const AudioTuning &p_tuning, const OfflineCheckOptions &p_options = {});
+
+// G7 row (e), from the sampler traces of an offline render [design §10.4]: per far / far_pinned burst,
+//   trace.noise_far.<seg>.<i>: noise_far (the unstepped sampler on voices 20-21) runs Trigger, loop segments back to
+//     back (each start is the previous segment's end on the same slot, prev_end == frame; each segment lasts its
+//     length at the pitch of its first frame within 3 %, the Lfo moving the pitch by up to 2 % inside it), none
+//     starting after the stop frame, then exactly one Tail segment (the variation's LastLoop + 1), then End; the
+//     value is the largest relative duration error;
+//   trace.corebass.<seg>.<i>: corebassdistant (voices 26-27) has a Trigger on round 0 and a Step on each later
+//     round's frame exactly, on alternating slots; the value is the largest frame error.
+void add_model_trace_rows(CheckReport &r_report, const OfflineCheck &p_check, const CheckScript &p_script, const core::audio::SoundProgram &p_program,
+		const core::audio::WaveBank &p_bank, uint32_t p_rate);
 
 } // namespace bf3::audio

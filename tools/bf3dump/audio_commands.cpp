@@ -28,6 +28,9 @@ namespace bf3dump {
 
 int cmd_audio_census(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args);
 int cmd_audio_render(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args);
+int cmd_audio_check(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args);
+int cmd_audio_bank(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args);
+int cmd_audio_wave(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args);
 
 namespace {
 
@@ -344,6 +347,15 @@ int cmd_audio(const InstallReader &p_reader, std::shared_ptr<Install> p_install,
 	}
 	if (p_args[0] == "render") {
 		return cmd_audio_render(p_reader, p_install, rest);
+	}
+	if (p_args[0] == "check") {
+		return cmd_audio_check(p_reader, p_install, rest);
+	}
+	if (p_args[0] == "bank") {
+		return cmd_audio_bank(p_reader, p_install, rest);
+	}
+	if (p_args[0] == "wave") {
+		return cmd_audio_wave(p_reader, p_install, rest);
 	}
 	std::fprintf(stderr, "%s", audio_usage());
 	return 2;

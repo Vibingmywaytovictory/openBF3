@@ -97,6 +97,8 @@ struct MixerStats {
 	std::atomic<uint64_t> late_commands{ 0 };
 	std::atomic<uint64_t> ring_overflows{ 0 };
 	std::atomic<uint64_t> starved_voices{ 0 };
+	std::atomic<uint64_t> decode_errors{ 0 }; // summed over the instances (PatchInstanceStats)
+	std::atomic<uint64_t> deferred_events{ 0 };
 	std::atomic<uint32_t> active_instances{ 0 };
 	std::atomic<uint32_t> peak_instances{ 0 };
 	std::atomic<uint64_t> max_block_ns{ 0 }; // report only

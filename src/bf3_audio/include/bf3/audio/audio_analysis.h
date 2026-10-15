@@ -10,7 +10,9 @@ namespace bf3::audio {
 
 // Onset detector, single-frame resolution:
 //   e[n] = mean of x^2 over the window_ms frames ending at n (a running sum: one envelope value per frame, no hop);
-//   floor[n] = the minimum of e over the floor_ms frames before the window;
+//   floor[n] = the mean of e over the floor_ms frames before the window (the mean, not the minimum: the 2 ms
+//     envelope of a noisy tail swings by more than 12 dB, so a minimum floor fires inside the M16A3 corebass tails;
+//     measured on the G7 render: 11-14 onsets per 10-round burst with the minimum, exactly 10 with the mean);
 //   an onset is the first frame n where e[n] >= floor[n] x 10^(rise_db / 10) (and e[n] above silence_dbfs), refined
 //   back to the first frame in [n - window, n] whose |x| reaches -20 dB of the largest |x| in [n - window, n + window];
 //   then nothing for min_gap_ms.

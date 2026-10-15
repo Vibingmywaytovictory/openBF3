@@ -14,6 +14,15 @@
 //       every graph compiled (allow_unimplemented), the handheld weapon patches compiled strictly
 //   audio render <LEVEL> <MODE> <patch> --distance <m> [--rounds N] [--seed S] [--first-person] --out <wav>
 //       one burst of a weapon patch rendered offline through the mixer core into a float WAV
+//   audio check [<LEVEL> <MODE>] [--g7] [--out-dir <dir>]
+//       the M16A3 check script (audio_check.h) rendered offline: the analyse_check rows (a)-(d); --g7 adds rows
+//       (e)-(h) (model trace, 0 Hz bypass, determinism incl. varying mix() call sizes, counters) and writes
+//       m16_offline.wav / _core.wav / _noise.wav to the out dir (default MP_Subway TeamDeathMatch0)
+//   audio bank <LEVEL> <MODE> [--loads N]
+//       gate G6: the level's wave bank (every non-localised SoundWaveAsset) loaded N times (default 2; the last is
+//       the warm time), and every handheld weapon patch of the mount compiled strictly, its waves resident
+//   audio wave <LEVEL> <MODE> <wave partition> [--envelope]
+//       every variation and segment of one SoundWaveAsset: frames, rate, level, peak, onsets (--envelope: 5 ms RMS)
 
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
