@@ -286,6 +286,14 @@ struct CompileStats {
 Result<SoundProgram> compile_sound_patch(const EbxResolver &p_db, const EbxPartition &p_partition, const CompileOptions &p_options,
 		gameplay::WorkBudget &r_budget, CompileStats *r_stats = nullptr);
 
+// The compiler's evaluation order, exposed for audio.patch.unit (design §10.1): nodes 0..n-1 with the registers each
+// reads and writes (p_reads[i], p_writes[i]; every register < p_registers). Kahn's algorithm, stable by index: a node
+// runs after every other node that writes a register it reads; a cycle is broken at the lowest remaining node and
+// the edges into it that were still open are added to r_feedback_edges (those reads see the previous step's value).
+// Every write, edge and successor visit is charged to r_budget.
+Result<std::vector<uint32_t>> order_by_register_dependencies(std::span<const std::vector<uint16_t>> p_reads,
+		std::span<const std::vector<uint16_t>> p_writes, uint32_t p_registers, gameplay::WorkBudget &r_budget, size_t &r_feedback_edges);
+
 // Blob "OBF3SNDP" (kSoundProgramFormatVersion): every field in declaration order, little endian, vectors as u64
 // count + elements, strings as u32 length + bytes (<= 64 KiB). decode_sound_program checks every count against the
 // bytes left, refuses trailing bytes and then runs validate_sound_program, so an accepted program can be evaluated

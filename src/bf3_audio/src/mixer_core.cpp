@@ -84,6 +84,10 @@ struct MixerCore::Impl {
 	SpscRing<MixerFeedback> feedback;
 	std::vector<MixerCommand> pending; // drained, not yet due (audio thread)
 	size_t pending_count = 0;
+	// Per block (audio thread): the Starts kept in `pending` because they are not due yet, as (handle, at_frame). A
+	// later command for the same handle due before that frame waits for its Start (design §16 item 5). Bounded by
+	// max_instances, the same order as find_slot's scan.
+	std::vector<std::pair<InstanceHandle, uint64_t>> held_starts;
 	std::vector<PatchInstance *> return_overflow; // audio thread: instances the return ring refused (capacity reserved)
 	size_t return_overflow_count = 0;
 	std::vector<InstanceSlot> instances;
@@ -106,6 +110,7 @@ struct MixerCore::Impl {
 		owner = std::this_thread::get_id();
 		pending.resize(std::max<uint32_t>(p_config.command_capacity, 2));
 		instances.resize(std::max<uint32_t>(p_config.max_instances, 1));
+		held_starts.resize(instances.size());
 		return_overflow.resize(instances.size() + pending.size());
 		bus_storage.assign(size_t(core::audio::MasterBus::Unknown) * kMaxBusChannels * kBlockFrames, 0.0f);
 		for (size_t b = 0; b < size_t(core::audio::MasterBus::Unknown); ++b) {
@@ -235,11 +240,25 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 	while (m.pending_count < m.pending.size() && m.commands.pop(c)) {
 		m.pending[m.pending_count++] = c;
 	}
-	// Apply every command due in this block, in push order.
-	size_t write = 0;
+	// Apply every command due in this block, in push order. A command for a handle whose Start is still held (stamped
+	// later) is moved to that Start's frame, so it is applied right after the Start instead of finding no instance.
+	size_t write = 0, held = 0;
 	for (size_t i = 0; i < m.pending_count; ++i) {
 		MixerCommand &cmd = m.pending[i];
+		if (cmd.type != MixerCommandType::Start && cmd.handle != kNoInstance) {
+			for (size_t k = 0; k < held; ++k) {
+				if (m.held_starts[k].first == cmd.handle && cmd.at_frame < m.held_starts[k].second) {
+					if (cmd.at_frame != 0 && cmd.at_frame < first) {
+						stats.late_commands.fetch_add(1, std::memory_order_relaxed); // its own frame was already mixed
+					}
+					cmd.at_frame = m.held_starts[k].second;
+				}
+			}
+		}
 		if (cmd.at_frame >= end) {
+			if (cmd.type == MixerCommandType::Start && held < m.held_starts.size()) {
+				m.held_starts[held++] = { cmd.handle, cmd.at_frame };
+			}
 			m.pending[write++] = cmd;
 			continue;
 		}

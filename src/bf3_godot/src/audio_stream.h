@@ -25,6 +25,7 @@
 #include <godot_cpp/classes/audio_stream.hpp>
 #include <godot_cpp/classes/audio_stream_playback.hpp>
 
+#include <atomic>
 #include <memory>
 
 namespace bf3::godot_side {
@@ -45,7 +46,7 @@ protected:
 
 private:
 	std::shared_ptr<bf3::audio::MixerCore> mixer_;
-	bool playing_ = false;
+	std::atomic<bool> playing_{ false }; // written by _start/_stop (main thread), read by _mix (audio thread)
 };
 
 class Bf3AudioStream : public godot::AudioStream {

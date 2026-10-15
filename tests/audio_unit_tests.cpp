@@ -1227,6 +1227,77 @@ TEST_SUITE("audio-patch") {
 		CHECK(e[0].slot != e[1].slot);
 	}
 
+	TEST_CASE("Sampler: Release without a tail ends with the playing segment; LtNone stops after its segment") {
+		const TestWave w = make_wave(3, 1000, 1, 2); // intro 0, loop [1, 2], no tail
+		for (SamplerLoop loop : { SamplerLoop::Release, SamplerLoop::None }) {
+			Builder b;
+			const uint16_t trig = b.input(1, true), rel = b.input(3, true);
+			b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
+			const uint32_t s = b.sampler(1, 0, loop);
+			b.set(s, cp::SmpTrigger, Builder::R(trig));
+			b.set(s, cp::SmpRelease, Builder::R(rel));
+			auto inst = instance(b.build(), w.bank);
+			ba::SamplerTrace trace;
+			trace.entries.resize(32);
+			inst->set_sampler_trace(&trace);
+			Buses buses;
+			inst->post_event(1, 0);
+			buses.block(*inst, 0);
+			buses.block(*inst, 512);
+			inst->post_event(3, 100); // Release at 1124, inside segment 1 (1000-2000)
+			for (uint64_t f = 1024; f < 8192; f += 512) {
+				buses.block(*inst, f);
+			}
+			const std::vector<SamplerTraceEntry> e = entries(trace);
+			REQUIRE(e.size() == 3);
+			CHECK(e[0].kind == SamplerTraceKind::Trigger);
+			CHECK(e[1].segment == 1);
+			CHECK(e[1].frame == 1000);
+			CHECK(e[2].kind == SamplerTraceKind::End);
+			CHECK(e[2].frame == 2000);
+			CHECK(inst->finished());
+		}
+	}
+
+	TEST_CASE("node order: register dependencies, stable ties, a cycle is one feedback edge, hostile input") {
+		using Regs = std::vector<std::vector<uint16_t>>;
+		const auto order = [](const Regs &p_reads, const Regs &p_writes, uint32_t p_regs, size_t &r_feedback, size_t p_budget = 1000) {
+			bf3::core::gameplay::WorkBudget budget(p_budget);
+			return order_by_register_dependencies(p_reads, p_writes, p_regs, budget, r_feedback);
+		};
+		size_t fb = 0;
+		// a chain written backwards: node 2 writes v3, node 1 reads v3 and writes v2, node 0 reads v2 and writes v1
+		Result<std::vector<uint32_t>> r = order({ { 2 }, { 3 }, {} }, { { 1 }, { 2 }, { 3 } }, 4, fb);
+		REQUIRE(r.ok());
+		CHECK(*r == std::vector<uint32_t>{ 2, 1, 0 });
+		CHECK(fb == 0);
+		// independent nodes keep their index order; a node reading its own output adds no edge
+		fb = 0;
+		r = order({ { 1 }, {}, { 5 } }, { { 1 }, { 4 }, { 5 } }, 6, fb);
+		REQUIRE(r.ok());
+		CHECK(*r == std::vector<uint32_t>{ 0, 1, 2 });
+		CHECK(fb == 0);
+		// a two-node cycle (0 reads v1 written by 1, 1 reads v2 written by 0) plus a reader of both: the cycle is broken
+		// at node 0 with one feedback edge, then 1, then 2
+		fb = 0;
+		r = order({ { 1 }, { 2 }, { 1, 2 } }, { { 2 }, { 1 }, {} }, 3, fb);
+		REQUIRE(r.ok());
+		CHECK(*r == std::vector<uint32_t>{ 0, 1, 2 });
+		CHECK(fb == 1);
+		// a three-node ring 0 -> 1 -> 2 -> 0: one feedback edge
+		fb = 0;
+		r = order({ { 3 }, { 1 }, { 2 } }, { { 1 }, { 2 }, { 3 } }, 4, fb);
+		REQUIRE(r.ok());
+		CHECK(*r == std::vector<uint32_t>{ 0, 1, 2 });
+		CHECK(fb == 1);
+		// hostile: a register out of range, mismatched lengths, and a fan-in larger than the budget
+		fb = 0;
+		CHECK_FALSE(order({ { 9 } }, { {} }, 4, fb).ok());
+		CHECK_FALSE(order({ {} }, { { 9 } }, 4, fb).ok());
+		CHECK_FALSE(order({ {}, {} }, { {} }, 4, fb).ok());
+		Regs reads(200, std::vector<uint16_t>{ 1 }), writes(200, std::vector<uint16_t>{ 1 });
+		CHECK_FALSE(order(reads, writes, 2, fb, 1000).ok()); // 200 x 199 edges > 1,000
+	}
 	TEST_CASE("program blob: round trip, corrupted bytes, connection misreads") {
 		const TestWave w = make_wave(5, 1000, 1, 3);
 		Builder b;
@@ -1531,12 +1602,15 @@ TEST_SUITE("audio-mixer") {
 		CHECK_FALSE(mixer.push(refused));
 		CHECK(mixer.stats().ring_overflows.load() == 1);
 		spare.reset(); // still ours: destroying it is fine
-		mixer.mix(buf.data(), 512); // block [512, 1024): Start not due yet; late command applied? (its instance is not started)
-		mixer.mix(buf.data(), 512); // block [1024, 1536)
+		// block [512, 1024): the Start is not due yet, so the late event for its handle waits for it (counted late once)
+		mixer.mix(buf.data(), 512);
+		CHECK(mixer.stats().late_commands.load() == 1);
+		mixer.mix(buf.data(), 512); // block [1024, 1536): Start at 1100, the held late event at 1100, the event at 1300
 		CHECK(mixer.stats().acked_epoch.load() == 7);
 		CHECK(mixer.stats().late_commands.load() == 1);
-		REQUIRE(trace.count >= 1);
-		CHECK(trace.entries[0].frame == 1300);
+		REQUIRE(trace.count >= 2);
+		CHECK(trace.entries[0].frame == 1100);
+		CHECK(trace.entries[1].frame == 1300);
 		// Stop: posts the stop event; the instance returns once silent and reclaim() destroys it.
 		ba::MixerCommand stop;
 		stop.type = ba::MixerCommandType::Stop;
@@ -1553,6 +1627,44 @@ TEST_SUITE("audio-mixer") {
 		REQUIRE(n >= 1);
 		CHECK(fb[n - 1].finished);
 		CHECK(fb[n - 1].handle == start.handle);
+	}
+	TEST_CASE("a command stamped 0 for a handle whose Start is stamped later waits for the Start") {
+		const TestWave w = make_wave(1, 2000, -1, -1);
+		const std::shared_ptr<const SoundProgram> prog = one_shot_program(w);
+		ba::MixerCore mixer(ba::MixerConfig{});
+		std::vector<float> buf(2 * 512);
+		auto inst = instance(prog, w.bank);
+		ba::SamplerTrace trace;
+		trace.entries.resize(16);
+		inst->set_sampler_trace(&trace);
+		ba::MixerCommand start;
+		start.type = ba::MixerCommandType::Start;
+		start.handle = mixer.next_handle();
+		start.instance = inst.get();
+		start.at_frame = 1700; // block [1536, 2048), offset 164
+		REQUIRE(mixer.push(start));
+		(void)inst.release();
+		ba::MixerCommand param;
+		param.type = ba::MixerCommandType::SetParameter;
+		param.handle = start.handle;
+		param.name_hash = 0x1234;
+		param.value = 1.0f;
+		REQUIRE(mixer.push(param)); // at_frame 0: as soon as possible, i.e. with the Start
+		ba::MixerCommand ev;
+		ev.type = ba::MixerCommandType::PostEvent;
+		ev.handle = start.handle;
+		ev.name_hash = 1;
+		REQUIRE(mixer.push(ev)); // at_frame 0
+		for (int i = 0; i < 3; ++i) {
+			mixer.mix(buf.data(), 512); // [0, 1536): nothing started, nothing dropped
+			CHECK(trace.count == 0);
+			CHECK(mixer.stats().active_instances.load() == 0);
+		}
+		mixer.mix(buf.data(), 512); // [1536, 2048)
+		REQUIRE(trace.count >= 1);
+		CHECK(trace.entries[0].frame == 1700);
+		CHECK(mixer.stats().late_commands.load() == 0);
+		CHECK(mixer.stats().active_instances.load() == 1);
 	}
 	TEST_CASE("mix() with odd and varying call sizes gives the samples of 512-frame calls") {
 		const TestWave w = make_wave(1, 3000, -1, -1, 48000, true);

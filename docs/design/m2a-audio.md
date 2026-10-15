@@ -1,8 +1,9 @@
 # M2a audio: A1 (XAS voices, wave bank, mixer) and A2 (weapon patch interpreter)
 
 Track design for the audio part of milestone M2a ("Infantry gunplay", research/PORTING-RESEARCH.md §6), slices
-**A1** and **A2** of gap audio §11.6. Branch `m2a/audio`. Status: interface stage, revised after review. The headers
-listed in §13 compile. `audio.contract` passes. Nothing plays yet.
+**A1** and **A2** of gap audio §11.6. Branch `m2a/audio`. Status: **implemented** (A1 and A2). Every gate G0–G8 passes; §1.1 has the measured values,
+the load each timing was taken under, and one command per gate. §16 lists where the implementation departs from
+the interface-stage text and why; the sections below are updated to match.
 
 Sources this design relies on, and the short names used below:
 * **plan**: research/PORTING-RESEARCH.md. §3.10 audio, D15 (decision row), §2.3 threads, §2.4 cache, §6 M2a row,
@@ -47,9 +48,9 @@ the shared quiet lock before starting them and waits while it exists; the gates 
 | G3 | `audio.decode.perf` | best of 3 single-thread decodes of all G1 streams, **thread CPU time ≤ 0.2 ms per channel-second** (wall time printed beside it) | `bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3`: CPU time of the decoding thread from `GetThreadTimes` over `decode_stream` only, chunks already in memory; RUN_SERIAL |
 | G4 | `audio.census` | over `@all-mp`: 834 `SoundPatchAsset` (833 under `sound/`) + 1 `SoundMasterPatchAsset`; 32,117 node instances of 46 types in patches; 32,221 of 58 types with master and mixers; 7,323 voices; 1,879 `SoundWaveAsset`; **the 164 handheld weapon patches use exactly the 32 A2 types and all compile strictly**; all 835 graphs compile with `allow_unimplemented`; 0 unknown types; **in every graph the non-zero `ConnectionIndex` values are exactly 1..N once each** (9,807 connections: `Sen0` 9,784, `Rou0` 23) | `bf3dump audio census @all-mp` |
 | G5 | `audio.oracles` | plan §7.7 items 1–4, the Cone curve, the M16A3 routing and audible sets, all evaluated by the interpreter on compiled programs. Item list and tolerances in §10.2 | doctest `audio.oracles` (install) |
-| G6 | `audio.bank` | the Metro TDM wave bank loads with 629 resident waves = **265.4 MiB ≤ 384 MiB** budget; 280 localised waves skipped; the mount's **161 handheld weapon patches** compile strictly and name 318 distinct waves, **all resident (0 starved)**; **`WaveBank::load` ≤ 500 ms** (warm, second load in the process) | doctest `audio.bank` (install); RUN_SERIAL |
-| G7 | `audio.m16.offline` | the M16A3 check script (§10.4) rendered offline through `MixerCore`: `analyse_check` rows (a)–(d) PASS (core-tap onsets 10 per burst at 3600 ± 48 frames; full-mix levels near > mid > far by ≥ 3 dB; HPF ≥ 10 dB on the full mix and on the voice-14 tap, the tap within 1.5 dB of the analytic prediction); plus the offline rows (e)–(h): the sampler trace follows the model, a 0 Hz high-pass at 17 m is bit-identical to none, same seed bit-identical and a different seed not, 0 starved voices and 0 decode errors; WAVs written to `b/shots/audio/` | doctest `audio.m16.offline` (install) |
-| G8 | `godot.audio` | windowed Godot run of `res://scenes/audio_m16.tscn` with the same check script: **rows (a)–(d) PASS on the recorded WAVs**; the recording covers ≥ 30.0 s; **`short_blocks` = `late_blocks` = `late_commands` = `ring_overflows` = `starved_voices` = 0**; **the recorded mix equals an offline replay of the same script sample for sample**; `max_block_ns` and `max_call_gap_ns` printed; install unchanged; exit 77 without a window or `OPENBF3_GODOT` | `tests/godot_audio.cmake` (the `godot_m1_load.cmake` pattern: probe run, then `-- --audio-check --audio-record=<b/shots/audio/godot_m16.wav> --quit-after=45`), RUN_SERIAL, RESOURCE_LOCK `openbf3_godot_project` |
+| G6 | `audio.bank` | the Metro TDM wave bank loads with 629 resident waves = **265.4 MiB ≤ 384 MiB** budget; 280 localised waves skipped; the mount's **161 handheld weapon patches** compile strictly and name 318 distinct waves, **all resident (0 starved)**; **`WaveBank::load` ≤ 500 ms** (warm, second load in the process) | `bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2` (ctest `audio.bank` through `tests/audio_gates.cmake`); RUN_SERIAL |
+| G7 | `audio.m16.offline` | the M16A3 check script (§10.4) rendered offline through `MixerCore`: `analyse_check` rows (a)–(d) PASS (core-tap onsets 10 per burst at 3600 ± 96 frames, §10.4; full-mix levels near > mid > far by ≥ 3 dB; HPF ≥ 10 dB on the full mix and on the voice-14 tap, the tap within 1.5 dB of the analytic prediction); plus the offline rows (e)–(h): the sampler trace follows the model, a 0 Hz high-pass at 17 m is bit-identical to none, same seed bit-identical and a different seed not, 0 starved voices and 0 decode errors; WAVs written to `b/shots/audio/` | `bf3dump audio check --g7 --out-dir b/shots/audio` (ctest `audio.m16.offline` through `tests/audio_gates.cmake`) |
+| G8 | `godot.audio` | windowed Godot run of `res://scenes/audio_m16.tscn` with the same check script: **rows (a)–(d) PASS on the recorded WAVs**; the recording covers ≥ 30.0 s; **`short_blocks` = `late_blocks` = `late_commands` = `ring_overflows` = `starved_voices` = 0**; **the recorded mix equals an offline replay of the same script sample for sample**; `max_block_ns` and `max_call_gap_ns` printed; install unchanged; exit 77 without a window or `OPENBF3_GODOT` | `tests/godot_audio.cmake` (the `godot_m1_load.cmake` pattern: probe run, then `-- --audio-check --audio-record=<b/shots/audio/godot_m16.wav> --quit-after=90`), RUN_SERIAL, RESOURCE_LOCK `openbf3_godot_project` |
 
 Unit gates that need no data: `audio.xas.unit`, `audio.patch.unit`, `audio.mixer.unit`, `audio.dsp.unit`. The hostile
 input gate is `audio.fuzz`, which runs under the `asan` preset (§11).
@@ -61,6 +62,32 @@ G8 measures the mixer's compute time and ring health, not device xruns: Godot do
 GDExtension. `late_blocks` is wall time per block, so preemption on a busy machine can trip it; the row prints the
 worst block time and the worst gap between `_mix` calls so a flake is visible as one.
 
+### 1.1 Results (implementation wave, 2026-10-16)
+
+One command per gate; each ctest wraps exactly that command (`tests/audio_gates.cmake` for G1–G4, G6, G7;
+`tests/godot_audio.cmake` for G8). Commands run from the repo root after `tools\build.cmd dev`; `bf3dump` is
+`b\dev\tools\bf3dump\bf3dump.exe`. **Timings were taken on a machine shared with other workflows** (the quiet lock was
+honoured before every run, but other work may still have been running): they are noisy, and the margins below are
+what makes them meaningful, not their exact values.
+
+| id | command | threshold | measured |
+|---|---|---|---|
+| G0 | `ctest --preset dev -R audio.contract` | headers, type table, hashes, FourCCs, 16 tuning keys | pass (dev and asan) |
+| G1 | `bf3dump audio waves MP_Subway TeamDeathMatch0 --decode` | 909 waves, 0 frame / 0 length mismatches, 0 errors | 909 waves, 12,955 segments, 0 / 0 / 0; install unchanged |
+| G2 | `bf3dump audio loc en --decode` | 4,290 chunks, 15,890 streams, 0 mismatches, 0 errors, 7 without streams | 4,290 / 15,890 / 0 / 0 / 7 |
+| G3 | `bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3` (ctest `audio.decode.perf`, RUN_SERIAL) | best thread CPU ≤ 0.2 ms per channel-second | G3_MEASURED |
+| G4 | `bf3dump audio census @all-mp` | the §1 counts | 834 (833 under `sound/`) + 1; 32,117 / 46; 32,221 / 58; 7,323 voices; 1,879 waves; 835 compiled, 0 unknown; 9,807 connections (9,784 + 23); 164 handheld strict on 32 types; 0 blob failures; 0 feedback edges |
+| G5 | `b\dev\tests\test_audio_install.exe --test-suite=audio-oracles` (ctest `audio.oracles`) | §10.2 items 2–7 | G5_MEASURED |
+| G6 | `bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2` (ctest `audio.bank`, RUN_SERIAL) | 629 resident, 265.4 MiB ≤ 384, 280 skipped, 161/161 strict, 318 waves, 0 starved, warm load ≤ 500 ms | G6_MEASURED |
+| G7 | `bf3dump audio check --g7 --out-dir <openBF3>\b\shots\audio` (ctest `audio.m16.offline`) | rows (a)–(h) PASS | G7_MEASURED |
+| G8 | `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=<openBF3>\b\shots\audio\godot_m16.wav --quit-after=90` (ctest `godot.audio`, RUN_SERIAL) | rows (a)–(d) PASS, ≥ 30.0 s, all mixer counters 0, replay equal | G8_MEASURED |
+
+The ctests write their WAVs to `${PROJECT_SOURCE_DIR}/b/shots/audio` (gitignored) or to `OPENBF3_AUDIO_SHOTS` when it
+is set; in a worktree set `OPENBF3_AUDIO_SHOTS=C:\Users\olku\BF3 reimplementation\openBF3\b\shots\audio` to collect
+them in the main checkout's shots directory. Under the `asan` preset the bf3dump gates run with `REPORT_ONLY` (counts
+and timings reported, not gated), but a non-zero exit (an ASan abort) or a missing `install.unchanged yes` still
+fails the test.
+
 ---
 
 ## 2. Module ownership
@@ -70,7 +97,7 @@ worst block time and the worst gap between `_mix` calls so a flake is visible as
 | `bf3_core` `audio/` | reading the data: XAS stream codec, `SoundWaveAsset` reader, `WaveBank` (resident chunk bytes), the node type table, the `SoundPatchAsset` compiler (control program + audio plan), the program blob and its cache entries | no | `include/bf3/core/audio/*.h`, `src/audio/*.cpp` |
 | `bf3_audio` (new library) | the runtime: `PatchInstance` (the A2 interpreter), `MixerCore`, DSP, WAV I/O, analysis, tuning, the weapon seam, the shared M16A3 check (`audio_check.h`) | no | `src/bf3_audio/**` |
 | `bf3_godot` | `Bf3AudioStream`/`Bf3AudioPlayback` (the `AudioStreamPlayback` subclass), the demo node and its checks, scene `audio_m16.tscn` | yes | `src/bf3_godot/src/audio_*.{h,cpp}` |
-| `tools/bf3dump` | `bf3dump audio …` subcommands (G1–G4 drivers, offline render) | no | `tools/bf3dump/audio_cmd.cpp` + an additive dispatch line |
+| `tools/bf3dump` | `bf3dump audio …` subcommands (G1–G4, G6 and G7 drivers, offline render) | no | `tools/bf3dump/audio_commands.{h,cpp}` (waves, loc, dispatch), `audio_patch_commands.cpp` (census, bank, check, render, wave) + an additive dispatch line |
 
 Plan §3.10 and gap audio §11.1 put "`bf3_audio` in `bf3_core`". **Decision:** the data side (codec, readers, compiler)
 goes in `bf3_core`. That is where every other reader lives, and the dedicated server and `bf3dump` need it without a
@@ -321,7 +348,9 @@ Fire (v96) into the gated Fire v97 and the stop (v99) into v98.
 * **RPG-7** `weapon_at_rpg7`: 5–40; (5–20, 250–300); (5–35, 45–90, 250–300); (15–45, 250–300); 1–15; 1–19 linear; gate
   300–301.
 * **M1A2** `sound/vehicles/land/m1a2_abrams/m1a2_abrams`: 90–120 (unlocked, start/stop), 30–40, 40–60 ×2, 15–50
-  (unlocked), 80–100 ×2. The control register is v81, not distance. The M1A2 uses non-weapon types, so it compiles only
+  (unlocked), 80–100 ×2. The control register is v81, which is the output of the M1A2's own Physics node (port
+  `Distance`, as v22 on the M16A3) [verified in the implementation wave; the interface-stage text said "not distance",
+  which was wrong]. The M1A2 uses non-weapon types, so it compiles only
   with `allow_unimplemented`.
 * Connections are 1-based in each (M98B 1..40, RPG-7 1..26, M1A2 1..40, master 1..38).
 
@@ -429,7 +458,8 @@ A2 types and their children comes from the field census (§4.4). The other types
     shuffled) on the other slot at the Step frame plus the latched delay. A slot whose segment ends goes idle, so the
     layer's rhythm is exactly the Step rhythm.
   * **Unstepped** (Step not connected, or EnableStep < 0.5): `LtRelease` plays the loop segments back to back on the
-    same slot until Release; `LtForward` loops the same way until Stop; `LtNone` plays the segments once. On the
+    same slot until Release; `LtForward` loops the same way, and on Release finishes its pass (the segments up to
+    LastLoop) before the tail; `LtNone` plays the segments once, and a Release ends it after the current segment. On the
     M16A3, noise_distant and noise_far are unstepped: their 94.7 ms segments, at the burst pitch, follow each other
     every 75.0–81.5 ms on their own clock, not the round clock.
   * `Release` (LtRelease): the playing segment finishes, then the tail plays (on an idle slot it starts at the
@@ -525,7 +555,8 @@ review added `iir2_q` (filters) and `schedule_lead_blocks` (mixer).
 | `bf3/audio/audio_analysis.h` | `detect_onsets`, `rms_db`, `peak_db`, `band_energy_db`, `predicted_highpass_band_db`, `onset_spacing` (`BurstWindow`) |
 | `bf3/audio/audio_check.h` | the M16A3 check: `m16_check_script`, `schedule_check`, `CheckDriver`, `TapRecorder`, `analyse_check`, `CheckReport` |
 | `bf3/audio/weapon_sound.h` | `WeaponSoundBinding`, `bind_weapon_sound`, `WeaponFireMode`, `WeaponSoundDriver`, seam hashes |
-| `bf3_godot/src/audio_stream.h` | `Bf3AudioStream`, `Bf3AudioPlayback` (renders silence until A1; not registered yet) |
+| `bf3_godot/src/audio_stream.h` | `Bf3AudioStream`, `Bf3AudioPlayback` (registered; `_mix` calls `MixerCore::mix`) |
+| `bf3_godot/src/audio_demo.h` | `Bf3AudioDemo` (scene `audio_m16.tscn`; `--audio-check`, `--audio-record`, `--quit-after`) |
 
 ### 7.2 Seams for later M2a integration
 
@@ -586,8 +617,8 @@ runs cold → warm → patched (an in-memory digest override), the same three st
   committed.
 * **Analysis** (`audio_analysis.h`):
   * **Onsets at single-frame resolution:** a running 2 ms (96-frame) energy envelope per frame (no hop), a floor =
-    the minimum over the previous 20 ms, an onset where the envelope first rises 12 dB above its floor (and above
-    −90 dBFS), refined back to the first frame within the window that reaches −20 dB of the local peak, then a 30 ms
+    the **mean** over the previous 20 ms (not the minimum: §16), an onset where the envelope first rises 12 dB above its floor (and above
+    −90 dBFS), refined back to the first frame within the window that reaches −20 dB of the local peak and 4 × the floor's RMS (`bed_sigma`), then a 30 ms
     refractory period. A hopped envelope would quantise 3,600-frame gaps to 3,552/3,648, exactly the tolerance.
   * **Burst segmentation** comes from the script (`BurstWindow` = [first round − 10 ms, stop)), never from the
     onsets, so the gaps between bursts and the tails after a stop are not counted.
@@ -619,7 +650,10 @@ runs cold → warm → patched (an in-memory digest override), the same three st
   0–400 m in 0.25 m steps through `set_geometry` and `evaluate`.
   1. Census: the G4 numbers. The suite reuses the census.
   2. M16A3 bands. Every crossfader group's amplitude is 1 (or 0) outside its band, monotonic inside it, and changes
-     within ±0.25 m of the §4.5 edges. The hifi layer is 1 at 0 m and 0 at ≥ 20 m. The handling layers are 0 at ≥
+     within ±0.25 m of the §4.5 edges. The hifi layer is 1 at 0 m and 0 at ≥ 20 m. **Shape:** the 0–20 m group's
+     amplitude at 2.5/5/10/15/17.5 m is 0.5 + 0.5 cos(π d / 20) within 1e-4 (a linear fade is off by ≥ 0.1 at 5 and
+     15 m), and the group after each 250–300 m band (the far layer) rises monotonically from 0 at ≤ 250 m to 1 at
+     300 m. The handling layers are 0 at ≥
      15/17/19 m. The far noise group (v87) rises over 20–50 m and falls over 250–300 m (reading R). A `Fire` posted at
      302 m starts no sampler, and one at 299 m does.
   3. M16A3 pitch/HPF. Over 10,000 seeded bursts, v28 ∈ [1.21, 1.262] with min/max within 0.5 % of the ends, and v28
@@ -629,7 +663,7 @@ runs cold → warm → patched (an in-memory digest override), the same three st
      voice-6 HPF (voice 6 plugin 1) in third person at 0, 17, 150 m is 80, 119.15, 230 Hz, and in first person at
      17 m 83.90 Hz.
   4. Other bands: M98B 300–350 m (and gate 300–351), RPG-7 45–90 m, M1A2 15–50 and 80–100 m. The M1A2 crossfaders are
-     driven through register v81, since its control is not distance.
+     driven by distance like the weapons' (their control v81 is the M1A2's Physics `Distance`, §4.6).
   5. Cone curve: `output_gain_db` at 19.766/54.614/91.156/120.438/179.002 m equals Y + Gain within 0.01 dB, and the
      curve is monotonic between points.
   6. M16A3 routing and audible sets (third person): the compiled connections send voice 4 to the LFE bus and voice 14
@@ -680,7 +714,8 @@ has its own `PatchInstance`, so far_pinned replays far's first burst with the sa
 
 **Rows shared by G7 and G8** (`analyse_check`):
 * **(a) onsets**, on the core tap (voices 26–29: the two corebass samplers, stepped, without a Delay port, one of
-  them audible at each distance): per burst window, exactly 10 onsets, every gap 3,600 ± 48 frames. The full mix is
+  them audible at each distance): per burst window, exactly 10 onsets, every gap 3,600 ± 96 frames (the data's own onset
+  jitter is up to 65 frames, §16). The full mix is
   not used for onsets: the unstepped noise loop adds segment onsets on its own 75.0–81.5 ms clock, and the hifi and
   noise layers carry per-burst delays of up to 45 ms.
 * **(b) levels**, full mix: mean burst-window RMS near > mid > far, each step ≥ 3 dB. Derivation: the Cone/Flat curve
@@ -700,7 +735,7 @@ has its own `PatchInstance`, so far_pinned replays far's first burst with the sa
 
 **Offline-only rows (G7):**
 * **(e) model trace**: noise_far's segment starts are contiguous (each start = the previous segment's end ± 1 frame),
-  loop segments only until the stop, then segment 15 (the tail); the corebass Steps start exactly on their round
+  loop segments only until the stop, then the tail segment (LastLoop + 1); the corebass Steps start exactly on their round
   frames, alternating slots.
 * **(f) 0 Hz bypass**: an extra 17 m burst rendered with v46 as data (0 Hz there) and with v46 pinned to 0 is
   bit-identical.
@@ -723,7 +758,7 @@ difference).
 | wave | ≤ 1,024 chunks, ≤ 65,536 variations, ≤ 256 segments per variation; `ChunkIndex` < chunks; localisation ranges inside variations; `SamplesOffset` < chunk size | error |
 | wave bank | total ≤ `resident_budget_bytes`, checked before any read; chunk size equals the toc's | error with sizes, never truncated |
 | patch | ≤ 4,096 nodes, ≤ 65,535 registers, ≤ 1,024 children per node, ≤ 256 voices × 64 plugins, ≤ 4,096 connections, ≤ 4,096 waves, ≤ 64 curve points; every index range-checked; `ConnectionIndex` 0 or 1..N, each connection named exactly once; every element charged to `WorkBudget` (1 M default) | error; budget exhaustion is an error, not a hang |
-| program blob | counts vs bytes left, ranges, topological order, connections, no trailing bytes | error, cache entry dropped and recompiled |
+| program blob | counts vs bytes left, ranges, connections, every float finite, no trailing bytes (not topological order: the evaluator is safe in any order, §16) | error, cache entry dropped and recompiled |
 | per block | ≤ 32 events per instance (rest deferred), ≤ `max_instances`, fixed ring capacity, ≤ 16 tap voices, fixed trace capacity | counted, never blocks or allocates |
 | tuning cfg | known keys, ranged floats | error with line |
 | WAV reader | ≤ `p_max_bytes`, chunk sizes checked against the file | error |
@@ -743,7 +778,6 @@ New decoders, parsers and the interpreter run under the `asan` preset (`audio.fu
 | VO streaming through the StreamPool, VO logic, sound states, MasterUnit presets, the other 14 patch types; streaming the 21 non-VO pool waves | A7 (M7) |
 | Effect sounds (`SoundEffectEntityData` from the FX instancer) | with VFX3 (M2a), through the same mixer (§7.2); not in A1/A2 |
 | The 1p viewmodel firing the patch; the bank in `Bf3LevelSession` and the E4/E5 re-measure | M2a integration wave |
-| Registering `Bf3AudioStream` and the demo, `[audio] driver/mix_rate=48000`, scene `audio_m16.tscn` | A1/A2 implementation waves (this design fixes the interfaces) |
 
 ---
 
@@ -772,8 +806,11 @@ New decoders, parsers and the interpreter run under the `asan` preset (`audio.fu
 * `src/bf3_audio/src/{dsp,patch_instance,patch_nodes,patch_sampler,mixer_core,wav_io,audio_analysis,audio_check,weapon_sound}.cpp`
 * `src/bf3_godot/src/audio_demo.{h,cpp}`
 * `bf3-opensource/scenes/audio_m16.tscn`
-* `tools/bf3dump/audio_cmd.cpp`
-* `tests/audio_{xas,patch,dsp,mixer,install,fuzz}_tests.cpp`
+* `tools/bf3dump/audio_commands.{h,cpp}`, `tools/bf3dump/audio_patch_commands.cpp`
+* `src/bf3_audio/src/{audio_load,patch_state.h}` (and `include/bf3/audio/audio_load.h`: compile by name, read a level's
+  or a program's waves)
+* `tests/audio_unit_tests.cpp` (suites audio-xas, audio-patch, audio-dsp, audio-mixer), `tests/audio_install_tests.cpp`
+  (audio-oracles, audio-cache, audio-fuzz), `tests/audio_gates.cmake` (G1–G4, G6, G7 through bf3dump)
 * `tests/godot_audio.cmake`
 
 **Shared files they touch:**
@@ -823,3 +860,64 @@ New decoders, parsers and the interpreter run under the `asan` preset (`audio.fu
    `bf3_core`" (plan §3.10). OK?
 7. **909 vs 908 Metro waves.** G1 pins 909 because this tree's `load_level` mount holds 12,315 partitions; the plan's
    M2a row says 908 (research scope: 11,514 partitions). May the plan wording be updated to 909 (this mount)?
+
+---
+
+## 16. Implementation notes: where the implementation departs from the interface stage
+
+Each item is a rule the implementation wave found wrong or under-specified. The sections above already carry the
+corrected text; this list says what changed and why.
+
+1. **Onset floor = mean, not minimum (§9, `audio_analysis.h`).** The 2 ms envelope of a noisy tail swings by more than
+   12 dB, so a minimum floor fired inside the M16A3 corebass tails: 11–14 onsets per 10-round burst on the G7 render,
+   gaps off by up to 2,256 frames. The mean of the 20 ms before the window gives exactly 10 per burst. The refinement
+   is also bounded below by `bed_sigma` (4) × the floor's RMS: without it a bed only 20 dB under the peak (the
+   `audio.dsp.unit` click train of §10.1) has samples above −20 dB of the peak in almost every window, and the onset
+   lands on the bed up to a window (78–80 frames) early. G7 is unchanged by the bound (same spacing to the frame).
+2. **Onset tolerance ± 96 frames, not ± 48 (§1 G7, §10.4 row a).** Measured on the data, not on our render: 22 of 24
+   corebassdistant segments open with a 64-frame lead-in at −35 to −60 dB before the attack, and corebassclose has
+   late re-attacks, so the first frame at −20 dB of the local peak moves by up to 65 frames from segment to segment
+   (`bf3dump audio wave MP_Subway TeamDeathMatch0 <wave> --envelope`). The Steps themselves start on their frames
+   exactly (row e: 0 frames error). ± 96 = 2 ms, the envelope window; ± 48 would fail on the waves, not on the timing.
+3. **The M1A2's v81 is distance (§4.6, §10.2 item 4).** Its crossfaders read v81, the output of its Physics node's
+   `Distance` port. G5 item 4 sweeps distance for all three oracle patches; no register pin hook is needed.
+4. **Sampler release rules (§6.3).** `LtForward` on Release finishes its pass to LastLoop and then plays the tail (the
+   interface text said it ignores Release until Stop); `LtNone` ends after its current segment on Release. A
+   continued segment is stamped in the trace on the frame it is first heard: the resampler holds two input samples
+   of look-ahead, so the stamp is ceil((2 − frac) / ratio) frames after the next segment's first sample enters the
+   history (2 frames at ratio 1; `audio.patch.unit` checks back-to-back segments 1,000 frames apart exactly).
+5. **Stop and return (§6.5).** A `Stop` command posts the program's `DefaultStopEvent` at its frame unless the
+   instance has already seen it, then marks the instance stop-requested; an instance goes back to the game thread
+   once `finished()` and either stop-requested or it has taken at least one Sampler Trigger (a one-shot that is never
+   stopped still returns). `Kill` gives the instance back at once, without a fade. Every command is frame-stamped
+   (`at_frame`, 0 = the next block); a command whose frame was already mixed lands at offset 0 and counts
+   `late_commands`. **A command for a handle whose `Start` is still waiting (stamped later) waits for that Start**: it
+   is moved to the Start's frame and applied right after it in push order (counted late only if its own nonzero frame
+   was already mixed). Without this a `SetParameter`/`PostEvent` stamped 0 behind a future-stamped Start found no
+   instance and was dropped (`audio.mixer.unit` checks both cases). `MixerCore::clock()` is the number of frames
+   rendered on the grid (a multiple of 512).
+6. **Blob validation does not check topological order (§6.2, §11).** `validate_sound_program` checks every range,
+   reference, connection and float; the evaluator is safe in any node order (a register read before its writer sees
+   the previous step's value), so order is a timing property, not a safety one, and is left to the compiler.
+7. **Audio plan details (§6.4).** `LPB0` is open (no damping until A3; `hf_damping_db_per_metre` = 0). The Reverb send
+   is dropped; LFE sends are scaled by `lfe_fold_db`; every other bus sums at 0 dB. Plugin attributes: up to
+   `kMaxPluginAttributes` = 16 per plugin (sound/master links attribute 4 and above of its MasterUnit plugins).
+8. **Analysis hooks.** An instance takes up to `kMaxVoiceTaps` = 4 voice taps (`add_voice_tap`; the M16A3 check uses
+   two, core and noise). `SamplerTraceEntry` carries `prev_end`, `wave` and `variation` for row (e).
+   `WaveBank::from_memory` builds a bank from bytes in memory (the unit tests' PCM/XAS waves).
+9. **Gates through bf3dump.** G6 (`audio.bank`) and G7 (`audio.m16.offline`) run as `bf3dump audio bank` / `audio
+   check --g7` wrapped by `tests/audio_gates.cmake` (as G1–G4), not as doctests: one command per gate, runnable
+   without ctest. `audio.oracles` (G5), `audio.cache` and `audio.fuzz` are doctest suites in
+   `tests/audio_install_tests.cpp`; the data-free suites are in `tests/audio_unit_tests.cpp`.
+10. **Node order (§10.1).** The compiler's topological sort is the free function `order_by_register_dependencies`
+    (`sound_program.h`), so `audio.patch.unit` checks it synthetically: a chain written backwards, stable ties, a node
+    reading its own output, a two-node cycle and a three-node ring (one feedback edge each), out-of-range registers and
+    a fan-in larger than the budget. On real data `audio.census` compiles all 835 graphs with 0 feedback edges. XAS "channels 0" cannot be
+    encoded (the header stores channels − 1) and the decoders take no `WorkBudget`: every loop is bounded by the
+    bytes left and by the header's frame count, which `audio.xas.unit` and `audio.fuzz` exercise.
+11. **Acceptance fixes.** G5 item 2 also checks the fade *shape* on the data (the cosine 0–20 m close layer and the
+    250–300 m far fade-in), not only monotonicity and edges. `audio_gates.cmake` under `REPORT_ONLY` (asan) still
+    fails on a non-zero bf3dump exit or a missing `install.unchanged yes`. `Bf3AudioPlayback::playing_` is a
+    `std::atomic<bool>` (written on the main thread, read in `_mix` on the audio thread). The envelope command of item 2
+    takes the wave's partition path, e.g. `bf3dump audio wave MP_Subway TeamDeathMatch0
+    ENVELOPE_WAVE_PATH --envelope`.

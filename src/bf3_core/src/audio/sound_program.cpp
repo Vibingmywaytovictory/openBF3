@@ -790,71 +790,7 @@ struct Compiler {
 				collect(prog.child_nodes[prog.children[prog.nodes[i].children_begin + c]], i);
 			}
 		}
-		std::vector<std::vector<uint32_t>> writers(regs);
-		for (size_t i = 0; i < n; ++i) {
-			for (uint16_t r : writes[i]) {
-				BF3_TRY(budget.charge(1));
-				if (writers[r].empty() || writers[r].back() != i) {
-					writers[r].push_back(uint32_t(i));
-				}
-			}
-		}
-		std::vector<std::vector<uint32_t>> succ(n);
-		std::vector<uint32_t> indegree(n, 0);
-		for (size_t i = 0; i < n; ++i) {
-			std::sort(reads[i].begin(), reads[i].end());
-			reads[i].erase(std::unique(reads[i].begin(), reads[i].end()), reads[i].end());
-			for (uint16_t r : reads[i]) {
-				for (uint32_t w : writers[r]) {
-					BF3_TRY(budget.charge(1)); // every edge is paid for: a hostile fan-in ends in the budget error
-					if (w == i) {
-						continue;
-					}
-					succ[w].push_back(uint32_t(i));
-					++indegree[i];
-				}
-			}
-		}
-		std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
-		std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> remaining; // for cycle breaking
-		std::vector<uint8_t> done(n, 0);
-		for (size_t i = 0; i < n; ++i) {
-			if (indegree[i] == 0) {
-				ready.push(uint32_t(i));
-			}
-			remaining.push(uint32_t(i));
-		}
-		std::vector<uint32_t> order;
-		order.reserve(n);
-		while (order.size() < n) {
-			if (ready.empty()) {
-				// A cycle: break it at the lowest remaining node; its open reads see the previous step's value.
-				while (!remaining.empty() && done[remaining.top()]) {
-					remaining.pop();
-				}
-				const uint32_t pick = remaining.top();
-				stats.feedback_edges += indegree[pick];
-				indegree[pick] = 0;
-				ready.push(pick);
-			}
-			const uint32_t at = ready.top();
-			ready.pop();
-			if (done[at]) {
-				continue;
-			}
-			done[at] = 1;
-			order.push_back(at);
-			for (uint32_t s : succ[at]) {
-				BF3_TRY(budget.charge(1));
-				if (done[s] || indegree[s] == 0) {
-					continue;
-				}
-				if (--indegree[s] == 0) {
-					ready.push(s);
-				}
-			}
-		}
-		return order;
+		return order_by_register_dependencies(reads, writes, regs, budget, stats.feedback_edges);
 	}
 
 	Result<SoundProgram> run() {
@@ -1091,6 +1027,88 @@ std::optional<uint16_t> SoundProgram::input_register(uint32_t p_name_hash) const
 		}
 	}
 	return std::nullopt;
+}
+
+Result<std::vector<uint32_t>> order_by_register_dependencies(std::span<const std::vector<uint16_t>> p_reads,
+		std::span<const std::vector<uint16_t>> p_writes, uint32_t p_registers, gameplay::WorkBudget &r_budget, size_t &r_feedback_edges) {
+	if (p_reads.size() != p_writes.size()) {
+		return make_error("sound program: node order: reads and writes differ in length");
+	}
+	const size_t n = p_reads.size();
+	std::vector<std::vector<uint32_t>> writers(p_registers);
+	for (size_t i = 0; i < n; ++i) {
+		for (uint16_t r : p_writes[i]) {
+			BF3_TRY(r_budget.charge(1));
+			if (r >= p_registers) {
+				return make_error("sound program: node order: register out of range");
+			}
+			if (writers[r].empty() || writers[r].back() != i) {
+				writers[r].push_back(uint32_t(i));
+			}
+		}
+	}
+	std::vector<std::vector<uint32_t>> succ(n);
+	std::vector<uint32_t> indegree(n, 0);
+	std::vector<uint16_t> reads;
+	for (size_t i = 0; i < n; ++i) {
+		BF3_TRY(r_budget.charge(p_reads[i].size() + 1));
+		reads.assign(p_reads[i].begin(), p_reads[i].end());
+		std::sort(reads.begin(), reads.end());
+		reads.erase(std::unique(reads.begin(), reads.end()), reads.end());
+		for (uint16_t r : reads) {
+			if (r >= p_registers) {
+				return make_error("sound program: node order: register out of range");
+			}
+			for (uint32_t w : writers[r]) {
+				BF3_TRY(r_budget.charge(1)); // every edge is paid for: a hostile fan-in ends in the budget error
+				if (w == i) {
+					continue;
+				}
+				succ[w].push_back(uint32_t(i));
+				++indegree[i];
+			}
+		}
+	}
+	std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
+	std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> remaining; // for cycle breaking
+	std::vector<uint8_t> done(n, 0);
+	for (size_t i = 0; i < n; ++i) {
+		if (indegree[i] == 0) {
+			ready.push(uint32_t(i));
+		}
+		remaining.push(uint32_t(i));
+	}
+	std::vector<uint32_t> order;
+	order.reserve(n);
+	while (order.size() < n) {
+		if (ready.empty()) {
+			// A cycle: break it at the lowest remaining node; its open reads see the previous step's value.
+			while (!remaining.empty() && done[remaining.top()]) {
+				remaining.pop();
+			}
+			const uint32_t pick = remaining.top();
+			r_feedback_edges += indegree[pick];
+			indegree[pick] = 0;
+			ready.push(pick);
+		}
+		const uint32_t at = ready.top();
+		ready.pop();
+		if (done[at]) {
+			continue;
+		}
+		done[at] = 1;
+		order.push_back(at);
+		for (uint32_t s : succ[at]) {
+			BF3_TRY(r_budget.charge(1));
+			if (done[s] || indegree[s] == 0) {
+				continue;
+			}
+			if (--indegree[s] == 0) {
+				ready.push(s);
+			}
+		}
+	}
+	return order;
 }
 
 Result<SoundProgram> compile_sound_patch(const EbxResolver &p_db, const EbxPartition &p_partition, const CompileOptions &p_options,
