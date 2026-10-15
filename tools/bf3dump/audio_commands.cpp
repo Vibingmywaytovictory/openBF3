@@ -327,7 +327,10 @@ const char *audio_usage() {
 	return "  audio waves <LEVEL> <MODE> [--decode] [--bench N]\n"
 		   "  audio loc <lang> [--decode]\n"
 		   "  audio census <sb-spec>\n"
-		   "  audio render <LEVEL> <MODE> <patch> --distance <m> [--rounds N] [--seed S] [--first-person] --out <wav>\n";
+		   "  audio render <LEVEL> <MODE> <patch> --distance <m> [--rounds N] [--seed S] [--first-person] --out <wav>\n"
+		   "  audio check [<LEVEL> <MODE>] [--g7] [--out-dir <dir>]\n"
+		   "  audio bank <LEVEL> <MODE> [--loads N]\n"
+		   "  audio wave <LEVEL> <MODE> <wave partition> [--envelope]\n";
 }
 
 int cmd_audio(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
