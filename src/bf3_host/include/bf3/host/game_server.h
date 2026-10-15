@@ -15,10 +15,17 @@
 //   3. sim: every live soldier steps once (SoldierMotor over the server's CollisionWorld), slot order
 //   4. rules: Ready / deaths -> (re)spawn at choose_spawn (after respawn_ticks for a death): sim::settle_spawn at
 //      this tick N, so the state is stamped N with full protection; Spawned goes out at once and the soldier
-//      steps from N + 1 (M1: fall damage is the only damage)
+//      steps from N + 1 (M1: fall damage is the only damage). Dev Teleport and SpawnAt requests received in
+//      step 1 are applied here too, so their states are stamped N like a spawn and the motor's tick
+//      precondition holds on the server (a Teleport keeps the life and has no protection, docs §6.8)
 //   5. (lag-compensation history: M2a)
 //   6. snapshots: every snapshot_divisor ticks, one Snapshot per connected client (own state + every other)
 // Slots: 0..max_slots-1 for peers and server-side sources alike; a slot is the ghost id of its soldier.
+// Spawn handoff assumptions (docs §8.2, the client side is client_session.h): a client sends no command before
+// its first own state; a respawn does not clear the slot's jitter buffer, so commands the client sent for ticks
+// after N while it was dead are applied from N + 1, which is what the client's catch-up assumes ("the ring
+// command if the client made one"); the motor reads no Command::sequence or flags, so the server's kRepeated /
+// kLocalSource marks never make its states differ from the client's.
 // Events: SoldierState::events covers one tick and snapshots go out every snapshot_divisor ticks, so the server
 // ORs each soldier's events per receiving client until its next snapshot (Snapshot::own_events).
 // Dev SpawnSweep (net::DebugKind::SpawnSweep): place_spawn for a batch of dummies (as many as there are free
@@ -26,7 +33,8 @@
 // `ticks` live server ticks, judge_settle, rows back, dummies removed. Dummies are left out of choose_spawn's
 // live-soldier list, so a respawn during the sweep still finds a point.
 // Dev Trace (net::DebugKind::Trace): the requesting client's soldier state after every tick, for `ticks` ticks,
-// returned in one DebugReport (E1 through the full path, docs §14).
+// returned in one DebugReport (E1 through the full path, docs §7.7, §14).
+// Sending: ServerHost sends the returned OutDatagrams and flushes ENet in the same tick (server_host.h).
 
 #include "bf3/core/result.h"
 #include "bf3/host/level_load.h"
@@ -79,8 +87,12 @@ struct SlotStats {
 	uint64_t commands_repeated = 0;
 	uint64_t commands_late = 0; // arrived after their tick ran
 	uint64_t commands_replaced = 0; // a newer sequence replaced a buffered command of the same tick
-	int32_t buffer_ticks = 0; // newest command tick received - server tick
-	sim::SoldierState state; // the authoritative state after the last tick (E1 through the server, docs §14)
+	// The tick of the highest-sequence command received (not the highest tick: after a backward client clock reset
+	// that would stay high for as many ticks as the jump) - the server tick. Snapshot::command_buffer_ticks.
+	int32_t buffer_ticks = 0;
+	// The authoritative state after the last tick, for tests and the HUD from other threads. E1 through the full
+	// path is measured on Trace reports, not on this polled copy (docs §7.7).
+	sim::SoldierState state;
 };
 
 struct GameServerStats {

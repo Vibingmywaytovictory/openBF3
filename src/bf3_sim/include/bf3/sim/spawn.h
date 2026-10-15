@@ -101,10 +101,14 @@ size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const s
 // ---- test courses on a real level (sim.motor, host.session, --m1-check: docs §14) ----------------------------
 // Deterministic searches, so the headless tests and the Godot check pick the same spots on the same world.
 
-// A heading (Command yaw) from p_feet along which a standing soldier has p_length metres of clear, level,
-// walkable path: a stand-capsule sweep of p_length finds nothing, and floor rays every metre along it stay within
-// p_max_rise of p_feet.y with walkable normals (no stairs, no ramps). Tries p_headings yaws evenly spaced from
-// p_first_yaw; nullopt when none qualifies (the test then moves to the next spawn point).
+// A heading (Command yaw) from p_feet along which a standing soldier has p_length metres of clear, level path: a
+// stand-capsule sweep of p_length finds nothing, and floor rays every metre along it stay within p_max_rise of
+// p_feet.y with normals within 2 degrees of up (no stairs, no ramps: the speed checks must not see the ground
+// plane's sin^2 shortening). At the start the prone shape and the prone footprint box (CollisionBoxMin/MaxExpand,
+// 1.3 m behind to 1.1 m ahead, oriented by the heading) and the crouch shape must also be free, so the E1c pose
+// courses run from p_feet on that heading and are refused only for timing bugs, never for a nearby wall. Tries
+// p_headings yaws evenly spaced from p_first_yaw; nullopt when none qualifies (the test then moves to the next
+// spawn point).
 std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const CollisionWorld &p_world, const Vec3 &p_feet, float p_length,
 		float p_max_rise = 0.05f, uint32_t p_headings = 16, uint16_t p_first_yaw = 0);
 

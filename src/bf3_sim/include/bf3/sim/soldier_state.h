@@ -60,8 +60,11 @@ struct SoldierState {
 	int16_t pitch = 0;
 	Pose pose = Pose::Stand; // the pose being left during a transition, else the current pose
 	Pose target_pose = Pose::Stand; // == pose when no transition runs
-	uint16_t transition_ticks = 0; // ticks left of the running transition (0 = none)
-	uint16_t transition_total = 0; // its length in ticks (the TransitionTimes entry, docs §6.5)
+	// Tick convention (docs §6.5, E1c): a transition of N ticks that starts in tick t0 (PoseStarted in the state of
+	// t0) has run one tick in that state, so transition_ticks = N - 1 there, decreases by one per tick, and the
+	// state of tick t0 + N - 1 has transition_ticks 0 and PoseFinished: finished tick - started tick + 1 == N.
+	uint16_t transition_ticks = 0; // ticks left of the running transition after this tick (0 = none)
+	uint16_t transition_total = 0; // its length N in ticks (the TransitionTimes entry, docs §6.5)
 	MoveMode mode = MoveMode::OnGround;
 	uint8_t reserved0 = 0;
 	uint16_t flags = 0; // soldier_flags::
@@ -87,7 +90,7 @@ constexpr Command hold_command(const SoldierState &p_state) {
 }
 
 // FNV-1a 64 over every field's bytes in declaration order (floats as their bit patterns): the determinism tests
-// compare runs and the server/client replay with it (soldier_motor.cpp).
+// compare runs and the server/client replay with it (soldier_state.cpp, T2).
 uint64_t soldier_state_hash(const SoldierState &p_state);
 
 } // namespace bf3::sim

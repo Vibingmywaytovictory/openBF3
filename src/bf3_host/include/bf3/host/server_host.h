@@ -29,7 +29,9 @@ struct ServerConfig {
 	sim::WorldConfig world;
 	// M1 (docs/design/m1.md §8): when set, the host runs a GameServer instead of the S0 dynamic-body world:
 	// tick_hz must be sim::kSimHz, the ENet host opens net::kChannelCount channels and every datagram goes to
-	// the GameServer. Null keeps the S0 behaviour unchanged (sim.* / host.* tests).
+	// the GameServer. After GameServer::tick the host sends the tick's OutDatagrams and calls Host::flush() at
+	// once, so a snapshot leaves in the tick that made it (the RTT bound of docs §7.5 depends on it; the S0 loop
+	// flushes only after its step-1 service). Null keeps the S0 behaviour unchanged (sim.* / host.* tests).
 	std::shared_ptr<const GameServerConfig> game;
 };
 

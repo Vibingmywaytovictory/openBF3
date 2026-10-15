@@ -106,6 +106,7 @@ struct Kick {
 enum class DebugKind : uint8_t {
 	// Put the soldier at position/yaw: a fresh standing state, velocity 0, same life, protect_ticks 0 (a debug
 	// placement is not a spawn, so the E1d fall-damage drops are not masked by spawn protection, docs §6.8).
+	// Applied in the server's rules step of tick N and stamped N, like a spawn (game_server.h).
 	Teleport = 1,
 	SpawnAt = 2, // respawn the soldier at spawn point `index` (settle included)
 	// One idle dummy per spawn point, placed with sim::place_spawn, stepped over `ticks` live server ticks with
@@ -183,7 +184,8 @@ core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_dat
 
 // ---- snapshots (ch0, S->C, every snapshot_divisor ticks) ---------------------------------------------------------
 // Body: u16 seq | u32 server tick | u32 sequence of the command applied at the server tick to this client's
-// soldier, 1 bit repeated | i8 command buffer ticks (newest command tick received - server tick; time sync §7.5)
+// soldier, 1 bit repeated | i8 command buffer ticks (tick of the highest-sequence command received - server
+// tick; time sync §7.5)
 // | u16 echo of the newest command sequence received | u16 echo hold (time from receiving that command to this
 // send, 0.1 ms units, so RTT = now - send time of the echoed command - hold) | u16 own events (OR of the own
 // soldier's soldier_events over every tick since the previous snapshot to this client: events of odd ticks are

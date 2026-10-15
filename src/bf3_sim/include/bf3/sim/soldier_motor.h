@@ -33,14 +33,26 @@
 //   - integrates the take-off tick as airborne (mid-step velocity v0 - g dt / 2), then applies gravity while the
 //     state is not grounded, passing ExtendedUpdate the mid-step velocity v - g dt / 2 (exact parabola);
 //   - clips its end velocity by what the solver realised: when the solver changed the horizontal displacement by
-//     more than 1e-4 m, the horizontal end velocity is the realised one (displacement / dt); when it changed the
-//     airborne vertical displacement by more than 1e-4 m (ceiling, wedge, steep bank), the vertical end velocity
-//     is dy / dt - g dt / 2, so a soldier held up while not grounded never accumulates fall speed;
+//     more than 1e-4 m from the expected one, the horizontal end velocity is the realised one (displacement / dt);
+//     the expected one is v_mid dt while airborne and, while grounded, the horizontal part of v_mid dt projected
+//     onto the ground plane (sliding along a walkable slope shortens the horizontal displacement by v dt sin^2,
+//     which is not an obstruction and must not slow the soldier on ramps). When the solver changed the airborne
+//     vertical displacement by more than 1e-4 m (ceiling, wedge, steep bank), the vertical end velocity is
+//     dy / dt - g dt / 2, so a soldier held up while not grounded never accumulates fall speed;
 //   - zeroes the vertical part when the step ends grounded;
 //   - derives landings and the impact speed from its own kGrounded change plus the exact fall distance.
 // Its own kGrounded flag (not GetGroundState before the update, which RefreshContacts computes without the
 // velocity check) drives the mode logic. Update always gets kTickSeconds and is never sub-stepped, so
-// mLastDeltaTime cannot leak from one soldier to the next.
+// mLastDeltaTime cannot leak from one soldier to the next; init primes it with one zero-velocity Update of
+// kTickSeconds far from any geometry, because RefreshContacts' steep-slope branch reads it before the first
+// Update and Jolt's default (1/60) equals kTickSeconds only at 60 Hz (a fresh motor must equal a used one).
+// Pose fit: whether a target pose fits is asked of the CollisionWorld (overlap_capsule / overlap_box with
+// tolerance pose_change_max_penetration), never of SetShape's own overlap check, so the reset sequence above is
+// the only thing that writes the character's contacts during a step.
+// Inputs: step reads only Command::tick, buttons, move_forward, move_right, yaw, pitch and pose, never sequence
+// or flags. The server's repeats carry kRepeated and its hold / idle commands kLocalSource while client commands
+// carry 0, so reading flags would make every idle tick differ (the interleaving and determinism tests step equal
+// commands with different sequence and flags and require equal states).
 // Pitch: the motor copies Command::pitch into the state unchanged (the input mapper clamps it to the Command's
 // +-kPitchLimit at sampling); the poses' look limits are kept in PoseParams but not applied in M1 (docs §6.3).
 
@@ -99,7 +111,7 @@ struct MotorTuning {
 	float character_padding = 0.02f; // CharacterVirtualSettings::mCharacterPadding
 	float predictive_contact_distance = 0.1f;
 	float penetration_recovery_speed = 1.0f;
-	float pose_change_max_penetration = 0.01f; // SetShape's check when growing to a taller pose
+	float pose_change_max_penetration = 0.01f; // tolerance of the CollisionWorld fit check for a target pose
 	uint32_t max_collision_iterations = 5;
 	uint32_t max_constraint_iterations = 15;
 	bool enhanced_internal_edge_removal = true;
@@ -132,6 +144,11 @@ struct StateSpeed {
 	float forward = 1, backward = 1, left = 1, right = 1; // SpeedModifier
 	float acceleration_gain = 0, deceleration_gain = 0, sprint_gain = 0;
 	float sprint_multiplier = 0;
+	// Per-tick factors precomputed by make_motor_params for the FractionPerReferenceTick model:
+	// 1 - (1 - gain)^(reference_hz * kTickSeconds). They are fields, so motor_params_hash covers the values the
+	// libm pow gave on this machine; a client whose pow rounds differently is detected by MatchInfo::motor_hash
+	// instead of mispredicting (M3 crosses machines, docs §6.10). The motor's own replicated math calls no libm.
+	float acceleration_factor = 0, deceleration_factor = 0, sprint_factor = 0;
 };
 
 struct PoseParams {

@@ -12,31 +12,43 @@
 //                          copyable and fixed size, <= ~20 KiB; a seqlock over heap-owning members would be UB)
 // It calls no Godot API, so the headless tests run it against a ServerHost on the same process.
 // The thread waits inside ENet's service call with a timeout to its next deadline (client tick or netsim
-// release), so a datagram is taken when it arrives, not at the next tick (no half-tick RTT bias on this side).
+// release), so a datagram is taken when it arrives, not at the next tick (no half-tick RTT bias on this side), and
+// it calls Host::flush() right after each CommandPacket send.
 //
-// Per client tick (60 Hz, client clock running the target command buffer ahead of the server, docs §7.5):
-//   1. service ENet; feed every received datagram through the inbound NetSim
-//   2. newest snapshot (seq_newer): its own state is the server's state at tick T = server_tick (protocol.h
-//      invariant). The ring is keyed by tick. If the ring holds a predicted state for T and it equals the server's
-//      within the epsilons (every discrete field equal), nothing happens. Otherwise (a difference, a ring miss
-//      after a stall or a clock reset, or a Spawned state) the client runs the one catch-up rule (docs §9.2):
-//        state = server state at T; prev = the ring's command at T, else sim::hold_command(state)
-//        for t = T + 1 .. client tick - 1:  cmd = the ring's command at t if the client made one for t, else
-//                                           repeated_command(prev, t) (what the server runs for a missing tick)
-//                                           state = step(state, cmd); ring[t] = (cmd, state); prev = cmd
-//      so every replayed tick overwrites the ring (the next snapshot compares against the replayed states) and
-//      the motor's precondition (command tick == state tick + 1) holds after any jump of the clock
-//   3. sample the input -> Command (quantised at sampling, so prediction and server see the same values)
-//   4. predict: SoldierMotor::step on the client's own CollisionWorld
-//   5. send a CommandPacket with the last kCommandsPerPacket commands through the outbound NetSim
-//   6. publish a PresentationFrame: prev/curr own state for render interpolation, the decaying visual offset, the
+// Per client tick C (the tick about to be predicted; 60 Hz, the clock running the target command buffer ahead of
+// the server, docs §7.5, §9.1):
+//   1. service ENet; feed every received datagram through the inbound NetSim; the own_events of every decoded
+//      snapshot (not only the newest) are ORed into the frame's server_events
+//   2. newest snapshot (seq_newer): S = its own state, T = server_tick = S.tick (protocol.h invariant)
+//   3. clock: slew, or reset to the estimate when the error passes clock_reset_ms. A backward reset discards the
+//      ring's entries after the new C - 1 (sim::PredictionRing::discard_after). Then, whenever T >= C (the clock
+//      is not ahead of the newest authoritative tick: startup, Spawned before the clock settled, a stall), C is
+//      forced forward to max(estimate, T + 1), counted in clock_resets
+//   4. reconcile (docs §9.2): if S has a newer life than the ring's (a spawn, whichever message carried it), or
+//      the ring has no entry at T (ring_misses), or the entry differs from S beyond the epsilons (any discrete
+//      field, reconciliations): sim::catch_up(motor, S, ring, C)
+//   5. base: if the ring still has no entry at C - 1 (a forward reset, a stall), sim::catch_up(motor, base, ring,
+//      C) with base = the ring's newest entry at or below C - 1, or the newest authoritative state when that is
+//      newer (by tick, within the same life). So the prediction always has its base, and the motor's precondition
+//      (command tick == state tick + 1) holds after any clock jump; every step checks it first and counts a
+//      violation in step_precondition_failures (the tests require 0)
+//   6. sample the input -> Command for C (quantised at sampling). While InputSample::life is older than the
+//      soldier's life the main thread has not yet adopted the spawn view, so the command is the hold command's
+//      content at C (no input, the spawn yaw and pitch, the spawn state's target pose; flags 0 as every client
+//      command). Predict ring[C] = step(ring[C - 1].state, cmd), sent
+//   7. send a CommandPacket of the last kCommandsPerPacket commands from the send history (only commands this
+//      client made and sent, never the catch-up's synthesised repeats) through the outbound NetSim; flush
+//   8. publish a PresentationFrame: prev/curr own state for render interpolation, the decaying visual offset, the
 //      last authoritative own state, and per other soldier the snapshot samples around the render time
+// Before the first own state (Spawned or a snapshot) the client predicts nothing and sends no commands: the
+// server holds the new slot on hold_command until the first one arrives (game_server.h).
 
 #include "bf3/core/result.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/netsim.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/prediction.h"
 #include "bf3/sim/soldier_state.h"
 
 #include <cstdint>
@@ -66,6 +78,11 @@ struct InputSample {
 	PoseRequest pose_request = PoseRequest::Keep;
 	sim::Pose pose = sim::Pose::Stand;
 	bool free_camera = false; // F6: the soldier gets a neutral command (it stands still, keeps simulating)
+	// The soldier life whose spawn view the mapper has adopted. On a new life (PresentationFrame::own_curr.life
+	// newer than this) the mapper sets its mouse yaw and pitch to own_curr's (the spawn view) and then reports
+	// that life here; until it does, the client commands the spawn view (step 6 above), so the first real
+	// commands never turn the soldier away from the view the server's hold command used (docs §9.2, §11.6).
+	uint32_t life = 0;
 };
 
 struct ClientSessionConfig {
@@ -73,7 +90,7 @@ struct ClientSessionConfig {
 	uint16_t port = 0;
 	std::string name = "player";
 	net::NetSimConfig netsim; // applied in both directions at this endpoint (net/netsim.h)
-	float interp_min_ms = 50.0f; // interpolation delay clamp (docs §9.4)
+	float interp_min_ms = 75.0f; // interpolation delay clamp: plan §2.4's 75-100 ms band at the low end (docs §9.4)
 	float interp_max_ms = 150.0f;
 	float extrapolate_max_ms = 250.0f; // past the newest sample (plan §3.5)
 	float error_decay_ms = 100.0f; // visual error decay after a correction (IW4L predicted_error ERROR_DECAY_MS)
@@ -85,7 +102,9 @@ struct ClientSessionConfig {
 	// being the mean absolute deviation of the server's integer buffer reports over the last 64 snapshots, clamped
 	// to max_buffer_ticks. The -1 keeps the +-1 flip of an integer reading (phase drift inside the deadband) from
 	// raising the target: 2 on loopback, 2-3 under "150/2". A new target is adopted only after it has been the
-	// computed value for target_hold_s (no flapping).
+	// computed value for target_hold_s (no flapping). After a clock reset, buffer reports whose sequence_echo is
+	// older than the first command sent after the reset still describe the old clock and are ignored (no MAD
+	// sample, no slew, no further reset), so one reset never cascades into a reset per snapshot.
 	uint32_t target_buffer_ticks = 2;
 	uint32_t max_buffer_ticks = 6;
 	float target_hold_s = 2.0f;
@@ -134,9 +153,14 @@ struct ClientStats {
 	uint64_t snapshots_late = 0; // older than the newest applied
 	uint64_t commands_sent = 0;
 	uint64_t reconciliations = 0; // own state differed from the ring's prediction: reset + replay
+	sim::Tick last_reconcile_tick = 0; // snapshot tick T of the newest reconciliation (E2's rest judge, rest_check.h)
+	uint64_t last_reconcile_ns = 0; // when it ran (net::monotonic_ns)
 	uint64_t ring_misses = 0; // no predicted state for the snapshot's tick (stall, clock reset): catch-up, no compare
 	uint64_t spawns = 0; // Spawned states taken (catch-up from the spawn tick)
-	uint64_t replayed_ticks = 0; // steps of every catch-up (reconciliations, ring misses, spawns)
+	uint64_t replayed_ticks = 0; // steps of every catch-up (reconciliations, ring misses, spawns, base fills)
+	uint64_t base_fills = 0; // catch-ups because the ring had no entry at C - 1 (forward reset, stall)
+	uint64_t forced_forward = 0; // clock forced to T + 1 because T >= C (also counted in clock_resets)
+	uint64_t step_precondition_failures = 0; // predicted steps whose command tick != base tick + 1 (must stay 0)
 	uint64_t corrections_over_1mm = 0; // |server - predicted| position > 1 mm at a reconciliation
 	float max_correction_m = 0.0f;
 	uint64_t teleports = 0; // corrections above teleport_above_m
@@ -177,13 +201,17 @@ struct PresentationFrame {
 	double own_ticks_per_ns = double(sim::kSimHz) * 1e-9;
 	sim::SoldierState own_prev;
 	sim::SoldierState own_curr;
+	sim::Command own_command; // the command own_curr was predicted with (the HUD; E2's rest judge reads idleness)
 	sim::Vec3 visual_offset{}; // added to the own position; decays to zero over error_decay_ms
 	float eye_height_prev = 1.6f;
 	float eye_height_curr = 1.6f;
-	// The last authoritative own state from a snapshot: E1 through the full path is measured on it (docs §14).
+	// The last authoritative own state from a snapshot, for the debug HUD only. E1 through the full path is
+	// measured on the per-tick Trace reports (net::DebugKind::Trace, docs §7.7), not on this 30 Hz state.
 	bool server_own_valid = false;
 	sim::SoldierState server_own;
-	uint16_t server_events = 0; // Snapshot::own_events ORed since the previous frame
+	// Snapshot::own_events of every snapshot decoded since the previous frame, ORed (a snapshot superseded in the
+	// same client tick still contributes; a lost one does not: HUD only, docs §9.1).
+	uint16_t server_events = 0;
 	uint32_t events = 0; // predicted sim::soldier_events:: of the own soldier since the previous frame
 	// The others' clock: render time in server ticks at publish_ns and its rate in ticks per nanosecond, so the
 	// render time at frame time t is render_ticks_at_publish + (t - publish_ns) * ticks_per_ns. It is built on the
@@ -216,7 +244,9 @@ public:
 	ClientSession &operator=(const ClientSession &) = delete;
 
 	// Builds the client CollisionWorld and motor over p_level, connects, sends Hello and Ready, and starts the
-	// client thread. Fails without starting a thread.
+	// client thread. Fails without starting a thread. M1 sends Ready as soon as the SharedLevel exists, so the
+	// soldier spawns (and its 2 s protection runs) while Phase C still uploads; harmless with fall damage as the
+	// only damage. M3 moves Ready to LoadStage::Done (plan §2.7: Loading progress before Ready), docs §7.8.
 	core::Status start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level);
 	void stop(); // idempotent; sends Bye, joins
 	bool running() const;

@@ -10,6 +10,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/rest_check.h"
 #include "bf3/host/server_host.h"
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/netsim.h"
@@ -17,6 +18,7 @@
 #include "bf3/render/level_scene.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/prediction.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
@@ -62,6 +64,8 @@ static_assert(net::quant::kPositionXZ.encode(-2252.0f) > 0);
 static_assert(std::is_trivially_copyable_v<net::OtherSoldier>);
 static_assert(std::is_trivially_copyable_v<bf3::host::ClientStats>);
 static_assert(std::is_trivially_copyable_v<bf3::host::PresentationFrame>);
+static_assert(std::is_trivially_copyable_v<bf3::host::RestSample>);
+static_assert(std::is_trivially_copyable_v<sim::PredictionEntry>);
 static_assert(net::seq_newer(1, 0) && !net::seq_newer(0, 1) && !net::seq_newer(5, 5));
 static_assert(net::seq_newer(2, 65530) && !net::seq_newer(65530, 2)); // wrap-around
 static_assert(bf3::core::level::kCollisionSoupVersion >= 1);
@@ -159,7 +163,7 @@ TEST_CASE("m1 contract: snapshot quantisers stay within half a step in range") {
 
 TEST_CASE("m1 contract: default configs match the design numbers") {
 	const bf3::host::ClientSessionConfig c;
-	CHECK(c.interp_min_ms == 50.0f);
+	CHECK(c.interp_min_ms == 75.0f); // plan §2.4's 75-100 ms band (docs §9.4)
 	CHECK(c.interp_max_ms == 150.0f);
 	CHECK(c.error_decay_ms == 100.0f);
 	CHECK(c.target_buffer_ticks == 2);
@@ -167,6 +171,13 @@ TEST_CASE("m1 contract: default configs match the design numbers") {
 	CHECK(c.clock_time_constant_s >= 1.0f);
 	CHECK(c.extrapolate_max_ms == 250.0f);
 	CHECK(c.max_clock_adjust == doctest::Approx(0.05f));
+	// E2's input-edge allowance is the redundancy plus the largest command buffer (docs §1 E2, rest_check.h).
+	const bf3::host::RestCheckOptions rest;
+	CHECK(rest.edge_ticks == net::kCommandsPerPacket + c.max_buffer_ticks);
+	CHECK(rest.window_s == 10.0);
+	CHECK(rest.max_eye_jitter_m == doctest::Approx(1e-4f));
+	const bf3::host::InputSample input;
+	CHECK(input.life == 0);
 	const bf3::host::GameServerConfig g;
 	CHECK(g.snapshot_divisor == 2);
 	CHECK(g.max_slots <= net::kMaxSlots);
