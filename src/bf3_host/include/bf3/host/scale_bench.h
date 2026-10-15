@@ -56,6 +56,9 @@ struct ScaleBenchOptions {
 	// ServerHost does) of paced_seconds sim time, reported beside the gate (not gated). 0 = none.
 	double paced_seconds = 30.0;
 	bool raise_priority = true; // THREAD_PRIORITY_ABOVE_NORMAL for the measured windows (this thread only)
+	// The bot level's nav (docs §5.7 experiments): radius rounding and cell size (0 = NavParams default).
+	bool radius_round_up = true;
+	float cell_size = 0.0f;
 };
 
 struct Percentiles {
@@ -151,8 +154,9 @@ struct NavBakeBenchOptions {
 	std::string mode = "ConquestLarge0";
 	unsigned threads = 16;
 	uint32_t layer_mask = sim::query_mask::kMovement;
-	bool radius_round_up = false; // NavParams default (1 cell)
-	float cell_size = 0.0f; // 0: NavParams default (0.25 m)
+	bool radius_round_up = true; // NavParams default
+	float cell_size = 0.0f; // 0: NavParams default (0.2 m)
+	int partition = -1; // NavPartition, -1: NavParams default
 	bool link_checks = true;
 	std::string tuning_text; // motor_tuning.cfg ("" = defaults); the soldier's numbers come from the level
 };
@@ -165,6 +169,9 @@ struct NavBakeBench {
 	size_t tiles_terrain_only = 0; // requested tiles whose own soup tile holds terrain only (or nothing)
 	size_t tiles_with_objects = 0; // requested tiles whose own soup tile holds a non-terrain movement triangle
 	size_t points_outside_areas = 0;
+	size_t tiles_wet = 0; // cover tiles the water rule took the terrain from (CollisionSoup::cover_tiles_wet)
+	float water_y = 0.0f; // the highest water plane (0 with none)
+	size_t water_planes = 0;
 	size_t soup_triangles = 0;
 	double seconds_load = 0.0, seconds_areas = 0.0, seconds_soup = 0.0, seconds_cook = 0.0;
 	double gate_seconds = 0.0; // nav_bake_gate_seconds(nav->stats())

@@ -26,6 +26,7 @@
 
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/cache/digest.h"
+#include "bf3/core/level/water_plane.h" // S1 water rule
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
 
@@ -181,6 +182,9 @@ struct StaticWorldLoadOptions {
 	// non-empty cover is a key parameter of the "jolt-world" entry ("cover=<SHA-256 of the sorted tile list>"); an
 	// empty one leaves the key text exactly as M1 wrote it, so M1's entries stay valid.
 	std::vector<std::array<int32_t, 2>> terrain_cover;
+	// S1 water rule (SoupOptions::cover_water; docs §5.2): with a non-empty cover, a non-empty list adds
+	// ";water=<SHA-256 of the planes>" to the key. Ignored without a cover.
+	std::vector<core::level::WaterPlane> cover_water;
 };
 
 // The static world of a traversed level x mode through the cache (see the header comment). p_cache may be null

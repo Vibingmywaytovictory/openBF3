@@ -276,6 +276,8 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	std::sort(options.terrain_cover.begin(), options.terrain_cover.end());
 	options.terrain_cover.erase(std::unique(options.terrain_cover.begin(), options.terrain_cover.end()), options.terrain_cover.end());
 	shared->terrain_cover = options.terrain_cover;
+	options.cover_water = p_options.cover_water;
+	shared->cover_water = p_options.cover_water;
 	core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes = sim::load_static_world_cached(p_options.cache, level, world, options);
 	if (!shapes) {
 		if (p_progress != nullptr) {

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -237,6 +238,69 @@ Result<ModeAreas> read_mode_areas(const World &p_world) {
 	return out;
 }
 
+Result<std::vector<WaterPlane>> read_water_planes(const World &p_world) {
+	WorkBudget &budget = *p_world.budget;
+	BF3_TRY(budget.status());
+	std::vector<WaterPlane> out;
+	for (const PlacedObject &object : p_world.objects) {
+		BF3_TRY(budget.charge(1));
+		if (!object.entity.is_a("WaterEntityData")) {
+			continue;
+		}
+		const std::optional<EbxInstance> asset = p_world.scopes.db().follow(object.entity.data(), "Asset");
+		if (!asset) {
+			continue;
+		}
+		const std::vector<EbxInstance> lakes = asset->partition().instances_of("LakeData");
+		BF3_TRY(budget.charge(1 + lakes.size()));
+		for (const EbxInstance &lake : lakes) {
+			if (out.size() >= kMaxCombatAreas) {
+				return make_error("water: more than " + std::to_string(kMaxCombatAreas) + " lakes");
+			}
+			const std::optional<EbxValue> points = lake.get("Points");
+			const OptionalEbxArray list = points ? points->as_array() : OptionalEbxArray();
+			if (!list || list->size() < 3) {
+				continue;
+			}
+			if (list->size() > kMaxCombatAreaPoints) {
+				return make_error("water: a lake has " + std::to_string(list->size()) + " points");
+			}
+			BF3_TRY(budget.charge(list->size()));
+			WaterPlane plane;
+			plane.y = -std::numeric_limits<float>::infinity();
+			for (const EbxValue &p : *list) {
+				const std::optional<EbxStruct> s = p.as_struct();
+				const std::optional<std::array<float, 3>> v = s ? s->vec3() : std::nullopt;
+				if (!v || !std::isfinite((*v)[0]) || !std::isfinite((*v)[1]) || !std::isfinite((*v)[2])) {
+					return make_error("water: a lake has a bad point");
+				}
+				const Vec3 w = object.transform.transform_point(*v);
+				if (!std::isfinite(w[0]) || !std::isfinite(w[1]) || !std::isfinite(w[2]) || std::fabs(w[0]) > 1e6f || std::fabs(w[1]) > 1e6f ||
+						std::fabs(w[2]) > 1e6f) {
+					return make_error("water: a lake point is out of range");
+				}
+				plane.y = std::max(plane.y, w[1]);
+				plane.polygon.push_back({ w[0], w[2] });
+			}
+			out.push_back(std::move(plane));
+		}
+	}
+	return out;
+}
+
+bool water_plane_covers(const WaterPlane &p_plane, float p_x, float p_z) {
+	bool in = false;
+	const size_t n = p_plane.polygon.size();
+	for (size_t i = 0, j = n - 1; n >= 3 && i < n; j = i++) {
+		const float xi = p_plane.polygon[i][0], zi = p_plane.polygon[i][1];
+		const float xj = p_plane.polygon[j][0], zj = p_plane.polygon[j][1];
+		if ((zi > p_z) != (zj > p_z) && p_x < (xj - xi) * (p_z - zi) / (zj - zi) + xi) {
+			in = !in;
+		}
+	}
+	return in;
+}
+
 Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const CombatAreaDef> p_areas, float p_margin) {
 	constexpr float kTile = 64.0f;
 	std::set<std::array<int32_t, 2>> tiles;
@@ -380,6 +444,13 @@ Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_ins
 		}
 		for (const std::array<int32_t, 2> &t : *tiles) {
 			all.insert(t);
+		}
+		if (out.water.empty()) {
+			Result<std::vector<WaterPlane>> water = read_water_planes(**world);
+			if (!water) {
+				return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, water.error());
+			}
+			out.water = std::move(*water);
 		}
 		Result<LevelSpawns> spawns = read_level_spawns(**world);
 		if (!spawns) {

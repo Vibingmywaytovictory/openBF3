@@ -22,6 +22,7 @@
 // WorkBudget (budget.h) before it is done, like the other helpers; polygons over kMaxCombatAreaPoints points and more
 // than kMaxCombatAreas areas are errors. Hostile data fails with an error.
 
+#include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/level_transform.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/result.h"
@@ -75,6 +76,17 @@ struct ModeAreas {
 // Reads the combat areas and objectives of a traversed level x mode. World is not thread-safe: caller's thread.
 Result<ModeAreas> read_mode_areas(const World &p_world);
 
+// The water surfaces (WaterPlane, collision_soup.h; docs/design/s1.md §5.2 "Deep water"): every WaterEntityData
+// placement's Asset partition holds LakeData shapes (VisualVectorShapeData: Points, closed). Verified on 2026-10-15:
+// Kharg's levels/mp_018/terrain/terrain_mp018.water.mesh has one LakeData, a closed 8.8 km square at y 88.47, under a
+// WaterEntityData at the identity transform (whose own transform therefore does not give the height); Metro's park
+// pond is at y 62.56 (14 points), Caspian's one lake at y 67.26 (9 points, under the terrain).
+// Every lake of the traversed level x mode, charged to the World's budget (points over kMaxCombatAreaPoints, a
+// non-finite point or more than kMaxCombatAreas lakes fail). A WaterEntityData whose Asset does not resolve is
+// skipped (no plane: the water rule is off there).
+Result<std::vector<WaterPlane>> read_water_planes(const World &p_world);
+
+
 // The 64 m tiles (the soup's tile key: floor(x / 64), floor(z / 64)) that any polygon of p_areas, grown by p_margin
 // metres, touches; sorted by (x, z), unique. The work (each area's candidate tiles x its edge samples) is summed
 // before the loop and refused past kMaxCombatAreaTileWork, so a hostile polygon fails instead of running for hours.
@@ -99,6 +111,9 @@ struct LevelCombatTiles {
 	size_t point_only_tiles = 0; // tiles only a point added (reported; 0 expected on retail data)
 	size_t points = 0; // objectives + spawn points over every mode
 	size_t points_outside_areas = 0; // of those, outside every combat polygon of their own mode (reported)
+	// The water surfaces of the level (read_water_planes of the first mode that has any; the lakes are level
+	// data, the same in every mode). The cover's water rule (SoupOptions::cover_water) uses them.
+	std::vector<WaterPlane> water;
 	double seconds = 0.0;
 };
 Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_install, std::string_view p_level_id, float p_margin);

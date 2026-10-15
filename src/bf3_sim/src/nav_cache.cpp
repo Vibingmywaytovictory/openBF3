@@ -222,7 +222,9 @@ core::CacheKeyInputs nav_world_key_inputs(const core::Sha256Digest &p_source_dig
 	in.jolt_version = link_checked ? jolt_build_id() : std::string();
 	in.params = "source=" + p_source_digest.hex() + ";level=" + core::to_lower_ascii(p_level) + ";mode=" + core::to_lower_ascii(p_mode) +
 			";soup=" + std::to_string(core::level::kCollisionSoupVersion) + ";terrain_spacing=" + bits_hex(p_options.world.terrain_spacing) +
-			";cover=" + terrain_cover_digest(p_options.world.terrain_cover).hex() + ";region=" + terrain_cover_digest(p_options.region).hex() + ";" +
+			";cover=" + terrain_cover_digest(p_options.world.terrain_cover).hex() +
+			(p_options.world.cover_water.empty() ? std::string() : ";water=" + cover_water_digest(p_options.world.cover_water).hex()) +
+			";region=" + terrain_cover_digest(p_options.region).hex() + ";" +
 			nav_params_text(p_options.bake.params) + ";" + recast_build_id() + layer_text(p_options.bake.layer_mask) +
 			(link_checked ? ";links=jolt" : ";links=none");
 	return in;
@@ -319,6 +321,7 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 		so.threads = p_options.world.soup_threads;
 		so.terrain_spacing = p_options.world.terrain_spacing;
 		so.terrain_cover = p_options.world.terrain_cover;
+		so.cover_water = p_options.world.cover_water;
 		so.progress = p_options.world.soup_progress;
 		core::Result<core::level::CollisionSoup> built = core::level::build_collision_soup(p_level, p_world, so);
 		if (!built) {

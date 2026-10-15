@@ -117,5 +117,8 @@ core::Result<StaticWorldIndex> decode_static_world_index(std::span<const uint8_t
 // S1 (docs/design/s1.md §5.2, §5.4): SHA-256 over a terrain cover's tiles (sorted and made unique first; i32 x, i32 z
 // little endian each), the "cover=" part of the jolt-world and nav-world keys.
 core::Sha256Digest terrain_cover_digest(std::span<const std::array<int32_t, 2>> p_tiles);
+// S1 water rule (SoupOptions::cover_water): SHA-256 over the planes in order (f32 y, u32 point count, f32 x, f32 z
+// per point, little endian bit patterns), the "water=" part of the same keys when the rule is on.
+core::Sha256Digest cover_water_digest(std::span<const core::level::WaterPlane> p_water);
 
 } // namespace bf3::sim

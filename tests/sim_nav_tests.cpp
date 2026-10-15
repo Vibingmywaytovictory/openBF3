@@ -295,6 +295,7 @@ TEST_SUITE("sim-nav-unit") {
 		const auto tiles = tiles_range(0, 0, 0, 0);
 		NavBakeOptions o;
 		o.params.drop_links = false;
+		o.params.cell_size = 0.25f; // the rounding case: 1.4 cells (the default 0.2 m gives 2 cells either way)
 		o.params.radius_round_up = true;
 		const auto closed = bake(t, tiles, o);
 		const NavComponents cc = nav_components(*closed);
@@ -438,8 +439,8 @@ TEST_SUITE("sim-nav-unit") {
 			REQUIRE(in.ok());
 			return (*in)[0].digest;
 		};
-		CHECK(nav_input_border(NavParams()) == doctest::Approx(2.1f));
-		CHECK(nav_input_border(NavParams()) > float(nav_recast_border_cells(NavParams())) * 0.25f); // the sweep term is the larger one
+		CHECK(nav_input_border(NavParams()) == doctest::Approx(2.05f));
+		CHECK(nav_input_border(NavParams()) > float(nav_recast_border_cells(NavParams())) * NavParams().cell_size); // the sweep term is the larger one
 		const core::Sha256Digest d0 = digest_of(base);
 		std::vector<StaticTriangle> near_wall = base, far_wall = base;
 		add_box(near_wall, { 66.0f, -3.0f, 10.0f }, { 66.1f, 1.0f, 50.0f }); // its box starts 2.0 m past the edge
@@ -746,10 +747,14 @@ TEST_SUITE("sim-nav-unit") {
 		bad.params.cell_size = 0.3f; // does not divide 64 m
 		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), tiles_range(0, 0, 0, 0), bad).ok());
 		CHECK(nav_cells(NavParams()).walkable_climb == 3);
-		CHECK(nav_cells(NavParams()).walkable_radius == 1); // round to nearest is the default (docs §5.7 as built)
-		NavParams ceil;
-		ceil.radius_round_up = true;
-		CHECK(nav_cells(ceil).walkable_radius == 2);
+		CHECK(nav_cells(NavParams()).walkable_radius == 2); // ceil(0.35 / 0.2): 0.4 m (docs §5.7 as built)
+		NavParams q;
+		q.radius_round_up = false;
+		CHECK(nav_cells(q).walkable_radius == 2); // 1.75 rounds to 2 as well
+		q.cell_size = 0.25f;
+		CHECK(nav_cells(q).walkable_radius == 1); // 1.4 -> 1
+		q.radius_round_up = true;
+		CHECK(nav_cells(q).walkable_radius == 2); // 1.4 -> 2: 0.5 m
 	}
 
 	TEST_CASE("sim.nav.unit: cache keys change with the input, the params and the link check; cold then warm tiles on a scratch root") {

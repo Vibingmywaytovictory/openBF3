@@ -220,6 +220,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	shared_options.threads = p_options.load_threads;
 	shared_options.tuning = tuning;
 	shared_options.terrain_cover = combat->tiles;
+	shared_options.cover_water = combat->water;
 	core::Result<std::shared_ptr<const SharedLevel>> shared = load_shared_level(*db, shared_options, &progress);
 	if (!shared) {
 		return core::error_at("scale bench: shared level", shared.error());
@@ -232,6 +233,10 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	bot_options.combat = &*combat;
 	bot_options.seed = p_options.seed;
 	bot_options.synthetic_spawns = std::max<uint32_t>(p_options.walkers, 1);
+	bot_options.params.radius_round_up = p_options.radius_round_up;
+	if (p_options.cell_size > 0.0f) {
+		bot_options.params.cell_size = p_options.cell_size;
+	}
 	core::Result<std::shared_ptr<const BotLevel>> bots = load_bot_level(*db, **shared, bot_options, &progress);
 	if (!bots) {
 		return core::error_at("scale bench: bot level", bots.error());
@@ -672,6 +677,9 @@ core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Instal
 	if (p_options.cell_size > 0.0f) {
 		out.params.cell_size = p_options.cell_size;
 	}
+	if (p_options.partition >= 0 && p_options.partition <= 3) {
+		out.params.partition = sim::NavPartition(p_options.partition);
+	}
 	out.seconds_load = seconds_since(clock);
 
 	clock = Clock::now();
@@ -689,12 +697,18 @@ core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Instal
 	core::level::SoupOptions so;
 	so.threads = threads;
 	so.terrain_cover = combat->tiles;
+	so.cover_water = combat->water;
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(**level, **world, so);
 	if (!soup) {
 		return core::error_at("nav bake bench: soup", soup.error());
 	}
 	out.seconds_soup = seconds_since(clock);
 	out.soup_triangles = soup->triangles;
+	out.tiles_wet = soup->cover_tiles_wet;
+	out.water_planes = combat->water.size();
+	for (const core::level::WaterPlane &w : combat->water) {
+		out.water_y = out.water_planes == 1 ? w.y : std::max(out.water_y, w.y);
+	}
 	{
 		// Tiles by content: a requested tile whose own soup tile holds a non-terrain movement triangle.
 		std::vector<std::array<int32_t, 2>> objects;
@@ -765,6 +779,8 @@ std::string format_nav_bake_bench(const NavBakeBench &p_b) {
 	line(fmt("   region: %zu tiles requested (%zu from the combat polygons + margin, %zu only from points; %zu points outside every area); %zu terrain-only, %zu "
 			 "with objects",
 			p_b.tiles_requested, p_b.tiles_polygon, p_b.tiles_point_only, p_b.points_outside_areas, p_b.tiles_terrain_only, p_b.tiles_with_objects));
+	line(fmt("   water rule: %zu planes (highest y %.2f), %zu cover tiles under water - 1.8 m lost their terrain", p_b.water_planes, double(p_b.water_y),
+			p_b.tiles_wet));
 	line(fmt("   not timed: load + traverse %.2f s, combat areas (all MP modes) %.2f s, soup with cover %.2f s (%zu triangles), link world cook %.2f s",
 			p_b.seconds_load, p_b.seconds_areas, p_b.seconds_soup, p_b.soup_triangles, p_b.seconds_cook));
 	line(fmt("   timed: input %.3f s + lanes %.3f s + assembly %.3f s = G4 %.3f s  (link world setup %.3f s and link sweeps %.3f s summed over lanes, %zu "

@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <unordered_map>
@@ -457,6 +458,77 @@ bool centre_tile(float p_origin, float p_spacing, size_t p_index, int32_t &r_til
 	}
 	r_tile = int32_t(tile);
 	return true;
+}
+
+// S1 water rule (SoupOptions::cover_water): the cover tiles that keep their terrain cells for this grid. A tile
+// whose centre lies in a plane keeps them when one of its cells' corner samples lies above the highest such plane
+// minus kCoverWaterDepth; a tile outside every plane, or without a cell of this grid, is kept. Tiles as in
+// terrain_triangles (the cell centre's grid coordinates).
+std::vector<std::array<int32_t, 2>> dry_cover(const res::HeightGrid &p_grid, const Transform &p_frame, const std::vector<std::array<int32_t, 2>> &p_cover,
+		const std::vector<WaterPlane> &p_water, size_t &r_wet) {
+	const size_t width = p_grid.width;
+	const size_t height = p_grid.height;
+	if (p_cover.empty() || p_water.empty() || width < 2 || height < 2) {
+		return p_cover;
+	}
+	std::vector<float> top(p_cover.size(), -std::numeric_limits<float>::infinity());
+	const float ox = p_grid.origin_xz[0];
+	const float oz = p_grid.origin_xz[1];
+	const float sx = p_grid.sample_spacing[0];
+	const float sz = p_grid.sample_spacing[1];
+	std::vector<int32_t> column_tile(width - 1);
+	std::vector<uint8_t> column_ok(width - 1);
+	for (size_t x = 0; x + 1 < width; ++x) {
+		column_ok[x] = centre_tile(ox, sx, x, column_tile[x]) ? 1 : 0;
+	}
+	for (size_t z = 0; z + 1 < height; ++z) {
+		int32_t tz = 0;
+		if (!centre_tile(oz, sz, z, tz)) {
+			continue;
+		}
+		size_t at = SIZE_MAX; // the cover is sorted by (x, z): one lookup per run of cells in the same tile
+		int32_t at_tile = INT32_MIN;
+		for (size_t x = 0; x + 1 < width; ++x) {
+			if (column_ok[x] == 0) {
+				continue;
+			}
+			if (column_tile[x] != at_tile) {
+				at_tile = column_tile[x];
+				const auto it = std::lower_bound(p_cover.begin(), p_cover.end(), std::array<int32_t, 2>{ at_tile, tz });
+				at = (it != p_cover.end() && (*it)[0] == at_tile && (*it)[1] == tz) ? size_t(it - p_cover.begin()) : SIZE_MAX;
+			}
+			if (at == SIZE_MAX) {
+				continue;
+			}
+			for (size_t j = 0; j < 2; ++j) {
+				for (size_t i = 0; i < 2; ++i) {
+					const res::Vec3 p = p_frame.transform_point({ ox + float(x + i) * sx, p_grid.at(x + i, z + j), oz + float(z + j) * sz });
+					if (std::isfinite(p[1])) {
+						top[at] = std::max(top[at], p[1]);
+					}
+				}
+			}
+		}
+	}
+	std::vector<std::array<int32_t, 2>> out;
+	out.reserve(p_cover.size());
+	for (size_t i = 0; i < p_cover.size(); ++i) {
+		const float cx = (float(p_cover[i][0]) + 0.5f) * 64.0f;
+		const float cz = (float(p_cover[i][1]) + 0.5f) * 64.0f;
+		float plane = -std::numeric_limits<float>::infinity();
+		for (const WaterPlane &w : p_water) {
+			if (water_plane_covers(w, cx, cz)) {
+				plane = std::max(plane, w.y);
+			}
+		}
+		if (top[i] == -std::numeric_limits<float>::infinity() || plane == -std::numeric_limits<float>::infinity() ||
+				top[i] >= plane - kCoverWaterDepth) {
+			out.push_back(p_cover[i]);
+		} else {
+			++r_wet;
+		}
+	}
+	return out;
 }
 
 // Winds a terrain triangle to face +Y (Havok's counter-clockwise front).
@@ -1085,7 +1157,9 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			}
 			frame.origin = t.trans;
 			Built b;
-			terrain_triangles(grid, frame, havok_tiles, cover, uint32_t(jobs.size() + soup.terrains.size()), p_options.threads, terrain, b);
+			// S1 water rule: the cover tiles under water lose their terrain (empty cover_water: the cover as given).
+			const std::vector<std::array<int32_t, 2>> grid_cover = dry_cover(grid, frame, cover, p_options.cover_water, soup.cover_tiles_wet);
+			terrain_triangles(grid, frame, havok_tiles, grid_cover, uint32_t(jobs.size() + soup.terrains.size()), p_options.threads, terrain, b);
 			if (soup.triangles + soup.terrain_triangles + b.triangles.size() > kMaxSoupTriangles) {
 				return make_error("collision soup: more than " + std::to_string(kMaxSoupTriangles) + " triangles");
 			}

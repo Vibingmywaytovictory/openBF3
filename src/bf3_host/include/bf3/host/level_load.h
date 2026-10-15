@@ -115,6 +115,7 @@ struct SharedLevel {
 	// unique; empty = M1's world). load_bot_level compares it with the level's combat-area tiles and fails on a
 	// mismatch, so the nav is never baked over ground the server's motor lacks.
 	std::vector<std::array<int32_t, 2>> terrain_cover;
+	std::vector<core::level::WaterPlane> cover_water; // S1: SharedLoadOptions::cover_water, for the same check
 };
 
 struct SharedLoadOptions {
@@ -127,6 +128,9 @@ struct SharedLoadOptions {
 	// mode_areas.h level_combat_tiles). Empty = M1's static world, bit for bit. The bots need it: the nav is baked
 	// from the same soup, and the motor must stand on the terrain the nav walks on.
 	std::vector<std::array<int32_t, 2>> terrain_cover;
+	// S1 water rule (SoupOptions::cover_water; docs §5.2): LevelCombatTiles::water. The bots need the same as the
+	// nav (load_bot_level compares).
+	std::vector<core::level::WaterPlane> cover_water;
 };
 
 // On the loader thread that owns p_db.

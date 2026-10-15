@@ -58,8 +58,9 @@ struct Args {
 	std::vector<std::string> positional;
 	unsigned threads = 0;
 	uint32_t layers = sim::query_mask::kMovement;
-	bool radius_round_up = false; // NavParams default
+	bool radius_round_up = true; // NavParams default
 	float cell_size = 0.0f; // 0: NavParams default
+	int partition = -1; // NavPartition, -1: NavParams default
 	bool links = true;
 	bool tiles = false;
 	bool points = false;
@@ -85,6 +86,8 @@ Args parse(const std::vector<std::string> &p_args, size_t p_from) {
 			a.radius_round_up = true;
 		} else if (s == "--radius=nearest") {
 			a.radius_round_up = false;
+		} else if (s == "--partition=watershed" || s == "--partition=monotone" || s == "--partition=layers" || s == "--partition=auto") {
+			a.partition = s == "--partition=watershed" ? 0 : s == "--partition=monotone" ? 1 : s == "--partition=layers" ? 2 : 3;
 		} else if (s.rfind("--cs=", 0) == 0) {
 			a.bad = a.bad || !parse_float(s.substr(5), a.cell_size) || a.cell_size < 0.1f || a.cell_size > 1.0f;
 		} else if (s == "--no-links") {
@@ -167,6 +170,7 @@ core::Result<Loaded> load(const core::InstallReader &p_reader, const std::shared
 	so.cache = cache;
 	so.threads = p_args.threads;
 	so.terrain_cover = out.combat.tiles;
+	so.cover_water = out.combat.water;
 	core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*out.db, so, &progress);
 	if (!shared) {
 		return shared.error();
@@ -182,6 +186,9 @@ core::Result<Loaded> load(const core::InstallReader &p_reader, const std::shared
 	bo.params.radius_round_up = p_args.radius_round_up;
 	if (p_args.cell_size > 0.0f) {
 		bo.params.cell_size = p_args.cell_size;
+	}
+	if (p_args.partition >= 0) {
+		bo.params.partition = sim::NavPartition(p_args.partition);
 	}
 	core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*out.db, *out.shared, bo, &progress);
 	if (!bots) {
@@ -345,6 +352,16 @@ int cmd_nav_components(const core::InstallReader &p_reader, const std::shared_pt
 			p_args.radius_round_up ? "ceil" : "nearest", l->combat.tiles.size(), l->combat.polygon_tiles, l->combat.point_only_tiles,
 			l->combat.points_outside_areas, l->combat.points, ns.tiles, ns.polys, ns.drop_links, l->seconds_db, l->seconds_areas, l->seconds_shared,
 			l->seconds_bots, l->bots->seconds_nav, ns.world_hit ? "cache hit" : "baked");
+	for (const core::level::WaterPlane &w : l->combat.water) {
+		float x0 = 1e30f, x1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
+		for (const auto &p : w.polygon) {
+			x0 = std::min(x0, p[0]);
+			x1 = std::max(x1, p[0]);
+			z0 = std::min(z0, p[1]);
+			z1 = std::max(z1, p[1]);
+		}
+		std::printf("water: plane y %.2f, %zu points, x %.0f..%.0f z %.0f..%.0f\n", w.y, w.polygon.size(), x0, x1, z0, z1);
+	}
 	for (size_t m = 0; m < l->combat.modes.size(); ++m) {
 		std::printf("mode %s: %zu combat areas (%zu unwired triggers), %zu objectives\n", l->combat.modes[m].c_str(), l->combat.areas[m].combat_areas.size(),
 				l->combat.areas[m].unwired_triggers.size(), l->combat.areas[m].objectives.size());
@@ -466,6 +483,7 @@ int cmd_nav_probe(const core::InstallReader &p_reader, const std::shared_ptr<cor
 	core::level::SoupOptions so;
 	if (combat) {
 		so.terrain_cover = combat->tiles;
+		so.cover_water = combat->water;
 	}
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(**level, **world, so);
 	if (!soup) {
@@ -598,6 +616,7 @@ int cmd_nav(const core::InstallReader &p_reader, const std::shared_ptr<core::Ins
 		o.layer_mask = a.layers;
 		o.radius_round_up = a.radius_round_up;
 		o.cell_size = a.cell_size;
+		o.partition = a.partition;
 		o.link_checks = a.links;
 		core::Result<host::NavBakeBench> b = host::run_nav_bake_bench(p_install, o);
 		if (!b) {
@@ -657,6 +676,10 @@ int cmd_bots(const core::InstallReader &p_reader, const std::shared_ptr<core::In
 				std::fprintf(stderr, "bots: cannot read %s\n", s.c_str() + 9);
 				return 2;
 			}
+		} else if (s == "--radius=ceil" || s == "--radius=nearest") {
+			o.radius_round_up = s == "--radius=ceil";
+		} else if (s.rfind("--cs=", 0) == 0 && parse_float(s.substr(5), f) && f >= 0.1f && f <= 1.0f) {
+			o.cell_size = f;
 		} else if (s.rfind("--cache=", 0) == 0) {
 			cache_root = utf8_path(std::string_view(s).substr(8));
 		} else if (s.rfind("--", 0) == 0) {

@@ -555,6 +555,9 @@ core::CacheKeyInputs static_world_key_inputs(const core::Sha256Digest &p_source_
 	// S1 (docs/design/s1.md §5.2): a terrain cover changes the soup; an empty one leaves M1's key text as it was.
 	if (!p_options.terrain_cover.empty()) {
 		in.params += ";cover=" + terrain_cover_digest(p_options.terrain_cover).hex();
+		if (!p_options.cover_water.empty()) {
+			in.params += ";water=" + cover_water_digest(p_options.cover_water).hex();
+		}
 	}
 	return in;
 }
@@ -676,6 +679,7 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 	soup_options.terrain_spacing = p_options.terrain_spacing;
 	soup_options.progress = p_options.soup_progress;
 	soup_options.terrain_cover = p_options.terrain_cover; // S1 (empty for M1)
+	soup_options.cover_water = p_options.cover_water; // S1 water rule (empty for M1)
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(p_level, p_world, soup_options);
 	if (!soup) {
 		return soup.error();
@@ -723,6 +727,33 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 }
 
 // ---- S1: the terrain cover's digest -------------------------------------------------------------------------
+
+core::Sha256Digest cover_water_digest(std::span<const core::level::WaterPlane> p_water) {
+	std::vector<uint8_t> bytes;
+	const auto put = [&](uint32_t p_v) {
+		for (int i = 0; i < 4; ++i) {
+			bytes.push_back(uint8_t(p_v >> (i * 8)));
+		}
+	};
+	const auto put_f = [&](float p_f) {
+		uint32_t v = 0;
+		std::memcpy(&v, &p_f, 4);
+		put(v);
+	};
+	for (const core::level::WaterPlane &w : p_water) {
+		put_f(w.y);
+		put(uint32_t(w.polygon.size()));
+		for (const std::array<float, 2> &p : w.polygon) {
+			put_f(p[0]);
+			put_f(p[1]);
+		}
+	}
+	core::Sha256Digest out{};
+	core::Hasher hasher(core::HashAlgorithm::Sha256);
+	hasher.update(bytes);
+	hasher.finish(out.bytes);
+	return out;
+}
 
 core::Sha256Digest terrain_cover_digest(std::span<const std::array<int32_t, 2>> p_tiles) {
 	std::vector<std::array<int32_t, 2>> tiles(p_tiles.begin(), p_tiles.end());

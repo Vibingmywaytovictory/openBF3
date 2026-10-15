@@ -85,30 +85,35 @@ inline constexpr uint16_t kAll = kWalk | kCrouch | kDrop;
 enum class NavPartition : uint8_t { Watershed = 0, Monotone = 1, Layers = 2 };
 
 struct NavParams {
-	float cell_size = 0.25f; // plan §3.6
+	// Plan §3.6 says 0.25. Implementation (docs §5.7 as built): 0.2, so that Recast's whole-cell erosion of 2 cells is
+	// 0.4 m, just over the 0.35 m capsule. At 0.25 the radius is 0.5 m (ceil: closes the 0.7-1.0 m passages the
+	// motor walks through; Metro CQL kept 13 of 78 G2 rows in the main component) or 0.25 m (nearest: 68 rows, but
+	// the corridors then pass gaps the capsule does not, and half of the walkers' goals were abandoned in the G1 run).
+	float cell_size = 0.2f;
 	float cell_height = 0.1f; // climb / ch must be whole (topics/06 §2.4: ch 0.3 breaks Metro's stairs)
 	float agent_radius = 0.35f; // MotorParams::radius
 	float agent_height = 1.8f; // stand PoseParams::height
 	float crouch_height = 1.15f; // crouch PoseParams::height: the walkable height; below agent_height = crouch area
 	float agent_climb = 0.3f; // stand PoseParams::step_height
 	float max_slope_degrees = 50.0f; // MotorParams::max_ascend_degrees
-	// Walkable radius in cells: ceil(radius / cs) (Recast's convention: 2 cells = 0.5 m at cs 0.25) when true,
-	// else round to nearest (1 cell = 0.25 m). docs §5.3 says which the gates use and why. Implementation (§5.7 as
-	// built): nearest is the default. The conservative raster already grows every wall by up to a cell, so 1 cell keeps
-	// the mesh 0.25-0.5 m off walls (the capsule is 0.35 m) where ceil keeps it 0.5-0.75 m off and closes the 0.7-1.0 m
-	// passages the motor walks through (Metro CQL: 13 of 78 G2 rows in the main component with ceil, 68 with nearest).
-	bool radius_round_up = false;
+	// Walkable radius in cells: ceil(radius / cs) (Recast's convention: 2 cells = 0.4 m at cs 0.2, 0.5 m at 0.25) when
+	// true, else round to nearest (2 cells at 0.2, 1 at 0.25). docs §5.3 / §5.7 say which the gates use and why. The
+	// conservative raster grows every wall by up to one more cell, so the mesh keeps 0.4-0.6 m off walls at the default.
+	bool radius_round_up = true;
 	float max_edge_length = 12.0f; // metres (Recast sample: 12)
 	float max_simplification_error = 1.3f; // cells
 	uint32_t min_region_cells = 8 * 8;
 	uint32_t merge_region_cells = 20 * 20;
 	float detail_sample_distance = 6.0f; // cells x cs
-	float detail_sample_max_error = 1.0f; // cells x ch
+	// Implementation (docs §5.7 as built): 2 ch = 0.2 m, not the Recast sample's 1 ch. rcBuildPolyMeshDetail was 76 %
+	// of Caspian's bake CPU at 1 ch (65 of 85 s summed over the lanes; G4 6.2 s at cs 0.2) and is 27 s at 2 ch (G4
+	// 3.9 s). The detail mesh only gives the poly heights the queries return; the motor stands on the physics world.
+	float detail_sample_max_error = 2.0f; // cells x ch
 	NavPartition partition = NavPartition::Watershed;
 	// Drop-down links (docs §5.3): from a border edge, a landing up to drop_max lower within drop_reach outward.
 	// 4.9 m is IW4L's 192 in; a 4.9 m fall lands at 9.8 m/s, below the 13.9 m/s damage knee (fall-damage curve).
-	// drop_reach is the farthest the landing may lie from the poly edge: the edge sits the erosion (0.5 m) plus up to
-	// the contour error (1.3 cells) inside the real ledge, and the landing must be a capsule radius and a cell past
+	// drop_reach is the farthest the landing may lie from the poly edge: the edge sits the erosion (0.4-0.5 m) plus up
+	// to the contour error (1.3 cells) inside the real ledge, and the landing must be a capsule radius and a cell past
 	// the ledge, so 1.5 m (implementation: revision 3's fixed 1.0 m put the falling capsule on the lip, sim.nav.unit).
 	bool drop_links = true;
 	float drop_max = 4.9f;
@@ -148,8 +153,8 @@ inline constexpr size_t kMaxNavTiles = size_t(1) << 16;
 using NavTileKey = std::array<int32_t, 2>; // (x, z) on the soup's 64 m grid
 
 // How far past its 64 m square a tile's input box reaches (metres): the larger of Recast's border (walkable radius
-// in cells + 3 cells, as Sample_TileMesh; 0.5 + 0.75 = 1.25 m at the defaults) and, when drop_links is on, the reach
-// of a drop link's check sweep (drop_reach + agent_radius + one cell = 1.5 + 0.35 + 0.25 = 2.1 m). So the input
+// in cells + 3 cells, as Sample_TileMesh; 0.4 + 0.6 = 1.0 m at the defaults) and, when drop_links is on, the reach
+// of a drop link's check sweep (drop_reach + agent_radius + one cell = 1.5 + 0.35 + 0.2 = 2.05 m). So the input
 // digest covers every triangle the tile's raster and its link sweeps can touch (review of revision 1: the sweep
 // reached 1.35 m past a 1.25 m border). The Recast heightfield border itself stays walkable radius + 3 cells.
 float nav_input_border(const NavParams &p_params);

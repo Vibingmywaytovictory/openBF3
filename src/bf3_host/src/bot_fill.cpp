@@ -122,6 +122,11 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 				" tiles) is not the level's combat-area tiles (" + std::to_string(combat->tiles.size()) +
 				"): load_shared_level must get SharedLoadOptions::terrain_cover = level_combat_tiles");
 	}
+	if (combat->water != p_shared.cover_water) {
+		return core::make_error("load_bot_level: the static world's water rule (" + std::to_string(p_shared.cover_water.size()) +
+				" planes) is not the level's (" + std::to_string(combat->water.size()) +
+				"): load_shared_level must get SharedLoadOptions::cover_water = LevelCombatTiles::water");
+	}
 	out->region.assign(combat->tiles.begin(), combat->tiles.end());
 
 	clock = Clock::now();
@@ -133,6 +138,7 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	nav_options.world.build.threads = p_options.threads;
 	nav_options.world.soup_threads = p_options.threads;
 	nav_options.world.terrain_cover = p_shared.terrain_cover;
+	nav_options.world.cover_water = p_shared.cover_water;
 	nav_options.region = out->region;
 	core::Result<std::shared_ptr<const sim::NavWorld>> nav =
 			sim::load_nav_world_cached(p_options.cache, *p_db.level, *p_db.world, nullptr, *p_shared.static_world, nav_options);

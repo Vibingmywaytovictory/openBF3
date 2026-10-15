@@ -45,7 +45,12 @@ static_assert(sim::kMaxNavCorners >= 2 && sim::kMaxNavPathPolys >= 64);
 
 TEST_CASE("s1 contract: nav defaults are the plan's and the soldier's") {
 	const sim::NavParams p;
-	CHECK(p.cell_size == 0.25f); // plan §3.6
+	// Plan §3.6 says 0.25; docs §5.7 (as built) changed it to 0.2 so that the whole-cell radius (2 cells, 0.4 m) is
+	// just over the 0.35 m capsule: at 0.25 it is 0.5 m (closes Metro's passages) or 0.25 m (paths the capsule cannot
+	// follow). A cell size must divide the 64 m tile.
+	CHECK(p.cell_size == 0.2f);
+	CHECK(p.radius_round_up);
+	CHECK(std::ceil(p.agent_radius / p.cell_size) * p.cell_size >= p.agent_radius);
 	CHECK(p.cell_height == 0.1f);
 	// climb / ch must be whole (topics/06 §2.4): 0.3 / 0.1 = 3 cells.
 	const float climb_cells = p.agent_climb / p.cell_height;
@@ -61,8 +66,8 @@ TEST_CASE("s1 contract: nav defaults are the plan's and the soldier's") {
 	CHECK(std::sqrt(2.0f * 9.81f * p.drop_max) < 13.9f);
 	CHECK(p == sim::NavParams{});
 	// The input box must reach past a drop link's check sweep (nav_input_border, docs §5.3): with the default params
-	// the sweep reaches drop_reach + radius = 1.85 m past the edge, Recast's border ceil(0.35 / 0.25) + 3 = 5 cells
-	// = 1.25 m does not, so the border rule's sweep term (2.1 m) is the one that applies.
+	// the sweep reaches drop_reach + radius = 1.85 m past the edge, Recast's border ceil(0.35 / 0.2) + 3 = 5 cells
+	// = 1.0 m does not, so the border rule's sweep term (2.05 m) is the one that applies.
 	const float recast_border = (std::ceil(p.agent_radius / p.cell_size) + 3.0f) * p.cell_size;
 	CHECK(recast_border < p.drop_reach + p.agent_radius);
 	// G4's timed span is input + bake (lanes incl. link checks) + assemble.

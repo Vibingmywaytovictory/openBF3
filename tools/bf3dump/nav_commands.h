@@ -5,7 +5,7 @@
 //
 //   nav bake <LEVEL> <MODE> [--threads=N] [--layers=movement|all] [--radius=ceil|nearest] [--cs=M] [--no-links] [--tiles]
 //       G4: the uncached bake as sim.nav.bake times it (run_nav_bake_bench); --tiles adds one row per tile; --cs a
-//       cell size that divides 64 m (the §5.7 experiments; default 0.25). The radius default is nearest (§5.7).
+//       cell size that divides 64 m (the §5.7 experiments; default 0.2, radius ceil: 2 cells = 0.4 m).
 //   nav stats <LEVEL> <MODE> [...]      the same with the per-tile rows (memory per tile).
 //   nav components <LEVEL> <MODE> [--points] [--seams] [--layers=movement|all] [--radius=ceil|nearest] [--cs=M]
 //       [--threads=N] [--cache=<dir>] [--dump=<file>]
