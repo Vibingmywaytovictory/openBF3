@@ -1043,8 +1043,10 @@ Tests: `sim.motor.unit` (no data) and `sim.motor` (install; skipped without one)
   soldier has the same `motor_params_hash` as the unit tests' synthetic soldier; `settle_spawn` 102 / 102 ok (worst
   lift −0.18 m, shift 0.4 m, gap ≤ 4.5 mm, 0.05 s); E1a-E1c along `find_clear_heading` courses from 6 spawn points
   (window means within 0.5 %, apex 0.599998 m, transition ticks exact); E1d at `find_drop_spot`
-  (−526.3, 62.5, −758.5): the same three impacts as above, fall = h within 1e-5 m; install unchanged. About 1 s in
-  `dev`, 31 s under `asan`.
+  (−526.3, 62.5, −758.5): the same three impacts as above, fall = h within 1e-5 m; the game's path, T1's
+  `load_static_world_cached` cold (170 tiles cooked) and warm (170 restored) on a scratch cache, gives the motor the
+  direct build's answers bit for bit (all 102 settles, every course heading, the drop spot, 9 sprint traces);
+  install unchanged. About 2 s in `dev`, 70 s under `asan`.
 
 Known limit (docs §6.1 "As built in T2"): where two floor meshes meet unwelded, Jolt's character padding meets the
 far mesh's edge and lifts a walker 0.5-14 mm for a tick, costing up to 3.5 % of the speed for about half a second.

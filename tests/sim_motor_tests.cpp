@@ -11,6 +11,7 @@
 // find_clear_heading / find_drop_spot pick, settle_spawn on all 102 TDM points, install unchanged.
 #include <doctest/doctest.h>
 
+#include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
@@ -31,6 +32,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -2099,6 +2101,107 @@ TEST_SUITE("sim-motor") {
 			CHECK(landed.damage <= d.max_damage);
 			CHECK(((landed.events & soldier_events::kDied) != 0) == d.dies);
 			CHECK((landed.mode == MoveMode::Dead) == d.dies);
+		}
+	}
+
+	TEST_CASE("sim.motor: Metro through the cache (load_static_world_cached, the game's path): cold and warm shapes give the motor the direct build's answers bit for bit") {
+		Metro *m = metro();
+		if (m == nullptr) {
+			return;
+		}
+		// The game loads the static world through T1's cache (warm: Shape::sRestoreFromBinaryState, no soup). The
+		// cases above run on build_static_world over the soup; this one checks that the motor answers the same on
+		// a cold (cooked) and a warm (restored) world of a scratch cache: every settle, the course headings, the
+		// drop spot and a sprint trace along each course.
+		namespace fs = std::filesystem;
+		wchar_t tmp[MAX_PATH];
+		GetTempPathW(MAX_PATH, tmp);
+		const fs::path root = fs::path(tmp) / (L"o3m-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+		struct RemoveRoot {
+			fs::path root;
+			~RemoveRoot() {
+				std::error_code ec;
+				fs::remove_all(root, ec);
+			}
+		} remove_root{ root };
+		const auto load = [&](bool p_warm) {
+			core::Cache cache;
+			core::CacheOptions o;
+			o.root = root;
+			o.guard = m->reader->write_guard();
+			std::string detail;
+			REQUIRE_MESSAGE(cache.open(o, &detail) == core::CacheStatus::Ok, detail);
+			const auto start = std::chrono::steady_clock::now();
+			core::Result<std::shared_ptr<const StaticWorldShapes>> w = load_static_world_cached(&cache, *m->collision.level, *m->collision.world);
+			REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
+			cache.close();
+			const StaticWorldStats &st = (*w)->stats();
+			std::printf("Metro shapes through the cache (%s): %.2f s, world hit %d, %zu tiles hit, %zu cooked\n", p_warm ? "warm" : "cold", seconds_since(start),
+					st.world_hit ? 1 : 0, st.tiles_hit, st.tiles_cooked);
+			CHECK(st.world_hit == p_warm);
+			CHECK(st.tiles_hit == (p_warm ? (*w)->tile_count() : 0));
+			return *w;
+		};
+		const std::shared_ptr<const StaticWorldShapes> cold = load(false);
+		const std::shared_ptr<const StaticWorldShapes> warm = load(true);
+
+		// The reference answers on the direct build.
+		const SoldierMotor &motor = *m->motor;
+		std::vector<SettleResult> settles;
+		for (const SpawnPoint &p : m->points) {
+			settles.push_back(settle_spawn(motor, *m->world, p, 1, 1000));
+		}
+		std::vector<std::optional<uint16_t>> headings;
+		for (const SettleResult &r : settles) {
+			headings.push_back(r.ok ? find_clear_heading(motor, *m->world, r.state.position, 20.0f) : std::nullopt);
+		}
+		const std::optional<Vec3> drop = find_drop_spot(motor, *m->world);
+		const auto sprint = [](const SoldierMotor &p_motor, SoldierState p_state, uint16_t p_yaw) {
+			return run(p_motor, p_state, 120, [&](Tick t) { return move_command(t, kAxisMax, 0, p_yaw, Pose::Stand, buttons::kSprint); });
+		};
+		std::vector<std::vector<SoldierState>> traces;
+		for (size_t i = 0; i < settles.size(); ++i) {
+			if (headings[i]) {
+				traces.push_back(sprint(motor, settles[i].state, *headings[i]));
+			}
+		}
+		REQUIRE(traces.size() >= 6);
+
+		for (const auto &[name, shapes] : { std::pair{ "cold", cold }, std::pair{ "warm", warm } }) {
+			REQUIRE(shapes->tile_count() == m->shapes->tile_count());
+			std::unique_ptr<CollisionWorld> world = world_of(shapes);
+			SoldierMotor other;
+			const core::Status s = other.init(*world, m->params);
+			REQUIRE_MESSAGE(s.ok(), (s.ok() ? std::string() : s.error().message));
+			size_t settle_diff = 0, heading_diff = 0, trace_diff = 0, ok = 0;
+			for (size_t i = 0; i < m->points.size(); ++i) {
+				const SettleResult r = settle_spawn(other, *world, m->points[i], 1, 1000);
+				ok += r.ok ? 1 : 0;
+				const bool same = r.ok == settles[i].ok && r.state == settles[i].state && std::memcmp(&r.lift, &settles[i].lift, sizeof(float)) == 0 &&
+						std::memcmp(&r.shift, &settles[i].shift, sizeof(float)) == 0 && std::memcmp(&r.gap, &settles[i].gap, sizeof(float)) == 0;
+				settle_diff += same ? 0 : 1;
+				CHECK_MESSAGE(same, name << " point " << i);
+				const std::optional<uint16_t> h = r.ok ? find_clear_heading(other, *world, r.state.position, 20.0f) : std::nullopt;
+				heading_diff += h == headings[i] ? 0 : 1;
+				CHECK_MESSAGE(h == headings[i], name << " point " << i);
+			}
+			size_t t = 0;
+			for (size_t i = 0; i < settles.size(); ++i) {
+				if (!headings[i]) {
+					continue;
+				}
+				const std::vector<SoldierState> trace = sprint(other, settles[i].state, *headings[i]);
+				trace_diff += trace == traces[t] ? 0 : 1;
+				CHECK_MESSAGE(trace == traces[t], name << " course at point " << i);
+				++t;
+			}
+			const std::optional<Vec3> d = find_drop_spot(other, *world);
+			const bool drop_same = d.has_value() == drop.has_value() && (!d || std::memcmp(d->data(), drop->data(), sizeof(Vec3)) == 0);
+			CHECK(drop_same);
+			std::printf("Metro motor on the %s cached world: settle %zu / %zu ok; differences from the direct build: %zu settles, %zu headings, "
+					"%zu of %zu sprint traces; drop spot %s\n",
+					name, ok, m->points.size(), settle_diff, heading_diff, trace_diff, traces.size(), drop_same ? "equal" : "DIFFERS");
+			CHECK(ok == 102);
 		}
 	}
 
