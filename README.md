@@ -1282,7 +1282,8 @@ testing on the machine, so every timing here is noisy and the acceptance rerun o
 | E4 cold load | 15 s | 2.59 s and 2.86 s in two full ctest runs (PASS; `_ready` -> Done 1.98 / 2.05 s) | `ctest --preset dev -R godot.m1_load` |
 | E5 warm load | 5 s | 1.98 s and 2.15 s (PASS; `_ready` -> Done 1.30 / 1.43 s) | same |
 
-`godot.l1_look` runs `--look=m1` and `--look=l1` alternately for 5 rounds (`-DROUNDS=n` in script mode). Each run
+`godot.l1_look` runs `--look=m1` and `--look=l1` alternately for 5 rounds (`-DROUNDS=n` in script mode); a run
+whose viewport is not 2560x1440 (`--fullscreen` takes the monitor's mode) fails. Each run
 holds 4 free views (street at TDM spawn 13, station at spawn 22, park, overview) and times 300 frames per view after
 a 3 s settle. A run's frame time is the mean over its views of the per-view median frame interval, and the medians
 over the rounds are compared. GPU render time (same statistic) is reported, not gated.
@@ -1311,7 +1312,15 @@ Set
 Tests: `render.look.unit` (no data) covers the shader database reader on a synthetic res: fields, every truncation,
 4 × 863 single-byte mutations, and a res whose 20,000 solution uses exceed the work budget. It also covers the
 resolver's tiers, normal pairing, glass, alpha test and undrawn rules on a synthetic lookup, plus `fog_fit`, the
-area weights (box, polygon, fade, NaN and infinite positions), the `look_frame` blend and `look_grade`.
+area weights (box, polygon, fade, NaN and infinite positions), the `look_frame` blend and `look_grade`. Two cases
+hold the resolver's work near-linear on hostile data: 200,000 shaders repeating 100,000 name hashes across two
+databases merge first-wins through a set (the scan of seen hashes was O(n²)), and a graph of 20,000 constants plus
+20,000 sampled names resolves for 2,000 slots within a work bound (0.18 s). Each graph's colour and normal
+candidates, its streamed/resident split and its parameter index are built once per graph and capped at 64
+(`kLookMaxGraphCandidates`; Metro's widest graph has 7, so none are dropped), and each folder's neighbour candidates
+are indexed once by class and file name, so a slot finds the longest shared prefix by binary search. A third case
+checks those neighbour picks. `bf3dump looks` prints the resolver work and the candidate maximum; Metro's resolved
+materials (`--materials`) did not change.
 `render.look` (install) parses Metro's shader database: 2 render paths, 1,280 shaders, 51,602 work units of a
 budget of 116 M. It also opens the resolver with 0 failures, reads the environment (park base, 3 areas, 3 LUTs) and
 checks install.unchanged. Both pass under `--preset asan`, as do `render.scene` and `bf3dump looks`. `render.scene`
