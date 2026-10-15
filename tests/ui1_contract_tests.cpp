@@ -21,7 +21,18 @@ namespace ui = bf3::core::ui;
 
 // ---- compile-time contract ---------------------------------------------------------------------------------
 
-static_assert(ui::kSwfMaxBodyBytes == 64u << 20);
+static_assert(ui::kSwfMaxBodyBytes == 16u << 20);
+static_assert(ui::kSwfMaxDisplayEvents == 1u << 18);
+// Budgets of docs §9.1: the default parse budget at the body cap stays below 2^26 units, and one font conversion
+// cannot finish a 4,096-contour x 16,384-point winding pass (67M units) on its budget.
+static_assert(ui::swf_default_budget_units(ui::kSwfMaxBodyBytes) < (size_t(1) << 26));
+static_assert(size_t(ui::kSwfFontMaxContoursPerGlyph) * ui::kSwfFontMaxPointsPerGlyph > ui::kUiFontConvertBudgetUnits);
+static_assert(ui::kSwfAtlasBudgetUnits == size_t(1) << 24 && ui::kSwfLayoutBudgetUnits == size_t(1) << 22);
+static_assert(ui::kTrueTypeReadBudgetUnits == size_t(1) << 22);
+// G6's counting key drops one trailing '*'.
+static_assert(ui::font_name_count_key("$FONT_TITLE*") == "$FONT_TITLE");
+static_assert(ui::font_name_count_key("$FONT_TITLE") == "$FONT_TITLE");
+static_assert(ui::font_name_count_key("") == "");
 static_assert(ui::swf_default_budget_units(0) == size_t(1) << 20);
 static_assert(ui::swf_default_budget_units(1000) == (size_t(1) << 20) + 2000);
 // 1024 em-square x 20 twips; the TrueType writer divides by exactly 10.

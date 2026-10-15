@@ -30,6 +30,9 @@ namespace bf3::core::ui {
 
 inline constexpr uint32_t kSwfLayoutMaxDepth = 8;
 inline constexpr uint32_t kSwfLayoutMaxNodes = 1u << 16;
+// What every caller passes for one read_layout / read_hud_placements call (docs §9.1); the movies it follows are
+// parsed through SwfLibrary::load, each on its own parse budget.
+inline constexpr size_t kSwfLayoutBudgetUnits = size_t(1) << 22;
 
 enum class SwfLayoutKind : uint8_t {
 	Sprite,

@@ -1267,6 +1267,8 @@ Design stage: the interface headers are in `src/bf3_core/include/bf3/core/ui/` (
 `swf_census.h`, `swf_atlas.h`, `swf_font.h`, `font_ttf.h`, `ui_fonts.h`, `swf_layout.h`) and
 `src/bf3_godot/src/ui_assets.h`, `ui_font_check.h`; `ctest -R ui1.contract` checks that they compile and keep their
 contract. The exit gates, each with its command and threshold, are the design's §1: G1 census of all 434 movies, G2
-the iconsingame map, G3 / G4 / G5 font conversion, Godot load and screenshots in `b\shots\ui1\`, G6 font mapping,
+the iconsingame map, G3 / G4 / G5 font conversion, Godot load and screenshots (to `OPENBF3_UI1_SHOTS`, default
+`C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1\`), G6 font mapping,
 G7 HUD positions, G8 asan, G9 install unchanged; timing gates T1 (census <= 15 s) and T2 (font load cold <= 1.0 s,
-warm <= 0.25 s), each measured and printed by its ctest on a shared, noisy machine.
+warm <= 0.25 s), each measured and printed by its ctest on a shared, noisy machine. Converted fonts exist only in
+memory and in the derived-data cache; no command writes them anywhere else (design revision 2, §20).

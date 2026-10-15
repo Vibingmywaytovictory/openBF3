@@ -18,6 +18,7 @@
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -57,6 +58,8 @@ struct SwfMovieCensus {
 	uint64_t abc_bytes = 0;
 	uint32_t unknown_tags = 0;
 	size_t budget_used = 0;
+	size_t retained_bytes = 0; // SwfMovie::retained_bytes
+	uint32_t labels_past_last_frame = 0; // labels whose frame == their timeline's ShowFrame count (0 in retail; G1)
 	double parse_ms = 0.0;
 };
 
@@ -80,8 +83,17 @@ struct SwfCensusTotals {
 	uint32_t fonts_outlines = 0;
 	uint32_t fonts_no_glyphs = 0;
 	uint32_t fonts_codes_only = 0;
-	uint32_t multi_sha1_names = 0; // names whose holders disagree (0 expected)
+	uint32_t multi_sha1_names = 0; // names whose holders disagree: G1 fails unless 0 (listed by format_census_totals)
+	uint32_t labels_past_last_frame = 0;
 	size_t max_budget_used = 0;
+	size_t max_retained_bytes = 0;
+	uint64_t sum_retained_bytes = 0;
+	// Font names over all movies (gfxfontlib imports, glyphless DefineFont3 names, edit-text font classes) by
+	// FontResolution (index = the enum value), counted as distinct names after dropping one trailing '*'
+	// (font_name_count_key, ui_fonts.h): expected Exact 4, CaseFolded 2, Family 4, Device 5, Unresolved 0 (G6).
+	// family_names is printed on its own line ("G6 family-inferred: ...").
+	std::array<uint32_t, 5> font_names_by_rule{};
+	std::vector<std::string> family_names;
 };
 
 struct SwfCensus {

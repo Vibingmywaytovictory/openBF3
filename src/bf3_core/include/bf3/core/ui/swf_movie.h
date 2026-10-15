@@ -28,8 +28,10 @@
 //
 // Hostile input (docs §9): every offset and length is checked; the body is at most kSwfMaxBodyBytes and the CFX
 // stream must inflate to exactly the declared length; every tag, record, string byte and display event charges
-// the WorkBudget before it is used (default budget: swf_default_budget_units(payload size)), so parse time and
-// memory are linear in the payload. Errors are Result values ("swf: <what> at <offset>").
+// the WorkBudget before it is used (default budget: swf_default_budget_units(declared length); a display event
+// costs 8 units, about its size / 16, so the budget bounds memory too), at most kSwfMaxDisplayEvents events per
+// movie, and a DefineSubImage with x2 < x1 or y2 < y1 is refused. Parse time and memory are linear in the payload.
+// Errors are Result values ("swf: <what> at <offset>").
 
 #include "bf3/core/level/budget.h"
 #include "bf3/core/result.h"
@@ -47,16 +49,21 @@ namespace bf3::core::ui {
 
 using level::WorkBudget;
 
-// Largest decompressed body accepted (retail maximum: 4,997,806 bytes, the zh EULA font library).
-inline constexpr uint32_t kSwfMaxBodyBytes = 64u << 20;
+// Largest decompressed body accepted (retail maximum: 4,997,806 bytes, the zh EULA font library; 3.4x margin).
+inline constexpr uint32_t kSwfMaxBodyBytes = 16u << 20;
 // Structural caps (retail maxima in brackets): frames per timeline (526), tags per movie (8,300).
 inline constexpr uint32_t kSwfMaxFrames = 1u << 16;
 inline constexpr uint32_t kSwfMaxTags = 1u << 22;
+// PlaceObject/RemoveObject events per movie, root and sprites (retail maximum: 4,075 PlaceObject events, compass):
+// bounds the SwfDisplayEvent memory of a hostile body of tiny tags to about 34 MB.
+inline constexpr uint32_t kSwfMaxDisplayEvents = 1u << 18;
+// Budget units one display event costs (about sizeof(SwfDisplayEvent) / 16).
+inline constexpr size_t kSwfDisplayEventUnits = 8;
 
 // Default work budget of one parse: 2 units per byte of the header's declared (decompressed) length, which is
 // checked against kSwfMaxBodyBytes before anything is inflated, plus a constant. A tag, a shape record (>= 6
-// bits), a display event or 16 string bytes cost one unit each, so retail movies use a fraction of it (the
-// census prints the peak, docs §9).
+// bits) or 16 string bytes cost one unit each and a display event kSwfDisplayEventUnits, so retail movies use about
+// half of it (the census prints the peak, docs §9.1).
 constexpr size_t swf_default_budget_units(size_t p_declared_length) {
 	return (size_t(1) << 20) + p_declared_length * 2;
 }
@@ -157,12 +164,14 @@ struct SwfColorTransform {
 };
 
 struct SwfFrameLabel {
-	uint32_t frame = 0; // 0-based frame the label names (the frame its ShowFrame ends)
+	uint32_t frame = 0; // 0-based frame the label names (the frame its ShowFrame ends); may equal the timeline's
+	                    // frames when no ShowFrame follows (0 retail labels; display_lists_at accepts it)
 	std::string name;
 };
 
 enum class SwfDisplayOp : uint8_t {
-	Place, // a new character at an empty depth (PlaceObject, PlaceObject2/3 without the move flag)
+	Place, // a character at a depth (PlaceObject, PlaceObject2/3 without the move flag); normally an empty depth,
+	       // and a Place on an occupied depth replaces what is there, as Flash players do (docs §5.1)
 	Modify, // move flag without a character: matrix / colour / ratio / name of the depth's character change
 	Replace, // move flag with a character: the depth's character is swapped, unset fields kept
 	Remove, // RemoveObject / RemoveObject2
@@ -213,8 +222,9 @@ struct SwfDisplayEntry {
 	std::string_view name; // points into the timeline's event (keep the SwfMovie alive)
 };
 
-// The display lists of p_timeline after the given frames (0-based; each frame index < timeline.frames), in ONE
-// pass over the events: O(events + sum of the returned list sizes), every event and every copied entry charged.
+// The display lists of p_timeline after the given frames (0-based; each frame index <= timeline.frames, where
+// timeline.frames means the state after every event), in ONE pass over the events: O(events + sum of the returned
+// list sizes), every event and every copied entry charged. A frame > timeline.frames is an error.
 // r_lists[i] belongs to p_frames[i] (any order, duplicates allowed); entries sorted by depth.
 Status display_lists_at(const SwfTimeline &p_timeline, std::span<const uint32_t> p_frames, WorkBudget &r_budget,
 		std::vector<std::vector<SwfDisplayEntry>> &r_lists);
@@ -265,7 +275,9 @@ struct SwfExternalImage {
 	uint32_t extra_bytes = 0;
 };
 
-// A rectangle of an external image, usable as a bitmap character.
+// A rectangle of an external image, usable as a bitmap character. The parser guarantees x1 <= x2 and y1 <= y2 (a
+// reversed rectangle is a parse error), so width() / height() never wrap; inside the image is checked by the census
+// and the atlas map (rects_outside_atlas).
 struct SwfSubImage {
 	uint16_t id = 0; // character id
 	uint16_t image_id = 0; // SwfExternalImage::image_id
@@ -413,9 +425,11 @@ struct SwfMovie {
 	uint32_t unknown_tags = 0; // codes swf_tag_name() does not name
 	uint32_t trailing_bytes = 0; // after the root End tag
 	size_t budget_used = 0; // units this parse charged
+	size_t retained_bytes = 0; // estimate of what this movie holds: body + vector capacities x element sizes +
+	                           // string capacities (the census prints the maximum and the sum)
 
 	// Validates and decompresses p_payload and reads every tag (see the header comment). p_budget null: a local
-	// budget of swf_default_budget_units(declared file length).
+	// budget of swf_default_budget_units(declared file length) (the size SwfLibrary::load and the census use).
 	static Result<SwfMovie> parse(std::span<const uint8_t> p_payload, WorkBudget *p_budget = nullptr);
 
 	const SwfSprite *find_sprite(uint16_t p_id) const;

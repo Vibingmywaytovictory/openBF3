@@ -20,7 +20,8 @@
 // Caching: one entry per converted font, kind "ui-font"; sources = the font library res's manifest SHA-1; converter
 // kUiFontConverterVersion; engine id; format = kTrueTypeWriterVersion; params "font=<long name>;upem=2048". The
 // payload is the TrueType file itself (FontFile.set_data takes it unchanged); accept = read_truetype() + the
-// family name. Converted fonts never leave the cache root (plan §2.1: a converted EA font is a private copy).
+// family name. Converted fonts never leave the cache root (plan §2.1: a converted EA font is a private copy): no
+// function here or in bf3dump writes the TrueType bytes to any other path.
 
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/result.h"
@@ -43,6 +44,10 @@ namespace bf3::core::ui {
 
 inline constexpr uint32_t kUiFontConverterVersion = 1;
 inline constexpr std::string_view kUiFontCacheKind = "ui-font";
+// One budget for the whole conversion of one font: load_font_outlines + normalise_winding + write_truetype +
+// read_truetype (convert_library_font creates it; docs §9.1). A hostile 4,096-contour, 16,384-point glyph needs 67M
+// winding units and ends on it in well under a second.
+inline constexpr size_t kUiFontConvertBudgetUnits = size_t(1) << 25;
 
 struct FontMapping {
 	std::string font_long_name; // "Purista EA Medium"
@@ -81,6 +86,12 @@ struct ResolvedFont {
 
 ResolvedFont resolve_font_name(const FontMappingCollection &p_collection, std::string_view p_used_name);
 
+// The key gate G6 counts distinct font names by: the name with one trailing '*' dropped ("$FONT_TITLE*" and
+// "$FONT_TITLE" are one name).
+constexpr std::string_view font_name_count_key(std::string_view p_name) {
+	return (!p_name.empty() && p_name.back() == '*') ? p_name.substr(0, p_name.size() - 1) : p_name;
+}
+
 struct ConvertedFont {
 	std::string font_long_name;
 	std::vector<std::string> scaleform_names;
@@ -117,6 +128,6 @@ private:
 
 // One font of a font library movie converted through p_cache (may be null); the unit the library and bf3dump use.
 Result<ConvertedFont> convert_library_font(const SwfLibrary &p_movies, std::string_view p_font_library, std::string_view p_font_long_name,
-		Cache *p_cache, WorkBudget &r_budget);
+		Cache *p_cache, WorkBudget &r_budget); // r_budget: kUiFontConvertBudgetUnits per font
 
 } // namespace bf3::core::ui

@@ -1,13 +1,17 @@
 #pragma once
 // The atlas cutter (docs/design/ui-swf-fonts.md §6): a movie's GFx external images (BF3 DxTextures
-// ui/assets/<swf>/<swf>_iN) cut into named regions by its DefineSubImage rectangles, and every frame label of
+// ui/assets/<swf>/<swf>_i<N>, <N> a string such as 1, 12 or e) cut into named regions by its DefineSubImage rectangles, and every frame label of
 // every sprite resolved to the sub-images its frame shows. Godot-free; the Godot side turns a region into an
 // AtlasTexture over the uploaded atlas (bf3_godot ui_assets.h).
 //
 // Resolution of a labelled frame: the sprite's display list at that frame (display_lists_at, one pass per
 // sprite); each entry's character is a shape (its bitmap fills that name a sub-image become pieces), a sprite
 // (its frame 0, recursively, at most kSwfAtlasMaxNesting levels, matrices composed) or something else (an edit
-// text, an import: no piece). An exported symbol resolves the same way from its frame 0.
+// text, an import: no piece). An exported symbol resolves the same way from its frame 0. Each sprite's frame-0
+// piece list is built once per map and memoised in the sprite's own space; a referrer copies it with its matrix
+// composed (charged per copied piece), so a deep DAG of sprites costs O(sprites + pieces). A sprite reached while
+// its own list is being built (a cycle, e.g. a sprite placing itself) is an error. A label whose frame equals the
+// timeline's ShowFrame count resolves on the state after every event (none in retail).
 //
 // iconsingame (measured 2026-10-15): one external image (iconsingame_i1.tga, 4096 x 128, DXT5), 162 sub-images,
 // 427 labels on 6 sprites. 135 labelled frames show art (110 one sub-image, 25 two: an icon over a background),
@@ -18,8 +22,10 @@
 // gotoAndStop), so `frames` lists every (sprite, frame) that draws one. Every rectangle lies inside the atlas
 // (820 of 820 over the 135 atlas movies).
 //
-// Bounds: the recursion is depth-capped and every visited display entry and every piece charges the budget, so
-// a sprite that places itself or a wide DAG of sprites ends on the budget, never on time or memory.
+// Bounds (docs §9, §9.1): the recursion is depth-capped and memoised, cycles fail, every visited display entry and
+// every piece (copies included) charges kSwfAtlasPieceUnits, and pieces are capped per region and per map, so no
+// input ends on time or memory. Callers pass a budget of kSwfAtlasBudgetUnits (Bf3UiAssets, the census, tests,
+// bf3dump swf labels).
 
 #include "bf3/core/result.h"
 #include "bf3/core/ui/swf_movie.h"
@@ -33,6 +39,9 @@ namespace bf3::core::ui {
 
 inline constexpr uint32_t kSwfAtlasMaxNesting = 16;
 inline constexpr uint32_t kSwfAtlasMaxPiecesPerRegion = 4096;
+inline constexpr uint32_t kSwfAtlasMaxPieces = 1u << 20; // per map, all regions (about 64 MB of SwfAtlasPiece)
+inline constexpr size_t kSwfAtlasPieceUnits = 4; // per visited display entry and per piece (about 64 bytes / 16)
+inline constexpr size_t kSwfAtlasBudgetUnits = size_t(1) << 24; // what every caller passes for one map
 
 struct SwfAtlasImage {
 	uint16_t image_id = 0;

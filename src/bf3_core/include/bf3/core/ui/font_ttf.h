@@ -19,6 +19,9 @@
 // Glyph 0 is .notdef (a hollow box, 0.6 em x 0.7 em, so a missing character shows); source glyph i is glyph i + 1.
 // Scale: unitsPerEm 2048 = kSwfFontUnitsPerEm / 10, every coordinate rounded to the nearest unit (at most
 // 1/4096 em off); y negated (SWF y down -> TrueType y up).
+// Deterministic: head.created and head.modified are 0, fontRevision 1.0, and nothing depends on time, paths or the
+// machine, so the same outlines always give the same bytes (and the same SHA-256 in bf3dump swf fonts).
+// The bytes go only to FontFile.set_data and the derived-data cache (plan §2.1); no API here writes a file.
 
 #include "bf3/core/result.h"
 #include "bf3/core/ui/swf_font.h"
@@ -34,6 +37,8 @@ namespace bf3::core::ui {
 inline constexpr uint16_t kTrueTypeUnitsPerEm = 2048;
 // Bump whenever the bytes the writer produces for the same input change (it is part of the font cache key).
 inline constexpr uint32_t kTrueTypeWriterVersion = 1;
+// Budget of one read_truetype call made on its own (the cache's accept step, tests); docs §9.1.
+inline constexpr size_t kTrueTypeReadBudgetUnits = size_t(1) << 22;
 
 struct TrueTypeOptions {
 	uint16_t units_per_em = kTrueTypeUnitsPerEm;

@@ -1,12 +1,13 @@
 # UI groundwork 1 design: SWF symbol tables, atlases and fonts
 
-Status: design for implementation, revision 1, 2026-10-15. Track ui1, branch `ui/swf-fonts`. Scope: the first UI
-groundwork wave of route A+ (plan [research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md) §3.8, D16; §2.2
-"UI readers: SWF symbol table, `DefineFont3`"; §7.8): BF3's own SwfMovie data read at run time as symbol tables, its
-external atlases cut into named regions, its `DefineFont3` fonts converted to TrueType that Godot loads, the font
-mapping, and the HUD positions from the movies' timelines. No SWF renderer and no AS2 interpreter. The HUD screens
-themselves (ammo, crosshair, hit indicator, kill feed, scoreboard, spawn screen) come in later M2a/M2b waves on top
-of this; the sibling track ui2 (minimap, `hud3dicons`, HUD data model) runs beside it.
+Status: design for implementation, revision 2, 2026-10-15 (after review; §20 lists what changed). Track ui1, branch
+`ui/swf-fonts`. Scope: the first UI groundwork wave of route A+ (plan
+[research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md) §3.8, D16; §2.2 "UI readers: SWF symbol table,
+`DefineFont3`"; §7.8): BF3's own SwfMovie data read at run time as symbol tables, its external atlases cut into named
+regions, its `DefineFont3` fonts converted to TrueType that Godot loads, the font mapping, and the HUD positions from
+the movies' timelines. No SWF renderer and no AS2 interpreter. The HUD screens themselves (ammo, crosshair, hit
+indicator, kill feed, scoreboard, spawn screen) come in later M2a/M2b waves on top of this; the sibling track ui2
+(minimap, `hud3dicons`, HUD data model) runs beside it.
 
 The interface headers named in §12 are in the tree and compile (ctest `ui1.contract`); their bodies are the
 implementation's work.
@@ -31,17 +32,17 @@ gates have wide margins and every run prints its measured value.
 
 | # | gate (task text) | how it is measured | pass threshold |
 |---|---|---|---|
-| G1 | all 434 SwfMovie res parse with 0 errors; the census is complete | `ctest -R "^core\.ui\.swf$"` (install): `SwfLibrary::open` + `run_swf_census` over every SwfMovie of the install; also `bf3dump swf census` (exit 1 on any error) | 434 movies, 434 parsed, 0 errors; `distinct_sha1s == 1` for every name (else the names are listed and the gate reads "first holder"); the totals equal the §5.3 table exactly (they are the probe's numbers; a difference is either a reader bug or a probe bug and must be explained in README before the gate is changed) |
+| G1 | all 434 SwfMovie res parse with 0 errors; the census is complete | `ctest -R "^core\.ui\.swf$"` (install): `SwfLibrary::open` + `run_swf_census` over every SwfMovie of the install; also `bf3dump swf census` (exit 1 on any error) | 434 movies, 434 parsed, 0 errors; `distinct_sha1s == 1` for every name (`multi_sha1_names` 0); 0 labels after their timeline's last ShowFrame; the tag totals equal the §4.2 table exactly (they are the probe's numbers; a difference is either a reader bug or a probe bug and must be explained in README before the gate is changed). Identical bytes per name are verified so far only across the 11 superbundles that cover all names (§4.1); the census is the first check over all 10,303 entries. If it finds a name with two SHA-1s, G1 **fails** and lists the names: there is no automatic "first holder" fallback, and only the user (through the orchestrator) can accept one, recorded in README with the names |
 | G2 | iconsingame 162 rectangles and 427 labels, the complete label → rectangle map | `core.ui.swf`: `build_atlas_map` of `ui/assets/iconsingame`; `bf3dump swf labels ui/assets/iconsingame` prints the map | 1 external image `iconsingame_i1.tga` 4096 × 128 whose DxTexture exists with that size (DXT5); 162 sub-images, 0 outside the atlas; 427 labels on 6 sprites, of which 135 draw art (110 one piece, 25 two) and 292 are empty frames; 95 sub-images reached from labels, 96 with the exported symbols, 162 from frames; spot checks of §6.3 |
 | G3 | Purista (443) and Venice (33) convert to TrueType | `ctest -R "^core\.ui\.font$"` (install): `UiFontLibrary::load` for `localization/us_loc` on a fresh scratch cache root, then again (warm) | 4 fonts; TrueType `numGlyphs` 444 / 444 / 34 / 34 (source + `.notdef`); cmap 442 / 442 / 32 / 32 codes; U+00C9 mapped in both Purista; `contours_reversed` 0; `read_truetype` round trip: every point within 0.5 font unit of the scaled source, every advance exact after scaling, kerning pairs 335 / 324 / 0 / 0; cold → 4 `converted`, warm → 4 `hit`; a damaged entry → `dropped_corrupt`, reconverted, then `hit` |
-| G4 | the fonts load in Godot (`FontFile.set_data` succeeds, glyph count matches) | `ctest -R "^godot\.ui_fonts$"` (install + Godot, headless): `res://scenes/ui_fonts.tscn -- --ui-check` | rows `fonts.set_data`, `fonts.glyphs`, `fonts.contours`, `fonts.metrics`, `fonts.kerning`, `fonts.metro` pass for all 4 fonts (§11.1); last line `UI1 CHECK: PASS (n/n)`, exit 0 |
-| G5 | sample strings rendered windowed, screenshots inspected (no inverted contours, right baseline and advances) | `ctest -R "^godot\.ui_fonts_shots$"` (install + Godot, **windowed**; 77 without a window): the same check plus `--shot-dir=b/shots/ui1`, three PNGs | the check passes and the three PNGs exist; the implementer opens them and records in README what they show (holes of O/A/0/8 open, glyphs on one baseline, no overlap or gaps at 16 / 32 / 64 px, "MÉTRO" with its accent). The visual judgement is manual; the automated parts of the same claim are G3's round trip and G4's `fonts.contours` / `fonts.metrics` rows |
-| G6 | the font mapping resolves every `$MENU_*` / `$HUD_*` name | `core.ui.swf`: every font name the 434 movies use (gfxfontlib imports, glyphless `DefineFont3` names, edit-text font classes) through `resolve_font_name` on the en collection | 0 `Unresolved`; the per-rule counts of §7.4 (Exact 4 names, CaseFolded 2, Family 4, Device 5) printed and equal |
+| G4 | the fonts load in Godot (`FontFile.set_data` succeeds, glyph count matches) | `ctest -R "^godot\.ui_fonts$"` (install + Godot, headless): `res://scenes/ui_fonts.tscn -- --ui-check` | rows `fonts.set_data`, `fonts.glyphs`, `fonts.contours`, `fonts.metrics` (every glyph's advance within 0.05 px and each sample string within 0.5 px of the source layout at 64 px, measured on the §10 FontFile settings), `fonts.kerning` (AV narrower by 3.84 ± 0.25 px), `fonts.metro` pass for all 4 fonts (§11.1); last line `UI1 CHECK: PASS (n/n)`, exit 0 |
+| G5 | sample strings rendered windowed, screenshots inspected (no inverted contours, right baseline and advances) | `ctest -R "^godot\.ui_fonts_shots$"` (install + Godot, **windowed**; 77 without a window): the same check plus `--shot-dir=<dir>`, three PNGs; `<dir>` = `$ENV{OPENBF3_UI1_SHOTS}`, default `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1\` (absolute, gitignored, outside any worktree; ui2's `OPENBF3_UI2_SHOTS` convention) | the check passes and the three PNGs exist; the implementer opens them and records in README what they show (holes of O/A/0/8 open, glyphs on one baseline, no overlap or gaps at 16 / 32 / 64 px, "MÉTRO" with its accent). The visual judgement is manual; the automated parts of the same claim are G3's round trip and G4's `fonts.contours` / `fonts.metrics` rows |
+| G6 | the font mapping resolves every `$MENU_*` / `$HUD_*` name | `core.ui.swf`: every font name the 434 movies use (gfxfontlib imports, glyphless `DefineFont3` names, edit-text font classes) through `resolve_font_name` on the en collection | 0 `Unresolved`; the per-rule counts of §7.4 printed and equal: Exact 4, CaseFolded 2, Family 4, Device 5, counted as **distinct names after dropping one trailing `*`** (`$FONT_TITLE` and `$FONT_TITLE*` are one name, `$Menu_light*` counts as `$Menu_light`); the Family-resolved names are printed on a line of their own (`G6 family-inferred: $FONT_TITLE $HUD $HUD_light $Menu_light`), so "every name resolves" is not read as "every name has a mapping entry" |
 | G7 | the HUD positions table for the in-game HUD movies | `core.ui.swf`: `read_hud_placements` for the 14 screens of §8; `bf3dump swf hud` prints the table | 86 placements; every screen's stage 1280 × 720; the spot values of §8.2 within 0.05 px |
-| G8 | SWF and font parsers under asan with truncation / fuzz tests | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` | `core.ui.swf.unit`, `core.ui.font.unit` (synthetic: every truncation, 2,000 mutants each, the hostile cases of §9) and the install fuzz `core.ui.swf.fuzz` pass with no ASan report; in `dev` each hostile case ends in under 1 s |
+| G8 | SWF and font parsers under asan with truncation / fuzz tests | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` | `core.ui.swf.unit`, `core.ui.font.unit` (synthetic: every truncation, 2,000 mutants each, the hostile cases of §9) and the install fuzz `core.ui.swf.fuzz` pass with no ASan report; in `dev` each hostile case ends in under 1 s (bounded by the budgets of §9.1). The asan run also includes the install tests `core.ui.swf` / `core.ui.font`; under ASan (`__SANITIZE_ADDRESS__`) their T1 / T2 rows print `reported (asan)` and are not checked, so an ASan slowdown cannot fail G8 on timing |
 | G9 | install unchanged | an `install.unchanged` row in `core.ui.swf`, `core.ui.font` and `godot.ui_fonts` (`take_install_snapshot` before / after, `diff_snapshots`) | sizes and mtimes of the 256 index files equal |
-| T1 | census time (reported, gated loosely) | `core.ui.swf` prints the library open time and the census wall time | open + census ≤ 15 s on 16 threads (the probe takes 34 s in Python; the C++ estimate is under 3 s) |
-| T2 | font load time | `core.ui.font` prints cold and warm `UiFontLibrary::load` times | cold ≤ 1.0 s, warm ≤ 0.25 s (estimate: tens of ms) |
+| T1 | census time (reported, gated loosely) | `core.ui.swf` prints the library open time and the census wall time | open + census ≤ 15 s on 16 threads (the probe takes 34 s in Python; the C++ estimate is under 3 s); checked in `dev`, reported only under asan; the machine is shared and noisy |
+| T2 | font load time | `core.ui.font` prints cold and warm `UiFontLibrary::load` times | cold ≤ 1.0 s, warm ≤ 0.25 s (estimate: tens of ms); checked in `dev`, reported only under asan; the machine is shared and noisy |
 
 All existing tests must keep passing: the acceptance run is the full `ctest --preset dev` with `OPENBF3_GODOT` set.
 
@@ -53,7 +54,7 @@ All existing tests must keep passing: the acceptance run is the full `ctest --pr
 |---|---|---|
 | `bf3_core` (`include/bf3/core/ui/`) | `swf_movie.h` (payload and tag reader, display lists), `swf_library.h` (every SwfMovie of the install, first holder, atlas textures), `swf_census.h`, `swf_atlas.h` (the atlas cutter), `swf_font.h` (DefineFont2/3 outlines, winding), `font_ttf.h` (TrueType writer and reader), `ui_fonts.h` (UIFontMappingCollection, name resolution, the cached font library), `swf_layout.h` (layout trees, HUD placement table) | no |
 | `bf3_godot` | `ui_assets.{h,cpp}` (`Bf3UiAssets`: FontFiles, atlas textures and `AtlasTexture` regions, the seams of §12.3), `ui_font_check.{h,cpp}` (`Bf3UiFontCheck`), scene `res://scenes/ui_fonts.tscn` | **yes** |
-| `bf3dump` | `swf_commands.{h,cpp}`: `swf census`, `swf movie`, `swf labels`, `swf layout`, `swf hud`, `swf fonts`, `swf ttf` (§12.4) | no |
+| `bf3dump` | `swf_commands.{h,cpp}`: `swf census`, `swf movie`, `swf labels`, `swf layout`, `swf hud`, `swf fonts` (§12.4; no command writes a converted font anywhere, §13) | no |
 
 Plan §2.2 puts the UI readers (SWF symbol table, `DefineFont3`) in `bf3_core` and the font conversion glue and
 Controls in `bf3_godot`. The TrueType writer is Godot-free and lives in `bf3_core` too, so the conversion and the
@@ -75,11 +76,17 @@ lands its own helper, the merge keeps one (a one-function change).
 | thread | ui1 work | rules |
 |---|---|---|
 | Godot main | `Bf3UiAssets` builds `FontFile`s (`set_data`), `ImageTexture`s (`render_bridge::make_texture`), `AtlasTexture`s; answers the getters; `Bf3UiFontCheck` draws and checks | Godot API only here |
-| `Bf3UiAssets` loader (`std::thread`, one) | `SwfLibrary::open` (manifest reads on `parallel_for` lanes), `acquire_cache`, `UiFontLibrary::load` (parse the font library, convert or hit the cache), `build_atlas_map` and `prepare_texture` of the requested atlas movies, `read_hud_placements` | no Godot API; joined in `_exit_tree` / `NOTIFICATION_PREDELETE`; uses the `Install` that `Bf3Localisation` opened (read-only, shared) |
+| `Bf3UiAssets` loader (`std::thread`, one) | `SwfLibrary::open` (manifest reads on `parallel_for` lanes), `acquire_cache`, `UiFontLibrary::load` (parse the font library, convert or hit the cache), `build_atlas_map` and `prepare_texture` of the requested atlas movies, `read_hud_placements` | no Godot API; joined in `_exit_tree` / `NOTIFICATION_PREDELETE`; uses the `Install` that `Bf3Localisation` opened (read-only, shared) and its `reader().write_guard()` as the cache's `PathGuard` |
 | `parallel_for` lanes | `SwfLibrary::open` (one manifest per lane), `run_swf_census` (one movie per lane) | read-only on the mount; each lane its own `WorkBudget` per movie |
 
 The work is small (the font library is 115,603 bytes; four 2048-wide atlases are ~0.6 MB of DXT5), so one loader
 thread is enough; the census runs in tools and tests only.
+
+**Cache sharing.** `acquire_cache(default_cache_root(), guard)` (`godot_cache.h`) is called on the loader thread
+with the guard above. In one process `Bf3UiAssets` and `LevelSession` share one `Cache` on `user://bf3cache`.
+Another process (a parallel worktree's Godot test uses the same `%APPDATA%` root) holding the root gives `Busy`:
+then the fonts are converted without a cache (logged once). G4 / G5 therefore never depend on a cache hit; only G3
+(`core.ui.font`, its own scratch root) checks hits.
 
 ---
 
@@ -102,8 +109,11 @@ probe's `rawres` (payload bytes into scratch) and `swfprobe.py`.
   layout order, then all others in layout order. First holders: FrontEnd 227, MP_001 112, Win32/UI 58, MP_007 13,
   COOP_002 9, MP_012 5, XP5_001 5, and SP_Bank, SP_Finale, SP_Jet, Web_Loading, XP3_Alborz 1 each. No single
   superbundle holds all; 11 superbundles cover all 434.
-* **Same bytes per name**: in those 11, every name's payload is byte-identical across holders. The census counts
-  the distinct manifest SHA-1s per name over all 10,303 entries (`distinct_sha1s`, G1).
+* **Same bytes per name**: in those 11, every name's payload is byte-identical across holders. Over all 10,303
+  entries this is **not yet verified** (`bf3dump list` prints no SHA-1s); the census counts the distinct manifest
+  SHA-1s per name over every entry (`distinct_sha1s`) and G1 fails on any name with two.
+* **Frames**: 718 sprites declare FrameCount 1 and contain no tag at all (0 ShowFrames: AS2 class placeholders);
+  0 of the 2,441 labels lie after their timeline's last ShowFrame [verified, probe].
 * **Format**: 371 `CFX` v8, 62 `GFX` v8, 1 `GFX` v7. The declared length equals header + body for all 434 (CFX
   inflates to exactly it). Bodies 1,342 B … 4,997,806 B (the zh EULA font library), 24.3 MB in all; the largest
   inflate ratio is 4.1. Stage 1280 × 720 on every HUD and menu screen checked.
@@ -145,10 +155,14 @@ PlaceObject2).
 * 135 movies have exactly one `GFX_DefineExternalImage2` (none has two; `GFX_DefineExternalImage` v1: 0). Layout as
   measured (§12.1 header comment): `u16 image id` (0 on 133, 1 on 2), `u16` 9 on all (meaning unknown; the research
   probe read these four bytes as one u32 id 0x90000, which does not match `DefineSubImage.imageId`), `u16 bitmap
-  format` 13, `u16 width`, `u16 height`, empty export name, file name `<swf>_iN.tga`, one trailing 0 byte.
-* Each `<swf>_iN.tga` resolves to the DxTexture `ui/assets/<swf>/<swf>_iN` in the same bundle as the movie
+  format` 13, `u16 width`, `u16 height`, empty export name, file name `<swf>_iN.tga`, one trailing 0 byte. `N` is not
+  always a decimal digit: of the 135, 118 end in `_i1`…`_i9`, 2 in `_i12` and 1 in `_i23`, and 14 in a letter
+  `_ia`…`_ie` (e.g. `killcam_ie`, `stepper_ib`, `gamemodeinfo_ia`) [verified, `bf3dump list`]. The texture name is
+  derived from the file-name string (`swf_atlas_texture_name`), never by parsing `N` as a number.
+* Each `<swf>_i<N>.tga` resolves to the DxTexture `ui/assets/<swf>/<swf>_iN` in the same bundle as the movie
   (135 / 135), with the declared width and height (135 / 135). Formats: 132 DXT5, 3 ARGB8888.
-* 820 `GFX_DefineSubImage` (12 bytes each): `u16 id, u16 imageId, u16 x1, y1, x2, y2`; all 820 inside their atlas;
+* 820 `GFX_DefineSubImage` (12 bytes each): `u16 id, u16 imageId, u16 x1, y1, x2, y2`; all 820 inside their atlas
+  and all with x1 ≤ x2, y1 ≤ y2 (the parser refuses a reversed rectangle, §9);
   imageId matches the movie's external image (811 × 0, 9 × 1).
 * x2 / y2 are exclusive: of the shapes filled by one sub-image, 737 have bounds of exactly (x2 − x1) × (y2 − y1)
   pixels; the fill matrix scale is 20 (twips per pixel) on 814 fills. Fill types 0x41 (1,865) and 0x43 (124);
@@ -213,9 +227,11 @@ The in-game MP HUD movies (in `<level>_uiplaying`, e.g. MP_Subway's 174 SWFs): `
 `spawnscreenpc`, `spectatorscreen`, `weaponcommonscreen`, the widgets they import (`ammo`, `health`, `minimap`,
 `compass`, `hitindicator`, `hudmessage`, `ticketcounter`, `squadlist`, …) and the crosshair movies
 (`crosshairdefault`, …). Every root timeline places one instance (`instance1`) of the exported screen sprite at
-identity; that sprite's frame 0 places the widgets as imported symbols (§8). All 1,268 imported symbols resolve to
-`ui/assets/<lowercase file stem>` and an export of it, except one (`deckofcards` imports `IconsShared_Check`, which
-`iconsshared` does not export: a retail defect the census lists).
+identity; that sprite's frame 0 places the widgets as imported symbols (§8). All 1,268 imported symbols (1,268
+ImportAssets(2) tags of one symbol each that name a movie; the 216 tags that import from `gfxfontlib` are font
+imports, counted separately in §4.4 and not part of the 1,268) resolve to `ui/assets/<lowercase file stem>` and an
+export of it, except one (`deckofcards` imports `IconsShared_Check`, which `iconsshared` does not export: a retail
+defect the census lists).
 
 ### 4.7 Godot 4.8 dev7 API (from `engine-api/4.8.dev7.c971f93e7/extension_api.json`)
 
@@ -233,25 +249,30 @@ PackedInt32Array`, `font_get_kerning`; `AtlasTexture.set_atlas / set_region / se
 
 * **Header and body.** Signature `CFX` (inflate the rest with libdeflate into exactly `file_length − 8` bytes;
   anything else is an error) or `GFX` (the rest is the body; its length must equal `file_length − 8`). `FWS`/`CWS`
-  and any other signature are refused (none in retail). `file_length − 8 ≤ kSwfMaxBodyBytes` (64 MiB) is checked
-  before anything is allocated.
+  and any other signature are refused (none in retail). `file_length − 8 ≤ kSwfMaxBodyBytes` (16 MiB, 3.4 × the
+  retail maximum of 4,997,806 bytes) is checked before anything is allocated.
 * **Tags.** One linear walk: `u16 code << 6 | len`, long form; every tag must end inside its timeline; `End` closes
   a timeline (bytes after the root `End` are counted, not parsed). `DefineSprite` opens a nested timeline of its
   control tags; a `DefineSprite` inside a sprite is an error (the specification forbids it; retail has none).
 * **Kept per tag**: the fields in `swf_movie.h` (`SwfDisplayEvent` for PlaceObject/2/3 and RemoveObject/2 with the
-  matrix, colour transform, ratio, clip depth, instance name and PlaceObject3's class name; labels with their
-  frame; exports, imports (both versions), ExporterInfo, external images, sub-images, shapes with their bitmap fills
-  from the initial style arrays and every `StyleChangeRecord`'s new styles, edit texts, static text ids, scaling
-  grids, fonts (header facts plus the tag's byte range), align zones, font names, CSMTextSettings count, DoAction /
-  DoInitAction byte counts, DoABC byte counts). PlaceObject3's filter list, blend mode and bitmap cache and the clip
-  actions of PlaceObject2/3 are skipped inside the tag's length (flags kept). Unknown codes are counted.
+  matrix, colour transform, ratio, clip depth, instance name and PlaceObject3's class name; labels with their frame;
+  exports, imports (both versions), ExporterInfo, external images, sub-images, shapes with their bitmap fills from the
+  initial style arrays and every `StyleChangeRecord`'s new styles, edit texts, static text ids, scaling grids, fonts
+  (header facts plus the tag's byte range), align zones, font names, CSMTextSettings count, DoAction / DoInitAction
+  byte counts, DoABC byte counts). PlaceObject3's filter list, blend mode and bitmap cache and the clip actions of
+  PlaceObject2/3 are skipped inside the tag's length (flags kept). Unknown codes are counted. At most
+  `kSwfMaxDisplayEvents` (2^18; retail maximum 4,075 PlaceObject events in one movie, `compass`) display events per
+  movie, so a hostile 16 MiB body of tiny PlaceObject2 tags cannot allocate ~130 bytes of `SwfDisplayEvent` for every
+  5 body bytes: the events are bounded at about 34 MB per movie.
 * **Shapes** are walked record by record only to collect bitmap fills and count edges: no geometry is kept (no
   renderer, plan D16).
 * **Display lists** (`display_lists_at`): the events replayed once per timeline, snapshots taken at the requested
-  frames in ascending order. Place puts a character at an empty depth (a Place on an occupied depth replaces it,
-  as Flash players do); Modify changes the given fields; Replace swaps the character and keeps unset fields; Remove
-  clears the depth. Cost O(events + Σ snapshot sizes), every event and every copied entry charged — the naive
-  "replay from frame 0 for each label" is O(labels × events) and is not allowed (WorkBudget rule).
+  frames in ascending order. Place puts a character at a depth (normally an empty one; a Place on an occupied depth
+  replaces what is there, as Flash players do); Modify changes the given fields; Replace swaps the character and keeps
+  unset fields; Remove clears the depth. Cost O(events + Σ snapshot sizes), every event and every copied entry charged
+  — the naive "replay from frame 0 for each label" is O(labels × events) and is not allowed (WorkBudget rule). A
+  requested frame may be `timeline.frames` itself: the state after every event (a label after the last ShowFrame names
+  the frame a closing ShowFrame would show; 0 such labels in retail, a unit case).
 * **Units**: pixels (twips / 20) everywhere in the public types, except `SwfBitmapFill::matrix` a..d (twips per
   bitmap pixel) and the font units of `swf_font.h`.
 
@@ -260,12 +281,15 @@ Estimated size ≈ 1,000 LOC with the display lists [inferred].
 ### 5.2 Library (`swf_library.h`)
 
 `SwfLibrary::open` lists every non-chunk, non-Loc superbundle's bundle manifests on `parallel_for` lanes (as
-`bf3dump list` does: the whole install's manifests in 0.5 s, measured), keeps the `SwfMovie` res entries, groups
-them by lowercase name, picks the first holder in the §4.1 search order and counts holders and distinct SHA-1s.
-`read_payload` / `load` mount the holder superbundle lazily (one `LevelMount` per holder, `load_bundles` of the
-holder bundle only) and read through `LevelMount::read_res`; `load_atlas_texture` uses the same mount and
-`res::load_texture`. Parsed movies are memoised. Import URLs map to movies by `swf_movie_name_for_url` (lowercase
-file stem under `ui/assets/`), the font library URL by `is_font_library_url`.
+`bf3dump list` does: the whole install's manifests in 0.5 s, measured), keeps the `SwfMovie` res entries, groups them by
+lowercase name, picks the first holder in the §4.1 search order and counts holders and distinct SHA-1s. `read_payload`
+/ `load` mount the holder superbundle lazily (one `LevelMount` per holder, `load_bundles` of the holder bundle only)
+and read through `LevelMount::read_res`. The lazy creation is guarded per holder: each holder slot has its own
+`std::once_flag`-style guard (a `std::mutex` + created flag in the slot, so a failed mount is memoised as its
+`Status`), and parallel census lanes that need the same superbundle wait for the one creation; afterwards the mount is
+shared read-only (`LevelMount` reads are internally locked). `load_atlas_texture` uses the same mount and
+`res::load_texture`. Parsed movies are memoised. Import URLs map to movies by `swf_movie_name_for_url` (lowercase file
+stem under `ui/assets/`), the font library URL by `is_font_library_url`.
 
 ### 5.3 Census (`swf_census.h`)
 
@@ -277,7 +301,10 @@ font name resolves (§7.4). Per movie it keeps the fields of `SwfMovieCensus`; t
 textures, fonts 63 / 21 / 2 (outlines / no glyphs / codes only), AS2 1,638,265 bytes. `format_census_tsv` writes
 one row per movie (name, superbundle, holders, sha1s, signature, version, payload and body bytes, stage, frames,
 sprites, labels, placements, edit texts, shapes, scaling grids, exports, imports, external images, sub-images,
-fonts, AS2 bytes, budget units, parse ms, error).
+fonts, AS2 bytes, budget units, retained bytes, parse ms, error). `retained_bytes` is the parsed movie's own
+estimate of what it holds (body plus every vector's capacity × element size plus string capacities); the totals
+print its maximum and sum, the memory figure the reviewers asked for (no process-level peak, which other lanes
+blur).
 
 ---
 
@@ -287,7 +314,12 @@ fonts, AS2 bytes, budget units, parse ms, error).
 
 A labelled frame's art is what its display list draws: for each entry, a shape contributes its bitmap fills that
 name a sub-image (as `SwfAtlasPiece`s with the composed placement), a sprite contributes its frame 0 recursively
-(≤ `kSwfAtlasMaxNesting` = 16 levels), anything else (edit text, import, static text) nothing. The same rule gives an
+(≤ `kSwfAtlasMaxNesting` = 16 levels), anything else (edit text, import, static text) nothing. Each sprite's
+frame-0 piece list is computed once per map and memoised (in sprite-local coordinates; a referrer copies it with
+its own matrix composed, charged per copied piece), so a 16-deep binary DAG of sprites costs O(sprites + pieces),
+not 2^16 per reference; a sprite reached again while its own list is being built (a cycle: a sprite placing itself,
+directly or through others) is an error. Pieces are capped at `kSwfAtlasMaxPiecesPerRegion` (4,096) per region and
+`kSwfAtlasMaxPieces` (2^20, about 64 MB) per map. The same rule gives an
 exported symbol's frame 0 (`symbols`), any frame of any sprite (`frames`) and each bare sub-image (`bare`). Names:
 `<symbol>/<label>`, `<symbol>`, `<symbol>@<frame>`, `#<id>`, where `<symbol>` is the export name or `#<sprite id>`.
 
@@ -337,9 +369,13 @@ some frame of some sprite (the 42 unlabelled child sprites hold the rest).
 `Bf3UiAssets` loads each requested atlas movie's texture with `SwfLibrary::load_atlas_texture`, prepares it with
 `bf3::render::prepare_texture(texture, TextureRole::Color)` (DXT5 kept as BC3 with its mips; ARGB8888 as RGBA8) on the
 loader thread and uploads it with `render_bridge::make_texture` on the main thread. A region is an `AtlasTexture`
-(`set_atlas`, `set_region(Rect2(x1, y1, x2 − x1, y2 − y1))`, `set_filter_clip(true)` so mip filtering does not pull
-in neighbours). Multi-piece regions return every piece with its placement; the HUD draws them in order. Textures
-are not cached (plan D13: resident BC from the install at load).
+(`set_atlas`, `set_region(Rect2(x1, y1, x2 − x1, y2 − y1))`, `set_filter_clip(true)`, which clamps sampling to the
+region at the level being sampled). The HUD draws regions with the canvas default `TEXTURE_FILTER_LINEAR` (no mipmaps:
+level 0 only), where filter_clip removes all bleeding. The atlas keeps its mips (prepare_texture keeps them), but its
+lower levels already mix neighbouring sub-images, so a Control that opts into a mipmap filter gets bleeding at mip >
+0; the HUD wave must not do that for atlas regions (stated in `ui_assets.h`). Multi-piece regions return every piece
+with its placement; the HUD draws them in order. Textures are not cached (plan D13: resident BC from the install at
+load).
 
 ---
 
@@ -379,11 +415,14 @@ Decisions:
   recomputes every bounding box from the points.
 * **Kerning**: a version-0 `kern` table, one format-0 subtable of (left glyph, right glyph, value / 10), sorted.
   HarfBuzz (Godot's TextServerAdvanced) applies `kern` when no GPOS is present [inferred from HarfBuzz's documented
-  behaviour; checked by G4's `fonts.kerning` row: `get_string_size("AV", 64)` is narrower than "A" + "V" by
-  1229 × 64 / 20480 = 3.84 px ± 1 px]. Fallback if it is not applied: `FontFile.set_kerning` per size in
+  behaviour; checked by G4's `fonts.kerning` row: `get_string_size("AV", 64)` is narrower than "A" + "V" by 1229 × 64
+  / 20480 = 3.84 ± 0.25 px with the §10 settings]. Fallback if it is not applied: `FontFile.set_kerning` per size in
   `make_font_file` (one call per pair, 335 pairs).
 * **name**: IDs 1 (family = the long name), 2 (Regular / Bold), 3, 4, 6 (PostScript name without spaces);
   `Font.get_font_name()` must read back the long name (G4).
+* **Determinism**: `head.created` and `head.modified` are 0, `fontRevision` 1.0, no time, path or machine value
+  anywhere; the same input always gives the same bytes, so the SHA-256 that `bf3dump swf fonts` prints is
+  reproducible (a `core.ui.font.unit` case writes a font twice and compares).
 * **OS/2 weight**: Medium 500, Semibold / SemiBold 600, else 400 (bold flag 700).
 
 The writer is about 600 LOC, the reader (validation, tests, cache accept) about 300 [inferred].
@@ -394,8 +433,10 @@ Purista covers U+00C9, so "OPERATION MÉTRO" (`ID_M_LEVELNAME_MP_SUBWAY`) render
 letters at all, so any HUD text with letters uses Purista (`$MENU_*`) as BF3 itself does (the ammo widget's "Gx"
 and reload hint are `$Menu_medium`, its digits `$HUD_medium`). The coverage table of each font (its distinct codes)
 is `ConvertedFont::codes`, drawn by the check (G5) and printed by `bf3dump swf fonts`. Characters the text database
-uses that a font lacks fall back to Godot's system font (`FontFile` fallbacks; [inferred]) and are listed by the
-check (`fonts.coverage` row, reported, not gated).
+uses that a font lacks fall back to a system font: `make_font_file` leaves `allow_system_fallback` true (§10), so
+TextServer's shaping substitutes them; they are listed by the check (`fonts.coverage` row, reported, not gated).
+The BF3 font's own coverage checks (`fonts.glyphs`, `fonts.metro`) look up glyphs on the FontFile's own data
+(`get_glyph_index`, `TextServer.font_get_supported_glyphs`), which system fallback does not touch.
 
 ### 7.4 Name resolution (`resolve_font_name`)
 
@@ -406,6 +447,10 @@ check (`fonts.coverage` row, reported, not gated).
 | Family [inferred] | `$HUD`, `$HUD_light` → `$HUD_medium`; `$Menu_light*` → `$MENU_medium`; `$FONT_TITLE`, `$FONT_TITLE*` → `$MENU_bold` |
 | Device (system font) | `Arial`, `Purista SemiBold`, `Calibri`, `Verdana`, `Times New Roman` |
 | Unresolved | none (G6) |
+
+Counting key for G6: distinct names after dropping one trailing `*` (`$FONT_TITLE*` → `$FONT_TITLE`,
+`$Menu_light*` → `$Menu_light`), so the rows count Exact 4, CaseFolded 2, Family 4 (`$FONT_TITLE`, `$HUD`,
+`$HUD_light`, `$Menu_light`), Device 5. The census and `bf3dump swf fonts` print the Family names on their own line.
 
 The Family rule is a guess about BF3's own runtime substitution (Scaleform resolves unknown `$` names through the
 font library's map; BF3's map lacks these four). It affects one MP HUD screen (`hudctfscreen`, `$HUD_light`) and
@@ -470,28 +515,61 @@ budget type is `level::WorkBudget` (atomic, sticky; reused rather than a third c
 
 | where | bound |
 |---|---|
-| payload | signature `CFX` / `GFX`; declared length ≤ 64 MiB **before** inflating; CFX must inflate to exactly the declared length (libdeflate with a fixed output size: a zlib bomb fails at the cap); GFX length exact |
+| payload | signature `CFX` / `GFX`; declared length ≤ 16 MiB (`kSwfMaxBodyBytes`) **before** inflating; CFX must inflate to exactly the declared length (libdeflate with a fixed output size: a zlib bomb fails at the cap); GFX length exact |
 | tags | header inside the timeline; long length ≤ bytes left; ≤ `kSwfMaxTags`; one unit per tag; sprites one level deep (a nested `DefineSprite` is an error, so no recursion on data) |
 | strings | NUL inside the tag; charged `1 + length / 16`; u8-prefixed strings inside the tag |
 | records | RECT / MATRIX / CXFORM bit fields read through a bounds-checked bit reader; style arrays: count × minimum record size ≤ bytes left before reading; one unit per shape record (≥ 6 bits each, so ≤ 1.4 units per body byte) |
-| frames | ShowFrame count ≤ `kSwfMaxFrames`; a label's frame ≤ the timeline's frame count |
-| display lists | one pass per timeline (§5.1); every event and copied entry charged |
-| atlas map | nesting ≤ 16; each visited display entry and each piece charged; ≤ 4,096 pieces per region (a sprite placing itself, or a 16-deep binary DAG, ends on the budget) |
+| frames | ShowFrame count ≤ `kSwfMaxFrames`; a label's frame ≤ the timeline's ShowFrame count (= is allowed, §5.1) |
+| display lists | ≤ `kSwfMaxDisplayEvents` (2^18) events per movie; one pass per timeline (§5.1); every event charged 8 units (≈ its 130 bytes / 16) and every copied entry 4 units, so the budget bounds memory as well as time |
+| sub-images | x1 ≤ x2 and y1 ≤ y2 or the parse fails (`width()` / `height()` can then never wrap); inside the atlas is a census / atlas-map check (`rects_outside_atlas`) |
+| atlas map | nesting ≤ 16; per-sprite frame-0 lists memoised, a cycle is an error; each visited display entry and each piece (copies included) charged 4 units; ≤ 4,096 pieces per region and 2^20 per map |
 | layout tree | depth ≤ 8, ≤ 65,536 nodes, imports followed only to existing movies, each movie parsed once per call |
 | fonts | NumGlyphs ≤ 65,535; offsets ascending and inside; points per glyph ≤ 16,384, contours ≤ 4,096; codes and kerning counts × record size ≤ bytes left; one unit per edge, point, code and kerning pair |
-| winding | O(c² × p) per glyph charged as c × (total points) units (retail: ≤ 24 × 281) |
+| winding | point-in-polygon of one point per contour against every other contour: c × (total points) edge tests per glyph, charged before it runs (retail: ≤ 24 × 281; a hostile 4,096-contour, 16,384-point glyph would need 67M and ends on the font budget below) |
 | TrueType writer | glyphs ≤ 65,534 (+ `.notdef`), points ≤ 65,535 and contours ≤ 32,767 per glyph, coordinates in int16 after scaling; the output is O(input) (≤ 9 bytes per point plus fixed tables) |
 | TrueType reader | table directory ≤ 64 tables, every table inside the file, checksums, `loca` ascending and inside `glyf`, flag repeats bounded by the point count, cmap segments ≤ 8,192 |
 
-Default budget per movie: `swf_default_budget_units(declared length)` = 2 units per declared byte + 2^20; the census
-prints the largest use per movie (expected well under 1 unit per byte).
+### 9.1 Budgets by caller
+
+Every function that takes `WorkBudget &r_budget` gets it from its caller; these are the sizes (constants in the
+headers, so the G8 "< 1 s" cases are bounded by a documented number; a unit is one tag, record, event, edge, point,
+16 string bytes or one inner-loop step, a few ns to a few tens of ns each).
+
+| work | budget | who creates it |
+|---|---|---|
+| `SwfMovie::parse` | `swf_default_budget_units(declared length)` = 2^20 + 2 × declared bytes (≤ 34.6M at the 16 MiB cap) | the parse itself (null budget), `SwfLibrary::load` (one per movie), the census (one per movie lane) |
+| `build_atlas_map` | `kSwfAtlasBudgetUnits` = 2^24 per map | `Bf3UiAssets` loader, `core.ui.swf`, `bf3dump swf labels`, the census (per atlas movie) |
+| `load_font_outlines` + `normalise_winding` + `write_truetype` + `read_truetype` of one font | `kUiFontConvertBudgetUnits` = 2^25 per font, one budget for the whole conversion | `convert_library_font` (so `UiFontLibrary::load`, `Bf3UiAssets`, `bf3dump swf fonts`) |
+| `read_truetype` alone (cache accept, tests) | `kTrueTypeReadBudgetUnits` = 2^22 per call | the cache accept step, `core.ui.font(.unit)` |
+| `read_layout` / `read_hud_placements` | `kSwfLayoutBudgetUnits` = 2^22 per call (the movies it follows are parsed through `SwfLibrary::load`, each with its own parse budget) | `Bf3UiAssets` loader, `core.ui.swf`, `bf3dump swf layout` / `hud` |
+
+The census prints the largest use per movie for each budget (retail is expected to stay near 1 unit per body byte,
+half the default). At ~10–30 ns per unit, 2^25 units end in under 1 s in `dev`; the unit tests time each hostile case
+against 1 s.
 
 ---
 
 ## 10. Godot side (`ui_assets.h`)
 
 `Bf3UiAssets` (Node) — load sequence in §3. Getters (§12.3). `make_font_file`: `FontFile.new()`, `set_data`,
-antialiasing gray, hinting light, `allow_system_fallback` true (for characters a BF3 font lacks), then the check that
+then fixed settings that the HUD and the G4 check share (the check measures the very FontFile the getters return):
+
+| setting | value | why |
+|---|---|---|
+| `antialiasing` | `FONT_ANTIALIASING_GRAY` | default; no LCD subpixel (HUD over 3D) |
+| `hinting` | `HINTING_NONE` | Scaleform draws unhinted outlines; with hinting on, FreeType can round each glyph's advance (`font_get_glyph_advance`) to whole pixels |
+| `subpixel_positioning` | `SUBPIXEL_POSITIONING_ONE_QUARTER` | the default `AUTO` turns subpixel positioning off above 20 px (`SUBPIXEL_POSITIONING_ONE_HALF_MAX_SIZE`), and TextServerAdvanced then rounds every shaped advance to a whole pixel, carrying the remainder only up to the next blank (`keep_rounding_remainders`, reset at spaces): "OPERATION MÉTRO" at 64 px can be ~1 px off and per-glyph rounding without the carry would be up to 4.4 px off (review probe). With subpixel positioning on, the shaped advance is HarfBuzz's unrounded 26.6 value |
+| `keep_rounding_remainders` | left at its default (true) | irrelevant while subpixel positioning is on; the check does not depend on it |
+| `allow_system_fallback` | true | characters a BF3 font lacks (Venice has no letters) come from a system font in shaping (§7.3) |
+| `multichannel_signed_distance_field` | false | a switch for the HUD wave (§15) |
+| `oversampling` | default (follows the viewport) | |
+
+[verified against the TextServerAdvanced source of Godot 4.8 dev7 (`modules/text_server_adv/text_server_adv.cpp`
+at `c971f93e7`, MIT): `_shape_substr` rounds `gl.advance` unless `subpos`, and `subpos` is false for `AUTO` above
+`SUBPIXEL_POSITIONING_ONE_HALF_MAX_SIZE` = 20; the shaping font is `hb_ft_font_create(face)` with no load flags
+set, i.e. HarfBuzz's documented default `FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING`, so shaped advances are unhinted
+whatever `hinting` says; `_ensure_glyph` passes the `hinting` load flags to `FT_Get_Advance` for the per-glyph
+advance. Read for this design, nothing copied.] Then the check that
 `get_font_name()` equals the long name; `make_atlas_region` as §6.4. Missing items (no install, a movie or font that
 is absent): the getter returns null and logs once; the HUD falls back to its own art and Godot's default font
 (plan §3.8 route C per item).
@@ -510,8 +588,8 @@ block of `register_types.cpp`).
 | `fonts.set_data` ×4 | `FontFile.set_data` accepted, `get_font_name()` = the long name |
 | `fonts.glyphs` ×4 | the TrueType `numGlyphs` = source + 1 (444 / 34); `get_supported_chars().length()` = distinct codes (442 / 32); `has_char` for every code; `TextServer.font_get_supported_glyphs` printed |
 | `fonts.contours` ×4 | for every glyph, `TextServer.font_get_glyph_contours(rid, 64, glyph)` has the writer's contour count and each contour's orientation (signed area sign) equals the writer's (outer clockwise, holes counter-clockwise) |
-| `fonts.metrics` ×4 | `get_ascent(64)` = 2224 × 64 / 2048 ± 1 px; `get_string_size("0123456789", 64)` and (Purista) `"OPERATION MÉTRO"` = the sum of the source advances × 64 / 20480 (+ kerning) ± 1 px |
-| `fonts.kerning` ×2 | Purista: `"AV"` narrower than `"A"` + `"V"` by 3.84 ± 1 px at 64 px |
+| `fonts.metrics` ×4 | on the §10 settings at 64 px: `get_ascent(64)` = 2224 × 64 / 2048 = 69.5 ± 1 px (FreeType rounds size metrics to whole pixels); for **every glyph** `TextServer.font_get_glyph_advance(rid, 64, glyph).x` = source advance × 64 / 20480 ± 0.05 px (26.6 resolution is 1/64 px); `get_string_size("0123456789", 64).x` and (Purista) `"OPERATION MÉTRO"` = Σ source advances × 64 / 20480 + Σ kerning pairs × 64 / 20480 ± 0.5 px (15 glyphs × 1/128 px of 26.6 rounding ≈ 0.12 px worst case) |
+| `fonts.kerning` ×2 | Purista: `"AV"` narrower than `"A"` + `"V"` by 1229 × 64 / 20480 = 3.84 ± 0.25 px at 64 px (if HarfBuzz ignores `kern`, 0 px: the row fails and the §7.2 fallback applies) |
 | `fonts.metro` | `tr("ID_M_LEVELNAME_MP_SUBWAY")` = "OPERATION MÉTRO" (Bf3Localisation), and every character of it maps to a non-zero glyph index in Purista EA Medium |
 | `fonts.mapping` | the census's font names resolve, 0 unresolved |
 | `fonts.coverage` | (reported) characters of the 15,515 text database strings that Purista lacks |
@@ -527,7 +605,9 @@ Windowed run with `--shot-dir`, three pages at 1280 × 720, dark grey background
 "0123456789 31 / 155", "AV AT To LT Yo" kerning pairs; Venice: "0123456789", "31/155 100%"; a 1 px red baseline
 under each line), `ui1_coverage.png` (every code of each font in a grid with its hex value), `ui1_icons.png` (the
 iconsingame labels with art, each drawn from its `AtlasTexture` with its name). The test writes to
-`b\shots\ui1\` (gitignored); the implementer inspects them and writes the findings into README.
+`$ENV{OPENBF3_UI1_SHOTS}` (default `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1\`, an absolute path
+outside the worktree, gitignored, never committed; `tests/godot_ui_fonts_shots.cmake` passes it as `--shot-dir`
+and creates it); the implementer inspects them and writes the findings into README.
 
 `tests/godot_ui_fonts.cmake` (headless) and `tests/godot_ui_fonts_shots.cmake` (windowed: a probe run first, as
 `godot_m1_load.cmake` does, so a session without a desktop exits 77 instead of hanging on the rendering-device
@@ -582,8 +662,12 @@ no exceptions; plain structs, sorted vectors; strings copied out of the body (a 
 | `swf labels <name>` | the atlas map: images, every region with its pieces and the atlas texture res |
 | `swf layout <name> [--depth=N]` | the layout tree, one line per node |
 | `swf hud` | the HUD placements table of the 14 screens |
-| `swf fonts [--text-db=<partition>] [--cache=<dir> \| --no-cache]` | the mapping, each font's glyphs, codes, coverage, kerning, winding stats, TrueType size and SHA-256, cache outcome; the name-resolution table of §7.4 |
-| `swf ttf <font-long-name> <out.ttf>` | one converted font written to a path outside the install (for inspection in other tools; a private copy of an EA font: never commit or share it) |
+| `swf fonts [--text-db=<partition>] [--cache=<dir> \| --no-cache]` | the mapping, each font's glyphs, codes, coverage, kerning, winding stats, TrueType size and SHA-256, cache outcome; the name-resolution table of §7.4 (Family-inferred names on their own line). `--cache` only names the cache root the converted fonts are stored in (the derived-data cache, `InstallReader::write_guard()`); the command writes no font file anywhere else |
+
+There is deliberately no command that writes a converted font to a path of the caller's choice (revision 1's
+`swf ttf` was dropped in review): plan §2.1 keeps a converted font in `user://` / the Cache only, and §13 below.
+Inspection needs are covered by `swf fonts` (sizes, SHA-256, every table's stats) and by `read_truetype` in the
+tests.
 
 ---
 
@@ -595,8 +679,10 @@ no exceptions; plain structs, sorted vectors; strings copied out of the body (a 
 
 Not cached: SWF parses (the en font library parses in about a millisecond and the HUD movies are a few KB; the
 census of everything is a tool), atlas textures (plan D13), atlas maps and layout tables (derived in microseconds
-from parsed movies) [inferred; measured by T1 / T2]. The converted fonts never leave the cache root (plan §2.1 "UI
-art, strings and fonts are runtime reads too").
+from parsed movies) [inferred; measured by T1 / T2]. The converted fonts never leave the cache root (plan §2.1: a converted
+font "lives only in user://, never in the repo or anything that leaves the machine"): no API or command writes the
+TrueType bytes anywhere but the Cache (and memory, for `FontFile.set_data`); the unit tests' synthetic fonts are not
+EA fonts, and `core.ui.font`'s scratch cache root under `%TEMP%` is deleted at the end of the test.
 
 ---
 
@@ -605,13 +691,13 @@ art, strings and fonts are runtime reads too").
 | test | data? | content |
 |---|---|---|
 | `ui1.contract` | no | every ui1 header compiles together; static_asserts (limits, units, tag codes, trivially copyable types); `swf_concat`; the cache kind is valid and the key moves with the converter version (exists now) |
-| `core.ui.swf.unit` | no | a small in-test SWF writer builds movies: GFX and CFX headers, every tag the reader keeps (PlaceObject 1/2/3 with all optional fields, RemoveObject 1/2, labels, sprites, exports, both imports, ExporterInfo, external image v1 / v2, sub-images, shapes 1–4 with bitmap fills in the initial arrays and in StyleChangeRecords, edit texts with every flag, scaling grids, DefineFont3 in all three forms, align zones, font names); display lists (Place / Modify / Replace / Remove, a Place on an occupied depth, queries in any order, one-pass cost); the atlas rule (nested sprites, composed matrices, empty frames, multi-piece); layout trees with a fake library; hostile: every truncation of each synthetic movie, 2,000 seeded mutants, a CFX that inflates past its declared length, a 2^32-declared length, a tag past the end, a nested DefineSprite, 2^22 one-byte tags, a sprite placing itself and a 16-deep binary DAG of sprites (budget), 65,535 frames; asan |
-| `core.ui.font.unit` | no | synthetic DefineFont3 (squares, a ring with a hole, quadratic curves, duplicate codes, kerning) → outlines → `write_truetype` → `read_truetype` round trip (points, flags, advances, cmap, kern, name, checksums); `normalise_winding` on reversed and nested contours; TrueType limits (65,535 points, int16 overflow) refused; every truncation of a written font refused by `read_truetype`; 2,000 mutants of each; asan |
-| `core.ui.swf` | install | G1 (census, totals = §4.2), G2 (§6.2, §6.3), G6 (§7.4), G7 (§8.2), T1, `install.unchanged` |
+| `core.ui.swf.unit` | no | a small in-test SWF writer builds movies: GFX and CFX headers, every tag the reader keeps (PlaceObject 1/2/3 with all optional fields, RemoveObject 1/2, labels, sprites, exports, both imports, ExporterInfo, external image v1 / v2, sub-images, shapes 1–4 with bitmap fills in the initial arrays and in StyleChangeRecords, edit texts with every flag, scaling grids, DefineFont3 in all three forms, align zones, font names); display lists (Place / Modify / Replace / Remove, a Place on an occupied depth, queries in any order, one-pass cost); the atlas rule (nested sprites, composed matrices, empty frames, multi-piece); layout trees with a fake library; hostile: every truncation of each synthetic movie, 2,000 seeded mutants, a CFX that inflates past its declared length, a 2^32-declared length, a tag past the end, a nested DefineSprite, 2^22 one-byte tags, a sprite placing itself (cycle error) and a 16-deep binary DAG of sprites (memoised: linear, and its piece count capped), 65,535 frames, a label after the last ShowFrame (frame == frames), a reversed sub-image rectangle (x2 < x1, refused), 2^18 + 1 display events (refused), a 16 MiB + 1 declared length (refused before inflating); each hostile case timed against 1 s; asan |
+| `core.ui.font.unit` | no | synthetic DefineFont3 (squares, a ring with a hole, quadratic curves, duplicate codes, kerning) → outlines → `write_truetype` → `read_truetype` round trip (points, flags, advances, cmap, kern, name, checksums); `normalise_winding` on reversed and nested contours; TrueType limits (65,535 points, int16 overflow) refused; a 4,096-contour, 16,384-point glyph ends on the 2^25 font budget in under 1 s; the same font written twice gives the same bytes; every truncation of a written font refused by `read_truetype`; 2,000 mutants of each; asan |
+| `core.ui.swf` | install | G1 (census, totals = §4.2), G2 (§6.2, §6.3), G6 (§7.4), G7 (§8.2), T1 (checked in `dev`, reported under asan), `install.unchanged` |
 | `core.ui.swf.fuzz` | install | 300 seeded in-memory mutants each of `iconsingame`, `hudmpscreen`, `ammo` and `fontcollection_en_fontlib` through `SwfMovie::parse`, `build_atlas_map`, `read_layout` (over the original library), `load_font_outlines` and `write_truetype`: no crash, every failure an error; asan |
-| `core.ui.font` | install | G3, T2, cache cold / warm / damaged on a scratch root under `%TEMP%`, `install.unchanged` |
+| `core.ui.font` | install | G3, T2 (checked in `dev`, reported under asan), cache cold / warm / damaged on a scratch root under `%TEMP%` (deleted afterwards), `install.unchanged` |
 | `godot.ui_fonts` | install + Godot | G4 (§11.1), headless |
-| `godot.ui_fonts_shots` | install + Godot, windowed | G5 (§11.2); 77 without a window |
+| `godot.ui_fonts_shots` | install + Godot, windowed | G5 (§11.2), shots to `OPENBF3_UI1_SHOTS`; 77 without a window |
 
 The install tests exit 77 without an install (`bf3::test::skip_install_case`). New test executables: `test_ui1`
 (suites `ui-swf-unit`, `ui-font-unit`, `ui-swf`, `ui-swf-fuzz`, `ui-font`) next to `test_ui1_contract`. All
@@ -646,6 +732,8 @@ The install tests exit 77 without an install (`bf3::test::skip_install_case`). N
 | A patched or modded install changes a movie | parse error or different numbers | G1 reports per movie; the cache key moves with the SHA-1; fallbacks per item |
 | Font conversion inside Godot's text cache uses more memory than expected | none expected (4 fonts, ~150 KB of TrueType) | measured by the check (reported) |
 | Overlap with ui2 helpers at merge | duplicate atlas helper | §2: one `make_atlas_region`, merged at integration |
+| ui1 and ui2 both append blocks at the end of `tests/CMakeLists.txt`, `src/bf3_core/CMakeLists.txt`, `src/bf3_godot/CMakeLists.txt` and README | trivial textual merge conflicts | keep both blocks; no name collides (`test_ui1*` / `test_ui2_contract`, `core.ui.swf/font` beside the existing `core.ui.text`) |
+| Godot's text layout changes (subpixel / rounding rules) in a later engine pin | `fonts.metrics` drifts | the §10 settings are explicit, not defaults; the row prints measured vs expected |
 
 ---
 
@@ -662,11 +750,12 @@ swf_font, font_ttf_write, font_ttf_read, ui_fonts, swf_layout}.cpp` (+ a private
 (the in-test SWF writer), `tests/godot_ui_fonts.cmake`, `tests/godot_ui_fonts_shots.cmake`.
 
 Modified additively (blocks headed `# UI ui1` / `// UI ui1`; existing lines untouched): `src/bf3_core/CMakeLists.txt`
-(done: headers; sources later), `src/bf3_godot/CMakeLists.txt` (done), `tests/CMakeLists.txt` (done:
-`ui1.contract`; the other tests later), `src/bf3_godot/src/register_types.cpp` (two `GDREGISTER_CLASS`),
-`tools/bf3dump/CMakeLists.txt` and `tools/bf3dump/bf3dump.cpp` (usage line and the `swf` dispatch), `README.md`
-(a "UI groundwork 1" section and one line under the ctest list paragraph), `NOTICE` only if third-party code is
-consulted (none planned: the SWF and TrueType specifications are documentation).
+(done: headers; sources later), `src/bf3_godot/CMakeLists.txt` (done), `tests/CMakeLists.txt` (done: `ui1.contract`;
+the other tests later), `src/bf3_godot/src/register_types.cpp` (two `GDREGISTER_CLASS`),
+`tools/bf3dump/CMakeLists.txt` and `tools/bf3dump/bf3dump.cpp` (usage lines for the six `swf` commands of §12.4
+and the `swf` dispatch), `README.md` (a "UI groundwork 1" section and one line
+under the ctest list paragraph), `NOTICE` only if third-party code is consulted (none planned: the SWF and TrueType
+specifications are documentation).
 
 ---
 
@@ -674,7 +763,7 @@ consulted (none planned: the SWF and TrueType specifications are documentation).
 
 | fact | value | how |
 |---|---|---|
-| SwfMovie entries | 434 names, 10,303 entries, 50 superbundles; first holders §4.1 | `bf3dump list` (all 1,094,723 entries) into scratch, filtered |
+| SwfMovie entries | 434 names, 10,303 entries, 50 superbundles; first holders §4.1 | `bf3dump list` into scratch, filtered: "53 superbundles, 1159 bundles, 1093563 entries, 0 errors" (the TSV has 1,094,723 lines = header + 1,093,563 entries + 1,159 bundle rows; revision 1 quoted the line count) |
 | payload format and size | 371 CFX v8, 62 GFX v8, 1 GFX v7; declared length exact on 434; resMeta 0 | ebx-dump probe `rawres` of the 11 covering superbundles + `swfprobe.py` |
 | identical bytes across holders | 0 names with 2 versions among the 11 superbundles | SHA-1 of every extracted payload |
 | tag census | §4.2 | `swfprobe.py census` (434 parsed, 0 errors after the CodesOnly fix) |
@@ -682,6 +771,9 @@ consulted (none planned: the SWF and TrueType specifications are documentation).
 | sub-image rectangle convention | x2 / y2 exclusive (737 shapes exact) | probe: shape bounds vs rectangles |
 | iconsingame map | §6.2, §6.3 | probe `icons2` with RemoveObject handling and nested sprites |
 | fonts | §4.4 (glyphs, codes, coverage, metrics, kerning, winding) | probe `font` on `fontcollection_en_fontlib`; all 63 outline fonts for sorting / maxima |
+| atlas file names | 135; suffixes `_i1`…`_i9` 118, `_i12` 2, `_i23` 1, `_ia`…`_ie` 14 | `bf3dump list` DxTexture names + probe `ext_images` |
+| labels and frames | 0 of 2,441 labels after the last ShowFrame; 718 empty sprites (FrameCount 1, no tags); 0 reversed sub-image rectangles; at most 4,075 PlaceObject events in a movie (`compass`) | probe (review revision) |
+| Godot text layout | §10 table (AUTO → no subpixel above 20 px, rounded advances, remainder reset at blanks, hb_ft unhinted advances) | Godot `text_server_adv.cpp` and `text_server.h` at `c971f93e7`, read only |
 | font mapping | §4.5 | `bf3dump types @all-mp UIFontMappingCollection`, `bf3dump dump` of all 33 |
 | font names used | §4.4 last bullet, §7.4 | probe over all imports and glyphless fonts |
 | imports resolve | 1,268 symbols, 1 missing export | probe `imports_check.py` |
@@ -698,7 +790,8 @@ For the user / orchestrator:
 
 1. **Font name fallbacks (§7.4).** `$HUD`, `$HUD_light`, `$Menu_light*` and `$FONT_TITLE(*)` have no mapping entry.
    The design maps them by family (`$HUD*` → `$HUD_medium`, `$MENU*` → `$MENU_medium`, `$FONT_TITLE` → `$MENU_bold`).
-   Accept, or should they count as unresolved (then G6 fails on 4 names by construction)?
+   Accept, or should they count as unresolved (then G6 fails on 4 names by construction)? (Reviewers: acceptable
+   provided the Family names are reported separately, which G6 now does.)
 2. **G5's visual judgement** is manual (the implementer inspects the PNGs and writes what they show). The
    automated proxies are G3's round trip and G4's contour / metric rows. Is that acceptable as the gate?
 3. **Empty icon frames.** 292 of iconsingame's 427 labels draw nothing at their frame. The design reports them as
@@ -708,3 +801,27 @@ For the implementation (answered by doing it):
 
 4. Does Godot apply the `kern` table (§7.2, §16)?
 5. The Godot-side cost of the four FontFiles and the atlases (reported by the check).
+6. The meaning of DefineExternalImage2's second u16 (9 on all 135 tags): kept as `field_2`, not interpreted.
+
+---
+
+## 20. Revision 2 (review findings addressed)
+
+| finding | change |
+|---|---|
+| `swf ttf` wrote a converted EA font to any path (plan §2.1, §13) — blocking | dropped; no API or command writes TrueType bytes outside the Cache (§2, §12.4, §13, §17) |
+| G4 `fonts.metrics` would fail by construction: AUTO subpixel → rounded advances above 20 px — blocking | §10 fixes the FontFile settings (hinting none, subpixel one quarter) shared by HUD and check, verified against the dev7 TextServerAdvanced source; the row compares every glyph's advance (± 0.05 px) and the strings (± 0.5 px); kerning ± 0.25 px (§1, §11.1) |
+| G1 pointed at §5.3; "first holder" escape clause | §4.2; distinct SHA-1s over all entries marked unverified until the census; a mismatch fails G1 and only the user can accept a fallback |
+| G6 counting key ambiguous | distinct names after one trailing `*` dropped; Family names printed separately (§1, §7.4) |
+| system fallback contradiction | `allow_system_fallback` true everywhere; coverage rows use the font's own glyph lookups (§7.3, §10, `ui_assets.h`) |
+| filter_clip and mip bleeding | regions drawn without mipmap filters; bleeding at mip > 0 stated (§6.4, `ui_assets.h`) |
+| T1 / T2 under asan | checked in `dev`, reported only under ASan (§1, §14) |
+| unspecified budgets; winding 67M units on one glyph | §9.1 names every budget and its creator; constants in the headers |
+| memory constant (130-byte events, 64 MiB body) | `kSwfMaxBodyBytes` 16 MiB, `kSwfMaxDisplayEvents` 2^18, events charged 8 units; census prints `retained_bytes` (§5.1, §5.3, §9) |
+| atlas recursion not memoised | per-sprite frame-0 lists memoised, cycles an error, 2^20 pieces per map (§6.1, §9) |
+| label at frame == frames | allowed: the state after every event; 0 in retail; unit case (§5.1, §9) |
+| sub-image x2 < x1 wraps `width()` | refused at parse (§4.3, §9, `swf_movie.h`) |
+| TrueType dates | `head.created` / `modified` 0, bytes deterministic (§7.2, `font_ttf.h`) |
+| relative shot dir | `OPENBF3_UI1_SHOTS`, absolute default (§1, §11.2) |
+| LevelMount creation from parallel lanes | per-holder guarded creation, failures memoised (§5.2, `swf_library.h`) |
+| 1,268 vs gfxfontlib imports; Place comment; `_iN` not decimal; `bf3dump list` count; cache Busy / PathGuard; merge conflicts | clarified (§4.3, §4.6, §5.1, §18, §3, §16) |
