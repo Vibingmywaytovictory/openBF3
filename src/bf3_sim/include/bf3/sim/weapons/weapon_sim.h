@@ -63,6 +63,10 @@ inline constexpr uint8_t kFirstShotArmed = 1u << 1; // the next shot takes First
 inline constexpr uint8_t kBoltWaitsRelease = 1u << 2; // HoldBoltActionUntilFireRelease: the cycle starts on release
 inline constexpr uint8_t kReloadCommitted = 1u << 3; // ReloadThreshold passed: the rounds are in
 inline constexpr uint8_t kZoomWasDown = 1u << 4;
+// A press while the weapon was not ready, remembered while fire stays held (single, burst, bolt, hold start; §5.3).
+inline constexpr uint8_t kPressPending = 1u << 5;
+// Hold-and-release: fire was released before HoldDelay passed; the throw goes when the delay is reached.
+inline constexpr uint8_t kReleasePending = 1u << 6;
 } // namespace slot_flags
 
 // One weapon of a soldier. Ammo and the spread / recoil state stay with the slot across switches.
@@ -176,7 +180,8 @@ struct WeaponTickOutput {
 	uint32_t events = 0; // the same as the state's
 	uint32_t refused_shots = 0; // shots the per-tick cap cut (always 0 for a valid def: §9)
 	uint8_t timed_count = 0;
-	std::array<TimedWeaponEvent, kMaxTimedEventsPerTick> timed{}; // in time order (ties: bit order)
+	std::array<TimedWeaponEvent, kMaxTimedEventsPerTick> timed{}; // in time order (ties: the order they happened in)
+	uint8_t timed_dropped = 0; // events beyond kMaxTimedEventsPerTick (always 0: the W8 invariants check it)
 };
 
 // A fresh life: every slot of p_loadout (def ids, kNoWeapon for empty) full, the active slot deploying from

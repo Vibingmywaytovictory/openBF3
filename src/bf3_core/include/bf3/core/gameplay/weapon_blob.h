@@ -39,9 +39,9 @@ class LevelMount;
 
 namespace bf3::core::gameplay {
 
-inline constexpr uint32_t kWeaponBlobFormatVersion = 1;
+inline constexpr uint32_t kWeaponBlobFormatVersion = 2; // 2: M2a weapons (reload holds, explosion pairs)
 // Bump when resolve_weapon's output changes for the same partitions.
-inline constexpr uint32_t kWeaponConverterVersion = 1;
+inline constexpr uint32_t kWeaponConverterVersion = 2; // 2: M2a weapons (blob v2 fields)
 inline constexpr const char *kWeaponCacheKind = "weapon";
 inline constexpr const char *kWeaponDepsCacheKind = "weapon-deps";
 

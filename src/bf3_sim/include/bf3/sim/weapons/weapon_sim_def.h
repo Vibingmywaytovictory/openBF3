@@ -166,6 +166,8 @@ struct WeaponSimDef {
 	SimTime reload_commit_empty = 0;
 	bool switch_cancels_reload = true; // rlWeaponSwitchCancelsUnfinishedReload
 	bool always_auto_reload = false;
+	// FireLogicData.HoldOffReloadUntilFireRelease (M98B true): an automatic reload waits until fire is released.
+	bool hold_off_reload_until_fire_release = false;
 
 	// Deploy (WeaponFiringData).
 	SimTime deploy_time = 0;
@@ -204,6 +206,9 @@ struct WeaponTable {
 	// trigger fires for as long as the script runs (W1's 134 shots in 10 s from a 31-round M16A3; W11's full-duty
 	// load). GameConfig never sets it; it is hashed, so a table built with it can never match a real one.
 	bool infinite_magazine = false;
+	// SoldierSprintSettingsData.RecoverTime (0.12 s on Metro [verified, bf3dump soldier]): fire stays refused this
+	// long after a sprint ends (Mechanics::sprint_blocks_fire). From WeaponTableOptions; hashed.
+	SimTime sprint_recover_time = 7'200'000;
 	uint64_t hash = 0; // weapon_table_hash
 };
 inline constexpr uint16_t kNoWeapon = 0xFFFF;
@@ -214,6 +219,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 struct WeaponTableOptions {
 	Mechanics mechanics;
 	bool infinite_magazine = false; // oracle only (see WeaponTable)
+	float sprint_recover_seconds = 0.12f; // the soldier's SoldierSprintSettingsData.RecoverTime
 };
 // The table for a loadout universe (the level's kits, or one weapon for the tools).
 core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<const core::gameplay::WeaponDef> p_defs,

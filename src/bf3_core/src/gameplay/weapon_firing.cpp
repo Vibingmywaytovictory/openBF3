@@ -86,6 +86,9 @@ void read_fire_function(Fields &r_f, const EbxInstance &p_ffd, FireFunction &r_f
 		r_fire.reload_threshold = r_f.f32(*fl, "ReloadThreshold");
 		r_fire.always_auto_reload = r_f.flag_or(*fl, "AlwaysAutoReload", false);
 		r_fire.reload_logic = r_f.enum_text(*fl, "ReloadLogic");
+		// M2a weapons (blob v2; docs/design/m2a-weapons.md §4.5).
+		r_fire.hold_off_reload_until_fire_release = r_f.flag_or(*fl, "HoldOffReloadUntilFireRelease", false);
+		r_fire.force_reload_action_on_fire_trigger = r_f.flag_or(*fl, "ForceReloadActionOnFireTrigger", false);
 	}
 	if (const std::optional<EbxStruct> ammo = r_f.sub(ffd, "Ammo")) {
 		r_fire.magazine_capacity = r_f.i32(*ammo, "MagazineCapacity");

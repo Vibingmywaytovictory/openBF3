@@ -49,6 +49,9 @@ public:
 	// The property the capsules of a zone carry (Head 65, Body 66, Chest 158, Foot 91 on Metro [verified,
 	// topics/01 §1.7]).
 	uint8_t zone_property(HitZone p_zone) const { return zone_property_[size_t(p_zone)]; }
+	// A default-constructed table (no grid: every relation absent, every pair unresolved) serves the synthetic
+	// defs of the no-data tests.
+	bool has_grid() const { return grid_ != nullptr; }
 	const core::gameplay::MaterialGrid &grid() const { return *grid_; }
 	size_t grid_pair_count() const { return pairs_.size(); }
 

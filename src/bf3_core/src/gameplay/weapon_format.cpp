@@ -82,7 +82,9 @@ std::string explosion(const Explosion &p_e) {
 		return "-";
 	}
 	return num(p_e.blast_damage) + " dmg, inner " + num(p_e.inner_blast_radius) + " m, radius " + num(p_e.blast_radius) + " m, impulse " +
-			num(p_e.blast_impulse) + ", shockwave " + num(p_e.shockwave_damage) + " dmg r " + num(p_e.shockwave_radius) + " (" + p_e.partition + ")";
+			num(p_e.blast_impulse) + ", shockwave " + num(p_e.shockwave_damage) + " dmg r " + num(p_e.shockwave_radius) + " (" + p_e.partition + ")" +
+			(p_e.material.present ? (p_e.material.resolved ? "  pair property " + std::to_string(p_e.material.property()) : std::string("  pair unresolved"))
+								 : std::string());
 }
 
 } // namespace
@@ -152,7 +154,9 @@ std::string format_weapon(const WeaponDef &p_w, const MaterialGrid *p_grid, cons
 		line("hold", "delay " + num(f.hold_delay) + " s  max " + num(f.hold_max_time) + " s  killed power x" + num(f.hold_killed_power_modifier));
 	}
 	line("reload", std::string(reload_type_name(f.reload_type)) + "  tactical " + num(f.reload_time_bullets_left) + " s  empty " + num(f.reload_time) +
-					" s  delay " + num(f.reload_delay) + " s  threshold " + num(f.reload_threshold) + "  " + f.reload_logic);
+					" s  delay " + num(f.reload_delay) + " s  threshold " + num(f.reload_threshold) + "  " + f.reload_logic +
+					(f.hold_off_reload_until_fire_release ? "  hold off until fire release" : "") +
+					(f.force_reload_action_on_fire_trigger ? "  force on fire trigger" : ""));
 	line("ammo", std::to_string(f.magazine_capacity) + " x " + std::to_string(f.number_of_magazines) + "  trace every " +
 					std::to_string(f.trace_frequency) + "  auto replenish " + num(f.auto_replenish_delay) + " s");
 	line("shot", "speed " + vec(f.initial_speed) + "  at " + vec(f.initial_position) + "  pellets " + std::to_string(f.bullets_per_shell) +

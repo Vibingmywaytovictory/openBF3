@@ -23,6 +23,10 @@ void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out) {
 	r_out.disable_occlusion = r_f.flag_or(e, "DisableOcclusion", false);
 	r_out.disable_static_entity_occlusion = r_f.flag_or(e, "DisableStaticEntityOcclusion", false);
 	r_out.is_causing_suppression = r_f.flag_or(e, "IsCausingSuppression", false);
+	// M2a weapons (blob v2): the explosion's own pair, read when the type has the field.
+	if (p_e.get("MaterialPair")) {
+		r_out.material = r_f.material_pair(e, "MaterialPair");
+	}
 }
 
 } // namespace
