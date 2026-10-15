@@ -507,14 +507,15 @@ then). No stub `.cpp` in bf3_core: nothing calls the declared functions yet.
 
 ## 12. Files
 
-Created (this commit): the 8 headers above, `ui2_header_check.cpp`, `tests/ui2_contract_tests.cpp`, this document.
-Modified additively (this commit; blocks headed `# UI ui2`): `src/bf3_core/CMakeLists.txt`,
+Created (this wave's design commits): the 8 headers above, `ui2_header_check.cpp`, `tests/ui2_contract_tests.cpp`, this document.
+Modified additively (blocks headed `# UI ui2`): `src/bf3_core/CMakeLists.txt`,
 `src/bf3_godot/CMakeLists.txt`, `tests/CMakeLists.txt`, `README.md` (own section, one line under the ctest
 paragraph).
 
 Implementation wave creates: `src/bf3_core/src/ui/{minimap,minimap_images,hud_icons,item_icons,hud_sources,
 hud_model}.cpp`; `src/bf3_godot/src/{minimap_hud,minimap_control,world_icons,minimap_check}.cpp`;
-`tools/bf3dump/ui_commands.{h,cpp}`; `tests/{ui_minimap_tests,ui_hud_tests,ui_install_tests,ui_fuzz_tests}.cpp`,
+`tools/bf3dump/ui_commands.{h,cpp}`; `tests/{ui_minimap_tests,ui_hud_tests,ui_install_tests,ui_fuzz_tests}.cpp`
+(`ui_fuzz_tests` registers `ui.minimap.fuzz` and `ui.hud.fuzz`),
 `tests/godot_ui2.cmake`. Modifies additively: `register_types.cpp` (`// UI ui2`), `bf3dump.cpp` (usage + dispatch
 block), `bf3-opensource/scenes/m1_metro.tscn` (one node), the CMake blocks above, README.
 
