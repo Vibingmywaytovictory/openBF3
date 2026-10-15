@@ -64,6 +64,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
+L1 look: `render.look.unit`, `render.look` and, with `OPENBF3_GODOT`, `godot.l1_look` (see "L1 look").
 
 ## Run
 
@@ -1143,3 +1144,165 @@ measured 4.8 s (the OS file cache was colder).
 Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
 terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
 floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.
+
+## L1 look (Metro materials and lighting)
+
+<!-- L1 look -->
+L1 is the look `res://scenes/m1_metro.tscn` draws by default: every drawn material gets the colour and normal map
+BF3's shader graph samples, and the level is lit from its VisualEnvironment EBX. `-- --look=m1` draws the M1 look
+(for before / after shots and the frame-time A/B). Code: `bf3_render` `shader_database.h` (the level shader
+database reader), `look_materials.h` (which textures a material draws, and how), `look_environment.h` (the
+environment read, per-camera blend, fog fit, grade LUTs), `level_scene.cpp` (plans L1 unless
+`ScenePlanOptions::look` says M1); `bf3_godot` `level_upload.cpp` (six L1 material shaders) and `look_bridge.cpp`
+(sun, sky, ambient, fog, exposure, glow and LUT, updated each frame from the camera position). The selection and
+material rules are ported from IW4L `level_bf3` / `resource_bf3` (the user's own Apache-2.0 code).
+
+**Why about half of Metro's materials drew flat.** The MeshVariationDatabase entry (and the MeshMaterial) of those
+slots lists no TextureParameters at all: their textures are constants of the surface shader graph, which only the
+level's compiled shader database names (`levels/mp_subway/mp_subway/shaderdb`, res type `0x36F3F2C0`, 28.8 MB, 640
+surface shaders on the first render path). The L1 resolver ranks candidates per role in three tiers: the slot's
+parameters (by name, sampled on the UV set and tiling the graph gives that parameter), the graph's own textures and
+the textures its solutions' pixel constants bind (by name suffix: `_d` / `_c` colour, `_n` normal, `_m` masks last),
+then, for a shader the database lacks, textures named like the mesh in its folder. Each texture is sampled with its
+own UV set (uv0, uv1; the overlay set uv2 is drawn from uv0 and a world-projected graph texture by the dominant axis
+of the world normal) and tiling. A normal map pairs with the colour's UV set and tiling, else it is the best one on a
+mesh UV set. Blend and sides come from the database's surface type and solutions. Glass keeps its colour map as a
+tint and draws blended at a fixed opacity of 0.3, because BF3 computes glass opacity in compiled shader code.
+
+**Material census** (`bf3dump looks MP_Subway TeamDeathMatch0`, about 5 s; it prints every drawn shader with its
+instance slots, parameters, M1 and L1 albedo and normal coverage, glass and the colour source, then the totals and
+the gate; `--shader NAME` dumps one graph from the database):
+
+| drawn instance slots, Metro TDM | M1 | L1 |
+|---|---|---|
+| with a base colour texture (**gate: L1 >= 95 %**) | 48.95 % (8,221 of 16,796) | **98.01 %** (16,451 of 16,785) |
+| with a colour where BF3's graph names one | | 100.00 % (16,451 of 16,451) |
+| with a normal map where BF3 has one | 46.54 % (5,960 of 12,807) | 99.73 % (12,773 of 12,807) |
+| instances with every drawn slot coloured | 41.10 % | 97.29 % (of 10,505) |
+| plan materials / textures | 624 / 378 | 631 / 647 (3 of them the sky) |
+
+The 334 slots L1 leaves without a colour texture have none in their graph: their colour is compiled into the
+shader (for example `ss_metrosign_frame` 44, `ss_sub_tickethall_shopouterwall` 32, `gravel_01` 26,
+`black_shader` 12), or they are glass with no colour map (100 slots, drawn as a grey tint). L1 also drops 11 slots
+that are transparent overlays drawn by their mask alone. The largest shaders M1 drew flat and L1 now textures:
+`proppreset_glass` (521 slots), `parkwall_01_mp_subway` (399), `fenceparc` (384), `ss_pipesystem_02` (383),
+`subwaytrain_interior_base` (289), `debrispile_02_objectsshader` (243), and `mp_subway_asphalt_02` (144, world
+projected at 0.5).
+
+**Environment selection.** A level places VisualEnvironmentReferenceObjectData. The reference's Priority orders them;
+the entity's own Priority is 1 on every Metro VE. A VE whose Visibility a PropertyConnection drives from an
+AreaProximityEntityData is an *area*: the proximity's LinkConnection names its shape (VolumeVectorShapeData polygon
+swept up by Height, or OBBData box), and its ProximityDistance is the fade. Every other VE that is not Excluded is
+always on. Per component (OutdoorLight, Enlighten, Sky, Fog, Tonemap, ColorCorrection), the base state comes from the
+always-on VE with the highest Priority. Areas then blend over it, lowest Priority first, by their weight at the
+camera: 1 inside the shape, falling linearly to 0 at the fade distance [inferred]. Metro uses:
+
+| VE | role | Priority | shape | what it changes |
+|---|---|---|---|---|
+| `ve_mp_subway_park_01` | base | 2750 | always on | sun (4, 3.02, 1.88) at elevation 35°, sky, fog 25..1382 m, MiddleGray 0.3, exposure 0.1..5, LUT 0 |
+| `ve_mp_subway_city_01` | area | 3500 | box, centre (-194.8, 76.4, -538.0), half extents (159, 20, 114.6), fade 1 m | street: sun peak 6, sky ×5, fog density 0.061, exposure 1..7, LUT 1 |
+| `ve_mp_subway_subway_01` | area | 4000 | 6-point polygon, floor 43.48 m, height 26 m, fade 2 m | station: sun peak 10, sky ×4, a fog curve that fits to density 0 (no fog), MiddleGray 0.15, exposure 0.25..30, LUT 2 |
+| `ve_mp_subway_subway_02` | area | 4500 | polygon, floor 36.41 m, height 100 m, fade 5 m | deeper tunnels: sun off |
+
+`cameras_01` is Excluded. `motionblur` has no component the look reads. The dominant state's LUT is the one drawn
+(an area's LUT from weight 0.5). `bf3dump looks` prints the read environment, the LUT grey ramps and the blended
+values at the four shot views.
+
+**Mapping to Godot** (`look_bridge.cpp`; one DirectionalLight3D, one WorldEnvironment, CameraAttributesPractical):
+
+* Sun: the light's colour is SunColor divided by its peak, and its energy is the peak (park 4, street 6)
+  [inferred]. Energy = peak / π, which treats SunColor as irradiance, drew every view far too dark at any exposure
+  within Min..MaxExposure. The direction comes from SunRotationX (azimuth from +Z toward +X) and SunRotationY
+  (elevation). Shadows reach 250 m.
+* Ambient: a sky shader whose radiance pass draws three bands:
+  * up = Enlighten SkyBoxSkyColor + 0.25 × bounce;
+  * horizon = the mean of sky and ground + 0.5 × bounce;
+  * down = SkyBoxGroundColor + bounce;
+  * bounce = SunColor × sin(elevation) × 0.25 (kBounceAlbedo) × BounceScale [inferred].
+  Enlighten is precomputed radiosity, stored in a res format not read here. Enlighten SunScale is not applied:
+  with it, the street's shade (SunScale 0.25) drew near black.
+* Sky: the panorama covers the upper hemisphere (u from PanoramicRotation, v over PanoramicUVMinY..MaxY), blended by
+  the red channel of PanoramicAlphaTexture over SkyGradientTexture, all × BrightnessScale. The sky parameters are
+  re-sent only when they change by more than 1 % (each change re-renders the 64² radiance map).
+* Fog: on by default. Godot depth fog, density × smoothstep(begin, end, d)^curve [inferred], is least-squares fitted
+  to the Fog Curve cubic over the first 1500 m past Start; the park gives 25..1382 m, density 0.156, curve 0.57. The
+  fog colour is the panorama's horizon (its bottom 15 % of rows, linear) × BrightnessScale, tinted toward FogColor by
+  the peak of FogColorCurve. The station area's fog curve fits to density 0, so it draws no fog.
+* Exposure: BF3 exposes each frame to MiddleGray / average luminance, clamped to Min..MaxExposure. Godot's auto
+  exposure does the same, with scale = MiddleGray and its sensitivity clamp set from the exposure limits:
+  min_sensitivity = MiddleGray / MaxExposure / k and max_sensitivity = MiddleGray / MinExposure / k. Speed is
+  1 / ExposureAdjustTime. k = 0.00125 scene luminance per ISO was **measured**:
+  * With both sensitivities at 24 ISO, the park drew like a fixed exposure of about 9.6.
+  * The street clamp (34..240 ISO) then bounded the views between fixed exposures 7 and 1.
+  * The 12.5 / 100 that the API docs suggest overexposed every view about 100×.
+* Tonemap and bloom: filmic with white 4 [inferred] stands in for BF3's FilmicNeutral. Additive glow uses HDR
+  threshold 0 and intensity = the peak BloomScale.
+* Colour correction: Contrast (about 0.5), Brightness and Saturation (about Rec.601 luma) per channel, then the
+  ColorGradingTexture (a 32³ volume, red fastest, corner-aligned). They are baked into one 32³ RGBA8 LUT per state,
+  sampled at texel centres, and drawn through Environment adjustment_color_correction (an ImageTexture3D). A probe
+  run confirmed that Godot feeds the LUT display-encoded (sRGB) values, as BF3 grades them.
+
+**The blue cast in shade.** M1 normalised the Enlighten sky colour to a peak of 0.7 and drew it as the only ambient,
+at energy 0.6, against a sun of energy 1.0 (SunColor × 0.25). Shade therefore got 42 % of the sun's level, in pure
+sky blue. BF3's numbers are a sky radiance of (0.06, 0.116, 0.157) against a SunColor of 4, plus warm bounce light.
+L1 keeps the sky at its radiance and the sun at SunColor, and adds the bounce estimate: the park's ambient is
+up (0.20, 0.22, 0.22) and down (0.74, 0.57, 0.33). The teal that remains in deep shade is BF3's own grade: park LUT 0
+maps display grey 0.27 to about (0.07, 0.20, 0.22), and `--look-off=lut` removes it.
+
+**Inferred constants** (each marked [inferred] in the code):
+
+| constant | value | where |
+|---|---|---|
+| area fade | linear, 1 inside the shape to 0 at ProximityDistance | `look_area_weight` |
+| sun energy | the SunColor peak, no 1/π | `look_frame_of` |
+| bounce albedo | 0.25 (kBounceAlbedo) | `look_environment.h` |
+| ambient bands | up = sky + ¼ bounce, horizon = ½ (sky + ground) + ½ bounce, down = ground + bounce | `look_frame_of` |
+| fog shape | Godot depth fog as density × smoothstep^curve, fitted over 1500 m | `fog_fit` |
+| exposure unit | 0.00125 luminance per ISO (measured) | `look_bridge.cpp` kLuminancePerIso |
+| static exposure (`--look-off=exposure` only) | reference albedo 0.3, sunlit share 0.1 | `look_environment.h` |
+| filmic white | 4 | `look_bridge.cpp` |
+| glass | opacity 0.3, untextured tint 0.25, roughness 0.1 | `level_upload.cpp` |
+| overlay UV (TEXCOORD2) | drawn from uv0 at scale 1 | `look_materials.h` |
+
+Diagnosis switches (after `--`): `--look=m1`, `--look-off=exposure,fog,bloom,lut` (any subset),
+`--look-exposure=<e>` (a fixed exposure), `--shot-settle=<s>` (free shots wait s seconds for auto exposure; default
+0), and `--shot-measure=<n>` (time n frames at each free shot, both as frame intervals and as the viewport's GPU
+render time).
+
+**Gates** (dev build, Radeon RX 9070 XT, D3D12, 2560×1440 fullscreen, vsync off; other tracks were building and
+testing on the machine, so every timing here is noisy and the acceptance rerun on a quiet machine decides):
+
+| gate | threshold | measured | command |
+|---|---|---|---|
+| L1 albedo coverage | >= 95 % of drawn instance slots | 98.01 % (PASS) | `bf3dump looks MP_Subway TeamDeathMatch0` |
+| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | @@FT@@ | `ctest --preset dev -R godot.l1_look` |
+| E4 cold load | 15 s | @@E4@@ | `ctest --preset dev -R godot.m1_load` |
+| E5 warm load | 5 s | @@E5@@ | same |
+
+`godot.l1_look` runs `--look=m1` and `--look=l1` alternately for 3 rounds (`-DROUNDS=n` in script mode). Each run
+holds 4 free views (street at TDM spawn 13, station at spawn 22, park, overview) and times 300 frames per view after
+a 3 s settle; the medians of the per-run means are compared. GPU render time is reported, not gated: @@GPU@@ Set
+`OPENBF3_LOOK_SHOTS=<dir>` to keep the last round's shots, `m1_<view>.png` and `l1_<view>.png` (for example
+`b\shots\l1`, which is gitignored; never commit them).
+
+Tests: `render.look.unit` (no data) covers the shader database reader on a synthetic res: fields, every truncation,
+4 × 863 single-byte mutations, and a res whose 20,000 solution uses exceed the work budget. It also covers the
+resolver's tiers, normal pairing, glass, alpha test and undrawn rules on a synthetic lookup, plus `fog_fit`, the
+area weights (box, polygon, fade, NaN and infinite positions), the `look_frame` blend and `look_grade`.
+`render.look` (install) parses Metro's shader database: 2 render paths, 1,280 shaders, 51,602 work units of a
+budget of 116 M. It also opens the resolver with 0 failures, reads the environment (park base, 3 areas, 3 LUTs) and
+checks install.unchanged. Both pass under `--preset asan`, as do `render.scene` and `bf3dump looks`. `render.scene`
+now accepts an albedo that is not one of the slot's textures when the L1 resolver chose it from the graph.
+
+Open issues:
+* No local lights (BF3's point and spot lights are not read) and no Enlighten radiosity: indoor and station light is
+  the area's sun and ambient only.
+* The terrain still draws one flat colour.
+* The 334 constant-colour slots draw untextured grey. Their colours are in compiled shader code, which is not read.
+* Glass opacity is a fixed guess.
+* Overlay uv2 is drawn from uv0.
+* World-projected graph textures use a triplanar-style dominant-axis mapping, not BF3's exact projection.
+* The sky, fog, bounce and LUT mappings are inferred and have not been compared against BF3 frames.
+* GPU render time rises by about @@GPUPCT@@ (radiance map, glow, fog, LUT and sky pass), while the frame interval
+  stays within the gate.
+* The plan default is now L1, so `godot.m1` and `godot.m1_load` run with L1 materials.
