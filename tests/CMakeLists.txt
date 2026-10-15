@@ -404,3 +404,9 @@ if(OPENBF3_ASAN)
     set_tests_properties(sim.weapons sim.weapons.range sim.weapons.fuzz sim.weapons.perf
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
 endif()
+# M2a weapons: `bf3dump weapon-sim --check` prints the data-backed W1-W6 / W9 rows and exits 0 / 1 (77 without an install).
+add_test(NAME tools.weapon_sim COMMAND bf3dump weapon-sim --check)
+set_tests_properties(tools.weapon_sim PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(tools.weapon_sim PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()

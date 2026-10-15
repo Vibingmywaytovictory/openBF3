@@ -48,6 +48,9 @@
 //                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
 //                              ... --shapes` adds them to a prepare run
 //   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
+// M2a weapons (docs/design/m2a-weapons.md §10; weapon_sim_commands.cpp):
+//   weapon-sim <partition> | --all | --check   the weapon simulation on resolved defs (timing, drop, shots to kill)
+//   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -70,6 +73,8 @@
 #include "shapes_commands.h" // M1 T1
 // M1 T2: spawn points and spawners of a level x mode.
 #include "spawns_commands.h"
+// M2a weapons: weapon-sim and range.
+#include "weapon_sim_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -500,6 +505,7 @@ void usage() {
 			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
+	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
 }
 
 } // namespace
@@ -614,6 +620,13 @@ int wmain(int argc, wchar_t **argv) {
 	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
+	}
+	// M2a weapons: weapon-sim and range (weapon_sim_commands.cpp; docs/design/m2a-weapons.md §10).
+	if (cmd == "weapon-sim") {
+		return bf3dump::cmd_weapon_sim(ebx_ctx, rest);
+	}
+	if (cmd == "range") {
+		return bf3dump::cmd_range(ebx_ctx, rest);
 	}
 	usage();
 	return 2;

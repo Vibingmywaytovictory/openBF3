@@ -21,3 +21,6 @@ target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `
 # M1 T2 (motor; docs/design/m1.md §10.1): `spawns <LEVEL> <MODE>`, the spawn points and spawners as TSV (bf3_sim from
 # T1's block above).
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
+# M2a weapons (docs/design/m2a-weapons.md §10): `weapon-sim` and `range`, the weapon simulation of bf3_sim on defs
+# resolved from the install (bf3_sim from M1 T1's block above).
+target_sources(bf3dump PRIVATE weapon_sim_commands.cpp weapon_sim_commands.h)
