@@ -1284,6 +1284,14 @@ struct LogicRuntime::State {
 				return;
 			case T::PrintDebugText:
 				return;
+			case T::Locator:
+				// A driven Transform republishes like the constant one at start (XP3_Valley drives some) [inferred].
+				if (p_port == port::kTransform) {
+					publish_all_ports(p_node, p_value);
+				} else {
+					unhandled_port(p_node, p_port, false);
+				}
+				return;
 			default:
 				unhandled_port(p_node, p_port, false);
 				return;
