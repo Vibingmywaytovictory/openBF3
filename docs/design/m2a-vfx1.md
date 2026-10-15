@@ -481,4 +481,4 @@ building): every row passed except `godot.m1` (E1 teleport: "the soldier did not
 10 s") and `godot.m1_load` (E4 cold 19.0 s > 15 s, E5 warm 6.2 s > 5 s), Godot timing rows that VFX1 cannot affect (no
 Godot-side change). After this design commit the full ctest ran again: 57/57 passed (55 passed, `core.cache_data` and
 `core.res` skipped for their unset sample variables), including `godot.m1` (344 s) and `godot.m1_load` (50 s) and the
-new `fx.contract`; total 798 s. The earlier two failures were load on the shared machine, not a code fault.
+new `fx.contract`; total 798 s. The earlier two failures were most likely load on the shared machine (same code, now passing) [inferred].
