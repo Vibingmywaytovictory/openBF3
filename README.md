@@ -1154,8 +1154,8 @@ BF3's shader graph samples, and the level is lit from its VisualEnvironment EBX.
 database reader), `look_materials.h` (which textures a material draws, and how), `look_environment.h` (the
 environment read, per-camera blend, fog fit, grade LUTs), `level_scene.cpp` (plans L1 unless
 `ScenePlanOptions::look` says M1); `bf3_godot` `level_upload.cpp` (six L1 material shaders) and `look_bridge.cpp`
-(sun, sky, ambient, fog, exposure, glow and LUT, updated each frame from the camera position). The selection and
-material rules are ported from IW4L `level_bf3` / `resource_bf3` (the user's own Apache-2.0 code).
+(sun, sky, ambient, fog, exposure, LUT and the opt-in glow, updated each frame from the camera position). The
+selection and material rules are ported from IW4L `level_bf3` / `resource_bf3` (the user's own Apache-2.0 code).
 
 **Why about half of Metro's materials drew flat.** The MeshVariationDatabase entry (and the MeshMaterial) of those
 slots lists no TextureParameters at all: their textures are constants of the surface shader graph, which only the
@@ -1235,8 +1235,10 @@ values at the four shot views.
   * With both sensitivities at 24 ISO, the park drew like a fixed exposure of about 9.6.
   * The street clamp (34..240 ISO) then bounded the views between fixed exposures 7 and 1.
   * The 12.5 / 100 that the API docs suggest overexposed every view about 100×.
-* Tonemap and bloom: filmic with white 4 [inferred] stands in for BF3's FilmicNeutral. Additive glow uses HDR
-  threshold 0 and intensity = the peak BloomScale.
+* Tonemap and bloom: filmic with white 4 [inferred] stands in for BF3's FilmicNeutral. Bloom is off by default:
+  Godot's glow (additive, HDR threshold 0, intensity = the peak BloomScale, about 0.07 on Metro) cost 0.31 ms of
+  GPU time per frame (2.08 -> 1.76 ms over the four views) and changed the frames by under 0.5 / 255 on average,
+  because auto exposure takes the added light back. `--look-bloom` draws it.
 * Colour correction: Contrast (about 0.5), Brightness and Saturation (about Rec.601 luma) per channel, then the
   ColorGradingTexture (a 32³ volume, red fastest, corner-aligned). They are baked into one 32³ RGBA8 LUT per state,
   sampled at texel centres, and drawn through Environment adjustment_color_correction (an ImageTexture3D). A probe
@@ -1264,10 +1266,11 @@ maps display grey 0.27 to about (0.07, 0.20, 0.22), and `--look-off=lut` removes
 | glass | opacity 0.3, untextured tint 0.25, roughness 0.1 | `level_upload.cpp` |
 | overlay UV (TEXCOORD2) | drawn from uv0 at scale 1 | `look_materials.h` |
 
-Diagnosis switches (after `--`): `--look=m1`, `--look-off=exposure,fog,bloom,lut` (any subset),
+Diagnosis switches (after `--`): `--look=m1`, `--look-bloom`, `--look-off=exposure,fog,bloom,lut,blend` (any
+subset; blend draws glass opaque),
 `--look-exposure=<e>` (a fixed exposure), `--shot-settle=<s>` (free shots wait s seconds for auto exposure; default
 0), and `--shot-measure=<n>` (time n frames at each free shot, both as frame intervals and as the viewport's GPU
-render time).
+render time, with per-view medians).
 
 **Gates** (dev build, Radeon RX 9070 XT, D3D12, 2560×1440 fullscreen, vsync off; other tracks were building and
 testing on the machine, so every timing here is noisy and the acceptance rerun on a quiet machine decides):
@@ -1275,13 +1278,33 @@ testing on the machine, so every timing here is noisy and the acceptance rerun o
 | gate | threshold | measured | command |
 |---|---|---|---|
 | L1 albedo coverage | >= 95 % of drawn instance slots | 98.01 % (PASS) | `bf3dump looks MP_Subway TeamDeathMatch0` |
-| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | @@FT@@ | `ctest --preset dev -R godot.l1_look` |
-| E4 cold load | 15 s | @@E4@@ | `ctest --preset dev -R godot.m1_load` |
-| E5 warm load | 5 s | @@E5@@ | same |
+| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | 7.41 against 6.88 ms, 1.076 (PASS) | `ctest --preset dev -R godot.l1_look` |
+| E4 cold load | 15 s | 2.59 s (PASS; `_ready` -> Done 1.98 s) | `ctest --preset dev -R godot.m1_load` |
+| E5 warm load | 5 s | 1.98 s (PASS; `_ready` -> Done 1.30 s) | same |
 
-`godot.l1_look` runs `--look=m1` and `--look=l1` alternately for 3 rounds (`-DROUNDS=n` in script mode). Each run
+`godot.l1_look` runs `--look=m1` and `--look=l1` alternately for 5 rounds (`-DROUNDS=n` in script mode). Each run
 holds 4 free views (street at TDM spawn 13, station at spawn 22, park, overview) and times 300 frames per view after
-a 3 s settle; the medians of the per-run means are compared. GPU render time is reported, not gated: @@GPU@@ Set
+a 3 s settle. A run's frame time is the mean over its views of the per-view median frame interval, and the medians
+over the rounds are compared. GPU render time (same statistic) is reported, not gated.
+
+The measured frame intervals (M1 6.87-7.62 ms per round) are about 2.5 × what the same runs give on an idle
+machine (M1 about 2.7 ms), because the other tracks kept every core busy: the frames are CPU bound, and the
+interval is mostly scheduling. An earlier gate run on a lighter load gave M1 2.67 against L1 2.94 ms (mean
+statistic, 3 rounds). GPU render time is stable under that load (M1 1.498-1.504 ms per round): L1 draws in
+1.764-1.777 ms, **+17.6 %** (0.27 ms) over M1. Parts, measured with `--look-off` (four views, GPU medians, ms):
+
+| run | GPU | against M1 |
+|---|---|---|
+| M1 | 1.506 | |
+| L1 with bloom (before it went off by default) | 2.076 | +0.57 |
+| L1 without bloom (the default) | 1.761 | +0.26 |
+| L1 without exposure | 2.024 | exposure 0.05 |
+| L1 without fog | 2.068 | fog 0.01 |
+| L1 without LUT | 2.057 | LUT 0.02 |
+| L1 with glass opaque | 1.981 | the transparent pass 0.10 |
+| L1 without exposure, fog, bloom, LUT and blending | 1.616 | the textures and normal maps 0.11 |
+
+Set
 `OPENBF3_LOOK_SHOTS=<dir>` to keep the last round's shots, `m1_<view>.png` and `l1_<view>.png` (for example
 `b\shots\l1`, which is gitignored; never commit them).
 
@@ -1303,6 +1326,7 @@ Open issues:
 * Overlay uv2 is drawn from uv0.
 * World-projected graph textures use a triplanar-style dominant-axis mapping, not BF3's exact projection.
 * The sky, fog, bounce and LUT mappings are inferred and have not been compared against BF3 frames.
-* GPU render time rises by about @@GPUPCT@@ (radiance map, glow, fog, LUT and sky pass), while the frame interval
-  stays within the gate.
+* GPU render time rises by 17.6 % (0.27 ms at 2560x1440): textures and normal maps on twice as many slots, the
+  glass pass, auto exposure, fog and the LUT. The frame interval, which is CPU bound on this machine, stays within
+  the gate. A GPU-bound budget would have to give up the glass pass (0.10 ms) or auto exposure (0.05 ms) first.
 * The plan default is now L1, so `godot.m1` and `godot.m1_load` run with L1 materials.
