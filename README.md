@@ -64,6 +64,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
+S2 vehicle replay adds `s2.contract` (no data) now and `sim.vehicle.unit` / `sim.vehicle` with the implementation (see "S2 vehicle replay").
 
 ## Run
 
@@ -1143,3 +1144,28 @@ measured 4.8 s (the OS file cache was colder).
 Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
 terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
 floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.
+
+## S2 vehicle replay (spike)
+
+<!-- S2 vehicle -->
+Spike S2 (docs/design/s2.md): the Humvee on Jolt's `VehicleConstraint` + `WheeledVehicleController` in a server world
+and a prediction world over one shared static world (MP_007 RushLarge0), saved and restored at full precision, driven
+by recorded command logs on 7 found courses. The interfaces are in the tree (`bf3_core` `gameplay/vehicle_drive.h`,
+`level/vehicle_spawns.h`; `bf3_sim` `vehicle_types.h`, `vehicle_ghost.h`, `vehicle_model.h`, `vehicle_world.h`,
+`vehicle_course.h`, `vehicle_replay.h`); what the data does not say is `bf3-opensource/config/vehicle_tuning.cfg`
+(30 keys, all `[inferred]` placeholders: IW4L's tuned jeep and Jolt defaults, for S5 Session 2 to replace).
+
+Gates, each one command (thresholds in docs/design/s2.md §1; timings printed by the runs are noisy on a shared machine
+and are not gates):
+
+| gate | threshold | command |
+|---|---|---|
+| G1 free driving bit-identical | 0 of 3,600 ticks with a differing state hash, every course | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| G1r replay from any tick | 0 mismatching ticks over 15 restore ticks per course | same |
+| G2 corrections with quantised 30 Hz ghosts | max and p99 < 0.02 m per course at 100 and 150 ms replays | same |
+| H handling numbers | report only (unverified placeholders) | same, or `bf3dump vehicle-replay MP_007 RushLarge0 --handling` |
+| install unchanged | sizes and mtimes equal | same |
+| contract / units | pass | `ctest --preset dev -R "^(s2\.contract\|sim\.vehicle\.unit)$"` |
+
+`s2.contract` runs now; `sim.vehicle.unit`, `sim.vehicle` and the `bf3dump vehicledrive` / `vehicle-replay` commands come
+with the implementation.

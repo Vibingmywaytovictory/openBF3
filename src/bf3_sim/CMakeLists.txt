@@ -45,3 +45,15 @@ target_sources(bf3_sim PRIVATE
     src/spawn.cpp
     src/prediction.cpp
 )
+
+# S2 vehicle (docs/design/s2.md §5-§8, §12): the vehicle model and tuning, the vehicle world (VehicleConstraint on our
+# Jolt, save / restore), the quantised ghost, the courses and command logs, the replay harness and its gates.
+# Interfaces only until the S2 implementation adds the sources.
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/vehicle_types.h
+    include/bf3/sim/vehicle_ghost.h
+    include/bf3/sim/vehicle_model.h
+    include/bf3/sim/vehicle_world.h
+    include/bf3/sim/vehicle_course.h
+    include/bf3/sim/vehicle_replay.h
+)

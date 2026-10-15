@@ -341,3 +341,15 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.m1_load COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1_load.cmake)
     set_tests_properties(godot.m1_load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
+
+# S2 vehicle (docs/design/s2.md §11): s2.contract compiles every S2 header together and checks the plain types, the
+# restore groups, the ghost widths (equal to the soldier ghost's position quantisers) and the shipped
+# vehicle_tuning.cfg keys. No data.
+openbf3_test(test_s2_contract test_main.cpp s2_contract_tests.cpp test_support.h)
+target_link_libraries(test_s2_contract PRIVATE bf3_sim bf3_net)
+target_compile_definitions(test_s2_contract PRIVATE "OPENBF3_VEHICLE_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/vehicle_tuning.cfg\"")
+add_test(NAME s2.contract COMMAND test_s2_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_s2_contract_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(s2.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s2_contract_cl_dir}")
+endif()
