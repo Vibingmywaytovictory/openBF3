@@ -64,6 +64,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
+S1 (spike, docs/design/s1.md): `s1.contract` (no data) now; the implementation adds `sim.nav.unit`, `host.scale.unit` (no data), `sim.nav` and the RUN_SERIAL timing gates `sim.nav.bake` and `host.scale` (install; see "S1 server scale (spike)").
 
 ## Run
 
@@ -1143,3 +1144,26 @@ measured 4.8 s (the OS file cache was colder).
 Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
 terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
 floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.
+
+<!-- S1 server scale (spike) -->
+## S1 server scale (spike)
+
+Spike S1 (docs/design/s1.md) asks whether a 60 Hz server steps 64 navmesh walker bots within 8 ms per tick, and
+whether the Detour navmesh baked from exactly the motor's collision set (Collision + Character bodies, terrain with
+holes, the level's combat-area tiles as terrain cover) connects every flag, HQ, MCOM and spawn point. Interfaces:
+`bf3/core/level/mode_areas.h`, `bf3/sim/nav.h`, `bf3/sim/nav_query.h`, `bf3/sim/bots/walker_brain.h`,
+`bf3/host/bot_fill.h`, `bf3/host/scale_bench.h`. Recast/Detour is built with 64-bit poly refs.
+
+Each gate is one ctest (the machine is shared while the tracks run, so timings are noisy; acceptance reruns them on
+a quiet machine):
+
+| gate | ctest | threshold |
+|---|---|---|
+| G1 tick | `host.scale` (Metro and Caspian ConquestLarge0, 64 walkers + 1 observer, 10 s warm-up + 120 s sim time ticked back to back) | p99 `GameServer::tick` <= 8.0 ms on each level; >= 90 % of bots walk >= 100 m, abandoned goals <= 10 % |
+| G2 connectivity | `sim.nav` (Metro and Caspian, all 7 MP modes) | every flag, HQ, MCOM and spawn on the mesh and in the main strongly connected component |
+| G3 sweep cost | `host.scale` | motor steps, queries per step, queries per second, us per step printed and non-zero |
+| G4 bake | `sim.nav.bake` (Caspian and Kharg ConquestLarge0, uncached, 16 threads) | Caspian <= 6.0 s, Kharg <= 13.0 s (tile inputs + Recast + assembly) |
+
+The same numbers for a human: `bf3dump bots <LEVEL> <MODE>`, `bf3dump nav bake|stats|components|path|probe`. In the
+game, `res://scenes/m1_metro.tscn -- --bots=64 --nav-overlay` adds the walkers to the M1 server and draws the navmesh
+by component (F7 toggles); screenshots go to `b\shots\s1\`.

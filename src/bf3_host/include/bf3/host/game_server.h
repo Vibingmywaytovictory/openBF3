@@ -37,6 +37,7 @@
 // Sending: ServerHost sends the returned OutDatagrams and flushes ENet in the same tick (server_host.h).
 
 #include "bf3/core/result.h"
+#include "bf3/host/bot_fill.h"
 #include "bf3/host/level_load.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
@@ -68,6 +69,9 @@ struct GameServerConfig {
 	uint32_t walkers = 0; // scripted walkers circling near spawn points (interpolation targets, docs §8.3)
 	bool dev_commands = false; // accept Debug requests (tests, --m1-check)
 	uint64_t seed = 1; // spawn choice and walker scripts
+	// S1 (docs/design/s1.md §6, §8): headless walker bots (nav + walker brain, bot_fill.h), added in init() as
+	// server-side soldiers through the same CommandSource path as the scripted walkers. Null = none.
+	std::shared_ptr<const BotFillConfig> bots;
 };
 
 struct OutDatagram {
@@ -109,6 +113,18 @@ struct GameServerStats {
 	double last_step_ms = 0; // motor steps of the last tick
 	double last_encode_ms = 0;
 	std::vector<SlotStats> slots;
+	// S1 (docs/design/s1.md §6.1): the parts of the last tick, wall milliseconds on the server thread. A tick is
+	// last_commands_ms (jitter buffers -> the tick's commands) + last_sources_ms (command sources: bot brains with
+	// their nav queries and path searches, scripted walkers, sweep dummies) + last_step_ms (one motor step per live
+	// soldier) + last_rules_ms (spawns with their settle, dev requests) + last_encode_ms (snapshots), and
+	// last_tick_ms is the whole GameServer::tick (datagram receive is outside: ServerHost hands datagrams in before).
+	double last_tick_ms = 0;
+	double last_commands_ms = 0;
+	double last_sources_ms = 0;
+	double last_rules_ms = 0;
+	uint64_t motor_steps = 0; // since init
+	uint64_t collision_queries = 0; // the server CollisionWorld's query_count() (motor casts, settles, bots' rays)
+	BotFillStats bots; // zero without GameServerConfig::bots
 };
 
 class GameServer {

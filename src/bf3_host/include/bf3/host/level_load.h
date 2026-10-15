@@ -119,6 +119,10 @@ struct SharedLoadOptions {
 	// passes the cores the scene lanes do not use (docs §12.2).
 	unsigned threads = 0;
 	sim::MotorTuning tuning;
+	// S1 (docs/design/s1.md §5.2): StaticWorldLoadOptions::terrain_cover (the level's combat-area tiles,
+	// mode_areas.h level_combat_tiles). Empty = M1's static world, bit for bit. The bots need it: the nav is baked
+	// from the same soup, and the motor must stand on the terrain the nav walks on.
+	std::vector<std::array<int32_t, 2>> terrain_cover;
 };
 
 // On the loader thread that owns p_db.

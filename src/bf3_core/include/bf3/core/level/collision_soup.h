@@ -233,6 +233,12 @@ struct SoupOptions {
 	bool terrain = true; // add the terrain heightfields
 	float terrain_spacing = 2.0f; // target metres between terrain samples
 	SoupProgress *progress = nullptr;
+	// S1 (docs/design/s1.md §5.2): extra 64 m tiles (soup tile keys, sorted, unique) whose terrain cells are kept as
+	// well, beside the rule above (tiles with Havok triangles and their 8 neighbours). Empty = the default rule only,
+	// so every soup without it is unchanged (the level-oracle parity, kCollisionSoupVersion). S1 passes the level's
+	// combat-area tiles: on Caspian CQL 35 of its 273 combat-area tiles, on Kharg CQL 1,119 of 1,494, hold no soup
+	// triangle at all under the default rule [verified 2026-10-15], so a walker there would fall through the world.
+	std::vector<std::array<int32_t, 2>> terrain_cover;
 };
 
 // The soup algorithm's version: bump it whenever the same install gives different soup triangles, tags or

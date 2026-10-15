@@ -76,6 +76,8 @@ target_compile_options(enet PRIVATE /wd5287 /wd4996) # upstream enum-mix and win
 set(RECASTNAVIGATION_DEMO OFF CACHE BOOL "" FORCE)
 set(RECASTNAVIGATION_TESTS OFF CACHE BOOL "" FORCE)
 set(RECASTNAVIGATION_EXAMPLES OFF CACHE BOOL "" FORCE)
+# S1 nav (docs/design/s1.md §5.3): 64-bit Detour poly refs (Kharg's CQL alone has 1,494 combat-area tiles).
+set(RECASTNAVIGATION_DT_POLYREF64 ON CACHE BOOL "" FORCE)
 # v1.6.0 declares cmake_minimum_required(3.0), which CMake 4 rejects without this floor.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_subdirectory(extern/recastnavigation recast EXCLUDE_FROM_ALL)

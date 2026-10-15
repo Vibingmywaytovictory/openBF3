@@ -28,3 +28,9 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/rest_check.h
 )
 target_link_libraries(bf3_host PRIVATE psapi)
+
+# S1 bots (spike S1; docs/design/s1.md §6, §8, §11): walker bots on the GameServer and the scale measurement.
+target_sources(bf3_host PRIVATE
+    include/bf3/host/bot_fill.h
+    include/bf3/host/scale_bench.h
+)

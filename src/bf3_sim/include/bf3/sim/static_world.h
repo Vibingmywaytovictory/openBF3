@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -58,6 +59,10 @@ enum class StaticLayer : uint8_t {
 	Character = 2, // RBTypeCharacter: blocks soldiers only (invisible character collision)
 };
 inline constexpr size_t kStaticLayerCount = 3;
+// The layer of a soup triangle: StaticLayer(body). The one rule the static world's tile cook and the S1 nav input
+// (nav.h) both use, so the navmesh is baked from exactly the triangles the motor collides with (docs/design/s1.md
+// §5.1). Defined by S1 in static_world.cpp; nullopt for a body past kStaticLayerCount (the cook's error case).
+std::optional<StaticLayer> static_layer_of(uint8_t p_soup_body);
 
 // Which static layers a query sees (bit = 1 << StaticLayer).
 namespace query_mask {
@@ -172,6 +177,10 @@ struct StaticWorldLoadOptions {
 	unsigned soup_threads = 0; // SoupOptions::threads for the cold path
 	float terrain_spacing = 2.0f; // SoupOptions::terrain_spacing (a key parameter)
 	core::level::SoupProgress *soup_progress = nullptr; // cold path stage display (optional)
+	// S1 (docs/design/s1.md §5.2): SoupOptions::terrain_cover for the cold path (the level's combat-area tiles). A
+	// non-empty cover is a key parameter of the "jolt-world" entry ("cover=<SHA-256 of the sorted tile list>"); an
+	// empty one leaves the key text exactly as M1 wrote it, so M1's entries stay valid.
+	std::vector<std::array<int32_t, 2>> terrain_cover;
 };
 
 // The static world of a traversed level x mode through the cache (see the header comment). p_cache may be null
