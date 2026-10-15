@@ -1,6 +1,7 @@
 # UI groundwork 1 design: SWF symbol tables, atlases and fonts
 
-Status: design for implementation, revision 2, 2026-10-15 (after review; §20 lists what changed). Track ui1, branch
+Status: implemented 2026-10-16 (§21: the measured gates, one command each, and what the implementation changed in
+this design); design revision 2, 2026-10-15 (after review; §20 lists what changed). Track ui1, branch
 `ui/swf-fonts`. Scope: the first UI groundwork wave of route A+ (plan
 [research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md) §3.8, D16; §2.2 "UI readers: SWF symbol table,
 `DefineFont3`"; §7.8): BF3's own SwfMovie data read at run time as symbol tables, its external atlases cut into named
@@ -35,9 +36,9 @@ gates have wide margins and every run prints its measured value.
 | G1 | all 434 SwfMovie res parse with 0 errors; the census is complete | `ctest -R "^core\.ui\.swf$"` (install): `SwfLibrary::open` + `run_swf_census` over every SwfMovie of the install; also `bf3dump swf census` (exit 1 on any error) | 434 movies, 434 parsed, 0 errors; `distinct_sha1s == 1` for every name (`multi_sha1_names` 0); 0 labels after their timeline's last ShowFrame; the tag totals equal the §4.2 table exactly (they are the probe's numbers; a difference is either a reader bug or a probe bug and must be explained in README before the gate is changed). Identical bytes per name are verified so far only across the 11 superbundles that cover all names (§4.1); the census is the first check over all 10,303 entries. If it finds a name with two SHA-1s, G1 **fails** and lists the names: there is no automatic "first holder" fallback, and only the user (through the orchestrator) can accept one, recorded in README with the names |
 | G2 | iconsingame 162 rectangles and 427 labels, the complete label → rectangle map | `core.ui.swf`: `build_atlas_map` of `ui/assets/iconsingame`; `bf3dump swf labels ui/assets/iconsingame` prints the map | 1 external image `iconsingame_i1.tga` 4096 × 128 whose DxTexture exists with that size (DXT5); 162 sub-images, 0 outside the atlas; 427 labels on 6 sprites, of which 135 draw art (110 one piece, 25 two) and 292 are empty frames; 95 sub-images reached from labels, 96 with the exported symbols, 162 from frames; spot checks of §6.3 |
 | G3 | Purista (443) and Venice (33) convert to TrueType | `ctest -R "^core\.ui\.font$"` (install): `UiFontLibrary::load` for `localization/us_loc` on a fresh scratch cache root, then again (warm) | 4 fonts; TrueType `numGlyphs` 444 / 444 / 34 / 34 (source + `.notdef`); cmap 442 / 442 / 32 / 32 codes; U+00C9 mapped in both Purista; `contours_reversed` 0; `read_truetype` round trip: every point within 0.5 font unit of the scaled source, every advance exact after scaling, kerning pairs 335 / 324 / 0 / 0; cold → 4 `converted`, warm → 4 `hit`; a damaged entry → `dropped_corrupt`, reconverted, then `hit` |
-| G4 | the fonts load in Godot (`FontFile.set_data` succeeds, glyph count matches) | `ctest -R "^godot\.ui_fonts$"` (install + Godot, headless): `res://scenes/ui_fonts.tscn -- --ui-check` | rows `fonts.set_data`, `fonts.glyphs`, `fonts.contours`, `fonts.metrics` (every glyph's advance within 0.05 px and each sample string within 0.5 px of the source layout at 64 px, measured on the §10 FontFile settings), `fonts.kerning` (AV narrower by 3.84 ± 0.25 px), `fonts.metro` pass for all 4 fonts (§11.1); last line `UI1 CHECK: PASS (n/n)`, exit 0 |
+| G4 | the fonts load in Godot (`FontFile.set_data` succeeds, glyph count matches) | `ctest -R "^godot\.ui_fonts$"` (install + Godot, headless): `res://scenes/ui_fonts.tscn -- --ui-check` | rows `fonts.set_data`, `fonts.glyphs`, `fonts.contours`, `fonts.metrics` (every glyph's advance within 0.05 px and each sample string's shaped width (the sum of its shaped glyph advances, §11.1) within 0.5 px of the source layout at 64 px, measured on the §10 FontFile settings), `fonts.kerning` (AV narrower by 3.84 ± 0.25 px), `fonts.metro` pass for all 4 fonts (§11.1); last line `UI1 CHECK: PASS (n/n)`, exit 0 |
 | G5 | sample strings rendered windowed, screenshots inspected (no inverted contours, right baseline and advances) | `ctest -R "^godot\.ui_fonts_shots$"` (install + Godot, **windowed**; 77 without a window): the same check plus `--shot-dir=<dir>`, three PNGs; `<dir>` = `$ENV{OPENBF3_UI1_SHOTS}`, default `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1\` (absolute, gitignored, outside any worktree; ui2's `OPENBF3_UI2_SHOTS` convention) | the check passes and the three PNGs exist; the implementer opens them and records in README what they show (holes of O/A/0/8 open, glyphs on one baseline, no overlap or gaps at 16 / 32 / 64 px, "MÉTRO" with its accent). The visual judgement is manual; the automated parts of the same claim are G3's round trip and G4's `fonts.contours` / `fonts.metrics` rows |
-| G6 | the font mapping resolves every `$MENU_*` / `$HUD_*` name | `core.ui.swf`: every font name the 434 movies use (gfxfontlib imports, glyphless `DefineFont3` names, edit-text font classes) through `resolve_font_name` on the en collection | 0 `Unresolved`; the per-rule counts of §7.4 printed and equal: Exact 4, CaseFolded 2, Family 4, Device 5, counted as **distinct names after dropping one trailing `*`** (`$FONT_TITLE` and `$FONT_TITLE*` are one name, `$Menu_light*` counts as `$Menu_light`); the Family-resolved names are printed on a line of their own (`G6 family-inferred: $FONT_TITLE $HUD $HUD_light $Menu_light`), so "every name resolves" is not read as "every name has a mapping entry" |
+| G6 | the font mapping resolves every `$MENU_*` / `$HUD_*` name | `core.ui.swf`: every font name the 434 movies use (gfxfontlib imports, glyphless `DefineFont3` names, edit-text font classes) through `resolve_font_name` on the en collection | 0 `Unresolved`; the per-rule counts of §7.4 printed and equal: Exact 5 (revision 2 said 4: the en font library's own edit texts name all four long names, Venice-SemiBold included; §21), CaseFolded 2, Family 4, Device 5, counted as **distinct names after dropping one trailing `*`** (`$FONT_TITLE` and `$FONT_TITLE*` are one name, `$Menu_light*` counts as `$Menu_light`); the Family-resolved names are printed on a line of their own (`G6 family-inferred: $FONT_TITLE $HUD $HUD_light $Menu_light`), so "every name resolves" is not read as "every name has a mapping entry" |
 | G7 | the HUD positions table for the in-game HUD movies | `core.ui.swf`: `read_hud_placements` for the 14 screens of §8; `bf3dump swf hud` prints the table | 86 placements; every screen's stage 1280 × 720; the spot values of §8.2 within 0.05 px |
 | G8 | SWF and font parsers under asan with truncation / fuzz tests | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` | `core.ui.swf.unit`, `core.ui.font.unit` (synthetic: every truncation, 2,000 mutants each, the hostile cases of §9) and the install fuzz `core.ui.swf.fuzz` pass with no ASan report; in `dev` each hostile case ends in under 1 s (bounded by the budgets of §9.1). The asan run also includes the install tests `core.ui.swf` / `core.ui.font`; under ASan (`__SANITIZE_ADDRESS__`) their T1 / T2 rows print `reported (asan)` and are not checked, so an ASan slowdown cannot fail G8 on timing |
 | G9 | install unchanged | an `install.unchanged` row in `core.ui.swf`, `core.ui.font` and `godot.ui_fonts` (`take_install_snapshot` before / after, `diff_snapshots`) | sizes and mtimes of the 256 index files equal |
@@ -416,8 +417,8 @@ Decisions:
   recomputes every bounding box from the points.
 * **Kerning**: a version-0 `kern` table, one format-0 subtable of (left glyph, right glyph, value / 10), sorted.
   HarfBuzz (Godot's TextServerAdvanced) applies `kern` when no GPOS is present [inferred from HarfBuzz's documented
-  behaviour; checked by G4's `fonts.kerning` row: `get_string_size("AV", 64)` is narrower than "A" + "V" by 1229 × 64
-  / 20480 = 3.84 ± 0.25 px with the §10 settings]. Fallback if it is not applied: `FontFile.set_kerning` per size in
+  behaviour; checked by G4's `fonts.kerning` row: the shaped "AV" at 64 px is narrower than "A" + "V" by 1229 × 64
+  / 20480 = 3.84 ± 0.25 px with the §10 settings; measured 3.844 px, so HarfBuzz applies `kern` (§21)]. Fallback if it is not applied: `FontFile.set_kerning` per size in
   `make_font_file` (one call per pair, 335 pairs).
 * **name**: IDs 1 (family = the long name), 2 (Regular / Bold), 3, 4, 6 (PostScript name without spaces);
   `Font.get_font_name()` must read back the long name (G4).
@@ -443,14 +444,14 @@ The BF3 font's own coverage checks (`fonts.glyphs`, `fonts.metro`) look up glyph
 
 | rule | names (of the 434 movies, en collection) |
 |---|---|
-| Exact | `$HUD_medium`; the long names `Purista EA Medium`, `Purista EA Semibold`, `Venice-Medium` (edit texts of the font library itself) |
+| Exact | `$HUD_medium`; the long names `Purista EA Medium`, `Purista EA Semibold`, `Venice-Medium`, `Venice-SemiBold` (edit texts of the font library itself; revision 2 missed the fourth) |
 | CaseFolded (ASCII case, one trailing `*`) | `$Menu_bold` → `$MENU_bold`, `$Menu_medium` → `$MENU_medium` |
 | Family [inferred] | `$HUD`, `$HUD_light` → `$HUD_medium`; `$Menu_light*` → `$MENU_medium`; `$FONT_TITLE`, `$FONT_TITLE*` → `$MENU_bold` |
 | Device (system font) | `Arial`, `Purista SemiBold`, `Calibri`, `Verdana`, `Times New Roman` |
 | Unresolved | none (G6) |
 
 Counting key for G6: distinct names after dropping one trailing `*` (`$FONT_TITLE*` → `$FONT_TITLE`,
-`$Menu_light*` → `$Menu_light`), so the rows count Exact 4, CaseFolded 2, Family 4 (`$FONT_TITLE`, `$HUD`,
+`$Menu_light*` → `$Menu_light`), so the rows count Exact 5, CaseFolded 2, Family 4 (`$FONT_TITLE`, `$HUD`,
 `$HUD_light`, `$Menu_light`), Device 5. The census and `bf3dump swf fonts` print the Family names on their own line.
 
 The Family rule is a guess about BF3's own runtime substitution (Scaleform resolves unknown `$` names through the
@@ -486,8 +487,8 @@ BF3 data). The numbers below are design facts like the other measured values in 
 | screen | placements | widgets (instance → widget at x, y) |
 |---|---|---|
 | `hudmpscreen` | 14 | LatencyIndicator_01 (1274, 3); Hitindicator_01 (640, 360); PassangerList_01 (707, 547); Ammo_01 (1194, 669); Health_01 (1193, 605); VehicleHealth_01 (1195, 555); HudMessage_05 (640, 632.2), _04 (500, 120, sy 0.999), _02 (1280, 0), _01 (640, 506); ScoreAggregator_01 (773, 486); SupportIconManager_01 (0, 0); HudAlertMessage_02 / _01 (640, 156) |
-| `hudtdmscreen` | 7 | HudBackgroundWidget_01 (−3, 486.9, scale 1.288 × 3.689); Compass_01 (85, 696); Minimap_01 (−3, 527); TicketCounter_01 (−4, 530); SquadList_00 (179, 619); HudMessage_00 (640, 675); MapmarkerManager_00 (0, 0) |
-| `hudconquestscreen` | 9 | HudBackgroundWidget_01 (−3, 456, 1.288 × 4.172); Compass_01 (85, 696); Minimap_01 (−3, 527); TicketCounter_01 (−4, 530); ObjectiveBar_01 (−4, 459); SquadList_00 (179, 619); HudMessage_00 (640, 675); CapturepointManager_01, MapmarkerManager_01 (0, 0) |
+| `hudtdmscreen` | 7 | HudBackgroundWidget_01 (−3, 486.95, scale 1.288 × 3.689); Compass_01 (85.05, 696, scale 0.99985 × 1); Minimap_01 (−3, 527); TicketCounter_01 (−4, 530); SquadList_00 (179, 619); HudMessage_00 (640, 675); MapmarkerManager_00 (0, 0) |
+| `hudconquestscreen` | 9 | HudBackgroundWidget_01 (−3, 456, 1.288 × 4.172); Compass_01 (85.05, 696, 0.99985 × 1); Minimap_01 (−3, 527); TicketCounter_01 (−4, 530); ObjectiveBar_01 (−4, 459); SquadList_00 (179, 619); HudMessage_00 (640, 675); CapturepointManager_01, MapmarkerManager_01 (0, 0) |
 | `hudscreen` | 8 | HudMessage_02 (640, 711), _03 (640, 579); ObjectiveMessage_01 (0, 0); LogMessage_01 (0, 534); TooltipMessage_01 (1280, 360); DamageIndicator_01 (640, 360); AlertManager_01, InteractionManager_01 (0, 0) |
 | `killscreen` | 4 | KillCam_01 (0, 0); HudMessage_01 (640, 514), _02 (640, 604); ScoreAggregator_01 (773, 494) |
 | `hudsdmscreen`, `hudrushscreen`, `hudctfscreen`, `hudgmscreen`, `spawnscreenpc`, `hudpreroundscreen`, `spectatorscreen` | 8, 9, 10, 7, 8, 1, 1 | (in the test; `bf3dump swf hud`) |
@@ -589,8 +590,8 @@ block of `register_types.cpp`).
 | `fonts.set_data` ×4 | `FontFile.set_data` accepted, `get_font_name()` = the long name |
 | `fonts.glyphs` ×4 | the TrueType `numGlyphs` = source + 1 (444 / 34); `get_supported_chars().length()` = distinct codes (442 / 32); `has_char` for every code; `TextServer.font_get_supported_glyphs` printed |
 | `fonts.contours` ×4 | for every glyph, `TextServer.font_get_glyph_contours(rid, 64, glyph)` has the writer's contour count and each contour's orientation (signed area sign) equals the writer's (outer clockwise, holes counter-clockwise) |
-| `fonts.metrics` ×4 | on the §10 settings at 64 px: `get_ascent(64)` = 2224 × 64 / 2048 = 69.5 ± 1 px (FreeType rounds size metrics to whole pixels); for **every glyph** `TextServer.font_get_glyph_advance(rid, 64, glyph).x` = source advance × 64 / 20480 ± 0.05 px (26.6 resolution is 1/64 px); `get_string_size("0123456789", 64).x` and (Purista) `"OPERATION MÉTRO"` = Σ source advances × 64 / 20480 + Σ kerning pairs × 64 / 20480 ± 0.5 px (15 glyphs × 1/128 px of 26.6 rounding ≈ 0.12 px worst case) |
-| `fonts.kerning` ×2 | Purista: `"AV"` narrower than `"A"` + `"V"` by 1229 × 64 / 20480 = 3.84 ± 0.25 px at 64 px (if HarfBuzz ignores `kern`, 0 px: the row fails and the §7.2 fallback applies) |
+| `fonts.metrics` ×4 | on the §10 settings at 64 px: `get_ascent(64)` = 2224 × 64 / 2048 = 69.5 ± 1 px (FreeType rounds size metrics to whole pixels); for **every glyph** `TextServer.font_get_glyph_advance(rid, 64, glyph).x` = source advance × 64 / 20480 ± 0.05 px (26.6 resolution is 1/64 px); the shaped width of `"0123456789"` and (Purista) `"OPERATION MÉTRO"` (the sum of `TextServer.shaped_text_get_glyphs()` advances of one shaped line) = Σ source advances × 64 / 20480 + Σ kerning pairs × 64 / 20480 ± 0.5 px (15 glyphs × 1/128 px of 26.6 rounding ≈ 0.12 px worst case). Not `Font.get_string_size()`: it and `shaped_text_get_width()` return the line width ceil()ed to whole pixels on dev7 (measured 367.000 px for a 366.519 px line), while the shaped advances themselves are fractional (39.8125 px) |
+| `fonts.kerning` ×2 | Purista: the shaped `"AV"` narrower than `"A"` + `"V"` by 1229 × 64 / 20480 = 3.84 ± 0.25 px at 64 px (if HarfBuzz ignores `kern`, 0 px: the row fails and the §7.2 fallback applies) |
 | `fonts.metro` | `tr("ID_M_LEVELNAME_MP_SUBWAY")` = "OPERATION MÉTRO" (Bf3Localisation), and every character of it maps to a non-zero glyph index in Purista EA Medium |
 | `fonts.mapping` | the census's font names resolve, 0 unresolved |
 | `fonts.coverage` | (reported) characters of the 15,515 text database strings that Purista lacks |
@@ -623,15 +624,15 @@ alert) run the scene; both hold the `openbf3_godot_project` resource lock.
 | header | contents |
 |---|---|
 | `bf3/core/ui/swf_movie.h` | `SwfMovie::parse`, tag codes, `SwfMatrix` / `swf_concat`, timelines and `SwfDisplayEvent`, `display_lists_at`, exports / imports, ExporterInfo, `SwfExternalImage`, `SwfSubImage`, `SwfShape` (bitmap fills), `SwfEditText`, `SwfScalingGrid`, `SwfFontInfo` (+ kinds), lookups |
-| `bf3/core/ui/swf_library.h` | `SwfLibrary` (open / find / read_payload / load / load_atlas_texture), `swf_superbundle_order`, `swf_movie_name_for_url`, `is_font_library_url`, `swf_atlas_texture_name` |
-| `bf3/core/ui/swf_census.h` | `run_swf_census`, `SwfMovieCensus`, totals, TSV |
+| `bf3/core/ui/swf_library.h` | `SwfLibrary` (open / find / read_payload / load / load_atlas_texture; added by the implementation: `read_atlas_texture_header` for the census's size check and `from_memory` for the unit and fuzz tests' in-memory movies), `swf_superbundle_order`, `swf_movie_name_for_url`, `is_font_library_url`, `swf_atlas_texture_name` |
+| `bf3/core/ui/swf_census.h` | `run_swf_census`, `SwfMovieCensus`, totals, TSV (added: `missing_import_symbols`, `font_names`, `max_atlas_budget_used`, the other font libraries' names checked against their own collection (`library_mappings`, `library_font_names*`), `build_atlas_maps`) |
 | `bf3/core/ui/swf_atlas.h` | `build_atlas_map`, `SwfAtlasMap` (images, labels, symbols, frames, bare; `find`), `SwfAtlasPiece`, stats |
 | `bf3/core/ui/swf_font.h` | `parse_font_outlines`, `load_font_outlines`, `SwfFontOutlines`, `GlyphOutline`, `normalise_winding` |
 | `bf3/core/ui/font_ttf.h` | `write_truetype`, `TrueTypeOptions`, `TrueTypeStats`, `read_truetype`, `TrueTypeFont`, `kTrueTypeWriterVersion` |
-| `bf3/core/ui/ui_fonts.h` | `read_font_mapping`, `font_mapping_partitions`, `font_mapping_for_text_database`, `resolve_font_name` (`FontResolution`), `UiFontLibrary`, `ConvertedFont`, `convert_library_font`, `kUiFontConverterVersion`, `kUiFontCacheKind` |
+| `bf3/core/ui/ui_fonts.h` | `read_font_mapping`, `font_mapping_partitions`, `font_mapping_for_text_database`, `read_all_font_mappings` (added), `resolve_font_name` (`FontResolution`), `UiFontLibrary`, `ConvertedFont`, `convert_library_font`, `kUiFontConverterVersion`, `kUiFontCacheKind` |
 | `bf3/core/ui/swf_layout.h` | `read_layout` (`SwfLayoutNode`, `SwfLayoutText`), `read_hud_placements` (`HudPlacement`, `HudAnchor`), `hud_screen_movies` |
-| `src/bf3_godot/src/ui_assets.h` | `Bf3UiAssets`, `make_font_file`, `make_atlas_region` |
-| `src/bf3_godot/src/ui_font_check.h` | `Bf3UiFontCheck` |
+| `src/bf3_godot/src/ui_assets.h` | `Bf3UiAssets`, `make_font_file`, `make_atlas_region` (added: `movies()`, `hud_placements()`, `atlas_texture()` for the check) |
+| `src/bf3_godot/src/ui_font_check.h` | `Bf3UiFontCheck` (added private members: the check's worker thread and page drawing) |
 
 ### 12.2 Error and data conventions
 
@@ -751,11 +752,12 @@ swf_font, font_ttf_write, font_ttf_read, ui_fonts, swf_layout}.cpp` (+ a private
 (the in-test SWF writer), `tests/godot_ui_fonts.cmake`, `tests/godot_ui_fonts_shots.cmake`.
 
 Modified additively (blocks headed `# UI ui1` / `// UI ui1`; existing lines untouched): `src/bf3_core/CMakeLists.txt`
-(done: headers; sources later), `src/bf3_godot/CMakeLists.txt` (done), `tests/CMakeLists.txt` (done: `ui1.contract`;
-the other tests later), `src/bf3_godot/src/register_types.cpp` (two `GDREGISTER_CLASS`),
+(headers and the `# UI ui1 implementation` sources block), `src/bf3_godot/CMakeLists.txt` (the ui1 block, now with
+`ui_font_check.cpp`), `tests/CMakeLists.txt` (`ui1.contract`, then the `# UI ui1 implementation` block: `test_ui1` and
+the two Godot tests), `src/bf3_godot/src/register_types.cpp` (two `GDREGISTER_CLASS`),
 `tools/bf3dump/CMakeLists.txt` and `tools/bf3dump/bf3dump.cpp` (usage lines for the six `swf` commands of §12.4
 and the `swf` dispatch), `README.md` (a "UI groundwork 1" section and one line
-under the ctest list paragraph), `NOTICE` only if third-party code is consulted (none planned: the SWF and TrueType
+under the ctest list paragraph), `NOTICE` only if third-party code is consulted (none was: the SWF and TrueType
 specifications are documentation).
 
 ---
@@ -800,8 +802,9 @@ For the user / orchestrator:
 
 For the implementation (answered by doing it):
 
-4. Does Godot apply the `kern` table (§7.2, §16)?
-5. The Godot-side cost of the four FontFiles and the atlases (reported by the check).
+4. Does Godot apply the `kern` table (§7.2, §16)? Yes: "AV" is 3.844 px narrower at 64 px (source 3.841 px; §21).
+5. The Godot-side cost of the four FontFiles and the atlases (reported by the check): about 1 ms on the main thread
+   after a 0.44 s loader (§21).
 6. The meaning of DefineExternalImage2's second u16 (9 on all 135 tags): kept as `field_2`, not interpreted.
 
 ---
@@ -826,3 +829,42 @@ For the implementation (answered by doing it):
 | relative shot dir | `OPENBF3_UI1_SHOTS`, absolute default (§1, §11.2) |
 | LevelMount creation from parallel lanes | per-holder guarded creation, failures memoised (§5.2, `swf_library.h`) |
 | 1,268 vs gfxfontlib imports; Place comment; `_iN` not decimal; `bf3dump list` count; cache Busy / PathGuard; merge conflicts | clarified (§4.3, §4.6, §5.1, §18, §3, §16) |
+
+---
+
+## 21. Implementation results (2026-10-16)
+
+Measured on this machine: 16 threads shared with other tracks' builds and tests, so every time below is noisy; each
+test prints its own values. Commands run from the worktree root after `tools\build.cmd dev`; the Godot tests need
+`OPENBF3_GODOT` (the 4.8 dev7 console executable). One command per gate:
+
+| gate | threshold (§1) | measured | met | command |
+|---|---|---|---|---|
+| G1 | 434 / 434 / 0 errors, 0 multi-SHA-1 names, 0 labels after the last ShowFrame, §4.2 totals exact | 434 movies, 434 parsed, 0 errors (CFX 371, GFX 63); 0 names with two SHA-1s over all manifest entries; 0 late labels; every §4.2 count exact and no other tag code; AS2 1,638,265 bytes, AS3 0; 135 external images, 0 textures missing or of another size; 820 sub-images, 0 outside; 1,268 imported symbols, 1 missing (`deckofcards` → `iconsShared.swf:IconsShared_Check`); fonts 63 / 21 / 2; parse budget max 127,948 units, atlas budget max 578,000, retained max 5.17 MB (sum 31.9 MB) | yes | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
+| G2 | §6.2 / §6.3 | `iconsingame_i1.tga` 4096 × 128, DxTexture DXT5 4096 × 128; 162 sub-images, 0 outside; 427 labels on 6 sprites, 135 with art (110 / 25), 292 empty; 95 / 96 / 162; the 10 spot rows exact | yes | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
+| G3 | 444 / 444 / 34 / 34, 442 / 442 / 32 / 32, U+00C9, 0 reversed, round trip, kerning 335 / 324 / 0 / 0, cache cold / warm / damaged | all as required; contours 836 / 836 / 30 / 30 (with `.notdef`'s 2); TrueType 47,012 / 44,292 / 2,972 / 3,048 bytes; cold 4 `converted`, warm 4 `hit`, damaged entry `dropped_corrupt` + converted, then 4 `hit` | yes | `ctest --preset dev -R "^core\.ui\.font$" -V` |
+| G4 | the §11.1 rows, `UI1 CHECK: PASS (n/n)` | `UI1 CHECK: PASS (25/25)`; ascent 70 px (69.5 ± 1); worst glyph advance 0.0156 px off; shaped "0123456789" 366.500 / 374.000 / 403.125 / 403.125 px vs source 366.519 / 374.034 / 403.222 / 403.222; "OPERATION MÉTRO" 547.031 / 555.531 vs 547.019 / 555.559; "AV" 3.844 px narrower (3.841) in both Purista weights; 0 contour count or orientation differences | yes | `ctest --preset dev -R "^godot\.ui_fonts$" -V` |
+| G5 | three PNGs, inspected | written at 1280 × 720 by the windowed check (25/25); findings in README "UI groundwork 1 (ui1)" | yes | `ctest --preset dev -R "^godot\.ui_fonts_shots$" -V` |
+| G6 | Exact 5 (see below), CaseFolded 2, Family 4, Device 5, Unresolved 0 | Exact 5, CaseFolded 2, Family 4, Device 5, Unresolved 0; `G6 family-inferred: $FONT_TITLE $HUD $HUD_light $Menu_light`; the other 32 font libraries' 59 names all Exact under their own collections | yes | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
+| G7 | 86 placements, 1280 × 720, §8.2 within 0.05 px | 86 (14, 8, 9, 7, 8, 9, 10, 7, 0, 1, 4, 8, 1, 0), every stage 1280 × 720, 31 spot values within 0.05 px; the ammo tree as §8.2 | yes | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
+| G8 | asan, no report; hostile cases < 1 s in dev | 6 of 6 pass under ASan (`ui1.contract`, `core.ui.swf.unit` 9.5 s, `core.ui.font.unit` 1.7 s, `core.ui.swf` 4.5 s, `core.ui.swf.fuzz` 24.8 s, `core.ui.font` 5.3 s); dev: slowest hostile case 2^18 + 1 display events ≈ 0.55 s, 2^22 + 1 tags ≈ 0.48 s, the rest under 0.45 s | yes | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` |
+| G9 | 256 index files unchanged | clean in `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font`, `godot.ui_fonts` | yes | the `install.unchanged` line of each of those tests |
+| T1 | ≤ 15 s (dev) | 0.28 s (open 0.25 s + census 0.037 s) | yes | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
+| T2 | cold ≤ 1.0 s, warm ≤ 0.25 s (dev) | cold 0.031 s, warm 0.003 s | yes | `ctest --preset dev -R "^core\.ui\.font$" -V` |
+
+What the implementation changed in this design (each where the rule is stated):
+
+* **G6 Exact 5, not 4.** The en font library's own sample edit texts name all four long names; revision 2's §7.4
+  listed three and missed `Venice-SemiBold`. The other rules' counts are unchanged.
+* **§8.2 values.** `hudtdmscreen` `HudBackgroundWidget_01` is at y 486.95 (revision 2 rounded to 486.9) and both
+  `Compass_01`s at x 85.05 with scale 0.99985 (rounded to 85); with the 0.05 px tolerance the rounded values fail.
+* **G4 string widths.** `Font.get_string_size()` and `TextServer.shaped_text_get_width()` return the line width
+  ceil()ed to whole pixels on dev7 (367.000 px for a 366.519 px line; 404 px for Venice's 10 × 40.3125 px), so the
+  0.5 px and 0.25 px tolerances are measured on the sum of the shaped glyph advances (`shaped_text_get_glyphs`),
+  which are HarfBuzz's fractional values with the kerning applied. The §10 settings were right: the shaped advances
+  are unrounded with `SUBPIXEL_POSITIONING_ONE_QUARTER`.
+* **Added APIs** (§12.1): `SwfLibrary::read_atlas_texture_header`, `SwfLibrary::from_memory`, `read_all_font_mappings`,
+  the census's library-font check and extra totals, `Bf3UiAssets::movies / hud_placements / atlas_texture`.
+* **Finding: Venice's empty glyphs.** Venice-Medium and Venice-SemiBold have outlines only for `#`, `%`, `-`, `.`,
+  `/`, `0`-`9` and `:`; their other 16 codes (`!"$&'()*+,;<=>?`) are empty glyphs in BF3's font library, so
+  `has_char` is true and system fallback does not replace them. HUD text with those characters belongs in `$MENU_*`.

@@ -1263,12 +1263,63 @@ TrueType for `FontFile.set_data` and cached (cache kind `ui-font`, converter ver
 `UIFontMappingCollection` resolves `$MENU_*` / `$HUD_*`; the HUD screens' widget positions are read from their
 1280 x 720 stages.
 
-Design stage: the interface headers are in `src/bf3_core/include/bf3/core/ui/` (`swf_movie.h`, `swf_library.h`,
-`swf_census.h`, `swf_atlas.h`, `swf_font.h`, `font_ttf.h`, `ui_fonts.h`, `swf_layout.h`) and
-`src/bf3_godot/src/ui_assets.h`, `ui_font_check.h`; `ctest -R ui1.contract` checks that they compile and keep their
-contract. The exit gates, each with its command and threshold, are the design's §1: G1 census of all 434 movies, G2
-the iconsingame map, G3 / G4 / G5 font conversion, Godot load and screenshots (to `OPENBF3_UI1_SHOTS`, default
-`C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1\`), G6 font mapping,
-G7 HUD positions, G8 asan, G9 install unchanged; timing gates T1 (census <= 15 s) and T2 (font load cold <= 1.0 s,
-warm <= 0.25 s), each measured and printed by its ctest on a shared, noisy machine. Converted fonts exist only in
-memory and in the derived-data cache; no command writes them anywhere else (design revision 2, §20).
+Implemented (2026-10-16). Readers in `src/bf3_core/src/ui/` (headers in `src/bf3_core/include/bf3/core/ui/`:
+`swf_movie.h`, `swf_library.h`, `swf_census.h`, `swf_atlas.h`, `swf_font.h`, `font_ttf.h`, `ui_fonts.h`,
+`swf_layout.h`); Godot side `src/bf3_godot/src/ui_assets.{h,cpp}` (`Bf3UiAssets`: fonts as `FontFile`s, atlas
+regions as `AtlasTexture`s, HUD rows and layout trees, loaded on its own thread after `Bf3Localisation`) and
+`ui_font_check.{h,cpp}` (`Bf3UiFontCheck`, scene `res://scenes/ui_fonts.tscn`). Every parser charges a
+`WorkBudget` and has hard caps (16 MiB body, 2^22 tags, 2^16 frames, 2^18 display events, 4,096 contours /
+16,384 points per glyph, 2^20 atlas pieces); hostile input fails with an error.
+
+**Commands.** `bf3dump swf census [--tsv <out.tsv>]` (exit 1 on any error), `swf movie <name>`, `swf labels <name>`,
+`swf layout <name>`, `swf hud`, `swf fonts [--cache=<dir> | --no-cache]` (the fonts' stats and SHA-256 and the
+name-resolution table; it writes no font file). Their output is BF3 data: keep it out of the repo. In Godot:
+`<godot> --path bf3-opensource res://scenes/ui_fonts.tscn` shows the font page (`-- --page=1` the coverage table,
+`--page=2` the iconsingame labels); `-- --ui-check` prints the rows and `UI1 CHECK: PASS (n/n)`; `--shot-dir=<dir>`
+also writes `ui1_fonts.png`, `ui1_coverage.png`, `ui1_icons.png`.
+
+**Gates** (measured 2026-10-16 on this machine; 16 threads shared with other tracks' builds and tests, so every time
+is noisy and each test prints its own; commands from the worktree root after `tools\build.cmd dev`, the Godot tests
+with `OPENBF3_GODOT` set; details in the design's §21):
+
+| gate | measured | command |
+|---|---|---|
+| G1 census | 434 movies, 434 parsed, 0 errors (CFX 371, GFX 63); 0 names with two SHA-1s; every tag total equals the design's §4.2 table and no other code occurs; AS2 1,638,265 bytes; 2,441 labels (0 after the last ShowFrame); 135 external images, 0 textures missing; 820 sub-images, 0 outside; 1,268 imported symbols, 1 missing (deckofcards imports `iconsShared.swf:IconsShared_Check`, not exported); fonts 63 outlines / 21 glyphless / 2 codes-only | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf census`) |
+| G2 iconsingame | `iconsingame_i1.tga` 4096 x 128, its DxTexture DXT5 of that size; 162 sub-images, 0 outside; 427 labels on 6 sprites: 135 with art (110 one piece, 25 two), 292 empty; 95 sub-images from labels, 96 with symbols, 162 from frames; the 10 spot rectangles of §6.3 exact | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf labels ui/assets/iconsingame`) |
+| G3 fonts | TrueType 444 / 444 / 34 / 34 glyphs, 442 / 442 / 32 / 32 codes (Purista EA Medium / Semibold, Venice-Medium / SemiBold), U+00C9 in both Purista, 0 contours reversed, every point within 0.5 unit of the source, advances exact, kerning 335 / 324 / 0 / 0; cold 4 converted, warm 4 hits, a damaged entry dropped and reconverted, then a hit | `ctest --preset dev -R "^core\.ui\.font$" -V` |
+| G4 Godot | `UI1 CHECK: PASS (25/25)`; glyph advances within 0.0156 px of the source at 64 px; shaped "0123456789" 366.500 px (source 366.519), "OPERATION MÉTRO" 547.031 px (547.019); "AV" 3.844 px narrower than "A" + "V" (source kerning 3.841 px) | `ctest --preset dev -R "^godot\.ui_fonts$" -V` |
+| G5 shots | the windowed check passes 25/25 and writes the three PNGs (findings below) | `ctest --preset dev -R "^godot\.ui_fonts_shots$" -V` |
+| G6 mapping | Exact 5, CaseFolded 2, Family 4, Device 5, Unresolved 0; `G6 family-inferred: $FONT_TITLE $HUD $HUD_light $Menu_light`; the other font libraries' 59 names all Exact under their own collections | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf fonts`) |
+| G7 HUD table | 86 placements (14, 8, 9, 7, 8, 9, 10, 7, 0, 1, 4, 8, 1, 0), every stage 1280 x 720, the §8.2 spot values within 0.05 px | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf hud`) |
+| G8 asan | `ui1.contract`, `core.ui.swf.unit`, `core.ui.font.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font` pass under ASan with no report; in dev every hostile case ends in under 1 s (slowest: 2^18 + 1 display events, about 0.55 s) | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` |
+| G9 install | 256 index files unchanged in `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font` and `godot.ui_fonts` | the `install.unchanged` lines of those tests |
+| T1 census time | 0.28 s (library open 0.25 s + census 0.037 s; limit 15 s) | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
+| T2 font load | cold 0.031 s (limit 1.0 s), warm 0.003 s (limit 0.25 s) | `ctest --preset dev -R "^core\.ui\.font$" -V` |
+
+**What the implementation changed in the design** (each fixed in the design in the same commit): G6 counts Exact 5,
+not 4 (the en font library's own edit texts name all four long names; revision 2 missed Venice-SemiBold); two §8.2
+values were rounded (`HudBackgroundWidget_01` in hudtdmscreen is at y 486.95, both `Compass_01`s at x 85.05 with
+scale 0.99985); the G4 string widths are the sum of the shaped glyph advances, because `Font.get_string_size()` and
+`TextServer.shaped_text_get_width()` return the width ceil()ed to whole pixels on Godot 4.8 dev7 (367.000 px for a
+366.519 px line) while the shaped advances are exact.
+
+**Screenshots** (G5; `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1\`, gitignored, not in the repo),
+inspected 2026-10-16:
+* `ui1_fonts.png`: both Purista weights and both Venice weights at 64 / 32 / 16 px. The counters of O, A, R, P, B,
+  0, 4, 6, 8, 9 and % are open (no inverted contour); every line sits on its red baseline; spacing is even with no
+  overlaps or gaps at any size; "OPERATION MÉTRO" shows its acute accent; "AV" visibly kerns. The red
+  baseline under the 32 px lines is fainter than the others (it falls on a half pixel); the text is right.
+* `ui1_coverage.png`: the 442 codes of each Purista weight (Latin-1, Latin Extended-A, Cyrillic, punctuation up
+  to U+2588) draw their glyphs, except five cells that draw nothing: U+0020, U+00A0 and U+00AD (expected) and
+  U+2012 and U+2588 (no visible outline at that size; the round trip shows the TrueType glyphs equal the source, so
+  this is BF3's data, not the converter). Venice draws only `#`, `%`, `-`,
+  `.`, `/`, `0`-`9` and `:`: the other 16 of its 32 codes (`!"$&'()*+,;<=>?`) are empty glyphs in BF3's own font
+  library (the source outlines have no contours for them; the converter keeps that), so `has_char` is true and
+  Godot's system fallback does not replace them. HUD text in `$HUD_*` with those characters draws nothing for them,
+  as Venice would in BF3 if those characters were ever shown; the HUD wave should use `$MENU_*` for such text.
+* `ui1_icons.png`: the 135 iconsingame labels with art, each from its `AtlasTexture` pieces: kit, vehicle, objective,
+  flag and squad icons in their friendly / enemy colours; the 25 two-piece labels (e.g. `KitPickupAssault`, the CTF
+  flag "picked" states) show the icon composed over its background; no piece is cut off or bleeds into a neighbour.
+
+Converted fonts exist only in memory and in the derived-data cache; no command writes them anywhere else (design
+revision 2, §20).
