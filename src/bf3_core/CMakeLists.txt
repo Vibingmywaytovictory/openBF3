@@ -231,3 +231,14 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/ui_fonts.h
     include/bf3/core/ui/swf_layout.h
 )
+# UI ui1 implementation (docs/design/ui-swf-fonts.md §17).
+target_sources(bf3_core PRIVATE
+    src/ui/swf_bits.h
+    src/ui/swf_font_detail.h
+    src/ui/swf_movie.cpp
+    src/ui/swf_display.cpp
+    src/ui/swf_library.cpp
+    src/ui/swf_font.cpp
+    src/ui/font_ttf_write.cpp
+    src/ui/font_ttf_read.cpp
+)
