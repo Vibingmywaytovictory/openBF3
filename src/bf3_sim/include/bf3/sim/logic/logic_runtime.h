@@ -172,6 +172,7 @@ struct LogicGhostLayout {
 
 struct LogicGhost {
 	Tick tick = 0;
+	size_t bool_count = 0; // = layout.bools.size()
 	std::vector<uint64_t> bool_bits; // bit i = bools[i]
 	std::vector<std::array<float, 12>> transforms;
 	std::vector<Tick> sequence_start; // kNoStart when not playing
@@ -189,6 +190,16 @@ struct LogicGhost {
 	};
 	std::vector<BoolDelta> bool_delta(const LogicGhost &p_base) const;
 };
+
+// A port of a primitive node that received a delivery its handler does not interpret (a no-op, counted). Review aid:
+// bf3dump and the census list them; an empty list on a row means every primitive input there has a behaviour.
+struct LogicUnhandledPort {
+	core::gameplay::LogicTypeId type = core::gameplay::LogicTypeId::Unknown;
+	int32_t port = 0;
+	bool event = true; // else a property input
+	uint64_t count = 0;
+};
+inline constexpr size_t kMaxUnhandledPorts = 256;
 
 class LogicRuntime {
 public:
@@ -219,6 +230,8 @@ public:
 	LogicGhost ghost() const;
 	const LogicGhostLayout &ghost_layout() const;
 	const LogicTrace &trace() const;
+	// Distinct (type, port, kind) deliveries no handler interpreted, in first-seen order (at most kMaxUnhandledPorts).
+	std::span<const LogicUnhandledPort> unhandled() const;
 	bool faulted() const;
 	const core::Error *fault() const;
 

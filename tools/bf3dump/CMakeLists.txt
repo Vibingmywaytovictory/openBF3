@@ -21,5 +21,5 @@ target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `
 # M1 T2 (motor; docs/design/m1.md §10.1): `spawns <LEVEL> <MODE>`, the spawn points and spawners as TSV (bf3_sim from
 # T1's block above).
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
-# S4 logic (docs/design/s4.md �9.4): `logic instantiate|stats|ports|fields|run|trace|census` (bf3_sim from M1 T1's block).
+# S4 logic (docs/design/s4.md §9.4): `logic instantiate|stats|ports|fields|run|trace|census` (bf3_sim from M1 T1's block).
 target_sources(bf3dump PRIVATE logic_commands.cpp logic_commands.h)

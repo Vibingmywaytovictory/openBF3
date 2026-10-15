@@ -43,6 +43,12 @@ struct LogicScriptOptions {
 	LogicScriptKind kind = LogicScriptKind::Idle;
 	Tick ticks = 60 * 60 * 10; // ticks stepped after start() (10 min at 60 Hz)
 	Tick rush_destroy_after = 60 * 60; // 60 s after an MCOM's activation
+	// Round start (RushMcoms and ConquestCaptures): at this tick, after the players enter, every PreRound node's
+	// StartRound (-1541508057) is forced, as the real PreRound does once RoundMinPlayerCount players are in [inferred:
+	// the stub has no player count]. 0 = never. Load-bearing for G2: StartRound closes full_rush_level's EventGate
+	// 253bd7c1, without which the 4th base's fall (MultipleTrigger 5c24a768, TriggerAmount 4) closes every base's
+	// gates and base 4's spawners never close (s4.md §9.1).
+	Tick round_start_tick = 1;
 	// One capture: at `tick` (timing convention of LogicNativeStubs: called after apply(tick), before step(tick)),
 	// the CapturePoint found by `flag` (LogicGraph::find_nodes with type CapturePoint; exactly one node, else the run
 	// fails) is captured by `team`.
@@ -52,6 +58,14 @@ struct LogicScriptOptions {
 		uint8_t team = 1;
 	};
 	std::vector<Capture> conquest_order;
+	// Extra forced events on top of the script (bf3dump --force): at `tick`, after the script's actions, the event
+	// `port` leaves `node` (no player, team 0).
+	struct Force {
+		Tick tick = 0;
+		uint32_t node = 0;
+		int32_t port = 0;
+	};
+	std::vector<Force> forces;
 	LogicRuntimeOptions runtime;
 };
 
@@ -86,10 +100,11 @@ struct LogicRunReport {
 	struct Action {
 		Tick tick = 0;
 		uint32_t node = 0;
-		enum class What : uint8_t { PlayerEnter, Destroy, Capture } what = What::Destroy;
+		enum class What : uint8_t { PlayerEnter, Destroy, Capture, RoundStart } what = What::Destroy;
 		uint8_t team = 0;
 	};
 	std::vector<Action> actions;
+	std::vector<LogicUnhandledPort> unhandled; // LogicRuntime::unhandled() at the end of the run
 };
 
 // Creates the runtime and the stubs, sets the script's watches, starts, runs p_options.ticks steps with the script's
@@ -138,5 +153,25 @@ std::span<const ConquestExpectation> caspian_conquest_expected();
 // values, checked by enabled[0]).
 LogicGateVerdict judge_conquest_timeline(const core::gameplay::LogicGraph &p_graph, const LogicRunReport &p_report,
 		std::span<const ConquestExpectation> p_expected);
+
+// I1 census row of one level x mode (ctest logic.census and `bf3dump logic census` print the same TSV): the graph's
+// stats, the ghost layout, tick 0 and a 600-tick Idle run.
+struct LogicCensusRow {
+	std::string level, mode;
+	bool ok = false;
+	std::string error;
+	core::gameplay::LogicGraphStats stats;
+	size_t nodes = 0;
+	size_t ghost_bools = 0, ghost_transforms = 0, ghost_sequences = 0;
+	double build_ms = 0;
+	LogicTickStats tick0;
+	size_t idle_deliveries = 0; // ticks 1..600
+	uint64_t idle_p99_ns = 0;
+	size_t unhandled = 0; // distinct unhandled primitive ports in the idle run
+};
+inline constexpr Tick kCensusIdleTicks = 600;
+LogicCensusRow logic_census_row(std::string p_level, std::string p_mode, std::shared_ptr<const core::gameplay::LogicGraph> p_graph, double p_build_ms);
+std::string logic_census_header();
+std::string logic_census_line(const LogicCensusRow &p_row);
 
 } // namespace bf3::sim::logic

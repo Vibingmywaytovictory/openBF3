@@ -5,8 +5,14 @@
 #include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/path_guard.h"
+#include "bf3/sim/logic/logic_harness.h"
 
+#include <algorithm>
+#include <charconv>
 #include <chrono>
+#include <filesystem>
+#include <optional>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -171,8 +177,9 @@ void print_stats(const LogicGraph &p_graph) {
 	std::printf("event_edges\t%zu\nproperty_edges\t%zu\nlink_edges\t%zu\nnetworked_only_edges\t%zu\nduplicate_paths\t%zu\n", s.event_edges,
 			s.property_edges, s.link_edges, s.networked_only_edges, s.duplicate_paths);
 	std::printf("connections_scanned\t%zu\ninterface_hops\t%zu\ndropped_realm\t%zu\ndropped_target_type\t%zu\ndropped_unbound\t%zu\n"
-				"dropped_unresolved\t%zu\n",
-			s.connections_scanned, s.interface_hops, s.dropped_realm, s.dropped_target_type, s.dropped_unbound, s.dropped_unresolved);
+				"dropped_unbound_events\t%zu\ndropped_unresolved\t%zu\n",
+			s.connections_scanned, s.interface_hops, s.dropped_realm, s.dropped_target_type, s.dropped_unbound, s.dropped_unbound_events,
+			s.dropped_unresolved);
 	std::printf("synced_bools\t%zu\nwork\t%zu\ndigest\t%016llx\n", s.synced_bools, s.work, static_cast<unsigned long long>(p_graph.digest()));
 	for (const auto &[name, count] : s.unknown_types) {
 		std::printf("unknown_type\t%s\t%zu\n", name.c_str(), count);
@@ -338,17 +345,235 @@ int cmd_fields(const level::LoadedLevel &p_level, const std::string &p_mode, con
 	return 0;
 }
 
+bool parse_u64(const std::string &p_text, uint64_t &r_value) {
+	const auto res = std::from_chars(p_text.data(), p_text.data() + p_text.size(), r_value);
+	return res.ec == std::errc() && res.ptr == p_text.data() + p_text.size();
+}
+
+// --force <node>:<port>@<tick>: node index or GUID prefix (unique), port id or a port name of the display table.
+bool parse_force(const LogicGraph &p_graph, const std::string &p_spec, bf3::sim::logic::LogicScriptOptions::Force &r_force) {
+	const size_t colon = p_spec.find(':');
+	const size_t at = p_spec.rfind('@');
+	if (colon == std::string::npos || at == std::string::npos || at < colon) {
+		return false;
+	}
+	const std::string node = p_spec.substr(0, colon), port = p_spec.substr(colon + 1, at - colon - 1), tick = p_spec.substr(at + 1);
+	uint64_t v = 0;
+	if (parse_u64(node, v) && v < p_graph.nodes().size()) {
+		r_force.node = static_cast<uint32_t>(v);
+	} else {
+		std::vector<uint32_t> found;
+		for (uint32_t i = 0; i < p_graph.nodes().size(); ++i) {
+			if (guid8(p_graph.nodes()[i].guid).rfind(node, 0) == 0 || p_graph.nodes()[i].guid.to_string().find(node) == 1) {
+				found.push_back(i);
+			}
+		}
+		if (found.size() != 1) {
+			std::fprintf(stderr, "--force %s: node matches %zu nodes\n", p_spec.c_str(), found.size());
+			return false;
+		}
+		r_force.node = found[0];
+	}
+	int64_t port_id = 0;
+	const auto res = std::from_chars(port.data(), port.data() + port.size(), port_id);
+	r_force.port = (res.ec == std::errc() && res.ptr == port.data() + port.size()) ? static_cast<int32_t>(port_id) : logic_port_id(port);
+	if (!parse_u64(tick, v) || v == 0 || v > 0xffffffffull) {
+		return false;
+	}
+	r_force.tick = static_cast<bf3::sim::Tick>(v);
+	return true;
+}
+
+int cmd_run(const LogicGraph &p_graph_ref, const std::vector<std::string> &p_args, bool p_trace) {
+	namespace lg = bf3::sim::logic;
+	std::string script = "idle";
+	std::optional<uint64_t> ticks, seed;
+	std::vector<lg::LogicScriptOptions::Force> forces;
+	for (size_t i = 0; i < p_args.size(); ++i) {
+		const std::string &a = p_args[i];
+		const bool has_value = i + 1 < p_args.size();
+		uint64_t v = 0;
+		if (a == "--script" && has_value) {
+			script = p_args[++i];
+		} else if (a == "--ticks" && has_value && parse_u64(p_args[i + 1], v)) {
+			ticks = v;
+			++i;
+		} else if (a == "--seed" && has_value && parse_u64(p_args[i + 1], v)) {
+			seed = v;
+			++i;
+		} else if (a == "--force" && has_value) {
+			lg::LogicScriptOptions::Force f;
+			if (!parse_force(p_graph_ref, p_args[++i], f)) {
+				std::fprintf(stderr, "bad --force %s (expected <node>:<port>@<tick>)\n", p_args[i].c_str());
+				return 2;
+			}
+			forces.push_back(f);
+		} else {
+			std::fprintf(stderr, "logic run: unknown argument %s\n", a.c_str());
+			return 2;
+		}
+	}
+	lg::LogicScriptOptions options;
+	if (script == "rush") {
+		options = lg::rush_mcoms_script();
+	} else if (script == "conquest") {
+		options = lg::caspian_conquest_script();
+	} else if (script == "idle") {
+		options.kind = lg::LogicScriptKind::Idle;
+		options.ticks = 3600;
+	} else {
+		std::fprintf(stderr, "logic run: unknown script %s (idle|rush|conquest)\n", script.c_str());
+		return 2;
+	}
+	if (ticks) {
+		options.ticks = static_cast<bf3::sim::Tick>(std::min<uint64_t>(*ticks, 0xffffffffull));
+	}
+	if (seed) {
+		options.runtime.root_seed = *seed;
+	}
+	options.forces = forces;
+	options.runtime.keep_trace_records = p_trace;
+	// The run shares the graph; a copy-free shared_ptr that does not own it.
+	const std::shared_ptr<const LogicGraph> graph(std::shared_ptr<const LogicGraph>(), &p_graph_ref);
+	const auto t0 = std::chrono::steady_clock::now();
+	Result<lg::LogicRunReport> report = lg::run_logic_script(graph, options);
+	const double run_s = seconds_since(t0);
+	if (!report) {
+		std::fprintf(stderr, "logic run: %s\n", report.error().message.c_str());
+		return 1;
+	}
+	const lg::LogicRunReport &r = *report;
+	if (p_trace) {
+		std::printf("# trace\ttick\tseq\tkind\tsource\tsource_port\ttarget\ttarget_port\tvalue_hash\tplayer\n");
+		static const char *const kKinds[] = { "event", "property", "timer", "forced", "effect", "carried", "fault" };
+		for (const lg::LogicTraceRecord &t : r.trace) {
+			std::printf("trace\t%u\t%u\t%s\t%u\t%s\t%u\t%s\t%016llx\t%d\n", t.tick, t.seq, kKinds[static_cast<size_t>(t.kind) % 7], t.source,
+					port_name(t.source_port).c_str(), t.target, port_name(t.target_port).c_str(), static_cast<unsigned long long>(t.value_hash), t.player);
+		}
+	}
+	static const char *const kWhat[] = { "enabled", "destroyed", "owner", "spawned", "round", "input" };
+	for (const lg::NativeTimelineEntry &e : r.timeline) {
+		if (e.what == lg::NativeTimelineEntry::What::Input) {
+			continue;
+		}
+		const LogicNode &n = p_graph_ref.nodes()[e.node];
+		std::printf("timeline\t%u\t%u\t%s\t%s\t%s\t%lld\n", e.tick, e.node, std::string(p_graph_ref.text(n.type_name)).c_str(), guid8(n.guid).c_str(),
+				kWhat[static_cast<size_t>(e.what) % 6], static_cast<long long>(e.value));
+	}
+	for (const lg::LogicRunReport::Action &a : r.actions) {
+		static const char *const kActions[] = { "player_enter", "destroy", "capture", "round_start" };
+		std::printf("action\t%u\t%u\t%s\t%s\tteam%u\n", a.tick, a.node, guid8(p_graph_ref.nodes()[a.node].guid).c_str(),
+				kActions[static_cast<size_t>(a.what) % 4], a.team);
+	}
+	for (const lg::LogicUnhandledPort &u : r.unhandled) {
+		std::printf("unhandled\t%s\t%s\t%s\t%llu\n", std::string(logic_type_info(u.type).ebx_type).c_str(), port_name(u.port).c_str(),
+				u.event ? "event" : "property", static_cast<unsigned long long>(u.count));
+	}
+	std::printf("ticks\t%u\ndeliveries\t%zu\nmax_deliveries_tick\t%zu\ncarried_over\t%zu\neffects\t%zu\nnetworked\t%zu\n", r.ticks, r.deliveries,
+			r.max_deliveries_tick, r.carried_over, r.effects, r.networked);
+	std::printf("tick0\tdeliveries %zu timers %zu carried %zu queue_peak %zu effects %zu drain_ns %llu\n", r.tick0.deliveries, r.tick0.timers_fired,
+			r.tick0.carried_over, r.tick0.queue_peak, r.tick0.effects, static_cast<unsigned long long>(r.tick0.drain_ns));
+	std::printf("drain_ns\tp50 %llu p99 %llu busy_p99 %llu max %llu busy_ticks %zu (wall clock, shared machine)\n",
+			static_cast<unsigned long long>(r.drain_ns_p50), static_cast<unsigned long long>(r.drain_ns_p99),
+			static_cast<unsigned long long>(r.drain_ns_busy_p99), static_cast<unsigned long long>(r.drain_ns_max), r.busy_ticks);
+	std::printf("trace_hash\t%016llx\ntrace_records\t%zu%s\n", static_cast<unsigned long long>(r.trace_hash), r.trace_records,
+			r.trace_truncated ? " (records truncated)" : "");
+	if (r.faulted) {
+		std::printf("fault\t%s\n", r.fault.c_str());
+	}
+	int rc = r.faulted ? 1 : 0;
+	if (options.kind == lg::LogicScriptKind::RushMcoms) {
+		const lg::LogicGateVerdict g2 = lg::judge_rush_spawner_order(p_graph_ref, r);
+		const lg::LogicGateVerdict g3 = lg::judge_park_delay(p_graph_ref, r);
+		std::printf("%s%s", g2.detail.c_str(), g3.detail.c_str());
+		rc = (g2.pass && g3.pass) ? rc : 1;
+	} else if (options.kind == lg::LogicScriptKind::ConquestCaptures) {
+		const lg::LogicGateVerdict g6 = lg::judge_conquest_timeline(p_graph_ref, r, lg::caspian_conquest_expected());
+		std::printf("%s", g6.detail.c_str());
+		rc = g6.pass ? rc : 1;
+	}
+	std::fprintf(stderr, "logic run: %u ticks in %.3f s\n", r.ticks, run_s);
+	return rc;
+}
+
+// `logic census [LEVEL...] [--out FILE]`: the I1 TSV (bf3_sim logic_census_row), every mode of each level.
+int cmd_census(const InstallReader &p_reader, const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
+	namespace lg = bf3::sim::logic;
+	std::vector<std::string> levels;
+	std::string out_path;
+	for (size_t i = 0; i < p_args.size(); ++i) {
+		if (p_args[i] == "--out" && i + 1 < p_args.size()) {
+			out_path = p_args[++i];
+		} else {
+			levels.push_back(p_args[i]);
+		}
+	}
+	if (levels.empty()) {
+		for (const Level &l : p_install->levels()) {
+			levels.push_back(l.id);
+		}
+	}
+	FILE *out = stdout;
+	if (!out_path.empty()) {
+		const std::filesystem::path path = std::filesystem::path(std::u8string(out_path.begin(), out_path.end()));
+		if (p_reader.write_guard().check_write_target(path) != PathGuard::Verdict::Allowed) {
+			std::fprintf(stderr, "logic census: refusing to write %s\n", out_path.c_str());
+			return 2;
+		}
+		if (_wfopen_s(&out, to_extended_length(path).c_str(), L"wb") != 0 || out == nullptr) {
+			std::fprintf(stderr, "logic census: cannot open %s\n", out_path.c_str());
+			return 1;
+		}
+	}
+	std::fprintf(out, "%s\n", lg::logic_census_header().c_str());
+	size_t rows = 0, failed = 0;
+	const auto start = std::chrono::steady_clock::now();
+	for (const std::string &level_id : levels) {
+		Result<level::LevelInfo> info = level::level_info(*p_install, level_id);
+		if (!info) {
+			std::fprintf(stderr, "logic census: %s: %s\n", level_id.c_str(), info.error().message.c_str());
+			++failed;
+			continue;
+		}
+		for (const std::string &mode : info->modes) {
+			Result<Loaded> loaded = load_graph(p_install, level_id, mode, LogicSide::Server);
+			lg::LogicCensusRow row;
+			if (!loaded) {
+				row.level = level_id;
+				row.mode = mode;
+				row.error = loaded.error().message;
+			} else {
+				row = lg::logic_census_row(level_id, mode, loaded->graph, loaded->build_s * 1000.0);
+			}
+			failed += row.ok ? 0 : 1;
+			++rows;
+			std::fprintf(out, "%s\n", lg::logic_census_line(row).c_str());
+			std::fflush(out);
+		}
+	}
+	if (out != stdout) {
+		std::fclose(out);
+	}
+	std::fprintf(stderr, "logic census: %zu rows, %zu failed, %.1f s\n", rows, failed, seconds_since(start));
+	return failed == 0 ? 0 : 1;
+}
+
 } // namespace
 
 const char *logic_usage() {
 	return "  logic instantiate <LEVEL> <MODE> [--edges] [--client]\n"
 		   "  logic stats <LEVEL> <MODE> [--client]\n"
 		   "  logic ports <LEVEL> <MODE>\n"
-		   "  logic fields <LEVEL> <MODE> <EbxType>...\n";
+		   "  logic guids <LEVEL> <MODE> <guid-prefix>...\n"
+		   "  logic fields <LEVEL> <MODE> <EbxType>...\n"
+		   "  logic run|trace <LEVEL> <MODE> [--script idle|rush|conquest] [--ticks N] [--seed S] [--force <node>:<port>@<tick>]...\n"
+		   "  logic census [<LEVEL>...] [--out <file>]\n";
 }
 
 int cmd_logic(const InstallReader &p_reader, const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
-	(void)p_reader;
+	if (!p_args.empty() && p_args[0] == "census") {
+		return cmd_census(p_reader, p_install, std::vector<std::string>(p_args.begin() + 1, p_args.end()));
+	}
 	if (p_args.size() < 3) {
 		std::fprintf(stderr, "%s", logic_usage());
 		return 2;
@@ -390,6 +615,27 @@ int cmd_logic(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 	}
 	if (sub == "ports") {
 		return cmd_ports(*loaded->graph);
+	}
+	if (sub == "guids") {
+		// Full GUIDs of the nodes and scope references whose GUID starts with one of the given prefixes.
+		const LogicGraph &g = *loaded->graph;
+		for (const std::string &prefix : rest) {
+			for (uint32_t i = 0; i < g.nodes().size(); ++i) {
+				if (guid8(g.nodes()[i].guid).rfind(prefix, 0) == 0) {
+					std::printf("node\t%u\t%s\t%s\t%s\n", i, g.nodes()[i].guid.to_string().c_str(), std::string(g.text(g.nodes()[i].type_name)).c_str(),
+							scope_chain(g, g.nodes()[i].scope).c_str());
+				}
+			}
+			for (uint32_t s = 0; s < g.scopes().size(); ++s) {
+				if (!g.scopes()[s].reference.is_zero() && guid8(g.scopes()[s].reference).rfind(prefix, 0) == 0) {
+					std::printf("scope\t%u\t%s\t%s\n", s, g.scopes()[s].reference.to_string().c_str(), std::string(g.text(g.scopes()[s].name)).c_str());
+				}
+			}
+		}
+		return 0;
+	}
+	if (sub == "run" || sub == "trace") {
+		return cmd_run(*loaded->graph, rest, sub == "trace");
 	}
 	std::fprintf(stderr, "%s", logic_usage());
 	return 2;

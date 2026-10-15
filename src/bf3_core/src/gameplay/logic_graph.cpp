@@ -101,7 +101,7 @@ constexpr LogicParamField kEventSwitchF[] = { { "OutEvents", K::Int }, { "AutoIn
 constexpr LogicParamField kRandomMultiEventF[] = { { "RandomEventWeight", K::Float, Shape::Array }, { "UniformDistribution", K::Bool },
 	{ "DisableOutputOnTrigger", K::Bool }, { "ResetOutputsWhenAllHasTriggered", K::Bool } };
 constexpr LogicParamField kSequenceF[] = { { "SequenceLength", K::Int }, { "SequenceStartTime", K::Int }, { "Looping", K::Bool }, { "PlayInReverse", K::Bool },
-	{ "AutoStart", K::Bool }, { "ExternalTime", K::Float }, { "Events", K::Int, Shape::StructArray, { { "EventTime", K::Int }, { "Id", K::Int } } } };
+	{ "AutoStart", K::Bool }, { "ExternalTime", K::Float }, { "Events", K::Int, Shape::StructArray, { { "Time", K::Int }, { "Event.Id", K::Int } } } };
 constexpr LogicParamField kTeamFilterF[] = { { "Team", K::Team }, { "InvertFilter", K::Bool }, { "GenerateEventForEveryMatchingTeamMember", K::Bool } };
 constexpr LogicParamField kPlayerFilterF[] = { { "InvertFilter", K::Bool } };
 constexpr LogicParamField kBoolF[] = { { "DefaultValue", K::Bool } };
@@ -113,7 +113,7 @@ constexpr LogicParamField kBoolToEventF[] = { { "Value", K::Bool }, { "InitalEve
 constexpr LogicParamField kNotF[] = { { "In", K::Bool } };
 constexpr LogicParamField kAndOrF[] = { { "In1", K::Bool }, { "In2", K::Bool } };
 constexpr LogicParamField kOr4F[] = { { "In1", K::Bool }, { "In2", K::Bool }, { "In3", K::Bool }, { "In4", K::Bool } };
-constexpr LogicParamField kCompareF[] = { { "Operator", K::Int }, { "IntIn0", K::Int }, { "IntIn1", K::Int }, { "FloatIn0", K::Float }, { "FloatIn1", K::Float } };
+constexpr LogicParamField kCompareF[] = { { "Operator", K::Text }, { "IntIn0", K::Int }, { "IntIn1", K::Int }, { "FloatIn0", K::Float }, { "FloatIn1", K::Float } };
 constexpr LogicParamField kCompareIntF[] = { { "A", K::Int }, { "B", K::Int }, { "TriggerOnPropertyChange", K::Bool }, { "TriggerOnStart", K::Bool } };
 constexpr LogicParamField kCompareFloatF[] = { { "A", K::Float }, { "B", K::Float }, { "TriggerOnPropertyChange", K::Bool }, { "TriggerOnStart", K::Bool } };
 constexpr LogicParamField kCompareBoolF[] = { { "Bool", K::Bool }, { "TriggerOnPropertyChange", K::Bool } };
@@ -1189,7 +1189,7 @@ private:
 								continue;
 							}
 							BF3_TRY(budget_.charge(1));
-							const std::optional<EbxValue> v = data->get(member.name);
+							const std::optional<EbxValue> v = data->get_path(member.name);
 							if (v) {
 								std::string text;
 								BF3_TRY(add_param(p_node, field_id(member.name), element, value_of_field(*v, member.kind, &text), text));
@@ -1290,6 +1290,7 @@ private:
 					const std::optional<End> to = end_of(s, *target, hop.target_port, false, kind);
 					if (!from || !to) {
 						++st.dropped_unbound;
+						st.dropped_unbound_events += list.kind == EdgeKind::Event;
 						continue;
 					}
 					if (from->kind == EndKind::Absent) {

@@ -81,7 +81,8 @@ struct LogicParam {
 // The configuration fields one node type reads (docs/design/s4.md §6.2), in the order the builder reads them. Each is
 // read as LogicWorld::effective (a property connection into the field or the placing reference, else the entity's
 // own field) and converted to `kind` (a field that does not convert is left out). A scalar array gives one param per
-// element (element 0, 1, ...); a struct array gives, per element, one param per member (field = the member's id).
+// element (element 0, 1, ...); a struct array gives, per element, one param per member (field = the member's id; a
+// member may be a dotted path through inline fields, e.g. SequenceEventData "Event.Id", hashed whole).
 // At most kMaxParamElements elements per array; a longer array fails the build.
 struct LogicParamMember {
 	std::string_view name;
@@ -181,6 +182,7 @@ struct LogicGraphStats {
 	size_t dropped_realm = 0; // an end does not exist on this side
 	size_t dropped_target_type = 0; // event TargetType not delivered on this side
 	size_t dropped_unbound = 0; // an end is a reference that was not instantiated, or not an object of the scope
+	size_t dropped_unbound_events = 0; // the event connections among dropped_unbound (G1 requires 0 on Metro RushLarge0)
 	size_t dropped_unresolved = 0; // an end does not resolve in the loaded partitions
 	size_t synced_bools = 0;
 	size_t work = 0; // budget units used by the walk and the build
