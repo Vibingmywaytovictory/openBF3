@@ -17,6 +17,7 @@
 #include "bf3/core/result.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
+#include "bf3/core/ui/ui_fonts.h"
 
 #include <array>
 #include <cstdint>
@@ -31,7 +32,8 @@ struct SwfMovieCensus {
 	uint32_t holders = 0;
 	uint32_t distinct_sha1s = 0;
 	uint64_t payload_bytes = 0;
-	std::string error; // empty when the movie parsed and every check passed
+	std::string error; // empty when the movie parsed, its atlas textures exist with their size, its sub-images lie
+	                   // inside them and its atlas map builds (a missing import is counted, not an error)
 	// Parsed facts (zero / empty on a parse error).
 	bool compressed = false;
 	uint8_t version = 0;
@@ -48,7 +50,8 @@ struct SwfMovieCensus {
 	uint32_t scaling_grids = 0;
 	uint32_t exports = 0;
 	uint32_t imported_symbols = 0;
-	uint32_t missing_imports = 0; // symbols whose movie or export does not exist
+	uint32_t missing_imports = 0; // symbols whose movie or export does not exist (listed, not an error: retail has one)
+	std::vector<std::string> missing_import_symbols; // "<url>:<symbol>"
 	std::vector<SwfExternalImage> external_images;
 	uint32_t atlas_textures_missing = 0; // external images without their DxTexture (or of another size)
 	std::vector<SwfSubImage> sub_images;
@@ -94,6 +97,9 @@ struct SwfCensusTotals {
 	// family_names is printed on its own line ("G6 family-inferred: ...").
 	std::array<uint32_t, 5> font_names_by_rule{};
 	std::vector<std::string> family_names;
+	// Every distinct counted name with its FontResolution, sorted by name (empty without a font mapping).
+	std::vector<std::pair<std::string, FontResolution>> font_names;
+	size_t max_atlas_budget_used = 0; // build_atlas_map over the atlas movies (kSwfAtlasBudgetUnits each)
 };
 
 struct SwfCensus {
@@ -105,6 +111,9 @@ struct SwfCensus {
 struct SwfCensusOptions {
 	unsigned threads = 0; // 0 = all cores
 	bool check_atlas_textures = true; // reads each atlas DxTexture header (not its chunk)
+	bool build_atlas_maps = true; // build_atlas_map of every movie with an external image
+	// The collection the font names are resolved with (G6: the en one); null: font names are not counted.
+	const FontMappingCollection *font_mapping = nullptr;
 };
 
 Result<SwfCensus> run_swf_census(const SwfLibrary &p_movies, const SwfCensusOptions &p_options = {});

@@ -89,6 +89,9 @@ public:
 	Result<std::shared_ptr<const SwfMovie>> load(std::string_view p_name) const;
 	// An atlas DxTexture from the movie's holder superbundle (res_loader's load_texture, chunk included).
 	Result<res::LoadedTexture> load_atlas_texture(std::string_view p_movie_name, const SwfExternalImage &p_image) const;
+	// The same texture's res header only (DxTexture::parse of the 128-byte res; no chunk read): the census checks
+	// that every external image exists with its declared size.
+	Result<res::DxTexture> read_atlas_texture_header(std::string_view p_movie_name, const SwfExternalImage &p_image) const;
 
 	double open_seconds() const;
 	size_t superbundles_listed() const;

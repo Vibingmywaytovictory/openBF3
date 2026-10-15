@@ -241,4 +241,8 @@ target_sources(bf3_core PRIVATE
     src/ui/swf_font.cpp
     src/ui/font_ttf_write.cpp
     src/ui/font_ttf_read.cpp
+    src/ui/swf_census.cpp
+    src/ui/swf_atlas.cpp
+    src/ui/ui_fonts.cpp
+    src/ui/swf_layout.cpp
 )

@@ -304,6 +304,31 @@ Result<res::LoadedTexture> SwfLibrary::load_atlas_texture(std::string_view p_mov
 	return texture;
 }
 
+Result<res::DxTexture> SwfLibrary::read_atlas_texture_header(std::string_view p_movie_name, const SwfExternalImage &p_image) const {
+	const SwfMovieSource *source = find(p_movie_name);
+	if (source == nullptr) {
+		return make_error("swf " + asset_key(p_movie_name) + ": no such SwfMovie in the install");
+	}
+	Result<const LevelMount *> mount = impl_->holder_mount(*source);
+	if (!mount) {
+		return mount.error();
+	}
+	const std::string name = swf_atlas_texture_name(source->name, p_image.file_name);
+	Result<std::pair<ResInfo, std::vector<uint8_t>>> res = (*mount)->read_res(name);
+	if (!res) {
+		return error_at("swf " + source->name + " atlas " + name, res.error());
+	}
+	if (res->first.res_type != res_type::kDxTexture) {
+		return make_error("swf " + source->name + " atlas " + name + ": not a DxTexture");
+	}
+	res::DxTexture texture;
+	const res::ResError e = res::DxTexture::parse(res::Bytes(res->second.data(), res->second.size()), texture);
+	if (!e.ok()) {
+		return make_error("swf " + source->name + " atlas " + name + ": " + e.message());
+	}
+	return texture;
+}
+
 double SwfLibrary::open_seconds() const {
 	return impl_->open_seconds;
 }
