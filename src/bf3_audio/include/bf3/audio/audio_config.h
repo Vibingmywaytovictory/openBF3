@@ -25,6 +25,7 @@ struct AudioTuning {
 	float lpb0_full_damping_hz = 2000.0f; // LPB0 cutoff when HFDamping* reaches 1 [inferred; A3 measures]
 	float lpb0_open_hz = 20000.0f; // LPB0 cutoff with no damping
 	float hf_damping_db_per_metre = 0.0f; // extra HF loss per metre beyond MinDistance x HFDampingDistance [inferred]
+	float iir2_q = 0.70710678f; // Q of HighPassIir2/LowPassIir2, which have no Q port [inferred: Butterworth]
 	// [output]
 	float lfe_fold_db = -6.0f; // the LFE bus folded into stereo until a 5.1 path exists (A3)
 	float window_top_db = 115.0f; // fixed loudness window top until HDR (A3): 0 dBFS = window_top_db
@@ -36,7 +37,8 @@ struct AudioTuning {
 	float release_fade_ms = 5.0f; // LtInstantRelease fade
 	// [mixer]
 	float max_voices = 128.0f; // voice slots in the mixer core (integer)
-	float control_block_frames = 512.0f; // control rate: one evaluation per mix block (Godot's fixed 512)
+	float control_block_frames = 512.0f; // control rate: one evaluation per block of the mixer core's render grid
+	float schedule_lead_blocks = 2.0f; // MixerCore::earliest_frame lead (integer blocks; 2 = 21.3 ms) [inferred]
 };
 
 struct AudioTuningKey {

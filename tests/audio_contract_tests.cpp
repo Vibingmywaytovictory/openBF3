@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/audio/audio_analysis.h"
+#include "bf3/audio/audio_check.h"
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/dsp.h"
 #include "bf3/audio/mixer_core.h"
@@ -38,6 +39,11 @@ static_assert(au::fourcc("Sub0") == 1400201776u);
 static_assert(au::fourcc("LPB0") == 1280328240u);
 static_assert(au::fourcc("Pn21") == 1349399089u);
 static_assert(au::fourcc("HI20") == 1212756528u);
+// SoundGraphInfo ConnectionIndex is 1-based with 0 = none [verified over all 835 graphs of @all-mp].
+static_assert(au::kStoredConnectionNone == 0);
+// The M16A3 check taps fit the instance's tap.
+static_assert(ba::kM16CoreTapVoices.size() <= ba::kMaxTapVoices && ba::kM16NoiseTapVoices.size() <= ba::kMaxTapVoices);
+static_assert(ba::kM16NoiseHpf.voice == 14 && ba::kM16NoiseHpf.plugin == 2 && ba::kM16CoreHpf.voice == 6 && ba::kM16CoreHpf.plugin == 1);
 // Commands cross the ring by copy.
 static_assert(std::is_trivially_copyable_v<ba::MixerCommand>);
 static_assert(std::is_trivially_copyable_v<au::SoundPort>);
@@ -91,7 +97,7 @@ TEST_CASE("seam hashes are ebx_name_hash of their names") {
 }
 
 TEST_CASE("tuning: defaults parse, bad input fails with the line") {
-	CHECK(ba::audio_tuning_keys().size() == 14);
+	CHECK(ba::audio_tuning_keys().size() == 16);
 	auto empty = ba::parse_audio_tuning("");
 	REQUIRE(empty.ok());
 	CHECK(empty->window_top_db == 115.0f);

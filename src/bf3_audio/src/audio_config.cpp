@@ -16,6 +16,7 @@ constexpr AudioTuningKey kKeys[] = {
 	{ "filters", "lpb0_full_damping_hz", &AudioTuning::lpb0_full_damping_hz, 100.0f, 20000.0f, "[inferred] LPB0 cutoff at full HF damping; A3 measures" },
 	{ "filters", "lpb0_open_hz", &AudioTuning::lpb0_open_hz, 1000.0f, 24000.0f, "[inferred] LPB0 cutoff with no damping" },
 	{ "filters", "hf_damping_db_per_metre", &AudioTuning::hf_damping_db_per_metre, 0.0f, 1.0f, "[inferred] off in A2" },
+	{ "filters", "iir2_q", &AudioTuning::iir2_q, 0.1f, 30.0f, "[inferred] Butterworth Q for HighPassIir2/LowPassIir2 (no Q port)" },
 	{ "output", "lfe_fold_db", &AudioTuning::lfe_fold_db, -96.0f, 12.0f, "stereo fold of the LFE bus until A3" },
 	{ "output", "window_top_db", &AudioTuning::window_top_db, 60.0f, 160.0f, "fixed loudness window until HDR (A3); M16A3 Loudness 110" },
 	{ "output", "window_headroom_db", &AudioTuning::window_headroom_db, 0.0f, 48.0f, "headroom below 0 dBFS" },
@@ -24,7 +25,8 @@ constexpr AudioTuningKey kKeys[] = {
 	{ "sampler", "step_crossfade_ms", &AudioTuning::step_crossfade_ms, 0.0f, 50.0f, "[inferred] de-click ramp on slot takeover" },
 	{ "sampler", "release_fade_ms", &AudioTuning::release_fade_ms, 0.0f, 200.0f, "[inferred] LtInstantRelease fade" },
 	{ "mixer", "max_voices", &AudioTuning::max_voices, 1.0f, 1024.0f, "voice slots" },
-	{ "mixer", "control_block_frames", &AudioTuning::control_block_frames, 512.0f, 512.0f, "Godot's fixed mix block" },
+	{ "mixer", "control_block_frames", &AudioTuning::control_block_frames, 512.0f, 512.0f, "the mixer core's render grid" },
+	{ "mixer", "schedule_lead_blocks", &AudioTuning::schedule_lead_blocks, 1.0f, 16.0f, "[inferred] lead of a new burst ahead of the mix clock" },
 };
 
 std::string_view trim(std::string_view p_text) {

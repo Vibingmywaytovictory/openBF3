@@ -17,8 +17,35 @@
 // ShuffleSegments): a counter-based generator per node, seeded from (instance seed, node index, draw count), so a
 // given seed and event sequence renders bit-identically (gate G7 determinism), on any thread.
 //
+// Seeds: the game derives p_seed from replicated state so every client renders the same sound for the same shot:
+// splitmix64(entity id << 32 | the weapon's burst sequence number) for weapons, the effect instance id for one-shot
+// effect sounds (design §7.2). Tests use fixed seeds.
+//
 // AreaType (MixerReceive from sound/mixers/areatype_mixer): A2 feeds 0 (design §6.3, plan M2a A2); set_mixer_value
 // is the seam A4 drives.
+//
+// Sampler model (design §6.3; [inferred], open question 4). A variation's segments split into an intro
+// [0, FirstLoopSegmentIndex), the loop [FirstLoop, LastLoop] and a tail (LastLoop, end) (the M16A3's hifi_lmg_m4_wave:
+// 1 / 12 / 1 segments; corebassclose_lmg_08_wave has no tail; lfe_wave is one segment that is its own loop).
+//   - Trigger starts segment 0 on a free slot, Delay seconds after the event frame (Delay is latched at Trigger).
+//   - Stepped mode (Step connected and EnableStep >= 0.5 at the event): each Step starts the next loop segment
+//     (in order, or shuffled) on the other slot at the Step frame + the latched Delay; a slot whose segment ends
+//     goes idle (no automatic advance), so the rhythm is exactly the Step rhythm.
+//   - Unstepped mode (Step unconnected, or EnableStep < 0.5): LtRelease plays the loop segments back to back on the
+//     same slot (next segment starts on the frame the previous one ends) until Release; LtForward does the same and
+//     ignores Release until Stop/kill; LtNone plays the segments once, in order.
+//   - Release (LtRelease): the playing segment finishes, then the tail plays (stepped and unstepped alike; with an
+//     idle slot it starts at the Release frame); no tail = the sampler ends with its segment. LtInstantRelease fades
+//     out over release_fade_ms.
+//   - Pitch = BasePitch x Pitch port x MasterPitch, read per sub-block; the M16A3's pitch register v30 = v28 x v29
+//     where v28 is drawn once per burst (its NumberGenerator is triggered by the gated Fire, not by Step).
+// DeMux: output index = floor(Value) clamped to [0, outputs - 1] (WrapValue false) or modulo outputs (true)
+// [inferred]. On the M16A3 that makes the EnableStep parameter the fire mode: v119 = SimpleValueSelector(#1365968171
+// + EnableStep) in [0, 1.9, ...]; with 0 the gated Fire is routed to the release register v100 in the same evaluation
+// (single shot: Trigger and Release together), with 1.9 the stop event is routed to v100 through
+// ParameterFilterLinear(v119, release 0.3/s) -> DeMux, so EnableStep must stay at the weapon's fire mode for the life
+// of the instance (dropping it to 0 lets the filtered index fall below 1 after 3 s and the stop would no longer
+// release the loops). weapon_sound.h sets it once from the fire mode.
 
 #include "bf3/audio/audio_config.h"
 #include "bf3/core/audio/sound_program.h"
@@ -57,6 +84,37 @@ struct ListenerState {
 struct BusBuffers {
 	float *channels[size_t(core::audio::MasterBus::Unknown)][kMaxBusChannels] = {};
 	uint32_t frames = 0;
+	uint64_t first_frame = 0; // MixerClock frame of the buffer's first frame (taps and the sampler trace use it)
+};
+
+// Analysis tap on a set of voices (gates G7/G8, design §9): after each sub-block, the outputs of the listed voices
+// (each voice's plugin chain output, before its sends), summed to mono, are handed to on_voices on the audio
+// thread (no blocking, no allocation). The M16A3 "core" tap is voices 26-29 (the stepped corebassdistant and
+// corebassclose samplers), the "noise" tap voice 14 (the submix behind the distance HPF v46).
+inline constexpr size_t kMaxTapVoices = 16;
+class VoiceTap {
+public:
+	virtual ~VoiceTap() = default;
+	virtual void on_voices(const float *p_mono, uint32_t p_frames, uint64_t p_first_frame) = 0;
+};
+
+// One sampler segment event, for the model checks of gate G7 (the unstepped noise loop plays back to back; Steps
+// start on their frames; the tail follows the release).
+enum class SamplerTraceKind : uint8_t { Trigger, Step, Advance, Tail, End };
+struct SamplerTraceEntry {
+	uint64_t frame = 0; // MixerClock frame the segment starts (End: the frame the slot went idle)
+	uint32_t node = 0; // index into SoundProgram::nodes
+	uint8_t slot = 0;
+	uint16_t segment = 0;
+	SamplerTraceKind kind = SamplerTraceKind::Trigger;
+	float pitch = 1.0f;
+};
+// Caller-owned trace storage: entries is sized before use and never grows; the audio side writes entries[count++]
+// and counts dropped once it is full.
+struct SamplerTrace {
+	std::vector<SamplerTraceEntry> entries;
+	uint32_t count = 0;
+	uint64_t dropped = 0;
 };
 
 // What the instance is doing, for tests, the oracle gate and the debug overlay. Values are those of the last
@@ -118,9 +176,15 @@ public:
 	// The attenuation (dB) an output node currently applies from its curve and Gain.
 	float output_gain_db(uint32_t p_output) const;
 	PatchHaptics haptics() const;
-	// Test hook (gate G7 HPF check): pin a plugin attribute to p_value instead of what the program drives
-	// (nullopt restores it). Not used by the game.
+	// Test hook (gates G7/G8 HPF checks): pin a plugin attribute to p_value instead of what the program drives
+	// (nullopt restores it). Not used by the game. Call it on the thread that owns the instance: before the Start
+	// command hands it to the mixer, or offline.
 	void override_plugin_attribute(core::audio::SoundPluginRef p_plugin, uint8_t p_attribute, std::optional<float> p_value);
+	// Analysis hooks (gates G7/G8), same threading rule. p_voices is copied (at most kMaxTapVoices). p_tap and
+	// r_trace are caller-owned and must outlive the instance's time in the mixer; the caller reads the trace once
+	// the instance is finished (it outlives the instance, which reclaim() destroys).
+	void set_voice_tap(std::span<const uint16_t> p_voices, VoiceTap *p_tap);
+	void set_sampler_trace(SamplerTrace *r_trace);
 	const core::audio::SoundProgram &program() const;
 	const PatchInstanceStats &stats() const;
 

@@ -5,6 +5,7 @@ add_library(bf3_audio STATIC
     src/audio_config.cpp
     include/bf3/audio/audio_config.h
     include/bf3/audio/audio_analysis.h
+    include/bf3/audio/audio_check.h
     include/bf3/audio/dsp.h
     include/bf3/audio/mixer_core.h
     include/bf3/audio/patch_instance.h

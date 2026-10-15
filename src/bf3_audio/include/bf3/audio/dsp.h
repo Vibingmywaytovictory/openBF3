@@ -23,7 +23,11 @@ enum class BiquadShape : uint8_t { LowPass, HighPass, BandPass, Peaking, Bypass 
 
 struct BiquadCoefficients {
 	float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
-	// p_frequency is clamped to [10 Hz, 0.45 p_rate], p_q to [0.1, 30]; p_gain_db only for Peaking.
+	// p_frequency is clamped to [10 Hz, 0.45 p_rate], p_q to [0.1, 30]; p_gain_db only for Peaking. A HighPass at
+	// p_frequency <= 0 is the identity {1, 0, 0, 0, 0} and Biquad::process passes samples through unchanged (bit
+	// exact): the M16A3's voice-14 HPF (v46) is 0 Hz up to 17 m, and gate G7 pins that a 0 Hz high-pass leaves the
+	// render bit-identical (its voice-6 HPF v49 is never 0 in third person: >= 80 Hz). HighPassIir2/LowPassIir2 have no Q port; they use the tuning
+	// key iir2_q (0.7071, Butterworth [inferred]).
 	static BiquadCoefficients design(BiquadShape p_shape, float p_rate, float p_frequency, float p_q, float p_gain_db);
 };
 

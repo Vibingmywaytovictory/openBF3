@@ -127,10 +127,19 @@ constexpr uint32_t fourcc(const char (&p_text)[5]) {
 			uint32_t(uint8_t(p_text[3]));
 }
 
+// ConnectionIndex as stored is 1-BASED, and 0 means "no connection" [verified over every graph of @all-mp: in all 835
+// (834 patches + master), the non-zero ConnectionIndex values of a graph are exactly 1..Connections.size(), each once;
+// 9,807 connections, used by Sen0 (9,784) and Rou0 (23, in 6 non-weapon graphs: sound/master, three mp_music patches,
+// destruction_bigtower, vehicle_paradrop_start_xp5); no Sen0 carries 0]. Read 1-based, the M16A3 routes its LFE voice
+// 4 to the LFE bus and voice 14 to voices 1 and 5; read 0-based, index N would be out of range. The compiler stores
+// the 0-based index (stored - 1) and fails the compile when a value exceeds Connections.size(), when two plugins name
+// the same connection, or when a connection is named by none (the checks are part of decode_sound_program too).
+inline constexpr uint32_t kStoredConnectionNone = 0;
+
 struct SoundVoicePlugin {
 	uint32_t id = 0; // FourCC
 	uint8_t channels = 0; // OutputChannelCount
-	uint16_t connection = kNoRegister; // Sen0: index into connections
+	uint16_t connection = kNoRegister; // Sen0/Rou0: 0-BASED index into connections (stored ConnectionIndex - 1); kNoRegister = none
 	uint32_t construct_begin = 0; // into construct_params
 	uint16_t construct_count = 0;
 	uint32_t attribute_mask = 0; // EnableAttributeReadMask
@@ -265,6 +274,7 @@ struct CompileStats {
 	size_t registers = 0;
 	size_t voices = 0;
 	size_t plugins = 0;
+	size_t connections = 0; // each named by exactly one plugin (see kStoredConnectionNone); G4 sums them: 9,807
 	std::vector<std::string> unknown_type_names;
 	std::vector<std::string> dependencies; // partitions read besides the patch (master, mixers, waves by GUID only)
 };

@@ -9,7 +9,12 @@
 // interleaved stereo, so MixerCore::mix writes into the buffer directly. It always returns `frames` (returning fewer
 // makes Godot fade the stream out and end it). rate_scale is ignored: the project runs the driver at 48 kHz
 // (project.godot [audio] driver/mix_rate=48000, the AudioSystemAsset SampleRate), so the stream's mix rate equals
-// the server's and Godot does not resample. Godot's mix block is 512 frames.
+// the server's and Godot does not resample. The call size is not assumed: MixerCore serves any frame count from
+// its own 512-frame grid.
+//
+// Lifetime: the playback holds a shared_ptr to the MixerCore but never the last one; Bf3LevelSession owns the
+// mixer, stops the player, waits one AudioServer lock()/unlock() and then releases it on the game thread
+// (mixer_core.h), so nothing is freed on Godot's audio thread.
 //
 // Registered in register_types.cpp by the A1 wave (the classes compile now and _mix renders silence; nothing
 // creates them yet).
