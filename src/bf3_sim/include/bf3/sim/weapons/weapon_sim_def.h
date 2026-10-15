@@ -64,7 +64,7 @@ struct ExplosionSimDef {
 	bool disable_occlusion = false;
 	bool disable_static_entity_occlusion = false;
 	// DamageProtectionMultiplier of the explosion's pair against each zone; 1.0 until the WeaponDef carries the
-	// explosion's MaterialPair (docs §6.4: Metro's blast cells are 1.0 for every zone [verified, grid dump]).
+	// explosion's MaterialPair (docs §4.2: Metro's blast cells are 1.0 for every zone [verified, grid dump]).
 	std::array<float, kHitZoneCount> zone_multiplier{ 1, 1, 1, 1 };
 	bool zone_multiplier_from_data = false;
 };

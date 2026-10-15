@@ -1,4 +1,4 @@
-// M2a weapons interface contract (docs/design/m2a-weapons.md §12): every weapons header compiles together with
+// M2a weapons interface contract (docs/design/m2a-weapons.md §14): every weapons header compiles together with
 // the M1 headers it builds on, the plain types keep their properties, and the inline helpers the server and the
 // clients must agree on (sub-tick time, the counter-based RNG, the weapon button fields) behave. No data; the
 // functions the headers only declare are the implementation wave's and are not called here.
