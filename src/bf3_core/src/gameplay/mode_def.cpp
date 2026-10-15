@@ -487,7 +487,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		if (array->size() > kMaxInterfaceConstants - out.interface_constants.size()) {
 			return make_error("mode: level " + id + " lists more than " + std::to_string(kMaxInterfaceConstants) + " interface constants");
 		}
-		BF3_TRY(budget.charge(array_cost(*array))); // a wide entry type costs more per entry
+		BF3_TRY(budget.charge(array_cost(*array)));
 		for (const EbxValue field : *array) {
 			InterfaceConstantDef c;
 			c.subworld = copy_text(budget, world.scope_name(s));

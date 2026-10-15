@@ -29,6 +29,15 @@
 //   ebxload <sb> [--walk]      bulk-parse every partition (timing, failures, bytes); --walk also
 //                              decodes every value of every instance
 //   numcheck                   self-check of the probe's JSON number text (no install needed)
+// Weapons (bf3_core gameplay readers; README "Weapon tables"):
+//   weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]
+//                              one resolved WeaponDef (a variant or a blueprint) with the level's
+//                              body multipliers for its projectile; --name adds the localised name
+//   weapons [--level <sb>]     one TSV row per SoldierWeaponUnlockAsset under weapons/
+// Text database (text_commands.cpp): text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>
+//   level <LEVEL> <MODE> [--legacy-mvdb]  canonical placement listing of one level x mode
+//                              (level_commands.cpp; parity with research/probes/tools/level-oracle)
+//   levelmodes <LEVEL>         the modes a level offers
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -41,8 +50,11 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/thread_pool.h"
 #include "ebx_commands.h"
+#include "weapon_commands.h"
+#include "text_commands.h"
 #include "gameplay_commands.h"
 #include "json_number.h"
+#include "level_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -461,7 +473,12 @@ void usage() {
 			"  types <sb[,sb..]|@all-mp> <Type>...\n"
 			"  dump <sb[,sb..]|@all-mp> <out_dir> <depth> <follow> <root>...\n"
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
-			"  numcheck\n");
+			"  numcheck\n"
+			"  weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]\n"
+			"  weapons [--level <sb>]\n"
+			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n"
+			"  level <LEVEL> <MODE> [--legacy-mvdb]\n"
+			"  levelmodes <LEVEL>\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 }
 
@@ -535,6 +552,27 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "ebxload" && (rest.size() == 1 || (rest.size() == 2 && rest[1] == "--walk"))) {
 		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], rest.size() == 2);
+	}
+	if (cmd == "weapon" && !rest.empty()) {
+		return bf3dump::cmd_weapon(ebx_ctx, rest);
+	}
+	if (cmd == "weapons") {
+		return bf3dump::cmd_weapons(ebx_ctx, rest);
+	}
+	if (cmd == "text" && rest.size() >= 1 && rest[0] == "--census" && rest.size() <= 2) {
+		return bf3dump::cmd_text_census(ebx_ctx, rest.size() == 2 ? rest[1] : std::string());
+	}
+	if (cmd == "text" && rest.size() == 2 && rest[0] == "--tsv") {
+		return bf3dump::cmd_text_tsv(ebx_ctx, rest[1]);
+	}
+	if (cmd == "text" && !rest.empty() && rest[0].rfind("--", 0) != 0) {
+		return bf3dump::cmd_text_lookup(ebx_ctx, rest);
+	}
+	if (cmd == "level" && (rest.size() == 2 || (rest.size() == 3 && rest[2] == "--legacy-mvdb"))) {
+		return bf3dump::cmd_level(ctx.install, rest[0], rest[1], rest.size() == 3);
+	}
+	if (cmd == "levelmodes" && rest.size() == 1) {
+		return bf3dump::cmd_level_modes(ctx.install, rest[0]);
 	}
 	if (const int rc = bf3dump::dispatch_gameplay(ebx_ctx, cmd, rest); rc >= 0) {
 		return rc;

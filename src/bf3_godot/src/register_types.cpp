@@ -1,7 +1,10 @@
 // GDExtension entry of openBF3 (entry_symbol "openbf3_library_init" in openbf3.gdextension).
 
+#include "bf3_localisation.h"
 #include "dedicated_main_loop.h"
 #include "game_session.h"
+#include "viewmodel_demo.h"
+#include "weapon_inspector.h"
 
 #include "bf3/host/loopback_client.h"
 #include "bf3/host/server_host.h"
@@ -20,6 +23,10 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(bf3::godot_side::GameSession);
 	GDREGISTER_CLASS(bf3::godot_side::DedicatedMainLoop);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3Translation);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3Localisation);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3WeaponInspector);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

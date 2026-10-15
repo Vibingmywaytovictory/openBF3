@@ -120,6 +120,8 @@ function(openbf3_module target)
 endfunction()
 
 add_subdirectory(src/bf3_core)
+add_subdirectory(src/bf3_anim) # skeletons, poses, skinning binds over bf3_core's Ant/EBX/res readers
+add_subdirectory(src/bf3_render) # Godot-free mesh/texture/material preparation for the Godot bridge
 add_subdirectory(src/bf3_sim)
 add_subdirectory(src/bf3_net)
 add_subdirectory(src/bf3_host)

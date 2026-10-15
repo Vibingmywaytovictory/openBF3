@@ -130,37 +130,14 @@ std::optional<EbxInstance> first_of(WorkBudget &r_budget, const std::vector<EbxI
 	return std::nullopt;
 }
 
-// The name of the field of p_target whose name hashes to p_field (descriptor hashes, no rehashing).
+// The name of the field of p_target whose name hashes to p_field: the first such field in fields()
+// order (base types first), found by the descriptors' stored hashes (no name is hashed again) in one
+// binary search of the type's lookup table (EbxPartition::lookup). An instance's fields all decode
+// (the parser validated each), so this is the field fields() would list.
 std::string_view field_name_of(const EbxInstance &p_target, int32_t p_field) {
 	const EbxPartition &partition = p_target.partition();
-	std::optional<uint32_t> complex = p_target.data().complex();
-	size_t at = p_target.data().offset();
-	std::string_view out;
-	// fields() order is base types first, so the last match up the chain is the first in that order.
-	for (size_t depth = 0; complex && depth < EbxPartition::kBaseDepth && *complex < partition.complex_descs().size(); ++depth) {
-		const EbxPartition::Complex &desc = partition.complex_descs()[*complex];
-		std::optional<uint32_t> base;
-		size_t base_at = 0;
-		std::string_view here;
-		for (uint32_t f = desc.field_start; f < desc.field_end; ++f) {
-			const EbxPartition::Field &member = partition.field_descs()[f];
-			const size_t member_at = at + static_cast<size_t>(static_cast<int64_t>(member.offset));
-			if (member.code == ebx_code::kVoid) {
-				if (!base) {
-					base = member.reference;
-					base_at = member_at;
-				}
-			} else if (here.empty() && static_cast<int32_t>(member.hash) == p_field && partition.decode(f, member_at)) {
-				here = partition.name(member.name_start, member.name_end);
-			}
-		}
-		if (!here.empty()) {
-			out = here;
-		}
-		complex = base;
-		at = base_at;
-	}
-	return out;
+	const EbxPartition::Lookup *found = partition.lookup(p_target.data().complex(), static_cast<uint32_t>(p_field));
+	return found != nullptr ? partition.field_name(found->first_field) : std::string_view();
 }
 
 struct UnlockTarget {
@@ -333,7 +310,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 	if (!entity || !entity->is_a("SoldierEntityData")) {
 		return make_error("soldier: `" + name + "` has no SoldierEntityData (primary " + std::string(blueprint.type_name()) + ")");
 	}
-	// Each instance examined below is charged its type width first (its inline structs included).
+	// Each instance examined below is charged first (its inline structs are part of the examination).
 	BF3_TRY(budget.charge_type(entity->data()));
 	SoldierDef out;
 	out.blueprint = name;

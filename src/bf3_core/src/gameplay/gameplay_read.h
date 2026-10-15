@@ -6,9 +6,8 @@
 // WorkBudget and charge it before the work (see work_budget.h and the cost model in
 // logic_world.cpp). Once the budget is exhausted they return an empty value at once; the public
 // reader that called them reports the budget error. The others read one field (or a dotted path
-// through inline fields) of an instance or struct the caller has charged: WorkBudget::charge_type
-// and array_cost charge EbxPartition::lookup_width, which covers the lookups of a wide type and of
-// its inline struct types alike.
+// through inline fields) of an instance or struct the caller has charged (WorkBudget::charge_type,
+// array_cost): every path segment is one O(log n) lookup in the EBX parser's tables.
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -87,21 +86,13 @@ inline std::string text(WorkBudget &r_budget, const EbxStruct &p_object, std::st
 	return copy_text(r_budget, text_view(p_object, p_path));
 }
 
-// The units a scan of p_array costs: its raw element count, times one more per kFieldsPerUnit
-// descriptors of a wide struct element type, its inline struct fields included (see
-// WorkBudget::charge_type).
+// The units a scan of p_array costs: its raw element count (each element is examined with a fixed
+// number of O(log n) lookups, see WorkBudget::charge_type).
 inline size_t array_cost(const EbxArray &p_array) {
-	size_t extra = 0; // every element has the array's member type
-	if (const std::optional<EbxValue> first = p_array.size() > 0 ? p_array.get(0) : std::nullopt) {
-		if (const std::optional<EbxStruct> element = first->as_struct()) {
-			extra = WorkBudget::type_width(*element) / WorkBudget::kFieldsPerUnit;
-		}
-	}
-	return p_array.size() * (1 + extra);
+	return p_array.size();
 }
 
-// The array a field holds, its element count charged before any element is looked at (struct
-// elements of a wide type cost more, see WorkBudget::charge_type). No array (absent, another type,
+// The array a field holds, its element count charged before any element is looked at. No array (absent, another type,
 // or the budget spent) is an empty OptionalEbxArray.
 inline OptionalEbxArray array_of(WorkBudget &r_budget, const std::optional<EbxValue> &p_value) {
 	const OptionalEbxArray out = p_value ? p_value->as_array() : OptionalEbxArray();
@@ -131,7 +122,7 @@ inline std::vector<EbxInstance> follow_all(WorkBudget &r_budget, const EbxResolv
 		const std::optional<EbxRef> r = element.as_ref();
 		if (r) {
 			if (const std::optional<EbxInstance> i = p_db.resolve(p_object.partition(), *r)) {
-				// The caller examines each instance: a wide type costs its lookups up front.
+				// The caller examines each instance: one more unit each.
 				if (!r_budget.take_type(i->data())) {
 					return out;
 				}
@@ -157,7 +148,7 @@ inline std::string ref_name(WorkBudget &r_budget, const EbxResolver &p_db, const
 // blueprint bookkeeping fields (IndexInBlueprint, Is*ConnectionTarget, RuntimeComponentCount) skipped.
 inline std::vector<std::pair<std::string, double>> scalars(WorkBudget &r_budget, const EbxInstance &p_object) {
 	std::vector<std::pair<std::string, double>> out;
-	if (!r_budget.take_type(p_object.data())) {
+	if (!r_budget.charge_fields(p_object.data()).ok()) {
 		return out;
 	}
 	for (const EbxField &f : p_object.fields()) {

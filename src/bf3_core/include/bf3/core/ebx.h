@@ -13,6 +13,16 @@
 // 9 FileRef, 10 Boolean, 11..18 Int8..UInt64, 19 Float32, 20 Float64, 21 Guid, 22 Sha1. FB2 has no
 // boxed values, TypeRef or ResourceRef; other codes are rejected. Array-of-enum elements carry no
 // enum type, so they decode to the value only.
+// Field lookup costs O(log n) whatever the type layout: the parser flattens each class and value
+// type's fields along its base chain into one table sorted by name hash (EbxPartition::lookup), so
+// get() never walks base types or field descriptors. To keep those tables (and every walk over a
+// type's descriptors) proportional to the partition, a type's base chain holds at most
+// kChainFields descriptors and all tables together at most kLookupsPerDescriptor entries per
+// descriptor (plus kLookupSlack); partitions past either are rejected. Retail BF3 (all 501,952
+// partitions of the 53 non-chunk superbundles): at most 96 descriptors along a chain, at most 1.96
+// table entries per descriptor. Enumerator names are a binary search too, and the validation pays
+// for each type's descriptors before it scans them, so parsing is linear in the partition's size
+// (at most 16 validation steps per byte) whatever the layout.
 
 #include "bf3/core/ids.h"
 #include "bf3/core/result.h"
@@ -25,6 +35,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace bf3::core {
@@ -95,7 +106,7 @@ public:
 	// The type first, then each base type up to the root.
 	std::vector<std::string_view> type_chain() const;
 	bool is_a(std::string_view p_type_name) const;
-	// The most derived field of that name.
+	// The most derived field of that name (O(log n): one search in the type's lookup table).
 	std::optional<EbxValue> get(std::string_view p_field) const;
 	// Dotted field path with optional array indices, e.g. "Transform.trans.x" or "Items[3].Name".
 	std::optional<EbxValue> get_path(std::string_view p_path) const;
@@ -381,6 +392,20 @@ public:
 		uint8_t code;
 		uint32_t size;
 		std::optional<uint32_t> base;
+		uint32_t lookup_start = 0; // this type's range of lookups_ (classes, value types) or enumerators_ (enums)
+		uint32_t lookup_end = 0;
+	};
+	// One field name of a class or value type, base types included. offset is from the start of
+	// the type's data. field / offset: the most derived declaration (what get() returns, the
+	// first in declaration order within that type); first_field / first_offset: the first in
+	// EbxStruct::fields() order (base types first). The two differ only when a type redeclares a
+	// base type's field name.
+	struct Lookup {
+		uint32_t hash;
+		uint32_t field;
+		uint32_t offset;
+		uint32_t first_field;
+		uint32_t first_offset;
 	};
 	struct InstanceEntry {
 		Guid guid;
@@ -403,29 +428,30 @@ public:
 	std::string_view complex_name(uint32_t p_complex) const;
 	std::string_view field_name(uint32_t p_field) const;
 	bool derives_from(uint32_t p_complex, uint32_t p_hash, std::string_view p_type_name) const;
-	// nullopt = offset outside the table; inner nullopt = the null string.
+	// nullopt = offset outside the table; inner nullopt = the null string. O(log n) in the table's
+	// string count, whatever the string's length (the parser indexes the NULs).
 	std::optional<std::optional<std::string_view>> string(uint32_t p_offset) const;
 	std::optional<EbxRef> reference(uint32_t p_raw) const;
+	// The first enumerator of that value (O(log n)).
 	std::optional<std::string_view> enumerator(uint32_t p_complex, int32_t p_value) const;
 	uint32_t stride(uint32_t p_field) const;
 	std::optional<EbxValue> decode(uint32_t p_field, size_t p_at) const;
-	// An upper bound on the descriptors one access to a struct of this type scans: one fields() pass,
-	// or one get_path of up to kLookupDepth segments through inline (ValueType) fields, decoding
-	// included. It is the descriptor count of the type chain plus the enumerators of its enum fields
-	// (decoding an enum scans its enumerators), plus the most any one inline field's type adds one
-	// segment further down (computed when the partition is parsed, linear in the descriptor count).
-	// 0 for an index out of range.
-	uint32_t lookup_width(uint32_t p_complex) const { return p_complex < lookup_widths_.size() ? lookup_widths_[p_complex] : 0; }
+	// The field of class or value type p_complex (base types included) whose descriptor carries
+	// name hash p_hash, or null; O(log n) in the type's field count. The parser resolves every field
+	// name through its hash, so within a partition a hash names exactly one name.
+	const Lookup *lookup(uint32_t p_complex, uint32_t p_hash) const;
 
 	static constexpr size_t kBaseDepth = 32;
-	static constexpr size_t kLookupDepth = 4;
+	static constexpr size_t kChainFields = 1024;
+	static constexpr size_t kLookupsPerDescriptor = 4;
+	static constexpr size_t kLookupSlack = 4096;
 
 private:
 	EbxPartition() = default;
 	friend class EbxValidator;
 
 	Status link_complexes();
-	void compute_lookup_widths();
+	Status build_lookups();
 	Result<std::optional<uint32_t>> check_members(uint32_t p_complex) const;
 	Status check_element(uint32_t p_complex, uint32_t p_member);
 	Result<uint32_t> array_member(uint32_t p_complex) const;
@@ -442,10 +468,11 @@ private:
 	size_t names_len_ = 0;
 	size_t strings_at_ = 0; // string table
 	size_t strings_len_ = 0;
-	std::vector<uint32_t> string_ends_; // offsets of the string table's NUL bytes, ascending
-	std::vector<uint32_t> lookup_widths_; // per complex (lookup_width)
+	std::vector<uint32_t> string_ends_; // offsets of the string table's NULs, ascending
 	std::vector<Field> fields_;
 	std::vector<Complex> complexes_;
+	std::vector<Lookup> lookups_; // per class / value type, sorted by hash (Complex::lookup_start)
+	std::vector<std::pair<int32_t, uint32_t>> enumerators_; // per enum: (value, field), sorted
 	std::vector<InstanceEntry> instances_;
 	std::vector<ArrayEntry> arrays_;
 	std::vector<uint32_t> by_guid_; // instance indices sorted by GUID

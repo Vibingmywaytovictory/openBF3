@@ -4,10 +4,16 @@
 
 #include "mini_json.h"
 
+#include "bf3/core/install_reader.h"
+#include "bf3/core/thread_pool.h"
+
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <mutex>
 
 namespace bf3::tools::antdump {
 
@@ -544,6 +550,158 @@ bool find_oracle_clip(const AntLibrary &p_library, const AntPackage &p_package, 
 	}
 	r_error = "no clip \"" + name + "\" with the oracle's codec/endFrame/keyTimes (" + std::to_string(candidates) + " candidates by name)";
 	return false;
+}
+
+// --- sources ---------------------------------------------------------------------------------
+
+bool open_source(const SourceOptions &p_options, OpenedSource &r_opened, std::string &r_error, bool *r_unavailable) {
+	r_opened = {};
+	if (r_unavailable) {
+		*r_unavailable = false;
+	}
+	if (!p_options.install) {
+		auto source = std::make_unique<AntExportDirSource>();
+		if (!std::filesystem::is_regular_file(std::filesystem::path(p_options.export_dir) / "res.tsv")) {
+			if (r_unavailable) {
+				*r_unavailable = true;
+			}
+			r_error = "no export directory at " + p_options.export_dir + " (res.tsv missing)";
+			return false;
+		}
+		if (!source->open(p_options.export_dir, r_error)) {
+			return false;
+		}
+		r_opened.description = "export directory " + p_options.export_dir + ": " + std::to_string(source->packages().size()) + " packages, " +
+				std::to_string(source->all_banks().size()) + " banks";
+		r_opened.source = std::move(source);
+		return true;
+	}
+	bf3::core::InstallReader reader;
+	bf3::core::InstallLocateOptions locate;
+	locate.cmdline_path = p_options.install_dir;
+	if (!reader.locate(locate)) {
+		if (r_unavailable) {
+			*r_unavailable = true;
+		}
+		r_error = "install not usable: " + reader.describe();
+		return false;
+	}
+	bf3::core::Result<std::shared_ptr<bf3::core::Install>> install = bf3::core::Install::open(reader);
+	if (!install) {
+		r_error = "open install: " + install.error().message;
+		return false;
+	}
+	bf3::core::Result<std::unique_ptr<AntInstallSource>> source = AntInstallSource::open(*install);
+	if (!source) {
+		r_error = "ant install source: " + source.error().message;
+		return false;
+	}
+	const AntInstallSource::OpenReport &rep = (*source)->report();
+	char line[256];
+	std::snprintf(line, sizeof(line), ": %zu packages, %zu banks from %zu of %zu superbundles in %.2f s (%zu warnings)", (*source)->packages().size(),
+			(*source)->all_banks().size(), rep.superbundles_used, rep.superbundles_scanned, rep.seconds, rep.warnings.size());
+	r_opened.description = "install " + reader.status().root_utf8 + line;
+	r_opened.install = *install;
+	r_opened.source = std::move(*source);
+	return true;
+}
+
+namespace {
+
+std::string info_row(const AntPackageInfo &p_info) {
+	return p_info.partition + " | " + p_info.name + " | " + p_info.short_name + " | " + packaging_name(p_info.packaging) + " | " + p_info.streaming_guid + " | " +
+			std::to_string(p_info.chunk_size) + " | " + (p_info.is_asset_package ? "asset" : "set") + " | " + p_info.superbundle + " | " + p_info.bundle;
+}
+
+void compare_rows(const char *p_what, const std::vector<AntPackageInfo> &p_a, const std::vector<AntPackageInfo> &p_b, size_t &r_equal,
+		std::vector<std::string> &r_differences) {
+	constexpr size_t kMaxDifferences = 12;
+	if (p_a.size() != p_b.size() && r_differences.size() < kMaxDifferences) {
+		r_differences.push_back(std::string(p_what) + ": " + std::to_string(p_a.size()) + " vs " + std::to_string(p_b.size()) + " rows");
+	}
+	for (size_t i = 0; i < std::min(p_a.size(), p_b.size()); ++i) {
+		const std::string a = info_row(p_a[i]), b = info_row(p_b[i]);
+		if (a == b) {
+			++r_equal;
+		} else if (r_differences.size() < kMaxDifferences) {
+			r_differences.push_back(std::string(p_what) + " row " + std::to_string(i) + ":\n      " + a + "\n   vs " + b);
+		}
+	}
+}
+
+} // namespace
+
+bool ParityResult::ok() const {
+	return packages_a == packages_b && package_rows_equal == packages_a && banks_a == banks_b && bank_rows_equal == banks_a && payloads_equal == payloads &&
+			payload_errors == 0;
+}
+
+void compare_sources(const AntPackageSource &p_a, const AntPackageSource &p_b, bool p_payloads, ParityResult &r_result) {
+	r_result = {};
+	r_result.packages_a = p_a.packages().size();
+	r_result.packages_b = p_b.packages().size();
+	r_result.banks_a = p_a.all_banks().size();
+	r_result.banks_b = p_b.all_banks().size();
+	compare_rows("packages", p_a.packages(), p_b.packages(), r_result.package_rows_equal, r_result.differences);
+	compare_rows("banks", p_a.all_banks(), p_b.all_banks(), r_result.bank_rows_equal, r_result.differences);
+	if (!p_payloads) {
+		return;
+	}
+	// Every bank (res) and every Chunk package, matched by row (the rows were compared above).
+	std::vector<std::pair<const AntPackageInfo *, const AntPackageInfo *>> items;
+	for (size_t i = 0; i < std::min(p_a.all_banks().size(), p_b.all_banks().size()); ++i) {
+		items.emplace_back(&p_a.all_banks()[i], &p_b.all_banks()[i]);
+	}
+	for (size_t i = 0; i < std::min(p_a.packages().size(), p_b.packages().size()); ++i) {
+		if (p_a.packages()[i].packaging == AntPackagingType::Chunk) {
+			items.emplace_back(&p_a.packages()[i], &p_b.packages()[i]);
+		}
+	}
+	std::atomic<size_t> equal{ 0 }, errors{ 0 };
+	std::atomic<uint64_t> bytes{ 0 };
+	std::mutex mutex;
+	bf3::core::parallel_for(items.size(), [&](size_t i) {
+		std::vector<uint8_t> a, b;
+		std::string error_a, error_b;
+		const bool ok_a = p_a.read(*items[i].first, a, error_a);
+		const bool ok_b = p_b.read(*items[i].second, b, error_b);
+		std::string difference;
+		if (!ok_a || !ok_b) {
+			++errors;
+			difference = items[i].first->partition + ": read failed: " + (ok_a ? std::string("-") : error_a) + " / " + (ok_b ? std::string("-") : error_b);
+		} else if (a != b) {
+			difference = items[i].first->partition + ": payloads differ (" + std::to_string(a.size()) + " vs " + std::to_string(b.size()) + " bytes)";
+		} else {
+			++equal;
+			bytes += a.size();
+		}
+		if (!difference.empty()) {
+			std::lock_guard lock(mutex);
+			if (r_result.differences.size() < 24) {
+				r_result.differences.push_back(std::move(difference));
+			}
+		}
+	});
+	r_result.payloads = items.size();
+	r_result.payloads_equal = equal;
+	r_result.payload_errors = errors;
+	r_result.payload_bytes = bytes;
+}
+
+std::string format_parity(const ParityResult &p_result) {
+	char buf[512];
+	std::snprintf(buf, sizeof(buf),
+			"packages: %zu vs %zu, rows equal %zu\n"
+			"banks:    %zu vs %zu, rows equal %zu\n"
+			"payloads: %zu compared, %zu byte-identical (%.1f MB), %zu read errors\n",
+			p_result.packages_a, p_result.packages_b, p_result.package_rows_equal, p_result.banks_a, p_result.banks_b, p_result.bank_rows_equal,
+			p_result.payloads, p_result.payloads_equal, double(p_result.payload_bytes) / 1e6, p_result.payload_errors);
+	std::string out = buf;
+	for (const std::string &d : p_result.differences) {
+		out += "  " + d + "\n";
+	}
+	out += p_result.ok() ? "PARITY OK\n" : "PARITY FAILED\n";
+	return out;
 }
 
 } // namespace bf3::tools::antdump

@@ -77,6 +77,12 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ant/ant_source.h
 )
 
+# Ant banks read from the install (res by name, chunk by GUID) with the research export's selection rules.
+target_sources(bf3_core PRIVATE
+    src/ant/ant_install_source.cpp
+    include/bf3/core/ant/ant_install_source.h
+)
+
 # Resource decoders (MeshSet, DxTexture, Havok physics) over caller-supplied bytes; see
 # include/bf3/core/res/res_types.h. Port of IW4L resource_bf3.
 target_sources(bf3_core PRIVATE
@@ -91,6 +97,65 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/res/mesh_set.h
     include/bf3/core/res/dx_texture.h
     include/bf3/core/res/havok.h
+)
+
+# Resource loading from a LevelMount (res payload + resMeta + chunks -> decoded MeshSet / DxTexture /
+# Havok); see include/bf3/core/res/res_loader.h. The API the Godot bridge calls.
+target_sources(bf3_core PRIVATE
+    src/res/res_loader.cpp
+    include/bf3/core/res/res_loader.h
+)
+
+# Gameplay table readers: WeaponDef resolver (variants, modifiers, gun sway, projectiles) and the
+# level material grid / soldier hit capsules (plan §3.2, topics/01). Reads through EbxResolver.
+target_sources(bf3_core PRIVATE
+    src/gameplay/ebx_fields.h
+    src/gameplay/ebx_fields.cpp
+    src/gameplay/weapon_readers.h
+    src/gameplay/weapon_def.cpp
+    src/gameplay/weapon_firing.cpp
+    src/gameplay/weapon_projectile.cpp
+    src/gameplay/weapon_sway.cpp
+    src/gameplay/weapon_resolver.cpp
+    src/gameplay/material_grid.cpp
+    include/bf3/core/gameplay/weapon_def.h
+    include/bf3/core/gameplay/weapon_resolver.h
+    include/bf3/core/gameplay/material_grid.h
+)
+
+# UI readers (plan §2.2, §3.8): the UITextDatabase string table and the EBX SID census, clean-room from
+# research/topics/gap-r1-ui-hud-minimap-localisation.md §4.
+target_sources(bf3_core PRIVATE
+    src/ui/text_db.cpp
+    src/ui/text_census.cpp
+    include/bf3/core/ui/text_db.h
+    include/bf3/core/ui/text_census.h
+)
+
+# The WeaponDef text block and the weapon sources/catalog shared by bf3dump and the in-game inspector
+# (plan §6 M0 exit: the inspector prints the resolved M16A3/M16A4-burst WeaponDef and its localised name).
+target_sources(bf3_core PRIVATE
+    src/gameplay/weapon_format.cpp
+    src/gameplay/weapon_catalog.cpp
+    include/bf3/core/gameplay/weapon_format.h
+    include/bf3/core/gameplay/weapon_catalog.h
+)
+
+# Level traversal (plan §2.2): one level x mode's bundles, the placed objects in Frostbite space, the
+# mesh census and the collision placements. Port of IW4L level_bf3; see include/bf3/core/level/.
+target_sources(bf3_core PRIVATE
+    src/level/level_transform.cpp
+    src/level/budget.cpp
+    src/level/connections.cpp
+    src/level/level.cpp
+    src/level/world.cpp
+    src/level/census.cpp
+    include/bf3/core/level/level_transform.h
+    include/bf3/core/level/budget.h
+    include/bf3/core/level/connections.h
+    include/bf3/core/level/level.h
+    include/bf3/core/level/world.h
+    include/bf3/core/level/census.h
 )
 
 # Gameplay tables (plan §3.1, §3.4, §3.7): soldier, kits, mode constants resolved through the level's

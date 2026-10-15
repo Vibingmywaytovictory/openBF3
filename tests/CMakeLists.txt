@@ -47,8 +47,9 @@ add_test(NAME net.enet COMMAND test_net)
 add_test(NAME host.server COMMAND test_host)
 # bf3dump's JSON number text (the probe's f32/f64 rules) on synthetic values; no install needed.
 add_test(NAME tools.numtext COMMAND bf3dump numcheck)
-# core.ant reads an Ant export directory (OPENBF3_ANT_DATA) and the probe's clip JSONs (OPENBF3_ANT_ORACLE);
-# exits 77 = skipped when they are absent. core.ant.unit needs no data.
+# core.ant reads the Ant banks from the install (or the export directory OPENBF3_ANT_DATA) and, when
+# OPENBF3_ANT_ORACLE is set, the probe's clip JSONs; exits 77 = skipped when neither input exists. core.ant.unit
+# needs no data.
 add_test(NAME core.ant.unit COMMAND test_ant --test-suite=ant-unit)
 add_test(NAME core.ant COMMAND test_ant --test-suite=ant)
 set_tests_properties(core.ant PROPERTIES SKIP_RETURN_CODE 77)
@@ -57,18 +58,134 @@ set_tests_properties(core.guard core.formats core.install core.fuzz core.cache s
 set_tests_properties(core.install PROPERTIES TIMEOUT 600)
 set_tests_properties(core.cache_data PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 set_tests_properties(core.res.unit core.res PROPERTIES TIMEOUT 300)
-# Gameplay tables (bf3_core/gameplay): soldier, kits, mode constants, vehicles. core.gameplay.unit needs
-# no data; core.gameplay.tables reads the retail install (plan §7.2-§7.4), exits 77 = skipped without one.
-openbf3_test(test_gameplay test_main.cpp gameplay_tests.cpp test_support.h)
-target_link_libraries(test_gameplay PRIVATE bf3_core)
-add_test(NAME core.gameplay.unit COMMAND test_gameplay --test-suite=gameplay_unit)
-add_test(NAME core.gameplay.tables COMMAND test_gameplay --test-suite=gameplay)
-set_tests_properties(core.gameplay.tables PROPERTIES SKIP_RETURN_CODE 77)
-set_tests_properties(core.gameplay.unit core.gameplay.tables PROPERTIES TIMEOUT 600)
 if(OPENBF3_ASAN)
     # The ASan runtime DLL ships next to cl.exe; put it on the tests' PATH.
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(core.guard core.formats core.install core.fuzz core.cache core.cache_data sim.jolt net.enet host.server tools.numtext core.ant.unit core.ant core.res.unit core.res
-        core.gameplay.unit core.gameplay.tables
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
+endif()
+
+# Resource decoders fed straight from the install through bf3/core/res/res_loader.h (read-only):
+# every MeshSet / DxTexture / Havok res of MP_Subway and the M9 1p mesh; exits 77 = skipped without
+# an install.
+openbf3_test(test_res_install test_main.cpp res_install_tests.cpp test_support.h)
+target_link_libraries(test_res_install PRIVATE bf3_core)
+add_test(NAME core.res.install COMMAND test_res_install)
+set_tests_properties(core.res.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(core.res.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
+endif()
+# Weapon tables (bf3_core/gameplay): unit arithmetic, then the §7.1 oracles read from the install
+# (exits 77 = skipped without one) and seeded mutations of the M16A4 partitions (meant for asan).
+openbf3_test(test_gameplay test_main.cpp gameplay_tests.cpp test_support.h)
+target_link_libraries(test_gameplay PRIVATE bf3_core)
+add_test(NAME core.gameplay.unit COMMAND test_gameplay --test-suite=gameplay-unit)
+add_test(NAME core.gameplay.weapons COMMAND test_gameplay --test-suite=gameplay)
+add_test(NAME core.gameplay.fuzz COMMAND test_gameplay --test-suite=gameplay-fuzz)
+set_tests_properties(core.gameplay.weapons core.gameplay.fuzz PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.gameplay.unit core.gameplay.weapons core.gameplay.fuzz PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_gameplay_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.gameplay.unit core.gameplay.weapons core.gameplay.fuzz
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_gameplay_cl_dir}")
+endif()
+# UITextDatabase reader and EBX SID census (bf3_core ui/). core.ui.text.unit is synthetic (no data);
+# core.ui.text checks the retail database (plan §7.8) and core.ui.text.fuzz mutates its chunks in memory;
+# both exit 77 = skipped without an install.
+openbf3_test(test_text test_main.cpp text_tests.cpp test_support.h)
+target_link_libraries(test_text PRIVATE bf3_core)
+add_test(NAME core.ui.text.unit COMMAND test_text --test-suite=text-unit)
+add_test(NAME core.ui.text COMMAND test_text --test-suite=text)
+add_test(NAME core.ui.text.fuzz COMMAND test_text --test-suite=text-fuzz)
+set_tests_properties(core.ui.text core.ui.text.fuzz PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.ui.text.unit core.ui.text core.ui.text.fuzz PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_text_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.ui.text.unit core.ui.text core.ui.text.fuzz
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_text_cl_dir}")
+endif()
+# bf3_anim (skeletons, poses, skinning binds): anim.unit needs no data; anim reads the install (Ant banks,
+# EBX skeletons, the 1P arms and M9 meshes) and exits 77 = skipped without one. With OPENBF3_ANT_ORACLE it
+# also compares model-space poses against the Ant probe's ReloadEmpty JSON.
+openbf3_test(test_anim test_main.cpp anim_tests.cpp test_support.h)
+target_link_libraries(test_anim PRIVATE bf3_anim antdump_lib)
+add_test(NAME anim.unit COMMAND test_anim --test-suite=anim-unit)
+add_test(NAME anim COMMAND test_anim --test-suite=anim)
+set_tests_properties(anim PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(anim.unit anim PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_anim_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(anim.unit anim PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_anim_cl_dir}")
+endif()
+# bf3_render (Godot-free preparation for the Godot bridge): render.unit needs no data; render loads the M9
+# viewmodel asset set from the install and exits 77 = skipped without one.
+openbf3_test(test_render test_main.cpp render_tests.cpp test_support.h)
+target_link_libraries(test_render PRIVATE bf3_render)
+add_test(NAME render.unit COMMAND test_render --test-suite=render-unit)
+add_test(NAME render COMMAND test_render --test-suite=render)
+set_tests_properties(render PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(render.unit render PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_render_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.unit render PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_render_cl_dir}")
+endif()
+# The Godot-side M9 reload check (res://scenes/m9_reload.tscn -- --m9-reload-check): Skeleton3D poses vs bf3_anim
+# and the probe JSON, skin, materials, install unchanged. Runs when OPENBF3_GODOT names the Godot console exe;
+# exits 77 = skipped otherwise or without an install. Needs the bf3_godot DLL (built with the default preset).
+if(OPENBF3_BUILD_GODOT)
+    add_test(NAME godot.m9_reload COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m9_reload.cmake)
+    set_tests_properties(godot.m9_reload PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+endif()
+# WeaponDef block and weapon catalog shared by bf3dump and the in-game inspector (bf3_core gameplay/
+# weapon_format.h, weapon_catalog.h). core.gameplay.inspect.unit is synthetic; core.gameplay.inspect reads
+# MP_Subway and the text database from the install (exits 77 = skipped without one).
+openbf3_test(test_inspect test_main.cpp inspect_tests.cpp test_support.h)
+target_link_libraries(test_inspect PRIVATE bf3_core)
+add_test(NAME core.gameplay.inspect.unit COMMAND test_inspect --test-suite=inspect-unit)
+add_test(NAME core.gameplay.inspect COMMAND test_inspect --test-suite=inspect)
+set_tests_properties(core.gameplay.inspect PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.gameplay.inspect.unit core.gameplay.inspect PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_inspect_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.gameplay.inspect.unit core.gameplay.inspect
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_inspect_cl_dir}")
+endif()
+# The Godot project run headless (OPENBF3_GODOT = the console executable; exits 77 = skipped when unset):
+# godot.s0_selftest (S0 self-test) and godot.inspector (M0 exit: the inspector's M16A3/M16A4-burst check
+# against plan §7.1 and their localised names). Both use the project and its DLL, so they never run at once.
+# cmake_language(EXIT) needs CMake 3.29.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.s0_selftest COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DUSER_ARGS=--s0-selftest
+        "-DPASS_LINE=S0 SELFTEST: PASS" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_check.cmake)
+    add_test(NAME godot.inspector COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DUSER_ARGS=--m0-inspector-check
+        "-DPASS_LINE=M0 INSPECTOR CHECK: PASS" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_check.cmake)
+    set_tests_properties(godot.s0_selftest godot.inspector PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project)
+    if(TEST godot.m9_reload)
+        set_tests_properties(godot.m9_reload PROPERTIES RESOURCE_LOCK openbf3_godot_project)
+    endif()
+endif()
+# Level traversal (bf3_core/level): level_unit on synthetic values; core.level reads the install
+# (read-only) against handoff §9 counts and exits 77 = skipped without one.
+openbf3_test(test_level test_main.cpp level_tests.cpp test_support.h)
+target_link_libraries(test_level PRIVATE bf3_core)
+add_test(NAME core.level.unit COMMAND test_level --test-suite=level_unit)
+add_test(NAME core.level COMMAND test_level --test-suite=level)
+set_tests_properties(core.level PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.level.unit core.level PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(core.level.unit core.level PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
+endif()
+# Soldier, kit, mode and vehicle tables (bf3_core/gameplay). core.gameplay.tables.unit is synthetic (no
+# data, incl. the hostile work-budget cases); core.gameplay.tables reads the retail install (plan §7.2-§7.4),
+# exits 77 = skipped without one.
+openbf3_test(test_gameplay_tables test_main.cpp gameplay_tables_tests.cpp test_support.h)
+target_link_libraries(test_gameplay_tables PRIVATE bf3_core)
+add_test(NAME core.gameplay.tables.unit COMMAND test_gameplay_tables --test-suite=tables-unit)
+add_test(NAME core.gameplay.tables COMMAND test_gameplay_tables --test-suite=tables)
+set_tests_properties(core.gameplay.tables PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.gameplay.tables.unit core.gameplay.tables PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_tables_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.gameplay.tables.unit core.gameplay.tables
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tables_cl_dir}")
 endif()

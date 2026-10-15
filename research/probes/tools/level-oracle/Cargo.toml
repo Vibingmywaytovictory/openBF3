@@ -1,0 +1,20 @@
+# Parity oracle for the C++ level traversal (bf3_core/level, `bf3dump level`). Research tool, not
+# shipped. Path dependencies: the install readers of ../ebx-dump and IW4L's level_bf3, ebx_bf3 and
+# resource_bf3 crates (Apache-2.0) from a local IW4L checkout; adjust those paths to yours.
+[workspace]
+resolver = "3"
+
+[package]
+name = "level-oracle"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+bf3_install = { path = "../ebx-dump/crates/bf3_install" }
+level_bf3 = { path = "C:/Users/olku/iw4L/crates/level_bf3" }
+ebx_bf3 = { path = "C:/Users/olku/iw4L/crates/ebx_bf3" }
+resource_bf3 = { path = "C:/Users/olku/iw4L/crates/resource_bf3" }
+
+[profile.release]
+debug = false
