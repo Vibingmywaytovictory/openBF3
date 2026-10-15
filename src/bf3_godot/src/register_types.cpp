@@ -1,6 +1,9 @@
 // GDExtension entry of openBF3 (entry_symbol "openbf3_library_init" in openbf3.gdextension).
 
 #include "bf3_localisation.h"
+// M2a audio
+#include "audio_demo.h"
+#include "audio_stream.h"
 #include "collision_overlay.h"
 #include "dedicated_main_loop.h"
 #include "game_session.h"
@@ -33,6 +36,10 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3CollisionOverlay);
 	// M1 T6
 	GDREGISTER_CLASS(bf3::godot_side::Bf3LevelSession);
+	// M2a audio
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

@@ -16,8 +16,8 @@
 // mixer, stops the player, waits one AudioServer lock()/unlock() and then releases it on the game thread
 // (mixer_core.h), so nothing is freed on Godot's audio thread.
 //
-// Registered in register_types.cpp by the A1 wave (the classes compile now and _mix renders silence; nothing
-// creates them yet).
+// Registered in register_types.cpp (M2a audio block); Bf3AudioDemo (audio_demo.h) creates them. set_mixer on a
+// playback that Godot's audio thread may be using is called only under AudioServer::lock().
 
 #include "bf3/audio/mixer_core.h"
 

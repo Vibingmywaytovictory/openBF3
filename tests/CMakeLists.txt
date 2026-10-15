@@ -416,3 +416,10 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     endforeach()
     set_tests_properties(audio.decode.perf audio.bank audio.m16.offline PROPERTIES RUN_SERIAL TRUE)
 endif()
+# M2a audio gate G8 (tests/godot_audio.cmake): the windowed M16A3 check of res://scenes/audio_m16.tscn; WAVs to the
+# same shots directory as audio.m16.offline. Exit 77 without OPENBF3_GODOT, an install, or a window.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.audio COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DSHOTS=${_openbf3_audio_shots}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_audio.cmake)
+    set_tests_properties(godot.audio PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()

@@ -78,5 +78,7 @@ target_link_libraries(bf3_godot PRIVATE psapi)
 target_sources(bf3_godot PRIVATE
     src/audio_stream.cpp
     src/audio_stream.h
+    src/audio_demo.cpp
+    src/audio_demo.h
 )
 target_link_libraries(bf3_godot PRIVATE bf3_audio)

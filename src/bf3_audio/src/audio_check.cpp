@@ -121,6 +121,8 @@ bool has_hpf_link(const ca::SoundProgram &p, ca::SoundPluginRef p_plugin) {
 
 } // namespace
 
+CheckDriver::~CheckDriver() = default;
+
 core::Result<std::unique_ptr<CheckDriver>> CheckDriver::create(const CheckScript &p_script, std::shared_ptr<const ca::SoundProgram> p_program,
 		std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning, uint64_t p_start_frame, uint32_t p_rate) {
 	if (!p_program || !p_bank) {

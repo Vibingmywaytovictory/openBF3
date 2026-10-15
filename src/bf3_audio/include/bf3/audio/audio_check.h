@@ -110,6 +110,7 @@ class CheckDriver {
 public:
 	static core::Result<std::unique_ptr<CheckDriver>> create(const CheckScript &p_script, std::shared_ptr<const core::audio::SoundProgram> p_program,
 			std::shared_ptr<const core::audio::WaveBank> p_bank, const AudioTuning &p_tuning, uint64_t p_start_frame, uint32_t p_rate);
+	~CheckDriver();
 	core::Status pump(MixerCore &r_mixer);
 	bool done(const MixerCore &p_mixer) const; // every burst stopped and its tail past
 	uint64_t start_frame() const;

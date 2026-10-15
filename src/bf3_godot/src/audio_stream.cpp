@@ -23,10 +23,14 @@ int32_t Bf3AudioPlayback::_mix(godot::AudioFrame *p_buffer, float, int32_t p_fra
 	if (p_frames <= 0) {
 		return 0;
 	}
-	// Interface stage: silence. The A1 wave replaces this with mixer_->mix(out, p_frames) once MixerCore exists
-	// (design §6.5); the signature and the always-return-p_frames rule are fixed here.
+	// AudioFrame {left, right} is interleaved stereo: the mixer writes into Godot's buffer directly. Always the whole
+	// buffer (returning fewer frames makes Godot fade the stream out and end it).
 	float *out = reinterpret_cast<float *>(p_buffer);
-	std::memset(out, 0, size_t(p_frames) * 2 * sizeof(float));
+	if (mixer_ == nullptr || !playing_) {
+		std::memset(out, 0, size_t(p_frames) * 2 * sizeof(float));
+		return p_frames;
+	}
+	mixer_->mix(out, uint32_t(p_frames));
 	return p_frames;
 }
 
