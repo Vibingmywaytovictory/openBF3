@@ -13,7 +13,9 @@
 //   Data        a link target that carries data only (volumes, OBBs, spheres, path points, UI combat areas);
 //   Structural  references and interface descriptors, which instantiation flattens away (a reference that is left
 //               as an object because its blueprint is excluded or missing is Structural too).
-// A type that has no row is Unknown: it is logged, counted and treated as Passive (plan D12, gap logic §7).
+// A type that has no row is Unknown: it is logged, counted and treated as Passive (plan D12, gap logic §7). Objects
+// that take part in no connection (RoadData, LightProbeVolumeData, ... 16 types over the 230 rows) have no row on
+// purpose: the graph counts unknown types over connected nodes only (logic_graph.h, kLogicNodeConnected).
 // `s4` marks the rows the S4 slice implements: every Primitive and Native type that takes part in a server-side
 // connection on any mode of MP_Subway or MP_007 (docs/design/s4.md §6.1, measured 2026-10-15). Rows with s4 false are
 // known types the census reports as "unimplemented" until a later milestone implements them.

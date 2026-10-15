@@ -7,15 +7,22 @@
 //  * LogicWorld walks the level with expand_root_objects on: every included sub-world (GameMode inclusion, AutoLoad),
 //    every prefab some ReferenceObjectData instantiates (one scope per instance), world parts transparent, the
 //    Object of every ObjectBlueprint reference emitted with that reference, spawn references kept as entities.
-//  * Every object of a scope becomes one node. Its type row (logic_types.h) and Realm decide whether the node exists
-//    on this side; a node that does not is not created and every edge touching it is dropped and counted.
+//  * Every object of a scope becomes one node, connected or not (Metro RushLarge0: 145 SyncedBool nodes, 125 of them on
+//    server connections). Its Realm decides whether the node exists on this side; a node that does not is not created
+//    and every edge touching it is dropped and counted (networked events excepted, see networked_edges()). Unknown
+//    and unimplemented types are gated only on connected nodes (at least one edge of any kind after routing and
+//    collapse, kLogicNodeConnected): unconnected objects of unlisted types (RoadData, LightProbeVolumeData, ... on
+//    every row) cannot send or receive and are counted apart as info.
 //  * Prefab interfaces are flattened. Each scope has a virtual IfaceIn and IfaceOut per interface port; the parent's
 //    X.a -> Ref.p becomes X.a -> IfaceIn.p, the child's Descriptor.p -> Y.b becomes IfaceIn.p -> Y.b, Y.b ->
 //    Descriptor.p becomes Y.b -> IfaceOut.p, the parent's Ref.p -> Z.c becomes IfaceOut.p -> Z.c. The virtual nodes are
 //    then collapsed into direct node -> node edges (depth first, in connection array order), so the runtime never
-//    sees an interface. Property inputs whose interface chain ends at a descriptor constant become the node's initial
-//    input value. Edges into a reference whose blueprint was not instantiated (Excluded, missing, sub-world not in
-//    this mode) are dropped and counted.
+//    sees an interface. The walk marks the virtual nodes on the current path only (set on entry, cleared on exit), so
+//    an interface cycle stops and distinct paths are all kept: a diamond through interfaces delivers once per path,
+//    as forwarding connection by connection would; such repeats are counted (stats.duplicate_paths). Every hop
+//    charges the budget, so path explosion fails with an error instead of running. Property inputs whose interface
+//    chain ends at a descriptor constant become the node's initial input value. Edges into a reference whose
+//    blueprint was not instantiated (Excluded, missing, sub-world not in this mode) are dropped and counted.
 //  * Edge order is stable: the order of the connection arrays in the walk order of the scopes, collapsed paths in the
 //    order their first hop appears. The runtime fans an event out in this order.
 //
@@ -71,9 +78,13 @@ struct LogicParam {
 	LogicValue value;
 };
 
+// LogicNode::flags.
+inline constexpr uint8_t kLogicNodeConnected = 1u << 0; // at least one edge (any kind, either end) after collapse
+
 struct LogicNode {
 	LogicTypeId type = LogicTypeId::Unknown;
 	LogicRealm realm = LogicRealm::Unset;
+	uint8_t flags = 0;
 	uint32_t scope = 0; // index into LogicGraph::scopes()
 	Guid guid; // the entity's instance GUID (shared by every instance of one prefab)
 	// Stable identity across runs and machines: hash_mix chain over the scope path (reference GUIDs from the root)
@@ -94,7 +105,12 @@ struct LogicEdge {
 	int32_t target_port = 0;
 	uint32_t order = 0; // global stable order within the edge kind
 	LogicEventTarget target_type = LogicEventTarget::ClientAndServer; // events only
-	bool networked = false; // events: sent to clients (networked_to_clients), the plan §3.5 networked event index
+	bool networked = false; // events: sent to clients (networked_to_clients)
+	// Events: identity of the EBX connection of the last hop (the one into the real target, whose TargetType this
+	// edge has): hash_mix chain over the owning scope's path, the blueprint partition GUID and the index in its
+	// EventConnections array. The server and a client compute the same id from the same data, so it is the id a
+	// networked event carries (plan §3.5) even when the target exists on one side only.
+	uint64_t connection = 0;
 };
 
 // A constant property input: the value a descriptor constant (or a source the build could not keep as a node, e.g.
@@ -102,6 +118,15 @@ struct LogicEdge {
 struct LogicInput {
 	int32_t port = 0;
 	LogicValue value;
+};
+
+// Data identity of a node for scripts, judges and tools (never used by the interpreter): the entity GUID, plus the
+// GUID of a reference that instantiated one of the node's enclosing scopes (any depth) to tell prefab instances apart;
+// zero matches any scope. Example: Caspian flag f3042a9e is {reference f3042a9e, entity zero} with type CapturePoint
+// (the CapturePoint sits in the nested capturepointprefabflagpole scope, shared GUID 237dadc8 on every flag).
+struct LogicNodeRef {
+	Guid scope_reference;
+	Guid entity; // zero: any entity of the requested type
 };
 
 struct LogicScopeInfo {
@@ -116,9 +141,14 @@ struct LogicGraphStats {
 	size_t scopes = 0;
 	size_t objects = 0; // LogicWorld objects examined
 	size_t nodes_by_class[6] = {}; // LogicTypeClass order
+	// The gated counts (G1, G5) are over connected nodes only (kLogicNodeConnected); the unconnected ones are info.
 	size_t unknown_nodes = 0;
 	size_t unimplemented_nodes = 0; // Primitive and Native rows with s4 false, on this side
+	size_t unknown_unconnected = 0; // [Metro + Caspian 229-235 per row, 13 types; 16 types over 230 rows]
+	size_t unimplemented_unconnected = 0;
 	size_t event_edges = 0, property_edges = 0, link_edges = 0;
+	size_t networked_only_edges = 0; // networked_edges(): fired for clients, not delivered on this side
+	size_t duplicate_paths = 0; // collapsed edges equal in (source, port, target, port) to an earlier one (kept)
 	size_t connections_scanned = 0;
 	size_t interface_hops = 0; // virtual interface edges collapsed
 	size_t dropped_realm = 0; // an end does not exist on this side
@@ -142,7 +172,7 @@ struct LogicGraphOptions {
 	size_t max_nodes = 1u << 20; // [8,360 objects, MP_003 RushLarge0]
 	size_t max_edges = 1u << 22; // all kinds together [~9.6k connections per row]
 	size_t max_params = 1u << 22;
-	size_t max_fanout = 1u << 16; // edges one collapsed interface port may produce
+	size_t max_fanout = 1u << 16; // edges one collapsed start edge may produce (paths through interfaces)
 	uint32_t max_interface_depth = 48; // hops through nested interfaces (LogicWorld max_depth)
 	// LogicWorld caps (see LogicWorldOptions).
 	uint32_t max_depth = 48;
@@ -164,6 +194,10 @@ public:
 	std::span<const LogicEdge> event_edges() const { return event_edges_; }
 	std::span<const LogicEdge> property_edges() const { return property_edges_; }
 	std::span<const LogicEdge> link_edges() const { return link_edges_; }
+	// Networked events this side fires but does not deliver: every NetworkedClient edge, and NetworkedClientAndServer
+	// edges whose target does not exist on this side (target kNoLogicIndex then). The server fires them for clients
+	// (e.g. Metro park Delay 456fc3ec.Out -> Sound 5a962122, NetworkedClient). Sorted like event_edges.
+	std::span<const LogicEdge> networked_edges() const { return networked_edges_; }
 	std::span<const LogicParam> params() const { return params_; }
 	std::span<const LogicInput> initial_inputs() const { return inputs_; }
 	std::span<const LogicScopeInfo> scopes() const { return scopes_; }
@@ -181,6 +215,11 @@ public:
 	std::span<const uint32_t> nodes_with_guid(const Guid &p_guid) const;
 	// Nodes of one type, in node order. No allocation.
 	std::span<const uint32_t> nodes_of_type(LogicTypeId p_type) const;
+	// Nodes of type p_type (any type when Unknown) matching p_ref, in node order. Linear in the nodes of that type
+	// times the scope depth (<= max_depth); for scripts and tools, not for the tick.
+	std::vector<uint32_t> find_nodes(const LogicNodeRef &p_ref, LogicTypeId p_type = LogicTypeId::Unknown) const;
+	// Whether scope p_scope is p_ancestor or lies below it.
+	bool scope_within(uint32_t p_scope, uint32_t p_ancestor) const;
 	std::string_view text(uint32_t p_index) const;
 
 	// FNV-1a 64 over the canonical content (versions, type names, keys, params, inputs, edges in order). Equal for
@@ -197,7 +236,10 @@ public:
 		void add_param(uint32_t p_node, int32_t p_field, const LogicValue &p_value, uint16_t p_element = 0);
 		void add_input(uint32_t p_node, int32_t p_port, const LogicValue &p_value);
 		void add_event(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port,
-				LogicEventTarget p_target_type = LogicEventTarget::Server);
+				LogicEventTarget p_target_type = LogicEventTarget::Server, uint64_t p_connection = 0);
+		// A networked event this side fires but does not deliver (see networked_edges()); p_target may be kNoLogicIndex.
+		void add_networked_only(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port, LogicEventTarget p_target_type,
+				uint64_t p_connection);
 		void add_property(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port);
 		void add_link(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port);
 		Result<LogicGraph> finish(const LogicGraphOptions &p_caps = {});
@@ -213,7 +255,7 @@ private:
 
 	LogicSide side_ = LogicSide::Server;
 	std::vector<LogicNode> nodes_;
-	std::vector<LogicEdge> event_edges_, property_edges_, link_edges_;
+	std::vector<LogicEdge> event_edges_, property_edges_, link_edges_, networked_edges_;
 	std::vector<LogicParam> params_;
 	std::vector<LogicInput> inputs_;
 	std::vector<LogicScopeInfo> scopes_;

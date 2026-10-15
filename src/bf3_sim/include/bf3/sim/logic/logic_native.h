@@ -22,6 +22,20 @@ namespace bf3::sim::logic {
 
 using core::gameplay::LogicTypeId;
 
+// Native ports with no recoverable name, verified on retail data (docs/design/s4.md §8, §13.4).
+namespace native_id {
+// Spawner property output of unknown meaning (VehicleSpawn and CharacterSpawn). Caspian ConquestLarge0 feeds it into
+// Not -> And for the Growler and VDV spawners. The S4 stubs never publish it, so it reads false.
+inline constexpr int32_t kSpawnerUnknownOut = 154856772;
+// CapturePoint link to its own CharacterSpawns (the flagpole prefab's two team spawners). Stub rule: enabled for the
+// owner team, disabled otherwise.
+inline constexpr int32_t kCaptureCharacterSpawnLink = -320184006;
+// Capture point prefab link to vehicle spawners (Caspian: flag e4c5d622 -> VDV e3e937bb and T-90 1fc335ff, flag
+// f3042a9e -> Growler c8bd75c7, HQs -> jet prefabs). Recorded only in S4: the graph's own Enabled wiring decides,
+// and G6 assumes no native effect from this link (open question for M4).
+inline constexpr int32_t kCaptureVehicleSpawnLink = -275573010;
+} // namespace native_id
+
 enum class NativePortDir : uint8_t { EventIn, EventOut, PropertyIn, PropertyOut, LinkIn, LinkOut };
 
 // What a bound port means to the stub. Ports the data uses that S4 does not interpret bind as Recorded: the effect
@@ -59,7 +73,9 @@ std::span<const NativePortBinding> native_ports(LogicTypeId p_type);
 std::optional<NativePortBinding> native_port(LogicTypeId p_type, NativePortDir p_dir, int32_t p_port);
 
 // One change of a stub's state, in apply order. The Enabled timelines of the Rush and Conquest gates are this list
-// filtered by node and kind.
+// filtered by node and kind. A stub starts from its node's own params (Enabled: the entity's Enabled field, e.g. true
+// on every Caspian VehicleSpawn), and an entry is written only when a value actually changes; an Input entry is
+// written for every Recorded input.
 struct NativeTimelineEntry {
 	Tick tick = 0;
 	uint32_t node = 0;
@@ -85,9 +101,14 @@ public:
 	// Applies the runtime's effects whose apply tick is p_tick (call before the runtime's step for p_tick), and
 	// forces the outputs those changes cause (a capture point's linked spawners, a spawner's OnSpawned).
 	core::Status apply(Tick p_tick, std::span<const LogicEffect> p_effects, LogicRuntime &r_runtime);
-	// Harness actions: the real entity's outputs, forced into the runtime for its next step.
+	// Harness actions: the real entity's outputs, forced into the runtime for its next step. Timing convention: an
+	// action "at tick T" is called after apply(T) and before the runtime's step() of tick T, so its outputs drain in
+	// tick T and the effects they cause apply at T + 1 (a capture at 600 shows as Enabled changes at 601).
 	core::Status player_enter(uint32_t p_human_player, LogicContext p_player, LogicRuntime &r_runtime);
+	// Forces OnDestroyed (context: no player, team 0) and marks the node destroyed.
 	core::Status destroy(uint32_t p_node, LogicRuntime &r_runtime);
+	// Sets the owner. When it changes: OnLost with the previous owner's team (only when that owner was not neutral),
+	// then OnCaptured with the new team, in that order; the kCaptureCharacterSpawnLink spawners follow the owner.
 	core::Status capture(uint32_t p_capture_point, uint8_t p_team, LogicRuntime &r_runtime);
 
 	std::optional<NativeStubState> state(uint32_t p_node) const;

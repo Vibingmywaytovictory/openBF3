@@ -29,6 +29,37 @@ static_assert(gp::logic_port::kTrigger == -1688613187);
 static_assert(gp::logic_port::kOnDestroyed == -1452333337);
 static_assert(gp::logic_port::kOnPlayerEnter == 1577401599);
 static_assert(gp::logic_port::kEnabled == 2662400);
+// Revision 2: the ports the G6 chain and the Rush activation use, verified on MP_007 ConquestLarge0 and MP_Subway
+// RushLarge0 connections (docs/design/s4.md §6.2, §13.3, §13.4).
+static_assert(gp::logic_port::kValue == 225375086); // Bool's property output (SyncedBool uses Out)
+static_assert(gp::logic_port::kSetTrue == -1541066415);
+static_assert(gp::logic_port::kSetFalse == 668205626);
+static_assert(gp::logic_port::kIn == 5862146);
+static_assert(gp::logic_port::kIn1 == 193450867);
+static_assert(gp::logic_port::kIn2 == 193450864);
+static_assert(gp::logic_port::kOnCaptured == 2099208964);
+static_assert(gp::logic_port::kOnLost == -1433788352);
+static_assert(gp::logic_port::kOnTriggeredByMatchingTeam == -699931768); // TeamFilter's output
+static_assert(gp::logic_port::kEnable == -1952177180); // the crate DelayTrigger's activation input
+static_assert(gp::logic_port::kDisable == -117303631);
+static_assert(gp::logic_port::kOnTrue == -1433512622);
+static_assert(gp::logic_port::kOnFalse == -81881639);
+static_assert(gp::logic_port::kOpen == 2089008817);
+static_assert(gp::logic_port::kClose == 212633683);
+
+// Delay ticks: ceil with the float32 epsilon, deliberately not seconds_to_ticks (round to nearest).
+static_assert(lg::logic_delay_ticks(0.0) == 0);
+static_assert(lg::logic_delay_ticks(-1.0) == 0);
+static_assert(lg::logic_delay_ticks(double(0.1f)) == 6);
+static_assert(lg::logic_delay_ticks(1.0) == 60);
+static_assert(lg::logic_delay_ticks(double(2.5f)) == 150);
+static_assert(lg::logic_delay_ticks(10.0) == 600);
+static_assert(lg::logic_delay_ticks(30.0) == 1800);
+static_assert(lg::logic_delay_ticks(0.105) == 7);
+static_assert(bf3::sim::seconds_to_ticks(0.105f) == 6);
+static_assert(lg::logic_delay_ticks(1e30) == lg::kMaxLogicDelayTicks);
+static_assert(lg::logic_delay_ticks(0.0001) == 1); // never early: any positive delay above the epsilon is >= 1 tick
+static_assert(lg::logic_delay_ticks(0.00001) == 0);
 
 static_assert(std::is_trivially_copyable_v<gp::LogicValue>);
 static_assert(std::is_trivially_copyable_v<gp::LogicParam>);
@@ -41,6 +72,12 @@ static_assert(std::is_trivially_copyable_v<lg::LogicTraceRecord>);
 static_assert(std::is_trivially_copyable_v<lg::LogicNetworkedEvent>);
 static_assert(std::is_trivially_copyable_v<lg::NativePortBinding>);
 static_assert(std::is_trivially_copyable_v<lg::NativeTimelineEntry>);
+static_assert(std::is_trivially_copyable_v<lg::LogicWatchHit>);
+static_assert(std::is_trivially_copyable_v<lg::LogicTickStats>);
+static_assert(std::is_trivially_copyable_v<gp::LogicNodeRef>);
+static_assert(std::is_trivially_copyable_v<lg::ConquestExpectation>);
+static_assert(lg::kMaxGhostEntries <= 65535); // ghost counts and delta indices are u16
+static_assert(lg::kConquestCheckTicks[1] == 601 && lg::kConquestCheckTicks[4] == 2401);
 static_assert(std::is_move_constructible_v<gp::LogicGraph>);
 static_assert(!std::is_copy_constructible_v<lg::LogicRuntime>);
 

@@ -1155,18 +1155,19 @@ server-capable primitive types, with gameplay entities kept native behind port b
 The type table (`gameplay/logic_types.h`) classifies all 130 entity types found on the connections of the 230
 level x mode rows: 54 primitive (34 in the S4 slice), 36 native (25 in S4), 35 passive, 5 data, plus 4 structural.
 
-Gates (each one ctest; install tests exit 77 = skipped without an install; timing is wall clock on a shared machine,
-so only the p99 is gated):
+Gates (each one ctest, run as `ctest --preset dev -R "^logic\.metro$"` and so on; install tests exit 77 = skipped
+without an install, found as in "Install location" above; timing is wall clock on a shared machine, so only
+percentiles and generous maxima are gated):
 
 | gate | ctest | pass threshold |
 |---|---|---|
-| G1 Metro RushLarge0 full graph | `logic.metro` | builds; 549 scopes, 7,299 objects, 145 SyncedBool, 0 unknown / unimplemented, 0 unbound event edges, work <= 1 M |
+| G1 Metro RushLarge0 full graph | `logic.metro` | builds; 549 scopes, 7,299 objects, 145 SyncedBool, 0 unknown / unimplemented connected nodes, 0 unbound event edges, work <= 1 M |
 | G2 Rush spawners in base order | `logic.metro` | 8 spawners open as 4 Team1+Team2 groups, group g between base g-1's and base g's fall |
 | G3 park event | `logic.metro` | park SyncedBool SetTrue exactly 600 ticks after base 1 falls |
 | G4 determinism | `logic.metro` | 2 in-process runs and 1 `bf3dump logic trace` run: equal trace hashes |
-| G5 0 unknown types | `logic.types` | 14 Metro + Caspian rows: 0 unknown, 0 unimplemented server nodes |
-| G6 Caspian CQL timeline | `logic.caspian` | the tank / IFV Enabled changes of docs/design/s4.md §9.2 at their ticks; jets constant |
-| G7 cost | `logic.perf` | drain p99 <= 100 us per tick, < 10,000 deliveries per tick |
+| G5 0 unknown types | `logic.types` | 14 Metro + Caspian rows: 0 unknown, 0 unimplemented connected server nodes (unconnected ones are info) |
+| G6 Caspian CQL timeline | `logic.caspian` | the 10 spawners of docs/design/s4.md §9.2 (6 capture-gated, 4 constant jets) have the table's Enabled values at ticks 1/601/1,201/1,801/2,401 and no other change |
+| G7 cost | `logic.perf` | p99 <= 100 us over all ticks, p99 <= 500 us over busy ticks, max <= 20 ms incl. tick 0, < 10,000 deliveries and no carry-over per tick |
 | I1 census (info) | `logic.census` | all 230 rows listed |
 
 Today only `s4.contract` exists (headers compile together, port ids, the type table); the rest lands with the
