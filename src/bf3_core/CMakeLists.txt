@@ -157,3 +157,15 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/level/world.h
     include/bf3/core/level/census.h
 )
+
+# Collision soup (M0 exit "Metro collision drawn as a debug overlay"): the level's Havok collision as
+# world-space triangles with material, surface class and body kind, in 64 m tiles; see
+# include/bf3/core/level/collision_soup.h; the terrain heightfield (res/terrain.h). Parts ported from IW4L
+# level_bf3 collision/ and resource_bf3 terrain.rs.
+target_sources(bf3_core PRIVATE
+    src/level/collision_material.cpp
+    src/level/collision_soup.cpp
+    include/bf3/core/level/collision_soup.h
+    src/res/terrain.cpp
+    include/bf3/core/res/terrain.h
+)

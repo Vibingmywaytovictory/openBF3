@@ -175,3 +175,24 @@ set_tests_properties(core.level.unit core.level PROPERTIES TIMEOUT 600)
 if(OPENBF3_ASAN)
     set_tests_properties(core.level.unit core.level PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
 endif()
+# Collision soup (bf3_core level/collision_soup.h): collision_unit on synthetic shapes and terrain trees; core.level.collision
+# reads MP_Subway and XP3_Alborz from the install (read-only) against the level-oracle numbers and exits
+# 77 = skipped without one.
+openbf3_test(test_collision test_main.cpp collision_tests.cpp terrain_tests.cpp test_support.h)
+target_link_libraries(test_collision PRIVATE bf3_core)
+add_test(NAME core.level.collision.unit COMMAND test_collision --test-suite=collision_unit)
+add_test(NAME core.level.collision COMMAND test_collision --test-suite=collision)
+set_tests_properties(core.level.collision PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.level.collision.unit core.level.collision PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(core.level.collision.unit core.level.collision PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_cl_dir}")
+    # Under ASan the 32 mutated group res take ~9 min and the two levels ~1 min (dev: 17 s in all).
+    set_tests_properties(core.level.collision PROPERTIES TIMEOUT 1800)
+endif()
+# Godot collision overlay (M0 exit "Metro collision drawn as a debug overlay"; README "Collision overlay"):
+# the headless --collision-check of res://scenes/metro_collision.tscn. Exits 77 = skipped without
+# OPENBF3_GODOT or an install; shares the project and its DLL with the other godot.* tests.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.collision COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_collision.cmake)
+    set_tests_properties(godot.collision PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 360 RESOURCE_LOCK openbf3_godot_project)
+endif()

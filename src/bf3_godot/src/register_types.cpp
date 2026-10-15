@@ -1,6 +1,7 @@
 // GDExtension entry of openBF3 (entry_symbol "openbf3_library_init" in openbf3.gdextension).
 
 #include "bf3_localisation.h"
+#include "collision_overlay.h"
 #include "dedicated_main_loop.h"
 #include "game_session.h"
 #include "viewmodel_demo.h"
@@ -27,6 +28,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Translation);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Localisation);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WeaponInspector);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3CollisionOverlay);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

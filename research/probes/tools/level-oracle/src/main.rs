@@ -6,6 +6,8 @@
 //!                           canonical listing on stdout (see below)
 //!   modes <LEVEL>           the modes LevelDescriptionAsset lists, one per line
 //!   levels                  every MP level id of the install, one per line
+//!   collision <LEVEL> <MODE>
+//!                           the collision soup's placements, tiles and totals (src/collision.rs)
 //!
 //! Listing (every section sorted bytewise; floats as f32 bit patterns, 8 lowercase hex digits):
 //!   level / bundle / settings / subworld-bundle / absent / partitions / world / skipped lines,
@@ -32,6 +34,8 @@ use level_bf3::{
     ResInfo, SourceError, Transform, World, field_id,
 };
 use resource_bf3::{GeometrySource, MeshSet, SubsetFilter};
+
+mod collision;
 
 const ROOT: &str = r"C:\Program Files\EA Games\Battlefield 3";
 
@@ -104,12 +108,13 @@ fn main() {
                 println!("{mode}");
             }
         }
+        (Some("collision"), 4) => print!("{}", collision::run(&install, &args[2], &args[3])),
         (Some("levels"), 2) => {
             for level in install.levels() {
                 println!("{}", level.id);
             }
         }
-        _ => fail("usage: level-oracle level <LEVEL> <MODE> | modes <LEVEL> | levels"),
+        _ => fail("usage: level-oracle level <LEVEL> <MODE> | modes <LEVEL> | levels | collision <LEVEL> <MODE>"),
     }
 }
 

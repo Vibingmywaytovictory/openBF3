@@ -7,3 +7,5 @@ openbf3_module(bf3dump)
 target_sources(bf3dump PRIVATE weapon_commands.cpp weapon_commands.h)
 # Level traversal listing (bf3_core/level), parity with research/probes/tools/level-oracle.
 target_sources(bf3dump PRIVATE level_commands.cpp level_commands.h)
+# Collision soup listing (bf3_core level/collision_soup.h), parity with level-oracle collision.
+target_sources(bf3dump PRIVATE collision_commands.cpp collision_commands.h)

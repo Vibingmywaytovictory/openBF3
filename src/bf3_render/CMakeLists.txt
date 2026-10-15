@@ -15,3 +15,8 @@ add_library(bf3_render STATIC
 target_include_directories(bf3_render PUBLIC include)
 target_link_libraries(bf3_render PUBLIC bf3_core bf3_anim)
 openbf3_module(bf3_render)
+# Collision soup -> per-(tile, layer) vertex arrays for the Godot collision overlay (README "Collision overlay").
+target_sources(bf3_render PRIVATE
+    src/collision_prep.cpp
+    include/bf3/render/collision_prep.h
+)
