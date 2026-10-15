@@ -6,6 +6,8 @@
 // the user's own Apache-2.0 code; the clock reset idea follows IW4L's frame_clock.rs (docs §7.5, §9.3).
 #include "bf3/host/client_session.h"
 
+#include "instance_registry.h"
+
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/sim/collision_world.h"
@@ -26,8 +28,8 @@ namespace bf3::host {
 
 namespace {
 
-std::mutex g_registry_mutex;
-std::vector<ClientSession *> g_registry;
+// H hygiene: pins instances against their destructor while stop_all is inside them (instance_registry.h).
+detail::InstanceRegistry<ClientSession> g_registry;
 
 constexpr double kNsPerTick = 1e9 / double(sim::kSimHz);
 constexpr double kMsPerTick = 1000.0 / double(sim::kSimHz);
@@ -968,6 +970,7 @@ ClientSession::ClientSession() :
 		impl_(std::make_unique<Impl>()) {}
 
 ClientSession::~ClientSession() {
+	g_registry.retire(this); // first: a concurrent stop_all is done with this instance once it returns
 	stop();
 }
 
@@ -1042,8 +1045,7 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 	m.running = true;
 	m.started = true;
 	m.thread = std::thread([this] { impl_->run(); });
-	std::lock_guard reg(g_registry_mutex);
-	g_registry.push_back(this);
+	g_registry.add(this);
 	return core::Status::success();
 }
 
@@ -1056,8 +1058,7 @@ void ClientSession::stop() {
 	impl_->thread.join();
 	impl_->host.reset();
 	impl_->running = false;
-	std::lock_guard reg(g_registry_mutex);
-	g_registry.erase(std::remove(g_registry.begin(), g_registry.end(), this), g_registry.end());
+	g_registry.remove(this);
 }
 
 bool ClientSession::running() const {
@@ -1107,15 +1108,7 @@ void ClientSession::debug_stall(uint32_t p_ms) {
 }
 
 size_t ClientSession::stop_all() {
-	std::vector<ClientSession *> sessions;
-	{
-		std::lock_guard reg(g_registry_mutex);
-		sessions = g_registry;
-	}
-	for (ClientSession *s : sessions) {
-		s->stop();
-	}
-	return sessions.size();
+	return g_registry.for_each_pinned([](ClientSession *p_session) { p_session->stop(); });
 }
 
 } // namespace bf3::host

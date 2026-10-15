@@ -1,5 +1,7 @@
 #include "bf3/host/loopback_client.h"
 
+#include "instance_registry.h"
+
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 
@@ -9,11 +11,12 @@
 namespace bf3::host {
 
 namespace {
-std::mutex g_clients_mutex;
-std::vector<LoopbackClient *> g_clients;
+// H hygiene: pins instances against their destructor while stop_all is inside them (instance_registry.h).
+detail::InstanceRegistry<LoopbackClient> g_clients;
 } // namespace
 
 LoopbackClient::~LoopbackClient() {
+	g_clients.retire(this); // first: a concurrent stop_all is done with this instance once it returns
 	stop();
 }
 
@@ -37,8 +40,7 @@ bool LoopbackClient::start(uint16_t p_port, int p_ping_hz, std::string *r_error)
 	stop_requested_ = false;
 	running_ = true;
 	thread_ = std::thread([this, p_port, p_ping_hz] { run(p_port, std::clamp(p_ping_hz, 1, 1000)); });
-	std::lock_guard reg(g_clients_mutex);
-	g_clients.push_back(this);
+	g_clients.add(this);
 	return true;
 }
 
@@ -51,20 +53,11 @@ void LoopbackClient::stop() {
 	thread_.join();
 	running_ = false;
 	connected_ = false;
-	std::lock_guard reg(g_clients_mutex);
-	g_clients.erase(std::remove(g_clients.begin(), g_clients.end(), this), g_clients.end());
+	g_clients.remove(this);
 }
 
 size_t LoopbackClient::stop_all() {
-	std::vector<LoopbackClient *> clients;
-	{
-		std::lock_guard reg(g_clients_mutex);
-		clients = g_clients;
-	}
-	for (LoopbackClient *c : clients) {
-		c->stop();
-	}
-	return clients.size();
+	return g_clients.for_each_pinned([](LoopbackClient *p_client) { p_client->stop(); });
 }
 
 LoopbackClientStats LoopbackClient::stats() const {

@@ -1,5 +1,6 @@
 #include "bf3/host/server_host.h"
 
+#include "instance_registry.h"
 #include "tick_timer.h"
 
 #include "bf3/net/enet_host.h"
@@ -19,17 +20,15 @@ public:
 
 namespace {
 
-std::mutex g_registry_mutex;
-std::vector<ServerHost *> g_registry;
+// H hygiene: pins instances against their destructor while stop_all is inside them (instance_registry.h).
+detail::InstanceRegistry<ServerHost> g_registry;
 
 void registry_add(ServerHost *p_host) {
-	std::lock_guard lock(g_registry_mutex);
-	g_registry.push_back(p_host);
+	g_registry.add(p_host);
 }
 
 void registry_remove(ServerHost *p_host) {
-	std::lock_guard lock(g_registry_mutex);
-	g_registry.erase(std::remove(g_registry.begin(), g_registry.end(), p_host), g_registry.end());
+	g_registry.remove(p_host);
 }
 
 int64_t now_ns() {
@@ -41,6 +40,7 @@ int64_t now_ns() {
 ServerHost::ServerHost() = default;
 
 ServerHost::~ServerHost() {
+	g_registry.retire(this); // first: a concurrent stop_all is done with this instance once it returns
 	stop();
 }
 
@@ -161,19 +161,10 @@ void ServerHost::stop() {
 }
 
 size_t ServerHost::stop_all() {
-	std::vector<ServerHost *> hosts;
-	{
-		std::lock_guard lock(g_registry_mutex);
-		hosts = g_registry;
-	}
-	for (ServerHost *h : hosts) {
-		h->stop();
-	}
-	return hosts.size();
+	return g_registry.for_each_pinned([](ServerHost *p_host) { p_host->stop(); });
 }
 
 size_t ServerHost::live_count() {
-	std::lock_guard lock(g_registry_mutex);
 	return g_registry.size();
 }
 
