@@ -1084,3 +1084,61 @@ both are `RUN_SERIAL` (wall-clock timing).
   scratch cache; E2 under "150/2" (the gate: 30 s idle + 4 walk-stop cycles along a `find_clear_heading` course):
   5 / 5 rest periods ok, 0 reconciliations, RTT 157 ms; "lat=150-165,loss=2" (stress row, reported): 5 / 5 ok, RTT
   322 ms; `SpawnSweep` with 128 slots 102 / 102 ok and equal to in-process `settle_spawn` rows; install unchanged.
+
+## M1 game (T6)
+
+<!-- M1 T6 -->
+`res://scenes/m1_metro.tscn` is M1: Metro TDM walkable through the loopback server. Its `Bf3LevelSession` node
+(bf3_godot, docs/design/m1.md §11, §12) loads the level on a loader thread (mount, scene plan, `SceneLanes`, the
+`SharedLevel` through the cache), starts a `ServerHost` with the `GameServer` (2 scripted walkers) and a
+`ClientSession` as soon as the shapes are in, and uploads the scene behind a loading screen: RenderingServer meshes
+and textures on Godot worker tasks (at most 3 in flight; the pool is capped at 4 threads in `project.godot`),
+materials and 10,506 RS instances on the main thread in 12 ms slices with vsync off. The first-person camera blends
+the client's presentation at the display frame's time; the mapper uses BF3's PC keys and adopts each life's spawn
+view. Headless (`--headless` or `--m1-check`) the session skips the scene and loads only what the server needs.
+
+```bat
+:: play (WASD move, Shift sprint, Space jump, Ctrl crouch toggle, Z prone toggle, mouse look,
+:: F6 free camera with Q/E down/up and the wheel for speed, Esc releases the mouse)
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn [-- --netsim=150/2 --walkers=2 --bf3-cache=<dir>]
+:: E1 / E2 / E3 headless: PASS/FAIL table, exit 0 or 1 (about 6 minutes)
+"%GODOT%" --headless --path bf3-opensource res://scenes/m1_metro.tscn -- --m1-check [--bf3-cache=<scratch dir>]
+:: E4 / E5 windowed: run cold on an empty cache root, then warm on the same root
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --m1-load-check=cold --bf3-cache=<scratch dir>
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --m1-load-check=warm --bf3-cache=<scratch dir>
+:: screenshots after the load: spawn points (stand / walk / crouch / prone) and free-camera views
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --shot-spawns=22:prone,13:walk --shot-dir=C:\temp\m1 --shots=C:\temp\m1\over.png@-150,260,-800,0,-40 --quit-after=1
+```
+
+Tests: `godot.m1` (headless `--m1-check`, about 6 minutes) and `godot.m1_load` (windowed `--m1-load-check` cold
+then warm on a fresh root under `%TEMP%`, 8 spawn shots each; exit 77 = skipped without a window). Both need
+`OPENBF3_GODOT` and an install, and both are `RUN_SERIAL`.
+
+Measured on Metro TDM (dev build, Radeon RX 9070 XT, D3D12; other tracks were building on the machine, so the
+timings are noisy):
+
+| criterion | result |
+|---|---|
+| E1a speeds (6 courses through the server's Trace) | walk 3.9577–4.0000 m/s, sprint 6.2727–6.5000, crouch 2.0000, prone 0.9000; worst window mean error 0.45 % (sprint) |
+| E1b jump apex | 0.599998 m on 6 / 6 courses |
+| E1c pose transitions | S→C 18, C→P 30, P→S 42, S→P 42, P→C 63, C→S 18 ticks on 6 / 6 courses |
+| E1d drops | 9.8 m: 0 damage; 10.1 m: 20.19 damage; 46 m: dead; fall within 1 mm, impact speed within 1e-5 m/s of √(2gh) |
+| E1 snapshots | 3,985 / 3,985 own states in the snapshots equal the server's Trace bit for bit |
+| E2 "150/2" (gate) | 5 / 5 rest periods ok, 0 reconciliations, eye jitter 0 m, RTT 157 ms, 12,960 samples |
+| E2 "lat=150-165,loss=2" (stress, reported) | 5 / 5 ok, 0 reconciliations, RTT 322 ms, 0.03 % of the others' frames extrapolated |
+| E3 spawns (`SpawnSweep`, 128 slots) | 102 / 102 ok and equal to in-process `settle_spawn`, 1.0 s |
+| E4 cold (process start → first controllable frame) | 2.33 s (`_ready` → Done 1.61 s); gate 15 s |
+| E5 warm | 1.49 s (`_ready` → Done 0.84 s); gate 5 s |
+| E6 converter peak (`tools.m1_prepare`, T1) | 332–338 MiB cold; gate 512 MiB |
+| game peak working set (reported, not gated) | 862 MiB cold, 959 MiB warm (windowed, D3D12); headless check 435 MiB |
+| frame time after Done (5 s at the spawn) | p50 5.56 ms, p99 8.33 ms |
+| install | unchanged after every run (256 files, sizes and mtimes) |
+
+Load phases (cold / warm): mount 0.16 / 0.16 s, shapes 1.20 / 0.11 s, scene lanes wall 0.90 / 0.26 s (604 mesh
+blobs converted / hit), C1 198 / 103 worker tasks with 0.82 / 0.65 s of work (largest task 27 ms), C2 0.036 /
+0.030 s of main-thread work, 670 / 605 loading frames at 2.4 / 1.4 ms mean. The very first cold run after a build
+measured 4.8 s (the OS file cache was colder).
+
+Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
+terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
+floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.

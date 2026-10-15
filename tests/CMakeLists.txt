@@ -318,3 +318,17 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_scene_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(render.scene.unit render.scene PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_scene_cl_dir}")
 endif()
+
+# M1 T6 godot (docs/design/m1.md §1, §11, §12, §14): godot.m1 runs the headless --m1-check of
+# res://scenes/m1_metro.tscn (E1 through the loopback server on Trace reports, E2 under both netsim profiles judged by
+# judge_rest, E3 SpawnSweep with 128 slots, install unchanged); godot.m1_load the windowed --m1-load-check cold then
+# warm on a fresh scratch cache root (E4 / E5, phase times, frame time, the game's peak working set, 8 spawn shots)
+# after a probe run, and exits 77 = skipped without a window or rendering device. Both exit 77 without OPENBF3_GODOT
+# or an install and share the project and its DLL with the other godot.* tests; both are RUN_SERIAL (E2 wall-clock
+# netsim, E4 / E5 timing).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.m1 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1.cmake)
+    set_tests_properties(godot.m1 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+    add_test(NAME godot.m1_load COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1_load.cmake)
+    set_tests_properties(godot.m1_load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()

@@ -4,9 +4,11 @@
 #include "collision_overlay.h"
 #include "dedicated_main_loop.h"
 #include "game_session.h"
+#include "level_session.h"
 #include "viewmodel_demo.h"
 #include "weapon_inspector.h"
 
+#include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
 #include "bf3/host/server_host.h"
 
@@ -29,6 +31,8 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Localisation);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WeaponInspector);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3CollisionOverlay);
+	// M1 T6
+	GDREGISTER_CLASS(bf3::godot_side::Bf3LevelSession);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {
@@ -37,6 +41,7 @@ static void uninitialize_openbf3(ModuleInitializationLevel p_level) {
 	}
 	// Safety net (plan §2.3): no server or client thread may outlive the extension.
 	bf3::host::LoopbackClient::stop_all();
+	bf3::host::ClientSession::stop_all(); // M1 T6: the M1 client threads, before the server
 	bf3::host::ServerHost::stop_all();
 }
 

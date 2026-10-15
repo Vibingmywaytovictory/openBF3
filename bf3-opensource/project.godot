@@ -36,3 +36,9 @@ joypads/ignore_joypad_on_unfocused_application=true
 
 rendering_device/driver.windows="d3d12"
 lights_and_shadows/multi_bounce_occlusion/enabled=true
+
+[threading]
+
+; M1 T6 (docs/design/m1.md §3): Godot's pool capped at 4 so it does not compete with the server, client and loader
+; threads; the level upload keeps at most 3 C1 tasks in flight, so one pool thread stays free.
+worker_pool/max_threads=4
