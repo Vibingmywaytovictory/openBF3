@@ -113,6 +113,10 @@ public:
 	// Stored (not decoded) bytes and their SHA1 (the manifest sha1 is of these bytes).
 	std::optional<Sha1> entry_sha1(const EntryRef &p_entry) const;
 	Result<std::vector<uint8_t>> read_stored(const EntryRef &p_entry) const;
+	// The manifest SHA1s of the stored bytes read_chunk(p_id) decodes, without reading them (derived-data
+	// cache keys): the bundle entry's, or for a tail-only entry completed from the chunk tocs that entry's and
+	// the toc copy's; the toc copy's for a toc-only chunk. Empty when the chunk is in no bundle or toc.
+	std::vector<Sha1> chunk_source_sha1s(const Guid &p_id) const;
 
 	struct Impl;
 

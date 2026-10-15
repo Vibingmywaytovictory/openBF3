@@ -11,3 +11,6 @@ target_sources(bf3dump PRIVATE weapon_commands.cpp weapon_commands.h)
 target_sources(bf3dump PRIVATE level_commands.cpp level_commands.h)
 # Collision soup listing (bf3_core level/collision_soup.h), parity with level-oracle collision.
 target_sources(bf3dump PRIVATE collision_commands.cpp collision_commands.h)
+# Derived-data cache preparation of one level x mode (bf3_render level_prepare.h).
+target_sources(bf3dump PRIVATE prepare_commands.cpp prepare_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_render psapi)

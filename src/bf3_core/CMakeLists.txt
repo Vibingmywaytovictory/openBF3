@@ -186,3 +186,17 @@ target_sources(bf3_core PRIVATE
     src/res/terrain.cpp
     include/bf3/core/res/terrain.h
 )
+
+# Converters through the derived-data cache (plan §2.4 step 3, M0 "per-item streaming converters"): the blob
+# reader/writer, cached_convert, and the WeaponDef blob with its dependency-list keys. Keys carry the pinned
+# engine API (the engine-api/<version>.<hash> folder name), so the game and bf3dump agree on them.
+get_filename_component(OPENBF3_ENGINE_ID "${OPENBF3_ENGINE_API}" NAME)
+target_sources(bf3_core PRIVATE
+    src/cache/blob_io.cpp
+    src/cache/cached_convert.cpp
+    src/gameplay/weapon_blob.cpp
+    include/bf3/core/cache/blob_io.h
+    include/bf3/core/cache/cached_convert.h
+    include/bf3/core/gameplay/weapon_blob.h
+)
+set_source_files_properties(src/cache/cached_convert.cpp PROPERTIES COMPILE_DEFINITIONS "OPENBF3_ENGINE_ID=\"${OPENBF3_ENGINE_ID}\"")

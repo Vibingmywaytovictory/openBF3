@@ -210,3 +210,17 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.collision COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_collision.cmake)
     set_tests_properties(godot.collision PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 360 RESOURCE_LOCK openbf3_godot_project)
 endif()
+# Converters through the derived-data cache and `bf3dump prepare` (bf3_core cache/cached_convert.h, gameplay/
+# weapon_blob.h; bf3_render mesh_cache.h, level_prepare.h). prepare.unit: blob round trips, hostile blobs, keys,
+# prepare twice / damaged entries on scratch roots (no data). prepare: the M9 viewmodel meshes and weapons from the
+# install into a scratch cache root (exits 77 = skipped without an install).
+openbf3_test(test_prepare test_main.cpp prepare_tests.cpp test_support.h)
+target_link_libraries(test_prepare PRIVATE bf3_render)
+add_test(NAME prepare.unit COMMAND test_prepare --test-suite=prepare-unit)
+add_test(NAME prepare COMMAND test_prepare --test-suite=prepare)
+set_tests_properties(prepare PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(prepare.unit prepare PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_prepare_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(prepare.unit prepare PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_prepare_cl_dir}")
+endif()

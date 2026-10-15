@@ -1,5 +1,6 @@
 #include "viewmodel_demo.h"
 
+#include "godot_cache.h"
 #include "godot_util.h"
 #include "m9_reload_check.h"
 #include "render_bridge.h"
@@ -109,14 +110,44 @@ void Bf3ViewmodelDemo::_ready() {
 	clip_speed_ = speed.empty() ? 1.0 : std::max(0.0, std::atof(speed.c_str()));
 	build_ui();
 
+	if (!has_user_arg("no-cache")) {
+		const std::string root = user_arg_value("bf3-cache");
+		cache_root_ = root.empty() ? default_cache_root() : std::filesystem::path(std::u8string(root.begin(), root.end()));
+	}
 	if (!install_.is_mounted()) {
 		load_error_ = "no usable install: " + install_.describe();
 		load_done_ = true;
 	} else {
+		cache_guard_ = install_.write_guard();
 		load_start_usec_ = Time::get_singleton()->get_ticks_usec();
-		// Heavy work off the main thread (plan §2.3): no Godot API is called on this thread.
+		// Heavy work off the main thread (plan §2.3): no Godot API is called on this thread. The cache is opened
+		// here too (journal replay, tree scan) and, when this was its last holder, closed here at the end.
 		loader_ = std::thread([this]() {
-			bf3::core::Result<std::unique_ptr<bf3::render::ViewmodelAssets>> r = bf3::render::load_viewmodel(install_, spec_, &progress_);
+			std::shared_ptr<bf3::core::Cache> cache;
+			std::string cache_line;
+			if (!cache_root_.empty()) {
+				progress_.set("opening the derived-data cache", 0);
+				AcquiredCache acquired = acquire_cache(cache_root_, cache_guard_);
+				const std::u8string root8 = cache_root_.u8string();
+				const std::string root(root8.begin(), root8.end());
+				if (acquired.status == bf3::core::CacheStatus::Ok) {
+					cache = acquired.cache;
+					const bf3::core::CacheStats st = cache->stats();
+					char line[512];
+					std::snprintf(line, sizeof(line), "cache %s: %s in %.1f ms, %llu entries, %.1f MiB", root.c_str(), acquired.shared ? "shared" : "opened",
+							acquired.open_seconds * 1000.0, static_cast<unsigned long long>(st.entries), double(st.bytes) / (1024.0 * 1024.0));
+					cache_line = line;
+				} else {
+					cache_line = "cache " + root + " not used (" + bf3::core::cache_status_name(acquired.status) + (acquired.detail.empty() ? "" : ": ") +
+							acquired.detail + "): converting without it";
+				}
+			} else {
+				cache_line = "cache disabled (--no-cache)";
+			}
+			bf3::core::Result<std::unique_ptr<bf3::render::ViewmodelAssets>> r = bf3::render::load_viewmodel(install_, spec_, &progress_, cache.get());
+			cache_used_ = cache != nullptr;
+			cache.reset(); // the last holder closes the cache here, on the loader thread
+			cache_summary_ = cache_line;
 			if (r) {
 				loaded_ = std::move(*r);
 			} else {
@@ -160,7 +191,11 @@ String Bf3ViewmodelDemo::get_status_text() const {
 	std::snprintf(buf, sizeof(buf), "openBF3 | M9 \"%s\" t %.2f / %.2f s (frame %.1f) | %.0f fps | loaded in %.2f s + upload %.2f s | 1P FOV %.0f",
 			spec_.clip.c_str(), t, duration, t * assets_->tracks.fps, Engine::get_singleton()->get_frames_per_second(), load_seconds_, upload_seconds_,
 			assets_->render_fov > 0.0f ? assets_->render_fov : 55.0f);
-	return to_godot(buf);
+	char cache_buf[256];
+	std::snprintf(cache_buf, sizeof(cache_buf), "\nmeshes %s: arms %s %.1f ms, M9 %s %.1f ms", cache_used_ ? "via the cache" : "without the cache",
+			bf3::core::cache_outcome_name(assets_->arms.cache.outcome), assets_->arms.seconds_mesh * 1000.0,
+			bf3::core::cache_outcome_name(assets_->weapon.cache.outcome), assets_->weapon.seconds_mesh * 1000.0);
+	return to_godot(std::string(buf) + cache_buf);
 }
 
 void Bf3ViewmodelDemo::update_label() {
@@ -172,6 +207,7 @@ void Bf3ViewmodelDemo::update_label() {
 void Bf3ViewmodelDemo::build_scene() {
 	const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
 	bf3::render::ViewmodelAssets &a = *assets_;
+	UtilityFunctions::print(to_godot("[viewmodel] " + cache_summary_));
 	for (const std::string &n : a.notes) {
 		UtilityFunctions::print(to_godot("[viewmodel] " + n));
 	}

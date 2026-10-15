@@ -18,9 +18,15 @@
 //                               bf3_anim's model space (and the probe JSON when OPENBF3_ANT_ORACLE is set),
 //                               print a PASS/FAIL table, quit 0/1
 //   --bf3-install=<dir>         install override, as for GameSession
+//   --bf3-cache=<dir>           derived-data cache root (default user://bf3cache); --no-cache converts without one
+//
+// Meshes go through the derived-data cache (godot_cache.h, bf3_render mesh_cache.h): the loader thread opens the
+// cache (off the main thread), takes each mesh's blob when its key matches and converts + puts otherwise; the
+// label and the log show which path each mesh took ("converted" on a cold cache, "hit" on a warm one).
 
 #include "bf3/anim/pose.h"
 #include "bf3/core/install_reader.h"
+#include "bf3/core/path_guard.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/render/viewmodel_assets.h"
 
@@ -28,6 +34,7 @@
 #include <godot_cpp/classes/skin.hpp>
 
 #include <atomic>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <thread>
@@ -62,6 +69,10 @@ public:
 	godot::Camera3D *camera() const { return camera_; }
 	const bf3::core::InstallReader &install() const { return install_; }
 	const bf3::core::InstallSnapshot &install_snapshot_at_start() const { return install_before_; }
+	const bf3::render::ViewmodelSpec &spec() const { return spec_; }
+	// How the cache was used ("" = no cache), set by the loader.
+	const std::string &cache_summary() const { return cache_summary_; }
+	bool cache_used() const { return cache_used_; }
 	// Poses the Skeleton3D (and the camera) at a clip frame; fills r_model with bf3_anim's model-space pose.
 	void pose_at_frame(float p_frame, std::vector<bf3::anim::Xform> *r_model = nullptr);
 	double load_seconds() const { return load_seconds_; }
@@ -90,6 +101,10 @@ private:
 	bf3::render::LoadProgress progress_;
 	std::unique_ptr<bf3::render::ViewmodelAssets> loaded_; // written by the loader before load_done_
 	std::string load_error_;
+	std::filesystem::path cache_root_; // empty: no cache
+	bf3::core::PathGuard cache_guard_;
+	std::string cache_summary_; // written by the loader before load_done_
+	bool cache_used_ = false;
 
 	// Built scene.
 	std::unique_ptr<bf3::render::ViewmodelAssets> assets_;

@@ -20,3 +20,11 @@ target_sources(bf3_render PRIVATE
     src/collision_prep.cpp
     include/bf3/render/collision_prep.h
 )
+
+# Prepared meshes through the derived-data cache and `bf3dump prepare` (plan §2.4 step 3, §3.12).
+target_sources(bf3_render PRIVATE
+    src/mesh_cache.cpp
+    src/level_prepare.cpp
+    include/bf3/render/mesh_cache.h
+    include/bf3/render/level_prepare.h
+)

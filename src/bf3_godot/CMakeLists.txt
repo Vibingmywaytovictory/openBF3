@@ -33,6 +33,11 @@ target_sources(bf3_godot PRIVATE
     src/collision_check.cpp
     src/collision_check.h
 )
+# The process's derived-data cache under user://bf3cache (meshes of the viewmodel demo; README "Preparing the cache").
+target_sources(bf3_godot PRIVATE
+    src/godot_cache.cpp
+    src/godot_cache.h
+)
 target_link_libraries(bf3_godot PRIVATE godot-cpp bf3_host bf3_core bf3_sim bf3_net bf3_anim bf3_render)
 openbf3_module(bf3_godot)
 # No incremental linking: keeps the .ilk out of the project's bin/ and the DLL self-contained.
