@@ -21,6 +21,6 @@ int cmd_find(const EbxContext &p_ctx, const std::string &p_spec, const std::vect
 int cmd_types(const EbxContext &p_ctx, const std::string &p_spec, const std::vector<std::string> &p_types);
 int cmd_dump(const EbxContext &p_ctx, const std::string &p_spec, const std::string &p_out_dir, size_t p_depth, const std::string &p_follow,
 		const std::vector<std::string> &p_roots);
-int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk);
+int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk, bool p_lookups = false);
 
 } // namespace bf3dump

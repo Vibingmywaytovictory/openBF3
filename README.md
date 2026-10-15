@@ -64,6 +64,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
+H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
 
 ## Run
 
@@ -771,8 +772,32 @@ run, median 0.24 s (warm file cache, 16 threads shared with other builds). Hando
   20311 placements on 2277 meshes (... 12725 placed hidden for destruction)` in its world report), after the
   geometry builder had gained destruction views: each destruction state's part is drawn by an instance of its own,
   hidden until the state shows. That is a renderer count, not a traversal one; the per-state expansion belongs to the
-  destruction work, not to this traversal. Its 20,311 - 12,725 = 7,586 shown instances are 739 more than the
-  traversal's 6,847 mesh placements; that remainder is not attributed.
+  destruction work, not to this traversal.
+* **Reproduced and attributed** (H hygiene, 2026-10-15): `level-oracle static-models MP_007 ConquestSmall0` runs
+  IW4L's own destruction, geometry and lighting builders and the assets lane's world-soup / static-model / held-back
+  rules (`research/probes/tools/level-oracle/src/static_models.rs`). Built against IW4L 3c4068e (the last commit
+  before the 2026-10-07 10:23 run logs that print the handoff line) it gives exactly 20,718 scene instances, 20,311
+  static models and 12,725 held back; IW4L HEAD 49aca70 gives 20,324 (13 more ground-scatter squares from the
+  2026-10-07 scatter commits), the rest unchanged. The decomposition, starting from the traversal's 6,847 mesh
+  placements (the same number IW4L's world gives):
+
+  | | instances |
+  |---|---|
+  | 2,682 destructible placements (2,653 props, 29 breakables; 10,686 slots, 21,862 states): initial view | 2,682 |
+  | the same: static-parts view (held back) | 807 |
+  | the same: one per health state that shows a part (held back) | 11,918 |
+  | other placements drawn as static models | 3,732 |
+  | ground scatter merged into one model per square and reach (`ScatterDraw::Models`; not in the traversal) | 1,172 |
+  | **static models** | **20,311**, of them 807 + 11,918 = **12,725** held back |
+  | other placements baked into the world soup: lightmapped models 380, world-kind meshes 24 | (404) |
+  | terrain and water | (3) |
+  | placements with no instance: 26 hidden at start (ruins, collapses, backdrops), 3 whose mesh draws nothing | (29) |
+
+  So 2,682 + 3,732 + 380 + 24 + 26 + 3 = 6,847, and the 739 by which the 7,586 shown static models exceeded the
+  traversal's placements are the 1,172 scatter models minus the 433 placements that are not static models (404 world
+  soup, 26 hidden, 3 empty). Our census does not expand destruction states or generate scatter yet; those numbers
+  belong to the destruction (plan M6) and Caspian terrain-scatter (M4) work, with `static-models` as their oracle. The
+  oracle needs the IW4L checkout it path-depends on; at another IW4L commit its scatter count may differ.
 * sections/03's "Metro 702" composite placements that hide parts is Metro ConquestSmall0 (IW4L probe
   `geom_MP_Subway_ConquestSmall0.txt`); Metro TDM's is 710 (`3-CONVERTER-PART/geometry.md`), which `core.level` asserts.
 
@@ -1143,3 +1168,86 @@ measured 4.8 s (the OS file cache was colder).
 Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
 terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
 floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.
+
+## H hygiene follow-ups
+
+<!-- H hygiene -->
+Four follow-ups from M0/M1. Measured 2026-10-15 on the Ryzen 7 5800X while five other tracks built and tested in
+parallel, so every timing here is noisy; the memory figures varied by under 1 %.
+
+**stop_all registries (`bf3_host`).** `ServerHost::stop_all`, `LoopbackClient::stop_all` and `ClientSession::stop_all`
+(the extension deinit's safety net, register_types.cpp) copied the pointer list under the registry mutex and called
+`stop()` through the copies after releasing it. An owner destroying its instance in between left `stop_all` with a
+dangling pointer: ASan reports a heap use after free in `stop()`'s lifecycle mutex. `InstanceRegistry<T>`
+(`src/bf3_host/src/instance_registry.h`) now pins every instance a pass takes, under the same mutex. The destructor
+calls `retire()` first, which waits until no pass holds a pin. A pass skips an instance that was retired or stopped
+before it got there. `host.registry` (no data, about 5 s, also under `asan`) checks the rule on `InstanceRegistry`
+itself (a destructor waits while `stop_all` is inside its instance; a retired instance is skipped, not called), then
+churns 160 ServerHosts, 160 LoopbackClients and 96 connected ClientSessions against a thread calling `stop_all` in a
+loop. Under `asan` the old code fails it: ServerHost 3 of 3 runs, LoopbackClient 2 of 2, ClientSession 1 of 2 (at 48
+sessions). The fix passes 3 of 3 runs.
+
+**EbxLibrary memory (`bf3_core` ebx).** `bf3dump ebxload <sb>` now prints where the memory goes (`partition_heap`:
+vector capacities, from the new `EbxPartition::memory_use()`) and the working set after the mount and catalog, after
+`load_all` and at its peak. Two causes stood out:
+* The tables derived from the descriptors alone (field and type descriptors, lookup tables, enumerators) took
+  173 MiB, but `@all-mp`'s 50,486 partitions have only 2,533 distinct descriptor layouts.
+* The import table, 2.38 M imports, was copied out of bytes the partition already keeps (72.6 MiB).
+
+The changes:
+* The descriptor-derived tables are interned process-wide (`EbxPartition::TypeTables`, `EbxTypeIntern` in ebx.cpp).
+  The key is the three counts that place the tables plus the bytes from the name table to the end of the type
+  descriptors. Keys are hashed with the per-process seed and compared in full. A partition whose layout is already
+  loaded adopts that copy and skips building it. The last partition of a layout frees it. `ebx_live_type_layouts()`
+  counts the live layouts.
+* Imports are read in place: an `EbxImport` is two 16-byte raw GUIDs, the file's own records.
+* The instance list is reserved (bounded by the payload) and the string NUL index is shrunk.
+
+The public API only gained `memory_use()` and `ebx_live_type_layouts()`; `field_descs()`, `complex_descs()`,
+`imports()` and `lookup()` return the same types.
+
+| `bf3dump ebxload` | before | after |
+|---|---|---|
+| `@all-mp` peak working set (3 runs) | 903-908 MiB | **678-680 MiB** (the Rust oracle: about 662 MiB) |
+| Metro (`Win32/Levels/MP_Subway/MP_Subway`) peak (3 runs) | 166-168 MiB | **127-128 MiB** |
+| `@all-mp` after the mount and catalog (LevelMounts, not changed here) | 261-264 MiB | 261-263 MiB |
+| `@all-mp` partition heap | bytes 306.4, descriptors + imports 168.5, lookups 77.4, instances 36.5, strings 2.3 (slack 16.2 of these), objects 14.3 MiB; 439,017 blocks | bytes 306.4, type tables 39.8 (2,533 layouts, 15.9 of it the keys), instances 33.4, strings 1.9, objects 13.5 MiB; 232,153 blocks |
+| `@all-mp` parse (all cores) | 0.31-0.33 s | 0.29-0.34 s |
+| `ebxload @all-mp --lookups`: `get()` by name of all 4,936,637 top-level fields, one thread, best of 3 | 0.447-0.449 s | 0.408-0.414 s |
+| Metro, the same | 0.111-0.113 s | 0.106-0.110 s |
+
+Gate: `ctest -R tools.ebx_memory` (or `cmake -DBF3DUMP=b\dev\tools\bf3dump\bf3dump.exe -P tests\ebx_memory.cmake`).
+It passes when every partition parses and the peak working set is at most **760 MiB for `@all-mp`** and **145 MiB for
+Metro**. It is RUN_SERIAL, report-only under `asan`, and 77 without an install. The old binary fails it (907.8 and
+166.3 MiB).
+
+Lookups are not gated (noisy timing). Rerun `bf3dump ebxload @all-mp --lookups` on a quiet machine; it should stay
+within a few percent of 0.41 s.
+
+Parity: the old and new `bf3dump` binaries print byte-identical output for:
+* `find @all-mp m16a4 shield`
+* `types @all-mp SoldierWeaponUnlockAsset MeshVariationDatabase LevelData`
+* `dump @all-mp <dir> 3 weapons,characters` of `u_m16_burst`, `mpsoldier` and the Metro level (32 MB of JSON)
+* `level MP_Subway TeamDeathMatch0` and `level MP_007 ConquestSmall0`
+* `weapons`
+* `kits MP_001 ConquestLarge0 --all`
+* `text --census @all-mp`
+
+`core.formats` adds two cases:
+* partitions of one layout share one copy and free it with the last one, a layout error is still found while a good
+  look-alike is alive, and a moved partition keeps its views;
+* 8 threads parse two layouts at once and agree on one copy each.
+
+`core.formats`, `core.install`, `core.fuzz` (also at 2,000 mutants per input), `core.level.unit`, `core.ui.text` and
+`core.gameplay.inspect` pass under `asan`.
+
+**Text database corrections (research/).** Checked with `bf3dump text --census`: the research set's 1,271 SIDs give
+1,247 resolved, `missing_marker=0`, `absent=24`. Of the 24, 18 are vehicle-weapon names `ID_P_VWNAME_*`; the others
+are `ID_H_COMBAT_AREA_`, three `ID_M_MOD_*_DESC`, `ID_P_VDESC_BARSUK` and `ID_WEAPON_CATEGORYGADGET1`. None of the
+15,515 entries holds `<MISSING>`; the only texts containing "MISSING" are two "THIS SECTION OF THE LEVEL IS MISSING"
+lines. `bf3dump text ID_P_WNAME_M16` gives `85119825  M16A4`, while `ID_P_VNAME_M1A2` and the `ID_P_MAP_*` guesses
+are absent. `research/PORTING-RESEARCH.md` §3.8 and `topics/gap-r1-ui-hud-minimap-localisation.md` are corrected; this
+README's "Text database" already said so.
+
+**Caspian §9 counts.** The handoff count is reproduced exactly and attributed; see "Level traversal". The oracle is
+`level-oracle static-models MP_007 ConquestSmall0`.

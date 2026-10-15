@@ -15,6 +15,8 @@
 
 #include <windows.h>
 
+#include <psapi.h>
+
 #include <algorithm>
 #include <atomic>
 #include <charconv>
@@ -36,6 +38,19 @@ namespace {
 
 double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
+}
+
+// H hygiene: the process's working set and private bytes now and at their peak, MiB.
+struct MemorySample {
+	double working_set = 0, peak_working_set = 0, private_bytes = 0, peak_private_bytes = 0;
+};
+
+MemorySample memory_sample() {
+	PROCESS_MEMORY_COUNTERS_EX pmc{};
+	pmc.cb = sizeof(pmc);
+	GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&pmc), sizeof(pmc));
+	const double mib = 1024.0 * 1024.0;
+	return { double(pmc.WorkingSetSize) / mib, double(pmc.PeakWorkingSetSize) / mib, double(pmc.PrivateUsage) / mib, double(pmc.PeakPagefileUsage) / mib };
 }
 
 std::wstring widen(std::string_view p_text) {
@@ -658,7 +673,7 @@ int cmd_dump(const EbxContext &p_ctx, const std::string &p_spec, const std::stri
 	return failures == 0 ? 0 : 1;
 }
 
-int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk) {
+int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk, bool p_lookups) {
 	const auto start = std::chrono::steady_clock::now();
 	const std::vector<std::string> sbs = expand_superbundles(*p_ctx.install, p_spec);
 	Result<std::unique_ptr<EbxLibrary>> opened = EbxLibrary::open(p_ctx.install, sbs);
@@ -668,7 +683,9 @@ int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk)
 	}
 	EbxLibrary &lib = **opened;
 	const double mount_s = seconds_since(start);
+	const MemorySample opened_memory = memory_sample();
 	const EbxLibrary::LoadReport report = lib.load_all();
+	const MemorySample loaded_memory = memory_sample();
 	print_load_report(report);
 	for (const std::string &e : report.errors) {
 		std::printf("error\t%s\n", e.c_str());
@@ -685,6 +702,28 @@ int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk)
 	std::printf("instances\t%zu\timports\t%zu\tduplicate_instance_guids\t%zu\tbytes\t%llu\n", instances, imports, dup_instance_guids,
 			static_cast<unsigned long long>(report.bytes));
 	std::printf("time\tmount+catalog %.3f s\tparse %.3f s\tinsert %.3f s\n", mount_s, report.parse_seconds, report.insert_seconds);
+	// H hygiene: where the memory goes (EbxPartition::memory_use: vector capacities, MiB) and the process's working
+	// set after the mount + catalog, after load_all and at its peak.
+	EbxPartition::MemoryUse use;
+	std::set<const void *> layouts;
+	for (const EbxLibrary::Entry &e : entries) {
+		const EbxPartition::MemoryUse m = e.partition->memory_use();
+		use.bytes += m.bytes;
+		use.strings += m.strings;
+		use.instances += m.instances;
+		use.slack += m.slack;
+		use.blocks += m.blocks;
+		if (layouts.insert(m.types_id).second) {
+			use.types += m.types; // shared: once per layout
+		}
+	}
+	const double mib = 1024.0 * 1024.0;
+	std::printf("partition_heap\tbytes %.1f\tstrings %.1f\tinstances %.1f\tslack %.1f\tobjects %.1f MiB\tblocks %zu\ttypes %.1f MiB in %zu layouts\n",
+			double(use.bytes) / mib, double(use.strings) / mib, double(use.instances) / mib, double(use.slack) / mib,
+			double(entries.size() * sizeof(EbxPartition)) / mib, use.blocks, double(use.types) / mib, layouts.size());
+	std::printf("memory\topened ws %.1f private %.1f\tloaded ws %.1f private %.1f\tpeak ws %.1f private %.1f MiB\n", opened_memory.working_set,
+			opened_memory.private_bytes, loaded_memory.working_set, loaded_memory.private_bytes, loaded_memory.peak_working_set,
+			loaded_memory.peak_private_bytes);
 	if (p_walk) {
 		const auto walk_start = std::chrono::steady_clock::now();
 		std::atomic<size_t> values{ 0 };
@@ -699,6 +738,25 @@ int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk)
 			values += n;
 		});
 		std::printf("walk\tvalues\t%zu\t%.3f s\n", values.load(), seconds_since(walk_start));
+	}
+	if (p_lookups) {
+		// H hygiene: every field of every instance looked up again by its name (EbxStruct::get: name hash + one
+		// binary search in the type's lookup table) on one thread; three passes, the fastest is the figure.
+		for (int pass = 0; pass < 3; ++pass) {
+			const auto lookup_start = std::chrono::steady_clock::now();
+			size_t found = 0, asked = 0;
+			for (const EbxLibrary::Entry &entry : entries) {
+				const EbxPartition &p = *entry.partition;
+				for (size_t k = 0; k < p.instance_count(); ++k) {
+					const EbxStruct data = p.instance(k)->data();
+					for (const EbxField &f : data.fields()) {
+						++asked;
+						found += data.get(f.name).has_value() ? 1 : 0;
+					}
+				}
+			}
+			std::printf("lookups\tpass %d\t%zu of %zu found\t%.3f s\n", pass + 1, found, asked, seconds_since(lookup_start));
+		}
 	}
 	std::printf("total\t%.3f s\n", seconds_since(start));
 	return report.failed == 0 ? 0 : 1;

@@ -8,6 +8,9 @@
 #include <charconv>
 #include <cstring>
 #include <limits>
+#include <mutex>
+#include <type_traits>
+#include <unordered_map>
 
 namespace bf3::core {
 
@@ -198,6 +201,168 @@ uint32_t ebx_name_hash(std::string_view p_name) {
 }
 
 // ------------------------------------------------------------------------------------------------
+// Shared type tables (H hygiene)
+// ------------------------------------------------------------------------------------------------
+
+// Everything the parser derives from the name table and the field and type descriptors alone, with the bytes it
+// was derived from (the key: the three counts that place those tables, then the bytes from the name table to the
+// end of the type descriptors). Immutable once shared.
+struct EbxPartition::TypeTables {
+	std::vector<Field> fields;
+	std::vector<Complex> complexes;
+	std::vector<Lookup> lookups;
+	std::vector<std::pair<int32_t, uint32_t>> enumerators;
+	std::array<uint32_t, 3> counts{}; // complex_count, field_count, names_len
+	std::vector<uint8_t> key;
+	uint64_t hash = 0;
+
+	size_t heap_bytes() const {
+		return sizeof(TypeTables) + fields.capacity() * sizeof(Field) + complexes.capacity() * sizeof(Complex) + lookups.capacity() * sizeof(Lookup) +
+				enumerators.capacity() * sizeof(enumerators[0]) + key.capacity();
+	}
+	bool same_key(const std::array<uint32_t, 3> &p_counts, std::span<const uint8_t> p_key) const {
+		return counts == p_counts && key.size() == p_key.size() && (p_key.empty() || std::memcmp(key.data(), p_key.data(), p_key.size()) == 0);
+	}
+};
+
+// The process-wide set of live TypeTables, by key. A partition whose layout is already here adopts that copy
+// instead of building its own; the last partition of a layout to go frees the copy and its entry (the deleter).
+// Cost: the key is hashed once per parse (linear in the descriptor bytes, 8 bytes per step) and compared in full
+// against each live entry of its hash bucket; the hash is keyed per process (ids.h hash_keyed), so crafted
+// layouts cannot pile into one bucket. One mutex; never held while a shared_ptr it locked could be the last one
+// released (that would re-enter it through the deleter).
+class EbxTypeIntern {
+public:
+	using Tables = EbxPartition::TypeTables;
+
+	static uint64_t hash_of(const std::array<uint32_t, 3> &p_counts, std::span<const uint8_t> p_key) {
+		uint64_t h = hash_keyed((uint64_t(p_counts[0]) << 32) | p_counts[1], (uint64_t(p_counts[2]) << 32) | uint64_t(p_key.size() & 0xFFFFFFFFu));
+		size_t at = 0;
+		for (; at + 8 <= p_key.size(); at += 8) {
+			uint64_t word;
+			std::memcpy(&word, p_key.data() + at, 8);
+			h = hash_mix(h ^ word) + at;
+		}
+		uint64_t tail = 0;
+		if (at < p_key.size()) {
+			std::memcpy(&tail, p_key.data() + at, p_key.size() - at);
+		}
+		return hash_mix(h ^ tail ^ (uint64_t(p_key.size() - at) << 56));
+	}
+
+	static std::shared_ptr<const Tables> find(uint64_t p_hash, const std::array<uint32_t, 3> &p_counts, std::span<const uint8_t> p_key) {
+		EbxTypeIntern &self = instance();
+		std::vector<std::shared_ptr<const Tables>> others; // released after the mutex
+		std::shared_ptr<const Tables> found;
+		{
+			std::lock_guard lock(self.mutex_);
+			const auto it = self.buckets_.find(p_hash);
+			if (it == self.buckets_.end()) {
+				return nullptr;
+			}
+			for (const std::weak_ptr<const Tables> &w : it->second) {
+				std::shared_ptr<const Tables> live = w.lock();
+				if (live && live->same_key(p_counts, p_key)) {
+					found = std::move(live);
+					break;
+				}
+				others.push_back(std::move(live));
+			}
+		}
+		return found;
+	}
+
+	// Shares p_fresh, or the equal copy another thread shared meanwhile.
+	static std::shared_ptr<const Tables> insert(std::unique_ptr<Tables> p_fresh) {
+		EbxTypeIntern &self = instance();
+		const uint64_t hash = p_fresh->hash;
+		std::vector<std::shared_ptr<const Tables>> others;
+		std::shared_ptr<const Tables> shared(p_fresh.release(), [](const Tables *p_tables) {
+			const uint64_t h = p_tables->hash;
+			delete p_tables;
+			forget(h);
+		});
+		{
+			std::lock_guard lock(self.mutex_);
+			std::vector<std::weak_ptr<const Tables>> &bucket = self.buckets_[hash];
+			for (const std::weak_ptr<const Tables> &w : bucket) {
+				std::shared_ptr<const Tables> live = w.lock();
+				if (live && live->same_key(shared->counts, shared->key)) {
+					others.push_back(std::move(shared)); // ours goes (after the mutex); theirs is shared
+					return live;
+				}
+				others.push_back(std::move(live));
+			}
+			bucket.push_back(shared);
+		}
+		return shared;
+	}
+
+	static size_t live_layouts() {
+		EbxTypeIntern &self = instance();
+		std::lock_guard lock(self.mutex_);
+		size_t n = 0;
+		for (const auto &[hash, bucket] : self.buckets_) {
+			n += bucket.size();
+		}
+		return n;
+	}
+
+private:
+	// The deleter of a shared copy: its weak entry has expired; drop the expired entries of its bucket.
+	static void forget(uint64_t p_hash) {
+		EbxTypeIntern &self = instance();
+		std::lock_guard lock(self.mutex_);
+		const auto it = self.buckets_.find(p_hash);
+		if (it == self.buckets_.end()) {
+			return;
+		}
+		std::vector<std::weak_ptr<const Tables>> &bucket = it->second;
+		bucket.erase(std::remove_if(bucket.begin(), bucket.end(), [](const std::weak_ptr<const Tables> &w) { return w.expired(); }), bucket.end());
+		if (bucket.empty()) {
+			self.buckets_.erase(it);
+		}
+	}
+
+	// Never destroyed: partitions held by other static objects may be released during process exit.
+	static EbxTypeIntern &instance() {
+		static EbxTypeIntern *s_instance = new EbxTypeIntern();
+		return *s_instance;
+	}
+
+	std::mutex mutex_;
+	std::unordered_map<uint64_t, std::vector<std::weak_ptr<const Tables>>> buckets_;
+};
+
+namespace {
+const EbxPartition::TypeTables &no_types() {
+	static const EbxPartition::TypeTables s_empty;
+	return s_empty;
+}
+} // namespace
+
+void EbxPartition::adopt(std::shared_ptr<const TypeTables> p_tables) {
+	types_ = std::move(p_tables);
+	building_ = nullptr;
+	fields_ = types_->fields;
+	complexes_ = types_->complexes;
+	lookups_ = types_->lookups;
+	enumerators_ = types_->enumerators;
+}
+
+const std::vector<EbxPartition::Field> &EbxPartition::field_descs() const {
+	return types_ ? types_->fields : no_types().fields;
+}
+
+const std::vector<EbxPartition::Complex> &EbxPartition::complex_descs() const {
+	return types_ ? types_->complexes : no_types().complexes;
+}
+
+size_t ebx_live_type_layouts() {
+	return EbxTypeIntern::live_layouts();
+}
+
+// ------------------------------------------------------------------------------------------------
 // Parsing
 // ------------------------------------------------------------------------------------------------
 
@@ -238,83 +403,101 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 	}
 
 	p.guid_ = guid;
-	p.imports_.reserve(import_count);
-	for (size_t i = 0; i < import_count; ++i) {
-		const size_t at = tables->imports + i * 32;
-		EbxImport imp;
-		if (!get_guid(bytes, at, imp.partition) || !get_guid(bytes, at + 16, imp.instance)) {
-			return truncated(Section::Imports);
-		}
-		p.imports_.push_back(imp);
+	// The import table is read in place: an EbxImport is two Guids of 16 raw bytes (every access to one goes
+	// through its uint8_t arrays), laid out as the file's 32-byte records.
+	static_assert(sizeof(EbxImport) == 32 && alignof(EbxImport) == 1 && std::is_trivially_copyable_v<EbxImport>);
+	if (tables->imports + uint64_t(import_count) * 32 > bytes.size()) {
+		return truncated(Section::Imports);
 	}
+	p.imports_ = std::span<const EbxImport>(reinterpret_cast<const EbxImport *>(bytes.data() + tables->imports), import_count);
 
 	if (tables->names + uint64_t(names_len) > bytes.size()) {
 		return truncated(Section::Names);
 	}
 	const std::span<const uint8_t> names_region = bytes.subspan(tables->names, names_len);
-	if (!detail::valid_utf8(names_region)) {
-		return not_utf8(Section::Names);
-	}
 	p.names_at_ = tables->names;
 	p.names_len_ = names_len;
-	struct NameEntry {
-		uint32_t hash, start, end;
-	};
-	std::vector<NameEntry> lookup;
-	{
-		size_t start = 0;
-		for (size_t i = 0; i <= names_region.size(); ++i) {
-			if (i == names_region.size() || names_region[i] == 0) {
-				if (i > start) {
-					const std::string_view piece(reinterpret_cast<const char *>(names_region.data()) + start, i - start);
-					lookup.push_back({ ebx_name_hash(piece), static_cast<uint32_t>(start), static_cast<uint32_t>(i) });
+	// H hygiene: the layout key runs from the name table to the end of the type descriptors (inside the metadata,
+	// which the header check put inside the partition). A layout already interned was built and checked from these
+	// very bytes, so its tables are adopted and the name, field and type steps below are skipped: they would
+	// succeed and give the same tables.
+	const std::array<uint32_t, 3> layout_counts{ complex_count, field_count, names_len };
+	const std::span<const uint8_t> layout_key = bytes.subspan(tables->names, tables->complexes + size_t(complex_count) * 16 - tables->names);
+	const uint64_t layout_hash = EbxTypeIntern::hash_of(layout_counts, layout_key);
+	std::unique_ptr<TypeTables> fresh;
+	if (std::shared_ptr<const TypeTables> shared = EbxTypeIntern::find(layout_hash, layout_counts, layout_key)) {
+		p.adopt(std::move(shared));
+	} else {
+		fresh = std::make_unique<TypeTables>();
+		p.building_ = fresh.get();
+	}
+	if (fresh) {
+		if (!detail::valid_utf8(names_region)) {
+			return not_utf8(Section::Names);
+		}
+		struct NameEntry {
+			uint32_t hash, start, end;
+		};
+		std::vector<NameEntry> lookup;
+		{
+			size_t start = 0;
+			for (size_t i = 0; i <= names_region.size(); ++i) {
+				if (i == names_region.size() || names_region[i] == 0) {
+					if (i > start) {
+						const std::string_view piece(reinterpret_cast<const char *>(names_region.data()) + start, i - start);
+						lookup.push_back({ ebx_name_hash(piece), static_cast<uint32_t>(start), static_cast<uint32_t>(i) });
+					}
+					start = i + 1;
 				}
-				start = i + 1;
 			}
 		}
-	}
-	std::sort(lookup.begin(), lookup.end(), [](const NameEntry &a, const NameEntry &b) { return a.hash < b.hash; });
-	auto resolve_name = [&](uint32_t p_hash) -> const NameEntry * {
-		const auto it = std::lower_bound(lookup.begin(), lookup.end(), p_hash, [](const NameEntry &e, uint32_t h) { return e.hash < h; });
-		return (it != lookup.end() && it->hash == p_hash) ? &*it : nullptr;
-	};
+		std::sort(lookup.begin(), lookup.end(), [](const NameEntry &a, const NameEntry &b) { return a.hash < b.hash; });
+		auto resolve_name = [&](uint32_t p_hash) -> const NameEntry * {
+			const auto it = std::lower_bound(lookup.begin(), lookup.end(), p_hash, [](const NameEntry &e, uint32_t h) { return e.hash < h; });
+			return (it != lookup.end() && it->hash == p_hash) ? &*it : nullptr;
+		};
 
-	p.fields_.reserve(field_count);
-	for (size_t i = 0; i < field_count; ++i) {
-		const size_t at = tables->fields + i * 16;
-		uint32_t hash, offset;
-		uint16_t flags, reference;
-		if (!get32(bytes, at, hash) || !get16(bytes, at + 4, flags) || !get16(bytes, at + 6, reference) || !get32(bytes, at + 8, offset)) {
-			return truncated(Section::Fields);
+		std::vector<Field> &fields = fresh->fields;
+		fields.reserve(field_count);
+		for (size_t i = 0; i < field_count; ++i) {
+			const size_t at = tables->fields + i * 16;
+			uint32_t hash, offset;
+			uint16_t flags, reference;
+			if (!get32(bytes, at, hash) || !get16(bytes, at + 4, flags) || !get16(bytes, at + 6, reference) || !get32(bytes, at + 8, offset)) {
+				return truncated(Section::Fields);
+			}
+			const NameEntry *name = resolve_name(hash);
+			if (name == nullptr) {
+				return unknown_name(hash);
+			}
+			fields.push_back(Field{ name->start, name->end, hash, static_cast<uint8_t>((flags >> 4) & 0x1F), reference, static_cast<int32_t>(offset) });
 		}
-		const NameEntry *name = resolve_name(hash);
-		if (name == nullptr) {
-			return unknown_name(hash);
-		}
-		p.fields_.push_back(Field{ name->start, name->end, hash, static_cast<uint8_t>((flags >> 4) & 0x1F), reference, static_cast<int32_t>(offset) });
-	}
+		p.fields_ = fields;
 
-	p.complexes_.reserve(complex_count);
-	for (size_t i = 0; i < complex_count; ++i) {
-		const size_t at = tables->complexes + i * 16;
-		uint32_t hash, field_start;
-		uint16_t flags, size;
-		if (!get32(bytes, at, hash) || !get32(bytes, at + 4, field_start) || at + 8 >= bytes.size() || !get16(bytes, at + 10, flags) ||
-				!get16(bytes, at + 12, size)) {
-			return truncated(Section::Complexes);
+		std::vector<Complex> &complexes = fresh->complexes;
+		complexes.reserve(complex_count);
+		for (size_t i = 0; i < complex_count; ++i) {
+			const size_t at = tables->complexes + i * 16;
+			uint32_t hash, field_start;
+			uint16_t flags, size;
+			if (!get32(bytes, at, hash) || !get32(bytes, at + 4, field_start) || at + 8 >= bytes.size() || !get16(bytes, at + 10, flags) ||
+					!get16(bytes, at + 12, size)) {
+				return truncated(Section::Complexes);
+			}
+			const uint8_t count = bytes[at + 8];
+			const uint64_t field_end = uint64_t(field_start) + count;
+			if (field_end > fields.size()) {
+				return bad_complex(static_cast<uint32_t>(i));
+			}
+			const NameEntry *name = resolve_name(hash);
+			if (name == nullptr) {
+				return unknown_name(hash);
+			}
+			complexes.push_back(Complex{ name->start, name->end, hash, field_start, static_cast<uint32_t>(field_end),
+					static_cast<uint8_t>((flags >> 4) & 0x1F), size, std::nullopt });
 		}
-		const uint8_t count = bytes[at + 8];
-		const uint64_t field_end = uint64_t(field_start) + count;
-		if (field_end > p.fields_.size()) {
-			return bad_complex(static_cast<uint32_t>(i));
-		}
-		const NameEntry *name = resolve_name(hash);
-		if (name == nullptr) {
-			return unknown_name(hash);
-		}
-		p.complexes_.push_back(Complex{ name->start, name->end, hash, field_start, static_cast<uint32_t>(field_end),
-				static_cast<uint8_t>((flags >> 4) & 0x1F), size, std::nullopt });
-	}
+		p.complexes_ = complexes;
+	} // fresh
 
 	auto read_triples = [&](size_t p_at, uint32_t p_count, Section p_section, std::vector<std::array<uint32_t, 3>> &r_out) -> Status {
 		r_out.reserve(p_count);
@@ -331,6 +514,14 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 	std::vector<std::array<uint32_t, 3>> instance_repeaters, array_repeaters;
 	BF3_TRY(read_triples(tables->instance_repeaters, instance_repeater_count, Section::InstanceRepeaters, instance_repeaters));
 	BF3_TRY(read_triples(tables->array_repeaters, array_count, Section::ArrayRepeaters, array_repeaters));
+	{
+		// Every instance takes at least its 16-byte GUID of the instance payload, which bounds the reservation.
+		uint64_t declared = 0;
+		for (const std::array<uint32_t, 3> &r : instance_repeaters) {
+			declared += r[1];
+		}
+		p.instances_.reserve(static_cast<size_t>(std::min<uint64_t>(declared, instance_payload_len / 16)));
+	}
 
 	const size_t strings_at = meta_size;
 	if (strings_at + uint64_t(strings_len) > bytes.size()) {
@@ -352,6 +543,7 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 		p.string_ends_.push_back(static_cast<uint32_t>(found));
 		at = found + 1;
 	}
+	p.string_ends_.shrink_to_fit();
 
 	const size_t payload_at = strings_at + strings_len;
 	const uint64_t payload_end = uint64_t(payload_at) + instance_payload_len;
@@ -360,8 +552,16 @@ Result<EbxPartition> EbxPartition::parse(std::vector<uint8_t> p_bytes) {
 	}
 
 	p.arrays_.reserve(array_repeaters.size());
-	BF3_TRY(p.link_complexes());
-	BF3_TRY(p.build_lookups());
+	if (fresh) {
+		BF3_TRY(p.link_complexes());
+		BF3_TRY(p.build_lookups());
+		fresh->lookups.shrink_to_fit();
+		fresh->enumerators.shrink_to_fit();
+		fresh->counts = layout_counts;
+		fresh->key.assign(layout_key.begin(), layout_key.end());
+		fresh->hash = layout_hash;
+		p.adopt(EbxTypeIntern::insert(std::move(fresh)));
+	}
 
 	size_t at = payload_at;
 	for (const auto &[internal, count, complex] : instance_repeaters) {
@@ -467,7 +667,7 @@ Status EbxPartition::link_complexes() {
 				if (!base) {
 					return base.error();
 				}
-				complexes_[complex].base = *base;
+				building_->complexes[complex].base = *base;
 				break;
 			}
 			case kArray: {
@@ -499,25 +699,28 @@ Status EbxPartition::link_complexes() {
 Status EbxPartition::build_lookups() {
 	// Every chain ends within kBaseDepth types (link_complexes). A type's table is its base type's,
 	// shifted by the base's offset, merged with its own fields, so types are built base first.
+	std::vector<Complex> &complexes = building_->complexes;
+	std::vector<Lookup> &lookups = building_->lookups;
+	std::vector<std::pair<int32_t, uint32_t>> &enumerators = building_->enumerators;
 	std::array<std::vector<uint32_t>, kBaseDepth + 1> by_depth;
-	for (uint32_t complex = 0; complex < complexes_.size(); ++complex) {
-		if (complexes_[complex].code == kEnum) {
+	for (uint32_t complex = 0; complex < complexes.size(); ++complex) {
+		if (complexes[complex].code == kEnum) {
 			// Enumerators by value, then declaration order: a value names its first enumerator.
-			const Complex &desc = complexes_[complex];
-			complexes_[complex].lookup_start = static_cast<uint32_t>(enumerators_.size());
+			const Complex &desc = complexes[complex];
+			complexes[complex].lookup_start = static_cast<uint32_t>(enumerators.size());
 			for (uint32_t field = desc.field_start; field < desc.field_end; ++field) {
-				enumerators_.emplace_back(fields_[field].offset, field);
+				enumerators.emplace_back(fields_[field].offset, field);
 			}
-			std::sort(enumerators_.begin() + desc.lookup_start, enumerators_.end());
-			complexes_[complex].lookup_end = static_cast<uint32_t>(enumerators_.size());
+			std::sort(enumerators.begin() + desc.lookup_start, enumerators.end());
+			complexes[complex].lookup_end = static_cast<uint32_t>(enumerators.size());
 			continue;
 		}
-		if (complexes_[complex].code != kClass && complexes_[complex].code != kValueType) {
+		if (complexes[complex].code != kClass && complexes[complex].code != kValueType) {
 			continue;
 		}
 		size_t chain = 0, depth = 0;
-		for (std::optional<uint32_t> at = complex; at && depth < kBaseDepth; at = complexes_[*at].base) {
-			chain += complexes_[*at].field_end - complexes_[*at].field_start;
+		for (std::optional<uint32_t> at = complex; at && depth < kBaseDepth; at = complexes[*at].base) {
+			chain += complexes[*at].field_end - complexes[*at].field_start;
 			++depth;
 		}
 		if (chain > kChainFields) {
@@ -526,11 +729,11 @@ Status EbxPartition::build_lookups() {
 		}
 		by_depth[depth].push_back(complex);
 	}
-	const size_t limit = kLookupsPerDescriptor * (fields_.size() + complexes_.size()) + kLookupSlack;
+	const size_t limit = kLookupsPerDescriptor * (fields_.size() + complexes.size()) + kLookupSlack;
 	std::vector<Lookup> own, merged;
 	for (const std::vector<uint32_t> &level : by_depth) {
 		for (const uint32_t complex : level) {
-			const Complex &desc = complexes_[complex];
+			const Complex &desc = complexes[complex];
 			own.clear();
 			uint32_t base_offset = 0;
 			for (uint32_t field = desc.field_start; field < desc.field_end; ++field) {
@@ -545,30 +748,32 @@ Status EbxPartition::build_lookups() {
 			std::sort(own.begin(), own.end(), [](const Lookup &a, const Lookup &b) { return a.hash != b.hash ? a.hash < b.hash : a.field < b.field; });
 			own.erase(std::unique(own.begin(), own.end(), [](const Lookup &a, const Lookup &b) { return a.hash == b.hash; }), own.end());
 			merged.clear();
-			size_t i = 0, j = desc.base ? complexes_[*desc.base].lookup_start : 0;
-			const size_t base_end = desc.base ? complexes_[*desc.base].lookup_end : 0;
+			size_t i = 0, j = desc.base ? complexes[*desc.base].lookup_start : 0;
+			const size_t base_end = desc.base ? complexes[*desc.base].lookup_end : 0;
 			while (i < own.size() || j < base_end) {
-				if (j < base_end && (i == own.size() || lookups_[j].hash < own[i].hash)) {
-					const Lookup &b = lookups_[j++];
+				if (j < base_end && (i == own.size() || lookups[j].hash < own[i].hash)) {
+					const Lookup &b = lookups[j++];
 					merged.push_back(Lookup{ b.hash, b.field, b.offset + base_offset, b.first_field, b.first_offset + base_offset });
-				} else if (j < base_end && lookups_[j].hash == own[i].hash) {
+				} else if (j < base_end && lookups[j].hash == own[i].hash) {
 					// Redeclared: get() takes this type's field, fields() order the base type's.
-					const Lookup &b = lookups_[j++];
+					const Lookup &b = lookups[j++];
 					merged.push_back(Lookup{ own[i].hash, own[i].field, own[i].offset, b.first_field, b.first_offset + base_offset });
 					++i;
 				} else {
 					merged.push_back(own[i++]);
 				}
 			}
-			if (lookups_.size() + merged.size() > limit) {
+			if (lookups.size() + merged.size() > limit) {
 				return make_error("type layouts need more than " + std::to_string(limit) + " field lookups (" + std::to_string(fields_.size()) +
-						" field and " + std::to_string(complexes_.size()) + " type descriptors)");
+						" field and " + std::to_string(complexes.size()) + " type descriptors)");
 			}
-			complexes_[complex].lookup_start = static_cast<uint32_t>(lookups_.size());
-			lookups_.insert(lookups_.end(), merged.begin(), merged.end());
-			complexes_[complex].lookup_end = static_cast<uint32_t>(lookups_.size());
+			complexes[complex].lookup_start = static_cast<uint32_t>(lookups.size());
+			lookups.insert(lookups.end(), merged.begin(), merged.end());
+			complexes[complex].lookup_end = static_cast<uint32_t>(lookups.size());
 		}
 	}
+	lookups_ = lookups;
+	enumerators_ = enumerators;
 	return Status::success();
 }
 
@@ -635,7 +840,7 @@ Status EbxPartition::check_element(uint32_t p_complex, uint32_t p_member) {
 		}
 		case kEnum:
 			// An enum element names no enum type (its reference is 0), so it has no names.
-			fields_[p_member].reference = kNoType;
+			building_->fields[p_member].reference = kNoType;
 			return Status::success();
 		default:
 			if (scalar_size(desc.code)) {
@@ -799,6 +1004,26 @@ size_t EbxPartition::duplicate_instance_guids() const {
 		n += instances_[by_guid_[i]].guid == instances_[by_guid_[i - 1]].guid ? 1 : 0;
 	}
 	return n;
+}
+
+EbxPartition::MemoryUse EbxPartition::memory_use() const {
+	MemoryUse m;
+	auto add = [&](size_t &r_part, const auto &p_vector) {
+		using Element = typename std::decay_t<decltype(p_vector)>::value_type;
+		r_part += p_vector.capacity() * sizeof(Element);
+		m.slack += (p_vector.capacity() - p_vector.size()) * sizeof(Element);
+		m.blocks += p_vector.capacity() != 0 ? 1 : 0;
+	};
+	add(m.bytes, bytes_);
+	add(m.strings, string_ends_);
+	add(m.instances, instances_);
+	add(m.instances, arrays_);
+	add(m.instances, by_guid_);
+	if (types_) {
+		m.types = types_->heap_bytes();
+		m.types_id = types_.get();
+	}
+	return m;
 }
 
 std::optional<EbxInstance> EbxPartition::resolve(const EbxRef &p_ref) const {

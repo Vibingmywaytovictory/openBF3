@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -43,6 +44,10 @@ namespace bf3::core {
 // The hash EBX uses for type, field and enumerator names and connection field ids:
 // h = 5381; h = (h * 33) ^ byte, case-sensitive (unlike asset_name_hash).
 uint32_t ebx_name_hash(std::string_view p_name);
+
+// H hygiene: the distinct partition layouts whose shared type tables are alive in the process (see
+// EbxPartition::TypeTables); 0 once every partition is gone.
+size_t ebx_live_type_layouts();
 
 namespace ebx_code {
 inline constexpr uint8_t kVoid = 0;
@@ -373,6 +378,18 @@ public:
 	size_t array_count() const { return arrays_.size(); }
 	// Instances sharing a GUID with another instance (lookup by GUID then picks one of them).
 	size_t duplicate_instance_guids() const;
+	// Heap bytes the partition holds, by part (H hygiene diagnostics: bf3dump ebxload); vector capacities. The
+	// type tables are shared by every partition of the same descriptor layout: count `types` once per `types_id`.
+	struct MemoryUse {
+		size_t bytes = 0; // the kept partition bytes (the imports are read in place)
+		size_t strings = 0; // the string table's NUL index
+		size_t instances = 0; // instance and array entries, the GUID order
+		size_t slack = 0; // capacity minus size of the partition's own vectors
+		size_t blocks = 0; // the partition's own heap allocations
+		size_t types = 0; // field and type descriptors, lookup tables, enumerators and the layout key
+		const void *types_id = nullptr;
+	};
+	MemoryUse memory_use() const;
 
 	// --- descriptor access used by the value types ---
 	struct Field {
@@ -418,8 +435,8 @@ public:
 		uint32_t complex;
 	};
 
-	const std::vector<Field> &field_descs() const { return fields_; }
-	const std::vector<Complex> &complex_descs() const { return complexes_; }
+	const std::vector<Field> &field_descs() const;
+	const std::vector<Complex> &complex_descs() const;
 	const std::vector<InstanceEntry> &instance_entries() const { return instances_; }
 	const std::vector<ArrayEntry> &array_entries() const { return arrays_; }
 	std::span<const uint8_t> bytes() const { return bytes_; }
@@ -446,10 +463,17 @@ public:
 	static constexpr size_t kLookupsPerDescriptor = 4;
 	static constexpr size_t kLookupSlack = 4096;
 
+	// H hygiene (memory): the tables derived from the name table and the field and type descriptors alone. They are
+	// interned process-wide by those bytes (ebx.cpp), so partitions of one layout share one copy (retail @all-mp:
+	// 2,533 layouts for 50,486 partitions) and a partition whose layout is already loaded skips building them.
+	struct TypeTables;
+
 private:
 	EbxPartition() = default;
 	friend class EbxValidator;
+	friend class EbxTypeIntern;
 
+	void adopt(std::shared_ptr<const TypeTables> p_tables);
 	Status link_complexes();
 	Status build_lookups();
 	Result<std::optional<uint32_t>> check_members(uint32_t p_complex) const;
@@ -463,16 +487,19 @@ private:
 	std::vector<uint8_t> bytes_;
 	Guid guid_;
 	uint32_t primary_ = 0;
-	std::vector<EbxImport> imports_;
+	std::span<const EbxImport> imports_; // the import table read in place from bytes_ (Guid is 16 raw bytes)
 	size_t names_at_ = 0; // name table: bytes_[names_at_, names_at_ + names_len_)
 	size_t names_len_ = 0;
 	size_t strings_at_ = 0; // string table
 	size_t strings_len_ = 0;
 	std::vector<uint32_t> string_ends_; // offsets of the string table's NULs, ascending
-	std::vector<Field> fields_;
-	std::vector<Complex> complexes_;
-	std::vector<Lookup> lookups_; // per class / value type, sorted by hash (Complex::lookup_start)
-	std::vector<std::pair<int32_t, uint32_t>> enumerators_; // per enum: (value, field), sorted
+	std::shared_ptr<const TypeTables> types_;
+	TypeTables *building_ = nullptr; // parse only, on a layout not interned yet: the tables types_ will hold
+	// Views of types_ (stable: the tables never change once shared).
+	std::span<const Field> fields_;
+	std::span<const Complex> complexes_;
+	std::span<const Lookup> lookups_; // per class / value type, sorted by hash (Complex::lookup_start)
+	std::span<const std::pair<int32_t, uint32_t>> enumerators_; // per enum: (value, field), sorted
 	std::vector<InstanceEntry> instances_;
 	std::vector<ArrayEntry> arrays_;
 	std::vector<uint32_t> by_guid_; // instance indices sorted by GUID

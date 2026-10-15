@@ -354,3 +354,15 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_hy_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(host.registry PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hy_cl_dir}")
 endif()
+# H hygiene: tools.ebx_memory, the EbxLibrary memory gate (tests/ebx_memory.cmake): `bf3dump ebxload @all-mp` peak
+# working set <= 760 MiB and Metro's <= 145 MiB, every partition parsed; 77 = skipped without an install; report-only
+# under asan. RUN_SERIAL so a ctest -j neighbour cannot skew the peak.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME tools.ebx_memory COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/ebx_memory.cmake)
+    set_tests_properties(tools.ebx_memory PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+    if(OPENBF3_ASAN)
+        get_filename_component(_openbf3_hymem_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        set_tests_properties(tools.ebx_memory PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hymem_cl_dir}")
+    endif()
+endif()

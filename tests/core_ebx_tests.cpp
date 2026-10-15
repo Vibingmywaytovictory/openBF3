@@ -12,11 +12,14 @@
 #include "test_support.h"
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <iterator>
 #include <memory>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace bf3::core;
@@ -396,6 +399,80 @@ TEST_SUITE("containers") {
 		Result<EbxPartition> p = EbxPartition::parse(b);
 		REQUIRE(p.ok());
 		CHECK(p->primary().get("Name")->as_str() == std::optional<std::string_view>("ello"));
+	}
+
+	// H hygiene: the type tables are interned by the descriptor bytes.
+	TEST_CASE("ebx: partitions of one layout share their type tables; the last one frees them") {
+		const size_t live_before = ebx_live_type_layouts();
+		SynthLayout l{};
+		const Bytes good = build_partition(kPartition, kThing0, kThing1, &l);
+		Bytes moved = good;
+		put32(moved, l.fields_at + 2 * 16 + 8, 44); // Thing.Value at 44 (inside the type, over Pos.z): another layout
+		{
+			Result<EbxPartition> a = EbxPartition::parse(good);
+			Result<EbxPartition> b = EbxPartition::parse(build_partition(kOtherPartition, kOtherInstance, kThing1));
+			Result<EbxPartition> c = EbxPartition::parse(moved);
+			REQUIRE(a.ok());
+			REQUIRE(b.ok());
+			REQUIRE(c.ok());
+			CHECK(a->memory_use().types_id != nullptr);
+			CHECK(a->memory_use().types_id == b->memory_use().types_id);
+			CHECK(&a->field_descs() == &b->field_descs());
+			CHECK(a->memory_use().types_id != c->memory_use().types_id);
+			CHECK(ebx_live_type_layouts() == live_before + 2);
+			CHECK(a->primary().get("Value")->as_f32() == b->primary().get("Value")->as_f32());
+			CHECK(c->primary().get("Value").has_value()); // read at 44 now
+			// A layout error is still found while an equal-looking good layout is alive.
+			Bytes bad = good;
+			put16(bad, l.fields_at + 2 * 16 + 4, static_cast<uint16_t>(23 << 4));
+			CHECK(parse_error(bad) == "field `Thing.Value` has unsupported type code 23");
+			CHECK(ebx_live_type_layouts() == live_before + 2);
+			// Moving a partition keeps its views of the shared tables.
+			EbxPartition kept = std::move(*a);
+			CHECK(kept.primary().get("Name")->as_str() == std::optional<std::string_view>("hello"));
+			CHECK(kept.imports().size() == 1);
+			CHECK(kept.imports()[0].partition == kOtherPartition);
+		}
+		CHECK(ebx_live_type_layouts() == live_before);
+	}
+
+	TEST_CASE("ebx: 8 threads parsing two layouts at once agree on one copy per layout") {
+		const size_t live_before = ebx_live_type_layouts();
+		SynthLayout l{};
+		const Bytes good = build_partition(kPartition, kThing0, kThing1, &l);
+		Bytes moved = good;
+		put32(moved, l.fields_at + 2 * 16 + 8, 44);
+		std::vector<std::vector<EbxPartition>> kept(8);
+		std::vector<std::thread> threads;
+		std::atomic<int> failures{ 0 };
+		for (int t = 0; t < 8; ++t) {
+			threads.emplace_back([&, t] {
+				for (int i = 0; i < 200; ++i) {
+					Result<EbxPartition> p = EbxPartition::parse(((i + t) % 2) ? good : moved);
+					if (!p.ok()) {
+						failures.fetch_add(1);
+						continue;
+					}
+					if (i % 4 == 0) {
+						kept[t].push_back(std::move(*p)); // some live on, the rest go at once
+					}
+				}
+			});
+		}
+		for (std::thread &t : threads) {
+			t.join();
+		}
+		CHECK(failures.load() == 0);
+		std::set<const void *> ids;
+		for (const std::vector<EbxPartition> &v : kept) {
+			for (const EbxPartition &p : v) {
+				ids.insert(p.memory_use().types_id);
+			}
+		}
+		CHECK(ids.size() == 2);
+		CHECK(ebx_live_type_layouts() == live_before + 2);
+		kept.clear();
+		CHECK(ebx_live_type_layouts() == live_before);
 	}
 }
 

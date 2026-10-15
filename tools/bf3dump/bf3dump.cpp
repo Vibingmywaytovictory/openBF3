@@ -28,6 +28,7 @@
 //                              partitions are listed but not expanded
 //   ebxload <sb> [--walk]      bulk-parse every partition (timing, failures, bytes); --walk also
 //                              decodes every value of every instance
+//   ebxload <sb> --lookups     (H hygiene) then get() by name of every field of every instance, 3 passes
 //   numcheck                   self-check of the probe's JSON number text (no install needed)
 // Weapons (bf3_core gameplay readers; README "Weapon tables"):
 //   weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]
@@ -487,6 +488,7 @@ void usage() {
 			"  types <sb[,sb..]|@all-mp> <Type>...\n"
 			"  dump <sb[,sb..]|@all-mp> <out_dir> <depth> <follow> <root>...\n"
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
+			"  ebxload <sb[,sb..]|@all-mp> --lookups\n" // H hygiene
 			"  numcheck\n"
 			"  weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]\n"
 			"  weapons [--level <sb>]\n"
@@ -570,6 +572,10 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "ebxload" && (rest.size() == 1 || (rest.size() == 2 && rest[1] == "--walk"))) {
 		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], rest.size() == 2);
+	}
+	// H hygiene: times get() by name of every field of every instance (the EBX lookup tables).
+	if (cmd == "ebxload" && rest.size() == 2 && rest[1] == "--lookups") {
+		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], false, true);
 	}
 	if (cmd == "weapon" && !rest.empty()) {
 		return bf3dump::cmd_weapon(ebx_ctx, rest);
