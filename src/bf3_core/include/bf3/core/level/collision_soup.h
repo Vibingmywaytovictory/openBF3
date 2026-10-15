@@ -244,6 +244,17 @@ inline constexpr uint32_t kCollisionSoupVersion = 1;
 // Retail Metro TDM holds 1.11 M triangles (0.17 M of them terrain); a soup past this fails (each triangle costs 48 bytes).
 inline constexpr size_t kMaxSoupTriangles = size_t(1) << 25;
 
+// One install entry the soup read (M1 T1, docs/design/m1.md §5.5 coverage check): the EBX partitions of the
+// level root, of every collision placement's entity (and its reference) and of every terrain object and asset;
+// every Havok res (objects and groups), terrain res and streaming tree; every terrain chunk asked for.
+struct SoupSource {
+	enum class Kind : uint8_t { Ebx = 0, Res = 1, Chunk = 2 };
+	Kind kind = Kind::Ebx;
+	std::string name; // Ebx / Res: lowercase asset key
+	Guid id; // Chunk
+	auto operator<=>(const SoupSource &) const = default;
+};
+
 struct CollisionSoup {
 	std::vector<SoupPlacement> placements; // collision_placements order (groups, then objects)
 	std::vector<SoupTerrain> terrains; // TerrainEntityData objects, object order
@@ -270,6 +281,7 @@ struct CollisionSoup {
 	double seconds_triangles = 0.0; // leaves, triangles, classes, hashes (all cores)
 	double seconds_terrain = 0.0; // height grids and terrain triangles
 	double seconds_tiles = 0.0;
+	std::vector<SoupSource> sources; // M1 T1: what the build read, sorted and unique (see SoupSource)
 };
 
 // Builds the soup of a traversed level (p_world from World::traverse(p_level)). Reads the install

@@ -207,6 +207,12 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/level/source_digest.h
 )
 
+# M1 T1 (world; docs/design/m1.md §5.5, §15): the level source digest (the "jolt-world" cache key). The
+# collision_soup.{h,cpp} edit (kCollisionSoupVersion, CollisionSoup::sources) is in place in the soup block.
+target_sources(bf3_core PRIVATE
+    src/level/source_digest.cpp
+)
+
 # M1 T2 (motor; docs/design/m1.md §10.1): the AlternateSpawn points and CharacterSpawnReference spawners of a level.
 target_sources(bf3_core PRIVATE
     src/level/spawn_points.cpp
