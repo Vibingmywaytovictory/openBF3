@@ -35,6 +35,7 @@ void WalkerStats::add(const WalkerStats &p_other) {
 	sprint_ticks += p_other.sprint_ticks;
 	crouch_ticks += p_other.crouch_ticks;
 	metres += p_other.metres;
+	starts_outside_main += p_other.starts_outside_main;
 }
 
 struct PathService::Impl {

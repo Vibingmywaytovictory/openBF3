@@ -42,6 +42,9 @@ namespace bf3::core::level {
 
 inline constexpr size_t kMaxCombatAreaPoints = 4096;
 inline constexpr size_t kMaxCombatAreas = 256;
+// combat_area_tiles' work bound: candidate tiles x polygon edge samples, summed over the areas (a retail area is a
+// few hundred tiles x a few hundred samples, about 10^5; review of revision 2: the tile test is tiles x edges).
+inline constexpr uint64_t kMaxCombatAreaTileWork = uint64_t(1) << 26;
 
 struct CombatAreaDef {
 	uint32_t trigger = 0; // World::objects index of the CombatAreaTriggerEntityData
@@ -69,16 +72,29 @@ struct ModeAreas {
 Result<ModeAreas> read_mode_areas(const World &p_world);
 
 // The 64 m tiles (the soup's tile key: floor(x / 64), floor(z / 64)) that any polygon of p_areas, grown by p_margin
-// metres, touches; sorted by (x, z), unique.
-std::vector<std::array<int32_t, 2>> combat_area_tiles(std::span<const CombatAreaDef> p_areas, float p_margin);
+// metres, touches; sorted by (x, z), unique. The work (each area's candidate tiles x its edge samples) is summed
+// before the loop and refused past kMaxCombatAreaTileWork, so a hostile polygon fails instead of running for hours.
+Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const CombatAreaDef> p_areas, float p_margin);
+
+// The tiles within p_margin metres of a point (the square [x - m, x + m] x [z - m, z + m]: at most 4 tiles at the
+// default 32 m margin); non-finite points give none.
+std::vector<std::array<int32_t, 2>> point_tiles(const Vec3 &p_point, float p_margin);
 
 // The union of combat_area_tiles over every MP mode of a level (gameplay level_modes: MP_Subway, MP_007 and MP_018
 // list 7 each), each mode loaded and traversed on the calling thread (about 0.2-0.4 s per mode), plus each mode's
 // areas for the reports. The plan bakes navigation over this union so that the modes share tiles (§3.6).
+// The region also takes point_tiles(p, p_margin) of every objective (flags, HQs, MCOMs) and every AlternateSpawn
+// point (read_level_spawns) of every mode, so a gameplay point outside every combat polygon is still baked and G2
+// judges it for a nav reason, never for a region reason (review of revision 2; Caspian CQL/RL/TDM points checked
+// inside the polygons, the other modes are counted here). The same tiles are the terrain cover (docs §5.2).
 struct LevelCombatTiles {
 	std::vector<std::string> modes;
 	std::vector<ModeAreas> areas; // per mode
-	std::vector<std::array<int32_t, 2>> tiles; // union, sorted, unique
+	std::vector<std::array<int32_t, 2>> tiles; // union of the polygon tiles and the point tiles, sorted, unique
+	size_t polygon_tiles = 0; // tiles the combat polygons (+ margin) touch, before the points
+	size_t point_only_tiles = 0; // tiles only a point added (reported; 0 expected on retail data)
+	size_t points = 0; // objectives + spawn points over every mode
+	size_t points_outside_areas = 0; // of those, outside every combat polygon of their own mode (reported)
 	double seconds = 0.0;
 };
 Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_install, std::string_view p_level_id, float p_margin);

@@ -91,6 +91,9 @@ struct WalkerBrain::Impl {
 	Tick drop_tick = 0;
 
 	bool off_mesh = false;
+	// The component goals are drawn from: the main one, or the bot's own when a path request found its start poly
+	// outside main (docs §7 "Goals"; review of revision 2). UINT32_MAX = main.
+	uint32_t home = UINT32_MAX;
 	bool back_target_valid = false;
 	Vec3 back_target{};
 
@@ -126,7 +129,9 @@ struct WalkerBrain::Impl {
 	}
 
 	bool pick_goal(const WalkerView &p_view, const Vec3 &p_position) {
-		const bool want_objective = !p_view.objectives.empty() && unit(rng) < params.objective_share;
+		const uint32_t component = home == UINT32_MAX ? p_view.main_component : home;
+		const bool in_main = component == p_view.main_component;
+		const bool want_objective = in_main && !p_view.objectives.empty() && unit(rng) < params.objective_share;
 		BotGoal g;
 		bool found = false;
 		if (want_objective) {
@@ -138,7 +143,7 @@ struct WalkerBrain::Impl {
 			for (int attempt = 0; attempt < 8 && !found; ++attempt) {
 				NavPolyRef poly = 0;
 				Vec3 point{};
-				if (!p_view.query->random_point(rng, *p_view.components, p_view.main_component, &poly, &point)) {
+				if (!p_view.query->random_point(rng, *p_view.components, component, &poly, &point)) {
 					break;
 				}
 				g = BotGoal();
@@ -148,7 +153,7 @@ struct WalkerBrain::Impl {
 				found = horizontal(point, p_position) >= params.goal_min_distance || attempt == 7;
 			}
 		}
-		if (!found && !p_view.objectives.empty()) {
+		if (!found && in_main && !p_view.objectives.empty()) {
 			g = p_view.objectives[size_t(splitmix64(rng) % p_view.objectives.size())];
 			found = horizontal(g.position, p_position) > g.arrive_radius;
 		}
@@ -298,6 +303,18 @@ struct WalkerBrain::Impl {
 			}
 			off_mesh = false;
 			back_target_valid = false;
+			if (p_view.components != nullptr) {
+				const uint32_t c = nav_poly_component(query.world(), *p_view.components, start);
+				const uint32_t want = home == UINT32_MAX ? p_view.main_component : home;
+				if (c != UINT32_MAX && c != want) {
+					// Outside the goals' component (a spawn the filter could not avoid, or a fall): goals from here on
+					// come from the bot's own component, so it keeps walking instead of abandoning goal after goal.
+					++stats.starts_outside_main;
+					home = c == p_view.main_component ? UINT32_MAX : c;
+					forget_goal();
+					return;
+				}
+			}
 			need_path = false;
 			pending = true;
 			++stats.path_requests;
@@ -435,6 +452,7 @@ Command WalkerBrain::command(const WalkerView &p_view) {
 	if (self->life != m.life) {
 		m.life = self->life;
 		m.forget_goal();
+		m.home = UINT32_MAX; // a new life spawns on the main component (bot spawn filter, docs §8)
 		m.have_last = false;
 		m.yaw_set = false;
 		m.off_mesh = false;

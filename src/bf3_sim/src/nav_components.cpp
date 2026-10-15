@@ -88,8 +88,15 @@ NavComponents nav_components(const NavWorld &p_world) {
 			}
 		}
 	}
+	// Weak ids, compact in poly order (a root's index is the smallest of its set, so roots come first).
+	out.weak_component.assign(n, 0);
 	for (uint32_t i = 0; i < n; ++i) {
-		out.weak_count += find(parent, i) == i ? 1 : 0;
+		const uint32_t r = find(parent, i);
+		if (r == i) {
+			out.weak_component[i] = uint32_t(out.weak_count++);
+		} else {
+			out.weak_component[i] = out.weak_component[r];
+		}
 	}
 
 	// Iterative Tarjan.

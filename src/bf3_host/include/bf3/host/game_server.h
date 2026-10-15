@@ -53,6 +53,21 @@ namespace bf3::host {
 // S1 (docs/design/s1.md §8): GameServerConfig::bots; defined in bot_fill.h (kept out of this header).
 struct BotFillConfig;
 
+// S1 (docs/design/s1.md §6.1): the parts of ONE tick, wall milliseconds on the server thread. Every field is
+// assigned on every tick and is 0 when its step did not run (encode_ms on the ticks between snapshots, rules_ms
+// when nothing spawned is the step's bookkeeping only), so per-tick sums and window means are exact (review of
+// revision 2). tick_ms = the whole GameServer::tick; commands + sources + step + rules + encode <= tick_ms, the rest
+// is glue. POD, read by the bench after every tick through GameServer::last_tick_times() (no copy of the slot list).
+struct GameServerTickTimes {
+	sim::Tick tick = 0; // the server tick these times belong to
+	double tick_ms = 0, commands_ms = 0, sources_ms = 0, step_ms = 0, rules_ms = 0, encode_ms = 0;
+	double paths_ms = 0; // of sources_ms: PathService::run (bots only)
+	uint32_t motor_steps = 0; // this tick
+	uint32_t spawns = 0; // spawns (settles) this tick
+	uint32_t snapshots = 0; // encoded this tick (0 between snapshots)
+	uint64_t collision_queries = 0; // the server CollisionWorld's query_count() delta over this tick
+};
+
 // A server-side command source (bots later, M1's scripted walkers and spawn-sweep dummies now): asked once per
 // tick for the command of its slot. Runs on the server thread.
 class CommandSource {
@@ -73,7 +88,9 @@ struct GameServerConfig {
 	bool dev_commands = false; // accept Debug requests (tests, --m1-check)
 	uint64_t seed = 1; // spawn choice and walker scripts
 	// S1 (docs/design/s1.md §6, §8): headless walker bots (nav + walker brain, bot_fill.h), added in init() as
-	// server-side soldiers through the same CommandSource path as the scripted walkers. Null = none.
+	// server-side soldiers through the same CommandSource path as the scripted walkers. Null = none. With
+	// BotFillConfig::spawn_in_main a bot slot's spawn() chooses among BotLevel::spawns.points (main nav component)
+	// instead of SharedLevel::spawns; its SlotStats spawn index then refers to that list.
 	std::shared_ptr<const BotFillConfig> bots;
 };
 
@@ -121,6 +138,9 @@ struct GameServerStats {
 	// their nav queries and path searches, scripted walkers, sweep dummies) + last_step_ms (one motor step per live
 	// soldier) + last_rules_ms (spawns with their settle, dev requests) + last_encode_ms (snapshots), and
 	// last_tick_ms is the whole GameServer::tick (datagram receive is outside: ServerHost hands datagrams in before).
+	// These S1 fields copy GameServer::last_tick_times() of the last tick. M1's last_encode_ms keeps its M1 meaning
+	// (the last encode, which on the ticks between snapshots is the previous tick's); the per-tick encode, 0 on
+	// those ticks, is GameServerTickTimes::encode_ms (review of revision 2).
 	double last_tick_ms = 0;
 	double last_commands_ms = 0;
 	double last_sources_ms = 0;
@@ -149,6 +169,9 @@ public:
 	// A server-side soldier (bot / walker): takes a free slot, spawns at choose_spawn. Returns the slot or -1.
 	int add_local_soldier(std::unique_ptr<CommandSource> p_source, int p_team);
 	GameServerStats stats() const; // server thread; ServerHost publishes a copy for other threads
+	// S1 (docs/design/s1.md §6.1): the parts of the last tick, by reference (no copy of the 128-entry slot list that
+	// stats() makes); server thread, valid until the next tick.
+	const GameServerTickTimes &last_tick_times() const;
 	// The authoritative state of a slot (server thread; tests).
 	const sim::SoldierState *soldier(uint32_t p_slot) const;
 

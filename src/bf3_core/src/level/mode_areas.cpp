@@ -6,6 +6,7 @@
 
 #include "bf3/core/install.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/level/spawn_points.h"
 
 #include <algorithm>
 #include <chrono>
@@ -19,6 +20,28 @@ namespace bf3::core::level {
 namespace {
 
 constexpr uint32_t kMaxInterfaceHops = 16; // prefab levels a combat area link may climb (retail: 1)
+
+// Whether (x, z) of p_point lies inside any polygon of p_areas (even-odd rule). No areas: inside.
+bool inside_any(std::span<const CombatAreaDef> p_areas, const Vec3 &p_point) {
+	if (p_areas.empty()) {
+		return true;
+	}
+	for (const CombatAreaDef &a : p_areas) {
+		bool in = false;
+		const size_t n = a.polygon.size();
+		for (size_t i = 0, j = n - 1; n >= 3 && i < n; j = i++) {
+			const float xi = a.polygon[i][0], zi = a.polygon[i][1];
+			const float xj = a.polygon[j][0], zj = a.polygon[j][1];
+			if ((zi > p_point[2]) != (zj > p_point[2]) && p_point[0] < (xj - xi) * (p_point[2] - zi) / (zj - zi) + xi) {
+				in = !in;
+			}
+		}
+		if (in) {
+			return true;
+		}
+	}
+	return false;
+}
 
 double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
@@ -201,10 +224,37 @@ Result<ModeAreas> read_mode_areas(const World &p_world) {
 	return out;
 }
 
-std::vector<std::array<int32_t, 2>> combat_area_tiles(std::span<const CombatAreaDef> p_areas, float p_margin) {
+Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const CombatAreaDef> p_areas, float p_margin) {
 	constexpr float kTile = 64.0f;
 	std::set<std::array<int32_t, 2>> tiles;
 	const float margin = std::isfinite(p_margin) ? std::clamp(p_margin, 0.0f, 1024.0f) : 0.0f;
+	// The work bound first: per area, candidate tiles x (edge samples + the point-in-polygon edges).
+	uint64_t work = 0;
+	for (const CombatAreaDef &a : p_areas) {
+		if (a.polygon.size() < 3) {
+			continue;
+		}
+		float x0 = a.polygon[0][0], x1 = x0, z0 = a.polygon[0][1], z1 = z0;
+		uint64_t samples = 0;
+		for (size_t i = 0, j = a.polygon.size() - 1; i < a.polygon.size(); j = i++) {
+			const std::array<float, 2> &p = a.polygon[i];
+			if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || std::fabs(p[0]) > 1e6f || std::fabs(p[1]) > 1e6f) {
+				return make_error("combat_area_tiles: a polygon point is not finite or beyond 10^6 m");
+			}
+			x0 = std::min(x0, p[0]);
+			x1 = std::max(x1, p[0]);
+			z0 = std::min(z0, p[1]);
+			z1 = std::max(z1, p[1]);
+			const float dx = p[0] - a.polygon[j][0], dz = p[1] - a.polygon[j][1];
+			samples += 2 + uint64_t(std::sqrt(dx * dx + dz * dz) / 2.0f);
+		}
+		const uint64_t nx = uint64_t(std::floor((x1 + margin) / kTile) - std::floor((x0 - margin) / kTile)) + 1;
+		const uint64_t nz = uint64_t(std::floor((z1 + margin) / kTile) - std::floor((z0 - margin) / kTile)) + 1;
+		work += nx * nz * samples;
+		if (work > kMaxCombatAreaTileWork) {
+			return make_error("combat_area_tiles: tiles x edge samples over " + std::to_string(kMaxCombatAreaTileWork));
+		}
+	}
 	for (const CombatAreaDef &a : p_areas) {
 		if (a.polygon.size() < 3) {
 			continue;
@@ -269,6 +319,23 @@ std::vector<std::array<int32_t, 2>> combat_area_tiles(std::span<const CombatArea
 	return std::vector<std::array<int32_t, 2>>(tiles.begin(), tiles.end());
 }
 
+std::vector<std::array<int32_t, 2>> point_tiles(const Vec3 &p_point, float p_margin) {
+	constexpr float kTile = 64.0f;
+	std::vector<std::array<int32_t, 2>> out;
+	if (!std::isfinite(p_point[0]) || !std::isfinite(p_point[2]) || std::fabs(p_point[0]) > 1e6f || std::fabs(p_point[2]) > 1e6f) {
+		return out;
+	}
+	const float m = std::isfinite(p_margin) ? std::clamp(p_margin, 0.0f, 64.0f) : 0.0f;
+	const int32_t tx0 = int32_t(std::floor((p_point[0] - m) / kTile)), tx1 = int32_t(std::floor((p_point[0] + m) / kTile));
+	const int32_t tz0 = int32_t(std::floor((p_point[2] - m) / kTile)), tz1 = int32_t(std::floor((p_point[2] + m) / kTile));
+	for (int32_t tz = tz0; tz <= tz1; ++tz) {
+		for (int32_t tx = tx0; tx <= tx1; ++tx) {
+			out.push_back({ tx, tz });
+		}
+	}
+	return out;
+}
+
 Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_install, std::string_view p_level_id, float p_margin) {
 	if (p_install == nullptr) {
 		return make_error("level_combat_tiles: no install");
@@ -280,6 +347,7 @@ Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_ins
 	}
 	LevelCombatTiles out;
 	std::set<std::array<int32_t, 2>> all;
+	std::set<std::array<int32_t, 2>> point_set;
 	for (const std::string &mode : info->modes) {
 		Result<std::unique_ptr<LoadedLevel>> level = load_level(p_install, p_level_id, mode);
 		if (!level) {
@@ -293,11 +361,39 @@ Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_ins
 		if (!areas) {
 			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, areas.error());
 		}
-		for (const std::array<int32_t, 2> &t : combat_area_tiles(areas->combat_areas, p_margin)) {
+		Result<std::vector<std::array<int32_t, 2>>> tiles = combat_area_tiles(areas->combat_areas, p_margin);
+		if (!tiles) {
+			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, tiles.error());
+		}
+		for (const std::array<int32_t, 2> &t : *tiles) {
 			all.insert(t);
 		}
+		Result<LevelSpawns> spawns = read_level_spawns(**world);
+		if (!spawns) {
+			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode + ": spawns", spawns.error());
+		}
+		std::vector<Vec3> points;
+		for (const ModeObjectiveDef &o : areas->objectives) {
+			points.push_back(o.position);
+		}
+		for (const SpawnPointDef &sp : spawns->points) {
+			points.push_back(sp.transform.trans);
+		}
+		for (const Vec3 &pt : points) {
+			if (!inside_any(areas->combat_areas, pt)) {
+				++out.points_outside_areas;
+			}
+			for (const std::array<int32_t, 2> &t : point_tiles(pt, p_margin)) {
+				point_set.insert(t);
+			}
+		}
+		out.points += points.size();
 		out.modes.push_back(mode);
 		out.areas.push_back(std::move(*areas));
+	}
+	out.polygon_tiles = all.size();
+	for (const std::array<int32_t, 2> &t : point_set) {
+		out.point_only_tiles += all.insert(t).second ? 1 : 0;
 	}
 	out.tiles.assign(all.begin(), all.end());
 	out.seconds = seconds_since(start);

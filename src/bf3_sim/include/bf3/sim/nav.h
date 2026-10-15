@@ -160,7 +160,11 @@ struct NavTileInput {
 	std::vector<uint8_t> layers; // StaticLayer per triangle
 	size_t own_triangles = 0; // of those, filed under this tile by the soup (a count; they are not stored first)
 	size_t far_triangles = 0; // filed under a soup tile outside the 3 x 3 around this one (long triangles)
-	core::Sha256Digest digest{}; // over every input triangle's float bits and layer, in order: the "nav-tile" key
+	// The "nav-tile" key: SHA-256 over the tile key (x, z) first, then every input triangle's float bits and layer,
+	// in order. The tile key is needed and must stay: one large slab can be the whole input of two tiles, and the
+	// baked Detour data carries the tile coordinates (validate_detour_tile checks them against the key's tile), so
+	// two tiles with identical triangles must not share an entry (review of revision 2).
+	core::Sha256Digest digest{};
 };
 
 // The input of p_tiles (sorted, unique) from p_soup with the layers in p_layer_mask (query_mask::kMovement for the
@@ -313,8 +317,16 @@ struct NavComponents {
 	std::vector<double> area; // per component: walkable area in m^2 (ground polys)
 	uint32_t largest = 0; // by area
 	size_t weak_count = 0; // weakly connected components (links both ways), for the report
+	// Per global poly: its weakly connected component (every link taken both ways), ids 0..weak_count-1 in poly order.
+	// A G2 row outside the main SCC but in the main SCC's weak component is "one-way only" (it can be left by a drop
+	// but not reached, or the reverse); one in another weak component is truly disconnected (review of revision 2:
+	// the two call for different R6 responses, docs §5.5).
+	std::vector<uint32_t> weak_component;
 };
 NavComponents nav_components(const NavWorld &p_world);
+// The strongly connected component of a poly (UINT32_MAX for 0, a stale ref or a poly outside p_components). The
+// walker brain uses it to keep goals inside its own component (docs §7 "Goals").
+uint32_t nav_poly_component(const NavWorld &p_world, const NavComponents &p_components, NavPolyRef p_poly);
 
 // Where a gameplay point lies relative to the mesh: the nearest poly (any flag) inside a box of p_half_extents
 // around p_point, its closest point (detail height), the horizontal and vertical offsets and the poly's component.
@@ -324,6 +336,7 @@ struct NavPointCheck {
 	float horizontal = 0.0f; // |xz(nearest - point)|
 	float vertical = 0.0f; // nearest.y - point.y
 	uint32_t component = UINT32_MAX;
+	uint32_t weak_component = UINT32_MAX; // NavComponents::weak_component of the poly
 };
 NavPointCheck nav_check_point(const NavWorld &p_world, const NavComponents &p_components, const Vec3 &p_point, const Vec3 &p_half_extents);
 

@@ -1,6 +1,7 @@
 // S1 interface contract (docs/design/s1.md §10, §11): every header of spike S1 compiles together with the M1 headers
-// it extends, and the plain types and constants keep the properties the design relies on. No data, no Godot; nothing
-// here calls a function the S1 implementation has yet to define.
+// it extends, and the plain types and constants keep the properties the design relies on. No data, no Godot. The only
+// functions called are the pure tile helpers of mode_areas.cpp (defined); nothing calls a function the S1
+// implementation has yet to define.
 #include <doctest/doctest.h>
 
 #include "bf3/core/level/collision_soup.h"
@@ -36,6 +37,7 @@ static_assert(std::is_trivially_copyable_v<sim::bots::PathServiceStats>);
 static_assert(std::is_trivially_copyable_v<host::TailShares>);
 static_assert(std::is_trivially_copyable_v<sim::NavPointCheck>);
 static_assert(std::is_trivially_copyable_v<sim::bots::BotGoal>);
+static_assert(std::is_trivially_copyable_v<host::GameServerTickTimes>);
 // Flags and areas are distinct bits / ids.
 static_assert((sim::nav_flags::kWalk & sim::nav_flags::kCrouch) == 0 && (sim::nav_flags::kCrouch & sim::nav_flags::kDrop) == 0);
 static_assert(sim::kNavAreaWalk != sim::kNavAreaCrouch && sim::kNavAreaCrouch != sim::kNavAreaDrop && sim::kNavAreaWalk != 0);
@@ -48,6 +50,8 @@ TEST_CASE("s1 contract: nav defaults are the plan's and the soldier's") {
 	// climb / ch must be whole (topics/06 §2.4): 0.3 / 0.1 = 3 cells.
 	const float climb_cells = p.agent_climb / p.cell_height;
 	CHECK(std::fabs(climb_cells - std::round(climb_cells)) < 1e-4f);
+	// nav_cells rounds (review of revision 2: floor would turn a tuning value just under 0.3 into 2 cells).
+	CHECK(std::lround(climb_cells) == 3);
 	// The defaults equal the motor's default soldier (MotorParams defaults = Metro's mpsoldier, sim.motor checks).
 	const sim::MotorParams m;
 	CHECK(p.agent_radius == m.radius);
@@ -83,6 +87,40 @@ TEST_CASE("s1 contract: walker and bench defaults") {
 	CHECK(b.seconds >= 120.0); // plan: at least 2 minutes of sim time
 	CHECK(b.observers >= 1);
 	CHECK(host::kScaleGateP99Ms == 8.0);
+	CHECK(host::kValidityMetres == 100.0);
+	CHECK(host::kValidityWalkedShare == 0.9);
+	CHECK(host::kValidityAbandonedShare == 0.1);
+	CHECK(host::kBotBudgetP99Ms == 2.0); // plan §3.6
+	CHECK(double(host::kServerMemoryBudgetBytes) == doctest::Approx(0.4 * 1024.0 * 1024.0 * 1024.0).epsilon(1e-6)); // plan M4
+	CHECK(b.paced_seconds > 0.0); // the paced row is printed by default (docs §6.1 bias)
+	// Bots spawn on the main component by default, so G1's validity does not depend on G2 (docs §8).
+	const host::BotFillConfig fc;
+	CHECK(fc.spawn_in_main);
+	const host::BotSpawns bs;
+	CHECK(bs.points.empty());
+	CHECK(!bs.teams_merged);
+	const host::BotPointRow row;
+	CHECK(!row.in_main_weak);
+	const sim::NavPointCheck pc;
+	CHECK(pc.weak_component == UINT32_MAX);
+}
+
+TEST_CASE("s1 contract: region tile helpers (mode_areas)") {
+	using Tile = std::array<int32_t, 2>;
+	// A point's tiles within the margin: a 32 m square around (10, 10) straddles four tiles.
+	const std::vector<Tile> four = core::level::point_tiles({ 10.0f, 0.0f, 10.0f }, 32.0f);
+	CHECK(four.size() == 4);
+	CHECK(core::level::point_tiles({ 10.0f, 0.0f, 10.0f }, 0.0f) == std::vector<Tile>{ Tile{ 0, 0 } });
+	CHECK(core::level::point_tiles({ NAN, 0.0f, 0.0f }, 32.0f).empty());
+	// A small square area touches its own tile; the work bound refuses a continent-sized polygon.
+	core::level::CombatAreaDef a;
+	a.polygon = { { 10.0f, 10.0f }, { 20.0f, 10.0f }, { 20.0f, 20.0f }, { 10.0f, 20.0f } };
+	const auto small = core::level::combat_area_tiles(std::span<const core::level::CombatAreaDef>(&a, 1), 0.0f);
+	REQUIRE(small);
+	CHECK(*small == std::vector<Tile>{ Tile{ 0, 0 } });
+	core::level::CombatAreaDef huge;
+	huge.polygon = { { -9e5f, -9e5f }, { 9e5f, -9e5f }, { 9e5f, 9e5f }, { -9e5f, 9e5f } };
+	CHECK(!core::level::combat_area_tiles(std::span<const core::level::CombatAreaDef>(&huge, 1), 32.0f));
 }
 
 TEST_CASE("s1 contract: the additive M1 fields default to M1's behaviour") {

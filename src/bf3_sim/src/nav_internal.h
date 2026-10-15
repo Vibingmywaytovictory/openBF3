@@ -67,7 +67,7 @@ struct NavWorldBuilder {
 struct NavCells {
 	int walkable_height = 0; // crouch height, ceil(crouch / ch)
 	int stand_height = 0; // ceil(stand / ch): spans with less room are crouch area
-	int walkable_climb = 0; // floor(climb / ch)
+	int walkable_climb = 0; // lround(climb / ch); check_nav_params requires it whole
 	int walkable_radius = 0; // ceil(radius / cs) or round to nearest
 	int border = 0; // walkable_radius + 3
 	int tile_cells = 0; // 64 / cs

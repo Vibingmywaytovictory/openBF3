@@ -15,7 +15,13 @@
 // A tick contains (game_server.h, GameServerStats parts): the commands from the jitter buffers, the command sources
 // (PathService::run + every bot brain: corridor moves, corner lists, goal picks, nearest-poly queries), one motor
 // step per live soldier (CharacterVirtual: contacts, sweeps, stairs, the motor's ground hug), the rules (respawns
-// with settle_spawn, if any), and the snapshot encode for each observer.
+// with settle_spawn, if any), and the snapshot encode for each observer. The bench reads
+// GameServer::last_tick_times() after every tick (a reference, no copy; parts are 0 when their step did not run).
+// Known bias (docs §6.1): back to back, caches stay warm and the core stays boosted, so the gate's p99 can be lower
+// than a paced 60 Hz ServerHost's; the paced row (sleep to each 16.667 ms boundary) is printed beside it. The
+// bench thread runs at THREAD_PRIORITY_ABOVE_NORMAL during the windows and records its own CPU time
+// (GetThreadTimes) beside the wall time, so a run preempted by other work on the shared machine is visible
+// (cpu_share < 0.95 is flagged "noisy" in the report; the acceptance rerun on a quiet machine decides).
 
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill.h"
@@ -44,6 +50,10 @@ struct ScaleBenchOptions {
 	uint64_t seed = 1;
 	sim::bots::WalkerParams walker;
 	std::string tuning_text; // motor_tuning.cfg contents ("" = the defaults)
+	// After the gate window: a paced window (each tick started on a 16.667 ms boundary, sleeping in between, as
+	// ServerHost does) of paced_seconds sim time, reported beside the gate (not gated). 0 = none.
+	double paced_seconds = 30.0;
+	bool raise_priority = true; // THREAD_PRIORITY_ABOVE_NORMAL for the measured windows (this thread only)
 };
 
 struct Percentiles {
@@ -62,8 +72,27 @@ struct TailShares {
 struct ScaleReport {
 	ScaleBenchOptions options;
 	uint64_t ticks = 0; // measured
-	Percentiles tick_ms; // GameServerStats::last_tick_ms over the measured ticks (the gate: p99)
+	Percentiles tick_ms; // GameServerTickTimes::tick_ms over the measured ticks (the gate: p99)
 	Percentiles commands_ms, sources_ms, step_ms, rules_ms, encode_ms;
+	// Noise evidence (docs §6.1): the gate window's wall time and the bench thread's CPU time over it.
+	double window_wall_seconds = 0.0;
+	double window_cpu_seconds = 0.0;
+	double cpu_share = 0.0; // cpu / wall; < 0.95 = the thread was preempted (report says "noisy")
+	// Paced window (not gated): the same parts with sleeps between ticks.
+	uint64_t paced_ticks = 0;
+	Percentiles paced_tick_ms;
+	// Plan §3.6 bot budget "64 bots <= 2 ms/tick p99": sources_ms.p99 against kBotBudgetP99Ms (reported).
+	bool bot_budget_ok = false;
+	// Validity of G1 (docs §1): bots that walked >= kValidityMetres in the window, the abandoned share of the goals
+	// started in it, and the verdict (>= 90 % of the bots, <= 10 % abandoned). Per bot metres for the report.
+	std::vector<double> bot_metres;
+	uint32_t bots_walked = 0;
+	double abandoned_share = 0.0;
+	bool valid = false;
+	// The bot spawn filter (bot_fill.h BotSpawns; docs §8): how many level spawn points were in the main component,
+	// excluded, whether the teams were merged, synthetic points; and starts outside main (WalkerStats) in the window.
+	uint32_t spawn_points_level = 0, spawn_points_in_main = 0, spawn_points_excluded = 0, spawn_points_synthetic = 0;
+	bool spawn_teams_merged = false;
 	TailShares tail; // the split of the slowest 1 % (docs §14)
 	// Motor (docs §6.3): steps and narrow-phase queries in the window (CollisionWorld::query_count), queries per step,
 	// queries per second of sim time, and the mean step cost (step_ms / steps per tick).
@@ -76,7 +105,8 @@ struct ScaleReport {
 	// inside the step time; Jolt's internal casts cannot be timed one by one from outside).
 	double us_per_query_upper = 0.0;
 	// Direct query costs (docs §6.3): after the window, sweep_samples positions recorded from the bots' feet during
-	// it are replayed on the server's CollisionWorld, each as one sweep_capsule (stand capsule, 1/60 s of sprint
+	// it are replayed on the bench's own CollisionWorld, created over SharedLevel::static_world (the same shapes the
+	// server's world holds; GameServer's world is private and gets no accessor), each as one sweep_capsule (stand capsule, 1/60 s of sprint
 	// along the bot's velocity) and one overlap_capsule, timed one by one (steady_clock around each call, the timer's
 	// own cost measured on empty calls and subtracted). Mean and p99 microseconds.
 	uint32_t sweep_samples = 0;
@@ -102,6 +132,11 @@ struct ScaleReport {
 	double seconds_database = 0.0, seconds_areas = 0.0, seconds_shared = 0.0, seconds_bots = 0.0;
 	sim::NavStats nav;
 	uint64_t peak_working_set = 0;
+	// The server's memory against plan M4's "<= 0.4 GiB at 64 slots" (kServerMemoryBudgetBytes; reported, not
+	// gated): the process working set after GameServer::init minus at the bench's start, with the soup and the
+	// loaders' scratch freed. An upper bound for the server's data (static world with the terrain cover, nav, slots):
+	// the CRT may keep freed heap.
+	uint64_t server_working_set = 0;
 	bool install_unchanged = true;
 };
 
@@ -110,5 +145,14 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 std::string format_scale_report(const ScaleReport &p_report);
 // The plan's p99 gate (docs §1 G1).
 inline constexpr double kScaleGateP99Ms = 8.0;
+// G1's validity condition (docs §1): share of bots that walk at least kValidityMetres, maximum abandoned share.
+inline constexpr double kValidityMetres = 100.0;
+inline constexpr double kValidityWalkedShare = 0.9;
+inline constexpr double kValidityAbandonedShare = 0.1;
+// Reported beside the gates (plan §3.6 bot budget; plan M4 server memory at 64 slots).
+inline constexpr double kBotBudgetP99Ms = 2.0;
+inline constexpr uint64_t kServerMemoryBudgetBytes = uint64_t(429496730); // 0.4 GiB
+// A window whose bench thread got less CPU than this share of its wall time is flagged noisy.
+inline constexpr double kNoisyCpuShare = 0.95;
 
 } // namespace bf3::host

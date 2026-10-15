@@ -41,6 +41,27 @@ struct BotPointRow {
 	sim::NavPointCheck check;
 	bool on_mesh = false; // check.poly != 0 and within the kind's radius (docs §5.5)
 	bool in_main = false; // on_mesh and check.component == main component
+	// on_mesh and check.weak_component == the main component's weak component: a row with in_main_weak and not
+	// in_main is reachable one way only (a drop), one with neither is truly disconnected (docs §5.5, the R6 class).
+	bool in_main_weak = false;
+};
+
+// Where the bots spawn (docs §8 "Bot spawns"; review of revision 2: G1 must not depend on G2). Built by
+// load_bot_level from the Spawn rows, in this order:
+//   1. every spawn point whose settled feet are in_main, with its own team;
+//   2. if team 1 or team 2 then has no point (own team or neutral), every point of step 1 becomes neutral (team 0),
+//      so both teams spawn on the main component (no combat in S1: team sides do not matter); teams_merged;
+//   3. if step 1 found no point at all, `count` seeded NavQuery::random_points of the main component, settled with
+//      settle_spawn on the server's world, as neutral points; synthetic. SpawnPoint::index = UINT32_MAX - i.
+// GameServer::spawn() uses this list (not SharedLevel::spawns) for bot slots when BotFillConfig::spawn_in_main is
+// set (choose_spawn over it, as for humans), so no bot starts outside the component its goals are in.
+struct BotSpawns {
+	std::vector<sim::SpawnPoint> points;
+	uint32_t level_points = 0; // SharedLevel::spawns.size()
+	uint32_t in_main = 0; // of those, settled feet in the main component
+	uint32_t excluded = 0; // level_points - in_main: off the mesh or in another component
+	bool teams_merged = false;
+	uint32_t synthetic = 0; // step 3 points
 };
 
 struct BotLevel {
@@ -51,6 +72,7 @@ struct BotLevel {
 	uint32_t main_component = 0; // the largest by area
 	std::vector<sim::bots::BotGoal> objectives; // the rows below that are in the main component, as goals
 	std::vector<BotPointRow> points; // every flag, HQ, MCOM and spawn point of the mode
+	BotSpawns spawns; // where bot slots spawn (main component only)
 	std::vector<sim::NavTileKey> region; // the baked tiles
 	double seconds_areas = 0.0; // level_combat_tiles (every MP mode traversed)
 	double seconds_nav = 0.0; // load_nav_world_cached
@@ -74,6 +96,10 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 struct BotFillConfig {
 	std::shared_ptr<const BotLevel> level;
 	uint32_t count = 0; // bots added at init
+	// Bot slots spawn (and respawn) at level->spawns.points, every one in the main component (docs §8). False = the
+	// mode's spawn points, as humans (M1's path; for the Godot run to show bots where humans spawn). The bench and
+	// host.scale use true.
+	bool spawn_in_main = true;
 	sim::bots::WalkerParams walker;
 	sim::bots::PathService::Options paths;
 	sim::NavQueryOptions query;

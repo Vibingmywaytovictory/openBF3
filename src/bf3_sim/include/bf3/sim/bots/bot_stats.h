@@ -43,6 +43,10 @@ struct WalkerStats {
 	uint64_t sprint_ticks = 0;
 	uint64_t crouch_ticks = 0;
 	double metres = 0.0; // horizontal distance walked (from the states)
+	// Path requests whose start poly lay outside the component of the bot's goals (docs §7): the brain then draws its
+	// goals from its own component. Non-zero means a bot spawned or fell outside the main component; the bench
+	// reports it beside the spawn filter's counts so G1's validity stays independent of G2 (review of revision 2).
+	uint64_t starts_outside_main = 0;
 
 	void add(const WalkerStats &p_other);
 };

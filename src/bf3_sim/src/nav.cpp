@@ -105,7 +105,9 @@ NavCells nav_cells(const NavParams &p_params) {
 	NavCells c;
 	c.walkable_height = int(std::ceil(p.crouch_height / p.cell_height - 1e-4f));
 	c.stand_height = int(std::ceil(p.agent_height / p.cell_height - 1e-4f));
-	c.walkable_climb = int(std::floor(p.agent_climb / p.cell_height + 1e-4f));
+	// Rounded, not floored: check_nav_params refuses a climb that is not a whole number of cells, and 0.3f / 0.1f
+	// lands just above 3 while a tuning value like 0.29999 lands just below (review of revision 2).
+	c.walkable_climb = int(std::lround(p.agent_climb / p.cell_height));
 	const float r = p.agent_radius / p.cell_size;
 	c.walkable_radius = p.radius_round_up ? int(std::ceil(r - 1e-4f)) : int(std::floor(r + 0.5f));
 	c.border = c.walkable_radius + 3;
@@ -138,6 +140,10 @@ core::Status check_nav_params(const NavParams &p_params) {
 	}
 	if (!std::isfinite(p.agent_climb) || p.agent_climb < 0.0f || p.agent_climb > 4.0f) {
 		return bad("agent_climb", p.agent_climb);
+	}
+	const float climb_cells = p.agent_climb / p.cell_height;
+	if (std::fabs(climb_cells - std::round(climb_cells)) > 1e-3f) {
+		return bad("agent_climb (climb / cell_height must be a whole number of cells, topics/06 §2.4)", p.agent_climb);
 	}
 	if (!std::isfinite(p.max_slope_degrees) || p.max_slope_degrees <= 0.0f || p.max_slope_degrees >= 90.0f) {
 		return bad("max_slope_degrees", p.max_slope_degrees);
@@ -604,6 +610,14 @@ core::Result<std::shared_ptr<const NavWorld>> NavWorldBuilder::finish(const NavP
 
 // ---- point check and debug mesh -----------------------------------------------------------------------------
 
+uint32_t nav_poly_component(const NavWorld &p_world, const NavComponents &p_components, NavPolyRef p_poly) {
+	if (p_poly == 0) {
+		return UINT32_MAX;
+	}
+	const uint32_t g = p_world.impl().global(p_poly);
+	return g != UINT32_MAX && g < p_components.component.size() ? p_components.component[g] : UINT32_MAX;
+}
+
 NavPointCheck nav_check_point(const NavWorld &p_world, const NavComponents &p_components, const Vec3 &p_point, const Vec3 &p_half_extents) {
 	NavPointCheck out;
 	const NavWorld::Impl &w = p_world.impl();
@@ -629,6 +643,9 @@ NavPointCheck nav_check_point(const NavWorld &p_world, const NavComponents &p_co
 	const uint32_t g = w.global(out.poly);
 	if (g != UINT32_MAX && g < p_components.component.size()) {
 		out.component = p_components.component[g];
+	}
+	if (g != UINT32_MAX && g < p_components.weak_component.size()) {
+		out.weak_component = p_components.weak_component[g];
 	}
 	return out;
 }
