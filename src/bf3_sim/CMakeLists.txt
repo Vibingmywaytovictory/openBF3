@@ -32,3 +32,14 @@ target_sources(bf3_sim PRIVATE
     src/static_world_internal.h
     src/collision_world.cpp
 )
+
+# M1 T2 (motor; docs/design/m1.md §6, §9.2, §10): the soldier motor on Jolt's CharacterVirtual, the state hash, the
+# tuning file and the params, spawning and settle, the test-course searches, the prediction ring and sim::catch_up.
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/prediction.h
+    src/soldier_state.cpp
+    src/motor_tuning.cpp
+    src/soldier_motor.cpp
+    src/spawn.cpp
+    src/prediction.cpp
+)

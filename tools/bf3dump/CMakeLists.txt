@@ -17,3 +17,6 @@ target_link_libraries(bf3dump PRIVATE bf3_render psapi)
 # M1 T1 (world; docs/design/m1.md §15): bf3dump links bf3_sim for the static-world commands (`shapes`, `prepare
 # --shapes`, T1 phase 2) and T2's `spawns`.
 target_link_libraries(bf3dump PRIVATE bf3_sim)
+# M1 T2 (motor; docs/design/m1.md §10.1): `spawns <LEVEL> <MODE>`, the spawn points and spawners as TSV (bf3_sim from
+# T1's block above).
+target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
