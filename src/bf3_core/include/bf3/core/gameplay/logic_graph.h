@@ -78,6 +78,33 @@ struct LogicParam {
 	LogicValue value;
 };
 
+// The configuration fields one node type reads (docs/design/s4.md §6.2), in the order the builder reads them. Each is
+// read as LogicWorld::effective (a property connection into the field or the placing reference, else the entity's
+// own field) and converted to `kind` (a field that does not convert is left out). A scalar array gives one param per
+// element (element 0, 1, ...); a struct array gives, per element, one param per member (field = the member's id).
+// At most kMaxParamElements elements per array; a longer array fails the build.
+struct LogicParamMember {
+	std::string_view name;
+	LogicValue::Kind kind = LogicValue::Kind::Int;
+};
+struct LogicParamField {
+	enum class Shape : uint8_t { Scalar, Array, StructArray };
+	std::string_view name;
+	LogicValue::Kind kind = LogicValue::Kind::Bool; // Scalar and Array
+	Shape shape = Shape::Scalar;
+	LogicParamMember members[2] = {}; // StructArray (empty name: unused)
+};
+inline constexpr size_t kMaxParamElements = 4096;
+std::span<const LogicParamField> logic_param_fields(LogicTypeId p_type);
+
+struct PropertyValue;
+// The conversion the builder applies to an effective value (scalar fields): nullopt when the value does not convert to
+// p_kind. A Text value is returned with i = 0 and its text in *r_text (the builder interns it into texts()).
+std::optional<LogicValue> logic_value_of(const PropertyValue &p_value, LogicValue::Kind p_kind, std::string *r_text = nullptr);
+// FNV-1a 64 of a value's kind and the fields that kind uses (little-endian, bitwise floats); the trace and the digest
+// hash values with it.
+uint64_t logic_value_hash(const LogicValue &p_value);
+
 // LogicNode::flags.
 inline constexpr uint8_t kLogicNodeConnected = 1u << 0; // at least one edge (any kind, either end) after collapse
 

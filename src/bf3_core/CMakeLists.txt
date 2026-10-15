@@ -219,9 +219,10 @@ target_sources(bf3_core PRIVATE
 )
 
 # S4 logic (docs/design/s4.md §5, §6): the level-logic type table and the instantiated logic graph a level x mode
-# builds from its LogicWorld (logic_graph.cpp lands with the S4 implementation).
+# builds from its LogicWorld.
 target_sources(bf3_core PRIVATE
     src/gameplay/logic_types.cpp
+    src/gameplay/logic_graph.cpp
     include/bf3/core/gameplay/logic_types.h
     include/bf3/core/gameplay/logic_graph.h
 )
