@@ -1278,9 +1278,9 @@ testing on the machine, so every timing here is noisy and the acceptance rerun o
 | gate | threshold | measured | command |
 |---|---|---|---|
 | L1 albedo coverage | >= 95 % of drawn instance slots | 98.01 % (PASS) | `bf3dump looks MP_Subway TeamDeathMatch0` |
-| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | 7.41 against 6.88 ms, 1.076 (PASS) | `ctest --preset dev -R godot.l1_look` |
-| E4 cold load | 15 s | 2.59 s (PASS; `_ready` -> Done 1.98 s) | `ctest --preset dev -R godot.m1_load` |
-| E5 warm load | 5 s | 1.98 s (PASS; `_ready` -> Done 1.30 s) | same |
+| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | 7.41 against 6.88 ms, 1.076 (PASS); final full ctest run 3.75 against 3.91 ms, 0.961 (PASS) | `ctest --preset dev -R godot.l1_look` |
+| E4 cold load | 15 s | 2.59 s and 2.86 s in two full ctest runs (PASS; `_ready` -> Done 1.98 / 2.05 s) | `ctest --preset dev -R godot.m1_load` |
+| E5 warm load | 5 s | 1.98 s and 2.15 s (PASS; `_ready` -> Done 1.30 / 1.43 s) | same |
 
 `godot.l1_look` runs `--look=m1` and `--look=l1` alternately for 5 rounds (`-DROUNDS=n` in script mode). Each run
 holds 4 free views (street at TDM spawn 13, station at spawn 22, park, overview) and times 300 frames per view after
@@ -1291,7 +1291,7 @@ The measured frame intervals (M1 6.87-7.62 ms per round) are about 2.5 × what t
 machine (M1 about 2.7 ms), because the other tracks kept every core busy: the frames are CPU bound, and the
 interval is mostly scheduling. An earlier gate run on a lighter load gave M1 2.67 against L1 2.94 ms (mean
 statistic, 3 rounds). GPU render time is stable under that load (M1 1.498-1.504 ms per round): L1 draws in
-1.764-1.777 ms, **+17.6 %** (0.27 ms) over M1. Parts, measured with `--look-off` (four views, GPU medians, ms):
+1.764-1.777 ms, **+17.6 %** (0.27 ms) over M1 (the final full ctest run: 1.675 against 1.426 ms, +17.4 %). Parts, measured with `--look-off` (four views, GPU medians, ms):
 
 | run | GPU | against M1 |
 |---|---|---|
