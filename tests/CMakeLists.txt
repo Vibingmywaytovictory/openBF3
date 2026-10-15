@@ -366,3 +366,14 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
         set_tests_properties(tools.ebx_memory PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hymem_cl_dir}")
     endif()
 endif()
+# UI ui1 (docs/design/ui-swf-fonts.md §12, §14): ui1.contract, every ui1 header compiles together and the inline
+# helpers behave (no data, no Godot). The implementation adds core.ui.swf(.unit/.fuzz), core.ui.font(.unit) and the
+# Godot checks below this line.
+openbf3_test(test_ui1_contract test_main.cpp ui1_contract_tests.cpp test_support.h)
+target_link_libraries(test_ui1_contract PRIVATE bf3_core)
+add_test(NAME ui1.contract COMMAND test_ui1_contract --test-suite=ui1-contract)
+set_tests_properties(ui1.contract PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui1_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui1.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui1_cl_dir}")
+endif()

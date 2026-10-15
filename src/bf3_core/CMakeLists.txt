@@ -217,3 +217,17 @@ target_sources(bf3_core PRIVATE
 target_sources(bf3_core PRIVATE
     src/level/spawn_points.cpp
 )
+
+# UI ui1 (SWF, atlases and fonts; docs/design/ui-swf-fonts.md §12): the SwfMovie symbol-table reader, the install
+# library and census, the atlas cutter, DefineFont3 outlines, the TrueType writer, the UI font library and the HUD
+# layout facts. Interface headers now; the sources are added by the implementation.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/swf_movie.h
+    include/bf3/core/ui/swf_library.h
+    include/bf3/core/ui/swf_census.h
+    include/bf3/core/ui/swf_atlas.h
+    include/bf3/core/ui/swf_font.h
+    include/bf3/core/ui/font_ttf.h
+    include/bf3/core/ui/ui_fonts.h
+    include/bf3/core/ui/swf_layout.h
+)
