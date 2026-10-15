@@ -57,7 +57,8 @@ public:
 	bool overlap_capsule(const Vec3 &p_feet, float p_radius, float p_height, uint32_t p_mask, float p_tolerance = 0.0f) const;
 	// Whether a box (half extents p_half, rotated by p_yaw about +Y, centred at p_center) overlaps static geometry.
 	bool overlap_box(const Vec3 &p_center, const Vec3 &p_half, float p_yaw, uint32_t p_mask, float p_tolerance = 0.0f) const;
-	// Highest walkable surface below p_from within p_max_drop (a ray straight down); nullopt when none.
+	// Highest surface below p_from within p_max_drop: the first hit of a ray straight down (r_hit may be null); false
+	// when none. It does not judge the slope: the caller reads r_hit->normal (the motor's MaxAscendAngle decides).
 	bool ground_below(const Vec3 &p_from, float p_max_drop, uint32_t p_mask, StaticHit *r_hit) const;
 
 	struct Impl; // bf3_sim internal (src/collision_world_internal.h): the PhysicsSystem, filters, temp allocator

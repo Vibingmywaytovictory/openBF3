@@ -1,9 +1,10 @@
 #include "bf3/sim/physics_world.h"
 
+#include "jolt_runtime.h"
+
 // Jolt.h must come first.
 #include <Jolt/Jolt.h>
 
-#include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemSingleThreaded.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
@@ -12,49 +13,13 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Jolt/RegisterTypes.h>
 
 #include <algorithm>
-#include <cstdarg>
-#include <cstdio>
 #include <cstring>
-#include <mutex>
 
 namespace bf3::sim {
 
 namespace {
-
-// ---- process-wide Jolt runtime (allocator, factory, type registry), reference counted -------
-std::mutex g_jolt_mutex;
-int g_jolt_users = 0;
-
-void jolt_trace(const char *p_fmt, ...) {
-	va_list args;
-	va_start(args, p_fmt);
-	char buf[1024];
-	vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	std::fprintf(stderr, "[jolt] %s\n", buf);
-}
-
-void jolt_acquire() {
-	std::lock_guard lock(g_jolt_mutex);
-	if (g_jolt_users++ == 0) {
-		JPH::RegisterDefaultAllocator();
-		JPH::Trace = jolt_trace;
-		JPH::Factory::sInstance = new JPH::Factory();
-		JPH::RegisterTypes();
-	}
-}
-
-void jolt_release() {
-	std::lock_guard lock(g_jolt_mutex);
-	if (--g_jolt_users == 0) {
-		JPH::UnregisterTypes();
-		delete JPH::Factory::sInstance;
-		JPH::Factory::sInstance = nullptr;
-	}
-}
 
 // ---- layers: static world vs moving bodies -----------------------------------------------------
 namespace Layers {
@@ -121,7 +86,8 @@ struct PhysicsWorld::Impl {
 	std::vector<BodyTransform> dynamic_shapes; // shape kind + size per dynamic body
 	JPH::BodyID ground;
 	uint64_t tick = 0;
-	bool jolt_held = false;
+	// The Jolt runtime (jolt_runtime.h), held while the system exists; shutdown() releases it after the system.
+	std::shared_ptr<void> runtime;
 };
 
 PhysicsWorld::PhysicsWorld() :
@@ -137,9 +103,8 @@ bool PhysicsWorld::is_initialized() const {
 
 bool PhysicsWorld::init(const WorldConfig &p_config) {
 	shutdown();
-	jolt_acquire();
-	impl_->jolt_held = true;
 	Impl &w = *impl_;
+	w.runtime = jolt_runtime_acquire();
 
 	w.temp = std::make_unique<JPH::TempAllocatorImpl>(16 * 1024 * 1024);
 	if (p_config.job_threads <= 0) {
@@ -200,10 +165,7 @@ void PhysicsWorld::shutdown() {
 	w.jobs.reset();
 	w.temp.reset();
 	w.tick = 0;
-	if (w.jolt_held) {
-		w.jolt_held = false;
-		jolt_release();
-	}
+	w.runtime.reset();
 }
 
 bool PhysicsWorld::step() {

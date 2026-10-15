@@ -14,3 +14,6 @@ target_sources(bf3dump PRIVATE collision_commands.cpp collision_commands.h)
 # Derived-data cache preparation of one level x mode (bf3_render level_prepare.h).
 target_sources(bf3dump PRIVATE prepare_commands.cpp prepare_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_render psapi)
+# M1 T1 (world; docs/design/m1.md §15): bf3dump links bf3_sim for the static-world commands (`shapes`, `prepare
+# --shapes`, T1 phase 2) and T2's `spawns`.
+target_link_libraries(bf3dump PRIVATE bf3_sim)

@@ -229,3 +229,15 @@ endif()
 openbf3_test(test_m1_contract test_main.cpp m1_contract_tests.cpp test_support.h)
 target_link_libraries(test_m1_contract PRIVATE bf3_host bf3_render)
 add_test(NAME m1.contract COMMAND test_m1_contract)
+# M1 T1 (world; docs/design/m1.md §5, §14): sim.world.unit builds synthetic static worlds and checks the
+# CollisionWorld queries and the CollisionWorld::Impl seam (it includes bf3_sim's internal headers and links Jolt for
+# that); no data.
+openbf3_test(test_sim_world test_main.cpp sim_world_tests.cpp test_support.h)
+target_link_libraries(test_sim_world PRIVATE bf3_sim Jolt)
+target_include_directories(test_sim_world PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
+add_test(NAME sim.world.unit COMMAND test_sim_world --test-suite=sim-world-unit)
+set_tests_properties(sim.world.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_world_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(sim.world.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_world_cl_dir}")
+endif()
