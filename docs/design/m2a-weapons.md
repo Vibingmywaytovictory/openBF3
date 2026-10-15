@@ -1,6 +1,6 @@
 # M2a weapons core: design and contract
 
-Status: design for implementation, revision 2, 2026-10-15. Track "M2a weapons core" (branch `m2a/weapons`), the
+Status: implemented (see "As built" below); design revision 2, 2026-10-15. Track "M2a weapons core" (branch `m2a/weapons`), the
 first wave of milestone M2a "Infantry gunplay" ([research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md)
 §6). The interface headers named here are in the tree and compile (ctest `m2a.weapons.contract`). Their bodies are
 the implementation wave's work (§13).
@@ -37,6 +37,66 @@ Tags: **[verified]** = read from code, data or a measurement in this tree on the
 from the plan or a research report, with its section. **[inferred]** = a design choice or estimate made here.
 **[unmeasured]** = a mechanic whose semantics the data does not give. It is a switch in `mechanics.h` with the
 plan's default until S5 Session 1 measures it (plan R5, §3.13).
+
+### As built (implementation wave, 2026-10-15)
+
+The implementation wave is in the tree (branch `m2a/weapons`). Every gate below was measured on this machine on
+2026-10-15 with the dev preset; W1–W10 run on simulated time and are exact, W11 is wall clock and noisy (the machine
+is shared with the other tracks' builds). Each row has one command; the README's "M2a weapons core" section repeats
+the thresholds.
+
+| # | command | threshold | measured | met |
+|---|---|---|---|---|
+| W1 | `ctest -R sim.weapons` (`sim.weapons.unit` synthetic, `sim.weapons` MP_Subway); `bf3dump weapon-sim --check` | §1 W1 | M16A3: 31 shots, first at the press tick's start, all 30 gaps 4,500,000, empty reload at the last shot + 4,500,000; 134 shots in 10 s on the `infinite_magazine` table, every gap 4,500,000. M98B bolt cycle 78,000,000 (tap-to-tap 79,000,000 = 45.57 RPM, reported). JNG-90 / L96 / M40A5 / SV98 78,000,000 / 82,800,000 / 66,000,000 / 75,000,000. AN-94 14 presses, 2 shots 3,000,000 apart, burst to burst ≥ 6,000,000. M16A4 9 presses, 3 shots 4,500,000 apart. 870 shots 28,800,000 apart, 12 distinct pellets, widest 2.979° from the shot direction. M9 smallest gap 9,000,000 | yes |
+| W2 | same | 1 cm; 1 mm | drop 0.1779 / 1.5981 m (M16A3 100 / 300 m), 1.0451 / 11.6098 m (M98B 300 / 1,000 m): 0.29–0.44 mm from the arithmetic (the chord sag of one tick). Expiry at 975.0000 m and 3,250.0000 m (0.000 mm). Walls at 0.99 × range hit, 1.01 × missed | yes |
+| W3 | `sim.weapons` (arithmetic), `sim.weapons.range` (end to end) | §1 W3 | one-shot ranges .338 head every range, .338 chest 17.4762, M40A5 14.9998, SV98 19.9995, M39 head 50.7445, SKS head 16.2565 m. On Metro (TDM spawn 87, a 96.9 m lane), exact aim: chest 4 / head 2 hits kill at 5 m, 6 / 3 at 60 m | yes |
+| W4 | `sim.weapons`; `bf3dump weapon-sim --all` | 119 rows, 0 errors | 172 variants, 119 qualifying, 119 rows, 0 errors | yes |
+| W5 | `sim.weapons.range` | 1e-3 | first hit at 5 m on the stand-ins: M16A3 50.0000 / 25.0000 / 25.0000 / 22.7500 (head / chest / body / legs), M98B 223.2500 / 100.7000 / 86.4500 (head / chest / legs), 870 pellet head 18.0000 | yes |
+| W6 | `sim.weapons.unit`, `sim.weapons` | exact | M16A3 tactical 108,000,000 (commit +91,800,000, magazine 31), empty 142,200,000 (commit +120,870,000, magazine 30); M9 81,000,000 / 96,000,000 (16 / 15); 870 5 shells at +109,200,000 + k × 40,200,000, done at +270,000,000; a switch before the commit cancels and keeps the old magazine, after it the new one stays; fire between shells interrupts | yes |
+| W7 | `sim.weapons.unit`, `sim.weapons.range` | equal hashes; ≥ 99 % | per-tick `soldier_weapons_hash` equal over a 600-tick mixed run and after a mid-burst restore (tick 103, burst_left 2); two `CollisionWorld`s over one `StaticWorldShapes` give equal shot / impact list hashes (synthetic walls; Metro: M16A3 10 s hip fire, 870 taps, M67 throw). Seed 2 vs 1: 134 / 134 (synthetic) and 71 / 71 (Metro) hip-fire directions differ | yes |
+| W8 | `sim.weapons.unit`, `sim.weapons.fuzz` (dev and asan) | no crash, every invariant | 43 hostile defs refused with the variant and field named; 17 synthetic defs × 600 random ticks, 0 violations; 2,000 retail mutants (M16A3 / 870 / M67 / RPG-7): 933 decoded, 683 accepted, 683 × 600 random ticks, 0 violations; 1,020 synthetic mutants, 0 violations | yes |
+| W9 | `sim.weapons`, `sim.weapons.range` | §1 W9 | M67 spawn 10,200,000 after the release tick's start, detonation 216,000,000 after spawn, 0.003 mm off the closed form, launch (0, 3, 18); blast 112 / 112 / 81.45 / 40.73 / 0. M320 HE dud at a 10 m wall, explosion at 40 m; 112 / 0.35 / 5 and dud 56 / 2.1 / 5. RPG-7 / SMAW arm 30,000,000, dud at 10 m, explosion at 100 m, 70.21 m/s at 3 s, 100 m/s at 6 s. On Metro: stand-ins 1 / 3 / 5 / 8 m beside the M67's rest point take 112.000 / 85.521 / 44.796 / nothing; an RPG-7 at a stand-in 30 m away does 562.5 direct + 112 blast | yes |
+| W10 | every install test and command | `install.unchanged` | yes (256 files: sizes and mtimes equal) in every case of `sim.weapons*`, `tools.weapon_sim`, `bf3dump weapon-sim` / `range` | yes |
+| W11 | `sim.weapons.perf`; `bf3dump range weapons/m16a4/u_m16a4 --perf` | p99 ≤ 2.0 ms | 64 shooters, 600 ticks, 8,576 shots, peak 76 live, mean lane 24.6 m: mean 0.115 ms, p50 0.112 ms, p99 0.205 ms, max 0.407 ms (bf3dump run: p99 0.281 ms). Wall clock, noisy | yes |
+
+Rules the implementation fixed (this document is updated where they live):
+* **Data times go through their shortest decimal** (§5.1). The data's floats are not the decimals the oracles quote
+  (1.8f is 1.79999995 s = 107,999,997 units). `make_weapon_sim_def` converts every time, rate and fraction through
+  the shortest decimal that reads back as the same float (`std::to_chars`, exactly specified, so every machine gets
+  the same digits): 1.8 → 108,000,000, 1.3 → 78,000,000, 0.48 → 28,800,000, 3.6 → 216,000,000.
+* **MaxHoldTime saturates** at 60 s instead of being refused (§9): the M67's 9999 means "no limit".
+* **ReloadType Unknown** is refused only for a weapon with a magazine whose ammo is not unlimited (§9): the knife.
+* **Sway modifiers are signed in data** (§9): the suppression DecreasePerSecondModifier of `xp2_hk417`, `xp2_l86` and
+  `xp2_lsat` is −10 (found by W4). The bound is |m| ≤ 10,000; the effective MinAngle, MaxAngle and IncreasePerShot are
+  clamped at 0, and a negative decrease grows the spread toward MaxAngle while the modifier holds [unmeasured].
+* **Reload fields are checked for the reload type that uses them** (the 870's ReloadTimeBulletsLeft −1 is ignored).
+* **870 interrupt:** fire between shells interrupts the reload only while no reload request is held; otherwise the
+  two alternated for the rest of the tick (found by W8's random commands: 48 dropped timed events).
+* **A burst completes after the script ends**: W1's burst rows run 30 settle ticks, so a press in the script's last
+  tick is not counted as a short burst.
+* **The direct hit and the blast both apply** to a missile's target (562.5 + 112 at the impact point) [inferred, H:W7].
+
+Not wired yet (documented, no effect in this wave): `Mechanics::bullets_pass_soldiers` (a bullet stops at the first
+soldier), the SoldierDef ExplosionDamageModifier (1 on Metro, read but not multiplied), spawn-protected bullet damage
+(left to the server rules: `HitTarget::spawn_protected` is carried), the fire-mode counter's value at spawn (the
+integration sets `mode_counter` from the player's current counter), the zoom block during deploy (not applied to the
+sway table), and the stance-transition penalty (off).
+
+Metro diagnostics (`sim.weapons.range`, `bf3dump range`): every Metro soup triangle's material value resolves to a
+grid pair (1,114,171 triangles, 92 distinct values, 0 unresolved; terrain included). On the 96.9 m lane every one of
+the 55 static hits of an M16A3 run passed one `kSoupInvisible` triangle first and then hit geometry behind it (property
+34, Indestructible): R-W10's case of invisible geometry in front of a wall, and nothing was shot through (every pass
+ended on a later static hit).
+Collision-before-Raycast (R-W2): 0 in the M16A3 run, 2 in the 870 run.
+
+New files beyond §13: `src/bf3_sim/include/bf3/sim/weapons/weapon_checks.h` + `src/weapons/weapon_checks.cpp` (the
+oracle rows as one function, shared by the unit test, the install test and `bf3dump weapon-sim --check`),
+`weapon_install.h` + `src/weapons/weapon_install.cpp` (the install side for tools and tests: catalog, grid pairs,
+materials, soldier, tables, the W4 table), `tests/weapons_support.h` and `tests/weapons_install_support.h`.
+Header additions: `slot_flags::kPressPending` / `kReleasePending`, `WeaponTickOutput::timed_dropped`,
+`WeaponSimDef::hold_off_reload_until_fire_release`, `WeaponTable::sprint_recover_time` (hashed) with
+`WeaponTableOptions::sprint_recover_seconds`, `SurfaceMaterialTable::has_grid`, `FireTimingResult` /
+`run_fire_timing` in `shooting_range.h`.
 
 ---
 
@@ -213,6 +273,11 @@ resolver, blob and format edits are additive, and the `bf3dump weapon` text gets
 blocks. The VFX and audio tracks may also need WeaponDef fields (FireEffects1p/3p, the sound patch). §16 asks the
 orchestrator to route every WeaponDef change through this track, so the blob version moves once.
 
+As built: the three fields are in `weapon_def.h` (at the ends of `FireFunction` and `Explosion`; `MaterialPairRef`
+moved above `Explosion`), read by `weapon_firing.cpp` / `weapon_projectile.cpp`, written at the ends of the blob's
+fire and explosion records, and printed at the ends of the `bf3dump weapon` reload and explosion lines. Blob format
+and converter versions are 2.
+
 ---
 
 ## 5. Algorithms and key decisions
@@ -228,6 +293,12 @@ units make both the tick boundaries and the data's intervals exact: 75 ms = 4,50
 not divide (650 RPM = 5,538,461.5) are rounded once, when the def is made, and the rounded integer is in the def
 hash. Server and clients then add the same integer forever: a 650 RPM weapon drifts 0.5 units (8 ns) per shot from
 the ideal, and never from each other. A 30 Hz build (D4 fallback) only changes kSimHz: 75 ms is then 2,250,000.
+
+**As built: data times go through their shortest decimal.** The data's floats are not the decimals the oracles
+quote: 1.8f is 1.79999995 s, 107,999,997 units if converted as it stands. `make_weapon_sim_def` converts every
+time, rate and fraction once through the shortest decimal that reads back as the same float (`std::to_chars`, an
+exactly specified algorithm, so every machine gets the same digits), then rounds to the nearest unit: 1.8 →
+108,000,000, 1.3 → 78,000,000, 0.48 → 28,800,000, 3.6 → 216,000,000. The integers are what the def stores and hashes.
 
 Tick convention (M1's): the command for tick T drives [tick_start(T), tick_end(T)). A trigger held in command T
 fires at tick_start(T) when the weapon is ready (`t = max(next_shot_time, tick start)`, plan §3.2).
@@ -648,14 +719,19 @@ No new Cache kind:
   * radii above 100 m;
   * angles above 90°;
   * rates above 10,000 / s;
-  * times above 60 s;
+  * times above 60 s, except HoldAndReleaseData.MaxHoldTime, which saturates at 60 s (the M67's 9999 = no limit;
+    as built);
   * more than 4 fire modes or an Unknown logic;
   * ReloadThreshold outside [0, 1];
   * hold-and-release powers outside [0, 10], or min above max; PowerIncreasePerSecond outside [0, 10,000];
   * TraceFrequency above 1,000. A value ≤ 0 is stored as 0, meaning no tracers: the knife's is 0 in data, and the
     tracer rule never divides by it.
 
-  ReloadType Unknown is refused for weapons with a magazine.
+  ReloadType Unknown is refused for weapons with a magazine whose ammo is not unlimited (as built: the knife has a
+  1-round magazine and unlimited ammo). Reload fields are checked only for the reload type that uses them (the
+  870's ReloadTimeBulletsLeft −1). Sway modifiers are signed in data (the XP2 LMGs' suppression
+  DecreasePerSecondModifier −10, found by W4), so their bound is |m| ≤ 10,000; the effective cone angles and growth
+  are clamped at 0 (as built, §5.6).
 * **Per tick and soldier:** at most 8 shots, and every loop is bounded by them. Phase changes per tick are bounded
   by the phases a tick can end (≤ 4: deploy, bolt, reload, shell). At most 16 timed events
   (`kMaxTimedEventsPerTick`); a 17th is a bug that the W8 invariants catch.
@@ -769,7 +845,9 @@ Nothing of the task's list is deferred: the M67, M320 HE and RPG-7 / SMAW are al
 
 **Implementation wave:**
 * new: `src/bf3_sim/src/weapons/{weapon_sim_def, surface_materials, spread_recoil, weapon_sim, hit_target, damage,
-  ballistics, shooting_range}.cpp`; `src/bf3_core/src/gameplay/grid_pairs.cpp`;
+  ballistics, shooting_range, weapon_checks, weapon_install}.cpp` and `weapons_internal.h`;
+  `src/bf3_sim/include/bf3/sim/weapons/{weapon_checks, weapon_install}.h` (as built);
+  `tests/weapons_support.h`, `tests/weapons_install_support.h` (as built); `src/bf3_core/src/gameplay/grid_pairs.cpp`;
   `tools/bf3dump/weapon_sim_commands.{h,cpp}`; `tests/weapons_tests.cpp`, `weapons_install_tests.cpp`,
   `weapons_range_tests.cpp`.
 * additive: the CMake blocks above, the bf3dump dispatch and usage text (`# M2a weapons` block),
@@ -848,3 +926,8 @@ For the orchestrator:
 
 For the implementation (answered by measurement or S5): the [unmeasured] switches (§6.9); Metro's longest lane;
 the R-W2 hull count; the grid table's load time (§8); W11's measured cost.
+
+Answered by the implementation wave (2026-10-15): Metro TDM's longest lane is 96.9 m (spawn 87), so W3's 60 m rows
+run on Metro and no fallback was needed; R-W2's Collision-before-Raycast count is 0 (M16A3 run) and 2 (870 run);
+the install side (catalog, grid pairs, materials, soldier) opens in about 0.2–0.5 s with a warm file cache; W11's
+p99 is 0.205 ms (threshold 2.0 ms, unchanged). The [unmeasured] switches stay at the plan's defaults.
