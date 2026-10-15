@@ -16,6 +16,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -323,6 +324,17 @@ bool Bf3Crowd::build(std::string *r_error) {
 	log(cache_line_);
 	log(fmt("assets loaded in %.2f s (ant %.2f, ebx %.2f, meshes %.2f, textures %.2f)", assets_->seconds_total, assets_->seconds_ant, assets_->seconds_ebx,
 			assets_->seconds_meshes, assets_->seconds_textures));
+	{
+		// The shot folder: never inside the install (PathGuard), created when missing.
+		const std::filesystem::path dir = utf8_path(shot_dir_);
+		std::error_code ec;
+		shot_dir_ok_ = session_->install().write_guard().allows_write(dir / "s3_overview.png");
+		if (shot_dir_ok_) {
+			std::filesystem::create_directories(dir, ec);
+			shot_dir_ok_ = !ec;
+		}
+		log(std::string("shot folder ") + shot_dir_ + (shot_dir_ok_ ? "" : " REFUSED (inside the install or not creatable): no shots"));
+	}
 	g0_stage_ = validate_stage(&stage_error_);
 	log(std::string("G0-stage: ") + (g0_stage_ ? "all 64 cells pass" : "FAIL: " + stage_error_));
 	if (feet_.empty()) {
@@ -523,14 +535,17 @@ void Bf3Crowd::_process(double p_delta) {
 		if (--settle_frames_ == 0) {
 			// G0-config (s3.md §1).
 			DisplayServer *ds = DisplayServer::get_singleton();
-			const Vector2 size = get_viewport()->get_visible_rect().size;
-			viewport_ok_ = int32_t(size.x) == int32_t(gate::kWidth) && int32_t(size.y) == int32_t(gate::kHeight) &&
+			// The root Window's size is the 3D render size (stretch mode canvas_items keeps the 2D visible rect at the
+			// project's 1152x648 base; 3D renders at the window's full resolution).
+			Window *window = get_window();
+			const Vector2i size = window != nullptr ? window->get_size() : Vector2i();
+			viewport_ok_ = size.x == int32_t(gate::kWidth) && size.y == int32_t(gate::kHeight) &&
 					ds->window_get_current_screen() == ds->get_primary_screen();
 			const int thread_model = int(ProjectSettings::get_singleton()->get_setting("rendering/driver/threads/thread_model", 1));
 			const bool cycles_ok = std::fabs(cycle_selftest_ratio_ - 1.0) <= 0.05;
 			g0_config_ = walkers_zero_ && no_hud_ && viewport_ok_ && thread_model == 1 && cycles_ok;
-			g0_config_detail_ = fmt("walkers=0 %s, no-hud %s, viewport %dx%d on screen %d (primary %d) %s, thread_model %d (1 = Safe), cycle self-test %.4f %s",
-					walkers_zero_ ? "yes" : "NO", no_hud_ ? "yes" : "NO", int(size.x), int(size.y), ds->window_get_current_screen(), ds->get_primary_screen(),
+			g0_config_detail_ = fmt("walkers=0 %s, no-hud %s, window %dx%d on screen %d (primary %d) %s, thread_model %d (1 = Safe), cycle self-test %.4f %s",
+					walkers_zero_ ? "yes" : "NO", no_hud_ ? "yes" : "NO", size.x, size.y, ds->window_get_current_screen(), ds->get_primary_screen(),
 					viewport_ok_ ? "ok" : "WRONG", thread_model, cycle_selftest_ratio_, cycles_ok ? "ok" : "OUT OF 1 +- 0.05");
 			log("G0-config: " + g0_config_detail_);
 			// The run plan (s3.md §12).
@@ -629,7 +644,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 		if (r.spec.overview && !r.overview_done) {
 			r.overview_done = true;
 			const std::string path = path_text(utf8_path(shot_dir_) / "s3_overview.png");
-			const bool ok = session_->save_screenshot(path);
+			const bool ok = shot_dir_ok_ && session_->save_screenshot(path);
 			log(std::string("overview shot ") + path + (ok ? "" : " FAILED"));
 		}
 	}
@@ -861,7 +876,7 @@ bool Bf3Crowd::shot_frame() {
 	const bool clear_ray = world_ && !world_->ray(c, bf3::sim::Vec3{ j.x - cam.x, j.y - cam.y, j.z - cam.z },
 											   bf3::sim::query_mask::kCollision | bf3::sim::query_mask::kRaycast);
 	const std::string path = path_text(utf8_path(shot_dir_) / (name + ".png"));
-	const bool saved = session_->save_screenshot(path);
+	const bool saved = shot_dir_ok_ && session_->save_screenshot(path);
 	std::error_code ec;
 	const uint64_t bytes = saved ? uint64_t(std::filesystem::file_size(utf8_path(path), ec)) : 0;
 	const bf3::render::PinchReport p =

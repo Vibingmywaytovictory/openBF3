@@ -220,6 +220,7 @@ private:
 	bool no_hud_ = false; // --no-hud given (the session's arg)
 	double run_seconds_ = 30.0;
 	std::string shot_dir_;
+	bool shot_dir_ok_ = false; // outside the install and created (build)
 	// Run state.
 	bool started_ = false; // the loader was started
 	bool built_ = false;
