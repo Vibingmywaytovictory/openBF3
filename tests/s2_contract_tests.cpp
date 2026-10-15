@@ -72,6 +72,18 @@ static_assert(sim::kG2SnapshotInterval * 30 == sim::kSimHz); // 30 Hz snapshots 
 static_assert(sim::kG2MaxError == 0.02f);
 static_assert(sim::kVehicleCourseKindCount == size_t(sim::VehicleCourseKind::SlopeIdle) + 1);
 static_assert(sim::kVehicleRestoreModeCount == size_t(sim::VehicleRestoreMode::Full) + 1);
+static_assert(sim::kVehicleSnapshotSectionCount == size_t(sim::VehicleSnapshotSection::Constraints) + 1);
+// The settle command is non-zero, so the wake rule keeps every course awake through the settle (s2.md §5.4, §8.4),
+// and it is a pure full brake.
+static_assert(sim::kSettleCommand.brake == 255 && sim::kSettleCommand.throttle == 0 && sim::kSettleCommand.steer == 0 &&
+		sim::kSettleCommand.buttons == 0);
+static_assert(sim::kSettleDriftTicks < sim::kSettleTicks);
+// Gate D (s2.md §8.6): every driving kind must stay awake and move; only SlopeIdle may sleep, and it must be held.
+static_assert(sim::kVehicleActivity.size() == sim::kVehicleCourseKindCount);
+static_assert(!sim::kVehicleActivity[size_t(sim::VehicleCourseKind::SlopeIdle)].must_stay_awake);
+static_assert(sim::kVehicleActivity[size_t(sim::VehicleCourseKind::SlopeIdle)].max_creep > 0.0f);
+static_assert(sim::kVehicleActivity[size_t(sim::VehicleCourseKind::Collision)].min_ticks_static_contact >= 30);
+static_assert(sim::kVehicleActivity[size_t(sim::VehicleCourseKind::Circle)].min_yaw_turns > 0.0f);
 // The ghost's position quantisers are the soldier ghost's (M3 sends both through one path).
 static_assert(sim::kDefaultVehicleGhost.position_xz.min == net::quant::kPositionXZ.min);
 static_assert(sim::kDefaultVehicleGhost.position_xz.step == net::quant::kPositionXZ.step);
@@ -147,8 +159,20 @@ TEST_CASE("s2 contract: default plain values") {
 	CHECK(o.snapshot_interval == sim::kG2SnapshotInterval);
 	CHECK(o.replay_ticks.size() == sim::kG2ReplayTicks.size());
 	CHECK(o.keep_hashes);
+	CHECK(o.modes == (1u << sim::kVehicleRestoreModeCount) - 1u); // every restore mode by default
+	CHECK(sim::VehicleContacts{}.chassis_vehicle_contacts == 0);
 	const sim::VehicleCourseSearch search;
 	CHECK(search.turnaround_radius > 0.0f);
+	CHECK(search.max_queries_per_kind > 0);
+	for (size_t k = 0; k < sim::kVehicleCourseKindCount; ++k) {
+		const sim::VehicleActivityThresholds &a = sim::kVehicleActivity[k];
+		if (k == size_t(sim::VehicleCourseKind::SlopeIdle)) {
+			continue;
+		}
+		CHECK(a.must_stay_awake);
+		// Every driving kind has at least one "it moved" criterion (a parked vehicle must fail gate D).
+		CHECK((a.min_distance > 0.0f || a.min_yaw_turns > 0.0f || a.min_static_impacts > 0));
+	}
 }
 
 #ifdef OPENBF3_VEHICLE_TUNING_CFG

@@ -51,7 +51,9 @@ struct VehicleCommand {
 	uint32_t sequence = 0; // +1 per command of one client session
 	int8_t throttle = 0; // -127..127: > 0 forward, < 0 reverse (AllowNegativeThrottle); -128 never produced
 	uint8_t brake = 0; // 0..255
-	int8_t steer = 0; // -127..127: > 0 steers right
+	// -127..127: > 0 steers right in the project's axes (right = -X at yaw 0, command.h / soldier_motor.cpp), which
+	// is Jolt's right (forward x up), so it reaches SetDriverInput's right input without a sign flip (s2.md §5.4)
+	int8_t steer = 0;
 	uint8_t buttons = 0; // vehicle_buttons::
 	uint8_t flags = 0; // command_flags:: (server side only; the step never reads it)
 

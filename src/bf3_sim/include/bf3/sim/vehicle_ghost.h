@@ -11,8 +11,11 @@
 // frame origin computes it from the model's CoM (M3).
 //
 // The encoder clamps (every value maps to a code); the decoder refuses codes outside their bit width, a largest
-// component index above 3, a gear outside the model's range and a wheel count above kMaxVehicleWheels with an error
-// (hostile network input, s2.md §9). Quantisers work in double like bf3_net's Quantizer (bit_stream.h), whose
+// component index above 3, a one-bit field (active, reversing) above 1, a gear outside the model's range, a wheel
+// count other than the scale's (and above kMaxVehicleWheels), and a smallest-three triple whose squared sum is above
+// 1 (each component may reach 1/sqrt2, so arbitrary in-width codes can sum to 1.5 and the dropped component's
+// radicand 1 - sum would be negative: refused, never a NaN rotation) with an error (hostile network input, s2.md
+// §9). VehicleWorld::restore_vehicle_state checks the decoded state again (finite, unit rotation). Quantisers work in double like bf3_net's Quantizer (bit_stream.h), whose
 // position quantisers these equal, so M3 can send the position with the soldier ghost's code path.
 
 #include "bf3/core/result.h"
@@ -112,8 +115,9 @@ core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const Vehicl
 
 // Smallest-three quaternion (x, y, z, w): drop the largest-magnitude component (made positive), code the other three
 // over [-1/sqrt2, 1/sqrt2] with p_bits each. decode renormalises with a correctly rounded sqrt (no libm trig;
-// deterministic under /fp:precise).
+// deterministic under /fp:precise). The encoder's own codes always give a radicand >= 0 up to rounding, which
+// decode clamps at 0 when -1e-3 <= 1 - sum < 0; below that (a hostile triple) it fails.
 void encode_quat_smallest_three(const std::array<float, 4> &p_q, unsigned p_bits, uint8_t &r_largest, uint16_t r_codes[3]);
-std::array<float, 4> decode_quat_smallest_three(uint8_t p_largest, const uint16_t p_codes[3], unsigned p_bits);
+core::Result<std::array<float, 4>> decode_quat_smallest_three(uint8_t p_largest, const uint16_t p_codes[3], unsigned p_bits);
 
 } // namespace bf3::sim

@@ -19,9 +19,16 @@
 //              a crest steep enough to unload all four wheels makes it the jump case
 //   Collision  ~30 km/h square into a static Collision-layer wall (a horizontal ray hit with |normal.y| < 0.3 and
 //              >= 1.5 m tall), reverse 15 m, again
-//   SlopeIdle  stop on ground of 8..20 degrees, no input for the rest of the run (stand-still brake, sleep)
+//   SlopeIdle  on ground of 8..20 degrees: full brake command for 240 ticks (the stand-still timer reaches its 2 s
+//              limit while the brake holds the vehicle), then the all-zero command for the rest of the run: the
+//              stand-still brake holds it, and with no input the wake rule stops and Jolt's sleep test may put it
+//              to sleep (reported, not a gate)
+// Every other script never sends the all-zero command (a stop is a held brake), so with the wake rule
+// (vehicle_world.h) a driving course never sleeps; gate D (vehicle_replay.h vehicle_course_drove) checks it.
 // A kind not found in the search radius is reported as not found: gate C fails, and G1 / G2 judge the found courses
-// only (s2.md §1), so a finder miss is never read as a determinism result.
+// only (s2.md §1), so a finder miss is never read as a determinism result. Each kind is searched with its own
+// query budget (VehicleCourseSearch::max_queries_per_kind) and reports what it spent, so a miss says whether the
+// terrain or the budget ran out.
 
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
@@ -52,13 +59,18 @@ struct VehicleCourse {
 	float slope_degrees = 0; // SlopeIdle: the ground's slope at start
 	float feature = 0; // Bumps: the curvature peak (1/m); Collision: wall height (m)
 	uint32_t seed = 0; // the seed point it was found from (index into p_seeds)
+	size_t queries = 0; // CollisionWorld queries this kind's search spent (found or not)
+	bool budget_exhausted = false; // the search stopped at max_queries_per_kind (a miss for budget, not terrain)
 };
 
 struct VehicleCourseSearch {
 	float radius = 300.0f; // m around each seed
 	float grid = 4.0f; // m between candidate points
 	float max_flat_degrees = 4.0f; // "flat" for Straight / Brake / Slalom / Circle
-	size_t max_queries = 2000000; // CollisionWorld queries over the whole search (hostile / huge levels stop here)
+	// CollisionWorld queries per kind (hostile / huge levels stop here); the whole search is bounded by
+	// kVehicleCourseKindCount x this. Kinds are searched independently in kind order, so a late kind is never
+	// starved by an early one.
+	size_t max_queries_per_kind = 400000;
 	// Straight / Brake / Slalom: a disc of this radius beyond each leg end must be on terrain tiles, within
 	// max_turnaround_degrees and free of Collision-layer obstacles up to the chassis height.
 	float turnaround_radius = 20.0f;

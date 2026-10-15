@@ -11,12 +11,31 @@
 // (static count + slot) and then its VehicleConstraint. Jolt restores constraints by index (= add order), so every
 // world must add the same slots in the same order (the replay harness does; restore() checks the slot list).
 //
+// Static bodies are byte-identical to CollisionWorld's (Jolt's default friction 0.2 included). Friction against
+// them comes from combine callbacks instead (s2.md §6.1): VehicleConstraint::SetCombineFriction gives a wheel
+// tyre friction x tuning.ground_friction on a static body (Jolt's default sqrt(tyre x 0.2) otherwise), and
+// PhysicsSystem::SetCombineFriction gives a chassis-static contact the chassis friction (RigidBodyData 0.5) and
+// keeps the geometric mean between two dynamic bodies. Restitution stays Jolt's max(a, b) = 0.4.
+//
 // Step: one PhysicsSystem::Update(kTickSeconds, tuning.collision_steps) per tick on a JobSystemSingleThreaded owned
 // by the world (no shared job threads: the step's order is the world's own; s2.md §6.3). Before the update, per
-// vehicle in slot order: the driver (our code; vehicle_model.h numbers) turns the tick's VehicleCommand and the
-// driver state into the controller's four inputs, adds the air drag force with EActivation::DontActivate (a zero
-// force must not wake a sleeping vehicle; BodyInterface.cpp:699), and advances the stand-still timer. Contact
-// listener callbacks only count (chassis-static contacts per tick), so their order cannot matter.
+// vehicle in slot order (the driver pass, identical in every world, s2.md §5.4):
+//   1. the driver (our code; vehicle_model.h numbers) turns the tick's VehicleCommand and the driver state into the
+//      controller's four inputs and advances the stand-still timer. Steering sign: VehicleCommand::steer > 0 is
+//      "right" in the project's axes (command.h / soldier_motor.cpp: right = (-cos yaw, 0, sin yaw), -X at yaw 0),
+//      which is Jolt's right (forward x up = (0,0,1) x (0,1,0) = -X; WheeledVehicleController.cpp:262 sets the
+//      steer angle to -right x max about +Y), so the Jolt right input is +steer_filter x the falloff, no flip;
+//   2. the wake rule: if the command's throttle, brake or steer is non-zero or its handbrake bit is set,
+//      BodyInterface::ActivateBody(chassis). SetDriverInput only stores the inputs and a sleeping body is never
+//      woken by them (WheeledVehicleController.h:105); Jolt's own vehicle samples do the same
+//      (VehicleConstraintTest.cpp:228). ActivateBody also resets the sleep timer of an awake body
+//      (BodyManager.cpp:511), so a vehicle with input never sleeps. The rule reads the command, not the driver's
+//      derived inputs: the stand-still brake alone does not wake or hold a vehicle awake, so an idle vehicle can
+//      sleep (WheeledVehicleController::AllowSleep: no forward input, idling engine, no shift);
+//   3. SetDriverInput, then the air drag force with EActivation::DontActivate (drag alone must not wake a sleeping
+//      vehicle; BodyInterface.cpp:699).
+// Contact listener callbacks only count (chassis-static and chassis-chassis contacts per tick), so their order
+// cannot matter.
 //
 // Threads: every method on the owner's thread. Two worlds over the same shapes may step at the same time on
 // different threads (sim.vehicle.unit runs them so).
@@ -26,10 +45,13 @@
 //             non-static body (statics never change), i.e. global state, the vehicle bodies, the contact cache and
 //             every constraint (VehicleConstraint, controller), plus our driver states and the tick. In-process and
 //             trusted: it is never sent or stored (the network carries VehicleGhostCodes, vehicle_ghost.h).
-//             Not in it, because Jolt saves neither: the broadphase trees' layout and
-//             BroadPhaseQuadTree::mNextLayerToUpdate. That is harmless while candidate order cannot reach the
-//             result (contacts are sorted, s2.md §6.3); the multi-vehicle check G1m (s2.md §1) is where it would
-//             show.
+//             Not in it, because Jolt saves none of them: the broadphase trees' layout and their fattened
+//             bounds (Docs/Architecture.md:804: broadphase queries are not deterministic until the next
+//             maintenance update), BroadPhaseQuadTree::mNextLayerToUpdate, and the order of the active-body list
+//             (RestoreState re-adds bodies by append / swap-remove, BodyManager.cpp:815-823). That is harmless
+//             while candidate order cannot reach the result (contacts and constraints are sorted before solving,
+//             PhysicsSystem.cpp:1503-1506, s2.md §6.3); the multi-vehicle check G1m and the in-place rollback of
+//             G1r (s2.md §1) are where it would show, and their divergence report names it.
 //   restore() the full state back (any world created the same way with the same slots); bit-identical stepping
 //             afterwards is gate G1 (s2.md §1). The slot list and the stream length are checked before Jolt reads
 //             anything. Jolt's non-validating RestoreState applies bodies before it can fail
@@ -110,8 +132,16 @@ enum class ContactCachePolicy : uint8_t {
 struct VehicleContacts {
 	uint8_t wheels_in_contact = 0;
 	uint16_t chassis_static_contacts = 0; // contact manifolds chassis vs static bodies added or persisted this step
+	uint16_t chassis_vehicle_contacts = 0; // the same against other vehicles' chassis (G1m)
 	float max_penetration = 0; // m, over those manifolds
 };
+
+// One part of PhysicsSystem::SaveState (JPH::EStateRecorderState Global / Bodies / Contacts / Constraints), for
+// the G1 divergence report: Jolt's combined stream has no section markers, so on a mismatch both worlds are saved
+// again one section at a time and compared section by section.
+enum class VehicleSnapshotSection : uint8_t { Global = 0, Bodies = 1, Contacts = 2, Constraints = 3 };
+inline constexpr size_t kVehicleSnapshotSectionCount = 4;
+const char *vehicle_snapshot_section_name(VehicleSnapshotSection p_section); // "global", "bodies", "contacts", "constraints"
 
 // The full state of a world at a tick (see save()). Opaque bytes.
 struct VehicleWorldSnapshot {
@@ -150,13 +180,18 @@ public:
 	VehicleContacts contacts(VehicleSlot p_slot) const;
 
 	void save(VehicleWorldSnapshot &r_snapshot) const;
+	// One section of save()'s Jolt stream on its own (same static-skipping filter); diagnostics only.
+	void save_section(VehicleSnapshotSection p_section, std::vector<uint8_t> &r_bytes) const;
 	// Fails, leaving the world as it was, when the snapshot's slots differ from this world's, the stream length does
 	// not match, or Jolt refuses the stream (the pre-restore backup is put back; see the file comment).
 	core::Status restore(const VehicleWorldSnapshot &p_snapshot);
 	// Writes the p_groups parts of p_state into the vehicle in p_slot (see the file comment); fields outside p_groups
 	// are not read. A caller holding a partial state (a decoded ghost) decodes into a copy of state(p_slot), so the
 	// fields the ghost leaves alone (previous_delta_time, the controller inputs, lambdas, contacts, the sleep test)
-	// are the world's own. Fails on an unknown slot or p_state.wheel_count != the model's wheel count.
+	// are the world's own. Fails, before anything is written, on an unknown slot, p_state.wheel_count != the model's
+	// wheel count, a non-finite float in a selected group, a rotation whose squared norm is outside 1 +- 1e-3, a gear
+	// outside the model's range or a contact body that is neither kNoContactBody nor a body of this world: a decoded
+	// network ghost (M3) fails with an error, never a NaN in Jolt's broadphase.
 	core::Status restore_vehicle_state(VehicleSlot p_slot, const VehicleState &p_state, uint32_t p_groups, ContactCachePolicy p_contacts);
 	uint64_t state_hash() const; // save() then its hash (gate G1 compares this and vehicle_state_hash per tick)
 

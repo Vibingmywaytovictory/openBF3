@@ -64,6 +64,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
+
 S2 vehicle replay adds `s2.contract` (no data) now and `sim.vehicle.unit` / `sim.vehicle` with the implementation (see "S2 vehicle replay").
 
 ## Run
@@ -1161,14 +1162,21 @@ and are not gates):
 | gate | threshold | command |
 |---|---|---|
 | C courses found | all 7 kinds found on MP_007 (a finder result, kept apart from G1 / G2) | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| D courses drove | every found course meets its kind's activity criteria (distance, speed, turns, impacts; driving kinds never asleep); G1 and G2 fail if any found course fails D | same |
 | G1 free driving bit-identical | 0 of 3,600 ticks with a differing state hash, every found course | same |
 | G1r replay from any tick | 0 mismatching ticks over 15 restore ticks per found course | same |
-| G1m several vehicles | 3 touching Humvees on synthetic ground: G1 and G1r with 0 mismatching ticks | `ctest --preset dev -R "^sim\.vehicle\.unit$" --output-on-failure` |
+| G1m several vehicles | 3 touching Humvees on synthetic ground: G1 and G1r with 0 mismatching ticks, >= 30 contact ticks | `ctest --preset dev -R "^sim\.vehicle\.unit$" --output-on-failure` |
 | G2 corrections with quantised 30 Hz ghosts | max (and p99) < 0.02 m per found course at 100 and 150 ms replays | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
 | X same hashes from a second binary | report only: `bf3dump vehicle-replay MP_007 RushLarge0 --hash-out <file>` from the dev and release builds, then a file compare | manual |
-| H handling numbers | report only (unverified placeholders) | same, or `bf3dump vehicle-replay MP_007 RushLarge0 --handling` |
-| install unchanged | sizes and mtimes equal | same |
+| H handling numbers | report only (unverified placeholders) | `ctest --preset dev -R "^sim\.vehicle$"`, or `bf3dump vehicle-replay MP_007 RushLarge0 --handling` |
+| S spawns settle | report only: < 1 cm drift over the last 60 settle ticks per Humvee spawner | `ctest --preset dev -R "^sim\.vehicle$"` |
+| install unchanged | sizes and mtimes equal | `ctest --preset dev -R "^sim\.vehicle$"` |
 | contract / units | pass | `ctest --preset dev -R "^(s2\.contract\|sim\.vehicle\.unit)$"` |
+
+S2 passes only when C, D, G1 (with G1r), G1m, G2, install unchanged and contract / units all pass. Under `ctest
+--preset asan`, `sim.vehicle` runs the G2 `OwnHistory` mode only (the ablations are `dev` / `release`);
+`sim.vehicle.unit` runs in full under both. `sim.vehicle` prints its steps and seconds per phase; its TIMEOUT is set
+from the first measured run (docs/design/s2.md §8.4).
 
 `s2.contract` runs now; `sim.vehicle.unit`, `sim.vehicle` and the `bf3dump vehicledrive` / `vehicle-replay` commands come
 with the implementation.

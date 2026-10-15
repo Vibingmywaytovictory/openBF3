@@ -65,7 +65,11 @@ enum class SteerAngleModel : uint8_t {
 struct VehicleTuning {
 	// world
 	float gravity = 9.81f; // m/s^2 before the chassis GravityModifier (1.85 Humvee) [inferred]
-	float ground_friction = 1.0f; // friction of every static body (the material grid's friction is S5's) [inferred]
+	// Friction of the static ground as the tyres see it, applied in the wheel's combine callback (tyre x this on a
+	// static body; VehicleConstraint::SetCombineFriction), never by changing the static bodies, which stay
+	// byte-identical to CollisionWorld's. The material grid's per-surface friction (S5) replaces it through the
+	// same callback (the sub-shape ID names the triangle) [inferred]
+	float ground_friction = 1.0f;
 	// suspension: IW4L jeep (vehicle_iw4 def.rs, Apache-2.0, the user's own): static sag 7/16 of the travel,
 	// damper 0.9 sqrt(k M / 4) (damping ratio 0.45). The data's Spring.Stiffness 0.5 / Damping 0.06 are not read
 	// until S5 maps their unit.
