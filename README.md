@@ -1183,8 +1183,10 @@ the units pass: Jolt's vehicle is bit-identical on every MP_007 and synthetic co
 each, into the prediction world and as an in-place rollback; three touching Humvees), and the dev, release and asan
 builds produce the same per-tick hashes. G2 with the quantised 440-bit ghost fails on slalom, bumps and collision
 (max 2.2-6.5 cm against 2 cm; p99 <= 1.3 cm everywhere), while restoring the full-precision `VehicleState`
-(`ExactPod`) gives exactly 0 error on every course: M3 sends the driver's own vehicle that state unquantised and the
-ghost (376 bits: the suspension codes carry nothing) to everyone else. H (unverified placeholders): 0-60 km/h 7.4 s,
+(`ExactPod`) onto the diverged client gives at most 1.9 mm (0 without static chassis contact; the contact cache need
+not be sent) and the same without the lambdas (`PodOwnLambdas`) fails at 2.8 cm: M3 sends the driver's own vehicle
+that state unquantised, lambdas included, and the ghost (376 bits: the suspension codes carry nothing) to everyone
+else. H (unverified placeholders): 0-60 km/h 7.4 s,
 9.1 m/s^2 braking, 18.4 m turning circle, 75 km/h top speed. S: 3 of 6 Humvee spawners settle within 1 cm.
 
 Tools: `bf3dump vehicledrive <LEVEL> <MODE> [<blueprint>]` prints the drive def as read and the model built from it;

@@ -1218,8 +1218,7 @@ TEST_SUITE("sim-vehicle") {
 			}
 			attempt(std::move(bytes));
 		}
-		std::printf("Humvee partition fuzz: %zu of 200 mutations parsed, %zu read, %zu built a model, %zu refused with an error
-", parsed, read, built, refused);
+		std::printf("Humvee partition fuzz: %zu of 200 mutations parsed, %zu read, %zu built a model, %zu refused with an error\n", parsed, read, built, refused);
 		CHECK(parsed > 0);
 		// Word mutations aimed at floats and counts: an aligned 4-byte field of an instance overwritten with NaN,
 		// infinity, a huge or negative value, zero or an all-ones count, so the reader's and builder's refusal paths
@@ -1238,8 +1237,7 @@ TEST_SUITE("sim-vehicle") {
 			std::memcpy(bytes.data() + offset, &w, 4);
 			attempt(std::move(bytes));
 		}
-		std::printf("Humvee partition word fuzz: %zu of 400 mutations parsed, %zu refused with an error, %zu built a model
-", parsed - parsed_flips,
+		std::printf("Humvee partition word fuzz: %zu of 400 mutations parsed, %zu refused with an error, %zu built a model\n", parsed - parsed_flips,
 				refused - refused_flips, built - built_flips);
 		CHECK(parsed > 0);
 	}
