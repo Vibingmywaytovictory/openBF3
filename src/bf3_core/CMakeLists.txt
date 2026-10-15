@@ -218,8 +218,8 @@ target_sources(bf3_core PRIVATE
     src/level/spawn_points.cpp
 )
 
-# S3 crowd (docs/design/s3.md §3, §15): persistent worker lanes for the per-frame pose job (interface; the
-# implementation src/worker_group.cpp lands with the track's first slice).
+# S3 crowd (docs/design/s3.md §3, §15): persistent worker lanes for the per-frame pose job.
 target_sources(bf3_core PRIVATE
     include/bf3/core/worker_group.h
+    src/worker_group.cpp
 )

@@ -26,9 +26,9 @@
 // Schedule (s3.md §5.8): soldier i (row r = i / cols, column c = i % cols; team = c < cols / 2 ? 0 : 1) faces
 // the grid heading + 180 deg + i * 37 deg and cycles through the phases below, phase_seconds each, offset by
 // i * 0.731 s, so every phase is on screen at once. Each phase has a target LOCAL velocity (in the soldier's
-// frame: +z forward, +x right); at each phase start (and at RunDiagonal's half) the local velocity ramps linearly
-// over ramp_seconds, so the run blend crosses direction brackets and the idle fade (0.2..1 m/s) in game, not only
-// in unit tests:
+// frame: +z forward, +x to its left, Y up, right-handed); at each phase start (and at RunDiagonal's half) the
+// local velocity ramps linearly over ramp_seconds, so the run blend crosses direction brackets and the idle fade
+// (0.2..1 m/s) in game, not only in unit tests:
 //   Idle        0
 //   RunFwd      run_speed forward
 //   RunBwd      side_factor * run_speed back
