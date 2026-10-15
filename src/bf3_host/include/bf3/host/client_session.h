@@ -11,12 +11,21 @@
 //   read_presentation()    the newest PresentationFrame, copied out under a short mutex (the frame is trivially
 //                          copyable and fixed size, <= ~20 KiB; a seqlock over heap-owning members would be UB)
 // It calls no Godot API, so the headless tests run it against a ServerHost on the same process.
+// The thread waits inside ENet's service call with a timeout to its next deadline (client tick or netsim
+// release), so a datagram is taken when it arrives, not at the next tick (no half-tick RTT bias on this side).
 //
 // Per client tick (60 Hz, client clock running the target command buffer ahead of the server, docs §7.5):
 //   1. service ENet; feed every received datagram through the inbound NetSim
-//   2. newest snapshot (seq_newer): if its own state differs from the predicted state at that tick beyond the
-//      epsilons (or any discrete field differs), reset to it, replay every later ring command and overwrite the
-//      ring's predicted states with the replayed ones (so the next snapshot compares against them)
+//   2. newest snapshot (seq_newer): its own state is the server's state at tick T = server_tick (protocol.h
+//      invariant). The ring is keyed by tick. If the ring holds a predicted state for T and it equals the server's
+//      within the epsilons (every discrete field equal), nothing happens. Otherwise (a difference, a ring miss
+//      after a stall or a clock reset, or a Spawned state) the client runs the one catch-up rule (docs §9.2):
+//        state = server state at T; prev = the ring's command at T, else sim::hold_command(state)
+//        for t = T + 1 .. client tick - 1:  cmd = the ring's command at t if the client made one for t, else
+//                                           repeated_command(prev, t) (what the server runs for a missing tick)
+//                                           state = step(state, cmd); ring[t] = (cmd, state); prev = cmd
+//      so every replayed tick overwrites the ring (the next snapshot compares against the replayed states) and
+//      the motor's precondition (command tick == state tick + 1) holds after any jump of the clock
 //   3. sample the input -> Command (quantised at sampling, so prediction and server see the same values)
 //   4. predict: SoldierMotor::step on the client's own CollisionWorld
 //   5. send a CommandPacket with the last kCommandsPerPacket commands through the outbound NetSim
@@ -72,11 +81,14 @@ struct ClientSessionConfig {
 	float teleport_above_m = 2.0f; // a correction above this snaps (no smoothing)
 	float position_epsilon_m = 1e-4f; // reconcile threshold
 	float velocity_epsilon = 1e-3f; // m/s
-	// Time sync (docs §7.5). The target command buffer is target_buffer_ticks plus the measured command-arrival
-	// jitter (2 x its mean absolute deviation in ticks, rounded up), clamped to max_buffer_ticks: 2 on loopback,
-	// 3 under "150/2".
+	// Time sync (docs §7.5). The target command buffer is target_buffer_ticks + max(0, ceil(2 x MAD - 1)), MAD
+	// being the mean absolute deviation of the server's integer buffer reports over the last 64 snapshots, clamped
+	// to max_buffer_ticks. The -1 keeps the +-1 flip of an integer reading (phase drift inside the deadband) from
+	// raising the target: 2 on loopback, 2-3 under "150/2". A new target is adopted only after it has been the
+	// computed value for target_hold_s (no flapping).
 	uint32_t target_buffer_ticks = 2;
 	uint32_t max_buffer_ticks = 6;
+	float target_hold_s = 2.0f;
 	float max_clock_adjust = 0.05f; // the client tick rate varies by at most +-5 %
 	float clock_time_constant_s = 1.5f; // proportional slew: rate = error / time constant, clamped (loop delay ~ RTT)
 	float clock_deadband_ticks = 0.5f; // no slew while |buffer - target| is below this
@@ -109,7 +121,8 @@ struct ClientStats {
 	uint8_t slot = 0;
 	sim::Tick client_tick = 0;
 	sim::Tick last_server_tick = 0;
-	double rtt_ms = 0.0; // snapshot sequence echo minus the server's echo hold
+	double rtt_ms = 0.0; // snapshot sequence echo minus the server's echo hold (smoothed)
+	double rtt_min_ms = 0.0; // minimum over the last 2 s (the server services ENet once per tick: up to +1 tick)
 	double enet_rtt_ms = 0.0; // ~0 on loopback: the netsim sits above ENet
 	int32_t command_buffer_ticks = 0; // the server's report
 	uint32_t target_buffer_ticks = 0; // the current target (docs §7.5)
@@ -120,8 +133,10 @@ struct ClientStats {
 	uint64_t snapshots_lost = 0; // sequence gaps
 	uint64_t snapshots_late = 0; // older than the newest applied
 	uint64_t commands_sent = 0;
-	uint64_t reconciliations = 0; // own state reset + replay
-	uint64_t replayed_ticks = 0;
+	uint64_t reconciliations = 0; // own state differed from the ring's prediction: reset + replay
+	uint64_t ring_misses = 0; // no predicted state for the snapshot's tick (stall, clock reset): catch-up, no compare
+	uint64_t spawns = 0; // Spawned states taken (catch-up from the spawn tick)
+	uint64_t replayed_ticks = 0; // steps of every catch-up (reconciliations, ring misses, spawns)
 	uint64_t corrections_over_1mm = 0; // |server - predicted| position > 1 mm at a reconciliation
 	float max_correction_m = 0.0f;
 	uint64_t teleports = 0; // corrections above teleport_above_m
@@ -156,6 +171,10 @@ struct PresentationFrame {
 	sim::Tick tick = 0; // the newer own tick
 	double tick_fraction = 0.0; // 0..1 of the way from prev to curr at publish time
 	uint64_t publish_ns = 0; // net::monotonic_ns
+	// The client clock's rate (ticks per ns, including the slew): the main thread advances tick_fraction by
+	// (now - publish_ns) * own_ticks_per_ns, clamped to 1 (present_own_fraction), so the own camera moves at the
+	// display rate between 60 Hz publishes.
+	double own_ticks_per_ns = double(sim::kSimHz) * 1e-9;
 	sim::SoldierState own_prev;
 	sim::SoldierState own_curr;
 	sim::Vec3 visual_offset{}; // added to the own position; decays to zero over error_decay_ms
@@ -166,8 +185,11 @@ struct PresentationFrame {
 	sim::SoldierState server_own;
 	uint16_t server_events = 0; // Snapshot::own_events ORed since the previous frame
 	uint32_t events = 0; // predicted sim::soldier_events:: of the own soldier since the previous frame
-	// The others' clock: render time in server ticks at publish_ns and the client clock's rate in ticks per
-	// nanosecond, so the render time at frame time t is render_ticks_at_publish + (t - publish_ns) * ticks_per_ns.
+	// The others' clock: render time in server ticks at publish_ns and its rate in ticks per nanosecond, so the
+	// render time at frame time t is render_ticks_at_publish + (t - publish_ns) * ticks_per_ns. It is built on the
+	// received server time (newest snapshot's server_tick + the time since it arrived, smoothed by a slow filter
+	// on the arrival offsets), not on the client's ahead-running command clock: render = received - delay
+	// (docs §9.4), so with d >= 2 snapshot intervals a sample newer than the render time normally exists.
 	double render_ticks_at_publish = 0.0;
 	double ticks_per_ns = double(sim::kSimHz) * 1e-9;
 	float extrapolate_max_ms = 250.0f;
@@ -182,6 +204,9 @@ static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 // for at most extrapolate_max_ms, then held). Writes at most r_out.size() soldiers and returns the count; adds
 // the extrapolated ones to *r_extrapolated when given. A pure function of the frame (tests call it directly).
 size_t present_others(const PresentationFrame &p_frame, uint64_t p_now_ns, std::span<PresentedSoldier> r_out, uint64_t *r_extrapolated = nullptr);
+// Main thread, every display frame: the own soldier's interpolation fraction between own_prev and own_curr at
+// p_now_ns: tick_fraction + (p_now_ns - publish_ns) * own_ticks_per_ns, clamped to [0, 1].
+double present_own_fraction(const PresentationFrame &p_frame, uint64_t p_now_ns);
 
 class ClientSession {
 public:

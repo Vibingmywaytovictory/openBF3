@@ -20,4 +20,5 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/collision_world.h
     include/bf3/sim/soldier_motor.h
     include/bf3/sim/spawn.h
+    src/collision_world_internal.h
 )

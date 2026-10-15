@@ -14,20 +14,35 @@
 // res://config/motor_tuning.cfg in the game and settable in tests, so measured values drop in without code.
 //
 // Collide-and-slide: Jolt's CharacterVirtual is the solver (docs §6.1), reset from SoldierState at the start of
-// every step (position, rotation = yaw, velocity, shape of the pose; then RefreshContacts) and read back after
-// ExtendedUpdate (walk stairs = StepHeight, stick to floor = AllowedDistanceFromGround when GroundHugging), so no
-// solver state survives between steps and a step restored from a snapshot equals the step the server ran.
-// One SoldierMotor serves any number of soldiers of one owner thread, one after the other.
-// The reset drops one thing a persistent CharacterVirtual would keep: the contacts' mHadCollision flags that
-// CancelVelocityTowardsSteepSlopes reads at the start of ExtendedUpdate (RefreshContacts rebuilds contacts with
-// mHadCollision = false). Both ends reset the same way, so they stay equal; behaviour against steep walls is the
-// reset path's, and the T2 slope tests run on it (docs §6.1).
-// Velocity is the motor's, not the solver's: Update never writes mLinearVelocity. The motor applies gravity only
-// while not grounded, passes ExtendedUpdate the mid-step velocity v - g dt / 2 (exact parabola), zeroes the
-// vertical part when the step ends grounded, and derives landings and the impact speed from its own kGrounded
-// change plus the exact fall distance. Its own kGrounded flag (not GetGroundState before the update, which
-// RefreshContacts computes without the velocity check) drives the mode logic. Update always gets kTickSeconds
-// and is never sub-stepped, so mLastDeltaTime cannot leak from one soldier to the next.
+// every step and read back after ExtendedUpdate (walk stairs = StepHeight, stick to floor =
+// AllowedDistanceFromGround when GroundHugging), so no solver state survives between steps and a step restored
+// from a snapshot equals the step the server ran. One SoldierMotor serves any number of soldiers of one owner
+// thread, one after the other.
+// Reset order, every step, before anything reads the character (docs §6.1 step 1):
+//   SetShape (the pose's, no overlap check) -> SetPosition -> SetRotation (yaw) -> SetLinearVelocity (the
+//   state's velocity) -> RefreshContacts.
+// The velocity must be set before RefreshContacts: it passes mLinearVelocity.NormalizedOr(0) to
+// GetContactsAtPosition as the active-edge movement direction, which changes contact normals and the ground state.
+// Without it a character shared by several soldiers would carry the previous soldier's velocity into the next
+// soldier's contacts (sim.motor.unit interleaves soldiers to catch this).
+// RefreshContacts -> StoreActiveContacts -> UpdateSupportingContact(skip velocity check) sets mHadCollision on
+// every contact closer than the collision tolerance, so a resting floor or a wall being pushed into keeps its
+// flag, as on a persistent character. Only predictive contacts (farther than the tolerance) lose it, which is
+// the one difference from a persistent character; both ends reset the same way (docs §6.1).
+// Velocity is the motor's, not the solver's: Update never writes mLinearVelocity. The motor
+//   - integrates the take-off tick as airborne (mid-step velocity v0 - g dt / 2), then applies gravity while the
+//     state is not grounded, passing ExtendedUpdate the mid-step velocity v - g dt / 2 (exact parabola);
+//   - clips its end velocity by what the solver realised: when the solver changed the horizontal displacement by
+//     more than 1e-4 m, the horizontal end velocity is the realised one (displacement / dt); when it changed the
+//     airborne vertical displacement by more than 1e-4 m (ceiling, wedge, steep bank), the vertical end velocity
+//     is dy / dt - g dt / 2, so a soldier held up while not grounded never accumulates fall speed;
+//   - zeroes the vertical part when the step ends grounded;
+//   - derives landings and the impact speed from its own kGrounded change plus the exact fall distance.
+// Its own kGrounded flag (not GetGroundState before the update, which RefreshContacts computes without the
+// velocity check) drives the mode logic. Update always gets kTickSeconds and is never sub-stepped, so
+// mLastDeltaTime cannot leak from one soldier to the next.
+// Pitch: the motor copies Command::pitch into the state unchanged (the input mapper clamps it to the Command's
+// +-kPitchLimit at sampling); the poses' look limits are kept in PoseParams but not applied in M1 (docs §6.3).
 
 #include "bf3/core/result.h"
 #include "bf3/sim/command.h"
@@ -125,7 +140,7 @@ struct PoseParams {
 	float step_height = 0;
 	std::array<float, 3> box_min_expand{}; // prone footprint
 	std::array<float, 3> box_max_expand{};
-	float min_look_pitch = 0, max_look_pitch = 0; // degrees
+	float min_look_pitch = 0, max_look_pitch = 0; // degrees (data: -45..45, prone -30..45); not applied in M1, docs §6.3
 	Curve throttle; // stick magnitude -> speed scale
 	std::array<uint16_t, kPoseCount> transition_ticks{}; // to each pose (0 = none listed / same pose)
 	StateSpeed on_ground;
@@ -184,7 +199,10 @@ public:
 	const MotorParams &params() const;
 
 	// One tick: r_state (the result of tick p_command.tick - 1) becomes the result of p_command.tick. Requires
-	// p_command.tick == r_state.tick + 1; a dead soldier only advances its tick.
+	// p_command.tick == r_state.tick + 1 (asserted in debug builds; a release build steps anyway and stamps
+	// p_command.tick, so a caller bug shows up as a hash mismatch, not as a crash); a dead soldier only advances
+	// its tick. The result depends on nothing but the arguments, the world and the params: stepping soldier A
+	// after soldier B on the same motor gives the same state as stepping A alone (docs §6.10).
 	void step(SoldierState &r_state, const Command &p_command, MotorStepInfo *r_info = nullptr) const;
 
 	// A fresh standing soldier at p_feet facing p_yaw, alive, full health, at p_tick; spawn protection

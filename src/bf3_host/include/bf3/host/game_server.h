@@ -6,10 +6,16 @@
 //
 // Tick order (plan §2.3): ServerHost services ENet and hands every datagram to on_receive -> tick():
 //   1. commands: per slot, the command for this tick from the slot's jitter buffer (by Command::tick); missing ->
-//      sim::repeated_command (edges cleared); commands for past ticks are dropped and counted late
+//      sim::repeated_command of the slot's last command (edges cleared); commands for past ticks are dropped and
+//      counted late. A command for a tick already buffered replaces it only when its sequence is newer (after a
+//      client clock reset moved the command tick backwards), else it is a redundant copy and dropped. A new slot's
+//      "last command" is sim::hold_command(spawn state), so the ticks between Spawned and the first real command
+//      run idle at the spawn yaw, exactly as the client's catch-up predicts them (docs §8.2, §9.2)
 //   2. command sources: bots / scripted walkers write their command for this tick (same Command, D11)
 //   3. sim: every live soldier steps once (SoldierMotor over the server's CollisionWorld), slot order
-//   4. rules: deaths -> respawn after respawn_ticks at choose_spawn (M1: fall damage is the only damage)
+//   4. rules: Ready / deaths -> (re)spawn at choose_spawn (after respawn_ticks for a death): sim::settle_spawn at
+//      this tick N, so the state is stamped N with full protection; Spawned goes out at once and the soldier
+//      steps from N + 1 (M1: fall damage is the only damage)
 //   5. (lag-compensation history: M2a)
 //   6. snapshots: every snapshot_divisor ticks, one Snapshot per connected client (own state + every other)
 // Slots: 0..max_slots-1 for peers and server-side sources alike; a slot is the ghost id of its soldier.
@@ -19,6 +25,8 @@
 // slots; a 128-slot config takes all 102 Metro points in one batch, the default 64 takes two), idle commands over
 // `ticks` live server ticks, judge_settle, rows back, dummies removed. Dummies are left out of choose_spawn's
 // live-soldier list, so a respawn during the sweep still finds a point.
+// Dev Trace (net::DebugKind::Trace): the requesting client's soldier state after every tick, for `ticks` ticks,
+// returned in one DebugReport (E1 through the full path, docs §14).
 
 #include "bf3/core/result.h"
 #include "bf3/host/level_load.h"
@@ -70,6 +78,7 @@ struct SlotStats {
 	uint64_t commands_applied = 0;
 	uint64_t commands_repeated = 0;
 	uint64_t commands_late = 0; // arrived after their tick ran
+	uint64_t commands_replaced = 0; // a newer sequence replaced a buffered command of the same tick
 	int32_t buffer_ticks = 0; // newest command tick received - server tick
 	sim::SoldierState state; // the authoritative state after the last tick (E1 through the server, docs §14)
 };

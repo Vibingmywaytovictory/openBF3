@@ -32,6 +32,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -162,5 +163,63 @@ core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount
 // Bytes the plan's prepared data needs resident at once (meshes LOD 0 + textures, estimated from the census):
 // the loader uses it to decide the number of lanes against the RSS budget (docs §12.4).
 uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::level::MeshCensus &p_census);
+
+// ---- Phase B: the scene lanes (docs §12.1, §12.2) -------------------------------------------------------------
+// Godot-free, so render.scene times it headless on Metro with a counting sink. The lanes are threads of their own
+// (bf3::core::parallel_for is a blocking fork-join and would hold the loader thread), so the loader goes on to
+// load_shared_level while they run.
+
+struct SceneLaneOptions {
+	unsigned lanes = 8; // threads; the session gives the other cores to the shape cook (level_load.h)
+	unsigned texture_lanes = 6; // at most this many lanes decode textures at once (decode stops scaling past ~4, gap load §2.4)
+	// Prepared bytes handed to the sink and not yet released (release_bytes). A lane whose next item would cross
+	// it waits; the sink is never blocked. 256 MiB [inferred]; 128 MiB is the fallback if the game's own peak
+	// counts towards E6 (docs §12.4).
+	uint64_t max_inflight_bytes = 256ull << 20;
+};
+
+// Receives the prepared items on the lane threads; implementations must be thread-safe and must not block (the
+// Godot side queues the item and returns). Each item's bytes() stay in flight until SceneLanes::release_bytes.
+class SceneSink {
+public:
+	virtual ~SceneSink() = default;
+	virtual void mesh(PreparedSceneMesh &&p_mesh, uint64_t p_bytes) = 0;
+	virtual void texture(uint32_t p_texture, PreparedTexture &&p_data, uint64_t p_bytes) = 0;
+	virtual void terrain(uint32_t p_terrain, PreparedMesh &&p_mesh, uint64_t p_bytes) = 0;
+	virtual void failure(const std::string &p_item, const std::string &p_error) = 0; // a missing texture never fails the load
+};
+
+struct SceneLaneStats {
+	double wall_seconds = 0.0; // start -> last item handed over
+	double mesh_seconds = 0.0; // summed over lanes (work time)
+	double texture_seconds = 0.0;
+	double terrain_seconds = 0.0;
+	uint64_t mesh_items = 0, texture_items = 0, terrain_items = 0;
+	uint64_t mesh_bytes = 0, texture_bytes = 0, terrain_bytes = 0; // handed to the sink
+	uint64_t peak_inflight_bytes = 0;
+	uint64_t cache_hits = 0, cache_converted = 0; // mesh blobs
+	uint64_t failures = 0;
+};
+
+// Runs every item of a plan: mesh requests grouped by res (one blob decode, then each variant on the same lane),
+// textures one item each, terrains one item each. p_plan, p_mount, p_cache and p_sink must outlive wait().
+class SceneLanes {
+public:
+	SceneLanes();
+	~SceneLanes(); // cancels and joins
+	SceneLanes(const SceneLanes &) = delete;
+	SceneLanes &operator=(const SceneLanes &) = delete;
+
+	core::Status start(const LevelScenePlan &p_plan, const core::LevelMount &p_mount, core::Cache *p_cache, const SceneLaneOptions &p_options,
+			SceneSink &p_sink);
+	void release_bytes(uint64_t p_bytes); // any thread: the consumer freed this many prepared bytes
+	void cancel(); // items not started are skipped
+	bool done() const;
+	core::Result<SceneLaneStats> wait(); // joins; fails only on a lane error that is not a per-item failure
+
+private:
+	struct Impl;
+	std::unique_ptr<Impl> impl_;
+};
 
 } // namespace bf3::render

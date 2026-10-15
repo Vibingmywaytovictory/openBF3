@@ -78,6 +78,14 @@ struct SoldierState {
 };
 static_assert(std::is_trivially_copyable_v<SoldierState>);
 
+// The command a slot "last had" when its client has sent none for the ticks after p_state (after Spawned, after a
+// gap the jitter buffer cannot fill, docs §8.2 / §9.2): the idle command of p_state's tick with its view and target
+// pose. The server feeds it to repeated_command for every tick without a real command; the client's catch-up
+// replays the same commands, so both step identical inputs.
+constexpr Command hold_command(const SoldierState &p_state) {
+	return idle_command(p_state.tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+}
+
 // FNV-1a 64 over every field's bytes in declaration order (floats as their bit patterns): the determinism tests
 // compare runs and the server/client replay with it (soldier_motor.cpp).
 uint64_t soldier_state_hash(const SoldierState &p_state);

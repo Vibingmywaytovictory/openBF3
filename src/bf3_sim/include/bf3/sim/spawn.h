@@ -17,6 +17,7 @@
 #include "bf3/sim/soldier_state.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -52,7 +53,10 @@ struct SettleResult {
 	bool ok = false;
 	std::string failure; // why not, when !ok (no floor, no room within the rings, still airborne, ...)
 	Vec3 placed{}; // where the soldier was put before the idle ticks
-	SoldierState state; // after settle_ticks idle ticks
+	// After settle_ticks idle ticks. place_spawn / judge_settle leave it as the steps made it (tick = p_tick +
+	// settle_ticks for the headless pieces); settle_spawn re-stamps it with stamp_spawn(p_tick), so it is the
+	// state of a soldier that spawns at p_tick with full spawn protection.
+	SoldierState state;
 	float floor_y = 0; // the floor found below the point
 	float lift = 0; // placed.y - point.y
 	float shift = 0; // horizontal distance placed -> point
@@ -76,7 +80,14 @@ SettleResult place_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_wo
 		const SettleOptions &p_options = {});
 void judge_settle(const SoldierMotor &p_motor, const CollisionWorld &p_world, const SpawnPoint &p_point, const SettleOptions &p_options,
 		SettleResult &r_result);
-// place_spawn, settle_ticks idle steps, judge_settle. p_motor must be bound to p_world. Caller's thread.
+// Makes a settled state the spawn state of tick p_tick: tick = p_tick, protect_ticks = immortal_ticks with
+// kSpawnProtected (the idle ticks do not use up ImmortalTimeAfterSpawn), events = kSpawned, air_ticks,
+// jump_penalty_ticks, impact_speed and damage 0. Position, velocity, ground normal, pose and the grounded /
+// steep flags are kept. The server sends this state in Spawned and steps it from p_tick + 1 (docs §8.2).
+void stamp_spawn(const SoldierMotor &p_motor, Tick p_tick, SoldierState &r_state);
+// place_spawn, settle_ticks idle steps (ticks p_tick + 1 ...; the motor's tick precondition), judge_settle, then
+// stamp_spawn(p_tick). The server calls it in the rules step of server tick p_tick (docs §8.1 step 5).
+// p_motor must be bound to p_world. Caller's thread.
 SettleResult settle_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_world, const SpawnPoint &p_point, uint32_t p_life, Tick p_tick,
 		const SettleOptions &p_options = {});
 
@@ -86,5 +97,20 @@ SettleResult settle_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_w
 // SIZE_MAX when there is none.
 size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const std::vector<Vec3> &p_live_soldiers, float p_protection_radius,
 		uint64_t p_seed);
+
+// ---- test courses on a real level (sim.motor, host.session, --m1-check: docs §14) ----------------------------
+// Deterministic searches, so the headless tests and the Godot check pick the same spots on the same world.
+
+// A heading (Command yaw) from p_feet along which a standing soldier has p_length metres of clear, level,
+// walkable path: a stand-capsule sweep of p_length finds nothing, and floor rays every metre along it stay within
+// p_max_rise of p_feet.y with walkable normals (no stairs, no ramps). Tries p_headings yaws evenly spaced from
+// p_first_yaw; nullopt when none qualifies (the test then moves to the next spawn point).
+std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const CollisionWorld &p_world, const Vec3 &p_feet, float p_length,
+		float p_max_rise = 0.05f, uint32_t p_headings = 16, uint16_t p_first_yaw = 0);
+
+// A floor spot for the E1d drops: scans the static world's bounds on a p_grid metre grid (x, then z, ascending)
+// and returns the first floor point whose normal is within 2 degrees of up over a 1 m patch and from which a
+// stand capsule swept p_clearance metres straight up hits nothing. nullopt when none.
+std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionWorld &p_world, float p_clearance = 50.0f, float p_grid = 5.0f);
 
 } // namespace bf3::sim

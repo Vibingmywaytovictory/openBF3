@@ -14,11 +14,13 @@
 //                  the motor params, the ids and digests.
 // Order on the loader thread (the World-touching steps are serial, the heavy steps parallel; docs §12.1):
 //   open_level_database  mount -> partitions -> traverse                                  [Mount, Database]
-//   bf3_render level_scene.h: census -> plan_level_scene; the mesh blobs, textures and terrain are queued on
-//                        the lanes at once                                                 [Meshes, Materials, Textures]
-//   load_shared_level    spawns, soldier def; static world through the cache (cold: the soup runs here while
-//                        the lanes convert meshes and decode textures; its tile cooks join the lanes) [Shapes]
-// The scene plan goes first because load_static_world_cached blocks the loader until its cook ends.
+//   bf3_render level_scene.h: census -> plan_level_scene -> SceneLanes::start (the mesh blobs, textures and
+//                        terrain run on the scene lanes' own threads from here on)        [Meshes, Materials, Textures]
+//   load_shared_level    spawns, soldier def; static world through the cache (cold: the soup and the tile cook
+//                        run on SharedLoadOptions::threads threads of their own, beside the scene lanes) [Shapes]
+// The scene plan goes first because load_static_world_cached blocks the loader until its cook ends. The two
+// thread pools are sized together by the caller (docs §12.2: 16 cores = 8 scene lanes + 8 shape threads), so the
+// load does not run 16 + 16 workers at once.
 
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/result.h"
@@ -113,7 +115,9 @@ struct SharedLevel {
 
 struct SharedLoadOptions {
 	core::Cache *cache = nullptr; // null: convert without a cache
-	unsigned threads = 0; // 0 = all cores
+	// Soup + tile-cook threads (StaticWorldBuildOptions::threads and soup_threads); 0 = all cores. The session
+	// passes the cores the scene lanes do not use (docs §12.2).
+	unsigned threads = 0;
 	sim::MotorTuning tuning;
 };
 

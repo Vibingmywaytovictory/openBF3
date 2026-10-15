@@ -83,6 +83,11 @@ struct Ready {
 	std::optional<core::Sha256Digest> source_digest;
 };
 
+// The client's soldier exists. `state` is stamped at the server tick S of the spawn (state.tick == S, full spawn
+// protection, sim::stamp_spawn). From S + 1 until the first real command of the client arrives, the server steps
+// the slot with repeated_command(sim::hold_command(state), tick) (idle, spawn yaw, pitch 0, Stand, kRepeated); the
+// client's catch-up (docs §9.2) steps the same commands from S up to its own clock and writes those ticks into its
+// prediction ring, so the first snapshots compare equal.
 struct Spawned {
 	uint8_t slot = 0;
 	uint32_t spawn_index = 0;
@@ -108,7 +113,12 @@ enum class DebugKind : uint8_t {
 	// headless sim.motor rows). Runs in batches of the free slots; dummies never count for choose_spawn.
 	SpawnSweep = 3,
 	SetSeed = 4, // reseed the server's spawn choice
+	// Record the requesting client's soldier for `ticks` server ticks (<= kMaxTraceTicks), starting with the tick
+	// after the request is handled: one authoritative SoldierState per tick, returned in DebugReport::trace when
+	// done. E1 through the full path is measured on it (every tick, not the 30 Hz snapshots; docs §14).
+	Trace = 5,
 };
+inline constexpr uint32_t kMaxTraceTicks = 1200; // 20 s; ~92 KiB on ch1 (reliable, fragments)
 
 struct DebugRequest {
 	DebugKind kind = DebugKind::Teleport;
@@ -133,6 +143,7 @@ struct DebugReport {
 	bool ok = false;
 	std::string text; // human-readable result line
 	std::vector<SpawnSweepRow> sweep; // SpawnSweep only; sent on ch1 (reliable, may fragment)
+	std::vector<sim::SoldierState> trace; // Trace only: consecutive ticks, oldest first, full precision
 };
 
 std::vector<uint8_t> encode_hello(const Hello &p_message);
@@ -171,14 +182,14 @@ std::vector<uint8_t> encode_command_packet(const CommandPacket &p_packet);
 core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_datagram);
 
 // ---- snapshots (ch0, S->C, every snapshot_divisor ticks) ---------------------------------------------------------
-// Body: u16 seq | u32 server tick | u32 last command tick and u32 last command sequence applied to this client's
+// Body: u16 seq | u32 server tick | u32 sequence of the command applied at the server tick to this client's
 // soldier, 1 bit repeated | i8 command buffer ticks (newest command tick received - server tick; time sync §7.5)
 // | u16 echo of the newest command sequence received | u16 echo hold (time from receiving that command to this
 // send, 0.1 ms units, so RTT = now - send time of the echoed command - hold) | u16 own events (OR of the own
 // soldier's soldier_events over every tick since the previous snapshot to this client: events of odd ticks are
 // not lost) | own-state block | u8 others count | others.
 // Own-state block: 1 bit present; then every SoldierState field at full precision (floats as f32 bit patterns,
-// integers in their own widths, the reserved fields left out): 77 bytes. Header + own state ~100 bytes.
+// integers in their own widths, the reserved fields left out): 77 bytes. Header + own state ~96 bytes.
 // Other soldier (M1: absolute, no baseline; M3 adds a 1-bit "delta vs acked baseline" in front without moving
 // the rest): u8 slot | u8 life generation (life & 0xFF, wraps) | position 21+18+21 bits (quant::kPosition*) |
 // velocity 3 x 11 bits | yaw 14 | pitch 12 | pose 2 | target pose 2 | transition progress 8 (0..255 of the total)
@@ -202,12 +213,16 @@ struct OtherSoldier {
 // compare against this).
 OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state);
 
+// Invariant (docs §9.2): the snapshot is sent after server tick `server_tick` ran, so own->tick == server_tick,
+// and the command applied to the own soldier at that tick is the client's command for that tick
+// (applied_repeated false) or a repeat (applied_repeated true; applied_sequence is then the sequence of the command
+// it repeats, 0 for the hold command after a spawn). The client keys its prediction ring by tick
+// (SoldierState::tick == Command::tick), never by sequence. Decoders fail a snapshot whose own->tick differs.
 struct Snapshot {
 	uint16_t seq = 0;
 	sim::Tick server_tick = 0;
-	sim::Tick last_command_tick = 0;
-	uint32_t last_command_sequence = 0;
-	bool last_command_repeated = false;
+	uint32_t applied_sequence = 0;
+	bool applied_repeated = false;
 	int8_t command_buffer_ticks = 0;
 	uint16_t sequence_echo = 0;
 	uint16_t echo_hold_100us = 0; // how long the server held the echoed command before this send (0.1 ms)

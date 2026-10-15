@@ -68,6 +68,8 @@ static_assert(bf3::core::level::kCollisionSoupVersion >= 1);
 static_assert(sim::idle_command(5, 7, -3, sim::Pose::Prone).tick == 5);
 static_assert(sim::idle_command(5, 7, -3, sim::Pose::Prone).buttons == 0);
 static_assert(uint8_t(bf3::host::LoadStage::Failed) + 1 == bf3::host::kLoadStageCount);
+static_assert(uint8_t(net::DebugKind::Trace) == 5);
+static_assert(net::kMaxTraceTicks >= 20 * sim::kSimHz); // E1's longest course (the 46 m drop and the transitions)
 static_assert(std::is_same_v<decltype(bf3::host::ServerConfig{}.game), std::shared_ptr<const bf3::host::GameServerConfig>>);
 
 TEST_CASE("m1 contract: yaw quantisation wraps and round-trips within half a step") {
@@ -118,6 +120,30 @@ TEST_CASE("m1 contract: a repeated command keeps held buttons, clears edges and 
 	CHECK(r.pose == sim::Pose::Crouch);
 }
 
+TEST_CASE("m1 contract: the hold command is the idle command of the state's tick, view and target pose") {
+	// The server repeats it from the spawn tick until the first real command arrives; the client's catch-up runs
+	// the same commands (docs §9.2), so they are pinned here.
+	sim::SoldierState st;
+	st.tick = 4000;
+	st.yaw = 777;
+	st.pitch = -12;
+	st.pose = sim::Pose::Stand;
+	st.target_pose = sim::Pose::Crouch;
+	const sim::Command h = sim::hold_command(st);
+	CHECK(h.tick == 4000);
+	CHECK(h.yaw == 777);
+	CHECK(h.pitch == -12);
+	CHECK(h.pose == sim::Pose::Crouch);
+	CHECK(h.buttons == 0);
+	CHECK(h.move_forward == 0);
+	CHECK(h.move_right == 0);
+	const sim::Command r = sim::repeated_command(h, 4001);
+	CHECK(r.tick == 4001);
+	CHECK((r.flags & sim::command_flags::kRepeated) != 0);
+	// Two repeats of the same hold are equal: the server and the client step identical inputs.
+	CHECK(sim::repeated_command(r, 4002) == sim::repeated_command(h, 4002));
+}
+
 TEST_CASE("m1 contract: snapshot quantisers stay within half a step in range") {
 	const net::Quantizer qs[] = { net::quant::kPositionXZ, net::quant::kPositionY, net::quant::kSoldierVelocity };
 	for (const net::Quantizer &q : qs) {
@@ -137,6 +163,7 @@ TEST_CASE("m1 contract: default configs match the design numbers") {
 	CHECK(c.interp_max_ms == 150.0f);
 	CHECK(c.error_decay_ms == 100.0f);
 	CHECK(c.target_buffer_ticks == 2);
+	CHECK(c.target_hold_s > 0.0f);
 	CHECK(c.clock_time_constant_s >= 1.0f);
 	CHECK(c.extrapolate_max_ms == 250.0f);
 	CHECK(c.max_clock_adjust == doctest::Approx(0.05f));
