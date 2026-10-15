@@ -62,7 +62,8 @@ private:
 };
 
 // A uniform quantiser: value -> integer in [0, 2^bits), clamped; decode(encode(v)) is within step / 2 of v in
-// range. The ranges of topics/05 §7.2.
+// range. The ranges of topics/05 §7.2. encode works in double: in float, (v - min) / step + 0.5 near 2^21 has an
+// ulp of a quarter step and broke the step / 2 bound by up to 0.6 mm (T3, docs §7.3).
 struct Quantizer {
 	float min = 0;
 	float step = 1;
@@ -70,11 +71,11 @@ struct Quantizer {
 
 	constexpr uint32_t max_code() const { return bits >= 32 ? 0xFFFFFFFFu : ((1u << bits) - 1u); }
 	constexpr uint32_t encode(float p_value) const {
-		const float t = (p_value - min) / step + 0.5f;
-		if (!(t > 0.0f)) {
+		const double t = (double(p_value) - double(min)) / double(step) + 0.5;
+		if (!(t > 0.0)) {
 			return 0; // also NaN
 		}
-		const float top = float(max_code());
+		const double top = double(max_code());
 		return t >= top ? max_code() : uint32_t(t);
 	}
 	constexpr float decode(uint32_t p_code) const { return min + float(p_code > max_code() ? max_code() : p_code) * step; }
