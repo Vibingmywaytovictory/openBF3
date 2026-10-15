@@ -201,6 +201,40 @@ TEST_SUITE("render-s3") {
 							<< p.below_right << " < 0.7), hand-IK " << p.hand_ik_m << " m");
 			CHECK(pal.size() == a.teams[t].binds.size());
 		}
+		// The weapon stays rigid in the idle / run / aim poses: every weapon bind's skin matrix equals Wep_Root's
+		// (all are identity at rest with the layout, so a rigid weapon moves as one). A joint that a locomotion or aim
+		// clip drives off the weapon's layout would draw a floating part.
+		{
+			std::vector<anim::CrowdSoldierInput> idle(2);
+			idle[0].team = 0;
+			idle[1].team = 1;
+			idle[1].pitch = 0.6f;
+			auto ei = anim::CrowdEvaluator::make(a.clips, teams, 2, anim::CrowdConfig{});
+			REQUIRE(ei.ok());
+			(*ei)->set_inputs(idle, 0.0);
+			(*ei)->evaluate_all_here();
+			for (uint32_t t = 0; t < 2; ++t) {
+				const std::vector<anim::SkinBind> &binds = a.teams[t].binds.binds();
+				const std::span<const anim::Mat34> pal = (*ei)->palette(t);
+				int32_t root = -1;
+				for (size_t b = 0; b < binds.size(); ++b) {
+					root = binds[b].name == "Wep_Root" ? int32_t(b) : root;
+				}
+				REQUIRE(root >= 0);
+				std::string loose;
+				for (size_t b = 0; b < binds.size(); ++b) {
+					if (binds[b].name.rfind("Wep_", 0) != 0) {
+						continue;
+					}
+					const float diff = anim::mat_max_diff(pal[b], pal[size_t(root)]);
+					if (diff > 1e-3f) {
+						loose += " " + binds[b].name + "=" + std::to_string(diff);
+					}
+				}
+				MESSAGE("team " << t << std::string(t == 0 ? " idle" : " idle + aim") << ": weapon binds off Wep_Root:" << (loose.empty() ? " none" : loose));
+				CHECK_MESSAGE(loose.empty(), loose);
+			}
+		}
 		const bf3::core::SnapshotDiff d = bf3::core::diff_snapshots(before, reader.snapshot());
 		MESSAGE("install unchanged: " << (d.clean() ? "yes" : d.summary()));
 		CHECK(d.clean());

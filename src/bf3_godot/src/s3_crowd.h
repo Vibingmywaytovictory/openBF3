@@ -143,6 +143,7 @@ private:
 		uint32_t windows = 0; // 0: continuous; else alternating animated / frozen windows of kWindowSeconds
 		bool overview = false; // save s3_overview.png after the warm-up
 		bool palettes = true; // false: the --s3-diag run that uploads roots only
+		bool crowd_hidden = false; // R0: the level without the crowd (every soldier hidden, step not called)
 	};
 	struct Sample {
 		float step_ms = 0, step_cpu_ms = 0, other_cpu_ms = 0, frame_ms = 0, render_cpu_ms = 0, render_gpu_ms = 0, job_ms = 0, blocked_ms = 0;

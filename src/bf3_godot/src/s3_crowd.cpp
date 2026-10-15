@@ -554,6 +554,7 @@ void Bf3Crowd::_process(double p_delta) {
 			if (g0_stage_ && g0_config_) {
 				plan_.push_back(RunSpec{ "bench skeleton3d", SkinBackend::Skeleton3D, false, false, false, gate::kBenchWindows, false });
 				plan_.push_back(RunSpec{ "bench rs", SkinBackend::RsSkeleton, false, false, false, gate::kBenchWindows, false });
+				plan_.push_back(RunSpec{ "R0 crowd hidden", SkinBackend::RsSkeleton, false, false, false, 0, false, true, true });
 				plan_.push_back(RunSpec{ "R1", SkinBackend::RsSkeleton, false, false, false, 0, true });
 				plan_.push_back(RunSpec{ "R2", SkinBackend::RsSkeleton, false, false, false, gate::kR2Windows, false });
 				plan_.push_back(RunSpec{ "R3 lod=on spread", SkinBackend::RsSkeleton, true, true, false, 0, false });
@@ -599,6 +600,7 @@ void Bf3Crowd::begin_run(const RunSpec &p_spec) {
 	}
 	lod_spread_ = spec.lod_spread;
 	uploader_->set_palette_upload(spec.palettes);
+	uploader_->set_visible(!spec.crowd_hidden);
 	DisplayServer::get_singleton()->window_set_vsync_mode(spec.vsync ? DisplayServer::VSYNC_ENABLED : DisplayServer::VSYNC_DISABLED);
 	Engine::get_singleton()->set_max_fps(0);
 	frozen_ = false;
@@ -654,7 +656,9 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 		}
 	}
 	// Window class of the next frame.
-	if (windowed && r.t > warm) {
+	if (r.spec.crowd_hidden) {
+		frozen_ = true;
+	} else if (windowed && r.t > warm) {
 		const uint32_t w = uint32_t((r.t - warm) / gate::kWindowSeconds);
 		frozen_ = (w % 2) == 1;
 	} else {
@@ -664,6 +668,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 		return;
 	}
 	frozen_ = false;
+	uploader_->set_visible(true);
 	// The run is over: summarize.
 	if (windowed) {
 		const HiddenCostStats h = hidden_cost(r);
@@ -928,11 +933,13 @@ void Bf3Crowd::report_and_finish() {
 		s1 = summarize(*r1, -1);
 		uint32_t view_min = UINT32_MAX;
 		for (const RunState &r : done_runs_) {
-			view_min = std::min(view_min, r.in_view_min);
+			if (!r.spec.crowd_hidden) {
+				view_min = std::min(view_min, r.in_view_min);
+			}
 		}
 		const bool view = view_min == gate::kInView;
 		valid = valid && view;
-		all &= row("G0-view", view, fmt("in-view minimum %u of 64 over every run (every 30th frame)", view_min == UINT32_MAX ? 0 : view_min));
+		all &= row("G0-view", view, fmt("in-view minimum %u of 64 over every run with the crowd drawn (every 30th frame)", view_min == UINT32_MAX ? 0 : view_min));
 		const bool blend = s1.two_cycle_fraction >= gate::kMinTwoCycleFraction && s1.idle_mix_fraction >= gate::kMinIdleMixFraction &&
 				s1.mean_loco_clips >= gate::kMinMeanLocoClips;
 		valid = valid && blend;
@@ -984,6 +991,11 @@ void Bf3Crowd::report_and_finish() {
 					"R3", "report", s3.step_p50_ms, s3.step_p99_ms, s1.step_p50_ms, s1.step_p99_ms, s3.job_p50_ms, s1.job_p50_ms, s3.evaluated_mean, tiers.c_str()));
 		}
 		for (const RunState &r : done_runs_) {
+			if (r.spec.crowd_hidden) {
+				const CrowdRunStats s0 = summarize(r, -1);
+				report_.push_back(fmt("%-10s %-7s level only (crowd hidden, step not called): frame p50 %.2f p99 %.2f ms, %.0f fps; render cpu %.2f gpu %.2f ms", "R0",
+						"report", s0.frame_p50_ms, s0.frame_p99_ms, s0.fps, s0.render_cpu_p50_ms, s0.render_gpu_p50_ms));
+			}
 			if (r.spec.label.rfind("Rdiag", 0) == 0) {
 				const HiddenCostStats d = hidden_cost(r);
 				report_.push_back(fmt("%-10s %-7s roots only (no palettes): hidden %.3f ms (R2 with palettes: see G1b); render cpu %.2f / %.2f ms; fps %.0f / %.0f", "diag",
