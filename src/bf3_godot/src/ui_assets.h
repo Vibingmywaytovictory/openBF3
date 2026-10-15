@@ -97,6 +97,11 @@ public:
 	// Godot-free results the checks read (main thread, after "assets_loaded").
 	const bf3::core::ui::UiFontLibrary *fonts() const;
 	const bf3::core::ui::SwfAtlasMap *atlas_map(const std::string &p_movie) const;
+	// Added by the implementation (docs §12.1): the library the loader opened (the check re-reads source outlines and
+	// runs the font-name census on it), the loaded HUD rows of one screen, and one uploaded atlas texture.
+	const bf3::core::ui::SwfLibrary *movies() const;
+	const std::vector<bf3::core::ui::HudPlacement> *hud_placements(const std::string &p_movie) const;
+	godot::Ref<godot::Texture2D> atlas_texture(const std::string &p_movie, uint16_t p_image_id) const;
 	double load_seconds() const;
 
 protected:

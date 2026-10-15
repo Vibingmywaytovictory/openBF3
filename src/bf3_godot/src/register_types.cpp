@@ -7,6 +7,9 @@
 #include "level_session.h"
 #include "viewmodel_demo.h"
 #include "weapon_inspector.h"
+// UI ui1
+#include "ui_assets.h"
+#include "ui_font_check.h"
 
 #include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
@@ -33,6 +36,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3CollisionOverlay);
 	// M1 T6
 	GDREGISTER_CLASS(bf3::godot_side::Bf3LevelSession);
+	// UI ui1
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiAssets);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

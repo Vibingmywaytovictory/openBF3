@@ -26,7 +26,10 @@
 
 #include <godot_cpp/classes/control.hpp>
 
+#include <atomic>
+#include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace bf3::godot_side {
@@ -55,6 +58,14 @@ private:
 	};
 	void run_checks(Bf3UiAssets &p_assets);
 	void finish();
+	// Added by the implementation: Godot-free inputs of the rows (source outlines, the font-name census, the text
+	// database coverage) computed on the check's own thread once the assets are loaded; the page drawing and shots.
+	struct Work;
+	void start_work(Bf3UiAssets &p_assets);
+	void draw_fonts_page(Bf3UiAssets &p_assets);
+	void draw_coverage_page(Bf3UiAssets &p_assets);
+	void draw_icons_page(Bf3UiAssets &p_assets);
+	bool save_shot(const std::string &p_file);
 
 	std::vector<Row> rows_;
 	std::string shot_dir_;
@@ -62,6 +73,11 @@ private:
 	int page_ = 0;
 	int frames_on_page_ = 0;
 	bool done_ = false;
+	std::unique_ptr<Work> work_;
+	std::thread worker_;
+	std::atomic<bool> work_done_{ false };
+	bool checked_ = false;
+	int exit_code_ = 0;
 };
 
 } // namespace bf3::godot_side
