@@ -1,9 +1,30 @@
 # M2a weapons core: design and contract
 
-Status: design for implementation, revision 1, 2026-10-15. Track "M2a weapons core" (branch `m2a/weapons`), the
+Status: design for implementation, revision 2, 2026-10-15. Track "M2a weapons core" (branch `m2a/weapons`), the
 first wave of milestone M2a "Infantry gunplay" ([research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md)
 §6). The interface headers named here are in the tree and compile (ctest `m2a.weapons.contract`). Their bodies are
 the implementation wave's work (§13).
+
+Revision 2 answers the review of revision 1:
+* W1's data row could not pass: a 31-round M16A3 cannot fire 134 shots in 10 s. There is now an oracle-only
+  `WeaponTable::infinite_magazine`, and the one-magazine row is gated without it (§1, §5.5).
+* The target seam could not rewind per shooter. `HitTargetProvider::targets_for(TargetQuery)` now carries the
+  projectile's identity, and `refly_projectile` handles a late HitReport (§5.7, §7.1).
+* Float projectile state could not meet W2's 1 mm max-range row. Flight is now double, closed form while unpowered
+  (§5.8).
+* Smaller fixes:
+  * the kind partition corrected;
+  * `ShotEvent::pellet_cone`;
+  * timed phase events for W6;
+  * the commit-time rounding;
+  * the tracer, threshold and power bounds;
+  * the fire-mode counter's modular step;
+  * Tap pinned to the containing tick;
+  * the synthetic world's extent and the 60 m fallback;
+  * W7's hip-fire condition;
+  * W11's aim, duty cycle, p99 rank and lock handling;
+  * replayed shots discarded;
+  * invisible-blocker counts.
 
 Scope of this track: the Godot-free weapon core in `bf3_sim`: the per-soldier weapon state machine with sub-tick
 shot times, the counter-based shot RNG, spread and recoil from data with the unmeasured mechanics as switches,
@@ -34,17 +55,17 @@ on this shared machine (rule 8). Each gate has one ctest, and `bf3dump weapon-si
 
 | # | criterion | measured by (ctest; command) | pass threshold |
 |---|---|---|---|
-| W1 | fire timing (§7.1) | `sim.weapons.unit` (synthetic defs with the §7.1 numbers) and `sim.weapons` (defs resolved from MP_Subway), from the per-tick `ShotEvent` times of `step_soldier_weapons`; `bf3dump weapon-sim --check` | **M16A3** (`u_m16a4`) fire held 10 s from the press tick: 134 shots, the first at the press tick's start, every gap exactly 4,500,000 units (75 ms). **M98B** (`u_m98b`): the bolt cycle (`kBoltStarted` to `kBoltFinished`) is exactly 78,000,000 units (1.3 s, 46.15 RPM, §7.1 "46.2"); JNG-90 / L96 / M40A5 / SV98 give 1.3 / 1.38 / 1.1 / 1.25 s. **AN-94** (`u_an94`): each press fires 2 shots exactly 3,000,000 apart (1200 RPM). **870MCS** (`u_870`): each shot spawns 12 pellet projectiles with 12 distinct directions inside 3° + spread, and with the Tap script shots are exactly 28,800,000 apart (0.48 s pump, 125 RPM). **M16A4** (`u_m16_burst`): each press fires 3 shots 4,500,000 apart; one burst per press. **M9**: single shots at least 9,000,000 apart (400 RPM) |
-| W2 | ballistic drop, no drag; max range | `sim.weapons.unit` (synthetic) and `sim.weapons` (data defs): the stepped flight (`ProjectileWorld`) against synthetic vertical walls; `bf3dump weapon-sim <w>` drop table | v0 650, g 15 (M16A3 data): the impact height below the launch line at the 100 m and 300 m walls is 0.1775 / 1.5976 m **within 1 cm** (§7.1: 0.178 / 1.60). M98B (650, g 9.81): 1.0449 m at 300 m and 11.609 m at 1,000 m within 1 cm (§7.1 quotes 1.05 / 11.6; README already notes the 1.045). Max range: the horizontal distance at expiry is v0 × TTL within 1 mm (M16A3 975 m, M98B 3,250 m); a wall at 0.99 × range is hit, one at 1.01 × is not |
-| W3 | shots to kill (§7.1 rows) | `sim.weapons` (`shots_to_kill`, `one_shot_range` on data defs) and `sim.weapons.range` (end to end through capsule hits on Metro, exact aim) | M16A3: chest/body 4 and head 2 at ≤ 8 m; 6 and 3 at ≥ 50 m. One-shot ranges within 0.01 m: .338 head at every range (+∞); .338 chest 17.475 m; M40A5 chest 15.000 m (80 × 1.25 = 100 exactly kills); SV98 chest 20.000 m; DMR (M39 EBR) head 50.74 m; SKS head 16.26 m. In the range at 5 m and 60 m: 4 / 2 and 6 / 3 hits kill |
+| W1 | fire timing (§7.1) | `sim.weapons.unit` (synthetic defs with the §7.1 numbers) and `sim.weapons` (defs resolved from MP_Subway), from the per-tick `ShotEvent` times of `step_soldier_weapons`; `bf3dump weapon-sim --check` | **M16A3** (`u_m16a4`): (a) the real magazine: fire held from the press tick gives 31 shots, the first at the press tick's start, all 30 gaps exactly 4,500,000 units (75 ms); then the automatic empty reload; (b) 10 s of held fire on a table built with `infinite_magazine` (oracle only, §5.5), from the same data def and from the synthetic def: 134 shots, every gap exactly 4,500,000. **M98B** (`u_m98b`): the bolt cycle (`kBoltStarted` to `kBoltFinished`) is exactly 78,000,000 units (1.3 s, 46.15 RPM, §7.1 "46.2"); JNG-90 / L96 / M40A5 / SV98 give 1.3 / 1.38 / 1.1 / 1.25 s. **AN-94** (`u_an94`): each press fires 2 shots exactly 3,000,000 apart (1200 RPM). **870MCS** (`u_870`): each shot spawns 12 pellet projectiles with 12 distinct directions inside 3° + spread, and with the Tap script (pinned to the tick that contains the ready time, §10) shots are exactly 28,800,000 apart (0.48 s pump, 125 RPM). **M16A4** (`u_m16_burst`): each press fires 3 shots 4,500,000 apart; one burst per press. **M9**: single shots at least 9,000,000 apart (400 RPM) |
+| W2 | ballistic drop, no drag; max range | `sim.weapons.unit` (synthetic) and `sim.weapons` (data defs): the `ProjectileWorld` flight (double, closed form, §5.8) against the synthetic wall world (`range_wall_triangles`: slab and walls out to 3,500 m, 150 m below the eye, so no gated flight meets the 200 m world margin, §10); `bf3dump weapon-sim <w>` drop table | v0 650, g 15 (M16A3 data): the impact height below the launch line at the 100 m and 300 m walls is 0.1775 / 1.5976 m **within 1 cm** (§7.1: 0.178 / 1.60). M98B (650, g 9.81): 1.0449 m at 300 m and 11.609 m at 1,000 m within 1 cm (§7.1 quotes 1.05 / 11.6; README already notes the 1.045). Max range: the horizontal distance at expiry is v0 × TTL within 1 mm (M16A3 975 m, M98B 3,250 m); a wall at 0.99 × range is hit, one at 1.01 × is not |
+| W3 | shots to kill (§7.1 rows) | `sim.weapons` (`shots_to_kill`, `one_shot_range` on data defs) and `sim.weapons.range` (end to end through capsule hits on Metro, exact aim; the synthetic world when Metro has no 60 m lane, §10) | M16A3: chest/body 4 and head 2 at ≤ 8 m; 6 and 3 at ≥ 50 m. One-shot ranges within 0.01 m of the values computed from data (§7.1 rounds them): .338 head at every range (+∞); .338 chest 17.476 m; M40A5 chest 15.000 m (80 × 1.25 = 100 exactly kills); SV98 chest 20.000 m; DMR (M39 EBR) head 50.745 m; SKS head 16.257 m. In the range at 5 m and 60 m: 4 / 2 and 6 / 3 hits kill |
 | W4 | generated table for every infantry weapon (report) | `sim.weapons`; `bf3dump weapon-sim --all` | one row per qualifying variant: a Bullet projectile, StartDamage > 0, not instant-hit, class not wcUgl / wcPowerTool. That is **119 of the 172** MP_Subway variants [verified 2026-10-15: `bf3dump weapons`]. Each row gives shots to kill per zone at 0 / 10 / 25 / 50 / 75 / 100 m and the one-shot ranges. Gate: 0 errors and the row count equals the qualifying count; the values are reported |
 | W5 | body multipliers per material grid | `sim.weapons.range` (capsule hits at 5 m, exact aim) on top of the `core.gameplay.weapons` grid rows | damage per hit within 1e-3: M16A3 head 50.0 (×2.0), chest and body 25.0, legs 22.75 (×0.91); M98B head 223.25 (×2.35), chest 100.70 (×1.06), legs 86.45; 870 pellet head 18.0 (×1.0) |
-| W6 | reload timing against ReloadTime | `sim.weapons.unit` and `sim.weapons` (weapon events per tick) | M16A3: tactical `kReloadStarted` to `kReloadFinished` 108,000,000 units (1.8 s), empty 142,200,000 (2.37 s); `kReloadCommitted` at 0.85 × that [unmeasured rule]; a switch before the commit keeps the old magazine, after it the new one; the magazine after a tactical reload is 31, after an empty one 30 (`empty_reload_unchambered` [unmeasured]); the reserve drops by what went in. M9: 1.35 / 1.6 s. 870 (rtSingleBullet): 1.15 s + 0.67 s per shell [inferred composition], so 5 shells from empty take 4.5 s; fire between shells interrupts the reload |
-| W7 | identical shot lists for identical seeds | `sim.weapons.unit` (synthetic world, two `CollisionWorld`s) and `sim.weapons.range` (Metro, two worlds over one `StaticWorldShapes`) | equal `shot_list_hash` and `impact_list_hash`, field for field, over 10 s of auto fire plus a 870 and an M67 run. A different match seed changes ≥ 99 % of the spread-drawn directions. A run restored from a saved `SoldierWeaponsState` mid-burst equals the run it was saved from (`soldier_weapons_hash` every tick) |
+| W6 | reload timing against ReloadTime | `sim.weapons.unit` and `sim.weapons`, from the exact times of the phase events (`WeaponTickOutput::timed`, `TimedWeaponEvent`; per-tick flags carry no time, and 2.37 s is 142.2 ticks) | M16A3: tactical `kReloadStarted` to `kReloadFinished` 108,000,000 units (1.8 s), empty 142,200,000 (2.37 s); `kReloadCommitted` at `scale_units(duration, 0.85)` = 91,800,000 / 120,870,000 units after the start [unmeasured rule]; a switch before the commit keeps the old magazine, after it the new one; the magazine after a tactical reload is 31, after an empty one 30 (`empty_reload_unchambered` [unmeasured]); the reserve drops by what went in. M9: 1.35 / 1.6 s. 870 (rtSingleBullet): 1.15 s + 0.67 s per shell [inferred composition], so 5 shells from empty take 4.5 s; fire between shells interrupts the reload |
+| W7 | identical shot lists for identical seeds | `sim.weapons.unit` (synthetic world, two `CollisionWorld`s) and `sim.weapons.range` (Metro, two worlds over one `StaticWorldShapes`) | equal `shot_list_hash` and `impact_list_hash`, field for field, over 10 s of auto fire plus a 870 and an M67 run. A different match seed changes ≥ 99 % of the spread-drawn directions, measured in hip fire, where every shot's cone is wider than 0 (an ADS first shot with MinAngle 0 has nothing to draw). A run restored from a saved `SoldierWeaponsState` mid-burst equals the run it was saved from (`soldier_weapons_hash` every tick) |
 | W8 | hostile data | `sim.weapons.unit` (bound rows) and `sim.weapons.fuzz` (mutated retail WeaponDef blobs; also under `asan`) | each bound of §9 refused with an error that names the field. 2,000 seeded mutations of the retail M16A3 / 870 / M67 / RPG-7 blobs (`decode_weapon_def`, then `make_weapon_sim_def`) never crash. Every accepted def runs 600 ticks of seeded random commands with every invariant held: magazine in [0, capacity], reserve ≥ 0, ≤ 8 shots per tick, live projectiles ≤ the limit, the step budget respected, no NaN in any state |
 | W9 | explosive projectiles of the M2a kits | `sim.weapons` (data defs, synthetic world); `sim.weapons.range` (blasts on stand-ins on Metro) | **M67**: launch (0, 3, 18) in the aim frame after SpawnDelay 0.17 s; detonation exactly 216,000,000 units (3.6 s) after spawn, also while bouncing; free flight equals the closed form within 1 cm up to the first contact; blast on targets at 1.0 / 1.5 / 3 / 5 / 7 m = 112 / 112 / 81.45 / 40.73 / 0 within 0.01 hp (linear [unmeasured]). **M320 HE**: (0, 1.5, 45), g −7.2; a hit before 0.5 s gives the dud (56, inner 2.1, r 5), after it the explosion (112, 0.35, 5); direct hit 100 × 2.5. **RPG-7 / SMAW**: (0, 0, 40) from (−0.3, −0.1, 2), 10 m/s² thrust to 100 m/s (6.0 s) [inferred], g −1.5, TTL 10 s, armed after 0.5 s, direct hit 225 × 2.5 (reported, H:W7), blast 112 / 0.35 / 4 |
 | W10 | install unchanged | every install test above and `bf3dump range` / `weapon-sim` | the `install.unchanged` row: sizes and modification times of the install's 256 index files equal before and after (`Install::snapshot`, `diff_snapshots`) |
-| W11 | weapon cost per server tick (**wall clock, noisy**) | `sim.weapons.perf` (install, RUN_SERIAL; the test waits for the quiet lock like every run) or `bf3dump range --perf` | 64 shooters with M16A3 full auto at 64 Metro spawn points, 600 ticks: p99 of (64 × `step_soldier_weapons` + `ProjectileWorld::step`) ≤ **2.0 ms** on one thread, dev preset. Mean, p50, max and the peak live projectiles are reported. The threshold is a quarter of S1's 8 ms p99 tick budget (plan §6 S1). It is an estimate (§12 R-W4), so the implementation may revise it once with the measured values and its reasons |
+| W11 | weapon cost per server tick (**wall clock, noisy**) | `sim.weapons.perf` (install, RUN_SERIAL) or `bf3dump range --perf`; both call `run_range_perf`. The runner honours the quiet lock before starting ctest, as for every run (rule 7). The test does not hard-code the session's lock path. If the environment variable `OPENBF3_QUIET_LOCK` names a file that exists, the test exits 77 (Skipped) instead of measuring on a busy machine | 64 shooters with M16A3 full auto at 64 Metro spawn points. Each aims level along its own longest clear heading, so bullets fly their lanes instead of dying in the nearest wall. The table is built with `infinite_magazine`: 100 % duty, the worst case, not the ~50 % a real magazine allows. Over 600 ticks, p99 of (64 × `step_soldier_weapons` + `ProjectileWorld::step`) ≤ **2.0 ms** on one thread, dev preset. p99 is the nearest rank, the 594th of 600 sorted ascending, so 6 ticks may exceed it. Mean, p50, max, the shots, the mean lane length and the peak live projectiles are reported. The threshold is a quarter of S1's 8 ms p99 tick budget (plan §6 S1). It is an estimate (§12 R-W4), so the implementation may revise it once with the measured values and its reasons |
 
 Rows that depend on a `[unmeasured]` rule print `unmeasured` next to their verdict (`Mechanics::measured` false).
 
@@ -89,10 +110,14 @@ stayed in the scratch directory.
 
 ### 4.1 Weapons
 
-* `bf3dump weapons` on MP_Subway: **172 variants, 172 resolved, 0 errors**, in 6.4 s while a build ran. Projectile
-  kinds: 151 Bullet (24 of them wcUgl, 2 knives, the repair tool and the defibrillator), 9 Grenade (8 × 40 mm LVG,
-  the M67), 5 Missile (RPG-7, SMAW, Javelin, Stinger, Igla), 13 Other (gadgets). Bullet variants with
-  StartDamage > 0: 146. Excluding wcUgl (24), wcKnife (2) and wcPowerTool (1) leaves the **119** of W4.
+* `bf3dump weapons` on MP_Subway: **172 variants, 172 resolved, 0 errors**, in 6.4 s while a build ran.
+  * Projectile kinds (revision 1 misprinted them; recounted from the TSV, they sum to 172):
+    * **147 Bullet:** 24 of them wcUgl, plus 2 knives, the repair tool, and the defibrillator with StartDamage 0;
+    * **9 Grenade:** 8 × 40 mm LVG and the M67;
+    * **5 Missile:** RPG-7, SMAW, Javelin, Stinger, Igla;
+    * **11 Other:** ammo bag, C4, claymore, EOD bot, M15, M224, MAV, medic bag, radio beacon, SOFLAM, T-UGS.
+  * Bullet variants with StartDamage > 0: 146. Excluding wcUgl (24), wcKnife (2) and wcPowerTool (1) leaves the
+    **119** of W4.
 * Chain [verified, weapon_resolver.h; topics/01 §1.2]: `SoldierWeaponUnlockAsset` → `SoldierWeaponBlueprint` →
   `SoldierWeaponData` → `WeaponFiringData` {DeployTime, DisableZoomOnDeployTime, WeaponSway → `GunSwayData`,
   PrimaryFire → `FiringFunctionData` {`ShotConfigData`, `FireLogicData` {`BoltActionData`, `HoldAndReleaseData`},
@@ -213,9 +238,16 @@ fires at tick_start(T) when the weapon is ready (`t = max(next_shot_time, tick s
   toggle counter (bits 6–7) and a 4-bit wanted-slot field (bits 8–11, 0 = keep), inside the 24 wire bits.
 * **Every weapon field is a level, never an edge.** `repeated_command` clears only `buttons::kEdgeMask` (kJump).
   A repeated or lost command must not cycle the fire mode twice or drop a switch, and with levels it cannot: a
-  repeated "slot 2" is idempotent and an unchanged counter means no change. Single fire, burst starts and the
+  repeated "slot 2" is idempotent and an unchanged counter means no change. The mode cycles
+  `fire_mode_steps(old, new)` = (new − old) mod 4 times, so a counter that moved by 2 across a lost command cycles
+  twice, as pressed. Four or more presses between two received commands alias. That is a known limit of the 2-bit
+  field, accepted because commands go out 3–4 times redundantly (plan §3.5). Single fire, burst starts and the
   bolt's "until fire release" compare the fire level with the previous command's, which the slot keeps
-  (`kTriggerDown`). The contract test checks that a repeat keeps every weapon field.
+  (`kTriggerDown`). The contract test checks that a repeat keeps every weapon field, and it pins `fire_mode_steps`.
+* `command.h` itself does not reserve bits 6–11 yet; only `weapon_input.h`'s static_asserts guard them, against
+  kJump / kSprint / kUse. The integration wave adds a reserved-range comment and constants in `command.h`, so that
+  another track adding a button cannot collide silently. Until then, §16 asks the other tracks to stay clear of
+  bits 6–11.
 * The soldier feeds the weapon (plan §3.1) through `make_weapon_context(motor, before, after, command)`:
   * eye at the tick's start and end: feet + the pose's eye height, blended through transitions by the motor's
     `eye_height`;
@@ -241,7 +273,7 @@ Per mode (`FireModeDef`, from FireLogicType then FireLogicTypeArray in data orde
 | Automatic | while fire is held, shots at `next_shot_time`, `next += interval` (60 / RateOfFire). Releasing never resets `next_shot_time`, so tapping cannot beat the rate |
 | Single | one shot per press, and not before `next_shot_time` (interval). A press while not ready is remembered until the weapon is ready, if fire is still held [inferred] |
 | Burst | a press starts `BulletsPerBurst` shots at the burst interval (60 / RateOfFireForBurst). The burst completes when released [inferred], and holding fires no second burst. The next burst may start `interval` after the burst's last shot [inferred]: AN-94 2 @ 50 ms, then ≥ 100 ms; M16A4 3 @ 75 ms, then ≥ 75 ms |
-| SingleWithBoltAction | a single shot, then the bolt / pump cycle of BoltActionDelay + BoltActionTime (topics/01 C8). With `HoldBoltActionUntilFireRelease` (M98B) the cycle starts at the start of the first tick whose command releases fire; without it (870) it starts at the shot. The next shot is at max(interval end, cycle end). So a tapping M98B fires every 1.3 s + 1 tick (45.6 RPM; the release cannot come before the end of the pressing tick), while the cycle itself is exactly 1.3 s. W1 gates the cycle, as Symthic's 46.2 RPM counts it. The tap gap is reported |
+| SingleWithBoltAction | a single shot, then the bolt / pump cycle of BoltActionDelay + BoltActionTime (topics/01 C8). With `HoldBoltActionUntilFireRelease` (M98B) the cycle starts at the start of the first tick whose command releases fire; without it (870) it starts at the shot. The next shot is at max(interval end, cycle end). So a tapping M98B fires every 1.3 s + 1 tick (45.6 RPM; the release cannot come before the end of the pressing tick), while the cycle itself is exactly 1.3 s. W1 gates the cycle, as Symthic's 46.2 RPM counts it. The tap gap is reported. The 870 (no hold) with the Tap script presses in the tick that contains the ready time, so its shots are exactly the pump apart (§10) |
 | HoldAndRelease (M67) | pressing enters Holding. Releasing after HoldDelay (0.5 s) throws: the shot is at the release tick's start and the projectile spawns SpawnDelay (0.17 s) later. Power = clamp(min + PowerIncreasePerSecond × held, min, max), 1.0 for the M67. A release before HoldDelay throws once the delay is reached [inferred]. Death while holding (ForceFireWhenKilledHolding) drops the grenade at KilledHoldingPowerModifier power, in the integration wave |
 | instant hit (knife) | a shot whose projectile is one segment of speed × TTL (1.8 m) at its spawn time (SpawnDelay 0.3 s) |
 
@@ -271,6 +303,12 @@ m1.md §6.10).
 
 * Spawn: every slot full; magazine = MagazineCapacity (31); reserve = NumberOfMagazines × capacity [inferred]. A
   negative NumberOfMagazines means unlimited (the knife's 1 × −1) [inferred].
+* **`WeaponTable::infinite_magazine` (oracle only).** Shots take no rounds, so a held trigger fires for as long as
+  the script runs. W1's 10 s rows use it: a real 31-round M16A3 empties after 31 shots (2.25 s), then reloads for
+  2.37 s. W11's full-duty load uses it too.
+  * It is set through `WeaponTableOptions` by tests and `bf3dump` only; `GameConfig` never exposes it.
+  * It is part of `weapon_table_hash`, so a table built with it cannot pass MatchInfo against a real one.
+  * W1's one-magazine row and every W6 row run without it.
 * Reload starts on a request (kReload held) when the magazine is below capacity and the reserve is not empty, or
   automatically with AlwaysAutoReload when the magazine is empty and the weapon is next ready. The M98B's
   HoldOffReloadUntilFireRelease holds it until fire is released (§4.5).
@@ -282,6 +320,12 @@ m1.md §6.10).
   magazine) once threshold × duration has passed. A switch before that cancels the reload and keeps the old
   magazine (rlWeaponSwitchCancelsUnfinishedReload). After it, the new magazine stays even if the switch interrupts
   the rest. This reading follows plan §3.2 "Open" and Symthic ("unable to change weapons until the threshold").
+  * The commit points are rounded once, in `make_weapon_sim_def`: `scale_units(duration, threshold)`, the nearest
+    unit, half up. They are stored as `reload_commit_tactical` / `reload_commit_empty` and hashed, so the server
+    and a client never round separately. M16A3: 91,800,000 and 120,870,000 units, static_asserted in the contract
+    test.
+  * Phase events carry their exact times (`WeaponTickOutput::timed`, at most 16 per tick). W6 and the viewmodel
+    and audio cues read them.
 * Rounds after an empty reload are capacity − 1 (30) under `empty_reload_unchambered` [unmeasured; Symthic 30 + 1].
 * Switching: a wanted slot with a weapon starts its deploy (DeployTime); during the deploy the weapon cannot fire,
   and zoom is refused for DisableZoomOnDeployTime. There is no holster time (none in the data). AltDeployTime
@@ -302,7 +346,8 @@ m1.md §6.10).
 * **Direction:** the aim is the command view turned by the recoil offset. The shot direction is a draw in the cone
   of half-angle s: radius = s·√u (UniformArea, plan default) or s·u (UniformRadius) [unmeasured H:W1], azimuth
   2π·u. Each pellet then adds its own draw inside the stance's pellet cone (870: 3°) around the shot direction
-  [inferred].
+  [inferred]. The cone's half-angle travels on the shot (`ShotEvent::pellet_cone`), so a remote client expands the
+  pellets exactly as the server does without knowing the shooter's stance.
 * **Recoil state** per slot: a view offset (pitch, yaw), with + yaw = left in the data's sign (topics/01 C7).
   * Per shot: pitch += RecoilAmplitudeIncPerShot, × FirstShotRecoilMultiplier when the first-shot flag is armed;
     yaw += lerp(HorizontalMin, HorizontalMax, u). Each is capped at its amplitude max.
@@ -327,11 +372,33 @@ mispredicting.
 ### 5.7 Hit targets (`hit_target.h`)
 
 * A `HitTarget` is up to 16 world-space `ZoneCapsule`s: segment a..b, radius, zone, BoneCollisionData index,
-  property and the behind-wall flag, plus a bounding sphere. `HitTargetProvider::targets_at(segment start time)`
-  returns the set a segment is tested against, which leaves rewind to the provider:
-  * **this wave:** `StaticTargets` with stationary stand-ins;
-  * **integration:** the server's live soldiers at the present tick;
-  * **integration / R14:** bf3_anim's posed capsules from the lag-compensation history at a HitReport's sample.
+  property and the behind-wall flag, plus a bounding sphere.
+* **The query carries the projectile's identity** (revision 2). `HitTargetProvider::targets_for(TargetQuery)`
+  returns the set one segment is tested against. `TargetQuery` holds:
+  * the segment's start and end times;
+  * the shooter's player slot, the shot index, the pellet and the def;
+  * why the provider is asked: Flight, Blast or Refly.
+
+  Rewind in plan §3.2 / D7 is per shooter and per bullet. A human shooter's unreported targets are tested at that
+  shooter's render time, which differs per client. Bots fire at the present. A reported target is tested at the
+  report's (tick_a, tick_b, alpha). A provider that saw only a time could not give two bullets of two shooters in
+  the same tick two different worlds. With the identity it can, so the integration needs no header change.
+  `ProjectileWorld` asks once per projectile sub-step and once per blast. A rewinding provider caches its last
+  answer keyed by (shooter, sample), so 64 shooters cost at most 64 rewinds per tick. The providers:
+  * **this wave:** `StaticTargets` with stationary stand-ins; it ignores the identity;
+  * **integration:** the server's soldiers. A bot's projectiles see the present tick. A human's see the lag-comp
+    ring at that shooter's render time, which comes from the interpolation delay its commands acknowledge;
+  * **integration / R14:** bf3_anim's posed capsules in the same ring.
+* **Late HitReports** (the integration wave's rule, written down here because the seam must allow it). A report
+  usually arrives after the server has flown that bullet live. The server keeps each human shooter's `ShotEvent`s
+  for 250 ms plus the longest bullet flight. On a report it calls `refly_projectile(shot, pellet, until)`, which
+  flies that single pellet again against the static world and a provider that answers the Refly query with the
+  reported target posed at the reported sample. Flight is a pure function of (ShotEvent, def, static world), so the
+  re-flown path is the live one; it costs a few segments.
+  * The report is accepted when the re-flight hits that target, within the tolerance of plan §3.2.
+  * Damage is applied at most once per (shot, pellet). If the live flight already damaged a target with that
+    pellet, a report naming another target is refused and counted: the first resolution wins [inferred]. The
+    integration may tune this rule, but it needs no change to these headers.
 * **Stand-ins** (`standin_target`, [inferred] layout until R14). Radius, length, zone and pair come from the 9
   hi-LOD capsules. Placement uses a fixed table, in metres above the feet in the soldier's frame (x left, z
   forward), scaled to the SoldierDef pose:
@@ -356,10 +423,20 @@ mispredicting.
 
 ### 5.8 Ballistics (`ballistics.h`)
 
-* **Projectiles are queries, never bodies** (plan §3.2, D5). Flight uses exact constant-acceleration steps,
-  p += v·dt + ½·a·dt² and v += a·dt with a = (0, g, 0). Positions at sample times are therefore the closed form
-  within float rounding, and W2 compares the impact on synthetic walls with the arithmetic. **No drag:** bullets
-  have no drag field; the missile's Drag (0 on RPG and SMAW) is read as a = −drag·v [inferred, inactive].
+* **Projectiles are queries, never bodies** (plan §3.2, D5).
+* **Flight state is double, and unpowered flight is the closed form** (revision 2). A projectile keeps a base
+  state: the time, position and velocity at its last discontinuity (spawn, bounce, engine phase change). Its
+  position at time t is base_position + base_velocity·τ + ½·a·τ², with τ = units_to_seconds(t − base_time) and
+  a = (0, g, 0), evaluated in double and never accumulated.
+  * Why revision 1's float steps failed: float32 per-tick steps of p += v·dt + ½·a·dt² end 0.67 mm short at
+    975 m (M16A3) and 5.86 mm short at 3,250 m (M98B), against W2's 1 mm max-range row. That is the review's
+    figure, reproduced here. In double, closed form, the error is far below 1 µm, because the sample times are
+    exact integers (§5.1).
+  * Only the missile's thrust phase is stepped, in double, re-basing every sub-step.
+  * The static ray itself is float (`CollisionWorld::ray`); its ulp at 3 km is 0.24 mm, inside every gate.
+  * W2 compares the impact on the synthetic walls with the arithmetic.
+* **No drag:** bullets have no drag field; the missile's Drag (0 on RPG and SMAW) is read as a = −drag·v [inferred,
+  inactive].
 * **Sub-steps.** The chord between two samples sags g·h²/8 below the parabola: 0.52 mm for a whole tick at g 15,
   well inside W2's 1 cm. So bullets use one segment per tick. Missiles with the engine on use 4 per tick, with
   thrust along the velocity up to MaxSpeed. A shot spawns at its exact spawn time and flies the rest of that tick
@@ -369,11 +446,15 @@ mispredicting.
     Character layer is soldier-only collision. This settles m1.md's "[inferred, M2a decides]" for the mask. Two
     kinds of hit are passed through by re-casting from 1 mm past the hit point, at most 8 re-casts per projectile
     per tick:
-    * invisible blockers (`kSoupInvisible`, player clip: topics/01 §5.5 "bullets ignore");
+    * invisible blockers (`kSoupInvisible`, player clip: topics/01 §5.5 "bullets ignore"). The flag comes from an
+      owner name containing "invisible" or "collisionmesh" (collision_soup.cpp `invisible_name`), and it is not a
+      `Mechanics` switch. So every pass is counted (`ProjectileStepOutput::invisible_passes`), and the range
+      reports the count on Metro. A wall whose only bullet geometry is a "collisionmesh" would show up there
+      (§12 R-W10);
     * penetrable surfaces: the pair's bit 24 is set and the (projectile, surface) cell has no NeverPenetrate. The
       damage scales by the cell's DamagePenetrationMultiplier [inferred rule, topics/01 C9]: chicken wire,
       pass-through fences, BulletsOnly.
-  * Targets: the provider's targets at the segment's start time.
+  * Targets: the provider's answer to the projectile's own `TargetQuery` (§5.7).
 * **Collision versus Raycast bodies.** Both layers hold the same props: the hull for movement, the detailed shell
   for rays. A hull that lies outside the shell would catch bullets a few centimetres early. The range test reports,
   for every static hit on the Collision layer, whether a Raycast hit lies within 10 cm behind it, and the count goes
@@ -387,7 +468,7 @@ mispredicting.
   * The fuse (DetonateOnTimeout) fires at spawn + TimeToLive exactly, wherever the grenade is.
   * TimeToLive 0 (40 mm) means "until impact", capped at kMaxFlightTime (30 s).
   * A projectile more than 200 m outside the static world's bounds is removed.
-* **Blasts**: tested against `targets_at(detonation time)`.
+* **Blasts**: tested against the provider's answer to a Blast query at the detonation time.
   * Distance = from the detonation point to the nearest point of the target's capsules [inferred].
   * Occlusion rays run from the blast to each capsule's centre against the Collision layer (`blast_occlusion`
     [unmeasured]). The ray's radius (MaxOcclusionRaycastRadius 0.25 / 0.5) is not modelled; a ray is a line.
@@ -433,18 +514,22 @@ modifier never applies.
 
 | header | holds |
 |---|---|
-| `bf3/sim/weapons/sim_time.h` | `SimTime`, `kTimeUnitsPerTick` / `PerSecond`, `tick_start` / `tick_end` / `tick_containing` / `tick_fraction`, `seconds_to_units`, `rpm_to_interval` (constexpr) |
-| `weapon_input.h` | `weapon_buttons::` (fire, zoom, reload, fire-mode counter, wanted slot), `WeaponInput`, `weapon_input(Command)`, `with_weapon_input` (constexpr), `kMaxWeaponSlots` 8 |
+| `bf3/sim/weapons/sim_time.h` | `SimTime`, `kTimeUnitsPerTick` / `PerSecond`, `tick_start` / `tick_end` / `tick_containing` / `tick_fraction`, `seconds_to_units`, `scale_units` (the commit rounding), `rpm_to_interval` (constexpr) |
+| `weapon_input.h` | `weapon_buttons::` (fire, zoom, reload, fire-mode counter, wanted slot), `WeaponInput`, `weapon_input(Command)`, `fire_mode_steps`, `with_weapon_input` (constexpr), `kMaxWeaponSlots` 8 |
 | `weapon_rng.h` | `splitmix64`, `shot_seed`, `RngPurpose` (append-only), `shot_random`, `unit_float` (constexpr, pinned) |
 | `mechanics.h` | `Mechanics`: every [unmeasured] switch (§6.9) |
-| `hit_target.h` | `HitZone`, `ZoneCapsule`, `HitTarget`, `TargetHit`, `HitTargetProvider`, `StaticTargets`, `segment_capsule`, `segment_target`, `standin_target`, `zone_aim_point` |
+| `hit_target.h` | `HitZone`, `ZoneCapsule`, `HitTarget`, `TargetHit`, `TargetQueryKind`, `TargetQuery`, `HitTargetProvider::targets_for`, `StaticTargets`, `segment_capsule`, `segment_target`, `standin_target`, `zone_aim_point` |
 | `surface_materials.h` | `SurfacePair`, `SurfaceMaterialTable` (static pair by material value, a pair's view, grid cells, zone properties) |
-| `weapon_sim_def.h` | `WeaponSimDef`, `FireModeDef`, `ProjectileSimDef`, `ExplosionSimDef`, `WeaponTable`, the k* bounds, `make_weapon_sim_def`, `make_weapon_table`, `weapon_table_hash`, `sim_shot_interval_seconds`, `sim_effective_rpm` |
+| `weapon_sim_def.h` | `WeaponSimDef` (with the rounded reload commit points), `FireModeDef`, `ProjectileSimDef`, `ExplosionSimDef`, `WeaponTable` (with the oracle-only `infinite_magazine`), `WeaponTableOptions`, the k* bounds, `make_weapon_sim_def`, `make_weapon_table`, `weapon_table_hash`, `sim_shot_interval_seconds`, `sim_effective_rpm` |
 | `spread_recoil.h` | `SwayContext`, `effective_dispersion` / `effective_recoil`, `decay_spread` / `enter_spread` / `spread_after_shot`, `sample_cone`, `RecoilOffset`, `recoil_after_shot`, `recover_recoil_tick`, `aim_direction` |
-| `weapon_sim.h` | `WeaponPhase`, `WeaponSlotState`, `SoldierWeaponsState` (POD), `weapon_events::`, `WeaponContext`, `ShotEvent`, `WeaponTickOutput`, `spawn_soldier_weapons`, `step_soldier_weapons`, `soldier_weapons_hash`, `make_weapon_context` |
+| `weapon_sim.h` | `WeaponPhase`, `WeaponSlotState`, `SoldierWeaponsState` (POD), `weapon_events::`, `WeaponContext`, `ShotEvent` (with `pellet_cone`), `TimedWeaponEvent`, `WeaponTickOutput` (with `timed`), `spawn_soldier_weapons`, `step_soldier_weapons`, `soldier_weapons_hash`, `make_weapon_context` |
 | `damage.h` | `DamageKind`, `DamageEvent`, `falloff_damage`, `zone_damage`, `blast_damage`, `apply_damage`, `shots_to_kill`, `one_shot_range` |
-| `ballistics.h` | `Projectile`, `ImpactEvent`, `DetonationEvent`, `BallisticsLimits`, `ProjectileStepOutput`, `ProjectileWorld` (`spawn`, `step`), `ballistic_position`, `fly_free` |
-| `shooting_range.h` | `RangeLane`, `find_range_lane`, `FireScript`, `RangeTargetSpec`, `RangeScenario`, `RangeTargetResult`, `RangeResult`, `run_range`, `shot_list_hash`, `impact_list_hash` |
+| `ballistics.h` | `DVec3`, `Projectile` (double base state), `ImpactEvent`, `DetonationEvent`, `BallisticsLimits`, `ProjectileStepOutput` (with the static diagnostics), `ProjectileWorld` (`spawn`, `step`), `ballistic_position`, `fly_free`, `refly_projectile` |
+| `shooting_range.h` | `RangeLane`, `find_range_lane`, `range_wall_triangles`, `FireScript`, `RangeTargetSpec`, `RangeScenario`, `RangeTargetResult`, `RangeResult`, `run_range`, `RangePerfResult`, `run_range_perf`, `shot_list_hash`, `impact_list_hash` |
+
+Hashes (`weapon_table_hash`, `soldier_weapons_hash`, `shot_list_hash`, `impact_list_hash`) are FNV-1a 64 field by
+field in declaration order, with floats by their bit pattern. They never memcpy a struct:
+`SoldierWeaponsState` and `WeaponSlotState` have implicit padding before their SimTime fields.
 | `bf3/core/gameplay/grid_pairs.h` | `read_grid_pairs(db, grid, MaterialGrid)` |
 
 ### 6.9 The unmeasured switches (`Mechanics`)
@@ -475,13 +560,25 @@ The tick order of m1.md §8.1 gains these steps, all additive and behind a `Game
   * `ctx = make_weapon_context(motor, before, after, cmd)`;
   * `step_soldier_weapons(table, weapons[slot], cmd, ctx, match_seed, out)`;
   * every `out.shots[i]` goes to `projectiles.spawn`.
-* **4b.** `projectiles.step(tick, server_world, present_targets, events)`. The targets are the live soldiers'
-  capsules (stand-ins posed at the state's pose and yaw until R14).
+* **4b.** `projectiles.step(tick, server_world, provider, events)`. The provider answers each projectile's
+  `TargetQuery`:
+  * a bot's projectiles get the present tick's capsules;
+  * a human's get the lag-comp ring at that shooter's render time (§5.7).
+
+  The capsules are stand-ins posed at the state's pose and yaw until R14.
 * **5.** The rules apply each `DamageEvent` with `apply_damage`. Deaths go to the existing respawn path, and
   `spawn_soldier_weapons` runs on spawn.
-* **6.** Lag-compensation history: a ring of the present `HitTarget`s per tick (64 × 16 capsules × 32 B ≈ 32 KiB
-  per tick; 250 ms = 15 ticks ≈ 0.5 MiB). A HitReport's (tick_a, tick_b, alpha) is answered by a provider that
-  lerps two ring entries (plan §3.2). R14's reduced bf3_anim pose replaces the stand-in capsules in the same ring.
+* **6.** Lag-compensation history and HitReports.
+  * The history is a ring of the present `HitTarget`s per tick: 64 × 16 capsules × 32 B ≈ 32 KiB per tick, and
+    250 ms = 15 ticks ≈ 0.5 MiB.
+  * A HitReport's (tick_a, tick_b, alpha) is answered by a provider that lerps two ring entries (plan §3.2).
+  * A report that arrives after the live flight goes through `refly_projectile` with a Refly query, and is applied
+    at most once per (shot, pellet) (§5.7).
+  * The server retains each human shooter's ShotEvents for the def's time to live plus 250 ms, at most 5.25 s for
+    the M98B; a ShotEvent is about 100 B. A report whose shot is gone, or whose sample is older than 250 ms, is refused.
+  * R14's reduced bf3_anim pose replaces the stand-in capsules in the same ring.
+* **Command bits.** `command.h` gains the reserved range of bits 6–11 with named constants, which
+  `weapon_input.h` then uses. That edit is integration-wave work, because S1 is editing `bf3_sim` in parallel.
 * **7.** Snapshots:
   * the owner gets its `SoldierWeaponsState` (full precision, like its `SoldierState`);
   * the others get the active slot's def id, phase and a fire flag;
@@ -498,6 +595,9 @@ The tick order of m1.md §8.1 gains these steps, all additive and behind a `Game
 * A reconciliation compares `soldier_weapons_hash` as well as the motor state.
 * Predicted `ShotEvent`s feed the 1p muzzle flash, tracer and sound at once. The server's ShotEvents for the own
   shots are not replayed.
+* **Only a tick's first prediction emits.** `catch_up` and reconciliation replays step the weapons again for ticks
+  already predicted. The ShotEvents and timed events those replays produce are discarded; only their state is
+  kept. So the 1p effects and sounds never fire twice. The client tracks the highest tick it has emitted for.
 
 ### 7.3 Presentation, VFX, audio, HUD (other tracks)
 
@@ -549,11 +649,16 @@ No new Cache kind:
   * angles above 90°;
   * rates above 10,000 / s;
   * times above 60 s;
-  * more than 4 fire modes or an Unknown logic.
+  * more than 4 fire modes or an Unknown logic;
+  * ReloadThreshold outside [0, 1];
+  * hold-and-release powers outside [0, 10], or min above max; PowerIncreasePerSecond outside [0, 10,000];
+  * TraceFrequency above 1,000. A value ≤ 0 is stored as 0, meaning no tracers: the knife's is 0 in data, and the
+    tracer rule never divides by it.
 
   ReloadType Unknown is refused for weapons with a magazine.
 * **Per tick and soldier:** at most 8 shots, and every loop is bounded by them. Phase changes per tick are bounded
-  by the phases a tick can end (≤ 4: deploy, bolt, reload, shell).
+  by the phases a tick can end (≤ 4: deploy, bolt, reload, shell). At most 16 timed events
+  (`kMaxTimedEventsPerTick`); a 17th is a bug that the W8 invariants catch.
 * **ProjectileWorld:**
   * at most 8,192 live projectiles; a spawn beyond is refused and counted;
   * per projectile per tick at most 8 re-casts, 4 bounces and 4 sub-steps;
@@ -581,8 +686,27 @@ No new Cache kind:
   killing shot and the time.
 * `exact_aim` zeroes spread and recoil for the direction (their state still runs) so the W3 / W5 rows hit their
   capsule every time.
-* Metro's longest lane is unknown until the implementation measures it. Rows longer than the lane (the 300 m drop)
-  run on the synthetic wall world, where W2 measures anyway. The range report prints the lane length.
+* **FireScript::Tap is pinned to the containing tick.** The script presses in command T when the ready time lies
+  before tick_end(T), and releases in command T + 1. The shot then goes at max(ready, tick_start(T)), which is the
+  exact ready time: the 870's shots are 28,800,000 apart, not 29,000,000. A bolt that waits for the release (M98B)
+  therefore taps every cycle + 1 tick (§5.3).
+* **The synthetic wall world** is `range_wall_triangles` through `build_static_world(triangles)`:
+  * a level slab spanning x and z from −100 m to 3,500 m, 150 m below the eye;
+  * vertical walls 40 m wide at the gated distances.
+
+  `ProjectileWorld` removes projectiles 200 m outside the world's bounds. That extent keeps every gated flight
+  inside: the M98B flies 3,250 m and falls 122.6 m in its 5 s, the M16A3 975 m and 16.9 m.
+* **Metro's longest lane** is unknown until the implementation measures it; the TDM spawns span about
+  194 × 146 m (the reviewer's figure, not re-measured here), so a 60 m lane is likely.
+  * Rows longer than the lane (the 300 m and 1,000 m drop) run on the synthetic wall world, where W2 measures
+    anyway.
+  * If no Metro lane reaches 60 m, W3's 60 m rows fall back in order: the spawns of the other Metro modes
+    (Conquest, Rush), then the synthetic world. The test prints which world it used and why. The gate stays
+    measurable either way.
+  * The range report prints the lane length, the static hits, the invisible passes (R-W10), the penetrations and
+    the Collision-before-Raycast count (R-W2).
+* **W11's load** (`run_range_perf`): see the W11 row. Each shooter aims along its own longest clear heading, with an
+  `infinite_magazine` table and no targets.
 
 **bf3dump** (implementation wave, `tools/bf3dump/weapon_sim_commands.{h,cpp}`, additive dispatch). Output is BF3
 data and stays out of the repo.
@@ -628,6 +752,9 @@ Nothing of the task's list is deferred: the M67, M320 HE and RPG-7 / SMAW are al
 | R-W7 | the burst, bolt-release and hold-and-release rules are inferred (§5.3) | W1 gates what the data fixes (rates, the bolt cycle, burst counts); the inferred parts are named in reports |
 | R-W8 | Metro has no 300 m lane, so the plan's "1.60 m drop at 300 m on Metro" cannot be shot on Metro | W2 measures it on the synthetic wall world through the same code; the range reports Metro's lane length |
 | R-W9 | the RPG direct hit (225 × 2.5) contradicts the community's "100" | reported, not gated; H:W7 decides |
+| R-W10 | `kSoupInvisible` is a name heuristic ("invisible" / "collisionmesh"), and bullets always pass it: a wall whose only bullet geometry is a collision mesh would be shot through | the range counts the invisible passes on Metro and reports them; a count on a lane wall is investigated before W3 is signed off |
+| R-W11 | merge friction with the parallel tracks: s1, s2, s4 and wp all append blocks at the end of `src/bf3_sim/CMakeLists.txt` (and likely `tests/CMakeLists.txt`); `weapon_def.h` / the weapon blob may be wanted by au and fx too | the blocks are additive and headed by track, so conflicts are textual and trivial. s1's `CollisionWorld::query_count` does not touch `ray` / `kProjectile`. §16 Q1 settles WeaponDef ownership before the implementation wave, so there is one blob version bump and no parallel edit of `weapon_def.h` |
+| R-W12 | late HitReports: the per-(shot, pellet) "first resolution wins" rule may refuse valid reports when the live flight at render time and the client disagree | the integration wave measures the refusal rate in loopback with latency; the rule lives in the server's report handling, not in these headers |
 
 ---
 
@@ -662,12 +789,12 @@ under `asan`.
 
 | ctest | data? | content |
 |---|---|---|
-| `m2a.weapons.contract` (now) | no | every weapons header compiles with the M1 headers; POD traits; the exact §7.1 intervals in units; 134 shots in 10 s at 800 RPM; pinned SplitMix64 / shot seeds; weapon buttons are levels that survive `repeated_command`; `Mechanics` defaults |
+| `m2a.weapons.contract` (now) | no | every weapons header compiles with the M1 headers; POD traits; the exact §7.1 intervals in units; the commit rounding (`scale_units`); `fire_mode_steps`; 134 shots in 10 s at 800 RPM; pinned SplitMix64 / shot seeds; weapon buttons are levels that survive `repeated_command`; a provider answers per shooter through `TargetQuery`; double projectile state; `infinite_magazine` off by default; `Mechanics` defaults |
 | `sim.weapons.unit` | no | synthetic defs with the §7.1 numbers: W1 every mode (auto, single, burst re-press, bolt with / without hold-until-release, pump, hold-and-release, instant hit), sub-tick shot origins, the shot cap; W6 reloads, commit and cancel, shells; spread decay / rise / kick, the disc distributions (moment checks over 100 k draws), recoil kick, caps and both recoveries; W2 on synthetic walls; W7 on two worlds and a mid-burst restore; capsule geometry (inside starts, grazing, ties); damage arithmetic, blasts, `shots_to_kill`, `one_shot_range`; explosive timing (arm, dud, fuse, bounce); W8 bound rows and the random-command invariants |
 | `sim.weapons` | install | `WeaponCatalog` on MP_Subway + grid + capsules + soldier: W1, W2, W3 (arithmetic), W4 (the 119-row table), W6, W9 on data defs; `read_grid_pairs` 32,400 entries resolved and index = low 24 bits; `SurfaceMaterialTable` zone properties 65 / 66 / 158 / 91; every Metro soup material value resolves to a pair |
 | `sim.weapons.range` | install | Metro static world: the lane found and printed; W3 end to end (5 m, 60 m), W5, W7 (two worlds), W9 blasts on stand-ins; every static impact carries a resolved pair and physics material; the Collision-before-Raycast count (R-W2) printed |
 | `sim.weapons.fuzz` | install (synthetic part without) | W8: 2,000 mutated retail blobs through `make_weapon_sim_def` and 600 random ticks each; asan |
-| `sim.weapons.perf` | install, RUN_SERIAL | W11 |
+| `sim.weapons.perf` | install, RUN_SERIAL | W11 (`run_range_perf`, `infinite_magazine`; exits 77 when `OPENBF3_QUIET_LOCK` names an existing file) |
 | `tools.weapon_sim` | install | `bf3dump weapon-sim --check` exits 0 |
 
 Godot checks: none in this wave (no Godot code). The existing suite, including the `godot.*` checks with
@@ -679,7 +806,10 @@ Godot checks: none in this wave (no Godot code). The existing suite, including t
 
 | fact | value | how |
 |---|---|---|
-| variants | 172, all resolve, 0 errors | `bf3dump weapons` (MP_Subway), 2026-10-15 |
+| variants | 172, all resolve, 0 errors; kinds 147 bullet / 9 grenade / 5 missile / 11 other; W4 set 119 | `bf3dump weapons` (MP_Subway), 2026-10-15; kinds recounted from its TSV in revision 2 |
+| TraceFrequency | 1 on every gate weapon, 0 on the knife (hence "≤ 0 = no tracers") | `bf3dump weapon` per variant |
+| `kSoupInvisible` source | owner name contains "invisible" or "collisionmesh" | collision_soup.cpp `invisible_name` |
+| float vs double flight | float32 per-tick steps: x −0.67 mm at 975 m, −5.86 mm at 3,250 m (y −0.29 mm); double steps 1e-11 m; double closed form 0 | the review's figure, reproduced with a scratch NumPy simulation (60 Hz, v0 650, g 15 / 9.81) in revision 2; §5.8 |
 | gate weapons' numbers | the §4.1 table | `bf3dump weapon` per variant |
 | bolt / hold / reload flags | M98B hold-until-release, force flags; 870 none; M67 hold data | `bf3dump dump` of the blueprints (FiringFunctionData.FireLogic) |
 | missile, grenade, 40 mm records | §4.1 | `bf3dump dump` of the projectile partitions |
@@ -691,7 +821,7 @@ Godot checks: none in this wave (no Godot code). The existing suite, including t
 | tick convention, Command buttons | kFire / kZoom / kReload reserved; kEdgeMask = kJump; 24 wire bits | command.h, soldier_state.h |
 | Metro load path for tests | `load_level_collision` + `build_static_world` + `read_soldier_def(level->db())` | sim_motor_tests.cpp |
 | WeaponDef has no explosion pair, no HoldOffReloadUntilFireRelease | fields absent | weapon_def.h |
-| contract helpers | 4 cases, 154 assertions pass | `test_weapons_contract` (dev), 2026-10-15 |
+| contract helpers | 5 cases, 159 assertions pass (revision 1: 4 / 154) | `test_weapons_contract` (dev), 2026-10-15 |
 
 ---
 
@@ -709,7 +839,12 @@ For the orchestrator:
    HoldBoltActionUntilFireRelease, the fastest tap-to-tap interval is 1.3 s + 1 tick at 60 Hz (45.6 RPM). Is that
    reading of §7.1 accepted?
 4. **"On Metro" (R-W8).** If Metro has no 300 m lane, the 300 m drop row is measured on the synthetic world
-   through the same code. Is that acceptable for the M2a exit?
+   through the same code. The same holds for W3's 60 m rows, if no Metro lane reaches 60 m (§10). Is that
+   acceptable for the M2a exit?
+5. **Command bits 6–11 (§5.2).** Until the integration wave reserves them in `command.h`, the other tracks should
+   not add buttons in bits 6–11.
+6. **Late HitReports (§5.7, R-W12).** The proposal is to re-fly with `refly_projectile`, with damage once per
+   (shot, pellet) and the first resolution winning. Is that the server rule the integration should build?
 
 For the implementation (answered by measurement or S5): the [unmeasured] switches (§6.9); Metro's longest lane;
 the R-W2 hull count; the grid table's load time (§8); W11's measured cost.

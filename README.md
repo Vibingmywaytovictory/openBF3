@@ -1262,20 +1262,22 @@ unmeasured `Mechanics` switches, hit targets, surface materials, `WeaponSimDef`,
 weapon state machine, damage, ballistics and the shooting range) plus `bf3/core/gameplay/grid_pairs.h`. This wave
 adds one test, `m2a.weapons.contract` (no data): the headers compile with the M1 headers, the §7.1 intervals are exact
 in sim units (800 RPM = 4,500,000 units = 75 ms), 10 s of 800 RPM fire is 134 shots, the shot seeds are pinned and the
-weapon buttons survive `repeated_command`.
+weapon buttons survive `repeated_command`. Revision 2 of the design (after review) adds the per-projectile
+`TargetQuery` (per-shooter rewind), double closed-form projectile flight, the oracle-only `infinite_magazine` and
+exact-time phase events.
 
 Gates of the implementation wave (one ctest each; simulated time, so exact, except W11):
 
 | gate | ctest / command | threshold |
 |---|---|---|
-| W1 fire timing | `sim.weapons.unit`, `sim.weapons`; `bf3dump weapon-sim --check` (`tools.weapon_sim`) | M16A3 134 shots in 10 s, every gap 4,500,000 units; M98B bolt cycle 78,000,000; AN-94 2 @ 3,000,000; 870 12 pellets, 28,800,000 pump; M16A4 3 per press |
+| W1 fire timing | `sim.weapons.unit`, `sim.weapons`; `bf3dump weapon-sim --check` (`tools.weapon_sim`) | M16A3 one magazine: 31 shots, every gap 4,500,000 units; with the oracle-only `infinite_magazine` table: 134 shots in 10 s, every gap 4,500,000; M98B bolt cycle 78,000,000; AN-94 2 @ 3,000,000; 870 12 pellets, 28,800,000 pump; M16A4 3 per press |
 | W2 drop, range | `sim.weapons.unit`, `sim.weapons` | 0.1775 / 1.5976 m at 100 / 300 m and M98B 1.0449 / 11.609 m at 300 / 1,000 m, within 1 cm; range v0 x TTL within 1 mm |
 | W3 shots to kill | `sim.weapons`, `sim.weapons.range` | M16A3 4 / 2 at <= 8 m, 6 / 3 at >= 50 m; one-shot ranges within 0.01 m |
 | W4 table | `sim.weapons`; `bf3dump weapon-sim --all` | 119 rows on MP_Subway, 0 errors |
 | W5 zone multipliers | `sim.weapons.range` | head 50.0 (x2.0), M98B head 223.25 (x2.35), within 1e-3 |
-| W6 reload | `sim.weapons.unit`, `sim.weapons` | M16A3 108,000,000 / 142,200,000 units exactly |
+| W6 reload | `sim.weapons.unit`, `sim.weapons` (timed phase events) | M16A3 108,000,000 / 142,200,000 units exactly; commit at 91,800,000 / 120,870,000 |
 | W7 determinism | `sim.weapons.unit`, `sim.weapons.range` | equal shot and impact list hashes for equal seeds |
 | W8 hostile data | `sim.weapons.unit`, `sim.weapons.fuzz` (also `asan`) | 2,000 mutated blobs: no crash, invariants hold |
 | W9 explosives | `sim.weapons`, `sim.weapons.range` | M67 fuse 216,000,000 units; blast 112 / 81.45 / 40.73 / 0 at 1.5 / 3 / 5 / 7 m |
 | W10 install unchanged | every install test above | `install.unchanged` row |
-| W11 cost (wall clock, **noisy**: shared machine) | `sim.weapons.perf` (RUN_SERIAL); `bf3dump range --perf` | 64 shooters, p99 <= 2.0 ms per tick |
+| W11 cost (wall clock, **noisy**: shared machine) | `sim.weapons.perf` (RUN_SERIAL; exits 77 while `OPENBF3_QUIET_LOCK` names an existing file); `bf3dump range --perf` | 64 M16A3 shooters on full auto (`infinite_magazine`, each aiming along its own longest lane), 600 ticks: p99 (nearest rank) <= 2.0 ms per tick |
