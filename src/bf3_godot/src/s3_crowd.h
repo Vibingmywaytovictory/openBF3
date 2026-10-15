@@ -41,7 +41,7 @@
 // finish: finish() runs the session's own shutdown and quit, and must not race a crowd still using its install.
 //
 // User args (after "--"):
-//   --s3-backend=<rs|skeleton3d|texture>   skin upload backend outside the check (default rs, s3.md §7.3)
+//   --s3-backend=<rs|skeleton3d>   skin upload backend outside the check (default rs, the measured winner; texture = C is not built, s3.md §7.3)
 //   --s3-lod=<on|off>           temporal LOD outside the check (default on)
 //   --s3-check                  the gate run (s3.md §1, §12): window 2560x1440 borderless at the primary screen's
 //                               origin; G0 validity rows; backend bench; runs R1-R4; G3 shots and metrics; prints a
@@ -215,6 +215,7 @@ private:
 	double stage_time_ = 0.0;
 	double cycles_per_ms_ = 0.0; // QueryThreadCycleTime calibration
 	double cycle_selftest_ratio_ = 0.0;
+	double single_thread_ms_ = 0.0; // evaluate_all_here p50 at build (reported)
 	SkinBackend backend_ = SkinBackend::RsSkeleton;
 	bool lod_ = true;
 	bool lod_spread_ = false; // R3: stage_input reports kLodRowDistance

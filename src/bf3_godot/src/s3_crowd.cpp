@@ -361,6 +361,26 @@ bool Bf3Crowd::build(std::string *r_error) {
 	}
 	log(fmt("aim: weight 1 at %.1f deg up, %.1f deg down; additive order %s", config_.aim_up_full_pitch_deg, config_.aim_down_full_pitch_deg,
 			config_.aim_order == anim::AdditiveOrder::LocalPost ? "LocalPost" : "LocalPre"));
+	if (check_) {
+		// Reported row (s3.md §1): the whole 64-soldier pose job on the main thread (evaluate_all_here), 30 frames of
+		// the stage schedule, LOD off; p50.
+		std::vector<anim::CrowdSoldierInput> in(stage_.soldiers());
+		const anim::Vec3 cam = anim::stage_camera(stage_).position;
+		std::vector<double> ms;
+		for (int k = 0; k < 30; ++k) {
+			const double t = 2.0 + k / 60.0;
+			for (uint32_t i = 0; i < stage_.soldiers(); ++i) {
+				in[i] = anim::stage_input(stage_, i, t, t - 1.0 / 60.0, cam, false);
+				in[i].position = feet_[i];
+			}
+			eval_->set_inputs(in, 1.0 / 60.0);
+			const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
+			eval_->evaluate_all_here();
+			ms.push_back(double(Time::get_singleton()->get_ticks_usec() - t0) / 1000.0);
+		}
+		single_thread_ms_ = percentile(ms, 0.5);
+		log(fmt("single-thread pose job (evaluate_all_here, 64 soldiers, LOD off): p50 %.3f ms over 30 frames", single_thread_ms_));
+	}
 	if (!make_uploader(check_ ? SkinBackend::Skeleton3D : backend_, r_error)) {
 		return false;
 	}
@@ -1003,8 +1023,9 @@ void Bf3Crowd::report_and_finish() {
 			}
 		}
 		report_.push_back(fmt("%-10s %-7s skeleton3d %.3f ms, rs %.3f ms -> %s", "bench", "report", bench_metric_[0], bench_metric_[1], skin_backend_name(winner_)));
-		report_.push_back(fmt("%-10s %-7s R1 job p50 %.3f p99 %.3f ms, blocked p99 %.3f ms, %.1f evaluated/frame, %u Godot calls/frame (p50)", "pose", "report",
-				s1.job_p50_ms, s1.job_p99_ms, s1.blocked_p99_ms, s1.evaluated_mean, s1.calls_p50));
+		report_.push_back(fmt("%-10s %-7s R1 job p50 %.3f p99 %.3f ms on the lanes (single thread p50 %.3f ms), blocked p99 %.3f ms, %.1f evaluated/frame, %u Godot "
+							  "calls/frame (p50)",
+				"pose", "report", s1.job_p50_ms, s1.job_p99_ms, single_thread_ms_, s1.blocked_p99_ms, s1.evaluated_mean, s1.calls_p50));
 	} else {
 		for (const char *g : { "G1a", "G1b", "G2-off", "G2-on" }) {
 			timing_ok &= row(g, false, "not measured", false);
