@@ -66,6 +66,7 @@ of real partitions, stored payloads and a `.toc` (in memory only) through every 
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
 M2a VFX1 adds `fx.contract` (the bf3_fx interface: record sizes, type vocabularies, polynomial goldens; no data); see "Effects (M2a VFX1)".
+M2a VFX1 also adds `fx.unit`, `fx.fuzz` (no data; both in the asan preset too), `fx.install` (the retail gates G1 and G3-G8, G11) and `tools.fx_bench` (G9, RUN_SERIAL, noisy); see "Effects (M2a VFX1)".
 
 ## Run
 
@@ -1260,11 +1261,26 @@ README's "Text database" already said so.
 deterministic CPU particle simulator `FxWorld`, the per-level emitter atlas and the impact table from the material
 grid. The design, exit gates (census 1,101/1,101 effects and 3,410/3,410 emitters with 0 unknown types, the 1p muzzle
 and oilfire goldens, Metro / Caspian impacts, Metro's 52 atlas entries, cost per particle) and the seams for the
-renderer (VFX2), triggers (VFX3) and audio are in [docs/design/m2a-vfx1.md](docs/design/m2a-vfx1.md). The interface
-headers are in the tree; `ctest -R fx.contract` checks them without data. The `bf3dump fx` commands and the
-`fx.unit` / `fx.install` / `fx.fuzz` / `tools.fx_bench` tests come with the implementation.
+renderer (VFX2), triggers (VFX3) and audio are in [docs/design/m2a-vfx1.md](docs/design/m2a-vfx1.md).
+`ctest -R fx.contract` checks the interface headers without data; `fx.unit` and `fx.fuzz` need no data; `fx.install`
+and `tools.fx_bench` read the install (Skipped without one).
 
-The cost gate (G9) will be measured by one command, `ctest -R tools.fx_bench` (= `bf3dump fx bench --seed 1`: a
-retail oilfire / 1p muzzle / impact mix of 12k-20k live particles on one lane, median of 5 runs): pass at <= 50 ns per
-particle per step, reported next to the research prototype's 24.7 ns. The machine is shared, so the figure is noisy;
-the test runs RUN_SERIAL and is report-only under asan.
+`bf3dump fx` (`fx census | compile | simulate | check | bench | atlas | impacts`, design §7.7) prints the compiled
+defs and runs the gates; every gate has one command (the design's §18 has the measured values):
+
+| gate | command | threshold | measured (2026-10-16, shared machine) |
+|---|---|---|---|
+| G1 census | `bf3dump fx census @all-mp` | 1,101/1,101 effects, 3,410/3,410 emitters, 0 unknown types, 32/32 + 10/10 types | met |
+| G2 polynomials | `ctest -R "fx.contract\|fx.unit"` | exact f(0), f(1), clamp then scale | met |
+| G3 1p muzzle | `bf3dump fx simulate fx_muzz_generic_rifle_1p --starts 10000 --seed 1 --seconds 1 --dt 0.0166667 --golden muzzle1p` | fractions 0.75 / 1 / 0.25 ± 0.02, flash life 0.05 s, lights exact | met |
+| G4 oilfire | `bf3dump fx simulate --emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01 --seconds 75 --dt 0.0166667 --seed 1 --golden oilfire` (and `--variable`) | 79..81 live after 15 s | 80..80, met |
+| G5 impacts | `bf3dump fx impacts MP_Subway` / `MP_007` | design §5.3 counts and cells | met |
+| G6 atlas | `bf3dump fx atlas MP_Subway` | 52 entries, 42 + 10, 0 missing | met |
+| G7 every effect | `bf3dump fx check @all-mp --seconds 10 --seed 1` | 0 failures | 0 of 1,101, met |
+| G8 determinism | `ctest -R fx.unit` and the `fx check` above | identical on 1 / 2 / 8 lanes | 0 mismatches, met |
+| G9 cost | `ctest -R tools.fx_bench` (= `bf3dump fx bench --seed 1`) | median <= 50 ns per particle per step | 39.4 ns (prototype 24.7), met; noisy |
+| G10 hostile data | `ctest --preset asan -R fx.fuzz` | no crash / hang / unbounded allocation | met |
+| G11 install unchanged | `ctest -R fx.install` | layout.toc, cas.cat, .sb/.toc unchanged | met |
+
+The cost gate runs RUN_SERIAL and is report-only under asan; the figure is wall clock on a shared machine, so it is
+noisy (the same build measured 39-42 ns across runs).

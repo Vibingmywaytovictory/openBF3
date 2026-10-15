@@ -47,7 +47,7 @@ building, so they are noisy; the bench gate takes the median of 5 runs and runs 
 | G4 | continuous steady state `em_amb_mp12_oilfire_l_fire_01` (item 4) | ctest `fx.install` case "oilfire" = `bf3dump fx simulate --emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01 --seconds 75 --dt 0.0166667 --seed 1 --golden oilfire` and the same with `--variable` in place of `--dt` (dt per frame uniform in [1/240, 1/20], a counter-based draw keyed by (seed, frame index), so the sequence is reproducible). `--emitter` wraps the lone EmitterDocument into a one-component EffectDef (`compile_emitter_effect`, MaxInstanceCount 1). Not the blueprint `fx/ambient/levelspecific/mp_12/fx_amb_mp12_oilfire_l`: it holds 4 emitters (fire_01, smoke_01, fire_02, smoke_01_highend) and a sound, so its total live count is not 80 | after a 15 s warm-up, live particles ∈ [79, 81] at every step over the next 60 s, in both runs; max live ≤ 81 (MaxCount) over the whole run; `spawns_dropped` = 0; `spawns_capped` reported |
 | G5 | impact selection, Metro and Caspian (item 5) | ctest `fx.install` case "impacts" = `bf3dump fx impacts MP_Subway --projectile=bullet` and `... MP_007 ...` | exact values under the counting rules of §5.3 (each count is defined there, so an implementation cannot pick the rule that fits): Metro 102 rows, 223 effect / 110 decal relations, the 5.56 cells of the 8 named materials, default-row indices 79, no-effect indices 66, 16 distinct effects; Caspian 118 rows, 299 / 123, default-row indices 63, no-effect indices 87, 16 distinct, its 8 named cells |
 | G6 | Metro atlas (item 6) | ctest `fx.install` case "atlas" = `bf3dump fx atlas MP_Subway` | 52 entries, 42 base + 10 normal, 3 degenerate; base DXT5 (2) sRGB 4096 × 4096, 13 mips; normal NormalDXT5RGA (20) linear 1024 × 2048, 12 mips; every non-degenerate rect pixel exact; every texture and normal-map name of Metro's 1,053 EmitterDocuments resolves (0 missing) and every entry is used |
-| G7 | every effect simulates sanely | ctest `fx.install` case "check" = `bf3dump fx check @all-mp --seconds 10 --seed 1` (harness of §7.7: each of the 1,101 effects runs 4 independent starts, each alone in a cleared world for 10 s: starts 0..2 at fixed dt 1/60 with seeds `fx_harness_seed(1, i)`, start 3 at the variable dt of G4) | 0 failures. A failure is any of: (a) a non-finite value in any output record; (b) `nonfinite_kills` > 0; (c) live particles of the instance > `EffectDef::max_particles` or `spawns_dropped` > 0 (simulator self-checks: admission makes both impossible, §6.7); (d) for an effect with a finite `effect_extent` (no continuous or repeating emitter): the live count rises between two steps after `spawn_end` (+ one step), or, when `end` + 1 s ≤ 10 s, the instance is still `alive` at `end` + 1 s. `end` includes the effect and component StartDelay, the children's windows and the largest possible UpdateAge life (`effect_extent`, effect_compiler.h). Effects with `end` + 1 s > 10 s (particle lives above about 9 s) skip the termination half of (d) and are counted and listed as `unchecked_termination` (reported, not a failure); continuous effects get (a)–(c) only |
+| G7 | every effect simulates sanely | ctest `fx.install` case "check" = `bf3dump fx check @all-mp --seconds 10 --seed 1` (harness of §7.7: each of the 1,101 effects runs 4 independent starts, each alone in a cleared world for 10 s: starts 0..2 at fixed dt 1/60 with seeds `fx_harness_seed(1, i)`, start 3 at the variable dt of G4) | 0 failures. A failure is any of: (a) a non-finite value in any output record; (b) `nonfinite_kills` > 0; (c) live particles of the instance > `EffectDef::max_particles` or `spawns_dropped` > 0 (simulator self-checks: admission makes both impossible, §6.7); (d) for an effect with a finite `effect_extent` (no continuous or repeating emitter): the live count rises between two steps after `spawn_end` + 3 steps (implementation: a delayed component starts at the first sub-step whose start time reaches its delay, and a child at the end of its parent particle's step, so spawning can lag `spawn_end` by about a step per level; the design's "+ one step" was too tight and is corrected here), or, when `end` + 1 s ≤ 10 s, the instance is still `alive` at `end` + 1 s. `end` includes the effect and component StartDelay, the children's windows and the largest possible UpdateAge life (`effect_extent`, effect_compiler.h). Effects with `end` + 1 s > 10 s (particle lives above about 9 s) skip the termination half of (d) and are counted and listed as `unchecked_termination` (reported, not a failure); continuous effects get (a)–(c) only |
 | G8 | determinism | ctest `fx.unit` (synthetic defs, including a run that saturates the world budget so admission drops spawns) and `fx.install` case "check" (retail: start 0 of every effect also on 8 lanes with item chunks of 1 and of 7) | `particles()` and `lights()` byte-identical (`memcmp`; both records have no padding) and `outputs()` equal field by field (EmitterOutput has padding), plus identical `FxStats`, on 1, 2 and 8 lanes and with two item partitions, for the same starts and dt sequence; in the saturating case `spawns_dropped` > 0 and identical across all runs |
 | G9 | simulator cost (plan §7.10 item 8: 24.7 ns/particle/frame from the research prototype) | ctest `tools.fx_bench` = `bf3dump fx bench --seed 1` (workload of §9: one FxWorld with the default config on one lane; 180 wrapped oilfire `fire_01` instances, 8 1p muzzles restarted every 0.1 s, 30 `fx_impact_concrete_01_s_xp2` impacts per second; 720 untimed warm-up steps of 1/60 s, then 600 timed steps; 5 runs, each after `clear()`; RUN_SERIAL; 77 without an install; report only under asan) | median over the 5 runs of (wall time of begin_frame through the last end_step summed over the timed steps) / (Σ over the timed steps of the particle ranges admitted in begin_step) ≤ 50 ns, printed next to the 24.7 ns reference (2× margin for the shared machine and for the full 32-processor path the prototype did not run). The run is valid only with mean live particles over the timed steps ∈ [12,000, 20,000], `spawns_dropped` = 0 and `refused_starts` = 0; the bench prints these, `stolen_instances` and `spawns_capped` |
 | G10 | hostile data | ctest `fx.fuzz` in the dev **and** asan presets (synthetic, no install) | every case returns an error or a bounded result; no crash, hang or unbounded allocation; `decode_effect_def` accepts only blobs that re-encode byte-identically |
@@ -266,7 +266,7 @@ sub-step split does not change it [inferred].
 | UpdateColor | rgb = Color ⊙ (Pre ? eval.rgb : 1) (DefaultValues.xyz == Color on all 2,479, so this equals the general rule without Pre) | [verified] |
 | UpdateTransparency | a = v.x; CullThreshold carried | [golden G2/G3] |
 | UpdateAlphaLevelMin / Max / Scale | alpha_min = MinLevel × v.x, alpha_max = MaxLevel × v.x, alpha_scale = v.x; Exponent carried per emitter (renderer erosion) | [inferred, R19] |
-| UpdateTextureCoords | frame += frame rate × v.x × dt_e (Pre: a playback-rate curve, 1 → 0.2–0.8); TextureInfo1 → `TextureRef` | [verified pattern] |
+| UpdateTextureCoords | frame += frame rate × v.x × dt_e (Pre: a playback-rate curve, 1 → 0.2–0.8); TextureInfo1 → `TextureRef`. Implementation: the state frame is kept within [0, frame_count) by one subtraction per wrap, so the output wrap (§6.4 frame rules) needs no fmod per particle | [verified pattern] |
 | UpdateOrientation | renderer marker (on every quad emitter), no state | [verified] |
 | UpdateClipScale | Lookup (132 int16) carried for VFX2 | deferred |
 
@@ -367,6 +367,10 @@ one [verified].
 * Comparison for G8: `ParticleVertex` and `ParticleLight` have no padding (static_assert on 80 / 32 bytes and the
   field layout), so `particles()` and `lights()` compare with `memcmp`; `EmitterOutput` has padding (after
   `first_person`) and a def pointer, so tests compare it field by field (the world zero-fills each record anyway).
+  Implementation: `fx_frame_digest` (fx_harness.h) hashes the particle and light bytes, every output field except
+  the effect handle's generation (it keeps counting across `clear()`, so a reused and a fresh world differ there for
+  the same start) and every `FxStats` field; the harness compares digests per frame, fx.unit also `memcmp`s the
+  particles.
 * NaN guard: after the update stage any non-finite position, velocity, size, colour or frame kills the particle
   (`nonfinite_kills`); the renderer never sees a NaN.
 
@@ -436,10 +440,10 @@ The audio track owns voices; VFX1 only emits events in a fixed order.
 | command | output |
 |---|---|
 | `fx census [<superbundle or @all-mp>] [--threads N]` | counts, per-type emitter counts, unknown lists, first errors, max work units, seconds; exit 1 unless G1 holds when run on `@all-mp` |
-| `fx compile <partition>...` | `format_effect_def` / `format_emitter_def` canonical text |
+| `fx compile <partition>... [--sb <spec>] [--cache <root>]` | `format_effect_def` / `format_emitter_def` canonical text (a blueprint, else a document; short names by `find_partition`) |
 | `fx simulate (<effect> \| --emitter <document>) [--seconds S] [--dt D \| --variable] [--seed N] [--starts K] [--golden muzzle1p\|oilfire]` | per-step live counts, per-component start fractions, stats; with `--golden`, the G3 / G4 checks and exit code |
-| `fx check [<sb>] [--seconds S] [--seed N]` | G7 / G8 over every effect; lists `unchecked_termination` effects |
-| `fx bench [--seed N] [--runs 5]` | G9: ns per admitted particle per sub-step (median of the runs) plus the validity counters |
+| `fx check [<sb>] [--seconds S] [--seed N] [--threads N] [--no-determinism] [--cache <root>]` | G7 / G8 over every effect; lists `unchecked_termination` effects; prints `G7 PASS` / `FAIL` and exits 0 / 1 |
+| `fx bench [--seed N] [--runs 5]` | G9: ns per admitted particle per sub-step (median of the runs) plus the validity counters and the mean live emitter instances; prints `G9 PASS` / `FAIL` and exits 0 / 1 |
 
 **Names.** `<effect>` and `--emitter <document>` take a full partition name or a short one that is the unique
 suffix after a `/` (ASCII case-insensitive) among the catalogued EffectBlueprint (resp. EmitterDocument) names
@@ -455,10 +459,10 @@ run's observations and `FxStats` to the totals. Starts never overlap, so the Max
 biasing the probabilities, the counts and the "not alive at the end" checks. The per-component start fraction is
 counted twice, from `fx_component_selected` and from the components whose emitters produced output, and the two must
 agree exactly.
-| `fx atlas <LEVEL>` | G6 entries and texture headers |
-| `fx impacts <LEVEL> [--projectile=bullet\|<pair partition>]` | G5 rows |
+| `fx atlas <LEVEL>` | G6 entries and texture headers, the names the level's EmitterDocuments use (missing / unused); for MP_Subway the §5.4 values are checked, `G6 PASS` / `FAIL`, exit 0 / 1 |
+| `fx impacts <LEVEL> [--projectile=bullet\|<material index>]` | G5 rows (every §5.3 count by name, the 8 named cells); for MP_Subway and MP_007 the §5.3 values are checked, `G5 PASS` / `FAIL`, exit 0 / 1 |
 
-All commands take the usual `--cache <root>` and open the install read-only through the repo's readers.
+All commands open the install read-only through the repo's readers. `compile`, `simulate` and `check` take `--cache <root>` (the fx-deps / fx-effect entries of §8; the reader's write guard refuses the install as a root); `census` and `bench` compile uncached and `atlas` / `impacts` are not cached in VFX1 (§8). `simulate --golden` and `census @all-mp` print `G3` / `G4` / `G1` `PASS` / `FAIL` and exit 0 / 1. The goldens and checks are the functions of `fx_harness.h` (implementation addition), which the fx.install cases call too, so a gate's command and its ctest measure the same thing.
 
 ## 8. Caching
 
@@ -606,8 +610,14 @@ Modified (additive "M2a VFX1" blocks only): top-level `CMakeLists.txt` (appended
 VFX1)" section at the end).
 
 Created by the implementation: `src/bf3_fx/src/{effect_compiler,effect_cache,effect_library,emitter_atlas,
-impact_table,simulator,census}.cpp`, `tools/bf3dump/fx_commands.{h,cpp}`, `tests/fx_unit_tests.cpp`,
-`tests/fx_install_tests.cpp`, `tests/fx_fuzz_tests.cpp`. Modified additively: `src/bf3_fx/CMakeLists.txt`,
+impact_table,simulator,fx_harness}.cpp` (the census is in effect_compiler.cpp), `src/bf3_fx/src/fx_ebx.h` (bounded EBX
+field reads, the recording resolver) and `fx_internal.h` (def validation, the particle bound), the header
+`src/bf3_fx/include/bf3/fx/fx_harness.h` (the multi-start harness, goldens, check, bench, lane pool and frame digest
+shared by bf3dump and the tests), `tools/bf3dump/fx_commands.{h,cpp}`, `tests/fx_unit_tests.cpp`,
+`tests/fx_install_tests.cpp`, `tests/fx_fuzz_tests.cpp`, `tests/fx_test_support.h` (the synthetic EBX writer and
+builders) and `tests/fx_bench.cmake` (the tools.fx_bench wrapper). Additive header changes: `CompileStats::
+flipbooks_normalised` (effect_compiler.h), `ImpactTable::index_map()`, `default_material_index()` and `cell(row,
+col)` (impact_table.h, for the §5.3 counting rules). Modified additively: `src/bf3_fx/CMakeLists.txt`,
 `tools/bf3dump/CMakeLists.txt` (link `bf3_fx`), `tools/bf3dump/bf3dump.cpp` (usage line and dispatch of `fx`),
 `tests/CMakeLists.txt` (`fx.unit`, `fx.install`, `fx.fuzz`, `tools.fx_bench`), `README.md` (its "Effects (M2a VFX1)"
 section and ctest line grow with the commands and tests).
@@ -646,3 +656,40 @@ Revision 2 (headers changed, no Godot-side change): `tools\build.cmd dev` built 
 | Emitter dedup by name with dual roles | Dedup by (name, role); census counts dual-role documents |
 | NormTime with life 0 | t = 0 rule (§6.5), fuzz case |
 | Merge friction; asan coverage | §13 risk; §11 asan rows |
+
+## 18. Implementation results (2026-10-16)
+
+Measured on branch `m2a/vfx` with the dev preset (Release) on the shared machine (other tracks and agents running;
+CPU load about 70 %), so every timing below is noisy. Each gate has one command; the fx.install / fx.unit cases call
+the same harness functions (`fx_harness.h`).
+
+| id | threshold | measured | met | command |
+|---|---|---|---|---|
+| G1 | 1,101/1,101 blueprints, 3,410/3,410 documents, no unknown type / enumerator, 32/32 and 10/10 types, max_work_units ≤ 65,536 | 1,101/1,101 and 3,410/3,410 compiled; unknown types and enumerators empty; 32/32 processor and 10/10 evaluator types; max_work_units 4,756; 4,353 EmitterEntityData, 21 effects with a transform, 12 component pools, 1 flipbook normalised, 0 dual-role documents; 0.05–0.08 s on all lanes | yes | `bf3dump fx census @all-mp` |
+| G2 | f(0) = w, f(1) = x+y+z+w exact; clamp then scale; flash alpha f(1) = 0.0051852 (rel 1e-4); colour endpoints | exact on the compiled evaluators of synthetic documents; rapidsmoke 0.1 at t = 0; f(1) = 0.00518524; Color1 at f = 0, Color0 at f = 1 | yes | `ctest -R "fx.contract\|fx.unit"` |
+| G3 | §2 G3 row | fractions 0.7465 / 0.7535 / 0.7531 (flash, light_01, light_02), 1 (rapidsmoke), 0.2473 (nozzleflames), selected = observed for every start; 7,465 flash starts, all with exactly one particle; life 0.0500000022 s; spawn size / P(0) in [0.320011, 0.399991]; size ratio error 1.35e-7; start frame [1.0011, 15.9912]; 527,310 lights checked, 0 off the golden (max rel error 0); rapidsmoke max live 5; 0 alive at the end; stolen / refused 0; 0.5 s | yes | `bf3dump fx simulate fx_muzz_generic_rifle_1p --starts 10000 --seed 1 --seconds 1 --dt 0.0166667 --golden muzzle1p` |
+| G4 | live ∈ [79, 81] after 15 s, max ≤ 81, spawns_dropped 0, both runs | fixed dt: 80..80, max 80, dropped 0, capped 0 (4,500 frames); variable dt: 80..80, max 80, dropped 0, capped 0 (2,726 frames) | yes | `bf3dump fx simulate --emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01 --seconds 75 --dt 0.0166667 --seed 1 --golden oilfire` (and `--variable` for `--dt 0.0166667`) |
+| G5 | §5.3 values and named cells | Metro: 102 rows, 223 / 110 relations, default-row 79 (all exactly generic), generic-effect 81, no-effect 66, no effect relation 65, 16 distinct, the 8 named cells (effects, decals, spreads 30 / 30 / 90 / 90 / 0 / 5 / 45); Caspian: 118, 299 / 123, 63, 64, 87, 86, 16, the 8 named cells; table load 0.014 s | yes | `bf3dump fx impacts MP_Subway --projectile=bullet` and `bf3dump fx impacts MP_007 --projectile=bullet` |
+| G6 | §5.4 values, 0 missing, every entry used | 52 entries, 42 base + 10 normal, 3 degenerate; base format 2 sRGB 4096 × 4096, 13 mips; normal format 20 linear 1024 × 2048, 12 mips; 0 inexact rects; 1,053 EmitterDocuments use 52 names, 0 missing, 0 unused entries | yes | `bf3dump fx atlas MP_Subway` |
+| G7 | 0 failures (a)–(d) | 1,101 effects × 4 starts: 0 failures; 589 finite, 137 `unchecked_termination` (listed by the command); `emitter_starts_dropped` 1,493 (child instances past their parent's per-emitter cap, reported); max live 2,611 (`fx_dlc_xp5_healthcritical_c130`); 30–78 s wall | yes | `bf3dump fx check @all-mp --seconds 10 --seed 1` |
+| G8 | identical particles / lights / outputs / stats on 1, 2, 8 lanes and two partitions; saturating case drops spawns identically | fx.unit: a world saturated by 50 instances (spawns_dropped > 0) gives identical per-frame digests and `memcmp`-equal particles on 1 lane, the lane pool with 2 and 8 lanes (chunks 1 and 7) and `FxWorld::step` on 8 lanes; retail: start 0 of all 1,101 effects on 8 lanes with chunks 1 and 7, 0 mismatches | yes | `ctest -R fx.unit` and `bf3dump fx check @all-mp --seconds 10 --seed 1` |
+| G9 | median ≤ 50 ns, valid run | median 39.42 ns (min 39.14, max 40.00) per admitted particle per sub-step, next to the prototype's 24.7 ns; mean live 15,348, mean emitter instances 354, spawns_dropped 0, refused 0, stolen 0, spawns_capped 4,183,576 (muzzle and impact emitters asking past MaxCount). Same build, other runs: 40.8–41.7 ns. Noisy: before the output stage was evaluated per chunk the same workload measured 94–178 ns at the same load | yes (noisy) | `ctest -R tools.fx_bench` (= `bf3dump fx bench --seed 1`) |
+| G10 | errors or bounded results, no crash / hang / unbounded allocation; decode only re-encode-identical blobs | fx.fuzz passes in dev (3.9 s) and asan (36.5 s): 1,500 mutated graphs (about 950 parse, about 600 compile and are simulated), hostile flipbooks / floats / template bounds / structure (duplicate types, evaluator as processor, processor as Pre, unknown enumerators, base nesting, child cycle, particle bound, 257 components, foreign component type, a 16-unit budget), every truncation / bit flip / count inflation of a blob and a deps list, NormTime without UpdateAge and with life 0, hostile dt (0, negative, NaN, inf, 1e30), 4,096 starts of a MaxCount 16,384 def | yes | `ctest --preset asan -R fx.fuzz` |
+| G11 | the install unchanged | fx.install "install unchanged" passes (dev and asan) | yes | `ctest -R fx.install` |
+
+ctest. Dev, `OPENBF3_GODOT` set: 61 rows; 58 passed, 2 skipped (`core.cache_data`, `core.res`: their sample
+variables are unset), and `host.session.unit` failed once ("extrapolated 1758 < 0.05 × presented": 15 %), a
+wall-clock networking row that shares no code with bf3_fx; run alone right after, it passed (70 s). `fx.contract`
+0.5 s, `fx.unit` 0.3 s, `fx.fuzz` 3.9 s, `fx.install` 37 s, `tools.fx_bench` 5.3 s, `godot.m1` 345 s, `godot.m1_load`
+48 s; total 808 s. Asan (`b/asan`): `fx.contract`, `fx.unit`, `fx.fuzz` and `fx.install` pass (fx.install 199 s);
+`tools.fx_bench` reports 690.83 ns and passes as report-only.
+
+Implementation decisions recorded with their sections: the G7 (d) slack (§2), the flipbook state wrap (§6.4), the
+digest without the handle generation (§6.8), the bf3dump flags and exit codes (§7.7) and the files (§15). Others:
+children of one parent instance and child emitter are capped at the parent's MaxCount (the excess counts as
+`emitter_starts_dropped`, 1,493 over G7, so `max_particles` stays a bound); a late join (`start_age`) arms neither
+the accumulator nor the burst of an emitter whose clock is past 0; a repeat wrap re-arms both; a rate-mode spawn's
+age offset is f = clamp((k + 1 − a0) / (rate × dt_e), 0, 1) of the sub-step; `run_census` reads a bulk-loaded library
+(callers run `load_all()` first). Performance: the Update stage's output slots (size, size axes, colour, alpha and the
+alpha levels) are evaluated per chunk of 256 particles with the vectorisable NormTime polynomial / colour paths, the
+NaN guard is one balanced sum times 0, and constant drag takes one `exp` per item.
