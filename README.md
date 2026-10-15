@@ -1126,11 +1126,12 @@ timings are noisy):
 | E1 snapshots | 3,985 / 3,985 own states in the snapshots equal the server's Trace bit for bit |
 | E2 "150/2" (gate) | 5 / 5 rest periods ok, 0 reconciliations, eye jitter 0 m, RTT 157 ms, 12,960 samples |
 | E2 "lat=150-165,loss=2" (stress, reported) | 5 / 5 ok, 0 reconciliations, RTT 322 ms, 0.03 % of the others' frames extrapolated |
+| input keys (device path, `input.keys`) | 48 / 48: Space / Ctrl / Z / F6 fire with no modifier, Shift, Ctrl and Shift+Ctrl held (sprint-jump, sprint-crouch); echoes and releases do nothing |
 | E3 spawns (`SpawnSweep`, 128 slots) | 102 / 102 ok and equal to in-process `settle_spawn`, 1.0 s |
-| E4 cold (process start → first controllable frame) | 2.33 s (`_ready` → Done 1.61 s); gate 15 s |
-| E5 warm | 1.49 s (`_ready` → Done 0.84 s); gate 5 s |
+| E4 cold (process start → first controllable frame) | 2.26–2.33 s (`_ready` → Done 1.61–1.69 s); gate 15 s |
+| E5 warm | 1.49 s (`_ready` → Done 0.84–0.85 s); gate 5 s |
 | E6 converter peak (`tools.m1_prepare`, T1) | 332–338 MiB cold; gate 512 MiB |
-| game peak working set (reported, not gated) | 862 MiB cold, 959 MiB warm (windowed, D3D12); headless check 435 MiB |
+| game peak working set (reported, not gated) | 851–862 MiB cold, 947–959 MiB warm (windowed, D3D12); headless check 426–435 MiB |
 | frame time after Done (5 s at the spawn) | p50 5.56 ms, p99 8.33 ms |
 | install | unchanged after every run (256 files, sizes and mtimes) |
 

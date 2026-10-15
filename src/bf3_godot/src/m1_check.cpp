@@ -1,6 +1,7 @@
 #include "m1_check.h"
 
 #include "godot_util.h"
+#include "input_mapper.h"
 #include "level_session.h"
 #include "level_upload.h"
 #include "loading_screen.h"
@@ -9,6 +10,7 @@
 #include "bf3/net/loopback_ping.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -286,6 +288,75 @@ CheckRow check_surface_format() {
 	return row;
 }
 
+CheckRow check_input_keys() {
+	struct Case {
+		InputAction action;
+		Key key;
+	};
+	const Case cases[] = {
+		{ InputAction::Jump, KEY_SPACE },
+		{ InputAction::Crouch, KEY_CTRL },
+		{ InputAction::Prone, KEY_Z },
+		{ InputAction::FreeCamera, KEY_F6 },
+	};
+	struct Mods {
+		const char *name;
+		bool shift, ctrl;
+	};
+	const Mods mods[] = { { "none", false, false }, { "shift", true, false }, { "ctrl", false, true }, { "shift+ctrl", true, true } };
+	enum class Kind { Press, Echo, Release };
+	const auto fired = [](const InputMapper &p_m, InputAction p_action) {
+		switch (p_action) {
+			case InputAction::Jump:
+				return p_m.sample().jump_presses == 1;
+			case InputAction::Crouch:
+				return p_m.requested_pose() == sim::Pose::Crouch;
+			case InputAction::Prone:
+				return p_m.requested_pose() == sim::Pose::Prone;
+			case InputAction::FreeCamera:
+				return p_m.free_camera();
+			default:
+				return false;
+		}
+	};
+	size_t ok = 0, total = 0;
+	std::string detail;
+	for (const Case &c : cases) {
+		for (const Mods &m : mods) {
+			for (const Kind kind : { Kind::Press, Kind::Echo, Kind::Release }) {
+				InputMapper mapper;
+				mapper.install_actions();
+				Ref<InputEventKey> ev;
+				ev.instantiate();
+				ev->set_keycode(c.key);
+				ev->set_physical_keycode(c.key);
+				ev->set_pressed(kind != Kind::Release);
+				ev->set_echo(kind == Kind::Echo);
+				ev->set_shift_pressed(m.shift);
+				ev->set_ctrl_pressed(m.ctrl);
+				mapper.handle_event(ev);
+				const bool want = kind == Kind::Press;
+				const bool got = fired(mapper, c.action);
+				++total;
+				if (got == want) {
+					++ok;
+				} else {
+					detail += fmt(" [%s with %s, %s: %s]", input_action_name(c.action), m.name, kind == Kind::Press ? "press" : (kind == Kind::Echo ? "echo" : "release"),
+							got ? "fired" : "did not fire");
+				}
+			}
+		}
+	}
+	CheckRow row;
+	row.check = "input.keys";
+	row.result = ok == total ? 0 : 1;
+	row.detail = fmt("%zu / %zu key events through handle_event as expected (Space / Ctrl / Z / F6 pressed with none / Shift / Ctrl / Shift+Ctrl held fire "
+					 "jump / crouch / prone / free camera; echoes and releases do nothing)",
+						 ok, total) +
+			detail;
+	return row;
+}
+
 // ---- ShotRunner -------------------------------------------------------------------------------------------------
 
 bool ShotRunner::parse(const std::string &p_shots, const std::string &p_spawns, std::vector<FreeShot> &r_free, std::vector<SpawnShot> &r_spawn,
@@ -517,9 +588,11 @@ void M1Check::prepare() {
 						level ? level->spawns.size() : size_t(0)) +
 						session_.cache_summary());
 	}
-	rows_.push_back(check_surface_format());
-	failed_ = failed_ || rows_.back().result == 1;
-	UtilityFunctions::print(to_godot("[m1-check] " + rows_.back().check + ": " + rows_.back().detail));
+	for (CheckRow (*row)() : { &check_surface_format, &check_input_keys }) {
+		rows_.push_back(row());
+		failed_ = failed_ || rows_.back().result == 1;
+		UtilityFunctions::print(to_godot("[m1-check] " + rows_.back().check + ": " + rows_.back().detail));
+	}
 	if (level == nullptr) {
 		fail_phase("prepare", "no shared level");
 		phase_ = Phase::Finish;

@@ -120,8 +120,10 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 			return;
 		}
 	}
+	// exact_match false: the actions carry no modifiers, and an exact match would also demand the event's modifier
+	// mask be empty, so Space / Ctrl / Z would do nothing while Shift (sprint) is held. Any modifier state matches.
 	for (const InputAction a : { InputAction::Jump, InputAction::Crouch, InputAction::Prone, InputAction::FreeCamera }) {
-		if (p_event->is_action_pressed(input_action_name(a), false, true)) {
+		if (p_event->is_action_pressed(input_action_name(a), false, false)) {
 			press(a);
 		}
 	}

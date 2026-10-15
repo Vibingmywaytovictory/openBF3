@@ -4,8 +4,9 @@
 #   ... the same with --m1-load-check=warm
 # E4 (cold <= 15 s) and E5 (warm <= 5 s) from process start to the first controllable frame, the per-phase work and
 # wall times, the frame time after Done, the game's peak working set (reported), install unchanged, and one
-# first-person shot at 8 sampled spawn points (written to the system temp directory, never the repo). Passes when
-# both runs print "M1 LOAD CHECK: PASS" and exit 0.
+# first-person shot at 8 sampled spawn points (written to the system temp directory, never the repo; removed at the
+# end unless OPENBF3_KEEP_SHOTS is set, so BF3 imagery does not pile up). Passes when both runs print
+# "M1 LOAD CHECK: PASS" and exit 0.
 # Skips (exit 77) when OPENBF3_GODOT is unset, no BF3 install is found, or no window / rendering device can be
 # created: on Windows, Godot's failure to create a rendering device raises a blocking OS alert, so a probe run
 # ("--path <project> --quit", windowed, killed after 60 s) decides first; only a clean probe starts the real runs
@@ -37,7 +38,7 @@ endif()
 string(RANDOM LENGTH 8 ALPHABET 0123456789abcdef tag)
 set(root "$ENV{TEMP}/openbf3-godot-m1-load-${tag}")
 set(shots "$ENV{TEMP}/openbf3-godot-m1-shots")
-file(REMOVE_RECURSE "${root}")
+file(REMOVE_RECURSE "${root}" "${shots}")
 file(MAKE_DIRECTORY "${shots}")
 set(failed FALSE)
 foreach(pass cold warm)
@@ -64,7 +65,12 @@ foreach(pass cold warm)
     endif()
 endforeach()
 file(REMOVE_RECURSE "${root}")
-message("shots: ${shots}/cold, ${shots}/warm")
+if("$ENV{OPENBF3_KEEP_SHOTS}" STREQUAL "")
+    file(REMOVE_RECURSE "${shots}")
+    message("shots removed (set OPENBF3_KEEP_SHOTS=1 to keep them in ${shots})")
+else()
+    message("shots: ${shots}/cold, ${shots}/warm")
+endif()
 if(failed)
     message(FATAL_ERROR "godot.m1_load failed")
 endif()

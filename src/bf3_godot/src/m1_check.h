@@ -21,7 +21,8 @@
 //        walk-stop cycles (2 s walk forward / back along the course heading, 13 s rest), one RestSample per presented
 //        frame with the eye read back from the first-person camera, judged by host::judge_rest.
 //   install.unchanged; a PASS/FAIL table and "M1 CHECK: PASS|FAIL (n/m)".
-//   Headless also runs upload.surface_format: encode_rs_surface against the RenderingServer's own conversion.
+//   Headless also runs upload.surface_format: encode_rs_surface against the RenderingServer's own conversion, and
+//   input.keys: the BF3 PC press keys through the device path with modifiers held.
 //
 // --m1-load-check=cold|warm (ctest godot.m1_load, windowed): E4 (cold, <= 15 s) or E5 (warm, <= 5 s) from process
 //   start to the first controllable frame (orchestrator decision on docs §16 question 4; _ready -> Done is
@@ -61,6 +62,10 @@ int print_check_table(const char *p_title, const std::vector<CheckRow> &p_rows);
 // upload.surface_format: encode_rs_surface of synthetic surfaces (with and without tangents, both index widths)
 // against mesh_add_surface_from_arrays + mesh_get_surface, byte for byte.
 CheckRow check_surface_format();
+// input.keys: key events (physical and logical keycode, pressed, not echo) through a fresh InputMapper's
+// handle_event: Space / Left Ctrl / Z / F6 must jump / crouch / go prone / toggle the free camera with no modifier,
+// Shift, Ctrl and Shift+Ctrl held (sprint-jump, sprint-crouch), and an echo or a release must do nothing.
+CheckRow check_input_keys();
 
 // Screenshots after Done (docs §11.8): free-camera views and first-person views at spawn points.
 class ShotRunner {

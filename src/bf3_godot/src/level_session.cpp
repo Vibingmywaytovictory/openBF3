@@ -138,6 +138,7 @@ void Bf3LevelSession::shutdown() {
 	if (server_ != nullptr) {
 		server_->stop();
 	}
+	upload_.set_lanes(nullptr); // the upload never sees a freed SceneLanes
 	lanes_.reset();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs != nullptr) {
@@ -376,8 +377,11 @@ void Bf3LevelSession::run_loader() {
 	session_ready_.store(true, std::memory_order_release);
 	if (scene_) {
 		bf3::core::Result<render::SceneLaneStats> stats = lanes_->wait();
-		upload_.lanes_finished();
+		// Every timing the loader writes (cache open, census, plan, lanes) is written before lanes_finished()
+		// publishes lanes_done_ (release); the main thread reads them only after LevelUpload::finished() saw it
+		// (acquire).
 		timings_.lanes_us = now_us();
+		upload_.lanes_finished();
 		if (!stats) {
 			fail("scene lanes: " + stats.error().message);
 			return;

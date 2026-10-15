@@ -638,8 +638,14 @@ bool LevelUpload::finished() const {
 void LevelUpload::wait_tasks() {
 	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
 	{
-		// Nothing new is taken once the queue is empty.
+		// Nothing new is taken once the queue is empty. The dropped items' bytes go back to the lanes, so the
+		// in-flight count stays right whatever the shutdown order.
 		std::lock_guard lock(queue_mutex_);
+		if (lanes_ != nullptr) {
+			for (const Item &item : queue_) {
+				lanes_->release_bytes(item.bytes);
+			}
+		}
 		queue_.clear();
 	}
 	for (const int64_t id : task_ids_) {

@@ -16,6 +16,8 @@
 //   InputSample::life only then. Until then the client commands the spawn view itself (client_session.h step 6).
 // * Free camera (F6): the mouse and the movement keys drive the free camera's own view; the soldier gets the
 //   neutral command (InputSample::free_camera) and keeps simulating.
+// * The press actions (jump, crouch, prone, free camera) fire whatever modifiers are held (not an exact match), so
+//   Space / Ctrl / Z work while Shift sprints; the check row input.keys feeds key events with Shift and Ctrl held.
 // * The mouse is captured in game and released on Esc; a click captures it again.
 // * Scripted input: --m1-check and the shot harness drive the same mapper through script_hold / script_press /
 //   script_view instead of the devices, so the check exercises the toggle, clamp and adoption code the player uses.
