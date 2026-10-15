@@ -6,11 +6,12 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/render/level_scene.h"
 #include "bf3/render/mesh_cache.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
-#include <map>
 #include <mutex>
 
 namespace bf3::render {
@@ -83,29 +84,14 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 		report.seconds_census = since(t0);
 		report.placements = census->placements;
 		report.census_failures = census->failures.size();
-		// One item per MeshSet res: the LODs any kept variant needs.
-		struct Item {
-			std::string name;
-			size_t lods = 0; // census-decoded LOD count (at most 4)
-			bool model = false; // some kept variant is model kind
-		};
-		std::map<std::string, Item> by_name;
+		// One item per MeshSet res: the LODs any kept variant needs (scene_mesh_requests, the same requests the
+		// game's scene plan makes, so a prepared root gives the game only hits).
 		for (const core::level::SceneMesh &m : census->meshes) {
-			if (!m.kept) {
-				continue;
+			if (m.kept) {
+				++report.scene_meshes;
 			}
-			++report.scene_meshes;
-			Item &item = by_name[m.name];
-			item.name = m.name;
-			item.lods = std::max(item.lods, m.lods.size());
-			item.model = item.model || !m.world_kind;
 		}
-		std::vector<Item> items;
-		items.reserve(by_name.size());
-		for (auto &[name, item] : by_name) {
-			items.push_back(std::move(item));
-		}
-		by_name.clear();
+		const std::vector<SceneMeshRequest> items = scene_mesh_requests(*census);
 
 		t0 = Clock::now();
 		core::ConvertTotals totals;
@@ -114,28 +100,22 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 		core::parallel_for(
 				items.size(),
 				[&](size_t i) {
-					const Item &item = items[i];
-					MeshRequest request;
-					request.lods.clear();
-					const size_t lods = item.model ? std::max<size_t>(item.lods, 1) : 1;
-					for (size_t l = 0; l < lods; ++l) {
-						request.lods.push_back(uint32_t(l));
-					}
-					core::Result<MeshHead> head = read_mesh_head(mount, item.name);
+					const SceneMeshRequest &item = items[i];
+					core::Result<MeshHead> head = read_mesh_head(mount, item.res);
 					if (!head) {
 						totals.add_failure();
-						failures.add(item.name, head.error().message);
+						failures.add(item.res, head.error().message);
 						return;
 					}
-					core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, mount, *head, request);
+					core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, mount, *head, item.request);
 					if (!mesh) {
 						totals.add_failure();
-						failures.add(item.name, mesh.error().message);
+						failures.add(item.res, mesh.error().message);
 						return;
 					}
 					totals.add(mesh->item);
 					if (!mesh->item.cache_error.empty()) {
-						failures.add(item.name, "cache: " + mesh->item.cache_error);
+						failures.add(item.res, "cache: " + mesh->item.cache_error);
 					}
 					vertices += mesh->mesh.vertices();
 					triangles += mesh->mesh.triangles();

@@ -229,3 +229,18 @@ endif()
 openbf3_test(test_m1_contract test_main.cpp m1_contract_tests.cpp test_support.h)
 target_link_libraries(test_m1_contract PRIVATE bf3_host bf3_render)
 add_test(NAME m1.contract COMMAND test_m1_contract)
+# M1 T5: the level scene (bf3_render level_scene.h; docs/design/m1.md §14). render.scene.unit: synthetic census,
+# meshes and heightfields (no data). render.scene: Metro TDM plan and SceneLanes cold and warm on a scratch cache
+# root with its timings, texture count and bytes, peak in-flight bytes and peak working set, install.unchanged (exits
+# 77 = skipped without an install). RUN_SERIAL so the printed lane timings do not compete with ctest -j neighbours.
+openbf3_test(test_render_scene test_main.cpp render_scene_tests.cpp test_support.h)
+target_link_libraries(test_render_scene PRIVATE bf3_render psapi)
+target_include_directories(test_render_scene PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_render/src)
+add_test(NAME render.scene.unit COMMAND test_render_scene --test-suite=render-scene-unit)
+add_test(NAME render.scene COMMAND test_render_scene --test-suite=render-scene)
+set_tests_properties(render.scene PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+set_tests_properties(render.scene.unit render.scene PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_scene_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.scene.unit render.scene PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_scene_cl_dir}")
+endif()
