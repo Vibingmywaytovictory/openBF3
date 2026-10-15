@@ -1278,15 +1278,18 @@ testing on the machine, so every timing here is noisy and the acceptance rerun o
 | gate | threshold | measured | command |
 |---|---|---|---|
 | L1 albedo coverage | >= 95 % of drawn instance slots | 98.01 % (PASS) | `bf3dump looks MP_Subway TeamDeathMatch0` |
-| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | 7.41 against 6.88 ms, 1.076 (PASS); final full ctest run 3.75 against 3.91 ms, 0.961 (PASS) | `ctest --preset dev -R godot.l1_look` |
-| E4 cold load | 15 s | 2.59 s and 2.86 s in two full ctest runs (PASS; `_ready` -> Done 1.98 / 2.05 s) | `ctest --preset dev -R godot.m1_load` |
-| E5 warm load | 5 s | 1.98 s and 2.15 s (PASS; `_ready` -> Done 1.30 / 1.43 s) | same |
+| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | 7.41 against 6.88 ms, 1.076 (PASS); full ctest run 3.75 against 3.91 ms, 0.961 (PASS); after the verifier fixes 5.91 against 4.97 ms, 1.187 (FAIL), then 4.62 against 4.78 ms, 0.966 (PASS), CPU at 34-93 % from other tracks | `ctest --preset dev -R godot.l1_look` |
+| E4 cold load | 15 s | 2.59 s and 2.86 s in two full ctest runs, 2.63 s after the verifier fixes (PASS; `_ready` -> Done 1.98 / 2.05 / 1.95 s) | `ctest --preset dev -R godot.m1_load` |
+| E5 warm load | 5 s | 1.98 s and 2.15 s, 2.08 s after the verifier fixes (PASS; `_ready` -> Done 1.30 / 1.43 / 1.41 s) | same |
 
 `godot.l1_look` runs `--look=m1` and `--look=l1` alternately for 5 rounds (`-DROUNDS=n` in script mode); a run
 whose viewport is not 2560x1440 (`--fullscreen` takes the monitor's mode) fails. Each run
 holds 4 free views (street at TDM spawn 13, station at spawn 22, park, overview) and times 300 frames per view after
 a 3 s settle. A run's frame time is the mean over its views of the per-view median frame interval, and the medians
-over the rounds are compared. GPU render time (same statistic) is reported, not gated.
+over the rounds are compared. GPU render time (same statistic) is reported, not gated. The interval swings with the
+load: within one 5-round run M1 alone ranged 3.2-7.6 ms, and a 3-round A/B of M1, L1, L1 with glass opaque and L1
+also without auto exposure gave medians of 4.28, 4.16, 3.54 and 4.58 ms, an order no part of L1 explains, while the
+GPU medians stayed in order (1.50, 1.68, 1.59, 1.58 ms). The quiet-machine rerun decides the interval gate.
 
 The measured frame intervals (M1 6.87-7.62 ms per round) are about 2.5 × what the same runs give on an idle
 machine (M1 about 2.7 ms), because the other tracks kept every core busy: the frames are CPU bound, and the
