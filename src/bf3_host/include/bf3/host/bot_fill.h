@@ -12,6 +12,7 @@
 //                    per tick before the first brain. Everything runs on the server thread (docs §3).
 
 #include "bf3/core/result.h"
+#include "bf3/host/bot_fill_stats.h"
 #include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/nav.h"
 
@@ -64,7 +65,9 @@ struct BotLoadOptions {
 };
 
 // On the loader thread that owns p_db (World is not thread-safe). p_shared must be the static world built with the
-// same terrain cover (the call checks the cover's digest against the static world's options and fails otherwise).
+// same terrain cover: the call compares SharedLevel::terrain_cover with the level's combat-area tiles
+// (level_combat_tiles) and fails otherwise. The nav bake's link checks use p_shared.static_world
+// (NavBakeOptions::link_shapes, one CollisionWorld per bake lane).
 core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase &p_db, const SharedLevel &p_shared, const BotLoadOptions &p_options,
 		LoadProgress *p_progress);
 
@@ -76,16 +79,6 @@ struct BotFillConfig {
 	sim::NavQueryOptions query;
 };
 
-// Per tick and cumulative bot counters (GameServerStats::bots). Trivially copyable.
-struct BotFillStats {
-	uint32_t bots = 0;
-	uint32_t thinks_last_tick = 0;
-	uint32_t path_iterations_last_tick = 0;
-	uint32_t paths_pending = 0;
-	double last_brains_ms = 0.0; // PathService::run + every brain's command() of the last tick
-	double last_paths_ms = 0.0; // of which PathService::run
-	sim::bots::WalkerStats walkers; // summed over the bots, cumulative
-	sim::NavQueryStats query; // the server NavQuery's cumulative counters
-};
+// BotFillStats (GameServerStats::bots) is in bot_fill_stats.h.
 
 } // namespace bf3::host

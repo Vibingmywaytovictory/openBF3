@@ -8,6 +8,7 @@
 // iterations it is given, so a caller (the bots' path service) bounds the work per tick.
 
 #include "bf3/core/result.h"
+#include "bf3/sim/bots/bot_stats.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/sim_types.h"
 
@@ -27,20 +28,8 @@ struct NavQueryOptions {
 	uint16_t exclude_flags = 0;
 };
 
-// Cumulative counters of one NavQuery (the bench reports them per second and per call).
-struct NavQueryStats {
-	uint64_t nearest = 0;
-	uint64_t paths_started = 0;
-	uint64_t paths_done = 0; // complete paths
-	uint64_t paths_partial = 0; // DT_PARTIAL_RESULT: the goal was not reached (other component, node pool)
-	uint64_t paths_failed = 0;
-	uint64_t path_iterations = 0; // updateSlicedFindPath iterations
-	uint64_t corridor_moves = 0; // NavCorridor::move_position
-	uint64_t random_points = 0;
-	double ms_nearest = 0.0;
-	double ms_path = 0.0; // init + update + finalize of the sliced searches
-	double ms_corridor = 0.0;
-};
+// NavQueryStats (the cumulative counters of one NavQuery) is in bots/bot_stats.h, so GameServerStats can carry it
+// without this header.
 
 enum class NavPathStatus : uint8_t { Idle = 0, InProgress = 1, Done = 2, Partial = 3, Failed = 4 };
 

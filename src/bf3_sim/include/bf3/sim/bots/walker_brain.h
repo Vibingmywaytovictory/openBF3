@@ -2,10 +2,11 @@
 // The S1 walker brain (spike S1, plan §3.6 "Brains ... reads an immutable ISimView, writes Commands only", D11; docs/
 // design/s1.md §7): a server-side bot that walks between reachable goals on the navmesh, with no combat. Godot-free.
 //
-// Contract: a brain reads a WalkerView (its own authoritative state, the tick, the static goal set and the navmesh
-// through the server thread's shared NavQuery and PathService) and returns the Command of the next tick, the same
-// struct a human's client sends (command.h). It never writes simulation state, never teleports, never reads another
-// soldier. The motor then steps the command like any other (game_server.h tick step 3-4).
+// Contract: a brain reads a WalkerView (its own authoritative state, the tick, the static goal set, and the navmesh
+// through its thread's NavQuery and PathService, the only mutable things it touches: query scratch and the request
+// queue, never sim state) and returns the Command of the next tick, the same struct a human's client sends
+// (command.h). It never writes simulation state, never teleports, never reads another soldier. The motor then steps
+// the command like any other (game_server.h tick step 3-4).
 //
 // Behaviour (docs §7):
 //   goals      alternately a random nav point of the main component (NavQuery::random_point) and a mode objective
@@ -25,6 +26,7 @@
 // Determinism: a brain's choices come from its own splitmix64 state (seed = match seed + slot) and the view; the
 // server runs brains in slot order, so a run reproduces bit for bit (host.scale.unit checks the command hash).
 
+#include "bf3/sim/bots/bot_stats.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/nav_query.h"
@@ -63,24 +65,7 @@ struct WalkerParams {
 	bool operator==(const WalkerParams &) const = default;
 };
 
-struct WalkerStats {
-	uint64_t ticks = 0; // commands written
-	uint64_t thinks = 0;
-	uint64_t goals_started = 0;
-	uint64_t goals_reached = 0;
-	uint64_t goals_abandoned = 0; // max_repaths reached
-	uint64_t path_requests = 0;
-	uint64_t path_partial = 0;
-	uint64_t path_failed = 0;
-	uint64_t repaths = 0;
-	uint64_t stuck_events = 0;
-	uint64_t off_mesh_ticks = 0;
-	uint64_t sprint_ticks = 0;
-	uint64_t crouch_ticks = 0;
-	double metres = 0.0; // horizontal distance walked (from the states)
-
-	void add(const WalkerStats &p_other);
-};
+// WalkerStats and PathServiceStats are in bot_stats.h (light, carried by GameServerStats).
 
 // Sliced path searches for every bot of one server thread, one at a time on the shared NavQuery (Detour allows one
 // sliced search per query object), at most iterations_per_tick A* iterations per tick across all requests; a request
@@ -102,15 +87,20 @@ public:
 	// The finished answer of p_slot, if any (then forgotten): Done / Partial with polys, or Failed.
 	NavPathStatus take(uint32_t p_slot, std::vector<NavPolyRef> &r_polys);
 	size_t pending() const;
-	uint64_t iterations() const; // total
+	const PathServiceStats &stats() const; // iterations, ticks at the budget, run times (bot_stats.h)
 
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 };
 
-// What a brain reads. Everything is immutable during the brain's call; the NavQuery and PathService are the server
-// thread's (the brains run on that thread one after another, so sharing them is safe).
+// What a brain reads. The sim state, the goal set and the components are immutable during the call. The NavQuery
+// and the PathService are not: they are the mutable query services of the brain's thread (Detour's node pool and
+// the shared request queue), handed in by pointer. S1 runs the brains serially on the server thread, so one NavQuery
+// and one PathService serve them all. Moving brains to the server job pool (plan §2.3; deferred, docs §13) needs one
+// NavQuery and one PathService per worker, and the shared first-come-first-served queue then becomes one queue per
+// worker, which changes the request order and so the command hash: determinism holds per worker assignment (bots
+// assigned to workers by slot), not against a serial run.
 struct WalkerView {
 	Tick tick = 0; // the tick the returned command drives (= self.tick + 1)
 	uint32_t slot = 0;

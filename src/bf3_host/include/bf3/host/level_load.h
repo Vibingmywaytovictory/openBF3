@@ -111,6 +111,10 @@ struct SharedLevel {
 	sim::MotorParams motor; // from characters/soldiers/mpsoldier + MotorTuning
 	double seconds_shapes = 0.0;
 	double seconds_tables = 0.0;
+	// S1 (docs/design/s1.md §5.2, §8): the SharedLoadOptions::terrain_cover static_world was built with (sorted,
+	// unique; empty = M1's world). load_bot_level compares it with the level's combat-area tiles and fails on a
+	// mismatch, so the nav is never baked over ground the server's motor lacks.
+	std::vector<std::array<int32_t, 2>> terrain_cover;
 };
 
 struct SharedLoadOptions {

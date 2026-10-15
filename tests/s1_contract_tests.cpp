@@ -5,10 +5,12 @@
 
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/mode_areas.h"
+#include "bf3/host/game_server.h" // first: it must compile with only bot_fill_stats.h and a forward BotFillConfig
 #include "bf3/host/bot_fill.h"
-#include "bf3/host/game_server.h"
+#include "bf3/host/bot_fill_stats.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/scale_bench.h"
+#include "bf3/sim/bots/bot_stats.h"
 #include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/nav.h"
@@ -30,6 +32,8 @@ static_assert(sim::kNavTileSize == 64.0f);
 static_assert(std::is_trivially_copyable_v<host::BotFillStats>);
 static_assert(std::is_trivially_copyable_v<sim::NavQueryStats>);
 static_assert(std::is_trivially_copyable_v<sim::bots::WalkerStats>);
+static_assert(std::is_trivially_copyable_v<sim::bots::PathServiceStats>);
+static_assert(std::is_trivially_copyable_v<host::TailShares>);
 static_assert(std::is_trivially_copyable_v<sim::NavPointCheck>);
 static_assert(std::is_trivially_copyable_v<sim::bots::BotGoal>);
 // Flags and areas are distinct bits / ids.
@@ -52,6 +56,20 @@ TEST_CASE("s1 contract: nav defaults are the plan's and the soldier's") {
 	// A drop link never deals fall damage: v = sqrt(2 g h) stays below the 13.9 m/s knee (plan §7.2) at g 9.81.
 	CHECK(std::sqrt(2.0f * 9.81f * p.drop_max) < 13.9f);
 	CHECK(p == sim::NavParams{});
+	// The input box must reach past a drop link's check sweep (nav_input_border, docs §5.3): with the default params
+	// the sweep reaches drop_reach + radius = 1.35 m past the edge, Recast's border ceil(0.35 / 0.25) + 3 = 5 cells
+	// = 1.25 m does not, so the border rule's sweep term (1.6 m) is the one that applies.
+	const float recast_border = (std::ceil(p.agent_radius / p.cell_size) + 3.0f) * p.cell_size;
+	CHECK(recast_border < p.drop_reach + p.agent_radius);
+	// G4's timed span is input + bake (lanes incl. link checks) + assemble.
+	sim::NavStats st;
+	st.seconds_input = 1.0;
+	st.seconds_bake = 2.0;
+	st.seconds_assemble = 0.5;
+	st.seconds_link_setup = 0.25; // inside seconds_bake, not added again
+	CHECK(sim::nav_bake_gate_seconds(st) == 3.5);
+	const sim::NavBakeOptions bo;
+	CHECK(bo.link_shapes == nullptr);
 }
 
 TEST_CASE("s1 contract: walker and bench defaults") {
@@ -74,6 +92,8 @@ TEST_CASE("s1 contract: the additive M1 fields default to M1's behaviour") {
 	CHECK(wo.terrain_cover.empty());
 	const host::SharedLoadOptions lo;
 	CHECK(lo.terrain_cover.empty());
+	const host::SharedLevel sl;
+	CHECK(sl.terrain_cover.empty());
 	const host::GameServerConfig gc;
 	CHECK(gc.bots == nullptr);
 	const host::GameServerStats gs;

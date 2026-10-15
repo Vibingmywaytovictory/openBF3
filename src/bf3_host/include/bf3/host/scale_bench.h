@@ -8,8 +8,9 @@
 // `observers` synthetic peers connected through on_connect + Hello + Ready datagrams (no sockets, as
 // host.session.unit drives GameServer), so the server encodes and "sends" a snapshot per observer every second tick.
 // Observers send no commands: the server repeats their hold command (an idle soldier each).
-// Run: warmup_seconds of ticks (the bots' initial spawns and their settles fall here and are reported separately),
-// then seconds of measured ticks. GameServer::tick is called back to back (no sleeps, no ENet), so a tick's wall
+// Run: GameServer::init adds the bots and spawns each at once (add_local_soldier calls spawn(): 64 settle_spawn
+// runs inside init, timed as seconds_init, not as ticks), then warmup_seconds of ticks (the first goals and path
+// searches; respawns here are counted in spawn_tick_ms), then seconds of measured ticks. GameServer::tick is called back to back (no sleeps, no ENet), so a tick's wall
 // time is its CPU time on one thread, which is what the 16.7 ms budget of a 60 Hz ServerHost thread is spent on.
 // A tick contains (game_server.h, GameServerStats parts): the commands from the jitter buffers, the command sources
 // (PathService::run + every bot brain: corridor moves, corner lists, goal picks, nearest-poly queries), one motor
@@ -49,11 +50,21 @@ struct Percentiles {
 	double p50 = 0.0, p95 = 0.0, p99 = 0.0, max = 0.0, mean = 0.0;
 };
 
+// The parts of the slowest ticks (docs §14 fallback rule): over the measured ticks whose last_tick_ms >= the p99,
+// the mean of each part and of the whole; share = part mean / whole mean. The parts are timed inside the tick, so
+// the shares sum to about 1 (the remainder is the tick's glue, printed as other).
+struct TailShares {
+	uint64_t ticks = 0; // ticks at or above the p99 (about 1 % of the window: 72 of 7,200)
+	double tick_ms = 0.0, commands_ms = 0.0, sources_ms = 0.0, step_ms = 0.0, rules_ms = 0.0, encode_ms = 0.0;
+	double commands = 0.0, sources = 0.0, step = 0.0, rules = 0.0, encode = 0.0, other = 0.0; // shares 0..1
+};
+
 struct ScaleReport {
 	ScaleBenchOptions options;
 	uint64_t ticks = 0; // measured
 	Percentiles tick_ms; // GameServerStats::last_tick_ms over the measured ticks (the gate: p99)
 	Percentiles commands_ms, sources_ms, step_ms, rules_ms, encode_ms;
+	TailShares tail; // the split of the slowest 1 % (docs §14)
 	// Motor (docs §6.3): steps and narrow-phase queries in the window (CollisionWorld::query_count), queries per step,
 	// queries per second of sim time, and the mean step cost (step_ms / steps per tick).
 	uint64_t motor_steps = 0;
@@ -61,14 +72,29 @@ struct ScaleReport {
 	double queries_per_step = 0.0;
 	double queries_per_second = 0.0;
 	double us_per_step = 0.0;
+	// us_per_step / queries_per_step: an UPPER bound on one query's cost (the CharacterVirtual solver's own math is
+	// inside the step time; Jolt's internal casts cannot be timed one by one from outside).
+	double us_per_query_upper = 0.0;
+	// Direct query costs (docs §6.3): after the window, sweep_samples positions recorded from the bots' feet during
+	// it are replayed on the server's CollisionWorld, each as one sweep_capsule (stand capsule, 1/60 s of sprint
+	// along the bot's velocity) and one overlap_capsule, timed one by one (steady_clock around each call, the timer's
+	// own cost measured on empty calls and subtracted). Mean and p99 microseconds.
+	uint32_t sweep_samples = 0;
+	Percentiles us_sweep, us_overlap;
 	// Nav (docs §6.4): calls and mean cost in the window, from the server NavQuery's counters.
 	sim::NavQueryStats query;
 	double us_per_path = 0.0; // ms_path / (paths_done + paths_partial + paths_failed)
 	double us_per_corridor_move = 0.0;
 	double us_per_nearest = 0.0;
+	// Path service (docs §6.4, §14): A* iterations in the window, ms per 1,000 iterations (an upper bound: init and
+	// finalize included), the ticks whose run() spent the whole budget with requests left, the longest run().
+	sim::bots::PathServiceStats paths;
+	double us_per_iteration = 0.0;
+	double ticks_at_budget_share = 0.0; // ticks_at_budget / ticks
 	sim::bots::WalkerStats walkers; // in the window
 	uint32_t respawns_in_window = 0; // ticks with a spawn inside the window are kept in tick_ms and counted here
-	Percentiles spawn_tick_ms; // the warm-up ticks that spawned bots
+	double seconds_init = 0.0; // GameServer::init: the bots' slots and their initial spawns (64 settles), not ticks
+	Percentiles spawn_tick_ms; // warm-up ticks that respawned a bot (usually none: the initial spawns are in init)
 	uint64_t snapshot_bytes = 0; // in the window, all observers
 	size_t max_snapshot_bytes = 0;
 	uint32_t others_dropped_max = 0; // others a snapshot could not carry (the 1,200-byte cap: about 55 others)

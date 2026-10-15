@@ -1152,7 +1152,8 @@ Spike S1 (docs/design/s1.md) asks whether a 60 Hz server steps 64 navmesh walker
 whether the Detour navmesh baked from exactly the motor's collision set (Collision + Character bodies, terrain with
 holes, the level's combat-area tiles as terrain cover) connects every flag, HQ, MCOM and spawn point. Interfaces:
 `bf3/core/level/mode_areas.h`, `bf3/sim/nav.h`, `bf3/sim/nav_query.h`, `bf3/sim/bots/walker_brain.h`,
-`bf3/host/bot_fill.h`, `bf3/host/scale_bench.h`. Recast/Detour is built with 64-bit poly refs.
+`bf3/host/bot_fill.h`, `bf3/host/scale_bench.h` (counters in `bf3/sim/bots/bot_stats.h`, `bf3/host/bot_fill_stats.h`).
+Recast/Detour is built with 64-bit poly refs.
 
 Each gate is one ctest (the machine is shared while the tracks run, so timings are noisy; acceptance reruns them on
 a quiet machine):
@@ -1161,8 +1162,8 @@ a quiet machine):
 |---|---|---|
 | G1 tick | `host.scale` (Metro and Caspian ConquestLarge0, 64 walkers + 1 observer, 10 s warm-up + 120 s sim time ticked back to back) | p99 `GameServer::tick` <= 8.0 ms on each level; >= 90 % of bots walk >= 100 m, abandoned goals <= 10 % |
 | G2 connectivity | `sim.nav` (Metro and Caspian, all 7 MP modes) | every flag, HQ, MCOM and spawn on the mesh and in the main strongly connected component |
-| G3 sweep cost | `host.scale` | motor steps, queries per step, queries per second, us per step printed and non-zero |
-| G4 bake | `sim.nav.bake` (Caspian and Kharg ConquestLarge0, uncached, 16 threads) | Caspian <= 6.0 s, Kharg <= 13.0 s (tile inputs + Recast + assembly) |
+| G3 sweep cost | `host.scale` | motor steps, queries per step, queries per second, us per step, direct us per sweep and per overlap printed and non-zero |
+| G4 bake | `sim.nav.bake` (Caspian and Kharg ConquestLarge0, uncached, 16 threads, drop links sweep-checked on per-lane worlds) | Caspian <= 6.0 s, Kharg <= 13.0 s (tile inputs + lanes incl. link checks + assembly; not like-for-like with the research's region, tile counts printed) |
 
 The same numbers for a human: `bf3dump bots <LEVEL> <MODE>`, `bf3dump nav bake|stats|components|path|probe`. In the
 game, `res://scenes/m1_metro.tscn -- --bots=64 --nav-overlay` adds the walkers to the M1 server and draws the navmesh

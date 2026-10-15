@@ -37,7 +37,7 @@
 // Sending: ServerHost sends the returned OutDatagrams and flushes ENet in the same tick (server_host.h).
 
 #include "bf3/core/result.h"
-#include "bf3/host/bot_fill.h"
+#include "bf3/host/bot_fill_stats.h"
 #include "bf3/host/level_load.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
@@ -49,6 +49,9 @@
 #include <vector>
 
 namespace bf3::host {
+
+// S1 (docs/design/s1.md §8): GameServerConfig::bots; defined in bot_fill.h (kept out of this header).
+struct BotFillConfig;
 
 // A server-side command source (bots later, M1's scripted walkers and spawn-sweep dummies now): asked once per
 // tick for the command of its slot. Runs on the server thread.

@@ -15,16 +15,23 @@
 // Bake (docs §5.3): 64 m tiles on the soup's tile grid (tile (x, z) covers [64x, 64x + 64) x [64z, 64z + 64)), cs
 // 0.25, ch 0.1, the soldier from MotorParams (radius 0.35, stand height 1.8, crouch height 1.15, climb = stand
 // StepHeight 0.3, slope = MaxAscendAngle 50; verified with bf3dump soldier on MP_Subway), over the given tiles only
-// (the union of the level's MP modes' combat-area tiles + margin, mode_areas.h). Each tile rasterises its own and
-// its neighbours' input triangles within the border (walkable radius + 3 cells), so tiles are independent and bake
-// on parallel_for lanes; walkable height is the crouch height and spans with less than the stand height of room are
-// area kNavAreaCrouch. Drop-down off-mesh links (one way) are found per tile from its own input (border included)
-// and checked with a stand-capsule sweep. Detour tiles are assembled into one dtNavMesh (64-bit poly refs,
+// (the union of the level's MP modes' combat-area tiles + margin, mode_areas.h). A tile's input is every
+// movement-layer triangle of the soup, from ANY soup tile, whose XZ bounding box overlaps the tile's input box (the
+// tile grown by nav_input_border): the soup files a triangle under its centroid's tile and never clips it, and a
+// Jolt tile MeshShape keeps the whole triangle, so the motor collides with a long triangle (Metro: up to 205 m, 112
+// Collision triangles reach past the 3 x 3 neighbourhood of their tile; Kharg 154 [verified 2026-10-15]) wherever it
+// lies; a fixed 3 x 3 gather would leave holes there that the motor does not have (docs §5.3). Tiles are therefore
+// independent and bake on parallel_for lanes; walkable height is the crouch height and spans with less than the
+// stand height of room are area kNavAreaCrouch. Drop-down off-mesh links (one way) are found per tile from its own
+// input and checked with a stand-capsule sweep on a per-lane CollisionWorld (NavBakeOptions::link_shapes); the
+// input box reaches past every point such a sweep can touch, so the tile's digest covers the link check too.
+// Detour tiles are assembled into one dtNavMesh (64-bit poly refs,
 // RECASTNAVIGATION_DT_POLYREF64; Kharg has 1,494 combat-area tiles in CQL alone and dense tiles may need more than
 // the 1,024 polys a 32-bit ref leaves at 12 tile bits).
 //
 // Cache (bf3_core Cache, docs §5.4): "nav-tile" (one Detour tile's data + its NavTileInfo; params = the SHA-256 of
-// the tile's input triangles incl. its border, nav_params_text, recast_build_id), "nav-world" (the tile list of a
+// the tile's input triangles (everything it rasterises or sweeps against), nav_params_text, recast_build_id, and
+// whether drop links were sweep-checked on Jolt, with the Jolt build id), "nav-world" (the tile list of a
 // level x mode: params = the static world's source digest, the soup version, the terrain cover and the region
 // digests, nav_params_text), "nav-area" (the union of a level's combat-area tiles, keyed by the source digests of
 // every mode). Warm: nav-world -> nav-tile blobs -> validate_detour_tile -> addTile; no soup, no Recast.
@@ -58,7 +65,6 @@ class World;
 
 namespace bf3::sim {
 
-class CollisionWorld;
 struct MotorParams;
 
 // Detour poly reference (dtPolyRef with DT_POLYREF64; nav.cpp static_asserts the match). 0 = none.
@@ -120,28 +126,48 @@ inline constexpr const char *kNavWorldCacheKind = "nav-world";
 inline constexpr const char *kNavAreaCacheKind = "nav-area";
 
 // Bounds (docs §9): per tile at most kMaxNavTileInputTriangles input triangles, a rasterisation of at most
-// kMaxNavTileRasterCells cells summed over its triangles' bounding boxes (charged before rasterising: a hostile soup
-// of huge overlapping triangles fails the tile instead of allocating spans without end), a height range of at most
-// kMaxNavTileHeight metres (Recast's 13-bit span height at ch 0.1 is 819 m); at most kMaxNavTiles tiles per world.
+// kMaxNavTileRasterCells cells summed over its triangles' bounding boxes clipped to the tile's heightfield (Recast
+// clips each triangle to the heightfield, so that is what it touches; charged before rasterising: a hostile soup of
+// huge overlapping triangles fails the tile instead of allocating spans without end), a height range of at most
+// kMaxNavTileHeight metres (Recast's 13-bit span height at ch 0.1 is 819 m); at most kMaxNavTiles tiles per world;
+// the input gather files each triangle under every requested tile its box overlaps, at most kMaxNavInputRefs
+// (triangle, tile) pairs over the whole bake (each pair charged; a triangle's tile range is clamped to the requested
+// tiles' range before it is walked, so a triangle spanning the region costs its tiles, never more).
 inline constexpr size_t kMaxNavTileInputTriangles = size_t(1) << 21;
 inline constexpr uint64_t kMaxNavTileRasterCells = uint64_t(1) << 28;
+inline constexpr uint64_t kMaxNavInputRefs = uint64_t(1) << 26;
 inline constexpr float kMaxNavTileHeight = 800.0f;
 inline constexpr size_t kMaxNavTiles = size_t(1) << 16;
 
 using NavTileKey = std::array<int32_t, 2>; // (x, z) on the soup's 64 m grid
 
-// One tile's input: the movement-layer triangles of the tile and of its neighbours that reach into the tile's
-// border, in soup order (tile order, then triangle order), as Recast takes them (float xyz, int indices).
+// How far past its 64 m square a tile's input box reaches (metres): the larger of Recast's border (walkable radius
+// in cells + 3 cells, as Sample_TileMesh; 0.5 + 0.75 = 1.25 m at the defaults) and, when drop_links is on, the reach
+// of a drop link's check sweep (drop_reach + agent_radius + one cell = 1.0 + 0.35 + 0.25 = 1.6 m). So the input
+// digest covers every triangle the tile's raster and its link sweeps can touch (review of revision 1: the sweep
+// reached 1.35 m past a 1.25 m border). The Recast heightfield border itself stays walkable radius + 3 cells.
+float nav_input_border(const NavParams &p_params);
+// Recast's border in cells (walkable radius cells + 3).
+int nav_recast_border_cells(const NavParams &p_params);
+
+// One tile's input, as Recast takes it (float xyz, int indices): every triangle of the soup whose layer
+// (static_layer_of) is in the mask and whose XZ bounding box overlaps the tile's input box
+// [64x - b, 64x + 64 + b) x [64z - b, 64z + 64 + b), b = nav_input_border, whatever soup tile files it; in soup
+// order (soup tile (x, z) order, then triangle order), so the order and the digest are deterministic.
 struct NavTileInput {
 	NavTileKey tile{};
 	std::vector<float> vertices; // xyz per corner, 3 corners per triangle, unshared
 	std::vector<uint8_t> layers; // StaticLayer per triangle
-	size_t own_triangles = 0; // triangles of this soup tile (the first own_triangles)
+	size_t own_triangles = 0; // of those, filed under this tile by the soup (a count; they are not stored first)
+	size_t far_triangles = 0; // filed under a soup tile outside the 3 x 3 around this one (long triangles)
 	core::Sha256Digest digest{}; // over every input triangle's float bits and layer, in order: the "nav-tile" key
 };
 
 // The input of p_tiles (sorted, unique) from p_soup with the layers in p_layer_mask (query_mask::kMovement for the
-// bake; kAll only for the split investigation, docs §5.1). Fails past kMaxNavTileInputTriangles.
+// bake; kAll only for the split investigation, docs §5.7). Gather: one pass over the soup's triangles, each filed
+// under every requested tile its box overlaps (its tile range clamped to the requested tiles' range first, every
+// pair charged against kMaxNavInputRefs), so the work is linear in the soup plus the pairs. Fails past
+// kMaxNavTileInputTriangles per tile or kMaxNavInputRefs pairs.
 core::Result<std::vector<NavTileInput>> nav_tile_inputs(const core::level::CollisionSoup &p_soup, std::span<const NavTileKey> p_tiles,
 		const NavParams &p_params, uint32_t p_layer_mask = query_mask::kMovement);
 
@@ -166,13 +192,25 @@ struct NavStats {
 	size_t tiles_hit = 0;
 	size_t tiles_baked = 0;
 	bool world_hit = false;
+	size_t far_triangles = 0; // input triangles from outside a tile's 3 x 3 neighbourhood, summed over the tiles
+	size_t link_worlds = 0; // per-lane CollisionWorlds created for the link checks
+	size_t link_candidates = 0; // drop samples that found a landing
+	size_t link_sweeps = 0;
+	size_t links_rejected = 0; // the sweep hit something
 	double seconds_input = 0.0; // nav_tile_inputs
-	double seconds_bake = 0.0; // Recast + link pass + dtCreateNavMeshData, all lanes, wall
+	double seconds_bake = 0.0; // the lanes' wall time: Recast + link pass (world checkouts and sweeps) + dtCreateNavMeshData
+	double seconds_link_setup = 0.0; // of the lanes' work, the per-lane CollisionWorld creations (summed over lanes)
+	double seconds_link_cpu = 0.0; // of the lanes' work, the link pass incl. sweeps (summed over lanes)
 	double seconds_assemble = 0.0; // dtNavMesh::init + addTile, serial
 	double seconds_restore = 0.0;
 	double seconds_total = 0.0;
 	uint64_t peak_working_set = 0; // bytes, sampled after the bake (0 when not sampled)
 };
+// G4's timed span (docs §1): from the soup in memory to the assembled dtNavMesh, with the link checks (the
+// per-lane world creations and the sweeps run inside the lanes, so inside seconds_bake).
+inline double nav_bake_gate_seconds(const NavStats &p_stats) {
+	return p_stats.seconds_input + p_stats.seconds_bake + p_stats.seconds_assemble;
+}
 
 // The immutable navmesh of one level x mode. Shared as std::shared_ptr<const NavWorld> on any thread.
 class NavWorld {
@@ -202,8 +240,15 @@ struct NavBakeOptions {
 	NavParams params;
 	unsigned threads = 0; // parallel_for lanes over the tiles; 0 = all cores
 	uint32_t layer_mask = query_mask::kMovement;
-	// Validates each drop link with a stand-capsule sweep (kMovement) along its path; null = keep every link found.
-	const CollisionWorld *link_check = nullptr;
+	// Validates each drop link with a stand-capsule sweep (kMovement) along its path against the motor's static world;
+	// null = keep every link found (synthetic tests only; the gates and the game pass the S1 static world).
+	// Threads: a CollisionWorld runs on its owner's thread only (collision_world.h: one temp allocator and query
+	// scratch per world), so the bake never shares one. It keeps a pool of CollisionWorld::create(link_shapes)
+	// worlds, at most one per lane: a tile job checks a world (and its rcContext) out of a mutex-guarded free list,
+	// creating one when the list is empty, and returns it when the tile is done (core::parallel_for hands out item
+	// indices, not lane indices, hence the checkout). Two worlds over the same shapes may be queried at once
+	// (collision_world.h). The worlds and their query counters die with the bake.
+	std::shared_ptr<const StaticWorldShapes> link_shapes;
 	std::atomic<size_t> *tiles_done = nullptr; // progress (optional)
 };
 
@@ -233,9 +278,31 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 std::vector<uint8_t> encode_nav_tile_blob(const NavWorld &p_world, size_t p_tile);
 core::Status validate_detour_tile(std::span<const uint8_t> p_data, const NavParams &p_params, const NavTileKey &p_tile);
 core::Result<std::shared_ptr<const NavWorld>> decode_nav_tile_blobs(std::span<const std::span<const uint8_t>> p_tiles, const NavParams &p_params);
-core::CacheKeyInputs nav_tile_key_inputs(const core::Sha256Digest &p_input, const NavParams &p_params);
+// p_link_checked: the tile's drop links were sweep-checked on Jolt ("links=jolt;" in the params and jolt_version =
+// jolt_build_id()); an unchecked tile keys "links=none;", so the two never share an entry.
+core::CacheKeyInputs nav_tile_key_inputs(const core::Sha256Digest &p_input, const NavParams &p_params, bool p_link_checked);
 core::CacheKeyInputs nav_world_key_inputs(const core::Sha256Digest &p_source_digest, std::string_view p_level, std::string_view p_mode,
 		const NavLoadOptions &p_options);
+
+// ---- input = motor set, against the cooked world (docs §5.1 proof 1) --------------------------------------------
+// Reads the triangles the motor really collides with back out of the cooked Jolt MeshShapes (Shape::
+// GetTrianglesStart / GetTrianglesNext over the tile's input box, on every static tile whose StaticTileInfo bounds
+// overlap it, on the layers of p_layer_mask; a returned triangle is kept only when its own XZ bounds overlap the
+// box, since Jolt returns whole leaf blocks) and matches them one to one against p_input's triangles within
+// p_tolerance per corner (Jolt stores vertices quantised to 21 bits over each shape's bounds, about 0.1 mm on a
+// 200 m box, so the match is by tolerance with corner rotation allowed, not by bits). Independent of
+// nav_tile_inputs: it starts from the cooked shapes, not from the soup. bf3_sim internal access to the shapes.
+struct NavInputCheck {
+	size_t nav_triangles = 0;
+	size_t world_triangles = 0;
+	size_t matched = 0;
+	size_t nav_only = 0; // in the nav input, not in the motor's world: the nav walks where the motor has nothing
+	size_t nav_only_degenerate = 0; // of those, triangles Jolt's MeshShapeSettings sanitise drops (no area; allowed)
+	size_t world_only = 0; // in the motor's world, not in the nav input: a hole or a missing wall in the nav
+	float max_corner_error = 0.0f; // metres, over the matched pairs
+};
+core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShapes &p_world, const NavTileInput &p_input, const NavParams &p_params,
+		uint32_t p_layer_mask = query_mask::kMovement, float p_tolerance = 0.001f);
 
 // ---- connectivity (docs §5.5) ---------------------------------------------------------------------------------
 // Strongly connected components of the directed poly graph: every poly link of every tile (internal neighbours,
