@@ -39,7 +39,8 @@
 //   --minimap-north-up               the large-map orientation (no rotation; also the M key in game)
 //   --minimap-check                  the in-game gates G9-G11 (minimap_check.h): PASS/FAIL table, quits 0 or 1
 //   --minimap-shots=<dir>            after Done: screenshots of the HUD (rotating and north-up) at the spawn and at
-//                                    the objectives, written to <dir> (b\shots\ui2\, never the repo)
+//                                    the objectives, written to <dir> (b\shots\ui2\, never the repo); without
+//                                    --minimap-check the run ends after the shots (exit 0, or 1 when one failed)
 // Keys: M toggles north-up / rotating (BF3 PC opens the large map with M [inferred]); the minimap draws only while the
 // first-person camera is current (F6 free camera hides it).
 

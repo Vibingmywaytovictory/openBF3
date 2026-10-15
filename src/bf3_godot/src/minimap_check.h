@@ -12,11 +12,14 @@
 // Rows:
 //   minimap.loaded       the assets published without error; satellite / mask / atlas sizes as read (Metro 2048² L8,
 //                        128² L8, 256 x 1024 RGBA8); the loader's wall time and process peak-working-set delta (G14)
-//   readback.calibration a 4 x 4 opaque ColorRect of Color8(17, 34, 51) drawn by the check reads back as exactly
-//                        (17, 34, 51): the viewport image holds the shader's bytes unchanged (no colour conversion,
+//   readback.calibration an opaque ColorRect of Color8(17, 34, 51) drawn by the check (whole canvas-unit origin, at
+//                        least 8 x 8 viewport pixels) reads back as exactly (17, 34, 51) at the 4 x 4 pixels around its
+//                        centre: the viewport image holds the shader's bytes unchanged (no colour conversion,
 //                        debanding or blending), which the UV read-back depends on
 //   marker.spawn         the first drawn frame after Done (no input yet): the own presented position (x, z) is within
-//                        0.5 m of one of shared_level()->spawns, the spawn the session used
+//                        0.5 m of one of shared_level()->spawns, the spawn the session used. Then the view is frozen:
+//                        the minimap re-centred there (set_center_override), the mapper scripted, the yaw rounded to a
+//                        multiple of 90 degrees (yaw0); the north-up frames are taken at yaw0 + pi/2
 //   map.uv.north_up      north-up view, icon item hidden, debug_uv on: at K = 49 sample pixels (the centre, 3 rings of
 //                        16 at 25 / 50 / 85 % of the radius, inside the disc and with an expected UV inside [0, 1]) the
 //                        decoded UV equals minimap_expected_uv(view, mapping, sample) within kMinimapUvCheckTexels
@@ -24,9 +27,9 @@
 //                        the samples exceeds kMinimapUvMirrorTexels (10 texels). The centre sample is the marker's
 //                        point, so this is the task's check: the map under the marker is world_to_minimap_uv of the
 //                        spawn position
-//   map.uv.rotating      the same after a scripted 90-degree turn (InputMapper::script_view, yaw + pi/2) in the rotating
-//                        view; additionally the samples straight above the centre decode to world points in the view
-//                        direction (forward is up)
+//   map.uv.rotating      the same after a scripted 90-degree turn (InputMapper::script_view, yaw0 + pi) in the rotating
+//                        view; additionally the samples straight above the centre whose expected UV is inside the
+//                        image (at least one) decode to world points within 2 degrees of the view direction
 //   marker.pixels        normal shading, icons visible: the pixels that differ from the icons-hidden frame near the
 //                        centre have their bounding-box centre within 1 canvas unit of the control centre, both views
 //   icons.minimap        --minimap-mode=ConquestSmall0, both views: for each of the 5 objectives whose
@@ -35,7 +38,7 @@
 //                        within 1 unit, in the objective's direction within 2 degrees); the icons-visible frame differs
 //                        from the hidden frame inside each drawn icon's rect; each drawn entry and state equal
 //                        objective_icon(hq, owner, kM1LocalTeam)
-//   icons.world          each objective not behind the camera: Bf3WorldIcons' centre equals the check's own projection
+//   icons.world          after a level turn towards the objectives' centroid, each objective not behind the camera: Bf3WorldIcons' centre equals the check's own projection
 //                        (camera projection x inverse camera transform, multiplied out here) of position +
 //                        (0, VerticalOffset 5.5, 0), plus PixelOffset (0, -28), within 0.5 canvas units; behind ones not
 //                        drawn; the image differs from a no-world-icons frame inside each on-screen icon's rect

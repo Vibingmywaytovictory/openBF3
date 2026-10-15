@@ -65,7 +65,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
-UI ui2 adds `ui2.contract` (the minimap / HUD icon / HUD model headers and their inline helpers, no data); see "UI minimap, HUD icons and HUD model (ui2)".
+UI ui2 adds `ui2.contract`, `ui.minimap.unit`, `ui.hud.unit` (no data), `ui.minimap`, `ui.hud.icons`, `ui.hud.sources`, `ui.minimap.fuzz`, `ui.hud.fuzz` (install) and `godot.ui2` (windowed); see "UI minimap, HUD icons and HUD model (ui2)".
 
 ## Run
 
@@ -1255,15 +1255,47 @@ README's "Text database" already said so.
 
 ## UI minimap, HUD icons and HUD model (ui2)
 
-Design: [docs/design/ui-minimap-icons.md](docs/design/ui-minimap-icons.md) (plan §3.8, D16, §7.8). This wave puts the
-interfaces in the tree: `bf3_core` `ui/minimap.h` (BF3's `UIMinimapData` from each level's LevelData partition, the
-mode's combat-area masks and objectives, the minimap mapping `u = 0.5 - (x - Cx)/S`, `v = 0.5 - (z - Cz)/S` and the
-on-screen view), `ui/hud_icons.h` (the hud3dicons atlas, the `_small` item icons, vehicle HUD icons),
-`ui/hud_sources.h` (the HUD DataSources table, generated from the install at run time and never stored) and
-`ui/hud_model.h` (`HudModel`, named after BF3's DataSources, and the 235 binding rows of the 11 bound component
-types); `bf3_godot` `minimap_hud.h`, `minimap_control.h`, `world_icons.h`, `minimap_check.h` (the in-game minimap
-node and its check). `ctest -R ui2.contract` checks the binding counts and the inline mapping, view, debug-UV packing
-and icon helpers. The readers, the bf3dump commands, the install tests and the in-game node follow in the
-implementation wave (design §15). The in-game check (`godot.ui2`) measures the drawn map on the viewport image: the
-shader's `debug_uv` mode writes the sampled texture coordinate, which must match the mapping within one satellite
-texel (design §10.4, gate G9).
+Design and measured results: [docs/design/ui-minimap-icons.md](docs/design/ui-minimap-icons.md) (plan §3.8, D16,
+§7.8; results in its §18).
+
+**In the game.** `res://scenes/m1_metro.tscn` has a `MinimapHud` node (`Bf3MinimapHud`) beside the session: after
+the level is controllable it loads, on its own thread at below-normal priority with 2 parse lanes, the level's
+`UIMinimapData` (from the LevelData partition), the mode's combat-area distance fields, the capture points and the
+hud3dicons atlas, then draws BF3's minimap bottom-left (the L8 satellite tinted with `DetailTextureTint`, outside the
+combat area shaded with `CombatAreaColor`, flags and HQs from the atlas, the player marker, the walkers) and the
+flag / HQ icons over the 3D view with their distance. Nothing is cached; the loader takes about 0.5 s on Metro.
+Keys: M toggles north-up / rotating; the minimap hides with the free camera (F6). User args after `--`:
+`--no-minimap`, `--minimap-mode=<mode>` (objectives and areas of another mode: the M1 game runs TDM, which has no
+flags; e.g. `--minimap-mode=ConquestSmall0`), `--minimap-size=<px>`, `--minimap-north-up`, `--minimap-check`,
+`--minimap-shots=<dir>`. The node is inert under `--headless`, `--m1-check`, `--m1-load-check`, `--shot-spawns`,
+`--shots` and `--no-hud`, so other tracks' measurements and reference shots are unchanged.
+
+**Libraries and tools.** `bf3_core` `ui/minimap.h` (`read_minimap_data`, `read_combat_area`, `load_minimap_level`,
+`load_minimap_images`, `l8_mip_chain`, `combat_area_min_field`, `minimap_census`; the mapping
+`u = 0.5 - (x - Cx)/S`, `v = 0.5 - (z - Cz)/S` and the on-screen view inline), `ui/hud_icons.h` (the atlas, mirrored
+frames as `flip_x` / `flip_y`, `_small` item icons by unlock identifier, vehicle HUD icons), `ui/hud_sources.h` (the
+HUD DataSources table, generated from the install at run time and never stored), `ui/hud_model.h` (`HudModel` and
+the 235 binding rows, `check_hud_bindings`). bf3dump:
+
+```
+bf3dump minimap MP_Subway ConquestSmall0     :: UIMinimapData, masks, objectives, image sizes, timings
+bf3dump minimap --census                     :: every combat-area asset and distance field of @all-mp (G3)
+bf3dump hud-icons                            :: the hud3dicons atlas (G6)
+bf3dump item-icons MP_Subway                 :: the catalog variants' _small icons by identifier (G7)
+bf3dump hud-sources [--unbound]              :: the DataSources table and the binding check (G8)
+```
+
+**Tests** (one command per gate; the godot one needs `OPENBF3_GODOT` and a desktop session, the install ones exit 77
+without an install):
+
+| gate | command | measured 2026-10-15 (dev build, shared machine, times noisy) |
+|---|---|---|
+| G1–G5 minimap data, masks, objectives, orientation | `ctest --preset dev -R "^ui\.minimap$"` | 29 / 29 levels; 455 / 455 masks, 498 / 498 fields, 562 / 562 distance-field assets; Metro CQS 5 / 5, Caspian CQS 6 / 6, CQL 7 / 7; TDM mask vs gameplay polygon IoU 1.000 (others 0.000) |
+| G6, G7 atlas and weapon icons | `ctest --preset dev -R "^ui\.hud\.icons$"` | 161 entries / 159 types / 93 with states, 8 mirrored frames; 172 / 172 catalog variants find a DXT5 64 × 16 icon |
+| G8 DataSources | `ctest --preset dev -R "^ui\.hud\.sources$"` | 84 types, 1215 sources, 58 state components; 235 / 235 binding rows, 0 missing, 0 extra |
+| G9–G11, G14 in game | `set OPENBF3_UI2_SHOTS=<dir>& ctest --preset dev -R "^godot\.ui2$"` | 10 / 10 rows: read-back byte-exact; map UV error ≤ 0.25 satellite texel in both views (mirrors ≥ 850 texels); marker ≤ 0.76 canvas unit; icons ≤ 0.22 texel, world icons 0.008 units; 6 shots (inspected by eye); loader 0.43–0.69 s |
+| G12 asan | `ctest --preset asan -R "^ui(2\.contract|\.minimap|\.hud)"` | 8 / 8, 0 reports |
+| G13 install unchanged | the `install.unchanged` row of each install test above | unchanged |
+
+`ui.minimap.unit` and `ui.hud.unit` need no data; `ui.minimap.fuzz` and `ui.hud.fuzz` feed 250 seeded mutants per
+input (`OPENBF3_FUZZ_ITERS`) through the readers.

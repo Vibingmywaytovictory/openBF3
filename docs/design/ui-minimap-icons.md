@@ -1,7 +1,8 @@
 # UI groundwork 2: minimap, HUD icons, HUD data model
 
-Status: design for implementation, revision 2, 2026-10-15 (revision 1 reviewed; revision 2 makes G9 / G10 measure
-the drawn map through a UV read-back, settles G7 and Q4, and keeps the node out of other runs' measurements).
+Status: implemented, 2026-10-15 (design revision 2; the implementation wave fixed the rules C7–C10 and the §10
+details it measured, and records every gate's result and command in §18). Revision 2 made G9 / G10 measure the drawn
+map through a UV read-back, settled G7 and Q4, and kept the node out of other runs' measurements.
 Track `ui2`, branch `ui/minimap-icons`. Scope: the second UI groundwork wave of the plan ([research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md) §3.8 "Route A+",
 D16, §7.8 "UI"), built on the research report
 [research/topics/gap-r1-ui-hud-minimap-localisation.md](../../research/topics/gap-r1-ui-hud-minimap-localisation.md)
@@ -22,6 +23,10 @@ left for its owner to fix):
 | C4 | hud3dicons "161 types" | 161 entries but **159 distinct** `IconType`s (`UIHudIcon_RadarSweepComponent` and `UIHudIcon_LocalPlayerBigIcon` twice) | §4.4 |
 | C5 | minimap data in `description_win32` | `levels/<l>/<l>/description_win32` holds defaults (WorldCenter 0,0, WorldSize 4096). The real `UIMinimapData` is in the **LevelData partition** `levels/<l>/<l>` (`LevelDescription.Components` → `UILevelDescriptionComponent.MinimapData`) | §4.1; `level::read_level_info` already reads the LevelData copy first |
 | C6 | gap UI's orientation reference "Metro's known TDM bounding box" (−282..−82, −584..−429) | that box is the bounding box of Metro TDM's **gameplay combat area**, a 23-point `VolumeVectorShapeData` in `levels/mp_subway/teamdeathmatch/layer0_teamdeathmatch_logic`. Against the polygon itself the UI mask's IoU is **1.000** for the research mapping and 0.000 for the other seven | §5.3 |
+| C7 | (design revision 2, G4) "Caspian ConquestSmall0 7 / 7" | Caspian **ConquestSmall0 has 6** CapturePoint placements (4 flags, 2 HQs); the 7 are **ConquestLarge0**'s (gap UI's orient run used CQL). G4 checks Caspian CQS 6 / 6 and CQL 7 / 7 | `bf3dump minimap MP_007 ConquestSmall0` / `ConquestLarge0`; ctest `ui.minimap` row `minimap.objectives` (implementation wave) |
+| C8 | (design revision 2, G6 / §9) every atlas frame has MinUv ≤ MaxUv | **8 frames** have MinUv > MaxUv: the Blink state of `UIHudIcon_NeutralFlag`, `_FriendlyFlag`, `_EnemyFlag` in both axes, `UIHudIcon_PercetageBarMiddle` (4 frames) and `UIHudIcon_PercentageBarBackground` in u. They are mirrored frames, not damage: the reader keeps them, `HudIconRect` gets `flip_x` / `flip_y` with a positive size, and the Godot side draws them mirrored | ctest `ui.hud.icons` row `icons.atlas` ("8 mirrored") |
+| C9 | (design revision 2, §4.2 / G3) "92 null SurroundingDistanceField" | **90** null `SurroundingDistanceField` and **2** null `DistanceField` (Metro's unused Rush stage 5: `a5`, `d5`), 92 null references in all. A null `DistanceField` is valid (an empty mask, nothing drawn); G3 reads 455 / 455 | `bf3dump minimap --census`; ctest `ui.minimap` row `minimap.masks` |
+| C10 | (§5.1) objectives carry `LocationNameSid` / `LocationTextSid` | empty on Metro's `CapturePointEntityData` placements (the SIDs sit on `CharacterSpawnReferenceObjectData`, not read in this wave). No label letters are drawn on the minimap; the world icons show the distance only | `bf3dump minimap MP_Subway ConquestSmall0` |
 
 **For the acceptance reviewer:** G1 (Bazaar satellite 2048², C1), G3 (455 / 498 / 562 instead of "499 masks", C2)
 and G6 (159 distinct types besides the 161 entries, C4) differ from the task's wording. Each follows the install data
@@ -47,9 +52,9 @@ without an install; `godot.*` tests also exit 77 without `OPENBF3_GODOT` or a wi
 | G1 | UIMinimapData of the three reference levels | `ctest -R "^ui\.minimap$"` (install), row `minimap.reference` | Metro (MP_Subway) WorldCenter (0, −162), WorldSize 1024, satellite L8 2048 × 2048; Caspian (MP_007) (0, 0), 2048, L8 2048²; Bazaar (MP_001) (0, 0), 512, **L8 2048²** (C1); exact |
 | G2 | all MP levels | `ui.minimap`, row `minimap.all_levels` | 29 / 29 levels: UIMinimapData read from `levels/<l>/<l>`, WorldSize > 0, WorldRotation 0, threshold in [0, 1], satellite decodes L8 with side ≤ 4096 |
 | G3 | every combat-area mask resolves | `ui.minimap`, row `minimap.masks` | over `@all-mp`: 455 / 455 `VeniceUICombatAreaAsset` read, 498 / 498 referenced distance fields decode L8 (C2), 562 / 562 `UIDistanceFieldAsset`s resolve to a decodable L8 texture; 0 failures; the counts printed |
-| G4 | objectives inside the mode's area | `ui.minimap`, row `minimap.objectives` | Metro ConquestSmall0: 5 / 5 CapturePoint placements (3 flags, 2 HQs) inside the union of the mode's masks (cacs1, cacs2) through the research mapping; Caspian ConquestSmall0 7 / 7; on Metro every other mapping variant < 5 / 5 |
+| G4 | objectives inside the mode's area | `ui.minimap`, row `minimap.objectives` | Metro ConquestSmall0: 5 / 5 CapturePoint placements (3 flags, 2 HQs) inside the union of the mode's masks (cacs1, cacs2) through the research mapping; Caspian ConquestSmall0 **6 / 6** and ConquestLarge0 7 / 7 (C7); on Metro every other mapping variant < 5 / 5 |
 | G5 | orientation | `ui.minimap`, row `minimap.orientation` | Metro TeamDeathMatch0 mask (catdm → dftdm) against the gameplay area: bounding-box IoU ≥ 0.65 for variant 0 (gap UI: 0.70) and ≤ 0.05 for the other 7; polygon IoU ≥ 0.95 for variant 0 (measured 1.000, C6) and ≤ 0.05 for the other 7 (measured 0.000) |
-| G6 | hud3dicons | `ctest -R "^ui\.hud\.icons$"` (install), row `icons.atlas` | 161 entries, 159 distinct types, 93 with states; every frame UV finite, in [0, 1], min ≤ max, rect non-empty inside 256 × 1024; atlas decodes RGBA8 256 × 1024; `UIHudIcon_LocalPlayer` Default rect (35, 633, 17, 19) |
+| G6 | hud3dicons | `ctest -R "^ui\.hud\.icons$"` (install), row `icons.atlas` | 161 entries, 159 distinct types, 93 with states; every frame UV finite, in [0, 1], rect non-empty inside 256 × 1024 after ordering (MinUv > MaxUv is a mirrored frame, 8 on retail: C8); atlas decodes RGBA8 256 × 1024; `UIHudIcon_LocalPlayer` Default rect (35, 633, 17, 19) |
 | G7 | weapon `_small` icons | `ui.hud.icons`, row `icons.weapons` | every MP_Subway catalog variant (172) maps through its unlock identifier (`SoldierWeaponUnlockAsset.Identifier` in `ItemIds`) to an `ItemIcon` whose texture exists in Win32/UI and decodes (format and size printed; DXT5 64 × 16 for the weapons): **172 / 172; any miss fails the row** and is listed by variant name. Measured for this design (§4.5): 158 through the weapon metadata, 14 through the kit-item metadata, 0 misses |
 | G8 | DataSources table complete | `ctest -R "^ui\.hud\.sources$"` (install) | 58 state components, all resolve; 84 component types over `Win32/UI,@all-mp`; source counts UIWeaponCompData 63, UISoldierCompData 16, UIVehicleCompData 82; `check_hud_bindings`: 235 rows, 0 rows missing from the install, 0 install sources of the 11 bound types without a row; Model / Client / Unused = 150 / 35 / 50 |
 | G9 | the map and the player marker in game, measured on the viewport image | `ctest -R "^godot\.ui2$"` (windowed; runs `--minimap-check --minimap-mode=ConquestSmall0`), rows `readback.calibration`, `marker.spawn`, `map.uv.north_up`, `map.uv.rotating`, `marker.pixels` | calibration patch reads back byte-exact; the own position at the first frame within 0.5 m of a spawn point of `shared_level()->spawns`; with the shader's `debug_uv` on and the icons hidden, at 49 sample pixels (centre + 3 rings of 16) the decoded UV equals `world_to_minimap_uv(minimap_unproject(sample))` within **1 satellite texel** per axis in the north-up view and after a scripted 90° turn in the rotating view (the centre sample: the map under the marker is the spawn's texel), and each of the 7 other mapping variants misses by **> 10 texels** at some sample; the marker's pixels centred within 1 canvas unit of the control centre in both views (§10.4) |
@@ -132,8 +137,8 @@ ConquestSmall0: two (cacs1, cacs2) in `levels/mp_subway/conquest_small/layer1_co
 TeamDeathMatch0: one (catdm) in `levels/mp_subway/teamdeathmatch/layer1_teamdeathmatch_spawners`.
 `VeniceUICombatAreaAsset {Prefix, DistanceField, SurroundingDistanceField}`, each field a `UIDistanceFieldAsset →
 DistanceFieldTexture` (TextureAsset `…_win32_sdf`, DxTexture L8 128² on the ones decoded). Census over `@all-mp`:
-455 assets on 25 levels (none on the 4 XP2 levels), 498 distinct distance fields referenced, 92 null
-`SurroundingDistanceField`s. `Prefix` naming is inconsistent (cs / cl / tdm against caCS11 / cacs01 …), so it is
+455 assets on 25 levels (none on the 4 XP2 levels), 498 distinct distance fields referenced, 90 null
+`SurroundingDistanceField`s and 2 null `DistanceField`s (Metro `a5`, `d5`; C9). `Prefix` naming is inconsistent (cs / cl / tdm against caCS11 / cacs01 …), so it is
 never used as a mode key: the mode's own placements decide.
 
 The gameplay area (for G5) is separate: `CombatAreaTriggerEntityData` (`gameplay/gamemodes/deathmatch`, two, one per
@@ -250,8 +255,9 @@ transpose alternatives for the gates (variant 0 = the research mapping).
 
 ### 5.3 Orientation evidence
 
-* G4 (objectives in mask union): Metro 5 / 5 only for variant 0; Caspian 7 / 7 for variant 0 but alternatives give
-  4–6 / 7, a weak discriminator on its own [verified: gap UI's orient.py re-run].
+* G4 (objectives in mask union): Metro 5 / 5 only for variant 0; Caspian ConquestLarge0 7 / 7 for variant 0 but
+  alternatives give 4–6 / 7, a weak discriminator on its own [verified: gap UI's orient.py re-run; the run used
+  ConquestLarge0, C7].
 * G5: the TDM mask against the gameplay polygon (§4.2): IoU 1.000 for variant 0, 0.000 for all others; against its
   bounding box 0.70 vs 0.00 [verified: `polyiou.py` and orient.py on the decoded 128² mask, 351 inside texels].
   The polygon is our own data, so G5 needs no third-party reference (the fun-bots check of gap UI is excluded).
@@ -299,7 +305,8 @@ SDFs are not mipmapped (128², linear filter).
 
 `read_hud_icon_atlas(ui resolver)` reads §4.4 into `HudIconAtlas` (data order, duplicates kept, `find` returns the
 first entry with states, else the first). `hud_icon_rect(uv, 256, 1024)` rounds to whole texels (retail UVs are
-multiples of 1/256 and 1/1024); `hud_icon_frame(state, t)` picks the frame from `FrameRate`. The atlas pixels go to
+multiples of 1/256 and 1/1024) and orders the corners, setting `flip_x` / `flip_y` for a frame written right to left
+or bottom to top (C8); `hud_icon_frame(state, t)` picks the frame from `FrameRate`. The atlas pixels go to
 Godot as FORMAT_RGBA8 unchanged.
 
 ### 6.2 Item icons
@@ -373,7 +380,7 @@ LevelData partition's and the mode's sub-world partitions' manifest SHA1s, `para
 | atlas / metadata / sources reads | `gameplay::WorkBudget` per iteration | error |
 | image side | ≤ 4096 (`kMaxMinimapImageSide`, `kMaxHudIconImageSide`); payload length checked against w·h (L8), w·h·4 (ARGB8888), blocks (DXT5) before allocating | error |
 | combat areas / objectives per mode | ≤ 64 / 64 | error |
-| atlas | ≤ 1024 icons, ≤ 16 states / icon, ≤ 64 frames / state; UVs finite, in [0, 1], min ≤ max; unknown state names counted (`unknown_states`) | error / counted |
+| atlas | ≤ 1024 icons, ≤ 16 states / icon, ≤ 64 frames / state; UVs finite, in [0, 1] (MinUv > MaxUv allowed: a mirrored frame, C8); unknown state names counted (`unknown_states`) | error / counted |
 | item icons | ≤ 4096 ids; paths ≤ 512 bytes | error |
 | component types / sources / state components | ≤ 1024 / 4096 / 1024 | error |
 | model text | fixed arrays (32 / 128 bytes, NUL padded, truncated at a UTF-8 boundary) | truncated |
@@ -425,6 +432,14 @@ items:
   `UIHudIcon_LocalPlayer` Default at the centre rotated by `minimap_marker_angle`, and the others.
   `set_icons_visible(false)` hides it for the check's map frames.
 
+**Measured in the implementation wave.** The control's origin is set in whole canvas units: with Godot's default
+`gui/common/snap_controls_to_pixels` a Control's drawn origin is rounded while `get_global_transform_with_canvas`
+keeps the fraction, and a fractional origin (480.4) put the map 0.4 px off what `canvas_to_viewport` reports (G9
+measured 1.55 texels; 0.23 texels after the fix). Icons are drawn at 0.45 canvas units per atlas texel per 100 units
+of side, objectives clamped 7 units per 100 inside the disc edge (about half an icon), the disc 1.5 units inside the
+square; the M1 walkers appear as `UIHudIcon_Player` Enemy and are dropped, not clamped, off the disc [inferred: sizes
+tuned by eye on the G11 shots].
+
 **Icon states** (`objective_icon` / `soldier_icon`, hud_icons.h, Godot-free and unit-tested). M1 has teams but no
 selection: the local player is on team 1 (`kM1LocalTeam`, m1.md §8.2 [verified]) and the walkers on team 2 (m1.md
 §8.3). Owner team 0 is neutral, the local team friendly, any other non-zero team enemy. Flags: `UIHudIcon_NeutralFlag`
@@ -458,11 +473,14 @@ game's TDM has no objectives). **Its evidence is the viewport image**, read back
 player's own position, which is the control centre by definition, so it could not catch a misplaced satellite; this
 revision measures the satellite's placement directly:
 
-1. `readback.calibration`: a 4 × 4 opaque ColorRect of Color8(17, 34, 51) must read back as exactly those bytes (no
+1. `readback.calibration`: an opaque ColorRect of Color8(17, 34, 51) must read back as exactly those bytes (no
    colour conversion, debanding or blending between the canvas and the image; the project renders 2D without HDR).
-   Every UV row depends on it, so it runs first.
+   Every UV row depends on it, so it runs first. Implementation: the rect sits at a whole canvas-unit origin (see the
+   snapping note in §10.2) and covers at least 8 × 8 viewport pixels; the 4 × 4 pixels around its centre are read.
 2. `marker.spawn`: at the first drawn frame after Done (no input yet) the own presented (x, z) is within 0.5 m of a
-   point of `shared_level()->spawns` (the session's spawn list, TDM 102 points).
+   point of `shared_level()->spawns` (the session's spawn list, TDM 102 points). Then the check freezes the view: the
+   minimap is re-centred on that position (`set_center_override`), the mapper is scripted, and the yaw is rounded to
+   a multiple of 90° (yaw0) so the marker's pixel box is not skewed by a turn.
 3. `map.uv.north_up`: icon item hidden, `debug_uv` on. 49 sample pixels: the centre and three rings of 16 at 25, 50
    and 85 % of the disc radius. Each sample is a viewport pixel centre mapped to control-local units with the inverse
    of `canvas_to_viewport()`; samples whose expected UV is outside [0, 1] are skipped (the count is printed). The
@@ -475,11 +493,15 @@ revision measures the satellite's placement directly:
    correct draw differs only by the packing (at most 0.25 texel on a 2048² satellite) and float rounding, whatever the
    screen scale (at the default size one screen pixel covers about 1.8 texels of Metro's satellite); an offset, scale,
    mirror or rotation error of a texel or more fails.
-4. `map.uv.rotating`: the same after a scripted 90° turn (`InputMapper::script_view`, yaw + π/2) in the rotating view;
-   in addition the samples straight above the centre decode to world points in the view direction.
+   Implementation: the north-up frames are taken at yaw0 + π/2, so the north-up marker is drawn turned (−90°).
+4. `map.uv.rotating`: the same after a scripted 90° turn (`InputMapper::script_view`, yaw0 + π) in the rotating view;
+   in addition the samples straight above the centre decode to world points in the view direction (within 2°; every
+   up sample whose expected UV lies inside the image counts, at least one: near the map's edge an outer ring's up
+   sample can fall outside it, as at Metro's spawn 19 facing −Z).
 5. `marker.pixels`: normal shading, icons visible, against the icons-hidden frame: the changed pixels near the centre
    have their bounding-box centre within 1 canvas unit of the control centre, both views.
-6. `icons.minimap` and `icons.world` as G10 states; the world-icon reference point is the check's own pinhole
+6. `icons.minimap` and `icons.world` as G10 states (`icons.world` first turns the view, level, towards the centroid
+   of the objectives: Metro's spawns face along the corridor and a 90° turn can leave every objective behind); the world-icon reference point is the check's own pinhole
    projection (the camera's `get_camera_projection()` and global transform multiplied out in the check) of the lifted
    point plus the pixel offset, so the comparison is not `unproject_position` against itself.
 7. Screenshots (`--minimap-shots`): at the spawn, then with the view re-centred on an HQ and on a flag
@@ -502,8 +524,8 @@ What stays for the eye (G11): the tint, the shading look and the icons' art; the
 | `.../world_icons.h` | `Bf3WorldIcons`, `WorldIconStyle` | other tag components (nametags, M2b) |
 | `.../minimap_check.h` | `MinimapCheck` | |
 
-`src/bf3_godot/src/ui2_header_check.cpp` compiles the four Godot headers until their `.cpp` files exist (deleted
-then). No stub `.cpp` in bf3_core: nothing calls the declared functions yet.
+`src/bf3_godot/src/ui2_header_check.cpp` compiled the four Godot headers until their `.cpp` files existed; the
+implementation wave deleted it. No stub `.cpp` in bf3_core: nothing calls the declared functions yet.
 
 ## 12. Files
 
@@ -525,7 +547,7 @@ block), `bf3-opensource/scenes/m1_metro.tscn` (one node), the CMake blocks above
 |---|---|---|
 | `ui2.contract` (now) | none | the headers compile together; binding counts (static_assert), Model fields = snake_case(source), no duplicate rows; mapping on Metro's numbers, inverse, 8 distinct variants; view orientation (forward up, left left, 5 headings), round trip, north-up vs image agreement; `sdf_inside` at 126 / 127; `at_uv` clamping and non-finite input; debug-UV packing round trip (≤ 0.26 texel at 2048), edges and hostile values; `minimap_expected_uv` (centre = the player's texel, the 7 mirrored variants miss > 10 texels on a ring, forward is up); `objective_icon` / `soldier_icon`; `hud_icon_rect` on the LocalPlayer UV; `hud_icon_frame` |
 | `ui.minimap.unit` | none (Godot-free doctest) | `l8_mip_chain` sizes and box filter, `combat_area_union`, `mask_box_iou` / `mask_polygon_iou` on synthetic masks (identity → 1, mirrored → 0; refused past `kMaxIouSide` / `kMaxAreaPolygonPoints`), `load_l8_texture` refusals on synthetic DxTexture headers (wrong format, side 8192, short payload) |
-| `ui.hud.unit` | none | state name parsing, `ItemIconIndex` ordering / duplicates on synthetic rows, `check_hud_bindings` on a synthetic table (missing, extra), `format_hud_source_table` |
+| `ui.hud.unit` | none | state name parsing, `hud_icon_rect` on a mirrored frame, `HudIconAtlas::find`, `decode_rgba8_texture` / `decode_item_icon` refusals (`ItemIconIndex` is built from EBX descriptions only, so its order, lookup and duplicate count are checked on the install in `ui.hud.icons`), `check_hud_bindings` on a synthetic table (missing, extra), `format_hud_source_table` |
 | `ui.minimap` | install, 77 without | G1–G5 (G5's polygon through `read_area_polygon` on Metro TeamDeathMatch0), G13 |
 | `ui.hud.icons` | install | G6, G7, G13 |
 | `ui.hud.sources` | install | G8, G13 |
@@ -583,3 +605,34 @@ ctest above gets the asan PATH block of the existing tests.
 * Q4: closed: all 14 gadget / M67 variants find their icon through `ui/uikititemmetadata` by identifier (§4.5).
 * Q5: can the M1 game simply run `--mode=ConquestSmall0` (83 spawn points exist) instead of the HUD-only mode
   override?
+
+## 18. Results (implementation wave, measured 2026-10-15)
+
+Dev build (`tools\build.cmd dev --no-test`), retail install read as-is, shared machine: the times are noisy and
+reported once. `ctest` commands run from the worktree root with `--preset dev` (G12: `--preset asan`); the
+`godot.*` ones need `OPENBF3_GODOT` = the Godot 4.8 dev7 console executable and a desktop session.
+
+| id | one command | threshold | measured | met |
+|---|---|---|---|---|
+| G1 | `ctest --preset dev -R "^ui\.minimap$"` (row `minimap.reference`) | Metro (0, −162) 1024, Caspian (0, 0) 2048, Bazaar (0, 0) 512; satellites L8 2048² | exactly those; all three satellites L8 2048 × 2048 | yes |
+| G2 | same, row `minimap.all_levels` | 29 / 29 | 29 / 29 (2.8 s) | yes |
+| G3 | same, row `minimap.masks` (also `bf3dump minimap --census`) | 455 / 455, 498 / 498, 562 / 562, 0 failures | 455 / 455 assets read on 25 levels; 498 / 498 referenced fields decode L8; 562 / 562 `UIDistanceFieldAsset`s decode; 90 null `SurroundingDistanceField` + 2 null `DistanceField` (C9); 0 failures; 1685 partitions scanned (0.6 s) | yes |
+| G4 | same, row `minimap.objectives` | Metro CQS 5 / 5 and every other variant < 5; Caspian CQS 6 / 6, CQL 7 / 7 (C7) | Metro CQS 5 / 5 (2 HQs, masks cacs2 + cacs1), variants 1–7: 0, 1, 0, 2, 0, 0, 0; Caspian CQS 6 / 6, CQL 7 / 7 | yes |
+| G5 | same, row `minimap.orientation` | box IoU ≥ 0.65 / ≤ 0.05; polygon ≥ 0.95 / ≤ 0.05 | polygon 23 points (bbox x −282.0 … −82.0, z −584.3 … −428.8), mask catdm 128²: box 0.702, polygon 1.000 for variant 0; 0.000 and 0.000 for each of the other 7 | yes |
+| G6 | `ctest --preset dev -R "^ui\.hud\.icons$"` (row `icons.atlas`) | 161 / 159 / 93; every rect valid; RGBA8 256 × 1024; LocalPlayer (35, 633, 17, 19) | 161 entries, 159 distinct, 93 with states, 242 frames, 0 bad rects, 8 mirrored (C8); states Default 54, Friendly 35, Enemy 34, Squad 38, Neutral 38, Blink 3; atlas RGBA8 256 × 1024; LocalPlayer Default (35, 633, 17, 19) | yes |
+| G7 | same, row `icons.weapons` | 172 / 172, 0 misses | 172 / 172 (158 weapon metadata, name SID equal on 158; 14 kit-item); index 257 ids, 2 listed twice; every icon DXT5 64 × 16 | yes |
+| G8 | `ctest --preset dev -R "^ui\.hud\.sources$"` | 58 state components; 84 types; 63 / 16 / 82; 235 rows, 0 / 0, 150 / 35 / 50 | 58 state components (7 with no sources), 84 types, 1215 sources; UIWeaponCompData 63, UISoldierCompData 16, UIVehicleCompData 82 (0.8 s); 235 rows all matched, 0 missing, 0 extra, Model / Client / Unused 150 / 35 / 50; 47 unbound components with 600 sources | yes |
+| G9 | `ctest --preset dev -R "^godot\.ui2$"` (rows `readback.calibration`, `marker.spawn`, `map.uv.*`, `marker.pixels`) | byte-exact; ≤ 0.5 m; ≤ 1 texel, other variants > 10; ≤ 1 unit | calibration 16 / 16 exact; own position 0.000 m from TDM spawn 19 of 102; north-up 46 samples (3 outside the image skipped) max 0.232 texels, other variants ≥ 850.5; rotating (after the 90° turn) max 0.250 texels, other variants ≥ 854.9, forward-is-up 2 / 3 up samples inside the image, worst 0.71°; marker pixel-box centre 0.76 units (north-up, marker turned −90°) and 0.28 units (rotating) off the centre plus the frame's alpha offset at 1152 × 648 (one canvas unit is one pixel there, so the box quantisation alone can reach 0.71: the margin is thin); also passes at `--resolution 1920x1080` (0.40 / 0.32 units) | yes |
+| G10 | same (rows `icons.minimap`, `icons.world`) | ≤ 1 texel / rim ≤ 1 unit and ≤ 2°; entries and states; world ≤ 0.5 units | Metro CQS 5 objectives per view: 2 on the disc (worst 0.220 texels), 3 clamped to the rim (0.00 units, ≤ 0.03°), fewest icon pixels 363; entries and states as `objective_icon`; world icons: 5 in front, 4 on screen, worst 0.008 units against the check's own projection, fewest icon pixels 214 | yes |
+| G11 | `set OPENBF3_UI2_SHOTS=C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui2& ctest --preset dev -R "^godot\.ui2$"` (row `shots`) | ≥ 4 PNGs, inspected | 6 PNGs (spawn / HQ / flag × rotating / north-up) in `b\shots\ui2\` (gitignored), inspected by eye: tinted satellite, combat area shaded outside, HQs and flags on the satellite's spots, marker at the centre, rim icons inside the disc, world flags over the flags with distances | yes (by eye) |
+| G12 | `ctest --preset asan -R "^ui(2\.contract|\.minimap|\.hud)"` | 8 tests pass, 0 ASan reports | 8 / 8 passed, 0 AddressSanitizer reports (ui.minimap 64 s under asan) | yes |
+| G13 | the `install.unchanged` rows of `ui.minimap`, `ui.hud.icons`, `ui.hud.sources`, `ui.minimap.fuzz`, `ui.hud.fuzz`, `godot.ui2` | 256 index files unchanged | unchanged in all six (sizes and mtimes of the 256 index files) | yes |
+| G14 | `ctest --preset dev -R "^godot\.ui2$"` (row `minimap.loaded`) | loader ≤ 5 s; memory reported | 0.43–0.69 s over the runs of this wave (install 0.05, load_level + traverse with 2 lanes 0.31–0.50, images 0.05–0.09, mips 0.01, Win32/UI atlas 0.03–0.04 s); peak working set +0.0 MiB (the session's own load had set the peak, about 805 MiB), working set +49 to +118 MiB across the loader | yes (noisy) |
+
+Fuzz (`ui.minimap.fuzz`, `ui.hud.fuzz`, 250 mutants per input, parsed / read): LevelData 122 / 122, cacs1 22 / 18,
+satellite header 153 / 108, dfcs1 137 / 98, detail field 149 / 98, hud3dicons 16 / 13, weapon metadata 39 / 39, kit
+items 9 / 9, ingamestatemp 95 / 2 (mutations mostly break its import table, which then fails to resolve, an error
+value), uiweaponcomp 15 / 15, atlas header 151 / 110, m16a4_small 149 / 115; no crash or hang.
+
+Other godot tests: the node is inert under `--m1-check` (no scene) and `--m1-load-check`, so `godot.m1` and
+`godot.m1_load` run without it (results in the README section of this track).
