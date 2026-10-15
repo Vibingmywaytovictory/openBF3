@@ -103,4 +103,15 @@ constexpr Command repeated_command(const Command &p_last, Tick p_tick) {
 	return c;
 }
 
+// No input: the view and pose kept (spawn settle, SpawnSweep dummies, the free camera's neutral command).
+constexpr Command idle_command(Tick p_tick, uint16_t p_yaw, int16_t p_pitch, Pose p_pose) {
+	Command c;
+	c.tick = p_tick;
+	c.yaw = p_yaw;
+	c.pitch = p_pitch;
+	c.pose = p_pose;
+	c.flags = command_flags::kLocalSource;
+	return c;
+}
+
 } // namespace bf3::sim

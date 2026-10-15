@@ -10,7 +10,8 @@ namespace bf3::sim {
 
 // Fixed simulation rate (plan D4: 60 Hz simulation, 30 Hz snapshots). Ticks are integers and time is
 // tick x kTickSeconds; every rate in the motor is written per second (topics/05 §4.1), so a 30 Hz build only
-// changes these two constants.
+// changes these two constants. That is a rebuild, not a per-match setting (plan D4's S1 fallback and harness
+// H:T1 rebuild); MatchInfo::sim_hz lets a client refuse a server built for another rate.
 inline constexpr uint32_t kSimHz = 60;
 inline constexpr float kTickSeconds = 1.0f / float(kSimHz);
 using Tick = uint32_t;

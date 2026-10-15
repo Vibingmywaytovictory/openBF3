@@ -4,7 +4,8 @@
 // listen server on 127.0.0.1; M3 binds the same server to a public address and nothing here changes.
 //
 // Channels (topics/05 §7.1):
-//   0 unreliable, unsequenced  S->C Snapshot (one datagram, <= kMaxDatagramBytes); C->S CommandPacket (60 Hz,
+//   0 unreliable, unsequenced  (ENET_PACKET_FLAG_UNSEQUENCED: enet_host.cpp sends flag 0 = sequenced today; T3
+//                              adds the unsequenced send mode, docs §7.1) S->C Snapshot (one datagram, <= kMaxDatagramBytes); C->S CommandPacket (60 Hz,
 //                              the last kCommandsPerPacket commands, so a lost datagram loses no command)
 //   1 reliable, ordered        control: Hello, MatchInfo, Ready, Spawned, Loading, Kick, Debug*, Bye
 //   2 reliable, ordered        bulk (M3+: FullSync of destruction rows and the logic ghost); unused in M1
@@ -73,6 +74,9 @@ struct MatchInfo {
 	sim::Tick server_tick = 0; // at send time (the client's first clock estimate)
 	MatchPhase phase = MatchPhase::InRound;
 	std::optional<core::Sha256Digest> source_digest; // level source digest (level/source_digest.h); M3 compares it
+	// sim::motor_params_hash of the server's MotorParams (SoldierDef numbers + MotorTuning). A client whose own
+	// hash differs would mispredict every tick: M1 logs it, M3 kicks (docs §7.2).
+	uint64_t motor_hash = 0;
 };
 
 struct Ready {
@@ -95,9 +99,14 @@ struct Kick {
 };
 
 enum class DebugKind : uint8_t {
-	Teleport = 1, // put the soldier at position/yaw (a fresh standing state, velocity 0)
+	// Put the soldier at position/yaw: a fresh standing state, velocity 0, same life, protect_ticks 0 (a debug
+	// placement is not a spawn, so the E1d fall-damage drops are not masked by spawn protection, docs §6.8).
+	Teleport = 1,
 	SpawnAt = 2, // respawn the soldier at spawn point `index` (settle included)
-	SpawnSweep = 3, // spawn one idle dummy at every spawn point, report each settle after `ticks`
+	// One idle dummy per spawn point, placed with sim::place_spawn, stepped over `ticks` live server ticks with
+	// the idle command, judged with sim::judge_settle (exactly settle_spawn's pieces, so the rows equal the
+	// headless sim.motor rows). Runs in batches of the free slots; dummies never count for choose_spawn.
+	SpawnSweep = 3,
 	SetSeed = 4, // reseed the server's spawn choice
 };
 
@@ -148,7 +157,9 @@ core::Result<DebugReport> decode_debug_report(std::span<const uint8_t> p_datagra
 // Body: u16 newest snapshot seq received | u32 ack bits of the 32 before it | u8 count (1..4) | the newest
 // command in full: u32 tick, u32 sequence, 24 buttons, 8+8 move, 16 yaw, 14 pitch, 2 pose; each older one as a
 // delta: tick and sequence implied (-1 each), 1 bit "same as the newer" or the full fields above minus tick and
-// sequence. The flags byte is server-side only and never sent. A typical 4-command packet is 18-30 bytes.
+// sequence. The flags byte is server-side only and never sent. Size with the type byte: 26 bytes when the 3 older
+// commands equal the newest, 53 bytes when all 4 differ. The encoder cuts count short at the first older command
+// whose tick or sequence is not exactly one less (after a clock reset), because the decoder implies both.
 
 struct CommandPacket {
 	uint16_t newest_snapshot = 0;
@@ -162,17 +173,21 @@ core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_dat
 // ---- snapshots (ch0, S->C, every snapshot_divisor ticks) ---------------------------------------------------------
 // Body: u16 seq | u32 server tick | u32 last command tick and u32 last command sequence applied to this client's
 // soldier, 1 bit repeated | i8 command buffer ticks (newest command tick received - server tick; time sync §7.5)
-// | u16 echo of the newest command sequence received (RTT) | own-state block | u8 others count | others.
+// | u16 echo of the newest command sequence received | u16 echo hold (time from receiving that command to this
+// send, 0.1 ms units, so RTT = now - send time of the echoed command - hold) | u16 own events (OR of the own
+// soldier's soldier_events over every tick since the previous snapshot to this client: events of odd ticks are
+// not lost) | own-state block | u8 others count | others.
 // Own-state block: 1 bit present; then every SoldierState field at full precision (floats as f32 bit patterns,
-// integers in their own widths, the reserved fields left out): 77 bytes. Header + own state ~95 bytes.
+// integers in their own widths, the reserved fields left out): 77 bytes. Header + own state ~100 bytes.
 // Other soldier (M1: absolute, no baseline; M3 adds a 1-bit "delta vs acked baseline" in front without moving
-// the rest): u8 slot | u32 life | position 20+18+20 bits (quant::kPosition*) | velocity 3 x 11 bits | yaw 14 |
-// pitch 12 | pose 2 | target pose 2 | transition progress 8 (0..255 of the total) | mode 4 | flags 8 (alive,
-// grounded, sprinting): 181 bits, ~23 bytes, so ~47 others fit one datagram.
+// the rest): u8 slot | u8 life generation (life & 0xFF, wraps) | position 21+18+21 bits (quant::kPosition*) |
+// velocity 3 x 11 bits | yaw 14 | pitch 12 | pose 2 | target pose 2 | transition progress 8 (0..255 of the total)
+// | mode 4 | flags 8 (alive, grounded, sprinting): 159 bits, ~20 bytes, so ~55 others fit one datagram. A full
+// 64-player snapshot (63 others, ~1,250 B) does not fit: M3 needs priority and baselines from its start.
 
 struct OtherSoldier {
 	uint8_t slot = 0;
-	uint32_t life = 0;
+	uint8_t generation = 0; // the low 8 bits of SoldierState::life (a respawn changes it; 256 lives wrap)
 	sim::Vec3 position{}; // after quantisation (what the receiver gets)
 	sim::Vec3 velocity{};
 	uint16_t yaw = 0; // 16-bit Command scale, low 2 bits zero
@@ -195,12 +210,19 @@ struct Snapshot {
 	bool last_command_repeated = false;
 	int8_t command_buffer_ticks = 0;
 	uint16_t sequence_echo = 0;
+	uint16_t echo_hold_100us = 0; // how long the server held the echoed command before this send (0.1 ms)
+	uint16_t own_events = 0; // soldier_events:: of the own soldier since the previous snapshot to this client
 	std::optional<sim::SoldierState> own; // the receiving client's soldier after server_tick
 	std::vector<OtherSoldier> others; // every other live soldier, nearest first, as many as fit
 };
 // Fills at most kMaxDatagramBytes; others that do not fit are left out (r_dropped counts them). M1's soldier
 // counts never come near the budget; M3 replaces the "nearest first" order with ghost priority.
+// Sequence numbers (Snapshot::seq, CommandPacket::newest_snapshot) wrap at 2^16: compare with seq_newer.
 std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropped = nullptr);
+// Whether u16 sequence p_a is newer than p_b under wrap-around (the half-range rule).
+constexpr bool seq_newer(uint16_t p_a, uint16_t p_b) {
+	return p_a != p_b && uint16_t(p_a - p_b) < 0x8000u;
+}
 core::Result<Snapshot> decode_snapshot(std::span<const uint8_t> p_datagram);
 
 } // namespace bf3::net

@@ -19,7 +19,8 @@
 //                Content keyed, so modes and levels that share a tile share its entry.
 //   "jolt-world" the tile list of one level x mode: (x, z, tile key) per tile + totals. Key: params = the
 //                level x mode's source digest (bf3_core level/source_digest.h: manifest SHA1s of every bundle
-//                the mode mounts) + the soup options + the build parameters; same versions.
+//                the mode mounts) + bf3_core kCollisionSoupVersion + the soup options + the build parameters;
+//                same versions. (The tile keys hash the soup's output, so they need no soup version.)
 // Warm load: source digest -> "jolt-world" -> every "jolt-tile" -> sRestoreWithChildren; no soup, no Havok
 // decode. Cold (or any tile missing): build the soup, cook the tiles on all lanes, put tiles then the world.
 

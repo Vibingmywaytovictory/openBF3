@@ -6,7 +6,10 @@
 // hundred bytes each; the triangles exist once per process.
 //
 // Threads: every method runs on the owner's thread only (each world has its own temp allocator and query
-// scratch). Two worlds over the same shapes may be queried at the same time from different threads.
+// scratch). Two worlds over the same shapes may be queried at the same time from different threads. Plan §2.3's
+// server job pool (bot perception rays between steps, B2+) needs queries from several threads on one world:
+// Jolt's narrow-phase queries are thread-safe on a system that is not being modified, so B2 adds overloads that
+// take a caller-owned scratch (temp allocator + collectors) per worker; M1 needs none.
 // Determinism: two worlds built from the same shapes with the same options answer every query identically (same
 // bodies, same creation order, same broadphase build), which is what makes the server's and the client's motor
 // steps equal (docs §6.11). M1 never steps these systems (no dynamic body); destruction (M6) adds per-world

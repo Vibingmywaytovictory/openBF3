@@ -81,7 +81,8 @@ struct Quantizer {
 };
 
 namespace quant {
-inline constexpr Quantizer kPositionXZ{ -2048.0f, 1.0f / 256.0f, 20 }; // +-2,048 m at 3.9 mm
+// +-4,096 m at 3.9 mm: covers plan §7.5's largest infantry distance (2,252 m, XP5_002), not only Metro.
+inline constexpr Quantizer kPositionXZ{ -4096.0f, 1.0f / 256.0f, 21 };
 inline constexpr Quantizer kPositionY{ -256.0f, 1.0f / 128.0f, 18 }; // -256..+1,792 m at 7.8 mm
 inline constexpr Quantizer kSoldierVelocity{ -32.0f, 1.0f / 32.0f, 11 }; // +-32 m/s at 3.1 cm/s
 inline constexpr unsigned kSoldierYawBits = 14; // of the 16-bit Command yaw

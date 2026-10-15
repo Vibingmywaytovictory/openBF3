@@ -13,6 +13,12 @@
 //   5. (lag-compensation history: M2a)
 //   6. snapshots: every snapshot_divisor ticks, one Snapshot per connected client (own state + every other)
 // Slots: 0..max_slots-1 for peers and server-side sources alike; a slot is the ghost id of its soldier.
+// Events: SoldierState::events covers one tick and snapshots go out every snapshot_divisor ticks, so the server
+// ORs each soldier's events per receiving client until its next snapshot (Snapshot::own_events).
+// Dev SpawnSweep (net::DebugKind::SpawnSweep): place_spawn for a batch of dummies (as many as there are free
+// slots; a 128-slot config takes all 102 Metro points in one batch, the default 64 takes two), idle commands over
+// `ticks` live server ticks, judge_settle, rows back, dummies removed. Dummies are left out of choose_spawn's
+// live-soldier list, so a respawn during the sweep still finds a point.
 
 #include "bf3/core/result.h"
 #include "bf3/host/level_load.h"
@@ -38,10 +44,12 @@ public:
 struct GameServerConfig {
 	std::shared_ptr<const SharedLevel> level; // static world, spawns, motor params
 	uint8_t snapshot_divisor = 2; // 30 Hz snapshots at 60 Hz
+	// Soldier slots, peers and server-side sources together (<= net::kMaxSlots). --m1-check and host.session use
+	// net::kMaxSlots (128) so one SpawnSweep batch covers Metro's 102 points plus the player and the walkers.
 	uint32_t max_slots = 64;
 	uint32_t jitter_buffer_ticks = 32; // commands kept ahead of the server tick per slot
 	uint32_t respawn_ticks = 60; // after death (M1 placeholder; the data's respawn base is unknown, plan §3.1)
-	uint32_t walkers = 0; // scripted walkers circling near spawn points (interpolation targets, docs §8.4)
+	uint32_t walkers = 0; // scripted walkers circling near spawn points (interpolation targets, docs §8.3)
 	bool dev_commands = false; // accept Debug requests (tests, --m1-check)
 	uint64_t seed = 1; // spawn choice and walker scripts
 };
@@ -63,6 +71,7 @@ struct SlotStats {
 	uint64_t commands_repeated = 0;
 	uint64_t commands_late = 0; // arrived after their tick ran
 	int32_t buffer_ticks = 0; // newest command tick received - server tick
+	sim::SoldierState state; // the authoritative state after the last tick (E1 through the server, docs §14)
 };
 
 struct GameServerStats {

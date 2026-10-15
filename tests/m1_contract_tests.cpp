@@ -4,6 +4,7 @@
 // design says. No data, no Godot; nothing here calls a function a track has yet to implement.
 #include <doctest/doctest.h>
 
+#include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/source_digest.h"
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/host/client_session.h"
@@ -52,9 +53,20 @@ static_assert((sim::buttons::kEdgeMask & ~sim::buttons::kWireMask) == 0);
 static_assert(net::kChannelCount == 3);
 static_assert(net::kMaxDatagramBytes <= 1392 - 64); // ENet MTU minus its headers
 static_assert(net::kCommandsPerPacket == 4);
-static_assert(net::quant::kPositionXZ.bits + net::quant::kPositionY.bits + net::quant::kPositionXZ.bits == 58);
+static_assert(net::quant::kPositionXZ.bits + net::quant::kPositionY.bits + net::quant::kPositionXZ.bits == 60);
 static_assert(net::quant::kPositionXZ.encode(-5000.0f) == 0);
 static_assert(net::quant::kPositionXZ.encode(5000.0f) == net::quant::kPositionXZ.max_code());
+// Plan §7.5: the largest infantry distance (2,252 m, XP5_002) is inside the XZ range.
+static_assert(net::quant::kPositionXZ.encode(2252.0f) < net::quant::kPositionXZ.max_code());
+static_assert(net::quant::kPositionXZ.encode(-2252.0f) > 0);
+static_assert(std::is_trivially_copyable_v<net::OtherSoldier>);
+static_assert(std::is_trivially_copyable_v<bf3::host::ClientStats>);
+static_assert(std::is_trivially_copyable_v<bf3::host::PresentationFrame>);
+static_assert(net::seq_newer(1, 0) && !net::seq_newer(0, 1) && !net::seq_newer(5, 5));
+static_assert(net::seq_newer(2, 65530) && !net::seq_newer(65530, 2)); // wrap-around
+static_assert(bf3::core::level::kCollisionSoupVersion >= 1);
+static_assert(sim::idle_command(5, 7, -3, sim::Pose::Prone).tick == 5);
+static_assert(sim::idle_command(5, 7, -3, sim::Pose::Prone).buttons == 0);
 static_assert(uint8_t(bf3::host::LoadStage::Failed) + 1 == bf3::host::kLoadStageCount);
 static_assert(std::is_same_v<decltype(bf3::host::ServerConfig{}.game), std::shared_ptr<const bf3::host::GameServerConfig>>);
 
@@ -125,9 +137,12 @@ TEST_CASE("m1 contract: default configs match the design numbers") {
 	CHECK(c.interp_max_ms == 150.0f);
 	CHECK(c.error_decay_ms == 100.0f);
 	CHECK(c.target_buffer_ticks == 2);
+	CHECK(c.clock_time_constant_s >= 1.0f);
+	CHECK(c.extrapolate_max_ms == 250.0f);
 	CHECK(c.max_clock_adjust == doctest::Approx(0.05f));
 	const bf3::host::GameServerConfig g;
 	CHECK(g.snapshot_divisor == 2);
+	CHECK(g.max_slots <= net::kMaxSlots);
 	const sim::MotorTuning t;
 	CHECK(t.gravity == doctest::Approx(9.81f));
 	CHECK(t.reference_hz == 30.0f);

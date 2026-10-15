@@ -1,8 +1,10 @@
 #pragma once
 // The level scene for the game (plan §2.5 "world drawing", §6 M1 "Godot RS instances"; docs/design/m1.md §11).
-// Godot-free; the plan is made on the loader thread that owns the level database, the meshes and textures are
-// prepared on the loader lanes, and the Godot side (src/bf3_godot level_session) only creates RenderingServer
-// resources and instances from the result, in <= 2 ms slices on the main thread.
+// Godot-free; the plan is made on the loader thread that owns the level database, the meshes, textures and
+// terrain are prepared on the loader lanes, and the Godot side (src/bf3_godot level_upload) creates the
+// RenderingServer resources from the result: textures (texture_2d_create) and meshes (mesh_create_from_surfaces)
+// on WorkerThreadPool tasks, which gap load §6.6 allows; materials and instances on the main thread with a
+// per-frame budget (12 ms behind the loading screen, vsync off; 2 ms for later in-game streaming; docs §12.1).
 //
 // Plan (from the census, bf3_core level/census.h): one SceneMeshPlan per kept census variant (res + hidden parts
 // + bake + variation entry), one SceneInstancePlan per census instance, one SceneMaterialPlan per distinct
@@ -15,6 +17,11 @@
 // the census LODs so M2 adds visibility ranges without a re-convert.
 //
 // Textures are decoded from the install at every load (plan §2.4: never cached), resident, full chain.
+//
+// Terrain: each TerrainEntityData of the census (Metro TDM: one) becomes one untextured world mesh from its
+// heightfield (res/terrain.h height_grid at about SceneTerrainOptions::spacing, hole cells dropped), built every
+// load on a lane and drawn with one flat material: M1's "minimal look" has outdoor ground. Water is not drawn
+// in M1 (no water surface is on a TDM walking route; the shot harness views avoid it, docs §11.2).
 
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/level/level_transform.h"
@@ -55,6 +62,18 @@ std::vector<SceneMeshRequest> scene_mesh_requests(const core::level::MeshCensus 
 struct ScenePlanOptions {
 	bool include_hidden_start = false; // placements that start invisible (starts_hidden) stay out (default)
 	uint32_t max_lod = 0; // M1: LOD 0 only
+	bool include_terrain = true;
+};
+
+// One TerrainEntityData to draw (docs §11.2).
+struct SceneTerrainPlan {
+	uint32_t object = 0; // index into World::objects
+	std::string asset; // Terrain res name (TerrainAsset)
+	core::level::LevelTransform transform;
+	std::array<float, 3> color{ 0.36f, 0.33f, 0.27f }; // flat albedo [inferred: no terrain shading in M1]
+};
+struct SceneTerrainOptions {
+	float spacing = 4.0f; // target metres between drawn samples (the collision soup uses 2 m)
 };
 
 struct SceneTexturePlan {
@@ -105,6 +124,7 @@ struct LevelScenePlan {
 	std::vector<SceneInstancePlan> instances;
 	std::vector<SceneMaterialPlan> materials;
 	std::vector<SceneTexturePlan> textures;
+	std::vector<SceneTerrainPlan> terrains;
 	SceneEnvironment environment;
 	std::vector<std::pair<std::string, std::string>> failures; // (item, error): materials not found, ...
 	double seconds = 0.0;
@@ -133,6 +153,11 @@ core::Result<PreparedSceneMesh> prepare_scene_mesh(core::Cache *p_cache, const c
 core::Result<CachedMesh> load_scene_request(core::Cache *p_cache, const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_request);
 // Any loader lane: the texture from the install (DxTexture res + chunk), prepared for its role.
 core::Result<PreparedTexture> prepare_scene_texture(const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_texture);
+
+// Any loader lane: terrain p_terrain's heightfield as one surface (positions, normals; no UVs or tangents),
+// wound for Godot (render_bridge.h), hole cells left out. Decoded at every load (Metro: a few MiB of chunks).
+core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_terrain,
+		const SceneTerrainOptions &p_options = {});
 
 // Bytes the plan's prepared data needs resident at once (meshes LOD 0 + textures, estimated from the census):
 // the loader uses it to decide the number of lanes against the RSS budget (docs §12.4).

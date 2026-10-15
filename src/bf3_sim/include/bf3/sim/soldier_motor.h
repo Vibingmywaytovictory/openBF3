@@ -18,6 +18,16 @@
 // ExtendedUpdate (walk stairs = StepHeight, stick to floor = AllowedDistanceFromGround when GroundHugging), so no
 // solver state survives between steps and a step restored from a snapshot equals the step the server ran.
 // One SoldierMotor serves any number of soldiers of one owner thread, one after the other.
+// The reset drops one thing a persistent CharacterVirtual would keep: the contacts' mHadCollision flags that
+// CancelVelocityTowardsSteepSlopes reads at the start of ExtendedUpdate (RefreshContacts rebuilds contacts with
+// mHadCollision = false). Both ends reset the same way, so they stay equal; behaviour against steep walls is the
+// reset path's, and the T2 slope tests run on it (docs §6.1).
+// Velocity is the motor's, not the solver's: Update never writes mLinearVelocity. The motor applies gravity only
+// while not grounded, passes ExtendedUpdate the mid-step velocity v - g dt / 2 (exact parabola), zeroes the
+// vertical part when the step ends grounded, and derives landings and the impact speed from its own kGrounded
+// change plus the exact fall distance. Its own kGrounded flag (not GetGroundState before the update, which
+// RefreshContacts computes without the velocity check) drives the mode logic. Update always gets kTickSeconds
+// and is never sub-stepped, so mLastDeltaTime cannot leak from one soldier to the next.
 
 #include "bf3/core/result.h"
 #include "bf3/sim/command.h"
@@ -67,6 +77,7 @@ struct MotorTuning {
 	// Sprint input in crouch/prone (SprintMultiplier 0 there) asks for Stand. [inferred, topics/02 §1.3]
 	bool sprint_stands_up = true;
 	// Prone: the footprint box (CollisionBoxMin/MaxExpand, 0.6 x 2.4 m) must be free to enter prone and to turn.
+	// Only the sphere moves through the world: crawling can push the virtual 2.4 m body into a wall. [inferred]
 	bool prone_footprint_check = true;
 	float prone_footprint_height = 0.35f; // box height above the feet [inferred]
 	// Solver (Jolt CharacterVirtual; docs §6.1).
@@ -147,6 +158,9 @@ static_assert(std::is_trivially_copyable_v<MotorParams>);
 // needs is missing (a pose, the OnGround stand speed, the jump height, the fall-damage curve).
 core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_def, const MotorTuning &p_tuning = {});
 float eval(const Curve &p_curve, float p_x); // piecewise linear, clamped at both ends (as eval_curve)
+// FNV-1a 64 over every field of p_params in declaration order (floats as bit patterns, tuning included):
+// MatchInfo::motor_hash, so a client predicting with other numbers than the server is detected (docs §7.2).
+uint64_t motor_params_hash(const MotorParams &p_params);
 
 // ---- the motor -----------------------------------------------------------------------------------------------
 
@@ -173,8 +187,9 @@ public:
 	// p_command.tick == r_state.tick + 1; a dead soldier only advances its tick.
 	void step(SoldierState &r_state, const Command &p_command, MotorStepInfo *r_info = nullptr) const;
 
-	// A fresh standing soldier at p_feet facing p_yaw, alive, full health, spawn protection running, at p_tick.
-	SoldierState spawn_state(const Vec3 &p_feet, uint16_t p_yaw, uint32_t p_life, Tick p_tick) const;
+	// A fresh standing soldier at p_feet facing p_yaw, alive, full health, at p_tick; spawn protection
+	// (immortal_ticks) runs when p_protect, and not for a debug Teleport (docs §6.8).
+	SoldierState spawn_state(const Vec3 &p_feet, uint16_t p_yaw, uint32_t p_life, Tick p_tick, bool p_protect = true) const;
 	// Eye height above the feet for the presentation: the pose's, blended linearly over a running transition.
 	float eye_height(const SoldierState &p_state) const;
 	// Whether a standing soldier fits at p_feet (overlap test of the stand shape, padding included).

@@ -67,7 +67,8 @@ public:
 	ServerStats stats() const;
 	// Latest published transforms of the dynamic bodies (copied under a short lock).
 	void copy_body_transforms(std::vector<sim::BodyTransform> &r_out) const;
-	// M1: the GameServer's stats as published after the last tick (empty when no game is configured).
+	// M1: the GameServer's stats as published after the last tick (empty when no game is configured). Declared
+	// now, defined by track T4 (server_host.cpp): a caller cannot link before T4 lands.
 	GameServerStats game_stats() const;
 
 	// Stops and joins every running ServerHost of the process (extension deinit safety net).

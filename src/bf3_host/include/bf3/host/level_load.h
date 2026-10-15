@@ -5,16 +5,20 @@
 //
 // Two results with different lifetimes:
 //   LevelDatabase  the mounted level, its parsed partitions and the traversal (bf3_core LoadedLevel + World).
-//                  Not thread-safe (World::Scopes); used on the loader thread only, by the steps that read EBX
-//                  (spawns, census, soup placements, scene plan), then released.
+//                  World is not thread-safe (World::Scopes): only the loader thread runs the steps that read
+//                  EBX (spawns, census, soup placements, scene plan). Its LevelMount (inside LoadedLevel) is
+//                  read-only and thread-safe and the Phase B lanes read it (load_scene_request,
+//                  prepare_scene_texture, prepare_scene_terrain), so the database lives until Phase B ends.
 //   SharedLevel    what the simulation needs, immutable after the load and shared (shared_ptr<const>) by the
 //                  ServerHost thread and the ClientSession thread: the static world shapes, the spawn points,
 //                  the motor params, the ids and digests.
-// Order (the World-touching steps are serial, the heavy steps parallel; docs §12):
+// Order on the loader thread (the World-touching steps are serial, the heavy steps parallel; docs §12.1):
 //   open_level_database  mount -> partitions -> traverse                                  [Mount, Database]
-//   load_shared_level    spawns, soldier def; static world through the cache (cold: soup)  [Shapes]
-//   (bf3_render level_scene.h, same thread, before the database is released: census -> plan; then the mesh
-//    blobs and textures on the lanes)                                                      [Meshes, Materials, Textures]
+//   bf3_render level_scene.h: census -> plan_level_scene; the mesh blobs, textures and terrain are queued on
+//                        the lanes at once                                                 [Meshes, Materials, Textures]
+//   load_shared_level    spawns, soldier def; static world through the cache (cold: the soup runs here while
+//                        the lanes convert meshes and decode textures; its tile cooks join the lanes) [Shapes]
+// The scene plan goes first because load_static_world_cached blocks the loader until its cook ends.
 
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/result.h"

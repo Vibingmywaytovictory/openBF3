@@ -63,7 +63,20 @@ struct SettleResult {
 // Every spawn point of the traversal, in its order, yaw from the point's forward axis (atan2(f.x, f.z)).
 std::vector<SpawnPoint> to_spawn_points(const core::level::LevelSpawns &p_spawns);
 
-// p_motor must be bound to p_world. Runs on the caller's thread.
+// settle_spawn in three pieces, so the server's SpawnSweep runs the idle ticks over live server ticks (not 6,120
+// motor steps inside one tick) and still gives the same rows as the headless call, bit for bit:
+//   place_spawn   floor ray, lift, rings -> SettleResult with placed / floor_y / lift / shift filled and
+//                 state = spawn_state(placed); failure set when no floor or no room
+//   (the caller)  settle_ticks steps of the idle command (sim::idle_command) on state
+//   judge_settle  grounded, no overlap, gap <= padding + hover_tolerance, lift / shift limits -> ok, gap,
+//                 overlapping, failure
+// The geometric fields do not depend on p_tick or p_life (the motor never reads them), so a sweep started at
+// any server tick yields the headless rows.
+SettleResult place_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_world, const SpawnPoint &p_point, uint32_t p_life, Tick p_tick,
+		const SettleOptions &p_options = {});
+void judge_settle(const SoldierMotor &p_motor, const CollisionWorld &p_world, const SpawnPoint &p_point, const SettleOptions &p_options,
+		SettleResult &r_result);
+// place_spawn, settle_ticks idle steps, judge_settle. p_motor must be bound to p_world. Caller's thread.
 SettleResult settle_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_world, const SpawnPoint &p_point, uint32_t p_life, Tick p_tick,
 		const SettleOptions &p_options = {});
 

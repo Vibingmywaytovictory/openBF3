@@ -9,6 +9,11 @@ if(godot STREQUAL "" OR NOT EXISTS "${godot}")
     message("SKIPPED: OPENBF3_GODOT does not name the Godot console executable")
     cmake_language(EXIT 77)
 endif()
+# As godot_check.cmake: without .godot/extension_list.cfg a fresh worktree's first run does not load the
+# extension ("Cannot get class Bf3ViewmodelDemo") and times out.
+if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
+    file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
+endif()
 execute_process(
     COMMAND "${godot}" --headless --path "${PROJECT_DIR}" res://scenes/m9_reload.tscn -- --m9-reload-check
     TIMEOUT 240
