@@ -94,6 +94,7 @@ struct SoundNode {
 	uint16_t plugins_count = 0;
 	uint16_t output = kNoRegister; // index into SoundProgram::outputs for Cone/Flat/DirectOutput
 	uint32_t source_index = 0; // position in SoundGraphData.Nodes (children: in the parent's array)
+	uint32_t aux = 0; // MixerReceiveEntry: index into SoundProgram::mixer_inputs (sound_ports.h lists the other extras)
 };
 
 enum SoundNodeFlag : uint8_t {
@@ -287,9 +288,16 @@ Result<SoundProgram> compile_sound_patch(const EbxResolver &p_db, const EbxParti
 
 // Blob "OBF3SNDP" (kSoundProgramFormatVersion): every field in declaration order, little endian, vectors as u64
 // count + elements, strings as u32 length + bytes (<= 64 KiB). decode_sound_program checks every count against the
-// bytes left, every register < registers, every range inside its pool, every plugin and connection reference in
-// range, the node order topological, and refuses trailing bytes, so an accepted program can be evaluated without
-// further checks. encode(decode(b)) == b.
+// bytes left, refuses trailing bytes and then runs validate_sound_program, so an accepted program can be evaluated
+// without further checks. encode(decode(b)) == b.
+//
+// validate_sound_program: every register < registers, every pool range inside its pool, every node's port / float /
+// plugin / wave / child layout the one its type has (sound_ports.h), child records of the parent's child type,
+// every plugin, connection, output and link reference in range, connections named exactly once, voice_order a
+// permutation by ascending stage, every float finite. It does NOT check that the node order is topological: the
+// evaluator is safe in any order (a register read before its writer sees the previous step's value), only the
+// timing of such a read differs. PatchInstance::create runs it on every program it is given.
+Status validate_sound_program(const SoundProgram &p_program);
 std::vector<uint8_t> encode_sound_program(const SoundProgram &p_program);
 Result<SoundProgram> decode_sound_program(std::span<const uint8_t> p_blob);
 

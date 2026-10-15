@@ -23,5 +23,5 @@ target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
 # M2a audio (docs/design/m2a-audio.md §1, §9): `audio waves|loc|census|render`, the drivers of gates G1-G4 and the
 # offline render through bf3_audio's mixer core.
-target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_render_commands.cpp)
+target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_commands.cpp)
 target_link_libraries(bf3dump PRIVATE bf3_audio)
