@@ -59,6 +59,10 @@ the thresholds.
 | W10 | every install test and command | `install.unchanged` | yes (256 files: sizes and mtimes equal) in every case of `sim.weapons*`, `tools.weapon_sim`, `bf3dump weapon-sim` / `range` | yes |
 | W11 | `sim.weapons.perf`; `bf3dump range weapons/m16a4/u_m16a4 --perf` | p99 ≤ 2.0 ms | 64 shooters, 600 ticks, 8,576 shots, peak 76 live, mean lane 24.6 m: mean 0.115 ms, p50 0.112 ms, p99 0.205 ms, max 0.407 ms (bf3dump run: p99 0.281 ms). Wall clock, noisy | yes |
 
+Under the `asan` preset, `m2a.weapons.contract`, `sim.weapons.unit`, `sim.weapons`, `sim.weapons.range`,
+`sim.weapons.fuzz` and `tools.weapon_sim` pass (no AddressSanitizer report); `sim.weapons.perf` skips there, since
+W11 is a dev-preset measurement (an instrumented build measured p99 68.7 ms, which says nothing about the budget).
+
 Rules the implementation fixed (this document is updated where they live):
 * **Data times go through their shortest decimal** (§5.1). The data's floats are not the decimals the oracles quote
   (1.8f is 1.79999995 s = 107,999,997 units). `make_weapon_sim_def` converts every time, rate and fraction through
