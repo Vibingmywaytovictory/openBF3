@@ -50,6 +50,7 @@ struct CompileStats {
 	uint32_t parameterised_evaluators = 0; // EmitterParameter other than None
 	uint32_t sounds = 0;
 	uint32_t visual_environments = 0;
+	uint32_t flipbooks_normalised = 0; // TextureRef frame count or columns stored 0 -> 1 (docs §6.2 step 6)
 };
 
 struct CompileContext {
