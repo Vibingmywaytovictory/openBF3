@@ -72,3 +72,11 @@ target_sources(bf3_godot PRIVATE
     src/m1_check.h
 )
 target_link_libraries(bf3_godot PRIVATE psapi)
+
+# M2a audio (docs/design/m2a-audio.md §6.5, §7): Bf3AudioStream / Bf3AudioPlayback over bf3_audio's mixer core
+# (registered by the A1 wave) and the audio demo node of res://scenes/audio_m16.tscn (A2 wave).
+target_sources(bf3_godot PRIVATE
+    src/audio_stream.cpp
+    src/audio_stream.h
+)
+target_link_libraries(bf3_godot PRIVATE bf3_audio)

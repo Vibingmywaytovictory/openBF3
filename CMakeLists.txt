@@ -137,3 +137,6 @@ if(OPENBF3_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# M2a audio (docs/design/m2a-audio.md): the Godot-free client audio runtime (patch instances, mixer core, DSP).
+add_subdirectory(src/bf3_audio)

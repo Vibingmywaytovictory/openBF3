@@ -366,3 +366,14 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
         set_tests_properties(tools.ebx_memory PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hymem_cl_dir}")
     endif()
 endif()
+# M2a audio (docs/design/m2a-audio.md §10): audio.contract, every audio header compiles together, the node type
+# table keeps the census sets, the seam hashes and FourCCs match the data's encoding, the tuning parser and the
+# project's audio_tuning.cfg. No data.
+openbf3_test(test_audio_contract test_main.cpp audio_contract_tests.cpp test_support.h)
+target_link_libraries(test_audio_contract PRIVATE bf3_audio bf3_core)
+target_compile_definitions(test_audio_contract PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg")
+add_test(NAME audio.contract COMMAND test_audio_contract --test-suite=audio-contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_audio_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+endif()
