@@ -871,8 +871,8 @@ Audio moved to §3.10. The r0 text chose "own Godot UI, no EA art" without an in
   waypoints on 4 level×mode pairs. Metro (0, −162)/1024; Caspian (0, 0)/2048; Bazaar (0, 0)/512; `AirRadarRange 700`.
 * **Strings (solved)**: `localization/us_loc` (`UITextDatabase`, `Win32/Globals`) points to two chunks in `Loc\en.sb`;
   the patch copy wins. Binary `0x39000` + histogram `0x39001`; 15,515 entries keyed by the SID hash
-  `h = 0xFFFFFFFF; h = h·33 + c` (additive, unlike BF1's xor); 1,247/1,271 EBX-referenced SIDs resolve (the rest are
-  missing or `<MISSING>`). Layout matches flamethrower's independent BF1 `localization.py`. Take SIDs from EBX fields,
+  `h = 0xFFFFFFFF; h = h·33 + c` (additive, unlike BF1's xor); 1,247/1,271 EBX-referenced SIDs resolve (the other 24
+  have no entry at all; none reads `<MISSING>`). Layout matches flamethrower's independent BF1 `localization.py`. Take SIDs from EBX fields,
   never by guessing (`ID_P_WNAME_M16A4` → "M16A3").
 * **Fonts**: SWF `DefineFont3` outlines, not TTF/OTF: Purista EA Medium/Semibold (443 glyphs), Venice-Medium/SemiBold
   (33 HUD glyphs), mapped to `$MENU_*`/`$HUD_*` by `UIFontMappingCollection`.

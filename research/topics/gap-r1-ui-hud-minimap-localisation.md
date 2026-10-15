@@ -246,7 +246,7 @@ every ebx/res entry whose name starts with `ui/`, or matches `levels/*/ui/` or `
 
 **SID hash [V]:** `h = 0xFFFFFFFF; for each byte c: h = (h*33 + c) mod 2^32`, applied to the SID exactly as written (upper case).
 - 1,247 of the 1,271 SIDs referenced from UI/level EBX (`S\loc\sid-resolution.tsv`) resolve.
-- The rest are SIDs without an English entry, or whose entry is literally `<MISSING>`.
+- The other 24 have no entry at all (18 of them vehicle-weapon names `ID_P_VWNAME_*`). No entry reads `<MISSING>`: that was this decoder script's placeholder for an absent key (corrected 2026-10-15 with `bf3dump text --census`).
 - BF1's hash in flamethrower (`hash.py`: seed 5381, `h*33 ^ c`) gives **0** hits on BF3, so the variant differs per game [V].
 - Self-consistency check: `ID_H_US_A`→`34a54e7a` and `ID_H_US_B`→`34a54e7b`, adjacent as an additive last step predicts.
 
@@ -275,7 +275,7 @@ every ebx/res entry whose name starts with `ui/`, or matches `levels/*/ui/` or `
 | ID_M_ASSAULT / ENGINEER / SUPPORT / RECON | ASSAULT / ENGINEER / SUPPORT / RECON |
 | ID_H_MES_SOLDIERS_HOLD_TO_RESPAWN | HOLD TO RESPAWN |
 
-- **SIDs to avoid.** The guessed SIDs `ID_P_WNAME_M16`, `ID_P_MAP_*` and `ID_P_VNAME_M1A2` do not exist. Always take SIDs from EBX fields, never by guessing.
+- **SIDs to avoid.** The guessed SIDs `ID_P_MAP_*` and `ID_P_VNAME_M1A2` do not exist. (`ID_P_WNAME_M16` does exist: it is the M16A4 burst variant's name SID and reads "M16A4".) Always take SIDs from EBX fields, never by guessing.
 - **Where SIDs come from [V/I].** SIDs arrive as strings in EBX: `UIWeaponDescription.Name`, `ID_M_LEVELNAME_*` in the level
   partition, `ID_H_MAP_*` in capture-point data. The runtime hashes them, so no SID list needs to ship.
 
@@ -436,7 +436,7 @@ project is done and people want a pixel-exact HUD.
 - **Kill-feed payload.** The exact `KillMessage` data and whether the kill feed uses `IconTexturePath` (`_small`) or an atlas inside a SWF. This is strongly inferred, not proven.
 - **Unparsed SWFs.** 169 of the 434 SWFs were not extracted or censused (mostly front-end screens).
 - **Label-to-rectangle mapping.** The full mapping from `iconsingame` frame label to sub-image rectangle is not built; only the rectangles are parsed.
-- **`<MISSING>` SIDs.** Why 24 SIDs resolve to `<MISSING>` or nothing (e.g. `ID_P_VWNAME_M1A2SMOKE`). Probably cut content.
+- **Absent SIDs.** Why 24 SIDs have no entry (e.g. `ID_P_VWNAME_M1A2SMOKE`). Probably cut content.
 - **Spawn screen.** Which `CameraEntityData`, if any, the PC spawn screen uses. It appears to draw `OverviewMap` from the minimap.
 - **Squad and vehicle spawn rules.** Exact squad-spawn and vehicle-spawn eligibility rules (open in PORTING-RESEARCH §3.7 already).
 - **Exact HUD layout.** Positions and sizes of HUD elements. Only stage sizes are known (e.g. minimap 512²). Taking them from `PlaceObject` matrices needs the symbol reader extended to the root timelines.
