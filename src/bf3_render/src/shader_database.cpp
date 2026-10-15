@@ -382,6 +382,19 @@ core::Result<std::vector<ShaderDatabase>> parse_shader_database(std::span<const 
 	return out;
 }
 
+ShaderDatabase merge_first_wins(std::vector<std::vector<SurfaceShader>> p_lists) {
+	ShaderDatabase out;
+	std::set<uint32_t> seen;
+	for (std::vector<SurfaceShader> &list : p_lists) {
+		for (SurfaceShader &s : list) {
+			if (seen.insert(s.name_hash).second) {
+				out.shaders.push_back(std::move(s));
+			}
+		}
+	}
+	return out;
+}
+
 ShaderLookup::ShaderLookup(ShaderDatabase p_database) :
 		database_(std::move(p_database)) {
 	by_hash_.reserve(database_.shaders.size());

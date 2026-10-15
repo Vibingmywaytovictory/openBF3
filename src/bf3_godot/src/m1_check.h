@@ -86,10 +86,11 @@ public:
 	bool empty() const { return free_.empty() && spawn_.empty(); }
 	// Every frame after Done; true when every shot was taken (or failed).
 	bool frame(uint64_t p_now_ns);
-	// L1 look: each free shot waits p_settle_s as well as 30 frames (auto exposure), then times p_measure frames.
+	// L1 look: each free shot waits p_settle_s as well as 30 frames (auto exposure), then times p_measure frames
+	// (the first only starts the clock, so 1 is raised to 2: one interval).
 	void set_timing(double p_settle_s, uint32_t p_measure) {
 		settle_s_ = p_settle_s;
-		measure_frames_ = p_measure;
+		measure_frames_ = p_measure == 1 ? 2 : p_measure;
 	}
 	size_t saved() const { return saved_; }
 	size_t failed() const { return failed_; }

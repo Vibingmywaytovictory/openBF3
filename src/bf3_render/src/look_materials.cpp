@@ -12,6 +12,7 @@
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <iterator>
 #include <span>
 #include <tuple>
 
@@ -181,7 +182,77 @@ const Candidate *best(uint8_t p_role, const std::vector<Candidate> &p_candidates
 	return out;
 }
 
+// A candidate texture, or nullopt when it cannot be drawn (no mesh UV set, a placeholder, no 2D texture header).
+// p_header: name -> the cached header, or nullptr.
+template <class Header>
+std::optional<Candidate> make_candidate(Header &&p_header, std::string_view p_name, uint8_t p_role, Rank p_rank, Sampling p_sampling,
+		const std::string &p_parameter) {
+	LookTexture t;
+	float factor = p_sampling.factor;
+	if (p_sampling.coord_type == kCoordWorld) {
+		t.channel = kLookUvProjected;
+	} else if (p_sampling.usage == kUsageTexCoord0) {
+		t.channel = kLookUv0;
+	} else if (p_sampling.usage == kUsageTexCoord1) {
+		t.channel = kLookUv1;
+	} else if (p_sampling.usage == kUsageTexCoord2) {
+		t.channel = kLookUvOverlay;
+		factor = 1.0f;
+	} else {
+		return std::nullopt;
+	}
+	t.name = lower(p_name);
+	if (t.name.empty() || placeholder_texture(t.name)) {
+		return std::nullopt;
+	}
+	const LookResolver::HeaderInfo *h = p_header(t.name);
+	if (h == nullptr || h->kind != core::res::TextureKind::Texture2D) {
+		return std::nullopt;
+	}
+	uint8_t role = p_role;
+	if ((role == kColor || role == kSpecular) && core::res::texture_format_is_normal_map(h->format)) {
+		role = kNormal;
+	}
+	if (role == kColor && has_word(last_part(t.name), kOverlayWords)) {
+		p_rank.quality = std::max<uint8_t>(p_rank.quality, 1);
+	}
+	t.scale = factor > 0.0f && factor != 1.0f && std::isfinite(factor) ? std::clamp(1.0f / factor, 1.0f / 256.0f, 64.0f) : 1.0f;
+	t.tier = p_rank.tier;
+	t.quality = p_rank.quality;
+	t.parameter = p_parameter;
+	return Candidate{ role, p_rank, std::move(t) };
+}
+
+size_t shared_prefix(std::string_view p_a, std::string_view p_b) {
+	size_t n = 0;
+	while (n < p_a.size() && n < p_b.size() && p_a[n] == p_b[n]) {
+		++n;
+	}
+	return n;
+}
+
+// Neighbour classes: colour / normal x quality 0 / 1 x untiled / tiled (the rank keys a neighbour can differ in
+// besides its folder and shared prefix). Other roles are never drawn.
+constexpr size_t kNeighbourClasses = 8;
+std::optional<size_t> neighbour_class(const Candidate &p_c) {
+	if (p_c.role != kColor && p_c.role != kNormal) {
+		return std::nullopt;
+	}
+	return size_t(p_c.role == kNormal ? 4 : 0) + size_t(std::min<uint8_t>(p_c.rank.quality, 1) * 2) + size_t(tiled(p_c.texture) ? 1 : 0);
+}
+
 } // namespace
+
+struct LookResolver::GraphInfo {
+	std::vector<std::pair<std::string, size_t>> parameters; // lowercase name -> texture_parameters index, sorted (stable: first wins)
+	std::vector<Candidate> candidates; // Graph tier colour and normal candidates (rank.graph 0), at most kLookMaxGraphCandidates
+	bool double_sided = false;
+};
+
+struct LookResolver::FolderIndex {
+	// Neighbour candidates (rank.graph 0, rank.order 0) per neighbour_class, sorted by file name (last path part).
+	std::array<std::vector<std::pair<std::string, Candidate>>, kNeighbourClasses> classes;
+};
 
 const char *look_tier_name(LookTier p_tier) {
 	switch (p_tier) {
@@ -278,8 +349,7 @@ std::unique_ptr<LookResolver> LookResolver::open(const core::LevelMount &p_mount
 	std::sort(out->texture_names_.begin(), out->texture_names_.end());
 	out->texture_names_.erase(std::unique(out->texture_names_.begin(), out->texture_names_.end()), out->texture_names_.end());
 	std::sort(databases.begin(), databases.end());
-	ShaderDatabase merged;
-	std::vector<uint32_t> seen;
+	std::vector<std::vector<SurfaceShader>> paths;
 	for (const std::string &name : databases) {
 		core::Result<std::pair<core::ResInfo, std::vector<uint8_t>>> res = p_mount.read_res(name);
 		if (!res) {
@@ -298,20 +368,17 @@ std::unique_ptr<LookResolver> LookResolver::open(const core::LevelMount &p_mount
 			continue;
 		}
 		// The first render path, as IW4L reads it; a shader's first database wins.
-		for (SurfaceShader &s : parsed->front().shaders) {
-			if (std::find(seen.begin(), seen.end(), s.name_hash) != seen.end()) {
-				continue;
-			}
-			seen.push_back(s.name_hash);
-			merged.shaders.push_back(std::move(s));
-		}
-		std::sort(seen.begin(), seen.end());
+		paths.push_back(std::move(parsed->front().shaders));
 	}
+	ShaderDatabase merged = merge_first_wins(std::move(paths));
 	out->stats_.shaders = merged.shaders.size();
 	out->shaders_ = ShaderLookup(std::move(merged));
 	out->stats_.seconds_database = std::chrono::duration<double>(Clock::now() - start).count();
 	return out;
 }
+
+LookResolver::LookResolver() = default;
+LookResolver::~LookResolver() = default;
 
 LookResolver::LookResolver(ShaderLookup p_shaders, std::map<std::string, HeaderInfo> p_headers, std::vector<std::string> p_texture_names) :
 		shaders_(std::move(p_shaders)), texture_names_(std::move(p_texture_names)) {
@@ -353,6 +420,83 @@ const std::vector<std::string> &LookResolver::folder(const std::string &p_folder
 	return found == folders_.end() ? kNone : found->second;
 }
 
+const LookResolver::GraphInfo &LookResolver::graph_info(const SurfaceShader &p_shader) {
+	const auto found = graphs_.find(&p_shader);
+	if (found != graphs_.end()) {
+		return *found->second;
+	}
+	auto info = std::make_unique<GraphInfo>();
+	const SurfaceShader &s = p_shader;
+	const auto hdr = [this](const std::string &p_name) { return header(p_name); };
+	info->parameters.reserve(s.texture_parameters.size());
+	for (size_t i = 0; i < s.texture_parameters.size(); ++i) {
+		info->parameters.emplace_back(lower(s.texture_parameters[i].name), i);
+	}
+	std::stable_sort(info->parameters.begin(), info->parameters.end(), [](const auto &p_a, const auto &p_b) { return p_a.first < p_b.first; });
+	std::vector<std::string> streamed;
+	streamed.reserve(s.textures.size());
+	for (size_t order = 0; order < s.textures.size(); ++order) {
+		std::string name = lower(s.textures[order].name);
+		if (const std::optional<NameRole> role = graph_role(name)) {
+			std::optional<Candidate> c = make_candidate(hdr, name, role->role, Rank{ LookTier::Graph, role->quality, 0, false, order },
+					Sampling{ s.textures[order].coord_type, s.textures[order].vertex_usage, s.textures[order].factor }, std::string());
+			if (c && (c->role == kColor || c->role == kNormal)) {
+				info->candidates.push_back(std::move(*c));
+			}
+		}
+		streamed.push_back(std::move(name));
+	}
+	std::sort(streamed.begin(), streamed.end());
+	for (size_t order = 0; order < s.sampled_textures.size(); ++order) {
+		const std::string name = lower(s.sampled_textures[order]);
+		if (std::binary_search(streamed.begin(), streamed.end(), name)) {
+			continue;
+		}
+		if (const std::optional<NameRole> role = graph_role(name)) {
+			std::optional<Candidate> c = make_candidate(hdr, name, role->role, Rank{ LookTier::Graph, role->quality, 0, true, order }, Sampling{}, std::string());
+			if (c && (c->role == kColor || c->role == kNormal)) {
+				info->candidates.push_back(std::move(*c));
+			}
+		}
+	}
+	stats_.resolve_work += s.texture_parameters.size() + s.textures.size() + s.sampled_textures.size() + s.solutions.size();
+	stats_.graph_candidates_max = std::max(stats_.graph_candidates_max, info->candidates.size());
+	if (info->candidates.size() > kLookMaxGraphCandidates) {
+		stats_.graph_candidates_dropped += info->candidates.size() - kLookMaxGraphCandidates;
+		info->candidates.resize(kLookMaxGraphCandidates);
+	}
+	info->double_sided = s.double_sided();
+	return *graphs_.emplace(&p_shader, std::move(info)).first->second;
+}
+
+const LookResolver::FolderIndex &LookResolver::folder_index(const std::string &p_folder) {
+	const auto found = folder_indices_.find(p_folder);
+	if (found != folder_indices_.end()) {
+		return *found->second;
+	}
+	auto index = std::make_unique<FolderIndex>();
+	const auto hdr = [this](const std::string &p_name) { return header(p_name); };
+	const std::vector<std::string> &names = folder(p_folder);
+	for (const std::string &name : names) {
+		const std::optional<NameRole> role = suffix_role(name);
+		if (!role || role->quality != 0) {
+			continue;
+		}
+		std::optional<Candidate> c = make_candidate(hdr, name, role->role, Rank{ LookTier::Neighbour, 0, 0, false, 0 }, Sampling{}, std::string());
+		if (!c) {
+			continue;
+		}
+		if (const std::optional<size_t> k = neighbour_class(*c)) {
+			index->classes[*k].emplace_back(std::string(last_part(c->texture.name)), std::move(*c));
+		}
+	}
+	for (auto &list : index->classes) {
+		std::stable_sort(list.begin(), list.end(), [](const auto &p_a, const auto &p_b) { return p_a.first < p_b.first; });
+	}
+	stats_.resolve_work += names.size();
+	return *folder_indices_.emplace(p_folder, std::move(index)).first->second;
+}
+
 LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view p_mesh) {
 	const Clock::time_point start = Clock::now();
 	LookMaterial out;
@@ -383,42 +527,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	const std::string shader_name = shader_names.empty() ? std::string() : shader_names.front();
 
 	std::vector<Candidate> candidates;
-	const auto candidate = [&](const std::string &p_name, uint8_t p_role, Rank p_rank, Sampling p_sampling, const std::string &p_parameter) {
-		LookTexture t;
-		float factor = p_sampling.factor;
-		if (p_sampling.coord_type == kCoordWorld) {
-			t.channel = kLookUvProjected;
-		} else if (p_sampling.usage == kUsageTexCoord0) {
-			t.channel = kLookUv0;
-		} else if (p_sampling.usage == kUsageTexCoord1) {
-			t.channel = kLookUv1;
-		} else if (p_sampling.usage == kUsageTexCoord2) {
-			t.channel = kLookUvOverlay;
-			factor = 1.0f;
-		} else {
-			return;
-		}
-		t.name = lower(p_name);
-		if (t.name.empty() || placeholder_texture(t.name)) {
-			return;
-		}
-		const HeaderInfo *h = header(t.name);
-		if (h == nullptr || h->kind != core::res::TextureKind::Texture2D) {
-			return;
-		}
-		uint8_t role = p_role;
-		if ((role == kColor || role == kSpecular) && core::res::texture_format_is_normal_map(h->format)) {
-			role = kNormal;
-		}
-		if (role == kColor && has_word(last_part(t.name), kOverlayWords)) {
-			p_rank.quality = std::max<uint8_t>(p_rank.quality, 1);
-		}
-		t.scale = factor > 0.0f && factor != 1.0f && std::isfinite(factor) ? std::clamp(1.0f / factor, 1.0f / 256.0f, 64.0f) : 1.0f;
-		t.tier = p_rank.tier;
-		t.quality = p_rank.quality;
-		t.parameter = p_parameter;
-		candidates.push_back(Candidate{ role, p_rank, std::move(t) });
-	};
+	const auto hdr = [this](const std::string &p_name) { return header(p_name); };
+	const GraphInfo *shader_info = shader != nullptr ? &graph_info(*shader) : nullptr;
 
 	// 1. The slot's parameters.
 	for (const auto &[parameter, texture] : p_slot.textures) {
@@ -428,39 +538,28 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 			continue;
 		}
 		Sampling sampling;
-		if (shader != nullptr) {
-			if (const ShaderTextureParameter *known = shader->parameter(name)) {
-				sampling = Sampling{ known->coord_type, known->vertex_usage, known->factor };
+		if (shader_info != nullptr) {
+			const auto known = std::lower_bound(shader_info->parameters.begin(), shader_info->parameters.end(), name,
+					[](const std::pair<std::string, size_t> &p_e, const std::string &p_name) { return p_e.first < p_name; });
+			if (known != shader_info->parameters.end() && known->first == name) {
+				const ShaderTextureParameter &p = shader->texture_parameters[known->second];
+				sampling = Sampling{ p.coord_type, p.vertex_usage, p.factor };
 			}
 		}
-		candidate(texture, role->first, Rank{ LookTier::Parameter, 0, 0, false, role->second }, sampling, parameter);
+		if (std::optional<Candidate> c = make_candidate(hdr, texture, role->first, Rank{ LookTier::Parameter, 0, 0, false, role->second }, sampling, parameter)) {
+			candidates.push_back(std::move(*c));
+		}
+		++stats_.resolve_work;
 	}
-	// 2. The graphs' constants.
+	// 2. The graphs' constants (built once per graph).
 	for (size_t g = 0; g < graphs.size(); ++g) {
 		if (graphs[g] == nullptr) {
 			continue;
 		}
-		const SurfaceShader &s = *graphs[g];
-		for (size_t order = 0; order < s.textures.size(); ++order) {
-			const std::string name = lower(s.textures[order].name);
-			const std::optional<NameRole> role = graph_role(name);
-			if (!role) {
-				continue;
-			}
-			candidate(name, role->role, Rank{ LookTier::Graph, role->quality, g, false, order },
-					Sampling{ s.textures[order].coord_type, s.textures[order].vertex_usage, s.textures[order].factor }, "");
-		}
-		for (size_t order = 0; order < s.sampled_textures.size(); ++order) {
-			const std::string name = lower(s.sampled_textures[order]);
-			const bool streamed = std::any_of(s.textures.begin(), s.textures.end(), [&](const ShaderTexture &t) { return lower(t.name) == name; });
-			if (streamed) {
-				continue;
-			}
-			const std::optional<NameRole> role = graph_role(name);
-			if (!role) {
-				continue;
-			}
-			candidate(name, role->role, Rank{ LookTier::Graph, role->quality, g, true, order }, Sampling{}, "");
+		for (const Candidate &c : graph_info(*graphs[g]).candidates) {
+			candidates.push_back(c);
+			candidates.back().rank.graph = g;
+			++stats_.resolve_work;
 		}
 	}
 	// 3. Neighbours, for a shader the database lacks and no colour so far.
@@ -473,22 +572,31 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		folders.push_back(parent(lower(p_mesh)));
 		folders.erase(std::unique(folders.begin(), folders.end()), folders.end());
 		const std::string mesh = lower(p_mesh); // owns the bytes last_part views (a temporary here dangled)
-		const std::string stem_copy(last_part(mesh));
+		const std::string_view stem = last_part(mesh);
+		// Per folder and class, the candidate sharing the longest prefix with the mesh's file name, first by name
+		// among equals: the one the full ranking would pick from that class (the class fixes every other rank key).
+		const auto before = [](const std::pair<std::string, Candidate> &p_e, std::string_view p_s) { return std::string_view(p_e.first) < p_s; };
 		for (size_t tier = 0; tier < folders.size(); ++tier) {
 			if (folders[tier].empty()) {
 				continue;
 			}
-			for (const std::string &name : folder(folders[tier])) {
-				const std::optional<NameRole> role = suffix_role(name);
-				if (!role || role->quality != 0) {
+			for (const auto &list : folder_index(folders[tier]).classes) {
+				if (list.empty()) {
 					continue;
 				}
-				const std::string_view part = last_part(name);
+				const auto at = std::lower_bound(list.begin(), list.end(), stem, before);
 				size_t shared = 0;
-				while (shared < part.size() && shared < stem_copy.size() && part[shared] == stem_copy[shared]) {
-					++shared;
+				if (at != list.end()) {
+					shared = shared_prefix(at->first, stem);
 				}
-				candidate(name, role->role, Rank{ LookTier::Neighbour, 0, tier, false, SIZE_MAX - shared }, Sampling{}, "");
+				if (at != list.begin()) {
+					shared = std::max(shared, shared_prefix(std::prev(at)->first, stem));
+				}
+				const auto first = shared == 0 ? list.begin() : std::lower_bound(list.begin(), list.end(), stem.substr(0, shared), before);
+				candidates.push_back(first->second);
+				candidates.back().rank.graph = tier;
+				candidates.back().rank.order = SIZE_MAX - shared;
+				++stats_.resolve_work;
 			}
 		}
 	}
@@ -503,8 +611,15 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	if (const Candidate *chosen = best(kColor, candidates)) {
 		color = chosen->texture;
 		if (chosen->rank.tier == LookTier::Graph && chosen->texture.scale == 1.0f) {
+			std::vector<std::pair<uint8_t, float>> normal_uvs; // sorted: a lookup per layer, not a scan of the candidates
+			for (const Candidate &c : candidates) {
+				if (c.role == kNormal) {
+					normal_uvs.emplace_back(c.texture.channel, c.texture.scale);
+				}
+			}
+			std::sort(normal_uvs.begin(), normal_uvs.end());
 			const auto shaded = [&](const LookTexture &p_t) {
-				return std::any_of(candidates.begin(), candidates.end(), [&](const Candidate &c) { return c.role == kNormal && same_uv(c.texture, p_t); });
+				return std::binary_search(normal_uvs.begin(), normal_uvs.end(), std::pair<uint8_t, float>(p_t.channel, p_t.scale));
 			};
 			const bool masked = std::any_of(candidates.begin(), candidates.end(),
 					[](const Candidate &c) { return c.role == kColor && c.rank.tier == LookTier::Graph && c.rank.quality == 1; });
@@ -570,7 +685,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 			}
 		}
 	}
-	out.double_sided = shader != nullptr ? shader->double_sided() : foliage;
+	out.double_sided = shader_info != nullptr ? shader_info->double_sided : foliage;
 	// Glass: a glass / window shader with no colour, or a transparent one whose colour map has no alpha. BF3 computes
 	// its opacity in the compiled pixel shader (OpacityMul, Fresnel), which the database does not expose: L1 keeps the
 	// colour map as the tint and draws it at a fixed opacity (level_upload.cpp kGlassOpacity).

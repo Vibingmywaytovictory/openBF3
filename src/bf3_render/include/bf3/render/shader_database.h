@@ -115,6 +115,10 @@ inline constexpr uint64_t kShaderWorkBase = uint64_t(1) << 20;
 // Every render path of a res payload, in stored order. p_work (optional) receives the work units spent.
 core::Result<std::vector<ShaderDatabase>> parse_shader_database(std::span<const uint8_t> p_res, uint64_t *r_work = nullptr);
 
+// One database of the shaders of several lists (each a res's first render path), in order, keeping the first shader
+// of each name hash. O(n log n) in the shader count (hostile databases may repeat a hash many times).
+ShaderDatabase merge_first_wins(std::vector<std::vector<SurfaceShader>> p_lists);
+
 // The surface shaders of the first render path, by name hash (the first entry of a hash wins).
 class ShaderLookup {
 public:

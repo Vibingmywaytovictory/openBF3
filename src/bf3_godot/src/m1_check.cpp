@@ -599,8 +599,9 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 					total_cpu_ms_ / double(total_frames_), total_gpu_ms_ / double(total_frames_), (unsigned long long)total_frames_, free_.size())));
 		}
 		if (median_views_ > 0) {
-			UtilityFunctions::print(to_godot(fmt("[look] frame time median: %.3f ms per frame (interval), GPU %.3f ms, mean of the per-view medians at %zu views",
-					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_)));
+			const Vector2 size = session_.get_viewport()->get_visible_rect().size;
+			UtilityFunctions::print(to_godot(fmt("[look] frame time median: %.3f ms per frame (interval), GPU %.3f ms, mean of the per-view medians at %zu views, viewport %dx%d",
+					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_, int(size.x), int(size.y))));
 		}
 	}
 	return next_ >= total;

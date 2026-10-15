@@ -1,5 +1,5 @@
 # ctest godot.l1_look (README "L1 look"): the frame-time A/B of the L1 look against the M1 look, and the before /
-# after screenshots. Runs the windowed M1 scene fullscreen (2560x1440 on the reference monitor) with vsync off,
+# after screenshots. Runs the windowed M1 scene fullscreen (the monitor's mode; a run whose viewport is not 2560x1440 fails) with vsync off,
 # alternating --look=m1 and --look=l1 for ROUNDS rounds (default 5), each run taking the same four free-camera
 # views (street at TDM spawn 13, station at TDM spawn 22, park, overview) after a 3 s settle, timing 300 frames at
 # each view (frame interval and the viewport's GPU render time) before its screenshot:
@@ -97,6 +97,13 @@ foreach(round RANGE 1 ${ROUNDS})
         endif()
         set(mean_ms "${CMAKE_MATCH_1}")
         set(gpu_ms "${CMAKE_MATCH_2}")
+        # The gate is defined at 1440p: --fullscreen takes the monitor's mode, so check it rather than assume it.
+        string(REGEX MATCH "mean of the per-view medians at [0-9]+ views, viewport ([0-9]+)x([0-9]+)" vp "${out}")
+        if(NOT vp OR NOT CMAKE_MATCH_1 STREQUAL "2560" OR NOT CMAKE_MATCH_2 STREQUAL "1440")
+            message("godot.l1_look: round ${round} ${look} rendered at '${CMAKE_MATCH_1}x${CMAKE_MATCH_2}', not 2560x1440 (the gate's resolution)")
+            set(failed TRUE)
+            continue()
+        endif()
         to_us("${mean_ms}" us)
         to_us("${gpu_ms}" gpu)
         list(APPEND ${look}_us ${us})

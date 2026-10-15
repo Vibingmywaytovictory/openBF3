@@ -203,6 +203,8 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 			mode.c_str(), seconds_load, m1->seconds, l1->seconds, ls.seconds_database, ls.seconds_resolve);
 	std::printf("shader databases %zu, surface shaders %zu, parse work %llu units; texture headers read %zu (%zu failed); mesh heads failed %zu\n",
 			ls.shader_databases, ls.shaders, (unsigned long long)ls.shader_work, ls.texture_headers, ls.texture_headers_failed, heads_failed);
+	std::printf("resolver work %llu units; graph colour/normal candidates: max %zu per graph (cap %zu), %zu dropped\n", (unsigned long long)ls.resolve_work,
+			ls.graph_candidates_max, render::kLookMaxGraphCandidates, ls.graph_candidates_dropped);
 	std::printf("plan M1: %zu materials, %zu textures; plan L1: %zu materials, %zu textures\n", m1->materials.size(), m1->textures.size(),
 			l1->materials.size(), l1->textures.size());
 	for (const auto &[item, error] : l1->failures) {

@@ -328,6 +328,97 @@ TEST_SUITE("render-look-unit") {
 		CHECK(!m.color);
 	}
 
+	// Hostile shape: one hash repeated across databases, and a graph naming tens of thousands of textures used by
+	// thousands of slots. Before the fix these were a linear scan per shader (O(n^2) in the shader count) and a scan
+	// of the streamed names per sampled name per slot (O(T x S x slots)); both would take minutes here.
+	TEST_CASE("render.look.unit: duplicate shaders and wide graphs stay near-linear") {
+		using F = res::TextureFormat;
+		std::vector<std::vector<SurfaceShader>> lists(2);
+		constexpr uint32_t kDistinct = 100000;
+		for (std::vector<SurfaceShader> &list : lists) {
+			list.reserve(kDistinct);
+			for (uint32_t i = 0; i < kDistinct; ++i) {
+				SurfaceShader s;
+				s.name_hash = i * 2654435761u;
+				s.flags = uint8_t(&list == &lists[0] ? 1 : 2);
+				list.push_back(std::move(s));
+			}
+		}
+		const auto t0 = std::chrono::steady_clock::now();
+		ShaderDatabase merged = merge_first_wins(std::move(lists));
+		CHECK(merged.shaders.size() == kDistinct);
+		CHECK(std::all_of(merged.shaders.begin(), merged.shaders.end(), [](const SurfaceShader &s) { return s.flags == 1; }));
+
+		constexpr size_t kWide = 20000;
+		const auto name = [](const char *p_prefix, size_t p_i, const char *p_suffix) {
+			char buf[64];
+			std::snprintf(buf, sizeof(buf), "levels/w/%s%05zu%s", p_prefix, p_i, p_suffix);
+			return std::string(buf);
+		};
+		std::map<std::string, LookResolver::HeaderInfo> headers;
+		std::vector<ShaderTexture> textures;
+		SurfaceShader wide = graph_shader("levels/w/wide", SurfaceShaderType::Opaque, {});
+		for (size_t i = 0; i < kWide; ++i) {
+			const bool normal = (i % 2) == 1;
+			const std::string n = name("t", i, normal ? "_n" : "_d");
+			wide.textures.push_back(ShaderTexture{ n, 1, kUsageTexCoord0, 1.0f });
+			headers[n] = { res::TextureKind::Texture2D, normal ? F::NormalDxn : F::Dxt1 };
+			// Half the sampled names repeat a streamed one (skipped), half are resident constants.
+			wide.sampled_textures.push_back((i % 2) == 0 ? n : name("r", i, "_d"));
+			headers[name("r", i, "_d")] = { res::TextureKind::Texture2D, F::Dxt1 };
+		}
+		ShaderDatabase db;
+		db.shaders.push_back(std::move(wide));
+		LookResolver resolver(ShaderLookup(std::move(db)), headers);
+		constexpr size_t kSlots = 2000;
+		MaterialSlot slot;
+		slot.shader = "levels/w/wide";
+		for (size_t i = 0; i < kSlots; ++i) {
+			slot.textures = { { "Diffuse", name("p", i, "_x") } }; // a distinct slot each time; its texture has no header
+			const LookMaterial m = resolver.resolve(slot, "levels/w/mesh");
+			REQUIRE(m.color);
+			CHECK(m.color->name == "levels/w/t00000_d");
+			REQUIRE(m.normal);
+			CHECK(m.normal->name == "levels/w/t00001_n");
+		}
+		const LookStats st = resolver.stats();
+		CHECK(st.graph_candidates_max == kWide + kWide / 2);
+		CHECK(st.graph_candidates_dropped == st.graph_candidates_max - kLookMaxGraphCandidates);
+		// Built once (parameters + textures + sampled), then per slot its parameter and the capped candidates.
+		CHECK(st.resolve_work <= 3 * kWide + kSlots * (1 + kLookMaxGraphCandidates));
+		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		std::printf("render.look.unit: %u duplicate-hash shaders merged and %zu slots of a %zu-texture graph resolved in %.3f s\n", kDistinct * 2, kSlots,
+				kWide, seconds);
+	}
+
+	TEST_CASE("render.look.unit: neighbour tier picks the longest shared file-name prefix") {
+		using F = res::TextureFormat;
+		std::map<std::string, LookResolver::HeaderInfo> headers;
+		const std::vector<std::string> names = { "levels/n/barrel_d", "levels/n/crate_01_d", "levels/n/crate_01_n", "levels/n/crate_02_d", "levels/n/crate_d",
+			"levels/n/crate_mask", "levels/m/crate_01_d" };
+		for (const std::string &n : names) {
+			headers[n] = { res::TextureKind::Texture2D, n.ends_with("_n") ? F::NormalDxn : F::Dxt1 };
+		}
+		LookResolver resolver(ShaderLookup(ShaderDatabase{}), headers, names);
+		MaterialSlot slot;
+		slot.shader = "levels/n/unknown_shader";
+		LookMaterial m = resolver.resolve(slot, "levels/n/crate_01_mesh");
+		REQUIRE(m.color);
+		CHECK(m.color->tier == LookTier::Neighbour);
+		CHECK(m.color->name == "levels/n/crate_01_d");
+		REQUIRE(m.normal);
+		CHECK(m.normal->name == "levels/n/crate_01_n");
+		m = resolver.resolve(slot, "levels/n/crate_02");
+		REQUIRE(m.color);
+		CHECK(m.color->name == "levels/n/crate_02_d");
+		m = resolver.resolve(slot, "levels/n/crate_09");
+		REQUIRE(m.color);
+		CHECK(m.color->name == "levels/n/crate_01_d"); // "crate_0" shared by both: the first by name
+		m = resolver.resolve(slot, "levels/n/zzz");
+		REQUIRE(m.color);
+		CHECK(m.color->name == "levels/n/barrel_d"); // nothing shared: the first by name
+	}
+
 	TEST_CASE("render.look.unit: look_cubic and fog_fit") {
 		CHECK(near(look_cubic({ 1.0f, 2.0f, 3.0f, 4.0f }, 0.5f), 0.125f + 0.5f + 1.5f + 4.0f));
 		float density = -1.0f, curve = -1.0f, end = -1.0f;

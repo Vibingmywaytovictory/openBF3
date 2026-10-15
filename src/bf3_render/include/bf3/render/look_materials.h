@@ -21,6 +21,12 @@
 // does, else it is the best on a mesh UV set (each texture is sampled with its own UV set and tiling).
 // Blend and sides come from the shader database (surface type, double-sided solutions), else from the shader name
 // as in M1.
+//
+// Work (hostile shader databases and texture lists): each graph's candidates (its constants' roles, the streamed /
+// resident split, its parameter index) are built once per graph in O(n log n) and capped at kLookMaxGraphCandidates
+// colour and normal candidates; each folder's neighbour candidates are built once per folder and kept sorted by file
+// name, so a slot finds its longest shared prefix by binary search. A slot's resolution is then O(its parameters x
+// log + the cap + folders x log), never the product of a graph's or folder's size and the slot count.
 
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/result.h"
@@ -40,6 +46,10 @@ class LevelMount;
 }
 
 namespace bf3::render {
+
+// Colour and normal candidates kept per shader graph (authored order: streamed constants, then resident ones). Retail
+// Metro's widest graph has far fewer (bf3dump looks prints the maximum); more are dropped and counted.
+inline constexpr size_t kLookMaxGraphCandidates = 64;
 
 enum class LookTier : uint8_t {
 	Parameter,
@@ -87,6 +97,9 @@ struct LookStats {
 	uint64_t shader_work = 0; // parse_shader_database work units
 	size_t texture_headers = 0; // DxTexture headers read for candidates
 	size_t texture_headers_failed = 0;
+	size_t graph_candidates_max = 0; // the most colour and normal candidates one graph gave (before the cap)
+	size_t graph_candidates_dropped = 0; // candidates past kLookMaxGraphCandidates, summed over graphs
+	uint64_t resolve_work = 0; // entries visited building graph and folder indices and resolving slots
 	double seconds_database = 0.0;
 	double seconds_resolve = 0.0;
 };
@@ -103,6 +116,7 @@ public:
 		core::res::TextureFormat format = core::res::TextureFormat::Dxt1;
 	};
 	LookResolver(ShaderLookup p_shaders, std::map<std::string, HeaderInfo> p_headers, std::vector<std::string> p_texture_names = {});
+	~LookResolver();
 
 	LookMaterial resolve(const MaterialSlot &p_slot, std::string_view p_mesh);
 
@@ -110,10 +124,15 @@ public:
 	const std::vector<std::pair<std::string, std::string>> &failures() const { return failures_; }
 	LookStats stats() const { return stats_; }
 
+	struct GraphInfo; // look_materials.cpp
+	struct FolderIndex;
+
 private:
-	LookResolver() = default;
+	LookResolver();
 	const HeaderInfo *header(const std::string &p_name);
 	const std::vector<std::string> &folder(const std::string &p_folder);
+	const GraphInfo &graph_info(const SurfaceShader &p_shader);
+	const FolderIndex &folder_index(const std::string &p_folder);
 
 	const core::LevelMount *mount_ = nullptr;
 	ShaderLookup shaders_;
@@ -121,6 +140,8 @@ private:
 	std::vector<std::string> texture_names_; // every DxTexture res of the mount, lowercase, sorted
 	std::map<std::string, std::vector<std::string>> folders_;
 	bool folders_built_ = false;
+	std::map<const SurfaceShader *, std::unique_ptr<GraphInfo>> graphs_;
+	std::map<std::string, std::unique_ptr<FolderIndex>> folder_indices_;
 	std::vector<std::pair<std::string, std::string>> failures_;
 	LookStats stats_;
 };
