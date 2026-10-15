@@ -134,6 +134,7 @@ void Bf3Crowd::_notification(int p_what) {
 
 void Bf3Crowd::parse_args() {
 	check_ = has_user_arg("s3-check");
+	diag_ = has_user_arg("s3-diag");
 	walkers_zero_ = has_user_arg("walkers") && user_arg_value("walkers") == "0";
 	no_hud_ = has_user_arg("no-hud");
 	no_cache_ = has_user_arg("no-cache");
@@ -557,6 +558,9 @@ void Bf3Crowd::_process(double p_delta) {
 				plan_.push_back(RunSpec{ "R2", SkinBackend::RsSkeleton, false, false, false, gate::kR2Windows, false });
 				plan_.push_back(RunSpec{ "R3 lod=on spread", SkinBackend::RsSkeleton, true, true, false, 0, false });
 				plan_.push_back(RunSpec{ "R4 vsync=on", SkinBackend::RsSkeleton, false, false, true, 0, false });
+				if (diag_) {
+					plan_.push_back(RunSpec{ "Rdiag roots-only", SkinBackend::RsSkeleton, false, false, false, gate::kBenchWindows * 2, false, false });
+				}
 			}
 			plan_index_ = 0;
 			if (plan_.empty()) {
@@ -594,6 +598,7 @@ void Bf3Crowd::begin_run(const RunSpec &p_spec) {
 		return;
 	}
 	lod_spread_ = spec.lod_spread;
+	uploader_->set_palette_upload(spec.palettes);
 	DisplayServer::get_singleton()->window_set_vsync_mode(spec.vsync ? DisplayServer::VSYNC_ENABLED : DisplayServer::VSYNC_DISABLED);
 	Engine::get_singleton()->set_max_fps(0);
 	frozen_ = false;
@@ -712,6 +717,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 	shot_index_ = 0;
 	shot_wait_ = -1;
 	shots_started_ = true;
+	uploader_->set_palette_upload(true);
 	if (eval_ && lanes_) {
 		eval_->wait_and_publish(*lanes_);
 	}
@@ -947,9 +953,10 @@ void Bf3Crowd::report_and_finish() {
 			const double g1b_v = s1.step_p50_ms + std::max(0.0, h.hidden_p50_ms);
 			timing_ok &= row("G1b", g1b_v <= gate::kMainThreadMs,
 					fmt("p50(G1a) %.3f + max(0, hidden %.3f) = %.3f ms (<= 2.0); R2 step cpu p50 %.3f ms; other cpu animated %.3f / frozen %.3f ms; fps %.0f / "
-						"%.0f; render cpu %.2f / %.2f ms",
+						"%.0f; render cpu %.2f / %.2f ms; frame p50 %.2f / %.2f, p99 %.2f / %.2f ms (animated / frozen)",
 							s1.step_p50_ms, h.hidden_p50_ms, g1b_v, h.animated.step_cpu_p50_ms, h.animated.other_cpu_p50_ms, h.frozen.other_cpu_p50_ms, h.animated.fps,
-							h.frozen.fps, h.animated.render_cpu_p50_ms, h.frozen.render_cpu_p50_ms),
+							h.frozen.fps, h.animated.render_cpu_p50_ms, h.frozen.render_cpu_p50_ms, h.animated.frame_p50_ms, h.frozen.frame_p50_ms,
+							h.animated.frame_p99_ms, h.frozen.frame_p99_ms),
 					valid);
 		} else {
 			timing_ok &= row("G1b", false, "not measured", valid);
@@ -975,6 +982,13 @@ void Bf3Crowd::report_and_finish() {
 			}
 			report_.push_back(fmt("%-10s %-7s step p50 %.3f p99 %.3f ms (R1 %.3f / %.3f); job p50 %.3f ms (R1 %.3f); evaluated %.1f/frame; per-soldier updates/s by tier:%s",
 					"R3", "report", s3.step_p50_ms, s3.step_p99_ms, s1.step_p50_ms, s1.step_p99_ms, s3.job_p50_ms, s1.job_p50_ms, s3.evaluated_mean, tiers.c_str()));
+		}
+		for (const RunState &r : done_runs_) {
+			if (r.spec.label.rfind("Rdiag", 0) == 0) {
+				const HiddenCostStats d = hidden_cost(r);
+				report_.push_back(fmt("%-10s %-7s roots only (no palettes): hidden %.3f ms (R2 with palettes: see G1b); render cpu %.2f / %.2f ms; fps %.0f / %.0f", "diag",
+						"report", d.hidden_p50_ms, d.animated.render_cpu_p50_ms, d.frozen.render_cpu_p50_ms, d.animated.fps, d.frozen.fps));
+			}
 		}
 		report_.push_back(fmt("%-10s %-7s skeleton3d %.3f ms, rs %.3f ms -> %s", "bench", "report", bench_metric_[0], bench_metric_[1], skin_backend_name(winner_)));
 		report_.push_back(fmt("%-10s %-7s R1 job p50 %.3f p99 %.3f ms, blocked p99 %.3f ms, %.1f evaluated/frame, %u Godot calls/frame (p50)", "pose", "report",

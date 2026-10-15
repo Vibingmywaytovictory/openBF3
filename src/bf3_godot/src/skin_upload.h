@@ -73,6 +73,12 @@ public:
 	virtual void set_soldier_visible(uint32_t p_soldier, bool p_visible) = 0;
 	// Frees every RID / node it created. Main thread.
 	virtual void clear() = 0;
+	// Diagnostic (--s3-diag, never in a gated run): false makes upload() push the roots only, so a run can split
+	// Godot's hidden cost into the instance-transform part and the skeleton part.
+	void set_palette_upload(bool p_on) { palette_upload_ = p_on; }
+
+protected:
+	bool palette_upload_ = true;
 };
 
 // The backend's uploader, or null when it is not built in (C until s3.md §7.3 asks for it). p_parent receives the

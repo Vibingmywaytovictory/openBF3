@@ -47,6 +47,8 @@
 //                               origin; G0 validity rows; backend bench; runs R1-R4; G3 shots and metrics; prints a
 //                               table and "S3 CHECK: PASS|FAIL"; exits 0 / 1, or 77 when the primary screen is not
 //                               2560x1440 (the wrapper also skips on no window / device and on "no usable install")
+//   --s3-diag                   with --s3-check: one more windowed run after R4 that uploads roots only (splits
+//                               Δhidden into instance-transform and skeleton parts; reported, not gated)
 //   --s3-seconds=<s>            length of each measured run (default and minimum for the gate: 30)
 //   --s3-shot-dir=<dir>         G3 shots (default <repo>/b/shots/s3; refused inside the install). Named apart from
 //                               the session's --shot-dir (its --shot-spawns shots), so the two never cross.
@@ -140,6 +142,7 @@ private:
 		bool vsync = false;
 		uint32_t windows = 0; // 0: continuous; else alternating animated / frozen windows of kWindowSeconds
 		bool overview = false; // save s3_overview.png after the warm-up
+		bool palettes = true; // false: the --s3-diag run that uploads roots only
 	};
 	struct Sample {
 		float step_ms = 0, step_cpu_ms = 0, other_cpu_ms = 0, frame_ms = 0, render_cpu_ms = 0, render_gpu_ms = 0, job_ms = 0, blocked_ms = 0;
@@ -216,6 +219,7 @@ private:
 	bool lod_spread_ = false; // R3: stage_input reports kLodRowDistance
 	bool frozen_ = false; // step not called this frame
 	bool check_ = false;
+	bool diag_ = false; // --s3-diag: append the roots-only hidden-cost run (reported, never gated)
 	bool walkers_zero_ = false; // --walkers=0 given (the session's arg)
 	bool no_hud_ = false; // --no-hud given (the session's arg)
 	double run_seconds_ = 30.0;

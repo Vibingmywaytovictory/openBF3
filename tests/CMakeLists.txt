@@ -367,3 +367,10 @@ set_tests_properties(anim.s3.unit anim.s3 render.s3 PROPERTIES TIMEOUT 600)
 if(OPENBF3_ASAN)
     set_tests_properties(anim.s3.unit anim.s3 render.s3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s3_cl_dir}")
 endif()
+# S3 crowd (docs/design/s3.md §1, §12): godot.s3_crowd runs the windowed --s3-check of res://scenes/s3_crowd.tscn (G0 rows,
+# G1a / G1b, G2 vsync off and on, G3 shots, install unchanged) after a probe run, with one repeat when only timing gates
+# fail. Exits 77 = skipped without OPENBF3_GODOT, a window, an install or a 2560x1440 primary screen.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.s3_crowd COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_s3_crowd.cmake)
+    set_tests_properties(godot.s3_crowd PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 2000 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()

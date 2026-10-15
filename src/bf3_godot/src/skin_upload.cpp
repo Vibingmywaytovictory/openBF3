@@ -183,7 +183,7 @@ public:
 			Skeleton3D *sk = skeletons_[i];
 			sk->set_transform(p_roots[i]);
 			++r_stats.calls;
-			if (!p_eval.changed(uint32_t(i))) {
+			if (!palette_upload_ || !p_eval.changed(uint32_t(i))) {
 				continue;
 			}
 			const std::span<const bf3::anim::Xform> model = p_eval.model(uint32_t(i));
@@ -283,7 +283,7 @@ public:
 			const Soldier &s = soldiers_[i];
 			rs->instance_set_transform(s.instance, p_roots[i]);
 			++r_stats.calls;
-			if (!p_eval.changed(uint32_t(i))) {
+			if (!palette_upload_ || !p_eval.changed(uint32_t(i))) {
 				continue;
 			}
 			const std::span<const bf3::anim::Mat34> palette = p_eval.palette(uint32_t(i));
