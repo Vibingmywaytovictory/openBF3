@@ -472,8 +472,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		}
 		folders.push_back(parent(lower(p_mesh)));
 		folders.erase(std::unique(folders.begin(), folders.end()), folders.end());
-		const std::string_view stem = last_part(lower(p_mesh));
-		const std::string stem_copy(stem);
+		const std::string mesh = lower(p_mesh); // owns the bytes last_part views (a temporary here dangled)
+		const std::string stem_copy(last_part(mesh));
 		for (size_t tier = 0; tier < folders.size(); ++tier) {
 			if (folders[tier].empty()) {
 				continue;

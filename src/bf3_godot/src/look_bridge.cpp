@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture3d.hpp>
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/sky.hpp>
@@ -130,6 +131,9 @@ void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelSceneP
 	environment_->set_glow_blend_mode(Environment::GLOW_BLEND_MODE_ADDITIVE);
 	environment_->set_glow_hdr_bleed_threshold(0.0f);
 	environment_->set_glow_bloom(0.0f);
+	// Linear glow upscale: the bicubic default cost 0.2-0.35 ms of GPU time at 2560x1440 for a bloom of about 0.07
+	// (godot.l1_look). Process-wide, which only the L1 look uses.
+	RenderingServer::get_singleton()->environment_glow_set_use_bicubic_upscale(false);
 	environment_->set_fog_mode(Environment::FOG_MODE_DEPTH);
 	environment_->set_fog_sky_affect(0.0f);
 	environment_->set_fog_aerial_perspective(0.0f);
@@ -191,20 +195,28 @@ void LookBridge::update(const LevelUpload &p_upload, const Vector3 &p_camera) {
 }
 
 void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
-	const std::optional<render::LookFrame> &a = applied_;
-	// Sun (cheap: every frame).
-	Vector3 d(p_f.sun_direction[0], p_f.sun_direction[1], p_f.sun_direction[2]);
-	d = d.length_squared() > 1e-8f ? d.normalized() : Vector3(0, -1, 0);
-	const Vector3 up = std::fabs(d.y) > 0.99f ? Vector3(0, 0, 1) : Vector3(0, 1, 0);
-	sun_->set_transform(Transform3D(Basis::looking_at(d, up), Vector3()));
-	sun_->set_color(color3(p_f.sun_color));
-	sun_->set_param(Light3D::PARAM_ENERGY, p_f.sun_energy);
-	sun_->set_visible(p_f.sun_energy > 0.0f);
-
-	// Sky material: only on a real change (each change re-renders the radiance map).
-	if (p_force || !a || moved3(a->ambient_up, p_f.ambient_up) || moved3(a->ambient_horizon, p_f.ambient_horizon) ||
-			moved3(a->ambient_down, p_f.ambient_down) || moved(a->sky_brightness, p_f.sky_brightness) || moved3(a->horizon, p_f.horizon) ||
-			a->sky_rotation != p_f.sky_rotation || a->uv_min_y != p_f.uv_min_y || a->uv_max_y != p_f.uv_max_y) {
+	// Every setter below reaches the RenderingServer, so each group is re-sent only when its values move by more than
+	// 1 % (moved()) from what that group last sent, or on p_force: a camera standing in one state sends nothing, and a
+	// slow drift still crosses 1 % and is sent. sent_ holds, per group, the values last sent.
+	const bool first = p_force || !sent_;
+	render::LookFrame &s = sent_ ? *sent_ : sent_.emplace(p_f);
+	// Sun.
+	if (first || moved3(s.sun_direction, p_f.sun_direction) || moved3(s.sun_color, p_f.sun_color) || moved(s.sun_energy, p_f.sun_energy)) {
+		Vector3 d(p_f.sun_direction[0], p_f.sun_direction[1], p_f.sun_direction[2]);
+		d = d.length_squared() > 1e-8f ? d.normalized() : Vector3(0, -1, 0);
+		const Vector3 up = std::fabs(d.y) > 0.99f ? Vector3(0, 0, 1) : Vector3(0, 1, 0);
+		sun_->set_transform(Transform3D(Basis::looking_at(d, up), Vector3()));
+		sun_->set_color(color3(p_f.sun_color));
+		sun_->set_param(Light3D::PARAM_ENERGY, p_f.sun_energy);
+		sun_->set_visible(p_f.sun_energy > 0.0f);
+		s.sun_direction = p_f.sun_direction;
+		s.sun_color = p_f.sun_color;
+		s.sun_energy = p_f.sun_energy;
+	}
+	// Sky material (each change re-renders the radiance map).
+	if (first || moved3(s.ambient_up, p_f.ambient_up) || moved3(s.ambient_horizon, p_f.ambient_horizon) || moved3(s.ambient_down, p_f.ambient_down) ||
+			moved(s.sky_brightness, p_f.sky_brightness) || moved3(s.horizon, p_f.horizon) || s.sky_rotation != p_f.sky_rotation ||
+			s.uv_min_y != p_f.uv_min_y || s.uv_max_y != p_f.uv_max_y) {
 		sky_material_->set_shader_parameter("ambient_up", color3(p_f.ambient_up));
 		sky_material_->set_shader_parameter("ambient_horizon", color3(p_f.ambient_horizon));
 		sky_material_->set_shader_parameter("ambient_down", color3(p_f.ambient_down));
@@ -213,45 +225,73 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		sky_material_->set_shader_parameter("uv_min_y", p_f.uv_min_y);
 		sky_material_->set_shader_parameter("uv_max_y", p_f.uv_max_y);
 		sky_material_->set_shader_parameter("horizon", color3(p_f.horizon));
+		s.ambient_up = p_f.ambient_up;
+		s.ambient_horizon = p_f.ambient_horizon;
+		s.ambient_down = p_f.ambient_down;
+		s.sky_brightness = p_f.sky_brightness;
+		s.sky_rotation = p_f.sky_rotation;
+		s.uv_min_y = p_f.uv_min_y;
+		s.uv_max_y = p_f.uv_max_y;
+		s.horizon = p_f.horizon;
 	}
 	// Fog.
-	environment_->set_fog_enabled(p_f.fog && !debug_off("fog"));
-	if (p_f.fog) {
-		const float level = peak3(p_f.fog_color);
-		environment_->set_fog_light_color(level > 1e-6f ? Color(p_f.fog_color[0] / level, p_f.fog_color[1] / level, p_f.fog_color[2] / level) : Color(0, 0, 0));
-		environment_->set_fog_light_energy(level);
-		environment_->set_fog_density(p_f.fog_density);
-		environment_->set_fog_depth_curve(p_f.fog_curve);
-		environment_->set_fog_depth_begin(p_f.fog_begin);
-		environment_->set_fog_depth_end(std::fmax(p_f.fog_end, p_f.fog_begin + 1.0f));
+	if (first || s.fog != p_f.fog || moved(s.fog_begin, p_f.fog_begin) || moved(s.fog_end, p_f.fog_end) || moved(s.fog_density, p_f.fog_density) ||
+			moved(s.fog_curve, p_f.fog_curve) || moved3(s.fog_color, p_f.fog_color)) {
+		environment_->set_fog_enabled(p_f.fog && !debug_off("fog"));
+		if (p_f.fog) {
+			const float level = peak3(p_f.fog_color);
+			environment_->set_fog_light_color(level > 1e-6f ? Color(p_f.fog_color[0] / level, p_f.fog_color[1] / level, p_f.fog_color[2] / level) : Color(0, 0, 0));
+			environment_->set_fog_light_energy(level);
+			environment_->set_fog_density(p_f.fog_density);
+			environment_->set_fog_depth_curve(p_f.fog_curve);
+			environment_->set_fog_depth_begin(p_f.fog_begin);
+			environment_->set_fog_depth_end(std::fmax(p_f.fog_end, p_f.fog_begin + 1.0f));
+		}
+		s.fog = p_f.fog;
+		s.fog_begin = p_f.fog_begin;
+		s.fog_end = p_f.fog_end;
+		s.fog_density = p_f.fog_density;
+		s.fog_curve = p_f.fog_curve;
+		s.fog_color = p_f.fog_color;
 	}
 	// Exposure: BF3 exposes each frame to MiddleGray / average luminance within Min..MaxExposure, i.e. it clamps the
 	// average luminance to MiddleGray / MaxExposure .. MiddleGray / MinExposure. Godot's auto exposure does the same
 	// with scale = MiddleGray and its luminance clamp in sensitivity units (kLuminancePerIso). --look-off=exposure
 	// draws the static estimate (LookFrame::exposure) instead; --look-exposure=<e> a fixed exposure (diagnosis).
-	const std::string fixed = user_arg_value("look-exposure");
-	const bool automatic = fixed.empty() && !debug_off("exposure");
-	attributes_->set_auto_exposure_enabled(automatic);
-	if (automatic) {
-		environment_->set_tonemap_exposure(1.0f);
-		attributes_->set_auto_exposure_scale(p_f.middle_gray);
-		attributes_->set_auto_exposure_min_sensitivity(p_f.middle_gray / std::fmax(p_f.max_exposure, 1e-3f) / kLuminancePerIso);
-		attributes_->set_auto_exposure_max_sensitivity(p_f.middle_gray / std::fmax(p_f.min_exposure, 1e-3f) / kLuminancePerIso);
-		attributes_->set_auto_exposure_speed(p_f.exposure_speed);
-	} else {
-		environment_->set_tonemap_exposure(fixed.empty() ? p_f.exposure : float(std::atof(fixed.c_str())));
+	if (first || moved(s.middle_gray, p_f.middle_gray) || moved(s.min_exposure, p_f.min_exposure) || moved(s.max_exposure, p_f.max_exposure) ||
+			moved(s.exposure_speed, p_f.exposure_speed) || moved(s.exposure, p_f.exposure)) {
+		static const std::string fixed = user_arg_value("look-exposure");
+		const bool automatic = fixed.empty() && !debug_off("exposure");
+		attributes_->set_auto_exposure_enabled(automatic);
+		if (automatic) {
+			environment_->set_tonemap_exposure(1.0f);
+			attributes_->set_auto_exposure_scale(p_f.middle_gray);
+			attributes_->set_auto_exposure_min_sensitivity(p_f.middle_gray / std::fmax(p_f.max_exposure, 1e-3f) / kLuminancePerIso);
+			attributes_->set_auto_exposure_max_sensitivity(p_f.middle_gray / std::fmax(p_f.min_exposure, 1e-3f) / kLuminancePerIso);
+			attributes_->set_auto_exposure_speed(p_f.exposure_speed);
+		} else {
+			environment_->set_tonemap_exposure(fixed.empty() ? p_f.exposure : float(std::atof(fixed.c_str())));
+		}
+		s.middle_gray = p_f.middle_gray;
+		s.min_exposure = p_f.min_exposure;
+		s.max_exposure = p_f.max_exposure;
+		s.exposure_speed = p_f.exposure_speed;
+		s.exposure = p_f.exposure;
 	}
 	// Bloom.
-	environment_->set_glow_enabled(p_f.bloom > 0.0f && !debug_off("bloom"));
-	environment_->set_glow_intensity(p_f.bloom);
+	if (first || moved(s.bloom, p_f.bloom)) {
+		environment_->set_glow_enabled(p_f.bloom > 0.0f && !debug_off("bloom"));
+		environment_->set_glow_intensity(p_f.bloom);
+		s.bloom = p_f.bloom;
+	}
 	// Colour correction: the dominant state's LUT.
-	if (p_f.lut != applied_lut_) {
+	if (first || p_f.lut != s.lut) {
 		const bool have = !debug_off("lut") && p_f.lut >= 0 && size_t(p_f.lut) < luts_.size() && luts_[size_t(p_f.lut)].is_valid();
 		environment_->set_adjustment_enabled(have);
 		if (have) {
 			environment_->set_adjustment_color_correction(luts_[size_t(p_f.lut)]);
 		}
-		applied_lut_ = p_f.lut;
+		s.lut = p_f.lut;
 	}
 	applied_ = p_f;
 }

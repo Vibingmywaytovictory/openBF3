@@ -512,7 +512,9 @@ void LevelUpload::create_materials(double p_deadline_us) {
 		if (next_material_ < plan.materials.size()) {
 			const render::SceneMaterialPlan &mp = plan.materials[next_material_];
 			if (plan.look == render::SceneLook::L1) {
-				const int mode = mp.blend ? 2 : (mp.alpha_test ? 1 : 0);
+				// --look-off=blend (diagnosis): blend materials draw opaque, to measure what the transparent pass costs.
+				static const bool blend_off = ("," + user_arg_value("look-off") + ",").find(",blend,") != std::string::npos;
+				const int mode = mp.blend && !blend_off ? 2 : (mp.alpha_test ? 1 : 0);
 				rs->material_set_shader(m, shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
 				rs->material_set_param(m, "albedo_uv", int64_t(mp.albedo_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.albedo_uv));
 				rs->material_set_param(m, "albedo_scale", mp.albedo_scale);

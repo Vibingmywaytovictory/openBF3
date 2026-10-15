@@ -64,8 +64,8 @@ private:
 	godot::Ref<godot::CameraAttributesPractical> attributes_;
 	std::vector<godot::Ref<godot::ImageTexture3D>> luts_;
 	std::array<bool, 3> sky_bound_{}; // panorama, alpha, gradient
-	std::optional<bf3::render::LookFrame> applied_; // what the sky material and environment last got
-	int32_t applied_lut_ = -2;
+	std::optional<bf3::render::LookFrame> applied_; // the last frame (describe())
+	std::optional<bf3::render::LookFrame> sent_; // per group, the values last sent to the RenderingServer
 };
 
 } // namespace bf3::godot_side
