@@ -45,3 +45,23 @@ target_sources(bf3_sim PRIVATE
     src/spawn.cpp
     src/prediction.cpp
 )
+
+# M2a weapons (docs/design/m2a-weapons.md §5, §13): the weapon state machine with sub-tick shot times, the
+# counter-based shot RNG, spread and recoil with the unmeasured mechanics as switches, ballistics against the
+# CollisionWorld and zone-capsule hit targets, damage from the level grid, and the headless shooting range.
+# Interfaces only in this wave (the inline helpers are exercised by m2a.weapons.contract); the implementation
+# wave adds src/weapons/*.cpp here.
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/weapons/sim_time.h
+    include/bf3/sim/weapons/weapon_input.h
+    include/bf3/sim/weapons/weapon_rng.h
+    include/bf3/sim/weapons/mechanics.h
+    include/bf3/sim/weapons/hit_target.h
+    include/bf3/sim/weapons/surface_materials.h
+    include/bf3/sim/weapons/weapon_sim_def.h
+    include/bf3/sim/weapons/spread_recoil.h
+    include/bf3/sim/weapons/weapon_sim.h
+    include/bf3/sim/weapons/damage.h
+    include/bf3/sim/weapons/ballistics.h
+    include/bf3/sim/weapons/shooting_range.h
+)

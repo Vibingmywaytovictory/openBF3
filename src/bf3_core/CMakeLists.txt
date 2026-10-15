@@ -217,3 +217,9 @@ target_sources(bf3_core PRIVATE
 target_sources(bf3_core PRIVATE
     src/level/spawn_points.cpp
 )
+
+# M2a weapons (docs/design/m2a-weapons.md §4.3, §13): the level grid's MaterialPairs in order, so a static hit's
+# pair index reaches its property (damage) and physics-material (impact effects) rows. Interface only in this wave.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/grid_pairs.h
+)

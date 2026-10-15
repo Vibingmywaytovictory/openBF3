@@ -366,3 +366,15 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
         set_tests_properties(tools.ebx_memory PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hymem_cl_dir}")
     endif()
 endif()
+
+# M2a weapons (docs/design/m2a-weapons.md §12): m2a.weapons.contract compiles every weapons header with the M1
+# headers it builds on and checks the inline contract (sub-tick time, the pinned shot seeds, the weapon button
+# levels, the mechanics defaults). No data. The implementation wave adds sim.weapons.unit, sim.weapons,
+# sim.weapons.range, sim.weapons.fuzz, sim.weapons.perf and tools.weapon_sim in this block.
+openbf3_test(test_weapons_contract test_main.cpp weapons_contract_tests.cpp test_support.h)
+target_link_libraries(test_weapons_contract PRIVATE bf3_sim)
+add_test(NAME m2a.weapons.contract COMMAND test_weapons_contract --test-suite=weapons-contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_wp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2a.weapons.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
