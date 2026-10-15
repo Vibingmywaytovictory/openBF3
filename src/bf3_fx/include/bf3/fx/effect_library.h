@@ -41,7 +41,8 @@ public:
 	EffectLibrary &operator=(const EffectLibrary &) = delete;
 
 	// The blueprint's def, compiled (or read from the cache) once; later calls return the same pointer. A failed
-	// compile is remembered and returned again (the error is logged once by the caller).
+	// compile is remembered and returned again (the error is logged once by the caller). p_blueprint is the full
+	// partition name (tools resolve a short name first with find_partition, effect_compiler.h).
 	core::Result<std::shared_ptr<const EffectDef>> get(std::string_view p_blueprint);
 	// Compiles a list on p_threads lanes (load time; bf3::core::parallel_for). Returns the number that failed.
 	size_t preload(const std::vector<std::string> &p_blueprints, unsigned p_threads = 0);

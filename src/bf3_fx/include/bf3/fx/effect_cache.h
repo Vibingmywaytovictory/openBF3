@@ -11,8 +11,17 @@
 // A warm lookup reads the list, takes each partition's manifest SHA1 from the mount (no EBX parsed) and gets the
 // blob. A patched emitter document changes the effect key; a patched blueprint changes both. The engine field is
 // cache_engine_id() as for every kind, so an engine bump recompiles (cheap: about a millisecond per effect).
+// Two rules make the pair sound (as resolve_weapon_cached in weapon_blob.cpp does):
+//   * the list is CompileContext::sources: every lookup the compile made, absent partitions included (recorded by
+//     the compiler's recording resolver), sorted and distinct; an absent one hashes as the zero digest, so a patch
+//     that adds it changes the effect key;
+//   * after any recompile (a miss of either entry), the fx-deps entry is rewritten when the new list differs from the
+//     cached one (the stale entry removed first), so a patched document that adds a base or a child cannot leave a
+//     list that misses forever; an undecodable deps or effect entry is removed and counted as dropped_corrupt.
 //
-// Blob "OBF3FXEF" (kFxBlobFormatVersion): every EffectDef field in declaration order, little endian (floats f32, enums
+// Blob "OBF3FXEF" (kFxBlobFormatVersion 1 includes EffectDef::transform and the component pool fields, carried even
+// where VFX1 does not apply them, so later waves need no format bump for them): every EffectDef field in
+// declaration order, little endian (floats f32, enums
 // and bools one byte, strings u32 length + bytes, at most kMaxNameLength; vectors u32 count + elements). The decoder
 // checks every count against the bytes left and the fx_types.h bounds before it allocates, checks every enum, index
 // (component -> emitter, slot -> evaluator, child -> emitter, gradient range) and float (finite, |x| <=

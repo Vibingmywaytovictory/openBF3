@@ -183,7 +183,39 @@ TEST_SUITE("fx-contract") {
 		CHECK(fx::fx_uniform(0.8f, 1.0f, 0.0f) == 0.8f);
 	}
 
+	TEST_CASE("fx.contract: instance seeds separate emitters, parents and children (docs §6.8 key layout)") {
+		const uint64_t start = fx::fx_harness_seed(1, 0);
+		CHECK(start != fx::fx_harness_seed(1, 1));
+		CHECK(start != fx::fx_harness_seed(2, 0));
+		// Two emitters of one component, and one emitter index in two components, get different instance seeds.
+		const uint64_t root0 = fx::fx_emitter_seed(start, 0, 0);
+		CHECK(root0 != fx::fx_emitter_seed(start, 0, 1));
+		CHECK(root0 != fx::fx_emitter_seed(start, 1, 0));
+		// Children of one parent: different per parent particle serial and per child emitter, and never the parent's.
+		const uint64_t child_a = fx::fx_child_seed(root0, 3, 0);
+		const uint64_t child_b = fx::fx_child_seed(root0, 3, 1);
+		const uint64_t child_c = fx::fx_child_seed(root0, 4, 0);
+		CHECK(child_a != child_b);
+		CHECK(child_a != child_c);
+		CHECK(child_a != root0);
+		// So the first spawn's draws (serial 0, SpawnPosition slot) differ between two children of one parent and
+		// between a parent and its child.
+		const uint32_t slot = uint32_t(fx::ProcessorType::SpawnPosition);
+		CHECK(fx::fx_key(child_a, 0, slot, 0) != fx::fx_key(child_b, 0, slot, 0));
+		CHECK(fx::fx_key(child_a, 0, slot, 0) != fx::fx_key(root0, 0, slot, 0));
+		CHECK(fx::kSlotLight >= fx::kProcessorTypeCount);
+		CHECK(fx::kSlotTurbulence >= fx::kProcessorTypeCount);
+		CHECK(fx::kSlotLight != fx::kSlotTurbulence);
+	}
+
 	TEST_CASE("fx.contract: default-constructed defs are the documented neutral values") {
+		const fx::EffectDef effect;
+		CHECK(effect.transform == fx::Transform{});
+		const fx::EffectStart start;
+		CHECK(start.start_age == 0.0f);
+		const fx::TextureRef tex;
+		CHECK(tex.frame_count == 1);
+		CHECK(tex.frame_columns == 1);
 		const fx::EvaluatorDef e;
 		CHECK(e.type == fx::EvaluatorType::Polynomial);
 		CHECK(e.parameter == fx::EmitterParameter::None);

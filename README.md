@@ -1263,3 +1263,8 @@ and oilfire goldens, Metro / Caspian impacts, Metro's 52 atlas entries, cost per
 renderer (VFX2), triggers (VFX3) and audio are in [docs/design/m2a-vfx1.md](docs/design/m2a-vfx1.md). The interface
 headers are in the tree; `ctest -R fx.contract` checks them without data. The `bf3dump fx` commands and the
 `fx.unit` / `fx.install` / `fx.fuzz` / `tools.fx_bench` tests come with the implementation.
+
+The cost gate (G9) will be measured by one command, `ctest -R tools.fx_bench` (= `bf3dump fx bench --seed 1`: a
+retail oilfire / 1p muzzle / impact mix of 12k-20k live particles on one lane, median of 5 runs): pass at <= 50 ns per
+particle per step, reported next to the research prototype's 24.7 ns. The machine is shared, so the figure is noisy;
+the test runs RUN_SERIAL and is report-only under asan.

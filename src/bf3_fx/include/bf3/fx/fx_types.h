@@ -205,6 +205,8 @@ inline constexpr uint32_t kMaxClipLookup = 4096; // UpdateClipScaleData.Lookup i
 inline constexpr uint32_t kMaxZOcclusionLookup = 4096; // EmitterTemplateData.ZOcclusionLookup (retail 33)
 inline constexpr float kMaxAbsParameter = 1.0e7f; // any compiled float (retail max |x| 7.6e6, one polynomial)
 inline constexpr size_t kMaxNameLength = 1024; // partition and texture names
+inline constexpr uint32_t kMaxFlipbookFrames = 1024; // EmitterTextureInfo.AnimationFrameCount (retail 0..49, columns 0..8)
+inline constexpr float kMaxStartAge = 3600.0f; // EffectStart::start_age is clamped to this (simulator.h)
 
 // ---- polynomials -------------------------------------------------------------------------------------------
 
@@ -240,9 +242,18 @@ inline Vec3 evaluate_color_interp(const Vec4 &p_coefficients, const Vec3 &p_colo
 }
 
 // ---- random numbers ----------------------------------------------------------------------------------------
-// Counter-based, so a draw depends only on its key, never on how many draws came before: the simulator keys every
-// draw by (instance seed, component, particle serial, slot), which makes a run independent of thread count and step
-// partitioning (docs §6.8). splitmix64 finaliser (public domain, Vigna).
+// Counter-based, so a draw depends only on its key, never on how many draws came before, which makes a run
+// independent of thread count and item partition (docs §6.8). splitmix64 finaliser (public domain, Vigna).
+//
+// Key layout. Every random draw of the simulator is exactly one of these, so no two draws share a key:
+//   per start and component (SpawnProbability)  fx_key(start seed, kKeyComponentDraw, component, 0)
+//   a root emitter instance's seed               fx_emitter_seed(start seed, component, emitter index)
+//   a child emitter instance's seed              fx_child_seed(parent instance seed, child emitter index, parent serial)
+//   a particle draw                              fx_key(instance seed, particle serial, slot, lane)
+// slot = the ProcessorType index (0..31), kSlotLight (the light's random intensity) or kSlotTurbulence; lane = the
+// vector component (0..3) of a draw, or for turbulence knot * 3 + axis (docs §6.4). The emitter index and, for a
+// child, the parent particle's serial are in the instance seed, so two emitters of one component, a parent and its
+// children, and two children of one parent never draw the same numbers.
 
 inline uint64_t fx_mix64(uint64_t p_x) {
 	p_x += 0x9E3779B97F4A7C15ull;
@@ -253,6 +264,25 @@ inline uint64_t fx_mix64(uint64_t p_x) {
 
 inline uint64_t fx_key(uint64_t p_seed, uint32_t p_a, uint32_t p_b, uint32_t p_c) {
 	return fx_mix64(fx_mix64(fx_mix64(p_seed ^ p_a) ^ (uint64_t(p_b) << 1)) ^ (uint64_t(p_c) << 2));
+}
+
+inline constexpr uint32_t kKeyComponentDraw = 0xFFFF0001u;
+inline constexpr uint32_t kKeyEmitterInstance = 0xFFFF0002u;
+inline constexpr uint32_t kKeyChildInstance = 0xFFFF0003u;
+inline constexpr uint32_t kSlotLight = 32;
+inline constexpr uint32_t kSlotTurbulence = 33;
+
+inline uint64_t fx_emitter_seed(uint64_t p_start_seed, uint32_t p_component, uint32_t p_emitter) {
+	return fx_key(fx_mix64(p_start_seed ^ kKeyEmitterInstance), kKeyEmitterInstance, p_component, p_emitter);
+}
+
+inline uint64_t fx_child_seed(uint64_t p_parent_instance_seed, uint32_t p_child_emitter, uint32_t p_parent_serial) {
+	return fx_key(fx_mix64(p_parent_instance_seed ^ kKeyChildInstance), kKeyChildInstance, p_child_emitter, p_parent_serial);
+}
+
+// The seed of start i of a multi-start harness run (`bf3dump fx simulate --starts K`, `fx check`; docs §7.7).
+inline uint64_t fx_harness_seed(uint64_t p_seed, uint64_t p_start) {
+	return fx_mix64(p_seed + p_start);
 }
 
 // Uniform in [0, 1): the top 24 bits, so every value is exact in a float and 1 is never returned.

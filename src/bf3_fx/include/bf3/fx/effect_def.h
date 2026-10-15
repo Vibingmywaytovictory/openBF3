@@ -121,7 +121,10 @@ struct ProcessorParams {
 	int32_t animation_frame = 0;
 	float animation_speed = 0; // frames per second
 	// UpdateAgeData
-	float particle_lifetime = 0; // seconds; 0 when the slot is absent (particles live until the emitter ends)
+	// Seconds; 0 when the slot is absent: then particles live until their emitter instance ends. A particle's life is
+	// particle_lifetime * v.x at spawn; when that is <= 0 (no slot, or hostile data) NormTime reads t = 0 instead of
+	// dividing by it, and a slot-present particle with life <= 0 dies at the end of its first step (docs §6.5).
+	float particle_lifetime = 0;
 	// UpdateCameraProximityData
 	float proximity_forward_offset = 0;
 	Vec3 proximity_size;
@@ -145,11 +148,15 @@ struct ProcessorParams {
 };
 
 // UpdateTextureCoordsData.TextureInfo1 (EmitterTextureInfo); names lowercased, '\' as '/'.
+// AnimationFrameCount and AnimationFrameColumnCount are floats in EBX (16.0 / 4.0 on the 1p flash). The compiler
+// accepts only finite integral values in [0, kMaxFlipbookFrames] with columns <= frames, and stores 0 as 1 (retail:
+// one document, em_aamissilemuzzleflash_01_3p, has 0 / 0 with EnableAnimation false); anything else fails the item.
+// Retail pairs: 1..49 frames, 1..8 columns, columns <= frames on all 2,479 instances [verified 2026-10-15].
 struct TextureRef {
 	std::string texture; // "fx/textures/muzzleflash/muzzleflash_01": an EmitterSystemAsset.TextureInfos name
 	std::string normal_map; // "systems/emitter/defaultnormalmap"
-	uint16_t frame_count = 1; // AnimationFrameCount (>= 1)
-	uint16_t frame_columns = 1; // AnimationFrameColumnCount (>= 1)
+	uint16_t frame_count = 1; // AnimationFrameCount, 1 ... kMaxFlipbookFrames
+	uint16_t frame_columns = 1; // AnimationFrameColumnCount, 1 ... frame_count
 	bool animated = false; // EnableAnimation
 };
 
@@ -169,7 +176,10 @@ enum EmitterFlags : uint32_t {
 	kEmitterExclusionVolumeCull = 1u << 10,
 	// derived by the compiler
 	kEmitterDerived = 1u << 16, // a BaseEmitterData document: processors from the base (docs §6.2)
-	kEmitterChild = 1u << 17, // started per particle of a parent emitter
+	// Started per particle of a parent emitter. Roles are per def: the compiler deduplicates emitters by (document
+	// name, role), so a document that one effect uses both as a component's emitter and as a child gets two defs, one
+	// with and one without this flag; the census counts such documents (docs §6.2).
+	kEmitterChild = 1u << 17,
 	kEmitterHasParameterisedEvaluator = 1u << 18, // an evaluator names an EmitterParameter other than None
 };
 
@@ -236,11 +246,14 @@ enum class ComponentKind : uint8_t {
 
 struct EffectComponentDef {
 	ComponentKind kind = ComponentKind::Emitter;
-	Transform transform; // relative to the effect
+	Transform transform; // relative to the effect (EffectDef::transform), docs §6.5
 	float spawn_probability = 1; // EmitterEntityData only; drawn once per effect start
-	float start_delay = 0;
+	float start_delay = 0; // added to EffectDef::start_delay
 	float cull_distance = 0;
 	uint8_t tiers = kTierAll;
+	// EmitterEntityData.MaxInstanceCount / ResetInstanceWhenStarted (retail: 1 on 4,349, 20 on 3, 50 on 1; reset
+	// false on 8). Carried in the blob, not applied in VFX1: the effect-level pool is the only instance pool (docs
+	// §6.7, open Q2); VFX3's instancer decides whether a component pool applies, and per owner or not.
 	uint16_t max_instance_count = 1;
 	bool reset_instance_when_started = true;
 	uint32_t emitter = 0; // Emitter: index into EffectDef::emitters
@@ -248,14 +261,17 @@ struct EffectComponentDef {
 };
 
 struct EffectDef {
-	std::string name; // the EffectBlueprint partition, lowercase
+	std::string name; // the EffectBlueprint partition, lowercase (a wrapped lone emitter: the EmitterDocument's)
+	// EffectEntityData.Transform (non-identity on 21 of the 1,101 retail effects). A point p in a component's frame
+	// lands in the world at  EffectStart::transform( transform( EffectComponentDef::transform(p) ) )  (docs §6.5).
+	Transform transform;
 	float cull_distance = 0;
 	float start_delay = 0;
 	uint8_t tiers = kTierAll;
 	uint16_t max_instance_count = 1; // EffectEntityData.MaxInstanceCount: the pool size (docs §6.7)
 	bool reset_instance_when_started = true; // true on all 1,101: a start past the pool steals the oldest
 	std::vector<EffectComponentDef> components; // blueprint order
-	std::vector<EmitterDef> emitters; // components' emitters first (deduplicated by name), then children
+	std::vector<EmitterDef> emitters; // components' emitters first, then children; deduplicated by (name, role)
 	uint32_t max_particles = 0; // sum of every emitter's MaxCount, children x their parent's MaxCount
 };
 

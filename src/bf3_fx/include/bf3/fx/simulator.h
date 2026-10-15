@@ -1,24 +1,50 @@
 #pragma once
 // The CPU particle simulator (docs/design/m2a-vfx1.md §6.3-§6.8, §7; plan §3.14 "simulate live emitters on worker
 // jobs", D19 option (c)). Godot-free; owns no thread. One FxWorld holds every live effect instance of a client; the
-// caller steps it once per frame through the three-phase API below, so the per-emitter work can run on any job
-// system (Godot's WorkerThreadPool in VFX2, bf3::core::parallel_for in tools and tests).
+// caller steps it once per frame through the phased API below, so the per-emitter work can run on any job system
+// (Godot's WorkerThreadPool in VFX2, bf3::core::parallel_for in tools and tests).
 //
 //   start(def, EffectStart) ......... an instance: MaxInstanceCount pool per def (steal the oldest when
-//                                     ResetInstanceWhenStarted, else refuse), SpawnProbability / StartDelay / tier
-//                                     drawn and applied per component from the start's seed
-//   set_transform / set_params / stop  any thread that owns the world between steps (not during a step)
-//   begin_step(dt, view) -> n ........ main/owner thread: advances clocks, starts due components, sizes the items
-//   run_items(first, count) .......... any threads, disjoint ranges: one item = one live emitter instance
-//                                     (spawn, update, write its vertices and lights into its own output range)
-//   end_step() ....................... owner thread: child-emitter starts and stops, retired instances, compaction,
-//                                     outputs() in a fixed order
-// Determinism: every random draw is keyed (fx_types.h fx_key) by the instance seed, the component, the particle's
-// serial and the processor slot, and every item writes only its own range, so the same defs, starts and dt sequence
-// give byte-identical outputs on 1 or N threads and with any item partition (fixed or variable dt alike).
-// Bounds: all storage is sized at construction (FxWorldConfig); a start that does not fit is refused, a spawn that
-// does not fit the world's particle budget is dropped, both counted. A particle whose state becomes non-finite is
-// killed and counted (the renderer never sees a NaN).
+//                                     ResetInstanceWhenStarted, else refuse), SpawnProbability drawn per component
+//   set_transform / set_params / stop / clear   owner thread, between frames (never during a frame)
+//   begin_frame(dt, view) -> k ....... owner: clamps dt to max_dt, splits it into k = ceil(dt / max_substep) equal
+//                                     sub-steps (k = 1 at any frame rate above 4 Hz), clears the last frame's events
+//   per sub-step, k times:
+//     begin_step() -> n .............. owner, serial over every live emitter instance in list order (below): advance
+//                                     the effect and emitter clocks, start due components, refresh child emitter
+//                                     transforms, run the Emitter stage (SpawnRate accumulator, burst), ADMIT spawns
+//                                     against MaxCount and the world budget, size each item's output range
+//     run_items(first, count) ........ any threads, disjoint ranges: one item = one live emitter instance (spawn its
+//                                     admitted particles, update all, write vertices and lights into its own range)
+//     end_step() ..................... owner: child-emitter starts and stops, retired instances, compaction
+//   outputs() / particles() / lights() / events() are valid after the frame's k-th end_step until the next
+//   begin_frame. step(dt, view, lanes) does the whole frame.
+//
+// Admission (the only place a spawn can be refused; docs §6.7). With B = max_particles - (live particles after the
+// last compaction), begin_step visits the live emitter instances in list order and for each computes due = the
+// spawns its SpawnRate stage yields this sub-step, then grants
+//     n = min(due, MaxCount - live_i, B),   spawns_capped += due - min(due, MaxCount - live_i),
+//     spawns_dropped += min(due, MaxCount - live_i) - n,   B -= n
+// and sizes the item's particle range to live_i + n (its light range to the same for ActAsPointLight emitters).
+// Capped and dropped spawns are discarded, never queued. So the ranges of one sub-step sum to at most max_particles,
+// and which spawns are refused depends only on the list order, never on threads or item partition.
+// List order: emitter instances are appended when created (a component start in begin_step, a child start in
+// end_step, both in a fixed order) and removed stably when retired, so it is a function of the start / stop / dt
+// sequence alone.
+//
+// Children (docs §6.5): a child instance's emitter transform is set in begin_step from its parent particle's state
+// as of the last end_step (position; orientation from the velocity); run_items never reads another item's state.
+//
+// Determinism: every random draw is keyed per fx_types.h (start seed -> per-component emitter instance seed
+// fx_emitter_seed, child seed fx_child_seed, particle draws fx_key(instance seed, serial, slot, lane)); serials count
+// the granted spawns of an instance. The same defs, starts and dt sequence give byte-identical particles() and
+// lights() on 1 or N threads and with any item partition (fixed or variable dt alike); outputs() compare equal
+// field by field (EmitterOutput has padding; the world zero-fills each record before writing it, but tests compare
+// fields, not bytes).
+// Bounds: all particle, light and instance storage is allocated at construction from FxWorldConfig and never grows;
+// a start that does not fit is refused, an emitter instance past max_emitter_instances is not created, and a spawn
+// past the budget is dropped, all counted. A particle whose state becomes non-finite is killed and counted (the
+// renderer never sees a NaN).
 //
 // Client only: a dedicated server never constructs an FxWorld (plan §2.6, VFX4 makes it a link-time rule).
 
@@ -86,6 +112,11 @@ struct EffectStart {
 	uint64_t seed = 0; // = hash(event id) in VFX3/VFX4 (shotSeq, detonation id, slot transition)
 	uint8_t tier = kTierHigh; // the client's quality tier (one bit of TierBits)
 	bool first_person = false; // drawn in the viewmodel pass (VFX2); the simulation is the same
+	// Seconds the effect has already been running (a late joiner seeing a running loop, plan §7.10 item 10; VFX4).
+	// Clamped to [0, kMaxStartAge]. VFX1 applies it to the clocks only: elapsed StartDelays count as passed, a
+	// component whose finite window ended before start_age is not started, and a continuous or repeating emitter
+	// starts with its clock at start_age (no particles prewarmed; the prewarm rule is VFX4's, docs §12).
+	float start_age = 0;
 	EmitterParams params;
 };
 
@@ -119,13 +150,14 @@ struct FxStats {
 	uint64_t spawned = 0;
 	uint64_t died = 0;
 	uint64_t spawns_capped = 0; // spawn attempts past an emitter's MaxCount (the cap BF3 data relies on)
-	uint64_t spawns_dropped = 0; // spawns past the world's particle budget
+	uint64_t spawns_dropped = 0; // spawns past the world's particle budget (admission, header comment)
+	uint64_t emitter_starts_dropped = 0; // component or child emitter instances past max_emitter_instances
 	uint64_t nonfinite_kills = 0; // particles killed because a state value became NaN or infinite
 	uint64_t stolen_instances = 0; // MaxInstanceCount pool steals (ResetInstanceWhenStarted)
 	uint64_t refused_starts = 0; // starts that did not fit (pool without reset, world full, def too large)
 };
 
-// One live emitter instance's output after end_step().
+// One live emitter instance's output after the frame's last end_step(). Has padding: compare field by field.
 struct EmitterOutput {
 	EffectHandle effect;
 	const EffectDef *def = nullptr; // valid while the instance lives (the world holds the shared_ptr)
@@ -148,6 +180,20 @@ struct FxEvent {
 	Transform transform;
 };
 
+// Whether start() runs component p_component of p_def for a start with p_start_seed at p_tier: the tier masks of the
+// effect and the component, then one SpawnProbability draw (fx_types.h key layout). FxWorld::start uses exactly this,
+// so a harness can count the expected per-start component fractions independently of the particles it observes.
+inline bool fx_component_selected(const EffectDef &p_def, uint32_t p_component, uint64_t p_start_seed, uint8_t p_tier) {
+	if (p_component >= p_def.components.size()) {
+		return false;
+	}
+	const EffectComponentDef &c = p_def.components[p_component];
+	if ((p_def.tiers & p_tier) == 0 || (c.tiers & p_tier) == 0) {
+		return false;
+	}
+	return fx_unit(fx_key(p_start_seed, kKeyComponentDraw, p_component, 0)) < c.spawn_probability;
+}
+
 class FxWorld {
 public:
 	explicit FxWorld(const FxWorldConfig &p_config = {});
@@ -157,19 +203,25 @@ public:
 
 	core::Result<EffectHandle> start(std::shared_ptr<const EffectDef> p_def, const EffectStart &p_start);
 	void stop(EffectHandle p_effect, StopMode p_mode = StopMode::Stop);
+	// Kills every instance, empties the pools and resets the stats (handles from before stay invalid: generations keep
+	// counting); keeps the storage. Harness runs use it between independent starts (docs §7.7).
+	void clear();
 	void set_transform(EffectHandle p_effect, const Transform &p_transform, const Vec3 &p_velocity);
 	void set_params(EffectHandle p_effect, const EmitterParams &p_params);
 	// False once the instance has finished (every emitter done and every particle dead) or was stolen/killed.
 	bool alive(EffectHandle p_effect) const;
 
-	// The three phases (header comment). dt > 0 seconds, any value: sub-stepped by max_substep, clamped to max_dt.
-	size_t begin_step(float p_dt, const FxView &p_view);
+	// The phases (header comment). p_dt in seconds; a non-finite or non-positive dt is a frame of 0 sub-steps.
+	uint32_t begin_frame(float p_dt, const FxView &p_view);
+	// Returns 0 and does nothing once the frame's sub-steps are done.
+	size_t begin_step();
 	void run_items(size_t p_first, size_t p_count);
 	void end_step();
-	// begin + run on p_lanes threads (bf3::core::parallel_for; 1 = the calling thread) + end.
+	// begin_frame, then per sub-step begin_step + run_items on p_lanes threads (bf3::core::parallel_for; 1 = the
+	// calling thread) + end_step.
 	void step(float p_dt, const FxView &p_view, unsigned p_lanes = 1);
 
-	// Valid until the next begin_step.
+	// Valid after the frame's last end_step until the next begin_frame.
 	std::span<const EmitterOutput> outputs() const;
 	std::span<const ParticleVertex> particles() const;
 	std::span<const ParticleLight> lights() const;

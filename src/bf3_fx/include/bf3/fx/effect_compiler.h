@@ -30,6 +30,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -55,7 +56,11 @@ struct CompileContext {
 	const core::EbxResolver *db = nullptr;
 	core::gameplay::WorkBudget budget{ kDefaultCompileWorkLimit };
 	CompileStats stats;
-	// Every partition the compile read, lowercase, in first-read order (the cache's dependency list, effect_cache.h).
+	// Every partition the compile looked up, lowercase, sorted and distinct (the cache's dependency list,
+	// effect_cache.h). Filled by the compiler itself: it wraps `db` in a recording resolver (the weapon_blob.cpp
+	// RecordingResolver pattern) that records every partition() / partition_by_name() / name_of() lookup, found or
+	// absent, so no call site does manual bookkeeping and an absent base or child document that later appears in a
+	// patch changes the key.
 	std::vector<std::string> sources;
 	// Names of types and enumerators the tables do not know (the census gate requires both empty).
 	std::vector<std::string> unknown_types;
@@ -66,8 +71,32 @@ struct CompileContext {
 // def's `children` indexing that vector: element 0 is the requested emitter).
 core::Result<std::vector<EmitterDef>> compile_emitter(std::string_view p_document, CompileContext &r_ctx);
 
-// One EffectBlueprint partition into one EffectDef (emitters deduplicated by document name).
+// One EffectBlueprint partition into one EffectDef (emitters deduplicated by (document name, role), effect_def.h).
 core::Result<EffectDef> compile_effect(std::string_view p_blueprint, CompileContext &r_ctx);
+
+// One lone EmitterDocument wrapped into a one-component EffectDef, for tools and goldens (`bf3dump fx simulate
+// --emitter`, gate G4): name = the document, identity transforms, one Emitter component with SpawnProbability 1,
+// StartDelay 0, all tiers, MaxInstanceCount 1 with reset, emitters = compile_emitter's result. Never cached.
+core::Result<EffectDef> compile_emitter_effect(std::string_view p_document, CompileContext &r_ctx);
+
+// The one catalogue name that is p_name or ends with "/" + p_name (ASCII case-insensitive), so a tool can take
+// "fx_muzz_generic_rifle_1p" for "fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p". No match, or more
+// than one, is an error that lists up to 8 candidates. EffectLibrary::get and the compiler take full names only.
+core::Result<std::string> find_partition(std::span<const std::string> p_catalogue, std::string_view p_name);
+
+// When an effect is over (docs §6.5, gate G7), from the def alone, in real seconds after the start: spawn_end = the
+// latest moment any emitter can still spawn = effect StartDelay + component StartDelay + window / TimeScale (a
+// child: its parent's spawn_end + its own window / TimeScale); end = the latest such moment plus the longest
+// possible particle life / TimeScale, where the life bound is UpdateAge Lifetime times an upper bound of its Pre
+// (Random max(Min, Max); Polynomial max(MinClamp, MaxClamp) * |ScaleValue|; any other evaluator 1); an emitter
+// without an UpdateAge slot ends at its spawn_end (its particles die with the window). `finite` is false when any
+// reachable emitter is continuous (Lifetime 0) or repeats (RepeatParticleSpawning).
+struct EffectExtent {
+	bool finite = true;
+	float spawn_end = 0;
+	float end = 0;
+};
+EffectExtent effect_extent(const EffectDef &p_def);
 
 // ---- census (gate G1; `bf3dump fx census`, ctest fx.install) -----------------------------------------------
 
@@ -82,6 +111,10 @@ struct CensusReport {
 	std::vector<std::string> unknown_types; // distinct, sorted
 	std::vector<std::string> unknown_enumerators;
 	std::vector<std::string> errors; // the first 32 "<partition>: <message>"
+	size_t dual_role_documents = 0; // documents one effect uses both as a component emitter and as a child
+	size_t effects_with_transform = 0; // EffectEntityData.Transform not identity (retail 21)
+	size_t component_pools = 0; // EmitterEntityData with MaxInstanceCount != 1 or reset false (retail 4 + 8)
+	size_t flipbooks_normalised = 0; // TextureRef frame count or columns stored 0 -> 1 (retail 1)
 	size_t max_work_units = 0; // most units one item spent (retail headroom)
 	double seconds = 0;
 };
