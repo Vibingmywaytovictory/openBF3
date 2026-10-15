@@ -64,7 +64,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
-S1 (spike, docs/design/s1.md): `s1.contract` (no data) now; the implementation adds `sim.nav.unit`, `host.scale.unit` (no data), `sim.nav` and the RUN_SERIAL timing gates `sim.nav.bake` and `host.scale` (install; see "S1 server scale (spike)").
+S1 (spike, docs/design/s1.md): `s1.contract`, `sim.nav.unit`, `host.scale.unit` (no data), `sim.nav` and the RUN_SERIAL timing gates `sim.nav.bake` and `host.scale` (install; see "S1 server scale (spike)").
 
 ## Run
 
@@ -1168,3 +1168,28 @@ a quiet machine):
 The same numbers for a human: `bf3dump bots <LEVEL> <MODE>`, `bf3dump nav bake|stats|components|path|probe`. In the
 game, `res://scenes/m1_metro.tscn -- --bots=64 --nav-overlay` adds the walkers to the M1 server and draws the navmesh
 by component (F7 toggles); screenshots go to `b\shots\s1\`.
+
+Results, 2026-10-15, on the shared machine, so the timings are noisy (docs/design/s1.md §19):
+
+* **G1 passes.** p99 1.51 ms on Metro and 0.87 ms on Caspian, both runs valid.
+* **G2 fails.** Every Conquest flag and HQ is in the main component, but not every row is:
+
+  | level | rows in main |
+  |---|---|
+  | Metro | 485 / 566 |
+  | Caspian | 661 / 709 |
+
+  * The Rush stage geometry is closed in a bake over all stages: `ParkEntranceUndestroyed` cuts the park off the station.
+  * Crates of stages a mode does not play are parked off the map.
+  * Some spawns are on platforms cut off by props and steps the motor cannot climb.
+  * `sim.nav` reports the all-rows gate as a WARN and CHECKs what holds.
+* **G3 is measured.** Metro: 3.44 queries per step, 4.4 µs per sweep. Caspian: 4.21 queries per step, 1.8 µs per sweep.
+* **G4 passes.** Caspian 2.8 s, Kharg 3.8 s on 16 threads.
+
+The as-built nav uses:
+
+* cs 0.2 with the radius rounded up (0.4 m);
+* a detail error of 2 ch;
+* the water rule, under which Kharg's sea bed tiles lose their terrain.
+
+The run with bots: `"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --mode=ConquestLarge0 --bots=64 --nav-overlay [--shot-delay=12 --shots=...]`.
