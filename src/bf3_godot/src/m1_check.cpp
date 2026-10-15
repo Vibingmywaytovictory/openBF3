@@ -10,9 +10,11 @@
 #include "bf3/net/loopback_ping.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -599,7 +601,11 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 					total_cpu_ms_ / double(total_frames_), total_gpu_ms_ / double(total_frames_), (unsigned long long)total_frames_, free_.size())));
 		}
 		if (median_views_ > 0) {
-			const Vector2 size = session_.get_viewport()->get_visible_rect().size;
+			// The size the screenshots have (the rendered image, read back once after timing): with stretch mode
+			// canvas_items the visible rect is the 1152x648 base size, and the texture's reported size is scaled again.
+			const Ref<ViewportTexture> target = session_.get_viewport()->get_texture();
+			const Ref<Image> image = target.is_valid() ? target->get_image() : Ref<Image>();
+			const Vector2 size = image.is_valid() ? Vector2(float(image->get_width()), float(image->get_height())) : Vector2();
 			UtilityFunctions::print(to_godot(fmt("[look] frame time median: %.3f ms per frame (interval), GPU %.3f ms, mean of the per-view medians at %zu views, viewport %dx%d",
 					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_, int(size.x), int(size.y))));
 		}
