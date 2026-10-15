@@ -151,10 +151,14 @@ gameplay::SoldierDef synthetic_soldier() {
 	stand.max_look_pitch = 45;
 	stand.transition_to[1] = 0.3f;
 	stand.transition_to[2] = 0.7f;
+	stand.box_min_expand = { 0.2f, 0.0f, 0.1f }; // read, unused by the M1 motor (only prone's footprint is)
+	stand.box_max_expand = { 0.1f, 0.6f, 0.2f };
 	gameplay::PoseDef crouch = stand;
 	crouch.pose = SoldierPose::Crouch;
 	crouch.height = 1.15f;
 	crouch.eye_height = 1.0f;
+	crouch.box_min_expand = { 0.1f, 0.0f, 0.6f };
+	crouch.box_max_expand = { 0.2f, 0.1f, 0.4f };
 	crouch.transition_to = {};
 	crouch.transition_to[0] = 0.3f;
 	crouch.transition_to[2] = 0.5f;
@@ -1646,5 +1650,461 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(p[2].priority == 0.5f);
 		CHECK(p[1].index == 1);
 		CHECK(p[2].position == Vec3{ 2.0f, 60.0f, -2.0f });
+	}
+	TEST_CASE("sim.motor: floor cracks, slopes by walls and edges (found on Metro): settle and the ground hug") {
+		std::vector<StaticTriangle> t;
+		// Two floors with a 1 cm crack at x = 30 (rays fall through it), a 27 degree ramp with a wall 0.35 m beside
+		// the spawn point on it, and a 10 cm slab whose edge a soldier stands on.
+		add_floor(t, 1.0f, 1.0f, 30.0f, 61.0f, 0.0f);
+		add_floor(t, 30.01f, 1.0f, 61.0f, 61.0f, 0.0f);
+		add_ramp(t, 40.0f, 50.0f, 30.0f, 0.0f, 27.0f, 10.0f, 2.0f);
+		add_box(t, { 43.65f, 0.0f, 30.0f }, { 44.0f, 8.0f, 42.0f });
+		add_box(t, { 10.0f, 0.0f, 10.0f }, { 15.0f, 0.1f, 15.0f });
+		Rig r = rig_of(t, params_with(shipped_tuning()));
+		const float pad = r.motor->params().tuning.character_padding;
+		const float tol = SettleOptions().hover_tolerance;
+		const float slope_y = 5.0f * std::tan(27.0f * kPi / 180.0f);
+		struct Case {
+			Vec3 at;
+			const char *what;
+			bool shifted;
+		};
+		const Case cases[] = {
+			{ { 30.005f, 0.0f, 20.0f }, "over the crack (the centre ray falls through; the rings find the floor)", true },
+			{ { 44.35f, slope_y, 35.0f }, "on the slope, 0.35 m from the wall (lifts at a ring sample)", true },
+			{ { 9.8f, 0.0f, 12.0f }, "at the slab's edge (rests on it: the drop gap is 0, the ray's 0.1 m)", false },
+		};
+		for (const Case &c : cases) {
+			SpawnPoint p;
+			p.position = c.at;
+			const SettleResult s = settle_spawn(*r.motor, *r.world, p, 1, 100);
+			std::printf("settle %s: ok %d (%s) lift %.3f shift %.3f gap %.5f, at (%.3f %.4f %.3f)\n", c.what, s.ok ? 1 : 0, s.failure.c_str(), double(s.lift),
+					double(s.shift), double(s.gap), double(s.state.position[0]), double(s.state.position[1]), double(s.state.position[2]));
+			CHECK_MESSAGE(s.ok, c.what << ": " << s.failure);
+			CHECK(std::fabs(s.gap) <= pad + tol);
+			CHECK((s.shift > 0.05f) == c.shifted); // the slab-edge soldier slides < 5 mm while settling
+		}
+		// Walking and sprinting across the crack: grounded on every tick, never InAir (the hug's probe is a sphere,
+		// so the crack is no ledge; with a ray probe a crack on Metro, at point 22, left a crouching soldier InAir with
+		// InAir speeds for a tick: this synthetic crack keeps Jolt OnGround either way). The far
+		// floor's boundary edge lies inside the solver's character padding, so CharacterVirtual lifts the soldier off
+		// it for a tick or two (5 mm walking, 11 mm sprinting: the Metro seam bumps, docs §6.1 "As built in T2", an
+		// open issue). Bounded here, and the speed is back within 1 % by the end.
+		for (const uint32_t b : { 0u, buttons::kSprint }) {
+			SoldierState s = at_rest(*r.motor, { 26.0f, 0.0f, 20.0f }, 16384);
+			const std::vector<SoldierState> trace = run(*r.motor, s, 90, [&](Tick tick) { return move_command(tick, kAxisMax, 0, 16384, Pose::Stand, b); });
+			REQUIRE(trace.back().position[0] > 31.0f);
+			const float expected = b != 0 ? 6.5f : 4.0f;
+			size_t airborne = 0;
+			float lo_y = 0.0f, hi_y = 0.0f, lo_v = 1e9f;
+			for (size_t i = 0; i < trace.size(); ++i) {
+				const SoldierState &e = trace[i];
+				airborne += grounded(e) && e.mode == MoveMode::OnGround ? 0 : 1;
+				lo_y = std::min(lo_y, e.position[1]);
+				hi_y = std::max(hi_y, e.position[1]);
+				lo_v = i >= 35 ? std::min(lo_v, horizontal(e.velocity)) : lo_v; // past the run-up
+			}
+			std::printf("crossing the crack (%s): %zu ticks not grounded, y %.5f..%.5f, lowest speed %.5f, end speed %.5f\n", b != 0 ? "sprint" : "walk",
+					airborne, double(lo_y), double(hi_y), double(lo_v), double(horizontal(trace.back().velocity)));
+			CHECK(airborne == 0);
+			CHECK(lo_y > -2e-3f);
+			CHECK(hi_y < 0.015f);
+			CHECK(lo_v >= 0.95f * expected);
+			CHECK(horizontal(trace.back().velocity) == doctest::Approx(expected).epsilon(0.01));
+		}
+	}
+}
+
+// ---- sim-motor: Metro's real static world (install; exits 77 without one) -------------------------------------
+
+namespace {
+
+// MP_Subway TeamDeathMatch0 loaded once per process: the soup through T1's build_static_world, the soldier with the
+// shipped tuning, the spawn points. The snapshot is taken before the first install read.
+struct Metro {
+	std::unique_ptr<core::InstallReader> reader;
+	std::shared_ptr<core::Install> install;
+	core::InstallSnapshot before;
+	core::level::LevelCollision collision;
+	std::shared_ptr<const StaticWorldShapes> shapes;
+	std::unique_ptr<CollisionWorld> world;
+	gameplay::SoldierDef soldier;
+	MotorParams params;
+	std::unique_ptr<SoldierMotor> motor;
+	core::level::LevelSpawns spawns;
+	std::vector<SpawnPoint> points;
+	double seconds_soup = 0, seconds_shapes = 0;
+};
+
+double seconds_since(std::chrono::steady_clock::time_point p_start) {
+	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
+}
+
+// nullptr (and the case marked skipped) without an install.
+Metro *metro() {
+	static std::unique_ptr<Metro> s_metro;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_metro == nullptr) {
+			bf3::test::skip_install_case("no BF3 install (see the first sim-motor case)");
+		}
+		return s_metro.get();
+	}
+	s_tried = true;
+	auto m = std::make_unique<Metro>();
+	m->reader = std::make_unique<core::InstallReader>();
+	if (!m->reader->locate({})) {
+		bf3::test::skip_install_case(m->reader->describe().c_str());
+		return nullptr;
+	}
+	m->before = m->reader->snapshot();
+	core::Result<std::shared_ptr<core::Install>> opened = core::Install::open(*m->reader);
+	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
+	m->install = *opened;
+	auto start = std::chrono::steady_clock::now();
+	core::Result<core::level::LevelCollision> c = core::level::load_level_collision(m->install, "MP_Subway", "TeamDeathMatch0");
+	REQUIRE_MESSAGE(c.ok(), (c.ok() ? std::string() : c.error().message));
+	m->collision = std::move(*c);
+	m->seconds_soup = seconds_since(start);
+	start = std::chrono::steady_clock::now();
+	core::Result<std::shared_ptr<const StaticWorldShapes>> shapes = build_static_world(m->collision.soup);
+	REQUIRE_MESSAGE(shapes.ok(), (shapes.ok() ? std::string() : shapes.error().message));
+	m->shapes = *shapes;
+	m->seconds_shapes = seconds_since(start);
+	m->world = world_of(m->shapes);
+	core::Result<gameplay::SoldierDef> soldier = gameplay::read_soldier_def(m->collision.level->db());
+	REQUIRE_MESSAGE(soldier.ok(), (soldier.ok() ? std::string() : soldier.error().message));
+	m->soldier = std::move(*soldier);
+	core::Result<MotorParams> params = make_motor_params(m->soldier, shipped_tuning());
+	REQUIRE_MESSAGE(params.ok(), (params.ok() ? std::string() : params.error().message));
+	m->params = *params;
+	m->motor = std::make_unique<SoldierMotor>();
+	const core::Status s = m->motor->init(*m->world, m->params);
+	REQUIRE_MESSAGE(s.ok(), (s.ok() ? std::string() : s.error().message));
+	core::Result<core::level::LevelSpawns> spawns = core::level::read_level_spawns(*m->collision.world);
+	REQUIRE_MESSAGE(spawns.ok(), (spawns.ok() ? std::string() : spawns.error().message));
+	m->spawns = std::move(*spawns);
+	m->points = to_spawn_points(m->spawns);
+	const Vec3 lo = m->shapes->min(), hi = m->shapes->max();
+	std::printf("Metro: soup %.2f s, shapes %.2f s, %zu tiles, bounds (%.1f, %.1f, %.1f)..(%.1f, %.1f, %.1f), %zu spawn points\n", m->seconds_soup,
+			m->seconds_shapes, m->shapes->tile_count(), double(lo[0]), double(lo[1]), double(lo[2]), double(hi[0]), double(hi[1]), double(hi[2]),
+			m->points.size());
+	s_metro = std::move(m);
+	return s_metro.get();
+}
+
+float heading_distance(const Vec3 &p_from, const Vec3 &p_to, uint16_t p_yaw) {
+	const float a = yaw_radians(p_yaw);
+	return (p_to[0] - p_from[0]) * std::sin(a) + (p_to[2] - p_from[2]) * std::cos(a);
+}
+
+} // namespace
+
+TEST_SUITE("sim-motor") {
+	TEST_CASE("sim.motor: Metro: make_motor_params from the level's soldier with the shipped tuning equals docs 6.4") {
+		Metro *m = metro();
+		if (m == nullptr) {
+			return;
+		}
+		const MotorParams &p = m->params;
+		CHECK(p.tuning == shipped_tuning());
+		CHECK(p.radius == 0.35f);
+		CHECK(p.mass == 100.0f);
+		CHECK(p.max_ascend_degrees == 50.0f);
+		CHECK(p.allowed_distance_from_ground == 0.5f);
+		CHECK(p.ground_hugging);
+		CHECK(p.jump_height == doctest::Approx(0.6f));
+		CHECK(p.jump_penalty_ticks == 60);
+		CHECK(p.jump_penalty_factor == doctest::Approx(0.3f));
+		CHECK(p.free_fall_velocity == 16.0f);
+		CHECK(p.max_health == 100.0f);
+		CHECK(p.immortal_ticks == 120);
+		CHECK(eval(p.fall_damage_vertical, 13.8f) == 0.0f);
+		CHECK(eval(p.fall_damage_vertical, 14.08f) == doctest::Approx(20.2f).epsilon(0.01));
+		CHECK(eval(p.fall_damage_vertical, 30.04f) >= 100.0f);
+		const PoseParams &stand = p.poses[size_t(Pose::Stand)];
+		const PoseParams &crouch = p.poses[size_t(Pose::Crouch)];
+		const PoseParams &prone = p.poses[size_t(Pose::Prone)];
+		CHECK(stand.height == doctest::Approx(1.8f));
+		CHECK(crouch.height == doctest::Approx(1.15f));
+		CHECK(prone.height == doctest::Approx(0.3f));
+		CHECK(stand.eye_height == doctest::Approx(1.6f));
+		CHECK(crouch.eye_height == doctest::Approx(1.0f));
+		CHECK(prone.eye_height == doctest::Approx(0.3f));
+		for (const PoseParams *q : { &stand, &crouch, &prone }) {
+			CHECK(q->step_height == doctest::Approx(0.3f));
+			REQUIRE(q->throttle.count == 3);
+			CHECK(q->throttle.points[1].x == doctest::Approx(0.1f));
+			CHECK(q->throttle.points[1].y == 0.0f);
+			CHECK(q->throttle.points[2].x == 1.0f);
+			CHECK(q->throttle.points[2].y == 1.0f);
+			CHECK(q->on_ground.acceleration_gain == doctest::Approx(0.35f));
+			CHECK(q->on_ground.deceleration_gain == doctest::Approx(-15.0f));
+			CHECK(q->in_air.velocity == doctest::Approx(6.0f));
+			CHECK(q->in_air.backward == doctest::Approx(0.5f));
+			CHECK(q->in_air.left == doctest::Approx(0.5f));
+			CHECK(q->in_air.acceleration_gain == doctest::Approx(0.1f));
+			CHECK(q->in_air.sprint_multiplier == doctest::Approx(1.5f));
+			CHECK(q->falling.velocity == doctest::Approx(15.0f));
+			CHECK(q->falling.acceleration_gain == doctest::Approx(0.05f));
+		}
+		CHECK(stand.transition_ticks == std::array<uint16_t, 3>{ 0, 18, 42 });
+		CHECK(crouch.transition_ticks == std::array<uint16_t, 3>{ 18, 0, 30 });
+		CHECK(prone.transition_ticks == std::array<uint16_t, 3>{ 42, 63, 0 });
+		CHECK(stand.on_ground.velocity == doctest::Approx(4.0f));
+		CHECK(stand.on_ground.backward == doctest::Approx(0.75f));
+		CHECK(stand.on_ground.left == doctest::Approx(0.75f));
+		CHECK(stand.on_ground.right == doctest::Approx(0.75f));
+		CHECK(stand.on_ground.sprint_gain == doctest::Approx(0.25f));
+		CHECK(stand.on_ground.sprint_multiplier == doctest::Approx(1.625f));
+		CHECK(crouch.on_ground.velocity == doctest::Approx(2.0f));
+		CHECK(crouch.on_ground.backward == doctest::Approx(0.8f));
+		CHECK(crouch.on_ground.left == doctest::Approx(0.8f));
+		CHECK(crouch.on_ground.sprint_multiplier == 0.0f);
+		CHECK(prone.on_ground.velocity == doctest::Approx(0.9f));
+		CHECK(prone.on_ground.backward == doctest::Approx(0.5f));
+		CHECK(prone.on_ground.left == doctest::Approx(0.7f));
+		CHECK(prone.on_ground.sprint_multiplier == 0.0f);
+		CHECK(prone.box_min_expand[2] == doctest::Approx(1.3f));
+		CHECK(prone.box_max_expand[2] == doctest::Approx(1.1f));
+		// The synthetic soldier of sim-motor-unit is these numbers: the hashes of the two params (every field) agree.
+		const uint64_t metro_hash = motor_params_hash(p);
+		const uint64_t synthetic_hash = motor_params_hash(params_with(shipped_tuning()));
+		std::printf("Metro params hash %016llx, synthetic %016llx\n", static_cast<unsigned long long>(metro_hash), static_cast<unsigned long long>(synthetic_hash));
+		CHECK(metro_hash == synthetic_hash);
+	}
+
+	TEST_CASE("sim.motor: Metro: the 102 TDM spawn points and the two spawners") {
+		Metro *m = metro();
+		if (m == nullptr) {
+			return;
+		}
+		REQUIRE(m->points.size() == 102);
+		float lo = 1e9f, hi = -1e9f;
+		for (size_t i = 0; i < m->points.size(); ++i) {
+			const SpawnPoint &p = m->points[i];
+			CHECK(p.index == i);
+			CHECK(p.team == 0);
+			CHECK(p.priority == 1.0f);
+			CHECK((std::isfinite(p.position[0]) && std::isfinite(p.position[1]) && std::isfinite(p.position[2])));
+			lo = std::min(lo, p.position[1]);
+			hi = std::max(hi, p.position[1]);
+		}
+		std::printf("Metro spawn points: y %.3f..%.3f\n", double(lo), double(hi));
+		CHECK(lo > 59.0f);
+		CHECK(hi < 74.0f);
+		REQUIRE(m->spawns.spawners.size() == 2);
+		std::set<int> teams;
+		for (const core::level::CharacterSpawnerDef &s : m->spawns.spawners) {
+			teams.insert(s.team);
+			CHECK(s.protection_radius == 10.0f);
+		}
+		CHECK(teams == std::set<int>{ 1, 2 });
+	}
+
+	TEST_CASE("sim.motor: Metro E3: settle_spawn on all 102 points (all ok; worst lift, shift and gap printed)") {
+		Metro *m = metro();
+		if (m == nullptr) {
+			return;
+		}
+		const float pad = m->params.tuning.character_padding;
+		const auto start = std::chrono::steady_clock::now();
+		size_t ok = 0;
+		float worst_lift = 0, worst_shift = 0, worst_gap = 0, min_gap = 1e9f;
+		size_t lifted = 0, shifted = 0;
+		for (const SpawnPoint &p : m->points) {
+			const SettleResult r = settle_spawn(*m->motor, *m->world, p, 1, 1000);
+			CHECK_MESSAGE(r.ok, "point " << p.index << ": " << r.failure);
+			ok += r.ok ? 1 : 0;
+			if (std::fabs(r.lift) > std::fabs(worst_lift)) {
+				worst_lift = r.lift;
+			}
+			worst_shift = std::max(worst_shift, r.shift);
+			worst_gap = std::max(worst_gap, r.gap);
+			min_gap = std::min(min_gap, r.gap);
+			lifted += std::fabs(r.lift) > 0.05f ? 1 : 0;
+			shifted += r.shift > 0.0f ? 1 : 0;
+			if (r.ok) {
+				CHECK(r.gap <= pad + SettleOptions().hover_tolerance);
+				CHECK_FALSE(r.overlapping);
+				CHECK((r.state.flags & soldier_flags::kGrounded) != 0);
+				CHECK(r.state.tick == 1000);
+				CHECK(r.state.protect_ticks == m->params.immortal_ticks);
+			}
+		}
+		std::printf("E3 Metro settle: %zu / %zu ok in %.3f s; worst lift %.4f m (%zu over 5 cm), worst shift %.3f m (%zu shifted), gap %.5f..%.5f m\n", ok,
+				m->points.size(), seconds_since(start), double(worst_lift), lifted, double(worst_shift), shifted, double(min_gap), double(worst_gap));
+		CHECK(ok == 102);
+	}
+
+	TEST_CASE("sim.motor: Metro E1a-E1c at 6 spawn points along find_clear_heading courses") {
+		Metro *m = metro();
+		if (m == nullptr) {
+			return;
+		}
+		const SoldierMotor &motor = *m->motor;
+		struct Course {
+			const char *name;
+			Pose pose;
+			uint32_t buttons;
+			float expected;
+		};
+		const Course courses[] = { { "walk", Pose::Stand, 0, 4.0f }, { "sprint", Pose::Stand, buttons::kSprint, 6.5f }, { "crouch", Pose::Crouch, 0, 2.0f },
+			{ "prone", Pose::Prone, 0, 0.9f } };
+		struct Change {
+			Pose from, to;
+			uint32_t ticks;
+		};
+		const Change changes[] = { { Pose::Stand, Pose::Crouch, 18 }, { Pose::Stand, Pose::Prone, 42 }, { Pose::Crouch, Pose::Stand, 18 },
+			{ Pose::Crouch, Pose::Prone, 30 }, { Pose::Prone, Pose::Stand, 42 }, { Pose::Prone, Pose::Crouch, 63 } };
+		size_t used = 0, skipped = 0;
+		for (const SpawnPoint &p : m->points) {
+			if (used == 6) {
+				break;
+			}
+			const SettleResult settled = settle_spawn(motor, *m->world, p, 1, 1000);
+			if (!settled.ok) {
+				++skipped; // E3 reports it
+				continue;
+			}
+			const Vec3 feet = settled.state.position;
+			const std::optional<uint16_t> heading = find_clear_heading(motor, *m->world, feet, 20.0f);
+			if (!heading) {
+				++skipped;
+				continue;
+			}
+			++used;
+			const uint16_t yaw = *heading;
+			// The settled state turned to the course heading (one idle tick at that yaw, still at rest).
+			SoldierState base = settled.state;
+			run(motor, base, 1, [&](Tick t) { return idle_command(t, yaw, 0, Pose::Stand); });
+			REQUIRE(grounded(base));
+			std::printf("Metro course %zu: point %u at (%.2f, %.3f, %.2f), heading %.1f deg\n", used, p.index, double(feet[0]), double(feet[1]),
+					double(feet[2]), double(yaw_radians(yaw)) * 180.0 / 3.14159265358979323846);
+			// E1a: take the pose at the start, then 120 ticks full forward; the steady window is ticks 60-120.
+			for (const Course &c : courses) {
+				SoldierState s = base;
+				run(motor, s, 80, [&](Tick t) { return idle_command(t, yaw, 0, c.pose); });
+				REQUIRE(s.pose == c.pose);
+				const std::vector<SoldierState> trace = run(motor, s, 120, [&](Tick t) { return move_command(t, kAxisMax, 0, yaw, c.pose, c.buttons); });
+				float lo = 1e9f, hi = 0.0f, rise = 0.0f;
+				size_t slow = 0, bumps = 0;
+				for (size_t i = 59; i < 120; ++i) {
+					const float v = horizontal(trace[i].velocity);
+					lo = std::min(lo, v);
+					hi = std::max(hi, v);
+					rise = std::max(rise, std::fabs(trace[i].position[1] - feet[1]));
+					slow += v < 0.99f * c.expected ? 1 : 0;
+				}
+				for (size_t i = 1; i < 120; ++i) {
+					bumps += std::fabs(trace[i].position[1] - trace[i - 1].position[1]) > 2e-4f ? 1 : 0; // a seam's ghost contact or crack (printed)
+				}
+				const float mean = heading_distance(trace[59].position, trace[119].position, yaw) / (60.0f * kTickSeconds);
+				std::printf("  E1a %s: speed %.5f..%.5f m/s, mean %.5f (expected %.2f), |dy| %.4f m, %zu ticks under 99 %%, %zu seam bumps\n", c.name,
+						double(lo), double(hi), double(mean), double(c.expected), double(rise), slow, bumps);
+				// The window's mean speed is held to +-1 % and no tick may exceed +1 %. Per tick the floor is 95 %, not
+				// 99 % as on the synthetic floor: Metro's floors have unwelded seams between meshes (flat, < 2 mm apart in
+				// height) or cracks where Jolt's CharacterVirtual takes a ghost contact for a tick (a 0.5-14 mm lift or dip, up to 3.5 %
+				// of the speed, regained by the acceleration gain within ~30 ticks); docs/design/m1.md §6.1 "As built in
+				// T2", an open issue. The synthetic E1a in sim-motor-unit keeps the per-tick +-1 %.
+				CHECK_MESSAGE(lo >= 0.95f * c.expected, "point " << p.index << " " << c.name);
+				CHECK_MESSAGE(hi <= 1.01f * c.expected, "point " << p.index << " " << c.name);
+				CHECK_MESSAGE(std::fabs(mean - c.expected) <= 0.01f * c.expected, "point " << p.index << " " << c.name);
+				CHECK(grounded(trace.back()));
+			}
+			// E1b: a jump from rest at the start.
+			{
+				SoldierState s = base;
+				const float take_off = s.position[1];
+				const Tick jump_tick = s.tick + 1;
+				const std::vector<SoldierState> trace =
+						run(motor, s, 90, [&](Tick t) { return move_command(t, 0, 0, yaw, Pose::Stand, t == jump_tick ? buttons::kJump : 0); });
+				float apex = -1.0f;
+				bool landed = false;
+				for (const SoldierState &e : trace) {
+					apex = std::max(apex, e.position[1] - take_off);
+					landed = landed || (e.events & soldier_events::kLanded) != 0;
+				}
+				std::printf("  E1b apex %.6f m, landed %d, end dy %.2e\n", double(apex), landed ? 1 : 0, double(trace.back().position[1] - take_off));
+				CHECK_MESSAGE(std::fabs(apex - 0.6f) <= 0.001f, "point " << p.index);
+				CHECK(landed);
+				CHECK(grounded(trace.back()));
+			}
+			// E1c: the six transitions at the start.
+			std::string ticks;
+			for (const Change &c : changes) {
+				SoldierState s = base;
+				run(motor, s, 90, [&](Tick t) { return idle_command(t, yaw, 0, c.from); });
+				REQUIRE(s.pose == c.from);
+				const std::vector<SoldierState> trace = run(motor, s, 120, [&](Tick t) { return idle_command(t, yaw, 0, c.to); });
+				int64_t started = -1, finished = -1;
+				for (const SoldierState &e : trace) {
+					if (started < 0 && (e.events & soldier_events::kPoseStarted) != 0) {
+						started = int64_t(e.tick);
+					} else if (started >= 0 && finished < 0 && e.transition_ticks == 0 && (e.events & soldier_events::kPoseFinished) != 0) {
+						finished = int64_t(e.tick);
+					}
+				}
+				const int64_t n = started >= 0 && finished >= 0 ? finished - started + 1 : -1;
+				ticks += " " + std::to_string(n);
+				CHECK_MESSAGE(n == int64_t(c.ticks), "point " << p.index << ": " << int(c.from) << " -> " << int(c.to));
+				CHECK(started == int64_t(trace.front().tick));
+			}
+			std::printf("  E1c ticks:%s\n", ticks.c_str());
+		}
+		std::printf("Metro E1a-E1c: %zu courses, %zu points without a 20 m heading skipped\n", used, skipped);
+		CHECK(used == 6);
+	}
+
+	TEST_CASE("sim.motor: Metro E1d drops of 9.8 / 10.1 / 46 m at find_drop_spot (fall = h within 1 mm, impact within 1e-3 m/s)") {
+		Metro *m = metro();
+		if (m == nullptr) {
+			return;
+		}
+		const auto start = std::chrono::steady_clock::now();
+		const std::optional<Vec3> drop = find_drop_spot(*m->motor, *m->world);
+		REQUIRE(drop.has_value());
+		std::printf("Metro drop spot (%.2f, %.4f, %.2f) found in %.3f s\n", double((*drop)[0]), double((*drop)[1]), double((*drop)[2]), seconds_since(start));
+		struct Drop {
+			float h;
+			float min_damage, max_damage;
+			bool dies;
+		};
+		const Drop drops[] = { { 9.8f, 0, 0, false }, { 10.1f, 20, 21, false }, { 46.0f, 100, 100, true } };
+		for (const Drop &d : drops) {
+			// A Teleport at rest with the feet h above the floor (the feet rest on the floor), no spawn protection.
+			SoldierState s = m->motor->spawn_state({ (*drop)[0], (*drop)[1] + d.h, (*drop)[2] }, 0, 1, 5000, false);
+			const float top = s.position[1];
+			SoldierState landed;
+			bool seen = false;
+			for (int i = 0; i < 600 && !seen; ++i) {
+				m->motor->step(s, idle_command(s.tick + 1, 0, 0, Pose::Stand));
+				if ((s.events & soldier_events::kLanded) != 0) {
+					landed = s;
+					seen = true;
+				}
+			}
+			REQUIRE(seen);
+			const float fall = top - landed.position[1];
+			const float expected = std::sqrt(2.0f * 9.81f * d.h);
+			std::printf("E1d Metro %.1f m: fell %.5f m, impact %.5f m/s (sqrt(2gh) %.5f), damage %.3f, health %.3f\n", double(d.h), double(fall),
+					double(landed.impact_speed), double(expected), double(landed.damage), double(landed.health));
+			CHECK(std::fabs(fall - d.h) <= 0.001f);
+			CHECK(std::fabs(landed.impact_speed - expected) <= 1e-3f);
+			CHECK(landed.damage >= d.min_damage);
+			CHECK(landed.damage <= d.max_damage);
+			CHECK(((landed.events & soldier_events::kDied) != 0) == d.dies);
+			CHECK((landed.mode == MoveMode::Dead) == d.dies);
+		}
+	}
+
+	TEST_CASE("sim.motor: Metro: install unchanged (layout.toc, cas.cat, the .sb / .toc files)") {
+		Metro *m = metro();
+		if (m == nullptr) {
+			return;
+		}
+		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s\n", diff.clean() ? "clean" : diff.summary().c_str());
 	}
 }

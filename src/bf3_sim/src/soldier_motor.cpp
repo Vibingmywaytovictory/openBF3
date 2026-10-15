@@ -39,6 +39,10 @@ namespace {
 constexpr float kClipTolerance = 1e-4f;
 // Speeds within this of the target snap onto it (the fraction model approaches it only asymptotically).
 constexpr float kSpeedSnap = 1e-4f;
+// The ground-hugging probe (docs §6.7): a sphere this size lowered from the feet, not a ray, so a crack or seam a
+// few millimetres wide between two floor meshes (common on Metro) does not read as a ledge; a real ledge still
+// lets go once the feet are this far past its edge.
+constexpr float kHugProbeRadius = 0.05f;
 // The prone footprint box starts this far above the feet, so the floor under a prone soldier is not part of it
 // (slopes up to about atan(0.1 / 1.3) = 4.4 degrees fit along the body) [inferred; docs §6.5].
 constexpr float kFootprintFloorClearance = 0.1f;
@@ -427,12 +431,12 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, MotorSt
 	//   - a sweep down stops on the edge the rounded shape still rests on, so stick-to-floor walks the shape down any
 	//     ledge in steps of less than 0.5 m (a 0.6 m ledge too).
 	// So a grounded, non-jumping soldier that did not end on walkable ground and did not move up sticks to the floor
-	// when the floor straight below its feet is within AllowedDistanceFromGround.
+	// when the floor straight below its feet (a kHugProbeRadius sphere) is within AllowedDistanceFromGround.
 	const bool hug = grounded0 && !jumped && p.ground_hugging && p.allowed_distance_from_ground > 0.0f;
 	if (hug && ch.GetGroundState() != JPH::CharacterBase::EGroundState::OnGround && JPH::Vec3(ch.GetPosition()).GetY() - p0.GetY() <= 1e-6f) {
 		const JPH::Vec3 at = JPH::Vec3(ch.GetPosition());
 		const float reach = p.allowed_distance_from_ground;
-		if (m.world->ray({ at.GetX(), at.GetY() + 0.01f, at.GetZ() }, { 0.0f, -(reach + 0.01f), 0.0f }, mask)) {
+		if (m.world->sweep_capsule({ at.GetX(), at.GetY() + 0.01f, at.GetZ() }, kHugProbeRadius, 2.0f * kHugProbeRadius, { 0.0f, -(reach + 0.01f), 0.0f }, mask)) {
 			ch.StickToFloor(JPH::Vec3(0.0f, -reach, 0.0f), w.broadphase_filter(mask), w.object_filter(mask), w.body_filter, w.shape_filter, *w.temp);
 		}
 	}

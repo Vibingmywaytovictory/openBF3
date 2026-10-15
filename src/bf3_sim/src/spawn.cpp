@@ -46,6 +46,28 @@ bool floor_at(const CollisionWorld &p_world, float p_x, float p_z, float p_top, 
 	return p_world.ray({ p_x, p_top, p_z }, { 0.0f, p_bottom - p_top, 0.0f }, query_mask::kMovement, &r_hit);
 }
 
+// How far the bottom sphere of a soldier standing at p_feet (radius p_radius) can drop straight down before it
+// touches kMovement geometry, at most p_depth: a hover gap that bridges floor seams, stands on an edge the centre
+// misses, and is ~0 on a slope (where the feet rest r / cos - r above the surface under the centre). The sphere
+// starts p_lift above the feet (inside the settled stand shape, so it is free); a start in contact gives -p_lift.
+bool drop_below(const CollisionWorld &p_world, const Vec3 &p_feet, float p_radius, float p_lift, float p_depth, float &r_drop) {
+	const Vec3 start = { p_feet[0], p_feet[1] + p_lift, p_feet[2] };
+	StaticHit h;
+	if (!p_world.sweep_capsule(start, p_radius, 2.0f * p_radius, { 0.0f, -(p_lift + p_depth), 0.0f }, query_mask::kMovement, &h)) {
+		return false;
+	}
+	r_drop = h.fraction * (p_lift + p_depth) - p_lift;
+	return true;
+}
+
+// Course lips (find_clear_heading): a stand capsule this far above the feet, swept along the course, meets any
+// step, curb, mat or seam higher than this under its whole footprint (a 4 mm mat on Metro bumps a walker 1 cm up and
+// costs 3 % of its speed for a tick: sim.motor).
+constexpr float kCourseLip = 0.002f;
+// Floor samples along a course: spacing and probe sphere (the motor's hug probe size).
+constexpr float kCourseProbeRadius = 0.05f;
+constexpr float kCourseRayStep = 0.1f;
+
 } // namespace
 
 std::vector<SpawnPoint> to_spawn_points(const core::level::LevelSpawns &p_spawns) {
@@ -71,7 +93,8 @@ std::vector<SpawnPoint> to_spawn_points(const core::level::LevelSpawns &p_spawns
 SettleResult place_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_world, const SpawnPoint &p_point, uint32_t p_life, Tick p_tick,
 		const SettleOptions &p_options) {
 	SettleResult r;
-	const float pad = p_motor.params().tuning.character_padding;
+	const MotorParams &params = p_motor.params();
+	const float pad = params.tuning.character_padding;
 	const Vec3 &at = p_point.position;
 	r.placed = at;
 	r.state = p_motor.spawn_state(at, p_point.yaw, p_life, p_tick);
@@ -79,23 +102,30 @@ SettleResult place_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_wo
 		r.failure = "the point is not finite";
 		return r;
 	}
+	// The floor under the point; without one (a crack or seam in the floor right under it) the rings look nearby.
 	StaticHit floor;
-	if (!floor_at(p_world, at[0], at[2], at[1] + p_options.probe_up, at[1] - p_options.probe_down, floor)) {
-		r.failure = "no floor within " + std::to_string(p_options.probe_up) + " m above to " + std::to_string(p_options.probe_down) + " m below";
+	const bool has_floor = floor_at(p_world, at[0], at[2], at[1] + p_options.probe_up, at[1] - p_options.probe_down, floor);
+	// Straight up from the floor first, then the rings (each sample with the same lifts: a point on a slope next to
+	// a wall needs both).
+	const uint32_t lifts = uint32_t(std::floor(std::max(p_options.max_lift, 0.0f) / kLiftStep + 1e-3f));
+	const auto try_lifts = [&](float p_x, float p_z, float p_floor) {
+		for (uint32_t k = 0; k <= lifts; ++k) {
+			const Vec3 feet = { p_x, p_floor + pad + float(k) * kLiftStep, p_z };
+			if (p_motor.fits_standing(feet)) {
+				r.placed = feet;
+				r.floor_y = p_floor;
+				r.lift = feet[1] - at[1];
+				r.shift = horizontal_distance(feet, at);
+				r.state = p_motor.spawn_state(feet, p_point.yaw, p_life, p_tick);
+				return true;
+			}
+		}
+		return false;
+	};
+	if (has_floor && try_lifts(at[0], at[2], floor.position[1])) {
 		return r;
 	}
-	r.floor_y = floor.position[1];
-	// Straight up from the floor first, then the rings.
-	const uint32_t lifts = uint32_t(std::floor(std::max(p_options.max_lift, 0.0f) / kLiftStep + 1e-3f));
-	for (uint32_t k = 0; k <= lifts; ++k) {
-		const Vec3 feet = { at[0], r.floor_y + pad + float(k) * kLiftStep, at[2] };
-		if (p_motor.fits_standing(feet)) {
-			r.placed = feet;
-			r.lift = feet[1] - at[1];
-			r.state = p_motor.spawn_state(feet, p_point.yaw, p_life, p_tick);
-			return r;
-		}
-	}
+	bool any_floor = has_floor;
 	const uint32_t samples = std::clamp<uint32_t>(p_options.ring_samples, 1u, 64u);
 	const uint32_t rings = std::min<uint32_t>(p_options.rings, 64u);
 	for (uint32_t ring = 1; ring <= rings; ++ring) {
@@ -108,16 +138,15 @@ SettleResult place_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_wo
 			if (!floor_at(p_world, x, z, at[1] + p_options.probe_up, at[1] - p_options.probe_down, h)) {
 				continue;
 			}
-			const Vec3 feet = { x, h.position[1] + pad, z };
-			if (p_motor.fits_standing(feet)) {
-				r.placed = feet;
-				r.floor_y = h.position[1];
-				r.lift = feet[1] - at[1];
-				r.shift = horizontal_distance(feet, at);
-				r.state = p_motor.spawn_state(feet, p_point.yaw, p_life, p_tick);
+			any_floor = true;
+			if (try_lifts(x, z, h.position[1])) {
 				return r;
 			}
 		}
+	}
+	if (!any_floor) {
+		r.failure = "no floor within " + std::to_string(p_options.probe_up) + " m above to " + std::to_string(p_options.probe_down) + " m below";
+		return r;
 	}
 	r.failure = "no room for a standing soldier within " + std::to_string(p_options.max_lift) + " m up or " +
 			std::to_string(p_options.ring_step * float(rings)) + " m sideways";
@@ -139,9 +168,11 @@ void judge_settle(const SoldierMotor &p_motor, const CollisionWorld &p_world, co
 	const Vec3 bottom = { s.position[0], s.position[1] + pad, s.position[2] };
 	r_result.overlapping = p_world.overlap_capsule(bottom, params.radius, params.poses[size_t(Pose::Stand)].height, query_mask::kMovement,
 			params.tuning.pose_change_max_penetration);
-	StaticHit floor;
-	const bool has_floor = floor_at(p_world, s.position[0], s.position[2], s.position[1] + 0.5f, s.position[1] - p_options.probe_down, floor);
-	r_result.gap = has_floor ? s.position[1] - floor.position[1] : 1e9f;
+	// The gap: how far the soldier could still drop (drop_below; on a slope or an edge a resting soldier's feet are
+	// above the surface under its centre, which is not hovering).
+	float drop = 0.0f;
+	const bool has_floor = drop_below(p_world, s.position, params.radius, 0.01f, p_options.probe_down, drop);
+	r_result.gap = has_floor ? drop : 1e9f;
 	const bool grounded = (s.flags & soldier_flags::kGrounded) != 0;
 	if ((s.flags & soldier_flags::kAlive) == 0) {
 		r_result.failure = "died while settling";
@@ -152,7 +183,7 @@ void judge_settle(const SoldierMotor &p_motor, const CollisionWorld &p_world, co
 	} else if (!has_floor) {
 		r_result.failure = "no floor under the settled soldier";
 	} else if (r_result.gap > pad + p_options.hover_tolerance || r_result.gap < -pad - p_options.hover_tolerance) {
-		r_result.failure = "the feet are " + std::to_string(r_result.gap) + " m from the floor";
+		r_result.failure = "the settled soldier can still drop " + std::to_string(r_result.gap) + " m";
 	} else if (r_result.lift > p_options.max_lift + 1e-4f) {
 		r_result.failure = "lifted " + std::to_string(r_result.lift) + " m";
 	} else if (r_result.shift > p_options.ring_step * float(p_options.rings) + 0.05f) {
@@ -255,16 +286,16 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 	const float crouch = params.poses[size_t(Pose::Crouch)].height;
 	const float tolerance = params.tuning.pose_change_max_penetration;
 	const Vec3 bottom = { p_feet[0], p_feet[1] + pad, p_feet[2] };
-	// The poses that do not depend on the heading.
+	// The poses that do not depend on the heading, and the room for the E1b jump (the stand shape swept up by the
+	// jump height and 5 cm).
 	if (p_world.overlap_capsule(bottom, r, crouch, query_mask::kMovement, tolerance) ||
-			p_world.overlap_capsule(bottom, r, 2.0f * r, query_mask::kMovement, tolerance)) {
+			p_world.overlap_capsule(bottom, r, 2.0f * r, query_mask::kMovement, tolerance) ||
+			p_world.sweep_capsule(bottom, r, stand, { 0.0f, params.jump_height + 0.05f, 0.0f }, query_mask::kMovement)) {
 		return std::nullopt;
 	}
 	const PoseParams &prone = params.poses[size_t(Pose::Prone)];
 	const uint32_t headings = std::min<uint32_t>(p_headings, 4096u);
-	const uint32_t samples = uint32_t(std::floor(p_length));
-	// The sweep starts above the floor's own contact; anything lower than that is a rise the floor rays catch.
-	const float sweep_lift = p_max_rise + pad + 0.01f;
+	const uint32_t samples = uint32_t(std::floor(p_length / kCourseRayStep));
 	for (uint32_t i = 0; i < headings; ++i) {
 		const uint16_t yaw = uint16_t(uint32_t(p_first_yaw) + uint32_t((uint64_t(i) * 65536u) / headings));
 		const float a = yaw_radians(yaw);
@@ -285,17 +316,28 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 				}
 			}
 		}
-		const Vec3 start = { p_feet[0], p_feet[1] + sweep_lift, p_feet[2] };
-		if (p_world.sweep_capsule(start, r, stand - sweep_lift, { dx * p_length, 0.0f, dz * p_length }, query_mask::kMovement)) {
+		// The stand capsule kCourseLip above the feet: walls, and every step, curb or seam higher than that under
+		// its footprint.
+		const Vec3 start = { p_feet[0], p_feet[1] + kCourseLip, p_feet[2] };
+		if (p_world.sweep_capsule(start, r, stand - kCourseLip, { dx * p_length, 0.0f, dz * p_length }, query_mask::kMovement)) {
 			continue;
 		}
+		// Floor samples on the centre line (a kCourseProbeRadius sphere lowered from half a metre up, so the
+		// millimetre cracks between floor meshes, which the motor's hug bridges, do not count as holes): no hole, no
+		// drop beyond p_max_rise, level normals.
 		bool level = true;
 		for (uint32_t k = 1; k <= samples && level; ++k) {
 			StaticHit h;
-			const float x = p_feet[0] + dx * float(k);
-			const float z = p_feet[2] + dz * float(k);
-			if (!floor_at(p_world, x, z, p_feet[1] + 0.5f, p_feet[1] - 1.0f, h) || std::fabs(h.position[1] - p_feet[1]) > p_max_rise ||
-					h.normal[1] < kLevelCos) {
+			const float x = p_feet[0] + dx * (float(k) * kCourseRayStep);
+			const float z = p_feet[2] + dz * (float(k) * kCourseRayStep);
+			const float top = p_feet[1] + 0.5f;
+			const float depth = 1.5f;
+			// The normal from a ray at the same spot (the sphere may touch a crack's side); a ray that falls through
+			// the crack judges nothing.
+			StaticHit n;
+			const bool ray_hit = floor_at(p_world, x, z, top, top - depth, n);
+			if (!p_world.sweep_capsule({ x, top, z }, kCourseProbeRadius, 2.0f * kCourseProbeRadius, { 0.0f, -depth, 0.0f }, query_mask::kMovement, &h) ||
+					std::fabs(top - h.fraction * depth - p_feet[1]) > p_max_rise || (ray_hit && n.normal[1] < kLevelCos)) {
 				level = false;
 			}
 		}
