@@ -28,3 +28,8 @@ target_sources(bf3_render PRIVATE
     include/bf3/render/mesh_cache.h
     include/bf3/render/level_prepare.h
 )
+
+# M1 level scene (docs/design/m1.md §11): the plan of RS meshes, materials, textures and instances.
+target_sources(bf3_render PRIVATE
+    include/bf3/render/level_scene.h
+)

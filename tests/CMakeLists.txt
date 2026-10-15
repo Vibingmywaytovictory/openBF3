@@ -224,3 +224,8 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_prepare_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(prepare.unit prepare PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_prepare_cl_dir}")
 endif()
+# M1 interface contract (docs/design/m1.md §14): every M1 cross-track header compiles together, the plain types
+# keep their properties, the shared inline helpers (command quantisation, ticks, quantisers) behave. No data.
+openbf3_test(test_m1_contract test_main.cpp m1_contract_tests.cpp test_support.h)
+target_link_libraries(test_m1_contract PRIVATE bf3_host bf3_render)
+add_test(NAME m1.contract COMMAND test_m1_contract)

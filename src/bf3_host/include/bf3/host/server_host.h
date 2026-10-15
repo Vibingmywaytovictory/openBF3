@@ -5,6 +5,7 @@
 // the body transforms; it must stop() the host before Godot's singletons go away (GameSession
 // does so in NOTIFICATION_PREDELETE, the extension deinit calls stop_all()).
 
+#include "bf3/host/game_server.h"
 #include "bf3/sim/physics_world.h"
 
 #include <atomic>
@@ -26,6 +27,10 @@ struct ServerConfig {
 	uint16_t port = 0; // 0 = any free port
 	size_t max_peers = 64;
 	sim::WorldConfig world;
+	// M1 (docs/design/m1.md §8): when set, the host runs a GameServer instead of the S0 dynamic-body world:
+	// tick_hz must be sim::kSimHz, the ENet host opens net::kChannelCount channels and every datagram goes to
+	// the GameServer. Null keeps the S0 behaviour unchanged (sim.* / host.* tests).
+	std::shared_ptr<const GameServerConfig> game;
 };
 
 // Plain copy of the counters, safe to read on any thread.
@@ -62,6 +67,8 @@ public:
 	ServerStats stats() const;
 	// Latest published transforms of the dynamic bodies (copied under a short lock).
 	void copy_body_transforms(std::vector<sim::BodyTransform> &r_out) const;
+	// M1: the GameServer's stats as published after the last tick (empty when no game is configured).
+	GameServerStats game_stats() const;
 
 	// Stops and joins every running ServerHost of the process (extension deinit safety net).
 	static size_t stop_all();
