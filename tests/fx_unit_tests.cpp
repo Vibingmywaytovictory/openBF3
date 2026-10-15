@@ -7,6 +7,7 @@
 #include "bf3/core/path_guard.h"
 #include "bf3/fx/effect_cache.h"
 #include "bf3/fx/effect_compiler.h"
+#include "bf3/fx/effect_library.h"
 #include "bf3/fx/fx_harness.h"
 #include "bf3/fx/simulator.h"
 #include "fx_test_support.h"
@@ -267,6 +268,27 @@ TEST_CASE("compile: unknown types, unknown enumerators, cycles, base emitters, f
 			}
 		}
 	}
+}
+
+TEST_CASE("library: one def per name, failures remembered, bindings per emitter") {
+	fxt::MemResolver db;
+	REQUIRE(db.set("fx/test/a", simple_doc(1).p));
+	EffectBuilder fx(9);
+	fx.emitter(1);
+	REQUIRE(db.set("fx/test/effect", fx.done()));
+	EffectLibrary::Sources src;
+	src.fx = sources_of(db);
+	EffectLibrary lib(src);
+	const auto a = lib.get("FX/Test/Effect");
+	REQUIRE(a.ok());
+	const auto b = lib.get("fx/test/effect");
+	REQUIRE(b.ok());
+	CHECK(a->get() == b->get()); // shared, compiled once
+	CHECK(lib.bindings(**a).size() == (*a)->emitters.size());
+	CHECK_FALSE(lib.get("fx/test/nothing").ok());
+	CHECK_FALSE(lib.get("fx/test/nothing").ok());
+	CHECK(lib.preload({ "fx/test/effect", "fx/test/nothing" }, 2) == 1);
+	CHECK(lib.impacts() == nullptr);
 }
 
 TEST_CASE("find_partition: unique suffix, none, ambiguous") {
