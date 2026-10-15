@@ -43,6 +43,7 @@
 // Keys: M toggles north-up / rotating (BF3 PC opens the large map with M [inferred]); the minimap draws only while the
 // first-person camera is current (F6 free camera hides it).
 
+#include "bf3/core/install_reader.h"
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/minimap.h"
 
@@ -80,7 +81,13 @@ struct MinimapAssets {
 	uint32_t atlas_height = 0; // 1024
 	double seconds = 0.0; // loader wall time (G14, minimap.loaded)
 	int64_t peak_working_set_delta = 0; // process PeakWorkingSetSize after the loader minus before it, bytes (G14)
+	int64_t working_set_delta = 0; // WorkingSetSize after minus before (the session's load usually set the peak already)
+	// The player marker's visible (alpha > 0) pixels: their bounding-box centre minus the frame's centre, atlas texels
+	// (marker.pixels compares the read-back's changed pixels against the control centre plus this, turned and scaled).
+	float marker_alpha_dx = 0.0f;
+	float marker_alpha_dy = 0.0f;
 	std::string error; // non-empty: nothing to draw (logged once)
+	std::string steps; // per-step wall times, for the log
 };
 
 // The pixels, handed to the main thread once and released after the Godot upload.
@@ -126,6 +133,8 @@ private:
 	void run_loader(); // loader thread
 	void build_godot_side(); // main thread, once after the publish
 	void update_view();
+	void layout_controls();
+	bool inert_args() const;
 
 	godot::NodePath session_path_ = godot::NodePath("../Session");
 	Bf3LevelSession *session_ = nullptr;
@@ -136,6 +145,10 @@ private:
 	std::string shots_dir_;
 	bool check_ = false;
 
+	bf3::core::InstallReader reader_; // copied from the session on the main thread before the loader starts
+	std::string level_id_;
+	std::string mode_id_;
+	bool loader_started_ = false;
 	std::thread loader_;
 	std::atomic<bool> stop_{ false };
 	std::atomic<bool> published_{ false };
@@ -146,6 +159,7 @@ private:
 	float center_override_x_ = 0.0f;
 	float center_override_z_ = 0.0f;
 
+	bool build_attempted_ = false;
 	bool drawn_ = false;
 	godot::Ref<godot::ImageTexture> satellite_;
 	godot::Ref<godot::ImageTexture> combat_area_;

@@ -45,8 +45,20 @@
 // re-centred on an HQ and on a flag (Bf3MinimapHud::set_center_override: the HUD's MinimapView only, the soldier does
 // not move), rotating and north-up; the debug_uv and icons-hidden frames are never saved.
 
+#include "bf3/core/ui/minimap.h"
+
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/ref.hpp>
+#include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
+
 #include <string>
 #include <vector>
+
+namespace godot {
+class CanvasLayer;
+class ColorRect;
+} // namespace godot
 
 namespace bf3::godot_side {
 
@@ -57,7 +69,8 @@ inline constexpr int kMinimapCheckRings = 3;
 
 class MinimapCheck {
 public:
-	explicit MinimapCheck(Bf3MinimapHud &p_hud, std::string p_shots_dir);
+	// p_rows false: --minimap-shots without --minimap-check (the screenshots only, no rows; the run then ends with 0).
+	MinimapCheck(Bf3MinimapHud &p_hud, std::string p_shots_dir, bool p_rows = true);
 	// Main thread, every frame after the HUD drew its first frame; true when finished (the session then quits).
 	bool step(double p_delta);
 	int exit_code() const;
@@ -68,11 +81,52 @@ private:
 		bool pass = false;
 		std::string detail;
 	};
+	// One view's frames (north-up or rotating): debug UV, normal with the icon item hidden, marker only, all icons.
+	struct ViewFrames {
+		godot::Ref<godot::Image> uv;
+		godot::Ref<godot::Image> hidden;
+		godot::Ref<godot::Image> marker;
+		godot::Ref<godot::Image> full;
+		bf3::core::ui::MinimapView view;
+	};
+	void add(const std::string &p_name, bool p_pass, const std::string &p_detail);
+	godot::Ref<godot::Image> grab() const;
+	void row_calibration(const godot::Ref<godot::Image> &p_image);
+	void row_map_uv(const char *p_name, const ViewFrames &p_frames);
+	void row_marker_pixels(const ViewFrames &p_north, const ViewFrames &p_rotating);
+	void row_icons_minimap(const ViewFrames &p_north, const ViewFrames &p_rotating);
+	void evaluate_icons(const ViewFrames &p_frames, std::string &r_detail, bool &r_pass, size_t &r_checked);
+	void row_icons_world(const godot::Ref<godot::Image> &p_hidden, const godot::Ref<godot::Image> &p_visible);
+	void finish_rows();
+
 	Bf3MinimapHud &hud_;
 	std::string shots_dir_;
+	bool rows_enabled_ = true;
 	std::vector<Row> rows_;
 	int phase_ = 0;
 	int frames_in_phase_ = 0;
+	int wait_ = 0;
+	float yaw0_ = 0.0f;
+	float pitch0_ = 0.0f;
+	float world_yaw_ = 0.0f;
+	godot::CanvasLayer *calibration_layer_ = nullptr;
+	godot::ColorRect *calibration_ = nullptr;
+	godot::Vector2i calibration_px_;
+	ViewFrames north_;
+	ViewFrames rotating_;
+	godot::Ref<godot::Image> world_hidden_;
+	// Icon positions recorded at the full frame of each view (the control redraws every frame with the same frozen view).
+	std::vector<bf3::core::ui::ScreenPoint> north_icons_;
+	std::vector<godot::Rect2> north_rects_;
+	std::vector<bool> north_clamped_;
+	std::vector<bf3::core::ui::ScreenPoint> rotating_icons_;
+	std::vector<godot::Rect2> rotating_rects_;
+	std::vector<bool> rotating_clamped_;
+	size_t shot_index_ = 0;
+	size_t shots_saved_ = 0;
+	bool shots_failed_ = false;
+	bool done_ = false;
+	int exit_code_ = 1;
 };
 
 } // namespace bf3::godot_side

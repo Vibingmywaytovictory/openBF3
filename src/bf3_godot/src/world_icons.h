@@ -49,6 +49,8 @@ public:
 	// get_camera_projection() and global transform, multiplied out in the check) plus the same offset, so a wrong lift,
 	// offset or camera shows; and a pixel test that the icon is in the viewport image there (minimap_check.h).
 	const std::vector<bf3::core::ui::ScreenPoint> &last_points() const { return last_points_; }
+	// Parallel to last_points: the drawn icon rect in canvas units (empty for skipped ones).
+	const std::vector<godot::Rect2> &last_rects() const { return last_rects_; }
 	const WorldIconStyle &style() const { return style_; }
 
 protected:
@@ -61,6 +63,7 @@ private:
 	const godot::Camera3D *camera_ = nullptr;
 	std::vector<MinimapIconDraw> icons_;
 	std::vector<bf3::core::ui::ScreenPoint> last_points_;
+	std::vector<godot::Rect2> last_rects_;
 };
 
 } // namespace bf3::godot_side

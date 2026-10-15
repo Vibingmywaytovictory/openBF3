@@ -37,6 +37,8 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 
 #include <string_view>
@@ -96,12 +98,16 @@ struct MinimapIconDraw {
 	float world_z = 0.0f;
 	float yaw = 0.0f;
 	godot::String label;
+	bool objective = true; // a flag / HQ (clamped to the rim); false for the other soldiers (dropped off the disc)
 };
 
 class Bf3MinimapControl : public godot::Control {
 	GDCLASS(Bf3MinimapControl, godot::Control)
 
 public:
+	Bf3MinimapControl();
+	~Bf3MinimapControl() override;
+
 	void _draw() override;
 
 	// Set once by Bf3MinimapHud::build_godot_side.
@@ -110,21 +116,37 @@ public:
 	// Every frame.
 	void set_view(const bf3::core::ui::MinimapView &p_view);
 	void set_icons(std::vector<MinimapIconDraw> p_icons);
+	// The square's side and the disc radius in control-local canvas units, the radius objectives are clamped to.
+	float disc_radius() const;
+	float rim_radius() const;
+	// Canvas units per atlas texel of the minimap icons (scales with the control's side).
+	float icon_scale() const;
 
 	// ---- check hooks (main thread) ----------------------------------------------------------------------------------
 	void set_debug_uv(bool p_on); // the shader's debug_uv uniform
 	void set_icons_visible(bool p_on); // the icon item (objectives, marker, others)
+	void set_marker_only(bool p_on); // the icon item draws the player marker alone (marker.pixels)
 	// Control-local canvas units -> viewport pixels (get_viewport()->get_final_transform() * get_global_transform_with_canvas()).
 	godot::Transform2D canvas_to_viewport() const;
 	// Where the last _draw put the player marker and each icon (control-local; NaN for none). Self-reported: the check
 	// uses them only to find where to read back, never as the evidence (design §10.4).
 	bf3::core::ui::ScreenPoint last_marker() const { return last_marker_; }
 	const std::vector<bf3::core::ui::ScreenPoint> &last_icons() const { return last_icons_; }
+	// Parallel to last_icons: the drawn rect (control-local, before the rotation of rotating icons) and whether the icon
+	// was clamped to the rim.
+	const std::vector<godot::Rect2> &last_icon_rects() const { return last_icon_rects_; }
+	const std::vector<bool> &last_clamped() const { return last_clamped_; }
+	const std::vector<MinimapIconDraw> &icons() const { return icons_; }
+	const bf3::core::ui::MinimapView &view() const { return view_; }
 
 protected:
 	static void _bind_methods();
+	void _notification(int p_what);
 
 private:
+	void ensure_items();
+	void draw_icon(const MinimapIconDraw &p_icon, godot::Vector2 p_at, float p_angle, godot::Rect2 *r_rect);
+
 	bf3::core::ui::MinimapData data_;
 	bf3::core::ui::MinimapView view_;
 	godot::Ref<godot::ImageTexture> satellite_;
@@ -133,8 +155,14 @@ private:
 	const bf3::core::ui::HudIconAtlas *icon_atlas_ = nullptr;
 	std::vector<MinimapIconDraw> icons_;
 	bool icons_visible_ = true;
+	bool marker_only_ = false;
+	bool debug_uv_ = false;
+	godot::RID map_item_; // carries the ShaderMaterial
+	godot::RID icon_item_; // above it, no material
 	bf3::core::ui::ScreenPoint last_marker_;
 	std::vector<bf3::core::ui::ScreenPoint> last_icons_;
+	std::vector<godot::Rect2> last_icon_rects_;
+	std::vector<bool> last_clamped_;
 };
 
 } // namespace bf3::godot_side

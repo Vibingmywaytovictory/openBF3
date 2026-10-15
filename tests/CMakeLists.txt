@@ -396,3 +396,11 @@ if(OPENBF3_ASAN)
     set_tests_properties(ui.minimap.unit ui.hud.unit ui.minimap ui.hud.icons ui.hud.sources ui.minimap.fuzz ui.hud.fuzz
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui2_impl_cl_dir}" TIMEOUT 1800)
 endif()
+# UI ui2 godot (docs/design/ui-minimap-icons.md §1 G9-G11, G14, §10.4): godot.ui2 runs the windowed
+# --minimap-check --minimap-mode=ConquestSmall0 of res://scenes/m1_metro.tscn after a probe run (exit 77 = skipped
+# without OPENBF3_GODOT, an install, a window or a rendering device); OPENBF3_UI2_SHOTS names a directory for the
+# six G11 PNGs. It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.ui2 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui2.cmake)
+    set_tests_properties(godot.ui2 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 400 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()

@@ -5,8 +5,11 @@
 #include "dedicated_main_loop.h"
 #include "game_session.h"
 #include "level_session.h"
+#include "minimap_control.h" // UI ui2
+#include "minimap_hud.h" // UI ui2
 #include "viewmodel_demo.h"
 #include "weapon_inspector.h"
+#include "world_icons.h" // UI ui2
 
 #include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
@@ -33,6 +36,10 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3CollisionOverlay);
 	// M1 T6
 	GDREGISTER_CLASS(bf3::godot_side::Bf3LevelSession);
+	// UI ui2 (docs/design/ui-minimap-icons.md §10.1)
+	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapHud);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {
