@@ -45,3 +45,11 @@ target_sources(bf3_sim PRIVATE
     src/spawn.cpp
     src/prediction.cpp
 )
+
+# S4 logic (docs/design/s4.md §7-§9): the logic interpreter, its trace and ghost, the native port bindings and stubs,
+# the scripted runs and gate judges (sources land with the S4 implementation).
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/logic_runtime.h
+    include/bf3/sim/logic/logic_native.h
+    include/bf3/sim/logic/logic_harness.h
+)

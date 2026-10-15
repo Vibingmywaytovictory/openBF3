@@ -341,3 +341,15 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.m1_load COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1_load.cmake)
     set_tests_properties(godot.m1_load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
+
+# S4 logic (docs/design/s4.md §12): s4.contract compiles every S4 level-logic header together and checks the port ids,
+# the type table's classification (48 server-capable primitives, 34 in the S4 slice, 25 S4 natives), the lookups and
+# the plain types. No data.
+openbf3_test(test_s4_contract test_main.cpp s4_contract_tests.cpp test_support.h)
+target_link_libraries(test_s4_contract PRIVATE bf3_sim)
+add_test(NAME s4.contract COMMAND test_s4_contract --test-suite=s4-contract)
+set_tests_properties(s4.contract PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_s4_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(s4.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s4_cl_dir}")
+endif()

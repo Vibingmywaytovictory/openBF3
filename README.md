@@ -65,6 +65,8 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 
+S4 logic: `ctest -R "s4|logic"` runs `s4.contract` (level-logic headers and type table, no data); see "S4 level logic" below.
+
 ## Run
 
 ```bat
@@ -1143,3 +1145,29 @@ measured 4.8 s (the OS file cache was colder).
 Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
 terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
 floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.
+
+## S4 level logic (spike)
+
+Design: [docs/design/s4.md](docs/design/s4.md). The level's own EBX wiring (blueprints, prefab interfaces flattened
+by port hash, sub-worlds by GameMode) becomes an immutable `LogicGraph` (`bf3_core`, `gameplay/logic_graph.h`),
+run server-side by a deterministic FIFO interpreter (`bf3_sim`, `sim/logic/logic_runtime.h`) over the 48
+server-capable primitive types, with gameplay entities kept native behind port bindings (`sim/logic/logic_native.h`).
+The type table (`gameplay/logic_types.h`) classifies all 130 entity types found on the connections of the 230
+level x mode rows: 54 primitive (34 in the S4 slice), 36 native (25 in S4), 35 passive, 5 data, plus 4 structural.
+
+Gates (each one ctest; install tests exit 77 = skipped without an install; timing is wall clock on a shared machine,
+so only the p99 is gated):
+
+| gate | ctest | pass threshold |
+|---|---|---|
+| G1 Metro RushLarge0 full graph | `logic.metro` | builds; 549 scopes, 7,299 objects, 145 SyncedBool, 0 unknown / unimplemented, 0 unbound event edges, work <= 1 M |
+| G2 Rush spawners in base order | `logic.metro` | 8 spawners open as 4 Team1+Team2 groups, group g between base g-1's and base g's fall |
+| G3 park event | `logic.metro` | park SyncedBool SetTrue exactly 600 ticks after base 1 falls |
+| G4 determinism | `logic.metro` | 2 in-process runs and 1 `bf3dump logic trace` run: equal trace hashes |
+| G5 0 unknown types | `logic.types` | 14 Metro + Caspian rows: 0 unknown, 0 unimplemented server nodes |
+| G6 Caspian CQL timeline | `logic.caspian` | the tank / IFV Enabled changes of docs/design/s4.md §9.2 at their ticks; jets constant |
+| G7 cost | `logic.perf` | drain p99 <= 100 us per tick, < 10,000 deliveries per tick |
+| I1 census (info) | `logic.census` | all 230 rows listed |
+
+Today only `s4.contract` exists (headers compile together, port ids, the type table); the rest lands with the
+implementation. `bf3dump logic instantiate|stats|run|trace|census` will print the same numbers.
