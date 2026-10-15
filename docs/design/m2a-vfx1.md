@@ -61,7 +61,7 @@ building, so they are noisy; the bench gate takes the median of 5 runs and runs 
 | compiler `effect_compiler.h`, cache `effect_cache.h` | `bf3_fx` | load-time workers (`bf3::core::parallel_for`); thread-safe across items over a thread-safe resolver (EbxLibrary, read-only EbxDb) |
 | `EffectLibrary` (`effect_library.h`) | `bf3_fx` | any; internally one mutex over the name map, compiles outside the lock with a per-name once flag |
 | `EmitterAtlas`, `ImpactTable` | `bf3_fx` | built once per level on a load worker; immutable afterwards, read from any thread |
-| `FxWorld` (`simulator.h`) | `bf3_fx` | owner thread (in VFX2 the Godot main thread) calls start / stop / set_* / begin_step / end_step; `run_items` on any threads over disjoint ranges; owns no thread |
+| `FxWorld` (`simulator.h`) | `bf3_fx` | owner thread (in VFX2 the Godot main thread) calls start / stop / set_* / clear / begin_frame / begin_step / end_step; `run_items` on any threads over disjoint ranges; owns no thread |
 | `bf3dump fx ...` | `tools/bf3dump` (`fx_commands.h/.cpp`, the spawns_commands pattern) | the tool's main thread plus `parallel_for` lanes |
 | tests | `tests/fx_*` | doctest executables |
 
@@ -259,7 +259,7 @@ sub-step split does not change it [inferred].
 | AirResistance | velocity *= exp(−DragFactor × v.x × dt_e) | [inferred form] |
 | Gravity | velocity.y −= Gravity × v.x × dt_e (positive pulls down, §4) | [verified sign] |
 | LocalForce | velocity += R_emitter · (LocalForce ⊙ v.xyz) × dt_e | [inferred] |
-| Turbulance | velocity += Intensity × v.x × n(serial, age) × dt_e, n a unit vector from value noise keyed by (seed, serial) with knots every 1/30 s of age, linearly interpolated (dt-partition independent) | [inferred, R19] |
+| Turbulance | velocity += Intensity × v.x × n(serial, age) × dt_e, n a unit vector from value noise keyed by fx_key(instance seed, serial, kSlotTurbulence, knot × 3 + axis) with knots every 1/30 s of age, linearly interpolated (dt-partition independent) | [inferred, R19] |
 | UpdateLinearVelocity | position += velocity × dt_e (absent: the particle does not move) | [inferred; present on every moving emitter] |
 | UpdateRotation | rotation += rotation speed × v.x × dt_e | [inferred] |
 | UpdateSize, UpdateSizeX/Y/Z | size = spawn size ⊙ (UpdateSize v) ⊙ (v_x, v_y, v_z of the axis processors); Pivot carried | [golden G3] |
@@ -491,7 +491,7 @@ format bump.
 Prototype 24.7 ns/particle/frame (plan §7.10 item 8) with a BF3-like chain. Design: SoA per emitter instance
 (position, velocity, size, colour, age, life, frame, rotation, serial), present-slot dispatch per emitter (a switch
 over a short array of present processors, no virtual calls), header-inline polynomials. 16k particles × 50 ns = 0.8 ms
-on one lane; spread over 4–8 lanes in VFX2. Compile cost target: census over `@all-mp` < 30 s on all lanes, a warm
+on one lane; spread over 4–8 lanes in VFX2. The serial part (`begin_step` admission, `end_step` compaction bookkeeping) is O(live emitter instances) except one memmove per item that closes the gaps dead particles leave in the vertex and light buffers (about 1.3 MB at 16k particles); it is inside the G9 timing window. Each item compacts its own SoA state in run_items. Compile cost target: census over `@all-mp` < 30 s on all lanes, a warm
 `get` < 50 µs (reported, not gated).
 
 **G9 workload and measure** (`bf3dump fx bench`, ctest `tools.fx_bench`). One FxWorld with the default config, one
@@ -620,7 +620,7 @@ building): every row passed except `godot.m1` (E1 teleport: "the soldier did not
 Godot-side change). After this design commit the full ctest ran again: 57/57 passed (55 passed, `core.cache_data` and
 `core.res` skipped for their unset sample variables), including `godot.m1` (344 s) and `godot.m1_load` (50 s) and the
 new `fx.contract`; total 798 s. The earlier two failures were most likely load on the shared machine (same code, now passing) [inferred].
-Revision 2's run is recorded in §17.
+Revision 2 (headers changed, no Godot-side change): `toolsuild.cmd dev` built with no warnings, each of the 8 headers compiles standalone under /W4 /permissive-, and the full ctest with OPENBF3_GODOT set passed 57/57 (55 passed, the same 2 skips), `godot.m1` 351 s, `godot.m1_load` 56 s, `fx.contract` 0.02 s, total 877 s on the shared machine.
 
 ## 17. Revision 2 (review response)
 
