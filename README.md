@@ -938,6 +938,46 @@ Measured (dev build, 16 threads, RX 9070 XT, D3D12, 1152×648, warm file cache, 
   meshes, top view 0.72 / 1.58 ms for 3.98 M primitives.
 * ASan: `core.level.collision` takes about 11 min (the 32 mutants about 9), so its timeout there is 1,800 s.
 
+## M1 soldier motor (T2)
+
+<!-- M1 T2 -->
+`bf3_sim` steps one soldier per call: `SoldierMotor::step(state, command)` on a Jolt `CharacterVirtual` that is reset
+from the POD `SoldierState` every tick, so a step depends only on (state, command, static world, params) and a
+client replay equals the server's step bit for bit (docs/design/m1.md §6). The numbers are Metro's soldier
+(`read_soldier_def` + `make_motor_params`); the gain semantics nobody has measured yet live in
+`bf3-opensource/config/motor_tuning.cfg` (19 keys, all `[inferred]` defaults; `parse_motor_tuning` rejects
+unknown keys, duplicates and out-of-range values and names the line). Also in this track: `spawn.h`
+(`settle_spawn` in three pieces for the server's sweep, `stamp_spawn`, `choose_spawn`, and the deterministic test
+courses `find_clear_heading` / `find_drop_spot`), `prediction.h` (`PredictionRing`, `sim::catch_up`, the one rule
+ClientSession uses for reconciliation and the base fill), `soldier_state_hash`, and `bf3_core`'s
+`read_level_spawns` (AlternateSpawn points and CharacterSpawnReference spawners with PropertyConnection values).
+
+`bf3dump spawns <LEVEL> <MODE>` prints the spawn points (index, object, position, the yaw the server spawns with,
+team, enabled, priority, entity) and the spawners as TSV. Metro TDM: 102 neutral points at y 59.8-73.4 and the two
+spawners #6 (Team2) and #7 (Team1), radius 10, 3 friendly kills in 30 s, in 0.18 s.
+
+Tests: `sim.motor.unit` (no data) and `sim.motor` (install; skipped without one).
+
+* `sim.motor.unit`, synthetic worlds: E1a walk 4.0000 / sprint 6.5 / crouch 2.0 / prone 0.9 m/s within 1 % per tick
+  (the default gains reach 99 % by tick 22, sprint by 33), direction factors and diagonals, deceleration; E1b apex
+  0.599999 m (the penalised second jump 0.1797 m); E1c 18 / 42 / 18 / 30 / 42 / 63 ticks; E1d 9.8 m → 13.86636 m/s,
+  0 hp; 10.1 m → 14.07700 m/s, 20.192 hp; 46 m → 30.04195 m/s, dead; ramps 49° / 51°, a 10° ramp at full speed,
+  step limit 0.42 m, wall pushes without jitter, ledges (0.4 m hugged, 0.6 m InAir), a 55° slide without damage, a
+  ceiling jump, stand-blocked, the prone footprint, floor cracks; determinism over 10,000 busy steps on two worlds
+  and in a child process (chain `6e8ede9353e499c8`), save / restore, 8 interleaved soldiers, hostile states;
+  `catch_up` from a mismatch, forward and backward resets, a 3 s stall and a spawn against the server's own
+  stepping; settle, `choose_spawn`, the course searches; the shipped cfg, its round trip and a parser fuzz.
+* `sim.motor`, Metro's real static world (soup → `build_static_world`): `make_motor_params` from the level's
+  soldier has the same `motor_params_hash` as the unit tests' synthetic soldier; `settle_spawn` 102 / 102 ok (worst
+  lift −0.18 m, shift 0.4 m, gap ≤ 4.5 mm, 0.05 s); E1a-E1c along `find_clear_heading` courses from 6 spawn points
+  (window means within 0.5 %, apex 0.599998 m, transition ticks exact); E1d at `find_drop_spot`
+  (−526.3, 62.5, −758.5): the same three impacts as above, fall = h within 1e-5 m; install unchanged. About 3 s in
+  `dev`, 31 s under `asan`.
+
+Known limit (docs §6.1 "As built in T2"): where two floor meshes meet unwelded, Jolt's character padding meets the
+far mesh's edge and lifts a walker 0.5-14 mm for a tick, costing up to 3.5 % of the speed for about half a second.
+Metro's E1a therefore holds the window mean to ±1 % and each tick to ≥ 95 %.
+
 ## Layout and pinned third-party code
 
 | path | what |

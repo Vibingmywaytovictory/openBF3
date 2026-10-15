@@ -71,8 +71,9 @@ std::vector<SpawnPoint> to_spawn_points(const core::level::LevelSpawns &p_spawns
 
 // settle_spawn in three pieces, so the server's SpawnSweep runs the idle ticks over live server ticks (not 6,120
 // motor steps inside one tick) and still gives the same rows as the headless call, bit for bit:
-//   place_spawn   floor ray (the rings when it misses), lifts, rings with lifts -> SettleResult with placed / floor_y / lift / shift filled and
-//                 state = spawn_state(placed); failure set when no floor or no room
+//   place_spawn   floor ray (the rings when it misses), lifts, rings with lifts -> SettleResult with placed /
+//                 floor_y / lift / shift filled and state = spawn_state(placed); failure set when no floor or no
+//                 room
 //   (the caller)  settle_ticks steps of the idle command (sim::idle_command) on state
 //   judge_settle  grounded, no overlap, |gap| <= padding + hover_tolerance, lift / shift limits -> ok, gap,
 //                 overlapping, failure
@@ -108,12 +109,13 @@ size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const s
 // higher than 2 mm under the capsule's footprint: such lips bump a walker and cost speed), and floor samples every
 // 10 cm along it (a 5 cm sphere lowered onto the floor, so the millimetre cracks between floor meshes do not count)
 // stay within p_max_rise of p_feet.y with normals within 2 degrees of up (no holes, stairs or ramps: the speed
-// checks must not see the ground plane's sin^2 shortening). At the start the prone shape and the prone footprint box (CollisionBoxMin/MaxExpand,
-// 1.3 m behind to 1.1 m ahead, oriented by the heading) and the crouch shape must also be free, and the stand
-// shape needs the jump height + 5 cm of room straight up, so the E1b jump and the E1c pose courses run from p_feet
-// on that heading and are refused only for timing bugs, never for a nearby wall or ceiling. Tries p_headings yaws
-// evenly spaced from p_first_yaw (64 by default: most Metro points stand by a wall, where the footprint rules out
-// most headings); nullopt when none qualifies (the test then moves to the next spawn point).
+// checks must not see the ground plane's sin^2 shortening). At the start the prone shape and the prone footprint
+// box (CollisionBoxMin/MaxExpand, 1.3 m behind to 1.1 m ahead, oriented by the heading) and the crouch shape must
+// also be free, and the stand shape needs the jump height + 5 cm of room straight up, so the E1b jump and the E1c
+// pose courses run from p_feet on that heading and are refused only for timing bugs, never for a nearby wall or
+// ceiling. Tries p_headings yaws evenly spaced from p_first_yaw (64 by default: most Metro points stand by a wall,
+// where the footprint rules out most headings); nullopt when none qualifies (the test then moves to the next spawn
+// point).
 std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const CollisionWorld &p_world, const Vec3 &p_feet, float p_length,
 		float p_max_rise = 0.05f, uint32_t p_headings = 64, uint16_t p_first_yaw = 0);
 
