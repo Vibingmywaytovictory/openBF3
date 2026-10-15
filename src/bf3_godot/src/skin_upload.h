@@ -61,9 +61,12 @@ public:
 	virtual bool build(const bf3::render::SoldierAssets &p_assets, const bf3::anim::CrowdEvaluator &p_eval, std::span<const uint8_t> p_team_of,
 			godot::RID p_scenario, std::string *r_error) = 0;
 	// Root transforms of every soldier (always) and palettes of the soldiers whose palette changed
-	// (CrowdEvaluator::changed). Main thread.
+	// (CrowdEvaluator::changed). Main thread. Not called at all on a frozen frame (s3.md §1 G1b: the soldiers
+	// keep their last roots and palettes and draw the same).
 	virtual void upload(const bf3::anim::CrowdEvaluator &p_eval, std::span<const godot::Transform3D> p_roots, UploadStats &r_stats) = 0;
 	virtual void set_visible(bool p_visible) = 0;
+	// One soldier's instance on or off (the G3 shots hide all but the posed pair). Main thread.
+	virtual void set_soldier_visible(uint32_t p_soldier, bool p_visible) = 0;
 	// Frees every RID / node it created. Main thread.
 	virtual void clear() = 0;
 };

@@ -25,12 +25,21 @@
 // resolves for every LOD0 slot. At rig rest, 109 of the 113 US skin matrices (103 of the 107 RU) are identity
 // within 1e-3. The rest are weapon bones (worst 0.338, Wep_Mag_Ammo / Wep_Mag), as expected for a weapon bound
 // from weaponske01. No mesh names a *Cloth or *Phys joint (the clips leave those undriven).
+// The 3p animatable's skeleton animations/skeletons/venice3pmasterskeleton [verified] is a MasterSkeletonAsset:
+// MasterSkeleton = veniceantske01 itself, plus one SubSkeleton weaponske01 with a BoneMap of 25 (weapon bone k ->
+// master bone 0, 155..178, same names) and a TransformMap of 25 pure translations (no rotation, up to 0.80 m).
+// So the body binds are exactly veniceantske01's, as used here. The TransformMap does not explain the weapon
+// bind offsets (residuals of 0.09-1.12 m either way), so S3 does not apply it; the weapon is fixed instead by the
+// weaponske01 layout of its undriven joints (SoldierTeam::weapon_joints / weapon_local, crowd_eval.h step 3):
+// 23 of the 25 weaponske01 bones have a parent of the same name in veniceantske01 (the other two are the roots
+// exportAnimation and Wep_Root, which hangs under Spine2 in the rig).
 // Materials come from MeshAsset.Materials through the MeshVariationDatabase (material_lookup.h), as for the
 // level: shaders/root/characterroot (+ _alphatest, _lod, _skin), eye_simple, teeth, alphablend, and
 // weapons/shaders/weaponpreset3p. Material-family mapping belongs to the L track; S3 only calls
 // mesh_materials and make_standard_material.
 
 #include "bf3/anim/crowd_clips.h"
+#include "bf3/anim/layers.h"
 #include "bf3/anim/skeleton.h"
 #include "bf3/anim/skinning.h"
 #include "bf3/anim/temporal_lod.h"
@@ -89,6 +98,11 @@ struct SoldierTeam {
 	std::string appearance;
 	std::vector<SoldierPart> parts; // body parts in appearance order, then the weapon
 	anim::SkinBinds binds; // one list for every part of the team: one skeleton per soldier
+	// crowd_eval.h step 3 (rig-sized): 1 for the rig joints that are weaponske01 bones below Wep_Root and that the
+	// locomotion clips leave undriven (21 [verified]); their weaponske01 LocalPose. render.s3 checks that at rig rest
+	// with this layout every weapon skin matrix equals Wep_Root's within 1e-3.
+	anim::BoneMask weapon_joints;
+	std::vector<anim::Xform> weapon_local;
 	uint32_t reload_index = 0; // chooser index (M16A4 41, AK-74M 33)
 	anim::CrowdClipData reload; // load_chosen_clip(reload_chooser, reload_index)
 	float reload_time = 0.0f; // WeaponDef reload time (0 when unresolved: rate 1)

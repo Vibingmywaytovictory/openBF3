@@ -1,5 +1,5 @@
 #pragma once
-// Temporal LOD for animated characters from the GameAnimationSettings in the install (S3; docs/design/s3.md §5.6;
+// Temporal LOD for animated characters from the GameAnimationSettings in the install (S3; docs/design/s3.md §5.7;
 // research/topics/03-animation.md C17).
 //
 // Retail values [verified 2026-10-15, superbundle Win32/default_settings_win32, partition default/settings_win32,
@@ -7,7 +7,7 @@
 //   tier      First  Second  Third  Fourth  Fifth  Sixth     TemporalLoddingFarDistance 208
 //   distance  2      30      60     90      120    150 m     ClientEnable true, ServerEnable true
 //   delta     0.02   0.04    0.06   0.08    0.10   0.12 s
-// The data names only distances and delta times. Their meaning here is an INFERENCE (s3.md §5.6): a character at
+// The data names only distances and delta times. Their meaning here is an INFERENCE (s3.md §5.7): a character at
 // camera distance d >= tiers[i].distance updates at most every tiers[i].delta_time seconds. Nearer than the
 // first tier it updates every frame. Beyond far_distance, far_policy says what happens. Between updates the
 // previous pose is kept and only the root transform follows the simulation.

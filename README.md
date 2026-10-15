@@ -1156,19 +1156,21 @@ palettes are uploaded on the main thread. Status: design and interfaces in the t
 evaluator, the asset loader and the Godot node land in the track's slices.
 
 Gates (one command; a 2560x1440 primary screen, windowed; the machine is shared, so timings are noisy and a failed
-timing gate is repeated once with both runs reported):
+timing gate is repeated once with both runs reported; ctest TIMEOUT 2000 s covers both runs):
 
 ```bat
 set OPENBF3_GODOT=C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe
 ctest --preset dev -R godot.s3_crowd -V
-:: = "%OPENBF3_GODOT%" --path bf3-opensource res://scenes/s3_crowd.tscn -- --s3-check --quit-after=900
+:: = "%OPENBF3_GODOT%" --path bf3-opensource res://scenes/s3_crowd.tscn --
+::     --s3-check --walkers=0 --no-hud --bf3-cache=<fresh scratch root> --quit-after=600   (process timeout 900 s)
 ```
 
 | id | threshold |
 |---|---|
-| G1a | main-thread animation + skeleton timer p50 and p99 <= 2.0 ms, 64 soldiers in view, temporal LOD off, >= 30 s |
-| G1b | that p50 plus the main-thread CPU Godot spends on the skeletons (animated minus frozen run, `QueryThreadCycleTime`) <= 2.0 ms |
+| G0 | validity, else the check FAILs without measuring: the fixed Metro stage is clear (floor, no overlap, unoccluded rays); 64 of 64 soldiers inside the camera frustum on every sampled frame; walkers 0, HUD off, thread model Safe, cycle-timer self-test; run blend exercised (two-cycle >= 25 %, idle mix >= 1 %, >= 1.25 locomotion clips per soldier-frame) |
+| G1a | step wall time (wait, upload, inputs, kick) p50 and p99 <= 2.0 ms, 64 soldiers in view, temporal LOD off, vsync off, >= 30 s |
+| G1b | p50(G1a) + hidden main-thread CPU (animated minus frozen windows interleaved in one run, step's own CPU excluded, `QueryThreadCycleTime`) <= 2.0 ms |
 | G2 | frame time p50 and p99 <= 16.7 ms, vsync off and vsync on, >= 30 s each |
-| G3 | 16 shoulder close-ups (US / RU x idle / run / reload / aim x 2 views) in `b\shots\s3\` plus pinch and hand-IK metrics; the user judges the pinch |
+| G3 | 16 shoulder close-ups (US / RU x idle / run / reload / aim x 2 views) in `b\shots\s3\`, each with the shoulder joint on screen and unoccluded, plus pinch and hand-IK metrics and one stage overview; the user judges the pinch |
 
 Screenshots of BF3 content go to `b\shots\s3\` (gitignored) and are never committed.
