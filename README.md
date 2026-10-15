@@ -552,6 +552,109 @@ install). `godot.inspector` and `godot.s0_selftest` run the Godot project headle
 `--s0-selftest`) through `tests/godot_check.cmake` when `OPENBF3_GODOT` names the console executable, and are
 skipped (77) otherwise; they share a resource lock, since both use the project and its DLL (CMake 3.29+).
 
+## Level traversal (`bf3_core`, `include/bf3/core/level/`)
+
+C++ port of IW4L `level_bf3` (Apache-2.0: `level.rs`, `mode.rs`, `info.rs`, `world.rs`, `transform.rs`,
+`variations.rs`, `connections.rs` and the counting parts of `geometry/` and `collision/`), namespace
+`bf3::core::level`. Everything stays in Frostbite space (metres, Y up, rows right/up/forward/trans, child-in-parent =
+row-vector product); there is no IW conversion.
+
+* `load_level(install, "MP_Subway", "TeamDeathMatch0")` mounts the level read-only and picks the mode's bundles: the
+  level bundle, its `_settings_win32` / `_gameconfiglight_win32` bundles, then breadth-first every
+  `SubWorldReferenceObjectData` the mode includes (`AutoLoad` and the mode in `EnabledOptions` of every `GameMode`
+  inclusion setting), nested ones too; absent bundles are listed (Metro has no `Conquest_Large`). Every partition is
+  parsed into one `EbxDb`. `level_info` gives names, `WorldSizeXZ`, the modes and the minimap without the rest.
+* `World::traverse` walks `LevelData`: layers (`WorldPartReferenceObjectData`), sub-worlds (own scope and
+  `MeshVariationDatabase`), `ReferenceObjectData` -> `ObjectBlueprint` objects / prefab scopes, spawn references,
+  `StaticModelGroupEntityData` members (from `InstanceTransforms`, else the next `ShapesSubpart` of the group's
+  `HavokPhysicsData`, one cursor over the members, `InstanceScale`, per-instance variation), other entities at their
+  `Transform`. `Excluded`, `BlueprintTransform` and `Transform` fed by `PropertyConnection`s are resolved through the
+  scope interfaces and child-prefab output ports (`Scopes::property`). Each `PlacedObject` has its kind, world
+  transform, entity, reference, sub-world, scope, variation hash, group slot and, for meshes, the `MeshAsset`, entity
+  type and `PhysicsData`.
+* `census.h`: `hidden_parts` (composite parts only later health states show), `starts_hidden` (`Visible` fed by a
+  `BoolEntityData` with `DefaultValue` false: ruins, Metro's backdrops), `mesh_census` (the scene meshes and
+  instances the placements need: one mesh per (asset, variation entry, hidden parts, bake of a non-uniform transform),
+  dropped when no LOD draws a triangle, world kind when placed at most 4 times with a placed radius of at least 16 m)
+  and `collision_placements` (each static model group's Havok res at the group transform, and each placed mesh
+  object's physics asset prebaked closest to its scale, with the frame the res's shapes go through). The decoders of
+  `include/bf3/core/res/` turn those res into triangles and convex pieces.
+* Hostile data fails with an error, never crashes or hangs. One `WorkBudget` (`budget.h`, 2^22 units) pays for the
+  load, the traversal, the property resolver and every helper run on the `World` (`starts_hidden`, `hidden_parts`,
+  `mesh_census`, `collision_placements`; `includes`, `subworld_references` and `read_level_info` take one too). Work
+  is charged before it is done, where it is done: the raw length of every data array before it is scanned (null and
+  unresolved slots included, a shared array once per scan), each connection candidate a resolution examines, one per
+  triangle the census examines, and 1 + length/16 for every data string or name it copies, keys, compares, parses or
+  prints (`charged_str`, `charged_enum_name`, `charge_text`; nothing else in `src/level` reads string values), so text
+  work and kept copies are at most 16 bytes per unit whatever one string's length or how many slots name it.
+  `EbxPartition` indexes its string table's NULs at parse, so decoding a string is O(log n), not a scan, and it
+  flattens each type's fields along its base chain into one table sorted by name hash, so a field lookup (`get`,
+  `follow`, a transform's 16 row reads, the resolver's `data_field`) and an enumerator name are one binary search,
+  whatever the type layout: a deep or wide hostile type costs a unit what a shallow one does. The parser rejects types
+  with more than 1,024 descriptors along their base chain and tables of more than 4 lookups per descriptor (retail,
+  all 501,952 partitions of the 53 non-chunk superbundles: at most 96 and 1.96), and its check pays for each type's
+  descriptors before scanning them, so parsing is linear in the partition's size. Once a charge
+  fails the budget stays exhausted, every later call returns the budget error, and `World::traverse` checks it again
+  after the walk. The comment block at the top of `src/level/world.cpp` is the cost model: every loop reachable from
+  the public entry points and what bounds it. Beside the budget: depth limits (48 blueprint levels, 8 layer levels,
+  32 connection hops and 2^16 hops per resolution), caps of 256 k placed objects, 256 k scopes, 64 k static model
+  groups, 4,096 kept sub-world names and 4,096 level-description modes, 1,024-byte names for lookups, each group res
+  parsed once per traversal, and a static model group whose instances need more subparts than its res holds is an
+  error. Retail use over all 230 level x mode runs: at most 26.9 k units for load + walk (MP_Subway RushLarge0: 19.0 k
+  walker steps, 542 resolve hops at most on any run, no resolution capped) and 412 k for everything `bf3dump level`
+  does (load, walk, census, collision, listing with every printed name charged; MP_Subway RushLarge0), 10 times below
+  the budget. `core.level.unit` and `core.level` build
+  hostile partitions for every shape found so far, and each one ends on the budget in under a second in the dev
+  build: a WorldPart listing itself twice, the same with a static model group of 200 k empty members, 10,000 objects
+  whose `Excluded` is fed by self-looping connections, a loop through a prefab's interface, K references to one
+  N-slot list (`Objects`, inclusion `Settings`, shared `EnabledOptions`, `MeshVariationDatabase` entries, component
+  `HealthStates`, `RigidBodies`, level-description `Mode` lists), K start-hidden checks over M connections, and K
+  slots naming one long string (a 4 MB `BundleName` on 2^18 sub-world slots and on a self-listing fan-out, 2^16 mode
+  names of one 1 MB string, long inclusion criteria and options, a 1 MB `BundleName` on a self-looping resolver hop,
+  4 MB collision asset names), deep and wide type layouts (a fan-out through types 27-30 deep and 32 descriptors wide
+  runs at the shallow form's rate; layouts past the parser's caps fail to parse) and a 16 MB partition of 255-wide
+  overlapping value types, whose check fails in under a second (88 s before).
+* A `World` is not thread-safe: `Scopes` keeps resolution state in its const methods (`property`, `interface`). The
+  `WorkBudget` itself is atomic; `mesh_census` charges it from its parallel part, which otherwise only reads the
+  partitions and the mount.
+
+`bf3dump level <LEVEL> <MODE> [--legacy-mvdb]` prints the canonical listing (sub-worlds, groups, every placement with
+its transform as f32 bit patterns, the mesh census variants and totals, the collision placements; every section
+sorted); `bf3dump levelmodes <LEVEL>` lists a level's modes. **Parity**: `research/probes/tools/level-oracle` (Rust,
+path-depends on IW4L `level_bf3`/`ebx_bf3`/`resource_bf3` and the `ebx-dump` install readers) prints the same listing
+through IW4L's own traversal:
+
+```bat
+set CARGO_TARGET_DIR=<scratch>\target
+cargo build --release --manifest-path research\probes\tools\level-oracle\Cargo.toml
+level-oracle level MP_Subway TeamDeathMatch0 > rust.txt  &  b\dev\tools\bf3dump\bf3dump.exe level MP_Subway TeamDeathMatch0 > cpp.txt
+```
+
+Result on 2026-10-14: every mode of every one of the 29 MP levels (230 level x mode runs, 5.7 k-18.3 k lines each) is
+byte-identical, transforms bit for bit; no MeshSet failed to decode. Load + traverse + census take 0.15-3.4 s per
+run, median 0.24 s (warm file cache, 16 threads shared with other builds). Handoff §9 / sections/03 against `ctest -R core.level`:
+
+| level x mode | handoff | measured |
+|---|---|---|
+| Metro TDM | 10,873 placements -> 842 meshes (762 model, 80 world), 10,571 instances | identical; groups 499 / 7,869 / 877 explicit / 6,992 Havok, 0 `user_data` mismatches; 710 composite placements hide parts; 64 start hidden (42 + 22 backdrops); 12,315 partitions |
+| Bazaar CQL | 620 meshes, 5,783 instances | 5,783 instances; 613 meshes with today's variation lookup, **620 (579 / 41) with `--legacy-mvdb`** (see below); group 381 / 3,646 / 3,292 |
+| Caspian CQS | 20,311 placements on 2,277 meshes, 12,725 placed hidden | traversal: 6,847 mesh placements -> 304 meshes, 6,846 instances; group 170 / 4,444 / 4,264; 538 composite placements hide parts (sections/03 §2.5) |
+| Palace Domination (IW4L geometry report) | 4,175 placements, 704 meshes (632 / 72), 4,131 instances | identical with `--legacy-mvdb` (701 without) |
+
+* The Metro and Bazaar mesh counts are IW4L's geometry builder at commit bab7c1a (2026-10-01). On 2026-10-07
+  (066d34c) IW4L stopped using a `MeshVariationDatabase` entry with an empty `Materials` list (the mesh falls back
+  to its default entry; Caspian's service buildings had gone white), which merges variants: Bazaar 620 -> 613
+  meshes, Palace 704 -> 701. The C++ follows today's rule; `CensusOptions::legacy_variations` / `--legacy-mvdb`
+  reproduce the handoff.
+* Caspian's 20,311 / 2,277 / 12,725 are the IW engine's static-model count of a later IW4L build (`bf3 static models:
+  20311 placements on 2277 meshes (... 12725 placed hidden for destruction)` in its world report), after the
+  geometry builder had gained destruction views: each destruction state's part is drawn by an instance of its own,
+  hidden until the state shows. That is a renderer count, not a traversal one; the per-state expansion belongs to the
+  destruction work, not to this traversal. Its 20,311 - 12,725 = 7,586 shown instances are 739 more than the
+  traversal's 6,847 mesh placements; that remainder is not attributed.
+* sections/03's "Metro 702" composite placements that hide parts is Metro ConquestSmall0 (IW4L probe
+  `geom_MP_Subway_ConquestSmall0.txt`); Metro TDM's is 710 (`3-CONVERTER-PART/geometry.md`), which `core.level` asserts.
+
 ## Layout and pinned third-party code
 
 | path | what |

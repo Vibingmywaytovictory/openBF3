@@ -35,6 +35,9 @@
 //                              body multipliers for its projectile; --name adds the localised name
 //   weapons [--level <sb>]     one TSV row per SoldierWeaponUnlockAsset under weapons/
 // Text database (text_commands.cpp): text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>
+//   level <LEVEL> <MODE> [--legacy-mvdb]  canonical placement listing of one level x mode
+//                              (level_commands.cpp; parity with research/probes/tools/level-oracle)
+//   levelmodes <LEVEL>         the modes a level offers
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -50,6 +53,7 @@
 #include "weapon_commands.h"
 #include "text_commands.h"
 #include "json_number.h"
+#include "level_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -471,7 +475,9 @@ void usage() {
 			"  numcheck\n"
 			"  weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]\n"
 			"  weapons [--level <sb>]\n"
-			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n");
+			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n"
+			"  level <LEVEL> <MODE> [--legacy-mvdb]\n"
+			"  levelmodes <LEVEL>\n");
 }
 
 } // namespace
@@ -559,6 +565,12 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "text" && !rest.empty() && rest[0].rfind("--", 0) != 0) {
 		return bf3dump::cmd_text_lookup(ebx_ctx, rest);
+	}
+	if (cmd == "level" && (rest.size() == 2 || (rest.size() == 3 && rest[2] == "--legacy-mvdb"))) {
+		return bf3dump::cmd_level(ctx.install, rest[0], rest[1], rest.size() == 3);
+	}
+	if (cmd == "levelmodes" && rest.size() == 1) {
+		return bf3dump::cmd_level_modes(ctx.install, rest[0]);
 	}
 	usage();
 	return 2;

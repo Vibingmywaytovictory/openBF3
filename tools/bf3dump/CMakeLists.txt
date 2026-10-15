@@ -5,3 +5,5 @@ target_link_libraries(bf3dump PRIVATE bf3_core)
 openbf3_module(bf3dump)
 # Weapon tables (bf3_core gameplay readers).
 target_sources(bf3dump PRIVATE weapon_commands.cpp weapon_commands.h)
+# Level traversal listing (bf3_core/level), parity with research/probes/tools/level-oracle.
+target_sources(bf3dump PRIVATE level_commands.cpp level_commands.h)
