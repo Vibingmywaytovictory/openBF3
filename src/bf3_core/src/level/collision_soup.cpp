@@ -532,14 +532,25 @@ struct TerrainRow {
 
 // One terrain object's rows of cells (all cores), then its triangles in emit order into r_built.
 void terrain_triangles(const res::HeightGrid &p_grid, const Transform &p_frame, const std::map<std::pair<int32_t, int32_t>, size_t> &p_tiles,
-		uint32_t p_placement, unsigned p_threads, SoupTerrain &r_terrain, Built &r_built) {
+		const std::vector<std::array<int32_t, 2>> &p_cover, uint32_t p_placement, unsigned p_threads, SoupTerrain &r_terrain, Built &r_built) {
 	const size_t width = p_grid.width;
 	const size_t height = p_grid.height;
-	if (width < 2 || height < 2 || p_tiles.empty()) {
+	if (width < 2 || height < 2 || (p_tiles.empty() && p_cover.empty())) {
 		return;
 	}
 	const TileMask mask = near_tiles(p_tiles);
+	// S1 terrain cover (SoupOptions::terrain_cover, sorted and unique): those tiles keep their cells too. Empty for
+	// every M1 soup, so the default rule below is untouched.
+	const auto covered = [&](int32_t p_x, int32_t p_z) {
+		return !p_cover.empty() && std::binary_search(p_cover.begin(), p_cover.end(), std::array<int32_t, 2>{ p_x, p_z });
+	};
 	const auto near = [&](int32_t p_x, int32_t p_z) {
+		if (covered(p_x, p_z)) {
+			return true;
+		}
+		if (p_tiles.empty()) {
+			return false;
+		}
 		if (!mask.bits.empty()) {
 			return mask.has(p_x, p_z);
 		}
@@ -1027,6 +1038,10 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 	set_stage(progress, SoupProgress::Terrain, 0);
 	if (p_options.terrain) {
 		const std::map<std::pair<int32_t, int32_t>, size_t> havok_tiles = tile_counts;
+		// S1: the cover, sorted and unique whatever the caller passed (binary search above).
+		std::vector<std::array<int32_t, 2>> cover = p_options.terrain_cover;
+		std::sort(cover.begin(), cover.end());
+		cover.erase(std::unique(cover.begin(), cover.end()), cover.end());
 		for (size_t at = 0; at < p_world.objects.size(); ++at) {
 			const PlacedObject &object = p_world.objects[at];
 			if (object.kind != ObjectKind::Terrain) {
@@ -1070,7 +1085,7 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			}
 			frame.origin = t.trans;
 			Built b;
-			terrain_triangles(grid, frame, havok_tiles, uint32_t(jobs.size() + soup.terrains.size()), p_options.threads, terrain, b);
+			terrain_triangles(grid, frame, havok_tiles, cover, uint32_t(jobs.size() + soup.terrains.size()), p_options.threads, terrain, b);
 			if (soup.triangles + soup.terrain_triangles + b.triangles.size() > kMaxSoupTriangles) {
 				return make_error("collision soup: more than " + std::to_string(kMaxSoupTriangles) + " triangles");
 			}

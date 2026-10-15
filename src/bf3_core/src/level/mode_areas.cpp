@@ -1,0 +1,307 @@
+// read_mode_areas, combat_area_tiles and level_combat_tiles (include/bf3/core/level/mode_areas.h; spike S1,
+// docs/design/s1.md §4, §5.3). The combat area chain is followed generically through LinkConnections: from the
+// trigger's Geometry field, up through each prefab interface it is linked to (the field the interface side names is
+// the field the parent scope links from the instantiating reference), until a VolumeVectorShapeData is the target.
+#include "bf3/core/level/mode_areas.h"
+
+#include "bf3/core/install.h"
+#include "bf3/core/level/level.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <optional>
+#include <set>
+#include <string>
+
+namespace bf3::core::level {
+
+namespace {
+
+constexpr uint32_t kMaxInterfaceHops = 16; // prefab levels a combat area link may climb (retail: 1)
+
+double seconds_since(std::chrono::steady_clock::time_point p_start) {
+	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
+}
+
+// The fed value of a field (a PropertyConnection of the object's scope into it), as spawn_points.cpp reads it.
+Result<std::optional<Property>> fed(const World &p_world, const PlacedObject &p_object, std::string_view p_field) {
+	const EbxInstance &target = p_object.reference ? *p_object.reference : p_object.entity;
+	Result<std::optional<Property>> r = p_world.scopes.property(p_object.scope, target, field_id(p_field));
+	if (!r || *r || !p_object.reference) {
+		return r;
+	}
+	return p_world.scopes.property(p_object.scope, p_object.entity, field_id(p_field));
+}
+
+// TeamId of a field: a fed `TeamId TeamN` constant or the object's own enum.
+Result<int> team_of(const World &p_world, const PlacedObject &p_object, std::string_view p_field) {
+	Result<std::optional<Property>> f = fed(p_world, p_object, p_field);
+	BF3_TRY(f);
+	if (*f) {
+		if (const std::optional<uint32_t> t = (*f)->as_team(); t && *t < 1024u) {
+			return int(*t);
+		}
+		if (const std::optional<int64_t> v = (*f)->as_i64(); v && *v >= 0 && *v < 1024) {
+			return int(*v);
+		}
+	}
+	const std::optional<EbxValue> own = p_object.entity.get(p_field);
+	if (own) {
+		if (const std::optional<int32_t> e = own->enum_value(); e && *e >= 0 && *e < 1024) {
+			return int(*e);
+		}
+	}
+	return 0;
+}
+
+// An enum field's name (fed constant text first), charged.
+Result<std::string> enum_of(const World &p_world, const PlacedObject &p_object, std::string_view p_field) {
+	WorkBudget &budget = *p_world.budget;
+	Result<std::optional<Property>> f = fed(p_world, p_object, p_field);
+	BF3_TRY(f);
+	if (*f) {
+		if (const std::optional<std::string_view> s = (*f)->as_str()) {
+			BF3_TRY(charge_text(budget, *s));
+			return std::string(*s);
+		}
+		if ((*f)->kind == Property::Kind::Constant) {
+			BF3_TRY(charge_text(budget, (*f)->text));
+			const std::string_view text = (*f)->text;
+			const size_t space = text.rfind(' ');
+			return std::string(space == std::string_view::npos ? text : text.substr(space + 1));
+		}
+	}
+	Result<std::optional<std::string_view>> own = charged_enum_name(p_object.entity.get(p_field), budget);
+	BF3_TRY(own);
+	return *own ? std::string(**own) : std::string();
+}
+
+// Follows the link chain from (p_source, p_field) in p_scope to a VolumeVectorShapeData. Every link scanned is
+// charged. Returns the shape and the scope that places it, or nullopt.
+struct ShapeAt {
+	EbxInstance shape;
+	uint32_t scope = 0;
+};
+Result<std::optional<ShapeAt>> follow_area(const World &p_world, uint32_t p_scope, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth) {
+	WorkBudget &budget = *p_world.budget;
+	if (p_depth > kMaxInterfaceHops || p_scope >= p_world.scopes.size()) {
+		return std::optional<ShapeAt>();
+	}
+	const Connections &c = p_world.scopes.connections(p_scope);
+	BF3_TRY(budget.charge(1 + c.link.size()));
+	const Scope &scope = p_world.scopes.get(p_scope);
+	for (const Connection &link : c.link) {
+		if (!(link.source == p_source) || link.source_field != p_field) {
+			continue;
+		}
+		BF3_TRY(charge_text(budget, link.target.type_name()));
+		if (link.target.is_a("VolumeVectorShapeData")) {
+			return std::optional<ShapeAt>(ShapeAt{ link.target, p_scope });
+		}
+		if (link.target.is_a("InterfaceDescriptorData") && scope.reference && scope.parent) {
+			Result<std::optional<ShapeAt>> up = follow_area(p_world, *scope.parent, *scope.reference, link.target_field, p_depth + 1);
+			BF3_TRY(up);
+			if (*up) {
+				return up;
+			}
+		}
+	}
+	return std::optional<ShapeAt>();
+}
+
+} // namespace
+
+Result<ModeAreas> read_mode_areas(const World &p_world) {
+	WorkBudget &budget = *p_world.budget;
+	BF3_TRY(budget.status());
+	ModeAreas out;
+	const int32_t geometry = field_id("Geometry");
+	for (uint32_t i = 0; i < p_world.objects.size(); ++i) {
+		const PlacedObject &object = p_world.objects[i];
+		BF3_TRY(budget.charge(1));
+		if (object.kind == ObjectKind::CombatArea) {
+			if (out.combat_areas.size() >= kMaxCombatAreas) {
+				return make_error("mode areas: more than " + std::to_string(kMaxCombatAreas) + " combat areas");
+			}
+			CombatAreaDef area;
+			area.trigger = i;
+			Result<int> team = team_of(p_world, object, "Team");
+			BF3_TRY(team);
+			area.team = *team;
+			const EbxInstance &source = object.entity;
+			Result<std::optional<ShapeAt>> shape = follow_area(p_world, object.scope, source, geometry, 0);
+			BF3_TRY(shape);
+			if (!*shape) {
+				return make_error("mode areas: combat area trigger " + std::to_string(i) + " (" + object.entity.guid().to_string() +
+						") resolves to no VolumeVectorShapeData");
+			}
+			const PlacedObject *placed = p_world.placed((*shape)->scope, (*shape)->shape);
+			const LevelTransform frame = placed != nullptr ? placed->transform : p_world.scopes.get((*shape)->scope).transform;
+			if (placed != nullptr) {
+				area.shape = uint32_t(placed - p_world.objects.data());
+			}
+			const std::optional<EbxValue> points = (*shape)->shape.get("Points");
+			const OptionalEbxArray list = points ? points->as_array() : OptionalEbxArray();
+			if (!list || list->size() < 3) {
+				return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has fewer than 3 points");
+			}
+			if (list->size() > kMaxCombatAreaPoints) {
+				return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has " + std::to_string(list->size()) + " points");
+			}
+			BF3_TRY(budget.charge(list->size()));
+			for (const EbxValue &p : *list) {
+				const std::optional<EbxStruct> s = p.as_struct();
+				const std::optional<std::array<float, 3>> v = s ? s->vec3() : std::nullopt;
+				if (!v || !std::isfinite((*v)[0]) || !std::isfinite((*v)[1]) || !std::isfinite((*v)[2])) {
+					return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has a bad point");
+				}
+				const Vec3 w = frame.transform_point(*v);
+				if (!std::isfinite(w[0]) || !std::isfinite(w[2]) || std::fabs(w[0]) > 1e6f || std::fabs(w[2]) > 1e6f) {
+					return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has a point out of range");
+				}
+				area.polygon.push_back({ w[0], w[2] });
+			}
+			if (const std::optional<EbxValue> h = (*shape)->shape.get("Height")) {
+				const std::optional<float> f = h->as_f32();
+				area.height = f && std::isfinite(*f) ? *f : 0.0f;
+			}
+			out.combat_areas.push_back(std::move(area));
+			continue;
+		}
+		const bool capture = object.kind == ObjectKind::CapturePoint;
+		const bool interaction = object.kind == ObjectKind::Other && object.entity.is_a("GameInteractionEntityData");
+		if (!capture && !interaction) {
+			continue;
+		}
+		ModeObjectiveDef o;
+		o.object = i;
+		o.position = object.transform.trans;
+		if (capture) {
+			Result<std::string> type = enum_of(p_world, object, "CapturableType");
+			BF3_TRY(type);
+			o.kind = *type == "CTUnableToChangeTeam" ? ModeObjectiveDef::Kind::Hq : ModeObjectiveDef::Kind::Flag;
+			Result<int> team = team_of(p_world, object, "InitialOwnerTeam");
+			BF3_TRY(team);
+			o.team = *team;
+		} else {
+			Result<std::string> type = enum_of(p_world, object, "InteractionEntityType");
+			BF3_TRY(type);
+			if (*type != "IET_RushCrateArm") {
+				continue;
+			}
+			o.kind = ModeObjectiveDef::Kind::Mcom;
+		}
+		if (const std::optional<std::string_view> label = p_world.scopes.db().name_of(object.entity.partition().guid())) {
+			BF3_TRY(charge_text(budget, *label));
+			o.scope_label = std::string(*label);
+		}
+		out.objectives.push_back(std::move(o));
+	}
+	return out;
+}
+
+std::vector<std::array<int32_t, 2>> combat_area_tiles(std::span<const CombatAreaDef> p_areas, float p_margin) {
+	constexpr float kTile = 64.0f;
+	std::set<std::array<int32_t, 2>> tiles;
+	const float margin = std::isfinite(p_margin) ? std::clamp(p_margin, 0.0f, 1024.0f) : 0.0f;
+	for (const CombatAreaDef &a : p_areas) {
+		if (a.polygon.size() < 3) {
+			continue;
+		}
+		float x0 = a.polygon[0][0], x1 = x0, z0 = a.polygon[0][1], z1 = z0;
+		for (const std::array<float, 2> &p : a.polygon) {
+			x0 = std::min(x0, p[0]);
+			x1 = std::max(x1, p[0]);
+			z0 = std::min(z0, p[1]);
+			z1 = std::max(z1, p[1]);
+		}
+		const int32_t tx0 = int32_t(std::floor((x0 - margin) / kTile));
+		const int32_t tx1 = int32_t(std::floor((x1 + margin) / kTile));
+		const int32_t tz0 = int32_t(std::floor((z0 - margin) / kTile));
+		const int32_t tz1 = int32_t(std::floor((z1 + margin) / kTile));
+		// A tile is touched when the polygon grown by the margin overlaps its square: the square's distance to the
+		// polygon (0 inside) is at most the margin.
+		const auto inside = [&](float p_x, float p_z) {
+			bool in = false;
+			const size_t n = a.polygon.size();
+			for (size_t i = 0, j = n - 1; i < n; j = i++) {
+				const float xi = a.polygon[i][0], zi = a.polygon[i][1];
+				const float xj = a.polygon[j][0], zj = a.polygon[j][1];
+				if ((zi > p_z) != (zj > p_z) && p_x < (xj - xi) * (p_z - zi) / (zj - zi) + xi) {
+					in = !in;
+				}
+			}
+			return in;
+		};
+		const auto seg_box_distance2 = [](float ax, float az, float bx, float bz, float qx0, float qz0, float qx1, float qz1) {
+			// Distance between a segment and an axis-aligned box, sampled finely enough for a 64 m tile (exactness is
+			// not needed: the margin is 32 m).
+			float best = 1e30f;
+			const float len = std::sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+			const int steps = std::max(1, int(len / 2.0f));
+			for (int s = 0; s <= steps; ++s) {
+				const float t = float(s) / float(steps);
+				const float px = ax + (bx - ax) * t, pz = az + (bz - az) * t;
+				const float dx = std::max({ qx0 - px, 0.0f, px - qx1 });
+				const float dz = std::max({ qz0 - pz, 0.0f, pz - qz1 });
+				best = std::min(best, dx * dx + dz * dz);
+			}
+			return best;
+		};
+		if (int64_t(tx1 - tx0 + 1) * int64_t(tz1 - tz0 + 1) > (int64_t(1) << 20)) {
+			continue; // a polygon over a million tiles: not a combat area (read_mode_areas caps the coordinates)
+		}
+		for (int32_t tz = tz0; tz <= tz1; ++tz) {
+			for (int32_t tx = tx0; tx <= tx1; ++tx) {
+				const float qx0 = float(tx) * kTile, qz0 = float(tz) * kTile;
+				const float qx1 = qx0 + kTile, qz1 = qz0 + kTile;
+				bool touch = inside(qx0 + 0.5f * kTile, qz0 + 0.5f * kTile);
+				for (size_t i = 0, j = a.polygon.size() - 1; !touch && i < a.polygon.size(); j = i++) {
+					touch = seg_box_distance2(a.polygon[j][0], a.polygon[j][1], a.polygon[i][0], a.polygon[i][1], qx0, qz0, qx1, qz1) <= margin * margin;
+				}
+				if (touch) {
+					tiles.insert({ tx, tz });
+				}
+			}
+		}
+	}
+	return std::vector<std::array<int32_t, 2>>(tiles.begin(), tiles.end());
+}
+
+Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_install, std::string_view p_level_id, float p_margin) {
+	if (p_install == nullptr) {
+		return make_error("level_combat_tiles: no install");
+	}
+	const auto start = std::chrono::steady_clock::now();
+	Result<LevelInfo> info = level_info(*p_install, p_level_id);
+	if (!info) {
+		return error_at("level_combat_tiles " + std::string(p_level_id), info.error());
+	}
+	LevelCombatTiles out;
+	std::set<std::array<int32_t, 2>> all;
+	for (const std::string &mode : info->modes) {
+		Result<std::unique_ptr<LoadedLevel>> level = load_level(p_install, p_level_id, mode);
+		if (!level) {
+			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, level.error());
+		}
+		Result<std::unique_ptr<World>> world = World::traverse(**level);
+		if (!world) {
+			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode + ": traverse", world.error());
+		}
+		Result<ModeAreas> areas = read_mode_areas(**world);
+		if (!areas) {
+			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, areas.error());
+		}
+		for (const std::array<int32_t, 2> &t : combat_area_tiles(areas->combat_areas, p_margin)) {
+			all.insert(t);
+		}
+		out.modes.push_back(mode);
+		out.areas.push_back(std::move(*areas));
+	}
+	out.tiles.assign(all.begin(), all.end());
+	out.seconds = seconds_since(start);
+	return out;
+}
+
+} // namespace bf3::core::level

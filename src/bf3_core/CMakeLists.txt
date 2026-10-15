@@ -221,4 +221,5 @@ target_sources(bf3_core PRIVATE
 # S1 nav (spike S1; docs/design/s1.md §4, §11): the combat areas and objectives of a level x mode.
 target_sources(bf3_core PRIVATE
     include/bf3/core/level/mode_areas.h
+    src/level/mode_areas.cpp
 )

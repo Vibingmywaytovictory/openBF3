@@ -53,5 +53,14 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/nav_query.h
     include/bf3/sim/bots/bot_stats.h
     include/bf3/sim/bots/walker_brain.h
+    src/nav_internal.h
+    src/nav.cpp
+    src/nav_bake.cpp
+    src/nav_cache.cpp
+    src/nav_validate.cpp
+    src/nav_components.cpp
+    src/nav_query.cpp
+    src/bots/path_service.cpp
+    src/bots/walker_brain.cpp
 )
 target_link_libraries(bf3_sim PRIVATE DetourCrowd)

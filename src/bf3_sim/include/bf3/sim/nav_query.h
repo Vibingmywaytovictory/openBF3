@@ -72,6 +72,7 @@ struct NavCorner {
 	uint16_t flags = 0; // nav_flags of the poly the corner leaves into (kDrop: an off-mesh drop starts here)
 	uint8_t area = 0; // kNavArea* of that poly
 	bool end = false; // the goal
+	NavPolyRef poly = 0; // the poly the corner leaves into (the off-mesh connection's poly at a drop's start)
 };
 
 class NavCorridor {
@@ -92,6 +93,10 @@ public:
 	uint32_t corners(NavQuery &p_query, NavCorner *r_corners, uint32_t p_max);
 	// Whether the first p_ahead polys still exist in the mesh (a tile swap would invalidate them; S1 never swaps).
 	bool valid(NavQuery &p_query, uint32_t p_ahead) const;
+	// At a drop's start corner (p_corner.flags has nav_flags::kDrop): advances the corridor past the off-mesh link
+	// (dtPathCorridor::moveOverOffmeshConnection), so its position becomes the landing; r_end gets the landing. false
+	// when the corner is not the next link of the corridor.
+	bool move_over_drop(NavQuery &p_query, const NavCorner &p_corner, Vec3 *r_end);
 	Vec3 position() const;
 	Vec3 goal() const;
 	NavPolyRef first_poly() const;

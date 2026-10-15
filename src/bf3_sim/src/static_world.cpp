@@ -298,11 +298,20 @@ core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(int32_t p_x, int32_
 	return cook_static_tile(std::move(*input), p_triangles, p_options);
 }
 
+// S1 (docs/design/s1.md §5.1): the one body -> layer rule of the cook and the nav input.
+std::optional<StaticLayer> static_layer_of(uint8_t p_soup_body) {
+	if (p_soup_body >= kStaticLayerCount) {
+		return std::nullopt;
+	}
+	return StaticLayer(p_soup_body);
+}
+
 core::Status soup_tile_triangles(const core::level::SoupTile &p_tile, std::vector<StaticTriangle> &r_out) {
 	r_out.clear();
 	r_out.reserve(p_tile.triangles.size());
 	for (const core::level::SoupTriangle &s : p_tile.triangles) {
-		if (s.body >= kStaticLayerCount) {
+		const std::optional<StaticLayer> layer = static_layer_of(s.body); // S1: the rule nav_tile_inputs shares
+		if (!layer) {
 			return core::make_error("static tile (" + std::to_string(p_tile.x) + ", " + std::to_string(p_tile.z) + "): soup body " +
 					std::to_string(int(s.body)) + " has no layer");
 		}
@@ -312,7 +321,7 @@ core::Status soup_tile_triangles(const core::level::SoupTile &p_tile, std::vecto
 		t.tag.surface = s.surface;
 		t.tag.body = s.body;
 		t.tag.flags = s.flags;
-		t.layer = StaticLayer(s.body);
+		t.layer = *layer;
 		r_out.push_back(t);
 	}
 	return core::Status::success();
