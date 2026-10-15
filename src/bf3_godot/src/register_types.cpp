@@ -5,6 +5,7 @@
 #include "dedicated_main_loop.h"
 #include "game_session.h"
 #include "level_session.h"
+#include "s3_crowd.h" // S3 crowd
 #include "viewmodel_demo.h"
 #include "weapon_inspector.h"
 
@@ -33,6 +34,8 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3CollisionOverlay);
 	// M1 T6
 	GDREGISTER_CLASS(bf3::godot_side::Bf3LevelSession);
+	// S3 crowd
+	GDREGISTER_CLASS(bf3::godot_side::Bf3Crowd);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

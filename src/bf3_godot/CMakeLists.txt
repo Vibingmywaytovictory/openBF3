@@ -74,8 +74,10 @@ target_sources(bf3_godot PRIVATE
 target_link_libraries(bf3_godot PRIVATE psapi)
 
 # S3 crowd (docs/design/s3.md §7, §11, §15): the Bf3Crowd node (res://scenes/s3_crowd.tscn) and the skin upload
-# backends (interfaces; not registered until their implementation lands).
+# backends A (Skeleton3D) and B (RS skeleton).
 target_sources(bf3_godot PRIVATE
+    src/s3_crowd.cpp
     src/s3_crowd.h
+    src/skin_upload.cpp
     src/skin_upload.h
 )

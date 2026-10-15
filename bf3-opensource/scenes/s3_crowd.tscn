@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[node name="S3Crowd" type="Node3D"]
+
+[node name="Session" type="Bf3LevelSession" parent="."]
+
+[node name="Crowd" type="Bf3Crowd" parent="."]

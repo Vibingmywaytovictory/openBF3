@@ -40,13 +40,17 @@ namespace bf3::render {
 struct SoldierAssets;
 }
 
+namespace godot {
+class Node;
+}
+
 namespace bf3::godot_side {
 
 enum class SkinBackend : uint8_t { Skeleton3D, RsSkeleton, BoneTexture };
 const char *skin_backend_name(SkinBackend p_backend); // "skeleton3d", "rs", "texture"
 
 // Per-frame upload counters (reports).
-struct UploadStats {
+struct SkinUploadStats {
 	uint32_t soldiers_uploaded = 0; // palettes pushed this frame
 	uint32_t calls = 0; // Godot API calls made this frame
 	double seconds = 0.0; // main-thread time spent in upload()
@@ -63,7 +67,7 @@ public:
 	// Root transforms of every soldier (always) and palettes of the soldiers whose palette changed
 	// (CrowdEvaluator::changed). Main thread. Not called at all on a frozen frame (s3.md §1 G1b: the soldiers
 	// keep their last roots and palettes and draw the same).
-	virtual void upload(const bf3::anim::CrowdEvaluator &p_eval, std::span<const godot::Transform3D> p_roots, UploadStats &r_stats) = 0;
+	virtual void upload(const bf3::anim::CrowdEvaluator &p_eval, std::span<const godot::Transform3D> p_roots, SkinUploadStats &r_stats) = 0;
 	virtual void set_visible(bool p_visible) = 0;
 	// One soldier's instance on or off (the G3 shots hide all but the posed pair). Main thread.
 	virtual void set_soldier_visible(uint32_t p_soldier, bool p_visible) = 0;
@@ -71,7 +75,8 @@ public:
 	virtual void clear() = 0;
 };
 
-// The backend's uploader, or null when it is not built in (C until s3.md §7.3 asks for it).
-std::unique_ptr<SkinUploader> make_skin_uploader(SkinBackend p_backend);
+// The backend's uploader, or null when it is not built in (C until s3.md §7.3 asks for it). p_parent receives the
+// nodes of backends that need the scene tree (A: one Skeleton3D + MeshInstance3D per soldier); B makes RIDs only.
+std::unique_ptr<SkinUploader> make_skin_uploader(SkinBackend p_backend, godot::Node *p_parent);
 
 } // namespace bf3::godot_side
