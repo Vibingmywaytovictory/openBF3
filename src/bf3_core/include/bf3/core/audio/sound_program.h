@@ -158,7 +158,7 @@ struct SoundPluginLink {
 };
 
 // AudioCurve {CurveType (AudioCurveType_Spline only), Points[] {X, Y, K}}. Evaluated as a cubic Hermite through the
-// points with slopes K (dY/dX), clamped to the end points' Y outside [X0, Xn] [inferred, design §6.4; the oracle
+// points with slopes K (dY/dX), clamped to the end points' Y outside [X0, Xn] [inferred, design §6.3; the oracle
 // checks the curve passes through every point].
 struct AudioCurvePoint {
 	float x = 0.0f, y = 0.0f, k = 0.0f;
@@ -174,7 +174,7 @@ struct SoundOutput {
 	uint32_t node = 0;
 	OutputKind kind = OutputKind::Cone;
 	uint32_t name_hash = 0; // OutputNameHash ("Cone", "Flat", "Handling", "LFE", ...)
-	AudioCurve attenuation; // dB over distance (X in metres [inferred], design §6.4)
+	AudioCurve attenuation; // dB over distance (X in metres [inferred], design §6.3)
 	float gain_db = 0.0f; // Gain
 	float min_distance = 0.0f; // MinDistance
 	float hf_damping_distance = 0.0f, hf_damping_obstruction = 0.0f, hf_damping_occlusion = 0.0f, hf_damping_angle = 0.0f;

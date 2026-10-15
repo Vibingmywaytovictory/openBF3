@@ -65,6 +65,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
+M2a audio adds `audio.contract` (the audio interface headers, no data); see "M2a audio".
 
 ## Run
 
@@ -1251,3 +1252,18 @@ README's "Text database" already said so.
 
 **Caspian §9 counts.** The handoff count is reproduced exactly and attributed; see "Level traversal". The oracle is
 `level-oracle static-models MP_007 ConquestSmall0`.
+
+## M2a audio
+
+Design: [docs/design/m2a-audio.md](docs/design/m2a-audio.md) (slices A1 XAS voices + wave bank + mixer, A2 weapon
+patch interpreter). Interface stage: the headers under `src/bf3_core/include/bf3/core/audio/` (stream codec,
+`SoundWaveAsset` reader, wave bank, node type table, patch compiler) and `src/bf3_audio/include/bf3/audio/` (patch
+instance, mixer core, DSP, WAV I/O, analysis, tuning, weapon seam), and `Bf3AudioStream`/`Bf3AudioPlayback` in
+bf3_godot (silent, not registered yet). Tuning that the data does not state lives in
+`bf3-opensource/config/audio_tuning.cfg`.
+
+`ctest -R audio.contract` checks that the headers compile together, the node type table (58 types + 8 child records;
+the 32 the 164 handheld weapon patches use), the seam hashes and FourCCs, and the tuning file. The exit gates G1-G8
+(Metro and Loc/en frame counts, decode speed, census, the plan section 7.7 oracles, the wave bank, an offline M16A3
+render and the Godot run) are listed with their thresholds in the design's section 1. Recordings go to
+`b/shots/audio/` and are never committed.

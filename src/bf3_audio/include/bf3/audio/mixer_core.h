@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace bf3::audio {
@@ -76,6 +77,17 @@ struct MixerStats {
 	std::atomic<uint32_t> peak_instances{ 0 };
 	std::atomic<uint64_t> max_block_ns{ 0 };
 	std::atomic<uint64_t> acked_epoch{ 0 };
+	std::atomic<uint64_t> feedback_drops{ 0 };
+};
+
+// Audio thread -> game thread, once per block per instance that has news: haptics (CameraShake / PadRumble) and
+// the finished flag. A third SPSC ring; when it is full the new entry is dropped and counted (feedback_drops); the
+// game polls it every frame.
+struct MixerFeedback {
+	InstanceHandle handle = kNoInstance;
+	uint64_t frame = 0;
+	PatchHaptics haptics;
+	bool finished = false;
 };
 
 // Receives every mixed block on the audio thread (WAV recorder, analysis). Must not block or allocate.
@@ -95,6 +107,7 @@ public:
 	bool push(const MixerCommand &p_command); // false: ring full (counted)
 	uint64_t clock() const; // frames mixed so far (relaxed)
 	void reclaim(); // destroy returned instances, release banks below the acked epoch
+	size_t poll_feedback(std::span<MixerFeedback> r_out); // drains up to r_out.size() entries
 	const MixerStats &stats() const { return stats_; }
 
 	// Audio thread. Fills p_frames frames (any count; split internally into kBlockFrames blocks); always fills the

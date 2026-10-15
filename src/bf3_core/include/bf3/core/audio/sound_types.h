@@ -2,7 +2,7 @@
 // The sound-graph node type table (M2a audio A2; docs/design/m2a-audio.md §6.1). Implemented now (sound_types.cpp):
 // it is data, and it pins the census gate's type sets.
 //
-// Census over @all-mp [verified 2026-10-15, scratch census on this tree's bf3_core, design §4.3]: 834
+// Census over @all-mp [verified 2026-10-15, scratch census on this tree's bf3_core, design §4.4]: 834
 // SoundPatchAsset partitions (833 under sound/ plus levels/mp_012/sound/sfx_poppertarget_raise) hold 32,117
 // instances of 46 node types; with the master patch and the 19 MixerAssets, 32,221 instances of 58 types. The 164
 // handheld weapon patches use exactly the 32 types flagged `a2`. Child records (crossfader groups, receive entries,
@@ -10,7 +10,7 @@
 //
 // Field names are the EBX descriptors' (PascalCase). `ports` are AudioGraphNodePort fields {UnconnectedValue,
 // ValueIndex, IsConnected} in the order the evaluator reads them; for the A2 types they are taken from the 164
-// weapon patches (every field of every instance, design §4.3); the types A2 does not implement list no ports yet
+// weapon patches (every field of every instance, design §4.4); the types A2 does not implement list no ports yet
 // (A6/A7 fill them in).
 
 #include <cstdint>
@@ -126,7 +126,7 @@ std::optional<SoundNodeType> sound_node_type(std::string_view p_ebx_name);
 // The enums the evaluator reads, by enumerator name (the compiler maps names, never stored values, so a reordered
 // enum in another build still compiles right). Enumerators and their stored values as the partitions' own enum
 // tables list them [verified 2026-10-15, scratch `au_census enums` on the M16A3, M136 and 9K34 patches]. Weapons use
-// Multiply 2,526, Add 492, Sine 9, Power 1, Subtract 1 (design §4.3).
+// Multiply 2,526, Add 492, Sine 9, Power 1, Subtract 1 (design §4.4).
 enum class SimpleTransformOp : uint8_t {
 	Add, // 0
 	Subtract,

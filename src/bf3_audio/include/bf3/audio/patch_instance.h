@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -70,6 +71,12 @@ struct SamplerSlotState {
 	float gain = 0.0f; // linear, after Gai0
 };
 
+// CameraShake / PadRumble node outputs (gap audio §11.1: they feed the game, not the mix). Summed over the nodes.
+struct PatchHaptics {
+	float shake_pitch = 0.0f, shake_roll = 0.0f, shake_yaw = 0.0f;
+	float rumble_low = 0.0f, rumble_high = 0.0f;
+};
+
 struct PatchInstanceStats {
 	uint64_t evaluations = 0;
 	uint64_t deferred_events = 0; // events past kMaxEventsPerBlock
@@ -110,6 +117,10 @@ public:
 	std::span<const SamplerSlotState> sampler_slots(uint32_t p_node) const;
 	// The attenuation (dB) an output node currently applies from its curve and Gain.
 	float output_gain_db(uint32_t p_output) const;
+	PatchHaptics haptics() const;
+	// Test hook (gate G7 HPF check): pin a plugin attribute to p_value instead of what the program drives
+	// (nullopt restores it). Not used by the game.
+	void override_plugin_attribute(core::audio::SoundPluginRef p_plugin, uint8_t p_attribute, std::optional<float> p_value);
 	const core::audio::SoundProgram &program() const;
 	const PatchInstanceStats &stats() const;
 

@@ -1,5 +1,5 @@
 #pragma once
-// SoundWaveAsset reader (M2a audio A1; docs/design/m2a-audio.md §4.2, §5.2). Plain data that no longer points into
+// SoundWaveAsset reader (M2a audio A1; docs/design/m2a-audio.md §4.1, §5.2). Plain data that no longer points into
 // the partition. Fields as the EBX descriptors spell them [verified 2026-10-15 with `bf3dump dump` on
 // sound/weapons/shared_content/hifi_lmg/hifi_lmg_m4_wave and sound/vo/common/ru/autotriggers/vo_ru_mp_alert_hmg]:
 //   SoundWaveAsset : SoundDataAsset { ChannelCount, Chunks[] {ChunkId Guid, ChunkSize}, Variations[] -> ref

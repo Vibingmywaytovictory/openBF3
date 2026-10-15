@@ -1,13 +1,14 @@
 #pragma once
-// DSP primitives of the A1/A2 mixer (M2a audio; docs/design/m2a-audio.md §6.5). Godot-free, allocation-free,
+// DSP primitives of the A1/A2 mixer (M2a audio; docs/design/m2a-audio.md §6.4). Godot-free, allocation-free,
 // real-time safe: every function here runs on the audio thread. Our own code from the textbook forms named below.
 //
 //   Biquad: the RBJ Audio EQ Cookbook (R. Bristow-Johnson) low-pass, high-pass, band-pass (constant 0 dB peak) and
 //     peaking forms, transposed direct form II, coefficients recomputed once per control block and ramped across
 //     the block to avoid zipper noise. HighPassIir2/LowPassIir2/BandPassIir2/PeakingIir2 (HI20/LI20/BI20/PI20)
-//     map onto these [inferred: the plugin names and the node ports Frequency/Q/Bandwidth/Amplitude; gap audio §5].
+//     map onto these [inferred: the plugin names and the node ports Frequency/Q/Bandwidth/Amplitude; gap audio §1.2-§1.3].
 //   OnePoleLowPass: the output voices' LPB0 (HF damping), y += a (x - y) with a = 1 - exp(-2 pi fc / fs).
-//   Resampler: cubic Hermite (Catmull-Rom) over a 4-sample history; ratio = wave rate / mix rate x pitch.
+//   Resampler (Rsp0, lives with the sampler slot state in patch_sampler.cpp): cubic Hermite (Catmull-Rom) over a
+//     4-sample history; ratio = wave rate / mix rate x pitch.
 //   Pan: equal power over azimuth for the stereo fold of Pn21 (Pn21 construct params 45, 135, 2 on the M16A3 are
 //     read but the 4-speaker layout is folded to 2 until A3).
 
