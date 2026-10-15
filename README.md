@@ -1291,7 +1291,7 @@ with `OPENBF3_GODOT` set; details in the design's §21):
 | G5 shots | the windowed check passes 25/25 and writes the three PNGs (findings below) | `ctest --preset dev -R "^godot\.ui_fonts_shots$" -V` |
 | G6 mapping | Exact 5, CaseFolded 2, Family 4, Device 5, Unresolved 0; `G6 family-inferred: $FONT_TITLE $HUD $HUD_light $Menu_light`; the other font libraries' 59 names all Exact under their own collections | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf fonts`) |
 | G7 HUD table | 86 placements (14, 8, 9, 7, 8, 9, 10, 7, 0, 1, 4, 8, 1, 0), every stage 1280 x 720, the §8.2 spot values within 0.05 px | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf hud`) |
-| G8 asan | `ui1.contract`, `core.ui.swf.unit`, `core.ui.font.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font` pass under ASan with no report; in dev every hostile case ends in under 1 s (slowest: 2^18 + 1 display events, about 0.55 s) | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` |
+| G8 asan | `ui1.contract`, `core.ui.swf.unit`, `core.ui.font.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font` pass under ASan with no report; in dev every hostile case ends in under 1 s (slowest over two runs: 2^18 + 1 display events 0.14 to 0.55 s, 2^22 + 1 tags 0.11 to 0.48 s; noisy) | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` |
 | G9 install | 256 index files unchanged in `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font` and `godot.ui_fonts` | the `install.unchanged` lines of those tests |
 | T1 census time | 0.28 s (library open 0.25 s + census 0.037 s; limit 15 s) | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
 | T2 font load | cold 0.031 s (limit 1.0 s), warm 0.003 s (limit 0.25 s) | `ctest --preset dev -R "^core\.ui\.font$" -V` |
