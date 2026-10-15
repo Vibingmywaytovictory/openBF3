@@ -1,0 +1,849 @@
+// GameServer: the M1 game inside ServerHost's thread (docs/design/m1.md §7.4, §7.7, §8; game_server.h has the tick
+// order). Network-free: datagrams come in through on_receive and go out through tick()'s OutDatagrams, so the tests
+// drive it without sockets and ServerHost sends and flushes in the tick that made them.
+#include "bf3/host/game_server.h"
+
+#include "bf3/net/loopback_ping.h"
+#include "bf3/net/protocol.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/spawn.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <deque>
+#include <limits>
+
+namespace bf3::host {
+
+namespace {
+
+uint64_t splitmix64(uint64_t &r_state) {
+	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+	return z ^ (z >> 31);
+}
+
+double ms_since(std::chrono::steady_clock::time_point p_start) {
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_start).count();
+}
+
+float distance2(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
+	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
+	return dx * dx + dy * dy + dz * dz;
+}
+
+bool alive(const sim::SoldierState &p_state) {
+	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead;
+}
+
+// A scripted walker (docs §8.3): walks forward and turns a quarter turn every 2 s, a square of 8 m sides at the
+// stand walk speed around its spawn point. Not a bot: it only writes the same Command a client sends (D11).
+class Walker final : public CommandSource {
+public:
+	explicit Walker(uint32_t p_phase) :
+			phase_(p_phase) {}
+	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) override {
+		if (!started_) {
+			started_ = true;
+			base_yaw_ = p_state.yaw;
+			start_ = p_tick;
+		}
+		sim::Command c;
+		c.tick = p_tick;
+		c.move_forward = sim::kAxisMax;
+		const uint32_t leg = ((p_tick - start_) / (2u * sim::kSimHz) + phase_) & 3u;
+		c.yaw = uint16_t(base_yaw_ + leg * 16384u);
+		c.pose = sim::Pose::Stand;
+		return c;
+	}
+
+private:
+	uint32_t phase_ = 0;
+	bool started_ = false;
+	uint16_t base_yaw_ = 0;
+	sim::Tick start_ = 0;
+};
+
+constexpr uint32_t kMaxSweepTicks = 600;
+// Hostile-input bounds: dev requests queued for the rules step, and control replies made between two ticks (a
+// client flooding requests gets no more replies; ENet bounds what one service delivers anyway).
+constexpr size_t kMaxQueuedDebug = 64;
+constexpr size_t kMaxPendingReplies = 1024;
+
+} // namespace
+
+struct GameServer::Impl {
+	struct Buffered {
+		bool valid = false;
+		sim::Command command;
+	};
+
+	struct Slot {
+		bool used = false;
+		bool remote = false;
+		bool dummy = false; // SpawnSweep
+		uint32_t peer = 0;
+		int team = 1;
+		bool hello = false; // MatchInfo sent: snapshots go out
+		bool spawned = false; // the soldier exists (state valid)
+		bool want_spawn = false; // Ready, or a death's respawn
+		sim::Tick respawn_at = 0;
+		uint32_t spawn_index = 0;
+		sim::SoldierState state;
+		sim::Command last; // the command applied at the last tick, or the hold command of a fresh spawn
+		uint32_t applied_sequence = 0;
+		bool applied_repeated = true;
+		std::vector<Buffered> buffer; // jitter buffer, indexed by tick % size
+		bool any_command = false;
+		uint32_t highest_sequence = 0;
+		sim::Tick highest_sequence_tick = 0;
+		uint64_t highest_sequence_ns = 0;
+		uint32_t last_applied_sequence = 0; // of the newest real (not repeated) command applied
+		uint32_t highest_late_sequence = 0;
+		uint16_t snapshot_seq = 0;
+		uint16_t own_events = 0; // ORed since the last snapshot to this client
+		std::unique_ptr<CommandSource> source;
+		sim::Command source_command;
+		SlotStats stats;
+		// Trace (dev)
+		bool tracing = false;
+		uint32_t trace_id = 0;
+		uint32_t trace_ticks = 0;
+		std::vector<sim::SoldierState> trace;
+		// SpawnSweep dummy: index into the sweep's pending results
+		size_t sweep_entry = 0;
+	};
+
+	struct PendingDebug {
+		uint32_t slot = 0;
+		net::DebugRequest request;
+	};
+
+	struct Sweep {
+		bool active = false;
+		uint32_t requester = 0; // slot
+		uint32_t id = 0;
+		uint32_t ticks = 60;
+		size_t next_point = 0;
+		bool batch_active = false;
+		sim::Tick batch_start = 0;
+		std::vector<sim::SettleResult> results; // per point of the current batch (by sweep_entry)
+		std::vector<uint32_t> batch_points;
+		std::vector<net::SpawnSweepRow> rows;
+	};
+
+	GameServerConfig config;
+	std::unique_ptr<sim::CollisionWorld> world;
+	sim::SoldierMotor motor;
+	uint64_t motor_hash = 0;
+	std::vector<Slot> slots;
+	sim::Tick tick = 0; // the last tick that ran
+	uint64_t rng = 1;
+	std::vector<OutDatagram> pending_out; // control replies made in on_receive
+	std::deque<PendingDebug> debug_queue; // applied in the rules step
+	Sweep sweep;
+	uint64_t snapshots_sent = 0;
+	uint64_t snapshot_bytes = 0;
+	size_t max_snapshot_bytes = 0;
+	uint64_t bad_datagrams = 0;
+	uint64_t step_precondition_failures = 0;
+	double last_step_ms = 0;
+	double last_encode_ms = 0;
+
+	int slot_of_peer(uint32_t p_peer) const {
+		for (size_t i = 0; i < slots.size(); ++i) {
+			if (slots[i].used && slots[i].remote && slots[i].peer == p_peer) {
+				return int(i);
+			}
+		}
+		return -1;
+	}
+
+	int free_slot() const {
+		for (size_t i = 0; i < slots.size(); ++i) {
+			if (!slots[i].used) {
+				return int(i);
+			}
+		}
+		return -1;
+	}
+
+	void reset_slot(Slot &r_slot) {
+		r_slot = Slot();
+		r_slot.buffer.assign(std::clamp<uint32_t>(config.jitter_buffer_ticks, 1u, 1024u) + 1u, Buffered{});
+	}
+
+	void send(uint32_t p_peer, uint8_t p_channel, std::vector<uint8_t> p_bytes) {
+		OutDatagram d;
+		d.peer = p_peer;
+		d.channel = p_channel;
+		d.reliable = p_channel != net::kChannelUnreliable;
+		d.bytes = std::move(p_bytes);
+		pending_out.push_back(std::move(d));
+	}
+
+	void report(uint32_t p_slot, uint32_t p_id, bool p_ok, std::string p_text) {
+		if (p_slot >= slots.size()) {
+			return;
+		}
+		const Slot &s = slots[p_slot];
+		if (!s.used || !s.remote || pending_out.size() >= kMaxPendingReplies) {
+			return;
+		}
+		net::DebugReport r;
+		r.id = p_id;
+		r.ok = p_ok;
+		r.text = std::move(p_text);
+		send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
+	}
+
+	std::vector<sim::Vec3> live_positions(size_t p_except) const {
+		std::vector<sim::Vec3> out;
+		for (size_t i = 0; i < slots.size(); ++i) {
+			const Slot &s = slots[i];
+			if (i != p_except && s.used && !s.dummy && s.spawned && alive(s.state)) {
+				out.push_back(s.state.position);
+			}
+		}
+		return out;
+	}
+
+	// Rules step: (re)spawn slot p_slot at point p_point (SIZE_MAX: choose_spawn), stamped at tick p_tick.
+	bool spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
+		Slot &s = slots[p_slot];
+		const std::vector<sim::SpawnPoint> &points = config.level->spawns;
+		if (points.empty()) {
+			return false;
+		}
+		size_t index = p_point;
+		if (index == SIZE_MAX) {
+			index = sim::choose_spawn(points, s.team, live_positions(p_slot), config.level->spawn_protection_radius, splitmix64(rng));
+			if (index == SIZE_MAX) {
+				// Every point is near a live soldier: take a seeded one anyway (M1 has no damage source).
+				index = size_t(splitmix64(rng) % points.size());
+			}
+		}
+		if (index >= points.size()) {
+			return false;
+		}
+		const sim::SettleResult r = sim::settle_spawn(motor, *world, points[index], s.state.life + 1u, p_tick);
+		if (!r.ok) {
+			std::fprintf(stderr, "GameServer: spawn point %u did not settle: %s (spawning there anyway)\n", points[index].index, r.failure.c_str());
+		}
+		s.state = r.state; // stamped p_tick, full protection, kSpawned
+		s.spawned = true;
+		s.want_spawn = false;
+		s.spawn_index = uint32_t(index);
+		s.last = sim::hold_command(s.state);
+		s.own_events = uint16_t(s.own_events | s.state.events);
+		if (s.remote) {
+			net::Spawned m;
+			m.slot = uint8_t(p_slot);
+			m.spawn_index = points[index].index;
+			m.state = s.state;
+			send(s.peer, net::kChannelReliable, net::encode_spawned(m));
+		}
+		return true;
+	}
+
+	void receive_commands(Slot &r_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
+		const uint32_t size = uint32_t(r_slot.buffer.size());
+		const uint32_t ahead = std::clamp<uint32_t>(config.jitter_buffer_ticks, 1u, 1024u);
+		// Oldest first, so the newest copy of a tick is the one kept when a packet names a tick twice.
+		for (size_t k = p_packet.count; k-- > 0;) {
+			sim::Command c = p_packet.commands[k];
+			c.flags = 0; // client commands carry no server flags
+			if (!r_slot.any_command || c.sequence > r_slot.highest_sequence) {
+				r_slot.any_command = true;
+				r_slot.highest_sequence = c.sequence;
+				r_slot.highest_sequence_tick = c.tick;
+				r_slot.highest_sequence_ns = p_now_ns;
+			}
+			if (c.tick <= tick) {
+				// Its tick already ran: a redundant copy of a command that ran, or late.
+				if (c.sequence > r_slot.last_applied_sequence && c.sequence > r_slot.highest_late_sequence) {
+					r_slot.highest_late_sequence = c.sequence;
+					++r_slot.stats.commands_late;
+				}
+				continue;
+			}
+			if (c.tick - tick > ahead) {
+				continue; // beyond the buffer (a hostile or broken clock): dropped
+			}
+			Buffered &b = r_slot.buffer[c.tick % size];
+			if (!b.valid || b.command.tick != c.tick) {
+				b.valid = true;
+				b.command = c;
+			} else if (c.sequence > b.command.sequence) {
+				// After a backward client clock reset the client re-sends ticks it already sent: the newer sequence
+				// is what it predicted with (docs §7.4).
+				b.command = c;
+				++r_slot.stats.commands_replaced;
+			}
+		}
+	}
+
+	void handle_hello(uint32_t p_peer, const net::Hello &p_hello) {
+		if (slot_of_peer(p_peer) >= 0) {
+			return; // a repeated Hello
+		}
+		if (p_hello.protocol != net::kProtocolVersion) {
+			net::Kick k;
+			k.reason = "protocol " + std::to_string(p_hello.protocol) + " (server " + std::to_string(net::kProtocolVersion) + ")";
+			send(p_peer, net::kChannelReliable, net::encode_kick(k));
+			return;
+		}
+		const int at = free_slot();
+		if (at < 0) {
+			net::Kick k;
+			k.reason = "server full";
+			send(p_peer, net::kChannelReliable, net::encode_kick(k));
+			return;
+		}
+		Slot &s = slots[size_t(at)];
+		reset_slot(s);
+		s.used = true;
+		s.remote = true;
+		s.peer = p_peer;
+		s.team = 1; // M1: the local player is on Team 1 (docs §8.2)
+		s.hello = true;
+		net::MatchInfo m;
+		m.level = config.level->level;
+		m.mode = config.level->mode;
+		m.snapshot_divisor = config.snapshot_divisor;
+		m.slot = uint8_t(at);
+		m.server_tick = tick;
+		m.phase = net::MatchPhase::InRound;
+		m.source_digest = config.level->source_digest;
+		m.motor_hash = motor_hash;
+		send(p_peer, net::kChannelReliable, net::encode_match_info(m));
+	}
+
+	// Trace and SetSeed act at once; Teleport, SpawnAt and SpawnSweep wait for the rules step.
+	void handle_debug(size_t p_slot, const net::DebugRequest &p_request) {
+		if (!config.dev_commands) {
+			report(uint32_t(p_slot), p_request.id, false, "dev commands are disabled on this server");
+			return;
+		}
+		Slot &s = slots[p_slot];
+		switch (p_request.kind) {
+			case net::DebugKind::Trace:
+				if (p_request.ticks == 0 || p_request.ticks > net::kMaxTraceTicks) {
+					report(uint32_t(p_slot), p_request.id, false, "trace: ticks must be 1.." + std::to_string(net::kMaxTraceTicks));
+					return;
+				}
+				if (s.tracing) {
+					report(uint32_t(p_slot), p_request.id, false, "trace: one is already running");
+					return;
+				}
+				s.tracing = true;
+				s.trace_id = p_request.id;
+				s.trace_ticks = p_request.ticks;
+				s.trace.clear();
+				s.trace.reserve(p_request.ticks);
+				return;
+			case net::DebugKind::SetSeed:
+				rng = uint64_t(p_request.index) * 0x9E3779B97F4A7C15ull + 1u;
+				report(uint32_t(p_slot), p_request.id, true, "seed set");
+				return;
+			case net::DebugKind::Teleport:
+			case net::DebugKind::SpawnAt:
+			case net::DebugKind::SpawnSweep:
+				if (debug_queue.size() >= kMaxQueuedDebug) {
+					report(uint32_t(p_slot), p_request.id, false, "too many queued requests");
+					return;
+				}
+				debug_queue.push_back({ uint32_t(p_slot), p_request });
+				return;
+		}
+		report(uint32_t(p_slot), p_request.id, false, "unknown debug request");
+	}
+
+	void apply_debug(sim::Tick p_tick) {
+		while (!debug_queue.empty()) {
+			const PendingDebug d = debug_queue.front();
+			debug_queue.pop_front();
+			Slot &s = slots[d.slot];
+			if (!s.used) {
+				continue;
+			}
+			const net::DebugRequest &q = d.request;
+			switch (q.kind) {
+				case net::DebugKind::Teleport: {
+					if (!s.spawned) {
+						report(d.slot, q.id, false, "teleport: no soldier");
+						break;
+					}
+					// A fresh standing state at the rules tick, same life, no protection (docs §6.8, §7.7). The slot's
+					// last command stays: the client keeps commanding through the teleport.
+					s.state = motor.spawn_state(q.position, q.yaw, s.state.life, p_tick, false);
+					char text[128];
+					std::snprintf(text, sizeof(text), "teleported to (%.3f, %.3f, %.3f) at tick %u", double(q.position[0]), double(q.position[1]),
+							double(q.position[2]), p_tick);
+					report(d.slot, q.id, true, text);
+					break;
+				}
+				case net::DebugKind::SpawnAt:
+					if (q.index >= config.level->spawns.size()) {
+						report(d.slot, q.id, false, "spawn at: no point " + std::to_string(q.index));
+						break;
+					}
+					spawn(d.slot, q.index, p_tick);
+					report(d.slot, q.id, true, "spawned at point " + std::to_string(q.index) + " at tick " + std::to_string(p_tick));
+					break;
+				case net::DebugKind::SpawnSweep:
+					if (sweep.active) {
+						report(d.slot, q.id, false, "spawn sweep: one is already running");
+						break;
+					}
+					sweep = Sweep();
+					sweep.active = true;
+					sweep.requester = d.slot;
+					sweep.id = q.id;
+					sweep.ticks = std::clamp<uint32_t>(q.ticks, 1u, kMaxSweepTicks);
+					break;
+				default:
+					break;
+			}
+		}
+	}
+
+	void run_sweep(sim::Tick p_tick) {
+		if (!sweep.active) {
+			return;
+		}
+		const std::vector<sim::SpawnPoint> &points = config.level->spawns;
+		if (sweep.batch_active && p_tick - sweep.batch_start >= sweep.ticks) {
+			for (size_t i = 0; i < slots.size(); ++i) {
+				Slot &s = slots[i];
+				if (!s.used || !s.dummy) {
+					continue;
+				}
+				sim::SettleResult &r = sweep.results[s.sweep_entry];
+				r.state = s.state;
+				const sim::SpawnPoint &p = points[sweep.batch_points[s.sweep_entry]];
+				sim::judge_settle(motor, *world, p, sim::SettleOptions(), r);
+				net::SpawnSweepRow row;
+				row.index = p.index;
+				row.ok = r.ok;
+				row.point = p.position;
+				row.settled = r.state.position;
+				row.lift = r.lift;
+				row.shift = r.shift;
+				row.gap = r.gap;
+				row.grounded = (r.state.flags & sim::soldier_flags::kGrounded) != 0;
+				row.overlapping = r.overlapping;
+				sweep.rows.push_back(row);
+				reset_slot(s); // the dummy is removed
+			}
+			sweep.batch_active = false;
+		}
+		if (!sweep.batch_active && sweep.next_point < points.size()) {
+			sweep.results.clear();
+			sweep.batch_points.clear();
+			while (sweep.next_point < points.size()) {
+				const int at = free_slot();
+				if (at < 0) {
+					break;
+				}
+				const sim::SpawnPoint &p = points[sweep.next_point];
+				sim::SettleResult r = sim::place_spawn(motor, *world, p, 1, p_tick);
+				if (!r.failure.empty()) {
+					net::SpawnSweepRow row;
+					row.index = p.index;
+					row.ok = false;
+					row.point = p.position;
+					row.settled = r.placed;
+					row.lift = r.lift;
+					row.shift = r.shift;
+					sweep.rows.push_back(row);
+					++sweep.next_point;
+					continue;
+				}
+				Slot &s = slots[size_t(at)];
+				reset_slot(s);
+				s.used = true;
+				s.dummy = true;
+				s.team = 0;
+				s.spawned = true;
+				s.state = r.state;
+				s.sweep_entry = sweep.results.size();
+				sweep.results.push_back(std::move(r));
+				sweep.batch_points.push_back(uint32_t(sweep.next_point));
+				++sweep.next_point;
+			}
+			if (!sweep.results.empty()) {
+				sweep.batch_active = true;
+				sweep.batch_start = p_tick;
+			} else if (sweep.next_point < points.size()) {
+				report(sweep.requester, sweep.id, false, "spawn sweep: no free slot");
+				sweep = Sweep();
+				return;
+			}
+		}
+		if (!sweep.batch_active && sweep.next_point >= points.size()) {
+			std::sort(sweep.rows.begin(), sweep.rows.end(), [](const net::SpawnSweepRow &a, const net::SpawnSweepRow &b) { return a.index < b.index; });
+			size_t ok = 0;
+			for (const net::SpawnSweepRow &r : sweep.rows) {
+				ok += r.ok ? 1 : 0;
+			}
+			if (sweep.requester < slots.size() && slots[sweep.requester].used && slots[sweep.requester].remote) {
+				const Slot &s = slots[sweep.requester];
+				net::DebugReport rep;
+				rep.id = sweep.id;
+				rep.ok = ok == sweep.rows.size();
+				rep.text = "spawn sweep: " + std::to_string(ok) + " / " + std::to_string(sweep.rows.size()) + " ok";
+				rep.sweep = std::move(sweep.rows);
+				send(s.peer, net::kChannelReliable, net::encode_debug_report(rep));
+			}
+			sweep = Sweep();
+		}
+	}
+
+	void send_snapshots(sim::Tick p_tick, uint64_t p_now_ns) {
+		const auto start = std::chrono::steady_clock::now();
+		std::vector<std::pair<float, size_t>> order;
+		for (size_t i = 0; i < slots.size(); ++i) {
+			Slot &s = slots[i];
+			if (!s.used || !s.remote || !s.hello) {
+				continue;
+			}
+			net::Snapshot snap;
+			snap.seq = s.snapshot_seq++;
+			snap.server_tick = p_tick;
+			snap.applied_sequence = s.applied_sequence;
+			snap.applied_repeated = s.applied_repeated;
+			const int64_t buffer = s.any_command ? int64_t(s.highest_sequence_tick) - int64_t(p_tick) : 0;
+			snap.command_buffer_ticks = int8_t(std::clamp<int64_t>(buffer, -127, 127));
+			snap.sequence_echo = uint16_t(s.highest_sequence & 0xFFFFu);
+			if (s.any_command) {
+				const uint64_t hold = p_now_ns > s.highest_sequence_ns ? (p_now_ns - s.highest_sequence_ns) / 100000u : 0u;
+				snap.echo_hold_100us = uint16_t(std::min<uint64_t>(hold, 0xFFFFu));
+			}
+			snap.own_events = s.own_events;
+			s.own_events = 0;
+			if (s.spawned) {
+				snap.own = s.state;
+			}
+			order.clear();
+			const sim::Vec3 at = s.spawned ? s.state.position : sim::Vec3{};
+			for (size_t j = 0; j < slots.size(); ++j) {
+				const Slot &o = slots[j];
+				if (j != i && o.used && o.spawned && alive(o.state)) {
+					order.push_back({ distance2(at, o.state.position), j });
+				}
+			}
+			std::sort(order.begin(), order.end());
+			snap.others.reserve(order.size());
+			for (const auto &[d, j] : order) {
+				snap.others.push_back(net::quantize_other(uint8_t(j), slots[j].state));
+			}
+			std::vector<uint8_t> bytes = net::encode_snapshot(snap);
+			if (bytes.empty()) {
+				continue;
+			}
+			++snapshots_sent;
+			snapshot_bytes += bytes.size();
+			max_snapshot_bytes = std::max(max_snapshot_bytes, bytes.size());
+			send(s.peer, net::kChannelUnreliable, std::move(bytes));
+		}
+		last_encode_ms = ms_since(start);
+	}
+
+	void run_tick(std::vector<OutDatagram> &r_out) {
+		const sim::Tick n = tick + 1u;
+		// Requests that arrived in step 1 and act at once already queued their replies.
+		// 2. commands for this tick per slot.
+		for (Slot &s : slots) {
+			if (!s.used || !s.remote) {
+				continue;
+			}
+			Buffered &b = s.buffer[n % s.buffer.size()];
+			const bool have = b.valid && b.command.tick == n;
+			sim::Command c;
+			if (have) {
+				c = b.command;
+			}
+			if (b.valid && b.command.tick <= n) {
+				b.valid = false;
+			}
+			if (!s.spawned) {
+				continue;
+			}
+			if (have) {
+				s.last = c;
+				s.applied_sequence = c.sequence;
+				s.applied_repeated = false;
+				s.last_applied_sequence = std::max(s.last_applied_sequence, c.sequence);
+				++s.stats.commands_applied;
+			} else {
+				s.last = sim::repeated_command(s.last, n);
+				s.applied_sequence = s.last.sequence; // the repeated command's (0 for the hold command)
+				s.applied_repeated = true;
+				++s.stats.commands_repeated;
+			}
+		}
+		// 3. command sources: walkers and sweep dummies.
+		for (Slot &s : slots) {
+			if (!s.used || s.remote || !s.spawned) {
+				continue;
+			}
+			sim::Command c;
+			if (s.dummy) {
+				c = sim::idle_command(s.state.tick + 1u, s.state.yaw, s.state.pitch, s.state.target_pose);
+			} else if (s.source) {
+				c = s.source->command(n, s.state);
+			}
+			c.tick = n;
+			c.flags = uint8_t(c.flags | sim::command_flags::kLocalSource);
+			s.last = c;
+			++s.stats.commands_applied;
+		}
+		// 4. motor steps, slot order.
+		const auto step_start = std::chrono::steady_clock::now();
+		for (Slot &s : slots) {
+			if (!s.used || !s.spawned) {
+				continue;
+			}
+			if (s.last.tick != s.state.tick + 1u) {
+				++step_precondition_failures;
+			}
+			const bool was_alive = alive(s.state);
+			motor.step(s.state, s.last);
+			if (was_alive && !alive(s.state) && !s.dummy) {
+				s.want_spawn = true;
+				s.respawn_at = n + config.respawn_ticks;
+			}
+		}
+		last_step_ms = ms_since(step_start);
+		// 5. rules: Ready / deaths -> (re)spawn, dev requests, the sweep. Everything here is stamped n.
+		for (size_t i = 0; i < slots.size(); ++i) {
+			Slot &s = slots[i];
+			if (s.used && !s.dummy && s.want_spawn && (!s.spawned || n >= s.respawn_at)) {
+				spawn(i, SIZE_MAX, n);
+			}
+		}
+		apply_debug(n);
+		run_sweep(n);
+		tick = n;
+		// 7. events per client, the traces, snapshots.
+		for (size_t i = 0; i < slots.size(); ++i) {
+			Slot &s = slots[i];
+			if (!s.used || !s.spawned) {
+				continue;
+			}
+			s.own_events = uint16_t(s.own_events | s.state.events);
+			if (s.tracing) {
+				s.trace.push_back(s.state);
+				if (s.trace.size() >= s.trace_ticks) {
+					if (s.remote) {
+						net::DebugReport r;
+						r.id = s.trace_id;
+						r.ok = true;
+						r.text = "trace of " + std::to_string(s.trace.size()) + " ticks from " + std::to_string(s.trace.front().tick);
+						r.trace = std::move(s.trace);
+						send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
+					}
+					s.trace.clear();
+					s.tracing = false;
+				}
+			}
+		}
+		if (config.snapshot_divisor <= 1 || n % config.snapshot_divisor == 0) {
+			send_snapshots(n, net::monotonic_ns());
+		}
+		for (OutDatagram &d : pending_out) {
+			r_out.push_back(std::move(d));
+		}
+		pending_out.clear();
+	}
+};
+
+GameServer::GameServer() :
+		impl_(std::make_unique<Impl>()) {}
+
+GameServer::~GameServer() = default;
+
+core::Status GameServer::init(const GameServerConfig &p_config) {
+	Impl &m = *impl_;
+	if (p_config.level == nullptr || p_config.level->static_world == nullptr) {
+		return core::make_error("GameServer: no level");
+	}
+	if (p_config.max_slots == 0 || p_config.max_slots > net::kMaxSlots) {
+		return core::make_error("GameServer: max_slots must be 1.." + std::to_string(net::kMaxSlots));
+	}
+	if (p_config.snapshot_divisor == 0) {
+		return core::make_error("GameServer: snapshot_divisor 0");
+	}
+	m.config = p_config;
+	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(p_config.level->static_world);
+	if (!world) {
+		return core::error_at("GameServer", world.error());
+	}
+	m.world = std::move(*world);
+	BF3_TRY(m.motor.init(*m.world, p_config.level->motor));
+	m.motor_hash = sim::motor_params_hash(p_config.level->motor);
+	m.rng = p_config.seed;
+	m.slots.resize(p_config.max_slots);
+	for (Impl::Slot &s : m.slots) {
+		m.reset_slot(s);
+	}
+	for (uint32_t i = 0; i < p_config.walkers; ++i) {
+		if (add_local_soldier(std::make_unique<Walker>(i), 2) < 0) {
+			return core::make_error("GameServer: no slot for walker " + std::to_string(i));
+		}
+	}
+	return core::Status::success();
+}
+
+void GameServer::on_connect(uint32_t) {
+	// A slot is taken on Hello (the client's name and protocol come with it).
+}
+
+void GameServer::on_disconnect(uint32_t p_peer) {
+	Impl &m = *impl_;
+	const int at = m.slot_of_peer(p_peer);
+	if (at >= 0) {
+		if (m.sweep.active && m.sweep.requester == uint32_t(at)) {
+			m.sweep.requester = UINT32_MAX; // the sweep finishes without a receiver
+		}
+		m.reset_slot(m.slots[size_t(at)]);
+	}
+}
+
+void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const uint8_t> p_datagram) {
+	Impl &m = *impl_;
+	const std::optional<net::MessageType> type = net::peek_type(p_datagram);
+	if (!type) {
+		++m.bad_datagrams;
+		return;
+	}
+	const int at = m.slot_of_peer(p_peer);
+	switch (*type) {
+		case net::MessageType::Hello: {
+			core::Result<net::Hello> h = net::decode_hello(p_datagram);
+			if (!h || p_channel != net::kChannelReliable) {
+				++m.bad_datagrams;
+				return;
+			}
+			m.handle_hello(p_peer, *h);
+			return;
+		}
+		case net::MessageType::Ready: {
+			core::Result<net::Ready> r = net::decode_ready(p_datagram);
+			if (!r || at < 0) {
+				++m.bad_datagrams;
+				return;
+			}
+			Impl::Slot &s = m.slots[size_t(at)];
+			if (r->source_digest != m.config.level->source_digest) {
+				std::fprintf(stderr, "GameServer: slot %d's source digest differs from the server's (M1: logged only)\n", at);
+			}
+			if (!s.spawned) {
+				s.want_spawn = true;
+			}
+			return;
+		}
+		case net::MessageType::CommandPacket: {
+			core::Result<net::CommandPacket> c = net::decode_command_packet(p_datagram);
+			if (!c || at < 0) {
+				++m.bad_datagrams;
+				return;
+			}
+			m.receive_commands(m.slots[size_t(at)], *c, net::monotonic_ns());
+			return;
+		}
+		case net::MessageType::Loading: {
+			if (!net::decode_loading(p_datagram) || at < 0) {
+				++m.bad_datagrams;
+			}
+			return;
+		}
+		case net::MessageType::Bye:
+			if (at >= 0) {
+				on_disconnect(p_peer);
+			}
+			return;
+		case net::MessageType::Debug: {
+			core::Result<net::DebugRequest> d = net::decode_debug(p_datagram);
+			if (!d || at < 0) {
+				++m.bad_datagrams;
+				return;
+			}
+			m.handle_debug(size_t(at), *d);
+			return;
+		}
+		default:
+			++m.bad_datagrams; // a server-to-client message from a client
+			return;
+	}
+}
+
+void GameServer::tick(std::vector<OutDatagram> &r_out) {
+	impl_->run_tick(r_out);
+}
+
+sim::Tick GameServer::current_tick() const {
+	return impl_->tick;
+}
+
+int GameServer::add_local_soldier(std::unique_ptr<CommandSource> p_source, int p_team) {
+	Impl &m = *impl_;
+	const int at = m.free_slot();
+	if (at < 0 || p_source == nullptr) {
+		return -1;
+	}
+	Impl::Slot &s = m.slots[size_t(at)];
+	m.reset_slot(s);
+	s.used = true;
+	s.team = p_team;
+	s.source = std::move(p_source);
+	if (!m.spawn(size_t(at), SIZE_MAX, m.tick)) {
+		m.reset_slot(s);
+		return -1;
+	}
+	return at;
+}
+
+GameServerStats GameServer::stats() const {
+	const Impl &m = *impl_;
+	GameServerStats g;
+	g.tick = m.tick;
+	g.snapshots_sent = m.snapshots_sent;
+	g.snapshot_bytes = m.snapshot_bytes;
+	g.max_snapshot_bytes = m.max_snapshot_bytes;
+	g.bad_datagrams = m.bad_datagrams;
+	g.step_precondition_failures = m.step_precondition_failures;
+	g.last_step_ms = m.last_step_ms;
+	g.last_encode_ms = m.last_encode_ms;
+	g.slots.resize(m.slots.size());
+	for (size_t i = 0; i < m.slots.size(); ++i) {
+		const Impl::Slot &s = m.slots[i];
+		SlotStats &o = g.slots[i];
+		o = s.stats;
+		o.used = s.used;
+		o.remote = s.remote;
+		o.peer = s.peer;
+		o.life = s.state.life;
+		o.alive = s.spawned && alive(s.state);
+		o.buffer_ticks = s.any_command ? int32_t(int64_t(s.highest_sequence_tick) - int64_t(m.tick)) : 0;
+		o.state = s.state;
+		g.clients += (s.used && s.remote) ? 1u : 0u;
+		g.soldiers += o.alive ? 1u : 0u;
+	}
+	return g;
+}
+
+const sim::SoldierState *GameServer::soldier(uint32_t p_slot) const {
+	const Impl &m = *impl_;
+	if (p_slot >= m.slots.size() || !m.slots[p_slot].used || !m.slots[p_slot].spawned) {
+		return nullptr;
+	}
+	return &m.slots[p_slot].state;
+}
+
+} // namespace bf3::host

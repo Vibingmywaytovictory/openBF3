@@ -109,6 +109,12 @@ private:
 
 	mutable std::mutex transforms_mutex_;
 	std::vector<sim::BodyTransform> transforms_;
+
+	// M1 T4 (config_.game set): the game replaces world_ on the server thread; its stats are published after every
+	// tick under game_stats_mutex_ (game_stats()).
+	std::unique_ptr<GameServer> game_;
+	mutable std::mutex game_stats_mutex_;
+	GameServerStats game_stats_;
 };
 
 } // namespace bf3::host

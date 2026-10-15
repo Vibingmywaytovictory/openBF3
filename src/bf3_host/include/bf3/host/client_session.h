@@ -116,6 +116,9 @@ struct ClientSessionConfig {
 	uint32_t connect_timeout_ms = 5000;
 	bool request_dev_commands = false; // the session may send Debug requests (tests, --m1-check)
 	bool debug_hash_compare = false; // also compare soldier_state_hash at every snapshot (counts hash_mismatches)
+	// Tests only (host.session.unit, T4): the first clock estimate (from MatchInfo) is moved by this many ticks, so
+	// a test can start the clock behind the server's spawn tick (a start with T >= C: forced_forward).
+	int32_t initial_clock_offset_ticks = 0;
 };
 
 // One soldier as the presentation sees it.
@@ -221,6 +224,9 @@ struct PresentationFrame {
 	double render_ticks_at_publish = 0.0;
 	double ticks_per_ns = double(sim::kSimHz) * 1e-9;
 	float extrapolate_max_ms = 250.0f;
+	// Eye height per pose (MotorParams::poses[].eye_height), so present_others blends a remote soldier's eye height
+	// over its transition progress without the motor (added in T4).
+	std::array<float, sim::kPoseCount> pose_eye_heights{ 1.6f, 1.0f, 0.3f };
 	uint32_t other_count = 0;
 	std::array<OtherTrack, net::kMaxSlots> others{};
 	ClientStats stats;
@@ -260,6 +266,14 @@ public:
 	// Dev commands (request_dev_commands). The report arrives asynchronously: poll take_debug_report.
 	void send_debug(const net::DebugRequest &p_request);
 	bool take_debug_report(net::DebugReport &r_report);
+
+	// Test hooks (host.session.unit, T4; docs §14): disturb the running client the way a scheduler hiccup or a
+	// mis-set clock would, so the tests exercise the recovery rules through the real thread. debug_shift_clock moves
+	// the command clock (and the tick about to be predicted) by p_ticks without counting a reset: the clock rules
+	// must then notice the wrong buffer and reset exactly once. debug_stall makes the client thread sleep p_ms once
+	// (no ENet service, no ticks), as a stalled thread would. Any thread; applied at the next loop of the client.
+	void debug_shift_clock(int32_t p_ticks);
+	void debug_stall(uint32_t p_ms);
 
 	// Stops and joins every running ClientSession of the process (extension deinit safety net).
 	static size_t stop_all();

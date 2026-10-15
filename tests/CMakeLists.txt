@@ -284,3 +284,21 @@ if(OPENBF3_ASAN)
     set_tests_properties(net.bits.unit net.proto.unit net.netsim.unit
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t3_cl_dir}")
 endif()
+
+# M1 T4 session (docs/design/m1.md §1 E2/E3, §7.4-§9, §14): host.session.unit runs GameServer without sockets,
+# judge_rest and the presentation helpers on synthetic input, then a real ServerHost + ClientSession over ENet
+# loopback on a synthetic world (spawn, clock resets, a stall, a teleport, Trace, E2 under 150/2 shortened); no
+# data. host.session runs the session on Metro's real world through load_shared_level (E2 under 150/2 as the gate
+# and 150 ms one way as a reported row, the 128-slot SpawnSweep against in-process rows, install unchanged) and
+# exits 77 without an install. Both read the shipped tuning file and are RUN_SERIAL (wall-clock timing).
+openbf3_test(test_host_session test_main.cpp host_session_tests.cpp test_support.h)
+target_link_libraries(test_host_session PRIVATE bf3_host)
+target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME host.session.unit COMMAND test_host_session --test-suite=host-session-unit)
+add_test(NAME host.session COMMAND test_host_session --test-suite=host-session)
+set_tests_properties(host.session.unit PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+set_tests_properties(host.session PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_t4_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.session.unit host.session PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t4_cl_dir}")
+endif()

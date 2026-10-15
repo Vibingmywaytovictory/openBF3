@@ -4,6 +4,7 @@
 
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
+#include "bf3/net/protocol.h"
 
 #include <algorithm>
 #include <chrono>
@@ -53,6 +54,50 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 	}
 	config_ = p_config;
 	config_.tick_hz = std::clamp(config_.tick_hz, 1, 1000);
+
+	// M1 T4 (docs/design/m1.md §8): a game config runs the GameServer at kSimHz instead of the S0 world.
+	if (config_.game) {
+		config_.tick_hz = int(sim::kSimHz);
+		game_ = std::make_unique<GameServer>();
+		const core::Status s = game_->init(*config_.game);
+		if (!s.ok()) {
+			game_.reset();
+			if (r_error) {
+				*r_error = s.error().message;
+			}
+			return false;
+		}
+		dynamic_bodies_ = 0;
+		net_ = std::make_unique<NetEndpoint>();
+		if (config_.enable_net) {
+			std::string err;
+			net_->host = net::Host::create_server(config_.bind_ip, config_.port, config_.max_peers, net::kChannelCount, &err);
+			if (!net_->host) {
+				game_.reset();
+				net_.reset();
+				if (r_error) {
+					*r_error = err;
+				}
+				return false;
+			}
+			port_.store(net_->host->bound_port(), std::memory_order_release);
+		}
+		ticks_ = 0;
+		last_step_us_ = p99_step_us_ = max_step_us_ = last_tick_us_ = 0;
+		overruns_ = pings_echoed_ = step_errors_ = 0;
+		peers_ = 0;
+		state_hash_ = 0;
+		{
+			std::lock_guard gl(game_stats_mutex_);
+			game_stats_ = game_->stats();
+		}
+		stop_requested_.store(false, std::memory_order_release);
+		running_.store(true, std::memory_order_release);
+		start_ns_ = now_ns();
+		thread_ = std::thread([this] { run(); });
+		registry_add(this);
+		return true;
+	}
 
 	// Build the world and bind the socket on the caller's thread so errors surface here; both
 	// are handed to the server thread and touched only there afterwards.
@@ -110,6 +155,7 @@ void ServerHost::stop() {
 	}
 	net_.reset();
 	world_.reset();
+	game_.reset();
 	port_.store(0, std::memory_order_release);
 	running_.store(false, std::memory_order_release);
 }
@@ -159,6 +205,11 @@ void ServerHost::copy_body_transforms(std::vector<sim::BodyTransform> &r_out) co
 	r_out = transforms_;
 }
 
+GameServerStats ServerHost::game_stats() const {
+	std::lock_guard lock(game_stats_mutex_);
+	return game_stats_;
+}
+
 void ServerHost::run() {
 	using clock = std::chrono::steady_clock;
 	const auto period = std::chrono::nanoseconds(1'000'000'000LL / config_.tick_hz);
@@ -172,6 +223,72 @@ void ServerHost::run() {
 
 	while (!stop_requested_.load(std::memory_order_acquire)) {
 		const auto tick_start = clock::now();
+
+		// M1 T4: the game tick (docs §8.1): ENet service -> GameServer::on_* -> tick -> send its datagrams -> flush,
+		// so a snapshot leaves in the tick that made it (the RTT bound of docs §7.5).
+		if (game_) {
+			if (net_ && net_->host) {
+				net::Host::Event ev;
+				int got = 0;
+				while ((got = net_->host->service(0, ev)) > 0) {
+					if (ev.type == net::Host::EventType::Connect) {
+						game_->on_connect(ev.peer);
+					} else if (ev.type == net::Host::EventType::Disconnect) {
+						game_->on_disconnect(ev.peer);
+					} else if (ev.type == net::Host::EventType::Receive) {
+						game_->on_receive(ev.peer, ev.channel, ev.data);
+					}
+				}
+				if (got < 0) {
+					step_errors_.fetch_add(1, std::memory_order_relaxed);
+				}
+			}
+			const auto step_start = clock::now();
+			std::vector<OutDatagram> out;
+			game_->tick(out);
+			const uint32_t step_us =
+					static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - step_start).count());
+			if (net_ && net_->host) {
+				for (const OutDatagram &d : out) {
+					const net::Host::SendMode mode = d.reliable ? net::Host::SendMode::Reliable
+																: (d.channel == net::kChannelUnreliable ? net::Host::SendMode::Unsequenced : net::Host::SendMode::Sequenced);
+					if (!net_->host->send(d.peer, d.channel, d.bytes.data(), d.bytes.size(), mode)) {
+						step_errors_.fetch_add(1, std::memory_order_relaxed);
+					}
+				}
+				net_->host->flush();
+				peers_.store(static_cast<uint32_t>(net_->host->connected_peers()), std::memory_order_relaxed);
+			}
+			{
+				GameServerStats g = game_->stats();
+				std::lock_guard gl(game_stats_mutex_);
+				game_stats_ = std::move(g);
+			}
+			window[window_fill % window.size()] = step_us;
+			window_fill++;
+			max_us = std::max(max_us, step_us);
+			if (window_fill % 60 == 0) {
+				const size_t n = std::min(window_fill, window.size());
+				sorted.assign(window.begin(), window.begin() + static_cast<std::ptrdiff_t>(n));
+				const size_t k = std::min(n - 1, (n * 99) / 100);
+				std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(k), sorted.end());
+				p99_step_us_.store(sorted[k], std::memory_order_relaxed);
+			}
+			last_step_us_.store(step_us, std::memory_order_relaxed);
+			max_step_us_.store(max_us, std::memory_order_relaxed);
+			last_tick_us_.store(
+					static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - tick_start).count()),
+					std::memory_order_relaxed);
+			ticks_.fetch_add(1, std::memory_order_release);
+			next += period;
+			const auto now = clock::now();
+			if (now > next + 5 * period) {
+				overruns_.fetch_add(1, std::memory_order_relaxed);
+				next = now;
+			}
+			timer.sleep_until(next);
+			continue;
+		}
 
 		// 1. network: drain events; echo pings (S0's only message).
 		if (net_ && net_->host) {

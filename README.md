@@ -1051,3 +1051,36 @@ Tests: `sim.motor.unit` (no data) and `sim.motor` (install; skipped without one)
 Known limit (docs §6.1 "As built in T2"): where two floor meshes meet unwelded, Jolt's character padding meets the
 far mesh's edge and lifts a walker 0.5-14 mm for a tick, costing up to 3.5 % of the speed for about half a second.
 Metro's E1a therefore holds the window mean to ±1 % and each tick to ≥ 95 %.
+
+## M1 session (T4)
+
+<!-- M1 T4 -->
+`bf3_host` runs the M1 game: `GameServer` inside `ServerHost`'s 60 Hz thread (`ServerConfig::game`; the S0 world is
+untouched without it) and `ClientSession` on its own thread, both Godot-free (docs/design/m1.md §7-§9, §12). The
+server keeps a 32-tick jitter buffer per slot (a newer sequence replaces a buffered tick, the buffer report follows
+the highest sequence), holds a new slot on the spawn's hold command, applies Teleport / SpawnAt / spawns in the rules
+step stamped at the tick, records `Trace` reports, runs `SpawnSweep` in batches of the free slots, and sends and
+flushes the tick's datagrams in the tick. The client runs the command clock (target buffer, slew, reset with a
+hold-off, forced forward), predicts every tick from the ring's entry at C - 1, reconciles and fills gaps through
+`sim::catch_up`, smooths corrections (IW4L's 100 ms decay), interpolates the others on the received server time and
+publishes a fixed-size `PresentationFrame`; `present_others` / `present_own_fraction` evaluate it per display frame.
+`judge_rest` (rest_check.h) is the one E2 judge. `level_load.h` loads the level database and the `SharedLevel`
+(spawns, soldier, static world through the cache).
+
+Tests: `host.session.unit` (no data, about 70 s) and `host.session` (install; skipped without one; about 190 s);
+both are `RUN_SERIAL` (wall-clock timing).
+
+* `host.session.unit`: `judge_rest` on synthetic recordings; `present_others` brackets, extrapolates 250 ms and
+  holds; `GameServer` without sockets (hold command, late / repeated / replaced counts, the buffer report, Teleport
+  and SpawnAt stamped at the rules tick, Trace, refused dev commands, a 20,000-datagram fuzz) and its SpawnSweep in
+  3 batches equal to headless rows; then real ENet loopback on a synthetic floor: spawn with 0 reconciliations, the
+  spawn view, 238 / 238 predicted states equal the server's Trace bit for bit, odd-tick events and a superseded
+  snapshot's events reach `server_events`, RTT 1.25 ms (bound: 1 tick + 2 ms), clock target 2; clock disturbances
+  of -20 / +20 ticks reset exactly once each (+20: 5-6 commands replaced on the server, the forward jump filled at
+  once), a 3 s stall and a start 30 ticks behind recover with 0 precondition failures; a 0.08 m Teleport is
+  reconciled once and smoothed to 0 in 350 ms; E2 under "150/2" (shortened: 12 s idle, 2 cycles) 3 / 3 rest periods
+  ok, RTT 156 ms against 150 ms netsim, extrapolated 0.07 % of frames.
+* `host.session`, Metro TDM through `load_shared_level` and the shipped tuning: cold 0.89 s / warm 0.22 s on a
+  scratch cache; E2 under "150/2" (the gate: 30 s idle + 4 walk-stop cycles along a `find_clear_heading` course):
+  5 / 5 rest periods ok, 0 reconciliations, RTT 157 ms; "lat=150-165,loss=2" (stress row, reported): 5 / 5 ok, RTT
+  322 ms; `SpawnSweep` with 128 slots 102 / 102 ok and equal to in-process `settle_spawn` rows; install unchanged.
