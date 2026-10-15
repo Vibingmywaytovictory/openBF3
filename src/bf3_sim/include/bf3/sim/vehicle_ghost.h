@@ -6,7 +6,9 @@
 // input-filter values). Lambdas, wheel contact points and the pitch-roll part are not sent: the client keeps its own
 // (s2.md §7.3 restore modes). Gate G2 (s2.md §1) measures the correction error of exactly this codec; its widths are
 // VehicleGhostQuantisation fields so the S2 sweep (bf3dump vehicle-replay --sweep) can vary them, and kDefault is
-// what M3 adopts.
+// what M3 adopts. The position sent is the centre-of-mass position (VehicleBodyState::com_position, the value Jolt
+// integrates), so a decode writes it straight back without the origin round trip; a receiver that presents the
+// frame origin computes it from the model's CoM (M3).
 //
 // The encoder clamps (every value maps to a code); the decoder refuses codes outside their bit width, a largest
 // component index above 3, a gear outside the model's range and a wheel count above kMaxVehicleWheels with an error
@@ -58,6 +60,11 @@ struct VehicleGhostQuantisation {
 	GhostQuantizer driver_filter{ -1.0f, 1.0f / 2047.0f, 12 }; // steer / throttle filters; brake on [0, 1] uses the upper half
 	unsigned stand_still_bits = 10; // ticks, saturating
 	bool send_controller_inputs = false; // the four Jolt inputs are re-derived from the command and the driver state
+	// The wheel collision test reruns every step (mNumStepsBetweenCollisionTestActive / Inactive = 1,
+	// VehicleConstraint.h:226-227) and rewrites each wheel's suspension length before the step reads it, so the
+	// suspension codes should carry no physics state. The sweep's "--no-suspension" row (false) confirms it; if G2 is
+	// unchanged M3 drops the 64 bits from the driven-vehicle row (s2.md §7.3).
+	bool send_suspension = true;
 
 	bool operator==(const VehicleGhostQuantisation &) const = default;
 };
@@ -84,8 +91,8 @@ struct VehicleGhostCodes {
 	uint8_t reversing = 0;
 };
 
-// Bits one ghost of p_wheels wheels costs at p_q (the Humvee at kDefault: 183 body bits + 4 x 39 wheel bits + 101 controller / driver
-// bits = 440 bits, 55 bytes; s2.md §7.2).
+// Bits one ghost of p_wheels wheels costs at p_q (the Humvee at kDefault: 183 body bits + 4 x 39 wheel bits + 101
+// controller / driver bits = 440 bits, 55 bytes; without the suspension codes 376 bits, 47 bytes; s2.md §7.2).
 size_t vehicle_ghost_bits(const VehicleGhostQuantisation &p_q, size_t p_wheels);
 
 // Per-wheel suspension max length, needed to scale the suspension codes (VehicleModel::wheels[i].suspension_max).
@@ -95,9 +102,11 @@ struct VehicleGhostScale {
 };
 
 VehicleGhostCodes encode_vehicle_ghost(const VehicleState &p_state, const VehicleGhostQuantisation &p_q, const VehicleGhostScale &p_scale);
-// Decodes into r_state: overwrites the body, the controller's rpm / gear / clutch / timers, the wheels' suspension
-// length, spin and angle and the driver state; leaves every other field of r_state (lambdas, contacts, pitch-roll,
-// controller inputs unless sent, current_step) as it was, so the caller decides where they come from (s2.md §7.3).
+// Decodes into r_state: overwrites the body's vehicle_restore::kBody fields (com_position, rotation, velocities,
+// active), the controller's rpm / gear / clutch / timers, the wheels' spin, angle and (if sent) suspension length and
+// the driver state; leaves every other field of r_state (the sleep test, previous_delta_time, lambdas, contacts,
+// pitch-roll, controller inputs unless sent, current_step) as it was. Callers decode into a copy of the client
+// world's own state(slot), so those fields are the client's own (s2.md §7.3); body.origin is not recomputed.
 core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const VehicleGhostQuantisation &p_q, const VehicleGhostScale &p_scale,
 		VehicleState &r_state);
 

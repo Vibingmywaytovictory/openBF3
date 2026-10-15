@@ -1160,9 +1160,12 @@ and are not gates):
 
 | gate | threshold | command |
 |---|---|---|
-| G1 free driving bit-identical | 0 of 3,600 ticks with a differing state hash, every course | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
-| G1r replay from any tick | 0 mismatching ticks over 15 restore ticks per course | same |
-| G2 corrections with quantised 30 Hz ghosts | max and p99 < 0.02 m per course at 100 and 150 ms replays | same |
+| C courses found | all 7 kinds found on MP_007 (a finder result, kept apart from G1 / G2) | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| G1 free driving bit-identical | 0 of 3,600 ticks with a differing state hash, every found course | same |
+| G1r replay from any tick | 0 mismatching ticks over 15 restore ticks per found course | same |
+| G1m several vehicles | 3 touching Humvees on synthetic ground: G1 and G1r with 0 mismatching ticks | `ctest --preset dev -R "^sim\.vehicle\.unit$" --output-on-failure` |
+| G2 corrections with quantised 30 Hz ghosts | max (and p99) < 0.02 m per found course at 100 and 150 ms replays | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| X same hashes from a second binary | report only: `bf3dump vehicle-replay MP_007 RushLarge0 --hash-out <file>` from the dev and release builds, then a file compare | manual |
 | H handling numbers | report only (unverified placeholders) | same, or `bf3dump vehicle-replay MP_007 RushLarge0 --handling` |
 | install unchanged | sizes and mtimes equal | same |
 | contract / units | pass | `ctest --preset dev -R "^(s2\.contract\|sim\.vehicle\.unit)$"` |

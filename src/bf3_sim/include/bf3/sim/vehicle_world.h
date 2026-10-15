@@ -14,8 +14,9 @@
 // Step: one PhysicsSystem::Update(kTickSeconds, tuning.collision_steps) per tick on a JobSystemSingleThreaded owned
 // by the world (no shared job threads: the step's order is the world's own; s2.md §6.3). Before the update, per
 // vehicle in slot order: the driver (our code; vehicle_model.h numbers) turns the tick's VehicleCommand and the
-// driver state into the controller's four inputs, adds the air drag force, and advances the stand-still timer.
-// Contact listener callbacks only count (chassis-static contacts per tick), so their order cannot matter.
+// driver state into the controller's four inputs, adds the air drag force with EActivation::DontActivate (a zero
+// force must not wake a sleeping vehicle; BodyInterface.cpp:699), and advances the stand-still timer. Contact
+// listener callbacks only count (chassis-static contacts per tick), so their order cannot matter.
 //
 // Threads: every method on the owner's thread. Two worlds over the same shapes may step at the same time on
 // different threads (sim.vehicle.unit runs them so).
@@ -25,13 +26,25 @@
 //             non-static body (statics never change), i.e. global state, the vehicle bodies, the contact cache and
 //             every constraint (VehicleConstraint, controller), plus our driver states and the tick. In-process and
 //             trusted: it is never sent or stored (the network carries VehicleGhostCodes, vehicle_ghost.h).
+//             Not in it, because Jolt saves neither: the broadphase trees' layout and
+//             BroadPhaseQuadTree::mNextLayerToUpdate. That is harmless while candidate order cannot reach the
+//             result (contacts are sorted, s2.md §6.3); the multi-vehicle check G1m (s2.md §1) is where it would
+//             show.
 //   restore() the full state back (any world created the same way with the same slots); bit-identical stepping
-//             afterwards is gate G1 (s2.md §1).
-//   restore_vehicle_state() one vehicle from a VehicleState POD, groups chosen by vehicle_restore:: bits: the body
-//             through BodyInterface, the constraint and controller through Jolt's own RestoreState fed a stream we
-//             write in VehicleConstraint::SaveState's layout (patched over the vehicle's current state, so groups
-//             not selected keep their values; Wheel has no setters for suspension length or lambdas). The contact
-//             policy says what happens to the chassis's cached contact manifolds (gate G2 restore modes, s2.md §7.3).
+//             afterwards is gate G1 (s2.md §1). The slot list and the stream length are checked before Jolt reads
+//             anything. Jolt's non-validating RestoreState applies bodies before it can fail
+//             (BodyManager.cpp:777-803), so restore() saves the current state first and puts that backup back if
+//             Jolt refuses the stream: a failed restore leaves the world as it was.
+//   restore_vehicle_state() one vehicle from a VehicleState POD, groups chosen by vehicle_restore:: bits, through
+//             Jolt's own restore functions only, each fed a stream in Jolt's save layout: the vehicle's current
+//             state is saved (PhysicsSystem::SaveBodyState, VehicleConstraint::SaveState), the selected groups are
+//             patched over it, and the result is read back with PhysicsSystem::RestoreBodyState (under a
+//             BodyLockWrite; it moves the body between the active lists and calls NotifyBodiesAABBChanged itself,
+//             PhysicsSystem.cpp:2971) and VehicleConstraint::RestoreState. Groups not selected keep their bits and
+//             nothing is recomputed (no p + R * CoM, no sleep-timer reset), so kAll of a world's own state(slot) is
+//             a bit-exact no-op. Wheel has no setters for suspension length or lambdas, hence the streams. The
+//             contact policy says what happens to the chassis's cached contact manifolds (gate G2 restore modes,
+//             s2.md §7.3).
 
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
@@ -70,7 +83,7 @@ struct VehiclePlacement {
 };
 
 namespace vehicle_restore {
-inline constexpr uint32_t kBody = 1u << 0; // position, rotation, velocities, active
+inline constexpr uint32_t kBody = 1u << 0; // centre-of-mass position, rotation, velocities, active
 inline constexpr uint32_t kController = 1u << 1; // rpm, gear, clutch, gearbox timers, previous dt
 inline constexpr uint32_t kControllerInputs = 1u << 2; // forward / right / brake / hand brake inputs
 inline constexpr uint32_t kWheels = 1u << 3; // per wheel: spin, angle, suspension length
@@ -79,9 +92,11 @@ inline constexpr uint32_t kLambdas = 1u << 5; // per wheel: the four totalLambda
 inline constexpr uint32_t kPitchRoll = 1u << 6; // pitch-roll axis and lambda
 inline constexpr uint32_t kStep = 1u << 7; // mCurrentStep, constraint enabled
 inline constexpr uint32_t kDriver = 1u << 8; // our driver state
-// What a decoded ghost carries (vehicle_ghost.h decode_vehicle_ghost).
+inline constexpr uint32_t kBodySleep = 1u << 9; // force, torque, sleep test spheres and timer, allow sleeping
+// What a decoded ghost carries (vehicle_ghost.h decode_vehicle_ghost). The sleep test is not sent: after a ghost
+// restore it is the client's own (from its own history), so the client falls asleep by its own test.
 inline constexpr uint32_t kGhost = kBody | kController | kWheels | kDriver;
-inline constexpr uint32_t kAll = (1u << 9) - 1u;
+inline constexpr uint32_t kAll = (1u << 10) - 1u;
 } // namespace vehicle_restore
 
 enum class ContactCachePolicy : uint8_t {
@@ -90,6 +105,8 @@ enum class ContactCachePolicy : uint8_t {
 };
 
 // What one vehicle touched during the last step.
+// Listener counts, world state outside the snapshot: after a restore they describe the last step taken, so the G2
+// tags come from the server's recorded counts, never from a client world (s2.md §8.4).
 struct VehicleContacts {
 	uint8_t wheels_in_contact = 0;
 	uint16_t chassis_static_contacts = 0; // contact manifolds chassis vs static bodies added or persisted this step
@@ -114,6 +131,10 @@ public:
 
 	const std::shared_ptr<const StaticWorldShapes> &shapes() const;
 	size_t static_body_count() const; // = CollisionWorld's static body count over the same shapes
+	// The BodyID value (index and sequence bits) of static body p_index < static_body_count(). sim.vehicle.unit checks
+	// that it equals CollisionWorld's over the same shapes, which catches drift in either creation path after a merge.
+	uint32_t static_body_id(size_t p_index) const;
+	uint32_t vehicle_body_id(VehicleSlot p_slot) const; // static_body_count() + p_slot
 
 	// Adds a vehicle in p_slot (unused, < max_vehicles) at p_placement, at rest, engine at min rpm, neutral driver.
 	// Fails on a used slot, a model whose world keys differ from the world's tuning, or when Jolt cannot add it.
@@ -129,9 +150,13 @@ public:
 	VehicleContacts contacts(VehicleSlot p_slot) const;
 
 	void save(VehicleWorldSnapshot &r_snapshot) const;
-	// Fails (and leaves the world unchanged) when the snapshot's slots differ from this world's or Jolt refuses the
-	// stream (a size check of every count before Jolt reads it).
+	// Fails, leaving the world as it was, when the snapshot's slots differ from this world's, the stream length does
+	// not match, or Jolt refuses the stream (the pre-restore backup is put back; see the file comment).
 	core::Status restore(const VehicleWorldSnapshot &p_snapshot);
+	// Writes the p_groups parts of p_state into the vehicle in p_slot (see the file comment); fields outside p_groups
+	// are not read. A caller holding a partial state (a decoded ghost) decodes into a copy of state(p_slot), so the
+	// fields the ghost leaves alone (previous_delta_time, the controller inputs, lambdas, contacts, the sleep test)
+	// are the world's own. Fails on an unknown slot or p_state.wheel_count != the model's wheel count.
 	core::Status restore_vehicle_state(VehicleSlot p_slot, const VehicleState &p_state, uint32_t p_groups, ContactCachePolicy p_contacts);
 	uint64_t state_hash() const; // save() then its hash (gate G1 compares this and vehicle_state_hash per tick)
 

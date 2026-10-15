@@ -14,17 +14,27 @@
 //   4. G1 replay: for each restore tick t (fixed list + seeded draws), restore the server's tick-t snapshot into the
 //      prediction world and replay min(replay_length, ticks - t) ticks, comparing as in 3; the same with the server
 //      world itself rewound (in-place rollback).
-//   5. G2 corrections: a client loop in the prediction world: every snapshot_interval ticks N, take the server's
-//      state at N, quantise it (vehicle_ghost.h), restore per mode (below) on top of the client's own state at N, replay
-//      R ticks of logged commands, and measure |position_client(N+R) - position_server(N+R)| (the body origin). The
-//      replayed states become the client's history. Samples are tagged "wheel contact" (>= 1 wheel in contact at
-//      N+R) and "static collision" (chassis-static contacts in any tick of N..N+R).
+//   5. G2 corrections: a client loop in the prediction world: at N = 0, snapshot_interval, 2 x snapshot_interval, ...
+//      with N + R <= ticks (1,798 samples for R = 6 and 1,796 for R = 9 over 3,600 ticks), take the server's state
+//      at N, quantise it (vehicle_ghost.h), decode it into a copy of the client's own state(slot) at N, restore per
+//      mode (below), replay R ticks of logged commands, and measure |origin_client(N+R) - origin_server(N+R)|
+//      (VehicleBodyState::origin, the frame origin). The replayed states become the client's history. Samples are
+//      tagged from the server's recorded listener counts (never the client world's): "wheel contact" (>= 1 wheel in
+//      contact at N+R) and "static collision" (chassis-static contacts in any tick of N..N+R).
 // Restore modes (s2.md §7.3); G2 is judged on OwnHistory, the others are the ablations that say which state matters:
-//   OwnHistory    client's own full snapshot at N, then the ghost (vehicle_restore::kGhost), contacts kept
+//   OwnHistory    client's own full snapshot at N, then the ghost (vehicle_restore::kGhost), contacts kept; the
+//                 sleep test stays the client's own
 //   Invalidate    the same, then the chassis contact cache invalidated
 //   GhostLambdas  OwnHistory + the server's exact lambdas (what sending lambdas would buy)
-//   ExactPod      client's own snapshot at N + the server's VehicleState with every group (no quantisation)
+//   ExactPod      client's own snapshot at N + the server's VehicleState with vehicle_restore::kAll, unquantised:
+//                 the vehicle's bytes then equal the server's exactly, so the only difference left is the client's
+//                 own contact cache (plan R4's "full-precision own-state block for the owner")
 //   Full          the server's full snapshot at N (no ghost; must give 0 error, a harness self-check)
+// ExactPod vs Full isolates the contact cache; OwnHistory vs ExactPod isolates quantisation and the unsent groups.
+//
+// G1m (run_vehicle_group): several vehicles in one world (slots 0..n-1), each with its own scripted course, that
+// touch each other and cross tile seams; G1 and G1r as above over all slots, no G2. One vehicle cannot show the
+// state Jolt does not save (broadphase layout, mNextLayerToUpdate, the order of tied wheel-cast hits); several can.
 
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
@@ -38,6 +48,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -67,6 +78,7 @@ struct VehicleReplayOptions {
 	uint32_t modes = 0x1Fu; // bit per VehicleRestoreMode; the primary mode is always run
 	VehicleGhostQuantisation quantisation = kDefaultVehicleGhost;
 	bool g1 = true, g2 = true;
+	bool keep_hashes = true; // fill VehicleCourseReport::server_hashes (bf3dump --hash-out, the cross-binary check)
 };
 
 struct VehicleDivergence {
@@ -107,18 +119,48 @@ struct VehicleCourseReport {
 	float max_speed_kmh = 0;
 	uint32_t ticks_all_wheels_off = 0; // airborne ticks (the jump)
 	uint32_t ticks_static_contact = 0;
+	uint32_t ticks_asleep = 0; // server body inactive (SlopeIdle must sleep: stand-still brake, then Jolt's sleep test)
 	size_t snapshot_bytes = 0; // one full snapshot
+	uint64_t steps = 0; // VehicleWorld::step calls over the whole run, every world and mode (printed with seconds)
 	double seconds = 0; // wall time of the whole run (noisy on a shared machine)
+	// The server's state_hash() at ticks 0..ticks (keep_hashes). bf3dump vehicle-replay --hash-out writes them, one
+	// hex line per tick, so two binaries (dev vs release, later Windows vs Linux, M3) can be compared with a diff.
+	std::vector<uint64_t> server_hashes;
 };
 
 core::Result<VehicleCourseReport> run_vehicle_course(std::shared_ptr<const StaticWorldShapes> p_shapes, std::shared_ptr<const VehicleModel> p_model,
 		const VehicleCourse &p_course, const VehicleReplayOptions &p_options = {});
 
-// The gates over a set of course reports (s2.md §1): G1 = every course found, g1_ticks == ticks, 0 mismatches,
-// 0 replay mismatches; G2 = every course found and, for OwnHistory at every replay length, all.samples > 0,
-// all.max < kG2MaxError and all.p99 < kG2MaxError (Collision additionally needs static_collision.samples >= 30).
+// The gates over a set of course reports (s2.md §1). C = every one of the kVehicleCourseKindCount kinds found (a
+// course-finder result, kept apart so a missing wall never reads as "Jolt not deterministic"). G1 and G2 judge the
+// found courses only and need at least one: G1 = g1_ticks == ticks, 0 mismatches, 0 replay mismatches; G2 = for
+// OwnHistory at every replay length, all.samples > 0, all.max < kG2MaxError and all.p99 < kG2MaxError (Collision,
+// when found, additionally needs static_collision.samples >= 30). p99 is informative once max passes.
+bool vehicle_gate_courses(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
 bool vehicle_gate_g1(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
 bool vehicle_gate_g2(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
+
+// ---- G1m: several vehicles in one world ------------------------------------------------------------------------
+
+struct VehicleGroupReport {
+	uint32_t vehicles = 0;
+	uint32_t g1_ticks = 0;
+	uint32_t g1_mismatches = 0;
+	VehicleDivergence g1_first; // field prefixed "slot<i>." for a VehicleState difference
+	uint32_t replay_runs = 0;
+	uint32_t replay_ticks = 0;
+	uint32_t replay_mismatches = 0;
+	VehicleDivergence replay_first;
+	uint32_t ticks_vehicle_contact = 0; // ticks with a chassis-chassis manifold (the case must have some)
+	uint64_t steps = 0;
+	double seconds = 0;
+};
+
+// p_courses[i] drives slot i (2 <= size <= kMaxVehicleSlots). G1 and G1r as in run_vehicle_course (options.g2 is
+// ignored). The gate: g1_ticks == ticks, 0 mismatches, 0 replay mismatches, ticks_vehicle_contact > 0.
+core::Result<VehicleGroupReport> run_vehicle_group(std::shared_ptr<const StaticWorldShapes> p_shapes, std::shared_ptr<const VehicleModel> p_model,
+		std::span<const VehicleCourse> p_courses, const VehicleReplayOptions &p_options = {});
+bool vehicle_gate_g1m(const VehicleGroupReport &p_report, std::string *r_why = nullptr);
 
 // ---- handling numbers (reported, unverified placeholders for S5 Session 2) ------------------------------------
 

@@ -8,8 +8,9 @@
 //
 // Courses on a real level are found, not hand-placed: find_vehicle_courses searches around seed points (the level's
 // vehicle spawners, vehicle_spawns.h) with CollisionWorld queries (ground_below, ray, overlap_box) on the Collision
-// layer, on a fixed grid in a fixed order (deterministic), and keeps every leg on tiles that have terrain (MP_007's
-// soup has terrain only in tiles with Havok triangles or their neighbours; s2.md §4.4). Each kind:
+// layer, on a fixed grid in a fixed order (deterministic), and keeps every leg, and the turnaround area beyond each
+// end of the Straight / Brake / Slalom legs (those 60 s runs turn around repeatedly), on tiles that have terrain
+// (MP_007's soup has terrain only in tiles with Havok triangles or their neighbours; s2.md §4.4). Each kind:
 //   Straight   a flat straight of >= 150 m: full throttle from rest, brake to rest at the end, turn around, again
 //   Brake      the same straight: accelerate to 60 km/h, full brake, measure, repeat
 //   Slalom     +-full steer at 0.5 Hz around the straight's line at ~40 km/h, turning back at its ends
@@ -19,7 +20,8 @@
 //   Collision  ~30 km/h square into a static Collision-layer wall (a horizontal ray hit with |normal.y| < 0.3 and
 //              >= 1.5 m tall), reverse 15 m, again
 //   SlopeIdle  stop on ground of 8..20 degrees, no input for the rest of the run (stand-still brake, sleep)
-// A kind not found in the search radius is reported as not found (that course's gates count as failed, s2.md §1).
+// A kind not found in the search radius is reported as not found: gate C fails, and G1 / G2 judge the found courses
+// only (s2.md §1), so a finder miss is never read as a determinism result.
 
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
@@ -57,6 +59,10 @@ struct VehicleCourseSearch {
 	float grid = 4.0f; // m between candidate points
 	float max_flat_degrees = 4.0f; // "flat" for Straight / Brake / Slalom / Circle
 	size_t max_queries = 2000000; // CollisionWorld queries over the whole search (hostile / huge levels stop here)
+	// Straight / Brake / Slalom: a disc of this radius beyond each leg end must be on terrain tiles, within
+	// max_turnaround_degrees and free of Collision-layer obstacles up to the chassis height.
+	float turnaround_radius = 20.0f;
+	float max_turnaround_degrees = 10.0f;
 };
 
 // One course per kind (found or not), kind order. Deterministic for equal inputs.
@@ -64,6 +70,11 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 		std::span<const Vec3> p_seeds, const VehicleModel &p_model, const VehicleCourseSearch &p_search = {});
 // The courses on build_synthetic_vehicle_ground's features (vehicle_world.h), all found.
 std::array<VehicleCourse, kVehicleCourseKindCount> synthetic_vehicle_courses(const SyntheticVehicleGround &p_ground = {});
+// G1m (vehicle_replay.h run_vehicle_group): three courses for slots 0..2 on the synthetic ground that make the
+// vehicles touch and cross a 64 m tile seam: slot 0 idles (SlopeIdle on the flat), slot 1 drives a Collision course
+// whose wall point b is slot 0's side (~30 km/h, reverse, again), slot 2 slaloms along a line crossing the seam and
+// passing within a metre of both.
+std::array<VehicleCourse, 3> synthetic_vehicle_group(const SyntheticVehicleGround &p_ground = {});
 
 // ---- the scripted driver (server side) -----------------------------------------------------------------------
 

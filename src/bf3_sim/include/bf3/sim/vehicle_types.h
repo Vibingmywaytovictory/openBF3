@@ -4,12 +4,17 @@
 //
 // VehicleCommand: one tick of a driver's input, quantised where it is made (like Command, command.h): the client
 // predicts with exactly the numbers the server receives. VehicleState: everything the vehicle world's step reads
-// from one vehicle besides the static world, in full precision: the Jolt body, the VehicleConstraint (wheels,
-// lambdas, pitch-roll part), the WheeledVehicleController (inputs, engine, transmission) and our own driver state
-// (input filter, stand-still timer). Field for field the same values Jolt's VehicleConstraint::SaveState writes
-// (VehicleConstraint.cpp:646, WheeledVehicleController.cpp:827, VehicleEngine.cpp:112,
-// VehicleTransmission.cpp:141), so a VehicleState restored through VehicleWorld::restore_vehicle_state with every
-// group set and the contact cache kept equals a Jolt restore of those parts.
+// from one vehicle besides the static world and the contact cache, in full precision: the Jolt body
+// (Body::SaveState + MotionProperties::SaveState, Body.cpp:296, MotionProperties.cpp:63, including the sleep test
+// state), the VehicleConstraint (wheels, lambdas, pitch-roll part), the WheeledVehicleController (inputs, engine,
+// transmission) and our own driver state (input filter, stand-still timer). Field for field the values Jolt's own
+// streams hold (PhysicsSystem::SaveBodyState, VehicleConstraint::SaveState: VehicleConstraint.cpp:646,
+// WheeledVehicleController.cpp:827, VehicleEngine.cpp:112, VehicleTransmission.cpp:141), so a VehicleState restored
+// through VehicleWorld::restore_vehicle_state with vehicle_restore::kAll writes back exactly the bytes Jolt saved:
+// the vehicle's part of the world is then bit-identical to a Jolt restore of it, and only the contact cache (kept or
+// invalidated, ContactCachePolicy) can differ (s2.md §6.4). The body position is the centre-of-mass position
+// (Body::mPosition, what Jolt integrates and saves), never the frame origin: origin = com - R * CoM is not
+// invertible bit-exactly in float (Body.h:273, Body.cpp:106), so the origin is a reported-only field.
 
 #include "bf3/sim/sim_types.h"
 
@@ -25,6 +30,14 @@ namespace bf3::sim {
 inline constexpr size_t kMaxVehicleWheels = 8;
 // "No body" in VehicleWheelState::contact_body (JPH::BodyID::cInvalidBodyID).
 inline constexpr uint32_t kNoContactBody = 0xFFFFFFFFu;
+
+// The byte sizes of the two Jolt streams restore_vehicle_state writes (Jolt 5.6.0, single precision; s2.md §6.4).
+// The implementation checks Jolt's own SaveBodyState / VehicleConstraint::SaveState against them before patching.
+// Body: active 1, position 12, rotation 16, linear 12, angular 12, force 12, torque 12, sleep spheres 3 x 16,
+// sleep timer 4, allow sleeping 1 (BodyManager.cpp:831, Body.cpp:296, MotionProperties.cpp:63).
+inline constexpr size_t kJoltBodyStreamBytes = 130;
+// VehicleConstraint: mEnabled 1, controller 44, 68 per wheel, pitch-roll axis 12 + lambda 4 + mCurrentStep 4.
+constexpr size_t jolt_vehicle_constraint_stream_bytes(size_t p_wheels) { return 1 + 44 + 68 * p_wheels + 20; }
 
 namespace vehicle_buttons {
 inline constexpr uint8_t kHandbrake = 1u << 0; // held
@@ -45,14 +58,31 @@ struct VehicleCommand {
 	bool operator==(const VehicleCommand &) const = default;
 };
 
-// The Jolt body (JPH::Body + MotionProperties), Frostbite axes. rotation is a quaternion (x, y, z, w).
+// One of MotionProperties::mSleepTestSpheres (Sphere: Float3 centre + radius, 16 bytes in the stream).
+struct VehicleSleepSphere {
+	Vec3 center{};
+	float radius = 0;
+};
+
+// The Jolt body (JPH::Body + MotionProperties), Frostbite axes, in PhysicsSystem::SaveBodyState's order (single
+// precision: active bool 1, position 12, rotation 16, linear 12, angular 12, force 12, torque 12, sleep spheres 48,
+// sleep timer 4, allow sleeping 1 = 130 bytes). rotation is a quaternion (x, y, z, w).
 struct VehicleBodyState {
-	Vec3 position{}; // Body::GetPosition: the vehicle frame origin (not the centre of mass)
+	Vec3 com_position{}; // Body::GetCenterOfMassPosition (= Body::mPosition)
 	std::array<float, 4> rotation{ 0, 0, 0, 1 };
 	Vec3 linear_velocity{};
 	Vec3 angular_velocity{};
-	uint8_t active = 1; // Body::IsActive (0 = asleep)
-	uint8_t reserved[3] = {};
+	// vehicle_restore::kBodySleep: accumulated force / torque (zero after every step, PhysicsSystem.cpp:2541) and
+	// the sleep test (Body::UpdateSleepStateInternal). A BodyInterface position or velocity setter would reset the
+	// sleep test; restore_vehicle_state never uses one.
+	Vec3 force{};
+	Vec3 torque{};
+	std::array<VehicleSleepSphere, 3> sleep_test_spheres{};
+	float sleep_test_timer = 0;
+	uint8_t active = 1; // Body::IsActive (0 = asleep); vehicle_restore::kBody
+	uint8_t allow_sleeping = 1; // MotionProperties::mAllowSleeping; vehicle_restore::kBodySleep
+	uint8_t reserved[2] = {};
+	Vec3 origin{}; // reported only: Body::GetPosition, the vehicle frame origin (what gate G2 measures)
 };
 
 // One VehicleConstraint wheel (Wheel / WheelWV). steer_angle is derived every step from the controller's right input
@@ -120,12 +150,12 @@ static_assert(std::is_trivially_copyable_v<VehicleCommand>);
 static_assert(std::is_trivially_copyable_v<VehicleState>);
 
 // FNV-1a 64 over the restorable fields' bit patterns in declaration order, the first wheel_count wheels only, never
-// the padding (reserved bytes), the reported-only fields (steer_angle, in_contact) or tick. -0.0 and 0.0 hash
-// differently: the gate is bit identity (s2.md §1 G1).
+// the padding (reserved bytes), the reported-only fields (body.origin, steer_angle, in_contact) or tick. -0.0 and
+// 0.0 hash differently: the gate is bit identity (s2.md §1 G1).
 uint64_t vehicle_state_hash(const VehicleState &p_state);
 
-// The first field two states differ in, as "body.position.y", "wheels[2].lambda_lateral", "controller.gear", ...;
-// empty when every hashed field is bit-equal (the G1 "measure why" report, s2.md §10).
+// The first field two states differ in, as "body.com_position.y", "wheels[2].lambda_lateral", "controller.gear", ...;
+// empty when every hashed field is bit-equal (the G1 "measure why" report, s2.md §1 fail rule).
 std::string vehicle_state_first_difference(const VehicleState &p_a, const VehicleState &p_b);
 
 } // namespace bf3::sim
