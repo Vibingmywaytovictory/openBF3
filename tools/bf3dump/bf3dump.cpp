@@ -47,6 +47,7 @@
 //                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
 //                              ... --shapes` adds them to a prepare run
 //   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
+// S1 (server scale): nav bake|stats|components|path|probe and bots (nav_commands.h)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -69,6 +70,8 @@
 #include "shapes_commands.h" // M1 T1
 // M1 T2: spawn points and spawners of a level x mode.
 #include "spawns_commands.h"
+// S1: the navmesh and the scale bench.
+#include "nav_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -608,6 +611,13 @@ int wmain(int argc, wchar_t **argv) {
 	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
+	}
+	// S1: nav ... and bots ... (nav_commands.cpp; docs/design/s1.md §12).
+	if (cmd == "nav") {
+		return bf3dump::cmd_nav(ctx.reader, ctx.install, rest);
+	}
+	if (cmd == "bots") {
+		return bf3dump::cmd_bots(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;

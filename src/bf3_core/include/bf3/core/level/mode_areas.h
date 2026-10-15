@@ -66,6 +66,10 @@ struct ModeObjectiveDef {
 struct ModeAreas {
 	std::vector<CombatAreaDef> combat_areas; // trigger order
 	std::vector<ModeObjectiveDef> objectives; // object order
+	// Triggers whose Geometry chain runs out of links (an interface field the instantiating scope never links): they
+	// watch no area and add no tiles (retail: Metro RL, open question 7 of docs/design/s1.md). A chain that reaches a
+	// target of another type is still an error.
+	std::vector<uint32_t> unwired_triggers;
 };
 
 // Reads the combat areas and objectives of a traversed level x mode. World is not thread-safe: caller's thread.

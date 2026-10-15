@@ -5,13 +5,19 @@
 
 #include "tick_timer.h"
 
+#include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/install.h"
+#include "bf3/core/level/collision_soup.h"
+#include "bf3/core/level/level.h"
+#include "bf3/core/level/world.h"
 #include "bf3/core/level/mode_areas.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
+#include "bf3/sim/nav.h"
 #include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/static_world.h"
 
 #include <windows.h>
 // windows.h first
@@ -623,6 +629,152 @@ std::string format_scale_report(const ScaleReport &p_report) {
 			double(kServerMemoryBudgetBytes) / (1024.0 * 1024.0), r.server_working_set <= kServerMemoryBudgetBytes ? "ok" : "over",
 			double(r.peak_working_set) / (1024.0 * 1024.0)));
 	return s;
+}
+
+// ---- G4: the uncached bake ------------------------------------------------------------------------------------------
+
+core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options) {
+	if (p_install == nullptr) {
+		return core::make_error("nav bake bench: no install");
+	}
+	NavBakeBench out;
+	out.options = p_options;
+	const unsigned threads = p_options.threads == 0 ? 0 : std::clamp(p_options.threads, 1u, 64u);
+	Clock::time_point clock = Clock::now();
+	core::level::LoadOptions load;
+	load.threads = threads;
+	core::Result<std::unique_ptr<core::level::LoadedLevel>> level = core::level::load_level(p_install, p_options.level, p_options.mode, load);
+	if (!level) {
+		return core::error_at("nav bake bench: " + p_options.level + " " + p_options.mode, level.error());
+	}
+	core::Result<std::unique_ptr<core::level::World>> world = core::level::World::traverse(**level);
+	if (!world) {
+		return core::error_at("nav bake bench: traverse", world.error());
+	}
+	sim::MotorTuning tuning;
+	if (!p_options.tuning_text.empty()) {
+		core::Result<sim::MotorTuning> t = sim::parse_motor_tuning(p_options.tuning_text);
+		if (!t) {
+			return core::error_at("nav bake bench: tuning", t.error());
+		}
+		tuning = *t;
+	}
+	core::Result<core::gameplay::SoldierDef> soldier = core::gameplay::read_soldier_def((*level)->db());
+	if (!soldier) {
+		return core::error_at("nav bake bench: soldier", soldier.error());
+	}
+	core::Result<sim::MotorParams> motor = sim::make_motor_params(*soldier, tuning);
+	if (!motor) {
+		return core::error_at("nav bake bench: motor params", motor.error());
+	}
+	out.params = sim::nav_params_from_motor(*motor);
+	out.params.radius_round_up = p_options.radius_round_up;
+	if (p_options.cell_size > 0.0f) {
+		out.params.cell_size = p_options.cell_size;
+	}
+	out.seconds_load = seconds_since(clock);
+
+	clock = Clock::now();
+	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(p_install, p_options.level, out.params.region_margin);
+	if (!combat) {
+		return core::error_at("nav bake bench: combat areas", combat.error());
+	}
+	out.seconds_areas = seconds_since(clock);
+	out.tiles_requested = combat->tiles.size();
+	out.tiles_polygon = combat->polygon_tiles;
+	out.tiles_point_only = combat->point_only_tiles;
+	out.points_outside_areas = combat->points_outside_areas;
+
+	clock = Clock::now();
+	core::level::SoupOptions so;
+	so.threads = threads;
+	so.terrain_cover = combat->tiles;
+	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(**level, **world, so);
+	if (!soup) {
+		return core::error_at("nav bake bench: soup", soup.error());
+	}
+	out.seconds_soup = seconds_since(clock);
+	out.soup_triangles = soup->triangles;
+	{
+		// Tiles by content: a requested tile whose own soup tile holds a non-terrain movement triangle.
+		std::vector<std::array<int32_t, 2>> objects;
+		for (const core::level::SoupTile &t : soup->tiles) {
+			for (const core::level::SoupTriangle &tri : t.triangles) {
+				const std::optional<sim::StaticLayer> layer = sim::static_layer_of(tri.body);
+				if ((tri.flags & core::level::kSoupTerrain) == 0 && layer && ((sim::query_mask::kMovement >> uint32_t(*layer)) & 1u) != 0) {
+					objects.push_back({ t.x, t.z });
+					break;
+				}
+			}
+		}
+		for (const std::array<int32_t, 2> &t : combat->tiles) {
+			const bool with = std::binary_search(objects.begin(), objects.end(), t);
+			(with ? out.tiles_with_objects : out.tiles_terrain_only) += 1;
+		}
+	}
+	std::shared_ptr<const sim::StaticWorldShapes> shapes;
+	if (p_options.link_checks) {
+		clock = Clock::now();
+		sim::StaticWorldBuildOptions bo;
+		bo.threads = threads;
+		bo.include_raycast = false; // the link sweeps are kMovement queries
+		core::Result<std::shared_ptr<const sim::StaticWorldShapes>> built = sim::build_static_world(*soup, bo);
+		if (!built) {
+			return core::error_at("nav bake bench: static world", built.error());
+		}
+		shapes = std::move(*built);
+		out.seconds_cook = seconds_since(clock);
+	}
+	world->reset(); // the World and the level are not needed by the bake
+	level->reset();
+
+	sim::NavBakeOptions bake;
+	bake.params = out.params;
+	bake.threads = threads;
+	bake.layer_mask = p_options.layer_mask;
+	bake.link_shapes = shapes;
+	core::Result<std::shared_ptr<const sim::NavWorld>> nav = sim::bake_nav_world(*soup, combat->tiles, bake);
+	if (!nav) {
+		return core::error_at("nav bake bench: bake", nav.error());
+	}
+	out.nav = std::move(*nav);
+	out.gate_seconds = sim::nav_bake_gate_seconds(out.nav->stats());
+	uint64_t sum = 0;
+	size_t n = 0;
+	for (size_t i = 0; i < out.nav->tile_count(); ++i) {
+		const sim::NavTileInfo &t = out.nav->tile(i);
+		if (t.data_bytes > 0) {
+			sum += t.data_bytes;
+			++n;
+			out.tile_bytes_max = std::max<uint64_t>(out.tile_bytes_max, t.data_bytes);
+		}
+	}
+	out.tile_bytes_mean = n > 0 ? double(sum) / double(n) : 0.0;
+	out.peak_working_set = peak_working_set();
+	return out;
+}
+
+std::string format_nav_bake_bench(const NavBakeBench &p_b) {
+	const sim::NavStats &s = p_b.nav != nullptr ? p_b.nav->stats() : sim::NavStats();
+	std::string out;
+	const auto line = [&](const std::string &p_text) { out += p_text + "\n"; };
+	line(fmt("nav bake %s %s: threads %u, layers %s, radius %s (%.2f m), cs %.2f ch %.2f climb %.2f slope %.0f height %.2f crouch %.2f", p_b.options.level.c_str(),
+			p_b.options.mode.c_str(), p_b.options.threads, p_b.options.layer_mask == sim::query_mask::kMovement ? "movement" : "all",
+			p_b.params.radius_round_up ? "ceil" : "nearest", double(p_b.params.agent_radius), double(p_b.params.cell_size), double(p_b.params.cell_height),
+			double(p_b.params.agent_climb), double(p_b.params.max_slope_degrees), double(p_b.params.agent_height), double(p_b.params.crouch_height)));
+	line(fmt("   region: %zu tiles requested (%zu from the combat polygons + margin, %zu only from points; %zu points outside every area); %zu terrain-only, %zu "
+			 "with objects",
+			p_b.tiles_requested, p_b.tiles_polygon, p_b.tiles_point_only, p_b.points_outside_areas, p_b.tiles_terrain_only, p_b.tiles_with_objects));
+	line(fmt("   not timed: load + traverse %.2f s, combat areas (all MP modes) %.2f s, soup with cover %.2f s (%zu triangles), link world cook %.2f s",
+			p_b.seconds_load, p_b.seconds_areas, p_b.seconds_soup, p_b.soup_triangles, p_b.seconds_cook));
+	line(fmt("   timed: input %.3f s + lanes %.3f s + assembly %.3f s = G4 %.3f s  (link world setup %.3f s and link sweeps %.3f s summed over lanes, %zu "
+			 "link worlds)",
+			s.seconds_input, s.seconds_bake, s.seconds_assemble, p_b.gate_seconds, s.seconds_link_setup, s.seconds_link_cpu, s.link_worlds));
+	line(fmt("   result: %zu tiles with polys, %zu empty, %zu polys, %zu drop links (%zu candidates, %zu sweeps, %zu rejected), far triangles %zu", s.tiles,
+			s.tiles_empty, s.polys, s.drop_links, s.link_candidates, s.link_sweeps, s.links_rejected, s.far_triangles));
+	line(fmt("   memory: %.1f MiB of tile data, %.1f KiB mean / %.1f KiB max per tile; peak working set %.1f MiB", double(s.data_bytes) / (1024.0 * 1024.0),
+			p_b.tile_bytes_mean / 1024.0, double(p_b.tile_bytes_max) / 1024.0, double(p_b.peak_working_set) / (1024.0 * 1024.0)));
+	return out;
 }
 
 } // namespace bf3::host

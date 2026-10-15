@@ -163,6 +163,46 @@ NavComponents nav_components(const NavWorld &p_world) {
 			out.largest = c;
 		}
 	}
+	// Which components can reach the largest one: a walk back along the reversed links from its polys.
+	out.reaches_largest.assign(out.area.size(), 0);
+	if (!out.area.empty()) {
+		std::vector<uint32_t> rstart(n + 1, 0);
+		for (uint32_t v = 0; v < n; ++v) {
+			for (uint32_t e = start[v]; e < start[v + 1]; ++e) {
+				++rstart[edges[e] + 1];
+			}
+		}
+		for (size_t i = 0; i < n; ++i) {
+			rstart[i + 1] += rstart[i];
+		}
+		std::vector<uint32_t> redges(rstart[n]);
+		std::vector<uint32_t> fill(rstart.begin(), rstart.end() - 1);
+		for (uint32_t v = 0; v < n; ++v) {
+			for (uint32_t e = start[v]; e < start[v + 1]; ++e) {
+				redges[fill[edges[e]]++] = v;
+			}
+		}
+		std::vector<uint8_t> seen(n, 0);
+		std::vector<uint32_t> todo;
+		for (uint32_t v = 0; v < n; ++v) {
+			if (out.component[v] == out.largest) {
+				seen[v] = 1;
+				todo.push_back(v);
+			}
+		}
+		while (!todo.empty()) {
+			const uint32_t v = todo.back();
+			todo.pop_back();
+			out.reaches_largest[out.component[v]] = 1;
+			for (uint32_t e = rstart[v]; e < rstart[v + 1]; ++e) {
+				const uint32_t u = redges[e];
+				if (seen[u] == 0) {
+					seen[u] = 1;
+					todo.push_back(u);
+				}
+			}
+		}
+	}
 	return out;
 }
 

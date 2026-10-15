@@ -93,8 +93,11 @@ struct NavParams {
 	float agent_climb = 0.3f; // stand PoseParams::step_height
 	float max_slope_degrees = 50.0f; // MotorParams::max_ascend_degrees
 	// Walkable radius in cells: ceil(radius / cs) (Recast's convention: 2 cells = 0.5 m at cs 0.25) when true,
-	// else round to nearest (1 cell = 0.25 m). docs §5.3 says which the gates use and why.
-	bool radius_round_up = true;
+	// else round to nearest (1 cell = 0.25 m). docs §5.3 says which the gates use and why. Implementation (§5.7 as
+	// built): nearest is the default. The conservative raster already grows every wall by up to a cell, so 1 cell keeps
+	// the mesh 0.25-0.5 m off walls (the capsule is 0.35 m) where ceil keeps it 0.5-0.75 m off and closes the 0.7-1.0 m
+	// passages the motor walks through (Metro CQL: 13 of 78 G2 rows in the main component with ceil, 68 with nearest).
+	bool radius_round_up = false;
 	float max_edge_length = 12.0f; // metres (Recast sample: 12)
 	float max_simplification_error = 1.3f; // cells
 	uint32_t min_region_cells = 8 * 8;
@@ -325,6 +328,10 @@ struct NavComponents {
 	// but not reached, or the reverse); one in another weak component is truly disconnected (review of revision 2:
 	// the two call for different R6 responses, docs §5.5).
 	std::vector<uint32_t> weak_component;
+	// Per component: 1 when it can reach the largest component along the links (the largest itself included). A
+	// one-way row that reaches it can be left towards the main component (a spawn there still feeds the fight); one
+	// that does not is a trap (implementation: the G2 report splits the one-way class by this).
+	std::vector<uint8_t> reaches_largest;
 };
 NavComponents nav_components(const NavWorld &p_world);
 // The strongly connected component of a poly (UINT32_MAX for 0, a stale ref or a poly outside p_components). The

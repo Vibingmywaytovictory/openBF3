@@ -55,6 +55,9 @@ struct BotPointRow {
 	// on_mesh and check.weak_component == the main component's weak component: a row with in_main_weak and not
 	// in_main is reachable one way only (a drop), one with neither is truly disconnected (docs §5.5, the R6 class).
 	bool in_main_weak = false;
+	// on_mesh and its component can reach the main component (the main component itself included): a one-way row
+	// that reaches it is exit-only (a spawn there feeds the main component), one that does not is a trap.
+	bool reaches_main = false;
 	bool settled = false; // spawns: settle_spawn succeeded (else the raw point was checked)
 };
 
@@ -94,8 +97,12 @@ struct BotLevel {
 struct BotLoadOptions {
 	core::Cache *cache = nullptr;
 	unsigned threads = 0; // nav bake lanes
-	sim::NavParams params; // nav_params_from_motor(SharedLevel::motor) by default (load_bot_level fills it when unset)
+	// The bake's params. With params_from_motor (the default) the soldier's numbers (radius, stand and crouch
+	// heights, climb, slope) come from SharedLevel::motor (nav_params_from_motor) and the rest (cell sizes, radius
+	// rounding, partition, drop links, margin) from here.
+	sim::NavParams params;
 	bool params_from_motor = true;
+	uint32_t layer_mask = sim::query_mask::kMovement; // kAll only for the split investigation (docs §5.7)
 	// BotSpawns step 3 (no spawn point in the main component): how many seeded main-component points to make.
 	uint32_t synthetic_spawns = 64;
 	uint64_t seed = 1; // of the synthetic points

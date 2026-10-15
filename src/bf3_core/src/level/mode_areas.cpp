@@ -101,14 +101,18 @@ Result<std::string> enum_of(const World &p_world, const PlacedObject &p_object, 
 }
 
 // Follows the link chain from (p_source, p_field) in p_scope to a VolumeVectorShapeData. Every link scanned is
-// charged. Returns the shape and the scope that places it, or nullopt.
+// charged. Returns the shape and the scope that places it, or nullopt; r_other is set when a link of the chain
+// reached a target that is neither a shape nor an interface the chain can climb (a wiring this reader does not know:
+// an error), and stays false when the chain only ran out of links (an unwired trigger, S1 open question 7).
 struct ShapeAt {
 	EbxInstance shape;
 	uint32_t scope = 0;
 };
-Result<std::optional<ShapeAt>> follow_area(const World &p_world, uint32_t p_scope, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth) {
+Result<std::optional<ShapeAt>> follow_area(const World &p_world, uint32_t p_scope, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth,
+		bool &r_other) {
 	WorkBudget &budget = *p_world.budget;
 	if (p_depth > kMaxInterfaceHops || p_scope >= p_world.scopes.size()) {
+		r_other = true;
 		return std::optional<ShapeAt>();
 	}
 	const Connections &c = p_world.scopes.connections(p_scope);
@@ -123,11 +127,13 @@ Result<std::optional<ShapeAt>> follow_area(const World &p_world, uint32_t p_scop
 			return std::optional<ShapeAt>(ShapeAt{ link.target, p_scope });
 		}
 		if (link.target.is_a("InterfaceDescriptorData") && scope.reference && scope.parent) {
-			Result<std::optional<ShapeAt>> up = follow_area(p_world, *scope.parent, *scope.reference, link.target_field, p_depth + 1);
+			Result<std::optional<ShapeAt>> up = follow_area(p_world, *scope.parent, *scope.reference, link.target_field, p_depth + 1, r_other);
 			BF3_TRY(up);
 			if (*up) {
 				return up;
 			}
+		} else {
+			r_other = true;
 		}
 	}
 	return std::optional<ShapeAt>();
@@ -153,8 +159,15 @@ Result<ModeAreas> read_mode_areas(const World &p_world) {
 			BF3_TRY(team);
 			area.team = *team;
 			const EbxInstance &source = object.entity;
-			Result<std::optional<ShapeAt>> shape = follow_area(p_world, object.scope, source, geometry, 0);
+			bool other = false;
+			Result<std::optional<ShapeAt>> shape = follow_area(p_world, object.scope, source, geometry, 0, other);
 			BF3_TRY(shape);
+			if (!*shape && !other) {
+				// The chain ends at an interface field the instantiating scope links to nothing (retail: Metro RL's
+				// rush-stage prefab instances whose stage the mode does not use). The trigger watches no area.
+				out.unwired_triggers.push_back(i);
+				continue;
+			}
 			if (!*shape) {
 				return make_error("mode areas: combat area trigger " + std::to_string(i) + " (" + object.entity.guid().to_string() +
 						") resolves to no VolumeVectorShapeData");

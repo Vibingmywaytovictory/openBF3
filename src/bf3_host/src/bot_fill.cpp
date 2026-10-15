@@ -91,7 +91,15 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	auto out = std::make_shared<BotLevel>();
 	out->level = p_shared.level;
 	out->mode = p_shared.mode;
-	const sim::NavParams params = p_options.params_from_motor ? sim::nav_params_from_motor(p_shared.motor) : p_options.params;
+	sim::NavParams params = p_options.params;
+	if (p_options.params_from_motor) {
+		const sim::NavParams soldier = sim::nav_params_from_motor(p_shared.motor);
+		params.agent_radius = soldier.agent_radius;
+		params.agent_height = soldier.agent_height;
+		params.crouch_height = soldier.crouch_height;
+		params.agent_climb = soldier.agent_climb;
+		params.max_slope_degrees = soldier.max_slope_degrees;
+	}
 
 	// The region: the combat-area tiles of every MP mode (+ margin); the static world must have that cover.
 	Clock::time_point clock = Clock::now();
@@ -121,6 +129,7 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	nav_options.bake.params = params;
 	nav_options.bake.threads = p_options.threads;
 	nav_options.bake.link_shapes = p_shared.static_world;
+	nav_options.bake.layer_mask = p_options.layer_mask;
 	nav_options.world.build.threads = p_options.threads;
 	nav_options.world.soup_threads = p_options.threads;
 	nav_options.world.terrain_cover = p_shared.terrain_cover;
@@ -193,6 +202,8 @@ BotRowsResult bot_point_rows(const sim::NavWorld &p_nav, const sim::NavComponent
 		row.on_mesh = row.check.poly != 0 && row.check.horizontal <= radius && std::fabs(row.check.vertical) <= vertical;
 		row.in_main = row.on_mesh && row.check.component == p_main;
 		row.in_main_weak = row.on_mesh && main_weak != UINT32_MAX && row.check.weak_component == main_weak;
+		row.reaches_main = row.on_mesh && p_main == p_components.largest && row.check.component < p_components.reaches_largest.size() &&
+				p_components.reaches_largest[row.check.component] != 0;
 		if (row.in_main) {
 			sim::bots::BotGoal g;
 			g.kind = goal_kind(row.kind);

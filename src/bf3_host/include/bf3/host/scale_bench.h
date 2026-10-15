@@ -142,6 +142,42 @@ struct ScaleReport {
 	bool install_unchanged = true;
 };
 
+// G4 (docs §1, §5.3): the uncached bake of one level x mode as the gate times it. Steps, each timed: load_level +
+// traverse, level_combat_tiles (every MP mode), the soup with the terrain cover, the static world cooked from that
+// soup (the link checks' world, uncached), then bake_nav_world over the region on p_threads lanes. The gate is
+// sim::nav_bake_gate_seconds(stats) (input + lanes + assembly). Also counts the region's tiles by content.
+struct NavBakeBenchOptions {
+	std::string level = "MP_007";
+	std::string mode = "ConquestLarge0";
+	unsigned threads = 16;
+	uint32_t layer_mask = sim::query_mask::kMovement;
+	bool radius_round_up = false; // NavParams default (1 cell)
+	float cell_size = 0.0f; // 0: NavParams default (0.25 m)
+	bool link_checks = true;
+	std::string tuning_text; // motor_tuning.cfg ("" = defaults); the soldier's numbers come from the level
+};
+struct NavBakeBench {
+	NavBakeBenchOptions options;
+	sim::NavParams params;
+	std::shared_ptr<const sim::NavWorld> nav;
+	size_t tiles_requested = 0;
+	size_t tiles_polygon = 0, tiles_point_only = 0; // of the region (LevelCombatTiles)
+	size_t tiles_terrain_only = 0; // requested tiles whose own soup tile holds terrain only (or nothing)
+	size_t tiles_with_objects = 0; // requested tiles whose own soup tile holds a non-terrain movement triangle
+	size_t points_outside_areas = 0;
+	size_t soup_triangles = 0;
+	double seconds_load = 0.0, seconds_areas = 0.0, seconds_soup = 0.0, seconds_cook = 0.0;
+	double gate_seconds = 0.0; // nav_bake_gate_seconds(nav->stats())
+	uint64_t tile_bytes_max = 0;
+	double tile_bytes_mean = 0.0; // over the non-empty tiles
+	uint64_t peak_working_set = 0;
+};
+core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options);
+std::string format_nav_bake_bench(const NavBakeBench &p_bench);
+// G4 thresholds (docs §1): seconds on 16 threads.
+inline constexpr double kNavBakeGateCaspianSeconds = 6.0;
+inline constexpr double kNavBakeGateKhargSeconds = 13.0;
+
 // The bench's statistics, exposed for host.scale.unit: nearest-rank percentiles (p = the smallest value with at
 // least that share of the samples at or below it) and the tail split of docs §14 over per-tick parts.
 Percentiles percentiles_of(std::vector<double> p_values);

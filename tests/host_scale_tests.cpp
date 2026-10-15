@@ -460,7 +460,14 @@ TEST_SUITE("host-scale-unit") {
 			CHECK(p.index > 0xFFFF0000u);
 		}
 		// The bots then spawn at the synthetic points and walk.
-		const ArenaRun r = run_arena(island_only, 16, 20.0, 3, true);
+		const ArenaRun r = run_arena(island_only, 16, 60.0, 3, true); // 60 s: a goal across the 256 m arena is up to 250 m away
+		{
+			const auto &w = r.bots.walkers;
+			std::printf("host.scale.unit synthetic: goals started %llu reached %llu abandoned %llu, stuck %llu, repaths %llu, metres min %.0f max %.0f\n",
+					(unsigned long long)w.goals_started, (unsigned long long)w.goals_reached, (unsigned long long)w.goals_abandoned,
+					(unsigned long long)w.stuck_events, (unsigned long long)w.repaths, r.metres.empty() ? 0.0 : r.metres.front(),
+					r.metres.empty() ? 0.0 : r.metres.back());
+		}
 		CHECK(!r.any_on_island_at_spawn);
 		CHECK(r.bots.walkers.goals_reached > 0);
 	}

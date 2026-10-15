@@ -295,6 +295,7 @@ TEST_SUITE("sim-nav-unit") {
 		const auto tiles = tiles_range(0, 0, 0, 0);
 		NavBakeOptions o;
 		o.params.drop_links = false;
+		o.params.radius_round_up = true;
 		const auto closed = bake(t, tiles, o);
 		const NavComponents cc = nav_components(*closed);
 		const NavPointCheck a = at(*closed, cc, 16, 0, 30.4f), b = at(*closed, cc, 48, 0, 30.4f);
@@ -473,7 +474,13 @@ TEST_SUITE("sim-nav-unit") {
 		const auto movement = bake(t, tiles);
 		const NavComponents mc = nav_components(*movement);
 		CHECK(at(*movement, mc, 10, 0, 32).component == at(*movement, mc, 32, 0, 32).component);
-		CHECK(at(*movement, mc, 42, 0, 42).poly == 0); // under the PLAYERCLIP block: nothing
+		{
+			// Under the PLAYERCLIP block: nothing. Detour may return a ground poly around the hole whose bounds
+			// overlap the box; its closest point is then outside the block (1-cell radius, docs §5.7).
+			const NavPointCheck u = at(*movement, mc, 42, 0, 42);
+			INFO("nearest ", u.nearest[0], " ", u.nearest[1], " ", u.nearest[2]);
+			CHECK((u.poly == 0 || u.horizontal > 1.5f));
+		}
 		NavBakeOptions all;
 		all.layer_mask = query_mask::kAll;
 		const auto with_raycast = bake(t, tiles, all);
@@ -739,10 +746,10 @@ TEST_SUITE("sim-nav-unit") {
 		bad.params.cell_size = 0.3f; // does not divide 64 m
 		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), tiles_range(0, 0, 0, 0), bad).ok());
 		CHECK(nav_cells(NavParams()).walkable_climb == 3);
-		CHECK(nav_cells(NavParams()).walkable_radius == 2);
-		NavParams nearest;
-		nearest.radius_round_up = false;
-		CHECK(nav_cells(nearest).walkable_radius == 1);
+		CHECK(nav_cells(NavParams()).walkable_radius == 1); // round to nearest is the default (docs §5.7 as built)
+		NavParams ceil;
+		ceil.radius_round_up = true;
+		CHECK(nav_cells(ceil).walkable_radius == 2);
 	}
 
 	TEST_CASE("sim.nav.unit: cache keys change with the input, the params and the link check; cold then warm tiles on a scratch root") {
@@ -761,7 +768,7 @@ TEST_SUITE("sim-nav-unit") {
 		q.cell_height = 0.2f;
 		CHECK(key(nav_tile_key_inputs(d0, q, true)) != k0);
 		q = p;
-		q.radius_round_up = false;
+		q.radius_round_up = !p.radius_round_up;
 		CHECK(key(nav_tile_key_inputs(d0, q, true)) != k0);
 		q = p;
 		q.drop_max = 4.0f;

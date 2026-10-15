@@ -21,3 +21,7 @@ target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `
 # M1 T2 (motor; docs/design/m1.md §10.1): `spawns <LEVEL> <MODE>`, the spawn points and spawners as TSV (bf3_sim from
 # T1's block above).
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
+# S1 (server scale; docs/design/s1.md §12): `nav bake|stats|components|path|probe` and `bots`, the navmesh, its
+# components and the 64-walker scale bench (bf3_host for the bot level and run_scale_bench).
+target_sources(bf3dump PRIVATE nav_commands.cpp nav_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_host)
