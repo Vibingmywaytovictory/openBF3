@@ -291,29 +291,50 @@ void course_facts(const Recording &p_rec, const VehicleModel &p_model, VehicleCo
 
 const char *kModeNames[kVehicleRestoreModeCount] = { "own", "invalidate", "lambdas", "pod", "pod-own-lambdas", "full" };
 
-// The G2 client loop for one mode and replay length (s2.md §8.4 step 5).
+// The OwnHistory client's history of one replay length: its world snapshot at every N it restored from.
+struct ClientHistory {
+	std::vector<VehicleWorldSnapshot> snapshots; // [tick], set where have[tick] != 0
+	std::vector<uint8_t> have;
+};
+
+// The G2 client loop for one mode and replay length (s2.md §8.4 step 5). OwnHistory, Invalidate and GhostLambdas
+// keep their own history (each replay's world at N + interval is the base of the next sample). ExactPod and
+// PodOwnLambdas restore the OwnHistory run's history (p_base) instead: a pod mode that kept its own history would
+// replay bit-identically after its exact restore (G1), so by induction from history[0] = the server's tick-0
+// snapshot its contact cache and lambdas would always equal the server's and the mode would equal Full by
+// construction. On the diverged OwnHistory base the only state that is not the server's is the client's Jolt state
+// outside the restored VehicleState groups (the contact cache; with PodOwnLambdas also the lambdas), which is what
+// s2.md §7.3 asks of them. r_history (OwnHistory only) receives the history.
 core::Status client_loop(Harness &r_h, VehicleWorld &r_client, const Recording &p_rec, VehicleRestoreMode p_mode, uint32_t p_replay,
-		const VehicleReplayOptions &p_options, VehicleCorrectionReport &r_report) {
+		const VehicleReplayOptions &p_options, const ClientHistory *p_base, ClientHistory *r_history, VehicleCorrectionReport &r_report) {
 	r_report.mode = p_mode;
 	r_report.replay_ticks = p_replay;
 	const uint32_t interval = p_options.snapshot_interval;
 	if (interval == 0 || p_replay < interval) {
 		return core::make_error("vehicle G2: replay length " + std::to_string(p_replay) + " is below the snapshot interval " + std::to_string(interval));
 	}
+	const bool pod = p_mode == VehicleRestoreMode::ExactPod || p_mode == VehicleRestoreMode::PodOwnLambdas;
+	if (pod && (p_base == nullptr || p_base->have.size() != size_t(p_rec.ticks) + 1)) {
+		return core::make_error(std::string("vehicle G2: mode ") + vehicle_restore_mode_name(p_mode) + " needs the OwnHistory history of R=" +
+				std::to_string(p_replay));
+	}
 	const VehicleGhostScale scale = vehicle_ghost_scale(*r_h.model);
-	std::vector<VehicleWorldSnapshot> history(size_t(p_rec.ticks) + 1);
-	std::vector<uint8_t> have(size_t(p_rec.ticks) + 1, 0);
-	history[0] = p_rec.snapshots[0];
-	have[0] = 1;
+	ClientHistory own;
+	own.snapshots.resize(size_t(p_rec.ticks) + 1);
+	own.have.assign(size_t(p_rec.ticks) + 1, 0);
+	own.snapshots[0] = p_rec.snapshots[0];
+	own.have[0] = 1;
+	const ClientHistory &history = pod ? *p_base : own;
 	std::vector<std::pair<float, Tick>> all, wheel_contact, static_collision;
 	for (uint32_t n = 0; n + p_replay <= p_rec.ticks; n += interval) {
 		if (p_mode == VehicleRestoreMode::Full) {
 			BF3_TRY(r_client.restore(p_rec.snapshots[n]));
 		} else {
-			if (have[n] == 0) {
+			if (history.have[n] == 0) {
 				return core::make_error("vehicle G2: no client history at tick " + std::to_string(n));
 			}
-			BF3_TRY(r_client.restore(history[n]));
+			BF3_TRY(r_client.restore(history.snapshots[n]));
+			r_report.diverged_bases += history.snapshots[n].hash != p_rec.snapshots[n].hash ? 1u : 0u;
 			const VehicleState &server = p_rec.states[n][0];
 			VehicleState target = r_client.state(0);
 			uint32_t groups = vehicle_restore::kGhost;
@@ -350,9 +371,9 @@ core::Status client_loop(Harness &r_h, VehicleWorld &r_client, const Recording &
 		}
 		for (uint32_t t = n + 1; t <= n + p_replay; ++t) {
 			BF3_TRY(r_h.step(r_client, p_rec.commands[t - 1]));
-			if (t == n + interval) {
-				r_client.save(history[t]);
-				have[t] = 1;
+			if (t == n + interval && !pod && p_mode != VehicleRestoreMode::Full) {
+				r_client.save(own.snapshots[t]);
+				own.have[t] = 1;
 			}
 		}
 		const VehicleState client = r_client.state(0);
@@ -375,6 +396,9 @@ core::Status client_loop(Harness &r_h, VehicleWorld &r_client, const Recording &
 	r_report.all = stats_of(std::move(all));
 	r_report.wheel_contact = stats_of(std::move(wheel_contact));
 	r_report.static_collision = stats_of(std::move(static_collision));
+	if (r_history != nullptr) {
+		*r_history = std::move(own);
+	}
 	return core::Status::success();
 }
 
@@ -431,14 +455,20 @@ core::Result<VehicleCourseReport> run_vehicle_course(std::shared_ptr<const Stati
 			BF3_TRY(made);
 			prediction = std::move(*made);
 		}
-		const uint32_t modes = p_options.modes | 1u; // the primary mode always runs
+		// The primary mode always runs, and first: its history per replay length is the diverged base of the pod
+		// modes (client_loop).
+		const uint32_t modes = p_options.modes | 1u;
+		const uint32_t pod_bits = (1u << uint32_t(VehicleRestoreMode::ExactPod)) | (1u << uint32_t(VehicleRestoreMode::PodOwnLambdas));
+		std::vector<ClientHistory> own(p_options.replay_ticks.size());
 		for (size_t m = 0; m < kVehicleRestoreModeCount; ++m) {
 			if ((modes & (1u << m)) == 0) {
 				continue;
 			}
-			for (const uint32_t r : p_options.replay_ticks) {
+			const bool primary = VehicleRestoreMode(m) == VehicleRestoreMode::OwnHistory;
+			for (size_t i = 0; i < p_options.replay_ticks.size(); ++i) {
 				VehicleCorrectionReport c;
-				BF3_TRY(client_loop(h, *prediction, rec, VehicleRestoreMode(m), r, p_options, c));
+				BF3_TRY(client_loop(h, *prediction, rec, VehicleRestoreMode(m), p_options.replay_ticks[i], p_options, primary ? nullptr : &own[i],
+						primary && (modes & pod_bits) != 0 ? &own[i] : nullptr, c));
 				report.corrections.push_back(c);
 			}
 		}
@@ -712,10 +742,10 @@ std::string format_vehicle_course_report(const VehicleCourseReport &p_report) {
 	for (const VehicleCorrectionReport &r : p_report.corrections) {
 		std::snprintf(line, sizeof(line),
 				"  G2 %-15s R=%u: all %zu max %.5f p99 %.5f mean %.5f (worst N %u) | wheel contact %zu max %.5f p99 %.5f | static collision %zu max %.5f "
-				"p99 %.5f | max rot %.4f deg, max vel %.4f m/s\n",
+				"p99 %.5f | max rot %.4f deg, max vel %.4f m/s | %u diverged bases\n",
 				vehicle_restore_mode_name(r.mode), r.replay_ticks, r.all.samples, double(r.all.max), double(r.all.p99), double(r.all.mean), r.all.worst_tick,
 				r.wheel_contact.samples, double(r.wheel_contact.max), double(r.wheel_contact.p99), r.static_collision.samples, double(r.static_collision.max),
-				double(r.static_collision.p99), double(r.max_orientation_degrees), double(r.max_velocity_error));
+				double(r.static_collision.p99), double(r.max_orientation_degrees), double(r.max_velocity_error), r.diverged_bases);
 		out += line;
 	}
 	std::snprintf(line, sizeof(line), "  snapshot %zu bytes, %llu world steps, %.2f s (shared machine: noisy)\n", p_report.snapshot_bytes,

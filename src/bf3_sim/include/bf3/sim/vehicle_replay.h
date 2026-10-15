@@ -29,9 +29,11 @@
 //                 sleep test stays the client's own
 //   Invalidate    the same, then the chassis contact cache invalidated
 //   GhostLambdas  OwnHistory + the server's exact lambdas (what sending lambdas would buy)
-//   ExactPod      client's own snapshot at N + the server's VehicleState with vehicle_restore::kAll, unquantised:
-//                 the vehicle's bytes then equal the server's exactly, so the only difference left is the client's
-//                 own contact cache (plan R4's "full-precision own-state block for the owner")
+//   ExactPod      the OwnHistory client's snapshot at N (that diverged history, not one of its own: an exact
+//                 restore replays bit-identically, so a pod mode's own history would stay the server's and the mode
+//                 would equal Full) + the server's VehicleState with vehicle_restore::kAll, unquantised: the
+//                 vehicle's bytes then equal the server's exactly, so the only difference left is the client's own
+//                 contact cache (plan R4's "full-precision own-state block for the owner")
 //   PodOwnLambdas ExactPod with the lambdas left the client's own (kAll & ~kLambdas): the unquantised POD minus
 //                 the solver state the ghost does not carry, so PodOwnLambdas - ExactPod is the cost of not sending
 //                 lambdas with no quantisation in the way
@@ -117,6 +119,9 @@ struct VehicleCorrectionReport {
 	VehicleErrorStats all, wheel_contact, static_collision;
 	float max_orientation_degrees = 0; // reported (2 acos|q.q'| via a series, no libm trig)
 	float max_velocity_error = 0; // m/s, reported
+	// samples whose restored client base at N differs from the server's snapshot (state_hash): Full has 0 by
+	// definition; the pod modes, restored from the OwnHistory history, need > 0 to measure anything
+	uint32_t diverged_bases = 0;
 };
 
 struct VehicleCourseReport {

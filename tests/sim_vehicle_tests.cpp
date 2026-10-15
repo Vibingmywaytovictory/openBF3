@@ -259,6 +259,18 @@ void print_handling(const char *p_what, const VehicleHandling &p_h) {
 			double(p_h.turning_circle_m), double(p_h.turning_circle_com_m), double(p_h.top_speed_kmh));
 }
 
+// The pod ablations (s2.md §7.3) restore the OwnHistory client's diverged history, never a copy of the server's:
+// on an undiverged base they would equal Full by construction and measure nothing. Full restores the server.
+void check_pod_bases(const VehicleCourseReport &p_report) {
+	for (const VehicleCorrectionReport &x : p_report.corrections) {
+		if (x.mode == VehicleRestoreMode::ExactPod || x.mode == VehicleRestoreMode::PodOwnLambdas) {
+			CHECK_MESSAGE(x.diverged_bases > 0, vehicle_course_name(p_report.course.kind) << " " << vehicle_restore_mode_name(x.mode) << " R=" << x.replay_ticks);
+		} else if (x.mode == VehicleRestoreMode::Full) {
+			CHECK(x.diverged_bases == 0);
+		}
+	}
+}
+
 } // namespace
 
 TEST_SUITE("sim-vehicle-unit") {
@@ -804,6 +816,7 @@ TEST_SUITE("sim-vehicle-unit") {
 					CHECK_MESSAGE(x.all.max == 0.0f, vehicle_course_name(c.kind));
 				}
 			}
+			check_pod_bases(*r);
 			if (c.kind == VehicleCourseKind::SlopeIdle) {
 				std::printf("slope_idle (synthetic 12 degrees): asleep %u of %u ticks (report only)\n", r->ticks_asleep, r->ticks);
 			}
@@ -1129,6 +1142,7 @@ TEST_SUITE("sim-vehicle") {
 				REQUIRE_MESSAGE(run.ok(), (run.ok() ? std::string() : run.error().message));
 				r = std::move(*run);
 				std::printf("%s", format_vehicle_course_report(r).c_str());
+				check_pod_bases(r);
 				steps += r.steps;
 			}
 			reports.push_back(std::move(r));
@@ -1175,6 +1189,23 @@ TEST_SUITE("sim-vehicle") {
 		}
 		std::mt19937 rng(0x5332u);
 		size_t parsed = 0, read = 0, built = 0, refused = 0;
+		const auto attempt = [&](std::vector<uint8_t> p_bytes) {
+			core::Result<core::EbxPartition> mutated = core::EbxPartition::parse(std::move(p_bytes));
+			if (!mutated.ok()) {
+				return; // the EBX validator refused it
+			}
+			++parsed;
+			const OverlayResolver overlay(db, kHumvee, *mutated);
+			gp::WorkBudget budget;
+			core::Result<gp::VehicleDriveDef> def = gp::read_vehicle_drive_def(overlay, kHumvee, &budget);
+			if (!def.ok()) {
+				++refused;
+				return;
+			}
+			++read;
+			core::Result<std::shared_ptr<const VehicleModel>> model = build_vehicle_model(*def, sources, m->tuning);
+			(model.ok() ? built : refused) += 1;
+		};
 		for (int iter = 0; iter < 200; ++iter) {
 			std::vector<uint8_t> bytes = original;
 			const int flips = 1 + int(rng() % 8);
@@ -1185,23 +1216,31 @@ TEST_SUITE("sim-vehicle") {
 				}
 				bytes[at + rng() % size] ^= uint8_t(1u << (rng() % 8));
 			}
-			core::Result<core::EbxPartition> mutated = core::EbxPartition::parse(std::move(bytes));
-			if (!mutated.ok()) {
-				continue; // the EBX validator refused it
-			}
-			++parsed;
-			const OverlayResolver overlay(db, kHumvee, *mutated);
-			gp::WorkBudget budget;
-			core::Result<gp::VehicleDriveDef> def = gp::read_vehicle_drive_def(overlay, kHumvee, &budget);
-			if (!def.ok()) {
-				++refused;
+			attempt(std::move(bytes));
+		}
+		std::printf("Humvee partition fuzz: %zu of 200 mutations parsed, %zu read, %zu built a model, %zu refused with an error
+", parsed, read, built, refused);
+		CHECK(parsed > 0);
+		// Word mutations aimed at floats and counts: an aligned 4-byte field of an instance overwritten with NaN,
+		// infinity, a huge or negative value, zero or an all-ones count, so the reader's and builder's refusal paths
+		// run (bit flips mostly land in values that stay plausible).
+		const uint32_t words[] = { 0x7FC00000u, 0x7F800000u, 0xFF800000u, 0x7149F2CAu /* 1e30 */, 0xF149F2CAu, 0xBF800000u /* -1 */, 0u, 0xFFFFFFFFu,
+			0x00010000u };
+		const size_t parsed_flips = parsed, refused_flips = refused, built_flips = built;
+		for (int iter = 0; iter < 400; ++iter) {
+			std::vector<uint8_t> bytes = original;
+			const auto &[at, size] = instances[rng() % instances.size()];
+			if (size < 4 || uint64_t(at) + size > bytes.size()) {
 				continue;
 			}
-			++read;
-			core::Result<std::shared_ptr<const VehicleModel>> model = build_vehicle_model(*def, sources, m->tuning);
-			(model.ok() ? built : refused) += 1;
+			const uint32_t offset = at + 4u * uint32_t(rng() % (size / 4));
+			const uint32_t w = words[rng() % std::size(words)];
+			std::memcpy(bytes.data() + offset, &w, 4);
+			attempt(std::move(bytes));
 		}
-		std::printf("Humvee partition fuzz: %zu of 200 mutations parsed, %zu read, %zu built a model, %zu refused with an error\n", parsed, read, built, refused);
+		std::printf("Humvee partition word fuzz: %zu of 400 mutations parsed, %zu refused with an error, %zu built a model
+", parsed - parsed_flips,
+				refused - refused_flips, built - built_flips);
 		CHECK(parsed > 0);
 	}
 

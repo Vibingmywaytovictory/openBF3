@@ -106,11 +106,11 @@ Result<std::vector<VehicleSpawnerDef>> read_vehicle_spawners(const World &p_worl
 	const EbxResolver &db = p_world.scopes.db();
 	std::vector<VehicleSpawnerDef> out;
 	for (uint32_t i = 0; i < p_world.objects.size(); ++i) {
+		BF3_TRY(budget.charge(1)); // every object iterated (WorkBudget rule), not only the spawners
 		const PlacedObject &object = p_world.objects[i];
 		if (object.kind != ObjectKind::VehicleSpawnReference) {
 			continue;
 		}
-		BF3_TRY(budget.charge(1));
 		const SpawnerFields read{ p_world, object };
 		VehicleSpawnerDef s;
 		s.object = i;
