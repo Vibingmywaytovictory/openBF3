@@ -15,3 +15,14 @@ add_library(bf3_anim STATIC
 target_include_directories(bf3_anim PUBLIC include)
 target_link_libraries(bf3_anim PUBLIC bf3_core)
 openbf3_module(bf3_anim)
+
+# S3 crowd (docs/design/s3.md §5, §11, §15): the 3p crowd clip set, run blend, layers and masks, temporal LOD, the
+# pose evaluator and the staged crowd (interfaces; implementations land with the track's slices).
+target_sources(bf3_anim PRIVATE
+    include/bf3/anim/crowd_clips.h
+    include/bf3/anim/crowd_eval.h
+    include/bf3/anim/crowd_stage.h
+    include/bf3/anim/layers.h
+    include/bf3/anim/locomotion.h
+    include/bf3/anim/temporal_lod.h
+)

@@ -341,3 +341,13 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.m1_load COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1_load.cmake)
     set_tests_properties(godot.m1_load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
+
+# S3 crowd (docs/design/s3.md §14): s3.contract compiles every Godot-free S3 header together and checks the plain
+# types, the temporal LOD table and interval rule, the phase advance on hostile numbers and the gate constants. No data.
+openbf3_test(test_s3_contract test_main.cpp s3_contract_tests.cpp test_support.h)
+target_link_libraries(test_s3_contract PRIVATE bf3_render)
+add_test(NAME s3.contract COMMAND test_s3_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_s3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(s3.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s3_cl_dir}")
+endif()

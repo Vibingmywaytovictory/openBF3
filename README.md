@@ -64,6 +64,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
+S3 crowd: `s3.contract` (no data) checks the S3 interfaces; the S3 gates are `godot.s3_crowd` (see "S3 crowd").
 
 ## Run
 
@@ -1143,3 +1144,31 @@ measured 4.8 s (the OS file cache was colder).
 Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
 terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
 floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.
+
+## S3 crowd (spike)
+
+<!-- S3 crowd -->
+Spike S3 (docs/design/s3.md): bf3_anim drives 64 third-person soldiers (32 US, 32 RU) on Metro with decoded
+`b_basicassetsmp` clips. A run blend over idle and four direction cycles carries a masked upper-body reload (each
+weapon's clip through `3P_Wep_Reload_NoAddon_Stand_Chooser`) and an additive aim. Temporal LOD tiers come from
+`GameAnimationSettings`; poses are evaluated on persistent worker lanes (`bf3/core/worker_group.h`) and the skin
+palettes are uploaded on the main thread. Status: design and interfaces in the tree (ctest `s3.contract`); the
+evaluator, the asset loader and the Godot node land in the track's slices.
+
+Gates (one command; a 2560x1440 primary screen, windowed; the machine is shared, so timings are noisy and a failed
+timing gate is repeated once with both runs reported):
+
+```bat
+set OPENBF3_GODOT=C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe
+ctest --preset dev -R godot.s3_crowd -V
+:: = "%OPENBF3_GODOT%" --path bf3-opensource res://scenes/s3_crowd.tscn -- --s3-check --quit-after=900
+```
+
+| id | threshold |
+|---|---|
+| G1a | main-thread animation + skeleton timer p50 and p99 <= 2.0 ms, 64 soldiers in view, temporal LOD off, >= 30 s |
+| G1b | that p50 plus the main-thread CPU Godot spends on the skeletons (animated minus frozen run, `QueryThreadCycleTime`) <= 2.0 ms |
+| G2 | frame time p50 and p99 <= 16.7 ms, vsync off and vsync on, >= 30 s each |
+| G3 | 16 shoulder close-ups (US / RU x idle / run / reload / aim x 2 views) in `b\shots\s3\` plus pinch and hand-IK metrics; the user judges the pinch |
+
+Screenshots of BF3 content go to `b\shots\s3\` (gitignored) and are never committed.
