@@ -36,6 +36,7 @@
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -615,7 +616,8 @@ Install *install() {
 	return s_install.get();
 }
 
-ScaleReport bench(Install &r_install, const char *p_level, uint32_t p_observers, double p_seconds, double p_paced) {
+// nullopt (after a failed check) when the bench fails: doctest's REQUIRE does not stop the case without exceptions.
+std::optional<ScaleReport> bench(Install &r_install, const char *p_level, uint32_t p_observers, double p_seconds, double p_paced) {
 	ScaleBenchOptions o;
 	o.level = p_level;
 	o.mode = "ConquestLarge0";
@@ -625,7 +627,10 @@ ScaleReport bench(Install &r_install, const char *p_level, uint32_t p_observers,
 	o.paced_seconds = p_paced;
 	o.tuning_text = read_text(OPENBF3_MOTOR_TUNING_CFG);
 	core::Result<ScaleReport> r = run_scale_bench(r_install.install, o);
-	REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
+	CHECK_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
+	if (!r) {
+		return std::nullopt;
+	}
 	std::printf("---- host.scale %s ConquestLarge0, %u observer(s) ----\n%s", p_level, p_observers, format_scale_report(*r).c_str());
 	std::fflush(stdout);
 	return *r;
@@ -655,7 +660,9 @@ TEST_SUITE("host-scale") {
 		if (m == nullptr) {
 			return;
 		}
-		gate(bench(*m, "MP_Subway", 1, 120.0, 30.0));
+		if (const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 1, 120.0, 30.0)) {
+			gate(*r);
+		}
 	}
 
 	TEST_CASE("host.scale: G1 / G3 on MP_007 ConquestLarge0 (64 walkers, 120 s of sim time)") {
@@ -663,7 +670,9 @@ TEST_SUITE("host-scale") {
 		if (m == nullptr) {
 			return;
 		}
-		gate(bench(*m, "MP_007", 1, 120.0, 30.0));
+		if (const std::optional<ScaleReport> r = bench(*m, "MP_007", 1, 120.0, 30.0)) {
+			gate(*r);
+		}
 	}
 
 	TEST_CASE("host.scale: the observers = 16 encode row on MP_Subway (reported, not gated)") {
@@ -671,8 +680,8 @@ TEST_SUITE("host-scale") {
 		if (m == nullptr) {
 			return;
 		}
-		const ScaleReport r = bench(*m, "MP_Subway", 16, 30.0, 0.0);
-		CHECK(r.ticks == 1800);
+		const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 16, 30.0, 0.0);
+		CHECK((r && r->ticks == 1800));
 	}
 
 	TEST_CASE("host.scale: install unchanged (layout.toc, cas.cat, the .sb / .toc files)") {

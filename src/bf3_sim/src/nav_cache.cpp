@@ -62,7 +62,7 @@ struct WorldEntry {
 std::vector<uint8_t> encode_world_index(const std::vector<WorldEntry> &p_tiles) {
 	core::BlobWriter w;
 	w.magic(kWorldMagic, kNavFormatVersion);
-	w.u32(uint32_t(p_tiles.size()));
+	w.u64(uint64_t(p_tiles.size())); // BlobReader::count reads a u64
 	for (const WorldEntry &e : p_tiles) {
 		w.i32(e.tile[0]);
 		w.i32(e.tile[1]);

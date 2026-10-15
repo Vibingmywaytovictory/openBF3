@@ -176,8 +176,8 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	if (p_install == nullptr) {
 		return core::make_error("scale bench: no install");
 	}
-	if (p_options.walkers > 120 || p_options.observers > 7 || p_options.walkers + p_options.observers > 128) {
-		return core::make_error("scale bench: at most 120 walkers and 7 observers in 128 slots");
+	if (p_options.walkers > 120 || p_options.observers > 32 || p_options.walkers + p_options.observers > 128) {
+		return core::make_error("scale bench: at most 120 walkers and 32 observers in 128 slots");
 	}
 	if (!(p_options.seconds > 0.0) || p_options.seconds > 3600.0 || !(p_options.warmup_seconds >= 0.0) || p_options.warmup_seconds > 600.0 ||
 			!(p_options.paced_seconds >= 0.0) || p_options.paced_seconds > 600.0) {

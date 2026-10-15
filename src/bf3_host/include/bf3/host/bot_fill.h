@@ -31,6 +31,7 @@ class Cache;
 namespace bf3::core::level {
 struct LevelCombatTiles;
 struct ModeObjectiveDef;
+struct CombatAreaDef;
 } // namespace bf3::core::level
 namespace bf3::sim {
 class CollisionWorld;
@@ -84,7 +85,9 @@ struct BotLevel {
 	std::string mode;
 	std::shared_ptr<const sim::NavWorld> nav;
 	sim::NavComponents components;
-	uint32_t main_component = 0; // the largest by area
+	// The mode's main component: the most walkable area inside the mode's combat areas (mode_main_component;
+	// implementation: on Metro the largest component of the region is not where TDM is played).
+	uint32_t main_component = 0;
 	std::vector<sim::bots::BotGoal> objectives; // the rows below that are in the main component, as goals
 	std::vector<BotPointRow> points; // every flag, HQ, MCOM and spawn point of the mode
 	BotSpawns spawns; // where bot slots spawn (main component only)
@@ -126,16 +129,24 @@ float bot_point_vertical(BotPointRow::Kind p_kind);
 struct BotRowsResult {
 	std::vector<BotPointRow> points; // objectives in order, then every spawn point
 	std::vector<sim::bots::BotGoal> objectives; // the in_main rows as goals
+	uint32_t main = 0; // the main component the rows were classified against
 };
-// Settles every spawn point with p_motor on p_world (the server's static world) and checks every row.
+// Settles every spawn point with p_motor on p_world (the server's static world) and checks every row against
+// p_main. With p_main_from_rows the main component is instead the one holding the most on-mesh rows (ties: p_main,
+// else the larger area; no row on the mesh: p_main). Implementation (docs §5.5 as built): load_bot_level passes the
+// mode's area-based main (mode_main_component) with p_main_from_rows, because on Metro the largest ground inside
+// TDM's combat area is buried terrain under the street level that no spawn point touches.
 BotRowsResult bot_point_rows(const sim::NavWorld &p_nav, const sim::NavComponents &p_components, uint32_t p_main,
 		std::span<const core::level::ModeObjectiveDef> p_objectives, std::span<const sim::SpawnPoint> p_spawns, const sim::SoldierMotor &p_motor,
-		const sim::CollisionWorld &p_world);
+		const sim::CollisionWorld &p_world, bool p_main_from_rows = false);
 // BotSpawns' three steps (above) from the rows.
 BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const sim::SpawnPoint> p_spawns, const sim::NavComponents &p_components,
 		uint32_t p_main, sim::NavQuery &p_query, const sim::SoldierMotor &p_motor, const sim::CollisionWorld &p_world, uint32_t p_synthetic, uint64_t p_seed);
 // The weak component of the main SCC (UINT32_MAX when it has no poly).
 uint32_t main_weak_component(const sim::NavComponents &p_components, uint32_t p_main);
+// The component with the most ground area (poly centroids) inside p_areas' polygons; the largest when there are
+// no areas or none holds any.
+uint32_t mode_main_component(const sim::NavWorld &p_nav, const sim::NavComponents &p_components, std::span<const core::level::CombatAreaDef> p_areas);
 
 struct BotFillConfig {
 	std::shared_ptr<const BotLevel> level;

@@ -45,6 +45,7 @@
 #include "bf3/sim/static_world.h"
 
 #include <array>
+#include <functional>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -207,6 +208,8 @@ struct NavStats {
 	size_t tiles_hit = 0;
 	size_t tiles_baked = 0;
 	bool world_hit = false;
+	size_t tiles_uncached = 0; // baked with an open cache but not stored (then no world index is written)
+	std::string cache_error; // the first such tile's put / get error
 	size_t far_triangles = 0; // input triangles from outside a tile's 3 x 3 neighbourhood, summed over the tiles
 	size_t link_worlds = 0; // per-lane CollisionWorlds created for the link checks
 	size_t link_candidates = 0; // drop samples that found a landing
@@ -333,12 +336,16 @@ struct NavComponents {
 	// but not reached, or the reverse); one in another weak component is truly disconnected (review of revision 2:
 	// the two call for different R6 responses, docs §5.5).
 	std::vector<uint32_t> weak_component;
-	// Per component: 1 when it can reach the largest component along the links (the largest itself included). A
-	// one-way row that reaches it can be left towards the main component (a spawn there still feeds the fight); one
-	// that does not is a trap (implementation: the G2 report splits the one-way class by this).
-	std::vector<uint8_t> reaches_largest;
 };
 NavComponents nav_components(const NavWorld &p_world);
+// Per component: 1 when it can reach p_target along the links (p_target itself included). A one-way G2 row that
+// reaches the main component can be left towards it (a spawn there still feeds the fight); one that does not is a
+// trap (implementation: the G2 report splits the one-way class by this). O(polys + links).
+std::vector<uint8_t> nav_components_reaching(const NavWorld &p_world, const NavComponents &p_components, uint32_t p_target);
+// Per component: the area (m^2) of its ground polys whose centroid (x, z) p_inside accepts. load_bot_level takes
+// the mode's main component as the one with the most area inside the mode's combat areas (implementation: the
+// largest over the whole region is another mode's playground on Metro, where TDM is played on the street level).
+std::vector<double> nav_component_area_in(const NavWorld &p_world, const NavComponents &p_components, const std::function<bool(float, float)> &p_inside);
 // The strongly connected component of a poly (UINT32_MAX for 0, a stale ref or a poly outside p_components). The
 // walker brain uses it to keep goals inside its own component (docs §7 "Goals").
 uint32_t nav_poly_component(const NavWorld &p_world, const NavComponents &p_components, NavPolyRef p_poly);

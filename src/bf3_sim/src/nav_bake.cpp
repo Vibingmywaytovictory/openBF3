@@ -570,6 +570,11 @@ core::Result<std::shared_ptr<const NavWorld>> bake_nav_inputs(std::vector<NavTil
 			++p_stats.tiles_baked;
 		}
 		stored = stored && items[i].outcome != core::CacheOutcome::Uncached;
+		if (cache != nullptr && items[i].outcome == core::CacheOutcome::Uncached) {
+			if (p_stats.tiles_uncached++ == 0) {
+				p_stats.cache_error = items[i].cache_error;
+			}
+		}
 		infos.push_back(b.info);
 		data.push_back(std::move(b.data));
 	}
