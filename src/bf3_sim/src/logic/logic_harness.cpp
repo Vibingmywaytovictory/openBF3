@@ -427,6 +427,7 @@ core::Result<LogicRunReport> run_logic_script(std::shared_ptr<const LogicGraph> 
 	report.trace_hash = rt.trace().hash;
 	report.trace_records = rt.trace().records_total;
 	report.trace_truncated = rt.trace().truncated;
+	report.ghost = rt.ghost();
 	report.drain_ns_p50 = percentile(drains, 0.50);
 	report.drain_ns_p99 = percentile(drains, 0.99);
 	report.drain_ns_busy_p99 = percentile(busy, 0.99);

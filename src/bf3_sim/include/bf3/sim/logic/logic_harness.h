@@ -105,6 +105,7 @@ struct LogicRunReport {
 	};
 	std::vector<Action> actions;
 	std::vector<LogicUnhandledPort> unhandled; // LogicRuntime::unhandled() at the end of the run
+	LogicGhost ghost; // LogicRuntime::ghost() at the end of the run (layout: LogicGhostLayout::of(graph))
 };
 
 // Creates the runtime and the stubs, sets the script's watches, starts, runs p_options.ticks steps with the script's

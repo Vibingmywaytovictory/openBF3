@@ -353,3 +353,28 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_s4_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(s4.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s4_cl_dir}")
 endif()
+# S4 logic (docs/design/s4.md §12): the level-logic interpreter. logic.unit and logic.fuzz need no data (logic.fuzz is
+# meant for the asan preset); logic.metro (G1-G4), logic.types (G5), logic.caspian (G6), logic.perf (G7, RUN_SERIAL,
+# wall clock) and logic.census (I1, info) read the install and exit 77 without one. logic.metro runs `bf3dump logic
+# trace` in a child process (G4), so it gets the bf3dump path in OPENBF3_BF3DUMP.
+openbf3_test(test_logic test_main.cpp logic_unit_tests.cpp logic_fuzz_tests.cpp logic_install_tests.cpp logic_test_support.h test_support.h)
+target_link_libraries(test_logic PRIVATE bf3_sim)
+add_test(NAME logic.unit COMMAND test_logic --test-suite=logic-unit)
+add_test(NAME logic.fuzz COMMAND test_logic --test-suite=logic-fuzz)
+add_test(NAME logic.metro COMMAND test_logic --test-suite=logic-metro)
+add_test(NAME logic.types COMMAND test_logic --test-suite=logic-types)
+add_test(NAME logic.caspian COMMAND test_logic --test-suite=logic-caspian)
+add_test(NAME logic.perf COMMAND test_logic --test-suite=logic-perf)
+add_test(NAME logic.census COMMAND test_logic --test-suite=logic-census)
+set_tests_properties(logic.unit logic.fuzz PROPERTIES TIMEOUT 600)
+set_tests_properties(logic.metro logic.types logic.caspian logic.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+set_tests_properties(logic.census PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+set_tests_properties(logic.perf PROPERTIES RUN_SERIAL TRUE)
+if(TARGET bf3dump)
+    set_tests_properties(logic.metro PROPERTIES ENVIRONMENT "OPENBF3_BF3DUMP=$<TARGET_FILE:bf3dump>")
+endif()
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_logic_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(logic.unit logic.fuzz logic.metro logic.types logic.caspian logic.perf logic.census
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_logic_cl_dir}")
+endif()
