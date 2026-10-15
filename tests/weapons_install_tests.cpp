@@ -284,6 +284,12 @@ TEST_SUITE("weapons-fuzz") {
 
 TEST_SUITE("weapons-perf") {
 	TEST_CASE("sim.weapons.perf: W11 64 shooters full auto on Metro (wall clock, noisy)") {
+#if defined(__SANITIZE_ADDRESS__)
+		// W11 is a dev-preset measurement; an instrumented build is 100x slower and says nothing about the budget.
+		std::printf("W11: not measured under AddressSanitizer (the gate is the dev preset)\n");
+		bf3::test::skip_install_case("asan build");
+		return;
+#endif
 		std::string lock;
 		{
 			char *v = nullptr;
