@@ -51,7 +51,9 @@
 //   --fog                                       M1 look: draw the plan's depth fog (off by default: see build_environment)
 //   --look=l1|m1                                L1 look (default; README "L1 look") or the M1 look (before / after
 //                                               shots and the godot.l1_look frame-time A/B)
-//   --look-off=exposure,fog,bloom,lut           L1 look diagnosis: drop parts (exposure: the static estimate)
+//   --look-off=exposure,fog,bloom,lut,blend     L1 look diagnosis: drop parts (exposure: the static estimate; blend:
+//                                               glass draws opaque)
+//   --look-bloom                                L1 look: draw BF3's bloom (off by default: README "L1 look")
 //   --look-exposure=<e>                         L1 look diagnosis: a fixed tonemap exposure instead of auto exposure
 // Controls: WASD move, Shift sprint, Space jump, Ctrl crouch, Z prone, mouse look, F6 free camera (Q/E down/up,
 // wheel speed), Esc releases the mouse, a click captures it.

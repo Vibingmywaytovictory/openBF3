@@ -1,12 +1,14 @@
 # ctest godot.l1_look (README "L1 look"): the frame-time A/B of the L1 look against the M1 look, and the before /
 # after screenshots. Runs the windowed M1 scene fullscreen (2560x1440 on the reference monitor) with vsync off,
-# alternating --look=m1 and --look=l1 for ROUNDS rounds (default 3), each run taking the same four free-camera
+# alternating --look=m1 and --look=l1 for ROUNDS rounds (default 5), each run taking the same four free-camera
 # views (street at TDM spawn 13, station at TDM spawn 22, park, overview) after a 3 s settle, timing 300 frames at
 # each view (frame interval and the viewport's GPU render time) before its screenshot:
 #   <godot> --fullscreen --disable-vsync --path bf3-opensource res://scenes/m1_metro.tscn -- --look=<m1|l1>
 #       --shot-settle=3 --shot-measure=300 --shots=<dir>/<look>_<view>.png@x,y,z,yaw,pitch;... --quit-after=1
-# Gate: the median over the rounds of L1's mean frame interval <= 1.10 x M1's. The GPU times are reported. Timing
-# is noisy (other processes, the display compositor): the median of alternating rounds is what is compared.
+# Gate: the median over the rounds of L1's frame interval <= 1.10 x M1's, where a run's frame interval is the mean
+# over its views of the per-view median frame interval. The GPU times (same statistic) and the plain means are
+# reported. Timing is noisy (other processes, the display compositor): per-frame medians and the median of
+# alternating rounds keep a single spike or a busy round from deciding.
 # Screenshots go to $OPENBF3_LOOK_SHOTS when set (e.g. openBF3\b\shots\l1, gitignored; never commit them), else to
 # the system temp directory, removed at the end. Skips (exit 77) like godot.m1_load: OPENBF3_GODOT unset, no BF3
 # install, or no window / rendering device (probe run).
@@ -18,7 +20,7 @@ if(godot STREQUAL "" OR NOT EXISTS "${godot}")
     cmake_language(EXIT 77)
 endif()
 if(NOT DEFINED ROUNDS)
-    set(ROUNDS 3)
+    set(ROUNDS 5)
 endif()
 if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
     file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
@@ -85,7 +87,7 @@ foreach(round RANGE 1 ${ROUNDS})
         foreach(line IN LISTS lines)
             message("round ${round} ${look}: ${line}")
         endforeach()
-        string(REGEX MATCH "frame time mean: ([0-9]+\\.[0-9]+) ms per frame \\(interval\\), GPU ([0-9]+\\.[0-9]+) ms" mean "${out}")
+        string(REGEX MATCH "frame time median: ([0-9]+\\.[0-9]+) ms per frame \\(interval\\), GPU ([0-9]+\\.[0-9]+) ms" mean "${out}")
         if(NOT rc STREQUAL "0" OR NOT mean)
             message("${out}")
             message("${err}")
@@ -131,8 +133,8 @@ median("${l1_gpu}" l1g)
 math(EXPR limit "${m1} * 110 / 100")
 math(EXPR ratio "${l1} * 1000 / ${m1}")
 math(EXPR gratio "${l1g} * 1000 / ${m1g}")
-message("frame interval per round (us): M1 ${m1_us}; L1 ${l1_us}")
-message("GPU render time per round (us): M1 ${m1_gpu}; L1 ${l1_gpu}")
+message("frame interval (mean of per-view medians) per round (us): M1 ${m1_us}; L1 ${l1_us}")
+message("GPU render time (mean of per-view medians) per round (us): M1 ${m1_gpu}; L1 ${l1_gpu}")
 message("median frame interval: M1 ${m1} us, L1 ${l1} us (L1 / M1 = ${ratio} per mille; limit ${limit} us = 1.10 x M1)")
 message("median GPU render time: M1 ${m1g} us, L1 ${l1g} us (L1 / M1 = ${gratio} per mille; reported, not gated)")
 if(l1 GREATER limit)

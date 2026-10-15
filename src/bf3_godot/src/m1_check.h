@@ -116,6 +116,11 @@ private:
 	uint64_t last_ns_ = 0;
 	double view_cpu_ms_ = 0.0, view_gpu_ms_ = 0.0, total_cpu_ms_ = 0.0, total_gpu_ms_ = 0.0;
 	uint64_t total_frames_ = 0;
+	// Per-frame samples of the current view (at most --shot-measure, capped at 100,000) for its medians, which other
+	// processes' spikes move far less than the means; the sums of the per-view medians over the measured views.
+	std::vector<float> view_cpu_samples_, view_gpu_samples_;
+	double median_cpu_sum_ms_ = 0.0, median_gpu_sum_ms_ = 0.0;
+	size_t median_views_ = 0;
 };
 
 class M1Check {

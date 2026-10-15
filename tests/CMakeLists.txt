@@ -358,7 +358,7 @@ if(OPENBF3_ASAN)
 endif()
 
 # L1 look (README "L1 look"): godot.l1_look alternates windowed fullscreen --look=m1 / --look=l1 runs of
-# res://scenes/m1_metro.tscn (vsync off, 4 free views, 300 timed frames each) for 3 rounds; gate: the median L1 frame
+# res://scenes/m1_metro.tscn (vsync off, 4 free views, 300 timed frames each) for 5 rounds; gate: the median L1 frame
 # interval <= 1.10 x the median M1 one (GPU render time reported). Screenshots to $OPENBF3_LOOK_SHOTS when set (never
 # commit them). Exits 77 like godot.m1_load; RUN_SERIAL (timing).
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)

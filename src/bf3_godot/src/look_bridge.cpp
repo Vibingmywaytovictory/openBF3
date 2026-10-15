@@ -131,7 +131,7 @@ void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelSceneP
 	environment_->set_glow_blend_mode(Environment::GLOW_BLEND_MODE_ADDITIVE);
 	environment_->set_glow_hdr_bleed_threshold(0.0f);
 	environment_->set_glow_bloom(0.0f);
-	// Linear glow upscale: the bicubic default cost 0.2-0.35 ms of GPU time at 2560x1440 for a bloom of about 0.07
+	// Linear glow upscale (--look-bloom): the bicubic default cost 0.2-0.35 ms of GPU time at 2560x1440 for a bloom of about 0.07
 	// (godot.l1_look). Process-wide, which only the L1 look uses.
 	RenderingServer::get_singleton()->environment_glow_set_use_bicubic_upscale(false);
 	environment_->set_fog_mode(Environment::FOG_MODE_DEPTH);
@@ -278,9 +278,12 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.exposure_speed = p_f.exposure_speed;
 		s.exposure = p_f.exposure;
 	}
-	// Bloom.
+	// Bloom: off unless --look-bloom. Godot's glow cost 0.31 ms of GPU time per frame at 2560x1440 (2.08 -> 1.76 ms
+	// over the four godot.l1_look views, RX 9070 XT) and changed the frames by under 0.5 / 255 on average: Metro's
+	// BloomScale is about 0.07 and auto exposure takes the rest back.
 	if (first || moved(s.bloom, p_f.bloom)) {
-		environment_->set_glow_enabled(p_f.bloom > 0.0f && !debug_off("bloom"));
+		static const bool bloom_on = has_user_arg("look-bloom");
+		environment_->set_glow_enabled(bloom_on && p_f.bloom > 0.0f && !debug_off("bloom"));
 		environment_->set_glow_intensity(p_f.bloom);
 		s.bloom = p_f.bloom;
 	}

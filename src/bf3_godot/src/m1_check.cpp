@@ -540,9 +540,17 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		if (measured_ == 0) {
 			rs->viewport_set_measure_render_time(viewport, true);
 			view_cpu_ms_ = view_gpu_ms_ = 0.0;
+			view_cpu_samples_.clear();
+			view_gpu_samples_.clear();
+			view_cpu_samples_.reserve(measure_frames_);
+			view_gpu_samples_.reserve(measure_frames_);
 		} else {
-			view_cpu_ms_ += double(p_now_ns - last_ns_) / 1e6;
-			view_gpu_ms_ += rs->viewport_get_measured_render_time_gpu(viewport);
+			const double interval_ms = double(p_now_ns - last_ns_) / 1e6;
+			const double gpu_ms = rs->viewport_get_measured_render_time_gpu(viewport);
+			view_cpu_ms_ += interval_ms;
+			view_gpu_ms_ += gpu_ms;
+			view_cpu_samples_.push_back(float(interval_ms));
+			view_gpu_samples_.push_back(float(gpu_ms));
 		}
 		last_ns_ = p_now_ns;
 		++measured_;
@@ -555,6 +563,20 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		total_frames_ += measure_frames_ - 1;
 		UtilityFunctions::print(to_godot(fmt("[look] frame time at %s: %.3f ms per frame (interval), GPU %.3f ms, over %u frames", shot.path.c_str(),
 				view_cpu_ms_ / n, view_gpu_ms_ / n, measure_frames_ - 1)));
+		if (!view_cpu_samples_.empty()) {
+			const auto median_of = [](std::vector<float> &r_v) {
+				const size_t mid = r_v.size() / 2;
+				std::nth_element(r_v.begin(), r_v.begin() + std::ptrdiff_t(mid), r_v.end());
+				return double(r_v[mid]);
+			};
+			const double cpu_median = median_of(view_cpu_samples_);
+			const double gpu_median = median_of(view_gpu_samples_);
+			median_cpu_sum_ms_ += cpu_median;
+			median_gpu_sum_ms_ += gpu_median;
+			++median_views_;
+			UtilityFunctions::print(to_godot(fmt("[look] frame time median at %s: %.3f ms per frame (interval), GPU %.3f ms", shot.path.c_str(), cpu_median,
+					gpu_median)));
+		}
 		measured_ = 0;
 	}
 	if (session_.save_screenshot(shot.path)) {
@@ -575,6 +597,10 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		if (measure_frames_ > 0 && total_frames_ > 0) {
 			UtilityFunctions::print(to_godot(fmt("[look] frame time mean: %.3f ms per frame (interval), GPU %.3f ms, %llu frames at %zu views",
 					total_cpu_ms_ / double(total_frames_), total_gpu_ms_ / double(total_frames_), (unsigned long long)total_frames_, free_.size())));
+		}
+		if (median_views_ > 0) {
+			UtilityFunctions::print(to_godot(fmt("[look] frame time median: %.3f ms per frame (interval), GPU %.3f ms, mean of the per-view medians at %zu views",
+					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_)));
 		}
 	}
 	return next_ >= total;
