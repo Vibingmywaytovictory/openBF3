@@ -7,9 +7,11 @@
 // per-frame budget (12 ms behind the loading screen, vsync off; 2 ms for later in-game streaming; docs §12.1).
 //
 // Plan (from the census, bf3_core level/census.h): one SceneMeshPlan per kept census variant (res + hidden parts
-// + bake + variation entry), one SceneInstancePlan per census instance, one SceneMaterialPlan per distinct
-// (variant, material slot), one SceneTexturePlan per distinct texture res the materials name, with the role the
-// first material gave it (Normal wins over Color: a normal map must not be uploaded as colour).
+// + bake + variation entry) with a shown placement, one SceneInstancePlan per census instance that does not start
+// hidden, one SceneMaterialPlan per distinct material slot content (shader, textures, vectors; variants that share
+// a look share the material), one SceneTexturePlan per distinct texture res a material draws (its albedo or normal
+// map, SceneMaterialPlan::albedo / normal), with the strongest role any material gave it (Normal wins over Color: a
+// normal map must not be uploaded as colour).
 //
 // Meshes go through the same MeshRequest as `bf3dump prepare` (scene_mesh_requests is the one place that decides
 // LODs and filters; level_prepare.cpp calls it too), so a game load after `bf3dump prepare` hits every entry.
@@ -84,17 +86,27 @@ struct SceneTexturePlan {
 
 struct SceneMaterialPlan {
 	MaterialSlot slot; // shader, texture parameters, vector parameters
-	std::vector<int32_t> textures; // indices into LevelScenePlan::textures, in slot.textures order (-1 none)
+	std::vector<int32_t> textures; // indices into LevelScenePlan::textures, in slot.textures order (-1: not uploaded)
+	// The two textures the M1 material draws (indices into LevelScenePlan::textures, -1 none), picked by parameter
+	// name: albedo Diffuse, else MainDiffuse, TileDiffuse, DiffuseLeaves, DiffuseBark, Diffuse2; normal map Normal,
+	// else MainNormal, TileNormal. Only these are uploaded (docs §11.3). Metro's facade and tile shaders name no plain
+	// Diffuse, so a Diffuse-only lookup (render_bridge make_standard_material) would leave them untextured.
+	int32_t albedo = -1;
+	int32_t normal = -1;
 	bool alpha_test = false; // the shader family's alpha (foliage, fences); M1 decides by shader name, docs §11.3
 	bool double_sided = false;
 };
+
+// SceneMeshPlan::surface_materials entry of a slot whose shader does not draw (the census's undrawn shader words):
+// prepare_scene_mesh drops its surfaces, as it drops a surface whose material index is past the list.
+inline constexpr uint32_t kSceneUndrawnMaterial = 0xFFFFFFFFu;
 
 struct SceneMeshPlan {
 	uint32_t request = 0; // index into LevelScenePlan::requests (the res blob)
 	uint32_t census_mesh = 0; // index into MeshCensus::meshes
 	std::vector<uint16_t> hidden_parts; // composite parts removed at preparation (sorted)
 	std::optional<std::array<std::array<float, 3>, 3>> bake; // linear map baked into the vertices
-	std::vector<uint32_t> surface_materials; // per MeshAsset.Materials index -> LevelScenePlan::materials
+	std::vector<uint32_t> surface_materials; // per MeshAsset.Materials index -> LevelScenePlan::materials (or kSceneUndrawnMaterial)
 	bool world_kind = false;
 	uint32_t instances = 0;
 };
@@ -140,11 +152,13 @@ core::Result<LevelScenePlan> plan_level_scene(const core::level::LoadedLevel &p_
 		const core::level::MeshCensus &p_census, const ScenePlanOptions &p_options = {});
 
 // One scene mesh ready for upload: LOD 0 of its res blob (through the cache), hidden parts' triangles removed, the
-// bake applied to positions / normals / tangents (winding flipped when its determinant is negative).
+// bake applied to positions / normals / tangents (winding flipped when its determinant is negative). LOD 0 is the
+// blob's first LOD that still draws a triangle after that (the census keeps a model mesh whose LOD 0 draws nothing
+// when LOD 1 draws, census.h).
 struct PreparedSceneMesh {
 	uint32_t mesh = 0; // index into LevelScenePlan::meshes
 	PreparedMesh lod0;
-	core::CachedItem item; // the blob's cache outcome (hit / converted / uncached)
+	core::CachedItem item; // the blob's cache outcome (hit / converted / uncached); SceneLanes sets it from load_scene_request
 };
 // Any loader lane; p_mount and p_cache are thread-safe for reads. Meshes that share a request share its blob:
 // the caller groups by SceneMeshPlan::request so a blob is decoded once per lane (docs §12.2).
@@ -160,9 +174,12 @@ core::Result<PreparedTexture> prepare_scene_texture(const core::LevelMount &p_mo
 core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_terrain,
 		const SceneTerrainOptions &p_options = {});
 
-// Bytes the plan's prepared data needs resident at once (meshes LOD 0 + textures, estimated from the census):
-// the loader uses it to decide the number of lanes against the RSS budget (docs §12.4).
-uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::level::MeshCensus &p_census);
+// Bytes the plan's prepared data would hold if all of it were resident at once (each plan mesh's drawn LOD at the
+// PreparedMesh layout + each texture's full Godot chain), from the res headers alone (no chunk is read; about one
+// small res read per request and texture): the loader uses it to decide the number of lanes against the RSS budget
+// (docs §12.4). Items whose res does not read count 0. (Design revision 4 had the census as the input; the census
+// holds no vertex counts or texture sizes, docs §11.2 T5 note.)
+uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::LevelMount &p_mount);
 
 // ---- Phase B: the scene lanes (docs §12.1, §12.2) -------------------------------------------------------------
 // Godot-free, so render.scene times it headless on Metro with a counting sink. The lanes are threads of their own

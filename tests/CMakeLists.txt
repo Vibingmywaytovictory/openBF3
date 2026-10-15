@@ -229,3 +229,106 @@ endif()
 openbf3_test(test_m1_contract test_main.cpp m1_contract_tests.cpp test_support.h)
 target_link_libraries(test_m1_contract PRIVATE bf3_host bf3_render)
 add_test(NAME m1.contract COMMAND test_m1_contract)
+# M1 T1 (world; docs/design/m1.md §5, §14): sim.world.unit builds synthetic static worlds and checks the
+# CollisionWorld queries and the CollisionWorld::Impl seam (it includes bf3_sim's internal headers and links Jolt for
+# that), the tile / world-index blobs (round trips, hostile bytes), the cache keys and the content-keyed tile cache on
+# scratch roots; no data. sim.world reads Metro from the install (read-only) into a scratch cache: cold then warm,
+# the source digest's coverage of the soup's sources, CollisionWorld answers against a brute-force reference over the
+# soup triangles, install.unchanged; exits 77 = skipped without an install.
+openbf3_test(test_sim_world test_main.cpp sim_world_tests.cpp sim_world_cache_tests.cpp sim_world_install_tests.cpp sim_world_support.h test_support.h)
+target_link_libraries(test_sim_world PRIVATE bf3_sim Jolt)
+target_include_directories(test_sim_world PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
+add_test(NAME sim.world.unit COMMAND test_sim_world --test-suite=sim-world-unit)
+set_tests_properties(sim.world.unit PROPERTIES TIMEOUT 300)
+add_test(NAME sim.world COMMAND test_sim_world --test-suite=sim-world)
+set_tests_properties(sim.world PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_world_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(sim.world.unit sim.world PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_world_cl_dir}")
+    set_tests_properties(sim.world PROPERTIES TIMEOUT 1800)
+endif()
+# tools.m1_prepare (E6, docs §1, §12.4): `bf3dump prepare MP_Subway TeamDeathMatch0 --shapes` on a fresh scratch root,
+# then again: the cold peak working set <= 512 MiB, the second run all hits; exits 77 = skipped without an install.
+# RUN_SERIAL so a ctest -j neighbour cannot skew the peak. cmake_language(EXIT) needs CMake 3.29.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME tools.m1_prepare COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -P ${CMAKE_CURRENT_SOURCE_DIR}/m1_prepare.cmake)
+    set_tests_properties(tools.m1_prepare PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+endif()
+# M1 T2 (motor; docs/design/m1.md §6, §9.2, §10, §14): sim.motor.unit steps the motor on synthetic static worlds (E1
+# numbers, slopes, steps, walls, ceilings, falls, transitions, determinism, interleaving, sim::catch_up, settle, the
+# tuning file); sim.motor runs the same on Metro's real static world (E1a-E1d at found courses, the 102-point settle)
+# and exits 77 = skipped without an install. Both read the shipped tuning file (OPENBF3_MOTOR_TUNING_CFG, §6.11).
+openbf3_test(test_sim_motor test_main.cpp sim_motor_tests.cpp test_support.h)
+target_link_libraries(test_sim_motor PRIVATE bf3_sim)
+target_compile_definitions(test_sim_motor PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME sim.motor.unit COMMAND test_sim_motor --test-suite=sim-motor-unit)
+add_test(NAME sim.motor COMMAND test_sim_motor --test-suite=sim-motor)
+set_tests_properties(sim.motor PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(sim.motor.unit PROPERTIES TIMEOUT 300)
+set_tests_properties(sim.motor PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_motor_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(sim.motor.unit sim.motor PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_motor_cl_dir}")
+endif()
+
+# M1 T3 net (docs/design/m1.md §7, §14): bit packing, the protocol's messages (round trips, every truncation,
+# fuzzed bytes, unsequenced ENet loopback) and the seeded netsim. No data; meant for the asan preset too.
+openbf3_test(test_net_proto test_main.cpp net_proto_tests.cpp test_support.h)
+target_link_libraries(test_net_proto PRIVATE bf3_net)
+add_test(NAME net.bits.unit COMMAND test_net_proto --test-suite=net-bits)
+add_test(NAME net.proto.unit COMMAND test_net_proto --test-suite=net-proto)
+add_test(NAME net.netsim.unit COMMAND test_net_proto --test-suite=net-netsim)
+set_tests_properties(net.bits.unit net.proto.unit net.netsim.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_t3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(net.bits.unit net.proto.unit net.netsim.unit
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t3_cl_dir}")
+endif()
+
+# M1 T4 session (docs/design/m1.md §1 E2/E3, §7.4-§9, §14): host.session.unit runs GameServer without sockets,
+# judge_rest and the presentation helpers on synthetic input, then a real ServerHost + ClientSession over ENet
+# loopback on a synthetic world (spawn, clock resets, a stall, a teleport, Trace, E2 under 150/2 shortened); no
+# data. host.session runs the session on Metro's real world through load_shared_level (E2 under 150/2 as the gate
+# and 150 ms one way as a reported row, the 128-slot SpawnSweep against in-process rows, install unchanged) and
+# exits 77 without an install. Both read the shipped tuning file and are RUN_SERIAL (wall-clock timing).
+openbf3_test(test_host_session test_main.cpp host_session_tests.cpp test_support.h)
+target_link_libraries(test_host_session PRIVATE bf3_host)
+target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME host.session.unit COMMAND test_host_session --test-suite=host-session-unit)
+add_test(NAME host.session COMMAND test_host_session --test-suite=host-session)
+set_tests_properties(host.session.unit PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+set_tests_properties(host.session PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_t4_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.session.unit host.session PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t4_cl_dir}")
+endif()
+
+# M1 T5: the level scene (bf3_render level_scene.h; docs/design/m1.md §14). render.scene.unit: synthetic census,
+# meshes and heightfields (no data). render.scene: Metro TDM plan and SceneLanes cold and warm on a scratch cache
+# root with its timings, texture count and bytes, peak in-flight bytes and peak working set, install.unchanged (exits
+# 77 = skipped without an install). RUN_SERIAL so the printed lane timings do not compete with ctest -j neighbours.
+openbf3_test(test_render_scene test_main.cpp render_scene_tests.cpp test_support.h)
+target_link_libraries(test_render_scene PRIVATE bf3_render psapi)
+target_include_directories(test_render_scene PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_render/src)
+add_test(NAME render.scene.unit COMMAND test_render_scene --test-suite=render-scene-unit)
+add_test(NAME render.scene COMMAND test_render_scene --test-suite=render-scene)
+set_tests_properties(render.scene PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+set_tests_properties(render.scene.unit render.scene PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_scene_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.scene.unit render.scene PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_scene_cl_dir}")
+endif()
+
+# M1 T6 godot (docs/design/m1.md §1, §11, §12, §14): godot.m1 runs the headless --m1-check of
+# res://scenes/m1_metro.tscn (E1 through the loopback server on Trace reports, E2 under both netsim profiles judged by
+# judge_rest, E3 SpawnSweep with 128 slots, install unchanged); godot.m1_load the windowed --m1-load-check cold then
+# warm on a fresh scratch cache root (E4 / E5, phase times, frame time, the game's peak working set, 8 spawn shots)
+# after a probe run, and exits 77 = skipped without a window or rendering device. Both exit 77 without OPENBF3_GODOT
+# or an install and share the project and its DLL with the other godot.* tests; both are RUN_SERIAL (E2 wall-clock
+# netsim, E4 / E5 timing).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.m1 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1.cmake)
+    set_tests_properties(godot.m1 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+    add_test(NAME godot.m1_load COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1_load.cmake)
+    set_tests_properties(godot.m1_load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()

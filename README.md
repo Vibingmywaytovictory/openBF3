@@ -963,3 +963,183 @@ Measured (dev build, 16 threads, RX 9070 XT, D3D12, 1152×648, warm file cache, 
 
 Follow-ups: GitHub Actions CI (configure, build, ctest, headless self-test without an install); the Linux build and
 its symbol-visibility test for our Jolt next to Godot's.
+
+## M1 static world (T1)
+
+The collision soup (above) becomes Jolt shapes: one `MeshShape` per 64 m tile and layer (Collision, Raycast,
+Character), the triangle's `SurfaceTag` (material, surface, body, flags) in its per-triangle user data. The shapes
+are built once per process (`StaticWorldShapes`, immutable, shared) and every `CollisionWorld` (server, client)
+puts one static body per shape into its own `PhysicsSystem`. Design: docs/design/m1.md §5.
+
+```
+bf3dump shapes MP_Subway TeamDeathMatch0 [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]
+bf3dump prepare MP_Subway TeamDeathMatch0 --shapes      # meshes + weapons, then the shapes, into the same root
+```
+
+Both print the cache result, the per-phase times, the shape counts and bytes, the peak working set and an
+`install.unchanged` row (exit 1 if the install changed). `--tiles` lists every tile (x, z, triangles per layer,
+tags, content digest).
+
+Cache entries (in the derived-data cache root, never in the repo):
+* `jolt-tile`: one tile's tag table and the `Shape::SaveBinaryState` stream of each layer's MeshShape, keyed by a
+  SHA-256 of the tile's input triangles, so modes that share a tile share the entry (Metro ConquestLarge0 after
+  TeamDeathMatch0: 160 of 170 tiles hit). Every stream's Jolt tree is walked and checked before Jolt restores it.
+* `jolt-world`: the tile list of a level × mode, keyed by the source digest (SHA-256 over the SHA1s of every
+  manifest entry in the bundles the mode mounts) and `kCollisionSoupVersion`. A warm load reads it and restores the
+  tiles without building the soup.
+
+Measured on Metro TDM (dev build, 16 threads, 2026-10-15; timings noisy, other builds ran in parallel):
+
+| | |
+|---|---|
+| shapes | 170 tiles, 291 MeshShapes (= bodies per CollisionWorld), 1,903 tags; 969,031 collision, 142,908 raycast, 2,232 character triangles |
+| resident shapes | 22.55 MiB (21.2 B per triangle; the design estimated ≈ 14 MiB) |
+| cache entries | 22.6 MiB in 171 entries; soup (cold only, freed) 51.0 MiB |
+| cold | 0.66–0.70 s: soup 0.37 s, cook + cache writes 0.26–0.30 s (0.12 s with `--no-cache`) |
+| warm | 0.035–0.038 s: source digest ≈ 25 ms (4 bundles, 21,030 entries), restore 0.011 s, no soup |
+| `prepare --shapes` peak (E6) | cold 332–338 MiB (≤ 512 MiB), warm 199.6 MiB with 1,134 of 1,134 hits |
+| soup sources outside the digest | 0 (155 EBX, 121 res, 10 chunks) |
+
+Tests: `sim.world.unit` (synthetic worlds; tile and world blob round trips, hostile blobs and 2,000 mutated Jolt
+trees, cache keys, cold / warm / damaged / closed-cache builds), `sim.world` (Metro from the install into a scratch
+root: cold versus warm byte-identical and answering 1,000 rays alike, the source coverage, rays, capsule and box
+overlaps and capsule sweeps against a brute-force double-precision reference over the soup triangles,
+`install.unchanged`), `tools.m1_prepare` (E6 and an all-hits second run). The parity case on Metro: 1,728 ray hits
+and 272 misses with the reference, the tag equal on all 1,523 distinct hit triangles; capsule overlaps 785 / 214;
+box overlaps 366 / 104; sweeps 322 hits, 78 clear, the time of impact inside 3 mm; 0 disagreements. Samples too close
+to call are counted as ambiguous and not judged: a capsule within 2 mm of touching (1), a box within 4 cm (30;
+Jolt rounds the box's corners by its convex radius), a ray with several triangles in reach.
+
+## M1 soldier motor (T2)
+
+<!-- M1 T2 -->
+`bf3_sim` steps one soldier per call: `SoldierMotor::step(state, command)` on a Jolt `CharacterVirtual` that is reset
+from the POD `SoldierState` every tick, so a step depends only on (state, command, static world, params) and a
+client replay equals the server's step bit for bit (docs/design/m1.md §6). The numbers are Metro's soldier
+(`read_soldier_def` + `make_motor_params`); the gain semantics nobody has measured yet live in
+`bf3-opensource/config/motor_tuning.cfg` (19 keys, all `[inferred]` defaults; `parse_motor_tuning` rejects
+unknown keys, duplicates and out-of-range values and names the line). Also in this track: `spawn.h`
+(`settle_spawn` in three pieces for the server's sweep, `stamp_spawn`, `choose_spawn`, and the deterministic test
+courses `find_clear_heading` / `find_drop_spot`), `prediction.h` (`PredictionRing`, `sim::catch_up`, the one rule
+ClientSession uses for reconciliation and the base fill), `soldier_state_hash`, and `bf3_core`'s
+`read_level_spawns` (AlternateSpawn points and CharacterSpawnReference spawners with PropertyConnection values).
+
+`bf3dump spawns <LEVEL> <MODE>` prints the spawn points (index, object, position, the yaw the server spawns with,
+team, enabled, priority, entity) and the spawners as TSV. Metro TDM: 102 neutral points at y 59.8-73.4 and the two
+spawners #6 (Team2) and #7 (Team1), radius 10, 3 friendly kills in 30 s, in 0.18 s.
+
+Tests: `sim.motor.unit` (no data) and `sim.motor` (install; skipped without one).
+
+* `sim.motor.unit`, synthetic worlds: E1a walk 4.0000 / sprint 6.5 / crouch 2.0 / prone 0.9 m/s within 1 % per tick
+  (the default gains reach 99 % by tick 22, sprint by 33), direction factors and diagonals, deceleration; E1b apex
+  0.599999 m (the penalised second jump 0.1797 m); E1c 18 / 42 / 18 / 30 / 42 / 63 ticks; E1d 9.8 m → 13.86636 m/s,
+  0 hp; 10.1 m → 14.07700 m/s, 20.192 hp; 46 m → 30.04195 m/s, dead; ramps 49° / 51°, a 10° ramp at full speed,
+  step limit 0.42 m, wall pushes without jitter, ledges (0.4 m hugged, 0.6 m InAir), a 55° slide without damage, a
+  ceiling jump, stand-blocked, the prone footprint, floor cracks; determinism over 10,000 busy steps on two worlds
+  and in a child process (chain `6e8ede9353e499c8`), save / restore, 8 interleaved soldiers, hostile states;
+  `catch_up` from a mismatch, forward and backward resets, a 3 s stall and a spawn against the server's own
+  stepping; settle, `choose_spawn`, the course searches; the shipped cfg, its round trip and a parser fuzz.
+* `sim.motor`, Metro's real static world (soup → `build_static_world`): `make_motor_params` from the level's
+  soldier has the same `motor_params_hash` as the unit tests' synthetic soldier; `settle_spawn` 102 / 102 ok (worst
+  lift −0.18 m, shift 0.4 m, gap ≤ 4.5 mm, 0.05 s); E1a-E1c along `find_clear_heading` courses from 6 spawn points
+  (window means within 0.5 %, apex 0.599998 m, transition ticks exact); E1d at `find_drop_spot`
+  (−526.3, 62.5, −758.5): the same three impacts as above, fall = h within 1e-5 m; the game's path, T1's
+  `load_static_world_cached` cold (170 tiles cooked) and warm (170 restored) on a scratch cache, gives the motor the
+  direct build's answers bit for bit (all 102 settles, every course heading, the drop spot, 9 sprint traces);
+  install unchanged. About 2 s in `dev`, 70 s under `asan`.
+
+Known limit (docs §6.1 "As built in T2"): where two floor meshes meet unwelded, Jolt's character padding meets the
+far mesh's edge and lifts a walker 0.5-14 mm for a tick, costing up to 3.5 % of the speed for about half a second.
+Metro's E1a therefore holds the window mean to ±1 % and each tick to ≥ 95 %.
+
+## M1 session (T4)
+
+<!-- M1 T4 -->
+`bf3_host` runs the M1 game: `GameServer` inside `ServerHost`'s 60 Hz thread (`ServerConfig::game`; the S0 world is
+untouched without it) and `ClientSession` on its own thread, both Godot-free (docs/design/m1.md §7-§9, §12). The
+server keeps a 32-tick jitter buffer per slot (a newer sequence replaces a buffered tick, the buffer report follows
+the highest sequence), holds a new slot on the spawn's hold command, applies Teleport / SpawnAt / spawns in the rules
+step stamped at the tick, records `Trace` reports, runs `SpawnSweep` in batches of the free slots, and sends and
+flushes the tick's datagrams in the tick. The client runs the command clock (target buffer, slew, reset with a
+hold-off, forced forward), predicts every tick from the ring's entry at C - 1, reconciles and fills gaps through
+`sim::catch_up`, smooths corrections (IW4L's 100 ms decay), interpolates the others on the received server time and
+publishes a fixed-size `PresentationFrame`; `present_others` / `present_own_fraction` evaluate it per display frame.
+`judge_rest` (rest_check.h) is the one E2 judge. `level_load.h` loads the level database and the `SharedLevel`
+(spawns, soldier, static world through the cache).
+
+Tests: `host.session.unit` (no data, about 70 s) and `host.session` (install; skipped without one; about 190 s);
+both are `RUN_SERIAL` (wall-clock timing).
+
+* `host.session.unit`: `judge_rest` on synthetic recordings; `present_others` brackets, extrapolates 250 ms and
+  holds; `GameServer` without sockets (hold command, late / repeated / replaced counts, the buffer report, Teleport
+  and SpawnAt stamped at the rules tick, Trace, refused dev commands, a 20,000-datagram fuzz) and its SpawnSweep in
+  3 batches equal to headless rows; then real ENet loopback on a synthetic floor: spawn with 0 reconciliations, the
+  spawn view, 238 / 238 predicted states equal the server's Trace bit for bit, odd-tick events and a superseded
+  snapshot's events reach `server_events`, RTT 1.25 ms (bound: 1 tick + 2 ms), clock target 2; clock disturbances
+  of -20 / +20 ticks reset exactly once each (+20: 5-6 commands replaced on the server, the forward jump filled at
+  once), a 3 s stall and a start 30 ticks behind recover with 0 precondition failures; a 0.08 m Teleport is
+  reconciled once and smoothed to 0 in 350 ms; E2 under "150/2" (shortened: 12 s idle, 2 cycles) 3 / 3 rest periods
+  ok, RTT 156 ms against 150 ms netsim, extrapolated 0.07 % of frames.
+* `host.session`, Metro TDM through `load_shared_level` and the shipped tuning: cold 0.89 s / warm 0.22 s on a
+  scratch cache; E2 under "150/2" (the gate: 30 s idle + 4 walk-stop cycles along a `find_clear_heading` course):
+  5 / 5 rest periods ok, 0 reconciliations, RTT 157 ms; "lat=150-165,loss=2" (stress row, reported): 5 / 5 ok, RTT
+  322 ms; `SpawnSweep` with 128 slots 102 / 102 ok and equal to in-process `settle_spawn` rows; install unchanged.
+
+## M1 game (T6)
+
+<!-- M1 T6 -->
+`res://scenes/m1_metro.tscn` is M1: Metro TDM walkable through the loopback server. Its `Bf3LevelSession` node
+(bf3_godot, docs/design/m1.md §11, §12) loads the level on a loader thread (mount, scene plan, `SceneLanes`, the
+`SharedLevel` through the cache), starts a `ServerHost` with the `GameServer` (2 scripted walkers) and a
+`ClientSession` as soon as the shapes are in, and uploads the scene behind a loading screen: RenderingServer meshes
+and textures on Godot worker tasks (at most 3 in flight; the pool is capped at 4 threads in `project.godot`),
+materials and 10,506 RS instances on the main thread in 12 ms slices with vsync off. The first-person camera blends
+the client's presentation at the display frame's time; the mapper uses BF3's PC keys and adopts each life's spawn
+view. Headless (`--headless` or `--m1-check`) the session skips the scene and loads only what the server needs.
+
+```bat
+:: play (WASD move, Shift sprint, Space jump, Ctrl crouch toggle, Z prone toggle, mouse look,
+:: F6 free camera with Q/E down/up and the wheel for speed, Esc releases the mouse)
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn [-- --netsim=150/2 --walkers=2 --bf3-cache=<dir>]
+:: E1 / E2 / E3 headless: PASS/FAIL table, exit 0 or 1 (about 6 minutes)
+"%GODOT%" --headless --path bf3-opensource res://scenes/m1_metro.tscn -- --m1-check [--bf3-cache=<scratch dir>]
+:: E4 / E5 windowed: run cold on an empty cache root, then warm on the same root
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --m1-load-check=cold --bf3-cache=<scratch dir>
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --m1-load-check=warm --bf3-cache=<scratch dir>
+:: screenshots after the load: spawn points (stand / walk / crouch / prone) and free-camera views
+"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --shot-spawns=22:prone,13:walk --shot-dir=C:\temp\m1 --shots=C:\temp\m1\over.png@-150,260,-800,0,-40 --quit-after=1
+```
+
+Tests: `godot.m1` (headless `--m1-check`, about 6 minutes) and `godot.m1_load` (windowed `--m1-load-check` cold
+then warm on a fresh root under `%TEMP%`, 8 spawn shots each; exit 77 = skipped without a window). Both need
+`OPENBF3_GODOT` and an install, and both are `RUN_SERIAL`.
+
+Measured on Metro TDM (dev build, Radeon RX 9070 XT, D3D12; other tracks were building on the machine, so the
+timings are noisy):
+
+| criterion | result |
+|---|---|
+| E1a speeds (6 courses through the server's Trace) | walk 3.9577–4.0000 m/s, sprint 6.2727–6.5000, crouch 2.0000, prone 0.9000; worst window mean error 0.45 % (sprint) |
+| E1b jump apex | 0.599998 m on 6 / 6 courses |
+| E1c pose transitions | S→C 18, C→P 30, P→S 42, S→P 42, P→C 63, C→S 18 ticks on 6 / 6 courses |
+| E1d drops | 9.8 m: 0 damage; 10.1 m: 20.19 damage; 46 m: dead; fall within 1 mm, impact speed within 1e-5 m/s of √(2gh) |
+| E1 snapshots | 3,985 / 3,985 own states in the snapshots equal the server's Trace bit for bit |
+| E2 "150/2" (gate) | 5 / 5 rest periods ok, 0 reconciliations, eye jitter 0 m, RTT 157 ms, 12,960 samples |
+| E2 "lat=150-165,loss=2" (stress, reported) | 5 / 5 ok, 0 reconciliations, RTT 322 ms, 0.03 % of the others' frames extrapolated |
+| input keys (device path, `input.keys`) | 48 / 48: Space / Ctrl / Z / F6 fire with no modifier, Shift, Ctrl and Shift+Ctrl held (sprint-jump, sprint-crouch); echoes and releases do nothing |
+| E3 spawns (`SpawnSweep`, 128 slots) | 102 / 102 ok and equal to in-process `settle_spawn`, 1.0 s |
+| E4 cold (process start → first controllable frame) | 2.26–2.33 s (`_ready` → Done 1.61–1.69 s); gate 15 s |
+| E5 warm | 1.49 s (`_ready` → Done 0.84–0.85 s); gate 5 s |
+| E6 converter peak (`tools.m1_prepare`, T1) | 332–338 MiB cold; gate 512 MiB |
+| game peak working set (reported, not gated) | 851–862 MiB cold, 947–959 MiB warm (windowed, D3D12); headless check 426–435 MiB |
+| frame time after Done (5 s at the spawn) | p50 5.56 ms, p99 8.33 ms |
+| install | unchanged after every run (256 files, sizes and mtimes) |
+
+Load phases (cold / warm): mount 0.16 / 0.16 s, shapes 1.20 / 0.11 s, scene lanes wall 0.90 / 0.26 s (604 mesh
+blobs converted / hit), C1 198 / 103 worker tasks with 0.82 / 0.65 s of work (largest task 27 ms), C2 0.036 /
+0.030 s of main-thread work, 670 / 605 loading frames at 2.4 / 1.4 ms mean. The very first cold run after a build
+measured 4.8 s (the OS file cache was colder).
+
+Known gaps of the minimal look: about half of Metro's materials name no texture and draw flat (T5 notes); the
+terrain is one flat colour; the plan's depth fog is off by default (`--fog` draws it) because the park's fog colour
+floods the frame; shadowed and indoor surfaces take a strong blue cast from the sky-only ambient.

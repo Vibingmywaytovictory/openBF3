@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -51,5 +52,14 @@ std::vector<std::string> variation_database_names(const core::EbxLibrary &p_libr
 // MeshMaterials' own TextureParameters), searching p_databases in order.
 core::Result<MeshMaterials> mesh_materials(const core::EbxLibrary &p_library, std::string_view p_mesh_partition, uint32_t p_variation_hash,
 		const std::vector<std::string> &p_databases);
+
+// The same for a placed variant whose MeshVariationDatabaseEntry is already known (the level census's
+// SceneMesh::entry, found through World::mesh_variation): p_asset is the MeshAsset instance, p_entry the entry or
+// none (the MeshMaterials' own TextureParameters are then kept). Works on any resolver (the level path's EbxDb,
+// an EbxLibrary). MeshMaterials::database names the entry's partition, variation_hash its VariationAssetNameHash.
+// Bounded: at most kMaxMaterialSlots slots and kMaxTextureParameters texture parameters per slot are read.
+inline constexpr size_t kMaxMaterialSlots = 4096;
+inline constexpr size_t kMaxTextureParameters = 256;
+core::Result<MeshMaterials> mesh_materials(const core::EbxResolver &p_db, const core::EbxInstance &p_asset, const std::optional<core::EbxInstance> &p_entry);
 
 } // namespace bf3::render

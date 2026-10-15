@@ -103,6 +103,9 @@ struct GameServerStats {
 	uint64_t snapshot_bytes = 0;
 	size_t max_snapshot_bytes = 0;
 	uint64_t bad_datagrams = 0; // failed to decode (counted, ignored)
+	// Motor steps whose command tick != state tick + 1 (a spawn, Teleport or SpawnAt not stamped at its rules tick
+	// would show here; must stay 0, host.session.unit). Added in T4 (docs §8.4).
+	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0; // motor steps of the last tick
 	double last_encode_ms = 0;
 	std::vector<SlotStats> slots;

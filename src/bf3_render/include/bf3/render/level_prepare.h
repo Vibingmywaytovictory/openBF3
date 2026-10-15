@@ -3,7 +3,8 @@
 // derived-data cache, item by item. Godot-free.
 //
 //   1. load_level + World::traverse + mesh_census (bf3_core/level): the scene meshes the mode places.
-//   2. Meshes: one item per distinct MeshSet res of a kept scene mesh. LODs: the census's (at most 4) when any
+//   2. Meshes: one item per distinct MeshSet res of a kept scene mesh (level_scene.h scene_mesh_requests, which
+//      the game's scene plan shares, so their keys match). LODs: the census's (at most 4) when any
 //      kept variant is model kind, LOD 0 when all are world kind (world-kind meshes keep only LOD 0); drawn
 //      subsets; unskinned. Each item: read the res, compute its key, get the blob or load the LODs' chunks,
 //      prepare_mesh, encode, put; the item's arrays are freed before the lane takes the next one, so peak

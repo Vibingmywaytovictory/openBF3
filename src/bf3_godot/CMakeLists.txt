@@ -53,3 +53,22 @@ set_target_properties(bf3_godot PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/lib>"
     PDB_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/pdb>"
 )
+
+# M1 T6 (godot; docs/design/m1.md §11, §12, §15): the M1 session node Bf3LevelSession (res://scenes/m1_metro.tscn),
+# the level upload (C1 worker tasks, C2 main-thread budget), cameras, input mapping, loading screen and the
+# --m1-check / --m1-load-check checks. psapi: the game's peak working set (reported by --m1-load-check).
+target_sources(bf3_godot PRIVATE
+    src/level_session.cpp
+    src/level_session.h
+    src/level_upload.cpp
+    src/level_upload.h
+    src/fp_camera.cpp
+    src/fp_camera.h
+    src/input_mapper.cpp
+    src/input_mapper.h
+    src/loading_screen.cpp
+    src/loading_screen.h
+    src/m1_check.cpp
+    src/m1_check.h
+)
+target_link_libraries(bf3_godot PRIVATE psapi)

@@ -366,7 +366,8 @@ constexpr size_t kMaxTerrainSide = res::kMaxGridSide; // IW4L collision/terrain.
 
 // The heightfield grid of a terrain asset at the depth whose spacing first reaches p_spacing.
 bool terrain_grid(const LevelMount &p_mount, const std::string &p_asset, float p_spacing, unsigned p_threads, uint8_t &r_depth, res::HeightGrid &r_grid,
-		std::string &r_error) {
+		std::string &r_error, std::vector<SoupSource> &r_sources) {
+	r_sources.push_back({ SoupSource::Kind::Res, asset_key(p_asset), {} });
 	const Result<std::pair<ResInfo, std::vector<uint8_t>>> terrain = p_mount.read_res(p_asset);
 	if (!terrain) {
 		r_error = "res " + p_asset + ": " + terrain.error().message;
@@ -378,6 +379,7 @@ bool terrain_grid(const LevelMount &p_mount, const std::string &p_asset, float p
 		r_error = "res " + p_asset + ": " + e.message();
 		return false;
 	}
+	r_sources.push_back({ SoupSource::Kind::Res, asset_key(tree_name), {} });
 	const Result<std::pair<ResInfo, std::vector<uint8_t>>> tree_bytes = p_mount.read_res(tree_name);
 	if (!tree_bytes) {
 		r_error = "res " + tree_name + ": " + tree_bytes.error().message;
@@ -411,6 +413,7 @@ bool terrain_grid(const LevelMount &p_mount, const std::string &p_asset, float p
 	for (const res::TerrainStreamingNode &node : tree.streaming_nodes) {
 		if (node.id.level <= depth) {
 			wanted.push_back(node.lod0_chunk);
+			r_sources.push_back({ SoupSource::Kind::Chunk, {}, Guid::from_bytes(node.lod0_chunk.bytes.data()) });
 		}
 	}
 	std::vector<std::optional<std::vector<uint8_t>>> chunks(wanted.size());
@@ -429,6 +432,7 @@ bool terrain_grid(const LevelMount &p_mount, const std::string &p_asset, float p
 				return chunks[i];
 			}
 		}
+		r_sources.push_back({ SoupSource::Kind::Chunk, {}, Guid::from_bytes(p_id.bytes.data()) });
 		Result<std::vector<uint8_t>> chunk = p_mount.read_chunk(Guid::from_bytes(p_id.bytes.data()));
 		if (!chunk) {
 			return std::nullopt;
@@ -805,6 +809,28 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 		it->second[*object.group->havok_subpart] = owner;
 	}
 
+	// M1 T1: the sources the build reads (CollisionSoup::sources), sorted and made unique at the end.
+	const auto add_partition_source = [&](const EbxInstance &p_instance) {
+		if (const std::optional<std::string_view> name = db.name_of(p_instance.partition().guid())) {
+			soup.sources.push_back({ SoupSource::Kind::Ebx, std::string(*name), {} });
+		}
+	};
+	add_partition_source(p_level.root());
+	for (const CollisionPlacement &c : *placements) {
+		if (c.kind == CollisionPlacement::Kind::Group) {
+			add_partition_source(p_world.groups[c.index].entity);
+		} else {
+			const PlacedObject &object = p_world.objects[c.index];
+			add_partition_source(object.entity);
+			if (object.reference) {
+				add_partition_source(*object.reference);
+			}
+		}
+		if (!c.res.empty()) {
+			soup.sources.push_back({ SoupSource::Kind::Res, asset_key(c.res), {} });
+		}
+	}
+
 	soup.placements.resize(placements->size());
 	std::vector<Job> jobs(placements->size());
 	std::vector<std::string> object_res; // distinct res names of built objects
@@ -1025,7 +1051,9 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			BF3_TRY(charge_text(budget, *name)); // kept below
 			terrain.asset = std::string(*name);
 			res::HeightGrid grid;
-			if (!terrain_grid(mount, terrain.asset, p_options.terrain_spacing, p_options.threads, terrain.depth, grid, terrain.error)) {
+			add_partition_source(object.entity);
+			add_partition_source(*asset);
+			if (!terrain_grid(mount, terrain.asset, p_options.terrain_spacing, p_options.threads, terrain.depth, grid, terrain.error, soup.sources)) {
 				terrain.state = SoupTerrain::State::Missing;
 				soup.terrains.push_back(std::move(terrain));
 				continue;
@@ -1102,6 +1130,10 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 		tick(progress);
 	}
 	soup.seconds_tiles = seconds_since(clock);
+	// A streaming node without data names the zero chunk id: nothing is read for it (no bundle or toc holds it).
+	std::erase_if(soup.sources, [](const SoupSource &p_s) { return p_s.kind == SoupSource::Kind::Chunk && p_s.id.is_zero(); });
+	std::sort(soup.sources.begin(), soup.sources.end());
+	soup.sources.erase(std::unique(soup.sources.begin(), soup.sources.end()), soup.sources.end());
 	set_stage(progress, SoupProgress::Done, 0);
 	return soup;
 }

@@ -42,6 +42,11 @@
 //                              parity with research/probes/tools/level-oracle collision)
 //   prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N]
 //                              placed meshes + weapon variants into the derived-data cache (prepare_commands.cpp)
+// M1 T1 (world):
+//   shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]
+//                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
+//                              ... --shapes` adds them to a prepare run
+//   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -61,6 +66,9 @@
 #include "level_commands.h"
 #include "collision_commands.h"
 #include "prepare_commands.h"
+#include "shapes_commands.h" // M1 T1
+// M1 T2: spawn points and spawners of a level x mode.
+#include "spawns_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -486,8 +494,10 @@ void usage() {
 			"  level <LEVEL> <MODE> [--legacy-mvdb]\n"
 			"  levelmodes <LEVEL>\n"
 			"  collision <LEVEL> <MODE>\n"
-			"  prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes]\n");
+			"  prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes] [--shapes]\n"
+			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
+	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
 }
 
 } // namespace
@@ -590,6 +600,14 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "collision" && rest.size() == 2) {
 		return bf3dump::cmd_collision(ctx.install, rest[0], rest[1]);
+	}
+	// M1 T1 (world): the static world's shapes.
+	if (cmd == "shapes") {
+		return bf3dump::cmd_shapes(ctx.reader, ctx.install, rest);
+	}
+	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
+	if (cmd == "spawns" && rest.size() == 2) {
+		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
 	}
 	usage();
 	return 2;

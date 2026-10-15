@@ -135,11 +135,38 @@ int Host::service(uint32_t p_timeout_ms, Event &r_event) {
 }
 
 bool Host::send(uint32_t p_peer, uint8_t p_channel, const void *p_data, size_t p_size, bool p_reliable) {
+	return send(p_peer, p_channel, p_data, p_size, p_reliable ? SendMode::Reliable : SendMode::Sequenced);
+}
+
+size_t Host::max_unfragmented_bytes(uint32_t p_peer) const {
+	const ENetHost *h = static_cast<const ENetHost *>(host_);
+	if (p_peer >= h->peerCount || h->peers[p_peer].state != ENET_PEER_STATE_CONNECTED) {
+		return 0;
+	}
+	// enet_peer_send's fragment threshold (peer.c): the MTU minus the protocol and fragment headers, minus the
+	// checksum when the host uses one.
+	size_t n = h->peers[p_peer].mtu - sizeof(ENetProtocolHeader) - sizeof(ENetProtocolSendFragment);
+	if (h->checksum != nullptr) {
+		n -= sizeof(enet_uint32);
+	}
+	return n;
+}
+
+bool Host::send(uint32_t p_peer, uint8_t p_channel, const void *p_data, size_t p_size, SendMode p_mode) {
 	ENetHost *h = static_cast<ENetHost *>(host_);
 	if (p_peer >= h->peerCount || h->peers[p_peer].state != ENET_PEER_STATE_CONNECTED) {
 		return false;
 	}
-	ENetPacket *pkt = enet_packet_create(p_data, p_size, p_reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
+	if (p_mode == SendMode::Unsequenced && p_size > max_unfragmented_bytes(p_peer)) {
+		return false;
+	}
+	enet_uint32 flags = 0;
+	if (p_mode == SendMode::Reliable) {
+		flags = ENET_PACKET_FLAG_RELIABLE;
+	} else if (p_mode == SendMode::Unsequenced) {
+		flags = ENET_PACKET_FLAG_UNSEQUENCED;
+	}
+	ENetPacket *pkt = enet_packet_create(p_data, p_size, flags);
 	if (pkt == nullptr) {
 		return false;
 	}

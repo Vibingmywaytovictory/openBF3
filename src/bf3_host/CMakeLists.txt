@@ -17,3 +17,14 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/game_server.h
     include/bf3/host/client_session.h
 )
+
+# M1 T4 (session; docs/design/m1.md §7.4-§9, §12): the level load, the game server, the client session, the E2 rest
+# judge. psapi for the loader's peak working-set sample (LoadProgress::peak_working_set).
+target_sources(bf3_host PRIVATE
+    src/level_load.cpp
+    src/game_server.cpp
+    src/client_session.cpp
+    src/rest_check.cpp
+    include/bf3/host/rest_check.h
+)
+target_link_libraries(bf3_host PRIVATE psapi)

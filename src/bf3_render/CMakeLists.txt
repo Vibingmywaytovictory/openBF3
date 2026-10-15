@@ -33,3 +33,10 @@ target_sources(bf3_render PRIVATE
 target_sources(bf3_render PRIVATE
     include/bf3/render/level_scene.h
 )
+
+# M1 T5: the level scene plan, its items and the scene lanes (docs/design/m1.md §11.2-§11.4, §12.2).
+target_sources(bf3_render PRIVATE
+    src/level_scene.cpp
+    src/level_scene_internal.h
+    src/scene_lanes.cpp
+)
