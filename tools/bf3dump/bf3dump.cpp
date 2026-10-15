@@ -47,6 +47,10 @@
 //                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
 //                              ... --shapes` adds them to a prepare run
 //   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
+// S2 vehicle:
+//   vehicledrive <LEVEL> <MODE> [<blueprint>]   the drive def and the vehicle model (vehicle_commands.cpp)
+//   vehicle-replay <LEVEL> <MODE> [options]     courses and gates C / D / G1 / G1r / G2, --handling, --sweep,
+//                                               --hash-out (gate X), --log-out / --log-in (vehicle_commands.cpp)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -69,6 +73,8 @@
 #include "shapes_commands.h" // M1 T1
 // M1 T2: spawn points and spawners of a level x mode.
 #include "spawns_commands.h"
+// S2 vehicle: vehicledrive, vehicle-replay.
+#include "vehicle_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -498,6 +504,7 @@ void usage() {
 			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
+	std::fprintf(stderr, "%s", bf3dump::vehicle_usage()); // S2 vehicle
 }
 
 } // namespace
@@ -608,6 +615,13 @@ int wmain(int argc, wchar_t **argv) {
 	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
+	}
+	// S2 vehicle: vehicledrive / vehicle-replay (vehicle_commands.cpp; docs/design/s2.md §1, §8).
+	if (cmd == "vehicledrive") {
+		return bf3dump::cmd_vehicledrive(ctx.install, rest);
+	}
+	if (cmd == "vehicle-replay") {
+		return bf3dump::cmd_vehicle_replay(ctx.install, rest);
 	}
 	usage();
 	return 2;

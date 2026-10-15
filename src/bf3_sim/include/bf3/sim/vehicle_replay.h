@@ -93,7 +93,7 @@ struct VehicleReplayOptions {
 	uint32_t modes = 0x3Fu; // bit per VehicleRestoreMode; the primary mode is always run (sim.vehicle under asan: 0x01)
 	VehicleGhostQuantisation quantisation = kDefaultVehicleGhost;
 	bool g1 = true, g2 = true;
-	bool keep_hashes = true; // fill VehicleCourseReport::server_hashes (bf3dump --hash-out, the cross-binary check)
+	bool keep_hashes = true; // fill VehicleCourseReport::server_hashes and log (bf3dump --hash-out / --log-out, the cross-binary check)
 };
 
 struct VehicleDivergence {
@@ -152,6 +152,9 @@ struct VehicleCourseReport {
 	// The server's state_hash() at ticks 0..ticks (keep_hashes). bf3dump vehicle-replay --hash-out writes them, one
 	// hex line per tick, so two binaries (dev vs release, later Windows vs Linux, M3) can be compared with a diff.
 	std::vector<uint64_t> server_hashes;
+	// The recorded commands of ticks 1..ticks (with keep_hashes): bf3dump vehicle-replay --log-out writes them
+	// (format_vehicle_command_log, scratch only) and --log-in replays such a log open loop.
+	VehicleCommandLog log;
 };
 
 core::Result<VehicleCourseReport> run_vehicle_course(std::shared_ptr<const StaticWorldShapes> p_shapes, std::shared_ptr<const VehicleModel> p_model,
@@ -239,7 +242,7 @@ std::string format_vehicle_group_report(const VehicleGroupReport &p_report);
 struct VehicleHandling {
 	float time_0_60_kmh = 0; // s, full throttle from rest on flat ground (0 = not reached in 30 s)
 	float speed_at_6s_kmh = 0; // IW4L's feel target: 68 km/h at 6 s (plan §7.4) [report claim]
-	float brake_distance_60_m = 0; // m, full brake from a held 60 km/h to rest
+	float brake_distance_60_m = 0; // m, full brake from 60 km/h (reached under full throttle) to rest
 	float brake_deceleration = 0; // m/s^2, mean over that stop (IW4L ~10 m/s^2)
 	float turning_circle_m = 0; // m, kerb to kerb: diameter of the outer front wheel's contact path at full lock, 15 km/h
 	float turning_circle_com_m = 0; // m, the centre of mass path's diameter

@@ -40,13 +40,20 @@ uint64_t splitmix(uint64_t &r_state) {
 	return z ^ (z >> 31);
 }
 
-// The angle (degrees) between two rotations, 2 acos |q . q'| through acos(d) = sqrt(2 (1 - d)) (1 + (1 - d) / 12)
-// (the series is exact to 1e-7 rad below 1 degree; reported only).
+// The angle (degrees) between two rotations from the chord between them (sign aligned): for unit quaternions
+// |q - q'| = 2 sin(theta / 4), so theta = 4 asin(|q - q'| / 2) = 2 c (1 + c^2 / 24 + ...) with c = |q - q'|. Unlike
+// 2 acos |q . q'| it is exactly 0 for equal quaternions whose float norm is not exactly 1 (reported only; the series
+// is exact to 1e-7 rad below 1 degree).
 float rotation_error_degrees(const std::array<float, 4> &p_a, const std::array<float, 4> &p_b) {
-	double d = std::fabs(double(p_a[0]) * p_b[0] + double(p_a[1]) * p_b[1] + double(p_a[2]) * p_b[2] + double(p_a[3]) * p_b[3]);
-	d = std::min(d, 1.0);
-	const double e = 1.0 - d;
-	return float(2.0 * std::sqrt(2.0 * e) * (1.0 + e / 12.0) * 180.0 / 3.14159265358979323846);
+	const double dot = double(p_a[0]) * p_b[0] + double(p_a[1]) * p_b[1] + double(p_a[2]) * p_b[2] + double(p_a[3]) * p_b[3];
+	const double sign = dot < 0.0 ? -1.0 : 1.0;
+	double c2 = 0.0;
+	for (size_t i = 0; i < 4; ++i) {
+		const double d = double(p_a[i]) - sign * double(p_b[i]);
+		c2 += d * d;
+	}
+	const double c = std::sqrt(c2);
+	return float(2.0 * c * (1.0 + c2 / 24.0) * 180.0 / 3.14159265358979323846);
 }
 
 VehicleErrorStats stats_of(std::vector<std::pair<float, Tick>> p_samples) {
@@ -406,6 +413,9 @@ core::Result<VehicleCourseReport> run_vehicle_course(std::shared_ptr<const Stati
 	if (p_options.keep_hashes) {
 		for (const VehicleWorldSnapshot &s : rec.snapshots) {
 			report.server_hashes.push_back(s.hash);
+		}
+		for (const std::vector<VehicleCommand> &c : rec.commands) {
+			report.log.commands.push_back(c[0]);
 		}
 	}
 	report.drove = vehicle_course_drove(report, &report.drove_why);
@@ -828,25 +838,22 @@ core::Result<VehicleHandling> measure_vehicle_handling(std::shared_ptr<const Veh
 			}
 		}
 	}
-	// Brake from a held 60 km/h to rest.
+	// Full brake from 60 km/h (reached under full throttle) to rest. A held cruise at 60 km/h needs most of the
+	// placeholder engine's torque (top speed ~75 km/h), so the stop starts at the first tick at or above 60 km/h.
 	{
 		core::Result<Bench> b = bench(*shapes, p_model, start);
 		BF3_TRY(b);
 		VehicleState s = b->state;
-		uint32_t held = 0;
 		bool braking = false;
 		Vec3 from{};
 		float v0 = 0.0f;
 		for (uint32_t t = 1; t <= 3600 * 2; ++t) {
-			VehicleCommand c = bench_command(s, 0, 60.0f / 3.6f, 0, false);
+			VehicleCommand c = bench_command(s, 127, 0.0f, 0, false);
 			const float speed = len3(s.body.linear_velocity);
-			if (!braking) {
-				held = speed * 3.6f >= 59.0f ? held + 1 : 0;
-				if (held >= 60) {
-					braking = true;
-					from = s.body.com_position;
-					v0 = speed;
-				}
+			if (!braking && speed * 3.6f >= 60.0f) {
+				braking = true;
+				from = s.body.com_position;
+				v0 = speed;
 			}
 			if (braking) {
 				c.throttle = 0;

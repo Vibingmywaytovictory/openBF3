@@ -663,7 +663,18 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	v.body = created->GetID();
 	v.driver = VehicleDriverState();
 	w.contacts[p_slot] = VehicleContacts();
-	return core::Status::success();
+	// Jolt's Wheel constructor leaves mContactPosition / mContactNormal / mContactLateral uninitialised (Wheel.h:125-130)
+	// and VehicleConstraint::SaveState writes them, so two fresh worlds would save different bytes until the first
+	// collision test overwrites them. Zero them through the same stream patch as restore_vehicle_state: equal inputs,
+	// equal bytes from the moment the vehicle exists.
+	VehicleState clean = state(p_slot);
+	for (size_t i = 0; i < clean.wheel_count; ++i) {
+		clean.wheels[i].contact_body = kNoContactBody;
+		clean.wheels[i].contact_position = {};
+		clean.wheels[i].contact_normal = {};
+		clean.wheels[i].contact_lateral = {};
+	}
+	return restore_vehicle_state(p_slot, clean, vehicle_restore::kWheelContacts, ContactCachePolicy::Keep);
 }
 
 bool VehicleWorld::has_vehicle(VehicleSlot p_slot) const {

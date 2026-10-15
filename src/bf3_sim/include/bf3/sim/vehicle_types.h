@@ -64,6 +64,8 @@ struct VehicleCommand {
 struct VehicleSleepSphere {
 	Vec3 center{};
 	float radius = 0;
+
+	bool operator==(const VehicleSleepSphere &) const = default;
 };
 
 // The Jolt body (JPH::Body + MotionProperties), Frostbite axes, in PhysicsSystem::SaveBodyState's order (single
@@ -85,6 +87,8 @@ struct VehicleBodyState {
 	uint8_t allow_sleeping = 1; // MotionProperties::mAllowSleeping; vehicle_restore::kBodySleep
 	uint8_t reserved[2] = {};
 	Vec3 origin{}; // reported only: Body::GetPosition, the vehicle frame origin (what gate G2 measures)
+
+	bool operator==(const VehicleBodyState &) const = default;
 };
 
 // One VehicleConstraint wheel (Wheel / WheelWV). steer_angle is derived every step from the controller's right input
@@ -105,6 +109,8 @@ struct VehicleWheelState {
 	float steer_angle = 0; // reported only
 	uint8_t in_contact = 0; // reported only (Wheel::HasContact after the step)
 	uint8_t reserved[3] = {};
+
+	bool operator==(const VehicleWheelState &) const = default;
 };
 
 // WheeledVehicleController + VehicleEngine + VehicleTransmission.
@@ -120,6 +126,8 @@ struct VehicleControllerState {
 	float gear_switch_time_left = 0;
 	float clutch_release_time_left = 0;
 	float gear_switch_latency_time_left = 0;
+
+	bool operator==(const VehicleControllerState &) const = default;
 };
 
 // Our own per-vehicle driver state (vehicle_model.h VehicleDriver; s2.md §5.4), stepped inside the tick.
@@ -130,6 +138,8 @@ struct VehicleDriverState {
 	uint16_t stand_still_ticks = 0; // ticks at low speed without throttle (UseStandStillBrake)
 	uint8_t reversing = 0; // the driver asked for reverse and the gearbox took it
 	uint8_t reserved = 0;
+
+	bool operator==(const VehicleDriverState &) const = default;
 };
 
 struct VehicleState {

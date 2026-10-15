@@ -353,3 +353,24 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_s2_contract_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(s2.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s2_contract_cl_dir}")
 endif()
+# S2 vehicle (docs/design/s2.md §1, §11): sim.vehicle.unit drives the Humvee fixture on the synthetic ground (the unit
+# contract U, gates D / G1 / G1r / G2 on the 7 synthetic courses, G1m, two threads, report H); sim.vehicle runs MP_007
+# RushLarge0 (gates C, D, G1, G1r, G2, I; reports S and H) and exits 77 = skipped without an install. The test includes
+# bf3_sim's internal headers (VehicleWorld::Impl, CollisionWorld::Impl) and links Jolt for the seams. Under asan the
+# install run keeps the primary restore mode only (OPENBF3_S2_ASAN).
+openbf3_test(test_sim_vehicle test_main.cpp sim_vehicle_tests.cpp test_support.h)
+target_link_libraries(test_sim_vehicle PRIVATE bf3_sim Jolt)
+target_include_directories(test_sim_vehicle PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
+target_compile_definitions(test_sim_vehicle PRIVATE "OPENBF3_VEHICLE_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/vehicle_tuning.cfg\"")
+add_test(NAME sim.vehicle.unit COMMAND test_sim_vehicle --test-suite=sim-vehicle-unit)
+add_test(NAME sim.vehicle COMMAND test_sim_vehicle --test-suite=sim-vehicle)
+# TIMEOUTs are 3x the measured runs (docs/design/s2.md §15.1): dev 46 s / 55 s, asan 636 s / 440 s.
+set_tests_properties(sim.vehicle PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE TIMEOUT 150)
+set_tests_properties(sim.vehicle.unit PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+if(OPENBF3_ASAN)
+    target_compile_definitions(test_sim_vehicle PRIVATE OPENBF3_S2_ASAN=1)
+    get_filename_component(_openbf3_vehicle_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(sim.vehicle.unit sim.vehicle PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_vehicle_cl_dir}")
+    set_tests_properties(sim.vehicle PROPERTIES TIMEOUT 1950)
+    set_tests_properties(sim.vehicle.unit PROPERTIES TIMEOUT 1350)
+endif()

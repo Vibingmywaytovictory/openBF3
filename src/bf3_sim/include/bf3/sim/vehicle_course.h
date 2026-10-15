@@ -8,17 +8,21 @@
 //
 // Courses on a real level are found, not hand-placed: find_vehicle_courses searches around seed points (the level's
 // vehicle spawners, vehicle_spawns.h) with CollisionWorld queries (ground_below, ray, overlap_box) on the Collision
-// layer, on a fixed grid in a fixed order (deterministic), and keeps every leg, and the turnaround area beyond each
-// end of the Straight / Brake / Slalom legs (those 60 s runs turn around repeatedly), on tiles that have terrain
-// (MP_007's soup has terrain only in tiles with Havok triangles or their neighbours; s2.md §4.4). Each kind:
-//   Straight   a flat straight of >= 150 m: full throttle from rest, brake to rest at the end, turn around, again
-//   Brake      the same straight: accelerate to 60 km/h, full brake, measure, repeat
-//   Slalom     +-full steer at 0.5 Hz around the straight's line at ~40 km/h, turning back at its ends
+// layer, on a fixed grid in a fixed order (deterministic), and keeps every leg, and the area beyond each end of
+// the Straight / Brake / Slalom legs (a 20 m turnaround disc; for Bumps the line itself extended 16 m: the overshoot
+// room of the shuttle below; Bumps also checks the cells beside its line, at most 8 degrees), on tiles that have terrain
+// (MP_007's soup has terrain only in tiles with Havok triangles or their neighbours; s2.md §4.4). The four leg
+// kinds shuttle: forward a -> b, stop a few metres past b, reverse back to past a at 30 km/h, stop, again (a U-turn
+// at full lock would swing ~15 m sideways onto unchecked ground); a leg that climbs runs downhill forward. Each kind:
+//   Straight   a flat straight of >= 150 m: full throttle forward, brake to rest past the end, reverse back, again
+//   Brake      the same straight: accelerate to 60 km/h, full brake, measure, on to the end, reverse back, repeat
+//   Slalom     +-full steer at 0.5 Hz around the straight's line, ~40 km/h forward and 30 km/h in reverse
 //   Circle     full lock left at a held ~15 km/h on a flat disc of >= 25 m radius (turning circle)
-//   Bumps      a line crossing ground whose height profile has a curvature peak (kerb, berm, crest) at >= 50 km/h;
-//              a crest steep enough to unload all four wheels makes it the jump case
+//   Bumps      a line crossing ground whose height profile has a curvature peak (kerb, berm, crest) at 55 km/h
+//              forward (>= 50 km/h), 30 km/h in reverse; a crest steep enough to unload all four wheels makes it the
+//              jump case
 //   Collision  ~30 km/h square into a static Collision-layer wall (a horizontal ray hit with |normal.y| < 0.3 and
-//              >= 1.5 m tall), reverse 15 m, again
+//              >= 1.5 m tall), push against it for 0.75 s, reverse 15 m, again
 //   SlopeIdle  on ground of 8..20 degrees: full brake command for 240 ticks (the stand-still timer reaches its 2 s
 //              limit while the brake holds the vehicle), then the all-zero command for the rest of the run: the
 //              stand-still brake holds it, and with no input the wake rule stops and Jolt's sleep test may put it
@@ -64,7 +68,9 @@ struct VehicleCourse {
 };
 
 struct VehicleCourseSearch {
-	float radius = 300.0f; // m around each seed
+	// m around each seed. 600 (s2.md §15): at 300 m every 150 m flat leg on MP_007 failed its 20 m turnaround discs
+	// (489 legs: 134 without ground, 160 too steep, 195 blocked); at 600 m all kinds are found within their budgets.
+	float radius = 600.0f;
 	float grid = 4.0f; // m between candidate points
 	float max_flat_degrees = 4.0f; // "flat" for Straight / Brake / Slalom / Circle
 	// CollisionWorld queries per kind (hostile / huge levels stop here); the whole search is bounded by
@@ -92,7 +98,7 @@ std::array<VehicleCourse, 3> synthetic_vehicle_group(const SyntheticVehicleGroun
 
 struct VehicleScriptMemory {
 	uint8_t phase = 0;
-	uint8_t leg = 0; // which end of the leg it drives towards
+	uint8_t leg = 0; // reserved (the leg shuttle runs a -> b forward and b -> a in reverse)
 	uint32_t phase_ticks = 0;
 	float measured[4] = {}; // phase measurements (start speed, start position along the leg, ...)
 };

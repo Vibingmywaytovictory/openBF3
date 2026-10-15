@@ -361,7 +361,15 @@ void fill_leg_course(Sampler &r_s, const Leg &p_leg, VehicleCourse &r_course) {
 	const Cell *end = r_s.ground(p_leg.i + p_leg.cells * p_leg.d.di, p_leg.j + p_leg.cells * p_leg.d.dj);
 	r_course.a = cell_point(r_s, p_leg.i, p_leg.j, start->y);
 	r_course.b = cell_point(r_s, p_leg.i + p_leg.cells * p_leg.d.di, p_leg.j + p_leg.cells * p_leg.d.dj, end->y);
-	r_course.start = place_on(r_course.a, start->normal, dir_vec(p_leg.d));
+	Vec3 normal = start->normal, heading = dir_vec(p_leg.d);
+	if (r_course.b[1] > r_course.a[1] + 0.5f) {
+		// The forward pass runs downhill (the reverse pass climbs): on MP_007's rough 5 degree bumps leg the Humvee
+		// cannot reach its bumps speed uphill (s2.md §15).
+		std::swap(r_course.a, r_course.b);
+		normal = end->normal;
+		heading = { -heading[0], 0.0f, -heading[2] };
+	}
+	r_course.start = place_on(r_course.a, normal, heading);
 	r_course.feature = p_leg.feature;
 }
 
@@ -434,19 +442,31 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 					case VehicleCourseKind::Slalom:
 					case VehicleCourseKind::Bumps: {
 						const bool bumps = kind == VehicleCourseKind::Bumps;
-						const float max_deg = bumps ? 12.0f : p_search.max_flat_degrees;
+						// Bumps: ground up to 8 degrees with the cells beside the line checked too, and instead of the
+						// turnaround discs the line itself extended by kBumpsRoom at both ends (the shuttle's overshoot room;
+						// the course is the inner 150 m). s2.md §15: a 12 degree line without side cells rolled the Humvee
+						// over on MP_007 at 55 km/h, and no 8 degree line there has the flat discs.
+						const float max_deg = bumps ? 8.0f : p_search.max_flat_degrees;
+						constexpr float kBumpsRoom = 16.0f;
 						for (const Dir &d : kDirs) {
 							Leg leg;
-							if (!check_leg(s, ci, cj, d, kLegLength, max_deg, kind == VehicleCourseKind::Slalom, leg)) {
+							if (!check_leg(s, ci, cj, d, kLegLength + (bumps ? 2.0f * kBumpsRoom : 0.0f), max_deg, kind == VehicleCourseKind::Slalom || bumps,
+										leg)) {
 								continue;
 							}
 							if (bumps && (leg.feature < 0.02f || (have_best && leg.feature <= best.feature))) {
 								continue;
 							}
+							if (bumps) {
+								const int32_t room = int32_t(std::ceil(kBumpsRoom / dir_step(d, grid)));
+								leg.i += room * d.di;
+								leg.j += room * d.dj;
+								leg.cells -= 2 * room;
+							}
 							const Dir back{ -d.di, -d.dj };
 							const int32_t ei = ci + leg.cells * d.di, ej = cj + leg.cells * d.dj;
-							if (!check_turnaround(s, ei, ej, d, p_search.turnaround_radius, p_search.max_turnaround_degrees) ||
-									!check_turnaround(s, ci, cj, back, p_search.turnaround_radius, p_search.max_turnaround_degrees)) {
+							if (!bumps && (!check_turnaround(s, ei, ej, d, p_search.turnaround_radius, p_search.max_turnaround_degrees) ||
+												  !check_turnaround(s, ci, cj, back, p_search.turnaround_radius, p_search.max_turnaround_degrees))) {
 								continue;
 							}
 							if (bumps) {
@@ -697,7 +717,7 @@ std::array<VehicleCourse, 3> synthetic_vehicle_group(const SyntheticVehicleGroun
 namespace {
 
 namespace phase {
-constexpr uint8_t kDrive = 0, kStop = 1, kTurn = 2, kBrakeTest = 3, kUnstick = 4, kHold = 5, kBack = 6;
+constexpr uint8_t kDrive = 0, kStop = 1, kTurn = 2, kBrakeTest = 3, kUnstick = 4, kHold = 5, kBack = 6, kPress = 7;
 }
 
 struct Pilot {
@@ -751,37 +771,67 @@ void set_phase(VehicleScriptMemory &r_memory, uint8_t p_phase) {
 	r_memory.phase_ticks = 0;
 }
 
-// Straight, Brake, Slalom and Bumps: drive the leg end to end, stop, turn around, again.
+// A point p_back m behind the vehicle's projection on the line p_from -> p_to (not before p_from): the reverse
+// target.
+Vec3 lookback(const Pilot &p_pilot, const Vec3 &p_from, const Vec3 &p_to, float p_back) {
+	const Vec3 line = sub(p_to, p_from);
+	const float len = length({ line[0], 0.0f, line[2] });
+	const Vec3 dir = horizontal(line);
+	const float along = std::clamp(dot(sub(p_pilot.position, p_from), dir), 0.0f, len);
+	return add(p_from, mul(dir, std::max(along - p_back, 0.0f)));
+}
+
+// Steering while reversing towards p_target: the rear follows the steer side (the turning centre is on the steer
+// side whichever way the vehicle moves), so a target to the vehicle's right needs a right steer.
+float reverse_steer(const Pilot &p_pilot, const Vec3 &p_target, float p_gain) {
+	const Vec3 d = sub(p_target, p_pilot.position);
+	const float back_lateral = -(d[0] * p_pilot.right[0] + d[2] * p_pilot.right[2]); // > 0: target to the vehicle's left
+	const float back_along = -(d[0] * p_pilot.forward[0] + d[2] * p_pilot.forward[2]);
+	return -p_gain * std::atan2(back_lateral, back_along);
+}
+
+// Straight, Brake, Slalom and Bumps: a shuttle on the leg. Forward a -> b (the kind's way: full throttle; full throttle
+// with one full-brake test from 60 km/h; +-full steer at 0.5 Hz at 40 km/h; 55 km/h over the bumps), stop a few metres
+// past b, reverse back to a few metres past a at 30 km/h, stop, again. The vehicle never leaves the corridor the finder
+// checked (the leg's cells, and for the slalom the cells beside it) plus the turnaround discs at both ends, which give
+// the overshoot room; a U-turn at full lock swings ~15 m sideways, onto ground nobody checked (s2.md §15: on MP_007
+// the U-turns hit trees beside the leg ends).
 VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, VehicleScriptMemory &r_m) {
 	VehicleCommand c;
-	const Vec3 from = r_m.leg == 0 ? p_course.a : p_course.b;
-	const Vec3 to = r_m.leg == 0 ? p_course.b : p_course.a;
-	const Vec3 dir = horizontal(sub(to, from));
-	const float remaining = dot(sub(to, p_p.position), dir);
+	const Vec3 dir = horizontal(sub(p_course.b, p_course.a));
+	const float along = dot(sub(p_p.position, p_course.a), dir); // from a towards b
+	const float remaining = dot(sub(p_course.b, p_p.position), dir);
 	const VehicleCourseKind kind = p_course.kind;
+	constexpr float kReverseSpeed = 30.0f / 3.6f;
+	// Braking distances with 8 m/s^2 assumed (the placeholder brakes at ~9): the stops land a few metres past the ends.
+	constexpr float kDecel = 8.0f, kOvershoot = 6.0f;
 	switch (r_m.phase) {
 		case phase::kDrive: {
-			const float cruise = kind == VehicleCourseKind::Slalom ? 40.0f / 3.6f : (kind == VehicleCourseKind::Bumps ? 60.0f / 3.6f : 200.0f);
+			// bumps at 55 km/h (s2.md §8.2 "crossed at >= 50 km/h"): at 60 the chassis grounds on MP_007's crests, at 50 the
+			// synthetic kicker unloads no wheel
+			const float cruise = kind == VehicleCourseKind::Slalom ? 40.0f / 3.6f : (kind == VehicleCourseKind::Bumps ? 55.0f / 3.6f : 200.0f);
 			if (kind == VehicleCourseKind::Straight || kind == VehicleCourseKind::Brake) {
 				c.throttle = 127;
 			} else {
 				hold_speed(p_p, cruise, c);
 			}
-			float steer = 2.5f * p_p.angle_to(lookahead(p_p, from, to, 12.0f));
-			if (kind == VehicleCourseKind::Slalom && p_p.speed > 15.0f / 3.6f && remaining > 25.0f) {
+			float steer = 2.5f * p_p.angle_to(lookahead(p_p, p_course.a, p_course.b, 12.0f));
+			if (kind == VehicleCourseKind::Slalom && p_p.speed > 15.0f / 3.6f && remaining > 15.0f) {
 				// +-full steer at 0.5 Hz about the line, the line correction on top
 				const float weave = ((r_m.phase_ticks / 60u) % 2u) == 0 ? 1.0f : -1.0f;
 				steer = weave + 0.6f * steer;
 			}
 			c.steer = steer_code(steer);
-			const float stop = p_p.forward_speed * p_p.forward_speed / (2.0f * 6.0f) + 4.0f;
-			if (kind == VehicleCourseKind::Brake && p_p.forward_speed >= 60.0f / 3.6f) {
+			const float stop = p_p.forward_speed * p_p.forward_speed / (2.0f * kDecel) - kOvershoot;
+			// One brake test per forward pass (measured[1] = done); afterwards full throttle on to the end of the leg.
+			if (kind == VehicleCourseKind::Brake && r_m.measured[1] == 0.0f && p_p.forward_speed >= 60.0f / 3.6f) {
 				r_m.measured[0] = p_p.forward_speed;
+				r_m.measured[1] = 1.0f;
 				set_phase(r_m, phase::kBrakeTest);
 			} else if (remaining < stop) {
 				set_phase(r_m, phase::kStop);
 			} else if (r_m.phase_ticks > 240 && p_p.speed < 0.5f) {
-				set_phase(r_m, phase::kUnstick);
+				set_phase(r_m, phase::kBack); // stuck: reverse out
 			}
 			break;
 		}
@@ -794,39 +844,44 @@ VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, Vehicl
 		case phase::kHold:
 			c.brake = 255;
 			if (r_m.phase_ticks >= 30) {
-				if (remaining > 70.0f) {
-					set_phase(r_m, phase::kDrive);
-				} else {
-					r_m.leg ^= 1u;
-					set_phase(r_m, phase::kTurn);
-				}
+				set_phase(r_m, phase::kDrive); // on to the end of the leg
 			}
 			break;
-		case phase::kStop:
+		case phase::kStop: // past b: stop, then reverse
 			c.brake = 255;
-			c.steer = steer_code(2.5f * p_p.angle_to(to));
 			if (p_p.speed < 0.5f && r_m.phase_ticks >= 10) {
-				r_m.leg ^= 1u;
-				set_phase(r_m, phase::kTurn);
+				set_phase(r_m, phase::kBack);
 			}
 			break;
-		case phase::kTurn: {
-			const float angle = p_p.angle_to(lookahead(p_p, from, to, 12.0f));
-			hold_speed(p_p, 3.0f, c);
-			c.steer = steer_code(3.0f * angle);
-			if (std::fabs(angle) < 15.0f * kDegrees) {
-				set_phase(r_m, phase::kDrive);
-			} else if (r_m.phase_ticks > 600) {
-				set_phase(r_m, phase::kUnstick);
+		case phase::kBack: {
+			const float back_speed = -p_p.forward_speed;
+			const float err = kReverseSpeed - back_speed;
+			if (err > 0.0f) {
+				c.throttle = int8_t(-std::lround(std::clamp(0.2f + err * 0.4f, 0.0f, 1.0f) * 127.0f));
+			} else if (err < -1.0f) {
+				c.brake = uint8_t(std::lround(std::clamp(-err * 0.3f, 0.0f, 1.0f) * 255.0f));
+			}
+			float steer = reverse_steer(p_p, lookback(p_p, p_course.a, p_course.b, 8.0f), 1.5f);
+			if (kind == VehicleCourseKind::Slalom && p_p.speed > 15.0f / 3.6f && along > 15.0f) {
+				// the slalom weaves in reverse too (+-full steer at 0.5 Hz, the line correction on top)
+				const float weave = ((r_m.phase_ticks / 60u) % 2u) == 0 ? 1.0f : -1.0f;
+				steer = weave + 0.6f * steer;
+			}
+			c.steer = steer_code(steer);
+			const float stop = back_speed * back_speed / (2.0f * kDecel) - kOvershoot;
+			if (along < stop) {
+				set_phase(r_m, phase::kTurn); // past a: stop, then forward
+			} else if (r_m.phase_ticks > 240 && p_p.speed < 0.5f) {
+				set_phase(r_m, phase::kDrive); // stuck: drive out
 			}
 			break;
 		}
-		case phase::kUnstick:
+		case phase::kTurn: // past a (the reverse end): stop, then forward again
 		default:
-			c.throttle = -127;
-			c.steer = steer_code(-3.0f * p_p.angle_to(to));
-			if (r_m.phase_ticks >= 90) {
-				set_phase(r_m, phase::kTurn);
+			c.brake = 255;
+			if (p_p.speed < 0.5f && r_m.phase_ticks >= 10) {
+				r_m.measured[1] = 0.0f;
+				set_phase(r_m, phase::kDrive);
 			}
 			break;
 	}
@@ -858,9 +913,27 @@ VehicleCommand drive_vehicle_course(const VehicleCourse &p_course, const Vehicle
 					hold_speed(p, 30.0f / 3.6f, c);
 					c.steer = steer_code(2.5f * p.angle_to(lookahead(p, p_course.a, p_course.b, 10.0f)));
 					r_memory.measured[0] = std::max(r_memory.measured[0], p.forward_speed);
-					if ((r_memory.measured[0] > 5.0f && p.speed < 1.5f && r_memory.phase_ticks > 30) || r_memory.phase_ticks > 900 ||
-							along > length(sub(p_course.b, p_course.a)) + 3.0f) {
+					r_memory.measured[2] = r_memory.phase_ticks == 0 ? along : std::max(r_memory.measured[2], along);
+					if (r_memory.measured[0] > 5.0f && p.speed < 1.5f && r_memory.phase_ticks > 30) {
+						set_phase(r_memory, phase::kPress); // stopped by the wall
+					} else if (r_memory.phase_ticks > 900 || along > length(sub(p_course.b, p_course.a)) + 3.0f) {
 						r_memory.measured[1] = along;
+						set_phase(r_memory, phase::kBack);
+					}
+					break;
+				case phase::kPress:
+					// The impact bounces the chassis back (restitution 0.4 above Jolt's 1 m/s restitution threshold).
+					// Creep back in at 1 m/s (no bounce below that) and push against the wall for 40 ticks (a
+					// sustained chassis-static contact: gate D's static-contact ticks, G2's static-collision samples),
+					// then back off. measured[2] is the furthest point reached, i.e. where the wall stopped it.
+					hold_speed(p, 1.0f, c);
+					c.steer = steer_code(2.5f * p.angle_to(lookahead(p, p_course.a, p_course.b, 10.0f)));
+					if (along > r_memory.measured[2] - 0.1f && p.speed < 0.3f) {
+						r_memory.measured[3] += 1.0f;
+					}
+					if (r_memory.measured[3] >= 40.0f || r_memory.phase_ticks >= 600) {
+						r_memory.measured[1] = along;
+						r_memory.measured[3] = 0.0f;
 						set_phase(r_memory, phase::kBack);
 					}
 					break;
