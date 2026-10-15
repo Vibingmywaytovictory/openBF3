@@ -319,7 +319,8 @@ frame-0 piece list is computed once per map and memoised (in sprite-local coordi
 its own matrix composed, charged per copied piece), so a 16-deep binary DAG of sprites costs O(sprites + pieces),
 not 2^16 per reference; a sprite reached again while its own list is being built (a cycle: a sprite placing itself,
 directly or through others) is an error. Pieces are capped at `kSwfAtlasMaxPiecesPerRegion` (4,096) per region and
-`kSwfAtlasMaxPieces` (2^20, about 64 MB) per map. The same rule gives an
+`kSwfAtlasMaxPieces` (2^20, about 64 MB) per map; exceeding either fails the map with an error (a binary DAG
+whose leaf holds one piece reaches 4,096 pieces at depth 12 and fails there, cheaply). The same rule gives an
 exported symbol's frame 0 (`symbols`), any frame of any sprite (`frames`) and each bare sub-image (`bare`). Names:
 `<symbol>/<label>`, `<symbol>`, `<symbol>@<frame>`, `#<id>`, where `<symbol>` is the export name or `#<sprite id>`.
 
@@ -662,7 +663,7 @@ no exceptions; plain structs, sorted vectors; strings copied out of the body (a 
 | `swf labels <name>` | the atlas map: images, every region with its pieces and the atlas texture res |
 | `swf layout <name> [--depth=N]` | the layout tree, one line per node |
 | `swf hud` | the HUD placements table of the 14 screens |
-| `swf fonts [--text-db=<partition>] [--cache=<dir> \| --no-cache]` | the mapping, each font's glyphs, codes, coverage, kerning, winding stats, TrueType size and SHA-256, cache outcome; the name-resolution table of §7.4 (Family-inferred names on their own line). `--cache` only names the cache root the converted fonts are stored in (the derived-data cache, `InstallReader::write_guard()`); the command writes no font file anywhere else |
+| `swf fonts [--text-db=<partition>] [--cache=<dir> \| --no-cache]` | the mapping, each font's glyphs, codes, coverage, kerning, winding stats, TrueType size and SHA-256, cache outcome; the name-resolution table of §7.4 (Family-inferred names on their own line). `--cache=<dir>` names a derived-data Cache root exactly as `bf3dump prepare --cache` does (default: the game's `user://bf3cache`, `%APPDATA%\Godot\app_userdata\bf3-opensource\bf3cache`; guarded by `InstallReader::write_guard()`); entries are digest-keyed Cache records, never a loose `.ttf`, and the command writes no font file anywhere else |
 
 There is deliberately no command that writes a converted font to a path of the caller's choice (revision 1's
 `swf ttf` was dropped in review): plan §2.1 keeps a converted font in `user://` / the Cache only, and §13 below.

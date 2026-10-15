@@ -23,8 +23,8 @@
 // (820 of 820 over the 135 atlas movies).
 //
 // Bounds (docs §9, §9.1): the recursion is depth-capped and memoised, cycles fail, every visited display entry and
-// every piece (copies included) charges kSwfAtlasPieceUnits, and pieces are capped per region and per map, so no
-// input ends on time or memory. Callers pass a budget of kSwfAtlasBudgetUnits (Bf3UiAssets, the census, tests,
+// every piece (copies included) charges kSwfAtlasPieceUnits, and pieces are capped per region and per map
+// (exceeding a cap is an error), so no input ends on time or memory. Callers pass a budget of kSwfAtlasBudgetUnits (Bf3UiAssets, the census, tests,
 // bf3dump swf labels).
 
 #include "bf3/core/result.h"
