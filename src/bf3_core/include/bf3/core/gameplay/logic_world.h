@@ -272,7 +272,10 @@ std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field)
 // inclusion setting must enable the mode. A reference without settings is always included; a
 // setting whose criterion does not resolve counts as a GameMode one, the only criterion levels use.
 // An empty p_mode accepts every auto-loaded sub-world. Every Settings entry (null and unresolvable
-// ones included) and every EnabledOptions entry is charged to r_budget before it is scanned.
-Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget);
+// ones included) and every EnabledOptions entry is charged to r_budget before it is scanned (and each
+// instance examined one unit). r_scanned, when set, gets the Settings and EnabledOptions entries
+// added (the walk counts them as walk steps).
+Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget,
+		size_t *r_scanned = nullptr);
 
 } // namespace bf3::core::gameplay

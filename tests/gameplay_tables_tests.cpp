@@ -1190,7 +1190,7 @@ TEST_SUITE("tables-unit") {
 		CHECK_FALSE(pick->enum_name().has_value());
 		CHECK(h->get_path("Inline.w").has_value());
 		CHECK_FALSE(h->get_path("Inline.missing").has_value());
-		// One unit per examination, a fields() pass 1 + descriptors / 64.
+		// One unit per examination, a fields() pass 1 + descriptors / 8.
 		WorkBudget budget(2);
 		CHECK(budget.charge_type(h->data()).ok());
 		CHECK(budget.charge_fields(h->data()).ok());
@@ -1355,8 +1355,8 @@ TEST_SUITE("tables-unit") {
 		// Decoding an enum used to scan its enum's (<= 255) enumerators, so a fields() pass over 31 x
 		// 254 enum fields whose values name none scanned 2M enumerators per state: K = 3000 states
 		// naming one fitted the budget (6G compares). Now the chain is at most 1024 descriptors, a
-		// decode is a binary search, and the pass costs 1 + descriptors / 64 units: 3000 such states
-		// read fast inside the budget, 60000 end on the budget error.
+		// decode is a binary search, and the pass costs 1 + descriptors / 8 units: 3000 such states
+		// read fast inside the budget (~130 units each), 60000 end on the budget error.
 		const auto build = [](size_t p_states) {
 			SynPartition s;
 			SynType choice{ "WideEnum", {}, false, {}, false, true };
@@ -1516,6 +1516,160 @@ TEST_SUITE("tables-unit") {
 		Result<LogicWorld> world = LogicWorld::build(db, p->primary(), options);
 		REQUIRE_FALSE(world.ok());
 		CHECK(budget_error(world.error()));
+		CHECK(seconds_since(start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: round 7 repro - feeds of a depth-1 leaf are charged (property_in, source_value)") {
+		// A binary chain of kLevels nodes in the root prefab (two PropertyConnections from node i + 1
+		// into node i) whose last node is fed by a ReferenceObjectData of a prefab with M feeds into
+		// its descriptor. One query reaches that leaf 2^16 times at depth 1, in ~196k charged steps
+		// (under kQuerySteps). Its source_value then looped over the M feeds calling
+		// source_value(..., 0), which returned before charging: 65536 x M free iterations per query
+		// (M = 100k: 23.8 s per query, the walk 117 s, all inside the budget). Now no call is made at
+		// depth 0 and every feed iteration is charged, so the leaf costs O(1) and the work is bounded
+		// by the budget alone.
+		constexpr size_t kLevels = 16, kFeeds = 100000;
+		const auto build = [&](bool p_walk, size_t p_heads) {
+			SynPartition s;
+			s.seed = 7;
+			s.types = world_types();
+			for (SynType &t : s.types) {
+				if (t.name == "ReferenceObjectData") {
+					t.fields = { { "Blueprint", 'r' } }; // no Excluded: the leaf's data_field finds nothing
+				}
+			}
+			s.types.push_back({ "Node", { { "Pad", 'i' } } });
+			s.types.push_back({ "Desc", { { "Pad", 'i' } } });
+			const uint32_t root = s.add({ "PrefabBlueprint", {} });
+			const uint32_t field = p_walk ? static_cast<uint32_t>(field_id("Excluded")) : 0x13572468u;
+			// The chain head: a WorldPartReferenceObjectData in the walk (whose Excluded it asks).
+			std::vector<uint32_t> node;
+			node.push_back(s.add({ p_walk ? "WorldPartReferenceObjectData" : "Node", {} }));
+			for (size_t i = 1; i < kLevels; ++i) {
+				node.push_back(s.add({ "Node", {} }));
+			}
+			const uint32_t prefab = s.add({ "PrefabBlueprint", {} });
+			const uint32_t desc = s.add({ "Desc", {} });
+			const uint32_t source = s.add({ "Node", {} });
+			const uint32_t leaf = s.add({ "ReferenceObjectData", { { "Blueprint", SynPartition::ref(prefab) } } });
+			SynArray chain{ "PropertyConnection", {}, {} };
+			for (size_t i = 0; i < kLevels; ++i) {
+				const uint32_t from = i + 1 < kLevels ? node[i + 1] : leaf;
+				for (int c = 0; c < 2; ++c) {
+					chain.structs.push_back({ { "Source", SynPartition::ref(from) }, { "Target", SynPartition::ref(node[i]) }, { "SourceFieldId", field },
+							{ "TargetFieldId", field } });
+				}
+			}
+			SynArray inner{ "PropertyConnection", {}, {} };
+			for (size_t i = 0; i < kFeeds; ++i) {
+				inner.structs.push_back({ { "Source", SynPartition::ref(source) }, { "Target", SynPartition::ref(desc) }, { "SourceFieldId", field },
+						{ "TargetFieldId", field } });
+			}
+			SynArray objects{ {}, std::vector<uint32_t>(p_heads, SynPartition::ref(node[0])), {} };
+			s.instances[root].values = { { "PropertyConnections", s.add_array(chain) }, { "Objects", s.add_array(objects) } };
+			s.instances[prefab].values = { { "PropertyConnections", s.add_array(inner) }, { "Descriptor", SynPartition::ref(desc) } };
+			return std::make_pair(s, field);
+		};
+		{
+			// Direct queries on a world that builds: each is ~196k steps, so the default budget ends
+			// the third; every later one returns at once.
+			auto [s, field] = build(false, 0);
+			EbxDb db;
+			const EbxPartition *p = insert_syn(db, "levels/synthetic/depth", s);
+			if (p == nullptr) {
+				return;
+			}
+			LogicWorldOptions options;
+			options.max_query_steps = SIZE_MAX;
+			Result<LogicWorld> world = LogicWorld::build(db, p->primary(), options);
+			REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
+			const std::optional<EbxInstance> head = p->instance(1);
+			REQUIRE(head.has_value());
+			const auto start = std::chrono::steady_clock::now();
+			const size_t before = world->budget().used();
+			CHECK_FALSE(world->property(0, *head, static_cast<int32_t>(field)).has_value());
+			const size_t one = world->budget().used() - before;
+			CHECK(one > 65536); // the 2^16 leaf visits are all charged
+			CHECK(one < 600000);
+			for (int i = 0; i < 6; ++i) {
+				CHECK_FALSE(world->property(0, *head, static_cast<int32_t>(field)).has_value());
+			}
+			CHECK(world->budget().exhausted());
+			CHECK(seconds_since(start) < kFastSeconds);
+		}
+		// Through the walk: the chain head listed 10 times in Objects, each an Excluded query.
+		auto [s, field] = build(true, 10);
+		(void)field;
+		EbxDb db;
+		const EbxPartition *p = insert_syn(db, "levels/synthetic/depth", s);
+		if (p == nullptr) {
+			return;
+		}
+		LogicWorldOptions options;
+		options.max_walk_steps = SIZE_MAX;
+		options.max_query_steps = SIZE_MAX;
+		const auto start = std::chrono::steady_clock::now();
+		Result<LogicWorld> world = LogicWorld::build(db, p->primary(), options);
+		REQUIRE_FALSE(world.ok());
+		CHECK(budget_error(world.error()));
+		CHECK(seconds_since(start) < kFastSeconds);
+	}
+
+	TEST_CASE("gameplay: K specialization pairs copying one long target name (read_soldier_def)") {
+		// Every pair of an unlock's UnlockValues copies the names of the target field it feeds. With
+		// one target there is no name compare to charge, so K pairs each copied an L-byte type name
+		// for one unit: K = 100k pairs of a 1 MiB name was 100 GB of copies (and of memory) inside the
+		// budget. Each copy is now charged by its length.
+		const auto build = [](size_t p_pairs, size_t p_name_length) {
+			SynPartition s;
+			s.types = world_types();
+			const std::string long_type = "Target" + std::string(p_name_length, 'x');
+			s.types.push_back({ "SoldierBlueprint", { { "Object", 'r' }, { "PropertyConnections", 'v', "PropertyConnection" } } });
+			s.types.push_back({ "SoldierEntityData", { { "Components", 'a' } } });
+			s.types.push_back({ "UnlockComponentData", { { "UnlockAsset", 'r' } } });
+			s.types.push_back({ "ValueUnlockAsset", { { "UnlockValues", 'a' } } });
+			s.types.push_back({ "UnlockValuePair", { { "Id", 's' }, { "UnlockedValue", 'i' }, { "DefaultValue", 'i' } } });
+			s.types.push_back({ long_type, { { "Boost", 'i' } } });
+			const uint32_t blueprint = s.add({ "SoldierBlueprint", {} });
+			const uint32_t entity = s.add({ "SoldierEntityData", {} });
+			const uint32_t unlock = s.add({ "UnlockComponentData", {} });
+			const uint32_t asset = s.add({ "ValueUnlockAsset", {} });
+			const uint32_t pair = s.add({ "UnlockValuePair", { { "Id", s.add_string("BoostL1") }, { "UnlockedValue", 2 } } });
+			const uint32_t target = s.add({ long_type, {} });
+			const uint32_t boost = static_cast<uint32_t>(field_id("Boost"));
+			s.instances[blueprint].values = { { "Object", SynPartition::ref(entity) },
+				{ "PropertyConnections", s.add_array(SynArray{ "PropertyConnection", {},
+												 { { { "Source", SynPartition::ref(unlock) }, { "Target", SynPartition::ref(target) }, { "SourceFieldId", 1 },
+														 { "TargetFieldId", boost } } } }) } };
+			s.instances[entity].values = { { "Components", s.add_refs(1, SynPartition::ref(unlock)) } };
+			s.instances[unlock].values = { { "UnlockAsset", SynPartition::ref(asset) } };
+			s.instances[asset].values = { { "UnlockValues", s.add_refs(p_pairs, SynPartition::ref(pair)) } };
+			return s;
+		};
+		const char *name = "characters/soldiers/syn";
+		{
+			EbxDb db;
+			if (insert_syn(db, name, build(3, 10)) == nullptr) {
+				return;
+			}
+			Result<SoldierDef> soldier = read_soldier_def(db, name);
+			REQUIRE_MESSAGE(soldier.ok(), (soldier.ok() ? std::string() : soldier.error().message));
+			REQUIRE(soldier->specializations.size() == 3);
+			CHECK(soldier->specializations[0].id == "BoostL1");
+			CHECK(soldier->specializations[0].target_type == "Target" + std::string(10, 'x'));
+			CHECK(soldier->specializations[0].target_field == "Boost");
+			CHECK(soldier->specializations[2].value == Approx(2));
+		}
+		EbxDb db;
+		// Not exactly 2^20: a run of 2^k equal bytes can leave ebx_name_hash where it started, and the
+		// name would then resolve to "Target".
+		if (insert_syn(db, name, build(100000, (size_t(1) << 20) + 7)) == nullptr) {
+			return;
+		}
+		const auto start = std::chrono::steady_clock::now();
+		Result<SoldierDef> soldier = read_soldier_def(db, name);
+		REQUIRE_FALSE(soldier.ok());
+		CHECK(budget_error(soldier.error()));
 		CHECK(seconds_since(start) < kFastSeconds);
 	}
 

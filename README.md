@@ -677,15 +677,19 @@ target fields through Float/IntHub entities whose port ids are designer hashes; 
 target field with the longest common name prefix (`UnderslungBoostL1` -> `UnderslungGrenadeIncrease`).
 Every reader runs on one `WorkBudget` (`work_budget.h`, default 1M units): the walk, every property query, connection
 set, sub-world inclusion test and array scan of the read is charged before it is done (null and unresolvable array
-entries, repeated references to one object, arrays shared by many instances, connection loops and wide type chains
-all count), so hostile data ends with "work budget of N units exhausted" within a second instead of running for
-minutes. An instance or struct costs its `EbxPartition::lookup_width`, computed once per type when the partition is
-parsed: its type chain, the enumerators its enum fields decode against, and its inline (value-type) fields' types
-four levels down, so a narrow class with wide inline structs pays for them too. String decodes are a binary search
-over the string table's NUL offsets, never a scan of the string. A caller can pass one budget to several reads
-(`bf3dump kits` shares one between the mode, the progression tables and every kit). Retail needs at most 17,322
-units for a mode (XP3_Shield Rush), 23,700 for `kits` with every kit, 3,675 for the soldier and 855 for a vehicle;
-the walk caps `max_walk_steps` / `max_query_steps` stay on top (retail: under 8k and 4k steps). Indexes keyed by data (connection targets, unlock GUIDs) are sorted or ordered, and
+entries, repeated references to one object, arrays shared by many instances and connection loops all count), so
+hostile data ends with "work budget of N units exhausted" within a second instead of running for minutes. The rule
+is that total work stays O((budget + input size) x log(input size)): every loop iteration and every recursive call
+over the data charges at least one unit before it runs (the property resolver never calls itself at depth 0, where a
+call would return uncharged, and charges each connection it follows), and everything one iteration does is O(log n)
+or charged by its size. The EBX reader makes that possible: every field lookup, enum decode and string decode is a
+binary search in tables built at parse time (see "Level traversal"), and type chains wider than 1,024 descriptors are
+rejected, so examining an instance costs one unit whatever its type's layout, an array its raw element count, a
+`fields()` pass 1 + descriptors / 8 and a string copy its length / 64. A caller can pass one budget to several reads
+(`bf3dump kits` shares one between the mode, the progression tables and every kit). Retail needs at most 26,121
+units for a mode (MP_Subway Rush), 32,929 for `kits` with every kit, 3,958 for the soldier and 1,554 for a vehicle
+(30x headroom or more); the walk caps `max_walk_steps` / `max_query_steps` stay on top (retail: under 8k and 4k
+steps). Indexes keyed by data (connection targets, unlock GUIDs) are sorted or ordered, and
 the hash maps of GUIDs, SHA1s and instance keys hash with a per-process random seed (`ids.h` `hash_keyed`), so crafted
 keys cannot pile into one bucket and make a charged entry cost O(N). The cost model is written down at the top of
 `src/gameplay/logic_world.cpp`; bf3dump prints the units a command used on stderr.

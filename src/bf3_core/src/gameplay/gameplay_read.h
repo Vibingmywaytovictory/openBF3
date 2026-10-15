@@ -92,8 +92,8 @@ inline size_t array_cost(const EbxArray &p_array) {
 	return p_array.size();
 }
 
-// The array a field holds, its element count charged before any element is looked at. No array (absent, another type,
-// or the budget spent) is an empty OptionalEbxArray.
+// The array a field holds, its element count charged before any element is looked at. No array
+// (absent, another type, or the budget spent) is an empty OptionalEbxArray.
 inline OptionalEbxArray array_of(WorkBudget &r_budget, const std::optional<EbxValue> &p_value) {
 	const OptionalEbxArray out = p_value ? p_value->as_array() : OptionalEbxArray();
 	if (!out) {

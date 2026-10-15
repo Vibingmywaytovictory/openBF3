@@ -10,7 +10,13 @@
 // done, where it is done; once the budget is exhausted every charge fails at once, every loop below
 // stops at its next charge, and every entry point returns the budget error (it checks status()
 // after the walk and again before it returns, so a helper that returned early with an empty value
-// never yields a result). Retail reads use at most ~24k units of the default 1M (README).
+// never yields a result). Retail reads use at most ~33k units of the default 1M (README).
+//
+// The rule. Total work is O((budget + input size) x log(input size)): every loop iteration and every
+// recursive call over data-controlled structure charges at least one unit before it runs (no free
+// iterations, depth-0 and early-return paths included: a resolver call at depth 0 is never made, see
+// property_in), and every operation one iteration makes is O(log n) or charged by its size (strings
+// by length, arrays by raw element count).
 //
 // Unit costs. Examining an instance or struct is a fixed number of field lookups (field names are
 // literals; a dotted path such as "SourceEvent.Id" or vec3() of an inline field is a few literal
@@ -22,7 +28,7 @@
 // loop looks into is charged one unit (WorkBudget::charge_type, take_type, follow_all) right before
 // it is looked into, every array is charged its raw size (array_cost, array_of) before its scan, and
 // a struct reached through an inline field of either is part of that examination. A fields() pass
-// (scalars) reads the whole chain, so it is charged 1 + chain descriptors / 64 (charge_fields). An
+// (scalars) reads the whole chain, so it is charged 1 + chain descriptors / 8 (charge_fields). An
 // is_a reads <= kBaseDepth descriptors and compares names of a literal's length. data_field and
 // field_name_of are one lookup by the descriptors' stored name hashes and never hash a name. A
 // reference resolve is one hash lookup (a lazy EbxLibrary parses a partition at most once in its
@@ -65,11 +71,16 @@
 //                                 binary search, so crafted field ids cannot collide it into O(n^2)
 //   LogicWorld::connection_set    memoised per blueprint: of() runs once per blueprint, a lookup is
 //                                 one hash probe made after a charged step
-//   property_in, source_value,    recursion; 1 unit per call (query_step), depth <= kResolveDepth,
-//   interface_in                  <= kQuerySteps per query; each loop over property_into() checks
-//                                 query_spent() first, and interface_in charges each Fields entry;
-//                                 source_value charges the blueprint, the source and a child
-//                                 prefab's blueprint before their lookups
+//   property_in, source_value,    recursion; every call made charges 1 unit (query_step) before
+//   interface_in                  anything else, and no call is made at depth 0 (each caller tests
+//                                 the depth: a call there would return uncharged); depth <=
+//                                 kResolveDepth, <= kQuerySteps per query. Each iteration of a loop
+//                                 over property_into() charges 1 unit itself before its callee runs
+//                                 (and stops once query_spent()); interface_in charges a query step
+//                                 per Fields entry; source_value charges the blueprint, the source and
+//                                 a child prefab's blueprint before their lookups. Once the per-query
+//                                 cap is hit, the calls still on the stack return at their next test
+//                                 (<= 3 calls per frame, <= kResolveDepth frames)
 //   LogicWorld::effective         the property query, then 1 unit before the stored lookup (any
 //                                 number of queries may ask one entity)
 //   LogicWalker::place_reference  1 unit for the referenced blueprint before its lookups (any number
@@ -78,7 +89,8 @@
 //   data_field                    one lookup (binary search), made by a charged query step
 // mode_def.cpp
 //   level_modes                   raw Categories size, raw Mode size per category, names by length
-//   read_mode_def                 1 unit for the level; per sub-world scope 1 unit each for the
+//   read_mode_def                 1 unit for the level, 1 per scope for the unresolved-connection
+//                                 count; per sub-world scope 1 unit each for the
 //                                 blueprint and the descriptor and the Fields scan (raw size,
 //                                 array_cost; at most 65536 entries in all),
 //                                 1 unit per object of the world and per crate interaction, names
@@ -105,20 +117,21 @@
 //                                 unlock's asset and user data: 1 unit each before their lookups
 //   curves, poses, states         raw size of every array read; 1 unit per pose, state and pose info
 //                                 (follow_all), its inline structs included; a state's and a
-//                                 component's scalars() pass 1 + chain descriptors / 64
+//                                 component's scalars() pass 1 + chain descriptors / 8
 //   first_of / unlock loop        over the (<= 4096) collected components, charged once per pass
 //   unlock_targets                <= 4 hops; raw property connection count charged per hop; hub
 //                                 frontier lookups are hash probes; each target name copy charged
 //   specialization pairs          raw UnlockValues size; per pair, 1 unit plus the compared bytes
-//                                 per target
+//                                 per target, and the picked target's names copied by length
 //   field_name_of                 one lookup (binary search) per charged target
 // vehicle_def.cpp
 //   Layout::walk                  recursion, depth <= 32, at most 8192 components; raw Components
 //                                 size charged per visit
 //   seat / turret association     child tables built in one pass, then O(depth <= 33) per component
-//   seat sort, per-node readers   1 unit per node per pass, names by length; each node was charged
-//                                 by the walk (follow_all), the blueprint, entity, config, body and
-//                                 camera 1 unit each before their lookups
+//   seat sort, per-node readers   kNodePasses (8) units per node for the passes after the walk
+//                                 (each with O(depth) association steps), names by length; each node
+//                                 was charged by the walk (follow_all), the blueprint, entity,
+//                                 config, body and camera 1 unit each before their lookups
 // ebx.cpp (core, reached through every lookup above; the parser of the level track)
 //   EbxStruct::get, lookup        binary search in the type's flattened, hash-sorted chain table
 //   EbxPartition::enumerator      binary search over the enum's (value, field) pairs
@@ -492,7 +505,13 @@ std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field)
 	return partition.decode(found->first_field, size_t(data.offset()) + found->first_offset);
 }
 
-Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget) {
+Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget,
+		size_t *r_scanned) {
+	const auto scanned = [&](size_t p_entries) {
+		if (r_scanned != nullptr) {
+			*r_scanned += p_entries;
+		}
+	};
 	const std::optional<EbxValue> auto_load = p_reference.get("AutoLoad");
 	if (!auto_load || !auto_load->as_bool().value_or(false)) {
 		return false;
@@ -513,6 +532,7 @@ Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_ref
 	// Every entry is charged before the scan, null and unresolvable ones included: one reference
 	// can be placed any number of times, and its settings array shared by any number of them.
 	BF3_TRY(r_budget.charge(list->size()));
+	scanned(list->size());
 	for (const EbxValue entry : *list) {
 		const std::optional<EbxRef> r = entry.as_ref();
 		const std::optional<EbxInstance> resolved = r ? p_db.resolve(settings->partition(), *r) : std::nullopt;
@@ -534,6 +554,7 @@ Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_ref
 		const std::optional<EbxValue> options = setting.get("EnabledOptions");
 		if (const OptionalEbxArray array = options ? options->as_array() : OptionalEbxArray()) {
 			BF3_TRY(r_budget.charge(array->size()));
+			scanned(array->size());
 			for (const EbxValue option : *array) {
 				const std::optional<std::string_view> text = option.as_str();
 				if (text && iequals_ascii(*text, p_mode)) {
@@ -699,11 +720,11 @@ private:
 	Status enter_subworld(const EbxInstance &p_reference, uint32_t p_scope, uint32_t p_depth) {
 		const std::optional<EbxValue> bundle = p_reference.get("BundleName");
 		const std::string_view name = bundle ? bundle->as_str().value_or(std::string_view()) : std::string_view();
-		// The inclusion test charges the budget itself (before each array scan); its work also
-		// counts as walk steps.
-		const size_t before = budget_.used();
-		const Result<bool> included = subworld_included(world_.db(), p_reference, options_.mode, budget_);
-		BF3_TRY(count(budget_.used() - before));
+		// The inclusion test charges the budget itself (before each array scan); the array entries
+		// it scans also count as walk steps.
+		size_t scanned = 0;
+		const Result<bool> included = subworld_included(world_.db(), p_reference, options_.mode, budget_, &scanned);
+		BF3_TRY(count(scanned));
 		if (!included) {
 			return included.error();
 		}
@@ -953,11 +974,19 @@ bool LogicWorld::query_step(size_t &r_steps) const {
 	return budget_->take(1);
 }
 
+// The three resolvers below recurse with a depth that drops by one per source_value. A call at depth
+// 0 would answer nothing and charge nothing, so none is made: each caller tests the depth first, and
+// every call that runs charges its query_step before anything else. Each loop iteration over
+// property_into() also charges one unit itself before its callee runs, so no iteration is free
+// whatever the callee does (the round 7 repro: M feeds of a depth-1 leaf, reached 2^16 times).
 std::optional<PropertyValue> LogicWorld::property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth, size_t &r_steps) const {
 	if (p_depth == 0 || !query_step(r_steps)) {
 		return std::nullopt;
 	}
 	const uint32_t depth = p_depth - 1;
+	if (depth == 0) {
+		return std::nullopt; // its sources would be asked at depth 0
+	}
 	const EbxInstance blueprint = p_frame.child ? p_frame.blueprint : scopes_[p_frame.scope].blueprint;
 	const std::optional<uint32_t> set_at = connection_set(blueprint);
 	if (!set_at) {
@@ -966,8 +995,9 @@ std::optional<PropertyValue> LogicWorld::property_in(const Frame &p_frame, const
 	// A deque keeps `set` (and the index the span views) valid while source_value adds sets.
 	const LogicConnections &set = sets_[*set_at];
 	for (const uint32_t at : set.property_into(p_target, p_field)) {
-		// Many connections may feed one field: stop as soon as the next step would fail.
-		if (query_spent(r_steps)) {
+		// Many connections may feed one field: each is charged, and the loop stops as soon as the
+		// next step would fail.
+		if (query_spent(r_steps) || !budget_->take(1)) {
 			return std::nullopt;
 		}
 		const LogicConnection connection = set.property[at];
@@ -989,10 +1019,11 @@ std::optional<PropertyValue> LogicWorld::source_value(const Frame &p_frame, cons
 		return std::nullopt;
 	}
 	if (const std::optional<EbxInstance> descriptor = db_->follow(blueprint.data(), "Descriptor"); descriptor && *descriptor == p_source) {
-		return interface_in(p_frame, p_field, depth, r_steps);
+		return depth > 0 ? interface_in(p_frame, p_field, depth, r_steps) : std::nullopt;
 	}
-	// A child prefab's or sub-world's output port: continue inside it from its interface.
-	{
+	// A child prefab's or sub-world's output port: continue inside it from its interface (its feeds
+	// are asked at `depth`, so at 0 there is nothing to ask).
+	if (depth > 0) {
 		const std::optional<EbxInstance> inner = referenced_blueprint(p_source);
 		if (inner && !budget_->take_type(inner->data())) { // its Descriptor lookup
 			return std::nullopt;
@@ -1010,7 +1041,7 @@ std::optional<PropertyValue> LogicWorld::source_value(const Frame &p_frame, cons
 			}
 			const LogicConnections &set = sets_[*set_at];
 			for (const uint32_t at : set.property_into(*descriptor, p_field)) {
-				if (query_spent(r_steps)) {
+				if (query_spent(r_steps) || !budget_->take(1)) {
 					return std::nullopt;
 				}
 				const LogicConnection connection = set.property[at];
@@ -1020,8 +1051,10 @@ std::optional<PropertyValue> LogicWorld::source_value(const Frame &p_frame, cons
 			}
 		}
 	}
-	if (std::optional<PropertyValue> v = property_in(p_frame, p_source, p_field, depth, r_steps)) {
-		return v;
+	if (depth > 0) {
+		if (std::optional<PropertyValue> v = property_in(p_frame, p_source, p_field, depth, r_steps)) {
+			return v;
+		}
 	}
 	const std::optional<EbxValue> field = data_field(p_source, p_field);
 	return field ? std::optional<PropertyValue>(PropertyValue::of_field(*field)) : std::nullopt;

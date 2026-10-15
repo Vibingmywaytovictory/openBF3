@@ -446,6 +446,8 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 						pick = t;
 					}
 				}
+				// Many pairs may pick one target: each copy of its names is charged.
+				BF3_TRY(budget.charge_bytes(targets[pick].type.size() + targets[pick].field.size()));
 				spec.target_type = targets[pick].type;
 				spec.target_field = targets[pick].field;
 			}

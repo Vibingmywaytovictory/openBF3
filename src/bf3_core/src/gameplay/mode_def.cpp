@@ -462,6 +462,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	out.scopes = world.scopes().size();
 	out.objects = world.objects().size();
 	out.walk_steps = world.stats().walk_steps;
+	BF3_TRY(budget.charge(world.scopes().size()));
 	for (uint32_t s = 0; s < world.scopes().size(); ++s) {
 		out.unresolved_connections += world.connections(s).unresolved;
 	}

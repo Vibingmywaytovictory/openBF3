@@ -19,6 +19,7 @@ namespace {
 
 constexpr size_t kMaxDepth = 32;
 constexpr size_t kMaxComponents = 8192;
+constexpr size_t kNodePasses = 8; // full passes over the nodes after the walk, rounded up
 
 enum class Role : uint8_t { Other, Chassis, Seat, Turret, Weapon, Camera };
 
@@ -255,8 +256,10 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	Layout layout;
 	layout.walk(budget, p_db, *entity, -1, 0);
 	out.components = layout.nodes.size();
-	// Each pass below looks at every node once (the nodes were charged by the walk); charge the passes.
-	BF3_TRY(budget.charge(4 * layout.nodes.size()));
+	// Each pass below looks at every node at most once, with O(kMaxDepth) association steps per node
+	// (the nodes were charged by the walk); charge the passes: index_children, the chassis, seat,
+	// seat-key, turret and weapon/camera passes (the seat sort is n log n of these).
+	BF3_TRY(budget.charge(kNodePasses * layout.nodes.size()));
 	layout.index_children();
 
 	for (const Node &node : layout.nodes) {

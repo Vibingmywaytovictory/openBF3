@@ -31,8 +31,9 @@ public:
 	static constexpr size_t kDefaultLimit = 1000000;
 	// String bytes one unit pays for.
 	static constexpr size_t kBytesPerUnit = 64;
-	// Descriptors one unit of a fields() pass pays for (see charge_fields).
-	static constexpr size_t kFieldsPerUnit = 64;
+	// Descriptors one unit of a fields() pass pays for (see charge_fields): each is a decode (for an
+	// enum, a binary search), so a unit buys about as much work as one examination.
+	static constexpr size_t kFieldsPerUnit = 8;
 
 	explicit WorkBudget(size_t p_limit = kDefaultLimit) :
 			limit_(p_limit) {}
