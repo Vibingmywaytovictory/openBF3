@@ -65,7 +65,7 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 
-S4 logic: `ctest -R "s4|logic"` runs `s4.contract` (level-logic headers and type table, no data); see "S4 level logic" below.
+S4 logic: `ctest -R "s4|logic"` runs `s4.contract`, `logic.unit` and `logic.fuzz` (no data) and the install gates `logic.metro`, `logic.types`, `logic.caspian`, `logic.perf` (RUN_SERIAL) and `logic.census` (exit 77 without an install); see "S4 level logic" below.
 
 ## Run
 
@@ -1159,16 +1159,21 @@ Gates (each one ctest, run as `ctest --preset dev -R "^logic\.metro$"` and so on
 without an install, found as in "Install location" above; timing is wall clock on a shared machine, so only
 percentiles and generous maxima are gated):
 
-| gate | ctest | pass threshold |
-|---|---|---|
-| G1 Metro RushLarge0 full graph | `logic.metro` | builds; 549 scopes, 7,299 objects, 145 SyncedBool, 0 unknown / unimplemented connected nodes, 0 unbound event edges, work <= 1 M |
-| G2 Rush spawners in base order | `logic.metro` | 8 spawners open as 4 Team1+Team2 groups, group g between base g-1's and base g's fall |
-| G3 park event | `logic.metro` | park SyncedBool SetTrue exactly 600 ticks after base 1 falls |
-| G4 determinism | `logic.metro` | 2 in-process runs and 1 `bf3dump logic trace` run: equal trace hashes |
-| G5 0 unknown types | `logic.types` | 14 Metro + Caspian rows: 0 unknown, 0 unimplemented connected server nodes (unconnected ones are info) |
-| G6 Caspian CQL timeline | `logic.caspian` | the 10 spawners of docs/design/s4.md §9.2 (6 capture-gated, 4 constant jets) have the table's Enabled values at ticks 1/601/1,201/1,801/2,401 and no other change |
-| G7 cost | `logic.perf` | p99 <= 100 us over all ticks, p99 <= 500 us over busy ticks, max <= 20 ms incl. tick 0, < 10,000 deliveries and no carry-over per tick |
-| I1 census (info) | `logic.census` | all 230 rows listed |
+| gate | ctest | pass threshold | measured 2026-10-15 |
+|---|---|---|---|
+| G1 Metro RushLarge0 full graph | `logic.metro` | builds; 549 scopes, 7,299 objects, 145 SyncedBool, 0 unknown / unimplemented connected nodes, 0 unbound event edges, work <= 1 M | met: 549 / 7,299 / 145, 0 / 0, 0 unbound event edges, 4,841 params equal `LogicWorld::effective`, work 95,181, build 13 ms |
+| G2 Rush spawners in base order | `logic.metro` | 8 spawners open as 4 Team1+Team2 groups, group g between base g-1's and base g's fall | met: bases fall at 3,661 / 9,067 / 14,473 / 19,879, groups open at 62 / 3,668 / 9,074 / 14,480 and close at fall + 1,802 |
+| G3 park event | `logic.metro` | park SyncedBool SetTrue exactly 600 ticks after base 1 falls | met: SetTrue at 4,261 = 3,661 + 600 |
+| G4 determinism | `logic.metro` | 2 in-process runs and 1 `bf3dump logic trace` run: equal trace hashes | met: 843761c3205e74bb, 11,386 records, all three |
+| G5 0 unknown types | `logic.types` | 14 Metro + Caspian rows: 0 unknown, 0 unimplemented connected server nodes (unconnected ones are info) | met on all 14 rows |
+| G6 Caspian CQL timeline | `logic.caspian` | the 10 spawners of docs/design/s4.md §9.2 (6 capture-gated, 4 constant jets) have the table's Enabled values at ticks 1/601/1,201/1,801/2,401 and no other change | met: 10 of 10, 0 stray changes |
+| G7 cost | `logic.perf` | p99 <= 100 us over all ticks, p99 <= 500 us over busy ticks, max <= 20 ms incl. tick 0, < 10,000 deliveries and no carry-over per tick | met (noisy, shared machine): p99 0.3 us, busy p99 12.1 us, max 194 us (tick 0), 418 deliveries max, 0 carry-over |
+| I1 census (info) | `logic.census` | all 230 rows listed | 230 of 230 build and run; 0 connected unknown types anywhere; unimplemented connected types on 96 rows (25 types) |
 
-Today only `s4.contract` exists (headers compile together, port ids, the type table); the rest lands with the
-implementation. `bf3dump logic instantiate|stats|run|trace|census` will print the same numbers.
+One command per gate: `ctest --preset dev -R "^logic\.metro$"` (G1-G4), `-R "^logic\.types$"` (G5),
+`-R "^logic\.caspian$"` (G6), `-R "^logic\.perf$"` (G7), `-R "^logic\.census$"` (I1); the same numbers from
+`bf3dump logic stats MP_Subway RushLarge0`, `bf3dump logic run MP_Subway RushLarge0 --script rush` (G2/G3 verdicts),
+`bf3dump logic trace MP_Subway RushLarge0 --script rush` (G4 hash), `bf3dump logic run MP_007 ConquestLarge0
+--script conquest` (G6) and `bf3dump logic census [LEVEL...] [--out FILE]` (I1/G5 TSV). `logic.fuzz` is meant for
+`ctest --preset asan`. Full results, the as-built semantics (round start forced at tick 1, silent init settle) and
+the fallback rule are in docs/design/s4.md §1.1, §7, §9.1 and §14.
