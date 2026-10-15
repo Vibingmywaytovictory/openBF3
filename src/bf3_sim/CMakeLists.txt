@@ -76,4 +76,6 @@ target_sources(bf3_sim PRIVATE
     src/weapons/shooting_range.cpp
     include/bf3/sim/weapons/weapon_checks.h
     src/weapons/weapon_checks.cpp
+    include/bf3/sim/weapons/weapon_install.h
+    src/weapons/weapon_install.cpp
 )

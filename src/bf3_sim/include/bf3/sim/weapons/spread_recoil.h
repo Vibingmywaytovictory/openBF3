@@ -46,7 +46,8 @@ struct SwayContext {
 Dispersion effective_dispersion(const WeaponSimDef &p_def, const SwayContext &p_context);
 Recoil effective_recoil(const WeaponSimDef &p_def, const SwayContext &p_context);
 
-// Spread after p_elapsed units of decay from p_spread (never below the minimum, never above the maximum).
+// Spread after p_elapsed units of decay from p_spread (never below the minimum, never above the maximum). A negative
+// DecreasePerSecond (a signed sway modifier in data, M2a weapons) grows it toward the maximum instead.
 float decay_spread(float p_spread, const Dispersion &p_dispersion, SimTime p_elapsed);
 // The spread a state change starts from (Mechanics::min_spread_rise; Immediate: max(p_spread, new minimum)).
 float enter_spread(float p_spread, const Dispersion &p_new, const Mechanics &p_mechanics);

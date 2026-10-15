@@ -101,13 +101,17 @@ public:
 		angle(p_d.increase_per_shot, p_field + ".IncreasePerShot");
 		rate(p_d.decrease_per_second, p_field + ".DecreasePerSecond");
 	}
+	// Sway modifiers are signed in data: the suppression DecreasePerSecondModifier of xp2_hk417, xp2_l86 and xp2_lsat
+	// is -10 [verified, sim.weapons W4 2026-10-15]. So the bound is |m| <= 10,000;
+	// spread_recoil.h clamps the effective MinAngle, MaxAngle and IncreasePerShot at 0, and a negative decrease makes
+	// the spread grow toward MaxAngle while the modifier holds [unmeasured].
 	void modifier(const SwayModifier &p_m, const std::string &p_field) {
-		factor(p_m.min_angle, p_field + ".MinAngleModifier");
-		factor(p_m.max_angle, p_field + ".MaxAngleModifier");
-		factor(p_m.increase_per_shot, p_field + ".IncreasePerShotModifier");
-		factor(p_m.decrease_per_second, p_field + ".DecreasePerSecondModifier");
-		factor(p_m.recoil_magnitude, p_field + ".RecoilMagnitudeModifier");
-		factor(p_m.recoil_angle, p_field + ".RecoilAngleModifier");
+		range(p_m.min_angle, -kMaxFactor, kMaxFactor, p_field + ".MinAngleModifier");
+		range(p_m.max_angle, -kMaxFactor, kMaxFactor, p_field + ".MaxAngleModifier");
+		range(p_m.increase_per_shot, -kMaxFactor, kMaxFactor, p_field + ".IncreasePerShotModifier");
+		range(p_m.decrease_per_second, -kMaxFactor, kMaxFactor, p_field + ".DecreasePerSecondModifier");
+		range(p_m.recoil_magnitude, -kMaxFactor, kMaxFactor, p_field + ".RecoilMagnitudeModifier");
+		range(p_m.recoil_angle, -kMaxFactor, kMaxFactor, p_field + ".RecoilAngleModifier");
 		finite(p_m.lag_yaw, p_field + ".LagYawModifier");
 		finite(p_m.lag_pitch, p_field + ".LagPitchModifier");
 	}

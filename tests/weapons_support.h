@@ -7,14 +7,19 @@
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/shooting_range.h"
 #include "bf3/sim/weapons/surface_materials.h"
+#include "bf3/sim/weapons/weapon_sim.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -387,6 +392,166 @@ inline std::unique_ptr<bf3::sim::CollisionWorld> wall_world(std::vector<float> p
 	bf3::core::Result<std::unique_ptr<bf3::sim::CollisionWorld>> w = bf3::sim::CollisionWorld::create(*shapes);
 	REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
 	return std::move(*w);
+}
+
+// One upright capsule target (a == b: a sphere).
+inline sw::HitTarget capsule_target(uint32_t p_id, const bf3::sim::Vec3 &p_a, const bf3::sim::Vec3 &p_b, float p_radius, sw::HitZone p_zone) {
+	sw::HitTarget t;
+	t.id = p_id;
+	t.capsule_count = 1;
+	t.capsules[0].a = p_a;
+	t.capsules[0].b = p_b;
+	t.capsules[0].radius = p_radius;
+	t.capsules[0].zone = p_zone;
+	t.bound_center = { 0.5f * (p_a[0] + p_b[0]), 0.5f * (p_a[1] + p_b[1]), 0.5f * (p_a[2] + p_b[2]) };
+	const float dx = p_b[0] - p_a[0], dy = p_b[1] - p_a[1], dz = p_b[2] - p_a[2];
+	t.bound_radius = 0.5f * std::sqrt(dx * dx + dy * dy + dz * dz) + p_radius + 1e-3f;
+	return t;
+}
+
+// Six capsules spread over the first 35 m of the +Z line of fire (the random runs' targets).
+inline std::vector<sw::HitTarget> random_run_targets() {
+	std::vector<sw::HitTarget> targets;
+	for (int i = 0; i < 6; ++i) {
+		const float x = float(i) - 2.5f, z = 10.0f + 5.0f * float(i);
+		targets.push_back(capsule_target(uint32_t(i), { x, 1.0f, z }, { x, 1.8f, z }, 0.25f, sw::HitZone(i % 4)));
+	}
+	return targets;
+}
+
+// W8's random-command run: p_ticks seeded random commands and contexts on the loadout {p_def, p_other, empty}, every
+// shot spawned into a bounded ProjectileWorld over p_world and p_targets, every invariant counted.
+struct RandomRun {
+	size_t shots = 0;
+	size_t violations = 0;
+	std::string first_violation;
+	uint32_t worst_shots = 0;
+	uint32_t worst_timed = 0;
+	size_t peak_live = 0;
+	size_t exhausted = 0; // steps that hit the budget (allowed: the rest waits for the next tick)
+	uint32_t refused = 0; // WeaponTickOutput::refused_shots (always 0 for a valid def)
+	uint32_t dropped = 0; // WeaponTickOutput::timed_dropped (always 0)
+	uint32_t events = 0;
+
+	void add(const RandomRun &p_r) {
+		shots += p_r.shots;
+		violations += p_r.violations;
+		if (first_violation.empty()) {
+			first_violation = p_r.first_violation;
+		}
+		worst_shots = std::max(worst_shots, p_r.worst_shots);
+		worst_timed = std::max(worst_timed, p_r.worst_timed);
+		peak_live = std::max(peak_live, p_r.peak_live);
+		exhausted += p_r.exhausted;
+		refused += p_r.refused;
+		dropped += p_r.dropped;
+		events |= p_r.events;
+	}
+};
+
+inline sw::BallisticsLimits random_run_limits() {
+	sw::BallisticsLimits limits;
+	limits.max_projectiles = 48;
+	limits.budget_per_step = 20'000;
+	return limits;
+}
+
+inline RandomRun random_run(const std::shared_ptr<const sw::WeaponTable> &p_table, uint16_t p_def, uint16_t p_other, uint32_t p_seed,
+		const bf3::sim::CollisionWorld &p_world, const sw::HitTargetProvider &p_targets, const sw::BallisticsLimits &p_limits = random_run_limits(),
+		uint32_t p_ticks = 600) {
+	using namespace bf3::sim;
+	RandomRun out;
+	auto violation = [&](bool p_bad, const char *p_what, uint32_t p_tick) {
+		if (p_bad) {
+			++out.violations;
+			if (out.first_violation.empty()) {
+				out.first_violation = std::string(p_what) + " at tick " + std::to_string(p_tick);
+			}
+		}
+	};
+	sw::SoldierWeaponsState st;
+	const uint16_t loadout[3] = { p_def, p_other, sw::kNoWeapon };
+	if (!sw::spawn_soldier_weapons(st, *p_table, loadout, 0, 0).ok()) {
+		violation(true, "spawn refused", 0);
+		return out;
+	}
+	sw::WeaponContext ctx;
+	ctx.eye_start = { 0, 1.6f, 0 };
+	ctx.eye_end = ctx.eye_start;
+	sw::WeaponTickOutput wout;
+	sw::ProjectileWorld pw(p_table, p_limits);
+	sw::ProjectileStepOutput pout;
+	std::mt19937 rng(p_seed);
+	uint8_t counter = 0;
+	bool held = false;
+	for (uint32_t i = 0; i < p_ticks; ++i) {
+		sw::WeaponInput in;
+		const uint32_t r = rng();
+		// Fire is held in runs (presses and releases at random); the rest changes rarely, so the run fires and still
+		// crosses every phase: mode changes, reload requests, switches (mostly back to the def under test, sometimes
+		// to the other def or the empty slot 2), sprints, deaths.
+		held = (r % 5) == 0 ? !held : held;
+		in.fire = held;
+		in.zoom = (r & 4) != 0;
+		in.reload = (r % 293) == 0;
+		counter = uint8_t(counter + ((r % 131) == 0 ? 1 + ((r >> 9) % 3) : 0));
+		in.fire_mode_counter = uint8_t(counter & 3);
+		const uint32_t pick = (r >> 12) % 20;
+		in.select_slot = (r % 113) == 0 ? uint8_t(pick < 12 ? 0 : (pick < 17 ? 1 : 2)) : uint8_t(0xFF);
+		ctx.sprinting = (r % 41) == 0;
+		ctx.alive = (r % 97) != 0;
+		ctx.yaw = uint16_t(r >> 16);
+		ctx.pitch = int16_t(int32_t((r >> 4) % 2001) - 1000);
+		ctx.sway.stance = sw::Stance((r >> 20) % 3);
+		ctx.sway.move = sw::SwayMove((r >> 22) % 6);
+		ctx.sway.zoom = in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
+		ctx.sway.suppressed = ((r >> 25) & 1) != 0;
+		Command c;
+		c.tick = st.tick + 1;
+		c.buttons = sw::with_weapon_input(0, in);
+		sw::step_soldier_weapons(*p_table, st, c, ctx, 1, wout);
+		violation(st.tick != c.tick, "the step did not advance", c.tick);
+		out.worst_shots = std::max<uint32_t>(out.worst_shots, wout.shot_count);
+		out.worst_timed = std::max<uint32_t>(out.worst_timed, wout.timed_count);
+		out.refused += wout.refused_shots;
+		out.dropped += wout.timed_dropped;
+		out.events |= wout.events;
+		for (const sw::WeaponSlotState &s : st.slots) {
+			if (s.def == sw::kNoWeapon) {
+				continue;
+			}
+			const sw::WeaponSimDef &sd = p_table->defs[s.def];
+			violation(s.magazine < 0 || s.magazine > sd.magazine_capacity, "magazine outside [0, capacity]", c.tick);
+			violation(s.reserve < 0, "negative reserve", c.tick);
+			violation(!std::isfinite(s.spread) || s.spread < 0, "spread not finite", c.tick);
+			violation(!std::isfinite(s.recoil.pitch) || !std::isfinite(s.recoil.yaw), "recoil not finite", c.tick);
+			violation(s.mode >= std::max<uint8_t>(1, sd.mode_count), "mode out of range", c.tick);
+		}
+		violation(wout.shot_count > sw::kMaxShotsPerTick, "more than 8 shots", c.tick);
+		violation(wout.timed_count > sw::kMaxTimedEventsPerTick, "more than 16 timed events", c.tick);
+		for (uint8_t k = 0; k < wout.shot_count && k < sw::kMaxShotsPerTick; ++k) {
+			const sw::ShotEvent &s = wout.shots[k];
+			const double len = std::sqrt(double(s.direction[0]) * s.direction[0] + double(s.direction[1]) * s.direction[1] + double(s.direction[2]) * s.direction[2]);
+			violation(!std::isfinite(len) || std::fabs(len - 1.0) > 1e-5, "shot direction not a unit vector", c.tick);
+			violation(!std::isfinite(s.origin[0]) || !std::isfinite(s.origin[1]) || !std::isfinite(s.origin[2]), "shot origin not finite", c.tick);
+			violation(s.time < sw::tick_start(c.tick) || s.time >= sw::tick_end(c.tick), "shot outside its tick", c.tick);
+			(void)pw.spawn(s); // refused when full: counted by the world
+		}
+		out.shots += wout.shot_count;
+		pout.clear();
+		pw.step(c.tick, p_world, p_targets, pout);
+		out.exhausted += pout.budget_exhausted ? 1 : 0;
+		violation(pout.budget_used > p_limits.budget_per_step + 64, "step budget overrun", c.tick);
+		violation(pw.live().size() > p_limits.max_projectiles, "live projectiles above the limit", c.tick);
+		out.peak_live = std::max(out.peak_live, pw.live().size());
+		for (const sw::Projectile &p : pw.live()) {
+			violation(!std::isfinite(p.position[0]) || !std::isfinite(p.position[1]) || !std::isfinite(p.position[2]), "projectile position not finite", c.tick);
+		}
+		for (const sw::DamageEvent &e : pout.damage) {
+			violation(!std::isfinite(e.amount) || e.amount < 0, "damage not finite", c.tick);
+		}
+	}
+	return out;
 }
 
 } // namespace bf3::test::weapons

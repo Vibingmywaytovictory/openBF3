@@ -127,20 +127,6 @@ WeaponInput fire(bool p_fire, bool p_zoom = true) {
 	return in;
 }
 
-HitTarget capsule_target(uint32_t p_id, const Vec3 &p_a, const Vec3 &p_b, float p_radius, HitZone p_zone) {
-	HitTarget t;
-	t.id = p_id;
-	t.capsule_count = 1;
-	t.capsules[0].a = p_a;
-	t.capsules[0].b = p_b;
-	t.capsules[0].radius = p_radius;
-	t.capsules[0].zone = p_zone;
-	t.bound_center = { 0.5f * (p_a[0] + p_b[0]), 0.5f * (p_a[1] + p_b[1]), 0.5f * (p_a[2] + p_b[2]) };
-	const float half = 0.5f * std::sqrt((p_b[0] - p_a[0]) * (p_b[0] - p_a[0]) + (p_b[1] - p_a[1]) * (p_b[1] - p_a[1]) + (p_b[2] - p_a[2]) * (p_b[2] - p_a[2]));
-	t.bound_radius = half + p_radius + 1e-3f;
-	return t;
-}
-
 ShotEvent level_shot(uint16_t p_def, const Vec3 &p_origin, SimTime p_time = 0, SimTime p_spawn_delay = 0, uint64_t p_seed = 1, uint32_t p_index = 0) {
 	ShotEvent s;
 	s.time = p_time;
@@ -356,6 +342,8 @@ TEST_SUITE("weapons-unit") {
 			{ "", [&](auto &w) { w.sway.state[1][1].recoil.up_per_shot = nan; } },
 			{ "", [](auto &w) { w.sway.state[2][0].move[1].decrease_per_second = 1e5f; } },
 			{ "", [](auto &w) { w.sway.first_shot_recoil_multiplier = -1; } },
+			{ "DecreasePerSecondModifier", [](auto &w) { w.sway.suppression[0].decrease_per_second = -1e5f; } },
+			{ "RecoilAngleModifier", [&](auto &w) { w.sway.suppression[1].recoil_angle = nan; } },
 			{ "", [](auto &w) { w.fire.weapon_dispersion[0].min_angle = 91; } },
 		};
 		const Synthetic &base = synthetic(kM16A3);
@@ -387,6 +375,20 @@ TEST_SUITE("weapons-unit") {
 		w.fire.bullets_per_burst = 32;
 		CHECK(make_weapon_sim_def(w, *materials).ok());
 		CHECK(make_weapon_sim_def(synthetic(k870).def, *materials).ok());
+		// A signed sway modifier as in data (the XP2 LMGs' suppression DecreasePerSecondModifier -10) is accepted; the
+		// spread then grows toward the maximum while suppressed and the cone's angles stay >= 0.
+		w = base.def;
+		w.sway.suppression[0].decrease_per_second = -10;
+		w.sway.suppression[0].min_angle = -2;
+		core::Result<WeaponSimDef> lmg = make_weapon_sim_def(w, *materials);
+		REQUIRE_MESSAGE(lmg.ok(), (lmg.ok() ? std::string() : lmg.error().message));
+		SwayContext supp;
+		supp.suppressed = true;
+		const Dispersion sd = effective_dispersion(*lmg, supp);
+		CHECK(sd.min_angle == 0.0f);
+		CHECK(sd.decrease_per_second < 0);
+		CHECK(decay_spread(1.0f, sd, kTimeUnitsPerSecond / 100) > 1.0f);
+		CHECK(decay_spread(1.0f, sd, kTimeUnitsPerSecond * 100) == sd.max_angle);
 		CHECK(make_weapon_sim_def(synthetic(kKnife).def, *materials).ok());
 	}
 
@@ -1048,90 +1050,24 @@ TEST_SUITE("weapons-unit") {
 
 	TEST_CASE("sim.weapons.unit: W8 600 random ticks per def: the state invariants and the projectile bounds") {
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
-		const float walls[2] = { 40.0f, 300.0f };
-		const std::unique_ptr<CollisionWorld> w = wall_world(std::vector<float>(walls, walls + 2));
-		std::vector<HitTarget> targets;
-		for (int i = 0; i < 6; ++i) {
-			targets.push_back(capsule_target(uint32_t(i), { float(i) - 2.5f, 1.0f, 10.0f + 5.0f * float(i) }, { float(i) - 2.5f, 1.8f, 10.0f + 5.0f * float(i) }, 0.25f,
-					HitZone(i % 4)));
-		}
-		const StaticTargets provider(targets);
-		BallisticsLimits limits;
-		limits.max_projectiles = 48;
-		limits.budget_per_step = 20'000;
-		size_t violations = 0, total_shots = 0, exhausted = 0;
-		uint32_t worst_shots = 0, worst_timed = 0;
-		size_t peak_live = 0;
+		const std::unique_ptr<CollisionWorld> w = wall_world({ 40.0f, 300.0f });
+		const StaticTargets provider(random_run_targets());
+		RandomRun all;
 		for (uint16_t def = 0; def < t->defs.size(); ++def) {
 			CAPTURE(t->defs[def].variant);
-			std::mt19937 rng(20261015u + def);
-			const uint16_t other = uint16_t((def + 1) % t->defs.size());
-			Driver d(t, { def, other, kNoWeapon });
-			ProjectileWorld pw(t, limits);
-			ProjectileStepOutput pout;
-			uint8_t counter = 0;
-			bool held = false;
-			for (uint32_t i = 0; i < 600; ++i) {
-				WeaponInput in;
-				const uint32_t r = rng();
-				// Fire is held in runs (presses and releases at random), the rest changes rarely, so the run fires a lot
-				// and still crosses every phase: mode changes, reload requests, switches (to empty slots too), sprints.
-				held = (r % 5) == 0 ? !held : held;
-				in.fire = held;
-				in.zoom = (r & 4) != 0;
-				in.reload = (r % 293) == 0;
-				counter = uint8_t(counter + ((r % 131) == 0 ? 1 + ((r >> 9) % 3) : 0));
-				in.fire_mode_counter = uint8_t(counter & 3);
-				// Switches: mostly back to the def under test, sometimes to the other def or the empty slot 2.
-				const uint32_t pick = (r >> 12) % 20;
-				in.select_slot = (r % 113) == 0 ? uint8_t(pick < 12 ? 0 : (pick < 17 ? 1 : 2)) : uint8_t(0xFF);
-				d.ctx.sprinting = (r % 41) == 0;
-				d.ctx.alive = (r % 97) != 0;
-				d.ctx.yaw = uint16_t(r >> 16);
-				d.ctx.pitch = int16_t(int32_t((r >> 4) % 2001) - 1000);
-				d.ctx.sway.stance = Stance((r >> 20) % 3);
-				d.ctx.sway.move = SwayMove((r >> 22) % 6);
-				d.ctx.sway.suppressed = ((r >> 25) & 1) != 0;
-				d.step(in);
-				worst_shots = std::max<uint32_t>(worst_shots, d.out.shot_count);
-				worst_timed = std::max<uint32_t>(worst_timed, d.out.timed_count);
-				for (const WeaponSlotState &s : d.st.slots) {
-					if (s.def == kNoWeapon) {
-						continue;
-					}
-					const WeaponSimDef &sd = t->defs[s.def];
-					const bool bad = s.magazine < 0 || s.magazine > sd.magazine_capacity || s.reserve < 0 || !std::isfinite(s.spread) || s.spread < 0 ||
-							!std::isfinite(s.recoil.pitch) || !std::isfinite(s.recoil.yaw) || s.mode >= std::max<uint8_t>(1, sd.mode_count);
-					violations += bad ? 1 : 0;
-				}
-				for (uint8_t k = 0; k < d.out.shot_count; ++k) {
-					const ShotEvent &s = d.out.shots[k];
-					const bool bad = !std::isfinite(s.direction[0]) || !std::isfinite(s.direction[1]) || !std::isfinite(s.direction[2]) ||
-							std::fabs(len3(s.direction) - 1.0) > 1e-5 || s.time < tick_start(d.st.tick) || s.time >= tick_end(d.st.tick);
-					violations += bad ? 1 : 0;
-					(void)pw.spawn(s);
-				}
-				total_shots += d.out.shot_count;
-				pout.clear();
-				pw.step(d.st.tick, *w, provider, pout);
-				exhausted += pout.budget_exhausted ? 1 : 0;
-				violations += pout.budget_used > limits.budget_per_step + 64 ? 1 : 0;
-				violations += pw.live().size() > limits.max_projectiles ? 1 : 0;
-				peak_live = std::max(peak_live, pw.live().size());
-				for (const DamageEvent &e : pout.damage) {
-					violations += (!std::isfinite(e.amount) || e.amount < 0) ? 1 : 0;
-				}
-			}
-			CHECK(d.refused == 0);
-			CHECK(d.dropped == 0);
-			std::printf("  %-36s %4zu shots, events %05x\n", t->defs[def].variant.c_str(), d.shots.size(), unsigned(d.all_events));
+			const RandomRun r = random_run(t, def, uint16_t((def + 1) % t->defs.size()), 20261015u + def, *w, provider);
+			CHECK(r.refused == 0);
+			CHECK(r.dropped == 0);
+			CHECK_MESSAGE(r.violations == 0, r.first_violation);
+			std::printf("  %-36s %4zu shots, events %05x\n", t->defs[def].variant.c_str(), r.shots, unsigned(r.events));
+			all.add(r);
 		}
 		std::printf("W8 random ticks: %zu defs x 600 ticks, %zu shots, worst %u shots / %u timed events per tick, peak %zu live, %zu budget-exhausted steps, "
 					"%zu violations\n",
-				t->defs.size(), total_shots, worst_shots, worst_timed, peak_live, exhausted, violations);
-		CHECK(violations == 0);
-		CHECK(worst_shots <= kMaxShotsPerTick);
-		CHECK(worst_timed <= kMaxTimedEventsPerTick);
-		CHECK(total_shots >= 200); // a floor: the run must fire (bolt rifles fire ~6 in 600 random ticks, automatics ~40)
+				t->defs.size(), all.shots, all.worst_shots, all.worst_timed, all.peak_live, all.exhausted, all.violations);
+		CHECK(all.violations == 0);
+		CHECK(all.worst_shots <= kMaxShotsPerTick);
+		CHECK(all.worst_timed <= kMaxTimedEventsPerTick);
+		CHECK(all.shots >= 200); // a floor: the run must fire (bolt rifles fire ~6 in 600 random ticks, automatics ~40)
 	}
 }

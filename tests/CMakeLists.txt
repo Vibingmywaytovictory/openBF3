@@ -387,3 +387,20 @@ set_tests_properties(sim.weapons.unit PROPERTIES TIMEOUT 300)
 if(OPENBF3_ASAN)
     set_tests_properties(sim.weapons.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
 endif()
+# M2a weapons on the install (read-only; exit 77 = skipped without one; every case prints install.unchanged):
+# sim.weapons (grid pairs, materials, the oracle rows on MP_Subway defs, W4's table), sim.weapons.range (Metro's
+# static world: W3 end to end, W5, W7, W9 on stand-ins), sim.weapons.fuzz (W8: mutated retail and synthetic blobs;
+# meant for asan too) and sim.weapons.perf (W11, wall clock, noisy: RUN_SERIAL, exits 77 when the file named by
+# OPENBF3_QUIET_LOCK exists).
+openbf3_test(test_weapons_install test_main.cpp weapons_install_tests.cpp weapons_range_tests.cpp weapons_install_support.h weapons_support.h test_support.h)
+target_link_libraries(test_weapons_install PRIVATE bf3_sim)
+add_test(NAME sim.weapons COMMAND test_weapons_install --test-suite=weapons)
+add_test(NAME sim.weapons.range COMMAND test_weapons_install --test-suite=weapons-range)
+add_test(NAME sim.weapons.fuzz COMMAND test_weapons_install --test-suite=weapons-fuzz)
+add_test(NAME sim.weapons.perf COMMAND test_weapons_install --test-suite=weapons-perf)
+set_tests_properties(sim.weapons sim.weapons.range sim.weapons.fuzz sim.weapons.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+set_tests_properties(sim.weapons.perf PROPERTIES RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    set_tests_properties(sim.weapons sim.weapons.range sim.weapons.fuzz sim.weapons.perf
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()

@@ -63,6 +63,11 @@ Dispersion effective_dispersion(const WeaponSimDef &p_def, const SwayContext &p_
 	const size_t m = std::min<size_t>(size_t(p_context.move), size_t(SwayMove::Count) - 1);
 	Dispersion d = st.has_move[m] ? st.move[m] : st.move[size_t(SwayMove::Base)];
 	apply_gated(d, p_def, p_context);
+	// Modifiers are signed in data (weapon_sim_def.cpp): the cone's angles and its growth never go below 0; the
+	// decrease keeps its sign (negative: the spread grows toward MaxAngle while the modifier holds [unmeasured]).
+	d.min_angle = std::max(0.0f, d.min_angle);
+	d.max_angle = std::max(0.0f, d.max_angle);
+	d.increase_per_shot = std::max(0.0f, d.increase_per_shot);
 	return d;
 }
 
@@ -74,10 +79,14 @@ Recoil effective_recoil(const WeaponSimDef &p_def, const SwayContext &p_context)
 
 float decay_spread(float p_spread, const Dispersion &p_dispersion, SimTime p_elapsed) {
 	float s = p_spread;
-	if (p_elapsed > 0 && s > p_dispersion.min_angle) {
+	const float top = std::max(p_dispersion.max_angle, p_dispersion.min_angle);
+	if (p_elapsed > 0 && p_dispersion.decrease_per_second < 0) {
+		// A negative decrease (a signed modifier in data) grows the spread toward the maximum.
+		s = std::min(top, s - p_dispersion.decrease_per_second * float(units_to_seconds(p_elapsed)));
+	} else if (p_elapsed > 0 && s > p_dispersion.min_angle) {
 		s = std::max(p_dispersion.min_angle, s - p_dispersion.decrease_per_second * float(units_to_seconds(p_elapsed)));
 	}
-	return std::min(s, std::max(p_dispersion.max_angle, p_dispersion.min_angle));
+	return std::max(0.0f, std::min(s, top));
 }
 
 float enter_spread(float p_spread, const Dispersion &p_new, const Mechanics &p_mechanics) {
