@@ -48,12 +48,14 @@ characters below the checkout (`b\release\gcpp\...plane_tracking.cpp.obj`), so k
 Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C++ exceptions off
 (`_HAS_EXCEPTIONS=0`). This covers godot-cpp, Jolt, ENet, Recast, libdeflate and doctest.
 
-`ctest` runs `core.guard`, `core.formats` (container and EBX readers on synthetic bytes), `core.install`,
-`core.fuzz`, `core.cache`, `core.cache_data`, `core.ant.unit`, `core.ant`, `core.res.unit`, `core.res`,
-`core.res.install`, `core.gameplay.unit`, `core.gameplay.weapons`, `core.gameplay.fuzz`, `core.gameplay.inspect.unit`,
-`core.gameplay.inspect`, `core.gameplay.tables.unit`, `core.gameplay.tables`, `core.ui.text.unit`, `core.ui.text`, `core.ui.text.fuzz`, `anim.unit`, `anim`, `render.unit`,
+`ctest` runs `core.guard`, `core.formats` (container and EBX readers on synthetic bytes), `core.install`, `core.fuzz`,
+`core.cache`, `core.cache_data`, `core.ant.unit`, `core.ant`, `core.res.unit`, `core.res`, `core.res.install`,
+`core.gameplay.unit`, `core.gameplay.weapons`, `core.gameplay.fuzz`, `core.gameplay.inspect.unit`,
+`core.gameplay.inspect`, `core.gameplay.tables.unit`, `core.gameplay.tables`, `core.level.collision.unit`,
+`core.level.collision`, `core.ui.text.unit`, `core.ui.text`, `core.ui.text.fuzz`, `anim.unit`, `anim`, `render.unit`,
 `render`, `sim.jolt`, `net.enet`, `host.server`, `tools.numtext` and, when `OPENBF3_GODOT` names the Godot console
-executable, the headless project checks `godot.s0_selftest`, `godot.inspector` and `godot.m9_reload`. The `*.unit`
+executable, the headless project checks `godot.s0_selftest`, `godot.inspector`, `godot.m9_reload` and
+`godot.collision`. The `*.unit`
 tests, `core.guard`, `core.formats` and `tools.numtext` need no data. The install tests report *Skipped* when no
 install is found; `core.cache_data` is skipped when `OPENBF3_CACHE_TESTDATA` is unset and `core.res` when
 `OPENBF3_RES_DATA` does not point at an exported resource sample (see "Resource decoders"; `core.res.install` covers
@@ -83,6 +85,8 @@ set "GODOT=C:\path\to\Godot_v4.8-dev7_win64_console.exe"
 "%GODOT%" --path bf3-opensource -- --inspector [--inspector-select=weapons/m16a4/u_m16_burst]
 "%GODOT%" --headless --path bf3-opensource -- --m0-inspector-check
 "%GODOT%" --headless --path bf3-opensource -- --inspect-weapon=weapons/m16a4/u_m16a4 [--unlock=u_m16a4_bipod]...
+:: Metro collision overlay (README "Collision overlay"); headless check: --headless ... -- --collision-check
+"%GODOT%" --path bf3-opensource res://scenes/metro_collision.tscn -- [--level=XP3_Alborz --mode=ConquestLarge0 --quit-after=10 --screenshot=C:\temp\coll.png]
 ```
 
 Known issue: on a project that has never been opened, the first `--import` registers the extension and writes
@@ -720,6 +724,102 @@ x2.75 below 36 deg, sides x1.8, disabled at 500, M1A2 ring lock 0.0001 and gun 0
 helicopters 5000 kg / 500 hp / disabled 170; jets 10000 kg, regen 18/s after 10 s; Humvee 1500 kg / 1.85; buggies
 800 / 1.65; RHIB 1000 / 1.25; C-RAM and Pantsir armour multiplier 99999. The tables read the data as it is: values the
 round logic changes at run time (which Rush bases are active, scripted ticket bleed) are not evaluated.
+
+## Collision overlay
+
+The M0 exit "Metro collision drawn as a debug overlay" (plan §6 M0): the collision a level starts with, read from
+the install by C++ at runtime and drawn in Godot, one mesh per 64 m tile. Three pieces, two of them Godot-free:
+
+* **Collision soup** (`bf3_core`, `include/bf3/core/level/collision_soup.h`; parts ported from IW4L `level_bf3`
+  `collision/` mod.rs, havok.rs and material.rs, Apache-2.0). `build_collision_soup` takes the traversal's
+  `collision_placements` (each static model group's `HavokPhysicsData` at the group transform, each mesh object's
+  physics asset prebaked closest to its scale). It lists objects the level starts hidden but does not build them,
+  loads each distinct res once on all cores, and walks each root shape's leaves (Mopp, List, ConvexTranslate,
+  ConvexTransform, ExtendedMesh shape subparts = group instances, then triangle subparts) through the
+  `res/havok.h` decoders. Pieces of 64 leaves run in parallel, then each placement is hashed in walk order. For
+  every triangle it keeps:
+  * the world-space corners;
+  * the `MaterialFlagsAndIndices` value;
+  * a surface class: the `RuntimeMaterialGrid` row voted from its assets' names, else the owner mesh's name, else
+    concrete;
+  * the rigid-body kind (collision, raycast, character).
+  A triangle whose part only a later health state shows is dropped (`destroyed`). Flags mark see-through
+  (material bit 27) and invisible blockers (mesh names with `invisible` / `collisionmesh`).
+* **Terrain** (`res/terrain.h`, port of the heightfield parts of IW4L `resource_bf3` terrain.rs). The `Terrain` res
+  names its `TerrainStreamingTree`. The tree's heightfield quadtree (embedded tiles, streamed lod0 chunks,
+  data-less and disabled nodes) becomes a `HeightGrid` with the Rust code's float order. The soup takes the first
+  depth whose spacing reaches 2 m (Metro: depth 2, 513² samples, 2 m; Alborz: depth 5, 4097², 2 m). It keeps every
+  cell whose centre lies in a tile that holds Havok triangles or touches one, unless a corner is a hole. Each cell
+  gives two triangles faced +Y, with surface dirt and flag `kSoupTerrain`. IW4L's near-area cap, flat-block
+  merging and paved decals are not ported.
+* Every corner is quantised to whole millimetres. Triangles with a non-finite or > 1e7 m coordinate are dropped
+  (`nonfinite`), and so are triangles with two equal corners (`degenerate`). The FNV-1a 64 of the nine values,
+  the material and the class bytes gives each placement a stream hash; tiles and the soup get a wrapping sum.
+  The tile is floor(centroid / 64 m) over X and Z. Bounds: the World's `WorkBudget` pays for the EBX reads, the
+  Havok decoders' own budgets bound the shapes, `kMaxSoupTriangles` = 2^25 bounds the soup, and the height grid
+  is limited to 4097 samples a side. A res that does not load marks its placement `Missing` and the soup goes on.
+* **`bf3_render`** `prepare_collision_meshes` builds one unindexed vertex array per (tile, layer) on the loader
+  thread. Corners are emitted (v0, v2, v1) because Godot's front faces are clockwise, with barycentric UVs for the
+  wireframe. Each face gets its surface colour, shaded by its facing to a fixed light and varied ±6 % per
+  placement. Character bodies are amber, invisible blockers magenta and terrain olive; see-through faces are
+  lighter. There are five layers: collision, raycast, character, invisible blockers, terrain.
+* **`bf3_godot`** `Bf3CollisionOverlay` (`collision_overlay.*`, scene `scenes/metro_collision.tscn`):
+  * A loader `std::thread` runs `load_level_collision` and the preparation while a label shows the stage.
+  * The main thread then creates one `RenderingServer` mesh and instance per prepared array, in 12 ms slices per
+    frame. They share one unshaded, double-sided `ShaderMaterial`: back faces at 55 %, and a barycentric wireframe
+    that fades out over 120 m.
+  * A free-fly camera starts at the first `AlternateSpawn` (TDM spawn) at eye height, else above the level centre.
+  * HUD: placements, triangles, terrain triangles, tiles and meshes, load + prepare + upload time, fps, position.
+  * Controls: WASD, Q/E, Shift ×6, wheel for speed; hold the right mouse button (or click, Esc releases) to look.
+    F3 cycles solid + wire, wire, solid. 1–5 toggle the layers, R goes back to the spawn, N to the next spawn,
+    T to a top view.
+  * User args: `--level`, `--mode` (default `MP_Subway` / `TeamDeathMatch0`), `--camera=x,y,z,yaw,pitch`,
+    `--view=spawn|top`, `--wire=0|1|2`, `--layers=<digits>`, `--quit-after`, `--screenshot`,
+    `--shots=<png>@x,y,z,yaw,pitch;...`, `--collision-check`, `--bf3-install`.
+
+`bf3dump collision <LEVEL> <MODE>` prints the soup in canonical form: sorted `T` lines per placement and terrain
+(state, counts, hash), `K` tiles (count, sum), then the totals and the surface and body histograms; timings go to
+stderr. **Parity**: `research/probes/tools/level-oracle collision <LEVEL> <MODE>` prints the same through IW4L's
+own crates (`HavokPhysicsData::shapes`, `resource_bf3::triangles`, `level_bf3::collision::Materials`,
+`TerrainStreamingTree::height_grid`). Result on 2026-10-15: all 230 level x mode runs of the 29 MP levels are
+byte-identical. That covers every placement hash, every tile sum and the 199 terrain grids (depth 2-5); MP_011 and the
+four Close Quarters levels have no terrain. No res was missing and no triangle was non-finite. The largest soup is
+XP3_Shield RushLarge0 with 4.01 M triangles (2.70 M of them terrain). The most work-budget units any run spent was
+209,790 of 4,194,304.
+
+| level x mode | placements | triangles (terrain) | destroyed | degenerate | tiles | sum | time |
+|---|---|---|---|---|---|---|---|
+| MP_Subway TeamDeathMatch0 | 2,122 (119 res) | 1,114,171 (174,080) | 72,733 | 34 | 170 | `2f7addcdc0b29fac` | 0.54 s |
+| XP3_Alborz ConquestLarge0 | 519 (56 res) | 3,992,285 (1,331,200) | 56,015 | 0 | 650 | `b6df96c3401645bf` | 1.70 s |
+
+Metro's bodies: 969,031 collision (174,080 of them terrain), 142,908 raycast, 2,232 character; all 32,400 material
+grid pairs resolve.
+
+**Check** (`-- --collision-check`; ctest `godot.collision` runs it when `OPENBF3_GODOT` names the console exe and
+skips with 77 otherwise or without an install). It prints a PASS/FAIL table and exits 0 or 1. Rows:
+* load: nothing missing or non-finite, the terrain built;
+* godot_free.recompute: a second `load_level_collision` gives the same placement hashes, terrain hashes and totals;
+* oracle: the level-oracle numbers above;
+* meshes: one valid mesh with one surface per (tile, layer) slot, 3 × the slot's triangles as vertices
+  (3,342,513 for Metro), the soup's first and last triangle bit for bit as (v0, v2, v1), the shared material;
+* tiles: every tile has its meshes and instances;
+* camera: starts at spawn 1;
+* install.unchanged: sizes and mtimes of the 256 index files.
+`core.level.collision.unit` covers synthetic shapes, the word table, hashes, mirrored frames, deep trees and a
+synthetic terrain tree, plus 3,000 bit-flipped trees and every truncation. `core.level.collision` checks Metro and
+Alborz against the oracle numbers and feeds 32 mutated group res through the soup.
+
+Measured (dev build, 16 threads, RX 9070 XT, D3D12, 1152×648, warm file cache, idle machine):
+* `bf3dump collision` totals. Metro TDM: 0.54 s (mount 0.15, traverse 0.03, soup 0.36: decode 0.04, triangles 0.22,
+  terrain 0.04, tiles 0.04). Alborz CQL: 1.70 s (soup 1.53: decode 0.20, triangles 0.70, terrain 0.42). XP3_Shield
+  TDM-CQ: 1.30 s.
+* In Godot, Metro: load 0.57 s, prepare 0.02 s and upload 0.07 s on the main thread for 376 meshes.
+* Frame time is pinned at the 180 Hz vsync (5.56 ms) both at the spawn and in the top view. Viewport CPU/GPU: spawn
+  0.13 / 0.38 ms (0.29 M primitives, 89 draw calls); top view with everything in sight 0.26 / 0.79 ms (1.12 M
+  primitives, 381 draw calls).
+* Alborz CQL in the same scene (`--level=XP3_Alborz --mode=ConquestLarge0`): load 1.75 s, upload 0.20 s for 1,168
+  meshes, top view 0.72 / 1.58 ms for 3.98 M primitives.
+* ASan: `core.level.collision` takes about 11 min (the 32 mutants about 9), so its timeout there is 1,800 s.
 
 ## Layout and pinned third-party code
 

@@ -38,6 +38,8 @@
 //   level <LEVEL> <MODE> [--legacy-mvdb]  canonical placement listing of one level x mode
 //                              (level_commands.cpp; parity with research/probes/tools/level-oracle)
 //   levelmodes <LEVEL>         the modes a level offers
+//   collision <LEVEL> <MODE>   the collision soup: placements, tiles, hashes (collision_commands.cpp;
+//                              parity with research/probes/tools/level-oracle collision)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -55,6 +57,7 @@
 #include "gameplay_commands.h"
 #include "json_number.h"
 #include "level_commands.h"
+#include "collision_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -478,7 +481,8 @@ void usage() {
 			"  weapons [--level <sb>]\n"
 			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n"
 			"  level <LEVEL> <MODE> [--legacy-mvdb]\n"
-			"  levelmodes <LEVEL>\n");
+			"  levelmodes <LEVEL>\n"
+			"  collision <LEVEL> <MODE>\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 }
 
@@ -576,6 +580,9 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (const int rc = bf3dump::dispatch_gameplay(ebx_ctx, cmd, rest); rc >= 0) {
 		return rc;
+	}
+	if (cmd == "collision" && rest.size() == 2) {
+		return bf3dump::cmd_collision(ctx.install, rest[0], rest[1]);
 	}
 	usage();
 	return 2;

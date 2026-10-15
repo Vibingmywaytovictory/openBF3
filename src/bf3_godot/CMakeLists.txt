@@ -26,6 +26,13 @@ target_sources(bf3_godot PRIVATE
     src/m0_inspector_check.cpp
     src/m0_inspector_check.h
 )
+# Metro collision debug overlay (M0 exit) and its headless check (README "Collision overlay").
+target_sources(bf3_godot PRIVATE
+    src/collision_overlay.cpp
+    src/collision_overlay.h
+    src/collision_check.cpp
+    src/collision_check.h
+)
 target_link_libraries(bf3_godot PRIVATE godot-cpp bf3_host bf3_core bf3_sim bf3_net bf3_anim bf3_render)
 openbf3_module(bf3_godot)
 # No incremental linking: keeps the .ilk out of the project's bin/ and the DLL self-contained.
