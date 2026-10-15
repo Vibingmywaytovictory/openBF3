@@ -366,3 +366,13 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
         set_tests_properties(tools.ebx_memory PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hymem_cl_dir}")
     endif()
 endif()
+
+# UI ui2 (docs/design/ui-minimap-icons.md §13): ui2.contract compiles the minimap / HUD icon / HUD model headers
+# together and checks the binding-row counts and the inline mapping, view and icon helpers; no data, no Godot.
+openbf3_test(test_ui2_contract test_main.cpp ui2_contract_tests.cpp)
+target_link_libraries(test_ui2_contract PRIVATE bf3_core)
+add_test(NAME ui2.contract COMMAND test_ui2_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui2.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui2_cl_dir}")
+endif()

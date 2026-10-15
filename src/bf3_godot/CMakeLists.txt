@@ -72,3 +72,14 @@ target_sources(bf3_godot PRIVATE
     src/m1_check.h
 )
 target_link_libraries(bf3_godot PRIVATE psapi)
+
+# UI ui2 (docs/design/ui-minimap-icons.md §10, §12): the in-game minimap node's interfaces (Bf3MinimapHud,
+# Bf3MinimapControl, Bf3WorldIcons, MinimapCheck). Headers only in this wave: ui2_header_check.cpp compiles them; the
+# classes are registered (register_types.cpp "// UI ui2") when their .cpp files land (design §15).
+target_sources(bf3_godot PRIVATE
+    src/minimap_hud.h
+    src/minimap_control.h
+    src/world_icons.h
+    src/minimap_check.h
+    src/ui2_header_check.cpp
+)
