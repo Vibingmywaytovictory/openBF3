@@ -121,6 +121,7 @@ struct VehicleCorrectionReport {
 
 struct VehicleCourseReport {
 	VehicleCourse course;
+	uint32_t ticks = 0; // the run's length (VehicleReplayOptions::ticks); G1 needs g1_ticks == ticks
 	// G1
 	uint32_t g1_ticks = 0;
 	uint32_t g1_mismatches = 0;
@@ -206,6 +207,7 @@ bool vehicle_gate_g2(const std::vector<VehicleCourseReport> &p_reports, std::str
 
 struct VehicleGroupReport {
 	uint32_t vehicles = 0;
+	uint32_t ticks = 0; // the run's length (VehicleReplayOptions::ticks)
 	uint32_t g1_ticks = 0;
 	uint32_t g1_mismatches = 0;
 	VehicleDivergence g1_first; // field prefixed "slot<i>." for a VehicleState difference
@@ -226,6 +228,11 @@ struct VehicleGroupReport {
 core::Result<VehicleGroupReport> run_vehicle_group(std::shared_ptr<const StaticWorldShapes> p_shapes, std::shared_ptr<const VehicleModel> p_model,
 		std::span<const VehicleCourse> p_courses, const VehicleReplayOptions &p_options = {});
 bool vehicle_gate_g1m(const VehicleGroupReport &p_report, std::string *r_why = nullptr);
+
+// Human-readable report blocks (the tests and bf3dump vehicle-replay print the same text): the course, the activity
+// facts and gate D, G1 / G1r, G2 per mode and replay length (max / p99 / mean per subset), steps and seconds.
+std::string format_vehicle_course_report(const VehicleCourseReport &p_report);
+std::string format_vehicle_group_report(const VehicleGroupReport &p_report);
 
 // ---- handling numbers (reported, unverified placeholders for S5 Session 2) ------------------------------------
 

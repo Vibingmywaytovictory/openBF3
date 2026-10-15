@@ -219,8 +219,10 @@ target_sources(bf3_core PRIVATE
 )
 
 # S2 vehicle (docs/design/s2.md §4, §12): the wheeled drive def of a VehicleBlueprint (component walk with composed
-# transforms) and the vehicle spawners of a level. Interfaces only until the S2 implementation adds the sources.
+# transforms) and the vehicle spawners of a level.
 target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/vehicle_drive.h
     include/bf3/core/level/vehicle_spawns.h
+    src/gameplay/vehicle_drive.cpp
+    src/level/vehicle_spawns.cpp
 )

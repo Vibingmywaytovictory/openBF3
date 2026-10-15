@@ -92,17 +92,25 @@ struct VehicleGhostCodes {
 	uint32_t steer_filter = 0, throttle_filter = 0, brake_filter = 0;
 	uint32_t stand_still = 0;
 	uint8_t reversing = 0;
+	// The four Jolt inputs (forward, right, brake, hand brake) on driver_filter's scale, only when
+	// VehicleGhostQuantisation::send_controller_inputs (off by default: re-derived from the command and the driver)
+	uint32_t controller_inputs[4] = {};
 };
 
 // Bits one ghost of p_wheels wheels costs at p_q (the Humvee at kDefault: 183 body bits + 4 x 39 wheel bits + 101
 // controller / driver bits = 440 bits, 55 bytes; without the suspension codes 376 bits, 47 bytes; s2.md §7.2).
 size_t vehicle_ghost_bits(const VehicleGhostQuantisation &p_q, size_t p_wheels);
 
-// Per-wheel suspension max length, needed to scale the suspension codes (VehicleModel::wheels[i].suspension_max).
+// What the receiver knows from the model: the wheel count (a ghost naming another is refused), each wheel's
+// suspension max length to scale the suspension codes (VehicleModel::wheels[i].suspension_max) and the
+// transmission's gear range.
 struct VehicleGhostScale {
+	uint8_t wheel_count = 0;
 	std::array<float, kMaxVehicleWheels> suspension_max{};
 	int32_t min_gear = -8, max_gear = 7; // the model's transmission range
 };
+struct VehicleModel;
+VehicleGhostScale vehicle_ghost_scale(const VehicleModel &p_model);
 
 VehicleGhostCodes encode_vehicle_ghost(const VehicleState &p_state, const VehicleGhostQuantisation &p_q, const VehicleGhostScale &p_scale);
 // Decodes into r_state: overwrites the body's vehicle_restore::kBody fields (com_position, rotation, velocities,
@@ -110,6 +118,8 @@ VehicleGhostCodes encode_vehicle_ghost(const VehicleState &p_state, const Vehicl
 // the driver state; leaves every other field of r_state (the sleep test, previous_delta_time, lambdas, contacts,
 // pitch-roll, controller inputs unless sent, current_step) as it was. Callers decode into a copy of the client
 // world's own state(slot), so those fields are the client's own (s2.md §7.3); body.origin is not recomputed.
+// Fails, leaving r_state unchanged, on any refused code (see the file comment) or when r_state.wheel_count is not
+// the scale's.
 core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const VehicleGhostQuantisation &p_q, const VehicleGhostScale &p_scale,
 		VehicleState &r_state);
 

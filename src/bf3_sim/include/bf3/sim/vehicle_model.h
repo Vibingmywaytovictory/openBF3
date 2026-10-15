@@ -137,8 +137,8 @@ struct VehicleWheelModel {
 	float angular_damping = 0;
 	float max_steer_angle = 0; // rad, the low-speed lock
 	float max_brake_torque = 0, max_hand_brake_torque = 0; // Nm
-	uint8_t steers = 0, driven = 0, axle = 0; // axle 0 front, 1 rear (by z sign)
-	uint8_t side = 0; // 0 left (x < 0), 1 right
+	uint8_t steers = 0, driven = 0, axle = 0; // axle: wheels grouped by z within 5 cm, front (largest z) = 0
+	uint8_t side = 0; // 0 left (x > 0: Jolt's left, its right = forward x up = -X, s2.md §5.4), 1 right (x < 0)
 };
 
 struct VehicleModel {
