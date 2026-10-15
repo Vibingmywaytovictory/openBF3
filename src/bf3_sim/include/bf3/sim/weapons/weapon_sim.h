@@ -7,9 +7,13 @@
 // The server runs it after each soldier's motor step; the shooter's client runs the same code in its prediction
 // and replays it on reconciliation (the state goes into the prediction ring next to SoldierState); bots write the
 // same Command. Nothing reads Command::sequence or flags (the M1 rule: repeated and local commands step alike).
+// The client keeps the shots and events of a tick's FIRST prediction only: the ShotEvents and timed events a
+// catch_up / reconciliation replay produces again are discarded, so the 1p effects and sounds never fire twice
+// (docs §7.2). With WeaponTable::infinite_magazine (oracle runs only) the magazine never decreases.
 //
 // Per tick (command for tick T, interval [tick_start(T), tick_end(T))):
-//   1. inputs: weapon_input(command); a changed fire-mode counter cycles the mode; a select_slot other than the
+//   1. inputs: weapon_input(command); the fire-mode counter cycles the mode fire_mode_steps(old, new) times
+//      ((new - old) mod 4, so a counter that moved by 2 between two received commands cycles twice); a select_slot other than the
 //      current one starts a switch (the old weapon's reload is cancelled when rlWeaponSwitchCancelsUnfinishedReload
 //      and its threshold has not passed), then the new weapon deploys for DeployTime;
 //   2. phase timers that end inside the tick end at their exact time (deploy, bolt, reload, shell, hold);
@@ -145,17 +149,34 @@ struct ShotEvent {
 	Vec3 aim{}; // unit: view + recoil, before spread (the tracer converges on it)
 	Vec3 direction{}; // unit: after spread (pellet 0 adds its cone draw to this)
 	float spread = 0; // the cone half-angle the direction was drawn in (degrees)
+	// The pellet cone half-angle in effect (WeaponSimDef::pellet_cone for the shooter's stance and zoom; degrees;
+	// 0 for single-projectile shots). Carried so a remote client and the server expand the pellets alike from the
+	// event without knowing the shooter's stance (ProjectileWorld::spawn).
+	float pellet_cone = 0;
 	RecoilOffset recoil{}; // the offset this shot was aimed with (before its own kick)
-	bool tracer = false; // shot_index % TraceFrequency == 0
+	bool tracer = false; // trace_frequency > 0 && shot_index % trace_frequency == 0 (<= 0 in data: no tracers)
 	float power = 1; // hold-and-release power modifier (grenades)
 };
 static_assert(std::is_trivially_copyable_v<ShotEvent>);
+
+// One phase event at its exact sub-tick time (reload start / commit / finish, shell, bolt, deploy, hold, throw):
+// what W6 measures the reload and bolt durations from, and what the viewmodel and audio time their cues by.
+struct TimedWeaponEvent {
+	SimTime time = 0;
+	uint32_t event = 0; // exactly one weapon_events:: bit
+	uint8_t weapon_slot = 0;
+};
+// Phase events per tick: at most one deploy end, one bolt end, one reload commit and end, one shell, a switch
+// (cancel + deploy start) and the shot-related starts; 16 leaves room and is checked by the W8 invariants.
+inline constexpr size_t kMaxTimedEventsPerTick = 16;
 
 struct WeaponTickOutput {
 	uint8_t shot_count = 0;
 	std::array<ShotEvent, kMaxShotsPerTick> shots{};
 	uint32_t events = 0; // the same as the state's
 	uint32_t refused_shots = 0; // shots the per-tick cap cut (always 0 for a valid def: §9)
+	uint8_t timed_count = 0;
+	std::array<TimedWeaponEvent, kMaxTimedEventsPerTick> timed{}; // in time order (ties: bit order)
 };
 
 // A fresh life: every slot of p_loadout (def ids, kNoWeapon for empty) full, the active slot deploying from
@@ -169,7 +190,9 @@ core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTab
 void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_state, const Command &p_command, const WeaponContext &p_context,
 		uint64_t p_match_seed, WeaponTickOutput &r_out);
 
-// FNV-1a 64 over every field (the determinism and replay tests compare with it, like soldier_state_hash).
+// FNV-1a 64 over every field, field by field in declaration order (never a memcpy of the struct: SoldierWeaponsState
+// and WeaponSlotState have implicit padding before their SimTime fields). The determinism and replay tests compare
+// with it, like soldier_state_hash.
 uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state);
 
 // The integration seam (docs §7.1): the context of one tick from the motor's state before and after it.

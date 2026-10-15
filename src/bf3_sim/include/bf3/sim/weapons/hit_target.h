@@ -8,8 +8,13 @@
 //   * M2a integration: the server's soldiers at the present tick (bots, and humans without a hit report);
 //   * M2a integration / R14: capsules posed from bf3_anim's reduced server skeleton, sampled from the
 //     lag-compensation history at the (tick_a, tick_b, alpha) a client's HitReport names (plan §3.2 "Hit
-//     registration"). ProjectileWorld asks the provider for the targets at the segment's time, so rewind is the
-//     provider's choice and needs no change here.
+//     registration").
+// Rewind is per shooter and per bullet (plan §3.2, D7): a human shooter's unreported targets are tested at THAT
+// shooter's render time, bots fire at the present, and a reported target is tested at the sample its report names.
+// So every query carries the projectile's identity (TargetQuery: shooter slot, shot index, pellet, def, the
+// segment's time span and why it is asked). ProjectileWorld asks once per projectile sub-step and once per blast;
+// the provider decides what pose set to answer with, so two bullets of two shooters in the same tick can see two
+// different rewound worlds without a change here (docs §5.7, §7.1 step 6).
 // The 13 BoneCollisionData capsules (characters/soldiers/defaultsoldierbonecollision; 9 hi-LOD) carry their radius,
 // length and material pair in data [verified: core.gameplay.weapons]; their zone is the pair's property name
 // (Head, Body, Chest, Foot -> legs), as gameplay::body_multipliers reads it.
@@ -23,6 +28,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -74,14 +80,35 @@ struct TargetHit {
 	uint8_t capsule_flags = 0;
 };
 
-// The targets a segment flown at p_time is tested against. ProjectileWorld calls it once per projectile
-// sub-step on the owner's thread; the returned span must stay valid until the next call. Implementations must be
-// deterministic (same inputs, same span contents in the same order): the earliest hit wins and ties go to the
-// lower index.
+// Why a provider is asked.
+enum class TargetQueryKind : uint8_t {
+	Flight = 0, // a live projectile's segment (ProjectileWorld::step)
+	Blast = 1, // a detonation at time_start == time_end
+	Refly = 2, // a single projectile re-flown to validate a late HitReport (refly_projectile, ballistics.h)
+};
+
+// One question to the provider: which targets does THIS projectile's segment [time_start, time_end) meet? The
+// identity lets the provider rewind per shooter (the shooter's render time) and per report (the sample a HitReport
+// names for one (shot, pellet, target)); the present-tick provider ignores everything but the times.
+struct TargetQuery {
+	SimTime time_start = 0; // the segment's start (a blast: the detonation time)
+	SimTime time_end = 0;
+	uint32_t player_slot = 0; // the shooter (Projectile::player_slot)
+	uint32_t shot_index = 0;
+	uint16_t def = 0xFFFF; // the weapon def id (kNoWeapon when unknown)
+	uint8_t pellet = 0;
+	TargetQueryKind kind = TargetQueryKind::Flight;
+};
+static_assert(std::is_trivially_copyable_v<TargetQuery>);
+
+// The targets a projectile's segment is tested against. ProjectileWorld calls it once per projectile sub-step and
+// once per blast, on the owner's thread; the returned span must stay valid until the next call (a provider that
+// rewinds per shooter caches its last answer keyed by (shooter, sample)). Implementations must be deterministic
+// (same query, same span contents in the same order): the earliest hit wins and ties go to the lower index.
 class HitTargetProvider {
 public:
 	virtual ~HitTargetProvider() = default;
-	virtual std::span<const HitTarget> targets_at(SimTime p_time) const = 0;
+	virtual std::span<const HitTarget> targets_for(const TargetQuery &p_query) const = 0;
 };
 
 // A fixed list (the shooting range's stationary stand-ins; tests).
@@ -89,7 +116,7 @@ class StaticTargets final : public HitTargetProvider {
 public:
 	explicit StaticTargets(std::vector<HitTarget> p_targets) :
 			targets_(std::move(p_targets)) {}
-	std::span<const HitTarget> targets_at(SimTime) const override { return targets_; }
+	std::span<const HitTarget> targets_for(const TargetQuery &) const override { return targets_; }
 	std::vector<HitTarget> &targets() { return targets_; }
 
 private:

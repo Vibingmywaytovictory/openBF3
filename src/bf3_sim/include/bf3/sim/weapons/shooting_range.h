@@ -16,6 +16,7 @@
 #include "bf3/core/result.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/spawn.h"
+#include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/hit_target.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -44,9 +45,25 @@ struct RangeLane {
 std::optional<RangeLane> find_range_lane(const CollisionWorld &p_world, std::span<const SpawnPoint> p_spawns, float p_eye_height,
 		float p_min_length, uint32_t p_headings = 64);
 
+// The synthetic range world (W2 drop and max range; the W3 fallback when Metro has no lane long enough): a level
+// ground slab and vertical walls facing a shooter at the origin looking along +Z, eye at p_eye_height above the
+// slab. Each wall is p_wall_half_width wide each side of the line of fire and spans y from the slab to 50 m above
+// the eye. The slab spans x and z from -100 m to p_extent and lies p_depth below the eye, so a gated flight never
+// leaves the world's bounds (ProjectileWorld removes projectiles world_margin = 200 m outside them): W2 uses
+// p_extent 3,500 m (past the M98B's 3,250 m) and p_depth 150 m (the M98B falls 122.6 m in its 5 s). A wall at a
+// distance d is a quad in the plane z = d. Triangles carry SurfaceTag material p_material_value.
+std::vector<StaticTriangle> range_wall_triangles(std::span<const float> p_wall_distances, float p_eye_height, float p_extent = 3'500.0f,
+		float p_depth = 150.0f, float p_wall_half_width = 20.0f, uint32_t p_material_value = 0);
+
 enum class FireScript : uint8_t {
-	Hold = 0, // fire held for the whole run (automatic); reloads on its own (AlwaysAutoReload)
-	Tap = 1, // one-tick presses as fast as the weapon allows (single, bolt, burst): press when ready, release next tick
+	Hold = 0, // fire held for the whole run (automatic); reloads on its own (AlwaysAutoReload) unless the table has
+			// infinite_magazine (W1's 10 s rows, W11)
+	// One-tick presses as fast as the weapon allows (single, bolt, pump, burst). "When ready" is pinned to the tick
+	// that CONTAINS the ready time: the script presses in command T when next_shot_time < tick_end(T) (and the
+	// bolt / pump cycle has ended by then), so the shot goes at max(ready time, tick_start(T)) = the exact ready
+	// time (870: 28,800,000 apart, not 29,000,000), and releases in command T + 1. For a bolt that waits for the
+	// release (M98B) the press-to-press gap is therefore the cycle + 1 tick (docs §5.3).
+	Tap = 1,
 	TapEvery = 2, // a one-tick press every tap_period ticks
 	ReloadAt = 3, // Hold, plus a reload request at reload_tick (tactical-reload timing)
 	Throw = 4, // hold-and-release: hold for hold_ticks, release
@@ -98,6 +115,14 @@ struct RangeResult {
 	uint64_t shot_list_hash = 0; // shot_list_hash(shots)
 	uint64_t impact_list_hash = 0;
 	size_t refused_projectiles = 0;
+	size_t peak_live_projectiles = 0;
+	// Static-world diagnostics summed over the run (ProjectileStepOutput): rays that passed kSoupInvisible triangles
+	// (a wall whose only bullet geometry is "collisionmesh" would let bullets through: R-W10), penetrations, and
+	// Collision-layer hits with a Raycast-layer hit within 10 cm behind them (R-W2).
+	size_t static_hits = 0;
+	size_t invisible_passes = 0;
+	size_t penetrations = 0;
+	size_t collision_before_raycast = 0;
 	double seconds_wall = 0; // wall time of the run (reported, not gated: the machine is shared)
 };
 
@@ -105,6 +130,26 @@ struct RangeResult {
 // has no stand / crouch / prone pose, or a target would lie past the lane.
 core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionWorld &p_world, const core::gameplay::SoldierDef &p_soldier,
 		std::span<const core::gameplay::HitCapsule> p_capsules, const RangeLane &p_lane, const RangeScenario &p_scenario);
+
+// W11's load (docs §1, wall clock, noisy): p_shooters scripted shooters (Hold, hip, the def p_weapon) at the first
+// p_shooters of p_spawns (refused when fewer), each standing at its spawn and aiming level along ITS OWN longest
+// clear heading (find_range_lane's search on that one point, 64 headings), so bullets fly their full lanes instead
+// of dying in the nearest wall; no targets. p_table must have infinite_magazine (refused otherwise): the load is
+// 100 % duty, the worst case, not the ~50 % a real magazine allows. Per tick, the wall time of every shooter's
+// step_soldier_weapons plus one ProjectileWorld::step is one sample.
+struct RangePerfResult {
+	std::vector<double> tick_ms; // one sample per tick, in tick order
+	double mean_ms = 0;
+	double p50_ms = 0;
+	double p99_ms = 0; // nearest rank: the ceil(0.99 n)-th smallest (600 ticks: the 594th; 6 samples may exceed it)
+	double max_ms = 0;
+	size_t peak_live_projectiles = 0;
+	size_t shots = 0;
+	uint32_t shooters = 0;
+	float mean_lane_length = 0;
+};
+core::Result<RangePerfResult> run_range_perf(const WeaponTable &p_table, const CollisionWorld &p_world, std::span<const SpawnPoint> p_spawns,
+		float p_eye_height, uint16_t p_weapon, uint32_t p_shooters = 64, uint32_t p_ticks = 600, uint64_t p_match_seed = 1);
 
 // FNV-1a 64 over every ShotEvent field (identical shot lists for identical seeds, §1 W7).
 uint64_t shot_list_hash(std::span<const ShotEvent> p_shots);

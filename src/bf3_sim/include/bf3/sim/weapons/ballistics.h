@@ -2,17 +2,23 @@
 // Projectiles: bullets, pellets, grenades and missiles as queries, never bodies (docs/design/m2a-weapons.md §5.7,
 // §5.8; plan §3.2 "Projectiles step p += v dt + 1/2 g dt^2 and test segments", D5; topics/01 §2.3, §5.3).
 //
-// Flight: exact constant-acceleration steps (gravity, and a missile's engine and drag piecewise per sub-step), so
-// the position at any sample time is the closed form within float rounding; the segment between two samples is
-// a chord, whose sag below the parabola is g h^2 / 8 (0.52 mm for a whole 60 Hz tick at g 15), so one sub-step
-// per tick keeps the hit test within a millimetre of the true path; a missile's thrust phase sub-steps at 4 per
-// tick. A shot spawns at its exact sub-tick spawn time and flies the rest of that tick at once.
+// Flight state is double (DVec3). Unpowered flight (bullets, pellets, grenades between bounces, a missile after
+// its engine) is the CLOSED FORM from the projectile's base state: p(t) = base_position + base_velocity tau +
+// 1/2 a tau^2, tau = units_to_seconds(t - base_time), re-based only at a discontinuity (spawn, bounce, engine phase
+// change). So a bullet's position at any time is exact to double rounding however long it flies (the M98B's
+// 3,250 m at 5 s: below a micrometre; a per-tick float step accumulates about 6 mm there, which W2's 1 mm max-range
+// row cannot absorb: review of revision 1). A missile's thrust phase is stepped (4 sub-steps per tick, in double,
+// re-basing each sub-step). The segment between two samples is a chord, whose sag below the parabola is g h^2 / 8
+// (0.52 mm for a whole 60 Hz tick at g 15), so one segment per tick keeps the hit test within a millimetre of the
+// true path. Only the CollisionWorld ray is float (its ulp at 3 km is 0.24 mm). A shot spawns at its exact sub-tick
+// spawn time and flies the rest of that tick at once.
 // Each segment is tested, earliest hit first, against
 //   * the static world: CollisionWorld::ray with query_mask::kProjectile (Collision + Raycast; the Character
 //     layer is soldiers-only collision). Invisible blockers (kSoupInvisible: player clip) are passed through by
 //     re-casting from just past the hit; so are penetrable surfaces (SurfacePair::penetrable without the cell's
 //     NeverPenetrate; the damage scales by the cell's DamagePenetrationMultiplier) [inferred rule, topics/01 C9];
-//   * hit targets: HitTargetProvider::targets_at(segment start time), analytic capsules (hit_target.h). A leg
+//   * hit targets: HitTargetProvider::targets_for(TargetQuery{segment times, the projectile's shooter, shot,
+//     pellet, def}), analytic capsules (hit_target.h); the identity lets the provider rewind per shooter. A leg
 //     capsule (DeactivateIfBehindWall) behind static geometry seen from the shot origin is skipped.
 // Results go out as events for the server rules (damage), VFX and audio (impacts, detonations) and the HUD.
 //
@@ -32,6 +38,7 @@
 #include "bf3/sim/weapons/weapon_sim.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -46,12 +53,20 @@ inline constexpr uint8_t kResting = 1u << 1; // a grenade that stopped bouncing
 inline constexpr uint8_t kEngineOn = 1u << 2;
 } // namespace projectile_flags
 
+// Projectile flight state in double (see above).
+using DVec3 = std::array<double, 3>;
+
 struct Projectile {
 	SimTime time = 0; // the projectile's own clock: position / velocity are at this time
 	SimTime spawn_time = 0;
-	Vec3 position{};
-	Vec3 velocity{};
-	Vec3 origin{}; // where it left (the falloff distance is measured from here)
+	// The base of the current closed-form piece: the state at the last discontinuity (spawn, bounce, engine phase
+	// change, a thrust sub-step). position / velocity are evaluated from it, never accumulated.
+	SimTime base_time = 0;
+	DVec3 base_position{};
+	DVec3 base_velocity{};
+	DVec3 position{}; // at `time`
+	DVec3 velocity{};
+	DVec3 origin{}; // where it left (the falloff distance is measured from here)
 	double path_length = 0; // metres flown (FalloffBasis::PathLength)
 	uint64_t seed = 0;
 	uint32_t player_slot = 0;
@@ -117,6 +132,11 @@ struct ProjectileStepOutput {
 	size_t removed = 0; // expired, hit, out of the world
 	size_t budget_used = 0;
 	bool budget_exhausted = false; // the rest of the projectiles were not stepped this tick (they stay)
+	// Diagnostics the range reports (docs §5.8, R-W2, R-W10): static rays that met a kSoupInvisible triangle and
+	// passed it, surfaces penetrated, and Collision-layer hits with a Raycast-layer hit within 10 cm behind them.
+	size_t invisible_passes = 0;
+	size_t penetrations = 0;
+	size_t collision_before_raycast = 0;
 
 	void clear() {
 		impacts.clear();
@@ -125,6 +145,9 @@ struct ProjectileStepOutput {
 		removed = 0;
 		budget_used = 0;
 		budget_exhausted = false;
+		invisible_passes = 0;
+		penetrations = 0;
+		collision_before_raycast = 0;
 	}
 };
 
@@ -132,14 +155,18 @@ class ProjectileWorld {
 public:
 	ProjectileWorld(std::shared_ptr<const WeaponTable> p_table, const BallisticsLimits &p_limits = {});
 
-	// Adds a shot's projectiles (one per pellet, each pellet's cone draw from the shot's seed). Refused, with a
-	// count, when the world is full or the def has no projectile. An instant-hit shot (knife) is resolved on
-	// the next step at its spawn time.
+	// Adds a shot's projectiles (one per pellet: pellet k > 0 draws its direction inside ShotEvent::pellet_cone
+	// around ShotEvent::direction from the shot's seed, so every end expands the pellets alike from the event
+	// alone). Refused, with a count, when the world is full or the def has no projectile. An instant-hit shot
+	// (knife) is resolved on the next step at its spawn time.
 	core::Status spawn(const ShotEvent &p_shot);
 	// Flies every projectile from its own time to tick_end(p_tick) (a projectile spawned later than the tick's
 	// start flies only its part), tests every segment, detonates fuses and explosive impacts (blasts are tested
-	// against the same targets with occlusion rays), and appends the tick's events to r_out (cleared by the
-	// caller). Deterministic: projectiles step in spawn order, events come out in that order.
+	// against the provider's answer to a Blast query, with occlusion rays), and appends the tick's events to r_out
+	// (cleared by the caller). Deterministic: projectiles step in spawn order, events come out in that order. Each
+	// segment asks p_targets with the projectile's own TargetQuery, so the provider may rewind per shooter.
+	// A projectile is removed when it leaves the static world's bounds by more than BallisticsLimits::world_margin
+	// (a synthetic test world must span every flight it gates: docs §10).
 	void step(Tick p_tick, const CollisionWorld &p_world, const HitTargetProvider &p_targets, ProjectileStepOutput &r_out);
 
 	std::span<const Projectile> live() const { return live_; }
@@ -153,10 +180,22 @@ private:
 	size_t refused_ = 0;
 };
 
-// Closed-form flight under constant acceleration (the arithmetic the drop gates compare the stepped flight to).
-Vec3 ballistic_position(const Vec3 &p_origin, const Vec3 &p_velocity, float p_gravity, double p_seconds);
-// The projectile's state p_seconds after spawn with no collision (ProjectileWorld's own integration, exposed so
-// the tests and bf3dump weapon-sim tabulate the stepped path: drop, time of flight, missile speed).
+// Closed-form flight under constant acceleration (the arithmetic the drop gates compare the flight to).
+DVec3 ballistic_position(const DVec3 &p_origin, const DVec3 &p_velocity, double p_gravity, double p_seconds);
+// The projectile's state at p_until with no collision (ProjectileWorld's own flight code: closed form while
+// unpowered, stepped under thrust), exposed so the tests and bf3dump weapon-sim tabulate it: drop, time of flight,
+// missile speed.
 Projectile fly_free(const WeaponSimDef &p_def, const Projectile &p_start, SimTime p_until);
+
+// Late HitReport validation (docs §7.1 step 6; plan §3.2 "the server flies its own bullet ... and tests that
+// target against the pose reconstructed at exactly that sample"). A client's report usually arrives after the
+// server has already flown the bullet live. The server then re-flies pellet p_pellet of the retained p_shot
+// alone, from its spawn to at most p_until (bounded by the def's time to live), against p_world and p_targets
+// (queries of kind Refly: the provider answers with the reported target posed at the reported sample), with the
+// same static passes and penetration as step. Flight is a pure function of (ShotEvent, def, static world), so the
+// re-flown path is the live one. Returns true and the first target hit in r_hit; false when nothing is hit or
+// p_budget runs out (r_status says which). Charges p_budget per segment, re-cast and capsule, as step does.
+bool refly_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, uint8_t p_pellet, SimTime p_until, const CollisionWorld &p_world,
+		const HitTargetProvider &p_targets, core::gameplay::WorkBudget &p_budget, ImpactEvent &r_hit, core::Status &r_status);
 
 } // namespace bf3::sim::weapons

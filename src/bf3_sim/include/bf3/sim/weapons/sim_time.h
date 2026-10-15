@@ -54,6 +54,18 @@ constexpr SimTime seconds_to_units(double p_seconds) {
 	const double u = p_seconds * double(kTimeUnitsPerSecond) + 0.5;
 	return u >= double(kMaxDefTime) ? kMaxDefTime : SimTime(u);
 }
+// A fraction of a duration, rounded ONCE in the def build to the nearest unit, half up (the ReloadThreshold commit
+// time: 0.85 x 108,000,000 = 91,800,000 although 0.85 is not exact in double). The result is stored in the def and
+// hashed, so the server and a client never round it separately. p_fraction in [0, 1] (checked by the def builder).
+constexpr SimTime scale_units(SimTime p_units, double p_fraction) {
+	if (!(p_fraction > 0.0) || p_units <= 0) {
+		return 0;
+	}
+	if (p_fraction >= 1.0) {
+		return p_units;
+	}
+	return SimTime(double(p_units) * p_fraction + 0.5);
+}
 // The interval of a rate in rounds per minute: 60 s / rpm, computed as (60 x units per second) / rpm so the
 // common rates are exact in double (800 -> 4,500,000.0). p_rpm must be > 0 (checked by the def builder).
 constexpr SimTime rpm_to_interval(double p_rpm) {

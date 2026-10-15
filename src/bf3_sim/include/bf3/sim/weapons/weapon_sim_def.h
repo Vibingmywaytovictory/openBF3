@@ -52,6 +52,8 @@ inline constexpr float kMaxRadius = 100.0f; // m [10: shockwave]
 inline constexpr float kMaxAngle = 90.0f; // degrees, every spread / recoil / cone value [10: recoil caps]
 inline constexpr float kMaxRate = 10'000.0f; // degrees per second, decreases and factors [30]
 inline constexpr SimTime kMaxFlightTime = 30 * kTimeUnitsPerSecond; // a projectile with TimeToLive 0 (40 mm) [10 s missiles]
+inline constexpr int32_t kMaxTraceFrequency = 1'000; // [1 on the gate weapons; the knife's is 0]; <= 0 means no tracers
+inline constexpr float kMaxPower = 10.0f; // hold-and-release power modifiers [1]
 
 // Explosion (VeniceExplosionEntityData) with the zone relation of its own material pair looked up.
 struct ExplosionSimDef {
@@ -139,23 +141,29 @@ struct WeaponSimDef {
 	// Hold and release (grenades): the throw needs the trigger held for hold_delay; release throws.
 	SimTime hold_delay = 0;
 	SimTime hold_max_time = 0;
-	float hold_min_power = 1;
+	float hold_min_power = 1; // [0, kMaxPower], min <= max (refused otherwise)
 	float hold_max_power = 1;
-	float hold_power_per_second = 0;
+	float hold_power_per_second = 0; // [0, kMaxRate]
 
 	// Ammunition.
 	int32_t magazine_capacity = 0; // 31 = 30 + chambered (Symthic; whether an empty reload yields 30 is a rule, §5.5)
 	int32_t magazines = 0; // spare magazines (NumberOfMagazines)
 	bool unlimited_ammo = false; // NumberOfMagazines < 0 in data (knife: 1 x -1)
 	int32_t pellets = 1; // NumberOfBulletsPerShell
-	int32_t trace_frequency = 0; // every n-th shot carries a tracer (VFX)
+	// Every n-th shot carries a tracer (VFX): shot_index % trace_frequency == 0. A value <= 0 in data is stored as
+	// 0 = no tracers (never a division); above kMaxTraceFrequency is refused.
+	int32_t trace_frequency = 0;
 
 	// Reload (ReloadType, ReloadTime*, ReloadThreshold, ReloadLogic).
 	ReloadType reload_type = ReloadType::Unknown;
 	SimTime reload_tactical = 0; // ReloadTimeBulletsLeft (rtMagazineWithPossibleShorterReload with rounds left)
 	SimTime reload_empty = 0; // ReloadTime (rtSingleBullet: per shell)
 	SimTime reload_delay = 0; // ReloadDelay (rtSingleBullet: before the first shell, 870 1.15 s)
-	float reload_threshold = 1; // ReloadThreshold: the fraction after which the reload is committed [inferred, H:W9]
+	float reload_threshold = 1; // ReloadThreshold in [0, 1] (refused outside): the fraction after which the reload is committed [inferred, H:W9]
+	// The commit points, scale_units(duration, reload_threshold): rounded once here and hashed, so the server and
+	// the client agree to the unit (M16A3: 91,800,000 tactical, 120,870,000 empty).
+	SimTime reload_commit_tactical = 0;
+	SimTime reload_commit_empty = 0;
 	bool switch_cancels_reload = true; // rlWeaponSwitchCancelsUnfinishedReload
 	bool always_auto_reload = false;
 
@@ -192,17 +200,27 @@ struct WeaponTable {
 	Mechanics mechanics;
 	// RecoveryShape::Exponential's per-tick factor exp(-factor x scale / kSimHz) is precomputed per def and recoil
 	// state (in the def build, not on the replicated path: plan R4, as make_motor_params does for the gains).
+	// ORACLE ONLY (tests, bf3dump weapon-sim / range): shots never take rounds from the magazine, so a held
+	// trigger fires for as long as the script runs (W1's 134 shots in 10 s from a 31-round M16A3; W11's full-duty
+	// load). GameConfig never sets it; it is hashed, so a table built with it can never match a real one.
+	bool infinite_magazine = false;
 	uint64_t hash = 0; // weapon_table_hash
 };
 inline constexpr uint16_t kNoWeapon = 0xFFFF;
 
 // Derives and checks one def. p_materials resolves the projectile's (and explosions') pairs and zone relations.
 core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &p_def, const SurfaceMaterialTable &p_materials);
+// Table options beyond the data: the unmeasured mechanics' choices and the oracle-only overrides.
+struct WeaponTableOptions {
+	Mechanics mechanics;
+	bool infinite_magazine = false; // oracle only (see WeaponTable)
+};
 // The table for a loadout universe (the level's kits, or one weapon for the tools).
 core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<const core::gameplay::WeaponDef> p_defs,
-		std::shared_ptr<const SurfaceMaterialTable> p_materials, const Mechanics &p_mechanics = {});
-// FNV-1a 64 over every def field's bytes in declaration order (strings as length + bytes), the materials'
-// zone properties and the variant choices: the server's and a client's tables must hash equal (MatchInfo).
+		std::shared_ptr<const SurfaceMaterialTable> p_materials, const WeaponTableOptions &p_options = {});
+// FNV-1a 64 over every def field in declaration order, field by field (never a memcpy of a struct: padding;
+// floats by their bit pattern, strings as length + bytes), the materials' zone properties, the mechanics' choices
+// and infinite_magazine: the server's and a client's tables must hash equal (MatchInfo).
 uint64_t weapon_table_hash(const WeaponTable &p_table);
 
 // Arithmetic of a def the oracles quote (plan §7.1); same rules as the simulation.

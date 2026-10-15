@@ -19,7 +19,9 @@
 
 #include <doctest/doctest.h>
 
+#include <span>
 #include <type_traits>
+#include <vector>
 
 using namespace bf3::sim;
 using namespace bf3::sim::weapons;
@@ -40,6 +42,14 @@ static_assert(seconds_to_units(0.67) == 40'200'000); // M16A3 deploy, 870 shell
 static_assert(seconds_to_units(3.6) == 216'000'000); // M67 fuse
 static_assert(rpm_to_interval(650.0) == 5'538'462); // rounded once to the nearest unit (16.7 ns)
 static_assert(seconds_to_units(-1.0) == 0 && seconds_to_units(1e9) == kMaxDefTime && rpm_to_interval(0.0) == kMaxDefTime);
+// The ReloadThreshold commit points, rounded once in the def (review r1): M16A3 0.85 x 1.8 s and x 2.37 s.
+static_assert(scale_units(108'000'000, 0.85) == 91'800'000);
+static_assert(scale_units(142'200'000, 0.85) == 120'870'000);
+static_assert(scale_units(78'000'000, 0.75) == 58'500'000); // M98B-like threshold on a 1.3 s span
+static_assert(scale_units(100, 0.0) == 0 && scale_units(100, 1.5) == 100 && scale_units(-5, 0.5) == 0);
+// The fire-mode counter: (new - old) mod 4 cycles (review r1: a counter that moved by 2 cycles twice).
+static_assert(fire_mode_steps(0, 0) == 0 && fire_mode_steps(0, 1) == 1 && fire_mode_steps(1, 3) == 2 && fire_mode_steps(3, 0) == 1
+		&& fire_mode_steps(2, 1) == 3);
 
 // ---- the plain types the rings, the wire and the events copy -------------------------------------------------
 static_assert(std::is_trivially_copyable_v<WeaponSlotState>);
@@ -50,6 +60,10 @@ static_assert(std::is_trivially_copyable_v<ImpactEvent>);
 static_assert(std::is_trivially_copyable_v<DamageEvent>);
 static_assert(std::is_trivially_copyable_v<HitTarget>);
 static_assert(std::is_trivially_copyable_v<WeaponContext>);
+static_assert(std::is_trivially_copyable_v<TargetQuery>);
+static_assert(std::is_trivially_copyable_v<TimedWeaponEvent>);
+// Projectile flight state is double (review r1: float steps lose ~6 mm over the M98B's 3,250 m).
+static_assert(std::is_same_v<decltype(Projectile::position), DVec3> && std::is_same_v<DVec3::value_type, double>);
 static_assert(kHitZoneCount == 4 && size_t(HitZone::Legs) == 3);
 static_assert(uint8_t(RngPurpose::SpreadRadius) == 0 && uint8_t(RngPurpose::FuseVariation) == 5, "RNG purposes are append-only");
 
@@ -108,6 +122,33 @@ TEST_SUITE("weapons-contract") {
 		CHECK(weapon_input(c).select_slot == 0xFF);
 		c.buttons = weapon_buttons::kSlotMask; // 15: out of range -> keep
 		CHECK(weapon_input(c).select_slot == 0xFF);
+	}
+
+	TEST_CASE("weapons contract: a provider sees the projectile's identity (per-shooter rewind)") {
+		// A provider that answers by shooter: two bullets of two shooters in the same tick get different sets.
+		struct ByShooter final : HitTargetProvider {
+			std::vector<HitTarget> a, b;
+			std::span<const HitTarget> targets_for(const TargetQuery &p_query) const override {
+				return p_query.player_slot == 0 ? std::span<const HitTarget>(a) : std::span<const HitTarget>(b);
+			}
+		};
+		ByShooter p;
+		p.a.resize(1);
+		p.b.resize(2);
+		TargetQuery q;
+		q.time_start = tick_start(10);
+		q.time_end = tick_end(10);
+		q.player_slot = 0;
+		CHECK(p.targets_for(q).size() == 1);
+		q.player_slot = 7;
+		q.shot_index = 3;
+		q.pellet = 2;
+		CHECK(p.targets_for(q).size() == 2);
+		const StaticTargets fixed({ HitTarget{} });
+		CHECK(fixed.targets_for(q).size() == 1);
+		WeaponTableOptions options;
+		CHECK_FALSE(options.infinite_magazine); // oracle only, off by default
+		CHECK_FALSE(WeaponTable{}.infinite_magazine);
 	}
 
 	TEST_CASE("weapons contract: the unmeasured mechanics default to the plan's no-measurement choice") {

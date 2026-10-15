@@ -4,7 +4,7 @@
 // the 24 bits bf3_net sends (buttons::kWireMask).
 //
 // Every weapon field is a LEVEL, never an edge: fire / zoom / reload are "held", the fire mode is a 2-bit toggle
-// counter (the weapon sim cycles once per change of the counter) and the slot field names the slot the player
+// counter (the weapon sim cycles (new - old) mod 4 times, fire_mode_steps) and the slot field names the slot the player
 // wants (0 = keep the current one). A level survives the server's repeated_command (which clears only
 // buttons::kEdgeMask) and a lost command packet without doing anything twice: a repeated "switch to slot 2" is
 // idempotent and a repeated counter value is no change. Single fire, bursts and the bolt's "until fire release"
@@ -55,6 +55,14 @@ constexpr WeaponInput weapon_input(const Command &p_command) {
 	const uint32_t slot = (p_command.buttons & weapon_buttons::kSlotMask) >> weapon_buttons::kSlotShift;
 	in.select_slot = (slot == 0 || slot > kMaxWeaponSlots) ? uint8_t(0xFF) : uint8_t(slot - 1);
 	return in;
+}
+
+// How many times the fire mode cycles when the counter goes from p_old to p_new: (new - old) mod 4. A counter
+// that moved by 2 between two received commands (a lost packet) cycles twice, as the player pressed twice; more
+// than 3 presses between two received commands cannot be told apart (a known limit of a 2-bit field, accepted:
+// commands are sent 3-4 times redundantly, plan §3.5).
+constexpr uint8_t fire_mode_steps(uint8_t p_old, uint8_t p_new) {
+	return uint8_t((p_new - p_old) & 3u);
 }
 
 // Writes the weapon fields of p_input into p_buttons (the input mapper and the bots build commands with this).
