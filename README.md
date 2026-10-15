@@ -1267,3 +1267,10 @@ the 32 the 164 handheld weapon patches use), the seam hashes and FourCCs, and th
 (Metro and Loc/en frame counts, decode speed, census, the plan section 7.7 oracles, the wave bank, an offline M16A3
 render and the Godot run) are listed with their thresholds in the design's section 1. Recordings go to
 `b/shots/audio/` and are never committed.
+
+The offline M16A3 render (`audio.m16.offline`, G7) and the Godot run (`godot.audio`, G8) share one check script and
+analysis (`bf3/audio/audio_check.h`, design section 10.4): onsets on the stepped corebass tap, levels and the distance
+high-pass on the full mix and on the voice-14 tap, and in G8 a sample-for-sample comparison with an offline replay. G8
+measures the mixer's compute time and ring health (late blocks, late commands, ring overflows, starved voices), not
+device xruns. The timing gates (`audio.decode.perf` on thread CPU time, `audio.bank` load time, `godot.audio`) need a
+quiet machine: run them when no other heavy work is running.

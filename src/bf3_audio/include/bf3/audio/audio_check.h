@@ -9,9 +9,9 @@
 //     triggered only in first person (Switcher on IsFirstPerson, case 1 -> v78), so no LFE path is active;
 //   - 0.5 m: Fire starts corebassclose (voices 28-29), hifi_lmg (18-19) and noise_close (15-16), all stepped;
 //   - 60 m and 150 m: Fire starts corebassdistant (stepped, voices 26-27 -> voice 6, HPF v49) and noise_far
-//     (UNstepped LtRelease loop, voices 20-21 -> voice 14, HPF v46); voices 3 and 5 are at gain 0 there (v59 = 0.8 x
-//     IsFirstPerson, v103 = ScaleClamp(1..3 m -> 0.5..0)); the far reflections (voice 8 -> voice 2, no HPF) start
-//     only at the stop event;
+//     (UNstepped LtRelease loop, voices 20-21 -> voice 14, HPF v46); voice 3 is at gain 0 in third person (v59 =
+//     0.8 x IsFirstPerson) and voice 5 (v103 = ScaleClamp(1..3 m -> 0..0.5)) forwards only voice 14's filtered
+//     output; the far reflections (voice 8 -> voices 2 and 5, no HPF) start only at the stop event;
 //   - so onsets are measured on the core tap (voices 26-29: the two stepped corebass samplers, one of which is
 //     audible at each distance, neither with a Delay port), not on the full mix, where the unstepped noise loop adds
 //     its own segment onsets about 75-81 ms apart and the hifi/noise layers carry random 0-45 ms delays;
