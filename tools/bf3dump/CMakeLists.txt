@@ -21,3 +21,6 @@ target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `
 # M1 T2 (motor; docs/design/m1.md §10.1): `spawns <LEVEL> <MODE>`, the spawn points and spawners as TSV (bf3_sim from
 # T1's block above).
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
+# M2a VFX1 (docs/design/m2a-vfx1.md §7.7): `fx census | compile | simulate | check | bench | atlas | impacts`.
+target_sources(bf3dump PRIVATE fx_commands.cpp fx_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_fx)

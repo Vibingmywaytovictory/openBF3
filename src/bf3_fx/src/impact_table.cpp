@@ -68,6 +68,7 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 			out.index_map_.push_back(v.as_i64().value_or(-1));
 		}
 	}
+	out.default_material_index_ = r.integer_or(g, "DefaultMaterialIndex", 0, 255, 0);
 	const core::OptionalEbxArray rows = r.array(g, "InteractionGrid", kMaxRows);
 	if (!r.ok()) {
 		return r.error();

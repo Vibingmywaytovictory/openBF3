@@ -7,13 +7,17 @@
 
 #include "bf3/core/result.h"
 #include "bf3/fx/effect_def.h"
+#include "bf3/fx/emitter_atlas.h"
+#include "bf3/fx/impact_table.h"
 #include "bf3/fx/simulator.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace bf3::fx {
@@ -46,6 +50,8 @@ void fx_step_frame(FxWorld &r_world, float p_dt, LanePool *p_pool = nullptr, siz
 
 // FNV-1a over the bytes of particles() and lights() (no padding in either record), the fields of every
 // outputs() record and every FxStats field: two frames with equal digests are identical in the sense of gate G8.
+// The effect handle's generation is left out (it keeps counting across clear(), so it differs between a reused and
+// a fresh world for the same start); its slot is included.
 uint64_t fx_frame_digest(const FxWorld &p_world);
 
 struct HarnessRun {
@@ -79,6 +85,27 @@ HarnessReport fx_simulate_starts(const std::shared_ptr<const EffectDef> &p_def, 
 HarnessReport fx_golden_muzzle1p(const std::shared_ptr<const EffectDef> &p_def, uint32_t p_starts, const HarnessRun &p_run);
 // Gate G4 on the wrapped em_amb_mp12_oilfire_l_fire_01 (docs §2, §5.2): one start of p_run.seconds (75).
 HarnessReport fx_golden_oilfire(const std::shared_ptr<const EffectDef> &p_def, const HarnessRun &p_run);
+
+// Gate G5 (docs §5.3): the counts of the projectile's row under the counting rules of §5.3, then the named cells.
+struct ImpactCounts {
+	size_t rows = 0;
+	size_t effect_relations = 0;
+	size_t decal_relations = 0;
+	size_t default_row_indices = 0;
+	size_t generic_effect_indices = 0;
+	size_t no_effect_indices = 0;
+	size_t columns_without_effect_relation = 0;
+	std::set<std::string> distinct_effects;
+	bool default_cells_generic = true; // every default-row index's cell is exactly {fx_impact_generic_01_s, no decal}
+};
+ImpactCounts fx_impact_counts(const ImpactTable &p_table, uint8_t p_projectile);
+// Prints the counts and the 8 named 5.56 cells; checks the §5.3 values when p_level is MP_Subway or MP_007
+// (another level: report only, pass).
+HarnessReport fx_golden_impacts(const ImpactTable &p_table, std::string_view p_level, uint8_t p_projectile);
+
+// Gate G6 (docs §5.4): the atlas against the names its level's EmitterDocuments use. Checks the Metro values when
+// p_level is MP_Subway (another level: the name checks only).
+HarnessReport fx_golden_atlas(const EmitterAtlas &p_atlas, std::string_view p_level, const std::set<std::string> &p_used_names, size_t p_documents);
 
 // Gates G7 and G8 over many effects (`bf3dump fx check`, ctest fx.install "check").
 struct CheckOptions {
@@ -117,6 +144,7 @@ CheckReport fx_check_effects(const std::vector<std::shared_ptr<const EffectDef>>
 struct BenchRun {
 	double ns_per_particle = 0;
 	double mean_live = 0;
+	double mean_emitters = 0; // live emitter instances, mean over the timed steps
 	uint64_t admitted = 0;
 	double timed_seconds = 0;
 	FxStats stats;

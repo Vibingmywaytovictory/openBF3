@@ -48,6 +48,8 @@
 //                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
 //                              ... --shapes` adds them to a prepare run
 //   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
+// M2a VFX1:
+//   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -70,6 +72,8 @@
 #include "shapes_commands.h" // M1 T1
 // M1 T2: spawn points and spawners of a level x mode.
 #include "spawns_commands.h"
+// M2a VFX1: bf3dump fx (effect compiler, simulator, atlas, impacts).
+#include "fx_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -500,6 +504,7 @@ void usage() {
 			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
+	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
 }
 
 } // namespace
@@ -614,6 +619,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
+	}
+	// M2a VFX1: fx <subcommand> (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7).
+	if (cmd == "fx") {
+		return bf3dump::cmd_fx(ebx_ctx, rest);
 	}
 	usage();
 	return 2;

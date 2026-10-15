@@ -704,8 +704,10 @@ struct FxWorld::Impl {
 		const uint32_t total = r_it.old_count + r_it.spawn;
 		uint32_t write = 0;
 		uint32_t light_write = 0;
-		std::array<float, kChunk> dt{};
-		std::array<uint8_t, kChunk> dead{};
+		std::array<float, kChunk> dt; // written before read (no zero fill per item)
+		std::array<uint8_t, kChunk> dead;
+		std::array<float, kChunk> tn; // normalised age of each particle of the chunk (update_chunk)
+		OutputValues ov;
 		for (uint32_t c0 = 0; c0 < total; c0 += uint32_t(kChunk)) {
 			const uint32_t n = std::min<uint32_t>(uint32_t(kChunk), total - c0);
 			for (uint32_t i = 0; i < n; ++i) {
@@ -722,8 +724,9 @@ struct FxWorld::Impl {
 				}
 				dead[i] = 0;
 			}
-			update_chunk(e, inst, r_it, dst, base + c0, n, dt.data(), dead.data(), local);
-			// Compaction and output.
+			update_chunk(e, inst, r_it, dst, base + c0, n, dt.data(), dead.data(), tn.data(), local);
+			// The Update stage's output values of the whole chunk (vectorised per slot), then compaction and output.
+			output_values(e, inst, r_it, dst, base + c0, n, tn.data(), ov);
 			for (uint32_t i = 0; i < n; ++i) {
 				const uint32_t from = base + c0 + i;
 				if (dead[i] != 0) {
@@ -733,7 +736,7 @@ struct FxWorld::Impl {
 				if (to != from) {
 					dst.move_one(from, to);
 				}
-				if (!emit(e, inst, r_it, dst, to, local, light_write)) {
+				if (!emit(e, inst, r_it, dst, to, i, tn[i], ov, local, light_write)) {
 					++r_it.nonfinite;
 					continue; // non-finite output: killed, the slot is overwritten by the next survivor
 				}
@@ -897,7 +900,7 @@ struct FxWorld::Impl {
 	}
 
 	void update_chunk(const EmitterDef &p_e, const EmitterInstance &p_inst, const Item &p_it, Soa &r_s, uint32_t p_at, uint32_t p_n, const float *p_dt,
-			uint8_t *r_dead, bool p_local) {
+			uint8_t *r_dead, float *r_t, bool p_local) {
 		const ProcessorParams &pp = p_e.params;
 		float *px = r_s.f[kPx].data() + p_at;
 		float *py = r_s.f[kPy].data() + p_at;
@@ -907,7 +910,7 @@ struct FxWorld::Impl {
 		float *vz = r_s.f[kVz].data() + p_at;
 		float *age = r_s.f[kAge].data() + p_at;
 		const float *life = r_s.f[kLife].data() + p_at;
-		std::array<float, kChunk> t{};
+		float *t = r_t;
 		Values v;
 		// UpdateAge: age, normalised t, death (docs §6.5).
 		const bool has_age = p_e.has(ProcessorType::UpdateAge);
@@ -931,10 +934,11 @@ struct FxWorld::Impl {
 		}
 		// AirResistance: v *= exp(-k * v.x * dt).
 		if (p_e.has(ProcessorType::AirResistance)) {
-			values(p_e, ProcessorType::AirResistance, p_it, p_inst, r_s, p_at, p_n, t.data(), false, v);
+			values(p_e, ProcessorType::AirResistance, p_it, p_inst, r_s, p_at, p_n, t, false, v);
+			const float f_full = v.constant ? std::exp(-(pp.drag * v.c.x) * p_it.dt_e) : 0.0f;
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const float k = pp.drag * (v.constant ? v.c.x : v.x[i]);
-				const float f = std::exp(-k * p_dt[i]);
+				const float f = v.constant && p_dt[i] == p_it.dt_e ? f_full : std::exp(-k * p_dt[i]);
 				vx[i] *= f;
 				vy[i] *= f;
 				vz[i] *= f;
@@ -942,7 +946,7 @@ struct FxWorld::Impl {
 		}
 		// Gravity: positive pulls down along world Y.
 		if (p_e.has(ProcessorType::Gravity)) {
-			values(p_e, ProcessorType::Gravity, p_it, p_inst, r_s, p_at, p_n, t.data(), false, v);
+			values(p_e, ProcessorType::Gravity, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			const Vec3 down = p_local ? unrotate(p_inst.transform, Vec3{ 0, -1, 0 }) : Vec3{ 0, -1, 0 };
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const float a = pp.gravity * (v.constant ? v.c.x : v.x[i]) * p_dt[i];
@@ -953,7 +957,7 @@ struct FxWorld::Impl {
 		}
 		// LocalForce: in the emitter's frame.
 		if (p_e.has(ProcessorType::LocalForce)) {
-			values(p_e, ProcessorType::LocalForce, p_it, p_inst, r_s, p_at, p_n, t.data(), true, v);
+			values(p_e, ProcessorType::LocalForce, p_it, p_inst, r_s, p_at, p_n, t, true, v);
 			const Vec3 &f = pp.local_force;
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const Vec3 lf = v.constant ? Vec3{ f.x * v.c.x, f.y * v.c.y, f.z * v.c.z } : Vec3{ f.x * v.x[i], f.y * v.y[i], f.z * v.z[i] };
@@ -965,7 +969,7 @@ struct FxWorld::Impl {
 		}
 		// Turbulance: value noise keyed by the particle and its age (docs §6.4).
 		if (p_e.has(ProcessorType::Turbulance) && pp.turbulence != 0) {
-			values(p_e, ProcessorType::Turbulance, p_it, p_inst, r_s, p_at, p_n, t.data(), false, v);
+			values(p_e, ProcessorType::Turbulance, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			const uint32_t *serial = r_s.serial.data() + p_at;
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const float a = age[i] * kTurbulenceKnotsPerSecond;
@@ -995,7 +999,7 @@ struct FxWorld::Impl {
 			}
 		}
 		if (p_e.has(ProcessorType::UpdateRotation)) {
-			values(p_e, ProcessorType::UpdateRotation, p_it, p_inst, r_s, p_at, p_n, t.data(), false, v);
+			values(p_e, ProcessorType::UpdateRotation, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			float *rot = r_s.f[kRot].data() + p_at;
 			const float *rspd = r_s.f[kRspd].data() + p_at;
 			for (uint32_t i = 0; i < p_n; ++i) {
@@ -1003,11 +1007,20 @@ struct FxWorld::Impl {
 			}
 		}
 		if (p_e.has(ProcessorType::UpdateTextureCoords)) {
-			values(p_e, ProcessorType::UpdateTextureCoords, p_it, p_inst, r_s, p_at, p_n, t.data(), false, v);
+			values(p_e, ProcessorType::UpdateTextureCoords, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			float *frame = r_s.f[kFrame].data() + p_at;
 			const float *frate = r_s.f[kFrate].data() + p_at;
+			// The state stays within [0, frame_count) (one subtraction per wrap; the output wrap of emit() then only
+			// sees spawn frames out of range), so no fmod per particle and step.
+			const float count = float(p_e.texture.frame_count);
 			for (uint32_t i = 0; i < p_n; ++i) {
-				frame[i] += frate[i] * (v.constant ? v.c.x : v.x[i]) * p_dt[i];
+				float f = frame[i] + frate[i] * (v.constant ? v.c.x : v.x[i]) * p_dt[i];
+				if (f >= count && f < 2.0f * count) {
+					f -= count;
+				} else if (f < 0.0f && f >= -count) {
+					f += count;
+				}
+				frame[i] = f;
 			}
 		}
 	}
@@ -1020,40 +1033,47 @@ struct FxWorld::Impl {
 		return 0.0f;
 	}
 
-	float slot_x(const EmitterDef &p_e, ProcessorType p_type, const EmitterInstance &p_inst, const Item &p_it, float p_t, uint32_t p_serial, float p_speed) const {
-		const ProcessorSlot &slot = p_e.slot(p_type);
-		if (slot.evaluator == kNoEvaluator) {
-			return slot.default_values.x;
+	// The output slots' values for one chunk (docs §6.4 Update stage): size, the size axes, colour, transparency and
+	// the alpha levels, each constant or per particle (values()).
+	struct OutputValues {
+		Values size, size_x, size_y, size_z, color, alpha, alpha_min, alpha_max, alpha_scale;
+		bool has_size = false, has_size_x = false, has_size_y = false, has_size_z = false, has_color = false, color_eval = false, has_alpha = false,
+			 has_alpha_min = false, has_alpha_max = false, has_alpha_scale = false;
+	};
+
+	void output_values(const EmitterDef &p_e, const EmitterInstance &p_inst, const Item &p_it, const Soa &p_s, uint32_t p_at, uint32_t p_n, const float *p_t,
+			OutputValues &r_o) const {
+		const auto one = [&](ProcessorType p_type, bool p_xyz, bool &r_has, Values &r_v) {
+			r_has = p_e.has(p_type);
+			if (r_has) {
+				values(p_e, p_type, p_it, p_inst, p_s, p_at, p_n, p_t, p_xyz, r_v);
+			}
+		};
+		one(ProcessorType::UpdateSize, true, r_o.has_size, r_o.size);
+		one(ProcessorType::UpdateSizeX, false, r_o.has_size_x, r_o.size_x);
+		one(ProcessorType::UpdateSizeY, false, r_o.has_size_y, r_o.size_y);
+		one(ProcessorType::UpdateSizeZ, false, r_o.has_size_z, r_o.size_z);
+		r_o.has_color = p_e.has(ProcessorType::UpdateColor);
+		r_o.color_eval = r_o.has_color && p_e.slot(ProcessorType::UpdateColor).evaluator != kNoEvaluator;
+		if (r_o.color_eval) {
+			values(p_e, ProcessorType::UpdateColor, p_it, p_inst, p_s, p_at, p_n, p_t, true, r_o.color);
 		}
-		const EvaluatorDef &ev = p_e.evaluators[size_t(slot.evaluator)];
-		const float in = input_of(slot.input, p_t, p_it.te, p_speed);
-		if (ev.type == EvaluatorType::Polynomial) {
-			return evaluate_polynomial(ev.polynomial, in);
-		}
-		return eval_one(p_e, ev, uint32_t(p_type), in, p_inst.seed, p_serial, slot.default_values).x;
-	}
-	Vec4 slot_v(const EmitterDef &p_e, ProcessorType p_type, const EmitterInstance &p_inst, const Item &p_it, float p_t, uint32_t p_serial, float p_speed) const {
-		const ProcessorSlot &slot = p_e.slot(p_type);
-		if (slot.evaluator == kNoEvaluator) {
-			return slot.default_values;
-		}
-		return eval_one(p_e, p_e.evaluators[size_t(slot.evaluator)], uint32_t(p_type), input_of(slot.input, p_t, p_it.te, p_speed), p_inst.seed, p_serial,
-				slot.default_values);
+		one(ProcessorType::UpdateTransparency, false, r_o.has_alpha, r_o.alpha);
+		one(ProcessorType::UpdateAlphaLevelMin, false, r_o.has_alpha_min, r_o.alpha_min);
+		one(ProcessorType::UpdateAlphaLevelMax, false, r_o.has_alpha_max, r_o.alpha_max);
+		one(ProcessorType::UpdateAlphaLevelScale, false, r_o.has_alpha_scale, r_o.alpha_scale);
 	}
 
-	// Writes particle p_at's vertex (and light) record; false when a value is not finite (the particle is killed).
-	bool emit(const EmitterDef &p_e, const EmitterInstance &p_inst, const Item &p_it, const Soa &p_s, uint32_t p_at, bool p_local, uint32_t &r_light) {
-		const float t = norm_time(p_s.f[kAge][p_at], p_s.f[kLife][p_at]);
+	static float vx_of(const Values &p_v, uint32_t p_i) { return p_v.constant ? p_v.c.x : p_v.x[p_i]; }
+	static Vec3 v3_of(const Values &p_v, uint32_t p_i) { return p_v.constant ? Vec3{ p_v.c.x, p_v.c.y, p_v.c.z } : Vec3{ p_v.x[p_i], p_v.y[p_i], p_v.z[p_i] }; }
+
+	// Writes particle p_at's vertex (and light) record from chunk index p_i's output values; false when a value is not
+	// finite (the particle is killed).
+	bool emit(const EmitterDef &p_e, const EmitterInstance &p_inst, const Item &p_it, const Soa &p_s, uint32_t p_at, uint32_t p_i, float p_t,
+			const OutputValues &p_o, bool p_local, uint32_t &r_light) {
+		const float t = p_t;
 		const uint32_t serial = p_s.serial[p_at];
 		const Vec3 vel{ p_s.f[kVx][p_at], p_s.f[kVy][p_at], p_s.f[kVz][p_at] };
-		float speed = 0;
-		const auto needs_speed = [&](ProcessorType p_type) { return p_e.has(p_type) && p_e.slot(p_type).input == EvaluatorInput::Velocity; };
-		if (needs_speed(ProcessorType::UpdateSize) || needs_speed(ProcessorType::UpdateSizeX) || needs_speed(ProcessorType::UpdateSizeY) ||
-				needs_speed(ProcessorType::UpdateSizeZ) || needs_speed(ProcessorType::UpdateColor) || needs_speed(ProcessorType::UpdateTransparency) ||
-				needs_speed(ProcessorType::UpdateAlphaLevelMin) || needs_speed(ProcessorType::UpdateAlphaLevelMax) ||
-				needs_speed(ProcessorType::UpdateAlphaLevelScale)) {
-			speed = length(vel);
-		}
 		const ProcessorParams &pp = p_e.params;
 		ParticleVertex out;
 		Vec3 pos{ p_s.f[kPx][p_at], p_s.f[kPy][p_at], p_s.f[kPz][p_at] };
@@ -1066,18 +1086,18 @@ struct FxWorld::Impl {
 		out.rotation = p_s.f[kRot][p_at];
 		// Size: spawn size x UpdateSize x the axis processors (docs §6.4).
 		Vec3 size{ p_s.f[kSx][p_at], p_s.f[kSy][p_at], p_s.f[kSz][p_at] };
-		if (p_e.has(ProcessorType::UpdateSize)) {
-			const Vec4 v = slot_v(p_e, ProcessorType::UpdateSize, p_inst, p_it, t, serial, speed);
+		if (p_o.has_size) {
+			const Vec3 v = v3_of(p_o.size, p_i);
 			size = { size.x * v.x, size.y * v.y, size.z * v.z };
 		}
-		if (p_e.has(ProcessorType::UpdateSizeX)) {
-			size.x *= slot_x(p_e, ProcessorType::UpdateSizeX, p_inst, p_it, t, serial, speed);
+		if (p_o.has_size_x) {
+			size.x *= vx_of(p_o.size_x, p_i);
 		}
-		if (p_e.has(ProcessorType::UpdateSizeY)) {
-			size.y *= slot_x(p_e, ProcessorType::UpdateSizeY, p_inst, p_it, t, serial, speed);
+		if (p_o.has_size_y) {
+			size.y *= vx_of(p_o.size_y, p_i);
 		}
-		if (p_e.has(ProcessorType::UpdateSizeZ)) {
-			size.z *= slot_x(p_e, ProcessorType::UpdateSizeZ, p_inst, p_it, t, serial, speed);
+		if (p_o.has_size_z) {
+			size.z *= vx_of(p_o.size_z, p_i);
 		}
 		out.size = size;
 		// Flipbook frame, wrapped into [0, frame_count).
@@ -1094,14 +1114,14 @@ struct FxWorld::Impl {
 		}
 		out.frame = frame;
 		Vec3 rgb{ 1, 1, 1 };
-		if (p_e.has(ProcessorType::UpdateColor)) {
+		if (p_o.has_color) {
 			rgb = pp.color;
-			if (p_e.slot(ProcessorType::UpdateColor).evaluator != kNoEvaluator) {
-				const Vec4 v = slot_v(p_e, ProcessorType::UpdateColor, p_inst, p_it, t, serial, speed);
+			if (p_o.color_eval) {
+				const Vec3 v = v3_of(p_o.color, p_i);
 				rgb = { rgb.x * v.x, rgb.y * v.y, rgb.z * v.z };
 			}
 		}
-		const float alpha = p_e.has(ProcessorType::UpdateTransparency) ? slot_x(p_e, ProcessorType::UpdateTransparency, p_inst, p_it, t, serial, speed) : 1.0f;
+		const float alpha = p_o.has_alpha ? vx_of(p_o.alpha, p_i) : 1.0f;
 		out.color = { rgb.x, rgb.y, rgb.z, alpha };
 		if (p_e.tmpl.emittable == EmittableType::ParticleMesh) {
 			out.axis = { p_s.f[kAx][p_at], p_s.f[kAy][p_at], p_s.f[kAz][p_at] };
@@ -1109,15 +1129,20 @@ struct FxWorld::Impl {
 			out.axis = normalize_or_zero(wvel);
 		}
 		out.age = t;
-		out.alpha_min = p_e.has(ProcessorType::UpdateAlphaLevelMin) ? pp.alpha_min_level * slot_x(p_e, ProcessorType::UpdateAlphaLevelMin, p_inst, p_it, t, serial, speed) : 0.0f;
-		out.alpha_max = p_e.has(ProcessorType::UpdateAlphaLevelMax) ? pp.alpha_max_level * slot_x(p_e, ProcessorType::UpdateAlphaLevelMax, p_inst, p_it, t, serial, speed) : 1.0f;
-		out.alpha_scale = p_e.has(ProcessorType::UpdateAlphaLevelScale) ? slot_x(p_e, ProcessorType::UpdateAlphaLevelScale, p_inst, p_it, t, serial, speed) : 1.0f;
+		out.alpha_min = p_o.has_alpha_min ? pp.alpha_min_level * vx_of(p_o.alpha_min, p_i) : 0.0f;
+		out.alpha_max = p_o.has_alpha_max ? pp.alpha_max_level * vx_of(p_o.alpha_max, p_i) : 1.0f;
+		out.alpha_scale = p_o.has_alpha_scale ? vx_of(p_o.alpha_scale, p_i) : 1.0f;
 		out.serial = serial;
-		// NaN guard (docs §6.8): position, velocity, size, colour, frame and every other output field.
-		if (!finite3(out.position.x, out.position.y, out.position.z) || !finite3(vel.x, vel.y, vel.z) || !finite3(out.size.x, out.size.y, out.size.z) ||
-				!finite3(out.color.x, out.color.y, out.color.z) || !std::isfinite(out.color.w) || !std::isfinite(out.frame) || !std::isfinite(out.rotation) ||
-				!finite3(out.axis.x, out.axis.y, out.axis.z) || !std::isfinite(out.alpha_min) || !std::isfinite(out.alpha_max) ||
-				!std::isfinite(out.alpha_scale)) {
+		// NaN guard (docs §6.8): position, velocity, size, colour, frame and every other output field. x * 0 is 0 for
+		// a finite x and NaN for an infinite or NaN one, so one sum tests them all.
+		// Summed as a balanced tree (short dependency chains).
+		const float p0 = (out.position.x + out.position.y) + (out.position.z + vel.x);
+		const float p1 = (vel.y + vel.z) + (out.size.x + out.size.y);
+		const float p2 = (out.size.z + out.color.x) + (out.color.y + out.color.z);
+		const float p3 = (out.color.w + out.frame) + (out.rotation + out.axis.x);
+		const float p4 = (out.axis.y + out.axis.z) + (out.alpha_min + out.alpha_max);
+		const float probe = (((p0 + p1) + (p2 + p3)) + (p4 + out.alpha_scale)) * 0.0f;
+		if (probe != 0.0f) {
 			return false;
 		}
 		ParticleLight light;

@@ -63,11 +63,17 @@ public:
 	// ("Default", "Grenade", ...), so a name is a convenience for tests and bf3dump, never a key.
 	std::optional<uint8_t> material_by_name(std::string_view p_name) const;
 	std::string_view material_name(uint8_t p_index) const;
+	// MaterialIndexMap (material index -> grid row) and DefaultMaterialIndex, for the counting rules of docs §5.3.
+	std::span<const int64_t> index_map() const { return index_map_; }
+	int64_t default_material_index() const { return default_material_index_; }
+	// The cell of grid row p_row, column p_col (both < rows()).
+	const ImpactCell &cell(size_t p_row, size_t p_col) const { return unique_[cells_[p_row * rows_ + p_col]]; }
 
 private:
 	size_t rows_ = 0;
 	size_t effect_relations_ = 0;
 	size_t decal_relations_ = 0;
+	int64_t default_material_index_ = 0;
 	std::vector<int64_t> index_map_; // MaterialIndexMap
 	std::vector<uint32_t> cells_; // rows_ * rows_ indices into unique_
 	std::vector<ImpactCell> unique_; // distinct cells; [0] is the empty cell

@@ -18,6 +18,7 @@
 
 namespace bf3::fx {
 
+
 namespace {
 
 std::string fmt(const char *p_fmt, double p_v) {
@@ -62,6 +63,14 @@ void add_stats(FxStats &r_sum, const FxStats &p_s) {
 	r_sum.nonfinite_kills += p_s.nonfinite_kills;
 	r_sum.stolen_instances += p_s.stolen_instances;
 	r_sum.refused_starts += p_s.refused_starts;
+}
+
+// The live_* fields of a report are maxima over every frame (the end-of-run values are usually 0).
+void note_peak(FxStats &r_sum, const FxStats &p_s) {
+	r_sum.live_effects = std::max(r_sum.live_effects, p_s.live_effects);
+	r_sum.live_emitters = std::max(r_sum.live_emitters, p_s.live_emitters);
+	r_sum.live_particles = std::max(r_sum.live_particles, p_s.live_particles);
+	r_sum.live_lights = std::max(r_sum.live_lights, p_s.live_lights);
 }
 
 void stats_lines(const FxStats &p_s, std::vector<std::string> &r_lines) {
@@ -247,8 +256,8 @@ uint64_t fx_frame_digest(const FxWorld &p_world) {
 	h = fnv_value(h, l.size());
 	h = fnv(h, l.data(), l.size_bytes());
 	for (const EmitterOutput &o : p_world.outputs()) {
+		// Not the handle generation: it keeps counting across clear(), so it tells only how many starts the world saw.
 		h = fnv_value(h, o.effect.slot);
-		h = fnv_value(h, o.effect.generation);
 		h = fnv_value(h, reinterpret_cast<uintptr_t>(o.def));
 		h = fnv_value(h, o.emitter);
 		h = fnv_value(h, o.component);
@@ -325,6 +334,7 @@ HarnessReport fx_simulate_starts(const std::shared_ptr<const EffectDef> &p_def, 
 		const uint64_t seed = fx_harness_seed(p_run.seed, i);
 		std::vector<uint8_t> seen(nc, 0);
 		const core::Result<EffectHandle> h = fx_run_start(world, p_def, i, p_run, [&](const FxWorld &p_w, EffectHandle, uint64_t, double, float) {
+			note_peak(rep.stats, p_w.stats());
 			for (const EmitterOutput &o : p_w.outputs()) {
 				if (o.particle_count > 0 && o.component < nc) {
 					seen[o.component] = 1;
@@ -441,6 +451,7 @@ HarnessReport fx_golden_muzzle1p(const std::shared_ptr<const EffectDef> &p_def, 
 		};
 		std::map<uint32_t, Obs> last; // flash serial -> previous observation
 		const core::Result<EffectHandle> h = fx_run_start(world, p_def, i, p_run, [&](const FxWorld &p_w, EffectHandle, uint64_t, double, float p_dt) {
+			note_peak(rep.stats, p_w.stats());
 			const std::span<const ParticleVertex> parts = p_w.particles();
 			const std::span<const ParticleLight> lights = p_w.lights();
 			for (const EmitterOutput &o : p_w.outputs()) {
@@ -592,6 +603,7 @@ HarnessReport fx_golden_oilfire(const std::shared_ptr<const EffectDef> &p_def, c
 	uint32_t steady_min = UINT32_MAX, steady_max = 0, max_live = 0;
 	uint64_t frames = 0;
 	const core::Result<EffectHandle> h = fx_run_start(world, p_def, 0, p_run, [&](const FxWorld &p_w, EffectHandle, uint64_t, double p_time, float) {
+		note_peak(rep.stats, p_w.stats());
 		const uint32_t live = p_w.stats().live_particles;
 		max_live = std::max(max_live, live);
 		if (p_time > 15.0) {
@@ -620,6 +632,227 @@ HarnessReport fx_golden_oilfire(const std::shared_ptr<const EffectDef> &p_def, c
 	}
 	if (rep.stats.spawns_dropped != 0) {
 		rep.failures.push_back("spawns_dropped " + std::to_string(rep.stats.spawns_dropped));
+	}
+	rep.pass = rep.failures.empty();
+	return rep;
+}
+
+// ---- G5: impacts -----------------------------------------------------------------------------------------------
+
+namespace {
+
+std::string leaf(std::string_view p_name) {
+	const size_t slash = p_name.rfind('/');
+	return std::string(slash == std::string_view::npos ? p_name : p_name.substr(slash + 1));
+}
+
+std::string joined_leaves(const std::vector<std::string> &p_names) {
+	std::string out;
+	for (const std::string &n : p_names) {
+		out += (out.empty() ? "" : ",") + leaf(n);
+	}
+	return out.empty() ? "-" : out;
+}
+
+std::string lower(std::string_view p_s) {
+	std::string out(p_s);
+	for (char &c : out) {
+		if (c >= 'A' && c <= 'Z') {
+			c = char(c - 'A' + 'a');
+		}
+	}
+	return out;
+}
+
+} // namespace
+
+ImpactCounts fx_impact_counts(const ImpactTable &p_table, uint8_t p_projectile) {
+	ImpactCounts c;
+	c.rows = p_table.rows();
+	c.effect_relations = p_table.effect_relations();
+	c.decal_relations = p_table.decal_relations();
+	const std::span<const int64_t> map = p_table.index_map();
+	if (p_projectile >= map.size() || map[p_projectile] < 0 || uint64_t(map[p_projectile]) >= c.rows) {
+		return c;
+	}
+	const size_t row = size_t(map[p_projectile]);
+	const int64_t def = p_table.default_material_index();
+	const int64_t default_row = def >= 0 && uint64_t(def) < map.size() ? map[size_t(def)] : -1;
+	for (size_t i = 0; i < map.size(); ++i) {
+		const bool valid = map[i] >= 0 && uint64_t(map[i]) < c.rows;
+		const ImpactCell *cell = valid ? &p_table.cell(row, size_t(map[i])) : nullptr;
+		if (map[i] == default_row) {
+			++c.default_row_indices;
+			if (cell == nullptr || cell->effects.size() != 1 || leaf(cell->effects[0]) != "fx_impact_generic_01_s" || !cell->decal.empty()) {
+				c.default_cells_generic = false;
+			}
+		}
+		if (cell != nullptr && cell->effects.size() == 1 && leaf(cell->effects[0]) == "fx_impact_generic_01_s") {
+			++c.generic_effect_indices;
+		}
+		if (cell == nullptr || cell->effects.empty()) {
+			++c.no_effect_indices;
+		}
+	}
+	for (size_t col = 0; col < c.rows; ++col) {
+		const ImpactCell &cell = p_table.cell(row, col);
+		if (!cell.has_effect_relation) {
+			++c.columns_without_effect_relation;
+		}
+		for (const std::string &e : cell.effects) {
+			c.distinct_effects.insert(e);
+		}
+	}
+	return c;
+}
+
+HarnessReport fx_golden_impacts(const ImpactTable &p_table, std::string_view p_level, uint8_t p_projectile) {
+	HarnessReport rep;
+	const std::string level = lower(p_level);
+	const ImpactCounts c = fx_impact_counts(p_table, p_projectile);
+	rep.lines.push_back("impacts\t" + level + "\tprojectile\t" + std::to_string(p_projectile));
+	rep.lines.push_back("rows\t" + std::to_string(c.rows));
+	rep.lines.push_back("effect_relations\t" + std::to_string(c.effect_relations));
+	rep.lines.push_back("decal_relations\t" + std::to_string(c.decal_relations));
+	rep.lines.push_back("default_row_indices\t" + std::to_string(c.default_row_indices) + "\tall_generic\t" + std::to_string(int(c.default_cells_generic)));
+	rep.lines.push_back("generic_effect_indices\t" + std::to_string(c.generic_effect_indices));
+	rep.lines.push_back("no_effect_indices\t" + std::to_string(c.no_effect_indices));
+	rep.lines.push_back("columns_without_effect_relation\t" + std::to_string(c.columns_without_effect_relation));
+	std::string distinct;
+	for (const std::string &e : c.distinct_effects) {
+		distinct += (distinct.empty() ? "" : ",") + leaf(e);
+	}
+	rep.lines.push_back("distinct_effects\t" + std::to_string(c.distinct_effects.size()) + "\t" + distinct);
+	struct Named {
+		const char *name;
+		uint8_t index;
+		const char *effect;
+		const char *decal; // "" none
+		float spread; // < 0: not gated
+	};
+	const bool metro = level == "mp_subway";
+	const bool caspian = level == "mp_007";
+	std::vector<Named> named;
+	if (metro) {
+		named = { { "Concrete", 8, "fx_impact_concrete_01_s_xp2", "decal_concrete_s_01", 30 }, { "Brick", 2, "fx_impact_concrete_01_s", "decal_brick_s_01", 30 },
+			{ "Body", 66, "fx_impact_soldier_body_s", "", 90 }, { "Chest", 158, "fx_impact_soldier_body_s", "", 90 },
+			{ "Head", 65, "fx_impact_soldier_body_s", "", 0 }, { "Water", 18, "fx_impact_water_s", "", -1 },
+			{ "Glass", 10, "fx_impact_glass_01_s", "decal_glass_s_01", 5 }, { "Metal", 3, "fx_impact_metal_01_s", "decal_metalarmor_s_01", 45 } };
+	} else if (caspian) {
+		named = { { "Concrete", 8, "fx_impact_concrete_01_s_xp2", "decal_concrete_s_01", -1 }, { "Brick", 2, "fx_impact_generic_01_s", "", -1 },
+			{ "Body", 66, "fx_impact_soldier_body_s", "", -1 }, { "Chest", 158, "fx_impact_soldier_body_s", "", -1 },
+			{ "Head", 65, "fx_impact_soldier_body_s", "", -1 }, { "Water", 18, "fx_impact_water_s", "", -1 },
+			{ "Glass", 10, "fx_impact_glass_01_s", "decal_glass_s_01", -1 }, { "Metal", 3, "fx_impact_metal_01_s", "decal_metalarmor_s_01", -1 } };
+	} else {
+		named = { { "Concrete", 8, "", "", -1 }, { "Brick", 2, "", "", -1 }, { "Body", 66, "", "", -1 }, { "Chest", 158, "", "", -1 },
+			{ "Head", 65, "", "", -1 }, { "Water", 18, "", "", -1 }, { "Glass", 10, "", "", -1 }, { "Metal", 3, "", "", -1 } };
+	}
+	for (const Named &n : named) {
+		const ImpactCell *cell = p_table.select(p_projectile, n.index);
+		const std::string name(p_table.material_name(n.index));
+		if (cell == nullptr) {
+			rep.lines.push_back("cell\t" + std::string(n.name) + "\t" + std::to_string(n.index) + "\t" + name + "\t(none)");
+			if (metro || caspian) {
+				rep.failures.push_back(std::string(n.name) + ": no cell");
+			}
+			continue;
+		}
+		const std::string decal = cell->decal.empty() ? std::string() : leaf(cell->decal);
+		rep.lines.push_back("cell\t" + std::string(n.name) + "\t" + std::to_string(n.index) + "\t" + name + "\teffects\t" + joined_leaves(cell->effects) +
+				"\tdecal\t" + (decal.empty() ? std::string("-") : decal) + "\tspread\t" + num(cell->max_spread_degrees));
+		if (metro || caspian) {
+			if (cell->effects.size() != 1 || leaf(cell->effects[0]) != n.effect) {
+				rep.failures.push_back(std::string(n.name) + ": effects " + joined_leaves(cell->effects) + ", expected " + n.effect);
+			}
+			if (decal != n.decal) {
+				rep.failures.push_back(std::string(n.name) + ": decal " + (decal.empty() ? std::string("-") : decal) + ", expected " +
+						(n.decal[0] != 0 ? n.decal : "-"));
+			}
+			if (n.spread >= 0 && cell->max_spread_degrees != n.spread) {
+				rep.failures.push_back(std::string(n.name) + ": spread " + num(cell->max_spread_degrees) + ", expected " + num(n.spread));
+			}
+		}
+	}
+	const auto expect = [&](const char *p_what, size_t p_got, size_t p_want) {
+		if (p_got != p_want) {
+			rep.failures.push_back(std::string(p_what) + " " + std::to_string(p_got) + ", expected " + std::to_string(p_want));
+		}
+	};
+	if (metro || caspian) {
+		expect("rows", c.rows, metro ? 102 : 118);
+		expect("effect_relations", c.effect_relations, metro ? 223 : 299);
+		expect("decal_relations", c.decal_relations, metro ? 110 : 123);
+		expect("default_row_indices", c.default_row_indices, metro ? 79 : 63);
+		expect("generic_effect_indices", c.generic_effect_indices, metro ? 81 : 64);
+		expect("no_effect_indices", c.no_effect_indices, metro ? 66 : 87);
+		expect("columns_without_effect_relation", c.columns_without_effect_relation, metro ? 65 : 86);
+		expect("distinct_effects", c.distinct_effects.size(), 16);
+		if (!c.default_cells_generic) {
+			rep.failures.push_back("a default-row cell is not exactly {fx_impact_generic_01_s, no decal}");
+		}
+	}
+	rep.pass = rep.failures.empty();
+	return rep;
+}
+
+// ---- G6: atlas -------------------------------------------------------------------------------------------------
+
+HarnessReport fx_golden_atlas(const EmitterAtlas &p_atlas, std::string_view p_level, const std::set<std::string> &p_used_names, size_t p_documents) {
+	HarnessReport rep;
+	const std::string level = lower(p_level);
+	const auto tex_line = [&](const char *p_kind, const AtlasTextureInfo &p_t) {
+		rep.lines.push_back(std::string("texture\t") + p_kind + "\t" + p_t.partition + "\tformat\t" + std::to_string(int(p_t.format)) + "\tsrgb\t" +
+				std::to_string(int(p_t.srgb)) + "\tsize\t" + std::to_string(p_t.width) + "x" + std::to_string(p_t.height) + "\tmips\t" +
+				std::to_string(p_t.mips));
+	};
+	tex_line("base", p_atlas.base());
+	tex_line("normal", p_atlas.normal());
+	size_t base = 0, normal = 0, degenerate = 0, inexact = 0, unused = 0;
+	for (const AtlasEntry &e : p_atlas.entries()) {
+		base += e.kind == AtlasKind::Base ? 1 : 0;
+		normal += e.kind == AtlasKind::Normal ? 1 : 0;
+		degenerate += e.degenerate ? 1 : 0;
+		inexact += !e.degenerate && !e.pixel_exact ? 1 : 0;
+		const bool used = p_used_names.contains(e.name);
+		unused += used ? 0 : 1;
+		rep.lines.push_back("entry\t" + e.name + "\t" + (e.kind == AtlasKind::Base ? "base" : "normal") + "\tuv\t" + num(e.min_uv.x) + "," + num(e.min_uv.y) +
+				"\t" + num(e.max_uv.x) + "," + num(e.max_uv.y) + "\tpx\t" + std::to_string(e.px_min_x) + "," + std::to_string(e.px_min_y) + "\t" +
+				std::to_string(e.px_max_x) + "," + std::to_string(e.px_max_y) + (e.degenerate ? "\tdegenerate" : "") +
+				(!e.degenerate && !e.pixel_exact ? "\tinexact" : "") + (used ? "" : "\tunused"));
+	}
+	size_t missing = 0;
+	for (const std::string &n : p_used_names) {
+		if (p_atlas.resolve(n) == nullptr) {
+			++missing;
+			rep.lines.push_back("missing\t" + n);
+		}
+	}
+	rep.lines.push_back("atlas\t" + level + "\tentries\t" + std::to_string(p_atlas.entries().size()) + "\tbase\t" + std::to_string(base) + "\tnormal\t" +
+			std::to_string(normal) + "\tdegenerate\t" + std::to_string(degenerate) + "\tinexact\t" + std::to_string(inexact));
+	rep.lines.push_back("names\tdocuments\t" + std::to_string(p_documents) + "\tused\t" + std::to_string(p_used_names.size()) + "\tmissing\t" +
+			std::to_string(missing) + "\tunused_entries\t" + std::to_string(unused));
+	const auto expect = [&](const char *p_what, size_t p_got, size_t p_want) {
+		if (p_got != p_want) {
+			rep.failures.push_back(std::string(p_what) + " " + std::to_string(p_got) + ", expected " + std::to_string(p_want));
+		}
+	};
+	expect("missing names", missing, 0);
+	expect("inexact rects", inexact, 0);
+	if (level == "mp_subway") {
+		expect("entries", p_atlas.entries().size(), 52);
+		expect("base entries", base, 42);
+		expect("normal entries", normal, 10);
+		expect("degenerate entries", degenerate, 3);
+		expect("unused entries", unused, 0);
+		expect("documents", p_documents, 1053);
+		const AtlasTextureInfo &b = p_atlas.base();
+		const AtlasTextureInfo &n = p_atlas.normal();
+		if (b.format != core::res::TextureFormat::Dxt5 || !b.srgb || b.width != 4096 || b.height != 4096 || b.mips != 13) {
+			rep.failures.push_back("base atlas texture differs from DXT5 sRGB 4096 x 4096, 13 mips");
+		}
+		if (n.format != core::res::TextureFormat::NormalDxt5Rga || n.srgb || n.width != 1024 || n.height != 2048 || n.mips != 12) {
+			rep.failures.push_back("normal atlas texture differs from NormalDXT5RGA linear 1024 x 2048, 12 mips");
+		}
 	}
 	rep.pass = rep.failures.empty();
 	return rep;
@@ -796,6 +1029,7 @@ BenchReport fx_bench(const EffectDef &p_oilfire, const EffectDef &p_muzzle, cons
 		}
 		BenchRun br;
 		double live_sum = 0;
+		double emitter_sum = 0;
 		std::chrono::steady_clock::duration timed{};
 		for (uint32_t f = 0; f < p_warmup_frames + p_timed_frames; ++f) {
 			if (f % 6 == 0) { // 8 muzzles every 0.1 s
@@ -823,11 +1057,13 @@ BenchReport fx_bench(const EffectDef &p_oilfire, const EffectDef &p_muzzle, cons
 			if (timed_frame) {
 				timed += std::chrono::steady_clock::now() - t0;
 				live_sum += world.stats().live_particles;
+				emitter_sum += world.stats().live_emitters;
 			}
 		}
 		br.timed_seconds = std::chrono::duration<double>(timed).count();
 		br.ns_per_particle = br.admitted > 0 ? br.timed_seconds * 1e9 / double(br.admitted) : 0.0;
 		br.mean_live = p_timed_frames > 0 ? live_sum / double(p_timed_frames) : 0.0;
+		br.mean_emitters = p_timed_frames > 0 ? emitter_sum / double(p_timed_frames) : 0.0;
 		br.stats = world.stats();
 		rep.runs.push_back(br);
 	}
