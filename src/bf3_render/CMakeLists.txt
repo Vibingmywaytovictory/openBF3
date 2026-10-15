@@ -41,7 +41,8 @@ target_sources(bf3_render PRIVATE
     src/scene_lanes.cpp
 )
 
-# S3 crowd (docs/design/s3.md §4, §6, §15): the 3p US / RU soldier asset set and the shoulder pinch metric (interface).
+# S3 crowd (docs/design/s3.md §4, §6, §15): the 3p US / RU soldier asset set and the shoulder pinch metric.
 target_sources(bf3_render PRIVATE
     include/bf3/render/soldier_assets.h
+    src/soldier_assets.cpp
 )

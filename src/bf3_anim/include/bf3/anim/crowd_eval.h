@@ -81,7 +81,11 @@ struct CrowdConfig {
 	TemporalLodTable lod; // read_game_animation_settings, or the defaults
 	LocoParams loco;
 	AdditiveOrder aim_order = AdditiveOrder::LocalPost; // s3.md §16 Q2
-	float aim_full_pitch_deg = 60.0f; // pitch at which AimUp / AimDown have weight 1 (inferred, s3.md §5.5)
+	// Pitch at which AimUp / AimDown have weight 1 (s3.md §5.5): the barrel elevation change the additive gives at
+	// weight 1 (measure_aim; the defaults are the values measured on the retail clips with LocalPost, so weight =
+	// |pitch| / full makes the barrel follow the pitch). Retail maps pitch through the Ant graph [inferred, §16 Q7].
+	float aim_up_full_pitch_deg = 78.1f;
+	float aim_down_full_pitch_deg = 60.7f;
 	bool run_noise = false; // add Rifle_Noise_RunFwd1 while running (off for the gates)
 };
 

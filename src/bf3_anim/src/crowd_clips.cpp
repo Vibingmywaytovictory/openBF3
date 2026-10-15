@@ -4,6 +4,7 @@
 #include "bf3/anim/clip_asset.h"
 #include "bf3/core/gameplay/work_budget.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -341,6 +342,78 @@ core::Result<CrowdClipData> load_chosen_clip(const CrowdClipSet &p_set, const An
 		return s.error();
 	}
 	return d;
+}
+
+core::Result<AimMeasure> measure_aim(const CrowdClipSet &p_set, AdditiveOrder p_order) {
+	const Skeleton &rig = p_set.rig;
+	const int32_t wep = rig.find("Wep_Root");
+	if (wep < 0) {
+		return core::make_error("aim: the rig has no Wep_Root");
+	}
+	core::ant::ClipPose scratch;
+	LocalPose base;
+	const CrowdClipData &idle = p_set.get(CrowdClip::Idle);
+	if (!sample_pose(rig, idle.clip, idle.tracks, 0.0f, base, scratch)) {
+		return core::make_error("aim: the idle clip does not sample");
+	}
+	std::vector<Xform> model;
+	model_pose(rig, base, model);
+	AimMeasure m;
+	float best = -2.0f;
+	for (int a = 0; a < 3; ++a) {
+		Vec3 axis{};
+		(a == 0 ? axis.x : a == 1 ? axis.y : axis.z) = 1.0f;
+		const Vec3 v = quat_rotate(model[size_t(wep)].q, axis);
+		for (const float sign : { 1.0f, -1.0f }) {
+			if (v.z * sign > best) {
+				best = v.z * sign;
+				m.barrel_axis = a;
+				m.barrel_negative = sign < 0.0f;
+			}
+		}
+	}
+	auto barrel = [&](const std::vector<Xform> &p_model, double &r_elevation, double &r_azimuth) {
+		Vec3 axis{};
+		(m.barrel_axis == 0 ? axis.x : m.barrel_axis == 1 ? axis.y : axis.z) = m.barrel_negative ? -1.0f : 1.0f;
+		const Vec3 d = quat_rotate(p_model[size_t(wep)].q, axis);
+		r_elevation = std::asin(std::clamp(double(d.y), -1.0, 1.0)) * 57.29577951308232;
+		r_azimuth = std::atan2(double(d.x), double(d.z)) * 57.29577951308232;
+	};
+	double rest_el = 0.0, rest_az = 0.0;
+	barrel(model, rest_el, rest_az);
+	m.monotonic = true;
+	for (const CrowdClip clip : { CrowdClip::AimUp, CrowdClip::AimDown }) {
+		const CrowdClipData &c = p_set.get(clip);
+		if (c.mask.size() != rig.size()) {
+			return core::make_error("aim: no aim clip");
+		}
+		LocalPose delta = identity_pose(rig);
+		if (!core::ant::sample_clip(c.clip, float(c.tracks.end_frame), scratch)) {
+			return core::make_error("aim: an aim clip does not sample");
+		}
+		apply_clip_pose(c.tracks, scratch, delta);
+		double last = 0.0, el = 0.0, az = 0.0;
+		for (const float w : { 0.25f, 0.5f, 0.75f, 1.0f }) {
+			LocalPose p = base;
+			apply_additive(p, delta, c.mask, w, p_order);
+			std::vector<Xform> pm;
+			model_pose(rig, p, pm);
+			barrel(pm, el, az);
+			const double mag = std::fabs(el - rest_el);
+			m.monotonic = m.monotonic && mag >= last - 0.01;
+			last = mag;
+		}
+		const float de = float(el - rest_el);
+		const float daz = float(std::fabs(std::remainder(az - rest_az, 360.0)));
+		if (clip == CrowdClip::AimUp) {
+			m.up_deg = de;
+			m.up_azimuth_deg = daz;
+		} else {
+			m.down_deg = de;
+			m.down_azimuth_deg = daz;
+		}
+	}
+	return m;
 }
 
 } // namespace bf3::anim

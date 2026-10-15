@@ -100,4 +100,22 @@ core::Result<uint32_t> weapon_choice_index(const core::ant::AntLibrary &p_librar
 core::Result<CrowdClipData> load_chosen_clip(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library, std::string_view p_chooser,
 		uint32_t p_index);
 
+// The aim additives' effect on the weapon (s3.md §5.5, the additive-order criterion): over the idle pose, the barrel
+// (the Wep_Root local axis most aligned with model +Z, i.e. forward) is measured at weights 0.25, 0.5, 0.75 and 1 of
+// AimUp and of AimDown, applied in order p_order with their own masks. Measured on the retail clips [verified
+// 2026-10-15]: LocalPost raises the barrel 78.1 deg (azimuth 4.7 deg; the barrel is nearly vertical) and lowers it
+// 60.7 deg (azimuth 0.06 deg), monotonic; LocalPre gives +26.3 deg with a 36.8 deg azimuth swing and AimDown +0.6 deg,
+// not monotonic. So AimUp / AimDown are the full up / down aim, and LocalPost is the order.
+struct AimMeasure {
+	int barrel_axis = 2; // Wep_Root local axis 0..2
+	bool barrel_negative = false; // the barrel is the negative axis
+	float up_deg = 0.0f; // barrel elevation change of AimUp at weight 1
+	float down_deg = 0.0f; // of AimDown (negative when it lowers the barrel)
+	float up_azimuth_deg = 0.0f, down_azimuth_deg = 0.0f; // |azimuth change| at weight 1
+	bool monotonic = false; // |elevation change| grows with the weight for both clips
+	// AimUp raises and AimDown lowers the barrel by >= 25 deg each, monotonic, with |azimuth change| < 5 deg.
+	bool qualifies() const { return up_deg >= 25.0f && down_deg <= -25.0f && monotonic && up_azimuth_deg < 5.0f && down_azimuth_deg < 5.0f; }
+};
+core::Result<AimMeasure> measure_aim(const CrowdClipSet &p_set, AdditiveOrder p_order);
+
 } // namespace bf3::anim
