@@ -28,6 +28,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/level/budget.h"
+#include "bf3/core/res/dx_texture.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -339,6 +340,12 @@ struct MinimapImages {
 
 // A DxTexture res that must be L8, 2D, one face, at most kMaxMinimapImageSide a side: its largest mip.
 Result<L8Image> load_l8_texture(const LevelMount &p_mount, std::string_view p_res_name);
+// The same checks on a parsed header and its whole chunk (load_l8_texture's decode step; the unit and fuzz tests
+// feed it synthetic and mutated headers). p_name is for messages.
+Result<L8Image> decode_l8_texture(const res::DxTexture &p_texture, std::span<const uint8_t> p_chunk, std::string_view p_name);
+// The level superbundle mounted read-only with every bundle indexed: the satellite, the fields and the combat-area
+// textures ship in the level bundle and its sub-world bundles (the mount load_minimap_images reads from).
+Result<LevelMount> mount_minimap_level(const Install &p_install, std::string_view p_level_id);
 Result<MinimapImages> load_minimap_images(const LevelMount &p_mount, const MinimapLevel &p_level);
 // Box-filtered mips down to 1x1, largest first (the satellite ships one mip; the Godot upload wants a chain so the
 // 2048² image does not alias at 300 px). p_image is mip 0.
@@ -368,6 +375,30 @@ inline constexpr size_t kMaxAreaPolygonPoints = 1024; // retail: Metro TDM's gam
 // kMaxAreaPolygonPoints; charges p_world's budget per point.
 Result<std::vector<std::array<float, 2>>> read_area_polygon(const level::LoadedLevel &p_level, const level::World &p_world,
 		std::string_view p_partition);
+
+// The per-texel minimum of the masks' distance values (inside either is inside, design D2): the one R8 field the
+// shader samples. All non-empty masks must share one size; fails when none is non-empty.
+Result<L8Image> combat_area_min_field(std::span<const L8Image> p_masks);
+
+// ---- census (gate G3; bf3dump minimap --census) -------------------------------------------------------------------
+// Over a library (ctest ui.minimap: "@all-mp"): every partition under levels/<l>/.../ui/ whose primary is a
+// VeniceUICombatAreaAsset is read with read_combat_area and each distance field it references is decoded with
+// load_l8_texture; every UIDistanceFieldAsset there resolves to a texture that must decode as L8. Textures are read
+// from the mount of the superbundle the TextureAsset partition came from (EbxLibrary::origin).
+struct MinimapCensus {
+	size_t partitions_scanned = 0; // names under levels/*/ui/ parsed
+	size_t combat_area_assets = 0; // VeniceUICombatAreaAsset partitions
+	size_t combat_area_read = 0; // of them, read_combat_area succeeded
+	size_t levels_with_areas = 0;
+	size_t null_surroundings = 0;
+	size_t null_distance_fields = 0; // a null DistanceField (Metro's unused Rush stage 5: a5, d5)
+	size_t referenced_fields = 0; // distinct distance-field textures the assets reference
+	size_t referenced_decoded = 0;
+	size_t distance_field_assets = 0; // UIDistanceFieldAsset partitions
+	size_t distance_field_decoded = 0;
+	std::vector<std::string> failures; // "<name>: <error>", every one
+};
+Result<MinimapCensus> minimap_census(const EbxLibrary &p_library);
 
 // ---- cache (design §8) ------------------------------------------------------------------------------------------------
 // Nothing here is cached: Metro's load_level + traverse take 0.34 s + 0.04 s (bf3dump level, warm OS cache), the

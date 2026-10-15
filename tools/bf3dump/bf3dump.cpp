@@ -48,6 +48,9 @@
 //                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
 //                              ... --shapes` adds them to a prepare run
 //   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
+// UI ui2 (ui_commands.cpp; docs/design/ui-minimap-icons.md §15):
+//   minimap <LEVEL> [MODE] | minimap --census   UIMinimapData, combat areas, objectives / the all-level census
+//   hud-icons | item-icons [LEVEL] | hud-sources [--unbound]   the hud3dicons atlas, _small item icons, DataSources
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -70,6 +73,8 @@
 #include "shapes_commands.h" // M1 T1
 // M1 T2: spawn points and spawners of a level x mode.
 #include "spawns_commands.h"
+// UI ui2: minimap, HUD icon and HUD source commands.
+#include "ui_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -614,6 +619,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
+	}
+	// UI ui2: minimap, hud-icons, item-icons, hud-sources (ui_commands.cpp).
+	if (const int rc = bf3dump::dispatch_ui2(ebx_ctx, cmd, rest); rc >= 0) {
+		return rc;
 	}
 	usage();
 	return 2;

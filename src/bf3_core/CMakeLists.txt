@@ -218,11 +218,17 @@ target_sources(bf3_core PRIVATE
     src/level/spawn_points.cpp
 )
 
-# UI ui2 (docs/design/ui-minimap-icons.md §12): the minimap, HUD icon and HUD data-model interfaces. Headers only in
-# this wave; the readers' .cpp files join this block in the implementation wave (design §15).
+# UI ui2 (docs/design/ui-minimap-icons.md §12): the minimap, HUD icon and HUD data-model readers.
 target_sources(bf3_core PRIVATE
     include/bf3/core/ui/minimap.h
     include/bf3/core/ui/hud_icons.h
     include/bf3/core/ui/hud_sources.h
     include/bf3/core/ui/hud_model.h
+    src/ui/ui_ebx.h
+    src/ui/minimap.cpp
+    src/ui/minimap_images.cpp
+    src/ui/hud_icons.cpp
+    src/ui/item_icons.cpp
+    src/ui/hud_sources.cpp
+    src/ui/hud_model.cpp
 )

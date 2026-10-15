@@ -25,7 +25,7 @@
 //   e.g. the Tunguska), VehicleItemHash}.
 //
 // Hostile input: readers charge a gameplay::WorkBudget; at most kMaxHudIcons icons, kMaxHudIconStates states per
-// icon, kMaxHudIconFrames frames per state; UVs must be finite and inside [0, 1] with min <= max; images must be the
+// icon, kMaxHudIconFrames frames per state; UVs must be finite and inside [0, 1]; images must be the
 // expected format and at most kMaxHudIconImageSide a side.
 
 #include "bf3/core/ebx_db.h"
@@ -35,6 +35,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -77,12 +78,18 @@ struct HudIconUv {
 	float max_v = 0.0f;
 };
 
-// An atlas rectangle in texels (AtlasTexture::set_region / draw_texture_rect_region source rect).
+// An atlas rectangle in texels (AtlasTexture::set_region / draw_texture_rect_region source rect), always with a
+// non-negative size. A frame whose MinUv lies right of (or below) its MaxUv is drawn mirrored on that axis: 8 retail
+// frames are written that way (the Blink state of the three flag icons in both axes, UIHudIcon_PercetageBarMiddle and
+// UIHudIcon_PercentageBarBackground in u; verified 2026-10-15 on ui/static/hud3dicons), so flip_x / flip_y keep the
+// order the data gives instead of refusing it.
 struct HudIconRect {
 	int32_t x = 0;
 	int32_t y = 0;
 	int32_t width = 0;
 	int32_t height = 0;
+	bool flip_x = false; // MinUv.x > MaxUv.x
+	bool flip_y = false; // MinUv.y > MaxUv.y
 };
 
 // Rounded to whole texels (retail UVs are exact multiples of 1/256 and 1/1024).
@@ -91,7 +98,14 @@ inline HudIconRect hud_icon_rect(const HudIconUv &p_uv, uint32_t p_atlas_width, 
 	const int32_t y0 = int32_t(std::lround(double(p_uv.min_v) * p_atlas_height));
 	const int32_t x1 = int32_t(std::lround(double(p_uv.max_u) * p_atlas_width));
 	const int32_t y1 = int32_t(std::lround(double(p_uv.max_v) * p_atlas_height));
-	return { x0, y0, x1 - x0, y1 - y0 };
+	HudIconRect r;
+	r.flip_x = x1 < x0;
+	r.flip_y = y1 < y0;
+	r.x = r.flip_x ? x1 : x0;
+	r.y = r.flip_y ? y1 : y0;
+	r.width = r.flip_x ? x0 - x1 : x1 - x0;
+	r.height = r.flip_y ? y0 - y1 : y1 - y0;
+	return r;
 }
 
 struct HudIconStateFrames {
@@ -146,6 +160,9 @@ struct Rgba8Image {
 };
 // p_mount: a mount of the superbundle holding the atlas texture (Win32/UI).
 Result<Rgba8Image> load_hud_icon_texture(const LevelMount &p_mount, const HudIconAtlas &p_atlas);
+// The decode step on a parsed header and its whole chunk (ARGB8888, 2D, one face, at most kMaxHudIconImageSide a side;
+// the unit and fuzz tests feed it synthetic and mutated headers). p_name is for messages.
+Result<Rgba8Image> decode_rgba8_texture(const res::DxTexture &p_texture, std::span<const uint8_t> p_chunk, std::string_view p_name);
 
 // ---- which atlas entry an object shows (design §10.2; M1 has one local team, kM1LocalTeam in minimap_hud.h) -------
 // Retail states of the entries used (bf3dump dump ui/static/hud3dicons, 2026-10-15): LocalPlayer {Default, Squad},
@@ -219,6 +236,8 @@ struct ItemIconImage {
 	std::vector<uint8_t> data; // mip 0
 };
 Result<ItemIconImage> load_item_icon(const LevelMount &p_mount, const ItemIcon &p_icon);
+// The decode step (2D, one face, a format of known size, mip 0 resident and complete).
+Result<ItemIconImage> decode_item_icon(const res::DxTexture &p_texture, std::span<const uint8_t> p_chunk, std::string_view p_name);
 
 // ---- vehicles ---------------------------------------------------------------------------------------------------------
 
