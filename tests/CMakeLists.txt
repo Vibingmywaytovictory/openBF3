@@ -229,6 +229,10 @@ endif()
 openbf3_test(test_m1_contract test_main.cpp m1_contract_tests.cpp test_support.h)
 target_link_libraries(test_m1_contract PRIVATE bf3_host bf3_render)
 add_test(NAME m1.contract COMMAND test_m1_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_contract_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m1.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_contract_cl_dir}")
+endif()
 # M1 T1 (world; docs/design/m1.md §5, §14): sim.world.unit builds synthetic static worlds and checks the
 # CollisionWorld queries and the CollisionWorld::Impl seam (it includes bf3_sim's internal headers and links Jolt for
 # that), the tile / world-index blobs (round trips, hostile bytes), the cache keys and the content-keyed tile cache on
@@ -251,8 +255,13 @@ endif()
 # then again: the cold peak working set <= 512 MiB, the second run all hits; exits 77 = skipped without an install.
 # RUN_SERIAL so a ctest -j neighbour cannot skew the peak. cmake_language(EXIT) needs CMake 3.29.
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME tools.m1_prepare COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -P ${CMAKE_CURRENT_SOURCE_DIR}/m1_prepare.cmake)
+    add_test(NAME tools.m1_prepare COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DE6_REPORT_ONLY=${OPENBF3_ASAN}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/m1_prepare.cmake)
     set_tests_properties(tools.m1_prepare PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+    if(OPENBF3_ASAN)
+        get_filename_component(_openbf3_m1prep_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        set_tests_properties(tools.m1_prepare PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m1prep_cl_dir}")
+    endif()
 endif()
 # M1 T2 (motor; docs/design/m1.md §6, §9.2, §10, §14): sim.motor.unit steps the motor on synthetic static worlds (E1
 # numbers, slopes, steps, walls, ceilings, falls, transitions, determinism, interleaving, sim::catch_up, settle, the

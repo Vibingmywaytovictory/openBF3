@@ -4,7 +4,7 @@
 #   the cold run converts every item and cooks every tile; the second run is all hits (meshes, weapons, the
 #   "jolt-world" entry and every tile) and puts nothing; both print install.unchanged yes.
 # Exits 77 (skipped) when bf3dump finds no install.
-# Usage: cmake -DBF3DUMP=<bf3dump.exe> -P m1_prepare.cmake
+# Usage: cmake -DBF3DUMP=<bf3dump.exe> [-DE6_REPORT_ONLY=ON] -P m1_prepare.cmake (report-only: the asan preset)
 cmake_minimum_required(VERSION 3.29)
 
 if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")
@@ -65,12 +65,17 @@ if(NOT _m)
     set(_peak_int 999999)
     set(_peak "unknown")
 endif()
-if(_peak_int LESS ${E6_LIMIT_MIB})
-    set(_ok TRUE)
+if(E6_REPORT_ONLY)
+    # ASan builds inflate the working set several times over; E6 is a dev-build measurement.
+    message(STATUS "  info  E6 (report only under ASan): cold peak working set ${_peak} MiB, gate ${E6_LIMIT_MIB} MiB")
 else()
-    set(_ok FALSE)
+    if(_peak_int LESS ${E6_LIMIT_MIB})
+        set(_ok TRUE)
+    else()
+        set(_ok FALSE)
+    endif()
+    report(_ok "E6: cold peak working set ${_peak} MiB <= ${E6_LIMIT_MIB} MiB")
 endif()
-report(_ok "E6: cold peak working set ${_peak} MiB <= ${E6_LIMIT_MIB} MiB")
 string(REGEX MATCH "meshes +([0-9]+) items: 0 hits, ([0-9]+) misses \\(([0-9]+) converted, 0 reused, 0 uncached\\), 0 failed" _m "${COLD}")
 if(_m AND CMAKE_MATCH_1 EQUAL CMAKE_MATCH_3)
     set(_ok TRUE)
