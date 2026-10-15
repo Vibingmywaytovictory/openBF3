@@ -51,19 +51,19 @@ Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C
 `ctest` runs `core.guard`, `core.formats` (container and EBX readers on synthetic bytes), `core.install`, `core.fuzz`,
 `core.cache`, `core.cache_data`, `core.ant.unit`, `core.ant`, `core.res.unit`, `core.res`, `core.res.install`,
 `core.gameplay.unit`, `core.gameplay.weapons`, `core.gameplay.fuzz`, `core.gameplay.inspect.unit`,
-`core.gameplay.inspect`, `core.gameplay.tables.unit`, `core.gameplay.tables`, `core.level.collision.unit`,
-`core.level.collision`, `core.ui.text.unit`, `core.ui.text`, `core.ui.text.fuzz`, `anim.unit`, `anim`, `render.unit`,
-`render`, `prepare.unit`, `prepare`, `sim.jolt`, `net.enet`, `host.server`, `tools.numtext` and, when `OPENBF3_GODOT`
-names the Godot console executable, the headless project checks `godot.s0_selftest`, `godot.inspector`,
-`godot.m9_reload` and `godot.collision`. The `*.unit` tests, `core.guard`, `core.formats` and `tools.numtext` need no data. The install tests report *Skipped* when no
-install is found; `core.cache_data` is skipped when `OPENBF3_CACHE_TESTDATA` is unset and `core.res` when
-`OPENBF3_RES_DATA` does not point at an exported resource sample (see "Resource decoders"; `core.res.install` covers
-the same decoders straight from the install). With an install `core.install` also
-reads every bundle manifest of the 53 non-chunk superbundles and checks SHA1s through the CAS, binary, delta and
-tail-only paths, and parses every EBX partition of `@all-mp` (50,486) with spot checks of known field values.
-`core.fuzz` (also skipped without an install) feeds seeded mutations of real partitions, stored payloads and a
-`.toc` (in memory only) through every parser; run it under `ctest --preset asan` after reader changes
-(`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
+`core.gameplay.inspect`, `core.gameplay.tables.unit`, `core.gameplay.tables`, `core.level.unit`, `core.level`,
+`core.level.collision.unit`, `core.level.collision`, `core.ui.text.unit`, `core.ui.text`, `core.ui.text.fuzz`,
+`anim.unit`, `anim`, `render.unit`, `render`, `prepare.unit`, `prepare`, `sim.jolt`, `net.enet`, `host.server`,
+`tools.numtext` and, when `OPENBF3_GODOT` names the Godot console executable, the headless project checks
+`godot.s0_selftest`, `godot.inspector`, `godot.m9_reload` and `godot.collision`. The `*.unit` tests, `core.guard`,
+`core.formats` and `tools.numtext` need no data. The install tests report *Skipped* when no install is found;
+`core.cache_data` is skipped when `OPENBF3_CACHE_TESTDATA` is unset and `core.res` when `OPENBF3_RES_DATA` does not
+point at an exported resource sample (see "Resource decoders"; `core.res.install` covers the same decoders straight
+from the install). With an install `core.install` also reads every bundle manifest of the 53 non-chunk superbundles
+and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses every EBX partition of `@all-mp`
+(50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
+of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
+asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 
 ## Run
 
