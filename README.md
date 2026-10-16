@@ -68,6 +68,8 @@ H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `
 
 S4 logic: `ctest -R "s4|logic"` runs `s4.contract`, `logic.unit` and `logic.fuzz` (no data) and the install gates `logic.metro`, `logic.types`, `logic.caspian`, `logic.perf` (RUN_SERIAL) and `logic.census` (exit 77 without an install); see "S4 level logic" below.
 
+S3 crowd: `s3.contract` and `anim.s3.unit` (no data), `anim.s3` and `render.s3` (install, skipped without one; also under `asan`) and the windowed gate check `godot.s3_crowd` (see "S3 crowd").
+
 ## Run
 
 ```bat
@@ -1285,3 +1287,56 @@ One command per gate: `ctest --preset dev -R "^logic\.metro$"` (G1-G4), `-R "^lo
 --script conquest` (G6) and `bf3dump logic census [LEVEL...] [--out FILE]` (I1/G5 TSV). `logic.unit` has a Builder-graph case
 with exact ticks for every primitive row of docs/design/s4.md §6.2; `logic.fuzz` is meant for `ctest --preset asan`. Full results, the as-built semantics (round start forced at tick 1, silent init settle) and
 the fallback rule are in docs/design/s4.md §1.1, §7, §9.1 and §14.
+
+## S3 crowd (spike)
+
+<!-- S3 crowd -->
+Spike S3 (docs/design/s3.md): bf3_anim drives 64 third-person soldiers (32 US, 32 RU) on Metro with decoded
+`b_basicassetsmp` clips. A run blend over idle and four direction cycles carries a masked upper-body reload (each
+weapon's clip through `3P_Wep_Reload_NoAddon_Stand_Chooser`) and an additive aim. Temporal LOD tiers come from
+`GameAnimationSettings`; poses are evaluated on persistent worker lanes (`bf3/core/worker_group.h`) and the skin
+palettes are uploaded on the main thread. Status: implemented (scene `res://scenes/s3_crowd.tscn`, node
+`Bf3Crowd`); the measured results are below and in docs/design/s3.md §18.
+
+Gates (one command; a 2560x1440 primary screen, windowed; the machine is shared, so timings are noisy and a failed
+timing gate is repeated once with both runs reported; ctest TIMEOUT 2000 s covers both runs):
+
+```bat
+set OPENBF3_GODOT=C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe
+ctest --preset dev -R godot.s3_crowd -V
+:: = "%OPENBF3_GODOT%" --path bf3-opensource res://scenes/s3_crowd.tscn --
+::     --s3-check --walkers=0 --no-hud --bf3-cache=<fresh scratch root> --quit-after=600   (process timeout 900 s)
+```
+
+| id | threshold |
+|---|---|
+| G0 | validity, else the check FAILs without measuring: the fixed Metro stage is clear (floor, no overlap, unoccluded rays); 64 of 64 soldiers inside the camera frustum on every sampled frame; walkers 0, HUD off, thread model Safe, cycle-timer self-test; run blend exercised (two-cycle >= 25 %, idle mix >= 1 %, >= 1.25 locomotion clips per soldier-frame) |
+| G1a | step wall time (wait, upload, inputs, kick) p50 and p99 <= 2.0 ms, 64 soldiers in view, temporal LOD off, vsync off, >= 30 s |
+| G1b | p50(G1a) + hidden main-thread CPU (animated minus frozen windows interleaved in one run, step's own CPU excluded, `QueryThreadCycleTime`) <= 2.0 ms |
+| G2 | frame time p50 and p99 <= 16.7 ms, vsync off and vsync on, >= 30 s each |
+| G3 | 16 shoulder close-ups (US / RU x idle / run / reload / aim x 2 views) in `b\shots\s3\`, each with the shoulder joint on screen and unoccluded, plus pinch and hand-IK metrics and one stage overview; the user judges the pinch |
+
+Screenshots of BF3 content go to `b\shots\s3\` (gitignored) and are never committed. The wrapper writes them to
+`%OPENBF3_S3_SHOT_DIR%` when set, else `<checkout>\b\shots\s3`. Interactive run (no gates):
+`"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/s3_crowd.tscn -- --walkers=0 --no-hud [--s3-backend=rs|skeleton3d]
+[--s3-lod=on|off]`; `--s3-check --s3-diag` adds a roots-only run that splits the hidden cost.
+
+Results (2026-10-15, `ctest --preset dev -R godot.s3_crowd -V`; the machine was shared with other tracks at 50-100 %
+CPU, so all timings are noisy; the repeat run decides):
+
+| id | measured (first run / repeat) | result |
+|---|---|---|
+| G0 | stage clear, 64 / 64 in view, config true, blend 43.7 % / 4.1 % / 1.48 | PASS |
+| G1a | step p50 0.315 / 0.306 ms, p99 0.605 / 0.453 ms (backend B, RS skeleton) | PASS |
+| G1b | 0.315 + 1.597 = 1.912 ms / 0.306 + 2.048 = 2.354 ms | FAIL (on the threshold within the noise) |
+| G2-off | frame p50 12.48 / 9.74 ms, p99 35.47 / 20.07 ms | FAIL (p99) |
+| G2-on | frame p50 11.69 / 10.58 ms, p99 28.73 / 21.23 ms | FAIL (p99) |
+| G3 | 16 / 16 shots with pinch (min ratio 0.35-0.65, at most 13 of 107 vertices < 0.7) and hand-IK (<= 9.9 mm) metrics | PASS (evidence; the user judges) |
+| install | unchanged | PASS |
+
+The pose job takes 0.27 ms on 6 worker lanes (1.02 ms on one thread) and never blocks the main thread. Backend B
+(one RS skeleton per soldier) beats A (Skeleton3D) in every bench (2.70 against 4.90 ms in the deciding run). About
+2 ms per frame of Godot's own work for 64 changed skeletons (0.22 ms when only the roots move) is what misses G1b. The
+level alone (R0) already has a frame p99 of 14.9-18.4 ms here; the crowd adds 3-6 ms p50. The next levers (shadows
+off for the crowd, fewer surfaces, backend C, temporal LOD on, a quiet-machine rerun) are the user's call (s3.md §16,
+§18). Rig ops are not needed for twist (the roll joints are keyed); see s3.md §9.

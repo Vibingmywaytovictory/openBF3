@@ -402,3 +402,35 @@ if(OPENBF3_ASAN)
     set_tests_properties(logic.unit logic.fuzz logic.metro logic.types logic.caspian logic.perf logic.census
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_logic_cl_dir}")
 endif()
+# S3 crowd (docs/design/s3.md §14): s3.contract compiles every Godot-free S3 header together and checks the plain
+# types, the temporal LOD table and interval rule, the phase advance on hostile numbers and the gate constants. No data.
+openbf3_test(test_s3_contract test_main.cpp s3_contract_tests.cpp test_support.h)
+target_link_libraries(test_s3_contract PRIVATE bf3_render)
+add_test(NAME s3.contract COMMAND test_s3_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_s3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(s3.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s3_cl_dir}")
+endif()
+# S3 crowd (docs/design/s3.md §14): anim.s3.unit (layers, run blend, WorkerGroup, the evaluator's frame protocol on a
+# synthetic rig, the stage schedule; no data), anim.s3 (the clip set, chooser and reload, the additive-order criterion and
+# the 64-soldier bench from the install) and render.s3 (the US / RU 3p asset set cold then warm on a scratch cache root).
+# The install tests exit 77 = skipped without an install. All three also run under the asan preset.
+openbf3_test(test_anim_s3 test_main.cpp anim_s3_tests.cpp test_support.h)
+target_link_libraries(test_anim_s3 PRIVATE bf3_anim)
+add_test(NAME anim.s3.unit COMMAND test_anim_s3 --test-suite=anim-s3-unit)
+add_test(NAME anim.s3 COMMAND test_anim_s3 --test-suite=anim-s3)
+openbf3_test(test_render_s3 test_main.cpp render_s3_tests.cpp test_support.h)
+target_link_libraries(test_render_s3 PRIVATE bf3_render)
+add_test(NAME render.s3 COMMAND test_render_s3 --test-suite=render-s3)
+set_tests_properties(anim.s3 render.s3 PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(anim.s3.unit anim.s3 render.s3 PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(anim.s3.unit anim.s3 render.s3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s3_cl_dir}")
+endif()
+# S3 crowd (docs/design/s3.md §1, §12): godot.s3_crowd runs the windowed --s3-check of res://scenes/s3_crowd.tscn (G0 rows,
+# G1a / G1b, G2 vsync off and on, G3 shots, install unchanged) after a probe run, with one repeat when only timing gates
+# fail. Exits 77 = skipped without OPENBF3_GODOT, a window, an install or a 2560x1440 primary screen.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.s3_crowd COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_s3_crowd.cmake)
+    set_tests_properties(godot.s3_crowd PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 2000 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()

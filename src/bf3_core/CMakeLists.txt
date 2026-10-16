@@ -226,3 +226,9 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/logic_types.h
     include/bf3/core/gameplay/logic_graph.h
 )
+
+# S3 crowd (docs/design/s3.md §3, §15): persistent worker lanes for the per-frame pose job.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/worker_group.h
+    src/worker_group.cpp
+)
