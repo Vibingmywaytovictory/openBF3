@@ -640,6 +640,73 @@ def c_wd(env):
     env.check('server shot rows for the human', len(srows) >= 90, '%d' % len(srows))
 
 # robustness: queue, repeats, stuck runs, human leaving, log faults, ticket forecast, Phase 0 faults ------------------
+def mh1_lines(path):
+    """(json body, length in bytes) of every MH1 line of a mock log."""
+    out = []
+    with open(path, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            m = re.search(r'MH1 (\{.*\})\s*$', line)
+            if m:
+                out.append((m.group(1), len(m.group(1).encode('utf-8'))))
+    return out
+
+
+@case(('phase0', 'all'))
+def c_meta_many_weapons(env):
+    """one Lua state that sees 8+ weapons (P0 damage, W-B B, W-C, P0 aim and bots, W-D): every meta row stays under the
+    1000 B cap (no trunc row) and every extracted run carries a dict name for each wid its meta row lists (pass 7)."""
+    def equip(u, r):
+        nxt = ['RPG7', 'SMAW', 'M320HE', 'M67'][min(len([a for a in u.answered if a == 'equip']) - 1, 3)]
+        u.task('equip', key=nxt)
+        u.goto('ring' if nxt == 'M67' else 'range')
+        u.task('wait', s=0.5)
+        u.cmd('ok')
+
+    def script(u):
+        yield from sc_script(u, ('wall', 'range', 'ring'), True,
+                             [('run WB mode=B w=M16A3,M98B', 'WB'), ('run WC scale=0.34', 'WC')], damage=True)
+        u.goto('wall')
+        yield from u.wait(0.5)
+        u.statuses.append((yield from u.run('p0 aim', 'P0', 300)))
+        u.statuses.append((yield from u.run('p0 bots', 'P0', 300)))
+        u.statuses.append((yield from u.run('run WD', 'WD', 20000)))
+        # oversize args (a pathological command line): the meta row drops args (argsx) instead of becoming trunc
+        mm = h.srv.mock.mod_env.require('mh_meta')
+        mm.run_meta('WD', h.srv.table({'k%02d' % i: 'x' * 90 for i in range(12)}), None)
+        yield from u.wait(1.0)
+
+    h, u = env.host({'falloff': 'linear', 'm98b_end': 150.0, 'blast': 'linear'})
+    u.responders.update({'equip': equip, 'fire': US.respond_fire_direct, 'throw': US.respond_throw})
+    for k in ('mags', 'reloads', 'optics', 'scope'):
+        u.responders[k] = US.respond_wd
+    env.drive(h, u, script(u), 80000)
+    env.check('runs done', u.statuses == ['done'] * 5, str(u.statuses))
+    env.journal(h)
+    lines = mh1_lines(h.slog_path)
+    metas = [(json.loads(b), n) for b, n in lines if '"e":"meta"' in b]
+    trunc = [b for b, n in lines if '"e":"trunc"' in b]
+    nw = max([m.get('nwpn', 0) for m, n in metas] or [0])
+    env.check('8+ weapons seen in one Lua state', nw >= 8, 'nwpn %d' % nw)
+    env.check('no trunc row', not trunc, '; '.join(t[:160] for t in trunc[:3]))
+    big = max([n for m, n in metas] or [0])
+    env.check('meta rows under 1000 B', metas and big < 1000, '%d meta rows, largest %d B' % (len(metas), big))
+    env.notes.append('meta rows: %d, largest %d B at nwpn %d' % (len(metas), big, nw))
+    env.check('oversize args -> argsx meta row', any(m.get('argsx') is True and 'args' not in m and m.get('wpn')
+                                                     for m, n in metas), '')
+    code, runs, text = env.extract(0)
+    bad = []
+    for run in runs:
+        names = run.dict_names('wpn')
+        for m in run.metas:
+            miss = [w for w in (m.get('wpn') or []) if not names.get(w)]
+            if miss:
+                bad.append('%s: %s' % (run.id, miss))
+    env.check('every run names the wids of its meta rows', not bad, '; '.join(bad[:3]))
+    wmeta = [m for run in runs if run.sc == 'WD' for m in run.metas]
+    env.check('WD run meta lists 8+ wids', wmeta and len(wmeta[-1].get('wpn') or []) >= 8,
+              str(wmeta[-1].get('wpn') if wmeta else None))
+
+
 def wait_ends(u, n, timeout, start):
     """Collect n run end marks (sc, status) from row index `start`."""
     out = []

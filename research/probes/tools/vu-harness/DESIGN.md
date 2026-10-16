@@ -194,7 +194,7 @@ PostSim 1, PostFrame 2, FrameInterpolation 3, PreInput 4, PreFrame 5) [doc].
 | id space | rule |
 |---|---|
 | players | humans 1-99 in order of first sight (event or command), bots 101-999; key = `Player.id` (RO int, an engine slot number, never logged). `dict kind=bot` rows give a bot's team, kit and weapon. |
-| weapons `wid` | 1.. per distinct `SoldierWeapon.name` / unlock asset name; `dict kind=wpn` gives the data name (e.g. `Weapons/M16A4/U_M16A4`). |
+| weapons `wid` | 1.. per distinct `SoldierWeapon.name` / unlock asset name; `dict kind=wpn` gives the data name (e.g. `Weapons/M16A4/U_M16A4`); the dict rows of every known wid are re-emitted right after each `meta` row, so each run carries the full wid → name map (pass 7). |
 | materials `mat` | `RayCastHit.material` is `DataContainer | nil` (`shared/type/raycasthit.md`) [doc]; after a nil check it is cast `MaterialContainerPair(hit.material)` (a read) and logged as `[flagsAndIndex, physicsMaterialIndex, physicsPropertyIndex]` (`fb/materialcontainerpair.md`) [doc]. Which of these keys our material grid (P §3.2; probably the index bits of `flagsAndIndex`) is **unverified**: decided offline from the logged triples [inferred]. No GUID is logged (deviation from R §3.4 `mat` GUID and `dmg.wfire` GUID). `DamageGiverInfo.weaponFiring` is a `DataContainer` (WeaponFiringData, `server/type/damagegiverinfo.md`), not the runtime `WeaponFiring`: it is never used for instance matching; `dmg.wfd` carries its type name only. |
 | flags `cp` | 1.. in iterator order per level; `dict kind=cp` gives `CapturePointEntity.name` (a data label). HQs are capture points too (our `CapturePointDef.is_hq()` = `CTUnableToChangeTeam`) [inferred for VU's iterator; live:L15]. |
 | entities `uid` | `Entity.uniqueId` (RO, `shared/type/entity.md`) [doc]: links `shot` to `hit`. |
@@ -212,7 +212,10 @@ PostSim 1, PostFrame 2, FrameInterpolation 3, PreInput 4, PreFrame 5) [doc].
 * Size cap 1000 B per row. An oversize row is replaced by `trunc {of, len}` (R §4.6: line limits unknown) [live:L20].
   Large payloads are chunked instead of truncated: `census` is emitted as several rows, each with one of `types`, `api`,
   `res` and `part`/`of`, ≤ 40 keys per row (a level has 100+ entity types; the API list has ~300 symbols); the mock
-  test asserts no `trunc` row from any emitter.
+  test asserts no `trunc` row from any emitter. `meta` carries wids only (names in the `dict` rows that follow it),
+  and `mh_meta.emit_meta` keeps it under the cap: it budgets 170 B for the envelope, leaves out `args` (`argsx`
+  true; the `cmd` row has them) and then shortens `wpn` if the payload would still not fit (pass 7; the mock case
+  `meta_many_weapons` sees 8 weapons in one Lua state: largest meta row 832 B).
 * Rate limiter: token bucket 240 rows/s, burst 480. Priority 1 rows (`meta census dict fx mark site shot hit dmg ev cmd
   err p0 prog lim trunc prompt`) are never dropped; priority 2 (`gs wf hp tk cp veh fov`) are dropped first, `hp` of
   non-primary ids first. Each second with drops emits `lim {drop:{gs:n,...}}`. Expected peaks: W-A 1 shooter gs + wf
@@ -372,7 +375,7 @@ Units: m, m/s, s, degrees unless the API unit is unknown; then the raw value is 
 
 | `e` | payload (req; *opt*) | notes |
 |---|---|---|
-| `meta` | `hv` harness version, `lvl`, `mode`, `rnd`, `rpm`, `hz` (GetTickrate), `freq` (`vu.FrequencyMode`), `vars` {whitelisted name: value}, `mods` [names]; *`clk`* (`postsim`/`engine`), *`aimcal`* {yaw, pitch, sign, unit, lat, pass, dt}, *`args`*, *`build`* (the VU build running, from RCON `version`), *`wpn`* {wid: {slot, fl}}, *`tcost`* {spawn, kill, remove}, *`fmt`* (`9g`) | one at load (session run) and one at every run start |
+| `meta` | `hv` harness version, `lvl`, `mode`, `rnd`, `rpm`, `hz` (GetTickrate), `freq` (`vu.FrequencyMode`), `vars` {whitelisted name: value}, `mods` [names]; *`clk`* (`postsim`/`engine`), *`aimcal`* {yaw, pitch, sign, unit, lat, pass, dt}, *`args`*, *`build`* (the VU build running, from RCON `version`), *`wpn`* [wid] (sorted wids known to the Lua state, ≤ 64; names in the `dict kind=wpn` rows re-emitted after every meta row), *`nwpn`* (their count), *`argsx`* (true when `args` were left out to stay under 1000 B), *`tcost`* {spawn, kill, remove}, *`fmt`* (`9g`) | one at load (session run) and one at every run start, followed by one `dict kind=wpn` row per known wid |
 | `census` | one of `types` {entity type name: count}, `api` {symbol: present}, `res` {asset name: found} per row, `part`, `of`; *`jsonv3 osdate vm guid_nodash cmd`* (`cmd` = the client console command's full name) | P0; chunked ≤ 40 keys per row |
 | `dict` | `kind` (`wpn mat cp bot unlock`), `id`, `name`; *`x`* {team, kit, wid} | before first use of an id |
 | `fx` | `act` (`create equip spawn place pose input kill remove seat respawn admin`), `id`, `ok`; *`pos yaw pitch pose team wid prof arg`* | every fixture |
@@ -1133,6 +1136,7 @@ The journal must show, for every e2e run: no `Pass`/`Return`; no write to any ob
 | repeats | `run WA` twice, `clear` while running, `ok` with no prompt, `queue` of two items while running, `queue`, `queue clear` twice, `stop` twice, `wall` twice, `clear` twice, unknown verb, `run XX`, `queue NOPE:x`, `status` | the replies of §5; the queued items never start; no handler errors; no orphan bots (PlayerManager count) |
 | no human | the user leaves 8 s into a W-A run and comes back: `idle_advance=no` (30 s away) and `yes` (150 s away, longer than the 120 s stall timeout) | `human-left` and `human-back` marks, no `stalled`, the run ends `done` |
 | log faults | `print_limit=600`, `log_drop=0.01`, `log_garbage=0.002` | extractor exit 0 or 2, malformed rows and q gaps counted per run; W2 still analysed from the damaged runs |
+| meta many weapons | one Lua state: P0 damage, W-B mode B, W-C, P0 aim and bots, W-D (8 weapons), then a run meta with oversize args | no `trunc` row; every meta row < 1000 B; every extracted run has a `dict` name for each wid its meta rows list; the W-D meta lists 8 wids; the oversize-args meta row has `argsx` and no `args` |
 
 Default suite: scaled protocols (`scale`, `parts`) so the whole e2e set runs in a few minutes; `--full` runs the full
 tier-1 W-A protocol and the whole overnight queue at 30 Hz (≈ 0.6 M ticks) as a stress run.
@@ -1313,3 +1317,10 @@ commands, `census`, `status` and the site commands work.
   the W5 M98B shape is judged against the end knot the end-knot test chose (a 120 m table read `other` against the
   150 m data knot) and an `other` verdict names the knots and both RMS values; RUNBOOK step 1 says that the last
   check run decides the certificate.
+* **2026-10-16, build pass 7 (acceptance finding).** `meta.wpn` held `{wid: {name}}` for every weapon the Lua state
+  had seen, so the meta row grew about 40 B per weapon and became a `trunc` row once 5 were known (Phase 0 alone sees
+  3; W-B, W-C and W-D add 5 more): every later run of the night would have lost its provenance row. It is now the
+  sorted wid list (`nwpn` the count), the names go to `dict kind=wpn` rows re-emitted after each meta row, and
+  `emit_meta` keeps the row under the cap (§3.5). The spec of pass 2 (`{wid: {slot, fl}}`) was never built: slot and
+  fire logic per weapon are in the `wf` rows (`wid`, `wsl`, `fl`). New e2e case `meta_many_weapons` (phase0 and all suites);
+  it fails on the pass-6 code with three `trunc` rows.

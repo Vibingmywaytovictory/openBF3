@@ -17,6 +17,7 @@ M.client_cmd = nil  -- full name of the client console command (mh:hello)
 M.vm = 'unknown'
 M.cached = nil
 M.build = nil
+M.WPN_MAX = 64  -- meta 'wpn' lists at most this many wids (schema 'ia'; nwpn gives the full count)
 
 local function val(res)
 	if type(res) ~= 'table' then return nil end
@@ -93,8 +94,14 @@ local function safe_call(fn, default)
 end
 
 function M.meta_payload(args, runner)
-	local wpn = {}
-	for wid, name in pairs(ids.wnames) do wpn[tostring(wid)] = { name = name } end
+	-- wpn: wids only (a few bytes each); the names are in the dict rows re-emitted after every meta row. Names in the
+	-- meta row made it outgrow the 1000 B cap (trunc) once about 5 weapons were known to the Lua state (pass 7).
+	local wpn = ids.weapon_ids()
+	if #wpn > M.WPN_MAX then
+		local cut = {}
+		for i = 1, M.WPN_MAX do cut[i] = wpn[i] end
+		wpn = cut
+	end
 	local cal = bots.cal and { sx = bots.cal.sx, sz = bots.cal.sz, off = bots.cal.off, unit = bots.cal.unit,
 		ps = bots.cal.ps, src = bots.cal_src, dt = bots.last_dt, pass = bots.pass } or nil
 	return {
@@ -111,21 +118,40 @@ function M.meta_payload(args, runner)
 		aimcal = cal,
 		args = args,
 		build = M.build,
-		wpn = next(wpn) and wpn or nil,
+		wpn = #wpn > 0 and wpn or nil,
+		nwpn = #ids.weapon_ids(),
 		tcost = runner and runner.tcost or nil,
 		fmt = '9g',
 	}
 end
 
+-- emit_meta(payload): the meta row never becomes a 'trunc' row (DESIGN 4). The envelope is at most about 160 B; if the
+-- payload would push the line over R.MAX_BYTES, args are left out (argsx = true; the 'cmd' row of the same command
+-- carries them), then the wid list is shortened (nwpn keeps the full count, the dict rows the names).
+M.ENVELOPE_MAX = 170
+function M.emit_meta(p)
+	local budget = R.MAX_BYTES - M.ENVELOPE_MAX
+	if #R.encode(p) > budget and p.args ~= nil then
+		p.args = nil
+		p.argsx = true
+	end
+	while #R.encode(p) > budget and type(p.wpn) == 'table' and #p.wpn > 0 do
+		p.wpn[#p.wpn] = nil
+		if #p.wpn == 0 then p.wpn = nil end
+	end
+	R.row('meta', p)
+	ids.redict_weapons()
+end
+
 function M.session_meta(runner)
 	if M.build == nil then M.read_build() end
-	R.row('meta', M.meta_payload(nil, runner))
+	M.emit_meta(M.meta_payload(nil, runner))
 end
 
 function M.run_meta(sc, args, runner)
 	local a = {}
 	for key, v in pairs(args or {}) do a[R.label(key)] = type(v) == 'string' and R.label(v) or v end
-	R.row('meta', M.meta_payload(next(a) and a or nil, runner))
+	M.emit_meta(M.meta_payload(next(a) and a or nil, runner))
 end
 
 -- join line: a plain log line (not a row; the extractor never copies it) with the GUID with and without dashes.

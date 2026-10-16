@@ -60,7 +60,9 @@
         "args": "o",
         "build": "i",
         "vext": "s",
-        "wpn": "oo",
+        "wpn": "ia",
+        "nwpn": "i",
+        "argsx": "b",
         "tcost": "o",
         "fmt": "s"
       }

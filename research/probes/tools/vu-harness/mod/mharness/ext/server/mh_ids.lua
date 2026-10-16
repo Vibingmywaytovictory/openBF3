@@ -80,6 +80,22 @@ function M.weapon(name)
 	return wid
 end
 
+-- weapon_ids(): the sorted wids known to this Lua state (meta 'wpn'; names stay in the dict rows, DESIGN 4).
+function M.weapon_ids()
+	local out = {}
+	for wid in pairs(M.wnames) do out[#out + 1] = wid end
+	table.sort(out)
+	return out
+end
+
+-- redict_weapons(): re-emit one 'dict kind=wpn' row per known wid (after every meta row) so each run's raw.jsonl
+-- carries the full wid -> name map although the first-sight dict row went to an earlier run (DESIGN 4).
+function M.redict_weapons()
+	for _, wid in ipairs(M.weapon_ids()) do
+		R.row('dict', { kind = 'wpn', id = wid, name = M.wnames[wid] })
+	end
+end
+
 -- material id: RayCastHit.material is DataContainer|nil (shared/type/raycasthit.md); after a nil check it is cast with
 -- MaterialContainerPair(hit.material) (fb/materialcontainerpair.md, read only) -> {flagsAndIndex, physicsMaterialIndex,
 -- physicsPropertyIndex}; mapping to our grid is decided after Phase 0 (DESIGN 3.4). Returns the triple and an id.

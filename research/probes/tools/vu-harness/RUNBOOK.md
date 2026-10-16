@@ -1,6 +1,6 @@
 # VU measurement night: runbook
 
-**2026-10-16 (pass 5).** The harness is implemented on `s5/harness`; the commands below are final once the checks
+**2026-10-16 (pass 7).** The harness is implemented on `s5/harness`; the commands below are final once the checks
 of step 1 pass on your PC: they load the mod in a real Lua 5.4, check every VU call against the API inventory, and run every
 scenario below end to end in a mock VU. If step 1 fails, stop and tell the agent; do not run VU with a broken harness.
 You start VU yourself; the agent never does. Design and background: [DESIGN.md](DESIGN.md).
