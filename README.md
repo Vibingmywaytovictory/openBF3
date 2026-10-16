@@ -34,7 +34,7 @@ Install location, first match wins: `--bf3-install=<dir>` (user arg), env `OPENB
 ```bat
 git clone --recurse-submodules <repo-url> openBF3
 cd openBF3
-tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev
+tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev minus the timing rows (--all-tests: all)
 ```
 
 From a VS x64 developer prompt the three steps are `cmake --preset dev`, `cmake --build --preset dev` and
