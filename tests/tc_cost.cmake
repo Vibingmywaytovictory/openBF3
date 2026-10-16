@@ -61,9 +61,9 @@ file(TO_CMAKE_PATH "$ENV{TEMP}" _temp)
 set(_table "")
 # level mode cold_s warm_s cold_peak_mib warm_peak_mib resident_mib cache_mib before
 set(_runs
-    "MP_Subway|TeamDeathMatch0|1.4|0.1|614.4|307.2|30|40|0.681 s; 293.1 / 308.2 MiB; warm 0.036 s; 22.6 MiB"
-    "XP3_Shield|RushLarge0|6.0|0.5|1536|512|150|160|2.876 s; 549.9 / 676.6 MiB; warm 0.092 s; 72.6 MiB"
-    "XP3_Alborz|SquadRush0|6.0|0.5|1536|512|150|160|2.513 s; 644.7 / 710.6 MiB; warm 0.054 s; 78.3 MiB")
+    "MP_Subway|TeamDeathMatch0|1.4|0.1|614.4|307.2|30|40|0.681 s, 293.1 / 308.2 MiB, warm 0.036 s, 22.6 MiB"
+    "XP3_Shield|RushLarge0|6.0|0.5|1536|512|150|160|2.876 s, 549.9 / 676.6 MiB, warm 0.092 s, 72.6 MiB"
+    "XP3_Alborz|SquadRush0|6.0|0.5|1536|512|150|160|2.513 s, 644.7 / 710.6 MiB, warm 0.054 s, 78.3 MiB")
 foreach(_run IN LISTS _runs)
     string(REPLACE "|" ";" _f "${_run}")
     list(GET _f 0 _level)

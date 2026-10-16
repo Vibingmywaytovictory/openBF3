@@ -927,13 +927,19 @@ the install by C++ at runtime and drawn in Godot, one mesh per 64 m tile. Three 
     frame. They share one unshaded, double-sided `ShaderMaterial`: back faces at 55 %, and a barycentric wireframe
     that fades out over 120 m.
   * A free-fly camera starts at the first `AlternateSpawn` (TDM spawn) at eye height, else above the level centre.
-  * HUD: placements, triangles, terrain triangles, tiles and meshes, load + prepare + upload time, fps, position.
+  * <!-- TC --> Terrain **window**: a whole terrain as overlay vertices would be 3.6 GB, so layer 5 (terrain) holds the
+    terrain triangles of the 64 m tiles within `--terrain-radius` (default 512 m, at most 4,096 m and 2^21
+    triangles) of the camera, nearest first. A worker thread re-prepares it (`prepare_terrain_window`) when the camera
+    leaves the window's inner half, and only the terrain RIDs are swapped. Caspian CQL at a spawn: 231 tiles, 473,088
+    triangles, prepared 0.11 s, uploaded 0.03 s.
+  * HUD: placements, triangles, terrain triangles, tiles and meshes, the terrain window, load + prepare + upload
+    time, fps, position.
   * Controls: WASD, Q/E, Shift ×6, wheel for speed; hold the right mouse button (or click, Esc releases) to look.
     F3 cycles solid + wire, wire, solid. 1–5 toggle the layers, R goes back to the spawn, N to the next spawn,
     T to a top view.
   * User args: `--level`, `--mode` (default `MP_Subway` / `TeamDeathMatch0`), `--camera=x,y,z,yaw,pitch`,
     `--view=spawn|top`, `--wire=0|1|2`, `--layers=<digits>`, `--quit-after`, `--screenshot`,
-    `--shots=<png>@x,y,z,yaw,pitch;...`, `--collision-check`, `--bf3-install`.
+    `--shots=<png>@x,y,z,yaw,pitch;...`, `--collision-check`, `--bf3-install`, `--terrain-radius=<m>` (TC).
 
 `bf3dump collision <LEVEL> <MODE>` prints the soup in canonical form: sorted `T` lines per placement and terrain
 (state, counts, hash), `K` tiles (count, sum), then the totals and the surface and body histograms; timings go to
@@ -953,13 +959,28 @@ XP3_Shield RushLarge0 with 4.01 M triangles (2.70 M of them terrain). The most w
 Metro's bodies: 969,031 collision (174,080 of them terrain), 142,908 raycast, 2,232 character; all 32,400 material
 grid pairs resolve.
 
+<!-- TC --> After the terrain-collision track (soup v2, every terrain cell kept; the listing is unchanged in form, its
+terrain lines now cover the whole grid; the oracle drops IW4L's `near` filter in one place):
+
+| level x mode | placements | triangles (terrain) | destroyed | degenerate | tiles | sum | terrain hash |
+|---|---|---|---|---|---|---|---|
+| MP_Subway TeamDeathMatch0 | 2,122 | 1,136,699 (196,608; 163,840 open cells) | 72,733 | 34 | 181 | `082eac1e5df0ae1c` | `308b8f1a3750c835` |
+| XP3_Alborz ConquestLarge0 | 519 | 36,215,517 (33,554,432) | 56,015 | 0 | 16,384 | `78096d54cf5022f0` | `f49b8d4219d957cf` |
+
+Metro's bodies after TC: 991,559 collision (196,608 of them terrain), 142,908 raycast, 2,232 character. The static
+world holds the terrain as one height field (Metro's 149 Havok tiles + 1 terrain + the world index = 151 cache
+entries); the overlay's Havok triangles are 940,091.
+
 **Check** (`-- --collision-check`; ctest `godot.collision` runs it when `OPENBF3_GODOT` names the console exe and
 skips with 77 otherwise or without an install). It prints a PASS/FAIL table and exits 0 or 1. Rows:
-* load: nothing missing or non-finite, the terrain built;
+* load: nothing missing or non-finite, the terrain built (TC: every terrain with its record);
 * godot_free.recompute: a second `load_level_collision` gives the same placement hashes, terrain hashes and totals;
-* oracle: the level-oracle numbers above;
+* oracle: the level-oracle numbers above (TC: Havok soup plus `hash_soup_terrain`, merged as the listing does);
+* terrain.window (TC): the window's tiles and triangles equal `append_soup_terrain_tile` over the tiles within the
+  radius of the camera;
 * meshes: one valid mesh with one surface per (tile, layer) slot, 3 × the slot's triangles as vertices
-  (3,342,513 for Metro), the soup's first and last triangle bit for bit as (v0, v2, v1), the shared material;
+  (TC: 3 × (Havok + window terrain triangles) = 3,041,457 for Metro at spawn 1), the soup's first and last triangle
+  bit for bit as (v0, v2, v1), the shared material;
 * tiles: every tile has its meshes and instances;
 * camera: starts at spawn 1;
 * install.unchanged: sizes and mtimes of the 256 index files.
