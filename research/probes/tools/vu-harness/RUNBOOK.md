@@ -1,6 +1,6 @@
 # VU measurement night: runbook
 
-**2026-10-16 (pass 7).** The harness is implemented on `s5/harness`; the commands below are final once the checks
+**2026-10-16 (pass 7).** The harness is on `main` (merged from `s5/harness`); the commands below are final once the checks
 of step 1 pass on your PC: they load the mod in a real Lua 5.4, check every VU call against the API inventory, and run every
 scenario below end to end in a mock VU. If step 1 fails, stop and tell the agent; do not run VU with a broken harness.
 You start VU yourself; the agent never does. Design and background: [DESIGN.md](DESIGN.md).
@@ -40,7 +40,7 @@ only when you type `!mh restartround confirm` / `!mh nextmap confirm` or put `rr
 ## 0. Paste these once into PowerShell 7 (`pwsh`)
 
 ```powershell
-$R = "C:\Users\olku\BF3 reimplementation\wt\s5"
+$R = "C:\Users\olku\BF3 reimplementation\openBF3"
 $H = "$R\research\probes\tools\vu-harness"
 $S = "$R\research\measurements\session-20261016"
 $I = "C:\Users\olku\Documents\Battlefield 3\ServerMeasure"
