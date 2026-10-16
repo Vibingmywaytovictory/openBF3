@@ -19,16 +19,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <type_traits>
 #include <vector>
 
 namespace bf3::core::gameplay {
 
-inline constexpr uint32_t kCapsuleTableVersion = 1; // part of the capsules/ cache key
+inline constexpr uint32_t kCapsuleTableVersion = 2; // capsules/ cache key part; 2: 16 fractions, bind-model offsets
 inline constexpr size_t kCapsuleStances = 3; // stand, crouch, prone (sim::Pose order)
 inline constexpr size_t kCapsulePitchBuckets = 33;
 inline constexpr size_t kCapsuleTransitions = 6;
-inline constexpr size_t kCapsuleTransitionFractions = 8;
+inline constexpr size_t kCapsuleTransitionFractions = 16;
 inline constexpr size_t kCapsuleRows = kCapsuleStances + kCapsuleTransitions; // row_source entries
 inline constexpr size_t kMaxTableCapsules = 16; // = sim::weapons::kMaxZoneCapsules (hi-LOD set: 9)
 
@@ -86,5 +87,13 @@ uint64_t capsule_pose_table_hash(const CapsulePoseTable &p_table);
 // capsule_count, every float finite, radii in (0, 2], ascending pitches, the row tags in range): a hostile cache
 // entry fails here instead of reaching posed_target.
 bool capsule_pose_table_valid(const CapsulePoseTable &p_table);
+
+// ---- lc additions (as built; docs/design/m2a-lc.md) ----------------------------------------------------------------
+
+// The capsules/ cache entry (m2a.md §13.1): magic "BF3CAPS1", kCapsuleTableVersion, then every field; decode fails
+// (no allocation beyond the blob's own size) on a short, oversized or inconsistent blob, and accepts only a table that
+// passes capsule_pose_table_valid and whose stored hash equals the recomputed one.
+std::vector<uint8_t> encode_capsule_pose_table(const CapsulePoseTable &p_table);
+bool decode_capsule_pose_table(std::span<const uint8_t> p_blob, CapsulePoseTable &r_table, std::string *r_error = nullptr);
 
 } // namespace bf3::core::gameplay

@@ -2017,3 +2017,31 @@ precision, deviations and the updated M1 rows: [docs/design/m2a-nt.md](docs/desi
 
 Run: `ctest --preset dev -R "^(net\.|m2a\.contract$)"`; the host rows (`host.server`, `host.session*`) and the Godot
 rows are timing rows, run under the quiet lock. Timing rows are wall-clock and noisy on this shared machine.
+
+## M2a lc: lag compensation and hit capsules
+
+<!-- # M2a lc -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §6; as built, the contract fixes and the measured gates:
+[docs/design/m2a-lc.md](docs/design/m2a-lc.md). The server's rewind (`bf3_host` `LagHistory` / `RewindProvider`,
+`bf3/host/lag_comp.h`) poses each target from exactly the samples the shooter's client had (its acked Snapshot and
+SnapshotOthers records), through the client's own sampler (`bf3_net` `sample_other`, `other_sample.h`), at
+`rewind_time_q8 = sim_time_q8(t) - clamp(view_back - 256, 0, 21 x 256)`. Hit capsules come from the server pose
+(`bf3_anim` `build_capsule_pose_table`: the 3p rig per stance at 33 pitch buckets and per transition at 16 fractions,
+`bf3_sim` `posed_target`). wp's ballistics fill the query segment (R4) for the swept-AABB broad phase.
+
+Commands (read-only; output is BF3 data, keep it out of the repo; each ends with `install.unchanged`):
+
+```bat
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0              :: the table, capsule placement readings, rig vs EBX
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0 --deviation  :: E18 (a) rows, "E18 (a): PASS|FAIL"
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0 --perf       :: E13 rows pairs / long (under the quiet lock)
+```
+
+Gates, measured 2026-10-16 on the dev preset (E13 is wall clock and **noisy** on this shared machine):
+
+| gate | command | threshold | measured |
+|---|---|---|---|
+| E18 (a) | `ctest -R anim.server_pose` (install) | head / chest ≤ 3 cm steady (32 mid-pitches), ≤ 5 cm transitions (15 mid-fractions × 32); stand ≤ 3 cm of `CrowdEvaluator`; 0 stand-in rows | worst steady 0.18 cm, worst transition 3.09 cm (stand→prone chest), crowd 0.013 cm; 10/10 rows, 0 stand-in |
+| E12 (a) | `ctest -R sim.lagcomp.unit` | server lists and samples bit-equal to the client's; cache on == off; window/track differences all classified | 8,900 rows, 0 differences; 17,636 provider rows equal; 1,438 Q22 rows, 0 unexplained |
+| E13 | `bf3dump lagcomp MP_Subway TeamDeathMatch0 --perf` | provider p99 ≤ 0.5 ms per tick | pairs 0.338 ms, long 0.354 ms |
+| R4 | `bf3dump weapon-sim --check` | 38/38, sim.weapons* bit-equal | 38/38; `--check` and `--all` output byte-equal to the build without R4 |

@@ -138,3 +138,8 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/weapons/mechanics_tuning.h
     include/bf3/sim/weapons/posed_target.h
 )
+
+# M2a lc (docs/design/m2a.md §6.5; docs/design/m2a-lc.md): hit targets posed from the capsule pose table.
+target_sources(bf3_sim PRIVATE
+    src/weapons/posed_target.cpp
+)

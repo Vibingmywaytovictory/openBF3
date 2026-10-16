@@ -103,6 +103,8 @@
 #include "weapon_sim_commands.h"
 // M2a VFX1: bf3dump fx (effect compiler, simulator, atlas, impacts).
 #include "fx_commands.h"
+// M2a lc: lagcomp (the capsule pose table, E18 (a) deviation, E13 rewind rows).
+#include "lagcomp_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -539,6 +541,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::swf_usage()); // UI ui1
 	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
 	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
+	std::fprintf(stderr, "%s", bf3dump::lagcomp_usage()); // M2a lc
 }
 
 } // namespace
@@ -696,6 +699,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M2a VFX1: fx <subcommand> (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7).
 	if (cmd == "fx") {
 		return bf3dump::cmd_fx(ebx_ctx, rest);
+	}
+	// M2a lc: lagcomp <LEVEL> <MODE> (lagcomp_commands.cpp; docs/design/m2a-lc.md).
+	if (cmd == "lagcomp") {
+		return bf3dump::cmd_lagcomp(ebx_ctx, rest);
 	}
 	usage();
 	return 2;

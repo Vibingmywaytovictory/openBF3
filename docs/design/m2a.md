@@ -115,7 +115,7 @@ open question 7). The acceptance list of the milestone carries this note, so the
 | E15 | determinism | `host.gunplay.replay` (two headless 3,600-tick firefights); `host.gunplay.client` cases "loopback" (10 min scripted play, no netsim) and "two clients" (the second `ClientSession` connects 30 s after the first, when every bot slot has fired) | equal per-tick world hashes (soldier states, weapon states, projectiles, combat events) for equal seeds, different for a different seed; 0 weapon and 0 motor reconciliations in loopback without netsim (health rebases, §8.2, counted separately and reported); both clients derive the same effect and sound seeds (§4.4) for every remote shot from the second client's join on (wave 2, cl: `bf3_host` does not link `bf3_fx`, so the row compares the seeds). After fx3 lands, `fx.triggers.unit` case "late join" feeds the two clients' recorded `PresentEvent` streams through two trigger instances and checks the same (effect, variant) choices per remote shot (wave 3) | §13.3 |
 | E16 | load time and memory with weapons | `godot.m1_load` run on the M2a scene (`res://scenes/m2a_metro.tscn`; gx) | M1's E4 / E5 still hold: Metro cold ≤ 15 s, warm ≤ 5 s, with the weapon table, wave bank, effect library and atlas, kit viewmodels, 3p weapons and the capsule pose table loaded; peak working set and VRAM printed | §13.2 |
 | E17 | hostile input; install unchanged | `net.proto.fuzz` (nt; dev and asan) over every new message; `host.gunplay.server` case "hostile" (sv); every install test's `install.unchanged` row | every malformed message refused and counted, no crash; a client sending wanted slot 15, `view_back` 65,535, a `view_seq` outside the history, fire-mode counter spam, `KitSelect` team 7 and 4× command rate changes no other soldier, clamps are counted, server tick unaffected; layout.toc, cas.cat and every .sb / .toc unchanged | §13.4 |
-| E18 | hit capsules from the server pose (R14) | (a) wave 2, lc: `anim.server_pose` (install) and `bf3dump lagcomp --deviation`: `posed_target` from the table against a **reference evaluation** written in the test, not through the table builder: per query `sample_pose` of the stance idle (or the transition clip at its exact time), `apply_additive` of the aim clips at the exact pitch weight, `model_pose`, and the capsules placed from the bones' model transforms (bf3_anim's layer functions; no pitch buckets, no fraction steps, no LOD, no RS skeleton), at **off-grid** queries: the 32 mid-pitches between buckets and the 7 mid-fractions between transition steps; plus the stand rows against S3's `CrowdEvaluator` (backend B, an independent code path that exists in wave 2). (b) wave 3, tp: `anim.s3.unit` case "capsules" reruns the crouch and prone rows against `CrowdEvaluator` once tp has added the stance inputs | head and chest capsule centres within 3 cm of the reference in the steady rows (stand, crouch, prone at the 32 mid-pitches) and within 5 cm in the transition rows (6 transitions × 7 mid-fractions × 32 mid-pitches) [both inferred thresholds, §16 Q14]; the stand rows within 3 cm of `CrowdEvaluator` (a), the crouch and prone rows within 3 cm of it (b); legs and run (locomotion is not modelled) reported only; every row tagged clip-derived or stand-in (§6.5), 0 stand-in rows expected on the retail install; the table hash is part of `weapon_hash` | §6.5 |
+| E18 | hit capsules from the server pose (R14) | (a) wave 2, lc: `anim.server_pose` (install) and `bf3dump lagcomp --deviation`: `posed_target` from the table against a **reference evaluation** written in the test, not through the table builder: per query `sample_pose` of the stance idle (or the transition clip at its exact time), `apply_additive` of the aim clips at the exact pitch weight, `model_pose`, and the capsules placed from the bones' model transforms (bf3_anim's layer functions; no pitch buckets, no fraction steps, no LOD, no RS skeleton), at **off-grid** queries: the 32 mid-pitches between buckets and the 15 mid-fractions between transition steps; plus the stand rows against S3's `CrowdEvaluator` (backend B, an independent code path that exists in wave 2). (b) wave 3, tp: `anim.s3.unit` case "capsules" reruns the crouch and prone rows against `CrowdEvaluator` once tp has added the stance inputs | head and chest capsule centres within 3 cm of the reference in the steady rows (stand, crouch, prone at the 32 mid-pitches) and within 5 cm in the transition rows (6 transitions × 15 mid-fractions × 32 mid-pitches) [both inferred thresholds, §16 Q14]; the stand rows within 3 cm of `CrowdEvaluator` (a), the crouch and prone rows within 3 cm of it (b); legs and run (locomotion is not modelled) reported only; every row tagged clip-derived or stand-in (§6.5), 0 stand-in rows expected on the retail install; the table hash is part of `weapon_hash` | §6.5 |
 | E19 | ADS, viewmodel FOV and springs | `anim.viewmodel.unit` (vm; Godot-free) and `godot.m2a` case "ads" (per display frame) | world vertical FOV 55 at hip and 40 at iron sights, reached `fovTransitionTime` (0.15 s) ± 1 display frame after the ADS press, and back after the release; viewmodel FOV = `RenderFov` 55 at hip; the camera's recoil offset equals the interpolated predicted recoil every frame (± 1e-4°); sway, bob and kick springs come to rest within their configured settle time once the input stops; zoom refused while deploying or sprinting (no FOV change; the presented ADS level follows the predicted active slot's `kZoomWasDown`, which `step_weapons_m2a` clears in those ticks, §5.2) | §11.2 |
 
 ---
@@ -485,8 +485,8 @@ command-stream hash change in the same sv commit that adds them (sv; `m2a.contra
 Lag for a human ≈ RTT + command buffer + d [inferred]: loopback ≈ 0 + 33 + 75 ≈ 110 ms; "150/2" ≈ 150 + 33 + 85 ≈
 270 ms; the one-way stress profile ≈ 420 ms. Plan D7 says "≤ 250 ms", which would clamp the gate profile. Default
 `max_rewind_ticks` = 21 (350 ms) so "150/2" is fully compensated (§16 Q1). Beyond it the server tests at the
-clamped time and counts `rewind_clamped`. A sample older than the history (24 snapshot samples = 800 ms) is never
-needed under the clamp.
+clamped time and counts `rewind_clamped`. A sample older than the history (48 snapshot samples = 1.6 s; corrected
+by lc from 24: see m2a-lc.md "history size") is never needed under the clamp.
 
 **Only the samples the client had.** After a lost snapshot (or a lost `SnapshotOthers`) the client interpolates
 across the gap or extrapolates, while the server's history holds the missing record. If the server sampled from its
@@ -545,8 +545,11 @@ the present. All four are counted in `LagCompStats`.
 ### 6.4 The target set at a rewound time
 
 * **Time rule (both ends, one function).** A query for a projectile segment that starts at `time_start` tests the
-  targets posed at `net::rewind_time_q8(time_start, view_back_q8)` = time_start in q8 ticks − view_back, clamped
-  (§6.3) and rounded to 1/256 tick. One pose per segment (the segment is at most one tick; a target moves ≤ 11 cm in
+  targets posed at `net::rewind_time_q8(time_start, view_back_q8)` = time_start in q8 ticks − (view_back − 256),
+  the lag clamped to 0 .. max_rewind_ticks × 256 (§6.3) and rounded to 1/256 tick (time_start in q8 ticks: the state
+  after server tick S sits at S × 256, so the step of command tick T covers [(T − 1) × 256, T × 256); a shot at the
+  start of command tick T then tests at exactly the drawn render time R = (T << 8) − view_back; corrected by lc,
+  see m2a-lc.md "time rule": "− view_back" alone tested one tick before R). One pose per segment (the segment is at most one tick; a target moves ≤ 11 cm in
   it at sprint speed). The view sample is the one stored for the projectile's shot index, so every shot of one
   command, and every tick of one bullet's flight, uses the same lag; the target time advances with the bullet. A
   projectile spawned mid-tick starts its segment at its spawn time. The client's cosmetic test (§8.4) calls the same
@@ -597,7 +600,7 @@ R14's mitigation is a reduced skeleton for the 9 hi-LOD capsules, recomputed fro
 
   The crouch and prone aim clips have the stand aim clips' layout (41 rotation, 12 vector channels, target
   `FullBodyWeaponRootNoFingers`); whether they decode as additive is checked at build (`DecodedClip::additive`). The
-  transitions are sampled at 8 fractions of their own length (the motor's transition fraction maps to the clip's
+  transitions are sampled at 16 fractions of their own length (the motor's transition fraction maps to the clip's
   normalised time).
 * **Fallback, per row.** A row whose clip is missing, fails to bind or is not additive where required is built from
   wp's `standin_target` layout for that stance (transition rows: a lerp of the two stance rows by the fraction).
@@ -607,10 +610,10 @@ R14's mitigation is a reduced skeleton for the 9 hi-LOD capsules, recomputed fro
   stance the server poses from a stand-in is also drawn from the stand clips, and the report says so.
 * `bf3_anim::build_capsule_pose_table(rig, clips, capsules)` evaluates the 3p rig per stance row at its idle clip
   with its own additive aim (pitch weights from S3's 78.1° up / 60.7° down; the crouch and prone aim limits from the
-  same LocalPost rule [inferred]) at 33 pitch buckets, and per transition at 8 fractions with the source stance's aim. For each
+  same LocalPost rule [inferred]) at 33 pitch buckets, and per transition at 16 fractions with the source stance's aim. For each
   entry it stores the 9 capsules' segments in the soldier's local frame (from `HitCapsule` bone, offset, length,
   axis, radius [verified: material_grid.h]; bones mapped to rig joints by name, as antdump `rigmap` does).
-* Size: (3 × 33 + 6 × 8 × 33) entries × 9 capsules × 32 B ≈ 0.47 MiB; build ≈ 1,700 pose evaluations, a few tens of
+* Size: (3 × 33 + 6 × 16 × 33) entries × 9 capsules × 32 B ≈ 0.90 MiB; build ≈ 3,300 pose evaluations, a few tens of
   ms [inferred], cached (§13.1).
 * `sim::weapons::posed_target(table, TargetPose)` lerps between the two nearest pitch buckets (and transition
   fractions), rotates by yaw and translates by the feet: O(1) per target, ≈ 0.3 µs for 9 capsules [inferred]. Both
@@ -653,7 +656,7 @@ HitTarget posed_target(const core::gameplay::CapsulePoseTable &, const TargetPos
 
 ```cpp
 namespace bf3::host {
-struct LagCompConfig { uint32_t history_snapshots = 24; uint32_t max_rewind_ticks = 21; bool enabled = true; };
+struct LagCompConfig { uint32_t history_snapshots = 48; uint32_t max_rewind_ticks = 21; bool enabled = true; };
 struct LagCompStats { uint64_t queries, candidates, pose_cache_hits, present, rewound, clamped, refused; double tick_ms_p99; };
 struct AckState { uint16_t newest = 0; uint64_t main_bits = 0, others_bits = 0; };   // 64 seqs back from newest
 struct ShotView {                       // per shot index, 16 B; a snapshot of the shooter's received set (§6.3)
@@ -706,7 +709,7 @@ Distinct poses per tick are at most the candidates (each new key is posed once);
 per command, sharing happens for bots, for the shots of one command and for a bullet's own later segments only
 when the key repeats, rarely across humans. E13 gates both rows at p99 ≤ 0.5 ms and prints queries, candidates and
 cache hits. Bots add nothing beyond the present set (posed once in `begin_tick`, 64 × 0.35 µs ≈ 22 µs). Memory:
-shared records 24 ticks × 64 × ≈ 48 B ≈ 72 KiB plus the swept bounds (64 × 24 B); sent rings and acks 64 clients ×
+shared records 48 snapshots × 64 × ≈ 48 B ≈ 144 KiB plus the swept bounds (64 × 24 B); sent rings and acks 64 clients ×
 64 seqs × 24 B = 96 KiB; shot-view rings 64 × 128 × 16 B = 128 KiB; pose cache 2,048 × ≈ 0.6 KB ≈ 1.2 MiB; the
 present set ≈ 40 KiB.
 

@@ -52,3 +52,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/client_projectiles.h
     include/bf3/host/hud_feed.h
 )
+
+# M2a lc (docs/design/m2a.md §6.3, §6.4, §6.6; docs/design/m2a-lc.md): the lag history and the rewind provider.
+target_sources(bf3_host PRIVATE
+    src/lag_comp.cpp
+)

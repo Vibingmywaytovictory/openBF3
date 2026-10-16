@@ -36,3 +36,9 @@ target_sources(bf3_net PRIVATE
 target_sources(bf3_net PRIVATE
     src/weapons_wire.cpp
 )
+
+# M2a lc (docs/design/m2a.md §6.1, §6.3, §6.4; docs/design/m2a-lc.md): the shared sampler, the time rule and the track
+# rebuild.
+target_sources(bf3_net PRIVATE
+    src/other_sample.cpp
+)

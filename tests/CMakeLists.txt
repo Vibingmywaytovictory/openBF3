@@ -718,3 +718,21 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_nt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(net.proto.fuzz PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_nt_cl_dir}")
 endif()
+
+# M2a lc (docs/design/m2a.md §6, E12 (a), E18 (a), R4; docs/design/m2a-lc.md): sim.lagcomp.unit (no data: the sampler,
+# the time rule, the track rules, LagHistory's acks and shot views, the E12 sample-equality rows with two clients, the
+# provider's cache on vs off and broad phase, the capsule table's blob and hostile blobs, posed_target, R4's query
+# segments) and anim.server_pose (the install: the capsule pose table, E18 (a) against the reference evaluation and
+# CrowdEvaluator, install.unchanged; 77 without one). Both also run under the asan preset.
+openbf3_test(test_lagcomp test_main.cpp sim_lagcomp_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_lagcomp PRIVATE bf3_host)
+add_test(NAME sim.lagcomp.unit COMMAND test_lagcomp --test-suite=sim-lagcomp-unit)
+openbf3_test(test_server_pose test_main.cpp anim_server_pose_tests.cpp test_support.h)
+target_link_libraries(test_server_pose PRIVATE bf3_anim bf3_sim)
+add_test(NAME anim.server_pose COMMAND test_server_pose --test-suite=anim-server-pose)
+set_tests_properties(anim.server_pose PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(sim.lagcomp.unit anim.server_pose PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_lc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(sim.lagcomp.unit anim.server_pose PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_lc_cl_dir}")
+endif()
