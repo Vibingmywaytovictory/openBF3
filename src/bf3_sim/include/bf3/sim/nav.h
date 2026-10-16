@@ -237,6 +237,11 @@ struct NavStats {
 	double seconds_restore = 0.0;
 	double seconds_total = 0.0;
 	uint64_t peak_working_set = 0; // bytes, sampled after the bake (0 when not sampled)
+	// TC water rule (0 until the TC implementation): requested tiles whose whole input is unwalkable terrain (baked to
+	// no tile without running Recast; S1's dropped cover tiles were 1,290 of 1,614 on Kharg), and the input triangles
+	// marked unwalkable over all tiles.
+	size_t tiles_wet = 0;
+	size_t triangles_unwalkable = 0;
 };
 // G4's timed span (docs §1): from the soup in memory to the assembled dtNavMesh, with the link checks (the
 // per-lane world creations and the sweeps run inside the lanes, so inside seconds_bake).
@@ -284,7 +289,9 @@ struct NavBakeOptions {
 	std::atomic<size_t> *tiles_done = nullptr; // progress (optional)
 	// TC: the level's water planes for the nav water rule (nav_terrain_wet); a non-empty list adds ";water=<SHA-256 of
 	// the planes>" to the nav-world key (until TC it rides on StaticWorldLoadOptions::cover_water). A tile whose whole
-	// input is unwalkable terrain bakes to no tile.
+	// input is unwalkable terrain bakes to no tile (NavStats counts those tiles, printed beside S1's dropped-cover
+	// count). With links=jolt the key also gets ";terrain=<kStaticTerrainBits>/<kStaticTerrainBlock>", because the drop
+	// links are checked against the terrain fields; region= keeps its digest of the sorted tile list.
 	std::vector<core::level::WaterPlane> water;
 };
 

@@ -49,6 +49,7 @@ struct CollisionSoup;
 class LoadedLevel;
 class World;
 struct SoupProgress;
+struct SoupTerrain; // TC
 } // namespace bf3::core::level
 
 namespace bf3::sim {
@@ -115,6 +116,12 @@ struct StaticTileInfo {
 // only hole is corner b or c: 4 cells on retail [verified 2026-10-16]) the cook holes that cell's sample a in the
 // field and puts the cells' triangles the field then lacks into a small patch MeshShape (a second body, same user
 // data), so the static world's terrain is exactly the soup's cells. Hits on either carry static_terrain_tag().
+// A field with no collision sample left (an all-hole grid, or one whose only kept cells sit in the patch) gets no
+// field body (Jolt would report a point bounds box); an empty patch gets no patch body. The terrain then still has its
+// StaticTerrainInfo entry (counts, digest) so indices stay the soup's.
+// Plan deviation (PORTING-RESEARCH D5 / D17 / §2.4 step 3 say "64 m tiled shapes"): the Havok triangles stay 64 m
+// tiles; each terrain is one field (terrain-collision.md §5.2 has the numbers). HeightFieldShape::SetHeights keeps
+// later terrain deformation possible on the one field.
 inline constexpr uint32_t kStaticTerrainBits = 16; // measured: <= 1.1 mm error on 23 of 24 terrains, 11.1 mm on MP_013
 inline constexpr uint32_t kStaticTerrainBlock = 4;
 inline constexpr uint32_t kStaticTerrainBodyLayer = 3;
@@ -150,6 +157,13 @@ struct StaticTerrainInfo {
 	Vec3 max{};
 	core::Sha256Digest content{}; // SHA-256 of the view (sizes, origin, spacing, frame, every height's bits, holes)
 };
+
+// The view of a soup terrain record (SoupTerrain::grid and frame; it borrows the grid, so the record must outlive
+// the view). An error for a terrain that is not Built or has no record. Defined by the TC implementation.
+core::Result<StaticTerrainView> static_terrain_view(const core::level::SoupTerrain &p_terrain);
+// StaticTerrainInfo::content of a view without cooking it (the "jolt-terrain" key's digest; sim.terrain G1 compares
+// it over every run of a level). Defined by the TC implementation.
+core::Sha256Digest static_terrain_content(const StaticTerrainView &p_view);
 
 struct StaticWorldStats {
 	size_t tiles = 0;
@@ -189,7 +203,7 @@ public:
 	// TC: the terrains (soup terrain order, Built only); 0 until the TC implementation.
 	size_t terrain_count() const;
 	const StaticTerrainInfo &terrain(size_t p_index) const;
-	// Bounds of every tile.
+	// Bounds of every tile (TC: and of every terrain field and patch body, StaticTerrainInfo::min / max).
 	Vec3 min() const;
 	Vec3 max() const;
 
@@ -263,10 +277,17 @@ std::vector<uint8_t> encode_static_tile_blob(const StaticWorldShapes &p_world, s
 core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_tile_blobs(std::span<const std::span<const uint8_t>> p_tiles);
 core::CacheKeyInputs static_tile_key_inputs(const core::Sha256Digest &p_content, const StaticWorldBuildOptions &p_options);
 // TC: "OBF3JTER" v1: the terrain's StaticTerrainInfo, then the HeightFieldShape's Shape::SaveBinaryState stream,
-// then the patch MeshShape's (or none). Decoding checks the field header before Jolt sees it (sample count
-// 2..kMaxGridSide rounded up to the block, block 2..8, bits 1..16, and the range-block, sample and active-edge byte
-// counts HeightFieldShape::AllocateBuffers derives from them against the bytes left), walks the patch like a tile's
-// MeshShape, and refuses trailing bytes. Key: params = the content digest + kStaticTerrainBits / kStaticTerrainBlock +
+// then the patch MeshShape's (or none). Decoding parses the field's whole header itself before Jolt's
+// RestoreBinaryState sees it (Jolt validates none of it): the Shape base (sub type HeightField, user data 0);
+// mOffset and mScale finite, scale x / z > 0 and y != 0; mSampleCount 2..kMaxGridSide rounded up to the block and a
+// multiple of it; mBlockSize 2..8; mBitsPerSample 1..16; num_blocks = mSampleCount / mBlockSize <= 1 << cNumBitsXY
+// and the sub-shape-ID bits (2 x bit width of mSampleCount - 1, plus 1) <= SubShapeID::MaxBits, as the constructor
+// requires;
+// mMinSample <= mMaxSample <= 0xFFFE, or mMinSample = 0xFFFF (no collision anywhere); mMaterialIndices empty and
+// mNumBitsPerMaterialIndex 0 (the cook sets no materials; RestoreBinaryState reserves 1 << that many entries); the
+// has-heights flag set, and the range-block, sample and active-edge byte counts HeightFieldShape::AllocateBuffers
+// derives from the header equal to the bytes that follow. It then checks the restored field against the blob's
+// StaticTerrainInfo (sizes, bounds), walks the patch like a tile's MeshShape, and refuses trailing bytes. Key: params = the content digest + kStaticTerrainBits / kStaticTerrainBlock +
 // the build parameters; content keyed, so the modes of a level share the entry. "OBF3JWLD" becomes v2 (the
 // terrain digests after the tiles; kStaticWorldFormatVersion 2).
 std::vector<uint8_t> encode_static_terrain_blob(const StaticWorldShapes &p_world, size_t p_terrain);

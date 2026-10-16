@@ -34,6 +34,10 @@ static_assert(sim::kNoStaticTile == UINT32_MAX);
 static_assert(sim::kNoStaticTerrain == UINT32_MAX);
 static_assert(std::is_aggregate_v<sim::StaticTerrainView>);
 static_assert(std::is_trivially_copyable_v<sim::StaticTerrainInfo>);
+// Revision 2: the whole-grid hash charges a caller-sized WorkBudget (decltype only: nothing odr-uses the declaration).
+static_assert(std::is_same_v<decltype(&core::level::hash_soup_terrain),
+		core::Result<core::level::SoupTerrainHash> (*)(const core::level::SoupTerrain &, uint32_t, core::level::WorkBudget &, unsigned)>);
+static_assert(std::is_same_v<decltype(&sim::static_terrain_content), core::Sha256Digest (*)(const sim::StaticTerrainView &)>);
 
 TEST_CASE("tc contract: the terrain tag is the soup's terrain cell tag") {
 	constexpr sim::SurfaceTag tag = sim::static_terrain_tag();
@@ -63,6 +67,9 @@ TEST_CASE("tc contract: the additive fields default to the behaviour before TC")
 	CHECK(bake.water.empty());
 	const sim::NavInputCheck check;
 	CHECK(check.terrain_matched == 0);
+	const sim::NavStats nav_stats;
+	CHECK(nav_stats.tiles_wet == 0);
+	CHECK(nav_stats.triangles_unwalkable == 0);
 	const sim::StaticWorldStats stats;
 	CHECK(stats.terrains == 0);
 	CHECK(stats.terrain_bytes == 0);

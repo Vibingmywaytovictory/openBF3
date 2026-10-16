@@ -1,8 +1,28 @@
 # Terrain collision everywhere: design
 
-Status: design revision 1 (2026-10-16). Interface headers are in the tree (§13); the implementation has not started.
+Status: design revision 2 (2026-10-16). Interface headers are in the tree (§13); the implementation has not started.
 Track "Terrain collision everywhere", branch `terrain/collision` (based on main 7b3e8fa). It merges before the
 parallel branches ui/swf-fonts, ui/minimap-icons, m2a/weapons, m2a/audio, m2a/vfx and m2a/design (§14.3).
+
+Revision 2 (after review of revision 1):
+* G3 now has pass thresholds for the largest level × mode and for Metro, measured by one ctest (`tools.tc_cost`, §2,
+  §4.5).
+* G1 covers all 199 terrain runs. Each mode's terrain record is checked against the cooked field by its content
+  digest, and each mode's own combat-area tiles are cast. It adds an exhaustive field-against-record check and rays
+  into both triangles of every mismatch cell (§2, §12.1).
+* G5's command now runs `sim.vehicle.unit` as well (G1m and the synthetic courses). A new synthetic case, G1t, drives
+  three vehicles over a heightfield with a patch (§2, §12.1).
+* Capsule sweep and overlap cost against the field were measured (§4.3). The Havok geometry around the Caspian spawns
+  was measured too (§9).
+* The plan deviation from D5 / D17 is recorded (§5.2). The Jolt citation now names the triangle walker.
+* The "OBF3JTER" decode list is complete, `hash_soup_terrain` takes a `WorkBudget`, and the empty cases are defined:
+  an out-of-range cell, and an all-hole field (§11).
+* Other changes:
+  * the nav-world key gets `terrain=` (§10);
+  * `StaticWorldShapes` bounds include the terrain (§5.3);
+  * the IW4L commit and the G2 wall time are recorded (§6);
+  * the asan regex is wider (G7);
+  * the direction of the S1 G2 count change is predicted (§7).
 
 Tags: **[verified]** means checked in this tree or on the install on 2026-10-16, by the command given.
 **[measured]** means a timing or size from a run on this machine; timings are noisy (shared machine, see G3).
@@ -45,21 +65,24 @@ Out of scope: destruction, terrain decals and paving (IW4L's block merging), swi
 
 ## 2. Exit gates
 
-Every timing gate has one documented command and runs under the quiet lock (§12.4). Timings are noisy: one run per
-row is reported as measured, and a failing timing is re-run once under the lock before it counts.
+Every gate has one documented command. Timings are noisy, because the machine is shared (the noise rule is below the
+table).
 
 | id | what | command | pass threshold |
 |---|---|---|---|
-| G1 | coverage | ctest **`sim.terrain`** (`test_sim_terrain --test-suite=sim-terrain`). (a) Caspian CQL, Kharg CQL and Metro TDM through the full static world (scratch cache, cold). (b) Each of the 24 terrain levels as a terrain-only world (`build_static_world_terrain`, first mode). Vertical rays at every point of a 16 m lattice (offset 1.0 m / 0.6 m into a cell, off its diagonal) and at every combat-area tile centre (offset the same). A ray starts 0.25 m above the expected height, runs down 0.5 m, and re-casts past non-terrain hits (counted as occluded, reported). Expected height = the cell's own triangle plane from the grid floats | **0** lattice points of non-open cells without a terrain hit within **5 cm** of the expected height; **0** terrain hits in open cells; **0** combat-area tiles without ground on Caspian CQL and Kharg CQL (before: 35/273 and 1,119/1,494). Lattice points, occluded points and the worst error are printed per level |
-| G2 | parity | `pwsh research/probes/tools/level-oracle/parity.ps1 -Out <scratch>` (new): `bf3dump collision` and `level-oracle collision` for every level × mode, compared byte for byte | **230 / 230** runs identical; 0 missing, 0 non-finite |
-| G3 | cost | `bf3dump shapes <L> <M> --cache=<fresh scratch root>` three times (cold, warm, warm) for MP_Subway TDM, XP3_Shield RushLarge0 (largest soup today) and XP3_Alborz SquadRush0 (largest Havok soup after TC), before (§4.4, measured) and after. Then ctest **`godot.m1_load`** (windowed) | the before / after table is reported (shapes total, soup, cook, restore, peak working set, peak private bytes, resident, cache bytes). **E4 ≤ 15 s and E5 ≤ 5 s** still pass on Metro |
-| G4 | S1 re-run | ctest **`host.scale`** (G1, G3 rows), ctest **`sim.nav.bake`** (G4), ctest **`sim.nav`** (G2 rows) | `host.scale` p99 ≤ **8.0 ms** on Metro and Caspian (valid runs); the G3 six numbers reported; bake ≤ **6.0 s** Caspian, ≤ **13.0 s** Kharg; G2 rows reported with the S1 numbers beside them (485/566, 661/709) |
-| G5 | S2 re-run | ctest **`sim.vehicle`** | G1, G1r and G1m 0 mismatching ticks (bit-identical) on all 14 courses; G2x `ExactPod` max **< 0.02 m** per found course |
+| G1 | coverage | ctest **`sim.terrain`** (`test_sim_terrain --test-suite=sim-terrain`, RUN_SERIAL), over **all 230 runs** in `levelmodes` order (§12.1 has the procedure): (a) every run's soup terrain record and its content digest; (b) one terrain-only world per distinct digest; (c) a 16 m lattice of vertical rays into both triangles of a cell, the exhaustive field check, and rays into each mismatch cell, per digest; (d) every run's own combat-area tile centres cast against its digest's world; (e) Caspian CQL, Kharg CQL and Metro TDM through the full static world as well | **0** lattice or tile-centre points of non-open cells without a terrain hit within **5 cm** of the expected height; **0** terrain hits in open cells. Every run's record digest equals its level's; the 31 runs without terrain have no record. Exhaustive: field + patch triangles = record cells one to one on every cell, and every height is within `max_error`. `holed` = 1 / 2 / 1 on MP_001 / MP_003 / XP4_Parl and 0 elsewhere. **0** combat-area tiles without ground on Caspian CQL and Kharg CQL (before: 35/273 and 1,119/1,494). Printed per level: lattice points, occluded, worst error, `holed`, `patch_triangles` |
+| G2 | parity | `pwsh research/probes/tools/level-oracle/parity.ps1 -Out <scratch>` (new): `bf3dump collision` and `level-oracle collision` for every level × mode, compared byte for byte | **230 / 230** runs identical; 0 missing, 0 non-finite. The script prints the IW4L commit the oracle builds against (`git -C <IW4L> rev-parse HEAD`) and the wall time; both go in the README row (§6) |
+| G3 | cost | ctest **`tools.tc_cost`** (new, `tests/tc_cost.cmake`, RUN_SERIAL; under the quiet lock): `bf3dump shapes <L> <M> --cache=<fresh scratch root>` cold, warm, warm in child processes for MP_Subway TDM, XP3_Shield RushLarge0 (largest soup today) and XP3_Alborz SquadRush0 (largest Havok soup after TC). Then ctest **`godot.m1_load`** (windowed). One command for both: `ctest --preset dev -R "^(tools\.tc_cost\|godot\.m1_load)$"` | Per run, the §4.5 limits: Shield RL and Alborz SR cold shapes total ≤ **6.0 s**, warm ≤ **0.5 s**; cold peak working set and peak private bytes ≤ **1.5 GiB**, warm ≤ **0.5 GiB**; Jolt resident ≤ **150 MiB**; cache ≤ **160 MiB**. Metro TDM cold ≤ **1.4 s**, warm ≤ **0.1 s**, peak ≤ **0.6 GiB**, resident ≤ **30 MiB**. **E4 ≤ 15 s and E5 ≤ 5 s** still pass. The before / after table is printed (§4.4 before). Report-only under asan |
+| G4 | S1 re-run | ctest **`host.scale`** (G1, G3 rows), ctest **`sim.nav.bake`** (G4), ctest **`sim.nav`** (G2 rows) | `host.scale` p99 ≤ **8.0 ms** on Metro and Caspian (valid runs); the G3 six numbers reported. Bake ≤ **6.0 s** Caspian and ≤ **13.0 s** Kharg, with `tiles_wet` / `triangles_unwalkable` printed beside S1's 1,290 dropped cover tiles. G2 rows reported with the S1 numbers beside them (485/566, 661/709); the prediction is in §7 (no row may fall without a named cause) |
+| G5 | S2 re-run | `ctest --preset dev -R "^sim\.vehicle(\.unit)?$"` (`sim.vehicle.unit`: the 7 synthetic courses, G1m, and the new G1t on a heightfield; `sim.vehicle`: the 7 MP_007 courses) | G1, G1r, G1m and G1t: 0 mismatching ticks (bit-identical) on all 14 courses and both groups; G2x `ExactPod` max **< 0.02 m** per found course |
 | G6 | Caspian spawns | ctest **`sim.terrain`**, case "Caspian RushLarge0 underground spawns" (§9) | the evidence holds as asserted: the cause is in the data; no TC fix |
-| G7 | hygiene | full `ctest --preset dev` with `OPENBF3_GODOT`; `tools\build.cmd asan` then `ctest --preset asan -R "core.level.collision\|sim.world\|sim.terrain\|tc.contract"`; `install.unchanged` rows; a windowed capture (§8.3) | all pass (77 = skipped only where it is today); install unchanged in every run; capture saved to `openBF3\b\shots\tc\` (never committed) and inspected |
+| G7 | hygiene | full `ctest --preset dev` with `OPENBF3_GODOT`; `tools\build.cmd asan` then `ctest --preset asan -R "core\.level\.collision\|sim\.world\|sim\.terrain\|sim\.nav\.unit\|sim\.vehicle\.unit\|tc\.contract"`; `install.unchanged` rows; a windowed capture (§8.3) | all pass (77 = skipped only where it is today); install unchanged in every run; capture saved to `openBF3\b\shots\tc\` (never committed) and inspected |
 
 G1 is stated against the grid floats, so the error includes the field's 16-bit quantisation (≤ 1.1 mm on 23 of the
 24 terrains and 11.1 mm on MP_013, §5.4). 5 cm is the task's threshold. The real margin is printed.
+
+The timing rows (G3, G4's bake and tick, and G5) follow one noise rule. Each runs under the quiet lock (§12.4). A
+failing timing is re-run once under the lock, and the second result counts; both are reported.
 
 ---
 
@@ -208,6 +231,34 @@ The ray column covers the levels where every ray hits; rays into holes are cheap
 * Per-tile fields (one 33 × 33 field per 64 m tile, 16 / 8) measured 65 MiB and 0.1 s wall on 16 lanes. That variant
   is rejected in §5.2.
 
+**Capsule sweeps and overlaps** [measured, probe `--sweep`, 2026-10-16, not under the lock; the machine was busy].
+Setup:
+* the capsule is r 0.35 m, half height 0.55 m;
+* 50,000 points in the grid's centre 64 m tile, each at least 3 m from the tile border;
+* the cast starts 0.3 m above standing height and moves (±0.5, −0.6, ±0.5) m;
+* the overlap is the capsule 5 cm into the ground;
+* two rounds each against the whole field (16 / 4) and against that tile's terrain as a MeshShape (today's form);
+* shape-level calls (`CollisionDispatch`), so no broadphase.
+
+| level | field: cast / collide | tile MeshShape: cast / collide |
+|---|---|---|
+| MP_007 Caspian | 2.92–2.98 / 1.79–1.84 µs | 1.80–1.94 / 1.16–1.17 µs |
+| MP_018 Kharg | 2.86–3.03 / 2.05–2.12 µs | 2.66 / 1.32 µs (round 2: 5.3 / 7.2, noise) |
+| XP3_Alborz | 2.77–2.90 / 2.02–2.08 µs | 2.04–2.11 / 1.28–1.49 µs |
+| MP_Subway Metro | 2.55 / 1.78 µs (round 1: 14.4 / 22.6, cold) | 1.89–1.98 / 1.30 µs |
+
+Both forms give the same hits (for example 49,890 / 50,000 casts and 84,759 / 84,758 contacts on Caspian). The field
+costs about **+1 µs per capsule query on the terrain** (1.4–1.6 ×). Jolt's field walker decodes a block's samples
+for every query, while a MeshShape reads ready vertices.
+
+What this costs at S1's measured load [computed]:
+* Caspian makes 16,430 queries per second of sim time (s1.md §19.1 G3).
+* Even if every query touched the terrain, that is +16 ms of CPU per second, about 0.27 ms per 60 Hz tick summed over
+  the lanes.
+* Caspian's p99 tick is 0.64 ms and the gate is 8 ms.
+
+G4 re-measures it (`host.scale` G1 and G3 `us_sweep`), and §15 lists the risk.
+
 Why MP_013's error is larger: Jolt first quantises every height to 16 bits over the field's whole range
 (1,627 m / 65,534 = 24.8 mm per step), and then per block. The bound is half a step, 12.4 mm. On the other levels,
 BF3's own samples already lie on a 1/65,535 grid of the tree's `world_size_y`, so the error stays under a millimetre.
@@ -235,8 +286,35 @@ Load and traverse take 0.17–0.19 s on top of each row. Install unchanged in ev
   cook, which runs in parallel with the tile cooks. Plus about 0.05 s for the grid digest.
 * Warm time: +0.03–0.1 s to read and verify a 47 MiB entry.
 * Cache: the terrain entry is per level and shared by its modes, so about +0.9 GB if every level is prepared.
+* Cold peak private bytes: the soup loses its terrain triangles (Shield RL: −129 MB) and holds the record instead
+  (84 MB). The field cook adds its transient buffers:
+  * the settings' float copy, 67 MB;
+  * Jolt's 16-bit quantised copy, 34 MB;
+  * the range blocks and the active-edge pass, about 20 MB;
+  * the finished 47 MiB shape.
+  That is about +150 to +250 MB over today, about 0.85–0.95 GiB on Alborz SR.
 
-G3 reports the measured values.
+### 4.5 G3 limits and why
+
+`tools.tc_cost` checks these on every run it makes. Each limit is about 2 × the expected value, so the noise on a
+shared machine (§4.3: 1.08–1.84 s for the same field cook) does not fail it. A limit is still low enough that a
+real regression fails, for example a whole terrain as triangles (minutes, GBs) or a field cooked per mode.
+
+| run | cold shapes total | warm shapes total | cold peak WS / private | warm peak WS / private | resident | cache |
+|---|---|---|---|---|---|---|
+| XP3_Shield RL | ≤ 6.0 s (before 2.88; expected ≤ 3.5) | ≤ 0.5 s (before 0.09; expected ≤ 0.25) | ≤ 1.5 GiB (before 0.54 / 0.66) | ≤ 0.5 GiB (before 0.21) | ≤ 150 MiB (before 72.6; expected ≈ 71) | ≤ 160 MiB |
+| XP3_Alborz SR | ≤ 6.0 s (before 2.51) | ≤ 0.5 s (before 0.05) | ≤ 1.5 GiB (before 0.63 / 0.69) | ≤ 0.5 GiB (before 0.21) | ≤ 150 MiB (before 78.3; expected ≈ 95) | ≤ 160 MiB |
+| MP_Subway TDM | ≤ 1.4 s (before 0.68) | ≤ 0.1 s (before 0.036) | ≤ 0.6 GiB (before 0.29 / 0.30) | ≤ 0.3 GiB (before 0.16) | ≤ 30 MiB (before 22.6) | ≤ 40 MiB |
+
+Why these limits:
+* **Memory headroom.** 1.5 GiB is 2.3 % of the machine's 64 GB. A server holds one static world per rotation level
+  it pre-bakes (D17), so even the 8 biggest levels at once stay under 1 GiB resident.
+* **Load time.** The largest level × mode builds its static world cold in at most 6 s, which is under E4's 15 s budget
+  for a whole Metro load. Warm, it restores in at most 0.5 s.
+* **Both limits stay inside the M1 / S1 budgets that already exist.** The `godot.m1_load` E4 / E5 rows still gate
+  Metro end to end.
+
+The first after-run's numbers replace "expected" here and in the README. A limit is not raised without a stated cause.
 
 ---
 
@@ -275,6 +353,22 @@ Three representations were weighed:
 | one HeightFieldShape per 64 m tile | 65 MiB (16 / 8) | 0.1 s on 16 lanes | 16,384 field borders, quantised independently, plus 16,384 bodies | rejected: a ray or capsule exactly on a border meets two different quantisations; more bodies |
 | **one HeightFieldShape per terrain plus a patch mesh** | **47.4 MiB (16 / 4)** | **0.5–1.1 s, one lane, parallel with the tiles** | **none** | **chosen** |
 
+The choice costs about +1 µs per capsule query on the terrain against a terrain MeshShape (§4.3). At S1's load that
+is under 0.3 ms per tick. The triangle form cannot be built at all, and per-tile fields have seams, so the field
+wins on every criterion that can fail.
+
+**Plan deviation (recorded).** PORTING-RESEARCH D5 ("static world as 64 m tiled shapes", §4 table), D17 ("64 m tiled
+Jolt shapes") and §2.4 step 3 ("Jolt shape streams in 64 m tiles") assume that the terrain is tiled like the Havok
+triangles. After TC the Havok triangles stay in 64 m tiles, but each terrain is one field.
+* Why: the numbers above. Per-tile fields put 16,384 quantisation seams and bodies into the world and save nothing.
+* What D5 and D17 wanted still holds:
+  * the shapes are immutable and shared by the Server, Prediction and Cosmetic worlds;
+  * the level converts on demand;
+  * the field is a content-keyed cache entry that a level's modes share.
+* Later terrain deformation (BF3's TerrainDestruction) stays possible on the one field.
+  `HeightFieldShape::SetHeights` rewrites a sample rectangle in place and keeps the shape's identity, so the
+  BodyIDs and S2's static-body order stay as they are.
+
 Settings:
 * `kStaticTerrainBits` = 16 and `kStaticTerrainBlock` = 4. 16 bits keeps the field within 1.1 mm of the grid on
   23 of 24 terrains (the nav proof 1 tolerance is 1 mm, §5.4); block 4 is 7 MiB larger than 8 but rays are 30 %
@@ -292,8 +386,16 @@ Frame:
   samples. Jolt pads the side up to a multiple of the block with no-collision samples itself (4097 becomes 4100),
   so no triangle appears past the grid's edge [verified: HeightFieldShape.cpp:703].
 
-Jolt's diagonal runs from (x, y) to (x + 1, y + 1), the same as our a → d, so its two triangles per cell are ours
-[verified: HeightFieldShape.cpp lines 908–925 emit (x, y), (x, y + 1), (x + 1, y + 1) and (x, y), (x + 1, y + 1), (x + 1, y)].
+Jolt's diagonal runs from (x, y) to (x + 1, y + 1), the same as our a → d, so its two triangles per cell are ours.
+[verified, `extern/JoltPhysics/.../HeightFieldShape.cpp`]:
+* The triangle walker that rays, casts and collides use is `HeightFieldShape::DecodingContext::WalkHeightField`
+  (declared at line 1758; the triangle loop is at lines 1966–2003).
+  * It skips the cell when (x, y) or (x + 1, y + 1) has no collision (line 1975).
+  * Triangle 0 is (x, y), (x, y + 1), (x + 1, y + 1). It is skipped when (x, y + 1) has none (line 1985).
+  * Triangle 1 is (x, y), (x + 1, y + 1), (x + 1, y). It is skipped when (x + 1, y) has none (line 1996).
+* `ProjectOntoSurface` (lines 898–928) and the debug `Draw` (lines 1619–1644) apply the same per-vertex rule.
+  Revision 1 cited only `ProjectOntoSurface`.
+* `sim.terrain.unit` proves the rule over all 2^9 hole patterns of a 3 × 3 block (§12.1).
 
 **Holes, exactly.**
 * Jolt drops a triangle when any of its three samples is `cNoCollisionValue`. The soup opens a cell when any of its
@@ -309,7 +411,12 @@ Jolt's diagonal runs from (x, y) to (x + 1, y + 1), the same as our a → d, so 
      removes at most 4 triangles the soup keeps: 1 each from the cells where it is corner b or c, 2 from the cell
      where it is corner d. That is at most 8 on retail (MP_003).
 * `StaticTerrainInfo::holed` and `patch_triangles` report the counts. `sim.terrain.unit` proves the equality on
-  synthetic grids with every hole pattern of a 3 × 3 block (2^9).
+  synthetic grids with every hole pattern of a 3 × 3 block (2^9). On the install, G1's exhaustive check proves it on
+  every cell of all 24 terrains, and G1 prints the counts beside §4.1's census (1 / 2 / 1).
+* **No collision at all.** A field with no collision sample left gets no field body, because Jolt's `GetLocalBounds`
+  would give a point box (line 1577). This covers an all-hole grid, or one whose only kept cells all sit in the
+  patch. An empty patch gets no patch body. The terrain keeps its `StaticTerrainInfo` entry, so the indices stay the
+  soup's. `sim.terrain.unit` covers an all-hole grid and a grid whose only kept cells are patch cells.
 
 ### 5.3 Bodies and hits
 
@@ -323,6 +430,11 @@ Jolt's diagonal runs from (x, y) to (x + 1, y + 1), the same as our a → d, so 
   (material 0, dirt, collision, `kSoupTerrain`).
 * The new `StaticHit::terrain` field defaults to `kNoStaticTerrain`. No caller in the tree or the branches calls
   `shapes->tile(hit.tile)` on an install world (§3).
+* `StaticWorldShapes::min()` / `max()` include the terrain bodies' bounds after TC. Today their users are tests on
+  synthetic or Havok-only worlds (`sim_world_tests.cpp:128`, `sim_motor_tests.cpp:1794`,
+  `sim_vehicle_tests.cpp:973`). Those worlds have no terrain, so their bounds do not change. G1's lattice uses each
+  terrain's own `StaticTerrainInfo` bounds, and the nav region uses the combat tiles, so neither depends on these
+  bounds.
 
 ### 5.4 Accuracy and the S1 nav proof 1
 
@@ -355,7 +467,17 @@ cooked shapes. The 1 mm principle holds on every gated level anyway.
 * `run()` loses the `near` set (572–575);
 * the doc comments at 26 and 382 follow.
 
-Cost [inferred]: 33.5 M triangles through FNV plus one BTreeMap entry each, about 5–8 s per big run. G2 prints it.
+Cost [inferred]: 33.5 M triangles through FNV plus one BTreeMap entry each, about 5–8 s per big run, so about
++20–40 min over the 230 runs. `parity.ps1` prints the measured wall time per run and in total, and the README row
+records it. If it is too slow, both tools switch to a per-row hash together (§16, question 2).
+
+**IW4L commit.** The oracle path-depends on `C:/Users/olku/iw4L/crates/{level_bf3, ebx_bf3, resource_bf3,
+bf3_scene}` (Cargo.toml). At this revision the checkout is `49aca70d5a8ccb1660c8178f98a8d2f120339461`, the `bf3`
+branch merge of 2026-10-08, with a clean tree [verified: `git -C C:\Users\olku\iw4L rev-parse HEAD`,
+`git status --short` empty].
+* `parity.ps1` prints the commit, and a dirty flag, as its first line.
+* The README collision row records the commit next to the 230 / 230 result.
+* If the checkout moves before G2 runs, the new commit is the one recorded.
 
 **Listing** (`tools/bf3dump/collision_commands.cpp`):
 * `collision_listing` calls `hash_soup_terrain` per Built terrain. Its T line prints the record's numbers.
@@ -411,8 +533,26 @@ proof 1 still matches the motor set. Only their area changes.
 * **Region**: unchanged. `level_combat_tiles` plus 32 m. The nav stays bounded to the combat areas, while the motor
   now has ground everywhere.
 * **Expected effect on G4 [inferred].** The input of each region tile gains the terrain of its border ring where
-  S1's cover lacked it, and Kharg's wet tiles are skipped as before. Bake time should stay near S1's 2.8–3.9 s
-  (Caspian) and 3.8–4.3 s (Kharg), well inside 6 s and 13 s.
+  S1's cover lacked it. Bake time should stay near S1's 2.8–3.9 s (Caspian) and 3.8–4.3 s (Kharg), well inside 6 s
+  and 13 s.
+* **Kharg: the meaning changes.** S1 dropped a whole cover tile when no terrain sample in it lay above
+  water − 1.8 m: 1,290 of 1,614 cover tiles (s1.md §19.2). The per-triangle rule drops a tile only when all of its
+  input is wet terrain. A coastal tile that mixes dry and wet terrain now runs Recast, with null-area triangles,
+  where S1 dropped or kept it whole.
+  * Expected: `tiles_wet` a little below 1,290, because coastal tiles with some dry triangles now bake. The Kharg bake
+    therefore costs a little more than S1's 3.8–4.3 s.
+  * `sim.nav.bake` prints `tiles_wet` and `triangles_unwalkable` (`NavStats`) beside S1's 1,290, so the move in
+    bake time can be explained.
+  * Caspian's lake (67.26 m) lies under all of its terrain (114.4 m and up), so Caspian marks nothing.
+  * Metro's pond (62.56 m) can mark terrain below 60.76 m. Metro's terrain reaches down to 53.7 m.
+* **Expected effect on S1 G2 (the `sim.nav` rows) [inferred].** S1 already ran its G2 with the combat-area tiles
+  as cover, so inside the region the motor and the nav already had terrain.
+  * TC only adds terrain: the region's border ring, and ground outside the combat tiles. It removes no Havok
+    triangle and no terrain cell inside the region, and walkable area only connects components.
+  * The spawn judge's `floor_at` casts from 1 m above the point to 2 m below it (`spawn.cpp:42`, `:107`), so only a
+    point within that window of new ground can change.
+  * So every row should stay the same or rise. The Caspian RL 24 stay off-mesh: the terrain is 29–32 m above them,
+    outside the window. A row that falls is a defect, and G4 names its cause before it counts.
 
 ---
 
@@ -480,7 +620,13 @@ Sources:
 4. The S4 trace opens them only as **group 4**, at tick 14,480, after base 3 falls at tick 14,473. Groups 1–3 open at
    62, 3,668 and 9,074.
 5. The defenders' LifeCounter (team2) has `BaseCount = 3` (interface value #1694831539 = 3). Metro's is 4.
-6. **[inferred, the same assumption as s4.md §9.1 / open question 12]** The round ends when BaseCount bases have
+6. **There is no underground room.** The RushLarge0 soup without terrain was searched with the probe's
+   `--havok-near` (scratch `tc-design/rev2/havok_near{1,2,3}.txt`). It has **0 Havok triangles** with a corner in
+   x −112..−58, z 343..370 (the points' footprint plus 6 m), at y 98–112 and over the whole column y 60–140. In the
+   wider box x −160..−10, y 60–200, z 300–420 it has 5,210 triangles in 22 placements: the StaticModelGroup, linden
+   and aspen trees, and azalea bushes. All of them lie at y ≥ 128.8 m, on the surface. So nothing exists at y 104
+   for a soldier to stand on. The points are parked, not placed in a room our reader fails to build.
+7. **[inferred, the same assumption as s4.md §9.1 / open question 12]** The round ends when BaseCount bases have
    fallen (RoundOver). Caspian's RushLarge0 therefore ends at base 3, group 4 belongs to a stage that is never
    played, and its spawns are parked underground.
 
@@ -488,9 +634,19 @@ Sources:
 * TC changes nothing here: the points were already under terrain under the near rule.
 * The spawn and G2 judges (S1 G2 rows, the bot spawn filter) should judge only points of played stages. That is
   M2b's, with S4 open question 12.
-* **Test** (`sim.terrain`, install case): asserts facts 1–5 through the readers. These are the point count and y
-  range, the identity transforms, the terrain height and no hole under each point (via the record),
-  `Enabled=false` on both spawners, the group-4 opening tick after base 3's fall, and `BaseCount = 3`.
+* **Until M2b**, these 24 points are still counted:
+  * S1 G2's Caspian RL row keeps them as failing (`o24`);
+  * the bot spawn filter (s1.md §8) still has them in its input and refuses them only because `settle_spawn` finds
+    no floor there. The `host.scale` gates run ConquestLarge0, so the gates never see these points.
+  TC changes neither. G4 reports the row with this note.
+* **Test** (`sim.terrain`, install case): asserts facts 1–6 through the readers:
+  * the point count and y range;
+  * the identity transforms;
+  * the terrain height and no hole above each point (via the record);
+  * `Enabled=false` on both spawners;
+  * the group-4 opening tick after base 3's fall;
+  * `BaseCount = 3`;
+  * no Havok soup triangle in the footprint box from y 60 to 140.
 * If a later reading shows stage 4 is played, the test fails, which is exactly when this explanation stops holding.
 
 ---
@@ -506,7 +662,7 @@ Sources:
 | **"jolt-terrain"** (new) | — | params = content digest (SHA-256 over width, height, origin, spacing, frame, every height's bits and every hole byte) + bits / block + build params; converter `kStaticWorldConverterVersion`; `jolt_version` = `jolt_build_id()`. Content keyed: a level's modes share one entry |
 | "OBF3JTER" v1 (new) | — | `StaticTerrainInfo`, the HeightFieldShape's `SaveBinaryState` stream, the patch MeshShape's stream (or a zero length) |
 | nav tile key | input digest (triangles and layers) | the same, plus `unwalkable` when non-empty |
-| nav world key | world options' cover / water | `NavBakeOptions::water` digest |
+| nav world key | world options' cover / water; `region=` via `terrain_cover_digest` | `NavBakeOptions::water` digest (`water=`). With `links=jolt`, also `terrain=<bits>/<block>`, because the drop links are swept against the fields. `region=` keeps its digest of the sorted tile list: `terrain_cover_digest` is renamed `tile_list_digest` in `static_world_internal.h`, with the same bytes, so region keys are unchanged |
 
 * **Warm path**: source digest → "jolt-world" v2 → every "jolt-tile" and every "jolt-terrain" → restore. No soup,
   no grid read.
@@ -522,12 +678,14 @@ Sources:
 |---|---|---|
 | terrain objects per soup | `kMaxSoupTerrains` = 8 | soup error |
 | grid side | `res::kMaxGridSide` = 4097 (`height_grid`'s own bound) | the terrain is Missing (as today) |
-| cell visits | every cell `append_soup_terrain_tile` / `hash_soup_terrain` / the static-world cook visits is charged to a `WorkBudget` (soup budget; the cook's own budget of `kMaxGridSide`² × 2 units per terrain) | error, no partial shape |
+| cell visits | every cell that `append_soup_terrain_tile` or the static-world cook visits is charged to a `WorkBudget`: the soup budget, or the cook's own budget of `kMaxGridSide`² × 2 units per terrain. `hash_soup_terrain(…, WorkBudget &r_budget, threads)` visits each cell exactly twice (tile sums, serial hash), so it charges 2 × (w − 1) × (h − 1) units before it starts. `WorkBudget` is thread-safe, and the caller sizes it (2^25 for 4097²) | error, no partial shape or hash |
+| cell index | `soup_terrain_cell` on a null grid or outside 0..w − 2 × 0..h − 2 | an empty cell with `open = true`; the grid is never indexed |
+| no collision | a field with no collision sample, or an empty patch | no body for it; the `StaticTerrainInfo` entry stays (§5.2) |
 | non-finite heights | a non-finite sample becomes a hole for the field and gives a non-finite count for the soup cells (quantise rule) | counted, as today |
 | frame | must be a rotation × positive uniform scale (determinant > 0, orthogonal within 1e-4) | terrain cook error |
 | height range | finite, span ≤ 1e6 m | cook error |
 | patch | ≤ 4 triangles per holed sample; `holed` ≤ the grid's cells | cook error |
-| "OBF3JTER" decode | sizes as in the blob comment (static_world.h); sample count 2..4097 rounded up to the block, block 2..8, bits 1..16; `mRangeBlocksSize`, `mHeightSamplesSize`, `mActiveEdgesSize` recomputed from the header with `AllocateBuffers`'s formulas and checked against the bytes left *before* Jolt reads; the patch walked like a tile MeshShape; no trailing bytes | decode error → treated as a miss and recooked |
+| "OBF3JTER" decode | We parse the whole HeightFieldShape header ourselves before `RestoreBinaryState`, because Jolt validates none of it. The checks:<br>• the Shape base: sub type HeightField, user data 0;<br>• `mOffset` and `mScale` finite, with scale x / z > 0 and y ≠ 0;<br>• `mSampleCount` from 2 to 4097 rounded up to the block, and a multiple of `mBlockSize`;<br>• `mBlockSize` 2..8 and `mBitsPerSample` 1..16;<br>• `num_blocks = mSampleCount / mBlockSize` ≤ 1 << `cNumBitsXY` (Jolt's constructor check, HeightFieldShape.cpp:477);<br>• sub-shape-ID bits `2 × bitwidth(mSampleCount − 1) + 1` ≤ `SubShapeID::MaxBits` (:484, :1451);<br>• `mMinSample` ≤ `mMaxSample` ≤ 0xFFFE, or `mMinSample` = 0xFFFF (no collision anywhere);<br>• `mMaterialIndices` empty and `mNumBitsPerMaterialIndex` = 0. The cook sets no materials; Jolt then stores none (:741), and `RestoreBinaryState` reserves `1 << bits` entries (:2701);<br>• the has-heights flag set, and the bytes that follow equal `mRangeBlocksSize`, `mHeightSamplesSize` and `mActiveEdgesSize` from `AllocateBuffers`'s formulas.<br>The restored field must match the blob's `StaticTerrainInfo` (sizes, bounds). The patch is walked like a tile MeshShape, and trailing bytes are refused | decode error → treated as a miss and recooked |
 | nav water planes | `read_water_planes`' own bounds (polygons over `kMaxCombatAreaPoints` = 4096 points refused, the World's budget charged); the rule's work is planes × points per triangle, charged | error |
 | overlay window | `max_terrain_triangles` | the window shrinks (reported) |
 
@@ -548,9 +706,49 @@ never a crash. The asan run covers it (G7).
   * `hash_soup_terrain` with 1 and N threads, equal;
   * blob round trip and hostile blobs;
   * `nav_terrain_wet` cases;
-  * `describe_hit` on terrain (`kNoStaticTile`, the tag).
-* **`sim.terrain`** (install): G1 (§2) and G6 (§9). Then cold → warm on a scratch root for Caspian CQL: a world hit,
-  terrains hit, identical hits on 10,000 rays. Then install unchanged.
+  * `describe_hit` on terrain (`kNoStaticTile`, the tag);
+  * an all-hole grid, and a grid whose only kept cells are patch cells: no field body, the info entry stays, rays
+    miss or hit only the patch;
+  * `soup_terrain_cell` on a null grid and out of range; `hash_soup_terrain` with a budget one unit short fails.
+* **`sim.terrain`** (install, RUN_SERIAL, G1 and G6). The G1 procedure:
+  1. **Every run.** For each of the 230 runs in `levelmodes` order: load, traverse, and build the soup (default
+     options). Compute each Built terrain's content digest from its record: `static_terrain_view`, then
+     `static_terrain_content`, the digest the "jolt-terrain" key and `StaticTerrainInfo::content` use.
+     The 31 runs without terrain must have none. Every run of a level must give the same digest (24 digests, one per
+     terrain level). The runs go 4 at a time on lanes. Each soup peaks at about 0.7 GB, so 4 lanes stay under 3 GB.
+     Estimated 2–5 min [inferred: 0.2 s load plus 0.4–1.6 s soup per run].
+  2. **Per digest, once.** `build_static_world_terrain({}, {view})` from the first run's record.
+     * Exhaustive check: for every cell, the field's per-triangle no-collision state (`IsNoCollision` on the
+       triangle's three samples) plus the patch's triangles equals `soup_terrain_cell`'s output one to one. Every
+       non-hole field sample is within `max_error` of the grid. `holed` and `patch_triangles` are printed, and
+       `holed` must equal §4.1's mismatch column.
+     * Lattice: a 16 m lattice over the terrain's extent. Each lattice point gives two rays, one at +(1.0, 0.6) m
+       into triangle (a, d, b) and one at +(0.6, 1.0) m into (a, c, d).
+     * Mismatch cells: rays into both triangles of every mismatch cell and of its 8 neighbours.
+     * A ray starts 0.25 m above the expected height (the cell's triangle plane from the grid floats) and runs
+       0.5 m down.
+     * About 1.5–3 s per 4097² terrain: the cook, about 0.2 s for the exhaustive pass, and 0.52 M rays at about
+       1 µs each.
+  3. **Per run.** Every combat-area tile centre of the run's own mode (`level_combat_tiles`), at both triangle
+     offsets, cast against its digest's world.
+  4. **Full worlds.** Caspian CQL, Kharg CQL and Metro TDM through `load_static_world_cached` on a scratch root,
+     cold. The lattice and tile centres are cast again. A non-terrain hit is re-cast past and counted as occluded.
+     Then warm on the same root: a world hit, the terrains hit, and identical hits on 10,000 rays.
+  5. **G6** (§9), then install unchanged.
+* **`tools.tc_cost`** (install, RUN_SERIAL, `tests/tc_cost.cmake`, the `tools.ebx_memory` / `tools.m1_prepare`
+  pattern). For each G3 run, on its own fresh scratch root, it runs `bf3dump shapes` cold, warm and warm in child
+  processes. It parses `shapes total`, `peak working set`, `peak private bytes`, `resident` and `cache` from the
+  output, and checks §4.5's limits. It prints the before / after table, and `install.unchanged` must be yes in every
+  run. Exit 77 without an install; report-only under asan.
+* **`sim.vehicle.unit` G1t** (new case in `sim_vehicle_tests.cpp`, no data). The world is
+  `build_static_world_terrain` with:
+  * a 65 × 65 field at 2 m with a 4° slope and bumps;
+  * one single-corner hole, so the world has a patch;
+  * one Havok MeshShape tile (a ramp) beside it.
+  Three Humvees drive courses that cross the field, the patch triangles next to the hole and the field-to-tile
+  border, touching each other as in G1m. Gates: G1 (two runs bit-identical) and G1r (restore and replay), as G1m.
+  This gates multi-vehicle determinism over HeightFieldShape and patch bodies, which the synthetic courses, all
+  MeshShape, never touch.
 * **`tc.contract`** (now): the header additions compile together; constants and defaults (§13).
 
 ### 12.2 Changed
@@ -564,7 +762,8 @@ never a crash. The asan run covers it (G7).
   (§5.4).
 * `host.scale.unit` / `host.scale`, `s1.contract`: the cover lines go.
 * `sim.vehicle` and `s2.contract`: the course finder's "keep legs on terrain tiles" check becomes always true. Courses
-  may move, and G5 re-runs them.
+  may move, and G5 re-runs them (`sim.vehicle` and `sim.vehicle.unit` together).
+* `sim.nav.bake`: prints `NavStats::tiles_wet` and `triangles_unwalkable` beside S1's 1,290 (G4, §7).
 
 ### 12.3 Unchanged and must pass
 
@@ -579,7 +778,8 @@ The rest of the full ctest (82 tests at this revision).
 4. Run only the timing commands.
 5. Delete the lock (held ≤ 45 min).
 
-G3, G4 and G5 timings are taken this way.
+G3 (`tools.tc_cost`, `godot.m1_load`), G4 (`host.scale`, `sim.nav.bake`) and G5 timings are taken this way. A
+failing timing is re-run once under the lock, and both results are reported (§2).
 
 ---
 
@@ -592,10 +792,10 @@ implementation; `tc.contract` checks this).
 
 | header | additions |
 |---|---|
-| `bf3/core/level/collision_soup.h` | forward `res::HeightGrid`; `SoupTerrain::grid`, `SoupTerrain::frame`; `kMaxSoupTerrains`; `SoupTerrainCell` + `soup_terrain_cell`; `append_soup_terrain_tile`; `SoupTerrainTileSum`, `SoupTerrainHash` + `hash_soup_terrain` |
-| `bf3/sim/static_world.h` | `kStaticTerrainBits`, `kStaticTerrainBlock`, `kStaticTerrainBodyLayer`, `kMaxStaticTerrains`, `kStaticTerrainCacheKind`, `static_terrain_tag()`; `StaticTerrainView`, `StaticTerrainInfo`; `StaticWorldShapes::terrain_count` / `terrain`; `StaticWorldStats` terrain fields; `build_static_world_terrain`; `encode_static_terrain_blob`, `decode_static_terrain_blob`, `static_terrain_key_inputs` |
+| `bf3/core/level/collision_soup.h` | forward `res::HeightGrid`; `SoupTerrain::grid`, `SoupTerrain::frame`; `kMaxSoupTerrains`; `SoupTerrainCell` + `soup_terrain_cell` (rev 2: null grid / out of range defined); `append_soup_terrain_tile`; `SoupTerrainTileSum`, `SoupTerrainHash` + `hash_soup_terrain` (rev 2: takes `WorkBudget &`) |
+| `bf3/sim/static_world.h` | `kStaticTerrainBits`, `kStaticTerrainBlock`, `kStaticTerrainBodyLayer`, `kMaxStaticTerrains`, `kStaticTerrainCacheKind`, `static_terrain_tag()`; `StaticTerrainView`, `StaticTerrainInfo`; rev 2: `static_terrain_view`, `static_terrain_content`; `StaticWorldShapes::terrain_count` / `terrain`; bounds include the terrain; `StaticWorldStats` terrain fields; `build_static_world_terrain`; `encode_static_terrain_blob`, `decode_static_terrain_blob` (rev 2: the full header check list), `static_terrain_key_inputs`; the empty-field rule and the D5 / D17 deviation note |
 | `bf3/sim/collision_world.h` | `kNoStaticTile`, `kNoStaticTerrain`, `StaticHit::terrain` |
-| `bf3/sim/nav.h` | `NavTileInput::unwalkable`; `nav_terrain_wet`; the `nav_tile_inputs` overload with water planes; `NavBakeOptions::water`; `NavInputCheck::terrain_matched`, `terrain_tolerance` |
+| `bf3/sim/nav.h` | `NavTileInput::unwalkable`; `nav_terrain_wet`; the `nav_tile_inputs` overload with water planes; `NavBakeOptions::water` (rev 2: the `terrain=` / `region=` key note); `NavInputCheck::terrain_matched`, `terrain_tolerance`; rev 2: `NavStats::tiles_wet`, `triangles_unwalkable` |
 | `bf3/render/collision_prep.h` | `CollisionPrepOptions`; the `prepare_collision_meshes` overload; `prepare_terrain_window` |
 | `tests/tc_contract_tests.cpp` + `tests/CMakeLists.txt` TC block | ctest `tc.contract` |
 
@@ -613,6 +813,7 @@ mention. None is used on a parallel branch (§3).
 * `src/bf3_core/src/level/soup_terrain.cpp`: the cell functions and the hash, split out of collision_soup.cpp.
 * `src/bf3_sim/src/static_world_terrain.cpp`: field and patch cook, digest, blob, validator.
 * `tests/terrain_collision_tests.cpp` (`sim.terrain.unit`, `sim.terrain`) and `tests/tc_contract_tests.cpp` (exists).
+* `tests/tc_cost.cmake` (`tools.tc_cost`, G3).
 * `research/probes/tools/level-oracle/parity.ps1`.
 * `tools/bf3dump/terrain_commands.{h,cpp}`: `bf3dump terrain <LEVEL> <MODE> [--grid=16] [--all]`, G1's numbers by
   hand.
@@ -641,6 +842,9 @@ mention. None is used on a parallel branch (§3).
 * **tests**:
   * `collision_tests.cpp`, `terrain_tests.cpp`;
   * `sim_world_install_tests.cpp`, `sim_nav_tests.cpp`, `sim_nav_install_tests.cpp`;
+  * `sim_vehicle_tests.cpp`: the G1t case. Its world (`build_static_world_terrain`) and its three courses (start
+    placements and command scripts for `run_vehicle_group`) are local to the test, so
+    `build_synthetic_vehicle_ground` and the 7 synthetic courses stay as they are;
   * `s1_contract_tests.cpp`, `host_scale_tests.cpp`;
   * `CMakeLists.txt` (TC block).
 * **docs**: `README.md` (collision table, the terrain sentence, the overlay rows); `docs/design/s1.md` §5.2 and
@@ -661,7 +865,8 @@ mention. None is used on a parallel branch (§3).
 | risk | effect | mitigation |
 |---|---|---|
 | Oracle and listing time grows (33.5 M triangles per big run) | the G2 parity run takes longer (estimate +20–40 min over 230 runs) | the hash definition is kept for parity. If too slow, a per-row hash (parallel) in both tools is a follow-up, and the parity is rerun |
-| Jolt heightfield and capsule contacts behave differently from MeshShape terrain (active edges, ghost bumps at cell edges) | motor or vehicle feel; S2 G2x moves | same active-edge angle as tiles; G5 re-run; `sim.motor` unchanged tests |
+| Jolt heightfield and capsule contacts behave differently from MeshShape terrain (active edges, ghost bumps at cell edges) | motor or vehicle feel; S2 G2x moves | same active-edge angle as tiles; G5 re-run including G1t; `sim.motor` unchanged tests |
+| Capsule queries on the field cost about +1 µs each (§4.3, 1.4–1.6 × a terrain MeshShape) | tick time | at S1's 16,430 queries per second this is ≤ 0.27 ms per tick summed over the lanes; G4 re-measures `host.scale` p99 and `us_sweep`. If it ever matters, the fallback is per-tile terrain MeshShapes generated around the soldiers, not a format change |
 | S2 courses move (the finder no longer avoids terrain holes) | G2x numbers change | G5 reports per course; ExactPod < 2 cm is the gate |
 | MP_013's 11 mm field error | nav proof 1 needs the terrain tolerance | stated and reported (§5.4); no S1 gate uses MP_013 |
 | Memory: field 47 MiB plus record 84 MB during the cold path; +0.9 GB of cache over all levels | peak working set on the cold path | G3 reports. The record is freed with the soup after the cook; warm paths read no record |
@@ -678,3 +883,7 @@ mention. None is used on a parallel branch (§3).
 2. The oracle's FNV chain is serial. If G2 becomes too slow, should both tools switch to a per-row hash?
    (The plan is to keep it for this track.)
 3. The overlay window radius (512 m) is a guess for a usable debug view. It can be tuned after the capture.
+4. The nav proof-1 tolerance is widened for terrain only (MP_013 needs 11.2 mm, §5.4). The alternative, baking the
+   nav from Jolt's dequantised heights, was rejected because the gated levels stay at 1 mm.
+5. S2's MP_007 courses may move once the terrain is whole, because the finder's terrain-tile constraint becomes
+   always true. The G2x numbers will move, and G5 gates them again.

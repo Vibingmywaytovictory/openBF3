@@ -277,7 +277,9 @@ inline constexpr size_t kMaxSoupTerrains = 8;
 
 // One cell (p_x, p_z) of a terrain record: its two triangles in emit order, or none when a corner is a hole (open).
 // Triangles are quantised like every soup triangle: a degenerate or non-finite one is counted, not returned.
-// p_placement is the triangles' SoupTriangle::placement (placements.size() + terrain index).
+// p_placement is the triangles' SoupTriangle::placement (placements.size() + terrain index). A terrain without a
+// record (null grid) or a cell outside 0..width-2 x 0..height-2 gives an empty cell with open = true and never
+// indexes the grid (callers treat it as no ground).
 struct SoupTerrainCell {
 	std::array<SoupTriangle, 2> triangles{};
 	uint8_t count = 0; // triangles kept (0..2)
@@ -297,7 +299,10 @@ Result<size_t> append_soup_terrain_tile(const SoupTerrain &p_terrain, uint32_t p
 // What the oracle's T and K lines need of one terrain: the whole grid's cells in emit order. hash is FNV-1a over
 // every kept triangle's bytes in emit order (the same definition as before TC, now over all cells); tiles holds per
 // soup tile (sorted by x, z) the triangle count and the wrapping sum of the triangle hashes. Rows run on up to
-// p_threads lanes for the tile sums; the running hash is one serial pass.
+// p_threads lanes for the tile sums; the running hash is one serial pass. The pass visits each cell exactly once
+// (twice counting the serial hash), so it charges 2 x (width - 1) x (height - 1) units to r_budget before it starts
+// (a 4097^2 terrain needs 2^25; the caller sizes the budget) and fails without a partial result when that is refused.
+// An error as well on a missing record.
 struct SoupTerrainTileSum {
 	std::array<int32_t, 2> tile{};
 	size_t triangles = 0;
@@ -312,7 +317,7 @@ struct SoupTerrainHash {
 	uint64_t hash = 0xcbf29ce484222325ull; // kFnvOffset
 	std::vector<SoupTerrainTileSum> tiles;
 };
-Result<SoupTerrainHash> hash_soup_terrain(const SoupTerrain &p_terrain, uint32_t p_placement, unsigned p_threads = 0);
+Result<SoupTerrainHash> hash_soup_terrain(const SoupTerrain &p_terrain, uint32_t p_placement, WorkBudget &r_budget, unsigned p_threads = 0);
 
 // One install entry the soup read (M1 T1, docs/design/m1.md §5.5 coverage check): the EBX partitions of the
 // level root, of every collision placement's entity (and its reference) and of every terrain object and asset;
