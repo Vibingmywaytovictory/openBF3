@@ -557,7 +557,7 @@ endif()
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_tc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(tc.contract sim.terrain.unit sim.terrain PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
-    set_tests_properties(sim.terrain PROPERTIES TIMEOUT 5400)
+    set_tests_properties(sim.terrain PROPERTIES TIMEOUT 10800) # G1 over 230 runs: 25 of 29 levels in 5,400 s under asan
     if(TARGET bf3dump)
         set_tests_properties(tools.tc_cost PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
     endif()
