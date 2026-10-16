@@ -174,6 +174,11 @@ public:
 	const GameServerTickTimes &last_tick_times() const;
 	// The authoritative state of a slot (server thread; tests).
 	const sim::SoldierState *soldier(uint32_t p_slot) const;
+	// M2a (docs/design/m2a.md §10.2; sv defines it): puts a server-side soldier (bot) at p_position / p_yaw in p_pose,
+	// the same code that handles the dev SpawnTarget request: applied in the rules step of the current tick and
+	// stamped there (the motor's tick precondition holds), spawn protection cleared. Server thread; the firefight
+	// brains call it at (re)spawn. Fails for an unused slot, a peer's slot or a non-finite position.
+	core::Status place_soldier(uint32_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose);
 
 private:
 	struct Impl;

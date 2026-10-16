@@ -206,6 +206,12 @@ struct WeaponTable {
 	// trigger fires for as long as the script runs (W1's 134 shots in 10 s from a 31-round M16A3; W11's full-duty
 	// load). GameConfig never sets it; it is hashed, so a table built with it can never match a real one.
 	bool infinite_magazine = false;
+	// M2a match option (docs/design/m2a.md §1, §4.2; the edit is sv's, R3): each ShotEvent's direction becomes
+	// aim_direction(cmd.yaw, cmd.pitch, {}) and its pellet_cone 0, exactly as the range's RangeScenario::exact_aim
+	// post-process (shooting_range.cpp); aim, origin and every other field keep the sim's values (with recoil), and
+	// the spread and recoil state still run. Server flag --exact-aim (dev_commands only), sent in MatchInfo's
+	// weapon_flags so the client builds the same table; fixed for the match; hashed after infinite_magazine.
+	bool exact_aim = false;
 	// SoldierSprintSettingsData.RecoverTime (0.12 s on Metro [verified, bf3dump soldier]): fire stays refused this
 	// long after a sprint ends (Mechanics::sprint_blocks_fire). From WeaponTableOptions; hashed.
 	SimTime sprint_recover_time = 7'200'000;
@@ -219,6 +225,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 struct WeaponTableOptions {
 	Mechanics mechanics;
 	bool infinite_magazine = false; // oracle only (see WeaponTable)
+	bool exact_aim = false; // M2a match option (see WeaponTable; docs/design/m2a.md §4.2)
 	float sprint_recover_seconds = 0.12f; // the soldier's SoldierSprintSettingsData.RecoverTime
 };
 // The table for a loadout universe (the level's kits, or one weapon for the tools).

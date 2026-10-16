@@ -14,8 +14,13 @@
 
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/result.h"
+#include "bf3/net/weapons_wire.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/weapons/ballistics.h"
+#include "bf3/sim/weapons/damage.h"
+#include "bf3/sim/weapons/hit_target.h"
+#include "bf3/sim/weapons/weapon_sim.h"
 
 #include <array>
 #include <cstddef>
@@ -51,6 +56,12 @@ enum class MessageType : uint8_t {
 	Bye = 22, // either way: orderly leave
 	Debug = 30, // C->S: dev commands (teleport, spawn at, spawn sweep); refused unless the server allows them
 	DebugReport = 31, // S->C: the answer to a Debug request
+	// M2a protocol v2 (docs/design/m2a.md §7; declared in W2.0, wire formats and codecs are nt's). The names are the
+	// contract; nt may renumber the values before its merge.
+	SnapshotOthers = 3, // ch0 S->C: the others that did not fit the Snapshot of the same seq (§7.3)
+	ShotEvents = 4, // ch0 S->C: remote shots since the previous snapshot (§7.4)
+	CombatEvents = 23, // ch1 S->C: hits, deaths, detonations (§7.4)
+	KitSelect = 24, // ch1 C->S: kit and team for the next spawn (§5.6)
 };
 // The type byte of a datagram, or nullopt when it is empty or unknown.
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -77,7 +88,19 @@ struct MatchInfo {
 	// sim::motor_params_hash of the server's MotorParams (SoldierDef numbers + MotorTuning). A client whose own
 	// hash differs would mispredict every tick: M1 logs it, M3 kicks (docs §7.2).
 	uint64_t motor_hash = 0;
+	// M2a v2 (docs/design/m2a.md §4.4, §5.5, §7.1). For weapon_hash and kit_hash the client disconnects with a reason
+	// on receiving MatchInfo, before Ready ("weapon table mismatch"; cl).
+	uint64_t match_seed = 0; // splitmix64(GameServerConfig::seed ^ level hash): shot seeds, bot brains, cosmetics
+	uint64_t weapon_hash = 0; // weapon_table_hash (table + mechanics + exact_aim / infinite_magazine) ^ capsule table hash
+	uint8_t weapon_flags = 0; // weapon_flags:: the match options; the client builds its table with them
+	uint64_t kit_hash = 0; // host::kit_table_hash
+	uint8_t max_rewind_ticks = 0; // host::LagCompConfig::max_rewind_ticks (21 = 350 ms, m2a.md §16 Q1)
 };
+// M2a: MatchInfo::weapon_flags bits (docs/design/m2a.md §7.1).
+namespace weapon_flags {
+inline constexpr uint8_t kExactAim = 1u << 0;
+inline constexpr uint8_t kInfiniteMagazine = 1u << 1;
+} // namespace weapon_flags
 
 struct Ready {
 	std::optional<core::Sha256Digest> source_digest;
@@ -92,6 +115,10 @@ struct Spawned {
 	uint8_t slot = 0;
 	uint32_t spawn_index = 0;
 	sim::SoldierState state; // full precision, as the own-state block
+	// M2a v2 (docs/design/m2a.md §5.6, §7.4): the life's kit (host::KitRole) and team (1, 2); the client calls
+	// spawn_soldier_weapons with them and keeps the spawn tick (state.tick) for step_weapons_m2a.
+	uint8_t kit = 0;
+	uint8_t team = 1;
 };
 
 struct Loading {
@@ -118,6 +145,11 @@ enum class DebugKind : uint8_t {
 	// after the request is handled: one authoritative SoldierState per tick, returned in DebugReport::trace when
 	// done. E1 through the full path is measured on it (every tick, not the 30 Hz snapshots; docs §14).
 	Trace = 5,
+	// M2a v2 (docs/design/m2a.md §7.4, §10.1; dev only; the server's handling is sv's). Place target bot `slot` at
+	// position / yaw in `pose` (applied in the rules step, clears spawn protection; GameServer::place_soldier's code).
+	SpawnTarget = 6,
+	// Report target bot `slot`'s server capsules (DebugReport::targets, one TargetInfoRow).
+	TargetInfo = 7,
 };
 inline constexpr uint32_t kMaxTraceTicks = 1200; // 20 s; ~92 KiB on ch1 (reliable, fragments)
 
@@ -128,6 +160,40 @@ struct DebugRequest {
 	uint16_t yaw = 0;
 	uint32_t index = 0;
 	uint32_t ticks = 60;
+	// M2a v2: SpawnTarget / TargetInfo.
+	uint8_t slot = 0;
+	sim::Pose pose = sim::Pose::Stand;
+};
+
+// M2a v2: TargetInfo's answer (docs/design/m2a.md §7.4): a target's server pose and the capsules the server tests.
+struct TargetInfoRow {
+	uint8_t slot = 0;
+	sim::Pose pose = sim::Pose::Stand;
+	sim::Vec3 feet{};
+	uint16_t yaw = 0;
+	sim::weapons::HitTarget target; // the capsules as the server's provider answers for the present tick
+};
+
+// M2a v2: the gunplay part of one traced tick (docs/design/m2a.md §1 "Server trace"). Bounded per tick; the excess is
+// dropped and counted in DebugReport::trace_dropped.
+inline constexpr size_t kMaxTraceShots = 8;
+inline constexpr size_t kMaxTraceProjectiles = 8;
+inline constexpr size_t kMaxTraceDamage = 8;
+inline constexpr size_t kMaxTraceDetonations = 2;
+inline constexpr size_t kMaxTraceDeaths = 4;
+struct TraceDeath {
+	uint8_t victim = 0;
+	uint8_t killer = 0;
+	uint32_t shot_index = 0;
+};
+struct TraceGunplayTick {
+	sim::Tick tick = 0;
+	std::vector<sim::weapons::ShotEvent> shots; // the traced shooter's
+	std::vector<sim::Vec3> projectiles; // positions of the traced shooter's live projectiles at the tick's end
+	std::vector<uint32_t> projectile_shots; // their shot indices (same order)
+	std::vector<sim::weapons::DamageEvent> damage;
+	std::vector<sim::weapons::DetonationEvent> detonations;
+	std::vector<TraceDeath> deaths;
 };
 
 struct SpawnSweepRow {
@@ -145,6 +211,10 @@ struct DebugReport {
 	std::string text; // human-readable result line
 	std::vector<SpawnSweepRow> sweep; // SpawnSweep only; sent on ch1 (reliable, may fragment)
 	std::vector<sim::SoldierState> trace; // Trace only: consecutive ticks, oldest first, full precision
+	// M2a v2.
+	std::vector<TargetInfoRow> targets; // TargetInfo only
+	std::vector<TraceGunplayTick> trace_gunplay; // Trace only: one per traced tick, the same ticks as `trace`
+	uint32_t trace_dropped = 0; // trace additions beyond the per-tick bounds
 };
 
 std::vector<uint8_t> encode_hello(const Hello &p_message);
@@ -178,7 +248,18 @@ struct CommandPacket {
 	uint32_t snapshot_ack_bits = 0; // bit i = snapshot newest_snapshot - 1 - i arrived
 	std::array<sim::Command, kCommandsPerPacket> commands{}; // [0] newest; consecutive ticks and sequences
 	uint8_t count = 0;
+	// M2a v2 (docs/design/m2a.md §7.2): bit i = the SnapshotOthers of seq newest_snapshot - i arrived. It differs from
+	// snapshot_ack_bits by one ON PURPOSE: bit 0 is the newest seq itself, because the main Snapshot's arrival does not
+	// imply its SnapshotOthers. newest_snapshot keeps M1's meaning (the newest Snapshot that arrived), so a
+	// SnapshotOthers newer than it cannot be acked yet (the client counts others_ahead). Pinned by m2a.contract.
+	uint32_t others_ack_bits = 0;
 };
+// M2a v2 (docs/design/m2a.md §7.2; nt defines them): the two ack conventions as predicates (the server's
+// host::LagHistory::ack and the client use them). snapshot_acked: p_seq == newest_snapshot, or bit
+// (newest_snapshot - 1 - p_seq) of snapshot_ack_bits; others_acked: bit (newest_snapshot - p_seq) of others_ack_bits.
+// A seq newer than newest_snapshot (seq_newer), or beyond the 32 bits of its field, is not acked.
+bool snapshot_acked(const CommandPacket &p_packet, uint16_t p_seq);
+bool others_acked(const CommandPacket &p_packet, uint16_t p_seq);
 std::vector<uint8_t> encode_command_packet(const CommandPacket &p_packet);
 core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_datagram);
 
@@ -210,6 +291,14 @@ struct OtherSoldier {
 	uint8_t transition = 0; // 0 = start, 255 = done
 	sim::MoveMode mode = sim::MoveMode::OnGround;
 	uint8_t flags = 0; // low 8 bits of soldier_flags::
+	// M2a v2 (docs/design/m2a.md §7.3): 19 more bits per other: the 3p weapon, firing, ADS, and reloads and bursts
+	// as sequence counters, so a lost snapshot cannot hide one (the burst sequence is au's audio seed, §4.4).
+	uint8_t weapon = 0xFF; // index into the match's def list (WeaponTable def id), 255 = none
+	uint8_t weapon_phase = 0; // sim::weapons::WeaponPhase (3 bits)
+	bool firing = false; // trigger down and a shot this interval
+	bool ads = false;
+	uint8_t reload_seq = 0; // 2 bits: counts reload starts
+	uint8_t burst_seq = 0; // 4 bits: counts bursts
 };
 // The quantised view of a server state, exactly as the receiver decodes it (the server's interpolation tests
 // compare against this).
@@ -231,6 +320,8 @@ struct Snapshot {
 	uint16_t own_events = 0; // soldier_events:: of the own soldier since the previous snapshot to this client
 	std::optional<sim::SoldierState> own; // the receiving client's soldier after server_tick
 	std::vector<OtherSoldier> others; // every other live soldier, nearest first, as many as fit
+	// M2a v2 (docs/design/m2a.md §7.3): the own soldier's weapons at full precision (weapons_wire.h), with `own`.
+	std::optional<WeaponsWire> own_weapons;
 };
 // Fills at most kMaxDatagramBytes; others that do not fit are left out (r_dropped counts them). M1's soldier
 // counts never come near the budget; M3 replaces the "nearest first" order with ghost priority.
@@ -241,5 +332,101 @@ constexpr bool seq_newer(uint16_t p_a, uint16_t p_b) {
 	return p_a != p_b && uint16_t(p_a - p_b) < 0x8000u;
 }
 core::Result<Snapshot> decode_snapshot(std::span<const uint8_t> p_datagram);
+
+// ---- M2a protocol v2 (docs/design/m2a.md §7; declared in W2.0, defined by nt) --------------------------------------
+// nt bumps kProtocolVersion to 2 with the codecs. Decoders take bytes from the network: counts are bounded
+// (shots <= kMaxShotsPerDatagram, others <= kMaxSlots - 1, combat events <= kMaxCombatEventsPerMessage), defs below
+// the table size are the receiver's check, floats finite; a malformed message is refused and counted (E17).
+
+// The others that did not fit the Snapshot of the same seq (unreliable). It carries the seq and server_tick of its
+// Snapshot, so its records are usable when that Snapshot is lost; nearest first after the Snapshot's own.
+struct SnapshotOthers {
+	uint16_t seq = 0;
+	sim::Tick server_tick = 0;
+	std::vector<OtherSoldier> others;
+};
+std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped = nullptr);
+core::Result<SnapshotOthers> decode_snapshot_others(std::span<const uint8_t> p_datagram);
+
+// One remote shot as decoded (the owner never receives its own shots: it predicted them). seed and spawn_time are
+// derived by the receiver (shot_seed(match_seed, slot, shot_index); time + the def's SpawnDelay), never sent.
+struct RemoteShot {
+	uint8_t slot = 0;
+	uint32_t shot_index = 0; // full 32 bits for a shooter's first shot in the datagram, then 4-bit deltas
+	uint16_t def = sim::weapons::kNoWeapon;
+	sim::weapons::SimTime time = 0; // 1/65,536 tick within the datagram's server tick on the wire
+	sim::Vec3 origin{}; // 3 x 20 bits, 1/256 m from ShotQuantization::origin_min (a 4,096 m span per axis)
+	sim::Vec3 direction{}; // octahedral 2 x 16
+	uint8_t pellets = 1; // 5 bits
+	bool tracer = false;
+	sim::Vec3 aim{}; // with tracer: octahedral 2 x 12 (the tracer converges on it)
+	float pellet_cone = 0; // with pellets > 1: 12 bits, 1/64 degree
+	float power = 1; // hold-and-release defs: 8 bits, 1/255
+};
+inline constexpr size_t kMaxShotsPerDatagram = 128;
+struct ShotEvents {
+	sim::Tick server_tick = 0;
+	std::vector<RemoteShot> shots;
+};
+// The level's quantisation frame for shot origins and combat positions (the static world's bounds' minimum).
+struct ShotQuantization {
+	sim::Vec3 origin_min{};
+};
+// At most kMaxDatagramBytes: further shots are dropped farthest-first (from p_receiver_eye) and counted in r_dropped;
+// the GameServer sends at most two datagrams per snapshot.
+std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQuantization &p_frame, const sim::Vec3 &p_receiver_eye,
+		size_t *r_dropped = nullptr);
+core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame);
+
+// Combat events (reliable, to every client; docs/design/m2a.md §4.3). Damage and health travel in 1/100 hp,
+// positions as shot origins, normals octahedral 16.
+struct HitEvent {
+	uint8_t victim = 0;
+	uint8_t shooter = 0;
+	uint32_t shot_index = 0;
+	uint8_t pellet = 0;
+	sim::weapons::HitZone zone = sim::weapons::HitZone::Body;
+	float damage = 0;
+	float health_after = 0;
+	sim::Vec3 position{};
+	sim::Vec3 normal{};
+	sim::weapons::SimTime time = 0;
+};
+struct DeathEvent {
+	uint8_t victim = 0;
+	uint8_t killer = 0; // == victim for fall damage
+	uint16_t def = sim::weapons::kNoWeapon; // kNoWeapon: not a weapon (fall damage)
+	sim::weapons::HitZone zone = sim::weapons::HitZone::Body;
+	uint32_t shot_index = 0;
+	bool headshot = false;
+	sim::weapons::SimTime time = 0;
+};
+// From wp's DetonationEvent, so every client places a grenade's explosion where the server's flew.
+struct DetonationWire {
+	uint8_t shooter = 0;
+	uint32_t shot_index = 0;
+	uint16_t def = sim::weapons::kNoWeapon;
+	sim::weapons::SimTime time = 0;
+	sim::Vec3 position{};
+	sim::Vec3 normal{};
+	bool dud = false;
+};
+inline constexpr size_t kMaxCombatEventsPerMessage = 256;
+struct CombatEvents {
+	sim::Tick server_tick = 0;
+	std::vector<HitEvent> hits;
+	std::vector<DeathEvent> deaths;
+	std::vector<DetonationWire> detonations;
+};
+std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const ShotQuantization &p_frame);
+core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame);
+
+// Client -> server: kit (< 4) and team (0 keep, 1, 2; a change needs dev_commands in M2a) for the next spawn.
+struct KitSelect {
+	uint8_t kit = 0;
+	uint8_t team = 0;
+};
+std::vector<uint8_t> encode_kit_select(const KitSelect &p_message);
+core::Result<KitSelect> decode_kit_select(std::span<const uint8_t> p_datagram);
 
 } // namespace bf3::net

@@ -298,3 +298,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/grid_pairs.h
     src/gameplay/grid_pairs.cpp
 )
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §6.5, §15; owner of the bodies: lc): the capsule pose table.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/capsule_pose_table.h
+)

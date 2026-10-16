@@ -98,6 +98,14 @@ struct TargetQuery {
 	uint16_t def = 0xFFFF; // the weapon def id (kNoWeapon when unknown)
 	uint8_t pellet = 0;
 	TargetQueryKind kind = TargetQueryKind::Flight;
+	// M2a (docs/design/m2a.md §6.4; filled by ProjectileWorld at its query sites, lc's R4): the segment's geometry,
+	// so a rewinding provider can cull against swept target bounds. Flight: the flight segment from -> to; Blast: the
+	// centre (from == to) and BlastRadius; Refly: the re-flown segment. StaticTargets and the present-tick provider
+	// ignore them; has_segment false means "not filled" (every query before R4).
+	Vec3 from{};
+	Vec3 to{};
+	float radius = 0;
+	bool has_segment = false;
 };
 static_assert(std::is_trivially_copyable_v<TargetQuery>);
 

@@ -119,6 +119,11 @@ struct ClientSessionConfig {
 	// Tests only (host.session.unit, T4): the first clock estimate (from MatchInfo) is moved by this many ticks, so
 	// a test can start the clock behind the server's spawn tick (a start with T >= C: forced_forward).
 	int32_t initial_clock_offset_ticks = 0;
+	// M2a (docs/design/m2a.md §5.5, E6; cl): the weapon_mechanics.cfg this client parses when it builds its weapon
+	// table on MatchInfo (both ends of a headless test share one SharedLevel, so the cfg is not part of it). The
+	// default is the shipped file's project-relative path (sim::weapons::kMechanicsTuningPath); E6's mismatch run
+	// points it at a second file.
+	std::string mechanics_cfg = "config/weapon_mechanics.cfg";
 };
 
 // One soldier as the presentation sees it.
@@ -134,6 +139,11 @@ struct PresentedSoldier {
 	sim::MoveMode mode = sim::MoveMode::OnGround;
 	uint8_t flags = 0;
 	bool extrapolated = false; // render time was past the newest sample
+	// M2a (docs/design/m2a.md §6.1; cl fills them in present_others): the stance being entered and the transition
+	// progress, switched together with `pose` at the newer sample; the capsules (sim::weapons::TargetPose) and tp's
+	// stance blend read them.
+	sim::Pose target_pose = sim::Pose::Stand;
+	float transition = 0.0f; // 0..1 (net::OtherSoldier::transition / 255)
 };
 
 // Trivially copyable (a fixed char buffer instead of a string): it travels inside PresentationFrame.
@@ -230,6 +240,11 @@ struct PresentationFrame {
 	uint32_t other_count = 0;
 	std::array<OtherTrack, net::kMaxSlots> others{};
 	ClientStats stats;
+	// M2a (docs/design/m2a.md §6.2, §8.3; cl fills it in publish): the newest Snapshot seq received when this frame was
+	// published (M1's newest_snapshot at that moment; a newer SnapshotOthers does not count, §7.2). The main thread
+	// puts its low 8 bits into the InputSample with the frame's render time, and the client thread writes them into
+	// the command as Command::view_seq8.
+	uint16_t newest_seq = 0;
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 

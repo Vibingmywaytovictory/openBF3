@@ -688,3 +688,20 @@ if(OPENBF3_ASAN)
         set_tests_properties(tools.fx_bench PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
     endif()
 endif()
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §15, §15.1): m2a.contract compiles every wave-2 interface header together
+# (and tests/gunplay_fixture.h) and pins the sizes of Command, ShotView, PresentEvent and OtherPose,
+# weapon_buttons::kAll inside the wire mask, the exact_aim hash change and its field-for-field equality with the range
+# post-process, the three step_weapons_m2a rows and the two ack-bit conventions. Rows that need a track's body (nt's
+# codecs, sv's R3 and weapon_rules.cpp) print PENDING with the reason until that track turns them on. No install;
+# one short loopback session on a synthetic floor (the fixture's smoke case).
+openbf3_test(test_m2a_contract test_main.cpp m2a_contract_tests.cpp gunplay_fixture.h weapons_support.h test_support.h)
+target_link_libraries(test_m2a_contract PRIVATE bf3_host bf3_render bf3_anim bf3_fx)
+# The fixture's metro() reads the shipped motor tuning (compiled here, not run: m2a.contract needs no install).
+target_compile_definitions(test_m2a_contract PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME m2a.contract COMMAND test_m2a_contract --test-suite=m2a-contract)
+set_tests_properties(m2a.contract PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2a_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2a.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_cl_dir}")
+endif()

@@ -129,3 +129,12 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/weapons/weapon_install.h
     src/weapons/weapon_install.cpp
 )
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §5.2, §5.5, §6.5, §15): the integration rules (step_weapons_m2a, sv; the
+# .cpp is a forwarding stub until sv lands it), the mechanics cfg parser (sv) and the posed target (lc).
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/weapons/weapon_rules.h
+    src/weapons/weapon_rules.cpp
+    include/bf3/sim/weapons/mechanics_tuning.h
+    include/bf3/sim/weapons/posed_target.h
+)

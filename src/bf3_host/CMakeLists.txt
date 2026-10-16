@@ -38,3 +38,17 @@ target_sources(bf3_host PRIVATE
     src/bot_fill.cpp
     src/scale_bench.cpp
 )
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §4, §6.6, §8, §10.1, §11.4, §15): server gunplay (sv), lag compensation
+# (lc), the client's events, presented weapon and cosmetic projectiles (cl) and the HUD feed (hud).
+target_sources(bf3_host PRIVATE
+    include/bf3/host/gunplay.h
+    include/bf3/host/kits.h
+    include/bf3/host/target_bots.h
+    include/bf3/host/server_view.h
+    include/bf3/host/lag_comp.h
+    include/bf3/host/presentation_events.h
+    include/bf3/host/presentation_weapon.h
+    include/bf3/host/client_projectiles.h
+    include/bf3/host/hud_feed.h
+)
