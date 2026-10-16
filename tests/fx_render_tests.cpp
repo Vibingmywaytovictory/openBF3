@@ -319,6 +319,16 @@ TEST_CASE("prepare: Waq and mesh stand-in transforms") {
 	RenderPrep prep;
 	prep.prepare(w, view_along_z(), atlas);
 	CHECK(prep.stats().mesh_standins == 3);
+	// A mesh particle naming no texture is drawn white (kFxRectWhite), not counted as a fallback.
+	FxWorld w2;
+	REQUIRE(w2.start(fxt::effect_def("bare", { burst("b", 2, EmittableType::ParticleMesh, 0, "") }), at(0, 0, 4, 3)).ok());
+	fx_step_frame(w2, 1.0f / 60.0f);
+	RenderPrep prep2;
+	prep2.prepare(w2, view_along_z(), atlas);
+	CHECK(prep2.stats().unresolved_this_frame == 0);
+	CHECK(prep2.stats().mesh_standins == 2);
+	REQUIRE(prep2.emitter_params().size() == 1);
+	CHECK(prep2.emitter_params()[0].base_rect[2] == kFxRectWhite);
 	for (const FxBatch &b : prep.batches()) {
 		const FxInstance &in = prep.instances()[b.first_instance];
 		if (b.key.shader == FxShaderClass::Waq) {

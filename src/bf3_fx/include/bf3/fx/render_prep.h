@@ -73,8 +73,12 @@ static_assert(sizeof(FxInstance) == 80);
 static_assert(std::is_trivially_copyable_v<FxInstance>);
 
 // The per-emitter constants of one EmitterOutput (64 B, four RGBA32F texels in the params texture).
+// base_rect sizes of kFxRectWhite: the emitter draws without a texture (a ParticleMesh naming none: white); a zero
+// size (nothing resolved and no default entry, e.g. an empty atlas) samples the whole base texture.
+inline constexpr float kFxRectWhite = -1.0f;
+
 struct FxEmitterParams {
-	float base_rect[4]; // atlas UV min (u, v) and size (du, dv) of the texture entry (base atlas)
+	float base_rect[4]; // atlas UV min (u, v) and size (du, dv) of the texture entry (base atlas); see kFxRectWhite
 	float flipbook[4]; // frame count, frame columns, alpha exponent, soft fade multiplier
 	float normal_rect[4]; // normal atlas UV min and size; size 0 = no normal map
 	float lighting[4]; // light multiplier, light wrap-around, emissive (0 / 1), cull threshold

@@ -62,6 +62,7 @@ struct Resolved {
 	const AtlasEntry *base = nullptr;
 	const AtlasEntry *normal = nullptr;
 	bool fallback = false; // base came from kFxDefaultTexture (or nothing resolved)
+	bool untextured = false; // a ParticleMesh emitter without a texture name (drawn white, not a fallback)
 };
 
 constexpr size_t kMaxResolved = 1u << 16;
@@ -153,18 +154,21 @@ struct RenderPrep::Impl {
 			resolved.clear(); // bounded: defs come and go in a long session; a re-resolve is cheap
 		}
 		Resolved &r = resolved[&p_e];
-		if (r.base != nullptr || r.fallback) {
+		if (r.base != nullptr || r.fallback || r.untextured) {
 			if (r.texture == p_e.texture.texture && r.normal_map == p_e.texture.normal_map) {
 				return r;
 			}
 		}
 		r.texture = p_e.texture.texture;
 		r.normal_map = p_e.texture.normal_map;
+		r.untextured = r.texture.empty() && p_e.tmpl.emittable == EmittableType::ParticleMesh;
 		r.base = r.texture.empty() ? nullptr : p_atlas.resolve(r.texture);
 		if (r.base != nullptr && r.base->kind != AtlasKind::Base) {
 			r.base = nullptr; // a normal-atlas entry named as a diffuse texture: not drawable from the base atlas
 		}
-		r.fallback = r.base == nullptr;
+		// A mesh particle naming no texture draws with its mesh's own material in BF3 (the stand-in: white); every
+		// other emitter without a resolved texture draws the default entry and is counted.
+		r.fallback = r.base == nullptr && !r.untextured;
 		if (r.fallback) {
 			r.base = default_entry;
 		}
@@ -224,6 +228,9 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 			row.base_rect[1] = r.base->min_uv.y;
 			row.base_rect[2] = r.base->max_uv.x - r.base->min_uv.x;
 			row.base_rect[3] = r.base->max_uv.y - r.base->min_uv.y;
+		} else if (r.untextured) {
+			row.base_rect[2] = kFxRectWhite;
+			row.base_rect[3] = kFxRectWhite;
 		}
 		row.flipbook[0] = float(std::max<uint16_t>(1, e.texture.frame_count));
 		row.flipbook[1] = float(std::clamp<uint16_t>(e.texture.frame_columns, 1, std::max<uint16_t>(1, e.texture.frame_count)));

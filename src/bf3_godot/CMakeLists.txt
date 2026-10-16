@@ -116,3 +116,15 @@ target_sources(bf3_godot PRIVATE
     src/minimap_check.cpp
     src/minimap_check.h
 )
+
+# M2a fx2 (docs/design/m2a-fx2.md): VFX2's renderer node Bf3FxRenderer, the demo Bf3FxDemo (res://scenes/fx_demo.tscn,
+# --fx-check) and the GPU reference bench Bf3FxRef (res://scenes/fx_ref.tscn, --fx-ref-check).
+target_sources(bf3_godot PRIVATE
+    src/fx_renderer.cpp
+    src/fx_renderer.h
+    src/fx_demo.cpp
+    src/fx_demo.h
+    src/fx_ref.cpp
+    src/fx_ref.h
+)
+target_link_libraries(bf3_godot PRIVATE bf3_fx)
