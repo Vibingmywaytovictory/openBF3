@@ -75,12 +75,16 @@ what makes them meaningful, not their exact values.
 | G0 | `ctest --preset dev -R audio.contract` | headers, type table, hashes, FourCCs, 16 tuning keys | pass (dev and asan) |
 | G1 | `bf3dump audio waves MP_Subway TeamDeathMatch0 --decode` | 909 waves, 0 frame / 0 length mismatches, 0 errors | 909 waves, 12,955 segments, 0 / 0 / 0; install unchanged |
 | G2 | `bf3dump audio loc en --decode` | 4,290 chunks, 15,890 streams, 0 mismatches, 0 errors, 7 without streams | 4,290 / 15,890 / 0 / 0 / 7 |
-| G3 | `bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3` (ctest `audio.decode.perf`, RUN_SERIAL) | best thread CPU ≤ 0.2 ms per channel-second | G3_MEASURED |
+| G3 | `bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3` (ctest `audio.decode.perf`, RUN_SERIAL) | best thread CPU ≤ 0.2 ms per channel-second | **0.1306** ms per channel-second (passes 0.1323 / 0.1306 / 0.1312, wall 0.1311) over 27,993.4 channel-seconds with the CPU 4–8 % busy; an earlier run with the CPU at 100 % (other workflows) gave 0.1825 (wall 0.2321): thread CPU time also inflates under SMT contention, so acceptance must run G3 on a quiet machine |
 | G4 | `bf3dump audio census @all-mp` | the §1 counts | 834 (833 under `sound/`) + 1; 32,117 / 46; 32,221 / 58; 7,323 voices; 1,879 waves; 835 compiled, 0 unknown; 9,807 connections (9,784 + 23); 164 handheld strict on 32 types; 0 blob failures; 0 feedback edges |
-| G5 | `b\dev\tests\test_audio_install.exe --test-suite=audio-oracles` (ctest `audio.oracles`) | §10.2 items 2–7 | G5_MEASURED |
-| G6 | `bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2` (ctest `audio.bank`, RUN_SERIAL) | 629 resident, 265.4 MiB ≤ 384, 280 skipped, 161/161 strict, 318 waves, 0 starved, warm load ≤ 500 ms | G6_MEASURED |
-| G7 | `bf3dump audio check --g7 --out-dir <openBF3>\b\shots\audio` (ctest `audio.m16.offline`) | rows (a)–(h) PASS | G7_MEASURED |
-| G8 | `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=<openBF3>\b\shots\audio\godot_m16.wav --quit-after=90` (ctest `godot.audio`, RUN_SERIAL) | rows (a)–(d) PASS, ≥ 30.0 s, all mixer counters 0, replay equal | G8_MEASURED |
+| G5 | `b\dev\tests\test_audio_install.exe --test-suite=audio-oracles` (ctest `audio.oracles`) | §10.2 items 2–7 | 6/6 cases, 314 assertions (dev; asan too): 12 / 13 / 11 / 7 band groups (M16A3 / M98B / RPG-7 / M1A2); the 0–20 m and three 250–300 m groups on the cosine law within 1e-4; 301 m Fire gate; v28 ∈ [1.21, 1.262] over 10,000 bursts; Lfo period 250 ± 1 ms; HPFs within 0.01 Hz; Cone within 0.01 dB; routing and audible sets |
+| G6 | `bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2` (ctest `audio.bank`, RUN_SERIAL) | 629 resident, 265.4 MiB ≤ 384, 280 skipped, 161/161 strict, 318 waves, 0 starved, warm load ≤ 500 ms | 629 resident, 265.4 MiB, 280 skipped, 161/161, 318 waves, 0 starved; first load 52.4 ms, **warm 54.7 ms** (CPU 4–8 % busy; 117.0 ms warm with the CPU at 100 %) |
+| G7 | `bf3dump audio check --g7 --out-dir <openBF3>\b\shots\audio` (ctest `audio.m16.offline`) | rows (a)–(h) PASS | 38/38 PASS: onset spacing worst 65 frames (≤ 96); levels near −27.9 / mid −68.9 / far −90.0 dBFS; hpf.mix 17.3 dB, noise tap 17.8 dB, prediction off by 0.043 dB at 225.30 Hz; trace rows 0 frames error; 0 Hz bypass and same-seed determinism bit-exact; 28.25 s rendered in 0.23 s |
+| G8 | `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=<openBF3>\b\shots\audio\godot_m16.wav --quit-after=90` (ctest `godot.audio`, RUN_SERIAL) | rows (a)–(d) PASS, ≥ 30.0 s, all mixer counters 0, replay equal | 31/31 PASS, windowed: 31.0 s at 48,000 Hz; short/late blocks, late commands, ring overflows, starved voices, dropped tap records all 0; replay max diff 0 over 2,712,000 samples; max_block 0.374 ms (block 10.67 ms), max_call_gap 21.8 ms over 2,912 blocks; install unchanged |
+
+Whole suite: `ctest --preset dev` with `OPENBF3_GODOT` set ran 71 tests, 69 passed and 2 skipped (`core.cache_data`,
+`core.res`: their data variables are unset), godot.audio included (33.2 s). `ctest --preset asan -R audio`: 14/14
+passed (the 13 non-Godot audio ctests and `audio.contract`).
 
 The ctests write their WAVs to `${PROJECT_SOURCE_DIR}/b/shots/audio` (gitignored) or to `OPENBF3_AUDIO_SHOTS` when it
 is set at configure time; in a worktree set `OPENBF3_AUDIO_SHOTS=C:\Users\olku\BF3 reimplementation\openBF3\b\shots\audio` to collect
@@ -789,7 +793,8 @@ New decoders, parsers and the interpreter run under the `asan` preset (`audio.fu
 * `src/bf3_audio/CMakeLists.txt`
 * `src/bf3_audio/include/bf3/audio/{audio_config,dsp,patch_instance,mixer_core,wav_io,audio_analysis,audio_check,weapon_sound}.h`
 * `src/bf3_audio/src/audio_config.cpp` (implemented: the tuning table and parser)
-* `src/bf3_godot/src/audio_stream.{h,cpp}` (compiles; silence; not registered)
+* `src/bf3_godot/src/audio_stream.{h,cpp}` (at the interface stage silent and unregistered; now registered, `_mix`
+  pulls from `MixerCore`)
 * `bf3-opensource/config/audio_tuning.cfg`
 * `tests/audio_contract_tests.cpp`
 * `docs/design/m2a-audio.md`
