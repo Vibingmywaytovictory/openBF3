@@ -11,14 +11,15 @@
 //   ref-lit-soft  MultiMesh 16k, the same lit per pixel with proximity fade 1 m (the gate's reference row)
 //   ref-lit-soft+64  the same plus 64 omni lights (range 6 m, no shadows)
 //   gpu-16x1000   16 GPUParticles3D of 1,000 with the lit-soft material (reported)
-//   vfx2          VFX2: one FxWorld of 16,384 one-particle effects at the same positions (a synthetic SAQ emitter,
-//                 lit, soft fade 1 m), drawn by Bf3FxRenderer (fx_alpha.gdshader)
+//   vfx2          VFX2: one FxWorld of 16 effects of 1,024 particles uniform in the 16 sub-boxes of the same box (a
+//                 synthetic SAQ emitter with a Box spawn position, lit, soft fade 1 m), drawn by Bf3FxRenderer
+//                 (fx_alpha.gdshader)
 //   vfx2+64       the same plus the 64 omni lights
 // Gate (godot.fx_ref): cost(vfx2) <= kFxRefRatioMax x cost(ref-lit-soft) (§16 Q17 default: the relative GPU row).
 // Shared machine: GPU times are noisy; the wrapper runs it under the quiet lock.
 //
 // User args (after "--"): --fx-ref-check (the gate run: report and exit 0 / 1), --fx-ref-pairs=<n> (on / off pairs per
-// row, default 3), --fx-ref-window=<s> (default 5).
+// row, default 3), --fx-ref-window=<s> (default 5), --fx-ref-shot-dir=<dir> (one picture per row; synthetic content).
 
 #include "fx_renderer.h"
 
@@ -65,6 +66,8 @@ private:
 		uint32_t windows = 0;
 		double cost_gpu = 0, on_p50 = 0, off_p50 = 0, frame_on_p50 = 0, frame_off_p50 = 0;
 		uint32_t drawn_vfx2 = 0;
+		bool shot = false;
+		std::vector<double> step_ms, prepare_ms, upload_ms; // VFX2 rows: Bf3FxRenderer's main-thread parts
 	};
 
 	void build();
@@ -80,6 +83,9 @@ private:
 	std::unique_ptr<bf3::fx::FxWorld> world_;
 	bf3::fx::EmitterAtlas empty_atlas_; // no entries: every emitter samples the whole synthetic texture
 	bool built_ = false, finished_ = false, check_ = false;
+	std::string shot_dir_; // --fx-ref-shot-dir: one synthetic picture per row
+	bool static_ = false, no_soft_ = false; // diagnostics (--fx-ref-static, --fx-ref-nosoft)
+	double busy_ms_ = 0; // diagnostics (--fx-ref-busy=<ms>)
 	uint32_t pairs_ = 3;
 	double window_ = kFxRefWindowSeconds;
 	int warmup_frames_ = 120;

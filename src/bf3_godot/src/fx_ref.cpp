@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/gpu_particles3d.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -22,6 +23,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -146,31 +148,43 @@ Ref<StandardMaterial3D> ref_material(const Ref<Texture2D> &p_tex, bool p_lit, bo
 	return m;
 }
 
-// The VFX2 row's emitter: one SAQ particle per effect, lit, soft fade 1 m (|multiplier| 1 x the 1 m extent), never
-// dying (no UpdateAge).
+// The VFX2 row's emitter: a burst of 1,024 SAQ particles uniform in a 10 x 7.5 x 7.5 m box (BoxEvaluatorData on
+// SpawnPosition), lit, soft fade 1 m (|multiplier| 1 x the 1 m extent), living 10^6 s; 16 effects tile the
+// reference box, so VFX2 draws 16 emitter outputs (sorted back to front) of 1,024 particles, like the GPUParticles row.
+constexpr uint32_t kFxRefEffects = 16;
+constexpr uint32_t kFxRefPerEffect = kFxRefParticles / kFxRefEffects;
 std::shared_ptr<const fx::EffectDef> vfx2_def() {
 	fx::EmitterDef e;
 	e.name = "fx2/synthetic/ref16k";
-	e.tmpl.max_count = 1;
+	e.tmpl.max_count = kFxRefPerEffect;
 	e.tmpl.lifetime = 0.01f;
 	e.tmpl.soft_particles_fade = -1.0f;
 	e.tmpl.light_multiplier = 1.0f;
 	e.tmpl.light_wrap_around = 0.0f;
 	e.slots[size_t(fx::ProcessorType::SpawnRate)].present = true;
-	e.params.spawn_rate = 1.0f;
+	e.params.spawn_rate = float(kFxRefPerEffect - 1) * 100.0f + 1.0f; // floor(1 + rate x 0.01) = 1,024 at the start
 	e.params.distribute_over_time = false;
+	fx::EvaluatorDef box;
+	box.type = fx::EvaluatorType::Box;
+	box.box.dimensions = fx::Vec3{ 10.0f, 7.5f, 7.5f };
+	box.box.pivot = fx::Vec3{ 0, 0, 0 };
+	e.evaluators.push_back(box);
+	e.slots[size_t(fx::ProcessorType::SpawnPosition)].present = true;
+	e.slots[size_t(fx::ProcessorType::SpawnPosition)].evaluator = 0;
+	e.slots[size_t(fx::ProcessorType::UpdateAge)].present = true;
+	e.params.particle_lifetime = 1.0e6f; // lives through the bench
 	e.slots[size_t(fx::ProcessorType::UpdateLinearVelocity)].present = true;
 	e.texture.texture = "fx2/synthetic/puff";
 	auto d = std::make_shared<fx::EffectDef>();
 	d->name = "fx2/synthetic/ref16k";
-	d->max_instance_count = uint16_t(std::min<uint32_t>(kFxRefParticles, 65535));
+	d->max_instance_count = uint16_t(kFxRefEffects);
 	d->reset_instance_when_started = false;
 	d->emitters.push_back(std::move(e));
 	fx::EffectComponentDef c;
 	c.kind = fx::ComponentKind::Emitter;
 	c.emitter = 0;
 	d->components.push_back(c);
-	d->max_particles = 1;
+	d->max_particles = kFxRefPerEffect;
 	return d;
 }
 
@@ -196,6 +210,10 @@ void Bf3FxRef::_ready() {
 		return;
 	}
 	check_ = has_user_arg("fx-ref-check");
+	shot_dir_ = user_arg_value("fx-ref-shot-dir");
+	static_ = has_user_arg("fx-ref-static"); // diagnostics: upload VFX2's buffers once per on window
+	no_soft_ = has_user_arg("fx-ref-nosoft"); // diagnostics: VFX2 without the soft fade
+	busy_ms_ = has_user_arg("fx-ref-busy") ? std::atof(user_arg_value("fx-ref-busy").c_str()) : 0.0; // diagnostics: main-thread busy wait in VFX2 rows
 	if (has_user_arg("fx-ref-pairs")) {
 		pairs_ = uint32_t(std::clamp(std::atoi(user_arg_value("fx-ref-pairs").c_str()), 1, 20));
 	}
@@ -317,18 +335,18 @@ void Bf3FxRef::build() {
 		renderer_ = memnew(Bf3FxRenderer);
 		add_child(renderer_);
 		renderer_->set_atlas_textures(puff, flat_normal());
+		renderer_->set_soft_particles(!no_soft_);
 		fx::FxWorldConfig cfg;
-		cfg.max_effects = kFxRefParticles + 64;
-		cfg.max_emitter_instances = kFxRefParticles + 64;
 		cfg.max_particles = 1u << 16;
 		world_ = std::make_unique<fx::FxWorld>(cfg);
 		const std::shared_ptr<const fx::EffectDef> def = vfx2_def();
-		for (size_t i = 0; i < pos.size(); ++i) {
+		for (uint32_t k = 0; k < kFxRefEffects; ++k) {
+			// The 16 sub-boxes of the reference box (x -20..20 in 4, z -20..10 in 4, y 0.5..8).
 			fx::EffectStart s;
-			s.transform.trans = fx::Vec3{ pos[i].x, pos[i].y, pos[i].z };
-			s.seed = i + 1;
+			s.transform.trans = fx::Vec3{ -15.0f + 10.0f * float(k % 4), 4.25f, -16.25f + 7.5f * float(k / 4) };
+			s.seed = k + 1;
 			if (!world_->start(def, s).ok()) {
-				log(fmt("VFX2 start %zu refused", i));
+				log(fmt("VFX2 start %u refused", k));
 				break;
 			}
 		}
@@ -363,18 +381,28 @@ void Bf3FxRef::_process(double p_delta) {
 		set_row(Row(0), false);
 		return;
 	}
+	if (busy_ms_ > 0.0 && vfx2_drawing_) {
+		const uint64_t until = Time::get_singleton()->get_ticks_usec() + uint64_t(busy_ms_ * 1000.0);
+		while (Time::get_singleton()->get_ticks_usec() < until) {
+		}
+	}
 	if (vfx2_drawing_) {
 		const Transform3D t = camera_->get_global_transform();
 		fx::FxView v;
 		v.camera_position = fx::Vec3{ t.origin.x, t.origin.y, t.origin.z };
 		const Vector3 f = -t.basis.get_column(2);
 		v.camera_forward = fx::Vec3{ f.x, f.y, f.z };
-		renderer_->step_world(*world_, p_delta, v);
-		renderer_->draw(*world_, v, empty_atlas_);
+		if (!static_ || renderer_->stats().drawn_instances == 0) {
+			renderer_->step_world(*world_, p_delta, v);
+			renderer_->draw(*world_, v, empty_atlas_);
+		}
 		if (renderer_->stats().drawn_instances != world_->particles().size()) {
 			++vfx2_mismatch_;
 		}
 		results_[row_index_].drawn_vfx2 = renderer_->stats().drawn_instances;
+		results_[row_index_].step_ms.push_back(renderer_->stats().step_ms);
+		results_[row_index_].prepare_ms.push_back(renderer_->stats().prepare_ms);
+		results_[row_index_].upload_ms.push_back(renderer_->stats().upload_ms);
 	}
 	if (warmup_frames_ > 0) {
 		--warmup_frames_;
@@ -393,6 +421,15 @@ void Bf3FxRef::_process(double p_delta) {
 	if (window_t_ >= kFxRefSkipSeconds) {
 		(on ? r.on_gpu : r.off_gpu).push_back(gpu);
 		(on ? r.on_frame : r.off_frame).push_back(p_delta * 1000.0);
+	}
+	if (!shot_dir_.empty() && on && window_index_ == 0 && !r.shot && window_t_ >= 1.5) {
+		// Synthetic content only (no BF3 data): one picture per row for the look.
+		r.shot = true;
+		Ref<Image> img = get_viewport()->get_texture()->get_image();
+		const std::string path = shot_dir_ + "/fx2_ref_" + r.name + ".png";
+		if (img.is_valid() && img->save_png(to_godot(path)) == OK) {
+			log("shot " + path);
+		}
 	}
 	window_t_ += p_delta;
 	if (window_t_ >= window_) {
@@ -428,7 +465,9 @@ void Bf3FxRef::report_and_finish() {
 	for (const RowResult &r : results_) {
 		log(fmt("%-16s cost %.3f ms GPU (on %.3f, off %.3f); frame on %.3f ms", r.name.c_str(), r.cost_gpu, r.on_p50, r.off_p50, r.frame_on_p50));
 	}
-	log(fmt("vfx2 drawn %u instances (mismatching frames %llu)", vfx.drawn_vfx2, (unsigned long long)vfx2_mismatch_));
+	log(fmt("vfx2 drawn %u instances (mismatching frames %llu); main thread p50: step %.3f ms, prepare %.3f ms, upload %.3f ms; params uploads %llu",
+			vfx.drawn_vfx2, (unsigned long long)vfx2_mismatch_, percentile(vfx.step_ms, 0.5), percentile(vfx.prepare_ms, 0.5), percentile(vfx.upload_ms, 0.5),
+			(unsigned long long)renderer_->stats().params_uploads));
 	const bool pass = ratio <= kFxRefRatioMax && vfx.drawn_vfx2 == kFxRefParticles && vfx2_mismatch_ == 0;
 	log(fmt("gate: vfx2 cost / ref-lit-soft cost = %.3f / %.3f = %.3f (<= %.2f): %s", vfx.cost_gpu, ref.cost_gpu, ratio, kFxRefRatioMax, pass ? "PASS" : "FAIL"));
 	log(std::string("FX REF: ") + (pass ? "PASS" : "FAIL"));
