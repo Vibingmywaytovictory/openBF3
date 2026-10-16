@@ -46,6 +46,7 @@ local function one_hit(ctx, shooter, T, user_sid, label, n, of)
 	if shooter then
 		local tries = 0
 		while (L.dmg_pairs_since(k0, T.sid, giver)) == 0 and tries < 10 do
+			if ctx.sa_ammo then ctx.sa_ammo(1) end
 			bots.aim_at(shooter, L.chest(T))
 			ctx:wait(0.2)
 			L.fire1(ctx, shooter)
@@ -78,6 +79,8 @@ function M.run(ctx, args)
 		shooter = L.spawn(ctx, 1, 'M16A3', O, u, 0)
 		if shooter == nil then ctx:abort('shooter spawn failed') end
 		bots.zoom(shooter, true)
+		-- the shooter empties its magazine in the spray reps: reload (or respawn when the reserve is gone) first
+		ctx.sa_ammo = function(need) return L.keep_loaded(ctx, shooter, need) end
 	else
 		user_sid = ids.player(ctx.owner)
 		S.watch(user_sid, { hp = true })
@@ -117,6 +120,7 @@ function M.run(ctx, args)
 				local spot = V.add(L.chest(T) or tpos, V.scale(side, 2.0))
 				ctx:mark('spray', { cfg = 'supp', i = r, k0 = C.kk() })
 				if shooter then
+					ctx.sa_ammo(25)
 					bots.aim_at(shooter, spot)
 					ctx:wait(0.2)
 					L.fire_n(ctx, shooter, 25, 800)
@@ -139,6 +143,7 @@ function M.run(ctx, args)
 		if shooter then
 			for _, delay in ipairs(M.DELAYS) do
 				for r = 1, n do
+					ctx.sa_ammo(1) -- before the respawn: a reload must not shift the shot delay
 					if bots.alive(T) then bots.kill(T) end
 					ctx:wait(1.0)
 					if not L.respawn(ctx, T, tpos, face_t, 0) then return false end

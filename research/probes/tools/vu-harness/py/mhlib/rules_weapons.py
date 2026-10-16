@@ -666,6 +666,11 @@ def rule_w4(runs, ctx=None):
 # ---------------------------------------------------------------------------------------------------------------------
 # W5 falloff (+ W6 pass-through report)
 
+# |dist - fxd| tolerance: dist runs from the bullet origin (ahead of the shooter position) to the hit point on the
+# body surface (in front of the target position), so a clean hit reads ~0.6 m short of the fixture distance.
+FXD_TOL = 1.0
+
+
 def wb_points(run, win):
     passes = []
     for m in run.marks('pass', win.q0, win.q1):
@@ -681,7 +686,7 @@ def wb_points(run, win):
         dist, fxd = r.get('dist'), r.get('fxd')
         if dist is None:
             continue
-        if fxd is not None and abs(dist - fxd) > 0.5:
+        if fxd is not None and abs(dist - fxd) > FXD_TOL:
             flagged += 1
             continue
         pts.append((dist, r['dmg'], r.get('bone', -1)))

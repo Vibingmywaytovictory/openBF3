@@ -278,6 +278,8 @@ def respond_spray(u, r):
     if p is None:
         return
     p = [p[0], p[1], p[2] + 2.0]
+    u.task('reload')         # a human reloads before a 25-round burst
+    u.task('wait', s=3.2)
     u.task('fire', n=25, target=p, timeout=5)
 
 
@@ -287,8 +289,13 @@ def respond_immune(u, r):
         if x.get('e') == 'prompt' and x.get('id'):
             tid = x.get('id')
             break
+    u.task('reload')
+    u.task('wait', s=3.2)
+    # the target is killed in the prompt's own tick: aim at its spawn point (8 m down the range, chest height)
+    rs = u.spots()['range']
+    spawn_pt = [rs['pos'][0] + 8 * rs['dir'][0], 1.3, rs['pos'][2] + 8 * rs['dir'][2]]
     for _ in range(12):
-        p = u.target(tid, 'chest') if tid else None
+        p = (u.target(tid, 'chest') if tid else None) or spawn_pt
         if p:
             u.task('tap', n=1, gap=0.1, target=p)
         u.task('wait', s=5.0)

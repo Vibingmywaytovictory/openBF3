@@ -129,6 +129,7 @@ local function shoot_at(ctx, shooter, T, user_sid, zone, n_hits, max_shots, w, d
 				ctx:mark('skip-distance', { x = { d = d, zone = zone, why = 'shots' } })
 				return false
 			end
+			L.keep_loaded(ctx, shooter, 1)
 			bots.aim_at(shooter, L.chest(T, zone))
 			ctx:wait(0.2)
 			L.fire1(ctx, shooter)

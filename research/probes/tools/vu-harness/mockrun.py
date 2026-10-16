@@ -366,6 +366,201 @@ def c_t1_none(env):
 def c_t1_recovery(env):
     t1_case(env, 'recovery', 'recovery')
 
+def sc_script(u, sites, aim, cmds, damage=False):
+    """setup, optional P0.9 (bot damage for the B modes), then each (command, sc) run in order."""
+    yield from US.setup(u, sites, aim=aim)
+    if damage:
+        u.dmg = yield from u.run('p0 damage', 'P0', 300)
+    u.statuses = []
+    for text, sc in cmds:
+        st = yield from u.run(text, sc, 30000)
+        u.statuses.append(st)
+
+
+def sc_case(env, laws, sites, aim, cmds, expect, items, damage=False, seed=1, level_opts=None, responders=None,
+            user_kw=None, max_s=60000):
+    h, u = env.host(laws, seed=seed, level_opts=level_opts, **(user_kw or {}))
+    for k, fn in (responders or {}).items():
+        u.responders[k] = fn
+    env.drive(h, u, sc_script(u, sites, aim, cmds, damage), max_s)
+    for (text, sc), st in zip(cmds, u.statuses + [None] * len(cmds)):
+        env.check('%s done' % text, st == 'done', str(st))
+    env.check('no orphan bots', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+    code, runs, text = env.extract(0)
+    res = env.analyze(runs, items)
+    for item, want in expect:
+        env.verdict(res, item, want)
+    return h, u, runs, res
+
+
+# S-B --------------------------------------------------------------------------------------------------------------
+@case()
+def c_sb_fraction(env):
+    sc_case(env, {'motor': 'fraction', 'gravity': 9.81}, ('wall', 'flat'), True, [('run SB scale=0.34', 'SB')],
+            [('S3', 'fraction'), ('S3-gravity', 'g=9.81')], ['S3'])
+
+
+@case()
+def c_sb_linear_g15(env):
+    sc_case(env, {'motor': 'linear', 'gravity': 15.0}, ('wall', 'flat'), True, [('run SB scale=0.34', 'SB')],
+            [('S3', 'linear'), ('S3-gravity', 'g=15.00')], ['S3'])
+
+
+@case()
+def c_sb_instant(env):
+    sc_case(env, {'motor': 'instant'}, ('wall', 'flat'), True, [('run SB scale=0.34', 'SB')], [('S3', 'instant')], ['S3'])
+
+
+@case()
+def c_sb_t1_accel(env):
+    """S-B at 30 and 60 Hz with coupled=accel: the acceleration gains differ but T1 lists them as VU-patched (not
+    informative), never as equal or coupled; gravity stays equal."""
+    for hz in (30, 60):
+        h, u = env.host({'hz': hz, 'coupled': 'accel', 'motor': 'fraction'}, tag='h%d' % hz)
+        env.drive(h, u, sc_script(u, ('wall', 'flat'), True, [('run SB scale=0.34', 'SB')]), 20000)
+        env.check('SB %d Hz done' % hz, u.statuses == ['done'], str(u.statuses))
+        env.journal(h)
+    code, runs, text = env.extract(0)
+    res = env.analyze(runs, ['S3', 'T1'])
+    t1 = [r for r in res if r.item == 'T1']
+    v = t1[0].variant if t1 else None
+    env.check('T1 none+patched', v == 'none+patched', '%r %s' % (v, t1[0].text()[:200] if t1 else ''))
+
+
+# W-B --------------------------------------------------------------------------------------------------------------
+def wb_b(env, laws, expect):
+    sc_case(env, laws, ('wall', 'range'), True, [('run WB mode=B w=M16A3,M98B', 'WB')], expect, ['W5'], damage=True)
+
+
+@case()
+def c_wb_b_linear(env):
+    wb_b(env, {'falloff': 'linear', 'm98b_end': 150.0}, [('W5 M16A3', 'linear'), ('W5 M98B end knot', '150')])
+
+
+@case()
+def c_wb_b_smooth(env):
+    wb_b(env, {'falloff': 'smooth', 'm98b_end': 120.0}, [('W5 M16A3', 'smooth'), ('W5 M98B end knot', '120')])
+
+
+@case(('phase0', 'all'))
+def c_wb_u(env):
+    """mode U: bot damage off, the user shoots on prompts with 10 % of its chest hits on an arm, a 150 m range."""
+    eq = US.make_equip(['M16A3', 'M98B'])
+    h, u, runs, res = sc_case(
+        env, {'bot_damage': False, 'falloff': 'linear', 'range_len': 150.0}, ('range',), False,
+        [('run WB mode=U w=M16A3,M98B', 'WB')], [('W5 M16A3', 'linear'), ('W5 M98B end knot', 'inconclusive')],
+        ['W5'], responders={'equip': eq, 'shoot': US.respond_shoot}, user_kw={'arm_frac': 0.1, 'aim_sd': 0.0})
+    dmg = [r for r in h.rows if r.get('e') == 'dmg' and r.get('ph') == 'pre']
+    env.check('only user damage rows', dmg and all(r.get('giver') == 1 and r.get('cli') is True for r in dmg),
+              '%d rows, givers %s' % (len(dmg), sorted(set(r.get('giver') for r in dmg), key=str)))
+    env.check('prompts answered', u.answered.count('shoot') >= 10 and 'equip' in u.answered, str(u.answered[:6]))
+
+
+# S-A --------------------------------------------------------------------------------------------------------------
+@case()
+def c_sa_b_10(env):
+    sc_case(env, {'regen_delay': 10.0, 'supp_abort': True}, ('wall', 'range'), True, [('run SA mode=B', 'SA')],
+            [('S1', '10'), ('S1-supp', 'abort')], ['S1'], damage=True)
+
+
+@case()
+def c_sa_b_16(env):
+    sc_case(env, {'regen_delay': 16.0, 'supp_abort': False}, ('wall', 'range'), True,
+            [('run SA mode=B', 'SA')], [('S1', '16'), ('S1-supp', 'no-abort')], ['S1'], damage=True)
+
+
+@case()
+def c_sa_b_nosupp(env):
+    """supp_effect=none: bot bullets never suppress -> 'suppression not induced', no SUPP verdict."""
+    h, u, runs, res = sc_case(env, {'supp_effect': 'none'}, ('wall', 'range'), True,
+                              [('run SA mode=B', 'SA')], [('S1', '10'), ('S1-supp', 'not-induced')], ['S1'],
+                              damage=True)
+    env.check('S2 reported', any(r.item == 'S2' for r in res), '')
+    env.check('regen reps without respawns', not marks(h, 'heal'), '')
+
+
+@case(('phase0', 'all'))
+def c_sa_u(env):
+    responders = {'position': lambda u, r: u.goto('range'), 'shoot': US.respond_shoot, 'spray': US.respond_spray,
+                  'immune': US.respond_immune}
+    h, u, runs, res = sc_case(env, {'regen_delay': 10.0, 'supp_abort': True}, ('range',), False,
+                              [('run SA mode=U', 'SA')], [('S1', '10'), ('S1-supp', 'abort')], ['S1'],
+                              responders=responders)
+    env.check('S2 reported', any(r.item == 'S2' for r in res), '')
+
+
+# M-A / M-B --------------------------------------------------------------------------------------------------------
+@case()
+def c_ma_a(env):
+    sc_case(env, {'bleed': 'A'}, (), False, [('run MA hold=60', 'MA')], [('M1', 'A')], ['M1'])
+
+
+@case()
+def c_ma_b(env):
+    sc_case(env, {'bleed': 'B'}, (), False, [('run MA hold=60', 'MA')], [('M1', 'B')], ['M1'])
+
+
+@case()
+def c_mb_model(env):
+    sc_case(env, {'capture': 'model', 'flip': 'lose_get'}, (), False, [('run MB scale=0.34', 'MB')],
+            [('M2', 'model'), ('M2-flip', 'lose_get')], ['M2'])
+
+
+@case()
+def c_mb_linear(env):
+    sc_case(env, {'capture': 'linear_n', 'flip': 'direct'}, (), False, [('run MB scale=0.34', 'MB')],
+            [('M2', 'linear_n'), ('M2-flip', 'direct')], ['M2'])
+
+
+# W-C / W-D --------------------------------------------------------------------------------------------------------
+def wc(env, blast):
+    eq = US.make_equip(['RPG7', 'SMAW', 'M320HE', 'M67'])
+
+    def equip(u, r):
+        nxt = ['RPG7', 'SMAW', 'M320HE', 'M67'][min(len([a for a in u.answered if a == 'equip']) - 1, 3)]
+        u.task('equip', key=nxt)
+        u.goto('ring' if nxt == 'M67' else 'range')
+        u.task('wait', s=0.5)
+        u.cmd('ok')
+    sc_case(env, {'blast': blast}, ('range', 'ring'), False, [('run WC scale=0.34', 'WC')], [('W7', blast)], ['W7'],
+            responders={'equip': equip, 'fire': US.respond_fire_direct, 'throw': US.respond_throw})
+
+
+@case(('phase0', 'all'))
+def c_wc_linear(env):
+    wc(env, 'linear')
+
+
+@case()
+def c_wc_quadratic(env):
+    wc(env, 'quadratic')
+
+
+@case(('phase0', 'all'))
+def c_wd(env):
+    """client realm: pred/corr gs rows, fov rows for 3 zoom levels within 0.1 deg of the mock's vertical FOV."""
+    h, u = env.host({})
+    for k in ('mags', 'reloads', 'optics', 'scope'):
+        u.responders[k] = US.respond_wd
+    env.drive(h, u, sc_script(u, ('wall',), False, [('run WD', 'WD')]), 20000)
+    env.check('WD done', u.statuses == ['done'], str(u.statuses))
+    env.journal(h)
+    code, runs, text = env.extract(0)
+    crows = [r for run in runs for r in run.crows]
+    gsrc = set(r.get('src') for r in crows if r.get('e') == 'gs')
+    env.check('client gs pred and corr', {'pred', 'corr'} <= gsrc, str(sorted(gsrc)))
+    fov = {}
+    for r in crows:
+        if r.get('e') == 'fov':
+            fov.setdefault(r['zoom'], []).append(r['vfov'])
+    vf = {0: 55.0, 1: 40.0, 2: 20.0}
+    env.check('fov rows for 3 zoom levels', set(fov) >= {0, 1, 2}, str(sorted(fov)))
+    worst = max([abs(v - vf[z]) for z, vs in fov.items() for v in vs if z in vf] or [99])
+    env.check('fov within 0.1 deg', worst <= 0.1, 'worst %.4f' % worst)
+    srows = [r for run in runs if run.sc == 'WD' for r in run.rows if r.get('r') == 'S' and r.get('e') == 'shot']
+    env.check('server shot rows for the human', len(srows) >= 90, '%d' % len(srows))
+
 # -- coverage ------------------------------------------------------------------------------------------------------
 CODE_LINE = re.compile(r'^\s*(?:end[,)]*|else|\}[,)]*|\)|do|then|return|break|local function [\w.:]+\(.*\)|function [\w.:]+\(.*\))?\s*$')
 

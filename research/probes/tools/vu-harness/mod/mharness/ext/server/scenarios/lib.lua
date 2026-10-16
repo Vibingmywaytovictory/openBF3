@@ -35,6 +35,7 @@ function L.spawn(ctx, team, w, pos, dir, pose, opt)
 end
 
 function L.respawn(ctx, bot, pos, dir, pose)
+	if pos then bot.home = { pos = pos, dir = dir, pose = pose or 0 } end
 	if bots.alive(bot) then
 		if pos then bots.place(bot, pos, dir) end
 		if pose then bots.pose(bot, pose) end
@@ -45,6 +46,8 @@ function L.respawn(ctx, bot, pos, dir, pose)
 	ctx:wait(0.3)
 	if dir then bots.face(bot, dir) end
 	L.ensure_slot(ctx, bot)
+	local a = L.ammo(bot)
+	if a > (bot.mag or 0) then bot.mag = a end
 	return true
 end
 
@@ -112,6 +115,19 @@ function L.ensure_ammo(ctx, bot, need, mag, pos, dir, pose)
 		return true
 	end
 	return L.reload(ctx, bot, math.min(mag, a + r))
+end
+
+-- keep_loaded: a shooter bot reloads (or respawns at its last spawn spot when the reserve is gone) before it would
+-- run dry; called before each shot of a long series (W-B, S-A). Restores the zoom input after a respawn.
+function L.keep_loaded(ctx, bot, need)
+	need = need or 1
+	local a = L.ammo(bot)
+	if a > (bot.mag or 0) then bot.mag = a end
+	if a >= need then return true end
+	local h = bot.home or {}
+	local ok = L.ensure_ammo(ctx, bot, need, bot.mag or 30, h.pos, h.dir, h.pose)
+	if bot.zoomv == 1 then bots.zoom(bot, true) end
+	return ok
 end
 
 function L.owner_pos(ctx)

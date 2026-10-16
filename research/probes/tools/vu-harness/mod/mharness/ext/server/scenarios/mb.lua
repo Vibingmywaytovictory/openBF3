@@ -80,14 +80,29 @@ function M.run(ctx, args)
 			bots.place(b, L.snap({ P[1] + 1.5 * math.cos(a), P[2], P[3] + 1.5 * math.sin(a) }), { 0, 0, 1 })
 		end
 	end
+	local direct_seen = false
+	local function unowned(cur)
+		-- neutral, or (direct flip, a §9 unknown) taken by the other team but not yet controlled
+		local o = owner(F)
+		return o == 0 or (o ~= cur and F.isControlled ~= true)
+	end
+	local function neutralise(cur)
+		put(3 - cur, 4)
+		local ok = ctx:wait_until(function() return unowned(cur) end, 90, 'neutral')
+		bench_all(3 - cur)
+		if ok and owner(F) ~= 0 and not direct_seen then
+			direct_seen = true
+			ctx:mark('direct-flip', { x = { cp = fid, team = owner(F) } })
+		end
+		return ok
+	end
 	local function reset(to)
-		-- to 0: the owner's enemy neutralises; to 2: team 2 captures
+		-- to 0: the owner's enemy neutralises; to 2: team 2 captures. With a direct flip the flag never reads
+		-- neutral: "team 2, not controlled, location 0" stands in for neutral (team 1 then flips it directly).
 		local cur = owner(F)
-		if cur ~= 0 and cur ~= to then
-			put(3 - cur, 4)
-			local ok = ctx:wait_until(function() return owner(F) == 0 end, 90, 'neutral')
-			bench_all(3 - cur)
-			if not ok then return false end
+		if cur ~= 0 and cur ~= to and not (to == 0 and direct_seen and cur == 2 and F.isControlled ~= true) then
+			if not neutralise(cur) then return false end
+			if to == 0 and owner(F) == 1 and not neutralise(1) then return false end
 		end
 		if to ~= 0 and not (owner(F) == to and F.isControlled == true) then
 			put(to, 4)
