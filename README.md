@@ -1953,3 +1953,36 @@ with no AddressSanitizer report (`sim.weapons.perf` skips there by design). One 
 | L1 `godot.l1_look` (ratio <= 1.25, p99 <= 16.7 ms) | 1.073, 5.41 ms (first integration) | 1.071 (2.686 against 2.506 ms), 5.40 ms |
 | M1 `godot.m1`, `godot.m1_load` E4 / E5 | PASS; 2.36 / 1.82 s | 16/16; 2.38 / 1.89 s |
 | install unchanged | clean | clean (256 files in every install test) |
+
+## M2a wave 2 contract (W2.0)
+
+<!-- # M2a w2 -->
+This is the integrator's contract commit for M2a wave 2, on branch `m2a/w2` from `main` 1874933. Design: [docs/design/m2a.md](docs/design/m2a.md)
+§15. As-built notes, the pending-row convention and the deviations from the sketches:
+[docs/design/m2a-w2.md](docs/design/m2a-w2.md).
+
+The commit declares every header of the wave-2 interfaces column and the additive fields of the M1 and wp structs
+(details in m2a-w2.md). It also adds `tests/gunplay_fixture.h` and the `m2a.contract` ctest.
+
+* **Bodies are left to the tracks.** The only body is a forwarding stub for `step_weapons_m2a`.
+* **Command pins.** `Command` is 24 B. No M1 test pinned its size or a command hash, so no M1 pin changed.
+* **Pending rows.** The `m2a.contract` rows that need sv's R3 / `weapon_rules.cpp` or nt's v2 codecs print
+  `PENDING (<key>)` until those tracks set `kSvRulesLanded` / `kNtLanded`. The §7.2 ack table runs now against a
+  test-local reference.
+
+Measured 2026-10-16 on the dev preset, with `OPENBF3_GODOT` set:
+
+* **Full ctest, timing rows excluded** (`-E` godot.*, host.session*, host.server, host.scale*, sim.nav.bake,
+  sim.weapons.perf, tools.fx_bench; `-j 6`): 90 of 92 passed, and `core.cache_data` and `core.res` were skipped as
+  before.
+* **Two timing rows failed under that parallel load.** `core.ui.swf.unit` took 1.16 s on a hostile case (limit 1 s) and
+  `core.ui.font` took 1.81 s on its cold load (limit 1 s). Both passed when rerun alone.
+* **Timing rows, one at a time under the quiet lock:** every row passed.
+  - `host.session.unit` and `host.session` failed their clock-target check once (4 and 5 target changes, limit 2).
+  - An A/B run of the E2 case then gave 0 target changes in both builds, twice each: main 1874933 (`wt/integ2`'s build)
+    and this branch.
+  - A rerun under a fresh lock passed both rows, with 0 target changes and install unchanged.
+* **`m2a.contract`:** 7/7 cases pass on dev and asan, with no AddressSanitizer report. `m1.contract`, `net.proto.unit`
+  and `m2a.weapons.contract` also pass on asan.
+
+Timing rows are wall-clock and noisy on this shared machine.

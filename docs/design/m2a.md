@@ -1313,6 +1313,9 @@ function.
 23. **Swept bounds for the broad phase.** **AABB of the recorded positions over the rewind window** (§6.4).
     Alternative: a constant speed bound (cheaper to explain, misses falling and blast-thrown soldiers).
 
+The recommended defaults (in bold above) were taken by the orchestrator on 2026-10-16 while the user was away; the
+user may revise them.
+
 ---
 
 ## 17. What the user must judge
