@@ -138,10 +138,10 @@ def marks(h, lbl, sc=None):
     return [r for r in h.rows if r.get('e') == 'mark' and r.get('lbl') == lbl and (sc is None or r.get('sc') == sc)]
 
 
-def wa_args(env, parts='a,b,c,d,e', scale=None, cfg='1'):
+def wa_args(env, parts='a,b,c,d,e', scale=None, cfg=None):
     if env.full:
         return 'tier=1'
-    s = 'cfg=%s parts=%s' % (cfg, parts)
+    s = ('cfg=%s parts=%s' % (cfg, parts)) if cfg else ('tier=1 parts=%s' % parts)
     if scale is not None:
         s += ' scale=%s' % scale
     return s
@@ -199,6 +199,172 @@ def c_p0_all(env):
     long_rows = [r for r in runs if r.sc == 'P0']
     env.check('P0 runs extracted', len(long_rows) >= 5, '%d P0 runs' % len(long_rows))
 
+
+
+def wa_script(u, args, sc='WA', aim=True, extra=None):
+    yield from US.setup(u, ('wall',), aim=aim)
+    if extra:
+        yield from extra(u)
+    u.status = None
+    u.statuses = []
+    for a in ([args] if isinstance(args, str) else args):
+        st = yield from u.run('run %s %s' % (sc, a), sc, 20000)
+        u.statuses.append(st)
+        u.status = st if u.status in (None, 'done') else u.status
+
+
+def run_wa(env, laws, args, items=None, seed=1, tag=None):
+    h, u = env.host(laws, seed=seed, tag=tag)
+    env.drive(h, u, wa_script(u, args), 40000)
+    env.check('WA %s done' % (args,), u.status == 'done', '%s' % u.statuses)
+    env.check('no orphan bots', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+    return h, u
+
+
+def wa_case(env, laws, args, expect, items, seed=1):
+    run_wa(env, laws, args, items, seed)
+    code, runs, text = env.extract(0)
+    res = env.analyze(runs, items)
+    for item, want in expect:
+        env.verdict(res, item, want)
+    return res
+
+
+@case()
+def c_wa_w1_area(env):
+    wa_case(env, {'disc': 'area'}, wa_args(env, 'a'), [('W1', 'area')], ['W1'])
+
+
+@case()
+def c_wa_w1_radius(env):
+    wa_case(env, {'disc': 'radius'}, wa_args(env, 'a'), [('W1', 'radius')], ['W1'])
+
+
+
+@case()
+def c_wa_t1_exp(env):
+    wa_case(env, {'recovery': 'exp', 'decay': 15.0, 'hcorr': 0.0, 'rearm': 'release'}, wa_args(env, scale='0.2'),
+            [('W2', '15'), ('W3', 'exp'), ('W3-yaw', 'none'), ('W4', 'release')], ['W2', 'W3', 'W4'])
+
+
+@case()
+def c_wa_t1_linear(env):
+    wa_case(env, {'recovery': 'linear', 'decay': 8.0, 'hcorr': 0.6, 'rearm': 'release'}, wa_args(env, scale='0.2'),
+            [('W2', '8'), ('W3', 'linear'), ('W3-yaw', 'correlated'), ('W4', 'release')], ['W2', 'W3', 'W4'])
+
+
+@case()
+def c_wa_w4_recovered(env):
+    wa_case(env, {'recovery': 'exp', 'rearm': 'recovered'}, wa_args(env, 'a,c', scale='0.2'), [('W4', 'recovered')],
+            ['W4'])
+
+
+@case()
+def c_wa_small(env):
+    wa_case(env, {'disc': 'area'}, wa_args(env, 'a', scale='0.1'), [('W1', 'inconclusive')], ['W1'])
+
+
+@case()
+def c_wa_outliers(env):
+    """planted outliers at 1.2 R and 1.3 R and a world origin 1500 m away: still area (no %.9g quantisation loss)."""
+    for i, wo in enumerate(('1@1.2', '3@1.3')):
+        laws = {'disc': 'area', 'w1_outliers': wo, 'origin': [1500.0, 0.0, 1500.0]}
+        sub = Env(env.dir, 'o%d' % i, env.full, env.coverage)
+        wa_case(sub, laws, wa_args(env, 'a'), [('W1', 'area')], ['W1'], seed=3 + i)
+        env.checks.extend(('%s %s' % (wo, c[0]), c[1], c[2]) for c in sub.checks)
+        env.hosts.extend(sub.hosts)
+        for src, lines in sub.cov.items():
+            env.cov.setdefault(src, set()).update(lines)
+
+
+@case()
+def c_wa_frame_cadence(env):
+    """gs_cadence=frame:3 and ra_units=rad: W1-W4 unchanged (analysis uses nup and impacts)."""
+    laws = {'gs_cadence': 'frame:3', 'ra_units': 'rad', 'disc': 'area', 'recovery': 'exp', 'decay': 15.0}
+    wa_case(env, laws, [wa_args(env, 'a'), wa_args(env, 'b,c,d,e', scale='0.2')],
+            [('W1', 'area'), ('W2', '15'), ('W3', 'exp'), ('W4', 'release')], ['W1', 'W2', 'W3', 'W4'])
+
+
+@case()
+def c_fire_mode_single(env):
+    """weapons spawn in single fire; the mod cycles to auto: every part runs."""
+    h, u = run_wa(env, {'fire_mode': 'single', 'recovery': 'exp'}, wa_args(env, 'a,b,c,d,e', scale='0.1'))
+    env.check('no no-auto marks', not marks(h, 'no-auto'), '')
+    parts = set((m.get('x') or {}).get('p') for m in marks(h, 'part', 'WA'))
+    env.check('parts a-e ran', parts >= set('abcde'), str(sorted(p for p in parts if p)))
+
+
+@case()
+def c_fire_mode_stuck(env):
+    """cycling is ignored: parts a and c only, with no-auto marks; the fast gaps are marked, not fired."""
+    h, u = run_wa(env, {'fire_mode': 'stuck'}, wa_args(env, 'a,b,c,d,e', scale='0.1'))
+    env.check('no-auto marked', len(marks(h, 'no-auto')) == 2, '%d' % len(marks(h, 'no-auto')))
+    parts = set((m.get('x') or {}).get('p') for m in marks(h, 'part', 'WA'))
+    env.check('parts a and c only', parts == {'a', 'c'}, str(sorted(p for p in parts if p)))
+    env.check('fast gaps skipped', marks(h, 'no-auto-gap'), '')
+
+
+@case(('phase0', 'all'))
+def c_no_server_gunsway(env):
+    """gs_server=no: P0.7 reports src=poll only; W2-W4 from poll rows unchanged."""
+    laws = {'gs_server': False, 'recovery': 'exp', 'decay': 15.0}
+    h, u = env.host(laws)
+
+    def script():
+        yield from US.setup(u, ('wall',), aim=True)
+        u.p0 = yield from u.run('p0 fire', 'P0', 300)
+        u.wa = yield from u.run('run WA ' + wa_args(env, 'b,c,d,e', scale='0.2'), 'WA', 20000)
+    env.drive(h, u, script(), 40000)
+    ok, val = p0_ok(h, 'P0.7')
+    env.check('P0.7 gs poll', val and val.get('gsrc') == 'poll' and val.get('srv') == 0, json.dumps(val)[:200])
+    env.check('WA done', u.wa == 'done', u.wa)
+    env.journal(h)
+    code, runs, text = env.extract(0)
+    res = env.analyze(runs, ['W2', 'W3', 'W4'])
+    for item, want in (('W2', '15'), ('W3', 'exp'), ('W4', 'release')):
+        env.verdict(res, item, want)
+
+
+@case(('phase0', 'all'))
+def c_input_dt(env):
+    """input_dt=required: bot inputs with deltaTime 0 would do nothing; the mod sets it, so P0 and W-A work."""
+    h, u = env.host({'input_dt': 'required'})
+    u.responders['fire3'] = US.respond_fire3
+
+    def script():
+        yield from US.setup(u, ('wall', 'flat'), aim=False)
+        u.p0 = yield from u.run('p0 all', 'P0', 900)
+        u.wa = yield from u.run('run WA ' + wa_args(env, 'a,b', scale='0.05'), 'WA', 3000)
+        u.sb = yield from u.run('run SB scale=0.34', 'SB', 3000)
+    env.drive(h, u, script(), 20000)
+    for s in ('P0.5', 'P0.6', 'P0.7', 'P0.9'):
+        ok, val = p0_ok(h, s)
+        env.check('%s ok' % s, ok, json.dumps(val)[:160])
+    env.check('WA done', u.wa == 'done', u.wa)
+    env.check('SB done', u.sb == 'done', u.sb)
+    env.journal(h)
+
+
+def t1_case(env, coupled, want):
+    for hz, tag, args in ((30, 'h30', wa_args(env, 'b,d,e', scale='0.2')), (60, 'h60', 'tier=60 parts=b,d,e scale=0.2')):
+        h, u = env.host({'hz': hz, 'coupled': coupled, 'recovery': 'exp'}, tag=tag)
+        env.drive(h, u, wa_script(u, args), 40000)
+        env.check('WA %d Hz done' % hz, u.status == 'done', '%s' % u.statuses)
+        env.journal(h)
+    code, runs, text = env.extract(0)
+    res = env.analyze(runs, ['W3', 'T1'])
+    env.verdict(res, 'T1', want)
+
+
+@case()
+def c_t1_none(env):
+    t1_case(env, 'none', 'none')
+
+
+@case()
+def c_t1_recovery(env):
+    t1_case(env, 'recovery', 'recovery')
 
 # -- coverage ------------------------------------------------------------------------------------------------------
 CODE_LINE = re.compile(r'^\s*(?:end[,)]*|else|\}[,)]*|\)|do|then|return|break|local function [\w.:]+\(.*\)|function [\w.:]+\(.*\))?\s*$')
