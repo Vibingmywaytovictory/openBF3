@@ -658,7 +658,11 @@ TEST_SUITE("render-scene") {
 				++with_albedo;
 				REQUIRE(size_t(m.albedo) < p.textures.size());
 				CHECK(p.textures[size_t(m.albedo)].role != TextureRole::Data);
-				CHECK(std::find(m.textures.begin(), m.textures.end(), m.albedo) != m.textures.end());
+				// M1 picked the albedo among the slot's own textures; the L1 resolver (README "L1 look") may take it
+				// from the shader graph in the level shader database (textures the slot does not name), so the check
+				// is: a slot texture, or a texture the L1 resolver chose (m.look set with a colour).
+				CHECK((std::find(m.textures.begin(), m.textures.end(), m.albedo) != m.textures.end() ||
+						(m.look.has_value() && m.look->color.has_value())));
 			}
 			if (m.normal >= 0) {
 				++with_normal;

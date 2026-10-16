@@ -46,3 +46,13 @@ target_sources(bf3_render PRIVATE
     include/bf3/render/soldier_assets.h
     src/soldier_assets.cpp
 )
+
+# L1 look (README "L1 look"): the level shader database and the material resolution through it.
+target_sources(bf3_render PRIVATE
+    src/shader_database.cpp
+    src/look_materials.cpp
+    src/look_environment.cpp
+    include/bf3/render/shader_database.h
+    include/bf3/render/look_materials.h
+    include/bf3/render/look_environment.h
+)

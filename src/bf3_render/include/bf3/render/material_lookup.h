@@ -31,6 +31,9 @@ struct MaterialSlot {
 	std::vector<std::pair<std::string, std::string>> textures; // ParameterName -> texture res name
 	std::vector<std::pair<std::string, std::array<float, 4>>> vectors; // VectorParameters of the MeshMaterial
 	bool from_variation_db = false; // textures came from a MeshVariationDatabase entry
+	// L1 look: the ShaderGraph of the entry's MeshMaterialVariation (MeshVariationDatabaseMaterial.MaterialVariation),
+	// "" when the entry names none or it has no shader; the look resolver tries it before `shader`.
+	std::string variation_shader;
 
 	// Texture res name of a parameter (case-insensitive), or "".
 	std::string texture(std::string_view p_parameter) const;

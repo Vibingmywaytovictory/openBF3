@@ -81,3 +81,9 @@ target_sources(bf3_godot PRIVATE
     src/skin_upload.cpp
     src/skin_upload.h
 )
+
+# L1 look (README "L1 look"): the visual environment on Godot (sun, sky shader, ambient, fog, exposure, LUTs).
+target_sources(bf3_godot PRIVATE
+    src/look_bridge.cpp
+    src/look_bridge.h
+)

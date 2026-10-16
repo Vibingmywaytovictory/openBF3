@@ -23,3 +23,5 @@ target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
 # S4 logic (docs/design/s4.md §9.4): `logic instantiate|stats|ports|fields|run|trace|census` (bf3_sim from M1 T1's block).
 target_sources(bf3dump PRIVATE logic_commands.cpp logic_commands.h)
+# L1 look (README "L1 look"): `looks <LEVEL> <MODE>`, the drawn-material census (bf3_render from the prepare block).
+target_sources(bf3dump PRIVATE look_commands.cpp look_commands.h)

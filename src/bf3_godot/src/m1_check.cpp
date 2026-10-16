@@ -10,8 +10,11 @@
 #include "bf3/net/loopback_ping.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -524,10 +527,59 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		session_.cameras().place_free(Vector3(shot.view[0], shot.view[1], shot.view[2]), mapper.free_view().yaw, mapper.free_view().pitch);
 		frames_ = 0;
 		state_ = 1;
+		state_ns_ = p_now_ns; // L1 look: the settle time runs from here
 		return false;
 	}
-	if (frames_ < 30) {
+	if (frames_ < 30 || seconds_between(state_ns_, p_now_ns) < settle_s_) {
+		last_ns_ = p_now_ns;
 		return false;
+	}
+	// L1 look: --shot-measure=<n> frames timed at each view before its screenshot (frame interval and the viewport's
+	// GPU render time; README "L1 look", ctest godot.l1_look).
+	if (measure_frames_ > 0 && measured_ < measure_frames_) {
+		RenderingServer *rs = RenderingServer::get_singleton();
+		const RID viewport = session_.get_viewport()->get_viewport_rid();
+		if (measured_ == 0) {
+			rs->viewport_set_measure_render_time(viewport, true);
+			view_cpu_ms_ = view_gpu_ms_ = 0.0;
+			view_cpu_samples_.clear();
+			view_gpu_samples_.clear();
+			view_cpu_samples_.reserve(measure_frames_);
+			view_gpu_samples_.reserve(measure_frames_);
+		} else {
+			const double interval_ms = double(p_now_ns - last_ns_) / 1e6;
+			const double gpu_ms = rs->viewport_get_measured_render_time_gpu(viewport);
+			view_cpu_ms_ += interval_ms;
+			view_gpu_ms_ += gpu_ms;
+			view_cpu_samples_.push_back(float(interval_ms));
+			view_gpu_samples_.push_back(float(gpu_ms));
+		}
+		last_ns_ = p_now_ns;
+		++measured_;
+		return false;
+	}
+	if (measure_frames_ > 0) {
+		const double n = double(measure_frames_ - 1);
+		total_cpu_ms_ += view_cpu_ms_;
+		total_gpu_ms_ += view_gpu_ms_;
+		total_frames_ += measure_frames_ - 1;
+		UtilityFunctions::print(to_godot(fmt("[look] frame time at %s: %.3f ms per frame (interval), GPU %.3f ms, over %u frames", shot.path.c_str(),
+				view_cpu_ms_ / n, view_gpu_ms_ / n, measure_frames_ - 1)));
+		if (!view_cpu_samples_.empty()) {
+			const auto median_of = [](std::vector<float> &r_v) {
+				const size_t mid = r_v.size() / 2;
+				std::nth_element(r_v.begin(), r_v.begin() + std::ptrdiff_t(mid), r_v.end());
+				return double(r_v[mid]);
+			};
+			const double cpu_median = median_of(view_cpu_samples_);
+			const double gpu_median = median_of(view_gpu_samples_);
+			median_cpu_sum_ms_ += cpu_median;
+			median_gpu_sum_ms_ += gpu_median;
+			++median_views_;
+			UtilityFunctions::print(to_godot(fmt("[look] frame time median at %s: %.3f ms per frame (interval), GPU %.3f ms", shot.path.c_str(), cpu_median,
+					gpu_median)));
+		}
+		measured_ = 0;
 	}
 	if (session_.save_screenshot(shot.path)) {
 		++saved_;
@@ -538,11 +590,25 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		lines_.push_back("screenshot failed: " + shot.path);
 	}
 	UtilityFunctions::print(to_godot("[m1] shot " + lines_.back()));
+	UtilityFunctions::print(to_godot("[m1] shot " + session_.look_summary()));
 	++next_;
 	state_ = 0;
 	if (next_ >= total) {
 		mapper.set_free_camera(false);
 		session_.cameras().set_free(false);
+		if (measure_frames_ > 0 && total_frames_ > 0) {
+			UtilityFunctions::print(to_godot(fmt("[look] frame time mean: %.3f ms per frame (interval), GPU %.3f ms, %llu frames at %zu views",
+					total_cpu_ms_ / double(total_frames_), total_gpu_ms_ / double(total_frames_), (unsigned long long)total_frames_, free_.size())));
+		}
+		if (median_views_ > 0) {
+			// The size the screenshots have (the rendered image, read back once after timing): with stretch mode
+			// canvas_items the visible rect is the 1152x648 base size, and the texture's reported size is scaled again.
+			const Ref<ViewportTexture> target = session_.get_viewport()->get_texture();
+			const Ref<Image> image = target.is_valid() ? target->get_image() : Ref<Image>();
+			const Vector2 size = image.is_valid() ? Vector2(float(image->get_width()), float(image->get_height())) : Vector2();
+			UtilityFunctions::print(to_godot(fmt("[look] frame time median: %.3f ms per frame (interval), GPU %.3f ms, mean of the per-view medians at %zu views, viewport %dx%d",
+					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_, int(size.x), int(size.y))));
+		}
 	}
 	return next_ >= total;
 }

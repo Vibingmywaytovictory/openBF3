@@ -13,6 +13,7 @@
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/netsim.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/capsule_mesh.hpp>
 #include <godot_cpp/classes/directional_light3d.hpp>
 #include <godot_cpp/classes/display_server.hpp>
@@ -184,6 +185,9 @@ void Bf3LevelSession::parse_args() {
 	const std::string quit_after = user_arg_value("quit-after");
 	quit_after_ = quit_after.empty() ? 0.0 : std::atof(quit_after.c_str());
 	hud_enabled_ = !has_user_arg("no-hud");
+	if (user_arg_value("look") == "m1") {
+		look_mode_ = render::SceneLook::M1;
+	}
 }
 
 void Bf3LevelSession::_ready() {
@@ -247,6 +251,10 @@ void Bf3LevelSession::_ready() {
 			failed_ = true;
 		}
 		shots_ = std::make_unique<ShotRunner>(*this, std::move(free_shots), std::move(spawn_shots), user_arg_value("shot-dir"));
+		// L1 look: --shot-settle=<s> (free shots wait for auto exposure), --shot-measure=<frames> (frame time per view).
+		const double settle = std::clamp(std::atof(user_arg_value("shot-settle").c_str()), 0.0, 60.0);
+		const long measure = std::clamp(std::atol(user_arg_value("shot-measure").c_str()), 0L, 100000L);
+		shots_->set_timing(settle, uint32_t(measure));
 	}
 	if (!install_.is_mounted()) {
 		std::lock_guard lock(loader_mutex_);
@@ -320,7 +328,9 @@ void Bf3LevelSession::run_loader() {
 		}
 		timings_.seconds_census = double(now_us() - t0) / 1e6;
 		t0 = now_us();
-		bf3::core::Result<render::LevelScenePlan> plan = render::plan_level_scene(*db->level, *db->world, *census);
+		render::ScenePlanOptions plan_options;
+		plan_options.look = look_mode_;
+		bf3::core::Result<render::LevelScenePlan> plan = render::plan_level_scene(*db->level, *db->world, *census, plan_options);
 		if (!plan) {
 			fail("scene plan: " + plan.error().message);
 			return;
@@ -518,7 +528,12 @@ void Bf3LevelSession::on_plan_ready() {
 	std::shared_ptr<const render::LevelScenePlan> plan = scene_plan();
 	LevelUpload::Options options;
 	upload_.begin(plan, get_world_3d()->get_scenario(), &progress_, options);
-	build_environment(plan->environment);
+	if (plan->look == render::SceneLook::L1) {
+		look_.build(this, plan);
+		UtilityFunctions::print(to_godot("[m1] " + look_.describe()));
+	} else {
+		build_environment(plan->environment);
+	}
 	char line[512];
 	std::snprintf(line, sizeof(line),
 			"[m1] scene plan: %zu requests, %zu meshes, %zu instances, %zu materials, %zu textures, %zu terrains, %zu failures (census %.3f s, plan %.3f s); "
@@ -766,6 +781,11 @@ void Bf3LevelSession::_process(double p_delta) {
 	}
 	if (scene_ && upload_.begun() && !failed_) {
 		upload_.pump(upload_task_, done_ ? 2.0 : 12.0);
+	}
+	if (look_.built()) {
+		// L1: the environment blended at the camera of the frame drawn last (one frame behind the camera update below).
+		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;
+		look_.update(upload_, camera != nullptr ? camera->get_global_position() : Vector3());
 	}
 	if (session_ready_.load(std::memory_order_acquire) && client_ != nullptr) {
 		client_->read_presentation(*frame_);

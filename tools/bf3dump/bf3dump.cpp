@@ -48,6 +48,8 @@
 //                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
 //                              ... --shapes` adds them to a prepare run
 //   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
+// L1 look:
+//   looks <LEVEL> <MODE> [--materials] [--shader NAME]  the drawn-material census, M1 mapping against L1 (look_commands.cpp)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -71,6 +73,8 @@
 // M1 T2: spawn points and spawners of a level x mode.
 #include "spawns_commands.h"
 #include "logic_commands.h" // S4 logic
+// L1 look: the drawn-material census.
+#include "look_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -502,6 +506,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
 	std::fprintf(stderr, "%s", bf3dump::logic_usage()); // S4 logic
+	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n"); // L1 look
 }
 
 } // namespace
@@ -620,6 +625,10 @@ int wmain(int argc, wchar_t **argv) {
 	// S4 logic: logic <sub> ... (logic_commands.cpp; docs/design/s4.md §9.4).
 	if (cmd == "logic") {
 		return bf3dump::cmd_logic(ctx.reader, ctx.install, rest);
+	}
+	// L1 look: looks <LEVEL> <MODE> [--materials] [--shader NAME] (look_commands.cpp).
+	if (cmd == "looks") {
+		return bf3dump::cmd_looks(ctx.install, rest);
 	}
 	usage();
 	return 2;
