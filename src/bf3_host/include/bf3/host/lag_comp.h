@@ -25,10 +25,12 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/weapons/hit_target.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <type_traits>
+#include <vector>
 
 namespace bf3::host {
 
@@ -46,6 +48,13 @@ struct LagCompConfig {
 	uint32_t history_snapshots = kHistorySnapshots;
 	uint32_t max_rewind_ticks = kDefaultMaxRewindTicks;
 	bool enabled = true; // false = every shot at the present (E12's control run sets max_rewind_ticks 0 instead)
+	// lc additions (as built, docs/design/m2a-lc.md). sample_other's other inputs, which must equal the client's for
+	// the E12 bit equality: the level's pose eye heights (MotorParams::poses[k].eye_height, as PresentationFrame's
+	// pose_eye_heights) and ClientSessionConfig::extrapolate_max_ms.
+	std::array<float, sim::kPoseCount> pose_eye_heights{ 1.6f, 1.0f, 0.3f };
+	float extrapolate_max_ms = 250.0f;
+	bool pose_cache = true; // false: every pose computed (sim.lagcomp.unit's cache-off arm; the answers are equal)
+	bool time_provider = true; // the provider's own wall time per tick (LagCompStats::tick_ms_p99, E13)
 };
 
 enum class RewindVerdict : uint8_t { Present = 0, Rewound = 1, Clamped = 2, Refused = 3 };
@@ -58,6 +67,38 @@ struct LagCompStats {
 	uint64_t present = 0, rewound = 0, clamped = 0, refused = 0; // shot verdicts
 	uint64_t acks_ignored = 0; // ack bits for seqs or parts never sent to that client
 	double tick_ms_p99 = 0; // the provider's own time per tick (E13)
+	// lc additions (as built).
+	uint64_t ticks = 0; // provider ticks (begin_tick calls)
+	uint64_t present_queries = 0; // queries answered from the present set (bots, quality None, refused, no view)
+	uint64_t rewound_queries = 0;
+	uint64_t no_view = 0; // queries whose shot had no stored view (answered at the present)
+	uint64_t culled = 0; // targets the swept-bound broad phase removed
+	uint64_t generation_skips = 0; // candidates sampled from another life than the present one
+	uint64_t history_misses = 0; // candidate records no longer in the shared store
+	uint64_t answered = 0; // HitTargets returned in all
+	double tick_ms_max = 0;
+	double tick_ms_mean = 0;
+};
+
+// One posed candidate of a rewound query (sim.lagcomp.unit, the E12 trace rows; RewindProvider::set_trace).
+struct RewindTraceRow {
+	uint32_t shooter = 0;
+	uint32_t shot_index = 0;
+	uint8_t pellet = 0;
+	uint8_t target = 0;
+	int64_t time_q8 = 0;
+	net::OtherPose pose;
+	bool cached = false;
+};
+
+// A target's swept bound over the history window (m2a.md §6.4): the AABB of its recorded feet over the shared store,
+// the largest recorded speed and the store's tick span.
+struct SweptBounds {
+	bool any = false;
+	float lo[3]{};
+	float hi[3]{};
+	float max_speed = 0;
+	uint32_t oldest_tick = 0, newest_tick = 0;
 };
 static_assert(std::is_trivially_copyable_v<LagCompStats>);
 
@@ -103,6 +144,13 @@ public:
 	void client_reset(uint8_t p_client_slot); // connect / disconnect: the sent ring and acks of that slot
 	const LagCompStats &stats() const;
 
+	// lc additions (as built).
+	const LagCompConfig &config() const;
+	uint32_t max_slots() const;
+	SweptBounds bounds(uint8_t p_slot) const; // maintained in record_tick
+	// The tick a seq of that client's sent ring stands for (false: not in the ring).
+	bool sent_tick(uint8_t p_client_slot, uint16_t p_seq, uint32_t &r_tick) const;
+
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
@@ -121,6 +169,22 @@ public:
 	// A scratch list of the candidates' HitTargets in slot order, valid until the next call (hit_target.h contract).
 	std::span<const sim::weapons::HitTarget> targets_for(const sim::weapons::TargetQuery &p_query) const override;
 	const LagCompStats &stats() const;
+
+	// lc additions (as built).
+	// begin_tick with the teams per slot (HitTarget::team; a missing entry is team 0). A present soldier is one with
+	// life != 0 and mode != Dead; spawn_protected = protect_ticks > 0. The shooter's client slot is its player slot.
+	void begin_tick(uint32_t p_tick, std::span<const sim::SoldierState> p_present, std::span<const uint8_t> p_teams);
+	// Closes the tick's timing (otherwise the next begin_tick does).
+	void end_tick();
+	// A shot whose view LagHistory::shot_view refused: tested at the present, counted Refused.
+	void note_refused(uint8_t p_slot, uint32_t p_shot_index);
+	// The view stored for a shot (false: none, or it was refused).
+	bool shot_view_of(uint8_t p_slot, uint32_t p_shot_index, ShotView &r_view) const;
+	// Every posed candidate of every rewound query is appended here while set (null: off). The caller bounds it.
+	void set_trace(std::vector<RewindTraceRow> *r_rows);
+	// The present set (posed in begin_tick) of a slot; null when not present.
+	const sim::weapons::HitTarget *present_target(uint8_t p_slot) const;
+	double last_tick_ms() const;
 
 private:
 	struct Impl;

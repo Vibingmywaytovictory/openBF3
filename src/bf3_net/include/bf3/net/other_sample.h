@@ -75,10 +75,50 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 // The time rule of §6.4, both ends: the target time of a projectile segment starting at p_segment_start for a shot
 // whose command carried p_view_back_q8, in q8 server ticks (ticks x 256), rounded to 1/256 tick. A lag beyond
 // p_max_rewind_ticks is clamped (the caller counts it: LagCompStats::clamped).
+// As built (lc): sim_time_q8(p_segment_start) - clamp(view_lag_q8(p_view_back_q8), 0, p_max_rewind_ticks x 256)
+// (sim_time_q8 and view_lag_q8 below): max_rewind_ticks 0 (E12's control run) tests at the present, and a negative
+// lag never tests in the future.
 int64_t rewind_time_q8(sim::weapons::SimTime p_segment_start, int32_t p_view_back_q8, uint32_t p_max_rewind_ticks);
 
 // The client's track rules over one target's candidate records (any order, duplicates allowed); writes the list
 // oldest first into r_list and returns its length (<= kTrackSamples).
 size_t rebuild_track(std::span<const TimedOther> p_candidates, uint32_t p_view_tick, std::span<TimedOther, kTrackSamples> r_list);
+
+// ---- lc additions (as built; docs/design/m2a-lc.md) ----------------------------------------------------------------
+
+// The selection rule alone (which samples sample_other uses at p_render_ticks and how), without the blend: the server's
+// pose cache keys on it before it decides whether to sample (m2a.md §6.4). sample_other calls exactly this, so the key
+// and the answer can never disagree. index_a / index_b index p_samples; tick_a / tick_b are their server ticks.
+//   Interpolate: the newest sample at or before the render time (a) and the next one (b), render strictly between.
+//   Extrapolate: past the newest sample, at most p_max_extrapolate_ticks ahead (a == b == newest).
+//   Hold: one sample, no motion: before the oldest (held), exactly at a sample's tick, or past the extrapolation
+//         limit (held; the position is the newest extrapolated by the limit, as present_others draws it).
+struct SampleSelection {
+	uint32_t index_a = 0;
+	uint32_t index_b = 0;
+	uint32_t tick_a = 0;
+	uint32_t tick_b = 0;
+	SampleKind kind = SampleKind::Hold;
+	bool held = false;
+	bool extrapolated = false;
+	bool valid = false; // false for an empty span
+};
+SampleSelection select_sample(std::span<const TimedOther> p_samples, double p_render_ticks, double p_max_extrapolate_ticks);
+
+// The time rule's q8 scale (docs/design/m2a-lc.md "time rule"): a sim time in q8 server ticks of the record scale,
+// in which the state after server tick S (the record of snapshot tick S, drawn at render time S) sits at S x 256:
+// round(p_time x 256 / kTimeUnitsPerTick), half up. A step of command tick T covers [(T - 1) x 256, T x 256).
+int64_t sim_time_q8(sim::weapons::SimTime p_time);
+// The lag a view sample stands for, before the clamp, in q8 ticks: view_back - 256. Command::view_back_q8 =
+// (T << 8) - R is measured from the command's tick T, but the step of T starts one tick earlier, at (T - 1) x 256, so
+// a shot at the start of command tick T tests the targets at exactly R, the render time the player saw (and a shot
+// later in the tick, or a later segment of its bullet, as much later). Negative = the client claims to draw ahead
+// of the server's present (LagHistory refuses such a shot).
+constexpr int32_t view_lag_q8(int32_t p_view_back_q8) {
+	return p_view_back_q8 - 256;
+}
+// Field-by-field equality, floats by bit pattern (padding ignored): the sample-equality rows of E12 use it.
+bool same_bits(const OtherPose &p_a, const OtherPose &p_b);
+bool same_bits(const TimedOther &p_a, const TimedOther &p_b);
 
 } // namespace bf3::net

@@ -100,4 +100,58 @@ struct CapsuleTableInputs {
 core::Result<core::gameplay::CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, const ServerPoseClips &p_clips,
 		const CapsuleTableInputs &p_inputs);
 
+// ---- lc additions (as built; docs/design/m2a-lc.md) ----------------------------------------------------------------
+
+// The rules the builder follows, named so tp (wave 3) and the E18 reference evaluation can follow the same ones.
+//
+// Pitch buckets: kCapsuleDownBuckets equal steps from -aim_down_full_pitch_deg to 0 and kCapsuleUpBuckets from 0 to
+// +aim_up_full_pitch_deg (S3's 60.7 / 78.1), so 0 is a bucket (the additive switches clips at 0) and the steps are
+// ~4.34 deg.
+inline constexpr size_t kCapsuleDownBuckets = 14;
+inline constexpr size_t kCapsuleUpBuckets = 18;
+static_assert(kCapsuleDownBuckets + kCapsuleUpBuckets + 1 == core::gameplay::kCapsulePitchBuckets);
+std::array<float, core::gameplay::kCapsulePitchBuckets> capsule_pitch_buckets(const CrowdConfig &p_aim);
+// Transition fractions: fraction k of kCapsuleTransitionFractions is k / (kCapsuleTransitionFractions - 1) of the
+// clip's own length (frame = fraction x end_frame): 0 and 1 are steps, so 7 intervals.
+float capsule_transition_fraction(size_t p_step);
+
+// Aim per stance: the additive weight of AimUp / AimDown is min(1, |pitch| / full) with full = the barrel elevation
+// change of that stance's aim clip at weight 1 over its idle (S3's measure_aim, LocalPost, the same rule that gave
+// stand 78.1 / 60.7). Stand takes the CrowdConfig values; crouch and prone are measured from their clips and fall
+// back to the stand values when the measurement fails or gives less than kMinAimFullDeg (reported).
+inline constexpr float kMinAimFullDeg = 5.0f;
+struct StanceAim {
+	float up_full_deg = 78.1f;
+	float down_full_deg = 60.7f;
+	bool measured = false; // false: the CrowdConfig values (stand, or a fallback)
+};
+std::array<StanceAim, core::gameplay::kCapsuleStances> server_pose_stance_aim(const ServerPoseClips &p_clips, const CrowdConfig &p_aim,
+		std::vector<std::string> *r_notes = nullptr);
+// The additive weight for p_pitch_deg of a stance (> 0 uses AimUp, < 0 AimDown, 0 none).
+float server_pose_aim_weight(const StanceAim &p_aim, float p_pitch_deg);
+
+// Capsule placement from a bone's model transform [inferred]: segment start a = the bone's model transform applied to
+// the capsule's offset (bone-local point); end b = a + length along the bone's local axis BoneAxis (0 x, 1 y, 2 z),
+// signed toward the bone's main child (the child with the longest rest translation; + when it has none). A length of
+// at most 0.01 m (the head) is a sphere at a (b = a).
+inline constexpr float kSphereCapsuleLength = 0.01f;
+// The sign of a bone's axis (+1 or -1) by that rule.
+float capsule_axis_sign(const Skeleton &p_rig, int32_t p_bone, int32_t p_axis);
+
+// What the builder did (E18 prints it): the row tags and why, the aim per stance, the capsule -> joint map.
+struct CapsuleTableReport {
+	std::array<uint8_t, core::gameplay::kCapsuleRows> row_source{};
+	std::array<StanceAim, core::gameplay::kCapsuleStances> aim{};
+	std::vector<int32_t> joint; // per placed (hi-LOD) capsule: rig joint, -1 = unmapped (placed from the stand-in)
+	std::vector<std::string> notes;
+	uint32_t pose_evaluations = 0;
+	double seconds = 0;
+};
+core::Result<core::gameplay::CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, const ServerPoseClips &p_clips,
+		const CapsuleTableInputs &p_inputs, CapsuleTableReport *r_report);
+
+// The capsules/ cache key inputs (m2a.md §13.1): FNV-1a 64 over the rig (joint names, parents, rest), every clip's
+// decoded keys and channel binding, the capsule list and the inputs; with kCapsuleTableVersion.
+uint64_t capsule_table_source_hash(const Skeleton &p_rig, const ServerPoseClips &p_clips, const CapsuleTableInputs &p_inputs);
+
 } // namespace bf3::anim
