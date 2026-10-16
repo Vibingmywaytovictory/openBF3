@@ -97,8 +97,34 @@ varints and f32 bit patterns are M1's (`bit_stream.h`).
 | combat precision | hp 0.0049, position 0.00195 m, normal 0.92°, time 8 units |
 | DebugReport | 1 target row + 3 gunplay ticks: 916 B; every bound full (1,200 ticks × every per-tick maximum + 128 target rows): 1,712,384 B (cap 2,097,152) |
 | net.proto.fuzz | 3,501 / 3,501 structured malformed cases refused; 900,000 mutated or random datagrams: 75,092 decoded and stable, 739,134 refused, 0 unstable (the rest had an unknown type byte), about 1.5 s on dev |
-| asan preset | `net.bits.unit`, `net.proto.unit`, `net.netsim.unit`, `net.proto.fuzz` (36 s), `m2a.contract` and `m1.contract` pass, with no AddressSanitizer report |
-| dev ctest | 90 / 90 non-timing rows pass (`core.cache_data` and `core.res` skipped as before). The timing rows `host.server`, `host.session.unit`, `host.session`, `host.scale`, `godot.m1`, `godot.m1_load` and `godot.s3_crowd` pass one at a time under the quiet lock |
+| asan preset | `net.bits.unit`, `net.proto.unit`, `net.netsim.unit`, `net.proto.fuzz` (16-36 s), `m2a.contract` and `m1.contract` pass, with no AddressSanitizer report |
+| dev ctest | 90 / 90 non-timing rows pass (`core.cache_data` and `core.res` skipped as before) |
+| timing rows | see "Timing rows on the shared machine" below: every row passes, but `godot.s3_crowd` only in a quiet window |
+
+## Timing rows on the shared machine (acceptance-fix round, 2026-10-16 21:00-22:53, HEAD 7df0568)
+
+Each row ran on its own, under this track's quiet lock. The machine is shared, so these timings are noisy (m2a.md §1
+noise policy). nt changes only `bf3_net` and its tests. No code the s3 crowd bench runs changed (Skeleton3D / rs
+skinning, the pose lanes, the renderer).
+
+| row | runs | result |
+|---|---|---|
+| `host.server`, `host.session`, `host.scale`, `godot.m1`, `godot.m1_load` | 1 each | pass |
+| `host.session.unit` | 4 | 4 / 4 pass (70 s each; loopback RTT mean 0.89-1.73 ms, 0 reconciliations, 0 hash mismatches). The earlier acceptance run's single failure in 3 did not repeat |
+| `godot.s3_crowd`, 21:15-21:33 | 2 (each with its built-in retry) | **fail**. The failing gate changed from run to run: G1b 2.111 ms (≤ 2.0), then G1a / G1b / G2-off on an attempt where the backend bench picked skeleton3d over rs, then G2-on p99 20.28 ms, then G2-off p99 20.22 ms. This is the same picture as the earlier acceptance run's 0 / 3 |
+| A/B `godot.s3_crowd`, 22:13-22:31: w2 (7220da0, nt's base) / nt / w2 | 3 | **3 / 3 pass**, nt on its first attempt |
+| `godot.s3_crowd` nt, 22:40-22:49 | 2 | **2 / 2 pass**: G1a p99 0.401 / 0.338 ms, G1b 1.758 / 1.706 ms (≤ 2.0), G2-off p99 11.65 / 11.39 ms, G2-on p99 12.61 / 12.65 ms (≤ 16.7); w2 in the A/B: G1b 1.735 ms, G2-off p99 11.31 ms |
+
+So nt and its base give the same s3 numbers in the same window (G1b 1.71-1.76 against 1.74 ms), and the failures
+follow the load on the machine, not the branch. G1b has about 0.25 ms of headroom on a quiet machine. Any other
+process using the CPU or GPU fails it.
+
+Quiet lock: the earlier acceptance run's A/B script was killed while it held the shared lock, and its
+`finally` never ran. The lock stayed orphaned from 17:51 to about 19:05 and blocked every agent. This round's runner
+(scratchpad `nt\locked.ps1`, not in the repo) takes the lock without `-Force` and tags it with its PID. It
+releases the lock in `finally` and on `PowerShell.Exiting`. A detached watchdog removes the lock (only while it
+still holds that exact tag) once the runner's PID is gone, which was tested by hard-killing a fake owner. The
+runner also stops itself after 40 minutes.
 
 ## Deviations from the m2a.md sketch (§7)
 
@@ -157,4 +183,6 @@ helpers compare them.
 | m2a.contract nt rows | no `PENDING (nt)`; ack table against nt's predicates and codec; 600-tick weapons wire row | `ctest --preset dev -R "^m2a\.contract$" -V` |
 | M1 net and host | pass | `ctest --preset dev -R "^(net\.|host\.server$|host\.session)"` (the host rows are timing rows: run them under the quiet lock) |
 
-Timing rows (host.session*, host.server, godot.*) are wall-clock and noisy on this shared machine.
+Timing rows (host.session*, host.server, godot.*) are wall-clock and noisy on this shared machine. Run them one
+at a time under the quiet lock, e.g. `ctest --preset dev -R "^godot\.s3_crowd$" -V` (threshold: `S3 TIMING: PASS`,
+G1b ≤ 2.0 ms, G2 p99 ≤ 16.7 ms).
