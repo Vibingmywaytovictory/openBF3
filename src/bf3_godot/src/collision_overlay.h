@@ -8,7 +8,9 @@
 // RenderingServer mesh + instance per prepared (tile, layer) array, a few per frame so the label stays live, all
 // sharing one unshaded, double-sided ShaderMaterial (vertex colour per surface class, back faces darker, a
 // barycentric wireframe that fades out with distance), and a free-fly camera at the first TDM spawn point (else
-// above the level's centre).
+// above the level's centre). TC (docs/design/terrain-collision.md §8.1): the terrain layer is a window, the
+// terrain cells of the 64 m tiles within --terrain-radius of the camera (bf3_render prepare_terrain_window, on a
+// worker thread), re-prepared when the camera leaves the window's inner half; only the layer-4 meshes swap.
 //
 // Controls: WASD move, Q/E (or Ctrl/Space) down/up, Shift fast, wheel = speed; hold the right mouse button (or
 // click to capture, Esc to release) to look. F3 cycles solid + wireframe / wireframe / solid; 1/2/3/4/5 toggle the
@@ -25,6 +27,7 @@
 //   --screenshot=<png>           save the viewport when quitting
 //   --shots=<png>@x,y,z,yaw,pitch[;...]  after the upload, place the camera at each, save, quit
 //   --collision-check            headless check (collision_check.h), quit 0/1
+//   --terrain-radius=<m>         terrain window radius (default CollisionPrepOptions::terrain_radius, 512 m)
 //   --bf3-install=<dir>          install override, as for GameSession
 
 #include "bf3/core/install_reader.h"
@@ -75,6 +78,10 @@ public:
 
 	// Used by the check.
 	bool uploaded() const { return collision_ != nullptr && next_upload_ >= prepared_.size(); }
+	// TC: the terrain window is prepared, uploaded and current for the camera (no job running).
+	bool window_ready() const { return uploaded() && window_valid_ && !window_running_; }
+	const bf3::render::TerrainWindowStats &window() const { return window_; }
+	const bf3::render::CollisionPrepOptions &window_options() const { return window_options_; }
 	const bf3::core::level::LevelCollision &collision() const { return *collision_; }
 	const std::vector<bf3::render::PreparedCollisionMesh> &prepared() const { return prepared_; }
 	const std::vector<TileMesh> &meshes() const { return meshes_; }
@@ -100,6 +107,9 @@ private:
 	};
 
 	void join_loader();
+	void join_window();
+	void update_window(); // TC: start a window job when the camera left the inner half; swap a finished one in
+	void free_mesh(TileMesh &r_mesh);
 	void free_render_objects();
 	void build_ui();
 	void update_label();
@@ -131,6 +141,20 @@ private:
 	std::vector<bf3::render::PreparedCollisionMesh> loaded_meshes_;
 	std::string load_error_;
 	double loader_prepare_seconds_ = 0.0;
+
+	// TC terrain window (a worker thread writes window_loaded_* before window_done_).
+	std::thread window_thread_;
+	std::atomic<bool> window_done_{ false };
+	bool window_running_ = false;
+	bool window_valid_ = false;
+	bf3::render::CollisionPrepOptions window_options_; // the current window's (centre, radius, cap)
+	bf3::render::TerrainWindowStats window_;
+	std::vector<bf3::render::PreparedCollisionMesh> window_loaded_;
+	bf3::render::TerrainWindowStats window_loaded_stats_;
+	bf3::render::CollisionPrepOptions window_job_options_;
+	double window_seconds_ = 0.0; // the last window job's wall time
+	size_t window_jobs_ = 0;
+	float terrain_radius_ = bf3::render::CollisionPrepOptions().terrain_radius;
 
 	// Built state.
 	std::unique_ptr<bf3::core::level::LevelCollision> collision_;

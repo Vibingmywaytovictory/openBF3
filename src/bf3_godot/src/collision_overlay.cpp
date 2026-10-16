@@ -111,6 +111,7 @@ Bf3CollisionOverlay::Bf3CollisionOverlay() = default;
 
 Bf3CollisionOverlay::~Bf3CollisionOverlay() {
 	join_loader();
+	join_window();
 }
 
 void Bf3CollisionOverlay::_bind_methods() {
@@ -120,6 +121,7 @@ void Bf3CollisionOverlay::_bind_methods() {
 void Bf3CollisionOverlay::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		join_loader(); // the loader writes into this node
+		join_window();
 		free_render_objects();
 	}
 }
@@ -128,6 +130,79 @@ void Bf3CollisionOverlay::join_loader() {
 	if (loader_.joinable()) {
 		loader_.join();
 	}
+}
+
+void Bf3CollisionOverlay::join_window() {
+	if (window_thread_.joinable()) {
+		window_thread_.join();
+	}
+}
+
+void Bf3CollisionOverlay::free_mesh(TileMesh &r_mesh) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	if (r_mesh.instance.is_valid()) {
+		rs->free_rid(r_mesh.instance);
+		r_mesh.instance = RID();
+	}
+	if (r_mesh.mesh.is_valid()) {
+		rs->free_rid(r_mesh.mesh);
+		r_mesh.mesh = RID();
+	}
+}
+
+void Bf3CollisionOverlay::update_window() {
+	if (window_running_) {
+		if (!window_done_.load()) {
+			return;
+		}
+		join_window();
+		window_running_ = false;
+		// Swap: drop the old layer-4 meshes (the Havok slots stay), append and upload the new ones at once.
+		for (TileMesh &m : meshes_) {
+			if (m.layer == bf3::render::kTerrainLayer) {
+				free_mesh(m);
+			}
+		}
+		std::erase_if(meshes_, [](const TileMesh &m) { return m.layer == bf3::render::kTerrainLayer; });
+		std::erase_if(prepared_, [](const bf3::render::PreparedCollisionMesh &m) { return m.layer == bf3::render::kTerrainLayer; });
+		next_upload_ = prepared_.size();
+		for (bf3::render::PreparedCollisionMesh &m : window_loaded_) {
+			prepared_.push_back(std::move(m));
+		}
+		window_loaded_.clear();
+		window_ = window_loaded_stats_;
+		window_options_ = window_job_options_;
+		window_valid_ = true;
+		const double before = upload_seconds_;
+		upload_some(true);
+		char line[384];
+		std::snprintf(line, sizeof(line),
+				"[collision] terrain window %zu: %zu tiles, %zu triangles within %.0f m of (%.1f, %.1f)%s%s; prepared %.3f s, uploaded %.3f s",
+				window_jobs_, window_.tiles, window_.triangles, double(window_.radius), double(window_.centre[0]), double(window_.centre[1]),
+				window_.capped ? ", capped at max_terrain_triangles" : "", window_.tiles_failed > 0 ? ", some tiles failed" : "", window_seconds_,
+				upload_seconds_ - before);
+		UtilityFunctions::print(line);
+	}
+	const float dx = position_.x - window_options_.terrain_centre[0], dz = position_.z - window_options_.terrain_centre[1];
+	if (window_valid_ && std::sqrt(dx * dx + dz * dz) <= 0.5f * window_options_.terrain_radius) {
+		return;
+	}
+	window_job_options_ = bf3::render::CollisionPrepOptions();
+	window_job_options_.terrain_centre = { position_.x, position_.z };
+	window_job_options_.terrain_radius = terrain_radius_;
+	window_running_ = true;
+	window_done_ = false;
+	++window_jobs_;
+	// Off the main thread: no Godot API is called on this thread; collision_ outlives it (joined before it goes).
+	window_thread_ = std::thread([this]() {
+		const auto t0 = std::chrono::steady_clock::now();
+		window_loaded_ = bf3::render::prepare_terrain_window(collision_->soup, window_job_options_, &window_loaded_stats_);
+		window_seconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		window_done_ = true;
+	});
 }
 
 void Bf3CollisionOverlay::free_render_objects() {
@@ -183,6 +258,10 @@ void Bf3CollisionOverlay::_ready() {
 	quit_after_ = quit_after.empty() ? 0.0 : std::atof(quit_after.c_str());
 	start_camera_ = user_arg_value("camera");
 	start_view_ = user_arg_value("view");
+	if (has_user_arg("terrain-radius")) {
+		const float r = float(std::atof(user_arg_value("terrain-radius").c_str()));
+		terrain_radius_ = std::isfinite(r) ? std::clamp(r, 0.0f, bf3::render::kMaxTerrainWindowRadius) : terrain_radius_;
+	}
 	const std::string wire = user_arg_value("wire");
 	if (!wire.empty()) {
 		wire_mode_ = std::clamp(std::atoi(wire.c_str()), 0, 2);
@@ -235,7 +314,7 @@ void Bf3CollisionOverlay::_ready() {
 			loaded_ = std::make_unique<lvl::LevelCollision>(std::move(*r));
 			preparing_ = true;
 			const auto t0 = std::chrono::steady_clock::now();
-			loaded_meshes_ = bf3::render::prepare_collision_meshes(loaded_->soup);
+			loaded_meshes_ = bf3::render::prepare_collision_meshes(loaded_->soup); // Havok slots; the terrain window follows the camera
 			loader_prepare_seconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 			load_done_ = true;
 		});
@@ -261,7 +340,7 @@ void Bf3CollisionOverlay::build_ui() {
 }
 
 String Bf3CollisionOverlay::get_status_text() const {
-	char buf[768];
+	char buf[1024];
 	if (!collision_) {
 		if (!load_error_.empty()) {
 			return to_godot("openBF3 collision: load failed: " + load_error_);
@@ -286,12 +365,14 @@ String Bf3CollisionOverlay::get_status_text() const {
 	}
 	const Vector3 p = position_;
 	std::snprintf(buf, sizeof(buf),
-			"openBF3 collision | %s %s | %s placements | %s triangles (%s terrain) | %zu tiles (%zu meshes)\n"
+			"openBF3 collision | %s %s | %s placements | %s Havok + %s terrain triangles | %zu tiles (%zu meshes)\n"
+			"terrain window: %zu tiles, %s triangles within %.0f m of (%.0f, %.0f)%s%s\n"
 			"load %.2f s + prepare %.2f s + upload %.2f s | %.0f fps | %s | pos %.1f %.1f %.1f | speed %.0f m/s\n"
 			"layers: [1] collision %s  [2] raycast %s  [3] character %s  [4] invisible %s  [5] terrain %s\n"
 			"WASD move, Q/E down/up, Shift fast, wheel speed, RMB look, F3 draw mode, 1-5 layers, R spawn, N next spawn, T top",
 			level_.c_str(), mode_.c_str(), with_commas(s.placements.size()).c_str(), with_commas(s.triangles).c_str(), with_commas(s.terrain_triangles).c_str(),
-			s.tiles.size(), meshes_.size(), load_seconds_, prepare_seconds_, upload_seconds_, Engine::get_singleton()->get_frames_per_second(),
+			s.tiles.size(), meshes_.size(), window_.tiles, with_commas(window_.triangles).c_str(), double(window_.radius), double(window_.centre[0]),
+			double(window_.centre[1]), window_.capped ? " (capped)" : "", window_running_ ? " (updating)" : "", load_seconds_, prepare_seconds_, upload_seconds_, Engine::get_singleton()->get_frames_per_second(),
 			kWireNames[wire_mode_], p.x, p.y, p.z, speed_, layers_[0] ? "on" : "off", layers_[1] ? "on" : "off", layers_[2] ? "on" : "off",
 			layers_[3] ? "on" : "off", layers_[4] ? "on" : "off");
 	return to_godot(buf);
@@ -566,7 +647,7 @@ void Bf3CollisionOverlay::_process(double p_delta) {
 			const lvl::CollisionSoup &s = collision_->soup;
 			char line[640];
 			std::snprintf(line, sizeof(line),
-					"[collision] %s %s: %zu placements (%zu built, %zu hidden, %zu missing), %zu triangles (%zu terrain; %zu destroyed-state, %zu degenerate "
+					"[collision] %s %s: %zu placements (%zu built, %zu hidden, %zu missing), %zu Havok triangles (+ %zu terrain; %zu destroyed-state, %zu degenerate "
 					"dropped) in %zu tiles, %zu meshes; load %.3f s (mount %.3f, traverse %.3f, soup %.3f: decode %.3f, triangles %.3f, terrain %.3f, "
 					"tiles %.3f), prepare %.3f s",
 					level_.c_str(), mode_.c_str(), s.placements.size(), s.built, s.hidden, s.missing, s.triangles, s.terrain_triangles, s.destroyed, s.degenerate,
@@ -606,12 +687,15 @@ void Bf3CollisionOverlay::_process(double p_delta) {
 			std::snprintf(line, sizeof(line), "[collision] uploaded %zu meshes / %zu instances: %.3f s on the main thread (%.3f s wall over frames)",
 					meshes_.size(), meshes_.size(), upload_seconds_, upload_wall_seconds_);
 			UtilityFunctions::print(line);
-			if (check_mode_) {
-				finish(run_collision_check(*this));
-				return;
-			}
 		}
 		update_label();
+		return;
+	}
+	update_window();
+	if (check_mode_) {
+		if (window_ready()) {
+			finish(run_collision_check(*this));
+		}
 		return;
 	}
 
@@ -629,7 +713,7 @@ void Bf3CollisionOverlay::_process(double p_delta) {
 			set_camera(shots_[next_shot_].camera);
 			update_label();
 			hold_frames_ = 6; // drawn a few times before the capture
-		} else if (hold_frames_ > 0 && --hold_frames_ == 0) {
+		} else if (hold_frames_ > 0 && window_ready() && --hold_frames_ == 0) { // TC: the window follows the shot first
 			if (!save_screenshot(shots_[next_shot_].path)) {
 				failed_ = true;
 			}
@@ -705,6 +789,7 @@ void Bf3CollisionOverlay::finish(int p_code) {
 		}
 	}
 	join_loader();
+	join_window();
 	get_tree()->quit(p_code);
 }
 

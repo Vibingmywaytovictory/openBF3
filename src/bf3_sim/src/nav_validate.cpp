@@ -261,6 +261,13 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		const float z0 = std::min({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] }), z1 = std::max({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] });
 		return x0 < bx1 && x1 >= bx0 && z0 < bz1 && z1 >= bz0;
 	};
+	// TC: the same with the box grown (p_slack > 0) or shrunk (< 0) by p_slack metres on every side.
+	constexpr float kTerrainEdge = 1e-3f;
+	const auto overlaps_by = [&](const Tri &p_t, float p_slack) {
+		const float x0 = std::min({ p_t.v[0][0], p_t.v[1][0], p_t.v[2][0] }), x1 = std::max({ p_t.v[0][0], p_t.v[1][0], p_t.v[2][0] });
+		const float z0 = std::min({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] }), z1 = std::max({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] });
+		return x0 < bx1 + p_slack && x1 >= bx0 - p_slack && z0 < bz1 + p_slack && z1 >= bz0 - p_slack;
+	};
 	// The motor's triangles: read back from every cooked MeshShape whose tile bounds overlap the box.
 	std::vector<Tri> world;
 	const StaticWorldShapes::Impl &s = p_world.impl();
@@ -317,18 +324,37 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 				}
 				JPH::Shape::GetTrianglesContext context;
 				shape->GetTrianglesStart(context, box, at, rotation, JPH::Vec3::sOne());
+				// Jolt's HeightFieldShape resumes a walk that filled the buffer at the start of the block it stopped in, so
+				// the triangles of that block already returned come again (HeightFieldShape.cpp VisitTriangle): a field
+				// triangle equal bit for bit to one returned before is dropped.
+				std::unordered_set<uint64_t> field_seen;
+				const bool is_field = shape == terrain.field.GetPtr();
 				while (true) {
 					const int n = shape->GetTrianglesNext(context, int(buffer.size() / 3), buffer.data());
 					if (n <= 0) {
 						break;
 					}
 					for (int t = 0; t < n; ++t) {
+						if (is_field) {
+							uint64_t h = 0xcbf29ce484222325ull;
+							for (int k = 0; k < 3; ++k) {
+								const JPH::Float3 &f = buffer[size_t(t) * 3 + size_t(k)];
+								for (const float c : { f.x, f.y, f.z }) {
+									uint32_t bits;
+									std::memcpy(&bits, &c, sizeof(bits));
+									h = (h ^ bits) * 0x100000001b3ull;
+								}
+							}
+							if (!field_seen.insert(h).second) {
+								continue;
+							}
+						}
 						Tri tri;
 						for (int k = 0; k < 3; ++k) {
 							const JPH::Float3 &f = buffer[size_t(t) * 3 + size_t(k)];
 							tri.v[size_t(k)] = { f.x, f.y, f.z };
 						}
-						if (overlaps(tri)) {
+						if (overlaps_by(tri, kTerrainEdge)) {
 							world_terrain.push_back(tri);
 						}
 					}
@@ -498,8 +524,11 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		}
 		++out.nav_only;
 	}
-	for (uint8_t u : terrain_used) {
-		out.world_only += u == 0 ? 1 : 0;
+	// An unmatched field triangle counts only when it overlaps the box by more than the edge slack: the field's corners
+	// (offset + scale x sample, in float) and the soup's (origin + sample x spacing) can differ by an ulp, which moves a
+	// triangle that only touches the box edge in or out of one side's set.
+	for (size_t i = 0; i < terrain_used.size(); ++i) {
+		out.world_only += terrain_used[i] == 0 && overlaps_by(world_terrain[i], -kTerrainEdge) ? 1 : 0;
 	}
 	return out;
 }

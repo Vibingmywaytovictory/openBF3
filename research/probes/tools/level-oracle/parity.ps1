@@ -40,6 +40,8 @@ if (-not (Test-Path $Oracle)) { Write-Output "no level-oracle at $Oracle"; exit 
 $all = @('MP_001', 'MP_003', 'MP_007', 'MP_011', 'MP_012', 'MP_013', 'MP_017', 'MP_018', 'MP_Subway', 'XP1_001', 'XP1_002', 'XP1_003',
 	'XP1_004', 'XP2_Factory', 'XP2_Office', 'XP2_Palace', 'XP2_Skybar', 'XP3_Alborz', 'XP3_Desert', 'XP3_Shield', 'XP3_Valley', 'XP4_FD',
 	'XP4_Parl', 'XP4_Quake', 'XP4_Rubble', 'XP5_001', 'XP5_002', 'XP5_003', 'XP5_004')
+# pwsh -File passes '-Levels a,b' as one string: split it.
+$Levels = @($Levels | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' })
 if ($Levels.Count -eq 0) { $Levels = $all }
 
 $runs = foreach ($level in $Levels) {

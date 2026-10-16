@@ -91,6 +91,14 @@ void print_shapes_pass(const ShapesPass &p_pass) {
 			s.world_hit ? "world hit (no soup)" : "world miss", s.tiles_hit, s.tiles, s.tiles_cooked, mib(s.shape_bytes), mib(s.cache_bytes));
 	std::printf("shapes   load + traverse %.3f s; soup %.3f s, cook %.3f s, restore %.3f s, shapes total %.3f s\n", p_pass.seconds_load, s.seconds_soup, s.seconds_cook,
 			s.seconds_restore, s.seconds_total);
+	// TC (docs/design/terrain-collision.md §5.2): the terrain fields (cooked on a lane beside the tiles).
+	std::printf("shapes   terrain %zu fields (%zu hit, %zu cooked), %.1f MiB resident, %.3f s\n", s.terrains, s.terrains_hit, s.terrains_cooked,
+			mib(s.terrain_bytes), s.seconds_terrain);
+	for (size_t i = 0; i < p_pass.shapes->terrain_count(); ++i) {
+		const bf3::sim::StaticTerrainInfo &t = p_pass.shapes->terrain(i);
+		std::printf("shapes   terrain %zu: object %u, %u x %u samples, %u holes, holed %u, patch_triangles %u, max_error %.4f m, content %.16s\n", i, t.object,
+				t.width, t.height, t.holes, t.holed, t.patch_triangles, double(t.max_error), t.content.hex().c_str());
+	}
 }
 
 int cmd_shapes(const InstallReader &p_reader, const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {

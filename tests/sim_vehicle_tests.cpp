@@ -848,6 +848,80 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK_MESSAGE(vehicle_gate_g1m(*r, &why), why);
 	}
 
+	TEST_CASE("sim.vehicle: G1t: three Humvees over a terrain HeightFieldShape, its patch and a Havok ramp tile, bit-identical, G1 and G1r") {
+		// TC (docs/design/terrain-collision.md §12.1): a 65 x 65 field at 2 m (x, z in -64..64) with a 4 degree slope
+		// along +X and bumps, one interior hole (sample (32, 40), world (0, 16)): the cells around it put triangles in
+		// the patch; beside it on +X one Havok MeshShape tile, a ramp continuing the slope from the x = 64 border.
+		const float slope = std::tan(4.0f * 3.14159265f / 180.0f);
+		const auto ground_y = [&](float x, float z) { return 30.0f + slope * x + 0.15f * std::sin(x / 5.0f) * std::cos(z / 7.0f); };
+		std::vector<float> heights(65 * 65);
+		std::vector<uint8_t> holes(65 * 65, 0);
+		for (size_t z = 0; z < 65; ++z) {
+			for (size_t x = 0; x < 65; ++x) {
+				heights[x + z * 65] = ground_y(-64.0f + 2.0f * float(x), -64.0f + 2.0f * float(z));
+			}
+		}
+		holes[32 + 40 * 65] = 1;
+		StaticTerrainView view;
+		view.width = 65;
+		view.height = 65;
+		view.origin_xz = { -64.0f, -64.0f };
+		view.spacing = { 2.0f, 2.0f };
+		view.heights = heights;
+		view.holes = holes;
+		std::vector<StaticTriangle> ramp;
+		const float y64 = ground_y(64.0f, 0.0f);
+		for (int i = 0; i < 16; ++i) {
+			const float x0 = 64.0f + 2.0f * float(i), x1 = x0 + 2.0f;
+			const float y0 = y64 + slope * (x0 - 64.0f), y1 = y64 + slope * (x1 - 64.0f);
+			StaticTriangle a, b;
+			a.v = { Vec3{ x0, y0, -40.0f }, Vec3{ x0, y0, 40.0f }, Vec3{ x1, y1, -40.0f } };
+			b.v = { Vec3{ x1, y1, -40.0f }, Vec3{ x0, y0, 40.0f }, Vec3{ x1, y1, 40.0f } };
+			ramp.push_back(a);
+			ramp.push_back(b);
+		}
+		core::Result<std::shared_ptr<const StaticWorldShapes>> shapes = build_static_world_terrain(ramp, std::span<const StaticTerrainView>(&view, 1));
+		REQUIRE_MESSAGE(shapes.ok(), (shapes.ok() ? std::string() : shapes.error().message));
+		REQUIRE((*shapes)->terrain_count() == 1);
+		REQUIRE((*shapes)->terrain(0).patch_triangles > 0);
+		REQUIRE((*shapes)->tile_count() >= 1);
+		const std::shared_ptr<const VehicleModel> m = fixture_model();
+		const auto at = [&](float x, float z, bool along_x) {
+			VehiclePlacement p;
+			p.position = { x, ground_y(x, z) + 0.6f, z };
+			if (along_x) {
+				p.rotation = { 0.0f, 0.70710678f, 0.0f, 0.70710678f };
+			}
+			return p;
+		};
+		std::array<VehicleCourse, 3> group;
+		// slot 0 idles next to the hole (its wheels over the patch triangles)
+		group[0].kind = VehicleCourseKind::SlopeIdle;
+		group[0].found = true;
+		group[0].a = { 2.5f, ground_y(2.5f, 13.0f), 13.0f };
+		group[0].b = group[0].a;
+		group[0].start = at(2.5f, 13.0f, true);
+		group[0].slope_degrees = 4.0f;
+		// slot 1 rams slot 0's side, backs off, again
+		group[1].kind = VehicleCourseKind::Collision;
+		group[1].found = true;
+		group[1].a = { 2.5f, ground_y(2.5f, -15.0f), -15.0f };
+		group[1].b = { 2.5f, ground_y(2.5f, 11.8f), 11.8f };
+		group[1].start = at(2.5f, -15.0f, false);
+		group[1].feature = 1.5f;
+		// slot 2 slaloms across the field, past the hole and slot 0, over the field-to-tile border onto the ramp
+		group[2].kind = VehicleCourseKind::Slalom;
+		group[2].found = true;
+		group[2].a = { -50.0f, ground_y(-50.0f, 17.0f), 17.0f };
+		group[2].b = { 90.0f, y64 + slope * 26.0f, 17.0f };
+		group[2].start = at(-50.0f, 17.0f, true);
+		core::Result<VehicleGroupReport> r = run_vehicle_group(*shapes, m, group);
+		REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
+		std::printf("G1t %s", format_vehicle_group_report(*r).c_str());
+		std::string why;
+		CHECK_MESSAGE(vehicle_gate_g1m(*r, &why), why);
+	}
+
 	TEST_CASE("sim.vehicle: two worlds stepped on two threads at once give the single-thread hashes") {
 		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes();
 		const std::shared_ptr<const VehicleModel> m = fixture_model();

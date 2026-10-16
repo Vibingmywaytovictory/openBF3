@@ -153,6 +153,48 @@ Reference make_reference(const level::CollisionSoup &p_soup) {
 		rt.count = r.triangles.size() - rt.first;
 		r.tiles.push_back(rt);
 	}
+	// TC (docs/design/terrain-collision.md §12.2): the terrain cells of every soup tile they fall in
+	// (append_soup_terrain_tile), tile = kNoStaticTile as CollisionWorld reports terrain hits.
+	for (size_t i = 0; i < p_soup.terrains.size(); ++i) {
+		const level::SoupTerrain &terrain = p_soup.terrains[i];
+		if (terrain.state != level::SoupTerrain::State::Built) {
+			continue;
+		}
+		const uint32_t placement = uint32_t(p_soup.placements.size() + i);
+		level::WorkBudget budget(size_t(1) << 28);
+		core::Result<level::SoupTerrainHash> h = level::hash_soup_terrain(terrain, placement, budget);
+		REQUIRE(h.ok());
+		std::vector<level::SoupTriangle> cells;
+		for (const level::SoupTerrainTileSum &ts : h->tiles) {
+			cells.clear();
+			REQUIRE(level::append_soup_terrain_tile(terrain, placement, ts.tile, cells, budget).ok());
+			Reference::Tile rt;
+			rt.first = r.triangles.size();
+			bool first = true;
+			for (const level::SoupTriangle &s : cells) {
+				RefTriangle tri;
+				for (size_t k = 0; k < 3; ++k) {
+					tri.v[k] = d3(s.v[k]);
+				}
+				tri.lo = { std::min({ tri.v[0].x, tri.v[1].x, tri.v[2].x }), std::min({ tri.v[0].y, tri.v[1].y, tri.v[2].y }),
+					std::min({ tri.v[0].z, tri.v[1].z, tri.v[2].z }) };
+				tri.hi = { std::max({ tri.v[0].x, tri.v[1].x, tri.v[2].x }), std::max({ tri.v[0].y, tri.v[1].y, tri.v[2].y }),
+					std::max({ tri.v[0].z, tri.v[1].z, tri.v[2].z }) };
+				rt.lo = first ? tri.lo : D3{ std::min(rt.lo.x, tri.lo.x), std::min(rt.lo.y, tri.lo.y), std::min(rt.lo.z, tri.lo.z) };
+				rt.hi = first ? tri.hi : D3{ std::max(rt.hi.x, tri.hi.x), std::max(rt.hi.y, tri.hi.y), std::max(rt.hi.z, tri.hi.z) };
+				first = false;
+				tri.tag.material = s.material;
+				tri.tag.surface = s.surface;
+				tri.tag.body = s.body;
+				tri.tag.flags = s.flags;
+				tri.layer = s.body;
+				tri.tile = kNoStaticTile;
+				r.triangles.push_back(tri);
+			}
+			rt.count = r.triangles.size() - rt.first;
+			r.tiles.push_back(rt);
+		}
+	}
 	return r;
 }
 
@@ -646,7 +688,7 @@ TEST_SUITE("sim-world") {
 		}
 		const auto world = world_of(shapes);
 		const Reference ref = make_reference(m->soup);
-		REQUIRE(ref.triangles.size() == 1114171);
+		REQUIRE(ref.triangles.size() == 1136699); // TC: 940,091 Havok + 196,608 terrain (every cell)
 		std::mt19937 rng(20261015);
 		std::uniform_real_distribution<double> unit(0.0, 1.0);
 		const auto random_spot = [&](uint32_t p_mask, D3 &r_point, D3 &r_normal) {

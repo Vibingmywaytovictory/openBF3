@@ -53,7 +53,8 @@ struct PreparedCollisionMesh {
 };
 
 // One mesh per (tile, layer) with triangles, in tile order then layer order. Uses up to p_threads lanes
-// (0 = all cores).
+// (0 = all cores). TC: the soup's tiles hold the Havok triangles only, so this gives no terrain (layer 4); the
+// overload below adds the terrain window.
 std::vector<PreparedCollisionMesh> prepare_collision_meshes(const core::level::CollisionSoup &p_soup, unsigned p_threads = 0);
 
 // TC (docs/design/terrain-collision.md §8): after TC the soup's tiles hold no terrain, and a whole terrain is up to
@@ -68,9 +69,30 @@ struct CollisionPrepOptions {
 	float terrain_radius = 512.0f; // metres; about 200 tiles, 0.4 M triangles
 	size_t max_terrain_triangles = size_t(1) << 21;
 };
-// Defined by the TC implementation (collision_prep.cpp).
-std::vector<PreparedCollisionMesh> prepare_collision_meshes(const core::level::CollisionSoup &p_soup, const CollisionPrepOptions &p_options);
-// Only the terrain window (the camera moved).
-std::vector<PreparedCollisionMesh> prepare_terrain_window(const core::level::CollisionSoup &p_soup, const CollisionPrepOptions &p_options);
+inline constexpr uint8_t kTerrainLayer = 4; // collision_layer of a kSoupTerrain triangle
+inline constexpr float kMaxTerrainWindowRadius = 4096.0f; // terrain_radius is clamped to 0..this
+// Cells one window tile may visit (append_soup_terrain_tile's budget): a retail 64 m tile visits about 1,100 at 2 m
+// spacing; a tile past this (a hostile frame or spacing) is skipped and counted in tiles_failed.
+inline constexpr size_t kTerrainWindowTileBudget = size_t(1) << 16;
+// What a window holds (the status text and the check print it).
+struct TerrainWindowStats {
+	std::array<float, 2> centre{};
+	float radius = 0.0f; // after the clamp
+	size_t tiles_considered = 0; // tiles within the radius
+	size_t tiles = 0; // with terrain triangles, kept (one layer-4 mesh each)
+	size_t triangles = 0;
+	size_t tiles_failed = 0; // budget or record errors
+	bool capped = false; // max_terrain_triangles stopped the window short of the radius (nearest tiles kept)
+};
+// The tiles within terrain_radius of terrain_centre (the tile square's XZ distance), nearest first, ties in tile
+// order; empty for a non-finite or far-out centre.
+std::vector<std::array<int32_t, 2>> terrain_window_candidates(const CollisionPrepOptions &p_options);
+// The Havok slots, then the terrain window (layer-4 meshes in tile order).
+std::vector<PreparedCollisionMesh> prepare_collision_meshes(const core::level::CollisionSoup &p_soup, const CollisionPrepOptions &p_options,
+		TerrainWindowStats *r_stats = nullptr);
+// Only the terrain window (the camera moved): one layer-4 mesh per candidate tile with terrain triangles, all Built
+// terrains of the tile in one mesh (terrain order, then append_soup_terrain_tile's emit order), in tile order.
+std::vector<PreparedCollisionMesh> prepare_terrain_window(const core::level::CollisionSoup &p_soup, const CollisionPrepOptions &p_options,
+		TerrainWindowStats *r_stats = nullptr);
 
 } // namespace bf3::render

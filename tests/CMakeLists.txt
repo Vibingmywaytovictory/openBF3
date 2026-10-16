@@ -535,12 +535,30 @@ if(OPENBF3_ASAN)
     set_tests_properties(sim.vehicle.unit PROPERTIES TIMEOUT 1350)
 endif()
 # TC terrain collision (track "Terrain collision everywhere", docs/design/terrain-collision.md §13): tc.contract
-# compiles the TC header additions together and checks their constants and defaults. No data. The TC implementation
-# adds sim.terrain.unit and sim.terrain (G1, G6) to this block.
+# compiles the TC header additions together and checks their constants and defaults. No data.
 openbf3_test(test_tc_contract test_main.cpp tc_contract_tests.cpp test_support.h)
 target_link_libraries(test_tc_contract PRIVATE bf3_sim bf3_render)
 add_test(NAME tc.contract COMMAND test_tc_contract)
+# sim.terrain.unit (no data) and sim.terrain (install, RUN_SERIAL: G1 over every level x mode, the full cached worlds,
+# G6 Caspian RushLarge0 spawns; exits 77 without an install). tools.tc_cost (G3, tests/tc_cost.cmake): bf3dump shapes
+# cold / warm / warm in child processes on fresh scratch roots, the limits of docs §4.5 (report-only under asan).
+openbf3_test(test_sim_terrain test_main.cpp terrain_collision_tests.cpp terrain_collision_support.h test_support.h)
+target_link_libraries(test_sim_terrain PRIVATE bf3_sim Jolt)
+target_include_directories(test_sim_terrain PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
+add_test(NAME sim.terrain.unit COMMAND test_sim_terrain --test-suite=sim-terrain-unit)
+add_test(NAME sim.terrain COMMAND test_sim_terrain --test-suite=sim-terrain)
+set_tests_properties(sim.terrain PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
+set_tests_properties(sim.terrain.unit PROPERTIES TIMEOUT 600)
+if(TARGET bf3dump)
+    add_test(NAME tools.tc_cost COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tc_cost.cmake)
+    set_tests_properties(tools.tc_cost PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE)
+endif()
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_tc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(tc.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
+    set_tests_properties(tc.contract sim.terrain.unit sim.terrain PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
+    set_tests_properties(sim.terrain PROPERTIES TIMEOUT 5400)
+    if(TARGET bf3dump)
+        set_tests_properties(tools.tc_cost PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
+    endif()
 endif()
