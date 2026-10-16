@@ -169,8 +169,18 @@ void Bf3M2aViewmodelDemo::_ready() {
 				return;
 			}
 			sources_ = std::move(*sources);
+			// The 8 loadouts from the data (E11's item set), cross-checked with the documented table.
+			bf3::core::Result<std::vector<bf3::render::ViewmodelKit>> kit_defs =
+					bf3::render::read_viewmodel_kits(*sources_->ebx, bf3::render::viewmodel_level_id(level));
+			if (!kit_defs) {
+				load_error_ = kit_defs.error().message;
+				load_done_ = true;
+				return;
+			}
+			kit_defs_ = std::move(*kit_defs);
+			kit_defs_difference_ = bf3::render::viewmodel_kits_difference(kit_defs_, bf3::render::documented_viewmodel_kits());
 			for (const int team : { 1, 2 }) {
-				bf3::render::ViewmodelSetSpec spec = bf3::render::team_viewmodel_set(team);
+				bf3::render::ViewmodelSetSpec spec = bf3::render::team_viewmodel_set(kit_defs_, team);
 				spec.superbundle = level;
 				bf3::core::Result<std::unique_ptr<bf3::render::ViewmodelSet>> set = bf3::render::load_viewmodel_set(*sources_, spec, &progress_, cache.get());
 				if (!set) {
@@ -190,8 +200,8 @@ void Bf3M2aViewmodelDemo::_ready() {
 				return;
 			}
 			std::vector<std::string> variants;
-			for (const bf3::render::ViewmodelKit &k : bf3::render::default_viewmodel_kits()) {
-				for (const char *u : k.unlocks) {
+			for (const bf3::render::ViewmodelKit &k : kit_defs_) {
+				for (const std::string &u : k.unlocks) {
 					if (std::find(variants.begin(), variants.end(), u) == variants.end()) {
 						variants.push_back(u);
 					}
@@ -205,14 +215,14 @@ void Bf3M2aViewmodelDemo::_ready() {
 				return;
 			}
 			table_ = *table;
-			const std::span<const bf3::render::ViewmodelKit> kits = bf3::render::default_viewmodel_kits();
+			const std::vector<bf3::render::ViewmodelKit> &kits = kit_defs_;
 			for (size_t k = 0; k < kits.size(); ++k) {
 				if (!kit_filter_.empty() && std::find(kit_filter_.begin(), kit_filter_.end(), k) == kit_filter_.end()) {
 					continue;
 				}
 				Kit kit;
 				kit.index = k;
-				kit.team = std::string_view(kits[k].team) == "RU" ? 2 : 1;
+				kit.team = kits[k].team == "RU" ? 2 : 1;
 				const bf3::render::ViewmodelSet &set = kit.team == 2 ? *set_ru_ : *set_us_;
 				std::array<uint16_t, vm_script::kKitItems> defs{};
 				for (size_t s = 0; s < vm_script::kKitItems; ++s) {
@@ -381,7 +391,7 @@ void Bf3M2aViewmodelDemo::update_label(const std::string &p_extra) {
 	const bf3::anim::ViewmodelOutput &o = vm->output();
 	std::snprintf(buf, sizeof(buf),
 			"openBF3 vm | %s %s | %s | t %.2f s | phase %u mag %d | FOV world %.1f vm %.1f | ADS %.2f | base %s action %s %.2f s w %.2f%s | %.0f fps",
-			bf3::render::default_viewmodel_kits()[kit.index].team, kit_short(bf3::render::default_viewmodel_kits()[kit.index]).c_str(),
+			kit_defs_[kit.index].team.c_str(), kit_short(kit_defs_[kit.index]).c_str(),
 			item ? item_short(item->unlock).c_str() : "-", script_t_ - kit.run.start_s(), unsigned(last_view_.weapon.phase), last_view_.weapon.magazine,
 			double(vm->ads().world_fov), double(vm->ads().viewmodel_fov), double(vm->ads().blend), bf3::anim::vm_clip_name(bf3::anim::VmClip(o.base_clip)),
 			bf3::anim::vm_clip_name(bf3::anim::VmClip(o.action_clip)), double(o.action_time_s), double(o.action_weight), o.action_procedural ? " (stand-in)" : "",
@@ -417,7 +427,7 @@ void Bf3M2aViewmodelDemo::begin_kit(size_t p_kit) {
 	if (shots_dir_.empty()) {
 		return;
 	}
-	const bf3::render::ViewmodelKit &k = bf3::render::default_viewmodel_kits()[kit.index];
+	const bf3::render::ViewmodelKit &k = kit_defs_[kit.index];
 	const bf3::render::ViewmodelSet &s = set(kit.team);
 	auto add = [&](uint8_t p_slot, const char *p_label, double p_at) {
 		if (kit.item[p_slot] < 0) {
@@ -501,7 +511,7 @@ void Bf3M2aViewmodelDemo::_process(double p_delta) {
 			if (!load_error_.empty() || kits_.empty()) {
 				UtilityFunctions::push_error(to_godot("[vm] load failed: " + (load_error_.empty() ? std::string("no kits") : load_error_)));
 				update_label();
-				finish(load_error_.rfind("no usable install", 0) == 0 && check_mode_ ? 1 : 1);
+				finish(1); // "no usable install" is a skip for ctest (godot_m2a_viewmodel.cmake matches the text)
 				return;
 			}
 			if (check_mode_) {

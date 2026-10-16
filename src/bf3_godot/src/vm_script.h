@@ -2,7 +2,7 @@
 // The vm demo's scripted weapon timeline (docs/design/m2a-vm.md; m2a.md §11.2 "vm's --vm-check scene drives the
 // same rows on a scripted weapon timeline before the game wiring exists"). Godot-free.
 //
-// One default loadout (render::default_viewmodel_kits(): primary, sidearm, M67, knife in sim slots 0..3) runs through
+// One default loadout (render::read_viewmodel_kits(): primary, sidearm, M67, knife in sim slots 0..3) runs through
 // the real weapon simulation (bf3_sim step_weapons_m2a on a WeaponTable of the install's kit variants) at 60 Hz with
 // a scripted input: zoom held through the spawn deploy (refused), a look-and-move burst then stillness (springs),
 // iron sights with aimed shots, hip fire, a tactical reload with the trigger pressed in the tick the reload ends in,
@@ -35,7 +35,7 @@ struct Mark {
 };
 
 struct KitRun {
-	size_t kit = 0; // index into render::default_viewmodel_kits()
+	size_t kit = 0; // index into render::read_viewmodel_kits()
 	sim::Tick spawn = 0;
 	std::array<uint16_t, kKitItems> defs{};
 	std::vector<sim::weapons::SoldierWeaponsState> states; // [i] = after tick spawn + i ([0] = the spawn state)

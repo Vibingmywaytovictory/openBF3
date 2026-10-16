@@ -157,7 +157,8 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 	MaterialOptions options;
 	options.viewmodel = true;
 	options.fov_override = 55.0f;
-	auto make_mesh = [&](const bf3::render::ViewmodelPart &p_part, std::vector<Ref<StandardMaterial3D>> &r_materials) {
+	auto make_mesh = [&](const bf3::render::ViewmodelPart &p_part, const std::vector<bf3::render::ViewmodelSlotLook> &p_looks,
+							 std::vector<Ref<StandardMaterial3D>> &r_materials) {
 		std::map<uint32_t, Ref<StandardMaterial3D>> materials;
 		const Ref<ArrayMesh> mesh = make_array_mesh(p_part.prepared, [&](const bf3::render::PreparedSurface &p_s) -> Ref<Material> {
 			if (p_s.material_index >= p_part.materials.slots.size()) {
@@ -166,6 +167,17 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 			Ref<StandardMaterial3D> &m = materials[p_s.material_index];
 			if (m.is_null()) {
 				m = make_standard_material(p_part.materials.slots[p_s.material_index], !p_s.tangents.empty(), find_texture, options);
+				if (p_s.material_index < p_looks.size()) {
+					// The shader database's alpha test (the knife's dog-tag chain strip): cut out by the Diffuse alpha.
+					const bf3::render::ViewmodelSlotLook &look = p_looks[p_s.material_index];
+					if (look.alpha_test) {
+						m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+						m->set_alpha_scissor_threshold(bf3::render::kViewmodelAlphaScissor);
+					}
+					if (look.double_sided) {
+						m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
+					}
+				}
 				r_materials.push_back(m);
 			}
 			return m;
@@ -180,19 +192,19 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 		mi->set_skeleton_path(NodePath(".."));
 		return mi;
 	};
-	arms_ = make_mesh(p_set.arms, arms_materials_);
+	arms_ = make_mesh(p_set.arms, p_set.arms_looks, arms_materials_);
 	items_.resize(p_set.items.size());
 	for (size_t i = 0; i < p_set.items.size(); ++i) {
 		const bf3::render::ViewmodelItem &it = p_set.items[i];
 		ItemNodes &n = items_[i];
 		n.skin = make_skin(it.binds.binds());
-		n.weapon = make_mesh(it.weapon, n.materials);
+		n.weapon = make_mesh(it.weapon, it.weapon_looks, n.materials);
 		n.weapon->set_skin(n.skin);
 		n.weapon->set_visible(false);
 		n.refs = bf3::render::viewmodel_clip_refs(it);
 		for (const bf3::render::ViewmodelAttachment &a : it.attachments) {
 			ItemNodes::Attachment na;
-			na.mesh = make_mesh(a.part, n.materials); // unskinned: placed on its bone every frame
+			na.mesh = make_mesh(a.part, a.looks, n.materials); // unskinned: placed on its bone every frame
 			na.mesh->set_visible(false);
 			na.bone = a.rig_bone;
 			na.xform = to_godot(a.transform);
@@ -276,6 +288,17 @@ float Bf3Viewmodel::applied_weapon_fov() const {
 		return 0.0f;
 	}
 	return float(items_[size_t(item_)].materials.front()->get_fov_override());
+}
+
+size_t Bf3Viewmodel::alpha_scissor_materials(int p_item) const {
+	if (p_item < 0 || size_t(p_item) >= items_.size()) {
+		return 0;
+	}
+	size_t n = 0;
+	for (const Ref<StandardMaterial3D> &m : items_[size_t(p_item)].materials) {
+		n += m->get_transparency() == BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR ? 1 : 0;
+	}
+	return n;
 }
 
 float Bf3Viewmodel::applied_arms_fov() const {

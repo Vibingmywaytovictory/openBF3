@@ -7,9 +7,12 @@
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/kit_def.h"
+#include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_cache.h"
 
@@ -885,6 +888,34 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		}
 	}
 
+	// How each material slot is drawn (alpha test), from the level shader database (L1's LookResolver).
+	{
+		std::unique_ptr<LookResolver> look = LookResolver::open(mount);
+		auto looks_of = [&](const ViewmodelPart &p_part) {
+			std::vector<ViewmodelSlotLook> out(p_part.materials.slots.size());
+			for (size_t i = 0; look && i < out.size(); ++i) {
+				const LookMaterial lm = look->resolve(p_part.materials.slots[i], p_part.mesh);
+				out[i].alpha_test = lm.blend == LookBlend::AlphaTest;
+				out[i].double_sided = lm.double_sided;
+				out[i].in_database = lm.shader_in_database;
+				if (out[i].alpha_test) {
+					set->notes.push_back("alpha test: " + p_part.mesh + " slot " + std::to_string(i) + " (" + p_part.materials.slots[i].shader + ")");
+				}
+			}
+			return out;
+		};
+		if (!look) {
+			set->notes.push_back("no level shader database: every viewmodel slot is drawn opaque");
+		}
+		set->arms_looks = looks_of(set->arms);
+		for (ViewmodelItem &item : set->items) {
+			item.weapon_looks = looks_of(item.weapon);
+			for (ViewmodelAttachment &a : item.attachments) {
+				a.looks = looks_of(a.part);
+			}
+		}
+	}
+
 	// Textures: Diffuse and Normal of every material a drawn surface uses, decoded on all cores.
 	progress("decoding textures", 7);
 	std::vector<std::pair<std::string, TextureRole>> wanted;
@@ -1006,16 +1037,117 @@ ViewmodelCoverage viewmodel_coverage(const ViewmodelItem &p_item) {
 	return c;
 }
 
+// ---- skinned-geometry sanity ---------------------------------------------------------------------------------
+
+bool ViewmodelSurfaceSkin::stretched() const {
+	return bad_weights > 0 || (posed_edge > kSkinStretchFloor && posed_edge > kSkinStretchFactor * bind_edge);
+}
+
+std::vector<ViewmodelSurfaceSkin> viewmodel_surface_skin(const PreparedMesh &p_mesh, std::span<const anim::SkinBind> p_binds,
+		std::span<const anim::Xform> p_model) {
+	std::vector<anim::Mat34> skin(p_binds.size());
+	std::vector<bool> valid(p_binds.size(), false);
+	for (size_t i = 0; i < p_binds.size(); ++i) {
+		const int32_t b = p_binds[i].bone;
+		if (b >= 0 && size_t(b) < p_model.size()) {
+			skin[i] = anim::mat_mul(anim::mat_from_xform(p_model[size_t(b)]), p_binds[i].inverse_bind);
+			valid[i] = true;
+		}
+	}
+	std::vector<ViewmodelSurfaceSkin> out;
+	std::vector<anim::Vec3> posed;
+	for (const PreparedSurface &sf : p_mesh.surfaces) {
+		ViewmodelSurfaceSkin r;
+		r.subset = sf.subset;
+		r.material = sf.material_name;
+		r.vertices = sf.vertex_count();
+		r.triangles = sf.indices.size() / 3;
+		const bool skinned = sf.bones.size() == r.vertices * 4 && sf.weights.size() == r.vertices * 4;
+		posed.assign(r.vertices, anim::Vec3{});
+		std::vector<int32_t> heaviest(r.vertices, -1);
+		for (size_t v = 0; v < r.vertices; ++v) {
+			const anim::Vec3 p{ sf.positions[v * 3], sf.positions[v * 3 + 1], sf.positions[v * 3 + 2] };
+			if (!skinned) {
+				posed[v] = p;
+				continue;
+			}
+			float sum = 0, best = -1;
+			anim::Vec3 acc{};
+			bool bad = false;
+			for (size_t l = 0; l < 4; ++l) {
+				const float w = sf.weights[v * 4 + l];
+				if (w <= 0) {
+					continue;
+				}
+				const int32_t bi = sf.bones[v * 4 + l];
+				if (bi < 0 || size_t(bi) >= skin.size() || !valid[size_t(bi)]) {
+					bad = true;
+					continue;
+				}
+				acc = anim::vec_add(acc, anim::vec_scale(anim::mat_point(skin[size_t(bi)], p), w));
+				if (std::find(r.binds.begin(), r.binds.end(), bi) == r.binds.end()) {
+					r.binds.push_back(bi);
+				}
+				sum += w;
+				if (w > best) {
+					best = w;
+					heaviest[v] = bi;
+				}
+			}
+			if (bad || std::fabs(sum - 1.0f) > 0.01f) {
+				++r.bad_weights;
+			}
+			posed[v] = acc;
+		}
+		std::sort(r.binds.begin(), r.binds.end());
+		r.posed_min = { 1e30f, 1e30f, 1e30f };
+		r.posed_max = { -1e30f, -1e30f, -1e30f };
+		for (const anim::Vec3 &p : posed) {
+			const float c[3] = { p.x, p.y, p.z };
+			for (size_t k = 0; k < 3; ++k) {
+				r.posed_min[k] = std::min(r.posed_min[k], c[k]);
+				r.posed_max[k] = std::max(r.posed_max[k], c[k]);
+			}
+		}
+		size_t worst_v = 0;
+		for (size_t t = 0; t + 2 < sf.indices.size(); t += 3) {
+			for (size_t e = 0; e < 3; ++e) {
+				const int32_t a = sf.indices[t + e], b = sf.indices[t + (e + 1) % 3];
+				if (a < 0 || b < 0 || size_t(a) >= r.vertices || size_t(b) >= r.vertices) {
+					continue;
+				}
+				const anim::Vec3 pa{ sf.positions[size_t(a) * 3], sf.positions[size_t(a) * 3 + 1], sf.positions[size_t(a) * 3 + 2] };
+				const anim::Vec3 pb{ sf.positions[size_t(b) * 3], sf.positions[size_t(b) * 3 + 1], sf.positions[size_t(b) * 3 + 2] };
+				r.bind_edge = std::max(r.bind_edge, float(anim::vec_dist(pa, pb)));
+				const float d = float(anim::vec_dist(posed[size_t(a)], posed[size_t(b)]));
+				if (d > r.posed_edge) {
+					r.posed_edge = d;
+					worst_v = size_t(a);
+				}
+			}
+		}
+		if (worst_v < heaviest.size() && heaviest[worst_v] >= 0) {
+			r.worst_bone = p_binds[size_t(heaviest[worst_v])].name;
+		}
+		out.push_back(std::move(r));
+	}
+	return out;
+}
+
 // ---- the default kits ---------------------------------------------------------------------------------------
 
 namespace {
+
+constexpr std::array<core::gameplay::WeaponSlot, 4> kKitSlots{ core::gameplay::WeaponSlot::Primary, core::gameplay::WeaponSlot::Sidearm,
+	core::gameplay::WeaponSlot::Grenade, core::gameplay::WeaponSlot::Knife };
 
 constexpr const char *kM9 = "weapons/m9/u_m9";
 constexpr const char *kMp443 = "weapons/mp443/u_mp443";
 constexpr const char *kM67 = "weapons/m67/u_m67";
 constexpr const char *kKnife = "weapons/knife/u_knife";
 
-const ViewmodelKit kKits[] = {
+// The cross-check of documented_viewmodel_kits (m2a.md §5.6, kits.h) [verified: bf3dump kits MP_Subway TeamDeathMatch0].
+const ViewmodelKit kDocumentedKits[] = {
 	{ "US", "gameplay/kits/usassault", { "weapons/m16a4/u_m16a4", kM9, kM67, kKnife } },
 	{ "US", "gameplay/kits/usengineer", { "weapons/m4a1/u_m4a1", kM9, kM67, kKnife } },
 	{ "US", "gameplay/kits/ussupport", { "weapons/m27iar/u_m27iar", kM9, kM67, kKnife } },
@@ -1026,13 +1158,91 @@ const ViewmodelKit kKits[] = {
 	{ "RU", "gameplay/kits/rurecon", { "weapons/svd/u_svd", kMp443, kM67, kKnife } },
 };
 
-} // namespace
-
-std::span<const ViewmodelKit> default_viewmodel_kits() {
-	return kKits;
+std::string kit_line(const ViewmodelKit &p_kit) {
+	std::string l = p_kit.team + " " + p_kit.kit + ":";
+	for (const std::string &u : p_kit.unlocks) {
+		l += " " + u;
+	}
+	return l;
 }
 
-ViewmodelSetSpec team_viewmodel_set(int p_team) {
+} // namespace
+
+core::Result<std::vector<ViewmodelKit>> read_viewmodel_kits(const core::EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode) {
+	// One budget for the mode, the progression tables and the kits (as bf3dump kits).
+	core::gameplay::WorkBudget budget;
+	core::Result<core::gameplay::ModeDef> mode = core::gameplay::read_mode_def(p_db, p_level_id, p_mode, &budget);
+	if (!mode) {
+		return core::make_error("viewmodel kits: " + mode.error().message);
+	}
+	core::Result<core::gameplay::UnlockProgression> progression = core::gameplay::read_unlock_progression(p_db, &budget);
+	if (!progression) {
+		return core::make_error("viewmodel kits: " + progression.error().message);
+	}
+	if (!progression->known()) {
+		return core::make_error("viewmodel kits: no unlock progression tables (the kits' defaults are unknown)");
+	}
+	std::vector<ViewmodelKit> kits;
+	for (const int team : { 1, 2 }) {
+		const core::gameplay::TeamDef *t = nullptr;
+		for (const core::gameplay::TeamDef &d : mode->teams) {
+			if (d.team == team) {
+				t = &d;
+				break;
+			}
+		}
+		if (t == nullptr) {
+			return core::make_error("viewmodel kits: " + std::string(p_mode) + " has no team " + std::to_string(team));
+		}
+		if (t->kits.size() != kViewmodelKitsPerTeam) {
+			return core::make_error("viewmodel kits: team " + std::to_string(team) + " lists " + std::to_string(t->kits.size()) + " kits (expected " +
+					std::to_string(kViewmodelKitsPerTeam) + ")");
+		}
+		for (const std::string &asset : t->kits) {
+			core::Result<core::gameplay::KitDef> kit = core::gameplay::read_kit_def(p_db, asset, &*progression, &budget);
+			if (!kit) {
+				return core::make_error("viewmodel kits: " + asset + ": " + kit.error().message);
+			}
+			ViewmodelKit k;
+			k.team = team == 2 ? "RU" : "US";
+			k.kit = kit->asset;
+			for (size_t i = 0; i < kKitSlots.size(); ++i) {
+				const core::gameplay::KitUnlock *d = kit->default_unlock(kKitSlots[i]);
+				if (d == nullptr || d->unlock.empty()) {
+					return core::make_error("viewmodel kits: " + asset + " has no default " + core::gameplay::weapon_slot_name(kKitSlots[i]));
+				}
+				k.unlocks[i] = d->unlock;
+			}
+			kits.push_back(std::move(k));
+		}
+	}
+	return kits;
+}
+
+std::string viewmodel_level_id(std::string_view p_superbundle) {
+	const size_t slash = p_superbundle.find_last_of("/\\");
+	return std::string(slash == std::string_view::npos ? p_superbundle : p_superbundle.substr(slash + 1));
+}
+
+std::span<const ViewmodelKit> documented_viewmodel_kits() {
+	return kDocumentedKits;
+}
+
+std::string viewmodel_kits_difference(std::span<const ViewmodelKit> p_data, std::span<const ViewmodelKit> p_documented) {
+	if (p_data.size() != p_documented.size()) {
+		return "the data lists " + std::to_string(p_data.size()) + " loadouts, the documented table " + std::to_string(p_documented.size());
+	}
+	for (size_t i = 0; i < p_data.size(); ++i) {
+		const ViewmodelKit &a = p_data[i];
+		const ViewmodelKit &b = p_documented[i];
+		if (a.team != b.team || a.kit != b.kit || a.unlocks != b.unlocks) {
+			return "loadout " + std::to_string(i) + ": data " + kit_line(a) + " | documented " + kit_line(b);
+		}
+	}
+	return {};
+}
+
+ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_team) {
 	ViewmodelSetSpec spec;
 	const char *team = p_team == 2 ? "RU" : "US";
 	if (p_team == 2) {
@@ -1042,11 +1252,11 @@ ViewmodelSetSpec team_viewmodel_set(int p_team) {
 		spec.arms_variation = "characters/arms/arms1p_ru/arms1p_rus_default";
 	}
 	std::set<std::string> seen;
-	for (const ViewmodelKit &k : kKits) {
-		if (std::string_view(k.team) != team) {
+	for (const ViewmodelKit &k : p_kits) {
+		if (k.team != team) {
 			continue;
 		}
-		for (const char *u : k.unlocks) {
+		for (const std::string &u : k.unlocks) {
 			if (seen.insert(u).second) {
 				ViewmodelItemSpec item;
 				item.unlock = u;

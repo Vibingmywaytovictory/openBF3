@@ -3,7 +3,8 @@
 // Scene: res://scenes/m2a_viewmodel.tscn.
 //
 // A loader thread reads the install (read-only): the shared viewmodel sources, the US and RU viewmodel sets of the
-// 8 default loadouts (render::team_viewmodel_set), the weapon table of their 12 variants (bf3_sim
+// 8 default loadouts (render::read_viewmodel_kits: the mode's kits, KitDef::default_unlock; render::team_viewmodel_set),
+// the weapon table of their 12 variants (bf3_sim
 // open_install_weapons), and runs the scripted timeline of every kit (vm_script.h). The main thread builds one
 // Bf3Viewmodel per team and a Camera3D, then plays the timelines through Bf3Viewmodel::present.
 //
@@ -61,6 +62,10 @@ public:
 		vm_script::KitRun run;
 	};
 	const std::vector<Kit> &kits() const { return kits_; }
+	// The 8 loadouts read from the data (Kit::index indexes them), and their difference from the documented table
+	// ("" = equal).
+	const std::vector<bf3::render::ViewmodelKit> &kit_defs() const { return kit_defs_; }
+	const std::string &kit_defs_difference() const { return kit_defs_difference_; }
 	const bf3::render::ViewmodelSet &set(int p_team) const { return p_team == 2 ? *set_ru_ : *set_us_; }
 	Bf3Viewmodel *viewmodel(int p_team) const;
 	godot::Camera3D *camera() const { return camera_; }
@@ -105,6 +110,8 @@ private:
 	std::unique_ptr<bf3::render::ViewmodelSet> set_us_, set_ru_;
 	std::shared_ptr<const bf3::sim::weapons::WeaponTable> table_;
 	std::vector<Kit> kits_;
+	std::vector<bf3::render::ViewmodelKit> kit_defs_;
+	std::string kit_defs_difference_;
 	std::vector<std::string> load_notes_;
 
 	// Scene.

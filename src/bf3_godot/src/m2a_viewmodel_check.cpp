@@ -10,18 +10,24 @@
 //   e19.fov.in / e19.fov.out    the FOV reaches the aimed / hip value the transition's FOV time after the press /
 //                               release, +- 1 display frame (the press = the display time the presented zoom flag
 //                               turns on: the tick_end of the state before the tick that set it)
-//   e19.fov.generic_0.15        the generic mode's rows: fovTransitionTime 0.15 s +- 1 frame (m2a.md E19's number)
+//   e19.fov.generic_0.15        the generic mode: the FOV times in use are 0.15 s (m2a.md E19's number, asserted)
+//                               and every transition lands within +- 1 frame of it
 //   e19.recoil                  the camera's recoil offset (camera angles - local view - presentation kick) ==
 //                               the interpolated predicted recoil within 1e-4 deg, every frame
 //   e19.springs                 every frame whose springs are not at rest is within the largest settle_seconds of
 //                               the last spring input (view rate, motion, sprint, ADS blend change, shot)
+//   e19.springs.<s>             per spring (sway, bob, kick, camera): not at rest at most its own settle_seconds
+//                               + 1 frame after its own last input (view rate; motion or sprint; shot; shot)
 //   e19.zoom_refused            zoom held while deploying or sprinting presents no ADS (anim::ads_allowed, §16
 //                               Q21); the sim's own refusal is sv's (printed PENDING while the stub sets the flag)
 //   e5.clip_start               the reload clip is the action on screen within 1 display frame of kReloadStarted
 //   e5.fire_after_finish        the first shot after kReloadFinished is on screen within 1 display frame of it
 //   e5.clip_cut                 that shot takes the reload clip off (authored rate, §16 Q4) within the crossfade
-//   e11.coverage                deploy, fire and reload of every item of the 8 loadouts: a clip or a counted
-//                               stand-in
+//   e11.coverage                deploy, fire and reload of every item of the 8 loadouts (read from the data:
+//                               render::read_viewmodel_kits): a clip or a counted stand-in
+//   e11.kits_match_data         the data's loadouts equal the documented table (m2a.md §5.6)
+//   vm.alpha_test               every slot the level shader database calls alpha-tested is drawn with an alpha
+//                               scissor (the knife's dog-tag chain strip among them)
 // Info lines: the E5 length table (authored clip length next to ReloadTime), the look scale and the vignette at full
 // ADS, the present cost.
 #include "m2a_viewmodel_demo.h"
@@ -37,6 +43,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -116,6 +123,13 @@ struct Accum {
 	// e19.springs
 	double worst_unsettled_s = 0;
 	uint32_t settle_marks = 0, settle_bad = 0;
+	// e19.springs.<spring>: per spring (sway, bob, kick, camera) the worst time not at rest after its own last input,
+	// and that time past the spring's settle_seconds in display frames of the pass
+	std::array<double, 4> spring_worst_s{};
+	std::array<double, 4> spring_excess_frames{ -1e9, -1e9, -1e9, -1e9 };
+	std::array<uint64_t, 4> spring_inputs{};
+	// e19.fov.generic_0.15: the FOV times the camera ran with on the zoomable items
+	float fov_seconds_min = 1e9f, fov_seconds_max = -1e9f;
 	// e19.zoom_refused
 	uint64_t refused_frames = 0, refused_bad = 0, sim_flag_frames = 0;
 	// e5
@@ -216,6 +230,7 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 	}
 
 	double last_input = t0;
+	std::array<double, 4> spring_last_input{ t0, t0, t0, t0 };
 	float last_blend = 0;
 	bool last_sprint = false;
 	double prev = t0 - dt;
@@ -243,6 +258,10 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 		if (item == nullptr) {
 			continue;
 		}
+		if (params.can_zoom) {
+			r_acc.fov_seconds_min = std::min({ r_acc.fov_seconds_min, params.fov_in_seconds, params.fov_out_seconds });
+			r_acc.fov_seconds_max = std::max({ r_acc.fov_seconds_max, params.fov_in_seconds, params.fov_out_seconds });
+		}
 
 		// Recoil: the camera read back.
 		{
@@ -269,6 +288,35 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			last_input = t;
 		} else if (!out.springs_at_rest) {
 			r_acc.worst_unsettled_s = std::max(r_acc.worst_unsettled_s, t - last_input);
+		}
+		// Per spring, against its own settle_seconds: the input that moves its target (or kicks it) this frame, and
+		// whether it is at rest at target 0 (every target is 0 without its input).
+		if (const bf3::anim::ViewmodelAnimator *animator = vm->animator()) {
+			const std::array<bf3::anim::SpringState, 7> st = animator->springs();
+			bool shot = false;
+			for (const bf3::host::PresentEvent &e : events) {
+				if (e.kind == bf3::host::PresentKind::OwnShot || (e.kind == bf3::host::PresentKind::OwnTimed && e.id == sw::weapon_events::kThrown)) {
+					shot = true;
+				}
+			}
+			const bool spring_input[4] = { view.yaw_rate != 0.0f || view.pitch_rate != 0.0f, view.speed > 0.0f || view.sprinting, shot, shot };
+			const bf3::anim::SpringParams *params_of[4] = { &tuning.sway, &tuning.bob, &tuning.kick, &tuning.camera_recoil };
+			const bool at_rest[4] = {
+				bf3::anim::spring_at_rest(tuning.sway, 0.0f, st[0]) && bf3::anim::spring_at_rest(tuning.sway, 0.0f, st[1]),
+				bf3::anim::spring_at_rest(tuning.bob, 0.0f, st[2]),
+				bf3::anim::spring_at_rest(tuning.kick, 0.0f, st[3]) && bf3::anim::spring_at_rest(tuning.kick, 0.0f, st[4]),
+				bf3::anim::spring_at_rest(tuning.camera_recoil, 0.0f, st[5]) && bf3::anim::spring_at_rest(tuning.camera_recoil, 0.0f, st[6]),
+			};
+			for (size_t k = 0; k < 4; ++k) {
+				if (spring_input[k]) {
+					spring_last_input[k] = t;
+					++r_acc.spring_inputs[k];
+				} else if (!at_rest[k]) {
+					const double since_input = t - spring_last_input[k];
+					r_acc.spring_worst_s[k] = std::max(r_acc.spring_worst_s[k], since_input);
+					r_acc.spring_excess_frames[k] = std::max(r_acc.spring_excess_frames[k], (since_input - double(params_of[k]->settle_seconds)) / dt);
+				}
+			}
 		}
 
 		// Refusal.
@@ -361,8 +409,8 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 		}
 	}
 
-	const std::string kit_name = std::string(bf3::render::default_viewmodel_kits()[kit.index].team) + " " +
-			std::string(bf3::render::default_viewmodel_kits()[kit.index].kit).substr(std::string(bf3::render::default_viewmodel_kits()[kit.index].kit).rfind('/') + 1);
+	const bf3::render::ViewmodelKit &kit_def = p_demo.kit_defs()[kit.index];
+	const std::string kit_name = kit_def.team + " " + kit_def.kit.substr(kit_def.kit.rfind('/') + 1);
 	const bf3::render::ViewmodelSet &set = p_demo.set(kit.team);
 	for (const Transition &tr : transitions) {
 		++r_acc.transitions;
@@ -447,6 +495,13 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 					dst->worst_unsettled_s = std::max(dst->worst_unsettled_s, a.worst_unsettled_s);
 					dst->settle_marks += a.settle_marks;
 					dst->settle_bad += a.settle_bad;
+					for (size_t s = 0; s < 4; ++s) {
+						dst->spring_worst_s[s] = std::max(dst->spring_worst_s[s], a.spring_worst_s[s]);
+						dst->spring_excess_frames[s] = std::max(dst->spring_excess_frames[s], a.spring_excess_frames[s]);
+						dst->spring_inputs[s] += a.spring_inputs[s];
+					}
+					dst->fov_seconds_min = std::min(dst->fov_seconds_min, a.fov_seconds_min);
+					dst->fov_seconds_max = std::max(dst->fov_seconds_max, a.fov_seconds_max);
 					dst->refused_frames += a.refused_frames;
 					dst->refused_bad += a.refused_bad;
 					dst->sim_flag_frames += a.sim_flag_frames;
@@ -491,10 +546,14 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 						a.worst_out_frames));
 	}
 	{
-		// The generic mode's FOV time is the aiming controller's fovTransitionTime: E19's 0.15 s.
-		bool generic_015 = per_mode[1].transitions > 0 && per_mode[1].transitions_bad == 0;
-		row("e19.fov.generic_0.15", generic_015,
-				fmt("generic mode: every transition uses fovTransitionTime %.2f s and lands within +-1 frame (rows e19.fov.in_out.generic)", double(kE19GenericFovSeconds)));
+		// The generic mode's FOV time is the aiming controller's fovTransitionTime: E19's literal 0.15 s, asserted on
+		// the parameters the camera ran with (every frame of a zoomable item), and the transitions land on it.
+		const Accum &g = per_mode[1];
+		const bool literal = g.fov_seconds_min <= g.fov_seconds_max && std::fabs(g.fov_seconds_min - kE19GenericFovSeconds) <= 1e-6f &&
+				std::fabs(g.fov_seconds_max - kE19GenericFovSeconds) <= 1e-6f;
+		row("e19.fov.generic_0.15", literal && g.transitions > 0 && g.transitions_bad == 0,
+				fmt("generic mode: the FOV times in use %.4f..%.4f s (== %.2f s, m2a.md E19), %u transitions within +-1 frame, worst %.2f / %.2f frames",
+						double(g.fov_seconds_min), double(g.fov_seconds_max), double(kE19GenericFovSeconds), g.transitions, g.worst_in_frames, g.worst_out_frames));
 	}
 	row("e19.recoil", all.frames > 0 && all.worst_recoil_deg <= kRecoilToleranceDeg && all.max_recoil_deg > 0.1,
 			fmt("%llu frames, worst |camera recoil offset - interpolated predicted recoil| %.2e deg (<= %.0e), largest recoil %.2f deg", (unsigned long long)all.frames,
@@ -505,6 +564,17 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 			fmt("worst unsettled frame %.3f s after the last spring input (<= largest settle_seconds %.2f + 1 frame); at rest at %u of %u settle marks "
 				"(mark + sway / bob settle_seconds)",
 					all.worst_unsettled_s, settle_max, all.settle_marks - all.settle_bad, all.settle_marks));
+	{
+		// Each spring against its own settle_seconds (+ 1 display frame of the pass), after its own last input.
+		const char *names[4] = { "sway", "bob", "kick", "camera" };
+		const bf3::anim::SpringParams *ps[4] = { &tu.sway, &tu.bob, &tu.kick, &tu.camera_recoil };
+		for (size_t k = 0; k < 4; ++k) {
+			const double excess = all.spring_excess_frames[k] < -1e8 ? 0.0 : all.spring_excess_frames[k];
+			row(std::string("e19.springs.") + names[k], all.spring_inputs[k] > 0 && excess <= 1.0 + 1e-6,
+					fmt("%llu input frames; worst %.3f s not at rest after the last input (settle_seconds %.2f; %+.2f frames past it, <= 1)",
+							(unsigned long long)all.spring_inputs[k], all.spring_worst_s[k], double(ps[k]->settle_seconds), excess));
+		}
+	}
 	row("e19.zoom_refused", all.refused_frames > 0 && all.refused_bad == 0,
 			fmt("%llu frames with zoom held while deploying or sprinting: ADS presented in %llu (presentation rule anim::ads_allowed, §16 Q21)",
 					(unsigned long long)all.refused_frames, (unsigned long long)all.refused_bad));
@@ -522,11 +592,12 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 	{
 		uint32_t items = 0, covered = 0, clips = 0, stand_ins = 0, na = 0;
 		std::string lines;
-		const std::span<const bf3::render::ViewmodelKit> kits = bf3::render::default_viewmodel_kits();
+		// The item set is the data's (read_viewmodel_kits: the mode's kits, KitDef::default_unlock of slots 0, 1, 6, 7).
+		const std::vector<bf3::render::ViewmodelKit> &kits = p_demo.kit_defs();
 		for (size_t k = 0; k < kits.size(); ++k) {
-			const int team = std::string_view(kits[k].team) == "RU" ? 2 : 1;
+			const int team = kits[k].team == "RU" ? 2 : 1;
 			const bf3::render::ViewmodelSet &set = p_demo.set(team);
-			for (const char *u : kits[k].unlocks) {
+			for (const std::string &u : kits[k].unlocks) {
 				const bf3::render::ViewmodelItem *it = nullptr;
 				for (const bf3::render::ViewmodelItem &i : set.items) {
 					if (i.unlock == u) {
@@ -535,7 +606,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 				}
 				++items;
 				if (it == nullptr) {
-					lines += fmt("    %s %s: NOT LOADED\n", kits[k].team, short_unlock(u).c_str());
+					lines += fmt("    %s %s: NOT LOADED\n", kits[k].team.c_str(), short_unlock(u).c_str());
 					continue;
 				}
 				const bf3::render::ViewmodelCoverage c = bf3::render::viewmodel_coverage(*it);
@@ -543,7 +614,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 				clips += c.clips;
 				stand_ins += c.stand_ins;
 				na += c.not_applicable;
-				std::string l = fmt("    %s %-14s %-12s", kits[k].team, std::string(kits[k].kit).substr(std::string(kits[k].kit).rfind('/') + 1).c_str(),
+				std::string l = fmt("    %s %-14s %-12s", kits[k].team.c_str(), kits[k].kit.substr(kits[k].kit.rfind('/') + 1).c_str(),
 						short_unlock(u).c_str());
 				for (const bf3::render::ViewmodelCoverageEntry &e : c.entries) {
 					l += fmt(" | %s: %s", e.what, e.applicable ? bf3::render::viewmodel_clip_source_name(e.source) : "n/a");
@@ -555,8 +626,57 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 			}
 		}
 		print("[vm] E11 viewmodel coverage (deploy, fire, reload per item of the 8 loadouts):\n" + lines);
-		row("e11.coverage", covered == items && items == kits.size() * 4,
-				fmt("%u of %u loadout items covered: %u clips, %u counted stand-ins, %u not applicable", covered, items, clips, stand_ins, na));
+		row("e11.coverage", covered == items && kits.size() == 2 * bf3::render::kViewmodelKitsPerTeam && items == kits.size() * 4,
+				fmt("%u of %u items of the %zu loadouts read from the data (%s) covered: %u clips, %u counted stand-ins, %u not applicable", covered, items,
+						kits.size(), std::string(bf3::render::kViewmodelKitsMode).c_str(), clips, stand_ins, na));
+		row("e11.kits_match_data", p_demo.kit_defs_difference().empty(),
+				p_demo.kit_defs_difference().empty() ? std::string("the data's 8 default loadouts equal the documented table (m2a.md §5.6, kits.h)")
+													 : "the data differs from the documented table: " + p_demo.kit_defs_difference());
+	}
+
+	// The shader database's alpha-tested slots (the knife's dog-tag chain strip) are alpha-scissored on the GPU side:
+	// the knife capture's stray bars were that strip drawn opaque.
+	{
+		uint32_t data_slots = 0, gpu = 0, items = 0;
+		bool knife_chain = false;
+		std::string lines;
+		for (const int team : { 1, 2 }) {
+			const bf3::render::ViewmodelSet &set = p_demo.set(team);
+			for (size_t i = 0; i < set.items.size(); ++i) {
+				const bf3::render::ViewmodelItem &it = set.items[i];
+				std::set<uint32_t> used; // slots a drawn surface uses (weapon), plus every accessory slot
+				for (const bf3::render::PreparedSurface &sf : it.weapon.prepared.surfaces) {
+					if (sf.material_index < it.weapon_looks.size() && it.weapon_looks[sf.material_index].alpha_test) {
+						used.insert(sf.material_index);
+					}
+				}
+				uint32_t want = uint32_t(used.size());
+				for (const bf3::render::ViewmodelAttachment &a : it.attachments) {
+					std::set<uint32_t> au;
+					for (const bf3::render::PreparedSurface &sf : a.part.prepared.surfaces) {
+						if (sf.material_index < a.looks.size() && a.looks[sf.material_index].alpha_test) {
+							au.insert(sf.material_index);
+						}
+					}
+					want += uint32_t(au.size());
+				}
+				const uint32_t have = uint32_t(p_demo.viewmodel(team)->alpha_scissor_materials(int(i)));
+				data_slots += want;
+				gpu += have;
+				++items;
+				if (it.kind == bf3::render::ViewmodelItemKind::Knife && want > 0 && have == want) {
+					knife_chain = true;
+				}
+				if (want > 0 || have > 0) {
+					lines += fmt("    %s %s: %u alpha-tested slots in the data, %u alpha-scissor materials\n", team == 2 ? "RU" : "US", short_unlock(it.unlock).c_str(),
+							want, have);
+				}
+			}
+		}
+		print("[vm] alpha-tested viewmodel slots (level shader database):\n" + lines);
+		row("vm.alpha_test", data_slots == gpu && knife_chain,
+				fmt("%u alpha-tested slots over %u items, %u drawn with an alpha scissor; the knife's dog-tag chain %s", data_slots, items, gpu,
+						knife_chain ? "alpha-scissored" : "NOT alpha-scissored"));
 	}
 
 	// E5 table: the authored clip length next to ReloadTime.

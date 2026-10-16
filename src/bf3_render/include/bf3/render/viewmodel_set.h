@@ -122,6 +122,17 @@ struct ViewmodelAdsData {
 	float fov_in = -1, fov_out = -1, zoom_in = -1, zoom_out = -1; // 0 -> 1 and 1 -> 0
 };
 
+// vm: how a material slot is drawn, from the level shader database through L1's LookResolver (the shader's surface
+// type; the name rule when the database lacks it). The knife's dog-tag chain is objects/shaders/proppreset_alphatest
+// (surface type OpaqueAlphaTest [verified: bf3dump looks MP_Subway TeamDeathMatch0 --shader]): a strip cut out by its
+// Diffuse alpha, which drawn opaque shows as long thin bars across the view.
+struct ViewmodelSlotLook {
+	bool alpha_test = false; // alpha scissor at kViewmodelAlphaScissor on the Diffuse alpha
+	bool double_sided = false;
+	bool in_database = false; // the slot's shader graph is in the level shader database
+};
+inline constexpr float kViewmodelAlphaScissor = 0.5f; // as L1's level materials (level_upload.cpp)
+
 // A rigid accessory mesh on a weapon bone (SoldierWeaponData.Sockets: a SocketData's AvailableObjects, the
 // WeaponRegularSocketObjectData's Asset1p / Asset1pzoom). The kits' default customization attaches the sockets whose
 // UnlockAsset is one of the "weapons/common/no..." unlocks (nooptics = the iron sights of flat-top rifles, the M16A4's
@@ -134,6 +145,7 @@ struct ViewmodelAttachment {
 	bool hip = true; // drawn while not aimed (Asset1p)
 	bool zoom = true; // drawn while aimed (Asset1pzoom)
 	ViewmodelPart part; // unskinned
+	std::vector<ViewmodelSlotLook> looks; // per material slot of part
 };
 inline constexpr std::string_view kDefaultSocketUnlockPrefix = "weapons/common/no";
 
@@ -160,6 +172,7 @@ struct ViewmodelItem {
 	// nothing here; every package of the item is kept alive by this list).
 	std::vector<std::unique_ptr<core::ant::AntPackage>> packages;
 	std::vector<ViewmodelAttachment> attachments; // the default customization's rigid accessories
+	std::vector<ViewmodelSlotLook> weapon_looks; // per material slot of weapon
 };
 
 // vm: the animator's clip table of an item (stand-ins as VmClipRef::stand_in with the stand-in's seconds).
@@ -174,6 +187,7 @@ struct ViewmodelSet {
 	anim::EbxSkeleton arms_skeleton;
 	anim::EbxSkeleton weapon_skeleton;
 	ViewmodelPart arms;
+	std::vector<ViewmodelSlotLook> arms_looks; // vm: per material slot of arms
 	std::vector<ViewmodelItem> items; // ViewmodelSetSpec::items order
 	std::vector<PreparedTexture> textures; // unique by name over every part
 	std::vector<std::string> notes; // stand-ins, fallbacks, formats (logs and E11's report)
@@ -222,14 +236,50 @@ struct ViewmodelCoverage {
 ViewmodelCoverage viewmodel_coverage(const ViewmodelItem &p_item);
 const char *viewmodel_clip_source_name(ViewmodelClipSource p_source);
 
-// The default loadouts of §5.6 (the kits' slot 0, 1, 6, 7 defaults on MP_Subway [verified: bf3dump kits]).
-struct ViewmodelKit {
-	const char *team; // "US" / "RU"
-	const char *kit; // gameplay/kits/usassault ...
-	std::array<const char *, 4> unlocks; // slots 0, 1, 6, 7
+// vm: skinned-geometry sanity (the stretched-lines check). Every drawn surface of a skinned part, skinned with the
+// binds and a model-space pose of the rig as the renderer does (sum of weight * model[bind.bone] * inverse_bind):
+// the longest triangle edge in the bind pose and after skinning, and the vertices whose weights do not sum to 1.
+// A rigid or animated weapon keeps its edge lengths; a vertex skinned to a bone the pose leaves behind (or one with
+// no weight) stretches its triangles across the screen.
+struct ViewmodelSurfaceSkin {
+	size_t subset = 0;
+	std::string material;
+	size_t vertices = 0, triangles = 0;
+	size_t bad_weights = 0; // |sum of weights - 1| > 0.01, or a weight on an unknown bind
+	float bind_edge = 0, posed_edge = 0; // the longest triangle edge, metres
+	std::string worst_bone; // the heaviest bone of the vertex at the longest posed edge
+	std::vector<int32_t> binds; // the binds the surface's weights use (sorted)
+	std::array<float, 3> posed_min{}, posed_max{}; // the skinned extent in the rig's model space
+	bool stretched() const;
 };
-std::span<const ViewmodelKit> default_viewmodel_kits(); // 8 loadouts: US then RU, assault engineer support recon
-// The set of one team (1 = US, 2 = RU): every distinct item of its four default kits, with the team's arms.
-ViewmodelSetSpec team_viewmodel_set(int p_team);
+// A posed edge longer than this factor of the bind pose's longest edge (and longer than the floor) is stretched.
+inline constexpr float kSkinStretchFactor = 1.5f;
+inline constexpr float kSkinStretchFloor = 0.05f; // metres
+std::vector<ViewmodelSurfaceSkin> viewmodel_surface_skin(const PreparedMesh &p_mesh, std::span<const anim::SkinBind> p_binds,
+		std::span<const anim::Xform> p_model);
+
+// The default loadouts of §5.6, read from the data: the mode's teams 1 (US) and 2 (RU), TeamDef::kits in order, and
+// KitDef::default_unlock of slots 0, 1, 6, 7 (the same resolution as sv's make_kit_table, bf3_host kits.h). E11's
+// coverage, bf3dump vm clips and the vm demo iterate over these, so the item set is the data's, not a copy of it.
+struct ViewmodelKit {
+	std::string team; // "US" (team 1) / "RU" (team 2)
+	std::string kit; // gameplay/kits/usassault ...
+	std::array<std::string, 4> unlocks; // slots 0, 1, 6, 7
+};
+inline constexpr std::string_view kViewmodelKitsMode = "TeamDeathMatch0"; // §5.6: the Metro TDM loadouts
+inline constexpr size_t kViewmodelKitsPerTeam = 4; // assault, engineer, support, recon
+// Reads the 8 loadouts of p_level_id's p_mode (US then RU, in the teams' kit order). Fails when a team is missing,
+// does not list 4 kits, or a kit has no default for one of the 4 slots. p_level_id: "MP_Subway".
+core::Result<std::vector<ViewmodelKit>> read_viewmodel_kits(const core::EbxResolver &p_db, std::string_view p_level_id,
+		std::string_view p_mode = kViewmodelKitsMode);
+// The level id of a superbundle path ("Win32/Levels/MP_Subway/MP_Subway" -> "MP_Subway").
+std::string viewmodel_level_id(std::string_view p_superbundle);
+// The loadouts §5.6 names for Metro TDM [verified: bf3dump kits MP_Subway TeamDeathMatch0]. A cross-check only
+// (row e11.kits_match_data, bf3dump vm clips): nothing iterates over it in place of read_viewmodel_kits.
+std::span<const ViewmodelKit> documented_viewmodel_kits();
+// "" when equal, else the first difference (for the cross-check lines).
+std::string viewmodel_kits_difference(std::span<const ViewmodelKit> p_data, std::span<const ViewmodelKit> p_documented);
+// The set of one team (1 = US, 2 = RU): every distinct item of its kits in p_kits, with the team's arms.
+ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_team);
 
 } // namespace bf3::render

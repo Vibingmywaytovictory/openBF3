@@ -113,6 +113,8 @@ public:
 	int32_t camera_joint() const { return camera_joint_; }
 	const bf3::anim::ViewmodelAnimator *animator() const { return animator_.get(); }
 	double last_present_us() const { return last_present_us_; }
+	// The item's weapon and accessory materials drawn with an alpha scissor (the shader database's alpha test).
+	size_t alpha_scissor_materials(int p_item) const;
 
 protected:
 	static void _bind_methods();
