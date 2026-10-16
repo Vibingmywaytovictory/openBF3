@@ -545,8 +545,11 @@ the present. All four are counted in `LagCompStats`.
 ### 6.4 The target set at a rewound time
 
 * **Time rule (both ends, one function).** A query for a projectile segment that starts at `time_start` tests the
-  targets posed at `net::rewind_time_q8(time_start, view_back_q8)` = time_start in q8 ticks − view_back, clamped
-  (§6.3) and rounded to 1/256 tick. One pose per segment (the segment is at most one tick; a target moves ≤ 11 cm in
+  targets posed at `net::rewind_time_q8(time_start, view_back_q8)` = time_start in q8 ticks − (view_back − 256),
+  the lag clamped to 0 .. max_rewind_ticks × 256 (§6.3) and rounded to 1/256 tick (time_start in q8 ticks: the state
+  after server tick S sits at S × 256, so the step of command tick T covers [(T − 1) × 256, T × 256); a shot at the
+  start of command tick T then tests at exactly the drawn render time R = (T << 8) − view_back; corrected by lc,
+  see m2a-lc.md "time rule": "− view_back" alone tested one tick before R). One pose per segment (the segment is at most one tick; a target moves ≤ 11 cm in
   it at sprint speed). The view sample is the one stored for the projectile's shot index, so every shot of one
   command, and every tick of one bullet's flight, uses the same lag; the target time advances with the bullet. A
   projectile spawned mid-tick starts its segment at its spawn time. The client's cosmetic test (§8.4) calls the same
