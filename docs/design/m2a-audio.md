@@ -83,7 +83,7 @@ what makes them meaningful, not their exact values.
 | G8 | `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=<openBF3>\b\shots\audio\godot_m16.wav --quit-after=90` (ctest `godot.audio`, RUN_SERIAL) | rows (a)–(d) PASS, ≥ 30.0 s, all mixer counters 0, replay equal | G8_MEASURED |
 
 The ctests write their WAVs to `${PROJECT_SOURCE_DIR}/b/shots/audio` (gitignored) or to `OPENBF3_AUDIO_SHOTS` when it
-is set; in a worktree set `OPENBF3_AUDIO_SHOTS=C:\Users\olku\BF3 reimplementation\openBF3\b\shots\audio` to collect
+is set at configure time; in a worktree set `OPENBF3_AUDIO_SHOTS=C:\Users\olku\BF3 reimplementation\openBF3\b\shots\audio` to collect
 them in the main checkout's shots directory. Under the `asan` preset the bf3dump gates run with `REPORT_ONLY` (counts
 and timings reported, not gated), but a non-zero exit (an ASan abort) or a missing `install.unchanged yes` still
 fails the test.
@@ -652,8 +652,8 @@ runs cold → warm → patched (an in-memory digest override), the same three st
   2. M16A3 bands. Every crossfader group's amplitude is 1 (or 0) outside its band, monotonic inside it, and changes
      within ±0.25 m of the §4.5 edges. The hifi layer is 1 at 0 m and 0 at ≥ 20 m. **Shape:** the 0–20 m group's
      amplitude at 2.5/5/10/15/17.5 m is 0.5 + 0.5 cos(π d / 20) within 1e-4 (a linear fade is off by ≥ 0.1 at 5 and
-     15 m), and the group after each 250–300 m band (the far layer) rises monotonically from 0 at ≤ 250 m to 1 at
-     300 m. The handling layers are 0 at ≥
+     15 m), and the three 250–300 m far groups (core bass, noise, reflections) follow the same cosine law at
+     255/262.5/275/287.5/295 m (reading R: they fade out over that band; open question 1). The handling layers are 0 at ≥
      15/17/19 m. The far noise group (v87) rises over 20–50 m and falls over 250–300 m (reading R). A `Fire` posted at
      302 m starts no sampler, and one at 299 m does.
   3. M16A3 pitch/HPF. Over 10,000 seeded bursts, v28 ∈ [1.21, 1.262] with min/max within 0.5 % of the ends, and v28
@@ -877,7 +877,7 @@ corrected text; this list says what changed and why.
 2. **Onset tolerance ± 96 frames, not ± 48 (§1 G7, §10.4 row a).** Measured on the data, not on our render: 22 of 24
    corebassdistant segments open with a 64-frame lead-in at −35 to −60 dB before the attack, and corebassclose has
    late re-attacks, so the first frame at −20 dB of the local peak moves by up to 65 frames from segment to segment
-   (`bf3dump audio wave MP_Subway TeamDeathMatch0 <wave> --envelope`). The Steps themselves start on their frames
+   (`bf3dump audio wave MP_Subway TeamDeathMatch0 <wave partition> --envelope`, item 11; segments 1–24, the intro excluded). The Steps themselves start on their frames
    exactly (row e: 0 frames error). ± 96 = 2 ms, the envelope window; ± 48 would fail on the waves, not on the timing.
 3. **The M1A2's v81 is distance (§4.6, §10.2 item 4).** Its crossfaders read v81, the output of its Physics node's
    `Distance` port. G5 item 4 sweeps distance for all three oracle patches; no register pin hook is needed.
@@ -915,9 +915,10 @@ corrected text; this list says what changed and why.
     a fan-in larger than the budget. On real data `audio.census` compiles all 835 graphs with 0 feedback edges. XAS "channels 0" cannot be
     encoded (the header stores channels − 1) and the decoders take no `WorkBudget`: every loop is bounded by the
     bytes left and by the header's frame count, which `audio.xas.unit` and `audio.fuzz` exercise.
-11. **Acceptance fixes.** G5 item 2 also checks the fade *shape* on the data (the cosine 0–20 m close layer and the
-    250–300 m far fade-in), not only monotonicity and edges. `audio_gates.cmake` under `REPORT_ONLY` (asan) still
+11. **Acceptance fixes.** G5 item 2 also checks the fade *shape* on the data (the cosine law of the 0–20 m close layer
+    and of the three 250–300 m far groups), not only monotonicity and edges. The plan's "far layer fades in over
+    250–300 m" is not tested as written: under reading R nothing fades in over that band (open question 1). `audio_gates.cmake` under `REPORT_ONLY` (asan) still
     fails on a non-zero bf3dump exit or a missing `install.unchanged yes`. `Bf3AudioPlayback::playing_` is a
     `std::atomic<bool>` (written on the main thread, read in `_mix` on the audio thread). The envelope command of item 2
     takes the wave's partition path, e.g. `bf3dump audio wave MP_Subway TeamDeathMatch0
-    ENVELOPE_WAVE_PATH --envelope`.
+    sound/weapons/shared_content/corebassdistant_lmg/corebassdistant_lmg_04_wave --envelope`.

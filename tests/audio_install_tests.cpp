@@ -447,40 +447,33 @@ TEST_SUITE("audio-oracles") {
 			}
 		}
 		// The fade shapes from the data (plan §7.7 item 1): the close layer's 0-20 m group falls with the cosine law
-		// 0.5 + 0.5 cos(pi t), which a linear fade (0.75 / 0.5 / 0.25 at 5 / 10 / 15 m) would fail by >= 0.1; the
-		// group after each 250-300 m band (the far layer) fades in from 0 at 250 m to 1 at 300 m.
-		size_t cosine_groups = 0, far_fade_ins = 0;
-		for (size_t k = 0; k < bands.size(); ++k) {
-			const Band &b = bands[k];
-			if (b.begin == 0.0f && b.end == 20.0f) {
-				++cosine_groups;
-				for (float d : { 2.5f, 5.0f, 10.0f, 15.0f, 17.5f }) {
-					at(*inst, d);
-					const float want = 0.5f + 0.5f * std::cos(3.14159265f * d / 20.0f);
-					const float got = inst->crossfader_group_amplitude(b.node, b.group);
-					CHECK_MESSAGE(std::fabs(got - want) <= 1e-4f, "0-20 m group (node ", b.node, ") at ", d, " m: ", got, ", cosine ", want);
-				}
+		// 0.5 + 0.5 cos(pi t), which a linear fade (0.75 / 0.5 / 0.25 at 5 / 10 / 15 m) misses by >= 0.1. The far
+		// layers (the last group of the core bass, noise and reflections crossfaders, band 250-300 m, §4.5) fade with the
+		// same cosine law under reading R (design §6.3: the last group fades out over its band; open question 1 asks
+		// about the plan's "fades in" wording).
+		size_t close_groups = 0, far_groups = 0;
+		const auto cosine_band = [&](const Band &p_b, std::initializer_list<float> p_at) {
+			for (float d : p_at) {
+				at(*inst, d);
+				const float t = (d - p_b.begin) / (p_b.end - p_b.begin);
+				const float want = 0.5f + 0.5f * std::cos(3.14159265f * t);
+				const float got = inst->crossfader_group_amplitude(p_b.node, p_b.group);
+				CHECK_MESSAGE(std::fabs(got - want) <= 1e-4f, p_b.begin, "-", p_b.end, " m group (node ", p_b.node, " group ", p_b.group, ") at ", d,
+						" m: ", got, ", cosine ", want);
 			}
-			if (b.begin == 250.0f && b.end == 300.0f && k + 1 < bands.size() && bands[k + 1].node == b.node) {
-				++far_fade_ins;
-				const Band &next = bands[k + 1];
-				float prev = -1.0f;
-				for (float d : { 249.0f, 250.0f, 262.5f, 275.0f, 287.5f, 300.0f }) {
-					at(*inst, d);
-					const float got = inst->crossfader_group_amplitude(next.node, next.group);
-					CHECK_MESSAGE(got >= prev, "far layer (node ", next.node, " group ", next.group, ") not rising at ", d, " m");
-					prev = got;
-					if (d <= 250.0f) {
-						CHECK_MESSAGE(got == 0.0f, "far layer at ", d, " m: ", got);
-					}
-					if (d == 300.0f) {
-						CHECK_MESSAGE(got == 1.0f, "far layer at 300 m: ", got);
-					}
-				}
+		};
+		for (const Band &b : bands) {
+			if (b.begin == 0.0f && b.end == 20.0f) {
+				++close_groups;
+				cosine_band(b, { 2.5f, 5.0f, 10.0f, 15.0f, 17.5f });
+			}
+			if (b.begin == 250.0f && b.end == 300.0f) {
+				++far_groups;
+				cosine_band(b, { 255.0f, 262.5f, 275.0f, 287.5f, 295.0f });
 			}
 		}
-		CHECK(cosine_groups == 1);
-		CHECK(far_fade_ins >= 1);
+		CHECK(close_groups == 1);
+		CHECK(far_groups == 3); // core bass, noise, reflections
 		// the far noise group v87: rises over 20-50, falls over 250-300
 		const std::pair<float, float> v87[] = { { 20.0f, 0.0f }, { 35.0f, 0.5f }, { 50.0f, 1.0f }, { 250.0f, 1.0f }, { 275.0f, 0.5f }, { 300.0f, 0.0f } };
 		for (auto [d, want87] : v87) {
