@@ -185,6 +185,11 @@ bool first_target(Env &r_env, const Projectile &p_p, const Vec3 &p_a, const Vec3
 	q.def = p_p.def;
 	q.pellet = p_p.pellet;
 	q.kind = r_env.kind;
+	// M2a lc R4 (docs/design/m2a.md §6.4): the segment's geometry for a rewinding provider's broad phase.
+	q.from = p_a;
+	q.to = p_b;
+	q.radius = 0.0f;
+	q.has_segment = true;
 	const std::span<const HitTarget> list = r_env.targets.targets_for(q);
 	bool any = false;
 	float best = 2.0f;
@@ -313,6 +318,11 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 	q.def = p_p.def;
 	q.pellet = p_p.pellet;
 	q.kind = TargetQueryKind::Blast;
+	// M2a lc R4 (docs/design/m2a.md §6.4): the blast's centre and reach (BlastRadius; no damage beyond it).
+	q.from = to_f(p_pos);
+	q.to = q.from;
+	q.radius = std::max(p_x.inner_radius, p_x.radius);
+	q.has_segment = true;
 	const std::span<const HitTarget> list = r_env.targets.targets_for(q);
 	const Mechanics &mech = r_env.table.mechanics;
 	const DVec3 eye = add(p_pos, scale(to_d(p_normal), 0.05)); // occlusion rays start just off the surface
