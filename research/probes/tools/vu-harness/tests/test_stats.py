@@ -62,6 +62,12 @@ class KS(unittest.TestCase):
         self.assertAlmostEqual(stats.spearman([1, 2, 3, 4], [4, 3, 2, 1]), -1.0)
         x = np.array([1.0, -1.0] * 50)
         self.assertLess(stats.lag1(x), -0.9)
+        # within-sequence pairs only: two ramps joined end to start would add a large negative boundary pair
+        r, n = stats.lag1_within([np.arange(10.0), np.arange(10.0)])
+        self.assertEqual(n, 18)
+        self.assertGreater(r, 0.6)
+        self.assertGreater(r, stats.lag1(np.concatenate([np.arange(10.0), np.arange(10.0)])))
+        self.assertEqual(stats.lag1_within([[1.0, 2.0]])[1], 0)
         f = stats.linfit([0, 1, 2, 3], [1, 3, 5, 7])
         self.assertAlmostEqual(f['b'], 2.0)
         self.assertAlmostEqual(f['r2'], 1.0)

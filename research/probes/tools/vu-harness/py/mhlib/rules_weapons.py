@@ -526,18 +526,135 @@ def rule_w3(runs, ctx=None):
         else:
             out.append(Result('W3', 'inconclusive: no law wins 80 %% of %d curves' % counted, 'inconclusive', numbers))
     if yaw_incs:
-        x = np.concatenate([v for v in yaw_incs])
-        r = stats.lag1(x)
-        n = len(x)
-        corr = abs(r) > 2 / math.sqrt(n)
-        out.append(Result('W3-yaw', 'horizontal kicks %s (lag-1 r = %.3f, n = %d, threshold %.3f)' % (
-            'correlated' if corr else 'independent', r, n, 2 / math.sqrt(n)), 'correlated' if corr else 'none',
-            {'r': r, 'n': n}, 'new open item for D7: correlated horizontal recoil (code change)' if corr else 'no change'))
+        # one-sided: the hypothesis (Symthic's "not independent draws", the mock's hcorr) is a positive lag-1
+        # correlation. Under independent kicks r is biased BELOW 0 (per-gap demeaning, and the in-tick yaw recovery
+        # is mean-reverting), so a two-sided |r| test flagged the null (verifier pass 6: 4/15 seeds); pairs only
+        # inside each magazine curve, never across a curve boundary
+        r, n = stats.lag1_within(yaw_incs)
+        thr = 2 / math.sqrt(n) if n else float('nan')
+        corr = n >= 20 and r > thr
+        if n < 20:
+            out.append(Result('W3-yaw', 'inconclusive: %d within-curve pairs of yaw increments (< 20)' % n,
+                              'inconclusive', {'r': r, 'n': n}))
+        else:
+            out.append(Result('W3-yaw', 'horizontal kicks %s (lag-1 r = %.3f within curves, n = %d pairs, one-sided '
+                              'threshold r > %.3f%s)' % ('correlated' if corr else 'independent', r, n, thr,
+                                                        '; r < 0 is the expected null bias, not evidence'
+                                                        if r < -thr else ''),
+                              'correlated' if corr else 'none', {'r': r, 'n': n, 'threshold': thr},
+                              'new open item for D7: correlated horizontal recoil (code change)' if corr else
+                              'no change'))
     return out
 
 
 # ---------------------------------------------------------------------------------------------------------------------
 # W4 first-shot re-arm
+
+HELD_MIN = 4   # W4: held units classified 'not armed' needed before OnTriggerRelease counts as supported
+
+
+def w3_correction(a, w3, hz):
+    """In-tick recovery of a shot tick from the fitted W3 law (fitted with the trigger released)."""
+    if a > 0 and w3:
+        if w3[0] == 'linear':
+            return min(a, w3[1] / hz)
+        if w3[0] == 'exp':
+            return a * (1 - math.exp(-w3[1] / hz))
+    return 0.0
+
+
+def released_rates(gs, ks, hz):
+    """Per-tick recovery after part a single shots (trigger released): {'linear': median decrement per tick,
+    'exp': median per-tick factor}, from ticks 3 and later after the shot (skips a firing-state window right after
+    the shot) while p is above 10 % of the peak."""
+    dps, fs = [], []
+    for k in ks:
+        pk = gs.p(k)
+        if not pk or pk <= 0:
+            continue
+        for kk in range(k + 3, k + int(3 * hz)):
+            v0, v1 = gs.p(kk - 1), gs.p(kk)
+            if v0 is None or v1 is None or v0 < 0.1 * pk or v1 <= 0:
+                break
+            dps.append(v0 - v1)
+            fs.append(v1 / v0)
+    out = {}
+    if len(dps) >= 5:
+        out['linear'] = float(np.median(dps))
+        out['exp'] = float(np.median(fs))
+    return out
+
+
+def held_corrections(gs, k1, k2, off, w3, rel, hz):
+    """Candidate in-tick recoveries for shot 2 of a held pair. Which recovery the shot tick sees is a live unknown:
+    the firing-scale recovery of the tick before (the trigger is down in both: the mock's model), the released rate
+    (a firing state that ends one interval after a shot: the synthetic model), or the W3 law. The W3 law alone
+    over-corrected the mock's held pairs (fast linear recovery: every held ratio unclear, verifier pass 6)."""
+    a = gs.p(k2 - 1 + off)
+    if not a or a <= 0:
+        return [0.0]
+    cs = []
+    a2 = gs.p(k2 - 2 + off) if k2 - 2 >= k1 else None
+    law = w3[0] if w3 else None
+    if a2 is not None and a2 >= a:
+        cs.append(a * (1 - a / a2) if (law == 'exp' and a2 > 0) else min(a, a2 - a))
+    cs.extend(rel_corrections(a, law, rel))
+    if not cs and w3:
+        # the W3 law only as the last resort: fitted with the trigger released, it over-corrects a held pair
+        cs.append(w3_correction(a, w3, hz))
+    return cs or [0.0]
+
+
+def rel_corrections(a, law, rel):
+    cs = []
+    if rel and a > 0:
+        if law in (None, 'linear'):
+            cs.append(min(a, max(0.0, rel['linear'])))
+        if law in (None, 'exp'):
+            cs.append(a * (1 - min(1.0, max(0.0, rel['exp']))))
+    return cs
+
+
+def released_corrections(a, w3, rel, hz):
+    """Candidate in-tick recoveries for shot 2 of a released pair: none (the shot tick already runs at the firing
+    scale, the mock's model), the W3 law, or the released rate measured after part a shots (the synthetic model)."""
+    if not a or a <= 0:
+        return [0.0]
+    cs = [0.0]
+    if w3:
+        cs.append(w3_correction(a, w3, hz))
+    cs.extend(rel_corrections(a, w3[0] if w3 else None, rel))
+    return cs
+
+
+def held_state(gs, k1, k2, off, kick1, w3):
+    """State of a held pair just before shot 2, from its own gs rows: {'recovered': (j0, j1), 'spreadmin': (j0, j1)}.
+
+    j = 1: the state in the row of the tick before the shot tick; j = 0: that state carried one more tick with the
+    change seen between the two rows before it (the trigger is down in both ticks, so the change is the shot tick's).
+    t_rec and t_min come from part a single shots with the trigger released between shots, so they predict released
+    gaps only: with the trigger held, recovery runs at the firing scale (ShootingRecoilDecreaseScale) and the spread
+    does not decay, so a held pair is judged by its own state (verifier pass 6)."""
+    out = {}
+    r1, r2 = gs.at(k2 - 1 + off), (gs.at(k2 - 2 + off) if k2 - 2 >= k1 else None)
+    if r1 is None:
+        return out
+    a = r1['rec'][0]
+    lim = 0.05 * max(kick1, 1e-9)
+    pre = a
+    if r2 is not None:
+        a2 = r2['rec'][0]
+        if a > 0 and a2 >= a:
+            pre = a * a / a2 if (w3 and w3[0] == 'exp' and a2 > 0) else a - (a2 - a)
+    out['recovered'] = (pre <= lim, a <= lim)
+    if r1.get('da') is not None and r1.get('dmin') is not None:
+        da, dmin = r1['da'], r1['dmin']
+        pre_da = da
+        if r2 is not None and r2.get('da') is not None:
+            pre_da = da - max(0.0, r2['da'] - da)
+        out['spreadmin'] = (pre_da <= dmin + 1e-6, da <= dmin + 1e-6)
+    return out
+
 
 def rule_w4(runs, ctx=None):
     was = [r for r in runs if r.sc == 'WA']
@@ -553,6 +670,7 @@ def rule_w4(runs, ctx=None):
             if 'c' not in pw:
                 continue
             gs = None
+            rel = {}
             # t_rec and t_min from part a single shots
             if 'a' in pw:
                 shots = [s for s in run.of('shot', *pw['a']) if s.get('kind') == 'bullet']
@@ -576,6 +694,7 @@ def rule_w4(runs, ctx=None):
                         if g is not None and g['da'] <= g['dmin'] + 1e-6:
                             t_min.append((kk - k) / run.hz)
                             break
+                rel = released_rates(gs, [s['k'] + off for s in shots[:60]], run.hz)
             for m, q0, q1 in unit_windows(run, pw['c'][0], pw['c'][1], 'c'):
                 shots = sorted([s for s in run.of('shot', q0, q1) if s.get('kind') == 'bullet'], key=lambda s: s['q'])
                 if len(shots) < 2:
@@ -585,30 +704,39 @@ def rule_w4(runs, ctx=None):
                     gs = GS(run, sid, w.q0, w.q1)
                 off = post_offset(gs, [s['k'] for s in shots]) if 'a' not in pw else off
                 k1, k2 = shots[0]['k'], shots[1]['k']
+                g = (m.get('x') or {}).get('g')
+                held = g is not None and g <= 0.08
                 d = []
                 for k in (k1, k2):
                     a, b = gs.p(k - 1 + off), gs.p(k + off)
                     if a is None or b is None:
                         d = None
                         break
-                    corr = 0.0
-                    if a > 0 and w3:
-                        if w3[0] == 'linear':
-                            corr = min(a, w3[1] / run.hz)
-                        elif w3[0] == 'exp':
-                            corr = a * (1 - math.exp(-w3[1] / run.hz))
-                    d.append(b - a + corr)
-                if not d or d[0] <= 0:
+                    if held and k == k2:
+                        cs = held_corrections(gs, k1, k2, off, w3, rel, run.hz)
+                    elif k == k2:
+                        cs = released_corrections(a, w3, rel, run.hz)
+                    else:
+                        cs = [w3_correction(a, w3, run.hz)]
+                    d.append([b - a + c for c in cs])
+                if not d or d[0][0] <= 0:
                     continue
-                g = (m.get('x') or {}).get('g')
-                units.append({'gap_k': k2 - k1, 'held': g is not None and g <= 0.08, 'g': g, 'ratio': d[1] / d[0],
-                              'fsrm': fsrm, 'cfg': w.label})
+                d0 = d[0][0]
+                u = {'gap_k': k2 - k1, 'held': held, 'g': g, 'ratios': [x / d0 for x in d[1]], 'fsrm': fsrm,
+                     'cfg': w.label}
+                if held:
+                    u['st'] = held_state(gs, k1, k2, off, d0, w3)
+                units.append(u)
     if not units:
         return no_data('W4', 'no part c pairs')
     fsrm = stats.median([u['fsrm'] for u in units if u['fsrm']]) or 2.5
     for u in units:
-        r = u['ratio']
-        u['state'] = 'armed' if abs(r - 1) <= 0.15 else ('not' if abs(r * fsrm - 1) <= 0.15 else 'unclear')
+        # several candidate in-tick corrections (held pairs): a unit is classified only when the candidates that give
+        # a clear state agree, never when one says armed and another not armed
+        sts = set('armed' if abs(r - 1) <= 0.15 else ('not' if abs(r * fsrm - 1) <= 0.15 else 'unclear')
+                  for r in u['ratios'])
+        clear = sts - {'unclear'}
+        u['state'] = clear.pop() if len(clear) == 1 else 'unclear'
     hz = was[0].hz
     bins = {}
     for u in units:
@@ -620,6 +748,16 @@ def rule_w4(runs, ctx=None):
         tot = b['armed'] + b['not']
         if tot >= 2:
             obs[key] = b['armed'] / tot >= 0.5
+    # held bins: the per-law state prediction (majority of the bin's units with rows), see held_state
+    hstate = {}
+    for key in obs:
+        if not key[1]:
+            continue
+        for law in ('recovered', 'spreadmin'):
+            for j in (0, 1):
+                v = [u['st'][law][j] for u in units if (u['gap_k'], u['held']) == key and law in (u.get('st') or {})]
+                if v:
+                    hstate[(key, law, j)] = sum(v) * 2 >= len(v)
     trec = stats.median(t_rec)
     tmin = stats.median(t_min)
     numbers = {'bins': {'%d%s' % (k[0], 'h' if k[1] else ''): v for k, v in sorted(bins.items())}, 't_rec': trec,
@@ -628,56 +766,97 @@ def rule_w4(runs, ctx=None):
     eps = 1e-6 * tick
 
     def consistent(pred):
-        return all(pred(g / hz, held) == armed for (g, held), armed in obs.items())
+        return all(pred(key) == armed for key, armed in obs.items())
 
-    def fits(t):
-        """armed iff gap >= t + j, j = 0 (the shot sees this tick's state, as in the gs row) or j = 1 tick (the shot
-        is evaluated before this tick's update): both orders are a live unknown, no other slack (a one-tick slack
-        BELOW t made a 5-tick t_min accept an unarmed 4-tick gap and the verdict fell to a spurious timer)."""
+    def release_pred(key):
+        return not key[1]
+
+    def law_pred(law, t, j):
+        def pred(key, th=t + j * tick):
+            gap, held = key
+            if held and (key, law, j) in hstate:
+                return hstate[(key, law, j)]
+            return gap / hz >= th - eps
+        return pred
+
+    def fits(law, t):
+        """armed iff gap >= t + j for released gaps (a held pair: its own state, held_state), j = 0 (the shot sees
+        this tick's state, as in the gs row) or j = 1 tick (the shot is evaluated before this tick's update): both
+        orders are a live unknown, no other slack (a one-tick slack BELOW t made a 5-tick t_min accept an unarmed
+        4-tick gap and the verdict fell to a spurious timer)."""
         if t is None:
             return None
         for j in (0, 1):
-            if consistent(lambda gap, held, th=t + j * tick: gap >= th - eps):
+            if consistent(law_pred(law, t, j)):
                 return j
         return None
 
-    cands = []
-    if consistent(lambda gap, held: not held):
-        cands.append('release')
-    j_rec, j_min = fits(trec), fits(tmin)
+    def disc(law, t, j):
+        """observed bins on which the law and OnTriggerRelease predict differently: 0 = the data cannot tell them
+        apart (a fast recovery leaves every released gap armed and every held pair unrecovered under both)."""
+        pr = law_pred(law, t, j)
+        return sum(1 for key in obs if pr(key) != release_pred(key))
+
+    held_bins = sorted(key for key in obs if key[1])
+    held_not = sum(bins[key]['not'] for key in held_bins)
+    release_cons = consistent(release_pred)
+    release_sup = release_cons and bool(held_bins) and held_not >= HELD_MIN
+    j_rec, j_min = fits('recovered', trec), fits('spreadmin', tmin)
+    fitted = {}
     if j_rec is not None:
-        cands.append('recovered')
+        fitted['recovered'] = (trec, j_rec, disc('recovered', trec, j_rec))
     if j_min is not None:
-        cands.append('spreadmin')
+        fitted['spreadmin'] = (tmin, j_min, disc('spreadmin', tmin, j_min))
+    cands = (['release'] if release_sup else []) + sorted(fitted)
     # timer: the step between the largest non-armed and the smallest armed gap
     na = [g for (g, h), a in obs.items() if not a]
     ar = [g for (g, h), a in obs.items() if a]
     timer = None
     if na and ar and max(na) < min(ar):
         T = (max(na) + min(ar)) / 2.0 / hz
-        if consistent(lambda gap, held: gap >= T):
+        if consistent(lambda key: key[0] >= T * hz):
             timer = T
     numbers['consistent'] = cands
+    numbers['held_not_armed'] = held_not
+    numbers['release_consistent'] = release_cons
+    numbers['discriminating_bins'] = {k: v[2] for k, v in fitted.items()}
     numbers['timer_T'] = timer
     numbers['step_ticks'] = [max(na) if na else None, min(ar) if ar else None]
     numbers['order_j'] = {'recovered': j_rec, 'spreadmin': j_min}
-    if 'release' in cands:
-        also = [c for c in cands if c != 'release']
-        return Result('W4', 'OnTriggerRelease: held pairs not armed, every released gap armed' +
-                      (' (also consistent: %s)' % ', '.join(also) if also else ''), 'release', numbers,
-                      'Mechanics::first_shot_rearm = FirstShotRearm::OnTriggerRelease in ' + MECH)
-    if 'recovered' in cands and 'spreadmin' in cands and abs(trec - tmin) > 0.5 * tick:
+    if release_cons:
+        # OnTriggerRelease fits, so every fitted law agrees with it on every observed bin (discriminating bins 0)
+        alias = sorted(fitted)
+        if release_sup and not alias:
+            # an AfterTime step between the held and the shortest released gap is always consistent with such bins;
+            # it does not count against OnTriggerRelease (a timer is identified only by a step among released gaps)
+            return Result('W4', 'OnTriggerRelease: %d held pairs not armed (bins %s), every released gap armed' % (
+                held_not, ', '.join('%dh' % k[0] for k in held_bins)), 'release', numbers,
+                'Mechanics::first_shot_rearm = FirstShotRearm::OnTriggerRelease in ' + MECH)
+        if alias:
+            numbers['indistinguishable'] = ['release'] + alias
+            return Result('W4', 'inconclusive: OnTriggerRelease and %s predict the same for every observed gap bin '
+                          '(no released gap below %s, no held pair recovered before its second shot)%s; no code '
+                          'change, the default OnTriggerRelease stays unmeasured' % (
+                              ' and '.join(alias),
+                              ' / '.join('%s %s s' % ('t_rec' if x == 'recovered' else 't_min', fmt(fitted[x][0]))
+                                         for x in alias),
+                              '' if release_sup else '; held pairs unclassified (%d not armed < %d)' % (
+                                  held_not, HELD_MIN)),
+                          'inconclusive', numbers)
+        return Result('W4', 'inconclusive: every released gap armed but the held pairs are unclassified (%d not '
+                      'armed < %d): no evidence for OnTriggerRelease' % (held_not, HELD_MIN), 'inconclusive', numbers)
+    if 'recovered' in fitted and 'spreadmin' in fitted and abs(trec - tmin) > 0.5 * tick:
         return Result('W4', 'inconclusive: WhenRecovered (t_rec %s s) and WhenSpreadMin (t_min %s s) both fit; the '
                       'measured gaps (step %s..%s ticks) do not fall between them' % (
                           fmt(trec), fmt(tmin), numbers['step_ticks'][0], numbers['step_ticks'][1]),
                       'inconclusive', numbers)
-    if 'recovered' in cands:
+    if 'recovered' in fitted:
         return Result('W4', 'WhenRecovered: armed iff gap >= t_rec %s s' % fmt(trec) +
                       (' (shot sees the previous tick)' if j_rec else '') +
-                      (' (t_min within half a tick: WhenSpreadMin is the same here)' if 'spreadmin' in cands else ''),
+                      (' (t_min within half a tick: WhenSpreadMin is the same here)' if 'spreadmin' in fitted else ''),
                       'recovered', numbers,
                       'Mechanics::first_shot_rearm = FirstShotRearm::WhenRecovered in ' + MECH)
-    if 'spreadmin' in cands:
+    if 'spreadmin' in fitted:
         return Result('W4', 'WhenSpreadMin: armed iff gap >= t_min %s s' % fmt(tmin) +
                       (' (shot sees the previous tick)' if j_min else ''), 'spreadmin', numbers,
                       'add FirstShotRearm::WhenSpreadMin (new enum value); Mechanics::first_shot_rearm = WhenSpreadMin '
@@ -761,6 +940,14 @@ def rule_w5(runs, ctx=None):
                     srow = src_row('W5', 'M98B falloff end distance', float(v), 'm', run.id, _build(run), run.hz,
                                    len(pts), 'RMS 150: %s, 120: %s, free knot %s' % (fmt(r150), fmt(r120), fmt(best)),
                                    MECH + ' falloff data (M98B)', 'P 7.1 M98B row; P 8 C14')
+                    if v == '120':
+                        # judge the shape against the knot the data chose: against the 150 m data knot a correct
+                        # 120 m table fits neither linear nor smooth and read 'other' (verifier pass 6)
+                        knots = k120
+                        lin = fits.fit_falloff(d, dmg, bones, knots, 'linear')
+                        smo = fits.fit_falloff(d, dmg, bones, knots, 'smooth')
+                        nums.update({'rms_linear': lin['rms'], 'rms_smooth': smo['rms'], 'bone_scales': lin['scales'],
+                                     'shape_knots': list(knots)})
                     out.append(Result(item + ' end knot', 'end knot %s m (%s; free fit %s m)' % (
                         v, 'data' if v == '150' else 'community', fmt(best)), v, nums,
                         'no change (data 150 m confirmed)' if v == '150' else
@@ -782,8 +969,10 @@ def rule_w5(runs, ctx=None):
             else:
                 s0, s1, r = fits.free_knots(d, dmg, bones, knots)
                 nums.update({'free_start': s0, 'free_end': s1, 'rms_free': r})
-                out.append(Result(item, 'neither linear nor smooth; free knots %s-%s m (RMS %s)' % (
-                    fmt(s0), fmt(s1), fmt(r)), 'other', nums, 'review: a new falloff table in ' + MECH))
+                out.append(Result(item, 'other: neither linear nor smooth between the knots %s-%s m (RMS linear %s, '
+                                  'smooth %s hp); free knots %s-%s m (RMS %s)' % (
+                                      fmt(knots[2]), fmt(knots[3]), fmt(lin['rms']), fmt(smo['rms']), fmt(s0), fmt(s1),
+                                      fmt(r)), 'other', nums, 'review: a new falloff table in ' + MECH))
             # W6 report: pass-through
             for a, b, x in passes:
                 t1, t2 = x.get('t1'), x.get('t2')

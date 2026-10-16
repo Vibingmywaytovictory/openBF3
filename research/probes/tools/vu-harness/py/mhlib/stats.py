@@ -175,6 +175,24 @@ def lag1(x):
     return float((x[:-1] * x[1:]).sum() / den) if den > 0 else 0.0
 
 
+def lag1_within(segments):
+    """Pooled lag-1 autocorrelation of several sequences, pairs taken only inside each sequence (each is centred on
+    its own mean): (r, n_pairs). Pairs across a sequence boundary would join two unrelated curves."""
+    num = den = 0.0
+    n = 0
+    for x in segments:
+        x = np.asarray(x, dtype=float)
+        if len(x) < 3:
+            continue
+        x = x - x.mean()
+        num += float((x[:-1] * x[1:]).sum())
+        den += float((x * x).sum())
+        n += len(x) - 1
+    if n == 0:
+        return float('nan'), 0
+    return (num / den if den > 0 else 0.0), n
+
+
 def linfit(x, y):
     """Least squares y = a + b x: returns dict(b, a, se_b, r2, n, rms)."""
     x = np.asarray(x, dtype=float)

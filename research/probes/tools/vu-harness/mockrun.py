@@ -248,10 +248,13 @@ def c_wa_t1_exp(env):
             [('W2', '15'), ('W3', 'exp'), ('W3-yaw', 'none'), ('W4', 'release')], ['W2', 'W3', 'W4'])
 
 
+# W4 'inconclusive': with linear recovery (8 deg/s) t_rec is 3 ticks, under the shortest released gap, and the held
+# pairs are unrecovered at the firing scale, so WhenRecovered predicts what OnTriggerRelease does on every bin (pass 6;
+# the pass-5 'release' here was the rule preferring release, not evidence)
 @case()
 def c_wa_t1_linear(env):
     wa_case(env, {'recovery': 'linear', 'decay': 8.0, 'hcorr': 0.6, 'rearm': 'release'}, wa_args(env, scale='0.2'),
-            [('W2', '8'), ('W3', 'linear'), ('W3-yaw', 'correlated'), ('W4', 'release')], ['W2', 'W3', 'W4'])
+            [('W2', '8'), ('W3', 'linear'), ('W3-yaw', 'correlated'), ('W4', 'inconclusive')], ['W2', 'W3', 'W4'])
 
 
 @case()
@@ -278,6 +281,48 @@ def c_wa_w4_spreadmin15(env):
 def c_wa_w4_timer(env):
     wa_case(env, {'recovery': 'exp', 'rearm': 'timer:0.3'}, wa_args(env, 'a,c', scale='0.2'), [('W4', 'timer:0.3')],
             ['W4'])
+
+
+# W4 with linear recovery (verifier pass 6): a fast linear recovery leaves every released gap armed and every held
+# pair unrecovered under both WhenRecovered and OnTriggerRelease, so protocol c cannot tell them apart. The verdict must
+# say so (inconclusive, both named as indistinguishable, no code change), never 'release' for a recovered law. The
+# pass-5 rule read 'release' here with no held pair classified (the W3-based in-tick correction over-corrected them).
+def w4_alias_case(env, laws, seed):
+    run_wa(env, laws, wa_args(env, 'a,c', scale='0.2'), seed=seed)
+    code, runs, text = env.extract(0)
+    res = env.analyze(runs, ['W4'])
+    got = [r for r in res if r.item == 'W4']
+    r = got[0] if got else None
+    txt = r.text()[:260].replace('\n', ' | ') if r else ''
+    env.check('W4 inconclusive (release and recovered indistinguishable)', r is not None and r.variant == 'inconclusive'
+              and set((r.numbers or {}).get('indistinguishable') or ()) >= {'release', 'recovered'},
+              'got %r: %s' % (r.variant if r else None, txt))
+    env.check('held pairs classified', r is not None and (r.numbers or {}).get('held_not_armed', 0) >= 4,
+              json.dumps((r.numbers or {}).get('bins') if r else None)[:200])
+    env.check('no code change', r is not None and r.change in (None, '', 'no change'), r.change if r else '')
+
+
+@case()
+def c_wa_w4_linear_recovered(env):
+    w4_alias_case(env, {'recovery': 'linear', 'rec_rate': 30.0, 'rearm': 'recovered'}, 4)
+
+
+@case()
+def c_wa_w4_linear_release(env):
+    w4_alias_case(env, {'recovery': 'linear', 'rec_rate': 30.0, 'rearm': 'release'}, 4)
+
+
+@case()
+def c_wa_w4_linear60_recovered(env):
+    w4_alias_case(env, {'hz': 60, 'recovery': 'linear', 'decay': 15.0, 'rearm': 'recovered'}, 1)
+
+
+# W3-yaw null with linear recovery (verifier pass 6): r under independent kicks is biased below 0; the one-sided,
+# within-curve test must read 'none' (the two-sided pass-5 test read 'correlated' at r = -0.185)
+@case()
+def c_wa_w3_yaw_null_linear(env):
+    wa_case(env, {'recovery': 'linear', 'rec_rate': 18.0, 'hcorr': 0.0}, wa_args(env, 'd', scale='0.2'),
+            [('W3-yaw', 'none')], ['W3'], seed=4)
 
 
 # W1 with impact noise: the ADS configs may go inconclusive (randomRadius veto); the final verdict must never be the

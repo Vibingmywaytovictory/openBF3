@@ -63,6 +63,9 @@ python -I "$H\check_all.py" --phase0
 `phase0 gate passed`: do Phase 0 (step 8) and the attended items (step 10) only; the harness itself refuses the
 overnight queue (`[mh] ... not certified tonight`). Anything else: stop and tell the agent.
 
+The check you ran last decides what is certified: after a `--phase0` run, run the full check again before the
+overnight queue (step 5 copies the mod with that certificate; after a new check, run step 5 again).
+
 ## 2. Make sure the normal server is not running
 
 Close any VU server window you have open. Tonight do **not** start the "VU Server 30/60/120 Hz" Start-menu shortcuts:

@@ -43,10 +43,10 @@ EXPECT = {
 }
 
 
-def pipeline(tmp, rule, variant, mangle=None, seed=1):
+def pipeline(tmp, rule, variant, mangle=None, seed=1, hz=30):
     logs = os.path.join(tmp, 'logs')
     out = os.path.join(tmp, 'out')
-    path = synth.generate(rule, variant, logs, seed=seed)
+    path = synth.generate(rule, variant, logs, seed=seed, hz=hz)
     if mangle:
         mangle(path)
     buf = io.StringIO()
@@ -79,6 +79,33 @@ class SynthRules(unittest.TestCase):
                 got = variant_of(res, item)
                 self.assertEqual(got, want, '%s %s -> %s' % (rule, variant,
                                                              [r.text()[:300] for r in res if r.item == item]))
+
+    def test_w3_yaw_null_over_seeds(self):
+        """independent horizontal kicks (hcorr 0) under every recovery law never read 'correlated' (verifier pass 6:
+        the two-sided test flagged the null at seeds 6, 9, 11, 15; its r is biased below 0); hcorr 0.6 always does."""
+        runs = [(30, v, s) for v in ('none', 'linear', 'exp') for s in (1, 2, 3, 4, 5, 6, 11)]
+        runs += [(60, v, s) for v in ('none', 'linear') for s in (6, 9, 11)]
+        runs += [(hz, 'correlated', s) for hz in (30, 60) for s in (2, 3)]
+        for hz, v, seed in runs:
+            with self.subTest(hz=hz, variant=v, seed=seed):
+                d = os.path.join(self.tmp, 'y%d%s%d' % (hz, v, seed))
+                code, res, _ = pipeline(d, 'W3', v, seed=seed, hz=hz)
+                want = 'correlated' if v == 'correlated' else 'none'
+                self.assertEqual(variant_of(res, 'W3-yaw'), want,
+                                 [r.text()[:200] for r in res if r.item == 'W3-yaw'])
+
+    def test_w4_over_seeds(self):
+        """every W4 variant at other seeds and at 60 Hz; release needs classified held pairs (pass 6)."""
+        for hz in (30, 60):
+            for v in ('release', 'recovered', 'spreadmin', 'timer:0.3'):
+                for seed in (2, 3):
+                    with self.subTest(hz=hz, variant=v, seed=seed):
+                        d = os.path.join(self.tmp, 'w4%d%s%d' % (hz, v.replace(':', '_'), seed))
+                        code, res, _ = pipeline(d, 'W4', v, seed=seed, hz=hz)
+                        got = [r for r in res if r.item == 'W4']
+                        self.assertEqual(got[0].variant if got else None, v, [r.text()[:300] for r in got])
+                        if v == 'release':
+                            self.assertGreaterEqual(got[0].numbers.get('held_not_armed', 0), 4)
 
     def test_every_variant_listed(self):
         for rule, vs in synth.VARIANTS.items():

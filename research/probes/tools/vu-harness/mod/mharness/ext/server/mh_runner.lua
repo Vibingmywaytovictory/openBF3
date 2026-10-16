@@ -333,7 +333,12 @@ function M.requirements(sc, mod, args, state)
 	end
 	if need.aimcal and bots.cal == nil then miss[#miss + 1] = 'aim calibration missing (!mh p0 aim)' end
 	if need.botdmg and M.p0.damage ~= 'YES' then
-		miss[#miss + 1] = 'bot damage is not YES (P0.9: !mh p0 damage' .. (bots.cal == nil and ' after !mh p0 aim)' or ')')
+		if M.p0.damage == 'NO-arb' then
+			-- P0.9 already said NO (arbitration): repeating it does not help, the user shoots instead (RUNBOOK failures)
+			miss[#miss + 1] = 'bot damage is NO (arbitration): use mode=U (you shoot)'
+		else
+			miss[#miss + 1] = 'bot damage is not YES (P0.9: !mh p0 damage' .. (bots.cal == nil and ' after !mh p0 aim)' or ')')
+		end
 	end
 	if #miss > 0 then return false, table.concat(miss, '; ') end
 	return true
