@@ -303,12 +303,29 @@ godot.fx_demo passes when every row passes, the concrete and brick surfaces are 
 vfx2 0.769, vfx2+64 1.966. VFX2's main-thread p50 in the bench is step 0.141, prepare 0.185 and upload 0.381 ms.
 
 **Full ctest, timing rows excluded** (`tools\build.cmd dev`, which skips the TIMING regex): 90 tests, all passed;
-`core.cache_data` and `core.res` were skipped as before. The timing rows are listed in §11.
+`core.cache_data` and `core.res` were skipped as before. §11 covers the timing rows.
 
 ## 11. Quiet lock and timing runs
 
 godot.fx_demo and godot.fx_ref ran under the lock "fx2 2026-10-16T14:11", which was created when no lock existed and
 held for 2 minutes before the rows ran (14:11–14:17).
+
+The other timing rows (build.cmd's TIMING regex) ran one session at a time under fresh "fx2" locks, after the
+full ctest:
+
+* **14:18–14:28:** host.scale, host.session*, host.server, sim.nav.bake, sim.weapons.perf, tools.fx_bench,
+  logic.perf, tools.ebx_memory, tools.m1_prepare and render.scene. 8 of 11 passed.
+  - `host.server` failed with 137 ticks against a limit of 130.
+  - `host.session.unit` and `host.session` failed their clock-target check, with 4 and 6 target changes against a
+    limit of 2.
+  - Rerun alone under a new lock (14:28–14:35), all three passed. fx2 does not touch `bf3_host`. These rows are
+    known to be load-sensitive (m2a-w2.md).
+* **14:35–14:56:** godot.m9_reload, s0_selftest, inspector, collision, m1, m1_load, l1_look, ui_fonts,
+  ui_fonts_shots and ui2 passed. `godot.s3_crowd` failed its timing gates (G1b / G2) on both of its internal runs.
+  - It failed again alone (15:30–15:40). The step p50 varied 0.34–0.90 ms between runs, a sign of machine load.
+  - **A/B:** the base build, `wt/w2` at 7220da0 (this branch's base, no fx2 code), failed the same gates under an
+    "fx2" lock at 16:22–16:34 (G1a p99 2.47 ms, G2-off p50 13.7 ms, then G2-on p50 13.5 ms).
+  - So the s3_crowd failure is the machine's load at the time, not fx2. It is reported as an open issue, not fixed.
 
 **Incident.** Earlier exploratory runs did overlap another track's lock: "nt 2026-10-16T12:29:13". They were the
 first `--fx-check` demo run and the quick fx_ref runs (12:33–12:38). I did not gate those runs on the lock. Their
