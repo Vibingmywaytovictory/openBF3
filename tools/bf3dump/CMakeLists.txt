@@ -38,3 +38,6 @@ target_sources(bf3dump PRIVATE ui_commands.cpp ui_commands.h)
 # M2a weapons (docs/design/m2a-weapons.md §10): `weapon-sim` and `range`, the weapon simulation of bf3_sim on defs
 # resolved from the install (bf3_sim from M1 T1's block above).
 target_sources(bf3dump PRIVATE weapon_sim_commands.cpp weapon_sim_commands.h)
+# M2a VFX1 (docs/design/m2a-vfx1.md §7.7): `fx census | compile | simulate | check | bench | atlas | impacts`.
+target_sources(bf3dump PRIVATE fx_commands.cpp fx_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_fx)

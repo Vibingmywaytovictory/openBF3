@@ -64,6 +64,8 @@
 // M2a weapons (docs/design/m2a-weapons.md §10; weapon_sim_commands.cpp):
 //   weapon-sim <partition> | --all | --check   the weapon simulation on resolved defs (timing, drop, shots to kill)
 //   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
+// M2a VFX1:
+//   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -99,6 +101,8 @@
 #include "ui_commands.h"
 // M2a weapons: weapon-sim and range.
 #include "weapon_sim_commands.h"
+// M2a VFX1: bf3dump fx (effect compiler, simulator, atlas, impacts).
+#include "fx_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -534,6 +538,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::vehicle_usage()); // S2 vehicle
 	std::fprintf(stderr, "%s", bf3dump::swf_usage()); // UI ui1
 	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
+	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
 }
 
 } // namespace
@@ -687,6 +692,10 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "range") {
 		return bf3dump::cmd_range(ebx_ctx, rest);
+	}
+	// M2a VFX1: fx <subcommand> (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7).
+	if (cmd == "fx") {
+		return bf3dump::cmd_fx(ebx_ctx, rest);
 	}
 	usage();
 	return 2;

@@ -652,3 +652,36 @@ set_tests_properties(tools.weapon_sim PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600
 if(OPENBF3_ASAN)
     set_tests_properties(tools.weapon_sim PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
 endif()
+
+# M2a VFX1 (docs/design/m2a-vfx1.md §11): fx.contract pins the bf3_fx interface (record sizes, the 32 processor and 10
+# evaluator vocabularies, name tables, the polynomial / colour / random-number goldens). No data, no Godot.
+openbf3_test(test_fx_contract test_main.cpp fx_contract_tests.cpp test_support.h)
+target_link_libraries(test_fx_contract PRIVATE bf3_fx)
+add_test(NAME fx.contract COMMAND test_fx_contract --test-suite=fx-contract)
+set_tests_properties(fx.contract PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
+endif()
+# M2a VFX1 (docs/design/m2a-vfx1.md §11): fx.unit (compiler on synthetic EBX, blob, cache rules, simulator; G2, G8),
+# fx.fuzz (G10; also in the asan preset), fx.install (G1, G3-G7, cold vs warm, G11; 77 without an install) and
+# tools.fx_bench (G9: `bf3dump fx bench --seed 1`, median ns per admitted particle <= 50; RUN_SERIAL; 77 without an
+# install; report only under asan). Timings are wall clock on a shared machine: noisy.
+openbf3_test(test_fx test_main.cpp fx_unit_tests.cpp fx_fuzz_tests.cpp fx_install_tests.cpp fx_test_support.h test_support.h)
+target_link_libraries(test_fx PRIVATE bf3_fx)
+add_test(NAME fx.unit COMMAND test_fx --test-suite=fx-unit)
+add_test(NAME fx.fuzz COMMAND test_fx --test-suite=fx-fuzz)
+add_test(NAME fx.install COMMAND test_fx --test-suite=fx-install)
+set_tests_properties(fx.unit fx.fuzz PROPERTIES TIMEOUT 600)
+set_tests_properties(fx.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME tools.fx_bench COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/fx_bench.cmake)
+    set_tests_properties(tools.fx_bench PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
+endif()
+if(OPENBF3_ASAN)
+    set_tests_properties(fx.unit fx.fuzz fx.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+        set_tests_properties(tools.fx_bench PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
+    endif()
+endif()

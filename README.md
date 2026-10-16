@@ -80,6 +80,8 @@ S2 vehicle replay adds `s2.contract` and `sim.vehicle.unit` (no data) and `sim.v
 
 M2a weapons adds `m2a.weapons.contract` and `sim.weapons.unit` (no data), `sim.weapons`, `sim.weapons.range`, `sim.weapons.fuzz`, `sim.weapons.perf` (W11, RUN_SERIAL, noisy) and `tools.weapon_sim` (install); see "M2a weapons core".
 
+M2a VFX1 adds `fx.contract` (the bf3_fx interface, no data), `fx.unit` and `fx.fuzz` (no data; both in the asan preset too), `fx.install` (the retail gates G1, G3-G8, G11) and `tools.fx_bench` (G9, RUN_SERIAL, noisy); see "Effects (M2a VFX1)".
+
 ## Run
 
 ```bat
@@ -1878,3 +1880,34 @@ machine). Measured 2026-10-15, dev preset:
 | W9 explosives | `sim.weapons`, `sim.weapons.range` | M67 fuse 216,000,000 units; blast 112 / 81.45 / 40.73 / 0 at 1.5 / 3 / 5 / 7 m; M320 / RPG arm 0.5 s | exact; Metro stand-ins 112 / 85.52 / 44.80 / 0 |
 | W10 install unchanged | every install test and command | `install.unchanged` row | yes (256 files) |
 | W11 cost (wall clock, noisy) | `sim.weapons.perf` (RUN_SERIAL; exits 77 while `OPENBF3_QUIET_LOCK` names an existing file); `bf3dump range --perf` | 64 M16A3 shooters on full auto, 600 ticks: p99 (nearest rank) ≤ 2.0 ms per tick | p99 0.205 ms (mean 0.115, max 0.407) |
+
+## Effects (M2a VFX1)
+
+`bf3_fx` (`src/bf3_fx`, Godot-free, client only) is BF3's visual-effects core: the compiler from `EffectBlueprint` /
+`EmitterDocument` EBX into flat, digest-cached `EffectDef`s (all 32 processor and 10 evaluator types), the
+deterministic CPU particle simulator `FxWorld`, the per-level emitter atlas and the impact table from the material
+grid. The design, exit gates (census 1,101/1,101 effects and 3,410/3,410 emitters with 0 unknown types, the 1p muzzle
+and oilfire goldens, Metro / Caspian impacts, Metro's 52 atlas entries, cost per particle) and the seams for the
+renderer (VFX2), triggers (VFX3) and audio are in [docs/design/m2a-vfx1.md](docs/design/m2a-vfx1.md).
+`ctest -R fx.contract` checks the interface headers without data; `fx.unit` and `fx.fuzz` need no data; `fx.install`
+and `tools.fx_bench` read the install (Skipped without one).
+
+`bf3dump fx` (`fx census | compile | simulate | check | bench | atlas | impacts`, design §7.7) prints the compiled
+defs and runs the gates; every gate has one command (the design's §18 has the measured values):
+
+| gate | command | threshold | measured (2026-10-16, shared machine) |
+|---|---|---|---|
+| G1 census | `bf3dump fx census @all-mp` | 1,101/1,101 effects, 3,410/3,410 emitters, 0 unknown types, 32/32 + 10/10 types | met |
+| G2 polynomials | `ctest -R "fx.contract\|fx.unit"` | exact f(0), f(1), clamp then scale | met |
+| G3 1p muzzle | `bf3dump fx simulate fx_muzz_generic_rifle_1p --starts 10000 --seed 1 --seconds 1 --dt 0.0166667 --golden muzzle1p` | fractions 0.75 / 1 / 0.25 ± 0.02, flash life 0.05 s, lights exact | met |
+| G4 oilfire | `bf3dump fx simulate --emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01 --seconds 75 --dt 0.0166667 --seed 1 --golden oilfire` (and `--variable`) | 79..81 live after 15 s | 80..80, met |
+| G5 impacts | `bf3dump fx impacts MP_Subway` / `MP_007` | design §5.3 counts and cells | met |
+| G6 atlas | `bf3dump fx atlas MP_Subway` | 52 entries, 42 + 10, 0 missing | met |
+| G7 every effect | `bf3dump fx check @all-mp --seconds 10 --seed 1` | 0 failures | 0 of 1,101, met |
+| G8 determinism | `ctest -R fx.unit` and the `fx check` above | identical on 1 / 2 / 8 lanes | 0 mismatches, met |
+| G9 cost | `ctest -R tools.fx_bench` (= `bf3dump fx bench --seed 1`) | median <= 50 ns per particle per step | 39.4 ns (prototype 24.7), met; noisy |
+| G10 hostile data | `ctest --preset asan -R fx.fuzz` | no crash / hang / unbounded allocation / superlinear work (compiler, blob, simulator, impact table, atlas) | met |
+| G11 install unchanged | `ctest -R fx.install` | layout.toc, cas.cat, .sb/.toc unchanged | met |
+
+The cost gate runs RUN_SERIAL and is report-only under asan; the figure is wall clock on a shared machine, so it is
+noisy (the same build measured 39-42 ns across runs).
