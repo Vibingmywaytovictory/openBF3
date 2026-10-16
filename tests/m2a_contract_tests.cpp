@@ -87,7 +87,7 @@ namespace {
 // sv: R3 (exact_aim applied in step_soldier_weapons and hashed in weapon_table_hash) and weapon_rules.cpp's two rules.
 constexpr bool kSvRulesLanded = false;
 // nt: protocol v2 (snapshot_acked / others_acked, others_ack_bits on the wire, weapons_wire.cpp, kProtocolVersion 2).
-constexpr bool kNtLanded = false;
+constexpr bool kNtLanded = true; // M2a nt: landed (protocol v2 codecs, weapons_wire.cpp)
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2a.contract: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);
@@ -822,3 +822,7 @@ TEST_SUITE("m2a-contract") {
 		s->server.stop();
 	}
 }
+
+// M2a nt: the wire's kit and team bounds are the host's (KitSelect / Spawned refuse beyond them).
+static_assert(net::kMaxKits == host::kKitCount, "KitSelect / Spawned kit bound");
+static_assert(net::kMaxTeam == host::kKitTeams, "KitSelect / Spawned team bound");
