@@ -24,6 +24,11 @@ namespace sim = bf3::sim;
 
 namespace {
 
+// M2a nt: protocol v2 helpers, defined in the "M2a nt" block at the end of this file.
+int decode_reencode_v2(net::MessageType p_type, std::span<const uint8_t> p_bytes);
+bool same_report_v2(const net::DebugReport &p_a, const net::DebugReport &p_b);
+void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out);
+
 // splitmix64: the tests' own seeded stream (independent of the netsim's).
 struct Rng {
 	uint64_t s;
@@ -98,14 +103,15 @@ bool same_other(const net::OtherSoldier &p_a, const net::OtherSoldier &p_b) {
 	return p_a.slot == p_b.slot && p_a.generation == p_b.generation && p_a.position == p_b.position &&
 			p_a.velocity == p_b.velocity && p_a.yaw == p_b.yaw && p_a.pitch == p_b.pitch && p_a.pose == p_b.pose &&
 			p_a.target_pose == p_b.target_pose && p_a.transition == p_b.transition && p_a.mode == p_b.mode &&
-			p_a.flags == p_b.flags;
+			p_a.flags == p_b.flags && p_a == p_b; // M2a nt: and the v2 weapon fields
 }
 
 bool same_snapshot(const net::Snapshot &p_a, const net::Snapshot &p_b) {
 	if (p_a.seq != p_b.seq || p_a.server_tick != p_b.server_tick || p_a.applied_sequence != p_b.applied_sequence ||
 			p_a.applied_repeated != p_b.applied_repeated || p_a.command_buffer_ticks != p_b.command_buffer_ticks ||
 			p_a.sequence_echo != p_b.sequence_echo || p_a.echo_hold_100us != p_b.echo_hold_100us ||
-			p_a.own_events != p_b.own_events || p_a.own != p_b.own || p_a.others.size() != p_b.others.size()) {
+			p_a.own_events != p_b.own_events || p_a.own != p_b.own || p_a.others.size() != p_b.others.size() ||
+			p_a.own_weapons != p_b.own_weapons) { // M2a nt: own_weapons
 		return false;
 	}
 	for (size_t i = 0; i < p_a.others.size(); ++i) {
@@ -117,7 +123,8 @@ bool same_snapshot(const net::Snapshot &p_a, const net::Snapshot &p_b) {
 }
 
 bool same_packet(const net::CommandPacket &p_a, const net::CommandPacket &p_b) {
-	if (p_a.newest_snapshot != p_b.newest_snapshot || p_a.snapshot_ack_bits != p_b.snapshot_ack_bits || p_a.count != p_b.count) {
+	if (p_a.newest_snapshot != p_b.newest_snapshot || p_a.snapshot_ack_bits != p_b.snapshot_ack_bits || p_a.count != p_b.count ||
+			p_a.others_ack_bits != p_b.others_ack_bits) { // M2a nt: others_ack_bits
 		return false;
 	}
 	for (size_t i = 0; i < p_a.count; ++i) {
@@ -130,7 +137,7 @@ bool same_packet(const net::CommandPacket &p_a, const net::CommandPacket &p_b) {
 
 bool same_report(const net::DebugReport &p_a, const net::DebugReport &p_b) {
 	if (p_a.id != p_b.id || p_a.ok != p_b.ok || p_a.text != p_b.text || p_a.sweep.size() != p_b.sweep.size() ||
-			p_a.trace != p_b.trace) {
+			p_a.trace != p_b.trace || !same_report_v2(p_a, p_b)) { // M2a nt: targets, trace_gunplay, trace_dropped
 		return false;
 	}
 	for (size_t i = 0; i < p_a.sweep.size(); ++i) {
@@ -185,7 +192,9 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 			auto b = net::decode_match_info(net::encode_match_info(*a));
 			return b && b->protocol == a->protocol && b->level == a->level && b->mode == a->mode && b->sim_hz == a->sim_hz &&
 							b->snapshot_divisor == a->snapshot_divisor && b->slot == a->slot && b->server_tick == a->server_tick &&
-							b->phase == a->phase && b->source_digest == a->source_digest && b->motor_hash == a->motor_hash
+							b->phase == a->phase && b->source_digest == a->source_digest && b->motor_hash == a->motor_hash &&
+							b->match_seed == a->match_seed && b->weapon_hash == a->weapon_hash && b->weapon_flags == a->weapon_flags &&
+							b->kit_hash == a->kit_hash && b->max_rewind_ticks == a->max_rewind_ticks // M2a nt
 					? 1
 					: 0;
 		}
@@ -203,7 +212,10 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 				return -1;
 			}
 			auto b = net::decode_spawned(net::encode_spawned(*a));
-			return b && b->slot == a->slot && b->spawn_index == a->spawn_index && b->state == a->state ? 1 : 0;
+			return b && b->slot == a->slot && b->spawn_index == a->spawn_index && b->state == a->state && b->kit == a->kit &&
+							b->team == a->team // M2a nt
+					? 1
+					: 0;
 		}
 		case net::MessageType::Loading: {
 			auto a = net::decode_loading(p_bytes);
@@ -230,7 +242,7 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 			}
 			auto b = net::decode_debug(net::encode_debug(*a));
 			return b && b->kind == a->kind && b->id == a->id && b->position == a->position && b->yaw == a->yaw &&
-							b->index == a->index && b->ticks == a->ticks
+							b->index == a->index && b->ticks == a->ticks && b->slot == a->slot && b->pose == a->pose // M2a nt
 					? 1
 					: 0;
 		}
@@ -242,6 +254,11 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 			auto b = net::decode_debug_report(net::encode_debug_report(*a));
 			return b && same_report(*a, *b) ? 1 : 0;
 		}
+		case net::MessageType::SnapshotOthers: // M2a nt
+		case net::MessageType::ShotEvents:
+		case net::MessageType::CombatEvents:
+		case net::MessageType::KitSelect:
+			return decode_reencode_v2(*type, p_bytes);
 	}
 	return -1;
 }
@@ -296,6 +313,7 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> sample_datagrams() {
 		rep.trace.push_back(sample_state(rng, 7000 + i));
 	}
 	out.emplace_back("DebugReport", net::encode_debug_report(rep));
+	append_v2_samples(out); // M2a nt
 	return out;
 }
 
@@ -610,7 +628,7 @@ TEST_SUITE("net-proto") {
 			const uint8_t b = uint8_t(t);
 			known += net::peek_type(std::span<const uint8_t>(&b, 1)).has_value() ? 1 : 0;
 		}
-		CHECK(known == 11);
+		CHECK(known == 15); // M2a nt: + SnapshotOthers, ShotEvents, CombatEvents, KitSelect
 		const uint8_t s = 1;
 		CHECK(net::peek_type(std::span<const uint8_t>(&s, 1)) == net::MessageType::Snapshot);
 	}
@@ -664,7 +682,7 @@ TEST_SUITE("net-proto") {
 		{
 			const net::Spawned s{ 5, 101, sample_state(rng, 4242) };
 			const std::vector<uint8_t> b = net::encode_spawned(s);
-			CHECK(b.size() == 1 + 1 + 4 + 77); // the own-state block is 77 bytes (docs §7.3)
+			CHECK(b.size() == 1 + 1 + 4 + 77 + 2); // the own-state block is 77 bytes (docs §7.3); M2a nt v2: + kit, team
 			auto d = net::decode_spawned(b);
 			REQUIRE(d);
 			CHECK(d->slot == 5);
@@ -772,7 +790,7 @@ TEST_SUITE("net-proto") {
 			p.commands[i].sequence = 20000 - i;
 		}
 		const std::vector<uint8_t> same = net::encode_command_packet(p);
-		CHECK(same.size() == 26);
+		CHECK(same.size() == 33); // M2a nt v2: 26 + others_ack_bits + the view sample
 		auto ds = net::decode_command_packet(same);
 		REQUIRE(ds);
 		CHECK(same_packet(*ds, p));
@@ -781,13 +799,13 @@ TEST_SUITE("net-proto") {
 			p.commands[i].yaw = uint16_t(p.commands[i - 1].yaw + 1); // never equal to the newer one
 		}
 		const std::vector<uint8_t> differ = net::encode_command_packet(p);
-		CHECK(differ.size() == 53);
+		CHECK(differ.size() == 70); // M2a nt v2: 53 + 17
 		auto dd = net::decode_command_packet(differ);
 		REQUIRE(dd);
 		CHECK(same_packet(*dd, p));
-		// A single command: header 8 B + 17 B.
+		// A single command: header 8 B + 17 B (M2a nt v2: header 12 B + 20.25 B).
 		p.count = 1;
-		CHECK(net::encode_command_packet(p).size() == 25);
+		CHECK(net::encode_command_packet(p).size() == 33);
 		// Server-side flags never travel; buttons above the 24 wire bits are dropped.
 		p.count = 2;
 		p.commands[0].flags = sim::command_flags::kRepeated;
@@ -837,6 +855,7 @@ TEST_SUITE("net-proto") {
 			return craft(net::MessageType::CommandPacket, [&](net::BitWriter &w) {
 				w.write_bits(1, 16);
 				w.write_bits(0, 32);
+				w.write_bits(0, 32); // M2a nt v2: others_ack_bits
 				w.write_bits(p_count, 8);
 				w.write_bits(p_tick, 32);
 				w.write_bits(p_seq, 32);
@@ -846,6 +865,7 @@ TEST_SUITE("net-proto") {
 				w.write_bits(0, 16);
 				w.write_signed(p_pitch, 14);
 				w.write_bits(p_pose, 2);
+				w.write_bits(0, 16 + 2 + 8); // M2a nt v2: the view sample
 				for (int i = 1; i < p_count; ++i) {
 					w.write_bool(true);
 				}
@@ -878,10 +898,11 @@ TEST_SUITE("net-proto") {
 		const size_t header = net::encode_snapshot(s).size();
 		MESSAGE("snapshot header + own state: ", header, " bytes");
 		CHECK(header == 97); // 770 bits (docs §7.3: about 96 B)
-		s = sample_snapshot(rng, 55);
+		// M2a nt v2: 49 others (178 bits each with the weapon fields; M1: 55 of 159 bits); without the own state 53 (M1: 59).
+		s = sample_snapshot(rng, 49);
 		size_t dropped = 99;
 		const std::vector<uint8_t> b = net::encode_snapshot(s, &dropped);
-		MESSAGE("snapshot with own state and 55 others: ", b.size(), " bytes");
+		MESSAGE("snapshot with own state and 49 others: ", b.size(), " bytes");
 		CHECK(b.size() <= net::kMaxDatagramBytes);
 		CHECK(dropped == 0);
 		auto d = net::decode_snapshot(b);
@@ -890,11 +911,11 @@ TEST_SUITE("net-proto") {
 		s = sample_snapshot(rng, 127);
 		const std::vector<uint8_t> big = net::encode_snapshot(s, &dropped);
 		CHECK(big.size() <= net::kMaxDatagramBytes);
-		CHECK(dropped == 127 - 55);
+		CHECK(dropped == 127 - 49);
 		auto db = net::decode_snapshot(big);
 		REQUIRE(db);
-		REQUIRE(db->others.size() == 55);
-		for (size_t i = 0; i < 55; ++i) {
+		REQUIRE(db->others.size() == 49);
+		for (size_t i = 0; i < 49; ++i) {
 			CHECK(same_other(db->others[i], s.others[i])); // the caller's order (nearest first) is kept
 		}
 		// Without the own state there is room for one more.
@@ -902,8 +923,8 @@ TEST_SUITE("net-proto") {
 		auto dn = net::decode_snapshot(net::encode_snapshot(s, &dropped));
 		REQUIRE(dn);
 		CHECK_FALSE(dn->own.has_value());
-		CHECK(dn->others.size() == 59);
-		CHECK(dropped == 127 - 59);
+		CHECK(dn->others.size() == 53);
+		CHECK(dropped == 127 - 53);
 	}
 
 	TEST_CASE("proto: snapshot invariants and hostile snapshots") {
@@ -1069,6 +1090,8 @@ TEST_SUITE("net-proto") {
 				w.write_bits(p_slot, 8);
 				w.write_bits(1, 32);
 				write_state_raw(w, s, p_pose, p_mode);
+				w.write_bits(0, 8); // M2a nt v2: kit
+				w.write_bits(1, 8); // team
 			});
 		};
 		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f)));
@@ -1090,11 +1113,13 @@ TEST_SUITE("net-proto") {
 				w.write_bits(0, 16);
 				w.write_bits(0, 32);
 				w.write_bits(p_ticks, 32);
+				w.write_bits(0, 8); // M2a nt v2: slot
+				w.write_bits(0, 8); // pose
 			});
 		};
 		CHECK(net::decode_debug(debug(1, 10.0f, 60)));
 		CHECK_FALSE(net::decode_debug(debug(0, 10.0f, 60)));
-		CHECK_FALSE(net::decode_debug(debug(6, 10.0f, 60)));
+		CHECK_FALSE(net::decode_debug(debug(8, 10.0f, 60))); // M2a nt v2: 6 and 7 are SpawnTarget / TargetInfo
 		CHECK_FALSE(net::decode_debug(debug(1, std::numeric_limits<float>::infinity(), 60)));
 		CHECK_FALSE(net::decode_debug(debug(1, 2.0e6f, 60)));
 		CHECK_FALSE(net::decode_debug(debug(5, 0.0f, net::kMaxTraceTicks + 1)));
@@ -1111,6 +1136,9 @@ TEST_SUITE("net-proto") {
 				w.write_bits(p_phase, 8);
 				w.write_bool(false);
 				w.write_bits(0, 64);
+				for (const unsigned bits : { 64u, 64u, 8u, 64u, 8u }) { // M2a nt v2: match seed, weapon hash, flags, kit hash, rewind ticks
+					w.write_bits(0, bits);
+				}
 			});
 		};
 		CHECK(net::decode_match_info(match(60, 2, 0, 2)));
@@ -1235,7 +1263,7 @@ TEST_SUITE("net-proto") {
 		for (uint32_t i = 0; i < 4; ++i) {
 			cp.commands[i] = sample_command(rng, 300 - i, 30 - i);
 		}
-		const net::Snapshot snap = sample_snapshot(rng, 55);
+		const net::Snapshot snap = sample_snapshot(rng, 49); // M2a nt v2: 49 others fit (M1: 55)
 		const std::vector<uint8_t> cmd_bytes = net::encode_command_packet(cp);
 		const std::vector<uint8_t> snap_bytes = net::encode_snapshot(snap);
 		REQUIRE(snap_bytes.size() > 1100);
@@ -1651,5 +1679,1271 @@ TEST_SUITE("net-netsim") {
 		CHECK(double(up_to_one_spike) >= 0.95 * double(runs.size()));
 		CHECK(runs.size() > 300);
 		CHECK(runs.size() < 800);
+	}
+}
+
+// =================================================================================================================
+// M2a nt: protocol v2 (docs/design/m2a.md §7, docs/design/m2a-nt.md). Round trips of every v2 message against the
+// documented quantisation, the datagram sizes printed, the 64-player Snapshot / SnapshotOthers split, the two ack
+// conventions, the weapons wire, and hostile bytes refused (net.proto.fuzz has the seeded mutations of every type).
+
+namespace {
+
+namespace sw = bf3::sim::weapons;
+
+const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } }; // the frame the fuzz uses too (any is valid)
+
+sim::Vec3 unit_vector(Rng &r_rng) {
+	for (;;) {
+		const float x = r_rng.uniform(-1, 1), y = r_rng.uniform(-1, 1), z = r_rng.uniform(-1, 1);
+		const float n = std::sqrt(x * x + y * y + z * z);
+		if (n > 0.1f && n <= 1.0f) {
+			return { x / n, y / n, z / n };
+		}
+	}
+}
+
+double angle_between(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
+	const double d = double(p_a[0]) * p_b[0] + double(p_a[1]) * p_b[1] + double(p_a[2]) * p_b[2];
+	const double na = std::sqrt(double(p_a[0]) * p_a[0] + double(p_a[1]) * p_a[1] + double(p_a[2]) * p_a[2]);
+	const double nb = std::sqrt(double(p_b[0]) * p_b[0] + double(p_b[1]) * p_b[1] + double(p_b[2]) * p_b[2]);
+	return std::acos(std::clamp(d / (na * nb), -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+}
+
+double max_axis_error(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
+	return std::max({ std::fabs(double(p_a[0]) - p_b[0]), std::fabs(double(p_a[1]) - p_b[1]), std::fabs(double(p_a[2]) - p_b[2]) });
+}
+
+net::OtherSoldier sample_other_v2(Rng &r_rng, uint8_t p_slot, sim::Tick p_tick) {
+	net::OtherSoldier o = net::quantize_other(p_slot, sample_state(r_rng, p_tick));
+	net::set_other_weapon(o, uint16_t(r_rng.below(300)), sw::WeaponPhase(r_rng.below(8)), (r_rng.next() & 1) != 0, (r_rng.next() & 1) != 0,
+			uint32_t(r_rng.next()), uint32_t(r_rng.next()));
+	return o;
+}
+
+int32_t sample_wire_time(Rng &r_rng) {
+	if (r_rng.below(5) == 0) {
+		return net::kWeaponsWireTimeZero;
+	}
+	return int32_t(int64_t(r_rng.next() % uint64_t(2 * int64_t(net::kWeaponsWireMaxOffset) + 1)) - int64_t(net::kWeaponsWireMaxOffset));
+}
+
+// A random view within the wire's widths (every slot kind: empty with a counter, active, pending, idle).
+net::WeaponsWire sample_weapons_wire(Rng &r_rng) {
+	net::WeaponsWire w;
+	w.next_shot_index = uint32_t(r_rng.next());
+	w.active = uint8_t(r_rng.below(sw::kMaxWeaponSlots));
+	w.pending = (r_rng.next() & 1) != 0 ? uint8_t(r_rng.below(sw::kMaxWeaponSlots)) : uint8_t(0xFF);
+	if (w.pending == w.active) {
+		w.pending = 0xFF;
+	}
+	w.events = uint32_t(r_rng.below(1u << 16));
+	w.sprint_recover_until = sample_wire_time(r_rng);
+	for (uint8_t i = 0; i < sw::kMaxWeaponSlots; ++i) {
+		net::WeaponSlotWire &s = w.slots[i];
+		s.mode_counter = uint8_t(r_rng.below(4));
+		if (i != w.active && i != w.pending && r_rng.below(3) == 0) {
+			continue;
+		}
+		s.def = uint16_t(r_rng.below(300));
+		s.mode = uint8_t(r_rng.below(4));
+		s.magazine = int32_t(r_rng.below(200)) - 5;
+		s.reserve = int32_t(uint32_t(r_rng.next()));
+		net::WeaponTimersWire &t = i == w.active ? w.timers[0] : i == w.pending ? w.timers[1] : w.idle[i];
+		t.slot = i;
+		t.phase = sw::WeaponPhase(r_rng.below(8));
+		t.burst_left = uint8_t(r_rng.below(64));
+		t.flags = uint8_t(r_rng.below(128));
+		t.phase_start = sample_wire_time(r_rng);
+		t.phase_end = sample_wire_time(r_rng);
+		t.next_shot_time = sample_wire_time(r_rng);
+		t.spread_time = sample_wire_time(r_rng);
+		t.hold_start = sample_wire_time(r_rng);
+		t.spread = r_rng.uniform(0, 8);
+		if (r_rng.below(3) != 0) {
+			t.recoil = { r_rng.uniform(-3, 3), r_rng.uniform(-3, 3) };
+		}
+	}
+	return w;
+}
+
+net::RemoteShot sample_shot(Rng &r_rng, uint8_t p_slot, uint32_t p_index, sim::Tick p_tick) {
+	net::RemoteShot s;
+	s.slot = p_slot;
+	s.shot_index = p_index;
+	s.def = uint16_t(r_rng.below(net::kMaxWireDefs));
+	s.time = sw::tick_start(p_tick - 1) + int64_t(r_rng.next() % uint64_t(2 * sw::kTimeUnitsPerTick));
+	s.origin = { r_rng.uniform(-300, 300), r_rng.uniform(-50, 120), r_rng.uniform(-300, 300) };
+	s.direction = unit_vector(r_rng);
+	s.pellets = r_rng.below(4) == 0 ? uint8_t(1 + r_rng.below(uint32_t(sw::kMaxPellets))) : uint8_t(1);
+	s.tracer = r_rng.below(3) == 0;
+	if (s.tracer) {
+		s.aim = unit_vector(r_rng);
+	}
+	if (s.pellets > 1) {
+		s.pellet_cone = r_rng.uniform(0, sw::kMaxAngle);
+	}
+	if (r_rng.below(4) == 0) {
+		s.power = r_rng.uniform(0, sw::kMaxPower);
+	}
+	return s;
+}
+
+bool same_shot(const net::RemoteShot &p_a, const net::RemoteShot &p_b) {
+	return p_a.slot == p_b.slot && p_a.shot_index == p_b.shot_index && p_a.def == p_b.def && p_a.time == p_b.time && p_a.origin == p_b.origin &&
+			p_a.direction == p_b.direction && p_a.pellets == p_b.pellets && p_a.tracer == p_b.tracer && p_a.aim == p_b.aim &&
+			p_a.pellet_cone == p_b.pellet_cone && p_a.power == p_b.power;
+}
+
+net::CombatEvents sample_combat(Rng &r_rng, sim::Tick p_tick, size_t p_hits, size_t p_deaths, size_t p_detonations) {
+	net::CombatEvents m;
+	m.server_tick = p_tick;
+	const auto time = [&] { return sw::tick_start(p_tick - r_rng.below(40)) + int64_t(r_rng.next() % uint64_t(sw::kTimeUnitsPerTick)); };
+	for (size_t i = 0; i < p_hits; ++i) {
+		net::HitEvent h;
+		h.victim = uint8_t(r_rng.below(128));
+		h.shooter = uint8_t(r_rng.below(128));
+		h.shot_index = uint32_t(r_rng.next());
+		h.pellet = uint8_t(r_rng.below(64));
+		h.zone = sw::HitZone(r_rng.below(4));
+		h.damage = r_rng.uniform(0, 300);
+		h.health_after = r_rng.uniform(0, 100);
+		h.position = { r_rng.uniform(-300, 300), r_rng.uniform(-50, 120), r_rng.uniform(-300, 300) };
+		h.normal = unit_vector(r_rng);
+		h.time = time();
+		m.hits.push_back(h);
+	}
+	for (size_t i = 0; i < p_deaths; ++i) {
+		net::DeathEvent d;
+		d.victim = uint8_t(r_rng.below(128));
+		d.killer = uint8_t(r_rng.below(128));
+		d.def = r_rng.below(5) == 0 ? sw::kNoWeapon : uint16_t(r_rng.below(net::kMaxWireDefs));
+		d.zone = sw::HitZone(r_rng.below(4));
+		d.shot_index = uint32_t(r_rng.next());
+		d.headshot = (r_rng.next() & 1) != 0;
+		d.time = time();
+		m.deaths.push_back(d);
+	}
+	for (size_t i = 0; i < p_detonations; ++i) {
+		net::DetonationWire d;
+		d.shooter = uint8_t(r_rng.below(128));
+		d.shot_index = uint32_t(r_rng.next());
+		d.def = uint16_t(r_rng.below(net::kMaxWireDefs));
+		d.time = time();
+		d.position = { r_rng.uniform(-300, 300), r_rng.uniform(-50, 120), r_rng.uniform(-300, 300) };
+		d.normal = unit_vector(r_rng);
+		d.dud = (r_rng.next() & 1) != 0;
+		m.detonations.push_back(d);
+	}
+	return m;
+}
+
+// Compare two decoded messages by their encoding (the encoders are deterministic and the decoders give values the
+// encoders reproduce): the fuzz idempotence check for the v2 types.
+template <class M, class Enc>
+bool same_encoding(const M &p_a, const M &p_b, Enc &&p_encode) {
+	return p_encode(p_a) == p_encode(p_b);
+}
+
+net::DebugReport sample_gunplay_report(Rng &r_rng) {
+	net::DebugReport rep;
+	rep.id = 41;
+	rep.ok = true;
+	rep.text = "target info";
+	net::TargetInfoRow row;
+	row.slot = 9;
+	row.pose = sim::Pose::Crouch;
+	row.feet = { 1.0f, 60.0f, -3.0f };
+	row.yaw = 12345;
+	row.target.id = 9;
+	row.target.team = 2;
+	row.target.bound_center = { 1.0f, 61.0f, -3.0f };
+	row.target.bound_radius = 1.25f;
+	row.target.capsule_count = 3;
+	for (uint8_t i = 0; i < 3; ++i) {
+		row.target.capsules[i] = { { 1.0f, 60.2f + i, -3.0f }, { 1.0f, 60.5f + i, -3.0f }, 0.15f, sw::HitZone(i), i, uint8_t(10 + i), 1 };
+	}
+	rep.targets.push_back(row);
+	for (sim::Tick t = 0; t < 3; ++t) {
+		rep.trace.push_back(sample_state(r_rng, 9000 + t));
+		net::TraceGunplayTick g;
+		g.tick = 9000 + t;
+		sw::ShotEvent s;
+		s.time = sw::tick_start(g.tick) + 1234;
+		s.spawn_time = s.time + 5;
+		s.seed = r_rng.next();
+		s.player_slot = 4;
+		s.shot_index = 70 + t;
+		s.def = 3;
+		s.weapon_slot = 1;
+		s.pellets = 1;
+		s.origin = { 1, 2, 3 };
+		s.aim = { 0, 0, 1 };
+		s.direction = { 0, 0.01f, 0.99995f };
+		s.spread = 0.3f;
+		s.recoil = { 0.1f, -0.05f };
+		g.shots.push_back(s);
+		g.projectiles.push_back({ 1, 2, 30 });
+		g.projectile_shots.push_back(70 + t);
+		sw::DamageEvent d;
+		d.time = s.time + 99;
+		d.attacker_slot = 4;
+		d.target = 9;
+		d.shot_index = 70 + t;
+		d.def = 3;
+		d.amount = 25;
+		g.damage.push_back(d);
+		if (t == 2) {
+			sw::DetonationEvent det;
+			det.time = s.time;
+			det.position = { 5, 6, 7 };
+			det.normal = { 0, 1, 0 };
+			det.player_slot = 4;
+			det.def = 3;
+			g.detonations.push_back(det);
+			g.deaths.push_back({ 9, 4, 72 });
+		}
+		rep.trace_gunplay.push_back(g);
+	}
+	rep.trace_dropped = 2;
+	return rep;
+}
+
+} // namespace
+
+// Definitions of the hooks the M1 helpers above call (declared at the top of this file).
+namespace {
+
+bool same_report_v2(const net::DebugReport &p_a, const net::DebugReport &p_b) {
+	// The v2 fields only: clear the M1 ones, compare the encodings (full precision, every float as its bits).
+	net::DebugReport a, b;
+	a.targets = p_a.targets;
+	a.trace_gunplay = p_a.trace_gunplay;
+	a.trace_dropped = p_a.trace_dropped;
+	b.targets = p_b.targets;
+	b.trace_gunplay = p_b.trace_gunplay;
+	b.trace_dropped = p_b.trace_dropped;
+	return net::encode_debug_report(a) == net::encode_debug_report(b);
+}
+
+int decode_reencode_v2(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
+	switch (p_type) {
+		case net::MessageType::SnapshotOthers: {
+			auto a = net::decode_snapshot_others(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_snapshot_others(net::encode_snapshot_others(*a));
+			return b && b->seq == a->seq && b->server_tick == a->server_tick && b->others == a->others ? 1 : 0;
+		}
+		case net::MessageType::ShotEvents: {
+			auto a = net::decode_shot_events(p_bytes, kFrame);
+			if (!a) {
+				return -1;
+			}
+			const sim::Vec3 eye{};
+			size_t dropped = 0;
+			auto b = net::decode_shot_events(net::encode_shot_events(*a, kFrame, eye, &dropped), kFrame);
+			const auto enc = [&](const net::ShotEvents &p_m) { return net::encode_shot_events(p_m, kFrame, eye); };
+			return b && dropped == 0 && b->shots.size() == a->shots.size() && same_encoding(*a, *b, enc) ? 1 : 0;
+		}
+		case net::MessageType::CombatEvents: {
+			auto a = net::decode_combat_events(p_bytes, kFrame);
+			if (!a) {
+				return -1;
+			}
+			size_t clamped = 0;
+			auto b = net::decode_combat_events(net::encode_combat_events(*a, kFrame, &clamped), kFrame);
+			const auto enc = [&](const net::CombatEvents &p_m) { return net::encode_combat_events(p_m, kFrame); };
+			return b && clamped == 0 && same_encoding(*a, *b, enc) ? 1 : 0;
+		}
+		case net::MessageType::KitSelect: {
+			auto a = net::decode_kit_select(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_kit_select(net::encode_kit_select(*a));
+			return b && b->kit == a->kit && b->team == a->team ? 1 : 0;
+		}
+		default:
+			return -1;
+	}
+}
+
+void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out) {
+	Rng rng(0x2002);
+	net::Snapshot s = sample_snapshot(rng, 6);
+	s.own_weapons = sample_weapons_wire(rng);
+	for (net::OtherSoldier &o : s.others) {
+		net::set_other_weapon(o, uint16_t(rng.below(254)), sw::WeaponPhase(rng.below(8)), true, false, uint32_t(rng.next()), uint32_t(rng.next()));
+	}
+	r_out.emplace_back("Snapshot (v2 own weapons)", net::encode_snapshot(s));
+	net::SnapshotOthers so;
+	so.seq = 4242;
+	so.server_tick = 77777;
+	for (uint8_t i = 0; i < 5; ++i) {
+		so.others.push_back(sample_other_v2(rng, uint8_t(60 + i), so.server_tick));
+	}
+	r_out.emplace_back("SnapshotOthers", net::encode_snapshot_others(so));
+	net::ShotEvents se;
+	se.server_tick = 77777;
+	for (uint32_t i = 0; i < 9; ++i) {
+		se.shots.push_back(sample_shot(rng, uint8_t(1 + i % 3), 500 + i * (i == 7 ? 40 : 1), se.server_tick));
+	}
+	se.shots[0].pellets = 12;
+	se.shots[0].pellet_cone = 2.5f;
+	se.shots[1].tracer = true;
+	se.shots[1].aim = { 0, 0, 1 };
+	se.shots[2].power = 0.5f;
+	r_out.emplace_back("ShotEvents", net::encode_shot_events(se, kFrame, {}));
+	r_out.emplace_back("CombatEvents", net::encode_combat_events(sample_combat(rng, 77777, 3, 2, 1), kFrame));
+	r_out.emplace_back("KitSelect", net::encode_kit_select({ 3, 2 }));
+	net::DebugRequest dr;
+	dr.kind = net::DebugKind::SpawnTarget;
+	dr.id = 5;
+	dr.slot = 17;
+	dr.pose = sim::Pose::Prone;
+	r_out.emplace_back("Debug (SpawnTarget)", net::encode_debug(dr));
+	r_out.emplace_back("DebugReport (v2)", net::encode_debug_report(sample_gunplay_report(rng)));
+	net::MatchInfo mi;
+	mi.level = "MP_Subway";
+	mi.mode = "TeamDeathMatch0";
+	mi.match_seed = 0x1234;
+	mi.weapon_hash = 0x5678;
+	mi.weapon_flags = net::weapon_flags::kExactAim;
+	mi.kit_hash = 0x9ABC;
+	mi.max_rewind_ticks = 21;
+	r_out.emplace_back("MatchInfo (v2)", net::encode_match_info(mi));
+	net::Spawned sp{ 3, 17, sample_state(rng, 4000) };
+	sp.kit = 2;
+	sp.team = 2;
+	r_out.emplace_back("Spawned (v2)", net::encode_spawned(sp));
+}
+
+} // namespace
+
+TEST_SUITE("net-proto") {
+	TEST_CASE("proto v2: version, message types and the bounds") {
+		CHECK(net::kProtocolVersion == 2);
+		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
+			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
+		}
+		CHECK(net::Hello{}.protocol == 2);
+		CHECK(net::MatchInfo{}.protocol == 2);
+	}
+
+	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
+		Rng rng(21);
+		net::MatchInfo m;
+		m.level = "MP_Subway";
+		m.mode = "TeamDeathMatch0";
+		m.match_seed = 0xFEDCBA9876543210ull;
+		m.weapon_hash = 0x0123456789ABCDEFull;
+		m.weapon_flags = net::weapon_flags::kExactAim | net::weapon_flags::kInfiniteMagazine;
+		m.kit_hash = 0xA5A5A5A55A5A5A5Aull;
+		m.max_rewind_ticks = 21;
+		auto dm = net::decode_match_info(net::encode_match_info(m));
+		REQUIRE(dm);
+		CHECK(dm->match_seed == m.match_seed);
+		CHECK(dm->weapon_hash == m.weapon_hash);
+		CHECK(dm->weapon_flags == m.weapon_flags);
+		CHECK(dm->kit_hash == m.kit_hash);
+		CHECK(dm->max_rewind_ticks == 21);
+		for (int bit = 2; bit < 8; ++bit) {
+			m.weapon_flags = uint8_t(1u << bit);
+			CHECK_FALSE(net::decode_match_info(net::encode_match_info(m))); // unknown match options
+		}
+		net::Spawned s{ 5, 101, sample_state(rng, 4242) };
+		for (uint8_t kit = 0; kit < 6; ++kit) {
+			for (uint8_t team = 0; team < 4; ++team) {
+				s.kit = kit;
+				s.team = team;
+				const std::vector<uint8_t> b = net::encode_spawned(s);
+				CHECK(b.size() == 1 + 1 + 4 + 77 + 2);
+				auto d = net::decode_spawned(b);
+				CHECK(d.ok() == (kit < net::kMaxKits && team <= net::kMaxTeam));
+				if (d) {
+					CHECK(d->kit == kit);
+					CHECK(d->team == team);
+					CHECK(d->state == s.state);
+				}
+				const std::vector<uint8_t> k = net::encode_kit_select({ kit, team });
+				CHECK(k.size() == 3);
+				auto dk = net::decode_kit_select(k);
+				CHECK(dk.ok() == (kit < net::kMaxKits && team <= net::kMaxTeam));
+				if (dk) {
+					CHECK(dk->kit == kit);
+					CHECK(dk->team == team);
+				}
+			}
+		}
+		CHECK_FALSE(net::decode_kit_select(std::vector<uint8_t>{ uint8_t(net::MessageType::KitSelect), 1 }));
+		CHECK_FALSE(net::decode_kit_select(std::vector<uint8_t>{ uint8_t(net::MessageType::KitSelect), 1, 1, 0 }));
+		for (const net::DebugKind kind : { net::DebugKind::SpawnTarget, net::DebugKind::TargetInfo }) {
+			for (const sim::Pose pose : { sim::Pose::Stand, sim::Pose::Crouch, sim::Pose::Prone }) {
+				net::DebugRequest r;
+				r.kind = kind;
+				r.id = 3;
+				r.slot = 127;
+				r.pose = pose;
+				r.position = { 4, 5, 6 };
+				auto d = net::decode_debug(net::encode_debug(r));
+				REQUIRE(d);
+				CHECK(d->kind == kind);
+				CHECK(d->slot == 127);
+				CHECK(d->pose == pose);
+			}
+		}
+		net::DebugRequest bad;
+		bad.kind = net::DebugKind::TargetInfo;
+		bad.slot = 128;
+		CHECK_FALSE(net::decode_debug(net::encode_debug(bad)));
+		bad.slot = 0;
+		bad.pose = sim::Pose(3);
+		CHECK_FALSE(net::decode_debug(net::encode_debug(bad)));
+		bad.pose = sim::Pose::Stand;
+		bad.kind = net::DebugKind(8);
+		CHECK_FALSE(net::decode_debug(net::encode_debug(bad)));
+	}
+
+	TEST_CASE("proto v2: a DebugReport carries TargetInfo rows and the gunplay trace; the per-tick bounds cut and count") {
+		Rng rng(22);
+		net::DebugReport rep = sample_gunplay_report(rng);
+		const std::vector<uint8_t> b = net::encode_debug_report(rep);
+		MESSAGE("DebugReport with 1 target row and 3 gunplay ticks: ", b.size(), " bytes");
+		auto d = net::decode_debug_report(b);
+		REQUIRE(d);
+		CHECK(same_report(*d, rep));
+		REQUIRE(d->targets.size() == 1);
+		CHECK(d->targets[0].target.capsule_count == 3);
+		CHECK(d->targets[0].target.capsules[2].property == 12);
+		REQUIRE(d->trace_gunplay.size() == 3);
+		CHECK(d->trace_gunplay[2].deaths.size() == 1);
+		CHECK(d->trace_gunplay[2].detonations.size() == 1);
+		CHECK(d->trace_gunplay[1].shots[0].shot_index == 71);
+		CHECK(d->trace_gunplay[1].shots[0].seed == rep.trace_gunplay[1].shots[0].seed);
+		CHECK(d->trace_dropped == 2);
+		// Over the per-tick bounds: cut and counted.
+		net::TraceGunplayTick &g = rep.trace_gunplay[0];
+		const sw::ShotEvent first_shot = g.shots[0];
+		while (g.shots.size() < net::kMaxTraceShots + 3) {
+			g.shots.push_back(first_shot);
+		}
+		while (g.deaths.size() < net::kMaxTraceDeaths + 1) {
+			g.deaths.push_back({ 1, 2, 3 });
+		}
+		auto cut = net::decode_debug_report(net::encode_debug_report(rep));
+		REQUIRE(cut);
+		CHECK(cut->trace_gunplay[0].shots.size() == net::kMaxTraceShots);
+		CHECK(cut->trace_gunplay[0].deaths.size() == net::kMaxTraceDeaths);
+		CHECK(cut->trace_dropped == 2 + 3 + 1);
+		// A full report (1,200 ticks with every per-tick maximum) stays under kMaxDebugReportBytes.
+		net::DebugReport full;
+		const net::TraceGunplayTick &one = rep.trace_gunplay[2];
+		net::TraceGunplayTick max_tick;
+		max_tick.tick = one.tick;
+		max_tick.shots.assign(net::kMaxTraceShots, one.shots[0]);
+		max_tick.projectiles.assign(net::kMaxTraceProjectiles, one.projectiles[0]);
+		max_tick.projectile_shots.assign(net::kMaxTraceProjectiles, 1);
+		max_tick.damage.assign(net::kMaxTraceDamage, one.damage[0]);
+		max_tick.detonations.assign(net::kMaxTraceDetonations, one.detonations[0]);
+		max_tick.deaths.assign(net::kMaxTraceDeaths, one.deaths[0]);
+		for (uint32_t i = 0; i < net::kMaxTraceTicks; ++i) {
+			full.trace.push_back(sample_state(rng, 100 + i));
+			full.trace_gunplay.push_back(max_tick);
+		}
+		for (uint32_t i = 0; i < net::kMaxTargetRows; ++i) {
+			full.targets.push_back(rep.targets[0]);
+		}
+		const std::vector<uint8_t> fb = net::encode_debug_report(full);
+		MESSAGE("DebugReport with every bound full: ", fb.size(), " bytes (cap ", net::kMaxDebugReportBytes, ")");
+		REQUIRE_FALSE(fb.empty());
+		CHECK(fb.size() <= net::kMaxDebugReportBytes);
+		auto df = net::decode_debug_report(fb);
+		REQUIRE(df);
+		CHECK(df->trace_gunplay.size() == net::kMaxTraceTicks);
+		CHECK(df->targets.size() == net::kMaxTargetRows);
+		// Hostile: a target row with a bad slot, a gunplay count beyond the bytes.
+		net::DebugReport bad_slot = rep;
+		bad_slot.targets[0].slot = 200;
+		CHECK_FALSE(net::decode_debug_report(net::encode_debug_report(bad_slot)));
+		const auto huge = craft(net::MessageType::DebugReport, [&](net::BitWriter &w) {
+			w.write_bits(1, 32);
+			w.write_bool(true);
+			w.write_varint(0); // text
+			w.write_varint(0); // sweep
+			w.write_varint(0); // trace
+			w.write_varint(0); // targets
+			w.write_varint(net::kMaxTraceTicks); // gunplay ticks: the bytes are not there
+		});
+		CHECK_FALSE(net::decode_debug_report(huge));
+	}
+
+	TEST_CASE("proto v2: the command packet carries the view sample and others_ack_bits (33 / 70 bytes)") {
+		Rng rng(23);
+		net::CommandPacket p;
+		p.newest_snapshot = 65535;
+		p.snapshot_ack_bits = 0x80000001u;
+		p.others_ack_bits = 0xDEADBEEFu;
+		p.count = 4;
+		for (uint32_t i = 0; i < 4; ++i) {
+			p.commands[i] = sample_command(rng, 1000 - i, 2000 - i);
+			p.commands[i].view_back_q8 = uint16_t(rng.next());
+			p.commands[i].view_quality = uint8_t(rng.below(4));
+			p.commands[i].view_seq8 = uint8_t(rng.next());
+		}
+		const std::vector<uint8_t> differ = net::encode_command_packet(p);
+		MESSAGE("v2 command packet, 4 different commands: ", differ.size(), " bytes");
+		CHECK(differ.size() == 70);
+		auto d = net::decode_command_packet(differ);
+		REQUIRE(d);
+		CHECK(same_packet(*d, p));
+		CHECK(d->others_ack_bits == 0xDEADBEEFu);
+		CHECK(d->commands[3].view_back_q8 == p.commands[3].view_back_q8);
+		for (uint32_t i = 1; i < 4; ++i) {
+			const sim::Command c = p.commands[0];
+			p.commands[i] = c;
+			p.commands[i].tick = c.tick - i;
+			p.commands[i].sequence = c.sequence - i;
+		}
+		const std::vector<uint8_t> same = net::encode_command_packet(p);
+		MESSAGE("v2 command packet, 4 equal commands: ", same.size(), " bytes");
+		CHECK(same.size() == 33);
+		// A view sample that differs breaks "same as the newer".
+		p.commands[2].view_seq8 = uint8_t(p.commands[2].view_seq8 + 1);
+		CHECK(net::encode_command_packet(p).size() == 58); // [2] and [3] (compared with [2]) in full: 96 + 162 + 1 + 2 x 99 bits
+		auto d2 = net::decode_command_packet(net::encode_command_packet(p));
+		REQUIRE(d2);
+		CHECK(same_packet(*d2, p));
+		p.count = 1;
+		CHECK(net::encode_command_packet(p).size() == 33);
+	}
+
+	TEST_CASE("proto v2: the ack predicates follow §7.2 (snapshot bit i = newest - 1 - i, others bit i = newest - i)") {
+		net::CommandPacket p;
+		p.newest_snapshot = 100;
+		p.snapshot_ack_bits = 0b101u; // 99 and 97
+		p.others_ack_bits = 0b110u; // 99 and 98 (not 100's own)
+		CHECK(net::snapshot_acked(p, 100));
+		CHECK(net::snapshot_acked(p, 99));
+		CHECK_FALSE(net::snapshot_acked(p, 98));
+		CHECK(net::snapshot_acked(p, 97));
+		CHECK_FALSE(net::others_acked(p, 100));
+		CHECK(net::others_acked(p, 99));
+		CHECK(net::others_acked(p, 98));
+		CHECK_FALSE(net::others_acked(p, 97));
+		CHECK_FALSE(net::snapshot_acked(p, 101)); // newer than newest
+		CHECK_FALSE(net::others_acked(p, 101));
+		p.snapshot_ack_bits = ~0u;
+		p.others_ack_bits = ~0u;
+		CHECK(net::snapshot_acked(p, uint16_t(100 - 32))); // bit 31
+		CHECK_FALSE(net::snapshot_acked(p, uint16_t(100 - 33)));
+		CHECK(net::others_acked(p, uint16_t(100 - 31))); // bit 31
+		CHECK_FALSE(net::others_acked(p, uint16_t(100 - 32)));
+		// Across the 2^16 wrap.
+		p.newest_snapshot = 1;
+		p.snapshot_ack_bits = 0b11u; // 0 and 65535
+		p.others_ack_bits = 0b1001u; // 1 and 65534
+		CHECK(net::snapshot_acked(p, 0));
+		CHECK(net::snapshot_acked(p, 65535));
+		CHECK_FALSE(net::snapshot_acked(p, 65534));
+		CHECK(net::others_acked(p, 1));
+		CHECK_FALSE(net::others_acked(p, 0));
+		CHECK(net::others_acked(p, 65534));
+		CHECK_FALSE(net::others_acked(p, 2));
+		// Through the codec.
+		p.count = 1;
+		p.commands[0].tick = 9;
+		auto d = net::decode_command_packet(net::encode_command_packet(p));
+		REQUIRE(d);
+		for (uint32_t s = 0; s < 65536; s += 1) {
+			REQUIRE(net::snapshot_acked(*d, uint16_t(s)) == net::snapshot_acked(p, uint16_t(s)));
+			REQUIRE(net::others_acked(*d, uint16_t(s)) == net::others_acked(p, uint16_t(s)));
+		}
+	}
+
+	TEST_CASE("proto v2: snapshots carry the own weapons and the others' weapon fields; 64 and 128 players split into Snapshot + SnapshotOthers") {
+		Rng rng(24);
+		net::Snapshot s = sample_snapshot(rng, 0);
+		size_t dropped = 0;
+		const size_t header = net::encode_snapshot(s).size();
+		s.own_weapons = sample_weapons_wire(rng);
+		const size_t with_weapons = net::encode_snapshot(s).size();
+		MESSAGE("snapshot header + own state: ", header, " bytes; + a random 8-slot weapons wire: ", with_weapons, " bytes");
+		CHECK(header == 97); // 770 bits + the own-weapons present bit
+		// A typical kit: 4 slots, the active one mid-fire.
+		net::WeaponsWire kit;
+		kit.next_shot_index = 1234;
+		kit.active = 0;
+		for (uint8_t i : { uint8_t(0), uint8_t(1), uint8_t(6), uint8_t(7) }) {
+			kit.slots[i].def = uint16_t(10 + i);
+			kit.slots[i].magazine = 30;
+			kit.slots[i].reserve = 120;
+			net::WeaponTimersWire &t = i == 0 ? kit.timers[0] : kit.idle[i];
+			t.slot = i;
+			t.phase = i == 0 ? sw::WeaponPhase::Ready : sw::WeaponPhase::None;
+			t.phase_start = i == 0 ? -250000 : net::kWeaponsWireTimeZero;
+			t.phase_end = net::kWeaponsWireTimeZero;
+			t.next_shot_time = i == 0 ? 400000 : net::kWeaponsWireTimeZero;
+			t.spread_time = i == 0 ? -1000 : net::kWeaponsWireTimeZero;
+			t.hold_start = net::kWeaponsWireTimeZero;
+			t.spread = i == 0 ? 1.5f : 0.0f;
+			if (i == 0) {
+				t.recoil = { 0.4f, -0.1f };
+			}
+		}
+		kit.sprint_recover_until = net::kWeaponsWireTimeZero;
+		s.own_weapons = kit;
+		const size_t with_kit = net::encode_snapshot(s).size();
+		MESSAGE("snapshot header + own state + a 4-slot kit: ", with_kit, " bytes");
+		auto dk = net::decode_snapshot(net::encode_snapshot(s));
+		REQUIRE(dk);
+		CHECK(dk->own_weapons == kit);
+		// Others with weapon fields, own weapons with: how many fit, and the 64 / 128 player splits.
+		for (const size_t players : { size_t(64), size_t(128) }) {
+			net::Snapshot full = s;
+			std::vector<net::OtherSoldier> all;
+			for (size_t i = 1; i < players; ++i) {
+				all.push_back(sample_other_v2(rng, uint8_t(i), full.server_tick));
+			}
+			full.others = all;
+			const std::vector<uint8_t> main = net::encode_snapshot(full, &dropped);
+			auto dm = net::decode_snapshot(main);
+			REQUIRE(dm);
+			const size_t in_main = dm->others.size();
+			CHECK(in_main + dropped == all.size());
+			net::SnapshotOthers rest;
+			rest.seq = full.seq;
+			rest.server_tick = full.server_tick;
+			rest.others.assign(all.begin() + std::ptrdiff_t(in_main), all.end());
+			size_t rest_dropped = 0;
+			const std::vector<uint8_t> extra = net::encode_snapshot_others(rest, &rest_dropped);
+			auto de = net::decode_snapshot_others(extra);
+			REQUIRE(de);
+			MESSAGE(players, " players: Snapshot ", main.size(), " B with ", in_main, " others; SnapshotOthers ", extra.size(), " B with ", de->others.size(),
+					" others; dropped ", rest_dropped);
+			CHECK(main.size() <= net::kMaxDatagramBytes);
+			CHECK(extra.size() <= net::kMaxDatagramBytes);
+			// 64 players fit the pair; 128 do not (46 + 53 of 127 with a kit): the rest is counted, for M3's priority.
+			CHECK(rest_dropped == (players == 64 ? 0u : players - 1 - in_main - de->others.size()));
+			CHECK(in_main + de->others.size() + rest_dropped == players - 1);
+			for (size_t i = 0; i < in_main; ++i) {
+				CHECK(dm->others[i] == all[i]);
+			}
+			for (size_t i = 0; i < de->others.size(); ++i) {
+				CHECK(de->others[i] == all[in_main + i]);
+			}
+			CHECK(de->seq == full.seq);
+			CHECK(de->server_tick == full.server_tick);
+		}
+		// Without the own weapons (and without the own state) more others fit; counts printed.
+		net::Snapshot bare = sample_snapshot(rng, 0);
+		for (size_t i = 1; i < 128; ++i) {
+			bare.others.push_back(sample_other_v2(rng, uint8_t(i), bare.server_tick));
+		}
+		const size_t without = net::decode_snapshot(net::encode_snapshot(bare))->others.size();
+		bare.own.reset();
+		const size_t no_own = net::decode_snapshot(net::encode_snapshot(bare))->others.size();
+		net::SnapshotOthers many;
+		many.others = bare.others;
+		const size_t so_cap = net::decode_snapshot_others(net::encode_snapshot_others(many, &dropped))->others.size();
+		MESSAGE("others per datagram: Snapshot with own state ", without, ", without own state ", no_own, ", SnapshotOthers ", so_cap);
+		CHECK(without == 49);
+		CHECK(so_cap == 53);
+		CHECK(dropped == 127 - 53);
+	}
+
+	TEST_CASE("proto v2: set_other_weapon masks to the wire widths; others' weapon fields round trip") {
+		net::OtherSoldier o;
+		net::set_other_weapon(o, 300, sw::WeaponPhase::Reloading, true, true, 7, 17);
+		CHECK(o.weapon == 0xFF);
+		CHECK(o.weapon_phase == uint8_t(sw::WeaponPhase::Reloading));
+		CHECK(o.reload_seq == 3);
+		CHECK(o.burst_seq == 1);
+		net::set_other_weapon(o, 254, sw::WeaponPhase::Releasing, false, true, 4, 16);
+		CHECK(o.weapon == 254);
+		CHECK(o.reload_seq == 0);
+		CHECK(o.burst_seq == 0);
+		CHECK_FALSE(o.firing);
+		CHECK(o.ads);
+		net::SnapshotOthers m;
+		m.seq = 1;
+		m.server_tick = 5;
+		m.others.push_back(o);
+		auto d = net::decode_snapshot_others(net::encode_snapshot_others(m));
+		REQUIRE(d);
+		CHECK(d->others[0] == o);
+		// Hostile: a slot named twice, a count above 127, bytes beyond one datagram.
+		m.others.push_back(o);
+		CHECK_FALSE(net::decode_snapshot_others(net::encode_snapshot_others(m)));
+		const auto count_128 = craft(net::MessageType::SnapshotOthers, [&](net::BitWriter &w) {
+			w.write_bits(1, 16);
+			w.write_bits(5, 32);
+			w.write_bits(128, 8);
+		});
+		CHECK_FALSE(net::decode_snapshot_others(count_128));
+		std::vector<uint8_t> big = net::encode_snapshot_others({ 1, 5, {} });
+		big.resize(net::kMaxDatagramBytes + 1, 0);
+		CHECK_FALSE(net::decode_snapshot_others(big));
+	}
+
+	TEST_CASE("proto v2: ShotEvents round trip at the documented precision, nearest shooters first, the rest dropped and counted") {
+		Rng rng(25);
+		const sim::Tick tick = 50000;
+		net::ShotEvents m;
+		m.server_tick = tick;
+		std::vector<uint32_t> next(16, 0);
+		for (size_t i = 0; i < 48; ++i) {
+			const uint8_t slot = uint8_t(1 + rng.below(12));
+			next[slot] += (i % 11 == 0) ? 1000 : 1 + rng.below(3); // some deltas beyond 15 (the escape)
+			m.shots.push_back(sample_shot(rng, slot, next[slot], tick));
+		}
+		m.shots.push_back(sample_shot(rng, 13, 0xFFFFFFFFu, tick)); // index wrap from here
+		m.shots.push_back(sample_shot(rng, 13, 4, tick));
+		const sim::Vec3 eye{ 10.0f, 60.0f, -20.0f };
+		size_t dropped = 99;
+		const std::vector<uint8_t> b = net::encode_shot_events(m, kFrame, eye, &dropped);
+		CHECK(dropped == 0);
+		CHECK(b.size() <= net::kMaxDatagramBytes);
+		auto d = net::decode_shot_events(b, kFrame);
+		REQUIRE(d);
+		REQUIRE(d->shots.size() == m.shots.size());
+		MESSAGE("ShotEvents with ", m.shots.size(), " mixed shots: ", b.size(), " bytes");
+		double t_err = 0, o_err = 0, dir_err = 0, aim_err = 0, cone_err = 0, power_err = 0;
+		size_t matched = 0;
+		for (const net::RemoteShot &orig : m.shots) {
+			const std::optional<net::RemoteShot> q = net::quantize_remote_shot(orig, kFrame, tick);
+			REQUIRE(q.has_value());
+			for (const net::RemoteShot &got : d->shots) {
+				if (got.slot == orig.slot && got.shot_index == orig.shot_index) {
+					++matched;
+					CHECK(same_shot(got, *q));
+					t_err = std::max(t_err, std::fabs(double(got.time - orig.time)));
+					o_err = std::max(o_err, max_axis_error(got.origin, orig.origin));
+					dir_err = std::max(dir_err, angle_between(got.direction, orig.direction));
+					if (orig.tracer) {
+						aim_err = std::max(aim_err, angle_between(got.aim, orig.aim));
+					}
+					if (orig.pellets > 1) {
+						cone_err = std::max(cone_err, std::fabs(double(got.pellet_cone) - orig.pellet_cone));
+					}
+					power_err = std::max(power_err, std::fabs(double(got.power) - orig.power));
+					CHECK(got.pellets == orig.pellets);
+					CHECK(got.def == orig.def);
+					CHECK(got.tracer == orig.tracer);
+				}
+			}
+		}
+		CHECK(matched == m.shots.size());
+		MESSAGE("shot precision: time ", t_err, " units, origin ", o_err, " m, direction ", dir_err, " deg, aim ", aim_err, " deg, cone ", cone_err,
+				" deg, power ", power_err);
+		CHECK(t_err <= 8.0); // 1/131,072 tick
+		CHECK(o_err <= 1.0 / 512.0 + 1e-4);
+		CHECK(dir_err < 0.01);
+		CHECK(aim_err < 0.1);
+		CHECK(cone_err <= 1.0 / 128.0 + 1e-6);
+		CHECK(power_err <= double(sw::kMaxPower) / 4095.0 / 2.0 + 1e-5);
+		// Shooters nearest first (a shooter's nearest shot), each shooter's shots in the caller's order.
+		std::vector<double> nearest(128, 1e30);
+		for (const net::RemoteShot &s : m.shots) {
+			const double dx = s.origin[0] - eye[0], dy = s.origin[1] - eye[1], dz = s.origin[2] - eye[2];
+			nearest[s.slot] = std::min(nearest[s.slot], dx * dx + dy * dy + dz * dz);
+		}
+		for (size_t i = 1; i < d->shots.size(); ++i) {
+			CHECK(nearest[d->shots[i - 1].slot] <= nearest[d->shots[i].slot]);
+		}
+		// Extremes: 64 pellets, the full cone, power 0 and kMaxPower, a pellet cone beyond 90 clamps.
+		net::ShotEvents ex;
+		ex.server_tick = tick;
+		ex.shots.push_back(sample_shot(rng, 1, 1, tick));
+		ex.shots[0].pellets = 64;
+		ex.shots[0].pellet_cone = sw::kMaxAngle;
+		ex.shots[0].power = 0;
+		ex.shots.push_back(sample_shot(rng, 1, 2, tick));
+		ex.shots[1].power = sw::kMaxPower;
+		ex.shots[1].pellets = 2;
+		ex.shots[1].pellet_cone = 200.0f;
+		auto dex = net::decode_shot_events(net::encode_shot_events(ex, kFrame, eye), kFrame);
+		REQUIRE(dex);
+		CHECK(dex->shots[0].pellets == 64);
+		CHECK(dex->shots[0].pellet_cone == sw::kMaxAngle);
+		CHECK(dex->shots[0].power == 0.0f);
+		CHECK(dex->shots[1].power == sw::kMaxPower);
+		CHECK(dex->shots[1].pellet_cone == sw::kMaxAngle);
+	}
+
+	TEST_CASE("proto v2: ShotEvents fill one datagram, and drop shots that cannot travel") {
+		Rng rng(26);
+		const sim::Tick tick = 777;
+		const sim::Vec3 eye{};
+		// One shooter, untraced single shots: the per-datagram count.
+		for (const bool tracer : { false, true }) {
+			net::ShotEvents m;
+			m.server_tick = tick;
+			for (uint32_t i = 0; i < 200; ++i) {
+				net::RemoteShot s = sample_shot(rng, 5, 100 + i, tick);
+				s.tracer = tracer;
+				s.aim = s.direction;
+				s.pellets = 1;
+				s.pellet_cone = 0;
+				s.power = 1;
+				m.shots.push_back(s);
+			}
+			size_t dropped = 0;
+			const std::vector<uint8_t> b = net::encode_shot_events(m, kFrame, eye, &dropped);
+			auto d = net::decode_shot_events(b, kFrame);
+			REQUIRE(d);
+			MESSAGE(std::string(tracer ? "traced" : "untraced"), " single shots per datagram: ", d->shots.size(), " (", b.size(), " B), dropped ", dropped);
+			CHECK(b.size() <= net::kMaxDatagramBytes);
+			CHECK(d->shots.size() + dropped == 200);
+			CHECK(d->shots.size() == (tracer ? 58u : 69u)); // 48 + 166 + 138 (n - 1) / 48 + 190 + 162 (n - 1) <= 9,600 bits
+		}
+		// Many shooters beyond one datagram: the farthest shooters' shots go.
+		net::ShotEvents m;
+		m.server_tick = tick;
+		for (uint32_t i = 0; i < 300; ++i) {
+			m.shots.push_back(sample_shot(rng, uint8_t(rng.below(128)), i, tick));
+		}
+		size_t dropped = 0;
+		auto d = net::decode_shot_events(net::encode_shot_events(m, kFrame, eye, &dropped), kFrame);
+		REQUIRE(d);
+		CHECK(d->shots.size() + dropped == 300);
+		CHECK(d->shots.size() <= net::kMaxShotsPerDatagram);
+		std::vector<double> nearest(128, 1e30);
+		for (const net::RemoteShot &s : m.shots) {
+			nearest[s.slot] = std::min(nearest[s.slot], double(s.origin[0]) * s.origin[0] + double(s.origin[1]) * s.origin[1] + double(s.origin[2]) * s.origin[2]);
+		}
+		double kept_max = 0;
+		for (const net::RemoteShot &s : d->shots) {
+			kept_max = std::max(kept_max, nearest[s.slot]);
+		}
+		for (const net::RemoteShot &s : m.shots) {
+			bool kept = false;
+			for (const net::RemoteShot &k : d->shots) {
+				kept = kept || (k.slot == s.slot && k.shot_index == s.shot_index);
+			}
+			if (!kept) {
+				CHECK(nearest[s.slot] >= kept_max);
+			}
+		}
+		// Shots that cannot travel: dropped and counted, the rest kept.
+		net::ShotEvents bad;
+		bad.server_tick = tick;
+		bad.shots.push_back(sample_shot(rng, 1, 1, tick)); // fine
+		net::RemoteShot s = sample_shot(rng, 2, 1, tick);
+		s.slot = 128;
+		bad.shots.push_back(s);
+		s = sample_shot(rng, 3, 1, tick);
+		s.def = 255;
+		bad.shots.push_back(s);
+		s = sample_shot(rng, 4, 1, tick);
+		s.time = sw::tick_start(tick - net::kMaxShotTicksBack) - 1; // 8 ticks back
+		bad.shots.push_back(s);
+		s = sample_shot(rng, 5, 1, tick);
+		s.time = sw::tick_end(tick); // after the message's tick
+		bad.shots.push_back(s);
+		s = sample_shot(rng, 6, 1, tick);
+		s.origin[0] = kFrame.origin_min[0] - 1.0f;
+		bad.shots.push_back(s);
+		s = sample_shot(rng, 7, 1, tick);
+		s.origin[2] = kFrame.origin_min[2] + 4096.5f;
+		bad.shots.push_back(s);
+		s = sample_shot(rng, 8, 1, tick);
+		s.pellets = 0;
+		bad.shots.push_back(s);
+		bad.shots.push_back(bad.shots[0]); // the same shot twice
+		s = sample_shot(rng, 9, 1, tick);
+		s.time = sw::tick_start(tick - net::kMaxShotTicksBack); // exactly 7 ticks back: kept
+		bad.shots.push_back(s);
+		auto db = net::decode_shot_events(net::encode_shot_events(bad, kFrame, eye, &dropped), kFrame);
+		REQUIRE(db);
+		CHECK(dropped == 8);
+		CHECK(db->shots.size() == 2);
+		for (const net::RemoteShot &x : bad.shots) {
+			const bool travels = net::quantize_remote_shot(x, kFrame, tick).has_value();
+			CHECK(travels == (x.slot == 1 || x.slot == 9));
+		}
+		net::ShotEvents zero;
+		zero.server_tick = 0;
+		zero.shots.push_back(sample_shot(rng, 1, 1, 1));
+		auto dz = net::decode_shot_events(net::encode_shot_events(zero, kFrame, eye, &dropped), kFrame);
+		REQUIRE(dz);
+		CHECK(dz->shots.empty());
+		CHECK(dropped == 1);
+		// remote_shot_of keeps every field a remote client needs.
+		sw::ShotEvent ev;
+		ev.time = 12345;
+		ev.player_slot = 7;
+		ev.shot_index = 99;
+		ev.def = 3;
+		ev.pellets = 9;
+		ev.origin = { 1, 2, 3 };
+		ev.aim = { 0, 1, 0 };
+		ev.direction = { 0, 0, 1 };
+		ev.pellet_cone = 1.5f;
+		ev.tracer = true;
+		ev.power = 0.25f;
+		const net::RemoteShot r = net::remote_shot_of(ev);
+		CHECK(r.slot == 7);
+		CHECK(r.shot_index == 99);
+		CHECK(r.def == 3);
+		CHECK(r.time == 12345);
+		CHECK(r.pellets == 9);
+		CHECK(r.origin == ev.origin);
+		CHECK(r.aim == ev.aim);
+		CHECK(r.direction == ev.direction);
+		CHECK(r.pellet_cone == 1.5f);
+		CHECK(r.tracer);
+		CHECK(r.power == 0.25f);
+	}
+
+	TEST_CASE("proto v2: hostile ShotEvents are refused") {
+		const sim::Tick tick = 100;
+		// One hand-written shot: slot, index field, def, back.
+		const auto shot = [](net::BitWriter &w, uint8_t p_slot, bool p_first, uint32_t p_index_or_delta, uint32_t p_def, uint32_t p_back) {
+			w.write_bits(p_slot, 7);
+			if (p_first) {
+				w.write_bits(p_index_or_delta, 32);
+			} else {
+				w.write_bits(p_index_or_delta, 4);
+				if (p_index_or_delta == 0) {
+					w.write_bits(5, 32); // escape: the same index as the first shot below
+				}
+			}
+			w.write_bits(p_def, 8);
+			w.write_bits(p_back, 3);
+			w.write_bits(0, 16);
+			for (int i = 0; i < 3; ++i) {
+				w.write_bits(1000, 20);
+			}
+			w.write_bits(0x8000, 16);
+			w.write_bits(0x8000, 16);
+			w.write_bits(0, 6);
+			w.write_bool(false);
+			w.write_bool(false);
+		};
+		const auto message = [&](sim::Tick p_tick, auto &&p_body) {
+			return craft(net::MessageType::ShotEvents, [&](net::BitWriter &w) {
+				w.write_bits(p_tick, 32);
+				p_body(w);
+			});
+		};
+		CHECK(net::decode_shot_events(message(tick, [&](net::BitWriter &w) {
+			w.write_bits(2, 8);
+			shot(w, 1, true, 5, 3, 0);
+			shot(w, 1, false, 1, 3, 1);
+		}), kFrame));
+		CHECK_FALSE(net::decode_shot_events(message(tick, [&](net::BitWriter &w) {
+			w.write_bits(2, 8);
+			shot(w, 1, true, 5, 3, 0);
+			shot(w, 1, false, 0, 3, 0); // escape to the same index
+		}), kFrame));
+		CHECK_FALSE(net::decode_shot_events(message(tick, [&](net::BitWriter &w) {
+			w.write_bits(3, 8);
+			shot(w, 1, true, 5, 3, 0);
+			shot(w, 1, false, 1, 3, 0);
+			shot(w, 1, false, 0, 3, 0); // back to index 5 later: named twice
+		}), kFrame));
+		CHECK_FALSE(net::decode_shot_events(message(tick, [&](net::BitWriter &w) {
+			w.write_bits(1, 8);
+			shot(w, 1, true, 5, 255, 0); // def 255
+		}), kFrame));
+		CHECK_FALSE(net::decode_shot_events(message(3, [&](net::BitWriter &w) {
+			w.write_bits(1, 8);
+			shot(w, 1, true, 5, 3, 3); // tick 3 - 3 = 0: before tick 1
+		}), kFrame));
+		CHECK_FALSE(net::decode_shot_events(message(tick, [&](net::BitWriter &w) {
+			w.write_bits(129, 8); // above kMaxShotsPerDatagram
+		}), kFrame));
+		CHECK_FALSE(net::decode_shot_events(message(tick, [&](net::BitWriter &w) {
+			w.write_bits(60, 8); // the bytes are not there
+			shot(w, 1, true, 5, 3, 0);
+		}), kFrame));
+	}
+
+	TEST_CASE("proto v2: CombatEvents round trip; out-of-range values clamp and count; hostile bytes are refused") {
+		Rng rng(27);
+		const sim::Tick tick = 4000;
+		const net::CombatEvents m = sample_combat(rng, tick, 20, 6, 4);
+		size_t clamped = 99;
+		const std::vector<uint8_t> b = net::encode_combat_events(m, kFrame, &clamped);
+		CHECK(clamped == 0);
+		auto d = net::decode_combat_events(b, kFrame);
+		REQUIRE(d);
+		REQUIRE(d->hits.size() == 20);
+		REQUIRE(d->deaths.size() == 6);
+		REQUIRE(d->detonations.size() == 4);
+		const size_t one_hit = net::encode_combat_events(sample_combat(rng, tick, 1, 0, 0), kFrame).size();
+		const size_t one_death = net::encode_combat_events(sample_combat(rng, tick, 0, 1, 0), kFrame).size();
+		const size_t one_det = net::encode_combat_events(sample_combat(rng, tick, 0, 0, 1), kFrame).size();
+		const size_t empty = net::encode_combat_events(sample_combat(rng, tick, 0, 0, 0), kFrame).size();
+		MESSAGE("CombatEvents: empty ", empty, " B; one hit +", one_hit - empty, " B, one death +", one_death - empty, " B, one detonation +",
+				one_det - empty, " B; 20 / 6 / 4: ", b.size(), " B");
+		double hp_err = 0, pos_err = 0, normal_err = 0, t_err = 0;
+		for (size_t i = 0; i < 20; ++i) {
+			const net::HitEvent &x = m.hits[i], &y = d->hits[i];
+			CHECK(x.victim == y.victim);
+			CHECK(x.shooter == y.shooter);
+			CHECK(x.shot_index == y.shot_index);
+			CHECK(x.pellet == y.pellet);
+			CHECK(x.zone == y.zone);
+			hp_err = std::max({ hp_err, std::fabs(double(x.damage) - y.damage), std::fabs(double(x.health_after) - y.health_after) });
+			pos_err = std::max(pos_err, max_axis_error(x.position, y.position));
+			normal_err = std::max(normal_err, angle_between(x.normal, y.normal));
+			t_err = std::max(t_err, std::fabs(double(x.time - y.time)));
+		}
+		for (size_t i = 0; i < 6; ++i) {
+			const net::DeathEvent &x = m.deaths[i], &y = d->deaths[i];
+			CHECK(x.victim == y.victim);
+			CHECK(x.killer == y.killer);
+			CHECK(x.def == y.def);
+			CHECK(x.zone == y.zone);
+			CHECK(x.shot_index == y.shot_index);
+			CHECK(x.headshot == y.headshot);
+			t_err = std::max(t_err, std::fabs(double(x.time - y.time)));
+		}
+		for (size_t i = 0; i < 4; ++i) {
+			const net::DetonationWire &x = m.detonations[i], &y = d->detonations[i];
+			CHECK(x.shooter == y.shooter);
+			CHECK(x.shot_index == y.shot_index);
+			CHECK(x.def == y.def);
+			CHECK(x.dud == y.dud);
+			pos_err = std::max(pos_err, max_axis_error(x.position, y.position));
+			normal_err = std::max(normal_err, angle_between(x.normal, y.normal));
+			t_err = std::max(t_err, std::fabs(double(x.time - y.time)));
+		}
+		MESSAGE("combat precision: hp ", hp_err, ", position ", pos_err, " m, normal ", normal_err, " deg, time ", t_err, " units");
+		CHECK(hp_err <= 0.005 + 1e-4);
+		CHECK(pos_err <= 1.0 / 512.0 + 1e-4);
+		CHECK(normal_err < 1.5);
+		CHECK(t_err <= 8.0);
+		// Clamps and cuts, counted.
+		net::CombatEvents c = sample_combat(rng, tick, 2, 2, 2);
+		c.hits[0].damage = -5; // clamps to 0
+		c.hits[0].health_after = 1e9f; // clamps to 100,000
+		c.hits[1].victim = 200; // cut
+		c.deaths[0].def = 300; // not on the wire: 255 (kNoWeapon)
+		c.detonations[0].position[1] = -10000; // outside the frame
+		c.detonations[1].def = sw::kNoWeapon; // cut
+		auto dc = net::decode_combat_events(net::encode_combat_events(c, kFrame, &clamped), kFrame);
+		REQUIRE(dc);
+		CHECK(clamped == 6);
+		CHECK(dc->hits.size() == 1);
+		CHECK(dc->hits[0].damage == 0.0f);
+		CHECK(dc->hits[0].health_after == 100000.0f);
+		CHECK(dc->deaths[0].def == sw::kNoWeapon);
+		CHECK(dc->detonations.size() == 1);
+		CHECK(dc->detonations[0].position[1] == kFrame.origin_min[1]);
+		net::CombatEvents many = sample_combat(rng, tick, 200, 100, 10);
+		auto dmany = net::decode_combat_events(net::encode_combat_events(many, kFrame, &clamped), kFrame);
+		REQUIRE(dmany);
+		CHECK(dmany->hits.size() + dmany->deaths.size() + dmany->detonations.size() == net::kMaxCombatEventsPerMessage);
+		CHECK(clamped == 310 - net::kMaxCombatEventsPerMessage);
+		CHECK(dmany->detonations.empty()); // hits first, then deaths, then detonations
+		// Hostile: counts above the bound or beyond the bytes, a time before tick 1, a detonation without a def,
+		// a hit amount above 100,000 hp.
+		const auto message = [&](sim::Tick p_tick, auto &&p_body) {
+			return craft(net::MessageType::CombatEvents, [&](net::BitWriter &w) {
+				w.write_bits(p_tick, 32);
+				p_body(w);
+			});
+		};
+		CHECK_FALSE(net::decode_combat_events(message(tick, [](net::BitWriter &w) {
+			w.write_varint(200);
+			w.write_varint(57);
+			w.write_varint(0);
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message(tick, [](net::BitWriter &w) {
+			w.write_varint(0);
+			w.write_varint(~0ull);
+			w.write_varint(0);
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message(tick, [](net::BitWriter &w) {
+			w.write_varint(0);
+			w.write_varint(10); // the bytes are not there
+			w.write_varint(0);
+		}), kFrame));
+		const auto death = [](net::BitWriter &w, uint32_t p_back) {
+			w.write_bits(1, 7);
+			w.write_bits(2, 7);
+			w.write_bits(3, 8);
+			w.write_bits(1, 2);
+			w.write_bits(77, 32);
+			w.write_bool(false);
+			w.write_varint(p_back);
+			w.write_bits(0, 16);
+		};
+		CHECK(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
+			w.write_varint(0);
+			w.write_varint(1);
+			w.write_varint(0);
+			death(w, tick - 1);
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
+			w.write_varint(0);
+			w.write_varint(1);
+			w.write_varint(0);
+			death(w, tick); // before tick 1
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message(0, [&](net::BitWriter &w) {
+			w.write_varint(0);
+			w.write_varint(1);
+			w.write_varint(0);
+			death(w, 0); // server tick 0 holds no time
+		}), kFrame));
+		const auto detonation = [](net::BitWriter &w, uint32_t p_def) {
+			w.write_bits(1, 7);
+			w.write_bits(77, 32);
+			w.write_bits(p_def, 8);
+			for (int i = 0; i < 3; ++i) {
+				w.write_bits(1000, 20);
+			}
+			w.write_bits(128, 8);
+			w.write_bits(255, 8);
+			w.write_bool(false);
+			w.write_varint(0);
+			w.write_bits(0, 16);
+		};
+		CHECK(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
+			w.write_varint(0);
+			w.write_varint(0);
+			w.write_varint(1);
+			detonation(w, 254);
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
+			w.write_varint(0);
+			w.write_varint(0);
+			w.write_varint(1);
+			detonation(w, 255);
+		}), kFrame));
+		const auto hit = [](net::BitWriter &w, uint32_t p_damage) {
+			w.write_bits(1, 7);
+			w.write_bits(2, 7);
+			w.write_bits(77, 32);
+			w.write_bits(0, 6);
+			w.write_bits(1, 2);
+			w.write_bits(p_damage, 24);
+			w.write_bits(0, 24);
+			for (int i = 0; i < 3; ++i) {
+				w.write_bits(1000, 20);
+			}
+			w.write_bits(128, 8);
+			w.write_bits(255, 8);
+			w.write_varint(0);
+			w.write_bits(0, 16);
+		};
+		CHECK(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
+			w.write_varint(1);
+			w.write_varint(0);
+			w.write_varint(0);
+			hit(w, 10'000'000);
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
+			w.write_varint(1);
+			w.write_varint(0);
+			w.write_varint(0);
+			hit(w, 10'000'001);
+		}), kFrame));
+	}
+
+	TEST_CASE("proto v2: the weapons wire round trips every field; offsets saturate at 35 s; hostile bytes are refused") {
+		Rng rng(28);
+		size_t max_bytes = 0;
+		for (int i = 0; i < 2000; ++i) {
+			const net::WeaponsWire w = sample_weapons_wire(rng);
+			net::BitWriter bw(4096);
+			net::write_weapons_wire(bw, w);
+			REQUIRE_FALSE(bw.overflowed());
+			const std::vector<uint8_t> bytes = bw.take();
+			max_bytes = std::max(max_bytes, bytes.size());
+			net::BitReader br(bytes);
+			net::WeaponsWire r;
+			REQUIRE(net::read_weapons_wire(br, r).ok());
+			REQUIRE(r == w);
+			// Every truncation is refused.
+			if (i < 50) {
+				for (size_t n = 0; n + 1 < bytes.size(); ++n) {
+					net::BitReader tr(std::span<const uint8_t>(bytes.data(), n));
+					net::WeaponsWire t;
+					REQUIRE_FALSE(net::read_weapons_wire(tr, t).ok());
+				}
+			}
+		}
+		MESSAGE("weapons wire: largest random 8-slot view ", max_bytes, " bytes");
+		// A state round trip with offsets beyond 35 s saturates (documented): the view clamps.
+		sw::SoldierWeaponsState st;
+		st.tick = 100000;
+		st.slots[0].def = 1;
+		st.slots[0].phase = sw::WeaponPhase::Ready;
+		st.slots[0].spread_time = sw::tick_start(st.tick) - 40 * sw::kTimeUnitsPerSecond;
+		st.slots[0].next_shot_time = sw::tick_start(st.tick) + 5;
+		st.slots[3].mode_counter = 3; // an empty slot keeps its counter
+		const net::WeaponsWire v = net::weapons_wire_view(st, st.tick);
+		CHECK(v.timers[0].spread_time == -net::kWeaponsWireMaxOffset);
+		CHECK(v.timers[0].next_shot_time == 5);
+		CHECK(v.timers[0].phase_start == net::kWeaponsWireTimeZero); // time 0 travels as itself
+		CHECK(v.slots[3].mode_counter == 3);
+		auto back = net::weapons_from_wire(v, st.tick, 0, 2);
+		REQUIRE(back.ok());
+		CHECK(back->slots[0].next_shot_time == st.slots[0].next_shot_time);
+		CHECK(back->slots[0].phase_start == 0);
+		CHECK(back->slots[0].spread_time == sw::tick_start(st.tick) - sw::SimTime(net::kWeaponsWireMaxOffset));
+		CHECK(back->slots[3].mode_counter == 3);
+		CHECK_FALSE(net::weapons_from_wire(v, st.tick, 0, 1).ok()); // def 1 not in a 1-def table
+		net::WeaponsWire bad = v;
+		bad.active = 8;
+		CHECK_FALSE(net::weapons_from_wire(bad, st.tick, 0, 2).ok());
+		bad = v;
+		bad.timers[0].slot = 0xFF; // slot 0 without its timed state
+		CHECK_FALSE(net::weapons_from_wire(bad, st.tick, 0, 2).ok());
+		// Hostile bytes: a def of kNoWeapon, an offset beyond 35 s, a non-finite spread, an active slot of 8.
+		const auto wire_bytes = [&](uint32_t p_active, uint64_t p_def, int64_t p_offset, float p_spread) {
+			net::BitWriter w(256);
+			w.write_bits(1, 32);
+			w.write_bits(p_active, 8);
+			w.write_bits(0xFF, 8);
+			w.write_bits(0, 16);
+			w.write_bool(true); // sprint_recover_until = 0
+			w.write_bool(true); // slot 0 present
+			w.write_varint(p_def);
+			w.write_bits(0, 2);
+			w.write_bits(0, 2);
+			w.write_varint(0);
+			w.write_varint(0);
+			w.write_bits(1, 3);
+			w.write_bits(0, 6);
+			w.write_bits(0, 7);
+			w.write_bool(false);
+			w.write_signed(p_offset, 32); // phase_start
+			w.write_bool(true);
+			w.write_bool(true);
+			w.write_f32(p_spread);
+			w.write_bool(true);
+			w.write_bool(true); // recoil at rest
+			w.write_bool(true);
+			for (int i = 1; i < 8; ++i) {
+				w.write_bool(false);
+				w.write_bits(0, 2);
+			}
+			return w.take();
+		};
+		const auto reads = [](const std::vector<uint8_t> &p_bytes) {
+			net::BitReader r(p_bytes);
+			net::WeaponsWire w;
+			return net::read_weapons_wire(r, w).ok();
+		};
+		CHECK(reads(wire_bytes(0, 3, -1000, 1.0f)));
+		CHECK_FALSE(reads(wire_bytes(8, 3, -1000, 1.0f)));
+		CHECK_FALSE(reads(wire_bytes(0, sw::kNoWeapon, -1000, 1.0f)));
+		CHECK_FALSE(reads(wire_bytes(0, ~0ull >> 1, -1000, 1.0f)));
+		CHECK_FALSE(reads(wire_bytes(0, 3, int64_t(net::kWeaponsWireMaxOffset) + 1, 1.0f)));
+		CHECK_FALSE(reads(wire_bytes(0, 3, -1000, std::numeric_limits<float>::infinity())));
+		CHECK_FALSE(reads(wire_bytes(0, 3, -1000, std::numeric_limits<float>::quiet_NaN())));
+		// Inside a Snapshot: a refused weapons block refuses the snapshot.
+		net::Snapshot s = sample_snapshot(rng, 0);
+		net::WeaponsWire nan = sample_weapons_wire(rng);
+		nan.timers[0].spread = std::numeric_limits<float>::quiet_NaN();
+		s.own_weapons = nan;
+		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(s)));
 	}
 }
