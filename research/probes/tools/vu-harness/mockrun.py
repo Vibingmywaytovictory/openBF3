@@ -286,7 +286,7 @@ def c_wa_frame_cadence(env):
             [('W1', 'area'), ('W2', '15'), ('W3', 'exp'), ('W4', 'release')], ['W1', 'W2', 'W3', 'W4'])
 
 
-@case()
+@case(('phase0', 'all'))
 def c_fire_mode_single(env):
     """weapons spawn in single fire; the mod cycles to auto: every part runs."""
     h, u = run_wa(env, {'fire_mode': 'single', 'recovery': 'exp'}, wa_args(env, 'a,b,c,d,e', scale='0.1'))
@@ -295,7 +295,7 @@ def c_fire_mode_single(env):
     env.check('parts a-e ran', parts >= set('abcde'), str(sorted(p for p in parts if p)))
 
 
-@case()
+@case(('phase0', 'all'))
 def c_fire_mode_stuck(env):
     """cycling is ignored: parts a and c only, with no-auto marks; the fast gaps are marked, not fired."""
     h, u = run_wa(env, {'fire_mode': 'stuck'}, wa_args(env, 'a,b,c,d,e', scale='0.1'))
@@ -690,7 +690,7 @@ def no_human_script(env, u, h, idle_s):
     u.ends = yield from wait_ends(u, 1, 3000, start)
 
 
-@case()
+@case(('phase0', 'all'))
 def c_no_human(env):
     """the human leaves mid-run: human-left / human-back marks, no stall (idle server frozen, or 150 s of ticks
     with nobody on), the run still ends done."""
@@ -775,7 +775,7 @@ def c_tickets(env):
               str(u.acc[:2]))
     env.check('MB done', u.ends == [('MB', 'done')], str(u.ends))
     env.journal(h)
-    h, u = env.host({'tcost': {'spawn': 8, 'kill': 1, 'remove': 0}}, level_opts={'tickets1': 110, 'tickets2': 110},
+    h, u = env.host({'tcost': {'spawn': 15, 'kill': 1, 'remove': 0}}, level_opts={'tickets1': 110, 'tickets2': 110},
                     tag='h2')
 
     def script2():
@@ -850,7 +850,7 @@ def c_p0_faults(env):
     env.extract(0)
 
 
-@case()
+@case(('phase0', 'all'))
 def c_p0_aim_fault(env):
     """bots aim 30 deg off: P0.9 reports NO-aim (not NO-arb)."""
     h, u = env.host({'aim_bias': 30.0})
@@ -862,7 +862,7 @@ def c_p0_aim_fault(env):
     env.journal(h)
 
 
-@case()
+@case(('phase0', 'all'))
 def c_p0_level_lost(env):
     """a round restart reloads the Lua state: P0.15 lost, rr/nextmap refused in the queue; bots created by the old
     state stay on the server (RUNBOOK: kick them or restart the server)."""

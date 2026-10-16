@@ -48,12 +48,13 @@ $VU = "$env:LOCALAPPDATA\VeniceUnleashed\client\vu.exe"
 New-Item -ItemType Directory -Force $S | Out-Null
 ```
 
-## 1. Checks (1-3 min)
+## 1. Checks (5-10 min; --phase0 about 3 min)
 
 ```powershell
 python -I "$H\check_all.py"
 ```
-Every stage `PASS` and `all checks passed`: everything below may run.
+Every stage `PASS` and `all checks passed`: everything below may run. The checks also read the BF3 install once
+(file sizes, dates and hashes only, never a write; the `powershell` line shows the item count).
 
 If the agent tells you the harness is only partly finished tonight, run instead:
 ```powershell

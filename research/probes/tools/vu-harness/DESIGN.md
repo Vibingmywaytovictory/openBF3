@@ -1112,7 +1112,7 @@ The journal must show, for every e2e run: no `Pass`/`Return`; no write to any ob
 | W-B mode U | `bot_damage=no`; the scripted user equips and shoots on prompts, 10 % of its "chest" hits land on an arm; a 150 m range | W5 from user shots (`cli` true) still `linear` (per-bone normalisation); M98B end knot `inconclusive` (range < 160 m); prompts answered; target respawns equal the heal-policy forecast; no bot-bullet damage rows |
 | S-A mode B / U | `regen_delay=10` / `16`; `supp_abort=on`; `supp_effect=none` (bot bullets do not suppress) | S1 verdicts; S2 report; with `supp_effect=none` "suppression not induced" and no SUPP verdict; REGEN reps without respawns |
 | M-A | `bleed=A` / `B` (single runs); and `queue MA rr nextmap MA` after `p0 level confirm` | M1 verdicts from hold windows only; four ends `done`; the second MA runs on MP_001 |
-| tickets | 120/120 tickets, `tcost=1/1/1`: a 7-item MB line, then one MB; 110/110 with `tcost` spawn 8 for a W-A run | the long line refused with "forecast ... put rr before it"; the accepted item prints its forecast (T1 109 T2 112: the user's own spawn cost one); the under-forecast run trips the guard (`guard`, item requeued, queue paused) |
+| tickets | 120/120 tickets, `tcost=1/1/1`: a 7-item MB line, then one MB; 110/110 with `tcost` spawn 15 for a W-A run (forecast at 1/1/1 passes, the real cost does not) | the long line refused with "forecast ... put rr before it"; the accepted item prints its forecast (T1 109 T2 112: the user's own spawn cost one); the under-forecast run trips the guard (`guard`, item requeued, queue paused) |
 | queue validation | `!mh queue WB:B`, `SB WA:tier1`, `MA WA:tier1`, `MA SA:B`, `run WA` with no sites | each refused at queue time with the missing site, nothing queued, nothing started |
 | M-B | `capture=model` + `flip=lose_get` / `capture=linear_n` + `flip=direct` | M2 and M2-flip verdicts (the direct flip never reads neutral: the reset treats "taken, not controlled" as neutral) |
 | W-C | `blast=linear` / `quadratic` | W7 report |
@@ -1170,7 +1170,7 @@ rules); tests must not depend on their exact values.
 
 `check_all.py` exits 0 only if every stage passes and prints one PASS/FAIL line per stage.
 
-**Staged gate `check_all.py --phase0`** (for a partly finished harness tonight): layout + JSON, `luaload`, `apicheck`
+**Staged gate `check_all.py --phase0`** (for a partly finished harness tonight): layout + JSON, invgen, `luaload`, `apicheck`
 (whole mod), `tests/test_extract.py`, the PowerShell tests, and the mock e2e runs of P0 (all P0 rows incl. faults,
 level, fire mode, input dt, no server GunSway) and of the attended U scenarios (W-B U, S-A U, W-D, W-C) with the
 repeats/stuck/log-fault runs. It prints `phase0 gate passed: Phase 0 and the attended items may run; the overnight
