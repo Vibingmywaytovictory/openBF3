@@ -45,6 +45,9 @@ set_tests_properties(core.res PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME sim.jolt COMMAND test_sim)
 add_test(NAME net.enet COMMAND test_net)
 add_test(NAME host.server COMMAND test_host)
+# Integration (integ/m2a1): host.server sleeps 2 s of wall clock and counts the 60 Hz ticks; under parallel load the
+# sleep overshoots (135 ticks against at most 130 once), so it runs alone. The thresholds are unchanged.
+set_tests_properties(host.server PROPERTIES RUN_SERIAL TRUE)
 # bf3dump's JSON number text (the probe's f32/f64 rules) on synthetic values; no install needed.
 add_test(NAME tools.numtext COMMAND bf3dump numcheck)
 # core.ant reads the Ant banks from the install (or the export directory OPENBF3_ANT_DATA) and, when

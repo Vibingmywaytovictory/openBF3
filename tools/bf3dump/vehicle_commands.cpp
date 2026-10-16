@@ -566,6 +566,10 @@ int cmd_vehicle_replay(const std::shared_ptr<Install> &p_install, const std::vec
 				why.clear();
 				pass = vehicle_gate_g2x(reports, &why);
 				gate("G2x", pass, why);
+			} else {
+				// Integration (integ/m2a1): say so instead of skipping G2x silently.
+				std::printf("gate G2x not judged: --modes=%x leaves out the ExactPod bit (%x)\n", unsigned(o.modes),
+						1u << uint32_t(VehicleRestoreMode::ExactPod));
 			}
 		}
 	}

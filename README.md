@@ -1651,7 +1651,8 @@ synthetic-course case of `sim.vehicle.unit` runs `OwnHistory` + `ExactPod` + `Fu
 `release`). Both suites print steps
 and seconds per course; the TIMEOUTs are 3x the measured runs (docs/design/s2.md §15.1).
 
-Measured (2026-10-15, docs/design/s2.md §15.1): **S2 fails on G2 alone.** C, D, G1, G1r, G1m, install unchanged and
+Measured (2026-10-15, docs/design/s2.md §15.1): **since the integration the quantised G2 is report-only and G2x
+(`ExactPod`) is the gate, which passes**; before it, S2 failed on G2 alone. C, D, G1, G1r, G1m, install unchanged and
 the units pass: Jolt's vehicle is bit-identical on every MP_007 and synthetic course (3,600 ticks; 30 restore runs
 each, into the prediction world and as an in-place rollback; three touching Humvees), and the dev, release and asan
 builds produce the same per-tick hashes. G2 with the quantised 440-bit ghost fails on slalom, bumps and collision
