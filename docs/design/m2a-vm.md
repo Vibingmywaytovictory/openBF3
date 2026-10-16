@@ -22,16 +22,20 @@ fixed dt (60 and 144 fps) and reads the Godot nodes back, so they are determinis
 | E19 unit | ADS, FOV, recoil, springs, refusal (Godot-free) | `ctest --preset dev -R anim.viewmodel.unit` | as E19, on the synthetic gate weapons at 30 / 60 / 144 / 240 fps | 9/9 cases pass; FOV reached within ±1 frame at every rate in both FOV-time modes; recoil worst 1.6e-15°; springs settle in sway 0.567 / bob 0.833 / kick 0.467 / camera 0.500 s against 0.75 / 1.0 / 0.6 / 0.6 configured |
 | E19 fov.hip / fov.ads | world vertical FOV 55 hip, 40 iron sights | `ctest --preset dev -R godot.m2a_viewmodel` (= `Godot --headless --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --vm-check`), rows `e19.fov.hip`, `e19.fov.ads` | Camera3D `fov` 55 / 40 ± 1e-3 (KEEP_HEIGHT) at every hip / aimed mark | 128/128 hip marks 55, 64/64 aimed marks 40 |
 | E19 vmfov.hip | viewmodel FOV = RenderFov 55 at hip | same, row `e19.vmfov.hip` | weapon and arms `fov_override` == the item's RenderFov at hip | 128/128; RenderFov is 55 on all 12 kit items |
-| E19 fov.in_out | FOV reached in the FOV time ± 1 display frame after the press, back after the release | same, rows `e19.fov.in_out.specific`, `e19.fov.in_out.generic`, `e19.fov.generic_0.15` | \|reached − FOV time\| ≤ 1 display frame, 60 and 144 fps, both FOV-time modes (§2.3) | 32 + 32 transitions, worst 1.00 frame in and out (the bias is −1..0 frames, §2.3) |
+| E19 fov.in_out | FOV reached in the FOV time ± 1 display frame after the press, back after the release | same, rows `e19.fov.in_out.specific`, `e19.fov.in_out.generic`, `e19.fov.generic_0.15` | \|reached − FOV time\| ≤ 1 display frame, 60 and 144 fps, both FOV-time modes (§2.3); `generic_0.15` also asserts that the FOV times in use are 0.15 s | 32 + 32 transitions, worst 1.00 frame in and out (the bias is −1..0 frames, §2.3); generic mode FOV times 0.1500..0.1500 s |
 | E19 recoil | camera recoil offset == interpolated predicted recoil | same, row `e19.recoil` | ≤ 1e-4° every frame | 81,550 frames, worst 7.9e-6° (float transform round trip), largest recoil 2.26° |
-| E19 springs | sway, bob, kick settle within their configured time | same, row `e19.springs` | every unsettled frame ≤ the largest settle_seconds (1.0 s) + 1 frame after the last spring input; at rest at mark + sway / bob settle time | worst 0.736 s; 32/32 settle marks at rest |
+| E19 springs | sway, bob, kick settle within their configured time | same, rows `e19.springs` and `e19.springs.sway` / `.bob` / `.kick` / `.camera` | `e19.springs`: every unsettled frame ≤ the largest settle_seconds (1.0 s) + 1 frame after the last spring input; at rest at mark + sway / bob settle time. Per spring: not at rest at most its own settle_seconds + 1 frame after its own last input (view rate; motion or sprint; shot; shot) | worst 0.736 s; 32/32 settle marks at rest. Per spring: sway 0.438 s (0.75), bob 0.800 s (1.0), kick 0.458 s (0.6), camera 0.493 s (0.6) |
 | E19 zoom_refused | zoom refused while deploying or sprinting | same, row `e19.zoom_refused` (+ unit case) | zoom held in a deploying or sprinting frame presents no ADS and FOV 55 | 6,882 frames, 0 with ADS; the sim half is sv's: the check prints `PENDING (sv)` while the `step_weapons_m2a` stub still sets `kZoomWasDown` (§2.4) |
 | E5 viewmodel row | clip start, fire after the finish, clip lengths | same, rows `e5.clip_start`, `e5.fire_after_finish`, `e5.clip_cut`; the table: `bf3dump vm clips` | clip on screen ≤ 1 display frame after `kReloadStarted`; first shot on screen ≤ 1 display frame after `kReloadFinished`; the shot takes the clip off within the 0.1 s crossfade + 1 frame | 96 reloads (tactical and empty, 12 kit weapons' 10 guns, 60 / 144 fps): worst 0.0143 s / 0.0143 s (both < 1 frame at 60 fps), cut within 0.104 s |
-| E11 viewmodel | deploy, fire, reload clip or counted stand-in for every item of the 8 loadouts | same, row `e11.coverage`; `bf3dump vm clips --team all` | 32/32 covered | 32/32: 42 clips, 46 counted stand-ins, 8 not applicable (the knife's reload) |
+| E11 viewmodel | deploy, fire, reload clip or counted stand-in for every item of the 8 loadouts | same, rows `e11.coverage`, `e11.kits_match_data`; `bf3dump vm clips --team all` | 32/32 covered over the loadouts **read from the data** (§2.6); the data's loadouts equal the documented table | 32/32: 42 clips, 46 counted stand-ins, 8 not applicable (the knife's reload); data == documented table |
+| look: alpha test | slots the level shader database alpha-tests are cut out | same, row `vm.alpha_test` | every drawn alpha-tested slot has an alpha-scissor material | 0 drawn by default (the only one is the knife's dog-tag chain, hidden, §2.7); 2 of 2 (US and RU knife) with `--vm-dogtags` |
+| look: knife dog tags | the knife capture's stray bars (§2.7) | same, row `vm.knife_dog_tags` | the knife's dog-tag surfaces are left out and counted (drawn with `--vm-dogtags`) | 2 knives, 2 surfaces each hidden, 0 drawn |
+| skinned geometry | no stretched triangles through deploy, fire and reload | `bf3dump vm skin [--team us\|ru\|all]` | no surface's longest skinned edge > 1.5 × its bind-pose edge (and > 5 cm); all weights sum to 1 | `VM SKIN: PASS` (`--team all`: 14 items, 95 surface rows, 0 stretched; 5.6 s warm; the knife's chain 0.397 m in the bind pose, 0.403 m posed: long by construction, not stretched) |
 | bf3dump | `bf3dump vm clips` | `bf3dump vm clips [<unlock>...] [--team us\|ru\|all]` | prints roles, codecs, endpoints, E5 rows, E11 coverage | met (§4) |
 | captures | hip, ADS, reload mid-clip for several kit weapons | `Godot --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --vm-shots=<openBF3>\b\shots\vm` (windowed) | PNGs for the user's judgement | 38 captures (§5) |
-| asan | hostile data | `ctest --preset asan -R anim.viewmodel.unit` | no crash, hang or unbounded allocation in the tuning parser, springs, animator, ADS camera | see the README section for the run |
-| install unchanged | layout.toc, cas.cat, .sb / .toc | the check's last line `[vm] install.unchanged` (also printed by `--vm-shots`) | identical sizes and mtimes of the 256 install files | yes (256 files) |
+| asan | hostile data | `tools\build.cmd asan --no-test` then `ctest --preset asan -R anim.viewmodel.unit` | no crash, hang or unbounded allocation in the tuning parser, springs, animator, ADS camera; no AddressSanitizer report | 9/9 cases, 6,155 assertions, no AddressSanitizer report; the tuning fuzz made 3,000 mutations (792 parsed, 2,208 failed cleanly). Also under asan: `bf3dump vm skin --team all` (VM SKIN PASS, 14 items) and `bf3dump vm clips --team all` (E11 PASS 32/32), no report, install unchanged |
+| install unchanged | layout.toc, cas.cat, .sb / .toc | the check's last line `[vm] install.unchanged` (also printed by `--vm-shots`, `bf3dump vm clips` and `bf3dump vm skin`) | identical sizes and mtimes of the 256 install files | yes (256 files) |
+| existing tests | all existing tests keep passing | `ctest --preset dev -E "<TIMING regex of tools\build.cmd>"`, then `ctest --preset dev -R godot\.` with the quiet lock checked | 0 failures | dev with the timing rows excluded: 90/90 pass in 307 s (core.cache_data and core.res skipped as usual); the 12 godot.* rows one at a time, each after the lock check: all pass (godot.m1 346 s, godot.s3_crowd 545 s, godot.l1_look 239 s on the shared machine) |
 
 Present cost (info only, noisy): `Bf3Viewmodel::present` mean 12.7 µs, max 196 µs per frame over 11,988 frames at
 60 fps (the check's info line).
@@ -117,6 +121,60 @@ weapon without an optic]. Loaded: M16A4 and M4A1 (m16_ironsight, m16_sight), M27
 Transform [inferred: both socket transforms are identity on these weapons, so the order is not tested]. At most 16
 accessories per item; unknown bones and skinned socket objects are skipped with a note.
 
+### 2.6 The 8 loadouts come from the data
+
+`render::read_viewmodel_kits(ebx, level, mode = TeamDeathMatch0)` reads the mode's teams 1 (US) and 2 (RU) with
+`read_mode_def`, the progression tables with `read_unlock_progression`, each listed kit with `read_kit_def`, and takes
+`KitDef::default_unlock` of slots 0, 1, 6 and 7: the same resolution as sv's `make_kit_table` (bf3_host kits.h). It
+fails when a team is missing, lists other than 4 kits, or a kit has no default for one of the four slots. The demo,
+`--vm-check` (E11, the E5 runs, the captures) and `bf3dump vm clips` / `vm skin` iterate over what it returns; the
+former hard-coded table is kept only as `documented_viewmodel_kits()`, the m2a.md §5.6 list, and is compared with the
+data (row `e11.kits_match_data`; `bf3dump vm clips` prints the comparison and fails on Metro when they differ). The
+read takes about 0.3 s on MP_Subway [verified: `bf3dump kits MP_Subway TeamDeathMatch0`, 18,053 work units].
+
+### 2.7 Material looks and the knife's dog tags
+
+The first knife captures showed long thin bars from the hand across the view. `bf3dump vm skin` (below) showed that
+nothing is stretched: every knife surface keeps its bind-pose edge lengths. The bars are the dog-tag **ball chain**
+of `knife_1p_mesh` (subset `M_Dogtag`, shader `objects/shaders/proppreset_alphatest`, Diffuse
+`weapons/knife/dogtag_d` with alpha), a strip of long thin quads (0.397 m edges in the bind pose) that the shader cuts
+out by the Diffuse alpha; the viewmodel drew every slot opaque. The tags themselves are subset `dogtag2`
+(`proppreset_diffuseonly`, `dogtag_d2`) [verified: `bf3dump vm skin weapons/knife/u_knife`, `bf3dump looks MP_Subway
+TeamDeathMatch0 --shader objects/shaders/proppreset_alphatest`: surface type 1 = OpaqueAlphaTest].
+
+Two changes:
+
+* **Alpha test from the shader database** (structural, all items): the loader resolves every material slot of the
+  arms, weapons and accessories through L1's `LookResolver` (the level shader database's surface type; M1's name rule
+  for a shader it lacks) into `ViewmodelSlotLook` (alpha_test, double_sided); `Bf3Viewmodel` gives those materials an
+  alpha scissor at 0.5 (`kViewmodelAlphaScissor`, as L1's level materials) and no culling when double-sided. Row
+  `vm.alpha_test`. On the 12 kit items the only alpha-tested slot is the knife's chain.
+* **Dog tags left out** (a counted stand-in): even cut out, the chain is a 0.4 m loop that the static
+  `Knife_IdlePose` holds upright from the tags below the hand up past it to the screen centre (camera-space box
+  y −0.465..+0.026 m, the hand at about −0.15 m). BF3 shows the player's chosen dog tags on the knife (a persistence
+  customization M2a does not have) and lets the chain hang [inferred]; the knife's `BoneFakePhysics` list is empty,
+  so how BF3 hangs it is not in the weapon data. M2a hides every knife surface whose Diffuse texture names `/dogtag`
+  (`kDogTagTexture`), counts them (`ViewmodelItem::hidden_surfaces`, 2 per knife) and lists them in the notes; the
+  demo's `--vm-dogtags` draws them (comparison captures in `b\shots\vm\dogtags\`). Row `vm.knife_dog_tags`.
+
+`bf3dump vm skin [<unlock>...] [--team us|ru|all]` loads the meshes and plays every item through the animator
+(deploy, fire, reload at 30 fps). Per surface of the weapon and the arms it prints the longest skinned triangle edge
+against the bind pose's, the weights that do not sum to 1, the camera-space extent and bones at idle, the material
+slots (shader, textures, alpha test) and any Scale DOF of the role clips (none on the kit items: the knife and M67
+idles have 96 quaternion and 39 vec3 channels, all rotation or translation). `VM SKIN: PASS` when no surface is
+stretched (`viewmodel_surface_skin`, `kSkinStretchFactor` 1.5, `kSkinStretchFloor` 5 cm).
+
+### 2.8 Contract notes for wave 3
+
+* §15 names "viewmodel_assets.* gains an additive overload". vm added the overload to `viewmodel_set.h` instead
+  (`load_viewmodel_set(ViewmodelSources &, ...)`, sharing the Ant library and level superbundle between the team
+  sets); `viewmodel_assets.*` is untouched.
+* `VmClip` (viewmodel_anim.h) and `ViewmodelClipRole` (viewmodel_set.h) gained `Sprint = 12` before `Count`
+  (static_asserts tie the two enums), and `ViewmodelSet::library` is a `shared_ptr` (the team sets share it). cl and
+  gx should build against these.
+* `ViewmodelKit` holds strings now and comes from `read_viewmodel_kits`; `team_viewmodel_set(kits, team)` takes the
+  kits. cl's own-soldier kit change should pass the match's `KitTable` loadout unlocks the same way.
+
 ## 3. Tuning (`bf3-opensource/config/viewmodel_tuning.cfg`)
 
 | spring | stiffness / damping | settle_seconds | other keys |
@@ -160,7 +218,8 @@ line number, and the built-in defaults are used (the demo prints which).
 
 ## 5. Captures (`openBF3\b\shots\vm\`, gitignored)
 
-38 PNGs at 1152 × 648 from `--vm-shots`: hip, ADS and reload mid-clip of all 10 guns of the 8 kits, plus hip, throw
+38 PNGs at 1152 × 648 from `--vm-shots` (retaken on the final tree, 2026-10-16 evening; 10 more with
+`--kits=0 --vm-dogtags` in `dogtags\`): hip, ADS and reload mid-clip of all 10 guns of the 8 kits, plus hip, throw
 and stab of the M67 and knife (US and RU assault). What they show:
 
 * **Hip**: arms and weapon in the lower right as in BF3, textures and gloves correct for US and RU; with the
@@ -172,7 +231,9 @@ and stab of the M67 and knife (US and RU assault). What they show:
 * **Reload mid-clip**: the authored clips (magazine out, hand at the well, rifle rolled) for every gun; nothing
   procedural.
 * **M67**: hip idle low right; the throw shows both arms raised wide (the procedural swing over the static idle).
-* **Knife**: the hand holds the knife in the static idle; see §6 for the blade.
+* **Knife**: the hand holds the knife in the static idle, blade forward; no stray geometry since the dog tags are
+  left out (§2.7). With `--vm-dogtags` (`b\shots\vm\dogtags\`) the cut-out chain shows as a thin loop standing up
+  from the hand: the user should judge whether BF3 shows the tags there and how they hang.
 
 ## 6. Open issues
 
@@ -181,4 +242,9 @@ and stab of the M67 and knife (US and RU assault). What they show:
   `viewmodel_frame_from(PresentedWeapon, ...)` and `viewmodel_cues_from(...)` unchanged.
 * m2a.md names the Godot E19 rows `godot.m2a` case "ads" (integ's scene, wave 3); this track's rows are
   `godot.m2a_viewmodel`.
-* For the user's judgement: the M16A4's ZoomRenderFov 15; the spring constants; the procedural throw and stab.
+* For the user's judgement: the M16A4's ZoomRenderFov 15; the spring constants; the procedural throw and stab; the
+  knife's dog tags (hidden stand-in, §2.7).
+* The FOV transition lands −1..0 frames early (the first frame after the flip credits a whole dt, and the stand-in
+  `present_weapon` takes the discrete zoom flag from the later tick), so the worst case sits at exactly 1.00 frame,
+  inside E19's ± 1 frame only through the 1e-6 slack. cl's real `present_weapon` decides the flag's timing in wave 3;
+  crediting only the part of the frame after the flip would centre the error.
