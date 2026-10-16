@@ -1,4 +1,5 @@
--- Scenario registry (SKELETON; DESIGN.md section 6). Session 2-3 entries exist disabled (extension points).
+-- Scenario registry (DESIGN.md section 6). Session 2-3 entries exist disabled (extension points: V-A..V-C vehicles,
+-- A-A..A-C air, M-C, N-A naval; they would add a module here, mh_bots.seat and the reserved veh/vdmg rows).
 local M = {
 	P0 = { module = 'scenarios/p0', who = 'U', enabled = true },
 	WA = { module = 'scenarios/wa', who = 'B', enabled = true },

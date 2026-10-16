@@ -1,4 +1,5 @@
--- W-A configurations in queue order (SKELETON; DESIGN.md section 6.2). Unlock names are resolved by P0.2 [live:L07].
+-- W-A configurations in queue order (DESIGN.md section 6.2) and the weapon tables every scenario uses.
+-- Unlock names are resolved by P0.2 [live:L07].
 local M = {}
 
 M.protocols = {
@@ -72,5 +73,49 @@ M.kits = {
 	team1 = { 'Gameplay/Kits/USAssault', 'gameplay/kits/usassault' },
 	team2 = { 'Gameplay/Kits/RUAssault', 'gameplay/kits/ruassault' },
 }
+
+-- Rounds per minute (P section 7.1, data/weapon_constants.json); FIRE_N timeouts and estimates only.
+M.rpm = { M16A3 = 800, AK74M = 650, M416 = 750, M249 = 800, M98B = 46, M9 = 400, ['870MCS'] = 70 }
+
+-- Rounds per life (magazine + reserve) [inferred]: only for the ticket forecast of W-A respawns.
+M.ammo_total = { M16A3 = 151, AK74M = 151, M416 = 151, M249 = 300, M98B = 30 }
+
+-- Soldier appearance assets for bots (SelectUnlockAssets) [inferred names; resolved by P0.2, skipped if absent].
+M.appearance = {
+	team1 = { 'Persistence/Unlocks/Soldiers/Visual/MP/Us/MP_US_Assault_Appearance01',
+		'persistence/unlocks/soldiers/visual/mp/us/mp_us_assault_appearance01' },
+	team2 = { 'Persistence/Unlocks/Soldiers/Visual/MP/RU/MP_RU_Assault_Appearance01',
+		'persistence/unlocks/soldiers/visual/mp/ru/mp_ru_assault_appearance01' },
+}
+
+-- Damage per weapon for the heal policy (falloff knots; P section 7.1) and the zone multiplier upper bound.
+M.falloff = {
+	M16A3 = { 25, 18.4, 8, 50 }, AK74M = { 25, 18.4, 8, 50 }, M416 = { 25, 18.4, 8, 50 },
+	M98B = { 95, 59, 15, 150 }, M9 = { 20, 12.5, 8, 50 }, ['870MCS'] = { 100, 25, 5, 30 },
+}
+M.zone_mult = { chest = 1.0, head = 2.5 }
+
+function M.expected_damage(w, d, zone)
+	local f = M.falloff[w]
+	if f == nil then return 100 end
+	local dmg
+	if d <= f[3] then dmg = f[1] elseif d >= f[4] then dmg = f[2] else
+		dmg = f[1] + (f[2] - f[1]) * (d - f[3]) / (f[4] - f[3])
+	end
+	return dmg * (M.zone_mult[zone] or 1.0)
+end
+
+-- canonical(name): accept keys and aliases case-insensitively (DESIGN.md 3.7).
+function M.canonical(name)
+	if name == nil then return nil end
+	local up = name:upper()
+	for key in pairs(M.unlocks) do
+		if key:upper() == up then return key end
+	end
+	for a, key in pairs(M.alias) do
+		if a:upper() == up then return key end
+	end
+	return nil
+end
 
 return M
