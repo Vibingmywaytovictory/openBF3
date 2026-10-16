@@ -55,6 +55,9 @@
 //   vehicledrive <LEVEL> <MODE> [<blueprint>]   the drive def and the vehicle model (vehicle_commands.cpp)
 //   vehicle-replay <LEVEL> <MODE> [options]     courses and gates C / D / G1 / G1r / G2x (G2 reported), --handling, --sweep,
 //                                               --hash-out (gate X), --log-out / --log-in (vehicle_commands.cpp)
+// UI ui1 (docs/design/ui-swf-fonts.md §12.4; swf_commands.cpp):
+//   swf census | movie <name> | labels <name> | layout <name> | hud | fonts
+//                              SwfMovie symbol tables, atlas label maps, HUD positions, UI fonts
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -84,6 +87,8 @@
 #include "nav_commands.h"
 // S2 vehicle: vehicledrive, vehicle-replay.
 #include "vehicle_commands.h"
+// UI ui1: the SwfMovie, atlas, layout and UI font commands.
+#include "swf_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -517,6 +522,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::logic_usage()); // S4 logic
 	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n"); // L1 look
 	std::fprintf(stderr, "%s", bf3dump::vehicle_usage()); // S2 vehicle
+	std::fprintf(stderr, "%s", bf3dump::swf_usage()); // UI ui1
 }
 
 } // namespace
@@ -653,6 +659,12 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "vehicle-replay") {
 		return bf3dump::cmd_vehicle_replay(ctx.install, rest);
+	}
+	// UI ui1: swf <census|movie|labels|layout|hud|fonts> (swf_commands.cpp); 2 = usage.
+	if (cmd == "swf") {
+		if (const int rc = bf3dump::cmd_swf(ctx.reader, ctx.install, rest); rc != 2) {
+			return rc;
+		}
 	}
 	usage();
 	return 2;

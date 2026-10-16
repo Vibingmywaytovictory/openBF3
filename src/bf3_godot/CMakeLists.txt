@@ -93,3 +93,13 @@ target_sources(bf3_godot PRIVATE
     src/nav_overlay.cpp
     src/nav_overlay.h
 )
+
+# UI ui1 (docs/design/ui-swf-fonts.md §10-§12): Bf3UiAssets (BF3 fonts as FontFiles, SWF atlases as AtlasTextures,
+# the HUD placement table) and the ui1 check scene's Bf3UiFontCheck (res://scenes/ui_fonts.tscn), registered in the
+# "// UI ui1" block of register_types.cpp.
+target_sources(bf3_godot PRIVATE
+    src/ui_assets.cpp
+    src/ui_assets.h
+    src/ui_font_check.cpp
+    src/ui_font_check.h
+)

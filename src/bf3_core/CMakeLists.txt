@@ -247,3 +247,32 @@ target_sources(bf3_core PRIVATE
     src/gameplay/vehicle_drive.cpp
     src/level/vehicle_spawns.cpp
 )
+
+# UI ui1 (SWF, atlases and fonts; docs/design/ui-swf-fonts.md §12): the SwfMovie symbol-table reader, the install
+# library and census, the atlas cutter, DefineFont3 outlines, the TrueType writer, the UI font library and the HUD
+# layout facts. Interface headers now; the sources are added by the implementation.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/swf_movie.h
+    include/bf3/core/ui/swf_library.h
+    include/bf3/core/ui/swf_census.h
+    include/bf3/core/ui/swf_atlas.h
+    include/bf3/core/ui/swf_font.h
+    include/bf3/core/ui/font_ttf.h
+    include/bf3/core/ui/ui_fonts.h
+    include/bf3/core/ui/swf_layout.h
+)
+# UI ui1 implementation (docs/design/ui-swf-fonts.md §17).
+target_sources(bf3_core PRIVATE
+    src/ui/swf_bits.h
+    src/ui/swf_font_detail.h
+    src/ui/swf_movie.cpp
+    src/ui/swf_display.cpp
+    src/ui/swf_library.cpp
+    src/ui/swf_font.cpp
+    src/ui/font_ttf_write.cpp
+    src/ui/font_ttf_read.cpp
+    src/ui/swf_census.cpp
+    src/ui/swf_atlas.cpp
+    src/ui/ui_fonts.cpp
+    src/ui/swf_layout.cpp
+)
