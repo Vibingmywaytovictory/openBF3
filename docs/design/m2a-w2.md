@@ -131,3 +131,25 @@ ctest --preset asan -R m2a.contract
 
 The results of this commit are in the README section "M2a wave 2 contract (W2.0)". Timing rows are wall-clock and
 noisy on this shared machine.
+
+## Merge of nt and lc (2026-10-17)
+
+`m2a/nt` (1752dd2) and then `m2a/lc` (b6fdf48) were merged into `m2a/w2` with `--no-ff`, one merge commit each.
+nt merged cleanly. lc conflicted only in the three shared files where both tracks appended a block at the same
+place: `README.md` (the "M2a protocol v2 (nt)" and "M2a lc" sections), `src/bf3_net/CMakeLists.txt` (nt's
+`weapons_wire.cpp` and lc's `other_sample.cpp` `target_sources` blocks) and `tests/CMakeLists.txt` (nt's
+`net.proto.fuzz` and lc's `sim.lagcomp.unit` / `anim.server_pose` blocks). Each was resolved by keeping both blocks,
+nt's first; no other line changed. No merge break needed a fix. `m2a.contract` runs nt's rows (`kNtLanded = true`,
+set by nt), including the ack-bit rows against `net::snapshot_acked` / `others_acked`.
+
+Results on the merge (dev preset unless noted; timing rows are wall-clock and noisy on this shared machine):
+
+| run | result |
+|---|---|
+| `tools\build.cmd dev --no-test` | clean |
+| `ctest --preset dev -E "<build.cmd TIMING regex>" -j 8` | 92 / 92 pass (`core.cache_data`, `core.res` skipped as documented: no test data env) |
+| `host.server`, `host.session.unit`, `host.scale`, `sim.nav.bake`, `logic.perf`, `tools.ebx_memory`, `tools.m1_prepare` | pass, each on its own |
+| `host.session`, `sim.weapons.perf`, `tools.fx_bench` | failed once while another agent's ctest ran (E2 target changes 11 > 2; W11 p99 4.73 > 2.0 ms; fx 82.5 > 50 ns); all three pass when rerun under the quiet lock |
+| `godot.s0_selftest`, `godot.inspector`, `godot.collision`, `godot.m9_reload`, `godot.m1`, `godot.m1_load`, `godot.l1_look`, `godot.ui_fonts`, `godot.ui_fonts_shots`, `godot.ui2`, `render.scene` | pass under the quiet lock |
+| `godot.s3_crowd` | 2 runs fail (G1b 2.15-2.41 ms, G2-off p99 18.1-18.9 ms) with another track's asan `test_sim_terrain` using a core; A/B in the same window: `m2a/nt` alone fails both attempts (G1b 2.34 / 3.72 ms), `m2a/w2` passes on its retry (G1a p99 0.394 ms, G1b 1.670 ms, G2-off p99 10.18 ms, G2-on p99 16.65 ms). Load, not the branch, as nt's notes found; lc touches no code the s3 bench runs |
+| `ctest --preset asan -R "^(net\.proto\.fuzz|sim\.lagcomp\.unit|anim\.server_pose)$"` | 3 / 3 pass, no ASan report |
