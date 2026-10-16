@@ -709,3 +709,23 @@ age offset is f = clamp((k + 1 − a0) / (rate × dt_e), 0, 1) of the sub-step; 
 (callers run `load_all()` first). Performance: the Update stage's output slots (size, size axes, colour, alpha and the
 alpha levels) are evaluated per chunk of 256 particles with the vectorisable NormTime polynomial / colour paths, the
 NaN guard is one balanced sum times 0, and constant drag takes one `exp` per item.
+
+### 18.1 Verifier follow-up (2026-10-16)
+
+The verifier found one blocking defect: `ImpactTable::load` deduplicated each new cell by comparing it with every
+distinct cell so far, uncharged (O(U²) in distinct cells, U ≤ 65,536). Fixed structurally (§6.10): cells are
+deduplicated through an ordered content map and each lookup is charged. Measured with the new fx.fuzz row on the same
+build (dev, shared machine, noisy): a 256 × 256 grid of 65,536 distinct cells took 18.8 s with the old scan (128 × 128:
+0.82 s, ratio 23) and takes 0.09-0.12 s now (128 × 128: 0.02-0.05 s, ratio 2.5-4.8; the row requires < 10), budget
+656,131 of 1,000,000. fx.fuzz now also covers the impact table and the emitter atlas (§10): to drive the atlas without
+an install, `EmitterAtlas::load` gained a `ResSource` overload and the header check `EmitterAtlas::texture_info`
+(the mount overload is a wrapper; G6 unchanged). The atlas name sort is now charged m · log2 m. Non-blocking:
+`FxStats::events_dropped` counts events past the frame buffer (§7.6; fx.unit covers it; 0 in G3, G4 and G7), and the
+README's two ctest lines are one.
+
+Re-measured after the fix: full dev ctest with `OPENBF3_GODOT`: 61 rows, 59 passed, 2 skipped (`core.cache_data`,
+`core.res`), 0 failed, 791 s (`fx.fuzz` 5.1 s, `fx.install` 29 s, `host.session.unit` passed). G1, G3, G4 (fixed and
+variable), G5 (Metro and Caspian), G6 and G7 (1,101 effects, 0 failed, 1,101 compared, 0 mismatches, 26 s) print
+PASS with the values of the table above. G9: `tools.fx_bench` medians 38.97 and 38.49 ns at low load (valid runs).
+Asan (`b/asan`, rebuilt): `fx.contract`, `fx.unit` (1.9 s), `fx.fuzz` (80.6 s, the new grid and atlas rows included)
+and `fx.install` (159 s) pass; `tools.fx_bench` is report-only there (681 ns).
