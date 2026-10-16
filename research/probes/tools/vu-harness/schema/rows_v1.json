@@ -215,7 +215,8 @@
       "opt": {
         "mat": "ia",
         "body": "s",
-        "shooter": "i"
+        "shooter": "i",
+        "vic": "i"
       }
     },
     "dmg": {
@@ -318,7 +319,8 @@
         "ok": "b"
       },
       "opt": {
-        "args": "sa"
+        "args": "s",
+        "via": "s"
       }
     },
     "prog": {

@@ -44,7 +44,7 @@ function M.on_gunsway(g, weapon, wf, dt, rec)
 	if not fs and C.gk % 4 ~= 0 then return end
 	M.last[src] = C.gk
 	M.n = M.n + 1
-	R.row('gs', G.payload(g, rec.id or 0, 0, src, pose, zoom, nil, dt, nil))
+	R.row('gs', G.payload(g, rec.pid or 0, 0, src, pose, zoom, nil, dt, nil))
 	return key
 end
 

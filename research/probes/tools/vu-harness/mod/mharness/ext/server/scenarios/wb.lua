@@ -45,7 +45,7 @@ function M.needs(args)
 	local n = { sites = { 'range' } }
 	if (args.mode or 'U') == 'B' then
 		n.aimcal = true
-		n.damage = true
+		n.botdmg = true
 	end
 	return n
 end
@@ -56,7 +56,7 @@ function M.cost(args)
 	local c = { s1 = 0, d1 = 0, r1 = 0, s2 = 0, d2 = 0, r2 = 0 }
 	local mode = args.mode or 'U'
 	for _, w in ipairs(M.weapons(args)) do
-		local ts = W.team[w] or 1
+		local ts = W.teams[w] or 1
 		local tt = 3 - ts
 		local deaths = 0
 		for _, z in ipairs(M.zones(args)) do
@@ -109,7 +109,7 @@ local function user_ready(ctx, w)
 	ctx.ok_flag = false
 	local wid = ids.weapon((W.unlocks[w] or {})[1])
 	ctx:prompt('equip', { n = 1, of = 1, wid = wid }, string.format('equip %s (team %s, no attachments), stand on the ' ..
-		'range start, then !mh ok', w, (W.team[w] or 1) == 1 and 'US' or 'RU'))
+		'range start, then !mh ok', w, (W.teams[w] or 1) == 1 and 'US' or 'RU'))
 	return ctx:wait_until(function() return ctx.ok_flag end, 300, 'equip')
 end
 
@@ -149,7 +149,7 @@ local function run_weapon(ctx, args, w, rng, mode)
 	local O, u = rng.pos, rng.dir
 	local side = V.yrot(u, math.pi / 2)
 	local face_t = V.scale(u, -1)
-	local ts = W.team[w] or 1
+	local ts = W.teams[w] or 1
 	local tt = 3 - ts
 	local shooter, user_sid = nil, nil
 	if mode == 'B' then

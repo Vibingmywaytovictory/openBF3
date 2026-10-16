@@ -217,7 +217,7 @@ end
 function M.module(sc)
 	local e = REG[sc]
 	if e == nil or not e.enabled then return nil end
-	return require(e.module)
+	return e.mod
 end
 
 -- Ticket forecast (DESIGN 3.8, 6.12) --------------------------------------------------------------------------------
@@ -322,7 +322,7 @@ function M.requirements(sc, mod, args, state)
 		if not state.sites_ok then return false, 'site ' .. s .. ' is on another level' end
 	end
 	if need.aimcal and bots.cal == nil then return false, 'aim calibration missing (!mh p0 aim)' end
-	if need.damage and M.p0.damage ~= 'YES' then return false, 'bot damage is not YES (P0.9)' end
+	if need.botdmg and M.p0.damage ~= 'YES' then return false, 'bot damage is not YES (P0.9)' end
 	if need.levels then
 		local okl = false
 		for _, l in ipairs(need.levels) do

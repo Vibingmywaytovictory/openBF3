@@ -39,7 +39,7 @@ def generate(here, write=True):
     if os.path.isfile(lua_path):
         with open(lua_path, encoding='utf-8', newline='') as f:
             cur = f.read()
-    if cur == text:
+    if cur is not None and cur.replace(chr(13) + chr(10), chr(10)) == text:
         return True
     if write:
         with open(lua_path, 'w', encoding='utf-8', newline='\n') as f:

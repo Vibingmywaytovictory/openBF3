@@ -24,7 +24,7 @@ function M.needs(args)
 	local n = { sites = { 'range' } }
 	if (args.mode or 'U') == 'B' then
 		n.aimcal = true
-		n.damage = true
+		n.botdmg = true
 	end
 	return n
 end

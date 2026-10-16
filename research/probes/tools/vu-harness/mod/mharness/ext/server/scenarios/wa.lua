@@ -85,7 +85,7 @@ function M.cost(args)
 	local from = tonumber(args.from or '1') or 1
 	for i, c in ipairs(M.list(args)) do
 		if i >= from then
-			local team = W.team[c.w] or 1
+			local team = W.teams[c.w] or 1
 			local resp = math.ceil(proto_shots(c, args) / (W.ammo_total[c.w] or 150))
 			if team == 1 then
 				c1.s1, c1.d1, c1.r1 = c1.s1 + 1 + resp, c1.d1 + resp, c1.r1 + 1
@@ -115,7 +115,7 @@ local function run_cfg(ctx, c, args, wall, label)
 	local face = V.scale(wall.n, -1)
 	local function stand_at(dd) return L.snap(V.add(wall.pos, V.scale(wall.n, dd))) end
 	local pos = stand_at(d)
-	local team = W.team[c.w] or 1
+	local team = W.teams[c.w] or 1
 	local bot = L.spawn(ctx, team, c.w, pos, face, pose)
 	if bot == nil then return false end
 	ctx.shooter = bot

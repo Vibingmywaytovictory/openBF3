@@ -185,7 +185,7 @@ function L.hits_since(k0, vic)
 end
 
 function L.team_for(w)
-	return W.team[w] or 1
+	return W.teams[w] or 1
 end
 
 function L.kgk()

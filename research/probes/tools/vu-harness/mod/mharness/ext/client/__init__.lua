@@ -18,7 +18,7 @@ local fov = require('mh_fov')
 local cam = require('mh_cam')
 MH.cgs, MH.fov, MH.cam = cgs, fov, cam
 
-local rec = { on = false, gs = false, fov = false, id = 0 }
+local rec = { on = false, gs = false, fov = false, pid = 0 }
 MH.rec = rec
 local full_name = 'mh'
 local hello_sent = false
@@ -43,7 +43,7 @@ NetEvents:Subscribe('mh:ctl', function(msg)
 		if type(msg) ~= 'table' then return end
 		if msg.on then
 			C.adopt(msg.run, msg.sc)
-			rec.on, rec.gs, rec.fov, rec.id = true, msg.gs == true, msg.fov == true, math.tointeger(msg.id) or 0
+			rec.on, rec.gs, rec.fov, rec.pid = true, msg.gs == true, msg.fov == true, math.tointeger(msg.id) or 0
 			fov.reset()
 			cgs.reset()
 		else
