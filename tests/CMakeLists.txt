@@ -705,3 +705,19 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_cl_dir}")
 endif()
+
+# M2a hud (docs/design/m2a.md §1 E10, §11.4; docs/design/m2a-hud.md): ui.hud.feed.unit is the Godot-free half of E10
+# (fill_hud over scripted frames, make_hud_static, the crosshair gap, the stage-to-window mapping, the screen layout on
+# synthetic and hostile trees; no data); ui.hud.feed.install resolves the 12 kit items of §5.6 on the install (names
+# 12/12 through the text database, the M67 through its UI description; _small icons 12/12; the hudmpscreen slots;
+# install.unchanged; 77 without an install).
+openbf3_test(test_ui_hud_feed test_main.cpp ui_hud_feed_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_ui_hud_feed PRIVATE bf3_host)
+add_test(NAME ui.hud.feed.unit COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-unit)
+add_test(NAME ui.hud.feed.install COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-install)
+set_tests_properties(ui.hud.feed.unit PROPERTIES TIMEOUT 120)
+set_tests_properties(ui.hud.feed.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_hud_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui.hud.feed.unit ui.hud.feed.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hud_cl_dir}")
+endif()

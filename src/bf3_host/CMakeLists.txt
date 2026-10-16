@@ -52,3 +52,9 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/client_projectiles.h
     include/bf3/host/hud_feed.h
 )
+
+# M2a hud (docs/design/m2a.md §11.4, docs/design/m2a-hud.md): the HUD feed (fill_hud, HudStatic) and the Godot-free
+# HUD layout (stage to window mapping, the hudmpscreen text slots, the crosshair gap) the Bf3Hud controls draw from.
+target_sources(bf3_host PRIVATE
+    src/hud_feed.cpp
+)
