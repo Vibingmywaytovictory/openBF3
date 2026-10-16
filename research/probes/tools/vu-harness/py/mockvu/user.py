@@ -29,6 +29,8 @@ class User(object):
         self.aim_sd = aim_sd
         self.arm_frac = arm_frac
         self.i_say = 0
+        self.i_say_poll = 0
+        self.moved_out = 0
         self.i_rows = 0
         self.spot = 'deploy'
         self.key = None
@@ -94,6 +96,13 @@ class User(object):
                 self.dead_since = None
         else:
             self.dead_since = None
+        # chat instructions without a prompt row: "step out of the line of fire" (L.wait_clear)
+        while self.i_say_poll < len(self.h.say):
+            line = self.h.say[self.i_say_poll]
+            self.i_say_poll += 1
+            if 'step out of the line of fire' in line:
+                self.moved_out += 1
+                self.goto('deploy')
         rows = self.h.rows
         while self.i_rows < len(rows):
             r = rows[self.i_rows]

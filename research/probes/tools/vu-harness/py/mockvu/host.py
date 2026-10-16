@@ -287,9 +287,15 @@ class Host(object):
         return pid
 
     def leave(self):
-        self.srv.mock.U.leave()
+        """The human leaves; the leave itself happens in a server tick (Player:Left), even when the empty server
+        then idles (idle_advance=False)."""
+        m = self.srv.mock
+        m.U.leave()
         self.local_pid = -1
         self.cli.mock.local_pid = -1
+        m.run_ticks(1)
+        self.k = int(m.k)
+        self.drain()
 
     def console(self, text):
         return self.cli.mock.console_cmd(text)

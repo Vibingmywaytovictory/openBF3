@@ -114,18 +114,18 @@ Type each command in chat (`J` or your chat key) and wait for the `[mh]` reply b
 | # | do | type | you should see |
 |---|---|---|---|
 | 1 | stay on the deploy screen | `!mh help` | a short help in chat (chat works from the deploy screen; write down if not) |
-| 2 | spawn as Assault on the US team (team 1), default M16A3, no attachments | `!mh census` | `[mh] census: api 75/75, assets 14/14, flags 3, tickets 2, console mharness.mh` (numbers vary) |
+| 2 | spawn as Assault on the US team (team 1), default M16A3, no attachments | `!mh census` | `[mh] census: API 180/180 (2 nil), assets 14/14, entity types 6, flags 5, ticket counters 2, vm same, console mharness.mh` (numbers vary; "nil" members exist but were empty, which is fine; an API count below the total: write the line down) |
 | 3 | — | `!mh p0 round` | three bots appear on their bases; after up to 60 s `[mh] round: started, tickets per spawn 1` or `[mh] round: preround` |
 | 3a | only if step 3 said `preround` (likely) | — | do "round: preround" in the failure table now (restart with `-DisablePreRound`, about 10 min), then redo steps 1-3 of this table |
-| 4 | — | `!mh p0 level confirm` | the round restarts (loading screen); then `[mh] level: state kept` (or `state lost`: write it down, it changes step 11) |
+| 4 | — | `!mh p0 level confirm` | the round restarts (loading screen); then `[mh] level: state kept`. If instead the greeting `[mh] mharness ... ready` comes again and no `level:` line follows, the Lua state was lost: write down `state lost` (it changes step 11); the 2 bots of this step stay on the server as orphans (`!mh clear` no longer knows them; they are harmless, a server restart removes them) |
 | 5 | — | `!mh p0 tick` | after 10 s: `[mh] tick: 30.0 Hz, 300 ticks / 10.0 s, mode regular` |
 | 6 | stand 15-30 m from a large flat wall, look at its middle, away from any flag | `!mh wall` | `[mh] wall ok: 24.7 m, incidence 3 deg, flat 0.6 cm` or a reason to pick another wall |
 | 7 | anywhere | `!mh p0 aim` | a bot turns and fires a few shots at the ground; `[mh] aim: convention <x>, error 0.1 deg` |
 | 8 | stay where you are | `!mh p0 bots` | two bots appear in front of you, crouch, go prone, move, switch to a pistol, vanish; `[mh] bots ok 7/7` |
 | 9 | step 3 m to the side | `!mh p0 fire` | a bot fires 10 rounds at the wall; `[mh] fire: shots 10, hits 10, auto yes, gs 1.0/tick` |
 | 10 | — | `!mh p0 damage` | a bot shoots another bot: `[mh] bot damage: YES`, `NO (arbitration)` or `NO (aim)` (write it down) |
-| 11 | fire 3 rounds at the wall yourself | `!mh p0 human` | `[mh] human shots seen: yes/no` |
-| 12 | — | step 9 below (extraction check) | — |
+| 11 | face the wall | `!mh p0 human`, then within 30 s fire 3 rounds at the wall | `[mh] fire 3 rounds at a wall now (30 s)`, then `[mh] human shots seen: true (shots 3, hits 3)` |
+| 12 | — | `!mh p0 log`, then step 9 below (extraction check) | `[mh] log: test row written; run extract.py --dry-run (RUNBOOK step 9)` |
 | 13 | — | `!mh p0 report` | one line per step, all `ok`, and the queue line to use in step 11 |
 
 ## 9. Extraction check (2 min, server keeps running)
@@ -133,7 +133,8 @@ Type each command in chat (`J` or your chat key) and wait for the `[mh]` reply b
 ```powershell
 python -I "$H\extract.py" --session 20261016 --server-logs "$I\logs" --client-logs "$env:LOCALAPPDATA\VeniceUnleashed" --out "$R\research\measurements" --dry-run
 ```
-Expected: `runs: ...-P0-30-...` with row counts, `malformed 0`, `gaps 0`, `trunc 0`.
+Expected: `runs: ...-P0-30-...` with row counts, `malformed 0`, `q gaps 0`, `trunc 0`. No runs found: list the log
+folder; if the files do not end in `.log`, add `--glob "*.txt"` (or the pattern you see).
 
 ## 10. Attended Session 1 (75-90 min; stop whenever you want, in this order)
 
@@ -226,7 +227,8 @@ screenshots or videos: they hold names and addresses; the run folders hold numbe
 | No `join with ... connect <guid>` line | Close the server, start it again **without** `-unlisted`, and join `mh-measure` from the server browser with the password. Or take the key's guid from the VU key portal where you made your server key (it is the same key as your normal server's). |
 | No `[mh]` greeting, no `[mharness]` lines in the server log | Check `ServerMeasure\Admin\ModList.txt` says `mharness` and `Admin\Mods\mharness\mod.json` exists; rerun step 5; restart the server. |
 | No log file at all in `ServerMeasure\logs` | Restart the server with `-debuglog` added to the launch line. |
-| Chat commands get no answer | Open the client console (`~`) and type `mh status`; if unknown, `mharness.mh status` (the greeting names the right one). If that works, type every command there without the `!`. |
+| Chat commands get no answer | Open the client console (`~`) and type `mh status`; if unknown, `mharness.mh status` (the greeting names the right one; `!mh census` reports it as `console ...`). If that works, type every command there without the `!`; the replies appear in the console. |
+| `[mh] step out of the line of fire` | You stand between a bot and its target or wall. Walk a few metres to the side or back; the scenario continues by itself (it waits up to 120 s, then skips the config). |
 | `bot damage: NO (arbitration)` | Expected possibility. Run W-B, S-A and W-C with `mode=U` (you shoot). The overnight queue is unaffected. |
 | `bot damage: NO (aim)` | `!mh p0 aim`, then `!mh p0 damage` again. Still `NO (aim)`: carry on in `mode=U`. |
 | `round: preround` | Expected. Close the server window first (the client can stay in the menu). Run `pwsh -NoProfile -File "$H\ps\setup-instance.ps1" -Session s1 -DisablePreRound` (no `-CopyKeyFrom`: it keeps your key and your password), start the server again (step 6), rejoin (step 7), redo Phase 0 from `!mh census`. |

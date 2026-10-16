@@ -1090,14 +1090,14 @@ The journal must show, for every e2e run: no `Pass`/`Return`; no write to any ob
 (flags, tickets, world); writes only of `bot_assign` fields on bot players and their `EntryInput`s; every fixture call
 (`fixture_calls`) followed within the same tick by an `fx` row for that bot; every `RCON:SendCommand` a whitelisted read without arguments, or an admin command followed by `fx act=admin`. A test fails otherwise.
 
-### 13.5 Scenario coverage (e2e runs in `tests/test_mock_e2e.py`)
+### 13.5 Scenario coverage (e2e cases in `mockrun.py`; `--list` prints them with their suites)
 
 | run | laws / faults | expected |
 |---|---|---|
 | P0 all | defaults | every `p0` step `ok`; census api N/N; `vm` reported; extractor 0 malformed |
-| P0 faults | `bot_damage=no`, `ef_bullets=no`, `gs_cadence=frame:2`, `preround=yes`, `chat=off` (console) | P0.9 "NO (arbitration)", P0.7/P0.8 fallbacks reported, P0.13 "preround", commands via console (`mharness.mh`) still work |
+| P0 faults | `bot_damage=no`, `ef_bullets=no`, `gs_cadence=frame:2`, `preround=yes`, `chat=off` (console) | P0.9 "NO (arbitration)", P0.7 not ok with `shots 0, fs 10` (the `gs.fs` fallback count), P0.8 reported, P0.13 "preround", commands and replies via the console path |
 | P0 aim fault | aim offset 30° on bots (`aim_bias`) | P0.9 "NO (aim)", not "NO (arbitration)" |
-| P0 level | `rr_state=kept` / `lost` | P0.15 ok / fail; with `lost` the queue refuses `rr` and `nextmap` |
+| P0 level | `rr_state=kept` / `lost` | P0.15 ok (in P0 all) / no P0.15 row at all (the run dies with its Lua state, the greeting comes again); with `lost` the queue refuses `rr`; the old state's bots stay as orphans (reported as a note) |
 | fire mode | `fire_mode=single` (cycled to auto) / `fire_mode=stuck` | W-A all parts / parts a and c only with `no-auto` marks; FIRE_N timeouts counted |
 | input dt | `input_dt=required` | every B scenario still works (the mod sets `deltaTime`) |
 | no server GunSway | `gs_server=no` | P0.7 reports `src=poll` only; W2-W4 verdicts unchanged from `src=poll` |
@@ -1111,16 +1111,16 @@ The journal must show, for every e2e run: no `Pass`/`Return`; no write to any ob
 | W-B mode B | `falloff=linear` / `smooth`; `m98b_end=150` / `120` | W5 verdicts |
 | W-B mode U | `bot_damage=no`; the scripted user equips and shoots on prompts, 10 % of its "chest" hits land on an arm; a 150 m range | W5 from user shots (`cli` true) still `linear` (per-bone normalisation); M98B end knot `inconclusive` (range < 160 m); prompts answered; target respawns equal the heal-policy forecast; no bot-bullet damage rows |
 | S-A mode B / U | `regen_delay=10` / `16`; `supp_abort=on`; `supp_effect=none` (bot bullets do not suppress) | S1 verdicts; S2 report; with `supp_effect=none` "suppression not induced" and no SUPP verdict; REGEN reps without respawns |
-| M-A Metro + Bazaar | `bleed=A` / `B`; `rr` and `nextmap` in the queue; `level_change=reloaded`; low tickets for team 2 at start | M1 verdicts from hold windows only; adaptive mirroring used; queue resumes after the level change |
-| tickets | the RUNBOOK queue with `tcost=1/1/1`; and one without the leading `rr` after the attended block | forecast printed per item; the second queue line refused at queue time with the reason; the guard never trips in the first |
-| queue validation | `!mh queue WB:B` without a range site; `WA` without a wall | refused at queue time, nothing queued |
-| M-B | `capture=model` / `linear_n` | M2 verdicts |
+| M-A | `bleed=A` / `B` (single runs); and `queue MA rr nextmap MA` after `p0 level confirm` | M1 verdicts from hold windows only; four ends `done`; the second MA runs on MP_001 |
+| tickets | 120/120 tickets, `tcost=1/1/1`: a 7-item MB line, then one MB; 110/110 with `tcost` spawn 8 for a W-A run | the long line refused with "forecast ... put rr before it"; the accepted item prints its forecast (T1 109 T2 112: the user's own spawn cost one); the under-forecast run trips the guard (`guard`, item requeued, queue paused) |
+| queue validation | `!mh queue WB:B`, `SB WA:tier1`, `MA WA:tier1`, `MA SA:B`, `run WA` with no sites | each refused at queue time with the missing site, nothing queued, nothing started |
+| M-B | `capture=model` + `flip=lose_get` / `capture=linear_n` + `flip=direct` | M2 and M2-flip verdicts (the direct flip never reads neutral: the reset treats "taken, not controlled" as neutral) |
 | W-C | `blast=linear` / `quadratic` | W7 report |
 | W-D | client realm: pred/corr gs rows, fov rows for 3 zoom levels | fov within 0.1° of the mock's vertical FOV |
-| stuck | `spawn_fails` on W-A config 2 | `timeout` → `cfg-skip`; 3 skips → `aborted`; the queue continues with the next item |
-| repeats | `!mh run WA` twice, `stop` twice, `wall` twice, `clear` twice, duplicate `queue` items, `ok` with no prompt | one shooter bot at a time; idle replies as in §5; no orphan bots (PlayerManager count) |
-| no human | `idle_advance=no`, the user disconnects mid-queue and returns | `human-left` mark, pause, resume, run completes |
-| log faults | `print_limit=600`, `log_drop=0.01`, garbage lines | extractor counts `trunc`/gaps/malformed; exit code 2 above 1 % |
+| stuck | `spawn_fails=WA:1` (config 1 spawns are no-ops); `WA:*` with `queue WA:rest:parts=b,c,d SB` | `cfg-skip`, run `done`; every config skipped → one `aborted` end mark ("3 consecutive skips"), then SB `done`; no orphan bots |
+| repeats | `run WA` twice, `clear` while running, `ok` with no prompt, `queue` of two items while running, `queue`, `queue clear` twice, `stop` twice, `wall` twice, `clear` twice, unknown verb, `run XX`, `queue NOPE:x`, `status` | the replies of §5; the queued items never start; no handler errors; no orphan bots (PlayerManager count) |
+| no human | the user leaves 8 s into a W-A run and comes back: `idle_advance=no` (30 s away) and `yes` (150 s away, longer than the 120 s stall timeout) | `human-left` and `human-back` marks, no `stalled`, the run ends `done` |
+| log faults | `print_limit=600`, `log_drop=0.01`, `log_garbage=0.002` | extractor exit 0 or 2, malformed rows and q gaps counted per run; W2 still analysed from the damaged runs |
 
 Default suite: scaled protocols (`scale`, `parts`) so the whole e2e set runs in a few minutes; `--full` runs the full
 tier-1 W-A protocol and the whole overnight queue at 30 Hz (≈ 0.6 M ticks) as a stress run.
@@ -1164,9 +1164,9 @@ rules); tests must not depend on their exact values.
 | `tests/test_extract.py` | tiny fixture logs (server + client format, header lines); malformed: truncated JSON, 100 KiB line, NaN, invalid UTF-8, duplicate keys, deep nesting, missing envelope keys, wrong types, GUID/IP strings, unknown keys, unknown `e`; idempotence (byte-identical rerun); refusals (install path, normal instance); run split incl. client rows; gzip threshold |
 | `tests/test_stats.py` | KS statistic and p-value against known values; bootstrap critical value reproducible with a seed; fits on exact synthetic curves |
 | `tests/test_synth_rules.py` | `synth.py` generates logs for **both** variants of each rule (W1 area/radius; W2 decay 15/8, min rise; W3 linear/exp, hcorr; W4 release/recovered/timer; W5 linear/smooth, 150/120; S1 10/16 s; S3 fraction/linear, g; M1 A/B; M2 model/alt; T1 equal/coupled) with seeds; `extract` → `analyze` returns the generating variant; `inconclusive` when n is too small |
-| `tests/test_mock_e2e.py` | the §13.5 runs: scenario in → rows → extract → analyze → expected verdict; every printed row validates against the schema; the journal passes §13.4; Lua line coverage of the mod over the suite (host-side `debug.sethook`, invisible to the mod) reported per file, target ≥ 85 % of executable lines, uncovered lines listed |
+| `mockrun.py --suite all` (stage mock-e2e) | the §13.5 runs: scenario in → rows → extract → analyze → expected verdict; every printed row validates against the schema; the journal passes §13.4; `--coverage` adds the Lua line coverage of the mod over the suite (host-side `debug.sethook`, invisible to the mod) per file with the uncovered lines (approximate executable lines; reported, not a gate); on a full pass `--write-cert` writes `mh_cert.lua` |
 | `tests/ps/run-ps-tests.ps1` | §11.1 and §11.2 tests on scratch trees under the scratchpad (plain asserts; no Pester needed) |
-| `--with-install` | adds the read-only real-install manifest (summary line only) |
+| real install | the read-only real-install manifest (summary line only) runs by default; `--no-install` skips it |
 
 `check_all.py` exits 0 only if every stage passes and prints one PASS/FAIL line per stage.
 
@@ -1235,3 +1235,40 @@ commands, `census`, `status` and the site commands work.
   cross-checks and per-bone fits, W4 measured-gap bins, W3 minimum samples, unit plumbing (§10.3), S1 suppression
   evidence, M-A hold windows and M-B n-th-attacker timing, the staged `--phase0` gate (§14). The inventory gained 29
   entries (308/308 confirmed against VU-Docs; `vudocs.py` learned kind `dtype`); `rows_v1.json` gained the new fields.
+* **2026-10-16, build pass 4 (mock VU and the end-to-end suite).** Built: `py/mockvu` (two `lupa.lua54` runtimes,
+  server and client, proxies checked against `api_inventory.json` with a write journal, §13.4 checks into the journal,
+  ticks run 10 at a time inside Lua, NetEvents delivered one tick later both ways, client frames fed from per-tick
+  server snapshots), the scripted user (`user.py`: Python generators, one yield per chunk; responders answer `prompt`
+  rows; it also steps out of the line of fire when the chat says so), `levels.py` (mock Metro and Bazaar layouts) and
+  `mockrun.py` with 43 cases (`--list`; suite `phase0` = P0, fault, attended-U, stuck, repeats, log-fault and
+  queue-validation cases). No VU process was started; every number below comes from the mock.
+* Mod defects the e2e suite found and fixed: shooter bots never reloaded in W-B and S-A, so long series ran dry and
+  every later distance was skipped (`L.keep_loaded`: reload before the shot, or respawn at the last spawn spot when the
+  reserve is gone; zoom restored); the M-B reset waited forever for a neutral flag under a direct flip (now "taken by the
+  other team, not controlled" counts as neutral once a direct flip has been seen, marked `direct-flip`); `Ctx:abort`
+  wrote a second `aborted` end mark (the runner's end mark is now the only one); S-A U immune taps and W-C equip order
+  in the mock user. Analysis: the W5 `|dist − fxd|` screen was 0.5 m, but a clean hit reads ~0.6 m short (bullet origin
+  ahead of the shooter position, hit point on the body surface): now 1.0 m (`FXD_TOL`). P0.8's angle limit is 0.05°
+  (bullet drop over the first tick's chord passes). The census counts a member that reads `nil` as present and reports
+  how many did (`API n/N (k nil)`); RUNBOOK step 8.2 says so.
+* Mock-side fixes (not mod behaviour): the out-of-band row scan restarts at every drain (false "fixture without fx row"
+  journal entries before); coverage hooks every new coroutine and starts before the mod loads; a human leaving happens
+  inside a server tick even when the empty server then idles (`idle_advance=no`).
+* Law pairs the mock cannot tell apart, by design of the rule, and how the cases avoid them: W4 `recovered` vs
+  `release` look alike when recovery is linear and fast, so the W4 cases run with `recovery=exp`; W1 needs two decisive
+  configs (§10.2), so W1 cases run `tier=1` (two configs), and one config is `inconclusive` by rule; the W1 critical
+  values come from a seeded Monte Carlo (`stats.w1_crit`), so a verdict within its Monte Carlo error of the critical
+  value can flip with the seed (the cases sit far from it).
+* As built, not as designed: W3's while-firing decay ratio is not computed (the result says so in its notes);
+  W2-minrise reads `immediate` only when `da` reaches the moving minimum in the same tick; time is k/hz from the PreSim
+  tick counter (P0.3 checks the clock); bot ownership is by player id (`bots.owns`); `extract.py --glob` (default
+  `*.log`) selects log files.
+* Covered by the e2e suite: every scenario (P0, W-A incl. 60 Hz for T1, S-B, W-B B/U, S-A B/U, M-A incl. a queue with
+  `rr` and `nextmap` across two levels, M-B, W-C, W-D client rows) under both law variants of each rule it feeds, bot
+  damage off (W-B U, P0 faults), GunSway every frame and every 3rd frame, server GunSway absent, fire mode single/stuck,
+  input deltaTime required, stuck and aborted runs, repeated and stray commands, the human leaving, log damage, ticket
+  forecast and guard, queue validation, and a lost Lua state. Not covered: the full overnight queue at full scale
+  (`--full`, ≈ 0.6 M ticks) was not run in this pass; the default suite runs scaled protocols (`scale`, `parts`).
+  Lua line coverage over the suite is reported by `mockrun.py --coverage` (approximate executable lines).
+* Everything the mock assumes about VU (§13.8) remains a Phase 0 live check; a shared wrong assumption passes the mock
+  and fails live.

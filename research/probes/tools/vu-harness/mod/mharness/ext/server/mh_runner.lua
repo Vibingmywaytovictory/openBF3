@@ -151,8 +151,8 @@ function Ctx:need_site(name)
 	return s
 end
 
+-- abort(why): ends the run; the runner writes the one 'aborted' end mark with the reason.
 function Ctx:abort(why)
-	self:mark('aborted', { x = { why = R.label(why) } })
 	error(err_obj('abort', why), 0)
 end
 

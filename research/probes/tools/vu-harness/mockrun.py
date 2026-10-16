@@ -561,6 +561,336 @@ def c_wd(env):
     srows = [r for run in runs if run.sc == 'WD' for r in run.rows if r.get('r') == 'S' and r.get('e') == 'shot']
     env.check('server shot rows for the human', len(srows) >= 90, '%d' % len(srows))
 
+# robustness: queue, repeats, stuck runs, human leaving, log faults, ticket forecast, Phase 0 faults ------------------
+def wait_ends(u, n, timeout, start):
+    """Collect n run end marks (sc, status) from row index `start`."""
+    out = []
+    i = start
+    k1 = u.h.k + int(timeout * u.h.hz)
+    while len(out) < n:
+        while i < len(u.h.rows):
+            r = u.h.rows[i]
+            i += 1
+            if r.get('e') == 'mark' and r.get('r') == 'S' and r.get('lbl') in US.STATUSES:
+                out.append((r.get('sc'), r['lbl']))
+        if u.h.k > k1:
+            raise US.Timeout('%d of %d run ends seen: %s' % (len(out), n, out))
+        yield
+    return out
+
+
+def say_all(u, text, wait_s=3.0):
+    """Send a command and return every reply line seen within wait_s."""
+    yield from u.wait_idle()
+    u.new_say()
+    u.cmd(text)
+    yield from u.wait(wait_s)
+    return u.new_say()
+
+
+@case(('phase0', 'all'))
+def c_stuck(env):
+    """a config whose spawns are no-ops is skipped (run done); every spawn blocked: WA aborts after 3 skips and the
+    next queue item still runs; no orphan bots either way."""
+    h, u = env.host({'spawn_fails': 'WA:1'})
+    env.drive(h, u, wa_script(u, wa_args(env, 'a,b', scale='0.05')), 20000)
+    env.check('WA:1 blocked: run done', u.status == 'done', str(u.statuses))
+    env.check('cfg-skip marked', marks(h, 'cfg-skip', 'WA'), '')
+    env.check('no orphan bots (1)', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+    h, u = env.host({'spawn_fails': 'WA:*'}, tag='h2')
+
+    def script():
+        yield from US.setup(u, ('wall', 'flat'), aim=True)
+        start = len(h.rows)
+        u.lines = yield from say_all(u, 'queue WA:rest:parts=b,c,d:scale=0.05 SB:scale=0.34')
+        u.ends = yield from wait_ends(u, 2, 20000, start)
+    env.drive(h, u, script(), 30000)
+    env.check('queue accepted', any(re.match(r'^\[mh\] 2 SB', x) for x in u.lines), str(u.lines[:3]))
+    env.check('WA aborted, SB done', u.ends == [('WA', 'aborted'), ('SB', 'done')], str(u.ends))
+    ab = marks(h, 'aborted', 'WA')
+    env.check('abort reason 3 skips', ab and '3 consecutive skips' in json.dumps(ab[-1]), json.dumps(ab[-1:])[:200])
+    env.check('no orphan bots (2)', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+    code, runs, text = env.extract(0)
+    env.check('aborted run extracted', any(r.sc == 'WA' for r in runs), str([r.id for r in runs]))
+
+
+@case(('phase0', 'all'))
+def c_repeats(env):
+    """repeated and stray commands: second run refused, stop twice, sites twice, clear twice, duplicate queue items,
+    ok without a prompt, unknown verbs; no handler errors, no orphan bots."""
+    h, u = env.host({})
+
+    def script():
+        yield from US.setup(u, ('wall',), aim=True)
+        r = {}
+        start = len(h.rows)
+        u.cmd('run WA ' + wa_args(env, 'a', scale='0.5'))
+        yield from u.wait(3)
+        r['again'] = yield from say_all(u, 'run WA ' + wa_args(env, 'a', scale='0.1'))
+        r['clear_busy'] = yield from say_all(u, 'clear')
+        r['ok'] = yield from say_all(u, 'ok')
+        # the queue starts only when idle: queue, show and clear it while WA runs
+        r['q1'] = yield from say_all(u, 'queue MA:hold=20 MA:hold=20')
+        r['qshow'] = yield from say_all(u, 'queue')
+        r['qclear'] = yield from say_all(u, 'queue clear')
+        r['qclear2'] = yield from say_all(u, 'queue clear')
+        r['stop1'] = yield from say_all(u, 'stop', 0.1)
+        r['stop2'] = yield from say_all(u, 'stop')
+        r['ends'] = yield from wait_ends(u, 1, 60, start)
+        r['wall2'] = yield from say_all(u, 'wall')
+        r['wall3'] = yield from say_all(u, 'wall')
+        r['clear1'] = yield from say_all(u, 'clear')
+        r['clear2'] = yield from say_all(u, 'clear')
+        r['bogus'] = yield from say_all(u, 'bogus verb')
+        r['badrun'] = yield from say_all(u, 'run XX')
+        r['badq'] = yield from say_all(u, 'queue NOPE:x')
+        r['status'] = yield from say_all(u, 'status')
+        u.r = r
+    env.drive(h, u, script(), 3000)
+    r = u.r
+
+    def has(key, rx):
+        env.check('%s: %s' % (key, rx), any(re.search(rx, x) for x in r[key]), str(r[key][:3]))
+    has('again', r'already running WA')
+    has('clear_busy', r'running WA: !mh stop first')
+    env.check('ok without prompt: no reply', not r['ok'], str(r['ok']))
+    has('stop1', r'stopping WA')
+    has('stop2', r'nothing running')
+    env.check('run stopped', r['ends'] == [('WA', 'stopped')], str(r['ends']))
+    has('wall2', r'^\[mh\] wall ')
+    has('wall3', r'^\[mh\] wall ')
+    has('clear1', r'removed \d+ bots')
+    has('clear2', r'removed 0 bots')
+    has('q1', r'^\[mh\] 2 MA:hold=20')
+    has('qshow', r'^\[mh\] 2 MA:hold=20')
+    has('qclear', r'queue cleared')
+    has('qclear2', r'queue cleared')
+    has('bogus', r'unknown verb bogus')
+    has('badrun', r'run <SC>')
+    has('badq', r'nothing queued: unknown item')
+    has('status', r'queue empty')
+    env.check('no MA started', not [m for m in marks(h, 'run-start') if (m.get('x') or {}).get('sc') == 'MA'], '')
+    env.check('no orphan bots', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+
+
+def no_human_script(env, u, h, idle_s):
+    yield from US.setup(u, ('wall',), aim=True)
+    start = len(h.rows)
+    u.cmd('run WA ' + wa_args(env, 'a', scale='0.1'))
+    yield from u.wait(8)
+    h.leave()
+    u.joined = False
+    for _ in range(int(idle_s * h.hz / 10)):
+        yield
+    u.join()
+    u.spawn('wall')
+    u.ends = yield from wait_ends(u, 1, 3000, start)
+
+
+@case()
+def c_no_human(env):
+    """the human leaves mid-run: human-left / human-back marks, no stall (idle server frozen, or 150 s of ticks
+    with nobody on), the run still ends done."""
+    for i, (adv, idle_s) in enumerate(((False, 30), (True, 150))):
+        h, u = env.host({'idle_advance': adv}, tag='h%d' % (i + 1))
+        env.drive(h, u, no_human_script(env, u, h, idle_s), 6000)
+        env.check('idle_advance=%s: marks' % adv, marks(h, 'human-left') and marks(h, 'human-back'), '')
+        env.check('idle_advance=%s: WA done' % adv, u.ends == [('WA', 'done')], str(u.ends))
+        env.check('idle_advance=%s: no orphans' % adv, bots_left(h) == 0, 'bots %d' % bots_left(h))
+        env.journal(h)
+
+
+@case(('phase0', 'all'))
+def c_log_faults(env):
+    """print_limit 600 B, 1 % dropped lines, 0.2 % garbage lines: the extractor reports malformed rows and q gaps
+    (exit 2 when malformed > 1 %), never crashes; analysis of the damaged runs still returns verdicts."""
+    h, u = env.host({'print_limit': 600, 'log_drop': 0.01, 'log_garbage': 0.002, 'recovery': 'exp'})
+    env.allow_viol = True
+    env.drive(h, u, wa_script(u, wa_args(env, 'a,b', scale='0.1')), 20000)
+    env.check('WA done', u.status == 'done', str(u.statuses))
+    code, runs, text = env.extract(None)
+    env.check('extract exit 0 or 2', code in (0, 2), 'exit %s' % code)
+    m = re.search(r'(\d+) malformed', text)
+    env.check('malformed counted', m and int(m.group(1)) > 0, text.splitlines()[0][:200])
+    gaps = [r.meta.get('q_gaps') for r in runs if r.meta.get('q_gaps')]
+    env.check('q gaps counted', gaps, str(gaps)[:200])
+    try:
+        res = env.analyze(runs, ['W1', 'W2', 'W3', 'W4'])
+        env.check('analysis on damaged runs', any(r.item == 'W2' for r in res), '')
+    except Exception as ex:  # noqa: BLE001 - the check is "no crash"
+        env.check('analysis on damaged runs', False, repr(ex)[:200])
+
+
+@case(('phase0', 'all'))
+def c_queue_validation(env):
+    """items whose sites, aim calibration or bot-damage verdict are missing are refused as a whole line."""
+    h, u = env.host({})
+
+    def script():
+        u.join()
+        u.spawn('deploy')
+        yield from u.wait(3)
+        r = {}
+        r['wbb'] = yield from say_all(u, 'queue WB:B')
+        r['sb'] = yield from say_all(u, 'queue SB:scale=0.2 WA:tier1')
+        r['wa'] = yield from say_all(u, 'queue MA WA:tier1')
+        r['sab'] = yield from say_all(u, 'queue MA SA:B')
+        r['runwa'] = yield from say_all(u, 'run WA')
+        r['show'] = yield from say_all(u, 'queue')
+        u.r = r
+    env.drive(h, u, script(), 600)
+    r = u.r
+    for key, rx in (('wbb', r'nothing queued: WB:B refused: site range missing'),
+                    ('sb', r'nothing queued: SB:scale=0.2 refused: site flat missing'),
+                    ('wa', r'nothing queued: WA:tier1 refused: site wall missing'),
+                    ('sab', r'nothing queued: SA:B refused: site range missing'),
+                    ('runwa', r'site wall missing'), ('show', r'queue empty')):
+        env.check('%s: %s' % (key, rx), any(re.search(rx, x) for x in r[key]), str(r[key][:3]))
+    env.check('nothing started', not marks(h, 'run-start'), '')
+    env.journal(h)
+
+
+@case()
+def c_tickets(env):
+    """ticket forecast: a line that would end below the guard is refused ('put rr before it'); an accepted item
+    shows its forecast; a run that burns more than forecast trips the guard (status guard, item requeued, queue
+    paused)."""
+    h, u = env.host({'tcost': {'spawn': 1, 'kill': 1, 'remove': 1}}, level_opts={'tickets1': 120, 'tickets2': 120})
+
+    def script():
+        u.join()
+        u.spawn('deploy')
+        yield from u.wait(3)
+        u.refused = yield from say_all(u, 'queue ' + ' '.join(['MB:scale=0.34'] * 7))
+        start = len(h.rows)
+        u.acc = yield from say_all(u, 'queue MB:scale=0.34')
+        u.ends = yield from wait_ends(u, 1, 3000, start)
+    env.drive(h, u, script(), 4000)
+    env.check('long line refused', any(re.search(r'refused: forecast T1 \d+ T2 \d+ < 60, put rr before it', x)
+                                       for x in u.refused), str(u.refused[:2]))
+    env.check('forecast line', any(re.search(r'^\[mh\] 1 MB:scale=0.34 \+\d+min T1 109 T2 112', x) for x in u.acc),
+              str(u.acc[:2]))
+    env.check('MB done', u.ends == [('MB', 'done')], str(u.ends))
+    env.journal(h)
+    h, u = env.host({'tcost': {'spawn': 8, 'kill': 1, 'remove': 0}}, level_opts={'tickets1': 110, 'tickets2': 110},
+                    tag='h2')
+
+    def script2():
+        yield from US.setup(u, ('wall',), aim=True)
+        start = len(h.rows)
+        u.cmd('run WA ' + wa_args(env, 'a,b', scale='0.2'))
+        u.ends = yield from wait_ends(u, 1, 3000, start)
+        yield from u.wait(2)
+        u.st = yield from say_all(u, 'status')
+    env.drive(h, u, script2(), 4000)
+    env.check('guard tripped', u.ends == [('WA', 'guard')], str(u.ends))
+    env.check('tickets-low message', any('tickets low' in x for x in u.h.say), '')
+    env.check('item requeued, queue paused', any(re.search(r'queue 1:WA.*\(paused tickets\)', x) for x in u.st),
+              str(u.st))
+    env.check('no orphan bots', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+
+
+@case()
+def c_ma_queue(env):
+    """queue MA rr nextmap MA after P0.15 kept: two MA runs on MP_Subway and MP_001, both M1 verdicts."""
+    h, u = env.host({'bleed': 'A'})
+
+    def script():
+        u.join()
+        u.spawn('deploy')
+        yield from u.wait(3)
+        st = yield from u.run('p0 level confirm', 'P0', 400)
+        u.p0 = st
+        yield from u.wait(20)
+        start = len(h.rows)
+        u.q = yield from say_all(u, 'queue MA:hold=40 rr nextmap MA:hold=40')
+        u.ends = yield from wait_ends(u, 4, 6000, start)
+    env.drive(h, u, script(), 8000)
+    env.check('P0 level done', u.p0 == 'done', str(u.p0))
+    env.check('queue lines', any(re.match(r'^\[mh\] 4 MA:hold=40', x) for x in u.q), str(u.q[:4]))
+    env.check('four ends done', [s for _, s in u.ends] == ['done'] * 4, str(u.ends))
+    env.check('MP_001 loaded', any('level-loaded Levels/MP_001' in w for _, w in h.marks), str(h.marks[-3:]))
+    env.journal(h)
+    code, runs, text = env.extract(0)
+    ma = [r for r in runs if r.sc == 'MA']
+    env.check('two MA runs', len(ma) == 2, str([r.id for r in runs]))
+    lv = set(r.metas[0].get('lvl') for r in ma if r.metas)
+    env.check('MA on both levels', len(lv) == 2, str(lv))
+    res = env.analyze(runs, ['M1'])
+    env.verdict(res, 'M1', 'A')
+
+
+@case(('phase0', 'all'))
+def c_p0_faults(env):
+    """bot damage off, no linked bullets, server GunSway every 2nd frame, preround, chat off (console path)."""
+    laws = {'bot_damage': False, 'ef_bullets': False, 'gs_cadence': 'frame:2', 'preround': True, 'chat': False}
+    h, u = env.host(laws, via='console')
+    u.responders['fire3'] = US.respond_fire3
+    env.drive(h, u, p0_script(u, level=False, round_=True), 3600)
+    vals = {}
+    for s in P0_STEPS[:-1]:
+        rows = p0_rows(h, s)
+        vals[s] = (rows[-1].get('ok'), rows[-1].get('val')) if rows else (None, None)
+    env.notes.append('P0 values: ' + json.dumps(vals)[:600])
+    rep = p0_rows(h, 'P0.14')
+    rv = rep[-1]['val'] if rep else {}
+    env.check('replies over the console path', u.census_line.startswith('[mh] census:'), u.census_line)
+    env.check('P0.9 NO-arb', rv.get('damage') == 'NO-arb', json.dumps(rv)[:200])
+    env.check('P0.13 not ok (preround)', vals['P0.13'][0] is False, json.dumps(vals['P0.13'])[:200])
+    env.check('P0.8 reported', vals['P0.8'][0] is not None, json.dumps(vals['P0.8'])[:200])
+    v7 = vals['P0.7'][1] or {}
+    env.check('P0.7 no EF bullets: shots 0, fs 10, srv gs', vals['P0.7'][0] is False and v7.get('shots') == 0 and
+              v7.get('fs') == 10 and v7.get('gsrc') == 'srv', json.dumps(v7)[:200])
+    env.check('no orphan bots', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+    env.extract(0)
+
+
+@case()
+def c_p0_aim_fault(env):
+    """bots aim 30 deg off: P0.9 reports NO-aim (not NO-arb)."""
+    h, u = env.host({'aim_bias': 30.0})
+    u.responders['fire3'] = US.respond_fire3
+    env.drive(h, u, p0_script(u, level=False, round_=False), 3600)
+    rep = p0_rows(h, 'P0.14')
+    rv = rep[-1]['val'] if rep else {}
+    env.check('P0.9 NO-aim', rv.get('damage') == 'NO-aim', json.dumps(rv)[:200])
+    env.journal(h)
+
+
+@case()
+def c_p0_level_lost(env):
+    """a round restart reloads the Lua state: P0.15 lost, rr/nextmap refused in the queue; bots created by the old
+    state stay on the server (RUNBOOK: kick them or restart the server)."""
+    h, u = env.host({'rr_state': 'lost'})
+    env.allow_err = True
+
+    def script():
+        u.join()
+        u.spawn('deploy')
+        yield from u.wait(3)
+        u.cmd('p0 level confirm')
+        k1 = h.k + 400 * h.hz
+        while not any(w == 'mod-reload' for _, w in h.marks):
+            if h.k > k1:
+                raise US.Timeout('no mod reload')
+            yield
+        yield from u.wait(25)
+        u.q = yield from say_all(u, 'queue rr')
+    env.drive(h, u, script(), 3000)
+    rows = p0_rows(h, 'P0.15')
+    env.check('no P0.15 kept row (the run died with its Lua state)', not [r for r in rows if r.get('ok') is True],
+              json.dumps(rows[-1:])[:200])
+    env.check('ready banner twice', sum(1 for x in h.say if re.search(r'mharness \S+ ready', x)) >= 2,
+              str([x for x in h.say if 'ready' in x]))
+    env.check('rr refused', any('round restart not verified' in x for x in u.q), str(u.q[:2]))
+    code, runs, text = env.extract(0)
+    env.notes.append('bots left after the Lua reload: %d' % bots_left(h))
+
 # -- coverage ------------------------------------------------------------------------------------------------------
 CODE_LINE = re.compile(r'^\s*(?:end[,)]*|else|\}[,)]*|\)|do|then|return|break|local function [\w.:]+\(.*\)|function [\w.:]+\(.*\))?\s*$')
 
