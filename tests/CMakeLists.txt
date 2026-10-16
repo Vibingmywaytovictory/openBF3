@@ -705,3 +705,16 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_cl_dir}")
 endif()
+
+# M2a fx2 (docs/design/m2a-fx2.md): fx.render.unit, VFX2's render preparation (batch keys and order, back-to-front sort,
+# the instance layout, alpha-level packing, default-texture fallbacks, the light merge and the 64-light pool) and the
+# prepared atlas pixels (NormalDXT5RGA -> BC5, the cache blob's round trip, truncations, mutations; also in the asan
+# preset). No install, no Godot.
+openbf3_test(test_fx_render test_main.cpp fx_render_tests.cpp fx_test_support.h test_support.h)
+target_link_libraries(test_fx_render PRIVATE bf3_fx)
+add_test(NAME fx.render.unit COMMAND test_fx_render --test-suite=fx-render-unit)
+set_tests_properties(fx.render.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.render.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx2_cl_dir}")
+endif()

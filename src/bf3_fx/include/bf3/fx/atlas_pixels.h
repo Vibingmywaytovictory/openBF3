@@ -13,11 +13,13 @@
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/res/dx_texture.h"
+#include "bf3/core/res/res_loader.h"
 #include "bf3/core/result.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/fx/emitter_atlas.h"
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -49,6 +51,20 @@ struct AtlasPixels {
 
 // p_cache may be null (convert without a cache).
 core::Result<AtlasPixels> prepare_atlas_pixels(const EmitterAtlas &p_atlas, const core::LevelMount &p_mount, core::Cache *p_cache,
+		core::gameplay::WorkBudget &r_budget);
+// The cache payload ("FXATLASP" magic, kAtlasPixelsVersion): both images with their mips and bytes. The decoder
+// checks every field (formats, sizes against the mip chain, offsets, the 256 MiB cap) before it allocates; hostile
+// bytes fail with an error (fx.render.unit, asan preset).
+inline constexpr const char *kAtlasPixelsCacheKind = "fx-atlas";
+inline constexpr uint64_t kAtlasPixelsMaxBytes = uint64_t(256) << 20;
+inline constexpr uint32_t kAtlasPixelsMaxMips = 16;
+std::vector<uint8_t> encode_atlas_pixels(const AtlasPixels &p_pixels);
+core::Status decode_atlas_pixels(std::span<const uint8_t> p_blob, AtlasPixels &r_pixels);
+// The bytes of one mip level of a BC3 / BC5 image (4x4 blocks of 16 bytes; a level below 4 px still takes a block).
+uint64_t atlas_level_bytes(uint32_t p_width, uint32_t p_height);
+// Prepares one image from a loaded texture (the base keeps its blocks, a NormalDXT5RGA converts): fx.render.unit
+// feeds synthetic LoadedTextures.
+core::Result<AtlasImage> prepare_atlas_image(const core::res::LoadedTexture &p_texture, const AtlasTextureInfo &p_info,
 		core::gameplay::WorkBudget &r_budget);
 // The conversion alone (fx.render.unit runs it on synthetic blocks): one NormalDXT5RGA mip -> BC5 blocks.
 core::Status convert_normal_dxt5rga_to_bc5(const uint8_t *p_blocks, uint64_t p_size, uint32_t p_width, uint32_t p_height, std::vector<uint8_t> &r_out,
