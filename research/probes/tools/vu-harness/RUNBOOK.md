@@ -15,7 +15,7 @@ only when you type `!mh restartround confirm` / `!mh nextmap confirm` or put `rr
 ## Checklist (one page)
 
 ```
-[ ] 1  Checks pass                     python -I ...\check_all.py   (or --phase0, see step 1)    1-3 min
+[ ] 1  Checks pass                     python -I ...\check_all.py   (or --phase0, see step 1)    5-10 min
 [ ] 2  Normal VU server NOT running; no "VU Server" Start-menu shortcuts tonight
 [ ] 3  PC ready for the night          Windows Update paused 1 day; sleep "Never"                2 min
 [ ] 4  Manifest before                 install-manifest.ps1 -Out ...\manifest-before.csv          1 min
