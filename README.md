@@ -1347,6 +1347,9 @@ level alone (R0) already has a frame p99 of 14.9-18.4 ms here; the crowd adds 3-
 off for the crowd, fewer surfaces, backend C, temporal LOD on, a quiet-machine rerun) are the user's call (s3.md §16,
 §18). Rig ops are not needed for twist (the roll joints are keyed); see s3.md §9.
 
+Accepted on a quiet machine (medians of 3): every gate PASS, backend B (G1a p99 0.38 ms, G1b 1.82 ms, frame p99
+10.4 ms); the integrated rerun is in "Integration of S1-S4 and L1".
+
 ## L1 look (Metro materials and lighting)
 
 <!-- L1 look -->
@@ -1666,3 +1669,49 @@ Tools: `bf3dump vehicledrive <LEVEL> <MODE> [<blueprint>]` prints the drive def 
 the synthetic courses with the level's model, `--courses=a,b`, `--modes=<hex>`, `--handling`, `--sweep` the ghost
 width rows, `--trace=N` a per-tick server trace, `--hash-out=`, `--log-out=<dir>` / `--log-in=<file>` command logs,
 scratch only).
+
+## Integration of S1-S4 and L1 (`integ/spikes`)
+
+<!-- integration (integ/spikes) -->
+`integ/spikes` merges, from `main` 111f937 (M1 plus the hygiene track): `spike/s4`, `spike/s3`, `look/l1`,
+`spike/s1`, `spike/s2`, in that order, each with its own `--no-ff` merge commit. Every shared file kept both sides
+under the comment naming its track. The `dev` build and the touched suites passed after every merge. Then the
+orchestrator decisions were applied:
+
+* S2: G2 is report-only and the gate is G2x (see "S2 vehicle replay" and docs/design/s2.md §15.2).
+* L1: `godot.l1_look` gates the L1 / M1 ratio at <= 1.25 and the L1 p99 frame interval at <= 16.7 ms (see "L1 look").
+* S1: G2 stays a WARN, and its fixes move to M2b and to the terrain-collision fix (docs/design/s1.md §19.5).
+* `host.session.unit` was already RUN_SERIAL. It passed in the integrated runs (dev under the quiet lock, and asan),
+  so nothing changed.
+
+Integrated tree, 2026-10-16 (Ryzen 7 5800X, RX 9070 XT, 2560x1440). The timing tests ran under the quiet lock while
+the other worktrees paused; the rest ran with `-j8`. The accepted numbers are medians of 3 on a quiet machine. Each
+integrated number is one run.
+
+| track gate | accepted | integrated |
+|---|---|---|
+| S4 `logic.metro` G1-G4 | PASS | 549 scopes / 7,299 objects / 145 SyncedBool, 0 unknown / unimplemented, work 95,181; G2 and G3 PASS; G4 hash 843761c3205e74bb, 11,386 records, all three runs equal |
+| S4 `logic.types` G5, `logic.caspian` G6, `logic.perf` G7, `logic.census` I1 | PASS, I1 230 / 230 | 14 rows 0 / 0; G6 PASS; G7 p99 0.4 us, busy p99 10 us, max 158 us; I1 PASS |
+| S1 `host.scale` G1 p99 tick (gate 8 ms) | 1.27 ms Metro / 0.67 ms Caspian | **1.17 / 0.64 ms**, both runs valid; G3 3.44 / 4.21 queries per step |
+| S1 `sim.nav.bake` G4 | Caspian 2.70 s / Kharg 3.70 s | **2.53 / 3.47 s** |
+| S1 `sim.nav` G2 (WARN) | Metro 485 / 566, Caspian 661 / 709 rows | the same rows |
+| S2 `sim.vehicle` G1 / G1r | 3,600 / 3,600 bit-identical, 0 replay mismatches | the same, on all 7 MP_007 and all 7 synthetic courses |
+| S2 G2x (`ExactPod` max, gate 2 cm) | <= 1.91 mm | **1.91 mm** MP_007, 0.75 mm synthetic (PASS) |
+| S2 G2 (report only) | 2.25-6.49 cm | the same (slalom, bumps, collision over 2 cm) |
+| S3 `godot.s3_crowd` | every gate PASS; G1a p99 0.38 ms, G1b 1.82 ms, frame p99 10.4 ms | every gate PASS; G1a p50 0.229 / p99 0.325 ms, G1b 1.769 ms, frame p99 10.88 ms vsync off / 10.31 ms on, G3 16 / 16 |
+| L1 `godot.l1_look` | ratio 1.103 (FAIL against the old 1.10 gate) | ratio **1.073** (2.671 against 2.487 ms), L1 p99 **5.41 ms** (limit 16.7), GPU 1.645 against 1.453 ms (+13 %): PASS |
+| L1 `bf3dump looks` albedo / normals | 98.01 % / 99.73 % | 98.01 % / 99.73 % |
+| M1 `godot.m1_load` E4 / E5 | 2.36 / 1.82 s | **2.33 / 1.81 s** |
+| M1 `godot.m1` | PASS | PASS (`install.unchanged`: 256 files) |
+| install unchanged | clean | clean: 1,918 files of the install have the same sizes and mtimes before and after every run |
+
+Full `ctest --preset dev` with `OPENBF3_GODOT` set: 79 of 81 pass. `core.cache_data` and `core.res` are skipped
+because their sample data are not set. `host.server` failed once in the parallel phase with 135 ticks in a 2 s sleep
+against at most 130. The sleep overshoots under load; the test is untouched by the merges and passed under the quiet
+lock (120 ticks, 59.98 Hz). Under `ctest --preset asan`, these 22 suites pass with no AddressSanitizer report:
+
+* the S1-S4 contracts;
+* `logic.*`, `sim.nav.unit`, `sim.vehicle.unit` (410 s, with `ExactPod`);
+* `host.session.unit`, `host.scale.unit`, `host.registry`;
+* `anim.unit`, `anim`, `anim.s3.unit`, `anim.s3`;
+* `render.s3`, `render.look.unit`.
