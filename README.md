@@ -65,8 +65,6 @@ and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses 
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
 asan` after reader changes (`OPENBF3_FUZZ_ITERS` raises the default 250 mutants per input).
 H hygiene adds `host.registry` (the bf3_host stop_all registries, no data) and `tools.ebx_memory` (the EbxLibrary memory gate, install); see "H hygiene follow-ups".
-UI ui1 adds `ui1.contract` (the SWF, atlas and font interface headers compile and keep their contract, no data); the ui1 implementation adds `core.ui.swf.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font.unit`, `core.ui.font`, `godot.ui_fonts` and `godot.ui_fonts_shots`; see "UI groundwork 1 (ui1)".
-UI ui2 adds `ui2.contract`, `ui.minimap.unit`, `ui.hud.unit` (no data), `ui.minimap`, `ui.hud.icons`, `ui.hud.sources`, `ui.minimap.fuzz`, `ui.hud.fuzz` (install) and `godot.ui2` (windowed); see "UI minimap, HUD icons and HUD model (ui2)".
 
 S4 logic: `ctest -R "s4|logic"` runs `s4.contract`, `logic.unit` and `logic.fuzz` (no data) and the install gates `logic.metro`, `logic.types`, `logic.caspian`, `logic.perf` (RUN_SERIAL) and `logic.census` (exit 77 without an install); see "S4 level logic" below.
 
@@ -77,6 +75,10 @@ L1 look: `render.look.unit`, `render.look` and, with `OPENBF3_GODOT`, `godot.l1_
 S1 (spike, docs/design/s1.md): `s1.contract`, `sim.nav.unit`, `host.scale.unit` (no data), `sim.nav` and the RUN_SERIAL timing gates `sim.nav.bake` and `host.scale` (install; see "S1 server scale (spike)").
 
 S2 vehicle replay adds `s2.contract` and `sim.vehicle.unit` (no data) and `sim.vehicle` (install; exits 77 without one), see "S2 vehicle replay".
+
+UI ui1 adds `ui1.contract` (the SWF, atlas and font interface headers compile and keep their contract, no data); the ui1 implementation adds `core.ui.swf.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font.unit`, `core.ui.font`, `godot.ui_fonts` and `godot.ui_fonts_shots`; see "UI groundwork 1 (ui1)".
+
+UI ui2 adds `ui2.contract`, `ui.minimap.unit`, `ui.hud.unit` (no data), `ui.minimap`, `ui.hud.icons`, `ui.hud.sources`, `ui.minimap.fuzz`, `ui.hud.fuzz` (install) and `godot.ui2` (windowed); see "UI minimap, HUD icons and HUD model (ui2)".
 
 M2a weapons adds `m2a.weapons.contract` and `sim.weapons.unit` (no data), `sim.weapons`, `sim.weapons.range`, `sim.weapons.fuzz`, `sim.weapons.perf` (W11, RUN_SERIAL, noisy) and `tools.weapon_sim` (install); see "M2a weapons core".
 
@@ -1677,52 +1679,6 @@ the synthetic courses with the level's model, `--courses=a,b`, `--modes=<hex>`, 
 width rows, `--trace=N` a per-tick server trace, `--hash-out=`, `--log-out=<dir>` / `--log-in=<file>` command logs,
 scratch only).
 
-## Integration of S1-S4 and L1 (`integ/spikes`)
-
-<!-- integration (integ/spikes) -->
-`integ/spikes` merges, from `main` 111f937 (M1 plus the hygiene track): `spike/s4`, `spike/s3`, `look/l1`,
-`spike/s1`, `spike/s2`, in that order, each with its own `--no-ff` merge commit. Every shared file kept both sides
-under the comment naming its track. The `dev` build and the touched suites passed after every merge. Then the
-orchestrator decisions were applied:
-
-* S2: G2 is report-only and the gate is G2x (see "S2 vehicle replay" and docs/design/s2.md §15.2).
-* L1: `godot.l1_look` gates the L1 / M1 ratio at <= 1.25 and the L1 p99 frame interval at <= 16.7 ms (see "L1 look").
-* S1: G2 stays a WARN, and its fixes move to M2b and to the terrain-collision fix (docs/design/s1.md §19.5).
-* `host.session.unit` was already RUN_SERIAL. It passed in the integrated runs (dev under the quiet lock, and asan),
-  so nothing changed.
-
-Integrated tree, 2026-10-16 (Ryzen 7 5800X, RX 9070 XT, 2560x1440). The timing tests ran under the quiet lock while
-the other worktrees paused; the rest ran with `-j8`. The accepted numbers are medians of 3 on a quiet machine. Each
-integrated number is one run.
-
-| track gate | accepted | integrated |
-|---|---|---|
-| S4 `logic.metro` G1-G4 | PASS | 549 scopes / 7,299 objects / 145 SyncedBool, 0 unknown / unimplemented, work 95,181; G2 and G3 PASS; G4 hash 843761c3205e74bb, 11,386 records, all three runs equal |
-| S4 `logic.types` G5, `logic.caspian` G6, `logic.perf` G7, `logic.census` I1 | PASS, I1 230 / 230 | 14 rows 0 / 0; G6 PASS; G7 p99 0.4 us, busy p99 10 us, max 158 us; I1 PASS |
-| S1 `host.scale` G1 p99 tick (gate 8 ms) | 1.27 ms Metro / 0.67 ms Caspian | **1.17 / 0.64 ms**, both runs valid; G3 3.44 / 4.21 queries per step |
-| S1 `sim.nav.bake` G4 | Caspian 2.70 s / Kharg 3.70 s | **2.53 / 3.47 s** |
-| S1 `sim.nav` G2 (WARN) | Metro 485 / 566, Caspian 661 / 709 rows | the same rows |
-| S2 `sim.vehicle` G1 / G1r | 3,600 / 3,600 bit-identical, 0 replay mismatches | the same, on all 7 MP_007 and all 7 synthetic courses |
-| S2 G2x (`ExactPod` max, gate 2 cm) | <= 1.91 mm | **1.91 mm** MP_007, 0.75 mm synthetic (PASS) |
-| S2 G2 (report only) | 2.25-6.49 cm | the same (slalom, bumps, collision over 2 cm) |
-| S3 `godot.s3_crowd` | every gate PASS; G1a p99 0.38 ms, G1b 1.82 ms, frame p99 10.4 ms | every gate PASS; G1a p50 0.229 / p99 0.325 ms, G1b 1.769 ms, frame p99 10.88 ms vsync off / 10.31 ms on, G3 16 / 16 |
-| L1 `godot.l1_look` | ratio 1.103 (FAIL against the old 1.10 gate) | ratio **1.073** (2.671 against 2.487 ms), L1 p99 **5.41 ms** (limit 16.7), GPU 1.645 against 1.453 ms (+13 %): PASS |
-| L1 `bf3dump looks` albedo / normals | 98.01 % / 99.73 % | 98.01 % / 99.73 % |
-| M1 `godot.m1_load` E4 / E5 | 2.36 / 1.82 s | **2.33 / 1.81 s** |
-| M1 `godot.m1` | PASS | PASS (`install.unchanged`: 256 files) |
-| install unchanged | clean | clean: 1,918 files of the install have the same sizes and mtimes before and after every run |
-
-Full `ctest --preset dev` with `OPENBF3_GODOT` set: 79 of 81 pass. `core.cache_data` and `core.res` are skipped
-because their sample data are not set. `host.server` failed once in the parallel phase with 135 ticks in a 2 s sleep
-against at most 130. The sleep overshoots under load; the test is untouched by the merges and passed under the quiet
-lock (120 ticks, 59.98 Hz). Under `ctest --preset asan`, these 22 suites pass with no AddressSanitizer report:
-
-* the S1-S4 contracts;
-* `logic.*`, `sim.nav.unit`, `sim.vehicle.unit` (410 s, with `ExactPod`);
-* `host.session.unit`, `host.scale.unit`, `host.registry`;
-* `anim.unit`, `anim`, `anim.s3.unit`, `anim.s3`;
-* `render.s3`, `render.look.unit`.
-
 ## UI groundwork 1 (ui1)
 
 Design: [docs/design/ui-swf-fonts.md](docs/design/ui-swf-fonts.md). BF3's SwfMovie res (434 movies) are read at run
@@ -1912,3 +1868,88 @@ defs and runs the gates; every gate has one command (the design's §18 has the m
 
 The cost gate runs RUN_SERIAL and is report-only under asan; the figure is wall clock on a shared machine, so it is
 noisy (the same build measured 39-42 ns across runs).
+
+## Integration of S1-S4 and L1 (`integ/spikes`)
+
+<!-- integration (integ/spikes) -->
+`integ/spikes` merges, from `main` 111f937 (M1 plus the hygiene track): `spike/s4`, `spike/s3`, `look/l1`,
+`spike/s1`, `spike/s2`, in that order, each with its own `--no-ff` merge commit. Every shared file kept both sides
+under the comment naming its track. The `dev` build and the touched suites passed after every merge. Then the
+orchestrator decisions were applied:
+
+* S2: G2 is report-only and the gate is G2x (see "S2 vehicle replay" and docs/design/s2.md §15.2).
+* L1: `godot.l1_look` gates the L1 / M1 ratio at <= 1.25 and the L1 p99 frame interval at <= 16.7 ms (see "L1 look").
+* S1: G2 stays a WARN, and its fixes move to M2b and to the terrain-collision fix (docs/design/s1.md §19.5).
+* `host.session.unit` was already RUN_SERIAL. It passed in the integrated runs (dev under the quiet lock, and asan),
+  so nothing changed.
+
+Integrated tree, 2026-10-16 (Ryzen 7 5800X, RX 9070 XT, 2560x1440). The timing tests ran under the quiet lock while
+the other worktrees paused; the rest ran with `-j8`. The accepted numbers are medians of 3 on a quiet machine. Each
+integrated number is one run.
+
+| track gate | accepted | integrated |
+|---|---|---|
+| S4 `logic.metro` G1-G4 | PASS | 549 scopes / 7,299 objects / 145 SyncedBool, 0 unknown / unimplemented, work 95,181; G2 and G3 PASS; G4 hash 843761c3205e74bb, 11,386 records, all three runs equal |
+| S4 `logic.types` G5, `logic.caspian` G6, `logic.perf` G7, `logic.census` I1 | PASS, I1 230 / 230 | 14 rows 0 / 0; G6 PASS; G7 p99 0.4 us, busy p99 10 us, max 158 us; I1 PASS |
+| S1 `host.scale` G1 p99 tick (gate 8 ms) | 1.27 ms Metro / 0.67 ms Caspian | **1.17 / 0.64 ms**, both runs valid; G3 3.44 / 4.21 queries per step |
+| S1 `sim.nav.bake` G4 | Caspian 2.70 s / Kharg 3.70 s | **2.53 / 3.47 s** |
+| S1 `sim.nav` G2 (WARN) | Metro 485 / 566, Caspian 661 / 709 rows | the same rows |
+| S2 `sim.vehicle` G1 / G1r | 3,600 / 3,600 bit-identical, 0 replay mismatches | the same, on all 7 MP_007 and all 7 synthetic courses |
+| S2 G2x (`ExactPod` max, gate 2 cm) | <= 1.91 mm | **1.91 mm** MP_007, 0.75 mm synthetic (PASS) |
+| S2 G2 (report only) | 2.25-6.49 cm | the same (slalom, bumps, collision over 2 cm) |
+| S3 `godot.s3_crowd` | every gate PASS; G1a p99 0.38 ms, G1b 1.82 ms, frame p99 10.4 ms | every gate PASS; G1a p50 0.229 / p99 0.325 ms, G1b 1.769 ms, frame p99 10.88 ms vsync off / 10.31 ms on, G3 16 / 16 |
+| L1 `godot.l1_look` | ratio 1.103 (FAIL against the old 1.10 gate) | ratio **1.073** (2.671 against 2.487 ms), L1 p99 **5.41 ms** (limit 16.7), GPU 1.645 against 1.453 ms (+13 %): PASS |
+| L1 `bf3dump looks` albedo / normals | 98.01 % / 99.73 % | 98.01 % / 99.73 % |
+| M1 `godot.m1_load` E4 / E5 | 2.36 / 1.82 s | **2.33 / 1.81 s** |
+| M1 `godot.m1` | PASS | PASS (`install.unchanged`: 256 files) |
+| install unchanged | clean | clean: 1,918 files of the install have the same sizes and mtimes before and after every run |
+
+Full `ctest --preset dev` with `OPENBF3_GODOT` set: 79 of 81 pass. `core.cache_data` and `core.res` are skipped
+because their sample data are not set. `host.server` failed once in the parallel phase with 135 ticks in a 2 s sleep
+against at most 130. The sleep overshoots under load; the test is untouched by the merges and passed under the quiet
+lock (120 ticks, 59.98 Hz). Under `ctest --preset asan`, these 22 suites pass with no AddressSanitizer report:
+
+* the S1-S4 contracts;
+* `logic.*`, `sim.nav.unit`, `sim.vehicle.unit` (410 s, with `ExactPod`);
+* `host.session.unit`, `host.scale.unit`, `host.registry`;
+* `anim.unit`, `anim`, `anim.s3.unit`, `anim.s3`;
+* `render.s3`, `render.look.unit`.
+
+<!-- integration (integ/m2a1) -->
+**Second integration (`integ/m2a1`, 2026-10-16).** From `main` 7b3e8fa (the integration above), each with its own
+`--no-ff` merge commit and in this order: `m2a/design` (docs/design/m2a.md, the M2a wave-2/3 plan, docs only),
+`ui/swf-fonts`, `ui/minimap-icons`, `m2a/weapons`, `m2a/vfx` (all branched from 111f937). Every shared file (README,
+the CMakeLists, bf3dump's usage and dispatch, register_types.cpp) kept both sides under its track's comment. No code
+had to change: the weapons core builds unchanged on S1's `CollisionWorld` / static-world additions (query counter,
+terrain cover, water planes; an empty cover keeps M1's cache keys) and S2's vehicle code, and `Bf3MinimapHud` reads
+the S1 / S3 / L1 `Bf3LevelSession` through its public accessors and stays inert under `--no-hud`, `--shots` and
+`--m1-load-check`, so `godot.l1_look` and `godot.m1_load` still measure the game without it. The `dev` build and the
+merged track's suites passed after every merge. Follow-ups from the first integration's verifier, in their own commit:
+`host.server` is RUN_SERIAL (thresholds unchanged), the S2 "Measured" paragraph now opens with G2 report-only and G2x
+the gate, and `bf3dump vehicle-replay` prints `gate G2x not judged` when `--modes` leaves out the `ExactPod` bit.
+
+Full `ctest --preset dev` with `OPENBF3_GODOT`: 108 of 110 pass, `core.cache_data` and `core.res` skipped as before;
+the timing tests ran under the quiet lock. `godot.s3_crowd` failed its timing gates once (G1b 2.26 ms, G2 p99 23 ms)
+while another worktree's `ctest` ran `host.scale` beside it without the lock, and passed on the quiet rerun below.
+Under `ctest --preset asan`, the 26 suites of the merged tracks (`ui1.contract`, `core.ui.swf*`, `core.ui.font*`,
+`ui2.contract`, `ui.*`, `m2a.weapons.contract`, `sim.weapons*`, `tools.weapon_sim`, `fx.*`, `tools.fx_bench`) pass
+with no AddressSanitizer report (`sim.weapons.perf` skips there by design). One run each on the integrated tree:
+
+| track gate | accepted | integrated (`integ/m2a1`) |
+|---|---|---|
+| ui1 `core.ui.swf` G1 / G2 / G7 | 434 / 434 parsed, 0 errors; 162 sub-images, 427 labels; 86 placements | the same |
+| ui1 `core.ui.font`, `godot.ui_fonts(_shots)` G3-G5 | 444 / 34 glyphs, É present, 25/25 | 444 / 444 / 34 / 34 glyphs, É present, `UI1 CHECK: PASS (25/25)` both runs |
+| ui2 `ui.minimap`, `ui.hud.icons`, `ui.hud.sources` | 29/29 levels, 498 masks, Metro 5/5, Caspian 6/6 + 7/7; 161 icon types; 172/172 weapon icons; 84 / 1,215 / 58 | the same |
+| ui2 `godot.ui2` G9-G11, G14 | 10/10, marker within 0.76 px | 10/10, marker 0.76; the six shots (`openBF3\b\shots\integ2\`) inspected: the minimap (satellite, combat area, flags, HQs, own marker, rotating and north-up) and the world icons with distances over the L1 look |
+| weapons `bf3dump weapon-sim --check` | 38/38 | 38/38 |
+| weapons W11 `sim.weapons.perf` (p99, quiet) | 0.223 ms | 0.208 ms |
+| VFX G1 census, G4 oilfire | 1,101 / 3,410, 0 unknown; steady 80 | the same; 80..80 |
+| VFX G9 `tools.fx_bench` (gate 50 ns) | 40.08 ns | 39.54 ns |
+| S1 `host.scale` G1 p99 Metro / Caspian | 1.27 / 0.67 ms | 1.14 / 0.65 ms, both runs valid |
+| S1 `sim.nav.bake` G4 Caspian / Kharg | 2.70 / 3.70 s | 2.54 / 3.47 s |
+| S2 `sim.vehicle` G1 / G1r / G2x | 0 mismatches; `ExactPod` <= 1.91 mm | 0 mismatches on all 7 courses; 1.91 mm |
+| S3 `godot.s3_crowd` (quiet rerun) | G1a p99 0.38 ms, G1b 1.82 ms, frame p99 10.4 ms | G1a p99 0.44 ms, G1b 1.92 ms (gate 2.0), frame p99 10.81 / 11.16 ms vsync off / on, G3 16 / 16 |
+| S4 `logic.metro`, `logic.caspian` | PASS | 549 / 7,299 / 145, work 95,181, G4 hash 843761c3205e74bb; G6 PASS |
+| L1 `godot.l1_look` (ratio <= 1.25, p99 <= 16.7 ms) | 1.073, 5.41 ms (first integration) | 1.071 (2.686 against 2.506 ms), 5.40 ms |
+| M1 `godot.m1`, `godot.m1_load` E4 / E5 | PASS; 2.36 / 1.82 s | 16/16; 2.38 / 1.89 s |
+| install unchanged | clean | clean (256 files in every install test) |
