@@ -58,6 +58,9 @@
 // UI ui1 (docs/design/ui-swf-fonts.md §12.4; swf_commands.cpp):
 //   swf census | movie <name> | labels <name> | layout <name> | hud | fonts
 //                              SwfMovie symbol tables, atlas label maps, HUD positions, UI fonts
+// UI ui2 (ui_commands.cpp; docs/design/ui-minimap-icons.md §15):
+//   minimap <LEVEL> [MODE] | minimap --census   UIMinimapData, combat areas, objectives / the all-level census
+//   hud-icons | item-icons [LEVEL] | hud-sources [--unbound]   the hud3dicons atlas, _small item icons, DataSources
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -89,6 +92,8 @@
 #include "vehicle_commands.h"
 // UI ui1: the SwfMovie, atlas, layout and UI font commands.
 #include "swf_commands.h"
+// UI ui2: minimap, HUD icon and HUD source commands.
+#include "ui_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -665,6 +670,10 @@ int wmain(int argc, wchar_t **argv) {
 		if (const int rc = bf3dump::cmd_swf(ctx.reader, ctx.install, rest); rc != 2) {
 			return rc;
 		}
+	}
+	// UI ui2: minimap, hud-icons, item-icons, hud-sources (ui_commands.cpp).
+	if (const int rc = bf3dump::dispatch_ui2(ebx_ctx, cmd, rest); rc >= 0) {
+		return rc;
 	}
 	usage();
 	return 2;

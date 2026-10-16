@@ -3,3 +3,5 @@
 [node name="M1Metro" type="Node3D"]
 
 [node name="Session" type="Bf3LevelSession" parent="."]
+
+[node name="MinimapHud" type="Bf3MinimapHud" parent="."]

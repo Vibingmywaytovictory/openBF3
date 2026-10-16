@@ -570,3 +570,41 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.ui_fonts_shots COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui_fonts_shots.cmake)
     set_tests_properties(godot.ui_fonts godot.ui_fonts_shots PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 360 RESOURCE_LOCK openbf3_godot_project)
 endif()
+
+# UI ui2 (docs/design/ui-minimap-icons.md §13): ui2.contract compiles the minimap / HUD icon / HUD model headers
+# together and checks the binding-row counts and the inline mapping, view and icon helpers; no data, no Godot.
+openbf3_test(test_ui2_contract test_main.cpp ui2_contract_tests.cpp)
+target_link_libraries(test_ui2_contract PRIVATE bf3_core)
+add_test(NAME ui2.contract COMMAND test_ui2_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui2.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui2_cl_dir}")
+endif()
+# UI ui2 (docs/design/ui-minimap-icons.md §13): the minimap, HUD icon and HUD source readers. ui.minimap.unit and
+# ui.hud.unit are synthetic (no data). ui.minimap (G1-G5), ui.hud.icons (G6, G7) and ui.hud.sources (G8) read the
+# install; ui.minimap.fuzz and ui.hud.fuzz mutate its partitions and texture headers in memory (meant for asan). The
+# install ones exit 77 = skipped without an install and end with install.unchanged (G13).
+openbf3_test(test_ui2 test_main.cpp ui_minimap_tests.cpp ui_hud_tests.cpp ui_install_tests.cpp ui_fuzz_tests.cpp ui2_test_support.h test_support.h)
+target_link_libraries(test_ui2 PRIVATE bf3_core)
+add_test(NAME ui.minimap.unit COMMAND test_ui2 --test-suite=ui-minimap-unit)
+add_test(NAME ui.hud.unit COMMAND test_ui2 --test-suite=ui-hud-unit)
+add_test(NAME ui.minimap COMMAND test_ui2 --test-suite=ui-minimap)
+add_test(NAME ui.hud.icons COMMAND test_ui2 --test-suite=ui-hud-icons)
+add_test(NAME ui.hud.sources COMMAND test_ui2 --test-suite=ui-hud-sources)
+add_test(NAME ui.minimap.fuzz COMMAND test_ui2 --test-suite=ui-minimap-fuzz)
+add_test(NAME ui.hud.fuzz COMMAND test_ui2 --test-suite=ui-hud-fuzz)
+set_tests_properties(ui.minimap ui.hud.icons ui.hud.sources ui.minimap.fuzz ui.hud.fuzz PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ui.minimap.unit ui.hud.unit ui.minimap ui.hud.icons ui.hud.sources ui.minimap.fuzz ui.hud.fuzz PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui2_impl_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui.minimap.unit ui.hud.unit ui.minimap ui.hud.icons ui.hud.sources ui.minimap.fuzz ui.hud.fuzz
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui2_impl_cl_dir}" TIMEOUT 1800)
+endif()
+# UI ui2 godot (docs/design/ui-minimap-icons.md §1 G9-G11, G14, §10.4): godot.ui2 runs the windowed
+# --minimap-check --minimap-mode=ConquestSmall0 of res://scenes/m1_metro.tscn after a probe run (exit 77 = skipped
+# without OPENBF3_GODOT, an install, a window or a rendering device); OPENBF3_UI2_SHOTS names a directory for the
+# six G11 PNGs. It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.ui2 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui2.cmake)
+    set_tests_properties(godot.ui2 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 400 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()

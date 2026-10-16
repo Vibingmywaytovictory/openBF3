@@ -33,3 +33,5 @@ target_link_libraries(bf3dump PRIVATE bf3_host)
 target_sources(bf3dump PRIVATE vehicle_commands.cpp vehicle_commands.h)
 # UI ui1 (docs/design/ui-swf-fonts.md §12.4): `swf census | movie | labels | layout | hud | fonts`.
 target_sources(bf3dump PRIVATE swf_commands.cpp swf_commands.h)
+# UI ui2 (docs/design/ui-minimap-icons.md §15): `minimap`, `hud-icons`, `item-icons`, `hud-sources`.
+target_sources(bf3dump PRIVATE ui_commands.cpp ui_commands.h)

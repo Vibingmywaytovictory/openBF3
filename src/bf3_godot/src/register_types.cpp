@@ -5,9 +5,12 @@
 #include "dedicated_main_loop.h"
 #include "game_session.h"
 #include "level_session.h"
+#include "minimap_control.h" // UI ui2
+#include "minimap_hud.h" // UI ui2
 #include "s3_crowd.h" // S3 crowd
 #include "viewmodel_demo.h"
 #include "weapon_inspector.h"
+#include "world_icons.h" // UI ui2
 // UI ui1
 #include "ui_assets.h"
 #include "ui_font_check.h"
@@ -42,6 +45,10 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	// UI ui1
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiAssets);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
+	// UI ui2 (docs/design/ui-minimap-icons.md §10.1)
+	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapHud);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {
