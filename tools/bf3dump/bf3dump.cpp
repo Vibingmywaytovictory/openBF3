@@ -70,6 +70,7 @@
 #include "shapes_commands.h" // M1 T1
 // M1 T2: spawn points and spawners of a level x mode.
 #include "spawns_commands.h"
+#include "logic_commands.h" // S4 logic
 
 #include <fcntl.h>
 #include <io.h>
@@ -500,6 +501,7 @@ void usage() {
 			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
+	std::fprintf(stderr, "%s", bf3dump::logic_usage()); // S4 logic
 }
 
 } // namespace
@@ -614,6 +616,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
+	}
+	// S4 logic: logic <sub> ... (logic_commands.cpp; docs/design/s4.md §9.4).
+	if (cmd == "logic") {
+		return bf3dump::cmd_logic(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;
