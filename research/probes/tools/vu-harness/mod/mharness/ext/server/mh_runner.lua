@@ -52,6 +52,12 @@ function M.certified(key)
 	return base ~= nil and set[base] == true
 end
 
+-- cert_key(sc, args): WB and SA are certified per mode (WB:U, WB:B, SA:U, SA:B); others by id.
+function M.cert_key(sc, args)
+	if sc == 'WB' or sc == 'SA' then return sc .. ':' .. ((args and args.mode) or 'U') end
+	return sc
+end
+
 local function err_obj(kind, why) return { mh = kind, why = why } end
 
 -- Context ----------------------------------------------------------------------------------------------------------
@@ -290,8 +296,7 @@ function M.validate(items)
 		else
 			local mod = M.module(it.sc)
 			if mod == nil then return nil, it.label .. ' refused: unknown scenario' end
-			local key = it.sc .. ((it.args.mode == 'B' and (it.sc == 'WB' or it.sc == 'SA')) and ':B' or '')
-			if not M.certified(key) then return nil, it.label .. ' not certified tonight' end
+			if not M.certified(M.cert_key(it.sc, it.args)) then return nil, it.label .. ' not certified tonight' end
 			local ok, why = M.requirements(it.sc, mod, it.args, state)
 			if not ok then return nil, it.label .. ' refused: ' .. why end
 			local c = mod.cost(it.args, M)

@@ -107,7 +107,7 @@ local function victim_of(rb)
 	pcall(function() tn = rb.typeInfo.name end)
 	local vic = nil
 	pcall(function()
-		if rb:Is('SoldierEntity') then
+		if rb:Is('ServerSoldierEntity') then
 			local so = SoldierEntity(rb)
 			vic = ids.player(so.player)
 		end

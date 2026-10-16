@@ -2,7 +2,7 @@
  "inventory": "mharness VU API inventory",
  "doc_root": "C:/Users/olku/VU-Docs/content/vext/ref (paths starting with content/ are relative to the VU-Docs root)",
  "doc_commit": "f3cb9f19",
- "checked": "2026-10-16 pass 3 (vudocs.py, 308 entries)",
+ "checked": "2026-10-16 implementation pass (vudocs.py, 317 entries)",
  "status_values": {
   "doc": "name, signature, enum value and read-only flag confirmed in that VU-Docs page by py/mhlib/vudocs.py",
   "research": "cited by gap-r1 section 2 only"
@@ -2848,6 +2848,83 @@
    "doc": "fb/explosionentitydata.md",
    "live": "L12",
    "status": "doc"
+  },
+  {
+   "sym": "DataContainer:Is",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/datacontainer.md",
+   "status": "doc",
+   "live": "L32"
+  },
+  {
+   "sym": "SoldierWeaponsComponent.currentWeapon",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeaponsComponent.isZooming",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.pose",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierentity.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "Vec2.x",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec2.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": false
+  },
+  {
+   "sym": "Vec2.y",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec2.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": false
+  },
+  {
+   "sym": "ServerCapturePointEntity",
+   "kind": "etype",
+   "realm": "server",
+   "doc": "content/vext/entities.md",
+   "status": "doc",
+   "live": "L15"
+  },
+  {
+   "sym": "ServerTicketCounterEntity",
+   "kind": "etype",
+   "realm": "server",
+   "doc": "content/vext/entities.md",
+   "status": "doc",
+   "live": "L15"
+  },
+  {
+   "sym": "ServerSoldierEntity",
+   "kind": "etype",
+   "realm": "server",
+   "doc": "content/vext/entities.md",
+   "status": "doc",
+   "live": "L13"
   }
  ],
  "forbidden_assign": {
@@ -2912,7 +2989,8 @@
   "Component@shared": "EntityBusPeer",
   "ControllableEntity@client": "PhysicsEntity",
   "PhysicsEntity@client": "GameEntity",
-  "GameEntity@client": "SpatialEntity"
+  "GameEntity@client": "SpatialEntity",
+  "SoldierWeaponsComponent@client": "Component"
  },
  "fixture_calls_note": "SetLevel covers EIACycleFireMode and EIASelectWeapon* inputs on our own bots (input, allowed by R 3.2)",
  "rcon_read_whitelist": {
@@ -2945,6 +3023,7 @@
   "admin_doc": "admin commands only from mh_cmd.lua or mh_runner.lua (a user command with confirm, or a queue item the user typed), each followed by fx act=admin"
  },
  "kinds_doc": {
-  "dtype": "a data container type name (for entityData:Is); vudocs confirms the page and its Inherits from parent"
+  "dtype": "a data container type name (for entityData:Is); vudocs confirms the page and its Inherits from parent",
+  "etype": "an entity type name of content/vext/entities.md (for entity:Is and EntityManager:GetIterator); vudocs confirms the '## <name>' heading"
  }
 }

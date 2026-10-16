@@ -72,6 +72,10 @@ def confirm(entry, root):
             return {'found': True, 'ro': None, 'value': None, 'reason': ''}
         found = re.search(r'^Inherits from \[' + re.escape(parent) + r'\]', text, re.M) is not None
         return {'found': found, 'ro': None, 'value': None, 'reason': '' if found else 'parent differs'}
+    if kind == 'etype':
+        # An entity type name (entity:Is, EntityManager:GetIterator): a '## <name>' heading on the entity listing.
+        found = re.search(r'^##\s+' + re.escape(sym) + r'\s*$', text, re.M) is not None
+        return {'found': found, 'ro': None, 'value': None, 'reason': '' if found else 'entity type not listed'}
     return {'found': False, 'ro': None, 'value': None, 'reason': 'unknown kind'}
 
 

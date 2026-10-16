@@ -146,7 +146,7 @@ end
 function M.client_ctl(pl, rec)
 	if pl == nil then return end
 	local msg = { run = C.run_id(), sc = C.scen(), on = rec ~= nil, gs = rec and rec.gs or false,
-		fov = rec and rec.fov or false }
+		fov = rec and rec.fov or false, id = ids.player(pl) }
 	NetEvents:SendTo('mh:ctl', pl, msg)
 end
 
