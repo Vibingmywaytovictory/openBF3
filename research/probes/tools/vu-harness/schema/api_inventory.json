@@ -2,7 +2,7 @@
  "inventory": "mharness VU API inventory",
  "doc_root": "C:/Users/olku/VU-Docs/content/vext/ref (paths starting with content/ are relative to the VU-Docs root)",
  "doc_commit": "f3cb9f19",
- "checked": "2026-10-16 (vudocs.py, 279/279 entries)",
+ "checked": "2026-10-16 pass 3 (vudocs.py, 308 entries)",
  "status_values": {
   "doc": "name, signature, enum value and read-only flag confirmed in that VU-Docs page by py/mhlib/vudocs.py",
   "research": "cited by gap-r1 section 2 only"
@@ -347,7 +347,7 @@
    "realm": "server",
    "doc": "server/library/rcon.md",
    "status": "doc",
-   "live": "L04"
+   "live": "L18"
   },
   {
    "sym": "TicketManager:GetTicketCount",
@@ -2589,6 +2589,265 @@
    "doc": "content/vext/guides/classes.md",
    "status": "doc",
    "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIACycleFireMode",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 34,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon1",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 16,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon2",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 17,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon3",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 18,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon4",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 19,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon5",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 20,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltSingleFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltSingleFireWithBoltAction",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltAutomaticFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltBurstFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 3,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltHoldAndRelease",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 4,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltDetonatedFiring",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 5,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_2",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_3",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 3,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_4",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 4,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_5",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 5,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_6",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 6,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_7",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 7,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "SoldierWeapon.fireLogic",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweapon.md",
+   "live": "L30",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "AimingSimulation.yaw",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/aimingsimulation.md",
+   "live": "L08",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "AimingSimulation.pitch",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/aimingsimulation.md",
+   "live": "L08",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "ConsoleCommand.name",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/consolecommand.md",
+   "live": "L19",
+   "ro": true,
+   "status": "doc"
+  },
+  {
+   "sym": "ConsoleCommand.groupName",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/consolecommand.md",
+   "live": "L19",
+   "ro": true,
+   "status": "doc"
+  },
+  {
+   "sym": "DamageGiverInfo.weaponFiring",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damagegiverinfo.md",
+   "live": "L14",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "MeshProjectileEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/meshprojectileentitydata.md",
+   "live": "L12",
+   "status": "doc"
+  },
+  {
+   "sym": "BulletEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/bulletentitydata.md",
+   "live": "L12",
+   "status": "doc",
+   "parent": "MeshProjectileEntityData"
+  },
+  {
+   "sym": "MissileEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/missileentitydata.md",
+   "live": "L12",
+   "status": "doc",
+   "parent": "MeshProjectileEntityData"
+  },
+  {
+   "sym": "GrenadeEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/grenadeentitydata.md",
+   "live": "L12",
+   "status": "doc",
+   "parent": "MeshProjectileEntityData"
+  },
+  {
+   "sym": "ExplosionEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/explosionentitydata.md",
+   "live": "L12",
+   "status": "doc"
   }
  ],
  "forbidden_assign": {
@@ -2610,13 +2869,18 @@
    "transform",
    "internalHealth",
    "isAllowedToSpawn",
-   "name"
+   "name",
+   "fireLogic",
+   "weaponFiring",
+   "yaw",
+   "pitch"
   ]
  },
  "bot_assign": {
   "doc": "the only engine fields mh_bots.lua may assign, and only on players it created or EntryInput objects it owns",
   "fields": [
    "input",
+   "deltaTime",
    "flags",
    "authoritativeAimingYaw",
    "authoritativeAimingPitch",
@@ -2649,5 +2913,38 @@
   "ControllableEntity@client": "PhysicsEntity",
   "PhysicsEntity@client": "GameEntity",
   "GameEntity@client": "SpatialEntity"
+ },
+ "fixture_calls_note": "SetLevel covers EIACycleFireMode and EIASelectWeapon* inputs on our own bots (input, allowed by R 3.2)",
+ "rcon_read_whitelist": {
+  "doc": "RCON:SendCommand may only be called with one of these literal commands and no args (apicheck rule 11, the mock journal)",
+  "read": [
+   "vars.serverName",
+   "vars.soldierHealth",
+   "vars.regenerateHealth",
+   "vars.bulletDamage",
+   "vars.playerRespawnTime",
+   "vars.gameModeCounter",
+   "vars.friendlyFire",
+   "vars.autoBalance",
+   "vars.idleTimeout",
+   "vars.roundStartPlayerCount",
+   "vars.roundRestartPlayerCount",
+   "vars.vehicleSpawnAllowed",
+   "vu.FrequencyMode",
+   "vu.SuppressionMultiplier",
+   "vu.TimeScale",
+   "vu.DisablePreRound",
+   "modList.ListRunning",
+   "serverInfo",
+   "version"
+  ],
+  "admin": [
+   "mapList.runNextRound",
+   "mapList.restartRound"
+  ],
+  "admin_doc": "admin commands only from mh_cmd.lua or mh_runner.lua (a user command with confirm, or a queue item the user typed), each followed by fx act=admin"
+ },
+ "kinds_doc": {
+  "dtype": "a data container type name (for entityData:Is); vudocs confirms the page and its Inherits from parent"
  }
 }

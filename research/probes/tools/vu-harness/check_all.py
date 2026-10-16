@@ -1,8 +1,10 @@
 """Run every S5 harness check in order and print one PASS/FAIL line per stage (DESIGN.md section 14).
 
-    python -I research\\probes\\tools\\vu-harness\\check_all.py [--with-install] [--full] [--vudocs <dir>]
+    python -I research\\probes\\tools\\vu-harness\\check_all.py [--phase0] [--with-install] [--full] [--vudocs <dir>]
 
 Exit 0 only if every stage passes. A tool that exits 3 is not built yet (skeleton) and counts as a failure.
+--phase0 is the staged gate of DESIGN.md section 14: the same stages, with the mock e2e suite limited to Phase 0 and
+the attended U scenarios; it certifies only those scenarios (mh_cert.lua, written by mockrun.py once it is built).
 """
 
 import argparse
@@ -50,6 +52,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--with-install', action='store_true')
     ap.add_argument('--full', action='store_true')
+    ap.add_argument('--phase0', action='store_true')
     ap.add_argument('--vudocs', default=DEFAULT_VUDOCS)
     a = ap.parse_args(argv)
     stages = [('layout+json', stage_layout)]
@@ -57,7 +60,8 @@ def main(argv=None):
     vud = ['--vudocs', a.vudocs] if os.path.isdir(a.vudocs) else []
     stages.append(('apicheck', lambda: run([PY, '-I', 'apicheck.py'] + vud)))
     stages.append(('unittests', lambda: run([PY, '-I', '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.'])))
-    stages.append(('mock-e2e', lambda: run([PY, '-I', 'mockrun.py', '--suite'] + (['--full'] if a.full else []))))
+    suite = ['--suite', 'phase0'] if a.phase0 else ['--suite', 'all']
+    stages.append(('mock-e2e', lambda: run([PY, '-I', 'mockrun.py'] + suite + (['--full'] if a.full else []))))
     ps = ['pwsh', '-NoProfile', '-File', os.path.join('tests', 'ps', 'run-ps-tests.ps1')]
     stages.append(('powershell', lambda: run(ps + (['-WithInstall'] if a.with_install else []))))
     ok_all = True
@@ -75,7 +79,11 @@ def main(argv=None):
                 detail = 'NOT BUILT ' + detail
         ok_all &= ok
         print('%-12s %s %s' % (name, 'PASS' if ok else 'FAIL', '' if ok else detail))
-    print('all checks passed' if ok_all else 'checks FAILED')
+    if a.phase0:
+        print('phase0 gate passed: Phase 0 and the attended items may run; the overnight queue may not'
+              if ok_all else 'phase0 gate FAILED')
+    else:
+        print('all checks passed' if ok_all else 'checks FAILED')
     return 0 if ok_all else 1
 
 

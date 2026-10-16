@@ -4,7 +4,9 @@ local M = {}
 
 function M.player(player) return nil end
 function M.weapon(name) return nil end
--- material id from the hit's MaterialContainerPair (fb/materialcontainerpair.md): {physicsMaterialIndex, physicsPropertyIndex}
+-- material id: RayCastHit.material is DataContainer|nil (shared/type/raycasthit.md); after a nil check it is cast with
+-- MaterialContainerPair(hit.material) (fb/materialcontainerpair.md, read only) -> {flagsAndIndex, physicsMaterialIndex,
+-- physicsPropertyIndex}; mapping to our grid is decided after Phase 0 (DESIGN 3.4).
 function M.material(materialContainer) return nil end
 function M.flag(capturePoint) return nil end
 

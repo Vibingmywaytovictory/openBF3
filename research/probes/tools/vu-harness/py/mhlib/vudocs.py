@@ -64,6 +64,14 @@ def confirm(entry, root):
     if kind == 'global':
         found = re.search(r'\b' + re.escape(sym) + r'\b', text) is not None
         return {'found': found, 'ro': None, 'value': None, 'reason': '' if found else 'name not on page'}
+    if kind == 'dtype':
+        # A data container type name used with entityData:Is(); the page must exist and, when the entry names a
+        # parent, its 'Inherits from' line must name that parent.
+        parent = entry.get('parent')
+        if parent is None:
+            return {'found': True, 'ro': None, 'value': None, 'reason': ''}
+        found = re.search(r'^Inherits from \[' + re.escape(parent) + r'\]', text, re.M) is not None
+        return {'found': found, 'ro': None, 'value': None, 'reason': '' if found else 'parent differs'}
     return {'found': False, 'ro': None, 'value': None, 'reason': 'unknown kind'}
 
 

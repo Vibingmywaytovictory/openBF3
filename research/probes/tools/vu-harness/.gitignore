@@ -1,2 +1,3 @@
 __pycache__/
 *.pyc
+mod/mharness/ext/shared/mh_cert.lua

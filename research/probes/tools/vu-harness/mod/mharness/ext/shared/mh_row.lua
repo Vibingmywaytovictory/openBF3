@@ -1,6 +1,7 @@
 -- Row builder (SKELETON; DESIGN.md sections 3.5, 3.6, 4).
 -- The only module that may call print(). Emits 'MH1 <json>' with the envelope v, run, sc, r, k, t, ms, q, e.
--- Own deterministic JSON encoder: %d integers, %.6g floats, Vec3 -> [x,y,z], non-finite -> null (lim.nf).
+-- Own deterministic JSON encoder: %d integers; floats %.9g by default (positions are site-relative, DESIGN 4.1);
+-- %.6g only for fields the schema marks 'q6'; Vec3 -> [x,y,z], non-finite -> null (lim.nf).
 -- Size cap 1000 B (oversize -> 'trunc' row); token bucket 240 rows/s, burst 480; priority-2 rows dropped first.
 local M = {}
 

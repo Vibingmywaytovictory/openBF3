@@ -1,6 +1,7 @@
 -- Chat replies and prompts (SKELETON; DESIGN.md sections 3.7, 4 'prompt').
 -- ChatManager:SendMessage(message, toPlayer) -> bool and Yell(message, duration, toPlayer)
--- (server/library/chatmanager.md). Prefix '[mh] ', at most 120 chars per message and 6 messages per reply.
+-- (server/library/chatmanager.md). Prefix '[mh] ' included in the cap: at most 120 chars per message
+-- (SendMessage limit 127), 6 messages per reply. cfg-done is echoed to chat (crash-resume hint).
 -- Every instruction to the user is also a 'prompt' row (machine-readable for the extractor and the mock user).
 local M = {}
 

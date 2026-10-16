@@ -1,7 +1,7 @@
 {
   "schema": "mharness rows",
   "version": 1,
-  "doc": "DESIGN.md section 4. Types: i int, n finite number, b bool, s label, v3 [n,n,n], q4 [n,n,n,n], a2/a4 number arrays, ia int array, sa label array, o small object (label keys; values n|i|b|s), oo object of objects, tm ticket rows. 'prompt' rows mirror every instruction the harness gives the user in chat (U scenarios), machine-readable for the mock user (DESIGN.md 13.6).",
+  "doc": "DESIGN.md section 4. Types: i int, n finite number, b bool, s label, v3 [n,n,n], q4 [n,n,n,n], a2/a4 number arrays, ia int array, sa label array, o small object (label keys; values n|i|b|s), oo object of objects, tm ticket rows. 'prompt' rows mirror every instruction the harness gives the user in chat (U scenarios), machine-readable for the mock user (DESIGN.md 13.6). census is chunked: each census row carries one of types/api/res plus part/of (pass 3, row cap).",
   "line_regex": "\\[VeniceEXT\\] \\[mharness\\] MH1 (\\{.*\\})\\s*$",
   "max_row_bytes": 1000,
   "label_pattern": "^[A-Za-z0-9_.:/+=#()\\[\\], -]{0,96}$",
@@ -57,20 +57,27 @@
       "opt": {
         "clk": "s",
         "aimcal": "o",
-        "args": "o"
+        "args": "o",
+        "build": "i",
+        "vext": "s",
+        "wpn": "oo",
+        "tcost": "o",
+        "fmt": "s"
       }
     },
     "census": {
-      "req": {
-        "types": "o",
-        "api": "o",
-        "res": "o"
-      },
+      "req": {},
       "opt": {
         "jsonv3": "s",
         "osdate": "b",
         "vm": "s",
-        "guid_nodash": "b"
+        "guid_nodash": "b",
+        "part": "i",
+        "of": "i",
+        "cmd": "s",
+        "types": "o",
+        "api": "o",
+        "res": "o"
       }
     },
     "dict": {
@@ -97,7 +104,10 @@
         "team": "i",
         "wid": "i",
         "prof": "s",
-        "arg": "o"
+        "arg": "o",
+        "slot": "i",
+        "fl": "i",
+        "dt": "n"
       }
     },
     "mark": {
@@ -108,7 +118,10 @@
         "cfg": "s",
         "i": "i",
         "n": "i",
-        "x": "o"
+        "x": "o",
+        "k0": "i",
+        "k1": "i",
+        "own": "ia"
       }
     },
     "site": {
@@ -156,7 +169,8 @@
         "smf": "n",
         "chf": "n",
         "nup": "i",
-        "dt": "n"
+        "dt": "n",
+        "fl": "i"
       }
     },
     "wf": {
@@ -172,7 +186,10 @@
         "ammo": "i",
         "ammo2": "i"
       },
-      "opt": {}
+      "opt": {
+        "fl": "i",
+        "slot": "i"
+      }
     },
     "shot": {
       "req": {
@@ -221,7 +238,10 @@
         "giver": "i",
         "wid": "i",
         "dtype": "i",
-        "dist": "n"
+        "dist": "n",
+        "fxd": "n",
+        "spos": "v3",
+        "wfd": "s"
       }
     },
     "hp": {
@@ -308,7 +328,11 @@
       },
       "opt": {
         "cfg": "s",
-        "eta": "n"
+        "eta": "n",
+        "tk1": "n",
+        "tk2": "n",
+        "fc1": "n",
+        "fc2": "n"
       }
     },
     "p0": {
@@ -399,10 +423,12 @@
       "remove",
       "seat",
       "respawn",
-      "admin"
+      "admin",
+      "bench"
     ],
     "gs.src": [
       "srv",
+      "poll",
       "pred",
       "corr"
     ],
@@ -438,5 +464,6 @@
       "password",
       "gamePassword"
     ]
-  }
+  },
+  "floats": "every float is printed with %.9g (pass 3; positions are absolute world coordinates, t cumulative per run); the analysis times events from k/hz"
 }

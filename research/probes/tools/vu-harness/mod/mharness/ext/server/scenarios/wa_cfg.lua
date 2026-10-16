@@ -14,6 +14,19 @@ M.distance = { hip = 10, ads = 25, ads_mag = 12 }
 M.team = { M16A3 = 1, M416 = 1, M249 = 1, M98B = 1, M9 = 1, ['870MCS'] = 1, SMAW = 1, M320HE = 1, M67 = 1,
 	AK74M = 2, RPG7 = 2 }
 
+-- Weapon slot per weapon (fb/weaponslot.md values; which slot each weapon class uses is [inferred; live:L31]:
+-- 0 primary, 1 secondary, 2 and 5 gadgets, 6 grenade). Verified per spawn with weaponsComponent.currentWeaponSlot.
+M.slot = { M16A3 = 0, AK74M = 0, M416 = 0, M249 = 0, M98B = 0, ['870MCS'] = 0, M9 = 1, RPG7 = 2, SMAW = 2,
+	M320HE = 2, M67 = 6 }
+
+-- Fire mode each weapon's protocols need (FireLogicType, fb/firelogictype.md: 2 auto, 1 bolt action). The bot cycles
+-- with EIACycleFireMode until SoldierWeapon.fireLogic matches (DESIGN.md 3.9) [live:L30].
+M.fire = { M16A3 = 2, AK74M = 2, M416 = 2, M249 = 2, M98B = 1 }
+
+-- Case-insensitive aliases accepted in chat arguments (DESIGN.md 3.7).
+M.alias = { ['870'] = '870MCS', ['AK-74M'] = 'AK74M', M16 = 'M16A3', ['M98'] = 'M98B', RPG = 'RPG7', M320 = 'M320HE' }
+
+-- Queue presets: WA:tier1 = configs 1-2, WA:rest = 3-17, WA:all = 1-17 (DESIGN.md 6.2).
 M.configs = {
 	{ tier = 1, w = 'M16A3', stance = 'stand', zoom = true, proto = 'full' },
 	{ tier = 1, w = 'M16A3', stance = 'stand', zoom = false, proto = 'full' },
@@ -30,8 +43,8 @@ M.configs = {
 	{ tier = 3, w = 'M249', stance = 'stand', zoom = true, proto = 'short' },
 	{ tier = 3, w = 'M249', stance = 'stand', zoom = false, proto = 'short' },
 	{ tier = 3, w = 'M249', stance = 'prone', zoom = true, proto = 'short' },
-	{ tier = 3, w = 'M98B', stance = 'stand', zoom = true, proto = 'bolt' },
-	{ tier = 3, w = 'M98B', stance = 'prone', zoom = true, proto = 'bolt' },
+	{ tier = 3, w = 'M98B', stance = 'stand', zoom = true, proto = 'bolt', sway = true },
+	{ tier = 3, w = 'M98B', stance = 'prone', zoom = true, proto = 'bolt', sway = true },
 }
 
 M.tier60 = {
