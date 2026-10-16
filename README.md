@@ -74,6 +74,8 @@ L1 look: `render.look.unit`, `render.look` and, with `OPENBF3_GODOT`, `godot.l1_
 
 S1 (spike, docs/design/s1.md): `s1.contract`, `sim.nav.unit`, `host.scale.unit` (no data), `sim.nav` and the RUN_SERIAL timing gates `sim.nav.bake` and `host.scale` (install; see "S1 server scale (spike)").
 
+S2 vehicle replay adds `s2.contract` and `sim.vehicle.unit` (no data) and `sim.vehicle` (install; exits 77 without one), see "S2 vehicle replay".
+
 ## Run
 
 ```bat
@@ -1591,3 +1593,52 @@ The as-built nav uses:
 * the water rule, under which Kharg's sea bed tiles lose their terrain.
 
 The run with bots: `"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --mode=ConquestLarge0 --bots=64 --nav-overlay [--shot-delay=12 --shots=...]`.
+
+## S2 vehicle replay (spike)
+
+<!-- S2 vehicle -->
+Spike S2 (docs/design/s2.md): the Humvee on Jolt's `VehicleConstraint` + `WheeledVehicleController` in a server world
+and a prediction world over one shared static world (MP_007 RushLarge0), saved and restored at full precision, driven
+by recorded command logs on 7 found courses. The interfaces are in the tree (`bf3_core` `gameplay/vehicle_drive.h`,
+`level/vehicle_spawns.h`; `bf3_sim` `vehicle_types.h`, `vehicle_ghost.h`, `vehicle_model.h`, `vehicle_world.h`,
+`vehicle_course.h`, `vehicle_replay.h`); what the data does not say is `bf3-opensource/config/vehicle_tuning.cfg`
+(30 keys, all `[inferred]` placeholders: IW4L's tuned jeep and Jolt defaults, for S5 Session 2 to replace).
+
+Gates, each one command (thresholds in docs/design/s2.md §1; timings printed by the runs are noisy on a shared machine
+and are not gates):
+
+| gate | threshold | command |
+|---|---|---|
+| C courses found | all 7 kinds found on MP_007 (a finder result, kept apart from G1 / G2) | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| D courses drove | every found course meets its kind's activity criteria (distance, speed, turns, impacts; driving kinds never asleep); G1 and G2 fail if any found course fails D | same |
+| G1 free driving bit-identical | 0 of 3,600 ticks with a differing state hash, every found course | same |
+| G1r replay from any tick | 0 mismatching ticks over 15 restore ticks per found course | same |
+| G1m several vehicles | 3 touching Humvees on synthetic ground: G1 and G1r with 0 mismatching ticks, >= 30 contact ticks | `ctest --preset dev -R "^sim\.vehicle\.unit$" --output-on-failure` |
+| G2 corrections with quantised 30 Hz ghosts | max (and p99) < 0.02 m per found course at 100 and 150 ms replays | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| X same hashes from a second binary | report only: the per-tick server hashes of a second build equal the first | `b\dev\tools\bf3dump\bf3dump.exe vehicle-replay MP_007 RushLarge0 --no-g1 --no-g2 --hash-out=dev.txt`, the same with `b\asan\...` (or `b\release\...`) into `other.txt`, then `fc dev.txt other.txt` |
+| H handling numbers | report only (unverified placeholders) | `ctest --preset dev -R "^sim\.vehicle$"`, or `bf3dump vehicle-replay MP_007 RushLarge0 --handling` |
+| S spawns settle | report only: < 1 cm drift over the last 60 settle ticks per Humvee spawner | `ctest --preset dev -R "^sim\.vehicle$"` |
+| install unchanged | sizes and mtimes equal | `ctest --preset dev -R "^sim\.vehicle$"` |
+| contract / units | pass | `ctest --preset dev -R "^(s2\.contract\|sim\.vehicle\.unit)$"` |
+
+S2 passes only when C, D, G1 (with G1r), G1m, G2, install unchanged and contract / units all pass. Under `ctest
+--preset asan` (Jolt runs ~27x slower there), `sim.vehicle` runs the G2 `OwnHistory` mode only and the synthetic-course
+case of `sim.vehicle.unit` runs `OwnHistory` + `Full` (the ablations are `dev` / `release`). Both suites print steps
+and seconds per course; the TIMEOUTs are 3x the measured runs (docs/design/s2.md §15.1).
+
+Measured (2026-10-15, docs/design/s2.md §15.1): **S2 fails on G2 alone.** C, D, G1, G1r, G1m, install unchanged and
+the units pass: Jolt's vehicle is bit-identical on every MP_007 and synthetic course (3,600 ticks; 30 restore runs
+each, into the prediction world and as an in-place rollback; three touching Humvees), and the dev, release and asan
+builds produce the same per-tick hashes. G2 with the quantised 440-bit ghost fails on slalom, bumps and collision
+(max 2.2-6.5 cm against 2 cm; p99 <= 1.3 cm everywhere), while restoring the full-precision `VehicleState`
+(`ExactPod`) onto the diverged client gives at most 1.9 mm (0 without static chassis contact; the contact cache need
+not be sent) and the same without the lambdas (`PodOwnLambdas`) fails at 2.8 cm: M3 sends the driver's own vehicle
+that state unquantised, lambdas included, and the ghost (376 bits: the suspension codes carry nothing) to everyone
+else. H (unverified placeholders): 0-60 km/h 7.4 s,
+9.1 m/s^2 braking, 18.4 m turning circle, 75 km/h top speed. S: 3 of 6 Humvee spawners settle within 1 cm.
+
+Tools: `bf3dump vehicledrive <LEVEL> <MODE> [<blueprint>]` prints the drive def as read and the model built from it;
+`bf3dump vehicle-replay <LEVEL> <MODE>` runs the course search and the gates with the test's report (`--synthetic`
+the synthetic courses with the level's model, `--courses=a,b`, `--modes=<hex>`, `--handling`, `--sweep` the ghost
+width rows, `--trace=N` a per-tick server trace, `--hash-out=`, `--log-out=<dir>` / `--log-in=<file>` command logs,
+scratch only).

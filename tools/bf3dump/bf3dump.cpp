@@ -51,6 +51,10 @@
 // L1 look:
 //   looks <LEVEL> <MODE> [--materials] [--shader NAME]  the drawn-material census, M1 mapping against L1 (look_commands.cpp)
 // S1 (server scale): nav bake|stats|components|path|probe and bots (nav_commands.h)
+// S2 vehicle:
+//   vehicledrive <LEVEL> <MODE> [<blueprint>]   the drive def and the vehicle model (vehicle_commands.cpp)
+//   vehicle-replay <LEVEL> <MODE> [options]     courses and gates C / D / G1 / G1r / G2, --handling, --sweep,
+//                                               --hash-out (gate X), --log-out / --log-in (vehicle_commands.cpp)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -78,6 +82,8 @@
 #include "look_commands.h"
 // S1: the navmesh and the scale bench.
 #include "nav_commands.h"
+// S2 vehicle: vehicledrive, vehicle-replay.
+#include "vehicle_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -510,6 +516,7 @@ void usage() {
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
 	std::fprintf(stderr, "%s", bf3dump::logic_usage()); // S4 logic
 	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n"); // L1 look
+	std::fprintf(stderr, "%s", bf3dump::vehicle_usage()); // S2 vehicle
 }
 
 } // namespace
@@ -639,6 +646,13 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "bots") {
 		return bf3dump::cmd_bots(ctx.reader, ctx.install, rest);
+	}
+	// S2 vehicle: vehicledrive / vehicle-replay (vehicle_commands.cpp; docs/design/s2.md §1, §8).
+	if (cmd == "vehicledrive") {
+		return bf3dump::cmd_vehicledrive(ctx.install, rest);
+	}
+	if (cmd == "vehicle-replay") {
+		return bf3dump::cmd_vehicle_replay(ctx.install, rest);
 	}
 	usage();
 	return 2;

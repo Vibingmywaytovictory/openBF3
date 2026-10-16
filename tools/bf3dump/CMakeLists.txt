@@ -29,3 +29,5 @@ target_sources(bf3dump PRIVATE look_commands.cpp look_commands.h)
 # components and the 64-walker scale bench (bf3_host for the bot level and run_scale_bench).
 target_sources(bf3dump PRIVATE nav_commands.cpp nav_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_host)
+# S2 vehicle (docs/design/s2.md §1, §8): `vehicledrive` and `vehicle-replay` (bf3_sim from M1 T1's block above).
+target_sources(bf3dump PRIVATE vehicle_commands.cpp vehicle_commands.h)
