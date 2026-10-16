@@ -49,6 +49,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapHud);
+	// M2a hud (docs/design/m2a-hud.md): Bf3Hud, its widgets and Bf3HudCheck (registered in hud_controls.cpp)
+	void openbf3_register_m2a_hud();
+	openbf3_register_m2a_hud();
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

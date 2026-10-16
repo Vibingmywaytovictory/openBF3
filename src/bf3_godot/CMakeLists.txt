@@ -116,3 +116,12 @@ target_sources(bf3_godot PRIVATE
     src/minimap_check.cpp
     src/minimap_check.h
 )
+
+# M2a hud (docs/design/m2a-hud.md): the minimal HUD (Bf3Hud and its widgets) and its check (Bf3HudCheck,
+# res://scenes/m2a_hud.tscn), registered by the "// M2a hud" block of register_types.cpp.
+target_sources(bf3_godot PRIVATE
+    src/hud_controls.cpp
+    src/hud_controls.h
+    src/hud_check.cpp
+    src/hud_check.h
+)

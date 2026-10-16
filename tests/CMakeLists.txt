@@ -721,3 +721,12 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_hud_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(ui.hud.feed.unit ui.hud.feed.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hud_cl_dir}")
 endif()
+# M2a hud godot (docs/design/m2a-hud.md §5): godot.m2a_hud runs the windowed --hud-check of
+# res://scenes/m2a_hud.tscn after a probe run (E10 at 1280 x 720, 1920 x 1080, 2560 x 1440 per frame of a scripted
+# model; exit 77 = skipped without OPENBF3_GODOT, an install, a window or a rendering device); the PNGs go to
+# $ENV{OPENBF3_HUD_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/hud (gitignored, outside the
+# worktree). It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.m2a_hud COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m2a_hud.cmake)
+    set_tests_properties(godot.m2a_hud PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()
