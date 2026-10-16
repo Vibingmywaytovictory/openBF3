@@ -723,7 +723,8 @@ endif()
 # line). The timing gates (G3, G6) and the long renders run serially; under asan they only report.
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     if(DEFINED ENV{OPENBF3_AUDIO_SHOTS})
-        set(_openbf3_audio_shots "$ENV{OPENBF3_AUDIO_SHOTS}")
+        # Forward slashes: a Windows path (C:\...\b\shots\audio) would reach audio_gates.cmake as invalid escapes.
+        file(TO_CMAKE_PATH "$ENV{OPENBF3_AUDIO_SHOTS}" _openbf3_audio_shots)
     else()
         set(_openbf3_audio_shots "${PROJECT_SOURCE_DIR}/b/shots/audio")
     endif()
