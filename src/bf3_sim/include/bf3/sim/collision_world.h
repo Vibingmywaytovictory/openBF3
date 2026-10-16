@@ -61,6 +61,12 @@ public:
 	// when none. It does not judge the slope: the caller reads r_hit->normal (the motor's MaxAscendAngle decides).
 	bool ground_below(const Vec3 &p_from, float p_max_drop, uint32_t p_mask, StaticHit *r_hit) const;
 
+	// S1 (docs/design/s1.md §6.3): narrow-phase queries run against this world since create(), the motor's
+	// CharacterVirtual casts included. Counted in the broadphase layer filters of collision_world_internal.h: with
+	// one broadphase layer, Jolt's BroadPhaseQuadTree calls ShouldCollide(BroadPhaseLayer) exactly once per ray, cast
+	// or collide query [verified: BroadPhaseQuadTree.cpp, every query loops the layers once]. Owner thread.
+	uint64_t query_count() const;
+
 	struct Impl; // bf3_sim internal (src/collision_world_internal.h): the PhysicsSystem, filters, temp allocator
 	Impl &impl() const { return *impl_; }
 

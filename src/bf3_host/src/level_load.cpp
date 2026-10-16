@@ -271,6 +271,13 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	sim::StaticWorldLoadOptions options;
 	options.build.threads = p_options.threads;
 	options.soup_threads = p_options.threads;
+	// S1 (docs/design/s1.md §5.2, §8): the terrain cover (sorted, unique), recorded for load_bot_level's check.
+	options.terrain_cover = p_options.terrain_cover;
+	std::sort(options.terrain_cover.begin(), options.terrain_cover.end());
+	options.terrain_cover.erase(std::unique(options.terrain_cover.begin(), options.terrain_cover.end()), options.terrain_cover.end());
+	shared->terrain_cover = options.terrain_cover;
+	options.cover_water = p_options.cover_water;
+	shared->cover_water = p_options.cover_water;
 	core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes = sim::load_static_world_cached(p_options.cache, level, world, options);
 	if (!shapes) {
 		if (p_progress != nullptr) {

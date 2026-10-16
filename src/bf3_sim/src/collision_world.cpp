@@ -57,10 +57,15 @@ class MaskBroadPhaseFilter final : public JPH::BroadPhaseLayerFilter {
 public:
 	explicit MaskBroadPhaseFilter(uint32_t p_mask) :
 			mask_(p_mask) {}
-	bool ShouldCollide(JPH::BroadPhaseLayer) const override { return mask_ != 0; }
+	bool ShouldCollide(JPH::BroadPhaseLayer) const override {
+		++queries_; // S1 (docs/design/s1.md §6.3): one call per query with the one broadphase layer
+		return mask_ != 0;
+	}
+	uint64_t queries() const { return queries_; } // S1
 
 private:
 	uint32_t mask_;
+	mutable uint64_t queries_ = 0; // S1: owner thread only, like the world
 };
 
 class MaskObjectFilter final : public JPH::ObjectLayerFilter {
@@ -247,6 +252,15 @@ core::Result<std::unique_ptr<CollisionWorld>> CollisionWorld::create(std::shared
 	}
 	w.system->OptimizeBroadPhase();
 	return std::unique_ptr<CollisionWorld>(new CollisionWorld(std::move(impl)));
+}
+
+// S1 (docs/design/s1.md §6.3): the narrow-phase queries counted by the per-mask broadphase filters.
+uint64_t CollisionWorld::query_count() const {
+	uint64_t total = 0;
+	for (const std::unique_ptr<JPH::BroadPhaseLayerFilter> &f : impl_->broadphase_filters) {
+		total += static_cast<const MaskBroadPhaseFilter *>(f.get())->queries();
+	}
+	return total;
 }
 
 const std::shared_ptr<const StaticWorldShapes> &CollisionWorld::shapes() const {

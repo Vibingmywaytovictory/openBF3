@@ -50,6 +50,7 @@
 //   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
 // L1 look:
 //   looks <LEVEL> <MODE> [--materials] [--shader NAME]  the drawn-material census, M1 mapping against L1 (look_commands.cpp)
+// S1 (server scale): nav bake|stats|components|path|probe and bots (nav_commands.h)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -75,6 +76,8 @@
 #include "logic_commands.h" // S4 logic
 // L1 look: the drawn-material census.
 #include "look_commands.h"
+// S1: the navmesh and the scale bench.
+#include "nav_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -629,6 +632,13 @@ int wmain(int argc, wchar_t **argv) {
 	// L1 look: looks <LEVEL> <MODE> [--materials] [--shader NAME] (look_commands.cpp).
 	if (cmd == "looks") {
 		return bf3dump::cmd_looks(ctx.install, rest);
+	}
+	// S1: nav ... and bots ... (nav_commands.cpp; docs/design/s1.md §12).
+	if (cmd == "nav") {
+		return bf3dump::cmd_nav(ctx.reader, ctx.install, rest);
+	}
+	if (cmd == "bots") {
+		return bf3dump::cmd_bots(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;

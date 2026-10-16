@@ -457,3 +457,47 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.l1_look COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_l1_look.cmake)
     set_tests_properties(godot.l1_look PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1500 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
+# S1 contract (spike S1 server scale; docs/design/s1.md §10, §11): every S1 header compiles together with the M1 ones
+# and the plain types keep their properties. No data. The S1 implementation adds its tests to this block: sim.nav.unit,
+# sim.nav, sim.nav.bake, host.scale.unit, host.scale (docs §10).
+openbf3_test(test_s1_contract test_main.cpp s1_contract_tests.cpp test_support.h)
+target_link_libraries(test_s1_contract PRIVATE bf3_host)
+add_test(NAME s1.contract COMMAND test_s1_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_s1_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(s1.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s1_cl_dir}")
+endif()
+# S1 nav (docs/design/s1.md §5, §10): sim.nav.unit on synthetic worlds (no data; it includes bf3_sim's internal nav
+# header and links Detour for the seam). sim.nav: G2 for 7 modes x Metro and Caspian, the input = motor set proofs,
+# the Metro split report, cold / warm on a scratch root, install unchanged. sim.nav.bake: G4 (Caspian and Kharg, 16
+# threads, uncached; RUN_SERIAL). The install suites exit 77 without an install.
+openbf3_test(test_sim_nav test_main.cpp sim_nav_tests.cpp sim_nav_install_tests.cpp test_support.h)
+target_link_libraries(test_sim_nav PRIVATE bf3_host Detour)
+target_include_directories(test_sim_nav PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
+target_compile_definitions(test_sim_nav PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME sim.nav.unit COMMAND test_sim_nav --test-suite=sim-nav-unit)
+add_test(NAME sim.nav COMMAND test_sim_nav --test-suite=sim-nav)
+add_test(NAME sim.nav.bake COMMAND test_sim_nav --test-suite=sim-nav-bake)
+set_tests_properties(sim.nav.unit PROPERTIES TIMEOUT 600)
+set_tests_properties(sim.nav PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+set_tests_properties(sim.nav.bake PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    set_tests_properties(sim.nav.unit sim.nav sim.nav.bake PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s1_cl_dir}")
+endif()
+# S1 bots (docs/design/s1.md §1 G1 / G3, §6-§8, §10): host.scale.unit runs walker bots on the GameServer over synthetic
+# worlds (no data); host.scale runs run_scale_bench on Metro and Caspian ConquestLarge0 (G1 p99 <= 8 ms with 64
+# walkers over 120 s of sim time, the validity condition, G3's numbers, the observers = 16 row) and exits 77 without an
+# install. Both RUN_SERIAL (tick timing). Under asan the timing gates are report only (the test still runs them).
+openbf3_test(test_host_scale test_main.cpp host_scale_tests.cpp test_support.h)
+target_link_libraries(test_host_scale PRIVATE bf3_host)
+target_compile_definitions(test_host_scale PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+if(OPENBF3_ASAN)
+    target_compile_definitions(test_host_scale PRIVATE OPENBF3_TIMING_REPORT_ONLY=1)
+endif()
+add_test(NAME host.scale.unit COMMAND test_host_scale --test-suite=host-scale-unit)
+add_test(NAME host.scale COMMAND test_host_scale --test-suite=host-scale)
+set_tests_properties(host.scale.unit PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
+set_tests_properties(host.scale PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    set_tests_properties(host.scale.unit host.scale PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s1_cl_dir}")
+endif()

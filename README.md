@@ -72,6 +72,8 @@ S3 crowd: `s3.contract` and `anim.s3.unit` (no data), `anim.s3` and `render.s3` 
 
 L1 look: `render.look.unit`, `render.look` and, with `OPENBF3_GODOT`, `godot.l1_look` (see "L1 look").
 
+S1 (spike, docs/design/s1.md): `s1.contract`, `sim.nav.unit`, `host.scale.unit` (no data), `sim.nav` and the RUN_SERIAL timing gates `sim.nav.bake` and `host.scale` (install; see "S1 server scale (spike)").
+
 ## Run
 
 ```bat
@@ -1540,3 +1542,52 @@ Open issues:
   glass pass, auto exposure, fog and the LUT. The frame interval, which is CPU bound on this machine, stays within
   the gate. A GPU-bound budget would have to give up the glass pass (0.10 ms) or auto exposure (0.05 ms) first.
 * The plan default is now L1, so `godot.m1` and `godot.m1_load` run with L1 materials.
+
+<!-- S1 server scale (spike) -->
+## S1 server scale (spike)
+
+Spike S1 (docs/design/s1.md) asks whether a 60 Hz server steps 64 navmesh walker bots within 8 ms per tick, and
+whether the Detour navmesh baked from exactly the motor's collision set (Collision + Character bodies, terrain with
+holes, the level's combat-area tiles as terrain cover) connects every flag, HQ, MCOM and spawn point. Interfaces:
+`bf3/core/level/mode_areas.h`, `bf3/sim/nav.h`, `bf3/sim/nav_query.h`, `bf3/sim/bots/walker_brain.h`,
+`bf3/host/bot_fill.h`, `bf3/host/scale_bench.h` (counters in `bf3/sim/bots/bot_stats.h`, `bf3/host/bot_fill_stats.h`).
+Recast/Detour is built with 64-bit poly refs.
+
+Each gate is one ctest (the machine is shared while the tracks run, so timings are noisy; acceptance reruns them on
+a quiet machine):
+
+| gate | ctest | threshold |
+|---|---|---|
+| G1 tick | `host.scale` (Metro and Caspian ConquestLarge0, 64 walkers + 1 observer, 10 s warm-up + 120 s sim time ticked back to back) | p99 `GameServer::tick` <= 8.0 ms on each level; >= 90 % of bots walk >= 100 m, abandoned goals <= 10 % (bots spawn in the main nav component, so G1 does not depend on G2; a paced 60 Hz row, the thread's CPU share, the bots' p99 vs 2 ms and the server working set vs 0.4 GiB are printed, not gated) |
+| G2 connectivity | `sim.nav` (Metro and Caspian, all 7 MP modes) | every flag, HQ, MCOM and spawn on the mesh and in the main strongly connected component (each row also prints its weak component) |
+| G3 sweep cost | `host.scale` | motor steps, queries per step, queries per second, us per step, direct us per sweep and per overlap printed and non-zero |
+| G4 bake | `sim.nav.bake` (Caspian and Kharg ConquestLarge0, uncached, 16 threads, drop links sweep-checked on per-lane worlds) | Caspian <= 6.0 s, Kharg <= 13.0 s (tile inputs + lanes incl. link checks + assembly; not like-for-like with the research's region, tile counts printed) |
+
+The same numbers for a human: `bf3dump bots <LEVEL> <MODE>`, `bf3dump nav bake|stats|components|path|probe`. In the
+game, `res://scenes/m1_metro.tscn -- --bots=64 --nav-overlay` adds the walkers to the M1 server and draws the navmesh
+by component (F7 toggles); screenshots go to `b\shots\s1\`.
+
+Results, 2026-10-15, on the shared machine, so the timings are noisy (docs/design/s1.md §19):
+
+* **G1 passes.** p99 1.51 ms on Metro and 0.87 ms on Caspian, both runs valid.
+* **G2 fails.** Every Conquest flag and HQ is in the main component, but not every row is:
+
+  | level | rows in main |
+  |---|---|
+  | Metro | 485 / 566 |
+  | Caspian | 661 / 709 |
+
+  * The Rush stage geometry is closed in a bake over all stages: `ParkEntranceUndestroyed` cuts the park off the station.
+  * Crates of stages a mode does not play are parked off the map.
+  * Some spawns are on platforms cut off by props and steps the motor cannot climb.
+  * `sim.nav` reports the all-rows gate as a WARN and CHECKs what holds.
+* **G3 is measured.** Metro: 3.44 queries per step, 4.4 µs per sweep. Caspian: 4.21 queries per step, 1.8 µs per sweep.
+* **G4 passes.** Caspian 2.8 s, Kharg 3.8 s on 16 threads.
+
+The as-built nav uses:
+
+* cs 0.2 with the radius rounded up (0.4 m);
+* a detail error of 2 ch;
+* the water rule, under which Kharg's sea bed tiles lose their terrain.
+
+The run with bots: `"%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --mode=ConquestLarge0 --bots=64 --nav-overlay [--shot-delay=12 --shots=...]`.

@@ -25,3 +25,7 @@ target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
 target_sources(bf3dump PRIVATE logic_commands.cpp logic_commands.h)
 # L1 look (README "L1 look"): `looks <LEVEL> <MODE>`, the drawn-material census (bf3_render from the prepare block).
 target_sources(bf3dump PRIVATE look_commands.cpp look_commands.h)
+# S1 (server scale; docs/design/s1.md §12): `nav bake|stats|components|path|probe` and `bots`, the navmesh, its
+# components and the 64-walker scale bench (bf3_host for the bot level and run_scale_bench).
+target_sources(bf3dump PRIVATE nav_commands.cpp nav_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_host)

@@ -55,6 +55,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/level/water_plane.h" // S1
 #include "bf3/core/level/world.h"
 #include "bf3/core/res/havok.h"
 #include "bf3/core/result.h"
@@ -233,6 +234,17 @@ struct SoupOptions {
 	bool terrain = true; // add the terrain heightfields
 	float terrain_spacing = 2.0f; // target metres between terrain samples
 	SoupProgress *progress = nullptr;
+	// S1 (docs/design/s1.md §5.2): extra 64 m tiles (soup tile keys, sorted, unique) whose terrain cells are kept as
+	// well, beside the rule above (tiles with Havok triangles and their 8 neighbours). Empty = the default rule only,
+	// so every soup without it is unchanged (the level-oracle parity, kCollisionSoupVersion). S1 passes the level's
+	// combat-area tiles: on Caspian CQL 35 of its 273 combat-area tiles, on Kharg CQL 1,119 of 1,494, hold no soup
+	// triangle at all under the default rule [verified 2026-10-15], so a walker there would fall through the world.
+	std::vector<std::array<int32_t, 2>> terrain_cover;
+	// S1 water rule (docs/design/s1.md §5.2 "Deep water"): a terrain_cover tile whose centre lies inside one of these
+	// planes keeps its terrain cells only when at least one of its terrain samples lies above the highest such plane
+	// minus kCoverWaterDepth (S1 has no swimming; Kharg's sea bed would be walkable). The default rule (tiles with
+	// Havok triangles and their neighbours) is untouched. Empty = no rule.
+	std::vector<WaterPlane> cover_water;
 };
 
 // The soup algorithm's version: bump it whenever the same install gives different soup triangles, tags or
@@ -261,6 +273,7 @@ struct CollisionSoup {
 	std::vector<SoupTile> tiles; // sorted by (x, z)
 	size_t triangles = 0; // terrain included
 	size_t terrain_triangles = 0;
+	size_t cover_tiles_wet = 0; // S1: terrain_cover tiles the water rule dropped (summed over terrain objects)
 	size_t destroyed = 0;
 	size_t degenerate = 0;
 	size_t nonfinite = 0;

@@ -57,3 +57,22 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/logic/logic_native.h
     include/bf3/sim/logic/logic_harness.h
 )
+
+# S1 nav (spike S1 server scale; docs/design/s1.md §5, §7, §11): the navmesh from the motor's collision set, its
+# queries and the walker brain (bots/). Detour's path corridor lives in DetourCrowd.
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/nav.h
+    include/bf3/sim/nav_query.h
+    include/bf3/sim/bots/bot_stats.h
+    include/bf3/sim/bots/walker_brain.h
+    src/nav_internal.h
+    src/nav.cpp
+    src/nav_bake.cpp
+    src/nav_cache.cpp
+    src/nav_validate.cpp
+    src/nav_components.cpp
+    src/nav_query.cpp
+    src/bots/path_service.cpp
+    src/bots/walker_brain.cpp
+)
+target_link_libraries(bf3_sim PRIVATE DetourCrowd)

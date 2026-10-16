@@ -3,6 +3,8 @@
 // drive it without sockets and ServerHost sends and flushes in the tick that made them.
 #include "bf3/host/game_server.h"
 
+#include "bot_director.h" // S1 bots (docs/design/s1.md §8)
+
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
@@ -86,6 +88,7 @@ struct GameServer::Impl {
 		bool used = false;
 		bool remote = false;
 		bool dummy = false; // SpawnSweep
+		bool bot = false; // S1: a walker bot (spawns from BotLevel::spawns with BotFillConfig::spawn_in_main)
 		uint32_t peer = 0;
 		int team = 1;
 		bool hello = false; // MatchInfo sent: snapshots go out
@@ -153,6 +156,11 @@ struct GameServer::Impl {
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
 	double last_encode_ms = 0;
+	// S1 (docs/design/s1.md §6.1, §8)
+	GameServerTickTimes times;
+	std::unique_ptr<BotDirector> bots;
+	uint64_t motor_steps = 0;
+	uint32_t tick_spawns = 0;
 
 	int slot_of_peer(uint32_t p_peer) const {
 		for (size_t i = 0; i < slots.size(); ++i) {
@@ -215,7 +223,10 @@ struct GameServer::Impl {
 	// Rules step: (re)spawn slot p_slot at point p_point (SIZE_MAX: choose_spawn), stamped at tick p_tick.
 	bool spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
 		Slot &s = slots[p_slot];
-		const std::vector<sim::SpawnPoint> &points = config.level->spawns;
+		// S1: a bot slot spawns at the bot spawn list (main nav component) when BotFillConfig::spawn_in_main.
+		const std::vector<sim::SpawnPoint> &points =
+				s.bot && config.bots != nullptr && config.bots->spawn_in_main && config.bots->level != nullptr ? config.bots->level->spawns.points
+																												 : config.level->spawns;
 		if (points.empty()) {
 			return false;
 		}
@@ -231,6 +242,7 @@ struct GameServer::Impl {
 			return false;
 		}
 		const sim::SettleResult r = sim::settle_spawn(motor, *world, points[index], s.state.life + 1u, p_tick);
+		++tick_spawns; // S1
 		if (!r.ok) {
 			std::fprintf(stderr, "GameServer: spawn point %u did not settle: %s (spawning there anyway)\n", points[index].index, r.failure.c_str());
 		}
@@ -506,6 +518,7 @@ struct GameServer::Impl {
 
 	void send_snapshots(sim::Tick p_tick, uint64_t p_now_ns) {
 		const auto start = std::chrono::steady_clock::now();
+		const uint64_t snapshots_before = snapshots_sent; // S1
 		std::vector<std::pair<float, size_t>> order;
 		for (size_t i = 0; i < slots.size(); ++i) {
 			Slot &s = slots[i];
@@ -552,10 +565,18 @@ struct GameServer::Impl {
 			send(s.peer, net::kChannelUnreliable, std::move(bytes));
 		}
 		last_encode_ms = ms_since(start);
+		times.encode_ms = last_encode_ms; // S1
+		times.snapshots = uint32_t(snapshots_sent - snapshots_before); // S1
 	}
 
 	void run_tick(std::vector<OutDatagram> &r_out) {
 		const sim::Tick n = tick + 1u;
+		const auto tick_start = std::chrono::steady_clock::now(); // S1 tick parts (docs/design/s1.md §6.1)
+		times = GameServerTickTimes();
+		times.tick = n;
+		tick_spawns = 0;
+		const uint64_t queries_before = world->query_count();
+		const double paths_before = bots != nullptr ? bots->paths_ms_total() : 0.0;
 		// Requests that arrived in step 1 and act at once already queued their replies.
 		// 2. commands for this tick per slot.
 		for (Slot &s : slots) {
@@ -587,7 +608,9 @@ struct GameServer::Impl {
 				++s.stats.commands_repeated;
 			}
 		}
+		times.commands_ms = ms_since(tick_start); // S1
 		// 3. command sources: walkers and sweep dummies.
+		const auto sources_start = std::chrono::steady_clock::now(); // S1
 		for (Slot &s : slots) {
 			if (!s.used || s.remote || !s.spawned) {
 				continue;
@@ -603,6 +626,8 @@ struct GameServer::Impl {
 			s.last = c;
 			++s.stats.commands_applied;
 		}
+		times.sources_ms = ms_since(sources_start); // S1
+		times.paths_ms = bots != nullptr ? bots->paths_ms_total() - paths_before : 0.0; // S1
 		// 4. motor steps, slot order.
 		const auto step_start = std::chrono::steady_clock::now();
 		for (Slot &s : slots) {
@@ -614,12 +639,16 @@ struct GameServer::Impl {
 			}
 			const bool was_alive = alive(s.state);
 			motor.step(s.state, s.last);
+			++times.motor_steps; // S1
 			if (was_alive && !alive(s.state) && !s.dummy) {
 				s.want_spawn = true;
 				s.respawn_at = n + config.respawn_ticks;
 			}
 		}
 		last_step_ms = ms_since(step_start);
+		times.step_ms = last_step_ms; // S1
+		motor_steps += times.motor_steps;
+		const auto rules_start = std::chrono::steady_clock::now(); // S1
 		// 5. rules: Ready / deaths -> (re)spawn, dev requests, the sweep. Everything here is stamped n.
 		for (size_t i = 0; i < slots.size(); ++i) {
 			Slot &s = slots[i];
@@ -629,6 +658,8 @@ struct GameServer::Impl {
 		}
 		apply_debug(n);
 		run_sweep(n);
+		times.rules_ms = ms_since(rules_start); // S1
+		times.spawns = tick_spawns; // S1
 		tick = n;
 		// 7. events per client, the traces, snapshots.
 		for (size_t i = 0; i < slots.size(); ++i) {
@@ -660,6 +691,27 @@ struct GameServer::Impl {
 			r_out.push_back(std::move(d));
 		}
 		pending_out.clear();
+		times.collision_queries = world->query_count() - queries_before; // S1
+		times.tick_ms = ms_since(tick_start); // S1
+	}
+
+	// S1: add_local_soldier with the bot mark set before the spawn (the bot spawn list, docs/design/s1.md §8).
+	int add_local(std::unique_ptr<CommandSource> p_source, int p_team, bool p_bot) {
+		const int at = free_slot();
+		if (at < 0 || p_source == nullptr) {
+			return -1;
+		}
+		Slot &s = slots[size_t(at)];
+		reset_slot(s);
+		s.used = true;
+		s.team = p_team;
+		s.bot = p_bot;
+		s.source = std::move(p_source);
+		if (!spawn(size_t(at), SIZE_MAX, tick)) {
+			reset_slot(s);
+			return -1;
+		}
+		return at;
 	}
 };
 
@@ -695,6 +747,19 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	for (uint32_t i = 0; i < p_config.walkers; ++i) {
 		if (add_local_soldier(std::make_unique<Walker>(i), 2) < 0) {
 			return core::make_error("GameServer: no slot for walker " + std::to_string(i));
+		}
+	}
+	// S1 (docs/design/s1.md §8): walker bots, teams 1 and 2 alternating; their initial spawns settle here.
+	if (p_config.bots != nullptr && p_config.bots->count > 0) {
+		core::Result<std::unique_ptr<BotDirector>> director = BotDirector::create(p_config.bots, p_config.seed);
+		if (!director) {
+			return core::error_at("GameServer", director.error());
+		}
+		m.bots = std::move(*director);
+		for (uint32_t i = 0; i < m.bots->count(); ++i) {
+			if (m.add_local(m.bots->source(i), 1 + int(i % 2u), true) < 0) {
+				return core::make_error("GameServer: no slot for bot " + std::to_string(i));
+			}
 		}
 	}
 	return core::Status::success();
@@ -792,21 +857,7 @@ sim::Tick GameServer::current_tick() const {
 }
 
 int GameServer::add_local_soldier(std::unique_ptr<CommandSource> p_source, int p_team) {
-	Impl &m = *impl_;
-	const int at = m.free_slot();
-	if (at < 0 || p_source == nullptr) {
-		return -1;
-	}
-	Impl::Slot &s = m.slots[size_t(at)];
-	m.reset_slot(s);
-	s.used = true;
-	s.team = p_team;
-	s.source = std::move(p_source);
-	if (!m.spawn(size_t(at), SIZE_MAX, m.tick)) {
-		m.reset_slot(s);
-		return -1;
-	}
-	return at;
+	return impl_->add_local(std::move(p_source), p_team, false);
 }
 
 GameServerStats GameServer::stats() const {
@@ -820,6 +871,16 @@ GameServerStats GameServer::stats() const {
 	g.step_precondition_failures = m.step_precondition_failures;
 	g.last_step_ms = m.last_step_ms;
 	g.last_encode_ms = m.last_encode_ms;
+	// S1 (docs/design/s1.md §6.1, §8)
+	g.last_tick_ms = m.times.tick_ms;
+	g.last_commands_ms = m.times.commands_ms;
+	g.last_sources_ms = m.times.sources_ms;
+	g.last_rules_ms = m.times.rules_ms;
+	g.motor_steps = m.motor_steps;
+	g.collision_queries = m.world != nullptr ? m.world->query_count() : 0;
+	if (m.bots != nullptr) {
+		g.bots = m.bots->stats();
+	}
 	g.slots.resize(m.slots.size());
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		const Impl::Slot &s = m.slots[i];
@@ -836,6 +897,10 @@ GameServerStats GameServer::stats() const {
 		g.soldiers += o.alive ? 1u : 0u;
 	}
 	return g;
+}
+
+const GameServerTickTimes &GameServer::last_tick_times() const {
+	return impl_->times;
 }
 
 const sim::SoldierState *GameServer::soldier(uint32_t p_slot) const {
