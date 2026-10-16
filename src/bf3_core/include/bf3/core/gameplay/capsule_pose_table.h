@@ -25,11 +25,11 @@
 
 namespace bf3::core::gameplay {
 
-inline constexpr uint32_t kCapsuleTableVersion = 1; // part of the capsules/ cache key
+inline constexpr uint32_t kCapsuleTableVersion = 2; // capsules/ cache key part; 2: 16 fractions, bind-model offsets
 inline constexpr size_t kCapsuleStances = 3; // stand, crouch, prone (sim::Pose order)
 inline constexpr size_t kCapsulePitchBuckets = 33;
 inline constexpr size_t kCapsuleTransitions = 6;
-inline constexpr size_t kCapsuleTransitionFractions = 8;
+inline constexpr size_t kCapsuleTransitionFractions = 16;
 inline constexpr size_t kCapsuleRows = kCapsuleStances + kCapsuleTransitions; // row_source entries
 inline constexpr size_t kMaxTableCapsules = 16; // = sim::weapons::kMaxZoneCapsules (hi-LOD set: 9)
 

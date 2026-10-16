@@ -6,7 +6,7 @@
 //     structural checks, the hash, the capsules/ blob round trip, a second build bit-equal, plausible stand-idle heights;
 //   * E18 (a): posed_target from the table against the reference evaluation (bf3/anim/server_pose_reference.h: per
 //     query sample_pose -> apply_additive at the exact pitch weight -> model_pose, capsules placed in double; no
-//     buckets, no fraction steps) at the 32 mid-pitches (steady rows, 3 stances) and 7 mid-fractions x 32 mid-pitches
+//     buckets, no fraction steps) at the 32 mid-pitches (steady rows, 3 stances) and 15 mid-fractions x 32 mid-pitches
 //     (6 transition rows): head and chest capsule centres within 3 cm (steady) and 5 cm (transitions); body and legs
 //     reported;
 //   * E18 (a): the stand rows against S3's CrowdEvaluator (its own clip set, loco blend and layers) within 3 cm; a run

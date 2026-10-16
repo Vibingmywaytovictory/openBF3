@@ -1,7 +1,7 @@
 #pragma once
 // The server pose of the hit capsules (plan R14; docs/design/m2a.md §6.5; owner lc): the 3p rig evaluated per stance
-// at its idle clip with the additive aim at 33 pitch buckets, and per stance transition at 8 fractions of its clip,
-// with the 9 hi-LOD capsules placed from the bones' model transforms into a CapsulePoseTable. Godot-free; the server
+// at its idle clip with the additive aim at 33 pitch buckets, and per stance transition at 16 fractions of its clip, with
+// the 9 hi-LOD capsules placed from the bones' model transforms into a CapsulePoseTable. Godot-free; the server
 // links it (the new bf3_host -> bf3_anim link, §2), the client builds the same table on its loader thread.
 //
 // Clip source [verified: antdump list --install b_basicassetsmp, 2026-10-16; every controller name occurs exactly
