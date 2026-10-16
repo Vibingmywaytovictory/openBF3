@@ -1019,7 +1019,7 @@ quiet lock. Design doc §17 has the full rows.
 | G4 S1 re-run | `ctest --preset dev -R "^host\.scale$"`, `... "^sim\.nav\.bake$"`, `... "^sim\.nav$"` | p99 tick: Metro 1.52 ms, Caspian 1.10 ms. Bake: Caspian 3.37 s, Kharg 3.07 s (1,240 tiles_wet, 3.49 M triangles_unwalkable; S1 dropped 1,290 cover tiles). G2 rows 485/566 and 661/709, unchanged |
 | G5 S2 re-run | `ctest --preset dev -R "^sim\.vehicle(\.unit)?$"` | G1, G1r, G1m and the new G1t (heightfield with hole and patch): 0 mismatching ticks. ExactPod max 1.9 mm |
 | G6 Caspian spawns | `ctest --preset dev -R "^sim\.terrain$"` | the 24 RL points sit 28.6–32.3 m under the terrain in `layer0_rush_logic`; the cause is in the data, no fix |
-| G7 hygiene | full `ctest --preset dev`; `tools\build.cmd asan` + `ctest --preset asan -R "core\.level\.collision\|sim\.world\|sim\.terrain\|sim\.nav\.unit\|sim\.vehicle\.unit\|tc\.contract"`; capture | see design doc §17.1 |
+| G7 hygiene | full `ctest --preset dev`; `tools\build.cmd asan` + `ctest --preset asan -R "core\.level\.collision\|sim\.world\|sim\.terrain\|sim\.nav\.unit\|sim\.vehicle\.unit\|tc\.contract"`; capture | full ctest: 80 passed, 2 skipped as on main, 3 timing rows (s0_selftest, host.session, s3_crowd) failed on the busy machine and passed on re-run (s3_crowd under the quiet lock); asan rows all pass (sim.terrain 7,895 s, timeout now 10,800 s); install unchanged; capture inspected (design doc §17.1, §17.3) |
 
 `sim.terrain.unit` needs no data. It covers:
 * hole patterns, including every pattern that needs a patch;
