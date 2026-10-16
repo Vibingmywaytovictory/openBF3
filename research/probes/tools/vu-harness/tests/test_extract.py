@@ -248,6 +248,31 @@ class ExtractTests(unittest.TestCase):
         # a sibling of the normal instance whose name merely starts with Server is not refused by the path rule
         self.assertIsNone(extract.refused_input(r'C:\Users\olku\Documents\Battlefield 3\ServerMeasure\logs'))
 
+    def test_session_range_cross_midnight(self):
+        # a run id carries its START date: overnight and morning runs of an evening session are 20261017-*
+        late = '20261017-SB-30-003000'
+        self.write_logs(extra_server=[line(row('ev', 61, run=late, sc='SB', name='after_midnight'))])
+        code, text, out = self.run_extract()
+        self.assertEqual(code, 0, text)
+        self.assertNotIn(late, os.listdir(out))
+        self.assertIn('WARNING 1 rows of runs outside --session 20261016', text)
+        self.assertIn('20261017 1 rows', text)
+        buf = io.StringIO()
+        out2 = os.path.join(self.tmp, 'out2')
+        with contextlib.redirect_stdout(buf):
+            code = extract.main(['--session', '20261016..20261017', '--server-logs', self.slog, '--client-logs',
+                                 self.clog, '--out', out2])
+        self.assertEqual(code, 0, buf.getvalue())
+        self.assertEqual(sorted(os.listdir(out2)), sorted([RUN, SRUN, late]))
+        self.assertNotIn('WARNING', buf.getvalue())
+
+    def test_session_parse(self):
+        self.assertEqual(extract.parse_session('20261016'), [('20261016', '20261016')])
+        self.assertEqual(extract.parse_session('20261016..20261017,20261020'),
+                         [('20261016', '20261017'), ('20261020', '20261020')])
+        for bad in ('2026101', '20261017..20261016', '20261332', 'x', '', '20261016..'):
+            self.assertIsNone(extract.parse_session(bad), bad)
+
     def test_session_filter_and_manifests(self):
         self.write_logs(extra_server=[line(row('ev', 60, run='20261015-WA-30-213000', name='old'))])
         mb = os.path.join(self.tmp, 'mb.csv')

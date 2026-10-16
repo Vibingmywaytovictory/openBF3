@@ -559,6 +559,8 @@ def rule_w4(runs, ctx=None):
                 sid = shooter_of(shots)
                 gs = GS(run, sid, w.q0, w.q1)
                 off = post_offset(gs, [s['k'] for s in shots])
+                # both times in gs-row ticks counted from the row that first shows the shot (k + off), so they
+                # compare directly with the shot-to-shot gap of part c
                 for s in shots[:60]:
                     k = s['k'] + off
                     pk = gs.p(k)
@@ -567,12 +569,12 @@ def rule_w4(runs, ctx=None):
                     for kk in range(k, k + int(3 * run.hz)):
                         v = gs.p(kk)
                         if v is not None and v <= 0.05 * pk:
-                            t_rec.append((kk - s['k']) / run.hz)
+                            t_rec.append((kk - k) / run.hz)
                             break
-                    for kk in range(s['k'], s['k'] + int(3 * run.hz)):
+                    for kk in range(k + 1, k + int(3 * run.hz)):
                         g = gs.at(kk)
-                        if g is not None and kk > s['k'] and g['da'] <= g['dmin'] + 1e-6:
-                            t_min.append((kk - s['k']) / run.hz)
+                        if g is not None and g['da'] <= g['dmin'] + 1e-6:
+                            t_min.append((kk - k) / run.hz)
                             break
             for m, q0, q1 in unit_windows(run, pw['c'][0], pw['c'][1], 'c'):
                 shots = sorted([s for s in run.of('shot', q0, q1) if s.get('kind') == 'bullet'], key=lambda s: s['q'])
@@ -622,17 +624,30 @@ def rule_w4(runs, ctx=None):
     tmin = stats.median(t_min)
     numbers = {'bins': {'%d%s' % (k[0], 'h' if k[1] else ''): v for k, v in sorted(bins.items())}, 't_rec': trec,
                't_min': tmin, 'fsrm': fsrm, 'hz': hz}
-    one = 1.0 / hz + 1e-9
+    tick = 1.0 / hz
+    eps = 1e-6 * tick
 
     def consistent(pred):
         return all(pred(g / hz, held) == armed for (g, held), armed in obs.items())
 
+    def fits(t):
+        """armed iff gap >= t + j, j = 0 (the shot sees this tick's state, as in the gs row) or j = 1 tick (the shot
+        is evaluated before this tick's update): both orders are a live unknown, no other slack (a one-tick slack
+        BELOW t made a 5-tick t_min accept an unarmed 4-tick gap and the verdict fell to a spurious timer)."""
+        if t is None:
+            return None
+        for j in (0, 1):
+            if consistent(lambda gap, held, th=t + j * tick: gap >= th - eps):
+                return j
+        return None
+
     cands = []
     if consistent(lambda gap, held: not held):
         cands.append('release')
-    if trec is not None and consistent(lambda gap, held: gap >= trec - one):
+    j_rec, j_min = fits(trec), fits(tmin)
+    if j_rec is not None:
         cands.append('recovered')
-    if tmin is not None and consistent(lambda gap, held: gap >= tmin - one):
+    if j_min is not None:
         cands.append('spreadmin')
     # timer: the step between the largest non-armed and the smallest armed gap
     na = [g for (g, h), a in obs.items() if not a]
@@ -644,20 +659,39 @@ def rule_w4(runs, ctx=None):
             timer = T
     numbers['consistent'] = cands
     numbers['timer_T'] = timer
+    numbers['step_ticks'] = [max(na) if na else None, min(ar) if ar else None]
+    numbers['order_j'] = {'recovered': j_rec, 'spreadmin': j_min}
     if 'release' in cands:
         also = [c for c in cands if c != 'release']
         return Result('W4', 'OnTriggerRelease: held pairs not armed, every released gap armed' +
                       (' (also consistent: %s)' % ', '.join(also) if also else ''), 'release', numbers,
                       'Mechanics::first_shot_rearm = FirstShotRearm::OnTriggerRelease in ' + MECH)
+    if 'recovered' in cands and 'spreadmin' in cands and abs(trec - tmin) > 0.5 * tick:
+        return Result('W4', 'inconclusive: WhenRecovered (t_rec %s s) and WhenSpreadMin (t_min %s s) both fit; the '
+                      'measured gaps (step %s..%s ticks) do not fall between them' % (
+                          fmt(trec), fmt(tmin), numbers['step_ticks'][0], numbers['step_ticks'][1]),
+                      'inconclusive', numbers)
     if 'recovered' in cands:
-        return Result('W4', 'WhenRecovered: armed iff gap >= t_rec %s s' % fmt(trec), 'recovered', numbers,
+        return Result('W4', 'WhenRecovered: armed iff gap >= t_rec %s s' % fmt(trec) +
+                      (' (shot sees the previous tick)' if j_rec else '') +
+                      (' (t_min within half a tick: WhenSpreadMin is the same here)' if 'spreadmin' in cands else ''),
+                      'recovered', numbers,
                       'Mechanics::first_shot_rearm = FirstShotRearm::WhenRecovered in ' + MECH)
     if 'spreadmin' in cands:
-        return Result('W4', 'WhenSpreadMin: armed iff gap >= t_min %s s' % fmt(tmin), 'spreadmin', numbers,
+        return Result('W4', 'WhenSpreadMin: armed iff gap >= t_min %s s' % fmt(tmin) +
+                      (' (shot sees the previous tick)' if j_min else ''), 'spreadmin', numbers,
                       'add FirstShotRearm::WhenSpreadMin (new enum value); Mechanics::first_shot_rearm = WhenSpreadMin '
                       'in ' + MECH)
     if timer is not None:
-        return Result('W4', 'AfterTime(%.3f s): a step matching neither t_rec nor t_min' % timer,
+        # guard: a step that sits on t_min or t_rec is that law, never a new timer enum value
+        for name, t in (('spreadmin', tmin), ('recovered', trec)):
+            if t is not None and abs(timer - t) <= 0.5 * tick + eps:
+                numbers['timer_matches'] = name
+                return Result('W4', 'inconclusive: the step (T %.3f s) sits on %s %s s but the bins do not fit it '
+                              'exactly; more part c pairs needed' % (timer, 't_min' if name == 'spreadmin' else 't_rec',
+                                                                    fmt(t)), 'inconclusive', numbers)
+        return Result('W4', 'AfterTime(%.3f s): a step matching neither t_rec %s s nor t_min %s s' % (
+                          timer, fmt(trec), fmt(tmin)),
                       'timer:%.1f' % (round(timer * 10) / 10.0), numbers,
                       'add FirstShotRearm::AfterTime with T = %.3f s (new enum value) in %s' % (timer, MECH))
     return Result('W4', 'inconclusive: no candidate law fits every gap bin', 'inconclusive', numbers)

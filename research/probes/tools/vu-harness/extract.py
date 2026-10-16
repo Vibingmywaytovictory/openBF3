@@ -1,6 +1,6 @@
 """Extract MH1 rows from VU server/client logs into research/measurements/<run>/ (DESIGN.md section 9).
 
-    python -I extract.py --session 20261016 --server-logs <dir> [--server-logs <dir> ...] [--client-logs <dir> ...]
+    python -I extract.py --session 20261016..20261017 --server-logs <dir> [--server-logs <dir> ...] [--client-logs <dir> ...]
         --out <repo>\\research\\measurements [--since 2026-10-16T18:00] [--glob *.log]
         [--manifest-before x.csv --manifest-after y.csv] [--force] [--dry-run]
 
@@ -10,6 +10,10 @@ log folder, the install or the normal instance. Parsing is defensive (mhlib.logp
 schema/rows_v1.json with the PII guard (mhlib.schema). Output per run: raw.jsonl sorted by (r, q) and meta.json;
 deterministic and idempotent; an existing run folder is skipped unless --force. --dry-run writes nothing and prints
 per run the rows, malformed counts, q gaps, trunc rows and the resume hint.
+--session takes a date (YYYYMMDD), an inclusive range (YYYYMMDD..YYYYMMDD) or a comma list of either: a run id
+carries the date its run STARTED (mh_clock), so an evening session with overnight and morning runs spans two dates
+(RUNBOOK uses 20261016..20261017). Rows of runs outside the session are counted and their dates printed, never
+dropped silently.
 Exit 0; 2 if malformed > 1 % of MH1 lines or any pii_suspect; 1 on a usage/refusal error.
 """
 
@@ -143,6 +147,32 @@ def guess_run(js):
     return m.group(1) if m else None
 
 
+def parse_session(text):
+    """'20261016', '20261016..20261017' or a comma list of these -> list of (lo, hi) date strings, or None."""
+    out = []
+    for part in text.split(','):
+        part = part.strip()
+        lo, sep, hi = part.partition('..')
+        if not sep:
+            hi = lo
+        for d in (lo, hi):
+            if not (len(d) == 8 and d.isdigit()):
+                return None
+            try:
+                datetime.date(int(d[:4]), int(d[4:6]), int(d[6:]))
+            except ValueError:
+                return None
+        if hi < lo:
+            return None
+        out.append((lo, hi))
+    return out or None
+
+
+def session_has(session, run):
+    d = run[:8]
+    return any(lo <= d <= hi for lo, hi in session)
+
+
 def process_file(path, kind, sch, coll, totals, header_all, session):
     counts = {}
     with open(path, 'rb') as f:
@@ -160,8 +190,11 @@ def process_file(path, kind, sch, coll, totals, header_all, session):
         if row is None:
             items.append((None, why, guess_run(js)))
             continue
-        if session and row['run'] != 'none' and not row['run'].startswith(session):
+        if session and row['run'] != 'none' and not session_has(session, row['run']):
             totals['other_session'] = totals.get('other_session', 0) + 1
+            od = totals.setdefault('other_dates', {})
+            d = row['run'][:8]
+            od[d] = od.get(d, 0) + 1
             continue
         items.append((row, None, None))
     src = os.path.basename(path)
@@ -171,7 +204,8 @@ def process_file(path, kind, sch, coll, totals, header_all, session):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='extract MH1 rows into run folders')
-    ap.add_argument('--session', required=True, help='YYYYMMDD: only runs of this date')
+    ap.add_argument('--session', required=True,
+                    help='YYYYMMDD, YYYYMMDD..YYYYMMDD (inclusive) or a comma list: run start dates to keep')
     ap.add_argument('--server-logs', action='append', default=[])
     ap.add_argument('--client-logs', action='append', default=[])
     ap.add_argument('--out', required=True)
@@ -182,8 +216,9 @@ def main(argv=None):
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)
-    if not (len(a.session) == 8 and a.session.isdigit()):
-        print('extract: --session must be YYYYMMDD')
+    session = parse_session(a.session)
+    if session is None:
+        print('extract: --session must be YYYYMMDD, YYYYMMDD..YYYYMMDD or a comma list of these')
         return 1
     since = None
     if a.since:
@@ -216,7 +251,7 @@ def main(argv=None):
     for kind, dirs in (('server', a.server_logs), ('client', a.client_logs)):
         for d in dirs:
             for p in list_logs(d, a.glob, since):
-                sources.append(process_file(p, kind, sch, coll, totals, header, a.session))
+                sources.append(process_file(p, kind, sch, coll, totals, header, session))
     manifests = None
     if a.manifest_before and a.manifest_after:
         manifests = {'before': os.path.basename(a.manifest_before), 'after': os.path.basename(a.manifest_after),
@@ -229,6 +264,10 @@ def main(argv=None):
         len(sources), totals.get('lines', 0), mh1, bad,
         ', '.join('%s %d' % kv for kv in sorted(merge(coll.malformed).items())) or 'none', too_long,
         totals.get('bad_utf8', 0), len(coll.runs)))
+    if totals.get('other_session'):
+        print('extract: WARNING %d rows of runs outside --session %s skipped (run dates: %s); widen --session to keep them'
+              % (totals['other_session'], a.session,
+                 ', '.join('%s %d rows' % kv for kv in sorted(totals.get('other_dates', {}).items()))))
     for run in sorted(coll.runs):
         items = coll.runs[run]
         srcs = [s for s in sources if s['name'] in coll.src_of.get(run, set())]

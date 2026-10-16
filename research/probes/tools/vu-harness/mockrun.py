@@ -82,7 +82,7 @@ class Env(object):
         out = os.path.join(self.dir, 'measurements')
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code = extract.main(['--session', '20261016', '--server-logs', os.path.join(self.dir, 'instance', 'logs'),
+            code = extract.main(['--session', '20261016..20261017', '--server-logs', os.path.join(self.dir, 'instance', 'logs'),
                                  '--client-logs', os.path.join(self.dir, 'client'), '--out', out, '--force'])
         text = buf.getvalue()
         self.extract_text = text
@@ -258,6 +258,39 @@ def c_wa_t1_linear(env):
 def c_wa_w4_recovered(env):
     wa_case(env, {'recovery': 'exp', 'rearm': 'recovered'}, wa_args(env, 'a,c', scale='0.2'), [('W4', 'recovered')],
             ['W4'])
+
+
+# W4 with the default (M16A3) weapon data, no tuning: t_min is a whole number of ticks, so a one-tick slack below it
+# accepted the unarmed gap one tick short and the rule fell to a spurious AfterTime timer (verifier finding, pass 5)
+@case()
+def c_wa_w4_spreadmin(env):
+    wa_case(env, {'recovery': 'exp', 'decay': 8.0, 'rearm': 'spreadmin'}, wa_args(env, 'a,c', scale='0.2'),
+            [('W4', 'spreadmin')], ['W4'])
+
+
+@case()
+def c_wa_w4_spreadmin15(env):
+    wa_case(env, {'recovery': 'exp', 'decay': 15.0, 'rearm': 'spreadmin'}, wa_args(env, 'a,c', scale='0.2'),
+            [('W4', 'spreadmin')], ['W4'], seed=2)
+
+
+@case()
+def c_wa_w4_timer(env):
+    wa_case(env, {'recovery': 'exp', 'rearm': 'timer:0.3'}, wa_args(env, 'a,c', scale='0.2'), [('W4', 'timer:0.3')],
+            ['W4'])
+
+
+# W1 with impact noise: the ADS configs may go inconclusive (randomRadius veto); the final verdict must never be the
+# wrong law or a conflict
+@case()
+def c_wa_w1_hit_noise(env):
+    run_wa(env, {'disc': 'area', 'hit_noise': 0.02}, wa_args(env, 'a'))
+    code, runs, text = env.extract(0)
+    res = env.analyze(runs, ['W1'])
+    got = [r for r in res if r.item == 'W1']
+    v = got[0].variant if got else None
+    env.check('W1 area or inconclusive under hit noise', v in ('area', 'inconclusive'),
+              'got %r: %s' % (v, got[0].text()[:200].replace(chr(10), ' | ') if got else ''))
 
 
 @case()
