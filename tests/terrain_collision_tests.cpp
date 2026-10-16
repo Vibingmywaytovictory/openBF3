@@ -815,7 +815,8 @@ TEST_SUITE("sim-terrain") {
 			const res::HeightGrid &g = *record.grid;
 			const size_t step = std::max<size_t>(1, size_t(std::lround(16.0 / std::max(0.01f, g.sample_spacing[0]))));
 			const RayCheck rc = cast_cells(*cw, record, placement, step, 0.05);
-			CHECK(rc.missed == 0);
+			CHECK_MESSAGE(rc.missed == 0, run.level, ": first miss cell (", rc.miss_x, ", ", rc.miss_z, ") half ", rc.miss_half, ", expected y ", rc.miss_expected,
+					", last hit y ", rc.miss_hit_y, ", ", rc.miss_occluders, " occluders");
 			// Open cells may hold Havok ground; only terrain hits count, and the full world's non-terrain hits are passed.
 			CHECK(rc.open_hits == 0);
 			// Tile centres: something under every combat-area tile (the gate's "ground"), from far above.
@@ -841,10 +842,10 @@ TEST_SUITE("sim-terrain") {
 				same += (ha == hb && (!ha || (std::memcmp(&a.position, &b.position, sizeof(a.position)) == 0 && a.terrain == b.terrain && a.tile == b.tile))) ? 1 : 0;
 			}
 			std::printf("sim.terrain full %s %s: cold %.2f s (terrain %.2f s, %zu tiles cooked, cache %.1f MiB), warm %.2f s (world hit %d, terrains hit %zu); "
-						"lattice %zu rays (%zu missed, %zu occluded by Havok, worst %.4f m), open %zu rays (%zu terrain hits); combat tiles %zu, %zu without "
+						"lattice %zu rays (%zu missed, %zu occluded by Havok, %zu on Havok ground within 5 cm, worst %.4f m), open %zu rays (%zu terrain hits); combat tiles %zu, %zu without "
 						"ground; tile-centre cells %zu rays, %zu bad (%zu outside, %zu open); 10,000 rays cold = warm: %zu (%zu hits)\n",
 					run.level, run.mode, cold_stats.seconds_total, cold_stats.seconds_terrain, cold_stats.tiles_cooked, double(cold_stats.cache_bytes) / 1048576.0,
-					warm_stats.seconds_total, warm_stats.world_hit ? 1 : 0, warm_stats.terrains_hit, rc.rays, rc.missed, rc.occluded, rc.worst, rc.open_rays,
+					warm_stats.seconds_total, warm_stats.world_hit ? 1 : 0, warm_stats.terrains_hit, rc.rays, rc.missed, rc.occluded, rc.coincident, rc.worst, rc.open_rays,
 					rc.open_hits, combat->tiles.size(), without_ground, tc.rays.rays, tc.rays.missed + tc.rays.open_hits, tc.outside, tc.open, same, hits);
 			std::fflush(stdout);
 			CHECK(same == 10000);

@@ -900,10 +900,16 @@ the install by C++ at runtime and drawn in Godot, one mesh per 64 m tile. Three 
 * **Terrain** (`res/terrain.h`, port of the heightfield parts of IW4L `resource_bf3` terrain.rs). The `Terrain` res
   names its `TerrainStreamingTree`. The tree's heightfield quadtree (embedded tiles, streamed lod0 chunks,
   data-less and disabled nodes) becomes a `HeightGrid` with the Rust code's float order. The soup takes the first
-  depth whose spacing reaches 2 m (Metro: depth 2, 513² samples, 2 m; Alborz: depth 5, 4097², 2 m). It keeps every
-  cell whose centre lies in a tile that holds Havok triangles or touches one, unless a corner is a hole. Each cell
-  gives two triangles faced +Y, with surface dirt and flag `kSoupTerrain`. IW4L's near-area cap, flat-block
-  merging and paved decals are not ported.
+  depth whose spacing reaches 2 m (Metro: depth 2, 513² samples, 2 m; Alborz: depth 5, 4097², 2 m).
+  <!-- TC --> Since the terrain-collision track (docs/design/terrain-collision.md, `kCollisionSoupVersion` 2) the
+  soup keeps every terrain as a **record**: the shared grid plus the object's frame (`SoupTerrain::grid` / `frame`),
+  and its tiles hold Havok triangles only. Every cell has collision unless a corner is a hole; there is no near-object
+  rule any more. `soup_terrain_cell` gives a cell's two triangles (faced +Y, surface dirt, flag `kSoupTerrain`),
+  `append_soup_terrain_tile` one 64 m tile's, and `hash_soup_terrain` the listing's hashes and tile sums. The static
+  world cooks one Jolt `HeightFieldShape` per terrain (16-bit samples, blocks of 4) plus a small world-space patch
+  `MeshShape` where Jolt's per-triangle hole rule would keep a triangle the soup drops, so holes match the soup
+  exactly (MP_001 1 marked sample, MP_003 2, XP4_Parl 1). IW4L's near-area cap, flat-block merging and paved decals
+  are not ported.
 * Every corner is quantised to whole millimetres. Triangles with a non-finite or > 1e7 m coordinate are dropped
   (`nonfinite`), and so are triangles with two equal corners (`degenerate`). The FNV-1a 64 of the nine values,
   the material and the class bytes gives each placement a stream hash; tiles and the soup get a wrapping sum.

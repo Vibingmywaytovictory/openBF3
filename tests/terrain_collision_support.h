@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -257,7 +258,12 @@ struct RayCheck {
 	size_t open_rays = 0;
 	size_t open_hits = 0; // a terrain hit in an open cell
 	size_t occluded = 0; // a non-terrain hit first (full worlds): re-cast past it
+	size_t coincident = 0; // a non-terrain hit within the tolerance of the terrain (Havok ground on the terrain plane)
 	double worst = 0.0; // largest |hit y - expected y| of the hits
+	// The first miss, for the message: cell, triangle, expected y, the last hit's y (NaN: none) and its occluders.
+	size_t miss_x = 0, miss_z = 0;
+	int miss_half = -1, miss_occluders = 0;
+	double miss_expected = 0.0, miss_hit_y = 0.0;
 };
 
 // A ray into a cell triangle against p_world: ground expected -> a terrain hit within p_tol of the plane (a ray from
@@ -273,6 +279,18 @@ inline void cast_cell(const sim::CollisionWorld &p_world, const level::SoupTerra
 	double top = ray.ground ? ray.at.y + 0.25 : p_hi_y;
 	const double bottom = ray.ground ? ray.at.y - 0.25 : p_lo_y;
 	(ray.ground ? r_check.rays : r_check.open_rays) += 1;
+	const auto note_miss = [&](double p_hit_y, int p_occluders) {
+		if (r_check.missed++ == 0) {
+			r_check.miss_x = p_x;
+			r_check.miss_z = p_z;
+			r_check.miss_half = p_half;
+			r_check.miss_expected = ray.at.y;
+			r_check.miss_hit_y = p_hit_y;
+			r_check.miss_occluders = p_occluders;
+		}
+	};
+	int occluders = 0;
+	double last_y = std::numeric_limits<double>::quiet_NaN();
 	for (int pass = 0; pass < 8 && top > bottom; ++pass) {
 		sim::StaticHit hit;
 		const sim::Vec3 origin{ float(ray.at.x), float(top), float(ray.at.z) };
@@ -280,7 +298,15 @@ inline void cast_cell(const sim::CollisionWorld &p_world, const level::SoupTerra
 			break;
 		}
 		if (hit.terrain == sim::kNoStaticTerrain) {
+			if (ray.ground && std::fabs(double(hit.position[1]) - ray.at.y) <= p_tol) {
+				// Havok ground lies on the terrain plane: the ray cannot tell the two apart and re-casting 1 mm below
+				// would step past the terrain. Ground is there; the terrain-only world proves the field (G1).
+				++r_check.coincident;
+				return;
+			}
 			++r_check.occluded;
+			++occluders;
+			last_y = double(hit.position[1]);
 			top = double(hit.position[1]) - 1e-3;
 			continue;
 		}
@@ -291,12 +317,12 @@ inline void cast_cell(const sim::CollisionWorld &p_world, const level::SoupTerra
 		const double e = std::fabs(double(hit.position[1]) - ray.at.y);
 		r_check.worst = std::max(r_check.worst, e);
 		if (e > p_tol) {
-			++r_check.missed;
+			note_miss(double(hit.position[1]), occluders);
 		}
 		return;
 	}
 	if (ray.ground) {
-		++r_check.missed;
+		note_miss(last_y, occluders);
 	}
 }
 
