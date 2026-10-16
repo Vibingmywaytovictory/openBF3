@@ -1999,3 +1999,26 @@ with no AddressSanitizer report (`sim.weapons.perf` skips there by design). One 
 | L1 `godot.l1_look` (ratio <= 1.25, p99 <= 16.7 ms) | 1.073, 5.41 ms (first integration) | 1.071 (2.686 against 2.506 ms), 5.40 ms |
 | M1 `godot.m1`, `godot.m1_load` E4 / E5 | PASS; 2.36 / 1.82 s | 16/16; 2.38 / 1.89 s |
 | install unchanged | clean | clean (256 files in every install test) |
+
+<!-- integration (integ/au) -->
+**Third integration (`integ/au`, 2026-10-16).** `m2a/audio` (branched from 111f937) merged with `--no-ff` onto `main`
+1874933 (the integration above). Shared files kept both sides, the main tree's blocks first and audio's after them; no
+code had to change (audio's `bf3_godot` classes are new files, registered after ui2). One follow-up:
+`OPENBF3_AUDIO_SHOTS` is passed through `file(TO_CMAKE_PATH)`, so the Windows path the design names works
+(it reached `audio_gates.cmake` as invalid escapes). Full `ctest --preset dev` with `OPENBF3_GODOT`: 123 of 125 pass,
+`core.cache_data` and `core.res` skipped as before; the timing rows ran under the quiet lock, the rest with `-j8`.
+`ctest --preset asan -R "^audio\."`: 14 / 14, no AddressSanitizer report. Integrated against accepted: G1 909 waves,
+12,955 segments, 0 frame / length mismatches; G2 4,290 chunks, 0 mismatches; G3 0.1301 / 0.1295 / 0.1295 ms per
+channel-second (accepted 0.1306, gate 0.2); G4 834 patches + 1 master, 32,117 nodes / 46 types, 7,323 voices, 1,879
+waves, 0 compile failures; G5 6 / 6 cases, 314 / 314 assertions; G6 warm load 57.5 ms (one run; accepted median 51.3,
+gate 500); G7 38 / 38; G8 windowed 31 / 31, every mixer counter 0, replay bit-exact, max block 0.343 ms. Main-tree
+gates: S1 `host.scale` G1 p99 1.18 / 0.75 ms (valid) and `sim.nav.bake` 2.53 / 3.60 s; S2 `sim.vehicle` G1 / G1r 0
+mismatches, G2x 1.91 mm; S3 `godot.s3_crowd` PASS (G1a p99 0.42 ms, G1b 1.86 ms, frame p99 11.4 / 10.7 ms, G3 16 /
+16); S4 `logic.metro` G4 hash 843761c3205e74bb; L1 `godot.l1_look` 1.085 and 1.064 (p99 5.7 / 6.0 ms); M1
+`godot.m1` 16 / 16, E4 / E5 2.40 / 1.84 s; ui1 25 / 25; ui2 10 / 10 with the six shots (`openBF3\b\shots\integau\`);
+`weapon-sim --check` 38 / 38, W11 p99 0.263 / 0.190 ms; VFX `fx.install` PASS, `tools.fx_bench` 38.5 ns; install
+unchanged in every install test. What a listener should know: G1 says 909 Metro waves where the M2a plan says 908 (this
+tree's `load_level` mount, a scope difference, open question 7); under reading R of the MultiCrossfader the M16A3's far
+noise layer fades **in** over 20-50 m and every layer fades **out** over 250-300 m, not "fades in over 250-300 m" as the
+plan words it (open question 1); and without the HDR window (A3) levels are low: a fixed window puts a 110 dB shot at
+-11 dBFS before attenuation, so the mid and far M16A3 shots sit near -69 and -90 dBFS.
