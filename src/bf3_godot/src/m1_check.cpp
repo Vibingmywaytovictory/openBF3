@@ -429,8 +429,37 @@ bool ShotRunner::parse(const std::string &p_shots, const std::string &p_spawns, 
 ShotRunner::ShotRunner(Bf3LevelSession &p_session, std::vector<FreeShot> p_free, std::vector<SpawnShot> p_spawn, std::string p_dir) :
 		session_(p_session), free_(std::move(p_free)), spawn_(std::move(p_spawn)), dir_(std::move(p_dir)) {}
 
+bool ShotRunner::parse_teleports(const std::string &p_teleports, std::vector<TeleportShot> &r_teleports, std::string &r_error) {
+	std::stringstream ss(p_teleports);
+	std::string item;
+	while (std::getline(ss, item, ';')) {
+		if (item.empty()) {
+			continue;
+		}
+		TeleportShot shot;
+		std::stringstream vs(item);
+		std::string v;
+		size_t n = 0;
+		bool ok = true;
+		while (ok && std::getline(vs, v, ',')) {
+			char *end = nullptr;
+			const float f = std::strtof(v.c_str(), &end);
+			ok = n < 4 && end != v.c_str() && std::isfinite(f) && std::fabs(f) < 1e6f;
+			if (ok) {
+				shot.at[n++] = f;
+			}
+		}
+		if (!ok || n != 4 || r_teleports.size() >= 64) {
+			r_error = "--shot-teleports entry is not x,y,z,yaw (at most 64): " + item;
+			return false;
+		}
+		r_teleports.push_back(shot);
+	}
+	return true;
+}
+
 bool ShotRunner::frame(uint64_t p_now_ns) {
-	const size_t total = spawn_.size() + free_.size();
+	const size_t total = spawn_.size() + teleport_.size() + free_.size();
 	if (next_ >= total) {
 		return true;
 	}
@@ -516,7 +545,65 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 				return false;
 		}
 	}
-	const FreeShot &shot = free_[next_ - spawn_.size()];
+	if (next_ < spawn_.size() + teleport_.size()) {
+		// TC: a teleport shot (m1_check.h).
+		const size_t index = next_ - spawn_.size();
+		const TeleportShot &shot = teleport_[index];
+		const float rad = 3.14159265358979323846f / 180.0f;
+		switch (state_) {
+			case 0: {
+				host::ClientSession *client = session_.client();
+				if (client == nullptr) {
+					lines_.push_back(fmt("teleport shot %zu: no client", index));
+					++failed_;
+					++next_;
+					return false;
+				}
+				mapper.set_scripted(true);
+				mapper.release_all();
+				mapper.set_free_camera(false);
+				session_.cameras().set_free(false);
+				mapper.script_view(shot.at[3] * rad, 0.0f);
+				net::DebugRequest q;
+				q.kind = net::DebugKind::Teleport;
+				q.id = ++request_id_;
+				q.position = { shot.at[0], shot.at[1], shot.at[2] };
+				q.yaw = sim::quantize_yaw(shot.at[3] * rad);
+				client->send_debug(q);
+				state_ = 1;
+				state_ns_ = p_now_ns;
+				return false;
+			}
+			case 1:
+				if (seconds_between(state_ns_, p_now_ns) >= 2.0) { // the fall from a few metres plus settling
+					state_ = 2;
+					frames_ = 0;
+				}
+				return false;
+			default: {
+				if (frames_ < 30) {
+					return false;
+				}
+				const std::string path = (dir_.empty() ? std::string(".") : dir_) + "/teleport_" + std::to_string(index) + ".png";
+				const host::PresentationFrame &f = session_.frame();
+				if (session_.save_screenshot(path)) {
+					++saved_;
+					lines_.push_back(fmt("%s: teleport to (%.2f, %.3f, %.2f), settled feet (%.2f, %.3f, %.2f), %.2f m/s, mode %d (0 = on ground), air_ticks %u",
+							path.c_str(), shot.at[0], shot.at[1], shot.at[2], f.own_curr.position[0], f.own_curr.position[1], f.own_curr.position[2],
+							double(horizontal(f.own_curr.velocity)), int(f.own_curr.mode), unsigned(f.own_curr.air_ticks)));
+				} else {
+					++failed_;
+					lines_.push_back("screenshot failed: " + path);
+				}
+				UtilityFunctions::print(to_godot("[m1] shot " + lines_.back()));
+				mapper.release_all();
+				++next_;
+				state_ = 0;
+				return false;
+			}
+		}
+	}
+	const FreeShot &shot = free_[next_ - spawn_.size() - teleport_.size()];
 	const float deg = 3.14159265358979323846f / 180.0f;
 	if (state_ == 0) {
 		mapper.set_scripted(true);

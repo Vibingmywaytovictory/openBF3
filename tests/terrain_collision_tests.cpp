@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -828,6 +829,47 @@ TEST_SUITE("sim-terrain") {
 				without_ground += cw->ray(top, { 0.0f, -6000.0f, 0.0f }, sim::query_mask::kMovement, nullptr) ? 0 : 1;
 			}
 			const TileCentres tc = cast_tile_centres(*cw, record, placement, combat->tiles, 0.05);
+			// The combat tiles that had no soup triangle before TC (no Havok tile in their 3 x 3, the IW4L near-object
+			// rule), and the one nearest their mean: where the G7 capture stands.
+			std::set<std::pair<int32_t, int32_t>> havok;
+			for (const level::SoupTile &t : soup->tiles) {
+				havok.insert({ t.x, t.z });
+			}
+			std::vector<std::array<int32_t, 2>> bare;
+			for (const std::array<int32_t, 2> &t : combat->tiles) {
+				bool close_by = false;
+				for (int32_t dz = -1; dz <= 1 && !close_by; ++dz) {
+					for (int32_t dx = -1; dx <= 1 && !close_by; ++dx) {
+						close_by = havok.count({ t[0] + dx, t[1] + dz }) != 0;
+					}
+				}
+				if (!close_by) {
+					bare.push_back(t);
+				}
+			}
+			if (!bare.empty()) {
+				double mx = 0, mz = 0;
+				for (const std::array<int32_t, 2> &t : bare) {
+					mx += t[0];
+					mz += t[1];
+				}
+				mx /= double(bare.size());
+				mz /= double(bare.size());
+				const std::array<int32_t, 2> *pick = &bare[0];
+				for (const std::array<int32_t, 2> &t : bare) {
+					if (std::hypot(t[0] - mx, t[1] - mz) < std::hypot((*pick)[0] - mx, (*pick)[1] - mz)) {
+						pick = &t;
+					}
+				}
+				const sim::Vec3 top{ float((*pick)[0]) * 64.0f + 32.0f, 3000.0f, float((*pick)[1]) * 64.0f + 32.0f };
+				sim::StaticHit hit;
+				const bool ground = cw->ray(top, { 0.0f, -6000.0f, 0.0f }, sim::query_mask::kMovement, &hit);
+				CHECK_MESSAGE((ground || !run.ground_gate), run.level);
+				std::printf("sim.terrain full %s %s: %zu of %zu combat tiles had no soup triangle before TC; capture tile (%d, %d), centre (%.1f, %.1f, %.1f), "
+							"terrain hit %d\n",
+						run.level, run.mode, bare.size(), combat->tiles.size(), (*pick)[0], (*pick)[1], double(top[0]), ground ? double(hit.position[1]) : 0.0,
+						double(top[2]), ground && hit.terrain != sim::kNoStaticTerrain ? 1 : 0);
+			}
 			// 10,000 seeded rays: cold and warm answer bit for bit.
 			std::mt19937 rng(4242u);
 			const sim::Vec3 lo = cold->min(), hi = cold->max();

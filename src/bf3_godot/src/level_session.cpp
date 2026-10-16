@@ -266,7 +266,13 @@ void Bf3LevelSession::_ready() {
 			UtilityFunctions::push_error(to_godot("[m1] " + error));
 			failed_ = true;
 		}
+		std::vector<ShotRunner::TeleportShot> teleport_shots; // TC: --shot-teleports (m1_check.h)
+		if (!ShotRunner::parse_teleports(user_arg_value("shot-teleports"), teleport_shots, error)) {
+			UtilityFunctions::push_error(to_godot("[m1] " + error));
+			failed_ = true;
+		}
 		shots_ = std::make_unique<ShotRunner>(*this, std::move(free_shots), std::move(spawn_shots), user_arg_value("shot-dir"));
+		shots_->set_teleports(std::move(teleport_shots));
 		// L1 look: --shot-settle=<s> (free shots wait for auto exposure), --shot-measure=<frames> (frame time per view).
 		const double settle = std::clamp(std::atof(user_arg_value("shot-settle").c_str()), 0.0, 60.0);
 		const long measure = std::clamp(std::atol(user_arg_value("shot-measure").c_str()), 0L, 100000L);

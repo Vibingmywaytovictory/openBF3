@@ -78,12 +78,21 @@ public:
 		uint32_t index = 0;
 		std::string mode = "stand"; // stand, crouch, prone, walk
 	};
+	// TC (docs/design/terrain-collision.md §8.3): --shot-teleports=x,y,z,yaw;... puts the own soldier's feet at
+	// (x, y, z) facing yaw (degrees, sim yaw) with a debug Teleport, lets it fall and settle for 2 s, then captures
+	// <shot-dir>/teleport_<i>.png and prints the settled feet. Taken after the spawn shots, before the free shots.
+	struct TeleportShot {
+		std::array<float, 4> at{}; // x, y, z, yaw
+	};
+	static bool parse_teleports(const std::string &p_teleports, std::vector<TeleportShot> &r_teleports, std::string &r_error);
+	void set_teleports(std::vector<TeleportShot> p_teleports) { teleport_ = std::move(p_teleports); }
+
 	// Parses --shots / --shot-spawns; false (with r_error) on a malformed entry.
 	static bool parse(const std::string &p_shots, const std::string &p_spawns, std::vector<FreeShot> &r_free, std::vector<SpawnShot> &r_spawn,
 			std::string &r_error);
 
 	ShotRunner(Bf3LevelSession &p_session, std::vector<FreeShot> p_free, std::vector<SpawnShot> p_spawn, std::string p_dir);
-	bool empty() const { return free_.empty() && spawn_.empty(); }
+	bool empty() const { return free_.empty() && spawn_.empty() && teleport_.empty(); }
 	// Every frame after Done; true when every shot was taken (or failed).
 	bool frame(uint64_t p_now_ns);
 	// L1 look: each free shot waits p_settle_s as well as 30 frames (auto exposure), then times p_measure frames
@@ -100,6 +109,7 @@ private:
 	Bf3LevelSession &session_;
 	std::vector<FreeShot> free_;
 	std::vector<SpawnShot> spawn_;
+	std::vector<TeleportShot> teleport_; // TC: after the spawn shots, before the free shots
 	std::string dir_;
 	size_t next_ = 0; // spawn shots first, then free shots
 	int state_ = 0;
