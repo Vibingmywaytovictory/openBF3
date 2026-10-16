@@ -6,6 +6,7 @@
 #include "fx_ebx.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 
 namespace bf3::fx {
@@ -20,13 +21,21 @@ bool ends_with(std::string_view p_s, std::string_view p_suffix) {
 	return p_s.size() >= p_suffix.size() && p_s.compare(p_s.size() - p_suffix.size(), p_suffix.size(), p_suffix) == 0;
 }
 
-core::Result<AtlasTextureInfo> texture_info(const core::LevelMount &p_mount, const std::string &p_partition) {
-	core::Result<core::res::RawRes> raw = core::res::read_raw_res(p_mount, p_partition);
-	if (!raw) {
-		return core::make_error(p_partition + ": " + raw.error().message);
+// A UV coordinate in pixels: rounded, clamped into [0, size], and whether it lies within 0.01 px of a whole pixel.
+uint32_t to_pixel(float p_uv, uint32_t p_size, bool &r_exact) {
+	const double px = double(p_uv) * double(p_size);
+	const double rounded = std::round(px);
+	if (std::fabs(px - rounded) > 0.01) {
+		r_exact = false;
 	}
+	return uint32_t(std::clamp(rounded, 0.0, double(p_size)));
+}
+
+} // namespace
+
+core::Result<AtlasTextureInfo> EmitterAtlas::texture_info(const std::string &p_partition, std::span<const uint8_t> p_res) {
 	core::res::DxTexture tex;
-	const core::res::ResError e = core::res::DxTexture::parse(raw->bytes(), tex);
+	const core::res::ResError e = core::res::DxTexture::parse(p_res, tex);
 	if (!e.ok()) {
 		return core::make_error(p_partition + ": " + e.message());
 	}
@@ -44,18 +53,6 @@ core::Result<AtlasTextureInfo> texture_info(const core::LevelMount &p_mount, con
 	return out;
 }
 
-// A UV coordinate in pixels: rounded, clamped into [0, size], and whether it lies within 0.01 px of a whole pixel.
-uint32_t to_pixel(float p_uv, uint32_t p_size, bool &r_exact) {
-	const double px = double(p_uv) * double(p_size);
-	const double rounded = std::round(px);
-	if (std::fabs(px - rounded) > 0.01) {
-		r_exact = false;
-	}
-	return uint32_t(std::clamp(rounded, 0.0, double(p_size)));
-}
-
-} // namespace
-
 std::string EmitterAtlas::emitter_system_of(std::string_view p_level) {
 	const std::string l = detail::canonical_name(p_level);
 	return "levels/" + l + "/" + l + "/emittersystem_win32";
@@ -70,6 +67,18 @@ AtlasKind EmitterAtlas::kind_of_name(std::string_view p_name) {
 }
 
 core::Result<EmitterAtlas> EmitterAtlas::load(const core::EbxResolver &p_db, const core::LevelMount &p_mount, std::string_view p_system,
+		core::gameplay::WorkBudget &r_budget) {
+	const ResSource res = [&p_mount](const std::string &p_partition) -> core::Result<std::vector<uint8_t>> {
+		core::Result<core::res::RawRes> raw = core::res::read_raw_res(p_mount, p_partition);
+		if (!raw) {
+			return core::make_error(p_partition + ": " + raw.error().message);
+		}
+		return std::move(raw->payload);
+	};
+	return load(p_db, res, p_system, r_budget);
+}
+
+core::Result<EmitterAtlas> EmitterAtlas::load(const core::EbxResolver &p_db, const ResSource &p_res, std::string_view p_system,
 		core::gameplay::WorkBudget &r_budget) {
 	detail::Reader r(p_db, r_budget);
 	const std::string system = detail::canonical_name(p_system);
@@ -93,11 +102,22 @@ core::Result<EmitterAtlas> EmitterAtlas::load(const core::EbxResolver &p_db, con
 	if (base.empty() || normal.empty()) {
 		return core::make_error(system + ": atlas texture reference missing");
 	}
-	core::Result<AtlasTextureInfo> b = texture_info(p_mount, base);
+	if (!p_res) {
+		return core::make_error(system + ": no texture res source");
+	}
+	const core::Result<std::vector<uint8_t>> base_res = p_res(base);
+	if (!base_res) {
+		return base_res.error();
+	}
+	core::Result<AtlasTextureInfo> b = texture_info(base, *base_res);
 	if (!b) {
 		return b.error();
 	}
-	core::Result<AtlasTextureInfo> n = texture_info(p_mount, normal);
+	const core::Result<std::vector<uint8_t>> normal_res = p_res(normal);
+	if (!normal_res) {
+		return normal_res.error();
+	}
+	core::Result<AtlasTextureInfo> n = texture_info(normal, *normal_res);
 	if (!n) {
 		return n.error();
 	}
@@ -130,6 +150,10 @@ core::Result<EmitterAtlas> EmitterAtlas::load(const core::EbxResolver &p_db, con
 	out.by_name_.resize(out.entries_.size());
 	for (uint32_t i = 0; i < out.by_name_.size(); ++i) {
 		out.by_name_[i] = i;
+	}
+	// The sort's O(m log m) comparisons of names already charged by Reader::text; m <= kMaxTextureInfos.
+	if (!r.charge(1 + out.by_name_.size() * size_t(std::bit_width(out.by_name_.size())))) {
+		return r.error();
 	}
 	std::stable_sort(out.by_name_.begin(), out.by_name_.end(), [&](uint32_t p_a, uint32_t p_b) { return out.entries_[p_a].name < out.entries_[p_b].name; });
 	return out;

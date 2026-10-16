@@ -68,6 +68,8 @@ public:
 	int64_t default_material_index() const { return default_material_index_; }
 	// The cell of grid row p_row, column p_col (both < rows()).
 	const ImpactCell &cell(size_t p_row, size_t p_col) const { return unique_[cells_[p_row * rows_ + p_col]]; }
+	// Distinct cell contents, the empty cell included (fx.fuzz checks the content deduplication with it).
+	size_t distinct_cells() const { return unique_.size(); }
 
 private:
 	size_t rows_ = 0;

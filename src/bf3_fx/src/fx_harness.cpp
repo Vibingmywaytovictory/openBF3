@@ -63,6 +63,7 @@ void add_stats(FxStats &r_sum, const FxStats &p_s) {
 	r_sum.nonfinite_kills += p_s.nonfinite_kills;
 	r_sum.stolen_instances += p_s.stolen_instances;
 	r_sum.refused_starts += p_s.refused_starts;
+	r_sum.events_dropped += p_s.events_dropped;
 }
 
 // The live_* fields of a report are maxima over every frame (the end-of-run values are usually 0).
@@ -78,7 +79,8 @@ void stats_lines(const FxStats &p_s, std::vector<std::string> &r_lines) {
 			std::to_string(p_s.spawns_capped) + "\tspawns_dropped\t" + std::to_string(p_s.spawns_dropped) + "\temitter_starts_dropped\t" +
 			std::to_string(p_s.emitter_starts_dropped) + "\tnonfinite_kills\t" + std::to_string(p_s.nonfinite_kills) + "\tstolen_instances\t" +
 			std::to_string(p_s.stolen_instances) + "\trefused_starts\t" + std::to_string(p_s.refused_starts) + "\tdt_clamped\t" +
-			std::to_string(p_s.dt_clamped) + "\tframes\t" + std::to_string(p_s.steps) + "\tsubsteps\t" + std::to_string(p_s.substeps));
+			std::to_string(p_s.dt_clamped) + "\tframes\t" + std::to_string(p_s.steps) + "\tsubsteps\t" + std::to_string(p_s.substeps) + "\tevents_dropped\t" +
+			std::to_string(p_s.events_dropped));
 	r_lines.push_back("stats\tmax_live_particles\t" + std::to_string(p_s.live_particles) + "\tmax_live_lights\t" + std::to_string(p_s.live_lights) +
 			"\tmax_live_emitters\t" + std::to_string(p_s.live_emitters));
 }
@@ -270,7 +272,7 @@ uint64_t fx_frame_digest(const FxWorld &p_world) {
 	}
 	const FxStats &s = p_world.stats();
 	const uint64_t fields[] = { s.live_effects, s.live_emitters, s.live_particles, s.live_lights, s.steps, s.substeps, s.dt_clamped, s.spawned, s.died,
-		s.spawns_capped, s.spawns_dropped, s.emitter_starts_dropped, s.nonfinite_kills, s.stolen_instances, s.refused_starts };
+		s.spawns_capped, s.spawns_dropped, s.emitter_starts_dropped, s.nonfinite_kills, s.stolen_instances, s.refused_starts, s.events_dropped };
 	return fnv(h, fields, sizeof(fields));
 }
 

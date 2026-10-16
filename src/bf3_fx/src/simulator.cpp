@@ -328,7 +328,8 @@ struct FxWorld::Impl {
 
 	void event(FxEvent::Kind p_kind, uint32_t p_effect, uint32_t p_component) {
 		if (events.size() >= events.capacity()) {
-			return; // bounded (never grows)
+			++stats.events_dropped; // bounded (never grows), but counted
+			return;
 		}
 		const EffectSlot &s = effects[p_effect];
 		FxEvent e;

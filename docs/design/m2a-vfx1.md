@@ -377,7 +377,9 @@ one [verified].
 ### 6.9 Emitter atlas
 
 `EmitterAtlas::load` reads the level's `EmitterSystemAsset`, the two textures' 128-byte DxTexture headers
-(`read_raw_res`; no pixel chunk) and classifies entries by the name rule (§5.4). Names are compared lowercase with `\`
+(`read_raw_res`; no pixel chunk) and classifies entries by the name rule (§5.4). The mount overload wraps a second one
+that takes a `ResSource` (partition name -> res bytes), and `EmitterAtlas::texture_info(partition, bytes)` is the
+header check, so fx.fuzz drives both with synthetic and hostile headers without an install. Names are compared lowercase with `\`
 → `/`. Pixel rects come from header sizes; `pixel_exact` flags a corner > 0.01 px off. Flipbooks: frame f of
 frame_count frames in frame_columns columns, row-major [assumed], inside the entry rect (`frame_rect`).
 `EffectLibrary::bindings` maps each emitter's texture and normal map to entries (nullptr → VFX2 draws
@@ -386,7 +388,10 @@ frame_count frames in frame_columns columns, row-major [assumed], inside the ent
 ### 6.10 Impact table
 
 `ImpactTable::load` reads the level grid (`MaterialGrid::grid_of_level`), its MaterialIndexMap, InteractionGrid and
-MaterialPairs, and the container's MaterialNames; cells are deduplicated. `select(projectile, surface)` takes two
+MaterialPairs, and the container's MaterialNames; cells are deduplicated by their relation list and then by their
+content, both through ordered maps (never a scan of the earlier cells: with ≤ 256 rows a hostile grid has ≤ 65,536
+cells, and a per-cell scan of the distinct cells so far would be ~2.1e9 comparisons; each lookup charges the budget
+1 + bytes / 64 of the cell's names, and log2 of the ≤ 65,537 distinct cells is a constant factor ≤ 17). `select(projectile, surface)` takes two
 PhysicsMaterialIndex bytes; `surface_material(triangle material)` maps a collision-soup material value (& 0xFFFFFF)
 through MaterialPairs. An empty cell selects nothing; no DefaultMaterialIndex fallback in VFX1 (the default material's
 own row already carries `fx_impact_generic_01_s`). Choosing among several `ImpactEffects[]`, spreading the direction and
@@ -433,7 +438,9 @@ No network ids: `EffectStart::seed` is the only cross-client input; `bf3_fx` sta
 
 `FxEvent {SoundStart|SoundStop, effect, component, def, transform}` with `EffectComponentDef::asset` = the
 SoundPatchAsset partition (319 sound components), and `ImpactCell::impact_sound` (MaterialRelationSoundData) for A5.
-The audio track owns voices; VFX1 only emits events in a fixed order.
+The audio track owns voices; VFX1 only emits events in a fixed order. The frame's event buffer is fixed at
+max_effects × 4 events; an event past it is dropped and counted in `FxStats::events_dropped` (printed by every
+`bf3dump fx` stats line and part of the frame digest), so a lost SoundStop is visible.
 
 ### 7.7 bf3dump fx
 
@@ -523,8 +530,9 @@ machine is shared, so the figure is noisy (README and §2 say so); report only u
   evaluator is expected, external chain links and cycles are errors.
 * Blob decode: counts checked against remaining bytes and the same caps before allocating; every enum, index and
   float validated; trailing bytes refused; re-encode identical.
-* Atlas: TextureInfos ≤ 4,096, UV finite; header sizes ≤ 16,384 and mips ≤ 15. Impact table: rows ≤ 256, map ≤
-  4,096, ImpactEffects per cell ≤ 64.
+* Atlas: TextureInfos ≤ 4,096 (checked before any res is read), UV finite and ≤ 1e7; header sizes 1..16,384 and
+  mips ≤ 15; the name sort is charged m · log2 m. Impact table: rows ≤ 256, Items per row = rows, map ≤ 4,096,
+  relations per cell ≤ 64, ImpactEffects / ImpactDebris per relation ≤ 64; keyed (not scanned) deduplication, §6.10.
 * Simulation: storage fixed at construction, admission (§6.7: the ranges of a sub-step sum to ≤ max_particles
   whatever the number of live instances), dt clamp and sub-steps (§6.8), the NaN guard, MaxCount per instance,
   `max_emitter_instances` for component and child instances; a def whose max_particles exceeds the world budget is
@@ -534,7 +542,13 @@ machine is shared, so the figure is noisy (README and §2 say so); report only u
   resolver (including fractional, negative, NaN and huge flipbook counts), truncated / bit-flipped / count-inflated
   blobs, NaN / huge parameters, a NormTime evaluator on an emitter without UpdateAge or with Lifetime 0, 4,096
   starts of a def with MaxCount 16,384 into one world (admission must hold the memory bound), and extreme dt
-  sequences (0, negative, NaN, 1e30).
+  sequences (0, negative, NaN, 1e30). Impact table: a 256 × 256 grid of 65,536 distinct cells (load time against a
+  128 × 128 grid: best-of-3 ratio < 10, about 4 when linear and 16 when quadratic), 65,536 relation instances of one
+  content (one cell), 257 rows, Items ≠ rows, 300 Items, external / dangling / internal-asset references, a NaN
+  spread, a 40-unit budget, 2,000 mutated grids. Atlas: 4,097 TextureInfos, 4,096 entries of one name, a foreign
+  primary, a missing reference, an unreadable res, no res source, NaN / 1e30 / out-of-[0, 1] UVs, short /
+  wrong-version / wrong-format / 16-mip / zero / oversized headers, 4,000 random or mutated headers and 2,000 mutated
+  systems.
 
 ## 11. Test plan
 
@@ -617,7 +631,9 @@ shared by bf3dump and the tests), `tools/bf3dump/fx_commands.{h,cpp}`, `tests/fx
 `tests/fx_install_tests.cpp`, `tests/fx_fuzz_tests.cpp`, `tests/fx_test_support.h` (the synthetic EBX writer and
 builders) and `tests/fx_bench.cmake` (the tools.fx_bench wrapper). Additive header changes: `CompileStats::
 flipbooks_normalised` (effect_compiler.h), `ImpactTable::index_map()`, `default_material_index()` and `cell(row,
-col)` (impact_table.h, for the §5.3 counting rules). Modified additively: `src/bf3_fx/CMakeLists.txt`,
+col)` (impact_table.h, for the §5.3 counting rules), `ImpactTable::distinct_cells()`, `EmitterAtlas::ResSource`,
+the `ResSource` overload of `EmitterAtlas::load` and `EmitterAtlas::texture_info` (emitter_atlas.h, for fx.fuzz) and
+`FxStats::events_dropped` (simulator.h). Modified additively: `src/bf3_fx/CMakeLists.txt`,
 `tools/bf3dump/CMakeLists.txt` (link `bf3_fx`), `tools/bf3dump/bf3dump.cpp` (usage line and dispatch of `fx`),
 `tests/CMakeLists.txt` (`fx.unit`, `fx.install`, `fx.fuzz`, `tools.fx_bench`), `README.md` (its "Effects (M2a VFX1)"
 section and ctest line grow with the commands and tests).

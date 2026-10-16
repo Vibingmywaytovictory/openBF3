@@ -26,7 +26,9 @@
 #include "bf3/fx/fx_types.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -65,6 +67,13 @@ public:
 	// p_mount: the level superbundle's mount, for the two texture res headers (read_raw_res; no chunk is read).
 	static core::Result<EmitterAtlas> load(const core::EbxResolver &p_db, const core::LevelMount &p_mount, std::string_view p_system,
 			core::gameplay::WorkBudget &r_budget);
+	// The texture res reader of load: a TextureAsset partition name -> its raw res bytes (the mount overload reads
+	// them with read_raw_res; fx.fuzz passes synthetic and hostile headers).
+	using ResSource = std::function<core::Result<std::vector<uint8_t>>(const std::string &p_partition)>;
+	static core::Result<EmitterAtlas> load(const core::EbxResolver &p_db, const ResSource &p_res, std::string_view p_system,
+			core::gameplay::WorkBudget &r_budget);
+	// One atlas texture header from its res bytes (DxTexture::parse, then the size and mip limits); hostile bytes fail.
+	static core::Result<AtlasTextureInfo> texture_info(const std::string &p_partition, std::span<const uint8_t> p_res);
 	// "levels/<l>/<l>/emittersystem_win32" for "MP_Subway", lowercase.
 	static std::string emitter_system_of(std::string_view p_level);
 	// The atlas an entry name belongs to (the suffix rule above).

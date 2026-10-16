@@ -155,6 +155,7 @@ struct FxStats {
 	uint64_t nonfinite_kills = 0; // particles killed because a state value became NaN or infinite
 	uint64_t stolen_instances = 0; // MaxInstanceCount pool steals (ResetInstanceWhenStarted)
 	uint64_t refused_starts = 0; // starts that did not fit (pool without reset, world full, def too large)
+	uint64_t events_dropped = 0; // FxEvents past the frame's event buffer (max_effects x 4); the audio seam lost them
 };
 
 // One live emitter instance's output after the frame's last end_step(). Has padding: compare field by field.

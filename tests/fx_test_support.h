@@ -197,6 +197,17 @@ inline const std::vector<Type> &type_lib() {
 		t.push_back({ "SoundEffectEntityData", { { "Sound", 'r' } }, false, "EffectComponentData" });
 		t.push_back({ "VisualEnvironmentEffectEntityData", { { "VisualEnvironment", 'r' } }, false, "EffectComponentData" });
 		t.push_back({ "TargetAsset", {} }); // an external target of no particular type (sounds, meshes)
+		// The emitter atlas (EmitterAtlas::load) and the impact table (ImpactTable::load).
+		t.push_back({ "EmitterSystemAsset", { { "BaseAtlasTexture", 'r' }, { "NormalAtlasTexture", 'r' }, { "TextureInfos", 'v', "EmitterTextureAtlasInfo" } } });
+		t.push_back({ "MaterialRelationPropertyPair", { { "PhysicsMaterialProperties", 'a' } }, true });
+		t.push_back({ "MaterialInteractionGridRow", { { "Items", 'v', "MaterialRelationPropertyPair" } }, true });
+		t.push_back({ "MaterialGridData",
+				{ { "MaterialIndexMap", 'I' }, { "DefaultMaterialIndex", 'i' }, { "InteractionGrid", 'v', "MaterialInteractionGridRow" },
+						{ "DefaultMaterial", 'r' }, { "MaterialPairs", 'a' } } });
+		t.push_back({ "MaterialRelationEffectData",
+				{ { "ImpactEffectMaxSpreadAngle", 'f' }, { "MirrorImpactDirection", 'b' }, { "ImpactEffects", 'a' }, { "ImpactDebris", 'a' } } });
+		t.push_back({ "MaterialRelationDecalData", { { "Decal", 'r' } } });
+		t.push_back({ "MaterialRelationSoundData", { { "ImpactSound", 'r' } } });
 		return t;
 	}();
 	return lib;

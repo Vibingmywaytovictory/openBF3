@@ -605,6 +605,28 @@ TEST_CASE("sim: pools steal with reset and refuse without") {
 	CHECK_FALSE(tiny.start(fxt::effect_def("big", { fxt::emitter_def("e", 100, 10, 10) }), start_with(1)).ok());
 }
 
+TEST_CASE("sim: events past the frame's buffer are counted, not lost silently") {
+	// The event buffer holds max_effects x 4 events a frame: one effect with six sound components overflows it by 2.
+	auto d = std::make_shared<EffectDef>(*fxt::effect_def("sounds", { fxt::emitter_def("e", 4, 10, 1) }));
+	for (int i = 0; i < 6; ++i) {
+		EffectComponentDef c;
+		c.kind = ComponentKind::Sound;
+		c.asset = "sound/fx/s" + std::to_string(i);
+		d->components.push_back(c);
+	}
+	FxWorldConfig one;
+	one.max_effects = 1;
+	FxWorld w(one);
+	REQUIRE(w.start(d, start_with(1)).ok());
+	fx_step_frame(w, 1.0f / 60.0f);
+	size_t starts = 0;
+	for (const FxEvent &e : w.events()) {
+		starts += e.kind == FxEvent::Kind::SoundStart ? 1 : 0;
+	}
+	CHECK(starts == 4);
+	CHECK(w.stats().events_dropped == 2);
+}
+
 TEST_CASE("sim: component selection fractions match fx_component_selected") {
 	auto d = std::make_shared<EffectDef>(*fxt::effect_def("prob", { fxt::emitter_def("e", 1, 1, 0.05f, 0.01f) }));
 	d->components[0].spawn_probability = 0.3f;

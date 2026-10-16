@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <tuple>
 #include <unordered_map>
 
 namespace bf3::fx {
@@ -20,10 +21,26 @@ constexpr size_t kMaxImpactEffects = 64;
 constexpr size_t kMaxPairs = 1u << 20;
 constexpr size_t kMaxRelationsPerCell = 64;
 
-bool cell_equal(const ImpactCell &p_a, const ImpactCell &p_b) {
-	return p_a.effects == p_b.effects && p_a.debris == p_b.debris && p_a.max_spread_degrees == p_b.max_spread_degrees &&
-			p_a.mirror_impact_direction == p_b.mirror_impact_direction && p_a.has_effect_relation == p_b.has_effect_relation && p_a.decal == p_b.decal &&
-			p_a.impact_sound == p_b.impact_sound;
+// A strict weak order over every ImpactCell field: the content key that deduplicates cells in O(log U) comparisons
+// each (U = distinct cells so far), so a hostile grid of distinct cells costs O(n^2 log n) for its n^2 cells, never
+// a scan of every earlier cell per cell. max_spread_degrees is finite (Reader::number), so < is a total order on it.
+struct CellLess {
+	bool operator()(const ImpactCell &p_a, const ImpactCell &p_b) const {
+		return std::tie(p_a.effects, p_a.debris, p_a.max_spread_degrees, p_a.mirror_impact_direction, p_a.has_effect_relation, p_a.decal, p_a.impact_sound) <
+				std::tie(p_b.effects, p_b.debris, p_b.max_spread_degrees, p_b.mirror_impact_direction, p_b.has_effect_relation, p_b.decal, p_b.impact_sound);
+	}
+};
+
+// The work units one key comparison of p_cell pays for: one plus one per kBytesPerUnit bytes of its strings.
+size_t cell_key_units(const ImpactCell &p_cell) {
+	size_t bytes = p_cell.decal.size() + p_cell.impact_sound.size();
+	for (const std::string &e : p_cell.effects) {
+		bytes += e.size();
+	}
+	for (const std::string &d : p_cell.debris) {
+		bytes += d.size();
+	}
+	return 1 + bytes / core::gameplay::WorkBudget::kBytesPerUnit;
 }
 
 // MaterialContainerPair instances of a container partition: instance GUID -> PhysicsMaterialIndex.
@@ -98,6 +115,8 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 	std::set<uint32_t> decal_relations;
 	// Relation instances are shared between cells: read each once.
 	std::map<std::vector<uint32_t>, uint32_t> by_relations;
+	// Distinct cells by content (different relation instances can hold the same content): cell -> index in unique_.
+	std::map<ImpactCell, uint32_t, CellLess> by_content;
 	for (size_t row = 0; row < n; ++row) {
 		for (size_t col = 0; col < n; ++col) {
 			if (!r.charge()) {
@@ -121,6 +140,9 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 					return core::make_error(grid_name + ": PhysicsMaterialProperties holds an external reference");
 				}
 				rel.push_back(ref->index);
+			}
+			if (!r.charge(1 + rel.size())) { // the by_relations lookup compares relation lists
+				return r.error();
 			}
 			const auto known = by_relations.find(rel);
 			if (known != by_relations.end()) {
@@ -185,16 +207,15 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 			}
 			uint32_t at = 0;
 			if (!cell.empty() || cell.has_effect_relation) {
-				for (uint32_t u = 1; u < out.unique_.size(); ++u) {
-					if (cell_equal(out.unique_[u], cell)) {
-						at = u;
-						break;
-					}
+				if (!r.charge(cell_key_units(cell))) {
+					return r.error();
 				}
-				if (at == 0) {
+				const uint32_t next = uint32_t(out.unique_.size());
+				const auto [it, inserted] = by_content.try_emplace(cell, next);
+				if (inserted) {
 					out.unique_.push_back(std::move(cell));
-					at = uint32_t(out.unique_.size() - 1);
 				}
+				at = it->second;
 			}
 			by_relations.emplace(std::move(rel), at);
 			out.cells_[row * n + col] = at;
