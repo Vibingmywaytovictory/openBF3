@@ -111,28 +111,51 @@ local function impl_for(view, k)
 	return nil
 end
 
+-- journal(e): every engine write and fixture call; M.on_journal (vu_server) checks it at once (DESIGN 13.4), so
+-- nothing accumulates over long runs.
 local function journal(e)
 	e.k = M.k
-	M.journal[#M.journal + 1] = e
+	if M.on_journal then M.on_journal(e) else M.journal[#M.journal + 1] = e end
 end
 M.jot = journal
 
 local PMT = {}
+local WRAP = {}
+local function wrapper(view, k)
+	local wv = WRAP[view]
+	if wv == nil then
+		wv = {}
+		WRAP[view] = wv
+	end
+	local f = wv[k]
+	if f then return f end
+	local fn = impl_for(view, k)
+	if fn == nil then error('mock: ' .. view .. ':' .. k .. ' not implemented by the mock', 3) end
+	local fixture = M.FIXTURE[k]
+	f = function(self, ...)
+		local se = P[self]
+		if se == nil then error('mock: ' .. view .. ':' .. k .. ' called without self (use :)', 2) end
+		if fixture then
+			local sid = se.o.__sid
+			if k == 'CreatePlayer' then sid = math.tointeger(tonumber(tostring((...)):match('^mh(%d+)$') or '')) end
+			if k == 'DeletePlayer' then
+				local a = P[(...)]
+				sid = a and a.o.__sid or nil
+			end
+			journal({ kind = 'call', view = view, field = k, owner = se.o.__owner, sid = sid })
+		end
+		return fn(se.o, ...)
+	end
+	wv[k] = f
+	return f
+end
+
 PMT.__index = function(p, k)
 	local e = P[p]
 	local o, view = e.o, e.v
 	local m = members(view)[k]
 	if m == nil then return M.missing(view, k) end
-	if m == 'm' then
-		local fn = impl_for(view, k)
-		if fn == nil then error('mock: ' .. view .. ':' .. k .. ' not implemented by the mock', 2) end
-		return function(self, ...)
-			local se = P[self]
-			if se == nil then error('mock: ' .. view .. ':' .. k .. ' called without self (use :)', 2) end
-			if M.FIXTURE[k] then journal({ kind = 'call', view = view, field = k, owner = se.o.__owner, sid = se.o.__sid }) end
-			return fn(se.o, ...)
-		end
-	end
+	if m == 'm' then return wrapper(view, k) end
 	local g = o.__get and o.__get[k]
 	if g then return g(o) end
 	return o[k]

@@ -31,7 +31,7 @@ MH.scenarios = require('scenarios/registry')
 local ids, chat, meta, bots, sites = MH.ids, MH.chat, MH.meta, MH.bots, MH.sites
 local S, H, EV, RUN, CMD = MH.samplers, MH.hooks, MH.events, MH.runner, MH.cmd
 
-local state = { post_seen = 0, eng_n = 0, first = true, greeted = {} }
+local state = { pre_seen = 0, post_seen = 0, eng_n = 0, first = true, greeted = {} }
 
 R.on_disable = function(where)
 	chat.say(nil, 'handler ' .. where .. ' disabled after 20 errors')
@@ -51,8 +51,9 @@ local function greet(pl)
 end
 
 -- One sim tick of work (PostSim, or Engine:Update in the fallback mode).
+-- The clock (k) advances at PreSim (C.mode 'presim'), so the hook, GunSway and PostSim rows of one sim tick share k;
+-- fallbacks: 'postsim' if PreSim never fires, 'engine' if neither UpdateManager pass fires [live:L03].
 local function tick_work(dt)
-	C.on_tick(dt)
 	if state.first then
 		state.first = false
 		meta.vm = vm_probe()
@@ -67,20 +68,28 @@ end
 
 Events:Subscribe('UpdateManager:Update', function(deltaTime, updatePass)
 	if updatePass == UpdatePass.UpdatePass_PreSim then
+		state.pre_seen = state.pre_seen + 1
+		if C.mode == 'presim' then C.on_tick(deltaTime) end
 		if bots.pass == 'presim' then R.safe('presim', bots.apply_inputs, deltaTime) end
 	elseif updatePass == UpdatePass.UpdatePass_PostSim then
 		state.post_seen = state.post_seen + 1
-		if C.mode == 'postsim' then R.safe('postsim', tick_work, deltaTime) end
+		if C.mode == 'presim' and state.pre_seen == 0 and state.post_seen > 30 then
+			C.mode = 'postsim'
+			R.row('mark', { lbl = 'clock-postsim' })
+		end
+		if C.mode == 'postsim' then C.on_tick(deltaTime) end
+		if C.mode ~= 'engine' then R.safe('postsim', tick_work, deltaTime) end
 	end
 end)
 
 Events:Subscribe('Engine:Update', function(deltaTime, simulationDeltaTime)
 	state.eng_n = state.eng_n + 1
-	if C.mode == 'postsim' and state.post_seen == 0 and state.eng_n > 90 then
+	if C.mode ~= 'engine' and state.post_seen == 0 and state.pre_seen == 0 and state.eng_n > 90 then
 		C.mode = 'engine'
 		R.row('mark', { lbl = 'clock-engine' })
 	end
 	if C.mode == 'engine' and type(simulationDeltaTime) == 'number' and simulationDeltaTime > 0 then
+		C.on_tick(simulationDeltaTime)
 		R.safe('engine', tick_work, simulationDeltaTime)
 	end
 end)

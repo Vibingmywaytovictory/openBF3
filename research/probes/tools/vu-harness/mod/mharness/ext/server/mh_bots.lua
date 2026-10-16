@@ -49,10 +49,10 @@ function M.find(names)
 	return nil, nil
 end
 
+-- owns(pl): by Player.id only (whether VU returns the same userdata wrapper for one player is not documented).
 function M.owns(pl)
 	if pl == nil then return false end
-	local b = M.by_pid[pl.id]
-	return b ~= nil and b.pl == pl
+	return M.by_pid[pl.id] ~= nil
 end
 
 local function mine(bot)

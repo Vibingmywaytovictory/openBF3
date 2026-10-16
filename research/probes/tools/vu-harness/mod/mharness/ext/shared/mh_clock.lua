@@ -3,7 +3,8 @@
 -- fb/updatepass.md); t: sum of PostSim deltaTime; ms: SharedUtils:GetTimeMS() (shared/library/sharedutils.md).
 -- Run id 'YYYYMMDD-<SC>-<HZ>-<HHMMSS>' from os.date at run start [live:L02]; SharedUtils:GetTickrate [live:L04].
 -- Rows outside a scenario belong to the session pseudo-run 'YYYYMMDD-S-<HZ>-<HHMMSS>'.
--- If PostSim does not fire once per sim tick [live:L03], the server entry drives on_tick from Engine:Update instead.
+-- The server entry advances k at UpdatePass_PreSim (hooks, GunSway and PostSim rows of one tick share k); if PreSim
+-- never fires it uses PostSim, if neither fires Engine:Update [live:L03].
 local M = {}
 
 M.gk = 0          -- ticks since mod load
@@ -14,7 +15,7 @@ M.cur_run = nil
 M.cur_sc = 'S'
 M.session = nil
 M.hzv = 30
-M.mode = 'postsim'
+M.mode = 'presim'   -- 'presim' (k advances at PreSim), 'postsim' or 'engine' fallbacks [live:L03]
 M.last_dt = 1 / 30
 M.used = {}
 
