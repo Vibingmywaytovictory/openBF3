@@ -84,6 +84,8 @@ M2a weapons adds `m2a.weapons.contract` and `sim.weapons.unit` (no data), `sim.w
 
 M2a VFX1 adds `fx.contract` (the bf3_fx interface, no data), `fx.unit` and `fx.fuzz` (no data; both in the asan preset too), `fx.install` (the retail gates G1, G3-G8, G11) and `tools.fx_bench` (G9, RUN_SERIAL, noisy); see "Effects (M2a VFX1)".
 
+M2a audio adds `audio.contract`, `audio.xas.unit`, `audio.patch.unit`, `audio.dsp.unit`, `audio.mixer.unit` (no data), `audio.oracles`, `audio.cache`, `audio.fuzz`, `audio.waves`, `audio.loc`, `audio.decode.perf`, `audio.census`, `audio.bank`, `audio.m16.offline` (install) and `godot.audio` (windowed, `OPENBF3_GODOT`); see "M2a audio".
+
 ## Run
 
 ```bat
@@ -1868,6 +1870,50 @@ defs and runs the gates; every gate has one command (the design's §18 has the m
 
 The cost gate runs RUN_SERIAL and is report-only under asan; the figure is wall clock on a shared machine, so it is
 noisy (the same build measured 39-42 ns across runs).
+
+## M2a audio
+
+Design: [docs/design/m2a-audio.md](docs/design/m2a-audio.md) (slices A1 XAS voices + wave bank + mixer, A2 weapon
+patch interpreter; section 1.1 has the measured results, section 16 the implementation notes). Implemented:
+* `bf3_core` `audio/`: the EA-XAS / PCM16 stream codec (a port of IW4L `sound.rs`, Apache-2.0, attributed in
+  `sound_stream.cpp`), the `SoundWaveAsset` reader, the resident `WaveBank` (budget 384 MiB), the node type table and
+  the `SoundPatchAsset` compiler with its `OBF3SNDP` program blob, validator and cache entries.
+* `bf3_audio` (Godot-free): `PatchInstance`, the A2 interpreter for the 32 node types the weapon patches use
+  (AreaType fixed at 0), the Sampler model, DSP (biquads, one-pole, gain ramps, pan, resampler), `MixerCore` (voices
+  summed on a 512-frame grid, lock-free command / return / feedback rings from the game thread), WAV I/O, analysis and
+  the shared M16A3 check (`audio_check.h`).
+* `bf3_godot`: `Bf3AudioStream`/`Bf3AudioPlayback` (an `AudioStreamPlayback` whose `_mix` pulls from `MixerCore`) and
+  `Bf3AudioDemo` in `res://scenes/audio_m16.tscn`. The project runs the driver at 48 kHz (`[audio]` in
+  `project.godot`). Tuning that the data does not state lives in `bf3-opensource/config/audio_tuning.cfg`.
+* `bf3dump audio waves|loc|census|bank|check|render|wave` (see `bf3dump` with no arguments for the usage).
+
+The gates, one command each (from the repo root after `tools\build.cmd dev`; `bf3dump` is
+`b\dev\tools\bf3dump\bf3dump.exe`; each ctest wraps exactly that command and checks the threshold):
+
+| gate | ctest | command | pass threshold |
+|---|---|---|---|
+| G1 | `audio.waves` | `bf3dump audio waves MP_Subway TeamDeathMatch0 --decode` | 909 waves, decoded frames == header frames: 0 mismatches, 0 errors |
+| G2 | `audio.loc` | `bf3dump audio loc en --decode` | 4,290 chunks, 15,890 streams, 0 mismatches, 0 errors |
+| G3 (timing) | `audio.decode.perf` | `bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3` | `best_cpu_ms_per_channel_second` ≤ 0.2 |
+| G4 | `audio.census` | `bf3dump audio census @all-mp` | 834 patches + 1 master, 32,117 nodes / 46 types, 7,323 voices, 1,879 waves, 164 handheld strict on 32 types |
+| G5 | `audio.oracles` | `b\dev\tests\test_audio_install.exe --test-suite=audio-oracles` | plan §7.7 items 1–4 (design §10.2) |
+| G6 (timing) | `audio.bank` | `bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2` | 629 resident waves, 265.4 MiB ≤ 384 MiB, 0 starved, `warm_load_ms` ≤ 500 |
+| G7 | `audio.m16.offline` | `bf3dump audio check --g7 --out-dir b\shots\audio` | 38 rows, 0 failed |
+| G8 (timing) | `godot.audio` | `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=b\shots\audio\godot_m16.wav --quit-after=90` | `AUDIO CHECK: PASS`: rows (a)–(d), ≥ 30.0 s recorded, short/late blocks, late commands, ring overflows, starved voices all 0, offline replay equal sample for sample |
+
+`audio.contract` checks the headers, the node type table, the seam hashes and FourCCs and the tuning file;
+`audio.xas.unit`, `audio.patch.unit`, `audio.dsp.unit` and `audio.mixer.unit` need no data; `audio.cache` checks the
+cold / warm / patched program cache and `audio.fuzz` feeds mutated chunks, the M16A3 partition and its program blob
+(run it under `ctest --preset asan`). Under `asan` the bf3dump gates report their counts and timings without gating
+them, but still fail on a non-zero exit.
+
+The offline M16A3 render (G7) and the Godot run (G8) share one check script and analysis (`bf3/audio/audio_check.h`,
+design section 10.4): onsets at 75 ms on the stepped corebass tap, levels near > mid > far and the distance high-pass
+on the full mix and on the voice-14 tap, and in G8 a sample-for-sample comparison with an offline replay. G8 measures
+the mixer's compute time and ring health, not device xruns. Recordings (`m16_offline*.wav`, `godot_m16*.wav`) go to
+`b/shots/audio/` (gitignored, never committed); `OPENBF3_AUDIO_SHOTS`, set when CMake configures, overrides the directory the ctests use. The
+timing gates (G3 on thread CPU time, G6 warm load, G8) need a quiet machine; timings taken while other work runs are
+noisy.
 
 ## Integration of S1-S4 and L1 (`integ/spikes`)
 

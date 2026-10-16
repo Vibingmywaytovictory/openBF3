@@ -41,3 +41,7 @@ target_sources(bf3dump PRIVATE weapon_sim_commands.cpp weapon_sim_commands.h)
 # M2a VFX1 (docs/design/m2a-vfx1.md §7.7): `fx census | compile | simulate | check | bench | atlas | impacts`.
 target_sources(bf3dump PRIVATE fx_commands.cpp fx_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_fx)
+# M2a audio (docs/design/m2a-audio.md §1, §9): `audio waves|loc|census|render`, the drivers of gates G1-G4 and the
+# offline render through bf3_audio's mixer core.
+target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_commands.cpp)
+target_link_libraries(bf3dump PRIVATE bf3_audio)

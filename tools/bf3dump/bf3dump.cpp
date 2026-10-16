@@ -66,6 +66,7 @@
 //   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
 // M2a VFX1:
 //   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
+// M2a audio (audio_commands.h): audio waves|loc|census|render, the drivers of gates G1-G4 and the offline render
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -103,6 +104,8 @@
 #include "weapon_sim_commands.h"
 // M2a VFX1: bf3dump fx (effect compiler, simulator, atlas, impacts).
 #include "fx_commands.h"
+// M2a audio: XAS waves, Loc/en streams, the sound-patch census, offline renders.
+#include "audio_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -696,6 +699,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M2a VFX1: fx <subcommand> (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7).
 	if (cmd == "fx") {
 		return bf3dump::cmd_fx(ebx_ctx, rest);
+	}
+	// M2a audio: audio waves|loc|census|render (audio_commands.cpp; docs/design/m2a-audio.md §1).
+	if (cmd == "audio") {
+		return bf3dump::cmd_audio(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;
