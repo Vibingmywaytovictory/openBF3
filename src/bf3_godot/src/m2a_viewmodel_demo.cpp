@@ -98,6 +98,7 @@ void Bf3M2aViewmodelDemo::_ready() {
 	UtilityFunctions::print(to_godot("[vm] engine " + engine_summary()));
 	UtilityFunctions::print(to_godot("[vm] install " + install_.describe()));
 	check_mode_ = has_user_arg("vm-check");
+	knife_dog_tags_ = has_user_arg("vm-dogtags");
 	shots_dir_ = user_arg_value("vm-shots");
 	const std::string quit_after = user_arg_value("quit-after");
 	quit_after_ = quit_after.empty() ? 0.0 : std::atof(quit_after.c_str());
@@ -181,6 +182,7 @@ void Bf3M2aViewmodelDemo::_ready() {
 			kit_defs_difference_ = bf3::render::viewmodel_kits_difference(kit_defs_, bf3::render::documented_viewmodel_kits());
 			for (const int team : { 1, 2 }) {
 				bf3::render::ViewmodelSetSpec spec = bf3::render::team_viewmodel_set(kit_defs_, team);
+				spec.knife_dog_tags = knife_dog_tags_;
 				spec.superbundle = level;
 				bf3::core::Result<std::unique_ptr<bf3::render::ViewmodelSet>> set = bf3::render::load_viewmodel_set(*sources_, spec, &progress_, cache.get());
 				if (!set) {

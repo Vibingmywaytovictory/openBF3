@@ -26,8 +26,10 @@
 //   e11.coverage                deploy, fire and reload of every item of the 8 loadouts (read from the data:
 //                               render::read_viewmodel_kits): a clip or a counted stand-in
 //   e11.kits_match_data         the data's loadouts equal the documented table (m2a.md §5.6)
-//   vm.alpha_test               every slot the level shader database calls alpha-tested is drawn with an alpha
-//                               scissor (the knife's dog-tag chain strip among them)
+//   vm.alpha_test               every drawn slot the level shader database calls alpha-tested is drawn with an
+//                               alpha scissor (the knife's dog-tag chain strip with --vm-dogtags)
+//   vm.knife_dog_tags           the knife's dog tags and chain are left out (stand-in, render::kDogTagTexture), or
+//                               drawn with --vm-dogtags
 // Info lines: the E5 length table (authored clip length next to ReloadTime), the look scale and the vignette at full
 // ADS, the present cost.
 #include "m2a_viewmodel_demo.h"
@@ -637,8 +639,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 	// The shader database's alpha-tested slots (the knife's dog-tag chain strip) are alpha-scissored on the GPU side:
 	// the knife capture's stray bars were that strip drawn opaque.
 	{
-		uint32_t data_slots = 0, gpu = 0, items = 0;
-		bool knife_chain = false;
+		uint32_t data_slots = 0, gpu = 0, items = 0, knives = 0, knives_hidden = 0, dogtag_drawn = 0;
 		std::string lines;
 		for (const int team : { 1, 2 }) {
 			const bf3::render::ViewmodelSet &set = p_demo.set(team);
@@ -664,8 +665,15 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 				data_slots += want;
 				gpu += have;
 				++items;
-				if (it.kind == bf3::render::ViewmodelItemKind::Knife && want > 0 && have == want) {
-					knife_chain = true;
+				if (it.kind == bf3::render::ViewmodelItemKind::Knife) {
+					++knives;
+					knives_hidden += it.hidden_surfaces > 0 ? 1 : 0;
+					for (const bf3::render::PreparedSurface &sf : it.weapon.prepared.surfaces) {
+						if (sf.material_index < it.weapon.materials.slots.size() &&
+								it.weapon.materials.slots[sf.material_index].texture("Diffuse").find(bf3::render::kDogTagTexture) != std::string::npos) {
+							++dogtag_drawn;
+						}
+					}
 				}
 				if (want > 0 || have > 0) {
 					lines += fmt("    %s %s: %u alpha-tested slots in the data, %u alpha-scissor materials\n", team == 2 ? "RU" : "US", short_unlock(it.unlock).c_str(),
@@ -674,9 +682,12 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 			}
 		}
 		print("[vm] alpha-tested viewmodel slots (level shader database):\n" + lines);
-		row("vm.alpha_test", data_slots == gpu && knife_chain,
-				fmt("%u alpha-tested slots over %u items, %u drawn with an alpha scissor; the knife's dog-tag chain %s", data_slots, items, gpu,
-						knife_chain ? "alpha-scissored" : "NOT alpha-scissored"));
+		row("vm.alpha_test", data_slots == gpu,
+				fmt("%u alpha-tested drawn slots over %u items, %u drawn with an alpha scissor (the knife's dog-tag chain when --vm-dogtags)", data_slots,
+						items, gpu));
+		row("vm.knife_dog_tags", knives > 0 && (p_demo.knife_dog_tags() ? dogtag_drawn > 0 : (knives_hidden == knives && dogtag_drawn == 0)),
+				fmt("%u knives: dog tags %s (%u with hidden surfaces, %u dog-tag surfaces drawn; render::kDogTagTexture stand-in)", knives,
+						p_demo.knife_dog_tags() ? "drawn (--vm-dogtags)" : "hidden", knives_hidden, dogtag_drawn));
 	}
 
 	// E5 table: the authored clip length next to ReloadTime.

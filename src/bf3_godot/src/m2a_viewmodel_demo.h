@@ -14,6 +14,7 @@
 //   --vm-shots=<dir>         windowed: play the kits at 60 fps and save the look-and-feel captures (hip, ADS,
 //                            reload mid-clip, throw, knife) as PNGs into <dir>, then quit
 //   --kits=<i,j,...>         only these kits (0-3 US assault engineer support recon, 4-7 RU)
+//   --vm-dogtags             draw the knife's dog tags and chain (hidden by default, render::kDogTagTexture)
 //   --quit-after=<s>         play mode: quit after s seconds
 //   --bf3-install=<dir>      install override; --bf3-cache=<dir> / --no-cache as the M9 demo
 // Without --vm-check / --vm-shots the kits play in a loop with a status label.
@@ -78,6 +79,7 @@ public:
 	const vm_script::View &last_view() const { return last_view_; }
 	void set_tuning(const bf3::anim::ViewmodelTuning &p_tuning);
 	double load_seconds() const { return load_seconds_; }
+	bool knife_dog_tags() const { return knife_dog_tags_; }
 
 protected:
 	static void _bind_methods();
@@ -125,6 +127,7 @@ private:
 
 	// Run control.
 	bool check_mode_ = false;
+	bool knife_dog_tags_ = false; // --vm-dogtags: draw the knife's dog tags (render::kDogTagTexture)
 	std::string shots_dir_;
 	double quit_after_ = 0;
 	double played_ = 0;

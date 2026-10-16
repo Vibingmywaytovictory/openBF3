@@ -17,6 +17,7 @@
 #include "bf3/render/mesh_cache.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -880,6 +881,27 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		item.binds = arms_binds;
 		if (core::Status st = prepare_part(mount, item.weapon, set->weapon_skeleton, set->rig, item.binds, p_cache, set->notes); !st.ok()) {
 			return core::error_at(item.unlock, st.error());
+		}
+		if (item.kind == ViewmodelItemKind::Knife && !p_spec.knife_dog_tags) {
+			// The dog tags and their chain (kDogTagTexture): left out, counted.
+			std::vector<PreparedSurface> &surfaces = item.weapon.prepared.surfaces;
+			for (size_t i = surfaces.size(); i-- > 0;) {
+				const PreparedSurface &sf = surfaces[i];
+				if (sf.material_index >= item.weapon.materials.slots.size()) {
+					continue;
+				}
+				std::string diffuse = item.weapon.materials.slots[sf.material_index].texture("Diffuse");
+				std::transform(diffuse.begin(), diffuse.end(), diffuse.begin(), [](unsigned char p_c) { return char(std::tolower(p_c)); });
+				if (diffuse.find(kDogTagTexture) == std::string::npos) {
+					continue;
+				}
+				set->notes.push_back(item.unlock + ": dog-tag surface " + std::to_string(sf.subset) + " (" + sf.material_name + ", " + diffuse +
+						") hidden (stand-in: no dog-tag customization or chain physics in M2a)");
+				item.weapon.prepared.vertices -= std::min(item.weapon.prepared.vertices, sf.vertex_count());
+				item.weapon.prepared.triangles -= std::min(item.weapon.prepared.triangles, sf.indices.size() / 3);
+				surfaces.erase(surfaces.begin() + std::ptrdiff_t(i));
+				++item.hidden_surfaces;
+			}
 		}
 		for (ViewmodelAttachment &a : item.attachments) {
 			if (core::Status st = prepare_rigid_part(mount, a.part, p_cache, set->notes); !st.ok()) {

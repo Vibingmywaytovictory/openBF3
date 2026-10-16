@@ -81,6 +81,8 @@ struct ViewmodelSetSpec {
 	std::string arms_variation = "characters/arms/arms1p_bareglove03/arms1p_bareglove03_afro";
 	// Ant clips and EBX data only: no meshes, materials or textures (bf3dump vm clips, the E5 / E11 reports).
 	bool clips_only = false;
+	// Draw the knife's dog-tag surfaces (kDogTagTexture). Off by default: see kDogTagTexture.
+	bool knife_dog_tags = false;
 };
 
 struct ViewmodelClip {
@@ -133,6 +135,15 @@ struct ViewmodelSlotLook {
 };
 inline constexpr float kViewmodelAlphaScissor = 0.5f; // as L1's level materials (level_upload.cpp)
 
+// vm: the knife's dog tags. knife_1p_mesh carries the tags (dogtag2, proppreset_diffuseonly) and their ball chain
+// (M_Dogtag, proppreset_alphatest), textured weapons/knife/dogtag_d / dogtag_d2 [verified: bf3dump vm skin], skinned
+// to Wep_Extra1/2 and Wep_Belt2/3 + Wep_Mag. In the static Knife_IdlePose the chain is a 0.4 m loop that runs from the
+// tags below the hand up past it to the screen centre: the stray bars of the first knife captures. BF3 shows the
+// player's chosen dog tags there (a persistence customization M2a does not have) and lets the chain hang [inferred];
+// without either, M2a hides every knife surface whose Diffuse texture names this, counted per item
+// (ViewmodelItem::hidden_surfaces) and listed in the notes. ViewmodelSetSpec::knife_dog_tags draws them.
+inline constexpr std::string_view kDogTagTexture = "/dogtag";
+
 // A rigid accessory mesh on a weapon bone (SoldierWeaponData.Sockets: a SocketData's AvailableObjects, the
 // WeaponRegularSocketObjectData's Asset1p / Asset1pzoom). The kits' default customization attaches the sockets whose
 // UnlockAsset is one of the "weapons/common/no..." unlocks (nooptics = the iron sights of flat-top rifles, the M16A4's
@@ -173,6 +184,7 @@ struct ViewmodelItem {
 	std::vector<std::unique_ptr<core::ant::AntPackage>> packages;
 	std::vector<ViewmodelAttachment> attachments; // the default customization's rigid accessories
 	std::vector<ViewmodelSlotLook> weapon_looks; // per material slot of weapon
+	uint32_t hidden_surfaces = 0; // weapon surfaces left out (the knife's dog tags, kDogTagTexture)
 };
 
 // vm: the animator's clip table of an item (stand-ins as VmClipRef::stand_in with the stand-in's seconds).
