@@ -339,7 +339,7 @@ local function fire(so, w, dmin, z)
 		st.last_kick = kick
 	end
 	-- spread increase
-	if z then st.da = math.min(math.max(z.max, dmin), (st.da or dmin) + z.inc) end
+	if z then st.da = math.min(math.max(z.max, dmin), (st.da or dmin) + (M.laws.inc or z.inc)) end
 	st.tsls = 0.0
 	st.last_t = M.t
 	st.shots = st.shots + 1

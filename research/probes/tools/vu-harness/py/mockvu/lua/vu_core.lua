@@ -275,6 +275,7 @@ local function subscribe(name, a, b)
 	table.insert(M.subs[name], s)
 	return M.px(s, 'Event')
 end
+M.subscribe = subscribe
 
 M.IMPL.Event = {
 	Unsubscribe = function(s)
@@ -354,7 +355,7 @@ function M.net_send(name, target, ...)
 	local args = table.pack(...)
 	local pargs = { n = args.n }
 	for i = 1, args.n do pargs[i] = plain(args[i]) end
-	M.net_out[#M.net_out + 1] = { name = name, target = target, args = pargs }
+	M.net_out[#M.net_out + 1] = { name = name, target = target, args = pargs, k = M.k }
 end
 
 function M.net_deliver(name, from, args)
@@ -449,6 +450,7 @@ end
 function M.take_out()
 	local out = M.out
 	M.out = {}
+	M.out_scan = 1
 	return out
 end
 
@@ -489,6 +491,19 @@ function M.build_env(sources, realm, globals)
 	env.os.time = function() return math.floor(M.wall_seconds()) + 1792000000 end
 	env.os.clock = function() return M.t end
 	env.coroutine = copy(coroutine)
+	env.coroutine.create = function(f)
+		local co = coroutine.create(f)
+		if M.cov_fn then debug.sethook(co, M.cov_fn, 'l') end
+		return co
+	end
+	env.coroutine.wrap = function(f)
+		local co = env.coroutine.create(f)
+		return function(...)
+			local r = table.pack(coroutine.resume(co, ...))
+			if not r[1] then error(r[2], 2) end
+			return table.unpack(r, 2, r.n)
+		end
+	end
 	env.utf8 = copy(utf8)
 	env.package = { loaded = {} }
 	env.json = M.json
@@ -550,7 +565,7 @@ end
 M.cov = {}
 function M.coverage_on()
 	local cov = M.cov
-	debug.sethook(function(_, line)
+	M.cov_fn = function(_, line)
 		local src = debug.getinfo(2, 'S').source
 		if src:sub(1, 5) == '@ext/' then
 			local c = cov[src]
@@ -560,6 +575,10 @@ function M.coverage_on()
 			end
 			c[line] = true
 		end
-	end, 'l')
+	end
+	debug.sethook(M.cov_fn, 'l')
 end
-function M.coverage_off() debug.sethook() end
+function M.coverage_off()
+	M.cov_fn = nil
+	debug.sethook()
+end

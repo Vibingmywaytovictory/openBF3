@@ -478,7 +478,7 @@ function M.tick()
 	-- host actions (chat, NetEvents from the client, user joins) run inside the tick
 	local q = M.host_q
 	M.host_q = {}
-	for _, fn in ipairs(q) do handler_ok = M.handler_call('host', fn) end
+	for _, fn in ipairs(q) do M.handler_call('host', fn) end
 	M.dispatch('UpdateManager:Update', M.dt, 0)
 	if M.level_state ~= 'loading' then
 		local dt = M.dt

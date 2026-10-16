@@ -452,7 +452,9 @@ local function step_fire(ctx)
 		end
 	end
 	local mp, ma = median(dpos), median(dang)
-	local geo = mp ~= nil and mp <= 0.01 and ma <= 0.02
+	-- 0.05 deg: bullet drop over the first tick's chord (~0.02 deg at 10 m) passes, a pre-dispersion direction
+	-- (>= 0.2 deg off for ADS, 2.5 deg hip) does not
+	local geo = mp ~= nil and mp <= 0.01 and ma <= 0.05
 	if mp ~= nil and ma ~= nil and ma > 90 then
 		H.dir_sign = -H.dir_sign
 		ctx:mark('shot-dir-flipped')

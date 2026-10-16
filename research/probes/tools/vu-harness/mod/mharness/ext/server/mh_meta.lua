@@ -195,7 +195,10 @@ local function probe_api(pl)
 		elseif kind == 'prop' then
 			local t, f = sym:match('^(%w+)%.(%w+)$')
 			if t and objs[t] ~= nil then
-				present = select(2, pcall(function() return objs[t][f] ~= nil end)) == true
+				-- a read that does not raise counts as present; a nil value (write-only fields such as Player.input
+				-- on a human, an empty slot) is reported as 'nil' (DESIGN 3.1: an absent member is assumed to raise)
+				local okr, v = pcall(function() return objs[t][f] end)
+				if okr then present = (v ~= nil) or 'nil' else present = false end
 			end
 		elseif kind == 'enum' then
 			local t, v = sym:match('^(%w+)%.([%w_]+)$')
@@ -271,10 +274,11 @@ function M.census(pl)
 			osdate = i == 1 and osdate or nil, vm = i == 1 and M.vm or nil, guid_nodash = i == 1 and guid_nodash or nil,
 			cmd = i == 1 and M.client_cmd and R.label(M.client_cmd) or nil })
 	end
-	local na, np = 0, 0
+	local na, np, nnil = 0, 0, 0
 	for _, v in pairs(api) do
 		na = na + 1
 		if v then np = np + 1 end
+		if v == 'nil' then nnil = nnil + 1 end
 	end
 	local nr, nf = 0, 0
 	for _, v in pairs(res) do
@@ -293,7 +297,7 @@ function M.census(pl)
 	local missing = {}
 	for key, v in pairs(res) do if not v then missing[#missing + 1] = key:match('[^/]+$') end end
 	table.sort(missing)
-	return { api = np, apin = na, res = nf, resn = nr, types = ntypes, flags = flags, tcs = tcs, vm = M.vm,
+	return { api = np, apin = na, apinil = nnil, res = nf, resn = nr, types = ntypes, flags = flags, tcs = tcs, vm = M.vm,
 		cmd = M.client_cmd or '?', missing = missing, osdate = osdate, jsonv3 = jsonv3 }
 end
 

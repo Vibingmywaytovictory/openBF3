@@ -91,8 +91,8 @@ end
 
 function H_.census(pl)
 	local s = meta.census(pl)
-	reply(pl, string.format('census: API %d/%d, assets %d/%d, entity types %d, flags %d, ticket counters %d, vm %s, ' ..
-		'console %s', s.api, s.apin, s.res, s.resn, s.types, s.flags, s.tcs, s.vm, s.cmd))
+	reply(pl, string.format('census: API %d/%d (%d nil), assets %d/%d, entity types %d, flags %d, ticket counters %d, ' ..
+		'vm %s, console %s', s.api, s.apin, s.apinil or 0, s.res, s.resn, s.types, s.flags, s.tcs, s.vm, s.cmd))
 	if #s.missing > 0 then reply(pl, 'missing assets: ' .. table.concat(s.missing, ' ')) end
 	return true
 end
