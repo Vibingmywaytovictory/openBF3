@@ -3,10 +3,10 @@
 // Suite sim-vehicle-unit (no install): the tuning file, the ghost codec, the state hash, the command log, the model
 // on a Humvee fixture (the §4.2 numbers as constants, the §4.5 chassis boxes), VehicleWorld on the synthetic ground
 // (BodyIDs, Jolt stream sizes, the bit-exact POD restore, the wake rule, the steering sign, hostile states and
-// snapshots), gates D / G1 / G1r / G2 on the 7 synthetic courses, G1m (three touching Humvees), two worlds on two
+// snapshots), gates D / G1 / G1r / G2x (G2 reported) on the 7 synthetic courses, G1m (three touching Humvees), two worlds on two
 // threads, and the fixture's handling numbers.
 // Suite sim-vehicle (install, exits 77 without one): MP_007 RushLarge0: the Humvee def and spawners as read, the
-// real model, the spawn settle (report S), the course search (gate C), D / G1 / G1r / G2 on every found course, the
+// real model, the spawn settle (report S), the course search (gate C), D / G1 / G1r / G2x (G2 reported) on every found course, the
 // handling numbers of the real model, 200 mutations of the Humvee partition through the reader, install unchanged.
 #include <doctest/doctest.h>
 
@@ -797,14 +797,16 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(w->state_hash() == before);
 	}
 
-	TEST_CASE("sim.vehicle: D, G1, G1r and G2 on the 7 synthetic courses (Full mode error exactly 0; slope_idle sleep reported)") {
+	TEST_CASE("sim.vehicle: D, G1, G1r and G2x on the 7 synthetic courses, G2 reported (Full mode error exactly 0; slope_idle sleep reported)") {
 		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes();
 		const std::shared_ptr<const VehicleModel> m = fixture_model();
 		std::vector<VehicleCourseReport> reports;
 		VehicleReplayOptions o;
 		if (kAsan) {
-			// asan runs Jolt ~27x slower (1,242 s with all six modes, s2.md §15.1): the gate mode and the Full self-check
-			o.modes = (1u << uint32_t(VehicleRestoreMode::OwnHistory)) | (1u << uint32_t(VehicleRestoreMode::Full));
+			// asan runs Jolt ~27x slower (1,242 s with all six modes, s2.md §15.1): OwnHistory (G2, reported, and the
+			// diverged history ExactPod restores onto), ExactPod (the G2x gate mode, s2.md §15.2) and the Full self-check
+			o.modes = (1u << uint32_t(VehicleRestoreMode::OwnHistory)) | (1u << uint32_t(VehicleRestoreMode::ExactPod)) |
+					(1u << uint32_t(VehicleRestoreMode::Full));
 		}
 		const auto start = std::chrono::steady_clock::now();
 		for (const VehicleCourse &c : synthetic_vehicle_courses()) {
@@ -827,7 +829,12 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK_MESSAGE(vehicle_gate_courses(reports, &why), why);
 		CHECK_MESSAGE(vehicle_gate_drove(reports, &why), why);
 		CHECK_MESSAGE(vehicle_gate_g1(reports, &why), why);
-		CHECK_MESSAGE(vehicle_gate_g2(reports, &why), why);
+		// G2 (the quantised ghost, OwnHistory) is report-only since the integration (s2.md §15.2); G2x is the gate.
+		why.clear();
+		const bool g2 = vehicle_gate_g2(reports, &why);
+		std::printf("G2 (report only, quantised ghost): %s%s%s\n", g2 ? "pass" : "over 2 cm", why.empty() ? "" : ": ", why.c_str());
+		why.clear();
+		CHECK_MESSAGE(vehicle_gate_g2x(reports, &why), "G2x: " << why);
 	}
 
 	TEST_CASE("sim.vehicle: G1m: three Humvees that touch and cross tile seams, bit-identical, G1 and G1r") {
@@ -1108,7 +1115,7 @@ TEST_SUITE("sim-vehicle") {
 		std::printf("S: %zu of %zu spawners settle within %.2f m (report only)\n", settled, r->size(), double(kSettleDriftLimit));
 	}
 
-	TEST_CASE("sim.vehicle: MP_007 courses (gate C, queries per kind), then D, G1, G1r and G2 on every found course") {
+	TEST_CASE("sim.vehicle: MP_007 courses (gate C, queries per kind), then D, G1, G1r and G2x on every found course, G2 reported") {
 		Caspian *m = caspian();
 		if (m == nullptr) {
 			return;
@@ -1129,7 +1136,8 @@ TEST_SUITE("sim-vehicle") {
 		}
 		VehicleReplayOptions o;
 		if (kAsan) {
-			o.modes = 1u << uint32_t(VehicleRestoreMode::OwnHistory);
+			// OwnHistory (G2, reported, and the diverged base) and ExactPod (the G2x gate mode, s2.md §15.2)
+			o.modes = (1u << uint32_t(VehicleRestoreMode::OwnHistory)) | (1u << uint32_t(VehicleRestoreMode::ExactPod));
 		}
 		start = std::chrono::steady_clock::now();
 		uint64_t steps = 0;
@@ -1154,8 +1162,12 @@ TEST_SUITE("sim-vehicle") {
 		CHECK_MESSAGE(vehicle_gate_drove(reports, &why), "D: " << why);
 		why.clear();
 		CHECK_MESSAGE(vehicle_gate_g1(reports, &why), "G1: " << why);
+		// G2 (the quantised ghost, OwnHistory) is report-only since the integration (s2.md §15.2); G2x is the gate.
 		why.clear();
-		CHECK_MESSAGE(vehicle_gate_g2(reports, &why), "G2: " << why);
+		const bool g2 = vehicle_gate_g2(reports, &why);
+		std::printf("G2 (report only, quantised ghost): %s%s%s\n", g2 ? "pass" : "over 2 cm", why.empty() ? "" : ": ", why.c_str());
+		why.clear();
+		CHECK_MESSAGE(vehicle_gate_g2x(reports, &why), "G2x: " << why);
 	}
 
 	TEST_CASE("sim.vehicle: handling numbers of the real Humvee model on the flat ground (report H, unverified placeholders)") {

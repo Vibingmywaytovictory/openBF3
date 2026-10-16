@@ -24,7 +24,9 @@
 //      (VehicleBodyState::origin, the frame origin). The replayed states become the client's history. Samples are
 //      tagged from the server's recorded listener counts (never the client world's): "wheel contact" (>= 1 wheel in
 //      contact at N+R) and "static collision" (chassis-static contacts in any tick of N..N+R).
-// Restore modes (s2.md §7.3); G2 is judged on OwnHistory, the others are the ablations that say which state matters:
+// Restore modes (s2.md §7.3). The gate G2x is judged on ExactPod (integration decision, s2.md §15.2: what M3 sends the
+// driving client per plan R4); G2 on OwnHistory (the quantised ghost) is report-only; the others are the ablations that
+// say which state matters:
 //   OwnHistory    client's own full snapshot at N, then the ghost (vehicle_restore::kGhost), contacts kept; the
 //                 sleep test stays the client's own
 //   Invalidate    the same, then the chassis contact cache invalidated
@@ -73,7 +75,10 @@ inline constexpr uint32_t kSettleTicks = 120;
 inline constexpr VehicleCommand kSettleCommand{ 0, 0, 0, 255, 0, 0, 0 };
 // Gate thresholds (s2.md §1).
 inline constexpr uint32_t kG1Ticks = 3600; // 60 s at 60 Hz
-inline constexpr float kG2MaxError = 0.02f; // m, max and p99 per course
+inline constexpr float kG2MaxError = 0.02f; // m, max and p99 per course (G2, OwnHistory: report-only since the integration)
+// G2x (integration decision, s2.md §15.2): ExactPod, the full-precision owner VehicleState restored onto the client's
+// own diverged history, max < 2 cm per course and replay length.
+inline constexpr float kG2xMaxError = 0.02f; // m, max per course
 inline constexpr uint32_t kG2SnapshotInterval = 2; // 30 Hz snapshots (plan D4)
 inline constexpr std::array<uint32_t, 2> kG2ReplayTicks{ 6, 9 }; // 100 ms and 150 ms
 
@@ -92,7 +97,7 @@ struct VehicleReplayOptions {
 	// G2
 	uint32_t snapshot_interval = kG2SnapshotInterval;
 	std::vector<uint32_t> replay_ticks{ kG2ReplayTicks.begin(), kG2ReplayTicks.end() };
-	uint32_t modes = 0x3Fu; // bit per VehicleRestoreMode; the primary mode is always run (sim.vehicle under asan: 0x01)
+	uint32_t modes = 0x3Fu; // bit per VehicleRestoreMode; the primary mode is always run (sim.vehicle under asan: OwnHistory + ExactPod, G2x's mode)
 	VehicleGhostQuantisation quantisation = kDefaultVehicleGhost;
 	bool g1 = true, g2 = true;
 	bool keep_hashes = true; // fill VehicleCourseReport::server_hashes and log (bf3dump --hash-out / --log-out, the cross-binary check)
@@ -205,11 +210,17 @@ bool vehicle_course_drove(const VehicleCourseReport &p_report, std::string *r_wh
 // for any found course, so a stalled course never passes them: G1 = g1_ticks == ticks, 0 mismatches, 0 replay
 // mismatches; G2 = for OwnHistory at every replay length, all.samples > 0, all.max < kG2MaxError and
 // all.p99 < kG2MaxError (Collision, when found, additionally needs static_collision.samples >= 30). p99 is
-// informative once max passes. S2 passes only when C, D, G1 (with G1r), G1m, G2, I and U all pass.
+// informative once max passes. G2 is report-only since the integration (s2.md §15.2): it measures the quantised
+// ghost, which M3 uses only for vehicles the client does not drive. G2x = for ExactPod at every replay length,
+// all.samples > 0, diverged_bases > 0 (restored onto the client's own diverged history, never a copy of the
+// server's) and all.max < kG2xMaxError (Collision, when found, additionally needs static_collision.samples >= 30):
+// the full-precision owner state M3 sends the driving client (plan R4). S2 passes when C, D, G1 (with G1r), G1m,
+// G2x, I and U all pass.
 bool vehicle_gate_courses(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
 bool vehicle_gate_drove(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
 bool vehicle_gate_g1(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
-bool vehicle_gate_g2(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
+bool vehicle_gate_g2(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr); // report-only
+bool vehicle_gate_g2x(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why = nullptr);
 
 // ---- G1m: several vehicles in one world ------------------------------------------------------------------------
 

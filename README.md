@@ -1480,7 +1480,7 @@ testing on the machine, so every timing here is noisy and the acceptance rerun o
 | gate | threshold | measured | command |
 |---|---|---|---|
 | L1 albedo coverage | >= 95 % of drawn instance slots | 98.01 % (PASS) | `bf3dump looks MP_Subway TeamDeathMatch0` |
-| frame time, L1 against M1 | median L1 frame interval <= 1.10 × M1's | 7.41 against 6.88 ms, 1.076 (PASS); full ctest run 3.75 against 3.91 ms, 0.961 (PASS); after the verifier fixes 5.91 against 4.97 ms, 1.187 (FAIL), then 4.62 against 4.78 ms, 0.966 (PASS), CPU at 34-93 % from other tracks | `ctest --preset dev -R godot.l1_look` |
+| frame time, L1 against M1 | median L1 frame interval <= 1.25 × M1's **and** median L1 p99 frame interval <= 16.7 ms (since the integration, below; was <= 1.10 × M1's) | 7.41 against 6.88 ms, 1.076 (PASS); full ctest run 3.75 against 3.91 ms, 0.961 (PASS); after the verifier fixes 5.91 against 4.97 ms, 1.187 (FAIL), then 4.62 against 4.78 ms, 0.966 (PASS), CPU at 34-93 % from other tracks | `ctest --preset dev -R godot.l1_look` |
 | E4 cold load | 15 s | 2.59 s and 2.86 s in two full ctest runs, 2.63 s after the verifier fixes (PASS; `_ready` -> Done 1.98 / 2.05 / 1.95 s) | `ctest --preset dev -R godot.m1_load` |
 | E5 warm load | 5 s | 1.98 s and 2.15 s, 2.08 s after the verifier fixes (PASS; `_ready` -> Done 1.30 / 1.43 / 1.41 s) | same |
 
@@ -1492,6 +1492,16 @@ over the rounds are compared. GPU render time (same statistic) is reported, not 
 load: within one 5-round run M1 alone ranged 3.2-7.6 ms, and a 3-round A/B of M1, L1, L1 with glass opaque and L1
 also without auto exposure gave medians of 4.28, 4.16, 3.54 and 4.58 ms, an order no part of L1 explains, while the
 GPU medians stayed in order (1.50, 1.68, 1.59, 1.58 ms). The quiet-machine rerun decides the interval gate.
+
+<!-- integration (integ/spikes) -->
+**Frame-time gate changed at the integration (orchestrator decision, 2026-10-16).** The quiet-machine acceptance run
+measured the L1 / M1 frame-interval ratio at a median 1.103 against the 1.10 limit: about 2.7 ms per frame at 1440p,
+GPU +14 %, all of it from drawing glass and transparency, the fog and the LUT, which M1 did not draw at all. A
+relative limit of 10 % penalised drawing content the baseline skipped rather than measuring a budget. `godot.l1_look`
+now passes when the median over the rounds of L1's frame interval is **<= 1.25 × M1's** and the median over the rounds
+of L1's **p99 frame interval** (every timed frame of a run, all four views; `[look] frame time p99` in the run's
+output) is **<= 16.7 ms** at 2560x1440, vsync off. Glass, fog and the LUT stay on by default; the ratio, both p99s and
+the GPU times are printed.
 
 The measured frame intervals (M1 6.87-7.62 ms per round) are about 2.5 × what the same runs give on an idle
 machine (M1 about 2.7 ms), because the other tracks kept every core busy: the frames are CPU bound, and the
@@ -1583,6 +1593,10 @@ Results, 2026-10-15, on the shared machine, so the timings are noisy (docs/desig
   * Crates of stages a mode does not play are parked off the map.
   * Some spawns are on platforms cut off by props and steps the motor cannot climb.
   * `sim.nav` reports the all-rows gate as a WARN and CHECKs what holds.
+  * Integration decision (2026-10-16): G2 stays a reported WARN. The fixes (per-stage Rush nav or Detour tile-cache
+    obstacles driven by the Rush logic, scoring only played points, the dynamic-prop and step / platform-edge spawn
+    cases) move to M2b (bots); the 24 Caspian RL spawns about 30 m under the terrain move to the terrain-collision fix
+    that follows this integration (docs/design/s1.md §19.5).
 * **G3 is measured.** Metro: 3.44 queries per step, 4.4 µs per sweep. Caspian: 4.21 queries per step, 1.8 µs per sweep.
 * **G4 passes.** Caspian 2.8 s, Kharg 3.8 s on 16 threads.
 
@@ -1614,16 +1628,18 @@ and are not gates):
 | G1 free driving bit-identical | 0 of 3,600 ticks with a differing state hash, every found course | same |
 | G1r replay from any tick | 0 mismatching ticks over 15 restore ticks per found course | same |
 | G1m several vehicles | 3 touching Humvees on synthetic ground: G1 and G1r with 0 mismatching ticks, >= 30 contact ticks | `ctest --preset dev -R "^sim\.vehicle\.unit$" --output-on-failure` |
-| G2 corrections with quantised 30 Hz ghosts | max (and p99) < 0.02 m per found course at 100 and 150 ms replays | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| G2x corrections with the full-precision owner state (the gate since the integration) | `ExactPod`: the server's `VehicleState` restored unquantised onto the client's own diverged history, max < 0.02 m per found course at 100 and 150 ms replays (and >= 1 diverged base, >= 30 static-collision samples on the collision course) | `ctest --preset dev -R "^sim\.vehicle$" --output-on-failure` |
+| G2 corrections with quantised 30 Hz ghosts | report only since the integration: max (and p99) per found course at 100 and 150 ms replays against 0.02 m, printed as `G2 (report only, quantised ghost)` | same |
 | X same hashes from a second binary | report only: the per-tick server hashes of a second build equal the first | `b\dev\tools\bf3dump\bf3dump.exe vehicle-replay MP_007 RushLarge0 --no-g1 --no-g2 --hash-out=dev.txt`, the same with `b\asan\...` (or `b\release\...`) into `other.txt`, then `fc dev.txt other.txt` |
 | H handling numbers | report only (unverified placeholders) | `ctest --preset dev -R "^sim\.vehicle$"`, or `bf3dump vehicle-replay MP_007 RushLarge0 --handling` |
 | S spawns settle | report only: < 1 cm drift over the last 60 settle ticks per Humvee spawner | `ctest --preset dev -R "^sim\.vehicle$"` |
 | install unchanged | sizes and mtimes equal | `ctest --preset dev -R "^sim\.vehicle$"` |
 | contract / units | pass | `ctest --preset dev -R "^(s2\.contract\|sim\.vehicle\.unit)$"` |
 
-S2 passes only when C, D, G1 (with G1r), G1m, G2, install unchanged and contract / units all pass. Under `ctest
---preset asan` (Jolt runs ~27x slower there), `sim.vehicle` runs the G2 `OwnHistory` mode only and the synthetic-course
-case of `sim.vehicle.unit` runs `OwnHistory` + `Full` (the ablations are `dev` / `release`). Both suites print steps
+S2 passes only when C, D, G1 (with G1r), G1m, G2x, install unchanged and contract / units all pass. Under `ctest
+--preset asan` (Jolt runs ~27x slower there), `sim.vehicle` runs the `OwnHistory` and `ExactPod` modes only and the
+synthetic-course case of `sim.vehicle.unit` runs `OwnHistory` + `ExactPod` + `Full` (the other ablations are `dev` /
+`release`). Both suites print steps
 and seconds per course; the TIMEOUTs are 3x the measured runs (docs/design/s2.md §15.1).
 
 Measured (2026-10-15, docs/design/s2.md §15.1): **S2 fails on G2 alone.** C, D, G1, G1r, G1m, install unchanged and
@@ -1636,6 +1652,14 @@ not be sent) and the same without the lambdas (`PodOwnLambdas`) fails at 2.8 cm:
 that state unquantised, lambdas included, and the ghost (376 bits: the suspension codes carry nothing) to everyone
 else. H (unverified placeholders): 0-60 km/h 7.4 s,
 9.1 m/s^2 braking, 18.4 m turning circle, 75 km/h top speed. S: 3 of 6 Humvee spawners settle within 1 cm.
+
+<!-- integration (integ/spikes) -->
+**Integration decision (2026-10-16, docs/design/s2.md §15.2).** The pre-registered fail branch (s2.md §1, plan R4)
+was taken: M4's driven vehicle stays on Jolt, M3 sends the driving client its full-precision `VehicleState` (about
+0.5-0.6 KB per update) and the quantised ghost only for vehicles the client does not drive. G2 measured the ghost on
+the driver, a configuration M3 will not use, so it is report-only now (its numbers keep being printed); the gate is
+**G2x**: `ExactPod` max < 2 cm on every found course, which is what M3 ships. `sim.vehicle` and `sim.vehicle.unit`
+pass with it (accepted run: `ExactPod` <= 1.91 mm on MP_007, 0.75 mm synthetic).
 
 Tools: `bf3dump vehicledrive <LEVEL> <MODE> [<blueprint>]` prints the drive def as read and the model built from it;
 `bf3dump vehicle-replay <LEVEL> <MODE>` runs the course search and the gates with the test's report (`--synthetic`

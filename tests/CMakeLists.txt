@@ -451,7 +451,8 @@ endif()
 
 # L1 look (README "L1 look"): godot.l1_look alternates windowed fullscreen --look=m1 / --look=l1 runs of
 # res://scenes/m1_metro.tscn (vsync off, 4 free views, 300 timed frames each) for 5 rounds; gate: the median L1 frame
-# interval <= 1.10 x the median M1 one (GPU render time reported). Screenshots to $OPENBF3_LOOK_SHOTS when set (never
+# interval <= 1.25 x the median M1 one and the median L1 p99 frame interval <= 16.7 ms at 2560x1440 (integration
+# decision, README "L1 look"; GPU render time reported). Screenshots to $OPENBF3_LOOK_SHOTS when set (never
 # commit them). Exits 77 like godot.m1_load; RUN_SERIAL (timing).
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.l1_look COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_l1_look.cmake)
@@ -513,10 +514,10 @@ if(OPENBF3_ASAN)
     set_tests_properties(s2.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s2_contract_cl_dir}")
 endif()
 # S2 vehicle (docs/design/s2.md §1, §11): sim.vehicle.unit drives the Humvee fixture on the synthetic ground (the unit
-# contract U, gates D / G1 / G1r / G2 on the 7 synthetic courses, G1m, two threads, report H); sim.vehicle runs MP_007
-# RushLarge0 (gates C, D, G1, G1r, G2, I; reports S and H) and exits 77 = skipped without an install. The test includes
+# contract U, gates D / G1 / G1r / G2x on the 7 synthetic courses with G2 reported, G1m, two threads, report H); sim.vehicle runs MP_007
+# RushLarge0 (gates C, D, G1, G1r, G2x, I; reports G2, S and H) and exits 77 = skipped without an install. The test includes
 # bf3_sim's internal headers (VehicleWorld::Impl, CollisionWorld::Impl) and links Jolt for the seams. Under asan the
-# install run keeps the primary restore mode only (OPENBF3_S2_ASAN).
+# install run keeps the primary restore mode and ExactPod (G2x) only (OPENBF3_S2_ASAN).
 openbf3_test(test_sim_vehicle test_main.cpp sim_vehicle_tests.cpp test_support.h)
 target_link_libraries(test_sim_vehicle PRIVATE bf3_sim Jolt)
 target_include_directories(test_sim_vehicle PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)

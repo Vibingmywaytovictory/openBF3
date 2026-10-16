@@ -122,6 +122,7 @@ private:
 	std::vector<float> view_cpu_samples_, view_gpu_samples_;
 	double median_cpu_sum_ms_ = 0.0, median_gpu_sum_ms_ = 0.0;
 	size_t median_views_ = 0;
+	std::vector<float> run_cpu_samples_; // integration: every view's frame intervals, for the run's p99 (godot.l1_look)
 };
 
 class M1Check {

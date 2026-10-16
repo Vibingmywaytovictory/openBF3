@@ -565,6 +565,7 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		total_frames_ += measure_frames_ - 1;
 		UtilityFunctions::print(to_godot(fmt("[look] frame time at %s: %.3f ms per frame (interval), GPU %.3f ms, over %u frames", shot.path.c_str(),
 				view_cpu_ms_ / n, view_gpu_ms_ / n, measure_frames_ - 1)));
+		run_cpu_samples_.insert(run_cpu_samples_.end(), view_cpu_samples_.begin(), view_cpu_samples_.end());
 		if (!view_cpu_samples_.empty()) {
 			const auto median_of = [](std::vector<float> &r_v) {
 				const size_t mid = r_v.size() / 2;
@@ -608,6 +609,11 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 			const Vector2 size = image.is_valid() ? Vector2(float(image->get_width()), float(image->get_height())) : Vector2();
 			UtilityFunctions::print(to_godot(fmt("[look] frame time median: %.3f ms per frame (interval), GPU %.3f ms, mean of the per-view medians at %zu views, viewport %dx%d",
 					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_, int(size.x), int(size.y))));
+		}
+		if (!run_cpu_samples_.empty()) {
+			// Integration (README "L1 look"): godot.l1_look gates the p99 frame interval over every timed frame of the run.
+			UtilityFunctions::print(to_godot(fmt("[look] frame time p99: %.3f ms per frame (interval), over %zu frames at %zu views",
+					double(percentile(run_cpu_samples_, 0.99)), run_cpu_samples_.size(), median_views_)));
 		}
 	}
 	return next_ >= total;

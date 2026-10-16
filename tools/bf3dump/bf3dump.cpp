@@ -53,7 +53,7 @@
 // S1 (server scale): nav bake|stats|components|path|probe and bots (nav_commands.h)
 // S2 vehicle:
 //   vehicledrive <LEVEL> <MODE> [<blueprint>]   the drive def and the vehicle model (vehicle_commands.cpp)
-//   vehicle-replay <LEVEL> <MODE> [options]     courses and gates C / D / G1 / G1r / G2, --handling, --sweep,
+//   vehicle-replay <LEVEL> <MODE> [options]     courses and gates C / D / G1 / G1r / G2x (G2 reported), --handling, --sweep,
 //                                               --hash-out (gate X), --log-out / --log-in (vehicle_commands.cpp)
 //
 // Command semantics and output formats follow the ebx-dump probe

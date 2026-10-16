@@ -558,9 +558,15 @@ int cmd_vehicle_replay(const std::shared_ptr<Install> &p_install, const std::vec
 			gate("G1", pass, why);
 		}
 		if (o.g2) {
+			// G2 (the quantised ghost) is report-only since the integration (s2.md §15.2): printed, never the exit code.
 			why.clear();
 			pass = vehicle_gate_g2(reports, &why);
-			gate("G2", pass, why);
+			std::printf("report G2 %s%s%s\n", pass ? "PASS" : "FAIL", why.empty() ? "" : ": ", why.c_str());
+			if ((o.modes & (1u << uint32_t(VehicleRestoreMode::ExactPod))) != 0) {
+				why.clear();
+				pass = vehicle_gate_g2x(reports, &why);
+				gate("G2x", pass, why);
+			}
 		}
 	}
 	return rc;

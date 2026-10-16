@@ -643,6 +643,54 @@ bool vehicle_gate_g2(const std::vector<VehicleCourseReport> &p_reports, std::str
 	return why.empty();
 }
 
+// G2x (integration decision, s2.md §15.2): the ExactPod mode, the full-precision owner VehicleState M3 sends the
+// driving client (plan R4), restored onto the client's own diverged OwnHistory history. Max only: p99 is printed.
+bool vehicle_gate_g2x(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why) {
+	std::string why;
+	size_t found = 0;
+	char buffer[200];
+	for (const VehicleCourseReport &r : p_reports) {
+		if (!r.course.found) {
+			continue;
+		}
+		++found;
+		const char *name = vehicle_course_name(r.course.kind);
+		size_t judged = 0;
+		for (const VehicleCorrectionReport &c : r.corrections) {
+			if (c.mode != VehicleRestoreMode::ExactPod) {
+				continue;
+			}
+			++judged;
+			if (c.all.samples == 0 || !(c.all.max < kG2xMaxError)) {
+				std::snprintf(buffer, sizeof(buffer), "%s R=%u: ExactPod max %.4f m p99 %.4f m over %zu samples", name, c.replay_ticks, double(c.all.max),
+						double(c.all.p99), c.all.samples);
+				why += (why.empty() ? "" : "; ") + std::string(buffer);
+			}
+			if (c.diverged_bases == 0) {
+				std::snprintf(buffer, sizeof(buffer), "%s R=%u: ExactPod restored no diverged base (it measured nothing)", name, c.replay_ticks);
+				why += (why.empty() ? "" : "; ") + std::string(buffer);
+			}
+			if (r.course.kind == VehicleCourseKind::Collision && c.static_collision.samples < 30) {
+				std::snprintf(buffer, sizeof(buffer), "%s R=%u: %zu static-collision samples (< 30)", name, c.replay_ticks, c.static_collision.samples);
+				why += (why.empty() ? "" : "; ") + std::string(buffer);
+			}
+		}
+		if (judged == 0) {
+			why += std::string(why.empty() ? "" : "; ") + name + ": no ExactPod result";
+		}
+	}
+	std::string drove;
+	if (found == 0) {
+		why = "no course found";
+	} else if (!vehicle_gate_drove(p_reports, &drove)) {
+		why += std::string(why.empty() ? "" : "; ") + "gate D failed (" + drove + ")";
+	}
+	if (r_why != nullptr) {
+		*r_why = why;
+	}
+	return why.empty();
+}
+
 core::Result<VehicleGroupReport> run_vehicle_group(std::shared_ptr<const StaticWorldShapes> p_shapes, std::shared_ptr<const VehicleModel> p_model,
 		std::span<const VehicleCourse> p_courses, const VehicleReplayOptions &p_options) {
 	const auto start = std::chrono::steady_clock::now();
