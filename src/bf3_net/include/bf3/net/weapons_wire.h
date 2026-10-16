@@ -9,9 +9,16 @@
 // tick's start (sim::weapons::tick_start(server_tick)), saturated at +-kWeaponsWireMaxOffset (35 s), plus spread,
 // spread time, recoil, hold start, phase, burst and flags. weapons_from_wire rebuilds a state that steps exactly as
 // the original (m2a.contract / net.proto round-trip every state of wp's W7 600-tick run and step both; nt's rows).
-// A slot that is neither active nor pending keeps only what the view carries: its timers are idle by construction
-// (a switch cancels them), and its spread and recoil have recovered by the time it deploys again [to be checked by
-// nt's W7 round trip; nt widens the view additively if that check needs more].
+// As built (nt): the view is complete. A slot that is neither active nor pending still steps (its recoil recovers every
+// tick, its kFirstShotArmed flag re-arms, its spread decays from spread_time when it fires again), so the view
+// carries its timed state too, in `idle` (widened additively; the wire sends every non-empty slot's timed state once,
+// in slot order). Empty slots carry their mode_counter (step_soldier_weapons writes the counter into every slot).
+// The view is exactly what the wire holds: weapons_wire_view masks the narrow fields to their wire widths (mode and
+// mode_counter 2 bits, burst_left 6, flags 7, events 16) and maps every time to an offset (absolute 0, "untimed", to
+// kWeaponsWireTimeZero), so read(write(view)) == view for every view the function makes, and weapons_from_wire of
+// it gives a state whose soldier_weapons_hash equals the original's unless a time was saturated (older or newer than
+// 35 s: an idle slot's spread_time / next_shot_time / hold_start after a long time in the holster; the spread has
+// fully decayed and the other two are only read again after they are rewritten, so the step is the same).
 
 #include "bf3/core/result.h"
 #include "bf3/net/bit_stream.h"
@@ -21,12 +28,15 @@
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <type_traits>
 
 namespace bf3::net {
 
 inline constexpr int32_t kWeaponsWireMaxOffset = int32_t(35 * sim::weapons::kTimeUnitsPerSecond); // 2.1e9 units
+// The view's code for the absolute time 0 (a phase without an end, a slot that never fired): outside the saturated range.
+inline constexpr int32_t kWeaponsWireTimeZero = INT32_MIN;
 
 // One slot: ammunition and mode for every non-empty slot.
 struct WeaponSlotWire {
@@ -64,6 +74,9 @@ struct WeaponsWire {
 	int32_t sprint_recover_until = 0; // offset, as the timers
 	std::array<WeaponSlotWire, sim::weapons::kMaxWeaponSlots> slots{};
 	std::array<WeaponTimersWire, 2> timers{}; // [0] the active slot, [1] the pending slot (slot 0xFF when none)
+	// nt, additive: the timed state of every other non-empty slot, indexed by slot (slot 0xFF when that slot is empty,
+	// active or pending).
+	std::array<WeaponTimersWire, sim::weapons::kMaxWeaponSlots> idle{};
 
 	bool operator==(const WeaponsWire &) const = default;
 };
