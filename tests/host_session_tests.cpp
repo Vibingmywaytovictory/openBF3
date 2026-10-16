@@ -1501,7 +1501,9 @@ TEST_SUITE("host-session") {
 		}
 		CHECK(m->level->level == "MP_Subway");
 		CHECK(m->level->mode == "TeamDeathMatch0");
-		CHECK(m->level->static_world->tile_count() == 170);
+		// TC (docs/design/terrain-collision.md): 149 Havok tiles and the terrain as one height field (170 tiles before).
+		CHECK(m->level->static_world->tile_count() == 149);
+		CHECK(m->level->static_world->terrain_count() == 1);
 		CHECK(m->level->spawn_protection_radius == 10.0f);
 		CHECK(m->level->source_digest.has_value());
 	}
