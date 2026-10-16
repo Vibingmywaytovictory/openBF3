@@ -43,4 +43,5 @@ target_sources(bf3_anim PRIVATE
 # M2a lc (docs/design/m2a.md §6.5; docs/design/m2a-lc.md): the server-pose clips and the capsule pose table builder.
 target_sources(bf3_anim PRIVATE
     src/server_pose.cpp
+    include/bf3/anim/server_pose_reference.h
 )

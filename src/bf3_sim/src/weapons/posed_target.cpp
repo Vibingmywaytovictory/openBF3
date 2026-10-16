@@ -8,6 +8,8 @@
 // equal inputs get equal bits.
 #include "bf3/sim/weapons/posed_target.h"
 
+#include "bf3/sim/weapons/surface_materials.h"
+
 #include "weapons_internal.h"
 
 #include <algorithm>
@@ -150,6 +152,47 @@ HitTarget posed_target(const CapsulePoseTable &p_table, const TargetPose &p_pose
 	t.bound_center = to_f(center);
 	t.bound_radius = float(radius) + 1e-3f;
 	return t;
+}
+
+core::Result<CapsuleTableData> capsule_table_data(const core::gameplay::SoldierDef &p_soldier, std::span<const core::gameplay::HitCapsule> p_capsules,
+		const SurfaceMaterialTable &p_materials) {
+	CapsuleTableData d;
+	d.property.resize(p_capsules.size(), 0);
+	d.zone.resize(p_capsules.size(), uint8_t(HitZone::Body));
+	for (size_t i = 0; i < p_capsules.size(); ++i) {
+		const SurfacePair pair = p_materials.pair_of(p_capsules[i].material);
+		if (!pair.resolved) {
+			continue;
+		}
+		d.property[i] = pair.property;
+		for (size_t z = 0; z < kHitZoneCount; ++z) {
+			if (p_materials.zone_property(HitZone(z)) == pair.property) {
+				d.zone[i] = uint8_t(z);
+				break;
+			}
+		}
+	}
+	for (size_t s = 0; s < core::gameplay::kCapsuleStances; ++s) {
+		core::Result<HitTarget> t = standin_target(p_soldier, p_capsules, p_materials, Pose(s), Vec3{ 0, 0, 0 }, 0, 0);
+		if (!t) {
+			return t.error();
+		}
+		for (uint8_t c = 0; c < t->capsule_count; ++c) {
+			const ZoneCapsule &z = t->capsules[c];
+			core::gameplay::CapsuleLocal e{};
+			for (size_t k = 0; k < 3; ++k) {
+				e.a[k] = z.a[k];
+				e.b[k] = z.b[k];
+			}
+			e.radius = z.radius;
+			e.zone = uint8_t(z.zone);
+			e.capsule = z.capsule;
+			e.property = z.property;
+			e.flags = z.flags;
+			d.standin[s].push_back(e);
+		}
+	}
+	return d;
 }
 
 } // namespace bf3::sim::weapons
