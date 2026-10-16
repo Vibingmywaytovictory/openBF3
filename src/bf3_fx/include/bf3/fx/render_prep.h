@@ -21,16 +21,18 @@
 //                      follows the velocity projected onto the view plane, its width faces the camera
 //                Waq   a quad in the world XZ plane (WorldAlignedQuad) or in the emitter frame's right / up plane
 //                      (Quad), rotated by r about its normal; Z = the unit normal
-//                Mesh  Euler(axis degrees, Y then X then Z [inferred]) x diag(size): a unit stand-in mesh (the
-//                      particle meshes are not loaded in VFX2; reported)
+//                Mesh  Euler(axis degrees, Y then X then Z [inferred]) x diag(size x kFxMeshStandinMeters): a unit
+//                      stand-in box (the particle meshes are not loaded in VFX2; reported)
 //              Quads span -0.5..0.5 x size (size = the full extent [inferred]).
 //   color      HDR linear rgb (UpdateColor), a = transparency (UpdateTransparency)
 //   custom     x = the output's row in emitter_params() (exact in a float), y = flipbook frame (integer part =
 //              frame index; frames are not blended, open question VFX1 Q6), z = alpha level min and max packed
 //              (fx_pack_alpha_levels, 10 bits each, exact in a float), w = alpha level scale
 // The shaders' alpha [inferred, an erosion reading of the alpha levels; the user judges the look]:
-//   a' = saturate((tex.a - min) / (max - min)), a = saturate((a' - 1 + scale) x exponent) x transparency
-// which is the texture's alpha unchanged at the defaults (min 0, max 1, scale 1, exponent 1).
+//   a' = saturate((tex.a - min) / (max - min)), or step(min, tex.a) once the window closed (min >= max: retail
+//   curves cross, e.g. the concrete impact's debris arm), a = saturate((a' - 1 + scale) x max(exponent, 1)) x
+//   transparency, which is the texture's alpha unchanged at the defaults (min 0, max 1, scale 1, exponent 1).
+//   ParticleMesh instances are a unit box x kFxMeshStandinMeters x size (the retail meshes are not loaded).
 // The per-emitter constants (atlas rects, flipbook layout, alpha exponent, soft fade, lighting) are one
 // FxEmitterParams row per EmitterOutput, uploaded as a small float texture.
 
@@ -61,6 +63,10 @@ inline constexpr size_t kFxShaderClassCount = size_t(FxShaderClass::Count);
 inline constexpr size_t kFxBlendCount = size_t(FxBlend::Count);
 inline constexpr size_t kFxPassCount = size_t(FxPass::Count);
 static_assert(kFxShaderClassCount * kFxBlendCount * kFxPassCount == kMaxFxBatches);
+
+// The mesh stand-in's edge at size 1 [inferred: BF3's particle meshes (shells, chunks) are centimetres to decimetres;
+// a 1 m box at the 1p shell ejection filled the screen; 3 cm is a rifle case].
+inline constexpr float kFxMeshStandinMeters = 0.03f;
 
 // One particle instance, 80 bytes: MultiMesh's transform (12 floats, 3x4 row-major), colour (4) and custom data (4:
 // emitter params row, flipbook frame, packed alpha levels, alpha level scale; header comment).

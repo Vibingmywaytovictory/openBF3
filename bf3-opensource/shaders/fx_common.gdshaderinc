@@ -11,6 +11,9 @@ uniform bool first_person = false; // the 1p pass: the viewmodel's FOV override 
 uniform float fp_fov_override = 55.0;
 uniform float fp_z_clip_scale = 0.25;
 uniform bool soft_enabled = true;
+uniform float self_lit_scale = 0.3; // kFxSelfLitScale (fx_renderer.h) [inferred]
+uniform float emissive_scale = 0.125; // kFxEmissiveScale (fx_renderer.h) [inferred]
+uniform int debug_view = 0; // diagnostics (--fx-debug-view): 1 unlit colour, 2 no normal map, 3 the normal map's texels
 uniform sampler2D base_atlas : source_color, filter_linear_mipmap, repeat_disable;
 uniform sampler2D normal_atlas : hint_normal, filter_linear_mipmap, repeat_disable;
 uniform sampler2D fx_params : filter_nearest, repeat_disable;
@@ -106,10 +109,12 @@ void vertex() {
 
 void fragment() {
 	vec4 tex = v_base.z < 0.0 ? vec4(1.0) : texture(base_atlas, v_base.xy + UV * v_base.zw);
-	// Alpha levels [inferred]: remap by min / max, then erode by the scale with the exponent as the edge sharpness.
+	// Alpha levels [inferred, an erosion reading; docs/design/m2a-fx2.md §4.2]: the texture alpha remapped from the
+	// [min, max] window to [0, 1] (a window that closed, min >= max, keeps only the texels above min), then eroded by the
+	// level scale (1 - scale is the threshold) with the exponent as the edge contrast, times the transparency.
 	float span = v_alpha.y - v_alpha.x;
-	float a1 = abs(span) < 0.0005 ? step(v_alpha.x, tex.a) : clamp((tex.a - v_alpha.x) / span, 0.0, 1.0);
-	float a = clamp((a1 - 1.0 + v_alpha.z) * v_alpha.w, 0.0, 1.0) * clamp(COLOR.a, 0.0, 1.0);
+	float a1 = span > 0.0005 ? clamp((tex.a - v_alpha.x) / span, 0.0, 1.0) : step(v_alpha.x + 0.0005, tex.a);
+	float a = clamp((a1 - 1.0 + v_alpha.z) * max(v_alpha.w, 1.0), 0.0, 1.0) * clamp(COLOR.a, 0.0, 1.0);
 	if (soft_enabled && v_light.w > 0.0) {
 		float depth = texture(fx_depth, SCREEN_UV).r;
 		vec4 view = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, depth, 1.0);
@@ -121,20 +126,28 @@ void fragment() {
 	}
 	vec3 rgb = tex.rgb * COLOR.rgb;
 #ifdef FX_LIT
-	if (v_normal.z > 0.0) {
+	if (v_normal.z > 0.0 && debug_view != 2) {
 		NORMAL_MAP = texture(normal_atlas, v_normal.xy + UV * v_normal.zw).rgb;
 	}
-	// Light multiplier [inferred]: the lit share of the colour; the rest is self-lit. Emissive rows are all self-lit.
+	// Light multiplier [inferred]: the lit share of the colour; the rest is self-lit at self_lit_scale (BF3's colours are
+	// relative to its own HDR scene level: an unlit colour of 1 - 3 is a grey wisp there, not a white card here).
 	float lit = v_light.z > 0.5 ? 0.0 : clamp(v_light.x, 0.0, 1.0);
 	ALBEDO = rgb * lit;
-	EMISSION = rgb * (1.0 - lit);
+	EMISSION = rgb * (1.0 - lit) * self_lit_scale;
 	ROUGHNESS = max(v_light.y, 0.02);
+	if (debug_view == 1) {
+		ALBEDO = vec3(0.0);
+		EMISSION = rgb;
+	} else if (debug_view == 3) {
+		ALBEDO = vec3(0.0);
+		EMISSION = v_normal.z > 0.0 ? texture(normal_atlas, v_normal.xy + UV * v_normal.zw).rgb : vec3(1.0, 0.0, 1.0);
+	}
 #ifdef FX_PREMUL
 	ALBEDO *= a;
 	EMISSION *= a;
 #endif
 #else
-	ALBEDO = rgb;
+	ALBEDO = rgb * emissive_scale;
 #endif
 	ALPHA = a;
 }

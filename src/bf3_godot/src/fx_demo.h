@@ -110,6 +110,7 @@ private:
 	std::filesystem::path cache_root_;
 	bool no_cache_ = false;
 	bool check_ = false;
+	int debug_view_ = 0; // --fx-debug-view=<n> (diagnostics)
 	std::string shot_dir_;
 	bool shot_dir_ok_ = false;
 	bool started_ = false, built_ = false, finished_ = false, shut_down_ = false;
@@ -120,6 +121,9 @@ private:
 	bool concrete_found_ = false, brick_found_ = false;
 	std::string concrete_line_, brick_line_;
 	Pose oil_pose_;
+	bool flash_present(std::string *r_where = nullptr) const;
+	std::string flash_line() const;
+	void frame_oilfire();
 	double oil_age_ = 0;
 	std::shared_ptr<const bf3::fx::EffectDef> impact_concrete_, impact_brick_; // from the impact table
 
@@ -129,6 +133,9 @@ private:
 	int impact_turn_ = 0;
 	bool frozen_ = false;
 	int settle_ = 0;
+	int shot_retries_ = 0; // muzzle shot re-fires until the flash is present
+	bool oil_framed_ = false, smoke_started_ = false;
+	std::string oil_frame_line_;
 	std::vector<Shot> shots_;
 	size_t shot_index_ = 0;
 	double shot_advance_left_ = 0;

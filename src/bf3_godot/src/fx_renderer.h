@@ -34,6 +34,12 @@ namespace bf3::godot_side {
 inline constexpr int32_t kFxStepTasks = 4; // WorkerThreadPool group tasks per sub-step
 inline constexpr size_t kFxSerialItems = 16; // fewer items: run on the calling thread
 inline constexpr uint32_t kFxMinCapacity = 64; // MultiMesh instances allocated at least (then powers of two)
+// The self-lit share's scale (fx_common.gdshaderinc self_lit_scale) [inferred: the retail colours are relative to
+// BF3's HDR scene level; 0.3 puts an unlit colour of 1 near the lit ground's brightness under the M1 look].
+inline constexpr float kFxSelfLitScale = 0.3f;
+// The additive (Emissive) rows' colour scale (fx_common.gdshaderinc emissive_scale) [inferred: retail emissive colours
+// are HDR in BF3's scene units, e.g. the oilfire's 0.03 x (900, 388, 188); at 1 every flame tonemapped to white].
+inline constexpr float kFxEmissiveScale = 0.125f;
 // Omni energy = summed intensity x the colour's largest component x this [inferred; the user judges the look].
 inline constexpr float kFxLightEnergyScale = 1.0f;
 inline constexpr int32_t kFxParamsRowsPerLine = 64; // fx_common.gdshaderinc's constant
@@ -63,6 +69,8 @@ public:
 	bool upload_atlas(const bf3::fx::AtlasPixels &p_pixels, std::string *r_error);
 	void set_atlas_textures(const godot::Ref<godot::Texture2D> &p_base, const godot::Ref<godot::Texture2D> &p_normal);
 	void set_soft_particles(bool p_enabled);
+	// Diagnostics: fx_common.gdshaderinc's debug_view (0 off, 1 unlit colour, 2 no normal map, 3 the normal map's texels).
+	void set_debug_view(int p_mode);
 	// The viewmodel's projection for the FirstPerson pass (render_bridge.h MaterialOptions defaults).
 	void set_first_person_projection(float p_fov_override, float p_z_clip_scale);
 
@@ -114,6 +122,7 @@ private:
 	int32_t params_lines_ = 0;
 	bool resources_ = false;
 	bool soft_ = true;
+	int debug_view_ = 0;
 	float fp_fov_ = 55.0f;
 	float fp_z_clip_ = 0.25f;
 	// The sub-step being run by run_chunk.

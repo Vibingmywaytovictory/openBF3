@@ -31,6 +31,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <optional>
 
@@ -50,7 +51,10 @@ constexpr const char *kSmoke = "fx/ambient/generic/firesmoke/smoke/smokepillars/
 // The nominal 1p muzzle in camera space (Godot: x right, y up, -z forward) [inferred: no viewmodel mesh in this
 // track; the M16A3's FireEffects1p offsets are relative to its weapon, which the vm track places].
 const Vector3 kMuzzleCamera(0.10f, -0.11f, -0.70f);
-constexpr float kShellBack = 0.55f; // FireEffects1p: the shell ejection sits 0.55 m behind the muzzle (0.99 - 0.44)
+// FireEffects1p: the shell ejection sits 0.55 m behind the muzzle at 0.99 m (0.99 - 0.44); scaled to kMuzzleCamera.
+constexpr float kShellBack = 0.55f * 0.70f / 0.99f;
+// The impact surfaces: rays from the stage camera, hits kept within [kSurfaceMin, kSurfaceMax] m (nearest 8 m wins).
+constexpr float kSurfaceRay = 60.0f, kSurfaceMin = 2.0f, kSurfaceMax = 45.0f;
 constexpr double kMuzzlePeriod = 0.1; // 10 Hz (the M16A3 fires 800 rpm; the demo's bursts are slower)
 constexpr double kImpactPeriod = 0.6;
 constexpr double kStressAt = 16.0;
@@ -59,6 +63,8 @@ constexpr double kOilGateAge = 15.0;
 constexpr int kOilTarget = 80, kOilTolerance = 1; // E8 (4)
 constexpr uint32_t kStressEffects = 96;
 constexpr int kSettleFrames = 4;
+constexpr int kFlashRetries = 16; // the muzzle shot re-fires until the _1p_flash component (p 0.75) is present
+constexpr double kSmokeStartAt = 7.5; // the smoke pillar starts after the impact shots (it would stand behind them)
 constexpr uint64_t kMinShotBytes = 50 * 1024;
 
 void log(const std::string &p_line) {
@@ -113,6 +119,28 @@ std::string lower(std::string_view p_text) {
 }
 
 // A frame with forward = p_forward, up as close to p_up_hint as possible.
+// An effect frame whose local +Y is p_axis: BF3 effects emit along +Y (SpawnDirection's default, m2a-vfx1.md §6), so a
+// muzzle's +Y is the barrel and an impact's +Y the surface normal [inferred from the data: the 1p flash's direction
+// and box offset are along +Y]. p_forward_hint picks the roll.
+fx::Transform frame_y(const Vector3 &p_origin, const Vector3 &p_axis, const Vector3 &p_forward_hint) {
+	const Vector3 u = p_axis.normalized();
+	Vector3 f = p_forward_hint - u * p_forward_hint.dot(u);
+	if (f.length() < 1e-4f) {
+		f = Vector3(0, 0, 1) - u * u.z;
+		if (f.length() < 1e-4f) {
+			f = Vector3(1, 0, 0) - u * u.x;
+		}
+	}
+	f = f.normalized();
+	const Vector3 r = u.cross(f).normalized();
+	fx::Transform t;
+	t.right = fv(r);
+	t.up = fv(u);
+	t.forward = fv(f);
+	t.trans = fv(p_origin);
+	return t;
+}
+
 fx::Transform frame_of(const Vector3 &p_origin, const Vector3 &p_forward, const Vector3 &p_up_hint) {
 	Vector3 f = p_forward.normalized();
 	Vector3 r = p_up_hint.cross(f);
@@ -197,6 +225,10 @@ void Bf3FxDemo::parse_args() {
 	check_ = has_user_arg("fx-check");
 	no_cache_ = has_user_arg("no-cache");
 	shot_dir_ = user_arg_value("fx-shot-dir");
+	{
+		const std::string dv = user_arg_value("fx-debug-view"); // diagnostics: fx_common.gdshaderinc debug_view
+		debug_view_ = dv.empty() ? 0 : std::clamp(std::atoi(dv.c_str()), 0, 3);
+	}
 	if (shot_dir_.empty()) {
 		const std::filesystem::path project = utf8_path(to_std(ProjectSettings::get_singleton()->globalize_path("res://")));
 		shot_dir_ = path_text((project / "..").lexically_normal() / "b" / "shots" / "fx2");
@@ -332,7 +364,8 @@ void Bf3FxDemo::start_loader() {
 }
 
 void Bf3FxDemo::set_pose(const Pose &p_pose) {
-	camera_->look_at_from_position(p_pose.position, p_pose.target, Vector3(0, 1, 0));
+	const Vector3 d = (p_pose.target - p_pose.position).normalized();
+	camera_->look_at_from_position(p_pose.position, p_pose.target, std::fabs(d.y) > 0.999f ? Vector3(0, 0, 1) : Vector3(0, 1, 0));
 }
 
 fx::FxView Bf3FxDemo::view() const {
@@ -346,7 +379,7 @@ fx::FxView Bf3FxDemo::view() const {
 fx::Transform Bf3FxDemo::muzzle_transform() const {
 	const Transform3D t = camera_->get_global_transform();
 	const Vector3 forward = -t.basis.get_column(2);
-	return frame_of(t.xform(kMuzzleCamera), forward, t.basis.get_column(1));
+	return frame_y(t.xform(kMuzzleCamera), forward, t.basis.get_column(1));
 }
 
 void Bf3FxDemo::start_effect(const std::shared_ptr<const fx::EffectDef> &p_def, const fx::Transform &p_t, bool p_first_person) {
@@ -365,7 +398,7 @@ void Bf3FxDemo::fire_muzzle() {
 	start_effect(loaded_->muzzle, m, true);
 	start_effect(loaded_->fillout, m, true);
 	fx::Transform shell = m;
-	shell.trans = fx::Vec3{ m.trans.x - m.forward.x * kShellBack, m.trans.y - m.forward.y * kShellBack + 0.02f, m.trans.z - m.forward.z * kShellBack };
+	shell.trans = fx::Vec3{ m.trans.x - m.up.x * kShellBack, m.trans.y - m.up.y * kShellBack + 0.02f, m.trans.z - m.up.z * kShellBack }; // +Y = barrel
 	start_effect(loaded_->shell, shell, true);
 	++muzzle_starts_;
 }
@@ -381,9 +414,68 @@ void Bf3FxDemo::start_impact(int p_which) {
 	if (!def) {
 		return;
 	}
-	// The impact frame [inferred; VFX3 owns the trigger]: forward = the surface normal.
-	start_effect(def, frame_of(p + n * 0.01f, n, Vector3(0, 1, 0)), false);
+	// The impact frame [inferred; VFX3 owns the trigger]: +Y = the surface normal.
+	start_effect(def, frame_y(p + n * 0.01f, n, Vector3(0, 1, 0)), false);
 	++impact_starts_;
+}
+
+bool Bf3FxDemo::flash_present(std::string *r_where) const {
+	for (const fx::EmitterOutput &o : world_->outputs()) {
+		if (o.first_person && o.particle_count > 0 && o.def != nullptr && o.emitter < o.def->emitters.size() &&
+				o.def->emitters[o.emitter].name.find("_1p_flash") != std::string::npos) {
+			if (r_where != nullptr && o.first_particle < world_->particles().size()) {
+				const fx::ParticleVertex &v = world_->particles()[o.first_particle];
+				const Vector3 c = camera_->get_global_transform().affine_inverse().xform(Vector3(v.position.x, v.position.y, v.position.z));
+				*r_where = fmt(" at camera (%.2f, %.2f, %.2f) m, size %.2f, colour (%.0f, %.0f, %.0f) a %.2f", c.x, c.y, c.z, v.size.x, v.color.x, v.color.y,
+						v.color.z, v.color.w);
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+std::string Bf3FxDemo::flash_line() const {
+	std::string where;
+	const bool present = flash_present(&where);
+	return fmt("; flash %s after %d re-fires%s", present ? "present" : "ABSENT", shot_retries_, where.c_str());
+}
+
+void Bf3FxDemo::frame_oilfire() {
+	Vector3 sum;
+	uint32_t n = 0;
+	const std::span<const fx::ParticleVertex> ps = world_->particles();
+	for (const fx::EmitterOutput &o : world_->outputs()) {
+		if (o.def != loaded_->oilfire.get()) {
+			continue;
+		}
+		for (uint32_t i = 0; i < o.particle_count && o.first_particle + i < ps.size(); ++i) {
+			const fx::Vec3 &q = ps[o.first_particle + i].position;
+			sum += Vector3(q.x, q.y, q.z);
+			++n;
+		}
+	}
+	if (n == 0) {
+		return;
+	}
+	const Vector3 c = sum / float(n);
+	float r = 0;
+	for (const fx::EmitterOutput &o : world_->outputs()) {
+		if (o.def != loaded_->oilfire.get()) {
+			continue;
+		}
+		for (uint32_t i = 0; i < o.particle_count && o.first_particle + i < ps.size(); ++i) {
+			const fx::Vec3 &q = ps[o.first_particle + i].position;
+			r = std::max(r, (Vector3(q.x, q.y, q.z) - c).length());
+		}
+	}
+	const Vector3 fwd = ((main_pose_.target - main_pose_.position) * Vector3(1, 0, 1)).normalized();
+	Pose pose;
+	pose.position = c - fwd * std::clamp(2.0f * r, 60.0f, 1500.0f) + Vector3(0, 5.0f, 0);
+	pose.target = c;
+	set_pose(pose);
+	oil_framed_ = true;
+	oil_frame_line_ = fmt("oilfire framed: %u particles, centre %.0f m above the start, radius %.0f m", n, c.y - oil_point_.y, r);
 }
 
 void Bf3FxDemo::start_light_stress() {
@@ -419,9 +511,9 @@ void Bf3FxDemo::find_surfaces() {
 		const float yaw_span = ring == 0 ? 1.2f : 3.14159265f; // radians either side
 		for (int yi = 0; yi < yaws; ++yi) {
 			const float yaw = -yaw_span + 2.0f * yaw_span * float(yi) / float(yaws - 1);
-			for (const float pitch : { -0.35f, -0.2f, -0.08f, 0.0f, 0.1f, 0.25f }) {
+			for (const float pitch : { -0.35f, -0.2f, -0.08f, 0.0f, 0.1f, 0.25f, 0.4f, 0.55f }) {
 				const Vector3 d = f0.rotated(Vector3(0, 1, 0), yaw);
-				const Vector3 dir = (d * std::cos(pitch) + Vector3(0, std::sin(pitch), 0)).normalized() * 40.0f;
+				const Vector3 dir = (d * std::cos(pitch) + Vector3(0, std::sin(pitch), 0)).normalized() * kSurfaceRay;
 				bf3::sim::StaticHit hit;
 				if (!cw.ray(bf3::sim::Vec3{ eye.x, eye.y, eye.z }, bf3::sim::Vec3{ dir.x, dir.y, dir.z }, mask, &hit)) {
 					continue;
@@ -432,8 +524,8 @@ void Bf3FxDemo::find_surfaces() {
 				}
 				const std::string name = lower(table.material_name(*surface));
 				++seen[name];
-				const float dist = hit.fraction * 40.0f;
-				if (dist < 2.0f || dist > 25.0f) {
+				const float dist = hit.fraction * kSurfaceRay;
+				if (dist < kSurfaceMin || dist > kSurfaceMax) {
 					continue;
 				}
 				Best *b = name.find("concrete") != std::string::npos ? &concrete : (name.find("brick") != std::string::npos ? &brick : nullptr);
@@ -463,7 +555,7 @@ void Bf3FxDemo::find_surfaces() {
 		std::string &line = k == 0 ? concrete_line_ : brick_line_;
 		std::shared_ptr<const fx::EffectDef> &def = k == 0 ? impact_concrete_ : impact_brick_;
 		if (!b.found) {
-			line = std::string(k == 0 ? "concrete" : "brick") + ": no surface within 2..25 m of the stage camera";
+			line = std::string(k == 0 ? "concrete" : "brick") + fmt(": no surface within %.0f..%.0f m of the stage camera", kSurfaceMin, kSurfaceMax);
 			continue;
 		}
 		bf3::core::Result<std::shared_ptr<const fx::EffectDef>> d = loaded_->library->get(b.effect);
@@ -497,6 +589,7 @@ bool Bf3FxDemo::build(std::string *r_error) {
 	}
 	renderer_ = memnew(Bf3FxRenderer);
 	renderer_->set_name("FxRenderer");
+	renderer_->set_debug_view(debug_view_);
 	add_child(renderer_);
 	std::string err;
 	if (!renderer_->upload_atlas(loaded_->pixels, &err)) {
@@ -562,13 +655,12 @@ bool Bf3FxDemo::build(std::string *r_error) {
 	fx::FxWorldConfig cfg;
 	world_ = std::make_unique<fx::FxWorld>(cfg);
 	start_effect(loaded_->oilfire, frame_of(oil_point_, fwd, Vector3(0, 1, 0)), false);
-	start_effect(loaded_->smoke, frame_of(smoke_point_, fwd, Vector3(0, 1, 0)), false);
 
 	shots_ = {
 		{ "fx2_muzzle_1p", 3.0, 0, 1.0 / 60.0 },
 		{ "fx2_impact_concrete", 5.0, 1, 0.12 },
 		{ "fx2_impact_brick", 7.0, 2, 0.12 },
-		{ "fx2_smoke", 10.0, 3, 0.25 },
+		{ "fx2_smoke", 13.0, 3, 0.25 },
 		{ "fx2_oilfire", 15.1, 4, 0.25 },
 		{ "fx2_lights", 17.0, 5, 0.0 },
 	};
@@ -653,8 +745,10 @@ void Bf3FxDemo::_process(double p_delta) {
 		const uint64_t bytes = saved ? uint64_t(std::filesystem::file_size(utf8_path(path), ec)) : 0;
 		const bool ok = saved && !ec && bytes >= kMinShotBytes;
 		shots_ok_ += ok ? 1 : 0;
-		shot_lines_.push_back(fmt("%s %s (%llu bytes, %u particles, %u lights)", s.name.c_str(), ok ? "saved" : "FAILED", (unsigned long long)bytes,
-				renderer_->stats().drawn_instances, renderer_->stats().lights));
+		shot_lines_.push_back(fmt("%s %s (%llu bytes, %u particles, %u lights)%s", s.name.c_str(), ok ? "saved" : "FAILED", (unsigned long long)bytes,
+				renderer_->stats().drawn_instances, renderer_->stats().lights,
+				s.kind == 0 ? flash_line().c_str()
+						: (s.kind == 4 ? ("; " + oil_frame_line_).c_str() : "")));
 		frozen_ = false;
 		shot_active_ = false;
 		++shot_index_;
@@ -694,6 +788,7 @@ void Bf3FxDemo::_process(double p_delta) {
 			}
 			case 4:
 				set_pose(oil_pose_);
+				oil_framed_ = false;
 				break;
 			default:
 				set_pose(main_pose_);
@@ -708,6 +803,11 @@ void Bf3FxDemo::_process(double p_delta) {
 	if (!shot_active_ && t_ >= next_impact_) {
 		start_impact(impact_turn_++ % 2);
 		next_impact_ = t_ + kImpactPeriod;
+	}
+	if (!smoke_started_ && t_ >= kSmokeStartAt) {
+		smoke_started_ = true;
+		const Vector3 fwd = ((main_pose_.target - main_pose_.position) * Vector3(1, 0, 1)).normalized();
+		start_effect(loaded_->smoke, frame_of(smoke_point_, fwd, Vector3(0, 1, 0)), false);
 	}
 	if (!stress_started_ && t_ >= kStressAt) {
 		start_light_stress();
@@ -740,7 +840,16 @@ void Bf3FxDemo::_process(double p_delta) {
 	}
 	if (shot_active_) {
 		shot_advance_left_ -= dt;
-		if (shot_advance_left_ <= 0.0) {
+		const Shot &s = shots_[shot_index_];
+		if (s.kind == 4 && !oil_framed_) {
+			frame_oilfire(); // the plume rises far above its start: frame its live particles
+		}
+		if (shot_advance_left_ <= 0.0 && s.kind == 0 && !flash_present() && shot_retries_ < kFlashRetries) {
+			++shot_retries_;
+			fire_muzzle();
+			next_muzzle_ = t_ + kMuzzlePeriod;
+			shot_advance_left_ = s.advance;
+		} else if (shot_advance_left_ <= 0.0) {
 			frozen_ = true;
 			settle_ = kSettleFrames;
 		}

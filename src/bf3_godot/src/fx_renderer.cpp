@@ -143,6 +143,17 @@ void Bf3FxRenderer::set_soft_particles(bool p_enabled) {
 	}
 }
 
+void Bf3FxRenderer::set_debug_view(int p_mode) {
+	debug_view_ = p_mode;
+	for (Batch &b : batches_) {
+		if (b.material.is_valid()) {
+			b.material->set_shader_parameter("debug_view", debug_view_);
+		b.material->set_shader_parameter("self_lit_scale", kFxSelfLitScale);
+		b.material->set_shader_parameter("emissive_scale", kFxEmissiveScale);
+		}
+	}
+}
+
 void Bf3FxRenderer::set_first_person_projection(float p_fov_override, float p_z_clip_scale) {
 	fp_fov_ = p_fov_override;
 	fp_z_clip_ = p_z_clip_scale;
@@ -197,6 +208,9 @@ bool Bf3FxRenderer::ensure_resources() {
 		b.material->set_shader_parameter("fp_fov_override", fp_fov_);
 		b.material->set_shader_parameter("fp_z_clip_scale", fp_z_clip_);
 		b.material->set_shader_parameter("soft_enabled", soft_);
+		b.material->set_shader_parameter("debug_view", debug_view_);
+		b.material->set_shader_parameter("self_lit_scale", kFxSelfLitScale);
+		b.material->set_shader_parameter("emissive_scale", kFxEmissiveScale);
 		b.material->set_shader_parameter("base_atlas", base_atlas_);
 		b.material->set_shader_parameter("normal_atlas", normal_atlas_);
 		b.material->set_shader_parameter("fx_params", params_tex_);

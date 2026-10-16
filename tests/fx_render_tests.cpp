@@ -337,6 +337,15 @@ TEST_CASE("prepare: Waq and mesh stand-in transforms") {
 			CHECK(in.transform[6] == 1.0f);
 			CHECK(in.transform[10] == 0.0f);
 		}
+		if (b.key.shader == FxShaderClass::Mesh) {
+			// The stand-in box: each basis column is the size (1 without SpawnSize) times kFxMeshStandinMeters long.
+			for (uint32_t i = 0; i < b.instance_count; ++i) {
+				const float *t = prep.instances()[b.first_instance + i].transform;
+				for (int c = 0; c < 3; ++c) {
+					CHECK(std::sqrt(t[c] * t[c] + t[4 + c] * t[4 + c] + t[8 + c] * t[8 + c]) == doctest::Approx(kFxMeshStandinMeters));
+				}
+			}
+		}
 	}
 }
 

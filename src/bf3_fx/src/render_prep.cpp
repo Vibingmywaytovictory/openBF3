@@ -348,7 +348,8 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 								const Vec3 c1{ -cy * sz + sy * sx * cz, cx * cz, sy * sz + cy * sx * cz };
 								const Vec3 c2{ sy * cx, -sx, cy * cx };
 								const float sz3 = p.size.z != 0.0f ? p.size.z : p.size.x;
-								put_transform(in.transform, scale(c0, p.size.x), scale(c1, p.size.y), scale(c2, sz3), p.position);
+								const float u = kFxMeshStandinMeters;
+								put_transform(in.transform, scale(c0, p.size.x * u), scale(c1, p.size.y * u), scale(c2, sz3 * u), p.position);
 								++standins;
 								break;
 							}
