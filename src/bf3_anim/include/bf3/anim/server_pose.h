@@ -130,10 +130,14 @@ std::array<StanceAim, core::gameplay::kCapsuleStances> server_pose_stance_aim(co
 // The additive weight for p_pitch_deg of a stance (> 0 uses AimUp, < 0 AimDown, 0 none).
 float server_pose_aim_weight(const StanceAim &p_aim, float p_pitch_deg);
 
-// Capsule placement from a bone's model transform [inferred]: segment start a = the bone's model transform applied to
-// the capsule's offset (bone-local point); end b = a + length along the bone's local axis BoneAxis (0 x, 1 y, 2 z),
-// signed toward the bone's main child (the child with the longest rest translation; + when it has none). A length of
-// at most 0.01 m (the head) is a sphere at a (b = a).
+// Capsule placement from a bone's model transform [inferred; docs/design/m2a-lc.md "capsule placement"]: the offset
+// is a model-space vector of the bind pose carried by the bone, so segment start a = bone position + (bone rotation x
+// inverse bind rotation) applied to the offset; end b = a + length along the bone's local axis BoneAxis (0 x, 1 y,
+// 2 z), signed toward the bone's main child (the child with the longest rest translation; + when it has none). A
+// length of at most 0.01 m (the head) is a sphere at a (b = a). The bind pose is the rig's rest (equal to the EBX
+// skeleton's ModelPose). Read as a bone-local point instead, the two Spine capsules (offsets y -0.1 and +0.25) would
+// sit behind and 25 cm in front of the spine at one height rather than belly below chest (the Chest sphere's centre
+// 0.94 m and 15 cm before the body in the stand idle); bf3dump lagcomp prints both readings.
 inline constexpr float kSphereCapsuleLength = 0.01f;
 // The sign of a bone's axis (+1 or -1) by that rule.
 float capsule_axis_sign(const Skeleton &p_rig, int32_t p_bone, int32_t p_axis);

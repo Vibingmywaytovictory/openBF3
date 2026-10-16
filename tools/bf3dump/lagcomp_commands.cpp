@@ -6,10 +6,14 @@
 #include "bf3/anim/clip_asset.h"
 #include "bf3/anim/crowd_clips.h"
 #include "bf3/anim/crowd_eval.h"
+#include "bf3/anim/pose.h"
+#include "bf3/anim/pose_math.h"
 #include "bf3/anim/server_pose.h"
 #include "bf3/anim/server_pose_reference.h"
 #include "bf3/anim/skinning.h"
+#include "bf3/anim/skeleton.h"
 #include "bf3/core/ant/ant_install_source.h"
+#include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/capsule_pose_table.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
@@ -93,6 +97,8 @@ double unit_hash(uint64_t p_a, uint64_t p_b) { // [0, 1)
 // ---- the table from the install -----------------------------------------------------------------------------------
 
 struct TableSet {
+	std::shared_ptr<core::Install> install;
+	std::string level_sb;
 	sw::InstallWeapons weapons;
 	sw::CapsuleTableData data;
 	std::unique_ptr<core::ant::AntInstallSource> source;
@@ -106,7 +112,9 @@ struct TableSet {
 
 core::Result<std::unique_ptr<TableSet>> open_table(const EbxContext &p_ctx, const std::string &p_level) {
 	auto t = std::make_unique<TableSet>();
-	core::Result<sw::InstallWeapons> w = sw::open_install_weapons(p_ctx.install, p_level);
+	t->install = p_ctx.install;
+	t->level_sb = p_level.find('/') == std::string::npos ? "Win32/Levels/" + p_level + "/" + p_level : p_level;
+	core::Result<sw::InstallWeapons> w = sw::open_install_weapons(p_ctx.install, p_level.find('/') == std::string::npos ? "Win32/Levels/" + p_level + "/" + p_level : p_level);
 	if (!w) {
 		return w.error();
 	}
@@ -184,6 +192,97 @@ void print_table(const TableSet &p_t) {
 				c, unsigned(e.capsule), hc.bone.c_str(), joint, jname.c_str(), sw::hit_zone_name(sw::HitZone(e.zone)), double(e.radius), double(hc.length),
 				int(hc.bone_axis), double(an::capsule_axis_sign(p_t.clips.rig, joint, hc.bone_axis)), centre_of(e, 0), centre_of(e, 1), centre_of(e, 2),
 				double(e.a[0]), double(e.a[1]), double(e.a[2]), double(e.b[0]), double(e.b[1]), double(e.b[2]));
+	}
+	// The placement's frame check: per capsule joint, its model position and local axes in the stand idle (frame 0,
+	// root reset, no aim) and its children's rest translations.
+	const an::Skeleton &rig = p_t.clips.rig;
+	if (p_t.clips.present[size_t(an::ServerPoseClip::StandIdle)]) {
+		const an::CrowdClipData &idle = p_t.clips.get(an::ServerPoseClip::StandIdle);
+		an::LocalPose pose;
+		core::ant::ClipPose scratch;
+		std::vector<an::Xform> model;
+		if (an::sample_pose(rig, idle.clip, idle.tracks, 0.0f, pose, scratch)) {
+			if (p_t.clips.root_joint >= 0) {
+				pose.joints[size_t(p_t.clips.root_joint)].t = rig.bone(size_t(p_t.clips.root_joint)).rest.t;
+			}
+			an::model_pose(rig, pose, model);
+			std::vector<an::Xform> rest;
+			an::model_pose(rig, an::rest_pose(rig), rest);
+			// The offset read three ways (the table uses the first, [inferred]): bone-local; a model-space vector of the
+			// bind (rest) pose carried by the bone; a model-space vector of the current pose.
+			for (size_t c = 0; c < rep.joint.size() && c < tab.capsule_count; ++c) {
+				const int32_t j = rep.joint[c];
+				if (j < 0) {
+					continue;
+				}
+				const gp::HitCapsule &hc = p_t.weapons.capsules[tab.steady[c].capsule];
+				const an::Vec3 off{ hc.offset[0], hc.offset[1], hc.offset[2] };
+				const an::Xform &x = model[size_t(j)];
+				const an::Vec3 v1 = an::xform_point(x, off);
+				const an::Quat rel = an::quat_mul(x.q, an::quat_conj(rest[size_t(j)].q));
+				const an::Vec3 v5 = an::vec_add(x.t, an::quat_rotate(rel, off));
+				const an::Vec3 v9 = an::vec_add(x.t, off);
+				std::printf("lagcomp.offset %zu %s offset (%.3f, %.3f, %.3f): bone-local (%.3f, %.3f, %.3f) bind-model (%.3f, %.3f, %.3f) model (%.3f, %.3f, %.3f)\n", c,
+						hc.bone.c_str(), double(off.x), double(off.y), double(off.z), double(v1.x), double(v1.y), double(v1.z), double(v5.x), double(v5.y), double(v5.z),
+						double(v9.x), double(v9.y), double(v9.z));
+			}
+			for (const int32_t j : rep.joint) {
+				if (j < 0) {
+					continue;
+				}
+				const an::Xform &x = model[size_t(j)];
+				const an::Vec3 ax = an::quat_rotate(x.q, an::Vec3{ 1, 0, 0 }), ay = an::quat_rotate(x.q, an::Vec3{ 0, 1, 0 }),
+							   az = an::quat_rotate(x.q, an::Vec3{ 0, 0, 1 });
+				std::string kids;
+				for (size_t k = 0; k < rig.size(); ++k) {
+					if (rig.bone(k).parent == j) {
+						const an::Vec3 &t = rig.bone(k).rest.t;
+						char buf[160];
+						std::snprintf(buf, sizeof(buf), " %s(%.3f,%.3f,%.3f)", rig.bone(k).name.c_str(), double(t.x), double(t.y), double(t.z));
+						kids += buf;
+					}
+				}
+				std::printf("lagcomp.joint %d %s model (%.3f, %.3f, %.3f) X (%.2f, %.2f, %.2f) Y (%.2f, %.2f, %.2f) Z (%.2f, %.2f, %.2f) children%s\n", j,
+						rig.bone(size_t(j)).name.c_str(), double(x.t.x), double(x.t.y), double(x.t.z), double(ax.x), double(ax.y), double(ax.z), double(ay.x),
+						double(ay.y), double(ay.z), double(az.x), double(az.y), double(az.z), kids.c_str());
+			}
+		}
+	}
+	// The EBX skeleton of the same rig (the render skeleton's bind pose): its ModelPose axes per capsule bone.
+	if (core::Result<std::unique_ptr<core::EbxLibrary>> lib = core::EbxLibrary::open(p_t.install, { p_t.level_sb }); lib) {
+		if (const core::EbxPartition *part = (*lib)->partition_by_name("animations/skeletons/veniceantske01")) {
+			if (core::Result<an::EbxSkeleton> ebx = an::read_ebx_skeleton(*part, "animations/skeletons/veniceantske01"); ebx) {
+				std::vector<an::Xform> rest;
+				an::model_pose(rig, an::rest_pose(rig), rest);
+				for (const int32_t j : rep.joint) {
+					if (j < 0) {
+						continue;
+					}
+					const int32_t e = ebx->find(rig.bone(size_t(j)).name);
+					if (e < 0) {
+						continue;
+					}
+					const an::Mat34 &m = ebx->model_pose[size_t(e)];
+					const an::Vec3 rx = an::quat_rotate(rest[size_t(j)].q, an::Vec3{ 1, 0, 0 });
+					std::printf("lagcomp.ebx %s ModelPose X (%.2f, %.2f, %.2f) Y (%.2f, %.2f, %.2f) Z (%.2f, %.2f, %.2f) t (%.3f, %.3f, %.3f); rig rest X (%.2f, %.2f, "
+								"%.2f) t (%.3f, %.3f, %.3f)\n",
+							rig.bone(size_t(j)).name.c_str(), double(m.m[0][0]), double(m.m[1][0]), double(m.m[2][0]), double(m.m[0][1]), double(m.m[1][1]),
+							double(m.m[2][1]), double(m.m[0][2]), double(m.m[1][2]), double(m.m[2][2]), double(m.m[0][3]), double(m.m[1][3]), double(m.m[2][3]),
+							double(rx.x), double(rx.y), double(rx.z), double(rest[size_t(j)].t.x), double(rest[size_t(j)].t.y), double(rest[size_t(j)].t.z));
+				}
+			} else {
+				std::printf("lagcomp.ebx read failed: %s\n", ebx.error().message.c_str());
+			}
+		} else {
+			std::printf("lagcomp.ebx no partition animations/skeletons/veniceantske01\n");
+		}
+	}
+	for (const char *name : { "Hips", "Spine", "Spine1", "Spine2", "Neck", "Head", "HeadEnd", "LeftArm", "LeftForeArm", "LeftHand", "LeftUpLeg", "LeftLeg",
+				 "LeftFoot", "RightFoot" }) {
+		const int32_t j = rig.find(name);
+		std::printf("lagcomp.rig %s joint %d parent %d rest t (%.3f, %.3f, %.3f)\n", name, j, j >= 0 ? rig.bone(size_t(j)).parent : -1,
+				j >= 0 ? double(rig.bone(size_t(j)).rest.t.x) : 0.0, j >= 0 ? double(rig.bone(size_t(j)).rest.t.y) : 0.0,
+				j >= 0 ? double(rig.bone(size_t(j)).rest.t.z) : 0.0);
 	}
 }
 

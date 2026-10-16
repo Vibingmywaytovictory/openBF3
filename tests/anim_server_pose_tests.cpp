@@ -191,13 +191,13 @@ TEST_SUITE("anim-server-pose") {
 		for (size_t c = 0; c < r.joint.size(); ++c) {
 			const gp::HitCapsule &hc = d->weapons.capsules[t.steady[c].capsule];
 			CHECK_MESSAGE(r.joint[c] >= 0, hc.bone);
-			MESSAGE("capsule " << c << " " << hc.bone << " -> joint " << r.joint[c] << " zone " << sw::hit_zone_name(sw::HitZone(t.steady[c].zone)) << " r "
+			MESSAGE("capsule " << c << " " << hc.bone << " -> joint " << r.joint[c] << " zone " << std::string(sw::hit_zone_name(sw::HitZone(t.steady[c].zone))) << " r "
 							   << hc.radius << " len " << hc.length << " axis " << hc.bone_axis << " sign " << an::capsule_axis_sign(d->clips.rig, r.joint[c], hc.bone_axis));
 		}
 		// Row tags: printed for E18, 0 stand-in rows expected on the retail install.
 		size_t standins = 0;
 		for (size_t row = 0; row < gp::kCapsuleRows; ++row) {
-			MESSAGE("row " << (row < 3 ? kStance[row] : kTransition[row - 3]) << ": " << tag(t.row_source[row]));
+			MESSAGE("row " << std::string(row < 3 ? kStance[row] : kTransition[row - 3]) << ": " << std::string(tag(t.row_source[row])));
 			standins += t.row_source[row] == gp::capsule_row_source::kClipDerived ? 0 : 1;
 		}
 		CHECK(standins == 0);
@@ -206,11 +206,11 @@ TEST_SUITE("anim-server-pose") {
 		CHECK(r.aim[0].up_full_deg == aim.aim_up_full_pitch_deg);
 		CHECK(r.aim[0].down_full_deg == aim.aim_down_full_pitch_deg);
 		for (size_t s = 0; s < 3; ++s) {
-			MESSAGE("aim " << kStance[s] << ": up " << r.aim[s].up_full_deg << " down " << r.aim[s].down_full_deg << (r.aim[s].measured ? " (measured)" : " (CrowdConfig)"));
+			MESSAGE("aim " << std::string(kStance[s]) << ": up " << r.aim[s].up_full_deg << " down " << r.aim[s].down_full_deg << std::string(r.aim[s].measured ? " (measured)" : " (CrowdConfig)"));
 		}
 		for (size_t s = 1; s < 3; ++s) {
 			if (!r.aim[s].measured) {
-				MESSAGE("aim " << kStance[s] << ": not measured, the stand values are used (reported, docs/design/m2a-lc.md)");
+				MESSAGE("aim " << std::string(kStance[s]) << ": not measured, the stand values are used (reported, docs/design/m2a-lc.md)");
 			}
 		}
 		// Pitch buckets: 0 is a bucket, the ends are the stand's full-aim pitches.
@@ -283,8 +283,8 @@ TEST_SUITE("anim-server-pose") {
 					tag(t.row_source[s]), dev.queries, dev.head, dev.chest, kSteadyGateCm, dev.body, dev.legs);
 			CHECK(dev.failed == 0);
 			CHECK(dev.queries == 32);
-			CHECK_MESSAGE(dev.head <= kSteadyGateCm, kStance[s] << " head " << dev.head << " cm");
-			CHECK_MESSAGE(dev.chest <= kSteadyGateCm, kStance[s] << " chest " << dev.chest << " cm");
+			CHECK_MESSAGE(dev.head <= kSteadyGateCm, std::string(kStance[s]) << " head " << dev.head << " cm");
+			CHECK_MESSAGE(dev.chest <= kSteadyGateCm, std::string(kStance[s]) << " chest " << dev.chest << " cm");
 		}
 		for (uint8_t tr = 0; tr < 6; ++tr) {
 			Dev dev;
@@ -306,9 +306,9 @@ TEST_SUITE("anim-server-pose") {
 			std::printf("anim.server_pose E18 transition %-14s [%s] %zu queries: head %.3f cm chest %.3f cm (gate %.0f cm) body %.3f cm legs %.3f cm (reported)\n",
 					kTransition[tr], tag(t.row_source[3 + tr]), dev.queries, dev.head, dev.chest, kTransitionGateCm, dev.body, dev.legs);
 			CHECK(dev.failed == 0);
-			CHECK(dev.queries == 7 * 32);
-			CHECK_MESSAGE(dev.head <= kTransitionGateCm, kTransition[tr] << " head " << dev.head << " cm");
-			CHECK_MESSAGE(dev.chest <= kTransitionGateCm, kTransition[tr] << " chest " << dev.chest << " cm");
+			CHECK(dev.queries == (gp::kCapsuleTransitionFractions - 1) * 32);
+			CHECK_MESSAGE(dev.head <= kTransitionGateCm, std::string(kTransition[tr]) << " head " << dev.head << " cm");
+			CHECK_MESSAGE(dev.chest <= kTransitionGateCm, std::string(kTransition[tr]) << " chest " << dev.chest << " cm");
 		}
 		// The on-grid points reproduce the reference to float rounding (the builder and the reference agree where the
 		// table has an entry): a check on the shared rules, not a gate row.

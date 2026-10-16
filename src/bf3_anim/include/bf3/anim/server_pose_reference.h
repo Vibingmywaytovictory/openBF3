@@ -7,9 +7,10 @@
 // stance idle at frame 0 (or of the transition clip at exactly fraction x its end frame), the root joint's translation
 // back to rest, apply_additive of the stance's AimUp / AimDown delta at the exact weight min(1, |pitch| / full), then
 // model_pose, and the hi-LOD capsules placed from their bones' model transforms in double. The placement rule
-// (server_pose.h: start = bone transform x offset, end = start + length along the signed BoneAxis, the sign toward the
-// bone's main child, a sphere at length <= 0.01) is written out again here rather than shared, so a slip in either
-// copy shows up as a deviation. The same placement also turns S3's CrowdEvaluator model pose into capsules (the stand
+// (server_pose.h: start = bone position + bone rotation x inverse bind rotation applied to the offset, a model-space
+// vector of the bind pose; end = start + length along the signed bone-local BoneAxis, the sign toward the bone's main
+// child; a sphere at length <= 0.01) is written out again here rather than shared, so a slip in either copy shows up
+// as a deviation. The same placement also turns S3's CrowdEvaluator model pose into capsules (the stand
 // rows' independent code path).
 
 #include "bf3/anim/crowd_clips.h"
@@ -56,6 +57,17 @@ public:
 		r.aim_ = p_aim;
 		r.order_ = p_order;
 		const Skeleton &rig = p_clips.rig;
+		// The bind pose's model rotations, accumulated here in double from the rest (local) rotations.
+		std::vector<std::array<double, 4>> bind(rig.size()); // w, x, y, z
+		for (size_t j = 0; j < rig.size(); ++j) {
+			const Quat &l = rig.bone(j).rest.q;
+			std::array<double, 4> q{ double(l.w), double(l.x), double(l.y), double(l.z) };
+			const int32_t parent = rig.bone(j).parent;
+			if (parent >= 0 && size_t(parent) < j) {
+				q = mul(bind[size_t(parent)], q);
+			}
+			bind[j] = q;
+		}
 		for (size_t i = 0; i < p_capsules.size(); ++i) {
 			const core::gameplay::HitCapsule &c = p_capsules[i];
 			if (!c.valid_hi_lod) {
@@ -65,6 +77,10 @@ public:
 			p.list_index = i;
 			p.joint = rig.find(c.bone);
 			p.offset = { double(c.offset[0]), double(c.offset[1]), double(c.offset[2]) };
+			if (p.joint >= 0) {
+				const std::array<double, 4> &b = bind[size_t(p.joint)];
+				p.bind_inverse = { b[0], -b[1], -b[2], -b[3] };
+			}
 			p.length = double(c.length);
 			const int axis = c.bone_axis >= 0 && c.bone_axis <= 2 ? c.bone_axis : 0;
 			// The main child: the child joint with the longest rest translation; its component on the axis gives the sign.
@@ -177,7 +193,8 @@ public:
 				continue;
 			}
 			const Xform &x = p_model[size_t(p.joint)];
-			rotate(x.q, p.offset, o.a);
+			const std::array<double, 4> rel = mul({ double(x.q.w), double(x.q.x), double(x.q.y), double(x.q.z) }, p.bind_inverse);
+			rotate(Quat{ float(rel[1]), float(rel[2]), float(rel[3]), float(rel[0]) }, p.offset, o.a);
 			for (size_t k = 0; k < 3; ++k) {
 				o.a[k] += k == 0 ? x.t.x : k == 1 ? x.t.y : x.t.z;
 			}
@@ -200,7 +217,14 @@ private:
 		std::array<double, 3> offset{};
 		std::array<double, 3> dir{};
 		double length = 0;
+		std::array<double, 4> bind_inverse{ 1, 0, 0, 0 }; // w, x, y, z
 	};
+
+	// Hamilton product a * b (w, x, y, z).
+	static std::array<double, 4> mul(const std::array<double, 4> &p_a, const std::array<double, 4> &p_b) {
+		return { p_a[0] * p_b[0] - p_a[1] * p_b[1] - p_a[2] * p_b[2] - p_a[3] * p_b[3], p_a[0] * p_b[1] + p_a[1] * p_b[0] + p_a[2] * p_b[3] - p_a[3] * p_b[2],
+			p_a[0] * p_b[2] - p_a[1] * p_b[3] + p_a[2] * p_b[0] + p_a[3] * p_b[1], p_a[0] * p_b[3] + p_a[1] * p_b[2] - p_a[2] * p_b[1] + p_a[3] * p_b[0] };
+	}
 
 	// v' = q v q* in double (the quaternion normalised first).
 	static void rotate(const Quat &p_q, const std::array<double, 3> &p_v, double (&r_out)[3]) {

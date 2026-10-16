@@ -131,7 +131,7 @@ gp::CapsulePoseTable synth_table() {
 	const size_t from[6] = { 0, 0, 1, 1, 2, 2 }, to[6] = { 1, 2, 0, 2, 0, 1 };
 	for (size_t r = 0; r < gp::kCapsuleTransitions; ++r) {
 		for (size_t f = 0; f < gp::kCapsuleTransitionFractions; ++f) {
-			const double w = double(f) / 7.0;
+			const double w = double(f) / double(gp::kCapsuleTransitionFractions - 1);
 			for (size_t p = 0; p < gp::kCapsulePitchBuckets; ++p) {
 				gp::CapsuleLocal a[3], b[3];
 				stance_entry(from[r], p, 0.05 * std::sin(3.14159265358979 * w), a);

@@ -107,7 +107,8 @@ private:
 struct Placement {
 	size_t list_index = 0; // index into CapsuleTableInputs::capsules (BoneCollisionData order)
 	int32_t joint = -1;
-	Vec3 offset{};
+	Vec3 offset{}; // model space of the bind pose (see server_pose.h)
+	Quat bind_inverse{}; // the conjugate of the joint's bind (rest) model rotation
 	Vec3 dir{}; // unit, bone-local
 	float length = 0;
 	float radius = 0;
@@ -328,6 +329,10 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 	if (p_rig.size() == 0 || p_rig.size() > kMaxCrowdRigJoints) {
 		return core::make_error(where + ": a rig of " + std::to_string(p_rig.size()) + " joints");
 	}
+	// The bind pose: the rig's rest in model space (= the EBX skeleton's ModelPose of the same rig, verified by
+	// bf3dump lagcomp's lagcomp.ebx rows).
+	std::vector<Xform> bind;
+	model_pose(p_rig, rest_pose(p_rig), bind);
 	// The hi-LOD capsules, in list order.
 	std::vector<Placement> placed;
 	size_t mapped = 0;
@@ -358,6 +363,7 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 		const float sign = capsule_axis_sign(p_rig, p.joint, axis);
 		p.dir = Vec3{ axis == 0 ? sign : 0.0f, axis == 1 ? sign : 0.0f, axis == 2 ? sign : 0.0f };
 		p.offset = Vec3{ c.offset[0], c.offset[1], c.offset[2] };
+		p.bind_inverse = p.joint >= 0 ? quat_conj(bind[size_t(p.joint)].q) : Quat{};
 		p.length = c.length;
 		p.radius = c.radius;
 		p.zone = p_inputs.zone[i];
@@ -404,7 +410,7 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 			e = p_inputs.standin[p_stance][c];
 			if (p.joint >= 0) {
 				const Xform &x = p_model[size_t(p.joint)];
-				const Vec3 a = xform_point(x, p.offset);
+				const Vec3 a = vec_add(x.t, quat_rotate(quat_mul(x.q, p.bind_inverse), p.offset));
 				const Vec3 b = p.length > kSphereCapsuleLength ? vec_add(a, quat_rotate(x.q, vec_scale(p.dir, p.length))) : a;
 				e.a[0] = a.x;
 				e.a[1] = a.y;
