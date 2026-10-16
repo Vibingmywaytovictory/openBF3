@@ -116,3 +116,16 @@ target_sources(bf3_godot PRIVATE
     src/minimap_check.cpp
     src/minimap_check.h
 )
+
+# M2a vm (docs/design/m2a-vm.md; m2a.md §11.1, §11.2): Bf3Viewmodel (the 1p viewmodel and ADS camera), the vm demo /
+# check scene Bf3M2aViewmodelDemo (res://scenes/m2a_viewmodel.tscn) and its scripted weapon timeline, registered in
+# register_types.cpp under "// M2a vm".
+target_sources(bf3_godot PRIVATE
+    src/viewmodel.cpp
+    src/viewmodel.h
+    src/vm_script.cpp
+    src/vm_script.h
+    src/m2a_viewmodel_demo.cpp
+    src/m2a_viewmodel_demo.h
+    src/m2a_viewmodel_check.cpp
+)

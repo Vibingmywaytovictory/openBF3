@@ -628,6 +628,13 @@ struct ViewmodelAnimator::Impl {
 					start_action(VmClip::Knife, t, false);
 					break;
 				}
+				if (ref(VmClip::Throw).seconds > 0.0f || has_clip(VmClip::Throw)) {
+					// A grenade's shot is its throw (the sim also sends kThrown at the same time: one action).
+					if (!(cur.active && cur.role == VmClip::Throw && std::fabs(cur.start - t) < 1e-6)) {
+						start_action(VmClip::Throw, t, false);
+					}
+					break;
+				}
 				const bool fire_clip = has_clip(VmClip::FireSingle) || has_clip(VmClip::Fire);
 				const float kick_scale = fire_clip ? ads * tuning.kick_ads_scale : 1.0f + (tuning.kick_ads_scale - 1.0f) * ads;
 				kick_back.v += spring_impulse_for_peak(tuning.kick, tuning.kick_back * kick_scale);
@@ -661,7 +668,9 @@ struct ViewmodelAnimator::Impl {
 				start_action(VmClip::Bolt, t, false);
 				break;
 			case VmCue::Kind::Thrown:
-				start_action(VmClip::Throw, t, false);
+				if (!(cur.active && cur.role == VmClip::Throw && std::fabs(cur.start - t) < 1e-6)) {
+					start_action(VmClip::Throw, t, false);
+				}
 				break;
 			case VmCue::Kind::DeployFinished:
 			case VmCue::Kind::ReloadCommitted:

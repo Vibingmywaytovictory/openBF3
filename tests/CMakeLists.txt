@@ -718,3 +718,8 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_vm_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(anim.viewmodel.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_vm_cl_dir}")
 endif()
+# M2a vm: godot.m2a_viewmodel, the install half (res://scenes/m2a_viewmodel.tscn -- --vm-check; tests/godot_m2a_viewmodel.cmake).
+if(OPENBF3_BUILD_GODOT)
+    add_test(NAME godot.m2a_viewmodel COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m2a_viewmodel.cmake)
+    set_tests_properties(godot.m2a_viewmodel PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 480 RESOURCE_LOCK openbf3_godot_project)
+endif()

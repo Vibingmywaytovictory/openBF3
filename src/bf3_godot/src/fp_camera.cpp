@@ -108,3 +108,33 @@ void FpCamera::scale_free_speed(float p_factor) {
 }
 
 } // namespace bf3::godot_side
+
+// M2a vm (docs/design/m2a-vm.md): ADS FOV, recoil and kick on the first-person camera (fp_camera.h's M2a vm block).
+#include "bf3/anim/viewmodel_anim.h"
+
+namespace bf3::godot_side {
+
+void apply_view_effects(godot::Camera3D *p_camera, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, const ViewEffects &p_effects) {
+	if (p_camera == nullptr) {
+		return;
+	}
+	const bf3::anim::ViewAngles a = bf3::anim::camera_view_angles(p_yaw, p_pitch, p_effects.recoil_pitch_deg, p_effects.recoil_yaw_deg,
+			p_effects.kick_pitch_deg, p_effects.kick_yaw_deg);
+	const godot::Basis basis = godot::Basis(godot::Vector3(0, 1, 0), real_t(a.yaw + 3.14159265358979323846)) * godot::Basis(godot::Vector3(1, 0, 0), real_t(a.pitch));
+	p_camera->set_keep_aspect_mode(godot::Camera3D::KEEP_HEIGHT);
+	p_camera->set_fov(p_effects.world_fov_deg);
+	p_camera->set_global_transform(godot::Transform3D(basis, p_eye));
+}
+
+void camera_view_angles_of(const godot::Camera3D *p_camera, double &r_yaw, double &r_pitch) {
+	r_yaw = 0;
+	r_pitch = 0;
+	if (p_camera == nullptr) {
+		return;
+	}
+	const godot::Vector3 f = -p_camera->get_global_transform().basis.get_column(2);
+	r_pitch = std::asin(std::clamp(double(f.y), -1.0, 1.0));
+	r_yaw = std::atan2(double(f.x), double(f.z));
+}
+
+} // namespace bf3::godot_side
