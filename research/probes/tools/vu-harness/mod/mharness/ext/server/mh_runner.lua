@@ -314,22 +314,28 @@ function M.validate(items)
 	return lines
 end
 
+-- Every missing prerequisite at once, in the order the user fixes them (aim before damage: P0.9 needs P0.5), so one
+-- refusal names the whole fix after a new Lua state (server restart, crash, lost state; RUNBOOK "re-prepare").
 function M.requirements(sc, mod, args, state)
 	local need = mod.needs and mod.needs(args) or {}
 	state = state or { level = M.level, sites_ok = true }
-	for _, s in ipairs(need.sites or {}) do
-		if sites.get(s) == nil then return false, 'site ' .. s .. ' missing (!mh ' .. s .. ')' end
-		if not state.sites_ok then return false, 'site ' .. s .. ' is on another level' end
-	end
-	if need.aimcal and bots.cal == nil then return false, 'aim calibration missing (!mh p0 aim)' end
-	if need.botdmg and M.p0.damage ~= 'YES' then return false, 'bot damage is not YES (P0.9)' end
+	local miss = {}
 	if need.levels then
 		local okl = false
 		for _, l in ipairs(need.levels) do
 			if state.level and state.level:find(l, 1, true) then okl = true end
 		end
-		if not okl then return false, 'needs level ' .. table.concat(need.levels, '/') end
+		if not okl then miss[#miss + 1] = 'needs level ' .. table.concat(need.levels, '/') end
 	end
+	for _, s in ipairs(need.sites or {}) do
+		if sites.get(s) == nil then miss[#miss + 1] = 'site ' .. s .. ' missing (!mh ' .. s .. ')'
+		elseif not state.sites_ok then miss[#miss + 1] = 'site ' .. s .. ' is on another level' end
+	end
+	if need.aimcal and bots.cal == nil then miss[#miss + 1] = 'aim calibration missing (!mh p0 aim)' end
+	if need.botdmg and M.p0.damage ~= 'YES' then
+		miss[#miss + 1] = 'bot damage is not YES (P0.9: !mh p0 damage' .. (bots.cal == nil and ' after !mh p0 aim)' or ')')
+	end
+	if #miss > 0 then return false, table.concat(miss, '; ') end
 	return true
 end
 

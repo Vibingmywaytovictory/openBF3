@@ -59,11 +59,13 @@ local function tick_work(dt)
 		meta.vm = vm_probe()
 		meta.session_meta(RUN)
 	end
-	S.on_postsim()
-	H.on_postsim()
-	sites.tick()
-	RUN.step()
-	if bots.pass == 'postsim' then bots.apply_inputs(dt) end
+	-- each part in its own error budget (R.safe disables a 'where' after 20 errors): a failing sampler must not
+	-- switch off the runner (stop, ticket guard, queue) and the other way round
+	R.safe('samplers', S.on_postsim)
+	R.safe('hooks.post', H.on_postsim)
+	R.safe('sites', sites.tick)
+	R.safe('runner', RUN.step)
+	if bots.pass == 'postsim' then R.safe('inputs.post', bots.apply_inputs, dt) end
 end
 
 Events:Subscribe('UpdateManager:Update', function(deltaTime, updatePass)

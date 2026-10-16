@@ -1,6 +1,6 @@
 # VU measurement night: runbook
 
-**2026-10-16 (pass 4).** The harness is implemented on `s5/harness`; the commands below are final once the checks
+**2026-10-16 (pass 5).** The harness is implemented on `s5/harness`; the commands below are final once the checks
 of step 1 pass on your PC: they load the mod in a real Lua 5.4, check every VU call against the API inventory, and run every
 scenario below end to end in a mock VU. If step 1 fails, stop and tell the agent; do not run VU with a broken harness.
 You start VU yourself; the agent never does. Design and background: [DESIGN.md](DESIGN.md).
@@ -28,10 +28,10 @@ only when you type `!mh restartround confirm` / `!mh nextmap confirm` or put `rr
 [ ] 10 Attended Session 1              W-B chest pass, S-A, W-D, W-C (stop when tired)           75-90 min
 [ ] 11 Overnight queue                 !mh flat, !mh wall, [!mh range], !mh queue rr WA:tier1 ...  5 min
 [ ] 12 Leave PC on, client connected                                                              ~7 h
-[ ] 13 Morning: 60 Hz repeat           stop, restart with -high60, !mh queue WA:60 SB             5 + 40 min
+[ ] 13 Morning: 60 Hz repeat           stop, restart -high60, re-prepare (R), !mh queue WA:60 SB  10 + 40 min
 [ ] 14 Stop safely                     !mh stop, !mh clear, quit client, close server
 [ ] 15 Manifest after + compare        install-compare.ps1 -> "install unchanged: N items"
-[ ] 16 Extract                         extract.py -> research\measurements\<run>\
+[ ] 16 Extract                         extract.py --session 20261016..20261017 -> measurements\<run>\
 [ ] 17 Restore your VU loadout; tell the agent "done" (send nothing else)
 ```
 
@@ -97,9 +97,10 @@ also in `ServerMeasure\Admin\Startup.txt`), and the two launch lines. Running it
 ```powershell
 & $VU -serverInstancePath $I -server -dedicated -unlisted
 ```
-Expected in the server window/log, in this order: VU build line, `[VeniceEXT] [mharness] mharness <ver> loaded`,
-the backend (Zeus) connection and authentication, `The server is now accepting connections`, and
-`mharness: join with the client console: connect <guid> <your password>`.
+Expected in the server window/log, in this order: VU build line, `[VeniceEXT] [mharness] mharness <ver> loaded`
+followed by `mharness: join with the client console: connect <guid> <your password>` (printed when the mod loads),
+then the backend (Zeus) connection and authentication, and `The server is now accepting connections`. Wait for that
+last line before you join.
 
 ## 7. Join with the client (2-3 min)
 
@@ -115,7 +116,7 @@ Type each command in chat (`J` or your chat key) and wait for the `[mh]` reply b
 | # | do | type | you should see |
 |---|---|---|---|
 | 1 | stay on the deploy screen | `!mh help` | a short help in chat (chat works from the deploy screen; write down if not) |
-| 2 | spawn as Assault on the US team (team 1), default M16A3, no attachments | `!mh census` | `[mh] census: API 180/180 (2 nil), assets 14/14, entity types 6, flags 5, ticket counters 2, vm same, console mharness.mh` (numbers vary; "nil" members exist but were empty, which is fine; an API count below the total: write the line down) |
+| 2 | spawn as Assault on the US team (team 1), default M16A3, no attachments | `!mh census` | `[mh] census: API 180/180 (2 nil), assets 16/16, entity types 4, flags 5, ticket counters 2, vm same, console mharness.mh` (this is the mock's line: the census probes the 180 run-time-checkable entries of the API inventory, and the real totals may differ; what matters is that the first number of each pair equals the second; "nil" members exist but were empty, which is fine; a count below its total: write the line down) |
 | 3 | — | `!mh p0 round` | three bots appear on their bases; after up to 60 s `[mh] round: started, tickets per spawn 1` or `[mh] round: preround` |
 | 3a | only if step 3 said `preround` (likely) | — | do "round: preround" in the failure table now (restart with `-DisablePreRound`, about 10 min), then redo steps 1-3 of this table |
 | 4 | — | `!mh p0 level confirm` | the round restarts (loading screen); then `[mh] level: state kept`. If instead the greeting `[mh] mharness ... ready` comes again and no `level:` line follows, the Lua state was lost: write down `state lost` (it changes step 11); the 2 bots of this step stay on the server as orphans (`!mh clear` no longer knows them; they are harmless, a server restart removes them) |
@@ -132,7 +133,7 @@ Type each command in chat (`J` or your chat key) and wait for the `[mh]` reply b
 ## 9. Extraction check (2 min, server keeps running)
 
 ```powershell
-python -I "$H\extract.py" --session 20261016 --server-logs "$I\logs" --client-logs "$env:LOCALAPPDATA\VeniceUnleashed" --out "$R\research\measurements" --dry-run
+python -I "$H\extract.py" --session 20261016..20261017 --server-logs "$I\logs" --client-logs "$env:LOCALAPPDATA\VeniceUnleashed" --out "$R\research\measurements" --dry-run
 ```
 Expected: `runs: ...-P0-30-...` with row counts, `malformed 0`, `q gaps 0`, `trunc 0`. No runs found: list the log
 folder; if the files do not end in `.log`, add `--glob "*.txt"` (or the pattern you see).
@@ -167,10 +168,13 @@ run it again.
 4. Type the queue line that `!mh p0 report` printed. Normally:
    * bot damage NO: `!mh queue rr WA:tier1 SB MB WA:rest rr MA nextmap MA`
    * bot damage YES: `!mh queue rr WA:tier1 WB:B SA:B SB MB WA:rest rr MA nextmap MA`
-   * step 8.4 said `state lost`: first `!mh restartround confirm`, wait for the level, redo 1-3 above, then
-     `!mh queue WA:tier1 SB MB WA:rest` (no `rr`, no `nextmap`, no M-A tonight)
+   * step 8.4 said `state lost`: first `!mh restartround confirm`, wait for the level, then do **all** of
+     "R. Re-prepare" below (the restart gave the harness a new Lua state: the aim calibration, the sites and the bot
+     damage verdict are gone), then `!mh queue WA:tier1 SB MB WA:rest` (no `rr`, no `nextmap`, no M-A tonight)
 5. The reply lists every item with its end time and both teams' tickets after it (about 7 h in all). If it answers
-   `refused: <item> <reason>`, nothing was queued: fix the reason (usually a missing site) and type the line again.
+   `refused: <item> <reasons>`, nothing was queued: the reasons list everything missing for that item, each with the
+   command that fixes it (`site wall missing (!mh wall)`, `aim calibration missing (!mh p0 aim)`, ...). Fix them in
+   that order and type the line again.
 6. Move out of every line of fire (the harness pauses if you stand in it). Go back to the deploy screen (if step 8.1
    worked there) or stand in a quiet corner.
 
@@ -178,7 +182,7 @@ run it again.
 
 Leave the PC on with the client connected. Nothing else to do. If you check in: `!mh status`.
 
-## 13. Morning: 60 Hz repeat (5 min attended + 40 min)
+## 13. Morning: 60 Hz repeat (10 min attended + 40 min)
 
 1. `!mh status` (the queue should say `done`), then `!mh stop` and `!mh clear`.
 2. Quit the client (Esc → Quit), close the server window.
@@ -186,9 +190,30 @@ Leave the PC on with the client connected. Nothing else to do. If you check in: 
    ```powershell
    & $VU -serverInstancePath $I -server -dedicated -unlisted -high60
    ```
-4. Join as in step 7, spawn, `!mh p0 tick` (expect `60.0 Hz ... high60`), `!mh wall`, `!mh flat`,
-   `!mh queue WA:60 SB`.
-5. About 40 min later `!mh status` says `done`.
+4. Join as in step 7, spawn, and do "R. Re-prepare" below (R1-R5; R6 and R7 are not needed: no bot-damage items
+   follow). R1 must say `60.0 Hz ... high60`.
+5. `!mh queue WA:60 SB`.
+6. About 40 min later `!mh status` says `done`.
+
+## R. Re-prepare after a new Lua state (10 min)
+
+Every server start (step 13, a crash) and every round restart that lost the state (step 8.4 `state lost`) gives the
+harness a fresh Lua state: it forgets the sites, the aim calibration and the bot-damage verdict, and a queue line is
+refused until they are back. Spawn as Assault on the US team (M16A3), then in this order (each waits for its `[mh]`
+reply; the mock end-to-end case `runbook_reprepare` replays exactly these lines):
+
+<!-- reprepare:begin -->
+1. `!mh p0 tick`: `[mh] tick: 30.0 Hz ...` (or `60.0 Hz ... high60` after step 13)
+2. at the wall of step 8.6: `!mh wall`: `[mh] wall ok: ...`
+3. stay there: `!mh p0 aim`: `[mh] aim: convention <x>, error ...`
+4. Metro's outdoor start area, along the flat strip: `!mh flat`: `[mh] flat ok: ...`
+5. `!mh status`: no scenario running
+6. (B items only) `!mh p0 damage`: `[mh] bot damage: YES` (needs R3 first)
+7. (B items only) at the range start of step 10.1, looking along it: `!mh range`: `[mh] range ok: ...`
+<!-- reprepare:end -->
+
+"B items" are `WB:B` and `SA:B` in the queue line you are about to type. Then type the queue line. If it is still
+refused, the reply names what is missing and the command for it.
 
 ## 14. Stop safely
 
@@ -205,9 +230,13 @@ Expected: `install unchanged: N items` (exit 0). Anything else: keep the files, 
 ## 16. Extract (2-5 min)
 
 ```powershell
-python -I "$H\extract.py" --session 20261016 --server-logs "$I\logs" --client-logs "$env:LOCALAPPDATA\VeniceUnleashed" --out "$R\research\measurements" --manifest-before "$S\manifest-before.csv" --manifest-after "$S\manifest-after.csv"
+python -I "$H\extract.py" --session 20261016..20261017 --server-logs "$I\logs" --client-logs "$env:LOCALAPPDATA\VeniceUnleashed" --out "$R\research\measurements" --manifest-before "$S\manifest-before.csv" --manifest-after "$S\manifest-after.csv"
 ```
-Expected: one folder per run under `research\measurements\` (`raw.jsonl` or `raw.jsonl.gz`, `meta.json`), `malformed 0`.
+Expected: one folder per run under `research\measurements\` (`raw.jsonl` or `raw.jsonl.gz`, `meta.json`), `malformed 0`,
+and **no** `WARNING ... rows of runs outside --session` line. A run id carries the date its run started, so the runs
+after midnight and the morning 60 Hz runs are `20261017-...`; that is why `--session` is the range
+`20261016..20261017`. If a WARNING names another date (e.g. you finished on the 18th), run the command again with the
+range widened to it (`--session 20261016..20261018`).
 
 ## 17. Afterwards
 
@@ -236,7 +265,7 @@ screenshots or videos: they hold names and addresses; the run folders hold numbe
 | A scenario seems stuck | `!mh status` shows the state and its timeout (every wait has one). `!mh next` skips the current config; `!mh stop` ends the scenario. After three skipped configs a scenario aborts itself (`[mh] aborted: <reason>`) and the queue moves on. |
 | `[mh] waiting for a human` | You left or the client dropped: rejoin (step 7); the queue resumes by itself. |
 | The harness asks for a weapon you do not have | Switch team (US: M16A3, M9, SMAW; RU: AK-74M, RPG-7), respawn; still missing: `!mh next`. |
-| Server or client crashed | Restart (steps 6-7), redo the sites (`!mh wall`, `!mh flat`, `!mh range`), run `extract.py ... --dry-run` (step 9): it prints `WA last cfg-done 7/17 -> !mh run WA from=8, queue item WA:all:from=8`; type `!mh queue` with that item first and the items that had not run yet after it (the chat also showed each `cfg done` line). |
+| Server or client crashed | Restart (steps 6-7), do "R. Re-prepare" (R1-R5, plus R6-R7 if B items follow), run `extract.py ... --dry-run` (step 9): it prints `WA last cfg-done 7/17 -> !mh run WA from=8, queue item WA:all:from=8`; type `!mh queue` with that item first and the items that had not run yet after it (the chat also showed each `cfg done` line). The new Lua state has not verified a round restart: a line with `rr` or `nextmap` is refused until `!mh p0 level confirm` reports `state kept` (it restarts the round itself; if it reports `state lost`, do R again and leave `rr`, `nextmap` and M-A out). |
 | `[mh] tickets low, queue paused` | The round is close to ending. `!mh restartround confirm`, wait for the level, `!mh queue resume` (sites stay valid). |
 | `[mh] ... not certified tonight` | The checks of step 1 did not certify that scenario; skip it. |
 | `install-compare` exit 1 | Stop everything; keep both CSVs; tell the agent. |

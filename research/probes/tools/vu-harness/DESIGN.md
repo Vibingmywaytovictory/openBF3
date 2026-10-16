@@ -261,7 +261,10 @@ scenario coroutine error aborts that scenario (cleanup runs, §3.8) and the queu
   `stop` on `!mh stop`, round over, level destroy or ticket guard).
 * **Stuck handling.** Every wait has a timeout. A config whose setup times out is skipped (`mark cfg-skip`); three
   consecutive skips abort the scenario (`mark lbl=aborted`, chat reason) and the queue moves on. A watchdog marks
-  `stalled` if a scenario has not yielded progress for 120 s of sim time beyond its own timeouts.
+  `stalled` if the scenario coroutine was not resumed for 120 s of sim time while not held (as built this is a
+  last-resort check that practically never fires: every yield refreshes it). The real protection against a stuck
+  scenario is that every wait has its own timeout and three skipped configs abort the scenario; a loop that never
+  yields would hang the server (none exists: every scenario loop goes through the ctx waits).
 * `!mh stop` sets a flag; on the next tick the runner closes the coroutine, runs `cleanup` (release all inputs, remove
   the scenario's bots, unwatch) and emits `mark lbl=stopped`. Repeating `stop` when idle answers "nothing running".
 * **Ticket budget** (§6.12). Every scenario has `cost(args) → {t1, t2}`: tickets it will take from each team, from
@@ -760,7 +763,7 @@ The full list (one entry per symbol, used by `apicheck.py`, `luaload.py` and the
 | L17 | `DetailedRaycast` hits walls and ground with normals | P0.4 | `CollisionRaycast` |
 | L18 | `RCON:GetServerGuid` gives the join GUID | P0.1 | the VU key portal lists the key's GUID; or relaunch without `-unlisted` and join through the server browser (`mh-measure`, passworded) |
 | L19 | NetEvents both ways; the console command's full name (`groupName.name`, probably `mharness.mh`); camera forward sign; client log rows; ms offset | P0.1, P0.4, P0.12 | `!mh wall` from the human's server-side aim (needs the L08 convention from the bot calibration) |
-| L20 | prints ≤ 1 KB intact; 60 rows/s without loss; live log readable | P0.12 | `rate 2`; extract after shutdown |
+| L20 | prints ≤ 1 KB intact; 60 rows/s without loss; live log readable. Peaks are higher (≈ 180-240 rows/s in 60 Hz W-A and in M-A with per-tick `tk`/`cp` rows), beyond what P0.12 verifies; any loss shows as `q` gaps per run (`extract --dry-run`), never silently | P0.12 | `rate 2`; extract after shutdown |
 | L21 | round leaves preround with 1 human + 3 bots (round start needs 4 players, P §3.7; whether bots count is unverified); flags capturable | P0.13 | `vu.DisablePreRound true` in `Startup.txt` (RUNBOOK; expected outcome) |
 | L22 | Lua state and created players survive a round restart (and so, presumably, a level change) | P0.15 | no `rr`/`nextmap` in the queue; the queue holds one round's worth |
 | L23 | the server keeps simulating overnight with the client connected and idle (`vars.idleTimeout 0`) | overnight `prog` rows | — (the user stays connected) |
@@ -1108,6 +1111,8 @@ The journal must show, for every e2e run: no `Pass`/`Return`; no write to any ob
 | W-A tier 1, `parts=a,b,c,d,e` | `disc=area`, then `disc=radius` | W1 `uniform_area` / `uniform_radius` (n = 200 per config), combined by §10.2 |
 | W-A outliers | `disc=area`, `w1_outliers=1@1.2` and `3@1.3`, a world origin 1500 m away | W1 still `uniform_area` (no quantisation loss with `%.9g`) |
 | W-A tier 1 | `recovery=linear` / `exp`; `rearm=release` / `recovered`; `decay=15` / `8`; `hcorr=0` / `0.6` | W3, W4, W2 verdicts match |
+| W-A W4 re-arm | `rearm=spreadmin` (decay 8, decay 15 at seed 2) and `timer:0.3`, default M16A3 data, `parts=a,c` | W4 `spreadmin` / `timer:0.3` (the pass-4 rule read `timer:0.2` for spreadmin: t_min is a whole number of ticks) |
+| W-A W1 hit noise | `disc=area`, `hit_noise=0.02` | W1 `area` or `inconclusive`, never `radius` or a conflict |
 | W-A small n | `disc=area`, `scale=0.1` | W1 `inconclusive` |
 | W-A frame cadence | `gs_cadence=frame:3`, `ra_units=rad` | W1-W4 verdicts unchanged (analysis uses `nup` and impacts) |
 | W-A60 + W-A | `hz=60` with `coupled=none` / `recovery` | T1 equal / tick-coupled (recovery); W4 binned by measured gaps |
@@ -1118,6 +1123,7 @@ The journal must show, for every e2e run: no `Pass`/`Return`; no write to any ob
 | M-A | `bleed=A` / `B` (single runs); and `queue MA rr nextmap MA` after `p0 level confirm` | M1 verdicts from hold windows only; four ends `done`; the second MA runs on MP_001 |
 | tickets | 120/120 tickets, `tcost=1/1/1`: a 7-item MB line, then one MB; 110/110 with `tcost` spawn 15 for a W-A run (forecast at 1/1/1 passes, the real cost does not) | the long line refused with "forecast ... put rr before it"; the accepted item prints its forecast (T1 109 T2 112: the user's own spawn cost one); the under-forecast run trips the guard (`guard`, item requeued, queue paused) |
 | queue validation | `!mh queue WB:B`, `SB WA:tier1`, `MA WA:tier1`, `MA SA:B`, `run WA` with no sites | each refused at queue time with the missing site, nothing queued, nothing started |
+| RUNBOOK re-prepare | a fresh 60 Hz host and a fresh 30 Hz host; the commands of the RUNBOOK `reprepare` block, **parsed from RUNBOOK.md**, then `queue WA:60 SB` / `queue WB:B SA:B SB MB` | before: refused with every missing prerequisite in one reply; after: every R step ok, P0.3 at the host rate, the line accepted, the first item starts, no orphan bots; RUNBOOK step 13 queues `WA:60 SB` right after R |
 | M-B | `capture=model` + `flip=lose_get` / `capture=linear_n` + `flip=direct` | M2 and M2-flip verdicts (the direct flip never reads neutral: the reset treats "taken, not controlled" as neutral) |
 | W-C | `blast=linear` / `quadratic` | W7 report |
 | W-D | client realm: pred/corr gs rows, fov rows for 3 zoom levels | fov within 0.1° of the mock's vertical FOV |
@@ -1276,3 +1282,15 @@ commands, `census`, `status` and the site commands work.
   Lua line coverage over the suite is reported by `mockrun.py --coverage` (approximate executable lines).
 * Everything the mock assumes about VU (§13.8) remains a Phase 0 live check; a shared wrong assumption passes the mock
   and fails live.
+* **2026-10-16, build pass 5 (verifier findings).** Extractor: `--session` takes a range or list
+  (`20261016..20261017`), because a run id carries its start date and the overnight and morning runs are dated the
+  next day; skipped rows of other dates are printed as a WARNING with their dates (§9; RUNBOOK steps 9 and 16). W4:
+  no slack below t_rec/t_min (it accepted an unarmed gap one tick short of a whole-tick t_min and fell to a spurious
+  `AfterTime`); a threshold fits with j = 0 or 1 tick (shot sees its own or the previous tick); t_rec and t_min are
+  counted from the gs row that first shows the shot; both fitting and more than half a tick apart is inconclusive;
+  the timer verdict is never given for a step on t_rec/t_min (§10). Runner: a queue or run refusal lists every missing
+  prerequisite with its command (level, sites, aim calibration, bot damage), and RUNBOOK gained "R. Re-prepare after a
+  new Lua state", used by step 11 (state lost), step 13 (60 Hz) and the crash row; the mock case `runbook_reprepare`
+  replays that block from RUNBOOK.md. The PostSim work runs in separate error budgets (`samplers`, `hooks.post`,
+  `sites`, `runner`, `inputs.post`) so 20 sampler errors no longer switch off the runner. New e2e cases: W4 spreadmin
+  (two) and timer, W1 hit noise, RUNBOOK re-prepare.

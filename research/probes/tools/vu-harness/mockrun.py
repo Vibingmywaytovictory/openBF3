@@ -924,6 +924,97 @@ def c_p0_level_lost(env):
     code, runs, text = env.extract(0)
     env.notes.append('bots left after the Lua reload: %d' % bots_left(h))
 
+RUNBOOK_PATH = os.path.join(HERE, 'RUNBOOK.md')
+SITE_CMDS = ('wall', 'flat', 'range')
+
+
+def runbook_reprepare():
+    """The RUNBOOK "R. Re-prepare" block as [(command without '!mh ', b_items_only)], parsed from the RUNBOOK itself so
+    the steps the user follows after a new Lua state are the steps this case replays."""
+    with open(RUNBOOK_PATH, encoding='utf-8') as f:
+        text = f.read()
+    m = re.search(r'<!-- reprepare:begin -->(.*?)<!-- reprepare:end -->', text, re.S)
+    if not m:
+        raise CaseFail('RUNBOOK has no reprepare block')
+    steps = []
+    for ln in m.group(1).splitlines():
+        c = re.search(r'`!mh ([^`]+)`', ln)
+        if c:
+            steps.append((c.group(1).strip(), '(B items only)' in ln))
+    return steps, text
+
+
+def reprepare_script(u, steps, b_items):
+    """Replay the block: sites by walking to them first, P0 steps as runs, the rest as plain commands."""
+    out = []
+    for cmd, b_only in steps:
+        if b_only and not b_items:
+            continue
+        if cmd in SITE_CMDS:
+            u.goto(cmd)
+            yield from u.wait(0.5)
+            line = yield from u.say_wait(cmd, r'^\[mh\] %s ' % cmd, 20)
+            out.append((cmd, ' ok' in line, line))
+        elif cmd.startswith('p0 '):
+            st = yield from u.run(cmd, 'P0', 300)
+            out.append((cmd, st == 'done', st))
+        else:
+            lines = yield from say_all(u, cmd)
+            out.append((cmd, bool(lines), ' | '.join(lines[:2])))
+    u.goto('deploy')
+    yield from u.wait(0.5)
+    return out
+
+
+def reprepare_case(env, hz, queue, b_items):
+    steps, text = runbook_reprepare()
+    env.check('reprepare block parsed', len(steps) >= 5 and steps[0][0] == 'p0 tick', str(steps))
+    h, u = env.host({'hz': hz}, tag='h%d' % hz)
+
+    def script():
+        u.join()
+        u.spawn('deploy')
+        yield from u.wait(3)
+        # a fresh Lua state: the queue line is refused with every missing prerequisite in one reply
+        u.before = yield from say_all(u, 'queue ' + queue)
+        u.steps = yield from reprepare_script(u, steps, b_items)
+        u.q = yield from say_all(u, 'queue ' + queue, 5.0)
+        yield from u.wait(20)
+        u.started = bool(marks(h, 'run-start'))
+        yield from say_all(u, 'queue clear')
+        u.cmd('stop')
+        yield from u.wait(30)
+        u.cmd('clear')
+        yield from u.wait(10)
+    env.drive(h, u, script(), 3000)
+    env.check('fresh state refused with all reasons', any(
+        'nothing queued' in x and 'aim calibration missing' in x and 'site' in x for x in u.before), str(u.before[:2]))
+    for cmd, ok, detail in u.steps:
+        env.check('R %s' % cmd, ok, str(detail)[:160])
+    tick = [d for c, ok, d in u.steps if c == 'p0 tick']
+    env.check('tick row says %d Hz' % hz, any(abs(float(r['val'].get('hz', 0)) - hz) < 0.5
+                                            for r in p0_rows(h, 'P0.3') if isinstance(r.get('val'), dict)),
+              json.dumps(p0_rows(h, 'P0.3')[-1:])[:200])
+    n = len(queue.split())
+    env.check('queue %r accepted' % queue, any(re.match(r'^\[mh\] %d ' % n, x) for x in u.q) and
+              not any('nothing queued' in x for x in u.q), str(u.q[:3]))
+    env.check('first item started', u.started, '')
+    env.check('no orphan bots', bots_left(h) == 0, 'bots %d' % bots_left(h))
+    env.journal(h)
+    return text
+
+
+@case(('phase0', 'all'))
+def c_runbook_reprepare(env):
+    """RUNBOOK step 13.4 (fresh 60 Hz server) and the crash / state-lost paths with B items: after the RUNBOOK's
+    re-prepare block the queue lines the RUNBOOK prints are accepted (verifier finding: they were refused for the
+    missing aim calibration)."""
+    text = reprepare_case(env, 60, 'WA:60 SB', False)
+    env.check('RUNBOOK 13 queues WA:60 SB after R', re.search(r'R\. Re-prepare.*\n.*\n5\. `!mh queue WA:60 SB`', text)
+              is not None, '')
+    reprepare_case(env, 30, 'WB:B SA:B SB MB', True)
+
+
 # -- coverage ------------------------------------------------------------------------------------------------------
 CODE_LINE = re.compile(r'^\s*(?:end[,)]*|else|\}[,)]*|\)|do|then|return|break|local function [\w.:]+\(.*\)|function [\w.:]+\(.*\))?\s*$')
 
