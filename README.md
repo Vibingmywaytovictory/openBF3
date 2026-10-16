@@ -1986,3 +1986,34 @@ Measured 2026-10-16 on the dev preset, with `OPENBF3_GODOT` set:
   and `m2a.weapons.contract` also pass on asan.
 
 Timing rows are wall-clock and noisy on this shared machine.
+
+## M2a protocol v2 (nt)
+
+<!-- # M2a nt -->
+Track nt of M2a wave 2 is on branch `m2a/nt` from the W2.0 contract. It writes the bodies of protocol v2
+(`kProtocolVersion` 2) in `bf3_net`. The changes are the MatchInfo / Spawned / Debug / DebugReport fields, the
+command view sample, `others_ack_bits` and the two ack predicates, the own weapons and the others' weapon fields in
+the Snapshot, `SnapshotOthers`, `ShotEvents`, `CombatEvents` and `KitSelect`, plus the new `weapons_wire.cpp`.
+
+Design: [docs/design/m2a.md](docs/design/m2a.md) §7. As built, with the wire layouts, measured sizes and
+precision, deviations and the updated M1 rows: [docs/design/m2a-nt.md](docs/design/m2a-nt.md).
+
+* **Sizes:**
+  - Command packets are 33 / 70 B.
+  - The Snapshot header with the own state is 97 B, and a 4-slot kit's weapons add 75 B.
+  - An other is 178 bits. 49 others fit beside the own state, and a SnapshotOthers holds 53.
+  - A 64-player match goes in a Snapshot (46 others with a kit) plus a SnapshotOthers (17), both ≤ 1,200 B.
+  - A datagram holds 69 untraced shots or 58 traced ones.
+* **Tests:**
+  - `net.proto.unit` has an `M2a nt` block with round trips at the documented precision, sizes, the split, acks
+    and the weapons wire.
+  - `net.proto.fuzz` is new. It runs seeded mutations and random bytes of all 15 message types, counting
+    refusals and checking decode → encode → decode stability; 3,501 / 3,501 structured malformed cases are
+    refused.
+  - `m2a.contract` runs its nt rows (`kNtLanded = true`).
+* **M1 rows pinned to the v1 wire were updated to the v2 values.** Spawned is 85 B, command packets 33 / 70 / 33 B,
+  a Snapshot holds 49 / 53 others, there are 15 known types, and Debug kind 8 is refused. Each row still checks the
+  exact value.
+
+Run: `ctest --preset dev -R "^(net\.|m2a\.contract$)"`; the host rows (`host.server`, `host.session*`) and the Godot
+rows are timing rows, run under the quiet lock. Timing rows are wall-clock and noisy on this shared machine.

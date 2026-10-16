@@ -705,3 +705,16 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_cl_dir}")
 endif()
+
+# M2a nt (docs/design/m2a-nt.md): net.proto.fuzz feeds seeded mutations and random bytes of every protocol v2 message
+# type through its decoder (refused and counted per type, or decode -> encode -> decode stable) and checks the
+# structured malformed cases (every truncation, a trailing byte, another type's decoder) are all refused. No data;
+# meant for the asan preset too (E17 wire side).
+openbf3_test(test_net_proto_fuzz test_main.cpp net_proto_fuzz.cpp)
+target_link_libraries(test_net_proto_fuzz PRIVATE bf3_net)
+add_test(NAME net.proto.fuzz COMMAND test_net_proto_fuzz --test-suite=net-proto-fuzz)
+set_tests_properties(net.proto.fuzz PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_nt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(net.proto.fuzz PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_nt_cl_dir}")
+endif()

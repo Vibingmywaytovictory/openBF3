@@ -32,7 +32,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 1; // bump on any wire change
+inline constexpr uint16_t kProtocolVersion = 2; // bump on any wire change (2: M2a, docs/design/m2a.md §7)
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -41,6 +41,15 @@ inline constexpr size_t kMaxDatagramBytes = 1200; // below ENet's 1392 MTU: no u
 inline constexpr size_t kCommandsPerPacket = 4; // newest first (topics/05 §4.1: 3-4 redundant)
 inline constexpr size_t kMaxSlots = 128; // soldier slots a snapshot can name (64 players + walkers / bots)
 inline constexpr size_t kMaxNameBytes = 32;
+// M2a v2 (nt; docs/design/m2a.md §7, §13.4). Bounds every v2 decoder refuses beyond.
+inline constexpr uint8_t kMaxKits = 4; // KitSelect / Spawned kit < 4 (= host::kKitCount, pinned by m2a.contract)
+inline constexpr uint8_t kMaxTeam = 2; // teams 1 and 2; 0 = none (Spawned) or keep (KitSelect)
+inline constexpr uint16_t kMaxWireDefs = 255; // a def id travels in 8 bits (others, shots, deaths): ids 0..254, 255 = none
+inline constexpr size_t kMaxTargetRows = 128; // DebugReport::targets (one per slot at most)
+// A DebugReport with every bound full (1,200 traced ticks, each with the per-tick maxima of shots, projectiles, damage,
+// detonations and deaths at full precision) is ~1.6 MiB; the reliable channel fragments it. Other reliable messages
+// stay under the M1 cap (protocol.cpp kMaxReliableBytes, 256 KiB).
+inline constexpr size_t kMaxDebugReportBytes = 2 * 1024 * 1024;
 
 enum class MessageType : uint8_t {
 	// ch0
@@ -242,6 +251,9 @@ core::Result<DebugReport> decode_debug_report(std::span<const uint8_t> p_datagra
 // sequence. The flags byte is server-side only and never sent. Size with the type byte: 26 bytes when the 3 older
 // commands equal the newest, 53 bytes when all 4 differ. The encoder cuts count short at the first older command
 // whose tick or sequence is not exactly one less (after a clock reset), because the decoder implies both.
+// v2 (M2a, nt): u32 others_ack_bits follows snapshot_ack_bits, and every full command carries the view sample after
+// the pose: 16 view_back_q8, 2 view_quality, 8 view_seq8 (98 bits; "same as the newer" compares them too). 33 bytes
+// with one command or 4 equal ones, 70 bytes when all 4 differ (m2a.md §7.2: 53 + 17).
 
 struct CommandPacket {
 	uint16_t newest_snapshot = 0;
@@ -278,6 +290,9 @@ core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_dat
 // velocity 3 x 11 bits | yaw 14 | pitch 12 | pose 2 | target pose 2 | transition progress 8 (0..255 of the total)
 // | mode 4 | flags 8 (alive, grounded, sprinting): 159 bits, ~20 bytes, so ~55 others fit one datagram. A full
 // 64-player snapshot (63 others, ~1,250 B) does not fit: M3 needs priority and baselines from its start.
+// v2 (M2a, nt): after the own state, 1 bit own weapons present and the weapons_wire.h block (~95 B for a kit); each
+// other gains u8 weapon | u3 phase | u1 firing | u1 ads | u2 reload seq | u4 burst seq (178 bits, 22.25 B). With the
+// own state and a kit's weapons about 43 others fit; the rest go in SnapshotOthers of the same seq.
 
 struct OtherSoldier {
 	uint8_t slot = 0;
@@ -299,10 +314,17 @@ struct OtherSoldier {
 	bool ads = false;
 	uint8_t reload_seq = 0; // 2 bits: counts reload starts
 	uint8_t burst_seq = 0; // 4 bits: counts bursts
+
+	bool operator==(const OtherSoldier &) const = default; // nt: field for field (the lag history compares records)
 };
 // The quantised view of a server state, exactly as the receiver decodes it (the server's interpolation tests
 // compare against this).
 OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state);
+// M2a v2 (nt): writes the 19 weapon bits of an other exactly as the receiver decodes them (the lag history stores the
+// record the client gets, so the server must store the masked values): weapon = p_def when < kMaxWireDefs else 255,
+// phase, firing, ads, reload_seq = p_reload_count & 3, burst_seq = p_burst_count & 15.
+void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::WeaponPhase p_phase, bool p_firing, bool p_ads, uint32_t p_reload_count,
+		uint32_t p_burst_count);
 
 // Invariant (docs §9.2): the snapshot is sent after server tick `server_tick` ran, so own->tick == server_tick,
 // and the command applied to the own soldier at that tick is the client's command for that tick
@@ -357,11 +379,11 @@ struct RemoteShot {
 	sim::weapons::SimTime time = 0; // 1/65,536 tick within the datagram's server tick on the wire
 	sim::Vec3 origin{}; // 3 x 20 bits, 1/256 m from ShotQuantization::origin_min (a 4,096 m span per axis)
 	sim::Vec3 direction{}; // octahedral 2 x 16
-	uint8_t pellets = 1; // 5 bits
+	uint8_t pellets = 1; // 6 bits (pellets - 1; 1..kMaxPellets)
 	bool tracer = false;
 	sim::Vec3 aim{}; // with tracer: octahedral 2 x 12 (the tracer converges on it)
-	float pellet_cone = 0; // with pellets > 1: 12 bits, 1/64 degree
-	float power = 1; // hold-and-release defs: 8 bits, 1/255
+	float pellet_cone = 0; // with pellets > 1: 13 bits, 1/64 degree (covers kMaxAngle)
+	float power = 1; // != 1: a presence bit + 12 bits over [0, kMaxPower] (1 travels as the absent bit)
 };
 inline constexpr size_t kMaxShotsPerDatagram = 128;
 struct ShotEvents {
@@ -374,9 +396,22 @@ struct ShotQuantization {
 };
 // At most kMaxDatagramBytes: further shots are dropped farthest-first (from p_receiver_eye) and counted in r_dropped;
 // the GameServer sends at most two datagrams per snapshot.
+// As built (nt): the shooters are ordered nearest first (a shooter's distance = its nearest shot's origin), each
+// shooter's shots in the caller's order, and the datagram is cut where the next shot does not fit, so the farthest
+// shooters' shots are the ones dropped. A shot that cannot travel is also dropped and counted: slot >= 128, def >=
+// kMaxWireDefs, time outside the kMaxShotTicksBack + 1 ticks ending with server_tick, origin outside the frame's
+// 4,096 m cube, or more than kMaxShotsPerDatagram shots. Time on the wire: 3 bits of ticks back from server_tick
+// (the snapshot interval holds two ticks) plus 16 bits of the tick, so a decoded time is within 8 units (1/131,072
+// tick) of the server's.
+inline constexpr uint32_t kMaxShotTicksBack = 7;
 std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQuantization &p_frame, const sim::Vec3 &p_receiver_eye,
 		size_t *r_dropped = nullptr);
 core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame);
+// One shot exactly as decode_shot_events gives it (the quantised times, origin, directions, cone and power); nullopt
+// when encode_shot_events would drop it. For the tests and for a server that compares what a client drew.
+std::optional<RemoteShot> quantize_remote_shot(const RemoteShot &p_shot, const ShotQuantization &p_frame, sim::Tick p_server_tick);
+// A wp ShotEvent as a RemoteShot (slot = player_slot; seed and spawn_time are left behind: the receiver derives them).
+RemoteShot remote_shot_of(const sim::weapons::ShotEvent &p_shot);
 
 // Combat events (reliable, to every client; docs/design/m2a.md §4.3). Damage and health travel in 1/100 hp,
 // positions as shot origins, normals octahedral 16.
@@ -418,7 +453,13 @@ struct CombatEvents {
 	std::vector<DeathEvent> deaths;
 	std::vector<DetonationWire> detonations;
 };
-std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const ShotQuantization &p_frame);
+// As built (nt): every event's time is a varint of ticks back from server_tick plus 16 bits of the tick; damage and
+// health in 1/100 hp in 24 bits (0..100,000; a larger code is refused); slots in 7 bits; positions as shot origins. The message is reliable,
+// so nothing is dropped silently: a value outside its range is clamped and counted in r_clamped (a position outside
+// the frame, a negative or huge amount, a time after the message's tick), and events beyond
+// kMaxCombatEventsPerMessage (hits first, then deaths, then detonations) or with a slot >= 128 are cut and counted
+// there too (the GameServer sends one message per snapshot, far below the bound).
+std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const ShotQuantization &p_frame, size_t *r_clamped = nullptr);
 core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame);
 
 // Client -> server: kit (< 4) and team (0 keep, 1, 2; a change needs dev_commands in M2a) for the next spawn.

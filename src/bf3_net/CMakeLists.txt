@@ -31,3 +31,8 @@ target_sources(bf3_net PRIVATE
     include/bf3/net/weapons_wire.h
     include/bf3/net/other_sample.h
 )
+
+# M2a nt (docs/design/m2a-nt.md): the body of weapons_wire.h.
+target_sources(bf3_net PRIVATE
+    src/weapons_wire.cpp
+)
