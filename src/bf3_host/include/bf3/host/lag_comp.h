@@ -37,7 +37,7 @@ namespace bf3::host {
 // m2a.md §16 Q1 (taken 2026-10-16): 350 ms = 21 ticks, so "150/2" (~270 ms lag) is fully compensated; beyond it
 // the server tests at the clamped time and counts rewind_clamped.
 inline constexpr uint32_t kDefaultMaxRewindTicks = 21;
-inline constexpr uint32_t kHistorySnapshots = 24; // 800 ms of 30 Hz snapshots
+inline constexpr uint32_t kHistorySnapshots = 48; // 1.6 s of 30 Hz snapshots: the 32-seq received window plus the view lag (m2a-lc.md)
 inline constexpr uint32_t kSentRingEntries = 64; // per client, by seq
 inline constexpr uint32_t kShotViewRing = 128; // per shooter slot, by shot index
 inline constexpr uint32_t kPoseCacheEntries = 2048; // open addressing, cleared in begin_tick

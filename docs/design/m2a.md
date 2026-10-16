@@ -485,8 +485,8 @@ command-stream hash change in the same sv commit that adds them (sv; `m2a.contra
 Lag for a human ≈ RTT + command buffer + d [inferred]: loopback ≈ 0 + 33 + 75 ≈ 110 ms; "150/2" ≈ 150 + 33 + 85 ≈
 270 ms; the one-way stress profile ≈ 420 ms. Plan D7 says "≤ 250 ms", which would clamp the gate profile. Default
 `max_rewind_ticks` = 21 (350 ms) so "150/2" is fully compensated (§16 Q1). Beyond it the server tests at the
-clamped time and counts `rewind_clamped`. A sample older than the history (24 snapshot samples = 800 ms) is never
-needed under the clamp.
+clamped time and counts `rewind_clamped`. A sample older than the history (48 snapshot samples = 1.6 s; corrected
+by lc from 24: see m2a-lc.md "history size") is never needed under the clamp.
 
 **Only the samples the client had.** After a lost snapshot (or a lost `SnapshotOthers`) the client interpolates
 across the gap or extrapolates, while the server's history holds the missing record. If the server sampled from its
@@ -656,7 +656,7 @@ HitTarget posed_target(const core::gameplay::CapsulePoseTable &, const TargetPos
 
 ```cpp
 namespace bf3::host {
-struct LagCompConfig { uint32_t history_snapshots = 24; uint32_t max_rewind_ticks = 21; bool enabled = true; };
+struct LagCompConfig { uint32_t history_snapshots = 48; uint32_t max_rewind_ticks = 21; bool enabled = true; };
 struct LagCompStats { uint64_t queries, candidates, pose_cache_hits, present, rewound, clamped, refused; double tick_ms_p99; };
 struct AckState { uint16_t newest = 0; uint64_t main_bits = 0, others_bits = 0; };   // 64 seqs back from newest
 struct ShotView {                       // per shot index, 16 B; a snapshot of the shooter's received set (§6.3)
@@ -709,7 +709,7 @@ Distinct poses per tick are at most the candidates (each new key is posed once);
 per command, sharing happens for bots, for the shots of one command and for a bullet's own later segments only
 when the key repeats, rarely across humans. E13 gates both rows at p99 ≤ 0.5 ms and prints queries, candidates and
 cache hits. Bots add nothing beyond the present set (posed once in `begin_tick`, 64 × 0.35 µs ≈ 22 µs). Memory:
-shared records 24 ticks × 64 × ≈ 48 B ≈ 72 KiB plus the swept bounds (64 × 24 B); sent rings and acks 64 clients ×
+shared records 48 snapshots × 64 × ≈ 48 B ≈ 144 KiB plus the swept bounds (64 × 24 B); sent rings and acks 64 clients ×
 64 seqs × 24 B = 96 KiB; shot-view rings 64 × 128 × 16 B = 128 KiB; pose cache 2,048 × ≈ 0.6 KB ≈ 1.2 MiB; the
 present set ≈ 40 KiB.
 
