@@ -27,6 +27,7 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <array>
@@ -122,6 +123,13 @@ private:
 		godot::Ref<godot::Skin> skin;
 		std::vector<godot::Ref<godot::StandardMaterial3D>> materials;
 		std::array<bf3::anim::VmClipRef, bf3::anim::kVmClips> refs{};
+		struct Attachment {
+			godot::MeshInstance3D *mesh = nullptr;
+			int32_t bone = -1;
+			godot::Transform3D xform; // in the bone's space
+			bool hip = true, zoom = true;
+		};
+		std::vector<Attachment> attachments; // the default customization's rigid accessories (iron sights)
 	};
 
 	void set_viewmodel_fov(float p_fov);

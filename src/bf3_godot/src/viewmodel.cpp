@@ -190,6 +190,16 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 		n.weapon->set_skin(n.skin);
 		n.weapon->set_visible(false);
 		n.refs = bf3::render::viewmodel_clip_refs(it);
+		for (const bf3::render::ViewmodelAttachment &a : it.attachments) {
+			ItemNodes::Attachment na;
+			na.mesh = make_mesh(a.part, n.materials); // unskinned: placed on its bone every frame
+			na.mesh->set_visible(false);
+			na.bone = a.rig_bone;
+			na.xform = to_godot(a.transform);
+			na.hip = a.hip;
+			na.zoom = a.zoom;
+			n.attachments.push_back(na);
+		}
 	}
 	arms_->set_visible(false);
 
@@ -218,6 +228,9 @@ void Bf3Viewmodel::select_item(int p_index) {
 	}
 	if (item_ >= 0 && size_t(item_) < items_.size()) {
 		items_[size_t(item_)].weapon->set_visible(false);
+		for (const ItemNodes::Attachment &a : items_[size_t(item_)].attachments) {
+			a.mesh->set_visible(false);
+		}
 	}
 	item_ = p_index >= 0 && size_t(p_index) < items_.size() ? p_index : -1;
 	ads_.reset();
@@ -311,6 +324,15 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	for (size_t b = 0; b < pose_.joints.size() && b < size_t(skeleton_->get_bone_count()); ++b) {
 		skeleton_->set_bone_pose_rotation(int32_t(b), to_godot(pose_.joints[b].q));
 		skeleton_->set_bone_pose_position(int32_t(b), to_godot(pose_.joints[b].t));
+	}
+	// Rigid accessories on their bones: Asset1p while the ADS blend is under half, Asset1pzoom from there.
+	const bool aimed = ads_frame_.blend >= 0.5f;
+	for (const ItemNodes::Attachment &a : items_[size_t(item_)].attachments) {
+		const bool on = (aimed ? a.zoom : a.hip) && a.bone >= 0 && size_t(a.bone) < model_.size();
+		a.mesh->set_visible(on);
+		if (on) {
+			a.mesh->set_transform(xform_to_godot(model_[size_t(a.bone)]) * a.xform);
+		}
 	}
 	set_viewmodel_fov(ads_frame_.viewmodel_fov);
 

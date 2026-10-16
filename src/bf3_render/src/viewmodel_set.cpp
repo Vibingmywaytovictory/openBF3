@@ -309,6 +309,93 @@ std::string last_component(const std::string &p_path) {
 	return slash == std::string::npos ? p_path : p_path.substr(slash + 1);
 }
 
+// The default customization's rigid accessories of a SoldierWeaponData (ViewmodelAttachment). Hostile data: at
+// most kMaxAttachments per item, unknown bones and non-rigid objects are skipped with a note.
+constexpr size_t kMaxAttachments = 16;
+
+void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInstance &p_swd, const anim::Skeleton &p_rig, const std::string &p_unlock,
+		std::vector<ViewmodelAttachment> &r_out, std::vector<std::string> &r_notes) {
+	auto mat = [](const std::optional<core::EbxValue> &p_v) {
+		const std::optional<std::array<std::array<float, 3>, 4>> rows = p_v ? p_v->as_transform() : std::nullopt;
+		return rows ? anim::mat_from_linear_transform(*rows) : anim::Mat34{};
+	};
+	for (const core::EbxInstance &socket : p_lib.follow_all(p_swd.data(), "Sockets")) {
+		if (!socket.is_a("SocketData")) {
+			continue;
+		}
+		const std::optional<core::EbxInstance> unlock = p_lib.follow(socket.data(), "UnlockAsset");
+		const std::string unlock_name = unlock ? name_of(p_lib, *unlock).value_or("") : std::string();
+		if (unlock_name.rfind(kDefaultSocketUnlockPrefix, 0) != 0) {
+			continue; // not part of the default customization
+		}
+		const std::optional<core::EbxValue> bone_v = socket.get("BoneName");
+		const std::string bone(bone_v && bone_v->as_str() ? *bone_v->as_str() : std::string_view());
+		const int32_t rig_bone = bone.empty() ? -1 : p_rig.find(bone);
+		if (rig_bone < 0) {
+			r_notes.push_back(p_unlock + ": socket " + unlock_name + " on bone `" + bone + "` not on the rig (skipped)");
+			continue;
+		}
+		const anim::Mat34 socket_m = anim::mat_mul(mat(socket.get("BoneRigidTransform")), mat(socket.get("Transform")));
+		for (const core::EbxInstance &object : p_lib.follow_all(socket.data(), "AvailableObjects")) {
+			if (!object.is_a("WeaponRegularSocketObjectData")) {
+				r_notes.push_back(p_unlock + ": socket " + unlock_name + ": " + std::string(object.type_name()) + " skipped (rigid objects only)");
+				continue;
+			}
+			const std::optional<core::EbxInstance> hip = p_lib.follow(object.data(), "Asset1p");
+			const std::optional<core::EbxInstance> zoom = p_lib.follow(object.data(), "Asset1pzoom");
+			const std::string hip_name = hip ? name_of(p_lib, *hip).value_or("") : std::string();
+			const std::string zoom_name = zoom ? name_of(p_lib, *zoom).value_or("") : std::string();
+			const anim::Mat34 m = anim::mat_mul(socket_m, mat(object.get("Transform")));
+			for (int which = 0; which < 2; ++which) {
+				const std::string &mesh = which == 0 ? hip_name : zoom_name;
+				if (mesh.empty() || (which == 1 && mesh == hip_name)) {
+					continue; // one entry draws both states when Asset1p == Asset1pzoom
+				}
+				if (r_out.size() >= kMaxAttachments) {
+					r_notes.push_back(p_unlock + ": more than " + std::to_string(kMaxAttachments) + " accessories (rest skipped)");
+					return;
+				}
+				ViewmodelAttachment a;
+				a.socket_unlock = unlock_name;
+				a.bone = bone;
+				a.rig_bone = rig_bone;
+				a.transform = m;
+				a.hip = mesh == hip_name;
+				a.zoom = mesh == zoom_name;
+				a.part.mesh = mesh;
+				r_out.push_back(std::move(a));
+			}
+		}
+	}
+}
+
+// An unskinned part (a rigid accessory): LOD 0, drawn subsets.
+core::Status prepare_rigid_part(const core::LevelMount &p_mount, ViewmodelPart &r_part, core::Cache *p_cache, std::vector<std::string> &r_notes) {
+	const Clock::time_point tm = Clock::now();
+	core::Result<MeshHead> head = read_mesh_head(p_mount, r_part.mesh);
+	if (!head) {
+		return head.error();
+	}
+	MeshRequest request;
+	request.lods = { 0 };
+	request.filter = core::res::SubsetFilter::Drawn;
+	core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, p_mount, *head, request);
+	if (!mesh) {
+		return mesh.error();
+	}
+	if (mesh->mesh.meshes.size() != 1) {
+		return core::make_error(r_part.mesh + ": no LOD 0 prepared");
+	}
+	r_part.prepared = std::move(mesh->mesh.meshes[0]);
+	r_part.cache = mesh->item;
+	r_part.seconds_mesh = since(tm);
+	char line[320];
+	std::snprintf(line, sizeof(line), "mesh %s (rigid accessory): %s in %.2f ms", r_part.mesh.c_str(),
+			p_cache != nullptr && p_cache->is_open() ? core::cache_outcome_name(r_part.cache.outcome) : "no cache", r_part.seconds_mesh * 1000.0);
+	r_notes.push_back(line);
+	return core::Status::success();
+}
+
 core::Status prepare_part(const core::LevelMount &p_mount, ViewmodelPart &r_part, const anim::EbxSkeleton &p_skeleton, const anim::Skeleton &p_rig,
 		anim::SkinBinds &r_binds, core::Cache *p_cache, std::vector<std::string> &r_notes) {
 	const Clock::time_point tm = Clock::now();
@@ -551,6 +638,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		if (const core::EbxPartition *bp = lib.partition_by_name(def->blueprint)) {
 			if (const std::optional<core::EbxInstance> swd = lib.follow(bp->primary().data(), "Object")) {
 				uint32_t clamped = 0;
+				read_default_attachments(lib, *swd, set->rig, spec.unlock, item.attachments, set->notes);
 				item.zoom_render_fov_data = sane(number(swd->get("ZoomRenderFov")), 0.0f, 0.0f, 170.0f, clamped);
 				if (mesh.empty()) {
 					if (const std::optional<core::EbxValue> states = swd->get("WeaponStates")) {
@@ -773,6 +861,11 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		if (core::Status st = materials(item.weapon); !st.ok()) {
 			return st.error();
 		}
+		for (ViewmodelAttachment &a : item.attachments) {
+			if (core::Status st = materials(a.part); !st.ok()) {
+				return core::error_at(item.unlock, st.error());
+			}
+		}
 	}
 	progress("decoding meshes", 6);
 	const core::LevelMount &mount = lib.mount(0);
@@ -785,6 +878,11 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		if (core::Status st = prepare_part(mount, item.weapon, set->weapon_skeleton, set->rig, item.binds, p_cache, set->notes); !st.ok()) {
 			return core::error_at(item.unlock, st.error());
 		}
+		for (ViewmodelAttachment &a : item.attachments) {
+			if (core::Status st = prepare_rigid_part(mount, a.part, p_cache, set->notes); !st.ok()) {
+				return core::error_at(item.unlock, st.error());
+			}
+		}
 	}
 
 	// Textures: Diffuse and Normal of every material a drawn surface uses, decoded on all cores.
@@ -794,6 +892,9 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	std::vector<const ViewmodelPart *> parts = { &set->arms };
 	for (const ViewmodelItem &item : set->items) {
 		parts.push_back(&item.weapon);
+		for (const ViewmodelAttachment &a : item.attachments) {
+			parts.push_back(&a.part);
+		}
 	}
 	for (const ViewmodelPart *part : parts) {
 		for (const PreparedSurface &s : part->prepared.surfaces) {

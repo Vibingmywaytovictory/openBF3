@@ -10,6 +10,7 @@
 // stand-in is counted and named (E11's report lists them).
 
 #include "bf3/anim/clip_asset.h"
+#include "bf3/anim/pose_math.h"
 #include "bf3/anim/pose.h"
 #include "bf3/anim/skeleton.h"
 #include "bf3/anim/skinning.h"
@@ -27,6 +28,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace bf3::render {
@@ -120,6 +122,21 @@ struct ViewmodelAdsData {
 	float fov_in = -1, fov_out = -1, zoom_in = -1, zoom_out = -1; // 0 -> 1 and 1 -> 0
 };
 
+// A rigid accessory mesh on a weapon bone (SoldierWeaponData.Sockets: a SocketData's AvailableObjects, the
+// WeaponRegularSocketObjectData's Asset1p / Asset1pzoom). The kits' default customization attaches the sockets whose
+// UnlockAsset is one of the "weapons/common/no..." unlocks (nooptics = the iron sights of flat-top rifles, the M16A4's
+// m16_ironsight and m16_sight); sockets of other unlocks (optics, rails, barrels) stay off.
+struct ViewmodelAttachment {
+	std::string socket_unlock; // the SocketData's UnlockAsset
+	std::string bone; // SocketData.BoneName (on the rig)
+	int32_t rig_bone = -1;
+	anim::Mat34 transform; // in the bone's space: BoneRigidTransform * SocketData.Transform * object Transform
+	bool hip = true; // drawn while not aimed (Asset1p)
+	bool zoom = true; // drawn while aimed (Asset1pzoom)
+	ViewmodelPart part; // unskinned
+};
+inline constexpr std::string_view kDefaultSocketUnlockPrefix = "weapons/common/no";
+
 struct ViewmodelItem {
 	std::string unlock;
 	ViewmodelPart weapon; // the 1p mesh, materials, prepared mesh
@@ -142,6 +159,7 @@ struct ViewmodelItem {
 	// The Ant packages the clip bindings point into (LoadedClip::package of the first clip of a package owns
 	// nothing here; every package of the item is kept alive by this list).
 	std::vector<std::unique_ptr<core::ant::AntPackage>> packages;
+	std::vector<ViewmodelAttachment> attachments; // the default customization's rigid accessories
 };
 
 // vm: the animator's clip table of an item (stand-ins as VmClipRef::stand_in with the stand-in's seconds).

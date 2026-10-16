@@ -282,6 +282,26 @@ void Bf3M2aViewmodelDemo::build_scene() {
 				UtilityFunctions::print(to_godot("[vm] " + n));
 			}
 		}
+		for (const bf3::render::ViewmodelItem &it : set->items) {
+			if (has_user_arg("vm-verbose")) {
+				// Every drawn surface of the item's weapon mesh: material, shader, size, extent (look debugging).
+				for (const bf3::render::PreparedSurface &sf : it.weapon.prepared.surfaces) {
+					const std::string shader = sf.material_index < it.weapon.materials.slots.size() ? it.weapon.materials.slots[sf.material_index].shader : "?";
+					char b[512];
+					std::snprintf(b, sizeof(b), "[vm] %s surface %zu material %s shader %s: %zu vertices, %zu triangles, aabb (%.3f %.3f %.3f)..(%.3f %.3f %.3f)",
+							it.unlock.c_str(), sf.subset, sf.material_name.c_str(), shader.c_str(), sf.vertex_count(), sf.indices.size() / 3, double(sf.aabb_min[0]),
+							double(sf.aabb_min[1]), double(sf.aabb_min[2]), double(sf.aabb_max[0]), double(sf.aabb_max[1]), double(sf.aabb_max[2]));
+					UtilityFunctions::print(b);
+				}
+			}
+			std::string l;
+			for (const bf3::render::ViewmodelAttachment &a : it.attachments) {
+				l += " " + a.part.mesh.substr(a.part.mesh.rfind('/') + 1) + (a.hip && a.zoom ? "" : a.hip ? " (hip)" : " (aimed)") + " on " + a.bone;
+			}
+			if (!l.empty()) {
+				UtilityFunctions::print(to_godot("[vm] " + it.unlock + ": accessories (" + it.attachments.front().socket_unlock + "):" + l));
+			}
+		}
 	}
 	camera_ = memnew(Camera3D);
 	camera_->set_name("ViewCamera");
