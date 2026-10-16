@@ -61,6 +61,9 @@
 // UI ui2 (ui_commands.cpp; docs/design/ui-minimap-icons.md §15):
 //   minimap <LEVEL> [MODE] | minimap --census   UIMinimapData, combat areas, objectives / the all-level census
 //   hud-icons | item-icons [LEVEL] | hud-sources [--unbound]   the hud3dicons atlas, _small item icons, DataSources
+// M2a weapons (docs/design/m2a-weapons.md §10; weapon_sim_commands.cpp):
+//   weapon-sim <partition> | --all | --check   the weapon simulation on resolved defs (timing, drop, shots to kill)
+//   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -94,6 +97,8 @@
 #include "swf_commands.h"
 // UI ui2: minimap, HUD icon and HUD source commands.
 #include "ui_commands.h"
+// M2a weapons: weapon-sim and range.
+#include "weapon_sim_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -528,6 +533,7 @@ void usage() {
 	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n"); // L1 look
 	std::fprintf(stderr, "%s", bf3dump::vehicle_usage()); // S2 vehicle
 	std::fprintf(stderr, "%s", bf3dump::swf_usage()); // UI ui1
+	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
 }
 
 } // namespace
@@ -674,6 +680,13 @@ int wmain(int argc, wchar_t **argv) {
 	// UI ui2: minimap, hud-icons, item-icons, hud-sources (ui_commands.cpp).
 	if (const int rc = bf3dump::dispatch_ui2(ebx_ctx, cmd, rest); rc >= 0) {
 		return rc;
+	}
+	// M2a weapons: weapon-sim and range (weapon_sim_commands.cpp; docs/design/m2a-weapons.md §10).
+	if (cmd == "weapon-sim") {
+		return bf3dump::cmd_weapon_sim(ebx_ctx, rest);
+	}
+	if (cmd == "range") {
+		return bf3dump::cmd_range(ebx_ctx, rest);
 	}
 	usage();
 	return 2;

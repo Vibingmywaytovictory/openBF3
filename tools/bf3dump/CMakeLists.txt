@@ -35,3 +35,6 @@ target_sources(bf3dump PRIVATE vehicle_commands.cpp vehicle_commands.h)
 target_sources(bf3dump PRIVATE swf_commands.cpp swf_commands.h)
 # UI ui2 (docs/design/ui-minimap-icons.md §15): `minimap`, `hud-icons`, `item-icons`, `hud-sources`.
 target_sources(bf3dump PRIVATE ui_commands.cpp ui_commands.h)
+# M2a weapons (docs/design/m2a-weapons.md §10): `weapon-sim` and `range`, the weapon simulation of bf3_sim on defs
+# resolved from the install (bf3_sim from M1 T1's block above).
+target_sources(bf3dump PRIVATE weapon_sim_commands.cpp weapon_sim_commands.h)

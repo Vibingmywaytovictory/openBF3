@@ -608,3 +608,47 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.ui2 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui2.cmake)
     set_tests_properties(godot.ui2 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 400 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
+
+# M2a weapons (docs/design/m2a-weapons.md §12): m2a.weapons.contract compiles every weapons header with the M1
+# headers it builds on and checks the inline contract (sub-tick time, the pinned shot seeds, the weapon button
+# levels, the mechanics defaults). No data. The implementation wave adds sim.weapons.unit, sim.weapons,
+# sim.weapons.range, sim.weapons.fuzz, sim.weapons.perf and tools.weapon_sim in this block.
+openbf3_test(test_weapons_contract test_main.cpp weapons_contract_tests.cpp test_support.h)
+target_link_libraries(test_weapons_contract PRIVATE bf3_sim)
+add_test(NAME m2a.weapons.contract COMMAND test_weapons_contract --test-suite=weapons-contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_wp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2a.weapons.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
+# M2a weapons: sim.weapons.unit runs the oracle rows (weapon_checks.h) on synthetic defs carrying the 7.1 numbers plus
+# the unit rows (fire modes, spread / recoil, reloads, determinism, hostile bounds, capsules, damage, explosives). No data.
+openbf3_test(test_weapons test_main.cpp weapons_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_weapons PRIVATE bf3_sim)
+add_test(NAME sim.weapons.unit COMMAND test_weapons --test-suite=weapons-unit)
+set_tests_properties(sim.weapons.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    set_tests_properties(sim.weapons.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
+# M2a weapons on the install (read-only; exit 77 = skipped without one; every case prints install.unchanged):
+# sim.weapons (grid pairs, materials, the oracle rows on MP_Subway defs, W4's table), sim.weapons.range (Metro's
+# static world: W3 end to end, W5, W7, W9 on stand-ins), sim.weapons.fuzz (W8: mutated retail and synthetic blobs;
+# meant for asan too) and sim.weapons.perf (W11, wall clock, noisy: RUN_SERIAL, exits 77 when the file named by
+# OPENBF3_QUIET_LOCK exists).
+openbf3_test(test_weapons_install test_main.cpp weapons_install_tests.cpp weapons_range_tests.cpp weapons_install_support.h weapons_support.h test_support.h)
+target_link_libraries(test_weapons_install PRIVATE bf3_sim)
+add_test(NAME sim.weapons COMMAND test_weapons_install --test-suite=weapons)
+add_test(NAME sim.weapons.range COMMAND test_weapons_install --test-suite=weapons-range)
+add_test(NAME sim.weapons.fuzz COMMAND test_weapons_install --test-suite=weapons-fuzz)
+add_test(NAME sim.weapons.perf COMMAND test_weapons_install --test-suite=weapons-perf)
+set_tests_properties(sim.weapons sim.weapons.range sim.weapons.fuzz sim.weapons.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+set_tests_properties(sim.weapons.perf PROPERTIES RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    set_tests_properties(sim.weapons sim.weapons.range sim.weapons.fuzz sim.weapons.perf
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
+# M2a weapons: `bf3dump weapon-sim --check` prints the data-backed W1-W6 / W9 rows and exits 0 / 1 (77 without an install).
+add_test(NAME tools.weapon_sim COMMAND bf3dump weapon-sim --check)
+set_tests_properties(tools.weapon_sim PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(tools.weapon_sim PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()

@@ -234,6 +234,9 @@ void io_fire(IO &io, FireFunction &f) {
 	io.v(dispersions);
 	f.firing_dispersions = static_cast<size_t>(dispersions);
 	io.v(f.fire_logic_recoil_nonzero);
+	// v2 (M2a weapons).
+	io.v(f.hold_off_reload_until_fire_release);
+	io.v(f.force_reload_action_on_fire_trigger);
 }
 
 template <class IO>
@@ -252,6 +255,14 @@ void io_explosion(IO &io, Explosion &e) {
 	io.v(e.disable_occlusion);
 	io.v(e.disable_static_entity_occlusion);
 	io.v(e.is_causing_suppression);
+	// v2 (M2a weapons): the explosion's pair.
+	io.v(e.material.present);
+	io.v(e.material.resolved);
+	io.v(e.material.partition);
+	io.v(e.material.instance);
+	io.v(e.material.flags_and_index);
+	io.v(e.material.physics_material_index);
+	io.v(e.material.physics_property_index);
 }
 
 template <class IO>
