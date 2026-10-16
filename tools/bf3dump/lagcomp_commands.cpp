@@ -423,12 +423,12 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 		net[c].down = 8 + c % 3;
 	}
 	std::array<sim::SoldierState, kShooters> st{};
-	std::array<SimTime, kShooters> next_shot{};
+	std::array<sw::SimTime, kShooters> next_shot{};
 	std::array<uint32_t, kShooters> shot_index{};
 	const uint32_t total = p_warm + p_ticks;
 	const uint32_t first_tick = 100; // history from tick 100; shots once the history spans the rewind
 	for (uint32_t c = 0; c < kShooters; ++c) {
-		next_shot[c] = sw::tick_start(first_tick + 60) + SimTime(c) * 70'000;
+		next_shot[c] = sw::tick_start(first_tick + 60) + sw::SimTime(c) * 70'000;
 	}
 	const int32_t view_back_q8 = int32_t(cfg.max_rewind_ticks + 1) * 256; // lag exactly max_rewind_ticks (§6.4)
 	std::vector<double> times;
