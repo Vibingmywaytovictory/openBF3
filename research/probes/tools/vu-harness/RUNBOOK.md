@@ -1,8 +1,11 @@
 # VU measurement night: runbook (draft)
 
 **Draft, 2026-10-16.** The commands are final once the harness is implemented on `s5/harness` and
-`check_all.py` passes (step 1). If step 1 fails, stop and tell the agent; do not run VU with a broken harness.
-Design and background: [DESIGN.md](DESIGN.md).
+`check_all.py` passes (step 1): it loads the mod in a real Lua 5.4, checks every VU call against the API inventory,
+and runs every scenario below end to end in a mock VU. If step 1 fails, stop and tell the agent; do not run VU with a
+broken harness. You start VU yourself; the agent never does. Design and background: [DESIGN.md](DESIGN.md).
+
+Times are estimates at 30 Hz. Everything the harness asks you to do also appears in chat as `[mh] ...`.
 
 ---
 
@@ -83,12 +86,14 @@ the backend (Zeus) connection and authentication, `The server is now accepting c
 ## 6. Join with the client (2-3 min)
 
 Start the VU client as usual (Start menu "VU Client"). Open the console with `~` and type
-`connect <guid> <password>` (the guid from step 5). Alternative: Win+R, `vu://join/<guid>/<password>`.
+`connect <guid> <password>` (the guid from step 5, 32 characters without dashes). Alternative: Win+R,
+`vu://join/<guid>/<password>`. If step 5 printed no guid: the VU key portal where you made your server key lists the
+key's guid; the server uses the key you copied in step 4.
 Expected: Operation Metro loads; in chat `[mh] mharness <ver> ready - !mh help`.
 
 ## 7. Phase 0 shakedown (30-45 min)
 
-Spawn as any class. Type each command in chat (`J` or your chat key), wait for the `[mh]` reply before the next one.
+Spawn as Assault on the US team (team 1) with the default M16A3 and no attachments. Type each command in chat (`J` or your chat key), wait for the `[mh]` reply before the next one.
 
 | # | do | type | you should see |
 |---|---|---|---|
@@ -114,6 +119,10 @@ Expected: `runs: ...-P0-30-...` with row counts, `malformed 0`, `gaps 0`.
 
 If step 7.7 said `bot damage: YES`, W-B and S-A can run unattended (`mode=B`, add them to the queue in step 10) and you
 can skip to W-D.
+
+Weapons: use them without attachments (iron sights) unless the harness asks for a scope. M16A3, M9 and SMAW are on
+the US side, AK-74M and RPG-7 on the RU side (the M98B, 870 and M67 on both). If a weapon the harness asks for is not in
+your loadout, switch team (Esc, team) and respawn; if it is still missing, type `!mh next`.
 
 | order | scenario | set up | type | what happens | time |
 |---|---|---|---|---|---|
@@ -170,8 +179,10 @@ Expected: one folder per run under `research\measurements\` (`raw.jsonl` or `raw
 
 ## 16. What to send back
 
-Only say "done" to the agent. It reads `research\measurements\` (run folders and `session-20261016`). Do not send or
-commit the VU log files, screenshots or videos: they hold names and addresses; the run folders do not.
+Only say "done" to the agent, plus anything that surprised you (one line each, e.g. "bot damage NO", "prompt for M9
+never came"). The agent reads `research\measurements\` on this PC (run folders and `session-20261016`). Do not send or
+commit the VU log files, screenshots or videos: they hold names and addresses; the run folders hold numbers and small
+ids only.
 
 ---
 
@@ -186,7 +197,9 @@ commit the VU log files, screenshots or videos: they hold names and addresses; t
 | Chat commands get no answer | Open the client console (`~`) and type `mh status`. If that works, use `mh <command>` instead of chat. |
 | `bot damage: NO` | Expected possibility. Run W-B, S-A and W-C with `mode=U` (you shoot). The overnight queue is unaffected. |
 | `round: preround` | M-A and M-B need a running round: stop the server, `setup-instance.ps1 -Session s1 -DisablePreRound`, start again, rejoin, redo `!mh wall` / `!mh flat`. |
-| A scenario seems stuck | `!mh status` shows the state and its timeout (every wait has one). `!mh next` skips the current config; `!mh stop` ends the scenario. |
+| A scenario seems stuck | `!mh status` shows the state and its timeout (every wait has one). `!mh next` skips the current config; `!mh stop` ends the scenario. After three skipped configs a scenario aborts itself (`[mh] aborted: <reason>`) and the queue moves on. |
+| `[mh] waiting for a human` | You left or the client dropped: rejoin (step 6); the queue resumes by itself. |
+| The harness asks for a weapon you do not have | Switch team (US: M16A3, M9, SMAW; RU: AK-74M, RPG-7), respawn; still missing: `!mh next`. |
 | Server or client crashed | Restart (steps 5-6), redo the sites (`!mh wall`, `!mh flat`), and resume: `!mh run WA from=<n>` with `<n>` from the last `cfg-done` in `!mh status` before the crash (or ask the agent). |
 | `[mh] tickets low, queue paused` | The round is close to ending. `!mh restartround confirm`, wait for the level, redo the sites, `!mh queue resume`. |
 | `install-compare` exit 1 | Stop everything; keep both CSVs; tell the agent. |

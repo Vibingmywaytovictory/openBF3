@@ -9,6 +9,11 @@ M.protocols = {
 
 M.distance = { hip = 10, ads = 25, ads_mag = 12 }
 
+-- Team per weapon so the shooter's own kit lists it (topics/01 section 1 kit table: M16A3 US, AK-74M RU, M416 both)
+-- [inferred; live:L29]. TeamId.Team1 = US, Team2 = RU on the Session 1 levels [inferred; P0.6 logs it].
+M.team = { M16A3 = 1, M416 = 1, M249 = 1, M98B = 1, M9 = 1, ['870MCS'] = 1, SMAW = 1, M320HE = 1, M67 = 1,
+	AK74M = 2, RPG7 = 2 }
+
 M.configs = {
 	{ tier = 1, w = 'M16A3', stance = 'stand', zoom = true, proto = 'full' },
 	{ tier = 1, w = 'M16A3', stance = 'stand', zoom = false, proto = 'full' },

@@ -2628,5 +2628,26 @@
   "version": "Lua 5.4",
   "source": "content/vext/_index.md (Lua engine)",
   "runtime": "lupa.lua54"
+ },
+ "inherits": {
+  "doc": "'Inherits from' lines of the VU-Docs type pages (type@realm -> parent); the mock VU runtime resolves members along this chain",
+  "CapturePointEntity@server": "GameEntity",
+  "ControllableEntity@server": "PhysicsEntity",
+  "Entity@shared": "EntityBusPeer",
+  "MaterialContainerPair@shared": "DataContainer",
+  "PhysicsEntity@server": "GameEntity",
+  "PhysicsEntityBase@shared": "SpatialEntity",
+  "SoldierEntity@client": "ControllableEntity",
+  "SoldierEntity@server": "ControllableEntity",
+  "SoldierWeapon@client": "GameEntity",
+  "SoldierWeapon@server": "GameEntity",
+  "SoldierWeaponsComponent@server": "Component",
+  "SpatialEntity@shared": "Entity",
+  "TicketCounterEntity@server": "GameEntity",
+  "GameEntity@server": "SpatialEntity",
+  "Component@shared": "EntityBusPeer",
+  "ControllableEntity@client": "PhysicsEntity",
+  "PhysicsEntity@client": "GameEntity",
+  "GameEntity@client": "SpatialEntity"
  }
 }
