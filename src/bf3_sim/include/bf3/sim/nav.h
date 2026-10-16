@@ -177,7 +177,16 @@ struct NavTileInput {
 	// baked Detour data carries the tile coordinates (validate_detour_tile checks them against the key's tile), so
 	// two tiles with identical triangles must not share an entry (review of revision 2).
 	core::Sha256Digest digest{};
+	// TC (docs/design/terrain-collision.md §7): per triangle, 1 = unwalkable (RC_NULL_AREA: a terrain triangle under
+	// water, nav_terrain_wet). Empty = every triangle walkable (no water planes). Hashed into digest when non-empty.
+	std::vector<uint8_t> unwalkable;
 };
+
+// TC water rule (moved from the soup's cover tiles to the nav input, per triangle): a terrain triangle (kSoupTerrain)
+// is unwalkable when its centroid lies inside a water plane (core::level::water_plane_covers) and its highest corner
+// lies more than core::level::kCoverWaterDepth below the highest such plane. Havok triangles are never marked (piers,
+// boats and decks over water stay walkable). Defined by the TC implementation.
+bool nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water);
 
 // The input of p_tiles (sorted, unique) from p_soup with the layers in p_layer_mask (query_mask::kMovement for the
 // bake; kAll only for the split investigation, docs §5.7). Gather: one pass over the soup's triangles, each filed
@@ -186,6 +195,11 @@ struct NavTileInput {
 // kMaxNavTileInputTriangles per tile or kMaxNavInputRefs pairs.
 core::Result<std::vector<NavTileInput>> nav_tile_inputs(const core::level::CollisionSoup &p_soup, std::span<const NavTileKey> p_tiles,
 		const NavParams &p_params, uint32_t p_layer_mask = query_mask::kMovement);
+// TC: the same with the terrain cells (from the soup's terrain records, append_soup_terrain_tile over the 3 x 3 tiles
+// around each requested one) and NavTileInput::unwalkable by nav_terrain_wet over p_water. Defined by the TC
+// implementation, which then makes the overload above call it with no planes.
+core::Result<std::vector<NavTileInput>> nav_tile_inputs(const core::level::CollisionSoup &p_soup, std::span<const NavTileKey> p_tiles,
+		const NavParams &p_params, uint32_t p_layer_mask, std::span<const core::level::WaterPlane> p_water);
 
 struct NavTileInfo {
 	NavTileKey tile{};
@@ -268,6 +282,10 @@ struct NavBakeOptions {
 	// (collision_world.h). The worlds and their query counters die with the bake.
 	std::shared_ptr<const StaticWorldShapes> link_shapes;
 	std::atomic<size_t> *tiles_done = nullptr; // progress (optional)
+	// TC: the level's water planes for the nav water rule (nav_terrain_wet); a non-empty list adds ";water=<SHA-256 of
+	// the planes>" to the nav-world key (until TC it rides on StaticWorldLoadOptions::cover_water). A tile whose whole
+	// input is unwalkable terrain bakes to no tile.
+	std::vector<core::level::WaterPlane> water;
 };
 
 // Bakes p_tiles from p_soup (no cache).
@@ -318,6 +336,11 @@ struct NavInputCheck {
 	size_t nav_only_degenerate = 0; // of those, triangles Jolt's MeshShapeSettings sanitise drops (no area; allowed)
 	size_t world_only = 0; // in the motor's world, not in the nav input: a hole or a missing wall in the nav
 	float max_corner_error = 0.0f; // metres, over the matched pairs
+	// TC: terrain triangles come back out of the HeightFieldShapes (GetPosition / IsNoCollision per sample over the box)
+	// and the patch MeshShapes; they match within max(p_tolerance, StaticTerrainInfo::max_error + 0.1 mm), because the
+	// field stores 16-bit samples over its height range (0.7 mm on Caspian, 0.3 mm on Kharg, 11.1 mm on MP_013).
+	size_t terrain_matched = 0;
+	float terrain_tolerance = 0.0f; // the tolerance used for the terrain pairs (metres)
 };
 core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShapes &p_world, const NavTileInput &p_input, const NavParams &p_params,
 		uint32_t p_layer_mask = query_mask::kMovement, float p_tolerance = 0.001f);

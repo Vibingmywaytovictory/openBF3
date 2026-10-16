@@ -534,3 +534,13 @@ if(OPENBF3_ASAN)
     set_tests_properties(sim.vehicle PROPERTIES TIMEOUT 1950)
     set_tests_properties(sim.vehicle.unit PROPERTIES TIMEOUT 1350)
 endif()
+# TC terrain collision (track "Terrain collision everywhere", docs/design/terrain-collision.md §13): tc.contract
+# compiles the TC header additions together and checks their constants and defaults. No data. The TC implementation
+# adds sim.terrain.unit and sim.terrain (G1, G6) to this block.
+openbf3_test(test_tc_contract test_main.cpp tc_contract_tests.cpp test_support.h)
+target_link_libraries(test_tc_contract PRIVATE bf3_sim bf3_render)
+add_test(NAME tc.contract COMMAND test_tc_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_tc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(tc.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
+endif()

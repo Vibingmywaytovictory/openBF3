@@ -69,6 +69,10 @@
 #include <string_view>
 #include <vector>
 
+namespace bf3::core::res {
+struct HeightGrid; // res/terrain.h (TC: SoupTerrain::grid)
+}
+
 namespace bf3::core::level {
 
 // IW4L collision/material.rs surface types (IW `surface_type`, 0..31); 0 is unused here.
@@ -208,6 +212,11 @@ struct SoupTerrain {
 	size_t degenerate = 0;
 	size_t nonfinite = 0;
 	uint64_t hash = 0; // FNV-1a over its triangles in emit order
+	// TC (docs/design/terrain-collision.md §5.1): the terrain record. The TC implementation sets both for a Built terrain
+	// and keeps no terrain triangle in the tiles; every consumer (static world, nav input, overlay, listing) makes the
+	// cells from them (soup_terrain_cell, append_soup_terrain_tile, hash_soup_terrain). Null / identity until then.
+	std::shared_ptr<const res::HeightGrid> grid;
+	res::Transform frame{}; // the object's frame (LevelTransform with its scale), as the cells use it
 };
 
 struct SoupTile {
@@ -255,6 +264,55 @@ inline constexpr uint32_t kCollisionSoupVersion = 1;
 
 // Retail Metro TDM holds 1.11 M triangles (0.17 M of them terrain); a soup past this fails (each triangle costs 48 bytes).
 inline constexpr size_t kMaxSoupTriangles = size_t(1) << 25;
+
+// ---- TC: terrain collision everywhere (docs/design/terrain-collision.md; declared here, defined by the TC
+// implementation in collision_soup.cpp / soup_terrain.cpp; nothing calls them before it lands) -------------------
+// The rule after TC: every cell of every Built terrain whose four samples are not holes gives (a, d, b) and (a, c, d)
+// as above, independent of the Havok tiles; SoupOptions::terrain_cover and cover_water go away (the water rule moves
+// to the nav bake, nav.h), CollisionSoup::triangles / tiles / sum count the Havok triangles only, and the terrain's
+// triangles, hash and per-tile sums come from hash_soup_terrain. kCollisionSoupVersion becomes 2.
+// Terrain objects a soup accepts (retail: at most 1 per level x mode, 199 of 230 runs have one [verified
+// 2026-10-16]); each record holds up to kMaxGridSide^2 floats + hole bytes (84 MB), so more fail the soup.
+inline constexpr size_t kMaxSoupTerrains = 8;
+
+// One cell (p_x, p_z) of a terrain record: its two triangles in emit order, or none when a corner is a hole (open).
+// Triangles are quantised like every soup triangle: a degenerate or non-finite one is counted, not returned.
+// p_placement is the triangles' SoupTriangle::placement (placements.size() + terrain index).
+struct SoupTerrainCell {
+	std::array<SoupTriangle, 2> triangles{};
+	uint8_t count = 0; // triangles kept (0..2)
+	uint8_t degenerate = 0;
+	uint8_t nonfinite = 0;
+	bool open = false; // a corner sample is a hole
+};
+SoupTerrainCell soup_terrain_cell(const SoupTerrain &p_terrain, uint32_t p_placement, size_t p_x, size_t p_z);
+
+// The terrain triangles whose soup tile (soup_tile_of: the centroid's 64 m tile) is p_tile, appended in emit order
+// (rows along +Z, cells along +X). Visits only the cells whose frame-mapped bounds can reach the tile (one cell of
+// margin); every visited cell is charged to r_budget. Returns the number appended; an error on a missing record or
+// an exhausted budget.
+Result<size_t> append_soup_terrain_tile(const SoupTerrain &p_terrain, uint32_t p_placement, const std::array<int32_t, 2> &p_tile,
+		std::vector<SoupTriangle> &r_out, WorkBudget &r_budget);
+
+// What the oracle's T and K lines need of one terrain: the whole grid's cells in emit order. hash is FNV-1a over
+// every kept triangle's bytes in emit order (the same definition as before TC, now over all cells); tiles holds per
+// soup tile (sorted by x, z) the triangle count and the wrapping sum of the triangle hashes. Rows run on up to
+// p_threads lanes for the tile sums; the running hash is one serial pass.
+struct SoupTerrainTileSum {
+	std::array<int32_t, 2> tile{};
+	size_t triangles = 0;
+	uint64_t sum = 0;
+};
+struct SoupTerrainHash {
+	size_t cells = 0;
+	size_t open = 0;
+	size_t triangles = 0;
+	size_t degenerate = 0;
+	size_t nonfinite = 0;
+	uint64_t hash = 0xcbf29ce484222325ull; // kFnvOffset
+	std::vector<SoupTerrainTileSum> tiles;
+};
+Result<SoupTerrainHash> hash_soup_terrain(const SoupTerrain &p_terrain, uint32_t p_placement, unsigned p_threads = 0);
 
 // One install entry the soup read (M1 T1, docs/design/m1.md §5.5 coverage check): the EBX partitions of the
 // level root, of every collision placement's entity (and its reference) and of every terrain object and asset;

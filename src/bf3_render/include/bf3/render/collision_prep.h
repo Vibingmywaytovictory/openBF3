@@ -56,4 +56,21 @@ struct PreparedCollisionMesh {
 // (0 = all cores).
 std::vector<PreparedCollisionMesh> prepare_collision_meshes(const core::level::CollisionSoup &p_soup, unsigned p_threads = 0);
 
+// TC (docs/design/terrain-collision.md §8): after TC the soup's tiles hold no terrain, and a whole terrain is up to
+// 33.5 M triangles (3.6 GB as overlay vertices), so the overlay's terrain layer is a window: the terrain triangles of
+// the 64 m tiles whose square lies within terrain_radius of terrain_centre (world XZ), at most max_terrain_triangles,
+// made from the soup's terrain records (core::level::append_soup_terrain_tile) as layer-4 meshes in tile order after
+// the Havok slots. The overlay re-prepares the window on its loader thread when the camera leaves the inner half.
+struct CollisionPrepOptions {
+	unsigned threads = 0; // 0 = all cores
+	bool terrain = true;
+	std::array<float, 2> terrain_centre{};
+	float terrain_radius = 512.0f; // metres; about 200 tiles, 0.4 M triangles
+	size_t max_terrain_triangles = size_t(1) << 21;
+};
+// Defined by the TC implementation (collision_prep.cpp).
+std::vector<PreparedCollisionMesh> prepare_collision_meshes(const core::level::CollisionSoup &p_soup, const CollisionPrepOptions &p_options);
+// Only the terrain window (the camera moved).
+std::vector<PreparedCollisionMesh> prepare_terrain_window(const core::level::CollisionSoup &p_soup, const CollisionPrepOptions &p_options);
+
 } // namespace bf3::render
