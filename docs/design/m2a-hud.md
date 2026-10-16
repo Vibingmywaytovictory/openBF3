@@ -180,11 +180,39 @@ godot.m2a_hud: `M2A HUD CHECK: PASS (32/32)` in 5.0 s, with the HUD ready 0.56 s
 
 ### 6.1 Unit and ASan results
 
-Filled in from the acceptance runs in §6.2.
+`ui.hud.feed.unit` (no install) passes 8/8 cases on dev and on asan, with no AddressSanitizer report.
 
-### 6.2 Acceptance runs
+| case | result |
+|---|---|
+| static rows | 7 synthetic rows: kinds, modes, capacities, refusals |
+| fill_hud | 600 scripted frames, 0 mismatches (magazine, reserve, name, ADS, reload, switch, death) |
+| hit indicator | 3 own hits shown on a 64 Hz clock, 50 frames, restarted once; 2 other hits ignored |
+| hostile feed | NaN spread and health, negative ammo, mode index 200 and an out-of-table def are clamped or cleared |
+| crosshair gap | h 1080, 1°, vfov 55 gives 18.1067 px |
+| stage mapping | 16:9 at the three sizes, plus 4:3 and 21:9 |
+| synthetic screen tree | 35 nodes |
+| hostile trees | a depth-200 chain and 5000 siblings on a 1000-unit budget both fail with an error |
 
-Filled in below by the final runs.
+`ui.hud.feed.install` passes on dev and asan:
+* 12/12 names and 12/12 `_small` icons (64 × 16).
+* Clip × spare magazines: 31 × 5 (M16A3, M4A1, AK-74M, AKS-74u), 46 × 4 (M27, RPK), 11 × 6 (MK11, SVD), 16 × 4 (M9), 18 × 4 (MP443), 1 × 0 (knife), 1 × 1 (M67).
+* The hudmpscreen slots of §4: 94 nodes, 0 missing.
+* install.unchanged: 256 files.
+
+Wall time: unit 0.27 s on dev, 2.8 s on asan; install 0.5 s on dev, 6.5 s on asan.
+
+### 6.2 Acceptance runs (2026-10-16, dev preset, OPENBF3_GODOT set)
+
+* **Full ctest without the timing rows** (build.cmd's TIMING regex, `-j 6`): 90/90 passed. `core.cache_data` and
+  `core.res` were skipped as before.
+* **The timing rows, serial (`-j 1`) under this track's quiet lock** (held 13:14 to 13:39): 23/23 passed. This
+  includes godot.m1 (348 s), godot.m1_load, godot.ui2, godot.ui_fonts(_shots), godot.s3_crowd, godot.l1_look,
+  godot.m9_reload, godot.s0_selftest, godot.inspector, godot.collision, host.session(.unit), host.server,
+  host.scale(.unit), sim.nav.bake, sim.weapons.perf, tools.fx_bench, logic.perf, tools.ebx_memory, tools.m1_prepare
+  and render.scene.
+* **godot.m2a_hud under the same lock:** `M2A HUD CHECK: PASS (32/32)` in 4.5 s (6.5 s for the ctest row).
+
+Timing rows are wall-clock and noisy on this shared machine. The figures above come from one run each.
 
 ## 7. Open items and handoffs
 
