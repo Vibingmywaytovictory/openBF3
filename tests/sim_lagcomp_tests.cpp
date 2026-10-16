@@ -610,8 +610,9 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK(net::sim_time_q8(0) == 0);
 		CHECK(net::sim_time_q8(sw::tick_start(5)) == 4 * 256);
 		CHECK(net::sim_time_q8(sw::tick_end(5)) == 5 * 256);
-		CHECK(net::sim_time_q8(U / 512) == 1); // 0.5 q8 rounds up
-		CHECK(net::sim_time_q8(U / 512 - 1) == 0);
+		CHECK(net::sim_time_q8(1954) == 1); // 0.50002 q8 rounds up (U / 512 = 1953.125 units is half a q8 step)
+		CHECK(net::sim_time_q8(1953) == 0); // 0.49997
+		CHECK(net::sim_time_q8(U / 4) == 64);
 		CHECK(net::sim_time_q8(-U) == -256);
 		for (uint32_t T = 50; T < 60; ++T) {
 			for (int64_t R = int64_t(T) * 256 - 30 * 256; R <= int64_t(T) * 256 + 256; R += 37) {
