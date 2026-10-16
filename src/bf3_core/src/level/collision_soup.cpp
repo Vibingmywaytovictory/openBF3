@@ -6,6 +6,8 @@
 // are bit-identical to resource_bf3::triangles on the same leaves.
 #include "bf3/core/level/collision_soup.h"
 
+#include "soup_terrain_internal.h"
+
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/thread_pool.h"
@@ -449,276 +451,6 @@ bool terrain_grid(const LevelMount &p_mount, const std::string &p_asset, float p
 	return true;
 }
 
-// Tile index of a cell centre; false when it is not a sane coordinate.
-bool centre_tile(float p_origin, float p_spacing, size_t p_index, int32_t &r_tile) {
-	const double centre = double(p_origin) + (double(p_index) + 0.5) * double(p_spacing);
-	const double tile = std::floor(centre / 64.0);
-	if (!(std::fabs(tile) < 1e7)) {
-		return false;
-	}
-	r_tile = int32_t(tile);
-	return true;
-}
-
-// S1 water rule (SoupOptions::cover_water): the cover tiles that keep their terrain cells for this grid. A tile
-// whose centre lies in a plane keeps them when one of its cells' corner samples lies above the highest such plane
-// minus kCoverWaterDepth; a tile outside every plane, or without a cell of this grid, is kept. Tiles as in
-// terrain_triangles (the cell centre's grid coordinates).
-std::vector<std::array<int32_t, 2>> dry_cover(const res::HeightGrid &p_grid, const Transform &p_frame, const std::vector<std::array<int32_t, 2>> &p_cover,
-		const std::vector<WaterPlane> &p_water, size_t &r_wet) {
-	const size_t width = p_grid.width;
-	const size_t height = p_grid.height;
-	if (p_cover.empty() || p_water.empty() || width < 2 || height < 2) {
-		return p_cover;
-	}
-	std::vector<float> top(p_cover.size(), -std::numeric_limits<float>::infinity());
-	const float ox = p_grid.origin_xz[0];
-	const float oz = p_grid.origin_xz[1];
-	const float sx = p_grid.sample_spacing[0];
-	const float sz = p_grid.sample_spacing[1];
-	std::vector<int32_t> column_tile(width - 1);
-	std::vector<uint8_t> column_ok(width - 1);
-	for (size_t x = 0; x + 1 < width; ++x) {
-		column_ok[x] = centre_tile(ox, sx, x, column_tile[x]) ? 1 : 0;
-	}
-	for (size_t z = 0; z + 1 < height; ++z) {
-		int32_t tz = 0;
-		if (!centre_tile(oz, sz, z, tz)) {
-			continue;
-		}
-		size_t at = SIZE_MAX; // the cover is sorted by (x, z): one lookup per run of cells in the same tile
-		int32_t at_tile = INT32_MIN;
-		for (size_t x = 0; x + 1 < width; ++x) {
-			if (column_ok[x] == 0) {
-				continue;
-			}
-			if (column_tile[x] != at_tile) {
-				at_tile = column_tile[x];
-				const auto it = std::lower_bound(p_cover.begin(), p_cover.end(), std::array<int32_t, 2>{ at_tile, tz });
-				at = (it != p_cover.end() && (*it)[0] == at_tile && (*it)[1] == tz) ? size_t(it - p_cover.begin()) : SIZE_MAX;
-			}
-			if (at == SIZE_MAX) {
-				continue;
-			}
-			for (size_t j = 0; j < 2; ++j) {
-				for (size_t i = 0; i < 2; ++i) {
-					const res::Vec3 p = p_frame.transform_point({ ox + float(x + i) * sx, p_grid.at(x + i, z + j), oz + float(z + j) * sz });
-					if (std::isfinite(p[1])) {
-						top[at] = std::max(top[at], p[1]);
-					}
-				}
-			}
-		}
-	}
-	std::vector<std::array<int32_t, 2>> out;
-	out.reserve(p_cover.size());
-	for (size_t i = 0; i < p_cover.size(); ++i) {
-		const float cx = (float(p_cover[i][0]) + 0.5f) * 64.0f;
-		const float cz = (float(p_cover[i][1]) + 0.5f) * 64.0f;
-		float plane = -std::numeric_limits<float>::infinity();
-		for (const WaterPlane &w : p_water) {
-			if (water_plane_covers(w, cx, cz)) {
-				plane = std::max(plane, w.y);
-			}
-		}
-		if (top[i] == -std::numeric_limits<float>::infinity() || plane == -std::numeric_limits<float>::infinity() ||
-				top[i] >= plane - kCoverWaterDepth) {
-			out.push_back(p_cover[i]);
-		} else {
-			++r_wet;
-		}
-	}
-	return out;
-}
-
-// Winds a terrain triangle to face +Y (Havok's counter-clockwise front).
-std::array<res::Vec3, 3> face_up(const std::array<res::Vec3, 3> &p_t) {
-	const res::Vec3 &a = p_t[0];
-	const res::Vec3 &b = p_t[1];
-	const res::Vec3 &c = p_t[2];
-	const res::Vec3 u = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
-	const res::Vec3 v = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
-	if (u[2] * v[0] - u[0] * v[2] < 0.0f) {
-		return { a, c, b };
-	}
-	return p_t;
-}
-
-// Kept tiles: the Havok tiles and their 8-neighbours, as a dense mask over their bounding range.
-struct TileMask {
-	int32_t x0 = 0;
-	int32_t z0 = 0;
-	int32_t width = 0;
-	int32_t height = 0;
-	std::vector<uint8_t> bits;
-
-	bool has(int32_t p_x, int32_t p_z) const {
-		const int64_t x = int64_t(p_x) - x0;
-		const int64_t z = int64_t(p_z) - z0;
-		return x >= 0 && z >= 0 && x < width && z < height && bits[size_t(x + z * width)] != 0;
-	}
-};
-
-TileMask near_tiles(const std::map<std::pair<int32_t, int32_t>, size_t> &p_tiles) {
-	TileMask mask;
-	if (p_tiles.empty()) {
-		return mask;
-	}
-	int64_t x0 = INT64_MAX;
-	int64_t z0 = INT64_MAX;
-	int64_t x1 = INT64_MIN;
-	int64_t z1 = INT64_MIN;
-	for (const auto &[key, count] : p_tiles) {
-		x0 = std::min<int64_t>(x0, int64_t(key.first) - 1);
-		x1 = std::max<int64_t>(x1, int64_t(key.first) + 1);
-		z0 = std::min<int64_t>(z0, int64_t(key.second) - 1);
-		z1 = std::max<int64_t>(z1, int64_t(key.second) + 1);
-	}
-	// Tiles come from |c| <= 1e7 m coordinates (~156k tiles from the origin); the mask is only
-	// allocated when it is small, a scattered soup looks the tiles up in the map instead.
-	if ((x1 - x0 + 1) * (z1 - z0 + 1) > (int64_t(1) << 24)) {
-		return mask;
-	}
-	mask.x0 = int32_t(x0);
-	mask.z0 = int32_t(z0);
-	mask.width = int32_t(x1 - x0 + 1);
-	mask.height = int32_t(z1 - z0 + 1);
-	mask.bits.assign(size_t(mask.width) * size_t(mask.height), 0);
-	for (const auto &[key, count] : p_tiles) {
-		for (int32_t dz = -1; dz <= 1; ++dz) {
-			for (int32_t dx = -1; dx <= 1; ++dx) {
-				mask.bits[size_t((key.first + dx - mask.x0) + (key.second + dz - mask.z0) * mask.width)] = 1;
-			}
-		}
-	}
-	return mask;
-}
-
-struct TerrainRow {
-	std::vector<SoupTriangle> triangles;
-	size_t cells = 0;
-	size_t open = 0;
-	size_t degenerate = 0;
-	size_t nonfinite = 0;
-};
-
-// One terrain object's rows of cells (all cores), then its triangles in emit order into r_built.
-void terrain_triangles(const res::HeightGrid &p_grid, const Transform &p_frame, const std::map<std::pair<int32_t, int32_t>, size_t> &p_tiles,
-		const std::vector<std::array<int32_t, 2>> &p_cover, uint32_t p_placement, unsigned p_threads, SoupTerrain &r_terrain, Built &r_built) {
-	const size_t width = p_grid.width;
-	const size_t height = p_grid.height;
-	if (width < 2 || height < 2 || (p_tiles.empty() && p_cover.empty())) {
-		return;
-	}
-	const TileMask mask = near_tiles(p_tiles);
-	// S1 terrain cover (SoupOptions::terrain_cover, sorted and unique): those tiles keep their cells too. Empty for
-	// every M1 soup, so the default rule below is untouched.
-	const auto covered = [&](int32_t p_x, int32_t p_z) {
-		return !p_cover.empty() && std::binary_search(p_cover.begin(), p_cover.end(), std::array<int32_t, 2>{ p_x, p_z });
-	};
-	const auto near = [&](int32_t p_x, int32_t p_z) {
-		if (covered(p_x, p_z)) {
-			return true;
-		}
-		if (p_tiles.empty()) {
-			return false;
-		}
-		if (!mask.bits.empty()) {
-			return mask.has(p_x, p_z);
-		}
-		for (int32_t dz = -1; dz <= 1; ++dz) {
-			for (int32_t dx = -1; dx <= 1; ++dx) {
-				if (p_tiles.count({ p_x - dx, p_z - dz }) != 0) {
-					return true;
-				}
-			}
-		}
-		return false;
-	};
-	const float ox = p_grid.origin_xz[0];
-	const float oz = p_grid.origin_xz[1];
-	const float sx = p_grid.sample_spacing[0];
-	const float sz = p_grid.sample_spacing[1];
-	std::vector<int32_t> column_tile(width - 1);
-	std::vector<uint8_t> column_ok(width - 1);
-	for (size_t x = 0; x + 1 < width; ++x) {
-		column_ok[x] = centre_tile(ox, sx, x, column_tile[x]) ? 1 : 0;
-	}
-	std::vector<TerrainRow> rows(height - 1);
-	parallel_for(
-			height - 1,
-			[&](size_t p_z) {
-				int32_t tz = 0;
-				if (!centre_tile(oz, sz, p_z, tz)) {
-					return;
-				}
-				TerrainRow &row = rows[p_z];
-				const size_t z = p_z;
-				for (size_t x = 0; x + 1 < width; ++x) {
-					if (column_ok[x] == 0 || !near(column_tile[x], tz)) {
-						continue;
-					}
-					++row.cells;
-					if (p_grid.hole(x, z) || p_grid.hole(x + 1, z) || p_grid.hole(x, z + 1) || p_grid.hole(x + 1, z + 1)) {
-						++row.open;
-						continue;
-					}
-					const auto point = [&](size_t p_i, size_t p_j) {
-						return p_frame.transform_point({ ox + float(x + p_i) * sx, p_grid.at(x + p_i, z + p_j), oz + float(z + p_j) * sz });
-					};
-					const res::Vec3 a = point(0, 0);
-					const res::Vec3 b = point(1, 0);
-					const res::Vec3 c = point(0, 1);
-					const res::Vec3 d = point(1, 1);
-					const std::array<std::array<res::Vec3, 3>, 2> pair = { { { a, d, b }, { a, c, d } } };
-					for (const std::array<res::Vec3, 3> &t : pair) {
-						SoupTriangle tri;
-						tri.v = face_up(t);
-						std::array<int64_t, 9> q{};
-						if (!soup_quantise(tri.v, q)) {
-							++row.nonfinite;
-							continue;
-						}
-						if (soup_degenerate(q)) {
-							++row.degenerate;
-							continue;
-						}
-						tri.material = 0;
-						tri.placement = p_placement;
-						tri.surface = surface::kDirt;
-						tri.body = uint8_t(CollisionBody::Collision);
-						tri.flags = kSoupTerrain;
-						row.triangles.push_back(tri);
-					}
-				}
-			},
-			p_threads);
-	size_t count = 0;
-	for (const TerrainRow &row : rows) {
-		count += row.triangles.size();
-	}
-	r_built.triangles.reserve(count);
-	r_built.tiles.reserve(count);
-	r_built.hashes.reserve(count);
-	for (TerrainRow &row : rows) {
-		r_terrain.cells += row.cells;
-		r_terrain.open += row.open;
-		r_built.degenerate += row.degenerate;
-		r_built.nonfinite += row.nonfinite;
-		for (const SoupTriangle &t : row.triangles) {
-			std::array<int64_t, 9> q{};
-			soup_quantise(t.v, q);
-			uint64_t h = kFnvOffset;
-			soup_hash_bytes(h, q, t.material, t.surface, t.body, t.flags);
-			soup_hash_bytes(r_built.hash, q, t.material, t.surface, t.body, t.flags);
-			r_built.triangles.push_back(t);
-			r_built.tiles.push_back(soup_tile_of(q));
-			r_built.hashes.push_back(h);
-		}
-		row = TerrainRow();
-	}
-}
-
 void include_point(CollisionSoup &r_soup, bool &r_any, const res::Vec3 &p_p) {
 	if (!r_any) {
 		r_soup.min = p_p;
@@ -1069,7 +801,7 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 	pieces = std::vector<Piece>();
 	soup.seconds_triangles = seconds_since(clock);
 
-	// --- Totals and tiles (placement order, then walk order; terrain last).
+	// --- Totals and tiles (placement order, then walk order; Havok triangles only, TC).
 	clock = std::chrono::steady_clock::now();
 	std::map<std::pair<int32_t, int32_t>, size_t> tile_counts;
 	for (size_t i = 0; i < jobs.size(); ++i) {
@@ -1106,18 +838,19 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 		}
 	}
 
-	// --- Terrain: height grids and the cells around the Havok tiles (rows on all cores).
+	// --- Terrain (TC, docs/design/terrain-collision.md §5.1): each terrain object's height grid as a record (grid +
+	// frame) and its cell counts over the whole grid; no terrain triangle goes into the tiles. Consumers make the cells
+	// on demand (soup_terrain_cell, append_soup_terrain_tile, hash_soup_terrain).
 	set_stage(progress, SoupProgress::Terrain, 0);
 	if (p_options.terrain) {
-		const std::map<std::pair<int32_t, int32_t>, size_t> havok_tiles = tile_counts;
-		// S1: the cover, sorted and unique whatever the caller passed (binary search above).
-		std::vector<std::array<int32_t, 2>> cover = p_options.terrain_cover;
-		std::sort(cover.begin(), cover.end());
-		cover.erase(std::unique(cover.begin(), cover.end()), cover.end());
+		size_t terrain_objects = 0;
 		for (size_t at = 0; at < p_world.objects.size(); ++at) {
 			const PlacedObject &object = p_world.objects[at];
 			if (object.kind != ObjectKind::Terrain) {
 				continue;
+			}
+			if (++terrain_objects > kMaxSoupTerrains) {
+				return make_error("collision soup: more than " + std::to_string(kMaxSoupTerrains) + " terrain objects");
 			}
 			SoupTerrain terrain;
 			terrain.object = uint32_t(at);
@@ -1137,16 +870,22 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			}
 			BF3_TRY(charge_text(budget, *name)); // kept below
 			terrain.asset = std::string(*name);
-			res::HeightGrid grid;
+			auto grid = std::make_shared<res::HeightGrid>();
 			add_partition_source(object.entity);
 			add_partition_source(*asset);
-			if (!terrain_grid(mount, terrain.asset, p_options.terrain_spacing, p_options.threads, terrain.depth, grid, terrain.error, soup.sources)) {
+			if (!terrain_grid(mount, terrain.asset, p_options.terrain_spacing, p_options.threads, terrain.depth, *grid, terrain.error, soup.sources)) {
 				terrain.state = SoupTerrain::State::Missing;
 				soup.terrains.push_back(std::move(terrain));
 				continue;
 			}
-			terrain.side = grid.width;
-			terrain.holes = size_t(std::count(grid.holes.begin(), grid.holes.end(), uint8_t(1)));
+			if (grid->heights.size() != grid->width * grid->height || grid->holes.size() != grid->width * grid->height) {
+				terrain.state = SoupTerrain::State::Missing;
+				terrain.error = "res " + terrain.asset + ": the height grid's arrays do not match its size";
+				soup.terrains.push_back(std::move(terrain));
+				continue;
+			}
+			terrain.side = grid->width;
+			terrain.holes = size_t(std::count(grid->holes.begin(), grid->holes.end(), uint8_t(1)));
 			const LevelTransform &t = object.transform;
 			const float factor = t.scale / 1.0f;
 			Transform frame;
@@ -1156,27 +895,12 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 				frame.axis[2][k] = t.forward[k] * factor;
 			}
 			frame.origin = t.trans;
-			Built b;
-			// S1 water rule: the cover tiles under water lose their terrain (empty cover_water: the cover as given).
-			const std::vector<std::array<int32_t, 2>> grid_cover = dry_cover(grid, frame, cover, p_options.cover_water, soup.cover_tiles_wet);
-			terrain_triangles(grid, frame, havok_tiles, grid_cover, uint32_t(jobs.size() + soup.terrains.size()), p_options.threads, terrain, b);
-			if (soup.triangles + soup.terrain_triangles + b.triangles.size() > kMaxSoupTriangles) {
-				return make_error("collision soup: more than " + std::to_string(kMaxSoupTriangles) + " triangles");
-			}
-			terrain.triangles = b.triangles.size();
-			terrain.degenerate = b.degenerate;
-			terrain.nonfinite = b.nonfinite;
-			terrain.hash = b.hash;
-			soup.terrain_triangles += terrain.triangles;
-			soup.degenerate += b.degenerate;
-			soup.nonfinite += b.nonfinite;
-			for (const std::array<int32_t, 2> &tile : b.tiles) {
-				++tile_counts[{ tile[0], tile[1] }];
-			}
+			soup_terrain_census(*grid, p_options.threads, terrain.cells, terrain.open);
+			terrain.frame = frame;
+			terrain.grid = std::move(grid);
+			soup.terrain_triangles += 2 * (terrain.cells - terrain.open);
 			soup.terrains.push_back(std::move(terrain));
-			built.push_back(std::move(b));
 		}
-		soup.triangles += soup.terrain_triangles;
 	}
 	soup.seconds_terrain = seconds_since(clock);
 

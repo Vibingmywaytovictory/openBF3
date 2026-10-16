@@ -183,6 +183,8 @@ target_sources(bf3_core PRIVATE
     src/level/collision_material.cpp
     src/level/collision_soup.cpp
     include/bf3/core/level/collision_soup.h
+    src/level/soup_terrain.cpp
+    src/level/soup_terrain_internal.h
     src/res/terrain.cpp
     include/bf3/core/res/terrain.h
 )

@@ -4,11 +4,11 @@
 //
 // Source: the collision soup (bf3_core level/collision_soup.h) of a level x mode: world-space triangles with a
 // material value, a surface class, a rigid-body kind (collision, raycast, character) and flags, chunked into
-// 64 m tiles. Convex Havok leaves arrive tessellated and the terrain as 2 m cells, so every piece is a triangle.
+// 64 m tiles. Convex Havok leaves arrive tessellated, so every tile piece is a triangle; TC: the terrain arrives as
+// a record (grid + frame) and becomes one HeightFieldShape per terrain (see the TC block below).
 //
-// Shapes: per (tile, layer) one JPH::MeshShape over that tile's triangles of that layer (layer = body kind;
-// terrain cells are in the Collision layer), built with per-triangle user data = an index into the tile's
-// SurfaceTag table. No welding, no clipping at tile borders (the soup's rule), active edges computed by Jolt.
+// Shapes: per (tile, layer) one JPH::MeshShape over that tile's triangles of that layer (layer = body kind),
+// built with per-triangle user data = an index into the tile's SurfaceTag table. No welding, no clipping at tile borders (the soup's rule), active edges computed by Jolt.
 // The shapes are immutable once built and are shared, ref-counted, by every CollisionWorld of the process: the
 // server world and the client prediction world of a listen host hold one copy of the static shapes (plan D5).
 //
@@ -17,12 +17,15 @@
 //                SHA-256 of the tile's exact input (every triangle's float bits, tag, layer, in soup order) +
 //                the build parameters; converter kStaticWorldConverterVersion; jolt_version = jolt_build_id().
 //                Content keyed, so modes and levels that share a tile share its entry.
-//   "jolt-world" the tile list of one level x mode: (x, z, tile key) per tile + totals. Key: params = the
-//                level x mode's source digest (bf3_core level/source_digest.h: manifest SHA1s of every bundle
-//                the mode mounts) + bf3_core kCollisionSoupVersion + the soup options + the build parameters;
+//   "jolt-world" the tile list of one level x mode: (x, z, tile key) per tile + totals (TC: then per terrain its
+//                object and content digest). Key: params = the level x mode's source digest (bf3_core
+//                level/source_digest.h: manifest SHA1s of every bundle the mode mounts) + bf3_core
+//                kCollisionSoupVersion + the soup options + the build parameters (TC: + the terrain bits / block);
 //                same versions. (The tile keys hash the soup's output, so they need no soup version.)
-// Warm load: source digest -> "jolt-world" -> every "jolt-tile" -> sRestoreFromBinaryState; no soup, no Havok
-// decode. Cold (or any tile missing): build the soup, cook the tiles on all lanes, put tiles then the world.
+//   "jolt-terrain" (TC) one terrain's field and patch, content keyed (static_terrain_key_inputs).
+// Warm load: source digest -> "jolt-world" -> every "jolt-tile" and "jolt-terrain" -> sRestoreFromBinaryState; no
+// soup, no Havok decode, no grid read. Cold (or any entry missing): build the soup, cook the tiles on all lanes and
+// the terrain fields on one more lane beside them, put tiles, terrains, then the world.
 
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/cache/digest.h"
@@ -107,8 +110,7 @@ struct StaticTileInfo {
 	core::Sha256Digest content{}; // SHA-256 of the tile's input (the "jolt-tile" key's params part)
 };
 
-// ---- TC: the terrain as heightfields (docs/design/terrain-collision.md §5; declared here, defined by the TC
-// implementation in static_world_terrain.cpp; nothing calls them before it lands) -----------------------------
+// ---- TC: the terrain as heightfields (docs/design/terrain-collision.md §5; static_world_terrain.cpp) ----------
 // Each Built soup terrain becomes one JPH::HeightFieldShape over its whole grid (kStaticTerrainBits per sample,
 // kStaticTerrainBlock samples a block), in the Collision layer, as one static body with user data
 // terrain * 4 + kStaticTerrainBodyLayer (tile bodies use tile * 4 + layer, layer < 3). Jolt drops a triangle when one
@@ -127,6 +129,7 @@ inline constexpr uint32_t kStaticTerrainBlock = 4;
 inline constexpr uint32_t kStaticTerrainBodyLayer = 3;
 inline constexpr size_t kMaxStaticTerrains = 8; // core::level::kMaxSoupTerrains
 inline constexpr const char *kStaticTerrainCacheKind = "jolt-terrain";
+inline constexpr uint32_t kStaticTerrainFormatVersion = 1; // the OBF3JTER blob
 // The tag of every terrain triangle: material 0, surface dirt, body collision, kSoupTerrain (the soup's cells).
 inline constexpr SurfaceTag static_terrain_tag() { return SurfaceTag{ 0, 6, 0, 4, 0 }; }
 
@@ -159,10 +162,11 @@ struct StaticTerrainInfo {
 };
 
 // The view of a soup terrain record (SoupTerrain::grid and frame; it borrows the grid, so the record must outlive
-// the view). An error for a terrain that is not Built or has no record. Defined by the TC implementation.
+// the view). An error for a terrain that is not Built or has no record.
 core::Result<StaticTerrainView> static_terrain_view(const core::level::SoupTerrain &p_terrain);
 // StaticTerrainInfo::content of a view without cooking it (the "jolt-terrain" key's digest; sim.terrain G1 compares
-// it over every run of a level). Defined by the TC implementation.
+// it over every run of a level). SHA-256 over: u64 width, u64 height, origin and spacing (f32 bits), the 9 axis
+// floats and the translation (f32 bits), every height's f32 bits (X fastest), then one byte per sample (1 = hole).
 core::Sha256Digest static_terrain_content(const StaticTerrainView &p_view);
 
 struct StaticWorldStats {
@@ -179,7 +183,7 @@ struct StaticWorldStats {
 	double seconds_cook = 0.0; // MeshShape builds (all lanes, wall time)
 	double seconds_restore = 0.0; // tile restores (all lanes, wall time)
 	double seconds_total = 0.0;
-	// TC: the terrain fields (0 until the TC implementation).
+	// TC: the terrain fields.
 	size_t terrains = 0;
 	uint64_t terrain_bytes = 0; // the fields' and patches' GetStats sizes (also in shape_bytes)
 	size_t terrains_hit = 0; // restored from "jolt-terrain" entries
@@ -200,7 +204,7 @@ public:
 	// The tag of triangle user-data value p_tag in tile p_tile (CollisionWorld hits carry both).
 	const SurfaceTag &tag(size_t p_tile, uint32_t p_tag) const;
 	const StaticWorldStats &stats() const;
-	// TC: the terrains (soup terrain order, Built only); 0 until the TC implementation.
+	// TC: the terrains (soup terrain order, Built only).
 	size_t terrain_count() const;
 	const StaticTerrainInfo &terrain(size_t p_index) const;
 	// Bounds of every tile (TC: and of every terrain field and patch body, StaticTerrainInfo::min / max).
@@ -226,8 +230,11 @@ struct StaticWorldBuildOptions {
 
 // Format and converter versions of the cache entries (bump the converter when the same soup builds different
 // shapes: winding, layer split, active edges, tag table).
-inline constexpr uint32_t kStaticWorldFormatVersion = 1;
+inline constexpr uint32_t kStaticWorldFormatVersion = 1; // OBF3JTIL (and the "jolt-tile" keys)
 inline constexpr uint32_t kStaticWorldConverterVersion = 1;
+// TC: OBF3JWLD v2 (the terrains after the tiles) and the "jolt-world" keys. A separate constant from the tiles'
+// format, so the Havok-only tiles of a level (unchanged by TC) keep their entries (terrain-collision.md §10).
+inline constexpr uint32_t kStaticWorldIndexVersion = 2;
 inline constexpr const char *kStaticTileCacheKind = "jolt-tile";
 inline constexpr const char *kStaticWorldCacheKind = "jolt-world";
 // "5.6.0;det=1;dp=0": the Jolt version and the build switches that change a saved shape stream
@@ -250,14 +257,7 @@ struct StaticWorldLoadOptions {
 	unsigned soup_threads = 0; // SoupOptions::threads for the cold path
 	float terrain_spacing = 2.0f; // SoupOptions::terrain_spacing (a key parameter)
 	core::level::SoupProgress *soup_progress = nullptr; // cold path stage display (optional)
-	// S1 (docs/design/s1.md §5.2): SoupOptions::terrain_cover for the cold path (the level's combat-area tiles). A
-	// non-empty cover is a key parameter of the "jolt-world" entry ("cover=<SHA-256 of the sorted tile list>"); an
-	// empty one leaves the key text exactly as M1 wrote it, so M1's entries stay valid.
-	std::vector<std::array<int32_t, 2>> terrain_cover;
-	// S1 water rule (SoupOptions::cover_water; docs §5.2): with a non-empty cover, a non-empty list adds
-	// ";water=<SHA-256 of the planes>" to the key. Ignored without a cover.
-	std::vector<core::level::WaterPlane> cover_water;
-	// (TC removes terrain_cover and cover_water: the terrain is whole, the water rule is the nav bake's, nav.h.)
+	// (TC removed S1's terrain_cover and cover_water: the terrain is whole, the water rule is the nav bake's, nav.h.)
 };
 
 // The static world of a traversed level x mode through the cache (see the header comment). p_cache may be null
@@ -271,13 +271,14 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 // triangle counts, the Shape::SaveBinaryState stream of its MeshShape (no children, no materials; the layout is in
 // src/static_world_cache.cpp). Decoding checks every count against the bytes left, walks the whole Jolt tree
 // (offsets, depth, vertex indices, the tag indices the shape can name) before Jolt restores it, and refuses
-// trailing bytes. "OBF3JWLD" v1: tile count, per tile (x, z, content digest, per-layer
-// triangle counts, tag count), the soup's sum and triangle total.
+// trailing bytes. "OBF3JWLD" v2 (kStaticWorldIndexVersion): tile count, per tile (x, z, content digest, per-layer
+// triangle counts, tag count), the soup's sum and triangle total, then the terrain count and per terrain (object,
+// content digest).
 std::vector<uint8_t> encode_static_tile_blob(const StaticWorldShapes &p_world, size_t p_tile);
 core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_tile_blobs(std::span<const std::span<const uint8_t>> p_tiles);
 core::CacheKeyInputs static_tile_key_inputs(const core::Sha256Digest &p_content, const StaticWorldBuildOptions &p_options);
-// TC: "OBF3JTER" v1: the terrain's StaticTerrainInfo, then the HeightFieldShape's Shape::SaveBinaryState stream,
-// then the patch MeshShape's (or none). Decoding parses the field's whole header itself before Jolt's
+// TC: "OBF3JTER" v1: the terrain's StaticTerrainInfo and its field body transform (position, rotation), then the
+// HeightFieldShape's Shape::SaveBinaryState stream (or none), then the patch MeshShape's (or none). Decoding parses the field's whole header itself before Jolt's
 // RestoreBinaryState sees it (Jolt validates none of it): the Shape base (sub type HeightField, user data 0);
 // mOffset and mScale finite, scale x / z > 0 and y != 0; mSampleCount 2..kMaxGridSide rounded up to the block and a
 // multiple of it; mBlockSize 2..8; mBitsPerSample 1..16; num_blocks = mSampleCount / mBlockSize <= 1 << cNumBitsXY
@@ -288,8 +289,8 @@ core::CacheKeyInputs static_tile_key_inputs(const core::Sha256Digest &p_content,
 // has-heights flag set, and the range-block, sample and active-edge byte counts HeightFieldShape::AllocateBuffers
 // derives from the header equal to the bytes that follow. It then checks the restored field against the blob's
 // StaticTerrainInfo (sizes, bounds), walks the patch like a tile's MeshShape, and refuses trailing bytes. Key: params = the content digest + kStaticTerrainBits / kStaticTerrainBlock +
-// the build parameters; content keyed, so the modes of a level share the entry. "OBF3JWLD" becomes v2 (the
-// terrain digests after the tiles; kStaticWorldFormatVersion 2).
+// the build parameters; content keyed, so the modes of a level share the entry. "OBF3JWLD" is v2 (the terrain
+// digests after the tiles; kStaticWorldIndexVersion 2; the tile format stays 1).
 std::vector<uint8_t> encode_static_terrain_blob(const StaticWorldShapes &p_world, size_t p_terrain);
 core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_terrain_blob(std::span<const uint8_t> p_blob);
 core::CacheKeyInputs static_terrain_key_inputs(const core::Sha256Digest &p_content, const StaticWorldBuildOptions &p_options);

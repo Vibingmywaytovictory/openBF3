@@ -220,7 +220,12 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	if (p_input.vertices.size() != ntris * 9) {
 		return core::make_error(where + ": input vertices and layers differ");
 	}
-	if (ntris == 0) {
+	if (!p_input.unwalkable.empty() && p_input.unwalkable.size() != ntris) {
+		return core::make_error(where + ": unwalkable marks and triangles differ");
+	}
+	// TC water rule: a tile whose whole input is unwalkable bakes to no tile without running Recast.
+	const bool all_wet = !p_input.unwalkable.empty() && std::all_of(p_input.unwalkable.begin(), p_input.unwalkable.end(), [](uint8_t p_u) { return p_u != 0; });
+	if (ntris == 0 || all_wet) {
 		out.info.seconds = seconds_since(start);
 		return out;
 	}
@@ -269,8 +274,8 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 		const float e1[3] = { a[6] - a[0], a[7] - a[1], a[8] - a[2] };
 		const float n[3] = { e0[1] * e1[2] - e0[2] * e1[1], e0[2] * e1[0] - e0[0] * e1[2], e0[0] * e1[1] - e0[1] * e1[0] };
 		const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-		if (len > 0.0f && std::fabs(n[1]) / len > cos_slope) {
-			areas[t] = RC_WALKABLE_AREA;
+		if (len > 0.0f && std::fabs(n[1]) / len > cos_slope && (p_input.unwalkable.empty() || p_input.unwalkable[t] == 0)) {
+			areas[t] = RC_WALKABLE_AREA; // TC: a wet terrain triangle stays RC_NULL_AREA (it still blocks)
 		}
 	}
 	if (!rcRasterizeTriangles(&r_context, v, areas.data(), int(ntris), *hf, c.walkable_climb)) {
@@ -473,6 +478,15 @@ core::Result<std::shared_ptr<const NavWorld>> bake_nav_inputs(std::vector<NavTil
 	BF3_TRY(check_nav_params(p_options.params));
 	core::Cache *cache = (p_cache != nullptr && p_cache->is_open()) ? p_cache : nullptr;
 	const bool link_checked = p_options.link_shapes != nullptr && p_options.params.drop_links;
+	// TC water rule counters (before the inputs are freed on the lanes).
+	for (const NavTileInput &in : p_inputs) {
+		size_t wet = 0;
+		for (uint8_t u : in.unwalkable) {
+			wet += u != 0 ? 1 : 0;
+		}
+		p_stats.triangles_unwalkable += wet;
+		p_stats.tiles_wet += !in.unwalkable.empty() && wet == in.unwalkable.size() ? 1 : 0;
+	}
 	std::optional<NavLinkWorldPool> pool;
 	if (link_checked) {
 		pool.emplace(p_options.link_shapes);
@@ -543,6 +557,7 @@ core::Result<std::shared_ptr<const NavWorld>> bake_nav_inputs(std::vector<NavTil
 				// The input is no longer needed (its digest went into the tile info).
 				p_inputs[p_i].vertices = std::vector<float>();
 				p_inputs[p_i].layers = std::vector<uint8_t>();
+				p_inputs[p_i].unwalkable = std::vector<uint8_t>();
 				if (p_options.tiles_done != nullptr) {
 					p_options.tiles_done->fetch_add(1, std::memory_order_relaxed);
 				}
@@ -588,7 +603,8 @@ core::Result<std::shared_ptr<const NavWorld>> bake_nav_inputs(std::vector<NavTil
 core::Result<std::shared_ptr<const NavWorld>> bake_nav_world(const core::level::CollisionSoup &p_soup, std::span<const NavTileKey> p_tiles,
 		const NavBakeOptions &p_options) {
 	const Clock::time_point start = Clock::now();
-	core::Result<std::vector<NavTileInput>> inputs = nav_tile_inputs_threads(p_soup, p_tiles, p_options.params, p_options.layer_mask, p_options.threads);
+	core::Result<std::vector<NavTileInput>> inputs =
+			nav_tile_inputs_threads(p_soup, p_tiles, p_options.params, p_options.layer_mask, p_options.threads, p_options.water);
 	if (!inputs) {
 		return inputs.error();
 	}

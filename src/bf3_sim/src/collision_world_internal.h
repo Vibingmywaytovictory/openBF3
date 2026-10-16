@@ -52,13 +52,14 @@ struct CollisionWorld::Impl {
 
 	std::unique_ptr<JPH::TempAllocatorImpl> temp; // CollisionWorldOptions::temp_allocator_bytes
 	std::unique_ptr<JPH::PhysicsSystem> system; // static bodies only; never stepped in M1 (declared last: dies first)
-	std::vector<JPH::BodyID> bodies; // (tile, layer) order
+	std::vector<JPH::BodyID> bodies; // (tile, layer) order, then the terrain bodies (TC)
 
 	// The filters for p_mask (query_mask::kMovement for the motor). p_mask must be < 8.
 	const JPH::BroadPhaseLayerFilter &broadphase_filter(uint32_t p_mask) const;
 	const JPH::ObjectLayerFilter &object_filter(uint32_t p_mask) const;
 	// The tile, layer and SurfaceTag of a hit (body user data = tile * 4 + layer; the sub-shape's triangle user data
-	// indexes the tile's tag table), as StaticHit carries them.
+	// indexes the tile's tag table), as StaticHit carries them. TC: user data terrain * 4 + 3 is a terrain body: tile
+	// kNoStaticTile, terrain = the index, layer Collision, tag static_terrain_tag().
 	void describe_hit(const JPH::BodyID &p_body, const JPH::SubShapeID &p_sub_shape, StaticHit &r_hit) const;
 };
 

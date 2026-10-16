@@ -32,6 +32,7 @@ target_sources(bf3_sim PRIVATE
     src/static_world.cpp
     src/static_world_internal.h
     src/static_world_cache.cpp
+    src/static_world_terrain.cpp
     src/collision_world.cpp
 )
 

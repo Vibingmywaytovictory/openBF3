@@ -11,8 +11,9 @@
 
 namespace bf3dump {
 
-// The canonical listing: sorted T placement lines, K tiles, totals, surface and body histograms.
-std::string collision_listing(const bf3::core::level::LevelCollision &p_collision);
+// The canonical listing: sorted T placement lines, K tiles, totals, surface and body histograms. TC: hashes every
+// terrain record's whole grid on up to p_threads lanes (0 = all cores); an error when a record is broken.
+bf3::core::Result<std::string> collision_listing(const bf3::core::level::LevelCollision &p_collision, unsigned p_threads = 0);
 // `collision <LEVEL> <MODE>`: the listing on stdout, counts and timings on stderr.
 int cmd_collision(const std::shared_ptr<bf3::core::Install> &p_install, const std::string &p_level, const std::string &p_mode);
 

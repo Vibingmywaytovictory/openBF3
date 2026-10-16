@@ -379,8 +379,8 @@ void Bf3LevelSession::run_loader() {
 		}
 		shared_options.tuning = *tuning;
 	}
-	// S1 (docs/design/s1.md §12): with --bots the static world carries the terrain cover and the water rule of the
-	// level's combat-area tiles (every MP mode), the same the navmesh is baked from.
+	// S1 (docs/design/s1.md §12): with --bots the navmesh is baked over the level's combat-area tiles (every MP mode)
+	// with their water rule (TC: the static world has terrain everywhere, no cover option).
 	std::optional<lvl::LevelCombatTiles> s1_combat;
 	if (bots_ > 0) {
 		bf3::core::Result<lvl::LevelCombatTiles> combat = lvl::level_combat_tiles(*install, level_, sim::NavParams().region_margin);
@@ -389,8 +389,6 @@ void Bf3LevelSession::run_loader() {
 			return;
 		}
 		s1_combat = std::move(*combat);
-		shared_options.terrain_cover = s1_combat->tiles;
-		shared_options.cover_water = s1_combat->water;
 	}
 	bf3::core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, shared_options, &progress_);
 	if (!shared) {

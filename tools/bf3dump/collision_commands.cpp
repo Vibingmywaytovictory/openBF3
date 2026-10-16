@@ -2,7 +2,9 @@
 // canonical form research/probes/tools/level-oracle `collision` prints through IW4L's crates, so
 // the two diff byte-identical when the soups agree: sorted `T` placement lines (state, triangle
 // counts, FNV-1a hash), `K` tiles (count, hash sum), then the totals and the surface and body
-// histograms. Timings go to stderr.
+// histograms. Timings go to stderr. TC (docs/design/terrain-collision.md §6): the soup keeps the terrain as a record, so
+// the listing hashes every terrain's whole grid (hash_soup_terrain) and merges its tile sums into the Havok tiles; the
+// totals and histograms count the terrain triangles as before.
 #include "collision_commands.h"
 
 #include "bf3/core/level/collision_soup.h"
@@ -10,7 +12,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace bf3::core;
@@ -33,12 +37,25 @@ std::string counts(const SoupPlacement &p_p) {
 
 } // namespace
 
-std::string collision_listing(const LevelCollision &p_collision) {
+Result<std::string> collision_listing(const LevelCollision &p_collision, unsigned p_threads) {
 	const EbxResolver &db = p_collision.level->db();
 	const World &world = *p_collision.world;
 	const CollisionSoup &soup = p_collision.soup;
+	// The tiles (Havok, then every terrain's), the totals and the histograms over both.
+	std::map<std::array<int32_t, 2>, std::pair<size_t, uint64_t>> tiles;
+	for (const SoupTile &tile : soup.tiles) {
+		tiles[{ tile.x, tile.z }] = { tile.triangles.size(), tile.sum };
+	}
+	size_t triangles = soup.triangles;
+	size_t terrain_triangles = 0;
+	size_t degenerate = soup.degenerate;
+	size_t nonfinite = soup.nonfinite;
+	std::array<size_t, kSurfaceCount> surfaces = soup.surfaces;
+	std::array<size_t, kCollisionBodyCount> bodies = soup.bodies;
+	// Each terrain charges 2 x its cells (kMaxSoupTerrains x a 4097^2 grid stays below this).
+	WorkBudget budget(size_t(1) << 28);
 	std::vector<std::string> lines;
-	lines.reserve(soup.placements.size());
+	lines.reserve(soup.placements.size() + soup.terrains.size());
 	for (const SoupPlacement &p : soup.placements) {
 		if (p.kind == CollisionPlacement::Kind::Group) {
 			lines.push_back("T group " + std::to_string(p.index) + " res " + p.res + " " + counts(p));
@@ -71,12 +88,29 @@ std::string collision_listing(const LevelCollision &p_collision) {
 			case SoupTerrain::State::Missing:
 				lines.push_back("T terrain " + label + " res " + t.asset + " missing");
 				break;
-			case SoupTerrain::State::Built:
+			case SoupTerrain::State::Built: {
+				const uint32_t placement = uint32_t(soup.placements.size() + size_t(&t - soup.terrains.data()));
+				Result<SoupTerrainHash> hash = hash_soup_terrain(t, placement, budget, p_threads);
+				if (!hash) {
+					return hash.error();
+				}
 				lines.push_back("T terrain " + label + " res " + t.asset + " built depth " + std::to_string(t.depth) + " side " + std::to_string(t.side) +
-						" holes " + std::to_string(t.holes) + " cells " + std::to_string(t.cells) + " open " + std::to_string(t.open) + " tris " +
-						std::to_string(t.triangles) + " destroyed 0 degenerate " + std::to_string(t.degenerate) + " nonfinite " + std::to_string(t.nonfinite) +
-						" hash " + hex64(t.hash));
+						" holes " + std::to_string(t.holes) + " cells " + std::to_string(hash->cells) + " open " + std::to_string(hash->open) + " tris " +
+						std::to_string(hash->triangles) + " destroyed 0 degenerate " + std::to_string(hash->degenerate) + " nonfinite " +
+						std::to_string(hash->nonfinite) + " hash " + hex64(hash->hash));
+				for (const SoupTerrainTileSum &tile : hash->tiles) {
+					std::pair<size_t, uint64_t> &merged = tiles[tile.tile];
+					merged.first += tile.triangles;
+					merged.second += tile.sum;
+				}
+				triangles += hash->triangles;
+				terrain_triangles += hash->triangles;
+				degenerate += hash->degenerate;
+				nonfinite += hash->nonfinite;
+				surfaces[surface::kDirt] += hash->triangles;
+				bodies[size_t(CollisionBody::Collision)] += hash->triangles;
 				break;
+			}
 		}
 	}
 	std::sort(lines.begin(), lines.end());
@@ -85,21 +119,23 @@ std::string collision_listing(const LevelCollision &p_collision) {
 		out += line;
 		out += '\n';
 	}
-	for (const SoupTile &tile : soup.tiles) {
-		out += "K " + std::to_string(tile.x) + " " + std::to_string(tile.z) + " tris " + std::to_string(tile.triangles.size()) + " sum " + hex64(tile.sum) + "\n";
+	uint64_t sum = 0;
+	for (const auto &[tile, merged] : tiles) {
+		out += "K " + std::to_string(tile[0]) + " " + std::to_string(tile[1]) + " tris " + std::to_string(merged.first) + " sum " + hex64(merged.second) + "\n";
+		sum += merged.second;
 	}
 	out += "soup placements " + std::to_string(soup.placements.size()) + " built " + std::to_string(soup.built) + " hidden " +
-			std::to_string(soup.hidden) + " missing " + std::to_string(soup.missing) + " triangles " + std::to_string(soup.triangles) + " terrain " +
-			std::to_string(soup.terrain_triangles) + " destroyed " +
-			std::to_string(soup.destroyed) + " degenerate " + std::to_string(soup.degenerate) + " nonfinite " + std::to_string(soup.nonfinite) + " tiles " +
-			std::to_string(soup.tiles.size()) + " sum " + hex64(soup.sum) + "\n";
+			std::to_string(soup.hidden) + " missing " + std::to_string(soup.missing) + " triangles " + std::to_string(triangles) + " terrain " +
+			std::to_string(terrain_triangles) + " destroyed " +
+			std::to_string(soup.destroyed) + " degenerate " + std::to_string(degenerate) + " nonfinite " + std::to_string(nonfinite) + " tiles " +
+			std::to_string(tiles.size()) + " sum " + hex64(sum) + "\n";
 	for (size_t k = 0; k < kSurfaceCount; ++k) {
-		if (soup.surfaces[k] > 0) {
-			out += "surface " + std::to_string(k) + " " + std::to_string(soup.surfaces[k]) + "\n";
+		if (surfaces[k] > 0) {
+			out += "surface " + std::to_string(k) + " " + std::to_string(surfaces[k]) + "\n";
 		}
 	}
 	for (size_t k = 0; k < kCollisionBodyCount; ++k) {
-		out += "body " + std::to_string(k) + " " + std::to_string(soup.bodies[k]) + "\n";
+		out += "body " + std::to_string(k) + " " + std::to_string(bodies[k]) + "\n";
 	}
 	return out;
 }
@@ -132,8 +168,14 @@ int cmd_collision(const std::shared_ptr<Install> &p_install, const std::string &
 		}
 	}
 	std::fprintf(stderr, "work budget: %zu of %zu units spent\n", collision->level->budget->spent(), collision->level->budget->limit());
-	const std::string text = collision_listing(*collision);
-	std::fwrite(text.data(), 1, text.size(), stdout);
+	const auto listing_start = std::chrono::steady_clock::now();
+	Result<std::string> text = collision_listing(*collision);
+	if (!text) {
+		std::fprintf(stderr, "collision %s %s: %s\n", p_level.c_str(), p_mode.c_str(), text.error().message.c_str());
+		return 1;
+	}
+	std::fprintf(stderr, "listing (terrain hash) %.3f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - listing_start).count());
+	std::fwrite(text->data(), 1, text->size(), stdout);
 	return 0;
 }
 

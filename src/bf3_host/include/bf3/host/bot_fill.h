@@ -2,7 +2,7 @@
 // Headless walker bots on the GameServer (spike S1, plan §3.6 "server-side fake clients emitting the same Command as
 // humans", D11; docs/design/s1.md §6, §8). Godot-free.
 //
-//   load_bot_level   on the loader thread, after load_shared_level (built with SharedLoadOptions::terrain_cover):
+//   load_bot_level   on the loader thread, after load_shared_level (TC: terrain everywhere, no cover option):
 //                    the mode's combat areas and objectives (bf3_core mode_areas.h), the level's combat-area tiles
 //                    over every MP mode, the navmesh through the cache (sim nav.h), its components, and the goal set
 //                    (flags, HQs, MCOMs, spawn points on the main component). Immutable after the load, shared.
@@ -114,10 +114,10 @@ struct BotLoadOptions {
 	const core::level::LevelCombatTiles *combat = nullptr;
 };
 
-// On the loader thread that owns p_db (World is not thread-safe). p_shared must be the static world built with the
-// same terrain cover: the call compares SharedLevel::terrain_cover with the level's combat-area tiles
-// (level_combat_tiles) and fails otherwise. The nav bake's link checks use p_shared.static_world
-// (NavBakeOptions::link_shapes, one CollisionWorld per bake lane).
+// On the loader thread that owns p_db (World is not thread-safe). The nav bakes the level's combat-area tiles
+// (level_combat_tiles) with their water planes (NavBakeOptions::water; TC: S1's cover check is gone, the static world
+// has terrain everywhere). The nav bake's link checks use p_shared.static_world (NavBakeOptions::link_shapes, one
+// CollisionWorld per bake lane).
 core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase &p_db, const SharedLevel &p_shared, const BotLoadOptions &p_options,
 		LoadProgress *p_progress);
 

@@ -81,7 +81,9 @@ TEST_CASE("tc contract: the additive fields default to the behaviour before TC")
 	CHECK(prep.terrain);
 	CHECK(prep.terrain_radius > 0.0f);
 	CHECK(prep.max_terrain_triangles > 0);
-	// Until the TC implementation lands the soup version stays M1's (the implementation bumps it to 2).
-	CHECK(core::level::kCollisionSoupVersion == 1);
+	// TC bumped the soup version: the tiles hold the Havok triangles only, the terrain is the records.
+	CHECK(core::level::kCollisionSoupVersion == 2);
+	CHECK(input.terrain_triangles == 0);
+	CHECK(check.terrain_tolerance == 0.0f);
 	CHECK(std::string_view(sim::kStaticTerrainCacheKind) == "jolt-terrain");
 }

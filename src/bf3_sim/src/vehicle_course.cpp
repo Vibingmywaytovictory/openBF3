@@ -222,13 +222,18 @@ private:
 			r_hit->fraction = hit.mFraction;
 			const JPH::Vec3 p = origin + delta * hit.mFraction;
 			r_hit->position = { p.GetX(), p.GetY(), p.GetZ() };
-			// The front face's normal (static bodies have the identity rotation: local = world).
-			const uint64_t user = w.system->GetBodyInterfaceNoLock().GetUserData(hit.mBodyID);
+			// The front face's normal (tile bodies have the identity rotation: local = world; TC: terrain bodies through
+			// static_face_normal, turned by the field's rotation).
+			const JPH::BodyInterface &bi = w.system->GetBodyInterfaceNoLock();
+			const uint64_t user = bi.GetUserData(hit.mBodyID);
 			const uint64_t tile = user >> 2;
 			const uint32_t layer = uint32_t(user & 3u);
 			const StaticWorldShapes::Impl &s = w.shapes->impl();
 			JPH::Vec3 n = JPH::Vec3::sAxisY();
-			if (tile < s.tiles.size() && layer < kStaticLayerCount && s.tiles[tile].shapes[layer] != nullptr) {
+			if (layer == kStaticTerrainBodyLayer) {
+				const JPH::RefConst<JPH::Shape> shape = bi.GetShape(hit.mBodyID);
+				n = static_face_normal(s, user, shape.GetPtr(), hit.mSubShapeID2);
+			} else if (tile < s.tiles.size() && layer < kStaticLayerCount && s.tiles[tile].shapes[layer] != nullptr) {
 				n = s.tiles[tile].shapes[layer]->GetSurfaceNormal(hit.mSubShapeID2, JPH::Vec3::sZero());
 			}
 			r_hit->normal = { n.GetX(), n.GetY(), n.GetZ() };
