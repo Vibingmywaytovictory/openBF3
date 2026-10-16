@@ -683,17 +683,29 @@ TEST_SUITE("sim-terrain") {
 			// Every run of a level gives the same terrain (or none at all).
 			CHECK_MESSAGE((with == 0 || with == results.size()), level_name, ": ", with, " of ", results.size(), " runs have a terrain");
 			CHECK_MESSAGE(level_digests.size() <= 1, level_name, ": ", level_digests.size(), " digests");
-			if (level_digests.empty() || results.empty() || !results[0].record) {
+			const RunResult *kept = nullptr;
+			for (const RunResult &r : results) {
+				if (r.ok && r.record) {
+					kept = &r;
+					break;
+				}
+			}
+			if (level_digests.empty() || kept == nullptr) {
+				CHECK_MESSAGE(level_digests.empty(), level_name, ": a digest but no kept record (the first mode failed)");
 				std::printf("sim.terrain %-12s %zu runs: no terrain (%.1f s)\n", level_id, results.size(), seconds_since(level_start));
 				continue;
 			}
 			++digests;
-			const level::SoupTerrain &record = *results[0].record;
-			const uint32_t placement = results[0].placement;
+			const level::SoupTerrain &record = *kept->record;
+			const uint32_t placement = kept->placement;
 			std::string error;
 			const auto cook_start = std::chrono::steady_clock::now();
 			std::shared_ptr<const StaticWorldShapes> shapes = terrain_world(record, &error);
-			REQUIRE_MESSAGE(shapes != nullptr, level_name, ": ", error);
+			CHECK_MESSAGE(shapes != nullptr, level_name, ": ", error);
+			if (shapes == nullptr) {
+				++failures;
+				continue;
+			}
 			const double cook = seconds_since(cook_start);
 			const sim::StaticTerrainInfo &ti = shapes->terrain(0);
 			CHECK(ti.content.hex() == *level_digests.begin());

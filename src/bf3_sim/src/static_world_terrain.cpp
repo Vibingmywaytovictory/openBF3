@@ -289,8 +289,9 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 	const size_t h = p_view.height;
 	const size_t cells_x = w - 1;
 	const size_t cells_z = h - 1;
-	// The cook's own budget: kMaxGridSide^2 x 2 units per terrain (§11), every sample and cell charged before its pass.
-	core::level::WorkBudget budget(core::res::kMaxGridSide * core::res::kMaxGridSide * 2);
+	// The cook's own budget: kMaxGridSide^2 x 3 units per terrain (§11: the samples, the cells, the field read-back), every
+	// sample and cell charged before its pass.
+	core::level::WorkBudget budget(core::res::kMaxGridSide * core::res::kMaxGridSide * 3);
 	BF3_TRY(budget.charge(w * h));
 
 	StaticWorldShapes::Impl::Terrain out;

@@ -678,7 +678,7 @@ Sources:
 |---|---|---|
 | terrain objects per soup | `kMaxSoupTerrains` = 8 | soup error |
 | grid side | `res::kMaxGridSide` = 4097 (`height_grid`'s own bound) | the terrain is Missing (as today) |
-| cell visits | every cell that `append_soup_terrain_tile` or the static-world cook visits is charged to a `WorkBudget`: the soup budget, or the cook's own budget of `kMaxGridSide`² × 2 units per terrain. `hash_soup_terrain(…, WorkBudget &r_budget, threads)` visits each cell exactly twice (tile sums, serial hash), so it charges 2 × (w − 1) × (h − 1) units before it starts. `WorkBudget` is thread-safe, and the caller sizes it (2^25 for 4097²) | error, no partial shape or hash |
+| cell visits | every cell that `append_soup_terrain_tile` or the static-world cook visits is charged to a `WorkBudget`: the soup budget, or the cook's own budget of `kMaxGridSide`² × 3 units per terrain (samples, cells, the field read-back; × 2 in the first draft failed every 4097² grid). `hash_soup_terrain(…, WorkBudget &r_budget, threads)` visits each cell exactly twice (tile sums, serial hash), so it charges 2 × (w − 1) × (h − 1) units before it starts. `WorkBudget` is thread-safe, and the caller sizes it (2^25 for 4097²) | error, no partial shape or hash |
 | cell index | `soup_terrain_cell` on a null grid or outside 0..w − 2 × 0..h − 2 | an empty cell with `open = true`; the grid is never indexed |
 | no collision | a field with no collision sample, or an empty patch | no body for it; the `StaticTerrainInfo` entry stays (§5.2) |
 | non-finite heights | a non-finite sample becomes a hole for the field and gives a non-finite count for the soup cells (quantise rule) | counted, as today |

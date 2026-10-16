@@ -118,7 +118,7 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world_cached
 // ---- TC: terrain fields (static_world_terrain.cpp) --------------------------------------------------------------
 
 // The field, patch, info and body transform of one terrain view. p_content is its static_terrain_content when the
-// caller has it (else computed). Every visited sample and cell is charged to a WorkBudget of kMaxGridSide^2 x 2 units
+// caller has it (else computed). Every visited sample and cell is charged to a WorkBudget of kMaxGridSide^2 x 3 units
 // per terrain. Fails on a bad view (sizes, non-finite spacing or origin, a frame that is not a rotation times a
 // positive uniform scale, a height span past 1e6 m) or a Jolt error. Needs the Jolt runtime held by the caller.
 core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticTerrainView &p_view, const StaticWorldBuildOptions &p_options,
