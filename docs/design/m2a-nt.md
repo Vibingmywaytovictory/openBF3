@@ -97,6 +97,8 @@ varints and f32 bit patterns are M1's (`bit_stream.h`).
 | combat precision | hp 0.0049, position 0.00195 m, normal 0.92°, time 8 units |
 | DebugReport | 1 target row + 3 gunplay ticks: 916 B; every bound full (1,200 ticks × every per-tick maximum + 128 target rows): 1,712,384 B (cap 2,097,152) |
 | net.proto.fuzz | 3,501 / 3,501 structured malformed cases refused; 900,000 mutated or random datagrams: 75,092 decoded and stable, 739,134 refused, 0 unstable (the rest had an unknown type byte), about 1.5 s on dev |
+| asan preset | `net.bits.unit`, `net.proto.unit`, `net.netsim.unit`, `net.proto.fuzz` (36 s), `m2a.contract` and `m1.contract` pass, with no AddressSanitizer report |
+| dev ctest | 90 / 90 non-timing rows pass (`core.cache_data` and `core.res` skipped as before). The timing rows `host.server`, `host.session.unit`, `host.session`, `host.scale`, `godot.m1`, `godot.m1_load` and `godot.s3_crowd` pass one at a time under the quiet lock |
 
 ## Deviations from the m2a.md sketch (§7)
 
