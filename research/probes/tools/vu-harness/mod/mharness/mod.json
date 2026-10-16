@@ -1,0 +1,9 @@
+{
+    "Name": "mharness",
+    "Description": "openBF3 S5 observe-only measurement harness (research tooling, never shipped)",
+    "Version": "0.1.0",
+    "HasVeniceEXT": true,
+    "Dependencies": {
+        "veniceext": "^1.15.0"
+    }
+}

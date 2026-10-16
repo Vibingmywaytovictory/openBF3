@@ -1,0 +1,3029 @@
+{
+ "inventory": "mharness VU API inventory",
+ "doc_root": "C:/Users/olku/VU-Docs/content/vext/ref (paths starting with content/ are relative to the VU-Docs root)",
+ "doc_commit": "f3cb9f19",
+ "checked": "2026-10-16 implementation pass (vudocs.py, 317 entries)",
+ "status_values": {
+  "doc": "name, signature, enum value and read-only flag confirmed in that VU-Docs page by py/mhlib/vudocs.py",
+  "research": "cited by gap-r1 section 2 only"
+ },
+ "note": "Names, kinds, realms and page paths only (API facts). Behaviour is confirmed by the live check named in 'live' (DESIGN.md section 8).",
+ "lua_globals": [
+  "assert",
+  "error",
+  "ipairs",
+  "next",
+  "pairs",
+  "pcall",
+  "print",
+  "rawequal",
+  "rawget",
+  "rawlen",
+  "rawset",
+  "select",
+  "setmetatable",
+  "getmetatable",
+  "tonumber",
+  "tostring",
+  "type",
+  "xpcall",
+  "require",
+  "_G",
+  "_VERSION",
+  "table",
+  "string",
+  "math",
+  "os",
+  "coroutine",
+  "package",
+  "utf8"
+ ],
+ "lua_forbidden": [
+  "io",
+  "debug",
+  "load",
+  "loadfile",
+  "dofile",
+  "collectgarbage",
+  "os.execute",
+  "os.exit",
+  "os.getenv",
+  "os.remove",
+  "os.rename",
+  "os.setlocale",
+  "os.tmpname",
+  "string.dump",
+  "package.loadlib",
+  "package.cpath",
+  "package.path",
+  "package.searchpath"
+ ],
+ "vu_globals": [
+  "CapturePointEntity",
+  "CharacterPoseType",
+  "ChatManager",
+  "ClientUtils",
+  "Console",
+  "ControllableEntity",
+  "EntityBusPeer",
+  "EntityIterator",
+  "EntityManager",
+  "EntryInput",
+  "EntryInputActionEnum",
+  "EntryInputFlags",
+  "Event",
+  "Events",
+  "HookContext",
+  "Hooks",
+  "LinearTransform",
+  "MaterialContainerPair",
+  "NetEvents",
+  "PhysicsEntityBase",
+  "Player",
+  "PlayerManager",
+  "RCON",
+  "RayCastFlags",
+  "RaycastManager",
+  "ResourceManager",
+  "SharedUtils",
+  "SoldierEntity",
+  "SpatialEntity",
+  "SquadId",
+  "TeamId",
+  "TicketCounterEntity",
+  "TicketManager",
+  "UpdatePass",
+  "Vec3",
+  "WeaponSlot",
+  "WeaponState",
+  "class",
+  "json"
+ ],
+ "forbidden_symbols": [
+  "MakeWritable",
+  "RegisterInstanceLoadHandler",
+  "RegisterInstanceLoadHandlerOnce",
+  "RegisterPartitionLoadHandler",
+  "RegisterPartitionLoadHandlerOnce",
+  "MountSuperBundle",
+  "UnmountSuperBundle",
+  "BeginLoadData",
+  "AddRegistry",
+  "Pass",
+  "Return",
+  "SetTicketCount",
+  "EnableSpawners",
+  "DisableSpawners",
+  "ApplyDamage",
+  "ApplyImpulse",
+  "ApplyForce",
+  "ApplyTorque",
+  "SetProperty",
+  "RemoveProperty",
+  "SetMass",
+  "SetExternalInput",
+  "EquipWeapon",
+  "UnequipWeapon",
+  "SetActiveHealthState",
+  "Kick",
+  "Ban",
+  "BanTemporarily",
+  "BanByName",
+  "BanByIp",
+  "Fade",
+  "FadeInAll",
+  "FadeOutAll",
+  "ConnectToServer",
+  "Destroy",
+  "RegisterCommand",
+  "FireEvent",
+  "PropertyChanged",
+  "SetSquadLeader",
+  "AttachSoldier",
+  "EnableInput",
+  "ForceDead",
+  "ApplyCustomization",
+  "SingleStepEntry",
+  "SetSpectatorEnabled",
+  "SendToLocal",
+  "BroadcastLocal"
+ ],
+ "forbidden_strings": [
+  "gamePassword",
+  "accountGuid",
+  "onlineId",
+  "vu.SetTeamTicketCount",
+  "MakeWritable"
+ ],
+ "fixture_calls": [
+  "CreatePlayer",
+  "DeletePlayer",
+  "SelectWeapon",
+  "SelectUnlockAssets",
+  "CreateSoldier",
+  "SpawnSoldierAt",
+  "SetPosition",
+  "SetPose",
+  "SetTransform",
+  "Kill",
+  "EnterVehicle",
+  "ExitVehicle",
+  "SetLevel"
+ ],
+ "fixture_module": "ext/server/mh_bots.lua",
+ "print_module": "ext/shared/mh_row.lua",
+ "entries": [
+  {
+   "sym": "Events:Subscribe",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/events.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Events:Unsubscribe",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/events.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Hooks:Install",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/hooks.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntityManager:GetIterator",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/entitymanager.md",
+   "status": "doc",
+   "live": "L15"
+  },
+  {
+   "sym": "EntityManager:TraverseAllEntities",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/entitymanager.md",
+   "status": "doc",
+   "live": "L15"
+  },
+  {
+   "sym": "ResourceManager:SearchForDataContainer",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/resourcemanager.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "SharedUtils:GetTimeMS",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/sharedutils.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "SharedUtils:GetTime",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/sharedutils.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "SharedUtils:GetTickrate",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/sharedutils.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "SharedUtils:GetLevelName",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/sharedutils.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "SharedUtils:GetCurrentGameMode",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/sharedutils.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "SharedUtils:IsServerModule",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/sharedutils.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "SharedUtils:IsClientModule",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/library/sharedutils.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "PlayerManager:GetPlayers",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/playermanager.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "PlayerManager:GetPlayerById",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/playermanager.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "PlayerManager:GetPlayerCount",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/playermanager.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "PlayerManager:CreatePlayer",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/playermanager.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "PlayerManager:DeletePlayer",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/playermanager.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "ChatManager:SendMessage",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/chatmanager.md",
+   "status": "doc",
+   "live": "L06"
+  },
+  {
+   "sym": "ChatManager:Yell",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/chatmanager.md",
+   "status": "doc",
+   "live": "L06"
+  },
+  {
+   "sym": "RCON:SendCommand",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/rcon.md",
+   "status": "doc",
+   "live": "L04"
+  },
+  {
+   "sym": "RCON:GetServerGuid",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/rcon.md",
+   "status": "doc",
+   "live": "L18"
+  },
+  {
+   "sym": "TicketManager:GetTicketCount",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/ticketmanager.md",
+   "status": "doc",
+   "live": "L16"
+  },
+  {
+   "sym": "TicketManager:GetCurrentRound",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/ticketmanager.md",
+   "status": "doc",
+   "live": "L16"
+  },
+  {
+   "sym": "TicketManager:GetRoundCount",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/ticketmanager.md",
+   "status": "doc",
+   "live": "L16"
+  },
+  {
+   "sym": "RaycastManager:DetailedRaycast",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/raycastmanager.md",
+   "status": "doc",
+   "live": "L17"
+  },
+  {
+   "sym": "RaycastManager:CollisionRaycast",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/raycastmanager.md",
+   "status": "doc",
+   "live": "L17"
+  },
+  {
+   "sym": "NetEvents:Subscribe",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/netevents.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "NetEvents:SendTo",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/netevents.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "NetEvents:Broadcast",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/library/netevents.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "NetEvents:Subscribe",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/netevents.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "NetEvents:Send",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/netevents.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "Console:Register",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/console.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "ClientUtils:GetCameraTransform",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/clientutils.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "ClientUtils:WorldToScreen",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/clientutils.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "ClientUtils:GetWindowSize",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/clientutils.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "PlayerManager:GetLocalPlayer",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/playermanager.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "PlayerManager:GetPlayerById",
+   "kind": "method",
+   "realm": "client",
+   "doc": "client/library/playermanager.md",
+   "status": "doc",
+   "live": "L19"
+  },
+  {
+   "sym": "GunSway.dispersionAngle",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.minDispersionAngle",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.currentRecoilDeviation",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.currentLagDeviation",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.currentDispersionDeviation",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.cameraRecoilTransform",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.timeSinceLastShot",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.crossHairDispersionFactor",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.currentGameplayDeviationScaleFactor",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.currentVisualDeviationScaleFactor",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.suppressionMinDispersionAngleFactor",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.randomAngle",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.randomRadius",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.jumpingTimer",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.seed",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.initialFireShot",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.fireShot",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.isFiring",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.isJumping",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.isMoving",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSway.isSupportedShooting",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunsway.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": true
+  },
+  {
+   "sym": "GunSwayDeviation.pitch",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunswaydeviation.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSwayDeviation.yaw",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunswaydeviation.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSwayDeviation.roll",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunswaydeviation.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "GunSwayDeviation.transY",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/gunswaydeviation.md",
+   "status": "doc",
+   "live": "L11",
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.gunSway",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "WeaponFiring.weaponState",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.lastWeaponState",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.nextWeaponState",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.timeToWait",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.recoilTimer",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.recoilAngleX",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.recoilAngleY",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.recoilAngleZ",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.recoilFovAngle",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.primaryAmmoToFill",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "WeaponFiring.instanceId",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/weaponfiring.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "Entity.uniqueId",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entity.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "Entity.isPendingDestruction",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entity.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "EntityBusPeer.typeInfo",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entitybuspeer.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "EntityBusPeer.data",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entitybuspeer.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "EntityBusPeer.instanceId",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entitybuspeer.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "EntityBusPeer:Is",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/entitybuspeer.md",
+   "status": "doc",
+   "live": "L15"
+  },
+  {
+   "sym": "EntityIterator:Next",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/entityiterator.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "SpatialEntity.transform",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/spatialentity.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "TypeInformation.name",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/typeinformation.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "DataContainer.typeInfo",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/datacontainer.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "HookContext:Call",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/hookcontext.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Event:Unsubscribe",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/event.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Vec3.x",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec3.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "Vec3.y",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec3.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "Vec3.z",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec3.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "Vec3.magnitude",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec3.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "LinearTransform.left",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/lineartransform.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "LinearTransform.up",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/lineartransform.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "LinearTransform.forward",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/lineartransform.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "LinearTransform.trans",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/lineartransform.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "RayCastHit.position",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/raycasthit.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": true
+  },
+  {
+   "sym": "RayCastHit.normal",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/raycasthit.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": true
+  },
+  {
+   "sym": "RayCastHit.material",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/raycasthit.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": true
+  },
+  {
+   "sym": "RayCastHit.part",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/raycasthit.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": true
+  },
+  {
+   "sym": "RayCastHit.bone",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/raycasthit.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": true
+  },
+  {
+   "sym": "RayCastHit.rigidBody",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/raycasthit.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": true
+  },
+  {
+   "sym": "EntryInput.deltaTime",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08",
+   "ro": false
+  },
+  {
+   "sym": "EntryInput.authoritativeAimingYaw",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08",
+   "ro": false
+  },
+  {
+   "sym": "EntryInput.authoritativeAimingPitch",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08",
+   "ro": false
+  },
+  {
+   "sym": "EntryInput.authoritativeCameraPosition",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08",
+   "ro": false
+  },
+  {
+   "sym": "EntryInput.flags",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08",
+   "ro": false
+  },
+  {
+   "sym": "EntryInput.zoomLevel",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08",
+   "ro": false
+  },
+  {
+   "sym": "EntryInput:GetLevel",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08"
+  },
+  {
+   "sym": "EntryInput:SetLevel",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": "L08"
+  },
+  {
+   "sym": "PhysicsEntityBase.linearVelocity",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/physicsentitybase.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "PhysicsEntityBase.angularVelocity",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/physicsentitybase.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "PhysicsEntityBase.partCount",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/physicsentitybase.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "PhysicsEntityBase:GetPartTransform",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/physicsentitybase.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "MaterialContainerPair.physicsMaterialIndex",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "fb/materialcontainerpair.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": false
+  },
+  {
+   "sym": "MaterialContainerPair.physicsPropertyIndex",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "fb/materialcontainerpair.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": false
+  },
+  {
+   "sym": "MaterialContainerPair.flagsAndIndex",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "fb/materialcontainerpair.md",
+   "status": "doc",
+   "live": "L13",
+   "ro": false
+  },
+  {
+   "sym": "Player.id",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": true
+  },
+  {
+   "sym": "Player.soldier",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": true
+  },
+  {
+   "sym": "Player.alive",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": true
+  },
+  {
+   "sym": "Player.hasSoldier",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": true
+  },
+  {
+   "sym": "Player.teamId",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": false
+  },
+  {
+   "sym": "Player.squadId",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": false
+  },
+  {
+   "sym": "Player.isAllowedToSpawn",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": false
+  },
+  {
+   "sym": "Player.input",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": false
+  },
+  {
+   "sym": "Player.selectedKit",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07",
+   "ro": false
+  },
+  {
+   "sym": "Player:SelectWeapon",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "Player:SelectUnlockAssets",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "Player:CreateSoldier",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "Player:SpawnSoldierAt",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "Player:EnterVehicle",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "Player:ExitVehicle",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/player.md",
+   "status": "doc",
+   "live": "L07"
+  },
+  {
+   "sym": "SoldierEntity.worldTransform",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.player",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.maxHealth",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": false
+  },
+  {
+   "sym": "SoldierEntity.isManDown",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.isAlive",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.isDead",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.isFiring",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.isReloading",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.health",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": false
+  },
+  {
+   "sym": "SoldierEntity.weaponsComponent",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.pose",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.pendingPose",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09",
+   "ro": false
+  },
+  {
+   "sym": "SoldierEntity:SetPosition",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09"
+  },
+  {
+   "sym": "SoldierEntity:Kill",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09"
+  },
+  {
+   "sym": "SoldierEntity:SetPose",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09"
+  },
+  {
+   "sym": "SoldierEntity:SetTransform",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": "L09"
+  },
+  {
+   "sym": "PhysicsEntity.velocity",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/physicsentity.md",
+   "status": "doc",
+   "live": "L10",
+   "ro": false
+  },
+  {
+   "sym": "PhysicsEntity.internalHealth",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/physicsentity.md",
+   "status": "doc",
+   "live": "L10",
+   "ro": false
+  },
+  {
+   "sym": "PhysicsEntity.physicsEntityBase",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/physicsentity.md",
+   "status": "doc",
+   "live": "L10",
+   "ro": true
+  },
+  {
+   "sym": "ControllableEntity:GetPlayerInEntry",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/controllableentity.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "ControllableEntity:GetDataForEntry",
+   "kind": "method",
+   "realm": "server",
+   "doc": "server/type/controllableentity.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "SoldierWeaponsComponent.currentWeapon",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeaponsComponent.isZooming",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeaponsComponent.currentWeaponSlot",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeaponsComponent.weapons",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.weaponFiring",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweapon.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.name",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweapon.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.primaryAmmo",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweapon.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "SoldierWeapon.secondaryAmmo",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweapon.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.position",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.direction",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.origin",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.damage",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.distributeDamageOverTime",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.collisionSpeed",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.boneIndex",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.isExplosionDamage",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.isBulletDamage",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageInfo.isClientDamage",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damageinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageGiverInfo.giver",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damagegiverinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageGiverInfo.weaponUnlock",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damagegiverinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "DamageGiverInfo.damageType",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damagegiverinfo.md",
+   "status": "doc",
+   "live": "L14",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.name",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "CapturePointEntity.playersInside",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "CapturePointEntity.isInPreRound",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "CapturePointEntity.isAttacked",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "CapturePointEntity.attackingTeam",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "CapturePointEntity.isFlagMoving",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "CapturePointEntity.team",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.flagVelocity",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.flagLocation",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.flagHome",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.isControlled",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.isCaptureEnabled",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.cooldownTimer",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.team1CooldownPenalty",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "CapturePointEntity.team2CooldownPenalty",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "TicketCounterEntity.team",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/ticketcounterentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "TicketCounterEntity.ticketCount",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/ticketcounterentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "TicketCounterEntity.initialTicketCount",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/ticketcounterentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": true
+  },
+  {
+   "sym": "TicketCounterEntity.controlledAreaValue",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/ticketcounterentity.md",
+   "status": "doc",
+   "live": "L15",
+   "ro": false
+  },
+  {
+   "sym": "Player.id",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/player.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "Player.soldier",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/player.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "Player.alive",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/player.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "Player.teamId",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/player.md",
+   "status": "doc",
+   "live": null,
+   "ro": false
+  },
+  {
+   "sym": "SoldierEntity.weaponsComponent",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierentity.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.isAlive",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierentity.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.health",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierentity.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.correctedWeaponFiring",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweapon.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.predictedWeaponFiring",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweapon.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.aimingSimulation",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweapon.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.name",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweapon.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeapon.primaryAmmo",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweapon.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "AimingSimulation.fovMultiplier",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/aimingsimulation.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": false
+  },
+  {
+   "sym": "AimingSimulation.zoomLevel",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/aimingsimulation.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": false
+  },
+  {
+   "sym": "UpdateManager:Update",
+   "kind": "event",
+   "realm": "shared",
+   "doc": "shared/event/updatemanager_update.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "Engine:Update",
+   "kind": "event",
+   "realm": "shared",
+   "doc": "shared/event/engine_update.md",
+   "status": "doc",
+   "live": "L03"
+  },
+  {
+   "sym": "GunSway:Update",
+   "kind": "event",
+   "realm": "shared",
+   "doc": "shared/event/gunsway_update.md",
+   "status": "doc",
+   "live": "L11"
+  },
+  {
+   "sym": "GunSway:UpdateRecoil",
+   "kind": "event",
+   "realm": "shared",
+   "doc": "shared/event/gunsway_updaterecoil.md",
+   "status": "doc",
+   "live": "L11"
+  },
+  {
+   "sym": "Level:Destroy",
+   "kind": "event",
+   "realm": "shared",
+   "doc": "shared/event/level_destroy.md",
+   "status": "doc",
+   "live": "L22"
+  },
+  {
+   "sym": "Extension:Loaded",
+   "kind": "event",
+   "realm": "shared",
+   "doc": "shared/event/extension_loaded.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Level:Loaded",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/level_loaded.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:Chat",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_chat.md",
+   "status": "doc",
+   "live": "L06"
+  },
+  {
+   "sym": "Player:Authenticated",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_authenticated.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:Left",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_left.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:Killed",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_killed.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:Respawn",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_respawn.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:Reload",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_reload.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:SuppressedEnemy",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_suppressedenemy.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:EnteredCapturePoint",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_enteredcapturepoint.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Player:ExitedCapturePoint",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/player_exitedcapturepoint.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "CapturePoint:Captured",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/capturepoint_captured.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "CapturePoint:Lost",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/capturepoint_lost.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Soldier:HealthAction",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/soldier_healthaction.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Soldier:ManDown",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/soldier_mandown.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Server:RoundOver",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/server_roundover.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Server:RoundReset",
+   "kind": "event",
+   "realm": "server",
+   "doc": "server/event/server_roundreset.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Level:Loaded",
+   "kind": "event",
+   "realm": "client",
+   "doc": "client/event/level_loaded.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Soldier:Damage",
+   "kind": "hook",
+   "realm": "server",
+   "doc": "server/hook/soldier_damage.md",
+   "status": "doc",
+   "live": "L14"
+  },
+  {
+   "sym": "BulletEntity:Collision",
+   "kind": "hook",
+   "realm": "server",
+   "doc": "server/hook/bulletentity_collision.md",
+   "status": "doc",
+   "live": "L13"
+  },
+  {
+   "sym": "EntityFactory:Create",
+   "kind": "hook",
+   "realm": "server",
+   "doc": "server/hook/entityfactory_create.md",
+   "status": "doc",
+   "live": "L12"
+  },
+  {
+   "sym": "BulletEntity:Collision",
+   "kind": "hook",
+   "realm": "client",
+   "doc": "client/hook/bulletentity_collision.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAThrottle",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAStrafe",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIABrake",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAYaw",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 4,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAPitch",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 5,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 7,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAZoom",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 11,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAJump",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 12,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAChangePose",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 13,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAProne",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 14,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIAReload",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 15,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASprint",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 32,
+   "doc": "fb/entryinputactionenum.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "CharacterPoseType.CharacterPoseType_Stand",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/characterposetype.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "CharacterPoseType.CharacterPoseType_Crouch",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/characterposetype.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "CharacterPoseType.CharacterPoseType_Prone",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/characterposetype.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "UpdatePass.UpdatePass_PreSim",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/updatepass.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "UpdatePass.UpdatePass_PostSim",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/updatepass.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_0",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/weaponslot.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_1",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/weaponslot.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "TeamId.TeamNeutral",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/teamid.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "TeamId.Team1",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/teamid.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "TeamId.Team2",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/teamid.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "SquadId.SquadNone",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/squadid.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "SquadId.Squad1",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/squadid.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "SquadId.Squad2",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/squadid.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "RayCastFlags.CheckDetailMesh",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "shared/type/raycastflags.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "RayCastFlags.DontCheckWater",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 4,
+   "doc": "shared/type/raycastflags.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "RayCastFlags.DontCheckRagdoll",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 16,
+   "doc": "shared/type/raycastflags.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "RayCastFlags.DontCheckCharacter",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 32,
+   "doc": "shared/type/raycastflags.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputFlags.AuthoritativeAiming",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "shared/type/entryinputflags.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponState.Deploy",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "shared/type/weaponstate.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponState.NoTrigger",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 3,
+   "doc": "shared/type/weaponstate.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponState.PrimarySingle",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 6,
+   "doc": "shared/type/weaponstate.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponState.BoltAction",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 8,
+   "doc": "shared/type/weaponstate.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponState.PrimaryAutomaticFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 9,
+   "doc": "shared/type/weaponstate.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "WeaponState.Reload",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 11,
+   "doc": "shared/type/weaponstate.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "Vec3",
+   "kind": "ctor",
+   "realm": "shared",
+   "doc": "shared/type/vec3.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "LinearTransform",
+   "kind": "ctor",
+   "realm": "shared",
+   "doc": "shared/type/lineartransform.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInput",
+   "kind": "ctor",
+   "realm": "shared",
+   "doc": "shared/type/entryinput.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "SoldierEntity",
+   "kind": "ctor",
+   "realm": "server",
+   "doc": "server/type/soldierentity.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "CapturePointEntity",
+   "kind": "ctor",
+   "realm": "server",
+   "doc": "server/type/capturepointentity.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "TicketCounterEntity",
+   "kind": "ctor",
+   "realm": "server",
+   "doc": "server/type/ticketcounterentity.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "SpatialEntity",
+   "kind": "ctor",
+   "realm": "shared",
+   "doc": "shared/type/spatialentity.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "MaterialContainerPair",
+   "kind": "ctor",
+   "realm": "shared",
+   "doc": "fb/materialcontainerpair.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "json",
+   "kind": "global",
+   "realm": "shared",
+   "doc": "content/vext/_index.md",
+   "status": "doc",
+   "live": "L02"
+  },
+  {
+   "sym": "class",
+   "kind": "global",
+   "realm": "shared",
+   "doc": "content/vext/guides/classes.md",
+   "status": "doc",
+   "live": null
+  },
+  {
+   "sym": "EntryInputActionEnum.EIACycleFireMode",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 34,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon1",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 16,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon2",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 17,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon3",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 18,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon4",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 19,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "EntryInputActionEnum.EIASelectWeapon5",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 20,
+   "doc": "fb/entryinputactionenum.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltSingleFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 0,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltSingleFireWithBoltAction",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 1,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltAutomaticFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltBurstFire",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 3,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltHoldAndRelease",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 4,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "FireLogicType.fltDetonatedFiring",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 5,
+   "doc": "fb/firelogictype.md",
+   "live": "L30",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_2",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 2,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_3",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 3,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_4",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 4,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_5",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 5,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_6",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 6,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "WeaponSlot.WeaponSlot_7",
+   "kind": "enum",
+   "realm": "shared",
+   "value": 7,
+   "doc": "fb/weaponslot.md",
+   "live": "L31",
+   "status": "doc"
+  },
+  {
+   "sym": "SoldierWeapon.fireLogic",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/soldierweapon.md",
+   "live": "L30",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "AimingSimulation.yaw",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/aimingsimulation.md",
+   "live": "L08",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "AimingSimulation.pitch",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/aimingsimulation.md",
+   "live": "L08",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "ConsoleCommand.name",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/consolecommand.md",
+   "live": "L19",
+   "ro": true,
+   "status": "doc"
+  },
+  {
+   "sym": "ConsoleCommand.groupName",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/consolecommand.md",
+   "live": "L19",
+   "ro": true,
+   "status": "doc"
+  },
+  {
+   "sym": "DamageGiverInfo.weaponFiring",
+   "kind": "prop",
+   "realm": "server",
+   "doc": "server/type/damagegiverinfo.md",
+   "live": "L14",
+   "ro": false,
+   "status": "doc"
+  },
+  {
+   "sym": "MeshProjectileEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/meshprojectileentitydata.md",
+   "live": "L12",
+   "status": "doc"
+  },
+  {
+   "sym": "BulletEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/bulletentitydata.md",
+   "live": "L12",
+   "status": "doc",
+   "parent": "MeshProjectileEntityData"
+  },
+  {
+   "sym": "MissileEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/missileentitydata.md",
+   "live": "L12",
+   "status": "doc",
+   "parent": "MeshProjectileEntityData"
+  },
+  {
+   "sym": "GrenadeEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/grenadeentitydata.md",
+   "live": "L12",
+   "status": "doc",
+   "parent": "MeshProjectileEntityData"
+  },
+  {
+   "sym": "ExplosionEntityData",
+   "kind": "dtype",
+   "realm": "shared",
+   "doc": "fb/explosionentitydata.md",
+   "live": "L12",
+   "status": "doc"
+  },
+  {
+   "sym": "DataContainer:Is",
+   "kind": "method",
+   "realm": "shared",
+   "doc": "shared/type/datacontainer.md",
+   "status": "doc",
+   "live": "L32"
+  },
+  {
+   "sym": "SoldierWeaponsComponent.currentWeapon",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierWeaponsComponent.isZooming",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierweaponscomponent.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": true
+  },
+  {
+   "sym": "SoldierEntity.pose",
+   "kind": "prop",
+   "realm": "client",
+   "doc": "client/type/soldierentity.md",
+   "status": "doc",
+   "live": null,
+   "ro": true
+  },
+  {
+   "sym": "Vec2.x",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec2.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": false
+  },
+  {
+   "sym": "Vec2.y",
+   "kind": "prop",
+   "realm": "shared",
+   "doc": "shared/type/vec2.md",
+   "status": "doc",
+   "live": "L19",
+   "ro": false
+  },
+  {
+   "sym": "ServerCapturePointEntity",
+   "kind": "etype",
+   "realm": "server",
+   "doc": "content/vext/entities.md",
+   "status": "doc",
+   "live": "L15"
+  },
+  {
+   "sym": "ServerTicketCounterEntity",
+   "kind": "etype",
+   "realm": "server",
+   "doc": "content/vext/entities.md",
+   "status": "doc",
+   "live": "L15"
+  },
+  {
+   "sym": "ServerSoldierEntity",
+   "kind": "etype",
+   "realm": "server",
+   "doc": "content/vext/entities.md",
+   "status": "doc",
+   "live": "L13"
+  }
+ ],
+ "forbidden_assign": {
+  "doc": "engine fields the mod never assigns, on any object (humans and bots): team/squad moves, health, ammo, flag ownership, tickets",
+  "fields": [
+   "teamId",
+   "squadId",
+   "health",
+   "maxHealth",
+   "primaryAmmo",
+   "secondaryAmmo",
+   "team",
+   "ticketCount",
+   "controlledAreaValue",
+   "flagLocation",
+   "isControlled",
+   "isCaptureEnabled",
+   "velocity",
+   "transform",
+   "internalHealth",
+   "isAllowedToSpawn",
+   "name",
+   "fireLogic",
+   "weaponFiring",
+   "yaw",
+   "pitch"
+  ]
+ },
+ "bot_assign": {
+  "doc": "the only engine fields mh_bots.lua may assign, and only on players it created or EntryInput objects it owns",
+  "fields": [
+   "input",
+   "deltaTime",
+   "flags",
+   "authoritativeAimingYaw",
+   "authoritativeAimingPitch",
+   "zoomLevel",
+   "selectedKit"
+  ]
+ },
+ "lua": {
+  "version": "Lua 5.4",
+  "source": "content/vext/_index.md (Lua engine)",
+  "runtime": "lupa.lua54"
+ },
+ "inherits": {
+  "doc": "'Inherits from' lines of the VU-Docs type pages (type@realm -> parent); the mock VU runtime resolves members along this chain",
+  "CapturePointEntity@server": "GameEntity",
+  "ControllableEntity@server": "PhysicsEntity",
+  "Entity@shared": "EntityBusPeer",
+  "MaterialContainerPair@shared": "DataContainer",
+  "PhysicsEntity@server": "GameEntity",
+  "PhysicsEntityBase@shared": "SpatialEntity",
+  "SoldierEntity@client": "ControllableEntity",
+  "SoldierEntity@server": "ControllableEntity",
+  "SoldierWeapon@client": "GameEntity",
+  "SoldierWeapon@server": "GameEntity",
+  "SoldierWeaponsComponent@server": "Component",
+  "SpatialEntity@shared": "Entity",
+  "TicketCounterEntity@server": "GameEntity",
+  "GameEntity@server": "SpatialEntity",
+  "Component@shared": "EntityBusPeer",
+  "ControllableEntity@client": "PhysicsEntity",
+  "PhysicsEntity@client": "GameEntity",
+  "GameEntity@client": "SpatialEntity",
+  "SoldierWeaponsComponent@client": "Component"
+ },
+ "fixture_calls_note": "SetLevel covers EIACycleFireMode and EIASelectWeapon* inputs on our own bots (input, allowed by R 3.2)",
+ "rcon_read_whitelist": {
+  "doc": "RCON:SendCommand may only be called with one of these literal commands and no args (apicheck rule 11, the mock journal)",
+  "read": [
+   "vars.serverName",
+   "vars.soldierHealth",
+   "vars.regenerateHealth",
+   "vars.bulletDamage",
+   "vars.playerRespawnTime",
+   "vars.gameModeCounter",
+   "vars.friendlyFire",
+   "vars.autoBalance",
+   "vars.idleTimeout",
+   "vars.roundStartPlayerCount",
+   "vars.roundRestartPlayerCount",
+   "vars.vehicleSpawnAllowed",
+   "vu.FrequencyMode",
+   "vu.SuppressionMultiplier",
+   "vu.TimeScale",
+   "vu.DisablePreRound",
+   "modList.ListRunning",
+   "serverInfo",
+   "version"
+  ],
+  "admin": [
+   "mapList.runNextRound",
+   "mapList.restartRound"
+  ],
+  "admin_doc": "admin commands only from mh_cmd.lua or mh_runner.lua (a user command with confirm, or a queue item the user typed), each followed by fx act=admin"
+ },
+ "kinds_doc": {
+  "dtype": "a data container type name (for entityData:Is); vudocs confirms the page and its Inherits from parent",
+  "etype": "an entity type name of content/vext/entities.md (for entity:Is and EntityManager:GetIterator); vudocs confirms the '## <name>' heading"
+ }
+}
