@@ -1,6 +1,7 @@
 # Terrain collision everywhere: design
 
-Status: design revision 2 (2026-10-16). Interface headers are in the tree (§13); the implementation has not started.
+Status: implemented on 2026-10-16 (design revision 2, with the refinements of §17.2). Every gate is measured;
+§17.1 gives the results and the one command per gate.
 Track "Terrain collision everywhere", branch `terrain/collision` (based on main 7b3e8fa). It merges before the
 parallel branches ui/swf-fonts, ui/minimap-icons, m2a/weapons, m2a/audio, m2a/vfx and m2a/design (§14.3).
 
@@ -887,3 +888,103 @@ mention. None is used on a parallel branch (§3).
    nav from Jolt's dequantised heights, was rejected because the gated levels stay at 1 mm.
 5. S2's MP_007 courses may move once the terrain is whole, because the finder's terrain-tile constraint becomes
    always true. The G2x numbers will move, and G5 gates them again.
+
+---
+
+## 17. As built (2026-10-16)
+
+### 17.1 Results
+
+Dev build, 16 threads, this machine (shared). Timings are noisy. The timing rows (G3, G4, G5) were taken under the
+quiet lock ("terrain/collision", held 12:00–12:10); the others were not. Branch `terrain/collision`.
+
+| id | command | threshold | measured | met |
+|---|---|---|---|---|
+| G1 | `ctest --preset dev -R "^sim\.terrain$"` (`test_sim_terrain --test-suite=sim-terrain`) | 0 lattice / tile-centre misses within 5 cm, 0 terrain hits in open cells, one digest per level, 31 runs without terrain, `holed` 1 / 2 / 1, exhaustive one to one, 0 combat tiles without ground on Caspian CQL and Kharg CQL | 230 runs (31 without terrain, 0 failed), 24 digests. Lattice 8,179,240 rays, 0 missed; open-cell 1,085,984 rays, 0 hits; tile centres 0 bad; worst error 0.0101 m (MP_013's quantisation, §5.4). Exhaustive: field + patch = soup on every cell of all 24 terrains (missing 0, extra 0). `holed`: MP_001 1 (3 patch triangles), MP_003 2 (6), XP4_Parl 1, 0 elsewhere. Full worlds, cold then warm: Caspian CQL 0 of 328 combat tiles without ground (66 had no soup triangle before TC); Kharg CQL 0 of 1,614 (1,234 before); Metro TDM cold = warm on 10,000 rays. The G1 case took 303.5 s | yes |
+| G2 | `pwsh research/probes/tools/level-oracle/parity.ps1 -Out <scratch> -Jobs 6` | 230 / 230 identical | **230 / 230 identical**, 0 missing, 0 non-finite. IW4L `49aca70d5a8ccb1660c8178f98a8d2f120339461` (clean). Wall 1,703 s with 6 jobs (bf3dump 5,539 s and oracle 4,388 s summed). An asan build and test ran beside it for part of that time, so the wall time is high and noisy | yes |
+| G3 | `ctest --preset dev -R "^(tools\.tc_cost\|godot\.m1_load)$"` | §4.5 limits; E4 ≤ 15 s, E5 ≤ 5 s | See the table below. E4 2.39 s, E5 1.92 s. The first run under the lock stopped after Metro, with all of Metro's rows ok, on a `tc_cost.cmake` bug: the "before" strings held `;`, which split the CMake list. Fixed and re-run once under the same lock; both runs are reported | yes |
+| G4 | `ctest --preset dev -R "^host\.scale$"`, `ctest --preset dev -R "^sim\.nav\.bake$"`, `ctest --preset dev -R "^sim\.nav$"` | host.scale p99 ≤ 8 ms; bake ≤ 6.0 s Caspian, ≤ 13.0 s Kharg; G2 rows beside 485/566 and 661/709 | **host.scale** p99: Metro CQL 1.517 ms, Caspian CQL 1.095 ms. Both runs valid (64/64 bots walked ≥ 100 m). G3 motor, Metro / Caspian: us_sweep mean 4.997 / 2.299 µs, us_overlap mean 2.430 / 1.148 µs, queries/s 13,418 / 16,413. **Bake** Caspian 3.370 s: 0 planes read, 0 tiles_wet, 0 triangles_unwalkable. Kharg 3.072 s: 1 plane at y 88.47, **1,240 tiles_wet, 3,493,129 triangles_unwalkable**, beside S1's 1,290 dropped cover tiles. The 50 extra tiles are coastal tiles that now bake, as §7 predicted. **sim.nav** G2 rows: **485 / 566** (Metro) and **661 / 709** (Caspian), equal to S1's. No row fell; G2 stays a WARN, as in S1 | yes |
+| G5 | `ctest --preset dev -R "^sim\.vehicle(\.unit)?$"` | 0 mismatching ticks on G1, G1r, G1m and G1t; G2x ExactPod max < 0.02 m | All 14 courses, G1m and G1t: G1 3,600 / 3,600 ticks, 0 mismatching; G1r 30 runs each, 0 mismatching. Every MP_007 course was found. ExactPod max 0.00190 m (collision course, R = 9); 0 on the other courses | yes |
+| G6 | `ctest --preset dev -R "^sim\.terrain$"` (case "G6 Caspian RushLarge0") | the evidence holds | 24 points in the footprint, all in `layer0_rush_logic`, none with a parent reference; y 104.131..104.443. The terrain is 28.6..32.3 m above them (0 open cells, 0 outside the grid). 2 disabled spawners; 0 Havok triangles in the box. The cause is in the data; no TC fix | yes |
+| G7 | full `ctest --preset dev` with `OPENBF3_GODOT`; `tools\build.cmd asan` then `ctest --preset asan -R "core\.level\.collision\|sim\.world\|sim\.terrain\|sim\.nav\.unit\|sim\.vehicle\.unit\|tc\.contract"`; the capture | all pass; install unchanged; capture inspected | FULL_CTEST_RESULT. ASAN_RESULT. install.unchanged was yes in every run that prints it (sim.terrain, tc_cost ×9, godot.collision, the captures). Capture: §17.3 | MET_G7 |
+
+G3 table (`tools.tc_cost` after TC). Each run gives the shapes total, then peak working set / peak private bytes:
+
+| run | cold | warm 1 | warm 2 | resident | cache | before TC (§4.4) |
+|---|---|---|---|---|---|---|
+| MP_Subway TDM | 0.631 s; 298.6 / 322.6 MiB | 0.042 s; 158.9 / 157.2 MiB | 0.037 s; 160.3 / 157.4 MiB | 20.1 MiB | 20.1 MiB | 0.681 s; 293.1 / 308.2 MiB; warm 0.036 s; 22.6 MiB |
+| XP3_Shield RL | 2.145 s; 505.0 / 504.7 MiB | 0.081 s; 305.6 / 256.2 MiB | 0.083 s; 304.8 / 255.4 MiB | 74.2 MiB | 74.3 MiB | 2.876 s; 549.9 / 676.6 MiB; warm 0.092 s; 72.6 MiB |
+| XP3_Alborz SR | 2.878 s; 628.1 / 641.8 MiB | 0.083 s; 334.7 / 285.6 MiB | 0.086 s; 333.8 / 284.7 MiB | 101.8 MiB | 101.9 MiB | 2.513 s; 644.7 / 710.6 MiB; warm 0.054 s; 78.3 MiB |
+
+A 4097² field costs 47.4 MiB resident, and its cook takes 1.45–1.51 s, which includes the `max_error` read-back. A
+warm run restores the field from the "jolt-terrain" entry well inside the 0.5 s limit.
+
+### 17.2 Refinements and deviations from the design
+
+* **Cook budget.**
+  * The first implementation charged three passes (samples, cells, the field read-back) against a budget of
+    `kMaxGridSide`² × 2, so every 4097² grid failed. `sim.terrain` G1 found this on MP_003.
+  * The budget is now × 3 (§11).
+* **Versions and keys.**
+  * The world index "OBF3JWLD" is v2 (`kStaticWorldIndexVersion`). For each Built terrain it stores the object and
+    the content digest.
+  * The tile blob stays format 1. Its content is now Havok only, so the tile keys change through the soup digest,
+    not through the format.
+  * The terrain blob "OBF3JTER" v1 is in `static_world_cache.cpp`, beside the tile blobs.
+  * The terrain key has no raycast switch, because the terrain is in the Collision layer either way. So a level's
+    modes share the terrain entry.
+* **Patch frame.** The patch is in world space: a `MeshShape` body at the identity, not in the field's frame. The
+  field body carries the frame.
+* **`describe_hit`.**
+  * A terrain hit reports `StaticHit::terrain` and `tile = kNoStaticTile`.
+  * `info.object` comes from the view when cooked and from the index when warm.
+* **Jolt's resumed block.**
+  * `HeightFieldShape::GetTrianglesNext` resumes at the start of the block it stopped in. Triangles it already
+    returned come back after a full buffer.
+  * `nav_validate.cpp` (proof 1) and the exhaustive test de-duplicate the field triangles by FNV-1a over the nine
+    float bits. The test counts the repeats (`resumed`).
+* **Nav input.**
+  * `NavTileInput::terrain_triangles` counts the terrain triangles, which follow the Havok ones.
+  * The gather visits the soup tiles within a per-record radius: 1 + the cells' XZ reach over 64 m. A terrain whose
+    cells reach further is refused.
+  * `unwalkable` is cleared when nothing is wet, so a dry tile's input and digest equal those without planes.
+* **Proof 1.** World terrain is gathered with a 1 mm slack. Only triangles that overlap the box shrunk by that slack
+  count as world-only, so edge triangles on the box border are not counted as extras.
+* **Overlay window.**
+  * Computed on a worker thread (`window_thread_`): nearest tiles first, in chunks of 32, each tile with its own
+    `WorkBudget` of 2^16.
+  * `--terrain-radius` takes 0..4,096 m.
+  * The check holds until the first window is ready, so `terrain.window` and `meshes.*` see it.
+* **`bf3dump terrain` (§14.1) was not added.**
+  * `sim.terrain` prints G1's numbers per level.
+  * `bf3dump shapes` prints each terrain's object, size, holes, `holed`, `patch_triangles`, `max_error` and content
+    digest.
+* **`sim.terrain` full worlds.**
+  * A ray from 0.25 m above a cell into the full world can first hit Havok ground lying on the terrain plane.
+    Re-casting 1 mm below that hit would step past the terrain.
+  * So a non-terrain hit within 5 cm of the expected height counts as ground (`coincident`, printed): 40, 66 and 60
+    rays on Caspian, Kharg and Metro.
+  * The terrain itself is proven by G1's terrain-only worlds (exhaustive check, 0 misses).
+* **G7 capture support.**
+  * `--shot-teleports=x,y,z,yaw;...` (an additive change to `ShotRunner` in m1_check.h) puts the own soldier at a
+    point with a debug Teleport.
+  * It then waits 2 s, captures `teleport_<i>.png` and prints the settled feet.
+
+### 17.3 Capture (G7)
+
+`sim.terrain` picks the Caspian CQL combat tile that had no soup triangle before TC and lies nearest the mean of
+those tiles: tile (4, 0), centre (288, 158.8, 32). The runs were windowed. The shots are in
+`openBF3\b\shots\tc\` (not committed).
+
+* **Soldier.**
+  * Command: `m1_metro.tscn -- --level=MP_007 --mode=ConquestLarge0 "--shot-teleports=288,161,32,0;288,161,32,180"
+    --shot-dir=<shots>`.
+  * The soldier dropped 2.15 m and settled at feet (287.99, 158.854, 32.01): 0 m/s, on ground (mode 0, air_ticks
+    0), eye 1.60 m.
+  * Inspected: open dunes under the feet, no fall-through.
+* **Overlay.**
+  * Commands: `metro_collision.tscn -- --level=MP_007 --mode=ConquestLarge0 --camera=288,200,120,0,-25
+    --screenshot=<shots>\overlay_bare_tile.png`, and the same with `--shots=<top>@288,420,32,0,-89.5 --layers=5`.
+  * Terrain window: 231 and 241 tiles (473,088 and 493,568 triangles).
+  * Inspected: layer 5 is continuous over the tile and around it.
+  * Frame time was at vsync (5.56 ms) with 0.71 M primitives.

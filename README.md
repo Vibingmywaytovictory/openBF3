@@ -1000,6 +1000,40 @@ Measured (dev build, 16 threads, RX 9070 XT, D3D12, 1152×648, warm file cache, 
   meshes, top view 0.72 / 1.58 ms for 3.98 M primitives.
 * ASan: `core.level.collision` takes about 11 min (the 32 mutants about 9), so its timeout there is 1,800 s.
 
+<!-- TC -->
+### Terrain collision everywhere (track TC, docs/design/terrain-collision.md)
+
+Every terrain cell has collision now, and holes are kept exactly as before. The static world cooks one Jolt
+`HeightFieldShape` per terrain plus a tiny patch mesh; the "jolt-terrain" cache entry is content keyed and shared
+by a level's modes. S1's `terrain_cover` / `cover_water` are gone. The nav bake applies the water rule per terrain
+triangle (`NavBakeOptions::water`), and `NavStats` prints `tiles_wet` and `triangles_unwalkable`.
+
+Gates, measured on 2026-10-16 on a shared machine, so the timings are noisy. G3, G4 and G5 were taken under the
+quiet lock. Design doc §17 has the full rows.
+
+| gate | command | result |
+|---|---|---|
+| G1 coverage | `ctest --preset dev -R "^sim\.terrain$"` | 230 runs, 24 digests, 31 without terrain; 8.18 M lattice rays and 1.09 M open-cell rays, 0 bad; worst 1.0 cm (MP_013 quantisation); 0 combat tiles without ground on Caspian CQL (0/328) and Kharg CQL (0/1,614) |
+| G2 parity | `pwsh research/probes/tools/level-oracle/parity.ps1 -Out <scratch> -Jobs 6` | 230 / 230 identical; IW4L `49aca70d5a8c` (clean); wall 1,703 s with 6 jobs |
+| G3 cost | `ctest --preset dev -R "^(tools\.tc_cost\|godot\.m1_load)$"` | cold / warm shapes total: Metro TDM 0.63 / 0.04 s, Shield RL 2.15 / 0.08 s, Alborz SR 2.88 / 0.09 s. Peak private bytes ≤ 642 MiB; resident ≤ 102 MiB; cache ≤ 102 MiB. E4 2.39 s, E5 1.92 s |
+| G4 S1 re-run | `ctest --preset dev -R "^host\.scale$"`, `... "^sim\.nav\.bake$"`, `... "^sim\.nav$"` | p99 tick: Metro 1.52 ms, Caspian 1.10 ms. Bake: Caspian 3.37 s, Kharg 3.07 s (1,240 tiles_wet, 3.49 M triangles_unwalkable; S1 dropped 1,290 cover tiles). G2 rows 485/566 and 661/709, unchanged |
+| G5 S2 re-run | `ctest --preset dev -R "^sim\.vehicle(\.unit)?$"` | G1, G1r, G1m and the new G1t (heightfield with hole and patch): 0 mismatching ticks. ExactPod max 1.9 mm |
+| G6 Caspian spawns | `ctest --preset dev -R "^sim\.terrain$"` | the 24 RL points sit 28.6–32.3 m under the terrain in `layer0_rush_logic`; the cause is in the data, no fix |
+| G7 hygiene | full `ctest --preset dev`; `tools\build.cmd asan` + `ctest --preset asan -R "core\.level\.collision\|sim\.world\|sim\.terrain\|sim\.nav\.unit\|sim\.vehicle\.unit\|tc\.contract"`; capture | see design doc §17.1 |
+
+`sim.terrain.unit` needs no data. It covers:
+* hole patterns, including every pattern that needs a patch;
+* random grids and frames;
+* append against hash;
+* blob round trips, plus 248 refused and 1,252 accepted hostile blobs;
+* `nav_terrain_wet`;
+* `describe_hit`;
+* all-hole and patch-only fields;
+* a synthetic nav proof 1.
+
+The M1 game takes `--shot-teleports=x,y,z,yaw;...`. It places the own soldier with a debug Teleport, waits 2 s,
+saves `teleport_<i>.png` to `--shot-dir` and prints the settled feet.
+
 ## Layout and pinned third-party code
 
 | path | what |
