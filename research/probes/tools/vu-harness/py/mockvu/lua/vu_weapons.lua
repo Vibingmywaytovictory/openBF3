@@ -221,7 +221,8 @@ local function decay(w, so, dt, frac)
 	local rate = M.laws.decay or 15
 	if st.da == nil then st.da = dmin end
 	local interval = 60 / w.def.rpm
-	local over = st.tsls - interval
+	-- the decrease starts once no shot was fired for two intervals (mock assumption, DESIGN 16)
+	local over = st.tsls - 2 * interval
 	if over > 0 then
 		local amt
 		if M.laws.coupled == 'decay' then amt = rate / 30 * frac * math.min(1, over / dt)
