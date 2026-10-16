@@ -41,3 +41,6 @@ target_sources(bf3dump PRIVATE weapon_sim_commands.cpp weapon_sim_commands.h)
 # M2a VFX1 (docs/design/m2a-vfx1.md §7.7): `fx census | compile | simulate | check | bench | atlas | impacts`.
 target_sources(bf3dump PRIVATE fx_commands.cpp fx_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_fx)
+# M2a vm (docs/design/m2a-vm.md): `vm clips`, the 1p viewmodel clip roles, E5 reload rows and E11 coverage (bf3_render
+# from the prepare block above).
+target_sources(bf3dump PRIVATE vm_commands.cpp vm_commands.h)

@@ -61,3 +61,8 @@ target_sources(bf3_render PRIVATE
 target_sources(bf3_render PRIVATE
     include/bf3/render/viewmodel_set.h
 )
+
+# M2a vm (docs/design/m2a-vm.md): the kit viewmodel sets (shared sources, role clips, stand-ins, ADS data).
+target_sources(bf3_render PRIVATE
+    src/viewmodel_set.cpp
+)
