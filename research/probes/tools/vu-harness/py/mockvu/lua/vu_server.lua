@@ -81,7 +81,9 @@ end
 function M.on_cfg_start(sc, i)
 	M.spawn_block = false
 	local sf = M.laws.spawn_fails
-	if type(sf) == 'string' and sf == string.format('%s:%d', tostring(sc), i or -1) then M.spawn_block = true end
+	if type(sf) == 'string' and (sf == string.format('%s:%d', tostring(sc), i or -1) or sf == tostring(sc) .. ':*') then
+		M.spawn_block = true
+	end
 	local wo = M.laws.w1_outliers
 	if type(wo) == 'string' and sc == 'WA' then
 		local k, f = wo:match('^(%d+)@([%d.]+)$')

@@ -59,10 +59,10 @@ class Env(object):
         self.allow_viol = False
 
     # -- setup ---------------------------------------------------------------------------------------------------
-    def host(self, laws=None, seed=1, cert=None, tag=None, **user_kw):
+    def host(self, laws=None, seed=1, cert=None, tag=None, level_opts=None, **user_kw):
         tag = tag or 'h%d' % (len(self.hosts) + 1)
         h = Host(laws or {}, seed=seed, outdir=self.dir, cert=ALL_CERT if cert is None else cert,
-                 coverage=self.coverage, tag=tag)
+                 coverage=self.coverage, tag=tag, level_opts=level_opts)
         if h.load_errors:
             raise CaseFail('mod load errors: %s' % h.errors[:3])
         u = US.User(h, **user_kw)

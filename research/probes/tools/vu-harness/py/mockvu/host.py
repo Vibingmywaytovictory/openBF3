@@ -123,7 +123,8 @@ class Realm(object):
 class Host(object):
     """One mock VU server + client with the mod loaded. chunk(n) advances n ticks; logs are written as they come."""
 
-    def __init__(self, laws=None, seed=1, outdir=None, cert=None, coverage=False, mod_dir=MOD_DIR, tag='run'):
+    def __init__(self, laws=None, seed=1, outdir=None, cert=None, coverage=False, mod_dir=MOD_DIR, tag='run',
+                 level_opts=None):
         self.laws = LAWS.make(**(laws or {}))
         self.seed = seed
         self.hz = int(self.laws['hz'])
@@ -154,7 +155,9 @@ class Host(object):
             m.laws.tcost = self.srv.table(lw['tcost'])
         self.level_list = LEVELS.levels(origin=self.laws.get('origin'), range_len=self.laws.get('range_len'))
         m.levels = self.srv.table(self.level_list)
-        m.level_opts = self.srv.table({'preround': bool(self.laws['preround'])})
+        lo = {'preround': bool(self.laws['preround'])}
+        lo.update(level_opts or {})
+        m.level_opts = self.srv.table(lo)
         ssrc = {k: v for k, v in sources.items() if k.startswith(('shared/', 'server/'))}
         if coverage:
             m.coverage_on()
@@ -176,6 +179,7 @@ class Host(object):
         self.marks = []
         self.ulog = []
         self.lines_out = 0
+        self.max_players = 0
         self.k = 0
         self.local_pid = -1
         self.level_name = self.level_list[0]['name']
@@ -272,6 +276,7 @@ class Host(object):
             return
         m.run_ticks(n)
         self.k = int(m.k)
+        self.max_players = max(self.max_players, int(m.U.player_count()))
         self.drain()
 
     def join(self, team=1):
