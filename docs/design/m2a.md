@@ -1204,7 +1204,12 @@ step (`gunplay->step_soldier`, §4.1 4a), the rules step (rules, dev kinds, `pla
 (`history.record_tick` / `history.sent`, the own weapons block, `SnapshotOthers`, the shot and combat datagrams); cl in
 `prediction.cpp` inside `catch_up`'s per-tick loop right after the motor step (`step_weapons_m2a`, §8.2), and in
 `client_session.cpp` in `handle_datagram` (`SnapshotOthers`, `ReceivedRecords`, shot and combat decode) and
-`publish` (weapon views, `newest_seq`).
+`publish` (weapon views, `newest_seq`). Corrected by cl (the list proved incomplete; m2a-cl.md "insertions"): the
+client also needs one-line calls in `authoritative` (the spawn's weapons, the ring-miss and reconcile rebase from the
+wire view, the weapons compare and R2's health rebase in the match branch), in `client_tick` (the view sample,
+`fire_presses` and the received state after `sample_command`, the weapons after the motor step, `others_ack_bits`)
+and in `start` (Ready leaves `start` for MatchInfo, so a refused client never sends it, E6), plus one member block
+inside `ClientSession::Impl` and `PredictionRing::attach_weapons` (the lane `catch_up` replays).
 
 **Named replacements** (lines are replaced, by the owner named, and nowhere else):
 
