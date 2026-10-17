@@ -16,6 +16,7 @@
 # checks print their table rows ("  FAIL  E2.150/2 ...", "| server.tick_rate | FAIL | ...").
 # godot.m1.e1 and host.session.e3 are not listed: their checks (E1 traces, E1d, E3, snapshots) are functional, so a
 # failure there fails the pass at once.
+# host.session.unit runs in the timing phase now (no reruns there); its rule stays for a lane run by hand.
 set(RT_ROWS host.server host.session.gate host.session.stress host.session.unit godot.m1.e2_gate godot.m1.e2_stress
 	godot.s0_selftest)
 

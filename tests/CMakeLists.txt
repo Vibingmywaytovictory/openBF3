@@ -388,7 +388,7 @@ endif()
 # exits 77 without an install. Both read the shipped tuning file. The suite host-session-unit is split
 # (docs/testing.md "Splits"): host.session.unit.pure runs the 4 socket-free cases (judge_rest, presentation,
 # GameServer without sockets, SpawnSweep in batches) on every branch; host.session.unit runs the 5 loopback cases,
-# which wait on real time, in the merge pass's real-time lane (label realtime, like host.session);
+# which wait on real time, serially in the merge pass's timing phase (label timing; it needed lane reruns);
 # host.session.unit.split_cover proves every case is in exactly one of the two. The suite host-session is split the
 # same way into three lane rows that run side by side, each loading Metro itself and checking install unchanged:
 # host.session.gate (the load case and E2 under 150/2), host.session.stress (E2 under lat=150-165,loss=2) and
@@ -412,6 +412,7 @@ openbf3_case_row(NAME host.session.e3 EXE test_host_session SUITE host-session G
 openbf3_split_cover(NAME host.session.split_cover EXE test_host_session SUITE host-session GROUP host-session
     INSTALL_CASE ${_openbf3_session_install})
 set_tests_properties(host.session.unit.pure host.session.unit PROPERTIES TIMEOUT 300)
+set_tests_properties(host.session.unit PROPERTIES RUN_SERIAL TRUE)
 set_tests_properties(host.session.gate host.session.stress host.session.e3 PROPERTIES TIMEOUT 400)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_t4_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
@@ -917,10 +918,12 @@ function(openbf3_label p_label)
 endfunction()
 # realtime: waits on real time at under 0.5 core and gates latency behaviour (the merge pass's lane, -j8).
 openbf3_label(realtime godot.m1.e1 godot.m1.e2_gate godot.m1.e2_stress host.session.gate host.session.stress host.session.e3
-    host.session.unit host.server godot.s0_selftest host.scale.paced)
+    host.server godot.s0_selftest host.scale.paced)
 # timing: gates wall or CPU time (the merge pass, serially; RUN_SERIAL stays on each).
+# host.session.unit left the real-time lane for the serial timing phase (S16 landing rule): beside the shards it
+# needed a rerun in 2 of 4 lane runs (interp.compared > 300, target_buffer_ticks == 2; 2026-10-17).
 openbf3_label(timing host.scale sim.nav.bake sim.weapons.perf tools.fx_bench audio.decode.perf audio.bank logic.perf
-    tools.tc_cost host.gunplay.perf)
+    tools.tc_cost host.gunplay.perf host.session.unit)
 # serial_wallclock: RUN_SERIAL in the branch pass for a wall-clock CHECK (host_scale_tests.cpp: the per-tick timer
 # parts sum to >= 0.95 x the tick on 99 % of ticks).
 openbf3_label(serial_wallclock host.scale.unit)
@@ -938,7 +941,7 @@ if(OPENBF3_ASAN)
     set_tests_properties(host.scale.paced PROPERTIES TIMEOUT 1800)
     # Their real-time gates still bite under asan (asan-realtime at -j4 failed the clock-target, extrapolation and
     # E2 rest checks): they run alone inside the asan-realtime phase.
-    set_tests_properties(host.session.unit host.session.gate PROPERTIES RUN_SERIAL TRUE)
+    set_tests_properties(host.session.gate PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 # PROCESSORS = measured cpu / wall (rounded, >= 2); COST = measured serial seconds (rows over 5 s), so a fresh build
