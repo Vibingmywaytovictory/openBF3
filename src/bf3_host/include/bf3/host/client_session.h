@@ -221,6 +221,8 @@ struct ClientStats {
 	uint64_t remote_shots = 0; // RemoteShot events (shots of other slots)
 	uint64_t combat_hits = 0, combat_deaths = 0, combat_detonations = 0;
 	uint64_t bad_gunplay_datagrams = 0; // ShotEvents / CombatEvents / SnapshotOthers that failed to decode
+	uint64_t bad_weapon_wires = 0; // a Snapshot's own weapons block refused by weapons_from_wire (not adopted)
+	uint64_t bad_gunplay_events = 0; // decoded shots / hits / deaths / detonations naming a slot or def out of range (dropped)
 	uint64_t late_sample = 0; // arrivals with a seq <= the view_seq of a firing command already sent (§6.3)
 	uint64_t generation_reorder = 0; // a reordered old-generation record reset a drawn track
 	uint64_t others_ahead = 0; // published frames drawing a SnapshotOthers record newer than newest_seq's tick

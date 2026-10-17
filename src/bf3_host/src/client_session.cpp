@@ -282,6 +282,8 @@ struct ClientSession::Impl {
 	void cl_push(const PresentEvent &p_event);
 	bool cl_match_info(const net::MatchInfo &p_match, uint64_t p_now); // false: refused (or a repeat), stop handling
 	void cl_refuse(const char *p_reason);
+	static bool cl_slot_ok(uint32_t p_slot);
+	bool cl_def_ok(uint32_t p_def) const;
 	void cl_spawned(const net::Spawned &p_spawned);
 	void cl_snapshot(const net::Snapshot &p_snapshot, uint64_t p_now);
 	void cl_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now);
@@ -1584,6 +1586,15 @@ void ClientSession::Impl::cl_snapshot(const net::Snapshot &p_snapshot, uint64_t 
 	}
 }
 
+// Hostile values that decode: a slot the snapshot space cannot name, a def outside this client's table.
+bool ClientSession::Impl::cl_slot_ok(uint32_t p_slot) {
+	return p_slot < net::kMaxSlots;
+}
+
+bool ClientSession::Impl::cl_def_ok(uint32_t p_def) const {
+	return cl_table != nullptr && p_def < cl_table->defs.size();
+}
+
 void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now) {
 	switch (p_type) {
 		case net::MessageType::SnapshotOthers: {
@@ -1614,6 +1625,10 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				if (r.slot == slot) {
 					continue; // the owner predicted it (the server never sends it)
 				}
+				if (!cl_slot_ok(r.slot) || !cl_def_ok(r.def)) {
+					++stats.bad_gunplay_events;
+					continue;
+				}
 				PresentEvent ev;
 				ev.kind = PresentKind::RemoteShot;
 				ev.timeline = PresentTimeline::Render;
@@ -1642,6 +1657,10 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				return;
 			}
 			for (const net::HitEvent &h : e->hits) {
+				if (!cl_slot_ok(h.victim) || !cl_slot_ok(h.shooter)) {
+					++stats.bad_gunplay_events;
+					continue;
+				}
 				PresentEvent ev;
 				ev.kind = PresentKind::Hit;
 				const bool own_victim = h.victim == slot, own_shooter = h.shooter == slot;
@@ -1654,13 +1673,17 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				copy3(ev.pos, h.position);
 				copy3(ev.dir, h.normal);
 				ev.value = h.damage;
-				ev.extra = uint32_t(std::clamp(h.health_after * 100.0f, 0.0f, 1.0e7f));
+				ev.extra = std::isfinite(h.health_after) ? uint32_t(std::clamp(h.health_after * 100.0f, 0.0f, 1.0e7f)) : 0u;
 				ev.material = uint32_t(h.zone);
 				ev.time = h.time;
 				cl_push(ev);
 				++stats.combat_hits;
 			}
 			for (const net::DeathEvent &d : e->deaths) {
+				if (!cl_slot_ok(d.victim) || !cl_slot_ok(d.killer) || (d.def != sim::weapons::kNoWeapon && !cl_def_ok(d.def))) {
+					++stats.bad_gunplay_events;
+					continue;
+				}
 				PresentEvent ev;
 				ev.kind = PresentKind::Death;
 				ev.timeline = PresentTimeline::Render;
@@ -1676,6 +1699,10 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				++stats.combat_deaths;
 			}
 			for (const net::DetonationWire &d : e->detonations) {
+				if (!cl_slot_ok(d.shooter) || !cl_def_ok(d.def)) {
+					++stats.bad_gunplay_events;
+					continue;
+				}
 				PresentEvent ev;
 				ev.kind = PresentKind::Detonation;
 				ev.timeline = PresentTimeline::Render;
@@ -1701,6 +1728,7 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 bool ClientSession::Impl::cl_put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick) {
 	core::Result<sim::weapons::SoldierWeaponsState> w = net::weapons_from_wire(cl_wire, p_s.tick, slot, cl_table->defs.size());
 	if (!w) {
+		++stats.bad_weapon_wires;
 		return false;
 	}
 	sim::WeaponPredictionEntry e;
