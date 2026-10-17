@@ -115,129 +115,166 @@ std::unique_ptr<AntPackage> load_package(const AntPackageSource &p_source, const
 }
 
 bool run_census(const AntPackageSource &p_source, const AntLibrary &p_library, bool p_mp_only, Census &r_census, std::string &r_error) {
+	return run_censuses(p_source, p_library, p_mp_only ? &r_census : nullptr, p_mp_only ? nullptr : &r_census, r_error);
+}
+
+bool run_censuses(const AntPackageSource &p_source, const AntLibrary &p_library, Census *r_mp, Census *r_all, std::string &r_error,
+		const PackageLoader &p_load) {
 	const Clock::time_point start = Clock::now();
-	r_census = {};
-	r_census.mp_only = p_mp_only;
 	const AntPackage *static_package = p_library.static_package();
 	if (static_package == nullptr) {
 		r_error = "library has no static package";
 		return false;
 	}
-	r_census.static_objects = static_package->object_count();
-	r_census.static_layouts = static_package->archive().layouts().size();
+	for (Census *c : { r_mp, r_all }) {
+		if (c != nullptr) {
+			*c = {};
+			c->mp_only = c == r_mp;
+			c->static_objects = static_package->object_count();
+			c->static_layouts = static_package->archive().layouts().size();
+		}
+	}
 
-	auto census_package = [&](const AntPackage &p_package, bool p_static) {
+	// Every clip is decoded and bound once; the result is counted into each census the package belongs to.
+	auto census_package = [&](const AntPackage &p_package, bool p_static, bool p_mp) {
+		Census *const targets[2] = { p_mp ? r_mp : nullptr, r_all };
 		for (uint32_t index : AntLibrary::clips(p_package)) {
 			const GdStruct clip = p_package.object(index);
 			const ClipCodec codec = clip_codec(clip);
 			const std::string codec_label = codec == ClipCodec::Unknown ? std::string(clip.type_name()) : codec_name(codec);
-			CodecCensus &cc = r_census.codecs[codec_label];
-			++cc.clips;
-			if (p_static) {
-				++r_census.static_codecs[codec_label];
-			}
 			DecodedClip decoded;
 			DecodeStats stats;
 			const Clock::time_point t0 = Clock::now();
 			const AntResult r = decode_clip(clip, decoded, &stats);
-			if (codec == ClipCodec::Dct) {
-				r_census.dct_decode_seconds += seconds_since(t0);
-			}
-			if (r.status == AntStatus::Unsupported) {
-				++cc.unsupported;
-			} else if (!r.ok()) {
-				++cc.errors;
-				if (codec == ClipCodec::Dct && r.message.find("overrun") != std::string::npos) {
-					++r_census.dct_overruns;
+			const double decode_seconds = seconds_since(t0);
+			const bool mapped_codec = codec == ClipCodec::Dct || codec == ClipCodec::Raw || codec == ClipCodec::Frame || codec == ClipCodec::Vbr;
+			ClipBinding b;
+			const AntResult br = mapped_codec ? p_library.bind(p_package, clip, b) : AntResult{};
+			for (Census *target : targets) {
+				if (target == nullptr) {
+					continue;
 				}
-				if (codec == ClipCodec::Raw) {
-					++r_census.raw_other;
+				Census &r_census = *target;
+				CodecCensus &cc = r_census.codecs[codec_label];
+				++cc.clips;
+				if (p_static) {
+					++r_census.static_codecs[codec_label];
 				}
-				if (codec == ClipCodec::Frame) {
-					++r_census.frame_other;
-				}
-				if (r_census.notes.size() < 20) {
-					r_census.notes.push_back(p_package.name() + "/" + std::string(clip.name()) + ": " + r.message);
-				}
-			} else {
-				++cc.decoded;
-				cc.keys += decoded.num_keys;
-				cc.channel_values += uint64_t(decoded.num_keys) * decoded.channel_count();
-				if (decoded.num_keys != header_key_count(clip, codec) || decoded.key_times.size() != decoded.num_keys) {
-					++cc.key_count_mismatch;
-				}
-				bool unit = true;
-				for (const Quat &q : decoded.quats) {
-					const double len = std::sqrt(double(q.x) * q.x + double(q.y) * q.y + double(q.z) * q.z + double(q.w) * q.w);
-					unit = unit && std::fabs(len - 1.0) < 1e-4;
-				}
-				cc.non_unit_quats += unit ? 0 : 1;
 				if (codec == ClipCodec::Dct) {
-					++r_census.dct_ok;
-					++r_census.dct_datasize_residual[stats.data_size_residual];
-					r_census.dct_bitstream_bytes += stats.bitstream_bytes;
-					r_census.dct_bits_read += stats.bits_read;
-					if (stats.mean_abs_quat_error > kQuatOffThreshold) {
-						++r_census.dct_q_off;
-						if (r_census.notes.size() < 40) {
-							char buf[256];
-							std::snprintf(buf, sizeof(buf), "%s/%s: mean |q|-1 = %.5f (keys %u, q %u)", p_package.name().c_str(), std::string(clip.name()).c_str(),
-									stats.mean_abs_quat_error, decoded.num_keys, decoded.num_quats);
-							r_census.notes.push_back(buf);
-						}
-					}
-					r_census.dct_worst_mean_q = std::max(r_census.dct_worst_mean_q, stats.mean_abs_quat_error);
-				} else if (codec == ClipCodec::Raw) {
-					++(stats.float_block_padded ? r_census.raw_padded : r_census.raw_exact);
-				} else if (codec == ClipCodec::Frame) {
-					++(stats.float_block_padded ? r_census.frame_other : r_census.frame_exact);
+					r_census.dct_decode_seconds += decode_seconds;
 				}
-			}
-			if (codec == ClipCodec::Dct || codec == ClipCodec::Raw || codec == ClipCodec::Frame || codec == ClipCodec::Vbr) {
-				ClipBinding b;
-				const AntResult br = p_library.bind(p_package, clip, b);
-				if (br.status == AntStatus::NotFound) {
-					++r_census.clips_without_controller;
-				} else if (!br.ok()) {
-					++r_census.bind_errors;
-					if (r_census.notes.size() < 60) {
-						r_census.notes.push_back(p_package.name() + "/" + std::string(clip.name()) + ": bind: " + br.message);
+				if (r.status == AntStatus::Unsupported) {
+					++cc.unsupported;
+				} else if (!r.ok()) {
+					++cc.errors;
+					if (codec == ClipCodec::Dct && r.message.find("overrun") != std::string::npos) {
+						++r_census.dct_overruns;
+					}
+					if (codec == ClipCodec::Raw) {
+						++r_census.raw_other;
+					}
+					if (codec == ClipCodec::Frame) {
+						++r_census.frame_other;
+					}
+					if (r_census.notes.size() < 20) {
+						r_census.notes.push_back(p_package.name() + "/" + std::string(clip.name()) + ": " + r.message);
 					}
 				} else {
-					++r_census.clips_with_controller;
-					++cc.mapped;
-					r_census.channels_total += b.tracks.size();
-					r_census.channels_ok += b.tracks.size() - b.kind_mismatches;
-					r_census.channels_on_delta_traj += b.delta_traj_channels;
-					if (b.kind_mismatches == 0) {
-						++r_census.clips_kind_consistent;
-						++cc.mapped_perfect;
+					++cc.decoded;
+					cc.keys += decoded.num_keys;
+					cc.channel_values += uint64_t(decoded.num_keys) * decoded.channel_count();
+					if (decoded.num_keys != header_key_count(clip, codec) || decoded.key_times.size() != decoded.num_keys) {
+						++cc.key_count_mismatch;
+					}
+					bool unit = true;
+					for (const Quat &q : decoded.quats) {
+						const double len = std::sqrt(double(q.x) * q.x + double(q.y) * q.y + double(q.z) * q.z + double(q.w) * q.w);
+						unit = unit && std::fabs(len - 1.0) < 1e-4;
+					}
+					cc.non_unit_quats += unit ? 0 : 1;
+					if (codec == ClipCodec::Dct) {
+						++r_census.dct_ok;
+						++r_census.dct_datasize_residual[stats.data_size_residual];
+						r_census.dct_bitstream_bytes += stats.bitstream_bytes;
+						r_census.dct_bits_read += stats.bits_read;
+						if (stats.mean_abs_quat_error > kQuatOffThreshold) {
+							++r_census.dct_q_off;
+							if (r_census.notes.size() < 40) {
+								char buf[256];
+								std::snprintf(buf, sizeof(buf), "%s/%s: mean |q|-1 = %.5f (keys %u, q %u)", p_package.name().c_str(), std::string(clip.name()).c_str(),
+										stats.mean_abs_quat_error, decoded.num_keys, decoded.num_quats);
+								r_census.notes.push_back(buf);
+							}
+						}
+						r_census.dct_worst_mean_q = std::max(r_census.dct_worst_mean_q, stats.mean_abs_quat_error);
+					} else if (codec == ClipCodec::Raw) {
+						++(stats.float_block_padded ? r_census.raw_padded : r_census.raw_exact);
+					} else if (codec == ClipCodec::Frame) {
+						++(stats.float_block_padded ? r_census.frame_other : r_census.frame_exact);
+					}
+				}
+				if (mapped_codec) {
+					if (br.status == AntStatus::NotFound) {
+						++r_census.clips_without_controller;
+					} else if (!br.ok()) {
+						++r_census.bind_errors;
+						if (r_census.notes.size() < 60) {
+							r_census.notes.push_back(p_package.name() + "/" + std::string(clip.name()) + ": bind: " + br.message);
+						}
+					} else {
+						++r_census.clips_with_controller;
+						++cc.mapped;
+						r_census.channels_total += b.tracks.size();
+						r_census.channels_ok += b.tracks.size() - b.kind_mismatches;
+						r_census.channels_on_delta_traj += b.delta_traj_channels;
+						if (b.kind_mismatches == 0) {
+							++r_census.clips_kind_consistent;
+							++cc.mapped_perfect;
+						}
 					}
 				}
 			}
 		}
 	};
 
-	census_package(*static_package, true);
+	census_package(*static_package, true, true);
 	for (const AntPackageInfo &info : p_source.packages()) {
-		if (info.packaging == AntPackagingType::Static || (p_mp_only && !is_mp_relevant(info.short_name))) {
+		const bool mp = is_mp_relevant(info.short_name);
+		if (info.packaging == AntPackagingType::Static || (r_all == nullptr && !mp)) {
 			continue;
 		}
-		++r_census.packages;
+		Census *const targets[2] = { mp ? r_mp : nullptr, r_all };
 		std::string error;
-		std::unique_ptr<AntPackage> p = load_package(p_source, info, error);
-		if (!p) {
-			++r_census.packages_failed;
-			r_census.failures.push_back(error);
-			continue;
+		std::unique_ptr<AntPackage> own;
+		const AntPackage *p = nullptr;
+		if (p_load) {
+			p = p_load(info, error);
+		} else {
+			own = load_package(p_source, info, error);
+			p = own.get();
 		}
-		if (info.packaging == AntPackagingType::Chunk) {
-			++r_census.chunk_packages;
-			r_census.chunk_size_ok += p->byte_size() == info.chunk_size ? 1 : 0;
+		for (Census *c : targets) {
+			if (c == nullptr) {
+				continue;
+			}
+			++c->packages;
+			if (p == nullptr) {
+				++c->packages_failed;
+				c->failures.push_back(error);
+			} else if (info.packaging == AntPackagingType::Chunk) {
+				++c->chunk_packages;
+				c->chunk_size_ok += p->byte_size() == info.chunk_size ? 1 : 0;
+			}
 		}
-		census_package(*p, false);
+		if (p != nullptr) {
+			census_package(*p, false, mp);
+		}
 	}
-	r_census.total_seconds = seconds_since(start);
+	for (Census *c : { r_mp, r_all }) {
+		if (c != nullptr) {
+			c->total_seconds = seconds_since(start);
+		}
+	}
 	return true;
 }
 

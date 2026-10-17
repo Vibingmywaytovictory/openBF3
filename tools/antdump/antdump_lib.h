@@ -10,6 +10,7 @@
 #include "bf3/core/install.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -104,6 +105,14 @@ struct Census {
 // Parses every AntPackageAsset of the source (mp_only: the probe's MP-relevant set), decodes every clip and
 // binds every clip of a mapped codec (DCT, Raw, Frame, VBR).
 bool run_census(const AntPackageSource &p_source, const AntLibrary &p_library, bool p_mp_only, Census &r_census, std::string &r_error);
+// The package for p_info, or null with r_error set; the pointer stays valid for the rest of the census.
+using PackageLoader = std::function<const AntPackage *(const AntPackageInfo &p_info, std::string &r_error)>;
+// Both censuses in one pass: every package is read and every clip decoded and bound once, then counted into r_all
+// and, for the MP-relevant packages, into r_mp (either may be null). Equal to run_census(..., true, *r_mp) and
+// run_census(..., false, *r_all) apart from the seconds fields. p_load (default: load_package from p_source) lets a
+// caller reuse packages it already parsed.
+bool run_censuses(const AntPackageSource &p_source, const AntLibrary &p_library, Census *r_mp, Census *r_all, std::string &r_error,
+		const PackageLoader &p_load = {});
 std::string format_census(const Census &p_census);
 
 // The probe's clip JSON: source, fps, fpsScale, numTicks, endFrame, keyTimes, joints (rig rest pose),

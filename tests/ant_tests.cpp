@@ -17,6 +17,8 @@
 #include "bf3/core/ant/gd_archive.h"
 #include "test_support.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -24,6 +26,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <memory>
 #include <numbers>
 #include <set>
 #include <string>
@@ -300,6 +304,66 @@ AntData *data_or_skip() {
 	return d;
 }
 
+// Packages parsed once per process: the bank case parses every bank and chunk package, and both censuses reuse the
+// ones listed in packages() instead of reading and parsing them again. Keyed by packaging, lowercase name and chunk
+// guid; a package the bank case did not parse is loaded on first use (each case still runs alone).
+struct PackageCache {
+	std::map<std::string, std::unique_ptr<AntPackage>> parsed;
+	std::map<std::string, std::string> errors;
+	size_t reused = 0;
+};
+
+PackageCache &package_cache() {
+	static PackageCache s_cache;
+	return s_cache;
+}
+
+std::string package_key(const AntPackageInfo &p_info) {
+	std::string name = p_info.name;
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char p_c) { return char(std::tolower(p_c)); });
+	return std::to_string(int(p_info.packaging)) + "|" + name + "|" + p_info.streaming_guid;
+}
+
+// The parsed package (null with r_error on failure), parsed on first use.
+const AntPackage *cached_package(const AntData &p_data, const AntPackageInfo &p_info, std::string &r_error) {
+	PackageCache &c = package_cache();
+	const std::string key = package_key(p_info);
+	if (auto it = c.parsed.find(key); it != c.parsed.end()) {
+		++c.reused;
+		return it->second.get();
+	}
+	if (auto it = c.errors.find(key); it != c.errors.end()) {
+		r_error = it->second;
+		return nullptr;
+	}
+	std::unique_ptr<AntPackage> p = antdump::load_package(p_data.source(), p_info, r_error);
+	if (!p) {
+		c.errors[key] = r_error;
+		return nullptr;
+	}
+	return (c.parsed[key] = std::move(p)).get();
+}
+
+// Both censuses of the source in one pass (antdump::run_censuses: every clip decoded and bound once), shared by the
+// MP and the all-packages census cases.
+struct Censuses {
+	bool ok = false;
+	std::string error;
+	antdump::Census mp, all;
+};
+
+const Censuses &censuses(const AntData &p_data) {
+	static Censuses s_censuses;
+	static bool s_done = false;
+	if (!s_done) {
+		s_done = true;
+		s_censuses.ok = antdump::run_censuses(p_data.source(), p_data.library, &s_censuses.mp, &s_censuses.all, s_censuses.error,
+				[&](const AntPackageInfo &p_info, std::string &r_error) { return cached_package(p_data, p_info, r_error); });
+		MESSAGE("censuses: one pass, " << package_cache().reused << " packages reused from the bank case");
+	}
+	return s_censuses;
+}
+
 } // namespace
 
 // =============================================================================================
@@ -548,7 +612,15 @@ TEST_SUITE("ant") {
 		const auto t0 = std::chrono::steady_clock::now();
 		for (const AntPackageInfo &info : d->source().all_banks()) {
 			std::string error;
-			auto p = antdump::load_package(d->source(), info, error);
+			// AntPackageAssets go through the cache the censuses reuse; animation-set banks are parsed and dropped.
+			std::unique_ptr<AntPackage> own;
+			const AntPackage *p = nullptr;
+			if (info.is_asset_package) {
+				p = cached_package(*d, info, error);
+			} else {
+				own = antdump::load_package(d->source(), info, error);
+				p = own.get();
+			}
 			if (!p) {
 				++failed;
 				MESSAGE(error);
@@ -564,7 +636,7 @@ TEST_SUITE("ant") {
 		for (const AntPackageInfo &info : d->source().packages()) {
 			if (info.packaging == AntPackagingType::Chunk) {
 				std::string error;
-				auto p = antdump::load_package(d->source(), info, error);
+				const AntPackage *p = cached_package(*d, info, error);
 				++chunks;
 				chunk_ok += (p && p->byte_size() == info.chunk_size) ? 1 : 0;
 				if (p && info.short_name == "m9") {
@@ -587,9 +659,9 @@ TEST_SUITE("ant") {
 		if (!d) {
 			return;
 		}
-		antdump::Census c;
-		std::string error;
-		REQUIRE(antdump::run_census(d->source(), d->library, true, c, error));
+		const Censuses &both = censuses(*d);
+		REQUIRE_MESSAGE(both.ok, both.error);
+		antdump::Census c = both.mp; // a copy: the checks below index its maps
 		MESSAGE(antdump::format_census(c));
 		CHECK(c.packages == 125);
 		CHECK(c.packages_failed == 0);
@@ -641,9 +713,9 @@ TEST_SUITE("ant") {
 		if (!d) {
 			return;
 		}
-		antdump::Census c;
-		std::string error;
-		REQUIRE(antdump::run_census(d->source(), d->library, false, c, error));
+		const Censuses &both = censuses(*d);
+		REQUIRE_MESSAGE(both.ok, both.error);
+		antdump::Census c = both.all; // a copy: the checks below index its maps
 		MESSAGE(antdump::format_census(c));
 		CHECK(c.packages == 321);
 		CHECK(c.packages_failed == 0);
