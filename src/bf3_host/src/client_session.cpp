@@ -1157,9 +1157,7 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 	hello.name = p_config.name;
 	m.hello_ns = now;
 	m.submit(net::kChannelReliable, net::encode_hello(hello), now);
-	net::Ready ready;
-	ready.source_digest = p_level->source_digest;
-	m.submit(net::kChannelReliable, net::encode_ready(ready), now);
+	// M2a cl: Ready goes out on MatchInfo, after the weapon table check (cl_match_info; E6).
 	m.release_out(now);
 	m.running = true;
 	m.started = true;
