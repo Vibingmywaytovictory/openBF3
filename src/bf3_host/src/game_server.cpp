@@ -252,11 +252,13 @@ struct GameServer::Impl {
 		s.spawn_index = uint32_t(index);
 		s.last = sim::hold_command(s.state);
 		s.own_events = uint16_t(s.own_events | s.state.events);
+		sv_on_spawn(p_slot, p_tick); // M2a sv [rules]: the life's kit and team, spawn_soldier_weapons
 		if (s.remote) {
 			net::Spawned m;
 			m.slot = uint8_t(p_slot);
 			m.spawn_index = points[index].index;
 			m.state = s.state;
+			sv_spawned(p_slot, m); // M2a sv [rules]
 			send(s.peer, net::kChannelReliable, net::encode_spawned(m));
 		}
 		return true;
@@ -365,6 +367,8 @@ struct GameServer::Impl {
 				rng = uint64_t(p_request.index) * 0x9E3779B97F4A7C15ull + 1u;
 				report(uint32_t(p_slot), p_request.id, true, "seed set");
 				return;
+			case net::DebugKind::SpawnTarget: // M2a sv [rules]
+			case net::DebugKind::TargetInfo: // M2a sv [rules]
 			case net::DebugKind::Teleport:
 			case net::DebugKind::SpawnAt:
 			case net::DebugKind::SpawnSweep:
@@ -421,6 +425,10 @@ struct GameServer::Impl {
 					sweep.id = q.id;
 					sweep.ticks = std::clamp<uint32_t>(q.ticks, 1u, kMaxSweepTicks);
 					break;
+				case net::DebugKind::SpawnTarget: // M2a sv [rules]
+				case net::DebugKind::TargetInfo: // M2a sv [rules]
+					sv_apply_debug(d, p_tick); // M2a sv [rules]
+					break; // M2a sv [rules]
 				default:
 					break;
 			}
@@ -655,6 +663,7 @@ struct GameServer::Impl {
 		motor_steps += times.motor_steps;
 		const auto rules_start = std::chrono::steady_clock::now(); // S1
 		// 5. rules: Ready / deaths -> (re)spawn, dev requests, the sweep. Everything here is stamped n.
+		sv_rules(n); // M2a sv [rules]: projectiles (4b), damage and deaths, placements
 		for (size_t i = 0; i < slots.size(); ++i) {
 			Slot &s = slots[i];
 			if (s.used && !s.dummy && s.want_spawn && (!s.spawned || n >= s.respawn_at)) {
