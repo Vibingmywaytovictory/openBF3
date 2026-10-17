@@ -2187,3 +2187,21 @@ notes, measurements and capture descriptions: [docs/design/m2a-fx2.md](docs/desi
 
 Both Godot rows are timing rows: run them under the quiet lock. A CPU-bound frame roughly doubles the measured GPU time
 on this machine (m2a-fx2.md §7).
+
+## M2a hud (minimal HUD)
+
+<!-- # M2a hud -->
+Track `hud` of M2a wave 2, on branch `m2a/hud`. Design: [docs/design/m2a.md](docs/design/m2a.md) §11.3, §11.4, §16
+Q7, gate E10. As built: [docs/design/m2a-hud.md](docs/design/m2a-hud.md).
+
+* **Feed** (`bf3/host/hud_feed.h`, Godot-free): `make_hud_static` (one row per weapon def; `apply_item_names` gives
+  the M67 its "M67 GRENADE"), `fill_hud` (ui2's `HudModel` from the presented weapon, the own soldier and the drained
+  events; the hit indicator 0.3 s at level 1 per own server hit, §16 Q7), and the layout: the hudmpscreen slots read
+  at run time, `hud_stage_to_window` (scale min(w/1280, h/720)), `crosshair_gap_px`.
+* **Godot** (`src/bf3_godot/src/hud_controls.h`): `Bf3Hud` draws the model only: ammo (`$HUD_medium` at Ammo_01),
+  crosshair (hidden in ADS), hit indicator (the hitindicator atlas art), weapon name and `_small` icon, health.
+* **Check**: `res://scenes/m2a_hud.tscn -- --hud-check --hud-shots=<dir>` drives a scripted model at 1280 x 720,
+  1920 x 1080 and 2560 x 1440 and compares every widget with the script every frame (ctest `godot.m2a_hud`; shots to
+  `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\hud\`, gitignored).
+* **Tests**: `ctest --preset dev -R "ui.hud.feed|godot.m2a_hud"` (OPENBF3_GODOT set). Measured results and one
+  command per gate: m2a-hud.md §6.

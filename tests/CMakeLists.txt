@@ -810,3 +810,28 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.fx_ref COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_fx_ref.cmake)
     set_tests_properties(godot.fx_demo godot.fx_ref PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1500 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
+
+# M2a hud (docs/design/m2a.md §1 E10, §11.4; docs/design/m2a-hud.md): ui.hud.feed.unit is the Godot-free half of E10
+# (fill_hud over scripted frames, make_hud_static, the crosshair gap, the stage-to-window mapping, the screen layout on
+# synthetic and hostile trees; no data); ui.hud.feed.install resolves the 12 kit items of §5.6 on the install (names
+# 12/12 through the text database, the M67 through its UI description; _small icons 12/12; the hudmpscreen slots;
+# install.unchanged; 77 without an install).
+openbf3_test(test_ui_hud_feed test_main.cpp ui_hud_feed_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_ui_hud_feed PRIVATE bf3_host)
+add_test(NAME ui.hud.feed.unit COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-unit)
+add_test(NAME ui.hud.feed.install COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-install)
+set_tests_properties(ui.hud.feed.unit PROPERTIES TIMEOUT 120)
+set_tests_properties(ui.hud.feed.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_hud_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui.hud.feed.unit ui.hud.feed.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hud_cl_dir}")
+endif()
+# M2a hud godot (docs/design/m2a-hud.md §5): godot.m2a_hud runs the windowed --hud-check of
+# res://scenes/m2a_hud.tscn after a probe run (E10 at 1280 x 720, 1920 x 1080, 2560 x 1440 per frame of a scripted
+# model; exit 77 = skipped without OPENBF3_GODOT, an install, a window or a rendering device); the PNGs go to
+# $ENV{OPENBF3_HUD_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/hud (gitignored, outside the
+# worktree). It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.m2a_hud COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m2a_hud.cmake)
+    set_tests_properties(godot.m2a_hud PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()
