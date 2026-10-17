@@ -170,7 +170,7 @@ rows are on **Metro**: one run of the five-case timing suite under this track's 
 
 Other rows on this branch:
 
-* Full ctest without the timing rows (`toolsuild.cmd dev`, which excludes godot.*, host.session*, host.server,
+* Full ctest without the timing rows (`tools\build.cmd dev`, which excludes godot.*, host.session*, host.server,
   host.gunplay.perf, sim.nav.bake, sim.weapons.perf, tools.fx_bench, the audio and logic timing rows), after the move
   of the gates to Metro: 95 rows, 92 pass, `core.cache_data` / `core.res` skipped as before, `host.gunplay.client`
   skipped (77) without `OPENBF3_CL_TIMING` (526 s; log `scratchpad\cl\full_ctest5.txt`). `host.gunplay.client.unit`
