@@ -689,6 +689,71 @@ TileCentres cast_tile_centres(const CollisionWorld &p_world, const level::SoupTe
 	return out;
 }
 
+// The per-level checks of G1 (cook, the exhaustive field check, the lattice and tile-centre rays) as values: they run
+// on the run lane that finishes the level's last run (no doctest assert off the main thread), and the main thread
+// checks and prints them in level order.
+struct LevelCheck {
+	bool kept = false; // a run kept a record (the level's first mode did not fail)
+	bool cooked = false;
+	std::string error; // the cook's
+	sim::StaticTerrainInfo ti;
+	FieldCheck fc;
+	RayCheck rc;
+	size_t centres = 0, centres_outside = 0, centres_open = 0, centre_rays = 0, centre_bad = 0;
+	double centre_worst = 0.0;
+	double cook = 0.0, ex = 0.0, rays = 0.0;
+};
+
+LevelCheck check_level(std::span<RunResult> p_results, unsigned p_lanes) {
+	LevelCheck out;
+	RunResult *kept = nullptr;
+	for (RunResult &r : p_results) {
+		if (r.ok && r.record) {
+			kept = &r;
+			break;
+		}
+	}
+	if (kept == nullptr) {
+		return out;
+	}
+	out.kept = true;
+	const level::SoupTerrain &record = *kept->record;
+	const uint32_t placement = kept->placement;
+	const auto cook_start = std::chrono::steady_clock::now();
+	std::shared_ptr<const StaticWorldShapes> shapes = terrain_world(record, &out.error);
+	if (shapes == nullptr) {
+		kept->record.reset();
+		return out;
+	}
+	out.cooked = true;
+	out.cook = seconds_since(cook_start);
+	out.ti = shapes->terrain(0);
+	const auto ex_start = std::chrono::steady_clock::now();
+	out.fc = exhaustive_check_banded(*shapes, 0, record, placement, p_lanes);
+	out.ex = seconds_since(ex_start);
+	std::unique_ptr<CollisionWorld> world = collision_world(shapes);
+	// A 16 m lattice (every 8th cell at 2 m) plus the mismatch cells and their neighbours.
+	const res::HeightGrid &g = *record.grid;
+	const size_t step = std::max<size_t>(1, size_t(std::lround(16.0 / std::max(0.01f, g.sample_spacing[0]))));
+	const auto ray_start = std::chrono::steady_clock::now();
+	out.rc = cast_cells_banded(shapes, record, placement, step, 0.05, p_lanes);
+	// Every run's own combat-area tile centres.
+	for (const RunResult &r : p_results) {
+		const TileCentres tc = cast_tile_centres(*world, record, placement, r.tiles, 0.05);
+		out.centres += tc.tiles;
+		out.centres_outside += tc.outside;
+		out.centres_open += tc.open;
+		out.centre_rays += tc.rays.rays + tc.rays.open_rays;
+		out.centre_bad += tc.rays.missed + tc.rays.open_hits;
+		out.centre_worst = std::max(out.centre_worst, tc.rays.worst);
+	}
+	out.rays = seconds_since(ray_start);
+	world.reset();
+	shapes.reset();
+	kept->record.reset(); // the level's grid is not needed any more
+	return out;
+}
+
 } // namespace
 
 TEST_SUITE("sim-terrain") {
@@ -700,12 +765,14 @@ TEST_SUITE("sim-terrain") {
 		}
 		const auto start = std::chrono::steady_clock::now();
 		const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-		// One flat queue over every (level, mode) run, then the per-level checks in level order on this thread (their
-		// exhaustive check and lattice in bands on all cores). The lane count follows the free memory (a run holds its
-		// level and soup, about 650 MB); the soup is the same on any thread count, so it changes scheduling only.
+		// One flat queue over every (level, mode) run. The lane that finishes a level's last run runs the level's checks
+		// (check_level: cook, exhaustive check and lattice in bands on hw / 2 inner lanes) and frees its record, so the
+		// checks overlap the other levels' runs; this thread then checks and prints every level in level order. The lane
+		// count follows the free memory (a run holds its level and soup, about 650 MB); the soup is the same on any
+		// thread count, so it changes scheduling only.
 		const unsigned lanes = g1_lanes();
 		const unsigned soup_threads = 2;
-		const unsigned check_lanes = env_unsigned("OPENBF3_TERRAIN_CHECK_LANES", hw);
+		const unsigned check_lanes = env_unsigned("OPENBF3_TERRAIN_CHECK_LANES", std::max(1u, hw / 2));
 		std::printf("sim.terrain G1: %u run lanes x %u soup threads, checks on %u lanes\n", lanes, soup_threads, check_lanes);
 		std::fflush(stdout);
 		struct Job {
@@ -725,9 +792,24 @@ TEST_SUITE("sim-terrain") {
 			}
 		}
 		first_job.push_back(jobs.size());
-		std::vector<RunResult> all = bf3::core::parallel_map<RunResult>(
-				jobs.size(), [&](size_t i) { return run_one(s->install, kLevels[jobs[i].level], jobs[i].mode, jobs[i].keep, soup_threads); }, lanes);
-		std::printf("sim.terrain G1: %zu runs in %.1f s\n", all.size(), seconds_since(start));
+		std::vector<RunResult> all(jobs.size());
+		std::vector<LevelCheck> checks(std::size(kLevels));
+		std::vector<std::atomic<size_t>> remaining(std::size(kLevels));
+		for (size_t li = 0; li < std::size(kLevels); ++li) {
+			remaining[li].store(first_job[li + 1] - first_job[li], std::memory_order_relaxed);
+		}
+		bf3::core::parallel_for(
+				jobs.size(),
+				[&](size_t i) {
+					const size_t li = jobs[i].level;
+					all[i] = run_one(s->install, kLevels[li], jobs[i].mode, jobs[i].keep, soup_threads);
+					// acq_rel: the last run of the level sees every other run's result.
+					if (remaining[li].fetch_sub(1, std::memory_order_acq_rel) == 1) {
+						checks[li] = check_level(std::span<RunResult>(all.data() + first_job[li], first_job[li + 1] - first_job[li]), check_lanes);
+					}
+				},
+				lanes);
+		std::printf("sim.terrain G1: %zu runs and their checks in %.1f s\n", all.size(), seconds_since(start));
 		std::fflush(stdout);
 		size_t runs = 0, runs_without = 0, digests = 0, lattice_rays = 0, lattice_missed = 0, open_rays = 0, open_hits = 0, centre_missed = 0, failures = 0;
 		double worst = 0.0;
@@ -755,57 +837,30 @@ TEST_SUITE("sim-terrain") {
 			// Every run of a level gives the same terrain (or none at all).
 			CHECK_MESSAGE((with == 0 || with == results.size()), level_name, ": ", with, " of ", results.size(), " runs have a terrain");
 			CHECK_MESSAGE(level_digests.size() <= 1, level_name, ": ", level_digests.size(), " digests");
-			const RunResult *kept = nullptr;
-			for (const RunResult &r : results) {
-				if (r.ok && r.record) {
-					kept = &r;
-					break;
-				}
-			}
-			if (level_digests.empty() || kept == nullptr) {
+			const LevelCheck &lc = checks[li];
+			if (level_digests.empty() || !lc.kept) {
 				CHECK_MESSAGE(level_digests.empty(), level_name, ": a digest but no kept record (the first mode failed)");
 				std::printf("sim.terrain %-12s %zu runs: no terrain (%.1f s)\n", level_id, results.size(), level_seconds);
 				continue;
 			}
 			++digests;
-			const level::SoupTerrain &record = *kept->record;
-			const uint32_t placement = kept->placement;
-			std::string error;
-			const auto cook_start = std::chrono::steady_clock::now();
-			std::shared_ptr<const StaticWorldShapes> shapes = terrain_world(record, &error);
-			CHECK_MESSAGE(shapes != nullptr, level_name, ": ", error);
-			if (shapes == nullptr) {
+			CHECK_MESSAGE(lc.cooked, level_name, ": ", lc.error);
+			if (!lc.cooked) {
 				++failures;
 				continue;
 			}
-			const double cook = seconds_since(cook_start);
-			const sim::StaticTerrainInfo &ti = shapes->terrain(0);
+			const sim::StaticTerrainInfo &ti = lc.ti;
 			CHECK(ti.content.hex() == *level_digests.begin());
 			CHECK_MESSAGE(ti.holed == expected_holed(level_name), level_name, ": holed ", ti.holed);
-			const auto ex_start = std::chrono::steady_clock::now();
-			const FieldCheck fc = exhaustive_check_banded(*shapes, 0, record, placement, check_lanes);
-			const double ex = seconds_since(ex_start);
+			const FieldCheck &fc = lc.fc;
 			CHECK_MESSAGE(fc.ok(), level_name, ": missing ", fc.missing, ", extra ", fc.extra, ", duplicate ", fc.duplicate);
 			CHECK(fc.field_triangles + fc.patch_triangles == fc.soup_triangles);
 			CHECK_MESSAGE(fc.worst <= double(ti.max_error) + 2e-3, level_name, ": worst corner ", fc.worst, " m, max_error ", ti.max_error);
-			std::unique_ptr<CollisionWorld> world = collision_world(shapes);
-			// A 16 m lattice (every 8th cell at 2 m) plus the mismatch cells and their neighbours.
-			const res::HeightGrid &g = *record.grid;
-			const size_t step = std::max<size_t>(1, size_t(std::lround(16.0 / std::max(0.01f, g.sample_spacing[0]))));
-			const auto ray_start = std::chrono::steady_clock::now();
-			const RayCheck rc = cast_cells_banded(shapes, record, placement, step, 0.05, check_lanes);
-			// Every run's own combat-area tile centres.
-			size_t centres = 0, centres_outside = 0, centres_open = 0, centre_rays = 0, centre_bad = 0;
-			for (const RunResult &r : results) {
-				const TileCentres tc = cast_tile_centres(*world, record, placement, r.tiles, 0.05);
-				centres += tc.tiles;
-				centres_outside += tc.outside;
-				centres_open += tc.open;
-				centre_rays += tc.rays.rays + tc.rays.open_rays;
-				centre_bad += tc.rays.missed + tc.rays.open_hits;
-				worst = std::max(worst, tc.rays.worst);
-			}
-			const double rays = seconds_since(ray_start);
+			const RayCheck &rc = lc.rc;
+			const size_t centres = lc.centres, centres_outside = lc.centres_outside, centres_open = lc.centres_open, centre_rays = lc.centre_rays,
+						 centre_bad = lc.centre_bad;
+			worst = std::max(worst, lc.centre_worst);
+			const double cook = lc.cook, ex = lc.ex, rays = lc.rays;
 			CHECK_MESSAGE(rc.missed == 0, level_name);
 			CHECK_MESSAGE(rc.open_hits == 0, level_name);
 			CHECK_MESSAGE(centre_bad == 0, level_name);
