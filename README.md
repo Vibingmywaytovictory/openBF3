@@ -34,12 +34,28 @@ Install location, first match wins: `--bf3-install=<dir>` (user arg), env `OPENB
 ```bat
 git clone --recurse-submodules <repo-url> openBF3
 cd openBF3
-tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev minus the timing rows (--all-tests: all)
+tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev (the branch pass)
+tools\build.cmd dev --timing   :: the merge pass's phases: dev-realtime (-j8), dev-timing (serial), dev-window (serial)
+tools\build.cmd asan           :: the asan selection (-j16, no asan_sweep rows), then asan-realtime (-j4); --asan-full adds the sweeps
 ```
 
 Test scheduling, the per-row budgets and the slowest-rows report are in [docs/testing.md](docs/testing.md): after each
 ctest phase `build.cmd` prints the 15 slowest rows, the skipped rows and any budget or label violation
 (`tools/test_budget.cmake`; `--strict` makes a violation fail).
+
+The passes (docs/testing.md "Scheduling labels"). `ctest --preset dev` is the branch pass: every functional row,
+the headless Godot rows included, at 16 jobs with each row's PROCESSORS and COST, at below-normal priority (4 jobs
+while the workflows' quiet lock exists). It leaves out the rows labelled `timing` (they gate wall or CPU time and
+run serially), `realtime` (they wait on real time and run side by side in the merge pass's real-time lane, where a
+row that fails only on its listed real-time checks is rerun once, `tests/realtime_retry.cmake`) and `window` (they
+need a window, GPU frame time or audio and run only while the user is away, `OPENBF3_GODOT_WINDOWED=1`). Measured on
+the shared 8-core machine with other builds running (noisy; 2026-10-17): the branch pass 611 s serially before,
+about 180 s now (2,140 CPU-s; `sim.terrain`, 117 s alone, is its critical path); the real-time lane 615 s serially
+before, about 170 s now (the godot.m1 and host.session shards); the timing phase 177 s (`host.scale` 88 s → 30 s,
+its paced rows moved to the lane as `host.scale.paced`); `godot.l1_look` stops after 3 of 5 rounds when the decision
+is fixed. The asan selection runs at 16 jobs: 59 min measured once, 20 min of it a `host.scale` timeout since moved to
+the sweeps (so about 40 min expected, not yet re-measured), against 3.35 h serially; the sweeps above 600 s under
+asan run in the `--asan-full` tier.
 
 From a VS x64 developer prompt the three steps are `cmake --preset dev`, `cmake --build --preset dev` and
 `ctest --preset dev`. Presets: `dev` (optimised, godot-cpp `template_debug`, everyday use), `debug` (unoptimised,
@@ -1177,8 +1193,11 @@ publishes a fixed-size `PresentationFrame`; `present_others` / `present_own_frac
 `judge_rest` (rest_check.h) is the one E2 judge. `level_load.h` loads the level database and the `SharedLevel`
 (spawns, soldier, static world through the cache).
 
-Tests: `host.session.unit` (no data, about 70 s) and `host.session` (install; skipped without one; about 190 s);
-both are `RUN_SERIAL` (wall-clock timing).
+Tests: `host.session.unit` (no data, about 70 s; its 4 socket-free cases run on every branch as
+`host.session.unit.pure`) and `host.session` (install; skipped without one), split by case into `host.session.gate`
+(load and E2 150/2), `host.session.stress` and `host.session.e3` (about 96 / 96 / 4 s), labelled `realtime`: they run
+side by side in the merge pass's real-time lane (docs/testing.md). `host.session.unit` is labelled `timing` and runs
+alone (beside the lane's shards it needed reruns).
 
 * `host.session.unit`: `judge_rest` on synthetic recordings; `present_others` brackets, extrapolates 250 ms and
   holds; `GameServer` without sockets (hold command, late / repeated / replaced counts, the buffer report, Teleport
@@ -1220,9 +1239,11 @@ view. Headless (`--headless` or `--m1-check`) the session skips the scene and lo
 "%GODOT%" --path bf3-opensource res://scenes/m1_metro.tscn -- --shot-spawns=22:prone,13:walk --shot-dir=C:\temp\m1 --shots=C:\temp\m1\over.png@-150,260,-800,0,-40 --quit-after=1
 ```
 
-Tests: `godot.m1` (headless `--m1-check`, about 6 minutes) and `godot.m1_load` (windowed `--m1-load-check` cold
-then warm on a fresh root under `%TEMP%`, 8 spawn shots each; exit 77 = skipped without a window). Both need
-`OPENBF3_GODOT` and an install, and both are `RUN_SERIAL`.
+Tests: the headless `--m1-check` as three shards (`--m1-phase=e1|e2_gate|e2_stress`): `godot.m1.e1`,
+`godot.m1.e2_gate` and `godot.m1.e2_stress` (about 165 / 95 / 95 s side by side in the real-time lane, instead of one
+6-minute `godot.m1`), and `godot.m1_load` (windowed `--m1-load-check` cold then warm on a fresh root under `%TEMP%`,
+8 spawn shots each under `b\<preset>\shots\m1_load-<tag>`; exit 77 = skipped without a window; label `window`,
+`RUN_SERIAL`). All need `OPENBF3_GODOT` and an install.
 
 Measured on Metro TDM (dev build, Radeon RX 9070 XT, D3D12; other tracks were building on the machine, so the
 timings are noisy):

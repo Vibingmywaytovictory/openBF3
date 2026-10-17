@@ -96,6 +96,12 @@ failed `split_cover` row as violations; the other budgets warn.
   code 77 through, so a mistyped pattern that only runs the install check fails.
 * A `<suite>.split_cover` row proves that every case of the suite is in exactly one split row.
 * Every install row keeps install.unchanged.
+* A Godot check splits by its own switch instead (`--m1-phase` for `godot.m1.e1`, `.e2_gate`, `.e2_stress`); each
+  shard prints its own table with install.unchanged. A headless shard may drop the `openbf3_godot_project` lock
+  (`openbf3_godot_row(... NO_PROJECT_LOCK)`) only after the project's `.godot` directory hashed identical before and
+  after its runs.
+* A lane split lands after 5 lane measurements on main (2 of them under branch load) without reruns; a row that
+  needed a rerun goes back to `timing`.
 
 ## 7. Shared machine
 
@@ -105,8 +111,31 @@ failed `split_cover` row as violations; the other budgets warn.
 * The merge pass settles on measured CPU load (under 20 % for 30 s, cap 300 s), not on a fixed sleep, and runs the
   window phase in its own tenure after the user is away.
 * A full asan run and the next timing pass never overlap.
+* After a merge, the main workflow skips main's dev ctest pass (never the build or the timing pass) when the merged
+  tree, the CMakeCache hash (without paths), the compiler and the Godot executable equal a branch pass recorded as
+  accepted in the workflows' ledger, that pass had 0 failed rows, and it skipped only rows main's pass skips too.
 
-## 8. Rerun rule (merge lane only)
+## 8. Asan
+
+| preset | selection | jobs |
+|---|---|---|
+| `asan` | every row except `asan_sweep`, `realtime` and `window` (no Godot rows exist under asan) | 16 |
+| `asan-realtime` | the `realtime` rows (threaded ServerHost, ClientSession and ENet lifecycles) | 4 |
+| `asan-sweep` | the `asan_sweep` rows: asan wall above 600 s after the in-test lanes | 8 |
+
+* `tools\build.cmd asan` runs `asan` then `asan-realtime`, never mixed; `--asan-full` adds `asan-sweep`. Timing
+  rows stay in the selection with their gates report-only under `OPENBF3_ASAN` (and RUN_SERIAL).
+* The full tier runs at branch acceptance when the diff touches what the sweeps link (src/bf3_core level, res,
+  collision, physics, havok or height grid code, src/bf3_sim, third_party) and once on the latest main after a
+  burst of merges, coalesced, at below-normal priority; the next timing pass waits for it.
+* Asan TIMEOUTs are about 3x the measured asan wall of the row in its phase.
+* Rows whose real-time or wall-clock gates still bite under asan run alone inside their phase (RUN_SERIAL under
+  `OPENBF3_ASAN`): `host.session.gate` in asan-realtime, `core.gameplay.tables.unit` (serial_wallclock).
+* First measurement (2026-10-17, busy shared machine): the asan selection took 3,552 s at -j16, of which 1,200 s
+  was `host.scale` timing out alone at the end (now asan_sweep with `sim.nav`, `sim.vehicle`, `sim.terrain` and
+  `host.scale.paced`), against about 12,047 s serially before; asan-realtime 608 s with `host.scale.paced`.
+
+## 9. Rerun rule (merge lane only)
 
 * A failed lane row is rerun alone only when every failing line matches its listed real-time checks
   (`tests/realtime_retry.cmake`). Functional failures, crashes and timeouts fail at once.
