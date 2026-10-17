@@ -1213,7 +1213,13 @@ client also needs one-line calls in `authoritative` (the spawn's weapons, the ri
 wire view, the weapons compare and R2's health rebase in the match branch), in `client_tick` (the view sample,
 `fire_presses` and the received state after `sample_command`, the weapons after the motor step, `others_ack_bits`)
 and in `start` (Ready leaves `start` for MatchInfo, so a refused client never sends it, E6), plus one member block
-inside `ClientSession::Impl` and `PredictionRing::attach_weapons` (the lane `catch_up` replays).
+inside `ClientSession::Impl` and `PredictionRing::attach_weapons` (the lane `catch_up` replays). Corrected at the
+wave-2 integration (sv's four places proved too few; m2a-sv.md "Decisions and deviations"): `game_server.cpp` takes
+eight tagged insertions, each line marked `// M2a sv [tag]` (`[init]`, `[recv]`, `[loop]`, `[rules]`, `[snap]`,
+`[ctrl]`, `[trace]`, `[stats]`), plus one-line `[impl]` declarations inside `GameServer::Impl`, and `game_server.h` /
+`level_load.{h,cpp}` take field insertions inside their structs (a member cannot go in an end block); all additive,
+no existing line changed. cl's dev-only `GunplayObserver::wants_rewind_rows` / `rewind_rows` (the E12 (b) server
+source, commit 7ea1331) are lines marked `// M2a cl` inside sv's `gunplay.{h,cpp}`, accepted at the integration.
 
 **Named replacements** (lines are replaced, by the owner named, and nowhere else):
 
