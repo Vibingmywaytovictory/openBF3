@@ -173,7 +173,7 @@ Other rows on this branch:
 * Full ctest without the timing rows (`toolsuild.cmd dev`, which excludes godot.*, host.session*, host.server,
   host.gunplay.perf, sim.nav.bake, sim.weapons.perf, tools.fx_bench, the audio and logic timing rows), after the move
   of the gates to Metro: 95 rows, 92 pass, `core.cache_data` / `core.res` skipped as before, `host.gunplay.client`
-  skipped (77) without `OPENBF3_CL_TIMING` (526 s; log `scratchpad\clull_ctest5.txt`). `host.gunplay.client.unit`
+  skipped (77) without `OPENBF3_CL_TIMING` (526 s; log `scratchpad\cl\full_ctest5.txt`). `host.gunplay.client.unit`
   now takes 91 s (ENet loopback, wall clock but not timed; 68 s of it the three floor variants); `host.gunplay.server`
   127 s. An earlier run failed `sim.vehicle.unit`, `sim.vehicle` (timeouts) and `core.ui.swf.unit` (a 1 s budget)
   because cl's `b\dev` cache had lost `CMAKE_CXX_FLAGS_RELEASE` (an unoptimised build, from a configure without a
