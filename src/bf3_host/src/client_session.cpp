@@ -55,7 +55,8 @@ void set_error(ClientStats &r_stats, const std::string &p_text) {
 }
 
 // Equal within the reconcile epsilons (docs §9.2): positions and velocities within epsilon, every discrete field
-// equal, the floats that are not positions within 1e-3.
+// equal, the floats that are not positions within 1e-3. R2 (docs/design/m2a.md §8.2, §15; cl): the health is left
+// out, since a server hit is not a motor mismatch; cl_after_match moves the ring's health instead (health_rebases).
 bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, float p_pos_eps, float p_vel_eps) {
 	if (p_a.tick != p_b.tick || p_a.life != p_b.life || p_a.yaw != p_b.yaw || p_a.pitch != p_b.pitch || p_a.pose != p_b.pose ||
 			p_a.target_pose != p_b.target_pose || p_a.transition_ticks != p_b.transition_ticks || p_a.transition_total != p_b.transition_total ||
@@ -66,8 +67,7 @@ bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, fl
 	if (!(length3(sub3(p_a.position, p_b.position)) <= p_pos_eps) || !(length3(sub3(p_a.velocity, p_b.velocity)) <= p_vel_eps)) {
 		return false;
 	}
-	return std::fabs(p_a.health - p_b.health) <= 1e-3f && std::fabs(p_a.impact_speed - p_b.impact_speed) <= 1e-3f &&
-			std::fabs(p_a.damage - p_b.damage) <= 1e-3f;
+	return std::fabs(p_a.impact_speed - p_b.impact_speed) <= 1e-3f && std::fabs(p_a.damage - p_b.damage) <= 1e-3f;
 }
 
 } // namespace
