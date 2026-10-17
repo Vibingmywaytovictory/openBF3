@@ -181,8 +181,8 @@ Other rows on this branch:
 * Timing rows under this track's quiet lock, one run each: `host.gunplay.client` on Metro (the five cases, 16.5 min,
   all pass; before the move to Metro the four cases passed on the synthetic floor in 986 s), `host.gunplay.server`,
   `host.session.unit` and `host.session` pass.
-* asan preset (rebuilt after the merge): `host.gunplay.client.unit` (27.3 s; the real server, the hostile relay, E6, R2,
-  SnapshotOthers), `host.session.unit` (72.6 s, with R1's case) and `m2a.contract` pass with no AddressSanitizer report.
+* asan preset (rebuilt after the move to Metro): `host.gunplay.client.unit` (92.2 s; the real server, the hostile relay, E6, R2, the floor variants,
+  SnapshotOthers), `host.session.unit` (71.9 s, with R1's case) and `m2a.contract` pass with no AddressSanitizer report.
 * `host.gunplay.client` reads the install read-only (Metro) and ends with `install.unchanged` clean, as
   `host.gunplay.server`'s Metro rows and `host.session`'s do; `host.gunplay.client.unit` reads no install.
 
