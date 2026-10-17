@@ -16,6 +16,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/thread_pool.h"
 #include "bf3/sim/logic/logic_harness.h"
 #include "bf3/sim/logic/logic_runtime.h"
 #include "test_support.h"
@@ -65,6 +66,9 @@ Mounted *mounted() {
 	}
 	return &m;
 }
+
+// Lanes of the census and logic.types loops: about 160 MiB per (level, mode) row in flight.
+constexpr unsigned kCensusLanes = 6;
 
 struct Built {
 	std::unique_ptr<level::LoadedLevel> level;
@@ -351,19 +355,55 @@ TEST_SUITE("logic-types") {
 		if (mount == nullptr) {
 			return;
 		}
-		size_t rows = 0;
+		// The 14 (level, mode) graphs are built on lanes over the shared read-only install; printed and checked here in order.
+		struct Job {
+			const char *level;
+			std::string mode;
+		};
+		struct Row {
+			std::string error;
+			LogicGraphStats stats;
+			size_t nodes = 0;
+		};
+		std::vector<Job> jobs;
 		for (const char *level_id : { "MP_Subway", "MP_007" }) {
 			Result<level::LevelInfo> info = level::level_info(*mount->install, level_id);
 			REQUIRE_MESSAGE(info.ok(), (info.ok() ? std::string() : info.error().message));
 			for (const std::string &mode : info->modes) {
-				Built b = build(*mount, level_id, mode);
-				const LogicGraphStats &st = b.graph->stats();
-				std::printf("G5 %s %s: unknown %zu unimplemented %zu unknown_unconnected %zu unimplemented_unconnected %zu nodes %zu\n", level_id,
-						mode.c_str(), st.unknown_nodes, st.unimplemented_nodes, st.unknown_unconnected, st.unimplemented_unconnected, b.graph->nodes().size());
-				CHECK(st.unknown_nodes == 0);
-				CHECK(st.unimplemented_nodes == 0);
-				++rows;
+				jobs.push_back({ level_id, mode });
 			}
+		}
+		const std::vector<Row> built = parallel_map<Row>(
+				jobs.size(),
+				[&](size_t i) {
+					Row row;
+					Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(mount->install, jobs[i].level, jobs[i].mode);
+					if (!loaded) {
+						row.error = loaded.error().message;
+						return row;
+					}
+					LogicGraphOptions o;
+					o.mode = jobs[i].mode;
+					Result<LogicGraph> g = build_logic_graph((*loaded)->db(), (*loaded)->root(), o);
+					if (!g) {
+						row.error = g.error().message;
+						return row;
+					}
+					row.stats = g->stats();
+					row.nodes = g->nodes().size();
+					return row;
+				},
+				kCensusLanes);
+		size_t rows = 0;
+		for (size_t i = 0; i < jobs.size(); ++i) {
+			const Row &r = built[i];
+			REQUIRE_MESSAGE(r.error.empty(), jobs[i].level, " ", jobs[i].mode, ": ", r.error);
+			const LogicGraphStats &st = r.stats;
+			std::printf("G5 %s %s: unknown %zu unimplemented %zu unknown_unconnected %zu unimplemented_unconnected %zu nodes %zu\n", jobs[i].level,
+					jobs[i].mode.c_str(), st.unknown_nodes, st.unimplemented_nodes, st.unknown_unconnected, st.unimplemented_unconnected, r.nodes);
+			CHECK(st.unknown_nodes == 0);
+			CHECK(st.unimplemented_nodes == 0);
+			++rows;
 		}
 		CHECK(rows == 14);
 		const SnapshotDiff diff = diff_snapshots(mount->before, mount->reader.snapshot());
@@ -455,41 +495,64 @@ TEST_SUITE("logic-census") {
 		const auto start = std::chrono::steady_clock::now();
 		std::printf("%s\n", logic_census_header().c_str());
 		size_t expected = 0, listed = 0, ok = 0, unknown_rows = 0;
+		// The (level, mode) list first, then load + build + the census row on lanes over the shared read-only install
+		// (each row is independent); the lines are printed in list order. The build ms column is taken on a lane (info).
+		struct Job {
+			std::string level;
+			std::string mode; // empty: the level's info failed (error)
+			std::string error;
+		};
+		std::vector<Job> jobs;
 		for (const Level &l : mount->install->levels()) {
 			Result<level::LevelInfo> info = level::level_info(*mount->install, l.id);
 			if (!info) {
-				std::printf("%s\t-\t0\t%s\n", l.id.c_str(), info.error().message.c_str());
-				++expected;
-				++listed;
+				jobs.push_back({ l.id, std::string(), info.error().message });
 				continue;
 			}
 			for (const std::string &mode : info->modes) {
-				++expected;
-				LogicCensusRow row;
-				Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(mount->install, l.id, mode);
-				if (!loaded) {
-					row.level = l.id;
-					row.mode = mode;
-					row.error = loaded.error().message;
-				} else {
+				jobs.push_back({ l.id, mode, std::string() });
+			}
+		}
+		const std::vector<LogicCensusRow> rows = parallel_map<LogicCensusRow>(
+				jobs.size(),
+				[&](size_t i) {
+					const Job &j = jobs[i];
+					LogicCensusRow row;
+					if (j.mode.empty()) {
+						return row;
+					}
+					Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(mount->install, j.level, j.mode);
+					if (!loaded) {
+						row.level = j.level;
+						row.mode = j.mode;
+						row.error = loaded.error().message;
+						return row;
+					}
 					LogicGraphOptions o;
-					o.mode = mode;
+					o.mode = j.mode;
 					const auto t = std::chrono::steady_clock::now();
 					Result<LogicGraph> g = build_logic_graph((*loaded)->db(), (*loaded)->root(), o);
 					const double ms = seconds_since(t) * 1000.0;
 					if (!g) {
-						row.level = l.id;
-						row.mode = mode;
+						row.level = j.level;
+						row.mode = j.mode;
 						row.error = g.error().message;
-					} else {
-						row = logic_census_row(l.id, mode, std::make_shared<const LogicGraph>(std::move(*g)), ms);
+						return row;
 					}
-				}
-				std::printf("%s\n", logic_census_line(row).c_str());
-				++listed;
-				ok += row.ok ? 1 : 0;
-				unknown_rows += row.ok && row.stats.unknown_nodes > 0 ? 1 : 0;
+					return logic_census_row(j.level, j.mode, std::make_shared<const LogicGraph>(std::move(*g)), ms);
+				},
+				kCensusLanes);
+		for (size_t i = 0; i < jobs.size(); ++i) {
+			++expected;
+			++listed;
+			if (jobs[i].mode.empty()) {
+				std::printf("%s\t-\t0\t%s\n", jobs[i].level.c_str(), jobs[i].error.c_str());
+				continue;
 			}
+			const LogicCensusRow &row = rows[i];
+			std::printf("%s\n", logic_census_line(row).c_str());
+			ok += row.ok ? 1 : 0;
+			unknown_rows += row.ok && row.stats.unknown_nodes > 0 ? 1 : 0;
 		}
 		std::printf("I1: %zu rows listed (%zu expected), %zu built and ran, %zu with unknown connected types, %.1f s\n", listed, expected, ok, unknown_rows,
 				seconds_since(start));
