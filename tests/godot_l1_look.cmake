@@ -14,7 +14,9 @@
 # Screenshots go to $OPENBF3_LOOK_SHOTS when set (e.g. openBF3\b\shots\l1, gitignored; never commit them), else to
 # the system temp directory, removed at the end. Skips (exit 77) like godot.m1_load: no Godot executable or no window opt-in (godot_common.cmake), no BF3
 # install, or no window / rendering device (probe run).
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> [-DROUNDS=n] -P godot_l1_look.cmake (CMake 3.29).
+# With the default 5 rounds the row stops after round 3 when rounds 4-5 can no longer change the decision (below;
+# README "L1 look"). Script mode: cmake -DPROJECT_DIR=<bf3-opensource> [-DROUNDS=n] [-DEARLY_STOP=OFF]
+# -P godot_l1_look.cmake (CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
@@ -122,6 +124,37 @@ foreach(round RANGE 1 ${ROUNDS})
             endforeach()
         endif()
     endforeach()
+    # Exact early stop (docs/testing.md): with 3 of the 5 values known, median5 <= max(known 3) and
+    # median5 >= min(known 3). When max(L1, rounds 1-3) <= 1.25 x min(M1, rounds 1-3) (the same integer limit as the
+    # gate below) and max(L1 p99, rounds 1-3) <= 16.7 ms, every outcome of rounds 4-5 passes the gate, so they are
+    # skipped. Only with the default 5 rounds, no failed run and all six lists full; -DEARLY_STOP=OFF or -DROUNDS=n
+    # runs every round.
+    if(round EQUAL 3 AND ROUNDS EQUAL 5 AND NOT failed AND NOT EARLY_STOP STREQUAL "OFF")
+        set(full TRUE)
+        foreach(l m1_us l1_us m1_gpu l1_gpu m1_p99 l1_p99)
+            list(LENGTH ${l} n)
+            if(NOT n EQUAL 3)
+                set(full FALSE)
+            endif()
+        endforeach()
+        if(full)
+            set(sorted_m1 ${m1_us})
+            list(SORT sorted_m1 COMPARE NATURAL)
+            list(GET sorted_m1 0 min_m1)
+            set(sorted_l1 ${l1_us})
+            list(SORT sorted_l1 COMPARE NATURAL ORDER DESCENDING)
+            list(GET sorted_l1 0 max_l1)
+            set(sorted_p99 ${l1_p99})
+            list(SORT sorted_p99 COMPARE NATURAL ORDER DESCENDING)
+            list(GET sorted_p99 0 max_l1p)
+            math(EXPR early_limit "${min_m1} * 125 / 100")
+            if(NOT max_l1 GREATER early_limit AND NOT max_l1p GREATER 16700)
+                message("early stop after 3 rounds: decision fixed (max L1 ${max_l1} us <= ${early_limit} us = 1.25 x min M1; max L1 p99 ${max_l1p} us <= 16700 us)")
+                break()
+            endif()
+            message("no early stop after 3 rounds (max L1 ${max_l1} us, limit ${early_limit} us; max L1 p99 ${max_l1p} us): rounds 4-5 decide")
+        endif()
+    endif()
 endforeach()
 file(REMOVE_RECURSE "${root}")
 if(NOT keep_shots)

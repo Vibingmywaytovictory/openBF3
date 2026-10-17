@@ -1581,6 +1581,17 @@ of L1's **p99 frame interval** (every timed frame of a run, all four views; `[lo
 output) is **<= 16.7 ms** at 2560x1440, vsync off. Glass, fog and the LUT stay on by default; the ratio, both p99s and
 the GPU times are printed.
 
+**Early stop (test speed, 2026-10-17).** With the default 5 rounds the row stops after round 3 when the decision can
+no longer change: the median of 5 values lies between the smallest and largest of any 3 of them, so when the largest
+L1 interval of rounds 1-3 is <= 1.25 × the smallest M1 interval of rounds 1-3 (the same integer limit) and the largest
+L1 p99 of rounds 1-3 is <= 16.7 ms, every outcome of rounds 4 and 5 passes the gate. It prints `early stop after 3
+rounds: decision fixed` and the medians of the 3 rounds; otherwise all 5 rounds run and decide as before. A failed
+run in rounds 1-3 (a short value list), `-DROUNDS=n` or `-DEARLY_STOP=OFF` runs every round. What an early stop does
+not check is rounds 4-5 themselves: 4 fewer Godot runs of the same binary and scene are checked for a crash, the
+viewport size and the frame-time lines; the frame-time decision is identical. Replayed on the 19 recorded 5-round
+runs (scratch harness): 11 stop after round 3, all of which pass with 5 rounds; the 3 failing runs and the 4 older
+logs without p99 lines never stop early.
+
 The measured frame intervals (M1 6.87-7.62 ms per round) are about 2.5 × what the same runs give on an idle
 machine (M1 about 2.7 ms), because the other tracks kept every core busy: the frames are CPU bound, and the
 interval is mostly scheduling. An earlier gate run on a lighter load gave M1 2.67 against L1 2.94 ms (mean
