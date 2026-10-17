@@ -143,3 +143,8 @@ target_sources(bf3_sim PRIVATE
 target_sources(bf3_sim PRIVATE
     src/weapons/posed_target.cpp
 )
+
+# M2a sv (docs/design/m2a.md §5.5; docs/design/m2a-sv.md): the weapon_mechanics.cfg parser.
+target_sources(bf3_sim PRIVATE
+    src/weapons/mechanics_tuning.cpp
+)

@@ -85,7 +85,7 @@ namespace {
 
 // ---- the tracks' switches (each set to true by its owner, in the commit that lands the body) ------------------
 // sv: R3 (exact_aim applied in step_soldier_weapons and hashed in weapon_table_hash) and weapon_rules.cpp's two rules.
-constexpr bool kSvRulesLanded = false;
+constexpr bool kSvRulesLanded = true; // M2a sv: landed (R3, weapon_rules.cpp)
 // nt: protocol v2 (snapshot_acked / others_acked, others_ack_bits on the wire, weapons_wire.cpp, kProtocolVersion 2).
 constexpr bool kNtLanded = true; // M2a nt: landed (protocol v2 codecs, weapons_wire.cpp)
 

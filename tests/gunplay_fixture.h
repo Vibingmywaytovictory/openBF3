@@ -472,3 +472,248 @@ inline sim::Vec3 own_eye(const host::PresentationFrame &p_frame) {
 }
 
 } // namespace bf3::test::gunplay
+
+// M2a sv (docs/design/m2a-sv.md): Metro with the gunplay tables, a server-side recorder (GunplayObserver), the weapon
+// button fields, aiming and a few server-reading helpers for host_gunplay_server_tests.cpp. The recorder's callbacks
+// run on the server thread; every reader takes its lock.
+#include "bf3/host/gunplay.h"
+#include "bf3/host/target_bots.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/weapons/hit_target.h"
+#include "bf3/sim/weapons/weapon_input.h"
+#include "bf3/sim/weapons/weapon_sim.h"
+
+#include <mutex>
+
+namespace bf3::test::gunplay {
+
+#ifdef OPENBF3_MOTOR_TUNING_CFG
+// Metro (MP_Subway / TeamDeathMatch0) loaded once per process with SharedLoadOptions::gunplay set: the weapons, the
+// kits and the capsule pose table from the retail clips. Read-only on the install, a fresh scratch cache root under
+// the temp directory. Null (case skipped) without an install. Separate from metro() so M1's load stays as it was.
+inline Metro *metro_gunplay() {
+	static std::unique_ptr<Metro> s_metro;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_metro == nullptr) {
+			bf3::test::skip_install_case("no BF3 install (see the first gunplay case)");
+		}
+		return s_metro.get();
+	}
+	s_tried = true;
+	auto m = std::make_unique<Metro>();
+	m->reader = std::make_unique<core::InstallReader>();
+	if (!m->reader->locate({})) {
+		bf3::test::skip_install_case(m->reader->describe().c_str());
+		return nullptr;
+	}
+	m->before = m->reader->snapshot();
+	core::Result<std::shared_ptr<core::Install>> opened = core::Install::open(*m->reader);
+	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
+	m->install = *opened;
+	m->cache_root = std::filesystem::temp_directory_path() /
+			("openbf3-gunplay-sv-" + std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	std::error_code ec;
+	std::filesystem::remove_all(m->cache_root, ec);
+	core::Cache cache;
+	core::CacheOptions co;
+	co.root = m->cache_root;
+	co.guard = m->reader->write_guard();
+	std::string detail;
+	REQUIRE_MESSAGE(cache.open(std::move(co), &detail) == core::CacheStatus::Ok, detail);
+	host::SharedLoadOptions options;
+	options.cache = &cache;
+	options.tuning = shipped_motor_tuning();
+	options.gunplay = true;
+	host::LoadProgress progress;
+	const auto start = std::chrono::steady_clock::now();
+	core::Result<host::LevelDatabase> db = host::open_level_database(m->install, "MP_Subway", "TeamDeathMatch0", 0, &progress);
+	REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
+	core::Result<std::shared_ptr<const host::SharedLevel>> level = host::load_shared_level(*db, options, &progress);
+	REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
+	m->seconds = seconds_since(start);
+	m->level = *level;
+	cache.close();
+	const host::GunplayLevel *g = m->level->gunplay.get();
+	REQUIRE(g != nullptr);
+	std::printf("gunplay fixture (sv): Metro with gunplay loaded in %.2f s (gunplay %.2f s: weapons %.2f, kits %.2f, capsules %.2f; %zu defs, "
+				"capsule table %s, %zu notes)\n",
+			m->seconds, m->level->seconds_gunplay, g->seconds_weapons, g->seconds_kits, g->seconds_capsules, g->defs.size(),
+			g->capsule_standin ? "STAND-IN" : "from the retail clips", g->notes.size());
+	s_metro = std::move(m);
+	return s_metro.get();
+}
+#endif
+
+// The weapon fields of InputSample::held_buttons / Command::buttons (weapon_input.h).
+inline uint32_t select_slot_field(uint8_t p_slot) {
+	return uint32_t(p_slot + 1u) << sim::weapons::weapon_buttons::kSlotShift;
+}
+inline uint32_t fire_mode_field(uint8_t p_counter) {
+	return (uint32_t(p_counter) << sim::weapons::weapon_buttons::kFireModeShift) & sim::weapons::weapon_buttons::kFireModeMask;
+}
+
+// Yaw and pitch (radians, the sim convention: yaw 0 looks down +Z, a quarter turn down +X) from p_from to p_to.
+inline void aim_at(const sim::Vec3 &p_from, const sim::Vec3 &p_to, float &r_yaw, float &r_pitch) {
+	const double dx = double(p_to[0]) - double(p_from[0]), dy = double(p_to[1]) - double(p_from[1]), dz = double(p_to[2]) - double(p_from[2]);
+	r_yaw = float(std::atan2(dx, dz));
+	r_pitch = float(std::atan2(dy, std::sqrt(dx * dx + dz * dz)));
+}
+
+struct WeaponTickRecord {
+	uint8_t slot = 0;
+	sim::Command command;
+	sim::weapons::SoldierWeaponsState after;
+	std::vector<sim::weapons::ShotEvent> shots;
+	std::vector<sim::weapons::TimedWeaponEvent> timed;
+	uint32_t events = 0;
+};
+struct ImpactRecord {
+	uint32_t tick = 0;
+	sim::weapons::ImpactEvent impact;
+};
+struct DamageRecord {
+	uint32_t tick = 0;
+	sim::weapons::DamageEvent event;
+	bool applied = false;
+	float health_after = 0;
+};
+
+// Everything the server's gunplay did (GunplayConfig::observer). Bounded: beyond kMaxRecords per kind the excess is
+// counted in `dropped` (a run that hits it says so).
+class GunplayRecorder final : public host::GunplayObserver {
+public:
+	static constexpr size_t kMaxRecords = size_t(1) << 20;
+	// Weapon ticks of this slot only (0xFF: every slot).
+	explicit GunplayRecorder(uint8_t p_watch = 0xFF) :
+			watch_(p_watch) {}
+
+	void weapon_tick(uint8_t p_slot, const sim::Command &p_command, const sim::weapons::SoldierWeaponsState &p_after,
+			const sim::weapons::WeaponTickOutput &p_out) override {
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (watch_ != 0xFF && p_slot != watch_) {
+			return;
+		}
+		if (ticks_.size() >= kMaxRecords) {
+			++dropped_;
+			return;
+		}
+		WeaponTickRecord r;
+		r.slot = p_slot;
+		r.command = p_command;
+		r.after = p_after;
+		r.shots.assign(p_out.shots.begin(), p_out.shots.begin() + std::min<size_t>(p_out.shot_count, p_out.shots.size()));
+		r.timed.assign(p_out.timed.begin(), p_out.timed.begin() + std::min<size_t>(p_out.timed_count, p_out.timed.size()));
+		r.events = p_out.events;
+		ticks_.push_back(std::move(r));
+	}
+	void projectiles(uint32_t p_tick, const sim::weapons::ProjectileStepOutput &p_out, std::span<const sim::weapons::Projectile> p_live) override {
+		(void)p_live;
+		std::lock_guard<std::mutex> lock(mutex_);
+		for (const sim::weapons::ImpactEvent &i : p_out.impacts) {
+			if (impacts_.size() >= kMaxRecords) {
+				++dropped_;
+				break;
+			}
+			impacts_.push_back({ p_tick, i });
+		}
+	}
+	void damage(uint32_t p_tick, const sim::weapons::DamageEvent &p_event, bool p_applied, float p_health_after) override {
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (damage_.size() >= kMaxRecords) {
+			++dropped_;
+			return;
+		}
+		damage_.push_back({ p_tick, p_event, p_applied, p_health_after });
+	}
+
+	void set_watch(uint8_t p_slot) {
+		std::lock_guard<std::mutex> lock(mutex_);
+		watch_ = p_slot;
+	}
+	void clear() {
+		std::lock_guard<std::mutex> lock(mutex_);
+		ticks_.clear();
+		impacts_.clear();
+		damage_.clear();
+	}
+	std::vector<WeaponTickRecord> ticks() const {
+		std::lock_guard<std::mutex> lock(mutex_);
+		return ticks_;
+	}
+	std::vector<sim::weapons::ShotEvent> shots(uint8_t p_slot) const {
+		std::lock_guard<std::mutex> lock(mutex_);
+		std::vector<sim::weapons::ShotEvent> out;
+		for (const WeaponTickRecord &r : ticks_) {
+			if (r.slot == p_slot) {
+				out.insert(out.end(), r.shots.begin(), r.shots.end());
+			}
+		}
+		return out;
+	}
+	size_t shot_count(uint8_t p_slot) const {
+		std::lock_guard<std::mutex> lock(mutex_);
+		size_t n = 0;
+		for (const WeaponTickRecord &r : ticks_) {
+			n += r.slot == p_slot ? r.shots.size() : 0;
+		}
+		return n;
+	}
+	std::optional<WeaponTickRecord> last(uint8_t p_slot) const {
+		std::lock_guard<std::mutex> lock(mutex_);
+		for (auto it = ticks_.rbegin(); it != ticks_.rend(); ++it) {
+			if (it->slot == p_slot) {
+				return *it;
+			}
+		}
+		return std::nullopt;
+	}
+	std::vector<ImpactRecord> impacts() const {
+		std::lock_guard<std::mutex> lock(mutex_);
+		return impacts_;
+	}
+	std::vector<DamageRecord> damage() const {
+		std::lock_guard<std::mutex> lock(mutex_);
+		return damage_;
+	}
+	uint64_t dropped() const {
+		std::lock_guard<std::mutex> lock(mutex_);
+		return dropped_;
+	}
+
+private:
+	mutable std::mutex mutex_;
+	uint8_t watch_ = 0xFF;
+	std::vector<WeaponTickRecord> ticks_;
+	std::vector<ImpactRecord> impacts_;
+	std::vector<DamageRecord> damage_;
+	uint64_t dropped_ = 0;
+};
+
+// Polls until p_done() or p_timeout_s; true when p_done() held.
+inline bool poll_until(Session &r_session, const std::function<bool()> &p_done, double p_timeout_s) {
+	const auto start = std::chrono::steady_clock::now();
+	while (seconds_since(start) < p_timeout_s) {
+		poll(r_session);
+		if (p_done()) {
+			return true;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	}
+	return p_done();
+}
+
+// Sends a dev request without waiting; the report comes with wait_report(id).
+inline uint32_t send_request(Session &r_session, net::DebugRequest p_request) {
+	p_request.id = r_session.next_debug_id++;
+	r_session.client.send_debug(p_request);
+	return p_request.id;
+}
+
+// The slot's active weapon is Ready (deployed) in the newest recorded tick.
+inline bool weapon_ready(const GunplayRecorder &p_recorder, uint8_t p_slot) {
+	const std::optional<WeaponTickRecord> r = p_recorder.last(p_slot);
+	return r && r->after.current().phase == sim::weapons::WeaponPhase::Ready;
+}
+
+} // namespace bf3::test::gunplay

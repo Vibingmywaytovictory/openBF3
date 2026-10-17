@@ -2045,3 +2045,85 @@ Gates, measured 2026-10-16 on the dev preset (E13 is wall clock and **noisy** on
 | E12 (a) | `ctest -R sim.lagcomp.unit` | server lists and samples bit-equal to the client's; cache on == off; window/track differences all classified | 8,900 rows, 0 differences; 17,636 provider rows equal; 1,438 Q22 rows, 0 unexplained |
 | E13 | `bf3dump lagcomp MP_Subway TeamDeathMatch0 --perf` | provider p99 ≤ 0.5 ms per tick | pairs 0.338 ms, long 0.354 ms |
 | R4 | `bf3dump weapon-sim --check` | 38/38, sim.weapons* bit-equal | 38/38; `--check` and `--all` output byte-equal to the build without R4 |
+
+## M2a cl: client prediction and events
+
+<!-- # M2a cl -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §6.1–§6.3, §7, §8; as built, the contract fixes and the measured
+gates: [docs/design/m2a-cl.md](docs/design/m2a-cl.md). The client predicts its own weapons with the server's code
+(`bf3_sim` `WeaponLane`, stepped after the motor in prediction and in `catch_up`, first predictions only emit),
+reconciles them by the Snapshot's own weapons block, rebases a health-only difference without a replay (R2), refuses a
+server whose `weapon_hash` (or kit hash) differs before sending Ready (E6), sends the drawn frame's view sample and
+`others_ack_bits` in every command, and hands the main thread `PresentEvent`s (`bf3/host/presentation_events.h`, an
+SPSC ring with Predicted / Render / Immediate timelines) and the two latest predicted weapon views
+(`present_weapon`, `bf3/host/presentation_weapon.h`) for vm, hud, fx3 and au3. Cosmetic projectiles
+(`bf3/host/client_projectiles.h`) test own shots against the rewound records the server will use and fly remote shots
+on the render timeline. `present_others` now calls lc's `net::sample_other` (R1). The client builds its gunplay inputs
+(table, capsules, kits, shot frame) from sv's `SharedLevel::gunplay` by default. Every end-to-end case runs against the
+real `ServerHost` with sv's `Gunplay`, with real clients as bots: the gates on Metro (read-only on the install, exit 77
+without one), shorter install-free variants on a synthetic floor in the unit row.
+
+Commands (the unit row needs no install; the Metro gates run only with `OPENBF3_CL_TIMING=1`, under the quiet lock):
+
+```bat
+ctest --preset dev -R host.gunplay.client.unit                     :: events, present_weapon, lane, projectiles, view sample, E6, R2, SnapshotOthers, hostile, floor variants
+ctest --preset dev -R host.session.unit                            :: M1 rows plus R1's equivalence
+set OPENBF3_CL_TIMING=1
+b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client  :: Metro: E1 + E5, E12 lagcomp (+ control, stress), E15 loopback (10 min), two clients, install unchanged
+```
+
+Gates, measured 2026-10-17 on the dev preset (the timing cases are wall clock and **noisy** on this shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| E1 (client, Metro) | predicted shots = server's field for field 31/31 | 31/31 (the install's M16A3); 30/30 gaps of 4,500,000; 36 predicted = 36 server shots |
+| E5 (client, Metro) | server phase events = predicted | 7/7; empty 2.37 s → 30, tactical 1.8 s (commit +1.53 s) → 31 |
+| E6 (client) | "weapon table mismatch", `weapon_hash_mismatch` 1, no Ready, no prediction | yes for a variant cfg, a missing cfg and a client without inputs (never spawned on the server); "kit table mismatch" for a kit hash |
+| E12 (b) (Metro) | server hit ≥ 99 % of client hits, same zone ≥ 99 %; samples bit-equal except `late_sample`; control ≤ 50 % | 500/500 (100 %), zone 100 %; 500/500 samples equal to the server's rewound rows, `late_sample` 0; control 2.40 %; stress 29/29 (all clamped, reported) |
+| E15 (Metro) | 0 weapon and 0 motor reconciliations in 10 min loopback; equal seeds for two clients | 0 and 0 (bots on the player's team: 0 health rebases); 212/212 seeds equal |
+| R1 / R2 | M1's drawing unchanged; a hit's writes rebase | 150,196/150,196 bit-equal; 3 enemy hits, 3 rebases, 0 reconciliations |
+
+## M2a sv: server gunplay
+
+<!-- # M2a sv -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §4, §5, §6 (server side), §10.1, §13, §14.1; as built, the
+decisions and the measured gates: [docs/design/m2a-sv.md](docs/design/m2a-sv.md). The `GameServer` runs weapons,
+projectiles, damage, deaths and kits when the level carries gunplay tables (`SharedLoadOptions::gunplay`, off by
+default; `bf3_host` `Gunplay`, `bf3/host/gunplay.h`): every live soldier's weapons step after its motor step
+(`step_weapons_m2a`), all projectiles fly once per tick through lc's `RewindProvider` (clients' shots against the
+targets as that client drew them, server-side shooters at the present), damage is applied in (time, shooter, shot,
+pellet) order, and deaths go out as `CombatEvents` through a `CombatEventSink` with the respawn decided by a
+`RespawnPolicy` (M2b's seams). Snapshots carry the own weapons and the others' weapon fields, the overflow goes in a
+`SnapshotOthers` of the same seq, the other shooters' shots in `ShotEvents`. `MatchInfo` carries the match seed,
+`weapon_hash` (table ^ capsule table), `weapon_flags` (exact aim, infinite magazine; dev only) and `kit_hash`. Dev
+requests `SpawnTarget` / `TargetInfo` place stationary target bots and return their server capsules.
+
+Commands (read-only on the install; the cases print BF3-derived numbers, keep the logs out of the repo; the last case
+prints `install.unchanged`). Every case runs the real `ServerHost` and `ClientSession` on Metro headless, except the
+hostile case and E6's offset sample, which drive the `GameServer` without sockets:
+
+```bat
+ctest --preset dev -R host.gunplay.server                                                          :: all cases (RUN_SERIAL, ~5 min)
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=timing      :: E1
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=drop        :: E2
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=stk         :: E3, E4
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=reload      :: E5
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=variants    :: E6
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=hostile     :: E17 (also under the asan preset)
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=install     :: E17 install unchanged
+```
+
+Gates, measured 2026-10-17 on the dev preset (server halves; the client halves are cl's `host.gunplay.client`;
+wall-clock pacing, **noisy** on this shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| E1 | M16A3: 31 shots, first at the press tick's start, 30 gaps of 4,500,000, trace = server shots; other kit firearms: the table interval; semi one shot per tap | 31 / 30 / yes / 31 of 31 bit-equal; M4A1, M27 IAR, AK-74M, AKS-74u, RPK-74M at their intervals; MK11, SVD, M9, MP443 5 / 5 |
+| E2 | 0.1779 ± 0.01 m at 100 m, 1.5981 ± 0.01 m at 300 m, expiry 975.0 ± 0.01 m | 0.1780-0.1786, 1.5993-1.6039, 975.0000 (sky lane in bounds 2,197.5 m) |
+| E3 | M16A3 chest 4 / head 2 at 5 m, chest 6 / head 3 at 60 m; 25 / 50 / 22.75 per hit | 4 / 2, 6 / 3; 25.0000 / 50.0000 / 22.7500 |
+| E4 | M16A3 head 50.000, MK11 head 117.500 (kill in 1), MK11 head at 60 m kills in 2 | 50.0000, 117.5000 (1), 2 |
+| E5 | M16A3 108,000,000 / commit +91,800,000 → 31, empty 142,200,000 → 30; M9 81,000,000 / 96,000,000 | all equal |
+| E6 | 4 distinct hashes; KS D ≤ 0.0364 over 2,000 offsets; recoil after 10 rounds within 1e-4° | 4; D 0.0158 each; diff ≤ 4.5e-9° |
+| E17 | hostile client changes no other soldier, clamps counted, tick unaffected; install unchanged | 0 / 900 ticks differ; all clamps counted; 0 precondition failures; `install.unchanged: clean (256 files)` |
+| G1 (regression) | `host.scale` tick p99 ≤ 8 ms under the quiet lock | 1.212 / 0.783 / 1.454 ms |
+| asan | m2a.contract, net.proto.unit / fuzz, sim.lagcomp.unit, sim.weapons.fuzz, host.gunplay.server under `--preset asan` | 6 / 6, no sanitizer report |

@@ -101,6 +101,8 @@ struct LevelDatabase {
 core::Result<LevelDatabase> open_level_database(std::shared_ptr<const core::Install> p_install, std::string_view p_level, std::string_view p_mode,
 		unsigned p_threads, LoadProgress *p_progress);
 
+struct GunplayLevel; // M2a sv: gunplay.h
+
 struct SharedLevel {
 	std::string level; // MP_Subway
 	std::string mode; // TeamDeathMatch0
@@ -116,6 +118,11 @@ struct SharedLevel {
 	// mismatch, so the nav is never baked over ground the server's motor lacks.
 	std::vector<std::array<int32_t, 2>> terrain_cover;
 	std::vector<core::level::WaterPlane> cover_water; // S1: SharedLoadOptions::cover_water, for the same check
+	// M2a sv (docs/design/m2a.md §4.2, §5.6, §6.5): the weapon defs, materials, soldier, hit capsules, capsule pose
+	// table and kits (gunplay.h GunplayLevel), loaded when SharedLoadOptions::gunplay is set. Null: no gunplay, the
+	// GameServer runs M1's game unchanged.
+	std::shared_ptr<const GunplayLevel> gunplay;
+	double seconds_gunplay = 0.0;
 };
 
 struct SharedLoadOptions {
@@ -131,6 +138,10 @@ struct SharedLoadOptions {
 	// S1 water rule (SoupOptions::cover_water; docs §5.2): LevelCombatTiles::water. The bots need the same as the
 	// nav (load_bot_level compares).
 	std::vector<core::level::WaterPlane> cover_water;
+	// M2a sv (docs/design/m2a.md §4.2): load the gunplay tables (load_gunplay_level: the level's weapons, the mode's
+	// kits, the capsule pose table from the retail clips; ~1.5 s on Metro [measured, noisy], nothing cached). Off by
+	// default so M1's load and its E4 / E5 numbers stay as they were until the integration turns it on.
+	bool gunplay = false;
 };
 
 // On the loader thread that owns p_db.
@@ -140,5 +151,10 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 // A SharedLevel over a synthetic static world (tests): the given spawn points, motor params from p_motor.
 std::shared_ptr<const SharedLevel> synthetic_shared_level(std::shared_ptr<const sim::StaticWorldShapes> p_world, std::vector<sim::SpawnPoint> p_spawns,
 		const sim::MotorParams &p_motor);
+
+// M2a sv (docs/design/m2a.md §4.2, §5.6, §6.5): fills r_level.gunplay from the database's install, level and mode
+// (gunplay.h load_gunplay_level). load_shared_level calls it when SharedLoadOptions::gunplay is set; a tool that holds
+// a SharedLevel it built itself may call it too.
+core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level);
 
 } // namespace bf3::host

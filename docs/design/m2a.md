@@ -804,10 +804,13 @@ delta compression and relevance; none of the M2a message meanings change.
 * On each snapshot the client compares `weapons_wire_view(predicted at server_tick)` with the decoded own block.
   A mismatch rebases the weapons from the wire view and replays (M1's rule). Expected 0 in loopback (E15).
 * **Health is not a motor mismatch.** M1's `states_match` compares health (client_session.cpp), so every server hit
-  on the own soldier would force a motor replay. cl splits the compare: when only health differs (and the life is
-  the same), the client writes the server's health into the ring entries from the snapshot tick on, with no replay,
-  and counts `health_rebases`; a death arrives as a motor state change and reconciles as in M1. E15 counts motor and
-  weapon reconciliations without the health rebases, and reports those separately.
+  on the own soldier would force a motor replay. cl splits the compare: when only what a hit writes differs (and the
+  life is the same), the client writes the server's health into the ring entries from the snapshot tick on, with no
+  replay, and counts `health_rebases`; a death arrives as a motor state change and reconciles as in M1. What a hit
+  writes is wp's `apply_damage`: the health, the tick's `damage` and the `kDamaged` event (rule fixed by cl against
+  sv's server: "only health" reconciled every hit, because `damage` and `kDamaged` differ in the hit's tick too; the
+  motor's own fall damage stays covered, it follows from `kLanded`, `impact_speed` and `protect_ticks`). E15 counts
+  motor and weapon reconciliations without the health rebases, and reports those separately.
 * **Only the first prediction of a tick emits.** Replays keep state but discard their `ShotEvent`s and timed events;
   the client tracks the highest emitted tick (wp §7.2). So effects and sounds never fire twice.
 * On the own death (server state) the client stops emitting; on Spawned it calls `spawn_soldier_weapons` with the
@@ -1204,7 +1207,12 @@ step (`gunplay->step_soldier`, §4.1 4a), the rules step (rules, dev kinds, `pla
 (`history.record_tick` / `history.sent`, the own weapons block, `SnapshotOthers`, the shot and combat datagrams); cl in
 `prediction.cpp` inside `catch_up`'s per-tick loop right after the motor step (`step_weapons_m2a`, §8.2), and in
 `client_session.cpp` in `handle_datagram` (`SnapshotOthers`, `ReceivedRecords`, shot and combat decode) and
-`publish` (weapon views, `newest_seq`).
+`publish` (weapon views, `newest_seq`). Corrected by cl (the list proved incomplete; m2a-cl.md "insertions"): the
+client also needs one-line calls in `authoritative` (the spawn's weapons, the ring-miss and reconcile rebase from the
+wire view, the weapons compare and R2's health rebase in the match branch), in `client_tick` (the view sample,
+`fire_presses` and the received state after `sample_command`, the weapons after the motor step, `others_ack_bits`)
+and in `start` (Ready leaves `start` for MatchInfo, so a refused client never sends it, E6), plus one member block
+inside `ClientSession::Impl` and `PredictionRing::attach_weapons` (the lane `catch_up` replays).
 
 **Named replacements** (lines are replaced, by the owner named, and nowhere else):
 

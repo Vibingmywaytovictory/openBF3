@@ -736,3 +736,37 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_lc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(sim.lagcomp.unit anim.server_pose PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_lc_cl_dir}")
 endif()
+
+# M2a cl (docs/design/m2a.md §6.1-§6.3, §7.2-§7.4, §8, §13.3; docs/design/m2a-cl.md): host.gunplay.client.unit (no
+# data, short: the events ring, present_weapon, the weapon lane under catch_up, ClientProjectiles, the view sample, E6's
+# refusal, R2's health rebase, the SnapshotOthers merge, the hostile datagrams) and host.gunplay.client (wall clock,
+# minutes: E1 + E5, E12 lagcomp (b) + control + stress, E15 loopback and two clients; runs only with
+# OPENBF3_CL_TIMING=1 under the quiet lock, else every case reports skipped, 77). Both run against the real ServerHost
+# with sv's gunplay on the synthetic floor (no install).
+openbf3_test(test_gunplay_client test_main.cpp host_gunplay_client_tests.cpp gunplay_fixture.h weapons_support.h test_support.h)
+target_link_libraries(test_gunplay_client PRIVATE bf3_host)
+target_compile_definitions(test_gunplay_client PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
+add_test(NAME host.gunplay.client.unit COMMAND test_gunplay_client --test-suite=host-gunplay-client-unit)
+add_test(NAME host.gunplay.client COMMAND test_gunplay_client --test-suite=host-gunplay-client)
+set_tests_properties(host.gunplay.client.unit PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
+set_tests_properties(host.gunplay.client PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 2400 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2a_cl_t_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.gunplay.client.unit host.gunplay.client PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_cl_t_dir}")
+endif()
+
+# M2a sv (docs/design/m2a.md §1 E1-E6, E17; docs/design/m2a-sv.md): host.gunplay.server, the server's gunplay criteria
+# headless through ServerHost + ClientSession on Metro with the gunplay tables (cases timing, drop, stk, reload,
+# variants, hostile, install; exits 77 without an install). RUN_SERIAL: the client paces itself at 60 Hz of wall clock.
+# Also runs under the asan preset (the hostile case feeds every new message kind).
+openbf3_test(test_host_gunplay_server test_main.cpp host_gunplay_server_tests.cpp gunplay_fixture.h test_support.h)
+target_link_libraries(test_host_gunplay_server PRIVATE bf3_host)
+target_compile_definitions(test_host_gunplay_server PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
+add_test(NAME host.gunplay.server COMMAND test_host_gunplay_server --test-suite=host-gunplay-server)
+set_tests_properties(host.gunplay.server PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_sv_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.gunplay.server PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_sv_cl_dir}")
+endif()

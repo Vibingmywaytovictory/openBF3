@@ -57,3 +57,20 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/lag_comp.cpp
 )
+
+# M2a cl (docs/design/m2a.md §8; docs/design/m2a-cl.md): the events ring, the presented weapon and the client's
+# cosmetic projectiles.
+target_sources(bf3_host PRIVATE
+    src/presentation_events.cpp
+    src/presentation_weapon.cpp
+    src/client_projectiles.cpp
+)
+
+# M2a sv (docs/design/m2a.md §4, §5.6, §10.1; docs/design/m2a-sv.md): server gunplay, kits, target bots. bf3_anim for
+# the capsule pose table built from the retail clips (lc's builder).
+target_sources(bf3_host PRIVATE
+    src/kits.cpp
+    src/target_bots.cpp
+    src/gunplay.cpp
+)
+target_link_libraries(bf3_host PUBLIC bf3_anim)

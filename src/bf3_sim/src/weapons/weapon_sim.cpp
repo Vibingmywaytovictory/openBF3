@@ -149,6 +149,13 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 	e.recoil = r_s.recoil;
 	e.tracer = p_d.trace_frequency > 0 && (index % uint32_t(p_d.trace_frequency)) == 0;
 	e.power = p_power;
+	if (r_io.table.exact_aim) {
+		// M2a sv, R3 (docs/design/m2a.md §4.2): the match option does exactly what the range's RangeScenario::exact_aim
+		// post-process does (shooting_range.cpp): the direction is the view without recoil, the pellet cone 0; aim,
+		// origin and every other field keep the sim's values, and the spread and recoil state below still run.
+		e.direction = aim_direction(r_io.cmd.yaw, r_io.cmd.pitch, RecoilOffset{});
+		e.pellet_cone = 0;
+	}
 
 	r_s.spread = spread_after_shot(spread, disp);
 	r_s.spread_time = p_time;

@@ -299,6 +299,12 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		p_progress->advance(LoadStage::Shapes);
 		p_progress->end(LoadStage::Shapes);
 	}
+	if (p_options.gunplay) { // M2a sv (named insertion: the gunplay tables, SharedLoadOptions::gunplay)
+		const core::Status gunplay = load_shared_gunplay(p_db, *shared); // M2a sv
+		if (!gunplay.ok()) { // M2a sv
+			return core::error_at("load_shared_level: gunplay", gunplay.error()); // M2a sv
+		} // M2a sv
+	} // M2a sv
 	sample_working_set(p_progress);
 	return std::shared_ptr<const SharedLevel>(std::move(shared));
 }
