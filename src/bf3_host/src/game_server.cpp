@@ -263,6 +263,7 @@ struct GameServer::Impl {
 	}
 
 	void receive_commands(Slot &r_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
+		sv_ack(r_slot, p_packet); // M2a sv [recv]: the packet's snapshot acks into the lag history
 		const uint32_t size = uint32_t(r_slot.buffer.size());
 		const uint32_t ahead = std::clamp<uint32_t>(config.jitter_buffer_ticks, 1u, 1024u);
 		// Oldest first, so the newest copy of a tick is the one kept when a packet names a tick twice.
@@ -290,11 +291,13 @@ struct GameServer::Impl {
 			if (!b.valid || b.command.tick != c.tick) {
 				b.valid = true;
 				b.command = c;
+				sv_buffered(r_slot, c); // M2a sv [recv]: the ack state at the command's first arrival
 			} else if (c.sequence > b.command.sequence) {
 				// After a backward client clock reset the client re-sends ticks it already sent: the newer sequence
 				// is what it predicted with (docs §7.4).
 				b.command = c;
 				++r_slot.stats.commands_replaced;
+				sv_buffered(r_slot, c); // M2a sv [recv]
 			}
 		}
 	}
