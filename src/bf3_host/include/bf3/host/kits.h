@@ -45,7 +45,7 @@ struct KitTable {
 };
 
 // The kits of the mode's two teams (TeamDef::kits in order, KitDef::default_unlock per slot), each default unlock
-// matched to a def of p_defs by WeaponDef::unlock (the index into p_defs is the table's def id). Fails when a team
+// matched to a def of p_defs by WeaponDef::variant (the index into p_defs is the table's def id). Fails when a team
 // does not list kKitCount kits, or a resolved slot's unlock has no def.
 core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs);
