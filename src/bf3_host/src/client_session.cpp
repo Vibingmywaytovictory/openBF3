@@ -1471,6 +1471,10 @@ void ClientSession::Impl::cl_refuse(const char *p_reason) {
 		host->disconnect_all();
 	}
 	connected = false;
+	// No tick publishes after this (client_tick runs only while connected): hand the refusal to stats() here.
+	stats.connected = false;
+	std::lock_guard lock(frame_mutex);
+	shared_frame->stats = stats;
 }
 
 bool ClientSession::Impl::cl_match_info(const net::MatchInfo &p_match, uint64_t p_now) {
