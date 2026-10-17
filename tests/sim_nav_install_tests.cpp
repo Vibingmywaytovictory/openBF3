@@ -19,6 +19,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/thread_pool.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/scale_bench.h"
@@ -40,6 +41,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace bf3;
@@ -160,43 +162,87 @@ struct ModeLoad {
 	std::shared_ptr<const host::SharedLevel> shared;
 	std::shared_ptr<const host::BotLevel> bots;
 	double seconds_db = 0, seconds_shared = 0, seconds_bots = 0;
+	std::string error; // when a step failed (shared or bots null)
 };
 
-// One level x mode as the bots load it (docs §8): the database, the static world (TC: terrain everywhere), the bot
-// level (nav with the water rule, components, rows) through p_cache.
-std::optional<ModeLoad> load_mode(Install &r_m, const std::string &p_level, const std::string &p_mode, const core::level::LevelCombatTiles &p_combat,
-		core::Cache *p_cache, const host::BotLoadOptions &p_bot_options = {}) {
-	ModeLoad out;
+// The database and the static world (TC: terrain everywhere) of one level x mode, kept for several bot loads.
+struct LevelBase {
+	std::optional<host::LevelDatabase> db;
+	std::shared_ptr<const host::SharedLevel> shared;
+	double seconds_db = 0, seconds_shared = 0;
+	std::string error;
+};
+
+// p_threads: the lanes of every pool the load uses (0 = all cores). No doctest assertions: runs on worker lanes.
+LevelBase load_base(Install &r_m, const std::string &p_level, const std::string &p_mode, core::Cache *p_cache, unsigned p_threads = 0) {
+	LevelBase out;
 	auto clock = std::chrono::steady_clock::now();
-	core::Result<host::LevelDatabase> db = host::open_level_database(r_m.install, p_level, p_mode, 0, nullptr);
-	CHECK_MESSAGE(db.ok(), p_level, " ", p_mode, ": ", (db.ok() ? std::string() : db.error().message));
+	core::Result<host::LevelDatabase> db = host::open_level_database(r_m.install, p_level, p_mode, p_threads, nullptr);
 	if (!db) {
-		return std::nullopt;
+		out.error = p_level + " " + p_mode + ": " + db.error().message;
+		return out;
 	}
+	out.db.emplace(std::move(*db));
 	out.seconds_db = seconds_since(clock);
 	clock = std::chrono::steady_clock::now();
 	host::SharedLoadOptions so;
 	so.cache = p_cache;
 	so.tuning = r_m.tuning;
-	core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, so, nullptr);
-	CHECK_MESSAGE(shared.ok(), p_level, " ", p_mode, ": ", (shared.ok() ? std::string() : shared.error().message));
+	so.threads = p_threads;
+	core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*out.db, so, nullptr);
 	if (!shared) {
-		return std::nullopt;
+		out.error = p_level + " " + p_mode + ": " + shared.error().message;
+		return out;
 	}
 	out.shared = *shared;
 	out.seconds_shared = seconds_since(clock);
-	clock = std::chrono::steady_clock::now();
+	return out;
+}
+
+// The bot level (nav with the water rule, components, rows) over p_base through p_cache.
+ModeLoad load_bots(const LevelBase &p_base, const core::level::LevelCombatTiles &p_combat, core::Cache *p_cache,
+		const host::BotLoadOptions &p_bot_options = {}, unsigned p_threads = 0) {
+	ModeLoad out;
+	out.shared = p_base.shared;
+	out.seconds_db = p_base.seconds_db;
+	out.seconds_shared = p_base.seconds_shared;
+	if (p_base.shared == nullptr) {
+		out.error = p_base.error;
+		return out;
+	}
+	const auto clock = std::chrono::steady_clock::now();
 	host::BotLoadOptions bo = p_bot_options;
 	bo.cache = p_cache;
 	bo.combat = &p_combat;
-	core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*db, *out.shared, bo, nullptr);
-	CHECK_MESSAGE(bots.ok(), p_level, " ", p_mode, ": ", (bots.ok() ? std::string() : bots.error().message));
+	if (p_threads != 0) {
+		bo.threads = p_threads;
+	}
+	core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*p_base.db, *p_base.shared, bo, nullptr);
 	if (!bots) {
-		return std::nullopt;
+		out.error = bots.error().message;
+		return out;
 	}
 	out.bots = *bots;
 	out.seconds_bots = seconds_since(clock);
 	return out;
+}
+
+// One level x mode as the bots load it (docs §8): load_base then load_bots. No assertions (worker lanes).
+ModeLoad load_mode_on(Install &r_m, const std::string &p_level, const std::string &p_mode, const core::level::LevelCombatTiles &p_combat,
+		core::Cache *p_cache, unsigned p_threads = 0) {
+	const LevelBase base = load_base(r_m, p_level, p_mode, p_cache, p_threads);
+	return load_bots(base, p_combat, p_cache, {}, p_threads);
+}
+
+// load_mode_on on this thread, the failure CHECKed.
+std::optional<ModeLoad> load_mode(Install &r_m, const std::string &p_level, const std::string &p_mode, const core::level::LevelCombatTiles &p_combat,
+		core::Cache *p_cache) {
+	ModeLoad l = load_mode_on(r_m, p_level, p_mode, p_combat, p_cache);
+	CHECK_MESSAGE(l.bots != nullptr, p_level, " ", p_mode, ": ", l.error);
+	if (l.bots == nullptr) {
+		return std::nullopt;
+	}
+	return l;
 }
 
 struct RowCounts {
@@ -244,12 +290,32 @@ RowCounts g2_level(Install &r_m, const std::string &p_level) {
 	if (!open_cache(r_m, (p_level + "_g2").c_str(), cache)) {
 		return level_counts;
 	}
+	// Mode 1 runs alone on every core first: it bakes and stores the tiles every mode shares, so the lanes of modes 2-7
+	// (run side by side, the pools of each sized hw / lanes) find them in the cache instead of baking them several times.
+	// The loads hold no assertions; the rows are printed and CHECKed below on this thread in mode order.
+	constexpr unsigned kModeLanes = 4;
+	const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+	std::vector<ModeLoad> loads;
+	loads.reserve(combat->modes.size());
+	if (!combat->modes.empty()) {
+		loads.push_back(load_mode_on(r_m, p_level, combat->modes[0], *combat, &cache));
+	}
+	if (combat->modes.size() > 1) {
+		std::vector<ModeLoad> rest = core::parallel_map<ModeLoad>(
+				combat->modes.size() - 1,
+				[&](size_t i) { return load_mode_on(r_m, p_level, combat->modes[i + 1], *combat, &cache, std::max(1u, hw / kModeLanes)); },
+				kModeLanes);
+		for (ModeLoad &l : rest) {
+			loads.push_back(std::move(l));
+		}
+	}
 	for (size_t m = 0; m < combat->modes.size(); ++m) {
 		const std::string &mode = combat->modes[m];
-		const std::optional<ModeLoad> l = load_mode(r_m, p_level, mode, *combat, &cache);
-		if (!l) {
+		CHECK_MESSAGE(loads[m].bots != nullptr, p_level, " ", mode, ": ", loads[m].error);
+		if (loads[m].bots == nullptr) {
 			continue;
 		}
+		const ModeLoad *l = &loads[m];
 		RowCounts c;
 		for (const host::BotPointRow &r : l->bots->points) {
 			const bool played = r.kind == host::BotPointRow::Kind::Spawn || in_combat_area(r.point, combat->areas[m]);
@@ -522,15 +588,21 @@ TEST_SUITE("sim-nav") {
 			{ "cs 0.25, radius nearest 0.25 m", sim::query_mask::kMovement, 0.25f, false },
 		};
 		std::optional<size_t> plan_main, built_main;
+		// The variants differ only in BotLoadOptions: one database and static world (same level, mode and tuning, no
+		// cache) serve all four bot loads.
+		const LevelBase base = load_base(*m, "MP_Subway", "ConquestLarge0", nullptr);
+		REQUIRE_MESSAGE(base.shared != nullptr, base.error);
 		for (const Variant &v : variants) {
 			host::BotLoadOptions bo;
 			bo.layer_mask = v.mask;
 			bo.params.cell_size = v.cs;
 			bo.params.radius_round_up = v.ceil;
-			const std::optional<ModeLoad> l = load_mode(*m, "MP_Subway", "ConquestLarge0", *combat, nullptr, bo);
-			if (!l) {
+			const ModeLoad loaded = load_bots(base, *combat, nullptr, bo);
+			CHECK_MESSAGE(loaded.bots != nullptr, v.name, ": ", loaded.error);
+			if (loaded.bots == nullptr) {
 				continue;
 			}
+			const ModeLoad *l = &loaded;
 			const sim::NavComponents &c = l->bots->components;
 			double total = 0.0;
 			for (double a : c.area) {
