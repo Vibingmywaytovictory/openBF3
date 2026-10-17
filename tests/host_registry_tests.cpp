@@ -71,6 +71,18 @@ bool wait_for(const std::atomic<bool> &p_flag, std::chrono::milliseconds p_timeo
 	return true;
 }
 
+// Polls p_done (on state, not a fixed sleep) until it holds or p_timeout passes.
+bool wait_until(const std::function<bool()> &p_done, std::chrono::milliseconds p_timeout) {
+	const auto end = std::chrono::steady_clock::now() + p_timeout;
+	while (!p_done()) {
+		if (std::chrono::steady_clock::now() > end) {
+			return false;
+		}
+		std::this_thread::yield();
+	}
+	return true;
+}
+
 // p_owners threads run p_round(thread, iteration) p_iterations times each while one thread calls p_stop_all in a
 // loop; returns the sum of what p_stop_all returned (instances it stopped).
 size_t churn(int p_owners, int p_iterations, const std::function<void(int, int)> &p_round, const std::function<size_t()> &p_stop_all,
@@ -104,11 +116,30 @@ size_t churn(int p_owners, int p_iterations, const std::function<void(int, int)>
 	return stopped.load();
 }
 
+// How jitter() spends a long pause (docs/testing.md "Waiting rules").
+enum class JitterMode {
+	// Every long pause spins on steady_clock with yield(): true 0-350 us lifetimes. A sleep_for that short is
+	// rounded up to the 15.6 ms Windows timer tick, which only made the probe case slow.
+	Spin,
+	// The instance-churn cases: 1 in 4 long pauses ((thread + iteration) % 4 == 0) keep the sleep_for, so those
+	// instances live at least one timer tick and the host thread reaches its 60 Hz tick loop (stop_all during a
+	// steady tick); the others spin (stop_all during start-up).
+	SpinSomeTicks,
+};
+
 // A small pause that varies by round, so destruction lands before, during and after a stop_all pass.
-void jitter(int p_thread, int p_iteration) {
+void jitter(int p_thread, int p_iteration, JitterMode p_mode) {
 	const int us = int((uint32_t(p_thread) * 2654435761u + uint32_t(p_iteration) * 40503u) % 700u);
 	if (us > 350) {
-		std::this_thread::sleep_for(std::chrono::microseconds(us - 350));
+		const std::chrono::microseconds pause(us - 350);
+		if (p_mode == JitterMode::SpinSomeTicks && (p_thread + p_iteration) % 4 == 0) {
+			std::this_thread::sleep_for(pause);
+			return;
+		}
+		const auto end = std::chrono::steady_clock::now() + pause;
+		while (std::chrono::steady_clock::now() < end) {
+			std::this_thread::yield();
+		}
 	} else if (us > 100) {
 		std::this_thread::yield();
 	}
@@ -162,7 +193,10 @@ TEST_SUITE("host-registry") {
 			probe.reset(); // retire() must wait for the pin
 			deleted.store(true, std::memory_order_release);
 		});
-		std::this_thread::sleep_for(100ms);
+		// retire() erases the instance from the live list before it waits on the pin: once the list is empty the
+		// owner is inside retire(). A short grace lets a destructor that does not wait run past it.
+		REQUIRE(wait_until([&] { return registry.size() == 0; }, 10s));
+		std::this_thread::sleep_for(20ms);
 		CHECK(!deleted.load()); // still inside stop(): the destructor has not run past retire()
 		CHECK(!raw->destroyed.load());
 		release.store(true, std::memory_order_release);
@@ -195,7 +229,10 @@ TEST_SUITE("host-registry") {
 			second.reset(); // pinned by the pass, which is still in `first`: waits, and the pass must skip it
 			deleted.store(true, std::memory_order_release);
 		});
-		std::this_thread::sleep_for(50ms);
+		// `first` stays listed (its stop() has not reached remove()); `second` leaves the list when its owner is
+		// inside retire().
+		REQUIRE(wait_until([&] { return registry.size() == 1; }, 10s));
+		std::this_thread::sleep_for(20ms);
 		CHECK(!deleted.load());
 		release.store(true, std::memory_order_release);
 		stop_all.join();
@@ -225,7 +262,7 @@ TEST_SUITE("host-registry") {
 				for (int i = 0; i < 500; ++i) {
 					auto p = std::make_unique<Probe>(registry);
 					registry.add(p.get());
-					jitter(t, i);
+					jitter(t, i, JitterMode::Spin);
 					if (i % 3 == 0) {
 						p->stop();
 					}
@@ -256,7 +293,7 @@ TEST_SUITE("host-registry") {
 					auto host = std::make_unique<bf3::host::ServerHost>();
 					std::string err;
 					REQUIRE_MESSAGE(host->start(config, &err), err);
-					jitter(p_thread, p_iteration);
+					jitter(p_thread, p_iteration, JitterMode::SpinSomeTicks);
 					if (p_iteration % 4 == 1) {
 						host->stop();
 					}
@@ -279,7 +316,7 @@ TEST_SUITE("host-registry") {
 					auto client = std::make_unique<bf3::host::LoopbackClient>();
 					std::string e;
 					REQUIRE_MESSAGE(client->start(server.port(), 100, &e), e);
-					jitter(p_thread, p_iteration);
+					jitter(p_thread, p_iteration, JitterMode::SpinSomeTicks);
 					client.reset();
 				},
 				[] { return bf3::host::LoopbackClient::stop_all(); }, &calls);
@@ -311,7 +348,7 @@ TEST_SUITE("host-registry") {
 					const bf3::core::Status s = session->start(cc, level);
 					REQUIRE_MESSAGE(s.ok(), (s.ok() ? std::string() : s.error().message));
 					started.fetch_add(1);
-					jitter(p_thread, p_iteration);
+					jitter(p_thread, p_iteration, JitterMode::SpinSomeTicks);
 					session.reset();
 				},
 				[] { return bf3::host::ClientSession::stop_all(); }, &calls);
