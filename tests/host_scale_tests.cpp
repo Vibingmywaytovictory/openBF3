@@ -7,10 +7,14 @@
 // points), a bot outside the main component walks goals of its own component, stuck detection on a door the motor
 // cannot pass (repath, then a new goal), the tail split names an injected slow part, the initial spawns run in init.
 // host-scale: run_scale_bench on MP_Subway and MP_007 ConquestLarge0 (G1 p99 <= 8 ms with the validity condition, G3
-// numbers), the observers = 16 row on Metro (reported), install unchanged. RUN_SERIAL; timings are noisy on a shared
-// machine and the acceptance step reruns this on a quiet one.
+// numbers; cold and uncached), the observers = 16 row on Metro (reported; its load comes from a scratch cache warmed by
+// an untimed load after both G1 windows), install unchanged. RUN_SERIAL; timings are noisy on a shared machine and the
+// acceptance step reruns this on a quiet one.
+// host-scale-paced: the paced 60 Hz rows (ticks started on 16.667 ms boundaries as ServerHost does; report only) on
+// both levels, as their own row in the merge pass's real-time lane (row host.scale.paced; loads on 2 threads).
 #include <doctest/doctest.h>
 
+#include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
@@ -29,11 +33,14 @@
 #include "bf3/sim/static_world.h"
 #include "test_support.h"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -617,7 +624,8 @@ Install *install() {
 }
 
 // nullopt (after a failed check) when the bench fails: doctest's REQUIRE does not stop the case without exceptions.
-std::optional<ScaleReport> bench(Install &r_install, const char *p_level, uint32_t p_observers, double p_seconds, double p_paced) {
+std::optional<ScaleReport> bench(Install &r_install, const char *p_level, uint32_t p_observers, double p_seconds, double p_paced,
+		core::Cache *p_cache = nullptr, bool p_gated = true, unsigned p_load_threads = 0) {
 	ScaleBenchOptions o;
 	o.level = p_level;
 	o.mode = "ConquestLarge0";
@@ -625,6 +633,9 @@ std::optional<ScaleReport> bench(Install &r_install, const char *p_level, uint32
 	o.observers = p_observers;
 	o.seconds = p_seconds;
 	o.paced_seconds = p_paced;
+	o.cache = p_cache;
+	o.gated = p_gated;
+	o.load_threads = p_load_threads;
 	o.tuning_text = read_text(OPENBF3_MOTOR_TUNING_CFG);
 	core::Result<ScaleReport> r = run_scale_bench(r_install.install, o);
 	CHECK_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
@@ -634,6 +645,70 @@ std::optional<ScaleReport> bench(Install &r_install, const char *p_level, uint32
 	std::printf("---- host.scale %s ConquestLarge0, %u observer(s) ----\n%s", p_level, p_observers, format_scale_report(*r).c_str());
 	std::fflush(stdout);
 	return *r;
+}
+
+// A scratch cache root (removed with the object) warmed by one untimed load of p_level ConquestLarge0 as the bench
+// loads it: the database, the static world and the bot level (nav) through the cache.
+struct WarmCache {
+	std::filesystem::path root;
+	core::Cache cache;
+	bool ok = false;
+	~WarmCache() {
+		cache.close();
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+	}
+};
+
+void warm_cache(Install &r_install, const char *p_level, WarmCache &r_warm) {
+	std::error_code ec;
+	r_warm.root = std::filesystem::temp_directory_path(ec) / ("openbf3_host_scale_" + std::to_string(GetCurrentProcessId()));
+	std::filesystem::remove_all(r_warm.root, ec);
+	core::CacheOptions co;
+	co.root = r_warm.root;
+	co.guard = r_install.reader->write_guard();
+	std::string detail;
+	const core::CacheStatus st = r_warm.cache.open(std::move(co), &detail);
+	CHECK_MESSAGE(st == core::CacheStatus::Ok, detail);
+	if (st != core::CacheStatus::Ok) {
+		return;
+	}
+	// The bench's own load options (seed 1, 64 synthetic spawns, the default nav params), so its keys hit. On a failure
+	// the row runs uncached (CHECK, not REQUIRE: doctest's REQUIRE does not stop the case without exceptions).
+	const auto start = std::chrono::steady_clock::now();
+	core::Result<LevelDatabase> db = open_level_database(r_install.install, p_level, "ConquestLarge0", 0, nullptr);
+	CHECK_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
+	if (!db) {
+		return;
+	}
+	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(r_install.install, p_level, sim::NavParams().region_margin);
+	CHECK_MESSAGE(combat.ok(), (combat.ok() ? std::string() : combat.error().message));
+	core::Result<sim::MotorTuning> tuning = sim::parse_motor_tuning(read_text(OPENBF3_MOTOR_TUNING_CFG));
+	CHECK(tuning.ok());
+	if (!combat || !tuning) {
+		return;
+	}
+	SharedLoadOptions so;
+	so.cache = &r_warm.cache;
+	so.tuning = *tuning;
+	core::Result<std::shared_ptr<const SharedLevel>> shared = load_shared_level(*db, so, nullptr);
+	CHECK_MESSAGE(shared.ok(), (shared.ok() ? std::string() : shared.error().message));
+	if (!shared) {
+		return;
+	}
+	BotLoadOptions bo;
+	bo.cache = &r_warm.cache;
+	bo.combat = &*combat;
+	bo.seed = 1;
+	bo.synthetic_spawns = 64;
+	core::Result<std::shared_ptr<const BotLevel>> bots = load_bot_level(*db, **shared, bo, nullptr);
+	CHECK_MESSAGE(bots.ok(), (bots.ok() ? std::string() : bots.error().message));
+	if (!bots) {
+		return;
+	}
+	std::printf("observers row: scratch cache warmed by an untimed %s load in %.1f s\n", p_level,
+			std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+	r_warm.ok = true;
 }
 
 void gate(const ScaleReport &p_r) {
@@ -660,7 +735,7 @@ TEST_SUITE("host-scale") {
 		if (m == nullptr) {
 			return;
 		}
-		if (const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 1, 120.0, 30.0)) {
+		if (const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 1, 120.0, 0.0)) {
 			gate(*r);
 		}
 	}
@@ -670,7 +745,7 @@ TEST_SUITE("host-scale") {
 		if (m == nullptr) {
 			return;
 		}
-		if (const std::optional<ScaleReport> r = bench(*m, "MP_007", 1, 120.0, 30.0)) {
+		if (const std::optional<ScaleReport> r = bench(*m, "MP_007", 1, 120.0, 0.0)) {
 			gate(*r);
 		}
 	}
@@ -680,11 +755,47 @@ TEST_SUITE("host-scale") {
 		if (m == nullptr) {
 			return;
 		}
-		const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 16, 30.0, 0.0);
+		// The row measures encode time in its window, not the load: the load restores the tiles of a scratch cache that
+		// an untimed load filled after both G1 windows (which stay cold and uncached).
+		WarmCache warm;
+		warm_cache(*m, "MP_Subway", warm);
+		const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 16, 30.0, 0.0, warm.ok ? &warm.cache : nullptr);
 		CHECK((r && r->ticks == 1800));
 	}
 
 	TEST_CASE("host.scale: install unchanged (layout.toc, cas.cat, the .sb / .toc files)") {
+		Install *m = install();
+		if (m == nullptr) {
+			return;
+		}
+		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(), m->before.files.size());
+	}
+}
+
+TEST_SUITE("host-scale-paced") {
+	// Report only (as before, when they followed the G1 windows): 10 s warm-up, a 1 s back-to-back window, then the paced
+	// 30 s window. In the real-time lane its neighbours use under a core, which can only raise the paced p99.
+	TEST_CASE("host.scale.paced: the paced 60 Hz row on MP_Subway ConquestLarge0 (report only)") {
+		Install *m = install();
+		if (m == nullptr) {
+			return;
+		}
+		const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 1, 1.0, 30.0, nullptr, false, 2);
+		CHECK((r && r->paced_ticks == 1800));
+	}
+
+	TEST_CASE("host.scale.paced: the paced 60 Hz row on MP_007 ConquestLarge0 (report only)") {
+		Install *m = install();
+		if (m == nullptr) {
+			return;
+		}
+		const std::optional<ScaleReport> r = bench(*m, "MP_007", 1, 1.0, 30.0, nullptr, false, 2);
+		CHECK((r && r->paced_ticks == 1800));
+	}
+
+	TEST_CASE("host.scale.paced: install unchanged") {
 		Install *m = install();
 		if (m == nullptr) {
 			return;

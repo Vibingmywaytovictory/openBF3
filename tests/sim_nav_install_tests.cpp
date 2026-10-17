@@ -3,9 +3,9 @@
 //                 all-rows gate reported), §5.1's proofs 1-3 on both CQLs (the nav input is the motor's collision
 //                 set), Metro's §5.7 component report (movement / all layers, and the cs 0.25 variants the as-built
 //                 choice was made from), cold then warm on a scratch cache root, install unchanged.
-//   sim-nav-bake  G4: run_nav_bake_bench on MP_007 (<= 6 s) and MP_018 (<= 13 s) at 16 threads (the gate), Caspian at
-//                 1 and 4 threads (reported). Timings are noisy on a shared machine; OPENBF3_TIMING_REPORT_ONLY
-//                 prints without gating.
+//   sim-nav-bake  G4: run_nav_bake_benches on MP_007 (<= 6 s) and MP_018 (<= 13 s) at 16 threads (the gate), Caspian at
+//                 1 and 4 threads (reported) from the same setup, and the 1-, 4- and 16-thread navs identical.
+//                 Timings are noisy on a shared machine; OPENBF3_TIMING_REPORT_ONLY prints without gating.
 // Derived data goes to a scratch directory under the system temp directory (removed at the end), never the install.
 #include <doctest/doctest.h>
 
@@ -668,38 +668,60 @@ TEST_SUITE("sim-nav-bake") {
 		if (m == nullptr) {
 			return;
 		}
-		struct Run {
+		// Caspian's untimed setup (load, traverse, combat areas, soup, link world) is built once on 16 threads and baked at
+		// 16 (the gate), 4 and 1 threads (reported); Kharg at 16 (the gate). Each bake's timed span is the single bench's.
+		struct Level {
 			const char *level;
-			unsigned threads;
-			double gate; // 0 = reported only
+			std::vector<unsigned> threads;
+			double gate; // on 16 threads
 		};
-		const Run runs[] = {
-			{ "MP_007", 16, host::kNavBakeGateCaspianSeconds },
-			{ "MP_018", 16, host::kNavBakeGateKhargSeconds },
-			{ "MP_007", 4, 0.0 },
-			{ "MP_007", 1, 0.0 },
+		const Level levels[] = {
+			{ "MP_007", { 16, 4, 1 }, host::kNavBakeGateCaspianSeconds },
+			{ "MP_018", { 16 }, host::kNavBakeGateKhargSeconds },
 		};
-		for (const Run &r : runs) {
+		for (const Level &l : levels) {
 			host::NavBakeBenchOptions o;
-			o.level = r.level;
+			o.level = l.level;
 			o.mode = "ConquestLarge0";
-			o.threads = r.threads;
+			o.threads = 16;
 			o.tuning_text = read_text(OPENBF3_MOTOR_TUNING_CFG);
-			core::Result<host::NavBakeBench> b = host::run_nav_bake_bench(m->install, o);
-			CHECK_MESSAGE(b.ok(), r.level, ": ", (b.ok() ? std::string() : b.error().message));
-			if (!b) {
+			core::Result<std::vector<host::NavBakeBench>> benches = host::run_nav_bake_benches(m->install, o, l.threads);
+			CHECK_MESSAGE(benches.ok(), l.level, ": ", (benches.ok() ? std::string() : benches.error().message));
+			if (!benches) {
 				continue;
 			}
-			std::printf("---- sim.nav.bake %s ConquestLarge0, %u threads ----\n%s", r.level, r.threads, host::format_nav_bake_bench(*b).c_str());
-			if (r.gate > 0.0) {
-				std::printf("G4 %s: %.3f s  [gate <= %.1f s on 16 threads: %s]\n", r.level, b->gate_seconds, r.gate, b->gate_seconds <= r.gate ? "PASS" : "FAIL");
+			for (const host::NavBakeBench &b : *benches) {
+				std::printf("---- sim.nav.bake %s ConquestLarge0, %u threads ----\n%s", l.level, b.options.threads, host::format_nav_bake_bench(b).c_str());
+				if (b.options.threads == 16) {
+					std::printf("G4 %s: %.3f s  [gate <= %.1f s on 16 threads: %s]\n", l.level, b.gate_seconds, l.gate, b.gate_seconds <= l.gate ? "PASS" : "FAIL");
 #if !defined(OPENBF3_TIMING_REPORT_ONLY)
-				CHECK_MESSAGE(b->gate_seconds <= r.gate, "G4 ", r.level, ": ", b->gate_seconds, " s > ", r.gate, " s");
+					CHECK_MESSAGE(b.gate_seconds <= l.gate, "G4 ", l.level, ": ", b.gate_seconds, " s > ", l.gate, " s");
 #endif
+				}
+				std::fflush(stdout);
+				CHECK(b.nav != nullptr);
+				CHECK(b.nav->stats().polys > 0);
 			}
-			std::fflush(stdout);
-			CHECK(b->nav != nullptr);
-			CHECK(b->nav->stats().polys > 0);
+			// The bake is deterministic across thread counts: the navs of one setup are identical, tile by tile.
+			const host::NavBakeBench &a = benches->front();
+			for (const host::NavBakeBench &b : *benches) {
+				if (a.nav == nullptr || b.nav == nullptr) {
+					continue;
+				}
+				const sim::NavStats &sa = a.nav->stats(), &sb = b.nav->stats();
+				CHECK_MESSAGE(sa.polys == sb.polys, l.level, " ", b.options.threads, " threads: ", sb.polys, " polys, ", sa.polys, " on 16");
+				CHECK_MESSAGE(sa.drop_links == sb.drop_links, l.level, " ", b.options.threads, " threads: ", sb.drop_links, " drop links, ", sa.drop_links, " on 16");
+				REQUIRE(a.nav->tile_count() == b.nav->tile_count());
+				size_t differ = 0;
+				for (size_t i = 0; i < a.nav->tile_count(); ++i) {
+					differ += (a.nav->tile(i).input == b.nav->tile(i).input && a.nav->tile(i).data_bytes == b.nav->tile(i).data_bytes) ? 0 : 1;
+				}
+				CHECK_MESSAGE(differ == 0, l.level, " ", b.options.threads, " threads: ", differ, " tiles differ from the 16-thread bake");
+				if (&b != &a) {
+					std::printf("sim.nav.bake %s: the %u-thread nav equals the 16-thread one (%zu polys, %zu drop links, %zu tiles; %zu differ)\n", l.level,
+							b.options.threads, sb.polys, sb.drop_links, b.nav->tile_count(), differ);
+				}
+			}
 		}
 		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());

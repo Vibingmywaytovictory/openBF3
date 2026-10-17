@@ -582,8 +582,12 @@ std::string format_scale_report(const ScaleReport &p_report) {
 	line(fmt("spawn filter: level points %u, in main %u, excluded %u, teams merged %s, synthetic %u; starts outside main in the window %llu",
 			r.spawn_points_level, r.spawn_points_in_main, r.spawn_points_excluded, r.spawn_teams_merged ? "yes" : "no", r.spawn_points_synthetic,
 			(unsigned long long)r.walkers.starts_outside_main));
-	line(fmt("G1 tick_ms %s  [gate p99 <= %.1f ms: %s]", percentile_text(r.tick_ms).c_str(), kScaleGateP99Ms,
-			r.tick_ms.p99 <= kScaleGateP99Ms ? "PASS" : "FAIL"));
+	if (r.options.gated) {
+		line(fmt("G1 tick_ms %s  [gate p99 <= %.1f ms: %s]", percentile_text(r.tick_ms).c_str(), kScaleGateP99Ms,
+				r.tick_ms.p99 <= kScaleGateP99Ms ? "PASS" : "FAIL"));
+	} else {
+		line(fmt("window tick_ms %s  (not gated)", percentile_text(r.tick_ms).c_str()));
+	}
 	line("   commands_ms " + percentile_text(r.commands_ms));
 	line("   sources_ms  " + percentile_text(r.sources_ms) + fmt("  (plan bot budget p99 <= %.1f ms: %s)", kBotBudgetP99Ms, r.bot_budget_ok ? "ok" : "over"));
 	line("   step_ms     " + percentile_text(r.step_ms));
@@ -598,8 +602,9 @@ std::string format_scale_report(const ScaleReport &p_report) {
 	line(fmt("noise: window wall %.2f s, thread cpu %.2f s, cpu_share %.3f%s", r.window_wall_seconds, r.window_cpu_seconds, r.cpu_share,
 			r.cpu_share < kNoisyCpuShare ? " (NOISY: the bench thread was preempted)" : ""));
 	line(fmt("paced 60 Hz row (%llu ticks, not gated): tick_ms %s", (unsigned long long)r.paced_ticks, percentile_text(r.paced_tick_ms).c_str()));
-	line(fmt("validity: %u / %zu bots walked >= %.0f m, abandoned %llu / %llu goals (%.1f%%): %s", r.bots_walked, r.bot_metres.size(), kValidityMetres,
-			(unsigned long long)r.walkers.goals_abandoned, (unsigned long long)r.walkers.goals_started, 100.0 * r.abandoned_share, r.valid ? "VALID" : "INVALID"));
+	line(fmt("validity: %u / %zu bots walked >= %.0f m, abandoned %llu / %llu goals (%.1f%%): %s%s", r.bots_walked, r.bot_metres.size(), kValidityMetres,
+			(unsigned long long)r.walkers.goals_abandoned, (unsigned long long)r.walkers.goals_started, 100.0 * r.abandoned_share, r.valid ? "VALID" : "INVALID",
+			r.options.gated ? "" : " (not gated)"));
 	if (!r.bot_metres.empty()) {
 		std::vector<double> m = r.bot_metres;
 		std::sort(m.begin(), m.end());
@@ -636,13 +641,24 @@ std::string format_scale_report(const ScaleReport &p_report) {
 
 // ---- G4: the uncached bake ------------------------------------------------------------------------------------------
 
-core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options) {
-	if (p_install == nullptr) {
-		return core::make_error("nav bake bench: no install");
-	}
-	NavBakeBench out;
-	out.options = p_options;
-	const unsigned threads = p_options.threads == 0 ? 0 : std::clamp(p_options.threads, 1u, 64u);
+namespace {
+
+// The untimed part of the G4 bench: the bake's input (soup, region, water) and the link checks' world, with the
+// bench's counters filled in r_out.
+struct NavBakeSetup {
+	core::level::CollisionSoup soup;
+	core::level::LevelCombatTiles combat;
+	std::shared_ptr<const sim::StaticWorldShapes> shapes;
+};
+
+unsigned bench_threads(unsigned p_threads) {
+	return p_threads == 0 ? 0 : std::clamp(p_threads, 1u, 64u);
+}
+
+core::Result<NavBakeSetup> nav_bake_setup(const std::shared_ptr<const core::Install> &p_install, const NavBakeBenchOptions &p_options, NavBakeBench &r_out) {
+	NavBakeBench &out = r_out;
+	NavBakeSetup setup;
+	const unsigned threads = bench_threads(p_options.threads);
 	Clock::time_point clock = Clock::now();
 	core::level::LoadOptions load;
 	load.threads = threads;
@@ -722,7 +738,6 @@ core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Instal
 			(with ? out.tiles_with_objects : out.tiles_terrain_only) += 1;
 		}
 	}
-	std::shared_ptr<const sim::StaticWorldShapes> shapes;
 	if (p_options.link_checks) {
 		clock = Clock::now();
 		sim::StaticWorldBuildOptions bo;
@@ -732,19 +747,26 @@ core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Instal
 		if (!built) {
 			return core::error_at("nav bake bench: static world", built.error());
 		}
-		shapes = std::move(*built);
+		setup.shapes = std::move(*built);
 		out.seconds_cook = seconds_since(clock);
 	}
 	world->reset(); // the World and the level are not needed by the bake
 	level->reset();
+	setup.soup = std::move(*soup);
+	setup.combat = std::move(*combat);
+	return setup;
+}
 
+// The timed part: bake_nav_world over the region on p_threads lanes, then the result's counters.
+core::Status nav_bake_run(const NavBakeSetup &p_setup, const NavBakeBenchOptions &p_options, unsigned p_threads, NavBakeBench &r_out) {
+	NavBakeBench &out = r_out;
 	sim::NavBakeOptions bake;
 	bake.params = out.params;
-	bake.threads = threads;
+	bake.threads = bench_threads(p_threads);
 	bake.layer_mask = p_options.layer_mask;
-	bake.link_shapes = shapes;
-	bake.water = combat->water; // TC: the water rule is the bake's
-	core::Result<std::shared_ptr<const sim::NavWorld>> nav = sim::bake_nav_world(*soup, combat->tiles, bake);
+	bake.link_shapes = p_setup.shapes;
+	bake.water = p_setup.combat.water; // TC: the water rule is the bake's
+	core::Result<std::shared_ptr<const sim::NavWorld>> nav = sim::bake_nav_world(p_setup.soup, p_setup.combat.tiles, bake);
 	if (!nav) {
 		return core::error_at("nav bake bench: bake", nav.error());
 	}
@@ -764,6 +786,50 @@ core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Instal
 	}
 	out.tile_bytes_mean = n > 0 ? double(sum) / double(n) : 0.0;
 	out.peak_working_set = peak_working_set();
+	return core::Status::success();
+}
+
+} // namespace
+
+core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options) {
+	if (p_install == nullptr) {
+		return core::make_error("nav bake bench: no install");
+	}
+	NavBakeBench out;
+	out.options = p_options;
+	core::Result<NavBakeSetup> setup = nav_bake_setup(p_install, p_options, out);
+	if (!setup) {
+		return setup.error();
+	}
+	core::Status baked = nav_bake_run(*setup, p_options, p_options.threads, out);
+	if (!baked) {
+		return baked.error();
+	}
+	return out;
+}
+
+core::Result<std::vector<NavBakeBench>> run_nav_bake_benches(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options,
+		std::span<const unsigned> p_threads) {
+	if (p_install == nullptr) {
+		return core::make_error("nav bake bench: no install");
+	}
+	NavBakeBench first;
+	first.options = p_options;
+	core::Result<NavBakeSetup> setup = nav_bake_setup(p_install, p_options, first);
+	if (!setup) {
+		return setup.error();
+	}
+	std::vector<NavBakeBench> out;
+	for (const unsigned t : p_threads) {
+		NavBakeBench b = first; // the setup's counters and seconds
+		b.options.threads = t;
+		b.nav = nullptr;
+		core::Status baked = nav_bake_run(*setup, p_options, t, b);
+		if (!baked) {
+			return baked.error();
+		}
+		out.push_back(std::move(b));
+	}
 	return out;
 }
 

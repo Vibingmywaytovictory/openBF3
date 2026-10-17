@@ -56,6 +56,8 @@ struct ScaleBenchOptions {
 	// ServerHost does) of paced_seconds sim time, reported beside the gate (not gated). 0 = none.
 	double paced_seconds = 30.0;
 	bool raise_priority = true; // THREAD_PRIORITY_ABOVE_NORMAL for the measured windows (this thread only)
+	// false: a report-only run (host.scale.paced): the back-to-back window and the validity are printed as not gated.
+	bool gated = true;
 	// The bot level's nav (docs §5.7 experiments): radius rounding and cell size (0 = NavParams default).
 	bool radius_round_up = true;
 	float cell_size = 0.0f;
@@ -183,6 +185,11 @@ struct NavBakeBench {
 	uint64_t peak_working_set = 0;
 };
 core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options);
+// The same bench baked once per entry of p_threads from one setup (built on p_options.threads lanes): the untimed
+// load, soup and link world are not rebuilt per thread count; each bench's timed span (the bake, link-world creation
+// included) is exactly run_nav_bake_bench's. Each result's options.threads is its bake's.
+core::Result<std::vector<NavBakeBench>> run_nav_bake_benches(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options,
+		std::span<const unsigned> p_threads);
 std::string format_nav_bake_bench(const NavBakeBench &p_bench);
 // G4 thresholds (docs §1): seconds on 16 threads.
 inline constexpr double kNavBakeGateCaspianSeconds = 6.0;

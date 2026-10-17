@@ -579,6 +579,8 @@ endif()
 # worlds (no data); host.scale runs run_scale_bench on Metro and Caspian ConquestLarge0 (G1 p99 <= 8 ms with 64
 # walkers over 120 s of sim time, the validity condition, G3's numbers, the observers = 16 row) and exits 77 without an
 # install. Both RUN_SERIAL (tick timing). Under asan the timing gates are report only (the test still runs them).
+# host.scale.paced runs the report-only paced 60 Hz windows (they followed the G1 windows in host.scale) in the merge
+# pass's real-time lane (label realtime): after a 2-thread load it ticks under a core.
 openbf3_test(test_host_scale test_main.cpp host_scale_tests.cpp test_support.h)
 target_link_libraries(test_host_scale PRIVATE bf3_host)
 target_compile_definitions(test_host_scale PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
@@ -587,10 +589,12 @@ if(OPENBF3_ASAN)
 endif()
 add_test(NAME host.scale.unit COMMAND test_host_scale --test-suite=host-scale-unit)
 add_test(NAME host.scale COMMAND test_host_scale --test-suite=host-scale)
+add_test(NAME host.scale.paced COMMAND test_host_scale --test-suite=host-scale-paced)
 set_tests_properties(host.scale.unit PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
 set_tests_properties(host.scale PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE)
+set_tests_properties(host.scale.paced PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 if(OPENBF3_ASAN)
-    set_tests_properties(host.scale.unit host.scale PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s1_cl_dir}")
+    set_tests_properties(host.scale.unit host.scale host.scale.paced PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s1_cl_dir}")
 endif()
 # S2 vehicle (docs/design/s2.md §11): s2.contract compiles every S2 header together and checks the plain types, the
 # restore groups, the ghost widths (equal to the soldier ghost's position quantisers) and the shipped
@@ -879,7 +883,7 @@ function(openbf3_label p_label)
     endforeach()
 endfunction()
 # realtime: waits on real time at under 0.5 core and gates latency behaviour (the merge pass's lane, -j8).
-openbf3_label(realtime godot.m1 host.session host.session.unit host.server godot.s0_selftest)
+openbf3_label(realtime godot.m1 host.session host.session.unit host.server godot.s0_selftest host.scale.paced)
 # timing: gates wall or CPU time (the merge pass, serially; RUN_SERIAL stays on each).
 openbf3_label(timing host.scale sim.nav.bake sim.weapons.perf tools.fx_bench audio.decode.perf audio.bank logic.perf
     tools.tc_cost host.gunplay.perf)
@@ -924,7 +928,8 @@ openbf3_cost(tools.ebx_memory 2 2)
 openbf3_cost(godot.m1 1 346)
 openbf3_cost(host.session 1 191)
 openbf3_cost(host.session.unit 1 70)
-openbf3_cost(host.scale 1 88)
+openbf3_cost(host.scale 1 30)
+openbf3_cost(host.scale.paced 1 85)
 openbf3_cost(sim.nav.bake 1 49)
 openbf3_cost(godot.s3_crowd 1 270)
 openbf3_cost(godot.l1_look 1 196)
