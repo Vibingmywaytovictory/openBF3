@@ -271,6 +271,8 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_tables_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(core.gameplay.tables.unit core.gameplay.tables
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tables_cl_dir}")
+    # The hostile work-budget cases CHECK a 20 s wall clock; at -j16 under asan one read 25.1 s (2026-10-17).
+    set_tests_properties(core.gameplay.tables.unit PROPERTIES RUN_SERIAL TRUE)
 endif()
 # Collision soup (bf3_core level/collision_soup.h): collision_unit on synthetic shapes and terrain trees; core.level.collision
 # reads MP_Subway and XP3_Alborz from the install (read-only) against the level-oracle numbers and exits
@@ -594,6 +596,9 @@ set_tests_properties(sim.nav.unit PROPERTIES TIMEOUT 600)
 set_tests_properties(sim.nav PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
 set_tests_properties(sim.nav.bake PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
 if(OPENBF3_ASAN)
+    # G4 is report only under asan, like host.scale's G1 (the first asan run of sim.nav.bake, 2026-10-17: Caspian
+    # 19.5 s and Kharg 30.0 s on 16 threads against the 6 / 13 s dev gates).
+    target_compile_definitions(test_sim_nav PRIVATE OPENBF3_TIMING_REPORT_ONLY=1)
     set_tests_properties(sim.nav.unit sim.nav sim.nav.bake PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_s1_cl_dir}")
 endif()
 # S1 bots (docs/design/s1.md §1 G1 / G3, §6-§8, §10): host.scale.unit runs walker bots on the GameServer over synthetic
@@ -921,6 +926,20 @@ openbf3_label(timing host.scale sim.nav.bake sim.weapons.perf tools.fx_bench aud
 openbf3_label(serial_wallclock host.scale.unit)
 # merge_also: the memory gates run in the branch pass and again alone in the merge pass's timing phase, which decides.
 openbf3_label(merge_also tools.ebx_memory tools.m1_prepare)
+# asan_sweep (asan only): asan wall above 600 s after the in-test lanes; the asan-sweep preset, the full tier
+# (docs/testing.md "Asan"). bigmem: peak above 8 GB.
+# Measured in the first -j16 asan selection (2026-10-17): sim.vehicle 634 s; sim.nav and host.scale over their
+# 1,200 s timeouts.
+if(OPENBF3_ASAN)
+    openbf3_label(asan_sweep sim.terrain sim.vehicle sim.nav host.scale host.scale.paced)
+    openbf3_label(bigmem sim.terrain)
+    openbf3_label(serial_wallclock core.gameplay.tables.unit)
+    set_tests_properties(sim.nav host.scale PROPERTIES TIMEOUT 3600)
+    set_tests_properties(host.scale.paced PROPERTIES TIMEOUT 1800)
+    # Their real-time gates still bite under asan (asan-realtime at -j4 failed the clock-target, extrapolation and
+    # E2 rest checks): they run alone inside the asan-realtime phase.
+    set_tests_properties(host.session.unit host.session.gate PROPERTIES RUN_SERIAL TRUE)
+endif()
 
 # PROCESSORS = measured cpu / wall (rounded, >= 2); COST = measured serial seconds (rows over 5 s), so a fresh build
 # directory without CTestCostData.txt still starts the critical path first. Measured on 925cd51 + S01 (dev, serial, 611 s pass);

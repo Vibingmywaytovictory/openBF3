@@ -1,8 +1,12 @@
 @echo off
 rem Configure, build and test one preset from a plain cmd/PowerShell prompt (docs/testing.md).
-rem Usage: tools\build.cmd [dev|debug|release|asan] [--no-test | --timing | --phase P | --all-tests] [-j N] [--strict]
+rem Usage: tools\build.cmd [dev|debug|release|asan] [--no-test | --timing | --phase P | --all-tests | --asan-full] [-j N]
+rem        [--strict]
 rem   (default)    the branch pass: ctest --preset <preset> (16 jobs), which excludes the timing, realtime and window
-rem                rows (docs/testing.md "Scheduling labels")
+rem                rows (docs/testing.md "Scheduling labels"); for asan the default asan selection (16 jobs, no
+rem                asan_sweep rows), then the asan-realtime phase (4 jobs), never mixed
+rem   --asan-full  asan only: the two asan phases, then the full tier's sweeps (asan-sweep, 8 jobs; docs/testing.md
+rem                "Asan")
 rem   --timing     the merge pass's phases, always all three, in order: <preset>-realtime (8 jobs), <preset>-timing
 rem                (serial), <preset>-window (serial; the windowed rows skip unless OPENBF3_GODOT_WINDOWED=1)
 rem   --phase P    only that merge-pass phase (realtime, timing or window); repeat it for several, run in that order
@@ -23,6 +27,7 @@ set MODE=branch
 set JOBS=
 set STRICT=0
 set PHASES=
+set ASAN_FULL=0
 :args
 if "%~1"=="" goto args_done
 if /i "%~1"=="--no-test" (
@@ -35,6 +40,8 @@ if /i "%~1"=="--no-test" (
     shift
 ) else if /i "%~1"=="--all-tests" (
     set MODE=all
+) else if /i "%~1"=="--asan-full" (
+    set ASAN_FULL=1
 ) else if /i "%~1"=="--strict" (
     set STRICT=1
 ) else if /i "%~1"=="-j" (
@@ -75,6 +82,8 @@ if "%MODE%"=="none" exit /b 0
 set RC=0
 if "%MODE%"=="timing" goto timing
 call :phase %PRESET% branch belownormal "%TEST_JOBS%"
+if "%ASAN%"=="1" call :phase asan-realtime realtime belownormal ""
+if "%ASAN%"=="1" if "%ASAN_FULL%"=="1" call :phase asan-sweep sweep belownormal ""
 if "%MODE%"=="branch" exit /b %RC%
 :timing
 echo build.cmd: merge-pass phases %PHASES% (normal priority)

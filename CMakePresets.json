@@ -81,6 +81,29 @@
       "execution": { "jobs": 1 },
       "filter": { "include": { "label": "^window$" } }
     },
-    { "name": "asan", "inherits": "test-base", "configurePreset": "asan" }
+    {
+      "name": "asan",
+      "inherits": "test-base",
+      "configurePreset": "asan",
+      "displayName": "asan: the default asan selection (no asan_sweep, realtime or window rows), 16 jobs",
+      "execution": { "jobs": 16 },
+      "filter": { "exclude": { "label": "^(asan_sweep|realtime|window)$" } }
+    },
+    {
+      "name": "asan-realtime",
+      "inherits": "test-base",
+      "configurePreset": "asan",
+      "displayName": "asan-realtime: the real-time rows under asan (label realtime), 4 jobs, after the asan phase",
+      "execution": { "jobs": 4 },
+      "filter": { "include": { "label": "^realtime$" }, "exclude": { "label": "^asan_sweep$" } }
+    },
+    {
+      "name": "asan-sweep",
+      "inherits": "test-base",
+      "configurePreset": "asan",
+      "displayName": "asan-sweep: the full tier's sweeps (label asan_sweep, asan wall above 600 s), 8 jobs",
+      "execution": { "jobs": 8 },
+      "filter": { "include": { "label": "^asan_sweep$" } }
+    }
   ]
 }
