@@ -945,6 +945,7 @@ GameServerStats GameServer::stats() const {
 		g.clients += (s.used && s.remote) ? 1u : 0u;
 		g.soldiers += o.alive ? 1u : 0u;
 	}
+	m.sv_stats(g); // M2a sv [stats]
 	return g;
 }
 
