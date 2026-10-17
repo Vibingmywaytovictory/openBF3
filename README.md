@@ -2045,3 +2045,48 @@ Gates, measured 2026-10-16 on the dev preset (E13 is wall clock and **noisy** on
 | E12 (a) | `ctest -R sim.lagcomp.unit` | server lists and samples bit-equal to the client's; cache on == off; window/track differences all classified | 8,900 rows, 0 differences; 17,636 provider rows equal; 1,438 Q22 rows, 0 unexplained |
 | E13 | `bf3dump lagcomp MP_Subway TeamDeathMatch0 --perf` | provider p99 ≤ 0.5 ms per tick | pairs 0.338 ms, long 0.354 ms |
 | R4 | `bf3dump weapon-sim --check` | 38/38, sim.weapons* bit-equal | 38/38; `--check` and `--all` output byte-equal to the build without R4 |
+
+## M2a sv: server gunplay
+
+<!-- # M2a sv -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §4, §5, §6 (server side), §10.1, §13, §14.1; as built, the
+decisions and the measured gates: [docs/design/m2a-sv.md](docs/design/m2a-sv.md). The `GameServer` runs weapons,
+projectiles, damage, deaths and kits when the level carries gunplay tables (`SharedLoadOptions::gunplay`, off by
+default; `bf3_host` `Gunplay`, `bf3/host/gunplay.h`): every live soldier's weapons step after its motor step
+(`step_weapons_m2a`), all projectiles fly once per tick through lc's `RewindProvider` (clients' shots against the
+targets as that client drew them, server-side shooters at the present), damage is applied in (time, shooter, shot,
+pellet) order, and deaths go out as `CombatEvents` through a `CombatEventSink` with the respawn decided by a
+`RespawnPolicy` (M2b's seams). Snapshots carry the own weapons and the others' weapon fields, the overflow goes in a
+`SnapshotOthers` of the same seq, the other shooters' shots in `ShotEvents`. `MatchInfo` carries the match seed,
+`weapon_hash` (table ^ capsule table), `weapon_flags` (exact aim, infinite magazine; dev only) and `kit_hash`. Dev
+requests `SpawnTarget` / `TargetInfo` place stationary target bots and return their server capsules.
+
+Commands (read-only on the install; the cases print BF3-derived numbers, keep the logs out of the repo; the last case
+prints `install.unchanged`). Every case runs the real `ServerHost` and `ClientSession` on Metro headless, except the
+hostile case and E6's offset sample, which drive the `GameServer` without sockets:
+
+```bat
+ctest --preset dev -R host.gunplay.server                                                          :: all cases (RUN_SERIAL, ~5 min)
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=timing      :: E1
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=drop        :: E2
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=stk         :: E3, E4
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=reload      :: E5
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=variants    :: E6
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=hostile     :: E17 (also under the asan preset)
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=install     :: E17 install unchanged
+```
+
+Gates, measured 2026-10-17 on the dev preset (server halves; the client halves are cl's `host.gunplay.client`;
+wall-clock pacing, **noisy** on this shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| E1 | M16A3: 31 shots, first at the press tick's start, 30 gaps of 4,500,000, trace = server shots; other kit firearms: the table interval; semi one shot per tap | 31 / 30 / yes / 31 of 31 bit-equal; M4A1, M27 IAR, AK-74M, AKS-74u, RPK-74M at their intervals; MK11, SVD, M9, MP443 5 / 5 |
+| E2 | 0.1779 ± 0.01 m at 100 m, 1.5981 ± 0.01 m at 300 m, expiry 975.0 ± 0.01 m | 0.1780-0.1786, 1.5993-1.6039, 975.0000 (sky lane in bounds 2,197.5 m) |
+| E3 | M16A3 chest 4 / head 2 at 5 m, chest 6 / head 3 at 60 m; 25 / 50 / 22.75 per hit | 4 / 2, 6 / 3; 25.0000 / 50.0000 / 22.7500 |
+| E4 | M16A3 head 50.000, MK11 head 117.500 (kill in 1), MK11 head at 60 m kills in 2 | 50.0000, 117.5000 (1), 2 |
+| E5 | M16A3 108,000,000 / commit +91,800,000 → 31, empty 142,200,000 → 30; M9 81,000,000 / 96,000,000 | all equal |
+| E6 | 4 distinct hashes; KS D ≤ 0.0364 over 2,000 offsets; recoil after 10 rounds within 1e-4° | 4; D 0.0158 each; diff ≤ 4.5e-9° |
+| E17 | hostile client changes no other soldier, clamps counted, tick unaffected; install unchanged | 0 / 900 ticks differ; all clamps counted; 0 precondition failures; `install.unchanged: clean (256 files)` |
+| G1 (regression) | `host.scale` tick p99 ≤ 8 ms under the quiet lock | 1.212 / 0.783 / 1.454 ms |
+| asan | m2a.contract, net.proto.unit / fuzz, sim.lagcomp.unit, sim.weapons.fuzz, host.gunplay.server under `--preset asan` | 6 / 6, no sanitizer report |
