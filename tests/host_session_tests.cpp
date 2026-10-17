@@ -1171,11 +1171,16 @@ TEST_SUITE("host-session-unit") {
 		live->input.pose = Pose::Crouch;
 		live->client.send_debug(tr2);
 		run_for(*live, 0.1);
+		// The 0.75 s window opens at the stall request, not at run_for's start: under a parallel ctest the main thread
+		// can be descheduled between the two, which moved the stall's end before the window (lane run, 2026-10-17).
+		// The client thread starts its 800 ms stall at or after the request, so the first fresh frame after 0.75 s
+		// is always one after the stall.
+		const auto stall_requested = std::chrono::steady_clock::now();
 		live->client.debug_stall(800);
 		bool first = true;
-		run_for(*live, 1.5, [&](bool p_fresh, uint64_t, double p_t) {
+		run_for(*live, 1.5, [&](bool p_fresh, uint64_t, double) {
 			const PresentationFrame &h = *live->frame;
-			if (p_fresh && p_t > 0.75 && h.server_own_valid && first && h.server_events != 0) {
+			if (p_fresh && seconds_since(stall_requested) > 0.75 && h.server_own_valid && first && h.server_events != 0) {
 				after_stall = h.server_events;
 				newest_after = h.server_own.tick;
 				first = false;
