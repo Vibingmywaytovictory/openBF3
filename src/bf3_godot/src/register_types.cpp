@@ -17,6 +17,10 @@
 // M2a vm
 #include "m2a_viewmodel_demo.h"
 #include "viewmodel.h"
+// M2a fx2
+#include "fx_demo.h"
+#include "fx_ref.h"
+#include "fx_renderer.h"
 
 #include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
@@ -55,6 +59,10 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	// M2a vm (docs/design/m2a-vm.md)
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Viewmodel);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);
+	// M2a fx2 (docs/design/m2a-fx2.md)
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRenderer);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRef);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

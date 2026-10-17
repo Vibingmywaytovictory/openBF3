@@ -2161,3 +2161,29 @@ The sim half of the zoom refusal prints `PENDING (sv)` until sv's rule lands in 
 follows the aiming controller's per-transition time (iron sights 0.12 s in, 0.15 s out); `fov_transition_specific =
 false` in `viewmodel_tuning.cfg` uses the generic 0.15 s, and the check measures both (m2a.md E19 was corrected).
 The present cost (mean 12.7 µs per frame) is wall clock on a shared machine and noisy.
+
+## M2a VFX2 renderer (fx2)
+
+<!-- # M2a fx2 -->
+VFX2 draws `bf3_fx`'s simulated particles in Godot. Design: [docs/design/m2a.md](docs/design/m2a.md) §12.1. As-built
+notes, measurements and capture descriptions: [docs/design/m2a-fx2.md](docs/design/m2a-fx2.md).
+
+* **`bf3::fx::RenderPrep`** (`render_prep.h`, Godot-free) turns `FxWorld`'s outputs into ≤ 24 instance streams:
+  shader class × blend × world / first-person pass, 80 B per instance. Batches are sorted back-to-front by emitter
+  (§16 Q10). It also builds the merged 64-light pool.
+* **`prepare_atlas_pixels`** (`atlas_pixels.h`) caches the level's emitter atlas as BC3 + BC5 with every mip
+  (`fx-atlas` cache entries).
+* **`Bf3FxRenderer`** steps the world on Godot's WorkerThreadPool and draws one MultiMesh per batch with
+  `res://shaders/fx_*.gdshader`. It also drives the omni lights.
+* **Demo:** `<godot> --path bf3-opensource res://scenes/fx_demo.tscn` runs synthetic starts on Metro: 1p muzzle,
+  concrete and brick impacts, a smoke pillar, the MP_012 oilfire and a light stress. With `-- --fx-check` it runs the
+  gates and writes captures to `b/shots/fx2/`.
+
+| gate | command | threshold | measured (2026-10-16, shared machine: noisy) |
+|---|---|---|---|
+| unit | `ctest --preset dev -R "^fx\.render\.unit$"` (also asan) | 9 cases | 9/9, 6,478 assertions |
+| demo (E8 (3), (4), (6), lights, 1p, FX time) | `ctest --preset dev -R "^godot\.fx_demo$"` with `OPENBF3_GODOT` | drawn == particles every frame; 52/52 atlas, 0 fallbacks; oilfire 80 ± 1 at 15 s; ≤ 64 lights; 1p batches | all met; FX main thread p50 0.108 / p99 0.225 ms |
+| GPU (E9 item 8, §16 Q17) | `ctest --preset dev -R "^godot\.fx_ref$"` with `OPENBF3_GODOT` | VFX2 16k ≤ 1.25 × MultiMesh 16k lit + soft | 0.769 / 0.758 ms = 1.015 |
+
+Both Godot rows are timing rows: run them under the quiet lock. A CPU-bound frame roughly doubles the measured GPU time
+on this machine (m2a-fx2.md §7).

@@ -32,3 +32,9 @@ target_sources(bf3_fx PRIVATE
     include/bf3/fx/render_prep.h
     include/bf3/fx/atlas_pixels.h
 )
+
+# M2a fx2 (docs/design/m2a-fx2.md): VFX2's render preparation and the prepared atlas pixels.
+target_sources(bf3_fx PRIVATE
+    src/render_prep.cpp
+    src/atlas_pixels.cpp
+)

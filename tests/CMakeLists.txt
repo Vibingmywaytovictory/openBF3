@@ -788,3 +788,25 @@ if(OPENBF3_BUILD_GODOT)
     add_test(NAME godot.m2a_viewmodel COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m2a_viewmodel.cmake)
     set_tests_properties(godot.m2a_viewmodel PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 480 RESOURCE_LOCK openbf3_godot_project)
 endif()
+
+# M2a fx2 (docs/design/m2a-fx2.md): fx.render.unit, VFX2's render preparation (batch keys and order, back-to-front sort,
+# the instance layout, alpha-level packing, default-texture fallbacks, the light merge and the 64-light pool) and the
+# prepared atlas pixels (NormalDXT5RGA -> BC5, the cache blob's round trip, truncations, mutations; also in the asan
+# preset). No install, no Godot.
+openbf3_test(test_fx_render test_main.cpp fx_render_tests.cpp fx_test_support.h test_support.h)
+target_link_libraries(test_fx_render PRIVATE bf3_fx)
+add_test(NAME fx.render.unit COMMAND test_fx_render --test-suite=fx-render-unit)
+set_tests_properties(fx.render.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.render.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx2_cl_dir}")
+endif()
+# godot.fx_demo: the windowed VFX2 demo check (E8 (3), (4), (6), lights <= 64, the 1p pass, FX main-thread time,
+# captures, install unchanged; 77 without OPENBF3_GODOT, a window or an install). godot.fx_ref: the Godot reference
+# workloads and VFX2's 16k row (cost <= 1.25 x the MultiMesh 16k lit+soft row, GPU, S3 G1b windows; no install). Both
+# are timing / windowed rows: run them under the quiet lock (shared machine: noisy).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.fx_demo COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_fx_demo.cmake)
+    add_test(NAME godot.fx_ref COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_fx_ref.cmake)
+    set_tests_properties(godot.fx_demo godot.fx_ref PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1500 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()
