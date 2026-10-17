@@ -804,10 +804,13 @@ delta compression and relevance; none of the M2a message meanings change.
 * On each snapshot the client compares `weapons_wire_view(predicted at server_tick)` with the decoded own block.
   A mismatch rebases the weapons from the wire view and replays (M1's rule). Expected 0 in loopback (E15).
 * **Health is not a motor mismatch.** M1's `states_match` compares health (client_session.cpp), so every server hit
-  on the own soldier would force a motor replay. cl splits the compare: when only health differs (and the life is
-  the same), the client writes the server's health into the ring entries from the snapshot tick on, with no replay,
-  and counts `health_rebases`; a death arrives as a motor state change and reconciles as in M1. E15 counts motor and
-  weapon reconciliations without the health rebases, and reports those separately.
+  on the own soldier would force a motor replay. cl splits the compare: when only what a hit writes differs (and the
+  life is the same), the client writes the server's health into the ring entries from the snapshot tick on, with no
+  replay, and counts `health_rebases`; a death arrives as a motor state change and reconciles as in M1. What a hit
+  writes is wp's `apply_damage`: the health, the tick's `damage` and the `kDamaged` event (rule fixed by cl against
+  sv's server: "only health" reconciled every hit, because `damage` and `kDamaged` differ in the hit's tick too; the
+  motor's own fall damage stays covered, it follows from `kLanded`, `impact_speed` and `protect_ticks`). E15 counts
+  motor and weapon reconciliations without the health rebases, and reports those separately.
 * **Only the first prediction of a tick emits.** Replays keep state but discard their `ShotEvent`s and timed events;
   the client tracks the highest emitted tick (wp §7.2). So effects and sounds never fire twice.
 * On the own death (server state) the client stops emitting; on Spawned it calls `spawn_soldier_weapons` with the
