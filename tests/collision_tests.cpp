@@ -11,6 +11,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/res/res_loader.h"
+#include "bf3/core/thread_pool.h"
 #include "test_support.h"
 
 #include <chrono>
@@ -348,35 +349,66 @@ TEST_SUITE("collision") {
 		}
 		Result<LevelCollision> c = load_level_collision(install, "MP_Subway", "TeamDeathMatch0");
 		REQUIRE(c.ok());
-		const SurfaceMaterials no_grid;
+		// The mutants are drawn serially from one rng (the same bytes in the same order as a serial run), decoded and
+		// souped on worker lanes, and checked here in mutant order.
+		struct Mutant {
+			size_t raw = 0;
+			std::vector<uint8_t> bytes;
+		};
+		struct Outcome {
+			bool decoded = false;
+			size_t triangles = 0; // triangles + degenerate + nonfinite
+		};
+		std::vector<res::RawRes> raws;
+		std::vector<Mutant> mutants;
 		std::mt19937 rng(20261015u);
-		size_t decoded = 0, failed = 0;
 		for (const SoupPlacement &p : c->soup.placements) {
 			if (p.kind != CollisionPlacement::Kind::Group) {
 				continue;
 			}
 			Result<res::RawRes> raw = res::read_raw_res(c->level->mount(), p.res);
 			REQUIRE(raw.ok());
+			raws.push_back(std::move(*raw));
 			for (int mutant = 0; mutant < 16; ++mutant) {
-				std::vector<uint8_t> bytes = raw->payload;
+				Mutant m;
+				m.raw = raws.size() - 1;
+				m.bytes = raws.back().payload;
 				const int flips = 1 + int(rng() % 16);
-				for (int f = 0; f < flips && !bytes.empty(); ++f) {
-					bytes[rng() % bytes.size()] ^= uint8_t(1u << (rng() % 8));
+				for (int f = 0; f < flips && !m.bytes.empty(); ++f) {
+					m.bytes[rng() % m.bytes.size()] ^= uint8_t(1u << (rng() % 8));
 				}
-				res::HavokPhysicsData data;
-				if (!res::HavokPhysicsData::parse(res::Bytes(bytes.data(), bytes.size()), raw->res_meta, data).ok()) {
-					++failed;
-					continue;
-				}
-				std::vector<res::Shape> shapes;
-				if (!data.shapes(shapes).ok()) {
-					++failed;
-					continue;
-				}
-				const SoupShapeResult r = soup_shape_triangles(data, shapes, res::Transform::identity(), {}, no_grid, "");
-				CHECK(r.triangles.size() + r.degenerate + r.nonfinite < size_t(1) << 26);
-				++decoded;
+				mutants.push_back(std::move(m));
 			}
+		}
+		constexpr unsigned kLanes = 4; // each lane holds a decoded copy of a 6.5 MB group
+		const std::vector<Outcome> outcomes = parallel_map<Outcome>(
+				mutants.size(),
+				[&](size_t i) {
+					Outcome o;
+					const Mutant &m = mutants[i];
+					const SurfaceMaterials no_grid;
+					res::HavokPhysicsData data;
+					if (!res::HavokPhysicsData::parse(res::Bytes(m.bytes.data(), m.bytes.size()), raws[m.raw].res_meta, data).ok()) {
+						return o;
+					}
+					std::vector<res::Shape> shapes;
+					if (!data.shapes(shapes).ok()) {
+						return o;
+					}
+					const SoupShapeResult r = soup_shape_triangles(data, shapes, res::Transform::identity(), {}, no_grid, "");
+					o.decoded = true;
+					o.triangles = r.triangles.size() + r.degenerate + r.nonfinite;
+					return o;
+				},
+				kLanes);
+		size_t decoded = 0, failed = 0;
+		for (size_t i = 0; i < outcomes.size(); ++i) {
+			if (!outcomes[i].decoded) {
+				++failed;
+				continue;
+			}
+			CHECK_MESSAGE(outcomes[i].triangles < size_t(1) << 26, "mutant ", i);
+			++decoded;
 		}
 		MESSAGE("mutants: " << decoded << " built, " << failed << " refused by the decoders");
 		CHECK(decoded + failed == 32);
