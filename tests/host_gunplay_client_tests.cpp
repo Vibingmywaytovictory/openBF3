@@ -1946,20 +1946,16 @@ TEST_SUITE("host-gunplay-client") {
 		CHECK(finishes[0] - starts[0] == 142'200'000); // empty: 2.37 s
 		CHECK(finishes[1] - starts[1] == 108'000'000); // tactical: 1.8 s
 		CHECK(commits[1] - starts[1] == 91'800'000);
-		// The ammo after the two reloads, from the server's weapon states: 30 after the empty one (unchambered), 31
-		// after the tactical one.
+		// The ammo when the two reloads finish, from the server's weapon states (the magazine changes at the commit):
+		// 30 after the empty one (unchambered), 31 after the tactical one.
 		int32_t after_empty = -1, after_tactical = -1;
 		for (const ServerMagazine &m : server.log().magazines()) {
 			if (m.slot != s.slot) {
 				continue;
 			}
-			const sw::SimTime end = sw::tick_end(m.tick);
-			if (after_empty < 0 && end >= finishes[0]) {
-				after_empty = m.magazine;
-			}
-			if (after_tactical < 0 && end >= finishes[1]) {
-				after_tactical = m.magazine;
-			}
+			const sw::SimTime begin = sw::tick_start(m.tick);
+			after_empty = begin <= finishes[0] ? m.magazine : after_empty;
+			after_tactical = begin <= finishes[1] ? m.magazine : after_tactical;
 		}
 		CHECK(after_empty == 30);
 		CHECK(after_tactical == 31);
