@@ -544,6 +544,9 @@ struct ClientSession::Impl {
 				if (!m || have_match) {
 					return;
 				}
+				if (!cl_match_info(*m, p_now)) {
+					return; // M2a cl: refused (weapon or kit table mismatch), disconnected before Ready
+				}
 				have_match = true;
 				slot = m->slot;
 				stats.slot = m->slot;
@@ -564,6 +567,7 @@ struct ClientSession::Impl {
 			case net::MessageType::Spawned: {
 				core::Result<net::Spawned> s = net::decode_spawned(p_d.bytes);
 				if (s && pending_spawned.size() < 16) {
+					cl_spawned(*s); // M2a cl: the life's kit and team
 					if (s->state.tick > anchor_tick) {
 						anchor_tick = s->state.tick;
 						anchor_ns = p_now;
@@ -578,6 +582,7 @@ struct ClientSession::Impl {
 					return;
 				}
 				++stats.snapshots_received;
+				cl_snapshot(*s, p_now); // M2a cl: ReceivedRecords, own weapons, late_sample, generation_reorder
 				server_events_acc = uint16_t(server_events_acc | s->own_events);
 				rtt_sample(*s, p_now);
 				if (have_snapshot && !net::seq_newer(s->seq, newest_seq)) {
@@ -630,6 +635,7 @@ struct ClientSession::Impl {
 				connected = false;
 				return;
 			default:
+				cl_datagram(*type, p_d, p_now); // M2a cl: SnapshotOthers, ShotEvents, CombatEvents
 				return;
 		}
 	}
