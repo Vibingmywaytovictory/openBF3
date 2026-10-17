@@ -900,6 +900,7 @@ struct ClientSession::Impl {
 	// ---- presentation (docs §9.4, §9.5) -------------------------------------------------------------------------
 
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd) {
+		cl_publish_begin(p_now); // M2a cl: track_timeout
 		PresentationFrame &f = *build;
 		f.serial = ++serial;
 		f.publish_ns = p_now;
@@ -967,6 +968,7 @@ struct ClientSession::Impl {
 			}
 		}
 		f.other_count = n;
+		cl_publish_end(f, p_now); // M2a cl: weapon views, newest seq, others_ahead, the remote world, stats
 		stats.connected = connected;
 		stats.client_tick = next_tick;
 		stats.target_buffer_ticks = target;
