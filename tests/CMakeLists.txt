@@ -770,3 +770,21 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_sv_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(host.gunplay.server PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_sv_cl_dir}")
 endif()
+
+# M2a vm (docs/design/m2a-vm.md; m2a.md §11.1, §11.2, E19, E5): anim.viewmodel.unit checks the 1p viewmodel
+# animator, its springs, viewmodel_tuning.cfg and the ADS camera against the real weapon sim on the synthetic gate
+# weapons, presented at 30 / 60 / 144 / 240 fps. No install, no Godot (godot.m2a_viewmodel is the install half).
+openbf3_test(test_anim_viewmodel test_main.cpp anim_viewmodel_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_anim_viewmodel PRIVATE bf3_anim bf3_sim)
+target_compile_definitions(test_anim_viewmodel PRIVATE "OPENBF3_VIEWMODEL_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/viewmodel_tuning.cfg\"")
+add_test(NAME anim.viewmodel.unit COMMAND test_anim_viewmodel --test-suite=anim-viewmodel-unit)
+set_tests_properties(anim.viewmodel.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_vm_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(anim.viewmodel.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_vm_cl_dir}")
+endif()
+# M2a vm: godot.m2a_viewmodel, the install half (res://scenes/m2a_viewmodel.tscn -- --vm-check; tests/godot_m2a_viewmodel.cmake).
+if(OPENBF3_BUILD_GODOT)
+    add_test(NAME godot.m2a_viewmodel COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m2a_viewmodel.cmake)
+    set_tests_properties(godot.m2a_viewmodel PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 480 RESOURCE_LOCK openbf3_godot_project)
+endif()

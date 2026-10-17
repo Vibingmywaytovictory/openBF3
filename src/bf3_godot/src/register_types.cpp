@@ -14,6 +14,9 @@
 // UI ui1
 #include "ui_assets.h"
 #include "ui_font_check.h"
+// M2a vm
+#include "m2a_viewmodel_demo.h"
+#include "viewmodel.h"
 
 #include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
@@ -49,6 +52,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapHud);
+	// M2a vm (docs/design/m2a-vm.md)
+	GDREGISTER_CLASS(bf3::godot_side::Bf3Viewmodel);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

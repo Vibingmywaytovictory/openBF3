@@ -45,3 +45,6 @@ target_link_libraries(bf3dump PRIVATE bf3_fx)
 # capsule pose table from the install, the E18 (a) deviation rows and the E13 rewind rows (bf3_host from the nav block).
 target_sources(bf3dump PRIVATE lagcomp_commands.cpp lagcomp_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_anim)
+# M2a vm (docs/design/m2a-vm.md): `vm clips`, the 1p viewmodel clip roles, E5 reload rows and E11 coverage (bf3_render
+# from the prepare block above).
+target_sources(bf3dump PRIVATE vm_commands.cpp vm_commands.h)

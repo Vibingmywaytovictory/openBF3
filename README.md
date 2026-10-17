@@ -2127,3 +2127,37 @@ wall-clock pacing, **noisy** on this shared machine):
 | E17 | hostile client changes no other soldier, clamps counted, tick unaffected; install unchanged | 0 / 900 ticks differ; all clamps counted; 0 precondition failures; `install.unchanged: clean (256 files)` |
 | G1 (regression) | `host.scale` tick p99 ≤ 8 ms under the quiet lock | 1.212 / 0.783 / 1.454 ms |
 | asan | m2a.contract, net.proto.unit / fuzz, sim.lagcomp.unit, sim.weapons.fuzz, host.gunplay.server under `--preset asan` | 6 / 6, no sanitizer report |
+## M2a vm: 1p viewmodel and ADS
+
+The own soldier's first-person viewmodel and ADS camera (design and measured gates:
+[docs/design/m2a-vm.md](docs/design/m2a-vm.md); plan m2a.md §11.1, §11.2, E19, E5, E11):
+
+* `bf3_anim` `viewmodel_anim.h`: the Godot-free animator (base, action and ADS layers, procedural stand-ins), the
+  sway, bob, kick and camera springs, `viewmodel_tuning.cfg` and its parser, `AdsCamera` (world FOV 55 -> 40
+  vertical, viewmodel FOV RenderFov -> ZoomRenderFov, look scale) and the zoom refusal rule `ads_allowed`.
+* `bf3_render` `viewmodel_set.h`: the US and RU sets of the 8 default loadouts, read from the data
+  (`read_viewmodel_kits`: the mode's kits and `KitDef::default_unlock`, as sv's kit table) with arms, every item's
+  1p mesh, role clips with counted stand-ins, ADS data from the aiming controller, the default customization's
+  iron-sight accessories, and each material slot's alpha test from the level shader database. The knife's dog tags
+  and chain are a counted stand-in: left out (`--vm-dogtags` draws them; design §2.7).
+* `bf3_godot` `Bf3Viewmodel` (`viewmodel.h`) and the `fp_camera` M2a vm block (FOV, interpolated predicted recoil,
+  presentation kick); the demo / check scene `res://scenes/m2a_viewmodel.tscn` plays every kit through the real
+  weapon sim on a scripted timeline (cl's `present_weapon` and sv's zoom rule are faked in `m2a_fake` until they
+  merge).
+
+Run the demo windowed with `Godot --path bf3-opensource res://scenes/m2a_viewmodel.tscn` (kits loop with a status
+label; `--kits=0,4` picks loadouts). Every gate has one command:
+
+| gate | command | threshold | measured (2026-10-16) |
+|---|---|---|---|
+| E19 unit | `ctest --preset dev -R anim.viewmodel.unit` | E19 on the synthetic weapons at 30 / 60 / 144 / 240 fps | 9/9 cases, met |
+| E19, E5, E11, looks (install) | `ctest --preset dev -R godot.m2a_viewmodel` (= `Godot --headless --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --vm-check`) | `M2A VIEWMODEL CHECK: PASS (20/20)`, install unchanged | 20/20: FOV 55 / 40, RenderFov 55, FOV time ±1 frame (worst 1.00) in both FOV-time modes and 0.15 s asserted in the generic mode, recoil worst 7.9e-6°, springs worst 0.736 s (≤ 1.0) and each spring within its own settle time, 0 ADS frames while deploying or sprinting, reload clip and refire ≤ 1 frame, 32/32 items of the loadouts read from the data covered (equal to m2a.md §5.6), alpha-tested slots cut out, knife dog tags hidden; met |
+| E5 clip lengths, E11 report | `bf3dump vm clips --team all` | authored length next to ReloadTime, coverage per item, loadouts from the data | printed (design §4); E11 PASS 32/32 |
+| skinned geometry | `bf3dump vm skin --team all` | no stretched skinned triangle through deploy, fire, reload | `VM SKIN: PASS` |
+| captures | `Godot --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --vm-shots=<openBF3>\b\shots\vm` | hip, ADS, reload mid-clip PNGs | 38 PNGs (design §5) |
+| hostile data | `ctest --preset asan -R anim.viewmodel.unit` (after `tools\build.cmd asan --no-test`) | no AddressSanitizer report | 9/9 cases, 6,155 assertions, no report (fuzz: 3,000 mutations, 792 parsed, 2,208 failed cleanly) |
+
+The sim half of the zoom refusal prints `PENDING (sv)` until sv's rule lands in `step_weapons_m2a`. The FOV time
+follows the aiming controller's per-transition time (iron sights 0.12 s in, 0.15 s out); `fov_transition_specific =
+false` in `viewmodel_tuning.cfg` uses the generic 0.15 s, and the check measures both (m2a.md E19 was corrected).
+The present cost (mean 12.7 µs per frame) is wall clock on a shared machine and noisy.

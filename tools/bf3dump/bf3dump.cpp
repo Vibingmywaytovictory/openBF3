@@ -66,6 +66,8 @@
 //   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
 // M2a VFX1:
 //   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
+// M2a vm:
+//   vm clips [<unlock>...] [--team us|ru|all]   1p viewmodel clip roles, E5 reload rows, E11 coverage (vm_commands.cpp)
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -105,6 +107,8 @@
 #include "fx_commands.h"
 // M2a lc: lagcomp (the capsule pose table, E18 (a) deviation, E13 rewind rows).
 #include "lagcomp_commands.h"
+// M2a vm: bf3dump vm clips (1p viewmodel clip roles, E5, E11).
+#include "vm_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -542,6 +546,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
 	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
 	std::fprintf(stderr, "%s", bf3dump::lagcomp_usage()); // M2a lc
+	std::fprintf(stderr, "%s", bf3dump::vm_usage()); // M2a vm
 }
 
 } // namespace
@@ -703,6 +708,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M2a lc: lagcomp <LEVEL> <MODE> (lagcomp_commands.cpp; docs/design/m2a-lc.md).
 	if (cmd == "lagcomp") {
 		return bf3dump::cmd_lagcomp(ebx_ctx, rest);
+	}
+	// M2a vm: vm clips (vm_commands.cpp; docs/design/m2a-vm.md).
+	if (cmd == "vm") {
+		return bf3dump::cmd_vm(ebx_ctx, rest);
 	}
 	usage();
 	return 2;

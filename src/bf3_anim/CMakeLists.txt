@@ -45,3 +45,8 @@ target_sources(bf3_anim PRIVATE
     src/server_pose.cpp
     include/bf3/anim/server_pose_reference.h
 )
+
+# M2a vm (docs/design/m2a-vm.md): the 1p viewmodel animator, springs, tuning file and ADS camera.
+target_sources(bf3_anim PRIVATE
+    src/viewmodel_anim.cpp
+)
