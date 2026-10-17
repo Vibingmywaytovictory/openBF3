@@ -43,6 +43,7 @@ inline constexpr float kSkyLaneStart = 10.0f;
 inline constexpr float kSkyLaneStep = 32.0f;
 inline constexpr float kSkyLaneClearRay = 1000.0f;
 inline constexpr float kSkyLaneSpare = 75.0f;
+inline constexpr float kSkyLaneEyeHeight = 1.6f; // sv: the stand eye above the teleport feet (Metro's SoldierDef)
 
 struct SkyLane {
 	sim::Vec3 eye{}; // the teleport point's eye
