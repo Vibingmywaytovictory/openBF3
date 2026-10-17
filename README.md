@@ -2045,3 +2045,38 @@ Gates, measured 2026-10-16 on the dev preset (E13 is wall clock and **noisy** on
 | E12 (a) | `ctest -R sim.lagcomp.unit` | server lists and samples bit-equal to the client's; cache on == off; window/track differences all classified | 8,900 rows, 0 differences; 17,636 provider rows equal; 1,438 Q22 rows, 0 unexplained |
 | E13 | `bf3dump lagcomp MP_Subway TeamDeathMatch0 --perf` | provider p99 ≤ 0.5 ms per tick | pairs 0.338 ms, long 0.354 ms |
 | R4 | `bf3dump weapon-sim --check` | 38/38, sim.weapons* bit-equal | 38/38; `--check` and `--all` output byte-equal to the build without R4 |
+
+## M2a cl: client prediction and events
+
+<!-- # M2a cl -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §6.1–§6.3, §7, §8; as built, the contract fixes and the measured
+gates: [docs/design/m2a-cl.md](docs/design/m2a-cl.md). The client predicts its own weapons with the server's code
+(`bf3_sim` `WeaponLane`, stepped after the motor in prediction and in `catch_up`, first predictions only emit),
+reconciles them by the Snapshot's own weapons block, rebases a health-only difference without a replay (R2), refuses a
+server whose `weapon_hash` (or kit hash) differs before sending Ready (E6), sends the drawn frame's view sample and
+`others_ack_bits` in every command, and hands the main thread `PresentEvent`s (`bf3/host/presentation_events.h`, an
+SPSC ring with Predicted / Render / Immediate timelines) and the two latest predicted weapon views
+(`present_weapon`, `bf3/host/presentation_weapon.h`) for vm, hud, fx3 and au3. Cosmetic projectiles
+(`bf3/host/client_projectiles.h`) test own shots against the rewound records the server will use and fly remote shots
+on the render timeline. `present_others` now calls lc's `net::sample_other` (R1). Until sv merges, the end-to-end
+cases run against a test-local `m2a_fake::GunServer`.
+
+Commands (no install needed; the timing cases run only with `OPENBF3_CL_TIMING=1`, under the quiet lock):
+
+```bat
+ctest --preset dev -R host.gunplay.client.unit                     :: events, present_weapon, lane, projectiles, view sample, E6, R2, hostile
+ctest --preset dev -R host.session.unit                            :: M1 rows plus R1's equivalence
+set OPENBF3_CL_TIMING=1
+b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client  :: E1 + E5, E12 lagcomp (+ control, stress), E15 loopback (10 min), two clients
+```
+
+Gates, measured 2026-10-17 on the dev preset (the timing cases are wall clock and **noisy** on this shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| E1 (client) | predicted shots = server's field for field 31/31 | 31/31; 30/30 gaps of 4,500,000 |
+| E5 (client) | server phase events = predicted | 7/7; empty 2.37 s → 30, tactical 1.8 s (commit +1.53 s) → 31 |
+| E6 (client) | "weapon table mismatch", `weapon_hash_mismatch` 1, no Ready, no prediction | yes for a variant cfg, a missing cfg and a client without a table; "kit table mismatch" for a kit hash |
+| E12 (b) | server hit ≥ 99 % of client hits, same zone ≥ 99 %; samples bit-equal except `late_sample`; control ≤ 50 % | 500/500 (100 %), zone 100 %; 500/500 samples equal, `late_sample` 0; control 1.6 %; stress 100 % (all clamped, reported) |
+| E15 | 0 weapon and 0 motor reconciliations in 10 min loopback; equal seeds for two clients | 0 and 0 (15 health rebases reported); 216/216 seeds equal |
+| R1 / R2 | M1's drawing unchanged; health-only hits rebase | 150,196/150,196 bit-equal; 8 rebases, 0 reconciliations |
