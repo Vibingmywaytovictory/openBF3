@@ -2084,6 +2084,56 @@ noise layer fades **in** over 20-50 m and every layer fades **out** over 250-300
 plan words it (open question 1); and without the HDR window (A3) levels are low: a fixed window puts a 110 dB shot at
 -11 dBFS before attenuation, so the mid and far M16A3 shots sit near -69 and -90 dBFS.
 
+<!-- integration (integ/w2) -->
+**Fourth integration: M2a wave 2 (`integ/w2`, 2026-10-17).** On `m2a/w2` f4bbc43 (the W2.0 contract with nt and lc
+merged), each with its own `--no-ff` merge commit and in this order: `m2a/cl` 9a99e81 (it contains `m2a/sv`), `m2a/vm`
+48c22ca, `m2a/fx2` ca561e9, `m2a/hud` 60cf30d, then `main` 925cd51 (`m2a/audio` A1 / A2, `terrain/collision`, the
+S5 harness). The `dev` build passed after every merge. Every text conflict was two tracks' blocks appended at the same
+place in a shared file (README, the CMakeLists, bf3dump's usage and dispatch, register_types.cpp); both were kept, the
+earlier merge's first. m2a.md's adjacent E18 (lc) and E19 (vm) rule fixes were both kept. The one code conflict,
+`level_load.h`, was TC's removal of S1's `terrain_cover` / `cover_water` next to sv's new gunplay fields; both kept, no
+other change was needed (sv's gunplay, `find_sky_lane` and cl's Metro rows run on TC's whole-terrain world and give the
+accepted numbers). Follow-ups in their own commits: m2a.md §15 now names sv's eight `game_server.cpp` insertion points
+and accepts cl's `rewind_rows` lines in sv's `gunplay.{h,cpp}` (rule fix), and `tools\build.cmd` lists
+`host.gunplay.client` among the timing rows. The merge resolves vm's `PENDING (sv)`: with sv's `step_weapons_m2a` the
+sim now refuses zoom too (0 of 6,882 frames set `kZoomWasDown`, against 6,882 on vm's branch), and `m2a.contract`
+prints no PENDING row.
+
+Full `ctest --preset dev` with `OPENBF3_GODOT`: 142 of 144 pass, `core.cache_data` and `core.res` skipped as before
+(114 rows with `-j8`, then the 30 timing rows one at a time in four quiet-lock windows, `host.gunplay.client` with
+`OPENBF3_CL_TIMING=1`). Every row passed on its first run, `godot.s3_crowd` included. Under `ctest --preset asan`,
+`m2a.contract`, `net.proto.unit`, `net.proto.fuzz`, `sim.lagcomp.unit`, `anim.server_pose`, `sim.weapons.fuzz`,
+`host.gunplay.server`, `host.gunplay.client.unit`, `anim.viewmodel.unit`, `fx.render.unit`, `ui.hud.feed.unit` and
+`ui.hud.feed.install` pass (12 / 12), with no AddressSanitizer report. One run each on the integrated tree (wall-clock
+rows are noisy on this shared machine):
+
+| track gate | accepted | integrated (`integ/w2`) |
+|---|---|---|
+| nt `net.proto.unit` sizes, `net.proto.fuzz`, `m2a.contract` | 64 players: Snapshot 1,195 B / 46 + SnapshotOthers 387 B / 17; fuzz 0 unstable; 7 / 7, PENDING (sv) only | the same; 7 / 7 (5,094 assertions), no PENDING |
+| lc E18 (a) `bf3dump lagcomp --deviation` | 10 / 10 rows; worst transition head / chest 2.47 / 3.09 cm | the same numbers, 0 stand-in rows |
+| lc E13 `bf3dump lagcomp --perf` (p99 <= 0.5 ms) | pairs 0.338, long 0.354 ms | pairs 0.298, long 0.205 ms |
+| sv `host.gunplay.server` E1-E6, E17 | 31 shots / 30 gaps of 4,500,000; drop 0.1780 / 1.5993 m, expiry 975.0 m; STK 4 / 2 and 6 / 3; reloads 108,000,000 / 142,200,000; KS D 0.0158; hostile 0 / 900 | the same; hostile tick p99 0.113 ms (control 0.120) |
+| cl E1 / E5, E12, E15 (`host.gunplay.client`) | 31 / 31, 7 / 7; gate 100 % (zone 100 %), control 2.40 %; loopback 0 / 0 reconciliations; 212 / 212 seeds | 31 / 31, 7 / 7; gate 500 / 500 (zone 100 %, (b) 500 / 500 equal), control 2.00 %, stress 40 / 40; loopback 600 s 0 motor / 0 weapon reconciliations, 422 server shots all rewound; 208 / 208 seeds |
+| vm `godot.m2a_viewmodel`, `vm skin`, `vm clips` | 20 / 20; FOV worst 1.00 frame, recoil 7.91e-6°, springs 0.736 s; 0 stretched; E11 32 / 32 | the same |
+| fx2 `godot.fx_demo`, `godot.fx_ref` (Q17, <= 1.25) | E8 (3) all frames, (6) 52 / 52, (4) 80; 64 lights; FX p99 0.225 ms; 1.015 | 3,667 / 3,667 frames, 52 / 52, 80 / 80; 64 lights; FX p99 0.213 ms; 0.775 / 0.752 = 1.031 |
+| hud `godot.m2a_hud`, `ui.hud.feed.*` | 32 / 32 at three sizes; gap error 0.0000 px; 36 / 36 hits; 12 / 12 names and icons | the same |
+| S1 `host.scale` G1 p99 Metro / MP_007; `sim.nav.bake` G4 | 1.18 / 0.75 ms; 2.53 / 3.60 s | 1.49 / 1.03 ms (both valid); 2.82 / 2.54 s |
+| S2 `sim.vehicle`; S4 `logic.metro` G4 | 0 mismatches; 843761c3205e74bb | 0 mismatches on all courses; 843761c3205e74bb |
+| S3 `godot.s3_crowd` | G1a p99 0.42, G1b 1.86 ms, frame p99 11.4 / 10.7 ms | first run PASS: G1a p99 0.43, G1b 1.80 ms, frame p99 13.8 / 13.2 ms, G3 16 / 16 |
+| L1 `godot.l1_look`; M1 `godot.m1`, `godot.m1_load` E4 / E5 | 1.085, p99 5.7 ms; 16 / 16, 2.40 / 1.84 s | 1.061, p99 5.87 ms; 16 / 16, 2.40 / 1.82 s |
+| wp `weapon-sim --check`, W11; VFX census, `tools.fx_bench` | 38 / 38, 0.263 ms; 1,101 / 3,410, 38.5 ns | 38 / 38, 0.219 ms; 1,101 / 3,410, 39.6 ns |
+| ui1 / ui2; audio `godot.audio`; TC `sim.terrain` | 25 / 25; 10 / 10; 31 / 31; G1 230 runs | 25 / 25; 10 / 10 with the six shots; 31 / 31; 230 runs, 0 failed |
+| install unchanged | clean | clean (256 files in every install test) |
+
+Captures for the user's eye (gitignored) are in `openBF3\b\shots\integw2\` (fx2, hud, s3, ui2, audio WAVs). What
+wave 3 still owes: E7 (audio through the game mixer, au3), E8 in the game and E9's firefight budget (fx3's triggers,
+`godot.m2a_firefight`), E11 (the 4 kits in both teams' loadouts in the game), E13's `host.gunplay.perf` row with 64
+firefight bots (bt), E14 (the client frame budget in the firefight), E16 (load and memory with weapons on
+`m2a_metro.tscn`), E19's `godot.m2a` case "ads", and the gx Godot wiring:
+`Bf3Viewmodel`, `Bf3Hud` (with `Bf3UiAssets` given `Bf3Hud::required_atlas_movies()`), `Bf3FxRenderer`, audio and the
+3p crowd fed from cl's `present_weapon` / events in `level_session`, and `SharedLoadOptions::gunplay` turned on for the
+M2a scene (it stays off by default, so M1's E4 / E5 are unchanged).
+
 ## M2a wave 2 contract (W2.0)
 
 <!-- # M2a w2 -->

@@ -153,3 +153,29 @@ Results on the merge (dev preset unless noted; timing rows are wall-clock and no
 | `godot.s0_selftest`, `godot.inspector`, `godot.collision`, `godot.m9_reload`, `godot.m1`, `godot.m1_load`, `godot.l1_look`, `godot.ui_fonts`, `godot.ui_fonts_shots`, `godot.ui2`, `render.scene` | pass under the quiet lock |
 | `godot.s3_crowd` | 2 runs fail (G1b 2.15-2.41 ms, G2-off p99 18.1-18.9 ms) with another track's asan `test_sim_terrain` using a core; A/B in the same window: `m2a/nt` alone fails both attempts (G1b 2.34 / 3.72 ms), `m2a/w2` passes on its retry (G1a p99 0.394 ms, G1b 1.670 ms, G2-off p99 10.18 ms, G2-on p99 16.65 ms). Load, not the branch, as nt's notes found; lc touches no code the s3 bench runs |
 | `ctest --preset asan -R "^(net\.proto\.fuzz|sim\.lagcomp\.unit|anim\.server_pose)$"` | 3 / 3 pass, no ASan report |
+
+## Wave-2 integration (`integ/w2`, 2026-10-17)
+
+On this branch's f4bbc43, `--no-ff` with one merge commit each: `m2a/cl` 9a99e81 (contains `m2a/sv`), `m2a/vm` 48c22ca,
+`m2a/fx2` ca561e9, `m2a/hud` 60cf30d, then `main` 925cd51 (`m2a/audio`, `terrain/collision`, the S5 harness). Conflicts,
+follow-ups and the integrated-against-accepted table are in the README paragraph "Fourth integration: M2a wave 2". In
+short: shared-file blocks kept on both sides; `level_load.h` kept TC's removal of `terrain_cover` / `cover_water` and
+sv's gunplay fields; m2a.md §15 corrected for sv's eight insertion points and cl's `rewind_rows` lines (rule fix);
+`tools\build.cmd` lists `host.gunplay.client` as a timing row. No merge regression needed a code fix.
+
+One command per check (from the worktree; wall-clock rows under the quiet lock, noisy on this shared machine):
+
+```
+tools\build.cmd dev --no-test
+set OPENBF3_GODOT=C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe
+ctest --preset dev -j 8 -E "<TIMING regex of tools\build.cmd>"                     (114 rows: 112 pass, 2 skip)
+ctest --preset dev -j1 -V -R "^<timing row>$"                                      (each of the 30, one at a time)
+set OPENBF3_CL_TIMING=1 && ctest --preset dev -V -R "^host\.gunplay\.client$"     (E1 / E5, E12, E15 on Metro)
+tools\build.cmd asan --no-test
+ctest --preset asan -R "^(net\.proto\.fuzz|net\.proto\.unit|sim\.lagcomp\.unit|anim\.server_pose|host\.gunplay\.server|host\.gunplay\.client\.unit|anim\.viewmodel\.unit|fx\.render\.unit|ui\.hud\.feed\.unit|ui\.hud\.feed\.install|m2a\.contract|sim\.weapons\.fuzz)$"
+b\dev\tools\bf3dump\bf3dump.exe weapon-sim --check                                 (38 / 38)
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0 --deviation      (E18 (a) 10 / 10)
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0 --perf           (E13 rewind, quiet lock)
+b\dev\tools\bf3dump\bf3dump.exe vm skin --team all ; vm clips --team all           (0 stretched; E11 32 / 32)
+b\dev\tools\bf3dump\bf3dump.exe fx census @all-mp                                  (G1 1,101 / 3,410)
+```
