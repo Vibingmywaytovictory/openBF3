@@ -65,6 +65,25 @@ them RUN_SERIAL or among its timing rows); `godot.fx_demo`, `godot.fx_ref` and `
 branch that changes gunplay runs them with `ctest --preset dev-timing -R "^host\.gunplay\."`. The branch pass after the
 merge: 127 rows, 172 s of ctest (2 runs, busy machine).
 
+Before / after, measured back to back under the quiet lock after a 120 s settle (2026-10-17, shared machine; before =
+main 925cd51, after = test/speed d77331f; every row passed on both, no row skipped except the two data-less skips
+`core.cache_data` and `core.res` on both, no lane rerun):
+
+| pass | before | after | after, the before checks only |
+|---|---|---|---|
+| branch dev pass | 556.9 s, 104 rows serial (`-E` the old TIMING regex) | 174.9 s, 127 rows at `-j16` | 174.9 s (it also runs the 6 functional rows moved out of TIMING, 15 s of row time) |
+| real-time lane | (inside the serial calls) | 166.0 s, 10 rows at `-j8` | 166.0 s |
+| timing phase | 433.6 s, 14 host and tool rows serial | 1,376.0 s, 14 rows | 170.9 s (without the e1d574d rows `host.gunplay.client` 988 s, `.server` 127 s, `.client.unit` 91 s) |
+| window phase | 913.5 s, the 12 `godot.*` rows serial | 694.2 s, 10 rows | 479.4 s (without the e1d574d rows `godot.fx_ref` 182 s, `godot.fx_demo` 28 s, `godot.m2a_hud` 5 s) |
+| merge pass total | 1,347.1 s (26 rows) | 2,236.2 s | 816.3 s |
+
+The branch pass is 3.2x faster; the merge pass covers the same checks in 816 s instead of 1,347 s (1.65x), and is
+longer in total only by the M2a wave-2 rows merged after 925cd51 (1,420 s). Per check: `godot.m1` 348 s → its three
+lane shards side by side (166 / 95 / 95 s); `host.session` 191 s → `.gate` / `.stress` / `.e3` in the lane (99 / 100 /
+5 s); `host.scale` 88 s → 30 s plus `host.scale.paced` 87 s in the lane; `godot.l1_look` 196 s → 118 s; `sim.nav.bake`
+49 s → 40 s; unchanged: `godot.s3_crowd` 270 s, `host.session.unit` 70 s, `godot.m1_load` 50 s (cold load by design),
+`godot.audio` 33 s.
+
 From a VS x64 developer prompt the three steps are `cmake --preset dev`, `cmake --build --preset dev` and
 `ctest --preset dev`. Presets: `dev` (optimised, godot-cpp `template_debug`, everyday use), `debug` (unoptimised,
 `/MTd`), `release` (`template_release`, for shipping) and `asan` (`/fsanitize=address`, libraries, tools and tests
