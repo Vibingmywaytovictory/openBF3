@@ -689,6 +689,7 @@ struct GameServer::Impl {
 			s.own_events = uint16_t(s.own_events | s.state.events);
 			if (s.tracing) {
 				s.trace.push_back(s.state);
+				sv_trace_tick(i); // M2a sv [trace]: the tick's shots, projectiles, damage, detonations, deaths
 				if (s.trace.size() >= s.trace_ticks) {
 					if (s.remote) {
 						net::DebugReport r;
@@ -696,6 +697,7 @@ struct GameServer::Impl {
 						r.ok = true;
 						r.text = "trace of " + std::to_string(s.trace.size()) + " ticks from " + std::to_string(s.trace.front().tick);
 						r.trace = std::move(s.trace);
+						sv_trace_report(i, r); // M2a sv [trace]
 						send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
 					}
 					s.trace.clear();
