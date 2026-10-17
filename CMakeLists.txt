@@ -17,6 +17,13 @@ set(OPENBF3_ENGINE_API "${CMAKE_SOURCE_DIR}/engine-api/4.8.dev7.c971f93e7" CACHE
     "Folder with extension_api.json + gdextension_interface.json dumped from the exact Godot build")
 set(OPENBF3_GODOT_PROJECT "${CMAKE_SOURCE_DIR}/bf3-opensource" CACHE PATH
     "Godot project; the extension DLL is written to its bin/ folder")
+# docs/testing.md "Godot rows": the headless godot.* ctest rows run this console executable on every build (the
+# environment variable OPENBF3_GODOT overrides it at test time). Looked up next to the checkout and one level up.
+if(OPENBF3_BUILD_GODOT)
+    find_program(OPENBF3_GODOT_EXE NAMES Godot_v4.8-dev7_win64_console.exe
+        HINTS "${CMAKE_SOURCE_DIR}/.." "${CMAKE_SOURCE_DIR}/../.." NO_DEFAULT_PATH
+        DOC "Godot console executable for the headless godot.* ctest rows")
+endif()
 
 # ---------------------------------------------------------------------------------------------
 # One ABI for everything linked into the extension: static CRT, no C++ exceptions, C++20.

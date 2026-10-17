@@ -12,20 +12,14 @@
 # (same statistic), M1's p99 and the plain means are reported. Timing is noisy (other processes, the display compositor): per-frame medians and the median of
 # alternating rounds keep a single spike or a busy round from deciding.
 # Screenshots go to $OPENBF3_LOOK_SHOTS when set (e.g. openBF3\b\shots\l1, gitignored; never commit them), else to
-# the system temp directory, removed at the end. Skips (exit 77) like godot.m1_load: OPENBF3_GODOT unset, no BF3
+# the system temp directory, removed at the end. Skips (exit 77) like godot.m1_load: no Godot executable or no window opt-in (godot_common.cmake), no BF3
 # install, or no window / rendering device (probe run).
 # Script mode: cmake -DPROJECT_DIR=<bf3-opensource> [-DROUNDS=n] -P godot_l1_look.cmake (CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
-set(godot "$ENV{OPENBF3_GODOT}")
-if(godot STREQUAL "" OR NOT EXISTS "${godot}")
-    message("SKIPPED: OPENBF3_GODOT does not name the Godot console executable")
-    cmake_language(EXIT 77)
-endif()
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 if(NOT DEFINED ROUNDS)
     set(ROUNDS 5)
-endif()
-if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
-    file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
 endif()
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" --quit

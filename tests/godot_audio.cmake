@@ -7,21 +7,15 @@
 # counters, the server mix rate and an in-process offline replay equal to the recording sample for sample, prints
 # the table and "AUDIO CHECK: PASS|FAIL", and exits 0/1. This script additionally needs the three WAVs
 # (godot_m16.wav, godot_m16_core.wav, godot_m16_noise.wav) in SHOTS (b/shots/audio, gitignored).
-# Skips (exit 77) when OPENBF3_GODOT is unset, no BF3 install is found, or no window / rendering device can be
+# Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no BF3 install is found, or no window / rendering device can be
 # created: a probe run ("--path <project> --quit", windowed, killed after 60 s) decides first, as in
 # godot_m1_load.cmake.
 # Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -DSHOTS=<dir> -P godot_audio.cmake (cmake_language(EXIT) needs 3.29).
 cmake_minimum_required(VERSION 3.29)
-set(godot "$ENV{OPENBF3_GODOT}")
-if(godot STREQUAL "" OR NOT EXISTS "${godot}")
-    message("SKIPPED: OPENBF3_GODOT does not name the Godot console executable")
-    cmake_language(EXIT 77)
-endif()
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 if(NOT SHOTS)
     message(FATAL_ERROR "godot_audio: -DSHOTS=<dir> is required")
-endif()
-if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
-    file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
 endif()
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" --quit

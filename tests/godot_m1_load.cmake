@@ -7,21 +7,15 @@
 # first-person shot at 8 sampled spawn points (written to the system temp directory, never the repo; removed at the
 # end unless OPENBF3_KEEP_SHOTS is set, so BF3 imagery does not pile up). Passes when both runs print
 # "M1 LOAD CHECK: PASS" and exit 0.
-# Skips (exit 77) when OPENBF3_GODOT is unset, no BF3 install is found, or no window / rendering device can be
+# Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no BF3 install is found, or no window / rendering device can be
 # created: on Windows, Godot's failure to create a rendering device raises a blocking OS alert, so a probe run
 # ("--path <project> --quit", windowed, killed after 60 s) decides first; only a clean probe starts the real runs
 # (docs §14: an environment variable such as SESSIONNAME cannot tell a desktop session from a service).
 # Acceptance needs this test to report Passed, not Skipped, in a desktop session.
 # Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_m1_load.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
-set(godot "$ENV{OPENBF3_GODOT}")
-if(godot STREQUAL "" OR NOT EXISTS "${godot}")
-    message("SKIPPED: OPENBF3_GODOT does not name the Godot console executable")
-    cmake_language(EXIT 77)
-endif()
-if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
-    file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
-endif()
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 # The probe: a windowed start that quits at once.
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" --quit

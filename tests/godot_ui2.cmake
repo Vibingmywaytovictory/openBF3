@@ -8,18 +8,12 @@
 # (user://bf3cache), so a first run converts Metro cold (about 15 s, godot.m1_load E4).
 # OPENBF3_UI2_SHOTS: a directory for the six PNGs (the acceptance run uses
 # C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui2\, gitignored; never a path in the repo).
-# Skips (exit 77) like godot.m1_load: OPENBF3_GODOT unset, no BF3 install, or a probe run without a window / rendering
+# Skips (exit 77) like godot.m1_load: no Godot executable or no window opt-in (godot_common.cmake), no BF3 install, or a probe run without a window / rendering
 # device.
 # Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_ui2.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
-set(godot "$ENV{OPENBF3_GODOT}")
-if(godot STREQUAL "" OR NOT EXISTS "${godot}")
-    message("SKIPPED: OPENBF3_GODOT does not name the Godot console executable")
-    cmake_language(EXIT 77)
-endif()
-if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
-    file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
-endif()
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
     TIMEOUT 60

@@ -201,7 +201,11 @@ void Bf3UiAssets::_process(double p_delta) {
 		} else {
 			loaded_ = std::make_unique<Loaded>();
 			loaded_->install = loc->install();
-			const std::filesystem::path cache_root = default_cache_root(); // ProjectSettings: main thread
+			// --bf3-cache=<dir> as in level_session.cpp (the per-build root of the headless godot.ui_fonts row), else
+			// user://bf3cache. ProjectSettings and the user args: main thread.
+			const std::string cache_arg = user_arg_value("bf3-cache");
+			const std::filesystem::path cache_root = cache_arg.empty() ? default_cache_root()
+																	   : std::filesystem::path(std::u8string(cache_arg.begin(), cache_arg.end()));
 			const bf3::core::PathGuard guard = loc->reader().write_guard();
 			const std::vector<std::string> atlas_movies = atlas_movies_;
 			Loaded *out = loaded_.get();

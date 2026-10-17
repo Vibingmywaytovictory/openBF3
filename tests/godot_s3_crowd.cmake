@@ -8,19 +8,13 @@
 # Noise policy (s3.md §1, fixed in advance): when only timing gates fail (the check prints "S3 TIMING: FAIL"), the whole
 # check runs once more and decides; both runs are printed and the repeat is named. A G0 failure is not repeated.
 # Shots go to $ENV{OPENBF3_S3_SHOT_DIR} when set, else <checkout>/b/shots/s3 (gitignored /b/; BF3 imagery is never
-# committed). Skips (exit 77) when OPENBF3_GODOT is unset, no window / rendering device can be created (the windowed
+# committed). Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no window / rendering device can be created (the windowed
 # --quit probe of godot_m1_load.cmake, killed after 60 s), no BF3 install is found ("no usable install"), or the check
 # exits 77 because the primary screen is not 2560x1440.
 # Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_s3_crowd.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
-set(godot "$ENV{OPENBF3_GODOT}")
-if(godot STREQUAL "" OR NOT EXISTS "${godot}")
-    message("SKIPPED: OPENBF3_GODOT does not name the Godot console executable")
-    cmake_language(EXIT 77)
-endif()
-if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
-    file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
-endif()
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
     TIMEOUT 60

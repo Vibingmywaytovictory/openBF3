@@ -1,28 +1,18 @@
 # Runs the Godot project headless with user args and checks for a PASS line (ctest godot.*).
 #   cmake -DPROJECT_DIR=<bf3-opensource> -DUSER_ARGS=<;-list> -DPASS_LINE=<text> [-DTIMEOUT=<s>] -P godot_check.cmake
-# The Godot console executable comes from the environment variable OPENBF3_GODOT; without it (or when
-# it does not exist) the test exits 77 (skipped). On a project that was never imported, the one-line
-# .godot/extension_list.cfg is written first (README "Run": avoids the crash of a first --import).
+# The Godot console executable comes from godot_common.cmake (OPENBF3_GODOT, else the configure-time
+# OPENBF3_GODOT_EXE); without one the test exits 77 (skipped). The godot.project_setup fixture has written the one-line
+# .godot/extension_list.cfg (README "Run": avoids the crash of a first --import).
 # Needs CMake >= 3.29 (cmake_language(EXIT)).
+cmake_minimum_required(VERSION 3.29)
 
-if(NOT DEFINED ENV{OPENBF3_GODOT} OR "$ENV{OPENBF3_GODOT}" STREQUAL "")
-    message("OPENBF3_GODOT is not set: skipped")
-    cmake_language(EXIT 77)
-endif()
-set(godot "$ENV{OPENBF3_GODOT}")
-if(NOT EXISTS "${godot}")
-    message("OPENBF3_GODOT=${godot} does not exist: skipped")
-    cmake_language(EXIT 77)
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 if(NOT DEFINED TIMEOUT)
     set(TIMEOUT 240)
 endif()
-if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
-    file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
-endif()
 
 execute_process(
-    COMMAND "${godot}" --headless --path "${PROJECT_DIR}" -- ${USER_ARGS}
+    COMMAND "${godot}" --headless ${godot_log_args} --path "${PROJECT_DIR}" -- ${USER_ARGS}
     RESULT_VARIABLE code
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err

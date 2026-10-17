@@ -9,6 +9,85 @@ function(openbf3_test name)
     openbf3_module(${name})
 endfunction()
 
+# docs/testing.md "Splits": one ctest row for a subset of a doctest suite's cases, run by tests/run_case_row.cmake.
+#   openbf3_case_row(NAME <row> EXE <target> SUITE <suite> GROUP <split group> COUNT <n> [CASES <pattern>...]
+#                    [EXCLUDE <pattern>...] [INSTALL_CASE <pattern>])
+# Patterns are doctest wildcards without spaces or commas. INSTALL_CASE (the suite's install-unchanged case) is added
+# to CASES; COUNT counts every case the row runs, install case included, and the runner fails unless exactly that
+# many ran and passed (a mistyped pattern cannot pass on the install check alone). Exit 77 passes through.
+function(openbf3_case_row)
+    cmake_parse_arguments(PARSE_ARGV 0 R "" "NAME;EXE;SUITE;GROUP;COUNT;INSTALL_CASE" "CASES;EXCLUDE")
+    set(cases ${R_CASES})
+    if(R_INSTALL_CASE)
+        list(APPEND cases ${R_INSTALL_CASE})
+    endif()
+    list(JOIN cases "," case_arg)
+    list(JOIN R_EXCLUDE "," exclude_arg)
+    add_test(NAME ${R_NAME} COMMAND ${CMAKE_COMMAND} "-DEXE=$<TARGET_FILE:${R_EXE}>" -DSUITE=${R_SUITE} -DCOUNT=${R_COUNT}
+        "-DCASES=${case_arg}" "-DEXCLUDE=${exclude_arg}" -P ${CMAKE_CURRENT_SOURCE_DIR}/run_case_row.cmake)
+    set_tests_properties(${R_NAME} PROPERTIES SKIP_RETURN_CODE 77)
+    set_property(GLOBAL APPEND PROPERTY OPENBF3_SPLIT_${R_GROUP}_ROWS ${R_NAME})
+    set_property(GLOBAL PROPERTY OPENBF3_SPLIT_${R_NAME}_CASES "${case_arg}")
+    set_property(GLOBAL PROPERTY OPENBF3_SPLIT_${R_NAME}_EXCLUDE "${exclude_arg}")
+endfunction()
+# The <NAME> row (a split group's .split_cover) diffs `--list-test-cases` of the whole suite against the group's rows:
+# every case in exactly one row, the install case (when given) in all of them. No data, under a second.
+function(openbf3_split_cover)
+    cmake_parse_arguments(PARSE_ARGV 0 C "" "NAME;EXE;SUITE;GROUP;INSTALL_CASE" "")
+    get_property(rows GLOBAL PROPERTY OPENBF3_SPLIT_${C_GROUP}_ROWS)
+    set(body "set(ROWS ${rows})\n")
+    foreach(row IN LISTS rows)
+        get_property(cases GLOBAL PROPERTY OPENBF3_SPLIT_${row}_CASES)
+        get_property(exclude GLOBAL PROPERTY OPENBF3_SPLIT_${row}_EXCLUDE)
+        string(APPEND body "set(ROW_${row}_CASES \"${cases}\")\nset(ROW_${row}_EXCLUDE \"${exclude}\")\n")
+    endforeach()
+    set(file "${CMAKE_CURRENT_BINARY_DIR}/split_cover/${C_GROUP}.cmake")
+    file(WRITE "${file}" "${body}")
+    add_test(NAME ${C_NAME} COMMAND ${CMAKE_COMMAND} -DMODE=cover "-DEXE=$<TARGET_FILE:${C_EXE}>" -DSUITE=${C_SUITE}
+        "-DROWS_FILE=${file}" "-DINSTALL_CASE=${C_INSTALL_CASE}" -P ${CMAKE_CURRENT_SOURCE_DIR}/run_case_row.cmake)
+    set_tests_properties(${C_NAME} PROPERTIES TIMEOUT 60)
+endfunction()
+
+# docs/testing.md "Godot rows": every godot.* row is registered here.
+#   openbf3_godot_row(<row> <script> HEADLESS|WINDOW [TIMEOUT <s>] [ARGS <-D...>...])
+# The script includes tests/godot_common.cmake: GODOT_EXE (the configure-time OPENBF3_GODOT_EXE) unless OPENBF3_GODOT
+# is set, a per-build cache root and log file for headless rows (BUILD_DIR, ROW); a WINDOW script sets GODOT_WINDOWED
+# and runs only with OPENBF3_GODOT_WINDOWED=1. WINDOW rows get the label window (the merge pass's user-away phase);
+# a HEADLESS row whose script does not run --headless, or a WINDOW row whose script is not opted in, is a configure
+# error, and so is a godot.* row registered any other way (the check at the end of this file). Every row requires
+# the godot.project_setup fixture and shares the project's .godot directory and DLL (RESOURCE_LOCK).
+function(openbf3_godot_row name script mode)
+    cmake_parse_arguments(PARSE_ARGV 3 G "" "TIMEOUT" "ARGS")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${script}" body)
+    if(mode STREQUAL "WINDOW")
+        if(NOT body MATCHES "set\\(GODOT_WINDOWED TRUE\\)")
+            message(FATAL_ERROR "${name}: the WINDOW script ${script} must set(GODOT_WINDOWED TRUE) before godot_common.cmake")
+        endif()
+    elseif(mode STREQUAL "HEADLESS")
+        if(body MATCHES "set\\(GODOT_WINDOWED TRUE\\)" OR NOT body MATCHES "--headless")
+            message(FATAL_ERROR "${name}: the HEADLESS script ${script} does not run Godot --headless; register it as WINDOW")
+        endif()
+    else()
+        message(FATAL_ERROR "openbf3_godot_row(${name}): mode must be HEADLESS or WINDOW, not '${mode}'")
+    endif()
+    add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} "-DGODOT_EXE=${OPENBF3_GODOT_EXE}"
+        "-DBUILD_DIR=${CMAKE_BINARY_DIR}" -DROW=${name} ${G_ARGS} -P ${CMAKE_CURRENT_SOURCE_DIR}/${script})
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED godot_project RESOURCE_LOCK openbf3_godot_project)
+    if(G_TIMEOUT)
+        set_tests_properties(${name} PROPERTIES TIMEOUT ${G_TIMEOUT})
+    endif()
+    if(mode STREQUAL "WINDOW")
+        set_property(TEST ${name} APPEND PROPERTY LABELS window)
+    endif()
+    set_property(GLOBAL APPEND PROPERTY OPENBF3_GODOT_ROWS ${name})
+endfunction()
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    # The fixture: writes .godot/extension_list.cfg when missing and checks the DLL; never runs --import.
+    add_test(NAME godot.project_setup COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT}
+        "-DDLL=$<TARGET_FILE:bf3_godot>" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_project_setup.cmake)
+    set_tests_properties(godot.project_setup PROPERTIES FIXTURES_SETUP godot_project RESOURCE_LOCK openbf3_godot_project TIMEOUT 60)
+endif()
+
 openbf3_test(test_core test_main.cpp core_guard_tests.cpp core_install_tests.cpp core_format_tests.cpp core_container_tests.cpp core_ebx_tests.cpp core_fuzz_tests.cpp test_support.h)
 target_link_libraries(test_core PRIVATE bf3_core)
 openbf3_test(test_cache test_main.cpp core_cache_tests.cpp core_cache_data_tests.cpp test_support.h)
@@ -48,8 +127,8 @@ add_test(NAME sim.jolt COMMAND test_sim)
 add_test(NAME net.enet COMMAND test_net)
 add_test(NAME host.server COMMAND test_host)
 # Integration (integ/m2a1): host.server sleeps 2 s of wall clock and counts the 60 Hz ticks; under parallel load the
-# sleep overshoots (135 ticks against at most 130 once), so it runs alone. The thresholds are unchanged.
-set_tests_properties(host.server PROPERTIES RUN_SERIAL TRUE)
+# sleep overshoots (135 ticks against at most 130 once), so it never runs next to the branch pass: label realtime
+# (the scheduling block at the end), the merge pass's lane of light real-time rows. The thresholds are unchanged.
 # bf3dump's JSON number text (the probe's f32/f64 rules) on synthetic values; no install needed.
 add_test(NAME tools.numtext COMMAND bf3dump numcheck)
 # core.ant reads the Ant banks from the install (or the export directory OPENBF3_ANT_DATA) and, when
@@ -137,9 +216,8 @@ endif()
 # The Godot-side M9 reload check (res://scenes/m9_reload.tscn -- --m9-reload-check): Skeleton3D poses vs bf3_anim
 # and the probe JSON, skin, materials, install unchanged. Runs when OPENBF3_GODOT names the Godot console exe;
 # exits 77 = skipped otherwise or without an install. Needs the bf3_godot DLL (built with the default preset).
-if(OPENBF3_BUILD_GODOT)
-    add_test(NAME godot.m9_reload COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m9_reload.cmake)
-    set_tests_properties(godot.m9_reload PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m9_reload godot_m9_reload.cmake HEADLESS TIMEOUT 300)
 endif()
 # WeaponDef block and weapon catalog shared by bf3dump and the in-game inspector (bf3_core gameplay/
 # weapon_format.h, weapon_catalog.h). core.gameplay.inspect.unit is synthetic; core.gameplay.inspect reads
@@ -158,16 +236,12 @@ endif()
 # The Godot project run headless (OPENBF3_GODOT = the console executable; exits 77 = skipped when unset):
 # godot.s0_selftest (S0 self-test) and godot.inspector (M0 exit: the inspector's M16A3/M16A4-burst check
 # against plan §7.1 and their localised names). Both use the project and its DLL, so they never run at once.
-# cmake_language(EXIT) needs CMake 3.29.
+# cmake_language(EXIT) needs CMake 3.29. godot.s0_selftest gates the server tick rate and step p99 (label realtime).
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.s0_selftest COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DUSER_ARGS=--s0-selftest
-        "-DPASS_LINE=S0 SELFTEST: PASS" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_check.cmake)
-    add_test(NAME godot.inspector COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DUSER_ARGS=--m0-inspector-check
-        "-DPASS_LINE=M0 INSPECTOR CHECK: PASS" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_check.cmake)
-    set_tests_properties(godot.s0_selftest godot.inspector PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project)
-    if(TEST godot.m9_reload)
-        set_tests_properties(godot.m9_reload PROPERTIES RESOURCE_LOCK openbf3_godot_project)
-    endif()
+    openbf3_godot_row(godot.s0_selftest godot_check.cmake HEADLESS TIMEOUT 300
+        ARGS -DUSER_ARGS=--s0-selftest "-DPASS_LINE=S0 SELFTEST: PASS")
+    openbf3_godot_row(godot.inspector godot_check.cmake HEADLESS TIMEOUT 300
+        ARGS -DUSER_ARGS=--m0-inspector-check "-DPASS_LINE=M0 INSPECTOR CHECK: PASS")
 endif()
 # Level traversal (bf3_core/level): level_unit on synthetic values; core.level reads the install
 # (read-only) against handoff §9 counts and exits 77 = skipped without one.
@@ -212,8 +286,7 @@ endif()
 # the headless --collision-check of res://scenes/metro_collision.tscn. Exits 77 = skipped without
 # OPENBF3_GODOT or an install; shares the project and its DLL with the other godot.* tests.
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.collision COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_collision.cmake)
-    set_tests_properties(godot.collision PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 360 RESOURCE_LOCK openbf3_godot_project)
+    openbf3_godot_row(godot.collision godot_collision.cmake HEADLESS TIMEOUT 360)
 endif()
 # Converters through the derived-data cache and `bf3dump prepare` (bf3_core cache/cached_convert.h, gameplay/
 # weapon_blob.h; bf3_render mesh_cache.h, level_prepare.h). prepare.unit: blob round trips, hostile blobs, keys,
@@ -258,11 +331,13 @@ if(OPENBF3_ASAN)
 endif()
 # tools.m1_prepare (E6, docs §1, §12.4): `bf3dump prepare MP_Subway TeamDeathMatch0 --shapes` on a fresh scratch root,
 # then again: the cold peak working set <= 512 MiB, the second run all hits; exits 77 = skipped without an install.
-# RUN_SERIAL so a ctest -j neighbour cannot skew the peak. cmake_language(EXIT) needs CMake 3.29.
+# It runs in the parallel branch pass and, labelled merge_also, again alone in the merge pass's serial timing phase,
+# which decides the peak gate (docs/testing.md; a -j neighbour can only trim the working set, so the peak commit is
+# printed next to it). cmake_language(EXIT) needs CMake 3.29.
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME tools.m1_prepare COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DE6_REPORT_ONLY=${OPENBF3_ASAN}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/m1_prepare.cmake)
-    set_tests_properties(tools.m1_prepare PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+    set_tests_properties(tools.m1_prepare PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
     if(OPENBF3_ASAN)
         get_filename_component(_openbf3_m1prep_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
         set_tests_properties(tools.m1_prepare PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m1prep_cl_dir}")
@@ -304,29 +379,39 @@ endif()
 # loopback on a synthetic world (spawn, clock resets, a stall, a teleport, Trace, E2 under 150/2 shortened); no
 # data. host.session runs the session on Metro's real world through load_shared_level (E2 under 150/2 as the gate
 # and 150 ms one way as a reported row, the 128-slot SpawnSweep against in-process rows, install unchanged) and
-# exits 77 without an install. Both read the shipped tuning file and are RUN_SERIAL (wall-clock timing).
+# exits 77 without an install. Both read the shipped tuning file. The suite host-session-unit is split
+# (docs/testing.md "Splits"): host.session.unit.pure runs the 4 socket-free cases (judge_rest, presentation,
+# GameServer without sockets, SpawnSweep in batches) on every branch; host.session.unit runs the 5 loopback cases,
+# which wait on real time, in the merge pass's real-time lane (label realtime, like host.session);
+# host.session.unit.split_cover proves every case is in exactly one of the two.
 openbf3_test(test_host_session test_main.cpp host_session_tests.cpp test_support.h)
 target_link_libraries(test_host_session PRIVATE bf3_host)
 target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
-add_test(NAME host.session.unit COMMAND test_host_session --test-suite=host-session-unit)
+set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*without*sockets* *GameServer*SpawnSweep*batches*)
+openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 4
+    CASES ${_openbf3_session_pure})
+openbf3_case_row(NAME host.session.unit EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 5
+    EXCLUDE ${_openbf3_session_pure})
+openbf3_split_cover(NAME host.session.unit.split_cover EXE test_host_session SUITE host-session-unit GROUP host-session-unit)
 add_test(NAME host.session COMMAND test_host_session --test-suite=host-session)
-set_tests_properties(host.session.unit PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
-set_tests_properties(host.session PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+set_tests_properties(host.session.unit.pure host.session.unit PROPERTIES TIMEOUT 300)
+set_tests_properties(host.session PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_t4_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(host.session.unit host.session PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t4_cl_dir}")
+    set_tests_properties(host.session.unit.pure host.session.unit host.session.unit.split_cover host.session
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t4_cl_dir}")
 endif()
 
 # M1 T5: the level scene (bf3_render level_scene.h; docs/design/m1.md §14). render.scene.unit: synthetic census,
 # meshes and heightfields (no data). render.scene: Metro TDM plan and SceneLanes cold and warm on a scratch cache
 # root with its timings, texture count and bytes, peak in-flight bytes and peak working set, install.unchanged (exits
-# 77 = skipped without an install). RUN_SERIAL so the printed lane timings do not compete with ctest -j neighbours.
+# 77 = skipped without an install). The lane timings are printed, never gated, so it runs in the parallel branch pass.
 openbf3_test(test_render_scene test_main.cpp render_scene_tests.cpp test_support.h)
 target_link_libraries(test_render_scene PRIVATE bf3_render psapi)
 target_include_directories(test_render_scene PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_render/src)
 add_test(NAME render.scene.unit COMMAND test_render_scene --test-suite=render-scene-unit)
 add_test(NAME render.scene COMMAND test_render_scene --test-suite=render-scene)
-set_tests_properties(render.scene PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+set_tests_properties(render.scene PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(render.scene.unit render.scene PROPERTIES TIMEOUT 600)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_scene_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
@@ -338,13 +423,12 @@ endif()
 # judge_rest, E3 SpawnSweep with 128 slots, install unchanged); godot.m1_load the windowed --m1-load-check cold then
 # warm on a fresh scratch cache root (E4 / E5, phase times, frame time, the game's peak working set, 8 spawn shots)
 # after a probe run, and exits 77 = skipped without a window or rendering device. Both exit 77 without OPENBF3_GODOT
-# or an install and share the project and its DLL with the other godot.* tests; both are RUN_SERIAL (E2 wall-clock
-# netsim, E4 / E5 timing).
+# or an install and share the project and its DLL with the other godot.* tests. godot.m1 is labelled realtime (E2
+# wall-clock netsim; the merge pass's lane), godot.m1_load is WINDOW and RUN_SERIAL (E4 / E5 timing).
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.m1 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1.cmake)
-    set_tests_properties(godot.m1 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
-    add_test(NAME godot.m1_load COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m1_load.cmake)
-    set_tests_properties(godot.m1_load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.m1 godot_m1.cmake HEADLESS TIMEOUT 600)
+    openbf3_godot_row(godot.m1_load godot_m1_load.cmake WINDOW TIMEOUT 300)
+    set_tests_properties(godot.m1_load PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 # H hygiene: the stop_all registries of bf3_host (src/bf3_host/src/instance_registry.h). host.registry pins the
@@ -361,11 +445,12 @@ if(OPENBF3_ASAN)
 endif()
 # H hygiene: tools.ebx_memory, the EbxLibrary memory gate (tests/ebx_memory.cmake): `bf3dump ebxload @all-mp` peak
 # working set <= 760 MiB and Metro's <= 145 MiB, every partition parsed; 77 = skipped without an install; report-only
-# under asan. RUN_SERIAL so a ctest -j neighbour cannot skew the peak.
+# under asan. It runs in the parallel branch pass and, labelled merge_also, again alone in the merge pass's serial
+# timing phase, which decides the gate (a -j neighbour can only trim the working set; the peak commit is printed too).
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME tools.ebx_memory COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/ebx_memory.cmake)
-    set_tests_properties(tools.ebx_memory PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+    set_tests_properties(tools.ebx_memory PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
     if(OPENBF3_ASAN)
         get_filename_component(_openbf3_hymem_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
         set_tests_properties(tools.ebx_memory PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hymem_cl_dir}")
@@ -436,8 +521,8 @@ endif()
 # G1a / G1b, G2 vsync off and on, G3 shots, install unchanged) after a probe run, with one repeat when only timing gates
 # fail. Exits 77 = skipped without OPENBF3_GODOT, a window, an install or a 2560x1440 primary screen.
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.s3_crowd COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_s3_crowd.cmake)
-    set_tests_properties(godot.s3_crowd PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 2000 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.s3_crowd godot_s3_crowd.cmake WINDOW TIMEOUT 2000)
+    set_tests_properties(godot.s3_crowd PROPERTIES RUN_SERIAL TRUE)
 endif()
 # L1 look (README "L1 look"): render.look.unit, the shader database reader on a synthetic res (fields, every
 # truncation, single-byte mutations, the work budget), the look resolver's tiers and rules on a synthetic lookup, and
@@ -460,8 +545,8 @@ endif()
 # decision, README "L1 look"; GPU render time reported). Screenshots to $OPENBF3_LOOK_SHOTS when set (never
 # commit them). Exits 77 like godot.m1_load; RUN_SERIAL (timing).
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.l1_look COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_l1_look.cmake)
-    set_tests_properties(godot.l1_look PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1500 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.l1_look godot_l1_look.cmake WINDOW TIMEOUT 1500)
+    set_tests_properties(godot.l1_look PROPERTIES RUN_SERIAL TRUE)
 endif()
 # S1 contract (spike S1 server scale; docs/design/s1.md §10, §11): every S1 header compiles together with the M1 ones
 # and the plain types keep their properties. No data. The S1 implementation adds its tests to this block: sim.nav.unit,
@@ -529,9 +614,10 @@ target_include_directories(test_sim_vehicle PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_
 target_compile_definitions(test_sim_vehicle PRIVATE "OPENBF3_VEHICLE_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/vehicle_tuning.cfg\"")
 add_test(NAME sim.vehicle.unit COMMAND test_sim_vehicle --test-suite=sim-vehicle-unit)
 add_test(NAME sim.vehicle COMMAND test_sim_vehicle --test-suite=sim-vehicle)
-# TIMEOUTs are 3x the measured runs (docs/design/s2.md §15.1): dev 46 s / 55 s, asan 636 s / 440 s.
-set_tests_properties(sim.vehicle PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE TIMEOUT 150)
-set_tests_properties(sim.vehicle.unit PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+# TIMEOUTs are 3x the measured runs (docs/design/s2.md §15.1): dev 46 s / 55 s, asan 636 s / 440 s; sim.vehicle 240 s
+# since it runs in the parallel branch pass (59 s measured under -j8).
+set_tests_properties(sim.vehicle PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240)
+set_tests_properties(sim.vehicle.unit PROPERTIES TIMEOUT 180)
 if(OPENBF3_ASAN)
     target_compile_definitions(test_sim_vehicle PRIVATE OPENBF3_S2_ASAN=1)
     get_filename_component(_openbf3_vehicle_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
@@ -544,15 +630,16 @@ endif()
 openbf3_test(test_tc_contract test_main.cpp tc_contract_tests.cpp test_support.h)
 target_link_libraries(test_tc_contract PRIVATE bf3_sim bf3_render)
 add_test(NAME tc.contract COMMAND test_tc_contract)
-# sim.terrain.unit (no data) and sim.terrain (install, RUN_SERIAL: G1 over every level x mode, the full cached worlds,
-# G6 Caspian RushLarge0 spawns; exits 77 without an install). tools.tc_cost (G3, tests/tc_cost.cmake): bf3dump shapes
-# cold / warm / warm in child processes on fresh scratch roots, the limits of docs §4.5 (report-only under asan).
+# sim.terrain.unit (no data) and sim.terrain (install: G1 over every level x mode, the full cached worlds, G6 Caspian
+# RushLarge0 spawns; exits 77 without an install). tools.tc_cost (G3, tests/tc_cost.cmake): bf3dump shapes
+# cold / warm / warm in child processes on fresh scratch roots, the limits of docs §4.5 (report-only under asan;
+# label timing, RUN_SERIAL).
 openbf3_test(test_sim_terrain test_main.cpp terrain_collision_tests.cpp terrain_collision_support.h test_support.h)
 target_link_libraries(test_sim_terrain PRIVATE bf3_sim Jolt)
 target_include_directories(test_sim_terrain PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
 add_test(NAME sim.terrain.unit COMMAND test_sim_terrain --test-suite=sim-terrain-unit)
 add_test(NAME sim.terrain COMMAND test_sim_terrain --test-suite=sim-terrain)
-set_tests_properties(sim.terrain PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
+set_tests_properties(sim.terrain PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
 set_tests_properties(sim.terrain.unit PROPERTIES TIMEOUT 600)
 if(TARGET bf3dump)
     add_test(NAME tools.tc_cost COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
@@ -600,9 +687,9 @@ if(OPENBF3_ASAN)
     set_tests_properties(core.ui.swf.unit core.ui.swf.fuzz PROPERTIES TIMEOUT 1800)
 endif()
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.ui_fonts COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui_fonts.cmake)
-    add_test(NAME godot.ui_fonts_shots COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui_fonts_shots.cmake)
-    set_tests_properties(godot.ui_fonts godot.ui_fonts_shots PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 360 RESOURCE_LOCK openbf3_godot_project)
+    openbf3_godot_row(godot.ui_fonts godot_ui_fonts.cmake HEADLESS TIMEOUT 360)
+    openbf3_godot_row(godot.ui_fonts_shots godot_ui_fonts_shots.cmake WINDOW TIMEOUT 360)
+    set_tests_properties(godot.ui_fonts_shots PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 # UI ui2 (docs/design/ui-minimap-icons.md §13): ui2.contract compiles the minimap / HUD icon / HUD model headers
@@ -639,8 +726,8 @@ endif()
 # without OPENBF3_GODOT, an install, a window or a rendering device); OPENBF3_UI2_SHOTS names a directory for the
 # six G11 PNGs. It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.ui2 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui2.cmake)
-    set_tests_properties(godot.ui2 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 400 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.ui2 godot_ui2.cmake WINDOW TIMEOUT 400)
+    set_tests_properties(godot.ui2 PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 # M2a weapons (docs/design/m2a-weapons.md §12): m2a.weapons.contract compiles every weapons header with the M1
@@ -768,12 +855,90 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
             set_tests_properties(audio.${_openbf3_audio_name} PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
         endif()
     endforeach()
-    set_tests_properties(audio.decode.perf audio.bank audio.m16.offline PROPERTIES RUN_SERIAL TRUE)
+    # The timing gates run serially (label timing). audio.m16.offline is a long render, not timed: it runs in the
+    # branch pass and only shares the shots WAVs with godot.audio (RESOURCE_LOCK).
+    set_tests_properties(audio.decode.perf audio.bank PROPERTIES RUN_SERIAL TRUE)
+    set_tests_properties(audio.m16.offline PROPERTIES RESOURCE_LOCK openbf3_shots_audio)
 endif()
 # M2a audio gate G8 (tests/godot_audio.cmake): the windowed M16A3 check of res://scenes/audio_m16.tscn; WAVs to the
 # same shots directory as audio.m16.offline. Exit 77 without OPENBF3_GODOT, an install, or a window.
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    add_test(NAME godot.audio COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DSHOTS=${_openbf3_audio_shots}
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_audio.cmake)
-    set_tests_properties(godot.audio PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.audio godot_audio.cmake WINDOW TIMEOUT 300 ARGS -DSHOTS=${_openbf3_audio_shots})
+    set_tests_properties(godot.audio PROPERTIES RUN_SERIAL TRUE RESOURCE_LOCK "openbf3_godot_project;openbf3_shots_audio")
 endif()
+
+# ---------------------------------------------------------------------------------------------
+# Scheduling (docs/testing.md): the labels that decide which ctest phase runs a row, then PROCESSORS and COST.
+# Unlabelled rows run in the parallel branch pass (the dev / debug / release test presets exclude the labels timing,
+# realtime and window). Rows that do not exist in this configuration (no Godot, asan) are skipped.
+function(openbf3_label p_label)
+    foreach(row IN LISTS ARGN)
+        if(TEST ${row})
+            set_property(TEST ${row} APPEND PROPERTY LABELS ${p_label})
+        endif()
+    endforeach()
+endfunction()
+# realtime: waits on real time at under 0.5 core and gates latency behaviour (the merge pass's lane, -j8).
+openbf3_label(realtime godot.m1 host.session host.session.unit host.server godot.s0_selftest)
+# timing: gates wall or CPU time (the merge pass, serially; RUN_SERIAL stays on each).
+openbf3_label(timing host.scale sim.nav.bake sim.weapons.perf tools.fx_bench audio.decode.perf audio.bank logic.perf
+    tools.tc_cost host.gunplay.perf)
+# serial_wallclock: RUN_SERIAL in the branch pass for a wall-clock CHECK (host_scale_tests.cpp: the per-tick timer
+# parts sum to >= 0.95 x the tick on 99 % of ticks).
+openbf3_label(serial_wallclock host.scale.unit)
+# merge_also: the memory gates run in the branch pass and again alone in the merge pass's timing phase, which decides.
+openbf3_label(merge_also tools.ebx_memory tools.m1_prepare)
+
+# PROCESSORS = measured cpu / wall (rounded, >= 2); COST = measured serial seconds (rows over 5 s), so a fresh build
+# directory without CTestCostData.txt still starts the critical path first. Measured on 925cd51 + S01 (dev, serial, 611 s pass).
+function(openbf3_cost p_row p_processors p_cost)
+    if(TEST ${p_row})
+        if(p_processors GREATER 1)
+            set_tests_properties(${p_row} PROPERTIES PROCESSORS ${p_processors})
+        endif()
+        set_tests_properties(${p_row} PROPERTIES COST ${p_cost})
+    endif()
+endfunction()
+openbf3_cost(sim.terrain 4 283)
+openbf3_cost(sim.nav 4 61)
+openbf3_cost(logic.census 2 38)
+openbf3_cost(sim.vehicle 1 40)
+openbf3_cost(fx.install 2 29)
+openbf3_cost(sim.vehicle.unit 1 25)
+openbf3_cost(core.level.collision 2 19)
+openbf3_cost(core.level 1 9)
+openbf3_cost(prepare 1 5)
+openbf3_cost(core.ant 1 4)
+openbf3_cost(core.gameplay.weapons 1 5)
+openbf3_cost(fx.fuzz 1 5)
+openbf3_cost(audio.loc 1 5)
+openbf3_cost(ui.minimap 1 5)
+openbf3_cost(sim.world 2 4)
+openbf3_cost(sim.motor 2 3)
+openbf3_cost(core.install 2 3)
+openbf3_cost(core.cache 2 1)
+openbf3_cost(core.res.install 2 3)
+openbf3_cost(audio.census 2 3)
+openbf3_cost(tools.ebx_memory 2 2)
+# The timing / realtime / window rows: COST only orders them inside their phase.
+openbf3_cost(godot.m1 1 346)
+openbf3_cost(host.session 1 191)
+openbf3_cost(host.session.unit 1 70)
+openbf3_cost(host.scale 1 88)
+openbf3_cost(sim.nav.bake 1 49)
+openbf3_cost(godot.s3_crowd 1 270)
+openbf3_cost(godot.l1_look 1 196)
+openbf3_cost(godot.m1_load 1 49)
+openbf3_cost(godot.audio 1 33)
+openbf3_cost(audio.decode.perf 1 11)
+openbf3_cost(tools.tc_cost 1 9)
+
+# Every godot.* row goes through openbf3_godot_row (docs/testing.md "Godot rows").
+get_property(_openbf3_all_tests DIRECTORY PROPERTY TESTS)
+get_property(_openbf3_godot_rows GLOBAL PROPERTY OPENBF3_GODOT_ROWS)
+foreach(_openbf3_row IN LISTS _openbf3_all_tests)
+    if(_openbf3_row MATCHES "^godot[.]" AND NOT _openbf3_row STREQUAL "godot.project_setup"
+            AND NOT _openbf3_row IN_LIST _openbf3_godot_rows)
+        message(FATAL_ERROR "${_openbf3_row}: register godot.* rows with openbf3_godot_row(HEADLESS|WINDOW) (docs/testing.md)")
+    endif()
+endforeach()

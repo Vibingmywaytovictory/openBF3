@@ -45,9 +45,42 @@
     { "name": "asan", "configurePreset": "asan" }
   ],
   "testPresets": [
-    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
-    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
-    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
-    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } }
+    { "name": "test-base", "hidden": true, "output": { "outputOnFailure": true } },
+    {
+      "name": "branch-base",
+      "hidden": true,
+      "inherits": "test-base",
+      "execution": { "jobs": 16 },
+      "filter": { "exclude": { "label": "^(timing|realtime|window)$" } }
+    },
+    { "name": "dev", "inherits": "branch-base", "configurePreset": "dev",
+      "displayName": "dev: the branch pass (docs/testing.md; no timing, realtime or window rows), 16 jobs" },
+    { "name": "debug", "inherits": "branch-base", "configurePreset": "debug" },
+    { "name": "release", "inherits": "branch-base", "configurePreset": "release" },
+    {
+      "name": "dev-realtime",
+      "inherits": "test-base",
+      "configurePreset": "dev",
+      "displayName": "dev-realtime: the merge pass's real-time lane (label realtime), 8 jobs",
+      "execution": { "jobs": 8 },
+      "filter": { "include": { "label": "^realtime$" } }
+    },
+    {
+      "name": "dev-timing",
+      "inherits": "test-base",
+      "configurePreset": "dev",
+      "displayName": "dev-timing: the merge pass's timing rows and memory gates (labels timing, merge_also), serial",
+      "execution": { "jobs": 1 },
+      "filter": { "include": { "label": "^(timing|merge_also)$" } }
+    },
+    {
+      "name": "dev-window",
+      "inherits": "test-base",
+      "configurePreset": "dev",
+      "displayName": "dev-window: the windowed Godot rows (label window), serial, the user-away tenure only",
+      "execution": { "jobs": 1 },
+      "filter": { "include": { "label": "^window$" } }
+    },
+    { "name": "asan", "inherits": "test-base", "configurePreset": "asan" }
   ]
 }
