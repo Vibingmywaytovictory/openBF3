@@ -2146,7 +2146,6 @@ TEST_SUITE("host-gunplay-client") {
 		for (int slot : server.bot_slots()) {
 			CHECK_MESSAGE(fired_before.count(uint8_t(slot)) == 1, "bot slot " << slot << " fired before the join");
 		}
-		const size_t a_before = a.events.size();
 		REQUIRE(b.start(server.port(), floor_level(), "off", 42));
 		const auto join = std::chrono::steady_clock::now();
 		for (;;) {
@@ -2160,18 +2159,24 @@ TEST_SUITE("host-gunplay-client") {
 			b.poll();
 			std::this_thread::sleep_for(std::chrono::milliseconds(4));
 		}
-		a.run_for(1.0);
-		b.run_for(1.0);
+		// Both stop firing and keep draining together until the last shots have arrived.
+		a.input.held_buttons = 0;
+		b.input.held_buttons = 0;
+		for (const auto tail = std::chrono::steady_clock::now(); tg::seconds_since(tail) < 1.5;) {
+			a.poll();
+			b.poll();
+			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		}
 		const host::ClientStats sa = a.client.stats(), sb = b.client.stats();
 		a.client.stop();
 		b.client.stop();
 		server.stop();
 		print_client("E15 client A", sa);
 		print_client("E15 client B", sb);
-		// Every shot B saw as remote: A saw it (as remote, or fired it itself) with the same effect seed.
+		// Every shot B saw as remote: A saw it (as remote, or fired it itself) with the same effect seed. A's whole
+		// stream: B's first ShotEvents also carry shots of the ticks just before its join.
 		std::map<std::pair<uint8_t, uint32_t>, const host::PresentEvent *> at_a;
-		for (size_t i = a_before; i < a.events.size(); ++i) {
-			const host::PresentEvent &e = a.events[i];
+		for (const host::PresentEvent &e : a.events) {
 			if (e.kind == host::PresentKind::RemoteShot || e.kind == host::PresentKind::OwnShot) {
 				at_a[{ e.slot, e.id }] = &e;
 			}

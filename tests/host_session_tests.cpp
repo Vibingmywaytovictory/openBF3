@@ -1732,7 +1732,7 @@ TEST_SUITE("host-session-unit") {
 			for (uint32_t i = 0; i < 4; ++i) {
 				OtherTrack &t = f->others[i];
 				t.slot = uint8_t(i + 1);
-				t.count = uint32_t(count(rng));
+				t.count = uint8_t(count(rng));
 				uint32_t tick = base + uint32_t(gap(rng));
 				for (uint32_t k = 0; k < t.count; ++k) {
 					net::OtherSoldier o;
