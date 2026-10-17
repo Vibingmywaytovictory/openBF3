@@ -530,6 +530,7 @@ struct GameServer::Impl {
 	void send_snapshots(sim::Tick p_tick, uint64_t p_now_ns) {
 		const auto start = std::chrono::steady_clock::now();
 		const uint64_t snapshots_before = snapshots_sent; // S1
+		sv_record_tick(p_tick); // M2a sv [snap]: the shared lag-history records of this snapshot tick
 		std::vector<std::pair<float, size_t>> order;
 		for (size_t i = 0; i < slots.size(); ++i) {
 			Slot &s = slots[i];
@@ -566,6 +567,7 @@ struct GameServer::Impl {
 			for (const auto &[d, j] : order) {
 				snap.others.push_back(net::quantize_other(uint8_t(j), slots[j].state));
 			}
+			sv_prepare_snapshot(i, snap); // M2a sv [snap]: own weapons, others' weapon fields, the SnapshotOthers split
 			std::vector<uint8_t> bytes = net::encode_snapshot(snap);
 			if (bytes.empty()) {
 				continue;
@@ -574,7 +576,9 @@ struct GameServer::Impl {
 			snapshot_bytes += bytes.size();
 			max_snapshot_bytes = std::max(max_snapshot_bytes, bytes.size());
 			send(s.peer, net::kChannelUnreliable, std::move(bytes));
+			sv_after_snapshot(i, snap); // M2a sv [snap]: SnapshotOthers, history.sent, shots, combat events
 		}
+		sv_end_snapshots(); // M2a sv [snap]
 		last_encode_ms = ms_since(start);
 		times.encode_ms = last_encode_ms; // S1
 		times.snapshots = uint32_t(snapshots_sent - snapshots_before); // S1
