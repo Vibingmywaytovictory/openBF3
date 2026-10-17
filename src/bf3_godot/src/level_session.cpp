@@ -810,7 +810,7 @@ void Bf3LevelSession::try_done() {
 		if (has_user_arg("m1-courses")) {
 			courses = uint32_t(std::clamp(std::atoi(user_arg_value("m1-courses").c_str()), 1, 102));
 		}
-		check_ = std::make_unique<M1Check>(*this, courses);
+		check_ = std::make_unique<M1Check>(*this, courses, user_arg_value("m1-phase"));
 	} else if (!load_check_.empty()) {
 		load_check_runner_ = std::make_unique<M1LoadCheck>(*this, load_check_ == "warm", shots_.get());
 	}

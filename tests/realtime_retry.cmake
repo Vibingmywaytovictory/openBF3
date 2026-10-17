@@ -14,7 +14,10 @@
 #                      same check name)
 # A failing line names the check: doctest prints "file(line): ERROR: CHECK( <expr> ) is NOT correct!", the Godot
 # checks print their table rows ("  FAIL  E2.150/2 ...", "| server.tick_rate | FAIL | ...").
-set(RT_ROWS host.server host.session host.session.unit godot.m1 godot.s0_selftest)
+# godot.m1.e1 and host.session.e3 are not listed: their checks (E1 traces, E1d, E3, snapshots) are functional, so a
+# failure there fails the pass at once.
+set(RT_ROWS host.server host.session.gate host.session.stress host.session.unit godot.m1.e2_gate godot.m1.e2_stress
+	godot.s0_selftest)
 
 set(RT_host.server_FAIL "ERROR: ")
 set(RT_host.server_SUMMARY "\\[doctest\\] test cases:")
@@ -26,10 +29,12 @@ set(RT_host.server_NO_RETRY "")
 # extrapolated share), the loopback case's clock target, RTT bound and presentation sample counts (frames presented
 # and compared over a real-time window), the teleport's smoothing deadline.
 set(_rt_session_retry "CHECK(_MESSAGE)?\\( (c\\.ok|\\(t == 2 \\|\\| t == 3\\)|run\\.target_changes <= 2|rtt (>=|<=) nominal|rtt_sum / double\\(rtt_n\\) <= |s\\.target_buffer_ticks == 2|double\\(run\\.interp\\.extrapolated\\) < |double\\(zero_ns - reconcile_ns\\) / 1e6 <= 400|interp\\.(presented > 500|compared > 300))")
-set(RT_host.session_FAIL "ERROR: ")
-set(RT_host.session_SUMMARY "\\[doctest\\] test cases:")
-set(RT_host.session_RETRY "${_rt_session_retry}")
-set(RT_host.session_NO_RETRY "")
+foreach(_rt_row host.session.gate host.session.stress)
+	set(RT_${_rt_row}_FAIL "ERROR: ")
+	set(RT_${_rt_row}_SUMMARY "\\[doctest\\] test cases:")
+	set(RT_${_rt_row}_RETRY "${_rt_session_retry}")
+	set(RT_${_rt_row}_NO_RETRY "")
+endforeach()
 set(RT_host.session.unit_FAIL "ERROR: ")
 set(RT_host.session.unit_SUMMARY "\\[doctest\\] test cases:")
 set(RT_host.session.unit_RETRY "${_rt_session_retry}")
@@ -37,10 +42,12 @@ set(RT_host.session.unit_NO_RETRY "")
 
 # src/bf3_godot/src/m1_check.cpp: the table rows E2.<profile> (judge_rest over the rest cycles, RTT, clock target,
 # extrapolation). Not when the row failed because the client could not restart or spawn (fail_phase).
-set(RT_godot.m1_FAIL "^  FAIL  ")
-set(RT_godot.m1_SUMMARY "M1 CHECK: (PASS|FAIL)")
-set(RT_godot.m1_RETRY "^  FAIL  E2\\.")
-set(RT_godot.m1_NO_RETRY "client restart|did not spawn|gave no new life")
+foreach(_rt_row godot.m1.e2_gate godot.m1.e2_stress)
+	set(RT_${_rt_row}_FAIL "^  FAIL  ")
+	set(RT_${_rt_row}_SUMMARY "M1 CHECK: (PASS|FAIL)")
+	set(RT_${_rt_row}_RETRY "^  FAIL  E2\\.")
+	set(RT_${_rt_row}_NO_RETRY "client restart|did not spawn|gave no new life")
+endforeach()
 
 # src/bf3_godot/src/s0_selftest.cpp: server.tick_rate and server.step_time (p99 < 5 ms).
 set(RT_godot.s0_selftest_FAIL "^\\| [^|]+ \\| FAIL")

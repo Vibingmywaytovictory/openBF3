@@ -57,7 +57,7 @@ endfunction()
 # error, and so is a godot.* row registered any other way (the check at the end of this file). Every row requires
 # the godot.project_setup fixture and shares the project's .godot directory and DLL (RESOURCE_LOCK).
 function(openbf3_godot_row name script mode)
-    cmake_parse_arguments(PARSE_ARGV 3 G "" "TIMEOUT" "ARGS")
+    cmake_parse_arguments(PARSE_ARGV 3 G "NO_PROJECT_LOCK" "TIMEOUT" "ARGS")
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${script}" body)
     if(mode STREQUAL "WINDOW")
         if(NOT body MATCHES "set\\(GODOT_WINDOWED TRUE\\)")
@@ -72,7 +72,11 @@ function(openbf3_godot_row name script mode)
     endif()
     add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} "-DGODOT_EXE=${OPENBF3_GODOT_EXE}"
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}" -DROW=${name} ${G_ARGS} -P ${CMAKE_CURRENT_SOURCE_DIR}/${script})
-    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED godot_project RESOURCE_LOCK openbf3_godot_project)
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED godot_project)
+    # NO_PROJECT_LOCK: a headless row shown not to write the project's .godot directory (docs/testing.md "Splits").
+    if(NOT G_NO_PROJECT_LOCK)
+        set_tests_properties(${name} PROPERTIES RESOURCE_LOCK openbf3_godot_project)
+    endif()
     if(G_TIMEOUT)
         set_tests_properties(${name} PROPERTIES TIMEOUT ${G_TIMEOUT})
     endif()
@@ -383,7 +387,10 @@ endif()
 # (docs/testing.md "Splits"): host.session.unit.pure runs the 4 socket-free cases (judge_rest, presentation,
 # GameServer without sockets, SpawnSweep in batches) on every branch; host.session.unit runs the 5 loopback cases,
 # which wait on real time, in the merge pass's real-time lane (label realtime, like host.session);
-# host.session.unit.split_cover proves every case is in exactly one of the two.
+# host.session.unit.split_cover proves every case is in exactly one of the two. The suite host-session is split the
+# same way into three lane rows that run side by side, each loading Metro itself and checking install unchanged:
+# host.session.gate (the load case and E2 under 150/2), host.session.stress (E2 under lat=150-165,loss=2) and
+# host.session.e3 (the SpawnSweep); host.session.split_cover proves the cover.
 openbf3_test(test_host_session test_main.cpp host_session_tests.cpp test_support.h)
 target_link_libraries(test_host_session PRIVATE bf3_host)
 target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
@@ -393,13 +400,21 @@ openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-se
 openbf3_case_row(NAME host.session.unit EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 5
     EXCLUDE ${_openbf3_session_pure})
 openbf3_split_cover(NAME host.session.unit.split_cover EXE test_host_session SUITE host-session-unit GROUP host-session-unit)
-add_test(NAME host.session COMMAND test_host_session --test-suite=host-session)
+set(_openbf3_session_install "*Metro*install*unchanged*")
+openbf3_case_row(NAME host.session.gate EXE test_host_session SUITE host-session GROUP host-session COUNT 3
+    CASES "*Metro*load_shared_level*cold*warm*" "*Metro*E2*150/2*gate" INSTALL_CASE ${_openbf3_session_install})
+openbf3_case_row(NAME host.session.stress EXE test_host_session SUITE host-session GROUP host-session COUNT 2
+    CASES "*Metro*E2*lat=150-165*" INSTALL_CASE ${_openbf3_session_install})
+openbf3_case_row(NAME host.session.e3 EXE test_host_session SUITE host-session GROUP host-session COUNT 2
+    CASES "*Metro*E3*SpawnSweep*" INSTALL_CASE ${_openbf3_session_install})
+openbf3_split_cover(NAME host.session.split_cover EXE test_host_session SUITE host-session GROUP host-session
+    INSTALL_CASE ${_openbf3_session_install})
 set_tests_properties(host.session.unit.pure host.session.unit PROPERTIES TIMEOUT 300)
-set_tests_properties(host.session PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+set_tests_properties(host.session.gate host.session.stress host.session.e3 PROPERTIES TIMEOUT 400)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_t4_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(host.session.unit.pure host.session.unit host.session.unit.split_cover host.session
-        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t4_cl_dir}")
+    set_tests_properties(host.session.unit.pure host.session.unit host.session.unit.split_cover host.session.gate
+        host.session.stress host.session.e3 host.session.split_cover PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_t4_cl_dir}")
 endif()
 
 # M1 T5: the level scene (bf3_render level_scene.h; docs/design/m1.md §14). render.scene.unit: synthetic census,
@@ -418,15 +433,21 @@ if(OPENBF3_ASAN)
     set_tests_properties(render.scene.unit render.scene PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_scene_cl_dir}")
 endif()
 
-# M1 T6 godot (docs/design/m1.md §1, §11, §12, §14): godot.m1 runs the headless --m1-check of
-# res://scenes/m1_metro.tscn (E1 through the loopback server on Trace reports, E2 under both netsim profiles judged by
-# judge_rest, E3 SpawnSweep with 128 slots, install unchanged); godot.m1_load the windowed --m1-load-check cold then
+# M1 T6 godot (docs/design/m1.md §1, §11, §12, §14): the headless --m1-check of res://scenes/m1_metro.tscn runs as
+# three shards side by side in the merge pass's real-time lane (--m1-phase, godot_m1.cmake -DPHASE): godot.m1.e1 (E1
+# through the loopback server on Trace reports, E1d, E3 SpawnSweep with 128 slots, the snapshot equality,
+# upload.surface_format, input.keys), godot.m1.e2_gate (E2 under 150/2 judged by judge_rest) and godot.m1.e2_stress
+# (E2 under lat=150-165,loss=2, reported); each loads Metro on its own cache root and checks install unchanged. They
+# drop the project lock: a headless m1 run leaves bf3-opensource/.godot unchanged (hashed before and after, S16), and
+# godot.project_setup has written extension_list.cfg first. godot.m1_load the windowed --m1-load-check cold then
 # warm on a fresh scratch cache root (E4 / E5, phase times, frame time, the game's peak working set, 8 spawn shots)
 # after a probe run, and exits 77 = skipped without a window or rendering device. Both exit 77 without OPENBF3_GODOT
-# or an install and share the project and its DLL with the other godot.* tests. godot.m1 is labelled realtime (E2
-# wall-clock netsim; the merge pass's lane), godot.m1_load is WINDOW and RUN_SERIAL (E4 / E5 timing).
+# or an install and share the project and its DLL with the other godot.* tests. The godot.m1 shards are labelled
+# realtime (E2 wall-clock netsim; the merge pass's lane), godot.m1_load is WINDOW and RUN_SERIAL (E4 / E5 timing).
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
-    openbf3_godot_row(godot.m1 godot_m1.cmake HEADLESS TIMEOUT 600)
+    openbf3_godot_row(godot.m1.e1 godot_m1.cmake HEADLESS NO_PROJECT_LOCK TIMEOUT 450 ARGS -DPHASE=e1)
+    openbf3_godot_row(godot.m1.e2_gate godot_m1.cmake HEADLESS NO_PROJECT_LOCK TIMEOUT 300 ARGS -DPHASE=e2_gate)
+    openbf3_godot_row(godot.m1.e2_stress godot_m1.cmake HEADLESS NO_PROJECT_LOCK TIMEOUT 300 ARGS -DPHASE=e2_stress)
     openbf3_godot_row(godot.m1_load godot_m1_load.cmake WINDOW TIMEOUT 300)
     set_tests_properties(godot.m1_load PROPERTIES RUN_SERIAL TRUE)
 endif()
@@ -890,7 +911,8 @@ function(openbf3_label p_label)
     endforeach()
 endfunction()
 # realtime: waits on real time at under 0.5 core and gates latency behaviour (the merge pass's lane, -j8).
-openbf3_label(realtime godot.m1 host.session host.session.unit host.server godot.s0_selftest host.scale.paced)
+openbf3_label(realtime godot.m1.e1 godot.m1.e2_gate godot.m1.e2_stress host.session.gate host.session.stress host.session.e3
+    host.session.unit host.server godot.s0_selftest host.scale.paced)
 # timing: gates wall or CPU time (the merge pass, serially; RUN_SERIAL stays on each).
 openbf3_label(timing host.scale sim.nav.bake sim.weapons.perf tools.fx_bench audio.decode.perf audio.bank logic.perf
     tools.tc_cost host.gunplay.perf)
@@ -935,8 +957,12 @@ openbf3_cost(core.res.install 2 3)
 openbf3_cost(audio.census 2 3)
 openbf3_cost(tools.ebx_memory 2 2)
 # The timing / realtime / window rows: COST only orders them inside their phase.
-openbf3_cost(godot.m1 1 346)
-openbf3_cost(host.session 1 191)
+openbf3_cost(godot.m1.e1 1 150)
+openbf3_cost(godot.m1.e2_gate 1 100)
+openbf3_cost(godot.m1.e2_stress 1 100)
+openbf3_cost(host.session.gate 1 100)
+openbf3_cost(host.session.stress 1 100)
+openbf3_cost(host.session.e3 1 10)
 openbf3_cost(host.session.unit 1 70)
 openbf3_cost(host.scale 1 30)
 openbf3_cost(host.scale.paced 1 85)

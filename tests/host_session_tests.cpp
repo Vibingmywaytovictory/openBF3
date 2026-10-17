@@ -1168,13 +1168,23 @@ TEST_SUITE("host-session-unit") {
 		tr2.ticks = 120;
 		uint16_t after_stall = 0;
 		Tick newest_after = 0;
-		live->input.pose = Pose::Crouch;
 		live->client.send_debug(tr2);
 		run_for(*live, 0.1);
-		// The 0.75 s window opens at the stall request, not at run_for's start: under a parallel ctest the main thread
-		// can be descheduled between the two, which moved the stall's end before the window (lane run, 2026-10-17).
-		// The client thread starts its 800 ms stall at or after the request, so the first fresh frame after 0.75 s
-		// is always one after the stall.
+		// The stall starts as soon as a frame shows the predicted PoseStarted (the crouch command is sent in that client
+		// tick), so the server's finish 18 ticks later always falls inside the 800 ms stall; a fixed wait between the
+		// command and the stall let a descheduled main thread move the finish before the stall (lane runs,
+		// 2026-10-17). The 0.75 s window opens at the stall request: the client thread starts its stall at or after
+		// it, so the first fresh frame after 0.75 s is always one after the stall.
+		live->input.pose = Pose::Crouch;
+		bool started = false;
+		const auto pose_sent = std::chrono::steady_clock::now();
+		while (!started && seconds_since(pose_sent) < 2.0) {
+			started = poll(*live) && (live->frame->events & soldier_events::kPoseStarted) != 0;
+			if (!started) {
+				std::this_thread::sleep_for(1ms);
+			}
+		}
+		REQUIRE(started);
 		const auto stall_requested = std::chrono::steady_clock::now();
 		live->client.debug_stall(800);
 		bool first = true;

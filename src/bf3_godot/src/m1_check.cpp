@@ -708,8 +708,22 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 
 // ---- M1Check ----------------------------------------------------------------------------------------------------
 
-M1Check::M1Check(Bf3LevelSession &p_session, uint32_t p_courses) :
-		session_(p_session), want_courses_(p_courses) {}
+M1Check::M1Check(Bf3LevelSession &p_session, uint32_t p_courses, const std::string &p_phase) :
+		session_(p_session), want_courses_(p_courses) {
+	if (!p_phase.empty()) {
+		phase_name_ = p_phase;
+	}
+	if (phase_name_ == "e1") {
+		profile_begin_ = profile_end_ = 0;
+	} else if (phase_name_ == "e2_gate" || phase_name_ == "e2_stress") {
+		run_e1_ = false;
+		profile_begin_ = phase_name_ == "e2_gate" ? 0 : 1;
+		profile_end_ = profile_begin_ + 1;
+	} else {
+		phase_known_ = phase_name_ == "all";
+	}
+	profile_ = profile_begin_;
+}
 
 M1Check::~M1Check() = default;
 
@@ -747,7 +761,20 @@ void M1Check::prepare() {
 						level ? level->spawns.size() : size_t(0)) +
 						session_.cache_summary());
 	}
+	if (!phase_known_) {
+		fail_phase("m1-phase", "unknown --m1-phase=" + phase_name_ + " (all, e1, e2_gate or e2_stress)");
+		phase_ = Phase::Finish;
+		return;
+	}
+	if (phase_name_ != "all") {
+		add("m1-phase", 2,
+				fmt("--m1-phase=%s: %s", phase_name_.c_str(),
+						run_e1_ ? "upload.surface_format, input.keys, E1, E1d, E3, E1.snapshots" : (profile_begin_ == 0 ? "E2 150/2 (the gate)" : "E2 lat=150-165,loss=2 (stress row)")));
+	}
 	for (CheckRow (*row)() : { &check_surface_format, &check_input_keys }) {
+		if (!run_e1_) {
+			break;
+		}
 		rows_.push_back(row());
 		failed_ = failed_ || rows_.back().result == 1;
 		UtilityFunctions::print(to_godot("[m1-check] " + rows_.back().check + ": " + rows_.back().detail));
@@ -797,6 +824,10 @@ void M1Check::prepare() {
 			fmt("in-process world and motor over the session's shapes: %zu settle rows, %zu courses (points %s), drop spot %s, %.2f s", headless_rows_.size(),
 					courses_.size(), points.c_str(),
 					drop_ ? fmt("(%.2f, %.3f, %.2f)", (*drop_)[0], (*drop_)[1], (*drop_)[2]).c_str() : "none", prepare_seconds_));
+	if (!run_e1_) {
+		phase_ = Phase::E2Start;
+		return;
+	}
 	phase_ = courses_.empty() ? (drop_ ? Phase::E1dTeleport : Phase::E3) : Phase::E1Teleport;
 }
 
@@ -1053,9 +1084,11 @@ void M1Check::judge_e2() {
 }
 
 void M1Check::finish_rows() {
-	add("E1.snapshots", snapshots_compared_ > 0 && snapshots_equal_ == snapshots_compared_ ? 0 : 1,
-			fmt("%llu snapshot own states seen during the traces equal the trace entry of their tick bit for bit (of %llu compared)",
-					(unsigned long long)snapshots_equal_, (unsigned long long)snapshots_compared_));
+	if (run_e1_ && phase_known_) {
+		add("E1.snapshots", snapshots_compared_ > 0 && snapshots_equal_ == snapshots_compared_ ? 0 : 1,
+				fmt("%llu snapshot own states seen during the traces equal the trace entry of their tick bit for bit (of %llu compared)",
+						(unsigned long long)snapshots_equal_, (unsigned long long)snapshots_compared_));
+	}
 	const bf3::core::InstallSnapshot &before = session_.install_snapshot_at_start();
 	if (before.valid) {
 		const bf3::core::SnapshotDiff d = bf3::core::diff_snapshots(before, session_.install().snapshot());
@@ -1307,7 +1340,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 		}
 
 		case Phase::E2Start: {
-			if (profile_ >= std::size(kProfiles)) {
+			if (profile_ >= profile_end_) {
 				phase_ = Phase::Finish;
 				return false;
 			}

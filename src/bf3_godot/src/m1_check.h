@@ -23,6 +23,10 @@
 //   install.unchanged; a PASS/FAIL table and "M1 CHECK: PASS|FAIL (n/m)".
 //   Headless also runs upload.surface_format: encode_rs_surface against the RenderingServer's own conversion, and
 //   input.keys: the BF3 PC press keys through the device path with modifiers held.
+//   --m1-phase=all|e1|e2_gate|e2_stress (default all) runs one shard of that sequence (ctest godot.m1.<phase>, the
+//   merge pass's real-time lane): e1 = upload.surface_format, input.keys, E1, E1d, E3 and E1.snapshots; e2_gate =
+//   E2 "150/2"; e2_stress = E2 "lat=150-165,loss=2". Every shard runs the load and prepare rows (E2 spawns at the
+//   first course's point) and install.unchanged.
 //
 // --m1-load-check=cold|warm (ctest godot.m1_load, windowed): E4 (cold, <= 15 s) or E5 (warm, <= 5 s) from process
 //   start to the first controllable frame (orchestrator decision on docs §16 question 4; _ready -> Done is
@@ -137,7 +141,8 @@ private:
 
 class M1Check {
 public:
-	M1Check(Bf3LevelSession &p_session, uint32_t p_courses);
+	// p_phase: the --m1-phase value ("" = all); an unknown value fails the check at prepare.
+	M1Check(Bf3LevelSession &p_session, uint32_t p_courses, const std::string &p_phase = std::string());
 	~M1Check();
 	// Every frame after Done, after the camera update. True when finished (exit_code()).
 	bool frame(uint64_t p_now_ns);
@@ -184,6 +189,10 @@ private:
 
 	Bf3LevelSession &session_;
 	uint32_t want_courses_ = 6;
+	std::string phase_name_ = "all";
+	bool phase_known_ = true;
+	bool run_e1_ = true; // upload.surface_format, input.keys, E1, E1d, E3, E1.snapshots
+	size_t profile_begin_ = 0, profile_end_ = 2; // the E2 profiles run, [begin, end) of kProfiles
 	std::vector<CheckRow> rows_;
 	bool failed_ = false;
 	int exit_code_ = 1;
