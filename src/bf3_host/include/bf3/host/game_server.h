@@ -38,6 +38,8 @@
 
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill_stats.h"
+#include "bf3/host/gunplay.h" // M2a sv
+#include "bf3/host/server_view.h" // M2a sv
 #include "bf3/host/level_load.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
@@ -92,6 +94,9 @@ struct GameServerConfig {
 	// BotFillConfig::spawn_in_main a bot slot's spawn() chooses among BotLevel::spawns.points (main nav component)
 	// instead of SharedLevel::spawns; its SlotStats spawn index then refers to that list.
 	std::shared_ptr<const BotFillConfig> bots;
+	// M2a sv (docs/design/m2a.md §4.2): weapons, projectiles, damage, kits and lag compensation. Active when the level
+	// has gunplay tables (SharedLevel::gunplay); without them the server runs M1's game unchanged.
+	GunplayConfig gunplay;
 };
 
 struct OutDatagram {
@@ -148,6 +153,13 @@ struct GameServerStats {
 	uint64_t motor_steps = 0; // since init
 	uint64_t collision_queries = 0; // the server CollisionWorld's query_count() (motor casts, settles, bots' rays)
 	BotFillStats bots; // zero without GameServerConfig::bots
+	// M2a sv: the gunplay part (zero without SharedLevel::gunplay) and the match values MatchInfo carries.
+	bool gunplay_active = false;
+	GunplayStats gunplay;
+	uint64_t match_seed = 0;
+	uint64_t weapon_hash = 0;
+	uint64_t kit_hash = 0;
+	uint8_t weapon_flags = 0;
 };
 
 class GameServer {
@@ -179,6 +191,11 @@ public:
 	// stamped there (the motor's tick precondition holds), spawn protection cleared. Server thread; the firefight
 	// brains call it at (re)spawn. Fails for an unused slot, a peer's slot or a non-finite position.
 	core::Status place_soldier(uint32_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose);
+	// M2a sv (docs/design/m2a.md §4.2, server_view.h): the read-only world view for bot brains, valid during the
+	// command-source step of every tick (and between ticks for tests on the server thread).
+	const ServerView &view() const;
+	// M2a sv: the gunplay part (null without SharedLevel::gunplay). Server thread.
+	const Gunplay *gunplay() const;
 
 private:
 	struct Impl;
