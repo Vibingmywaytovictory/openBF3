@@ -4,8 +4,9 @@
 #   ... the same with --m1-load-check=warm
 # E4 (cold <= 15 s) and E5 (warm <= 5 s) from process start to the first controllable frame, the per-phase work and
 # wall times, the frame time after Done, the game's peak working set (reported), install unchanged, and one
-# first-person shot at 8 sampled spawn points (written to the system temp directory, never the repo; removed at the
-# end unless OPENBF3_KEEP_SHOTS is set, so BF3 imagery does not pile up). Passes when both runs print
+# first-person shot at 8 sampled spawn points (written to <build dir>/shots/m1_load-<random> (the build tree is
+# gitignored; the system temp directory in script mode without -DBUILD_DIR), a fresh directory per run, so two runs
+# never delete each other's shots; removed at the end unless OPENBF3_KEEP_SHOTS is set, so BF3 imagery does not pile up). Passes when both runs print
 # "M1 LOAD CHECK: PASS" and exit 0.
 # Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no BF3 install is found, or no window / rendering device can be
 # created: on Windows, Godot's failure to create a rendering device raises a blocking OS alert, so a probe run
@@ -31,9 +32,14 @@ if(NOT probe_rc STREQUAL "0")
 endif()
 string(RANDOM LENGTH 8 ALPHABET 0123456789abcdef tag)
 set(root "$ENV{TEMP}/openbf3-godot-m1-load-${tag}")
-set(shots "$ENV{TEMP}/openbf3-godot-m1-shots")
+if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")
+    set(shots "${BUILD_DIR}/shots/m1_load-${tag}")
+else()
+    set(shots "$ENV{TEMP}/openbf3-godot-m1-shots-${tag}")
+endif()
 file(REMOVE_RECURSE "${root}" "${shots}")
 file(MAKE_DIRECTORY "${shots}")
+message("shots directory: ${shots}")
 set(failed FALSE)
 foreach(pass cold warm)
     execute_process(
