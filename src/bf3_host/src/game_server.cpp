@@ -767,6 +767,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	for (Impl::Slot &s : m.slots) {
 		m.reset_slot(s);
 	}
+	BF3_TRY(m.sv_init()); // M2a sv [init]: the gunplay part and the target bots (slots 0 .. target_bots - 1)
 	for (uint32_t i = 0; i < p_config.walkers; ++i) {
 		if (add_local_soldier(std::make_unique<Walker>(i), 2) < 0) {
 			return core::make_error("GameServer: no slot for walker " + std::to_string(i));
