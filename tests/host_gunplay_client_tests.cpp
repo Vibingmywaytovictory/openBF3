@@ -50,6 +50,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <random>
 #include <set>
 #include <string>
 #include <thread>
@@ -223,7 +224,23 @@ struct GunServerConfig {
 	uint64_t seed = 1;
 	std::vector<BotSpec> bots;
 	size_t trace_limit = size_t(1) << 20;
+	// Hostile: two mutated copies (bit flips, truncation, trailing bytes) of every SnapshotOthers, ShotEvents and
+	// CombatEvents, and every 20 ticks decodable hostile values (an own weapons block with a def outside the table,
+	// a remote shot of an unknown def, a hit with huge damage naming slot 250, which the 7-bit wire slot carries as 122).
+	bool hostile = false;
 };
+
+// A remote shot that decodes but names a def outside the table (the client refuses it and counts it).
+net::RemoteShot hostile_shot(sim::Tick p_tick, const sim::Vec3 &p_eye) {
+	net::RemoteShot r;
+	r.slot = 63;
+	r.shot_index = 1000u + p_tick;
+	r.def = uint16_t(net::kMaxWireDefs - 1); // the largest def the wire carries; the synthetic table is far smaller
+	r.time = sw::tick_start(p_tick);
+	r.origin = p_eye;
+	r.direction = { 0.0f, 0.0f, 1.0f };
+	return r;
+}
 
 struct ServerShot {
 	sim::Tick tick = 0;
@@ -242,7 +259,7 @@ struct ServerLog {
 	std::vector<host::RewindTraceRow> trace;
 	std::vector<std::pair<sim::Tick, net::WeaponsWire>> wires; // the first remote slot's own weapons block per snapshot
 	uint64_t readys = 0, kit_selects = 0, weapon_precondition_failures = 0, refused_views = 0, fake_hits = 0;
-	uint64_t snapshots = 0, snapshot_others = 0, shot_datagrams = 0, combat_datagrams = 0;
+	uint64_t snapshots = 0, snapshot_others = 0, shot_datagrams = 0, combat_datagrams = 0, hostile_sent = 0;
 	host::LagCompStats lag;
 };
 
@@ -565,6 +582,36 @@ private:
 		host_->send(p_peer, p_channel, p_bytes.data(), p_bytes.size(), mode);
 	}
 
+	void hostile_copies(uint32_t p_peer, const std::vector<uint8_t> &p_bytes) {
+		if (!config_.hostile || p_bytes.size() < 2) {
+			return;
+		}
+		for (int k = 0; k < 2; ++k) {
+			std::vector<uint8_t> b = p_bytes;
+			switch (rng_() % 3) {
+				case 0: {
+					const int flips = 1 + int(rng_() % 8);
+					for (int f = 0; f < flips; ++f) {
+						const size_t at = 1 + size_t(rng_() % (b.size() - 1)); // byte 0 stays the type
+						b[at] ^= uint8_t(1u << (rng_() % 8));
+					}
+					break;
+				}
+				case 1:
+					b.resize(1 + size_t(rng_() % (b.size() - 1)));
+					break;
+				default:
+					for (int t = 0, n = 1 + int(rng_() % 16); t < n; ++t) {
+						b.push_back(uint8_t(rng_()));
+					}
+					break;
+			}
+			send(p_peer, net::kChannelUnreliable, false, b);
+			std::lock_guard lock(mutex_);
+			++log_.hostile_sent;
+		}
+	}
+
 	void rewrite_and_send(std::vector<host::OutDatagram> &r_out, sim::Tick p_n) {
 		struct Snap {
 			uint32_t peer = 0;
@@ -676,9 +723,15 @@ private:
 			for (const net::OtherSoldier &o : others.others) {
 				others_mask |= o.slot < 64 ? uint64_t(1) << o.slot : 0;
 			}
+			const bool hostile_tick = config_.hostile && p_n % 20u == 0;
+			if (hostile_tick && snap.own_weapons.has_value()) {
+				snap.own_weapons->slots[snap.own_weapons->active % snap.own_weapons->slots.size()].def = 0xFFF0;
+			}
 			send(s.peer, net::kChannelUnreliable, false, net::encode_snapshot(snap));
 			if (!others.others.empty()) {
-				send(s.peer, net::kChannelUnreliable, false, net::encode_snapshot_others(others));
+				const std::vector<uint8_t> bytes = net::encode_snapshot_others(others);
+				send(s.peer, net::kChannelUnreliable, false, bytes);
+				hostile_copies(s.peer, bytes);
 			}
 			if (lag_ != nullptr) {
 				lag_->sent(uint8_t(at), snap.seq, p_n, main_mask, others_mask);
@@ -693,8 +746,16 @@ private:
 				}
 				sim::Vec3 eye = snap.own.has_value() ? snap.own->position : sim::Vec3{};
 				eye[1] += 1.6f;
+				if (hostile_tick) {
+					net::ShotEvents bad;
+					bad.server_tick = p_n;
+					bad.shots.push_back(hostile_shot(p_n, eye));
+					send(s.peer, net::kChannelUnreliable, false, net::encode_shot_events(bad, frame_, eye));
+				}
 				if (!shots.shots.empty()) {
-					send(s.peer, net::kChannelUnreliable, false, net::encode_shot_events(shots, frame_, eye));
+					const std::vector<uint8_t> bytes = net::encode_shot_events(shots, frame_, eye);
+					send(s.peer, net::kChannelUnreliable, false, bytes);
+					hostile_copies(s.peer, bytes);
 					std::lock_guard lock(mutex_);
 					++log_.shot_datagrams;
 				}
@@ -708,8 +769,18 @@ private:
 				for (const HitRecord &h : hits) {
 					combat.hits.push_back(h.hit);
 				}
+				if (hostile_tick) {
+					net::HitEvent bad;
+					bad.victim = 250;
+					bad.shooter = 251;
+					bad.damage = 1e30f;
+					bad.health_after = -1e30f;
+					combat.hits.push_back(bad);
+				}
 				if (!combat.hits.empty()) {
-					send(s.peer, net::kChannelReliable, true, net::encode_combat_events(combat, frame_));
+					const std::vector<uint8_t> bytes = net::encode_combat_events(combat, frame_);
+					send(s.peer, net::kChannelReliable, true, bytes);
+					hostile_copies(s.peer, bytes);
 					std::lock_guard lock(mutex_);
 					++log_.combat_datagrams;
 				}
@@ -841,6 +912,7 @@ private:
 	std::vector<int> bot_slots_;
 	std::vector<std::pair<sim::Tick, net::RemoteShot>> recent_shots_;
 	std::vector<HitRecord> recent_hits_;
+	std::mt19937_64 rng_{ 0xB0B5EED };
 	std::unique_ptr<net::Host> host_;
 	uint16_t port_ = 0;
 	std::thread thread_;
@@ -953,9 +1025,20 @@ bool same_shot(const sw::ShotEvent &p_a, const sw::ShotEvent &p_b, std::string *
 	return true;
 }
 
+std::optional<std::string> env_value(const char *p_name) {
+	char *v = nullptr;
+	size_t n = 0;
+	if (_dupenv_s(&v, &n, p_name) != 0 || v == nullptr) {
+		return std::nullopt;
+	}
+	std::string out(v);
+	std::free(v);
+	return out;
+}
+
 bool timing_enabled(const char *p_case) {
-	const char *e = std::getenv("OPENBF3_CL_TIMING");
-	if (e == nullptr || std::string(e) != "1") {
+	const std::optional<std::string> e = env_value("OPENBF3_CL_TIMING");
+	if (!e.has_value() || *e != "1") {
 		const std::string why = std::string(p_case) + ": a timing case (set OPENBF3_CL_TIMING=1 and run under the quiet lock)";
 		bf3::test::skip_install_case(why.c_str());
 		return false;
@@ -964,8 +1047,8 @@ bool timing_enabled(const char *p_case) {
 }
 
 double env_seconds(const char *p_name, double p_default) {
-	const char *e = std::getenv(p_name);
-	return e != nullptr ? std::max(1.0, std::atof(e)) : p_default;
+	const std::optional<std::string> e = env_value(p_name);
+	return e.has_value() ? std::max(1.0, std::atof(e->c_str())) : p_default;
 }
 
 // One client and its main-thread side: the newest frame, the spawn view adopted, the drawn frame's view sample, the
@@ -1079,11 +1162,6 @@ GunServerConfig server_config() {
 	c.level = floor_level();
 	c.inputs = m2a_fake::inputs();
 	return c;
-}
-
-sim::Vec3 forward_of(uint16_t p_yaw) {
-	const float y = sim::yaw_radians(p_yaw);
-	return { std::sin(y), 0.0f, std::cos(y) };
 }
 
 void print_client(const char *p_label, const host::ClientStats &p_s) {
@@ -1582,7 +1660,15 @@ TEST_SUITE("host-gunplay-client-unit") {
 		Player p;
 		REQUIRE(p.start(server.port(), floor_level(), "off", 5));
 		REQUIRE(p.wait_spawned());
+		// At least 4 s, then until 3 virtual hits and 50 SnapshotOthers have arrived (a loaded machine ticks slower), at most 20 s.
 		p.run_for(4.0);
+		for (const auto t0 = std::chrono::steady_clock::now(); tg::seconds_since(t0) < 16.0;) {
+			const host::ClientStats now = p.client.stats();
+			if (now.health_rebases >= 3 && now.combat_hits >= 3 && now.snapshot_others_received > 50) {
+				break;
+			}
+			p.run_for(0.25);
+		}
 		const host::ClientStats s = p.client.stats();
 		const m2a_fake::ServerLog log = server.take_log();
 		print_client("R2 / SnapshotOthers", s);
@@ -1609,6 +1695,60 @@ TEST_SUITE("host-gunplay-client-unit") {
 	}
 }
 
+TEST_SUITE("host-gunplay-client-unit") {
+	TEST_CASE("host.gunplay.client: hostile gunplay datagrams are refused and counted; the session keeps predicting") {
+		GunServer server;
+		std::string err;
+		GunServerConfig sc = server_config();
+		sc.hostile = true;
+		sc.split_keep = 1;
+		sc.fake_damage_every_ticks = 45;
+		sc.bots.push_back({ 2, true, m2a_fake::firing_bot(5) });
+		sc.bots.push_back({ 2, true, m2a_fake::firing_bot(35) });
+		sc.bots.push_back({ 2, false, m2a_fake::strafing_bot() });
+		REQUIRE_MESSAGE(server.start(sc, err), err);
+		Player p;
+		REQUIRE(p.start(server.port(), floor_level(), "off", 9));
+		REQUIRE(p.wait_spawned());
+		p.run_for(5.0, [&](double p_t) {
+			p.input.held_buttons = std::fmod(p_t, 1.0) < 0.3 ? sim::buttons::kFire : 0u;
+			p.input.yaw = float(p_t * 0.5);
+		});
+		const host::ClientStats s = p.client.stats();
+		const m2a_fake::ServerLog log = server.take_log();
+		print_client("hostile", s);
+		CHECK(s.connected);
+		CHECK(!s.refused);
+		CHECK(p.frame->valid);
+		CHECK(log.hostile_sent > 100);
+		CHECK(s.bad_gunplay_datagrams > 0);
+		// The unknown-def shot and the hit on slot 250 decode (the wire carries any def and slot byte) and are dropped
+		// by the client's range checks before any event.
+		net::ShotEvents probe;
+		probe.server_tick = 600;
+		probe.shots.push_back(m2a_fake::hostile_shot(600, { 0.0f, 1.6f, 0.0f }));
+		const sim::Vec3 eye0{ 0.0f, 1.6f, 0.0f };
+		const core::Result<net::ShotEvents> decoded =
+				net::decode_shot_events(net::encode_shot_events(probe, m2a_fake::inputs()->shot_frame, eye0), m2a_fake::inputs()->shot_frame);
+		REQUIRE(decoded.ok());
+		REQUIRE(decoded->shots.size() == 1);
+		CHECK(decoded->shots[0].def >= m2a_fake::tables().table->defs.size());
+		std::printf("hostile probe: def %u decodes (table %zu defs), slot %u\n", unsigned(decoded->shots[0].def), m2a_fake::tables().table->defs.size(),
+				unsigned(decoded->shots[0].slot));
+		CHECK(s.bad_gunplay_events > 0);
+		CHECK(std::none_of(p.events.begin(), p.events.end(), [&](const host::PresentEvent &e) {
+			return e.slot >= net::kMaxSlots || e.aux >= net::kMaxSlots || (e.kind == host::PresentKind::RemoteShot && e.def >= m2a_fake::tables().table->defs.size());
+		}));
+		CHECK(s.bad_weapon_wires > 0);
+		CHECK(s.step_precondition_failures == 0);
+		CHECK(s.lane.gaps == 0);
+		CHECK(s.predicted_shots > 0);
+		std::printf("hostile: %" PRIu64 " mutated datagrams sent; refused to decode %" PRIu64 ", out-of-range events dropped %" PRIu64 ", own weapon wires refused %" PRIu64
+					", still predicting (%" PRIu64 " own shots, %" PRIu64 " weapon reconciliations)\n",
+				log.hostile_sent, s.bad_gunplay_datagrams, s.bad_gunplay_events, s.bad_weapon_wires, s.predicted_shots, s.weapon_reconciliations);
+	}
+}
+
 // ---- timing (OPENBF3_CL_TIMING=1, under the quiet lock) ------------------------------------------------------------
 
 namespace {
@@ -1622,6 +1762,7 @@ struct LagcompResult {
 	host::ClientStats stats;
 	m2a_fake::ServerLog log;
 	double strafe_speed = 0;
+	uint64_t draws = 0, window_extrapolated = 0, drawn_extrapolated = 0, drawn_held = 0;
 };
 
 LagcompResult run_lagcomp(const char *p_label, const std::string &p_netsim, uint32_t p_server_rewind, size_t p_shots) {
@@ -1637,13 +1778,15 @@ LagcompResult run_lagcomp(const char *p_label, const std::string &p_netsim, uint
 	Player p;
 	REQUIRE(p.start(server.port(), floor_level(), p_netsim, 11, [](host::ClientSessionConfig &r_c) { r_c.own_test_max_rewind_ticks = int32_t(host::kDefaultMaxRewindTicks); }));
 	REQUIRE(p.wait_spawned());
-	// Stand 20 m in front of the target's spawn, facing it.
-	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	// Stand 20 m to the side of the target's strafe line (across its velocity), facing it: the target crosses the
+	// view at 4 m/s, so the ~250 ms the client draws it behind is about 1 m sideways (the control run's miss).
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
 	const sim::SoldierState b0 = server.state_of(bot);
-	// The strafe origin: where the brain started (its spawn); the bot is near it now.
-	const sim::Vec3 fwd = forward_of(b0.yaw);
-	const sim::Vec3 at{ b0.position[0] + fwd[0] * 20.0f, 0.05f, b0.position[2] + fwd[2] * 20.0f };
-	const uint16_t face = uint16_t(b0.yaw + 32768u);
+	const float vl = std::sqrt(b0.velocity[0] * b0.velocity[0] + b0.velocity[2] * b0.velocity[2]);
+	REQUIRE(vl > 1.0f);
+	const sim::Vec3 across{ -b0.velocity[2] / vl, 0.0f, b0.velocity[0] / vl };
+	const sim::Vec3 at{ b0.position[0] + across[0] * 20.0f, 0.05f, b0.position[2] + across[2] * 20.0f };
+	const uint16_t face = sim::quantize_yaw(std::atan2(-across[0], -across[2]));
 	p.adopt_yaw = sim::yaw_radians(face);
 	p.input.yaw = sim::yaw_radians(face);
 	REQUIRE(p.teleport(at, face).has_value());
@@ -1653,12 +1796,18 @@ LagcompResult run_lagcomp(const char *p_label, const std::string &p_netsim, uint
 	sim::Tick last_press = 0;
 	double speed_sum = 0;
 	size_t speed_n = 0;
+	p.input.held_buttons = sim::buttons::kZoom; // aimed down the sights: the smaller spread
 	const auto start = std::chrono::steady_clock::now();
 	while (fired.size() < p_shots && tg::seconds_since(start) < double(p_shots) / 4.0 + 60.0) {
 		p.poll();
 		const host::PresentationFrame &f = *p.frame;
 		std::array<host::PresentedSoldier, 8> drawn;
-		const size_t n = host::present_others(f, net::monotonic_ns(), drawn);
+		host::PresentOthersCounts counts;
+		const size_t n = host::present_others(f, net::monotonic_ns(), drawn, counts);
+		r.window_extrapolated += counts.window_extrapolated;
+		r.drawn_extrapolated += counts.extrapolated;
+		r.drawn_held += counts.held;
+		++r.draws;
 		for (size_t i = 0; i < n; ++i) {
 			if (drawn[i].slot != bot || !f.valid) {
 				continue;
@@ -1669,7 +1818,7 @@ LagcompResult run_lagcomp(const char *p_label, const std::string &p_netsim, uint
 			p.input.pitch = std::atan2(dy, std::sqrt(dx * dx + dz * dz));
 			speed_sum += std::sqrt(drawn[i].velocity[0] * drawn[i].velocity[0] + drawn[i].velocity[2] * drawn[i].velocity[2]);
 			++speed_n;
-			if (f.tick >= last_press + 10u) {
+			if (f.tick >= last_press + 12u) {
 				++p.input.fire_presses;
 				last_press = f.tick;
 			}
@@ -1746,8 +1895,10 @@ LagcompResult run_lagcomp(const char *p_label, const std::string &p_netsim, uint
 			r.same_zone, r.both ? 100.0 * double(r.same_zone) / double(r.both) : 0.0, r.compared, r.equal, r.mismatched, r.stats.late_sample, r.client_only,
 			r.log.lag.present, r.log.lag.rewound, r.log.lag.clamped, r.log.lag.refused, r.strafe_speed);
 	print_client(p_label, r.stats);
-	std::printf("E12 %s residuals: generation_reorder %" PRIu64 ", others_ahead %" PRIu64 ", track_timeout %" PRIu64 ", refused views %" PRIu64 "\n", p_label,
-			r.stats.generation_reorder, r.stats.others_ahead, r.stats.track_timeout, r.log.refused_views);
+	std::printf("E12 %s residuals: generation_reorder %" PRIu64 ", others_ahead %" PRIu64 ", track_timeout %" PRIu64 ", window_extrapolated %" PRIu64
+				" of %" PRIu64 " draws (extrapolated %" PRIu64 ", held %" PRIu64 "), refused views %" PRIu64 "\n",
+			p_label, r.stats.generation_reorder, r.stats.others_ahead, r.stats.track_timeout, r.window_extrapolated, r.draws, r.drawn_extrapolated,
+			r.drawn_held, r.log.refused_views);
 	return r;
 }
 
