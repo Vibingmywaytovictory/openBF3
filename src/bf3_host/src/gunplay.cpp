@@ -396,6 +396,7 @@ struct Gunplay::Impl {
 	GunplayStats stats;
 	double weapons_acc_ms = 0;
 	sw::SoldierWeaponsState empty_state;
+	std::vector<RewindTraceRow> rewind_rows; // M2a cl: GunplayObserver::wants_rewind_rows (dev / tests)
 
 	void clear(uint8_t p_slot) {
 		Slot &s = slots[p_slot];
@@ -442,6 +443,9 @@ core::Result<std::unique_ptr<Gunplay>> Gunplay::create(const SharedLevel &p_leve
 	m.projectiles = std::make_unique<sw::ProjectileWorld>(m.table);
 	m.history = std::make_unique<LagHistory>(p_config.lag, uint32_t(net::kMaxSlots));
 	m.rewind = std::make_unique<RewindProvider>(*m.history, level.capsule_table, p_config.lag);
+	if (p_config.observer != nullptr && p_config.observer->wants_rewind_rows()) { // M2a cl
+		m.rewind->set_trace(&m.rewind_rows); // M2a cl
+	} // M2a cl
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		m.slots[i].weapons.player_slot = uint32_t(i);
 	}
@@ -578,6 +582,10 @@ void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierStat
 	m.stats.lag = m.rewind->stats();
 	if (m.config.observer) {
 		m.config.observer->projectiles(p_tick, m.step_out, m.projectiles->live());
+		if (!m.rewind_rows.empty()) { // M2a cl
+			m.config.observer->rewind_rows(p_tick, m.rewind_rows); // M2a cl
+			m.rewind_rows.clear(); // M2a cl
+		} // M2a cl
 	}
 }
 

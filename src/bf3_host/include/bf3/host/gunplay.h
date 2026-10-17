@@ -84,6 +84,12 @@ public:
 	virtual void damage(uint32_t p_tick, const sim::weapons::DamageEvent &p_event, bool p_applied, float p_health_after) {
 		(void)p_tick, (void)p_event, (void)p_applied, (void)p_health_after;
 	}
+	// M2a cl (contract fix, docs/design/m2a-cl.md): E12 (b) compares the server's rewound OtherPose with the client's
+	// own-world sample, but neither the Trace wire nor the callbacks above carried it. An observer whose
+	// wants_rewind_rows() is true (read once, in Gunplay::create) gets the RewindProvider's trace rows (lag_comp.h
+	// RewindTraceRow, every posed candidate of a rewound query) of each projectile step, after projectiles().
+	virtual bool wants_rewind_rows() const { return false; }
+	virtual void rewind_rows(uint32_t p_tick, std::span<const RewindTraceRow> p_rows) { (void)p_tick, (void)p_rows; }
 };
 
 struct GunplayConfig {
