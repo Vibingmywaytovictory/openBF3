@@ -139,4 +139,12 @@ failed `split_cover` row as violations; the other budgets warn.
 
 * A failed lane row is rerun alone only when every failing line matches its listed real-time checks
   (`tests/realtime_retry.cmake`). Functional failures, crashes and timeouts fail at once.
-* Each rerun is logged. A check that needs a rerun on 2 of the last 5 merges fails the pass.
+* Each lane run and each rerun is logged (`OPENBF3_RERUN_LOG`; every lane run writes a `- lane` line, so the log
+  holds the clean merges too). A check that needs a rerun on 2 of the last 5 lane runs (the last 5 merges) fails the
+  pass.
+* The merge pass sets `OPENBF3_TIMING_REQUIRE_RUN=1`: a phase that selects no row, or a row that skipped (77: no
+  Godot exe, no `OPENBF3_GODOT_WINDOWED`, the user-active flag), fails, and no rerun clears it. Every merge-pass gate
+  has to run on main; without the variable (a branch's `--all-tests`) the windowed rows may skip.
+* The merge workflow runs the merge pass only through `tools\build.cmd dev --phase ...` (or `--timing`), never as
+  `ctest --preset dev -R <regex>`: the `dev` preset excludes the timing, realtime and window rows, so such a call
+  selects almost none of them and still passes.

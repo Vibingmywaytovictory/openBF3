@@ -6,9 +6,14 @@
 # runs even when an earlier one failed; the script exits 1 if any failed.
 # The realtime phase's rerun rule (tests/realtime_retry.cmake): a failed lane row is rerun alone only when every
 # failing line of its output matches the row's real-time checks; a crash, a timeout, a missing summary or any other
-# failing line fails at once. Both results are printed. With RERUN_LOG every "lane fail, alone pass" is appended as
-# <date> <commit> <row> <check> (tab-separated), and the pass fails when the same check needed a rerun on 2 of the
-# last 5 commits in the log.
+# failing line fails at once. Both results are printed. With RERUN_LOG every realtime phase appends one
+# <date> <commit> - lane line (so the log holds every lane run, clean or not) and every "lane fail, alone pass" a
+# <date> <commit> <row> <check> line (tab-separated); the pass fails when the same check needed a rerun on 2 of the
+# last 5 commits whose lane ran (the last 5 merges).
+# A phase that selects no row fails (a label or preset filter that went wrong must not pass silently). With
+# REQUIRE_RUN=1 (or the environment variable OPENBF3_TIMING_REQUIRE_RUN=1; the main-merge workflow sets it) a row
+# that skipped (exit 77: no Godot exe, no OPENBF3_GODOT_WINDOWED, the user-active flag) also fails its phase: on main
+# every merge-pass row has to run, while a branch's --all-tests may skip the windowed rows.
 # The quiet lock, the settle and the user-away wait belong to the caller (the main-merge workflow), never to this
 # script: it never creates, waits on or deletes the lock.
 cmake_minimum_required(VERSION 3.29)
@@ -20,6 +25,12 @@ if(NOT DEFINED PHASES)
 endif()
 if(NOT DEFINED STRICT)
 	set(STRICT 0)
+endif()
+if(NOT DEFINED REQUIRE_RUN)
+	set(REQUIRE_RUN "$ENV{OPENBF3_TIMING_REQUIRE_RUN}")
+endif()
+if(NOT REQUIRE_RUN STREQUAL "1")
+	set(REQUIRE_RUN 0)
 endif()
 get_filename_component(_tools "${CMAKE_CURRENT_LIST_FILE}" DIRECTORY)
 get_filename_component(_root "${_tools}/.." ABSOLUTE)
@@ -36,8 +47,10 @@ function(xml_unescape p_text r_out)
 	set(${r_out} "${t}" PARENT_SCOPE)
 endfunction()
 
-# Runs one phase; sets r_failed to the failed row names (empty when it passed) and r_rc.
-function(run_phase p_phase r_rc)
+# Runs one phase; sets r_rc (0 when it passed), r_ran (1 when it selected at least one row) and r_hard (1 when it
+# failed in a way no rerun can clear: no row selected, a skipped row under REQUIRE_RUN, a budget violation).
+function(run_phase p_phase r_rc r_ran r_hard)
+	set(hard 0)
 	set(junit "${BDIR}/ctest-${PRESET}-${p_phase}.xml")
 	file(REMOVE "${junit}")
 	message("timing_pass: phase ${p_phase}: ctest --preset ${PRESET}-${p_phase}")
@@ -48,9 +61,41 @@ function(run_phase p_phase r_rc)
 			-DPHASE=${PRESET}-${p_phase} -P "${_tools}/test_budget.cmake" RESULT_VARIABLE brc)
 		if(NOT brc EQUAL 0)
 			set(rc 1)
+			set(hard 1)
+		endif()
+		file(READ "${junit}" xml)
+		string(REGEX MATCHALL "<testcase name=\"[^\"]*\"" all "${xml}")
+		list(LENGTH all n_rows)
+		string(REGEX MATCHALL "<testcase name=\"[^\"]*\"[^>]*status=\"(notrun|disabled)\"" skipped "${xml}")
+		set(skipped_names "")
+		foreach(h IN LISTS skipped)
+			string(REGEX MATCH "name=\"([^\"]*)\"" _ "${h}")
+			list(APPEND skipped_names "${CMAKE_MATCH_1}")
+		endforeach()
+	else()
+		set(n_rows 0)
+		set(skipped_names "")
+	endif()
+	set(${r_ran} 0 PARENT_SCOPE)
+	if(n_rows EQUAL 0)
+		message("timing_pass: phase ${p_phase} selected no row: FAIL (check the labels and the ${PRESET}-${p_phase} preset)")
+		set(rc 1)
+		set(hard 1)
+	else()
+		set(${r_ran} 1 PARENT_SCOPE)
+	endif()
+	if(NOT skipped_names STREQUAL "")
+		string(REPLACE ";" " " t "${skipped_names}")
+		if(REQUIRE_RUN)
+			message("timing_pass: phase ${p_phase}: skipped rows with REQUIRE_RUN=1: FAIL: ${t}")
+			set(rc 1)
+			set(hard 1)
+		else()
+			message("timing_pass: phase ${p_phase}: skipped rows (allowed without REQUIRE_RUN): ${t}")
 		endif()
 	endif()
 	set(${r_rc} ${rc} PARENT_SCOPE)
+	set(${r_hard} ${hard} PARENT_SCOPE)
 endfunction()
 
 # The failed rows of a junit file, each as "<row>|<failure message>".
@@ -145,7 +190,16 @@ set(pass_failed FALSE)
 set(logged "")
 execute_process(COMMAND git -C "${_root}" rev-parse --short HEAD OUTPUT_VARIABLE commit OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 foreach(phase IN LISTS PHASES)
-	run_phase(${phase} rc)
+	run_phase(${phase} rc ran hard)
+	if(hard EQUAL 1)
+		set(pass_failed TRUE)
+	endif()
+	if(phase STREQUAL "realtime" AND ran EQUAL 1)
+		if(DEFINED RERUN_LOG AND NOT RERUN_LOG STREQUAL "")
+			string(TIMESTAMP now "%Y-%m-%dT%H:%M:%S")
+			file(APPEND "${RERUN_LOG}" "${now}\t${commit}\t-\tlane\n")
+		endif()
+	endif()
 	if(rc EQUAL 0)
 		continue()
 	endif()
@@ -191,7 +245,8 @@ foreach(phase IN LISTS PHASES)
 	endforeach()
 endforeach()
 
-# A check that keeps needing reruns is a regression hiding behind them: 2 of the last 5 commits in the log fail.
+# A check that keeps needing reruns is a regression hiding behind them: 2 of the last 5 commits whose lane ran (every
+# lane run logs a "- lane" line, so these are the last 5 merges) fail.
 if(NOT logged STREQUAL "" AND EXISTS "${RERUN_LOG}")
 	file(STRINGS "${RERUN_LOG}" log_lines)
 	set(commits "")
@@ -222,7 +277,8 @@ if(NOT logged STREQUAL "" AND EXISTS "${RERUN_LOG}")
 		list(LENGTH hits nh)
 		if(nh GREATER_EQUAL 2)
 			string(REPLACE "\t" " " k "${key}")
-			message("timing_pass: ${k} needed a rerun on ${nh} of the last ${nc} logged commits (max 5): investigate; the pass fails")
+			list(LENGTH recent nr)
+			message("timing_pass: ${k} needed a rerun on ${nh} of the last ${nr} lane runs: investigate; the pass fails")
 			set(pass_failed TRUE)
 		endif()
 	endforeach()

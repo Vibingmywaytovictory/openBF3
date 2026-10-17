@@ -13,6 +13,7 @@ rem   --phase P    only that merge-pass phase (realtime, timing or window); repe
 rem   --all-tests  the branch pass, then the three --timing phases (never one mixed ctest call)
 rem The merge-pass phases run through tools\timing_pass.cmake: every phase runs even when an earlier one failed, and
 rem the realtime phase applies the rerun rule (tests\realtime_retry.cmake); OPENBF3_RERUN_LOG names its rerun log.
+rem A phase that selects no row fails; with OPENBF3_TIMING_REQUIRE_RUN=1 (the main-merge workflow) a skipped row too.
 rem   -j N         jobs for the build and the branch pass (CTEST_PARALLEL_LEVEL does the same for the branch pass)
 rem The build and the branch pass run at below-normal priority. While the file named by OPENBF3_QUIET_LOCK exists (the
 rem workflows set the variable; this script never creates, waits on or deletes that file) they use 4 jobs. The timing
