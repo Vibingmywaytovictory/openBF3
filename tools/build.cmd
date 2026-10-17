@@ -7,7 +7,7 @@ rem lock, with ctest --preset <preset> -R "<row>" (or pass --all-tests here).
 setlocal
 set PRESET=%~1
 if "%PRESET%"=="" set PRESET=dev
-set "TIMING=^(godot\.|host\.scale$|host\.session|host\.server|host\.gunplay\.perf|sim\.nav\.bake|sim\.weapons\.perf|tools\.fx_bench|audio\.decode\.perf|audio\.bank|logic\.perf|tools\.ebx_memory|tools\.m1_prepare|render\.scene$)"
+set "TIMING=^(godot\.|host\.scale$|host\.session|host\.server|host\.gunplay\.perf|host\.gunplay\.client$|sim\.nav\.bake|sim\.weapons\.perf|tools\.fx_bench|audio\.decode\.perf|audio\.bank|logic\.perf|tools\.ebx_memory|tools\.m1_prepare|render\.scene$)"
 set VSROOT=C:\Program Files\Microsoft Visual Studio\18\Community
 if not defined VSCMD_VER call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 where ninja >nul 2>nul || set "PATH=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;%PATH%"
