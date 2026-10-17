@@ -337,6 +337,7 @@ struct GameServer::Impl {
 		m.phase = net::MatchPhase::InRound;
 		m.source_digest = config.level->source_digest;
 		m.motor_hash = motor_hash;
+		sv_match_info(size_t(at), m); // M2a sv [ctrl]: match seed, weapon / kit hashes, flags; the slot's lag history
 		send(p_peer, net::kChannelReliable, net::encode_match_info(m));
 	}
 
@@ -818,6 +819,7 @@ void GameServer::on_disconnect(uint32_t p_peer) {
 		if (m.sweep.active && m.sweep.requester == uint32_t(at)) {
 			m.sweep.requester = UINT32_MAX; // the sweep finishes without a receiver
 		}
+		m.sv_disconnect(size_t(at)); // M2a sv [ctrl]
 		m.reset_slot(m.slots[size_t(at)]);
 	}
 }
@@ -884,6 +886,9 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			m.handle_debug(size_t(at), *d);
 			return;
 		}
+		case net::MessageType::KitSelect: // M2a sv [ctrl]
+			m.sv_kit_select(at, p_datagram); // M2a sv [ctrl]
+			return; // M2a sv [ctrl]
 		default:
 			++m.bad_datagrams; // a server-to-client message from a client
 			return;
