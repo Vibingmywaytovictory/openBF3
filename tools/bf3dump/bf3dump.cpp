@@ -66,6 +66,8 @@
 //   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
 // M2a VFX1:
 //   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
+// M2a vm:
+//   vm clips [<unlock>...] [--team us|ru|all]   1p viewmodel clip roles, E5 reload rows, E11 coverage (vm_commands.cpp)
 // M2a audio (audio_commands.h): audio waves|loc|census|render, the drivers of gates G1-G4 and the offline render
 //
 // Command semantics and output formats follow the ebx-dump probe
@@ -104,6 +106,10 @@
 #include "weapon_sim_commands.h"
 // M2a VFX1: bf3dump fx (effect compiler, simulator, atlas, impacts).
 #include "fx_commands.h"
+// M2a lc: lagcomp (the capsule pose table, E18 (a) deviation, E13 rewind rows).
+#include "lagcomp_commands.h"
+// M2a vm: bf3dump vm clips (1p viewmodel clip roles, E5, E11).
+#include "vm_commands.h"
 // M2a audio: XAS waves, Loc/en streams, the sound-patch census, offline renders.
 #include "audio_commands.h"
 
@@ -542,6 +548,8 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::swf_usage()); // UI ui1
 	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
 	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
+	std::fprintf(stderr, "%s", bf3dump::lagcomp_usage()); // M2a lc
+	std::fprintf(stderr, "%s", bf3dump::vm_usage()); // M2a vm
 }
 
 } // namespace
@@ -699,6 +707,14 @@ int wmain(int argc, wchar_t **argv) {
 	// M2a VFX1: fx <subcommand> (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7).
 	if (cmd == "fx") {
 		return bf3dump::cmd_fx(ebx_ctx, rest);
+	}
+	// M2a lc: lagcomp <LEVEL> <MODE> (lagcomp_commands.cpp; docs/design/m2a-lc.md).
+	if (cmd == "lagcomp") {
+		return bf3dump::cmd_lagcomp(ebx_ctx, rest);
+	}
+	// M2a vm: vm clips (vm_commands.cpp; docs/design/m2a-vm.md).
+	if (cmd == "vm") {
+		return bf3dump::cmd_vm(ebx_ctx, rest);
 	}
 	// M2a audio: audio waves|loc|census|render (audio_commands.cpp; docs/design/m2a-audio.md §1).
 	if (cmd == "audio") {

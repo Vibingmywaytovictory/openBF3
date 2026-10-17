@@ -36,7 +36,16 @@ Extra labels: `serial_wallclock` (RUN_SERIAL in the dev pass for a wall-clock CH
 serially in the merge pass, e.g. memory gates), `bigmem` (peak above 8 GB), `asan_sweep` (asan wall above 600 s).
 
 The test presets carry the filters, so a bare `ctest --preset dev` is always the safe branch selection.
-`--all-tests` runs phases, never one mixed ctest call.
+`--all-tests` runs phases, never one mixed ctest call. A branch that changes what a timing row covers runs that row
+with its phase's preset, e.g. `ctest --preset dev-timing -R "^host\.gunplay\."`; the `dev-timing` preset also sets
+`OPENBF3_CL_TIMING=1`, the opt-in of `host.gunplay.client`'s Metro gates.
+
+A row that waits on wall-clock windows it does not measure (a reply within 0.5 s, a 60 Hz client in real time) is
+unlabelled only when it gives its alone results beside a `-j16` branch pass in repeated runs; the branch pass runs
+at below-normal priority next to other builds, so RUN_SERIAL there does not restore a quiet machine. Otherwise it is
+a `timing` row, split first so its socket-free cases stay on branches (`host.session.unit.pure`,
+`host.gunplay.client.unit.pure`). `host.gunplay.server` (1 failure in 3 such runs) and `host.gunplay.client.unit`
+(1 in 10) are timing rows for this reason.
 
 ## 2. Parallel-safe by default
 
@@ -73,7 +82,8 @@ Dev preset, a row measured alone on a quiet machine; asan is about 10x.
   cases with `openbf3_case_row`.
 * No dev row above 60 s (`sim.terrain` is exempt at up to 150 s).
 * Timing, real-time and window rows: at most 120 s each unless the gate defines the length (G8's 30 s recording,
-  E2's 90 s); the design doc then states it.
+  E2's 90 s, M2a cl's E15 10 min loopback in `host.gunplay.client`, about 990 s in all; `host.gunplay.server`'s
+  60 Hz play, about 127 s; `godot.fx_ref`'s alternating G1b windows, about 182 s); the design doc then states it.
 * Asan: a row over 600 s gets `asan_sweep`. Its full tier runs at acceptance for branches touching what it links,
   and on the latest main after merges.
 

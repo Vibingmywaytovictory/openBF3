@@ -1631,3 +1631,184 @@ TEST_SUITE("host-session") {
 		std::filesystem::remove_all(m->cache_root, ec);
 	}
 }
+
+// M2a cl (docs/design/m2a.md §6.1, §15 R1; docs/design/m2a-cl.md): present_others' Hermite body became the call to
+// net::sample_other. This block keeps M1's body as it was (copied from client_session.cpp before R1) and checks the
+// new present_others draws the same soldiers, bit for bit in every M1 field, on 200,000 random tracks and render times
+// (bracketed, before the oldest sample, extrapolated, held past 250 ms; yaw across the wrap; pose switches).
+namespace m1_present_ref {
+
+float lerp(float p_a, float p_b, float p_t) {
+	return p_a + (p_b - p_a) * p_t;
+}
+
+float hermite(float p_p0, float p_m0, float p_p1, float p_m1, float p_u) {
+	const float u2 = p_u * p_u, u3 = u2 * p_u;
+	return (2 * u3 - 3 * u2 + 1) * p_p0 + (u3 - 2 * u2 + p_u) * p_m0 + (-2 * u3 + 3 * u2) * p_p1 + (u3 - u2) * p_m1;
+}
+
+float eye_of(const PresentationFrame &p_frame, const net::OtherSoldier &p_o) {
+	const size_t from = std::min<size_t>(uint8_t(p_o.pose), kPoseCount - 1);
+	const size_t to = std::min<size_t>(uint8_t(p_o.target_pose), kPoseCount - 1);
+	return lerp(p_frame.pose_eye_heights[from], p_frame.pose_eye_heights[to], float(p_o.transition) / 255.0f);
+}
+
+PresentedSoldier present_sample(const PresentationFrame &p_frame, const net::OtherSoldier &p_o) {
+	PresentedSoldier s;
+	s.slot = p_o.slot;
+	s.generation = p_o.generation;
+	s.position = p_o.position;
+	s.velocity = p_o.velocity;
+	s.yaw = yaw_radians(p_o.yaw);
+	s.pitch = pitch_radians(p_o.pitch);
+	s.pose = p_o.pose;
+	s.eye_height = eye_of(p_frame, p_o);
+	s.mode = p_o.mode;
+	s.flags = p_o.flags;
+	return s;
+}
+
+size_t present_others(const PresentationFrame &p_frame, uint64_t p_now_ns, std::span<PresentedSoldier> r_out, uint64_t *r_extrapolated) {
+	constexpr double kMsPerTick = 1000.0 / double(kSimHz);
+	const double dt_ns = p_now_ns >= p_frame.publish_ns ? double(p_now_ns - p_frame.publish_ns) : -double(p_frame.publish_ns - p_now_ns);
+	const double render = p_frame.render_ticks_at_publish + dt_ns * p_frame.ticks_per_ns;
+	const double max_extra_ticks = std::max(0.0, double(p_frame.extrapolate_max_ms)) / kMsPerTick;
+	size_t n = 0;
+	const uint32_t count = std::min<uint32_t>(p_frame.other_count, uint32_t(p_frame.others.size()));
+	for (uint32_t i = 0; i < count && n < r_out.size(); ++i) {
+		const OtherTrack &t = p_frame.others[i];
+		const uint32_t used = std::min<uint32_t>(t.count, uint32_t(kOtherSamples));
+		if (used == 0) {
+			continue;
+		}
+		uint32_t a = 0;
+		while (a + 1 < used && double(t.samples[a + 1].server_tick) <= render) {
+			++a;
+		}
+		const OtherSample &sa = t.samples[a];
+		PresentedSoldier out;
+		if (render <= double(sa.server_tick)) {
+			out = present_sample(p_frame, sa.soldier);
+		} else if (a + 1 < used) {
+			const OtherSample &sb = t.samples[a + 1];
+			const double span = double(sb.server_tick - sa.server_tick);
+			const float u = float(std::clamp((render - double(sa.server_tick)) / span, 0.0, 1.0));
+			const float dt = float(span) * kTickSeconds;
+			out = present_sample(p_frame, sa.soldier);
+			for (size_t k = 0; k < 3; ++k) {
+				out.position[k] = hermite(sa.soldier.position[k], sa.soldier.velocity[k] * dt, sb.soldier.position[k], sb.soldier.velocity[k] * dt, u);
+				out.velocity[k] = lerp(sa.soldier.velocity[k], sb.soldier.velocity[k], u);
+			}
+			const int16_t dyaw = int16_t(uint16_t(sb.soldier.yaw - sa.soldier.yaw));
+			out.yaw = yaw_radians(uint16_t(sa.soldier.yaw + int32_t(std::lround(float(dyaw) * u))));
+			out.pitch = lerp(pitch_radians(sa.soldier.pitch), pitch_radians(sb.soldier.pitch), u);
+			const net::OtherSoldier &discrete = u >= 1.0f ? sb.soldier : sa.soldier;
+			out.pose = discrete.pose;
+			out.mode = discrete.mode;
+			out.flags = discrete.flags;
+			out.generation = discrete.generation;
+			out.eye_height = lerp(eye_of(p_frame, sa.soldier), eye_of(p_frame, sb.soldier), u);
+		} else {
+			const double ahead = std::min(render - double(sa.server_tick), max_extra_ticks);
+			const float secs = float(ahead) * kTickSeconds;
+			out = present_sample(p_frame, sa.soldier);
+			for (size_t k = 0; k < 3; ++k) {
+				out.position[k] = sa.soldier.position[k] + sa.soldier.velocity[k] * secs;
+			}
+			out.extrapolated = true;
+			if (r_extrapolated != nullptr) {
+				++*r_extrapolated;
+			}
+		}
+		r_out[n++] = out;
+	}
+	return n;
+}
+
+bool same_m1_fields(const PresentedSoldier &p_a, const PresentedSoldier &p_b) {
+	auto bits = [](const auto &p_x, const auto &p_y) { return std::memcmp(&p_x, &p_y, sizeof(p_x)) == 0; };
+	return p_a.slot == p_b.slot && p_a.generation == p_b.generation && bits(p_a.position, p_b.position) && bits(p_a.velocity, p_b.velocity) &&
+			bits(p_a.yaw, p_b.yaw) && bits(p_a.pitch, p_b.pitch) && p_a.pose == p_b.pose && bits(p_a.eye_height, p_b.eye_height) && p_a.mode == p_b.mode &&
+			p_a.flags == p_b.flags && p_a.extrapolated == p_b.extrapolated;
+}
+
+} // namespace m1_present_ref
+
+TEST_SUITE("host-session-unit") {
+	TEST_CASE("host.session: M2a cl R1: present_others through net::sample_other draws what M1's body drew (bit for bit, 200,000 cases)") {
+		std::mt19937_64 rng(0xC1A1);
+		std::uniform_real_distribution<float> pos(-300.0f, 300.0f), vel(-8.0f, 8.0f);
+		std::uniform_int_distribution<int> any(0, 65535), small(0, 255), pose(0, 2), count(0, 3), gap(1, 4);
+		std::uniform_real_distribution<double> offset(-3.0, 30.0);
+		auto f = std::make_unique<PresentationFrame>();
+		f->publish_ns = 5'000'000'000ull;
+		f->ticks_per_ns = 60e-9;
+		f->extrapolate_max_ms = 250.0f;
+		size_t cases = 0, equal = 0, extrapolated = 0, held = 0, bracketed = 0, before = 0;
+		for (int round = 0; round < 50'000; ++round) {
+			f->other_count = 4;
+			uint32_t base = 1000u + uint32_t(any(rng));
+			for (uint32_t i = 0; i < 4; ++i) {
+				OtherTrack &t = f->others[i];
+				t.slot = uint8_t(i + 1);
+				t.count = uint8_t(count(rng));
+				uint32_t tick = base + uint32_t(gap(rng));
+				for (uint32_t k = 0; k < t.count; ++k) {
+					net::OtherSoldier o;
+					o.slot = t.slot;
+					o.generation = uint8_t(small(rng));
+					o.position = { pos(rng), pos(rng) * 0.1f, pos(rng) };
+					o.velocity = { vel(rng), vel(rng) * 0.2f, vel(rng) };
+					o.yaw = uint16_t(any(rng));
+					o.pitch = uint16_t(any(rng));
+					o.pose = Pose(pose(rng));
+					o.target_pose = Pose(pose(rng));
+					o.transition = uint8_t(small(rng));
+					o.mode = MoveMode(small(rng) % 3);
+					o.flags = uint8_t(small(rng));
+					t.samples[k].server_tick = tick;
+					t.samples[k].soldier = o;
+					tick += uint32_t(gap(rng));
+				}
+			}
+			f->render_ticks_at_publish = double(base) + offset(rng);
+			const uint64_t now = f->publish_ns + uint64_t(any(rng)) * 1000ull;
+			std::array<PresentedSoldier, 4> a{}, b{};
+			uint64_t ea = 0, eb = 0;
+			const size_t na = m1_present_ref::present_others(*f, now, a, &ea);
+			const size_t nb = present_others(*f, now, b, &eb);
+			CHECK(na == nb);
+			CHECK(ea == eb);
+			const double render = f->render_ticks_at_publish + double(now - f->publish_ns) * f->ticks_per_ns;
+			for (size_t i = 0; i < std::min(na, nb); ++i) {
+				++cases;
+				const bool same = m1_present_ref::same_m1_fields(a[i], b[i]);
+				equal += same ? 1u : 0u;
+				if (!same && cases - equal <= 3) {
+					MESSAGE("case " << cases << " slot " << int(a[i].slot) << " differs");
+				}
+				const OtherTrack *t = nullptr;
+				for (uint32_t k = 0; k < 4; ++k) {
+					t = f->others[k].slot == a[i].slot ? &f->others[k] : t;
+				}
+				if (a[i].extrapolated) {
+					++extrapolated;
+					held += render - double(t->samples[t->count - 1].server_tick) > 15.0 ? 1u : 0u;
+				} else if (render <= double(t->samples[0].server_tick)) {
+					++before;
+				} else {
+					++bracketed;
+				}
+			}
+		}
+		CHECK(cases > 100'000);
+		CHECK(equal == cases);
+		CHECK(bracketed > 10'000);
+		CHECK(extrapolated > 10'000);
+		CHECK(held > 1'000);
+		CHECK(before > 1'000);
+		std::printf("R1: %zu soldiers drawn, %zu equal to M1's body in every M1 field (bracketed %zu, before the oldest %zu, extrapolated %zu of which "
+					"held past 250 ms %zu)\n",
+				cases, equal, bracketed, before, extrapolated, held);
+	}
+}

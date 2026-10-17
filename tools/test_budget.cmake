@@ -25,7 +25,7 @@ endif()
 
 # Rows whose length the gate defines (docs/testing.md budget 4): exempt from the 120 s timing / realtime / window cap.
 set(gate_length_rows godot.m1 godot.m1.e1 godot.m1.e2_gate godot.m1.e2_stress host.session host.session.gate
-	host.session.stress godot.s3_crowd godot.l1_look host.scale.paced)
+	host.session.stress godot.s3_crowd godot.l1_look host.scale.paced host.gunplay.client host.gunplay.server godot.fx_ref)
 # The one dev row allowed past 60 s (docs/testing.md budget 4).
 set(long_dev_rows sim.terrain)
 set(serial_reasons timing realtime window bigmem serial_wallclock)

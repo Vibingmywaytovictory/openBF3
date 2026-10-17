@@ -57,6 +57,14 @@ is fixed. The asan selection runs at 16 jobs: 59 min measured once, 20 min of it
 the sweeps (so about 40 min expected, not yet re-measured), against 3.35 h serially; the sweeps above 600 s under
 asan run in the `--asan-full` tier.
 
+After the merge of the M2a wave-2 rows (main e1d574d): `godot.m2a_viewmodel` (headless, about 7 s) and the socket-free
+half of `host.gunplay.client.unit` (`.pure`) run in the branch pass; `host.gunplay.server`, the 60 Hz loopback half of
+`host.gunplay.client.unit` and `host.gunplay.client` (the Metro gates; the `dev-timing` preset sets
+`OPENBF3_CL_TIMING=1`) are timing rows, because their wall-clock waits failed beside a `-j16` branch pass (main ran
+them RUN_SERIAL or among its timing rows); `godot.fx_demo`, `godot.fx_ref` and `godot.m2a_hud` are window rows. A
+branch that changes gunplay runs them with `ctest --preset dev-timing -R "^host\.gunplay\."`. The branch pass after the
+merge: 127 rows, 172 s of ctest (2 runs, busy machine).
+
 From a VS x64 developer prompt the three steps are `cmake --preset dev`, `cmake --build --preset dev` and
 `ctest --preset dev`. Presets: `dev` (optimised, godot-cpp `template_debug`, everyday use), `debug` (unoptimised,
 `/MTd`), `release` (`template_release`, for shipping) and `asan` (`/fsanitize=address`, libraries, tools and tests
@@ -2119,3 +2127,306 @@ tree's `load_level` mount, a scope difference, open question 7); under reading R
 noise layer fades **in** over 20-50 m and every layer fades **out** over 250-300 m, not "fades in over 250-300 m" as the
 plan words it (open question 1); and without the HDR window (A3) levels are low: a fixed window puts a 110 dB shot at
 -11 dBFS before attenuation, so the mid and far M16A3 shots sit near -69 and -90 dBFS.
+
+<!-- integration (integ/w2) -->
+**Fourth integration: M2a wave 2 (`integ/w2`, 2026-10-17).** On `m2a/w2` f4bbc43 (the W2.0 contract with nt and lc
+merged), each with its own `--no-ff` merge commit and in this order: `m2a/cl` 9a99e81 (it contains `m2a/sv`), `m2a/vm`
+48c22ca, `m2a/fx2` ca561e9, `m2a/hud` 60cf30d, then `main` 925cd51 (`m2a/audio` A1 / A2, `terrain/collision`, the
+S5 harness). The `dev` build passed after every merge. Every text conflict was two tracks' blocks appended at the same
+place in a shared file (README, the CMakeLists, bf3dump's usage and dispatch, register_types.cpp); both were kept, the
+earlier merge's first. m2a.md's adjacent E18 (lc) and E19 (vm) rule fixes were both kept. The one code conflict,
+`level_load.h`, was TC's removal of S1's `terrain_cover` / `cover_water` next to sv's new gunplay fields; both kept, no
+other change was needed (sv's gunplay, `find_sky_lane` and cl's Metro rows run on TC's whole-terrain world and give the
+accepted numbers). Follow-ups in their own commits: m2a.md §15 now names sv's eight `game_server.cpp` insertion points
+and accepts cl's `rewind_rows` lines in sv's `gunplay.{h,cpp}` (rule fix), and `tools\build.cmd` lists
+`host.gunplay.client` among the timing rows. The merge resolves vm's `PENDING (sv)`: with sv's `step_weapons_m2a` the
+sim now refuses zoom too (0 of 6,882 frames set `kZoomWasDown`, against 6,882 on vm's branch), and `m2a.contract`
+prints no PENDING row.
+
+Full `ctest --preset dev` with `OPENBF3_GODOT`: 142 of 144 pass, `core.cache_data` and `core.res` skipped as before
+(114 rows with `-j8`, then the 30 timing rows one at a time in four quiet-lock windows, `host.gunplay.client` with
+`OPENBF3_CL_TIMING=1`). Every row passed on its first run, `godot.s3_crowd` included. Under `ctest --preset asan`,
+`m2a.contract`, `net.proto.unit`, `net.proto.fuzz`, `sim.lagcomp.unit`, `anim.server_pose`, `sim.weapons.fuzz`,
+`host.gunplay.server`, `host.gunplay.client.unit`, `anim.viewmodel.unit`, `fx.render.unit`, `ui.hud.feed.unit` and
+`ui.hud.feed.install` pass (12 / 12), with no AddressSanitizer report. One run each on the integrated tree (wall-clock
+rows are noisy on this shared machine):
+
+| track gate | accepted | integrated (`integ/w2`) |
+|---|---|---|
+| nt `net.proto.unit` sizes, `net.proto.fuzz`, `m2a.contract` | 64 players: Snapshot 1,195 B / 46 + SnapshotOthers 387 B / 17; fuzz 0 unstable; 7 / 7, PENDING (sv) only | the same; 7 / 7 (5,094 assertions), no PENDING |
+| lc E18 (a) `bf3dump lagcomp --deviation` | 10 / 10 rows; worst transition head / chest 2.47 / 3.09 cm | the same numbers, 0 stand-in rows |
+| lc E13 `bf3dump lagcomp --perf` (p99 <= 0.5 ms) | pairs 0.338, long 0.354 ms | pairs 0.298, long 0.205 ms |
+| sv `host.gunplay.server` E1-E6, E17 | 31 shots / 30 gaps of 4,500,000; drop 0.1780 / 1.5993 m, expiry 975.0 m; STK 4 / 2 and 6 / 3; reloads 108,000,000 / 142,200,000; KS D 0.0158; hostile 0 / 900 | the same; hostile tick p99 0.113 ms (control 0.120) |
+| cl E1 / E5, E12, E15 (`host.gunplay.client`) | 31 / 31, 7 / 7; gate 100 % (zone 100 %), control 2.40 %; loopback 0 / 0 reconciliations; 212 / 212 seeds | 31 / 31, 7 / 7; gate 500 / 500 (zone 100 %, (b) 500 / 500 equal), control 2.00 %, stress 40 / 40; loopback 600 s 0 motor / 0 weapon reconciliations, 422 server shots all rewound; 208 / 208 seeds |
+| vm `godot.m2a_viewmodel`, `vm skin`, `vm clips` | 20 / 20; FOV worst 1.00 frame, recoil 7.91e-6°, springs 0.736 s; 0 stretched; E11 32 / 32 | the same |
+| fx2 `godot.fx_demo`, `godot.fx_ref` (Q17, <= 1.25) | E8 (3) all frames, (6) 52 / 52, (4) 80; 64 lights; FX p99 0.225 ms; 1.015 | 3,667 / 3,667 frames, 52 / 52, 80 / 80; 64 lights; FX p99 0.213 ms; 0.775 / 0.752 = 1.031 |
+| hud `godot.m2a_hud`, `ui.hud.feed.*` | 32 / 32 at three sizes; gap error 0.0000 px; 36 / 36 hits; 12 / 12 names and icons | the same |
+| S1 `host.scale` G1 p99 Metro / MP_007; `sim.nav.bake` G4 | 1.18 / 0.75 ms; 2.53 / 3.60 s | 1.49 / 1.03 ms (both valid); 2.82 / 2.54 s |
+| S2 `sim.vehicle`; S4 `logic.metro` G4 | 0 mismatches; 843761c3205e74bb | 0 mismatches on all courses; 843761c3205e74bb |
+| S3 `godot.s3_crowd` | G1a p99 0.42, G1b 1.86 ms, frame p99 11.4 / 10.7 ms | first run PASS: G1a p99 0.43, G1b 1.80 ms, frame p99 13.8 / 13.2 ms, G3 16 / 16 |
+| L1 `godot.l1_look`; M1 `godot.m1`, `godot.m1_load` E4 / E5 | 1.085, p99 5.7 ms; 16 / 16, 2.40 / 1.84 s | 1.061, p99 5.87 ms; 16 / 16, 2.40 / 1.82 s |
+| wp `weapon-sim --check`, W11; VFX census, `tools.fx_bench` | 38 / 38, 0.263 ms; 1,101 / 3,410, 38.5 ns | 38 / 38, 0.219 ms; 1,101 / 3,410, 39.6 ns |
+| ui1 / ui2; audio `godot.audio`; TC `sim.terrain` | 25 / 25; 10 / 10; 31 / 31; G1 230 runs | 25 / 25; 10 / 10 with the six shots; 31 / 31; 230 runs, 0 failed |
+| install unchanged | clean | clean (256 files in every install test) |
+
+Captures for the user's eye (gitignored) are in `openBF3\b\shots\integw2\` (fx2, hud, s3, ui2, audio WAVs). What
+wave 3 still owes: E7 (audio through the game mixer, au3), E8 in the game and E9's firefight budget (fx3's triggers,
+`godot.m2a_firefight`), E11 (the 4 kits in both teams' loadouts in the game), E13's `host.gunplay.perf` row with 64
+firefight bots (bt), E14 (the client frame budget in the firefight), E16 (load and memory with weapons on
+`m2a_metro.tscn`), E19's `godot.m2a` case "ads", and the gx Godot wiring:
+`Bf3Viewmodel`, `Bf3Hud` (with `Bf3UiAssets` given `Bf3Hud::required_atlas_movies()`), `Bf3FxRenderer`, audio and the
+3p crowd fed from cl's `present_weapon` / events in `level_session`, and `SharedLoadOptions::gunplay` turned on for the
+M2a scene (it stays off by default, so M1's E4 / E5 are unchanged).
+
+## M2a wave 2 contract (W2.0)
+
+<!-- # M2a w2 -->
+This is the integrator's contract commit for M2a wave 2, on branch `m2a/w2` from `main` 1874933. Design: [docs/design/m2a.md](docs/design/m2a.md)
+§15. As-built notes, the pending-row convention and the deviations from the sketches:
+[docs/design/m2a-w2.md](docs/design/m2a-w2.md).
+
+The commit declares every header of the wave-2 interfaces column and the additive fields of the M1 and wp structs
+(details in m2a-w2.md). It also adds `tests/gunplay_fixture.h` and the `m2a.contract` ctest.
+
+* **Bodies are left to the tracks.** The only body is a forwarding stub for `step_weapons_m2a`.
+* **Command pins.** `Command` is 24 B. No M1 test pinned its size or a command hash, so no M1 pin changed.
+* **Pending rows.** The `m2a.contract` rows that need sv's R3 / `weapon_rules.cpp` or nt's v2 codecs print
+  `PENDING (<key>)` until those tracks set `kSvRulesLanded` / `kNtLanded`. The §7.2 ack table runs now against a
+  test-local reference.
+
+Measured 2026-10-16 on the dev preset, with `OPENBF3_GODOT` set:
+
+* **Full ctest, timing rows excluded** (`-E` godot.*, host.session*, host.server, host.scale*, sim.nav.bake,
+  sim.weapons.perf, tools.fx_bench; `-j 6`): 90 of 92 passed, and `core.cache_data` and `core.res` were skipped as
+  before.
+* **Two timing rows failed under that parallel load.** `core.ui.swf.unit` took 1.16 s on a hostile case (limit 1 s) and
+  `core.ui.font` took 1.81 s on its cold load (limit 1 s). Both passed when rerun alone.
+* **Timing rows, one at a time under the quiet lock:** every row passed.
+  - `host.session.unit` and `host.session` failed their clock-target check once (4 and 5 target changes, limit 2).
+  - An A/B run of the E2 case then gave 0 target changes in both builds, twice each: main 1874933 (`wt/integ2`'s build)
+    and this branch.
+  - A rerun under a fresh lock passed both rows, with 0 target changes and install unchanged.
+* **`m2a.contract`:** 7/7 cases pass on dev and asan, with no AddressSanitizer report. `m1.contract`, `net.proto.unit`
+  and `m2a.weapons.contract` also pass on asan.
+
+Timing rows are wall-clock and noisy on this shared machine.
+
+## M2a protocol v2 (nt)
+
+<!-- # M2a nt -->
+Track nt of M2a wave 2 is on branch `m2a/nt` from the W2.0 contract. It writes the bodies of protocol v2
+(`kProtocolVersion` 2) in `bf3_net`. The changes are the MatchInfo / Spawned / Debug / DebugReport fields, the
+command view sample, `others_ack_bits` and the two ack predicates, the own weapons and the others' weapon fields in
+the Snapshot, `SnapshotOthers`, `ShotEvents`, `CombatEvents` and `KitSelect`, plus the new `weapons_wire.cpp`.
+
+Design: [docs/design/m2a.md](docs/design/m2a.md) §7. As built, with the wire layouts, measured sizes and
+precision, deviations and the updated M1 rows: [docs/design/m2a-nt.md](docs/design/m2a-nt.md).
+
+* **Sizes:**
+  - Command packets are 33 / 70 B.
+  - The Snapshot header with the own state is 97 B, and a 4-slot kit's weapons add 75 B.
+  - An other is 178 bits. 49 others fit beside the own state, and a SnapshotOthers holds 53.
+  - A 64-player match goes in a Snapshot (46 others with a kit) plus a SnapshotOthers (17), both ≤ 1,200 B.
+  - A datagram holds 69 untraced shots or 58 traced ones.
+* **Tests:**
+  - `net.proto.unit` has an `M2a nt` block with round trips at the documented precision, sizes, the split, acks
+    and the weapons wire.
+  - `net.proto.fuzz` is new. It runs seeded mutations and random bytes of all 15 message types, counting
+    refusals and checking decode → encode → decode stability; 3,501 / 3,501 structured malformed cases are
+    refused.
+  - `m2a.contract` runs its nt rows (`kNtLanded = true`).
+* **M1 rows pinned to the v1 wire were updated to the v2 values.** Spawned is 85 B, command packets 33 / 70 / 33 B,
+  a Snapshot holds 49 / 53 others, there are 15 known types, and Debug kind 8 is refused. Each row still checks the
+  exact value.
+
+Run: `ctest --preset dev -R "^(net\.|m2a\.contract$)"`; the host rows (`host.server`, `host.session*`) and the Godot
+rows are timing rows, run under the quiet lock. Timing rows are wall-clock and noisy on this shared machine.
+
+## M2a lc: lag compensation and hit capsules
+
+<!-- # M2a lc -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §6; as built, the contract fixes and the measured gates:
+[docs/design/m2a-lc.md](docs/design/m2a-lc.md). The server's rewind (`bf3_host` `LagHistory` / `RewindProvider`,
+`bf3/host/lag_comp.h`) poses each target from exactly the samples the shooter's client had (its acked Snapshot and
+SnapshotOthers records), through the client's own sampler (`bf3_net` `sample_other`, `other_sample.h`), at
+`rewind_time_q8 = sim_time_q8(t) - clamp(view_back - 256, 0, 21 x 256)`. Hit capsules come from the server pose
+(`bf3_anim` `build_capsule_pose_table`: the 3p rig per stance at 33 pitch buckets and per transition at 16 fractions,
+`bf3_sim` `posed_target`). wp's ballistics fill the query segment (R4) for the swept-AABB broad phase.
+
+Commands (read-only; output is BF3 data, keep it out of the repo; each ends with `install.unchanged`):
+
+```bat
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0              :: the table, capsule placement readings, rig vs EBX
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0 --deviation  :: E18 (a) rows, "E18 (a): PASS|FAIL"
+b\dev\tools\bf3dump\bf3dump.exe lagcomp MP_Subway TeamDeathMatch0 --perf       :: E13 rows pairs / long (under the quiet lock)
+```
+
+Gates, measured 2026-10-16 on the dev preset (E13 is wall clock and **noisy** on this shared machine):
+
+| gate | command | threshold | measured |
+|---|---|---|---|
+| E18 (a) | `ctest -R anim.server_pose` (install) | head / chest ≤ 3 cm steady (32 mid-pitches), ≤ 5 cm transitions (15 mid-fractions × 32); stand ≤ 3 cm of `CrowdEvaluator`; 0 stand-in rows | worst steady 0.18 cm, worst transition 3.09 cm (stand→prone chest), crowd 0.013 cm; 10/10 rows, 0 stand-in |
+| E12 (a) | `ctest -R sim.lagcomp.unit` | server lists and samples bit-equal to the client's; cache on == off; window/track differences all classified | 8,900 rows, 0 differences; 17,636 provider rows equal; 1,438 Q22 rows, 0 unexplained |
+| E13 | `bf3dump lagcomp MP_Subway TeamDeathMatch0 --perf` | provider p99 ≤ 0.5 ms per tick | pairs 0.338 ms, long 0.354 ms |
+| R4 | `bf3dump weapon-sim --check` | 38/38, sim.weapons* bit-equal | 38/38; `--check` and `--all` output byte-equal to the build without R4 |
+
+## M2a cl: client prediction and events
+
+<!-- # M2a cl -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §6.1–§6.3, §7, §8; as built, the contract fixes and the measured
+gates: [docs/design/m2a-cl.md](docs/design/m2a-cl.md). The client predicts its own weapons with the server's code
+(`bf3_sim` `WeaponLane`, stepped after the motor in prediction and in `catch_up`, first predictions only emit),
+reconciles them by the Snapshot's own weapons block, rebases a health-only difference without a replay (R2), refuses a
+server whose `weapon_hash` (or kit hash) differs before sending Ready (E6), sends the drawn frame's view sample and
+`others_ack_bits` in every command, and hands the main thread `PresentEvent`s (`bf3/host/presentation_events.h`, an
+SPSC ring with Predicted / Render / Immediate timelines) and the two latest predicted weapon views
+(`present_weapon`, `bf3/host/presentation_weapon.h`) for vm, hud, fx3 and au3. Cosmetic projectiles
+(`bf3/host/client_projectiles.h`) test own shots against the rewound records the server will use and fly remote shots
+on the render timeline. `present_others` now calls lc's `net::sample_other` (R1). The client builds its gunplay inputs
+(table, capsules, kits, shot frame) from sv's `SharedLevel::gunplay` by default. Every end-to-end case runs against the
+real `ServerHost` with sv's `Gunplay`, with real clients as bots: the gates on Metro (read-only on the install, exit 77
+without one), shorter install-free variants on a synthetic floor in the unit row.
+
+Commands (the unit row needs no install; the Metro gates run only with `OPENBF3_CL_TIMING=1`, under the quiet lock):
+
+```bat
+ctest --preset dev -R host.gunplay.client.unit                     :: the branch pass's half: events, present_weapon, lane, projectiles, view sample (.pure)
+ctest --preset dev-timing -R "^host\.gunplay\.client\.unit$"       :: the timing half (60 Hz loopback): E6, R2, SnapshotOthers, hostile, floor variants
+ctest --preset dev -R host.session.unit                            :: M1's socket-free rows plus R1's equivalence (.pure; the loopback half is a timing row)
+set OPENBF3_CL_TIMING=1
+b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client  :: Metro: E1 + E5, E12 lagcomp (+ control, stress), E15 loopback (10 min), two clients, install unchanged
+```
+
+Gates, measured 2026-10-17 on the dev preset (the timing cases are wall clock and **noisy** on this shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| E1 (client, Metro) | predicted shots = server's field for field 31/31 | 31/31 (the install's M16A3); 30/30 gaps of 4,500,000; 36 predicted = 36 server shots |
+| E5 (client, Metro) | server phase events = predicted | 7/7; empty 2.37 s → 30, tactical 1.8 s (commit +1.53 s) → 31 |
+| E6 (client) | "weapon table mismatch", `weapon_hash_mismatch` 1, no Ready, no prediction | yes for a variant cfg, a missing cfg and a client without inputs (never spawned on the server); "kit table mismatch" for a kit hash |
+| E12 (b) (Metro) | server hit ≥ 99 % of client hits, same zone ≥ 99 %; samples bit-equal except `late_sample`; control ≤ 50 % | 500/500 (100 %), zone 100 %; 500/500 samples equal to the server's rewound rows, `late_sample` 0; control 2.40 %; stress 29/29 (all clamped, reported) |
+| E15 (Metro) | 0 weapon and 0 motor reconciliations in 10 min loopback; equal seeds for two clients | 0 and 0 (bots on the player's team: 0 health rebases); 212/212 seeds equal |
+| R1 / R2 | M1's drawing unchanged; a hit's writes rebase | 150,196/150,196 bit-equal; 3 enemy hits, 3 rebases, 0 reconciliations |
+
+## M2a sv: server gunplay
+
+<!-- # M2a sv -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §4, §5, §6 (server side), §10.1, §13, §14.1; as built, the
+decisions and the measured gates: [docs/design/m2a-sv.md](docs/design/m2a-sv.md). The `GameServer` runs weapons,
+projectiles, damage, deaths and kits when the level carries gunplay tables (`SharedLoadOptions::gunplay`, off by
+default; `bf3_host` `Gunplay`, `bf3/host/gunplay.h`): every live soldier's weapons step after its motor step
+(`step_weapons_m2a`), all projectiles fly once per tick through lc's `RewindProvider` (clients' shots against the
+targets as that client drew them, server-side shooters at the present), damage is applied in (time, shooter, shot,
+pellet) order, and deaths go out as `CombatEvents` through a `CombatEventSink` with the respawn decided by a
+`RespawnPolicy` (M2b's seams). Snapshots carry the own weapons and the others' weapon fields, the overflow goes in a
+`SnapshotOthers` of the same seq, the other shooters' shots in `ShotEvents`. `MatchInfo` carries the match seed,
+`weapon_hash` (table ^ capsule table), `weapon_flags` (exact aim, infinite magazine; dev only) and `kit_hash`. Dev
+requests `SpawnTarget` / `TargetInfo` place stationary target bots and return their server capsules.
+
+Commands (read-only on the install; the cases print BF3-derived numbers, keep the logs out of the repo; the last case
+prints `install.unchanged`). Every case runs the real `ServerHost` and `ClientSession` on Metro headless, except the
+hostile case and E6's offset sample, which drive the `GameServer` without sockets:
+
+```bat
+ctest --preset dev-timing -R "^host\.gunplay\.server$"                                            :: all cases (a timing row, RUN_SERIAL, ~2-5 min)
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=timing      :: E1
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=drop        :: E2
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=stk         :: E3, E4
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=reload      :: E5
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=variants    :: E6
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=hostile     :: E17 (also under the asan preset)
+b\dev\tests\test_host_gunplay_server.exe --test-suite=host-gunplay-server --test-case=install     :: E17 install unchanged
+```
+
+Gates, measured 2026-10-17 on the dev preset (server halves; the client halves are cl's `host.gunplay.client`;
+wall-clock pacing, **noisy** on this shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| E1 | M16A3: 31 shots, first at the press tick's start, 30 gaps of 4,500,000, trace = server shots; other kit firearms: the table interval; semi one shot per tap | 31 / 30 / yes / 31 of 31 bit-equal; M4A1, M27 IAR, AK-74M, AKS-74u, RPK-74M at their intervals; MK11, SVD, M9, MP443 5 / 5 |
+| E2 | 0.1779 ± 0.01 m at 100 m, 1.5981 ± 0.01 m at 300 m, expiry 975.0 ± 0.01 m | 0.1780-0.1786, 1.5993-1.6039, 975.0000 (sky lane in bounds 2,197.5 m) |
+| E3 | M16A3 chest 4 / head 2 at 5 m, chest 6 / head 3 at 60 m; 25 / 50 / 22.75 per hit | 4 / 2, 6 / 3; 25.0000 / 50.0000 / 22.7500 |
+| E4 | M16A3 head 50.000, MK11 head 117.500 (kill in 1), MK11 head at 60 m kills in 2 | 50.0000, 117.5000 (1), 2 |
+| E5 | M16A3 108,000,000 / commit +91,800,000 → 31, empty 142,200,000 → 30; M9 81,000,000 / 96,000,000 | all equal |
+| E6 | 4 distinct hashes; KS D ≤ 0.0364 over 2,000 offsets; recoil after 10 rounds within 1e-4° | 4; D 0.0158 each; diff ≤ 4.5e-9° |
+| E17 | hostile client changes no other soldier, clamps counted, tick unaffected; install unchanged | 0 / 900 ticks differ; all clamps counted; 0 precondition failures; `install.unchanged: clean (256 files)` |
+| G1 (regression) | `host.scale` tick p99 ≤ 8 ms under the quiet lock | 1.212 / 0.783 / 1.454 ms |
+| asan | m2a.contract, net.proto.unit / fuzz, sim.lagcomp.unit, sim.weapons.fuzz, host.gunplay.server under `--preset asan` | 6 / 6, no sanitizer report |
+## M2a vm: 1p viewmodel and ADS
+
+The own soldier's first-person viewmodel and ADS camera (design and measured gates:
+[docs/design/m2a-vm.md](docs/design/m2a-vm.md); plan m2a.md §11.1, §11.2, E19, E5, E11):
+
+* `bf3_anim` `viewmodel_anim.h`: the Godot-free animator (base, action and ADS layers, procedural stand-ins), the
+  sway, bob, kick and camera springs, `viewmodel_tuning.cfg` and its parser, `AdsCamera` (world FOV 55 -> 40
+  vertical, viewmodel FOV RenderFov -> ZoomRenderFov, look scale) and the zoom refusal rule `ads_allowed`.
+* `bf3_render` `viewmodel_set.h`: the US and RU sets of the 8 default loadouts, read from the data
+  (`read_viewmodel_kits`: the mode's kits and `KitDef::default_unlock`, as sv's kit table) with arms, every item's
+  1p mesh, role clips with counted stand-ins, ADS data from the aiming controller, the default customization's
+  iron-sight accessories, and each material slot's alpha test from the level shader database. The knife's dog tags
+  and chain are a counted stand-in: left out (`--vm-dogtags` draws them; design §2.7).
+* `bf3_godot` `Bf3Viewmodel` (`viewmodel.h`) and the `fp_camera` M2a vm block (FOV, interpolated predicted recoil,
+  presentation kick); the demo / check scene `res://scenes/m2a_viewmodel.tscn` plays every kit through the real
+  weapon sim on a scripted timeline (cl's `present_weapon` and sv's zoom rule are faked in `m2a_fake` until they
+  merge).
+
+Run the demo windowed with `Godot --path bf3-opensource res://scenes/m2a_viewmodel.tscn` (kits loop with a status
+label; `--kits=0,4` picks loadouts). Every gate has one command:
+
+| gate | command | threshold | measured (2026-10-16) |
+|---|---|---|---|
+| E19 unit | `ctest --preset dev -R anim.viewmodel.unit` | E19 on the synthetic weapons at 30 / 60 / 144 / 240 fps | 9/9 cases, met |
+| E19, E5, E11, looks (install) | `ctest --preset dev -R godot.m2a_viewmodel` (= `Godot --headless --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --vm-check`) | `M2A VIEWMODEL CHECK: PASS (20/20)`, install unchanged | 20/20: FOV 55 / 40, RenderFov 55, FOV time ±1 frame (worst 1.00) in both FOV-time modes and 0.15 s asserted in the generic mode, recoil worst 7.9e-6°, springs worst 0.736 s (≤ 1.0) and each spring within its own settle time, 0 ADS frames while deploying or sprinting, reload clip and refire ≤ 1 frame, 32/32 items of the loadouts read from the data covered (equal to m2a.md §5.6), alpha-tested slots cut out, knife dog tags hidden; met |
+| E5 clip lengths, E11 report | `bf3dump vm clips --team all` | authored length next to ReloadTime, coverage per item, loadouts from the data | printed (design §4); E11 PASS 32/32 |
+| skinned geometry | `bf3dump vm skin --team all` | no stretched skinned triangle through deploy, fire, reload | `VM SKIN: PASS` |
+| captures | `Godot --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --vm-shots=<openBF3>\b\shots\vm` | hip, ADS, reload mid-clip PNGs | 38 PNGs (design §5) |
+| hostile data | `ctest --preset asan -R anim.viewmodel.unit` (after `tools\build.cmd asan --no-test`) | no AddressSanitizer report | 9/9 cases, 6,155 assertions, no report (fuzz: 3,000 mutations, 792 parsed, 2,208 failed cleanly) |
+
+The sim half of the zoom refusal prints `PENDING (sv)` until sv's rule lands in `step_weapons_m2a`. The FOV time
+follows the aiming controller's per-transition time (iron sights 0.12 s in, 0.15 s out); `fov_transition_specific =
+false` in `viewmodel_tuning.cfg` uses the generic 0.15 s, and the check measures both (m2a.md E19 was corrected).
+The present cost (mean 12.7 µs per frame) is wall clock on a shared machine and noisy.
+
+## M2a VFX2 renderer (fx2)
+
+<!-- # M2a fx2 -->
+VFX2 draws `bf3_fx`'s simulated particles in Godot. Design: [docs/design/m2a.md](docs/design/m2a.md) §12.1. As-built
+notes, measurements and capture descriptions: [docs/design/m2a-fx2.md](docs/design/m2a-fx2.md).
+
+* **`bf3::fx::RenderPrep`** (`render_prep.h`, Godot-free) turns `FxWorld`'s outputs into ≤ 24 instance streams:
+  shader class × blend × world / first-person pass, 80 B per instance. Batches are sorted back-to-front by emitter
+  (§16 Q10). It also builds the merged 64-light pool.
+* **`prepare_atlas_pixels`** (`atlas_pixels.h`) caches the level's emitter atlas as BC3 + BC5 with every mip
+  (`fx-atlas` cache entries).
+* **`Bf3FxRenderer`** steps the world on Godot's WorkerThreadPool and draws one MultiMesh per batch with
+  `res://shaders/fx_*.gdshader`. It also drives the omni lights.
+* **Demo:** `<godot> --path bf3-opensource res://scenes/fx_demo.tscn` runs synthetic starts on Metro: 1p muzzle,
+  concrete and brick impacts, a smoke pillar, the MP_012 oilfire and a light stress. With `-- --fx-check` it runs the
+  gates and writes captures to `b/shots/fx2/`.
+
+| gate | command | threshold | measured (2026-10-16, shared machine: noisy) |
+|---|---|---|---|
+| unit | `ctest --preset dev -R "^fx\.render\.unit$"` (also asan) | 9 cases | 9/9, 6,478 assertions |
+| demo (E8 (3), (4), (6), lights, 1p, FX time) | `ctest --preset dev-window -R "^godot.fx_demo$"` with `OPENBF3_GODOT_WINDOWED=1` (a window row) | drawn == particles every frame; 52/52 atlas, 0 fallbacks; oilfire 80 ± 1 at 15 s; ≤ 64 lights; 1p batches | all met; FX main thread p50 0.108 / p99 0.225 ms |
+| GPU (E9 item 8, §16 Q17) | `ctest --preset dev-window -R "^godot.fx_ref$"` with `OPENBF3_GODOT_WINDOWED=1` (a window row) | VFX2 16k ≤ 1.25 × MultiMesh 16k lit + soft | 0.769 / 0.758 ms = 1.015 |
+
+Both Godot rows are timing rows: run them under the quiet lock. A CPU-bound frame roughly doubles the measured GPU time
+on this machine (m2a-fx2.md §7).
+
+## M2a hud (minimal HUD)
+
+<!-- # M2a hud -->
+Track `hud` of M2a wave 2, on branch `m2a/hud`. Design: [docs/design/m2a.md](docs/design/m2a.md) §11.3, §11.4, §16
+Q7, gate E10. As built: [docs/design/m2a-hud.md](docs/design/m2a-hud.md).
+
+* **Feed** (`bf3/host/hud_feed.h`, Godot-free): `make_hud_static` (one row per weapon def; `apply_item_names` gives
+  the M67 its "M67 GRENADE"), `fill_hud` (ui2's `HudModel` from the presented weapon, the own soldier and the drained
+  events; the hit indicator 0.3 s at level 1 per own server hit, §16 Q7), and the layout: the hudmpscreen slots read
+  at run time, `hud_stage_to_window` (scale min(w/1280, h/720)), `crosshair_gap_px`.
+* **Godot** (`src/bf3_godot/src/hud_controls.h`): `Bf3Hud` draws the model only: ammo (`$HUD_medium` at Ammo_01),
+  crosshair (hidden in ADS), hit indicator (the hitindicator atlas art), weapon name and `_small` icon, health.
+* **Check**: `res://scenes/m2a_hud.tscn -- --hud-check --hud-shots=<dir>` drives a scripted model at 1280 x 720,
+  1920 x 1080 and 2560 x 1440 and compares every widget with the script every frame (ctest `godot.m2a_hud`; shots to
+  `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\hud\`, gitignored).
+* **Tests**: `ctest --preset dev -R "ui.hud.feed"` and the window row `godot.m2a_hud` (`ctest --preset dev-window -R godot.m2a_hud` with `OPENBF3_GODOT_WINDOWED=1`). Measured results and one
+  command per gate: m2a-hud.md §6.

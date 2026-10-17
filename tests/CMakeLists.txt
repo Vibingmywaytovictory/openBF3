@@ -386,8 +386,8 @@ endif()
 # data. host.session runs the session on Metro's real world through load_shared_level (E2 under 150/2 as the gate
 # and 150 ms one way as a reported row, the 128-slot SpawnSweep against in-process rows, install unchanged) and
 # exits 77 without an install. Both read the shipped tuning file. The suite host-session-unit is split
-# (docs/testing.md "Splits"): host.session.unit.pure runs the 4 socket-free cases (judge_rest, presentation,
-# GameServer without sockets, SpawnSweep in batches) on every branch; host.session.unit runs the 5 loopback cases,
+# (docs/testing.md "Splits"): host.session.unit.pure runs the 5 socket-free cases (judge_rest, presentation, M2a cl's
+# R1 presentation equality, GameServer without sockets, SpawnSweep in batches) on every branch; host.session.unit runs the 5 loopback cases,
 # which wait on real time, serially in the merge pass's timing phase (label timing; it needed lane reruns);
 # host.session.unit.split_cover proves every case is in exactly one of the two. The suite host-session is split the
 # same way into three lane rows that run side by side, each loading Metro itself and checking install unchanged:
@@ -396,8 +396,9 @@ endif()
 openbf3_test(test_host_session test_main.cpp host_session_tests.cpp test_support.h)
 target_link_libraries(test_host_session PRIVATE bf3_host)
 target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+# *present_others* selects two socket-free cases: M1's presentation helpers and M2a cl's R1 equality with M1's body.
 set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*without*sockets* *GameServer*SpawnSweep*batches*)
-openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 4
+openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 5
     CASES ${_openbf3_session_pure})
 openbf3_case_row(NAME host.session.unit EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 5
     EXCLUDE ${_openbf3_session_pure})
@@ -844,6 +845,177 @@ if(OPENBF3_ASAN)
         set_tests_properties(tools.fx_bench PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
     endif()
 endif()
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §15, §15.1): m2a.contract compiles every wave-2 interface header together
+# (and tests/gunplay_fixture.h) and pins the sizes of Command, ShotView, PresentEvent and OtherPose,
+# weapon_buttons::kAll inside the wire mask, the exact_aim hash change and its field-for-field equality with the range
+# post-process, the three step_weapons_m2a rows and the two ack-bit conventions. Rows that need a track's body (nt's
+# codecs, sv's R3 and weapon_rules.cpp) print PENDING with the reason until that track turns them on. No install;
+# one short loopback session on a synthetic floor (the fixture's smoke case).
+openbf3_test(test_m2a_contract test_main.cpp m2a_contract_tests.cpp gunplay_fixture.h weapons_support.h test_support.h)
+target_link_libraries(test_m2a_contract PRIVATE bf3_host bf3_render bf3_anim bf3_fx)
+# The fixture's metro() reads the shipped motor tuning (compiled here, not run: m2a.contract needs no install).
+target_compile_definitions(test_m2a_contract PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME m2a.contract COMMAND test_m2a_contract --test-suite=m2a-contract)
+set_tests_properties(m2a.contract PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2a_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2a.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_cl_dir}")
+endif()
+
+# M2a nt (docs/design/m2a-nt.md): net.proto.fuzz feeds seeded mutations and random bytes of every protocol v2 message
+# type through its decoder (refused and counted per type, or decode -> encode -> decode stable) and checks the
+# structured malformed cases (every truncation, a trailing byte, another type's decoder) are all refused. No data;
+# meant for the asan preset too (E17 wire side).
+openbf3_test(test_net_proto_fuzz test_main.cpp net_proto_fuzz.cpp)
+target_link_libraries(test_net_proto_fuzz PRIVATE bf3_net)
+add_test(NAME net.proto.fuzz COMMAND test_net_proto_fuzz --test-suite=net-proto-fuzz)
+set_tests_properties(net.proto.fuzz PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_nt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(net.proto.fuzz PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_nt_cl_dir}")
+endif()
+
+# M2a lc (docs/design/m2a.md §6, E12 (a), E18 (a), R4; docs/design/m2a-lc.md): sim.lagcomp.unit (no data: the sampler,
+# the time rule, the track rules, LagHistory's acks and shot views, the E12 sample-equality rows with two clients, the
+# provider's cache on vs off and broad phase, the capsule table's blob and hostile blobs, posed_target, R4's query
+# segments) and anim.server_pose (the install: the capsule pose table, E18 (a) against the reference evaluation and
+# CrowdEvaluator, install.unchanged; 77 without one). Both also run under the asan preset.
+openbf3_test(test_lagcomp test_main.cpp sim_lagcomp_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_lagcomp PRIVATE bf3_host)
+add_test(NAME sim.lagcomp.unit COMMAND test_lagcomp --test-suite=sim-lagcomp-unit)
+openbf3_test(test_server_pose test_main.cpp anim_server_pose_tests.cpp test_support.h)
+target_link_libraries(test_server_pose PRIVATE bf3_anim bf3_sim)
+add_test(NAME anim.server_pose COMMAND test_server_pose --test-suite=anim-server-pose)
+set_tests_properties(anim.server_pose PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(sim.lagcomp.unit anim.server_pose PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_lc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(sim.lagcomp.unit anim.server_pose PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_lc_cl_dir}")
+endif()
+
+# M2a cl (docs/design/m2a.md §6.1-§6.3, §7.2-§7.4, §8, §13.3; docs/design/m2a-cl.md): host.gunplay.client.unit (no
+# data, short: the events ring, present_weapon, the weapon lane under catch_up, ClientProjectiles, the view sample, E6's
+# refusal, R2's health rebase, the SnapshotOthers merge, the hostile datagrams) and host.gunplay.client (wall clock,
+# minutes: E1 + E5, E12 lagcomp (b) + control + stress, E15 loopback and two clients; runs only with
+# OPENBF3_CL_TIMING=1 under the quiet lock, else every case reports skipped, 77). Both run against the real ServerHost
+# with sv's gunplay on the synthetic floor (no install).
+openbf3_test(test_gunplay_client test_main.cpp host_gunplay_client_tests.cpp gunplay_fixture.h weapons_support.h test_support.h)
+target_link_libraries(test_gunplay_client PRIVATE bf3_host)
+target_compile_definitions(test_gunplay_client PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
+# Scheduling (docs/testing.md; the labels at the end of this file): host.gunplay.client is a timing row (the merge
+# pass's serial timing phase under the quiet lock; the dev-timing test preset sets OPENBF3_CL_TIMING=1, so it runs
+# there and skips elsewhere). The suite host-gunplay-client-unit is split (docs/testing.md "Splits") like
+# host-session-unit: host.gunplay.client.unit.pure runs the 5 socket-free cases (the events ring, present_weapon, the
+# weapon lane, ClientProjectiles, the view sample) on every branch; host.gunplay.client.unit runs the 7 cases that
+# play over loopback at 60 Hz of wall clock (E6, R2, SnapshotOthers, hostile, the three floor variants; about 90 s),
+# which main ran RUN_SERIAL: beside a -j16 branch pass they failed 1 run in 10 (E15 floor 'reconciliations == 0',
+# 2026-10-17), so they are a timing row (RUN_SERIAL, the merge pass's serial timing phase).
+# host.gunplay.client.unit.split_cover proves every case is in exactly one of the two.
+set(_openbf3_cl_pure *PresentationEvents*keeps*order* *present_weapon*from*two*predicted* *weapon*lane*replays*catch_up*
+    *ClientProjectiles*own*world*rewound* *view*sample*present_view_quality*)
+openbf3_case_row(NAME host.gunplay.client.unit.pure EXE test_gunplay_client SUITE host-gunplay-client-unit
+    GROUP host-gunplay-client-unit COUNT 5 CASES ${_openbf3_cl_pure})
+openbf3_case_row(NAME host.gunplay.client.unit EXE test_gunplay_client SUITE host-gunplay-client-unit
+    GROUP host-gunplay-client-unit COUNT 7 EXCLUDE ${_openbf3_cl_pure})
+openbf3_split_cover(NAME host.gunplay.client.unit.split_cover EXE test_gunplay_client SUITE host-gunplay-client-unit
+    GROUP host-gunplay-client-unit)
+add_test(NAME host.gunplay.client COMMAND test_gunplay_client --test-suite=host-gunplay-client)
+set_tests_properties(host.gunplay.client.unit.pure PROPERTIES TIMEOUT 120)
+set_tests_properties(host.gunplay.client.unit PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
+set_tests_properties(host.gunplay.client PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 2400 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2a_cl_t_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.gunplay.client.unit.pure host.gunplay.client.unit host.gunplay.client.unit.split_cover
+        host.gunplay.client PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_cl_t_dir}")
+endif()
+
+# M2a sv (docs/design/m2a.md §1 E1-E6, E17; docs/design/m2a-sv.md): host.gunplay.server, the server's gunplay criteria
+# headless through ServerHost + ClientSession on Metro with the gunplay tables (cases timing, drop, stk, reload,
+# variants, hostile, install; exits 77 without an install). The client paces itself at 60 Hz of wall clock (about
+# 130 s alone, under a core) and the cases wait on wall-clock windows (a damage record within 0.5 s of its shot, a
+# shot within 1 s of the press): beside a -j16 branch pass it failed 1 run in 3 (E3 / E4 'no kill', 2026-10-17), so it
+# is a timing row (RUN_SERIAL, the merge pass's serial timing phase under the quiet lock), as main's RUN_SERIAL kept
+# it alone. Also runs under the asan preset (the hostile case feeds every new message kind), RUN_SERIAL there too.
+openbf3_test(test_host_gunplay_server test_main.cpp host_gunplay_server_tests.cpp gunplay_fixture.h test_support.h)
+target_link_libraries(test_host_gunplay_server PRIVATE bf3_host)
+target_compile_definitions(test_host_gunplay_server PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
+add_test(NAME host.gunplay.server COMMAND test_host_gunplay_server --test-suite=host-gunplay-server)
+set_tests_properties(host.gunplay.server PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_sv_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.gunplay.server PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_sv_cl_dir}")
+endif()
+
+# M2a vm (docs/design/m2a-vm.md; m2a.md §11.1, §11.2, E19, E5): anim.viewmodel.unit checks the 1p viewmodel
+# animator, its springs, viewmodel_tuning.cfg and the ADS camera against the real weapon sim on the synthetic gate
+# weapons, presented at 30 / 60 / 144 / 240 fps. No install, no Godot (godot.m2a_viewmodel is the install half).
+openbf3_test(test_anim_viewmodel test_main.cpp anim_viewmodel_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_anim_viewmodel PRIVATE bf3_anim bf3_sim)
+target_compile_definitions(test_anim_viewmodel PRIVATE "OPENBF3_VIEWMODEL_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/viewmodel_tuning.cfg\"")
+add_test(NAME anim.viewmodel.unit COMMAND test_anim_viewmodel --test-suite=anim-viewmodel-unit)
+set_tests_properties(anim.viewmodel.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_vm_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(anim.viewmodel.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_vm_cl_dir}")
+endif()
+# M2a vm: godot.m2a_viewmodel, the install half (res://scenes/m2a_viewmodel.tscn -- --vm-check; tests/godot_m2a_viewmodel.cmake).
+# Headless and functional (the display frames are stepped, the load time is printed, never gated): it runs in the
+# branch pass on its per-build cache root.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m2a_viewmodel godot_m2a_viewmodel.cmake HEADLESS TIMEOUT 480)
+endif()
+
+# M2a fx2 (docs/design/m2a-fx2.md): fx.render.unit, VFX2's render preparation (batch keys and order, back-to-front sort,
+# the instance layout, alpha-level packing, default-texture fallbacks, the light merge and the 64-light pool) and the
+# prepared atlas pixels (NormalDXT5RGA -> BC5, the cache blob's round trip, truncations, mutations; also in the asan
+# preset). No install, no Godot.
+openbf3_test(test_fx_render test_main.cpp fx_render_tests.cpp fx_test_support.h test_support.h)
+target_link_libraries(test_fx_render PRIVATE bf3_fx)
+add_test(NAME fx.render.unit COMMAND test_fx_render --test-suite=fx-render-unit)
+set_tests_properties(fx.render.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.render.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx2_cl_dir}")
+endif()
+# godot.fx_demo: the windowed VFX2 demo check (E8 (3), (4), (6), lights <= 64, the 1p pass, FX main-thread time,
+# captures, install unchanged; 77 without OPENBF3_GODOT, a window or an install). godot.fx_ref: the Godot reference
+# workloads and VFX2's 16k row (cost <= 1.25 x the MultiMesh 16k lit+soft row, GPU, S3 G1b windows; no install). Both
+# are timing / windowed rows: WINDOW (label window, the merge pass's user-away phase, serially under the quiet lock).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.fx_demo godot_fx_demo.cmake WINDOW TIMEOUT 1500)
+    openbf3_godot_row(godot.fx_ref godot_fx_ref.cmake WINDOW TIMEOUT 1500)
+    set_tests_properties(godot.fx_demo godot.fx_ref PROPERTIES RUN_SERIAL TRUE)
+endif()
+
+# M2a hud (docs/design/m2a.md §1 E10, §11.4; docs/design/m2a-hud.md): ui.hud.feed.unit is the Godot-free half of E10
+# (fill_hud over scripted frames, make_hud_static, the crosshair gap, the stage-to-window mapping, the screen layout on
+# synthetic and hostile trees; no data); ui.hud.feed.install resolves the 12 kit items of §5.6 on the install (names
+# 12/12 through the text database, the M67 through its UI description; _small icons 12/12; the hudmpscreen slots;
+# install.unchanged; 77 without an install).
+openbf3_test(test_ui_hud_feed test_main.cpp ui_hud_feed_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_ui_hud_feed PRIVATE bf3_host)
+add_test(NAME ui.hud.feed.unit COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-unit)
+add_test(NAME ui.hud.feed.install COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-install)
+set_tests_properties(ui.hud.feed.unit PROPERTIES TIMEOUT 120)
+set_tests_properties(ui.hud.feed.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_hud_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui.hud.feed.unit ui.hud.feed.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_hud_cl_dir}")
+endif()
+# M2a hud godot (docs/design/m2a-hud.md §5): godot.m2a_hud runs the windowed --hud-check of
+# res://scenes/m2a_hud.tscn after a probe run (E10 at 1280 x 720, 1920 x 1080, 2560 x 1440 per frame of a scripted
+# model; exit 77 = skipped without OPENBF3_GODOT, an install, a window or a rendering device); the PNGs go to
+# $ENV{OPENBF3_HUD_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/hud (gitignored, outside the
+# worktree). It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
+# WINDOW: label window, the merge pass's user-away phase.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m2a_hud godot_m2a_hud.cmake WINDOW TIMEOUT 600)
+    set_tests_properties(godot.m2a_hud PROPERTIES RUN_SERIAL TRUE)
+endif()
+
 # M2a audio (docs/design/m2a-audio.md §10): audio.contract, every audio header compiles together, the node type
 # table keeps the census sets, the seam hashes and FourCCs match the data's encoding, the tuning parser and the
 # project's audio_tuning.cfg. No data.
@@ -922,8 +1094,12 @@ openbf3_label(realtime godot.m1.e1 godot.m1.e2_gate godot.m1.e2_stress host.sess
 # timing: gates wall or CPU time (the merge pass, serially; RUN_SERIAL stays on each).
 # host.session.unit left the real-time lane for the serial timing phase (S16 landing rule): beside the shards it
 # needed a rerun in 2 of 4 lane runs (interp.compared > 300, target_buffer_ticks == 2; 2026-10-17).
+# host.gunplay.client (M2a cl): E1 / E5, E12 lagcomp and E15's 10 min loopback on Metro, wall clock (main's build.cmd
+# listed it among the timing rows); the dev-timing preset sets its OPENBF3_CL_TIMING=1.
+# host.gunplay.server (M2a sv) and host.gunplay.client.unit (M2a cl): real-time play with wall-clock waits that failed
+# beside a -j16 branch pass (their CMake comments).
 openbf3_label(timing host.scale sim.nav.bake sim.weapons.perf tools.fx_bench audio.decode.perf audio.bank logic.perf
-    tools.tc_cost host.gunplay.perf host.session.unit)
+    tools.tc_cost host.gunplay.perf host.session.unit host.gunplay.client host.gunplay.server host.gunplay.client.unit)
 # serial_wallclock: RUN_SERIAL in the branch pass for a wall-clock CHECK (host_scale_tests.cpp: the per-tick timer
 # parts sum to >= 0.95 x the tick on 99 % of ticks).
 openbf3_label(serial_wallclock host.scale.unit)
@@ -978,6 +1154,8 @@ openbf3_cost(core.cache 2 1)
 openbf3_cost(core.res.install 2 3)
 openbf3_cost(audio.census 2 3)
 openbf3_cost(tools.ebx_memory 2 2)
+# godot.m2a_viewmodel (M2a vm), measured in the branch pass after the merge of main e1d574d (2026-10-17).
+openbf3_cost(godot.m2a_viewmodel 1 7)
 # The timing / realtime / window rows: COST only orders them inside their phase.
 openbf3_cost(godot.m1.e1 1 150)
 openbf3_cost(godot.m1.e2_gate 1 100)
@@ -995,6 +1173,12 @@ openbf3_cost(godot.m1_load 1 49)
 openbf3_cost(godot.audio 1 33)
 openbf3_cost(audio.decode.perf 1 11)
 openbf3_cost(tools.tc_cost 1 9)
+# The M2a w2 timing rows, measured in the timing phase after the merge of main e1d574d (2026-10-17).
+openbf3_cost(host.gunplay.client 1 988)
+openbf3_cost(host.gunplay.server 1 127)
+openbf3_cost(host.gunplay.client.unit 1 91)
+openbf3_cost(godot.fx_ref 1 182)
+openbf3_cost(godot.fx_demo 1 27)
 
 # Every godot.* row goes through openbf3_godot_row (docs/testing.md "Godot rows").
 get_property(_openbf3_all_tests DIRECTORY PROPERTY TESTS)

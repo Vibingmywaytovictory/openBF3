@@ -50,8 +50,14 @@
 #include "bf3/sim/command.h"
 #include "bf3/sim/prediction.h"
 #include "bf3/sim/soldier_state.h"
+// M2a cl (docs/design/m2a.md §8; as built: docs/design/m2a-cl.md)
+#include "bf3/host/client_projectiles.h"
+#include "bf3/host/kits.h"
+#include "bf3/host/presentation_events.h"
+#include "bf3/net/weapons_wire.h"
 
 #include <cstdint>
+#include <functional>
 #include <array>
 #include <memory>
 #include <span>
@@ -83,6 +89,15 @@ struct InputSample {
 	// that life here; until it does, the client commands the spawn view (step 6 above), so the first real
 	// commands never turn the soldier away from the view the server's hold command used (docs §9.2, §11.6).
 	uint32_t life = 0;
+	// M2a cl (docs/design/m2a.md §6.2, §8.1; as built: docs/design/m2a-cl.md). fire_presses: a press counter like
+	// jump_presses, so a click shorter than a tick still fires (the command of the tick after a change carries kFire).
+	// The view sample of the frame the player saw: set_view_sample fills it from the drawn PresentationFrame; without
+	// it (view_valid false: headless tests) the client takes its own newest frame's render time at sampling.
+	uint32_t fire_presses = 0;
+	bool view_valid = false;
+	uint8_t view_quality = 0; // sim::ViewQuality of the drawn frame
+	uint16_t view_seq = 0; // PresentationFrame::newest_seq of the drawn frame
+	double view_render_ticks = 0.0; // the render time present_others drew the frame at (server ticks)
 };
 
 struct ClientSessionConfig {
@@ -119,6 +134,23 @@ struct ClientSessionConfig {
 	// Tests only (host.session.unit, T4): the first clock estimate (from MatchInfo) is moved by this many ticks, so
 	// a test can start the clock behind the server's spawn tick (a start with T >= C: forced_forward).
 	int32_t initial_clock_offset_ticks = 0;
+	// M2a (docs/design/m2a.md §5.5, E6; cl): the weapon_mechanics.cfg this client parses when it builds its weapon
+	// table on MatchInfo (both ends of a headless test share one SharedLevel, so the cfg is not part of it). The
+	// default is the shipped file's project-relative path (sim::weapons::kMechanicsTuningPath); E6's mismatch run
+	// points it at a second file.
+	std::string mechanics_cfg = "config/weapon_mechanics.cfg";
+	// M2a cl (as built: docs/design/m2a-cl.md). What the client builds its weapon table from. Null: the level's own
+	// (client_gunplay_inputs of SharedLevel::gunplay, built on MatchInfo) when gunplay_from_level is set and the level
+	// has gunplay tables; otherwise no gunplay, and a server whose MatchInfo names a weapon_hash refuses this client
+	// ("weapon table mismatch").
+	std::shared_ptr<const struct ClientGunplayInputs> gunplay;
+	bool gunplay_from_level = true;
+	// The own world's time rule clamp (ClientProjectiles); -1 = MatchInfo::max_rewind_ticks. E12's control run keeps
+	// the client at 21 while its server uses 0.
+	int32_t own_test_max_rewind_ticks = -1;
+	bool record_predicted = false; // keep the first predictions' ShotEvents and timed events (take_predicted; E1, E5)
+	bool send_kit_select = false; // send kit_select with Ready (the kit and team of the first spawn)
+	net::KitSelect kit_select;
 };
 
 // One soldier as the presentation sees it.
@@ -134,6 +166,11 @@ struct PresentedSoldier {
 	sim::MoveMode mode = sim::MoveMode::OnGround;
 	uint8_t flags = 0;
 	bool extrapolated = false; // render time was past the newest sample
+	// M2a (docs/design/m2a.md §6.1; cl fills them in present_others): the stance being entered and the transition
+	// progress, switched together with `pose` at the newer sample; the capsules (sim::weapons::TargetPose) and tp's
+	// stance blend read them.
+	sim::Pose target_pose = sim::Pose::Stand;
+	float transition = 0.0f; // 0..1 (net::OtherSoldier::transition / 255)
 };
 
 // Trivially copyable (a fixed char buffer instead of a string): it travels inside PresentationFrame.
@@ -172,6 +209,30 @@ struct ClientStats {
 	net::NetSimStats netsim_out;
 	net::NetSimStats netsim_in;
 	std::array<char, 128> last_error{}; // NUL-terminated
+	// M2a cl (docs/design/m2a.md §6.3, §8; as built: docs/design/m2a-cl.md).
+	bool refused = false; // MatchInfo refused (weapon or kit table mismatch): disconnected before Ready, nothing predicted
+	bool gunplay = false; // the own weapons are predicted (the server's weapon_hash matched)
+	uint64_t weapon_hash_mismatch = 0;
+	uint64_t kit_hash_mismatch = 0;
+	uint64_t weapon_reconciliations = 0; // predicted weapons at T differed from the Snapshot's wire view: rebase + replay
+	uint64_t weapon_ring_misses = 0; // no predicted weapons at T: rebased from the wire view (no compare)
+	uint64_t health_rebases = 0; // R2: only the health differed at T: the ring's health moved by the difference, no replay
+	uint64_t predicted_shots = 0; // ShotEvents of first predictions
+	uint64_t predicted_timed = 0; // timed weapon events of first predictions
+	uint64_t no_view_shots = 0; // own shots whose command had no stored view sample (a repeat, a view_seq outside 32)
+	uint64_t snapshot_others_received = 0;
+	uint64_t remote_shots = 0; // RemoteShot events (shots of other slots)
+	uint64_t combat_hits = 0, combat_deaths = 0, combat_detonations = 0;
+	uint64_t bad_gunplay_datagrams = 0; // ShotEvents / CombatEvents / SnapshotOthers that failed to decode
+	uint64_t bad_weapon_wires = 0; // a Snapshot's own weapons block refused by weapons_from_wire (not adopted)
+	uint64_t bad_gunplay_events = 0; // decoded shots / hits / deaths / detonations naming a slot or def out of range (dropped)
+	uint64_t late_sample = 0; // arrivals with a seq <= the view_seq of a firing command already sent (§6.3)
+	uint64_t generation_reorder = 0; // a reordered old-generation record reset a drawn track
+	uint64_t others_ahead = 0; // published frames drawing a SnapshotOthers record newer than newest_seq's tick
+	uint64_t track_timeout = 0; // drawn tracks dropped by the wall-clock timeout
+	uint64_t events_overflow = 0; // PresentationEvents pushes refused (ring full; E14 gates 0)
+	sim::WeaponLaneStats lane;
+	ClientProjectilesStats projectiles;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -179,14 +240,12 @@ static_assert(std::is_trivially_copyable_v<ClientStats>);
 // the render time at publish, then up to two newer ones, so the main thread finds a bracketing pair for any frame
 // until the next publish.
 inline constexpr size_t kOtherSamples = 3;
-struct OtherSample {
-	sim::Tick server_tick = 0;
-	net::OtherSoldier soldier;
-};
+using OtherSample = net::TimedOther; // R1 (docs/design/m2a.md §6.1; cl): the record type lc moved to bf3_net
 struct OtherTrack {
 	uint8_t slot = 0;
 	uint8_t count = 0; // samples used, oldest first
 	std::array<OtherSample, kOtherSamples> samples{};
+	sim::Tick track_newest_tick = 0; // M2a cl: the newest sample of the client's whole track (window_extrapolated)
 };
 
 // One frame for the Godot main thread. The own soldier comes as the two latest predicted ticks plus the fraction
@@ -230,6 +289,20 @@ struct PresentationFrame {
 	uint32_t other_count = 0;
 	std::array<OtherTrack, net::kMaxSlots> others{};
 	ClientStats stats;
+	// M2a (docs/design/m2a.md §6.2, §8.3; cl fills it in publish): the newest Snapshot seq received when this frame was
+	// published (M1's newest_snapshot at that moment; a newer SnapshotOthers does not count, §7.2). The main thread
+	// puts its low 8 bits into the InputSample with the frame's render time, and the client thread writes them into
+	// the command as Command::view_seq8.
+	uint16_t newest_seq = 0;
+	// M2a cl (as built: docs/design/m2a-cl.md): the own weapons of the two latest predicted ticks for
+	// present_weapon (presentation_weapon.h), the match seed (effect seeds) and the server tick of newest_seq.
+	bool own_weapons_valid = false;
+	net::WeaponsWire own_weapons_prev; // weapons_wire_view(predicted weapons after tick - 1, tick - 1)
+	net::WeaponsWire own_weapons_curr; // weapons_wire_view(predicted weapons after tick, tick)
+	uint64_t match_seed = 0;
+	sim::Tick newest_tick = 0;
+	uint8_t own_kit = 0;
+	uint8_t own_team = 0;
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 
@@ -275,6 +348,13 @@ public:
 	void debug_shift_clock(int32_t p_ticks);
 	void debug_stall(uint32_t p_ms);
 
+	// M2a cl (docs/design/m2a.md §8.3; as built: docs/design/m2a-cl.md). The events ring (drain it from one thread,
+	// the main thread), the first predictions' shots and timed events (record_predicted) and the own world's E12 log,
+	// each moved out since the previous call. Any thread.
+	PresentationEvents &events();
+	void take_predicted(std::vector<struct PredictedShot> &r_shots, std::vector<struct PredictedTimed> &r_timed);
+	void take_own_test_samples(std::vector<OwnTestSample> &r_samples);
+
 	// Stops and joins every running ClientSession of the process (extension deinit safety net).
 	static size_t stop_all();
 
@@ -282,5 +362,59 @@ private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 };
+
+// ---- M2a cl (docs/design/m2a.md §6.1-§6.3, §8; as built: docs/design/m2a-cl.md) -----------------------------------
+
+// What the client builds its weapon table from on MatchInfo: by default the SharedLevel's gunplay tables
+// (client_gunplay_inputs below, the same defs, materials, capsule pose table and kits the server's Gunplay uses), or
+// what the caller supplies (ClientSessionConfig::gunplay). The client's table is a copy of `table` with the mechanics
+// from mechanics_cfg (load_mechanics; null keeps the table's) and the match options of MatchInfo::weapon_flags,
+// rehashed; it predicts only when weapon_table_hash(that) ^ capsules->hash equals MatchInfo::weapon_hash and kits.hash
+// equals MatchInfo::kit_hash. A table's defs do not depend on the mechanics (make_weapon_table), so the copy equals the
+// server's make_match_table of the same cfg and flags bit for bit.
+struct ClientGunplayInputs {
+	std::shared_ptr<const sim::weapons::WeaponTable> table;
+	std::shared_ptr<const core::gameplay::CapsulePoseTable> capsules;
+	KitTable kits;
+	net::ShotQuantization shot_frame; // the level's frame for shot origins and combat positions (static world bounds min)
+	// Reads and parses the cfg at a path (sv: read the file, sim::weapons::parse_mechanics_tuning). An error refuses
+	// the match like a mismatch.
+	std::function<core::Result<sim::weapons::Mechanics>(const std::string &p_path)> load_mechanics;
+};
+
+// The weapon table a client builds from p_inputs for MatchInfo's p_weapon_flags (also what a test server builds).
+core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> build_client_weapon_table(const ClientGunplayInputs &p_inputs,
+		const std::string &p_mechanics_cfg, uint8_t p_weapon_flags);
+// MatchInfo::weapon_hash of a table and a capsule table: weapon_table_hash(table) ^ capsules.hash.
+uint64_t client_weapon_hash(const sim::weapons::WeaponTable &p_table, const core::gameplay::CapsulePoseTable &p_capsules);
+// The inputs from a level's gunplay tables (SharedLevel::gunplay, gunplay.h): make_match_table with wp's default
+// mechanics (replaced per match by load_mechanics = load_mechanics_cfg), the capsule pose table, the kits and the
+// level's shot frame (shot_frame of the static world). Fails without gunplay tables.
+core::Result<std::shared_ptr<const ClientGunplayInputs>> client_gunplay_inputs(const SharedLevel &p_level);
+
+struct PredictedShot {
+	sim::Tick tick = 0;
+	sim::weapons::ShotEvent shot;
+};
+struct PredictedTimed {
+	sim::Tick tick = 0;
+	sim::weapons::TimedWeaponEvent event;
+};
+
+// present_others with the drawn-frame residual of §6.1: a soldier extrapolated past the window's newest sample while
+// the client's track held a newer one (a main-thread stall longer than a sample interval) counts window_extrapolated.
+struct PresentOthersCounts {
+	uint64_t extrapolated = 0;
+	uint64_t window_extrapolated = 0;
+	uint64_t held = 0; // before the oldest sample or past the extrapolation limit
+};
+size_t present_others(const PresentationFrame &p_frame, uint64_t p_now_ns, std::span<PresentedSoldier> r_out, PresentOthersCounts &r_counts);
+// The render time present_others draws at p_now_ns (render_ticks_at_publish advanced by ticks_per_ns).
+double present_render_ticks(const PresentationFrame &p_frame, uint64_t p_now_ns);
+// The view quality of the frame drawn at p_render_ticks: None for a frame never published, Held when a drawn soldier
+// is past the 250 ms extrapolation, Extrapolated when one is past its newest sample, else Interpolated.
+sim::ViewQuality present_view_quality(const PresentationFrame &p_frame, double p_render_ticks);
+// Main thread, every frame the input is sampled for: puts the drawn frame's view sample into r_input.
+void set_view_sample(InputSample &r_input, const PresentationFrame &p_frame, uint64_t p_now_ns);
 
 } // namespace bf3::host

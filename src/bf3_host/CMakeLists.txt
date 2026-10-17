@@ -38,3 +38,45 @@ target_sources(bf3_host PRIVATE
     src/bot_fill.cpp
     src/scale_bench.cpp
 )
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §4, §6.6, §8, §10.1, §11.4, §15): server gunplay (sv), lag compensation
+# (lc), the client's events, presented weapon and cosmetic projectiles (cl) and the HUD feed (hud).
+target_sources(bf3_host PRIVATE
+    include/bf3/host/gunplay.h
+    include/bf3/host/kits.h
+    include/bf3/host/target_bots.h
+    include/bf3/host/server_view.h
+    include/bf3/host/lag_comp.h
+    include/bf3/host/presentation_events.h
+    include/bf3/host/presentation_weapon.h
+    include/bf3/host/client_projectiles.h
+    include/bf3/host/hud_feed.h
+)
+
+# M2a lc (docs/design/m2a.md §6.3, §6.4, §6.6; docs/design/m2a-lc.md): the lag history and the rewind provider.
+target_sources(bf3_host PRIVATE
+    src/lag_comp.cpp
+)
+
+# M2a cl (docs/design/m2a.md §8; docs/design/m2a-cl.md): the events ring, the presented weapon and the client's
+# cosmetic projectiles.
+target_sources(bf3_host PRIVATE
+    src/presentation_events.cpp
+    src/presentation_weapon.cpp
+    src/client_projectiles.cpp
+)
+
+# M2a sv (docs/design/m2a.md §4, §5.6, §10.1; docs/design/m2a-sv.md): server gunplay, kits, target bots. bf3_anim for
+# the capsule pose table built from the retail clips (lc's builder).
+target_sources(bf3_host PRIVATE
+    src/kits.cpp
+    src/target_bots.cpp
+    src/gunplay.cpp
+)
+target_link_libraries(bf3_host PUBLIC bf3_anim)
+
+# M2a hud (docs/design/m2a.md §11.4, docs/design/m2a-hud.md): the HUD feed (fill_hud, HudStatic) and the Godot-free
+# HUD layout (stage to window mapping, the hudmpscreen text slots, the crosshair gap) the Bf3Hud controls draw from.
+target_sources(bf3_host PRIVATE
+    src/hud_feed.cpp
+)

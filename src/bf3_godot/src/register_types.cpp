@@ -17,6 +17,13 @@
 // UI ui1
 #include "ui_assets.h"
 #include "ui_font_check.h"
+// M2a vm
+#include "m2a_viewmodel_demo.h"
+#include "viewmodel.h"
+// M2a fx2
+#include "fx_demo.h"
+#include "fx_ref.h"
+#include "fx_renderer.h"
 
 #include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
@@ -52,6 +59,16 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapHud);
+	// M2a vm (docs/design/m2a-vm.md)
+	GDREGISTER_CLASS(bf3::godot_side::Bf3Viewmodel);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);
+	// M2a fx2 (docs/design/m2a-fx2.md)
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRenderer);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRef);
+	// M2a hud (docs/design/m2a-hud.md): Bf3Hud, its widgets and Bf3HudCheck (registered in hud_controls.cpp)
+	void openbf3_register_m2a_hud();
+	openbf3_register_m2a_hud();
 	// M2a audio
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);

@@ -71,7 +71,8 @@
       "configurePreset": "dev",
       "displayName": "dev-timing: the merge pass's timing rows and memory gates (labels timing, merge_also), serial",
       "execution": { "jobs": 1 },
-      "filter": { "include": { "label": "^(timing|merge_also)$" } }
+      "filter": { "include": { "label": "^(timing|merge_also)$" } },
+      "environment": { "OPENBF3_CL_TIMING": "1" }
     },
     {
       "name": "dev-window",

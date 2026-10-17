@@ -301,6 +301,16 @@ target_sources(bf3_core PRIVATE
     src/gameplay/grid_pairs.cpp
 )
 
+# M2a w2 (W2.0 contract, docs/design/m2a.md §6.5, §15; owner of the bodies: lc): the capsule pose table.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/capsule_pose_table.h
+)
+
+# M2a lc (docs/design/m2a.md §6.5, §13.1; docs/design/m2a-lc.md): the capsule pose table's hash, checks and cache blob.
+target_sources(bf3_core PRIVATE
+    src/gameplay/capsule_pose_table.cpp
+)
+
 # M2a audio (docs/design/m2a-audio.md §5, §6): sound stream codecs (EA-XAS v1), SoundWaveAsset reader, the resident
 # wave bank, the sound-graph node type table and the SoundPatchAsset compiler.
 target_sources(bf3_core PRIVATE

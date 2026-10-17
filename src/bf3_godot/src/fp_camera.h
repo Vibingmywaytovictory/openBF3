@@ -64,3 +64,21 @@ private:
 };
 
 } // namespace bf3::godot_side
+
+// M2a vm (docs/design/m2a.md §11.2; docs/design/m2a-vm.md): the ADS FOV, the interpolated predicted recoil and the
+// presentation kick on a first-person Camera3D. Bf3Viewmodel calls apply_view_effects once per display frame after
+// the camera's eye is known; camera_view_angles_of reads a camera back (E19's recoil row).
+namespace bf3::godot_side {
+
+struct ViewEffects {
+	float world_fov_deg = FpCamera::kFovDegrees; // vertical (KEEP_HEIGHT; §16 Q5)
+	float recoil_pitch_deg = 0, recoil_yaw_deg = 0; // the interpolated predicted RecoilOffset (+ up, + left)
+	float kick_pitch_deg = 0, kick_yaw_deg = 0; // the presentation kick (ViewmodelOutput::camera_recoil_*)
+};
+// Places p_camera at p_eye looking along view + recoil + kick (bf3::anim::camera_view_angles; sim convention, the
+// basis rotate_y(yaw + pi) * rotate_x(pitch) of the M1 camera) with KEEP_HEIGHT and the world FOV.
+void apply_view_effects(godot::Camera3D *p_camera, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, const ViewEffects &p_effects);
+// The sim-convention yaw / pitch (radians) a camera looks along: forward = (sin y cos p, sin p, cos y cos p).
+void camera_view_angles_of(const godot::Camera3D *p_camera, double &r_yaw, double &r_pitch);
+
+} // namespace bf3::godot_side

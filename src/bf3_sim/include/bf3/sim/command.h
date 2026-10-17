@@ -35,6 +35,10 @@ inline constexpr uint8_t kRepeated = 1u << 0;
 inline constexpr uint8_t kLocalSource = 1u << 1;
 } // namespace command_flags
 
+// M2a (docs/design/m2a.md §6.2): how the drawn frame showed the others when the command was sampled (2 bits on the
+// wire).
+enum class ViewQuality : uint8_t { None = 0, Interpolated = 1, Extrapolated = 2, Held = 3 };
+
 struct Command {
 	Tick tick = 0; // the server tick this command drives (the client aims it 1-2 ticks ahead, §7.5)
 	uint32_t sequence = 0; // +1 per command of one client session: acks and dedupe
@@ -45,6 +49,14 @@ struct Command {
 	int16_t pitch = 0; // view pitch, kPitchStepsPerHalfTurn steps per half turn, clamped to +-kPitchLimit
 	Pose pose = Pose::Stand; // the pose the player asks for (toggles resolved by the client's input mapping)
 	uint8_t flags = 0; // command_flags:: (server side only; never sent by a client)
+	// M2a view sample (docs/design/m2a.md §6.2): what the player saw when this command's input was sampled, so the
+	// server tests the command's shots against the targets as that client drew them (lag compensation, §6.3).
+	// 26 bits on the wire (bf3_net protocol.h v2). Bots and server-side sources leave them 0 (quality None: they
+	// fire at the present, plan D7).
+	uint16_t view_back_q8 = 0; // (tick << 8) - render_time_q8, server ticks x 256, saturated at 65,535 (4.27 s)
+	uint8_t view_quality = 0; // ViewQuality, from present_others' counters at that frame
+	uint8_t view_seq8 = 0; // low 8 bits of the newest Snapshot seq (this client's seq space) received before the
+			// drawn frame was published
 
 	bool operator==(const Command &) const = default;
 };

@@ -26,3 +26,15 @@ add_library(bf3_fx STATIC
 target_include_directories(bf3_fx PUBLIC include)
 target_link_libraries(bf3_fx PUBLIC bf3_core)
 openbf3_module(bf3_fx)
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §12.1, §15): VFX2's render preparation and prepared atlas pixels (fx2).
+target_sources(bf3_fx PRIVATE
+    include/bf3/fx/render_prep.h
+    include/bf3/fx/atlas_pixels.h
+)
+
+# M2a fx2 (docs/design/m2a-fx2.md): VFX2's render preparation and the prepared atlas pixels.
+target_sources(bf3_fx PRIVATE
+    src/render_prep.cpp
+    src/atlas_pixels.cpp
+)

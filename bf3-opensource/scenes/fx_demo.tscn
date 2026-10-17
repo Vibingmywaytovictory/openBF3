@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[node name="FxDemo" type="Node3D"]
+
+[node name="Session" type="Bf3LevelSession" parent="."]
+
+[node name="FxDemo" type="Bf3FxDemo" parent="."]

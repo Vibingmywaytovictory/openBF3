@@ -117,6 +117,40 @@ target_sources(bf3_godot PRIVATE
     src/minimap_check.h
 )
 
+# M2a vm (docs/design/m2a-vm.md; m2a.md §11.1, §11.2): Bf3Viewmodel (the 1p viewmodel and ADS camera), the vm demo /
+# check scene Bf3M2aViewmodelDemo (res://scenes/m2a_viewmodel.tscn) and its scripted weapon timeline, registered in
+# register_types.cpp under "// M2a vm".
+target_sources(bf3_godot PRIVATE
+    src/viewmodel.cpp
+    src/viewmodel.h
+    src/vm_script.cpp
+    src/vm_script.h
+    src/m2a_viewmodel_demo.cpp
+    src/m2a_viewmodel_demo.h
+    src/m2a_viewmodel_check.cpp
+)
+
+# M2a fx2 (docs/design/m2a-fx2.md): VFX2's renderer node Bf3FxRenderer, the demo Bf3FxDemo (res://scenes/fx_demo.tscn,
+# --fx-check) and the GPU reference bench Bf3FxRef (res://scenes/fx_ref.tscn, --fx-ref-check).
+target_sources(bf3_godot PRIVATE
+    src/fx_renderer.cpp
+    src/fx_renderer.h
+    src/fx_demo.cpp
+    src/fx_demo.h
+    src/fx_ref.cpp
+    src/fx_ref.h
+)
+target_link_libraries(bf3_godot PRIVATE bf3_fx)
+
+# M2a hud (docs/design/m2a-hud.md): the minimal HUD (Bf3Hud and its widgets) and its check (Bf3HudCheck,
+# res://scenes/m2a_hud.tscn), registered by the "// M2a hud" block of register_types.cpp.
+target_sources(bf3_godot PRIVATE
+    src/hud_controls.cpp
+    src/hud_controls.h
+    src/hud_check.cpp
+    src/hud_check.h
+)
+
 # M2a audio (docs/design/m2a-audio.md §6.5, §7): Bf3AudioStream / Bf3AudioPlayback over bf3_audio's mixer core
 # (registered by the A1 wave) and the audio demo node of res://scenes/audio_m16.tscn (A2 wave).
 target_sources(bf3_godot PRIVATE

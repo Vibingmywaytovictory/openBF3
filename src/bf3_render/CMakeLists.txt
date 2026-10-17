@@ -56,3 +56,13 @@ target_sources(bf3_render PRIVATE
     include/bf3/render/look_materials.h
     include/bf3/render/look_environment.h
 )
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §11.1, §15): a kit's 1p viewmodels (vm).
+target_sources(bf3_render PRIVATE
+    include/bf3/render/viewmodel_set.h
+)
+
+# M2a vm (docs/design/m2a-vm.md): the kit viewmodel sets (shared sources, role clips, stand-ins, ADS data).
+target_sources(bf3_render PRIVATE
+    src/viewmodel_set.cpp
+)

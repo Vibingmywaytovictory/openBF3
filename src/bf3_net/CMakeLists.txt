@@ -24,3 +24,21 @@ target_sources(bf3_net PRIVATE
     src/protocol.cpp
     src/netsim.cpp
 )
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §6.1, §7, §15): the own-weapons wire view (nt) and the shared sampler of
+# one other soldier (lc).
+target_sources(bf3_net PRIVATE
+    include/bf3/net/weapons_wire.h
+    include/bf3/net/other_sample.h
+)
+
+# M2a nt (docs/design/m2a-nt.md): the body of weapons_wire.h.
+target_sources(bf3_net PRIVATE
+    src/weapons_wire.cpp
+)
+
+# M2a lc (docs/design/m2a.md §6.1, §6.3, §6.4; docs/design/m2a-lc.md): the shared sampler, the time rule and the track
+# rebuild.
+target_sources(bf3_net PRIVATE
+    src/other_sample.cpp
+)

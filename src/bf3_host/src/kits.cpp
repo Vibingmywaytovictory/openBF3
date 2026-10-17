@@ -1,0 +1,176 @@
+// The match's kits (docs/design/m2a.md §5.6; owner sv; kits.h): each team's four default TDM loadouts resolved to the
+// def ids of the match's WeaponTable, slots 0, 1, 6 and 7 only.
+#include "bf3/host/kits.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+
+namespace bf3::host {
+
+namespace {
+
+std::string lower(std::string_view p_text) {
+	std::string out(p_text);
+	for (char &c : out) {
+		c = char(std::tolower(static_cast<unsigned char>(c)));
+	}
+	return out;
+}
+
+// The role of a kit asset by its partition name (gameplay/kits/usassault, .../rusupport ...): the order of
+// TeamDef::kits is the data's, the role is what M2a's KitSelect names.
+bool role_of(std::string_view p_asset, KitRole &r_role) {
+	const std::string a = lower(p_asset);
+	const size_t slash = a.rfind('/');
+	const std::string name = slash == std::string::npos ? a : a.substr(slash + 1);
+	static const std::pair<const char *, KitRole> kRoles[] = { { "assault", KitRole::Assault }, { "engineer", KitRole::Engineer },
+		{ "support", KitRole::Support }, { "recon", KitRole::Recon } };
+	for (const auto &[word, role] : kRoles) {
+		if (name.find(word) != std::string::npos) {
+			r_role = role;
+			return true;
+		}
+	}
+	return false;
+}
+
+void fnv(uint64_t &r_hash, const void *p_data, size_t p_size) {
+	const unsigned char *b = static_cast<const unsigned char *>(p_data);
+	for (size_t i = 0; i < p_size; ++i) {
+		r_hash ^= b[i];
+		r_hash *= 0x100000001B3ull;
+	}
+}
+
+template <typename T>
+void fnv_value(uint64_t &r_hash, const T &p_value) {
+	unsigned char bytes[sizeof(T)];
+	std::memcpy(bytes, &p_value, sizeof(T));
+	fnv(r_hash, bytes, sizeof(T));
+}
+
+} // namespace
+
+const char *kit_role_name(KitRole p_role) {
+	switch (p_role) {
+		case KitRole::Assault:
+			return "assault";
+		case KitRole::Engineer:
+			return "engineer";
+		case KitRole::Support:
+			return "support";
+		case KitRole::Recon:
+			return "recon";
+	}
+	return "?";
+}
+
+const KitLoadout &KitTable::loadout(uint8_t p_team, uint8_t p_kit) const {
+	const size_t team = p_team >= 1 && p_team <= kKitTeams ? size_t(p_team - 1) : 0;
+	const size_t kit = p_kit < kKitCount ? size_t(p_kit) : 0;
+	return loadouts[team][kit];
+}
+
+core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
+		std::span<const core::gameplay::WeaponDef> p_defs) {
+	using core::gameplay::WeaponSlot;
+	KitTable table;
+	for (uint8_t t = 0; t < kKitTeams; ++t) {
+		const int team_id = int(t) + 1;
+		const core::gameplay::TeamDef *team = nullptr;
+		for (const core::gameplay::TeamDef &d : p_teams) {
+			if (d.team == team_id) {
+				team = &d;
+				break;
+			}
+		}
+		if (team == nullptr) {
+			return core::make_error("kits: the mode has no team " + std::to_string(team_id));
+		}
+		std::array<bool, kKitCount> filled{};
+		for (const std::string &asset : team->kits) {
+			KitRole role = KitRole::Assault;
+			if (!role_of(asset, role)) {
+				table.skipped.push_back(asset + ": not one of the four kit roles");
+				continue;
+			}
+			if (filled[size_t(role)]) {
+				return core::make_error("kits: team " + std::to_string(team_id) + " lists two " + kit_role_name(role) + " kits");
+			}
+			const std::string want = lower(asset);
+			const core::gameplay::KitDef *kit = nullptr;
+			for (const core::gameplay::KitDef &k : p_kits) {
+				if (lower(k.asset) == want) {
+					kit = &k;
+					break;
+				}
+			}
+			if (kit == nullptr) {
+				return core::make_error("kits: team " + std::to_string(team_id) + " kit " + asset + " was not read");
+			}
+			KitLoadout &l = table.loadouts[t][size_t(role)];
+			l.kit = uint8_t(role);
+			l.team = uint8_t(team_id);
+			l.defs.fill(sim::weapons::kNoWeapon);
+			l.active = kKitSlots[0];
+			for (size_t s = 0; s < kit->weapon_slots.size() && s < core::gameplay::kWeaponSlotCount; ++s) {
+				const core::gameplay::KitUnlock *u = kit->default_unlock(WeaponSlot(s));
+				const bool resolved = std::find(kKitSlots.begin(), kKitSlots.end(), uint8_t(s)) != kKitSlots.end();
+				if (!resolved) {
+					if (u != nullptr) {
+						table.skipped.push_back(std::string(kit_role_name(role)) + "/" + std::to_string(team_id) + "/" + std::to_string(s) + ": " + u->unlock);
+					}
+					continue;
+				}
+				if (u == nullptr) {
+					return core::make_error("kits: " + asset + " slot " + std::to_string(s) + " has no default unlock" +
+							(kit->progression_known ? "" : " (the progression tables were not found)"));
+				}
+				const std::string unlock = lower(u->unlock);
+				size_t id = p_defs.size();
+				for (size_t d = 0; d < p_defs.size(); ++d) {
+					if (lower(p_defs[d].variant) == unlock) {
+						id = d;
+						break;
+					}
+				}
+				if (id == p_defs.size() || id >= size_t(sim::weapons::kNoWeapon)) {
+					return core::make_error("kits: " + asset + " slot " + std::to_string(s) + " unlock " + u->unlock + " has no weapon def");
+				}
+				l.defs[s] = uint16_t(id);
+				l.unlocks[s] = unlock;
+			}
+			for (const uint8_t s : kKitSlots) {
+				if (l.defs[s] == sim::weapons::kNoWeapon) {
+					return core::make_error("kits: " + asset + " has no weapon in slot " + std::to_string(s));
+				}
+			}
+			filled[size_t(role)] = true;
+		}
+		for (uint8_t k = 0; k < kKitCount; ++k) {
+			if (!filled[k]) {
+				return core::make_error("kits: team " + std::to_string(team_id) + " has no " + kit_role_name(KitRole(k)) + " kit");
+			}
+		}
+	}
+	table.hash = kit_table_hash(table);
+	return table;
+}
+
+uint64_t kit_table_hash(const KitTable &p_table) {
+	uint64_t h = 0xCBF29CE484222325ull;
+	for (const auto &team : p_table.loadouts) {
+		for (const KitLoadout &l : team) {
+			fnv_value(h, l.team);
+			fnv_value(h, l.kit);
+			for (const uint16_t d : l.defs) {
+				fnv_value(h, d);
+			}
+			fnv_value(h, l.active);
+		}
+	}
+	return h;
+}
+
+} // namespace bf3::host

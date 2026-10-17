@@ -32,3 +32,21 @@ target_sources(bf3_anim PRIVATE
     include/bf3/anim/locomotion.h
     include/bf3/anim/temporal_lod.h
 )
+
+# M2a w2 (W2.0 contract, docs/design/m2a.md §6.5, §11.1, §15): the server pose of the hit capsules (lc) and the 1p
+# viewmodel animator (vm).
+target_sources(bf3_anim PRIVATE
+    include/bf3/anim/server_pose.h
+    include/bf3/anim/viewmodel_anim.h
+)
+
+# M2a lc (docs/design/m2a.md §6.5; docs/design/m2a-lc.md): the server-pose clips and the capsule pose table builder.
+target_sources(bf3_anim PRIVATE
+    src/server_pose.cpp
+    include/bf3/anim/server_pose_reference.h
+)
+
+# M2a vm (docs/design/m2a-vm.md): the 1p viewmodel animator, springs, tuning file and ADS camera.
+target_sources(bf3_anim PRIVATE
+    src/viewmodel_anim.cpp
+)

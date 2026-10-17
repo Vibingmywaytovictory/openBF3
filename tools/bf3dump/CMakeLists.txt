@@ -41,6 +41,14 @@ target_sources(bf3dump PRIVATE weapon_sim_commands.cpp weapon_sim_commands.h)
 # M2a VFX1 (docs/design/m2a-vfx1.md §7.7): `fx census | compile | simulate | check | bench | atlas | impacts`.
 target_sources(bf3dump PRIVATE fx_commands.cpp fx_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_fx)
+# M2a lc (docs/design/m2a.md §6, E13, E18; docs/design/m2a-lc.md): `lagcomp <LEVEL> <MODE> [--deviation] [--perf]`, the
+# capsule pose table from the install, the E18 (a) deviation rows and the E13 rewind rows (bf3_host from the nav block).
+target_sources(bf3dump PRIVATE lagcomp_commands.cpp lagcomp_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_anim)
+# M2a vm (docs/design/m2a-vm.md): `vm clips`, the 1p viewmodel clip roles, E5 reload rows and E11 coverage (bf3_render
+# from the prepare block above).
+target_sources(bf3dump PRIVATE vm_commands.cpp vm_commands.h)
+
 # M2a audio (docs/design/m2a-audio.md §1, §9): `audio waves|loc|census|render`, the drivers of gates G1-G4 and the
 # offline render through bf3_audio's mixer core.
 target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_commands.cpp)
