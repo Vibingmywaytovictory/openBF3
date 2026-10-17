@@ -3,7 +3,7 @@
 // bots on the real GameServer of a level x mode, ticked back to back on the calling thread for a fixed span of sim
 // time, every tick timed. Godot-free; one code path for the ctest (host.scale) and `bf3dump bots`.
 //
-// Setup: open_level_database -> level_combat_tiles -> load_shared_level (terrain_cover = those tiles) ->
+// Setup: open_level_database -> level_combat_tiles -> load_shared_level (TC: terrain everywhere) ->
 // load_bot_level -> GameServer::init with GameServerConfig::bots (count walkers) and max_slots 128, then
 // `observers` synthetic peers connected through on_connect + Hello + Ready datagrams (no sockets, as
 // host.session.unit drives GameServer), so the server encodes and "sends" a snapshot per observer every second tick.
@@ -169,7 +169,10 @@ struct NavBakeBench {
 	size_t tiles_terrain_only = 0; // requested tiles whose own soup tile holds terrain only (or nothing)
 	size_t tiles_with_objects = 0; // requested tiles whose own soup tile holds a non-terrain movement triangle
 	size_t points_outside_areas = 0;
-	size_t tiles_wet = 0; // cover tiles the water rule took the terrain from (CollisionSoup::cover_tiles_wet)
+	// TC water rule (NavStats::tiles_wet / triangles_unwalkable of the bake): requested tiles whose whole input is
+	// unwalkable terrain, and the terrain triangles under water - 1.8 m (RC_NULL_AREA). S1 reported 1,290 cover tiles.
+	size_t tiles_wet = 0;
+	size_t triangles_unwalkable = 0;
 	float water_y = 0.0f; // the highest water plane (0 with none)
 	size_t water_planes = 0;
 	size_t soup_triangles = 0;

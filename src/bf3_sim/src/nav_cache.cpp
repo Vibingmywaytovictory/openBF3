@@ -222,11 +222,11 @@ core::CacheKeyInputs nav_world_key_inputs(const core::Sha256Digest &p_source_dig
 	in.jolt_version = link_checked ? jolt_build_id() : std::string();
 	in.params = "source=" + p_source_digest.hex() + ";level=" + core::to_lower_ascii(p_level) + ";mode=" + core::to_lower_ascii(p_mode) +
 			";soup=" + std::to_string(core::level::kCollisionSoupVersion) + ";terrain_spacing=" + bits_hex(p_options.world.terrain_spacing) +
-			";cover=" + terrain_cover_digest(p_options.world.terrain_cover).hex() +
-			(p_options.world.cover_water.empty() ? std::string() : ";water=" + cover_water_digest(p_options.world.cover_water).hex()) +
-			";region=" + terrain_cover_digest(p_options.region).hex() + ";" +
+			// TC (docs/design/terrain-collision.md §10): the water planes of the bake's rule; no cover.
+			(p_options.bake.water.empty() ? std::string() : ";water=" + water_planes_digest(p_options.bake.water).hex()) +
+			";region=" + tile_list_digest(p_options.region).hex() + ";" +
 			nav_params_text(p_options.bake.params) + ";" + recast_build_id() + layer_text(p_options.bake.layer_mask) +
-			(link_checked ? ";links=jolt" : ";links=none");
+			(link_checked ? ";links=jolt;terrain=" + std::to_string(kStaticTerrainBits) + "/" + std::to_string(kStaticTerrainBlock) : ";links=none");
 	return in;
 }
 
@@ -320,8 +320,6 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 		core::level::SoupOptions so;
 		so.threads = p_options.world.soup_threads;
 		so.terrain_spacing = p_options.world.terrain_spacing;
-		so.terrain_cover = p_options.world.terrain_cover;
-		so.cover_water = p_options.world.cover_water;
 		so.progress = p_options.world.soup_progress;
 		core::Result<core::level::CollisionSoup> built = core::level::build_collision_soup(p_level, p_world, so);
 		if (!built) {
@@ -331,7 +329,7 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 		soup = &*own_soup;
 	}
 	const Clock::time_point input_start = Clock::now();
-	core::Result<std::vector<NavTileInput>> inputs = nav_tile_inputs_threads(*soup, region, bake.params, bake.layer_mask, bake.threads);
+	core::Result<std::vector<NavTileInput>> inputs = nav_tile_inputs_threads(*soup, region, bake.params, bake.layer_mask, bake.threads, bake.water);
 	if (!inputs) {
 		return inputs.error();
 	}

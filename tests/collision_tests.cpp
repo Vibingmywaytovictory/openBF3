@@ -228,9 +228,10 @@ struct Expected {
 	const char *level;
 	const char *mode;
 	size_t placements;
-	size_t triangles; // terrain included
+	size_t triangles; // terrain included (the listing's totals: soup Havok + hash_soup_terrain)
 	size_t terrain;
 	const char *terrain_hash;
+	size_t terrain_open; // cells left open (a hole corner); TC: of the whole grid
 	size_t destroyed;
 	size_t degenerate;
 	size_t tiles;
@@ -254,18 +255,39 @@ void check_level(const std::shared_ptr<Install> &p_install, const Expected &p_e)
 	CHECK(s.built == p_e.placements);
 	CHECK(s.missing == 0);
 	CHECK(s.hidden == 0);
-	CHECK(s.triangles == p_e.triangles);
-	CHECK(s.terrain_triangles == p_e.terrain);
+	// TC: the soup holds the Havok triangles and the terrain record; the oracle's totals are both together, the
+	// terrain's from hash_soup_terrain over the whole grid (as bf3dump collision prints them).
 	REQUIRE(s.terrains.size() == 1);
 	CHECK(s.terrains[0].state == SoupTerrain::State::Built);
-	CHECK(s.terrains[0].triangles == p_e.terrain);
-	CHECK(hex64(s.terrains[0].hash) == p_e.terrain_hash);
+	REQUIRE(s.terrains[0].grid != nullptr);
+	CHECK(s.terrains[0].triangles == 0);
+	WorkBudget budget(size_t(1) << 28);
+	Result<SoupTerrainHash> th = hash_soup_terrain(s.terrains[0], uint32_t(s.placements.size()), budget);
+	REQUIRE_MESSAGE(th.ok(), (th.ok() ? std::string() : th.error().message));
+	CHECK(th->triangles == p_e.terrain);
+	CHECK(s.terrain_triangles == p_e.terrain);
+	CHECK(th->open == p_e.terrain_open);
+	CHECK(s.terrains[0].open == p_e.terrain_open);
+	CHECK(th->cells == s.terrains[0].cells);
+	CHECK(hex64(th->hash) == p_e.terrain_hash);
+	CHECK(s.triangles + th->triangles == p_e.triangles);
 	CHECK(s.destroyed == p_e.destroyed);
-	CHECK(s.degenerate == p_e.degenerate);
-	CHECK(s.nonfinite == 0);
-	CHECK(s.tiles.size() == p_e.tiles);
-	CHECK(hex64(s.sum) == p_e.sum);
-	CHECK(s.bodies == p_e.bodies);
+	CHECK(s.degenerate + th->degenerate == p_e.degenerate);
+	CHECK(s.nonfinite + th->nonfinite == 0);
+	std::set<std::pair<int32_t, int32_t>> all_tiles;
+	uint64_t sum = s.sum;
+	for (const SoupTile &tile : s.tiles) {
+		all_tiles.insert({ tile.x, tile.z });
+	}
+	for (const SoupTerrainTileSum &t : th->tiles) {
+		all_tiles.insert({ t.tile[0], t.tile[1] });
+		sum += t.sum;
+	}
+	CHECK(all_tiles.size() == p_e.tiles);
+	CHECK(hex64(sum) == p_e.sum);
+	std::array<size_t, 3> bodies = s.bodies;
+	bodies[size_t(CollisionBody::Collision)] += th->triangles;
+	CHECK(bodies == p_e.bodies);
 	// Tiles: sorted, non-empty, every triangle's centroid inside its 64 m square, counts add up.
 	size_t total = 0, outside = 0;
 	std::set<std::pair<int32_t, int32_t>> seen;
@@ -289,8 +311,9 @@ void check_level(const std::shared_ptr<Install> &p_install, const Expected &p_e)
 } // namespace
 
 TEST_SUITE("collision") {
-	// level-oracle collision (2026-10-15): placements, triangles, terrain triangles and hash, destroyed, degenerate,
-	// tiles, sum, bodies. Each case also checks that the install's index files are unchanged.
+	// level-oracle collision (TC, 2026-10-16, IW4L 49aca70 without its near-object rule: every terrain cell): placements,
+	// triangles, terrain triangles, hash and open cells, destroyed, degenerate, tiles, sum, bodies. Each case also
+	// checks that the install's index files are unchanged.
 	TEST_CASE("collision: MP_Subway TeamDeathMatch0 matches the IW4L oracle") {
 		InstallReader reader;
 		const std::shared_ptr<Install> install = open_or_skip(reader);
@@ -298,8 +321,8 @@ TEST_SUITE("collision") {
 			return;
 		}
 		const InstallSnapshot before = reader.snapshot();
-		check_level(install, { "MP_Subway", "TeamDeathMatch0", 2122, 1114171, 174080, "8b65925bf4a20a95", 72733, 34, 170, "2f7addcdc0b29fac",
-									 { 969031, 142908, 2232 } });
+		check_level(install, { "MP_Subway", "TeamDeathMatch0", 2122, 1136699, 196608, "308b8f1a3750c835", 163840, 72733, 34, 181, "082eac1e5df0ae1c",
+									 { 991559, 142908, 2232 } });
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
@@ -311,8 +334,8 @@ TEST_SUITE("collision") {
 			return;
 		}
 		const InstallSnapshot before = reader.snapshot();
-		check_level(install, { "XP3_Alborz", "ConquestLarge0", 519, 3992285, 1331200, "5f7d5e0ad504fb6a", 56015, 0, 650, "b6df96c3401645bf",
-									 { 3882832, 109453, 0 } });
+		check_level(install, { "XP3_Alborz", "ConquestLarge0", 519, 36215517, 33554432, "f49b8d4219d957cf", 0, 56015, 0, 16384, "78096d54cf5022f0",
+									 { 36106064, 109453, 0 } });
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}

@@ -29,13 +29,20 @@ struct CollisionWorldOptions {
 	uint32_t temp_allocator_bytes = 4u << 20;
 };
 
+// TC (docs/design/terrain-collision.md §5.3): a hit on a terrain field or its patch has tile = kNoStaticTile,
+// terrain = its index into StaticWorldShapes::terrain, layer Collision and tag static_terrain_tag(); a tile hit has
+// terrain = kNoStaticTerrain. Check tile < shapes->tile_count() before StaticWorldShapes::tile / tag.
+inline constexpr uint32_t kNoStaticTile = 0xFFFF'FFFFu;
+inline constexpr uint32_t kNoStaticTerrain = 0xFFFF'FFFFu;
+
 struct StaticHit {
 	Vec3 position{}; // world space
 	Vec3 normal{}; // the triangle's face normal, towards the query
 	float fraction = 1.0f; // along the ray or sweep (0..1)
 	StaticLayer layer = StaticLayer::Collision;
-	uint32_t tile = 0; // index into StaticWorldShapes::tile
+	uint32_t tile = 0; // index into StaticWorldShapes::tile (kNoStaticTile on terrain, TC)
 	SurfaceTag tag;
+	uint32_t terrain = kNoStaticTerrain; // TC: index into StaticWorldShapes::terrain on a terrain hit
 };
 
 class CollisionWorld {

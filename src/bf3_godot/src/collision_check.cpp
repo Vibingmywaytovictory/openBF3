@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -43,7 +44,8 @@ struct Row {
 	std::string detail;
 };
 
-// research/probes/tools/level-oracle `collision` on this install (2026-10-15; README "Collision overlay").
+// research/probes/tools/level-oracle `collision` on this install (TC, 2026-10-16: every terrain cell; README "Collision
+// overlay"). The overlay's numbers are the soup's Havok triangles merged with hash_soup_terrain (merged_totals).
 struct OracleRow {
 	const char *level;
 	const char *mode;
@@ -56,9 +58,51 @@ struct OracleRow {
 	uint64_t sum;
 };
 constexpr OracleRow kOracle[] = {
-	{ "MP_Subway", "TeamDeathMatch0", 2122, 1114171, 174080, 72733, 34, 170, 0x2f7addcdc0b29facull },
-	{ "XP3_Alborz", "ConquestLarge0", 519, 3992285, 1331200, 56015, 0, 650, 0xb6df96c3401645bfull },
+	{ "MP_Subway", "TeamDeathMatch0", 2122, 1136699, 196608, 72733, 34, 181, 0x082eac1e5df0ae1cull },
+	{ "XP3_Alborz", "ConquestLarge0", 519, 36215517, 33554432, 56015, 0, 16384, 0x78096d54cf5022f0ull },
 };
+
+// The listing's totals of a soup (bf3dump collision): Havok + every Built terrain's hash_soup_terrain.
+struct Merged {
+	bool ok = true;
+	std::string error;
+	size_t triangles = 0, terrain = 0, degenerate = 0, tiles = 0;
+	uint64_t sum = 0;
+	std::vector<uint64_t> terrain_hashes;
+};
+Merged merged_totals(const lvl::CollisionSoup &p_soup) {
+	Merged out;
+	out.triangles = p_soup.triangles;
+	out.degenerate = p_soup.degenerate;
+	out.sum = p_soup.sum;
+	std::set<std::pair<int32_t, int32_t>> tiles;
+	for (const lvl::SoupTile &t : p_soup.tiles) {
+		tiles.insert({ t.x, t.z });
+	}
+	for (size_t i = 0; i < p_soup.terrains.size(); ++i) {
+		const lvl::SoupTerrain &t = p_soup.terrains[i];
+		if (t.state != lvl::SoupTerrain::State::Built) {
+			continue;
+		}
+		lvl::WorkBudget budget(size_t(1) << 28);
+		bf3::core::Result<lvl::SoupTerrainHash> h = lvl::hash_soup_terrain(t, uint32_t(p_soup.placements.size() + i), budget);
+		if (!h) {
+			out.ok = false;
+			out.error = h.error().message;
+			return out;
+		}
+		out.terrain += h->triangles;
+		out.triangles += h->triangles;
+		out.degenerate += h->degenerate;
+		out.terrain_hashes.push_back(h->hash);
+		for (const lvl::SoupTerrainTileSum &ts : h->tiles) {
+			tiles.insert({ ts.tile[0], ts.tile[1] });
+			out.sum += ts.sum;
+		}
+	}
+	out.tiles = tiles.size();
+	return out;
+}
 
 bool same_vertex(const Vector3 &p_a, const bf3::core::res::Vec3 &p_b) {
 	return std::memcmp(&p_a.x, &p_b[0], 4) == 0 && std::memcmp(&p_a.y, &p_b[1], 4) == 0 && std::memcmp(&p_a.z, &p_b[2], 4) == 0;
@@ -78,11 +122,13 @@ int run_collision_check(Bf3CollisionOverlay &p_overlay) {
 
 	size_t terrain_missing = 0;
 	for (const lvl::SoupTerrain &t : s.terrains) {
-		terrain_missing += t.state == lvl::SoupTerrain::State::Built ? 0 : 1;
+		// TC: a Built terrain carries its record (the grid every consumer makes the cells from).
+		terrain_missing += t.state == lvl::SoupTerrain::State::Built && t.grid != nullptr ? 0 : 1;
 	}
+	const Merged merged = merged_totals(s);
 	add("load", (s.missing == 0 && s.nonfinite == 0 && s.built > 0 && terrain_missing == 0) ? 0 : 1,
 			fmt("%s %s: %zu placements (%zu built, %zu hidden, %zu missing, %zu without res), %zu res decoded, %zu terrains (%zu not built), %zu triangles "
-				"(%zu terrain) in %zu tiles, %zu non-finite",
+				"(+ %zu terrain, every terrain with its record) in %zu Havok tiles, %zu non-finite",
 					p_overlay.level_id().c_str(), p_overlay.mode_id().c_str(), s.placements.size(), s.built, s.hidden, s.missing, s.no_res, s.res_decoded,
 					s.terrains.size(), terrain_missing, s.triangles, s.terrain_triangles, s.tiles.size(), s.nonfinite));
 	add("timing", 2,
@@ -109,9 +155,12 @@ int run_collision_check(Bf3CollisionOverlay &p_overlay) {
 							: 0;
 				}
 			}
-			bool same_terrain = g.terrains.size() == s.terrains.size();
+			// TC: the terrain records hold no hash; compare the two loads' hash_soup_terrain.
+			const Merged gm = merged_totals(g);
+			bool same_terrain = g.terrains.size() == s.terrains.size() && gm.ok && merged.ok && gm.terrain_hashes == merged.terrain_hashes &&
+					gm.terrain == merged.terrain && gm.sum == merged.sum;
 			for (size_t i = 0; same_terrain && i < s.terrains.size(); ++i) {
-				same_terrain = g.terrains[i].hash == s.terrains[i].hash && g.terrains[i].triangles == s.terrains[i].triangles;
+				same_terrain = g.terrains[i].cells == s.terrains[i].cells && g.terrains[i].open == s.terrains[i].open;
 			}
 			const bool same = g.placements.size() == s.placements.size() && same_hashes == s.placements.size() && same_terrain &&
 					g.terrain_triangles == s.terrain_triangles && g.triangles == s.triangles &&
@@ -133,17 +182,18 @@ int run_collision_check(Bf3CollisionOverlay &p_overlay) {
 	if (oracle == nullptr) {
 		add("oracle", 2, "no level-oracle numbers recorded for this level x mode");
 	} else {
-		const bool same = s.placements.size() == oracle->placements && s.built == oracle->placements && s.triangles == oracle->triangles &&
-				s.terrain_triangles == oracle->terrain &&
-				s.destroyed == oracle->destroyed && s.degenerate == oracle->degenerate && s.tiles.size() == oracle->tiles && s.sum == oracle->sum;
+		const bool same = merged.ok && s.placements.size() == oracle->placements && s.built == oracle->placements && merged.triangles == oracle->triangles &&
+				merged.terrain == oracle->terrain && s.terrain_triangles == oracle->terrain && s.destroyed == oracle->destroyed &&
+				merged.degenerate == oracle->degenerate && merged.tiles == oracle->tiles && merged.sum == oracle->sum;
 		add("oracle", same ? 0 : 1,
 				fmt("level-oracle collision: %zu placements, %zu triangles (%zu terrain), %zu destroyed, %zu degenerate, %zu tiles, sum %s; overlay %zu, %zu (%zu), "
 					"%zu, %zu, %zu, %s",
 						oracle->placements, oracle->triangles, oracle->terrain, oracle->destroyed, oracle->degenerate, oracle->tiles, hex64(oracle->sum).c_str(),
-						s.placements.size(), s.triangles, s.terrain_triangles, s.destroyed, s.degenerate, s.tiles.size(), hex64(s.sum).c_str()));
+						s.placements.size(), merged.triangles, merged.terrain, s.destroyed, merged.degenerate, merged.tiles, hex64(merged.sum).c_str()));
 	}
 
-	// Meshes: one per (tile, layer) with triangles.
+	// Meshes: one per (tile, layer) with triangles: the Havok slots of the soup's tiles, and (TC) the terrain window's
+	// tiles, each against append_soup_terrain_tile over the Built terrains.
 	std::map<std::pair<std::pair<int32_t, int32_t>, uint8_t>, std::vector<const lvl::SoupTriangle *>> expected;
 	std::map<std::pair<int32_t, int32_t>, size_t> tile_meshes;
 	for (const lvl::SoupTile &tile : s.tiles) {
@@ -152,6 +202,51 @@ int run_collision_check(Bf3CollisionOverlay &p_overlay) {
 			expected[{ { tile.x, tile.z }, bf3::render::collision_layer(t) }].push_back(&t);
 		}
 	}
+	const bf3::render::TerrainWindowStats &window = p_overlay.window();
+	std::map<std::pair<int32_t, int32_t>, std::vector<lvl::SoupTriangle>> terrain_store;
+	size_t window_expected = 0, window_errors = 0, window_triangles = 0;
+	{
+		// Every tile within the radius with terrain triangles is in the window (unless capped), and nothing else.
+		const std::vector<std::array<int32_t, 2>> candidates = bf3::render::terrain_window_candidates(p_overlay.window_options());
+		for (const std::array<int32_t, 2> &tile : candidates) {
+			std::vector<lvl::SoupTriangle> tris;
+			bool ok = true;
+			for (size_t i = 0; i < s.terrains.size() && ok; ++i) {
+				if (s.terrains[i].state != lvl::SoupTerrain::State::Built) {
+					continue;
+				}
+				lvl::WorkBudget budget(bf3::render::kTerrainWindowTileBudget);
+				ok = lvl::append_soup_terrain_tile(s.terrains[i], uint32_t(s.placements.size() + i), tile, tris, budget).ok();
+			}
+			window_errors += ok ? 0 : 1;
+			if (ok && !tris.empty()) {
+				terrain_store[{ tile[0], tile[1] }] = std::move(tris);
+			}
+		}
+		// The window keeps the nearest tiles while the cap allows: when capped, only the tiles it holds are expected.
+		std::set<std::pair<int32_t, int32_t>> held;
+		for (const Bf3CollisionOverlay::TileMesh &m : p_overlay.meshes()) {
+			if (m.layer == bf3::render::kTerrainLayer) {
+				held.insert({ m.tile_x, m.tile_z });
+			}
+		}
+		for (auto &[tile, tris] : terrain_store) {
+			if (window.capped && held.count(tile) == 0) {
+				continue;
+			}
+			++window_expected;
+			window_triangles += tris.size();
+			tile_meshes[tile] = 0;
+			for (const lvl::SoupTriangle &t : tris) {
+				expected[{ tile, bf3::render::kTerrainLayer }].push_back(&t);
+			}
+		}
+	}
+	add("terrain.window", (window_errors == 0 && window.tiles_failed == 0 && window.tiles == window_expected && window.triangles == window_triangles) ? 0 : 1,
+			fmt("%zu tiles (%zu triangles) within %.0f m of the camera's (%.1f, %.1f)%s: expected %zu tiles (%zu triangles) from append_soup_terrain_tile, "
+				"%zu errors",
+					window.tiles, window.triangles, double(window.radius), double(window.centre[0]), double(window.centre[1]), window.capped ? ", capped" : "",
+					window_expected, window_triangles, window_errors + window.tiles_failed));
 	const std::vector<Bf3CollisionOverlay::TileMesh> &meshes = p_overlay.meshes();
 	add("meshes.count", (meshes.size() == expected.size() && p_overlay.prepared().size() == expected.size()) ? 0 : 1,
 			fmt("%zu RenderingServer meshes for %zu (tile, layer) slots of the soup (%zu prepared)", meshes.size(), expected.size(), p_overlay.prepared().size()));
@@ -188,7 +283,8 @@ int run_collision_check(Bf3CollisionOverlay &p_overlay) {
 	}
 	add("meshes.surfaces", (valid == meshes.size() && one_surface == meshes.size() && right_count == meshes.size()) ? 0 : 1,
 			fmt("%zu valid, %zu with one surface, %zu with 3 x the slot's triangles as vertices", valid, one_surface, right_count));
-	add("meshes.vertices", vertices == 3 * s.triangles ? 0 : 1, fmt("%zu vertices over all meshes = 3 x %zu triangles", vertices, s.triangles));
+	add("meshes.vertices", vertices == 3 * (s.triangles + window.triangles) ? 0 : 1,
+			fmt("%zu vertices over all meshes = 3 x (%zu Havok + %zu window terrain triangles)", vertices, s.triangles, window.triangles));
 	add("meshes.winding", matched == meshes.size() ? 0 : 1,
 			fmt("%zu of %zu meshes hold the soup's first and last triangle of their slot bit for bit, as (v0, v2, v1)", matched, meshes.size()));
 	add("meshes.material", with_material == meshes.size() ? 0 : 1, fmt("%zu of %zu surfaces use the shared overlay material", with_material, meshes.size()));
@@ -196,8 +292,8 @@ int run_collision_check(Bf3CollisionOverlay &p_overlay) {
 	for (const auto &[tile, count] : tile_meshes) {
 		covered += count > 0 ? 1 : 0;
 	}
-	add("tiles", (covered == s.tiles.size() && instances == meshes.size()) ? 0 : 1,
-			fmt("%zu of %zu tiles have their meshes; %zu instances", covered, s.tiles.size(), instances));
+	add("tiles", (covered == tile_meshes.size() && instances == meshes.size()) ? 0 : 1,
+			fmt("%zu of %zu tiles (Havok and terrain window) have their meshes; %zu instances", covered, tile_meshes.size(), instances));
 
 	// The camera starts at the first TDM spawn point (AlternateSpawn), at eye height.
 	if (c.spawns.empty()) {

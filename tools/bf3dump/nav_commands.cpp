@@ -169,8 +169,6 @@ core::Result<Loaded> load(const core::InstallReader &p_reader, const std::shared
 	host::SharedLoadOptions so;
 	so.cache = cache;
 	so.threads = p_args.threads;
-	so.terrain_cover = out.combat.tiles;
-	so.cover_water = out.combat.water;
 	core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*out.db, so, &progress);
 	if (!shared) {
 		return shared.error();
@@ -479,12 +477,8 @@ int cmd_nav_probe(const core::InstallReader &p_reader, const std::shared_ptr<cor
 		std::fprintf(stderr, "nav probe: %s\n", world.error().message.c_str());
 		return 1;
 	}
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(p_install, p_args.positional[0], sim::NavParams().region_margin);
+	// TC: the soup tiles hold the Havok triangles; the probe lists those (the terrain is the soup's terrain records).
 	core::level::SoupOptions so;
-	if (combat) {
-		so.terrain_cover = combat->tiles;
-		so.cover_water = combat->water;
-	}
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(**level, **world, so);
 	if (!soup) {
 		std::fprintf(stderr, "nav probe: %s\n", soup.error().message.c_str());

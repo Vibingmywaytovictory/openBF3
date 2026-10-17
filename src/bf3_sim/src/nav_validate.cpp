@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -260,6 +261,13 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		const float z0 = std::min({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] }), z1 = std::max({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] });
 		return x0 < bx1 && x1 >= bx0 && z0 < bz1 && z1 >= bz0;
 	};
+	// TC: the same with the box grown (p_slack > 0) or shrunk (< 0) by p_slack metres on every side.
+	constexpr float kTerrainEdge = 1e-3f;
+	const auto overlaps_by = [&](const Tri &p_t, float p_slack) {
+		const float x0 = std::min({ p_t.v[0][0], p_t.v[1][0], p_t.v[2][0] }), x1 = std::max({ p_t.v[0][0], p_t.v[1][0], p_t.v[2][0] });
+		const float z0 = std::min({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] }), z1 = std::max({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] });
+		return x0 < bx1 + p_slack && x1 >= bx0 - p_slack && z0 < bz1 + p_slack && z1 >= bz0 - p_slack;
+	};
 	// The motor's triangles: read back from every cooked MeshShape whose tile bounds overlap the box.
 	std::vector<Tri> world;
 	const StaticWorldShapes::Impl &s = p_world.impl();
@@ -295,10 +303,75 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 			}
 		}
 	}
-	out.world_triangles = world.size();
-	// The nav triangles of the mask.
+	// TC: the terrain's triangles, read back from every terrain field (at its body transform) and patch whose bounds
+	// overlap the box, when the Collision layer is in the mask; matched against the input's terrain triangles (the
+	// last NavTileInput::terrain_triangles) within the terrain tolerance.
+	std::vector<Tri> world_terrain;
+	float terrain_tolerance = p_tolerance;
+	if (((p_layer_mask >> uint32_t(StaticLayer::Collision)) & 1u) != 0) {
+		for (const StaticWorldShapes::Impl::Terrain &terrain : s.terrains) {
+			const StaticTerrainInfo &info = terrain.info;
+			if (info.max[0] < bx0 || info.min[0] >= bx1 || info.max[2] < bz0 || info.min[2] >= bz1) {
+				continue;
+			}
+			terrain_tolerance = std::max(terrain_tolerance, info.max_error + 1e-4f);
+			const JPH::Quat q(terrain.rotation[0], terrain.rotation[1], terrain.rotation[2], terrain.rotation[3]);
+			const JPH::Vec3 position(terrain.position[0], terrain.position[1], terrain.position[2]);
+			for (const auto &[shape, at, rotation] : { std::tuple{ terrain.field.GetPtr(), position, q },
+						 std::tuple{ terrain.patch.GetPtr(), JPH::Vec3::sZero(), JPH::Quat::sIdentity() } }) {
+				if (shape == nullptr) {
+					continue;
+				}
+				JPH::Shape::GetTrianglesContext context;
+				shape->GetTrianglesStart(context, box, at, rotation, JPH::Vec3::sOne());
+				// Jolt's HeightFieldShape resumes a walk that filled the buffer at the start of the block it stopped in, so
+				// the triangles of that block already returned come again (HeightFieldShape.cpp VisitTriangle): a field
+				// triangle equal bit for bit to one returned before is dropped.
+				std::unordered_set<uint64_t> field_seen;
+				const bool is_field = shape == terrain.field.GetPtr();
+				while (true) {
+					const int n = shape->GetTrianglesNext(context, int(buffer.size() / 3), buffer.data());
+					if (n <= 0) {
+						break;
+					}
+					for (int t = 0; t < n; ++t) {
+						if (is_field) {
+							uint64_t h = 0xcbf29ce484222325ull;
+							for (int k = 0; k < 3; ++k) {
+								const JPH::Float3 &f = buffer[size_t(t) * 3 + size_t(k)];
+								for (const float c : { f.x, f.y, f.z }) {
+									uint32_t bits;
+									std::memcpy(&bits, &c, sizeof(bits));
+									h = (h ^ bits) * 0x100000001b3ull;
+								}
+							}
+							if (!field_seen.insert(h).second) {
+								continue;
+							}
+						}
+						Tri tri;
+						for (int k = 0; k < 3; ++k) {
+							const JPH::Float3 &f = buffer[size_t(t) * 3 + size_t(k)];
+							tri.v[size_t(k)] = { f.x, f.y, f.z };
+						}
+						if (overlaps_by(tri, kTerrainEdge)) {
+							world_terrain.push_back(tri);
+						}
+					}
+				}
+			}
+		}
+	}
+	out.world_triangles = world.size() + world_terrain.size();
+	out.terrain_tolerance = terrain_tolerance;
+	if (p_input.terrain_triangles > p_input.layers.size()) {
+		return core::make_error("nav input check: more terrain triangles than triangles");
+	}
+	const size_t first_terrain = p_input.layers.size() - p_input.terrain_triangles;
+	// The nav triangles of the mask (Havok, then terrain).
 	std::vector<Tri> nav;
 	std::vector<uint8_t> nav_layer;
+	std::vector<Tri> nav_terrain;
 	for (size_t t = 0; t < p_input.layers.size(); ++t) {
 		if (((p_layer_mask >> p_input.layers[t]) & 1u) == 0) {
 			continue;
@@ -309,10 +382,14 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 				tri.v[size_t(k)][size_t(c)] = p_input.vertices[t * 9 + size_t(k) * 3 + size_t(c)];
 			}
 		}
+		if (t >= first_terrain) {
+			nav_terrain.push_back(tri);
+			continue;
+		}
 		nav.push_back(tri);
 		nav_layer.push_back(p_input.layers[t]);
 	}
-	out.nav_triangles = nav.size();
+	out.nav_triangles = nav.size() + nav_terrain.size();
 	// Hash the world triangles by centroid cell (cells of 4 x the tolerance, so a match is in the 27 around).
 	const float cell = std::max(p_tolerance * 4.0f, 1e-4f);
 	std::unordered_multimap<uint64_t, uint32_t> grid;
@@ -405,6 +482,53 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 	}
 	for (uint8_t u : used) {
 		out.world_only += u == 0 ? 1 : 0;
+	}
+	// TC: the terrain group, one to one within the terrain tolerance (a terrain triangle is never degenerate for Jolt
+	// on a sane grid, so an unmatched one counts as nav_only or world_only without the sanitise rule).
+	const float terrain_cell = std::max(terrain_tolerance * 4.0f, 1e-4f);
+	std::unordered_multimap<uint64_t, uint32_t> terrain_grid;
+	terrain_grid.reserve(world_terrain.size());
+	for (uint32_t i = 0; i < world_terrain.size(); ++i) {
+		const Vec3 c = centroid(world_terrain[i]);
+		terrain_grid.emplace(cell_key(cell_of(c[0], terrain_cell), cell_of(c[1], terrain_cell), cell_of(c[2], terrain_cell)), i);
+	}
+	std::vector<uint8_t> terrain_used(world_terrain.size(), 0);
+	for (const Tri &t : nav_terrain) {
+		const Vec3 c = centroid(t);
+		const int64_t cx = cell_of(c[0], terrain_cell), cy = cell_of(c[1], terrain_cell), cz = cell_of(c[2], terrain_cell);
+		int64_t best = -1;
+		float best_error = terrain_tolerance;
+		for (int64_t dz = -1; dz <= 1; ++dz) {
+			for (int64_t dy = -1; dy <= 1; ++dy) {
+				for (int64_t dx = -1; dx <= 1; ++dx) {
+					const auto range = terrain_grid.equal_range(cell_key(cx + dx, cy + dy, cz + dz));
+					for (auto it = range.first; it != range.second; ++it) {
+						if (terrain_used[it->second] != 0) {
+							continue;
+						}
+						const float e = corner_error(t, world_terrain[it->second]);
+						if (e <= best_error) {
+							best_error = e;
+							best = int64_t(it->second);
+						}
+					}
+				}
+			}
+		}
+		if (best >= 0) {
+			terrain_used[size_t(best)] = 1;
+			++out.matched;
+			++out.terrain_matched;
+			out.max_corner_error = std::max(out.max_corner_error, best_error);
+			continue;
+		}
+		++out.nav_only;
+	}
+	// An unmatched field triangle counts only when it overlaps the box by more than the edge slack: the field's corners
+	// (offset + scale x sample, in float) and the soup's (origin + sample x spacing) can differ by an ulp, which moves a
+	// triangle that only touches the box edge in or out of one side's set.
+	for (size_t i = 0; i < terrain_used.size(); ++i) {
+		out.world_only += terrain_used[i] == 0 && overlaps_by(world_terrain[i], -kTerrainEdge) ? 1 : 0;
 	}
 	return out;
 }

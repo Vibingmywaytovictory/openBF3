@@ -391,13 +391,8 @@ core::Result<std::unique_ptr<VehicleWorld>> VehicleWorld::create(std::shared_ptr
 	if (p_options.temp_allocator_bytes < (64u << 10) || p_options.max_body_pairs < 64 || p_options.max_contact_constraints < 64) {
 		return core::make_error("vehicle world: allocator or pair limits too small");
 	}
-	const StaticWorldShapes::Impl &s = p_shapes->impl();
-	size_t static_bodies = 0;
-	for (const StaticWorldShapes::Impl::Tile &tile : s.tiles) {
-		for (const JPH::RefConst<JPH::Shape> &shape : tile.shapes) {
-			static_bodies += shape != nullptr ? 1 : 0;
-		}
-	}
+	const std::vector<StaticBodySpec> specs = static_body_specs(p_shapes->impl()); // TC: tiles, then terrain bodies
+	const size_t static_bodies = specs.size();
 	const uint64_t max_bodies = uint64_t(static_bodies) + p_options.max_vehicles;
 	if (max_bodies > (1u << 22)) {
 		return core::make_error("vehicle world: " + std::to_string(max_bodies) + " bodies exceed Jolt's limit");
@@ -429,26 +424,20 @@ core::Result<std::unique_ptr<VehicleWorld>> VehicleWorld::create(std::shared_ptr
 	w.system->SetCombineFriction(combine_contact_friction);
 	w.system->SetContactListener(w.listener.get());
 
-	// The static bodies exactly as CollisionWorld::create makes them (collision_world.cpp): one per present (tile,
-	// layer) in tile then layer order, user data tile * 4 + layer, default friction and restitution, added in one
-	// batch without activation, then OptimizeBroadPhase.
+	// The static bodies exactly as CollisionWorld::create makes them (collision_world.cpp, static_body_specs): one per
+	// present (tile, layer) in tile then layer order, user data tile * 4 + layer, then (TC) per terrain its field and
+	// patch, user data terrain * 4 + 3; default friction and restitution, added in one batch without activation, then
+	// OptimizeBroadPhase.
 	JPH::BodyInterface &bi = w.system->GetBodyInterfaceNoLock();
 	w.statics.reserve(static_bodies);
-	for (size_t t = 0; t < s.tiles.size(); ++t) {
-		const StaticWorldShapes::Impl::Tile &tile = s.tiles[t];
-		const JPH::Vec3 origin = static_tile_origin(tile.info.x, tile.info.z);
-		for (size_t layer = 0; layer < kStaticLayerCount; ++layer) {
-			if (tile.shapes[layer] == nullptr) {
-				continue;
-			}
-			JPH::BodyCreationSettings body(tile.shapes[layer].GetPtr(), JPH::RVec3(origin), JPH::Quat::sIdentity(), JPH::EMotionType::Static, JPH::ObjectLayer(layer));
-			body.mUserData = uint64_t(t) * 4u + layer;
-			JPH::Body *created = bi.CreateBody(body);
-			if (created == nullptr) {
-				return core::make_error("vehicle world: Jolt refused static body " + std::to_string(w.statics.size()));
-			}
-			w.statics.push_back(created->GetID());
+	for (const StaticBodySpec &spec : specs) {
+		JPH::BodyCreationSettings body(spec.shape, JPH::RVec3(spec.position), spec.rotation, JPH::EMotionType::Static, JPH::ObjectLayer(spec.layer));
+		body.mUserData = spec.user;
+		JPH::Body *created = bi.CreateBody(body);
+		if (created == nullptr) {
+			return core::make_error("vehicle world: Jolt refused static body " + std::to_string(w.statics.size()));
 		}
+		w.statics.push_back(created->GetID());
 	}
 	if (!w.statics.empty()) {
 		const JPH::BodyInterface::AddState state = bi.AddBodiesPrepare(w.statics.data(), int(w.statics.size()));

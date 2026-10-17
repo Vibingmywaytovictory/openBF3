@@ -112,7 +112,7 @@ struct LevelCombatTiles {
 	size_t points = 0; // objectives + spawn points over every mode
 	size_t points_outside_areas = 0; // of those, outside every combat polygon of their own mode (reported)
 	// The water surfaces of the level (read_water_planes of the first mode that has any; the lakes are level
-	// data, the same in every mode). The cover's water rule (SoupOptions::cover_water) uses them.
+	// data, the same in every mode). The nav bake's water rule (NavBakeOptions::water; TC) uses them.
 	std::vector<WaterPlane> water;
 	double seconds = 0.0;
 };

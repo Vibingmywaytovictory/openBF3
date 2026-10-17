@@ -48,3 +48,8 @@ target_link_libraries(bf3dump PRIVATE bf3_anim)
 # M2a vm (docs/design/m2a-vm.md): `vm clips`, the 1p viewmodel clip roles, E5 reload rows and E11 coverage (bf3_render
 # from the prepare block above).
 target_sources(bf3dump PRIVATE vm_commands.cpp vm_commands.h)
+
+# M2a audio (docs/design/m2a-audio.md §1, §9): `audio waves|loc|census|render`, the drivers of gates G1-G4 and the
+# offline render through bf3_audio's mixer core.
+target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_commands.cpp)
+target_link_libraries(bf3dump PRIVATE bf3_audio)

@@ -162,8 +162,8 @@ struct ModeLoad {
 	double seconds_db = 0, seconds_shared = 0, seconds_bots = 0;
 };
 
-// One level x mode as the bots load it (docs §8): the database, the static world with the cover and the water rule,
-// the bot level (nav, components, rows) through p_cache.
+// One level x mode as the bots load it (docs §8): the database, the static world (TC: terrain everywhere), the bot
+// level (nav with the water rule, components, rows) through p_cache.
 std::optional<ModeLoad> load_mode(Install &r_m, const std::string &p_level, const std::string &p_mode, const core::level::LevelCombatTiles &p_combat,
 		core::Cache *p_cache, const host::BotLoadOptions &p_bot_options = {}) {
 	ModeLoad out;
@@ -178,8 +178,6 @@ std::optional<ModeLoad> load_mode(Install &r_m, const std::string &p_level, cons
 	host::SharedLoadOptions so;
 	so.cache = p_cache;
 	so.tuning = r_m.tuning;
-	so.terrain_cover = p_combat.tiles;
-	so.cover_water = p_combat.water;
 	core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, so, nullptr);
 	CHECK_MESSAGE(shared.ok(), p_level, " ", p_mode, ": ", (shared.ok() ? std::string() : shared.error().message));
 	if (!shared) {
@@ -337,15 +335,13 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(r_m.install, p_level, sim::NavParams().region_margin);
 	REQUIRE_MESSAGE(combat.ok(), (combat.ok() ? std::string() : combat.error().message));
 	core::level::SoupOptions so;
-	so.terrain_cover = combat->tiles;
-	so.cover_water = combat->water;
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(**level, **world, so);
 	REQUIRE_MESSAGE(soup.ok(), (soup.ok() ? std::string() : soup.error().message));
 	sim::StaticWorldBuildOptions bo;
 	core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes = sim::build_static_world(*soup, bo);
 	REQUIRE_MESSAGE(shapes.ok(), (shapes.ok() ? std::string() : shapes.error().message));
 	const sim::NavParams params;
-	core::Result<std::vector<sim::NavTileInput>> inputs = sim::nav_tile_inputs(*soup, combat->tiles, params, sim::query_mask::kMovement);
+	core::Result<std::vector<sim::NavTileInput>> inputs = sim::nav_tile_inputs(*soup, combat->tiles, params, sim::query_mask::kMovement, combat->water);
 	REQUIRE_MESSAGE(inputs.ok(), (inputs.ok() ? std::string() : inputs.error().message));
 	const double seconds_setup = seconds_since(clock);
 	// Proofs 1 and 2.

@@ -136,6 +136,14 @@ void CollisionWorld::Impl::describe_hit(const JPH::BodyID &p_body, const JPH::Su
 	const uint64_t user = system->GetBodyInterfaceNoLock().GetUserData(p_body);
 	const uint64_t tile = user >> 2;
 	const uint32_t layer = uint32_t(user & 3u);
+	if (layer == kStaticTerrainBodyLayer) {
+		// TC (docs/design/terrain-collision.md §5.3): a terrain field or patch.
+		r_hit.tile = kNoStaticTile;
+		r_hit.terrain = uint32_t(tile);
+		r_hit.layer = StaticLayer::Collision;
+		r_hit.tag = tile < shapes->impl().terrains.size() ? static_terrain_tag() : SurfaceTag();
+		return;
+	}
 	r_hit.tile = uint32_t(tile);
 	r_hit.layer = StaticLayer(layer < kStaticLayerCount ? layer : 0);
 	r_hit.tag = SurfaceTag();
@@ -153,17 +161,23 @@ void CollisionWorld::Impl::describe_hit(const JPH::BodyID &p_body, const JPH::Su
 
 namespace {
 
-// The hit triangle's face normal (the body frame has the identity rotation, so local = world), turned to face
-// p_towards. Up when the body is not one of ours.
+// The hit triangle's face normal (a tile body has the identity rotation, so local = world; TC: a terrain field is
+// turned by its body rotation), turned to face p_towards. Up when the body is not one of ours.
 JPH::Vec3 face_normal(const CollisionWorld::Impl &p_impl, const JPH::BodyID &p_body, const JPH::SubShapeID &p_sub_shape, JPH::Vec3Arg p_towards) {
-	const uint64_t user = p_impl.system->GetBodyInterfaceNoLock().GetUserData(p_body);
+	const JPH::BodyInterface &bi = p_impl.system->GetBodyInterfaceNoLock();
+	const uint64_t user = bi.GetUserData(p_body);
 	const uint64_t tile = user >> 2;
 	const uint32_t layer = uint32_t(user & 3u);
 	const StaticWorldShapes::Impl &s = p_impl.shapes->impl();
-	if (tile >= s.tiles.size() || layer >= kStaticLayerCount || s.tiles[tile].shapes[layer] == nullptr) {
+	JPH::Vec3 n;
+	if (layer == kStaticTerrainBodyLayer) {
+		const JPH::RefConst<JPH::Shape> shape = bi.GetShape(p_body);
+		n = static_face_normal(s, user, shape.GetPtr(), p_sub_shape);
+	} else if (tile >= s.tiles.size() || layer >= kStaticLayerCount || s.tiles[tile].shapes[layer] == nullptr) {
 		return JPH::Vec3::sAxisY();
+	} else {
+		n = s.tiles[tile].shapes[layer]->GetSurfaceNormal(p_sub_shape, JPH::Vec3::sZero());
 	}
-	JPH::Vec3 n = s.tiles[tile].shapes[layer]->GetSurfaceNormal(p_sub_shape, JPH::Vec3::sZero());
 	if (n.Dot(p_towards) < 0.0f) {
 		n = -n;
 	}
@@ -198,13 +212,8 @@ core::Result<std::unique_ptr<CollisionWorld>> CollisionWorld::create(std::shared
 	if (p_options.temp_allocator_bytes < (64u << 10)) {
 		return core::make_error("collision world: temp_allocator_bytes " + std::to_string(p_options.temp_allocator_bytes) + " is below 64 KiB");
 	}
-	const StaticWorldShapes::Impl &s = p_shapes->impl();
-	size_t static_bodies = 0;
-	for (const StaticWorldShapes::Impl::Tile &tile : s.tiles) {
-		for (const JPH::RefConst<JPH::Shape> &shape : tile.shapes) {
-			static_bodies += shape != nullptr ? 1 : 0;
-		}
-	}
+	const std::vector<StaticBodySpec> specs = static_body_specs(p_shapes->impl()); // TC: tiles, then terrain bodies
+	const size_t static_bodies = specs.size();
 	const uint64_t max_bodies = uint64_t(static_bodies) + p_options.max_dynamic_bodies;
 	if (max_bodies > (1u << 22)) { // BodyID's index bits (23) with headroom
 		return core::make_error("collision world: " + std::to_string(max_bodies) + " bodies exceed Jolt's limit");
@@ -226,25 +235,18 @@ core::Result<std::unique_ptr<CollisionWorld>> CollisionWorld::create(std::shared
 	const JPH::uint pairs = std::max<JPH::uint>(1024, p_options.max_dynamic_bodies * 4);
 	w.system->Init(JPH::uint(max_bodies), 0, pairs, pairs, *w.broadphase_layers, *w.object_vs_broadphase, *w.object_pairs);
 
-	// One static body per present (tile, layer), in tile then layer order; user data = tile * 4 + layer.
+	// One static body per present (tile, layer), in tile then layer order; user data = tile * 4 + layer. TC: then
+	// per terrain its field and patch, user data terrain * 4 + kStaticTerrainBodyLayer (static_body_specs).
 	JPH::BodyInterface &bi = w.system->GetBodyInterfaceNoLock();
 	w.bodies.reserve(static_bodies);
-	for (size_t t = 0; t < s.tiles.size(); ++t) {
-		const StaticWorldShapes::Impl::Tile &tile = s.tiles[t];
-		const JPH::Vec3 origin = static_tile_origin(tile.info.x, tile.info.z);
-		for (size_t layer = 0; layer < kStaticLayerCount; ++layer) {
-			if (tile.shapes[layer] == nullptr) {
-				continue;
-			}
-			JPH::BodyCreationSettings settings(tile.shapes[layer].GetPtr(), JPH::RVec3(origin), JPH::Quat::sIdentity(), JPH::EMotionType::Static,
-					JPH::ObjectLayer(layer));
-			settings.mUserData = uint64_t(t) * 4u + layer;
-			JPH::Body *body = bi.CreateBody(settings);
-			if (body == nullptr) {
-				return core::make_error("collision world: Jolt refused body " + std::to_string(w.bodies.size()));
-			}
-			w.bodies.push_back(body->GetID());
+	for (const StaticBodySpec &spec : specs) {
+		JPH::BodyCreationSettings settings(spec.shape, JPH::RVec3(spec.position), spec.rotation, JPH::EMotionType::Static, JPH::ObjectLayer(spec.layer));
+		settings.mUserData = spec.user;
+		JPH::Body *body = bi.CreateBody(settings);
+		if (body == nullptr) {
+			return core::make_error("collision world: Jolt refused body " + std::to_string(w.bodies.size()));
 		}
+		w.bodies.push_back(body->GetID());
 	}
 	if (!w.bodies.empty()) {
 		const JPH::BodyInterface::AddState state = bi.AddBodiesPrepare(w.bodies.data(), int(w.bodies.size()));

@@ -68,6 +68,7 @@
 //   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
 // M2a vm:
 //   vm clips [<unlock>...] [--team us|ru|all]   1p viewmodel clip roles, E5 reload rows, E11 coverage (vm_commands.cpp)
+// M2a audio (audio_commands.h): audio waves|loc|census|render, the drivers of gates G1-G4 and the offline render
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -109,6 +110,8 @@
 #include "lagcomp_commands.h"
 // M2a vm: bf3dump vm clips (1p viewmodel clip roles, E5, E11).
 #include "vm_commands.h"
+// M2a audio: XAS waves, Loc/en streams, the sound-patch census, offline renders.
+#include "audio_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -712,6 +715,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M2a vm: vm clips (vm_commands.cpp; docs/design/m2a-vm.md).
 	if (cmd == "vm") {
 		return bf3dump::cmd_vm(ebx_ctx, rest);
+	}
+	// M2a audio: audio waves|loc|census|render (audio_commands.cpp; docs/design/m2a-audio.md §1).
+	if (cmd == "audio") {
+		return bf3dump::cmd_audio(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;

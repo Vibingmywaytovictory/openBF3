@@ -93,7 +93,50 @@ std::array<float, 3> collision_surface_colour(uint8_t p_surface) {
 	}
 }
 
-std::vector<PreparedCollisionMesh> prepare_collision_meshes(const lvl::CollisionSoup &p_soup, unsigned p_threads) {
+namespace {
+
+// Appends one soup triangle to a mesh as (v0, v2, v1) with its colour, UVs and bounds.
+void emit_triangle(PreparedCollisionMesh &r_m, const lvl::SoupTriangle &p_tri, bool &r_first) {
+	C base = collision_surface_colour(p_tri.surface);
+	if (p_tri.body == uint8_t(lvl::CollisionBody::Character)) {
+		base = kCharacterColour;
+	} else if ((p_tri.flags & lvl::kSoupInvisible) != 0) {
+		base = kInvisibleColour;
+	} else if ((p_tri.flags & lvl::kSoupTerrain) != 0) {
+		base = kTerrainColour;
+	}
+	if ((p_tri.flags & lvl::kSoupSeeThrough) != 0) {
+		for (float &c : base) {
+			c = 0.55f * c + 0.45f;
+		}
+	}
+	const core::res::Vec3 n =
+			core::res::vec::normalize(core::res::vec::cross(core::res::vec::sub(p_tri.v[1], p_tri.v[0]), core::res::vec::sub(p_tri.v[2], p_tri.v[0])));
+	const float facing = std::fabs(n[0] * kLight[0] + n[1] * kLight[1] + n[2] * kLight[2]);
+	const float shade = (0.45f + 0.55f * (std::isfinite(facing) ? facing : 0.0f)) * placement_jitter(p_tri.placement);
+	const float rgba[4] = { std::min(1.0f, base[0] * shade), std::min(1.0f, base[1] * shade), std::min(1.0f, base[2] * shade), 1.0f };
+	static constexpr int kOrder[3] = { 0, 2, 1 }; // Godot front faces are clockwise
+	static constexpr float kBary[3][2] = { { 1.0f, 0.0f }, { 0.0f, 1.0f }, { 0.0f, 0.0f } };
+	for (int k = 0; k < 3; ++k) {
+		const core::res::Vec3 &p = p_tri.v[kOrder[k]];
+		r_m.positions.insert(r_m.positions.end(), { p[0], p[1], p[2] });
+		r_m.colors.insert(r_m.colors.end(), rgba, rgba + 4);
+		r_m.uvs.insert(r_m.uvs.end(), { kBary[k][0], kBary[k][1] });
+		for (int a = 0; a < 3; ++a) {
+			if (r_first) {
+				r_m.min[a] = p[a];
+				r_m.max[a] = p[a];
+			} else {
+				r_m.min[a] = std::min(r_m.min[a], p[a]);
+				r_m.max[a] = std::max(r_m.max[a], p[a]);
+			}
+		}
+		r_first = false;
+	}
+}
+
+// The Havok (tile, layer) slots of the soup's tiles.
+std::vector<PreparedCollisionMesh> prepare_tile_meshes(const lvl::CollisionSoup &p_soup, unsigned p_threads) {
 	// Which (tile, layer) meshes exist and how many triangles each takes.
 	struct Slot {
 		size_t tile = 0;
@@ -128,48 +171,154 @@ std::vector<PreparedCollisionMesh> prepare_collision_meshes(const lvl::Collision
 				m.uvs.reserve(slot.triangles * 6);
 				bool first = true;
 				for (const lvl::SoupTriangle &tri : tile.triangles) {
-					if (collision_layer(tri) != slot.layer) {
-						continue;
-					}
-					C base = collision_surface_colour(tri.surface);
-					if (tri.body == uint8_t(lvl::CollisionBody::Character)) {
-						base = kCharacterColour;
-					} else if ((tri.flags & lvl::kSoupInvisible) != 0) {
-						base = kInvisibleColour;
-					} else if ((tri.flags & lvl::kSoupTerrain) != 0) {
-						base = kTerrainColour;
-					}
-					if ((tri.flags & lvl::kSoupSeeThrough) != 0) {
-						for (float &c : base) {
-							c = 0.55f * c + 0.45f;
-						}
-					}
-					const core::res::Vec3 n = core::res::vec::normalize(
-							core::res::vec::cross(core::res::vec::sub(tri.v[1], tri.v[0]), core::res::vec::sub(tri.v[2], tri.v[0])));
-					const float facing = std::fabs(n[0] * kLight[0] + n[1] * kLight[1] + n[2] * kLight[2]);
-					const float shade = (0.45f + 0.55f * (std::isfinite(facing) ? facing : 0.0f)) * placement_jitter(tri.placement);
-					const float rgba[4] = { std::min(1.0f, base[0] * shade), std::min(1.0f, base[1] * shade), std::min(1.0f, base[2] * shade), 1.0f };
-					static constexpr int kOrder[3] = { 0, 2, 1 }; // Godot front faces are clockwise
-					static constexpr float kBary[3][2] = { { 1.0f, 0.0f }, { 0.0f, 1.0f }, { 0.0f, 0.0f } };
-					for (int k = 0; k < 3; ++k) {
-						const core::res::Vec3 &p = tri.v[kOrder[k]];
-						m.positions.insert(m.positions.end(), { p[0], p[1], p[2] });
-						m.colors.insert(m.colors.end(), rgba, rgba + 4);
-						m.uvs.insert(m.uvs.end(), { kBary[k][0], kBary[k][1] });
-						for (int a = 0; a < 3; ++a) {
-							if (first) {
-								m.min[a] = p[a];
-								m.max[a] = p[a];
-							} else {
-								m.min[a] = std::min(m.min[a], p[a]);
-								m.max[a] = std::max(m.max[a], p[a]);
-							}
-						}
-						first = false;
+					if (collision_layer(tri) == slot.layer) {
+						emit_triangle(m, tri, first);
 					}
 				}
 			},
 			p_threads);
+	return out;
+}
+
+// The 64 m tile's distance (XZ) from a point: 0 inside.
+float tile_distance(const std::array<int32_t, 2> &p_tile, const std::array<float, 2> &p_centre) {
+	float d2 = 0.0f;
+	for (int a = 0; a < 2; ++a) {
+		const float lo = float(p_tile[size_t(a)]) * 64.0f, hi = lo + 64.0f;
+		const float c = p_centre[size_t(a)];
+		const float d = c < lo ? lo - c : (c > hi ? c - hi : 0.0f);
+		d2 += d * d;
+	}
+	return std::sqrt(d2);
+}
+
+} // namespace
+
+std::vector<std::array<int32_t, 2>> terrain_window_candidates(const CollisionPrepOptions &p_options) {
+	std::vector<std::array<int32_t, 2>> out;
+	const float radius = std::clamp(std::isfinite(p_options.terrain_radius) ? p_options.terrain_radius : 0.0f, 0.0f, kMaxTerrainWindowRadius);
+	const std::array<float, 2> &c = p_options.terrain_centre;
+	if (!std::isfinite(c[0]) || !std::isfinite(c[1]) || std::fabs(c[0]) > 1e6f || std::fabs(c[1]) > 1e6f) {
+		return out;
+	}
+	const int32_t x0 = int32_t(std::floor((c[0] - radius) / 64.0f)), x1 = int32_t(std::floor((c[0] + radius) / 64.0f));
+	const int32_t z0 = int32_t(std::floor((c[1] - radius) / 64.0f)), z1 = int32_t(std::floor((c[1] + radius) / 64.0f));
+	for (int32_t z = z0; z <= z1; ++z) {
+		for (int32_t x = x0; x <= x1; ++x) {
+			if (tile_distance({ x, z }, c) <= radius) {
+				out.push_back({ x, z });
+			}
+		}
+	}
+	// Nearest first (ties in tile order), so the triangle cap keeps the tiles around the centre.
+	std::stable_sort(out.begin(), out.end(),
+			[&](const std::array<int32_t, 2> &a, const std::array<int32_t, 2> &b) { return tile_distance(a, c) < tile_distance(b, c); });
+	return out;
+}
+
+std::vector<PreparedCollisionMesh> prepare_terrain_window(const lvl::CollisionSoup &p_soup, const CollisionPrepOptions &p_options, TerrainWindowStats *r_stats) {
+	TerrainWindowStats stats;
+	stats.centre = p_options.terrain_centre;
+	stats.radius = std::clamp(std::isfinite(p_options.terrain_radius) ? p_options.terrain_radius : 0.0f, 0.0f, kMaxTerrainWindowRadius);
+	std::vector<PreparedCollisionMesh> out;
+	bool any = false;
+	for (const lvl::SoupTerrain &t : p_soup.terrains) {
+		any = any || (t.state == lvl::SoupTerrain::State::Built && t.grid != nullptr);
+	}
+	if (!p_options.terrain || !any) {
+		if (r_stats != nullptr) {
+			*r_stats = std::move(stats);
+		}
+		return out;
+	}
+	const std::vector<std::array<int32_t, 2>> candidates = terrain_window_candidates(p_options);
+	stats.tiles_considered = candidates.size();
+	// Nearest first in chunks on the lanes; a chunk's tiles are kept in order while the cap allows, so the memory is the
+	// cap plus one chunk. Each tile's cells are charged to its own budget (a tile of a sane grid is a few thousand).
+	constexpr size_t kChunk = 32;
+	struct Gathered {
+		std::vector<lvl::SoupTriangle> triangles;
+		bool failed = false;
+	};
+	std::vector<Gathered> chunk;
+	for (size_t at = 0; at < candidates.size() && !stats.capped; at += kChunk) {
+		const size_t n = std::min(kChunk, candidates.size() - at);
+		chunk.assign(n, Gathered{});
+		core::parallel_for(
+				n,
+				[&](size_t p_index) {
+					Gathered &g = chunk[p_index];
+					lvl::WorkBudget budget(kTerrainWindowTileBudget);
+					for (size_t t = 0; t < p_soup.terrains.size(); ++t) {
+						const lvl::SoupTerrain &terrain = p_soup.terrains[t];
+						if (terrain.state != lvl::SoupTerrain::State::Built || terrain.grid == nullptr) {
+							continue;
+						}
+						core::Result<size_t> added = lvl::append_soup_terrain_tile(
+								terrain, uint32_t(p_soup.placements.size() + t), candidates[at + p_index], g.triangles, budget);
+						if (!added) {
+							g.failed = true;
+							g.triangles.clear();
+							return;
+						}
+					}
+				},
+				p_options.threads);
+		for (size_t i = 0; i < n; ++i) {
+			Gathered &g = chunk[i];
+			if (g.failed) {
+				++stats.tiles_failed;
+				continue;
+			}
+			if (g.triangles.empty()) {
+				continue;
+			}
+			if (stats.triangles + g.triangles.size() > p_options.max_terrain_triangles) {
+				stats.capped = true;
+				break;
+			}
+			stats.triangles += g.triangles.size();
+			PreparedCollisionMesh m;
+			m.tile_x = candidates[at + i][0];
+			m.tile_z = candidates[at + i][1];
+			m.layer = kTerrainLayer;
+			m.triangles = g.triangles.size();
+			m.positions.reserve(m.triangles * 9);
+			m.colors.reserve(m.triangles * 12);
+			m.uvs.reserve(m.triangles * 6);
+			bool first = true;
+			for (const lvl::SoupTriangle &tri : g.triangles) {
+				emit_triangle(m, tri, first);
+			}
+			out.push_back(std::move(m));
+			std::vector<lvl::SoupTriangle>().swap(g.triangles);
+		}
+	}
+	// Tile order, as the Havok slots.
+	std::sort(out.begin(), out.end(), [](const PreparedCollisionMesh &a, const PreparedCollisionMesh &b) {
+		return std::make_pair(a.tile_x, a.tile_z) < std::make_pair(b.tile_x, b.tile_z);
+	});
+	stats.tiles = out.size();
+	if (r_stats != nullptr) {
+		*r_stats = std::move(stats);
+	}
+	return out;
+}
+
+std::vector<PreparedCollisionMesh> prepare_collision_meshes(const lvl::CollisionSoup &p_soup, unsigned p_threads) {
+	CollisionPrepOptions options;
+	options.threads = p_threads;
+	options.terrain = false;
+	return prepare_collision_meshes(p_soup, options);
+}
+
+std::vector<PreparedCollisionMesh> prepare_collision_meshes(const lvl::CollisionSoup &p_soup, const CollisionPrepOptions &p_options, TerrainWindowStats *r_stats) {
+	std::vector<PreparedCollisionMesh> out = prepare_tile_meshes(p_soup, p_options.threads);
+	std::vector<PreparedCollisionMesh> window = prepare_terrain_window(p_soup, p_options, r_stats);
+	out.reserve(out.size() + window.size());
+	for (PreparedCollisionMesh &m : window) {
+		out.push_back(std::move(m));
+	}
 	return out;
 }
 

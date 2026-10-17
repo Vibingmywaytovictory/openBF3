@@ -34,7 +34,7 @@ Install location, first match wins: `--bf3-install=<dir>` (user arg), env `OPENB
 ```bat
 git clone --recurse-submodules <repo-url> openBF3
 cd openBF3
-tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev
+tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev minus the timing rows (--all-tests: all)
 ```
 
 From a VS x64 developer prompt the three steps are `cmake --preset dev`, `cmake --build --preset dev` and
@@ -83,6 +83,8 @@ UI ui2 adds `ui2.contract`, `ui.minimap.unit`, `ui.hud.unit` (no data), `ui.mini
 M2a weapons adds `m2a.weapons.contract` and `sim.weapons.unit` (no data), `sim.weapons`, `sim.weapons.range`, `sim.weapons.fuzz`, `sim.weapons.perf` (W11, RUN_SERIAL, noisy) and `tools.weapon_sim` (install); see "M2a weapons core".
 
 M2a VFX1 adds `fx.contract` (the bf3_fx interface, no data), `fx.unit` and `fx.fuzz` (no data; both in the asan preset too), `fx.install` (the retail gates G1, G3-G8, G11) and `tools.fx_bench` (G9, RUN_SERIAL, noisy); see "Effects (M2a VFX1)".
+
+M2a audio adds `audio.contract`, `audio.xas.unit`, `audio.patch.unit`, `audio.dsp.unit`, `audio.mixer.unit` (no data), `audio.oracles`, `audio.cache`, `audio.fuzz`, `audio.waves`, `audio.loc`, `audio.decode.perf`, `audio.census`, `audio.bank`, `audio.m16.offline` (install) and `godot.audio` (windowed, `OPENBF3_GODOT`); see "M2a audio".
 
 ## Run
 
@@ -908,10 +910,16 @@ the install by C++ at runtime and drawn in Godot, one mesh per 64 m tile. Three 
 * **Terrain** (`res/terrain.h`, port of the heightfield parts of IW4L `resource_bf3` terrain.rs). The `Terrain` res
   names its `TerrainStreamingTree`. The tree's heightfield quadtree (embedded tiles, streamed lod0 chunks,
   data-less and disabled nodes) becomes a `HeightGrid` with the Rust code's float order. The soup takes the first
-  depth whose spacing reaches 2 m (Metro: depth 2, 513² samples, 2 m; Alborz: depth 5, 4097², 2 m). It keeps every
-  cell whose centre lies in a tile that holds Havok triangles or touches one, unless a corner is a hole. Each cell
-  gives two triangles faced +Y, with surface dirt and flag `kSoupTerrain`. IW4L's near-area cap, flat-block
-  merging and paved decals are not ported.
+  depth whose spacing reaches 2 m (Metro: depth 2, 513² samples, 2 m; Alborz: depth 5, 4097², 2 m).
+  <!-- TC --> Since the terrain-collision track (docs/design/terrain-collision.md, `kCollisionSoupVersion` 2) the
+  soup keeps every terrain as a **record**: the shared grid plus the object's frame (`SoupTerrain::grid` / `frame`),
+  and its tiles hold Havok triangles only. Every cell has collision unless a corner is a hole; there is no near-object
+  rule any more. `soup_terrain_cell` gives a cell's two triangles (faced +Y, surface dirt, flag `kSoupTerrain`),
+  `append_soup_terrain_tile` one 64 m tile's, and `hash_soup_terrain` the listing's hashes and tile sums. The static
+  world cooks one Jolt `HeightFieldShape` per terrain (16-bit samples, blocks of 4) plus a small world-space patch
+  `MeshShape` where Jolt's per-triangle hole rule would keep a triangle the soup drops, so holes match the soup
+  exactly (MP_001 1 marked sample, MP_003 2, XP4_Parl 1). IW4L's near-area cap, flat-block merging and paved decals
+  are not ported.
 * Every corner is quantised to whole millimetres. Triangles with a non-finite or > 1e7 m coordinate are dropped
   (`nonfinite`), and so are triangles with two equal corners (`degenerate`). The FNV-1a 64 of the nine values,
   the material and the class bytes gives each placement a stream hash; tiles and the soup get a wrapping sum.
@@ -929,13 +937,19 @@ the install by C++ at runtime and drawn in Godot, one mesh per 64 m tile. Three 
     frame. They share one unshaded, double-sided `ShaderMaterial`: back faces at 55 %, and a barycentric wireframe
     that fades out over 120 m.
   * A free-fly camera starts at the first `AlternateSpawn` (TDM spawn) at eye height, else above the level centre.
-  * HUD: placements, triangles, terrain triangles, tiles and meshes, load + prepare + upload time, fps, position.
+  * <!-- TC --> Terrain **window**: a whole terrain as overlay vertices would be 3.6 GB, so layer 5 (terrain) holds the
+    terrain triangles of the 64 m tiles within `--terrain-radius` (default 512 m, at most 4,096 m and 2^21
+    triangles) of the camera, nearest first. A worker thread re-prepares it (`prepare_terrain_window`) when the camera
+    leaves the window's inner half, and only the terrain RIDs are swapped. Caspian CQL at a spawn: 231 tiles, 473,088
+    triangles, prepared 0.11 s, uploaded 0.03 s.
+  * HUD: placements, triangles, terrain triangles, tiles and meshes, the terrain window, load + prepare + upload
+    time, fps, position.
   * Controls: WASD, Q/E, Shift ×6, wheel for speed; hold the right mouse button (or click, Esc releases) to look.
     F3 cycles solid + wire, wire, solid. 1–5 toggle the layers, R goes back to the spawn, N to the next spawn,
     T to a top view.
   * User args: `--level`, `--mode` (default `MP_Subway` / `TeamDeathMatch0`), `--camera=x,y,z,yaw,pitch`,
     `--view=spawn|top`, `--wire=0|1|2`, `--layers=<digits>`, `--quit-after`, `--screenshot`,
-    `--shots=<png>@x,y,z,yaw,pitch;...`, `--collision-check`, `--bf3-install`.
+    `--shots=<png>@x,y,z,yaw,pitch;...`, `--collision-check`, `--bf3-install`, `--terrain-radius=<m>` (TC).
 
 `bf3dump collision <LEVEL> <MODE>` prints the soup in canonical form: sorted `T` lines per placement and terrain
 (state, counts, hash), `K` tiles (count, sum), then the totals and the surface and body histograms; timings go to
@@ -955,13 +969,28 @@ XP3_Shield RushLarge0 with 4.01 M triangles (2.70 M of them terrain). The most w
 Metro's bodies: 969,031 collision (174,080 of them terrain), 142,908 raycast, 2,232 character; all 32,400 material
 grid pairs resolve.
 
+<!-- TC --> After the terrain-collision track (soup v2, every terrain cell kept; the listing is unchanged in form, its
+terrain lines now cover the whole grid; the oracle drops IW4L's `near` filter in one place):
+
+| level x mode | placements | triangles (terrain) | destroyed | degenerate | tiles | sum | terrain hash |
+|---|---|---|---|---|---|---|---|
+| MP_Subway TeamDeathMatch0 | 2,122 | 1,136,699 (196,608; 163,840 open cells) | 72,733 | 34 | 181 | `082eac1e5df0ae1c` | `308b8f1a3750c835` |
+| XP3_Alborz ConquestLarge0 | 519 | 36,215,517 (33,554,432) | 56,015 | 0 | 16,384 | `78096d54cf5022f0` | `f49b8d4219d957cf` |
+
+Metro's bodies after TC: 991,559 collision (196,608 of them terrain), 142,908 raycast, 2,232 character. The static
+world holds the terrain as one height field (Metro's 149 Havok tiles + 1 terrain + the world index = 151 cache
+entries); the overlay's Havok triangles are 940,091.
+
 **Check** (`-- --collision-check`; ctest `godot.collision` runs it when `OPENBF3_GODOT` names the console exe and
 skips with 77 otherwise or without an install). It prints a PASS/FAIL table and exits 0 or 1. Rows:
-* load: nothing missing or non-finite, the terrain built;
+* load: nothing missing or non-finite, the terrain built (TC: every terrain with its record);
 * godot_free.recompute: a second `load_level_collision` gives the same placement hashes, terrain hashes and totals;
-* oracle: the level-oracle numbers above;
+* oracle: the level-oracle numbers above (TC: Havok soup plus `hash_soup_terrain`, merged as the listing does);
+* terrain.window (TC): the window's tiles and triangles equal `append_soup_terrain_tile` over the tiles within the
+  radius of the camera;
 * meshes: one valid mesh with one surface per (tile, layer) slot, 3 × the slot's triangles as vertices
-  (3,342,513 for Metro), the soup's first and last triangle bit for bit as (v0, v2, v1), the shared material;
+  (TC: 3 × (Havok + window terrain triangles) = 3,041,457 for Metro at spawn 1), the soup's first and last triangle
+  bit for bit as (v0, v2, v1), the shared material;
 * tiles: every tile has its meshes and instances;
 * camera: starts at spawn 1;
 * install.unchanged: sizes and mtimes of the 256 index files.
@@ -980,6 +1009,40 @@ Measured (dev build, 16 threads, RX 9070 XT, D3D12, 1152×648, warm file cache, 
 * Alborz CQL in the same scene (`--level=XP3_Alborz --mode=ConquestLarge0`): load 1.75 s, upload 0.20 s for 1,168
   meshes, top view 0.72 / 1.58 ms for 3.98 M primitives.
 * ASan: `core.level.collision` takes about 11 min (the 32 mutants about 9), so its timeout there is 1,800 s.
+
+<!-- TC -->
+### Terrain collision everywhere (track TC, docs/design/terrain-collision.md)
+
+Every terrain cell has collision now, and holes are kept exactly as before. The static world cooks one Jolt
+`HeightFieldShape` per terrain plus a tiny patch mesh; the "jolt-terrain" cache entry is content keyed and shared
+by a level's modes. S1's `terrain_cover` / `cover_water` are gone. The nav bake applies the water rule per terrain
+triangle (`NavBakeOptions::water`), and `NavStats` prints `tiles_wet` and `triangles_unwalkable`.
+
+Gates, measured on 2026-10-16 on a shared machine, so the timings are noisy. G3, G4 and G5 were taken under the
+quiet lock. Design doc §17 has the full rows.
+
+| gate | command | result |
+|---|---|---|
+| G1 coverage | `ctest --preset dev -R "^sim\.terrain$"` | 230 runs, 24 digests, 31 without terrain; 8.18 M lattice rays and 1.09 M open-cell rays, 0 bad; worst 1.0 cm (MP_013 quantisation); 0 combat tiles without ground on Caspian CQL (0/328) and Kharg CQL (0/1,614) |
+| G2 parity | `pwsh research/probes/tools/level-oracle/parity.ps1 -Out <scratch> -Jobs 6` | 230 / 230 identical; IW4L `49aca70d5a8c` (clean); wall 1,703 s with 6 jobs |
+| G3 cost | `ctest --preset dev -R "^(tools\.tc_cost\|godot\.m1_load)$"` | cold / warm shapes total: Metro TDM 0.63 / 0.04 s, Shield RL 2.15 / 0.08 s, Alborz SR 2.88 / 0.09 s. Peak private bytes ≤ 642 MiB; resident ≤ 102 MiB; cache ≤ 102 MiB. E4 2.39 s, E5 1.92 s |
+| G4 S1 re-run | `ctest --preset dev -R "^host\.scale$"`, `... "^sim\.nav\.bake$"`, `... "^sim\.nav$"` | p99 tick: Metro 1.52 ms, Caspian 1.10 ms. Bake: Caspian 3.37 s, Kharg 3.07 s (1,240 tiles_wet, 3.49 M triangles_unwalkable; S1 dropped 1,290 cover tiles). G2 rows 485/566 and 661/709, unchanged |
+| G5 S2 re-run | `ctest --preset dev -R "^sim\.vehicle(\.unit)?$"` | G1, G1r, G1m and the new G1t (heightfield with hole and patch): 0 mismatching ticks. ExactPod max 1.9 mm |
+| G6 Caspian spawns | `ctest --preset dev -R "^sim\.terrain$"` | the 24 RL points sit 28.6–32.3 m under the terrain in `layer0_rush_logic`; the cause is in the data, no fix |
+| G7 hygiene | full `ctest --preset dev`; `tools\build.cmd asan` + `ctest --preset asan -R "core\.level\.collision\|sim\.world\|sim\.terrain\|sim\.nav\.unit\|sim\.vehicle\.unit\|tc\.contract"`; capture | full ctest: 80 passed, 2 skipped as on main, 3 timing rows (s0_selftest, host.session, s3_crowd) failed on the busy machine and passed on re-run (s3_crowd under the quiet lock); asan rows all pass (sim.terrain 7,895 s, timeout now 10,800 s); install unchanged; capture inspected (design doc §17.1, §17.3) |
+
+`sim.terrain.unit` needs no data. It covers:
+* hole patterns, including every pattern that needs a patch;
+* random grids and frames;
+* append against hash;
+* blob round trips, plus 248 refused and 1,252 accepted hostile blobs;
+* `nav_terrain_wet`;
+* `describe_hit`;
+* all-hole and patch-only fields;
+* a synthetic nav proof 1.
+
+The M1 game takes `--shot-teleports=x,y,z,yaw;...`. It places the own soldier with a debug Teleport, waits 2 s,
+saves `teleport_<i>.png` to `--shot-dir` and prints the settled feet.
 
 ## Layout and pinned third-party code
 
@@ -1869,6 +1932,50 @@ defs and runs the gates; every gate has one command (the design's §18 has the m
 The cost gate runs RUN_SERIAL and is report-only under asan; the figure is wall clock on a shared machine, so it is
 noisy (the same build measured 39-42 ns across runs).
 
+## M2a audio
+
+Design: [docs/design/m2a-audio.md](docs/design/m2a-audio.md) (slices A1 XAS voices + wave bank + mixer, A2 weapon
+patch interpreter; section 1.1 has the measured results, section 16 the implementation notes). Implemented:
+* `bf3_core` `audio/`: the EA-XAS / PCM16 stream codec (a port of IW4L `sound.rs`, Apache-2.0, attributed in
+  `sound_stream.cpp`), the `SoundWaveAsset` reader, the resident `WaveBank` (budget 384 MiB), the node type table and
+  the `SoundPatchAsset` compiler with its `OBF3SNDP` program blob, validator and cache entries.
+* `bf3_audio` (Godot-free): `PatchInstance`, the A2 interpreter for the 32 node types the weapon patches use
+  (AreaType fixed at 0), the Sampler model, DSP (biquads, one-pole, gain ramps, pan, resampler), `MixerCore` (voices
+  summed on a 512-frame grid, lock-free command / return / feedback rings from the game thread), WAV I/O, analysis and
+  the shared M16A3 check (`audio_check.h`).
+* `bf3_godot`: `Bf3AudioStream`/`Bf3AudioPlayback` (an `AudioStreamPlayback` whose `_mix` pulls from `MixerCore`) and
+  `Bf3AudioDemo` in `res://scenes/audio_m16.tscn`. The project runs the driver at 48 kHz (`[audio]` in
+  `project.godot`). Tuning that the data does not state lives in `bf3-opensource/config/audio_tuning.cfg`.
+* `bf3dump audio waves|loc|census|bank|check|render|wave` (see `bf3dump` with no arguments for the usage).
+
+The gates, one command each (from the repo root after `tools\build.cmd dev`; `bf3dump` is
+`b\dev\tools\bf3dump\bf3dump.exe`; each ctest wraps exactly that command and checks the threshold):
+
+| gate | ctest | command | pass threshold |
+|---|---|---|---|
+| G1 | `audio.waves` | `bf3dump audio waves MP_Subway TeamDeathMatch0 --decode` | 909 waves, decoded frames == header frames: 0 mismatches, 0 errors |
+| G2 | `audio.loc` | `bf3dump audio loc en --decode` | 4,290 chunks, 15,890 streams, 0 mismatches, 0 errors |
+| G3 (timing) | `audio.decode.perf` | `bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3` | `best_cpu_ms_per_channel_second` ≤ 0.2 |
+| G4 | `audio.census` | `bf3dump audio census @all-mp` | 834 patches + 1 master, 32,117 nodes / 46 types, 7,323 voices, 1,879 waves, 164 handheld strict on 32 types |
+| G5 | `audio.oracles` | `b\dev\tests\test_audio_install.exe --test-suite=audio-oracles` | plan §7.7 items 1–4 (design §10.2) |
+| G6 (timing) | `audio.bank` | `bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2` | 629 resident waves, 265.4 MiB ≤ 384 MiB, 0 starved, `warm_load_ms` ≤ 500 |
+| G7 | `audio.m16.offline` | `bf3dump audio check --g7 --out-dir b\shots\audio` | 38 rows, 0 failed |
+| G8 (timing) | `godot.audio` | `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=b\shots\audio\godot_m16.wav --quit-after=90` | `AUDIO CHECK: PASS`: rows (a)–(d), ≥ 30.0 s recorded, short/late blocks, late commands, ring overflows, starved voices all 0, offline replay equal sample for sample |
+
+`audio.contract` checks the headers, the node type table, the seam hashes and FourCCs and the tuning file;
+`audio.xas.unit`, `audio.patch.unit`, `audio.dsp.unit` and `audio.mixer.unit` need no data; `audio.cache` checks the
+cold / warm / patched program cache and `audio.fuzz` feeds mutated chunks, the M16A3 partition and its program blob
+(run it under `ctest --preset asan`). Under `asan` the bf3dump gates report their counts and timings without gating
+them, but still fail on a non-zero exit.
+
+The offline M16A3 render (G7) and the Godot run (G8) share one check script and analysis (`bf3/audio/audio_check.h`,
+design section 10.4): onsets at 75 ms on the stepped corebass tap, levels near > mid > far and the distance high-pass
+on the full mix and on the voice-14 tap, and in G8 a sample-for-sample comparison with an offline replay. G8 measures
+the mixer's compute time and ring health, not device xruns. Recordings (`m16_offline*.wav`, `godot_m16*.wav`) go to
+`b/shots/audio/` (gitignored, never committed); `OPENBF3_AUDIO_SHOTS`, set when CMake configures, overrides the directory the ctests use. The
+timing gates (G3 on thread CPU time, G6 warm load, G8) need a quiet machine; timings taken while other work runs are
+noisy.
+
 ## Integration of S1-S4 and L1 (`integ/spikes`)
 
 <!-- integration (integ/spikes) -->
@@ -1953,6 +2060,29 @@ with no AddressSanitizer report (`sim.weapons.perf` skips there by design). One 
 | L1 `godot.l1_look` (ratio <= 1.25, p99 <= 16.7 ms) | 1.073, 5.41 ms (first integration) | 1.071 (2.686 against 2.506 ms), 5.40 ms |
 | M1 `godot.m1`, `godot.m1_load` E4 / E5 | PASS; 2.36 / 1.82 s | 16/16; 2.38 / 1.89 s |
 | install unchanged | clean | clean (256 files in every install test) |
+
+<!-- integration (integ/au) -->
+**Third integration (`integ/au`, 2026-10-16).** `m2a/audio` (branched from 111f937) merged with `--no-ff` onto `main`
+1874933 (the integration above). Shared files kept both sides, the main tree's blocks first and audio's after them; no
+code had to change (audio's `bf3_godot` classes are new files, registered after ui2). One follow-up:
+`OPENBF3_AUDIO_SHOTS` is passed through `file(TO_CMAKE_PATH)`, so the Windows path the design names works
+(it reached `audio_gates.cmake` as invalid escapes). Full `ctest --preset dev` with `OPENBF3_GODOT`: 123 of 125 pass,
+`core.cache_data` and `core.res` skipped as before; the timing rows ran under the quiet lock, the rest with `-j8`.
+`ctest --preset asan -R "^audio\."`: 14 / 14, no AddressSanitizer report. Integrated against accepted: G1 909 waves,
+12,955 segments, 0 frame / length mismatches; G2 4,290 chunks, 0 mismatches; G3 0.1301 / 0.1295 / 0.1295 ms per
+channel-second (accepted 0.1306, gate 0.2); G4 834 patches + 1 master, 32,117 nodes / 46 types, 7,323 voices, 1,879
+waves, 0 compile failures; G5 6 / 6 cases, 314 / 314 assertions; G6 warm load 57.5 ms (one run; accepted median 51.3,
+gate 500); G7 38 / 38; G8 windowed 31 / 31, every mixer counter 0, replay bit-exact, max block 0.343 ms. Main-tree
+gates: S1 `host.scale` G1 p99 1.18 / 0.75 ms (valid) and `sim.nav.bake` 2.53 / 3.60 s; S2 `sim.vehicle` G1 / G1r 0
+mismatches, G2x 1.91 mm; S3 `godot.s3_crowd` PASS (G1a p99 0.42 ms, G1b 1.86 ms, frame p99 11.4 / 10.7 ms, G3 16 /
+16); S4 `logic.metro` G4 hash 843761c3205e74bb; L1 `godot.l1_look` 1.085 and 1.064 (p99 5.7 / 6.0 ms); M1
+`godot.m1` 16 / 16, E4 / E5 2.40 / 1.84 s; ui1 25 / 25; ui2 10 / 10 with the six shots (`openBF3\b\shots\integau\`);
+`weapon-sim --check` 38 / 38, W11 p99 0.263 / 0.190 ms; VFX `fx.install` PASS, `tools.fx_bench` 38.5 ns; install
+unchanged in every install test. What a listener should know: G1 says 909 Metro waves where the M2a plan says 908 (this
+tree's `load_level` mount, a scope difference, open question 7); under reading R of the MultiCrossfader the M16A3's far
+noise layer fades **in** over 20-50 m and every layer fades **out** over 250-300 m, not "fades in over 250-300 m" as the
+plan words it (open question 1); and without the HDR window (A3) levels are low: a fixed window puts a 110 dB shot at
+-11 dBFS before attenuation, so the mid and far M16A3 shots sit near -69 and -90 dBFS.
 
 ## M2a wave 2 contract (W2.0)
 

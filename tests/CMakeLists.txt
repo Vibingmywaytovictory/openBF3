@@ -537,6 +537,35 @@ if(OPENBF3_ASAN)
     set_tests_properties(sim.vehicle PROPERTIES TIMEOUT 1950)
     set_tests_properties(sim.vehicle.unit PROPERTIES TIMEOUT 1350)
 endif()
+# TC terrain collision (track "Terrain collision everywhere", docs/design/terrain-collision.md §13): tc.contract
+# compiles the TC header additions together and checks their constants and defaults. No data.
+openbf3_test(test_tc_contract test_main.cpp tc_contract_tests.cpp test_support.h)
+target_link_libraries(test_tc_contract PRIVATE bf3_sim bf3_render)
+add_test(NAME tc.contract COMMAND test_tc_contract)
+# sim.terrain.unit (no data) and sim.terrain (install, RUN_SERIAL: G1 over every level x mode, the full cached worlds,
+# G6 Caspian RushLarge0 spawns; exits 77 without an install). tools.tc_cost (G3, tests/tc_cost.cmake): bf3dump shapes
+# cold / warm / warm in child processes on fresh scratch roots, the limits of docs §4.5 (report-only under asan).
+openbf3_test(test_sim_terrain test_main.cpp terrain_collision_tests.cpp terrain_collision_support.h test_support.h)
+target_link_libraries(test_sim_terrain PRIVATE bf3_sim Jolt)
+target_include_directories(test_sim_terrain PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
+add_test(NAME sim.terrain.unit COMMAND test_sim_terrain --test-suite=sim-terrain-unit)
+add_test(NAME sim.terrain COMMAND test_sim_terrain --test-suite=sim-terrain)
+set_tests_properties(sim.terrain PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
+set_tests_properties(sim.terrain.unit PROPERTIES TIMEOUT 600)
+if(TARGET bf3dump)
+    add_test(NAME tools.tc_cost COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tc_cost.cmake)
+    set_tests_properties(tools.tc_cost PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE)
+endif()
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_tc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(tc.contract sim.terrain.unit sim.terrain PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
+    set_tests_properties(sim.terrain PROPERTIES TIMEOUT 10800) # G1 over 230 runs: 25 of 29 levels in 5,400 s under asan
+    if(TARGET bf3dump)
+        set_tests_properties(tools.tc_cost PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
+    endif()
+endif()
+
 # UI ui1 (docs/design/ui-swf-fonts.md §12, §14): ui1.contract, every ui1 header compiles together and the inline
 # helpers behave (no data, no Godot). The implementation adds core.ui.swf(.unit/.fuzz), core.ui.font(.unit) and the
 # Godot checks below this line.
@@ -834,4 +863,63 @@ endif()
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.m2a_hud COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_m2a_hud.cmake)
     set_tests_properties(godot.m2a_hud PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()
+
+# M2a audio (docs/design/m2a-audio.md §10): audio.contract, every audio header compiles together, the node type
+# table keeps the census sets, the seam hashes and FourCCs match the data's encoding, the tuning parser and the
+# project's audio_tuning.cfg. No data.
+openbf3_test(test_audio_contract test_main.cpp audio_contract_tests.cpp test_support.h)
+target_link_libraries(test_audio_contract PRIVATE bf3_audio bf3_core)
+target_compile_definitions(test_audio_contract PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg")
+add_test(NAME audio.contract COMMAND test_audio_contract --test-suite=audio-contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_audio_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+endif()
+# M2a audio (docs/design/m2a-audio.md §10.1): the data-free unit suites, one ctest per suite.
+openbf3_test(test_audio_unit test_main.cpp audio_unit_tests.cpp test_support.h)
+target_link_libraries(test_audio_unit PRIVATE bf3_audio bf3_core)
+foreach(_openbf3_audio_suite xas patch dsp mixer)
+    add_test(NAME audio.${_openbf3_audio_suite}.unit COMMAND test_audio_unit --test-suite=audio-${_openbf3_audio_suite})
+    if(OPENBF3_ASAN)
+        set_tests_properties(audio.${_openbf3_audio_suite}.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+    endif()
+endforeach()
+# M2a audio (docs/design/m2a-audio.md §10.2): the install suites (exit 77 without an install).
+openbf3_test(test_audio_install test_main.cpp audio_install_tests.cpp test_support.h)
+target_link_libraries(test_audio_install PRIVATE bf3_audio bf3_core)
+set_tests_properties(audio.xas.unit audio.patch.unit audio.dsp.unit audio.mixer.unit PROPERTIES TIMEOUT 300)
+add_test(NAME audio.oracles COMMAND test_audio_install --test-suite=audio-oracles)
+add_test(NAME audio.cache COMMAND test_audio_install --test-suite=audio-cache)
+add_test(NAME audio.fuzz COMMAND test_audio_install --test-suite=audio-fuzz)
+set_tests_properties(audio.oracles audio.cache audio.fuzz PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+if(OPENBF3_ASAN)
+    set_tests_properties(audio.oracles audio.cache audio.fuzz PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+endif()
+# M2a audio gates G1-G4, G6, G7 (tests/audio_gates.cmake drives one bf3dump command each and checks its summary
+# line). The timing gates (G3, G6) and the long renders run serially; under asan they only report.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    if(DEFINED ENV{OPENBF3_AUDIO_SHOTS})
+        # Forward slashes: a Windows path (C:\...\b\shots\audio) would reach audio_gates.cmake as invalid escapes.
+        file(TO_CMAKE_PATH "$ENV{OPENBF3_AUDIO_SHOTS}" _openbf3_audio_shots)
+    else()
+        set(_openbf3_audio_shots "${PROJECT_SOURCE_DIR}/b/shots/audio")
+    endif()
+    foreach(_openbf3_audio_gate waves loc decode_perf census bank m16_offline)
+        string(REPLACE "_" "." _openbf3_audio_name "${_openbf3_audio_gate}")
+        add_test(NAME audio.${_openbf3_audio_name} COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DGATE=${_openbf3_audio_gate}
+            -DSHOTS=${_openbf3_audio_shots} -DREPORT_ONLY=${OPENBF3_ASAN} -P ${CMAKE_CURRENT_SOURCE_DIR}/audio_gates.cmake)
+        set_tests_properties(audio.${_openbf3_audio_name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        if(OPENBF3_ASAN)
+            set_tests_properties(audio.${_openbf3_audio_name} PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+        endif()
+    endforeach()
+    set_tests_properties(audio.decode.perf audio.bank audio.m16.offline PROPERTIES RUN_SERIAL TRUE)
+endif()
+# M2a audio gate G8 (tests/godot_audio.cmake): the windowed M16A3 check of res://scenes/audio_m16.tscn; WAVs to the
+# same shots directory as audio.m16.offline. Exit 77 without OPENBF3_GODOT, an install, or a window.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.audio COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DSHOTS=${_openbf3_audio_shots}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_audio.cmake)
+    set_tests_properties(godot.audio PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()

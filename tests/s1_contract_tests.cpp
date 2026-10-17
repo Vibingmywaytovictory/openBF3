@@ -129,14 +129,9 @@ TEST_CASE("s1 contract: region tile helpers (mode_areas)") {
 }
 
 TEST_CASE("s1 contract: the additive M1 fields default to M1's behaviour") {
-	const core::level::SoupOptions so;
-	CHECK(so.terrain_cover.empty());
-	const sim::StaticWorldLoadOptions wo;
-	CHECK(wo.terrain_cover.empty());
-	const host::SharedLoadOptions lo;
-	CHECK(lo.terrain_cover.empty());
-	const host::SharedLevel sl;
-	CHECK(sl.terrain_cover.empty());
+	// (TC removed S1's terrain_cover / cover_water options: terrain everywhere, the water rule is the nav bake's.)
+	const sim::NavBakeOptions nb;
+	CHECK(nb.water.empty());
 	const host::GameServerConfig gc;
 	CHECK(gc.bots == nullptr);
 	const host::GameServerStats gs;

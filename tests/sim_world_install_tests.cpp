@@ -1,6 +1,6 @@
 // sim.world (install): Metro TDM's static world from the retail install (read-only) through a scratch cache
 // (docs/design/m1.md §5, §14). Exits 77 (skipped) without an install.
-//   * cold then warm: the tile list and per-tile, per-layer triangle counts equal the soup's (969,031 collision
+//   * cold then warm: the tile list and per-tile, per-layer triangle counts equal the soup's (TC: 794,951 Havok collision
 //     + 142,908 raycast + 2,232 character); the warm path builds no soup (its progress never leaves Mount) and
 //     restores every tile; cold and warm give byte-identical tile blobs and bit-identical answers to 1,000 seeded
 //     rays; a second mode of the level (ConquestLarge0) takes the tiles it shares from the cache;
@@ -152,6 +152,48 @@ Reference make_reference(const level::CollisionSoup &p_soup) {
 		}
 		rt.count = r.triangles.size() - rt.first;
 		r.tiles.push_back(rt);
+	}
+	// TC (docs/design/terrain-collision.md §12.2): the terrain cells of every soup tile they fall in
+	// (append_soup_terrain_tile), tile = kNoStaticTile as CollisionWorld reports terrain hits.
+	for (size_t i = 0; i < p_soup.terrains.size(); ++i) {
+		const level::SoupTerrain &terrain = p_soup.terrains[i];
+		if (terrain.state != level::SoupTerrain::State::Built) {
+			continue;
+		}
+		const uint32_t placement = uint32_t(p_soup.placements.size() + i);
+		level::WorkBudget budget(size_t(1) << 28);
+		core::Result<level::SoupTerrainHash> h = level::hash_soup_terrain(terrain, placement, budget);
+		REQUIRE(h.ok());
+		std::vector<level::SoupTriangle> cells;
+		for (const level::SoupTerrainTileSum &ts : h->tiles) {
+			cells.clear();
+			REQUIRE(level::append_soup_terrain_tile(terrain, placement, ts.tile, cells, budget).ok());
+			Reference::Tile rt;
+			rt.first = r.triangles.size();
+			bool first = true;
+			for (const level::SoupTriangle &s : cells) {
+				RefTriangle tri;
+				for (size_t k = 0; k < 3; ++k) {
+					tri.v[k] = d3(s.v[k]);
+				}
+				tri.lo = { std::min({ tri.v[0].x, tri.v[1].x, tri.v[2].x }), std::min({ tri.v[0].y, tri.v[1].y, tri.v[2].y }),
+					std::min({ tri.v[0].z, tri.v[1].z, tri.v[2].z }) };
+				tri.hi = { std::max({ tri.v[0].x, tri.v[1].x, tri.v[2].x }), std::max({ tri.v[0].y, tri.v[1].y, tri.v[2].y }),
+					std::max({ tri.v[0].z, tri.v[1].z, tri.v[2].z }) };
+				rt.lo = first ? tri.lo : D3{ std::min(rt.lo.x, tri.lo.x), std::min(rt.lo.y, tri.lo.y), std::min(rt.lo.z, tri.lo.z) };
+				rt.hi = first ? tri.hi : D3{ std::max(rt.hi.x, tri.hi.x), std::max(rt.hi.y, tri.hi.y), std::max(rt.hi.z, tri.hi.z) };
+				first = false;
+				tri.tag.material = s.material;
+				tri.tag.surface = s.surface;
+				tri.tag.body = s.body;
+				tri.tag.flags = s.flags;
+				tri.layer = s.body;
+				tri.tile = kNoStaticTile;
+				r.triangles.push_back(tri);
+			}
+			rt.count = r.triangles.size() - rt.first;
+			r.tiles.push_back(rt);
+		}
 	}
 	return r;
 }
@@ -450,8 +492,11 @@ TEST_SUITE("sim-world") {
 			return;
 		}
 		const level::CollisionSoup &soup = m->soup;
-		REQUIRE(soup.tiles.size() == 170);
-		CHECK(soup.bodies[0] == 969031);
+		// TC: the soup's tiles hold the Havok triangles only (170 tiles and 969,031 collision triangles with the near-rule
+		// terrain before); the terrain is one record, one field.
+		REQUIRE(soup.tiles.size() == 149);
+		CHECK(soup.bodies[0] == 794951);
+		REQUIRE(soup.terrains.size() == 1);
 		CHECK(soup.bodies[1] == 142908);
 		CHECK(soup.bodies[2] == 2232);
 
@@ -474,25 +519,30 @@ TEST_SUITE("sim-world") {
 		const core::CacheStats cold_cache = load(m->cold, cold_progress, cold_done);
 		const StaticWorldStats &c = m->cold->stats();
 		CHECK_FALSE(c.world_hit);
-		CHECK(c.tiles_cooked == 170);
+		CHECK(c.tiles_cooked == 149);
+		CHECK(c.terrains == 1);
+		CHECK(c.terrains_cooked == 1);
+		CHECK(c.terrains_hit == 0);
 		CHECK(c.tiles_hit == 0);
 		CHECK(c.seconds_soup > 0.0);
 		CHECK(cold_progress.stage.load() == level::SoupProgress::Done);
-		CHECK(cold_done.load() == 170);
-		CHECK(cold_cache.entries == 171); // 170 tiles + the world index
+		CHECK(cold_done.load() == 149);
+		CHECK(cold_cache.entries == 151); // 149 tiles + the terrain + the world index
 
 		level::SoupProgress warm_progress;
 		std::atomic<size_t> warm_done{ 0 };
 		const core::CacheStats warm_cache = load(m->warm, warm_progress, warm_done);
 		const StaticWorldStats &w = m->warm->stats();
 		CHECK(w.world_hit);
-		CHECK(w.tiles_hit == 170);
+		CHECK(w.tiles_hit == 149);
+		CHECK(w.terrains_hit == 1);
+		CHECK(w.terrains_cooked == 0);
 		CHECK(w.tiles_cooked == 0);
 		CHECK(w.seconds_soup == 0.0);
 		CHECK(warm_progress.stage.load() == level::SoupProgress::Mount); // build_collision_soup never ran
-		CHECK(warm_done.load() == 170);
+		CHECK(warm_done.load() == 149);
 		CHECK(warm_cache.puts == 0);
-		CHECK(warm_cache.hits == 171);
+		CHECK(warm_cache.hits == 151);
 
 		// The soup's tiles, counts and totals, in both.
 		for (const StaticWorldShapes *shapes : { m->cold.get(), m->warm.get() }) {
@@ -507,7 +557,7 @@ TEST_SUITE("sim-world") {
 				count_mismatch += (t.x != soup.tiles[i].x || t.z != soup.tiles[i].z || t.triangles != bodies) ? 1 : 0;
 			}
 			CHECK(count_mismatch == 0);
-			CHECK(shapes->stats().triangles[0] == 969031);
+			CHECK(shapes->stats().triangles[0] == 794951);
 			CHECK(shapes->stats().triangles[1] == 142908);
 			CHECK(shapes->stats().triangles[2] == 2232);
 		}
@@ -517,6 +567,9 @@ TEST_SUITE("sim-world") {
 			blob_mismatch += encode_static_tile_blob(*m->cold, i) == encode_static_tile_blob(*m->warm, i) ? 0 : 1;
 		}
 		CHECK(blob_mismatch == 0);
+		REQUIRE(m->cold->terrain_count() == 1);
+		REQUIRE(m->warm->terrain_count() == 1);
+		CHECK(encode_static_terrain_blob(*m->cold, 0) == encode_static_terrain_blob(*m->warm, 0));
 		const auto cold_world = world_of(m->cold);
 		const auto warm_world = world_of(m->warm);
 		// 1,000 seeded rays: from 1-20 m around a random soup triangle's centroid through it and 50 % past it.
@@ -566,6 +619,7 @@ TEST_SUITE("sim-world") {
 			MESSAGE("MP_Subway ConquestLarge0 after TDM: ", s.tiles, " tiles, ", s.tiles_hit, " from the cache, ", s.tiles_cooked, " cooked");
 			CHECK_FALSE(s.world_hit);
 			CHECK(s.tiles_hit > 0);
+			CHECK(s.terrains_hit == 1); // TC: content keyed, the modes of a level share the terrain entry
 			cache.close();
 		}
 		*cq_world = nullptr;
@@ -646,7 +700,7 @@ TEST_SUITE("sim-world") {
 		}
 		const auto world = world_of(shapes);
 		const Reference ref = make_reference(m->soup);
-		REQUIRE(ref.triangles.size() == 1114171);
+		REQUIRE(ref.triangles.size() == 1136699); // TC: 940,091 Havok + 196,608 terrain (every cell)
 		std::mt19937 rng(20261015);
 		std::uniform_real_distribution<double> unit(0.0, 1.0);
 		const auto random_spot = [&](uint32_t p_mask, D3 &r_point, D3 &r_normal) {

@@ -183,6 +183,8 @@ target_sources(bf3_core PRIVATE
     src/level/collision_material.cpp
     src/level/collision_soup.cpp
     include/bf3/core/level/collision_soup.h
+    src/level/soup_terrain.cpp
+    src/level/soup_terrain_internal.h
     src/res/terrain.cpp
     include/bf3/core/res/terrain.h
 )
@@ -307,4 +309,21 @@ target_sources(bf3_core PRIVATE
 # M2a lc (docs/design/m2a.md §6.5, §13.1; docs/design/m2a-lc.md): the capsule pose table's hash, checks and cache blob.
 target_sources(bf3_core PRIVATE
     src/gameplay/capsule_pose_table.cpp
+)
+
+# M2a audio (docs/design/m2a-audio.md §5, §6): sound stream codecs (EA-XAS v1), SoundWaveAsset reader, the resident
+# wave bank, the sound-graph node type table and the SoundPatchAsset compiler.
+target_sources(bf3_core PRIVATE
+    src/audio/sound_program.cpp
+    src/audio/sound_program_blob.cpp
+    src/audio/sound_stream.cpp
+    src/audio/sound_types.cpp
+    src/audio/sound_wave.cpp
+    src/audio/wave_bank.cpp
+    include/bf3/core/audio/sound_ports.h
+    include/bf3/core/audio/sound_program.h
+    include/bf3/core/audio/sound_stream.h
+    include/bf3/core/audio/sound_types.h
+    include/bf3/core/audio/sound_wave.h
+    include/bf3/core/audio/wave_bank.h
 )

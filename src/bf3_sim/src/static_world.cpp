@@ -1,6 +1,7 @@
 // The static level world as Jolt MeshShapes (docs/design/m1.md §5.1-§5.3, §5.5): tiles cooked in parallel, one
 // shape per (tile, layer), per-triangle user data = the tile's tag index; the soup and loose-triangle builds and
-// the per-tile "jolt-tile" cache loop. The blobs, keys and load_static_world_cached are in static_world_cache.cpp.
+// the per-tile "jolt-tile" cache loop. The blobs, keys and load_static_world_cached are in static_world_cache.cpp; TC's
+// terrain fields in static_world_terrain.cpp (cooked here on one lane beside the tiles).
 #include "static_world_internal.h"
 
 #include "jolt_runtime.h"
@@ -74,6 +75,11 @@ const SurfaceTag &empty_tag() {
 	return tag;
 }
 
+const StaticTerrainInfo &empty_terrain_info() {
+	static const StaticTerrainInfo info;
+	return info;
+}
+
 core::Status check_options(const StaticWorldBuildOptions &p_options) {
 	if (!std::isfinite(p_options.active_edge_degrees) || p_options.active_edge_degrees < 0.0f || p_options.active_edge_degrees > 180.0f) {
 		return core::make_error("static world: active_edge_degrees " + std::to_string(p_options.active_edge_degrees) + " is outside 0..180");
@@ -128,6 +134,14 @@ const StaticWorldStats &StaticWorldShapes::stats() const {
 	return impl_->stats;
 }
 
+size_t StaticWorldShapes::terrain_count() const {
+	return impl_->terrains.size();
+}
+
+const StaticTerrainInfo &StaticWorldShapes::terrain(size_t p_index) const {
+	return p_index < impl_->terrains.size() ? impl_->terrains[p_index].info : empty_terrain_info();
+}
+
 Vec3 StaticWorldShapes::min() const {
 	return impl_->min;
 }
@@ -163,6 +177,26 @@ std::shared_ptr<const StaticWorldShapes> StaticWorldBuilder::finish(std::unique_
 		}
 		any = true;
 	}
+	// TC: the terrain fields and patches (also in shape_bytes; their bounds join the tiles').
+	s.terrains = w.terrains.size();
+	s.terrain_bytes = 0;
+	for (const StaticWorldShapes::Impl::Terrain &terrain : w.terrains) {
+		for (const JPH::RefConst<JPH::Shape> *shape : { &terrain.field, &terrain.patch }) {
+			if (*shape != nullptr) {
+				++s.shapes;
+				s.terrain_bytes += (*shape)->GetStats().mSizeBytes;
+			}
+		}
+		if (terrain.field == nullptr && terrain.patch == nullptr) {
+			continue; // no collision: no bounds
+		}
+		for (size_t k = 0; k < 3; ++k) {
+			w.min[k] = any ? std::min(w.min[k], terrain.info.min[k]) : terrain.info.min[k];
+			w.max[k] = any ? std::max(w.max[k], terrain.info.max[k]) : terrain.info.max[k];
+		}
+		any = true;
+	}
+	s.shape_bytes += s.terrain_bytes;
 	if (s.seconds_total == 0.0) {
 		s.seconds_total = s.seconds_soup + s.seconds_cook + s.seconds_restore;
 	}
@@ -434,10 +468,52 @@ core::Result<std::unique_ptr<StaticWorldShapes::Impl>> cook_static_tiles(core::C
 	return impl;
 }
 
+// TC: the tiles on the build lanes and the terrain fields on one more lane beside them (one lane: one after the
+// other). The tiles' Impl gets the terrains, their stats and times; r_stored as cook_static_tiles, and the terrains.
+core::Result<std::unique_ptr<StaticWorldShapes::Impl>> cook_static_tiles_and_terrains(core::Cache *p_cache,
+		const std::vector<std::array<int32_t, 2>> &p_keys, const StaticTileSource &p_source, std::span<const StaticTerrainView> p_terrains,
+		const StaticWorldBuildOptions &p_options, std::shared_ptr<void> p_runtime, bool *r_stored) {
+	std::optional<core::Result<std::unique_ptr<StaticWorldShapes::Impl>>> tiles;
+	std::optional<core::Result<std::vector<StaticWorldShapes::Impl::Terrain>>> terrains;
+	bool tiles_stored = false;
+	bool terrains_stored = false;
+	uint64_t terrain_bytes = 0;
+	size_t terrain_hits = 0;
+	double seconds_terrain = 0.0;
+	core::parallel_for(
+			2,
+			[&](size_t p_lane) {
+				if (p_lane == 0) {
+					const Clock::time_point start = Clock::now();
+					terrains.emplace(cook_static_terrains(p_cache, p_terrains, p_options, &terrains_stored, &terrain_bytes, &terrain_hits));
+					seconds_terrain = seconds_since(start);
+				} else {
+					tiles.emplace(cook_static_tiles(p_cache, p_keys, p_source, p_options, p_runtime, &tiles_stored));
+				}
+			},
+			p_options.threads == 1 ? 1u : 2u);
+	if (!tiles->ok()) {
+		return tiles->error();
+	}
+	if (!terrains->ok()) {
+		return terrains->error();
+	}
+	std::unique_ptr<StaticWorldShapes::Impl> impl = std::move(tiles->value());
+	impl->terrains = std::move(terrains->value());
+	impl->stats.terrains_hit = terrain_hits;
+	impl->stats.terrains_cooked = impl->terrains.size() - terrain_hits;
+	impl->stats.cache_bytes += terrain_bytes;
+	impl->stats.seconds_terrain = seconds_terrain;
+	if (r_stored != nullptr) {
+		*r_stored = tiles_stored && terrains_stored;
+	}
+	return impl;
+}
+
 // ---- builds -----------------------------------------------------------------------------------------------
 
 core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world_cached(core::Cache *p_cache, std::span<const StaticTriangle> p_triangles,
-		const StaticWorldBuildOptions &p_options) {
+		const StaticWorldBuildOptions &p_options, std::span<const StaticTerrainView> p_terrains) {
 	BF3_TRY(check_options(p_options));
 	std::shared_ptr<void> runtime = jolt_runtime_acquire();
 	// Tile every triangle by the soup's rule (millimetre-quantised centroid, floor of / 64 m), keep input order.
@@ -467,7 +543,7 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world_cached
 		}
 	}
 	first.push_back(keyed.size());
-	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles(
+	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles_and_terrains(
 			p_cache, keys,
 			[&](size_t p_tile, std::vector<StaticTriangle> &r_scratch) -> core::Result<std::span<const StaticTriangle>> {
 				r_scratch.clear();
@@ -476,7 +552,7 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world_cached
 				}
 				return std::span<const StaticTriangle>(r_scratch);
 			},
-			p_options, std::move(runtime));
+			p_terrains, p_options, std::move(runtime), nullptr);
 	if (!impl) {
 		return impl.error();
 	}
@@ -488,6 +564,29 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(std::s
 	return build_static_world_cached(nullptr, p_triangles, p_options);
 }
 
+core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world_terrain(std::span<const StaticTriangle> p_triangles,
+		std::span<const StaticTerrainView> p_terrains, const StaticWorldBuildOptions &p_options) {
+	return build_static_world_cached(nullptr, p_triangles, p_options, p_terrains);
+}
+
+core::Result<std::vector<StaticTerrainView>> soup_terrain_views(const core::level::CollisionSoup &p_soup) {
+	std::vector<StaticTerrainView> views;
+	for (const core::level::SoupTerrain &terrain : p_soup.terrains) {
+		if (terrain.state != core::level::SoupTerrain::State::Built) {
+			continue;
+		}
+		core::Result<StaticTerrainView> view = static_terrain_view(terrain);
+		if (!view) {
+			return view.error();
+		}
+		views.push_back(*view);
+	}
+	if (views.size() > kMaxStaticTerrains) {
+		return core::make_error("static world: " + std::to_string(views.size()) + " terrains exceed " + std::to_string(kMaxStaticTerrains));
+	}
+	return views;
+}
+
 core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(const core::level::CollisionSoup &p_soup, const StaticWorldBuildOptions &p_options) {
 	BF3_TRY(check_options(p_options));
 	std::shared_ptr<void> runtime = jolt_runtime_acquire();
@@ -496,13 +595,17 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world(const 
 	for (const core::level::SoupTile &tile : p_soup.tiles) {
 		keys.push_back({ tile.x, tile.z });
 	}
-	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles(
+	core::Result<std::vector<StaticTerrainView>> views = soup_terrain_views(p_soup); // TC
+	if (!views) {
+		return views.error();
+	}
+	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles_and_terrains(
 			nullptr, keys,
 			[&](size_t p_tile, std::vector<StaticTriangle> &r_scratch) -> core::Result<std::span<const StaticTriangle>> {
 				BF3_TRY(soup_tile_triangles(p_soup.tiles[p_tile], r_scratch));
 				return std::span<const StaticTriangle>(r_scratch);
 			},
-			p_options, std::move(runtime));
+			*views, p_options, std::move(runtime), nullptr);
 	if (!impl) {
 		return impl.error();
 	}

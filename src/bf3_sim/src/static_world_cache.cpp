@@ -14,8 +14,22 @@
 // Restoring goes through Shape::sRestoreFromBinaryState only after validate_mesh_tree has walked the whole tree
 // (see there): Jolt itself trusts every offset in it, so a damaged or hostile tree would otherwise reach a query.
 //
-// "OBF3JWLD" v1 (one level x mode): u32 tile count; per tile: i32 x, i32 z, content digest, 3 x u32 triangle
-// counts, u32 tag count; then u64 soup sum, u64 soup triangles.
+// "OBF3JWLD" v2 (one level x mode; kStaticWorldIndexVersion): u32 tile count; per tile: i32 x, i32 z, content digest,
+// 3 x u32 triangle counts, u32 tag count; then u64 soup sum, u64 soup triangles; then (TC) u32 terrain count and per
+// terrain u32 object, content digest.
+//
+// "OBF3JTER" v1 (TC: one terrain; kStaticTerrainFormatVersion), little endian:
+//   magic, version
+//   StaticTerrainInfo: u32 object, width, height, holes, holed, patch triangles; f32 max error; bounds min, max
+//     (6 x f32); content digest (32 bytes)
+//   the field body: position (3 x f32), rotation (4 x f32, x y z w)
+//   u32 field stream bytes (0 = no field), the HeightFieldShape's Shape::SaveBinaryState stream:
+//     u8 sub type, u64 user data, mOffset, mScale (3 x f32 each), u32 mSampleCount, u32 mBlockSize,
+//     u8 mBitsPerSample, u16 mMinSample, u16 mMaxSample, u32 material index bytes + bytes, u32 bits per material
+//     index, u8 has heights, then the range blocks (16 bytes each), height samples and active edges
+//   u32 patch Jolt triangles, u32 patch stream bytes (0 = no patch), the patch MeshShape's stream (as a tile layer's)
+// validate_field_stream parses the whole field header itself before Jolt's RestoreBinaryState sees it (Jolt checks
+// none of it, and its Read of the material array would resize to any length).
 #include "static_world_internal.h"
 
 #include "jolt_runtime.h"
@@ -27,12 +41,14 @@
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/source_digest.h"
+#include "bf3/core/res/terrain.h"
 #include "bf3/core/thread_pool.h"
 
 #include <Jolt/AABBTree/NodeCodec/NodeCodecQuadTreeHalfFloat.h>
 #include <Jolt/AABBTree/TriangleCodec/TriangleCodecIndexed8BitPackSOA4Flags.h>
 #include <Jolt/Core/StreamIn.h>
 #include <Jolt/Core/StreamOut.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
 
@@ -59,6 +75,8 @@ double seconds_since(Clock::time_point p_start) {
 
 constexpr const char *kTileMagic = "OBF3JTIL";
 constexpr const char *kWorldMagic = "OBF3JWLD";
+constexpr const char *kTerrainMagic = "OBF3JTER";
+constexpr size_t kWorldTerrainBytes = 4 + 32;
 constexpr size_t kTagBytes = 8;
 constexpr size_t kLayerHeaderBytes = 1 + 4 + 4 + 4;
 constexpr size_t kWorldTileBytes = 4 + 4 + 32 + 3 * 4 + 4;
@@ -302,6 +320,112 @@ std::string build_params(const StaticWorldBuildOptions &p_options) {
 	return "active_edge_degrees=" + float_bits_hex(p_options.active_edge_degrees) + ";raycast=" + (p_options.include_raycast ? "1" : "0");
 }
 
+// ---- TC: HeightFieldShape stream validation -----------------------------------------------------------------
+
+// HeightFieldShape's private layout in Jolt 5.6 (HeightFieldShape.h / .cpp): sizeof(RangeBlock) (4 x 2 x uint16),
+// sGridOffsets (the range blocks of the coarser levels: (4^level - 1) / 3), AllocateBuffers' size formulas. The keys
+// carry jolt_build_id(), so a Jolt bump re-cooks every terrain, and sim.terrain.unit's round trip fails if they move.
+constexpr size_t kRangeBlockBytes = 16;
+
+uint32_t bit_width(uint32_t p_v) {
+	uint32_t bits = 0;
+	while (p_v != 0) {
+		++bits;
+		p_v >>= 1;
+	}
+	return bits;
+}
+
+// Parses the field stream's header (see the layout above) and checks every value Jolt's constructor would have
+// refused, the sizes AllocateBuffers derives and the bytes that follow. r_samples is mSampleCount.
+core::Status validate_field_stream(std::span<const uint8_t> p_stream, uint32_t &r_samples) {
+	constexpr size_t kHead = 1 + 8 + 12 + 12 + 4 + 4 + 1 + 2 + 2 + 4;
+	if (p_stream.size() < kHead + 4 + 1) {
+		return core::make_error("field stream: truncated");
+	}
+	if (p_stream[0] != uint8_t(JPH::EShapeSubType::HeightField)) {
+		return core::make_error("field stream: shape sub type " + std::to_string(int(p_stream[0])) + " is not a height field");
+	}
+	if (load<uint64_t>(p_stream, 1) != 0) {
+		return core::make_error("field stream: unexpected shape user data");
+	}
+	float offset[3], scale[3];
+	for (int i = 0; i < 3; ++i) {
+		offset[i] = load<float>(p_stream, 9 + 4 * size_t(i));
+		scale[i] = load<float>(p_stream, 21 + 4 * size_t(i));
+		if (!std::isfinite(offset[i]) || !std::isfinite(scale[i])) {
+			return core::make_error("field stream: non-finite offset or scale");
+		}
+	}
+	if (!(scale[0] > 0.0f) || !(scale[2] > 0.0f) || scale[1] == 0.0f) {
+		return core::make_error("field stream: scale x / z must be positive and y non-zero");
+	}
+	const uint32_t samples = load<uint32_t>(p_stream, 33);
+	const uint32_t block = load<uint32_t>(p_stream, 37);
+	const uint8_t bits = p_stream[41];
+	const uint16_t min_sample = load<uint16_t>(p_stream, 42);
+	const uint16_t max_sample = load<uint16_t>(p_stream, 44);
+	const uint32_t material_bytes = load<uint32_t>(p_stream, 46);
+	if (block < 2 || block > 8) {
+		return core::make_error("field stream: block size " + std::to_string(block));
+	}
+	const size_t max_samples = (core::res::kMaxGridSide + 8 - 1) / 8 * 8 + 8;
+	if (samples < 2 * block || samples > max_samples || samples % block != 0) {
+		return core::make_error("field stream: " + std::to_string(samples) + " samples a side (block " + std::to_string(block) + ")");
+	}
+	if (bits < 1 || bits > JPH::HeightFieldShapeConstants::cMaxBitsPerSample) {
+		return core::make_error("field stream: " + std::to_string(int(bits)) + " bits per sample");
+	}
+	const uint32_t num_blocks = samples / block;
+	if (num_blocks < 2 || num_blocks > (1u << JPH::HeightFieldShapeConstants::cNumBitsXY)) {
+		return core::make_error("field stream: " + std::to_string(num_blocks) + " blocks a side");
+	}
+	if (2 * bit_width(samples - 1) + 1 > JPH::SubShapeID::MaxBits) {
+		return core::make_error("field stream: too many samples for the sub-shape id bits");
+	}
+	const bool none = min_sample == JPH::HeightFieldShapeConstants::cNoCollisionValue16;
+	if (!none && !(min_sample <= max_sample && max_sample <= JPH::HeightFieldShapeConstants::cMaxHeightValue16)) {
+		return core::make_error("field stream: sample range " + std::to_string(min_sample) + ".." + std::to_string(max_sample));
+	}
+	if (material_bytes != 0) {
+		return core::make_error("field stream: " + std::to_string(material_bytes) + " material index bytes (the cook sets no materials)");
+	}
+	const uint32_t material_bits = load<uint32_t>(p_stream, kHead);
+	if (material_bits != 0) {
+		return core::make_error("field stream: " + std::to_string(material_bits) + " bits per material index");
+	}
+	const uint8_t has_heights = p_stream[kHead + 4];
+	if (has_heights != 1) {
+		return core::make_error("field stream: no heights (a field without collision is never stored)");
+	}
+	const uint32_t max_level = bit_width(num_blocks - 1);
+	const uint64_t grid_offset = ((uint64_t(1) << (2 * (max_level - 1))) - 1) / 3;
+	const uint64_t max_stride = (uint64_t(num_blocks) + 1) >> 1;
+	const uint64_t range_blocks = grid_offset + max_stride * max_stride;
+	const uint64_t height_bytes = (uint64_t(samples) * samples * bits + 7) / 8 + 2;
+	const uint64_t edge_bytes = ((uint64_t(samples) - 1) * (samples - 1) * 3 + 7) / 8 + 1;
+	const uint64_t body = range_blocks * kRangeBlockBytes + height_bytes + edge_bytes;
+	if (p_stream.size() - (kHead + 5) != body) {
+		return core::make_error("field stream: " + std::to_string(p_stream.size() - (kHead + 5)) + " bytes after the header, the header says " +
+				std::to_string(body));
+	}
+	r_samples = samples;
+	return core::Status::success();
+}
+
+core::Result<JPH::RefConst<JPH::Shape>> restore_field(std::span<const uint8_t> p_stream, uint32_t &r_samples) {
+	BF3_TRY(validate_field_stream(p_stream, r_samples));
+	SpanStreamIn in(p_stream);
+	const JPH::Shape::ShapeResult result = JPH::Shape::sRestoreFromBinaryState(in);
+	if (result.HasError()) {
+		return core::make_error("field stream: Jolt: " + std::string(result.GetError().c_str()));
+	}
+	if (!in.at_end()) {
+		return core::make_error("field stream: Jolt did not read the whole stream");
+	}
+	return JPH::RefConst<JPH::Shape>(result.Get());
+}
+
 } // namespace
 
 // ---- tile blobs ---------------------------------------------------------------------------------------------
@@ -473,7 +597,7 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_tile_blobs(
 
 std::vector<uint8_t> encode_static_world_index(const StaticWorldIndex &p_index) {
 	core::BlobWriter w;
-	w.magic(kWorldMagic, kStaticWorldFormatVersion);
+	w.magic(kWorldMagic, kStaticWorldIndexVersion);
 	w.u32(uint32_t(p_index.tiles.size()));
 	for (const StaticWorldEntry &t : p_index.tiles) {
 		w.i32(t.x);
@@ -486,13 +610,18 @@ std::vector<uint8_t> encode_static_world_index(const StaticWorldIndex &p_index) 
 	}
 	w.u64(p_index.soup_sum);
 	w.u64(p_index.soup_triangles);
+	w.u32(uint32_t(p_index.terrains.size()));
+	for (const StaticWorldIndex::Terrain &t : p_index.terrains) {
+		w.u32(t.object);
+		w.raw(t.content.bytes.data(), t.content.bytes.size());
+	}
 	return w.take();
 }
 
 core::Result<StaticWorldIndex> decode_static_world_index(std::span<const uint8_t> p_blob) {
 	core::BlobReader r(p_blob);
 	const uint32_t version = r.magic(kWorldMagic);
-	if (r.ok() && version != kStaticWorldFormatVersion) {
+	if (r.ok() && version != kStaticWorldIndexVersion) {
 		return core::make_error("jolt-world: format version " + std::to_string(version));
 	}
 	StaticWorldIndex out;
@@ -514,6 +643,20 @@ core::Result<StaticWorldIndex> decode_static_world_index(std::span<const uint8_t
 	}
 	out.soup_sum = r.u64();
 	out.soup_triangles = r.u64();
+	const size_t terrains = counted(r, kWorldTerrainBytes);
+	if (!r.ok()) {
+		return r.error("jolt-world");
+	}
+	if (terrains > kMaxStaticTerrains) {
+		return core::make_error("jolt-world: " + std::to_string(terrains) + " terrains");
+	}
+	out.terrains.resize(terrains);
+	for (StaticWorldIndex::Terrain &t : out.terrains) {
+		t.object = r.u32();
+		for (uint8_t &b : t.content.bytes) {
+			b = r.u8();
+		}
+	}
 	if (!r.ok()) {
 		return r.error("jolt-world");
 	}
@@ -528,7 +671,183 @@ core::Result<StaticWorldIndex> decode_static_world_index(std::span<const uint8_t
 	return out;
 }
 
+// ---- TC: terrain blobs ------------------------------------------------------------------------------------------
+
+std::vector<uint8_t> encode_static_terrain(const StaticWorldShapes::Impl::Terrain &p_terrain) {
+	const StaticTerrainInfo &info = p_terrain.info;
+	core::BlobWriter w;
+	w.magic(kTerrainMagic, kStaticTerrainFormatVersion);
+	for (uint32_t v : { info.object, info.width, info.height, info.holes, info.holed, info.patch_triangles }) {
+		w.u32(v);
+	}
+	w.f32(info.max_error);
+	for (const Vec3 *v : { &info.min, &info.max }) {
+		for (float c : *v) {
+			w.f32(c);
+		}
+	}
+	w.raw(info.content.bytes.data(), info.content.bytes.size());
+	for (float c : p_terrain.position) {
+		w.f32(c);
+	}
+	for (float c : p_terrain.rotation) {
+		w.f32(c);
+	}
+	const auto put_stream = [&](const JPH::Shape *p_shape) {
+		if (p_shape == nullptr) {
+			w.u32(0);
+			return;
+		}
+		std::vector<uint8_t> stream;
+		VectorStreamOut out(stream);
+		p_shape->SaveBinaryState(out);
+		w.u32(uint32_t(stream.size()));
+		w.raw(stream.data(), stream.size());
+	};
+	put_stream(p_terrain.field.GetPtr());
+	w.u32(p_terrain.patch != nullptr ? p_terrain.patch->GetStats().mNumTriangles : 0);
+	put_stream(p_terrain.patch.GetPtr());
+	return w.take();
+}
+
+core::Result<StaticWorldShapes::Impl::Terrain> decode_static_terrain(std::span<const uint8_t> p_blob) {
+	core::BlobReader r(p_blob);
+	const uint32_t version = r.magic(kTerrainMagic);
+	if (!r.ok()) {
+		return r.error("jolt-terrain");
+	}
+	if (version != kStaticTerrainFormatVersion) {
+		return core::make_error("jolt-terrain: format version " + std::to_string(version) + ", expected " + std::to_string(kStaticTerrainFormatVersion));
+	}
+	StaticWorldShapes::Impl::Terrain terrain;
+	StaticTerrainInfo &info = terrain.info;
+	for (uint32_t *v : { &info.object, &info.width, &info.height, &info.holes, &info.holed, &info.patch_triangles }) {
+		*v = r.u32();
+	}
+	info.max_error = r.f32();
+	for (Vec3 *v : { &info.min, &info.max }) {
+		for (float &c : *v) {
+			c = r.f32();
+		}
+	}
+	for (uint8_t &b : info.content.bytes) {
+		b = r.u8();
+	}
+	for (float &c : terrain.position) {
+		c = r.f32();
+	}
+	for (float &c : terrain.rotation) {
+		c = r.f32();
+	}
+	if (!r.ok()) {
+		return r.error("jolt-terrain");
+	}
+	const auto finite_all = [](std::span<const float> p_v) {
+		return std::all_of(p_v.begin(), p_v.end(), [](float p_c) { return std::isfinite(p_c); });
+	};
+	if (!finite_vec(info.min) || !finite_vec(info.max) || !finite_vec(terrain.position) || !finite_all(terrain.rotation) || !std::isfinite(info.max_error) ||
+			info.max_error < 0.0f) {
+		return core::make_error("jolt-terrain: non-finite info or transform");
+	}
+	const double q = double(terrain.rotation[0]) * terrain.rotation[0] + double(terrain.rotation[1]) * terrain.rotation[1] +
+			double(terrain.rotation[2]) * terrain.rotation[2] + double(terrain.rotation[3]) * terrain.rotation[3];
+	if (std::fabs(q - 1.0) > 1e-4) {
+		return core::make_error("jolt-terrain: the rotation is not a unit quaternion");
+	}
+	if (info.width < 2 || info.height < 2 || info.width > core::res::kMaxGridSide || info.height > core::res::kMaxGridSide) {
+		return core::make_error("jolt-terrain: grid " + std::to_string(info.width) + " x " + std::to_string(info.height));
+	}
+	const uint64_t cells = uint64_t(info.width - 1) * (info.height - 1);
+	if (info.holes > uint64_t(info.width) * info.height || info.holed > cells || info.patch_triangles > 8ull * info.holed) {
+		return core::make_error("jolt-terrain: counts past the grid");
+	}
+	// The field.
+	const uint32_t field_bytes = r.u32();
+	std::vector<uint8_t> stream;
+	if (!r.ok() || !r.array(field_bytes, stream)) {
+		return r.error("jolt-terrain");
+	}
+	if (field_bytes != 0) {
+		uint32_t samples = 0;
+		core::Result<JPH::RefConst<JPH::Shape>> field = restore_field(stream, samples);
+		if (!field) {
+			return core::error_at("jolt-terrain field", field.error());
+		}
+		const uint32_t block = kStaticTerrainBlock;
+		uint32_t expected = std::max({ info.width, info.height, 2 * block });
+		expected = (expected + block - 1) / block * block;
+		if (samples != expected) {
+			return core::make_error("jolt-terrain: field of " + std::to_string(samples) + " samples a side for a " + std::to_string(info.width) + " x " +
+					std::to_string(info.height) + " grid");
+		}
+		terrain.field = std::move(*field);
+	}
+	// The patch.
+	const uint32_t patch_triangles = r.u32();
+	const uint32_t patch_bytes = r.u32();
+	stream.clear();
+	if (!r.ok() || !r.array(patch_bytes, stream)) {
+		return r.error("jolt-terrain");
+	}
+	if (patch_bytes != 0) {
+		if (patch_triangles == 0 || patch_triangles > info.patch_triangles) {
+			return core::make_error("jolt-terrain: patch of " + std::to_string(patch_triangles) + " of " + std::to_string(info.patch_triangles) + " triangles");
+		}
+		uint32_t found = 0;
+		core::Result<JPH::RefConst<JPH::Shape>> patch = restore_mesh(stream, 1, found);
+		if (!patch) {
+			return core::error_at("jolt-terrain patch", patch.error());
+		}
+		if (found != patch_triangles) {
+			return core::make_error("jolt-terrain: the patch holds " + std::to_string(found) + " triangles, the blob says " + std::to_string(patch_triangles));
+		}
+		terrain.patch = std::move(*patch);
+	} else if (patch_triangles != 0) {
+		return core::make_error("jolt-terrain: patch triangles without a patch");
+	}
+	if (!r.at_end()) {
+		return core::make_error("jolt-terrain: " + std::to_string(r.remaining()) + " trailing bytes");
+	}
+	return terrain;
+}
+
+std::vector<uint8_t> encode_static_terrain_blob(const StaticWorldShapes &p_world, size_t p_terrain) {
+	const StaticWorldShapes::Impl &w = p_world.impl();
+	if (p_terrain >= w.terrains.size()) {
+		return {};
+	}
+	return encode_static_terrain(w.terrains[p_terrain]);
+}
+
+core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_terrain_blob(std::span<const uint8_t> p_blob) {
+	const Clock::time_point start = Clock::now();
+	auto impl = std::make_unique<StaticWorldShapes::Impl>();
+	impl->runtime = jolt_runtime_acquire();
+	core::Result<StaticWorldShapes::Impl::Terrain> terrain = decode_static_terrain(p_blob);
+	if (!terrain) {
+		return terrain.error();
+	}
+	impl->terrains.push_back(std::move(*terrain));
+	impl->stats.cache_bytes = p_blob.size();
+	impl->stats.terrains_hit = 1;
+	impl->stats.seconds_restore = seconds_since(start);
+	return StaticWorldBuilder::finish(std::move(impl));
+}
+
 // ---- keys -------------------------------------------------------------------------------------------------------
+
+core::CacheKeyInputs static_terrain_key_inputs(const core::Sha256Digest &p_content, const StaticWorldBuildOptions &p_options) {
+	core::CacheKeyInputs in;
+	in.kind = kStaticTerrainCacheKind;
+	in.converter_version = kStaticWorldConverterVersion;
+	in.engine = std::string(core::cache_engine_id());
+	in.format_version = kStaticTerrainFormatVersion;
+	in.jolt_version = jolt_build_id();
+	// The raycast switch does not change a terrain (it is in the Collision layer), so it is not a parameter.
+	in.params = "content=" + p_content.hex() + ";bits=" + std::to_string(kStaticTerrainBits) + ";block=" + std::to_string(kStaticTerrainBlock) +
+			";active_edge_degrees=" + float_bits_hex(p_options.active_edge_degrees);
+	return in;
+}
 
 core::CacheKeyInputs static_tile_key_inputs(const core::Sha256Digest &p_content, const StaticWorldBuildOptions &p_options) {
 	core::CacheKeyInputs in;
@@ -547,18 +866,12 @@ core::CacheKeyInputs static_world_key_inputs(const core::Sha256Digest &p_source_
 	in.kind = kStaticWorldCacheKind;
 	in.converter_version = kStaticWorldConverterVersion;
 	in.engine = std::string(core::cache_engine_id());
-	in.format_version = kStaticWorldFormatVersion;
+	in.format_version = kStaticWorldIndexVersion; // TC: 2
 	in.jolt_version = jolt_build_id();
+	// TC: soup=2 (the terrain record) and the field's bits / block; S1's cover= / water= are gone.
 	in.params = "source=" + p_source_digest.hex() + ";level=" + core::to_lower_ascii(p_level) + ";mode=" + core::to_lower_ascii(p_mode) +
-			";soup=" + std::to_string(core::level::kCollisionSoupVersion) + ";terrain=1;terrain_spacing=" + float_bits_hex(p_options.terrain_spacing) + ";" +
-			build_params(p_options.build);
-	// S1 (docs/design/s1.md §5.2): a terrain cover changes the soup; an empty one leaves M1's key text as it was.
-	if (!p_options.terrain_cover.empty()) {
-		in.params += ";cover=" + terrain_cover_digest(p_options.terrain_cover).hex();
-		if (!p_options.cover_water.empty()) {
-			in.params += ";water=" + cover_water_digest(p_options.cover_water).hex();
-		}
-	}
+			";soup=" + std::to_string(core::level::kCollisionSoupVersion) + ";terrain=" + std::to_string(kStaticTerrainBits) + "/" +
+			std::to_string(kStaticTerrainBlock) + ";terrain_spacing=" + float_bits_hex(p_options.terrain_spacing) + ";" + build_params(p_options.build);
 	return in;
 }
 
@@ -566,20 +879,50 @@ core::CacheKeyInputs static_world_key_inputs(const core::Sha256Digest &p_source_
 
 namespace {
 
-// The warm path: every tile the index names, restored from its "jolt-tile" entry on the build lanes. nullopt when
-// any is missing or does not decode (a damaged one is removed); the caller then takes the cold path.
+// The warm path: every tile the index names, restored from its "jolt-tile" entry on the build lanes, and (TC) every
+// terrain from its "jolt-terrain" entry (the terrains first, so the big ones start early). nullopt when any is missing
+// or does not decode (a damaged one is removed); the caller then takes the cold path.
 std::optional<std::unique_ptr<StaticWorldShapes::Impl>> restore_world(core::Cache &r_cache, const StaticWorldIndex &p_index,
 		const StaticWorldBuildOptions &p_options, std::shared_ptr<void> p_runtime) {
 	const Clock::time_point start = Clock::now();
 	std::vector<std::optional<StaticWorldShapes::Impl::Tile>> tiles(p_index.tiles.size());
-	std::vector<uint64_t> bytes(p_index.tiles.size(), 0);
+	std::vector<std::optional<StaticWorldShapes::Impl::Terrain>> terrains(p_index.terrains.size());
+	const size_t nt = p_index.terrains.size();
+	std::vector<uint64_t> bytes(nt + p_index.tiles.size(), 0);
 	std::atomic<bool> failed{ false };
 	core::parallel_for(
-			p_index.tiles.size(),
-			[&](size_t p_at) {
+			nt + p_index.tiles.size(),
+			[&](size_t p_job) {
 				if (failed.load(std::memory_order_relaxed)) {
 					return;
 				}
+				if (p_job < nt) {
+					const StaticWorldIndex::Terrain &e = p_index.terrains[p_job];
+					const std::optional<core::CacheKey> key = core::make_cache_key(static_terrain_key_inputs(e.content, p_options));
+					if (!key) {
+						failed = true;
+						return;
+					}
+					core::GetResult got = r_cache.get(*key);
+					if (got.status != core::CacheStatus::Ok) {
+						failed = true;
+						return;
+					}
+					core::Result<StaticWorldShapes::Impl::Terrain> terrain = decode_static_terrain(got.entry.payload());
+					if (!terrain.ok() || terrain->info.content != e.content) {
+						got.entry.reset();
+						if (!terrain.ok()) {
+							r_cache.remove(*key);
+						}
+						failed = true;
+						return;
+					}
+					terrain->info.object = e.object;
+					bytes[p_job] = got.entry.payload().size();
+					terrains[p_job] = std::move(*terrain);
+					return;
+				}
+				const size_t p_at = p_job - nt;
 				const StaticWorldEntry &e = p_index.tiles[p_at];
 				const std::optional<core::CacheKey> key = core::make_cache_key(static_tile_key_inputs(e.content, p_options));
 				if (!key) {
@@ -606,7 +949,7 @@ std::optional<std::unique_ptr<StaticWorldShapes::Impl>> restore_world(core::Cach
 					failed = true;
 					return;
 				}
-				bytes[p_at] = got.entry.payload().size();
+				bytes[p_job] = got.entry.payload().size();
 				tiles[p_at] = std::move(*tile);
 				if (p_options.tiles_done != nullptr) {
 					p_options.tiles_done->fetch_add(1, std::memory_order_relaxed);
@@ -621,9 +964,15 @@ std::optional<std::unique_ptr<StaticWorldShapes::Impl>> restore_world(core::Cach
 	impl->tiles.reserve(tiles.size());
 	for (size_t i = 0; i < tiles.size(); ++i) {
 		impl->tiles.push_back(std::move(*tiles[i]));
-		impl->stats.cache_bytes += bytes[i];
+	}
+	for (size_t i = 0; i < terrains.size(); ++i) {
+		impl->terrains.push_back(std::move(*terrains[i]));
+	}
+	for (uint64_t b : bytes) {
+		impl->stats.cache_bytes += b;
 	}
 	impl->stats.tiles_hit = impl->tiles.size();
+	impl->stats.terrains_hit = impl->terrains.size();
 	impl->stats.world_hit = true;
 	impl->stats.seconds_restore = seconds_since(start);
 	return impl;
@@ -678,8 +1027,6 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 	soup_options.threads = p_options.soup_threads;
 	soup_options.terrain_spacing = p_options.terrain_spacing;
 	soup_options.progress = p_options.soup_progress;
-	soup_options.terrain_cover = p_options.terrain_cover; // S1 (empty for M1)
-	soup_options.cover_water = p_options.cover_water; // S1 water rule (empty for M1)
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(p_level, p_world, soup_options);
 	if (!soup) {
 		return soup.error();
@@ -690,14 +1037,18 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 	for (const core::level::SoupTile &tile : soup->tiles) {
 		keys.push_back({ tile.x, tile.z });
 	}
+	core::Result<std::vector<StaticTerrainView>> views = soup_terrain_views(*soup); // TC
+	if (!views) {
+		return views.error();
+	}
 	bool stored = false;
-	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles(
+	core::Result<std::unique_ptr<StaticWorldShapes::Impl>> impl = cook_static_tiles_and_terrains(
 			cache, keys,
 			[&](size_t p_tile, std::vector<StaticTriangle> &r_scratch) -> core::Result<std::span<const StaticTriangle>> {
 				BF3_TRY(soup_tile_triangles(soup->tiles[p_tile], r_scratch));
 				return std::span<const StaticTriangle>(r_scratch);
 			},
-			build, std::move(runtime), &stored);
+			*views, build, std::move(runtime), &stored);
 	if (!impl) {
 		return impl.error();
 	}
@@ -716,6 +1067,9 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 			e.tags = tile.info.tags;
 			index.tiles.push_back(e);
 		}
+		for (const StaticWorldShapes::Impl::Terrain &terrain : w.terrains) {
+			index.terrains.push_back({ terrain.info.object, terrain.info.content });
+		}
 		const std::vector<uint8_t> blob = encode_static_world_index(index);
 		if (cache->put(*world_key, blob).status == core::CacheStatus::Ok) {
 			w.stats.cache_bytes += blob.size();
@@ -726,9 +1080,9 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 	return StaticWorldBuilder::finish(std::move(*impl));
 }
 
-// ---- S1: the terrain cover's digest -------------------------------------------------------------------------
+// ---- key digests (S1's, renamed by TC) ----------------------------------------------------------------------
 
-core::Sha256Digest cover_water_digest(std::span<const core::level::WaterPlane> p_water) {
+core::Sha256Digest water_planes_digest(std::span<const core::level::WaterPlane> p_water) {
 	std::vector<uint8_t> bytes;
 	const auto put = [&](uint32_t p_v) {
 		for (int i = 0; i < 4; ++i) {
@@ -755,7 +1109,7 @@ core::Sha256Digest cover_water_digest(std::span<const core::level::WaterPlane> p
 	return out;
 }
 
-core::Sha256Digest terrain_cover_digest(std::span<const std::array<int32_t, 2>> p_tiles) {
+core::Sha256Digest tile_list_digest(std::span<const std::array<int32_t, 2>> p_tiles) {
 	std::vector<std::array<int32_t, 2>> tiles(p_tiles.begin(), p_tiles.end());
 	std::sort(tiles.begin(), tiles.end());
 	tiles.erase(std::unique(tiles.begin(), tiles.end()), tiles.end());

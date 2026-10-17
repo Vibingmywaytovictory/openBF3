@@ -108,9 +108,9 @@ struct NavTileBake {
 };
 core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavParams &p_params, const CollisionWorld *p_links, rcContext &r_context);
 
-// nav_tile_inputs on up to p_threads lanes (the digests are computed per tile on the lanes).
+// nav_tile_inputs on up to p_threads lanes (the digests, and TC's terrain cells and water rule, per tile on the lanes).
 core::Result<std::vector<NavTileInput>> nav_tile_inputs_threads(const core::level::CollisionSoup &p_soup, std::span<const NavTileKey> p_tiles,
-		const NavParams &p_params, uint32_t p_layer_mask, unsigned p_threads);
+		const NavParams &p_params, uint32_t p_layer_mask, unsigned p_threads, std::span<const core::level::WaterPlane> p_water);
 // The same over loose triangles tiled by the soup's rule (synthetic worlds).
 core::Result<std::vector<NavTileInput>> nav_tile_inputs_triangles(std::span<const StaticTriangle> p_triangles, std::span<const NavTileKey> p_tiles,
 		const NavParams &p_params, uint32_t p_layer_mask, unsigned p_threads);

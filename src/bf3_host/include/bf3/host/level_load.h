@@ -113,11 +113,8 @@ struct SharedLevel {
 	sim::MotorParams motor; // from characters/soldiers/mpsoldier + MotorTuning
 	double seconds_shapes = 0.0;
 	double seconds_tables = 0.0;
-	// S1 (docs/design/s1.md §5.2, §8): the SharedLoadOptions::terrain_cover static_world was built with (sorted,
-	// unique; empty = M1's world). load_bot_level compares it with the level's combat-area tiles and fails on a
-	// mismatch, so the nav is never baked over ground the server's motor lacks.
-	std::vector<std::array<int32_t, 2>> terrain_cover;
-	std::vector<core::level::WaterPlane> cover_water; // S1: SharedLoadOptions::cover_water, for the same check
+	// (TC removed S1's terrain_cover / cover_water record: the static world has terrain everywhere, so the server's
+	// motor, the client prediction world and the nav agree with no option; docs/design/terrain-collision.md §8.2.)
 	// M2a sv (docs/design/m2a.md §4.2, §5.6, §6.5): the weapon defs, materials, soldier, hit capsules, capsule pose
 	// table and kits (gunplay.h GunplayLevel), loaded when SharedLoadOptions::gunplay is set. Null: no gunplay, the
 	// GameServer runs M1's game unchanged.
@@ -131,13 +128,8 @@ struct SharedLoadOptions {
 	// passes the cores the scene lanes do not use (docs §12.2).
 	unsigned threads = 0;
 	sim::MotorTuning tuning;
-	// S1 (docs/design/s1.md §5.2): StaticWorldLoadOptions::terrain_cover (the level's combat-area tiles,
-	// mode_areas.h level_combat_tiles). Empty = M1's static world, bit for bit. The bots need it: the nav is baked
-	// from the same soup, and the motor must stand on the terrain the nav walks on.
-	std::vector<std::array<int32_t, 2>> terrain_cover;
-	// S1 water rule (SoupOptions::cover_water; docs §5.2): LevelCombatTiles::water. The bots need the same as the
-	// nav (load_bot_level compares).
-	std::vector<core::level::WaterPlane> cover_water;
+	// (TC removed S1's terrain_cover and cover_water: every terrain cell has collision; the water rule is the bots'
+	// nav bake's, BotLoadOptions / NavBakeOptions::water.)
 	// M2a sv (docs/design/m2a.md §4.2): load the gunplay tables (load_gunplay_level: the level's weapons, the mode's
 	// kits, the capsule pose table from the retail clips; ~1.5 s on Metro [measured, noisy], nothing cached). Off by
 	// default so M1's load and its E4 / E5 numbers stay as they were until the integration turns it on.

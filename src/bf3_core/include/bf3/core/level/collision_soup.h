@@ -30,9 +30,9 @@
 //     body     = RigidBodies[root].RigidBodyType of the object (groups: collision);
 //     flags    = see-through (material bit 27) | invisible blocker (mesh name has "invisible" or
 //              "collisionmesh").
-//   then the terrain (build_terrain below): each TerrainEntityData's heightfield (res/terrain.h)
-//     on a grid of about SoupOptions::terrain_spacing, the cells around the Havok tiles as two
-//     triangles each;
+//   then the terrain (SoupTerrain below): each TerrainEntityData's heightfield (res/terrain.h)
+//     on a grid of about SoupOptions::terrain_spacing, kept as a record (TC: every cell has
+//     collision; the tiles hold no terrain triangle, consumers make the cells on demand);
 //   Unlike IW4L's IW soup nothing is welded, re-wound, cropped or made into brushes, and foliage
 //   is kept (its surface tags it): this is what a Jolt static world and a debug view start from.
 //   Every coordinate is quantised to whole millimetres for the hashes and the tile key; a triangle
@@ -49,8 +49,9 @@
 // Bounds: the soup's EBX reads (placements, material grid, rigid bodies, part infos, names) charge
 // the World's WorkBudget like the other helpers; the triangle output is bounded by the Havok
 // decoders' own budgets (shape tree size and hull work per packfile byte, res/havok.h), and the
-// whole soup by kMaxSoupTriangles. Hostile data fails with an error; a res that does not load
-// marks its placement Missing and the soup goes on.
+// Havok triangles by kMaxSoupTriangles, the terrain records by kMaxSoupTerrains (the grid by
+// res::kMaxGridSide). Hostile data fails with an error; a res that does not load marks its
+// placement Missing and the soup goes on.
 
 #include "bf3/core/install.h"
 #include "bf3/core/level/census.h"
@@ -68,6 +69,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace bf3::core::res {
+struct HeightGrid; // res/terrain.h (TC: SoupTerrain::grid)
+}
 
 namespace bf3::core::level {
 
@@ -184,11 +189,15 @@ struct SoupPlacement {
 // One TerrainEntityData's heightfield in the soup. The grid is the streaming tree's height_grid at
 // the first quadtree depth whose sample spacing reaches SoupOptions::terrain_spacing (+0.1%), short
 // of the tree's deepest level and of res::kMaxGridSide (IW4L collision/terrain.rs; without its
-// near-area cap, block merging and paved decals). Kept cells: those whose centre (in f64, grid
-// coordinates) falls in a 64 m tile that holds a Havok triangle or is next to one (8-neighbours),
-// none of whose four samples is a hole. A cell with corners a = (x, z), b = (x + 1, z),
-// c = (x, z + 1), d = (x + 1, z + 1) gives (a, d, b) and (a, c, d) at the object's frame, each wound
-// to face +Y; rows along +Z, cells along +X. Material 0, surface dirt, body collision, kSoupTerrain.
+// near-area cap, block merging and paved decals). TC (docs/design/terrain-collision.md §5.1): every
+// cell has collision, independent of the Havok placements (before TC only the cells of the 64 m
+// tiles that held a Havok triangle or touched one, IW4L's near-object rule). Cells: those whose
+// centre (in f64, grid coordinates) has a sane 64 m tile; kept: none of their four samples is a
+// hole. A cell with corners a = (x, z), b = (x + 1, z), c = (x, z + 1), d = (x + 1, z + 1) gives
+// (a, d, b) and (a, c, d) at the object's frame, each wound to face +Y; rows along +Z, cells along
+// +X. Material 0, surface dirt, body collision, kSoupTerrain. The soup keeps the grid and the frame
+// (the record) and no terrain triangle; soup_terrain_cell / append_soup_terrain_tile /
+// hash_soup_terrain below make the triangles.
 struct SoupTerrain {
 	enum class State : uint8_t {
 		Built,
@@ -202,18 +211,25 @@ struct SoupTerrain {
 	uint8_t depth = 0; // height_grid depth
 	size_t side = 0; // grid samples a side
 	size_t holes = 0; // hole samples in the whole grid
-	size_t cells = 0; // cells in the kept tiles
+	size_t cells = 0; // cells of the whole grid (TC; before TC: of the kept tiles)
 	size_t open = 0; // of those, left open (a hole corner)
+	// TC: 0 in the soup. The triangle count, the drops and the hash of the whole grid come from hash_soup_terrain
+	// (SoupTerrainHash), which the listing and the checks call; the soup does not hash 2.6 GB of triangle bytes.
 	size_t triangles = 0;
 	size_t degenerate = 0;
 	size_t nonfinite = 0;
-	uint64_t hash = 0; // FNV-1a over its triangles in emit order
+	uint64_t hash = 0;
+	// TC (docs/design/terrain-collision.md §5.1): the terrain record, both set for a Built terrain (null / identity
+	// otherwise); every consumer (static world, nav input, overlay, listing) makes the cells from them
+	// (soup_terrain_cell, append_soup_terrain_tile, hash_soup_terrain). Shared, so a soup copy shares the grid.
+	std::shared_ptr<const res::HeightGrid> grid;
+	res::Transform frame{}; // the object's frame (LevelTransform with its scale), as the cells use it
 };
 
 struct SoupTile {
 	int32_t x = 0; // floor(centroid x / 64 m)
 	int32_t z = 0;
-	std::vector<SoupTriangle> triangles; // placement order, then walk order; terrain last
+	std::vector<SoupTriangle> triangles; // placement order, then walk order (Havok only, TC)
 	uint64_t sum = 0; // wrapping sum of the triangle hashes
 	res::Vec3 min{}; // bounds of the triangles' corners
 	res::Vec3 max{};
@@ -234,27 +250,72 @@ struct SoupOptions {
 	bool terrain = true; // add the terrain heightfields
 	float terrain_spacing = 2.0f; // target metres between terrain samples
 	SoupProgress *progress = nullptr;
-	// S1 (docs/design/s1.md §5.2): extra 64 m tiles (soup tile keys, sorted, unique) whose terrain cells are kept as
-	// well, beside the rule above (tiles with Havok triangles and their 8 neighbours). Empty = the default rule only,
-	// so every soup without it is unchanged (the level-oracle parity, kCollisionSoupVersion). S1 passes the level's
-	// combat-area tiles: on Caspian CQL 35 of its 273 combat-area tiles, on Kharg CQL 1,119 of 1,494, hold no soup
-	// triangle at all under the default rule [verified 2026-10-15], so a walker there would fall through the world.
-	std::vector<std::array<int32_t, 2>> terrain_cover;
-	// S1 water rule (docs/design/s1.md §5.2 "Deep water"): a terrain_cover tile whose centre lies inside one of these
-	// planes keeps its terrain cells only when at least one of its terrain samples lies above the highest such plane
-	// minus kCoverWaterDepth (S1 has no swimming; Kharg's sea bed would be walkable). The default rule (tiles with
-	// Havok triangles and their neighbours) is untouched. Empty = no rule.
-	std::vector<WaterPlane> cover_water;
+	// (TC removed S1's terrain_cover and cover_water: every terrain cell has collision, and the water rule is the nav
+	// bake's, bf3_sim nav.h nav_terrain_wet; docs/design/terrain-collision.md §7.)
 };
 
 // The soup algorithm's version: bump it whenever the same install gives different soup triangles, tags or
 // tiles (terrain handling, body / layer split, destroyed-part rule, quantisation). Derived caches built from the
 // soup without hashing its triangles (bf3_sim's "jolt-world" entries) put it in their keys (docs/design/m1.md
 // §5.5).
-inline constexpr uint32_t kCollisionSoupVersion = 1;
+// 2 (TC): the terrain is a record over the whole grid, the tiles hold Havok triangles only.
+inline constexpr uint32_t kCollisionSoupVersion = 2;
 
-// Retail Metro TDM holds 1.11 M triangles (0.17 M of them terrain); a soup past this fails (each triangle costs 48 bytes).
+// Havok triangles of a soup (TC: the terrain is not counted; retail's largest is XP3_Alborz SquadRush0 / RushLarge0
+// with 2.66 M); a soup past this fails (each triangle costs 48 bytes).
 inline constexpr size_t kMaxSoupTriangles = size_t(1) << 25;
+
+// ---- TC: terrain collision everywhere (docs/design/terrain-collision.md; soup_terrain.cpp) -----------------------
+// The rule: every cell of every Built terrain whose four samples are not holes gives (a, d, b) and (a, c, d) as above,
+// independent of the Havok tiles. CollisionSoup::triangles / tiles / sum count the Havok triangles only, and the
+// terrain's triangles, hash and per-tile sums come from hash_soup_terrain.
+// Terrain objects a soup accepts (retail: at most 1 per level x mode, 199 of 230 runs have one [verified
+// 2026-10-16]); each record holds up to kMaxGridSide^2 floats + hole bytes (84 MB), so more fail the soup.
+inline constexpr size_t kMaxSoupTerrains = 8;
+
+// One cell (p_x, p_z) of a terrain record: its two triangles in emit order, or none when a corner is a hole (open).
+// Triangles are quantised like every soup triangle: a degenerate or non-finite one is counted, not returned.
+// p_placement is the triangles' SoupTriangle::placement (placements.size() + terrain index). A terrain without a
+// record (null grid) or a cell outside 0..width-2 x 0..height-2 gives an empty cell with open = true and never
+// indexes the grid (callers treat it as no ground).
+struct SoupTerrainCell {
+	std::array<SoupTriangle, 2> triangles{};
+	uint8_t count = 0; // triangles kept (0..2)
+	uint8_t degenerate = 0;
+	uint8_t nonfinite = 0;
+	bool open = false; // a corner sample is a hole
+};
+SoupTerrainCell soup_terrain_cell(const SoupTerrain &p_terrain, uint32_t p_placement, size_t p_x, size_t p_z);
+
+// The terrain triangles whose soup tile (soup_tile_of: the centroid's 64 m tile) is p_tile, appended in emit order
+// (rows along +Z, cells along +X). Visits only the cells whose frame-mapped bounds can reach the tile (one cell of
+// margin); every visited cell is charged to r_budget. Returns the number appended; an error on a missing record or
+// an exhausted budget.
+Result<size_t> append_soup_terrain_tile(const SoupTerrain &p_terrain, uint32_t p_placement, const std::array<int32_t, 2> &p_tile,
+		std::vector<SoupTriangle> &r_out, WorkBudget &r_budget);
+
+// What the oracle's T and K lines need of one terrain: the whole grid's cells in emit order. hash is FNV-1a over
+// every kept triangle's bytes in emit order (the same definition as before TC, now over all cells); tiles holds per
+// soup tile (sorted by x, z) the triangle count and the wrapping sum of the triangle hashes. Rows run on up to
+// p_threads lanes for the tile sums; the running hash is one serial pass. The pass visits each cell exactly once
+// (twice counting the serial hash), so it charges 2 x (width - 1) x (height - 1) units to r_budget before it starts
+// (a 4097^2 terrain needs 2^25; the caller sizes the budget) and fails without a partial result when that is refused.
+// An error as well on a missing record.
+struct SoupTerrainTileSum {
+	std::array<int32_t, 2> tile{};
+	size_t triangles = 0;
+	uint64_t sum = 0;
+};
+struct SoupTerrainHash {
+	size_t cells = 0;
+	size_t open = 0;
+	size_t triangles = 0;
+	size_t degenerate = 0;
+	size_t nonfinite = 0;
+	uint64_t hash = 0xcbf29ce484222325ull; // kFnvOffset
+	std::vector<SoupTerrainTileSum> tiles;
+};
+Result<SoupTerrainHash> hash_soup_terrain(const SoupTerrain &p_terrain, uint32_t p_placement, WorkBudget &r_budget, unsigned p_threads = 0);
 
 // One install entry the soup read (M1 T1, docs/design/m1.md §5.5 coverage check): the EBX partitions of the
 // level root, of every collision placement's entity (and its reference) and of every terrain object and asset;
@@ -270,21 +331,20 @@ struct SoupSource {
 struct CollisionSoup {
 	std::vector<SoupPlacement> placements; // collision_placements order (groups, then objects)
 	std::vector<SoupTerrain> terrains; // TerrainEntityData objects, object order
-	std::vector<SoupTile> tiles; // sorted by (x, z)
-	size_t triangles = 0; // terrain included
-	size_t terrain_triangles = 0;
-	size_t cover_tiles_wet = 0; // S1: terrain_cover tiles the water rule dropped (summed over terrain objects)
+	std::vector<SoupTile> tiles; // sorted by (x, z); Havok triangles only (TC)
+	size_t triangles = 0; // Havok triangles (TC: the terrain is not included; before TC it was)
+	size_t terrain_triangles = 0; // TC: 2 x the kept cells of every terrain record (the listing's count on retail)
 	size_t destroyed = 0;
-	size_t degenerate = 0;
+	size_t degenerate = 0; // Havok (TC; hash_soup_terrain counts the terrain's)
 	size_t nonfinite = 0;
 	size_t built = 0;
 	size_t hidden = 0;
 	size_t missing = 0;
 	size_t no_res = 0;
-	uint64_t sum = 0;
-	std::array<size_t, kSurfaceCount> surfaces{};
+	uint64_t sum = 0; // over the Havok triangles (TC)
+	std::array<size_t, kSurfaceCount> surfaces{}; // Havok triangles (TC)
 	std::array<size_t, kCollisionBodyCount> bodies{};
-	res::Vec3 min{}; // bounds of every kept corner (zero when empty)
+	res::Vec3 min{}; // bounds of every kept Havok corner (zero when empty; TC: the terrain is not included)
 	res::Vec3 max{};
 	size_t res_decoded = 0; // distinct object res loaded + group res whose shapes were decoded
 	size_t material_pairs = 0;
@@ -292,7 +352,7 @@ struct CollisionSoup {
 	double seconds_placements = 0.0; // placements, materials, owners (calling thread)
 	double seconds_decode = 0.0; // load_havok + group shapes (all cores)
 	double seconds_triangles = 0.0; // leaves, triangles, classes, hashes (all cores)
-	double seconds_terrain = 0.0; // height grids and terrain triangles
+	double seconds_terrain = 0.0; // totals, height grids and the terrain records' cell counts
 	double seconds_tiles = 0.0;
 	std::vector<SoupSource> sources; // M1 T1: what the build read, sorted and unique (see SoupSource)
 };

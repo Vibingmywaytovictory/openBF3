@@ -1,6 +1,9 @@
 // GDExtension entry of openBF3 (entry_symbol "openbf3_library_init" in openbf3.gdextension).
 
 #include "bf3_localisation.h"
+// M2a audio
+#include "audio_demo.h"
+#include "audio_stream.h"
 #include "collision_overlay.h"
 #include "dedicated_main_loop.h"
 #include "game_session.h"
@@ -66,6 +69,10 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	// M2a hud (docs/design/m2a-hud.md): Bf3Hud, its widgets and Bf3HudCheck (registered in hud_controls.cpp)
 	void openbf3_register_m2a_hud();
 	openbf3_register_m2a_hud();
+	// M2a audio
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

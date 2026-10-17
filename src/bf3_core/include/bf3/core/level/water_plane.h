@@ -1,6 +1,6 @@
 #pragma once
 // A water surface of a level (spike S1, docs/design/s1.md §5.2 "Deep water"; read by mode_areas.h
-// read_water_planes, used by the soup's cover water rule, SoupOptions::cover_water). Godot-free, no EBX: a small
+// read_water_planes, used by the nav bake's water rule, NavBakeOptions::water, TC). Godot-free, no EBX: a small
 // header the static world and nav options can include.
 
 #include <array>

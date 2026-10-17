@@ -24,8 +24,10 @@
 //! Terrain (`terrain`): each `TerrainEntityData`'s streaming tree heightfield through
 //! `TerrainStreamingTree::height_grid` at the first depth whose spacing reaches 2 m (IW4L
 //! collision/terrain.rs's depth rule, without its near-area cap, block merging and paved decals);
-//! every cell whose centre falls in a 64 m tile that holds a Havok triangle or touches one, and has
-//! no hole corner, as two triangles faced +Y: material 0, surface dirt, body 0, flags 4.
+//! every cell (whose centre has a sane 64 m tile) with no hole corner, as two triangles faced +Y:
+//! material 0, surface dirt, body 0, flags 4 (openBF3 TC, docs/design/terrain-collision.md §6:
+//! terrain collision everywhere; before TC only the cells of the tiles that held a Havok triangle
+//! or touched one, IW4L's near-object rule).
 //! Unlike IW4L's IW soup nothing is welded, re-wound, cropped or turned into brushes, and foliage
 //! is kept (tagged by its surface): this is the Frostbite-space soup a Jolt static world is built
 //! from. Quantisation: every coordinate to whole millimetres (`(f64(c) * 1000).round()`); a
@@ -45,7 +47,7 @@
 //!   surface <id> <triangles>   (non-zero only)
 //!   body <id> <triangles>
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -379,11 +381,10 @@ fn face_up(t: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
     if u[2] * v[0] - u[0] * v[2] < 0.0 { [a, c, b] } else { t }
 }
 
-/// One terrain object: every grid cell whose centre lies in a tile of `near` and none of whose four
-/// samples is a hole, as two triangles (a, d, b) and (a, c, d) of its corners a = (x, z),
+/// One terrain object: every grid cell none of whose four samples is a hole (TC: the whole grid), as two triangles (a, d, b) and (a, c, d) of its corners a = (x, z),
 /// b = (x + 1, z), c = (x, z + 1), d = (x + 1, z + 1), faced up, at the object's frame; rows of
 /// cells along +Z, cells along +X. Material 0, surface dirt, body collision, flags 4.
-fn terrain(source: &Mount, db: &EbxDb, object: &level_bf3::PlacedObject<'_>, label: &str, near: &BTreeSet<(i32, i32)>) -> (String, Option<Built>) {
+fn terrain(source: &Mount, db: &EbxDb, object: &level_bf3::PlacedObject<'_>, label: &str) -> (String, Option<Built>) {
     let Some(asset) = db.follow(object.entity, "TerrainAsset").and_then(|asset| asset.get("Name")?.as_str()) else {
         return (format!("T terrain {label} res - nores"), None);
     };
@@ -404,16 +405,13 @@ fn terrain(source: &Mount, db: &EbxDb, object: &level_bf3::PlacedObject<'_>, lab
     let [ox, oz] = grid.origin_xz;
     let [sx, sz] = grid.sample_spacing;
     for z in 0..grid.height.saturating_sub(1) {
-        let Some(tz) = centre_tile(oz, sz, z) else {
+        let Some(_) = centre_tile(oz, sz, z) else {
             continue;
         };
         for x in 0..grid.width.saturating_sub(1) {
-            let Some(tx) = centre_tile(ox, sx, x) else {
+            let Some(_) = centre_tile(ox, sx, x) else {
                 continue;
             };
-            if !near.contains(&(tx, tz)) {
-                continue;
-            }
             cells += 1;
             let hole = |i: usize, j: usize| grid.holes[(x + i) + (z + j) * grid.width];
             if hole(0, 0) || hole(1, 0) || hole(0, 1) || hole(1, 1) {
@@ -568,17 +566,13 @@ pub fn run(install: &Arc<Bf3Install>, level: &str, mode: &str) -> String {
         }
         lines.push(line);
     }
-    // Terrain: the heightfield cells around the Havok tiles.
-    let near: BTreeSet<(i32, i32)> = tiles
-        .keys()
-        .flat_map(|&(tx, tz)| (-1..=1).flat_map(move |dz| (-1..=1).map(move |dx| (tx + dx, tz + dz))))
-        .collect();
+    // Terrain: every heightfield cell (TC).
     let mut terrain_tris = 0usize;
     for object in &world.objects {
         if !matches!(object.kind, level_bf3::ObjectKind::Terrain) {
             continue;
         }
-        let (line, built) = terrain(&source, db, object, &id(db, object.entity), &near);
+        let (line, built) = terrain(&source, db, object, &id(db, object.entity));
         if let Some(built) = &built {
             terrain_tris += built.tris;
             absorb(built, &mut totals, &mut tiles);
