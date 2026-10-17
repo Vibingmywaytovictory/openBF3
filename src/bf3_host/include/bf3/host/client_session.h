@@ -235,10 +235,7 @@ static_assert(std::is_trivially_copyable_v<ClientStats>);
 // the render time at publish, then up to two newer ones, so the main thread finds a bracketing pair for any frame
 // until the next publish.
 inline constexpr size_t kOtherSamples = 3;
-struct OtherSample {
-	sim::Tick server_tick = 0;
-	net::OtherSoldier soldier;
-};
+using OtherSample = net::TimedOther; // R1 (docs/design/m2a.md §6.1; cl): the record type lc moved to bf3_net
 struct OtherTrack {
 	uint8_t slot = 0;
 	uint8_t count = 0; // samples used, oldest first

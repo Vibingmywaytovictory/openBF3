@@ -70,93 +70,15 @@ bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, fl
 			std::fabs(p_a.damage - p_b.damage) <= 1e-3f;
 }
 
-float lerp(float p_a, float p_b, float p_t) {
-	return p_a + (p_b - p_a) * p_t;
-}
-
-// Cubic Hermite between p0 (tangent m0) and p1 (tangent m1), u in [0, 1].
-float hermite(float p_p0, float p_m0, float p_p1, float p_m1, float p_u) {
-	const float u2 = p_u * p_u, u3 = u2 * p_u;
-	return (2 * u3 - 3 * u2 + 1) * p_p0 + (u3 - 2 * u2 + p_u) * p_m0 + (-2 * u3 + 3 * u2) * p_p1 + (u3 - u2) * p_m1;
-}
-
-float eye_of(const PresentationFrame &p_frame, const net::OtherSoldier &p_o) {
-	const size_t from = std::min<size_t>(uint8_t(p_o.pose), sim::kPoseCount - 1);
-	const size_t to = std::min<size_t>(uint8_t(p_o.target_pose), sim::kPoseCount - 1);
-	return lerp(p_frame.pose_eye_heights[from], p_frame.pose_eye_heights[to], float(p_o.transition) / 255.0f);
-}
-
-PresentedSoldier present_sample(const PresentationFrame &p_frame, const net::OtherSoldier &p_o) {
-	PresentedSoldier s;
-	s.slot = p_o.slot;
-	s.generation = p_o.generation;
-	s.position = p_o.position;
-	s.velocity = p_o.velocity;
-	s.yaw = sim::yaw_radians(p_o.yaw);
-	s.pitch = sim::pitch_radians(p_o.pitch);
-	s.pose = p_o.pose;
-	s.eye_height = eye_of(p_frame, p_o);
-	s.mode = p_o.mode;
-	s.flags = p_o.flags;
-	return s;
-}
-
 } // namespace
 
 size_t present_others(const PresentationFrame &p_frame, uint64_t p_now_ns, std::span<PresentedSoldier> r_out, uint64_t *r_extrapolated) {
-	const double dt_ns = p_now_ns >= p_frame.publish_ns ? double(p_now_ns - p_frame.publish_ns) : -double(p_frame.publish_ns - p_now_ns);
-	const double render = p_frame.render_ticks_at_publish + dt_ns * p_frame.ticks_per_ns;
-	const double max_extra_ticks = std::max(0.0, double(p_frame.extrapolate_max_ms)) / kMsPerTick;
-	size_t n = 0;
-	const uint32_t count = std::min<uint32_t>(p_frame.other_count, uint32_t(p_frame.others.size()));
-	for (uint32_t i = 0; i < count && n < r_out.size(); ++i) {
-		const OtherTrack &t = p_frame.others[i];
-		const uint32_t used = std::min<uint32_t>(t.count, uint32_t(kOtherSamples));
-		if (used == 0) {
-			continue;
-		}
-		// The bracketing pair: the newest sample at or before the render time and the next one.
-		uint32_t a = 0;
-		while (a + 1 < used && double(t.samples[a + 1].server_tick) <= render) {
-			++a;
-		}
-		const OtherSample &sa = t.samples[a];
-		PresentedSoldier out;
-		if (render <= double(sa.server_tick)) {
-			out = present_sample(p_frame, sa.soldier); // before the oldest sample: hold it
-		} else if (a + 1 < used) {
-			const OtherSample &sb = t.samples[a + 1];
-			const double span = double(sb.server_tick - sa.server_tick);
-			const float u = float(std::clamp((render - double(sa.server_tick)) / span, 0.0, 1.0));
-			const float dt = float(span) * sim::kTickSeconds;
-			out = present_sample(p_frame, sa.soldier);
-			for (size_t k = 0; k < 3; ++k) {
-				out.position[k] = hermite(sa.soldier.position[k], sa.soldier.velocity[k] * dt, sb.soldier.position[k], sb.soldier.velocity[k] * dt, u);
-				out.velocity[k] = lerp(sa.soldier.velocity[k], sb.soldier.velocity[k], u);
-			}
-			const int16_t dyaw = int16_t(uint16_t(sb.soldier.yaw - sa.soldier.yaw)); // shortest arc
-			out.yaw = sim::yaw_radians(uint16_t(sa.soldier.yaw + int32_t(std::lround(float(dyaw) * u))));
-			out.pitch = lerp(sim::pitch_radians(sa.soldier.pitch), sim::pitch_radians(sb.soldier.pitch), u);
-			const net::OtherSoldier &discrete = u >= 1.0f ? sb.soldier : sa.soldier; // pose and mode switch at the newer sample
-			out.pose = discrete.pose;
-			out.mode = discrete.mode;
-			out.flags = discrete.flags;
-			out.generation = discrete.generation;
-			out.eye_height = lerp(eye_of(p_frame, sa.soldier), eye_of(p_frame, sb.soldier), u);
-		} else {
-			// Past the newest sample: extrapolate along its velocity for at most extrapolate_max_ms, then hold.
-			const double ahead = std::min(render - double(sa.server_tick), max_extra_ticks);
-			const float secs = float(ahead) * sim::kTickSeconds;
-			out = present_sample(p_frame, sa.soldier);
-			for (size_t k = 0; k < 3; ++k) {
-				out.position[k] = sa.soldier.position[k] + sa.soldier.velocity[k] * secs;
-			}
-			out.extrapolated = true;
-			if (r_extrapolated != nullptr) {
-				++*r_extrapolated;
-			}
-		}
-		r_out[n++] = out;
+	// R1 (docs/design/m2a.md §6.1, §15; cl): the Hermite body is lc's net::sample_other now, called per soldier by the
+	// counting overload (the M2a cl block at the end of this file), so the client draws what the server rewinds to.
+	PresentOthersCounts counts;
+	const size_t n = present_others(p_frame, p_now_ns, r_out, counts);
+	if (r_extrapolated != nullptr) {
+		*r_extrapolated += counts.extrapolated;
 	}
 	return n;
 }
