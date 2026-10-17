@@ -55,19 +55,24 @@ void set_error(ClientStats &r_stats, const std::string &p_text) {
 }
 
 // Equal within the reconcile epsilons (docs §9.2): positions and velocities within epsilon, every discrete field
-// equal, the floats that are not positions within 1e-3. R2 (docs/design/m2a.md §8.2, §15; cl): the health is left
-// out, since a server hit is not a motor mismatch; cl_after_match moves the ring's health instead (health_rebases).
+// equal, the floats that are not positions within 1e-3. R2 (docs/design/m2a.md §8.2, §15; cl): what a server hit
+// writes (sim::weapons::apply_damage: the health, the tick's damage and the kDamaged event) is left out, since a hit
+// is not a motor mismatch; cl_after_match moves the ring's health instead (health_rebases). The motor's own fall
+// damage stays covered: it follows from kLanded, impact_speed and protect_ticks, which are compared. A death changes
+// the mode and the flags and reconciles as in M1.
 bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, float p_pos_eps, float p_vel_eps) {
+	const uint16_t events_a = uint16_t(p_a.events & ~sim::soldier_events::kDamaged);
+	const uint16_t events_b = uint16_t(p_b.events & ~sim::soldier_events::kDamaged);
 	if (p_a.tick != p_b.tick || p_a.life != p_b.life || p_a.yaw != p_b.yaw || p_a.pitch != p_b.pitch || p_a.pose != p_b.pose ||
 			p_a.target_pose != p_b.target_pose || p_a.transition_ticks != p_b.transition_ticks || p_a.transition_total != p_b.transition_total ||
-			p_a.mode != p_b.mode || p_a.flags != p_b.flags || p_a.events != p_b.events || p_a.jump_penalty_ticks != p_b.jump_penalty_ticks ||
+			p_a.mode != p_b.mode || p_a.flags != p_b.flags || events_a != events_b || p_a.jump_penalty_ticks != p_b.jump_penalty_ticks ||
 			p_a.air_ticks != p_b.air_ticks || p_a.protect_ticks != p_b.protect_ticks) {
 		return false;
 	}
 	if (!(length3(sub3(p_a.position, p_b.position)) <= p_pos_eps) || !(length3(sub3(p_a.velocity, p_b.velocity)) <= p_vel_eps)) {
 		return false;
 	}
-	return std::fabs(p_a.impact_speed - p_b.impact_speed) <= 1e-3f && std::fabs(p_a.damage - p_b.damage) <= 1e-3f;
+	return std::fabs(p_a.impact_speed - p_b.impact_speed) <= 1e-3f;
 }
 
 } // namespace
@@ -1857,6 +1862,10 @@ void ClientSession::Impl::cl_after_match(const sim::SoldierState &p_s) {
 		}
 		sim::PredictionEntry moved = *e;
 		moved.state.health = t == p_s.tick ? p_s.health : moved.state.health + delta;
+		if (t == p_s.tick) { // the hit's own tick: its damage and kDamaged as the server wrote them
+			moved.state.damage = p_s.damage;
+			moved.state.events = uint16_t((moved.state.events & ~sim::soldier_events::kDamaged) | (p_s.events & sim::soldier_events::kDamaged));
+		}
 		ring->put(moved);
 	}
 	++stats.health_rebases;
