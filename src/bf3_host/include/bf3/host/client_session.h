@@ -139,9 +139,12 @@ struct ClientSessionConfig {
 	// default is the shipped file's project-relative path (sim::weapons::kMechanicsTuningPath); E6's mismatch run
 	// points it at a second file.
 	std::string mechanics_cfg = "config/weapon_mechanics.cfg";
-	// M2a cl (as built: docs/design/m2a-cl.md). What the client builds its weapon table from (null: no gunplay; a
-	// server whose MatchInfo names a weapon_hash then refuses this client: "weapon table mismatch").
+	// M2a cl (as built: docs/design/m2a-cl.md). What the client builds its weapon table from. Null: the level's own
+	// (client_gunplay_inputs of SharedLevel::gunplay, built on MatchInfo) when gunplay_from_level is set and the level
+	// has gunplay tables; otherwise no gunplay, and a server whose MatchInfo names a weapon_hash refuses this client
+	// ("weapon table mismatch").
 	std::shared_ptr<const struct ClientGunplayInputs> gunplay;
+	bool gunplay_from_level = true;
 	// The own world's time rule clamp (ClientProjectiles); -1 = MatchInfo::max_rewind_ticks. E12's control run keeps
 	// the client at 21 while its server uses 0.
 	int32_t own_test_max_rewind_ticks = -1;
@@ -362,11 +365,13 @@ private:
 
 // ---- M2a cl (docs/design/m2a.md §6.1-§6.3, §8; as built: docs/design/m2a-cl.md) -----------------------------------
 
-// What the client builds its weapon table from on MatchInfo. Until sv's SharedLevel carries the level's weapon defs,
-// kits and capsule table, the caller supplies them (the headless tests: synthetic tables; sv's merge fills them from
-// the SharedLevel). The client's table is a copy of `table` with the mechanics from mechanics_cfg (load_mechanics;
-// null keeps the table's) and the match options of MatchInfo::weapon_flags, rehashed; it predicts only when
-// weapon_table_hash(that) ^ capsules->hash equals MatchInfo::weapon_hash and kits.hash equals MatchInfo::kit_hash.
+// What the client builds its weapon table from on MatchInfo: by default the SharedLevel's gunplay tables
+// (client_gunplay_inputs below, the same defs, materials, capsule pose table and kits the server's Gunplay uses), or
+// what the caller supplies (ClientSessionConfig::gunplay). The client's table is a copy of `table` with the mechanics
+// from mechanics_cfg (load_mechanics; null keeps the table's) and the match options of MatchInfo::weapon_flags,
+// rehashed; it predicts only when weapon_table_hash(that) ^ capsules->hash equals MatchInfo::weapon_hash and kits.hash
+// equals MatchInfo::kit_hash. A table's defs do not depend on the mechanics (make_weapon_table), so the copy equals the
+// server's make_match_table of the same cfg and flags bit for bit.
 struct ClientGunplayInputs {
 	std::shared_ptr<const sim::weapons::WeaponTable> table;
 	std::shared_ptr<const core::gameplay::CapsulePoseTable> capsules;
@@ -382,6 +387,10 @@ core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> build_client_weap
 		const std::string &p_mechanics_cfg, uint8_t p_weapon_flags);
 // MatchInfo::weapon_hash of a table and a capsule table: weapon_table_hash(table) ^ capsules.hash.
 uint64_t client_weapon_hash(const sim::weapons::WeaponTable &p_table, const core::gameplay::CapsulePoseTable &p_capsules);
+// The inputs from a level's gunplay tables (SharedLevel::gunplay, gunplay.h): make_match_table with wp's default
+// mechanics (replaced per match by load_mechanics = load_mechanics_cfg), the capsule pose table, the kits and the
+// level's shot frame (shot_frame of the static world). Fails without gunplay tables.
+core::Result<std::shared_ptr<const ClientGunplayInputs>> client_gunplay_inputs(const SharedLevel &p_level);
 
 struct PredictedShot {
 	sim::Tick tick = 0;

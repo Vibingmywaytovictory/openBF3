@@ -1159,6 +1159,7 @@ size_t ClientSession::stop_all() {
 // weapons predicted beside the motor (sim::WeaponLane; catch_up replays them) and reconciled against the Snapshot's
 // wire view, R2's health rebase, the view sample and the received state of every command, ReceivedRecords and the
 // SnapshotOthers merge with its ack bits, ShotEvents / CombatEvents into PresentationEvents and the cosmetic worlds.
+#include "bf3/host/gunplay.h"
 #include "bf3/net/other_sample.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
@@ -1291,6 +1292,24 @@ core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> build_client_weap
 
 uint64_t client_weapon_hash(const sim::weapons::WeaponTable &p_table, const core::gameplay::CapsulePoseTable &p_capsules) {
 	return sim::weapons::weapon_table_hash(p_table) ^ p_capsules.hash;
+}
+
+core::Result<std::shared_ptr<const ClientGunplayInputs>> client_gunplay_inputs(const SharedLevel &p_level) {
+	if (p_level.gunplay == nullptr || p_level.static_world == nullptr) {
+		return core::make_error("client gunplay inputs: the level has no gunplay tables");
+	}
+	const GunplayLevel &g = *p_level.gunplay;
+	core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> table = make_match_table(g, sim::weapons::Mechanics{}, false, false);
+	if (!table) {
+		return core::error_at("client gunplay inputs", table.error());
+	}
+	auto in = std::make_shared<ClientGunplayInputs>();
+	in->table = *table;
+	in->capsules = std::make_shared<const core::gameplay::CapsulePoseTable>(g.capsule_table);
+	in->kits = g.kits;
+	in->shot_frame = shot_frame(*p_level.static_world);
+	in->load_mechanics = load_mechanics_cfg;
+	return std::shared_ptr<const ClientGunplayInputs>(std::move(in));
 }
 
 // ---- ReceivedRecords ----------------------------------------------------------------------------------------------
@@ -1482,6 +1501,16 @@ void ClientSession::Impl::cl_refuse(const char *p_reason) {
 bool ClientSession::Impl::cl_match_info(const net::MatchInfo &p_match, uint64_t p_now) {
 	stats.slot = p_match.slot;
 	if (p_match.weapon_hash != 0) {
+		if (config.gunplay == nullptr && config.gunplay_from_level && level->gunplay != nullptr) {
+			// The level's own tables (sv's GunplayLevel): what the server's Gunplay builds its table from.
+			core::Result<std::shared_ptr<const ClientGunplayInputs>> own = client_gunplay_inputs(*level);
+			if (!own) {
+				++stats.weapon_hash_mismatch;
+				cl_refuse(("weapon table mismatch (" + own.error().message + ")").c_str());
+				return false;
+			}
+			config.gunplay = *own;
+		}
 		const ClientGunplayInputs *gp = config.gunplay.get();
 		if (gp == nullptr || gp->table == nullptr || gp->capsules == nullptr || !core::gameplay::capsule_pose_table_valid(*gp->capsules)) {
 			++stats.weapon_hash_mismatch;
