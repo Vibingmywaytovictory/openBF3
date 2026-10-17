@@ -18,6 +18,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/vehicle_spawns.h"
+#include "bf3/core/thread_pool.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/vehicle_course.h"
@@ -39,6 +40,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -261,6 +263,10 @@ void print_handling(const char *p_what, const VehicleHandling &p_h) {
 
 // The pod ablations (s2.md §7.3) restore the OwnHistory client's diverged history, never a copy of the server's:
 // on an undiverged base they would equal Full by construction and measure nothing. Full restores the server.
+// Lanes for the course loops: each course is its own VehicleWorld (Jolt, CROSS_PLATFORM_DETERMINISTIC), so the
+// reports do not depend on the lane a course runs on ("two worlds stepped on two threads at once" proves it).
+constexpr unsigned kCourseLanes = 4;
+
 void check_pod_bases(const VehicleCourseReport &p_report) {
 	for (const VehicleCorrectionReport &x : p_report.corrections) {
 		if (x.mode == VehicleRestoreMode::ExactPod || x.mode == VehicleRestoreMode::PodOwnLambdas) {
@@ -809,8 +815,14 @@ TEST_SUITE("sim-vehicle-unit") {
 					(1u << uint32_t(VehicleRestoreMode::Full));
 		}
 		const auto start = std::chrono::steady_clock::now();
-		for (const VehicleCourse &c : synthetic_vehicle_courses()) {
-			core::Result<VehicleCourseReport> r = run_vehicle_course(shapes, m, c, o);
+		// Each course runs in its own VehicleWorld over the shared const shapes and model, on lanes; the reports are
+		// printed and gated here in course order.
+		const auto synthetic = synthetic_vehicle_courses();
+		std::vector<core::Result<VehicleCourseReport>> runs = core::parallel_map<core::Result<VehicleCourseReport>>(
+				synthetic.size(), [&](size_t i) { return run_vehicle_course(shapes, m, synthetic[i], o); }, kCourseLanes);
+		for (size_t i = 0; i < synthetic.size(); ++i) {
+			const VehicleCourse &c = synthetic[i];
+			core::Result<VehicleCourseReport> &r = runs[i];
 			REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
 			std::printf("%s", format_vehicle_course_report(*r).c_str());
 			for (const VehicleCorrectionReport &x : r->corrections) {
@@ -1216,11 +1228,23 @@ TEST_SUITE("sim-vehicle") {
 		start = std::chrono::steady_clock::now();
 		uint64_t steps = 0;
 		std::vector<VehicleCourseReport> reports;
-		for (const VehicleCourse &c : *courses) {
+		// The found courses run on lanes (one VehicleWorld each over the shared const shapes and model); printed and
+		// gated here in course order.
+		std::vector<std::optional<core::Result<VehicleCourseReport>>> runs = core::parallel_map<std::optional<core::Result<VehicleCourseReport>>>(
+				courses->size(),
+				[&](size_t i) -> std::optional<core::Result<VehicleCourseReport>> {
+					if (!(*courses)[i].found) {
+						return std::nullopt;
+					}
+					return run_vehicle_course(m->shapes, m->model, (*courses)[i], o);
+				},
+				kCourseLanes);
+		for (size_t i = 0; i < courses->size(); ++i) {
+			const VehicleCourse &c = (*courses)[i];
 			VehicleCourseReport r;
 			r.course = c;
 			if (c.found) {
-				core::Result<VehicleCourseReport> run = run_vehicle_course(m->shapes, m->model, c, o);
+				core::Result<VehicleCourseReport> &run = *runs[i];
 				REQUIRE_MESSAGE(run.ok(), (run.ok() ? std::string() : run.error().message));
 				r = std::move(*run);
 				std::printf("%s", format_vehicle_course_report(r).c_str());
