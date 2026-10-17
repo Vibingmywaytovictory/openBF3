@@ -20,9 +20,11 @@
 #include "bf3/net/other_sample.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
+#include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -35,6 +37,13 @@ struct ClientProjectilesStats {
 	uint64_t own_soldier_contacts = 0, own_impacts = 0, remote_impacts = 0;
 	uint64_t samples_logged = 0; // own-world target samples written to the E12 log
 	uint32_t live_own = 0, live_remote = 0;
+	// cl, as built.
+	uint64_t samples_dropped = 0; // E12 log entries beyond ClientProjectilesConfig::max_samples
+	uint64_t own_queries = 0, own_no_view = 0, remote_queries = 0;
+	uint64_t remote_soldier_contacts = 0;
+	uint64_t detonations_suppressed = 0; // cosmetic detonations (the server's DetonationWire places them)
+	uint64_t remote_late = 0; // remote shots spawned after their time had passed the render time (a late datagram)
+	uint64_t events_refused = 0; // PresentationEvents::push refused (ring full)
 };
 static_assert(std::is_trivially_copyable_v<ClientProjectilesStats>);
 
@@ -54,12 +63,42 @@ public:
 	virtual ~ReceivedRecordSource() = default;
 	// The candidates of p_target under p_view (bit i of the masks: seq view_seq - i), any order.
 	virtual size_t candidates(const ShotView &p_view, uint8_t p_target, std::span<net::TimedOther> r_out) const = 0;
+	// cl, as built: the server tick of the client's Snapshot of seq p_seq (rebuild_track's view tick; false when the
+	// client does not hold that seq), and the slots any record under p_view names (the targets worth sampling).
+	virtual bool view_tick(uint16_t p_seq, uint32_t &r_tick) const = 0;
+	virtual void slots_in(const ShotView &p_view, std::array<uint64_t, 2> &r_slots) const = 0;
 };
+
+// cl, as built (docs/design/m2a-cl.md): the inputs the two worlds need beyond the table. The own world's time rule and
+// sampler inputs must be the server's (LagCompConfig: max_rewind_ticks from MatchInfo, the level's pose eye heights,
+// ClientSessionConfig::extrapolate_max_ms) for E12's bit equality.
+struct ClientProjectilesConfig {
+	uint8_t own_slot = 0;
+	uint32_t max_rewind_ticks = kDefaultMaxRewindTicks;
+	std::array<float, sim::kPoseCount> pose_eye_heights{ 1.6f, 1.0f, 0.3f };
+	float extrapolate_max_ms = 250.0f;
+	size_t max_samples = 1u << 16; // the E12 log's bound (beyond: dropped and counted)
+	size_t max_remote_pending = 1024; // remote shots waiting for the render time (beyond: refused and counted)
+	sim::weapons::BallisticsLimits limits;
+};
+
+// The effect seed of a shot (docs/design/m2a.md §4.4: splitmix64(match_seed ^ (slot << 32 | shot_index))) and an
+// impact's (the effect seed mixed with the pellet and the impact's ordinal within its shot). Both ends of a remote
+// shot derive the same values from replicated inputs (E15).
+uint64_t effect_seed(uint64_t p_match_seed, uint8_t p_slot, uint32_t p_shot_index);
+uint64_t impact_seed(uint64_t p_effect_seed, uint8_t p_pellet, uint32_t p_ordinal);
+// A decoded remote shot as the ShotEvent the server fired (seed and spawn time derived, §7.4); false when its def is
+// not in the table.
+bool shot_event_of(const net::RemoteShot &p_shot, const sim::weapons::WeaponTable &p_table, uint64_t p_match_seed, sim::weapons::ShotEvent &r_event);
 
 class ClientProjectiles {
 public:
 	static core::Result<std::unique_ptr<ClientProjectiles>> create(std::shared_ptr<const sim::weapons::WeaponTable> p_table,
 			std::shared_ptr<const core::gameplay::CapsulePoseTable> p_capsules, uint64_t p_match_seed);
+	// cl, as built: with the own slot, the time rule's clamp and the sampler inputs (the declared create uses the
+	// defaults, own slot 0).
+	static core::Result<std::unique_ptr<ClientProjectiles>> create(std::shared_ptr<const sim::weapons::WeaponTable> p_table,
+			std::shared_ptr<const core::gameplay::CapsulePoseTable> p_capsules, uint64_t p_match_seed, const ClientProjectilesConfig &p_config);
 	~ClientProjectiles();
 	ClientProjectiles(const ClientProjectiles &) = delete;
 	ClientProjectiles &operator=(const ClientProjectiles &) = delete;

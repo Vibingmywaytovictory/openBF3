@@ -57,3 +57,11 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/lag_comp.cpp
 )
+
+# M2a cl (docs/design/m2a.md §8; docs/design/m2a-cl.md): the events ring, the presented weapon and the client's
+# cosmetic projectiles.
+target_sources(bf3_host PRIVATE
+    src/presentation_events.cpp
+    src/presentation_weapon.cpp
+    src/client_projectiles.cpp
+)
