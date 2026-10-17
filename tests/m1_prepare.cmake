@@ -4,6 +4,9 @@
 #   the cold run converts every item and cooks every tile; the second run is all hits (meshes, weapons, the
 #   "jolt-world" entry and every tile) and puts nothing; both print install.unchanged yes.
 # Exits 77 (skipped) when bf3dump finds no install.
+# Also printed (info, never gated; docs/testing.md): the cold run's peak commit (PeakPagefileUsage, bf3dump's "peak
+# private bytes"), which working-set trimming does not lower, and a warning when peak ws / peak commit falls below
+# 0.8 x the serial ratio (943 / 1000: 295.4 / 313.1 MiB alone, 2026-10-17); the serial merge-pass run decides.
 # Usage: cmake -DBF3DUMP=<bf3dump.exe> [-DE6_REPORT_ONLY=ON] -P m1_prepare.cmake (report-only: the asan preset)
 cmake_minimum_required(VERSION 3.29)
 
@@ -75,6 +78,16 @@ else()
         set(_ok FALSE)
     endif()
     report(_ok "E6: cold peak working set ${_peak} MiB <= ${E6_LIMIT_MIB} MiB")
+endif()
+string(REGEX MATCH "peak working set ([0-9]+)[.0-9]* MiB, peak private bytes ([0-9]+)[.0-9]* MiB" _m "${COLD}")
+if(_m AND CMAKE_MATCH_2 GREATER 0)
+    set(_ws_int "${CMAKE_MATCH_1}")
+    set(_commit_int "${CMAKE_MATCH_2}")
+    math(EXPR _ratio "${_ws_int} * 1000 / ${_commit_int}")
+    message(STATUS "  info  cold peak commit (PeakPagefileUsage) ${_commit_int} MiB; peak ws / commit ${_ratio} / 1000 (serial 943)")
+    if(_ratio LESS 754)
+        message(STATUS "  WARN  cold peak ws / commit ${_ratio} / 1000 is below 0.8 x serial: the working set was trimmed")
+    endif()
 endif()
 string(REGEX MATCH "meshes +([0-9]+) items: 0 hits, ([0-9]+) misses \\(([0-9]+) converted, 0 reused, 0 uncached\\), 0 failed" _m "${COLD}")
 if(_m AND CMAKE_MATCH_1 EQUAL CMAKE_MATCH_3)
