@@ -8,8 +8,9 @@ The README's "M2a cl" section repeats the gates.
 Tags as in m2a.md: **[verified]** read from code or a measurement in this tree on 2026-10-17; **[inferred]** a choice
 or estimate made here.
 
-sv (the server gunplay) is not merged. Until it is, every end-to-end case runs against `m2a_fake::GunServer`
-(`tests/host_gunplay_client_tests.cpp`), described below. sv's merge replaces it with the GameServer itself.
+sv (the server gunplay) is merged (6e32749, `--no-ff`). Every end-to-end case now runs against the real server:
+`host::ServerHost` running the GameServer with sv's `Gunplay` (described under "The end-to-end harness" below).
+`m2a_fake::GunServer` is deleted.
 
 ## What landed
 
@@ -20,14 +21,19 @@ sv (the server gunplay) is not merged. Until it is, every end-to-end case runs a
 | `src/bf3_host/include/bf3/host/client_projectiles.h`, `src/bf3_host/src/client_projectiles.cpp` | `ClientProjectiles` (§8.4): the own world on the predicted timeline against the rewound records, the remote world on the render timeline, Impact and SoldierContact events, the E12 log (`OwnTestSample`), `shot_event_of(RemoteShot)` |
 | `src/bf3_sim/include/bf3/sim/prediction.h`, `src/bf3_sim/src/prediction.cpp` | `WeaponLane` (the weapons ring beside `PredictionRing`), `WeaponReplay`, `WeaponEmitSink`, `PredictionRing::attach_weapons`; the named insertion in `catch_up` (the weapons step after the motor step) |
 | `src/bf3_host/include/bf3/host/client_session.h`, `src/bf3_host/src/client_session.cpp` | additive blocks (config, stats, frame fields, `ClientGunplayInputs`, `build_client_weapon_table`, `client_weapon_hash`, `present_others` with `PresentOthersCounts`, `set_view_sample`, `present_view_quality`), the `Impl` member block and the end block (`cl_*`), the named insertions, R1 and R2 |
-| `tests/host_gunplay_client_tests.cpp` | `host.gunplay.client.unit` and `host.gunplay.client`, `m2a_fake::GunServer` |
+| `tests/host_gunplay_client_tests.cpp` | `host.gunplay.client.unit` and `host.gunplay.client` against the real ServerHost (gunplay_floor, ServerLog, Server, Bot, HostileRelay) |
+| `src/bf3_host/include/bf3/host/gunplay.h`, `src/bf3_host/src/gunplay.cpp` (sv's; contract fix 7ea1331) | `GunplayObserver::wants_rewind_rows` / `rewind_rows`: the rewound queries' trace rows for E12 (b), dev only |
 | `tests/host_session_tests.cpp` (block at the end) | R1's equivalence against M1's `present_others` body |
 
 ## The client, step by step
 
 * **MatchInfo (E6).** `ClientGunplayInputs` (the weapon table, the capsule pose table, the kit table, the shot
-  quantisation frame, a `load_mechanics(path)` hook) come with the `ClientSessionConfig`; `mechanics_cfg` is parsed
-  by the client itself through the hook. On MatchInfo with a `weapon_hash`, the client builds its table
+  quantisation frame, a `load_mechanics(path)` hook) come from the level by default: `client_gunplay_inputs(level)`
+  builds them from sv's `SharedLevel::gunplay` (`make_match_table` with wp's defaults, `load_mechanics_cfg`, the
+  level's capsule pose table, kits and `shot_frame`) on MatchInfo, unless the config supplies its own
+  (`ClientSessionConfig::gunplay`) or turns it off (`gunplay_from_level = false`). `mechanics_cfg` is parsed by the
+  client itself through the hook. A table's defs do not depend on the mechanics, so the client's copy with the
+  match's mechanics and flags equals the server's `make_match_table` bit for bit. On MatchInfo with a `weapon_hash`, the client builds its table
   (`build_client_weapon_table`: a copy with the parsed `Mechanics`, `exact_aim` and the infinite-magazine flag from
   `weapon_flags`, rehashed) and compares `client_weapon_hash = weapon_table_hash ^ capsule table hash` with the
   server's. A missing table, an unreadable cfg or a different hash refuses with "weapon table mismatch" and
@@ -43,8 +49,9 @@ sv (the server gunplay) is not merged. Until it is, every end-to-end case runs a
 * **Reconciliation (§8.2).** On a Snapshot whose motor state matches (M1's epsilons, health left out by R2), the
   client compares `weapons_wire_view(predicted at T)` with the own weapons block: a difference rebases the lane from
   the wire view (`weapons_from_wire`, validated against the table) and replays (`weapon_reconciliations`); no
-  predicted weapons at T rebase without a compare (`weapon_ring_misses`). Only the health differing is R2's health
-  rebase: the ring's health from T on moves by the difference, no replay (`health_rebases`). A motor mismatch
+  predicted weapons at T rebase without a compare (`weapon_ring_misses`). A difference only in what a hit writes
+  (wp's `apply_damage`: the health, the tick's `damage`, `kDamaged`) is R2's health rebase: the ring's health from T
+  on moves by the difference, the hit tick takes the server's `damage` and `kDamaged`, no replay (`health_rebases`). A motor mismatch
   reconciles as in M1 and the weapons are rebased from the wire view first.
 * **Spawn.** Spawned carries kit and team; the life's loadout comes from `kits.loadouts[team - 1][kit]` through
   `spawn_soldier_weapons` (the shot index carried over from the previous life). A life that arrives in a Snapshot
@@ -81,80 +88,106 @@ sv (the server gunplay) is not merged. Until it is, every end-to-end case runs a
   0cc492d.
 * **A refused client's stats (7ecb98f).** `stats()` reads the published frame, and only a client tick publishes. A
   refusal disconnects before the first tick, so it now publishes its stats itself.
+* **R2's "only health" (24fea82, code 026c15d).** Against sv's real server every hit reconciled the motor: wp's
+  `apply_damage` also adds the tick's `damage` and sets `kDamaged`. `states_match` now leaves out all three (the
+  motor's own fall damage follows from `kLanded`, `impact_speed` and `protect_ticks`, which stay compared); m2a.md
+  §8.2 says so.
+* **E12 (b) had no server source (7ea1331).** E12 (b) compares the server's rewound `OtherPose` with the client's
+  sample, but the Trace wire (`TraceGunplayTick`) does not carry it and sv's observer had no callback for it. A
+  dev-only `GunplayObserver::rewind_rows` (with `wants_rewind_rows`, read once in `Gunplay::create`, which then calls
+  lc's `RewindProvider::set_trace`) hands the rows of each projectile step to the observer. Off otherwise. This is
+  an edit in sv's files (gunplay.h's observer and three guarded lines in gunplay.cpp), each line marked `M2a cl`.
+* **Clients without inputs on a gunplay server (f5ba4dc).** sv's `host.gunplay.server` starts its ClientSessions
+  without `ClientGunplayInputs`; after the merge cl's client refused them ("weapon table mismatch"). The client now
+  builds the inputs from `SharedLevel::gunplay` itself (above); sv's cases pass unchanged.
 
-## m2a_fake::GunServer (until sv)
+## The end-to-end harness (after sv's merge)
 
-M1's GameServer (motor, jitter buffer, spawns, snapshots, clock reports) on its own ENet loop at 60 Hz, wrapped with
-the gunplay a v2 server adds:
+`tests/host_gunplay_client_tests.cpp`, no install:
 
-* the applied command per slot mirrored from GameServer's rules (receive_commands' window and sequence rule, the
-  repeat of the last command, hold at the spawn), with lc's `AckState` at the command's first arrival;
-* `step_weapons_m2a` after every motor step with the before/after states (dead skip as the lane), spawns detected by
-  a life change (loadout kit 0 of the soldier's team), one `ProjectileWorld` against lc's real `LagHistory` /
-  `RewindProvider` (the trace rows E12 (b) compares, `shot_view` per shot);
-* MatchInfo rewritten with the match fields (seed, `weapon_hash` from the same `build_client_weapon_table`, flags,
-  kit hash, max rewind), Spawned with kit and team, the Snapshot with the own weapons block, an optional split into
-  SnapshotOthers, `record_tick` / `sent` for the history, ShotEvents and CombatEvents per client since its last
-  snapshot, a virtual health loss (R2) and an optional hostile mode (mutated copies and out-of-range values);
-* bots through `add_local_soldier`: a target strafing ± 4 m at the stand speed across its spawn heading, and bots
-  firing bursts.
+* **The level.** `gunplay_floor()`: the fixture's synthetic floor (240 m, twelve spawn points, the synthetic soldier)
+  with a `GunplayLevel`: the synthetic gate weapons (`weapons_support.h`) with an empty material table (every
+  zone multiplier 1: the M16A3 does 25 per hit at R2's 5 m), lc's synthetic capsule pose table, and a kit table
+  giving every kit of both teams the M16A3 and the M9 (`kit_table_hash`). Server and clients share the object.
+* **The server.** `Server`: `host::ServerHost` with the GameServer, `dev_commands`, 64 slots, `GunplayConfig` (the
+  shipped `weapon_mechanics.cfg` or a scratch variant, match seed, `exact_aim`, `infinite_magazine`,
+  `lag.max_rewind_ticks`, sv's stationary target bots, the observer). `ServerLog` (a `GunplayObserver`) keeps the
+  shots and timed events with their command tick, the active magazine at each change, the Target impacts, the
+  damage decisions and, for E12, the rewind trace rows. `game_stats()` gives the gunplay counters.
+* **The other soldiers** are real clients: `Bot` runs a `ClientSession` on its own thread with a scripted input (a
+  target strafing ± 4 m at the stand speed across its spawn heading; a shooter firing bursts at the floor; R2's
+  shooter aiming at the victim's presented chest), on a team by KitSelect (dev). Same-team soldiers do no damage
+  (friendly fire off), so the loopback and the two-clients runs have no deaths.
+* **E12's target** must not die over 500 hits: both ends parse a scratch copy of the cfg with
+  `bullet_damage_modifier = 0` (the impacts and the rewound tests are unchanged, the hash differs from the shipped
+  cfg on both ends alike).
+* **The hostile case** puts `HostileRelay` (two ENet hosts on one thread) between the client and the server: it
+  forwards both ways and adds two mutated copies (bit flips, truncation, trailing bytes) of every SnapshotOthers,
+  ShotEvents and CombatEvents, and every 20th Snapshot names def 0xFFF0 in the own weapons block, followed by a
+  ShotEvents with an unknown def and a CombatEvents hit of 1e30 naming slot 250. 60 target bots make the server
+  split its snapshots, so SnapshotOthers travel.
 
-Its MatchInfo hash is built by the client's own function from the same table, so E6's "matched" row only shows that
-the client accepts an equal hash and refuses a different one. The mechanics cfg files are a fake loader
-(`server.cfg`, `variant.cfg` with the other disc distribution, `missing.cfg` unreadable) until sv's
-`parse_mechanics_tuning` is the hook.
-
-## Gates (measured 2026-10-17, dev preset)
+## Gates (measured 2026-10-17, dev preset, against the real ServerHost after sv's merge)
 
 The wall-clock rows run under the quiet lock and are **noisy** on this shared machine. `host.gunplay.client` skips
 (77) unless `OPENBF3_CL_TIMING=1`, because `tools\build.cmd`'s TIMING regex (not cl's file) does not list it; the
-unit row is short and runs in the default test step.
+unit row is short and runs in the default test step. Every row's server is `host::ServerHost` with sv's `Gunplay`
+(`m2a_fake` is gone).
 
 | gate | command | threshold | measured | met |
 |---|---|---|---|---|
-| E1 (client side) | `set OPENBF3_CL_TIMING=1` then `b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client --test-case="*E1 + E5*"` (quiet lock) | predicted `ShotEvent`s equal the server's field for field 31/31; 30 gaps of 4,500,000; first shot at the press tick's start; one OwnShot event per predicted shot | 31/31 equal (time, spawn time, seed, ids, origin, aim, direction, spread, cone, recoil, tracer, power by bits; and the tick); 30/30 gaps; first at the press tick's start; 36 OwnShot events for 36 predicted shots (the 31-round magazine, then 5 after the reload); 0 motor and 0 weapon reconciliations | yes |
-| E5 (client side) | same case | server phase events = predicted phase events; M16A3 tactical 108,000,000 with commit at +91,800,000 → 31, empty 142,200,000 → 30 | 7 / 7 timed events equal (time, event, weapon slot, tick); empty 142,200,000 → 30 rounds, tactical 108,000,000, commit +91,800,000 → 31 rounds (from the server's own weapons blocks) | yes |
-| E6 (client side) | `ctest --preset dev -R host.gunplay.client.unit` (case "E6") | a mismatched client disconnects on MatchInfo with "weapon table mismatch", `weapon_hash_mismatch` = 1, never sends Ready, never predicts | variant.cfg (other disc distribution): refused "weapon table mismatch", `weapon_hash_mismatch` 1, Ready 0, commands 0, no frame; missing.cfg and a client without a table: the same with the reason appended; a different kit hash: "kit table mismatch", `kit_hash_mismatch` 1; the matched client: Ready 1, gunplay on; an M1 server (no `weapon_hash`): Ready 1, gunplay off | yes |
-| E12 (b) lagcomp | `set OPENBF3_CL_TIMING=1` then `b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client --test-case="*E12 lagcomp*"` (quiet lock) | 150/2, a target strafing at 4 m/s over 8 m at 20 m, 500 single shots: the server hits ≥ 99 % of the shots the client's own test hit, same zone for ≥ 99 % of those; every sampled target's `OtherPose` equal to the server's Trace bit for bit except `late_sample`; residuals reported | 500 shots, the client's test hit 500, the server 500 (100 %), same zone 500 (100 %); (b) 500 / 500 samples bit-equal, 0 mismatched, `late_sample` 0 (another 500 client samples have no server row: the server's swept-bound broad phase culled those segments before posing; the comparison covers every row both ends posed); server verdicts 500 rewound, 0 clamped, 0 refused; residuals `generation_reorder` 0, `others_ahead` 0, `track_timeout` 0, `window_extrapolated` 0 of 26,582 draws | yes |
-| E12 control | same case | the server without rewind (`max_rewind_ticks` 0) hits ≤ 50 % of the client's test hits | 8 of 500 (1.6 %), all clamped to the present | yes |
-| E12 stress | same case | reported | "lat=150-165,loss=2" (RTT 321 ms): client test hit 35, server 35 (100 %), same zone 100 %; (b) 965 / 965 equal; every shot clamped to 21 ticks on both ends (view lag > 350 ms) | reported |
-| E15 loopback | `set OPENBF3_CL_TIMING=1` then `b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client --test-case="*E15 loopback*"` (quiet lock; `OPENBF3_CL_LOOPBACK_S`, default 600) | 0 weapon and 0 motor reconciliations in 10 min of scripted play without netsim; health rebases reported | 600 s (walk, turn, bursts and taps, zoom, reload, pistol and back, crouch, jump, sprint; a strafing and a firing bot): 0 motor, 0 weapon reconciliations, 0 weapon ring misses, 0 step precondition failures, 0 lane gaps, 0 event overflows; 236 predicted shots, 234 timed events, 36,003 lane steps; health rebases 15 for 60 virtual hits (the health floors at 1 after 15, so later hits change nothing) | yes |
-| E15 two clients | `... --test-case="*two clients*"` (quiet lock) | the second client joins after 30 s (every bot slot has fired); both derive the same effect seed for every remote shot from the join on | B saw 216 remote shots after its join, A saw all 216 (as remote or own), 216 / 216 equal effect seeds, origins within 1 cm; both bots fired before the join | yes |
+| E1 (client side) | `set OPENBF3_CL_TIMING=1` then `b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client --test-case="*E1 + E5*"` (quiet lock) | predicted `ShotEvent`s equal the server's field for field 31/31; 30 gaps of 4,500,000; first shot at the press tick's start; one OwnShot event per predicted shot | 31/31 equal against sv's `Gunplay` observer (time, spawn time, seed, ids, origin, aim, direction, spread, cone, recoil, tracer, power by bits; and the command tick); 30/30 gaps; first at the press tick's start; 36 predicted, 36 server shots (the 31-round magazine, then 5 after the reload), 36 OwnShot events; 0 motor and 0 weapon reconciliations; server rewound 36 | yes |
+| E5 (client side) | same case | server phase events = predicted phase events; M16A3 tactical 108,000,000 with commit at +91,800,000 → 31, empty 142,200,000 → 30 | 7 / 7 timed events equal (time, event, weapon slot, tick); empty 142,200,000 → 30 rounds, tactical 108,000,000, commit +91,800,000 → 31 rounds (the server's active magazine at the last change at or before each finish) | yes |
+| E6 (client side) | `ctest --preset dev -R host.gunplay.client.unit` (case "E6") | a mismatched client disconnects on MatchInfo with "weapon table mismatch", `weapon_hash_mismatch` = 1, never sends Ready, never predicts | against a real gunplay server: variant.cfg (other disc distribution): refused "weapon table mismatch", `weapon_hash_mismatch` 1, Ready 0, commands 0, never spawned on the server; missing.cfg and a client without inputs (`gunplay_from_level = false`): the same with the reason appended; a different kit hash: "kit table mismatch", `kit_hash_mismatch` 1; the matched client (inputs from the level): spawned 1, gunplay on; an M1 server (no `weapon_hash`): gunplay off | yes |
+| E12 (b) lagcomp | `set OPENBF3_CL_TIMING=1` then `b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client --test-case="*E12 lagcomp*"` (quiet lock) | 150/2, a target strafing at 4 m/s over 8 m at 20 m, 500 single shots: the server hits ≥ 99 % of the shots the client's own test hit, same zone for ≥ 99 % of those; every sampled target's `OtherPose` equal to the server's rewound pose bit for bit except `late_sample`; residuals reported | 500 shots (sv's `exact_aim`, `infinite_magazine`, a damage-free cfg on both ends), client test hit 500, server 500 (100 %), same zone 500 (100 %); (b) 500 / 500 samples bit-equal to the server's `rewind_rows`, 0 mismatched, `late_sample` 0 (another 500 client samples have no server row: the server's swept-bound broad phase culled those segments before posing); server verdicts 500 rewound, 0 clamped, 0 refused; residuals `generation_reorder` 0, `others_ahead` 0, `track_timeout` 0, `window_extrapolated` 0 of 25,187 draws (5 extrapolated draws inside the window); 1 motor reconciliation (the spawn teleport), 0 weapon | yes |
+| E12 control | same case | the server without rewind (`max_rewind_ticks` 0) hits ≤ 50 % of the client's test hits | 6 of 500 (1.20 %), all 500 clamped to the present | yes |
+| E12 stress | same case | reported | "lat=150-165,loss=2" (RTT about 323 ms): client test hit 30, server 30 (100 %), same zone 100 %; (b) 970 / 970 equal; every shot clamped on both ends (view lag > 350 ms) | reported |
+| E15 loopback | `set OPENBF3_CL_TIMING=1` then `b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client --test-case="*E15 loopback*"` (quiet lock; `OPENBF3_CL_LOOPBACK_S`, default 600) | 0 weapon and 0 motor reconciliations in 10 min of scripted play without netsim; health rebases reported | 600 s (walk, turn, bursts and taps, zoom, reload, pistol and back, crouch, jump, sprint; a strafing and a firing bot, real clients): 0 motor, 0 weapon reconciliations, 0 weapon ring misses, 0 step precondition failures, 0 lane gaps, 0 event overflows; 236 predicted shots, 234 timed events, 186 remote shots seen, 422 server shots (421 rewound, 1 whose view sample the server's `LagHistory` refused, resolved at the present), 35,987 lane steps, 18 replayed (catch-up steps at or below the emitted mark, events discarded; not a reconciliation); health rebases 0 (the bots are on the player's team, friendly fire off; R2 covers the rebase against a real enemy) | yes |
+| E15 two clients | `... --test-case="*two clients*"` (quiet lock) | the second client joins after 30 s (every bot slot has fired); both derive the same effect seed for every remote shot from the join on | B saw 211 remote shots after its join, A saw all 211, 211 / 211 equal effect seeds, origins within 1 cm; both bots fired before the join (client A: 1 motor reconciliation, not gated here) | yes |
 | R1 | `ctest --preset dev -R host.session.unit` (case "M2a cl R1") | `present_others` through `net::sample_other` draws what M1's body drew | 150,196 drawn soldiers on 50,000 random frames, 150,196 bit-equal in every M1 field (11,237 bracketed, 16,292 before the oldest, 122,667 extrapolated of which 54,964 held past 250 ms) | yes |
-| R2 | `ctest --preset dev -R host.gunplay.client.unit` (case "R2") | a server hit that changes only the health is a health rebase, not a reconciliation | 8 health rebases for 8 virtual hits, 0 motor and 0 weapon reconciliations, Hit events Immediate with `kOwnVictim`; SnapshotOthers 121 received of 121, 0 acks ignored by `LagHistory` | yes |
-| events and presented weapon (vm, hud, fx3, au3) | `ctest --preset dev -R host.gunplay.client.unit` | the ring keeps order and counts a full ring; `present_weapon` lerps and refuses hostile views; the frame carries the two predicted wire views | 1,000,000 events in order across two threads; 5 overflows counted on a full ring; present_weapon rows (deploy progress, ammo, spread / recoil lerp, zoom, no lerp across items, hostile def and slot refused) pass; events seen end to end: OwnShot, OwnTimed, RemoteShot, Impact, SoldierContact, Hit, Spawn (E1, R2, E12, loopback) | yes |
-| hostile gunplay data | `ctest --preset dev -R host.gunplay.client.unit` (case "hostile") and the asan preset | mutated and out-of-range gunplay datagrams refused and counted; the session keeps predicting | 390 mutated copies: 288 refused by the decoders (`bad_gunplay_datagrams`), 15 out-of-range shots dropped (`bad_gunplay_events`), 15 own weapons blocks with a def outside the table refused (`bad_weapon_wires`), still connected and predicting, 0 step precondition failures | yes |
-| M1 host.session | `ctest --preset dev -R "^host\.session"` (quiet lock) | the M1 rows still pass | host.session.unit passed (70.4 s), host.session passed (191.9 s) | yes |
+| R2 | `ctest --preset dev -R host.gunplay.client.unit` (case "R2") | a server hit that changes only what a hit writes is a health rebase, not a reconciliation | an enemy client (team 2, `exact_aim`) taps 3 shots at the victim from 5 m: 3 server hits, 3 health rebases, health 25.0, 0 motor and 0 weapon reconciliations after the teleport, 3 Hit events Immediate with `kOwnVictim` | yes |
+| SnapshotOthers | `ctest --preset dev -R host.gunplay.client.unit` (case "SnapshotOthers") | the server's split snapshots arrive and draw every other | 60 sv target bots and a firing bot: 91 SnapshotOthers received, 61 others drawn, 0 acks ignored by `LagHistory`, 0 others dropped on the server | yes |
+| events and presented weapon (vm, hud, fx3, au3) | `ctest --preset dev -R host.gunplay.client.unit` | the ring keeps order and counts a full ring; `present_weapon` lerps and refuses hostile views; the frame carries the two predicted wire views | 1,000,000 events in order across two threads; 5 overflows counted on a full ring; present_weapon rows pass; events seen end to end: OwnShot, OwnTimed, RemoteShot, Impact, SoldierContact, Hit, Spawn | yes |
+| hostile gunplay data | `ctest --preset dev -R host.gunplay.client.unit` (case "hostile") and the asan preset | mutated and out-of-range gunplay datagrams refused and counted; the session keeps predicting | through `HostileRelay` against the real server: 427 hostile datagrams sent (356 forwarded), 301 refused by the decoders (`bad_gunplay_datagrams`), 8 out-of-range events dropped (`bad_gunplay_events`), 7 own weapons blocks with a def outside the table refused (`bad_weapon_wires`), still connected and predicting, 0 weapon reconciliations, 0 step precondition failures | yes |
+| sv's server rows | `ctest --preset dev -R "^host\.gunplay\.server"` (quiet lock) | sv's rows still pass after cl's contract fixes | host.gunplay.server passed (165.8 s, Metro) | yes |
+| M1 host.session | `ctest --preset dev -R "^host\.session"` (quiet lock) | the M1 rows still pass | host.session.unit passed (71.3 s), host.session passed (197.0 s) | yes |
 
 Other rows on this branch:
 
 * Full ctest without the timing rows (`tools\build.cmd dev`, which excludes godot.*, host.session*, host.server,
-  host.gunplay.perf, sim.nav.bake, sim.weapons.perf, tools.fx_bench, the audio and logic timing rows): 94 rows, 91
+  host.gunplay.perf, sim.nav.bake, sim.weapons.perf, tools.fx_bench, the audio and logic timing rows): 95 rows, 92
   pass, `core.cache_data` / `core.res` skipped as before, `host.gunplay.client` skipped (77) without
-  `OPENBF3_CL_TIMING`. `host.gunplay.client.unit` takes 12-17 s (ENet loopback, wall clock but not timed).
-* Timing rows under this track's quiet lock, one run each: `host.gunplay.client` (all four cases, 987 s; the
-  two-clients case first missed 4 of 220 shots because the test compared only A's events after the join and stopped
-  draining A one second early, a test fault fixed in 2cc2660 and rerun: 216 / 216), `host.session.unit` (70.4 s) and
-  `host.session` (191.9 s) pass.
-* asan preset: `host.gunplay.client.unit` (with the hostile case), `host.session.unit` (with R1's case) and
-  `m2a.contract` pass with no AddressSanitizer report.
-* The install is not read by any cl case (synthetic floor); `host.session`'s Metro rows end with `install.unchanged`
-  clean.
+  `OPENBF3_CL_TIMING` (584 s). `host.gunplay.client.unit` takes 23 s (ENet loopback, wall clock but not timed);
+  `host.gunplay.server` 131 s. A first run failed `sim.vehicle.unit`, `sim.vehicle` (timeouts) and `core.ui.swf.unit`
+  (a 1 s budget) because cl's `b\dev` cache had lost `CMAKE_CXX_FLAGS_RELEASE` (an unoptimised build, from a
+  configure without a working vcvars); a fresh cache (/O2) passes them all, and the timing cases above were rerun on
+  that build.
+* Timing rows under this track's quiet lock, one run each: `host.gunplay.client` (the four timing cases, 986 s, all
+  pass), `host.gunplay.server`, `host.session.unit` and `host.session` pass.
+* asan preset (rebuilt after the merge): `host.gunplay.client.unit` (27.3 s; the real server, the hostile relay, E6, R2,
+  SnapshotOthers), `host.session.unit` (72.6 s, with R1's case) and `m2a.contract` pass with no AddressSanitizer report.
+* The install is not read by any cl case (synthetic floor); `host.gunplay.server`'s Metro rows and `host.session`'s
+  end with `install.unchanged` clean.
 
 ## Open limits
 
-* **No `exact_aim` yet.** `WeaponTable::exact_aim` has no effect until sv's R3, so E12's shots carry the M16A3's
-  spread and recoil: the test aims down the sights (`kZoom`) and fires once per 12 ticks to keep the spread small.
-  The gate compares the client's cosmetic test with the server's verdict for the same seeded shot, so spread does
-  not weaken it; it only lowers the share of shots that hit.
-* **Stress clamps.** At "lat=150-165,loss=2" the view lag (RTT ≈ 322 ms plus the interpolation delay) is past 350 ms,
-  so every shot is clamped to 21 ticks on both ends (the client's own test uses the same clamp). The hit agreement
-  is therefore expected; the row is reported, not gated.
+* **Stress clamps.** At "lat=150-165,loss=2" the view lag (RTT ≈ 323 ms plus the interpolation delay) is past 350 ms,
+  so every shot is clamped on both ends (the client's own test uses the same clamp). The hit agreement is therefore
+  expected; the row is reported, not gated.
 * **E12 control** uses the client's own test with the default 21-tick rewind (`own_test_max_rewind_ticks`) against a
   server with `max_rewind_ticks` 0, which is what "without rewind" means for the hit rate.
+* **E12 (b) covers what both ends posed.** The server's swept-bound broad phase culls segments before posing, so 500
+  client samples have no server row; the bit compare covers the 500 that do.
+* **Pose eye heights.** The server's `LagCompConfig::pose_eye_heights` stay at the defaults {1.6, 1.0, 0.3}, which
+  equal the synthetic soldier's and Metro's; a level with other heights would need sv to set them from the soldier.
+* **No health rebase in the loopback.** The loopback's bots are on the player's team (friendly fire off), so E15
+  sees no hits; R2 measures the rebase against an enemy client.
 * **Kits.** `kit_table_hash` and `KitTable::loadout` are sv's; the client checks `KitTable::hash` when the server
-  sends one and indexes `loadouts[team - 1][kit]`. The fake kit table gives every kit the M16A3 and the M9.
+  sends one and indexes `loadouts[team - 1][kit]`. The test level's kit table gives every kit the M16A3 and the M9.
 * **E1 / E5 from a predicted client only.** The server rows of E1 and E5 (`host.gunplay.server`) and the
   viewmodel / HUD rows (`godot.m2a`) are sv's, vm's and hud's.
-* **ClientGunplayInputs supply.** Until sv lands, the caller fills `ClientGunplayInputs` (the tests do); sv's
-  `SharedLevel` additions should supply the table, capsules and kits for the Godot client.
+* **ClientGunplayInputs on the Godot client** come from `SharedLevel::gunplay`, which sv's loader fills only when
+  `SharedLoadOptions::gunplay` is set; a level loaded without it leaves the client without gunplay (refused by a
+  gunplay server, as E6's no-inputs row).
+* **The timing regex.** `tools\build.cmd` does not list `host.gunplay.client` in its TIMING regex, so the full ctest
+  skips it (77) unless `OPENBF3_CL_TIMING=1`; the fix is a one-line edit in a shared file, left to the owner.

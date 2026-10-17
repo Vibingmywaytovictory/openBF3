@@ -2058,13 +2058,14 @@ server whose `weapon_hash` (or kit hash) differs before sending Ready (E6), send
 SPSC ring with Predicted / Render / Immediate timelines) and the two latest predicted weapon views
 (`present_weapon`, `bf3/host/presentation_weapon.h`) for vm, hud, fx3 and au3. Cosmetic projectiles
 (`bf3/host/client_projectiles.h`) test own shots against the rewound records the server will use and fly remote shots
-on the render timeline. `present_others` now calls lc's `net::sample_other` (R1). Until sv merges, the end-to-end
-cases run against a test-local `m2a_fake::GunServer`.
+on the render timeline. `present_others` now calls lc's `net::sample_other` (R1). The client builds its gunplay inputs
+(table, capsules, kits, shot frame) from sv's `SharedLevel::gunplay` by default. Every end-to-end case runs against the
+real `ServerHost` with sv's `Gunplay` on a synthetic floor, with real clients as bots.
 
 Commands (no install needed; the timing cases run only with `OPENBF3_CL_TIMING=1`, under the quiet lock):
 
 ```bat
-ctest --preset dev -R host.gunplay.client.unit                     :: events, present_weapon, lane, projectiles, view sample, E6, R2, hostile
+ctest --preset dev -R host.gunplay.client.unit                     :: events, present_weapon, lane, projectiles, view sample, E6, R2, SnapshotOthers, hostile
 ctest --preset dev -R host.session.unit                            :: M1 rows plus R1's equivalence
 set OPENBF3_CL_TIMING=1
 b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client  :: E1 + E5, E12 lagcomp (+ control, stress), E15 loopback (10 min), two clients
@@ -2074,12 +2075,12 @@ Gates, measured 2026-10-17 on the dev preset (the timing cases are wall clock an
 
 | gate | threshold | measured |
 |---|---|---|
-| E1 (client) | predicted shots = server's field for field 31/31 | 31/31; 30/30 gaps of 4,500,000 |
+| E1 (client) | predicted shots = server's field for field 31/31 | 31/31; 30/30 gaps of 4,500,000; 36 predicted = 36 server shots |
 | E5 (client) | server phase events = predicted | 7/7; empty 2.37 s → 30, tactical 1.8 s (commit +1.53 s) → 31 |
-| E6 (client) | "weapon table mismatch", `weapon_hash_mismatch` 1, no Ready, no prediction | yes for a variant cfg, a missing cfg and a client without a table; "kit table mismatch" for a kit hash |
-| E12 (b) | server hit ≥ 99 % of client hits, same zone ≥ 99 %; samples bit-equal except `late_sample`; control ≤ 50 % | 500/500 (100 %), zone 100 %; 500/500 samples equal, `late_sample` 0; control 1.6 %; stress 100 % (all clamped, reported) |
-| E15 | 0 weapon and 0 motor reconciliations in 10 min loopback; equal seeds for two clients | 0 and 0 (15 health rebases reported); 216/216 seeds equal |
-| R1 / R2 | M1's drawing unchanged; health-only hits rebase | 150,196/150,196 bit-equal; 8 rebases, 0 reconciliations |
+| E6 (client) | "weapon table mismatch", `weapon_hash_mismatch` 1, no Ready, no prediction | yes for a variant cfg, a missing cfg and a client without inputs (never spawned on the server); "kit table mismatch" for a kit hash |
+| E12 (b) | server hit ≥ 99 % of client hits, same zone ≥ 99 %; samples bit-equal except `late_sample`; control ≤ 50 % | 500/500 (100 %), zone 100 %; 500/500 samples equal to the server's rewound rows, `late_sample` 0; control 1.20 %; stress 30/30 (all clamped, reported) |
+| E15 | 0 weapon and 0 motor reconciliations in 10 min loopback; equal seeds for two clients | 0 and 0 (bots on the player's team: 0 health rebases); 211/211 seeds equal |
+| R1 / R2 | M1's drawing unchanged; a hit's writes rebase | 150,196/150,196 bit-equal; 3 enemy hits, 3 rebases, 0 reconciliations |
 
 ## M2a sv: server gunplay
 
