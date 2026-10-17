@@ -33,12 +33,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <random>
 #include <set>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -185,6 +187,16 @@ TEST_SUITE("sim-terrain-unit") {
 			const RayCheck rc = cast_cells(*world, record, 0, 1, double(shapes->terrain(0).max_error) + 0.01);
 			CHECK_MESSAGE(rc.missed == 0, "round ", round);
 			CHECK_MESSAGE(rc.open_hits == 0, "round ", round);
+			// sim.terrain's banded checks (bands of 4 rows on 3 lanes here) give the serial counters ("resumed" aside).
+			const FieldCheck fb = exhaustive_check_banded(*shapes, 0, record, 0, 3, 4);
+			CHECK_MESSAGE((fb.cells == fc.cells && fb.soup_triangles == fc.soup_triangles && fb.field_triangles == fc.field_triangles &&
+								  fb.patch_triangles == fc.patch_triangles && fb.missing == fc.missing && fb.extra == fc.extra && fb.duplicate == fc.duplicate &&
+								  fb.worst == fc.worst),
+					"round ", round, ": banded exhaustive check differs");
+			const RayCheck rb = cast_cells_banded(shapes, record, 0, 1, double(shapes->terrain(0).max_error) + 0.01, 3);
+			CHECK_MESSAGE((rb.rays == rc.rays && rb.missed == rc.missed && rb.open_rays == rc.open_rays && rb.open_hits == rc.open_hits &&
+								  rb.occluded == rc.occluded && rb.worst == rc.worst),
+					"round ", round, ": banded lattice differs");
 		}
 	}
 
@@ -532,6 +544,37 @@ Shared *shared() {
 	return &s;
 }
 
+unsigned env_unsigned(const char *p_name, unsigned p_default) {
+	char *value = nullptr;
+	size_t size = 0;
+	unsigned out = p_default;
+	if (_dupenv_s(&value, &size, p_name) == 0 && value != nullptr && value[0] != '\0') {
+		out = unsigned(std::strtoul(value, nullptr, 10));
+	}
+	std::free(value);
+	return out;
+}
+
+// G1's run lanes: free physical memory / 650 MB (one run holds its level and soup), clamped to 2..8, 4 at most under
+// asan (several times the memory per run). OPENBF3_TERRAIN_LANES overrides it (the lane-count check of the split).
+unsigned g1_lanes() {
+	const unsigned forced = env_unsigned("OPENBF3_TERRAIN_LANES", 0);
+	if (forced != 0) {
+		return forced;
+	}
+	MEMORYSTATUSEX m{};
+	m.dwLength = sizeof(m);
+	uint64_t avail = 0;
+	if (GlobalMemoryStatusEx(&m)) {
+		avail = m.ullAvailPhys;
+	}
+	unsigned lanes = unsigned(std::clamp<uint64_t>(avail / (650ull << 20), 2, 8));
+#if defined(__SANITIZE_ADDRESS__)
+	lanes = std::min(lanes, 4u);
+#endif
+	return lanes;
+}
+
 // A short scratch root under %TEMP% (removed at the end).
 struct Scratch {
 	fs::path root;
@@ -657,17 +700,45 @@ TEST_SUITE("sim-terrain") {
 		}
 		const auto start = std::chrono::steady_clock::now();
 		const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-		constexpr unsigned kLanes = 4;
-		size_t runs = 0, runs_without = 0, digests = 0, lattice_rays = 0, lattice_missed = 0, open_rays = 0, open_hits = 0, centre_missed = 0, failures = 0;
-		double worst = 0.0;
-		for (const char *level_id : kLevels) {
-			const std::string level_name = level_id;
+		// One flat queue over every (level, mode) run, then the per-level checks in level order on this thread (their
+		// exhaustive check and lattice in bands on all cores). The lane count follows the free memory (a run holds its
+		// level and soup, about 650 MB); the soup is the same on any thread count, so it changes scheduling only.
+		const unsigned lanes = g1_lanes();
+		const unsigned soup_threads = 2;
+		const unsigned check_lanes = env_unsigned("OPENBF3_TERRAIN_CHECK_LANES", hw);
+		std::printf("sim.terrain G1: %u run lanes x %u soup threads, checks on %u lanes\n", lanes, soup_threads, check_lanes);
+		std::fflush(stdout);
+		struct Job {
+			size_t level;
+			std::string mode;
+			bool keep; // the level's first mode keeps its record
+		};
+		std::vector<Job> jobs;
+		std::vector<size_t> first_job;
+		for (size_t li = 0; li < std::size(kLevels); ++li) {
+			const std::string level_name = kLevels[li];
 			bf3::core::Result<level::LevelInfo> info = level::level_info(*s->install, level_name);
 			REQUIRE_MESSAGE(info.ok(), level_name, ": ", (info.ok() ? std::string() : info.error().message));
-			const std::vector<std::string> modes = info->modes;
-			const auto level_start = std::chrono::steady_clock::now();
-			std::vector<RunResult> results = bf3::core::parallel_map<RunResult>(
-					modes.size(), [&](size_t i) { return run_one(s->install, level_name, modes[i], i == 0, std::max(1u, hw / kLanes)); }, kLanes);
+			first_job.push_back(jobs.size());
+			for (size_t m = 0; m < info->modes.size(); ++m) {
+				jobs.push_back({ li, info->modes[m], m == 0 });
+			}
+		}
+		first_job.push_back(jobs.size());
+		std::vector<RunResult> all = bf3::core::parallel_map<RunResult>(
+				jobs.size(), [&](size_t i) { return run_one(s->install, kLevels[jobs[i].level], jobs[i].mode, jobs[i].keep, soup_threads); }, lanes);
+		std::printf("sim.terrain G1: %zu runs in %.1f s\n", all.size(), seconds_since(start));
+		std::fflush(stdout);
+		size_t runs = 0, runs_without = 0, digests = 0, lattice_rays = 0, lattice_missed = 0, open_rays = 0, open_hits = 0, centre_missed = 0, failures = 0;
+		double worst = 0.0;
+		for (size_t li = 0; li < std::size(kLevels); ++li) {
+			const char *level_id = kLevels[li];
+			const std::string level_name = level_id;
+			const std::span<const RunResult> results(all.data() + first_job[li], first_job[li + 1] - first_job[li]);
+			double level_seconds = 0.0; // the level's runs, summed over their lanes
+			for (const RunResult &r : results) {
+				level_seconds += r.seconds;
+			}
 			runs += results.size();
 			std::set<std::string> level_digests;
 			size_t with = 0;
@@ -693,7 +764,7 @@ TEST_SUITE("sim-terrain") {
 			}
 			if (level_digests.empty() || kept == nullptr) {
 				CHECK_MESSAGE(level_digests.empty(), level_name, ": a digest but no kept record (the first mode failed)");
-				std::printf("sim.terrain %-12s %zu runs: no terrain (%.1f s)\n", level_id, results.size(), seconds_since(level_start));
+				std::printf("sim.terrain %-12s %zu runs: no terrain (%.1f s)\n", level_id, results.size(), level_seconds);
 				continue;
 			}
 			++digests;
@@ -712,7 +783,7 @@ TEST_SUITE("sim-terrain") {
 			CHECK(ti.content.hex() == *level_digests.begin());
 			CHECK_MESSAGE(ti.holed == expected_holed(level_name), level_name, ": holed ", ti.holed);
 			const auto ex_start = std::chrono::steady_clock::now();
-			const FieldCheck fc = exhaustive_check(*shapes, 0, record, placement);
+			const FieldCheck fc = exhaustive_check_banded(*shapes, 0, record, placement, check_lanes);
 			const double ex = seconds_since(ex_start);
 			CHECK_MESSAGE(fc.ok(), level_name, ": missing ", fc.missing, ", extra ", fc.extra, ", duplicate ", fc.duplicate);
 			CHECK(fc.field_triangles + fc.patch_triangles == fc.soup_triangles);
@@ -722,7 +793,7 @@ TEST_SUITE("sim-terrain") {
 			const res::HeightGrid &g = *record.grid;
 			const size_t step = std::max<size_t>(1, size_t(std::lround(16.0 / std::max(0.01f, g.sample_spacing[0]))));
 			const auto ray_start = std::chrono::steady_clock::now();
-			const RayCheck rc = cast_cells(*world, record, placement, step, 0.05);
+			const RayCheck rc = cast_cells_banded(shapes, record, placement, step, 0.05, check_lanes);
 			// Every run's own combat-area tile centres.
 			size_t centres = 0, centres_outside = 0, centres_open = 0, centre_rays = 0, centre_bad = 0;
 			for (const RunResult &r : results) {
@@ -751,7 +822,7 @@ TEST_SUITE("sim-terrain") {
 					level_id, results.size(), ti.content.hex().c_str(), size_t(ti.width), size_t(ti.height), ti.holes, ti.holed, ti.patch_triangles,
 					double(ti.max_error), fc.cells, fc.soup_triangles, fc.field_triangles, fc.patch_triangles, fc.missing, fc.extra, fc.worst, rc.rays,
 					rc.missed, rc.worst, rc.occluded, rc.open_rays, rc.open_hits, centres, centres_outside, centres_open, centre_rays, centre_bad, cook, ex,
-					rays, seconds_since(level_start));
+					rays, level_seconds);
 			std::fflush(stdout);
 		}
 		std::printf("sim.terrain G1: %zu runs (%zu without terrain, %zu failed), %zu digests; lattice %zu rays, %zu missed; open-cell %zu rays, %zu hits; "

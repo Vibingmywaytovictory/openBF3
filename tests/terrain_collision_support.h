@@ -2,9 +2,11 @@
 // Terrain collision checks shared by sim.terrain.unit and sim.terrain (tests/terrain_collision_tests.cpp,
 // docs/design/terrain-collision.md §12.1): a soup terrain record from a grid, the exhaustive field + patch check
 // (every Jolt triangle of the terrain's bodies against soup_terrain_cell, one to one) and the vertical-ray checks
-// (lattice, mismatch cells, points of open cells).
+// (lattice, mismatch cells, points of open cells); the exhaustive check and the lattice also in bands on worker lanes
+// (exhaustive_check_banded, cast_cells_banded: the same counters, sim.terrain.unit compares them).
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/res/terrain.h"
+#include "bf3/core/thread_pool.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 
@@ -17,6 +19,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace terrain_test {
@@ -216,6 +219,161 @@ inline FieldCheck exhaustive_check(const sim::StaticWorldShapes &p_world, size_t
 	return r;
 }
 
+// exhaustive_check on worker lanes, in bands of p_band_rows cell rows (sim.terrain G1; docs/testing.md). Each band
+// walks the field and the patch inside a box over its rows (padded by one sample; the first and last bands reach
+// +/-1e7 in Z, every band +/-1e7 in X and Y) and owns the triangles whose centroid row falls in it (clamped), so every
+// triangle is counted exactly once and the bands write disjoint rows of seen[]. The counters are summed and worst is
+// the maximum: equal to exhaustive_check apart from `resumed`, which depends on where Jolt's buffer fills. Needs an
+// axis-aligned frame with +Z kept (every retail frame is the identity); other frames take the serial check.
+inline FieldCheck exhaustive_check_banded(const sim::StaticWorldShapes &p_world, size_t p_index, const level::SoupTerrain &p_record, uint32_t p_placement,
+		unsigned p_lanes, size_t p_band_rows = 64) {
+	const res::Transform &f = p_record.frame;
+	const bool aligned = f.axis[0][1] == 0 && f.axis[0][2] == 0 && f.axis[1][0] == 0 && f.axis[1][2] == 0 && f.axis[2][0] == 0 && f.axis[2][1] == 0 &&
+			f.axis[2][2] > 0;
+	const res::HeightGrid &g = *p_record.grid;
+	if (!aligned || g.width < 2 || g.height < 2 || p_band_rows == 0) {
+		return exhaustive_check(p_world, p_index, p_record, p_placement);
+	}
+	const sim::StaticWorldShapes::Impl::Terrain &terrain = p_world.impl().terrains[p_index];
+	const size_t cw = g.width - 1, ch = g.height - 1;
+	const size_t bands = (ch + p_band_rows - 1) / p_band_rows;
+	std::vector<uint8_t> seen(cw * ch, 0);
+	std::vector<FieldCheck> parts(bands);
+	const auto row_z = [&](double p_row) { return double(f.origin[2]) + double(f.axis[2][2]) * (double(g.origin_xz[1]) + p_row * double(g.sample_spacing[1])); };
+	const auto owner = [&](const std::array<D3, 3> &p_v) {
+		const D3 c{ (p_v[0].x + p_v[1].x + p_v[2].x) / 3.0, (p_v[0].y + p_v[1].y + p_v[2].y) / 3.0, (p_v[0].z + p_v[1].z + p_v[2].z) / 3.0 };
+		double u = 0, v = 0;
+		to_grid(p_record, c, u, v);
+		const double fz = std::floor(v);
+		if (!(fz >= 0)) {
+			return size_t(0);
+		}
+		return std::min(bands - 1, size_t(fz) / p_band_rows);
+	};
+	bf3::core::parallel_for(
+			bands,
+			[&](size_t p_band) {
+				FieldCheck &r = parts[p_band];
+				std::vector<JPH::Float3> buffer(3 * 65536);
+				const size_t z0 = p_band * p_band_rows, z1 = std::min(ch, z0 + p_band_rows);
+				const float lo = p_band == 0 ? -1e7f : float(row_z(double(z0) - 1.0));
+				const float hi = p_band + 1 == bands ? 1e7f : float(row_z(double(z1) + 1.0));
+				const JPH::AABox box(JPH::Vec3(-1e7f, -1e7f, std::min(lo, hi)), JPH::Vec3(1e7f, 1e7f, std::max(lo, hi)));
+				const auto visit = [&](const JPH::Shape *p_shape, JPH::Vec3 p_position, JPH::Quat p_rotation, size_t &r_count) {
+					if (p_shape == nullptr) {
+						return;
+					}
+					JPH::Shape::GetTrianglesContext context;
+					p_shape->GetTrianglesStart(context, box, p_position, p_rotation, JPH::Vec3::sOne());
+					while (true) {
+						const int n = p_shape->GetTrianglesNext(context, int(buffer.size() / 3), buffer.data());
+						if (n <= 0) {
+							break;
+						}
+						for (int t = 0; t < n; ++t) {
+							std::array<D3, 3> v;
+							for (int k = 0; k < 3; ++k) {
+								const JPH::Float3 &fl = buffer[size_t(t) * 3 + size_t(k)];
+								v[size_t(k)] = { fl.x, fl.y, fl.z };
+							}
+							if (owner(v) != p_band) {
+								continue; // another band's triangle (the padded box overlaps its neighbours)
+							}
+							++r_count;
+							size_t x = 0, z = 0;
+							int half = 0;
+							if (!cell_of(p_record, v, x, z, half)) {
+								++r.extra;
+								continue;
+							}
+							uint8_t &sv_bits = seen[x + z * cw];
+							const uint8_t bit = uint8_t(1u << half);
+							const uint8_t from_patch = uint8_t(8u << half);
+							const bool patch = p_shape == terrain.patch.GetPtr();
+							if ((sv_bits & bit) != 0) {
+								if (!patch && (sv_bits & from_patch) == 0) {
+									--r_count;
+									++r.resumed;
+								} else {
+									++r.duplicate;
+								}
+								continue;
+							}
+							sv_bits |= bit;
+							if (patch) {
+								sv_bits |= from_patch;
+							}
+							const level::SoupTerrainCell cell = level::soup_terrain_cell(p_record, p_placement, x, z);
+							bool found = false;
+							for (uint8_t k = 0; k < cell.count; ++k) {
+								std::array<D3, 3> sv;
+								for (size_t c = 0; c < 3; ++c) {
+									sv[c] = d3(cell.triangles[k].v[c]);
+								}
+								size_t sx = 0, sz = 0;
+								int sh = 0;
+								if (!cell_of(p_record, sv, sx, sz, sh) || sh != half) {
+									continue;
+								}
+								found = true;
+								for (const D3 &pt : v) {
+									r.worst = std::max(r.worst, std::min({ dist(pt, sv[0]), dist(pt, sv[1]), dist(pt, sv[2]) }));
+								}
+							}
+							if (!found) {
+								sv_bits |= 4;
+								++r.extra;
+							}
+						}
+					}
+				};
+				const JPH::Quat q(terrain.rotation[0], terrain.rotation[1], terrain.rotation[2], terrain.rotation[3]);
+				visit(terrain.field.GetPtr(), JPH::Vec3(terrain.position[0], terrain.position[1], terrain.position[2]), q, r.field_triangles);
+				visit(terrain.patch.GetPtr(), JPH::Vec3::sZero(), JPH::Quat::sIdentity(), r.patch_triangles);
+			},
+			p_lanes);
+	FieldCheck r;
+	r.cells = cw * ch;
+	for (const FieldCheck &part : parts) {
+		r.field_triangles += part.field_triangles;
+		r.patch_triangles += part.patch_triangles;
+		r.extra += part.extra;
+		r.duplicate += part.duplicate;
+		r.resumed += part.resumed;
+		r.worst = std::max(r.worst, part.worst);
+	}
+	// The missing pass over the soup's cells, banded the same way (seen[] is complete after the join).
+	std::vector<std::array<size_t, 2>> missing(bands);
+	bf3::core::parallel_for(
+			bands,
+			[&](size_t p_band) {
+				const size_t z0 = p_band * p_band_rows, z1 = std::min(ch, z0 + p_band_rows);
+				for (size_t z = z0; z < z1; ++z) {
+					for (size_t x = 0; x < cw; ++x) {
+						const level::SoupTerrainCell cell = level::soup_terrain_cell(p_record, p_placement, x, z);
+						for (uint8_t k = 0; k < cell.count; ++k) {
+							std::array<D3, 3> sv;
+							for (size_t c = 0; c < 3; ++c) {
+								sv[c] = d3(cell.triangles[k].v[c]);
+							}
+							size_t sx = 0, sz = 0;
+							int sh = 0;
+							++missing[p_band][0];
+							if (!cell_of(p_record, sv, sx, sz, sh) || (seen[x + z * cw] & (1u << sh)) == 0) {
+								++missing[p_band][1];
+							}
+						}
+					}
+				}
+			},
+			p_lanes);
+	for (const std::array<size_t, 2> &m : missing) {
+		r.soup_triangles += m[0];
+		r.missing += m[1];
+	}
+	return r;
+}
+
 // One vertical ray into a cell triangle: the point at in-cell fractions (0.6, 0.3) for (a, d, b) or (0.3, 0.6) for
 // (a, c, d), the expected height from the soup triangle's plane (doubles).
 struct CellRay {
@@ -353,6 +511,87 @@ inline std::vector<std::array<size_t, 2>> mismatch_cells(const res::HeightGrid &
 				out.push_back({ x, z });
 			}
 		}
+	}
+	return out;
+}
+
+// The lattice of cast_cells on worker lanes: the p_step rows are split into p_lanes contiguous parts, each cast
+// against its own CollisionWorld over p_shapes (two worlds over the same shapes may be queried at once), plus one part
+// for the mismatch cells; the parts are merged in order, so the counters and the first reported miss equal the serial
+// cast_cells. p_lanes 1: the serial order on this thread.
+inline RayCheck cast_cells_banded(std::shared_ptr<const sim::StaticWorldShapes> p_shapes, const level::SoupTerrain &p_record, uint32_t p_placement,
+		size_t p_step, double p_tol, unsigned p_lanes) {
+	const res::HeightGrid &g = *p_record.grid;
+	RayCheck out;
+	if (g.width < 2 || g.height < 2) {
+		return out;
+	}
+	float lo = 0.0f, hi = 0.0f;
+	bool first = true;
+	for (size_t i = 0; i < g.heights.size(); ++i) {
+		if (std::isfinite(g.heights[i])) {
+			lo = first ? g.heights[i] : std::min(lo, g.heights[i]);
+			hi = first ? g.heights[i] : std::max(hi, g.heights[i]);
+			first = false;
+		}
+	}
+	const double lo_y = double(std::min(lo, p_shapes->min()[1])) - 5.0, hi_y = double(std::max(hi, p_shapes->max()[1])) + 5.0;
+	const size_t cw = g.width - 1, ch = g.height - 1;
+	std::vector<size_t> rows;
+	for (size_t z = 0; z < ch; z += p_step) {
+		rows.push_back(z);
+	}
+	const size_t lanes = std::max<size_t>(1, std::min<size_t>(p_lanes, rows.size()));
+	const size_t per = (rows.size() + lanes - 1) / lanes;
+	std::vector<RayCheck> parts(lanes + 1);
+	std::vector<std::string> errors(lanes + 1);
+	bf3::core::parallel_for(
+			lanes + 1,
+			[&](size_t p_part) {
+				bf3::core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(p_shapes);
+				if (!world) {
+					errors[p_part] = world.error().message;
+					return;
+				}
+				RayCheck &r = parts[p_part];
+				if (p_part < lanes) {
+					for (size_t i = p_part * per; i < std::min(rows.size(), (p_part + 1) * per); ++i) {
+						for (size_t x = 0; x < cw; x += p_step) {
+							for (int half = 0; half < 2; ++half) {
+								cast_cell(**world, p_record, p_placement, x, rows[i], half, lo_y, hi_y, p_tol, r);
+							}
+						}
+					}
+				} else if (p_step > 1) {
+					for (const std::array<size_t, 2> &c : mismatch_cells(g)) {
+						for (int half = 0; half < 2; ++half) {
+							cast_cell(**world, p_record, p_placement, c[0], c[1], half, lo_y, hi_y, p_tol, r);
+						}
+					}
+				}
+			},
+			unsigned(lanes + 1));
+	for (size_t i = 0; i < parts.size(); ++i) {
+		const RayCheck &r = parts[i];
+		if (!errors[i].empty()) {
+			out.missed += 1; // no world: counted as a miss (the caller's missed == 0 check fails)
+			continue;
+		}
+		if (out.missed == 0 && r.missed != 0) {
+			out.miss_x = r.miss_x;
+			out.miss_z = r.miss_z;
+			out.miss_half = r.miss_half;
+			out.miss_expected = r.miss_expected;
+			out.miss_hit_y = r.miss_hit_y;
+			out.miss_occluders = r.miss_occluders;
+		}
+		out.rays += r.rays;
+		out.missed += r.missed;
+		out.open_rays += r.open_rays;
+		out.open_hits += r.open_hits;
+		out.occluded += r.occluded;
+		out.coincident += r.coincident;
+		out.worst = std::max(out.worst, r.worst);
 	}
 	return out;
 }

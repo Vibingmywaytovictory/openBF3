@@ -634,16 +634,23 @@ endif()
 openbf3_test(test_tc_contract test_main.cpp tc_contract_tests.cpp test_support.h)
 target_link_libraries(test_tc_contract PRIVATE bf3_sim bf3_render)
 add_test(NAME tc.contract COMMAND test_tc_contract)
-# sim.terrain.unit (no data) and sim.terrain (install: G1 over every level x mode, the full cached worlds, G6 Caspian
-# RushLarge0 spawns; exits 77 without an install). tools.tc_cost (G3, tests/tc_cost.cmake): bf3dump shapes
+# sim.terrain.unit (no data); the install suite sim-terrain in two rows (openbf3_case_row; exit 77 without an install):
+# sim.terrain = G1 over every level x mode (the dev pass's critical path: its runs and checks on lanes, PROCESSORS 8),
+# sim.terrain.worlds = the full cached worlds and G6 Caspian RushLarge0 spawns; both run the install-unchanged case and
+# sim.terrain.split_cover proves every case is in exactly one of them. tools.tc_cost (G3, tests/tc_cost.cmake): bf3dump shapes
 # cold / warm / warm in child processes on fresh scratch roots, the limits of docs §4.5 (report-only under asan;
 # label timing, RUN_SERIAL).
 openbf3_test(test_sim_terrain test_main.cpp terrain_collision_tests.cpp terrain_collision_support.h test_support.h)
 target_link_libraries(test_sim_terrain PRIVATE bf3_sim Jolt)
 target_include_directories(test_sim_terrain PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
 add_test(NAME sim.terrain.unit COMMAND test_sim_terrain --test-suite=sim-terrain-unit)
-add_test(NAME sim.terrain COMMAND test_sim_terrain --test-suite=sim-terrain)
-set_tests_properties(sim.terrain PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+openbf3_case_row(NAME sim.terrain EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain COUNT 2 CASES "*G1*every*"
+    INSTALL_CASE "*install is unchanged*")
+openbf3_case_row(NAME sim.terrain.worlds EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain COUNT 3
+    CASES "*G1*full*worlds*" "*G6*Caspian*" INSTALL_CASE "*install is unchanged*")
+openbf3_split_cover(NAME sim.terrain.split_cover EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain
+    INSTALL_CASE "*install is unchanged*")
+set_tests_properties(sim.terrain sim.terrain.worlds PROPERTIES TIMEOUT 1800)
 set_tests_properties(sim.terrain.unit PROPERTIES TIMEOUT 600)
 if(TARGET bf3dump)
     add_test(NAME tools.tc_cost COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
@@ -652,8 +659,8 @@ if(TARGET bf3dump)
 endif()
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_tc_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(tc.contract sim.terrain.unit sim.terrain PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
-    set_tests_properties(sim.terrain PROPERTIES TIMEOUT 10800) # G1 over 230 runs: 25 of 29 levels in 5,400 s under asan
+    set_tests_properties(tc.contract sim.terrain.unit sim.terrain sim.terrain.worlds PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
+    set_tests_properties(sim.terrain PROPERTIES TIMEOUT 10800) # G1 over 230 runs: 25 of 29 levels in 5,400 s under asan (serial)
     if(TARGET bf3dump)
         set_tests_properties(tools.tc_cost PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
     endif()
@@ -894,7 +901,9 @@ openbf3_label(serial_wallclock host.scale.unit)
 openbf3_label(merge_also tools.ebx_memory tools.m1_prepare)
 
 # PROCESSORS = measured cpu / wall (rounded, >= 2); COST = measured serial seconds (rows over 5 s), so a fresh build
-# directory without CTestCostData.txt still starts the critical path first. Measured on 925cd51 + S01 (dev, serial, 611 s pass).
+# directory without CTestCostData.txt still starts the critical path first. Measured on 925cd51 + S01 (dev, serial, 611 s pass);
+# the rows S08-S15 put on lanes (sim.terrain, sim.nav, logic.census, sim.vehicle(.unit), fx.install, core.level.collision,
+# core.ant) re-measured alone after those steps (jobrun cpu / wall, 2026-10-17).
 function(openbf3_cost p_row p_processors p_cost)
     if(TEST ${p_row})
         if(p_processors GREATER 1)
@@ -903,7 +912,8 @@ function(openbf3_cost p_row p_processors p_cost)
         set_tests_properties(${p_row} PROPERTIES COST ${p_cost})
     endif()
 endfunction()
-openbf3_cost(sim.terrain 4 283)
+openbf3_cost(sim.terrain 8 150)
+openbf3_cost(sim.terrain.worlds 2 25)
 openbf3_cost(sim.nav 6 47)
 openbf3_cost(logic.census 2 38)
 openbf3_cost(sim.vehicle 1 40)
