@@ -641,8 +641,10 @@ struct GameServer::Impl {
 				++step_precondition_failures;
 			}
 			const bool was_alive = alive(s.state);
+			const sim::SoldierState sv_before = s.state; // M2a sv [loop]
 			motor.step(s.state, s.last);
 			++times.motor_steps; // S1
+			sv_step_soldier(s, sv_before, was_alive); // M2a sv [loop]: step 4a, the weapons after the motor
 			if (was_alive && !alive(s.state) && !s.dummy) {
 				s.want_spawn = true;
 				s.respawn_at = n + config.respawn_ticks;
