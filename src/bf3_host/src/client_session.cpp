@@ -735,6 +735,7 @@ struct ClientSession::Impl {
 			// The server's last command at the spawn tick is the hold command (whatever the ring held for that
 			// tick belonged to the old life), so the catch-up repeats it for ticks the client never sent.
 			ring->put({ sim::hold_command(p_s), p_s, false });
+			cl_weapons_spawn(p_s); // M2a cl: the life's weapons at the spawn tick
 			run_catch_up(p_s);
 			++stats.spawns;
 			stats.spawned = true;
@@ -744,6 +745,7 @@ struct ClientSession::Impl {
 		const sim::PredictionEntry *e = ring->find(p_s.tick);
 		if (e == nullptr) {
 			++stats.ring_misses;
+			cl_weapons_ring_miss(p_s); // M2a cl
 			run_catch_up(p_s);
 			return;
 		}
@@ -751,6 +753,7 @@ struct ClientSession::Impl {
 			if (config.debug_hash_compare && sim::soldier_state_hash(e->state) != sim::soldier_state_hash(p_s)) {
 				++stats.hash_mismatches;
 			}
+			cl_after_match(p_s); // M2a cl: weapons by wire view, R2's health rebase
 			return;
 		}
 		++stats.reconciliations;
@@ -758,6 +761,7 @@ struct ClientSession::Impl {
 		stats.last_reconcile_ns = p_now;
 		const sim::PredictionEntry *before = next_tick > 0 ? ring->find(next_tick - 1u) : nullptr;
 		const sim::Vec3 old_pos = before != nullptr ? before->state.position : p_s.position;
+		cl_weapons_reconcile(p_s); // M2a cl
 		run_catch_up(p_s);
 		const sim::PredictionEntry *after = next_tick > 0 ? ring->find(next_tick - 1u) : nullptr;
 		const sim::Vec3 new_pos = after != nullptr ? after->state.position : p_s.position;
@@ -865,12 +869,14 @@ struct ClientSession::Impl {
 			// 6-7. sample and predict from ring[C - 1].
 			const sim::PredictionEntry *base = ring->find(c - 1u);
 			cmd = sample_command(c);
+			cl_command_made(cmd, p_now); // M2a cl: fire_presses, the view sample, the received state
 			if (base == nullptr || cmd.tick != base->state.tick + 1u) {
 				++stats.step_precondition_failures;
 				assert(false && "ClientSession: prediction base missing");
 			} else {
 				sim::SoldierState state = base->state;
 				motor.step(state, cmd);
+				cl_predict_weapons(cmd, base->state, state); // M2a cl: the weapons after the motor step, first prediction
 				events_acc |= state.events;
 				ring->put({ cmd, state, true });
 				made = ring->find(c);
@@ -884,6 +890,7 @@ struct ClientSession::Impl {
 				net::CommandPacket p;
 				p.newest_snapshot = newest_seq;
 				p.snapshot_ack_bits = ack_bits;
+				p.others_ack_bits = cl_others_ack_bits(); // M2a cl
 				p.count = uint8_t(history.size());
 				for (size_t i = 0; i < history.size(); ++i) {
 					p.commands[i] = history[history.size() - 1 - i];
