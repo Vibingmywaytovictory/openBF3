@@ -8,11 +8,9 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <map>
-#include <mutex>
 #include <set>
 #include <thread>
 
@@ -147,19 +145,39 @@ float fx_variable_dt(uint64_t p_seed, uint64_t p_frame) {
 
 // ---- lane pool ---------------------------------------------------------------------------------------------
 
+// The hand-off is two atomics: run() publishes the job (world, items, chunk) and bumps the generation `job` with
+// release order; a lane that acquires the new generation sees the job, works, and decrements `busy` (acq_rel); run()
+// returns once it acquires busy == 0, so every lane's writes to the world happen before the caller's next step. Both
+// waits spin a bounded number of polls (a step is often shorter than a thread wake-up) and then block in
+// std::atomic::wait, so idle lanes cost nothing under an oversubscribed ctest -j.
 struct LanePool::Impl {
+	static constexpr int kSpinPolls = 2000;
 	unsigned lanes = 1;
 	std::vector<std::thread> threads;
-	std::mutex mutex;
-	std::condition_variable wake;
-	std::condition_variable done;
-	uint64_t job = 0;
-	bool quit = false;
+	std::atomic<uint64_t> job{ 0 };
+	std::atomic<bool> quit{ false };
 	FxWorld *world = nullptr;
 	size_t items = 0;
 	size_t chunk = 1;
 	std::atomic<size_t> next{ 0 };
-	unsigned busy = 0;
+	std::atomic<unsigned> busy{ 0 };
+
+	// Waits until p_value no longer holds p_old; returns the new value.
+	template <class T>
+	static T wait_change(const std::atomic<T> &p_value, T p_old) {
+		T v = p_value.load(std::memory_order_acquire);
+		for (int i = 0; v == p_old && i < kSpinPolls; ++i) {
+			if ((i & 63) == 63) {
+				std::this_thread::yield();
+			}
+			v = p_value.load(std::memory_order_acquire);
+		}
+		while (v == p_old) {
+			p_value.wait(p_old, std::memory_order_acquire);
+			v = p_value.load(std::memory_order_acquire);
+		}
+		return v;
+	}
 
 	void work() {
 		const size_t chunks = (items + chunk - 1) / chunk;
@@ -174,20 +192,13 @@ struct LanePool::Impl {
 	void loop() {
 		uint64_t seen = 0;
 		for (;;) {
-			{
-				std::unique_lock<std::mutex> lock(mutex);
-				wake.wait(lock, [&]() { return quit || job != seen; });
-				if (quit) {
-					return;
-				}
-				seen = job;
+			seen = wait_change(job, seen);
+			if (quit.load(std::memory_order_acquire)) {
+				return;
 			}
 			work();
-			{
-				const std::lock_guard<std::mutex> lock(mutex);
-				if (--busy == 0) {
-					done.notify_all();
-				}
+			if (busy.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+				busy.notify_all();
 			}
 		}
 	}
@@ -202,11 +213,9 @@ LanePool::LanePool(unsigned p_lanes) :
 }
 
 LanePool::~LanePool() {
-	{
-		const std::lock_guard<std::mutex> lock(impl_->mutex);
-		impl_->quit = true;
-	}
-	impl_->wake.notify_all();
+	impl_->quit.store(true, std::memory_order_release);
+	impl_->job.fetch_add(1, std::memory_order_release);
+	impl_->job.notify_all();
 	for (std::thread &t : impl_->threads) {
 		t.join();
 	}
@@ -221,19 +230,23 @@ void LanePool::run(FxWorld &r_world, size_t p_items, size_t p_chunk) {
 	if (p_items == 0) {
 		return;
 	}
-	{
-		const std::lock_guard<std::mutex> lock(p.mutex);
-		p.world = &r_world;
-		p.items = p_items;
-		p.chunk = std::max<size_t>(1, p_chunk);
-		p.next = 0;
-		p.busy = unsigned(p.threads.size());
-		++p.job;
+	// The lanes are all parked on `job` here (the previous run returned at busy == 0), so the plain fields are free.
+	p.world = &r_world;
+	p.items = p_items;
+	p.chunk = std::max<size_t>(1, p_chunk);
+	p.next.store(0, std::memory_order_relaxed);
+	if (p.threads.empty()) {
+		p.work(); // one lane: the same chunks on this thread, no hand-off
+		return;
 	}
-	p.wake.notify_all();
+	p.busy.store(unsigned(p.threads.size()), std::memory_order_relaxed);
+	p.job.fetch_add(1, std::memory_order_release);
+	p.job.notify_all();
 	p.work();
-	std::unique_lock<std::mutex> lock(p.mutex);
-	p.done.wait(lock, [&]() { return p.busy == 0; });
+	unsigned b = p.busy.load(std::memory_order_acquire);
+	while (b != 0) {
+		b = Impl::wait_change(p.busy, b);
+	}
 }
 
 void fx_step_frame(FxWorld &r_world, float p_dt, LanePool *p_pool, size_t p_chunk) {

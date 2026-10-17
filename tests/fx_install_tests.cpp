@@ -67,6 +67,26 @@ bool open_or_skip(Session &r_s, bool p_all = true) {
 	return true;
 }
 
+// The @all-mp library, opened and bulk-loaded once per process and shared (read only) by the cases that need it
+// (census, muzzle, oilfire, cache, check). Built lazily by the first of them, so each case still runs alone under a
+// doctest filter; null (the case skips) without an install.
+Session *all_mp() {
+	static std::unique_ptr<Session> s_session;
+	static bool s_tried = false;
+	if (!s_tried) {
+		s_tried = true;
+		auto made = std::make_unique<Session>();
+		if (open_or_skip(*made)) {
+			s_session = std::move(made);
+		}
+		return s_session.get();
+	}
+	if (s_session == nullptr) {
+		bf3::test::skip_install_case("no BF3 install (see the first fx-install case)");
+	}
+	return s_session.get();
+}
+
 void print_failures(const HarnessReport &p_rep) {
 	for (const std::string &f : p_rep.failures) {
 		MESSAGE(f);
@@ -88,10 +108,11 @@ std::vector<std::string> blueprints_of(const EbxLibrary &p_lib) {
 TEST_SUITE("fx-install") {
 
 TEST_CASE("census: G1, every blueprint and emitter document compiles") {
-	Session s;
-	if (!open_or_skip(s)) {
+	Session *shared = all_mp();
+	if (shared == nullptr) {
 		return;
 	}
+	Session &s = *shared;
 	const Result<CensusReport> r = run_census(*s.all);
 	REQUIRE(r.ok());
 	for (const std::string &e : r->errors) {
@@ -117,10 +138,11 @@ TEST_CASE("census: G1, every blueprint and emitter document compiles") {
 }
 
 TEST_CASE("muzzle: G3, fx_muzz_generic_rifle_1p over 10,000 starts") {
-	Session s;
-	if (!open_or_skip(s)) {
+	Session *shared = all_mp();
+	if (shared == nullptr) {
 		return;
 	}
+	Session &s = *shared;
 	CompileContext ctx;
 	ctx.db = s.all.get();
 	Result<EffectDef> d = compile_effect(kMuzzle, ctx);
@@ -137,10 +159,11 @@ TEST_CASE("muzzle: G3, fx_muzz_generic_rifle_1p over 10,000 starts") {
 }
 
 TEST_CASE("oilfire: G4, the wrapped fire_01 holds 79..81 live, fixed and variable dt") {
-	Session s;
-	if (!open_or_skip(s)) {
+	Session *shared = all_mp();
+	if (shared == nullptr) {
 		return;
 	}
+	Session &s = *shared;
 	CompileContext ctx;
 	ctx.db = s.all.get();
 	Result<EffectDef> d = compile_emitter_effect(kOilfire, ctx);
@@ -230,10 +253,11 @@ TEST_CASE("atlas: G6, Metro's emitter atlas and every name its documents use") {
 }
 
 TEST_CASE("cache: cold and warm compiles give the same defs") {
-	Session s;
-	if (!open_or_skip(s)) {
+	Session *shared = all_mp();
+	if (shared == nullptr) {
 		return;
 	}
+	Session &s = *shared;
 	const std::filesystem::path root =
 			std::filesystem::temp_directory_path() / ("openbf3_fx_install_cache_" + std::to_string(GetCurrentProcessId()));
 	std::error_code ec;
@@ -288,10 +312,11 @@ TEST_CASE("cache: cold and warm compiles give the same defs") {
 }
 
 TEST_CASE("check: G7 and G8 over every effect, 10 s, seed 1") {
-	Session s;
-	if (!open_or_skip(s)) {
+	Session *shared = all_mp();
+	if (shared == nullptr) {
 		return;
 	}
+	Session &s = *shared;
 	const std::vector<std::string> names = blueprints_of(*s.all);
 	std::vector<std::shared_ptr<const EffectDef>> defs(names.size());
 	parallel_for(names.size(), [&](size_t i) {
