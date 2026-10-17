@@ -623,6 +623,7 @@ core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<con
 	table->materials = std::move(p_materials);
 	table->mechanics = p_options.mechanics;
 	table->infinite_magazine = p_options.infinite_magazine;
+	table->exact_aim = p_options.exact_aim; // M2a sv, R3
 	table->sprint_recover_time = seconds_to_units(data_decimal(p_options.sprint_recover_seconds));
 	table->hash = weapon_table_hash(*table);
 	return std::shared_ptr<const WeaponTable>(std::move(table));
@@ -641,6 +642,9 @@ uint64_t weapon_table_hash(const WeaponTable &p_table) {
 	}
 	hash_mechanics(h, p_table.mechanics);
 	h.add(p_table.infinite_magazine);
+	if (p_table.exact_aim) {
+		h.add(p_table.exact_aim); // M2a sv, R3: only when set, so every table without the option hashes as before (W1-W11, weapon-sim output)
+	}
 	h.add(p_table.sprint_recover_time);
 	return h.value();
 }
