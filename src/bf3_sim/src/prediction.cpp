@@ -93,11 +93,14 @@ CatchUpStats catch_up(const SoldierMotor &p_motor, const SoldierState &p_base, P
 	if (survives(state.tick)) {
 		r_ring.put({ prev, state, base_sent });
 	}
+	WeaponReplay weapon_replay(r_ring.weapons(), state); // M2a cl (named insertion, docs/design/m2a.md §8.2)
 	for (Tick t = state.tick + 1u; t < p_until; ++t) {
 		const PredictionEntry *e = r_ring.find(t);
 		const bool sent = e != nullptr && e->sent && e->command.tick == t;
 		const Command cmd = sent ? e->command : repeated_command(prev, t);
+		const SoldierState weapon_before = state; // M2a cl
 		p_motor.step(state, cmd);
+		weapon_replay.step(cmd, weapon_before, state); // M2a cl (named insertion: the weapons after the motor step)
 		if (survives(t)) {
 			r_ring.put({ cmd, state, sent });
 		}
