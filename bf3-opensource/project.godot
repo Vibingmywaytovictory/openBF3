@@ -42,3 +42,9 @@ lights_and_shadows/multi_bounce_occlusion/enabled=true
 ; M1 T6 (docs/design/m1.md §3): Godot's pool capped at 4 so it does not compete with the server, client and loader
 ; threads; the level upload keeps at most 3 C1 tasks in flight, so one pool thread stays free.
 worker_pool/max_threads=4
+
+; M2a audio (docs/design/m2a-audio.md §6.5): the server mixes at the data rate (AudioSystemAsset SampleRate), so the
+; openBF3 mixer stream is never resampled.
+[audio]
+
+driver/mix_rate=48000

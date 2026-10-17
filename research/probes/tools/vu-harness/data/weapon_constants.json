@@ -1,0 +1,330 @@
+{
+ "doc": "Data values the S5 decision rules compare against. Every value is copied from our own research (PORTING-RESEARCH.md section 7, 'P7.x'; section 8 C14), which read them from the retail install. null = not in P section 7 or topics/01-weapons.md: fill from bf3dump (read-only on the install) before the rule that needs it runs; the analysis reports the measurement without a data comparison while a value is null.",
+ "units": "degrees for angles, m, m/s, s, hp; rpm rounds per minute",
+ "weapons": {
+  "M16A3": {
+   "unlock": "Weapons/M16A4/U_M16A4",
+   "rpm": 800,
+   "mag": 31,
+   "v0": 650,
+   "g": -15,
+   "falloff": {
+    "start_dmg": 25,
+    "end_dmg": 18.4,
+    "start_m": 8,
+    "end_m": 50
+   },
+   "hip": {
+    "min": 2.5,
+    "max": 7,
+    "inc": 0.1,
+    "dec_per_s": 15
+   },
+   "ads": {
+    "min": 0.2,
+    "max": 3,
+    "inc": 0.1,
+    "dec_per_s": 15
+   },
+   "recoil": {
+    "up": 0.26,
+    "h_min": -0.4,
+    "h_max": 0.1,
+    "dec": 18,
+    "fsrm": 2.5
+   },
+   "zone": "BulletDamage",
+   "src": "P7.1 M16A3 row; dec_per_s 15 from topics/01-weapons.md l.459 (\"15 deg/s on every rifle\"), stand only"
+  },
+  "AK74M": {
+   "unlock": "Weapons/AK74M/U_AK74M",
+   "rpm": 650,
+   "mag": 31,
+   "v0": 600,
+   "g": -15,
+   "falloff": {
+    "start_dmg": 25,
+    "end_dmg": 18.4,
+    "start_m": 8,
+    "end_m": 50
+   },
+   "recoil": {
+    "up": 0.28,
+    "h_min": -0.3,
+    "h_max": 0.2,
+    "dec": 18,
+    "fsrm": 1.5
+   },
+   "zone": "BulletDamage",
+   "src": "P7.1 AK-74M row; topics/01-weapons.md assault table l.342/349/373 (stand ADS min / hip min +IncreasePerShot)",
+   "hip": {
+    "min": 2.5,
+    "max": null,
+    "inc": 0.1,
+    "dec_per_s": 15
+   },
+   "ads": {
+    "min": 0.2,
+    "max": null,
+    "inc": 0.1,
+    "dec_per_s": 15
+   }
+  },
+  "M416": {
+   "unlock": "Weapons/M416/U_M416",
+   "rpm": 750,
+   "mag": 31,
+   "v0": 600,
+   "g": -15,
+   "falloff": {
+    "start_dmg": 25,
+    "end_dmg": 18.4,
+    "start_m": 8,
+    "end_m": 50
+   },
+   "recoil": {
+    "up": 0.26,
+    "h_min": -0.3,
+    "h_max": 0.1,
+    "dec": 18,
+    "fsrm": 2
+   },
+   "zone": "BulletDamage",
+   "src": "topics/01-weapons.md assault table l.342/349/373 (stand ADS min / hip min +IncreasePerShot) (unlock path inferred; P0.2 resolves it)",
+   "hip": {
+    "min": 2.5,
+    "max": null,
+    "inc": 0.1,
+    "dec_per_s": 15
+   },
+   "ads": {
+    "min": 0.2,
+    "max": null,
+    "inc": 0.1,
+    "dec_per_s": 15
+   }
+  },
+  "M249": {
+   "unlock": "Weapons/M249/U_M249",
+   "rpm": 800,
+   "mag": 100,
+   "v0": 620,
+   "g": -15,
+   "falloff": {
+    "start_dmg": 25,
+    "end_dmg": 18.4,
+    "start_m": 8,
+    "end_m": 50
+   },
+   "hip": {
+    "min": 5,
+    "max": 7,
+    "inc": 0.1
+   },
+   "ads": {
+    "min": 0.5
+   },
+   "recoil": {
+    "up": 0.4,
+    "h_min": -0.4,
+    "h_max": 0.4,
+    "dec": 12,
+    "fsrm": 2.2
+   },
+   "zone": "BulletDamage",
+   "src": "P7.1 M249 row; topics/01-weapons.md assault table l.342/349/373 (stand ADS min / hip min +IncreasePerShot)"
+  },
+  "M98B": {
+   "unlock": "Weapons/Model98B/U_M98B",
+   "rpm": 46.2,
+   "mag": 6,
+   "v0": 650,
+   "g": -9.81,
+   "falloff": {
+    "start_dmg": 95,
+    "end_dmg": 59,
+    "start_m": 15,
+    "end_m": 150,
+    "end_m_community": 120
+   },
+   "zone": "Sniper",
+   "src": "P7.1 M98B row; P8 C14 (150 vs 120)"
+  },
+  "M9": {
+   "unlock": "Weapons/M9/U_M9",
+   "rpm": 400,
+   "mag": 16,
+   "v0": 380,
+   "g": -15,
+   "falloff": {
+    "start_dmg": 25,
+    "end_dmg": 13.75,
+    "start_m": 12,
+    "end_m": 50
+   },
+   "zone": "BulletDamage",
+   "src": "P7.1 M9 row"
+  },
+  "870MCS": {
+   "unlock": "Weapons/Remington870/U_870",
+   "rpm": 125,
+   "pellets": 12,
+   "v0": 300,
+   "g": -9.81,
+   "falloff": {
+    "start_dmg": 18,
+    "end_dmg": 6,
+    "start_m": 8,
+    "end_m": 25
+   },
+   "pellet_cone": 3,
+   "zone": "buckshot",
+   "src": "P7.1 870MCS row"
+  },
+  "RPG7": {
+   "unlock": "Weapons/RPG7/U_RPG7",
+   "direct": 225,
+   "direct_community": 100,
+   "blast": 112,
+   "inner": 0.35,
+   "radius": 4,
+   "arm_s": 0.5,
+   "zone": "RPG impact 2.5",
+   "src": "P7.1 RPG-7/SMAW row; P8 C14"
+  },
+  "SMAW": {
+   "unlock": "Weapons/SMAW/U_SMAW",
+   "direct": 225,
+   "direct_community": 100,
+   "blast": 112,
+   "inner": 0.35,
+   "radius": 4,
+   "arm_s": 0.5,
+   "src": "P7.1 RPG-7/SMAW row"
+  },
+  "M320HE": {
+   "unlock": "Weapons/Gadgets/M320/U_M320_HE",
+   "direct": 100,
+   "blast": 112,
+   "inner": 0.35,
+   "radius": 5,
+   "arm_s": 0.5,
+   "src": "P7.1 M320 HE row"
+  },
+  "M67": {
+   "unlock": "Weapons/M67/U_M67",
+   "blast": 112,
+   "inner": 1.5,
+   "radius": 7,
+   "fuse_s": 3.6,
+   "src": "P7.1 M67 row"
+  }
+ },
+ "zones": {
+  "BulletDamage": {
+   "head": 2.0,
+   "body": 1.0,
+   "chest": 1.0,
+   "legs": 0.91
+  },
+  "Sniper": {
+   "head": 2.35,
+   "body": 1.0,
+   "chest": 1.25,
+   "legs": 0.91
+  },
+  "338": {
+   "head": 2.35,
+   "body": 1.0,
+   "chest": 1.06,
+   "legs": 0.91
+  },
+  "buckshot": {
+   "head": 1.0,
+   "body": 1.0,
+   "chest": 1.0,
+   "legs": 0.91
+  },
+  "src": "P7.1 body multipliers (Metro, MP_001, Caspian)"
+ },
+ "spread_decrease_c14": {
+  "data": 15,
+  "community": 8,
+  "src": "P8 C14 (weapon and state not named there: confirm with bf3dump for each W-A config)"
+ },
+ "soldier": {
+  "health": 100,
+  "regen_delay_s": 10,
+  "regen_delay_community_s": 16,
+  "regen_rate_hps": 5,
+  "immortal_after_spawn_s": 2,
+  "speed": {
+   "stand": 4.0,
+   "sprint": 6.5,
+   "crouch": 2.0,
+   "prone": 0.9,
+   "back_strafe_factor": 0.75
+  },
+  "jump_height_m": 0.6,
+  "fall_damage": [
+   [
+    13.9,
+    0
+   ],
+   [
+    14,
+    20
+   ],
+   [
+    22,
+    40
+   ],
+   [
+    30,
+    100
+   ]
+  ],
+  "gains": {
+   "acceleration": 0.35,
+   "deceleration": -15,
+   "sprint": 0.25,
+   "inair_accel": 0.1,
+   "falling_accel": 0.05
+  },
+  "free_fall_velocity": 16,
+  "falling_speed": 15,
+  "gravity": null,
+  "pose_transition_s": {
+   "stand_crouch": 0.3,
+   "stand_prone": 0.7,
+   "crouch_prone": 0.5,
+   "prone_stand": 0.7,
+   "prone_crouch": 1.05
+  },
+  "src": "P7.2; P3.1; m1.md section 6.4 (gravity is not in the data: MotorTuning default 9.81 [inferred])"
+ },
+ "modes": {
+  "ticket_loss_per_min": 15,
+  "ticket_loss_start": 100,
+  "capture": {
+   "time_to_get": 20,
+   "time_to_lose": 20,
+   "added_per_player": 0.34,
+   "max_multiplier": 4
+  },
+  "levels": {
+   "MP_Subway/ConquestSmall0": {
+    "tickets": 350,
+    "area_value_per_flag": 55,
+    "flags": 3
+   },
+   "MP_001/ConquestLarge0": {
+    "tickets": 400,
+    "area_value_per_flag": 34,
+    "flags": null
+   }
+  },
+  "src": "P7.3 conquest row ('Metro CQS 350/55', 'MP_001 CQL 400/34' read as tickets / AreaValue per flag [inferred], consistent with R3.5 '2 x 55 = 110', '3 x 34 = 102'); flag counts from the level iterator at run time"
+ },
+ "stance_note": "crouch/prone minima and every non-rifle DecreasePerSecond are null: fill from bf3dump weapon-sim (read-only on the install) before W2 compares them; the analysis then reports the measurement alone"
+}

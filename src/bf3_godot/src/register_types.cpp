@@ -1,13 +1,22 @@
 // GDExtension entry of openBF3 (entry_symbol "openbf3_library_init" in openbf3.gdextension).
 
 #include "bf3_localisation.h"
+// M2a audio
+#include "audio_demo.h"
+#include "audio_stream.h"
 #include "collision_overlay.h"
 #include "dedicated_main_loop.h"
 #include "game_session.h"
 #include "level_session.h"
+#include "minimap_control.h" // UI ui2
+#include "minimap_hud.h" // UI ui2
 #include "s3_crowd.h" // S3 crowd
 #include "viewmodel_demo.h"
 #include "weapon_inspector.h"
+#include "world_icons.h" // UI ui2
+// UI ui1
+#include "ui_assets.h"
+#include "ui_font_check.h"
 
 #include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
@@ -36,6 +45,17 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3LevelSession);
 	// S3 crowd
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Crowd);
+	// UI ui1
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiAssets);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
+	// UI ui2 (docs/design/ui-minimap-icons.md §10.1)
+	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapHud);
+	// M2a audio
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

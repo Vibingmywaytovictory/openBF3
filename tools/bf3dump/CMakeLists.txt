@@ -31,3 +31,17 @@ target_sources(bf3dump PRIVATE nav_commands.cpp nav_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_host)
 # S2 vehicle (docs/design/s2.md §1, §8): `vehicledrive` and `vehicle-replay` (bf3_sim from M1 T1's block above).
 target_sources(bf3dump PRIVATE vehicle_commands.cpp vehicle_commands.h)
+# UI ui1 (docs/design/ui-swf-fonts.md §12.4): `swf census | movie | labels | layout | hud | fonts`.
+target_sources(bf3dump PRIVATE swf_commands.cpp swf_commands.h)
+# UI ui2 (docs/design/ui-minimap-icons.md §15): `minimap`, `hud-icons`, `item-icons`, `hud-sources`.
+target_sources(bf3dump PRIVATE ui_commands.cpp ui_commands.h)
+# M2a weapons (docs/design/m2a-weapons.md §10): `weapon-sim` and `range`, the weapon simulation of bf3_sim on defs
+# resolved from the install (bf3_sim from M1 T1's block above).
+target_sources(bf3dump PRIVATE weapon_sim_commands.cpp weapon_sim_commands.h)
+# M2a VFX1 (docs/design/m2a-vfx1.md §7.7): `fx census | compile | simulate | check | bench | atlas | impacts`.
+target_sources(bf3dump PRIVATE fx_commands.cpp fx_commands.h)
+target_link_libraries(bf3dump PRIVATE bf3_fx)
+# M2a audio (docs/design/m2a-audio.md §1, §9): `audio waves|loc|census|render`, the drivers of gates G1-G4 and the
+# offline render through bf3_audio's mixer core.
+target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_commands.cpp)
+target_link_libraries(bf3dump PRIVATE bf3_audio)

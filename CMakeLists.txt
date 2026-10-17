@@ -139,3 +139,11 @@ if(OPENBF3_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# M2a VFX1 (docs/design/m2a-vfx1.md): bf3_fx, the Godot-free effect compiler and particle simulator (client only).
+# Added after the tools and tests on purpose: link edges to it resolve at generate time, and an appended block keeps
+# this shared file's existing lines untouched.
+add_subdirectory(src/bf3_fx)
+
+# M2a audio (docs/design/m2a-audio.md): the Godot-free client audio runtime (patch instances, mixer core, DSP).
+add_subdirectory(src/bf3_audio)

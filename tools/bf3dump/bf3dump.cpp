@@ -55,6 +55,18 @@
 //   vehicledrive <LEVEL> <MODE> [<blueprint>]   the drive def and the vehicle model (vehicle_commands.cpp)
 //   vehicle-replay <LEVEL> <MODE> [options]     courses and gates C / D / G1 / G1r / G2x (G2 reported), --handling, --sweep,
 //                                               --hash-out (gate X), --log-out / --log-in (vehicle_commands.cpp)
+// UI ui1 (docs/design/ui-swf-fonts.md §12.4; swf_commands.cpp):
+//   swf census | movie <name> | labels <name> | layout <name> | hud | fonts
+//                              SwfMovie symbol tables, atlas label maps, HUD positions, UI fonts
+// UI ui2 (ui_commands.cpp; docs/design/ui-minimap-icons.md §15):
+//   minimap <LEVEL> [MODE] | minimap --census   UIMinimapData, combat areas, objectives / the all-level census
+//   hud-icons | item-icons [LEVEL] | hud-sources [--unbound]   the hud3dicons atlas, _small item icons, DataSources
+// M2a weapons (docs/design/m2a-weapons.md §10; weapon_sim_commands.cpp):
+//   weapon-sim <partition> | --all | --check   the weapon simulation on resolved defs (timing, drop, shots to kill)
+//   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
+// M2a VFX1:
+//   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
+// M2a audio (audio_commands.h): audio waves|loc|census|render, the drivers of gates G1-G4 and the offline render
 //
 // Command semantics and output formats follow the ebx-dump probe
 // (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
@@ -84,6 +96,16 @@
 #include "nav_commands.h"
 // S2 vehicle: vehicledrive, vehicle-replay.
 #include "vehicle_commands.h"
+// UI ui1: the SwfMovie, atlas, layout and UI font commands.
+#include "swf_commands.h"
+// UI ui2: minimap, HUD icon and HUD source commands.
+#include "ui_commands.h"
+// M2a weapons: weapon-sim and range.
+#include "weapon_sim_commands.h"
+// M2a VFX1: bf3dump fx (effect compiler, simulator, atlas, impacts).
+#include "fx_commands.h"
+// M2a audio: XAS waves, Loc/en streams, the sound-patch census, offline renders.
+#include "audio_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -517,6 +539,9 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::logic_usage()); // S4 logic
 	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n"); // L1 look
 	std::fprintf(stderr, "%s", bf3dump::vehicle_usage()); // S2 vehicle
+	std::fprintf(stderr, "%s", bf3dump::swf_usage()); // UI ui1
+	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
+	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
 }
 
 } // namespace
@@ -653,6 +678,31 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (cmd == "vehicle-replay") {
 		return bf3dump::cmd_vehicle_replay(ctx.install, rest);
+	}
+	// UI ui1: swf <census|movie|labels|layout|hud|fonts> (swf_commands.cpp); 2 = usage.
+	if (cmd == "swf") {
+		if (const int rc = bf3dump::cmd_swf(ctx.reader, ctx.install, rest); rc != 2) {
+			return rc;
+		}
+	}
+	// UI ui2: minimap, hud-icons, item-icons, hud-sources (ui_commands.cpp).
+	if (const int rc = bf3dump::dispatch_ui2(ebx_ctx, cmd, rest); rc >= 0) {
+		return rc;
+	}
+	// M2a weapons: weapon-sim and range (weapon_sim_commands.cpp; docs/design/m2a-weapons.md §10).
+	if (cmd == "weapon-sim") {
+		return bf3dump::cmd_weapon_sim(ebx_ctx, rest);
+	}
+	if (cmd == "range") {
+		return bf3dump::cmd_range(ebx_ctx, rest);
+	}
+	// M2a VFX1: fx <subcommand> (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7).
+	if (cmd == "fx") {
+		return bf3dump::cmd_fx(ebx_ctx, rest);
+	}
+	// M2a audio: audio waves|loc|census|render (audio_commands.cpp; docs/design/m2a-audio.md §1).
+	if (cmd == "audio") {
+		return bf3dump::cmd_audio(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;

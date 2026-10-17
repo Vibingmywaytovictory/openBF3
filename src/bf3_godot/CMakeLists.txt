@@ -93,3 +93,36 @@ target_sources(bf3_godot PRIVATE
     src/nav_overlay.cpp
     src/nav_overlay.h
 )
+
+# UI ui1 (docs/design/ui-swf-fonts.md §10-§12): Bf3UiAssets (BF3 fonts as FontFiles, SWF atlases as AtlasTextures,
+# the HUD placement table) and the ui1 check scene's Bf3UiFontCheck (res://scenes/ui_fonts.tscn), registered in the
+# "// UI ui1" block of register_types.cpp.
+target_sources(bf3_godot PRIVATE
+    src/ui_assets.cpp
+    src/ui_assets.h
+    src/ui_font_check.cpp
+    src/ui_font_check.h
+)
+
+# UI ui2 (docs/design/ui-minimap-icons.md §10, §12): the in-game minimap node (Bf3MinimapHud, Bf3MinimapControl,
+# Bf3WorldIcons, MinimapCheck), registered in register_types.cpp under "// UI ui2".
+target_sources(bf3_godot PRIVATE
+    src/minimap_hud.cpp
+    src/minimap_hud.h
+    src/minimap_control.cpp
+    src/minimap_control.h
+    src/world_icons.cpp
+    src/world_icons.h
+    src/minimap_check.cpp
+    src/minimap_check.h
+)
+
+# M2a audio (docs/design/m2a-audio.md §6.5, §7): Bf3AudioStream / Bf3AudioPlayback over bf3_audio's mixer core
+# (registered by the A1 wave) and the audio demo node of res://scenes/audio_m16.tscn (A2 wave).
+target_sources(bf3_godot PRIVATE
+    src/audio_stream.cpp
+    src/audio_stream.h
+    src/audio_demo.cpp
+    src/audio_demo.h
+)
+target_link_libraries(bf3_godot PRIVATE bf3_audio)

@@ -1,0 +1,189 @@
+// DSP primitives of the A1/A2 mixer (dsp.h). Our own code from the textbook forms: the biquads are the RBJ Audio EQ
+// Cookbook forms in transposed direct form II; the pan is the equal-power (sin/cos) law.
+
+#include "bf3/audio/dsp.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace bf3::audio {
+
+namespace {
+
+constexpr float kPi = 3.14159265358979323846f;
+
+bool identity(const BiquadCoefficients &c) {
+	return c.b0 == 1.0f && c.b1 == 0.0f && c.b2 == 0.0f && c.a1 == 0.0f && c.a2 == 0.0f;
+}
+
+} // namespace
+
+float db_to_gain(float p_db) {
+	if (!(p_db > -144.0f)) {
+		return 0.0f;
+	}
+	return std::pow(10.0f, std::min(p_db, 96.0f) / 20.0f);
+}
+
+float gain_to_db(float p_gain) {
+	const float g = std::fabs(p_gain);
+	if (!(g > 6.3e-8f)) {
+		return -144.0f;
+	}
+	return 20.0f * std::log10(g);
+}
+
+BiquadCoefficients BiquadCoefficients::design(BiquadShape p_shape, float p_rate, float p_frequency, float p_q, float p_gain_db) {
+	BiquadCoefficients c;
+	if (p_shape == BiquadShape::Bypass || !(p_rate > 0.0f)) {
+		return c;
+	}
+	if (p_shape == BiquadShape::HighPass && !(p_frequency > 0.0f)) {
+		return c; // the identity: a 0 Hz high-pass passes everything unchanged (bit exact, see Biquad::process)
+	}
+	if (p_shape == BiquadShape::Peaking && p_gain_db == 0.0f) {
+		return c;
+	}
+	const float f = std::clamp(std::isfinite(p_frequency) ? p_frequency : 10.0f, 10.0f, 0.45f * p_rate);
+	const float q = std::clamp(std::isfinite(p_q) ? p_q : 0.70710678f, 0.1f, 30.0f);
+	const double w0 = 2.0 * double(kPi) * double(f) / double(p_rate);
+	const double cw = std::cos(w0);
+	const double alpha = std::sin(w0) / (2.0 * double(q));
+	double b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
+	switch (p_shape) {
+		case BiquadShape::LowPass:
+			b0 = (1.0 - cw) * 0.5;
+			b1 = 1.0 - cw;
+			b2 = b0;
+			a0 = 1.0 + alpha;
+			a1 = -2.0 * cw;
+			a2 = 1.0 - alpha;
+			break;
+		case BiquadShape::HighPass:
+			b0 = (1.0 + cw) * 0.5;
+			b1 = -(1.0 + cw);
+			b2 = b0;
+			a0 = 1.0 + alpha;
+			a1 = -2.0 * cw;
+			a2 = 1.0 - alpha;
+			break;
+		case BiquadShape::BandPass:
+			b0 = alpha;
+			b1 = 0.0;
+			b2 = -alpha;
+			a0 = 1.0 + alpha;
+			a1 = -2.0 * cw;
+			a2 = 1.0 - alpha;
+			break;
+		case BiquadShape::Peaking: {
+			const double a = std::pow(10.0, double(std::clamp(p_gain_db, -96.0f, 48.0f)) / 40.0);
+			b0 = 1.0 + alpha * a;
+			b1 = -2.0 * cw;
+			b2 = 1.0 - alpha * a;
+			a0 = 1.0 + alpha / a;
+			a1 = -2.0 * cw;
+			a2 = 1.0 - alpha / a;
+			break;
+		}
+		case BiquadShape::Bypass:
+			break;
+	}
+	c.b0 = float(b0 / a0);
+	c.b1 = float(b1 / a0);
+	c.b2 = float(b2 / a0);
+	c.a1 = float(a1 / a0);
+	c.a2 = float(a2 / a0);
+	return c;
+}
+
+void Biquad::process(float *r_samples, uint32_t p_frames, const BiquadCoefficients &p_target) {
+	if (p_frames == 0) {
+		return;
+	}
+	if (identity(c) && identity(p_target)) {
+		z1 = z2 = 0.0f;
+		return; // bit exact pass-through
+	}
+	const bool ramp = c.b0 != p_target.b0 || c.b1 != p_target.b1 || c.b2 != p_target.b2 || c.a1 != p_target.a1 || c.a2 != p_target.a2;
+	float b0 = c.b0, b1 = c.b1, b2 = c.b2, a1 = c.a1, a2 = c.a2;
+	float s1 = z1, s2 = z2;
+	if (ramp) {
+		const float inv = 1.0f / float(p_frames);
+		const float db0 = (p_target.b0 - b0) * inv, db1 = (p_target.b1 - b1) * inv, db2 = (p_target.b2 - b2) * inv;
+		const float da1 = (p_target.a1 - a1) * inv, da2 = (p_target.a2 - a2) * inv;
+		for (uint32_t i = 0; i < p_frames; ++i) {
+			b0 += db0;
+			b1 += db1;
+			b2 += db2;
+			a1 += da1;
+			a2 += da2;
+			const float x = r_samples[i];
+			const float y = b0 * x + s1;
+			s1 = b1 * x - a1 * y + s2;
+			s2 = b2 * x - a2 * y;
+			r_samples[i] = y;
+		}
+	} else {
+		for (uint32_t i = 0; i < p_frames; ++i) {
+			const float x = r_samples[i];
+			const float y = b0 * x + s1;
+			s1 = b1 * x - a1 * y + s2;
+			s2 = b2 * x - a2 * y;
+			r_samples[i] = y;
+		}
+	}
+	if (!std::isfinite(s1) || !std::isfinite(s2)) {
+		s1 = s2 = 0.0f; // never let a blown-up state persist
+	}
+	z1 = s1;
+	z2 = s2;
+	c = p_target;
+}
+
+void OnePoleLowPass::set_cutoff(float p_rate, float p_frequency) {
+	if (!(p_rate > 0.0f) || !(p_frequency > 0.0f)) {
+		a = 1.0f;
+		return;
+	}
+	a = 1.0f - std::exp(-2.0f * kPi * std::min(p_frequency, 0.5f * p_rate) / p_rate);
+}
+
+void OnePoleLowPass::process(float *r_samples, uint32_t p_frames) {
+	float s = y;
+	for (uint32_t i = 0; i < p_frames; ++i) {
+		s += a * (r_samples[i] - s);
+		r_samples[i] = s;
+	}
+	y = std::isfinite(s) ? s : 0.0f;
+}
+
+void apply_gain_ramp(float *r_samples, uint32_t p_frames, float p_from, float p_to) {
+	if (p_frames == 0) {
+		return;
+	}
+	if (p_from == p_to) {
+		if (p_to == 1.0f) {
+			return;
+		}
+		for (uint32_t i = 0; i < p_frames; ++i) {
+			r_samples[i] *= p_to;
+		}
+		return;
+	}
+	const float step = (p_to - p_from) / float(p_frames);
+	float g = p_from;
+	for (uint32_t i = 0; i < p_frames; ++i) {
+		g += step;
+		r_samples[i] *= g;
+	}
+}
+
+StereoGains equal_power_pan(float p_azimuth, float p_spread) {
+	const float az = std::isfinite(p_azimuth) ? p_azimuth : 0.0f;
+	const float spread = std::clamp(std::isfinite(p_spread) ? p_spread : 0.0f, 0.0f, 1.0f);
+	const float position = std::sin(az) * (1.0f - spread); // -1 left .. 1 right; front and back fold together
+	const float theta = (position + 1.0f) * 0.25f * kPi;
+	return StereoGains{ std::cos(theta), std::sin(theta) };
+}
+
+} // namespace bf3::audio

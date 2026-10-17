@@ -1,0 +1,731 @@
+# M2a VFX1 design: effect compiler and particle simulator
+
+Status: design for implementation, revision 2, 2026-10-15 (revision 1 after review: spawn admission and the phased
+step API, the multi-start harness, partition names, the G5 counting rules, effect transforms, RNG key layout; the
+change list is §17). Scope: slice **VFX1** of the plan
+([research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md) §3.14, D19, R19, §6 M2a row, §7.10; slice table in
+[research/topics/gap-r2-vfx-effects-system.md](../../research/topics/gap-r2-vfx-effects-system.md) §8.2, "gap VFX"
+below). The interface headers named below are in the tree under `src/bf3_fx/include/bf3/fx/` and compile (ctest
+`fx.contract`); their bodies are the implementation's work (§15).
+
+Tags: **[verified]** = read from code, data or a measurement in this tree on the date above (bf3dump `types` / `dump`
+/ `reshead` / `weapon` over the retail install plus Python over the dumps in scratch). **[plan]** = taken from the plan
+or the gap report, with its section. **[inferred]** = a design choice or estimate made here; every inferred semantic
+is pinned by a golden or listed in §13 / §14.
+
+---
+
+## 1. Goal and scope
+
+VFX1 turns BF3's own effect data into something a renderer can draw, without Godot:
+
+* **Compiler**: every `EffectBlueprint` and `EmitterDocument` of the install into a flat, owned `EffectDef` /
+  `EmitterDef` (all 32 processor types, all 10 evaluator types, polynomials with clamp and scale, spawn and age
+  rules, `MaxCount` / `MaxInstanceCount`, base and child emitters, tiers), cached by partition digest (§8).
+* **Simulator**: a deterministic structure-of-arrays CPU simulation (`FxWorld`) with fixed or variable dt that
+  outputs per-particle vertex records, point lights and sound / visual-environment events (§6.3–§6.8, §7.2).
+* **Level data**: the per-level emitter atlas (`EmitterAtlas`, §6.9) and impact selection from the material grid
+  (`ImpactTable`, §6.10).
+* **Tools**: `bf3dump fx` commands (census, compile, simulate with stats and goldens, check, bench, atlas, impacts;
+  §7.7).
+* **Seams** for VFX2 (renderer), VFX3 (triggers, lights, decals), VFX4 (network rules) and the audio track (§7).
+
+Not in VFX1: anything Godot-side (no `bf3_godot` change, no Godot check), pixel decode or upload of the atlas, the
+light pool, decals, triggers, `EmitterParameter` inputs, camera proximity, visual environments (§12).
+
+## 2. Exit gates
+
+Each gate has one automated command or ctest and one threshold. "fx.install" exits 77 without an install (ctest
+SKIP_RETURN_CODE 77), as every install test does. All timings are wall clock on a shared machine with other tracks
+building, so they are noisy; the bench gate takes the median of 5 runs and runs RUN_SERIAL.
+
+| id | gate | how measured | threshold |
+|---|---|---|---|
+| G1 | census: every blueprint and emitter compiles, no unknown type (plan §7.10 item 1) | ctest `fx.install` case "census" = `bf3dump fx census @all-mp` (`run_census`, 0 = all lanes) | blueprints 1,101/1,101 and EmitterDocuments 3,410/3,410 compiled; `unknown_types` and `unknown_enumerators` empty; 32/32 processor and 10/10 evaluator types seen; `max_work_units` ≤ kDefaultCompileWorkLimit / 16 (headroom) |
+| G2 | polynomial golden (item 2) | ctest `fx.contract` (now, header-inline evaluator) and `fx.unit` (compiled evaluators) | f(0) = w and f(1) = x+y+z+w exact on synthetic coefficients; clamp-then-scale (rapidsmoke 0.1 at t = 0); 1p flash alpha 1 → 0.0051852 (rel 1e-4); colour interp endpoints |
+| G3 | 1p muzzle golden `fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p` (EffectBlueprint, item 3) | ctest `fx.install` case "muzzle" = `bf3dump fx simulate fx_muzz_generic_rifle_1p --starts 10000 --seed 1 --seconds 1 --dt 0.0166667 --golden muzzle1p` (the short name resolves by unique suffix, `find_partition`; the harness runs each start alone, §7.7) | `stolen_instances` = 0 and `refused_starts` = 0 over the run; observed per-start component fractions equal the `fx_component_selected` fractions exactly and are: `_1p_flash`, `_1p_light_01`, `_1p_light_02` 0.75 ± 0.02, `rapidsmoke_ls_01` 1.0 exact, `nozzleflames_ls_01` 0.25 ± 0.02; flash: exactly 1 particle per started component, particle life 0.05 s (± 1e-6), spawn size ∈ [0.32, 0.40] × P(0) with P(0) = 0.7980724, size(t)/size(0) = P(t)/P(0) (rel 1e-5 at every step), start frame value ∈ [1, 16) with min < 1.01 and max > 15.99 over the starts; lights: one per live light particle, radius 0.2 / 2.5 exact, colour (1000, 395.072, 65.754) / (5, 1.875, 0.255) × intensity(t), intensity = clamp(cubic(t)) (rel 1e-5); rapidsmoke live ≤ 6 every step; every start's instance is no longer `alive` at the end of its 1 s run |
+| G4 | continuous steady state `em_amb_mp12_oilfire_l_fire_01` (item 4) | ctest `fx.install` case "oilfire" = `bf3dump fx simulate --emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01 --seconds 75 --dt 0.0166667 --seed 1 --golden oilfire` and the same with `--variable` in place of `--dt` (dt per frame uniform in [1/240, 1/20], a counter-based draw keyed by (seed, frame index), so the sequence is reproducible). `--emitter` wraps the lone EmitterDocument into a one-component EffectDef (`compile_emitter_effect`, MaxInstanceCount 1). Not the blueprint `fx/ambient/levelspecific/mp_12/fx_amb_mp12_oilfire_l`: it holds 4 emitters (fire_01, smoke_01, fire_02, smoke_01_highend) and a sound, so its total live count is not 80 | after a 15 s warm-up, live particles ∈ [79, 81] at every step over the next 60 s, in both runs; max live ≤ 81 (MaxCount) over the whole run; `spawns_dropped` = 0; `spawns_capped` reported |
+| G5 | impact selection, Metro and Caspian (item 5) | ctest `fx.install` case "impacts" = `bf3dump fx impacts MP_Subway --projectile=bullet` and `... MP_007 ...` | exact values under the counting rules of §5.3 (each count is defined there, so an implementation cannot pick the rule that fits): Metro 102 rows, 223 effect / 110 decal relations, the 5.56 cells of the 8 named materials, default-row indices 79, no-effect indices 66, 16 distinct effects; Caspian 118 rows, 299 / 123, default-row indices 63, no-effect indices 87, 16 distinct, its 8 named cells |
+| G6 | Metro atlas (item 6) | ctest `fx.install` case "atlas" = `bf3dump fx atlas MP_Subway` | 52 entries, 42 base + 10 normal, 3 degenerate; base DXT5 (2) sRGB 4096 × 4096, 13 mips; normal NormalDXT5RGA (20) linear 1024 × 2048, 12 mips; every non-degenerate rect pixel exact; every texture and normal-map name of Metro's 1,053 EmitterDocuments resolves (0 missing) and every entry is used |
+| G7 | every effect simulates sanely | ctest `fx.install` case "check" = `bf3dump fx check @all-mp --seconds 10 --seed 1` (harness of §7.7: each of the 1,101 effects runs 4 independent starts, each alone in a cleared world for 10 s: starts 0..2 at fixed dt 1/60 with seeds `fx_harness_seed(1, i)`, start 3 at the variable dt of G4) | 0 failures. A failure is any of: (a) a non-finite value in any output record; (b) `nonfinite_kills` > 0; (c) live particles of the instance > `EffectDef::max_particles` or `spawns_dropped` > 0 (simulator self-checks: admission makes both impossible, §6.7); (d) for an effect with a finite `effect_extent` (no continuous or repeating emitter): the live count rises between two steps after `spawn_end` + 3 steps (implementation: a delayed component starts at the first sub-step whose start time reaches its delay, and a child at the end of its parent particle's step, so spawning can lag `spawn_end` by about a step per level; the design's "+ one step" was too tight and is corrected here), or, when `end` + 1 s ≤ 10 s, the instance is still `alive` at `end` + 1 s. `end` includes the effect and component StartDelay, the children's windows and the largest possible UpdateAge life (`effect_extent`, effect_compiler.h). Effects with `end` + 1 s > 10 s (particle lives above about 9 s) skip the termination half of (d) and are counted and listed as `unchecked_termination` (reported, not a failure); continuous effects get (a)–(c) only |
+| G8 | determinism | ctest `fx.unit` (synthetic defs, including a run that saturates the world budget so admission drops spawns) and `fx.install` case "check" (retail: start 0 of every effect also on 8 lanes with item chunks of 1 and of 7) | `particles()` and `lights()` byte-identical (`memcmp`; both records have no padding) and `outputs()` equal field by field (EmitterOutput has padding), plus identical `FxStats`, on 1, 2 and 8 lanes and with two item partitions, for the same starts and dt sequence; in the saturating case `spawns_dropped` > 0 and identical across all runs |
+| G9 | simulator cost (plan §7.10 item 8: 24.7 ns/particle/frame from the research prototype) | ctest `tools.fx_bench` = `bf3dump fx bench --seed 1` (workload of §9: one FxWorld with the default config on one lane; 180 wrapped oilfire `fire_01` instances, 8 1p muzzles restarted every 0.1 s, 30 `fx_impact_concrete_01_s_xp2` impacts per second; 720 untimed warm-up steps of 1/60 s, then 600 timed steps; 5 runs, each after `clear()`; RUN_SERIAL; 77 without an install; report only under asan) | median over the 5 runs of (wall time of begin_frame through the last end_step summed over the timed steps) / (Σ over the timed steps of the particle ranges admitted in begin_step) ≤ 50 ns, printed next to the 24.7 ns reference (2× margin for the shared machine and for the full 32-processor path the prototype did not run). The run is valid only with mean live particles over the timed steps ∈ [12,000, 20,000], `spawns_dropped` = 0 and `refused_starts` = 0; the bench prints these, `stolen_instances` and `spawns_capped` |
+| G10 | hostile data | ctest `fx.fuzz` in the dev **and** asan presets (synthetic, no install) | every case returns an error or a bounded result; no crash, hang or unbounded allocation; `decode_effect_def` accepts only blobs that re-encode byte-identically |
+| G11 | install unchanged | `fx.install` last case "install unchanged" (`take_install_snapshot` / `diff_snapshots`, as host.session) | layout.toc, cas.cat and every .sb / .toc identical before and after the run |
+
+## 3. Modules, ownership and threads
+
+| piece | module | owner thread(s) |
+|---|---|---|
+| `fx_types.h` (vocabulary, bounds, polynomials, RNG), `effect_def.h` | `bf3_fx` (new, static, links `bf3_core` only) | any (plain data, header-inline helpers) |
+| compiler `effect_compiler.h`, cache `effect_cache.h` | `bf3_fx` | load-time workers (`bf3::core::parallel_for`); thread-safe across items over a thread-safe resolver (EbxLibrary, read-only EbxDb) |
+| `EffectLibrary` (`effect_library.h`) | `bf3_fx` | any; internally one mutex over the name map, compiles outside the lock with a per-name once flag |
+| `EmitterAtlas`, `ImpactTable` | `bf3_fx` | built once per level on a load worker; immutable afterwards, read from any thread |
+| `FxWorld` (`simulator.h`) | `bf3_fx` | owner thread (in VFX2 the Godot main thread) calls start / stop / set_* / clear / begin_frame / begin_step / end_step; `run_items` on any threads over disjoint ranges; owns no thread |
+| `bf3dump fx ...` | `tools/bf3dump` (`fx_commands.h/.cpp`, the spawns_commands pattern) | the tool's main thread plus `parallel_for` lanes |
+| tests | `tests/fx_*` | doctest executables |
+
+`bf3_fx` is client only: never linked into `bf3_sim`, `bf3_net` or `bf3_host` (plan §2.6, D19 "effects
+client-only"); VFX4 turns this into a checked rule (§12). It is added by an appended block at the end of the top-level
+CMakeLists.txt (§15) so the shared file's existing lines stay untouched.
+
+## 4. Verified data sources
+
+All counts over `@all-mp` (the EbxLibrary over every MP superbundle, 5,420 effect-related partitions) unless a level
+is named [verified 2026-10-15; agree with plan §3.14 and gap VFX §1].
+
+| type | count | fields VFX1 reads |
+|---|---|---|
+| `EffectBlueprint` | 1,101 | `Object` → `EffectEntityData` |
+| `EffectEntityData` | 1,101 | `Components[]`, `MaxInstanceCount` (1:850, 2:1, 5:4, 7:6, 10:107, 15:2, 20:80, 30:29, 50:18, 100:4), `ResetInstanceWhenStarted` (true on all 1,101), `Transform` (not identity on 21), `CullDistance`, `StartDelay` (> 0 on 5), `HighEndPc/MediumPc/LowEndPc`; components 1..41 per effect |
+| `EmitterEntityData` | 4,353 (all inside effects, all internal) | `Emitter` (external → EmitterDocument; 3,187 distinct documents, 223 documents referenced by no blueprint), `Transform`, `SpawnProbability` (≠ 1 on ≈ 256), `StartDelay` (> 0 on 211), `CullDistance` (> 0 on 13), tier flags, `MaxInstanceCount` (1 on 4,349, 20 on 3, 50 on 1) and `ResetInstanceWhenStarted` (false on 8): carried, not applied (§6.7) |
+| `SoundEffectEntityData` | 1,716 (319 inside effects) | `Sound` (SoundPatchAsset), `Transform` |
+| `VisualEnvironmentEffectEntityData` | 88 | carried by name (VFX5) |
+| `EmitterDocument` / `EmitterTemplateData` | 3,410 / 3,410 | `RootProcessor`, `TemplateData` |
+| `EmitterSystemAsset` | 29 (one per MP level) | `BaseAtlasTexture`, `NormalAtlasTexture`, `TextureInfos[] {TextureName, MinUv, MaxUv}` |
+| processors | 32 types | `NextProcessor`, `Pre`, `EvaluatorInput`, `DefaultValues`, `Enable` + per type (§6.4) |
+| evaluators | 10 types | §6.6 |
+
+Chain and graph facts [verified]:
+
+* Chains: length min 1 / median 21 / max 26; no cycles; no type twice in one reachable chain; `Pre` names one
+  evaluator leaf; evaluator depth 1 (no evaluator references another; `PolynomialOperatorData` holds two inline
+  `PolynomialTempData` operands); `NextProcessor` and `Pre` are always internal references.
+* Per-emitter type usage (top and tail): SpawnRate and UpdateAge 3,334, SpawnSize 3,315, ..., EmitterData 174,
+  BaseEmitterData 121, UpdateCameraProximity 46, UpdateSizeZ 16. Disabled (`Enable` false): BaseEmitterData 121 (all),
+  Turbulance 7 (779 enabled), UpdateRotation 5.
+* Order varies between documents: SpawnDirection after SpawnSpeed in 443; UpdateAge after SpawnRate in 56;
+  AirResistance before Gravity 2,243 vs after 102; Gravity and LocalForce always before UpdateLinearVelocity; every
+  emitter with SpawnSpeed or Gravity also has UpdateLinearVelocity (3,311).
+* Enumerators: EvaluatorInput EfNormTime 36,806, EfOne 24,755, EfEmitterNormTime 2,136, EfVelocity 2; EmitterParameter
+  None 34,482, Distance 1,703, Vec 722, Param1 122, Param2 29, VecAverage 20, Param3 8; EmittableType SAQ 1,899,
+  ParticleMesh 931, DAQ 558, Quad 18, WAQ 4 (Trail, Point unused).
+* Template (lifetime == 0, RepeatParticleSpawning): (F,F) 2,399, (F,T) 543, (T,F) 455, (T,T) 13;
+  KillParticlesWithEmitter 105; TimeScale ≠ 1 on ≈ 355 (0.5 on 111), range 0.05..4; LifetimeFrameCount ≠ 0 on 8.
+* Ranges: particle life 0.05..10,000 s; SpawnRate 0.005..1e6; emitter Lifetime 0..720 s; no non-finite float; largest
+  |coefficient| ≈ 7.6e6 (one polynomial); MinClamp > MaxClamp never, == 137 times; Random Min > Max 126 times.
+* Base emitters (`BaseEmitterData`, 121, no nested bases): in 76 documents BaseEmitterData is the only reachable
+  processor, and the partition's unreachable "orphan" processor copy equals the base document's chain instance for
+  instance (76/76) while the template differs from the base's; in the other 45 the disabled BaseEmitterData sits at
+  position 0 followed by a full own chain (42 with the base's type set, 3 supersets).
+* Child emitters (`EmitterData.EmitterAssets[]`): 271 child references, at most 4 per emitter, no grandchildren;
+  largest parent MaxCount × child MaxCount = 2,300 (c130 flares). Example: the burningpaper `mainparent` emits
+  invisible carrier particles (size 0, debug texture) whose children are the fire (LocalSpace) and a mesh.
+* `DefaultValues`: UpdateColor `DefaultValues.xyz == Color` on 2,479/2,479; SpawnDirection (0,1,0,0); SpawnPosition
+  (0,0,0,1); UpdateRotation and UpdateTextureCoords (1,0,0,0) (UpdateTextureCoords on all 2,479 instances);
+  SpawnAnimationFrame (1,0,0,0) on 987 and (0,0,0,0) on 930 instances, orphan copies included (the rule ignores them: Pre on all but one
+  reachable slot, §6.4); SpawnAnimation (0,0,0,0) on 1,858/1,858; UpdateSizeX/Y varied without Pre (30, 2, ...); the
+  other types (1,1,1,1). Only `x` is read for scalar processors, so the zero `yzw` are irrelevant there.
+* Flipbook fields (`EmitterTextureInfo` in UpdateTextureCoords.TextureInfo1) are floats: AnimationFrameCount
+  {1, 2, 4, 5, 8, 9, 14, 16, 25, 32, 49} plus one 0, AnimationFrameColumnCount 1..8 plus one 0 (the same document,
+  `em_aamissilemuzzleflash_01_3p`, EnableAnimation false); all integral, columns ≤ frames everywhere. Stored as
+  uint16 after the §10 validation, 0 → 1.
+* Animation: SpawnAnimationFrame has Pre on 1,871 of 1,872, nearly all `Random [0 or 1, N]` with N the texture's
+  `AnimationFrameCount`, and `AnimationFrame` 0 with Pre `Random [1, 32]` on 86; SpawnAnimation `AnimationSpeed` > 0
+  without Pre on 1,055, with Pre `Random [0.75, 1.5]`-style multipliers on 273; UpdateTextureCoords Pre (572) is a
+  NormTime polynomial starting near 1 and mostly falling to 0.2–0.8.
+* Gravity sign: positive on 1,713, negative on 965; debris median +10 (196 of 200 positive), sparks +9, shells +8,
+  fire −1 (192 of 233 negative), smoke −0.5: **positive Gravity pulls down**.
+
+## 5. Golden data
+
+### 5.1 1p muzzle `fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p` [verified, `bf3dump types` / `dump`; plan §7.10 item 3, gap VFX §2.3]
+
+`EffectEntityData` MaxInstanceCount 7, ResetInstanceWhenStarted true, 5 emitter components:
+
+| component | p | key data |
+|---|---|---|
+| `_1p_flash` | 0.75 | SAQ, MaxCount 1, emitter Lifetime 0.1, UpdateAge 0.05, SpawnRate 1 (DistributeOverTime true); SpawnSize 0.4 × Random U[0.8, 1]; UpdateSize poly {w 0.7980724, x 0.44260055, y −0.88148373, z 0.6358111}; UpdateTransparency poly {w 1, y 0.95294344, z −1.9477582} (f(1) = 0.00518524); UpdateAlphaLevelScale Exponent 10, poly {w 0.0050001144, z 0.9804876} clamp [0.9, 1]; UpdateColor interp {w 0.794, z −41.20004}, Color0 (125, 42.417, 8.716), Color1 (48.719, 12.026, 0.739); SpawnAnimationFrame AnimationFrame 1, Pre Random U[1, 16]; texture `fx/textures/muzzleflash/muzzleflash_01` 16 frames, 4 columns; AirResistance 10; LocalForce (5, 0.33, 0); SpawnSpeed 0.1 × U[0.6, 1]; SpawnPosition box pivot y 2, dimensions (0, 0.25, 0); template light radius 20 but ActAsPointLight false |
+| `_1p_light_01` | 0.75 | ActAsPointLight, radius 0.2, colour (1000, 395.072, 65.754), intensity poly {w 0.97097605, x −1.7119899, y 3.966709, z −3.2640686}, random 1..1; emitter Lifetime 0.05, particle life 0.6, SpawnRate 15, DistributeOverTime false (one particle), Size 0, texture debug_arrow_up |
+| `_1p_light_02` | 0.75 | as `_01`, radius 2.5, colour (5, 1.875, 0.255), intensity {w 1.0118451, x 0.07549087, y −0.72858727, z −0.3657508} |
+| `rapidsmoke_ls_01` | 1.0 | MaxCount 6, SpawnRate 100, window 0.1, particle life 0.05, LocalSpace; UpdateTransparency {w 1.1179048, z −1.117318} scale 0.1 (clamp then scale: 0.1 at t = 0) |
+| `nozzleflames_ls_01` | 0.25 | MaxCount 2, LowEndPc false |
+
+### 5.2 Oilfire `fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01` [verified; plan §7.10 item 4]
+
+SAQ, emitter Lifetime 0 (continuous), MaxCount 81, TimeScale 0.5, UpdateAge 5.0, SpawnRate 16 DistributeOverTime true,
+Emissive; no EmitterParameter evaluator. Steady state rate × life = 80 live, invariant under TimeScale (both the
+spawn clock and the age clock scale): with TimeScale 0.5 a particle lives 10 s of real time and 8 spawn per real
+second. G4's 15 s warm-up covers the 10 s fill.
+
+### 5.3 Impacts [verified, `bf3dump weapon` / `dump`; plan §7.10 item 5, gap VFX §3]
+
+The 5.56 bullet (`weapons/common/bullets/556x45mmnato`) material pair 5b6b84ac has PhysicsMaterialIndex 1 ("Bullet"),
+property 77; M67 material 90, RPG-7 26. `MaterialContainerAsset.MaterialNames` first indices: Default 0, Bullet 1, Brick
+2, Metal 3, Concrete 8, Glass 10, Gravel 11, Wood 13, Water 18, Head 65, Body 66, Chest 158 (names repeat).
+
+* Metro `levels/mp_subway/mp_subway/materialgrid_win32/grid`: 102 rows, MaterialIndexMap 180, 32,400 pairs, 223 effect
+  and 110 decal relations, 114 surface material indices with an effect for 5.56, 16 distinct 5.56 effects. 5.56 row:
+  Concrete → `fx_impact_concrete_01_s_xp2` + `decal_concrete_s_01`, spread 30; Brick → `fx_impact_concrete_01_s` +
+  `decal_brick_s_01`, spread 30; Body / Chest → `fx_impact_soldier_body_s`, spread 90, no decal; Head →
+  `fx_impact_soldier_body_s`, spread 0; Water → `fx_impact_water_s`, no decal; Glass → `fx_impact_glass_01_s` +
+  `decal_glass_s_01`, spread 5; Metal → `fx_impact_metal_01_s` + `decal_metalarmor_s_01`, spread 45; the default row
+  (79 material indices) → `fx_impact_generic_01_s`, no decal.
+* Caspian `levels/mp_007/mp_007/materialgrid_win32/grid`: 118 rows, 299 / 123 relations, 16 distinct 5.56 effects
+  (tarmac present, steampipe absent). 5.56 cells (effects + decal; spreads not gated): Concrete →
+  `fx_impact_concrete_01_s_xp2` + `decal_concrete_s_01`; Brick → the default row (`fx_impact_generic_01_s`, no decal);
+  Body / Chest / Head → `fx_impact_soldier_body_s`; Water → `fx_impact_water_s`; Glass → `fx_impact_glass_01_s` +
+  `decal_glass_s_01`; Metal → `fx_impact_metal_01_s` + `decal_metalarmor_s_01`.
+
+**Counting rules of G5** [verified with a script over the grid dumps, 2026-10-15]. Every count is over the 5.56 row
+r = MaterialIndexMap[1] unless it says "grid", and over material indices i ∈ [0, |MaterialIndexMap|) = [0, 180):
+
+| count | rule | Metro | Caspian |
+|---|---|---|---|
+| rows | \|InteractionGrid\| | 102 | 118 |
+| effect / decal relations (grid) | distinct `MaterialRelationEffectData` / `MaterialRelationDecalData` instances referenced from any cell of the grid (equal to the partition's instance counts; references are 1,267 / 670 and 1,947 / 814) | 223 / 110 | 299 / 123 |
+| default-row indices | i with MaterialIndexMap[i] == MaterialIndexMap[DefaultMaterialIndex] (DefaultMaterialIndex 0 → row 0); every such cell is exactly {`fx_impact_generic_01_s`, no decal} | 79 | 63 |
+| generic-effect indices (reported, not the default count) | i whose cell's ImpactEffects are exactly [`fx_impact_generic_01_s`], any decal: the default-row indices plus Plastic (9) and PlasticBag (142, Metro only), which add `decal_plastic_s_01` | 81 | 64 |
+| no-effect indices | i whose cell has no non-null ImpactEffects entry: no properties at all (Metro 61, Caspian 71), sound only (4, 15), or an effect relation with an empty ImpactEffects (Chickenwire, 1, 1); each of these columns has one index | 66 | 87 |
+| columns without an effect relation | cells with no `MaterialRelationEffectData` | 65 | 86 |
+| distinct effects | distinct ImpactEffects names over the row's cells | 16 | 16 |
+
+The bf3dump `fx impacts` output prints every count of this table under its name, and the G5 case compares all of
+them plus the named cells above.
+
+### 5.4 Atlas [verified, `bf3dump dump` / `reshead`; plan §7.10 item 6, gap VFX §5]
+
+Metro `levels/mp_subway/mp_subway/emittersystem_win32`: 52 TextureInfos (other levels 48..53). Base
+`emittertexturebase_win32`: format 2 (DXT5), flags 0x22 (sRGB), 4096 × 4096, 13 mips. Normal
+`emittertexturenormal_win32`: format 20 (NormalDXT5RGA), flags 0x20, 1024 × 2048, 12 mips. Name rule (`_n`, `_nr`,
+`_nrm` suffix or `normalmap` substring → normal atlas) gives 42 base + 10 normal, 3 degenerate `defaultnormalmap`
+aliases (min > max); all non-degenerate rects pixel exact with the min corner ≡ 3 (mod 4) px (3 px gutter). Other
+levels' normal atlases have other sizes, so pixel rects use the header sizes. Metro's superbundle has 280
+EffectBlueprints and 1,053 EmitterDocuments using 42 diffuse + 10 normal names, 0 missing, all entries used.
+
+## 6. Algorithms and decisions
+
+### 6.1 Vocabulary and the census
+
+`fx_types.h` fixes the 32 `ProcessorType` and 10 `EvaluatorType` values with their exact EBX type names
+(`fx_types.cpp`, round-trip tested in `fx.contract`), plus the EvaluatorInput, EmitterParameter, PolynomialOperation
+and EmittableType enumerator names. A type or enumerator outside the tables fails the item and is recorded in
+`CompileContext::unknown_*`; G1 requires both lists empty. EBX type names compare case-sensitively.
+
+### 6.2 Chain resolution
+
+1. Walk `RootProcessor → NextProcessor` (internal references only), at most kMaxChainLength links, with a visited set:
+   a cycle, an external link, a second instance of a type, or a non-processor instance is an error.
+2. Skip `Enable == false` processors (counted), except that a `BaseEmitterData` is always read for its asset.
+3. **BaseEmitterData rule** [verified census decision, §4]: if the document's reachable chain holds nothing but the
+   BaseEmitterData, the processors come from the base document `EmitterAsset` (resolved recursively up to
+   kMaxBaseDepth; retail depth 1); otherwise the document's own chain is used and the base is provenance only. The
+   template always comes from the document. The emitter is flagged `kEmitterDerived` in the first case. The orphan
+   copy is never read (it equals the base chain in all 76 retail cases).
+4. **EmitterData**: each `EmitterAssets[]` document compiles into the same EffectDef as a child (flag
+   `kEmitterChild`, index in the parent's `children`), up to kMaxChildrenPerEmitter and kMaxChildDepth (retail 4 and
+   1). Emitters are deduplicated within an EffectDef by (document name, role): a document one effect uses both as a
+   component's emitter and as a child becomes two EmitterDefs, so the child flag is never ambiguous; the census
+   counts such documents (`dual_role_documents`, reported).
+5. Each present slot stores `EvaluatorInput`, `DefaultValues` and at most one evaluator (`Pre`) in
+   `EmitterDef::evaluators`.
+6. Flipbook fields: AnimationFrameCount / AnimationFrameColumnCount must be finite, integral, in [0,
+   kMaxFlipbookFrames] with columns ≤ frames; 0 is stored as 1 (one retail document, counted as
+   `flipbooks_normalised`); anything else fails the item.
+7. Dependencies: the compiler wraps the resolver in a recording resolver (the `weapon_blob.cpp` RecordingResolver
+   pattern) that records every lookup, found or absent, into `CompileContext::sources` (sorted, distinct; §8).
+
+### 6.3 Canonical processor order
+
+The simulator runs present slots in `ProcessorType` order (the enum is the order), stage by stage: Structural (base,
+children) → Emitter (SpawnRate) → Spawn (position, direction, speed, size, rotation, rotation speed, orientation,
+animation frame, animation speed) → Update (age, camera proximity, drag, gravity, local force, turbulence, velocity
+integration, rotation, sizes, colour, transparency, alpha levels, texture coords, orientation, clip scale). Data order
+varies (§4), but no processor reads another's output except through the particle state, and the only order-sensitive
+pairs are resolved by physics: drag, then forces (each `v += a·dt`), then `x += v·dt` (semi-implicit Euler), so
+SpawnSpeed's magnitude applies to SpawnDirection's direction whatever the data order. Drag is `v *= exp(−k·dt)` so a
+sub-step split does not change it [inferred].
+
+### 6.4 Processor semantics
+
+`v = Pre ? evaluate(Pre, input) : DefaultValues` (a Vec4; scalar evaluators broadcast). `t` = particle age / life, `te`
+= emitter normalised time. Particle-state fields named as in `ParticleVertex`.
+
+| processor | rule | basis |
+|---|---|---|
+| BaseEmitter, Emitter | structural (§6.2, §6.5 children) | [verified] |
+| SpawnRate | emitter stage: rate = SpawnRate × v.x (§6.5) | [plan §3.14] |
+| SpawnPosition | local position = v.xyz (Box / Sphere / CameraProximity evaluators; default origin) | [inferred] |
+| SpawnDirection | dir = normalize(v.xyz) (RotateVector cone around DefaultValues.xyz; default +Y); blended toward normalize(position) by DirectionFromEmitterOrigin; InheritSpeedAndDirectionFromEmitter adds the source velocity | [inferred] |
+| SpawnSpeed | velocity = dir × Speed × v.x | [plan] |
+| SpawnSize | size.xyz = Size × v.xyz | [plan, golden G3] |
+| SpawnRotation | rotation = Rotation × v.x × π rad (Rotation 1.0 on 2,353, 180/360 on 33) | [inferred unit, R19] |
+| SpawnRotationSpeed | rotation speed = RotationSpeed × v.x × π rad/s | [inferred unit] |
+| SpawnOrientation | axis = v.xyz Euler degrees (RandomXYZ ±180/360; ParticleMesh only, 255) | [inferred] |
+| SpawnAnimationFrame | frame = Pre ? v.x : AnimationFrame (0-based flipbook position; Random [0, N] dominant, AnimationFrame 0 with Random [1, 32] rules out a product) | [verified pattern, inferred meaning] |
+| SpawnAnimation | frame rate = AnimationSpeed × (Pre ? v.x : 1) frames/s; the (0,0,0,0) DefaultValues are ignored (1,055 animated emitters have no Pre) | [verified pattern] |
+| UpdateAge | life = Lifetime × v.x (spawn time); age += dt_e; t = age / life; dies at t ≥ 1 | [plan] |
+| UpdateCameraProximity | compiled and carried; no-op in VFX1 (VFX7) | deferred |
+| AirResistance | velocity *= exp(−DragFactor × v.x × dt_e) | [inferred form] |
+| Gravity | velocity.y −= Gravity × v.x × dt_e (positive pulls down, §4) | [verified sign] |
+| LocalForce | velocity += R_emitter · (LocalForce ⊙ v.xyz) × dt_e | [inferred] |
+| Turbulance | velocity += Intensity × v.x × n(serial, age) × dt_e, n a unit vector from value noise keyed by fx_key(instance seed, serial, kSlotTurbulence, knot × 3 + axis) with knots every 1/30 s of age, linearly interpolated (dt-partition independent) | [inferred, R19] |
+| UpdateLinearVelocity | position += velocity × dt_e (absent: the particle does not move) | [inferred; present on every moving emitter] |
+| UpdateRotation | rotation += rotation speed × v.x × dt_e | [inferred] |
+| UpdateSize, UpdateSizeX/Y/Z | size = spawn size ⊙ (UpdateSize v) ⊙ (v_x, v_y, v_z of the axis processors); Pivot carried | [golden G3] |
+| UpdateColor | rgb = Color ⊙ (Pre ? eval.rgb : 1) (DefaultValues.xyz == Color on all 2,479, so this equals the general rule without Pre) | [verified] |
+| UpdateTransparency | a = v.x; CullThreshold carried | [golden G2/G3] |
+| UpdateAlphaLevelMin / Max / Scale | alpha_min = MinLevel × v.x, alpha_max = MaxLevel × v.x, alpha_scale = v.x; Exponent carried per emitter (renderer erosion) | [inferred, R19] |
+| UpdateTextureCoords | frame += frame rate × v.x × dt_e (Pre: a playback-rate curve, 1 → 0.2–0.8); TextureInfo1 → `TextureRef`. Implementation: the state frame is kept within [0, frame_count) by one subtraction per wrap, so the output wrap (§6.4 frame rules) needs no fmod per particle | [verified pattern] |
+| UpdateOrientation | renderer marker (on every quad emitter), no state | [verified] |
+| UpdateClipScale | Lookup (132 int16) carried for VFX2 | deferred |
+
+Point lights (`ActAsPointLight`): one `ParticleLight` per live particle: radius = PointLightRadius, intensity =
+clamp(cubic(t), PointLightMinClamp, PointLightMaxClamp) × U[RandomIntensityMin, Max] (drawn once per particle),
+colour = PointLightColor × intensity, position = particle + PointLightPivot [plan §3.14; merge is VFX3].
+
+### 6.5 Spawn, age and emitter lifetime
+
+* Emitter clock: dt_e = dt × TimeScale; window L = template Lifetime (0 = continuous until stopped).
+* **Rate mode** (DistributeOverTime true): an accumulator starts at **1** (at least one particle spawns, plan §3.14);
+  each sub-step adds rate × dt_e and spawns floor(acc), keeping the fraction; spawned particles get sub-step age
+  offsets so a fast emitter does not clump [inferred].
+* **Burst mode** (DistributeOverTime false): floor(1 + rate × L) particles at the window start (`_1p_light_*`: 1).
+  A continuous emitter in burst mode behaves as rate mode [inferred, counted by the census].
+* DistributeOverDistance: the accumulator adds rate × metres travelled by the source instead [inferred].
+* **Cap and budget**: spawns are admitted in `begin_step` (§6.7): a spawn past `MaxCount` live is discarded and
+  counted (`spawns_capped`), one past the world's particle budget is dropped (`spawns_dropped`); neither is queued,
+  and the accumulator keeps only its fraction.
+* Window: spawning stops at e_age ≥ L. RepeatParticleSpawning wraps e_age and re-arms the accumulator / burst; such an
+  emitter ends only on stop. An emitter is done when its window is over (or it was stopped) and its particles are
+  dead; KillParticlesWithEmitter drops them at stop.
+* No UpdateAge slot (none remain after §6.2 in retail): particles die when the emitter's window ends (or at stop)
+  [inferred]. NormTime is t = age / life only when life > 0; otherwise t = 0 (no division; hostile data, a fuzz
+  case). A particle whose computed life is ≤ 0 with the slot present dies at the end of its first step.
+* EfEmitterNormTime: te = L > 0 ? min(e_age / L, 1) : 0 [inferred]. EfOne = 1. EfVelocity = |velocity| [inferred,
+  2 uses].
+* Children: for each parent particle spawned in a sub-step, `end_step` creates one instance of each child emitter at
+  the particle (seed `fx_child_seed(parent instance seed, child emitter index, parent serial)`); each following
+  `begin_step` sets the child's emitter transform from the parent particle's state as of the previous `end_step`
+  (position; orientation from its velocity), and the child is stopped when that particle dies [inferred; gap VFX §10
+  "child timing" open, Q4]. At most one child instance per parent particle and child emitter, so a parent instance
+  has at most MaxCount children per child emitter; past `max_emitter_instances` a child is not created
+  (`emitter_starts_dropped`).
+* Effect: each component starts after effect + component StartDelay if `fx_component_selected` (the tier masks, then
+  one SpawnProbability draw per component per start, key `fx_key(start seed, kKeyComponentDraw, component, 0)`). Its
+  emitters get `fx_emitter_seed(start seed, component, emitter index)`. An effect instance is done when every
+  component is done; sound and visual-environment components emit `FxEvent`s.
+* Transforms: a component emitter's world transform is `EffectStart::transform ∘ EffectDef::transform ∘
+  EffectComponentDef::transform` (a point is mapped by the component transform first). `EffectDef::transform` is
+  `EffectEntityData.Transform`, non-identity on 21 effects; it is in blob v1.
+* `EffectStart::start_age` (the late-join seam, VFX4): clamped to [0, kMaxStartAge]; VFX1 advances the clocks only
+  (elapsed StartDelays pass; components whose finite window ended before it are not started; continuous and
+  repeating emitters start with their clock there); no particles are prewarmed (Q7).
+
+### 6.6 Evaluators
+
+Polynomial, PolynomialColorInterp: `fx_types.h` (header-inline, G2). PolynomialOperator: clamp(op(first(t),
+second(t)), MinClampResult, MaxClampResult), op ∈ {×, +}. Random / RandomXYZ: lerp(Min, Max, u) per particle and slot
+(Min > Max legal). Box: Pivot + (u − ½) ⊙ Dimensions [inferred full extents]. Sphere: Pivot + Scale ⊙ (uniform in a
+ball of Radius) [inferred]. RotateVector: a direction in a cone of Angle degrees around the slot's DefaultValues.xyz,
+uniform in solid angle; RotateWithinPlane fixes the azimuth [inferred]. SampleTexture: a 1-D gradient
+(`GradientData`) sampled at t, lerp(IntensityMin, IntensityMax, sample) [inferred]. CameraProximity: compiled, VFX7.
+**EmitterParameter** (2,604 non-None uses): carried in `EvaluatorDef::parameter` and `EffectStart::params`, evaluated
+as None in VFX1 (open Q3); `kEmitterHasParameterisedEvaluator` marks affected emitters. None of the gate effects uses
+one [verified].
+
+### 6.7 Pools
+
+* `MaxCount`: per emitter instance (§6.5).
+* `MaxInstanceCount`: one pool per `EffectDef` per `FxWorld` (global, not per owner) [plan §3.14 "start with a global
+  steal-oldest pool"]. When full, ResetInstanceWhenStarted (true on all 1,101) kills the oldest instance and counts
+  `stolen_instances`; otherwise the start is refused (`refused_starts`). The component-level
+  `EmitterEntityData.MaxInstanceCount` (20 on 3, 50 on 1) and `ResetInstanceWhenStarted` (false on 8) are carried in
+  `EffectComponentDef` and the blob but **not applied** in VFX1: the effect pool is the only pool (Q2; VFX3's
+  instancer decides).
+* World bounds `FxWorldConfig` (effects 4,096, emitter instances 16,384, particles 65,536): all storage is allocated
+  at construction (an estimated 25 MiB at the defaults: about 200 B of SoA state, vertex and light record per particle, double-buffered for compaction [inferred; fx.unit reports the measured figure]) and never grows; a start that
+  does not fit is refused. `clear()` empties the world and keeps the storage.
+* **Admission** (the single place a spawn is refused; simulator.h header). In `begin_step`, serially, with B =
+  max_particles − (live particles after the last compaction), the live emitter instances are visited in list order
+  (appended at creation, removed stably at retirement; a function of the start / stop / dt sequence only). For each:
+  due = what its SpawnRate stage yields this sub-step (accumulator or burst), room = MaxCount − live_i,
+  n = min(due, room, B); `spawns_capped` += due − min(due, room); `spawns_dropped` += min(due, room) − n; B −= n. The
+  item's particle range is live_i + n (its light range the same for ActAsPointLight emitters), so the ranges of a
+  sub-step sum to at most max_particles (the memory bound of G10) and the refused spawns depend on the list order
+  only, never on threads or partition (G8). A def whose own `max_particles` exceeds the world budget is refused at
+  start.
+
+### 6.8 Time steps and determinism
+
+* Phases (simulator.h): `begin_frame(dt)` clamps dt to `max_dt` (2 s, counted) and splits it into k = ceil(dt /
+  `max_substep`) equal sub-steps (≤ 0.25 s; k = 1 above 4 Hz), so a long frame cannot tunnel a burst window or blow
+  up drag. Each sub-step is `begin_step` (owner, serial: clocks, component starts, child transforms, Emitter stage,
+  admission, ranges) → `run_items` (any threads, disjoint item ranges) → `end_step` (owner: child starts / stops,
+  retirement, compaction). Admission per sub-step uses the live counts after the previous sub-step's compaction, so
+  MaxCount is exact across sub-steps. Fixed and variable dt use the same path. Outputs are valid after the k-th
+  `end_step`; events accumulate over the frame.
+* Random numbers are counter-based, with the key layout of `fx_types.h`: start seed → `fx_component_selected` draw
+  and `fx_emitter_seed(start seed, component, emitter)`; children `fx_child_seed(parent instance seed, child emitter,
+  parent serial)`; particle draws `fx_key(instance seed, serial, slot, lane)` with slot = ProcessorType index,
+  `kSlotLight` or `kSlotTurbulence` (lane = knot × 3 + axis). Serials count the granted spawns of an instance. The
+  emitter index and parent serial in the instance seed keep emitters of one component, parents and children, and
+  sibling children uncorrelated (`fx.contract` checks the seeds; `fx.unit` checks two children's spawn positions
+  differ). Nothing depends on draw order, thread count or item partition (G8).
+* `run_items` reads only its own instance's state (a child's transform was set in `begin_step`) and writes only its
+  own range; `end_step` compacts in list order, particles in serial order.
+* Comparison for G8: `ParticleVertex` and `ParticleLight` have no padding (static_assert on 80 / 32 bytes and the
+  field layout), so `particles()` and `lights()` compare with `memcmp`; `EmitterOutput` has padding (after
+  `first_person`) and a def pointer, so tests compare it field by field (the world zero-fills each record anyway).
+  Implementation: `fx_frame_digest` (fx_harness.h) hashes the particle and light bytes, every output field except
+  the effect handle's generation (it keeps counting across `clear()`, so a reused and a fresh world differ there for
+  the same start) and every `FxStats` field; the harness compares digests per frame, fx.unit also `memcmp`s the
+  particles.
+* NaN guard: after the update stage any non-finite position, velocity, size, colour or frame kills the particle
+  (`nonfinite_kills`); the renderer never sees a NaN.
+
+### 6.9 Emitter atlas
+
+`EmitterAtlas::load` reads the level's `EmitterSystemAsset`, the two textures' 128-byte DxTexture headers
+(`read_raw_res`; no pixel chunk) and classifies entries by the name rule (§5.4). The mount overload wraps a second one
+that takes a `ResSource` (partition name -> res bytes), and `EmitterAtlas::texture_info(partition, bytes)` is the
+header check, so fx.fuzz drives both with synthetic and hostile headers without an install. Names are compared lowercase with `\`
+→ `/`. Pixel rects come from header sizes; `pixel_exact` flags a corner > 0.01 px off. Flipbooks: frame f of
+frame_count frames in frame_columns columns, row-major [assumed], inside the entry rect (`frame_rect`).
+`EffectLibrary::bindings` maps each emitter's texture and normal map to entries (nullptr → VFX2 draws
+`systems/emitter/defaulttexture` and counts it).
+
+### 6.10 Impact table
+
+`ImpactTable::load` reads the level grid (`MaterialGrid::grid_of_level`), its MaterialIndexMap, InteractionGrid and
+MaterialPairs, and the container's MaterialNames; cells are deduplicated by their relation list and then by their
+content, both through ordered maps (never a scan of the earlier cells: with ≤ 256 rows a hostile grid has ≤ 65,536
+cells, and a per-cell scan of the distinct cells so far would be ~2.1e9 comparisons; each lookup charges the budget
+1 + bytes / 64 of the cell's names, and log2 of the ≤ 65,537 distinct cells is a constant factor ≤ 17). `select(projectile, surface)` takes two
+PhysicsMaterialIndex bytes; `surface_material(triangle material)` maps a collision-soup material value (& 0xFFFFFF)
+through MaterialPairs. An empty cell selects nothing; no DefaultMaterialIndex fallback in VFX1 (the default material's
+own row already carries `fx_impact_generic_01_s`). Choosing among several `ImpactEffects[]`, spreading the direction and
+placing the decal are VFX3.
+
+## 7. Interfaces and seams
+
+### 7.1 EffectLibrary (`effect_library.h`)
+
+One per level session: `get(blueprint)` compiles once (cache first) and returns the same `shared_ptr<const
+EffectDef>`; failures are remembered. `preload(list, threads)` at load. `bindings(def)` gives atlas entries per
+emitter; `impacts()` the level's table.
+
+### 7.2 FxWorld (`simulator.h`)
+
+`start(def, EffectStart{transform, velocity, seed, tier, first_person, start_age, params}) → EffectHandle` (slot +
+generation); `stop(handle, Stop|Kill)`, `set_transform`, `set_params`, `alive`, `clear()`. Per frame:
+`begin_frame(dt, view) → k` (owner), then k times `begin_step() → n` (owner) → `run_items(first, count)` (any
+threads, disjoint) → `end_step()` (owner); or `step(dt, view, lanes)`. Outputs valid after the k-th `end_step` until
+the next `begin_frame`: `outputs()` (`EmitterOutput` per live emitter instance with def, emitter index,
+component, first_person, particle and light ranges, emitter transform), `particles()` (`ParticleVertex`, 80 B,
+world space), `lights()` (`ParticleLight`, 32 B), `events()` (`FxEvent`), `stats()`.
+
+### 7.3 VFX2 renderer seam
+
+VFX2 reads `outputs()` / `particles()` per frame, takes the emittable type and render fields from
+`EmitterDef::tmpl`, the texture from `EmitterDef::texture` + `EffectLibrary::bindings`, frame rects from
+`EmitterAtlas::frame_rect`, and pixels from the atlas partitions named in `AtlasTextureInfo`. Sorting, batching,
+shaders, half-res, soft fade and the 1p viewmodel pass are VFX2's. `FxWorld` stepping moves onto Godot's
+WorkerThreadPool through `run_items`.
+
+### 7.4 VFX3 trigger seam
+
+Triggers call `EffectLibrary::get(name)` and `FxWorld::start` with a world transform and `seed = hash(event id)`
+(shotSeq, impact id). Impacts: `ImpactTable::surface_material(triangle material)` then `select(bullet material,
+surface)` → `ImpactCell {effects, debris, max_spread_degrees, mirror_impact_direction, decal, impact_sound}`. The light
+pool merges `lights()` per `EmitterOutput` light range. Decals use `ImpactCell::decal`.
+
+### 7.5 VFX4 network seam
+
+No network ids: `EffectStart::seed` is the only cross-client input; `bf3_fx` stays out of server modules.
+
+### 7.6 Audio seam
+
+`FxEvent {SoundStart|SoundStop, effect, component, def, transform}` with `EffectComponentDef::asset` = the
+SoundPatchAsset partition (319 sound components), and `ImpactCell::impact_sound` (MaterialRelationSoundData) for A5.
+The audio track owns voices; VFX1 only emits events in a fixed order. The frame's event buffer is fixed at
+max_effects × 4 events; an event past it is dropped and counted in `FxStats::events_dropped` (printed by every
+`bf3dump fx` stats line and part of the frame digest), so a lost SoundStop is visible.
+
+### 7.7 bf3dump fx
+
+| command | output |
+|---|---|
+| `fx census [<superbundle or @all-mp>] [--threads N]` | counts, per-type emitter counts, unknown lists, first errors, max work units, seconds; exit 1 unless G1 holds when run on `@all-mp` |
+| `fx compile <partition>... [--sb <spec>] [--cache <root>]` | `format_effect_def` / `format_emitter_def` canonical text (a blueprint, else a document; short names by `find_partition`) |
+| `fx simulate (<effect> \| --emitter <document>) [--seconds S] [--dt D \| --variable] [--seed N] [--starts K] [--golden muzzle1p\|oilfire]` | per-step live counts, per-component start fractions, stats; with `--golden`, the G3 / G4 checks and exit code |
+| `fx check [<sb>] [--seconds S] [--seed N] [--threads N] [--no-determinism] [--cache <root>]` | G7 / G8 over every effect; lists `unchecked_termination` effects; prints `G7 PASS` / `FAIL` and exits 0 / 1 |
+| `fx bench [--seed N] [--runs 5]` | G9: ns per admitted particle per sub-step (median of the runs) plus the validity counters and the mean live emitter instances; prints `G9 PASS` / `FAIL` and exits 0 / 1 |
+
+**Names.** `<effect>` and `--emitter <document>` take a full partition name or a short one that is the unique
+suffix after a `/` (ASCII case-insensitive) among the catalogued EffectBlueprint (resp. EmitterDocument) names
+(`find_partition`, effect_compiler.h); no match or several matches is an error listing up to 8 candidates.
+`fx_muzz_generic_rifle_1p` → `fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p`. `--emitter` compiles the
+document with `compile_emitter_effect` (one component, MaxInstanceCount 1).
+
+**Multi-start harness** (`simulate --starts K`, `check`). Start i (0 ≤ i < K) is independent: the harness calls
+`FxWorld::clear()`, starts the def once with seed `fx_harness_seed(N, i)`, identity transform, zero velocity, tier
+High, start_age 0, then steps ceil(S / D) frames of D (or the variable sequence keyed by (N, frame)), and adds the
+run's observations and `FxStats` to the totals. Starts never overlap, so the MaxInstanceCount pool never fills:
+`stolen_instances` and `refused_starts` are 0 by construction and the goldens require it, which keeps steals from
+biasing the probabilities, the counts and the "not alive at the end" checks. The per-component start fraction is
+counted twice, from `fx_component_selected` and from the components whose emitters produced output, and the two must
+agree exactly.
+| `fx atlas <LEVEL>` | G6 entries and texture headers, the names the level's EmitterDocuments use (missing / unused); for MP_Subway the §5.4 values are checked, `G6 PASS` / `FAIL`, exit 0 / 1 |
+| `fx impacts <LEVEL> [--projectile=bullet\|<material index>]` | G5 rows (every §5.3 count by name, the 8 named cells); for MP_Subway and MP_007 the §5.3 values are checked, `G5 PASS` / `FAIL`, exit 0 / 1 |
+
+All commands open the install read-only through the repo's readers. `compile`, `simulate` and `check` take `--cache <root>` (the fx-deps / fx-effect entries of §8; the reader's write guard refuses the install as a root); `census` and `bench` compile uncached and `atlas` / `impacts` are not cached in VFX1 (§8). `simulate --golden` and `census @all-mp` print `G3` / `G4` / `G1` `PASS` / `FAIL` and exit 0 / 1. The goldens and checks are the functions of `fx_harness.h` (implementation addition), which the fx.install cases call too, so a gate's command and its ctest measure the same thing.
+
+## 8. Caching
+
+Kind `fx-deps` (key: blueprint SHA1, `kFxConverterVersion`, `cache_engine_id()`, `kFxDepsFormatVersion`, params
+`effect=<name>`) → the compile's source list; kind `fx-effect` (key: the SHA1s of those partitions in list order, zero
+digest for an absent one, `kFxConverterVersion`, engine, `kFxBlobFormatVersion`, params `effect=<name>;deps=<SHA-256 of
+the list>`) → blob `OBF3FXEF` v1 (`BlobWriter`). This is the WeaponDef two-entry pattern (`gameplay/weapon_blob.h`):
+a warm lookup parses no EBX, a patched emitter document changes the effect key, a patched blueprint both. Through
+`cached_convert` into the session's Cache root (`user://` in the game, `--cache` in tools); never next to the install.
+`kFxConverterVersion` bumps on any §6 semantic change. The atlas and impact table are not cached in VFX1 (header reads
+and one grid walk; `fx.install` reports their load time; cache them in VFX2 if > 50 ms per level).
+
+Two rules, as `resolve_weapon_cached` (weapon_blob.cpp) applies them, make the pair sound:
+
+1. **Absent lookups are dependencies.** The list is `CompileContext::sources`, filled by the compiler's recording
+   resolver with every partition looked up, found or not (sorted, distinct); an absent one hashes as the zero digest,
+   so a patch that adds a missing base or child document changes the effect key. No call site keeps the list by hand.
+2. **The list is rewritten when it changes.** After any recompile (a miss on either entry), when the new list differs
+   from the cached one the stale fx-deps entry is removed and the new one put, so a patched document that adds a base
+   or child cannot leave a list that misses forever. An undecodable entry is removed and counted
+   (`dropped_corrupt`). `fx.unit` tests both with a temp Cache root and an in-memory resolver whose partitions change
+   between lookups.
+
+Blob v1 already holds every field VFX1 carries without applying (`EffectDef::transform`, the component pool fields,
+EmitterParameter, camera proximity, clip lookup), so the later waves that apply them need a converter bump, not a
+format bump.
+
+## 9. Performance
+
+Prototype 24.7 ns/particle/frame (plan §7.10 item 8) with a BF3-like chain. Design: SoA per emitter instance
+(position, velocity, size, colour, age, life, frame, rotation, serial), present-slot dispatch per emitter (a switch
+over a short array of present processors, no virtual calls), header-inline polynomials. 16k particles × 50 ns = 0.8 ms
+on one lane; spread over 4–8 lanes in VFX2. The serial part (`begin_step` admission, `end_step` compaction bookkeeping) is O(live emitter instances) except one memmove per item that closes the gaps dead particles leave in the vertex and light buffers (about 1.3 MB at 16k particles); it is inside the G9 timing window. Each item compacts its own SoA state in run_items. Compile cost target: census over `@all-mp` < 30 s on all lanes, a warm
+`get` < 50 µs (reported, not gated).
+
+**G9 workload and measure** (`bf3dump fx bench`, ctest `tools.fx_bench`). One FxWorld with the default config, one
+lane (`step(dt, view, 1)`), fixed dt 1/60. Defs: the wrapped oilfire `fire_01` document (`compile_emitter_effect`),
+`fx_muzz_generic_rifle_1p` and `fx_impact_concrete_01_s_xp2`, each as a private copy with `max_instance_count`
+raised to kMaxInstanceCount (1,024) so the pools never steal (the bench measures particle cost, not the pool
+policy; stated in its output). Starts at t = 0: 180 oilfire instances (180 × 80 = 14,400 live at steady state), then
+8 muzzles every 0.1 s and 30 impacts per second at seeded positions. 720 untimed warm-up steps (12 s, past the 10 s
+oilfire fill), then 600 timed steps. Measure: wall time (steady clock) of each timed frame from `begin_frame` to the
+last `end_step`, summed, divided by the sum over the timed sub-steps of the admitted particle ranges (live + granted,
+what `run_items` processes). Five runs separated by `clear()`, median reported with min and max. Validity: mean live
+over the timed steps ∈ [12,000, 20,000], `spawns_dropped` = 0, `refused_starts` = 0; otherwise the bench fails
+rather than report a per-particle figure from the wrong load. Gate ≤ 50 ns (2× the prototype's 24.7 ns); the
+machine is shared, so the figure is noisy (README and §2 say so); report only under asan.
+
+## 10. Hostile-input bounds
+
+* Compile: `CompileContext::budget` (`gameplay::WorkBudget`, 2^20 units; one per instance read, array element, and
+  reference followed) ends any graph; plus the structural caps in `fx_types.h`: chain 64 (retail 26), base depth 4
+  (1), child depth 2 (1), children per emitter 16 (4), MaxCount 16,384 (1,051), components 256 (41), emitters per
+  effect 512 (46), Σ particles 2^17 (3,000), MaxInstanceCount 1,024 (100, effect and component), gradient samples
+  4,096 (512), clip lookup 4,096 (132), z-occlusion lookup 4,096 (33), |float| ≤ 1e7 (7.6e6) and finite, names ≤
+  1,024, flipbook AnimationFrameCount / AnimationFrameColumnCount finite, integral, 0 ≤ columns ≤ frames ≤
+  kMaxFlipbookFrames 1,024 (49 / 8; 0 stored as 1). Unknown enumerators, wrong instance types where a processor /
+  evaluator is expected, external chain links and cycles are errors.
+* Blob decode: counts checked against remaining bytes and the same caps before allocating; every enum, index and
+  float validated; trailing bytes refused; re-encode identical.
+* Atlas: TextureInfos ≤ 4,096 (checked before any res is read), UV finite and ≤ 1e7; header sizes 1..16,384 and
+  mips ≤ 15; the name sort is charged m · log2 m. Impact table: rows ≤ 256, Items per row = rows, map ≤ 4,096,
+  relations per cell ≤ 64, ImpactEffects / ImpactDebris per relation ≤ 64; keyed (not scanned) deduplication, §6.10.
+* Simulation: storage fixed at construction, admission (§6.7: the ranges of a sub-step sum to ≤ max_particles
+  whatever the number of live instances), dt clamp and sub-steps (§6.8), the NaN guard, MaxCount per instance,
+  `max_emitter_instances` for component and child instances; a def whose max_particles exceeds the world budget is
+  refused at start; NormTime with life ≤ 0 reads t = 0; `start_age` clamped to kMaxStartAge; a non-finite or
+  non-positive dt is a frame of no sub-steps.
+* `fx.fuzz` runs in the dev and asan presets: mutated retail-shaped and synthetic EBX graphs through an in-memory
+  resolver (including fractional, negative, NaN and huge flipbook counts), truncated / bit-flipped / count-inflated
+  blobs, NaN / huge parameters, a NormTime evaluator on an emitter without UpdateAge or with Lifetime 0, 4,096
+  starts of a def with MaxCount 16,384 into one world (admission must hold the memory bound), and extreme dt
+  sequences (0, negative, NaN, 1e30). Impact table: a 256 × 256 grid of 65,536 distinct cells (load time against a
+  128 × 128 grid: best-of-3 ratio < 10, about 4 when linear and 16 when quadratic), 65,536 relation instances of one
+  content (one cell), 257 rows, Items ≠ rows, 300 Items, external / dangling / internal-asset references, a NaN
+  spread, a 40-unit budget, 2,000 mutated grids. Atlas: 4,097 TextureInfos, 4,096 entries of one name, a foreign
+  primary, a missing reference, an unreadable res, no res source, NaN / 1e30 / out-of-[0, 1] UVs, short /
+  wrong-version / wrong-format / 16-mip / zero / oversized headers, 4,000 random or mutated headers and 2,000 mutated
+  systems.
+
+## 11. Test plan
+
+| ctest | executable / command | content | install |
+|---|---|---|---|
+| `fx.contract` (now) | `test_fx_contract` | header compile, record sizes 80 / 32, 32 / 10 vocabularies, stage order, name tables round-trip, polynomial / colour / RNG goldens, the instance-seed key layout (emitters, parents, children, siblings differ), default values (effect transform identity, start_age 0, flipbook 1 / 1) | no |
+| `fx.unit` | `test_fx` `--test-suite=fx-unit` | synthetic defs: spawn accumulator, burst, window, repeat, cap, TimeScale, sub-steps (MaxCount exact across sub-steps), drag / gravity sign, size / colour product rules, frame rules, child start / stop and child transform taken from the previous step, two children of one parent spawn at different positions, effect × component transform order, start_age, pools (steal, refuse; component pool fields ignored), admission (a world saturated by many instances: ranges ≤ max_particles, `spawns_dropped` > 0, identical on 1 / 2 / 8 lanes and two partitions), determinism (G8; memcmp particles / lights, field-wise outputs), `find_partition` (unique, none, ambiguous), `effect_extent`, `fx_component_selected` fractions, blob round-trip, cache warm / cold and the two §8 rules through a temp Cache root | no |
+| `fx.install` | `test_fx` `--test-suite=fx-install` | G1, G3, G4, G5, G6, G7, cold vs warm `format_effect_def` equality, G11; exits 77 without an install | yes |
+| `fx.fuzz` | `test_fx` `--test-suite=fx-fuzz`; the implementation adds `fx.unit` and `fx.fuzz` to the asan preset with the PATH modification already templated for `fx.contract` / `m1.contract` | G10 | no |
+| `tools.fx_bench` | `bf3dump fx bench` | G9, RUN_SERIAL, 77 without install, report only under asan | yes |
+
+No Godot check in VFX1 (nothing links `bf3_fx` into `bf3_godot` yet).
+
+## 12. Deferred items
+
+| item | wave |
+|---|---|
+| Atlas pixel upload, normal decode (x = 2R−1, y = 2A−1), MultiMesh batches, shaders (SAQ/DAQ/WAQ/mesh, flipbook blend, alpha levels and Exponent, soft fade, clip scale, lighting blends), sorting, half-res, 1p viewmodel pass, default-texture fallback, atlas / impact caching if slow | VFX2 (M2a) |
+| Weapon / tracer / impact triggers, choice among `ImpactEffects[]`, spread and mirror, decals, light pool ≤ 64 with per-emitter merge, instancer policy beyond the global pool, CullDistance culling, 64-bot firefight budget | VFX3 (M2a) |
+| Seeds from event ids, late-join derivation, link-time exclusion of `bf3_fx` from server modules | VFX4 (M3) |
+| Explosions, vehicle effects, VisualEnvironment effects, camera shake | VFX5 (M4) |
+| Destruction effects | VFX6 (M6) |
+| `EmitterParameter` inputs, UpdateCameraProximity / CameraProximity weather, level `EffectReferenceObjectData`, quality-tier UI, GPUParticles fallback for the largest emitters | VFX7 (M7) |
+| Sound components' playback | audio track (A5) via `FxEvent` |
+
+## 13. Risks
+
+* **Inferred semantics** (R19): base-emitter rule (decided by census), rotation unit, drag form, turbulence noise,
+  child timing, alpha-level meaning, Box / Sphere / RotateVector shapes, frame 0- vs 1-based. Mitigation: each is one
+  function with a unit test; `kFxConverterVersion` bumps on change; VFX2 compares against footage.
+* **Cost**: the full 32-processor path may exceed 50 ns/particle; mitigations: per-emitter specialised update loops
+  for the common chains, lanes.
+* **Determinism vs float**: byte-identical only for the same binary and dt sequence; cross-client agreement is by seed,
+  not bits (plan VFX4).
+* **Census drift**: `@all-mp` may hold documents no level uses (223 unreferenced); they must still compile (G1).
+* **Shared machine timing**: G9 and the census time are noisy; G9 uses a median and a 2× margin.
+* **Admission fairness**: when the world budget saturates, instances earlier in the list keep spawning and later ones
+  starve. Deterministic and bounded, but not fair; VFX3's firefight budget (64 bots) decides whether a per-effect
+  share is needed.
+* **Merge friction**: wp, au, s1–s4 and lk also append blocks at the end of the top-level CMakeLists.txt,
+  tests/CMakeLists.txt and README.md; expect trivial same-hunk conflicts at merge. `bf3_fx` is added after `tests/`
+  and `bf3_godot`; target_link_libraries forward references resolve at generate time, so the build works, and VFX2's
+  link of `bf3_fx` into `bf3_godot` relies on the same.
+
+## 14. Open questions
+
+1. Should `ImpactTable::select` fall back to `DefaultMaterialIndex` when a cell selects no effect? (VFX1: no; 66 Metro
+   and 87 Caspian material indices select none for 5.56, §5.3.)
+2. `MaxInstanceCount` scope: global per def (chosen) vs per owner (weapon, vehicle); and whether the component-level
+   `EmitterEntityData.MaxInstanceCount` (20 on 3, 50 on 1) and `ResetInstanceWhenStarted` (false on 8) form their
+   own pools (VFX1: carried, not applied).
+3. `EmitterParameter` semantics (Distance 1,703, Vec 722, ...): what sets them and how they combine with `t`.
+4. Child emitter timing: does a child stop or live out when its parent particle dies?
+5. Does PointLightRadius scale with particle size? (VFX1: no.)
+6. Flipbook order (row-major assumed) and whether frames blend (UpdateTextureCoords TextureBlendValue).
+7. Late join: how a running loop is prewarmed for `EffectStart::start_age` (VFX1 advances clocks only; VFX4).
+
+## 15. Files
+
+Created now (this commit):
+
+* `docs/design/m2a-vfx1.md` (this file)
+* `src/bf3_fx/CMakeLists.txt`
+* `src/bf3_fx/include/bf3/fx/fx_types.h`, `effect_def.h`, `effect_compiler.h`, `effect_cache.h`, `effect_library.h`,
+  `emitter_atlas.h`, `impact_table.h`, `simulator.h`
+* `src/bf3_fx/src/fx_types.cpp` (the name tables; the only stub the tree needs)
+* `tests/fx_contract_tests.cpp`
+
+Revision 2 changes these files only (headers, this doc, `fx_contract_tests.cpp`, the README section).
+
+Modified (additive "M2a VFX1" blocks only): top-level `CMakeLists.txt` (appended `add_subdirectory(src/bf3_fx)`),
+`tests/CMakeLists.txt` (appended `fx.contract`), `README.md` (one line under the ctest list and an "Effects (M2a
+VFX1)" section at the end).
+
+Created by the implementation: `src/bf3_fx/src/{effect_compiler,effect_cache,effect_library,emitter_atlas,
+impact_table,simulator,fx_harness}.cpp` (the census is in effect_compiler.cpp), `src/bf3_fx/src/fx_ebx.h` (bounded EBX
+field reads, the recording resolver) and `fx_internal.h` (def validation, the particle bound), the header
+`src/bf3_fx/include/bf3/fx/fx_harness.h` (the multi-start harness, goldens, check, bench, lane pool and frame digest
+shared by bf3dump and the tests), `tools/bf3dump/fx_commands.{h,cpp}`, `tests/fx_unit_tests.cpp`,
+`tests/fx_install_tests.cpp`, `tests/fx_fuzz_tests.cpp`, `tests/fx_test_support.h` (the synthetic EBX writer and
+builders) and `tests/fx_bench.cmake` (the tools.fx_bench wrapper). Additive header changes: `CompileStats::
+flipbooks_normalised` (effect_compiler.h), `ImpactTable::index_map()`, `default_material_index()` and `cell(row,
+col)` (impact_table.h, for the §5.3 counting rules), `ImpactTable::distinct_cells()`, `EmitterAtlas::ResSource`,
+the `ResSource` overload of `EmitterAtlas::load` and `EmitterAtlas::texture_info` (emitter_atlas.h, for fx.fuzz) and
+`FxStats::events_dropped` (simulator.h). Modified additively: `src/bf3_fx/CMakeLists.txt`,
+`tools/bf3dump/CMakeLists.txt` (link `bf3_fx`), `tools/bf3dump/bf3dump.cpp` (usage line and dispatch of `fx`),
+`tests/CMakeLists.txt` (`fx.unit`, `fx.install`, `fx.fuzz`, `tools.fx_bench`), `README.md` (its "Effects (M2a VFX1)"
+section and ctest line grow with the commands and tests).
+
+## 16. Baseline at design time
+
+Full ctest on m2a/vfx before any VFX1 code (dev preset, OPENBF3_GODOT set, shared machine with other tracks
+building): every row passed except `godot.m1` (E1 teleport: "the soldier did not arrive at the course start within
+10 s") and `godot.m1_load` (E4 cold 19.0 s > 15 s, E5 warm 6.2 s > 5 s), Godot timing rows that VFX1 cannot affect (no
+Godot-side change). After this design commit the full ctest ran again: 57/57 passed (55 passed, `core.cache_data` and
+`core.res` skipped for their unset sample variables), including `godot.m1` (344 s) and `godot.m1_load` (50 s) and the
+new `fx.contract`; total 798 s. The earlier two failures were most likely load on the shared machine (same code, now passing) [inferred].
+Revision 2 (headers changed, no Godot-side change): `tools\build.cmd dev` built with no warnings, each of the 8 headers compiles standalone under /W4 /permissive-, and the full ctest with OPENBF3_GODOT set passed 57/57 (55 passed, the same 2 skips), `godot.m1` 351 s, `godot.m1_load` 56 s, `fx.contract` 0.02 s, total 877 s on the shared machine.
+
+## 17. Revision 2 (review response)
+
+| finding | resolution |
+|---|---|
+| Spawn admission against the world budget unspecified (memory bound vs G8) [blocking] | Serial admission in `begin_step` with ranges live + n (§6.7, simulator.h header); storage fixed at construction; phased API `begin_frame` / `begin_step` / `run_items` / `end_step` so admission is exact per sub-step (§6.8); fx.unit saturation case (G8) and fx.fuzz memory-bound case (G10) |
+| G3 multi-start semantics with MaxInstanceCount 7 [blocking] | Harness of §7.7: each start alone after `clear()`, seed `fx_harness_seed(seed, i)`, `stolen_instances` = 0 and `refused_starts` = 0 required in G3 |
+| G3 partition name; short names | `fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p`; `find_partition` unique-suffix rule (§7.7) |
+| G4 command ambiguous; the blueprint holds 4 emitters + a sound | G4 pinned to `--emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01`; `compile_emitter_effect` added |
+| G5 counts depend on an unstated rule | Counting-rule table in §5.3 (default-row 79 / 63, generic-effect 81 / 64, no-effect 66 / 87, no effect relation 65 / 86) [verified by script] |
+| EffectEntityData.Transform missing | `EffectDef::transform`, composition rule §6.5, in blob v1 |
+| Component MaxInstanceCount / Reset | Carried, not applied; §6.7 and Q2 |
+| G7 harness and termination criterion | Independent starts; `effect_extent` with StartDelays, child windows and the largest life; `unchecked_termination` listed; non-increasing check after spawn_end |
+| DefaultValues wording; float flipbook fields | §4 corrected; validation in §6.2 step 6 and §10, `kMaxFlipbookFrames` |
+| Cache rules (rewrite deps; absent lookups) | §8 rules 1–2; recording resolver in the compiler; sorted list |
+| Late-join seam | `EffectStart::start_age` (clocks only in VFX1; Q7) |
+| README lacks G9 command | README section names `bf3dump fx bench` / `tools.fx_bench` and ≤ 50 ns |
+| RNG key collisions between parents / children | Key layout in fx_types.h (`fx_emitter_seed`, `fx_child_seed`, slots); fx.contract case |
+| Padding in EmitterOutput | memcmp only particles / lights; outputs field by field (§6.8) |
+| Child transform race | Child transforms set in `begin_step` from the previous `end_step` (§6.5, §6.8) |
+| G9 measure unspecified | §9 workload, timing window, warm-up, validity counters |
+| Weak G7 checks | (c) kept as self-checks and labelled so; (d) adds the non-increasing rule |
+| Emitter dedup by name with dual roles | Dedup by (name, role); census counts dual-role documents |
+| NormTime with life 0 | t = 0 rule (§6.5), fuzz case |
+| Merge friction; asan coverage | §13 risk; §11 asan rows |
+
+## 18. Implementation results (2026-10-16)
+
+Measured on branch `m2a/vfx` with the dev preset (Release) on the shared machine (other tracks and agents running;
+CPU load about 70 %), so every timing below is noisy. Each gate has one command; the fx.install / fx.unit cases call
+the same harness functions (`fx_harness.h`).
+
+| id | threshold | measured | met | command |
+|---|---|---|---|---|
+| G1 | 1,101/1,101 blueprints, 3,410/3,410 documents, no unknown type / enumerator, 32/32 and 10/10 types, max_work_units ≤ 65,536 | 1,101/1,101 and 3,410/3,410 compiled; unknown types and enumerators empty; 32/32 processor and 10/10 evaluator types; max_work_units 4,756; 4,353 EmitterEntityData, 21 effects with a transform, 12 component pools, 1 flipbook normalised, 0 dual-role documents; 0.05–0.08 s on all lanes | yes | `bf3dump fx census @all-mp` |
+| G2 | f(0) = w, f(1) = x+y+z+w exact; clamp then scale; flash alpha f(1) = 0.0051852 (rel 1e-4); colour endpoints | exact on the compiled evaluators of synthetic documents; rapidsmoke 0.1 at t = 0; f(1) = 0.00518524; Color1 at f = 0, Color0 at f = 1 | yes | `ctest -R "fx.contract\|fx.unit"` |
+| G3 | §2 G3 row | fractions 0.7465 / 0.7535 / 0.7531 (flash, light_01, light_02), 1 (rapidsmoke), 0.2473 (nozzleflames), selected = observed for every start; 7,465 flash starts, all with exactly one particle; life 0.0500000022 s; spawn size / P(0) in [0.320011, 0.399991]; size ratio error 1.35e-7; start frame [1.0011, 15.9912]; 527,310 lights checked, 0 off the golden (max rel error 0); rapidsmoke max live 5; 0 alive at the end; stolen / refused 0; 0.5 s | yes | `bf3dump fx simulate fx_muzz_generic_rifle_1p --starts 10000 --seed 1 --seconds 1 --dt 0.0166667 --golden muzzle1p` |
+| G4 | live ∈ [79, 81] after 15 s, max ≤ 81, spawns_dropped 0, both runs | fixed dt: 80..80, max 80, dropped 0, capped 0 (4,500 frames); variable dt: 80..80, max 80, dropped 0, capped 0 (2,726 frames) | yes | `bf3dump fx simulate --emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01 --seconds 75 --dt 0.0166667 --seed 1 --golden oilfire` (and `--variable` for `--dt 0.0166667`) |
+| G5 | §5.3 values and named cells | Metro: 102 rows, 223 / 110 relations, default-row 79 (all exactly generic), generic-effect 81, no-effect 66, no effect relation 65, 16 distinct, the 8 named cells (effects, decals, spreads 30 / 30 / 90 / 90 / 0 / 5 / 45); Caspian: 118, 299 / 123, 63, 64, 87, 86, 16, the 8 named cells; table load 0.014 s | yes | `bf3dump fx impacts MP_Subway --projectile=bullet` and `bf3dump fx impacts MP_007 --projectile=bullet` |
+| G6 | §5.4 values, 0 missing, every entry used | 52 entries, 42 base + 10 normal, 3 degenerate; base format 2 sRGB 4096 × 4096, 13 mips; normal format 20 linear 1024 × 2048, 12 mips; 0 inexact rects; 1,053 EmitterDocuments use 52 names, 0 missing, 0 unused entries | yes | `bf3dump fx atlas MP_Subway` |
+| G7 | 0 failures (a)–(d) | 1,101 effects × 4 starts: 0 failures; 589 finite, 137 `unchecked_termination` (listed by the command); `emitter_starts_dropped` 1,493 (child instances past their parent's per-emitter cap, reported); max live 2,611 (`fx_dlc_xp5_healthcritical_c130`); 30–78 s wall | yes | `bf3dump fx check @all-mp --seconds 10 --seed 1` |
+| G8 | identical particles / lights / outputs / stats on 1, 2, 8 lanes and two partitions; saturating case drops spawns identically | fx.unit: a world saturated by 50 instances (spawns_dropped > 0) gives identical per-frame digests and `memcmp`-equal particles on 1 lane, the lane pool with 2 and 8 lanes (chunks 1 and 7) and `FxWorld::step` on 8 lanes; retail: start 0 of all 1,101 effects on 8 lanes with chunks 1 and 7, 0 mismatches | yes | `ctest -R fx.unit` and `bf3dump fx check @all-mp --seconds 10 --seed 1` |
+| G9 | median ≤ 50 ns, valid run | median 39.42 ns (min 39.14, max 40.00) per admitted particle per sub-step, next to the prototype's 24.7 ns; mean live 15,348, mean emitter instances 354, spawns_dropped 0, refused 0, stolen 0, spawns_capped 4,183,576 (muzzle and impact emitters asking past MaxCount). Same build, other runs: 40.8–41.7 ns. Noisy: before the output stage was evaluated per chunk the same workload measured 94–178 ns at the same load | yes (noisy) | `ctest -R tools.fx_bench` (= `bf3dump fx bench --seed 1`) |
+| G10 | errors or bounded results, no crash / hang / unbounded allocation; decode only re-encode-identical blobs | fx.fuzz passes in dev (3.9 s) and asan (36.5 s): 1,500 mutated graphs (about 950 parse, about 600 compile and are simulated), hostile flipbooks / floats / template bounds / structure (duplicate types, evaluator as processor, processor as Pre, unknown enumerators, base nesting, child cycle, particle bound, 257 components, foreign component type, a 16-unit budget), every truncation / bit flip / count inflation of a blob and a deps list, NormTime without UpdateAge and with life 0, hostile dt (0, negative, NaN, inf, 1e30), 4,096 starts of a MaxCount 16,384 def | yes | `ctest --preset asan -R fx.fuzz` |
+| G11 | the install unchanged | fx.install "install unchanged" passes (dev and asan) | yes | `ctest -R fx.install` |
+
+ctest. Dev, `OPENBF3_GODOT` set: 61 rows; 58 passed, 2 skipped (`core.cache_data`, `core.res`: their sample
+variables are unset), and `host.session.unit` failed once ("extrapolated 1758 < 0.05 × presented": 15 %), a
+wall-clock networking row that shares no code with bf3_fx; run alone right after, it passed (70 s). `fx.contract`
+0.5 s, `fx.unit` 0.3 s, `fx.fuzz` 3.9 s, `fx.install` 37 s, `tools.fx_bench` 5.3 s, `godot.m1` 345 s, `godot.m1_load`
+48 s; total 808 s. Asan (`b/asan`): `fx.contract`, `fx.unit`, `fx.fuzz` and `fx.install` pass (fx.install 199 s);
+`tools.fx_bench` reports 690.83 ns and passes as report-only.
+
+Implementation decisions recorded with their sections: the G7 (d) slack (§2), the flipbook state wrap (§6.4), the
+digest without the handle generation (§6.8), the bf3dump flags and exit codes (§7.7) and the files (§15). Others:
+children of one parent instance and child emitter are capped at the parent's MaxCount (the excess counts as
+`emitter_starts_dropped`, 1,493 over G7, so `max_particles` stays a bound); a late join (`start_age`) arms neither
+the accumulator nor the burst of an emitter whose clock is past 0; a repeat wrap re-arms both; a rate-mode spawn's
+age offset is f = clamp((k + 1 − a0) / (rate × dt_e), 0, 1) of the sub-step; `run_census` reads a bulk-loaded library
+(callers run `load_all()` first). Performance: the Update stage's output slots (size, size axes, colour, alpha and the
+alpha levels) are evaluated per chunk of 256 particles with the vectorisable NormTime polynomial / colour paths, the
+NaN guard is one balanced sum times 0, and constant drag takes one `exp` per item.
+
+### 18.1 Verifier follow-up (2026-10-16)
+
+The verifier found one blocking defect: `ImpactTable::load` deduplicated each new cell by comparing it with every
+distinct cell so far, uncharged (O(U²) in distinct cells, U ≤ 65,536). Fixed structurally (§6.10): cells are
+deduplicated through an ordered content map and each lookup is charged. Measured with the new fx.fuzz row on the same
+build (dev, shared machine, noisy): a 256 × 256 grid of 65,536 distinct cells took 18.8 s with the old scan (128 × 128:
+0.82 s, ratio 23) and takes 0.09-0.12 s now (128 × 128: 0.02-0.05 s, ratio 2.5-4.8; the row requires < 10), budget
+656,131 of 1,000,000. fx.fuzz now also covers the impact table and the emitter atlas (§10): to drive the atlas without
+an install, `EmitterAtlas::load` gained a `ResSource` overload and the header check `EmitterAtlas::texture_info`
+(the mount overload is a wrapper; G6 unchanged). The atlas name sort is now charged m · log2 m. Non-blocking:
+`FxStats::events_dropped` counts events past the frame buffer (§7.6; fx.unit covers it; 0 in G3, G4 and G7), and the
+README's two ctest lines are one.
+
+Re-measured after the fix: full dev ctest with `OPENBF3_GODOT`: 61 rows, 59 passed, 2 skipped (`core.cache_data`,
+`core.res`), 0 failed, 791 s (`fx.fuzz` 5.1 s, `fx.install` 29 s, `host.session.unit` passed). G1, G3, G4 (fixed and
+variable), G5 (Metro and Caspian), G6 and G7 (1,101 effects, 0 failed, 1,101 compared, 0 mismatches, 26 s) print
+PASS with the values of the table above. G9: `tools.fx_bench` medians 38.97 and 38.49 ns at low load (valid runs).
+Asan (`b/asan`, rebuilt): `fx.contract`, `fx.unit` (1.9 s), `fx.fuzz` (80.6 s, the new grid and atlas rows included)
+and `fx.install` (159 s) pass; `tools.fx_bench` is report-only there (681 ns).

@@ -249,3 +249,71 @@ target_sources(bf3_core PRIVATE
     src/gameplay/vehicle_drive.cpp
     src/level/vehicle_spawns.cpp
 )
+
+# UI ui1 (SWF, atlases and fonts; docs/design/ui-swf-fonts.md §12): the SwfMovie symbol-table reader, the install
+# library and census, the atlas cutter, DefineFont3 outlines, the TrueType writer, the UI font library and the HUD
+# layout facts. Interface headers now; the sources are added by the implementation.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/swf_movie.h
+    include/bf3/core/ui/swf_library.h
+    include/bf3/core/ui/swf_census.h
+    include/bf3/core/ui/swf_atlas.h
+    include/bf3/core/ui/swf_font.h
+    include/bf3/core/ui/font_ttf.h
+    include/bf3/core/ui/ui_fonts.h
+    include/bf3/core/ui/swf_layout.h
+)
+# UI ui1 implementation (docs/design/ui-swf-fonts.md §17).
+target_sources(bf3_core PRIVATE
+    src/ui/swf_bits.h
+    src/ui/swf_font_detail.h
+    src/ui/swf_movie.cpp
+    src/ui/swf_display.cpp
+    src/ui/swf_library.cpp
+    src/ui/swf_font.cpp
+    src/ui/font_ttf_write.cpp
+    src/ui/font_ttf_read.cpp
+    src/ui/swf_census.cpp
+    src/ui/swf_atlas.cpp
+    src/ui/ui_fonts.cpp
+    src/ui/swf_layout.cpp
+)
+
+# UI ui2 (docs/design/ui-minimap-icons.md §12): the minimap, HUD icon and HUD data-model readers.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/minimap.h
+    include/bf3/core/ui/hud_icons.h
+    include/bf3/core/ui/hud_sources.h
+    include/bf3/core/ui/hud_model.h
+    src/ui/ui_ebx.h
+    src/ui/minimap.cpp
+    src/ui/minimap_images.cpp
+    src/ui/hud_icons.cpp
+    src/ui/item_icons.cpp
+    src/ui/hud_sources.cpp
+    src/ui/hud_model.cpp
+)
+
+# M2a weapons (docs/design/m2a-weapons.md §4.3, §13): the level grid's MaterialPairs in order, so a static hit's
+# pair index reaches its property (damage) and physics-material (impact effects) rows.
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/grid_pairs.h
+    src/gameplay/grid_pairs.cpp
+)
+
+# M2a audio (docs/design/m2a-audio.md §5, §6): sound stream codecs (EA-XAS v1), SoundWaveAsset reader, the resident
+# wave bank, the sound-graph node type table and the SoundPatchAsset compiler.
+target_sources(bf3_core PRIVATE
+    src/audio/sound_program.cpp
+    src/audio/sound_program_blob.cpp
+    src/audio/sound_stream.cpp
+    src/audio/sound_types.cpp
+    src/audio/sound_wave.cpp
+    src/audio/wave_bank.cpp
+    include/bf3/core/audio/sound_ports.h
+    include/bf3/core/audio/sound_program.h
+    include/bf3/core/audio/sound_stream.h
+    include/bf3/core/audio/sound_types.h
+    include/bf3/core/audio/sound_wave.h
+    include/bf3/core/audio/wave_bank.h
+)

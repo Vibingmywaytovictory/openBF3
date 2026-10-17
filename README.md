@@ -34,7 +34,7 @@ Install location, first match wins: `--bf3-install=<dir>` (user arg), env `OPENB
 ```bat
 git clone --recurse-submodules <repo-url> openBF3
 cd openBF3
-tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev
+tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev minus the timing rows (--all-tests: all)
 ```
 
 From a VS x64 developer prompt the three steps are `cmake --preset dev`, `cmake --build --preset dev` and
@@ -75,6 +75,16 @@ L1 look: `render.look.unit`, `render.look` and, with `OPENBF3_GODOT`, `godot.l1_
 S1 (spike, docs/design/s1.md): `s1.contract`, `sim.nav.unit`, `host.scale.unit` (no data), `sim.nav` and the RUN_SERIAL timing gates `sim.nav.bake` and `host.scale` (install; see "S1 server scale (spike)").
 
 S2 vehicle replay adds `s2.contract` and `sim.vehicle.unit` (no data) and `sim.vehicle` (install; exits 77 without one), see "S2 vehicle replay".
+
+UI ui1 adds `ui1.contract` (the SWF, atlas and font interface headers compile and keep their contract, no data); the ui1 implementation adds `core.ui.swf.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font.unit`, `core.ui.font`, `godot.ui_fonts` and `godot.ui_fonts_shots`; see "UI groundwork 1 (ui1)".
+
+UI ui2 adds `ui2.contract`, `ui.minimap.unit`, `ui.hud.unit` (no data), `ui.minimap`, `ui.hud.icons`, `ui.hud.sources`, `ui.minimap.fuzz`, `ui.hud.fuzz` (install) and `godot.ui2` (windowed); see "UI minimap, HUD icons and HUD model (ui2)".
+
+M2a weapons adds `m2a.weapons.contract` and `sim.weapons.unit` (no data), `sim.weapons`, `sim.weapons.range`, `sim.weapons.fuzz`, `sim.weapons.perf` (W11, RUN_SERIAL, noisy) and `tools.weapon_sim` (install); see "M2a weapons core".
+
+M2a VFX1 adds `fx.contract` (the bf3_fx interface, no data), `fx.unit` and `fx.fuzz` (no data; both in the asan preset too), `fx.install` (the retail gates G1, G3-G8, G11) and `tools.fx_bench` (G9, RUN_SERIAL, noisy); see "Effects (M2a VFX1)".
+
+M2a audio adds `audio.contract`, `audio.xas.unit`, `audio.patch.unit`, `audio.dsp.unit`, `audio.mixer.unit` (no data), `audio.oracles`, `audio.cache`, `audio.fuzz`, `audio.waves`, `audio.loc`, `audio.decode.perf`, `audio.census`, `audio.bank`, `audio.m16.offline` (install) and `godot.audio` (windowed, `OPENBF3_GODOT`); see "M2a audio".
 
 ## Run
 
@@ -1706,7 +1716,8 @@ synthetic-course case of `sim.vehicle.unit` runs `OwnHistory` + `ExactPod` + `Fu
 `release`). Both suites print steps
 and seconds per course; the TIMEOUTs are 3x the measured runs (docs/design/s2.md §15.1).
 
-Measured (2026-10-15, docs/design/s2.md §15.1): **S2 fails on G2 alone.** C, D, G1, G1r, G1m, install unchanged and
+Measured (2026-10-15, docs/design/s2.md §15.1): **since the integration the quantised G2 is report-only and G2x
+(`ExactPod`) is the gate, which passes**; before it, S2 failed on G2 alone. C, D, G1, G1r, G1m, install unchanged and
 the units pass: Jolt's vehicle is bit-identical on every MP_007 and synthetic course (3,600 ticks; 30 restore runs
 each, into the prediction world and as an in-place rollback; three touching Humvees), and the dev, release and asan
 builds produce the same per-tick hashes. G2 with the quantised 440-bit ghost fails on slalom, bumps and collision
@@ -1730,6 +1741,240 @@ Tools: `bf3dump vehicledrive <LEVEL> <MODE> [<blueprint>]` prints the drive def 
 the synthetic courses with the level's model, `--courses=a,b`, `--modes=<hex>`, `--handling`, `--sweep` the ghost
 width rows, `--trace=N` a per-tick server trace, `--hash-out=`, `--log-out=<dir>` / `--log-in=<file>` command logs,
 scratch only).
+
+## UI groundwork 1 (ui1)
+
+Design: [docs/design/ui-swf-fonts.md](docs/design/ui-swf-fonts.md). BF3's SwfMovie res (434 movies) are read at run
+time as symbol tables (no SWF renderer, no ActionScript): timelines, labels, placements, exports and imports, the
+Scaleform external-image atlases and their sub-images, edit texts, scaling grids and `DefineFont3` fonts. The atlas
+cutter maps labels and symbols to atlas rectangles (Godot `AtlasTexture`); the fonts are converted to in-memory
+TrueType for `FontFile.set_data` and cached (cache kind `ui-font`, converter version in the key);
+`UIFontMappingCollection` resolves `$MENU_*` / `$HUD_*`; the HUD screens' widget positions are read from their
+1280 x 720 stages.
+
+Implemented (2026-10-16). Readers in `src/bf3_core/src/ui/` (headers in `src/bf3_core/include/bf3/core/ui/`:
+`swf_movie.h`, `swf_library.h`, `swf_census.h`, `swf_atlas.h`, `swf_font.h`, `font_ttf.h`, `ui_fonts.h`,
+`swf_layout.h`); Godot side `src/bf3_godot/src/ui_assets.{h,cpp}` (`Bf3UiAssets`: fonts as `FontFile`s, atlas
+regions as `AtlasTexture`s, HUD rows and layout trees, loaded on its own thread after `Bf3Localisation`) and
+`ui_font_check.{h,cpp}` (`Bf3UiFontCheck`, scene `res://scenes/ui_fonts.tscn`). Every parser charges a
+`WorkBudget` and has hard caps (16 MiB body, 2^22 tags, 2^16 frames, 2^18 display events, 4,096 contours /
+16,384 points per glyph, 2^20 atlas pieces); hostile input fails with an error.
+
+**Commands.** `bf3dump swf census [--tsv <out.tsv>]` (exit 1 on any error), `swf movie <name>`, `swf labels <name>`,
+`swf layout <name>`, `swf hud`, `swf fonts [--cache=<dir> | --no-cache]` (the fonts' stats and SHA-256 and the
+name-resolution table; it writes no font file). Their output is BF3 data: keep it out of the repo. In Godot:
+`<godot> --path bf3-opensource res://scenes/ui_fonts.tscn` shows the font page (`-- --page=1` the coverage table,
+`--page=2` the iconsingame labels); `-- --ui-check` prints the rows and `UI1 CHECK: PASS (n/n)`; `--shot-dir=<dir>`
+also writes `ui1_fonts.png`, `ui1_coverage.png`, `ui1_icons.png`.
+
+**Gates** (measured 2026-10-16 on this machine; 16 threads shared with other tracks' builds and tests, so every time
+is noisy and each test prints its own; commands from the worktree root after `tools\build.cmd dev`, the Godot tests
+with `OPENBF3_GODOT` set; details in the design's §21):
+
+| gate | measured | command |
+|---|---|---|
+| G1 census | 434 movies, 434 parsed, 0 errors (CFX 371, GFX 63); 0 names with two SHA-1s; every tag total equals the design's §4.2 table and no other code occurs; AS2 1,638,265 bytes; 2,441 labels (0 after the last ShowFrame); 135 external images, 0 textures missing; 820 sub-images, 0 outside; 1,268 imported symbols, 1 missing (deckofcards imports `iconsShared.swf:IconsShared_Check`, not exported); fonts 63 outlines / 21 glyphless / 2 codes-only | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf census`) |
+| G2 iconsingame | `iconsingame_i1.tga` 4096 x 128, its DxTexture DXT5 of that size; 162 sub-images, 0 outside; 427 labels on 6 sprites: 135 with art (110 one piece, 25 two), 292 empty; 95 sub-images from labels, 96 with symbols, 162 from frames; the 10 spot rectangles of §6.3 exact | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf labels ui/assets/iconsingame`) |
+| G3 fonts | TrueType 444 / 444 / 34 / 34 glyphs, 442 / 442 / 32 / 32 codes (Purista EA Medium / Semibold, Venice-Medium / SemiBold), U+00C9 in both Purista, 0 contours reversed, every point within 0.5 unit of the source, advances exact, kerning 335 / 324 / 0 / 0; cold 4 converted, warm 4 hits, a damaged entry dropped and reconverted, then a hit | `ctest --preset dev -R "^core\.ui\.font$" -V` |
+| G4 Godot | `UI1 CHECK: PASS (25/25)`; glyph advances within 0.0156 px of the source at 64 px; shaped "0123456789" 366.500 px (source 366.519), "OPERATION MÉTRO" 547.031 px (547.019); "AV" 3.844 px narrower than "A" + "V" (source kerning 3.841 px) | `ctest --preset dev -R "^godot\.ui_fonts$" -V` |
+| G5 shots | the windowed check passes 25/25 and writes the three PNGs (findings below) | `ctest --preset dev -R "^godot\.ui_fonts_shots$" -V` |
+| G6 mapping | Exact 5, CaseFolded 2, Family 4, Device 5, Unresolved 0; `G6 family-inferred: $FONT_TITLE $HUD $HUD_light $Menu_light`; the other font libraries' 59 names all Exact under their own collections | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf fonts`) |
+| G7 HUD table | 86 placements (14, 8, 9, 7, 8, 9, 10, 7, 0, 1, 4, 8, 1, 0), every stage 1280 x 720, the §8.2 spot values within 0.05 px | `ctest --preset dev -R "^core\.ui\.swf$" -V` (also `bf3dump swf hud`) |
+| G8 asan | `ui1.contract`, `core.ui.swf.unit`, `core.ui.font.unit`, `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font` pass under ASan with no report; in dev every hostile case ends in under 1 s (slowest over two runs: 2^18 + 1 display events 0.14 to 0.55 s, 2^22 + 1 tags 0.11 to 0.48 s; noisy) | `ctest --preset asan -R "^core\.ui\.(swf\|font)"` |
+| G9 install | 256 index files unchanged in `core.ui.swf`, `core.ui.swf.fuzz`, `core.ui.font` and `godot.ui_fonts` | the `install.unchanged` lines of those tests |
+| T1 census time | 0.28 s (library open 0.25 s + census 0.037 s; limit 15 s) | `ctest --preset dev -R "^core\.ui\.swf$" -V` |
+| T2 font load | cold 0.031 s (limit 1.0 s), warm 0.003 s (limit 0.25 s) | `ctest --preset dev -R "^core\.ui\.font$" -V` |
+
+**What the implementation changed in the design** (each fixed in the design in the same commit): G6 counts Exact 5,
+not 4 (the en font library's own edit texts name all four long names; revision 2 missed Venice-SemiBold); two §8.2
+values were rounded (`HudBackgroundWidget_01` in hudtdmscreen is at y 486.95, both `Compass_01`s at x 85.05 with
+scale 0.99985); the G4 string widths are the sum of the shaped glyph advances, because `Font.get_string_size()` and
+`TextServer.shaped_text_get_width()` return the width ceil()ed to whole pixels on Godot 4.8 dev7 (367.000 px for a
+366.519 px line) while the shaped advances are exact.
+
+**Screenshots** (G5; `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1\`, gitignored, not in the repo),
+inspected 2026-10-16:
+* `ui1_fonts.png`: both Purista weights and both Venice weights at 64 / 32 / 16 px. The counters of O, A, R, P, B,
+  0, 4, 6, 8, 9 and % are open (no inverted contour); every line sits on its red baseline; spacing is even with no
+  overlaps or gaps at any size; "OPERATION MÉTRO" shows its acute accent; "AV" visibly kerns. The red
+  baseline under the 32 px lines is fainter than the others (it falls on a half pixel); the text is right.
+* `ui1_coverage.png`: the 442 codes of each Purista weight (Latin-1, Latin Extended-A, Cyrillic, punctuation up
+  to U+2588) draw their glyphs, except five cells that draw nothing: U+0020, U+00A0 and U+00AD (expected) and
+  U+2012 and U+2588 (no visible outline at that size; the round trip shows the TrueType glyphs equal the source, so
+  this is BF3's data, not the converter). Venice draws only `#`, `%`, `-`,
+  `.`, `/`, `0`-`9` and `:`: the other 16 of its 32 codes (`!"$&'()*+,;<=>?`) are empty glyphs in BF3's own font
+  library (the source outlines have no contours for them; the converter keeps that), so `has_char` is true and
+  Godot's system fallback does not replace them. HUD text in `$HUD_*` with those characters draws nothing for them,
+  as Venice would in BF3 if those characters were ever shown; the HUD wave should use `$MENU_*` for such text.
+* `ui1_icons.png`: the 135 iconsingame labels with art, each from its `AtlasTexture` pieces: kit, vehicle, objective,
+  flag and squad icons in their friendly / enemy colours; the 25 two-piece labels (e.g. `KitPickupAssault`, the CTF
+  flag "picked" states) show the icon composed over its background; no piece is cut off or bleeds into a neighbour.
+
+Converted fonts exist only in memory and in the derived-data cache; no command writes them anywhere else (design
+revision 2, §20).
+
+## UI minimap, HUD icons and HUD model (ui2)
+
+Design and measured results: [docs/design/ui-minimap-icons.md](docs/design/ui-minimap-icons.md) (plan §3.8, D16,
+§7.8; results in its §18).
+
+**In the game.** `res://scenes/m1_metro.tscn` has a `MinimapHud` node (`Bf3MinimapHud`) beside the session: after
+the level is controllable it loads, on its own thread at below-normal priority with 2 parse lanes, the level's
+`UIMinimapData` (from the LevelData partition), the mode's combat-area distance fields, the capture points and the
+hud3dicons atlas, then draws BF3's minimap bottom-left (the L8 satellite tinted with `DetailTextureTint`, outside the
+combat area shaded with `CombatAreaColor`, flags and HQs from the atlas, the player marker, the walkers) and the
+flag / HQ icons over the 3D view with their distance. Nothing is cached; the loader takes about 0.5 s on Metro.
+Keys: M toggles north-up / rotating; the minimap hides with the free camera (F6). User args after `--`:
+`--no-minimap`, `--minimap-mode=<mode>` (objectives and areas of another mode: the M1 game runs TDM, which has no
+flags; e.g. `--minimap-mode=ConquestSmall0`), `--minimap-size=<px>`, `--minimap-north-up`, `--minimap-check`,
+`--minimap-shots=<dir>`. The node is inert under `--headless`, `--m1-check`, `--m1-load-check`, `--shot-spawns`,
+`--shots` and `--no-hud`, so other tracks' measurements and reference shots are unchanged.
+
+**Libraries and tools.** `bf3_core` `ui/minimap.h` (`read_minimap_data`, `read_combat_area`, `load_minimap_level`,
+`load_minimap_images`, `l8_mip_chain`, `combat_area_min_field`, `minimap_census`; the mapping
+`u = 0.5 - (x - Cx)/S`, `v = 0.5 - (z - Cz)/S` and the on-screen view inline), `ui/hud_icons.h` (the atlas, mirrored
+frames as `flip_x` / `flip_y`, `_small` item icons by unlock identifier, vehicle HUD icons), `ui/hud_sources.h` (the
+HUD DataSources table, generated from the install at run time and never stored), `ui/hud_model.h` (`HudModel` and
+the 235 binding rows, `check_hud_bindings`). bf3dump:
+
+```
+bf3dump minimap MP_Subway ConquestSmall0     :: UIMinimapData, masks, objectives, image sizes, timings
+bf3dump minimap --census                     :: every combat-area asset and distance field of @all-mp (G3)
+bf3dump hud-icons                            :: the hud3dicons atlas (G6)
+bf3dump item-icons MP_Subway                 :: the catalog variants' _small icons by identifier (G7)
+bf3dump hud-sources [--unbound]              :: the DataSources table and the binding check (G8)
+```
+
+**Tests** (one command per gate; the godot one needs `OPENBF3_GODOT` and a desktop session, the install ones exit 77
+without an install):
+
+| gate | command | measured 2026-10-15 (dev build, shared machine, times noisy) |
+|---|---|---|
+| G1–G5 minimap data, masks, objectives, orientation | `ctest --preset dev -R "^ui\.minimap$"` | 29 / 29 levels; 455 / 455 masks, 498 / 498 fields, 562 / 562 distance-field assets; Metro CQS 5 / 5, Caspian CQS 6 / 6, CQL 7 / 7; TDM mask vs gameplay polygon IoU 1.000 (others 0.000) |
+| G6, G7 atlas and weapon icons | `ctest --preset dev -R "^ui\.hud\.icons$"` | 161 entries / 159 types / 93 with states, 8 mirrored frames; 172 / 172 catalog variants find a DXT5 64 × 16 icon |
+| G8 DataSources | `ctest --preset dev -R "^ui\.hud\.sources$"` | 84 types, 1215 sources, 58 state components; 235 / 235 binding rows, 0 missing, 0 extra |
+| G9–G11, G14 in game | `set OPENBF3_UI2_SHOTS=<dir>& ctest --preset dev -R "^godot\.ui2$"` | 10 / 10 rows: read-back byte-exact; map UV error ≤ 0.25 satellite texel in both views (mirrors ≥ 850 texels); marker ≤ 0.76 canvas unit; icons ≤ 0.22 texel, world icons 0.008 units; 6 shots (inspected by eye); loader 0.43–0.69 s |
+| G12 asan | `ctest --preset asan -R "^ui(2\.contract|\.minimap|\.hud)"` | 8 / 8, 0 reports |
+| G13 install unchanged | the `install.unchanged` row of each install test above | unchanged |
+
+`ui.minimap.unit` and `ui.hud.unit` need no data; `ui.minimap.fuzz` and `ui.hud.fuzz` feed 250 seeded mutants per
+input (`OPENBF3_FUZZ_ITERS`) through the readers.
+
+## M2a weapons core
+
+<!-- # M2a weapons -->
+Design, contract and as-built results: [docs/design/m2a-weapons.md](docs/design/m2a-weapons.md). The Godot-free weapon
+core is in `bf3_sim` (`src/bf3_sim/include/bf3/sim/weapons/`, `src/bf3_sim/src/weapons/`): the per-soldier weapon state
+machine with sub-tick shot times (`SimTime`, 1,000,000 units per tick: 800 RPM = 4,500,000 units = 75 ms), the
+counter-based shot RNG, spread and recoil from GunSwayData with the unmeasured mechanics as `Mechanics` switches,
+double closed-form ballistics against `CollisionWorld` and zone-capsule hit targets (`HitTargetProvider`, stand-in
+capsules), damage from the level material grid (`read_grid_pairs`, `SurfaceMaterialTable`), the M67 / M320 HE /
+RPG-7 / SMAW explosives, and the headless shooting range. `weapon_checks.h` holds the §7.1 oracle rows as one
+function (the unit test, the install test and `bf3dump weapon-sim --check` run the same rows); `weapon_install.h` is
+the install side for tools and tests. The data's float times are converted through their shortest decimal, so 1.8 s
+is exactly 108,000,000 units.
+
+Commands (read-only; output is BF3 data, keep it out of the repo; each ends with `install.unchanged`):
+
+```bat
+b\dev\tools\bf3dump\bf3dump.exe weapon-sim weapons/m16a4/u_m16a4      :: sim numbers, fire / reload timing, drop table, shots to kill
+b\dev\tools\bf3dump\bf3dump.exe weapon-sim --check                    :: the data rows, "WEAPON-SIM CHECK: PASS (38/38)", exit 0 / 1
+b\dev\tools\bf3dump\bf3dump.exe weapon-sim --all > %TEMP%\w4.tsv      :: W4: 119 infantry rows on MP_Subway
+b\dev\tools\bf3dump\bf3dump.exe range weapons/m16a4/u_m16a4 --exact   :: Metro TDM lane (96.9 m), targets at 10 / 25 / 50 m
+b\dev\tools\bf3dump\bf3dump.exe range weapons/m16a4/u_m16a4 --perf    :: W11's 64-shooter load
+```
+
+Gates (one ctest each; W1–W10 run on simulated time and are exact; W11 is wall clock and **noisy** on this shared
+machine). Measured 2026-10-15, dev preset:
+
+| gate | ctest / command | threshold | measured |
+|---|---|---|---|
+| W1 fire timing | `sim.weapons.unit`, `sim.weapons`; `tools.weapon_sim` | M16A3 one magazine: 31 shots, every gap 4,500,000 units; `infinite_magazine` table: 134 shots in 10 s; M98B bolt cycle 78,000,000; AN-94 2 @ 3,000,000; 870 12 pellets, 28,800,000 pump; M16A4 3 per press; M9 ≥ 9,000,000 | all exact, on synthetic and MP_Subway defs (38/38 rows) |
+| W2 drop, range | `sim.weapons.unit`, `sim.weapons` | 0.1775 / 1.5976 m at 100 / 300 m, M98B 1.0449 / 11.609 m at 300 / 1,000 m within 1 cm; range v0 × TTL within 1 mm | 0.1779 / 1.5981 / 1.0451 / 11.6098 m; 975.0000 / 3,250.0000 m |
+| W3 shots to kill | `sim.weapons`, `sim.weapons.range` | M16A3 4 / 2 at ≤ 8 m, 6 / 3 at ≥ 50 m; one-shot ranges within 0.01 m | as required; Metro 5 m and 60 m end to end; 17.4762 / 14.9998 / 19.9995 / 50.7445 / 16.2565 m |
+| W4 table | `sim.weapons`; `bf3dump weapon-sim --all` | 119 rows on MP_Subway, 0 errors | 119 rows, 0 errors |
+| W5 zone multipliers | `sim.weapons.range` | M16A3 head 50.0 (×2.0), chest / body 25.0, legs 22.75; M98B 223.25 / 100.70 / 86.45; 870 pellet 18.0; within 1e-3 | exact to 1e-4 |
+| W6 reload | `sim.weapons.unit`, `sim.weapons` | M16A3 108,000,000 / 142,200,000 units; commit 91,800,000 / 120,870,000; 870 270,000,000 | exact |
+| W7 determinism | `sim.weapons.unit`, `sim.weapons.range` | equal shot and impact list hashes; ≥ 99 % of hip-fire directions change with the seed | equal; 100 % |
+| W8 hostile data | `sim.weapons.unit`, `sim.weapons.fuzz` (dev and `asan`) | 2,000 mutated blobs: no crash, invariants hold | 0 violations (683 accepted mutants × 600 random ticks) |
+| W9 explosives | `sim.weapons`, `sim.weapons.range` | M67 fuse 216,000,000 units; blast 112 / 81.45 / 40.73 / 0 at 1.5 / 3 / 5 / 7 m; M320 / RPG arm 0.5 s | exact; Metro stand-ins 112 / 85.52 / 44.80 / 0 |
+| W10 install unchanged | every install test and command | `install.unchanged` row | yes (256 files) |
+| W11 cost (wall clock, noisy) | `sim.weapons.perf` (RUN_SERIAL; exits 77 while `OPENBF3_QUIET_LOCK` names an existing file); `bf3dump range --perf` | 64 M16A3 shooters on full auto, 600 ticks: p99 (nearest rank) ≤ 2.0 ms per tick | p99 0.205 ms (mean 0.115, max 0.407) |
+
+## Effects (M2a VFX1)
+
+`bf3_fx` (`src/bf3_fx`, Godot-free, client only) is BF3's visual-effects core: the compiler from `EffectBlueprint` /
+`EmitterDocument` EBX into flat, digest-cached `EffectDef`s (all 32 processor and 10 evaluator types), the
+deterministic CPU particle simulator `FxWorld`, the per-level emitter atlas and the impact table from the material
+grid. The design, exit gates (census 1,101/1,101 effects and 3,410/3,410 emitters with 0 unknown types, the 1p muzzle
+and oilfire goldens, Metro / Caspian impacts, Metro's 52 atlas entries, cost per particle) and the seams for the
+renderer (VFX2), triggers (VFX3) and audio are in [docs/design/m2a-vfx1.md](docs/design/m2a-vfx1.md).
+`ctest -R fx.contract` checks the interface headers without data; `fx.unit` and `fx.fuzz` need no data; `fx.install`
+and `tools.fx_bench` read the install (Skipped without one).
+
+`bf3dump fx` (`fx census | compile | simulate | check | bench | atlas | impacts`, design §7.7) prints the compiled
+defs and runs the gates; every gate has one command (the design's §18 has the measured values):
+
+| gate | command | threshold | measured (2026-10-16, shared machine) |
+|---|---|---|---|
+| G1 census | `bf3dump fx census @all-mp` | 1,101/1,101 effects, 3,410/3,410 emitters, 0 unknown types, 32/32 + 10/10 types | met |
+| G2 polynomials | `ctest -R "fx.contract\|fx.unit"` | exact f(0), f(1), clamp then scale | met |
+| G3 1p muzzle | `bf3dump fx simulate fx_muzz_generic_rifle_1p --starts 10000 --seed 1 --seconds 1 --dt 0.0166667 --golden muzzle1p` | fractions 0.75 / 1 / 0.25 ± 0.02, flash life 0.05 s, lights exact | met |
+| G4 oilfire | `bf3dump fx simulate --emitter fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01 --seconds 75 --dt 0.0166667 --seed 1 --golden oilfire` (and `--variable`) | 79..81 live after 15 s | 80..80, met |
+| G5 impacts | `bf3dump fx impacts MP_Subway` / `MP_007` | design §5.3 counts and cells | met |
+| G6 atlas | `bf3dump fx atlas MP_Subway` | 52 entries, 42 + 10, 0 missing | met |
+| G7 every effect | `bf3dump fx check @all-mp --seconds 10 --seed 1` | 0 failures | 0 of 1,101, met |
+| G8 determinism | `ctest -R fx.unit` and the `fx check` above | identical on 1 / 2 / 8 lanes | 0 mismatches, met |
+| G9 cost | `ctest -R tools.fx_bench` (= `bf3dump fx bench --seed 1`) | median <= 50 ns per particle per step | 39.4 ns (prototype 24.7), met; noisy |
+| G10 hostile data | `ctest --preset asan -R fx.fuzz` | no crash / hang / unbounded allocation / superlinear work (compiler, blob, simulator, impact table, atlas) | met |
+| G11 install unchanged | `ctest -R fx.install` | layout.toc, cas.cat, .sb/.toc unchanged | met |
+
+The cost gate runs RUN_SERIAL and is report-only under asan; the figure is wall clock on a shared machine, so it is
+noisy (the same build measured 39-42 ns across runs).
+
+## M2a audio
+
+Design: [docs/design/m2a-audio.md](docs/design/m2a-audio.md) (slices A1 XAS voices + wave bank + mixer, A2 weapon
+patch interpreter; section 1.1 has the measured results, section 16 the implementation notes). Implemented:
+* `bf3_core` `audio/`: the EA-XAS / PCM16 stream codec (a port of IW4L `sound.rs`, Apache-2.0, attributed in
+  `sound_stream.cpp`), the `SoundWaveAsset` reader, the resident `WaveBank` (budget 384 MiB), the node type table and
+  the `SoundPatchAsset` compiler with its `OBF3SNDP` program blob, validator and cache entries.
+* `bf3_audio` (Godot-free): `PatchInstance`, the A2 interpreter for the 32 node types the weapon patches use
+  (AreaType fixed at 0), the Sampler model, DSP (biquads, one-pole, gain ramps, pan, resampler), `MixerCore` (voices
+  summed on a 512-frame grid, lock-free command / return / feedback rings from the game thread), WAV I/O, analysis and
+  the shared M16A3 check (`audio_check.h`).
+* `bf3_godot`: `Bf3AudioStream`/`Bf3AudioPlayback` (an `AudioStreamPlayback` whose `_mix` pulls from `MixerCore`) and
+  `Bf3AudioDemo` in `res://scenes/audio_m16.tscn`. The project runs the driver at 48 kHz (`[audio]` in
+  `project.godot`). Tuning that the data does not state lives in `bf3-opensource/config/audio_tuning.cfg`.
+* `bf3dump audio waves|loc|census|bank|check|render|wave` (see `bf3dump` with no arguments for the usage).
+
+The gates, one command each (from the repo root after `tools\build.cmd dev`; `bf3dump` is
+`b\dev\tools\bf3dump\bf3dump.exe`; each ctest wraps exactly that command and checks the threshold):
+
+| gate | ctest | command | pass threshold |
+|---|---|---|---|
+| G1 | `audio.waves` | `bf3dump audio waves MP_Subway TeamDeathMatch0 --decode` | 909 waves, decoded frames == header frames: 0 mismatches, 0 errors |
+| G2 | `audio.loc` | `bf3dump audio loc en --decode` | 4,290 chunks, 15,890 streams, 0 mismatches, 0 errors |
+| G3 (timing) | `audio.decode.perf` | `bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3` | `best_cpu_ms_per_channel_second` ≤ 0.2 |
+| G4 | `audio.census` | `bf3dump audio census @all-mp` | 834 patches + 1 master, 32,117 nodes / 46 types, 7,323 voices, 1,879 waves, 164 handheld strict on 32 types |
+| G5 | `audio.oracles` | `b\dev\tests\test_audio_install.exe --test-suite=audio-oracles` | plan §7.7 items 1–4 (design §10.2) |
+| G6 (timing) | `audio.bank` | `bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2` | 629 resident waves, 265.4 MiB ≤ 384 MiB, 0 starved, `warm_load_ms` ≤ 500 |
+| G7 | `audio.m16.offline` | `bf3dump audio check --g7 --out-dir b\shots\audio` | 38 rows, 0 failed |
+| G8 (timing) | `godot.audio` | `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=b\shots\audio\godot_m16.wav --quit-after=90` | `AUDIO CHECK: PASS`: rows (a)–(d), ≥ 30.0 s recorded, short/late blocks, late commands, ring overflows, starved voices all 0, offline replay equal sample for sample |
+
+`audio.contract` checks the headers, the node type table, the seam hashes and FourCCs and the tuning file;
+`audio.xas.unit`, `audio.patch.unit`, `audio.dsp.unit` and `audio.mixer.unit` need no data; `audio.cache` checks the
+cold / warm / patched program cache and `audio.fuzz` feeds mutated chunks, the M16A3 partition and its program blob
+(run it under `ctest --preset asan`). Under `asan` the bf3dump gates report their counts and timings without gating
+them, but still fail on a non-zero exit.
+
+The offline M16A3 render (G7) and the Godot run (G8) share one check script and analysis (`bf3/audio/audio_check.h`,
+design section 10.4): onsets at 75 ms on the stepped corebass tap, levels near > mid > far and the distance high-pass
+on the full mix and on the voice-14 tap, and in G8 a sample-for-sample comparison with an offline replay. G8 measures
+the mixer's compute time and ring health, not device xruns. Recordings (`m16_offline*.wav`, `godot_m16*.wav`) go to
+`b/shots/audio/` (gitignored, never committed); `OPENBF3_AUDIO_SHOTS`, set when CMake configures, overrides the directory the ctests use. The
+timing gates (G3 on thread CPU time, G6 warm load, G8) need a quiet machine; timings taken while other work runs are
+noisy.
 
 ## Integration of S1-S4 and L1 (`integ/spikes`)
 
@@ -1776,3 +2021,65 @@ lock (120 ticks, 59.98 Hz). Under `ctest --preset asan`, these 22 suites pass wi
 * `host.session.unit`, `host.scale.unit`, `host.registry`;
 * `anim.unit`, `anim`, `anim.s3.unit`, `anim.s3`;
 * `render.s3`, `render.look.unit`.
+
+<!-- integration (integ/m2a1) -->
+**Second integration (`integ/m2a1`, 2026-10-16).** From `main` 7b3e8fa (the integration above), each with its own
+`--no-ff` merge commit and in this order: `m2a/design` (docs/design/m2a.md, the M2a wave-2/3 plan, docs only),
+`ui/swf-fonts`, `ui/minimap-icons`, `m2a/weapons`, `m2a/vfx` (all branched from 111f937). Every shared file (README,
+the CMakeLists, bf3dump's usage and dispatch, register_types.cpp) kept both sides under its track's comment. No code
+had to change: the weapons core builds unchanged on S1's `CollisionWorld` / static-world additions (query counter,
+terrain cover, water planes; an empty cover keeps M1's cache keys) and S2's vehicle code, and `Bf3MinimapHud` reads
+the S1 / S3 / L1 `Bf3LevelSession` through its public accessors and stays inert under `--no-hud`, `--shots` and
+`--m1-load-check`, so `godot.l1_look` and `godot.m1_load` still measure the game without it. The `dev` build and the
+merged track's suites passed after every merge. Follow-ups from the first integration's verifier, in their own commit:
+`host.server` is RUN_SERIAL (thresholds unchanged), the S2 "Measured" paragraph now opens with G2 report-only and G2x
+the gate, and `bf3dump vehicle-replay` prints `gate G2x not judged` when `--modes` leaves out the `ExactPod` bit.
+
+Full `ctest --preset dev` with `OPENBF3_GODOT`: 108 of 110 pass, `core.cache_data` and `core.res` skipped as before;
+the timing tests ran under the quiet lock. `godot.s3_crowd` failed its timing gates once (G1b 2.26 ms, G2 p99 23 ms)
+while another worktree's `ctest` ran `host.scale` beside it without the lock, and passed on the quiet rerun below.
+Under `ctest --preset asan`, the 26 suites of the merged tracks (`ui1.contract`, `core.ui.swf*`, `core.ui.font*`,
+`ui2.contract`, `ui.*`, `m2a.weapons.contract`, `sim.weapons*`, `tools.weapon_sim`, `fx.*`, `tools.fx_bench`) pass
+with no AddressSanitizer report (`sim.weapons.perf` skips there by design). One run each on the integrated tree:
+
+| track gate | accepted | integrated (`integ/m2a1`) |
+|---|---|---|
+| ui1 `core.ui.swf` G1 / G2 / G7 | 434 / 434 parsed, 0 errors; 162 sub-images, 427 labels; 86 placements | the same |
+| ui1 `core.ui.font`, `godot.ui_fonts(_shots)` G3-G5 | 444 / 34 glyphs, É present, 25/25 | 444 / 444 / 34 / 34 glyphs, É present, `UI1 CHECK: PASS (25/25)` both runs |
+| ui2 `ui.minimap`, `ui.hud.icons`, `ui.hud.sources` | 29/29 levels, 498 masks, Metro 5/5, Caspian 6/6 + 7/7; 161 icon types; 172/172 weapon icons; 84 / 1,215 / 58 | the same |
+| ui2 `godot.ui2` G9-G11, G14 | 10/10, marker within 0.76 px | 10/10, marker 0.76; the six shots (`openBF3\b\shots\integ2\`) inspected: the minimap (satellite, combat area, flags, HQs, own marker, rotating and north-up) and the world icons with distances over the L1 look |
+| weapons `bf3dump weapon-sim --check` | 38/38 | 38/38 |
+| weapons W11 `sim.weapons.perf` (p99, quiet) | 0.223 ms | 0.208 ms |
+| VFX G1 census, G4 oilfire | 1,101 / 3,410, 0 unknown; steady 80 | the same; 80..80 |
+| VFX G9 `tools.fx_bench` (gate 50 ns) | 40.08 ns | 39.54 ns |
+| S1 `host.scale` G1 p99 Metro / Caspian | 1.27 / 0.67 ms | 1.14 / 0.65 ms, both runs valid |
+| S1 `sim.nav.bake` G4 Caspian / Kharg | 2.70 / 3.70 s | 2.54 / 3.47 s |
+| S2 `sim.vehicle` G1 / G1r / G2x | 0 mismatches; `ExactPod` <= 1.91 mm | 0 mismatches on all 7 courses; 1.91 mm |
+| S3 `godot.s3_crowd` (quiet rerun) | G1a p99 0.38 ms, G1b 1.82 ms, frame p99 10.4 ms | G1a p99 0.44 ms, G1b 1.92 ms (gate 2.0), frame p99 10.81 / 11.16 ms vsync off / on, G3 16 / 16 |
+| S4 `logic.metro`, `logic.caspian` | PASS | 549 / 7,299 / 145, work 95,181, G4 hash 843761c3205e74bb; G6 PASS |
+| L1 `godot.l1_look` (ratio <= 1.25, p99 <= 16.7 ms) | 1.073, 5.41 ms (first integration) | 1.071 (2.686 against 2.506 ms), 5.40 ms |
+| M1 `godot.m1`, `godot.m1_load` E4 / E5 | PASS; 2.36 / 1.82 s | 16/16; 2.38 / 1.89 s |
+| install unchanged | clean | clean (256 files in every install test) |
+
+<!-- integration (integ/au) -->
+**Third integration (`integ/au`, 2026-10-16).** `m2a/audio` (branched from 111f937) merged with `--no-ff` onto `main`
+1874933 (the integration above). Shared files kept both sides, the main tree's blocks first and audio's after them; no
+code had to change (audio's `bf3_godot` classes are new files, registered after ui2). One follow-up:
+`OPENBF3_AUDIO_SHOTS` is passed through `file(TO_CMAKE_PATH)`, so the Windows path the design names works
+(it reached `audio_gates.cmake` as invalid escapes). Full `ctest --preset dev` with `OPENBF3_GODOT`: 123 of 125 pass,
+`core.cache_data` and `core.res` skipped as before; the timing rows ran under the quiet lock, the rest with `-j8`.
+`ctest --preset asan -R "^audio\."`: 14 / 14, no AddressSanitizer report. Integrated against accepted: G1 909 waves,
+12,955 segments, 0 frame / length mismatches; G2 4,290 chunks, 0 mismatches; G3 0.1301 / 0.1295 / 0.1295 ms per
+channel-second (accepted 0.1306, gate 0.2); G4 834 patches + 1 master, 32,117 nodes / 46 types, 7,323 voices, 1,879
+waves, 0 compile failures; G5 6 / 6 cases, 314 / 314 assertions; G6 warm load 57.5 ms (one run; accepted median 51.3,
+gate 500); G7 38 / 38; G8 windowed 31 / 31, every mixer counter 0, replay bit-exact, max block 0.343 ms. Main-tree
+gates: S1 `host.scale` G1 p99 1.18 / 0.75 ms (valid) and `sim.nav.bake` 2.53 / 3.60 s; S2 `sim.vehicle` G1 / G1r 0
+mismatches, G2x 1.91 mm; S3 `godot.s3_crowd` PASS (G1a p99 0.42 ms, G1b 1.86 ms, frame p99 11.4 / 10.7 ms, G3 16 /
+16); S4 `logic.metro` G4 hash 843761c3205e74bb; L1 `godot.l1_look` 1.085 and 1.064 (p99 5.7 / 6.0 ms); M1
+`godot.m1` 16 / 16, E4 / E5 2.40 / 1.84 s; ui1 25 / 25; ui2 10 / 10 with the six shots (`openBF3\b\shots\integau\`);
+`weapon-sim --check` 38 / 38, W11 p99 0.263 / 0.190 ms; VFX `fx.install` PASS, `tools.fx_bench` 38.5 ns; install
+unchanged in every install test. What a listener should know: G1 says 909 Metro waves where the M2a plan says 908 (this
+tree's `load_level` mount, a scope difference, open question 7); under reading R of the MultiCrossfader the M16A3's far
+noise layer fades **in** over 20-50 m and every layer fades **out** over 250-300 m, not "fades in over 250-300 m" as the
+plan words it (open question 1); and without the HDR window (A3) levels are low: a fixed window puts a 110 dB shot at
+-11 dBFS before attenuation, so the mid and far M16A3 shots sit near -69 and -90 dBFS.

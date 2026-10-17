@@ -191,6 +191,24 @@ struct FireFunction {
 	size_t firing_dispersions = 0; // FiringFunctionData.Dispersion entries (empty on soldier weapons)
 	// Recoil in FireLogicData (zero on soldier weapons; soldier recoil is in GunSway).
 	bool fire_logic_recoil_nonzero = false;
+	// M2a weapons (blob v2; docs/design/m2a-weapons.md §4.5): FireLogicData's reload holds (M98B true / true,
+	// 870 buckshot false / false [verified, EBX dump 2026-10-15]).
+	bool hold_off_reload_until_fire_release = false;
+	bool force_reload_action_on_fire_trigger = false;
+};
+
+// MaterialContainerPair as referenced by a projectile, explosion or hit capsule.
+struct MaterialPairRef {
+	bool present = false; // the field holds a reference
+	bool resolved = false; // the pair instance was found
+	Guid partition;
+	Guid instance;
+	uint32_t flags_and_index = 0;
+	int32_t physics_material_index = 0;
+	int32_t physics_property_index = 0; // signed in the data: row = MaterialIndexMap[value & 0xFF]
+	uint8_t property() const { return uint8_t(physics_property_index & 0xFF); }
+	uint8_t material() const { return uint8_t(physics_material_index & 0xFF); }
+	bool penetrable() const { return ((flags_and_index >> 24) & 1u) != 0; }
 };
 
 // VeniceExplosionEntityData / ExplosionEntityData.
@@ -209,6 +227,9 @@ struct Explosion {
 	bool disable_occlusion = false;
 	bool disable_static_entity_occlusion = false;
 	bool is_causing_suppression = false;
+	// M2a weapons (blob v2; docs/design/m2a-weapons.md §4.2, §4.5): the explosion's own MaterialContainerPair
+	// (40 mm / RPG 79 BlastDamage, dud 139 Dud, M67 80 Grenade), whose zone cells scale the blast.
+	MaterialPairRef material;
 };
 
 // WeaponSuppressionData (the per-bullet suppression multiplier, Symthic's "suppression %").
@@ -218,20 +239,6 @@ struct Suppression {
 	float max_multiplier = 0;
 	float min_distance = 0;
 	float max_distance = 0;
-};
-
-// MaterialContainerPair as referenced by a projectile, explosion or hit capsule.
-struct MaterialPairRef {
-	bool present = false; // the field holds a reference
-	bool resolved = false; // the pair instance was found
-	Guid partition;
-	Guid instance;
-	uint32_t flags_and_index = 0;
-	int32_t physics_material_index = 0;
-	int32_t physics_property_index = 0; // signed in the data: row = MaterialIndexMap[value & 0xFF]
-	uint8_t property() const { return uint8_t(physics_property_index & 0xFF); }
-	uint8_t material() const { return uint8_t(physics_material_index & 0xFF); }
-	bool penetrable() const { return ((flags_and_index >> 24) & 1u) != 0; }
 };
 
 struct ProjectileDef {

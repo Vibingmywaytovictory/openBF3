@@ -45,6 +45,9 @@ set_tests_properties(core.res PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME sim.jolt COMMAND test_sim)
 add_test(NAME net.enet COMMAND test_net)
 add_test(NAME host.server COMMAND test_host)
+# Integration (integ/m2a1): host.server sleeps 2 s of wall clock and counts the 60 Hz ticks; under parallel load the
+# sleep overshoots (135 ticks against at most 130 once), so it runs alone. The thresholds are unchanged.
+set_tests_properties(host.server PROPERTIES RUN_SERIAL TRUE)
 # bf3dump's JSON number text (the probe's f32/f64 rules) on synthetic values; no install needed.
 add_test(NAME tools.numtext COMMAND bf3dump numcheck)
 # core.ant reads the Ant banks from the install (or the export directory OPENBF3_ANT_DATA) and, when
@@ -561,4 +564,214 @@ if(OPENBF3_ASAN)
     if(TARGET bf3dump)
         set_tests_properties(tools.tc_cost PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tc_cl_dir}")
     endif()
+endif()
+
+# UI ui1 (docs/design/ui-swf-fonts.md §12, §14): ui1.contract, every ui1 header compiles together and the inline
+# helpers behave (no data, no Godot). The implementation adds core.ui.swf(.unit/.fuzz), core.ui.font(.unit) and the
+# Godot checks below this line.
+openbf3_test(test_ui1_contract test_main.cpp ui1_contract_tests.cpp test_support.h)
+target_link_libraries(test_ui1_contract PRIVATE bf3_core)
+add_test(NAME ui1.contract COMMAND test_ui1_contract --test-suite=ui1-contract)
+set_tests_properties(ui1.contract PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui1_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui1.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui1_cl_dir}")
+endif()
+# UI ui1 implementation (docs/design/ui-swf-fonts.md §14): test_ui1 runs the SWF and font suites. core.ui.swf.unit
+# and core.ui.font.unit are synthetic (tests/ui_swf_writer.h); core.ui.swf, core.ui.swf.fuzz and core.ui.font read
+# the install (read-only) and exit 77 = skipped without one. godot.ui_fonts runs res://scenes/ui_fonts.tscn
+# -- --ui-check headless; godot.ui_fonts_shots runs it windowed with --shot-dir (OPENBF3_UI1_SHOTS) and exits 77
+# without a window.
+openbf3_test(test_ui1 test_main.cpp ui_swf_tests.cpp ui_font_tests.cpp ui_swf_writer.h test_support.h)
+target_link_libraries(test_ui1 PRIVATE bf3_core)
+add_test(NAME core.ui.swf.unit COMMAND test_ui1 --test-suite=ui-swf-unit)
+add_test(NAME core.ui.font.unit COMMAND test_ui1 --test-suite=ui-font-unit)
+add_test(NAME core.ui.swf COMMAND test_ui1 --test-suite=ui-swf)
+add_test(NAME core.ui.swf.fuzz COMMAND test_ui1 --test-suite=ui-swf-fuzz)
+add_test(NAME core.ui.font COMMAND test_ui1 --test-suite=ui-font)
+set_tests_properties(core.ui.swf core.ui.swf.fuzz core.ui.font PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.ui.swf.unit core.ui.font.unit core.ui.swf core.ui.swf.fuzz core.ui.font PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui1_impl_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(core.ui.swf.unit core.ui.font.unit core.ui.swf core.ui.swf.fuzz core.ui.font
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui1_impl_cl_dir}")
+    set_tests_properties(core.ui.swf.unit core.ui.swf.fuzz PROPERTIES TIMEOUT 1800)
+endif()
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.ui_fonts COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui_fonts.cmake)
+    add_test(NAME godot.ui_fonts_shots COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui_fonts_shots.cmake)
+    set_tests_properties(godot.ui_fonts godot.ui_fonts_shots PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 360 RESOURCE_LOCK openbf3_godot_project)
+endif()
+
+# UI ui2 (docs/design/ui-minimap-icons.md §13): ui2.contract compiles the minimap / HUD icon / HUD model headers
+# together and checks the binding-row counts and the inline mapping, view and icon helpers; no data, no Godot.
+openbf3_test(test_ui2_contract test_main.cpp ui2_contract_tests.cpp)
+target_link_libraries(test_ui2_contract PRIVATE bf3_core)
+add_test(NAME ui2.contract COMMAND test_ui2_contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui2.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui2_cl_dir}")
+endif()
+# UI ui2 (docs/design/ui-minimap-icons.md §13): the minimap, HUD icon and HUD source readers. ui.minimap.unit and
+# ui.hud.unit are synthetic (no data). ui.minimap (G1-G5), ui.hud.icons (G6, G7) and ui.hud.sources (G8) read the
+# install; ui.minimap.fuzz and ui.hud.fuzz mutate its partitions and texture headers in memory (meant for asan). The
+# install ones exit 77 = skipped without an install and end with install.unchanged (G13).
+openbf3_test(test_ui2 test_main.cpp ui_minimap_tests.cpp ui_hud_tests.cpp ui_install_tests.cpp ui_fuzz_tests.cpp ui2_test_support.h test_support.h)
+target_link_libraries(test_ui2 PRIVATE bf3_core)
+add_test(NAME ui.minimap.unit COMMAND test_ui2 --test-suite=ui-minimap-unit)
+add_test(NAME ui.hud.unit COMMAND test_ui2 --test-suite=ui-hud-unit)
+add_test(NAME ui.minimap COMMAND test_ui2 --test-suite=ui-minimap)
+add_test(NAME ui.hud.icons COMMAND test_ui2 --test-suite=ui-hud-icons)
+add_test(NAME ui.hud.sources COMMAND test_ui2 --test-suite=ui-hud-sources)
+add_test(NAME ui.minimap.fuzz COMMAND test_ui2 --test-suite=ui-minimap-fuzz)
+add_test(NAME ui.hud.fuzz COMMAND test_ui2 --test-suite=ui-hud-fuzz)
+set_tests_properties(ui.minimap ui.hud.icons ui.hud.sources ui.minimap.fuzz ui.hud.fuzz PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ui.minimap.unit ui.hud.unit ui.minimap ui.hud.icons ui.hud.sources ui.minimap.fuzz ui.hud.fuzz PROPERTIES TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui2_impl_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui.minimap.unit ui.hud.unit ui.minimap ui.hud.icons ui.hud.sources ui.minimap.fuzz ui.hud.fuzz
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui2_impl_cl_dir}" TIMEOUT 1800)
+endif()
+# UI ui2 godot (docs/design/ui-minimap-icons.md §1 G9-G11, G14, §10.4): godot.ui2 runs the windowed
+# --minimap-check --minimap-mode=ConquestSmall0 of res://scenes/m1_metro.tscn after a probe run (exit 77 = skipped
+# without OPENBF3_GODOT, an install, a window or a rendering device); OPENBF3_UI2_SHOTS names a directory for the
+# six G11 PNGs. It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.ui2 COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_ui2.cmake)
+    set_tests_properties(godot.ui2 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 400 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
+endif()
+
+# M2a weapons (docs/design/m2a-weapons.md §12): m2a.weapons.contract compiles every weapons header with the M1
+# headers it builds on and checks the inline contract (sub-tick time, the pinned shot seeds, the weapon button
+# levels, the mechanics defaults). No data. The implementation wave adds sim.weapons.unit, sim.weapons,
+# sim.weapons.range, sim.weapons.fuzz, sim.weapons.perf and tools.weapon_sim in this block.
+openbf3_test(test_weapons_contract test_main.cpp weapons_contract_tests.cpp test_support.h)
+target_link_libraries(test_weapons_contract PRIVATE bf3_sim)
+add_test(NAME m2a.weapons.contract COMMAND test_weapons_contract --test-suite=weapons-contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_wp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2a.weapons.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
+# M2a weapons: sim.weapons.unit runs the oracle rows (weapon_checks.h) on synthetic defs carrying the 7.1 numbers plus
+# the unit rows (fire modes, spread / recoil, reloads, determinism, hostile bounds, capsules, damage, explosives). No data.
+openbf3_test(test_weapons test_main.cpp weapons_tests.cpp weapons_support.h test_support.h)
+target_link_libraries(test_weapons PRIVATE bf3_sim)
+add_test(NAME sim.weapons.unit COMMAND test_weapons --test-suite=weapons-unit)
+set_tests_properties(sim.weapons.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    set_tests_properties(sim.weapons.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
+# M2a weapons on the install (read-only; exit 77 = skipped without one; every case prints install.unchanged):
+# sim.weapons (grid pairs, materials, the oracle rows on MP_Subway defs, W4's table), sim.weapons.range (Metro's
+# static world: W3 end to end, W5, W7, W9 on stand-ins), sim.weapons.fuzz (W8: mutated retail and synthetic blobs;
+# meant for asan too) and sim.weapons.perf (W11, wall clock, noisy: RUN_SERIAL, exits 77 when the file named by
+# OPENBF3_QUIET_LOCK exists).
+openbf3_test(test_weapons_install test_main.cpp weapons_install_tests.cpp weapons_range_tests.cpp weapons_install_support.h weapons_support.h test_support.h)
+target_link_libraries(test_weapons_install PRIVATE bf3_sim)
+add_test(NAME sim.weapons COMMAND test_weapons_install --test-suite=weapons)
+add_test(NAME sim.weapons.range COMMAND test_weapons_install --test-suite=weapons-range)
+add_test(NAME sim.weapons.fuzz COMMAND test_weapons_install --test-suite=weapons-fuzz)
+add_test(NAME sim.weapons.perf COMMAND test_weapons_install --test-suite=weapons-perf)
+set_tests_properties(sim.weapons sim.weapons.range sim.weapons.fuzz sim.weapons.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+set_tests_properties(sim.weapons.perf PROPERTIES RUN_SERIAL TRUE)
+if(OPENBF3_ASAN)
+    set_tests_properties(sim.weapons sim.weapons.range sim.weapons.fuzz sim.weapons.perf
+        PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
+# M2a weapons: `bf3dump weapon-sim --check` prints the data-backed W1-W6 / W9 rows and exits 0 / 1 (77 without an install).
+add_test(NAME tools.weapon_sim COMMAND bf3dump weapon-sim --check)
+set_tests_properties(tools.weapon_sim PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    set_tests_properties(tools.weapon_sim PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_wp_cl_dir}")
+endif()
+
+# M2a VFX1 (docs/design/m2a-vfx1.md §11): fx.contract pins the bf3_fx interface (record sizes, the 32 processor and 10
+# evaluator vocabularies, name tables, the polynomial / colour / random-number goldens). No data, no Godot.
+openbf3_test(test_fx_contract test_main.cpp fx_contract_tests.cpp test_support.h)
+target_link_libraries(test_fx_contract PRIVATE bf3_fx)
+add_test(NAME fx.contract COMMAND test_fx_contract --test-suite=fx-contract)
+set_tests_properties(fx.contract PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
+endif()
+# M2a VFX1 (docs/design/m2a-vfx1.md §11): fx.unit (compiler on synthetic EBX, blob, cache rules, simulator; G2, G8),
+# fx.fuzz (G10; also in the asan preset), fx.install (G1, G3-G7, cold vs warm, G11; 77 without an install) and
+# tools.fx_bench (G9: `bf3dump fx bench --seed 1`, median ns per admitted particle <= 50; RUN_SERIAL; 77 without an
+# install; report only under asan). Timings are wall clock on a shared machine: noisy.
+openbf3_test(test_fx test_main.cpp fx_unit_tests.cpp fx_fuzz_tests.cpp fx_install_tests.cpp fx_test_support.h test_support.h)
+target_link_libraries(test_fx PRIVATE bf3_fx)
+add_test(NAME fx.unit COMMAND test_fx --test-suite=fx-unit)
+add_test(NAME fx.fuzz COMMAND test_fx --test-suite=fx-fuzz)
+add_test(NAME fx.install COMMAND test_fx --test-suite=fx-install)
+set_tests_properties(fx.unit fx.fuzz PROPERTIES TIMEOUT 600)
+set_tests_properties(fx.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME tools.fx_bench COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/fx_bench.cmake)
+    set_tests_properties(tools.fx_bench PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
+endif()
+if(OPENBF3_ASAN)
+    set_tests_properties(fx.unit fx.fuzz fx.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+        set_tests_properties(tools.fx_bench PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx_cl_dir}")
+    endif()
+endif()
+# M2a audio (docs/design/m2a-audio.md §10): audio.contract, every audio header compiles together, the node type
+# table keeps the census sets, the seam hashes and FourCCs match the data's encoding, the tuning parser and the
+# project's audio_tuning.cfg. No data.
+openbf3_test(test_audio_contract test_main.cpp audio_contract_tests.cpp test_support.h)
+target_link_libraries(test_audio_contract PRIVATE bf3_audio bf3_core)
+target_compile_definitions(test_audio_contract PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg")
+add_test(NAME audio.contract COMMAND test_audio_contract --test-suite=audio-contract)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_audio_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+endif()
+# M2a audio (docs/design/m2a-audio.md §10.1): the data-free unit suites, one ctest per suite.
+openbf3_test(test_audio_unit test_main.cpp audio_unit_tests.cpp test_support.h)
+target_link_libraries(test_audio_unit PRIVATE bf3_audio bf3_core)
+foreach(_openbf3_audio_suite xas patch dsp mixer)
+    add_test(NAME audio.${_openbf3_audio_suite}.unit COMMAND test_audio_unit --test-suite=audio-${_openbf3_audio_suite})
+    if(OPENBF3_ASAN)
+        set_tests_properties(audio.${_openbf3_audio_suite}.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+    endif()
+endforeach()
+# M2a audio (docs/design/m2a-audio.md §10.2): the install suites (exit 77 without an install).
+openbf3_test(test_audio_install test_main.cpp audio_install_tests.cpp test_support.h)
+target_link_libraries(test_audio_install PRIVATE bf3_audio bf3_core)
+set_tests_properties(audio.xas.unit audio.patch.unit audio.dsp.unit audio.mixer.unit PROPERTIES TIMEOUT 300)
+add_test(NAME audio.oracles COMMAND test_audio_install --test-suite=audio-oracles)
+add_test(NAME audio.cache COMMAND test_audio_install --test-suite=audio-cache)
+add_test(NAME audio.fuzz COMMAND test_audio_install --test-suite=audio-fuzz)
+set_tests_properties(audio.oracles audio.cache audio.fuzz PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+if(OPENBF3_ASAN)
+    set_tests_properties(audio.oracles audio.cache audio.fuzz PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+endif()
+# M2a audio gates G1-G4, G6, G7 (tests/audio_gates.cmake drives one bf3dump command each and checks its summary
+# line). The timing gates (G3, G6) and the long renders run serially; under asan they only report.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    if(DEFINED ENV{OPENBF3_AUDIO_SHOTS})
+        # Forward slashes: a Windows path (C:\...\b\shots\audio) would reach audio_gates.cmake as invalid escapes.
+        file(TO_CMAKE_PATH "$ENV{OPENBF3_AUDIO_SHOTS}" _openbf3_audio_shots)
+    else()
+        set(_openbf3_audio_shots "${PROJECT_SOURCE_DIR}/b/shots/audio")
+    endif()
+    foreach(_openbf3_audio_gate waves loc decode_perf census bank m16_offline)
+        string(REPLACE "_" "." _openbf3_audio_name "${_openbf3_audio_gate}")
+        add_test(NAME audio.${_openbf3_audio_name} COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DGATE=${_openbf3_audio_gate}
+            -DSHOTS=${_openbf3_audio_shots} -DREPORT_ONLY=${OPENBF3_ASAN} -P ${CMAKE_CURRENT_SOURCE_DIR}/audio_gates.cmake)
+        set_tests_properties(audio.${_openbf3_audio_name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        if(OPENBF3_ASAN)
+            set_tests_properties(audio.${_openbf3_audio_name} PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_audio_cl_dir}")
+        endif()
+    endforeach()
+    set_tests_properties(audio.decode.perf audio.bank audio.m16.offline PROPERTIES RUN_SERIAL TRUE)
+endif()
+# M2a audio gate G8 (tests/godot_audio.cmake): the windowed M16A3 check of res://scenes/audio_m16.tscn; WAVs to the
+# same shots directory as audio.m16.offline. Exit 77 without OPENBF3_GODOT, an install, or a window.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    add_test(NAME godot.audio COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT} -DSHOTS=${_openbf3_audio_shots}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_audio.cmake)
+    set_tests_properties(godot.audio PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK openbf3_godot_project RUN_SERIAL TRUE)
 endif()
