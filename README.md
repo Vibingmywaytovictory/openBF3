@@ -37,6 +37,10 @@ cd openBF3
 tools\build.cmd dev            :: = vcvars64 + cmake --preset dev + cmake --build --preset dev + ctest --preset dev minus the timing rows (--all-tests: all)
 ```
 
+Test scheduling, the per-row budgets and the slowest-rows report are in [docs/testing.md](docs/testing.md): after each
+ctest phase `build.cmd` prints the 15 slowest rows, the skipped rows and any budget or label violation
+(`tools/test_budget.cmake`; `--strict` makes a violation fail).
+
 From a VS x64 developer prompt the three steps are `cmake --preset dev`, `cmake --build --preset dev` and
 `ctest --preset dev`. Presets: `dev` (optimised, godot-cpp `template_debug`, everyday use), `debug` (unoptimised,
 `/MTd`), `release` (`template_release`, for shipping) and `asan` (`/fsanitize=address`, libraries, tools and tests

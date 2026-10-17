@@ -1,4 +1,6 @@
 # doctest executables for the Godot-free libraries. Run with: ctest --preset dev
+# Every row follows docs/testing.md (scheduling labels, parallel-safe scratch, PROCESSORS / COST, budgets); build.cmd
+# reports violations after each ctest phase (tools/test_budget.cmake).
 function(openbf3_test name)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PRIVATE doctest::doctest)
