@@ -163,3 +163,31 @@ struct BotFillConfig {
 // BotFillStats (GameServerStats::bots) is in bot_fill_stats.h.
 
 } // namespace bf3::host
+
+// M2a bt (docs/design/m2a.md §10.2, §15 bt row; docs/design/m2a-bt.md): the additive hook the firefight brains
+// (firefight_brain.h) move through. One BotNav per GameServer, server thread only: its own NavQuery and PathService
+// over a BotLevel's nav (the S1 types the BotDirector owns for the walker bots), PathService::run once per tick from
+// the first brain that asks in that tick, and the WalkerView a sim::bots::WalkerBrain reads, built the way
+// BotDirector::command builds it. A GameServer with S1 walker bots and firefight bots has two of these query sets,
+// each with its own per-tick iteration budget (BotFillConfig::paths).
+namespace bf3::host {
+
+struct BotNav {
+	std::shared_ptr<const BotLevel> level;
+	std::unique_ptr<sim::NavQuery> query;
+	std::unique_ptr<sim::bots::PathService> paths;
+	sim::Tick run_tick = UINT32_MAX; // the tick PathService::run last ran for
+	double paths_ms = 0.0; // PathService::run, cumulative wall milliseconds
+
+	// PathService::run on the first call of tick p_tick; later calls of the same tick do nothing.
+	void run_once(sim::Tick p_tick);
+	// The WalkerView of bot p_slot for p_tick (= p_self.tick + 1) with p_objectives as the brain's goal set.
+	sim::bots::WalkerView view(sim::Tick p_tick, uint32_t p_slot, const sim::SoldierState &p_self, std::span<const sim::bots::BotGoal> p_objectives,
+			float p_stand_eye_height);
+};
+
+// Fails without a level or nav.
+core::Result<std::unique_ptr<BotNav>> make_bot_nav(std::shared_ptr<const BotLevel> p_level, const sim::bots::PathService::Options &p_paths = {},
+		const sim::NavQueryOptions &p_query = {});
+
+} // namespace bf3::host
