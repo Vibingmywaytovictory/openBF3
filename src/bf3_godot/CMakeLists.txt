@@ -177,6 +177,31 @@ target_sources(bf3_godot PRIVATE
     src/m2a_w3_headers.cpp
 )
 
+# M2a tp (docs/design/m2a-tp.md): Bf3GameCrowd's body (game_crowd.cpp) and the crowd's kit item lists
+# (game_crowd_items.h, Godot-free); Bf3TpCrowdCheck, the crowd's check node of res://scenes/m2a_tp_crowd.tscn.
+target_sources(bf3_godot PRIVATE
+    src/game_crowd.cpp
+    src/game_crowd_items.h
+    src/tp_crowd_check.cpp
+    src/tp_crowd_check.h
+)
+
+# M2a au3 (docs/design/m2a-au3.md): Bf3GameAudio, the game's mixer, stream and player over bf3_audio's router.
+target_sources(bf3_godot PRIVATE
+    src/game_audio.cpp
+)
+
+# M2a fx3 (docs/design/m2a-fx3.md): Bf3GameFx (game_fx.h's body: FxWorld + Bf3FxRenderer + VFX3's triggers + the decal
+# pool), the decal pool FxDecalPool and the fx3 demo / capture scene Bf3Fx3Demo (res://scenes/fx3_demo.tscn,
+# --fx3-check), registered by the "// M2a fx3" block of register_types.cpp.
+target_sources(bf3_godot PRIVATE
+    src/game_fx.cpp
+    src/fx_decals.cpp
+    src/fx_decals.h
+    src/fx3_demo.cpp
+    src/fx3_demo.h
+)
+
 # M2a gx (docs/design/m2a-gx.md): the in-game check (M2aCheck) and the playable scene's wiring
 # (level_session_m2a.cpp's hook bodies). The wave-3 parts are linked in by their owners' blocks; the hooks build them
 # only when their body is in the tree (the file's presence: no edit here when tp, au3, fx3 or bt merge).

@@ -1077,6 +1077,12 @@ void fill_hud(const PresentationFrame &, double own_fraction, std::span<const Pr
   `IsFirstPerson` 1 at the camera, every other soldier with 0 at its 3p muzzle. Trigger down, rounds and trigger up
   come from the own predicted OwnShot / trigger events (exact sub-tick round times) and, for the others, from the
   firing bit and burst sequence of their records (state, so a lost shot datagram does not cut a burst's sound).
+  **Rule fixed by au3** (docs/design/m2a-au3.md "Bursts"): sv's `burst_count` rises once per tick with shots after a
+  tick without, i.e. about once per shot for an automatic weapon whose interval spans more than one tick, so "a
+  burst_seq change = a new burst" does not hold. As built, an other's RemoteShot (it arrives about the render delay
+  early) starts the burst on its exact frame and places each round by its shot index; the records' firing bit and
+  burst_seq only keep the burst alive and start it when every RemoteShot of it was lost; a burst_seq change never
+  starts a burst.
 * **Clock**: `SimMixerClock` maps presentation time to mixer frames from the stream's played-frame counter; commands
   are scheduled `schedule_lead_blocks` (2 = 21.3 ms) ahead [verified: au].
 * **Impacts**: `ImpactCell::impact_sound` and effect sound components (`FxEvent`) start one-shot `PatchInstance`s
@@ -1090,7 +1096,10 @@ void fill_hud(const PresentationFrame &, double own_fraction, std::span<const Pr
 * **Knife and M67**: no `WeaponSoundDriver` loop; their swing, throw and explosion patches start as one-shot
   `PatchInstance`s from OwnShot / RemoteShot / Detonation (E7 item 1 lists the form per item).
 * **Client-local audition** for E7 item 4: `Bf3GameAudio::audition(patch, position)` starts a one-shot of any
-  compiled patch at a world position; only `m2a_check` calls it (never the server, never the wire).
+  compiled patch at a world position; only `m2a_check` calls it (never the server, never the wire). **Rule fixed by
+  au3:** the M1A2 patch is not on Metro's mount, so the load step compiles an E7 audition patch the level lacks from
+  `audio::kAuditionSuperbundles` (MP_001, which holds it and its waves) with a bank of its own; an audition step
+  that still cannot run is skipped through `GameAudioCheck::skip_step` and fails E7 (never a silent pass).
 * Listener = the active camera (1p or free).
 
 ---
@@ -1257,7 +1266,7 @@ on Metro, dev request helpers) is created in W2.0 and extended additively.
 
 | key | title | owns (creates / edits) | interfaces (headers) | depends on |
 |---|---|---|---|---|
-| au3 | game audio | `bf3/audio/weapon_audio.h` + cpp (`WeaponAudioRouter`, `SimMixerClock`, voice limits, the two timelines of §8.3), `impact_audio.h` + cpp; `src/bf3_godot/src/game_audio.{h,cpp}` (`Bf3GameAudio`: mixer, stream, player, bank load step, client-local `audition`); new `bf3/audio/game_audio_check.h` + cpp (the in-game check: drives the recording schedule and calls au's public `analyse_check` from `audio_check.h`; no au file is edited); `MixerConfig::max_instances` = 96 in `Bf3GameAudio`; tests `audio_router_tests.cpp` (`audio.router.unit`) | `weapon_audio.h`, `impact_audio.h`, `game_audio.h` | cl (events, presented others) |
+| au3 | game audio | `bf3/audio/weapon_audio.h` + cpp (`WeaponAudioRouter`, `SimMixerClock`, voice limits, the two timelines of §8.3), `impact_audio.h` + cpp; `src/bf3_godot/src/game_audio.{h,cpp}` (`Bf3GameAudio`: mixer, stream, player, bank load step, client-local `audition`); new `bf3/audio/game_audio_check.h` + cpp (the in-game check: drives the recording schedule and calls au's public `analyse_check` from `audio_check.h`; no au file is edited); `MixerConfig::max_instances` = 96 in `Bf3GameAudio`; new `bf3/audio/kit_audio.h` + cpp and `bf3/audio/game_audio_frame.h` + cpp (added by au3, docs/design/m2a-au3.md: the kit items' sources and the Godot-free halves of `Bf3GameAudio` load / step / audition the offline rows run); tests `audio_router_tests.cpp` (`audio.router.unit`, `audio.game`, `audio.game.crowd`, `audio.game.underruns`) | `weapon_audio.h`, `impact_audio.h`, `game_audio.h` | cl (events, presented others) |
 | fx3 | VFX3 triggers | `bf3/fx/triggers.h` + cpp (shot, impact, hit, detonation; seeds; cull; the two timelines), `src/bf3_godot/src/game_fx.{h,cpp}` (`Bf3GameFx`: FxWorld + renderer + triggers + decal pool, client-local `start_effect`), `fx_decals.{h,cpp}`; tests `fx_triggers_tests.cpp` (`fx.triggers.unit`, incl. case "late join" = E15's variant row on cl's recorded event streams) and the `fx.install` case "cells" (in-game cell selection, incl. the Caspian water fallback of E8 (5)) | `triggers.h`, `game_fx.h` | fx2, cl; tp for 3p muzzles (until then: muzzle at eye height + the weapon offset, a test-local fake) |
 | tp | 3p soldiers | additive blocks in `crowd_eval.{h,cpp}`, `crowd_clips.{h,cpp}` (stance via lc's `ServerPoseClipNames`, sneak / crawl moves, `CrowdWeapon` and `CrowdTeam::weapons` (W3.0 declares them), fire, death, muzzle out) and R5; new `src/bf3_godot/src/game_crowd.{h,cpp}` (`Bf3GameCrowd`: present_others → inputs, 3p weapon meshes); tests: block in the S3 tests (`anim.s3.unit`: two weapons per team, and case "capsules" = E18 (b), the crouch and prone rows against `CrowdEvaluator`) | `crowd_eval.h` (additions), `game_crowd.h` | nt, cl, lc (clip names, the E18 reference) |
 | bt | bots | new `src/bf3_host/include/bf3/host/firefight_brain.h` + `src/bf3_host/src/firefight_brain.cpp` (reads `ServerView`, places with sv's `place_soldier`, `FirefightConfig::observer`, §10.2); additive block in S1's bot fill (kit by slot, pairs layout); `bf3dump firefight` (headless run, `--perf`); tests `host_gunplay_perf.cpp` (`host.gunplay.perf`, RUN_SERIAL, E13; `host.gunplay.replay`, E15) | `firefight_brain.h` | sv |

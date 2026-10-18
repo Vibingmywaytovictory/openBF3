@@ -9,9 +9,10 @@
 //     trigger down / rounds / trigger up from the own OwnShot events (exact sub-tick round times, Predicted
 //     timeline) and the OwnTimed reload / deploy / empty-click events (one-shots);
 //   - every other soldier: a driver with IsFirstPerson 0 at its 3p muzzle (tp's crowd muzzle, else the eye height +
-//     the weapon offset), driven by its records' firing bit and burst sequence (state, Render timeline:
-//     host::present_other_weapons), so a lost RemoteShot datagram never cuts a burst's sound; RemoteShot events
-//     only refine the round frames of a burst already running;
+//     the weapon offset), on the Render timeline. As built (au3, docs/design/m2a-au3.md "Bursts"): a RemoteShot
+//     arrives about the render delay early, so it starts the burst on its exact frame and places each round by its
+//     shot index; the records' firing bit and burst sequence (host::present_other_weapons) keep it alive and start
+//     one when every RemoteShot of it was lost, so a lost datagram never cuts a burst's sound;
 //   - knife and M67: no driver loop; their swing / throw / explosion patches start as one-shots (OwnShot, RemoteShot,
 //     Detonation), WeaponAudioDef::form says which form a def uses (E7 item 1 lists it per kit item);
 //   - impacts and effect sounds: impact_audio.h (one OneShotPool shared with the router).
@@ -40,6 +41,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -54,6 +56,12 @@ inline constexpr uint32_t kMaxWeaponVoices = 32;
 inline constexpr uint32_t kMaxOneShotVoices = 64;
 inline constexpr uint32_t kGameMixerInstances = 96; // MixerConfig::max_instances of Bf3GameAudio's mixer
 static_assert(kMaxWeaponVoices + kMaxOneShotVoices <= kGameMixerInstances);
+
+// One-shot events of the kit items without a DefaultStartEvent [verified 2026-10-18 on Metro: bf3dump dump of
+// sound/weapons/handheld/m67/m67 lists Fire 2088671869, the stop 1920007028, Reload, #2484178491, #3520090073;
+// sound/weapons/handheld/knife/knife lists #2484178491 and 210357473 = ebx_name_hash("Melee")]. A OneShot def posts
+// the program's DefaultStartEvent, else Fire, else Melee (WeaponAudioDef::one_shot_event).
+inline constexpr uint32_t kHashMelee = 210357473u;
 
 // §4.4: a weapon burst's instance seed, splitmix64(entity << 32 | burst seq).
 constexpr uint64_t sound_seed(uint32_t p_entity, uint32_t p_burst_seq) {
@@ -86,6 +94,13 @@ public:
 	uint64_t heard_frame() const; // clock() - latency (0 while the latency exceeds the clock)
 	uint64_t late() const;
 	uint64_t max_late_frames() const;
+	// au3 additions: the bias (Bf3GameAudio sets it once the stream runs) and what set_now / the mixer last gave.
+	void set_bias_frames(int64_t p_bias);
+	int64_t bias_frames() const;
+	uint64_t output_latency_frames() const;
+	const host::PresentClock &now() const;
+	uint64_t earliest_frame() const; // the mixer's
+	uint32_t rate() const;
 
 private:
 	const MixerCore *mixer_ = nullptr;
@@ -111,6 +126,10 @@ struct WeaponAudioDef {
 	std::shared_ptr<const core::audio::SoundProgram> program; // Driver and OneShot
 	std::shared_ptr<const core::audio::SoundProgram> explosion; // M67: the detonation one-shot (null otherwise)
 	std::string error; // why form is None
+	// au3 additions.
+	uint32_t one_shot_event = 0; // OneShot: the event a use posts (DefaultStartEvent, else Fire, else Melee)
+	bool has_reload = false; // the program takes the Reload event (kHashReload): reload one-shots
+	double shot_interval_s = 0.0; // the source's (Driver: also binding.shot_interval_seconds)
 };
 
 // The match's weapon sounds, by WeaponTable def id (GunplayLevel::defs order). Built on the loader thread.
@@ -134,6 +153,26 @@ struct WeaponSoundSource {
 // Compiles every def's WeaponDef::sound with compile_patch (strict: a failure is the def's error, the table still
 // builds) and binds the firearms (bind_weapon_sound at the def's shot interval). p_defs: GunplayLevel::defs.
 core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, std::span<const WeaponSoundSource> p_defs, uint32_t p_mix_rate);
+// au3 addition: the event a OneShot use of p_program posts (its DefaultStartEvent, else Fire, else Melee; 0: none,
+// the def is None).
+uint32_t one_shot_event_of(const core::audio::SoundProgram &p_program);
+
+// How a one-shot starts (au3 addition): the event it posts at its frame (0: the program's DefaultStartEvent; none
+// posted when that is 0 too), IsFirstPerson when set, and a hook that sees the instance before its Start command
+// (the in-game check's taps on an audition). The rate is the instance's mix rate.
+struct OneShotOptions {
+	uint32_t event = 0;
+	bool set_first_person = false;
+	bool first_person = false;
+	uint32_t mix_rate = kMixRate;
+	std::function<void(PatchInstance &, InstanceHandle)> before_start;
+};
+
+// A one-shot older than this gets a Stop (its stop event, then it returns when silent): a patch whose samplers never
+// trigger (gated by distance) would otherwise stay in the mixer; one this old after its start is killed and forgotten
+// (a lost finished feedback must not leak a slot).
+inline constexpr double kOneShotStopAfterSeconds = 3.0;
+inline constexpr double kOneShotForgetSeconds = 20.0;
 
 // Ring of one-shot instances shared by the router and ImpactAudio: at most p_limit live, the oldest stolen (Kill)
 // when a new one needs a slot (counted). Owns no PatchInstance after Start (the mixer does).
@@ -144,6 +183,10 @@ public:
 	// (counted; the caller does not retry a one-shot).
 	bool start(MixerCore &r_mixer, std::shared_ptr<const core::audio::SoundProgram> p_program, std::shared_ptr<const core::audio::WaveBank> p_bank,
 			const AudioTuning &p_tuning, uint64_t p_seed, const EmitterState &p_emitter, const ListenerState &p_listener, uint64_t p_frame);
+	// au3 addition: the same with OneShotOptions (the event, IsFirstPerson, the pre-Start hook).
+	bool start(MixerCore &r_mixer, std::shared_ptr<const core::audio::SoundProgram> p_program, std::shared_ptr<const core::audio::WaveBank> p_bank,
+			const AudioTuning &p_tuning, uint64_t p_seed, const EmitterState &p_emitter, const ListenerState &p_listener, uint64_t p_frame,
+			const OneShotOptions &p_options);
 	// Feedback finished flags (MixerCore::poll_feedback) free their slots.
 	void on_finished(InstanceHandle p_handle);
 	uint32_t live() const;
@@ -151,16 +194,30 @@ public:
 	uint64_t started() const;
 	uint64_t stolen() const;
 	uint64_t failed() const;
+	// au3 additions (game thread).
+	InstanceHandle last_handle() const; // the instance of the last successful start
+	bool contains(InstanceHandle p_handle) const;
+	// The listener moved: SetEmitter for every live one-shot (the mixer applies a listener only on the next
+	// SetEmitter). Returns the commands pushed.
+	uint32_t resend_emitters(MixerCore &r_mixer) const;
+	// Ages the live one-shots (kOneShotStopAfterSeconds, kOneShotForgetSeconds) against the mixer clock.
+	void update(MixerCore &r_mixer, uint32_t p_rate = kMixRate);
+	// Stop for one live one-shot (an effect's SoundStop): its stop event, then it returns when silent.
+	bool stop(MixerCore &r_mixer, InstanceHandle p_handle);
+	uint64_t forgotten() const; // aged out without a finished feedback
 
 private:
 	struct Entry {
 		InstanceHandle handle = kNoInstance;
 		uint64_t start_frame = 0;
+		EmitterState emitter;
+		bool stopped = false;
 	};
 	uint32_t limit_ = kMaxOneShotVoices;
 	std::vector<Entry> live_;
 	uint32_t peak_ = 0;
-	uint64_t started_ = 0, stolen_ = 0, failed_ = 0;
+	uint64_t started_ = 0, stolen_ = 0, failed_ = 0, forgotten_ = 0;
+	InstanceHandle last_ = kNoInstance;
 };
 
 // A 3p muzzle in world space (tp's CrowdEvaluator::muzzle_model through Bf3GameCrowd; Godot-free mirror of it).
@@ -175,6 +232,23 @@ struct WeaponAudioConfig {
 	uint32_t max_weapon_voices = kMaxWeaponVoices;
 	float max_weapon_distance_m = 1000.0f; // a soldier beyond it gets no driver (counted culled)
 	uint32_t own_slot_unknown = 0xFF; // set_own_slot not called yet
+	// au3 additions (the two timelines, docs/design/m2a-au3.md "Bursts").
+	// An own burst ends when the predicted clock passes its last round by this many shot intervals without a next
+	// round (or at once when set_own_trigger(false) arrives); its stop event goes half an interval after the last
+	// round (the au check's stop_after_last_round), never before MixerCore::earliest_frame().
+	double own_hold_intervals = 1.5;
+	// An other's burst ends when the render clock passes its last evidence (a firing sample, a burst_seq change or a
+	// RemoteShot) by one shot interval plus this many ticks: firing is "fired since the previous snapshot tick" (two
+	// server ticks at 30 Hz), so a running automatic burst can show a sample without it.
+	double other_hold_ticks = 3.0;
+	// With set_others_newest: a RemoteShot burst ends once the newest records and RemoteShots run past its last shot
+	// by one interval plus this many ticks.
+	double other_event_hold_ticks = 2.0;
+	// The weapon offset of the stand-in 3p muzzle when the crowd has none: eye height, then this far along the view.
+	float standin_muzzle_forward_m = 0.5f;
+	// A released driver instance this old (after its stop) without a finished feedback is killed and forgotten.
+	double voice_forget_seconds = 15.0;
+	uint32_t mix_rate = kMixRate;
 };
 
 // Plain counters, game thread (the E7 report prints them).
@@ -190,6 +264,14 @@ struct WeaponAudioStats {
 	uint64_t retried_commands = 0; // a round / trigger up the ring refused, retried next frame
 	uint32_t weapon_voices = 0; // live drivers
 	uint32_t peak_weapon_voices = 0;
+	// au3 additions.
+	uint64_t reloads = 0; // reload one-shots (own OwnTimed kReloadStarted, others' reload_seq changes)
+	uint64_t stolen = 0; // released (tail) driver instances killed for a nearer burst
+	uint64_t event_rounds = 0; // rounds placed from OwnShot / RemoteShot shot indices (exact)
+	uint64_t state_rounds = 0; // others' rounds synthesised from the records (no RemoteShot for them)
+	uint64_t forgotten = 0; // released driver instances aged out without a finished feedback
+	uint64_t emitter_updates = 0; // SetEmitter commands (listener moves and moving shooters)
+	uint64_t detonations = 0; // explosion one-shots
 };
 static_assert(std::is_trivially_copyable_v<WeaponAudioStats>);
 
@@ -211,6 +293,16 @@ public:
 	WeaponAudioRouter &operator=(const WeaponAudioRouter &) = delete;
 
 	void set_own_slot(uint8_t p_slot); // PresentationFrame's own slot (the mapper's adopted life)
+	// au3 additions. The own soldier sounds IsFirstPerson 1 at the listener while true (1p camera, alive), else
+	// IsFirstPerson 0 at its last shot's origin (free camera). The predicted trigger (own_weapons_curr's active slot
+	// kTriggerDown): false ends a running own burst at once instead of after own_hold_intervals.
+	void set_own_first_person(bool p_first_person);
+	void set_own_trigger(bool p_down);
+	// au3 addition, before on_events each frame: the others' fields at the newest received tick
+	// (host::present_other_weapons at PresentationFrame::newest_tick) and the server time they and the RemoteShots
+	// reach (the end of that tick). A RemoteShot burst then ends about the render delay early, so its stop event is on
+	// time; without it the render clock decides (late by about the render delay, clamped to earliest_frame).
+	void set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon);
 	// The active camera; re-sends every live instance's emitter.
 	void set_listener(const ListenerState &p_listener);
 	// The drained events of this frame, oldest first (the ring's order): OwnShot, OwnTimed, RemoteShot, Detonation,

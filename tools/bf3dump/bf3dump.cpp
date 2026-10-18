@@ -112,6 +112,8 @@
 #include "vm_commands.h"
 // M2a audio: XAS waves, Loc/en streams, the sound-patch census, offline renders.
 #include "audio_commands.h"
+// M2a bt: firefight (the headless firefight bots, E13 --perf).
+#include "firefight_commands.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -550,6 +552,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
 	std::fprintf(stderr, "%s", bf3dump::lagcomp_usage()); // M2a lc
 	std::fprintf(stderr, "%s", bf3dump::vm_usage()); // M2a vm
+	std::fprintf(stderr, "%s", bf3dump::firefight_usage()); // M2a bt
 }
 
 } // namespace
@@ -719,6 +722,10 @@ int wmain(int argc, wchar_t **argv) {
 	// M2a audio: audio waves|loc|census|render (audio_commands.cpp; docs/design/m2a-audio.md §1).
 	if (cmd == "audio") {
 		return bf3dump::cmd_audio(ctx.reader, ctx.install, rest);
+	}
+	// M2a bt: firefight <LEVEL> <MODE> (firefight_commands.cpp; docs/design/m2a-bt.md).
+	if (cmd == "firefight") {
+		return bf3dump::cmd_firefight(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;

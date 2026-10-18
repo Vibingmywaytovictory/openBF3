@@ -2494,6 +2494,163 @@ Measured 2026-10-18, before the review fix:
 * **asan:** `m2a.contract3`, `m2a.contract`, `m1.contract`, `net.proto.unit` and `net.proto.fuzz` passed, with no
   AddressSanitizer report.
 
+## M2a bt: firefight bots
+
+<!-- # M2a bt -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §10.2, E13, E15. As-built notes, constants, decisions and the
+measured gates: [docs/design/m2a-bt.md](docs/design/m2a-bt.md).
+
+The firefight bots are `bf3_host` `FirefightBrain`s, added by `GameServer::init` through `GameServerConfig::firefight`
+(W3.0's G3 hook). They read `ServerView` and fight:
+* They walk the nav mesh (S1's `WalkerBrain` through the `BotNav` hook in `bot_fill.h`) toward the nearest enemy.
+* They pick targets by eye-to-chest line of sight and turn at a bounded rate, with a seeded aim error. The weapon's
+  own spread and recoil come from the sim.
+* They fire bursts (or 2 Hz taps), reload, switch to the sidearm, strafe when close, and die and respawn through the
+  `RespawnPolicy`.
+* In **Pairs** mode (E13's budget scenario), 32 pairs stand on lanes in front of an observer pose and are placed with
+  `place_soldier` after each respawn.
+* In **Free** mode they spawn at the TDM spawns and hunt.
+
+A human (a remote slot) is an enemy like any bot. Soldiers in slots 64 and above are never hit (lc's
+`RewindProvider` covers slots 0-63), so runs use at most 64 slots for fighters.
+
+Commands (read-only on the install; the output carries BF3-derived numbers, so keep it out of the repo; each prints
+`install.unchanged`):
+
+```bat
+ctest --preset dev -R "^host\.gunplay\.(firefight|replay)$"                                :: functional rows (branch pass)
+ctest --preset dev-timing -R "^host\.gunplay\.perf$"                                       :: E13, timing row (merge pass, quiet lock)
+b\dev\tools\bf3dump\bf3dump.exe firefight MP_Subway TeamDeathMatch0 --mode=free --count=64 --seconds=60 --bots
+b\dev\tools\bf3dump\bf3dump.exe firefight MP_Subway TeamDeathMatch0 --perf                 :: E13's row, headless
+```
+
+Gates, measured 2026-10-18 on the dev preset (branch, unlocked, shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| host.gunplay.firefight | 64 Free bots, 60 s: both teams kill, every bot fires, 0 stuck (20 s windows), ≥ 10 m per bot, 0 inside geometry / below ground / NaN, 0 preconditions, 0 team kills; plus 32 bots + 1 peer: the peer is hit | kills 117 / 100; 64 / 64 fired; 73 windows, 0 stuck; 7,249 checks, 0 / 0 / 0; peer hit 6 times, killed twice |
+| host.gunplay.replay (E15) | equal per-tick world hashes for one seed over 3,600 ticks; a different seed differs | 0 / 3,600 differ; 3,600 / 3,600 differ for seed + 1 |
+| host.gunplay.perf (E13) | server tick p99 ≤ 8.0 ms, 64 Pairs bots + 1 observer, 10 s + 120 s | indicative only (branch, unlocked): p99 1.909 ms; weapons + projectiles + rewind 7.7 % of the mean tick |
+
+Branch pass: `toolsuild.cmd dev --strict` ran 130 rows (128 passed, 2 skipped as before) in 408 s on a machine
+loaded by other worktrees. The one STRICT violation is `sim.terrain.unit`, which took 40.1 s in the phase without a
+COST and 0.85 s alone; bt did not touch it.
+
+## M2a tp: 3p soldiers
+
+<!-- # M2a tp -->
+Track tp of M2a wave 3 is on branch `m2a/tp`, from the W3.0 contract. Design: [docs/design/m2a.md](docs/design/m2a.md)
+§9, R5, E18 (b) and §16 Q13. As-built notes, measured gates and one command per gate:
+[docs/design/m2a-tp.md](docs/design/m2a-tp.md).
+
+* **Evaluator** (`bf3/anim/crowd_eval.h`, `crowd_clips.h`):
+  - **R5:** per-soldier weapon binds, reload and `weapon_local` from `CrowdTeam::weapons`. Index 0 is S3's data. A
+    team without items, or with S3's one weapon, is S3's evaluator bit for bit.
+  - **Stance set:** lc's `ServerPoseClipNames` idles, aims and transitions. The crouch moves are `Rifle_Sneak*` and
+    the prone moves `Rifle_Crawl*`.
+  - **Fire:** `Rifle_CrouchFire` when crouched, a 3° / 50 ms kick when standing or prone.
+  - **Death** (§16 Q13): blend to prone over 0.5 s, hidden after 3 s.
+  - **Muzzle:** a per-soldier 3p muzzle (`muzzle_model`).
+  - **Binds init fix:** each soldier's buffers are sized from the largest team.
+* **3p weapons** (`bf3/render/crowd_weapons.h`, `crowd_weapons.cpp`): `load_crowd_weapons` loads one skinned 3p mesh
+  per kit item, with binds, reload clip and rate, `weapon_local` and the FireEffects3p muzzle. Metro TDM gives 7 + 7
+  items.
+* **Godot** (`Bf3GameCrowd`, `game_crowd.cpp`):
+  - `present_others` / `present_other_weapon` become crowd inputs. Wire team 1/2 maps to crowd team 0/1, and the def
+    maps to the item.
+  - RemoteShot, Death and Spawn events apply on their timeline.
+  - Each soldier gets its own weapon instance, and the muzzles are published for fx3.
+  - Headless, it poses without drawing.
+  - gx still has to wire it into the level session's hooks.
+* **Check:** `res://scenes/m2a_tp_crowd.tscn -- --tp-check [--tp-shots=<dir>]` drives 12 scripted soldiers on S3's
+  Metro stage. The shots go to `b\shots\tp\` (gitignored).
+* **Tests:**
+  - `ctest --preset dev -R "^anim\.s3\.unit$"`: R5 bit-equal with one weapon, two weapons per team, the stance set.
+  - `ctest --preset dev -R "^anim\.s3$"`: case "capsules" = E18 (b). Crouch head 0.077 cm, prone head 0.179 cm vs the
+    3 cm gate.
+  - `ctest --preset dev -R "^render\.crowd_weapons$"`: install.
+  - `ctest --preset dev -R "^godot\.m2a_tp_crowd$"`: headless, `M2A TP CROWD CHECK: PASS`.
+  - `m2a.contract3` has `kTpLanded` set.
+
+## M2a au3: game audio
+
+<!-- # M2a au3 -->
+Track `au3` of M2a wave 3, on branch `m2a/au3`. Design: [docs/design/m2a.md](docs/design/m2a.md) §12.3, gate E7.
+As built, with the measured results and one command per gate: [docs/design/m2a-au3.md](docs/design/m2a-au3.md).
+
+* **Router** (`bf3/audio/weapon_audio.h`, Godot-free):
+  - **Own fire** runs on the Predicted timeline: one first-person driver per trigger hold, with its rounds on the shot
+    index grid.
+  - **Others' fire** runs on the Render timeline. A RemoteShot starts the burst on its exact frame, and the newest
+    records decide the end on time. The records also fill rounds whose datagram was lost.
+  - **Reloads, the knife and the M67** are one-shots.
+  - **Voice limit:** 32 drivers, the farthest released tail stolen, the rest culled; 64 one-shots; a 96-instance mixer.
+  - **Listener:** after every listener move, every emitter is sent again.
+* **Clock:** `SimMixerClock` places events on the mixer clock with the measured output latency and a bias.
+* **Impacts** (`impact_audio.h`): fx3's impact and effect sound patches, compiled once.
+* **Godot** (`src/bf3_godot/src/game_audio.h`): `Bf3GameAudio` owns the game mixer, its stream and the player
+  "Bf3GameMixer". It has `load`, `build`, `step` and the client-local `audition`. Its Godot-free halves are in
+  `bf3/audio/game_audio_frame.h`, and the offline rows run them.
+* **E7** (`game_audio_check.h`): `GameAudioCheck` records the mix and the shooter's voice taps.
+  `analyse_game_check` judges the recording with au's `analyse_check` and the in-game rows. Item 4's M1A2 patch is
+  not on Metro's mount: it loads from MP_001 (`kAuditionSuperbundles`) with a bank of its own. A step that cannot run
+  fails (`skipped.<step>`); it never reads as a pass.
+* **Tests:**
+  - `ctest --preset dev -R "^audio\.(router|game)"` runs the unit suite and the install rows. `audio.game` covers the
+    kits, the offline E7 rehearsal and a scene for the ear; `audio.game.crowd` runs 64 shooters for 60 s.
+  - The rows write their WAVs to `b\dev\shots\<row>\`, which is gitignored. Copies for listening are in
+    `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\au3\`.
+  - `audio.game.underruns` gates the underrun count (a wall-clock measure) and runs on main only.
+
+## M2a fx3: VFX3 triggers
+
+<!-- # M2a fx3 -->
+VFX3 turns the game's PresentEvents into effects: shots, impacts, hits and detonations. Design:
+[docs/design/m2a.md](docs/design/m2a.md) §12.2. As-built notes, contract corrections, measurements and capture
+descriptions: [docs/design/m2a-fx3.md](docs/design/m2a-fx3.md).
+
+* **`bf3::fx::FxTriggers`** (`triggers.h`, Godot-free) is fed by `on_muzzles` and `on_events`.
+  - OwnShot: the def's FireEffects1p list at the own 1p muzzle, otherwise FireEffects3p in the world.
+  - RemoteShot: FireEffects3p at the crowd muzzle or the aim fallback.
+  - Tracers: on flagged shots, converging on the aim.
+  - Impacts: the level's cell for the surface's PhysicsMaterialIndex, a variant chosen by the event's seed, with
+    decal and sound cues.
+  - Soldier contacts and Hits: the zone's cell. Detonations: the detonation effect and its scorch.
+
+  Seeds come from the match seed, so two clients start the same variants (E15). It also covers culling and the
+  predicted and render timelines.
+* **`Bf3GameFx`** (`game_fx.h`) is what gx wires into the playable scene. It holds:
+  - the load on the loader thread: its own uncached library, the atlas and the preload of every fire and impact
+    blueprint;
+  - fx2's renderer and light pool, and the decal pool (Godot `Decal`s). Every decal texture passes one rule
+    (`fx::prepare_decal_texture`): a real alpha is kept, a magenta-keyed BC1 one is un-keyed to grey with alpha, and
+    an opaque one is refused (Metro's brick texture is a channel mask, so brick hits leave no mark rather than a red
+    square);
+  - `own_muzzle` from G6, `sound_cues` / `effect_sound_cues` for au3, and a client-local `start_effect`.
+* **Demo:** `<godot> --path bf3-opensource res://scenes/fx3_demo.tscn -- --fx3-check --fx3-shot-dir=<dir>` drives
+  the game path on Metro. It captures the 1p muzzle flash, impacts on concrete, metal and dirt (a Sand sandbag),
+  decals, a soldier hit and tracers.
+
+| gate | command | threshold | measured (2026-10-18, branch, unlocked, shared machine: indicative only) |
+|---|---|---|---|
+| unit (incl. E15 late join) | `ctest --preset dev -R "^fx\.triggers\.unit$"` (also asan) | all cases | 15/15, 4,530 assertions, 0.21-0.35 s |
+| install cells (E8 (1), (3), (5), (7)) | `ctest --preset dev -R "^fx\.install\.cells$"` (also asan) | 0 preload failures; 1p flash in [710, 790] / 1000; G5's cells; water on Caspian | 72/72; 759 / 1000; met; `fx_impact_water_s`; decal textures: brick refused, 8 drawn; 2.9-4.3 s |
+| demo | `ctest --preset dev-window -R "^godot\.fx3_demo$"` with `OPENBF3_GODOT_WINDOWED=1` (a window row) | `FX3 DEMO: PASS`, 7 captures | PASS, 7/7; FX main thread p50 0.09 / p99 0.16 ms; 24.7 s |
+
+Branch pass (2026-10-18; branch, unlocked, shared machine: indicative only):
+
+* **asan:** fx.triggers.unit, fx.install.cells, fx.unit, fx.render.unit and m2a.contract3 passed, with no
+  AddressSanitizer report.
+* **`tools\build.cmd dev --strict`** ran twice while other sessions were testing.
+  - The first run: all 130 rows functionally passed (2 skipped as on m2a/w3), with 2 budget violations from the load
+    (fx.unit 36.5 s, fx.install.cells 32.2 s).
+  - The second run: 5 budget violations, none on an fx3 row, and `core.ui.font`'s own cold-time check failed
+    (1.64 s against 1.0 s).
+  - Alone, the rows ran in 0.26 s (fx.triggers.unit), 0.49 s (fx.unit) and 3.06 s (fx.install.cells), with
+    core.ui.font passing.
+  - After the verifier's fixes: `toolsuild.cmd dev --strict` exit 0, 128 passed and 2 skipped of 130, 0 STRICT
+    violations, phase wall 193 s (m2a-fx3.md §10).
+
 ## M2a: the playable scene (gx)
 
 <!-- # M2a gx -->

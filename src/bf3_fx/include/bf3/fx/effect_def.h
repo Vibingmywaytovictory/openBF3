@@ -42,7 +42,7 @@ struct RandomXyzDef { // RandomXYZEvaluatorData: per component
 	Vec3 min;
 	Vec3 max;
 };
-struct BoxDef { // BoxEvaluatorData: uniform in Pivot +- Dimensions / 2 [inferred: full extents]
+struct BoxDef { // BoxEvaluatorData: uniform in (Pivot * Dimensions +- Dimensions) / 2, Pivot in half extents (M2a fx3) [inferred]
 	Vec3 dimensions;
 	Vec3 pivot;
 };

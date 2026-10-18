@@ -61,6 +61,14 @@ struct FirefightStats {
 	std::atomic<uint64_t> retargets{ 0 };
 	std::atomic<uint64_t> no_target_fire{ 0 }; // Free: bursts along the longest clear heading
 	std::atomic<uint64_t> placements{ 0 }; // place_soldier calls
+	// bt (as built, docs/design/m2a-bt.md).
+	std::atomic<uint64_t> los_rays{ 0 }; // eye-to-chest rays cast (perception and target checks)
+	std::atomic<uint64_t> hunts{ 0 }; // Free: hunt goals handed to the walker (the nearest enemy, snapped onto the mesh)
+	std::atomic<uint64_t> strafes{ 0 }; // strafe legs started while engaged
+	std::atomic<uint64_t> mode_switches{ 0 }; // fire-mode counter steps sent to reach the weapon's automatic mode
+	std::atomic<uint64_t> sidearm_switches{ 0 }; // primary out of ammo: the sidearm selected
+	std::atomic<uint32_t> walk_unavailable{ 0 }; // 1: walk was asked for without GameServerConfig::bots' BotLevel
+	std::atomic<uint32_t> lanes_shared{ 0 }; // Pairs: pairs placed on an already used lane (fewer lanes than pairs)
 };
 
 struct FirefightConfig {
@@ -107,12 +115,28 @@ struct FirefightLane {
 // The Pairs layout from the observer (bt): at most p_config.count / 2 lanes, each end with a clear eye-to-chest ray to
 // the other and a foothold (p_world rays down; the nav check is bt's). Deterministic for a seed. Fails when no lane
 // holds at all.
+// As built (bt): p_config.observer must be valid (add_firefight_bots resolves the default first). Lane i of n is aimed
+// at the fan angle -fan + 2 fan i / (n - 1) and the distance lane_min + (lane_max - lane_min) frac(0.618 i); retries
+// draw both from the seed. Even tries lay the lane across the view ray, odd tries along it. An end is accepted when a
+// ray down from 2 m above the observer's eye meets ground within 3 m of the observer's floor, the standing capsule
+// fits there, the two ends see each other eye to chest, and (first half of the tries only) the observer's eye sees
+// both chests. With p_nav (the BotLevel's query) each end also needs a poly of the main component within 1 m.
 core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWorld &p_world, const FirefightConfig &p_config, uint64_t p_seed);
+struct BotNav;
+core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWorld &p_world, const FirefightConfig &p_config, uint64_t p_seed,
+		BotNav *p_nav, uint32_t *r_rejected = nullptr);
+
+// The brains of one GameServer share this (bt; firefight_brain.cpp): the server, the config, the soldier's eye
+// heights, the nav hook (bot_fill.h BotNav; null = no walking) and the lanes.
+struct FirefightShared;
 
 // One bot (bt). Holds the GameServer for place_soldier, view() and gunplay().
 class FirefightBrain final : public CommandSource {
 public:
 	FirefightBrain(GameServer &r_server, std::shared_ptr<const FirefightConfig> p_config, uint32_t p_index, const FirefightLane *p_lane);
+	// add_firefight_bots' path (bt): every brain of the server shares p_shared; p_end 0 / 1 = the lane's a / b end;
+	// p_offset moves the placement along the lane's normal (a pair that shares a lane).
+	FirefightBrain(std::shared_ptr<FirefightShared> p_shared, uint32_t p_index, const FirefightLane *p_lane, uint8_t p_end, float p_offset);
 	~FirefightBrain() override;
 	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) override;
 	void set_slot(uint8_t p_slot); // add_firefight_bots tells the brain its slot after add_local_soldier

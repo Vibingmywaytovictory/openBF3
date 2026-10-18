@@ -1206,6 +1206,121 @@ if(OPENBF3_ASAN)
     set_tests_properties(m2a.contract3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_w3_cl_dir}")
 endif()
 
+# M2a bt (docs/design/m2a.md §1 E13, E15, §10.2; docs/design/m2a-bt.md): the firefight bots on the real GameServer,
+# headless on Metro TDM (load_firefight_level once per process, a per-PID scratch cache root). host.gunplay.firefight
+# (functional, untimed: 64 Free bots for 60 s of simulated time, kills on both teams, every bot fires, no stuck bot, no
+# soldier inside geometry or below the ground, no NaN; the idle observer peer is engaged) and host.gunplay.replay (E15,
+# functional: three 3,600-tick runs on three threads) stay out of the timing label. host.gunplay.perf (E13, timing,
+# RUN_SERIAL: 10 s warm-up + 120 s of 64 Pairs bots and one observer) runs in the merge pass only; report only under asan.
+openbf3_test(test_host_gunplay_perf test_main.cpp host_gunplay_perf.cpp test_support.h)
+target_link_libraries(test_host_gunplay_perf PRIVATE bf3_host)
+target_compile_definitions(test_host_gunplay_perf PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
+if(OPENBF3_ASAN)
+    target_compile_definitions(test_host_gunplay_perf PRIVATE OPENBF3_TIMING_REPORT_ONLY=1)
+endif()
+add_test(NAME host.gunplay.firefight COMMAND test_host_gunplay_perf --test-suite=host-gunplay-firefight)
+add_test(NAME host.gunplay.replay COMMAND test_host_gunplay_perf --test-suite=host-gunplay-replay)
+add_test(NAME host.gunplay.perf COMMAND test_host_gunplay_perf --test-suite=host-gunplay-perf)
+set_tests_properties(host.gunplay.firefight host.gunplay.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+set_tests_properties(host.gunplay.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
+openbf3_label(timing host.gunplay.perf)
+# Measured alone (dev, 2026-10-18, warm machine): firefight 13.8 s wall / 30.9 s CPU (two runs and the Metro load with
+# its cold per-PID cache), replay 11.4 s / 38.0 s (three runs on three threads), perf 12.4 s.
+openbf3_cost(host.gunplay.firefight 2 14)
+openbf3_cost(host.gunplay.replay 3 12)
+openbf3_cost(host.gunplay.perf 1 13)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2a_bt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    # Under asan (2026-10-18, the two rows side by side on a loaded machine): firefight 563 s, replay 431 s.
+    set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES TIMEOUT 1800)
+    set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_bt_cl_dir}")
+endif()
+
+# M2a tp (docs/design/m2a-tp.md): case "capsules" of anim.s3 (E18 (b)) builds the capsule pose table from the install
+# through bf3_sim (weapon_install.h, posed_target.h).
+target_link_libraries(test_anim_s3 PRIVATE bf3_sim)
+# render.crowd_weapons (install, exits 77 without one): S3's soldier assets, the Metro TDM kits and every kit item's 3p
+# weapon through load_crowd_weapons (game_crowd_items.h builds the lists), the binds, reload, muzzle, strip and views.
+openbf3_test(test_render_crowd_weapons test_main.cpp render_crowd_weapons_tests.cpp test_support.h)
+target_link_libraries(test_render_crowd_weapons PRIVATE bf3_render bf3_host)
+target_include_directories(test_render_crowd_weapons PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+add_test(NAME render.crowd_weapons COMMAND test_render_crowd_weapons --test-suite=render-crowd-weapons)
+set_tests_properties(render.crowd_weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_tp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.crowd_weapons PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tp_cl_dir}")
+endif()
+# godot.m2a_tp_crowd (headless, functional; tests/godot_m2a_tp_crowd.cmake): Bf3GameCrowd in the level through
+# Bf3TpCrowdCheck (res://scenes/m2a_tp_crowd.tscn -- --tp-check).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m2a_tp_crowd godot_m2a_tp_crowd.cmake HEADLESS TIMEOUT 480)
+endif()
+# COST (docs/testing.md §4): both rows load the soldier assets, the level's gunplay tables and every kit item's 3p
+# weapon from the install (no lighter subset proves the per-item meshes); alone 2.9 s (render.crowd_weapons) and 9.4 s
+# (godot.m2a_tp_crowd, the crowd load 3.4 s of it), but 34 s and 39 s inside the 16-job branch pass (2026-10-18), so
+# they start early.
+openbf3_cost(render.crowd_weapons 1 5)
+openbf3_cost(godot.m2a_tp_crowd 1 10)
+
+# M2a au3 (docs/design/m2a-au3.md): the game's weapon audio. audio.router.unit runs the data-free audio-router suite
+# (synthetic programs through WeaponAudioRouter, ImpactAudio and SimMixerClock on an offline MixerCore; a unit row,
+# <= 2 s). The audio-game install rows (exit 77 without an install, install.unchanged in each): audio.game runs the
+# kit items (E7 item 1), the offline E7 rehearsal and the scene for the ear (own fire, a reload, others by distance,
+# impacts: gate 4 offline), WAVs and tables to shots/audio.game; audio.game.crowd (64 shooters for 60 s, functional
+# counters); audio.game.underruns is the same render gating late_blocks = 0, a wall-clock gate (timing, main only).
+openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h)
+target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_host bf3_fx bf3_core)
+target_compile_definitions(test_audio_router PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg"
+    OPENBF3_AU3_SHOTS="${CMAKE_BINARY_DIR}/shots")
+add_test(NAME audio.router.unit COMMAND test_audio_router --test-suite=audio-router)
+set_tests_properties(audio.router.unit PROPERTIES TIMEOUT 300)
+# One process for the three cases that share the load (the fixture loads Metro's gunplay tables and the bank once).
+add_test(NAME audio.game COMMAND test_audio_router --test-suite=audio-game "--test-case-exclude=64 shooters*")
+add_test(NAME audio.game.crowd COMMAND test_audio_router --test-suite=audio-game "--test-case=64 shooters*")
+add_test(NAME audio.game.underruns COMMAND test_audio_router --test-suite=audio-game "--test-case=64 shooters*")
+set_tests_properties(audio.game audio.game.crowd audio.game.underruns PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+set_tests_properties(audio.game.underruns PROPERTIES RUN_SERIAL TRUE)
+if(NOT OPENBF3_ASAN)
+    set_tests_properties(audio.game.underruns PROPERTIES ENVIRONMENT "OPENBF3_AU3_GATE_LATE=1")
+endif()
+openbf3_label(timing audio.game.underruns)
+openbf3_cost(audio.game 1 8)
+openbf3_cost(audio.game.crowd 1 16)
+openbf3_cost(audio.game.underruns 1 16)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_au3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.router.unit audio.game audio.game.crowd audio.game.underruns PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au3_cl_dir}")
+endif()
+
+# M2a fx3 (docs/design/m2a-fx3.md): VFX3's triggers. fx.triggers.unit: install-free (synthetic EBX effects and grid
+# through the real library, cl's ClientProjectiles for case "late join"), a unit row (<= 2 s). fx.install.cells: the
+# retail in-game cell selection (Metro's fire effects and collision cells, the E8 (1) / (3) / (5) / (7) items, the
+# Caspian water fallback; install unchanged last), an install row; 77 without an install. Both in the asan preset.
+openbf3_test(test_fx_triggers test_main.cpp fx_triggers_tests.cpp fx_test_support.h weapons_support.h test_support.h)
+target_link_libraries(test_fx_triggers PRIVATE bf3_fx bf3_host bf3_render) # bf3_render: the decal textures as Bf3GameFx prepares them
+add_test(NAME fx.triggers.unit COMMAND test_fx_triggers --test-suite=fx-triggers-unit)
+add_test(NAME fx.install.cells COMMAND test_fx_triggers --test-suite=fx-install-cells)
+set_tests_properties(fx.install.cells PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+# COST: 3-5.6 s alone (Metro's gunplay level, fx sources, collision and Caspian), so it starts early in a parallel pass.
+openbf3_cost(fx.install.cells 1 5)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.triggers.unit fx.install.cells PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx3_cl_dir}")
+endif()
+
+# godot.fx3_demo: the windowed VFX3 demo check (Bf3GameFx end to end on Metro: load, draw, shots, impacts, decals, hit,
+# 7 captures, install unchanged; docs/design/m2a-fx3.md §6). A window row (label window: the merge pass's user-away
+# phase, serially); over 30 s because the level session loads Metro (warm on the row's own cache root) before the
+# demo's scripted 15 s.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.fx3_demo godot_fx3_demo.cmake WINDOW TIMEOUT 900)
+    set_tests_properties(godot.fx3_demo PROPERTIES RUN_SERIAL TRUE)
+    openbf3_cost(godot.fx3_demo 1 31)
+endif()
+
 # M2a gx (docs/design/m2a-gx.md §5): the playable scene's in-game checks. godot.m2a runs --m2a-check on
 # res://scenes/m2a_metro.tscn (range, reload, hud, ads, audio, fx; a skipped case names its track), godot.m2a.kits
 # the 8 loadouts (E11), godot.m2a.play the scripted 5-minute play run (0 ERROR lines). Screenshots go to

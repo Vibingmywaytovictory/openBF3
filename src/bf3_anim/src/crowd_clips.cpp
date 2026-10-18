@@ -417,3 +417,145 @@ core::Result<AimMeasure> measure_aim(const CrowdClipSet &p_set, AdditiveOrder p_
 }
 
 } // namespace bf3::anim
+
+// ---- M2a tp (docs/design/m2a.md §9; docs/design/m2a-tp.md): the crouch and prone moves, the crouch fire, the deaths ----
+
+namespace bf3::anim {
+
+namespace {
+
+// Root displacement of a move clip over its cycle (rig model space, last frame minus first; y dropped), as
+// load_crowd_clips measures the stand cycles.
+bool move_root_motion(const CrowdClipSet &p_set, const CrowdClipData &p_clip, Vec3 &r_displacement, float &r_duration) {
+	r_duration = p_clip.tracks.duration_seconds();
+	if (!(r_duration > 0.0f) || p_set.root_joint < 0 || size_t(p_set.root_joint) >= p_set.rig.size()) {
+		return false;
+	}
+	LocalPose pose;
+	core::ant::ClipPose scratch;
+	std::vector<Xform> model;
+	const Vec3 a = joint_model_position(p_set.rig, p_clip, p_set.root_joint, 0.0f, pose, scratch, model);
+	const Vec3 b = joint_model_position(p_set.rig, p_clip, p_set.root_joint, float(p_clip.tracks.end_frame), pose, scratch, model);
+	r_displacement = Vec3{ b.x - a.x, 0.0f, b.z - a.z };
+	return std::isfinite(r_displacement.x) && std::isfinite(r_displacement.z);
+}
+
+bool loco_info(const Vec3 &p_displacement, float p_duration, LocoClipInfo &r_info) {
+	const float len = std::sqrt(p_displacement.x * p_displacement.x + p_displacement.z * p_displacement.z);
+	if (!(len > 1.0e-3f) || !std::isfinite(len) || !(p_duration > 0.0f)) {
+		return false;
+	}
+	r_info.duration = p_duration;
+	r_info.root_speed = len / p_duration;
+	r_info.root_dir = Vec3{ p_displacement.x / len, 0.0f, p_displacement.z / len };
+	return true;
+}
+
+} // namespace
+
+core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, const AntLibrary &p_library, const CrowdMoveClipNames &p_names) {
+	if (!p_set.package || p_set.rig.size() == 0) {
+		return core::make_error("crowd move clips: the crowd clip set has no package or no rig");
+	}
+	CrowdMoveClips out;
+	const AntPackage &pkg = *p_set.package;
+	const std::string where = "crowd move clips (" + pkg.name() + ")";
+	core::gameplay::WorkBudget budget;
+	std::array<uint32_t, kCrowdMoveClips> matches{};
+	std::array<GdStruct, kCrowdMoveClips> found{};
+	for (const uint32_t ci : AntLibrary::clips(pkg)) {
+		if (core::Status s = budget.charge(1); !s.ok()) {
+			return core::error_at(where, s.error());
+		}
+		const GdStruct clip = pkg.object(ci);
+		const GdStruct controller = controller_of(p_library, pkg, clip);
+		if (!controller.valid()) {
+			continue;
+		}
+		const std::string_view name = controller.name();
+		for (size_t k = 0; k < kCrowdMoveClips; ++k) {
+			if (name == p_names.controllers[k]) {
+				++matches[k];
+				found[k] = clip;
+			}
+		}
+	}
+	const core::ant::AntRig *rig = p_set.get(CrowdClip::Idle).binding.rig;
+	for (size_t k = 0; k < kCrowdMoveClips; ++k) {
+		const std::string what = where + " " + p_names.controllers[k];
+		if (matches[k] != 1) {
+			out.notes.push_back(what + ": occurs " + std::to_string(matches[k]) + " times (must be exactly once): not used");
+			continue;
+		}
+		core::Result<CrowdClipData> d = make_clip(p_library, pkg, found[k], what);
+		if (!d) {
+			out.notes.push_back(d.error().message + ": not used");
+			continue;
+		}
+		if (rig != nullptr && d->binding.rig != rig) {
+			out.notes.push_back(what + ": binds to rig " + std::string(d->binding.rig->name) + ", not " + std::string(rig->name) + ": not used");
+			continue;
+		}
+		if (core::Status s = track_clip(*d, p_set.rig, what); !s.ok()) {
+			out.notes.push_back(s.error().message + ": not used");
+			continue;
+		}
+		if (d->tracks.rotation_bone.empty() && d->tracks.translation_bone.empty()) {
+			out.notes.push_back(what + ": no tracks on the rig: not used");
+			continue;
+		}
+		out.clips[k] = std::move(*d);
+		out.present[k] = true;
+	}
+	// The stance move tables (crouch, prone), each direction from its measured root motion.
+	struct Dir {
+		LocoClip loco;
+		CrowdMoveClip clip;
+	};
+	static constexpr Dir kDirs[kCrowdMoveStances][4] = {
+		{ { LocoClip::Fwd, CrowdMoveClip::SneakFwd }, { LocoClip::Bwd, CrowdMoveClip::SneakBwdLeft }, { LocoClip::Left, CrowdMoveClip::SneakLeft },
+				{ LocoClip::Right, CrowdMoveClip::SneakRight } },
+		{ { LocoClip::Fwd, CrowdMoveClip::CrawlFwd }, { LocoClip::Bwd, CrowdMoveClip::CrawlBwd }, { LocoClip::Left, CrowdMoveClip::CrawlLeft },
+				{ LocoClip::Right, CrowdMoveClip::CrawlRight } },
+	};
+	static constexpr const char *kStanceName[kCrowdMoveStances] = { "crouch", "prone" };
+	for (size_t st = 0; st < kCrowdMoveStances; ++st) {
+		bool ok = true;
+		std::string line = std::string(kStanceName[st]) + " moves:";
+		for (const Dir &d : kDirs[st]) {
+			Vec3 disp{};
+			float duration = 0.0f;
+			bool have = false;
+			if (st == 0 && d.loco == LocoClip::Bwd) {
+				// The two backward diagonals at one phase: mean duration, mean displacement.
+				Vec3 a{}, b{};
+				float da = 0.0f, db = 0.0f;
+				have = out.has(CrowdMoveClip::SneakBwdLeft) && out.has(CrowdMoveClip::SneakBwdRight) &&
+						move_root_motion(p_set, out.get(CrowdMoveClip::SneakBwdLeft), a, da) && move_root_motion(p_set, out.get(CrowdMoveClip::SneakBwdRight), b, db);
+				if (have) {
+					duration = 0.5f * (da + db);
+					// Displacements per second, averaged, times the mean duration (the blend plays both at one phase).
+					disp = Vec3{ 0.5f * (a.x / da + b.x / db) * duration, 0.0f, 0.5f * (a.z / da + b.z / db) * duration };
+				}
+			} else {
+				have = out.has(d.clip) && move_root_motion(p_set, out.get(d.clip), disp, duration);
+			}
+			LocoClipInfo info;
+			if (!have || !loco_info(disp, duration, info)) {
+				ok = false;
+				line += " " + std::to_string(int(d.loco)) + " missing";
+				continue;
+			}
+			out.loco[st][size_t(d.loco)] = info;
+			char b[96];
+			std::snprintf(b, sizeof(b), " %d: %.2f m/s over %.2f s dir (%.2f, %.2f)", int(d.loco), double(info.root_speed), double(info.duration),
+					double(info.root_dir.x), double(info.root_dir.z));
+			line += b;
+		}
+		out.moves_ok[st] = ok;
+		out.notes.push_back(line + (ok ? "" : " -> the stand cycles move this stance"));
+	}
+	return out;
+}
+
+} // namespace bf3::anim

@@ -53,3 +53,7 @@ target_sources(bf3dump PRIVATE vm_commands.cpp vm_commands.h)
 # offline render through bf3_audio's mixer core.
 target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_commands.cpp)
 target_link_libraries(bf3dump PRIVATE bf3_audio)
+
+# M2a bt (docs/design/m2a-bt.md): `firefight <LEVEL> <MODE> [--perf]`, bt's firefight bots on the headless GameServer
+# (host::run_firefight; bf3_host from the nav block).
+target_sources(bf3dump PRIVATE firefight_commands.cpp firefight_commands.h)

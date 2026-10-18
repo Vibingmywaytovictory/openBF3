@@ -31,6 +31,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace bf3::audio {
@@ -41,6 +42,10 @@ class ImpactSoundCache {
 public:
 	// Compiles each name once (compile_patch); failures are kept with their error and counted, never fatal.
 	static core::Result<std::shared_ptr<const ImpactSoundCache>> build(const core::EbxResolver &p_db, std::span<const std::string> p_patches);
+	// au3 addition: a cache of programs compiled elsewhere (unit tests, Bf3GameAudio's auditions). Empty names and
+	// null programs are skipped; a repeated name keeps the first.
+	static std::shared_ptr<const ImpactSoundCache> from_programs(
+			std::span<const std::pair<std::string, std::shared_ptr<const core::audio::SoundProgram>>> p_programs);
 	// nullptr: unknown or failed to compile.
 	std::shared_ptr<const core::audio::SoundProgram> find(std::string_view p_patch) const;
 	// Every compiled program (Bf3GameAudio's wave list: read_program_waves).

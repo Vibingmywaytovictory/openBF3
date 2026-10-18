@@ -119,3 +119,66 @@ struct AimMeasure {
 core::Result<AimMeasure> measure_aim(const CrowdClipSet &p_set, AdditiveOrder p_order);
 
 } // namespace bf3::anim
+
+// ---- M2a tp (docs/design/m2a.md §9; docs/design/m2a-tp.md) -----------------------------------------------------------
+
+#include <vector>
+
+namespace bf3::anim {
+
+// The clips a 3p soldier needs beyond S3's stand set and lc's stance idles, aims and transitions (those come through
+// server_pose.h's ServerPoseClipNames / load_server_pose_clips, so the drawn soldier and the server's capsules share
+// one source, m2a.md §6.5): the crouch and prone moves, the crouch fire and the three stance deaths. Every controller
+// name below occurs exactly once in b_basicassetsmp [verified 2026-10-18, antdump list --install b_basicassetsmp:
+// Rifle_SneakBwd occurs twice (end frames 32 and 42), so the crouched backward move blends Rifle_SneakBwdLeft45 and
+// Rifle_SneakBwdRight45 at one phase]. Rifle_CrouchFire is a 21-frame clip on FullBodyWeaponRootNoFingers (the aim
+// clips' target); there is no unique stand or prone rifle fire controller, so those stances kick procedurally
+// (crowd_eval.h, kCrowdFireKick*).
+enum class CrowdMoveClip : uint8_t {
+	SneakFwd, // Rifle_SneakFwd (crouch forward, end frame 42)
+	SneakBwdLeft, // Rifle_SneakBwdLeft45 (32)
+	SneakBwdRight, // Rifle_SneakBwdRight45 (32)
+	SneakLeft, // Rifle_SneakLeft1 (45)
+	SneakRight, // Rifle_SneakRight1 (45)
+	CrawlFwd, // Rifle_CrawlFwd (35)
+	CrawlBwd, // Rifle_CrawlBwd (65)
+	CrawlLeft, // Rifle_CrawlLeft (51)
+	CrawlRight, // Rifle_CrawlRight (45)
+	CrouchFire, // Rifle_CrouchFire (21, FullBodyWeaponRootNoFingers)
+	DeathStand, // Death_StandChest (35)
+	DeathCrouch, // Death_Crouch1 (36)
+	DeathProne, // Death_Prone1 (15, FullBodyAllWeaponParts)
+	Count
+};
+inline constexpr size_t kCrowdMoveClips = size_t(CrowdMoveClip::Count);
+
+struct CrowdMoveClipNames {
+	std::array<std::string, kCrowdMoveClips> controllers{ "Rifle_SneakFwd", "Rifle_SneakBwdLeft45", "Rifle_SneakBwdRight45", "Rifle_SneakLeft1",
+		"Rifle_SneakRight1", "Rifle_CrawlFwd", "Rifle_CrawlBwd", "Rifle_CrawlLeft", "Rifle_CrawlRight", "Rifle_CrouchFire", "Death_StandChest",
+		"Death_Crouch1", "Death_Prone1" };
+};
+
+// The stances whose moves this set carries (index 0 crouch, 1 prone; stand is S3's CrowdClipSet::loco).
+inline constexpr size_t kCrowdMoveStances = 2;
+
+struct CrowdMoveClips {
+	std::array<CrowdClipData, kCrowdMoveClips> clips; // bound into CrowdClipSet::package, tracked on CrowdClipSet::rig
+	std::array<bool, kCrowdMoveClips> present{}; // false: absent, not unique, unbound or without tracks (a note says why)
+	// Per stance (crouch, prone): the LocoClip table the run blend uses (Idle stays zero: the stance idle is lc's pose).
+	// Crouch Bwd is the 50/50 blend of SneakBwdLeft / SneakBwdRight at one phase: its duration is their mean and its
+	// root motion the mean of their displacements over that duration. moves_ok[s] is true when every direction of the
+	// stance is present and has root motion; otherwise the evaluator moves that stance with the stand cycles (counted).
+	std::array<std::array<LocoClipInfo, kLocoClips>, kCrowdMoveStances> loco{};
+	std::array<bool, kCrowdMoveStances> moves_ok{};
+	std::vector<std::string> notes;
+
+	const CrowdClipData &get(CrowdMoveClip p_clip) const { return clips[size_t(p_clip)]; }
+	bool has(CrowdMoveClip p_clip) const { return present[size_t(p_clip)]; }
+};
+
+// Binds and decodes the named clips from p_set's package (the one load_crowd_clips read: no second package load) on
+// p_set's rig and measures the moves' root motion as load_crowd_clips does. Fails only when p_set has no package or no
+// rig; a clip that is missing, not unique, on another rig or unusable is a note (present false).
+core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library, const CrowdMoveClipNames &p_names = {});
+
+} // namespace bf3::anim
