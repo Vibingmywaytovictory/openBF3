@@ -9,25 +9,36 @@
 //   --m2a-firefight                  the firefight case alone (FirefightConfig mode Pairs with the observer; E13 / E14
 //                                    windowed; godot.m2a_firefight is a timing row: the integrator's)
 // Cases (gx as built: docs/design/m2a-gx.md §4; the E numbers are m2a.md §1's):
-//   range      E1 / E3: the M16A3 held from a full magazine through the input mapper (fire level and press counter),
-//              the first predictions against the server's shots field for field, the 75 ms gaps, the first shot at
-//              its tick's start, one OwnShot event and one viewmodel Shot cue per shot; the M9 one shot per tap;
-//              E3 through the game at 5 m (and 60 m on a range lane): hits to kill, the HUD's hit indicator per
-//              server hit, the kill counter from the Death event
-//   reload     E5: tactical and empty reload durations and commit points against the def, server and prediction
-//              equal, the viewmodel's reload clip and the HUD's is_reloading over the reload, a switch cancels
-//   kits       E11: the 8 loadouts through KitSelect (send_kit_select) + SpawnAt: the presented kit, team and slot
-//              defs, every slot deploys (1, 2, G, F), the viewmodel item maps from PresentedWeapon::def through the
-//              kit unlocks, the primary fires and reloads; the knife hits a target; the M67's fuse
+//   range      E1 / E3 / E4: the M16A3 held from a full magazine through the input mapper (fire level and press
+//              counter), the first predictions against the server's shots field for field, the 75 ms gaps, the first
+//              shot at its tick's start, one OwnShot event, one viewmodel Shot cue and one fx3 1p muzzle start per
+//              shot; the M9 one shot per tap; E3 through the game: chest / head / legs at 5 m, chest / head at 60 m on
+//              a range lane (hits to kill, the damage per hit, the HUD's hit indicator per server hit, the kill
+//              counter from the Death event); E4 the MK11 (recon): head at 5 m kills in 1, at 60 m in 2; one shot per
+//              tap and one per held trigger
+//   reload     E5: M16A3 and M9 tactical and empty reload durations and commit points against the def, server and
+//              prediction equal; per display frame: the viewmodel's reload clip start, the HUD ammo change and the
+//              ready frame against the predicted kReloadStarted / kAmmoCommitted / kReloadFinished (late <= 1 frame,
+//              early <= 1 tick), the M16A3's fire-again at the finish; the clip lengths per kit weapon; a switch cancels
+//   kits       E11 / E1: the 8 loadouts through KitSelect (send_kit_select) + SpawnAt: the presented kit, team and
+//              slot defs; every item deploys (its Deploy clip or stand-in, the vm clip / stand-in list), fires and
+//              (firearms) reloads with server events == predicted events; E1's gaps for every kit firearm; the
+//              knife hits the target bot (applied when it is an enemy); the M67's fuse from the server's
+//              DetonationEvent == 3.6 s == TimeToLive exactly
 //   hud        E10: per frame, the HUD model against the presented weapon (magazine, reserve, crosshair, reload);
-//              the localised name and icon of every kit item (12 / 12)
-//   ads        E19: ADS world FOV 55 -> 40 and back within the aiming FOV times, the look scale, ADS refused while
-//              sprinting
+//              what the widgets drew: the crosshair gap against the presented spread and camera FOV (+- 0.5 px) and
+//              the ammo at hudmpscreen's Ammo_01 slot (x 1194 +- 2 stage px, $HUD_medium); the localised name and
+//              icon of every kit item (12 / 12); hud_hip / hud_reload / hud_ads screenshots
+//   ads        E19: viewmodel FOV = RenderFov 55 at hip; ADS world FOV 55 -> 40 and back within the aiming FOV
+//              times +- 1 display frame of the presented ADS level change (the press latency gated <= 0.1 s); the
+//              look scale; the camera's recoil == the presented recoil every frame (+- 1e-4 deg); the springs settle;
+//              ADS refused while deploying and while sprinting
 //   audio      E7 (au3): au3's G7 script in the game on a new life; the own soldier fires aimed 60 degrees up and is
 //              heard in 3p through a listener on the aim axis (M2aGame::listener_override); au3's GameAudioCheck
 //              records the mix and analyse_game_check's rows are the case's (gx_e7.wav in the shots directory)
 //   fx         E8 (fx3): 500 M16A3 shots each at Metro concrete and brick (the 1p flash fraction, drawn ==
-//              particles, the named cells' effects and decals), the client-local oilfire after 15 s, a soldier hit,
+//              particles, the named cells' effects and decals), water searched in Metro's collision tags (shot at
+//              when one is reachable), the client-local oilfire after 15 s, a soldier hit,
 //              the cue counts (tracers, shells, impact sounds, 0 double starts)
 //   play       the scripted 5-minute play run: the input mapper drives move / look / fire / reload / switch / die
 //              (fall damage) / respawn among the bots; every subsystem built, events flowing, deaths and respawns

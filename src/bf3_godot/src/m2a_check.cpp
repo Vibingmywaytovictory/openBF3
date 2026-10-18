@@ -224,6 +224,8 @@ struct M2aCheck::State {
 	bool play_engaging = false;
 	double play_engage_until = 0;
 	std::array<bool, 5> play_shot_taken{};
+	std::array<float, 5> play_shot_distance{}; // the firefight / ADS shots: the framed bot's distance (a nearer one re-takes)
+	std::array<uint32_t, 5> play_shot_retakes{};
 	uint32_t play_fall_deaths = 0; // scheduled falls
 	uint32_t play_fall_drops = 0; // teleports (a fall that lands alive is dropped again from where it landed)
 	uint32_t play_fall_retries_left = 0;
@@ -2105,6 +2107,8 @@ void M2aCheck::State::build_play() {
 			st.play_team_at_start = st.g.own_team;
 			st.deaths_mark = st.g.deaths;
 			st.play_shot_taken.fill(false);
+			st.play_shot_distance.fill(1e9f);
+			st.play_shot_retakes.fill(0);
 			st.play_fall_deaths = 0;
 			st.play_last_fall = -1000;
 			st.play_fall_drops = 0;
@@ -2191,24 +2195,46 @@ void M2aCheck::State::build_play() {
 			mp.script_hold(InputAction::Sprint, false);
 			mp.m2a_script_hold(Action::Fire, std::fmod(cyc, 0.7) < 0.4);
 			mp.m2a_script_hold(Action::Ads, int(p_t / 8.0) % 2 == 1);
-			// The firefight and ADS shots: a bot within 45 m in the line of sight (the check's collision world), drawn
-			// (tp's crowd built) and in the middle fifth of the frame (the aim has settled on it).
+			// The firefight and ADS shots: a bot within 45 m whose head, chest, hips and both sides are in the line of sight
+			// (the check's collision world), drawn (tp's crowd built) and in the middle fifth of the frame (the aim has settled
+			// on it). Render-only occluders (foliage without collision) are not in that world, so a nearer framed bot
+			// re-takes the shot (>= 4 m nearer, at most 8 times): the kept frame is the nearest, largest soldier.
 			bool seen = st.g.world == nullptr;
 			const sim::Vec3 aim = { o.position[0], o.position[1] + std::max(0.5f, o.eye_height - 0.35f), o.position[2] };
 			if (!seen) {
-				seen = !st.g.world->ray(eye, { aim[0] - eye[0], aim[1] - eye[1], aim[2] - eye[2] }, sim::query_mask::kProjectile);
+				// Five rays (head, chest, hips, and the chest 0.3 m to each side across the line of sight) against every
+				// collision set (kAll): an edge of a wall or a pillar between the eye and the bot fails one of them.
+				const float dx = o.position[0] - eye[0], dz = o.position[2] - eye[2];
+				const float dl = std::max(1e-3f, std::sqrt(dx * dx + dz * dz));
+				const float px = -dz / dl * 0.3f, pz = dx / dl * 0.3f;
+				const float chest = std::max(0.4f, o.eye_height - 0.35f);
+				const std::array<sim::Vec3, 5> points{ { { 0.0f, std::max(0.5f, o.eye_height - 0.1f), 0.0f }, { 0.0f, chest, 0.0f },
+						{ 0.0f, 0.45f * std::max(0.9f, o.eye_height), 0.0f }, { px, chest, pz }, { -px, chest, -pz } } };
+				seen = true;
+				for (const sim::Vec3 &q : points) {
+					const sim::Vec3 to = { o.position[0] + q[0], o.position[1] + q[1], o.position[2] + q[2] };
+					seen = seen && !st.g.world->ray(eye, { to[0] - eye[0], to[1] - eye[1], to[2] - eye[2] }, sim::query_mask::kAll);
+				}
 			}
 			const bool framed = seen && best < 45.0f && st.g.crowd_built && st.centred(Vector3(aim[0], aim[1], aim[2]), 0.1f);
-			if (!st.play_shot_taken[3] && cyc >= 6.5 && framed) {
-				st.play_shot_taken[3] = st.save_shot("gx_firefight");
+			const auto nearer = [&](size_t p_k) { return best < st.play_shot_distance[p_k] - 4.0f && st.play_shot_retakes[p_k] < 8; };
+			if (cyc >= 6.5 && framed && nearer(3) && st.save_shot("gx_firefight")) {
+				st.play_shot_taken[3] = true;
+				st.play_shot_distance[3] = best;
+				++st.play_shot_retakes[3];
 			}
 			if (!st.g.weapon.zoomed) {
 				st.play_zoomed_since = -1;
 			} else if (st.play_zoomed_since < 0) {
 				st.play_zoomed_since = p_t;
 			}
-			if (!st.play_shot_taken[1] && int(p_t / 8.0) % 2 == 1 && st.play_zoomed_since >= 0 && p_t - st.play_zoomed_since >= 0.4 && framed) {
-				st.play_shot_taken[1] = st.save_shot("gx_ads");
+			// The ADS shot between bursts (the trigger up >= 0.15 s): no muzzle flash over the bot in the sight picture.
+			const bool between_bursts = std::fmod(cyc, 0.7) >= 0.55;
+			if (int(p_t / 8.0) % 2 == 1 && st.play_zoomed_since >= 0 && p_t - st.play_zoomed_since >= 0.4 && framed && between_bursts && nearer(1) &&
+					st.save_shot("gx_ads")) {
+				st.play_shot_taken[1] = true;
+				st.play_shot_distance[1] = best;
+				++st.play_shot_retakes[1];
 			}
 		} else {
 			mp.m2a_script_hold(Action::Fire, false);
@@ -2319,8 +2345,12 @@ void M2aCheck::State::build_play() {
 		}
 		st.row("play.weapon_reconciliations", double(cs.weapon_reconciliations), "reported", true);
 		st.row("play.kit_selects", double(st.g.kit_selects_sent), ">= 1 KitSelect sent after Spawned", st.g.kit_selects_sent >= 1);
-		st.row("play.screenshots", double(st.shots_saved), st.options.shots_dir.empty() ? "no --m2a-shots dir (reported)" : "5 (hip, ADS, reload, firefight, death)",
-				st.options.shots_dir.empty() || st.shots_saved >= 5);
+		const uint32_t taken = uint32_t(std::count(st.play_shot_taken.begin(), st.play_shot_taken.end(), true));
+		st.row("play.screenshots", double(taken),
+				st.options.shots_dir.empty() ? "no --m2a-shots dir (reported)"
+											 : fmt("5 (hip, ADS, reload, firefight, death; the firefight bot at %.1f m, the ADS one at %.1f m, the nearest of %u / %u framed)",
+													   double(st.play_shot_distance[3]), double(st.play_shot_distance[1]), st.play_shot_retakes[3], st.play_shot_retakes[1]),
+				st.options.shots_dir.empty() || taken >= 5);
 		return true;
 	});
 }
