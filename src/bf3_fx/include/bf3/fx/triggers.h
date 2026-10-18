@@ -22,6 +22,8 @@
 // it) is held in a pending list and started when the clock passes it. Immediate events start with age 0.
 // Duplicates: a start keyed by (kind, slot, id, pellet, ordinal) that already ran is skipped and counted
 // (double_starts, gated 0 after replays, E8 (7)).
+// Frames: every Transform here (muzzles, impact frames, decals) is an effect frame in fx2's convention
+// (m2a-fx2.md): local +Y = the barrel or the surface normal.
 // Seeds (§4.4): the event carries its effect seed (shots) or impact seed (impacts) from cl; each start inside one
 // event takes trigger_seed(event seed, purpose, index), so every client starts the same variants (E15).
 #include "bf3/core/ebx_db.h"
@@ -77,10 +79,11 @@ constexpr uint64_t trigger_seed(uint64_t p_event_seed, TriggerPurpose p_purpose,
 	return sim::weapons::splitmix64(p_event_seed ^ sim::weapons::splitmix64((uint64_t(uint8_t(p_purpose)) << 32) | uint64_t(p_index)));
 }
 
-// One FireEffects1p / FireEffects3p entry of a weapon (an effect blueprint and its offset from the muzzle socket).
+// One FireEffects1p / FireEffects3p entry of a weapon: an effect blueprint and its offset in the weapon's frame (the
+// rig's Wep_Root, viewmodel_muzzle.h G6; the M16A3's muzzle entries sit at 0.99 m, the shell ejection 0.55 m behind).
 struct FireEffect {
 	std::string blueprint; // EffectBlueprint partition, lowercase
-	Transform offset; // relative to the muzzle (fx_demo: the shell ejection sits 0.55 m behind it at +Y = barrel)
+	Transform offset; // in the weapon frame (Frostbite axes, as the data stores it)
 };
 
 struct WeaponFireEffects {
@@ -114,7 +117,7 @@ struct MuzzleSample {
 	uint8_t slot = 0;
 	bool valid = false;
 	bool first_person = false;
-	Transform transform; // forward = the barrel direction
+	Transform transform; // the effect frame, fx2's convention (m2a-fx2.md): local +Y (up) = the barrel
 	Vec3 velocity;
 };
 static_assert(std::is_trivially_copyable_v<MuzzleSample>);
@@ -125,7 +128,7 @@ MuzzleSample fallback_muzzle(const host::PresentedSoldier &p_soldier);
 // A decal to place (Bf3GameFx's pool).
 struct DecalCue {
 	std::string_view decal; // ImpactCell::decal (DecalTemplateData partition; valid while the table lives)
-	Transform transform; // on the surface, forward = the normal
+	Transform transform; // on the surface, the effect frame convention: local +Y (up) = the surface normal
 	uint64_t seed = 0; // trigger_seed(.., Decal, 0): rotation
 	float start_age = 0.0f;
 };
