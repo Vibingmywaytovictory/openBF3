@@ -74,6 +74,17 @@ struct CrowdSoldierInput {
 	float camera_distance = 0.0f; // metres, for temporal LOD
 	uint8_t team = 0; // 0 US, 1 RU
 	uint8_t flags = 0; // crowd_flags
+	// M2a w3 (W3.0 contract, docs/design/m2a.md §9; docs/design/m2a-w3.md): the server state's stance, weapon, fire,
+	// ADS and death, which tp's R5 and Bf3GameCrowd drive. The defaults are S3's soldier (standing, the team's default
+	// weapon, no fire), so S3's scenes and tests run unchanged. The wire's team 1 / 2 maps to team 0 / 1 here
+	// (crowd_team_of_wire below).
+	uint8_t pose = 0; // sim::Pose: 0 stand, 1 crouch, 2 prone
+	uint8_t target_pose = 0; // the stance being entered
+	float transition = 0.0f; // 0..1 from pose to target_pose (PresentedSoldier::transition)
+	uint8_t weapon = 0; // index into the team's CrowdTeam::weapons (0 = the team's default weapon)
+	uint8_t fire_seq = 0; // changes once per shot (or per burst seq change): the upper-body fire kick
+	bool ads = false;
+	bool dead = false; // blend to prone over 0.5 s, hidden after 3 s (m2a.md §16 Q13)
 };
 
 struct CrowdConfig {
@@ -89,6 +100,21 @@ struct CrowdConfig {
 	bool run_noise = false; // add Rifle_Noise_RunFwd1 while running (off for the gates)
 };
 
+// M2a w3 (W3.0 contract, docs/design/m2a.md §9; docs/design/m2a-w3.md): one 3p item a team can hold (tp fills and
+// evaluates them, R5). The skinning step draws the body from CrowdTeam::binds and the weapon from the soldier's
+// CrowdWeapon; the reload clip, the weapon joints' LocalPose and the 3p muzzle come per weapon.
+inline constexpr uint32_t kMaxCrowdWeapons = 8; // 4 primaries, sidearm, knife, M67 per team, one spare
+struct CrowdWeapon {
+	const SkinBinds *binds = nullptr; // the 3p weapon mesh only (body, head, helmet stay in CrowdTeam::binds)
+	const CrowdClipData *reload = nullptr; // S3's per-team reload, now per weapon (null: no reload clip)
+	float reload_rate = 1.0f;
+	const BoneMask *weapon_joints = nullptr; // step 3 above, per weapon (null / empty: no fix)
+	std::span<const Xform> weapon_local; // weaponske01 LocalPose of this item, rig-sized
+	int32_t muzzle_joint = -1; // rig joint the 3p muzzle hangs on (-1: none; the FX triggers then use the eye fallback)
+	Xform muzzle_offset{}; // the muzzle in that joint's space (the effect frame: +Y along the barrel, m2a-fx2.md)
+	uint8_t palette = 0; // material palette index of the 3p mesh
+};
+
 struct CrowdTeam {
 	const SkinBinds *binds = nullptr; // the team's mesh binds (one list: body, head, helmet, weapon)
 	const CrowdClipData *reload = nullptr; // load_chosen_clip for the team's weapon
@@ -97,6 +123,10 @@ struct CrowdTeam {
 	// where the mask is 0). Both rig-sized; make() fails on a size mismatch. Null / empty: no fix.
 	const BoneMask *weapon_joints = nullptr;
 	std::span<const Xform> weapon_local;
+	// M2a w3 (W3.0 contract, docs/design/m2a.md §9, R5): the items of this team (<= kMaxCrowdWeapons). Empty: the
+	// fields above are the one weapon (S3). With items, CrowdSoldierInput::weapon picks one; an index past the end draws
+	// item 0 and is counted.
+	std::span<const CrowdWeapon> weapons;
 };
 
 // Per-frame counters of the last published job (reports and the G0 blend row, s3.md §1).
@@ -149,11 +179,38 @@ public:
 	std::span<const Xform> model(uint32_t p_i) const;
 	const CrowdFrameStats &stats() const;
 	uint64_t bad_inputs() const; // non-finite values replaced by set_inputs
+	// M2a w3 (W3.0 contract, docs/design/m2a.md §9; tp's body): the 3p muzzle of soldier p_i behind the front palette,
+	// in model space (the root is not applied, as palette()): the weapon's muzzle joint times its muzzle offset. False
+	// when the soldier's weapon has no muzzle joint, is hidden or was never evaluated. Published to the FX triggers
+	// after wait_and_publish.
+	bool muzzle_model(uint32_t p_i, Xform &r_model) const;
 
 private:
 	CrowdEvaluator();
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 };
+
+// ---- M2a w3 (W3.0 contract, docs/design/m2a.md §3, §16 Q11; docs/design/m2a-w3.md) --------------------------------
+
+// The crowd's pose lanes: S3's clamp(hardware_concurrency - 4, 2, 6), and with a listen server in the process M2a's
+// clamp(hardware_concurrency - 8, 2, kCrowdLanesListenMax) so the server thread keeps a core (a hardware_concurrency
+// of 0 counts as 2 lanes). kCrowdLanesListenMax is 4 until the integrator's quiet-machine rerun of godot.s3_crowd
+// with 4 lanes and a listen server; it becomes 5 if G1a's p99 there exceeds 2.0 ms (§3).
+inline constexpr uint32_t kCrowdLanesListenMax = 4;
+constexpr uint32_t crowd_lanes(uint32_t p_hardware_concurrency, bool p_listen_server) {
+	if (p_hardware_concurrency == 0) {
+		return 2;
+	}
+	const int64_t hc = int64_t(p_hardware_concurrency);
+	const int64_t want = p_listen_server ? hc - 8 : hc - 4;
+	const int64_t hi = p_listen_server ? int64_t(kCrowdLanesListenMax) : 6;
+	return uint32_t(want < 2 ? 2 : (want > hi ? hi : want));
+}
+// The wire's team (net::OtherSoldier::team, Spawned::team: 1 US, 2 RU, 0 unknown) to CrowdSoldierInput::team (0 US,
+// 1 RU); unknown draws as US.
+constexpr uint8_t crowd_team_of_wire(uint8_t p_wire_team) {
+	return p_wire_team == 2 ? uint8_t(1) : uint8_t(0);
+}
 
 } // namespace bf3::anim
