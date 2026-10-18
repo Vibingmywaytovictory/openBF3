@@ -2266,11 +2266,18 @@ void M2aCheck::State::build_play() {
 			}
 			// The ADS shot between bursts (the trigger up >= 0.15 s): no muzzle flash over the bot in the sight picture.
 			const bool between_bursts = std::fmod(cyc, 0.7) >= 0.55;
-			if (int(p_t / 8.0) % 2 == 1 && st.play_zoomed_since >= 0 && p_t - st.play_zoomed_since >= 0.4 && framed && between_bursts && nearer(1) &&
-					st.save_shot("gx_ads")) {
+			// M2a w3 integration: in the last 60 s (seven engagements, three of them aimed down the sights; one fall) a run that has
+			// framed no bot in the sights yet takes the ADS shot unframed, so the row does not hang on where the bots
+			// happen to stand (the merge pass's play run framed 0 in its ADS windows). Framed shots still re-take it; the
+			// row reports an unframed shot (retakes 0).
+			const bool ads_fallback = !st.play_shot_taken[1] && p_t >= T - 60.0;
+			if (int(p_t / 8.0) % 2 == 1 && st.play_zoomed_since >= 0 && p_t - st.play_zoomed_since >= 0.4 && between_bursts &&
+					((framed && nearer(1)) || ads_fallback) && st.save_shot("gx_ads")) {
 				st.play_shot_taken[1] = true;
 				st.play_shot_distance[1] = best;
-				++st.play_shot_retakes[1];
+				if (framed) {
+					++st.play_shot_retakes[1];
+				}
 			}
 		} else {
 			mp.m2a_script_hold(Action::Fire, false);
@@ -2384,8 +2391,9 @@ void M2aCheck::State::build_play() {
 		const uint32_t taken = uint32_t(std::count(st.play_shot_taken.begin(), st.play_shot_taken.end(), true));
 		st.row("play.screenshots", double(taken),
 				st.options.shots_dir.empty() ? "no --m2a-shots dir (reported)"
-											 : fmt("5 (hip, ADS, reload, firefight, death; the firefight bot at %.1f m, the ADS one at %.1f m, the nearest of %u / %u framed)",
-													   double(st.play_shot_distance[3]), double(st.play_shot_distance[1]), st.play_shot_retakes[3], st.play_shot_retakes[1]),
+											 : fmt("5 (hip, ADS, reload, firefight, death; the firefight bot at %.1f m, the ADS one at %.1f m, the nearest of %u / %u framed%s)",
+													   double(st.play_shot_distance[3]), double(st.play_shot_distance[1]), st.play_shot_retakes[3], st.play_shot_retakes[1],
+													   st.play_shot_taken[1] && st.play_shot_retakes[1] == 0 ? "; the ADS shot is the unframed fallback" : ""),
 				st.options.shots_dir.empty() || taken >= 5);
 		return true;
 	});
