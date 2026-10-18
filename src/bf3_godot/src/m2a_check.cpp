@@ -2254,10 +2254,15 @@ void M2aCheck::State::build_play() {
 			}
 			const bool framed = seen && best < 45.0f && st.g.crowd_built && st.centred(Vector3(aim[0], aim[1], aim[2]), 0.1f);
 			const auto nearer = [&](size_t p_k) { return best < st.play_shot_distance[p_k] - 4.0f && st.play_shot_retakes[p_k] < 8; };
-			if (cyc >= 6.5 && framed && nearer(3) && st.save_shot("gx_firefight")) {
+			// M2a w3 integration: the same unframed fallback as the ADS shot below (the merge pass's second play run framed
+			// no bot for either shot).
+			const bool firefight_fallback = !st.play_shot_taken[3] && p_t >= T - 60.0;
+			if (cyc >= 6.5 && ((framed && nearer(3)) || firefight_fallback) && st.save_shot("gx_firefight")) {
 				st.play_shot_taken[3] = true;
 				st.play_shot_distance[3] = best;
-				++st.play_shot_retakes[3];
+				if (framed) {
+					++st.play_shot_retakes[3];
+				}
 			}
 			if (!st.g.weapon.zoomed) {
 				st.play_zoomed_since = -1;
@@ -2393,7 +2398,9 @@ void M2aCheck::State::build_play() {
 				st.options.shots_dir.empty() ? "no --m2a-shots dir (reported)"
 											 : fmt("5 (hip, ADS, reload, firefight, death; the firefight bot at %.1f m, the ADS one at %.1f m, the nearest of %u / %u framed%s)",
 													   double(st.play_shot_distance[3]), double(st.play_shot_distance[1]), st.play_shot_retakes[3], st.play_shot_retakes[1],
-													   st.play_shot_taken[1] && st.play_shot_retakes[1] == 0 ? "; the ADS shot is the unframed fallback" : ""),
+													   std::string(st.play_shot_taken[3] && st.play_shot_retakes[3] == 0 ? "; the firefight shot is the unframed fallback" : "")
+															   .append(st.play_shot_taken[1] && st.play_shot_retakes[1] == 0 ? "; the ADS shot is the unframed fallback" : "")
+															   .c_str()),
 				st.options.shots_dir.empty() || taken >= 5);
 		return true;
 	});
