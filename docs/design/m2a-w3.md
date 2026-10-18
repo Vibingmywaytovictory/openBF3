@@ -26,22 +26,25 @@ one named change.
 | 414fa79 | G7: the member block in `level_session.h` (one named insertion) and the new `level_session_m2a.{h,cpp}` (empty `M2aSession`, no-op hooks) | §15 gx row, §3 |
 | fbf4b25 | G7: one tagged call per hook in `level_session.cpp` (named insertions) | §15 gx row |
 | 2043315 | `m2a.contract3` | §15.1 |
+| 3cc624e | review fix: named insertion in `crowd_eval.h`'s `CrowdEvaluator`: `weapon_of(i)`, `weapon_palette(i)` (declared, tp's body); `kNoCrowdWeapon` in the end block | §9, R5 |
+| f4cdb8b | review fix: tp's 3p weapon route. New `bf3/render/crowd_weapons.h` (`load_crowd_weapons` declared; `strip_team_weapon_parts`, `crowd_weapons_of`, `crowd_weapon_index` with bodies), the `# M2a w3` block in bf3_render's CMake, the route in `game_crowd.h`, `m2a.contract3` pins and a case | §9, R5, §13 |
 
-Every shared CMake file got one `# M2a w3` block at its end (bf3_host, bf3_audio, bf3_fx, bf3_godot, tests).
+Every shared CMake file got one `# M2a w3` block at its end (bf3_host, bf3_audio, bf3_fx, bf3_godot, bf3_render, tests).
 
 ### 1.1 Who writes which body
 
 | track | declared in W3.0, body theirs | stubs W3.0 wrote (theirs to replace) |
 |---|---|---|
 | bt | `firefight_layout`, `FirefightBrain`, `add_firefight_bots` | `firefight_brain.cpp`: succeeds without a config or with `count` 0, otherwise fails with "W3.0 stub", so a run that asks for bots before bt lands fails loudly |
-| tp | `CrowdEvaluator::muzzle_model`, R5 in `crowd_eval.cpp`, `Bf3GameCrowd` | none |
+| tp | `CrowdEvaluator::muzzle_model`, `weapon_of`, `weapon_palette`, R5 in `crowd_eval.cpp`, `load_crowd_weapons` (its new `src/bf3_render/src/crowd_weapons.cpp`, listed in its own `# M2a tp` CMake block), `Bf3GameCrowd` | none |
 | au3 | `SimMixerClock`, `load_weapon_audio`, `OneShotPool`, `WeaponAudioRouter`, `ImpactSoundCache`, `ImpactAudio`, `game_check_script`, `game_audition_items`, `GameAudioCheck`, `analyse_game_check`, `Bf3GameAudio` | none |
 | fx3 | `load_fire_effects`, `FireEffectTable::blueprints`, `impact_sound_names`, `impact_effect_names`, `fallback_muzzle`, `FxTriggers`, `Bf3GameFx`; it owns `viewmodel_muzzle.{h,cpp}` from now on | none |
 | gx | `M2aCheck`, every `m2a_*` hook body and `M2aSession`'s members | `level_session_m2a.cpp`: every hook does nothing |
 
 Written by the integrator with bodies: `present_other_weapon(s)`, `make_client_gunplay_inputs`, `present_clock`,
 `send_kit_select`, `set_other_team` and the G1 codec lines, `crowd_lanes`, `crowd_team_of_wire`, `sound_seed`,
-`trigger_seed`, `firefight_seed`, `parse_m2a_cases` and the case-name helpers, `viewmodel_muzzle_transform`.
+`trigger_seed`, `firefight_seed`, `parse_m2a_cases` and the case-name helpers, `viewmodel_muzzle_transform`,
+`strip_team_weapon_parts`, `crowd_weapons_of`, `crowd_weapon_index`.
 
 ## 2. The seven gaps (review §1.2), and what was decided
 
@@ -169,7 +172,41 @@ gx's `m2a_client_config` passes the result, so `restart_client` reuses one table
   - `crowd_lanes(hc, listen)` = clamp(hc - 8, 2, 4) with a listen server, else S3's clamp(hc - 4, 2, 6) (§16 Q11).
   - `CrowdEvaluator::muzzle_model(i, out)` publishes the muzzles. `Bf3GameCrowd::muzzles()` gives them to fx3 and au3
     as `fx::MuzzleSample`.
-  - The review's watch item (`crowd_eval.cpp` sizes every soldier's binds from team 0) is part of tp's R5.
+  - The review's watch item (`crowd_eval.cpp` sizes every soldier's binds from team 0) is part of tp's R5: size the
+    body buffers from the largest team's binds and the weapon buffers from the largest `CrowdWeapon::binds`.
+  - **tp's 3p weapon route** (closes review §1.1 row 1, the W3.0 review's blocking item). S3 bakes one weapon into
+    each team: it is the last `SoldierPart` of `SoldierTeam`, its binds are in the team's one `SkinBinds` list,
+    `SoldierSpec` names one weapon per team, and `SkinUploader::build` draws one combined mesh per team from
+    `SoldierTeam::parts`. tp owns neither `soldier_assets.*` nor `skin_upload.*`, so the route edits neither. This
+    is option (a) of the review. Option (b), named insertions in S3's loader and uploader, was not taken: each of
+    the uploader's backends would need a second mesh path, and S3's G0 / G1 rows would have to be re-proven.
+    1. Load: `load_soldier_assets` as S3 does, then `render::load_crowd_weapons` (new `crowd_weapons.h`, tp's body)
+       for every kit item of each team. Each item gets:
+       - its own `SkinBinds` (weaponske01 bound into the rig, with the `bind_lod` S3 uses for its weapon part);
+       - its mesh through `load_mesh_cached` and its materials through `mesh_materials`;
+       - its reload clip through `load_chosen_clip`, by its chooser index;
+       - the step-3 weapon layout;
+       - the 3p muzzle: Wep_Root and the FireEffects3p offset, as G6 does for 1p.
+       Item 0 of each team is the team's `SoldierSpec` weapon, so index 0 keeps S3's meaning. Every primitive the
+       loader needs is public (`mesh_cache.h`, `material_lookup.h`, `skinning.h`, `crowd_clips.h`).
+    2. `render::strip_team_weapon_parts(assets)` (body in W3.0) removes the weapon `SoldierPart` before
+       `SkinUploader::build`. The team meshes then hold body, head and helmet only. The team binds, and so
+       `palette(i)`, keep their layout. The default weapon's few binds are still posed, but no drawn vertex reads
+       them.
+    3. `render::crowd_weapons_of(set, team)` gives the `CrowdTeam::weapons` views for `CrowdEvaluator::make`.
+       `render::crowd_weapon_index(set, team, def)` is the def to `CrowdSoldierInput::weapon` table. It returns -1
+       for an unknown def; the soldier then draws item 0 and `GameCrowdStats::unknown_weapons` counts it.
+    4. The evaluator output (named insertion 3cc624e, tp's body):
+       - `weapon_of(i)`: the item behind the front palette, or `kNoCrowdWeapon` without one;
+       - `weapon_palette(i)`: one `Mat34` per bind of that item's `binds`, model space, in the same per-soldier
+         double buffer and under the same `changed(i)` flag as `palette(i)`.
+    5. Draw: tp's own code in `game_crowd.cpp`. It makes one RS mesh per item, and per soldier one instance and one
+       RS skeleton sized from its item's binds. When `weapon_of(i)` changes, the instance is re-based and the
+       skeleton re-allocated (`GameCrowdStats::weapon_rebases`). The bones come from `weapon_palette(i)` when
+       `changed(i)`, as the RS backend does for the body.
+    The m2a.md §13 budget line "3p weapon meshes (14) ≈ 30 MiB" covers these items. The weapon skeletons add about
+    5 to 8 bone calls per drawn soldier to the RS backend's 107-113 [inferred from s3.md's bind counts]. tp
+    reports the measured cost inside E14.
 * **bt** (`firefight_brain.h`): see G3. The functional 64-bot row is registered as its own ctest,
   `host.gunplay.firefight`, outside build.cmd's TIMING regex (review R6).
 * **gx** (`m2a_check.h`, `m2a_game.h`, the G7 hooks):
@@ -198,7 +235,8 @@ classes. They have no editor surface, the session drives every call, and an unre
 | R2: parallel tracks need G1-G7 | closed by G1-G7 |
 | `CrowdWeapon` without weapon joints or a muzzle joint | closed: `weapon_joints`, `weapon_local`, `muzzle_joint`, `muzzle_offset` |
 | the wire's team 1 / 2 against the crowd's 0 / 1 | closed: `crowd_team_of_wire` (m2a.contract3 pins it) |
-| def id to the crowd weapon index | assigned: Bf3GameCrowd (tp), per team |
+| `CrowdWeapon` / `CrowdTeam::weapons`: the weapon is baked into each team's combined mesh, and tp owns neither `soldier_assets.*` nor `skin_upload.*` (row 1; the W3.0 review's blocking item) | closed: tp's 3p weapon route (§3): `crowd_weapons.h` (`load_crowd_weapons` is tp's; `strip_team_weapon_parts`, `crowd_weapons_of`), `CrowdEvaluator::weapon_of` / `weapon_palette` (named insertion), and tp's own weapon draw in `game_crowd.cpp`; no S3 file is edited |
+| def id to the crowd weapon index | closed: `render::crowd_weapon_index` (body in W3.0); Bf3GameCrowd (tp) fills the specs' defs |
 | 3p muzzle output | closed: `CrowdEvaluator::muzzle_model`, `Bf3GameCrowd::muzzles`, `fx::MuzzleSample`, `audio::MuzzlePoint` |
 | `FirefightConfig` in full, the server hook, the dead-slot rule | closed (G3) |
 | a dead bot's source is still called every tick | documented for bt: the brain checks the slot is alive |
@@ -220,6 +258,37 @@ classes. They have no editor surface, the session drives every call, and an unre
 | playability (review §2: mouse capture, own death, kill counter, friend / foe, respawn time, kit / team, def to item, launch, free camera, capsules first) | gx's spec; W3.0 provides the team (G1), runtime KitSelect (G4), `respawn_ticks` through `m2a_server_config`, the per-frame hooks and the own-alive flag in `M2aFrame` |
 | R3-R5, R7, R9-R11 | script-level (merge order, filters, reviewers); not W3.0's |
 | no CMake test enforces VFX4 (no server module links bf3_fx) | still true; bf3_fx and bf3_audio now link bf3_host, never the reverse |
+| the W3.0 review's non-blocking notes | recorded in §4.1 |
+
+### 4.1 Notes from the W3.0 review (non-blocking)
+
+* **gx, `input_mapper.{h,cpp}`.** Several of gx's input changes alter lines inside existing functions:
+  - the fire / ADS / reload / slot / K / T actions;
+  - the click that captures the mouse, which must not fire (`input_mapper.cpp`'s left click);
+  - `fire_presses` in `InputMapper::sample()`.
+
+  Each is a gx named insertion in its own commit, named in the message. m2a.md §15 already gives gx the file. If a
+  change cannot be made as an insertion, there is a fallback: the `m2a_presented` hook runs after `set_input`, so gx
+  can call `set_input` again with an augmented sample.
+* **Effect sounds (fx3 and au3).** `ImpactAudio::on_effect_sound` takes FxEvent SoundStart / SoundStop (m2a.md
+  §12.3). But `Bf3GameFx` exposes only `sound_cues()`, and `Bf3GameAudio::step` takes only impact cues. Both
+  headers belong to their owners:
+  - fx3 adds an accessor for the frame's effect-sound events to `game_fx.h`;
+  - au3 adds a matching `step` parameter to `game_audio.h`;
+  - they agree on it before au3's merge, and gx passes it in its frame hook.
+* **G4 timing (gx).** `send_kit_select` drains on every client loop, including before the server has assigned the
+  slot. `sv_kit_select` then counts the message in `bad_datagrams` and drops it. So gx sends runtime KitSelects
+  only after `Spawned`; the kit at start still goes with Ready. That keeps the E14 / E17 `bad_datagrams` gates
+  clean. m2a.contract3's G4 row checks only that queueing before start neither crashes nor sends.
+* **Capsules (gx).** M1's `draw_others` capsules keep drawing after tp lands. gx hides that node in `m2a_frame`
+  once `Bf3GameCrowd::built()` is true (stated in `game_crowd.h`).
+* **Commit granularity.** b9915b3 put three named insertions into `crowd_eval.h` in one commit: the
+  `CrowdSoldierInput` fields, `CrowdTeam::weapons` and `CrowdEvaluator::muzzle_model`. Its message names each one.
+  The review fix 3cc624e is one commit for one insertion.
+* **`FirefightConfig::count` = 64** (m2a.md §10.2). With an observer client, the player lands in slot 64, outside
+  sv's `kMaxLagSlots`. See the gx row in §4: the playable default stays at 32 bots or fewer.
+* **G1 capacity.** A SnapshotOthers holds 52 others, and a Snapshot about 42 with the own state and a kit. That is
+  ample for 64 slots; it would only matter at 128.
 
 ## 5. m2a.contract3
 
@@ -236,6 +305,7 @@ classes. They have no editor surface, the session drives every call, and an unre
   - the limits: 32 / 64 / 96, 256 decals, 30 s fade, 30 m tracer, the six E7 distances, 8 crowd weapons, 4 listen
     lanes;
   - the lane rule at 0, 2, 4, 8, 10, 11, 12 and 16 cores, and the team map;
+  - `kNoCrowdWeapon` 0xFF and the member types of `CrowdEvaluator::weapon_of`, `weapon_palette` and `muzzle_model`;
   - the seed hashes: `sound_seed(7, 5)` = 0xf90639b22b02a930, `sound_seed(0, 0)` = 0xe220a8397b1dcdaf, four
     `trigger_seed` values, `firefight_seed`, and cl's `effect_seed(0x5EED5EED12345678, 3, 42)` = 0xb5be2a90e372ab24.
 * Functional rows:
@@ -246,7 +316,12 @@ classes. They have no editor surface, the session drives every call, and an unre
   - G3: init without a config, with count 0, and with 4 free-mode bots (the stub refuses with "W3.0 stub" until bt);
   - G4: 40 `send_kit_select` calls before start, then stop;
   - G5: a synthetic level without gunplay is refused with the switch's name;
-  - the case parser with 10 hostile command lines.
+  - the case parser with 10 hostile command lines;
+  - tp's route:
+    - `strip_team_weapon_parts` on a synthetic two-team asset set: two parts removed, then none (idempotent), and
+      the vertex and triangle totals;
+    - `crowd_weapons_of` on ten items: it stops at 8, with the reload, weapon-joint and muzzle views;
+    - `crowd_weapon_index`: hits, an item past 8, an unknown team.
 * Pending switches: `kBtLanded`, `kTpLanded`, `kAu3Landed`, `kFx3Landed`. Each owner sets its switch in the commit
   that lands the body. au3's row then checks SimMixerClock on the two timelines; fx3's checks the triggers on an empty
   frame; bt's checks that init adds the bots.
