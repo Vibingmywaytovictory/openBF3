@@ -1196,7 +1196,7 @@ endforeach()
 # defaults, the lane rule and the seed hashes, plus G1-G5 and the check's case parser. Rows that need a track's body
 # print PENDING until the track sets its switch. No install; a contract row (<= 2 s).
 openbf3_test(test_m2a_contract3 test_main.cpp m2a_contract3_tests.cpp gunplay_fixture.h test_support.h)
-target_link_libraries(test_m2a_contract3 PRIVATE bf3_host bf3_anim bf3_fx bf3_audio)
+target_link_libraries(test_m2a_contract3 PRIVATE bf3_host bf3_anim bf3_fx bf3_audio bf3_render)
 target_include_directories(test_m2a_contract3 PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
 target_compile_definitions(test_m2a_contract3 PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
 add_test(NAME m2a.contract3 COMMAND test_m2a_contract3 --test-suite=m2a-contract3)

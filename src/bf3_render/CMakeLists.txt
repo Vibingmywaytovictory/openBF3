@@ -66,3 +66,9 @@ target_sources(bf3_render PRIVATE
 target_sources(bf3_render PRIVATE
     src/viewmodel_set.cpp
 )
+
+# M2a w3 (W3.0 contract, docs/design/m2a-w3.md §3 "tp's 3p weapon route"): the crowd's per-item 3p weapons (tp writes
+# load_crowd_weapons in its own block; the header's inline helpers need no source).
+target_sources(bf3_render PRIVATE
+    include/bf3/render/crowd_weapons.h
+)

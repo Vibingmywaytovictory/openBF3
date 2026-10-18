@@ -36,6 +36,7 @@
 #include "bf3/host/presentation_events.h"
 #include "bf3/net/other_sample.h"
 #include "bf3/net/protocol.h"
+#include "bf3/render/crowd_weapons.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "m2a_check.h"
 #include "m2a_game.h"
@@ -108,6 +109,12 @@ static_assert(audio::kMaxWeaponVoices == 32 && audio::kMaxOneShotVoices == 64 &&
 static_assert(fx::kMaxDecals == 256 && fx::kDecalFadeSeconds == 30.0f && fx::kTracerConvergeM == 30.0f);
 static_assert(audio::kGameCheckDistances == std::array<float, 6>{ 5.0f, 20.0f, 100.0f, 150.0f, 280.0f, 320.0f });
 static_assert(anim::kMaxCrowdWeapons == 8 && anim::kCrowdLanesListenMax == 4);
+// tp's 3p weapon route (m2a-w3.md §3): the evaluator's weapon outputs, by type (unevaluated: no body needed yet).
+static_assert(anim::kNoCrowdWeapon == 0xFF);
+static_assert(std::is_same_v<decltype(&anim::CrowdEvaluator::weapon_of), uint8_t (anim::CrowdEvaluator::*)(uint32_t) const>);
+static_assert(std::is_same_v<decltype(&anim::CrowdEvaluator::weapon_palette),
+		std::span<const anim::Mat34> (anim::CrowdEvaluator::*)(uint32_t) const>);
+static_assert(std::is_same_v<decltype(&anim::CrowdEvaluator::muzzle_model), bool (anim::CrowdEvaluator::*)(uint32_t, anim::Xform &) const>);
 
 // The crowd lane rule (§3, §16 Q11): S3 alone clamp(hc - 4, 2, 6); with a listen server clamp(hc - 8, 2, 4); 0
 // reported cores count as 2 lanes.
@@ -416,6 +423,63 @@ TEST_SUITE("m2a-contract3") {
 		}
 	}
 
+	TEST_CASE("m2a.contract3: tp's 3p weapon route: strip the team weapon part, CrowdTeam::weapons views, def -> index") {
+		render::SoldierAssets assets;
+		for (render::SoldierTeam &team : assets.teams) {
+			render::SoldierPart body;
+			body.prepared.vertices = 100;
+			body.prepared.triangles = 50;
+			render::SoldierPart weapon;
+			weapon.weapon = true;
+			weapon.prepared.vertices = 30;
+			weapon.prepared.triangles = 20;
+			team.parts.push_back(body);
+			team.parts.push_back(weapon);
+			team.vertices = 130;
+			team.triangles = 70;
+		}
+		CHECK(render::strip_team_weapon_parts(assets) == 2);
+		CHECK(render::strip_team_weapon_parts(assets) == 0); // idempotent
+		for (const render::SoldierTeam &team : assets.teams) {
+			REQUIRE(team.parts.size() == 1);
+			CHECK_FALSE(team.parts[0].weapon);
+			CHECK(team.vertices == 100);
+			CHECK(team.triangles == 50);
+		}
+
+		render::CrowdWeaponSet set;
+		for (uint16_t d = 0; d < 10; ++d) { // more than kMaxCrowdWeapons: the views stop at 8
+			render::CrowdWeaponPart part;
+			part.spec.def = uint16_t(100 + d);
+			part.have_reload = (d % 2) == 0;
+			part.reload_rate = 1.0f + float(d);
+			part.muzzle_joint = int32_t(d);
+			part.weapon_local.assign(3, anim::xform_identity());
+			if (d == 1) {
+				part.weapon_joints.weight.assign(3, 1.0f);
+			}
+			set.teams[0].push_back(std::move(part));
+		}
+		const std::vector<anim::CrowdWeapon> us = render::crowd_weapons_of(set, 0);
+		REQUIRE(us.size() == anim::kMaxCrowdWeapons);
+		CHECK(us[0].binds == &set.teams[0][0].binds);
+		CHECK(us[0].reload == &set.teams[0][0].reload);
+		CHECK(us[1].reload == nullptr);
+		CHECK(us[0].weapon_joints == nullptr);
+		CHECK(us[1].weapon_joints == &set.teams[0][1].weapon_joints);
+		CHECK(us[3].reload_rate == 4.0f);
+		CHECK(us[5].muzzle_joint == 5);
+		CHECK(us[2].weapon_local.size() == 3);
+		CHECK(render::crowd_weapons_of(set, 1).empty());
+		CHECK(render::crowd_weapons_of(set, 2).empty());
+		CHECK(render::crowd_weapon_index(set, 0, 100) == 0);
+		CHECK(render::crowd_weapon_index(set, 0, 107) == 7);
+		CHECK(render::crowd_weapon_index(set, 0, 108) == -1); // past kMaxCrowdWeapons
+		CHECK(render::crowd_weapon_index(set, 1, 100) == -1);
+		CHECK(render::crowd_weapon_index(set, 5, 100) == -1);
+		CHECK(set.texture("none") == nullptr);
+	}
+
 	TEST_CASE("m2a.contract3: the tracks' bodies (pending until each lands)") {
 		if constexpr (kAu3Landed) {
 			// SimMixerClock: an Immediate event and a Predicted event in the past map to earliest_frame(), the latter
@@ -448,9 +512,9 @@ TEST_SUITE("m2a-contract3") {
 			pending("fx3", "FxTriggers on an empty frame", "triggers.cpp is fx3's");
 		}
 		if constexpr (kTpLanded) {
-			MESSAGE("tp: CrowdEvaluator::muzzle_model is covered by anim.s3.unit's two-weapon block");
+			MESSAGE("tp: CrowdEvaluator::muzzle_model, weapon_of, weapon_palette and load_crowd_weapons are covered by anim.s3.unit's two-weapon block");
 		} else {
-			pending("tp", "CrowdEvaluator::muzzle_model", "crowd_eval.cpp's muzzle body is tp's");
+			pending("tp", "CrowdEvaluator::muzzle_model, weapon_of, weapon_palette; load_crowd_weapons", "crowd_eval.cpp's bodies and crowd_weapons.cpp are tp's");
 		}
 	}
 }

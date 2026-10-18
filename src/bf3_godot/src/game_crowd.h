@@ -3,22 +3,29 @@
 // contract, docs/design/m2a-w3.md). The S3 glue of s3_crowd.cpp (loader, team wiring, lanes, evaluator, uploader,
 // step, shutdown) rebuilt for the level session: Bf3Crowd's members are private to the S3 check node, so this is a
 // new class, and S3's files are not touched. A plain class owned by the level session (gx).
-//   load   loader thread, no Godot API: bf3::render::load_soldier_assets for both teams, every kit item's 3p weapon
-//          (anim::CrowdWeapon per team: binds, reload clip, weapon joints, muzzle joint), the crowd clips (stance via
-//          lc's ServerPoseClipNames, sneak / crawl, fire, death)
+//   load   loader thread, no Godot API: bf3::render::load_soldier_assets for both teams, then
+//          bf3::render::load_crowd_weapons for every kit item's 3p weapon (crowd_weapons.h: its own mesh and SkinBinds,
+//          reload clip, weapon joints, muzzle joint) and strip_team_weapon_parts, so the team meshes hold the body,
+//          head and helmet only; the crowd clips (stance via lc's ServerPoseClipNames, sneak / crawl, fire, death)
 //   build  main thread: the CrowdEvaluator on anim::crowd_lanes(hardware_concurrency, true) lanes (§3, §16 Q11: a
-//          listen server; the 4-lane re-measure is the integrator's), the SkinUploader's meshes under p_parent
+//          listen server; the 4-lane re-measure is the integrator's) with CrowdTeam::weapons = crowd_weapons_of(set,
+//          team); S3's SkinUploader (RS backend) for the stripped team meshes under p_parent; and tp's own weapon
+//          draw in game_crowd.cpp: one RS mesh per item, per soldier one instance and one RS skeleton sized from the
+//          item's binds, re-based when CrowdEvaluator::weapon_of changes and fed from weapon_palette (S3's
+//          soldier_assets.* and skin_upload.* stay untouched; m2a-w3.md §3 "tp's 3p weapon route")
 //   step   main thread, every display frame (m2a_game.h order: before the FX and the audio): M2aFrame::others and
 //          other_weapons -> CrowdSoldierInput (team = anim::crowd_team_of_wire(team), weapon = the CrowdTeam::weapons
-//          index of the def, fire_seq from burst_seq / firing changes, ads, dead from the life), publish, upload, kick;
+//          index of the def (render::crowd_weapon_index), fire_seq from burst_seq / firing changes, ads, dead from the life), publish, upload, kick;
 //          then muzzles() for this frame
-// Until tp lands, the session keeps drawing capsules (draw_others) and the FX / audio use fx::fallback_muzzle.
+// Until tp lands, the session keeps drawing capsules (draw_others) and the FX / audio use fx::fallback_muzzle. Once
+// built() is true, gx hides M1's draw_others capsule node in its m2a_frame hook (it runs after draw_others).
 
 #include "m2a_game.h"
 
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/core/result.h"
 #include "bf3/fx/triggers.h"
+#include "bf3/render/crowd_weapons.h"
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +43,8 @@ struct GameCrowdStats {
 	uint32_t soldiers = 0; // drawn this frame
 	uint32_t muzzles = 0; // valid muzzles this frame
 	uint32_t unknown_weapons = 0; // a def with no CrowdWeapon for the team (drawn with weapon index 0)
+	uint32_t weapon_instances = 0; // soldiers drawn with a separate 3p weapon mesh this frame
+	uint32_t weapon_rebases = 0; // weapon meshes switched this frame (weapon_of changed)
 	uint64_t frames = 0;
 	uint64_t frozen_frames = 0; // the pose job was not done in time (published last frame's)
 };
