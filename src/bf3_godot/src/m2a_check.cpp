@@ -1520,8 +1520,9 @@ void M2aCheck::State::kit_deploy(const std::string &p_tag, uint8_t p_team, uint8
 }
 
 // E1 (every other kit firearm, once per def): automatic fire held for 6 shots, every gap == the automatic mode's
-// interval; a weapon without an automatic mode tapped every other display frame (faster than its interval), every gap
-// >= the mode's interval and the smallest == it (W1's M9 rule).
+// interval; a weapon without an automatic mode tapped once every 2 ticks (a press needs a tick with the trigger up
+// before it, and a remembered press needs the trigger held, weapon_sim.cpp), so the interval is what limits it:
+// every gap >= the mode's interval (W1's M9 rule "at least") and the smallest within the 2-tick tap period of it.
 void M2aCheck::State::kit_gaps(const std::string &p_tag, uint8_t p_slot) {
 	(void)p_tag;
 	add(fmt("gaps %u", unsigned(p_slot)), 8.0, [](State &st, double p_t, bool p_first) {
@@ -1564,8 +1565,9 @@ void M2aCheck::State::kit_gaps(const std::string &p_tag, uint8_t p_slot) {
 			}
 			if (automatic) {
 				st.mapper().m2a_script_hold(Action::Fire, true);
-			} else if (++st.taps % 2 == 1) {
+			} else if (p_t - st.t_mark >= 2.0 / double(sim::kSimHz) - 1e-4) {
 				st.mapper().m2a_script_press(Action::Fire);
+				st.t_mark = p_t;
 			}
 			return false;
 		}
@@ -1591,11 +1593,12 @@ void M2aCheck::State::kit_gaps(const std::string &p_tag, uint8_t p_slot) {
 			at_least += gap >= mode.interval ? 1 : 0;
 		}
 		const size_t gaps = pred.empty() ? 0 : pred.size() - 1;
-		const bool ok = gaps >= 4 && (automatic ? equal == gaps : (at_least == gaps && min_gap == mode.interval));
+		const sw::SimTime tap_period = 2 * sw::kTimeUnitsPerTick;
+		const bool ok = gaps >= 4 && (automatic ? equal == gaps : (at_least == gaps && min_gap <= mode.interval + tap_period));
 		const std::string leaf = d->variant.empty() ? fmt("def%u", unsigned(def_id)) : short_unlock(d->variant);
 		st.row("e1.gaps." + leaf, double(min_gap),
 				fmt("%s: %zu gaps, %s the mode's interval %" PRId64 " units (min %" PRId64 ", max %" PRId64 ")", automatic ? "held automatic" : "tapped single", gaps,
-						automatic ? "every one ==" : "every one >= and the smallest ==", int64_t(mode.interval), int64_t(min_gap), int64_t(max_gap)),
+						automatic ? "every one ==" : "every one >= and the smallest within the 2-tick tap period of", int64_t(mode.interval), int64_t(min_gap), int64_t(max_gap)),
 				ok);
 		const size_t serv = st.g.server_shots.size() - st.mark_server;
 		st.row("e1.gaps." + leaf + ".server", double(serv), "the server fired the same shots", serv == pred.size());
@@ -1616,8 +1619,15 @@ void M2aCheck::State::kit_fire_reload(const std::string &p_tag, uint8_t p_slot) 
 	add(tag + " fire clip", 1.0, [tag](State &st, double, bool) {
 		const size_t serv = st.g.server_shots.size() - st.mark_server, pred = st.g.predicted_shots.size() - st.mark_predicted;
 		st.row(tag + ".fires", double(serv), "one shot (server and predicted)", serv == 1 && pred == 1);
+		// The item's fire is a clip (the action layer draws Fire / FireSingle) or vm's procedural kick stand-in (no
+		// action clip: the Shot cue drives the kick springs; viewmodel_coverage counts it).
+		const Bf3Viewmodel *vm = st.g.own_viewmodel();
+		const bf3::render::ViewmodelItem *item = vm != nullptr ? vm->current_item() : nullptr;
+		const bool kick = item != nullptr && bf3::render::viewmodel_coverage(*item).entries[1].source == bf3::render::ViewmodelClipSource::ProceduralStandIn;
 		const uint32_t fire = (1u << uint32_t(bf3::anim::VmClip::Fire)) | (1u << uint32_t(bf3::anim::VmClip::FireSingle));
-		st.row(tag + ".fire_clip", (st.clips_seen & fire) != 0 ? 1.0 : 0.0, "the viewmodel drew a Fire / FireSingle clip (or stand-in)", (st.clips_seen & fire) != 0);
+		const bool drawn = kick ? st.g.vm_shot_cues > st.mark_cues : (st.clips_seen & fire) != 0;
+		st.row(tag + ".fire_clip", drawn ? 1.0 : 0.0,
+				kick ? "the viewmodel took the shot cue on its procedural kick stand-in (no fire clip)" : "the viewmodel drew its Fire / FireSingle clip", drawn);
 		return true;
 	});
 	add(tag + " reload", 8.0, [](State &st, double p_t, bool p_first) {
@@ -1665,12 +1675,19 @@ void M2aCheck::State::kit_knife(const std::string &p_tag) {
 		return p_t >= 1.5 && st.ready();
 	});
 	add(tag + " knife rows", 1.0, [tag](State &st, double, bool) {
-		uint32_t hits = 0;
+		// The knife hit is the server DamageEvent on the target bot; it is applied only when the bot is an enemy (the
+		// target bot is on the run team other than --team, so it is a teammate of the RU loadouts: friendly fire off).
+		uint32_t hits = 0, applied = 0;
 		for (size_t i = st.mark_damage; i < st.g.server_damage.size(); ++i) {
 			const M2aServerRecorder::Damage &d = st.g.server_damage[i];
-			hits += d.event.attacker_slot == st.g.own_slot && d.event.target == 0 && d.applied ? 1 : 0;
+			if (d.event.attacker_slot == st.g.own_slot && d.event.target == 0) {
+				++hits;
+				applied += d.applied ? 1 : 0;
+			}
 		}
-		st.row(tag + ".knife_hit", double(hits), "the knife hit the target bot (server damage applied)", hits >= 1);
+		const bool mate = st.g.own_team != st.g.team;
+		st.row(tag + ".knife_hit", double(hits), fmt("the knife hit the target bot (server DamageEvents; %u applied: the bot is %s)", applied, mate ? "a teammate" : "an enemy"),
+				hits >= 1 && (mate || applied >= 1));
 		const uint32_t clip = 1u << uint32_t(bf3::anim::VmClip::Knife);
 		st.row(tag + ".fire_clip", (st.clips_seen & clip) != 0 ? 1.0 : 0.0, "the viewmodel drew its Knife clip (or stand-in)", (st.clips_seen & clip) != 0);
 		st.events_equal_row(tag + ".events_equal");
@@ -1686,6 +1703,7 @@ void M2aCheck::State::kit_m67(const std::string &p_tag) {
 	add(tag + " throw", 8.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
 			st.mark();
+			st.counter = uint32_t(st.g.server_detonations.size());
 			st.detonation_time = -1;
 			st.mapper().script_view(st.mapper().view().yaw, float(25.0 * kPi / 180.0));
 			st.mapper().m2a_script_hold(Action::Fire, true);
@@ -1695,7 +1713,7 @@ void M2aCheck::State::kit_m67(const std::string &p_tag) {
 		}
 		for (const host::PresentEvent &e : st.g.events) {
 			if (e.kind == host::PresentKind::Detonation && e.slot == st.g.own_slot && st.detonation_time < 0) {
-				st.detonation_time = e.time; // the server's DetonationEvent time (DetonationWire::time)
+				st.detonation_time = e.time; // the presented Detonation (DetonationWire::time, quantized on the wire)
 			}
 		}
 		return p_t >= 5.5;
@@ -1713,12 +1731,23 @@ void M2aCheck::State::kit_m67(const std::string &p_tag) {
 		}
 		const sw::WeaponSimDef *d = st.def(def_id);
 		st.row(tag + ".m67_thrown", thrown >= 0 ? 1.0 : 0.0, "the M67 left the hand (server shot on slot 6)", thrown >= 0);
-		const sw::SimTime fuse = thrown >= 0 && st.detonation_time >= 0 ? st.detonation_time - spawned : -1;
+		// The server's own DetonationEvent of that shot (M2aServerRecorder::projectiles), not the wire's copy.
+		sw::SimTime detonated = -1;
+		for (size_t i = st.counter; i < st.g.server_detonations.size(); ++i) {
+			if (thrown >= 0 && st.g.server_detonations[i].event.def == def_id) {
+				detonated = st.g.server_detonations[i].event.time;
+				break;
+			}
+		}
+		st.row(tag + ".m67_presented", st.detonation_time >= 0 && detonated >= 0 ? double(st.detonation_time - detonated) : -1e9,
+				"the client presented the Detonation (units off the server time: the wire quantizes to 1/65536 tick, <= 16)",
+				st.detonation_time >= 0 && detonated >= 0 && std::llabs(int64_t(st.detonation_time - detonated)) <= 16);
+		const sw::SimTime fuse = thrown >= 0 && detonated >= 0 ? detonated - spawned : -1;
 		const sw::SimTime want = sw::SimTime(std::llround(3.6 * double(sw::kTimeUnitsPerSecond)));
 		st.row(tag + ".m67_fuse_s", fuse >= 0 ? sw::units_to_seconds(fuse) : -1.0,
 				fmt("DetonationEvent - ShotEvent::spawn_time == 3.6 s exactly (%" PRId64 " units; the def's TimeToLive %" PRId64 "); release to detonation %.4f s",
 						int64_t(fuse), d != nullptr ? int64_t(d->projectile.time_to_live) : int64_t(-1),
-						thrown >= 0 && st.detonation_time >= 0 ? sw::units_to_seconds(st.detonation_time - thrown) : -1.0),
+						thrown >= 0 && detonated >= 0 ? sw::units_to_seconds(detonated - thrown) : -1.0),
 				fuse == want && d != nullptr && fuse == d->projectile.time_to_live);
 		const uint32_t clip = 1u << uint32_t(bf3::anim::VmClip::Throw);
 		st.row(tag + ".fire_clip", (st.clips_seen & clip) != 0 ? 1.0 : 0.0, "the viewmodel drew its Throw clip (or stand-in)", (st.clips_seen & clip) != 0);

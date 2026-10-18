@@ -99,8 +99,16 @@ public:
 	void weapon_tick(uint8_t p_slot, const bf3::sim::Command &p_command, const bf3::sim::weapons::SoldierWeaponsState &p_after,
 			const bf3::sim::weapons::WeaponTickOutput &p_out) override;
 	void damage(uint32_t p_tick, const bf3::sim::weapons::DamageEvent &p_event, bool p_applied, float p_health_after) override;
+	// The watched slot's detonations at the server's exact times (E11's M67 fuse: the wire's DetonationWire time is
+	// quantized to 1/65536 tick, protocol.h).
+	struct Detonation {
+		uint32_t tick = 0;
+		bf3::sim::weapons::DetonationEvent event;
+	};
+	void projectiles(uint32_t p_tick, const bf3::sim::weapons::ProjectileStepOutput &p_out, std::span<const bf3::sim::weapons::Projectile> p_live) override;
 	// Moves everything recorded since the last call out (appends).
 	void take(std::vector<Shot> &r_shots, std::vector<Timed> &r_timed, std::vector<Damage> &r_damage);
+	void take_detonations(std::vector<Detonation> &r_detonations);
 	uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
 
 private:
@@ -110,6 +118,7 @@ private:
 	std::vector<Shot> shots_;
 	std::vector<Timed> timed_;
 	std::vector<Damage> damage_;
+	std::vector<Detonation> detonations_;
 };
 
 // What the M2a session keeps between frames, and what the check reads (main thread unless marked).
@@ -198,6 +207,7 @@ struct M2aGame {
 	std::vector<M2aServerRecorder::Shot> server_shots;
 	std::vector<M2aServerRecorder::Timed> server_timed;
 	std::vector<M2aServerRecorder::Damage> server_damage;
+	std::vector<M2aServerRecorder::Detonation> server_detonations; // the own slot's (bounded like server_damage)
 	uint64_t events_drained = 0;
 	uint64_t frames = 0;
 

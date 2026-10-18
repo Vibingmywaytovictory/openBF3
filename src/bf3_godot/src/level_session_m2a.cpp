@@ -195,6 +195,31 @@ void M2aServerRecorder::damage(uint32_t p_tick, const sw::DamageEvent &p_event, 
 	damage_.push_back({ p_tick, p_event, p_applied, p_health_after });
 }
 
+void M2aServerRecorder::projectiles(uint32_t p_tick, const sw::ProjectileStepOutput &p_out, std::span<const sw::Projectile> p_live) {
+	(void)p_live;
+	const int slot = slot_.load(std::memory_order_acquire);
+	if (p_out.detonations.empty() || slot < 0) {
+		return;
+	}
+	std::lock_guard lock(mutex_);
+	for (const sw::DetonationEvent &d : p_out.detonations) {
+		if (int(d.player_slot) != slot) {
+			continue;
+		}
+		if (detonations_.size() >= kMaxRecords) {
+			dropped_.fetch_add(1, std::memory_order_relaxed);
+			continue;
+		}
+		detonations_.push_back({ p_tick, d });
+	}
+}
+
+void M2aServerRecorder::take_detonations(std::vector<Detonation> &r_detonations) {
+	std::lock_guard lock(mutex_);
+	r_detonations.insert(r_detonations.end(), detonations_.begin(), detonations_.end());
+	detonations_.clear();
+}
+
 void M2aServerRecorder::take(std::vector<Shot> &r_shots, std::vector<Timed> &r_timed, std::vector<Damage> &r_damage) {
 	std::lock_guard lock(mutex_);
 	r_shots.insert(r_shots.end(), shots_.begin(), shots_.end());
@@ -600,6 +625,10 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 	}
 	if (g.recorder != nullptr) {
 		g.recorder->take(g.server_shots, g.server_timed, g.server_damage);
+		g.recorder->take_detonations(g.server_detonations);
+		if (g.server_detonations.size() > kMaxPredictedKept) {
+			g.server_detonations.clear();
+		}
 		if (!g.record_predicted) {
 			g.server_shots.clear();
 			g.server_timed.clear();
