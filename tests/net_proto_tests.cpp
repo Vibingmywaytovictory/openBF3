@@ -923,8 +923,8 @@ TEST_SUITE("net-proto") {
 		auto dn = net::decode_snapshot(net::encode_snapshot(s, &dropped));
 		REQUIRE(dn);
 		CHECK_FALSE(dn->own.has_value());
-		CHECK(dn->others.size() == 53);
-		CHECK(dropped == 127 - 53);
+		CHECK(dn->others.size() == 52); // M2a w3 (G1): 52 with the 2 team bits (nt v2: 53)
+		CHECK(dropped == 127 - 52); // M2a w3 (G1)
 	}
 
 	TEST_CASE("proto: snapshot invariants and hostile snapshots") {
@@ -2349,8 +2349,8 @@ TEST_SUITE("net-proto") {
 		const size_t so_cap = net::decode_snapshot_others(net::encode_snapshot_others(many, &dropped))->others.size();
 		MESSAGE("others per datagram: Snapshot with own state ", without, ", without own state ", no_own, ", SnapshotOthers ", so_cap);
 		CHECK(without == 49);
-		CHECK(so_cap == 53);
-		CHECK(dropped == 127 - 53);
+		CHECK(so_cap == 52); // M2a w3 (G1): 52 with the 2 team bits (nt v2: 53)
+		CHECK(dropped == 127 - 52); // M2a w3 (G1)
 	}
 
 	TEST_CASE("proto v2: set_other_weapon masks to the wire widths; others' weapon fields round trip") {
@@ -2945,5 +2945,43 @@ TEST_SUITE("net-proto") {
 		nan.timers[0].spread = std::numeric_limits<float>::quiet_NaN();
 		s.own_weapons = nan;
 		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(s)));
+	}
+}
+
+// M2a w3 (G1, docs/design/m2a-w3.md): the others' team, 2 bits after the burst seq.
+TEST_SUITE("net-proto") {
+	TEST_CASE("proto w3: the others' team round trips in Snapshot and SnapshotOthers; team 3 is refused") {
+		Rng rng(311);
+		net::OtherSoldier o;
+		for (const uint8_t t : { uint8_t(0), uint8_t(1), uint8_t(2), uint8_t(3), uint8_t(255) }) {
+			net::set_other_team(o, t);
+			CHECK(o.team == (t == 1 || t == 2 ? t : 0));
+		}
+		net::Snapshot s = sample_snapshot(rng, 0);
+		net::SnapshotOthers so;
+		so.seq = s.seq;
+		so.server_tick = s.server_tick;
+		for (uint8_t i = 1; i <= 6; ++i) {
+			net::OtherSoldier x = sample_other_v2(rng, i, s.server_tick);
+			net::set_other_team(x, uint8_t(i % 3));
+			s.others.push_back(x);
+			so.others.push_back(x);
+		}
+		auto ds = net::decode_snapshot(net::encode_snapshot(s));
+		REQUIRE(ds);
+		REQUIRE(ds->others.size() == s.others.size());
+		auto dso = net::decode_snapshot_others(net::encode_snapshot_others(so));
+		REQUIRE(dso);
+		REQUIRE(dso->others.size() == so.others.size());
+		for (size_t i = 0; i < s.others.size(); ++i) {
+			CHECK(ds->others[i] == s.others[i]);
+			CHECK(ds->others[i].team == uint8_t((i + 1) % 3));
+			CHECK(dso->others[i] == so.others[i]);
+		}
+		// A hostile sender writes the unused code 3: the decoder refuses the datagram.
+		s.others[2].team = 3;
+		so.others[4].team = 3;
+		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(s)));
+		CHECK_FALSE(net::decode_snapshot_others(net::encode_snapshot_others(so)));
 	}
 }

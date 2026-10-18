@@ -293,6 +293,7 @@ core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_dat
 // v2 (M2a, nt): after the own state, 1 bit own weapons present and the weapons_wire.h block (~95 B for a kit); each
 // other gains u8 weapon | u3 phase | u1 firing | u1 ads | u2 reload seq | u4 burst seq (178 bits, 22.25 B). With the
 // own state and a kit's weapons about 43 others fit; the rest go in SnapshotOthers of the same seq.
+// M2a w3 (G1, docs/design/m2a-w3.md): each other also carries u2 team after the burst seq (180 bits, 22.5 B).
 
 struct OtherSoldier {
 	uint8_t slot = 0;
@@ -314,6 +315,10 @@ struct OtherSoldier {
 	bool ads = false;
 	uint8_t reload_seq = 0; // 2 bits: counts reload starts
 	uint8_t burst_seq = 0; // 4 bits: counts bursts
+	// M2a w3 (G1, docs/design/m2a-w3.md): the soldier's team in 2 bits (0 = unknown, 1, 2; 3 is refused by the
+	// decoder), so the client tells friend from foe and picks the 3p team (tp, gx). Per sample, so it switches with
+	// the generation at a respawn.
+	uint8_t team = 0;
 
 	bool operator==(const OtherSoldier &) const = default; // nt: field for field (the lag history compares records)
 };
@@ -325,6 +330,8 @@ OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state);
 // phase, firing, ads, reload_seq = p_reload_count & 3, burst_seq = p_burst_count & 15.
 void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::WeaponPhase p_phase, bool p_firing, bool p_ads, uint32_t p_reload_count,
 		uint32_t p_burst_count);
+// M2a w3 (G1): the team exactly as the receiver decodes it: 1 and 2 kept, anything else 0 (unknown).
+void set_other_team(OtherSoldier &r_other, uint8_t p_team);
 
 // Invariant (docs §9.2): the snapshot is sent after server tick `server_tick` ran, so own->tick == server_tick,
 // and the command applied to the own soldier at that tick is the client's command for that tick

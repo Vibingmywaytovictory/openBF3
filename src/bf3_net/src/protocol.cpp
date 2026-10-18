@@ -35,8 +35,9 @@ static_assert(kCommandFieldBits == 72); // + 1 "same" bit = the 73 bits of docs 
 // M2a v2 (nt; docs/design/m2a.md §6.2, §7.2, §7.3).
 constexpr unsigned kViewSampleBits = 16 + 2 + 8; // view_back_q8, view_quality, view_seq8
 constexpr unsigned kOtherWeaponBits = 8 + 3 + 1 + 1 + 2 + 4; // weapon, phase, firing, ads, reload seq, burst seq
-constexpr unsigned kOtherBitsV2 = kOtherBits + kOtherWeaponBits;
-static_assert(kOtherWeaponBits == 19 && kOtherBitsV2 == 178); // m2a.md §7.3: 19 more bits, ~178 per other
+constexpr unsigned kOtherTeamBits = 2; // M2a w3 (G1, docs/design/m2a-w3.md): OtherSoldier::team
+constexpr unsigned kOtherBitsV2 = kOtherBits + kOtherWeaponBits + kOtherTeamBits;
+static_assert(kOtherWeaponBits == 19 && kOtherBitsV2 == 180); // m2a.md §7.3: 19 more bits; W3.0 G1: + 2 team bits, 180 per other
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
 constexpr unsigned kWireSlotBits = 7; // shot and combat slots < kMaxSlots
 static_assert((size_t(1) << kWireSlotBits) == kMaxSlots);
@@ -515,6 +516,7 @@ void write_other(BitWriter &r_w, const OtherSoldier &p_o) {
 	r_w.write_bool(p_o.ads);
 	r_w.write_bits(p_o.reload_seq, 2);
 	r_w.write_bits(p_o.burst_seq, 4);
+	r_w.write_bits(p_o.team, 2); // M2a w3 (G1)
 }
 
 bool read_other(BitReader &r_r, OtherSoldier &r_o) {
@@ -540,6 +542,11 @@ bool read_other(BitReader &r_r, OtherSoldier &r_o) {
 	r_o.ads = r_r.read_bool();
 	r_o.reload_seq = uint8_t(r_r.read_bits(2));
 	r_o.burst_seq = uint8_t(r_r.read_bits(4));
+	const uint64_t team = r_r.read_bits(2); // M2a w3 (G1)
+	if (team > kMaxTeam) {
+		return false; // M2a w3 (G1): team 3 does not exist
+	}
+	r_o.team = uint8_t(team); // M2a w3 (G1)
 	if (slot >= kMaxSlots || pitch < -kOtherPitchMaxCode || pitch > kOtherPitchMaxCode || !valid_pose(pose) ||
 			!valid_pose(target) || mode >= sim::kMoveModeCount) {
 		return false;
@@ -1387,6 +1394,11 @@ void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::Weapo
 	r_other.burst_seq = uint8_t(p_burst_count & 15u);
 }
 
+// M2a w3 (G1, docs/design/m2a-w3.md).
+void set_other_team(OtherSoldier &r_other, uint8_t p_team) {
+	r_other.team = p_team >= 1 && p_team <= kMaxTeam ? p_team : uint8_t(0);
+}
+
 // ---- acks (m2a.md §7.2) ------------------------------------------------------------------------------------------
 
 bool snapshot_acked(const CommandPacket &p_packet, uint16_t p_seq) {
@@ -1411,6 +1423,7 @@ bool others_acked(const CommandPacket &p_packet, uint16_t p_seq) {
 // ---- SnapshotOthers (ch0) ----------------------------------------------------------------------------------------
 // Body: u16 seq | u32 server tick | u8 count (<= kMaxSlots - 1) | others (178 bits each, as in the Snapshot). Up to 53
 // others fit one datagram, more than the Snapshot leaves out for 128 slots.
+// M2a w3 (G1): with the 2 team bits an other is 180 bits, and 52 fit.
 
 std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped) {
 	BitWriter w = begin(MessageType::SnapshotOthers, kMaxDatagramBytes);

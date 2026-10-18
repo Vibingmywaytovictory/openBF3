@@ -796,6 +796,7 @@ net::OtherSoldier Gunplay::other_record(uint8_t p_slot, const sim::SoldierState 
 		const sw::WeaponSlotState &w = s.weapons.current();
 		net::set_other_weapon(o, w.def, w.phase, s.firing, (w.flags & sw::slot_flags::kZoomWasDown) != 0, s.reload_count, s.burst_count);
 	}
+	net::set_other_team(o, p_slot < m.slots.size() ? m.slots[p_slot].team : uint8_t(0)); // M2a w3 [G1]: the life's team on the wire
 	return o;
 }
 
