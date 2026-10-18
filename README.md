@@ -2516,8 +2516,8 @@ As built, with the measured results and one command per gate: [docs/design/m2a-a
 * **E7** (`game_audio_check.h`): `GameAudioCheck` records the mix and the shooter's voice taps.
   `analyse_game_check` judges the recording with au's `analyse_check` and the in-game rows.
 * **Tests:**
-  - `ctest --preset dev -R "^audio\.(router|game)\."` runs the unit suite and the install rows. The install rows are
-    kits, the offline E7 rehearsal, a scene for the ear and 64 shooters for 60 s.
+  - `ctest --preset dev -R "^audio\.(router|game)"` runs the unit suite and the install rows. `audio.game` covers the
+    kits, the offline E7 rehearsal and a scene for the ear; `audio.game.crowd` runs 64 shooters for 60 s.
   - The rows write their WAVs to `b\dev\shots\<row>\`, which is gitignored. Copies for listening are in
     `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\au3\`.
   - `audio.game.underruns` gates the underrun count (a wall-clock measure) and runs on main only.

@@ -175,7 +175,7 @@ The class is in `game_audio.{h,cpp}`. gx calls it.
   - the band rule now follows au's fade-in reading: the RPG-7's 45-90 group is 0.933 at 30 m inside its 5-35 fade-in;
   - the audible rule was a 1 s RMS at −90 dBFS. The M98B at 325 m measures −102.7 dB as a 1 s RMS, while its loudest
     20 ms is −93.0 dBFS: present, and as quiet as its distance law makes it.
-* **The offline rehearsal** (`audio.game.e7`) drives the game's code on recorded presentation events, without Godot:
+* **The offline rehearsal** (`audio.game`, case "E7 rehearsal") drives the game's code on recorded presentation events, without Godot:
   - **The data.** The fixture loads Metro TDM's gunplay tables and the assets, exactly as `Bf3GameAudio::load` does.
     The audio tuning comes from the project's `audio_tuning.cfg`.
   - **The server side** follows sv's rules: burst_count per tick-with-shots after a tick without, and firing for a
@@ -194,9 +194,7 @@ The class is in `game_audio.{h,cpp}`. gx calls it.
 | row | what | label |
 |---|---|---|
 | `audio.router.unit` | 12 data-free cases (synthetic programs): the clock and both timelines, own bursts / single fire, others' RemoteShot bursts (lost datagrams, no newest records, all lost, two bursts, single fire, death), distance and cull, the listener re-send, reloads and one-shots, the voice limit and stealing, impacts and effect sounds, pool aging, determinism (bit-identical mix and counters), hostile input, the check's bookkeeping | none |
-| `audio.game.kits` | E7 item 1 on Metro TDM: 12 kit items, 10 Driver and 2 OneShot, 12 compiled, 0 failed; the impact cache; the bank with 0 missing waves | none (install) |
-| `audio.game.e7` | the offline E7 rehearsal; `e7_rehearsal.wav` and `.txt` to `<build>/shots/audio.game.e7` | none (install) |
-| `audio.game.scene` | gate 4 offline: own M16A3 bursts and a reload, the M16A3 at 15 / 80 / 250 m, an SVD at 40 m, five impacts; `scene.wav` | none (install) |
+| `audio.game` | one process, one load, three cases: "kit items" (E7 item 1 on Metro TDM: 12 kit items, 10 Driver and 2 OneShot, 12 compiled, 0 failed; the impact cache; the bank with 0 missing waves), "E7 rehearsal" (the offline E7 rehearsal), "a scene for the ear" (gate 4 offline: own M16A3 bursts and a reload, the M16A3 at 15 / 80 / 250 m, an SVD at 40 m, five impacts); `e7_rehearsal.wav` / `.txt` and `scene.wav` / `.txt` to `<build>/shots/audio.game` | none (install, COST 8) |
 | `audio.game.crowd` | 63 others + the own soldier for 60 s plus 6 s of tails, impacts every 3rd frame, reloads; functional counters | none (install, COST 16) |
 | `audio.game.underruns` | the same render with `OPENBF3_AU3_GATE_LATE=1`: also gates `late_blocks` = 0 (a wall-clock measure: a block that took longer than its 10.67 ms) | `timing` (main only, RUN_SERIAL) |
 
@@ -240,7 +238,7 @@ Times are from the branch, unlocked, on a shared machine: **indicative only**. N
   10.67 ms; 66 s rendered in 15.9 s wall time (4.2× real time). The gating row is `audio.game.underruns` (timing,
   main only).
 * **Gate 4: in the playable scene.**
-  - **Offline (`audio.game.scene`).** The loudest 20 ms of each sound, at unity master:
+  - **Offline (`audio.game`, case "a scene for the ear").** The loudest 20 ms of each sound, at unity master:
 
     | sound | dBFS |
     |---|---|
@@ -263,12 +261,12 @@ From the worktree, after `tools\build.cmd dev --no-test`.
 | gate | command |
 |---|---|
 | 1 audio.router.unit | `ctest --preset dev -R "^audio\.router\.unit$"` |
-| 2 E7 rehearsal (offline) | `ctest --preset dev -R "^audio\.game\.e7$"` (WAV: `b\dev\shots\audio.game.e7\e7_rehearsal.wav`) |
+| 2 E7 rehearsal (offline) | `ctest --preset dev -R "^audio\.game$"` (case "E7 rehearsal"; WAV: `b\dev\shots\audio.game\e7_rehearsal.wav`) |
 | 2 E7 in game (windowed) | gx's `godot.m2a_check` case "audio" (`OPENBF3_GODOT_WINDOWED=1`), once gx lands |
 | 3 64 shooters, functional | `ctest --preset dev -R "^audio\.game\.crowd$"` |
 | 3 64 shooters, underruns | `ctest --preset dev-timing -R "^audio\.game\.underruns$"` (main only, rule 7) |
-| 4 heard, offline | `ctest --preset dev -R "^audio\.game\.scene$"` (WAV: `b\dev\shots\audio.game.scene\scene.wav`) |
-| E7 item 1 | `ctest --preset dev -R "^audio\.game\.kits$"` |
+| 4 heard, offline | `ctest --preset dev -R "^audio\.game$"` (case "a scene for the ear"; WAV: `b\dev\shots\audio.game\scene.wav`) |
+| E7 item 1 | `ctest --preset dev -R "^audio\.game$"` (case "kit items") |
 | contract | `ctest --preset dev -R "^m2a\.contract3$"` |
 | asan | `tools\build.cmd asan --no-test`, then `ctest --preset asan -R "audio\.router|audio\.game|m2a\.contract3"` |
 
