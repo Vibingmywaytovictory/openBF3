@@ -2471,11 +2471,22 @@ As-built notes, the decisions on G1-G7 and the review items: [docs/design/m2a-w3
     offset.
   - G7: gx's hooks in the level session, which do nothing until gx fills them.
 * **Changed pins.** `net.proto.unit`'s two capacity pins went from 53 to 52 (G1).
+* **3p weapons per soldier (review fix).** S3 bakes one weapon into each team's mesh. tp draws the kit item each
+  soldier holds without editing S3's loader or uploader: `bf3/render/crowd_weapons.h` loads each item as its own
+  skinned mesh, `strip_team_weapon_parts` drops the baked weapon before upload, and `CrowdEvaluator::weapon_of` /
+  `weapon_palette` pose it (m2a-w3.md §3, "tp's 3p weapon route").
 * **Test.** `ctest --preset dev -R "^m2a\.contract3$"` compiles the Godot-free headers together. It pins the POD
   shapes, enum values, defaults, the crowd lane rule and the seed hashes, and runs G1-G5 and the check's case parser.
   The rows that need bt, tp, au3 or fx3 print `PENDING (<key>)` until each track sets its switch.
 
-Measured 2026-10-18:
+Measured 2026-10-18, after the review fix (head of `m2a/w3`):
+
+* **`toolsuild.cmd dev --strict`:** 128 rows, 126 passed and 2 skipped (`core.cache_data`, `core.res`), 178 s wall
+  time, exit 0, only the existing budget warnings. `m2a.contract3` (10 cases, 333 assertions) took 0.24 s.
+* **asan:** `m2a.contract3`, `m2a.contract`, `m1.contract`, `anim.s3.unit`, `net.proto.unit` and `net.proto.fuzz`
+  passed, with no AddressSanitizer report.
+
+Measured 2026-10-18, before the review fix:
 
 * **`tools\build.cmd dev --strict`** (the branch pass, no timing, realtime or window rows): 128 rows, 126 passed and
   2 skipped (`core.cache_data`, `core.res`, as before), 176 s wall time, no budget violation. `m2a.contract3` took
