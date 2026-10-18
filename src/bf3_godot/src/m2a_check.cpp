@@ -9,11 +9,21 @@
 #include "m2a_check.h"
 
 #include "fp_camera.h"
+#include "fx_renderer.h"
+#include "game_audio.h"
+#include "game_crowd.h"
+#include "game_fx.h"
 #include "godot_util.h"
 #include "hud_controls.h"
 #include "level_session_m2a.h"
 #include "viewmodel.h"
 
+#include "bf3/audio/audio_config.h"
+#include "bf3/audio/game_audio_check.h"
+#include "bf3/fx/simulator.h"
+#include "bf3/fx/triggers.h"
+
+#include "bf3/host/firefight_run.h"
 #include "bf3/host/kits.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
@@ -23,6 +33,10 @@
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
@@ -30,7 +44,9 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
+#include <map>
 
 #ifndef OPENBF3_M2A_HAVE_FX
 #define OPENBF3_M2A_HAVE_FX 0
@@ -49,10 +65,70 @@ namespace host = bf3::host;
 namespace net = bf3::net;
 namespace sim = bf3::sim;
 namespace sw = bf3::sim::weapons;
+namespace fx = bf3::fx;
+namespace ba = bf3::audio;
 
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+// E7: the shooter (the own soldier, heard in 3p) aims this far up, so its rounds leave Metro without an impact sound
+// in the recording; the listener sits on the aim axis (au's G7 geometry).
+constexpr double kAudioPitchDeg = 60.0;
+// E8: the predicted M16A3 shots of the 1p flash row (3 sigma at p 0.75), split over the two surfaces.
+constexpr uint64_t kFxShots = 1000;
+constexpr double kFxOilfireSeconds = 15.0;
+constexpr int64_t kFxOilfireParticles = 80; // fx G4's steady state (+-1)
+constexpr const char *kFxOilfire = "fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01"; // MP_012 (fx_demo.cpp)
+// fx G5's named cells (fx_triggers_tests.cpp "cells": the PhysicsMaterialIndex, the effect and the decal leaf names).
+struct FxNamedCell {
+	uint8_t material;
+	const char *name;
+	const char *effect;
+	const char *decal;
+};
+constexpr std::array<FxNamedCell, 4> kFxNamedCells{ { { 8, "concrete", "fx_impact_concrete_01_s_xp2", "decal_concrete_s_01" },
+		{ 2, "brick", "fx_impact_concrete_01_s", "decal_brick_s_01" }, { 10, "glass", "fx_impact_glass_01_s", "decal_glass_s_01" },
+		{ 3, "metal", "fx_impact_metal_01_s", "decal_metalarmor_s_01" } } };
+constexpr const char *kFxSoldierEffect = "fx_impact_soldier_body_s";
+// E9 / E14 (m2a.md §1): 10 s warm-up, 60 s in alternating 5 s FX-on / FX-off windows (the S3 G1b method), 2560 x 1440.
+constexpr double kFfWarmupSeconds = 10.0;
+constexpr double kFfWindowSeconds = 5.0;
+constexpr uint32_t kFfWindows = 12;
+constexpr int32_t kFfWidth = 2560, kFfHeight = 1440;
+
+const FxNamedCell *fx_named_cell(uint8_t p_material) {
+	for (const FxNamedCell &c : kFxNamedCells) {
+		if (c.material == p_material) {
+			return &c;
+		}
+	}
+	return nullptr;
+}
+
+std::string leaf(std::string_view p_name) {
+	const size_t slash = p_name.rfind('/');
+	return std::string(slash == std::string_view::npos ? p_name : p_name.substr(slash + 1));
+}
+
+bool env_is_one(const char *p_name) {
+	char *v = nullptr;
+	size_t n = 0;
+	if (_dupenv_s(&v, &n, p_name) != 0 || v == nullptr) {
+		return false;
+	}
+	const bool one = std::string(v) == "1";
+	std::free(v);
+	return one;
+}
+
+double percentile(std::vector<double> p_v, double p_q) {
+	if (p_v.empty()) {
+		return 0.0;
+	}
+	std::sort(p_v.begin(), p_v.end());
+	const size_t i = size_t(std::clamp(std::ceil(p_q * double(p_v.size())) - 1.0, 0.0, double(p_v.size() - 1)));
+	return p_v[i];
+}
 using Action = InputMapper::M2aAction;
 
 std::string fmt(const char *p_format, ...) {
@@ -151,6 +227,48 @@ struct M2aCheck::State {
 	double play_dead_since = -1;
 	double play_zoomed_since = -1; // the ADS screenshot waits for 0.4 s of zoom (the viewmodel's blend done)
 	sw::SimTime detonation_time = -1;
+	// The audio case (E7).
+	std::unique_ptr<ba::GameAudioCheck> acheck;
+	ba::GameCheckScript ascript;
+	ba::AudioTuning atuning;
+	int64_t astep = -1;
+	double astep_t0 = 0, anext_burst = 0;
+	uint32_t abursts_left = 0, aburst_shots = 0;
+	bool aburst_firing = false, aaudition_started = false, aorigin_valid = false;
+	Vector3 aorigin, adir;
+	// The fx case (E8).
+	struct FxSurface {
+		uint8_t material = 0;
+		bool found = false;
+		uint32_t spawn = 0;
+		sim::Vec3 point{};
+		float distance = 0;
+	};
+	std::array<FxSurface, 2> fx_surfaces{ { { 8 }, { 2 } } }; // concrete, brick
+	int32_t fx_flash_component = -1;
+	std::string fx_m16_1p;
+	uint64_t fx_shots_1p = 0, fx_flash = 0, fx_seg_shots = 0, fx_frames = 0, fx_mismatch_frames = 0;
+	uint64_t fx_tracer_flags = 0, fx_own_shot_events = 0, fx_impact_events = 0;
+	std::map<uint8_t, std::array<uint64_t, 4>> fx_mat; // PhysicsMaterialIndex -> impacts, effect as named, decals, decal as named
+	uint64_t fx_soldier_starts = 0, fx_soldier_ok = 0, fx_soldier_decals = 0;
+	std::string fx_first_bad;
+	fx::FxTriggerStats fx_trig0{};
+	fx::EffectHandle fx_oil{};
+	bool fx_oil_started = false;
+	double fx_oil_t0 = -1;
+	int64_t fx_oil_particles = -1;
+	// The firefight case (E9 / E14).
+	std::vector<double> ff_frame_on, ff_m2a_on, ff_crowd, ff_fx_main, ff_gpu_on, ff_gpu_off;
+	uint32_t ff_max_lights = 0, ff_max_particles = 0, ff_lights_over = 0, ff_min_drawn = 0xFFFFFFFFu;
+	uint64_t ff_late0 = 0, ff_short0 = 0, ff_remote0 = 0, ff_hits0 = 0;
+
+	~State() {
+		if (acheck != nullptr && g.audio != nullptr) {
+			g.audio->set_check(nullptr); // the audio thread must not see the recorder after it goes
+		}
+		g.listener_override = false;
+		g.fx_off = false;
+	}
 
 	// ---- helpers ----
 	const host::PresentationFrame &f() const { return s.frame(); }
@@ -353,6 +471,11 @@ struct M2aCheck::State {
 	void build_hud();
 	void build_ads();
 	void build_play();
+	void build_audio();
+	void build_fx();
+	void build_firefight();
+	void automatic_mode();
+	void fx_account();
 	void kill_row(const char *p_name, sw::HitZone p_zone, float p_distance, int p_kill_in, double p_per_hit);
 	void finish_case();
 };
@@ -394,17 +517,42 @@ void M2aCheck::State::build_case(M2aCase p_case) {
 			build_play();
 			break;
 		case M2aCase::Audio:
-			current.outcome = M2aOutcome::Skip;
-			current.reason = OPENBF3_M2A_HAVE_AUDIO ? "au3 landed: the E7 case body is the merge pass's (docs/design/m2a-gx.md §6)" : "waiting for au3";
+			if (!OPENBF3_M2A_HAVE_AUDIO) {
+				current.outcome = M2aOutcome::Skip;
+				current.reason = "waiting for au3";
+				break;
+			}
+			case_timeout = std::max(case_timeout, 300.0);
+			build_audio();
 			break;
 		case M2aCase::Fx:
-			current.outcome = M2aOutcome::Skip;
-			current.reason = OPENBF3_M2A_HAVE_FX ? "fx3 landed: the E8 case body is the merge pass's (docs/design/m2a-gx.md §6)" : "waiting for fx3";
+			if (!OPENBF3_M2A_HAVE_FX) {
+				current.outcome = M2aOutcome::Skip;
+				current.reason = "waiting for fx3";
+				break;
+			}
+			case_timeout = std::max(case_timeout, 420.0);
+			build_fx();
 			break;
-		case M2aCase::Firefight:
-			current.outcome = M2aOutcome::Skip;
-			current.reason = OPENBF3_M2A_HAVE_BT ? "bt landed: the E13 / E14 case body is the merge pass's (docs/design/m2a-gx.md §6)" : "waiting for bt";
+		case M2aCase::Firefight: {
+			if (!OPENBF3_M2A_HAVE_BT) {
+				current.outcome = M2aOutcome::Skip;
+				current.reason = "waiting for bt";
+				break;
+			}
+			// The gate is defined at 2560 x 1440 (m2a.md E9 / E14, S3's rule): another primary screen skips the case.
+			DisplayServer *ds = DisplayServer::get_singleton();
+			const int32_t primary = ds->get_primary_screen();
+			const Vector2i size = ds->screen_get_size(primary);
+			if (size.x != kFfWidth || size.y != kFfHeight) {
+				current.outcome = M2aOutcome::Skip;
+				current.reason = fmt("the primary screen is %dx%d, the gate is defined at %dx%d", size.x, size.y, kFfWidth, kFfHeight);
+				break;
+			}
+			case_timeout = std::max(case_timeout, 240.0);
+			build_firefight();
 			break;
+		}
 	}
 	if (current.outcome == M2aOutcome::Skip) {
 		return;
@@ -432,21 +580,7 @@ void M2aCheck::State::build_range() {
 	teleport_lane();
 	select_slot(0);
 	full_magazine();
-	// Automatic: cycle the fire mode (B) until the M16A3 is on its automatic mode.
-	add("automatic fire mode", 4.0, [](State &st, double p_t, bool) {
-		const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
-		if (d == nullptr) {
-			return false;
-		}
-		if (d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic == core::gameplay::FireLogic::Automatic) {
-			return st.ready();
-		}
-		if (p_t - st.t_mark > 0.3 || st.t_mark > p_t) {
-			st.t_mark = p_t;
-			st.mapper().m2a_script_press(Action::FireMode);
-		}
-		return false;
-	});
+	automatic_mode();
 	// E1: fire held from a full magazine until it is empty.
 	add("E1 hold fire", 8.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
@@ -1310,7 +1444,35 @@ void M2aCheck::State::build_play() {
 		st.row("play.events_overflow", double(cs.events_overflow), "== 0 (E14's gate)", cs.events_overflow == 0);
 		st.row("play.bad_gunplay_events", double(cs.bad_gunplay_events), "== 0", cs.bad_gunplay_events == 0);
 		st.row("play.events_drained", double(st.g.events_drained), "> 0 events flowed", st.g.events_drained > 0);
-		st.row("play.remote_shots", double(st.g.remote_shots_seen), "RemoteShot events (0 until bt's bots fire: reported)", true);
+		st.row("play.remote_shots", double(st.g.remote_shots_seen), "> 0 RemoteShot events (bt's bots fire)", !OPENBF3_M2A_HAVE_BT || st.g.remote_shots_seen > 0);
+		st.row("play.killed_by_enemy", double(st.g.deaths_by_enemy), "own deaths by another soldier (reported)", true);
+		st.row("play.firefight_bots", double(st.g.firefight_bots), "bt's firefight bots in the match (reported)", true);
+		const bool crowd_ok = st.g.crowd != nullptr && st.g.crowd_built;
+		st.row("play.crowd_built", crowd_ok ? 1.0 : 0.0, "tp's 3p soldiers drawn (Bf3GameCrowd built; the capsules hidden)", crowd_ok);
+		if (crowd_ok) {
+			const GameCrowdStats cr = st.g.crowd->stats();
+			st.row("play.crowd_frames", double(cr.frames), fmt("crowd steps (%" PRIu64 " frozen, %u unknown weapons; reported)", cr.frozen_frames, cr.unknown_weapons), cr.frames > 0);
+		}
+		const bool fx_ok = st.g.fx != nullptr && st.g.fx->built();
+		st.row("play.fx_built", fx_ok ? 1.0 : 0.0, "fx3's effects built (Bf3GameFx)", fx_ok);
+		if (fx_ok) {
+			const GameFxStats fs = st.g.fx->stats();
+			st.row("play.fx_muzzles", double(fs.triggers.muzzle_starts),
+					fmt("muzzle starts (%" PRIu64 " remote shots without a crowd muzzle; %" PRIu64 " own 1p muzzles from fx3, %" PRIu64 " from the stand-in)", fs.triggers.muzzle_fallbacks,
+							st.g.own_muzzles_fx, st.g.own_muzzles_standin),
+					fs.triggers.muzzle_starts > 0);
+			st.row("play.fx_impacts", double(fs.triggers.impacts), fmt("impact cells started (%" PRIu64 " decals, %" PRIu64 " double starts)", fs.triggers.decals, fs.triggers.double_starts),
+					fs.triggers.impacts > 0 && fs.triggers.double_starts == 0);
+		}
+		const bool audio_ok = st.g.audio != nullptr && st.g.audio->built();
+		st.row("play.audio_built", audio_ok ? 1.0 : 0.0, "au3's game audio built (Bf3GameAudio)", audio_ok);
+		if (audio_ok) {
+			const GameAudioStats as = st.g.audio->stats();
+			st.row("play.audio_mixed_s", double(as.mixer_frames) / double(ba::kMixRate), fmt("seconds mixed (peak %u voices, %" PRIu64 " impacts, %" PRIu64 " reloads)", as.peak_instances,
+																							  as.impacts.impacts, as.router.reloads),
+					as.mixer_frames > 0);
+			st.row("play.audio_late_commands", double(as.late_commands), "== 0 (short / late blocks are wall clock: reported)", as.late_commands == 0);
+		}
 		st.row("play.weapon_reconciliations", double(cs.weapon_reconciliations), "reported", true);
 		st.row("play.kit_selects", double(st.g.kit_selects_sent), ">= 1 KitSelect sent after Spawned", st.g.kit_selects_sent >= 1);
 		st.row("play.screenshots", double(st.shots_saved), st.options.shots_dir.empty() ? "no --m2a-shots dir (reported)" : "5 (hip, ADS, reload, firefight, death)",
@@ -1319,7 +1481,593 @@ void M2aCheck::State::build_play() {
 	});
 }
 
+// E7 (au3's GameAudioCheck in the running game). The shooter is the own soldier, heard in 3p (M2aFrame::free_camera
+// with the listener held by the check: the router plays an own shot at its OwnShot position then, exactly as a
+// remote one), firing M16A3 bursts of the script's rounds up into the sky; the listener holds at each distance on the
+// aim axis, facing the muzzle; then the client-local auditions at their band distances. analyse_game_check judges the
+// recording with au's rules. Deviation from m2a.md E7 ("a server bot fires"): no bot fires on command (bt's brains
+// pick their own targets), and the own soldier's 3p route is the router's remote route with the own slot.
+void M2aCheck::State::build_audio() {
+	add("audio: built", 20.0, [](State &st, double, bool) { return st.g.audio != nullptr && st.g.audio->built(); });
+	add("audio: range lane", 5.0, [](State &st, double, bool) {
+		if (st.g.world != nullptr && st.s.shared_level() != nullptr) {
+			st.lane = sw::find_range_lane(*st.g.world, st.s.shared_level()->spawns, st.f().eye_height_curr, 30.0f);
+		}
+		return true;
+	});
+	teleport_lane();
+	select_slot(0);
+	automatic_mode();
+	full_magazine();
+	add("audio: aim up", 1.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mapper().script_view(st.mapper().view().yaw, float(kAudioPitchDeg * kPi / 180.0));
+		}
+		return p_t >= 0.5;
+	});
+	// One round first: its OwnShot position is the emitter the listener lines up with.
+	add("audio: probe round", 4.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.aorigin_valid = false;
+			st.mapper().m2a_script_press(Action::Fire);
+		}
+		for (const host::PresentEvent &e : st.g.events) {
+			if (e.kind == host::PresentKind::OwnShot && !st.aorigin_valid) {
+				st.aorigin = Vector3(e.pos[0], e.pos[1], e.pos[2]);
+				const double yaw = st.mapper().view().yaw, pitch = st.mapper().view().pitch;
+				st.adir = Vector3(float(std::sin(yaw) * std::cos(pitch)), float(std::sin(pitch)), float(std::cos(yaw) * std::cos(pitch))).normalized();
+				st.aorigin_valid = true;
+			}
+		}
+		return st.aorigin_valid && p_t > 0.3 && st.ready();
+	});
+	full_magazine();
+	add("audio: recorder", 2.0, [](State &st, double, bool) {
+		st.ascript = ba::game_check_script();
+		// The recording holds the whole run: the script's 120 s plus the reloads between the steps of a real magazine.
+		st.ascript.timeout_s = std::max(st.ascript.timeout_s, 200.0);
+		const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
+		if (d != nullptr) {
+			const double interval = sw::units_to_seconds(d->modes[std::min<size_t>(st.g.weapon.mode, 3)].interval);
+			st.ascript.analysis.shot_interval_s = interval;
+			st.ascript.analysis.expected_spacing_frames = interval * double(ba::kMixRate);
+		}
+		const String path = "res://config/audio_tuning.cfg"; // the file Bf3GameAudio::build reads
+		if (FileAccess::file_exists(path)) {
+			bf3::core::Result<ba::AudioTuning> t = ba::parse_audio_tuning(to_std(FileAccess::get_file_as_string(path)));
+			if (t) {
+				st.atuning = *t;
+			} else {
+				st.note("audio_tuning.cfg: " + t.error().message + " (defaults)");
+			}
+		}
+		st.acheck = std::make_unique<ba::GameAudioCheck>(st.ascript, ba::kMixRate, st.g.audio->stats().mixer_frames);
+		st.acheck->set_guard(st.s.install().write_guard());
+		st.acheck->set_shooter(st.g.own_slot);
+		st.g.audio->set_check(st.acheck.get());
+		st.astep = -1;
+		st.abursts_left = 0;
+		st.aburst_firing = false;
+		st.note(fmt("shooter slot %u at (%.1f, %.1f, %.1f), aim pitch %.0f deg; %zu steps, %u rounds per burst", unsigned(st.g.own_slot), double(st.aorigin.x),
+				double(st.aorigin.y), double(st.aorigin.z), kAudioPitchDeg, st.ascript.steps.size(), st.ascript.rounds));
+		return true;
+	});
+	add("audio: run", 400.0, [](State &st, double p_t, bool) {
+		const ba::GameCheckScript &sc = st.ascript;
+		ba::GameAudioCheck &ck = *st.acheck;
+		if (st.aburst_firing) {
+			for (const host::PresentEvent &e : st.g.events) {
+				st.aburst_shots += e.kind == host::PresentKind::OwnShot ? 1u : 0u;
+			}
+			if (st.aburst_shots >= sc.rounds || !st.g.alive) {
+				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.aburst_firing = false;
+			}
+		}
+		const bool current_done = st.astep >= 0 && !st.aburst_firing && st.abursts_left == 0 && st.aaudition_started && ck.step_done(uint32_t(st.astep));
+		if (st.astep < 0 || current_done) {
+			if (st.astep + 1 >= int64_t(sc.steps.size())) {
+				return true;
+			}
+			const ba::GameCheckStep &next = sc.steps[size_t(st.astep + 1)];
+			const int32_t need = next.audition ? 0 : int32_t(next.bursts * sc.rounds);
+			if (st.g.weapon.valid && st.g.weapon.magazine < need) {
+				if (st.ready()) {
+					st.mapper().m2a_script_press(Action::Reload); // between steps: the reload is outside every window
+				}
+				return false;
+			}
+			if (!st.ready()) {
+				return false;
+			}
+			++st.astep;
+			st.g.listener_position = st.aorigin + st.adir * next.distance_m;
+			st.g.listener_forward = -st.adir;
+			st.g.listener_override = true;
+			ck.begin_step(uint32_t(st.astep), (st.g.listener_position - st.aorigin).length());
+			st.astep_t0 = p_t;
+			st.anext_burst = p_t + sc.settle_s + sc.analysis.start_s;
+			st.abursts_left = next.audition ? 0u : next.bursts;
+			st.aaudition_started = !next.audition;
+			st.note(fmt("step %s: listener %.1f m on the aim axis at %.1f s", next.name.c_str(), double(next.distance_m), p_t));
+			return false;
+		}
+		const ba::GameCheckStep &cur = sc.steps[size_t(st.astep)];
+		if (cur.audition) {
+			if (!st.aaudition_started && p_t >= st.astep_t0 + sc.settle_s) {
+				std::string err;
+				const fx::Vec3 at{ st.aorigin.x, st.aorigin.y, st.aorigin.z };
+				if (!st.g.audio->audition(cur.patch, at, &err)) {
+					st.note("audition " + cur.name + " refused: " + err); // the check skipped (and fails) the step
+				}
+				st.aaudition_started = true;
+			}
+			return false;
+		}
+		if (st.abursts_left > 0 && !st.aburst_firing && p_t >= st.anext_burst && st.ready()) {
+			st.aburst_shots = 0;
+			st.aburst_firing = true;
+			st.mapper().m2a_script_hold(Action::Fire, true);
+			--st.abursts_left;
+			st.anext_burst = std::max(st.anext_burst + sc.burst_period_s, p_t + 0.5);
+		}
+		return false;
+	});
+	add("audio: rows", 2.0, [](State &st, double, bool) {
+		st.mapper().m2a_script_hold(Action::Fire, false);
+		st.g.audio->set_check(nullptr);
+		st.g.listener_override = false;
+		const GameAudioStats as = st.g.audio->stats();
+		ba::GameCheckCounters c;
+		c.short_blocks = as.short_blocks;
+		c.late_blocks = as.late_blocks;
+		c.late_commands = as.late_commands;
+		c.mixer_refusals = as.router.mixer_refusals;
+		const ba::CheckReport rep = ba::analyse_game_check(st.ascript, *st.acheck, c, st.atuning, ba::kMixRate);
+		const bool gate_late = env_is_one("OPENBF3_AU3_GATE_LATE");
+		for (const ba::CheckRow &r : rep.rows) {
+			const bool timing = r.name == "mixer.late_blocks";
+			st.row("e7." + r.name, r.value, r.rule + (timing && !gate_late ? " (wall clock: reported on a branch; OPENBF3_AU3_GATE_LATE=1 gates it)" : ""),
+					r.pass || (timing && !gate_late));
+		}
+		// Item 1: every kit item compiles and binds (Bf3GameAudio::load_report: "<unlock> [<patch>]: driver | one-shot").
+		uint32_t items = 0, drivers = 0, one_shots = 0;
+		for (const std::string &l : st.g.audio->load_report()) {
+			if (l.rfind("weapons/", 0) != 0) {
+				continue;
+			}
+			++items;
+			drivers += l.find("]: driver") != std::string::npos ? 1u : 0u;
+			one_shots += l.find("]: one-shot") != std::string::npos ? 1u : 0u;
+		}
+		st.row("e7.item1.kit_items", double(items), "12 kit items in the load report", items == 12);
+		st.row("e7.item1.forms", double(drivers + one_shots), fmt("every kit item bound: %u drivers (10 firearms), %u one-shots (knife, M67)", drivers, one_shots),
+				drivers == 10 && one_shots == 2);
+		st.row("e7.item1.program_failures", double(as.program_failures), fmt("== 0 (%u programs)", as.programs), as.program_failures == 0 && as.programs > 0);
+		st.row("e7.steps_skipped", double(st.acheck->skipped().size()), "== 0 (every audition item loaded and started)", st.acheck->skipped().empty());
+		st.row("e7.dropped_frames", double(st.acheck->dropped_frames()), "== 0 (the recording held the run)", st.acheck->dropped_frames() == 0);
+		st.row("e7.ring_overflows", double(as.ring_overflows), "== 0", as.ring_overflows == 0);
+		if (!st.options.shots_dir.empty()) {
+			const bf3::core::Status w = st.acheck->write_wav(st.options.shots_dir / "gx_e7.wav");
+			st.note(w.ok() ? std::string("recording: gx_e7.wav") : "recording not written: " + w.error().message);
+		}
+		return true;
+	});
+}
+
+// The E8 bookkeeping of one display frame (after Bf3GameFx::step in m2a_frame): the starts, decals and sound cues of
+// this frame's events, the renderer's instance count against the world's particles.
+void M2aCheck::State::fx_account() {
+	if (g.fx == nullptr || !g.fx->built() || g.fx->triggers() == nullptr) {
+		return;
+	}
+	++fx_frames;
+	const GameFxStats fs = g.fx->stats();
+	const Bf3FxRenderer *r = g.fx->renderer();
+	if (r != nullptr && r->stats().drawn_instances != fs.particles) {
+		++fx_mismatch_frames;
+	}
+	std::map<std::pair<uint8_t, uint32_t>, uint8_t> impact_material; // (slot, id) -> PhysicsMaterialIndex
+	for (const host::PresentEvent &e : g.events) {
+		if (e.kind == host::PresentKind::OwnShot) {
+			++fx_own_shot_events;
+			fx_tracer_flags += (e.flags & host::present_flags::kTracer) != 0 ? 1u : 0u;
+		} else if (e.kind == host::PresentKind::Impact) {
+			++fx_impact_events;
+			impact_material[{ e.slot, e.id }] = uint8_t(e.material);
+		}
+	}
+	const fx::FxTriggers &t = *g.fx->triggers();
+	int frame_material = -1; // the one material of this frame's impact starts (-2: several)
+	for (const fx::TriggerStart &ts : t.starts()) {
+		if (ts.def == nullptr) {
+			continue;
+		}
+		if (ts.kind == host::PresentKind::OwnShot && ts.purpose == fx::TriggerPurpose::Muzzle && ts.first_person) {
+			if (fx_m16_1p.empty() || ts.def->name != fx_m16_1p) {
+				continue;
+			}
+			if (fx_flash_component < 0) {
+				for (size_t c = 0; c < ts.def->components.size(); ++c) {
+					const fx::EffectComponentDef &cd = ts.def->components[c];
+					if (cd.kind == fx::ComponentKind::Emitter && cd.emitter < ts.def->emitters.size() &&
+							ts.def->emitters[cd.emitter].name.find("_1p_flash") != std::string::npos) {
+						fx_flash_component = int32_t(c);
+					}
+				}
+			}
+			++fx_shots_1p;
+			++fx_seg_shots;
+			fx_flash += fx_flash_component >= 0 && fx::fx_component_selected(*ts.def, uint32_t(fx_flash_component), ts.seed, fx::kTierHigh /* FxTriggerConfig's default tier, Bf3GameFx's */) ? 1u : 0u;
+		} else if (ts.kind == host::PresentKind::Impact && ts.purpose == fx::TriggerPurpose::ImpactEffect) {
+			const auto it = impact_material.find({ ts.slot, ts.id });
+			if (it == impact_material.end()) {
+				continue;
+			}
+			const uint8_t m = it->second;
+			frame_material = frame_material == -1 || frame_material == int(m) ? int(m) : -2;
+			std::array<uint64_t, 4> &row = fx_mat[m];
+			++row[0];
+			const FxNamedCell *named = fx_named_cell(m);
+			if (named != nullptr) {
+				const bool ok = leaf(ts.def->name) == named->effect;
+				row[1] += ok ? 1u : 0u;
+				if (!ok && fx_first_bad.empty()) {
+					fx_first_bad = fmt("material %u started %s, not %s", unsigned(m), leaf(ts.def->name).c_str(), named->effect);
+				}
+			}
+		} else if (ts.kind == host::PresentKind::SoldierContact && ts.purpose == fx::TriggerPurpose::ImpactEffect) {
+			++fx_soldier_starts;
+			fx_soldier_ok += leaf(ts.def->name) == kFxSoldierEffect ? 1u : 0u;
+		}
+	}
+	for (const fx::DecalCue &d : t.decals()) {
+		if (frame_material >= 0) {
+			std::array<uint64_t, 4> &row = fx_mat[uint8_t(frame_material)];
+			++row[2];
+			const FxNamedCell *named = fx_named_cell(uint8_t(frame_material));
+			row[3] += named != nullptr && leaf(d.decal) == named->decal ? 1u : 0u;
+		} else if (frame_material == -1) {
+			++fx_soldier_decals; // a decal without a static impact this frame (a soldier contact must leave none)
+		}
+	}
+}
+
+// E8 in the game: the fx tables (1, 6); 1,000 predicted M16A3 shots at Metro concrete and brick (3: the 1p flash
+// fraction and the drawn instances; 5: the named cells' effects and decals; 7: tracers, shells, sounds, no double
+// start); the client-local oilfire after 15 s (4); a soldier hit (5).
+void M2aCheck::State::build_fx() {
+	add("fx: built", 20.0, [](State &st, double, bool) { return st.g.fx != nullptr && st.g.fx->built() && st.g.fx->fire_effects() != nullptr; });
+	add("fx: tables", 2.0, [](State &st, double, bool) {
+		const GameFxStats fs = st.g.fx->stats();
+		st.row("e8.1.preload", double(fs.preload_failures), fmt("every kit and impact blueprint compiles: %u preloaded, 0 failures", fs.preloaded),
+				fs.preloaded > 0 && fs.preload_failures == 0);
+		st.row("e8.6.atlas", double(fs.atlas_entries), fmt("52 / 52 entries uploaded, %u default-texture fallbacks (0)", fs.atlas_fallbacks),
+				fs.atlas_entries == 52 && fs.atlas_fallbacks == 0);
+		const uint16_t m16 = st.loadout(1, 0).defs[0]; // US assault primary: the M16A3
+		const fx::FireEffectTable *fire = st.g.fx->fire_effects();
+		st.fx_m16_1p = m16 < fire->defs.size() && !fire->defs[m16].first_person.empty() ? fire->defs[m16].first_person.front().blueprint : std::string();
+		st.row("e8.m16_1p_muzzle", st.fx_m16_1p.empty() ? 0.0 : 1.0, "the M16A3 has a FireEffects1p blueprint (" + leaf(st.fx_m16_1p) + ")", !st.fx_m16_1p.empty());
+		return true;
+	});
+	// The surfaces: from every spawn of the mode, the first heading (5 degree steps, a few pitches) whose ray meets a
+	// collision triangle of the wanted PhysicsMaterialIndex 6..30 m out, facing the shooter.
+	add("fx: surfaces", 5.0, [](State &st, double, bool) {
+		const std::shared_ptr<const host::SharedLevel> shared = st.s.shared_level();
+		if (st.g.world == nullptr || shared == nullptr || shared->gunplay == nullptr || shared->gunplay->materials == nullptr) {
+			return true;
+		}
+		const sw::SurfaceMaterialTable &materials = *shared->gunplay->materials;
+		const float eye_h = st.f().eye_height_curr > 0.5f ? st.f().eye_height_curr : 1.6f;
+		for (FxSurface &surface : st.fx_surfaces) {
+			for (size_t i = 0; i < shared->spawns.size() && !surface.found; ++i) {
+				const sim::Vec3 &feet = shared->spawns[i].position;
+				const sim::Vec3 eye = { feet[0], feet[1] + eye_h, feet[2] };
+				for (int h = 0; h < 72 && !surface.found; ++h) {
+					for (const float pitch_deg : { -12.0f, -6.0f, -2.0f, 3.0f, 8.0f }) {
+						const double yaw = double(h) * 5.0 * kPi / 180.0, pitch = double(pitch_deg) * kPi / 180.0;
+						const sim::Vec3 dir = { float(std::sin(yaw) * std::cos(pitch)), float(std::sin(pitch)), float(std::cos(yaw) * std::cos(pitch)) };
+						sim::StaticHit hit;
+						if (!st.g.world->ray(eye, { dir[0] * 30.0f, dir[1] * 30.0f, dir[2] * 30.0f }, sim::query_mask::kMovement, &hit)) {
+							continue;
+						}
+						const float dist = 30.0f * hit.fraction;
+						const float facing = -(hit.normal[0] * dir[0] + hit.normal[1] * dir[1] + hit.normal[2] * dir[2]);
+						const sw::SurfacePair pair = materials.static_pair(hit.tag.material);
+						if (pair.resolved && pair.physics_material == surface.material && dist >= 6.0f && facing > 0.5f) {
+							surface.found = true;
+							surface.spawn = uint32_t(i);
+							surface.point = hit.position;
+							surface.distance = dist;
+							break;
+						}
+					}
+				}
+			}
+			const FxNamedCell *named = fx_named_cell(surface.material);
+			st.note(surface.found ? fmt("%s (%u): spawn %u, %.1f m to (%.1f, %.1f, %.1f)", named->name, unsigned(surface.material), surface.spawn,
+											double(surface.distance), double(surface.point[0]), double(surface.point[1]), double(surface.point[2]))
+								  : fmt("%s (%u): no triangle within 30 m of a spawn", named->name, unsigned(surface.material)));
+		}
+		st.fx_trig0 = st.g.fx->stats().triggers;
+		return true;
+	});
+	for (size_t k = 0; k < 2; ++k) {
+		respawn_at([k](State &st) { return st.fx_surfaces[k].found ? st.fx_surfaces[k].spawn : 0u; });
+		select_slot(0);
+		automatic_mode();
+		add(fmt("fx: segment %zu aim", k), 2.0, [k](State &st, double, bool p_first) {
+			if (p_first) {
+				st.fx_seg_shots = 0;
+				if (st.fx_surfaces[k].found) {
+					st.aim_at(st.eye(), st.fx_surfaces[k].point);
+				}
+			}
+			return true;
+		});
+		if (k == 0) {
+			// The oilfire 20 m ahead on the floor, started client-locally (no server request).
+			add("fx: oilfire start", 30.0, [](State &st, double, bool) {
+				const double yaw = st.mapper().view().yaw;
+				const sim::Vec3 e = st.eye();
+				const Vector3 at(float(double(e[0]) + std::sin(yaw) * 20.0), e[1] - st.f().eye_height_curr, float(double(e[2]) + std::cos(yaw) * 20.0));
+				fx::Transform t;
+				t.right = fx::Vec3{ 1, 0, 0 };
+				t.up = fx::Vec3{ 0, 1, 0 };
+				t.forward = fx::Vec3{ 0, 0, 1 };
+				t.trans = fx::Vec3{ at.x, at.y, at.z };
+				bf3::core::Result<fx::EffectHandle> h = st.g.fx->start_effect(kFxOilfire, t);
+				st.fx_oil_started = h.ok();
+				if (h) {
+					st.fx_oil = *h;
+				} else {
+					st.note("oilfire: " + h.error().message);
+				}
+				st.fx_oil_t0 = st.case_t;
+				return true;
+			});
+		}
+		add(fmt("fx: segment %zu fire", k), 200.0, [k](State &st, double, bool p_first) {
+			if (p_first) {
+				st.mapper().m2a_script_hold(Action::Fire, true);
+			}
+			st.fx_account();
+			// The oilfire's live particles at 15 s.
+			if (st.fx_oil_started && st.fx_oil_particles < 0 && st.case_t - st.fx_oil_t0 >= kFxOilfireSeconds && st.g.fx->world() != nullptr) {
+				int64_t n = 0;
+				for (const fx::EmitterOutput &o : st.g.fx->world()->outputs()) {
+					n += o.effect == st.fx_oil ? int64_t(o.particle_count) : 0;
+				}
+				st.fx_oil_particles = n;
+			}
+			if (!st.fx_surfaces[k].found || st.fx_seg_shots >= kFxShots / 2) {
+				st.mapper().m2a_script_hold(Action::Fire, false);
+				return st.fx_oil_particles >= 0 || !st.fx_oil_started || k > 0;
+			}
+			// Keep the aim on the surface; reload an empty magazine (the hold resumes when ready).
+			if (st.g.weapon.valid && st.g.weapon.magazine == 0 && st.ready()) {
+				st.mapper().m2a_script_press(Action::Reload);
+			}
+			st.aim_at(st.eye(), st.fx_surfaces[k].point);
+			return false;
+		});
+		wait(0.5);
+		add(fmt("fx: segment %zu tail", k), 1.0, [](State &st, double, bool) {
+			st.fx_account();
+			return true;
+		});
+	}
+	// A soldier hit: the target bot 8 m down the range lane, single rounds at its chest.
+	add("fx: lane", 5.0, [](State &st, double, bool) {
+		if (st.g.world != nullptr && st.s.shared_level() != nullptr) {
+			st.lane = sw::find_range_lane(*st.g.world, st.s.shared_level()->spawns, st.f().eye_height_curr, 20.0f);
+		}
+		return true;
+	});
+	teleport_lane();
+	full_magazine();
+	place_target(8.0f);
+	add("fx: soldier hits", 6.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.fx_soldier_starts = st.fx_soldier_ok = st.fx_soldier_decals = 0;
+			st.taps = 0;
+			st.t_mark = 0;
+			if (!st.report.targets.empty()) {
+				sw::zone_aim_point(st.report.targets[0].target, sw::HitZone::Chest, st.point);
+			}
+		}
+		st.fx_account();
+		if (!st.report.targets.empty()) {
+			st.aim_at(st.eye(), st.point);
+		}
+		if (st.taps < 3 && p_t >= st.t_mark && st.ready()) {
+			st.mapper().m2a_script_press(Action::Fire);
+			++st.taps;
+			st.t_mark = p_t + 0.4;
+		}
+		return st.taps >= 3 && p_t >= st.t_mark + 0.5;
+	});
+	add("fx: rows", 1.0, [](State &st, double, bool) {
+		const fx::FxTriggerStats now = st.g.fx->stats().triggers;
+		const fx::FxTriggerStats &a = st.fx_trig0;
+		const double flash = st.fx_shots_1p > 0 ? double(st.fx_flash) / double(st.fx_shots_1p) : 0.0;
+		st.row("e8.3.shots", double(st.fx_shots_1p), fmt(">= %" PRIu64 " predicted M16A3 shots with a 1p muzzle start", kFxShots), st.fx_shots_1p >= kFxShots);
+		st.row("e8.3.flash_fraction", flash, fmt("the _1p_flash component present in [0.71, 0.79] of them (%" PRIu64 " of %" PRIu64 ")", st.fx_flash, st.fx_shots_1p),
+				st.fx_shots_1p >= kFxShots && flash >= 0.71 && flash <= 0.79);
+		st.row("e8.3.drawn_equals_particles", double(st.fx_mismatch_frames), fmt("frames whose drawn instances != FxWorld::particles() (0 of %" PRIu64 ")", st.fx_frames),
+				st.fx_frames > 0 && st.fx_mismatch_frames == 0);
+		st.row("e8.4.oilfire_particles", double(st.fx_oil_particles), fmt("the client-local oilfire draws %" PRId64 " +- 1 live particles after %.0f s", kFxOilfireParticles, kFxOilfireSeconds),
+				st.fx_oil_started && std::llabs(st.fx_oil_particles - kFxOilfireParticles) <= 1);
+		for (const FxSurface &surface : st.fx_surfaces) {
+			const FxNamedCell *named = fx_named_cell(surface.material);
+			const std::array<uint64_t, 4> row = st.fx_mat.count(surface.material) ? st.fx_mat[surface.material] : std::array<uint64_t, 4>{};
+			const std::string tag = std::string("e8.5.") + named->name;
+			st.row(tag + ".effect", double(row[1]), fmt("every impact on it started %s (%" PRIu64 " of %" PRIu64 ")%s", named->effect, row[1], row[0],
+															 st.fx_first_bad.empty() ? "" : (", first other: " + st.fx_first_bad).c_str()),
+					surface.found && row[0] > 0 && row[1] == row[0]);
+			st.row(tag + ".decal", double(row[3]), fmt("its decals are %s (%" PRIu64 " of %" PRIu64 ")", named->decal, row[3], row[2]), surface.found && row[2] > 0 && row[3] == row[2]);
+		}
+		std::string others;
+		for (const auto &[m, row] : st.fx_mat) {
+			if (m != 8 && m != 2) {
+				others += fmt(" %u: %" PRIu64 " impacts (%" PRIu64 " as named)", unsigned(m), row[0], row[1]);
+			}
+		}
+		if (!others.empty()) {
+			st.note("other materials hit:" + others);
+		}
+		st.row("e8.5.soldier", double(st.fx_soldier_ok), fmt("soldier contacts started %s (%" PRIu64 " of %" PRIu64 "), no decal (%" PRIu64 ")", kFxSoldierEffect, st.fx_soldier_ok,
+														 st.fx_soldier_starts, st.fx_soldier_decals),
+				st.fx_soldier_starts > 0 && st.fx_soldier_ok == st.fx_soldier_starts && st.fx_soldier_decals == 0);
+		st.row("e8.5.water", 0.0, "Metro: no water (the water cell is fx.install.cells' Caspian row, E8 (5))", true);
+		const uint64_t tracers = now.tracers - a.tracers, tracer_shots = now.tracer_shots - a.tracer_shots;
+		st.row("e8.7.tracers", double(tracers), fmt("tracer starts == shots flagged kTracer with a tracer effect (%" PRIu64 "; %" PRIu64 " OwnShot events flagged)", tracer_shots, st.fx_tracer_flags),
+				tracers == tracer_shots && tracer_shots == st.fx_tracer_flags && tracers > 0);
+		const uint64_t shells = now.shells - a.shells, firearm = now.firearm_shots - a.firearm_shots;
+		st.row("e8.7.shells", double(shells), fmt("one shell eject per firearm shot (%" PRIu64 ")", firearm), shells == firearm && shells > 0);
+		const uint64_t sounds = now.sounds - a.sounds, impacts = now.impacts - a.impacts;
+		st.row("e8.7.impact_sounds", double(sounds), fmt("one impact sound cue per impact cell started (%" PRIu64 "; %" PRIu64 " Impact events, %" PRIu64 " culled)", impacts,
+															st.fx_impact_events, now.impacts_culled - a.impacts_culled),
+				sounds == impacts && sounds > 0);
+		st.row("e8.7.double_starts", double(now.double_starts - a.double_starts), "== 0 after the replays", now.double_starts == a.double_starts);
+		return true;
+	});
+}
+
+// E9 / E14 with bt's bots: 64 firefight bots in pairs in front of the observer (the player at the range lane, slot
+// 64: never hit), 2560 x 1440 borderless, vsync off, 10 s warm-up, then 12 windows of 5 s with FX on and off in turn
+// (the S3 G1b method for the FX GPU time). A timing case: the integrator runs it on main under the quiet lock.
+void M2aCheck::State::build_firefight() {
+	add("firefight: window", 3.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			DisplayServer *ds = DisplayServer::get_singleton();
+			const int32_t primary = ds->get_primary_screen();
+			ds->window_set_mode(DisplayServer::WINDOW_MODE_WINDOWED);
+			ds->window_set_flag(DisplayServer::WINDOW_FLAG_BORDERLESS, true);
+			ds->window_set_current_screen(primary);
+			ds->window_set_position(ds->screen_get_position(primary));
+			ds->window_set_size(Vector2i(kFfWidth, kFfHeight));
+			ds->window_set_vsync_mode(DisplayServer::VSYNC_DISABLED);
+			if (Viewport *vp = st.s.get_viewport()) {
+				RenderingServer::get_singleton()->viewport_set_measure_render_time(vp->get_viewport_rid(), true);
+			}
+		}
+		return p_t >= 1.0;
+	});
+	add("firefight: lane", 5.0, [](State &st, double, bool) {
+		if (st.g.world != nullptr && st.s.shared_level() != nullptr) {
+			st.lane = sw::find_range_lane(*st.g.world, st.s.shared_level()->spawns, st.f().eye_height_curr, 60.0f);
+		}
+		return true;
+	});
+	teleport_lane(); // the observer: bt's default layout starts at the range lane (firefight_brain.h)
+	add("firefight: warm-up", kFfWarmupSeconds + 5.0, [](State &st, double p_t, bool) {
+		if (st.lane) {
+			st.mapper().script_view(sim::yaw_radians(st.lane->yaw), 0.0f);
+		}
+		return p_t >= kFfWarmupSeconds;
+	});
+	add("firefight: measure", kFfWindowSeconds * kFfWindows + 10.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			const GameAudioStats as = st.g.audio != nullptr ? st.g.audio->stats() : GameAudioStats();
+			st.ff_late0 = as.late_blocks;
+			st.ff_short0 = as.short_blocks;
+			st.ff_remote0 = st.g.remote_shots_seen;
+			st.ff_hits0 = st.g.hits_seen;
+		}
+		const uint32_t window = uint32_t(p_t / kFfWindowSeconds);
+		if (window >= kFfWindows) {
+			st.g.fx_off = false;
+			return true;
+		}
+		const bool on = window % 2 == 0;
+		const bool window_start = p_t - double(window) * kFfWindowSeconds < 0.5; // the first 0.5 s of a window settles
+		RenderingServer *rs = RenderingServer::get_singleton();
+		const double gpu = st.s.get_viewport() != nullptr ? rs->viewport_get_measured_render_time_gpu(st.s.get_viewport()->get_viewport_rid()) : 0.0;
+		if (!window_start) {
+			if (on) {
+				st.ff_frame_on.push_back(st.dt * 1000.0);
+				st.ff_m2a_on.push_back(st.g.ms_total);
+				st.ff_gpu_on.push_back(gpu);
+				if (const Bf3FxRenderer *r = st.g.fx != nullptr ? st.g.fx->renderer() : nullptr) {
+					st.ff_fx_main.push_back(r->stats().step_ms + r->stats().prepare_ms + r->stats().upload_ms);
+				}
+			} else {
+				st.ff_gpu_off.push_back(gpu);
+			}
+			st.ff_crowd.push_back(st.g.ms_crowd);
+		}
+		if (on && st.g.fx != nullptr) {
+			const GameFxStats fs = st.g.fx->stats();
+			st.ff_max_lights = std::max(st.ff_max_lights, fs.lights);
+			st.ff_lights_over += fs.lights > fx::kMaxFxLights ? 1u : 0u;
+			st.ff_max_particles = std::max(st.ff_max_particles, fs.particles);
+		}
+		if (st.g.crowd != nullptr && st.g.crowd_built) {
+			st.ff_min_drawn = std::min(st.ff_min_drawn, st.g.crowd->stats().soldiers);
+		}
+		// The next frame's FX state (the FX-off window skips the FX step and hides its instances).
+		const uint32_t next = uint32_t((p_t + st.dt) / kFfWindowSeconds);
+		st.g.fx_off = next < kFfWindows && next % 2 == 1;
+		return false;
+	});
+	add("firefight: rows", 1.0, [](State &st, double, bool) {
+		const host::ClientStats &cs = st.f().stats;
+		const host::FirefightCounters ff = st.g.firefight_stats != nullptr ? host::firefight_counters(*st.g.firefight_stats) : host::FirefightCounters();
+		st.row("ff.bots", double(ff.bots), "64 firefight bots in pairs", ff.bots == 64);
+		st.row("ff.bursts", double(ff.bursts), "the bots fired (bursts)", ff.bursts > 0);
+		st.row("ff.remote_shots", double(st.g.remote_shots_seen - st.ff_remote0), "RemoteShot events presented during the window", st.g.remote_shots_seen > st.ff_remote0);
+		st.row("ff.crowd_drawn_min", st.ff_min_drawn == 0xFFFFFFFFu ? 0.0 : double(st.ff_min_drawn), "3p soldiers drawn every frame (minimum; reported)", true);
+		st.row("e9.lights_max", double(st.ff_max_lights), fmt("effect lights <= %u in every frame (%u frames over)", fx::kMaxFxLights, st.ff_lights_over), st.ff_lights_over == 0);
+		st.row("e9.particles_max", double(st.ff_max_particles), "live particles (reported; <= 16k expected)", true);
+		const double fx_main_p99 = percentile(st.ff_fx_main, 0.99);
+		st.row("e9.fx_main_p99_ms", fx_main_p99, fmt("FX main thread (world step + RenderPrep + upload + lights) p99 <= 1.0 ms (%zu frames)", st.ff_fx_main.size()),
+				!st.ff_fx_main.empty() && fx_main_p99 <= 1.0);
+		const double gpu_on = percentile(st.ff_gpu_on, 0.5), gpu_off = percentile(st.ff_gpu_off, 0.5);
+		st.row("e9.fx_gpu_ms", gpu_on - gpu_off, fmt("FX GPU time: p50 FX on %.3f - FX off %.3f ms <= 2.0 ms (alternating 5 s windows)", gpu_on, gpu_off),
+				!st.ff_gpu_on.empty() && !st.ff_gpu_off.empty() && gpu_on - gpu_off <= 2.0);
+		const double frame_p99 = percentile(st.ff_frame_on, 0.99);
+		st.row("e14.frame_p99_ms", frame_p99, fmt("frame p99 <= 16.7 ms at %dx%d, vsync off (FX-on frames, %zu)", kFfWidth, kFfHeight, st.ff_frame_on.size()),
+				!st.ff_frame_on.empty() && frame_p99 <= 16.7);
+		const double m2a_p99 = percentile(st.ff_m2a_on, 0.99);
+		st.row("e14.m2a_main_p99_ms", m2a_p99, "M2a main-thread additions (viewmodel, HUD, crowd, triggers + FX, audio router) p99 <= 3.0 ms", !st.ff_m2a_on.empty() && m2a_p99 <= 3.0);
+		const double crowd_p99 = percentile(st.ff_crowd, 0.99);
+		st.row("e14.crowd_step_p99_ms", crowd_p99, "Bf3GameCrowd::step p99 <= 2.0 ms (S3 G1a)", !st.ff_crowd.empty() && crowd_p99 <= 2.0);
+		const GameAudioStats as = st.g.audio != nullptr ? st.g.audio->stats() : GameAudioStats();
+		st.row("e14.audio_underruns", double(as.late_blocks - st.ff_late0 + as.short_blocks - st.ff_short0), "0 audio underruns (late + short blocks)",
+				st.g.audio != nullptr && as.late_blocks == st.ff_late0 && as.short_blocks == st.ff_short0);
+		st.row("e14.event_overflows", double(cs.events_overflow), "0 presentation-event overflows", cs.events_overflow == 0);
+		return true;
+	});
+}
+
+// Automatic: cycle the fire mode (B) until the weapon in hand is on its automatic mode.
+void M2aCheck::State::automatic_mode() {
+	add("automatic fire mode", 4.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.t_mark = 0;
+		}
+		const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
+		if (d == nullptr) {
+			return false;
+		}
+		if (d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic == core::gameplay::FireLogic::Automatic) {
+			return st.ready();
+		}
+		if (p_t - st.t_mark > 0.3 || st.t_mark > p_t) {
+			st.t_mark = p_t;
+			st.mapper().m2a_script_press(Action::FireMode);
+		}
+		return false;
+	});
+}
+
 void M2aCheck::State::finish_case() {
+	if (acheck != nullptr && g.audio != nullptr) {
+		g.audio->set_check(nullptr);
+	}
+	g.listener_override = false;
+	g.fx_off = false;
 	if (current.outcome != M2aOutcome::Skip) {
 		for (const M2aRow &r : current.rows) {
 			if (!r.pass) {

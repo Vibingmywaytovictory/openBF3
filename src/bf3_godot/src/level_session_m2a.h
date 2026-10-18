@@ -40,6 +40,7 @@
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/host/client_wiring.h"
+#include "bf3/host/firefight_brain.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/presentation_weapon.h"
@@ -55,6 +56,8 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <godot_cpp/variant/vector3.hpp>
 
 namespace godot {
 class CanvasLayer;
@@ -181,6 +184,7 @@ struct M2aGame {
 	bool killed_by_self = false;
 	uint64_t death_ns = 0;
 	uint32_t respawns = 0;
+	uint32_t deaths_by_enemy = 0; // own deaths with another soldier as the killer
 
 	// ---- kit / team for the next spawn (K / T) ----
 	uint8_t next_kit = 0, next_team = 1;
@@ -202,6 +206,25 @@ struct M2aGame {
 	std::unique_ptr<Bf3GameAudio, void (*)(Bf3GameAudio *)> audio{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)> crowd{ nullptr, nullptr };
 	bool crowd_built = false;
+	std::vector<std::string> part_notes; // the parts' load lines (loader thread), printed on the first frame
+	// The firefight bots (bt: GameServerConfig::firefight; Free in the playable scene and the play case, Pairs for
+	// --m2a-firefight). null: none.
+	std::shared_ptr<bf3::host::FirefightStats> firefight_stats;
+	uint32_t firefight_bots = 0;
+	bool firefight_pairs = false;
+	// E9's FX-off windows (the firefight case): the effects hidden and their step skipped.
+	bool fx_off = false;
+	// The listener / culling camera of the last frame (M2aFrame::camera_velocity from the difference).
+	bool camera_valid = false;
+	godot::Vector3 camera_prev;
+	// The M2a main-thread parts of this frame, wall milliseconds (E14: viewmodel + HUD + crowd + FX + audio).
+	double ms_vm = 0, ms_hud = 0, ms_crowd = 0, ms_fx = 0, ms_audio = 0, ms_total = 0;
+	float fp_fov_applied = -1.0f; // the FX 1p projection last set from the viewmodel
+	uint64_t own_muzzles_fx = 0, own_muzzles_standin = 0; // own 1p muzzles from fx3's own_muzzle / G6's transform
+	// E7 (the audio case): the listener held at a point of the check's (the own soldier then sounds in 3p, as the free
+	// camera's: M2aFrame::free_camera), without the free camera's neutral command, so the soldier keeps firing.
+	bool listener_override = false;
+	godot::Vector3 listener_position, listener_forward{ 0, 0, -1 };
 
 	Bf3Viewmodel *own_viewmodel() const { return own_team == 2 ? vm[1] : (own_team == 1 ? vm[0] : nullptr); }
 	// The viewmodel item of a def for a team (-1: none).
