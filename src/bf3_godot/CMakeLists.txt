@@ -176,3 +176,10 @@ target_sources(bf3_godot PRIVATE
     src/viewmodel_muzzle.cpp
     src/m2a_w3_headers.cpp
 )
+
+# M2a tp (docs/design/m2a-tp.md): Bf3GameCrowd's body (game_crowd.cpp) and the crowd's kit item lists
+# (game_crowd_items.h, Godot-free).
+target_sources(bf3_godot PRIVATE
+    src/game_crowd.cpp
+    src/game_crowd_items.h
+)
