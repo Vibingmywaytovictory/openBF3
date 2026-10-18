@@ -63,7 +63,7 @@ namespace {
 constexpr bool kBtLanded = true; // bt: firefight_brain.cpp (add_firefight_bots, firefight_layout, FirefightBrain)
 constexpr bool kTpLanded = true; // tp: CrowdEvaluator::muzzle_model and R5
 constexpr bool kAu3Landed = true; // au3: weapon_audio.cpp, impact_audio.cpp, game_audio_check.cpp
-constexpr bool kFx3Landed = false; // fx3: triggers.cpp
+constexpr bool kFx3Landed = true; // fx3: triggers.cpp
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2a.contract3: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);

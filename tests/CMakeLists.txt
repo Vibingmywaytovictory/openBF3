@@ -1293,4 +1293,29 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_au3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(audio.router.unit audio.game audio.game.crowd audio.game.underruns PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au3_cl_dir}")
+
+# M2a fx3 (docs/design/m2a-fx3.md): VFX3's triggers. fx.triggers.unit: install-free (synthetic EBX effects and grid
+# through the real library, cl's ClientProjectiles for case "late join"), a unit row (<= 2 s). fx.install.cells: the
+# retail in-game cell selection (Metro's fire effects and collision cells, the E8 (1) / (3) / (5) / (7) items, the
+# Caspian water fallback; install unchanged last), an install row; 77 without an install. Both in the asan preset.
+openbf3_test(test_fx_triggers test_main.cpp fx_triggers_tests.cpp fx_test_support.h weapons_support.h test_support.h)
+target_link_libraries(test_fx_triggers PRIVATE bf3_fx bf3_host bf3_render) # bf3_render: the decal textures as Bf3GameFx prepares them
+add_test(NAME fx.triggers.unit COMMAND test_fx_triggers --test-suite=fx-triggers-unit)
+add_test(NAME fx.install.cells COMMAND test_fx_triggers --test-suite=fx-install-cells)
+set_tests_properties(fx.install.cells PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+# COST: 3-5.6 s alone (Metro's gunplay level, fx sources, collision and Caspian), so it starts early in a parallel pass.
+openbf3_cost(fx.install.cells 1 5)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.triggers.unit fx.install.cells PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx3_cl_dir}")
+endif()
+
+# godot.fx3_demo: the windowed VFX3 demo check (Bf3GameFx end to end on Metro: load, draw, shots, impacts, decals, hit,
+# 7 captures, install unchanged; docs/design/m2a-fx3.md §6). A window row (label window: the merge pass's user-away
+# phase, serially); over 30 s because the level session loads Metro (warm on the row's own cache root) before the
+# demo's scripted 15 s.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.fx3_demo godot_fx3_demo.cmake WINDOW TIMEOUT 900)
+    set_tests_properties(godot.fx3_demo PROPERTIES RUN_SERIAL TRUE)
+    openbf3_cost(godot.fx3_demo 1 31)
 endif()
