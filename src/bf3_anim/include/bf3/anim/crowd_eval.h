@@ -147,6 +147,11 @@ struct CrowdFrameStats {
 	double blocked_seconds = 0.0; // wait_and_publish blocked on the job
 };
 
+// M2a tp [class] (named insertion, docs/design/m2a-tp.md): the stance set and the M2a counters of the members below
+// (defined in the M2a tp block at the end of this file).
+struct CrowdStanceSet;
+struct CrowdM2aStats;
+
 class CrowdEvaluator {
 public:
 	// p_clips and the teams' binds and reload clips must outlive the evaluator. Fails when p_soldiers exceeds
@@ -193,6 +198,17 @@ public:
 	// binds; with weapons the default weapon's SoldierPart is stripped before upload, so no drawn vertex reads them).
 	uint8_t weapon_of(uint32_t p_i) const;
 	std::span<const Mat34> weapon_palette(uint32_t p_i) const;
+	// M2a tp [class] (named insertion, docs/design/m2a-tp.md): make() with the stance set (lc's stance idles, aims and
+	// transitions and tp's moves, fire and death clips): the soldiers then follow CrowdSoldierInput's pose, target_pose,
+	// transition, fire_seq and dead (the M2a tp block at the end of this file). The make() above is this one with an empty
+	// set. Fails as that one does, and when the stance clips' rig is not the crowd rig.
+	static core::Result<std::unique_ptr<CrowdEvaluator>> make(const CrowdClipSet &p_clips, const CrowdStanceSet &p_stance, std::span<const CrowdTeam> p_teams,
+			uint32_t p_soldiers, const CrowdConfig &p_config);
+	// False when the soldier draws nothing: hidden (crowd_flags::kHidden), dead longer than kCrowdDeathHideSeconds, or never
+	// evaluated. Owner thread, after wait_and_publish.
+	bool drawn(uint32_t p_i) const;
+	// What the last published job did with the M2a inputs, and the counted clamps since make().
+	CrowdM2aStats m2a_stats() const;
 
 private:
 	CrowdEvaluator();
