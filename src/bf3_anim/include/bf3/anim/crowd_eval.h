@@ -184,6 +184,15 @@ public:
 	// when the soldier's weapon has no muzzle joint, is hidden or was never evaluated. Published to the FX triggers
 	// after wait_and_publish.
 	bool muzzle_model(uint32_t p_i, Xform &r_model) const;
+	// M2a w3 (W3.0 contract, docs/design/m2a.md §9; docs/design/m2a-w3.md §3 "tp's 3p weapon route"; tp's body, R5): the
+	// soldier's weapon drawn as its own mesh. weapon_of(p_i) is the CrowdTeam::weapons index behind the front palette
+	// (kNoCrowdWeapon when the team has no weapons, or the soldier is hidden or was never evaluated); weapon_palette(p_i)
+	// is one Mat34 per bind of that CrowdWeapon::binds, model space (the root is not applied, as palette()), in the same
+	// per-soldier double buffer and under the same changed(p_i) flag as palette(). Empty with kNoCrowdWeapon. palette(p_i)
+	// keeps its layout: one Mat34 per CrowdTeam::binds entry (still body, head, helmet and the team's default weapon
+	// binds; with weapons the default weapon's SoldierPart is stripped before upload, so no drawn vertex reads them).
+	uint8_t weapon_of(uint32_t p_i) const;
+	std::span<const Mat34> weapon_palette(uint32_t p_i) const;
 
 private:
 	CrowdEvaluator();
@@ -212,5 +221,9 @@ constexpr uint32_t crowd_lanes(uint32_t p_hardware_concurrency, bool p_listen_se
 constexpr uint8_t crowd_team_of_wire(uint8_t p_wire_team) {
 	return p_wire_team == 2 ? uint8_t(1) : uint8_t(0);
 }
+// CrowdEvaluator::weapon_of when the soldier draws no separate weapon mesh (S3's teams without CrowdTeam::weapons,
+// hidden or never evaluated).
+inline constexpr uint8_t kNoCrowdWeapon = 0xFF;
+static_assert(kMaxCrowdWeapons < kNoCrowdWeapon);
 
 } // namespace bf3::anim
