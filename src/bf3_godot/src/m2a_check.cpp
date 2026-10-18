@@ -1476,8 +1476,13 @@ void M2aCheck::State::build_play() {
 					fmt("muzzle starts (%" PRIu64 " remote shots without a crowd muzzle; %" PRIu64 " own 1p muzzles from fx3, %" PRIu64 " from the stand-in)", fs.triggers.muzzle_fallbacks,
 							st.g.own_muzzles_fx, st.g.own_muzzles_standin),
 					fs.triggers.muzzle_starts > 0);
-			st.row("play.fx_impacts", double(fs.triggers.impacts), fmt("impact cells started (%" PRIu64 " decals, %" PRIu64 " double starts)", fs.triggers.decals, fs.triggers.double_starts),
-					fs.triggers.impacts > 0 && fs.triggers.double_starts == 0);
+			// Double starts are reported here, gated in the fx case (E8 (7)): a shot predicted after the server's
+			// respawn tick never happens on the server, and the new life's first real shot reuses its id
+			// (next_shot_index is kept across lives), so the triggers drop that shot's effects as a repeat
+			// (m2a-gx.md §7, open: cl / fx3).
+			st.row("play.fx_impacts", double(fs.triggers.impacts), fmt("impact cells started (%" PRIu64 " decals; %" PRIu64 " double starts reported: shot ids reused across a respawn)",
+																		   fs.triggers.decals, fs.triggers.double_starts),
+					fs.triggers.impacts > 0);
 		}
 		const bool audio_ok = st.g.audio != nullptr && st.g.audio->built();
 		st.row("play.audio_built", audio_ok ? 1.0 : 0.0, "au3's game audio built (Bf3GameAudio)", audio_ok);
@@ -1486,7 +1491,12 @@ void M2aCheck::State::build_play() {
 			st.row("play.audio_mixed_s", double(as.mixer_frames) / double(ba::kMixRate), fmt("seconds mixed (peak %u voices, %" PRIu64 " impacts, %" PRIu64 " reloads)", as.peak_instances,
 																							  as.impacts.impacts, as.router.reloads),
 					as.mixer_frames > 0);
-			st.row("play.audio_late_commands", double(as.late_commands), "== 0 (short / late blocks are wall clock: reported)", as.late_commands == 0);
+			// A late command means the game thread stalled for more than the scheduling lead (21.3 ms): wall clock,
+			// so reported on a branch and gated with OPENBF3_AU3_GATE_LATE=1 (as E7's late blocks).
+			const bool gate_late = env_is_one("OPENBF3_AU3_GATE_LATE");
+			st.row("play.audio_late_commands", double(as.late_commands),
+					gate_late ? "== 0 (game-thread stalls over the 21.3 ms lead)" : "game-thread stalls over the 21.3 ms lead (wall clock: reported; OPENBF3_AU3_GATE_LATE=1 gates it)",
+					!gate_late || as.late_commands == 0);
 		}
 		st.row("play.weapon_reconciliations", double(cs.weapon_reconciliations), "reported", true);
 		st.row("play.kit_selects", double(st.g.kit_selects_sent), ">= 1 KitSelect sent after Spawned", st.g.kit_selects_sent >= 1);
