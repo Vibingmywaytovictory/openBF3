@@ -830,7 +830,7 @@ struct FxTriggers::Impl {
 		if (!config.impacts) {
 			return;
 		}
-		const uint32_t zone = contact ? uint32_t(std::clamp(p_e.value, 0.0f, 3.0f)) : p_e.material;
+		const uint32_t zone = contact ? (std::isfinite(p_e.value) ? uint32_t(std::clamp(p_e.value, 0.0f, 3.0f)) : 1u) : p_e.material;
 		const ImpactTable *table = library.impacts();
 		const ImpactCell *cell = table != nullptr ? table->select(projectile_material(p_e.def, p_e.slot, p_e.id), zone_material(zone)) : nullptr;
 		if (cell == nullptr || cell->empty()) {

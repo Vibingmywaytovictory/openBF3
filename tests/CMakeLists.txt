@@ -1205,3 +1205,17 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_w3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_w3_cl_dir}")
 endif()
+
+# M2a fx3 (docs/design/m2a-fx3.md): VFX3's triggers. fx.triggers.unit: install-free (synthetic EBX effects and grid
+# through the real library, cl's ClientProjectiles for case "late join"), a unit row (<= 2 s). fx.install.cells: the
+# retail in-game cell selection (Metro's fire effects and collision cells, the E8 (1) / (3) / (5) / (7) items, the
+# Caspian water fallback; install unchanged last), an install row; 77 without an install. Both in the asan preset.
+openbf3_test(test_fx_triggers test_main.cpp fx_triggers_tests.cpp fx_test_support.h weapons_support.h test_support.h)
+target_link_libraries(test_fx_triggers PRIVATE bf3_fx bf3_host)
+add_test(NAME fx.triggers.unit COMMAND test_fx_triggers --test-suite=fx-triggers-unit)
+add_test(NAME fx.install.cells COMMAND test_fx_triggers --test-suite=fx-install-cells)
+set_tests_properties(fx.install.cells PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_fx3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(fx.triggers.unit fx.install.cells PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx3_cl_dir}")
+endif()
