@@ -1239,7 +1239,12 @@ source, commit 7ea1331) are lines marked `// M2a cl` inside sv's `gunplay.{h,cpp
 | R3 | sv | weapon_sim.cpp, weapon_sim_def.cpp | the `exact_aim` branch where `step_soldier_weapons` fills a `ShotEvent`, and the hash line in `weapon_table_hash` (§4.2) |
 | R4 | lc | ballistics.cpp | filling the new `TargetQuery` fields at `ProjectileWorld`'s query sites (§6.4) |
 | R5 | tp (wave 3) | crowd_eval.cpp | `make()` and the skinning step pick the weapon binds, reload clip and `weapon_local` per soldier from `CrowdTeam::weapons` (§9; index 0 = today's per-team data) |
+| R6 | gx (wave 4) | fx3's game_fx.cpp | `resolve()`: a partition holding an `EmitterDocument` counts as one (an emitter partition's primary instance is its `EmitterTemplateData`; E8 (4)'s oilfire was refused), commit b7652bc |
+| R7 | gx (wave 4) | au3's tests/audio_router_tests.cpp | the test-local `m2a_fake::impact_sound_names` deleted for fx3's real `bf3::fx::impact_sound_names` (fx3 merged), commit 589a3b0 |
 
+R6 and R7 were added at gx's verify fix (wave 4): the rule (R1–R5, decided before wave 2) proved too narrow for the
+end-to-end step, whose in-game checks are the first to run the merged tracks together and find their seams; gx
+named and committed each one separately in the other track's file, nothing else of fx3's or au3's changed.
 Each insertion and replacement is a separate commit whose message names it. wp's W1–W11 must stay bit-equal after
 R3 and R4 (they do not take the new branches: `exact_aim` is off and the `TargetQuery` fields are only read by the
 new provider), and S3's G0 and `anim.s3.unit` rows must stay equal after R5 (one weapon per team). The two §5.2
