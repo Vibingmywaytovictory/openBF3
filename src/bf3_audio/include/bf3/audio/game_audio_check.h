@@ -93,6 +93,9 @@ struct GameCheckWindow {
 	float probe_far = -1.0f;
 	std::array<float, 4> band_amplitude{ -1.0f, -1.0f, -1.0f, -1.0f };
 	uint32_t bands_found = 0;
+	// The band of the group before each matched one in its crossfader (the group fades in over it, au G5.4's rule;
+	// { -1, -1 } for a first group): the amplitude is partial there too.
+	std::array<std::pair<float, float>, 4> band_fade_in{ { { -1.0f, -1.0f }, { -1.0f, -1.0f }, { -1.0f, -1.0f }, { -1.0f, -1.0f } } };
 };
 
 // Records the run: a MixTap for the full mix (set on the game mixer before its stream starts), TapRecorders on the

@@ -10,26 +10,55 @@
 #include "test_support.h"
 
 #include "bf3/audio/audio_check.h"
+#include "bf3/audio/audio_config.h"
+#include "bf3/audio/audio_load.h"
 #include "bf3/audio/game_audio_check.h"
+#include "bf3/audio/game_audio_frame.h"
 #include "bf3/audio/impact_audio.h"
+#include "bf3/audio/kit_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/audio/wav_io.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/audio/weapon_sound.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/sound_stream.h"
 #include "bf3/core/audio/wave_bank.h"
+#include "bf3/core/gameplay/material_grid.h"
+#include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/install.h"
+#include "bf3/core/install_reader.h"
+#include "bf3/core/install_snapshot.h"
+#include "bf3/core/level/level.h"
+#include "bf3/core/path_guard.h"
+#include "bf3/fx/effect_compiler.h"
+#include "bf3/fx/impact_table.h"
+#include "bf3/fx/triggers.h"
+#include "bf3/host/client_session.h"
+#include "bf3/host/client_wiring.h"
+#include "bf3/host/gunplay.h"
+#include "bf3/host/kits.h"
+#include "bf3/net/protocol.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <random>
+#include <sstream>
+#include <string>
 #include <vector>
 
 using namespace bf3::core;
@@ -38,6 +67,8 @@ namespace cp = bf3::core::audio::port;
 namespace ba = bf3::audio;
 namespace host = bf3::host;
 namespace sw = bf3::sim::weapons;
+namespace sim = bf3::sim;
+namespace net = bf3::net;
 using ba::SamplerTraceEntry;
 using ba::SamplerTraceKind;
 
@@ -815,6 +846,24 @@ TEST_SUITE("audio-router") {
 			CHECK(x.up);
 			check_grid(x, 5);
 		}
+		// Single fire: one instance per RemoteShot; the firing records after each shot belong to it (no second start).
+		Rig sg;
+		std::vector<Shooter> single(1);
+		single[0].def = kSingle;
+		single[0].burst(sg.render + 20 * kTick, 1, 5, 0.2);
+		run(sg, single, 160);
+		CHECK(sg.recorder.seen.size() == 5);
+		CHECK(sg.router->stats().bursts == 5);
+		CHECK(sg.router->stats().state_rounds == 0);
+		for (size_t i = 0; i < sg.recorder.seen.size(); ++i) {
+			CHECK(sg.recorder.seen[i].up);
+			if (i > 0) {
+				// 0.2 s apart, within the mixer clock's resolution (MixerCore::clock() moves in 512-frame blocks, so
+				// separate instances carry up to one block of the display frame's phase; a burst's rounds do not).
+				const int64_t gap = int64_t(sg.recorder.seen[i].first) - int64_t(sg.recorder.seen[i - 1].first);
+				CHECK(std::llabs(gap - 9600) <= int64_t(ba::kBlockFrames));
+			}
+		}
 		Rig k;
 		std::vector<Shooter> dead(1);
 		dead[0].burst(k.render + 10 * kTick, 1, 30);
@@ -1167,5 +1216,759 @@ TEST_SUITE("audio-router") {
 		CHECK(rep.table().find("mixer.late_blocks") != std::string::npos);
 		r.router->set_observer(nullptr);
 		r.mixer->set_tap(&r.capture);
+	}
+}
+
+// =====================================================================================================================
+// audio-game: the install rows (exit 77 without an install; install.unchanged in each case).
+
+// fx3's fx::impact_sound_names (triggers.h) is declared by the W3.0 contract but not merged on this branch: the same
+// rule over the public ImpactTable::cell (every cell's impact_sound, deduplicated and sorted), test-local.
+namespace m2a_fake {
+std::vector<std::string> impact_sound_names(const bf3::fx::ImpactTable &p_table) {
+	std::vector<std::string> out;
+	for (size_t r = 0; r < p_table.rows(); ++r) {
+		for (size_t c = 0; c < p_table.rows(); ++c) {
+			const std::string &n = p_table.cell(r, c).impact_sound;
+			if (!n.empty()) {
+				out.push_back(n);
+			}
+		}
+	}
+	std::sort(out.begin(), out.end());
+	out.erase(std::unique(out.begin(), out.end()), out.end());
+	return out;
+}
+} // namespace m2a_fake
+
+namespace {
+
+constexpr const char *kM16Patch = "sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02";
+constexpr double kNsPerTick = 1e9 / 60.0;
+
+// One install, Metro TDM, its gunplay tables, fx's impact sound names and the game's audio assets
+// (load_game_audio_assets, exactly Bf3GameAudio::load) for every case of the process.
+struct GameFixture {
+	InstallReader reader;
+	InstallSnapshot before;
+	std::shared_ptr<Install> install;
+	std::unique_ptr<level::LoadedLevel> metro;
+	std::shared_ptr<const host::GunplayLevel> gunplay;
+	std::vector<std::string> impact_names;
+	std::string impact_note;
+	ba::GameAudioAssets assets;
+	ba::AudioTuning tuning;
+	double load_seconds = 0.0;
+};
+
+GameFixture *game_fixture() {
+	static std::unique_ptr<GameFixture> f;
+	static bool tried = false;
+	if (tried) {
+		return f.get();
+	}
+	tried = true;
+	auto made = std::make_unique<GameFixture>();
+	if (!made->reader.locate({})) {
+		return nullptr;
+	}
+	const auto t0 = std::chrono::steady_clock::now();
+	made->before = made->reader.snapshot();
+	Result<std::shared_ptr<Install>> install = Install::open(made->reader);
+	REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
+	made->install = *install;
+	Result<std::unique_ptr<level::LoadedLevel>> lvl = level::load_level(made->install, "MP_Subway", "TeamDeathMatch0");
+	REQUIRE_MESSAGE(lvl.ok(), (lvl.ok() ? std::string() : lvl.error().message));
+	made->metro = std::move(*lvl);
+	const std::string id = made->metro->info.id.empty() ? made->metro->root_name : made->metro->info.id;
+	Result<std::shared_ptr<const host::GunplayLevel>> g = host::load_gunplay_level(made->install, id, "TeamDeathMatch0");
+	REQUIRE_MESSAGE(g.ok(), (g.ok() ? std::string() : g.error().message));
+	made->gunplay = *g;
+	// fx's impact sound names (Bf3GameFx::impact_sound_names: every ImpactCell::impact_sound of the level's table).
+	const std::optional<std::string> grid = gameplay::MaterialGrid::grid_of_level(made->metro->db(), made->metro->root_name);
+	if (grid) {
+		gameplay::WorkBudget budget{ bf3::fx::kDefaultCompileWorkLimit };
+		Result<bf3::fx::ImpactTable> table = bf3::fx::ImpactTable::load(made->metro->db(), *grid, budget);
+		if (table) {
+			made->impact_names = m2a_fake::impact_sound_names(*table);
+		} else {
+			made->impact_note = "impact table: " + table.error().message;
+		}
+	} else {
+		made->impact_note = "impact table: no material grid for " + made->metro->root_name;
+	}
+	Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(*made->install, *made->metro, *made->gunplay, made->impact_names, 0);
+	REQUIRE_MESSAGE(a.ok(), (a.ok() ? std::string() : a.error().message));
+	made->assets = std::move(*a);
+	std::ifstream cfg(OPENBF3_AUDIO_TUNING_CFG, std::ios::binary);
+	REQUIRE(cfg.good());
+	std::stringstream text;
+	text << cfg.rdbuf();
+	Result<ba::AudioTuning> tuning = ba::parse_audio_tuning(text.str());
+	REQUIRE_MESSAGE(tuning.ok(), (tuning.ok() ? std::string() : tuning.error().message));
+	made->tuning = *tuning;
+	made->load_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+	f = std::move(made);
+	return f.get();
+}
+
+GameFixture *need_game_install() {
+	GameFixture *f = game_fixture();
+	if (f == nullptr) {
+		bf3::test::skip_install_case("no BF3 install found");
+	}
+	return f;
+}
+
+void check_game_unchanged(const GameFixture &p_fixture) {
+	const SnapshotDiff diff = diff_snapshots(p_fixture.before, p_fixture.reader.snapshot());
+	CHECK_MESSAGE(diff.clean(), diff.summary());
+}
+
+std::string env_value(const char *p_name) {
+	char *v = nullptr;
+	size_t n = 0;
+	if (_dupenv_s(&v, &n, p_name) != 0 || v == nullptr) {
+		return {};
+	}
+	std::string out(v);
+	std::free(v);
+	return out;
+}
+
+std::filesystem::path au3_shots_dir() {
+	const std::string env = env_value("OPENBF3_AU3_SHOTS");
+	return std::filesystem::path(env.empty() ? std::string(OPENBF3_AU3_SHOTS) : env);
+}
+
+PathGuard install_guard(const GameFixture &p_fixture) {
+	PathGuard g;
+	REQUIRE(g.add_protected_root(p_fixture.reader.root()));
+	return g;
+}
+
+void write_text(const PathGuard &p_guard, const std::filesystem::path &p_path, const std::string &p_text) {
+	REQUIRE(p_guard.allows_write(p_path));
+	std::ofstream out(p_path, std::ios::binary | std::ios::trunc);
+	out << p_text;
+	CHECK(out.good());
+}
+
+uint16_t def_of_patch(const ba::WeaponAudioTable &p_table, std::string_view p_patch) {
+	for (size_t i = 0; i < p_table.defs.size(); ++i) {
+		if (p_table.defs[i].patch == p_patch && p_table.defs[i].form == ba::WeaponAudioForm::Driver) {
+			return uint16_t(i);
+		}
+	}
+	return sw::kNoWeapon;
+}
+
+// ---- a cl-faithful presentation stream ------------------------------------------------------------------------------
+// The server side runs sv's rules per tick (gunplay.cpp: burst_count counts the ticks with shots after a tick without;
+// firing = a shot in the snapshot interval (s - 2, s]; a record at tick s holds the shots of tick s); a snapshot of
+// the even ticks reaches the client latency_ticks after its tick ended with its records and the RemoteShots of its
+// interval; the client publishes a real PresentationFrame per display frame (render = received - delay_ticks, the
+// newest sample at or before the render time plus up to two newer, newest_tick); present_clock, present_others and
+// present_other_weapons are host's own functions.
+
+struct NetShooter {
+	uint8_t slot = 1;
+	uint16_t def = sw::kNoWeapon;
+	sim::SoldierState state;
+	std::vector<sw::SimTime> shots; // ascending
+	std::vector<uint32_t> ids;
+	size_t next_tick_scan = 0; // the first shot not yet past by the server
+	size_t next_sent = 0; // the first shot not yet in a snapshot's RemoteShots
+	uint32_t burst_count = 0;
+	uint32_t reload_count = 0;
+	int64_t last_shot_tick = -100;
+	bool previous_tick_shots = false;
+	uint32_t next_id = 1;
+	std::deque<net::TimedOther> received; // ascending server ticks
+	void burst(sw::SimTime p_first, uint32_t p_rounds, sw::SimTime p_interval) {
+		for (uint32_t k = 0; k < p_rounds; ++k) {
+			shots.push_back(p_first + sw::SimTime(k) * p_interval);
+			ids.push_back(next_id++);
+		}
+	}
+	// sv, after tick p_tick ran.
+	void server_tick(uint32_t p_tick) {
+		bool any = false;
+		while (next_tick_scan < shots.size() && sim::Tick(sw::tick_containing(shots[next_tick_scan])) <= p_tick) {
+			any = any || sw::tick_containing(shots[next_tick_scan]) == p_tick;
+			++next_tick_scan;
+		}
+		if (any) {
+			if (!previous_tick_shots) {
+				++burst_count;
+			}
+			last_shot_tick = p_tick;
+		}
+		previous_tick_shots = any;
+	}
+	net::OtherSoldier record(uint32_t p_tick) const {
+		net::OtherSoldier o = net::quantize_other(slot, state);
+		const bool firing = last_shot_tick > int64_t(p_tick) - 2 && last_shot_tick <= int64_t(p_tick);
+		net::set_other_weapon(o, def, sw::WeaponPhase::Ready, firing, false, reload_count, burst_count);
+		net::set_other_team(o, 2);
+		return o;
+	}
+	sim::Vec3 eye() const {
+		return { state.position[0], state.position[1] + 1.6f, state.position[2] };
+	}
+};
+
+struct NetStream {
+	double latency_ticks = 2.5; // snapshot end of tick -> arrival
+	double delay_ticks = 4.0; // cl's interpolation delay (2 snapshot intervals)
+	uint32_t server_ran = 0; // the newest tick the server stepped
+	struct Pending {
+		double arrive = 0.0;
+		uint32_t tick = 0;
+	};
+	std::deque<Pending> in_flight;
+	uint32_t newest_tick = 0;
+	std::unique_ptr<host::PresentationFrame> frame = std::make_unique<host::PresentationFrame>();
+
+	// Steps the server to floor(p_t) and delivers the snapshots that arrived by p_t; RemoteShots into r_events.
+	void advance(double p_t, std::vector<NetShooter> &r_shooters, std::vector<host::PresentEvent> &r_events) {
+		while (double(server_ran + 1) <= p_t) {
+			++server_ran;
+			for (NetShooter &s : r_shooters) {
+				s.server_tick(server_ran);
+			}
+			if (server_ran % 2 == 0) {
+				in_flight.push_back(Pending{ double(server_ran) + latency_ticks, server_ran });
+				for (NetShooter &s : r_shooters) {
+					s.received.push_back(net::TimedOther{ server_ran, s.record(server_ran) }); // held back until arrival below
+				}
+			}
+		}
+		while (!in_flight.empty() && in_flight.front().arrive <= p_t) {
+			const uint32_t tick = in_flight.front().tick;
+			in_flight.pop_front();
+			newest_tick = tick;
+			for (NetShooter &s : r_shooters) {
+				while (s.next_sent < s.shots.size() && sim::Tick(sw::tick_containing(s.shots[s.next_sent])) <= tick) {
+					host::PresentEvent e;
+					e.kind = host::PresentKind::RemoteShot;
+					e.timeline = host::PresentTimeline::Render;
+					e.slot = s.slot;
+					e.def = s.def;
+					e.id = s.ids[s.next_sent];
+					e.time = s.shots[s.next_sent];
+					const sim::Vec3 eye = s.eye();
+					e.pos[0] = eye[0];
+					e.pos[1] = eye[1];
+					e.pos[2] = eye[2];
+					r_events.push_back(e);
+					++s.next_sent;
+				}
+			}
+		}
+	}
+	// The frame cl publishes at p_t (server-tick units), p_now_ns.
+	void publish(double p_t, uint64_t p_now_ns, const std::vector<NetShooter> &p_shooters) {
+		host::PresentationFrame &f = *frame;
+		f.valid = true;
+		++f.serial;
+		f.tick = sim::Tick(std::floor(p_t)) + 3; // the own clock runs ahead
+		f.tick_fraction = p_t - std::floor(p_t);
+		f.publish_ns = p_now_ns;
+		f.render_ticks_at_publish = p_t - latency_ticks - delay_ticks;
+		f.newest_tick = newest_tick;
+		f.other_count = 0;
+		for (const NetShooter &s : p_shooters) {
+			if (f.other_count >= f.others.size()) {
+				break;
+			}
+			host::OtherTrack &t = f.others[f.other_count];
+			t.slot = s.slot;
+			t.count = 0;
+			// The arrived samples (received holds the in-flight ones too: only ticks <= newest_tick count).
+			size_t last = 0;
+			bool any = false;
+			for (size_t i = 0; i < s.received.size(); ++i) {
+				if (s.received[i].server_tick <= newest_tick) {
+					last = i;
+					any = true;
+				}
+			}
+			if (!any) {
+				continue;
+			}
+			size_t first = 0;
+			for (size_t i = 0; i <= last; ++i) {
+				if (double(s.received[i].server_tick) <= f.render_ticks_at_publish) {
+					first = i;
+				}
+			}
+			for (size_t i = first; i <= last && t.count < host::kOtherSamples; ++i) {
+				t.samples[t.count++] = s.received[i];
+			}
+			t.track_newest_tick = s.received[last].server_tick;
+			++f.other_count;
+		}
+	}
+	void trim(std::vector<NetShooter> &r_shooters) {
+		for (NetShooter &s : r_shooters) {
+			while (s.received.size() > 12) {
+				s.received.pop_front();
+			}
+		}
+	}
+};
+
+// The game's audio side of the offline runs: the mixer, pool, clock, router and impacts as Bf3GameAudio::build makes
+// them (latency 0: no device), and GameAudioDriver::step per display frame.
+struct GameRig {
+	const GameFixture &fx;
+	std::unique_ptr<ba::MixerCore> mixer;
+	std::unique_ptr<ba::OneShotPool> pool;
+	std::unique_ptr<ba::SimMixerClock> clock;
+	std::unique_ptr<ba::WeaponAudioRouter> router;
+	std::unique_ptr<ba::ImpactAudio> impacts;
+	std::unique_ptr<ba::GameAudioDriver> driver = std::make_unique<ba::GameAudioDriver>();
+	std::vector<host::PresentedSoldier> soldiers = std::vector<host::PresentedSoldier>(net::kMaxSlots);
+	std::vector<host::PresentedOtherWeapon> weapons = std::vector<host::PresentedOtherWeapon>(net::kMaxSlots);
+	std::vector<float> buffer = std::vector<float>(size_t(kFramesPerTick) * 2);
+	ba::ListenerState listener;
+	host::PresentClock now;
+	size_t presented = 0;
+
+	GameRig(const GameFixture &p_fx, ba::MixTap *p_tap) :
+			fx(p_fx) {
+		ba::MixerConfig mc;
+		mc.max_instances = ba::kGameMixerInstances;
+		mc.command_capacity = 8192;
+		mc.schedule_lead_blocks = uint32_t(std::max(1.0f, p_fx.tuning.schedule_lead_blocks));
+		mixer = std::make_unique<ba::MixerCore>(mc);
+		mixer->set_tap(p_tap);
+		pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
+		ba::SimMixerClockConfig cc;
+		cc.bias_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames) + 2 * int64_t(ba::kBlockFrames) + 800;
+		clock = std::make_unique<ba::SimMixerClock>(*mixer, cc);
+		router = std::make_unique<ba::WeaponAudioRouter>(*mixer, p_fx.assets.table, p_fx.assets.bank, p_fx.tuning, *pool);
+		impacts = std::make_unique<ba::ImpactAudio>(*mixer, p_fx.assets.impacts, p_fx.assets.bank, p_fx.tuning, *pool);
+	}
+	~GameRig() {
+		router.reset();
+		impacts.reset();
+	}
+	// One display frame: the clock, the presentation, the driver, 800 frames mixed.
+	void frame(const host::PresentationFrame &p_frame, uint64_t p_now_ns, std::span<const host::PresentEvent> p_events, uint8_t p_own_slot,
+			std::span<const ba::ImpactSoundRequest> p_impacts = {}) {
+		now = host::present_clock(p_frame, p_now_ns);
+		clock->set_now(now);
+		presented = host::present_others(p_frame, p_now_ns, soldiers);
+		const size_t nw = host::present_other_weapons(p_frame, host::present_render_ticks(p_frame, p_now_ns), weapons);
+		ba::GameAudioInputs in;
+		in.frame = &p_frame;
+		in.now_ns = p_now_ns;
+		in.events = p_events;
+		in.others = std::span<const host::PresentedSoldier>(soldiers.data(), presented);
+		in.other_weapons = std::span<const host::PresentedOtherWeapon>(weapons.data(), nw);
+		in.listener = listener;
+		in.own_slot = p_own_slot;
+		in.own_first_person = true;
+		driver->step(*router, impacts.get(), *clock, in, p_impacts);
+		mixer->mix(buffer.data(), kFramesPerTick);
+	}
+	const host::PresentedSoldier *soldier(uint8_t p_slot) const {
+		for (size_t i = 0; i < presented; ++i) {
+			if (soldiers[i].slot == p_slot) {
+				return &soldiers[i];
+			}
+		}
+		return nullptr;
+	}
+};
+
+// The router's stand-in muzzle of a presented soldier (weapon_audio.cpp other_emitter, standin_muzzle_forward_m).
+ba::Vec3 standin_muzzle(const host::PresentedSoldier &p_s) {
+	const float cp = std::cos(p_s.pitch), spi = std::sin(p_s.pitch), cy = std::cos(p_s.yaw), sy = std::sin(p_s.yaw);
+	const float f = ba::WeaponAudioConfig{}.standin_muzzle_forward_m;
+	return { p_s.position[0] + sy * cp * f, p_s.position[1] + p_s.eye_height + spi * f, p_s.position[2] + cy * cp * f };
+}
+
+float distance(const ba::Vec3 &p_a, const ba::Vec3 &p_b) {
+	const float dx = p_a.x - p_b.x, dy = p_a.y - p_b.y, dz = p_a.z - p_b.z;
+	return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+bool gate_late_blocks() {
+	return env_value("OPENBF3_AU3_GATE_LATE") == "1";
+}
+
+} // namespace
+
+TEST_SUITE("audio-game") {
+	TEST_CASE("kit items: Metro TDM's kit patches compile strict and bind (E7 item 1), impacts and auditions load") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const ba::GameAudioAssets &a = f->assets;
+		std::string report;
+		for (const std::string &line : a.report) {
+			report += "  " + line + "\n";
+		}
+		MESSAGE("load ", f->load_seconds, " s (branch, unlocked, shared machine: indicative only)\n", report, f->impact_note);
+		uint32_t drivers = 0, one_shots = 0, none = 0, compiled = 0;
+		for (const ba::KitAudioItem &item : a.kits.items) {
+			REQUIRE(item.def < a.table->defs.size());
+			const ba::WeaponAudioDef &d = a.table->defs[item.def];
+			drivers += d.form == ba::WeaponAudioForm::Driver ? 1 : 0;
+			one_shots += d.form == ba::WeaponAudioForm::OneShot ? 1 : 0;
+			none += d.form == ba::WeaponAudioForm::None ? 1 : 0;
+			compiled += d.program ? 1 : 0;
+			CHECK_MESSAGE(d.form != ba::WeaponAudioForm::None, item.variant, ": ", d.error);
+			CHECK((d.one_shot_event != 0 || d.form != ba::WeaponAudioForm::OneShot));
+			const bool is_one_shot = d.form == ba::WeaponAudioForm::OneShot;
+			CHECK(item.one_shot == is_one_shot);
+		}
+		CHECK(a.kits.items.size() == 12);
+		CHECK(drivers == 10);
+		CHECK(one_shots == 2);
+		CHECK(none == 0);
+		CHECK(compiled == 12);
+		CHECK(a.table->failed == 0);
+		const uint16_t m16 = def_of_patch(*a.table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		CHECK(a.table->defs[m16].fire_mode == ba::WeaponFireMode::Automatic);
+		CHECK(std::fabs(a.table->defs[m16].shot_interval_s - 0.075) < 1e-6);
+		CHECK(!f->impact_names.empty());
+		CHECK(a.impacts->compiled() > 0);
+		CHECK(a.bank);
+		CHECK(a.waves_missing == 0);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("E7 rehearsal: an M16A3 shooter through the cl presentation stream, GameAudioCheck, analyse_game_check") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const auto t0 = std::chrono::steady_clock::now();
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		const uint16_t m16 = def_of_patch(table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		// The script: the game's, minus the auditions whose patch the mount lacks (reported skips).
+		ba::GameCheckScript script = ba::game_check_script();
+		std::string skips;
+		for (size_t i = 0; i < script.steps.size();) {
+			if (script.steps[i].audition && !f->assets.auditions.contains(script.steps[i].patch)) {
+				skips += " " + script.steps[i].name;
+				script.steps.erase(script.steps.begin() + ptrdiff_t(i));
+			} else {
+				++i;
+			}
+		}
+		script.analysis.shot_interval_s = table.defs[m16].shot_interval_s;
+		script.analysis.expected_spacing_frames = table.defs[m16].shot_interval_s * double(ba::kMixRate);
+		const sw::SimTime interval = sw::SimTime(std::llround(table.defs[m16].shot_interval_s * double(sw::kTimeUnitsPerSecond)));
+		ba::GameAudioCheck check(script, ba::kMixRate, 0);
+		const PathGuard guard = install_guard(*f);
+		check.set_guard(guard);
+		GameRig rig(*f, &check);
+		rig.router->set_observer(&check);
+		constexpr uint8_t kOwn = 0, kShooter = 1;
+		check.set_shooter(kShooter);
+		std::vector<NetShooter> shooters(1);
+		NetShooter &sh = shooters[0];
+		sh.slot = kShooter;
+		sh.def = m16;
+		sh.state.life = 1;
+		sh.state.position = { 0.0f, 0.0f, 0.0f };
+		sh.state.yaw = 0; // facing +z, the listener's axis
+		NetStream net;
+		const double t_start = 600.25; // server ticks (10 s into the match, off the tick grid)
+		const uint32_t settle_frames = uint32_t(std::llround(script.settle_s * 60.0));
+		const uint32_t start_frames = uint32_t(std::llround(script.analysis.start_s * 60.0));
+		const uint32_t period_frames = uint32_t(std::llround(script.burst_period_s * 60.0));
+		uint64_t f_index = 0;
+		int64_t step = -1;
+		uint64_t step_frame = 0;
+		bool audition_started = false;
+		uint32_t auditions = 0;
+		const uint64_t max_frames = uint64_t(script.timeout_s * 60.0) + 600;
+		std::vector<host::PresentEvent> events;
+		std::vector<std::string> placed;
+		bool done = false;
+		for (; f_index < max_frames && !done; ++f_index) {
+			const double t = t_start + double(f_index);
+			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+			events.clear();
+			net.advance(t, shooters, events);
+			net.publish(t, now_ns, shooters);
+			// The free camera: the next step once the current one is recorded (the first after 1 s of match).
+			if ((step < 0 && f_index >= 60) || (step >= 0 && check.step_done(uint32_t(step)))) {
+				++step;
+				if (size_t(step) >= script.steps.size()) {
+					done = true;
+					break;
+				}
+				const ba::GameCheckStep &st = script.steps[size_t(step)];
+				const host::PresentedSoldier *s = rig.soldier(kShooter);
+				REQUIRE(s != nullptr);
+				const ba::Vec3 muzzle = standin_muzzle(*s);
+				rig.listener.position = { muzzle.x, muzzle.y, muzzle.z + st.distance_m };
+				rig.listener.forward = { 0.0f, 0.0f, -1.0f };
+				rig.listener.up = { 0.0f, 1.0f, 0.0f };
+				const float d = distance(rig.listener.position, muzzle);
+				check.begin_step(uint32_t(step), d);
+				step_frame = f_index;
+				audition_started = false;
+				placed.push_back(st.name + " " + std::to_string(d));
+				if (!st.audition) {
+					for (uint32_t b = 0; b < st.bursts; ++b) {
+						const double first = t + double(settle_frames + start_frames + b * period_frames);
+						sh.burst(sw::SimTime(std::llround(first * double(sw::kTimeUnitsPerTick))), script.rounds, interval);
+					}
+				}
+			}
+			rig.frame(*net.frame, now_ns, events, kOwn);
+			if (step >= 0 && script.steps[size_t(step)].audition && !audition_started && f_index >= step_frame + settle_frames) {
+				const ba::GameCheckStep &st = script.steps[size_t(step)];
+				const host::PresentedSoldier *s = rig.soldier(kShooter);
+				REQUIRE(s != nullptr);
+				const uint64_t seed = ba::sound_seed(0xA0D1u, auditions);
+				CHECK(ba::start_audition(*rig.pool, *rig.mixer, f->assets.auditions.find(st.patch)->second, f->assets.bank, f->tuning, rig.listener,
+						standin_muzzle(*s), seed, rig.clock->earliest_frame(), &check));
+				++auditions;
+				audition_started = true;
+			}
+			net.trim(shooters);
+		}
+		const double run_s = double(f_index) / 60.0;
+		CHECK(done);
+		// Tails: a few frames more so every stop reached the mixer.
+		const ba::MixerStats &ms = rig.mixer->stats();
+		ba::GameCheckCounters counters;
+		counters.short_blocks = ms.short_blocks.load();
+		counters.late_blocks = ms.late_blocks.load();
+		counters.late_commands = ms.late_commands.load();
+		counters.mixer_refusals = rig.router->stats().mixer_refusals;
+		const ba::CheckReport rep = ba::analyse_game_check(script, check, counters, f->tuning, ba::kMixRate);
+		const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		std::string table_text = rep.table();
+		MESSAGE("E7 rehearsal: ", run_s, " s of game time, ", rep.rows.size(), " rows, audition skips:", (skips.empty() ? " none" : skips), "; wall ",
+				wall_s, " s (branch, unlocked, shared machine: indicative only)\n", table_text);
+		size_t failed = 0;
+		for (const ba::CheckRow &r : rep.rows) {
+			if (r.name == "mixer.late_blocks" && !gate_late_blocks()) {
+				continue; // a wall-clock row (rule 7): gated on main only (OPENBF3_AU3_GATE_LATE=1)
+			}
+			if (!r.pass) {
+				++failed;
+				MESSAGE("FAIL ", r.name, " ", r.value, " ", r.rule);
+			}
+		}
+		CHECK(failed == 0);
+		CHECK(run_s <= script.timeout_s);
+		CHECK(check.dropped_frames() == 0);
+		CHECK(rig.router->stats().mixer_refusals == 0);
+		CHECK(ms.ring_overflows.load() == 0);
+		CHECK(ms.starved_voices.load() == 0);
+		// The recording for the user (b/shots/au3, gitignored).
+		const std::filesystem::path dir = au3_shots_dir();
+		std::error_code ec;
+		REQUIRE(guard.allows_write(dir));
+		std::filesystem::create_directories(dir, ec);
+		const Status wav = check.write_wav(dir / "e7_rehearsal.wav");
+		CHECK_MESSAGE(wav.ok(), (wav.ok() ? std::string() : wav.error().message));
+		std::string placed_text;
+		for (const std::string &p : placed) {
+			placed_text += p + "\n";
+		}
+		placed_text += "windows (step, seed, first frame, stop frame; relative to the WAV start):\n";
+		for (const ba::GameCheckWindow &w : check.windows()) {
+			placed_text += script.steps[w.step].name + " " + std::to_string(w.seed) + " " + std::to_string(w.first_frame - check.start_frame()) + " " +
+					std::to_string(w.stop_frame - check.start_frame()) + "\n";
+		}
+		write_text(guard, dir / "e7_rehearsal.txt", table_text + "\nsteps (name, listener distance m):\n" + placed_text);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("64 shooters for 60 s: the voice limit, the one-shot pool and impacts under load, no refusal or overflow") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		std::vector<uint16_t> drivers, one_shots;
+		for (const ba::KitAudioItem &item : f->assets.kits.items) {
+			const ba::WeaponAudioForm form = table.defs[item.def].form;
+			(form == ba::WeaponAudioForm::Driver ? drivers : one_shots).push_back(item.def);
+		}
+		REQUIRE(!drivers.empty());
+		const uint16_t m16 = def_of_patch(table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		std::vector<std::string_view> impact_names;
+		for (const std::string &n : f->impact_names) {
+			if (f->assets.impacts->find(n)) {
+				impact_names.push_back(n);
+			}
+		}
+		struct Silent final : ba::MixTap {
+			double sum = 0.0;
+			uint64_t frames = 0, non_finite = 0;
+			float peak = 0.0f;
+			void on_block(const float *p, uint32_t n, uint64_t) override {
+				for (uint32_t i = 0; i < n * 2; ++i) {
+					if (!std::isfinite(p[i])) {
+						++non_finite;
+						continue;
+					}
+					sum += double(p[i]) * double(p[i]);
+					peak = std::max(peak, std::fabs(p[i]));
+				}
+				frames += n;
+			}
+		} tap;
+		GameRig rig(*f, &tap);
+		rig.listener.position = { 0.0f, 1.6f, 0.0f };
+		std::mt19937_64 rng(0xA03u);
+		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+		const double t_start = 600.25;
+		constexpr int kSeconds = 60;
+		constexpr uint32_t kShooters = 63; // + the own soldier = 64
+		std::vector<NetShooter> shooters(kShooters);
+		for (uint32_t i = 0; i < kShooters; ++i) {
+			NetShooter &s = shooters[i];
+			s.slot = uint8_t(1 + i);
+			s.state.life = 1;
+			// Half within 100 m, the rest out to 900 m (past the M16A3's 301 m Fire gate and the 1000 m cull).
+			const float r = i % 2 == 0 ? 3.0f + 97.0f * unit(rng) : 100.0f + 800.0f * unit(rng);
+			const float a = 6.2831853f * unit(rng);
+			s.state.position = { r * std::sin(a), 0.0f, r * std::cos(a) };
+			s.state.yaw = uint16_t(rng());
+			// Bursts with gaps, mostly the kit's drivers, some one-shot items (knife, grenade).
+			const bool one_shot = !one_shots.empty() && i % 9 == 4;
+			s.def = one_shot ? one_shots[i % one_shots.size()] : drivers[i % drivers.size()];
+			const double iv = one_shot ? 1.0 : std::max(0.06, table.defs[s.def].shot_interval_s);
+			const sw::SimTime interval = sw::SimTime(std::llround(iv * double(sw::kTimeUnitsPerSecond)));
+			double t = t_start + 30.0 + 120.0 * unit(rng);
+			while (t < t_start + kSeconds * 60.0 - 120.0) {
+				// Automatic weapons hold long bursts (5-55 rounds), so more than max_weapon_voices run at once at times.
+				const bool automatic = table.defs[s.def].fire_mode != ba::WeaponFireMode::Single;
+				const uint32_t rounds = one_shot ? 1u : (automatic ? 5u + uint32_t(unit(rng) * 50.0f) : 1u + uint32_t(unit(rng) * 20.0f));
+				s.burst(sw::SimTime(std::llround(t * double(sw::kTimeUnitsPerTick))), rounds, interval);
+				t += double(rounds) * iv * 60.0 + 12.0 + 50.0 * unit(rng);
+			}
+		}
+		// The own soldier: M16A3 bursts on the Predicted timeline.
+		std::vector<sw::SimTime> own_shots;
+		for (double t = t_start + 40.0; t < t_start + kSeconds * 60.0 - 120.0;) {
+			const uint32_t rounds = 3 + uint32_t(unit(rng) * 15.0f);
+			for (uint32_t k = 0; k < rounds; ++k) {
+				own_shots.push_back(sw::SimTime(std::llround((t + double(k) * 4.5) * double(sw::kTimeUnitsPerTick))));
+			}
+			t += double(rounds) * 4.5 + 30.0 + 90.0 * unit(rng);
+		}
+		NetStream net;
+		std::vector<host::PresentEvent> events;
+		std::vector<ba::ImpactSoundRequest> impacts;
+		size_t own_next = 0;
+		uint32_t own_id = 1;
+		uint64_t reloads = 0;
+		const auto t0 = std::chrono::steady_clock::now();
+		const uint64_t frames = uint64_t(kSeconds) * 60;
+		for (uint64_t fi = 0; fi < frames; ++fi) {
+			const double t = t_start + double(fi);
+			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+			events.clear();
+			impacts.clear();
+			// Reloads now and then (reload_seq changes at the next record).
+			if (fi % 97 == 0) {
+				NetShooter &s = shooters[(fi / 97) % kShooters];
+				++s.reload_count;
+				++reloads;
+			}
+			net.advance(t, shooters, events);
+			net.publish(t, now_ns, shooters);
+			// Own fire: OwnShot events up to the predicted time, the trigger down while a burst runs.
+			const host::PresentClock c = host::present_clock(*net.frame, now_ns);
+			bool trigger = false;
+			while (own_next < own_shots.size() && own_shots[own_next] <= c.predicted) {
+				host::PresentEvent e;
+				e.kind = host::PresentKind::OwnShot;
+				e.timeline = host::PresentTimeline::Predicted;
+				e.slot = 0;
+				e.def = m16;
+				e.id = own_id++;
+				e.time = own_shots[own_next];
+				events.push_back(e);
+				++own_next;
+			}
+			if (own_next < own_shots.size() && own_next > 0 && own_shots[own_next] - own_shots[own_next - 1] < 5 * sw::kTimeUnitsPerTick) {
+				trigger = true;
+			}
+			net.frame->own_weapons_valid = true;
+			net.frame->own_weapons_curr.timers[0].flags = trigger ? sw::slot_flags::kTriggerDown : 0;
+			// Impacts: the fire lands around the listener (fx's cue names, Render timeline).
+			if (!impact_names.empty() && fi % 3 == 0) {
+				ba::ImpactSoundRequest r;
+				r.patch = impact_names[size_t(rng() % impact_names.size())];
+				r.position = { 60.0f * (unit(rng) - 0.5f), 0.0f, 60.0f * (unit(rng) - 0.5f) };
+				r.seed = rng();
+				r.time = c.render;
+				r.timeline = host::PresentTimeline::Render;
+				impacts.push_back(r);
+			}
+			rig.frame(*net.frame, now_ns, events, 0, impacts);
+			net.trim(shooters);
+		}
+		// Let every tail end (the pool's 3 s stop, the drivers' release).
+		for (uint64_t fi = frames; fi < frames + 6 * 60; ++fi) {
+			const double t = t_start + double(fi);
+			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+			events.clear();
+			net.advance(t, shooters, events);
+			net.publish(t, now_ns, shooters);
+			net.frame->own_weapons_curr.timers[0].flags = 0;
+			rig.frame(*net.frame, now_ns, events, 0);
+		}
+		const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		const ba::MixerStats &ms = rig.mixer->stats();
+		const ba::WeaponAudioStats &ws = rig.router->stats();
+		const ba::ImpactAudioStats &is = rig.impacts->stats();
+		const double rms_db = tap.frames > 0 ? 10.0 * std::log10(std::max(1e-30, tap.sum / double(tap.frames * 2))) : -999.0;
+		char line[1200];
+		std::snprintf(line, sizeof(line),
+				"64 shooters, %d s + 6 s tails: wall %.2f s, %.1fx real time, max block %.3f ms of %.3f ms, late_blocks %llu (branch, unlocked, shared "
+				"machine: indicative only)\n  mixer: blocks %llu short %llu late_commands %llu ring_overflows %llu starved %llu decode_errors %llu "
+				"feedback_drops %llu peak_instances %u\n  router: bursts %llu culled %llu stolen %llu event_rounds %llu state_rounds %llu reloads %llu "
+				"one_shots %llu refusals %llu\n  pool: peak %u stolen %llu failed %llu; impacts %llu unknown %llu; reload records %llu\n  mix: rms %.1f dBFS "
+				"peak %.3f non-finite %llu",
+				kSeconds, wall_s, double(kSeconds + 6) / std::max(1e-9, wall_s), double(ms.max_block_ns.load()) / 1e6, 512.0 / 48.0,
+				(unsigned long long)ms.late_blocks.load(), (unsigned long long)ms.blocks.load(), (unsigned long long)ms.short_blocks.load(),
+				(unsigned long long)ms.late_commands.load(), (unsigned long long)ms.ring_overflows.load(), (unsigned long long)ms.starved_voices.load(),
+				(unsigned long long)ms.decode_errors.load(), (unsigned long long)ms.feedback_drops.load(), unsigned(ms.peak_instances.load()),
+				(unsigned long long)ws.bursts, (unsigned long long)ws.culled, (unsigned long long)ws.stolen, (unsigned long long)ws.event_rounds,
+				(unsigned long long)ws.state_rounds, (unsigned long long)ws.reloads, (unsigned long long)ws.one_shots, (unsigned long long)ws.mixer_refusals,
+				unsigned(rig.pool->peak()), (unsigned long long)rig.pool->stolen(), (unsigned long long)rig.pool->failed(), (unsigned long long)is.impacts,
+				(unsigned long long)is.unknown_patches, (unsigned long long)reloads, rms_db, double(tap.peak), (unsigned long long)tap.non_finite);
+		MESSAGE(line);
+		CHECK(ms.short_blocks.load() == 0);
+		CHECK(ms.late_commands.load() == 0);
+		CHECK(ms.ring_overflows.load() == 0);
+		CHECK(ms.starved_voices.load() == 0);
+		CHECK(ms.decode_errors.load() == 0);
+		CHECK(ms.feedback_drops.load() == 0);
+		CHECK(ms.peak_instances.load() <= ba::kGameMixerInstances);
+		CHECK(ws.mixer_refusals == 0);
+		CHECK(ws.bursts > 100);
+		CHECK(ws.culled > 0); // more shooters than voices
+		CHECK(ws.reloads > 0);
+		CHECK(is.impacts > 0);
+		CHECK(rig.pool->failed() == 0);
+		CHECK(tap.non_finite == 0);
+		CHECK(tap.frames >= uint64_t(kSeconds) * ba::kMixRate);
+		CHECK(rms_db > -60.0);
+		if (gate_late_blocks()) {
+			CHECK(ms.late_blocks.load() == 0); // the underrun gate: main only (timing label)
+		}
+		check_game_unchanged(*f);
 	}
 }

@@ -863,6 +863,8 @@ struct WeaponAudioRouter::Impl {
 		if (v->single) {
 			trigger_up(*v);
 			t.held = kNoInstance;
+			// The records show firing up to two ticks after the shot: those samples are this shot, not a lost one.
+			t.ended_evidence = std::max(t.ended_evidence, p_e.time + 2 * sw::kTimeUnitsPerTick);
 		}
 	}
 
@@ -993,6 +995,7 @@ struct WeaponAudioRouter::Impl {
 		if (v->single) {
 			trigger_up(*v);
 			r_t.held = kNoInstance;
+			r_t.ended_evidence = std::max(r_t.ended_evidence, p_evidence); // this record is the shot it started
 		}
 	}
 

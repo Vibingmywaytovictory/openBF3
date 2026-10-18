@@ -24,7 +24,11 @@ namespace {
 
 constexpr double kAuditionWindowSeconds = 1.0; // the RMS window of an audition one-shot
 constexpr double kSilenceDb = -100.0; // the 320 m bursts' core tap must stay below (the 300-301 m Fire gate)
-constexpr double kAudibleDb = -90.0; // an in-band audition window must rise above (full mix)
+// An in-band audition window's loudest 20 ms (full mix, unity master) must rise above this: present in the mix, not
+// gated. The patches' own distance laws set the level (the M98B at 325 m peaks near -83 dBFS, its loudest 20 ms
+// near -93 dBFS); a gated or silent window reads the -144 dB floor or below.
+constexpr double kAudibleDb = -110.0;
+constexpr double kAudibleWindowSeconds = 0.02;
 constexpr float kDistanceTolerance = 0.25f;
 
 // The M16A3's far bands (au G5.2): the close group 0-20 m, the far groups 250-300 m; the distant HPF 17..200 m ->
@@ -302,9 +306,13 @@ void GameAudioCheck::on_audition(uint32_t p_step, uint64_t p_seed, uint64_t p_fr
 	if (std::unique_ptr<PatchInstance> probe = probe_at(prog, p_seed, w.listener_distance_m, st.tuning, st.rate)) {
 		const std::vector<BandRef> bands = crossfader_bands(prog);
 		for (size_t i = 0; i < step.bands.size() && i < w.band_amplitude.size(); ++i) {
-			for (const BandRef &b : bands) {
+			for (size_t k = 0; k < bands.size(); ++k) {
+				const BandRef &b = bands[k];
 				if (b.begin == step.bands[i].first && b.end == step.bands[i].second) {
 					w.band_amplitude[i] = probe->crossfader_group_amplitude(b.node, b.group);
+					if (b.group > 0 && k > 0 && bands[k - 1].node == b.node) {
+						w.band_fade_in[i] = { bands[k - 1].begin, bands[k - 1].end };
+					}
 					++w.bands_found;
 					break;
 				}
@@ -513,8 +521,8 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 			}
 			continue;
 		}
-		// Auditions: each band's group amplitude partial inside its band, exactly 0 or 1 outside (au G5.4 reading R),
-		// and the in-band windows audible in the mix.
+		// Auditions: each band's group amplitude partial inside its band or the band it fades in over (the previous
+		// group's), exactly 0 or 1 outside both (au G5.4 reading R), and the in-band windows audible in the mix.
 		if (w.bands_found != std::min<size_t>(step.bands.size(), w.band_amplitude.size())) {
 			row("audition.bands." + tag, double(w.bands_found), "every item band is a crossfader group of the patch", false);
 			continue;
@@ -523,18 +531,28 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 		for (size_t i = 0; i < step.bands.size() && i < w.band_amplitude.size(); ++i) {
 			const auto [b, e] = step.bands[i];
 			const float a = w.band_amplitude[i];
+			const auto [fb, fe] = w.band_fade_in[i];
 			const bool inside = d > b && d < e;
+			const bool fading_in = fb >= 0.0f && d > fb && d < fe;
 			inside_any = inside_any || inside;
 			const std::string band = fmt("%g-%g", b, e);
 			if (inside) {
 				row("audition.band." + tag + "." + band, a, "in (0, 1) inside the band", a > 0.0f && a < 1.0f);
+			} else if (fading_in) {
+				row("audition.band." + tag + "." + band, a, fmt("in (0, 1) inside the band it fades in over (%g-%g)", fb, fe), a > 0.0f && a < 1.0f);
 			} else {
 				row("audition.band." + tag + "." + band, a, "0 or 1 outside the band", a == 0.0f || a == 1.0f);
 			}
 		}
 		if (inside_any && w.first_frame >= start && w.stop_frame - start <= total) {
-			const double db = rms_db(p_check.mix(), 2, w.first_frame - start, w.stop_frame - w.first_frame);
-			row("audition.audible." + tag, db, fmt(">= %.0f dBFS (full mix, %.1f s window)", kAudibleDb, kAuditionWindowSeconds), db >= kAudibleDb);
+			// The loudest 20 ms of the window.
+			const uint64_t len = uint64_t(kAudibleWindowSeconds * double(p_rate));
+			double best = -300.0;
+			for (uint64_t at = w.first_frame - start; len > 0 && at + len <= w.stop_frame - start; at += len / 2) {
+				best = std::max(best, double(rms_db(p_check.mix(), 2, at, len)));
+			}
+			row("audition.audible." + tag, best, fmt(">= %.0f dBFS (full mix, the loudest 20 ms of the %.1f s window)", kAudibleDb, kAuditionWindowSeconds),
+					best >= kAudibleDb);
 		}
 	}
 
