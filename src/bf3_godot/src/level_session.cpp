@@ -138,6 +138,7 @@ void Bf3LevelSession::shutdown() {
 	if (WorkerThreadPool::get_singleton() != nullptr) {
 		upload_.wait_tasks();
 	}
+	m2a_shutdown(); // M2a w3 [G7]
 	if (client_ != nullptr) {
 		client_->stop();
 	}
@@ -201,6 +202,7 @@ void Bf3LevelSession::parse_args() {
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
 	const std::string shot_delay = user_arg_value("shot-delay");
 	shot_delay_ = shot_delay.empty() ? 0.0 : std::clamp(std::atof(shot_delay.c_str()), 0.0, 600.0);
+	m2a_parse_args(); // M2a w3 [G7]: gx's args (level_session_m2a.cpp)
 }
 
 void Bf3LevelSession::_ready() {
@@ -396,6 +398,7 @@ void Bf3LevelSession::run_loader() {
 		}
 		s1_combat = std::move(*combat);
 	}
+	m2a_load_options(shared_options); // M2a w3 [G7]: gunplay on (gx)
 	bf3::core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, shared_options, &progress_);
 	if (!shared) {
 		fail(shared.error().message);
@@ -436,6 +439,11 @@ void Bf3LevelSession::run_loader() {
 			nav_ready_.store(true, std::memory_order_release);
 		}
 	}
+	// M2a w3 [G7]: the wave-3 load steps (gx: viewmodel sets, effects, wave bank, crowd assets).
+	if (std::string m2a_error; !m2a_load_assets(*db, cache.get(), scene_ ? std::min(8u, half) : 0u, &m2a_error)) {
+		fail(m2a_error);
+		return;
+	}
 	// Phase D: the server and the client, while the lanes still run (docs §12.1).
 	std::string error;
 	if (!start_session(&error)) {
@@ -474,6 +482,7 @@ host::ClientSessionConfig Bf3LevelSession::client_config(const std::string &p_ne
 	}
 	cc.netsim.seed = p_seed * 7919u + 1u;
 	cc.request_dev_commands = true;
+	m2a_client_config(cc); // M2a w3 [G7]: gunplay inputs, kit select (gx)
 	cc.debug_hash_compare = m1_check_;
 	return cc;
 }
@@ -499,6 +508,7 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 		game->bots = fill;
 		game->max_slots = uint32_t(bf3::net::kMaxSlots);
 	}
+	m2a_server_config(*game); // M2a w3 [G7]: gunplay, firefight, respawn (gx)
 	host::ServerConfig sc;
 	sc.tick_hz = int(sim::kSimHz);
 	sc.game = game;
@@ -821,6 +831,7 @@ void Bf3LevelSession::_unhandled_input(const Ref<InputEvent> &p_event) {
 		return;
 	}
 	mapper_.handle_event(p_event);
+	m2a_input(p_event); // M2a w3 [G7]
 	// S1: F7 toggles the nav overlay.
 	if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (k->is_pressed() && !k->is_echo() && k->get_keycode() == KEY_F7 && nav_draw_.uploaded()) {
@@ -874,6 +885,7 @@ void Bf3LevelSession::_process(double p_delta) {
 		mapper_.adopt(*frame_);
 		mapper_.poll_devices();
 		client_->set_input(mapper_.sample());
+		m2a_presented(p_delta, now_ns); // M2a w3 [G7]
 	}
 	try_done();
 	if (!done_) {
@@ -915,6 +927,9 @@ void Bf3LevelSession::_process(double p_delta) {
 	update_hud(p_delta);
 	s1_upload_overlay(); // S1
 	s1_report_others(now_ns); // S1
+	if (m2a_frame(p_delta, now_ns)) { // M2a w3 [G7]
+		return;
+	}
 
 	if (check_ != nullptr) {
 		if (check_->frame(now_ns)) {
