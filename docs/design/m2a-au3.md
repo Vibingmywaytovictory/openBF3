@@ -280,7 +280,7 @@ From the worktree, after `tools\build.cmd dev --no-test`.
 | 4 heard, offline | `ctest --preset dev -R "^audio\.game$"` (case "a scene for the ear"; WAV: `b\dev\shots\audio.game\scene.wav`) |
 | E7 item 1 | `ctest --preset dev -R "^audio\.game$"` (case "kit items") |
 | contract | `ctest --preset dev -R "^m2a\.contract3$"` |
-| asan | `tools\build.cmd asan --no-test`, then `ctest --preset asan -R "audio\.router|audio\.game|m2a\.contract3" -LE timing` (rule 7: the timing row stays on main) |
+| asan | `tools\build.cmd asan --no-test`, then `ctest --preset asan -R "audio\.router|audio\.game|m2a\.contract3" -E "^audio\.game\.underruns$"` (rule 7: the timing row stays on main; the asan preset's own label filter overrides a `-LE timing` on the command line, so the row is excluded by name) |
 
 ## 10. Open issues and hand-offs
 
