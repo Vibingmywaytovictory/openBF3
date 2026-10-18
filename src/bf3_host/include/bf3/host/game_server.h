@@ -97,6 +97,9 @@ struct GameServerConfig {
 	// M2a sv (docs/design/m2a.md §4.2): weapons, projectiles, damage, kits and lag compensation. Active when the level
 	// has gunplay tables (SharedLevel::gunplay); without them the server runs M1's game unchanged.
 	GunplayConfig gunplay;
+	// M2a w3 (G3, docs/design/m2a-w3.md; firefight_brain.h, owner bt): firefight stub bots, added by init after the
+	// target bots, the walkers and S1's bots through add_firefight_bots. Null = none.
+	std::shared_ptr<const struct FirefightConfig> firefight;
 };
 
 struct OutDatagram {

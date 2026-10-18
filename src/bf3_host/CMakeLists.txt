@@ -80,3 +80,11 @@ target_link_libraries(bf3_host PUBLIC bf3_anim)
 target_sources(bf3_host PRIVATE
     src/hud_feed.cpp
 )
+
+# M2a w3 (W3.0 contract, docs/design/m2a.md §10.2, §15.1 step 6; docs/design/m2a-w3.md): bt's firefight bots (G3: the
+# stub of the GameServer::init hook until bt lands) and the client wiring W3.0 adds (G2 present_other_weapon, G5
+# make_client_gunplay_inputs).
+target_sources(bf3_host PRIVATE
+    include/bf3/host/firefight_brain.h
+    src/firefight_brain.cpp
+)

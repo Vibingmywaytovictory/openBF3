@@ -4,6 +4,7 @@
 #include "bf3/host/game_server.h"
 
 #include "bot_director.h" // S1 bots (docs/design/s1.md §8)
+#include "bf3/host/firefight_brain.h" // M2a w3 [G3 firefight]
 
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
@@ -807,6 +808,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 			}
 		}
 	}
+	BF3_TRY(add_firefight_bots(*this, p_config)); // M2a w3 [G3 firefight]: bt's FirefightBrains (GameServerConfig::firefight)
 	return core::Status::success();
 }
 
