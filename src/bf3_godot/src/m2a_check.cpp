@@ -142,11 +142,14 @@ struct M2aCheck::State {
 	bool play_engaging = false;
 	double play_engage_until = 0;
 	std::array<bool, 5> play_shot_taken{};
-	uint32_t play_fall_deaths = 0;
+	uint32_t play_fall_deaths = 0; // scheduled falls
+	uint32_t play_fall_drops = 0; // teleports (a fall that lands alive is dropped again from where it landed)
+	uint32_t play_fall_retries_left = 0;
 	uint8_t play_team_at_start = 0;
 	bool play_team_switched = false;
 	double play_last_fall = -1000;
 	double play_dead_since = -1;
+	double play_zoomed_since = -1; // the ADS screenshot waits for 0.4 s of zoom (the viewmodel's blend done)
 	sw::SimTime detonation_time = -1;
 
 	// ---- helpers ----
@@ -297,6 +300,19 @@ struct M2aCheck::State {
 			return st.poll_report();
 		});
 		wait(0.4);
+	}
+	// The play case's fall: a Teleport 60 m above the soldier (M1's fall damage kills from there onto the ground).
+	void play_drop(double p_t) {
+		net::DebugRequest q;
+		q.kind = net::DebugKind::Teleport;
+		q.position = f().own_curr.position;
+		q.position[1] += 60.0f;
+		q.yaw = sim::quantize_yaw(mapper().view().yaw);
+		send(q);
+		play_last_fall = p_t;
+		++play_fall_drops;
+		const sim::Vec3 &from = f().own_curr.position;
+		note(fmt("fall %u (drop %u) at %.1f s: from (%.1f, %.1f, %.1f)", play_fall_deaths, play_fall_drops, p_t, double(from[0]), double(from[1]), double(from[2])));
 	}
 	// Place the target bot p_distance m ahead along the view (on the floor), facing back.
 	void place_target(float p_distance) {
@@ -1126,6 +1142,8 @@ void M2aCheck::State::build_play() {
 			st.play_shot_taken.fill(false);
 			st.play_fall_deaths = 0;
 			st.play_last_fall = -1000;
+			st.play_fall_drops = 0;
+			st.play_fall_retries_left = 0;
 			st.play_dead_since = -1;
 			st.mark();
 		}
@@ -1141,6 +1159,7 @@ void M2aCheck::State::build_play() {
 		if (!st.g.alive) {
 			st.release_weapon_input();
 			mp.release_all();
+			st.play_fall_retries_left = 0;
 			if (st.play_dead_since < 0) {
 				st.play_dead_since = p_t;
 			}
@@ -1150,6 +1169,22 @@ void M2aCheck::State::build_play() {
 			return false;
 		}
 		st.play_dead_since = -1;
+		// Falling: no input for 8 s after the teleport (the soldier drops straight down; no shots, no moves). A drop
+		// that lands alive (on a roof on the way down: Metro's park is lined with ~30 m buildings) drops again from
+		// where it landed, up to 3 times.
+		if (p_t - st.play_last_fall < 8.0) {
+			st.release_weapon_input();
+			mp.release_all();
+			st.poll_report();
+			return false;
+		}
+		if (st.play_fall_retries_left > 0) {
+			--st.play_fall_retries_left;
+			st.note(fmt("alive after fall %u: health %.1f, dropping again", st.play_fall_deaths, double(st.f().own_curr.health)));
+			st.play_drop(p_t);
+			st.poll_report();
+			return false;
+		}
 		if (st.play_team_at_start != 0 && st.g.own_team != st.play_team_at_start) {
 			st.play_team_switched = true;
 		}
@@ -1165,7 +1200,7 @@ void M2aCheck::State::build_play() {
 		if (std::fmod(p_t, 47.0) < st.dt || std::fmod(p_t + 3.0, 47.0) < st.dt) {
 			mp.script_press(InputAction::Crouch);
 		}
-		// Combat: every 8 s, 2.5 s at the nearest other within 80 m (bursts, half of them aimed down the sights).
+		// Combat: every 8 s, 2.5 s at the nearest enemy within 80 m (bursts, half of them aimed down the sights).
 		std::array<host::PresentedSoldier, net::kMaxSlots> others{};
 		const size_t n = host::present_others(st.f(), st.now_ns, others);
 		const sim::Vec3 eye = st.eye();
@@ -1173,6 +1208,10 @@ void M2aCheck::State::build_play() {
 		float best = 80.0f;
 		for (size_t i = 0; i < n; ++i) {
 			const float d = vdist(others[i].position, eye);
+			const uint8_t team = st.g.slot_team[others[i].slot];
+			if (team != 0 && team == st.g.own_team) {
+				continue; // a known teammate: the script fights the other team
+			}
 			if (others[i].mode != sim::MoveMode::Dead && d < best) {
 				best = d;
 				nearest = int(i);
@@ -1187,10 +1226,21 @@ void M2aCheck::State::build_play() {
 			mp.script_hold(InputAction::Sprint, false);
 			mp.m2a_script_hold(Action::Fire, std::fmod(cyc, 0.7) < 0.4);
 			mp.m2a_script_hold(Action::Ads, int(p_t / 8.0) % 2 == 1);
-			if (!st.play_shot_taken[3] && cyc >= 6.5 && best < 45.0f) {
+			// The firefight shot: a bot within 45 m in the line of sight (the check's collision world).
+			bool seen = st.g.world == nullptr;
+			if (!seen) {
+				const sim::Vec3 aim = { o.position[0], o.position[1] + std::max(0.5f, o.eye_height - 0.35f), o.position[2] };
+				seen = !st.g.world->ray(eye, { aim[0] - eye[0], aim[1] - eye[1], aim[2] - eye[2] }, sim::query_mask::kMovement);
+			}
+			if (!st.play_shot_taken[3] && cyc >= 6.5 && best < 45.0f && seen) {
 				st.play_shot_taken[3] = st.save_shot("gx_firefight");
 			}
-			if (!st.play_shot_taken[1] && int(p_t / 8.0) % 2 == 1 && cyc >= 6.6 && st.g.weapon.zoomed) {
+			if (!st.g.weapon.zoomed) {
+				st.play_zoomed_since = -1;
+			} else if (st.play_zoomed_since < 0) {
+				st.play_zoomed_since = p_t;
+			}
+			if (!st.play_shot_taken[1] && int(p_t / 8.0) % 2 == 1 && st.play_zoomed_since >= 0 && p_t - st.play_zoomed_since >= 0.4) {
 				st.play_shot_taken[1] = st.save_shot("gx_ads");
 			}
 		} else {
@@ -1234,16 +1284,11 @@ void M2aCheck::State::build_play() {
 			mp.m2a_script_press(Action::Kit);
 			mp.m2a_script_press(Action::Team);
 		}
-		// A fall to death every 70 s (from 60 m above the soldier: M1's fall damage).
-		if (p_t - st.play_last_fall >= 70.0 && p_t >= 50.0 && p_t < T - 15.0) {
-			st.play_last_fall = p_t;
-			net::DebugRequest q;
-			q.kind = net::DebugKind::Teleport;
-			q.position = st.f().own_curr.position;
-			q.position[1] += 60.0f;
-			q.yaw = sim::quantize_yaw(mp.view().yaw);
-			st.send(q);
+		// A fall to death every 70 s (play_drop).
+		if (p_t - st.play_last_fall >= 70.0 && p_t >= 50.0 && p_t < T - 40.0) {
 			++st.play_fall_deaths;
+			st.play_fall_retries_left = 3;
+			st.play_drop(p_t);
 		}
 		st.poll_report();
 		return false;
@@ -1252,7 +1297,7 @@ void M2aCheck::State::build_play() {
 		const host::ClientStats &cs = st.f().stats;
 		const uint64_t deaths = st.g.deaths - st.deaths_mark;
 		st.row("play.seconds", st.options.play_seconds, "the scripted run ran its length", true);
-		st.row("play.fall_deaths_asked", double(st.play_fall_deaths), ">= 3 falls from 60 m", st.play_fall_deaths >= 3);
+		st.row("play.fall_deaths_asked", double(st.play_fall_deaths), fmt(">= 3 falls (%u drops of 60 m)", st.play_fall_drops), st.play_fall_deaths >= 3);
 		st.row("play.deaths", double(deaths), ">= the falls (Death events with kOwnVictim)", deaths >= st.play_fall_deaths && deaths >= 3);
 		st.row("play.respawns", double(st.g.respawns), ">= 3 lives after the first", st.g.respawns >= 3);
 		st.row("play.own_shots", double(st.g.own_shots_seen - st.mark_own_shots), ">= 50 OwnShot events", st.g.own_shots_seen - st.mark_own_shots >= 50);
