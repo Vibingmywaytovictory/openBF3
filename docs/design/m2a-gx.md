@@ -281,6 +281,7 @@ are indicative only.
 | `godot.m2a` | PASS, 6 / 6 cases (range 27.7 s, reload 12.8 s, hud 7.7 s, ads 4.3 s, audio 124.5 s, fx 163.0 s); 0 ERROR lines; 348.8 s |
 | `godot.m2a.kits` | PASS, 67 / 67 rows, 61.2 s case, 69.5 s row |
 | `godot.m2a.play` | PASS, every row, 0 ERROR lines, 300.4 s scripted, 310.5 s row |
+| branch pass `tools\build.cmd dev --strict` | exit 0: 137 rows, 135 passed, 2 skipped (`core.cache_data`, `core.res`), 0 failed, 0 STRICT violations; 194 s. The install's layout.toc, cas.cat and .sb / .toc files unchanged |
 
 * audio (E7):
   * windows: every step's windows as scripted;
