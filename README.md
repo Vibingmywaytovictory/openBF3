@@ -2514,7 +2514,9 @@ As built, with the measured results and one command per gate: [docs/design/m2a-a
   "Bf3GameMixer". It has `load`, `build`, `step` and the client-local `audition`. Its Godot-free halves are in
   `bf3/audio/game_audio_frame.h`, and the offline rows run them.
 * **E7** (`game_audio_check.h`): `GameAudioCheck` records the mix and the shooter's voice taps.
-  `analyse_game_check` judges the recording with au's `analyse_check` and the in-game rows.
+  `analyse_game_check` judges the recording with au's `analyse_check` and the in-game rows. Item 4's M1A2 patch is
+  not on Metro's mount: it loads from MP_001 (`kAuditionSuperbundles`) with a bank of its own. A step that cannot run
+  fails (`skipped.<step>`); it never reads as a pass.
 * **Tests:**
   - `ctest --preset dev -R "^audio\.(router|game)"` runs the unit suite and the install rows. `audio.game` covers the
     kits, the offline E7 rehearsal and a scene for the ear; `audio.game.crowd` runs 64 shooters for 60 s.

@@ -115,10 +115,17 @@ The class is in `game_audio.{h,cpp}`. gx calls it.
 * **`load`** (loader thread) calls `load_game_audio_assets`:
   1. `kit_audio_sources` over `SharedLevel::gunplay`, then `load_weapon_audio` (strict);
   2. `ImpactSoundCache::build` over `p_impact_sounds` (Bf3GameFx's `impact_sound_names`);
-  3. the E7 audition patches, compiled leniently (a missing one is a reported skip);
-  4. one `WaveBank` over every program's waves, using the loader's threads.
+  3. the E7 audition patches, compiled leniently. A patch the level's mount lacks (on Metro: the M1A2) is compiled
+     from a lazily mounted `EbxLibrary` over `GameAudioLoadOptions::audition_superbundles` (default
+     `kAuditionSuperbundles` = `Win32/Levels/MP_001/MP_001`, which holds the patch and its waves [verified:
+     `bf3dump find @all-mp m1a2_abrams`]) and gets a `WaveBank` of its own from that superbundle's mount. One that
+     loads from neither is listed in `audition_failures`, and its check steps fail;
+  4. one `WaveBank` over the level programs' waves, using the loader's threads.
 
-  `load_report()` lists each kit item's form, the auditions and the bank line.
+  `load_report()` lists each kit item's form, the auditions (with their source) and the bank line. On Metro the
+  M1A2 adds 14 resident waves (5.0 MiB) and 0.09-0.36 s on the loader thread (branch, unlocked, shared machine:
+  indicative only). `set_load_options` before `load` changes the source; an empty `audition_superbundles` skips it
+  (item 4 then fails).
 * **`build`** (main thread):
   - reads `res://config/audio_tuning.cfg`;
   - creates the mixer: 96 instances, 8192 commands, the lead from the tuning;
@@ -169,6 +176,9 @@ The class is in `game_audio.{h,cpp}`. gx calls it.
   - `probe.close` and `probe.far`: cosine fades within 1e-4;
   - `audition.band`: partial inside the band or the band it fades in over, exactly 0 or 1 outside both (au G5.4);
   - `audition.audible`: the loudest 20 ms of the window ≥ −110 dBFS, full mix at unity master;
+  - `skipped.<step>`: always a failure. A step the driver cannot run (an audition whose patch did not load, or that
+    `Bf3GameAudio::audition` refused) is marked with `GameAudioCheck::skip_step`: `step_done` turns true so the run
+    moves on, and both `skipped.<step>` and `windows.<step>` fail. A skipped item never reads as a pass;
   - the counters: mixer short_blocks / late_blocks / late_commands, router mixer_refusals, record dropped frames.
 
   Two rules changed on this branch after the first rehearsal:
@@ -186,8 +196,8 @@ The class is in `game_audio.{h,cpp}`. gx calls it.
     `present_others` and `present_other_weapons` read it.
   - **The audio side.** `GameAudioDriver::step` runs on a 96-instance MixerCore with the game's bias, with
     `GameAudioCheck` as tap and observer. The listener holds on the shooter's axis, facing it.
-  - **The auditions** go through `start_audition`. The M1A2 patch is not on Metro's mount, so its 4 steps are reported
-    skips.
+  - **The auditions** go through `start_audition` with each item's own bank. The rehearsal runs every step of
+    `game_check_script` (none is removed) and requires 0 skips; the M1A2 comes from MP_001 (§5).
 
 ## 7. Rows
 
@@ -212,8 +222,8 @@ Times are from the branch, unlocked, on a shared machine: **indicative only**. N
   - the voice limit and stealing;
   - both timelines;
   - bit-identical determinism.
-* **Gate 2: the E7 rehearsal.** All 106 rows passed. The run covered 93.2 s of game time and 9 audition windows
-  (the 4 M1A2 steps are reported skips). The rows:
+* **Gate 2: the E7 rehearsal.** All 124 rows passed, 0 skips. The run covered 113.4 s of game time, 13 burst windows
+  and 10 audition windows. The rows:
   - **Bursts.** 10 onsets in each of the 11 sub-301 m windows. Spacing within 4-70 frames of 3600 (tolerance 96).
   - **Levels.** near − mid 45.4 dB, mid − far 13.6 dB.
   - **HPF.** `hpf.mix` 17.0 dB and `hpf.noise_tap` 18.5 dB; `hpf.noise_prediction` 0.74 dB (≤ 1.5).
@@ -222,6 +232,8 @@ Times are from the branch, unlocked, on a shared machine: **indicative only**. N
   - **Auditions.**
     - m98b: 1.0 at 280 m, 0.5 at 325 m (loudest 20 ms −93.0 dBFS), 0.0 at 400 m.
     - rpg7: 0.933 at 30 m (in the fade-in), 0.5 at 67.5 m (−47.9 dBFS), 0.0 at 120 m.
+    - m1a2 (from MP_001): band 15-50 reads 1.0 at 10 m, 0.5 at 32.5 m (−67.4 dBFS), 0.0 at 90 and 120 m; band
+      80-100 reads 1.0 at 10 and 32.5 m, 0.5 at 90 m (−96.7 dBFS), 0.0 at 120 m.
   - **Counters.** short_blocks 0, late_commands 0, mixer_refusals 0, dropped frames 0. late_blocks read 0, not gated.
 
   The windowed run is gx's m2a_check case "audio" (§10).
@@ -268,7 +280,7 @@ From the worktree, after `tools\build.cmd dev --no-test`.
 | 4 heard, offline | `ctest --preset dev -R "^audio\.game$"` (case "a scene for the ear"; WAV: `b\dev\shots\audio.game\scene.wav`) |
 | E7 item 1 | `ctest --preset dev -R "^audio\.game$"` (case "kit items") |
 | contract | `ctest --preset dev -R "^m2a\.contract3$"` |
-| asan | `tools\build.cmd asan --no-test`, then `ctest --preset asan -R "audio\.router|audio\.game|m2a\.contract3"` |
+| asan | `tools\build.cmd asan --no-test`, then `ctest --preset asan -R "audio\.router|audio\.game|m2a\.contract3" -LE timing` (rule 7: the timing row stays on main) |
 
 ## 10. Open issues and hand-offs
 
@@ -277,7 +289,8 @@ From the worktree, after `tools\build.cmd dev --no-test`.
     on the loader thread after `Bf3GameFx::load`, then `build(parent)`. Then call `step(frame, Bf3GameFx::sound_cues()[,
     effect sounds])` every frame after `Bf3GameFx::step`.
   - **The check.** For case "audio", `set_check(&check)` before the first step. Then `begin_step` when the camera is
-    in place, `audition` per audition step, `step_done` polling, and `analyse_game_check` with
+    in place, `audition` per audition step (a refusal skips the step through `skip_step`, so `step_done` still turns
+    true and the step fails), `step_done` polling, and `analyse_game_check` with
     `stats().short_blocks / late_blocks / late_commands / router.mixer_refusals`.
   - **The shooter.** The check needs a bot firing M16A3 bursts of 10 on the camera's axis.
   - **`m2a_check`'s shooter** is `set_shooter(slot)`.
@@ -288,8 +301,8 @@ From the worktree, after `tools\build.cmd dev --no-test`.
   interval spans more than one tick, that is once per shot, not once per burst. The others' seeds use
   (record burst_seq + 1 + RemoteShots ahead) & 15, which every client computes alike from the same records. But
   "a change = a new burst" does not hold, so the router never uses a burst_seq change to start a burst.
-* **The M1A2 audition.** The patch is not on Metro's mount ("no such partition"). Its 4 steps are reported skips, not
-  passes.
+* **The M1A2 audition** (fixed after the verifier's finding). The patch is not on Metro's mount; it now loads from
+  `kAuditionSuperbundles` (§5) and its 4 steps pass. Any audition that cannot run fails E7 (`skipped.<step>`).
 * **The M67 explosion.** Metro's M67 def has no `explosion_sound`. The detonation sound has to come from fx3's effect
   sounds.
 * **far_pinned seed.** In game, `far_pinned` is a later burst, so its seed differs from far.0's (au's G7 reuses
