@@ -951,10 +951,11 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			return;
 		}
 		const M2a::Stance &st = x.stances[to];
-		if (to != 0 && (st.idle_fallback || st.moves_fallback)) {
+		loco_blend(st, r_out);
+		// A missing stance idle always, missing moves only while the stand cycles actually move the stance.
+		if (to != 0 && (st.idle_fallback || (st.moves_fallback && xs.moving))) {
 			++xs.fallbacks;
 		}
-		loco_blend(st, r_out);
 	};
 	if (xs.dead) {
 		xs.dying = true;
