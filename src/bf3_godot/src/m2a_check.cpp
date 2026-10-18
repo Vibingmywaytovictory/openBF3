@@ -45,8 +45,12 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <functional>
+#include <limits>
 #include <map>
+#include <set>
+#include <tuple>
 
 #ifndef OPENBF3_M2A_HAVE_FX
 #define OPENBF3_M2A_HAVE_FX 0
@@ -251,7 +255,18 @@ struct M2aCheck::State {
 	uint64_t fx_tracer_flags = 0, fx_own_shot_events = 0, fx_impact_events = 0;
 	std::map<uint8_t, std::array<uint64_t, 4>> fx_mat; // PhysicsMaterialIndex -> impacts, effect as named, decals, decal as named
 	uint64_t fx_soldier_starts = 0, fx_soldier_ok = 0, fx_soldier_decals = 0;
-	std::string fx_first_bad;
+	std::string fx_first_bad, fx_last_muzzle;
+	uint64_t fx_muzzle_starts = 0, fx_expected_sounds = 0, fx_dup_events = 0;
+	std::set<std::tuple<uint8_t, uint8_t, uint32_t, uint8_t, uint32_t>> fx_seen; // (kind, slot, id, pellet, extra) of the events counted
+	std::string fx_first_dup;
+	std::multimap<std::pair<uint8_t, uint32_t>, std::pair<sim::Vec3, uint8_t>> fx_impact_mem;
+	std::deque<std::pair<uint8_t, uint32_t>> fx_impact_order;
+	double fx_next_note = 0, fx_mode_t = 0;
+	int fx_phase = 0; // the segment's fire loop: 0 firing, 3 settling, 1 respawning (the reserve ran dry), 2 re-arming
+	double fx_dry_t = 0;
+	bool fx_accounting = false;
+	uint64_t fx_soldier_sounds = 0, fx_sound_cues = 0;
+	uint32_t fx_lives = 0;
 	fx::FxTriggerStats fx_trig0{};
 	fx::EffectHandle fx_oil{};
 	bool fx_oil_started = false;
@@ -1667,14 +1682,42 @@ void M2aCheck::State::fx_account() {
 	if (r != nullptr && r->stats().drawn_instances != fs.particles) {
 		++fx_mismatch_frames;
 	}
-	std::map<std::pair<uint8_t, uint32_t>, uint8_t> impact_material; // (slot, id) -> PhysicsMaterialIndex
+	// (slot, id) -> the shot's Impact events (a penetrating round leaves several: the start's position picks one). Kept
+	// over frames: an impact's start waits for its timeline (the triggers' pending events), so it can come frames later.
+	std::multimap<std::pair<uint8_t, uint32_t>, std::pair<sim::Vec3, uint8_t>> &impact_material = fx_impact_mem;
+	const fx::ImpactTable *table = g.fx->impacts();
+	const fx::FireEffectTable *fire = g.fx->fire_effects();
 	for (const host::PresentEvent &e : g.events) {
+		if (e.kind != host::PresentKind::OwnShot && e.kind != host::PresentKind::Impact) {
+			continue;
+		}
+		if (!fx_seen.insert({ uint8_t(e.kind), e.slot, e.id, e.pellet, e.extra }).second) {
+			++fx_dup_events; // the triggers' double_starts count the same repeats
+			if (fx_first_dup.empty()) {
+				fx_first_dup = fmt("kind %u slot %u id %u pellet %u extra %u timeline %u at %.2f s ('%s')", unsigned(e.kind), unsigned(e.slot), e.id, unsigned(e.pellet),
+						e.extra, unsigned(e.timeline), case_t, (step < steps.size() ? steps[step].name : std::string()).c_str());
+			}
+			continue;
+		}
 		if (e.kind == host::PresentKind::OwnShot) {
 			++fx_own_shot_events;
 			fx_tracer_flags += (e.flags & host::present_flags::kTracer) != 0 ? 1u : 0u;
-		} else if (e.kind == host::PresentKind::Impact) {
+		} else {
 			++fx_impact_events;
-			impact_material[{ e.slot, e.id }] = uint8_t(e.material);
+			impact_material.insert({ { e.slot, e.id }, { sim::Vec3{ e.pos[0], e.pos[1], e.pos[2] }, uint8_t(e.material) } });
+			fx_impact_order.push_back({ e.slot, e.id });
+			while (fx_impact_order.size() > 4096) { // bounded: ~4 magazines of rounds in flight is far beyond any delay
+				const auto old = impact_material.find(fx_impact_order.front());
+				if (old != impact_material.end()) {
+					impact_material.erase(old);
+				}
+				fx_impact_order.pop_front();
+			}
+			// E8 (7): one impact sound per static Impact event whose cell names one (cells without a sound play none).
+			if (table != nullptr && fire != nullptr && e.def < fire->defs.size()) {
+				const fx::ImpactCell *cell = table->select(fire->defs[e.def].bullet_material, uint8_t(e.material & 0xFF));
+				fx_expected_sounds += cell != nullptr && !cell->impact_sound.empty() ? 1u : 0u;
+			}
 		}
 	}
 	const fx::FxTriggers &t = *g.fx->triggers();
@@ -1682,6 +1725,10 @@ void M2aCheck::State::fx_account() {
 	for (const fx::TriggerStart &ts : t.starts()) {
 		if (ts.def == nullptr) {
 			continue;
+		}
+		if (ts.purpose == fx::TriggerPurpose::Muzzle) {
+			++fx_muzzle_starts;
+			fx_last_muzzle = fmt("kind %u 1p %d ", unsigned(ts.kind), int(ts.first_person)) + ts.def->name;
 		}
 		if (ts.kind == host::PresentKind::OwnShot && ts.purpose == fx::TriggerPurpose::Muzzle && ts.first_person) {
 			if (fx_m16_1p.empty() || ts.def->name != fx_m16_1p) {
@@ -1700,11 +1747,21 @@ void M2aCheck::State::fx_account() {
 			++fx_seg_shots;
 			fx_flash += fx_flash_component >= 0 && fx::fx_component_selected(*ts.def, uint32_t(fx_flash_component), ts.seed, fx::kTierHigh /* FxTriggerConfig's default tier, Bf3GameFx's */) ? 1u : 0u;
 		} else if (ts.kind == host::PresentKind::Impact && ts.purpose == fx::TriggerPurpose::ImpactEffect) {
-			const auto it = impact_material.find({ ts.slot, ts.id });
-			if (it == impact_material.end()) {
+			const auto [lo, hi] = impact_material.equal_range({ ts.slot, ts.id });
+			if (lo == hi) {
 				continue;
 			}
-			const uint8_t m = it->second;
+			float best = std::numeric_limits<float>::max();
+			uint8_t m = 0;
+			for (auto it = lo; it != hi; ++it) {
+				const sim::Vec3 &q = it->second.first;
+				const float dx = q[0] - ts.transform.trans.x, dy = q[1] - ts.transform.trans.y, dz = q[2] - ts.transform.trans.z;
+				const float d2 = dx * dx + dy * dy + dz * dz;
+				if (d2 < best) {
+					best = d2;
+					m = it->second.second;
+				}
+			}
 			frame_material = frame_material == -1 || frame_material == int(m) ? int(m) : -2;
 			std::array<uint64_t, 4> &row = fx_mat[m];
 			++row[0];
@@ -1719,6 +1776,22 @@ void M2aCheck::State::fx_account() {
 		} else if (ts.kind == host::PresentKind::SoldierContact && ts.purpose == fx::TriggerPurpose::ImpactEffect) {
 			++fx_soldier_starts;
 			fx_soldier_ok += leaf(ts.def->name) == kFxSoldierEffect ? 1u : 0u;
+		}
+	}
+	std::vector<fx::Vec3> soldier_at;
+	for (const fx::TriggerStart &ts : t.starts()) {
+		if (ts.kind == host::PresentKind::SoldierContact && ts.purpose == fx::TriggerPurpose::ImpactEffect) {
+			soldier_at.push_back(ts.transform.trans);
+		}
+	}
+	for (const fx::ImpactSoundCue &c : t.sounds()) {
+		++fx_sound_cues;
+		for (const fx::Vec3 &q : soldier_at) {
+			const float dx = q.x - c.position.x, dy = q.y - c.position.y, dz = q.z - c.position.z;
+			if (dx * dx + dy * dy + dz * dz < 1e-4f) {
+				++fx_soldier_sounds; // a soldier cell's sound: not a static Impact event's (E8 (7) counts those)
+				break;
+			}
 		}
 	}
 	for (const fx::DecalCue &d : t.decals()) {
@@ -1790,6 +1863,7 @@ void M2aCheck::State::build_fx() {
 								  : fmt("%s (%u): no triangle within 30 m of a spawn", named->name, unsigned(surface.material)));
 		}
 		st.fx_trig0 = st.g.fx->stats().triggers;
+		st.fx_accounting = true;
 		return true;
 	});
 	for (size_t k = 0; k < 2; ++k) {
@@ -1830,8 +1904,14 @@ void M2aCheck::State::build_fx() {
 		add(fmt("fx: segment %zu fire", k), 200.0, [k](State &st, double, bool p_first) {
 			if (p_first) {
 				st.mapper().m2a_script_hold(Action::Fire, true);
+				st.fx_next_note = st.case_t + 10.0;
+				st.fx_phase = 0;
 			}
-			st.fx_account();
+			if (st.case_t >= st.fx_next_note) {
+				st.fx_next_note = st.case_t + 10.0;
+				st.note(fmt("segment %zu: %" PRIu64 " 1p M16A3 starts, %" PRIu64 " own shots, %" PRIu64 " muzzle starts (last: %s), magazine %d", k,
+						st.fx_seg_shots, st.fx_own_shot_events, st.fx_muzzle_starts, st.fx_last_muzzle.c_str(), int(st.g.weapon.magazine)));
+			}
 			// The oilfire's live particles at 15 s.
 			if (st.fx_oil_started && st.fx_oil_particles < 0 && st.case_t - st.fx_oil_t0 >= kFxOilfireSeconds && st.g.fx->world() != nullptr) {
 				int64_t n = 0;
@@ -1844,6 +1924,56 @@ void M2aCheck::State::build_fx() {
 				st.mapper().m2a_script_hold(Action::Fire, false);
 				return st.fx_oil_particles >= 0 || !st.fx_oil_started || k > 0;
 			}
+			const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
+			if (st.fx_phase == 0 && st.g.weapon.valid && st.g.weapon.magazine == 0 && st.g.weapon.reserve == 0) {
+				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.fx_phase = 3;
+				st.fx_dry_t = st.case_t;
+				return false;
+			}
+			if (st.fx_phase == 3) {
+				// The bag is empty (one life carries ~190 M16A3 rounds): a new life at the same spawn refills it. The
+				// SpawnAt waits 1 s for the last shots' commands to be acknowledged: a respawn inside the replay window
+				// re-emits the life's last OwnShot (cl's ClEmit; m2a-gx.md §7, open), which the triggers count as a double start.
+				if (st.case_t - st.fx_dry_t < 1.0) {
+					return false;
+				}
+				st.life_before = st.f().own_curr.life;
+				net::DebugRequest q;
+				q.kind = net::DebugKind::SpawnAt;
+				q.index = st.fx_surfaces[k].spawn;
+				st.send(q);
+				st.fx_phase = 1;
+				++st.fx_lives;
+				return false;
+			}
+			if (st.fx_phase == 1) {
+				st.poll_report();
+				if (st.g.alive && st.f().own_curr.life != st.life_before && st.mapper().adopted_life() == st.f().own_curr.life && st.ready()) {
+					st.fx_phase = 2;
+					st.fx_mode_t = st.case_t;
+				}
+				return false;
+			}
+			if (st.fx_phase == 2) {
+				st.aim_at(st.eye(), st.fx_surfaces[k].point);
+				if (st.g.weapon.active_slot != 0) {
+					st.mapper().m2a_script_select(0);
+					return false;
+				}
+				if (d != nullptr && d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic != core::gameplay::FireLogic::Automatic) {
+					if (st.case_t - st.fx_mode_t > 0.3) {
+						st.fx_mode_t = st.case_t;
+						st.mapper().m2a_script_press(Action::FireMode);
+					}
+					return false;
+				}
+				if (!st.ready()) {
+					return false;
+				}
+				st.mapper().m2a_script_hold(Action::Fire, true);
+				st.fx_phase = 0;
+			}
 			// Keep the aim on the surface; reload an empty magazine (the hold resumes when ready).
 			if (st.g.weapon.valid && st.g.weapon.magazine == 0 && st.ready()) {
 				st.mapper().m2a_script_press(Action::Reload);
@@ -1852,10 +1982,7 @@ void M2aCheck::State::build_fx() {
 			return false;
 		});
 		wait(0.5);
-		add(fmt("fx: segment %zu tail", k), 1.0, [](State &st, double, bool) {
-			st.fx_account();
-			return true;
-		});
+		wait(0.5); // the segment's last impacts and their pending starts
 	}
 	// A soldier hit: the target bot 8 m down the range lane, single rounds at its chest.
 	add("fx: lane", 5.0, [](State &st, double, bool) {
@@ -1876,7 +2003,6 @@ void M2aCheck::State::build_fx() {
 				sw::zone_aim_point(st.report.targets[0].target, sw::HitZone::Chest, st.point);
 			}
 		}
-		st.fx_account();
 		if (!st.report.targets.empty()) {
 			st.aim_at(st.eye(), st.point);
 		}
@@ -1888,6 +2014,7 @@ void M2aCheck::State::build_fx() {
 		return st.taps >= 3 && p_t >= st.t_mark + 0.5;
 	});
 	add("fx: rows", 1.0, [](State &st, double, bool) {
+		st.fx_accounting = false;
 		const fx::FxTriggerStats now = st.g.fx->stats().triggers;
 		const fx::FxTriggerStats &a = st.fx_trig0;
 		const double flash = st.fx_shots_1p > 0 ? double(st.fx_flash) / double(st.fx_shots_1p) : 0.0;
@@ -1926,10 +2053,16 @@ void M2aCheck::State::build_fx() {
 		const uint64_t shells = now.shells - a.shells, firearm = now.firearm_shots - a.firearm_shots;
 		st.row("e8.7.shells", double(shells), fmt("one shell eject per firearm shot (%" PRIu64 ")", firearm), shells == firearm && shells > 0);
 		const uint64_t sounds = now.sounds - a.sounds, impacts = now.impacts - a.impacts;
-		st.row("e8.7.impact_sounds", double(sounds), fmt("one impact sound cue per impact cell started (%" PRIu64 "; %" PRIu64 " Impact events, %" PRIu64 " culled)", impacts,
-															st.fx_impact_events, now.impacts_culled - a.impacts_culled),
-				sounds == impacts && sounds > 0);
-		st.row("e8.7.double_starts", double(now.double_starts - a.double_starts), "== 0 after the replays", now.double_starts == a.double_starts);
+		const uint64_t culled = now.impacts_culled - a.impacts_culled;
+		const uint64_t static_sounds = sounds >= st.fx_soldier_sounds ? sounds - st.fx_soldier_sounds : 0;
+		st.row("e8.7.impact_sounds", double(static_sounds),
+				fmt("one impact sound per static Impact event whose cell names one, within its cull distance (%" PRIu64 " expected of %" PRIu64 " Impact events, %" PRIu64
+					" culled; %" PRIu64 " cells started, %" PRIu64 " soldier-cell sounds, %" PRIu64 " cues seen)",
+						st.fx_expected_sounds, st.fx_impact_events, culled, impacts, st.fx_soldier_sounds, st.fx_sound_cues),
+				static_sounds > 0 && static_sounds + culled >= st.fx_expected_sounds && static_sounds <= st.fx_expected_sounds && st.fx_sound_cues == sounds);
+		st.row("e8.7.double_starts", double(now.double_starts - a.double_starts),
+				fmt("== 0 after the replays (%" PRIu64 " repeated events seen by the check%s)", st.fx_dup_events, st.fx_first_dup.empty() ? "" : (", first: " + st.fx_first_dup).c_str()),
+				now.double_starts == a.double_starts);
 		return true;
 	});
 }
@@ -2068,6 +2201,7 @@ void M2aCheck::State::finish_case() {
 	}
 	g.listener_override = false;
 	g.fx_off = false;
+	fx_accounting = false;
 	if (current.outcome != M2aOutcome::Skip) {
 		for (const M2aRow &r : current.rows) {
 			if (!r.pass) {
@@ -2120,6 +2254,9 @@ bool M2aCheck::frame(uint64_t p_now_ns, double p_dt) {
 		}
 	}
 	st.case_t += p_dt;
+	if (st.fx_accounting) {
+		st.fx_account(); // every frame from the surfaces to the rows: no event / start / cue is missed between steps
+	}
 	if (st.step >= st.steps.size()) {
 		st.finish_case();
 		return false;

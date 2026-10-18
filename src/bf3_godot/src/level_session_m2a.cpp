@@ -524,7 +524,7 @@ void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
 	r_game.gunplay.player_team = g.team;
 	if (g.checks()) {
 		r_game.gunplay.observer = g.recorder;
-		if (g.wants_case(M2aCase::Range) || g.wants_case(M2aCase::Kits)) {
+		if (g.wants_case(M2aCase::Range) || g.wants_case(M2aCase::Kits) || g.wants_case(M2aCase::Fx)) { // fx: E8 (5)'s soldier hit
 			// E3's range rule (exact aim) and one stationary target bot in slot 0 for the range and the knife.
 			r_game.gunplay.exact_aim = true;
 			r_game.gunplay.target_bots = 1;
