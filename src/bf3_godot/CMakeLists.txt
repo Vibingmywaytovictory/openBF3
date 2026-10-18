@@ -184,4 +184,6 @@ target_sources(bf3_godot PRIVATE
     src/game_fx.cpp
     src/fx_decals.cpp
     src/fx_decals.h
+    src/fx3_demo.cpp
+    src/fx3_demo.h
 )

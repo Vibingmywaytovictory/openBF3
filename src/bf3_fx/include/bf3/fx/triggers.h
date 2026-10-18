@@ -226,6 +226,24 @@ struct DecalPlacement {
 };
 DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed);
 
+// fx3: BF3's BC1 impact decal textures (decal_metal_s_01_d, decal_brick_s_01_d, decal_stone_s_01_d,
+// decal_wood_s_01_d, decal_s_01_d on Metro) carry no alpha: they are colour-keyed on magenta [verified: decompressed,
+// the background is pure (255, 0, 255), the hole's halo blends towards it, means (0.90, 0.01, 0.90); the BC3 decals
+// (concrete, glass, scorch) carry a real alpha]. How BF3's decal shader uses the key is [inferred]: each texel is read
+// as a x colour + (1 - a) x magenta with a grey-ish colour, so 1 - a = min(R, B) - G.
+// The BC1 blocks of a w x h level as RGBA8 (BC1's 3-colour mode: index 3 transparent black). An error when the bytes
+// are fewer than the blocks need or the size is 0 or above 4096.
+core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height);
+// The share of texels that are the key (R, B >= 230, G <= 25): keyed when >= kMagentaKeyedShare.
+inline constexpr float kMagentaKeyedShare = 0.2f;
+float magenta_share(std::span<const uint8_t> p_rgba);
+// Un-blends every texel in place: a = 1 - clamp(min(R, B) - G), colour = (R - k, G, B - k) / a (k = 1 - a); a texel
+// with a < 1/255 becomes (0, 0, 0, 0).
+void unkey_magenta(std::span<uint8_t> r_rgba);
+// The full mip chain of an RGBA8 level (each level halves, at least 1 texel; alpha-weighted 2 x 2 box): level 0 first,
+// tightly packed; r_levels counts the levels (Godot's chain length). Empty for a size of 0 or too few bytes.
+std::vector<uint8_t> rgba_mip_chain(std::span<const uint8_t> p_level0, uint32_t p_width, uint32_t p_height, uint32_t *r_levels);
+
 // An impact sound to play (au3: ImpactAudio::play_impact).
 struct ImpactSoundCue {
 	std::string_view patch; // ImpactCell::impact_sound (valid while the table lives)
@@ -287,6 +305,7 @@ struct FxTriggerStats {
 	uint64_t tracer_steals = 0; // a tracer stopped early for a new one (kMaxTracers)
 	uint64_t attached_updates = 0; // UpdateTransform muzzle effects moved with their muzzle
 	uint64_t pending_now = 0; // events held this frame
+	uint64_t culled = 0; // starts of any purpose beyond their def's CullDistance (impacts_culled counts the impacts' cells)
 };
 static_assert(std::is_trivially_copyable_v<FxTriggerStats>);
 

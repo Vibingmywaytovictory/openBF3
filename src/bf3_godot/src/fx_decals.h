@@ -3,7 +3,8 @@
 // fx::kMaxDecals Godot Decal nodes under one Node3D; a new decal past the cap takes the oldest node. Each decal is a
 // DecalTemplateData (fx::DecalTemplate: Size + U x RandomSize metres square, Rotation +- RandomRotation about the
 // normal, fx::decal_placement from the cue's seed) with its diffuse texture (fx::pick_decal_texture [inferred]) as
-// the albedo; it fades out over kDecalFadeOutSeconds once it is fx::kDecalFadeSeconds old.
+// the albedo; a magenta-keyed BC1 texture is un-keyed to RGBA8 with alpha on the loader thread (fx::unkey_magenta).
+// A decal fades out over kDecalFadeOutSeconds once it is fx::kDecalFadeSeconds old.
 // Godot's Decal projects along its local -Y, so the node's basis is the cue's effect frame (local +Y = the surface
 // normal) turned about Y by the placement's rotation; its box is size x kDecalDepth x size, centred NormalOffset above
 // the surface. ClipAngle becomes the normal fade (0.5 cos(ClipAngle) + 0.5: Godot fades by smoothstep(normal_fade, 1,
@@ -38,6 +39,7 @@ struct FxDecalAssets {
 	std::map<std::string, render::PreparedTexture, std::less<>> textures; // by texture partition name
 	std::vector<std::string> errors; // "<decal or texture>: <message>" (counted, the decal is skipped or untextured)
 	uint32_t without_texture = 0; // templates with no texture found
+	uint32_t unkeyed = 0; // magenta-keyed BC1 textures converted to RGBA8 with alpha (fx::unkey_magenta)
 	uint64_t texture_bytes = 0;
 
 	// p_names: every decal the impact table's cells name and the scorch mark (fx::impact_decal_names + kScorchDecal).
@@ -72,6 +74,11 @@ public:
 	// Frees the nodes (main thread; idempotent).
 	void clear();
 	const FxDecalStats &stats() const { return stats_; }
+	// Diagnostics (main thread, decompresses every texture): per texture its source and GPU format and the mean RGBA
+	// and alpha coverage of a 64 x 64 copy.
+	// p_dump_dir non-empty: also saves each decompressed texture there as <leaf>.png (a diagnostics folder outside
+	// the install: the caller checks it; never committed).
+	std::vector<std::string> texture_report(const std::string &p_dump_dir = {}) const;
 
 private:
 	struct Slot {

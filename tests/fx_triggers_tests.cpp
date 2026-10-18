@@ -448,6 +448,61 @@ TEST_CASE("decal textures and placements") {
 	CHECK_FALSE(load_decal_template(db, "decals/syn/target", tex).ok()); // not a DecalTemplateData
 }
 
+TEST_CASE("decal keys: BC1 decode, the magenta key, the RGBA mip chain, hostile sizes") {
+	// One 4-colour block: c0 = magenta (31, 0, 31), c1 = black; indices 0 (magenta) in row 0, 1 (black) in row 1, 2 and 3
+	// (the 2/3 and 1/3 mixes) in rows 2 and 3.
+	const uint16_t c0 = uint16_t((31u << 11) | 31u), c1 = 0;
+	const std::array<uint8_t, 8> block{ uint8_t(c0 & 0xFF), uint8_t(c0 >> 8), uint8_t(c1 & 0xFF), uint8_t(c1 >> 8), 0x00, 0x55, 0xAA, 0xFF };
+	core::Result<std::vector<uint8_t>> rgba = decode_bc1(block, 4, 4);
+	REQUIRE(rgba.ok());
+	REQUIRE(rgba->size() == 64);
+	auto texel = [&](uint32_t p_x, uint32_t p_y) {
+		const uint8_t *t = rgba->data() + (size_t(p_y) * 4 + p_x) * 4;
+		return std::array<int, 4>{ t[0], t[1], t[2], t[3] };
+	};
+	CHECK(texel(1, 0) == std::array<int, 4>{ 255, 0, 255, 255 });
+	CHECK(texel(2, 1) == std::array<int, 4>{ 0, 0, 0, 255 });
+	CHECK(texel(0, 2) == std::array<int, 4>{ 170, 0, 170, 255 });
+	CHECK(texel(3, 3) == std::array<int, 4>{ 85, 0, 85, 255 });
+	CHECK(magenta_share(*rgba) == doctest::Approx(0.25f));
+	// The 3-colour mode (c0 <= c1): index 3 is transparent black.
+	const std::array<uint8_t, 8> three{ 0, 0, uint8_t(c0 & 0xFF), uint8_t(c0 >> 8), 0xFF, 0xFF, 0xFF, 0xFF };
+	core::Result<std::vector<uint8_t>> t3 = decode_bc1(three, 4, 4);
+	REQUIRE(t3.ok());
+	CHECK((*t3)[3] == 0);
+	// Un-keying: magenta becomes transparent; a grey texel blended half over magenta comes back grey at alpha 0.5; a
+	// texel with no magenta in it stays.
+	std::vector<uint8_t> px{ 255, 0, 255, 255, 191, 64, 191, 255, 100, 120, 90, 255 };
+	unkey_magenta(px);
+	CHECK(px[3] == 0);
+	CHECK(px[7] == doctest::Approx(128).epsilon(0.02));
+	CHECK(px[4] == doctest::Approx(127).epsilon(0.03));
+	CHECK(px[5] == doctest::Approx(127).epsilon(0.03));
+	CHECK(px[6] == doctest::Approx(127).epsilon(0.03));
+	CHECK(std::vector<uint8_t>(px.begin() + 8, px.end()) == std::vector<uint8_t>{ 100, 120, 90, 255 });
+	// The mip chain of a 4 x 2 level: 4x2, 2x1, 1x1; alpha-weighted (a transparent texel adds no colour).
+	std::vector<uint8_t> level(4 * 2 * 4, 0);
+	for (size_t i = 0; i < 8; ++i) {
+		level[i * 4 + 0] = 200;
+		level[i * 4 + 3] = (i % 2 == 0) ? 255 : 0;
+	}
+	uint32_t levels = 0;
+	const std::vector<uint8_t> chain = rgba_mip_chain(level, 4, 2, &levels);
+	CHECK(levels == 3);
+	REQUIRE(chain.size() == (8 + 2 + 1) * 4);
+	CHECK(chain[32] == 200); // level 1 texel 0: red from the opaque texels only
+	CHECK(chain[35] == doctest::Approx(128).epsilon(0.02));
+	// Hostile: too few bytes, a zero or oversized level.
+	CHECK_FALSE(decode_bc1(std::span<const uint8_t>(block.data(), 7), 4, 4).ok());
+	CHECK_FALSE(decode_bc1(block, 8, 4).ok());
+	CHECK_FALSE(decode_bc1(block, 0, 4).ok());
+	CHECK_FALSE(decode_bc1(block, 5000, 4).ok());
+	CHECK(rgba_mip_chain(level, 4, 4, &levels).empty());
+	CHECK(levels == 0);
+	CHECK(rgba_mip_chain(level, 0, 2, nullptr).empty());
+	CHECK(magenta_share({}) == 0.0f);
+}
+
 TEST_CASE("name lists: fire table blueprints, impact sounds, effects, decals") {
 	std::unique_ptr<Syn> s = make_syn();
 	const std::vector<std::string> bp = s->fire->blueprints();

@@ -97,6 +97,8 @@ public:
 	const fx::FxTriggers *triggers() const;
 	// The load's notes (sizes, times, the first errors), for the session log.
 	std::vector<std::string> notes() const;
+	// Diagnostics (main thread, slow: decompresses): FxDecalPool::texture_report.
+	std::vector<std::string> decal_texture_report(const std::string &p_dump_dir = {}) const;
 	GameFxStats stats() const;
 	void shutdown(); // frees the renderer's and the decals' RIDs (idempotent; main thread)
 

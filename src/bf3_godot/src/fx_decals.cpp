@@ -7,12 +7,14 @@
 
 #include "bf3/core/res/res_loader.h"
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/core/object.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace bf3::godot_side {
 
@@ -48,6 +50,19 @@ FxDecalAssets FxDecalAssets::load(const core::EbxLibrary &p_level, const core::L
 					t->texture.clear();
 					++out.without_texture;
 				} else {
+					// A magenta-keyed BC1 decal becomes RGBA8 with the key as alpha (fx::unkey_magenta).
+					if (prepared->format == render::GpuFormat::Bc1) {
+						core::Result<std::vector<uint8_t>> rgba = fx::decode_bc1(prepared->data, prepared->width, prepared->height);
+						if (rgba && fx::magenta_share(*rgba) >= fx::kMagentaKeyedShare) {
+							fx::unkey_magenta(*rgba);
+							uint32_t levels = 0;
+							prepared->data = fx::rgba_mip_chain(*rgba, prepared->width, prepared->height, &levels);
+							prepared->format = render::GpuFormat::Rgba8;
+							prepared->levels = levels;
+							prepared->stored_levels = levels;
+							++out.unkeyed;
+						}
+					}
 					out.texture_bytes += prepared->data.size();
 					out.textures.emplace(t->texture, std::move(*prepared));
 				}
@@ -171,6 +186,48 @@ void FxDecalPool::step(double p_dt) {
 		++live;
 	}
 	stats_.live = live;
+}
+
+std::vector<std::string> FxDecalPool::texture_report(const std::string &p_dump_dir) const {
+	std::vector<std::string> out;
+	if (assets_ == nullptr) {
+		return out;
+	}
+	for (const auto &[name, tex] : textures_) {
+		const auto prepared = assets_->textures.find(name);
+		Ref<Image> img = tex->get_image();
+		if (img.is_null()) {
+			continue;
+		}
+		img = img->duplicate();
+		if (img->is_compressed()) {
+			img->decompress();
+		}
+		img->clear_mipmaps();
+		img->convert(Image::FORMAT_RGBA8);
+		if (!p_dump_dir.empty()) {
+			const size_t slash = name.rfind('/');
+			img->save_png(to_godot(p_dump_dir + "/" + (slash == std::string::npos ? name : name.substr(slash + 1)) + ".png"));
+		}
+		img->resize(64, 64, Image::INTERPOLATE_BILINEAR);
+		double sum[4] = { 0, 0, 0, 0 };
+		uint32_t opaque = 0;
+		for (int32_t y = 0; y < 64; ++y) {
+			for (int32_t x = 0; x < 64; ++x) {
+				const Color c = img->get_pixel(x, y);
+				sum[0] += c.r, sum[1] += c.g, sum[2] += c.b, sum[3] += c.a;
+				opaque += c.a >= 0.5f ? 1 : 0;
+			}
+		}
+		char line[512];
+		std::snprintf(line, sizeof(line), "%s: source format %d -> %s %ux%u, mean rgba (%.2f %.2f %.2f %.2f), alpha >= 0.5 on %.0f %%", name.c_str(),
+				prepared != assets_->textures.end() ? int(prepared->second.source_format) : -1,
+				prepared != assets_->textures.end() ? render::gpu_format_name(prepared->second.format) : "?", prepared != assets_->textures.end() ? prepared->second.width : 0,
+				prepared != assets_->textures.end() ? prepared->second.height : 0, sum[0] / 4096.0, sum[1] / 4096.0, sum[2] / 4096.0, sum[3] / 4096.0,
+				100.0 * double(opaque) / 4096.0);
+		out.push_back(line);
+	}
+	return out;
 }
 
 void FxDecalPool::clear() {

@@ -462,6 +462,138 @@ DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed)
 	return d;
 }
 
+core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height) {
+	if (p_width == 0 || p_height == 0 || p_width > 4096 || p_height > 4096) {
+		return core::Error{ "decode_bc1: size out of range" };
+	}
+	const uint32_t bw = (p_width + 3) / 4, bh = (p_height + 3) / 4;
+	if (p_blocks.size() < size_t(bw) * bh * 8) {
+		return core::Error{ "decode_bc1: fewer bytes than the blocks need" };
+	}
+	std::vector<uint8_t> out(size_t(p_width) * p_height * 4);
+	auto expand = [](uint32_t p_c, uint8_t *r_rgb) {
+		const uint32_t r = (p_c >> 11) & 31, g = (p_c >> 5) & 63, b = p_c & 31;
+		r_rgb[0] = uint8_t((r * 527 + 23) >> 6);
+		r_rgb[1] = uint8_t((g * 259 + 33) >> 6);
+		r_rgb[2] = uint8_t((b * 527 + 23) >> 6);
+	};
+	for (uint32_t by = 0; by < bh; ++by) {
+		for (uint32_t bx = 0; bx < bw; ++bx) {
+			const uint8_t *b = p_blocks.data() + (size_t(by) * bw + bx) * 8;
+			const uint32_t c0 = uint32_t(b[0]) | (uint32_t(b[1]) << 8), c1 = uint32_t(b[2]) | (uint32_t(b[3]) << 8);
+			uint8_t pal[4][4] = {};
+			expand(c0, pal[0]);
+			expand(c1, pal[1]);
+			for (int k = 0; k < 3; ++k) {
+				if (c0 > c1) {
+					pal[2][k] = uint8_t((2 * pal[0][k] + pal[1][k] + 1) / 3);
+					pal[3][k] = uint8_t((pal[0][k] + 2 * pal[1][k] + 1) / 3);
+				} else {
+					pal[2][k] = uint8_t((pal[0][k] + pal[1][k] + 1) / 2);
+					pal[3][k] = 0;
+				}
+			}
+			pal[0][3] = pal[1][3] = pal[2][3] = 255;
+			pal[3][3] = c0 > c1 ? 255 : 0;
+			const uint32_t bits = uint32_t(b[4]) | (uint32_t(b[5]) << 8) | (uint32_t(b[6]) << 16) | (uint32_t(b[7]) << 24);
+			for (uint32_t i = 0; i < 16; ++i) {
+				const uint32_t x = bx * 4 + (i & 3), y = by * 4 + (i >> 2);
+				if (x >= p_width || y >= p_height) {
+					continue;
+				}
+				const uint8_t *c = pal[(bits >> (2 * i)) & 3];
+				uint8_t *o = out.data() + (size_t(y) * p_width + x) * 4;
+				o[0] = c[0];
+				o[1] = c[1];
+				o[2] = c[2];
+				o[3] = c[3];
+			}
+		}
+	}
+	return out;
+}
+
+float magenta_share(std::span<const uint8_t> p_rgba) {
+	const size_t n = p_rgba.size() / 4;
+	if (n == 0) {
+		return 0.0f;
+	}
+	size_t keyed = 0;
+	for (size_t i = 0; i < n; ++i) {
+		const uint8_t *t = p_rgba.data() + i * 4;
+		keyed += t[0] >= 230 && t[2] >= 230 && t[1] <= 25 ? 1 : 0;
+	}
+	return float(double(keyed) / double(n));
+}
+
+void unkey_magenta(std::span<uint8_t> r_rgba) {
+	auto q = [](float p_v) {
+		return uint8_t(std::lround(std::clamp(p_v, 0.0f, 1.0f) * 255.0f));
+	};
+	for (size_t i = 0; i + 3 < r_rgba.size(); i += 4) {
+		uint8_t *t = r_rgba.data() + i;
+		const float r = float(t[0]) / 255.0f, g = float(t[1]) / 255.0f, b = float(t[2]) / 255.0f;
+		const float k = std::clamp(std::min(r, b) - g, 0.0f, 1.0f);
+		const float a = 1.0f - k;
+		if (a < 1.0f / 255.0f) {
+			t[0] = t[1] = t[2] = t[3] = 0;
+			continue;
+		}
+		const float a0 = float(t[3]) / 255.0f;
+		t[0] = q((r - k) / a);
+		t[1] = q(g / a);
+		t[2] = q((b - k) / a);
+		t[3] = q(a * a0);
+	}
+}
+
+std::vector<uint8_t> rgba_mip_chain(std::span<const uint8_t> p_level0, uint32_t p_width, uint32_t p_height, uint32_t *r_levels) {
+	if (r_levels != nullptr) {
+		*r_levels = 0;
+	}
+	if (p_width == 0 || p_height == 0 || p_width > 4096 || p_height > 4096 || p_level0.size() < size_t(p_width) * p_height * 4) {
+		return {};
+	}
+	std::vector<uint8_t> out(p_level0.begin(), p_level0.begin() + ptrdiff_t(size_t(p_width) * p_height * 4));
+	uint32_t levels = 1;
+	size_t prev = 0;
+	uint32_t w = p_width, h = p_height;
+	while (w > 1 || h > 1) {
+		const uint32_t nw = std::max(1u, w / 2), nh = std::max(1u, h / 2);
+		const size_t base = out.size();
+		out.resize(base + size_t(nw) * nh * 4);
+		for (uint32_t y = 0; y < nh; ++y) {
+			for (uint32_t x = 0; x < nw; ++x) {
+				float sum[4] = { 0, 0, 0, 0 };
+				for (uint32_t dy = 0; dy < 2; ++dy) {
+					for (uint32_t dx = 0; dx < 2; ++dx) {
+						const uint32_t sx = std::min(w - 1, x * 2 + dx), sy = std::min(h - 1, y * 2 + dy);
+						const uint8_t *t = out.data() + prev + (size_t(sy) * w + sx) * 4;
+						const float a = float(t[3]) / 255.0f;
+						sum[0] += float(t[0]) * a;
+						sum[1] += float(t[1]) * a;
+						sum[2] += float(t[2]) * a;
+						sum[3] += a;
+					}
+				}
+				uint8_t *o = out.data() + base + (size_t(y) * nw + x) * 4;
+				for (int k = 0; k < 3; ++k) {
+					o[k] = sum[3] > 0.0f ? uint8_t(std::lround(std::clamp(sum[k] / sum[3], 0.0f, 255.0f))) : 0;
+				}
+				o[3] = uint8_t(std::lround(std::clamp(sum[3] * 0.25f * 255.0f, 0.0f, 255.0f)));
+			}
+		}
+		prev = base;
+		w = nw;
+		h = nh;
+		++levels;
+	}
+	if (r_levels != nullptr) {
+		*r_levels = levels;
+	}
+	return out;
+}
+
 void effect_sound_cues(std::span<const FxEvent> p_events, std::vector<EffectSoundCue> &r_out) {
 	for (const FxEvent &e : p_events) {
 		if (e.kind != FxEvent::Kind::SoundStart && e.kind != FxEvent::Kind::SoundStop) {
@@ -610,6 +742,7 @@ struct FxTriggers::Impl {
 		if (p_def->cull_distance > 0.0f && !p_first_person) {
 			const float d = length(sub(p_frame.trans, view.camera_position));
 			if (d > p_def->cull_distance) {
+				++stats.culled;
 				if (r_culled != nullptr) {
 					*r_culled = true;
 				}

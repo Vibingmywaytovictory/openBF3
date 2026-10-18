@@ -281,8 +281,9 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		m.decal_assets = FxDecalAssets::load(lib, lib.mount(0), names);
 		m.stats.decal_templates = uint32_t(m.decal_assets.templates.size());
 		m.stats.decal_templates_untextured = m.decal_assets.without_texture;
-		m.notes.push_back(fmt("decals: %zu templates of %zu names, %u without a texture, %zu textures (%.1f MiB), %.2f s", m.decal_assets.templates.size(),
-				names.size(), m.decal_assets.without_texture, m.decal_assets.textures.size(), double(m.decal_assets.texture_bytes) / 1048576.0, since(td)));
+		m.notes.push_back(fmt("decals: %zu templates of %zu names, %u without a texture, %zu textures (%u magenta-keyed BC1 un-keyed; %.1f MiB), %.2f s",
+				m.decal_assets.templates.size(), names.size(), m.decal_assets.without_texture, m.decal_assets.textures.size(), m.decal_assets.unkeyed,
+				double(m.decal_assets.texture_bytes) / 1048576.0, since(td)));
 		m.note_errors("decal", m.decal_assets.errors);
 	}
 	fx::FxWorldConfig wc;
@@ -474,6 +475,10 @@ const fx::FxTriggers *Bf3GameFx::triggers() const {
 
 std::vector<std::string> Bf3GameFx::notes() const {
 	return impl_->notes;
+}
+
+std::vector<std::string> Bf3GameFx::decal_texture_report(const std::string &p_dump_dir) const {
+	return impl_->decals.texture_report(p_dump_dir);
 }
 
 GameFxStats Bf3GameFx::stats() const {
