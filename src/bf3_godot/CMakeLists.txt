@@ -160,3 +160,17 @@ target_sources(bf3_godot PRIVATE
     src/audio_demo.h
 )
 target_link_libraries(bf3_godot PRIVATE bf3_audio)
+
+# M2a w3 (W3.0 contract, docs/design/m2a-w3.md): the wave-3 game parts' headers (Bf3GameAudio au3, Bf3GameFx fx3,
+# Bf3GameCrowd tp, M2aCheck gx), the 1p muzzle (G6, fx3) and a TU that compiles the headers together. The owners
+# add their .cpp files in their own blocks.
+target_sources(bf3_godot PRIVATE
+    src/m2a_game.h
+    src/game_audio.h
+    src/game_fx.h
+    src/game_crowd.h
+    src/m2a_check.h
+    src/viewmodel_muzzle.h
+    src/viewmodel_muzzle.cpp
+    src/m2a_w3_headers.cpp
+)
