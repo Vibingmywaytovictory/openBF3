@@ -5,7 +5,8 @@
 //                 its stealing rules, the listener re-send, determinism, hostile input, the check's bookkeeping.
 //   audio-game    (install rows, exit 77 without an install; install.unchanged in each) the Metro kit items through
 //                 load_weapon_audio, the offline E7 rehearsal (a cl-faithful presentation stream of an M16A3 shooter
-//                 into the router, GameAudioCheck on the mixer, analyse_game_check), and the 64-shooter 60 s render.
+//                 into the router, GameAudioCheck on the mixer, analyse_game_check), a scene for the ear (own fire
+//                 and reload, others by distance, impacts) and the 64-shooter 60 s render.
 // The program builder and the test wave are copies of audio_unit_tests.cpp's (au's file is not edited).
 #include "test_support.h"
 
@@ -1773,7 +1774,7 @@ TEST_SUITE("audio-game") {
 		CHECK(ms.ring_overflows.load() == 0);
 		CHECK(ms.starved_voices.load() == 0);
 		// The recording for the user (b/shots/au3, gitignored).
-		const std::filesystem::path dir = au3_shots_dir("audio.game.e7");
+		const std::filesystem::path dir = au3_shots_dir("audio.game");
 		std::error_code ec;
 		REQUIRE(guard.allows_write(dir));
 		std::filesystem::create_directories(dir, ec);
@@ -1957,7 +1958,7 @@ TEST_SUITE("audio-game") {
 		}
 		// The WAV for the user's ear (shots, gitignored).
 		const PathGuard guard = install_guard(*f);
-		const std::filesystem::path dir = au3_shots_dir("audio.game.scene");
+		const std::filesystem::path dir = au3_shots_dir("audio.game");
 		REQUIRE(guard.allows_write(dir));
 		std::error_code ec;
 		std::filesystem::create_directories(dir, ec);

@@ -1208,32 +1208,31 @@ endif()
 
 # M2a au3 (docs/design/m2a-au3.md): the game's weapon audio. audio.router.unit runs the data-free audio-router suite
 # (synthetic programs through WeaponAudioRouter, ImpactAudio and SimMixerClock on an offline MixerCore; a unit row,
-# <= 2 s). The audio-game install rows (exit 77 without an install, install.unchanged in each): audio.game.kits (E7
-# item 1), audio.game.e7 (the offline E7 rehearsal; its WAV and table to shots/<row>), audio.game.scene (own fire,
-# a reload, others by distance, impacts: gate 4 offline, scene.wav beside), audio.game.crowd (64
-# shooters for 60 s, functional counters); audio.game.underruns is the same render gating late_blocks = 0, a wall-clock
-# gate (timing, main only).
+# <= 2 s). The audio-game install rows (exit 77 without an install, install.unchanged in each): audio.game runs the
+# kit items (E7 item 1), the offline E7 rehearsal and the scene for the ear (own fire, a reload, others by distance,
+# impacts: gate 4 offline), WAVs and tables to shots/audio.game; audio.game.crowd (64 shooters for 60 s, functional
+# counters); audio.game.underruns is the same render gating late_blocks = 0, a wall-clock gate (timing, main only).
 openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h)
 target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_host bf3_fx bf3_core)
 target_compile_definitions(test_audio_router PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg"
     OPENBF3_AU3_SHOTS="${CMAKE_BINARY_DIR}/shots")
 add_test(NAME audio.router.unit COMMAND test_audio_router --test-suite=audio-router)
 set_tests_properties(audio.router.unit PROPERTIES TIMEOUT 300)
-add_test(NAME audio.game.kits COMMAND test_audio_router --test-suite=audio-game "--test-case=kit items*")
-add_test(NAME audio.game.e7 COMMAND test_audio_router --test-suite=audio-game "--test-case=E7 rehearsal*")
-add_test(NAME audio.game.scene COMMAND test_audio_router --test-suite=audio-game "--test-case=a scene for the ear*")
+# One process for the three cases that share the load (the fixture loads Metro's gunplay tables and the bank once).
+add_test(NAME audio.game COMMAND test_audio_router --test-suite=audio-game "--test-case-exclude=64 shooters*")
 add_test(NAME audio.game.crowd COMMAND test_audio_router --test-suite=audio-game "--test-case=64 shooters*")
 add_test(NAME audio.game.underruns COMMAND test_audio_router --test-suite=audio-game "--test-case=64 shooters*")
-set_tests_properties(audio.game.kits audio.game.e7 audio.game.scene audio.game.crowd audio.game.underruns PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
+set_tests_properties(audio.game audio.game.crowd audio.game.underruns PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200)
 set_tests_properties(audio.game.underruns PROPERTIES RUN_SERIAL TRUE)
 if(NOT OPENBF3_ASAN)
     set_tests_properties(audio.game.underruns PROPERTIES ENVIRONMENT "OPENBF3_AU3_GATE_LATE=1")
 endif()
 openbf3_label(timing audio.game.underruns)
+openbf3_cost(audio.game 1 8)
 openbf3_cost(audio.game.crowd 1 16)
 openbf3_cost(audio.game.underruns 1 16)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_au3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(audio.router.unit audio.game.kits audio.game.e7 audio.game.scene audio.game.crowd audio.game.underruns PROPERTIES
+    set_tests_properties(audio.router.unit audio.game audio.game.crowd audio.game.underruns PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au3_cl_dir}")
 endif()
