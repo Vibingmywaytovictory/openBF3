@@ -72,7 +72,7 @@
       "displayName": "dev-timing: the merge pass's timing rows and memory gates (labels timing, merge_also), serial",
       "execution": { "jobs": 1 },
       "filter": { "include": { "label": "^(timing|merge_also)$" } },
-      "environment": { "OPENBF3_CL_TIMING": "1" }
+      "environment": { "OPENBF3_CL_TIMING": "1", "OPENBF3_CL_LOOPBACK_S": "60" }
     },
     {
       "name": "dev-window",
