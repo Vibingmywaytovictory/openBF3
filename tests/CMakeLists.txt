@@ -1293,6 +1293,7 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_au3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(audio.router.unit audio.game audio.game.crowd audio.game.underruns PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au3_cl_dir}")
+endif()
 
 # M2a fx3 (docs/design/m2a-fx3.md): VFX3's triggers. fx.triggers.unit: install-free (synthetic EBX effects and grid
 # through the real library, cl's ClientProjectiles for case "late join"), a unit row (<= 2 s). fx.install.cells: the
