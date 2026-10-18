@@ -89,6 +89,14 @@ struct CrowdEvaluator::Impl {
 	void evaluate(uint32_t p_i);
 	void publish(double p_blocked);
 	void prepare_job();
+	// M2a tp [impl] (named insertion, docs/design/m2a-tp.md): R5's per-team weapons and the stance set, per team and per
+	// soldier (the M2a tp block at the end of this file). Null: S3's evaluator exactly (no stance set, no team with weapons).
+	struct M2a;
+	struct M2aDeleter {
+		void operator()(M2a *p_m2a) const;
+	};
+	std::unique_ptr<M2a, M2aDeleter> m2a;
+	void evaluate_m2a(uint32_t p_i);
 };
 
 void CrowdEvaluator::Impl::prepare_job() {
@@ -100,6 +108,10 @@ void CrowdEvaluator::Impl::prepare_job() {
 }
 
 void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
+	if (m2a) { // M2a tp [eval] (named insertion): the stance and per-soldier weapon path (the M2a tp block)
+		evaluate_m2a(p_i);
+		return;
+	}
 	Soldier &s = soldiers[p_i];
 	s.skipped_lod = s.hidden = s.two_cycle = s.idle_mix = s.reloading = s.aiming = false;
 	s.loco_clips = 0;
