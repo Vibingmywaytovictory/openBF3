@@ -1077,6 +1077,12 @@ void fill_hud(const PresentationFrame &, double own_fraction, std::span<const Pr
   `IsFirstPerson` 1 at the camera, every other soldier with 0 at its 3p muzzle. Trigger down, rounds and trigger up
   come from the own predicted OwnShot / trigger events (exact sub-tick round times) and, for the others, from the
   firing bit and burst sequence of their records (state, so a lost shot datagram does not cut a burst's sound).
+  **Rule fixed by au3** (docs/design/m2a-au3.md "Bursts"): sv's `burst_count` rises once per tick with shots after a
+  tick without, i.e. about once per shot for an automatic weapon whose interval spans more than one tick, so "a
+  burst_seq change = a new burst" does not hold. As built, an other's RemoteShot (it arrives about the render delay
+  early) starts the burst on its exact frame and places each round by its shot index; the records' firing bit and
+  burst_seq only keep the burst alive and start it when every RemoteShot of it was lost; a burst_seq change never
+  starts a burst.
 * **Clock**: `SimMixerClock` maps presentation time to mixer frames from the stream's played-frame counter; commands
   are scheduled `schedule_lead_blocks` (2 = 21.3 ms) ahead [verified: au].
 * **Impacts**: `ImpactCell::impact_sound` and effect sound components (`FxEvent`) start one-shot `PatchInstance`s
@@ -1090,7 +1096,10 @@ void fill_hud(const PresentationFrame &, double own_fraction, std::span<const Pr
 * **Knife and M67**: no `WeaponSoundDriver` loop; their swing, throw and explosion patches start as one-shot
   `PatchInstance`s from OwnShot / RemoteShot / Detonation (E7 item 1 lists the form per item).
 * **Client-local audition** for E7 item 4: `Bf3GameAudio::audition(patch, position)` starts a one-shot of any
-  compiled patch at a world position; only `m2a_check` calls it (never the server, never the wire).
+  compiled patch at a world position; only `m2a_check` calls it (never the server, never the wire). **Rule fixed by
+  au3:** the M1A2 patch is not on Metro's mount, so the load step compiles an E7 audition patch the level lacks from
+  `audio::kAuditionSuperbundles` (MP_001, which holds it and its waves) with a bank of its own; an audition step
+  that still cannot run is skipped through `GameAudioCheck::skip_step` and fails E7 (never a silent pass).
 * Listener = the active camera (1p or free).
 
 ---
