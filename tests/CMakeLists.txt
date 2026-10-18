@@ -1219,3 +1219,13 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_fx3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(fx.triggers.unit fx.install.cells PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx3_cl_dir}")
 endif()
+
+# godot.fx3_demo: the windowed VFX3 demo check (Bf3GameFx end to end on Metro: load, draw, shots, impacts, decals, hit,
+# 7 captures, install unchanged; docs/design/m2a-fx3.md §6). A window row (label window: the merge pass's user-away
+# phase, serially); over 30 s because the level session loads Metro (warm on the row's own cache root) before the
+# demo's scripted 15 s.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.fx3_demo godot_fx3_demo.cmake WINDOW TIMEOUT 900)
+    set_tests_properties(godot.fx3_demo PROPERTIES RUN_SERIAL TRUE)
+    openbf3_cost(godot.fx3_demo 1 31)
+endif()
