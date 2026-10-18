@@ -1337,7 +1337,7 @@ std::string env_value(const char *p_name) {
 	return out;
 }
 
-// <build>/shots/<row> (docs/testing.md §2), or OPENBF3_AU3_SHOTS as one flat directory (b\shotsu3 for the user).
+// <build>/shots/<row> (docs/testing.md §2), or OPENBF3_AU3_SHOTS as one flat directory (b/shots/au3 for the user).
 std::filesystem::path au3_shots_dir(const char *p_row) {
 	const std::string env = env_value("OPENBF3_AU3_SHOTS");
 	return env.empty() ? std::filesystem::path(OPENBF3_AU3_SHOTS) / p_row : std::filesystem::path(env);

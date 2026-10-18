@@ -67,8 +67,9 @@ public:
 	// Main thread, every display frame.
 	void step(const M2aFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues);
 	// au3 addition (m2a-w3.md §4.1 "effect sounds"): the same, with the running effects' SoundStart / SoundStop of
-	// this frame (fx3's accessor), keyed by effect and component; their patches compile at load when they are among
-	// p_impact_sounds, and compile on first use otherwise (main thread, counted in program_failures on failure).
+	// this frame (fx3's accessor), keyed by effect and component. Their patches must be among p_impact_sounds (compiled
+	// at load); any other is counted in ImpactAudioStats::unknown_patches and stays silent (no compile on the main
+	// thread).
 	void step(const M2aFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues, std::span<const audio::EffectSoundRequest> p_effect_sounds);
 	// E7 item 4 (client-local). p_position in world space, Frostbite axes.
 	bool audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error);
