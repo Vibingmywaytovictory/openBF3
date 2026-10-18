@@ -176,3 +176,12 @@ target_sources(bf3_godot PRIVATE
     src/viewmodel_muzzle.cpp
     src/m2a_w3_headers.cpp
 )
+
+# M2a fx3 (docs/design/m2a-fx3.md): Bf3GameFx (game_fx.h's body: FxWorld + Bf3FxRenderer + VFX3's triggers + the decal
+# pool), the decal pool FxDecalPool and the fx3 demo / capture scene Bf3Fx3Demo (res://scenes/fx3_demo.tscn,
+# --fx3-check), registered by the "// M2a fx3" block of register_types.cpp.
+target_sources(bf3_godot PRIVATE
+    src/game_fx.cpp
+    src/fx_decals.cpp
+    src/fx_decals.h
+)

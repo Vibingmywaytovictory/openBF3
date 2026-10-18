@@ -17,6 +17,8 @@
 // (0.10, -0.11, -0.70) [inferred] on the rig's CameraJoint, flagged CameraStandIn so the E8 report counts it.
 // Main thread, after Bf3Viewmodel::present for the frame.
 
+#include "bf3/fx/triggers.h"
+
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -46,5 +48,14 @@ struct ViewmodelMuzzle {
 ViewmodelMuzzle viewmodel_muzzle_transform(const Bf3Viewmodel &p_viewmodel);
 // p_offset in Frostbite weapon axes (a FireEffects1p entry's transform, converted with render_bridge's to_godot).
 ViewmodelMuzzle viewmodel_muzzle_transform(const Bf3Viewmodel &p_viewmodel, const godot::Transform3D &p_offset);
+
+// fx3: the muzzle as VFX3's MuzzleSample (first_person, the effect frame of triggers.h: local +Y = the barrel, local +Z
+// = the weapon's up). WeaponRoot: the muzzle's basis is the Frostbite weapon frame (column 2 = the barrel, column 1 =
+// up), so the frame is effect_frame_of_weapon of it; CameraStandIn: the camera's -Z is the barrel. Invalid when the
+// muzzle is. p_velocity: the own soldier's velocity (InheritSpeedAndDirectionFromEmitter).
+fx::MuzzleSample muzzle_sample(const ViewmodelMuzzle &p_muzzle, uint8_t p_slot, const fx::Vec3 &p_velocity);
+// fx::Transform (rows right, up, forward, trans: world vectors) <-> godot::Transform3D (basis columns, origin).
+godot::Transform3D to_godot_transform(const fx::Transform &p_t);
+fx::Transform to_fx_transform(const godot::Transform3D &p_t);
 
 } // namespace bf3::godot_side
