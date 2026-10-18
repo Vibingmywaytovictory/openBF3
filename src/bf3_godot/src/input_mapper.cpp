@@ -101,6 +101,9 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (scripted_ || p_event.is_null()) {
 		return;
 	}
+	if (m2a_handle_event(p_event)) { // M2a gx [mapper]: the weapon actions; the capture click never fires
+		return;
+	}
 	if (const InputEventMouseMotion *mm = Object::cast_to<InputEventMouseMotion>(p_event.ptr())) {
 		if (captured_) {
 			const Vector2 rel = mm->get_relative();
@@ -229,6 +232,7 @@ bf3::host::InputSample InputMapper::sample() const {
 		s.move_right = float(int(held(InputAction::Right)) - int(held(InputAction::Left)));
 		s.held_buttons = held(InputAction::Sprint) ? sim::buttons::kSprint : 0u;
 	}
+	m2a_sample(s); // M2a gx [mapper]: weapon bits, fire_presses, the view sample (no-op unless m2a_enable)
 	return s;
 }
 
