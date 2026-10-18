@@ -1209,3 +1209,14 @@ endif()
 # M2a tp (docs/design/m2a-tp.md): case "capsules" of anim.s3 (E18 (b)) builds the capsule pose table from the install
 # through bf3_sim (weapon_install.h, posed_target.h).
 target_link_libraries(test_anim_s3 PRIVATE bf3_sim)
+# render.crowd_weapons (install, exits 77 without one): S3's soldier assets, the Metro TDM kits and every kit item's 3p
+# weapon through load_crowd_weapons (game_crowd_items.h builds the lists), the binds, reload, muzzle, strip and views.
+openbf3_test(test_render_crowd_weapons test_main.cpp render_crowd_weapons_tests.cpp test_support.h)
+target_link_libraries(test_render_crowd_weapons PRIVATE bf3_render bf3_host)
+target_include_directories(test_render_crowd_weapons PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+add_test(NAME render.crowd_weapons COMMAND test_render_crowd_weapons --test-suite=render-crowd-weapons)
+set_tests_properties(render.crowd_weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_tp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.crowd_weapons PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tp_cl_dir}")
+endif()
