@@ -87,4 +87,6 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     include/bf3/host/firefight_brain.h
     src/firefight_brain.cpp
+    include/bf3/host/client_wiring.h
+    src/client_wiring.cpp
 )
