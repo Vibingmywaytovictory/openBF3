@@ -1,9 +1,9 @@
 // M2a bt (docs/design/m2a.md §1 E13, E15, §10.2, §14.1; docs/design/m2a-bt.md): the firefight bots on the real
 // GameServer, headless, on Metro TDM (MP_Subway / TeamDeathMatch0; read-only on the install, a per-process scratch
 // cache root under the temp directory, the shipped motor tuning). Three suites, one ctest row each:
-//   host-gunplay-firefight  host.gunplay.firefight (functional, untimed): 64 Free bots for 60 s plus one idle observer
-//                           peer: both teams kill, every bot fires, none is stuck, none inside geometry or below the
-//                           ground, no NaN, no precondition failure, no team kill; the peer (a human slot) is engaged.
+//   host-gunplay-firefight  host.gunplay.firefight (functional, untimed): 64 Free bots for 60 s: both teams kill, every
+//                           bot fires and walks, none is stuck, none inside geometry or below the ground, no NaN, no
+//                           precondition failure, no team kill; then 32 bots and one idle peer (a human slot): engaged.
 //   host-gunplay-replay     host.gunplay.replay (E15, functional): two 3,600-tick firefights with one seed give equal
 //                           per-tick world hashes, a third with another seed differs.
 //   host-gunplay-perf       host.gunplay.perf (E13, timing, RUN_SERIAL): 64 Pairs bots and one observer peer, 10 s
@@ -170,7 +170,6 @@ TEST_SUITE("host-gunplay-firefight") {
 		o.walk = true;
 		o.seed = kSeed;
 		o.ticks = 60 * sim::kSimHz;
-		o.observers = 1; // a human slot (held at its spawn): bots must engage it like any enemy
 		o.hashes = false;
 		o.check_every = 30;
 		std::optional<host::FirefightReport> r = run(o, "host.gunplay.firefight: Free, 64 bots, 60 s");
@@ -187,13 +186,39 @@ TEST_SUITE("host-gunplay-firefight") {
 			CHECK_MESSAGE(b.shots > 0, "slot ", int(b.slot), " never fired");
 			CHECK_MESSAGE(b.stuck_windows == 0, "slot ", int(b.slot), " stuck in ", b.stuck_windows, " of ", b.windows, " 20 s windows (min ",
 					b.min_window_metres, " m)");
+			// A bot that dies before any full window still has to have moved (the windows only see lives of 20 s).
+			CHECK_MESSAGE(b.metres >= 10.0, "slot ", int(b.slot), " walked only ", b.metres, " m in 60 s");
 		}
 		CHECK(r->windows > 0);
 		CHECK(r->bots_stuck == 0);
-		CHECK(r->peer_slots == 1);
-		CHECK_MESSAGE(r->peer_hits > 0, "the bots never hit the observer peer (a human slot)");
-		// Most bots should have hit someone (not only blind fire); reported, gated loosely.
+		// Most bots should have hit someone (not only blind fire); gated loosely.
 		CHECK_MESSAGE(r->bots_hit_enemy * 2 >= r->bots.size(), "only ", r->bots_hit_enemy, " bots hit an enemy");
+	}
+
+	TEST_CASE("a human slot is an enemy like any other") {
+		// gx's playable scene (<= 32 bots): one remote peer that sends no command (the server holds it at its spawn,
+		// M1's repeated hold command) on team 1. The 64-bot case has no room for it: the RewindProvider answers hit
+		// targets for slots 0 .. 63 only (lag_comp.cpp kMaxLagSlots), so a peer in slot 64 is never hit.
+		host::FirefightRunOptions o;
+		o.mode = host::FirefightMode::Free;
+		o.count = 32;
+		o.walk = true;
+		o.seed = kSeed;
+		o.ticks = 60 * sim::kSimHz;
+		o.observers = 1;
+		o.hashes = false;
+		o.check_every = 30;
+		std::optional<host::FirefightReport> r = run(o, "host.gunplay.firefight: Free, 32 bots and one human slot, 60 s");
+		if (!r) {
+			return;
+		}
+		CHECK(r->bots.size() == 32);
+		CHECK(r->peer_slots == 1);
+		check_sane(*r);
+		CHECK(r->kills[1] > 0);
+		CHECK(r->kills[2] > 0);
+		CHECK(r->peer_exposed > 0);
+		CHECK_MESSAGE(r->peer_hits > 0, "the bots never hit the human slot (exposed in ", r->peer_exposed, " of ", r->peer_checks, " checks)");
 	}
 
 	TEST_CASE("install unchanged") {
@@ -286,7 +311,8 @@ TEST_SUITE("host-gunplay-perf") {
 		o.count = 64;
 		o.walk = false;
 		o.seed = kSeed;
-		o.observers = 1;
+		o.observers = 1; // receives the snapshots (encode runs as in a match); slot 64, never hit (see the firefight suite)
+		o.max_slots = 65;
 		o.warmup_ticks = 10 * sim::kSimHz;
 		o.ticks = 120 * sim::kSimHz;
 		o.hashes = false;
