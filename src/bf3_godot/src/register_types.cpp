@@ -73,6 +73,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
+	// M2a tp (docs/design/m2a-tp.md): Bf3TpCrowdCheck (registered in tp_crowd_check.cpp)
+	void openbf3_register_m2a_tp();
+	openbf3_register_m2a_tp();
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {
