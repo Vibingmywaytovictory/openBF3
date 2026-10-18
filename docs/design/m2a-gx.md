@@ -358,3 +358,163 @@ In `b\shots\gx\`, 1152 x 648:
 * The wave-2 fakes in `vm_script.{h,cpp}` (`m2a_fake::present_weapon`), `tests/anim_viewmodel_tests.cpp` and
   `tests/m2a_contract_tests.cpp` stay. They are the reference predicates of those tests, and the real parts do not
   replace them one for one.
+
+## 10. The verify fix (as built)
+
+The verifier's blocking findings on the end-to-end step, each fixed in `m2a_check.cpp` (gx), with
+`level_session_m2a.{h,cpp}` (gx) for the server-side records. Branch results: unlocked, shared machine, so the
+timings are indicative only.
+
+### 10.1 What changed
+
+* **E19 (ads)**:
+  * The FOV time is gated at ± 1 display frame (the run's worst frame dt). It is measured from the first frame that
+    presents the new ADS level.
+  * The press-to-presented latency is its own row, gated ≤ 0.1 s. A frame-exact gate cannot include one predicted
+    tick plus the presentation delay. m2a.md E19 now says this (rule-fix commit b4a3899).
+  * New rows:
+    * the viewmodel FOV equals `RenderFov` 55 at hip;
+    * the camera recoil equals the presented recoil every frame (camera − view − kick against `weapon.recoil`,
+      ± 1e-4°);
+    * the springs settle within the longest configured settle time (+ 1 frame) of the last shot cue;
+    * ADS is refused while deploying: no presented zoom, `ads_allowed` false, the FOV stays at hip, and the held
+      ADS zooms once the deploy ends;
+    * ADS is refused while sprinting.
+* **E11 (kits)**: in every loadout, slots 1, 7, 6, 0.
+  * Every item deploys (its Deploy clip or a stand-in). The vm clip / stand-in list is printed per item.
+  * Every item fires (a Fire / FireSingle / Knife / Throw clip). The automatic rifles have no fire clip, so for them
+    the Shot cue on vm's procedural kick stand-in counts (`viewmodel_coverage` entry 1 is `ProceduralStandIn`).
+  * Every firearm reloads (its Reload clip).
+  * Server events equal predicted events: shots field for field, plus the sorted timed (time, event, slot) tuples.
+  * The knife hits the target bot. The damage must be applied only when the bot is an enemy. For the RU loadouts
+    the bot is a teammate (friendly fire off).
+  * The M67 fuse is exactly 3.6 s and equals `TimeToLive`. The fuse comes from the server's own `DetonationEvent`
+    (new `M2aServerRecorder::projectiles`), not from its wire copy. The client's presented Detonation has its own
+    row: the wire quantizes it to 1/65536 tick, measured at −3 units.
+* **E3 / E4 (range)**:
+  * E3 adds head at 60 m (3 hits) and legs at 5 m (5 hits, 22.75 each). A missing lane now fails its row.
+  * E4 adds the MK11 (recon): a head shot at 5 m kills in 1 (117.5), at 60 m in 2.
+* **E5 (reload)**: the M16A3 and M9, tactical and empty.
+  * Per display frame, against the predicted `kReloadStarted` / `kAmmoCommitted` / `kReloadFinished`: the reload
+    clip start, the HUD ammo change and the ready frame.
+  * The gate is late ≤ 1 frame and early ≤ 1 tick. Early is allowed because a presented weapon's discrete fields
+    come from the newer predicted tick.
+  * The M16A3 with the trigger held through the reload fires its first shot exactly at `kReloadFinished`, and its
+    Shot cue comes within 1 frame.
+  * The clip lengths are printed per kit weapon.
+* **E8 (5) (fx)**: Metro's collision tags are searched for Water (18). The search found 0 Water tags among 1,818
+  tags. Concrete and brick resolve through the same table, so the row passes on the search, not on a constant. If
+  Metro had reachable water, the case would shoot it and gate the effect with no decal.
+* **E1 / E10**:
+  * E1: one fx3 1p muzzle start per predicted shot.
+  * E1 gaps for every kit firearm:
+    * held automatic: equal to the interval;
+    * single fire: tapped every 2 ticks so each tap is a new press, with every gap ≥ the interval and the smallest
+      within the tap period.
+  * E1: MK11 taps give one shot per tap and one per held trigger.
+  * E10 checks what the widgets drew (`Bf3HudDrawRecord`, a frame later):
+    * the crosshair gap against (h/2)·tan(spread)/tan(vfov/2), ± 0.5 px;
+    * the ammo at hudmpscreen's `Ammo_01`, x 1194 ± 2 stage px, in `$HUD_medium`;
+    * screenshots `hud_hip`, `hud_reload` and `hud_ads`.
+* **Ownership**: m2a.md §15 lists gx's two named replacements:
+  * R6: b7652bc, in fx3's `game_fx.cpp`;
+  * R7: 589a3b0, in au3's `tests/audio_router_tests.cpp`.
+
+  Commit 0009ec3, which adds them, says the rule proved too narrow.
+* **Nonblocking**:
+  * `play.killed_by_enemy` ≥ 1 is gated in a build with bt.
+  * `godot.m2a` and `godot.m2a.kits` take `-DNO_ERRORS=1`.
+  * The status line reads "firefight bots N (bt, free|pairs), others in the snapshot K".
+  * The firefight and ADS shots need a bot within 45 m, centred, with five rays (head, chest, hips, chest ± 0.3 m
+    across) clear of every collision set. A nearer framed bot re-takes the shot, and the ADS shot is taken between
+    bursts.
+
+### 10.2 Results (2026-10-18, branch, unlocked, shared machine: timings indicative only)
+
+| row | command | result |
+|---|---|---|
+| `godot.m2a` | `ctest --preset dev-window -R "^godot\.m2a$"` (with `OPENBF3_GODOT`, `OPENBF3_GODOT_WINDOWED=1`) | PASS, 6 / 6 cases, 252 rows, 0 failed, 0 ERROR lines; 393 s (range 52.6, reload 22.1, hud 7.7, ads 13.0, audio 124.6, fx 164.0) |
+| `godot.m2a.kits` | `ctest --preset dev-window -R "^godot\.m2a\.kits$"` | PASS, 276 rows, 0 failed, 0 ERROR lines; 161 s |
+| `godot.m2a.play` | `ctest --preset dev-window -R "^godot\.m2a\.play$"` | PASS, 0 ERROR lines, `killed_by_enemy` 4 (gated ≥ 1); 311 s |
+| branch pass | `tools\build.cmd dev --strict` (`OPENBF3_GODOT` set) | exit 0: 137 rows, 135 passed, 2 skipped (`core.cache_data`, `core.res`), 0 failed, 0 STRICT violations; 187 s |
+
+* **E19**:
+  * fov_in 0.1167 s (target 0.120 ± 0.0056 s); fov_out 0.150 s (target 0.150);
+  * press latency 0.011 s;
+  * recoil worst 1.34e-5° over 398 frames (largest recoil 0.563°);
+  * springs at rest after 0.489 s (limit 1.0 s);
+  * deploy refusal: 96 frames, 0 zoomed, lowest FOV 55.00;
+  * sprint refusal: 145 frames;
+  * viewmodel FOV 55.00 (weapon and arms).
+* **E11**:
+  * 8 / 8 loadouts.
+  * The M67 fuse is 216,000,000 units (3.6 s), equal to `TimeToLive`, in every loadout. Release to detonation
+    3.77 s; the presented Detonation is −3 units off.
+  * The knife hit is applied on the US side; on the RU side it is 1 hit, not applied (a teammate).
+  * `events_equal` passes for every item.
+* **E1 gaps** (held / tapped; units):
+  * M16A3 / M4A1: 4.5 M;
+  * M27: 4.8 M;
+  * AK-74M: 5,538,462;
+  * M9 / MP443: min 10 M against a 9 M interval;
+  * MK11 / SVD: min 14 M against 13,846,154;
+  * the server fired the same shots.
+* **E3 / E4**:
+  * M16A3: chest at 5 m 4 hits (25), head at 5 m 2 (50), legs at 5 m 5 (22.75), chest at 60 m 6, head at 60 m 3.
+  * MK11: head at 5 m 1 hit (117.5), head at 60 m 2.
+  * Every kill was counted, with the hit indicator once per server hit.
+  * E1: 31 1p muzzle starts for 31 shots.
+* **E5**:
+  * M16A3: tactical 1.8 s with the commit at 1.53 s; empty 2.37 s with the commit at 2.0145 s.
+  * M9: tactical 1.35 s, commit 1.0125 s; empty 1.6 s, commit 1.2 s.
+  * The clip starts 0 frames late, and ready is 0 frames late.
+  * The HUD ammo changes up to 2 frames early (0.0111 s at most, under a tick).
+  * The held trigger fires exactly at the finish.
+* **E5 clip lengths** (reload clip / empty clip in s, against `ReloadTimeBulletsLeft` / `ReloadTime`):
+
+  | weapon | reload / empty clip | `ReloadTimeBulletsLeft` / `ReloadTime` |
+  |---|---|---|
+  | M16A3 | 2.333 / 2.900 | 1.80 / 2.37 |
+  | M9 | 1.900 / 2.167 | 1.35 / 1.60 |
+  | M4A1 | 2.267 / 2.867 | 1.85 / 2.48 |
+  | M27 | 2.333 / 2.900 | 1.90 / 2.50 |
+  | MK11 | 2.267 / 2.867 | 1.85 / 2.40 |
+  | AK-74M | 2.667 / 3.600 | 2.10 / 3.10 |
+  | MP443 | 1.900 / 2.167 | 1.35 / 1.60 |
+  | AKS-74u | 2.333 / 3.333 | 1.90 / 3.00 |
+  | RPK-74M | 3.600 / 4.467 | 3.00 / 4.00 |
+  | SVD | 2.967 / 3.867 | 2.15 / 3.30 |
+
+  The authored clips are longer than the sim times. The sim times gate; the clip is presentation.
+* **E10**:
+  * crosshair gap error 0 px over 1,096 frames;
+  * ammo at x 1194.00 over 1,096 frames, 0 in the wrong font;
+  * 1 stale widget record (limit 10).
+* **The BF3 install is unchanged**:
+  * a read-only listing: 1,918 files, none written since 2026-10-17 (newest 2026-04-25);
+  * the suites' `install.unchanged` cases pass in the branch pass.
+
+### 10.3 Screenshots
+
+In `b\shots\gx\`, 1152 x 648:
+
+* `hud_hip.png`: the M16A3 at the hip by a bus shelter, with the crosshair and `26 / 118`.
+* `hud_reload.png`: the rifle tilted in its reload clip, `23 / 118`.
+* `hud_ads.png`: the iron sights, the crosshair hidden, `31 / 110`.
+* `gx_hip.png`: the M16A3 at the hip at a doorway, with impact smoke on the wall and `26 / 155`. The status line ends
+  "firefight bots 16 (bt, free), others in the snapshot 16".
+* `gx_reload.png`: the M16A3 tilted in its reload, `30 / 125`.
+* `gx_death.png`: `KILLED BY slot 9 (RU)` and `respawn in 1.5 s`, with a 3p soldier in the lower left.
+* `gx_firefight.png` (the bot at 21.5 m): a street with a red van. The bot is in a shadowed doorway at the crosshair:
+  small and dark.
+* `gx_ads.png` (the bot at 24.9 m): the rear sight ring. The bot is a dark shape in the ring, partly behind the front
+  post, and hard to make out.
+
+### 10.4 Open items
+
+* The firefight / ADS framing sees only the check's collision world, not foliage, other render-only occluders,
+  lighting or the iron sight's own post.
+  * Earlier runs framed a bot behind a tree and one behind a wall corner. The five rays fixed the wall corner.
+  * The kept shots show the bot, but small.
+  * A test on the rendered frame (the crowd's own pixels) would close this. It is not built.
+* `audio_late_commands` (8 in the last play run) and the double starts from reused shot ids (6) remain as §9.5 says.

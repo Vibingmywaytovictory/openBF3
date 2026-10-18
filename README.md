@@ -2680,15 +2680,16 @@ Since the end-to-end step (`m2a/w3` merged, m2a-gx.md §9) the match has:
 
 A part that fails to load is dropped with an `[m2a] ERROR` line, and the game runs on without it.
 
-Gates, measured 2026-10-18 on the branch (windowed rows one at a time, shared machine; wall times indicative only).
+Gates, measured 2026-10-18 on the branch after the verify fix (m2a-gx.md §10; windowed rows one at a time, unlocked,
+shared machine; wall times indicative only).
 Every windowed row needs `set OPENBF3_GODOT=<exe>` and `set OPENBF3_GODOT_WINDOWED=1`:
 
 | gate | command | threshold | measured |
 |---|---|---|---|
-| functional cases (E1, E3, E5, E7, E8, E10, E19) | `ctest --preset dev-window -R "^godot\.m2a$"` | `M2A CHECK: PASS` | 6 / 6 cases pass (range, reload, hud, ads, audio, fx); 0 ERROR lines; 349 s |
-| kits (E11) | `ctest --preset dev-window -R "^godot\.m2a\.kits$"` | `M2A CHECK: PASS` | 67 / 67 rows (8 loadouts, knife hit, M67 fuse 3.6 s); 67 s |
-| 5-minute play, 0 errors | `ctest --preset dev-window -R "^godot\.m2a\.play$"` | `M2A CHECK: PASS`, 0 `ERROR` lines | PASS. 16 bt bots, 9,178 remote shots, team kills US 68 : RU 55. The player: 355 own shots, 5 kills, 6 deaths (3 by bots), 6 respawns, the team switch. Crowd, FX and audio built (300.8 s mixed, 13,035 impact cells). 0 event overflows; 0 ERROR lines; 310 s |
-| screenshots | the play row (to `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\gx\`) | hip, ADS, reload, firefight, death | 5 / 5 (m2a-gx.md §9.4), plus E7's recording `gx_e7.wav` |
-| branch pass | `tools\build.cmd dev --strict` | every row passes, no budget violation | after the end-to-end step: exit 0, 137 rows, 135 passed, 2 skipped (`core.cache_data`, `core.res`), 0 failed, 0 STRICT violations; 194 s |
+| functional cases (E1, E3, E4, E5, E7, E8, E10, E19) | `ctest --preset dev-window -R "^godot\.m2a$"` | `M2A CHECK: PASS`, 0 `ERROR` lines | 6 / 6 cases, 252 rows pass (range, reload, hud, ads, audio, fx): E19 FOV in 0.1167 s / out 0.150 s within 1 frame, recoil within 1.34e-5°, ADS refused while deploying and sprinting; E3 / E4 at 5 m and 60 m with the MK11; E5 per frame for the M16A3 and M9; E10 gap error 0 px, ammo at x 1194; Metro's 1,818 tags hold no Water; 0 ERROR lines; 393 s |
+| kits (E11) | `ctest --preset dev-window -R "^godot\.m2a\.kits$"` | `M2A CHECK: PASS`, 0 `ERROR` lines | 276 / 276 rows: 8 loadouts, every item deploys, fires and (firearms) reloads with server events = predicted, E1 gaps for every kit firearm, the knife hit, the M67 fuse from the server's DetonationEvent exactly 3.6 s = TimeToLive; 161 s |
+| 5-minute play, 0 errors | `ctest --preset dev-window -R "^godot\.m2a\.play$"` | `M2A CHECK: PASS`, 0 `ERROR` lines, killed by an enemy >= 1 | PASS. 16 bt bots, 8,456 remote shots, team kills US 55 : RU 51. The player: 406 own shots, 2 kills, 7 deaths (4 by bots), 7 respawns, the team switch. Crowd, FX and audio built (300.9 s mixed, 12,478 impact cells). 0 event overflows; 0 ERROR lines; 311 s |
+| screenshots | the play row and the hud case (to `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\gx\`) | hip, ADS, reload, firefight, death; hud_hip, hud_reload, hud_ads | 5 / 5 and 3 / 3 (m2a-gx.md §10.3; the firefight and ADS bots are small: §10.4), plus E7's recording `gx_e7.wav` |
+| branch pass | `tools\build.cmd dev --strict` | every row passes, no budget violation | after the verify fix: exit 0, 137 rows, 135 passed, 2 skipped (`core.cache_data`, `core.res`), 0 failed, 0 STRICT violations; 187 s |
 | E16 on the M2a scene | `ctest --preset dev-window -R "^godot\.m2a_load$"` | cold <= 15 s, warm <= 5 s | the integrator's row. One run on the branch (unlocked, shared machine, indicative only): cold 4.34 s pass, warm 5.42 s over the threshold |
 | E9, E13 / E14 | `ctest --preset dev-window -R "^godot\.m2a_firefight$"` | m2a.md E9, E14 | the integrator's row (64 bt bots, 2560 x 1440, FX on / off windows); not run on the branch (TIMING rule) |
