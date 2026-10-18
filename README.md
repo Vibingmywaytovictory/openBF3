@@ -2485,7 +2485,7 @@ As-built notes, the decisions on G1-G7 and the review items: [docs/design/m2a-w3
 
 Measured 2026-10-18, after the review fix (head of `m2a/w3`):
 
-* **`toolsuild.cmd dev --strict`:** 128 rows, 126 passed and 2 skipped (`core.cache_data`, `core.res`), 178 s wall
+* **`tools\build.cmd dev --strict`:** 128 rows, 126 passed and 2 skipped (`core.cache_data`, `core.res`), 178 s wall
   time, exit 0, only the existing budget warnings. `m2a.contract3` (10 cases, 333 assertions) took 0.24 s.
 * **asan:** `m2a.contract3`, `m2a.contract`, `m1.contract`, `anim.s3.unit`, `net.proto.unit` and `net.proto.fuzz`
   passed, with no AddressSanitizer report.
@@ -2536,7 +2536,7 @@ Gates, measured 2026-10-18 on the dev preset (branch, unlocked, shared machine):
 | host.gunplay.replay (E15) | equal per-tick world hashes for one seed over 3,600 ticks; a different seed differs | 0 / 3,600 differ; 3,600 / 3,600 differ for seed + 1 |
 | host.gunplay.perf (E13) | server tick p99 ≤ 8.0 ms, 64 Pairs bots + 1 observer, 10 s + 120 s | indicative only (branch, unlocked): p99 1.909 ms; weapons + projectiles + rewind 7.7 % of the mean tick |
 
-Branch pass: `toolsuild.cmd dev --strict` ran 130 rows (128 passed, 2 skipped as before) in 408 s on a machine
+Branch pass: `tools\build.cmd dev --strict` ran 130 rows (128 passed, 2 skipped as before) in 408 s on a machine
 loaded by other worktrees. The one STRICT violation is `sim.terrain.unit`, which took 40.1 s in the phase without a
 COST and 0.85 s alone; bt did not touch it.
 
@@ -2652,7 +2652,7 @@ Branch pass (2026-10-18; branch, unlocked, shared machine: indicative only):
     (1.64 s against 1.0 s).
   - Alone, the rows ran in 0.26 s (fx.triggers.unit), 0.49 s (fx.unit) and 3.06 s (fx.install.cells), with
     core.ui.font passing.
-  - After the verifier's fixes: `toolsuild.cmd dev --strict` exit 0, 128 passed and 2 skipped of 130, 0 STRICT
+  - After the verifier's fixes: `tools\build.cmd dev --strict` exit 0, 128 passed and 2 skipped of 130, 0 STRICT
     violations, phase wall 193 s (m2a-fx3.md §10).
 
 ## M2a: the playable scene (gx)

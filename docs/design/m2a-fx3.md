@@ -263,12 +263,12 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
 
 ## 10. Branch pass and asan (2026-10-18; branch, unlocked, shared machine: indicative only)
 
-* **asan** (`toolsuild.cmd asan --no-test`, then
+* **asan** (`tools\build.cmd asan --no-test`, then
   `ctest --preset asan -R "^(fx\.triggers\.unit|fx\.install\.cells|fx\.unit|fx\.render\.unit|m2a\.contract3)$"`):
   5 / 5 rows passed with no AddressSanitizer report. That covers `decode_bc1`, `unkey_magenta`, `rgba_mip_chain`,
   the decal-template reader, `load_fire_effects` and the triggers. Under asan, fx.triggers.unit took 3.4 s and
   fx.install.cells 60.9 s (the asan preset has no time budget).
-* **`toolsuild.cmd dev --strict`**, run twice while other sessions were building and testing on the machine (one
+* **`tools\build.cmd dev --strict`**, run twice while other sessions were building and testing on the machine (one
   of them was running ctest with host.gunplay.perf):
   - **Pass 1:** 130 rows, 128 passed and 2 skipped (`core.cache_data` and `core.res`, as on m2a/w3), with 430 s of
     test time (m2a/w3's own pass took 178 s). `test_budget` STRICT found 2 violations, both from the contention:
@@ -281,7 +281,7 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
 
   So the strict gate was not seen passing in those two runs. Both failures followed the machine's load and moved
   between rows.
-* **After the verifier's fixes** (decal-texture rule, COST 5 on fx.install.cells): `toolsuild.cmd dev --strict`
+* **After the verifier's fixes** (decal-texture rule, COST 5 on fx.install.cells): `tools\build.cmd dev --strict`
   exit 0: 130 rows, 128 passed and 2 skipped (`core.cache_data`, `core.res`), 0 failed, **0 STRICT violations**
   (budget warnings only, none on an fx3 row); phase wall 193 s. fx.unit 1.6 s, fx.install.cells 11.1 s,
   fx.triggers.unit 0.35 s. asan after the fixes: the same 5 rows passed with no AddressSanitizer report
