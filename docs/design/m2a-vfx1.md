@@ -316,7 +316,8 @@ colour = PointLightColor × intensity, position = particle + PointLightPivot [pl
 
 Polynomial, PolynomialColorInterp: `fx_types.h` (header-inline, G2). PolynomialOperator: clamp(op(first(t),
 second(t)), MinClampResult, MaxClampResult), op ∈ {×, +}. Random / RandomXYZ: lerp(Min, Max, u) per particle and slot
-(Min > Max legal). Box: Pivot + (u − ½) ⊙ Dimensions [inferred full extents]. Sphere: Pivot + Scale ⊙ (uniform in a
+(Min > Max legal). Box: (½ Pivot + u − ½) ⊙ Dimensions, Pivot in half extents [inferred; M2a fx3 replaced the full-extent reading
+Pivot + (u − ½) ⊙ Dimensions, which put the 1p flash 2 m along the barrel]. Sphere: Pivot + Scale ⊙ (uniform in a
 ball of Radius) [inferred]. RotateVector: a direction in a cone of Angle degrees around the slot's DefaultValues.xyz,
 uniform in solid angle; RotateWithinPlane fixes the azimuth [inferred]. SampleTexture: a 1-D gradient
 (`GradientData`) sampled at t, lerp(IntensityMin, IntensityMax, sample) [inferred]. CameraProximity: compiled, VFX7.

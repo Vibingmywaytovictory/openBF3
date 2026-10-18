@@ -119,9 +119,12 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 				fx_uniform(p_ev.random_xyz.min.y, p_ev.random_xyz.max.y, draw(p_seed, p_serial, p_slot, 1)),
 				fx_uniform(p_ev.random_xyz.min.z, p_ev.random_xyz.max.z, draw(p_seed, p_serial, p_slot, 2)), 1.0f };
 		case EvaluatorType::Box: {
+			// M2a fx3 named replacement: Pivot is in half-extent units, so the box is centred on Pivot * Dimensions / 2
+			// (the 1p flash's pivot y 2, dimensions y 0.25 put it 0.25 m along the barrel, not 2 m) [inferred].
 			const BoxDef &b = p_ev.box;
-			return { b.pivot.x + (draw(p_seed, p_serial, p_slot, 0) - 0.5f) * b.dimensions.x, b.pivot.y + (draw(p_seed, p_serial, p_slot, 1) - 0.5f) * b.dimensions.y,
-				b.pivot.z + (draw(p_seed, p_serial, p_slot, 2) - 0.5f) * b.dimensions.z, 1.0f };
+			return { (0.5f * b.pivot.x + draw(p_seed, p_serial, p_slot, 0) - 0.5f) * b.dimensions.x,
+				(0.5f * b.pivot.y + draw(p_seed, p_serial, p_slot, 1) - 0.5f) * b.dimensions.y,
+				(0.5f * b.pivot.z + draw(p_seed, p_serial, p_slot, 2) - 0.5f) * b.dimensions.z, 1.0f };
 		}
 		case EvaluatorType::Sphere: {
 			const SphereDef &s = p_ev.sphere;
