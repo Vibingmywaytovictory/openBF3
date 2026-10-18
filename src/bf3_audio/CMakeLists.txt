@@ -37,3 +37,10 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/game_audio_check.h
 )
 target_link_libraries(bf3_audio PUBLIC bf3_host)
+
+# M2a au3 (docs/design/m2a-au3.md): the bodies of the W3.0 headers above.
+target_sources(bf3_audio PRIVATE
+    src/weapon_audio.cpp
+    src/impact_audio.cpp
+    src/game_audio_check.cpp
+)

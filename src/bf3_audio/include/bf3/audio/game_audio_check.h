@@ -21,6 +21,7 @@
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/core/path_guard.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -30,6 +31,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace bf3::audio {
@@ -43,6 +45,8 @@ struct GameAuditionItem {
 	std::string name; // "m98b", "rpg7", "m1a2"
 	std::string patch; // the SoundPatchAsset partition ("" until resolved)
 	std::vector<float> distances_m; // the band distances to audition at
+	// au3 addition: the crossfader bands (GroupFadeBegin, GroupFadeEnd) of au §10.2 / G5.4 the item is judged by.
+	std::vector<std::pair<float, float>> bands;
 };
 
 struct GameCheckStep {
@@ -51,6 +55,10 @@ struct GameCheckStep {
 	uint32_t bursts = 2;
 	bool audition = false; // a GameAuditionItem one-shot instead of a bot burst
 	std::string patch; // audition only
+	// au3 additions: the bursts of this step get both M16A3 distance HPFs pinned to 0 Hz (au's far_pinned segment,
+	// the reference of the hpf rows); an audition step's item bands (GameAuditionItem::bands).
+	bool pin_distance_hpfs = false;
+	std::vector<std::pair<float, float>> bands;
 };
 
 struct GameCheckScript {
@@ -73,6 +81,18 @@ struct GameCheckWindow {
 	uint64_t first_frame = 0;
 	uint64_t stop_frame = 0;
 	float listener_distance_m = 0.0f; // measured at the first round
+	// au3 additions: the window's patch probed at listener_distance_m with the window's seed (a Godot-free control
+	// evaluation of a fresh PatchInstance on the same program, au's G5 method; -1: not probed). Bursts: the distant
+	// HPF v46 (kM16NoiseHpf), the per-burst pitch v28 after the Fire, the 0-20 m close group and the 250-300 m far
+	// groups (mean of the three). Auditions: each step band's group amplitude (bands_found of them matched).
+	bool audition = false;
+	bool stopped = false; // the stop frame is known (on_trigger_up; auditions: first_frame + their window)
+	float probe_hpf_hz = -1.0f;
+	float probe_pitch = -1.0f;
+	float probe_close = -1.0f;
+	float probe_far = -1.0f;
+	std::array<float, 4> band_amplitude{ -1.0f, -1.0f, -1.0f, -1.0f };
+	uint32_t bands_found = 0;
 };
 
 // Records the run: a MixTap for the full mix (set on the game mixer before its stream starts), TapRecorders on the
@@ -95,6 +115,19 @@ public:
 	bool step_done(uint32_t p_step) const; // its bursts recorded and their tails past
 	std::span<const GameCheckWindow> windows() const;
 	core::Status write_wav(const std::filesystem::path &p_path) const; // --audio-record (scratch or user cache only)
+	// au3 additions. write_wav above goes through the guard set here (none set: refused, PathGuard NoRoots).
+	void set_guard(const core::PathGuard &p_guard);
+	core::Status write_wav(const core::PathGuard &p_guard, const std::filesystem::path &p_path) const;
+	const GameCheckScript &script() const;
+	uint32_t rate() const;
+	uint64_t start_frame() const;
+	uint64_t total_frames() const;
+	uint64_t recorded_until() const; // the end of the newest mixed block seen (absolute MixerClock frame)
+	// Read after the run (the audio thread no longer mixes into the game mixer or the tap is cleared).
+	std::span<const float> mix() const; // stereo, [start_frame, start_frame + total_frames)
+	std::span<const float> core_tap() const;
+	std::span<const float> noise_tap() const;
+	uint64_t dropped_frames() const; // mix blocks outside the preallocated span
 
 private:
 	struct State;

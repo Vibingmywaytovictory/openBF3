@@ -1,0 +1,1221 @@
+// Weapons in the game's mixer (weapon_audio.h; docs/design/m2a.md §12.3, §8.3, §4.4; as built: docs/design/m2a-au3.md).
+// Game thread only. Every PatchInstance is built here (allocation on the game thread) and handed to the mixer by a
+// Start command; the mixer gives finished ones back through its feedback and return rings.
+
+#include "bf3/audio/weapon_audio.h"
+
+#include "bf3/audio/audio_load.h"
+#include "bf3/sim/weapons/weapon_sim.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <limits>
+#include <unordered_map>
+
+namespace bf3::audio {
+
+namespace ca = core::audio;
+namespace sw = sim::weapons;
+
+namespace {
+
+constexpr uint32_t kStopCommandDelayFrames = 2 * kBlockFrames; // the Stop command after the stop event (au's check)
+
+float distance(const Vec3 &p_a, const Vec3 &p_b) {
+	const float dx = p_a.x - p_b.x, dy = p_a.y - p_b.y, dz = p_a.z - p_b.z;
+	return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+bool finite3(const float *p_v) {
+	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
+}
+
+bool has_event(const ca::SoundProgram &p_program, uint32_t p_hash) {
+	for (const ca::SoundInput &in : p_program.inputs) {
+		if (in.event && in.name_hash == p_hash) {
+			return true;
+		}
+	}
+	return false;
+}
+
+uint32_t pick_one_shot_event(const ca::SoundProgram &p_program) {
+	if (p_program.start_event != 0) {
+		return p_program.start_event;
+	}
+	if (has_event(p_program, kHashFire)) {
+		return kHashFire;
+	}
+	if (has_event(p_program, kHashMelee)) {
+		return kHashMelee;
+	}
+	return 0;
+}
+
+bool same_emitter(const EmitterState &p_a, const EmitterState &p_b) {
+	const auto eq = [](const Vec3 &a, const Vec3 &b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+	return eq(p_a.position, p_b.position) && eq(p_a.velocity, p_b.velocity) && eq(p_a.forward, p_b.forward);
+}
+
+MixerCommand emitter_command(InstanceHandle p_handle, const EmitterState &p_emitter) {
+	MixerCommand c;
+	c.type = MixerCommandType::SetEmitter;
+	c.handle = p_handle;
+	c.emitter = p_emitter;
+	return c;
+}
+
+} // namespace
+
+// ---- SimMixerClock ------------------------------------------------------------------------------------------------
+
+SimMixerClock::SimMixerClock(const MixerCore &p_mixer, const SimMixerClockConfig &p_config) :
+		mixer_(&p_mixer), config_(p_config) {
+	if (config_.rate == 0) {
+		config_.rate = kMixRate;
+	}
+}
+
+void SimMixerClock::set_output_latency_frames(uint64_t p_frames) {
+	latency_frames_ = p_frames;
+}
+
+void SimMixerClock::set_now(const host::PresentClock &p_now) {
+	now_ = p_now;
+}
+
+uint64_t SimMixerClock::heard_frame() const {
+	const uint64_t c = mixer_->clock();
+	return c > latency_frames_ ? c - latency_frames_ : 0;
+}
+
+uint64_t SimMixerClock::frame_of(sw::SimTime p_time, host::PresentTimeline p_timeline) {
+	const uint64_t earliest = mixer_->earliest_frame();
+	if (p_timeline == host::PresentTimeline::Immediate) {
+		return earliest;
+	}
+	if (!now_.valid(p_timeline)) {
+		++late_;
+		return earliest;
+	}
+	// (t - now) in frames, rounded; the SimTime difference of two valid clocks is far below 2^53.
+	const double delta = double(p_time - now_.now(p_timeline)) * double(config_.rate) / double(sw::kTimeUnitsPerSecond);
+	if (!std::isfinite(delta)) {
+		++late_;
+		return earliest;
+	}
+	const double f = double(heard_frame()) + std::round(delta) + double(config_.bias_frames);
+	if (!(f >= double(earliest))) {
+		++late_;
+		const double behind = double(earliest) - f;
+		const uint64_t b = behind >= 1.8e19 ? std::numeric_limits<uint64_t>::max() : uint64_t(behind);
+		max_late_frames_ = std::max(max_late_frames_, b);
+		return earliest;
+	}
+	if (f >= 1.8e19) {
+		return std::numeric_limits<uint64_t>::max() / 2; // hostile: a time far in the future (never reached)
+	}
+	return uint64_t(f);
+}
+
+uint64_t SimMixerClock::late() const {
+	return late_;
+}
+
+uint64_t SimMixerClock::max_late_frames() const {
+	return max_late_frames_;
+}
+
+void SimMixerClock::set_bias_frames(int64_t p_bias) {
+	config_.bias_frames = p_bias;
+}
+
+int64_t SimMixerClock::bias_frames() const {
+	return config_.bias_frames;
+}
+
+uint64_t SimMixerClock::output_latency_frames() const {
+	return latency_frames_;
+}
+
+const host::PresentClock &SimMixerClock::now() const {
+	return now_;
+}
+
+uint64_t SimMixerClock::earliest_frame() const {
+	return mixer_->earliest_frame();
+}
+
+uint32_t SimMixerClock::rate() const {
+	return config_.rate;
+}
+
+// ---- load_weapon_audio --------------------------------------------------------------------------------------------
+
+core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, std::span<const WeaponSoundSource> p_defs, uint32_t p_mix_rate) {
+	if (p_mix_rate == 0) {
+		return core::make_error("load_weapon_audio: mix rate 0");
+	}
+	WeaponAudioTable table;
+	table.defs.resize(p_defs.size());
+	// One compile per partition (the two teams share the knife, the M67 and every patch named twice).
+	std::unordered_map<std::string, core::Result<std::shared_ptr<const ca::SoundProgram>>> compiled;
+	const auto compile = [&](const std::string &p_name) -> const core::Result<std::shared_ptr<const ca::SoundProgram>> & {
+		auto it = compiled.find(p_name);
+		if (it == compiled.end()) {
+			it = compiled.emplace(p_name, compile_patch(p_db, p_name)).first;
+		}
+		return it->second;
+	};
+	for (size_t i = 0; i < p_defs.size(); ++i) {
+		const WeaponSoundSource &src = p_defs[i];
+		WeaponAudioDef &d = table.defs[i];
+		d.patch = src.sound;
+		d.fire_mode = src.fire_mode;
+		d.shot_interval_s = src.shot_interval_s;
+		if (src.sound.empty()) {
+			d.error = "no sound partition";
+			continue;
+		}
+		const core::Result<std::shared_ptr<const ca::SoundProgram>> &prog = compile(src.sound);
+		if (!prog) {
+			d.error = "compile: " + prog.error().message;
+			++table.failed;
+			continue;
+		}
+		d.program = *prog;
+		d.has_reload = has_event(*d.program, kHashReload);
+		if (!src.explosion_sound.empty()) {
+			const core::Result<std::shared_ptr<const ca::SoundProgram>> &ex = compile(src.explosion_sound);
+			if (ex) {
+				d.explosion = *ex;
+			} else {
+				d.error = "explosion compile: " + ex.error().message; // the form stays; the detonation is silent
+			}
+		}
+		if (src.one_shot) {
+			d.one_shot_event = pick_one_shot_event(*d.program);
+			if (d.one_shot_event == 0) {
+				d.error = "one-shot patch has no start, Fire or Melee event";
+				d.program.reset();
+				++table.failed;
+				continue;
+			}
+			d.form = WeaponAudioForm::OneShot;
+			++table.compiled;
+			continue;
+		}
+		core::Result<WeaponSoundBinding> b = bind_weapon_sound(d.program, src.shot_interval_s, p_mix_rate);
+		if (!b) {
+			d.error = "bind: " + b.error().message;
+			d.program.reset();
+			++table.failed;
+			continue;
+		}
+		d.binding = std::move(*b);
+		d.form = WeaponAudioForm::Driver;
+		++table.compiled;
+	}
+	return table;
+}
+
+// ---- OneShotPool --------------------------------------------------------------------------------------------------
+
+OneShotPool::OneShotPool(uint32_t p_limit) :
+		limit_(std::max<uint32_t>(p_limit, 1)) {
+	live_.reserve(limit_);
+}
+
+bool OneShotPool::start(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgram> p_program, std::shared_ptr<const ca::WaveBank> p_bank,
+		const AudioTuning &p_tuning, uint64_t p_seed, const EmitterState &p_emitter, const ListenerState &p_listener, uint64_t p_frame) {
+	return start(r_mixer, std::move(p_program), std::move(p_bank), p_tuning, p_seed, p_emitter, p_listener, p_frame, OneShotOptions{});
+}
+
+bool OneShotPool::start(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgram> p_program, std::shared_ptr<const ca::WaveBank> p_bank,
+		const AudioTuning &p_tuning, uint64_t p_seed, const EmitterState &p_emitter, const ListenerState &p_listener, uint64_t p_frame,
+		const OneShotOptions &p_options) {
+	if (!p_program) {
+		++failed_;
+		return false;
+	}
+	if (live_.size() >= limit_) {
+		// The oldest is stolen (Kill: no fade, it is the least audible by age).
+		auto oldest = std::min_element(live_.begin(), live_.end(), [](const Entry &a, const Entry &b) { return a.start_frame < b.start_frame; });
+		MixerCommand kill;
+		kill.type = MixerCommandType::Kill;
+		kill.handle = oldest->handle;
+		if (!r_mixer.push(kill)) {
+			++failed_;
+			return false;
+		}
+		live_.erase(oldest);
+		++stolen_;
+	}
+	core::Result<std::unique_ptr<PatchInstance>> inst = PatchInstance::create(p_program, std::move(p_bank), p_tuning, p_seed, p_options.mix_rate);
+	if (!inst) {
+		++failed_;
+		return false;
+	}
+	PatchInstance &pi = **inst;
+	if (p_options.set_first_person) {
+		pi.set_parameter(kHashIsFirstPerson, p_options.first_person ? 1.0f : 0.0f);
+	}
+	pi.set_geometry(p_emitter, p_listener);
+	const InstanceHandle handle = r_mixer.next_handle();
+	if (p_options.before_start) {
+		p_options.before_start(pi, handle);
+	}
+	MixerCommand start;
+	start.type = MixerCommandType::Start;
+	start.handle = handle;
+	start.at_frame = p_frame;
+	start.instance = &pi;
+	if (!r_mixer.push(start)) {
+		++failed_;
+		return false; // the instance stays ours and is destroyed here
+	}
+	(void)inst->release(); // the mixer owns it now
+	const uint32_t event = p_options.event != 0 ? p_options.event : p_program->start_event;
+	if (event != 0) {
+		MixerCommand ev;
+		ev.type = MixerCommandType::PostEvent;
+		ev.handle = handle;
+		ev.name_hash = event;
+		ev.at_frame = p_frame;
+		if (!r_mixer.push(ev)) {
+			++failed_; // started but silent; update() stops and forgets it
+		}
+	}
+	Entry e;
+	e.handle = handle;
+	e.start_frame = p_frame;
+	e.emitter = p_emitter;
+	live_.push_back(e);
+	peak_ = std::max<uint32_t>(peak_, uint32_t(live_.size()));
+	++started_;
+	last_ = handle;
+	return true;
+}
+
+void OneShotPool::on_finished(InstanceHandle p_handle) {
+	for (size_t i = 0; i < live_.size(); ++i) {
+		if (live_[i].handle == p_handle) {
+			live_.erase(live_.begin() + std::ptrdiff_t(i));
+			return;
+		}
+	}
+}
+
+uint32_t OneShotPool::live() const {
+	return uint32_t(live_.size());
+}
+
+uint32_t OneShotPool::peak() const {
+	return peak_;
+}
+
+uint64_t OneShotPool::started() const {
+	return started_;
+}
+
+uint64_t OneShotPool::stolen() const {
+	return stolen_;
+}
+
+uint64_t OneShotPool::failed() const {
+	return failed_;
+}
+
+InstanceHandle OneShotPool::last_handle() const {
+	return last_;
+}
+
+bool OneShotPool::contains(InstanceHandle p_handle) const {
+	return std::any_of(live_.begin(), live_.end(), [&](const Entry &e) { return e.handle == p_handle; });
+}
+
+uint32_t OneShotPool::resend_emitters(MixerCore &r_mixer) const {
+	uint32_t n = 0;
+	for (const Entry &e : live_) {
+		if (r_mixer.push(emitter_command(e.handle, e.emitter))) {
+			++n;
+		}
+	}
+	return n;
+}
+
+void OneShotPool::update(MixerCore &r_mixer, uint32_t p_rate) {
+	const uint64_t clock = r_mixer.clock();
+	const uint64_t stop_after = uint64_t(kOneShotStopAfterSeconds * double(p_rate));
+	const uint64_t forget_after = uint64_t(kOneShotForgetSeconds * double(p_rate));
+	for (size_t i = 0; i < live_.size();) {
+		Entry &e = live_[i];
+		if (clock > e.start_frame + forget_after) {
+			MixerCommand kill;
+			kill.type = MixerCommandType::Kill;
+			kill.handle = e.handle;
+			if (r_mixer.push(kill)) {
+				live_.erase(live_.begin() + std::ptrdiff_t(i));
+				++forgotten_;
+				continue;
+			}
+		} else if (!e.stopped && clock > e.start_frame + stop_after) {
+			MixerCommand stop;
+			stop.type = MixerCommandType::Stop;
+			stop.handle = e.handle;
+			e.stopped = r_mixer.push(stop);
+		}
+		++i;
+	}
+}
+
+bool OneShotPool::stop(MixerCore &r_mixer, InstanceHandle p_handle) {
+	for (Entry &e : live_) {
+		if (e.handle == p_handle) {
+			if (e.stopped) {
+				return true;
+			}
+			MixerCommand stop;
+			stop.type = MixerCommandType::Stop;
+			stop.handle = p_handle;
+			e.stopped = r_mixer.push(stop);
+			return e.stopped;
+		}
+	}
+	return false;
+}
+
+uint64_t OneShotPool::forgotten() const {
+	return forgotten_;
+}
+
+// ---- WeaponAudioRouter --------------------------------------------------------------------------------------------
+
+struct WeaponAudioRouter::Impl {
+	MixerCore &mixer;
+	std::shared_ptr<const WeaponAudioTable> table;
+	std::shared_ptr<const ca::WaveBank> bank;
+	AudioTuning tuning;
+	OneShotPool &pool;
+	WeaponAudioConfig config;
+	WeaponAudioStats stats;
+	WeaponAudioObserver *observer = nullptr;
+	uint8_t own_slot = 0xFF;
+	bool own_first_person = true;
+	bool own_trigger_known = false;
+	bool own_trigger_down = false;
+	ListenerState listener;
+	bool listener_set = false;
+	uint32_t own_burst_counter = 0;
+	uint64_t frame_counter = 0;
+
+	// One driver instance in the mixer: a burst while held, its tail after the trigger up.
+	enum class OpKind : uint8_t { Down, Round, Up, Stop };
+	struct Op {
+		OpKind kind = OpKind::Down;
+		uint32_t round = 0;
+		uint64_t frame = 0;
+	};
+	struct Voice {
+		InstanceHandle handle = kNoInstance;
+		uint8_t slot = 0;
+		bool own = false;
+		uint16_t def = sw::kNoWeapon;
+		uint64_t seed = 0;
+		double interval_s = 0.075; // the binding's shot interval
+		uint32_t rate = kMixRate; // the binding's mix rate
+		WeaponSoundDriver driver;
+		bool held = true;
+		bool single = false;
+		host::PresentTimeline timeline = host::PresentTimeline::Render;
+		uint64_t first_frame = 0;
+		sw::SimTime first_time = 0;
+		bool have_id = false;
+		uint32_t first_id = 0;
+		uint32_t next_round = 1;
+		uint32_t last_round = 0;
+		sw::SimTime last_round_time = 0; // the newest round's time (event or synthesised)
+		sw::SimTime last_evidence = 0; // others: the newest firing sample, burst_seq change or RemoteShot time
+		sw::SimTime last_event_time = std::numeric_limits<sw::SimTime>::min(); // others: the newest RemoteShot
+		uint64_t stop_frame = 0;
+		uint64_t release_clock = 0;
+		EmitterState emitter;
+		bool emitter_dirty = false;
+		float distance = 0.0f;
+		std::vector<Op> ops; // not yet accepted by the command ring, in order
+		Voice(const WeaponSoundBinding &p_binding, WeaponFireMode p_mode, InstanceHandle p_handle) :
+				handle(p_handle),
+				interval_s(p_binding.shot_interval_seconds > 0.0 ? p_binding.shot_interval_seconds : 0.075),
+				rate(p_binding.mix_rate != 0 ? p_binding.mix_rate : kMixRate),
+				driver(p_binding, p_mode, p_handle) {}
+		// WeaponSoundDriver::round_frame without needing the trigger down flushed yet.
+		uint64_t round_frame(uint32_t p_round) const {
+			return first_frame + uint64_t(std::llround(double(p_round) * interval_s * double(rate)));
+		}
+	};
+	std::vector<Voice> voices; // <= config.max_weapon_voices
+
+	struct PendingShot {
+		sw::SimTime time = 0;
+		uint32_t id = 0;
+		uint16_t def = sw::kNoWeapon;
+		EmitterState emitter;
+	};
+	struct Track {
+		InstanceHandle held = kNoInstance; // the slot's running burst
+		bool seen = false;
+		bool weapon_seen = false;
+		uint8_t generation = 0;
+		uint8_t burst_seq = 0;
+		uint8_t reload_seq = 0;
+		uint32_t last_firing_tick = 0;
+		uint16_t def = sw::kNoWeapon;
+		uint64_t present_frame = 0;
+		EmitterState emitter;
+		float distance = 0.0f;
+		std::vector<PendingShot> pending; // RemoteShots not yet in a burst, oldest first
+		sw::SimTime last_event_time = std::numeric_limits<sw::SimTime>::min();
+	};
+	std::array<Track, 256> tracks{};
+	Track own;
+	SimMixerClock *clock = nullptr;
+
+	Impl(MixerCore &r_mixer, std::shared_ptr<const WeaponAudioTable> p_table, std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning,
+			OneShotPool &r_pool, const WeaponAudioConfig &p_config) :
+			mixer(r_mixer), table(std::move(p_table)), bank(std::move(p_bank)), tuning(p_tuning), pool(r_pool), config(p_config) {
+		voices.reserve(std::max<uint32_t>(config.max_weapon_voices, 1));
+	}
+
+	const WeaponAudioDef *def_of(uint16_t p_def) const {
+		if (!table || p_def >= table->defs.size()) {
+			return nullptr;
+		}
+		return &table->defs[p_def];
+	}
+
+	Voice *voice(InstanceHandle p_handle) {
+		for (Voice &v : voices) {
+			if (v.handle == p_handle) {
+				return &v;
+			}
+		}
+		return nullptr;
+	}
+
+	sw::SimTime interval_units(const Voice &p_v) const {
+		return sw::SimTime(std::llround(p_v.interval_s * double(sw::kTimeUnitsPerSecond)));
+	}
+
+	// Pushes the voice's queued ops in order; stops at the first the ring refuses (retried in update()).
+	void flush(Voice &r_v) {
+		size_t done = 0;
+		for (; done < r_v.ops.size(); ++done) {
+			const Op &op = r_v.ops[done];
+			bool ok = true;
+			switch (op.kind) {
+				case OpKind::Down:
+					ok = r_v.driver.trigger_down(mixer, op.frame);
+					break;
+				case OpKind::Round:
+					ok = r_v.driver.round_fired(mixer, op.round);
+					break;
+				case OpKind::Up:
+					ok = r_v.driver.trigger_up(mixer, op.frame);
+					break;
+				case OpKind::Stop: {
+					MixerCommand c;
+					c.type = MixerCommandType::Stop;
+					c.handle = r_v.handle;
+					c.at_frame = op.frame;
+					ok = mixer.push(c);
+					break;
+				}
+			}
+			if (!ok) {
+				++stats.retried_commands;
+				break;
+			}
+		}
+		r_v.ops.erase(r_v.ops.begin(), r_v.ops.begin() + std::ptrdiff_t(done));
+	}
+
+	void kill(InstanceHandle p_handle) {
+		MixerCommand c;
+		c.type = MixerCommandType::Kill;
+		c.handle = p_handle;
+		(void)mixer.push(c); // a refused Kill leaves the instance to finish on its own
+	}
+
+	void erase_voice(InstanceHandle p_handle) {
+		for (size_t i = 0; i < voices.size(); ++i) {
+			if (voices[i].handle == p_handle) {
+				voices.erase(voices.begin() + std::ptrdiff_t(i));
+				break;
+			}
+		}
+		for (Track &t : tracks) {
+			if (t.held == p_handle) {
+				t.held = kNoInstance;
+			}
+		}
+		if (own.held == p_handle) {
+			own.held = kNoInstance;
+		}
+	}
+
+	// A voice for a new burst: under the limit, or by killing the farthest released (tail) one. False: culled.
+	bool make_room(float p_distance) {
+		if (voices.size() < config.max_weapon_voices) {
+			return true;
+		}
+		Voice *far = nullptr;
+		for (Voice &v : voices) {
+			if (!v.held && (far == nullptr || v.distance > far->distance)) {
+				far = &v;
+			}
+		}
+		(void)p_distance;
+		if (far == nullptr) {
+			return false; // every voice is a running burst: the new one waits for a trigger up (nearest first applies there)
+		}
+		const InstanceHandle h = far->handle;
+		kill(h);
+		erase_voice(h);
+		++stats.stolen;
+		return true;
+	}
+
+	// Starts a burst: one PatchInstance (seed, IsFirstPerson, EnableStep, emitter), Start + trigger down at p_frame.
+	Voice *start_burst(Track &r_track, bool p_own, uint8_t p_slot, uint16_t p_def, uint64_t p_seed, uint64_t p_frame, sw::SimTime p_time,
+			host::PresentTimeline p_timeline, const EmitterState &p_emitter, float p_distance, bool p_first_person) {
+		const WeaponAudioDef *d = def_of(p_def);
+		if (d == nullptr || d->form != WeaponAudioForm::Driver || !d->program) {
+			++stats.unbound_defs;
+			return nullptr;
+		}
+		if (!(p_distance <= config.max_weapon_distance_m) || !make_room(p_distance)) {
+			++stats.culled;
+			return nullptr;
+		}
+		core::Result<std::unique_ptr<PatchInstance>> inst = PatchInstance::create(d->program, bank, tuning, p_seed, d->binding.mix_rate);
+		if (!inst) {
+			++stats.mixer_refusals; // counted with the refusals: the burst cannot sound
+			return nullptr;
+		}
+		PatchInstance &pi = **inst;
+		const InstanceHandle handle = mixer.next_handle();
+		voices.emplace_back(d->binding, d->fire_mode, handle);
+		Voice &v = voices.back();
+		v.slot = p_slot;
+		v.own = p_own;
+		v.def = p_def;
+		v.seed = p_seed;
+		v.single = d->fire_mode == WeaponFireMode::Single;
+		v.timeline = p_timeline;
+		v.first_frame = p_frame;
+		v.first_time = p_time;
+		v.last_round_time = p_time;
+		v.last_evidence = p_time;
+		v.emitter = p_emitter;
+		v.distance = p_distance;
+		v.driver.prepare(pi, p_first_person);
+		pi.set_geometry(p_emitter, listener);
+		if (observer != nullptr) {
+			observer->on_driver_instance(p_slot, p_seed, p_frame, pi);
+		}
+		MixerCommand start;
+		start.type = MixerCommandType::Start;
+		start.handle = handle;
+		start.at_frame = p_frame;
+		start.instance = &pi;
+		if (!mixer.push(start)) {
+			++stats.mixer_refusals;
+			voices.pop_back();
+			return nullptr; // the instance is destroyed with `inst`
+		}
+		(void)inst->release();
+		v.ops.push_back(Op{ OpKind::Down, 0, p_frame });
+		flush(v);
+		r_track.held = handle;
+		++stats.bursts;
+		if (p_own) {
+			++stats.own_bursts;
+		}
+		stats.peak_weapon_voices = std::max<uint32_t>(stats.peak_weapon_voices, uint32_t(voices.size()));
+		return &v;
+	}
+
+	void post_round(Voice &r_v, uint32_t p_round, sw::SimTime p_time, bool p_from_event) {
+		if (p_round < r_v.next_round || r_v.single) {
+			return;
+		}
+		r_v.next_round = p_round + 1;
+		r_v.last_round = p_round;
+		r_v.last_round_time = std::max(r_v.last_round_time, p_time);
+		r_v.ops.push_back(Op{ OpKind::Round, p_round, 0 });
+		flush(r_v);
+		++stats.rounds;
+		if (p_from_event) {
+			++stats.event_rounds;
+		} else {
+			++stats.state_rounds;
+		}
+	}
+
+	// Ends a held burst: the stop event half an interval after the last round (not before earliest_frame, and after
+	// the last round's frame), then the Stop command.
+	void trigger_up(Voice &r_v) {
+		if (!r_v.held) {
+			return;
+		}
+		r_v.held = false;
+		const uint64_t last = r_v.round_frame(r_v.last_round);
+		uint64_t stop = r_v.single ? last + 1 : last + uint64_t(std::llround(0.5 * r_v.interval_s * double(config.mix_rate)));
+		stop = std::max(stop, mixer.earliest_frame());
+		r_v.stop_frame = stop;
+		r_v.release_clock = mixer.clock();
+		r_v.ops.push_back(Op{ OpKind::Up, 0, stop });
+		r_v.ops.push_back(Op{ OpKind::Stop, 0, stop + kStopCommandDelayFrames });
+		flush(r_v);
+		++stats.trigger_ups;
+		if (observer != nullptr) {
+			observer->on_trigger_up(r_v.slot, r_v.seed, stop);
+		}
+	}
+
+	void end_track(Track &r_track) {
+		if (r_track.held != kNoInstance) {
+			if (Voice *v = voice(r_track.held)) {
+				trigger_up(*v);
+			}
+			r_track.held = kNoInstance;
+		}
+	}
+
+	EmitterState own_emitter(const host::PresentEvent &p_e) const {
+		EmitterState e;
+		if (own_first_person) {
+			e.position = listener.position;
+			e.forward = listener.forward;
+		} else if (finite3(p_e.pos)) {
+			e.position = { p_e.pos[0], p_e.pos[1], p_e.pos[2] };
+			if (finite3(p_e.dir)) {
+				e.forward = { p_e.dir[0], p_e.dir[1], p_e.dir[2] };
+			}
+		}
+		return e;
+	}
+
+	EmitterState event_emitter(const host::PresentEvent &p_e) const {
+		EmitterState e;
+		if (finite3(p_e.pos)) {
+			e.position = { p_e.pos[0], p_e.pos[1], p_e.pos[2] };
+		}
+		if (finite3(p_e.dir)) {
+			e.forward = { p_e.dir[0], p_e.dir[1], p_e.dir[2] };
+		}
+		return e;
+	}
+
+	// A one-shot of a def's program (knife swing, M67 throw, reloads, the explosion).
+	bool one_shot(const std::shared_ptr<const ca::SoundProgram> &p_program, uint32_t p_event, uint64_t p_seed, const EmitterState &p_emitter,
+			uint64_t p_frame, bool p_first_person) {
+		if (!p_program) {
+			return false;
+		}
+		OneShotOptions o;
+		o.event = p_event;
+		o.set_first_person = true;
+		o.first_person = p_first_person;
+		o.mix_rate = config.mix_rate;
+		if (!pool.start(mixer, p_program, bank, tuning, p_seed, p_emitter, listener, p_frame, o)) {
+			return false;
+		}
+		++stats.one_shots;
+		return true;
+	}
+
+	void own_shot(const host::PresentEvent &p_e, SimMixerClock &r_clock) {
+		const WeaponAudioDef *d = def_of(p_e.def);
+		if (d == nullptr || d->form == WeaponAudioForm::None) {
+			++stats.unbound_defs;
+			return;
+		}
+		const EmitterState em = own_emitter(p_e);
+		const uint64_t frame = r_clock.frame_of(p_e.time, host::PresentTimeline::Predicted);
+		if (d->form == WeaponAudioForm::OneShot) {
+			end_track(own);
+			(void)one_shot(d->program, d->one_shot_event, sound_seed(own_slot, own_burst_counter++), em, frame, own_first_person);
+			return;
+		}
+		Voice *v = own.held != kNoInstance ? voice(own.held) : nullptr;
+		if (v != nullptr) {
+			const sw::SimTime gap = p_e.time - v->last_round_time;
+			const double hold = config.own_hold_intervals * v->interval_s * double(sw::kTimeUnitsPerSecond);
+			if (v->def != p_e.def || !v->have_id || p_e.id < v->first_id || double(gap) > hold || v->single) {
+				trigger_up(*v);
+				own.held = kNoInstance;
+				v = nullptr;
+			}
+		}
+		if (v == nullptr) {
+			v = start_burst(own, true, own_slot, p_e.def, sound_seed(own_slot, own_burst_counter++), frame, p_e.time, host::PresentTimeline::Predicted, em,
+					0.0f, own_first_person);
+			if (v == nullptr) {
+				return;
+			}
+			v->have_id = true;
+			v->first_id = p_e.id;
+			++stats.event_rounds;
+			if (v->single) {
+				trigger_up(*v);
+				own.held = kNoInstance;
+			}
+			return;
+		}
+		post_round(*v, p_e.id - v->first_id, p_e.time, true);
+	}
+
+	void remote_shot(const host::PresentEvent &p_e, SimMixerClock &r_clock) {
+		if (p_e.slot == own_slot) {
+			return; // cl emits OwnShot for the own soldier
+		}
+		Track &t = tracks[p_e.slot];
+		const WeaponAudioDef *d = def_of(p_e.def);
+		if (d == nullptr || d->form == WeaponAudioForm::None) {
+			++stats.unbound_defs;
+			return;
+		}
+		const EmitterState em = event_emitter(p_e);
+		t.last_event_time = std::max(t.last_event_time, p_e.time);
+		if (d->form == WeaponAudioForm::OneShot) {
+			const float dist = distance(em.position, listener.position);
+			if (dist <= config.max_weapon_distance_m) {
+				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, r_clock.frame_of(p_e.time, host::PresentTimeline::Render),
+						false);
+			}
+			return;
+		}
+		// A running burst of the same def takes the shot as a round (exact: its shot index); otherwise the shot waits
+		// for the records to start the burst at render time (on_others), so the burst seed is the record's.
+		if (t.held != kNoInstance) {
+			if (Voice *v = voice(t.held)) {
+				if (v->def == p_e.def && !v->single) {
+					v->last_evidence = std::max(v->last_evidence, p_e.time);
+					v->last_event_time = std::max(v->last_event_time, p_e.time);
+					if (!v->have_id) {
+						// The burst started from the records: anchor the shot indices at this shot's round by its time.
+						const sw::SimTime iu = interval_units(*v);
+						const int64_t k = iu > 0 ? std::llround(double(p_e.time - v->first_time) / double(iu)) : 0;
+						if (k >= 0 && uint64_t(k) <= p_e.id) {
+							v->have_id = true;
+							v->first_id = p_e.id - uint32_t(k);
+						}
+					}
+					if (v->have_id && p_e.id >= v->first_id) {
+						post_round(*v, p_e.id - v->first_id, p_e.time, true);
+					}
+					return;
+				}
+			}
+		}
+		if (t.pending.size() >= config.pending_remote_shots && !t.pending.empty()) {
+			t.pending.erase(t.pending.begin());
+			++stats.remote_shots_dropped;
+		}
+		t.pending.push_back(PendingShot{ p_e.time, p_e.id, p_e.def, em });
+	}
+
+	void on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock) {
+		clock = &r_clock;
+		for (const host::PresentEvent &e : p_events) {
+			switch (e.kind) {
+				case host::PresentKind::OwnShot:
+					own_shot(e, r_clock);
+					break;
+				case host::PresentKind::OwnTimed:
+					if ((e.id & sw::weapon_events::kReloadStarted) != 0) {
+						const WeaponAudioDef *d = def_of(e.def);
+						if (d != nullptr && d->program && d->has_reload) {
+							EmitterState em;
+							em.position = listener.position;
+							em.forward = listener.forward;
+							if (one_shot(d->program, kHashReload, sound_seed(own_slot, 0x80000000u | own_burst_counter++), em,
+										r_clock.frame_of(e.time, host::PresentTimeline::Predicted), own_first_person)) {
+								++stats.reloads;
+							}
+						}
+					}
+					break;
+				case host::PresentKind::RemoteShot:
+					remote_shot(e, r_clock);
+					break;
+				case host::PresentKind::Detonation: {
+					const WeaponAudioDef *d = def_of(e.def);
+					if (d != nullptr && d->explosion) {
+						if (one_shot(d->explosion, 0, sound_seed(e.slot, 0x40000000u | (e.id & 0x3FFFFFFFu)), event_emitter(e),
+									r_clock.frame_of(e.time, e.timeline), false)) {
+							++stats.detonations;
+						}
+					}
+					break;
+				}
+				case host::PresentKind::Death:
+					if (e.aux == own_slot) {
+						end_track(own);
+					} else {
+						end_track(tracks[e.aux]);
+					}
+					break;
+				case host::PresentKind::Spawn:
+					if (e.slot == own_slot) {
+						end_track(own);
+					} else {
+						Track &t = tracks[e.slot];
+						end_track(t);
+						t.weapon_seen = false;
+						t.pending.clear();
+					}
+					break;
+				default:
+					break;
+			}
+		}
+		// The own burst ends when the trigger is up, or when the predicted clock passed the next round's time.
+		if (own.held != kNoInstance) {
+			Voice *v = voice(own.held);
+			if (v == nullptr) {
+				own.held = kNoInstance;
+			} else {
+				bool end = own_trigger_known && !own_trigger_down;
+				const host::PresentClock &now = r_clock.now();
+				if (!end && now.predicted_valid) {
+					const double hold = config.own_hold_intervals * v->interval_s * double(sw::kTimeUnitsPerSecond);
+					end = double(now.predicted - v->last_round_time) > hold;
+				}
+				if (end) {
+					trigger_up(*v);
+					own.held = kNoInstance;
+				}
+			}
+		}
+		// Keep the own 1p voices at the listener.
+		if (own_first_person) {
+			for (Voice &v : voices) {
+				if (v.own) {
+					EmitterState em;
+					em.position = listener.position;
+					em.forward = listener.forward;
+					if (!same_emitter(em, v.emitter)) {
+						v.emitter = em;
+						v.emitter_dirty = true;
+					}
+				}
+			}
+		}
+	}
+
+	EmitterState other_emitter(const host::PresentedSoldier &p_s, const MuzzlePoint *p_muzzle) const {
+		EmitterState e;
+		if (p_muzzle != nullptr && p_muzzle->valid && std::isfinite(p_muzzle->position.x) && std::isfinite(p_muzzle->position.y) &&
+				std::isfinite(p_muzzle->position.z)) {
+			e.position = p_muzzle->position;
+			e.forward = p_muzzle->forward;
+		} else {
+			const float cp = std::cos(p_s.pitch), sp = std::sin(p_s.pitch), cy = std::cos(p_s.yaw), sy = std::sin(p_s.yaw);
+			const Vec3 fwd{ sy * cp, sp, cy * cp };
+			const float f = config.standin_muzzle_forward_m;
+			e.position = { p_s.position[0] + fwd.x * f, p_s.position[1] + p_s.eye_height + fwd.y * f, p_s.position[2] + fwd.z * f };
+			e.forward = fwd;
+		}
+		e.velocity = { p_s.velocity[0], p_s.velocity[1], p_s.velocity[2] };
+		if (!std::isfinite(e.position.x) || !std::isfinite(e.position.y) || !std::isfinite(e.position.z)) {
+			e = EmitterState{};
+		}
+		return e;
+	}
+
+	// The records start a burst at render time; a RemoteShot already received for it gives its exact first round.
+	void start_other_from_state(Track &r_t, uint8_t p_slot, uint16_t p_def, uint8_t p_burst_seq, sw::SimTime p_evidence, SimMixerClock &r_clock) {
+		const WeaponAudioDef *d = def_of(p_def);
+		if (d == nullptr || d->form != WeaponAudioForm::Driver) {
+			if (d == nullptr || d->form == WeaponAudioForm::None) {
+				++stats.unbound_defs;
+			}
+			return; // knife / M67: their one-shots come from RemoteShot only (no loop to keep alive)
+		}
+		const sw::SimTime interval = sw::SimTime(std::llround(d->binding.shot_interval_seconds * double(sw::kTimeUnitsPerSecond)));
+		const sw::SimTime window_lo = p_evidence - interval - 2 * sw::kTimeUnitsPerTick;
+		// The earliest pending shot of this def inside the sample's window is round 0.
+		const PendingShot *first = nullptr;
+		for (const PendingShot &s : r_t.pending) {
+			if (s.def == p_def && s.time > window_lo && s.time <= p_evidence + interval && (first == nullptr || s.time < first->time)) {
+				first = &s;
+			}
+		}
+		const sw::SimTime t0 = first != nullptr ? first->time : p_evidence;
+		const EmitterState em = r_t.emitter;
+		Voice *v = start_burst(r_t, false, p_slot, p_def, sound_seed(p_slot, p_burst_seq), r_clock.frame_of(t0, host::PresentTimeline::Render), t0,
+				host::PresentTimeline::Render, em, r_t.distance, false);
+		if (v == nullptr) {
+			return;
+		}
+		v->last_evidence = std::max(p_evidence, t0);
+		if (first != nullptr) {
+			v->have_id = true;
+			v->first_id = first->id;
+			v->last_event_time = first->time;
+			++stats.event_rounds;
+			const uint32_t first_id = first->id;
+			std::vector<PendingShot> rest;
+			for (const PendingShot &s : r_t.pending) {
+				if (s.def == p_def && s.id > first_id) {
+					rest.push_back(s);
+				}
+			}
+			std::sort(rest.begin(), rest.end(), [](const PendingShot &a, const PendingShot &b) { return a.id < b.id; });
+			for (const PendingShot &s : rest) {
+				v->last_evidence = std::max(v->last_evidence, s.time);
+				v->last_event_time = std::max(v->last_event_time, s.time);
+				post_round(*v, s.id - first_id, s.time, true);
+			}
+		}
+		r_t.pending.clear();
+		if (v->single) {
+			trigger_up(*v);
+			r_t.held = kNoInstance;
+		}
+	}
+
+	void on_others(std::span<const host::PresentedSoldier> p_soldiers, std::span<const host::PresentedOtherWeapon> p_weapons, std::span<const MuzzlePoint> p_muzzles,
+			SimMixerClock &r_clock) {
+		clock = &r_clock;
+		++frame_counter;
+		const host::PresentClock &now = r_clock.now();
+		for (size_t i = 0; i < p_soldiers.size(); ++i) {
+			const host::PresentedSoldier &s = p_soldiers[i];
+			if (s.slot == own_slot) {
+				continue;
+			}
+			Track &t = tracks[s.slot];
+			t.present_frame = frame_counter;
+			t.emitter = other_emitter(s, i < p_muzzles.size() ? &p_muzzles[i] : nullptr);
+			t.distance = distance(t.emitter.position, listener.position);
+			if (t.seen && s.generation != t.generation) {
+				end_track(t); // a new life
+				t.weapon_seen = false;
+				t.pending.clear();
+			}
+			t.seen = true;
+			t.generation = s.generation;
+			Voice *v = t.held != kNoInstance ? voice(t.held) : nullptr;
+			if (t.held != kNoInstance && v == nullptr) {
+				t.held = kNoInstance;
+			}
+			if (v != nullptr) {
+				v->distance = t.distance;
+				if (!same_emitter(v->emitter, t.emitter)) {
+					v->emitter = t.emitter;
+					v->emitter_dirty = true;
+				}
+			}
+			if (i >= p_weapons.size() || !p_weapons[i].valid || p_weapons[i].slot != s.slot) {
+				continue;
+			}
+			const host::PresentedOtherWeapon &w = p_weapons[i];
+			if (v != nullptr && v->def != w.def) {
+				trigger_up(*v); // a weapon switch ends the burst
+				t.held = kNoInstance;
+				v = nullptr;
+			}
+			bool evidence = false;
+			if (t.weapon_seen) {
+				evidence = w.burst_seq != t.burst_seq || (w.firing && w.sample_tick != t.last_firing_tick);
+				if (w.reload_seq != t.reload_seq) {
+					const WeaponAudioDef *d = def_of(w.def);
+					if (d != nullptr && d->program && d->has_reload && t.distance <= config.max_weapon_distance_m &&
+							one_shot(d->program, kHashReload, sound_seed(s.slot, 0x80000000u | (uint32_t(w.reload_seq) << 8) | w.generation), t.emitter,
+									r_clock.frame_of(sw::SimTime(w.sample_tick) * sw::kTimeUnitsPerTick, host::PresentTimeline::Render), false)) {
+						++stats.reloads;
+					}
+				}
+			} else {
+				evidence = w.firing;
+			}
+			t.weapon_seen = true;
+			t.burst_seq = w.burst_seq;
+			t.reload_seq = w.reload_seq;
+			t.def = w.def;
+			if (w.firing) {
+				t.last_firing_tick = w.sample_tick;
+			}
+			if (evidence) {
+				const sw::SimTime when = sw::SimTime(w.sample_tick) * sw::kTimeUnitsPerTick;
+				if (v == nullptr) {
+					start_other_from_state(t, s.slot, w.def, w.burst_seq, when, r_clock);
+					v = t.held != kNoInstance ? voice(t.held) : nullptr;
+				} else {
+					v->last_evidence = std::max(v->last_evidence, when);
+				}
+			}
+			// Rounds the RemoteShots did not place (a lost datagram): one per interval up to the newest evidence.
+			if (v != nullptr && v->held && !v->single) {
+				const sw::SimTime iu = interval_units(*v);
+				if (iu > 0 && v->last_evidence > v->last_event_time + iu) {
+					const int64_t k_max = (v->last_evidence - v->first_time) / iu;
+					for (int64_t k = int64_t(v->next_round); k <= k_max && k < 100000; ++k) {
+						post_round(*v, uint32_t(k), v->first_time + k * iu, false);
+					}
+				}
+				// The burst ends when the render clock passes its last evidence by an interval plus the hold.
+				if (now.render_valid) {
+					const sw::SimTime last = std::max(v->last_evidence, v->last_event_time);
+					const double hold = double(iu) + config.other_hold_ticks * double(sw::kTimeUnitsPerTick);
+					if (double(now.render - last) > hold) {
+						trigger_up(*v);
+						t.held = kNoInstance;
+					}
+				}
+			}
+		}
+		// Soldiers not drawn this frame (left, out of the window): their bursts end.
+		for (uint32_t slot = 0; slot < tracks.size(); ++slot) {
+			Track &t = tracks[slot];
+			if (t.held != kNoInstance && t.present_frame != frame_counter) {
+				end_track(t);
+			}
+		}
+	}
+
+	void set_listener(const ListenerState &p_listener) {
+		const auto eq = [](const Vec3 &a, const Vec3 &b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+		if (listener_set && eq(listener.position, p_listener.position) && eq(listener.forward, p_listener.forward) && eq(listener.up, p_listener.up) &&
+				eq(listener.velocity, p_listener.velocity)) {
+			return;
+		}
+		listener = p_listener;
+		listener_set = true;
+		MixerCommand c;
+		c.type = MixerCommandType::SetListener;
+		c.listener = p_listener;
+		if (!mixer.push(c)) {
+			listener_set = false; // retried next frame
+			return;
+		}
+		// The mixer applies a listener on the next SetEmitter only (mixer_core.cpp): re-send every live emitter.
+		for (Voice &v : voices) {
+			if (v.own && own_first_person) {
+				v.emitter.position = listener.position;
+				v.emitter.forward = listener.forward;
+			}
+			v.emitter_dirty = true;
+		}
+		stats.emitter_updates += pool.resend_emitters(mixer);
+	}
+
+	void update() {
+		for (Voice &v : voices) {
+			if (!v.ops.empty()) {
+				flush(v);
+			}
+			if (v.emitter_dirty && mixer.push(emitter_command(v.handle, v.emitter))) {
+				v.emitter_dirty = false;
+				++stats.emitter_updates;
+			}
+		}
+		std::array<MixerFeedback, 128> fb;
+		for (int guard = 0; guard < 64; ++guard) {
+			const size_t n = mixer.poll_feedback(fb);
+			for (size_t i = 0; i < n; ++i) {
+				if (!fb[i].finished) {
+					continue;
+				}
+				if (voice(fb[i].handle) != nullptr) {
+					erase_voice(fb[i].handle);
+				} else {
+					pool.on_finished(fb[i].handle);
+				}
+			}
+			if (n < fb.size()) {
+				break;
+			}
+		}
+		pool.update(mixer, config.mix_rate);
+		const uint64_t clock_now = mixer.clock();
+		const uint64_t forget = uint64_t(config.voice_forget_seconds * double(config.mix_rate));
+		for (size_t i = 0; i < voices.size();) {
+			Voice &v = voices[i];
+			if (!v.held && v.ops.empty() && clock_now > v.stop_frame + forget) {
+				const InstanceHandle h = v.handle;
+				kill(h);
+				erase_voice(h);
+				++stats.forgotten;
+				continue;
+			}
+			++i;
+		}
+		mixer.reclaim();
+		stats.weapon_voices = uint32_t(voices.size());
+		stats.peak_weapon_voices = std::max(stats.peak_weapon_voices, stats.weapon_voices);
+	}
+};
+
+WeaponAudioRouter::WeaponAudioRouter(MixerCore &r_mixer, std::shared_ptr<const WeaponAudioTable> p_table, std::shared_ptr<const ca::WaveBank> p_bank,
+		const AudioTuning &p_tuning, OneShotPool &r_one_shots, const WeaponAudioConfig &p_config) :
+		impl_(std::make_unique<Impl>(r_mixer, std::move(p_table), std::move(p_bank), p_tuning, r_one_shots, p_config)) {}
+
+WeaponAudioRouter::~WeaponAudioRouter() {
+	if (impl_) {
+		for (const Impl::Voice &v : impl_->voices) {
+			impl_->kill(v.handle);
+		}
+	}
+}
+
+void WeaponAudioRouter::set_own_slot(uint8_t p_slot) {
+	if (p_slot != impl_->own_slot) {
+		impl_->end_track(impl_->own);
+		if (impl_->own_slot < impl_->tracks.size()) {
+			impl_->tracks[impl_->own_slot] = Impl::Track{};
+		}
+		impl_->end_track(impl_->tracks[p_slot]);
+	}
+	impl_->own_slot = p_slot;
+}
+
+void WeaponAudioRouter::set_own_first_person(bool p_first_person) {
+	impl_->own_first_person = p_first_person;
+}
+
+void WeaponAudioRouter::set_own_trigger(bool p_down) {
+	impl_->own_trigger_known = true;
+	impl_->own_trigger_down = p_down;
+}
+
+void WeaponAudioRouter::set_listener(const ListenerState &p_listener) {
+	impl_->set_listener(p_listener);
+}
+
+void WeaponAudioRouter::on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock) {
+	impl_->on_events(p_events, r_clock);
+}
+
+void WeaponAudioRouter::on_others(std::span<const host::PresentedSoldier> p_soldiers, std::span<const host::PresentedOtherWeapon> p_weapons,
+		std::span<const MuzzlePoint> p_muzzles, SimMixerClock &r_clock) {
+	impl_->on_others(p_soldiers, p_weapons, p_muzzles, r_clock);
+}
+
+void WeaponAudioRouter::update(uint64_t) {
+	impl_->update();
+}
+
+void WeaponAudioRouter::set_observer(WeaponAudioObserver *p_observer) {
+	impl_->observer = p_observer;
+}
+
+const WeaponAudioStats &WeaponAudioRouter::stats() const {
+	return impl_->stats;
+}
+
+} // namespace bf3::audio
