@@ -1205,3 +1205,35 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_w3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_w3_cl_dir}")
 endif()
+
+# M2a bt (docs/design/m2a.md §1 E13, E15, §10.2; docs/design/m2a-bt.md): the firefight bots on the real GameServer,
+# headless on Metro TDM (load_firefight_level once per process, a per-PID scratch cache root). host.gunplay.firefight
+# (functional, untimed: 64 Free bots for 60 s of simulated time, kills on both teams, every bot fires, no stuck bot, no
+# soldier inside geometry or below the ground, no NaN; the idle observer peer is engaged) and host.gunplay.replay (E15,
+# functional: three 3,600-tick runs on three threads) stay out of the timing label. host.gunplay.perf (E13, timing,
+# RUN_SERIAL: 10 s warm-up + 120 s of 64 Pairs bots and one observer) runs in the merge pass only; report only under asan.
+openbf3_test(test_host_gunplay_perf test_main.cpp host_gunplay_perf.cpp test_support.h)
+target_link_libraries(test_host_gunplay_perf PRIVATE bf3_host)
+target_compile_definitions(test_host_gunplay_perf PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
+if(OPENBF3_ASAN)
+    target_compile_definitions(test_host_gunplay_perf PRIVATE OPENBF3_TIMING_REPORT_ONLY=1)
+endif()
+add_test(NAME host.gunplay.firefight COMMAND test_host_gunplay_perf --test-suite=host-gunplay-firefight)
+add_test(NAME host.gunplay.replay COMMAND test_host_gunplay_perf --test-suite=host-gunplay-replay)
+add_test(NAME host.gunplay.perf COMMAND test_host_gunplay_perf --test-suite=host-gunplay-perf)
+set_tests_properties(host.gunplay.firefight host.gunplay.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+set_tests_properties(host.gunplay.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
+openbf3_label(timing host.gunplay.perf)
+# Measured alone (dev, 2026-10-18, warm machine): firefight 13.8 s wall / 30.9 s CPU (two runs and the Metro load with
+# its cold per-PID cache), replay 11.4 s / 38.0 s (three runs on three threads), perf 12.4 s.
+openbf3_cost(host.gunplay.firefight 2 14)
+openbf3_cost(host.gunplay.replay 3 12)
+openbf3_cost(host.gunplay.perf 1 13)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2a_bt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    # Under asan (2026-10-18, the two rows side by side on a loaded machine): firefight 563 s, replay 431 s.
+    set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES TIMEOUT 1800)
+    set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_bt_cl_dir}")
+endif()

@@ -90,3 +90,10 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/client_wiring.h
     src/client_wiring.cpp
 )
+
+# M2a bt (docs/design/m2a.md §10.2, E13, E15; docs/design/m2a-bt.md): the headless firefight run (bf3dump firefight,
+# host.gunplay.firefight / replay / perf).
+target_sources(bf3_host PRIVATE
+    include/bf3/host/firefight_run.h
+    src/firefight_run.cpp
+)

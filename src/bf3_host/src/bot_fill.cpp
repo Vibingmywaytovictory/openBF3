@@ -417,3 +417,51 @@ const sim::bots::WalkerBrain &BotDirector::brain(uint32_t p_index) const {
 }
 
 } // namespace bf3::host
+
+// M2a bt (bot_fill.h's M2a bt block; docs/design/m2a-bt.md): the firefight brains' nav hook.
+namespace bf3::host {
+
+void BotNav::run_once(sim::Tick p_tick) {
+	if (p_tick == run_tick || paths == nullptr) {
+		return;
+	}
+	run_tick = p_tick;
+	const Clock::time_point start = Clock::now();
+	paths->run();
+	paths_ms += ms_since(start);
+}
+
+sim::bots::WalkerView BotNav::view(sim::Tick p_tick, uint32_t p_slot, const sim::SoldierState &p_self, std::span<const sim::bots::BotGoal> p_objectives,
+		float p_stand_eye_height) {
+	sim::bots::WalkerView v;
+	v.tick = p_tick;
+	v.slot = p_slot;
+	v.self = &p_self;
+	v.stand_eye_height = p_stand_eye_height;
+	v.objectives = p_objectives;
+	if (level != nullptr) {
+		v.components = &level->components;
+		v.main_component = level->main_component;
+	}
+	v.query = query.get();
+	v.paths = paths.get();
+	return v;
+}
+
+core::Result<std::unique_ptr<BotNav>> make_bot_nav(std::shared_ptr<const BotLevel> p_level, const sim::bots::PathService::Options &p_paths,
+		const sim::NavQueryOptions &p_query) {
+	if (p_level == nullptr || p_level->nav == nullptr) {
+		return core::make_error("bot nav: no bot level");
+	}
+	auto out = std::make_unique<BotNav>();
+	out->level = std::move(p_level);
+	core::Result<std::unique_ptr<sim::NavQuery>> query = sim::NavQuery::create(out->level->nav, p_query);
+	if (!query) {
+		return core::error_at("bot nav", query.error());
+	}
+	out->query = std::move(*query);
+	out->paths = std::make_unique<sim::bots::PathService>(*out->query, p_paths);
+	return out;
+}
+
+} // namespace bf3::host
