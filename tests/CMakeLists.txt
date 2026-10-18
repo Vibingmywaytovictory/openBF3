@@ -1189,3 +1189,19 @@ foreach(_openbf3_row IN LISTS _openbf3_all_tests)
         message(FATAL_ERROR "${_openbf3_row}: register godot.* rows with openbf3_godot_row(HEADLESS|WINDOW) (docs/testing.md)")
     endif()
 endforeach()
+
+# M2a w3 (W3.0 contract, docs/design/m2a-w3.md): m2a.contract3 compiles every Godot-free wave-3 interface header together
+# (bf3_audio's weapon_audio / impact_audio / game_audio_check, bf3_fx's triggers, bf3_host's client_wiring and
+# firefight_brain, the crowd additions, bf3_godot's m2a_game.h and m2a_check.h) and pins the POD shapes, enum values,
+# defaults, the lane rule and the seed hashes, plus G1-G5 and the check's case parser. Rows that need a track's body
+# print PENDING until the track sets its switch. No install; a contract row (<= 2 s).
+openbf3_test(test_m2a_contract3 test_main.cpp m2a_contract3_tests.cpp gunplay_fixture.h test_support.h)
+target_link_libraries(test_m2a_contract3 PRIVATE bf3_host bf3_anim bf3_fx bf3_audio)
+target_include_directories(test_m2a_contract3 PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+target_compile_definitions(test_m2a_contract3 PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME m2a.contract3 COMMAND test_m2a_contract3 --test-suite=m2a-contract3)
+set_tests_properties(m2a.contract3 PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2a_w3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2a.contract3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_w3_cl_dir}")
+endif()
