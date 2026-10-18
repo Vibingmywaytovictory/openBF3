@@ -9,6 +9,7 @@
 // The program builder and the test wave are copies of audio_unit_tests.cpp's (au's file is not edited).
 #include "test_support.h"
 
+#include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/audio_check.h"
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/audio_load.h"
@@ -1336,9 +1337,10 @@ std::string env_value(const char *p_name) {
 	return out;
 }
 
-std::filesystem::path au3_shots_dir() {
+// <build>/shots/<row> (docs/testing.md §2), or OPENBF3_AU3_SHOTS as one flat directory (b\shotsu3 for the user).
+std::filesystem::path au3_shots_dir(const char *p_row) {
 	const std::string env = env_value("OPENBF3_AU3_SHOTS");
-	return std::filesystem::path(env.empty() ? std::string(OPENBF3_AU3_SHOTS) : env);
+	return env.empty() ? std::filesystem::path(OPENBF3_AU3_SHOTS) / p_row : std::filesystem::path(env);
 }
 
 PathGuard install_guard(const GameFixture &p_fixture) {
@@ -1771,7 +1773,7 @@ TEST_SUITE("audio-game") {
 		CHECK(ms.ring_overflows.load() == 0);
 		CHECK(ms.starved_voices.load() == 0);
 		// The recording for the user (b/shots/au3, gitignored).
-		const std::filesystem::path dir = au3_shots_dir();
+		const std::filesystem::path dir = au3_shots_dir("audio.game.e7");
 		std::error_code ec;
 		REQUIRE(guard.allows_write(dir));
 		std::filesystem::create_directories(dir, ec);
@@ -1787,6 +1789,184 @@ TEST_SUITE("audio-game") {
 					std::to_string(w.stop_frame - check.start_frame()) + "\n";
 		}
 		write_text(guard, dir / "e7_rehearsal.txt", table_text + "\nsteps (name, listener distance m):\n" + placed_text);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("a scene for the ear: own fire and reload, the M16A3 at 15 / 80 / 250 m, an SVD, impacts (gate 4 offline)") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		const uint16_t m16 = def_of_patch(table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		uint16_t svd = sw::kNoWeapon;
+		for (const ba::KitAudioItem &item : f->assets.kits.items) {
+			if (item.sound.find("svd") != std::string::npos && table.defs[item.def].form == ba::WeaponAudioForm::Driver) {
+				svd = item.def;
+			}
+		}
+		REQUIRE(svd != sw::kNoWeapon);
+		struct Whole final : ba::MixTap {
+			std::vector<float> mix;
+			void on_block(const float *p, uint32_t n, uint64_t) override {
+				mix.insert(mix.end(), p, p + size_t(n) * 2);
+			}
+		} tap;
+		struct Starts final : ba::WeaponAudioObserver {
+			std::vector<std::pair<uint8_t, uint64_t>> first; // slot, first round frame
+			void on_driver_instance(uint8_t p_slot, uint64_t, uint64_t p_first, ba::PatchInstance &) override {
+				first.push_back({ p_slot, p_first });
+			}
+			void on_trigger_up(uint8_t, uint64_t, uint64_t) override {}
+		} starts;
+		GameRig rig(*f, &tap);
+		rig.router->set_observer(&starts);
+		rig.listener.position = { 0.0f, 1.6f, 0.0f };
+		rig.listener.forward = { 0.0f, 0.0f, 1.0f };
+		const double t_start = 600.25;
+		const auto at = [&](double p_s) { return sw::SimTime(std::llround((t_start + p_s * 60.0) * double(sw::kTimeUnitsPerTick))); };
+		const sw::SimTime m16_iv = sw::SimTime(std::llround(table.defs[m16].shot_interval_s * double(sw::kTimeUnitsPerSecond)));
+		// The others: M16A3s at 15, 80 and 250 m on the listener's axis facing it, an SVD at 40 m to the side.
+		std::vector<NetShooter> shooters(4);
+		const float dist[3] = { 15.0f, 80.0f, 250.0f };
+		for (int i = 0; i < 3; ++i) {
+			shooters[i].slot = uint8_t(1 + i);
+			shooters[i].def = m16;
+			shooters[i].state.life = 1;
+			shooters[i].state.position = { 0.0f, 0.0f, dist[i] + 0.5f };
+			shooters[i].state.yaw = 32768; // facing -z, the listener
+			shooters[i].burst(at(4.0 + 3.0 * i), 10, m16_iv);
+		}
+		shooters[3].slot = 4;
+		shooters[3].def = svd;
+		shooters[3].state.life = 1;
+		shooters[3].state.position = { 40.0f, 0.0f, 0.0f };
+		shooters[3].state.yaw = 49152; // facing -x
+		for (int k = 0; k < 3; ++k) {
+			shooters[3].burst(at(13.0 + 0.5 * k), 1, m16_iv);
+		}
+		// Own: an M16A3 burst at 1 s, the reload at 2.2 s, a second burst at 18 s.
+		std::vector<sw::SimTime> own;
+		for (int k = 0; k < 8; ++k) {
+			own.push_back(at(1.0) + sw::SimTime(k) * m16_iv);
+		}
+		for (int k = 0; k < 8; ++k) {
+			own.push_back(at(18.0) + sw::SimTime(k) * m16_iv);
+		}
+		const sw::SimTime own_reload = at(2.2);
+		bool reload_sent = false;
+		std::vector<std::string_view> impact_names;
+		for (const std::string &n : f->impact_names) {
+			if (f->assets.impacts->find(n)) {
+				impact_names.push_back(n);
+			}
+		}
+		REQUIRE(!impact_names.empty());
+		NetStream net;
+		std::vector<host::PresentEvent> events;
+		std::vector<ba::ImpactSoundRequest> impacts;
+		size_t own_next = 0;
+		uint32_t own_id = 1;
+		std::vector<uint64_t> impact_frames;
+		const uint64_t frames = 24 * 60;
+		for (uint64_t fi = 0; fi < frames; ++fi) {
+			const double t = t_start + double(fi);
+			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+			events.clear();
+			impacts.clear();
+			net.advance(t, shooters, events);
+			net.publish(t, now_ns, shooters);
+			const host::PresentClock c = host::present_clock(*net.frame, now_ns);
+			while (own_next < own.size() && own[own_next] <= c.predicted) {
+				host::PresentEvent e;
+				e.kind = host::PresentKind::OwnShot;
+				e.timeline = host::PresentTimeline::Predicted;
+				e.def = m16;
+				e.id = own_id++;
+				e.time = own[own_next++];
+				events.push_back(e);
+			}
+			if (!reload_sent && own_reload <= c.predicted) {
+				host::PresentEvent e;
+				e.kind = host::PresentKind::OwnTimed;
+				e.timeline = host::PresentTimeline::Predicted;
+				e.def = m16;
+				e.id = sw::weapon_events::kReloadStarted;
+				e.time = own_reload;
+				events.push_back(e);
+				reload_sent = true;
+			}
+			const bool trigger = own_next > 0 && own_next < own.size() && own[own_next] - own[own_next - 1] <= m16_iv;
+			net.frame->own_weapons_valid = true;
+			net.frame->own_weapons_curr.timers[0].flags = trigger ? sw::slot_flags::kTriggerDown : 0;
+			// Impacts at 16 s: five hits 3-8 m in front, 0.3 s apart.
+			if (fi >= 16 * 60 && fi < 16 * 60 + 90 && (fi - 16 * 60) % 18 == 0) {
+				ba::ImpactSoundRequest r;
+				r.patch = impact_names[(fi / 18) % impact_names.size()];
+				r.position = { -2.0f + 0.8f * float((fi - 16 * 60) / 18), 0.0f, 3.0f + float((fi - 16 * 60) / 18) };
+				r.seed = fi;
+				r.time = c.render;
+				r.timeline = host::PresentTimeline::Render;
+				impacts.push_back(r);
+				impact_frames.push_back(rig.clock->frame_of(c.render, host::PresentTimeline::Render));
+			}
+			rig.frame(*net.frame, now_ns, events, 0, impacts);
+			net.trim(shooters);
+		}
+		const ba::WeaponAudioStats &ws = rig.router->stats();
+		CHECK(ws.own_bursts == 2);
+		CHECK(ws.reloads == 1);
+		CHECK(ws.bursts == 2 + 3 + 3); // own 2, the M16A3s 3, the SVD's 3 single shots
+		CHECK(ws.mixer_refusals == 0);
+		CHECK(ws.state_rounds == 0);
+		CHECK(rig.impacts->stats().impacts == 5);
+		// The loudest 20 ms of the first second of each sound (full mix, unity master).
+		const auto loudest = [&](uint64_t p_first, double p_seconds) {
+			const uint64_t len = uint64_t(0.02 * ba::kMixRate);
+			double best = -300.0;
+			const uint64_t end = std::min<uint64_t>(p_first + uint64_t(p_seconds * ba::kMixRate), tap.mix.size() / 2);
+			for (uint64_t a = p_first; a + len <= end; a += len / 2) {
+				best = std::max(best, double(ba::rms_db(tap.mix, 2, a, len)));
+			}
+			return best;
+		};
+		double own_db = -300.0, at_db[4] = { -300.0, -300.0, -300.0, -300.0 };
+		bool own_seen = false;
+		for (const auto &[slot, first] : starts.first) {
+			const double db = loudest(first, 1.0);
+			if (slot == 0 && !own_seen) {
+				own_db = db;
+				own_seen = true;
+			} else if (slot >= 1 && slot <= 4 && at_db[slot - 1] == -300.0) {
+				at_db[slot - 1] = db;
+			}
+		}
+		REQUIRE(!impact_frames.empty());
+		const double impacts_db = loudest(impact_frames.front(), 1.5);
+		char line[400];
+		std::snprintf(line, sizeof(line),
+				"scene: own M16A3 (1p) %.1f, M16A3 at 15 m %.1f, 80 m %.1f, 250 m %.1f, SVD at 40 m %.1f, impacts %.1f dBFS (loudest 20 ms, unity master)",
+				own_db, at_db[0], at_db[1], at_db[2], at_db[3], impacts_db);
+		MESSAGE(line);
+		CHECK(own_db > at_db[1]);
+		CHECK(at_db[0] > at_db[1]);
+		CHECK(at_db[1] > at_db[2]);
+		for (double db : { own_db, at_db[0], at_db[1], at_db[2], at_db[3], impacts_db }) {
+			CHECK(db >= -110.0);
+		}
+		// The WAV for the user's ear (shots, gitignored).
+		const PathGuard guard = install_guard(*f);
+		const std::filesystem::path dir = au3_shots_dir("audio.game.scene");
+		REQUIRE(guard.allows_write(dir));
+		std::error_code ec;
+		std::filesystem::create_directories(dir, ec);
+		const Status wav = ba::write_wav(guard, dir / "scene.wav", tap.mix, 2, ba::kMixRate);
+		CHECK_MESSAGE(wav.ok(), (wav.ok() ? std::string() : wav.error().message));
+		write_text(guard, dir / "scene.txt",
+				std::string(line) + "\n0-1 s silence; 1 s own burst (8); 2.2 s own reload; 4 / 7 / 10 s M16A3 at 15 / 80 / 250 m (10 rounds);"
+				" 13 s SVD at 40 m (3 shots); 16 s five impacts 3-8 m; 18 s own burst (8)\n");
+		rig.router->set_observer(nullptr);
 		check_game_unchanged(*f);
 	}
 
