@@ -239,8 +239,11 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
 * **Integration (gx).** gx wires `Bf3GameFx` into the playable scene: `load` in `m2a_load_assets`, `build` and `step`
   in `m2a_frame`, `own_muzzle` first in `M2aFrame::muzzles`, `sound_cues` and `effect_sound_cues` to
   `Bf3GameAudio`. Until then the playable scene draws no VFX3 effects. The demo and its captures show the path.
-* **3p muzzles** come from tp's crowd (`Bf3GameCrowd::muzzles`). Until tp lands, the tests use a test-local
-  `m2a_fake::crowd_muzzle` (= `fallback_muzzle`), and the triggers use the aim fallback (counted `muzzle_fallbacks`).
+* **3p muzzles** come from tp's crowd (`Bf3GameCrowd::muzzles`). tp landed on m2a/w3, so the test-local
+  `m2a_fake::crowd_muzzle` is gone: `fx.triggers.unit` feeds a crowd-style sample (wire slot, 3p, off the eye
+  fallback) and checks the trigger takes it; a soldier without a crowd muzzle still gets the aim fallback (counted
+  `muzzle_fallbacks`). Until gx feeds `Bf3GameCrowd::muzzles()` to `Bf3GameFx` in the playable scene, every remote
+  shot there uses the fallback.
 
 ## 9. Gates, measured (2026-10-18; branch, unlocked, shared machine: indicative only)
 

@@ -58,14 +58,6 @@ namespace tw = bf3::test::weapons;
 namespace sw = bf3::sim::weapons;
 namespace hk = bf3::host;
 
-// Until tp's crowd lands (m2a.md §15 fx3 row): the 3p muzzle of a presented soldier, at eye height plus the weapon
-// offset along its view (fx::fallback_muzzle is the same rule; the fake stands for Bf3GameCrowd::muzzles()).
-namespace m2a_fake {
-MuzzleSample crowd_muzzle(const hk::PresentedSoldier &p_soldier) {
-	return fallback_muzzle(p_soldier);
-}
-} // namespace m2a_fake
-
 namespace {
 
 constexpr uint32_t kNormTime = 1;
@@ -398,7 +390,7 @@ TEST_CASE("frames, offsets, aim and fallback muzzles, seeds") {
 	soldier.eye_height = 1.6f;
 	soldier.yaw = 0.0f;
 	soldier.pitch = 0.0f;
-	const MuzzleSample fb = m2a_fake::crowd_muzzle(soldier);
+	const MuzzleSample fb = fallback_muzzle(soldier);
 	REQUIRE(fb.valid);
 	CHECK(fb.slot == 4);
 	CHECK(near3(fb.transform.up, { 0, 0, 1 })); // yaw 0 looks along +z (sim aim_direction)
@@ -633,12 +625,20 @@ TEST_CASE("shots: 1p and 3p muzzles, shells per firearm shot, fallbacks, knife, 
 	own.transform.trans.x += 0.1f;
 	t.on_muzzles(std::span<const MuzzleSample>(&own, 1));
 	CHECK(t.stats().attached_updates == 1);
-	// A remote shot: with a crowd muzzle (the m2a_fake stand-in for tp), then without one (counted fallback).
+	// A remote shot: with a crowd muzzle, then without one (counted fallback). The crowd muzzle is a sample as tp's
+	// Bf3GameCrowd::muzzles() publishes it (wire slot, 3p, the barrel frame at the weapon's muzzle: game_crowd.cpp),
+	// placed off the eye fallback so the check shows the triggers take the crowd's sample.
 	hk::PresentedSoldier other;
 	other.slot = 5;
 	other.position = { 3, 0, 3 };
 	other.yaw = 0.5f;
-	const MuzzleSample crowd = m2a_fake::crowd_muzzle(other);
+	MuzzleSample crowd;
+	crowd.slot = 5;
+	crowd.valid = true;
+	crowd.first_person = false;
+	crowd.transform = effect_frame({ 3.0f + 0.9f * std::sin(0.5f), 1.35f, 3.0f + 0.9f * std::cos(0.5f) },
+			{ std::sin(0.5f), 0, std::cos(0.5f) }, { 0, 1, 0 });
+	CHECK_FALSE(crowd.transform == fallback_muzzle(other).transform);
 	t.on_muzzles(std::span<const MuzzleSample>(&crowd, 1));
 	hk::PresentEvent remote = ev(hk::PresentKind::RemoteShot, 5, 9, 0, { 3, 1.6f, 3 }, { std::sin(0.5f), 0, std::cos(0.5f) });
 	t.on_events(std::span<const hk::PresentEvent>(&remote, 1), clock_at(0), kNear);
