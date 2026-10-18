@@ -2493,3 +2493,35 @@ Measured 2026-10-18, before the review fix:
   0.06 s.
 * **asan:** `m2a.contract3`, `m2a.contract`, `m1.contract`, `net.proto.unit` and `net.proto.fuzz` passed, with no
   AddressSanitizer report.
+
+## M2a fx3: VFX3 triggers
+
+<!-- # M2a fx3 -->
+VFX3 turns the game's PresentEvents into effects: shots, impacts, hits and detonations. Design:
+[docs/design/m2a.md](docs/design/m2a.md) §12.2. As-built notes, contract corrections, measurements and capture
+descriptions: [docs/design/m2a-fx3.md](docs/design/m2a-fx3.md).
+
+* **`bf3::fx::FxTriggers`** (`triggers.h`, Godot-free) is fed by `on_muzzles` and `on_events`.
+  - OwnShot: the def's FireEffects1p list at the own 1p muzzle, otherwise FireEffects3p in the world.
+  - RemoteShot: FireEffects3p at the crowd muzzle or the aim fallback.
+  - Tracers: on flagged shots, converging on the aim.
+  - Impacts: the level's cell for the surface's PhysicsMaterialIndex, a variant chosen by the event's seed, with
+    decal and sound cues.
+  - Soldier contacts and Hits: the zone's cell. Detonations: the detonation effect and its scorch.
+
+  Seeds come from the match seed, so two clients start the same variants (E15). It also covers culling and the
+  predicted and render timelines.
+* **`Bf3GameFx`** (`game_fx.h`) is what gx wires into the playable scene. It holds:
+  - the load on the loader thread: its own uncached library, the atlas and the preload of every fire and impact
+    blueprint;
+  - fx2's renderer and light pool, and the decal pool (Godot `Decal`s; the magenta-keyed BC1 decals are un-keyed);
+  - `own_muzzle` from G6, `sound_cues` / `effect_sound_cues` for au3, and a client-local `start_effect`.
+* **Demo:** `<godot> --path bf3-opensource res://scenes/fx3_demo.tscn -- --fx3-check --fx3-shot-dir=<dir>` drives
+  the game path on Metro. It captures the 1p muzzle flash, impacts on concrete, metal and dirt (a Sand sandbag),
+  decals, a soldier hit and tracers.
+
+| gate | command | threshold | measured (2026-10-18, branch, unlocked, shared machine: indicative only) |
+|---|---|---|---|
+| unit (incl. E15 late join) | `ctest --preset dev -R "^fx\.triggers\.unit$"` (also asan) | all cases | 14/14, 4,496 assertions, 0.34 s |
+| install cells (E8 (1), (3), (5), (7)) | `ctest --preset dev -R "^fx\.install\.cells$"` (also asan) | 0 preload failures; 1p flash in [710, 790] / 1000; G5's cells; water on Caspian | 72/72; 759 / 1000; met; `fx_impact_water_s`; 4.5 s |
+| demo | `ctest --preset dev-window -R "^godot\.fx3_demo$"` with `OPENBF3_GODOT_WINDOWED=1` (a window row) | `FX3 DEMO: PASS`, 7 captures | PASS, 7/7; FX main thread p50 0.16 / p99 0.47 ms; 30.1 s |
