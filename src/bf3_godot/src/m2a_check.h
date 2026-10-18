@@ -8,18 +8,27 @@
 //   --m2a-check=<case>[,<case>...]   cases in order; "all" = range, reload, kits, hud, ads, audio, fx
 //   --m2a-firefight                  the firefight case alone (FirefightConfig mode Pairs with the observer; E13 / E14
 //                                    windowed; godot.m2a_firefight is a timing row: the integrator's)
-// Cases:
-//   range      E1 / E3: M16A3 fire held from a full magazine through Bf3InputMapper, server trace vs predicted shots,
-//              one 1p muzzle start per predicted shot; semi taps one shot per tap
-//   reload     E4: reload timing, commit at ReloadThreshold, cancel by switch
-//   kits       E5: every kit item deploys, fires, reloads; K / T send KitSelect (ClientSession::send_kit_select)
-//   hud        E10: the HUD rows (hud's check through the session)
-//   ads        E11: ADS camera, FOVs, look scale
-//   audio      E7 (au3): the listener holds, Bf3GameAudio's recording judged by game_audio_check; item 4 auditions
-//   fx         E8 (fx3): muzzle presence, oilfire start_effect, cells, atlas, cues
-//   play       the scripted 5-minute play run: the input mapper drives move / look / fire / reload / switch / die /
-//              respawn against the bots; passes with 0 errors in the log, every subsystem built, events flowing
-//   firefight  E13 / E14 with bt's bots (--m2a-firefight)
+// Cases (gx as built: docs/design/m2a-gx.md §4; the E numbers are m2a.md §1's):
+//   range      E1 / E3: the M16A3 held from a full magazine through the input mapper (fire level and press counter),
+//              the first predictions against the server's shots field for field, the 75 ms gaps, the first shot at
+//              its tick's start, one OwnShot event and one viewmodel Shot cue per shot; the M9 one shot per tap;
+//              E3 through the game at 5 m (and 60 m on a range lane): hits to kill, the HUD's hit indicator per
+//              server hit, the kill counter from the Death event
+//   reload     E5: tactical and empty reload durations and commit points against the def, server and prediction
+//              equal, the viewmodel's reload clip and the HUD's is_reloading over the reload, a switch cancels
+//   kits       E11: the 8 loadouts through KitSelect (send_kit_select) + SpawnAt: the presented kit, team and slot
+//              defs, every slot deploys (1, 2, G, F), the viewmodel item maps from PresentedWeapon::def through the
+//              kit unlocks, the primary fires and reloads; the knife hits a target; the M67's fuse
+//   hud        E10: per frame, the HUD model against the presented weapon (magazine, reserve, crosshair, reload);
+//              the localised name and icon of every kit item (12 / 12)
+//   ads        E19: ADS world FOV 55 -> 40 and back within the aiming FOV times, the look scale, ADS refused while
+//              sprinting
+//   audio      E7 (au3): skipped with "waiting for au3" until Bf3GameAudio lands
+//   fx         E8 (fx3): skipped with "waiting for fx3" until Bf3GameFx lands
+//   play       the scripted 5-minute play run: the input mapper drives move / look / fire / reload / switch / die
+//              (fall damage) / respawn among the bots; every subsystem built, events flowing, deaths and respawns
+//              seen; the ctest script fails it on any ERROR line in the log
+//   firefight  E13 / E14 with bt's bots (--m2a-firefight): skipped with "waiting for bt" until bt lands
 
 #include "bf3/core/result.h"
 
@@ -35,6 +44,7 @@
 namespace bf3::godot_side {
 
 class Bf3LevelSession;
+struct M2aGame; // level_session_m2a.h (the Godot side; this header stays Godot-free)
 
 enum class M2aCase : uint8_t { Range = 0, Reload = 1, Kits = 2, Hud = 3, Ads = 4, Audio = 5, Fx = 6, Play = 7, Firefight = 8 };
 inline constexpr uint32_t kM2aCaseCount = 9;
@@ -130,7 +140,7 @@ struct M2aCheckOptions {
 // Runs the cases in order on the session. Main thread.
 class M2aCheck {
 public:
-	M2aCheck(Bf3LevelSession &r_session, std::vector<M2aCase> p_cases, const M2aCheckOptions &p_options);
+	M2aCheck(Bf3LevelSession &r_session, M2aGame &r_game, std::vector<M2aCase> p_cases, const M2aCheckOptions &p_options);
 	~M2aCheck();
 	M2aCheck(const M2aCheck &) = delete;
 	M2aCheck &operator=(const M2aCheck &) = delete;
