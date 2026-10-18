@@ -2449,3 +2449,36 @@ Q7, gate E10. As built: [docs/design/m2a-hud.md](docs/design/m2a-hud.md).
   `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\hud\`, gitignored).
 * **Tests**: `ctest --preset dev -R "ui.hud.feed"` and the window row `godot.m2a_hud` (`ctest --preset dev-window -R godot.m2a_hud` with `OPENBF3_GODOT_WINDOWED=1`). Measured results and one
   command per gate: m2a-hud.md §6.
+
+## M2a wave 3 contract (W3.0)
+
+<!-- # M2a w3 -->
+These are the integrator's contract commits for M2a wave 3, on branch `m2a/w3` from `main` 5e296e7 (wave 2 is on
+main: sv, cl, vm, fx2 and hud are its ancestors). Design: [docs/design/m2a.md](docs/design/m2a.md) §15 "Wave 3".
+As-built notes, the decisions on G1-G7 and the review items: [docs/design/m2a-w3.md](docs/design/m2a-w3.md).
+
+* **Interfaces.** The commits declare the wave-3 headers. The Godot-free ones are `bf3/audio/weapon_audio.h`,
+  `impact_audio.h`, `game_audio_check.h`, `bf3/fx/triggers.h`, `bf3/host/firefight_brain.h` and `client_wiring.h`,
+  plus the crowd additions in `crowd_eval.h`. The Godot side is `game_audio.h`, `game_fx.h`, `game_crowd.h`,
+  `m2a_check.h` and `m2a_game.h`. The tracks (bt, tp, au3, fx3, gx) write the bodies.
+* **The seven gaps wave 2 left.**
+  - G1: the others' team as 2 bits on the wire, so 52 others fit a snapshot without the own state.
+  - G2: `present_other_weapon`.
+  - G3: `GameServerConfig::firefight` and its init hook.
+  - G4: `ClientSession::send_kit_select`.
+  - G5: `make_client_gunplay_inputs`.
+  - G6: `viewmodel_muzzle_transform`. weaponske01 has no muzzle joint, so it uses Wep_Root times the FireEffects1p
+    offset.
+  - G7: gx's hooks in the level session, which do nothing until gx fills them.
+* **Changed pins.** `net.proto.unit`'s two capacity pins went from 53 to 52 (G1).
+* **Test.** `ctest --preset dev -R "^m2a\.contract3$"` compiles the Godot-free headers together. It pins the POD
+  shapes, enum values, defaults, the crowd lane rule and the seed hashes, and runs G1-G5 and the check's case parser.
+  The rows that need bt, tp, au3 or fx3 print `PENDING (<key>)` until each track sets its switch.
+
+Measured 2026-10-18:
+
+* **`tools\build.cmd dev --strict`** (the branch pass, no timing, realtime or window rows): 128 rows, 126 passed and
+  2 skipped (`core.cache_data`, `core.res`, as before), 176 s wall time, no budget violation. `m2a.contract3` took
+  0.06 s.
+* **asan:** `m2a.contract3`, `m2a.contract`, `m1.contract`, `net.proto.unit` and `net.proto.fuzz` passed, with no
+  AddressSanitizer report.
