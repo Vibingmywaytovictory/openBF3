@@ -1205,3 +1205,7 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_w3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_w3_cl_dir}")
 endif()
+
+# M2a tp (docs/design/m2a-tp.md): case "capsules" of anim.s3 (E18 (b)) builds the capsule pose table from the install
+# through bf3_sim (weapon_install.h, posed_target.h).
+target_link_libraries(test_anim_s3 PRIVATE bf3_sim)
