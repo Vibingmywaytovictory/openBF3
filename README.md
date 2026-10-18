@@ -2493,3 +2493,45 @@ Measured 2026-10-18, before the review fix:
   0.06 s.
 * **asan:** `m2a.contract3`, `m2a.contract`, `m1.contract`, `net.proto.unit` and `net.proto.fuzz` passed, with no
   AddressSanitizer report.
+
+## M2a bt: firefight bots
+
+<!-- # M2a bt -->
+Design: [docs/design/m2a.md](docs/design/m2a.md) §10.2, E13, E15. As-built notes, constants, decisions and the
+measured gates: [docs/design/m2a-bt.md](docs/design/m2a-bt.md).
+
+The firefight bots are `bf3_host` `FirefightBrain`s, added by `GameServer::init` through `GameServerConfig::firefight`
+(W3.0's G3 hook). They read `ServerView` and fight:
+* They walk the nav mesh (S1's `WalkerBrain` through the `BotNav` hook in `bot_fill.h`) toward the nearest enemy.
+* They pick targets by eye-to-chest line of sight and turn at a bounded rate, with a seeded aim error. The weapon's
+  own spread and recoil come from the sim.
+* They fire bursts (or 2 Hz taps), reload, switch to the sidearm, strafe when close, and die and respawn through the
+  `RespawnPolicy`.
+* In **Pairs** mode (E13's budget scenario), 32 pairs stand on lanes in front of an observer pose and are placed with
+  `place_soldier` after each respawn.
+* In **Free** mode they spawn at the TDM spawns and hunt.
+
+A human (a remote slot) is an enemy like any bot. Soldiers in slots 64 and above are never hit (lc's
+`RewindProvider` covers slots 0-63), so runs use at most 64 slots for fighters.
+
+Commands (read-only on the install; the output carries BF3-derived numbers, so keep it out of the repo; each prints
+`install.unchanged`):
+
+```bat
+ctest --preset dev -R "^host\.gunplay\.(firefight|replay)$"                                :: functional rows (branch pass)
+ctest --preset dev-timing -R "^host\.gunplay\.perf$"                                       :: E13, timing row (merge pass, quiet lock)
+b\dev\tools\bf3dump\bf3dump.exe firefight MP_Subway TeamDeathMatch0 --mode=free --count=64 --seconds=60 --bots
+b\dev\tools\bf3dump\bf3dump.exe firefight MP_Subway TeamDeathMatch0 --perf                 :: E13's row, headless
+```
+
+Gates, measured 2026-10-18 on the dev preset (branch, unlocked, shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| host.gunplay.firefight | 64 Free bots, 60 s: both teams kill, every bot fires, 0 stuck (20 s windows), ≥ 10 m per bot, 0 inside geometry / below ground / NaN, 0 preconditions, 0 team kills; plus 32 bots + 1 peer: the peer is hit | kills 117 / 100; 64 / 64 fired; 73 windows, 0 stuck; 7,249 checks, 0 / 0 / 0; peer hit 6 times, killed twice |
+| host.gunplay.replay (E15) | equal per-tick world hashes for one seed over 3,600 ticks; a different seed differs | 0 / 3,600 differ; 3,600 / 3,600 differ for seed + 1 |
+| host.gunplay.perf (E13) | server tick p99 ≤ 8.0 ms, 64 Pairs bots + 1 observer, 10 s + 120 s | indicative only (branch, unlocked): p99 1.909 ms; weapons + projectiles + rewind 7.7 % of the mean tick |
+
+Branch pass: `toolsuild.cmd dev --strict` ran 130 rows (128 passed, 2 skipped as before) in 408 s on a machine
+loaded by other worktrees. The one STRICT violation is `sim.terrain.unit`, which took 40.1 s in the phase without a
+COST and 0.85 s alone; bt did not touch it.

@@ -1225,6 +1225,11 @@ add_test(NAME host.gunplay.perf COMMAND test_host_gunplay_perf --test-suite=host
 set_tests_properties(host.gunplay.firefight host.gunplay.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 set_tests_properties(host.gunplay.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
 openbf3_label(timing host.gunplay.perf)
+# Measured alone (dev, 2026-10-18, warm machine): firefight 13.8 s wall / 30.9 s CPU (two runs and the Metro load with
+# its cold per-PID cache), replay 11.4 s / 38.0 s (three runs on three threads), perf 12.4 s.
+openbf3_cost(host.gunplay.firefight 2 14)
+openbf3_cost(host.gunplay.replay 3 12)
+openbf3_cost(host.gunplay.perf 1 13)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_bt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES

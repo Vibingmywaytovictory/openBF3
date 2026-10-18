@@ -16,13 +16,17 @@
 //            weapon's own spread and recoil are the sim's (the command carries only the view);
 //   fire     automatic weapons in bursts (burst_min_rounds .. burst_max_rounds, burst_pause_* between), switched
 //            to their automatic mode first through the fire-mode counter; others tapped at semi_rate_hz; fire only
-//            when the view is within kFireConeDeg of the aim; reload at an empty magazine, or without a target
-//            below reload_fraction; the sidearm when the primary has no round left at all;
+//            when the view is within kFireConeDeg of the aim, the target was seen at its last check and its life is
+//            at least kFreshTargetTicks old (FirefightShared::scan_lives); reload at an empty magazine, or without a
+//            target below reload_fraction; the sidearm when the primary has no round left at all;
 //   move     Free with walk: S1's WalkerBrain (bot_fill.h BotNav) with the nearest enemy as its goal set (hunting),
 //            its move re-expressed in the brain's own view yaw, no sprint while engaged; engaged within
 //            kEngageStopMetres, and Pairs while engaged: strafe legs of kStrafeHalfMetres either side of where
 //            the leg started, reversed at a missing floor;
-//   blind    Free without a target for no_target_s: one burst along the longest clear of 8 headings.
+//   blind    without a target for no_target_s: one burst along the longest clear of 8 headings (Free) or down the
+//            lane toward the partner's end (Pairs).
+// Pairs lanes: firefight_layout; with fewer lanes than pairs a pair reuses a lane moved along its normal where both
+// ends re-foot and still see each other (offset_lane), else the lane as it is.
 // Everything random comes from the brain's seed (firefight_seed(match_seed, slot)) and the life, and the server runs
 // the brains in slot order, so a firefight reproduces bit for bit (E15).
 
