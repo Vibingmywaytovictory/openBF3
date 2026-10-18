@@ -1237,3 +1237,29 @@ if(OPENBF3_ASAN)
     set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_bt_cl_dir}")
 endif()
+
+# M2a tp (docs/design/m2a-tp.md): case "capsules" of anim.s3 (E18 (b)) builds the capsule pose table from the install
+# through bf3_sim (weapon_install.h, posed_target.h).
+target_link_libraries(test_anim_s3 PRIVATE bf3_sim)
+# render.crowd_weapons (install, exits 77 without one): S3's soldier assets, the Metro TDM kits and every kit item's 3p
+# weapon through load_crowd_weapons (game_crowd_items.h builds the lists), the binds, reload, muzzle, strip and views.
+openbf3_test(test_render_crowd_weapons test_main.cpp render_crowd_weapons_tests.cpp test_support.h)
+target_link_libraries(test_render_crowd_weapons PRIVATE bf3_render bf3_host)
+target_include_directories(test_render_crowd_weapons PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+add_test(NAME render.crowd_weapons COMMAND test_render_crowd_weapons --test-suite=render-crowd-weapons)
+set_tests_properties(render.crowd_weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_tp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(render.crowd_weapons PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tp_cl_dir}")
+endif()
+# godot.m2a_tp_crowd (headless, functional; tests/godot_m2a_tp_crowd.cmake): Bf3GameCrowd in the level through
+# Bf3TpCrowdCheck (res://scenes/m2a_tp_crowd.tscn -- --tp-check).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m2a_tp_crowd godot_m2a_tp_crowd.cmake HEADLESS TIMEOUT 480)
+endif()
+# COST (docs/testing.md §4): both rows load the soldier assets, the level's gunplay tables and every kit item's 3p
+# weapon from the install (no lighter subset proves the per-item meshes); alone 2.9 s (render.crowd_weapons) and 9.4 s
+# (godot.m2a_tp_crowd, the crowd load 3.4 s of it), but 34 s and 39 s inside the 16-job branch pass (2026-10-18), so
+# they start early.
+openbf3_cost(render.crowd_weapons 1 5)
+openbf3_cost(godot.m2a_tp_crowd 1 10)

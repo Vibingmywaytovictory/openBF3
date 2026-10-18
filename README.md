@@ -2535,3 +2535,39 @@ Gates, measured 2026-10-18 on the dev preset (branch, unlocked, shared machine):
 Branch pass: `toolsuild.cmd dev --strict` ran 130 rows (128 passed, 2 skipped as before) in 408 s on a machine
 loaded by other worktrees. The one STRICT violation is `sim.terrain.unit`, which took 40.1 s in the phase without a
 COST and 0.85 s alone; bt did not touch it.
+
+## M2a tp: 3p soldiers
+
+<!-- # M2a tp -->
+Track tp of M2a wave 3 is on branch `m2a/tp`, from the W3.0 contract. Design: [docs/design/m2a.md](docs/design/m2a.md)
+§9, R5, E18 (b) and §16 Q13. As-built notes, measured gates and one command per gate:
+[docs/design/m2a-tp.md](docs/design/m2a-tp.md).
+
+* **Evaluator** (`bf3/anim/crowd_eval.h`, `crowd_clips.h`):
+  - **R5:** per-soldier weapon binds, reload and `weapon_local` from `CrowdTeam::weapons`. Index 0 is S3's data. A
+    team without items, or with S3's one weapon, is S3's evaluator bit for bit.
+  - **Stance set:** lc's `ServerPoseClipNames` idles, aims and transitions. The crouch moves are `Rifle_Sneak*` and
+    the prone moves `Rifle_Crawl*`.
+  - **Fire:** `Rifle_CrouchFire` when crouched, a 3° / 50 ms kick when standing or prone.
+  - **Death** (§16 Q13): blend to prone over 0.5 s, hidden after 3 s.
+  - **Muzzle:** a per-soldier 3p muzzle (`muzzle_model`).
+  - **Binds init fix:** each soldier's buffers are sized from the largest team.
+* **3p weapons** (`bf3/render/crowd_weapons.h`, `crowd_weapons.cpp`): `load_crowd_weapons` loads one skinned 3p mesh
+  per kit item, with binds, reload clip and rate, `weapon_local` and the FireEffects3p muzzle. Metro TDM gives 7 + 7
+  items.
+* **Godot** (`Bf3GameCrowd`, `game_crowd.cpp`):
+  - `present_others` / `present_other_weapon` become crowd inputs. Wire team 1/2 maps to crowd team 0/1, and the def
+    maps to the item.
+  - RemoteShot, Death and Spawn events apply on their timeline.
+  - Each soldier gets its own weapon instance, and the muzzles are published for fx3.
+  - Headless, it poses without drawing.
+  - gx still has to wire it into the level session's hooks.
+* **Check:** `res://scenes/m2a_tp_crowd.tscn -- --tp-check [--tp-shots=<dir>]` drives 12 scripted soldiers on S3's
+  Metro stage. The shots go to `b\shots\tp\` (gitignored).
+* **Tests:**
+  - `ctest --preset dev -R "^anim\.s3\.unit$"`: R5 bit-equal with one weapon, two weapons per team, the stance set.
+  - `ctest --preset dev -R "^anim\.s3$"`: case "capsules" = E18 (b). Crouch head 0.077 cm, prone head 0.179 cm vs the
+    3 cm gate.
+  - `ctest --preset dev -R "^render\.crowd_weapons$"`: install.
+  - `ctest --preset dev -R "^godot\.m2a_tp_crowd$"`: headless, `M2A TP CROWD CHECK: PASS`.
+  - `m2a.contract3` has `kTpLanded` set.

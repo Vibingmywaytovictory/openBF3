@@ -72,3 +72,8 @@ target_sources(bf3_render PRIVATE
 target_sources(bf3_render PRIVATE
     include/bf3/render/crowd_weapons.h
 )
+
+# M2a tp (docs/design/m2a-tp.md): load_crowd_weapons, the crowd's per-item 3p weapons (crowd_weapons.h).
+target_sources(bf3_render PRIVATE
+    src/crowd_weapons.cpp
+)
