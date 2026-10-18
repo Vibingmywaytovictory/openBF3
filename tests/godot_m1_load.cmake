@@ -17,6 +17,12 @@
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
+# M2a gx [E16] (named replacement, docs/design/m2a-gx.md §5): -DSCENE picks the scene (default M1's), -DUSER_ARGS adds
+# user args; godot.m2a_load runs this script on res://scenes/m2a_metro.tscn (m2a.md E16).
+if(NOT DEFINED SCENE OR SCENE STREQUAL "")
+    set(SCENE "res://scenes/m1_metro.tscn")
+endif()
+separate_arguments(user_args NATIVE_COMMAND "${USER_ARGS}")
 # The probe: a windowed start that quits at once.
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
@@ -43,8 +49,8 @@ message("shots directory: ${shots}")
 set(failed FALSE)
 foreach(pass cold warm)
     execute_process(
-        COMMAND "${godot}" --path "${PROJECT_DIR}" res://scenes/m1_metro.tscn -- "--m1-load-check=${pass}" "--bf3-cache=${root}"
-            --shot-spawns=0,13,26,39,52,65,78,91 "--shot-dir=${shots}/${pass}"
+        COMMAND "${godot}" --path "${PROJECT_DIR}" "${SCENE}" -- "--m1-load-check=${pass}" "--bf3-cache=${root}"
+            --shot-spawns=0,13,26,39,52,65,78,91 "--shot-dir=${shots}/${pass}" ${user_args}
         TIMEOUT 140
         RESULT_VARIABLE rc
         OUTPUT_VARIABLE out
