@@ -64,16 +64,6 @@ ba::Vec3 vec(const fx::Vec3 &p_v) {
 	return { p_v.x, p_v.y, p_v.z };
 }
 
-core::Result<std::shared_ptr<const ca::SoundProgram>> compile_lenient(const core::EbxResolver &p_db, std::string_view p_patch) {
-	core::Result<std::shared_ptr<const ca::SoundProgram>> strict = ba::compile_patch(p_db, p_patch);
-	if (strict) {
-		return strict;
-	}
-	ca::CompileOptions lenient;
-	lenient.allow_unimplemented = true;
-	return ba::compile_patch(p_db, p_patch, lenient);
-}
-
 } // namespace
 
 struct Bf3GameAudio::Impl {
@@ -123,79 +113,19 @@ core::Status Bf3GameAudio::load(const M2aLoadInputs &p_in, std::span<const std::
 	if (!p_in.shared || !p_in.shared->gunplay) {
 		return core::make_error("Bf3GameAudio::load: the shared level has no gunplay tables (SharedLoadOptions::gunplay)");
 	}
-	const core::EbxDb &db = p_in.db->level->db();
-	const auto stopped = [&]() { return p_in.stop != nullptr && p_in.stop->load(std::memory_order_relaxed); };
 	m.db = p_in.db;
-	// E7 item 1: the kit items' patches, strict, and their binding.
-	m.kits = ba::kit_audio_sources(*p_in.shared->gunplay);
-	core::Result<ba::WeaponAudioTable> table = ba::load_weapon_audio(db, m.kits.sources, ba::kMixRate);
-	if (!table) {
-		return table.error();
+	core::Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(*p_in.db->install, *p_in.db->level, *p_in.shared->gunplay, p_impact_sounds, p_in.threads, p_in.stop);
+	if (!a) {
+		return a.error();
 	}
-	auto shared_table = std::make_shared<ba::WeaponAudioTable>(std::move(*table));
-	m.report = ba::kit_audio_report(m.kits, *shared_table);
-	m.programs += shared_table->compiled;
-	m.program_failures += shared_table->failed;
-	m.table = shared_table;
-	if (stopped()) {
-		return core::make_error("Bf3GameAudio::load: stopped");
-	}
-	// Impact and effect sounds (fx3's names).
-	core::Result<std::shared_ptr<const ba::ImpactSoundCache>> cache = ba::ImpactSoundCache::build(db, p_impact_sounds);
-	if (!cache) {
-		return cache.error();
-	}
-	m.impacts_cache = *cache;
-	m.programs += uint32_t((*cache)->compiled());
-	m.program_failures += uint32_t((*cache)->failed());
-	for (const std::string &e : (*cache)->errors()) {
-		m.report.push_back("impact " + e);
-	}
-	// E7 item 4: the audition patches, when the level's mount has them (else a reported skip).
-	for (const ba::GameAuditionItem &item : ba::game_audition_items()) {
-		core::Result<std::shared_ptr<const ca::SoundProgram>> p = compile_lenient(db, item.patch);
-		if (p) {
-			m.auditions.emplace(item.patch, *p);
-			m.report.push_back("audition " + item.name + " [" + item.patch + "]: compiled");
-		} else {
-			m.report.push_back("audition " + item.name + " [" + item.patch + "]: skipped (" + p.error().message + ")");
-		}
-	}
-	if (stopped()) {
-		return core::make_error("Bf3GameAudio::load: stopped");
-	}
-	// One bank over every program's waves.
-	std::vector<std::shared_ptr<const ca::SoundProgram>> all;
-	for (const ba::WeaponAudioDef &d : m.table->defs) {
-		if (d.program) {
-			all.push_back(d.program);
-		}
-		if (d.explosion) {
-			all.push_back(d.explosion);
-		}
-	}
-	for (const std::shared_ptr<const ca::SoundProgram> &p : m.impacts_cache->programs()) {
-		all.push_back(p);
-	}
-	for (const auto &[name, p] : m.auditions) {
-		all.push_back(p);
-	}
-	size_t missing = 0;
-	core::Result<std::vector<ca::SoundWaveInfo>> waves = ba::read_program_waves(db, all, &missing);
-	if (!waves) {
-		return waves.error();
-	}
-	ca::WaveBankOptions bo;
-	bo.threads = p_in.threads;
-	core::Result<std::shared_ptr<const ca::WaveBank>> bank = ca::WaveBank::load(*p_in.db->install, p_in.db->level->mount(), std::move(*waves), bo);
-	if (!bank) {
-		return bank.error();
-	}
-	m.bank = *bank;
-	char line[160];
-	std::snprintf(line, sizeof(line), "bank: %zu programs, %u resident waves, %zu waves not in the level", all.size(), unsigned(m.bank->stats().resident_waves),
-			missing);
-	m.report.push_back(line);
+	m.kits = std::move(a->kits);
+	m.table = std::move(a->table);
+	m.impacts_cache = std::move(a->impacts);
+	m.auditions = std::move(a->auditions);
+	m.bank = std::move(a->bank);
+	m.report = std::move(a->report);
+	m.programs = a->programs;
+	m.program_failures = a->program_failures;
 	m.loaded.store(true, std::memory_order_release);
 	return core::Status::success();
 }
@@ -328,7 +258,7 @@ bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position
 		if (m.db == nullptr || !m.db->level) {
 			return fail("Bf3GameAudio::audition: no level database");
 		}
-		core::Result<std::shared_ptr<const ca::SoundProgram>> p = compile_lenient(m.db->level->db(), p_patch);
+		core::Result<std::shared_ptr<const ca::SoundProgram>> p = ba::compile_patch_lenient(m.db->level->db(), p_patch);
 		if (!p) {
 			++m.program_failures;
 			return fail(std::string(p_patch) + ": " + p.error().message);
@@ -336,24 +266,8 @@ bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position
 		program = *p;
 		m.auditions.emplace(std::string(p_patch), program); // its waves are not in the bank unless loaded: starved, counted
 	}
-	ba::EmitterState em;
-	em.position = vec(p_position);
-	const ba::Vec3 d{ m.listener.position.x - em.position.x, m.listener.position.y - em.position.y, m.listener.position.z - em.position.z };
-	const float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
-	if (len > 0.0f) {
-		em.forward = { d.x / len, d.y / len, d.z / len }; // facing the listener (on the cone axis)
-	}
-	ba::OneShotOptions o;
-	o.set_first_person = true;
-	o.first_person = false;
 	const uint64_t seed = ba::sound_seed(0xA0D1u, uint32_t(m.auditions_started));
-	const uint64_t frame = m.clock->earliest_frame();
-	ba::GameAudioCheck *check = m.check;
-	if (check != nullptr && check->current_step() >= 0) {
-		const uint32_t step = uint32_t(check->current_step());
-		o.before_start = [check, step, seed, frame](ba::PatchInstance &r_instance, ba::InstanceHandle) { check->on_audition(step, seed, frame, r_instance); };
-	}
-	if (!m.pool->start(*m.mixer, program, m.bank, m.tuning, seed, em, m.listener, frame, o)) {
+	if (!ba::start_audition(*m.pool, *m.mixer, program, m.bank, m.tuning, m.listener, vec(p_position), seed, m.clock->earliest_frame(), m.check)) {
 		return fail("Bf3GameAudio::audition: the one-shot pool refused");
 	}
 	++m.auditions_started;
