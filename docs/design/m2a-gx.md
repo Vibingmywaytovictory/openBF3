@@ -368,7 +368,8 @@ timings are indicative only.
 ### 10.1 What changed
 
 * **E19 (ads)**:
-  * The FOV time is gated at ± 1 display frame (the run's worst frame dt). It is measured from the first frame that
+  * The FOV time is gated at ± 1 display frame (the median frame dt of the transition, so one hitch does not widen
+    the gate). It is measured from the first frame that
     presents the new ADS level.
   * The press-to-presented latency is its own row, gated ≤ 0.1 s. A frame-exact gate cannot include one predicted
     tick plus the presentation delay. m2a.md E19 now says this (rule-fix commit b4a3899).
@@ -402,6 +403,11 @@ timings are indicative only.
   * The M16A3 with the trigger held through the reload fires its first shot exactly at `kReloadFinished`, and its
     Shot cue comes within 1 frame.
   * The clip lengths are printed per kit weapon.
+  * The sampling step runs until the presented time is past the predicted `kReloadFinished` plus a tick (and, with
+    the trigger held, past its first shot with that shot's Shot cue drawn). It used to end on the presented Ready,
+    which can show up to one tick before its time: in 3 of 4 verifier runs no sample reached `kReloadFinished` and
+    the empty M16A3 `ready_frames` / `fire_cue_frames` rows failed as not found (verifier finding, fix 10899b3).
+    After the fix: 3 of 3 direct `range,reload` runs pass (433 frames, ready and cue 0 or −1 frames, 0.0005 s early).
 * **E8 (5) (fx)**: Metro's collision tags are searched for Water (18). The search found 0 Water tags among 1,818
   tags. Concrete and brick resolve through the same table, so the row passes on the search, not on a constant. If
   Metro had reachable water, the case would shoot it and gate the effect with no decal.
