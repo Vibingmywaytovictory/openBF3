@@ -1322,7 +1322,40 @@ void M2aCheck::State::reload_cycle(uint8_t p_slot, const std::string &p_weapon) 
 				st.mapper().m2a_script_hold(Action::Fire, false);
 				st.counter = 2;
 			}
-			return p_t > 0.5 && st.reload_frames > 0 && st.ready() && (!automatic || st.counter == 2);
+			if (!(p_t > 0.5 && st.reload_frames > 0 && st.ready() && (!automatic || st.counter == 2))) {
+				return false;
+			}
+			// The presented phase and cues come from the newer predicted tick (up to 1 tick before their time is
+			// presented): sample on until the presented time is past the predicted kReloadFinished (and, held trigger,
+			// past its first shot with that shot's Shot cue drawn), so every per-frame row of " rows" has both its
+			// event frame and its shown frame. A missing event runs into the step's timeout and fails its row there.
+			const uint8_t slot_index = st.g.weapon.active_slot;
+			const double tick_s = 1.0 / double(sim::kSimHz);
+			const double presented = st.samples.empty() ? -1.0 : st.samples.back().sim_s;
+			sw::SimTime finished = -1;
+			for (size_t i = st.mark_ptimed; i < st.g.predicted_timed.size(); ++i) {
+				const host::PredictedTimed &e = st.g.predicted_timed[i];
+				if (e.event.event == sw::weapon_events::kReloadFinished && e.event.weapon_slot == slot_index) {
+					finished = e.event.time;
+					break;
+				}
+			}
+			if (finished < 0 || presented < sw::units_to_seconds(finished) + tick_s) {
+				return false;
+			}
+			if (automatic) {
+				sw::SimTime first = -1;
+				for (size_t i = st.mark_predicted; i < st.g.predicted_shots.size(); ++i) {
+					if (st.g.predicted_shots[i].shot.weapon_slot == slot_index) {
+						first = st.g.predicted_shots[i].shot.time;
+						break;
+					}
+				}
+				if (first < 0 || presented < sw::units_to_seconds(first) + tick_s || st.samples.back().shot_cues <= st.samples.front().shot_cues) {
+					return false;
+				}
+			}
+			return true;
 		});
 		wait(0.5);
 		add(tag + " rows", 1.0, [empty, tag](State &st, double, bool) {
@@ -1927,10 +1960,13 @@ void M2aCheck::State::build_ads() {
 			const double end = st.samples.empty() ? 0.0 : double(st.samples.back().fov);
 			st.row(std::string("e19.fov_") + (in ? "aimed" : "hip"), end, fmt("== the %s FOV %.1f +- 0.05", in ? "zoom" : "hip", target), std::fabs(end - target) <= 0.05);
 			const bool found = i0 < st.samples.size() && ir < st.samples.size();
-			double frame = 0;
+			// One display frame: the median frame delta of i0..ir (a nominal frame; one hitch does not widen the gate).
+			std::vector<double> dts;
 			for (size_t i = i0; found && i <= ir; ++i) {
-				frame = std::max(frame, st.samples[i].dt);
+				dts.push_back(st.samples[i].dt);
 			}
+			std::sort(dts.begin(), dts.end());
+			const double frame = dts.empty() ? 0.0 : dts[dts.size() / 2];
 			// From the last frame of the old level to the first at the target: the frames' deltas i0..ir (the camera steps each
 			// frame by its own delta; a sample's t excludes its own).
 			const double elapsed = found ? st.samples[ir].t - st.samples[i0].t + st.samples[ir].dt : -1.0;
