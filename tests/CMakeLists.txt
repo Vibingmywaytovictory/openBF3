@@ -1215,6 +1215,8 @@ target_link_libraries(test_fx_triggers PRIVATE bf3_fx bf3_host bf3_render) # bf3
 add_test(NAME fx.triggers.unit COMMAND test_fx_triggers --test-suite=fx-triggers-unit)
 add_test(NAME fx.install.cells COMMAND test_fx_triggers --test-suite=fx-install-cells)
 set_tests_properties(fx.install.cells PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+# COST: 3-5.6 s alone (Metro's gunplay level, fx sources, collision and Caspian), so it starts early in a parallel pass.
+openbf3_cost(fx.install.cells 1 5)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_fx3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(fx.triggers.unit fx.install.cells PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_fx3_cl_dir}")

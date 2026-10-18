@@ -1649,11 +1649,11 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 				CHECK_MESSAGE(rule->transparent >= kMinDecalTransparentShare, texture);
 				CHECK_MESSAGE(rule->transparent < 0.999f, texture); // and something to draw
 			}
-			std::string names;
+			std::string named_by;
 			for (const std::string &d : decals) {
-				names += (names.empty() ? "" : ", ") + d;
+				named_by += (named_by.empty() ? "" : ", ") + d;
 			}
-			MESSAGE("decal texture " << leaf(texture) << " (" << names << "): " << std::string(render::gpu_format_name(prepared->format)) << " " << prepared->width
+			MESSAGE("decal texture " << leaf(texture) << " (" << named_by << "): " << std::string(render::gpu_format_name(prepared->format)) << " " << prepared->width
 									 << "x" << prepared->height << ", magenta " << rule->magenta << ", see-through " << rule->transparent << " -> "
 									 << std::string(decal_texture_kind_name(rule->kind)));
 		}
