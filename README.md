@@ -2493,3 +2493,42 @@ Measured 2026-10-18, before the review fix:
   0.06 s.
 * **asan:** `m2a.contract3`, `m2a.contract`, `m1.contract`, `net.proto.unit` and `net.proto.fuzz` passed, with no
   AddressSanitizer report.
+
+## M2a: the playable scene (gx)
+
+<!-- # M2a gx -->
+Track `gx` of M2a wave 3, on branch `m2a/gx` from the W3.0 contract. Design: [docs/design/m2a.md](docs/design/m2a.md)
+§15 row gx. As built, with measured results and the screenshot descriptions:
+[docs/design/m2a-gx.md](docs/design/m2a-gx.md).
+
+**Play Metro TDM:** `tools\play.cmd`, which runs `<godot> --path bf3-opensource res://scenes/m2a_metro.tscn --
+--bots=24`. Godot comes from `OPENBF3_GODOT` (default `C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe`).
+Extra arguments pass through: `--kit=<0..3>` (assault, engineer, support, recon), `--team=<1|2>` (US, RU),
+`--respawn=<s>` (default 5) and `--bots=<n>` (at most 32).
+
+Controls are M1's mouse look, WASD, Shift, Space, Ctrl, Z and F6, plus:
+* left mouse fire, right mouse ADS, R reload, B fire mode;
+* 1 / 2 / G / F / wheel for the slots (primary, sidearm, grenade, knife);
+* K / T for the next spawn's kit / team;
+* Esc to release the mouse (every held button is released too; the click that captures it again never fires).
+
+The scene shows the HUD, the viewmodel of the own team, the kill counter (`kills k deaths d   US a : RU b`) and the
+death screen (killer slot or fall, respawn countdown; the viewmodel and the weapon HUD hidden). S1's walker bots are
+armed but do not fire; they are drawn as capsules tinted friend (blue) or foe (red).
+
+Phase 1 skips bot AI, 3p soldiers, game audio and game effects. Their check cases are skipped with "waiting for
+bt / tp / au3 / fx3", and the code that drives them is compiled once their files land (the `OPENBF3_M2A_HAVE_*`
+switches of the `M2a gx` CMake block).
+
+Gates, measured 2026-10-18 on the branch (windowed rows one at a time, shared machine). Every windowed row needs
+`set OPENBF3_GODOT=<exe>` and `set OPENBF3_GODOT_WINDOWED=1`:
+
+| gate | command | threshold | measured |
+|---|---|---|---|
+| functional cases (E1, E3, E5, E10, E19) | `ctest --preset dev-window -R "^godot\.m2a$"` | `M2A CHECK: PASS`; audio / fx skipped with their track | 4 pass (range, reload, hud, ads), 0 fail, 2 skip; 58 s |
+| kits (E11) | `ctest --preset dev-window -R "^godot\.m2a\.kits$"` | `M2A CHECK: PASS` | 67 / 67 rows (8 loadouts, knife hit, M67 fuse 3.6 s); 67 s |
+| 5-minute play, 0 errors | `ctest --preset dev-window -R "^godot\.m2a\.play$"` | `M2A CHECK: PASS`, 0 `ERROR` lines | PASS: 3 deaths, 3 respawns, 403 own shots, 4 kills, team switch, 0 event overflows; 0 ERROR lines; 312 s |
+| screenshots | the play row (to `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\gx\`) | hip, ADS, reload, firefight, death | 5 / 5 (m2a-gx.md §7) |
+| branch pass | `tools\build.cmd dev --strict` | every row passes, no budget violation | 128 rows: 126 passed, 2 skipped (`core.cache_data`, `core.res`), 0 failed, in two runs (556 s and 627 s on a busy machine). `--strict` exited 1 both times, on rows of other tracks that have no COST and went over 30 s under the load (run 1: `render.s3` 31.9 s; run 2: `anim`, `anim.s3`, `render.s3`, `sim.terrain.unit`, `fx.unit`, `anim.server_pose`). test_budget STRICT over the five gx rows (window preset): 0 violations |
+| E16 on the M2a scene | `ctest --preset dev-window -R "^godot\.m2a_load$"` | cold <= 15 s, warm <= 5 s | the integrator's row. One run on the branch (unlocked, shared machine, indicative only): cold 4.34 s pass, warm 5.42 s over the threshold |
+| E9, E13 / E14 | `ctest --preset dev-window -R "^godot\.m2a_firefight$"` | m2a.md E9, E14 | the integrator's row; skipped until bt lands |
