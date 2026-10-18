@@ -242,4 +242,71 @@ constexpr uint8_t crowd_team_of_wire(uint8_t p_wire_team) {
 inline constexpr uint8_t kNoCrowdWeapon = 0xFF;
 static_assert(kMaxCrowdWeapons < kNoCrowdWeapon);
 
+// ---- M2a tp (docs/design/m2a.md §9, R5, §16 Q13; docs/design/m2a-tp.md) ---------------------------------------------
+//
+// R5 (crowd_eval.cpp, tp): with CrowdTeam::weapons, a soldier's weapon layout (step 3), reload clip (step 4) and weapon
+// binds (step 6) come from weapons[CrowdSoldierInput::weapon] (an index past the end draws item 0, counted); the team's
+// own fields are the body (binds) and the weapon of a team without items. Per-soldier buffers are sized from the
+// largest team's binds and the largest CrowdWeapon::binds, and a never-evaluated soldier's palette is empty (S3 sized
+// it from team 0's binds).
+//
+// With a CrowdStanceSet (make() overload) the per-soldier steps become, in order:
+//   1. stance and locomotion: dead -> the death pose below; pose != target_pose -> the transition clip (lc's Rifle_T_*)
+//      at transition x its end frame, no locomotion (the capsule table's rule, m2a.md §6.5: from != to is a transition
+//      at the fraction, even 0 and 1); otherwise the steady stance target_pose: stand = S3's run blend (bit for bit),
+//      crouch / prone = their idle (lc's Rifle_CrouchIdle_Pose / Rifle_ProneIdle_Pose) and moves (tp's Sneak / Crawl
+//      cycles, CrowdMoveClips::loco). A stance whose idle is missing is drawn from the stand idle, one whose moves are
+//      incomplete moves with the stand cycles (both counted in CrowdM2aStats::stance_fallbacks).
+//   2.-4. as S3 (root, the weapon's layout, the weapon's reload); a weapon change cancels a playing reload.
+//   4b. fire: fire_seq changed -> crouch plays Rifle_CrouchFire from its start (additive when it decodes additive, else
+//      a masked override ramped like the reload); stand and prone (no unique rifle fire controller, m2a.md §9) add
+//      kCrowdFireKickDeg of aim pitch, a triangle over kCrowdFireKickSeconds [inferred].
+//   5. aim: the stance's AimUp / AimDown additive at weight min(1, |pitch| / full), full = S3's config values for stand
+//      and lc's server_pose_stance_aim for crouch and prone (the capsule table's weights); a transition aims with its
+//      source stance (as the table); a dead soldier does not aim or fire.
+//   6. body palette (team binds), weapon palette (CrowdWeapon::binds), muzzle (CrowdWeapon::muzzle_joint x
+//      muzzle_offset) into the back buffers.
+// Death (m2a.md §16 Q13, default BlendToProne): the pose blends from the alive pose to the prone idle over
+// kCrowdDeathBlendSeconds; CrowdDeathStyle::Clip plays the stance's death clip (Death_StandChest, Death_Crouch1,
+// Death_Prone1) and holds its last frame instead (BlendToProne when the clip is missing). Either way the soldier is hidden
+// kCrowdDeathHideSeconds after `dead` rose (drawn() false, weapon_of kNoCrowdWeapon); dead falling back to false (a
+// respawn) restarts it alive. Times run on the evaluator's input clock (set_inputs' dt), so temporal LOD skips do not
+// stretch them.
+
+struct ServerPoseClips; // bf3/anim/server_pose.h (lc): load_server_pose_clips with ServerPoseClipNames
+
+enum class CrowdDeathStyle : uint8_t {
+	BlendToProne = 0, // m2a.md §16 Q13's recommended default
+	Clip = 1, // the stance's retail death clip, last frame held [verified present: CrowdMoveClips]
+};
+inline constexpr CrowdDeathStyle kCrowdDeathDefault = CrowdDeathStyle::BlendToProne; // §16 Q13
+inline constexpr float kCrowdDeathBlendSeconds = 0.5f; // §16 Q13
+inline constexpr float kCrowdDeathHideSeconds = 3.0f; // §16 Q13
+inline constexpr float kCrowdFireKickSeconds = 0.05f; // m2a.md §9 [inferred]
+inline constexpr float kCrowdFireKickDeg = 3.0f; // [inferred]
+
+struct CrowdStanceSet {
+	const ServerPoseClips *pose = nullptr; // lc's stance idles, aims and transitions (null: every stance drawn standing, counted)
+	const CrowdMoveClips *moves = nullptr; // tp's moves, crouch fire and deaths (null: stand cycles, kicks, BlendToProne)
+	CrowdDeathStyle death = kCrowdDeathDefault;
+};
+
+struct CrowdM2aStats {
+	// The last published job, over the soldiers it evaluated.
+	uint32_t stand = 0, crouch = 0, prone = 0; // steady stance drawn
+	uint32_t transitions = 0; // posed from a transition clip (or its stand-in lerp)
+	uint32_t moving_crouch = 0, moving_prone = 0; // a crouch / prone move cycle weighted
+	uint32_t firing = 0; // a fire clip or kick weighted
+	uint32_t dying = 0; // dead and still drawn
+	uint32_t weapon_palettes = 0; // a weapon palette written (teams with CrowdTeam::weapons)
+	uint32_t muzzles = 0; // a muzzle written
+	// Since make(), over every evaluation.
+	uint64_t stance_fallbacks = 0; // a crouch / prone / transition drawn from stand clips (missing stance clip)
+	uint64_t bad_weapon = 0; // CrowdSoldierInput::weapon past the team's items (item 0 drawn)
+	uint64_t bad_stance = 0; // pose / target_pose > 2 (clamped) or a non-finite transition (0)
+	uint64_t reloads_cancelled = 0; // a weapon change during a reload
+	uint64_t deaths = 0; // dead rose
+	uint64_t death_hidden = 0; // soldiers hidden after kCrowdDeathHideSeconds (counted once per death)
+};
+
 } // namespace bf3::anim
