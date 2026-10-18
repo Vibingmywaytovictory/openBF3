@@ -90,9 +90,11 @@ struct FxNamedCell {
 	const char *effect;
 	const char *decal;
 };
-constexpr std::array<FxNamedCell, 4> kFxNamedCells{ { { 8, "concrete", "fx_impact_concrete_01_s_xp2", "decal_concrete_s_01" },
+constexpr std::array<FxNamedCell, 5> kFxNamedCells{ { { 8, "concrete", "fx_impact_concrete_01_s_xp2", "decal_concrete_s_01" },
 		{ 2, "brick", "fx_impact_concrete_01_s", "decal_brick_s_01" }, { 10, "glass", "fx_impact_glass_01_s", "decal_glass_s_01" },
-		{ 3, "metal", "fx_impact_metal_01_s", "decal_metalarmor_s_01" } } };
+		{ 3, "metal", "fx_impact_metal_01_s", "decal_metalarmor_s_01" }, { 18, "water", "fx_impact_water_s", "" } } };
+constexpr uint8_t kFxWater = 18; // PhysicsMaterialIndex Water (E8 (5); fx G5's Caspian cell, no decal)
+constexpr uint64_t kFxWaterShots = 30;
 constexpr const char *kFxSoldierEffect = "fx_impact_soldier_body_s";
 // E9 / E14 (m2a.md §1): 10 s warm-up, 60 s in alternating 5 s FX-on / FX-off windows (the S3 G1b method), 2560 x 1440.
 constexpr double kFfWarmupSeconds = 10.0;
@@ -248,7 +250,7 @@ struct M2aCheck::State {
 		sim::Vec3 point{};
 		float distance = 0;
 	};
-	std::array<FxSurface, 2> fx_surfaces{ { { 8 }, { 2 } } }; // concrete, brick
+	std::array<FxSurface, 3> fx_surfaces{ { { 8 }, { 2 }, { kFxWater } } }; // concrete, brick, water (when Metro has a reachable one)
 	int32_t fx_flash_component = -1;
 	std::string fx_m16_1p;
 	uint64_t fx_shots_1p = 0, fx_flash = 0, fx_seg_shots = 0, fx_frames = 0, fx_mismatch_frames = 0;
@@ -276,6 +278,45 @@ struct M2aCheck::State {
 	std::vector<double> ff_frame_on, ff_m2a_on, ff_crowd, ff_fx_main, ff_gpu_on, ff_gpu_off;
 	uint32_t ff_max_lights = 0, ff_max_particles = 0, ff_lights_over = 0, ff_min_drawn = 0xFFFFFFFFu;
 	uint64_t ff_late0 = 0, ff_short0 = 0, ff_remote0 = 0, ff_hits0 = 0;
+	// Per display frame samples of the step that records them (E5, E19): one per frame, bounded.
+	struct Sample {
+		double t = 0; // seconds into the step
+		double dt = 0; // this display frame
+		double sim_s = 0; // PresentedWeapon::time_s
+		sw::WeaponPhase phase = sw::WeaponPhase::None;
+		bool zoomed = false; // the presented ADS level
+		bool ready = false;
+		int32_t magazine = 0;
+		int32_t hud_ammo = 0; // the HUD model's magazine
+		uint32_t clip = 0; // the viewmodel's action clip (anim::VmClip)
+		float fov = 0; // the 1p camera's vertical FOV
+		bool ads_allowed = true;
+		bool at_rest = true; // the viewmodel's springs
+		uint64_t shot_cues = 0; // M2aGame::vm_shot_cues
+	};
+	static constexpr size_t kMaxSamples = 1u << 15;
+	std::vector<Sample> samples;
+	// fx3's own 1p muzzle starts since the last mark (E1), counted every frame from the triggers' starts.
+	uint64_t muzzle_1p_starts = 0, muzzle_3p_starts = 0;
+	std::set<uint32_t> muzzle_1p_ids; // shot ids with a started 1p muzzle (bounded: kMaxSamples)
+	// E11: the action clips the viewmodel drew since the last mark (bit per anim::VmClip), every frame.
+	uint32_t clips_seen = 0;
+	// E1 / E11: the start of the window whose server and predicted events are compared (sim units; mark()).
+	sw::SimTime window_from = 0;
+	std::set<uint16_t> gap_defs_done; // E1: the kit firearms whose shot gaps were measured
+	// E10: the HUD model of the last frames by serial (the widgets draw after the check's part of the frame).
+	struct HudExpect {
+		uint64_t serial = 0;
+		int32_t magazine = 0, reserve = 0;
+		double spread = 0, vfov = 0;
+		bool crosshair = false, ammo = false;
+	};
+	std::deque<HudExpect> hud_expect;
+	uint64_t gap_frames = 0, gap_bad = 0, ammo_frames = 0, ammo_place_bad = 0, ammo_font_bad = 0, hud_stale = 0;
+	double gap_err_max = 0, ammo_x_min = 1e9, ammo_x_max = -1e9;
+	std::string hud_first_bad;
+	// E8 (5): the water search over Metro's collision tags.
+	uint64_t water_tags = 0, water_tag_tiles = 0, tags_searched = 0, water_rays = 0;
 
 	~State() {
 		if (acheck != nullptr && g.audio != nullptr) {
@@ -345,6 +386,121 @@ struct M2aCheck::State {
 		mark_kills = g.kills;
 		mark_cues = g.vm_shot_cues;
 		mark_own_shots = g.own_shots_seen;
+		muzzle_1p_starts = muzzle_3p_starts = 0;
+		muzzle_1p_ids.clear();
+		clips_seen = 0;
+		// Events of ticks after the newest presented predicted tick: none of them was recorded before the mark.
+		window_from = sw::tick_start(f().tick + 1);
+	}
+	// Every frame (M2aCheck::frame, before the step): fx3's own muzzle starts and the viewmodel's action clip.
+	void observe() {
+		if (const Bf3Viewmodel *vm = g.own_viewmodel(); vm != nullptr && vm->is_visible() && vm->output().action_clip < 32) {
+			clips_seen |= 1u << vm->output().action_clip;
+		}
+		if (g.fx == nullptr || !g.fx->built() || g.fx->triggers() == nullptr) {
+			return;
+		}
+		for (const fx::TriggerStart &ts : g.fx->triggers()->starts()) {
+			if (ts.kind != host::PresentKind::OwnShot || ts.purpose != fx::TriggerPurpose::Muzzle || ts.def == nullptr || !ts.started) {
+				continue;
+			}
+			if (ts.first_person) {
+				++muzzle_1p_starts;
+				if (muzzle_1p_ids.size() < kMaxSamples) {
+					muzzle_1p_ids.insert(ts.id);
+				}
+			} else {
+				++muzzle_3p_starts;
+			}
+		}
+	}
+	// One Sample of this frame (E5, E19).
+	void sample(double p_t) {
+		if (samples.size() >= kMaxSamples) {
+			return;
+		}
+		Sample x;
+		x.t = p_t;
+		x.dt = dt;
+		x.sim_s = g.weapon.time_s;
+		x.phase = g.weapon.phase;
+		x.zoomed = g.weapon.zoomed;
+		x.ready = ready();
+		x.magazine = g.weapon.magazine;
+		x.hud_ammo = g.hud_model.weapon.active_weapon_ammo;
+		x.shot_cues = g.vm_shot_cues;
+		if (const Bf3Viewmodel *vm = g.own_viewmodel()) {
+			x.clip = vm->output().action_clip;
+			x.ads_allowed = vm->ads_allowed();
+			x.at_rest = vm->output().springs_at_rest;
+		}
+		if (Camera3D *cam = s.cameras().first_person()) {
+			x.fov = float(cam->get_fov());
+		}
+		samples.push_back(x);
+	}
+	// The first sample at or after p_from whose presented time reaches p_seconds (samples.size(): none).
+	size_t sample_at_time(double p_seconds, size_t p_from = 0) const {
+		for (size_t i = p_from; i < samples.size(); ++i) {
+			if (samples[i].sim_s >= p_seconds - 1e-9) {
+				return i;
+			}
+		}
+		return samples.size();
+	}
+	// E11 / E1: the server's events of the own soldier equal the client's first predictions, in
+	// [window_from, 15 ticks before the newest presented tick) (both recorders have every event of that window).
+	void events_equal_row(const std::string &p_name) {
+		const sw::SimTime to = sw::tick_start(f().tick > 15 ? f().tick - 15 : 0);
+		auto in = [&](sw::SimTime p_t) { return p_t >= window_from && p_t < to; };
+		std::vector<const host::PredictedShot *> pred;
+		std::vector<const M2aServerRecorder::Shot *> serv;
+		for (const host::PredictedShot &p : g.predicted_shots) {
+			if (in(p.shot.time)) {
+				pred.push_back(&p);
+			}
+		}
+		for (const M2aServerRecorder::Shot &q : g.server_shots) {
+			if (in(q.shot.time)) {
+				serv.push_back(&q);
+			}
+		}
+		size_t shots_equal = 0;
+		for (const host::PredictedShot *p : pred) {
+			for (const M2aServerRecorder::Shot *q : serv) {
+				if (q->shot.shot_index != p->shot.shot_index) {
+					continue;
+				}
+				double diff = 0;
+				for (size_t k = 0; k < 3; ++k) {
+					diff = std::max({ diff, double(std::fabs(p->shot.origin[k] - q->shot.origin[k])), double(std::fabs(p->shot.direction[k] - q->shot.direction[k])) });
+				}
+				shots_equal += p->tick == q->tick && p->shot.time == q->shot.time && p->shot.def == q->shot.def && p->shot.weapon_slot == q->shot.weapon_slot &&
+								p->shot.seed == q->shot.seed && p->shot.spawn_time == q->shot.spawn_time && diff <= 1e-5
+						? 1u
+						: 0u;
+				break;
+			}
+		}
+		using Key = std::tuple<sw::SimTime, uint32_t, uint32_t>;
+		std::vector<Key> pt, st_;
+		for (const host::PredictedTimed &p : g.predicted_timed) {
+			if (in(p.event.time)) {
+				pt.push_back({ p.event.time, uint32_t(p.event.event), uint32_t(p.event.weapon_slot) });
+			}
+		}
+		for (const M2aServerRecorder::Timed &q : g.server_timed) {
+			if (in(q.event.time)) {
+				st_.push_back({ q.event.time, uint32_t(q.event.event), uint32_t(q.event.weapon_slot) });
+			}
+		}
+		std::sort(pt.begin(), pt.end());
+		std::sort(st_.begin(), st_.end());
+		const bool ok = serv.size() == pred.size() && shots_equal == pred.size() && pt == st_ && serv.size() + st_.size() > 0;
+		row(p_name, double(serv.size() + st_.size()),
+				fmt("server events == the first predictions: %zu / %zu shots equal field for field (%zu server), %zu predicted timed events == %zu server", shots_equal,
+						pred.size(), serv.size(), pt.size(), st_.size()),
+				ok);
 	}
 	void release_weapon_input() {
 		for (size_t a = 0; a < InputMapper::kM2aActionCount; ++a) {
@@ -363,6 +519,143 @@ struct M2aCheck::State {
 			return true;
 		}
 		return false;
+	}
+
+	// E10: what the crosshair and ammo widgets drew last (the previous frame's model) against that frame's presented
+	// spread and camera FOV, and this frame's expectation kept for the next.
+	void hud_draw_account(double p_t) {
+		Bf3Hud *hud = g.hud;
+		Camera3D *cam = s.cameras().first_person();
+		if (hud == nullptr || !hud->is_loaded() || hud->crosshair_widget() == nullptr || hud->ammo_widget() == nullptr || cam == nullptr) {
+			return;
+		}
+		const Vector2 size = hud->get_size();
+		const HudDrawRecord &c = hud->crosshair_widget()->record();
+		const HudDrawRecord &a = hud->ammo_widget()->record();
+		const auto find = [&](uint64_t p_serial) -> const HudExpect * {
+			for (const HudExpect &e : hud_expect) {
+				if (e.serial == p_serial) {
+					return &e;
+				}
+			}
+			return nullptr;
+		};
+		if (const HudExpect *e = find(c.serial)) {
+			++gap_frames;
+			bool bad = c.visible != e->crosshair;
+			if (!bad && c.visible) {
+				const double want = 0.5 * double(size.y) * std::tan(e->spread * kPi / 180.0) / std::tan(0.5 * e->vfov * kPi / 180.0);
+				const double err = std::fabs(c.gap_px - want);
+				gap_err_max = std::max(gap_err_max, err);
+				bad = err > 0.5;
+			}
+			gap_bad += bad ? 1 : 0;
+			if (bad && hud_first_bad.empty()) {
+				hud_first_bad = fmt("%.2f s: crosshair %s, gap %.3f px, spread %.3f, vfov %.2f, want %s", p_t, c.visible ? "shown" : "hidden", c.gap_px, e->spread, e->vfov,
+						e->crosshair ? "shown" : "hidden");
+			}
+		} else if (c.draws > 0) {
+			++hud_stale;
+		}
+		if (const HudExpect *e = find(a.serial); e != nullptr && a.visible && e->ammo) {
+			++ammo_frames;
+			const double sc = double(host::hud_scale(size.x, size.y));
+			const double stage_x = 1280.0 + (double(a.at_a.x) - double(size.x)) / std::max(1e-9, sc);
+			ammo_x_min = std::min(ammo_x_min, stage_x);
+			ammo_x_max = std::max(ammo_x_max, stage_x);
+			ammo_place_bad += std::fabs(stage_x - 1194.0) > 2.0 || a.text_a != std::to_string(e->magazine) ? 1 : 0;
+			ammo_font_bad += a.font.rfind(std::string(host::kHudNumberFont) + "=", 0) != 0 || a.font.find("=system") != std::string::npos ? 1 : 0;
+		}
+		HudExpect x;
+		x.serial = g.hud_model.serial;
+		x.magazine = g.hud_model.weapon.active_weapon_ammo;
+		x.reserve = g.hud_model.weapon.active_weapon_ammo_in_bag;
+		x.spread = g.weapon.valid ? std::max(0.0, double(g.weapon.spread_deg)) : 0.0;
+		x.vfov = double(cam->get_fov());
+		x.crosshair = g.hud_model.weapon.show_crosshair && !g.weapon.zoomed;
+		x.ammo = g.hud_model.weapon.active_weapon_show_ammo;
+		hud_expect.push_back(x);
+		while (hud_expect.size() > 8) {
+			hud_expect.pop_front();
+		}
+	}
+
+	// E8 (5): every collision tag of Metro's static world whose material resolves to Water (18); from each spawn within
+	// 150 m of such a tile, rays to a grid of points over the tile's bounds; the first ray that meets a Water triangle
+	// facing it is the water surface (fx_surfaces[2]).
+	void water_search(const sw::SurfaceMaterialTable &p_materials, const host::SharedLevel &p_level, float p_eye_h) {
+		water_tags = water_tag_tiles = tags_searched = water_rays = 0;
+		FxSurface &water = fx_surfaces[2];
+		if (g.world == nullptr || g.world->shapes() == nullptr) {
+			return;
+		}
+		const sim::StaticWorldShapes &shapes = *g.world->shapes();
+		std::vector<size_t> tiles;
+		for (size_t t = 0; t < shapes.tile_count(); ++t) {
+			const sim::StaticTileInfo &info = shapes.tile(t);
+			bool has = false;
+			for (uint32_t j = 0; j < info.tags; ++j) {
+				++tags_searched;
+				const sw::SurfacePair pair = p_materials.static_pair(shapes.tag(t, j).material);
+				if (pair.resolved && pair.physics_material == kFxWater) {
+					++water_tags;
+					has = true;
+				}
+			}
+			if (has) {
+				tiles.push_back(t);
+			}
+		}
+		water_tag_tiles = tiles.size();
+		for (const size_t t : tiles) {
+			const sim::StaticTileInfo &info = shapes.tile(t);
+			for (size_t i = 0; i < p_level.spawns.size() && !water.found; ++i) {
+				const sim::Vec3 &feet = p_level.spawns[i].position;
+				const float cx = std::clamp(feet[0], info.min[0], info.max[0]), cz = std::clamp(feet[2], info.min[2], info.max[2]);
+				if (std::hypot(cx - feet[0], cz - feet[2]) > 150.0f) {
+					continue;
+				}
+				const sim::Vec3 eye = { feet[0], feet[1] + p_eye_h, feet[2] };
+				for (int a = 0; a < 8 && !water.found; ++a) {
+					for (int b = 0; b < 8 && !water.found; ++b) {
+						for (int c = 0; c < 3 && !water.found; ++c) {
+							const sim::Vec3 to = { info.min[0] + (info.max[0] - info.min[0]) * (float(a) + 0.5f) / 8.0f,
+								info.min[1] + (info.max[1] - info.min[1]) * float(c) / 2.0f, info.min[2] + (info.max[2] - info.min[2]) * (float(b) + 0.5f) / 8.0f };
+							const sim::Vec3 delta = { to[0] - eye[0], to[1] - eye[1], to[2] - eye[2] };
+							const float len = std::sqrt(delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]);
+							if (len < 6.0f || len > 160.0f) {
+								continue;
+							}
+							++water_rays;
+							sim::StaticHit hit;
+							if (!g.world->ray(eye, delta, sim::query_mask::kProjectile, &hit)) {
+								continue;
+							}
+							const sw::SurfacePair pair = p_materials.static_pair(hit.tag.material);
+							const float facing = -(hit.normal[0] * delta[0] + hit.normal[1] * delta[1] + hit.normal[2] * delta[2]) / len;
+							if (pair.resolved && pair.physics_material == kFxWater && facing > 0.2f && len * hit.fraction >= 6.0f) {
+								water.found = true;
+								water.spawn = uint32_t(i);
+								water.point = hit.position;
+								water.distance = len * hit.fraction;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// A world point in front of the 1p camera within p_frac of the frame's size of its centre (the play shots).
+	bool centred(const Vector3 &p_point, float p_frac) const {
+		Camera3D *cam = s.cameras().first_person();
+		Viewport *vp = s.get_viewport();
+		if (cam == nullptr || vp == nullptr || cam->is_position_behind(p_point)) {
+			return false;
+		}
+		const Vector2 size = vp->get_visible_rect().size;
+		const Vector2 px = cam->unproject_position(p_point);
+		return std::fabs(px.x - 0.5f * size.x) <= p_frac * size.x && std::fabs(px.y - 0.5f * size.y) <= p_frac * size.y;
 	}
 
 	// ---- step builders ----
@@ -400,8 +693,12 @@ struct M2aCheck::State {
 		});
 	}
 	// Spawn at a point (SpawnAt) and wait for the new life to be adopted, alive and ready.
-	void respawn_at(std::function<uint32_t(State &)> p_index) {
-		add("SpawnAt", 10.0, [p_index](State &st, double, bool p_first) {
+	void respawn_at(std::function<uint32_t(State &)> p_index, std::function<bool(State &)> p_when = nullptr) {
+		add("SpawnAt", 10.0, [p_index, p_when](State &st, double, bool p_first) {
+			if (p_first && p_when && !p_when(st)) {
+				st.life_before = 0xFFFFFFFFu; // not asked: the step is done at once
+				return true;
+			}
 			if (p_first) {
 				st.life_before = st.f().own_curr.life;
 				net::DebugRequest q;
@@ -482,7 +779,13 @@ struct M2aCheck::State {
 	void build_case(M2aCase p_case);
 	void build_range();
 	void build_reload();
+	void reload_cycle(uint8_t p_slot, const std::string &p_weapon);
 	void build_kits();
+	void kit_deploy(const std::string &p_tag, uint8_t p_team, uint8_t p_kit, uint8_t p_slot);
+	void kit_gaps(const std::string &p_tag, uint8_t p_slot);
+	void kit_fire_reload(const std::string &p_tag, uint8_t p_slot);
+	void kit_knife(const std::string &p_tag);
+	void kit_m67(const std::string &p_tag);
 	void build_hud();
 	void build_ads();
 	void build_play();
@@ -663,6 +966,17 @@ void M2aCheck::State::build_range() {
 				st.g.vm_shot_cues - st.mark_cues == pred.size());
 		st.row("e1.hud_ammo", double(st.g.hud_model.weapon.active_weapon_ammo), "the HUD's ammo == the presented magazine after the burst",
 				st.g.hud_model.weapon.active_weapon_ammo == st.g.weapon.magazine);
+		// fx3's muzzle: one started 1p muzzle (the def's FireEffects1p list at the viewmodel's muzzle) per predicted shot.
+		size_t muzzled = 0;
+		for (const host::PredictedShot &p : pred) {
+			muzzled += st.muzzle_1p_ids.count(p.shot.shot_index);
+		}
+		const bool fx_on = st.g.fx != nullptr && st.g.fx->built();
+		st.row("e1.muzzle_1p", double(muzzled),
+				fx_on ? fmt("one started 1p muzzle per predicted shot (%zu shots; %" PRIu64 " 1p starts of their blueprints, %" PRIu64 " 3p starts)", pred.size(),
+								st.muzzle_1p_starts, st.muzzle_3p_starts)
+					  : std::string("fx3's Bf3GameFx is not built"),
+				fx_on && !pred.empty() && muzzled == pred.size() && st.muzzle_1p_ids.size() == pred.size() && st.muzzle_3p_starts == 0);
 		return true;
 	});
 	// M9: one shot per tap (press counter), one shot for a held trigger.
@@ -704,17 +1018,75 @@ void M2aCheck::State::build_range() {
 		st.row("e1.m9_held", double(pred), "a held semi trigger fires once", pred == 1);
 		return true;
 	});
-	// E3 through the game: chest and head at 5 m, chest at 60 m when the lane is long enough (report).
+	// E3 through the game (m2a.md E3: exact): the M16A3 chest 4 / head 2 / legs at 5 m with the damage per hit, chest 6
+	// / head 3 at 60 m. The legs' count is ceil(100 / 22.75) = 5.
 	select_slot(0);
 	kill_row("e3.chest_5m", sw::HitZone::Chest, 5.0f, 4, 25.0);
 	kill_row("e3.head_5m", sw::HitZone::Head, 5.0f, 2, 50.0);
-	add("60 m lane", 1.0, [](State &st, double, bool) {
-		if (!st.lane || st.lane->length < 62.0f) {
-			st.note("60 m rows skipped (no lane)");
+	kill_row("e3.legs_5m", sw::HitZone::Legs, 5.0f, 5, 22.75);
+	kill_row("e3.chest_60m", sw::HitZone::Chest, 60.0f, 6, -1.0);
+	kill_row("e3.head_60m", sw::HitZone::Head, 60.0f, 3, -1.0);
+	// E4 (same harness): the MK11 (US recon's primary, u_mk11) head 117.5 at 5 m kills in 1, at 60 m in 2; and E1's
+	// one-frame taps on the MK11 (one shot per tap, one shot for a held trigger).
+	add("E4 recon kit", 2.0, [](State &st, double p_t, bool p_first) {
+		if (p_first && st.client() != nullptr) {
+			st.client()->send_kit_select(net::KitSelect{ uint8_t(host::KitRole::Recon), 1 });
 		}
+		return p_t >= 0.3;
+	});
+	respawn_at([](State &st) { return st.lane ? st.lane->spawn_index : 0u; });
+	select_slot(0);
+	add("E4 MK11 in hand", 1.0, [](State &st, double, bool) {
+		const host::KitLoadout &l = st.loadout(1, uint8_t(host::KitRole::Recon));
+		const bool mk11 = st.g.weapon.def == l.defs[0] && lower(l.unlocks[0]).find("u_mk11") != std::string::npos;
+		st.row("e4.mk11_in_hand", double(st.g.weapon.def), "the recon kit's primary in hand is the MK11 (" + short_unlock(l.unlocks[0]) + ")", mk11);
 		return true;
 	});
-	kill_row("e3.chest_60m", sw::HitZone::Chest, 60.0f, -1, -1.0);
+	kill_row("e4.mk11_head_5m", sw::HitZone::Head, 5.0f, 1, 117.5);
+	kill_row("e4.mk11_head_60m", sw::HitZone::Head, 60.0f, 2, -1.0);
+	full_magazine();
+	add("MK11 taps", 6.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			st.taps = 0;
+			st.t_mark = 0;
+		}
+		if (st.taps < 5 && p_t >= st.t_mark) {
+			st.mapper().m2a_script_press(Action::Fire);
+			++st.taps;
+			st.t_mark = p_t + 0.5;
+		}
+		return st.taps >= 5 && p_t >= st.t_mark + 0.3;
+	});
+	add("MK11 tap rows", 1.0, [](State &st, double, bool) {
+		const size_t pred = st.g.predicted_shots.size() - st.mark_predicted;
+		const size_t serv = st.g.server_shots.size() - st.mark_server;
+		st.row("e1.mk11_taps", double(pred), "5 one-frame taps fire 5 shots (predicted)", pred == 5);
+		st.row("e1.mk11_taps_server", double(serv), "== predicted", serv == pred);
+		return true;
+	});
+	add("MK11 held", 3.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			st.mapper().m2a_script_hold(Action::Fire, true);
+		}
+		if (p_t >= 0.6) {
+			st.mapper().m2a_script_hold(Action::Fire, false);
+		}
+		return p_t >= 1.2;
+	});
+	add("MK11 held row", 1.0, [](State &st, double, bool) {
+		const size_t pred = st.g.predicted_shots.size() - st.mark_predicted;
+		st.row("e1.mk11_held", double(pred), "a held semi trigger fires once", pred == 1);
+		return true;
+	});
+	add("range: restore kit", 2.0, [](State &st, double p_t, bool p_first) {
+		if (p_first && st.client() != nullptr) {
+			st.client()->send_kit_select(net::KitSelect{ st.g.kit, st.g.team });
+		}
+		return p_t >= 0.3;
+	});
+	respawn_at([](State &st) { return st.lane ? st.lane->spawn_index : 0u; });
 	add("range shot", 2.0, [](State &st, double p_t, bool) {
 		if (p_t < 0.3) {
 			return false;
@@ -789,6 +1161,7 @@ void M2aCheck::State::kill_row(const char *p_name, sw::HitZone p_zone, float p_d
 	});
 	add(name + " rows", 1.0, [name, p_kill_in, p_per_hit](State &st, double, bool) {
 		if (st.counter == 1) {
+			st.row(name, st.lane ? double(st.lane->length) : 0.0, "a range lane of >= 62 m for the 60 m rows (m2a.md E3 / E4)", false);
 			return true;
 		}
 		if (st.counter == 2) {
@@ -811,83 +1184,39 @@ void M2aCheck::State::kill_row(const char *p_name, sw::HitZone p_zone, float p_d
 	});
 }
 
-// E5: tactical and empty reloads timed against the def, a switch cancelling one, the viewmodel clip and the HUD flag.
+// E5: tactical and empty reloads of the M16A3 and the M9 timed against the def (server and first prediction), per
+// display frame: the viewmodel's reload clip from the predicted kReloadStarted, the HUD's ammo from the commit, the
+// weapon ready (and, automatic, firing) again from the finish; the authored clip lengths next to ReloadTime; a switch
+// cancels a reload.
 void M2aCheck::State::build_reload() {
+	reload_cycle(0, "m16a3");
+	reload_cycle(1, "m9");
+	add("reload: clip lengths", 1.0, [](State &st, double, bool) {
+		// Printed (m2a.md E5): the authored reload clips of every kit firearm next to the data's ReloadTime.
+		for (size_t t = 0; t < 2; ++t) {
+			const bf3::render::ViewmodelSet *set = st.g.vm_sets[t].get();
+			if (set == nullptr) {
+				st.row(fmt("e5.clips_%s", t == 0 ? "us" : "ru"), 0, "the team's viewmodel set loaded", false);
+				continue;
+			}
+			for (const bf3::render::ViewmodelItem &item : set->items) {
+				if (item.kind != bf3::render::ViewmodelItemKind::Gun) {
+					continue;
+				}
+				const bf3::render::ViewmodelClip &r = item.clips[size_t(bf3::render::ViewmodelClipRole::Reload)];
+				const bf3::render::ViewmodelClip &e = item.clips[size_t(bf3::render::ViewmodelClipRole::ReloadEmpty)];
+				st.row(fmt("e5.clip.%s", short_unlock(item.unlock).c_str()), double(r.seconds),
+						fmt("printed: reload clip %.3f s (%s), empty clip %.3f s (%s); ReloadTime %.3f s, ReloadTimeBulletsLeft %.3f s, ReloadThreshold %.3f",
+								double(r.seconds), bf3::render::viewmodel_clip_source_name(r.source), double(e.seconds),
+								bf3::render::viewmodel_clip_source_name(e.source), double(item.reload_time), double(item.reload_time_bullets_left),
+								double(item.reload_threshold)),
+						true);
+			}
+		}
+		return true;
+	});
 	select_slot(0);
 	full_magazine();
-	for (const bool empty : { false, true }) {
-		const std::string tag = empty ? "empty" : "tactical";
-		add("reload " + tag + " fire", 8.0, [empty](State &st, double p_t, bool p_first) {
-			if (p_first) {
-				st.taps = 0;
-				st.t_mark = 0;
-				if (empty) {
-					st.mapper().m2a_script_hold(Action::Fire, true);
-				}
-			}
-			if (empty) {
-				if (st.g.weapon.valid && st.g.weapon.magazine == 0) {
-					st.mapper().m2a_script_hold(Action::Fire, false);
-					return true;
-				}
-				return false;
-			}
-			if (st.taps < 5 && p_t >= st.t_mark && st.ready()) {
-				st.mapper().m2a_script_press(Action::Fire);
-				++st.taps;
-				st.t_mark = p_t + 0.15;
-			}
-			return st.taps >= 5 && p_t > st.t_mark + 0.3 && st.ready();
-		});
-		add("reload " + tag, 10.0, [](State &st, double p_t, bool p_first) {
-			if (p_first) {
-				st.mark();
-				st.reload_frames = st.vm_reload_frames = st.hud_reload_frames = 0;
-				st.mapper().m2a_script_press(Action::Reload);
-			}
-			if (st.g.weapon.valid && st.g.weapon.phase == sw::WeaponPhase::Reloading) {
-				++st.reload_frames;
-				const Bf3Viewmodel *vm = st.g.own_viewmodel();
-				if (vm != nullptr) {
-					const uint32_t clip = vm->output().action_clip;
-					st.vm_reload_frames += clip == uint32_t(bf3::anim::VmClip::Reload) || clip == uint32_t(bf3::anim::VmClip::ReloadEmpty) ? 1 : 0;
-				}
-				st.hud_reload_frames += st.g.hud_model.weapon.active_weapon_is_reloading ? 1 : 0;
-			}
-			return p_t > 0.5 && st.reload_frames > 0 && st.ready();
-		});
-		wait(0.5);
-		add("reload " + tag + " rows", 1.0, [empty, tag](State &st, double, bool) {
-			const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
-			auto find = [&](const auto &p_list, size_t p_from, uint32_t p_event) -> sw::SimTime {
-				for (size_t i = p_from; i < p_list.size(); ++i) {
-					if (p_list[i].event.event == p_event && p_list[i].event.weapon_slot == 0) {
-						return p_list[i].event.time;
-					}
-				}
-				return -1;
-			};
-			const sw::SimTime s0 = find(st.g.server_timed, st.mark_timed, sw::weapon_events::kReloadStarted);
-			const sw::SimTime s1 = find(st.g.server_timed, st.mark_timed, sw::weapon_events::kReloadCommitted);
-			const sw::SimTime s2 = find(st.g.server_timed, st.mark_timed, sw::weapon_events::kReloadFinished);
-			const sw::SimTime p0 = find(st.g.predicted_timed, st.mark_ptimed, sw::weapon_events::kReloadStarted);
-			const sw::SimTime p2 = find(st.g.predicted_timed, st.mark_ptimed, sw::weapon_events::kReloadFinished);
-			const sw::SimTime want = d == nullptr ? 0 : (empty ? d->reload_empty : d->reload_tactical);
-			const sw::SimTime want_commit = d == nullptr ? 0 : (empty ? d->reload_commit_empty : d->reload_commit_tactical);
-			const bool timed = s0 >= 0 && s2 >= 0;
-			st.row("e5." + tag + ".duration_s", timed ? sw::units_to_seconds(s2 - s0) : -1.0, fmt("== the def's %.4f s (server)", sw::units_to_seconds(want)),
-					timed && s2 - s0 == want);
-			st.row("e5." + tag + ".commit_s", s1 >= 0 && s0 >= 0 ? sw::units_to_seconds(s1 - s0) : -1.0,
-					fmt("== the def's commit %.4f s (ReloadThreshold)", sw::units_to_seconds(want_commit)), s0 >= 0 && s1 >= 0 && s1 - s0 == want_commit);
-			st.row("e5." + tag + ".predicted_equal", p0 >= 0 && p2 >= 0 ? sw::units_to_seconds(p2 - p0) : -1.0, "the first prediction's start and end == the server's",
-					p0 == s0 && p2 == s2 && s0 >= 0);
-			const double vm_share = st.reload_frames > 0 ? double(st.vm_reload_frames) / double(st.reload_frames) : 0.0;
-			st.row("e5." + tag + ".viewmodel_clip", vm_share, fmt(">= 0.9 of the %u reloading frames draw a reload clip", st.reload_frames), vm_share >= 0.9);
-			const double hud_share = st.reload_frames > 0 ? double(st.hud_reload_frames) / double(st.reload_frames) : 0.0;
-			st.row("e5." + tag + ".hud_is_reloading", hud_share, "every reloading frame's HUD model says reloading", st.reload_frames > 0 && hud_share >= 0.999);
-			return true;
-		});
-	}
 	// A switch before the commit cancels the reload (rlWeaponSwitchCancelsUnfinishedReload).
 	add("cancel: fire 3", 4.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
@@ -931,12 +1260,173 @@ void M2aCheck::State::build_reload() {
 	});
 }
 
-// E11: the 8 loadouts through KitSelect + SpawnAt; every slot deploys and shows its own viewmodel item.
+// One weapon's E5 rows (tactical, then empty) on slot p_slot.
+void M2aCheck::State::reload_cycle(uint8_t p_slot, const std::string &p_weapon) {
+	select_slot(p_slot);
+	if (p_slot == 0) {
+		automatic_mode();
+	}
+	full_magazine();
+	for (const bool empty : { false, true }) {
+		const std::string tag = "e5." + p_weapon + "." + (empty ? "empty" : "tactical");
+		// Spend rounds: 5 taps (tactical), or the whole magazine (empty: held on automatic, tapped on single fire).
+		add(tag + " fire", 12.0, [empty](State &st, double p_t, bool p_first) {
+			if (p_first) {
+				st.taps = 0;
+				st.t_mark = 0;
+			}
+			const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
+			const bool automatic = d != nullptr && d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic == core::gameplay::FireLogic::Automatic;
+			if (empty) {
+				if (st.g.weapon.valid && st.g.weapon.magazine == 0) {
+					st.mapper().m2a_script_hold(Action::Fire, false);
+					return true;
+				}
+				if (automatic) {
+					st.mapper().m2a_script_hold(Action::Fire, true);
+				} else if (st.ready() && p_t >= st.t_mark) {
+					st.mapper().m2a_script_press(Action::Fire);
+					st.t_mark = p_t + 0.05;
+				}
+				return false;
+			}
+			if (st.taps < 5 && p_t >= st.t_mark && st.ready()) {
+				st.mapper().m2a_script_press(Action::Fire);
+				++st.taps;
+				st.t_mark = p_t + 0.2;
+			}
+			return st.taps >= 5 && p_t > st.t_mark + 0.3 && st.ready();
+		});
+		add(tag, 10.0, [](State &st, double p_t, bool p_first) {
+			const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
+			const bool automatic = d != nullptr && d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic == core::gameplay::FireLogic::Automatic;
+			if (p_first) {
+				st.mark();
+				st.samples.clear();
+				st.counter = 0; // 1: the trigger held for the fire-again rows, 2: its shot predicted
+				st.reload_frames = 0;
+				st.mapper().m2a_script_press(Action::Reload);
+			}
+			st.sample(p_t);
+			const bool reloading = st.g.weapon.valid && st.g.weapon.phase == sw::WeaponPhase::Reloading;
+			st.reload_frames += reloading ? 1 : 0;
+			// Automatic: hold the trigger from the middle of the reload on (refused until it ends), released at its shot.
+			if (automatic && st.counter == 0 && reloading && st.g.weapon.phase_end_s > 0 &&
+					st.g.weapon.time_s > 0.5 * (st.g.weapon.phase_start_s + st.g.weapon.phase_end_s)) {
+				st.mapper().m2a_script_hold(Action::Fire, true);
+				st.counter = 1;
+			}
+			if (st.counter == 1 && st.g.predicted_shots.size() > st.mark_predicted) {
+				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.counter = 2;
+			}
+			return p_t > 0.5 && st.reload_frames > 0 && st.ready() && (!automatic || st.counter == 2);
+		});
+		wait(0.5);
+		add(tag + " rows", 1.0, [empty, tag](State &st, double, bool) {
+			const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
+			const uint8_t slot_index = st.g.weapon.active_slot;
+			auto find = [&](const auto &p_list, size_t p_from, uint32_t p_event) -> sw::SimTime {
+				for (size_t i = p_from; i < p_list.size(); ++i) {
+					if (p_list[i].event.event == p_event && p_list[i].event.weapon_slot == slot_index) {
+						return p_list[i].event.time;
+					}
+				}
+				return -1;
+			};
+			const sw::SimTime s0 = find(st.g.server_timed, st.mark_timed, sw::weapon_events::kReloadStarted);
+			const sw::SimTime s1 = find(st.g.server_timed, st.mark_timed, sw::weapon_events::kReloadCommitted);
+			const sw::SimTime s2 = find(st.g.server_timed, st.mark_timed, sw::weapon_events::kReloadFinished);
+			const sw::SimTime p0 = find(st.g.predicted_timed, st.mark_ptimed, sw::weapon_events::kReloadStarted);
+			const sw::SimTime p1 = find(st.g.predicted_timed, st.mark_ptimed, sw::weapon_events::kReloadCommitted);
+			const sw::SimTime p2 = find(st.g.predicted_timed, st.mark_ptimed, sw::weapon_events::kReloadFinished);
+			const sw::SimTime want = d == nullptr ? 0 : (empty ? d->reload_empty : d->reload_tactical);
+			const sw::SimTime want_commit = d == nullptr ? 0 : (empty ? d->reload_commit_empty : d->reload_commit_tactical);
+			const bool timed = s0 >= 0 && s2 >= 0;
+			st.row(tag + ".duration_s", timed ? sw::units_to_seconds(s2 - s0) : -1.0,
+					fmt("== the def's %" PRId64 " units (%.4f s; server)", int64_t(want), sw::units_to_seconds(want)), timed && s2 - s0 == want);
+			st.row(tag + ".commit_s", s1 >= 0 && s0 >= 0 ? sw::units_to_seconds(s1 - s0) : -1.0,
+					fmt("== the def's commit %" PRId64 " units (%.4f s, ReloadThreshold)", int64_t(want_commit), sw::units_to_seconds(want_commit)),
+					s0 >= 0 && s1 >= 0 && s1 - s0 == want_commit);
+			st.row(tag + ".predicted_equal", p0 >= 0 && p2 >= 0 ? sw::units_to_seconds(p2 - p0) : -1.0,
+					"the first prediction's start, commit and end == the server's", p0 == s0 && p1 == s1 && p2 == s2 && s0 >= 0);
+			// Per display frame against the predicted times: late = frames after the first frame that presents the
+			// event's time (<= 1); early = seconds before it (the discrete fields come from the newer predicted tick, so
+			// a change can show up to one tick before its time is presented; <= 1 tick).
+			const double tick_s = 1.0 / double(sim::kSimHz);
+			const auto frame_row = [&](const std::string &p_name, sw::SimTime p_event, const std::function<bool(const Sample &)> &p_shown, const char *p_what) {
+				const double te = p_event >= 0 ? sw::units_to_seconds(p_event) : 1e30;
+				const size_t ie = st.sample_at_time(te);
+				size_t is = st.samples.size();
+				for (size_t i = 0; i < st.samples.size(); ++i) {
+					if (p_shown(st.samples[i])) {
+						is = i;
+						break;
+					}
+				}
+				const bool found = p_event >= 0 && ie < st.samples.size() && is < st.samples.size();
+				const double late = found ? double(int64_t(is) - int64_t(ie)) : 1e9;
+				const double early_s = found ? std::max(0.0, te - st.samples[is].sim_s) : 1e9;
+				st.row(tag + "." + p_name, late,
+						fmt("%s within 1 display frame of the predicted event (frames late; %.4f s early, <= 1 tick %.4f s; %zu frames)", p_what, found ? early_s : -1.0,
+								tick_s, st.samples.size()),
+						found && late <= 1.0 && early_s <= tick_s + 1e-9);
+			};
+			const int32_t before = st.samples.empty() ? 0 : st.samples.front().hud_ammo;
+			frame_row(
+					"clip_start_frames", p0,
+					[](const Sample &x) { return x.clip == uint32_t(bf3::anim::VmClip::Reload) || x.clip == uint32_t(bf3::anim::VmClip::ReloadEmpty); },
+					"the viewmodel's reload clip starts");
+			frame_row("hud_ammo_frames", p1, [before](const Sample &x) { return x.hud_ammo != before; }, "the HUD's ammo changes at the commit");
+			bool was_reloading = false;
+			frame_row(
+					"ready_frames", p2,
+					[&was_reloading](const Sample &x) {
+						was_reloading = was_reloading || x.phase == sw::WeaponPhase::Reloading;
+						return was_reloading && x.phase == sw::WeaponPhase::Ready;
+					},
+					"the weapon is ready to fire again");
+			if (d != nullptr && d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic == core::gameplay::FireLogic::Automatic) {
+				// The trigger was held from mid-reload: the first shot after it is at the predicted finish, exactly.
+				sw::SimTime first = -1;
+				for (size_t i = st.mark_predicted; i < st.g.predicted_shots.size(); ++i) {
+					if (st.g.predicted_shots[i].shot.weapon_slot == slot_index) {
+						first = st.g.predicted_shots[i].shot.time;
+						break;
+					}
+				}
+				st.row(tag + ".fires_at_finish", first >= 0 && p2 >= 0 ? sw::units_to_seconds(first - p2) : -1.0,
+						"with the trigger held through the reload, the first predicted shot is at kReloadFinished exactly (seconds after it)", first >= 0 && first == p2);
+				const double sf = first >= 0 ? sw::units_to_seconds(first) : 1e30;
+				const size_t ie = st.sample_at_time(sf);
+				size_t is = st.samples.size();
+				for (size_t i = 0; i < st.samples.size(); ++i) {
+					if (st.samples[i].shot_cues > st.samples.front().shot_cues) {
+						is = i;
+						break;
+					}
+				}
+				const bool found = first >= 0 && ie < st.samples.size() && is < st.samples.size();
+				const double late = found ? double(int64_t(is) - int64_t(ie)) : 1e9;
+				st.row(tag + ".fire_cue_frames", late,
+						"the viewmodel's Shot cue of that shot within 1 display frame of its time (frames late; the cue drains with its predicted tick)",
+						found && late <= 1.0);
+			}
+			return true;
+		});
+	}
+}
+
+// E11: the 8 loadouts through KitSelect + SpawnAt. Each cycles 0 -> 1 -> 7 -> 6 -> 0: every item deploys (its
+// viewmodel item from PresentedWeapon::def through the kit unlocks, the deploy clip drawn, the item's clip coverage
+// reported), fires (the firearms also reload; the knife at the target bot 1.3 m ahead; the M67 thrown, its fuse
+// exact), with the server's events equal to the first predictions. E1's gap rows run once per kit firearm.
 void M2aCheck::State::build_kits() {
 	add("kits: range lane", 5.0, [](State &st, double, bool) {
 		if (st.g.world != nullptr && st.s.shared_level() != nullptr) {
 			st.lane = sw::find_range_lane(*st.g.world, st.s.shared_level()->spawns, st.f().eye_height_curr, 20.0f);
 		}
+		st.gap_defs_done.clear();
 		return true;
 	});
 	for (uint8_t team = 1; team <= 2; ++team) {
@@ -949,6 +1439,7 @@ void M2aCheck::State::build_kits() {
 				return p_t >= 0.3;
 			});
 			respawn_at([](State &st) { return st.lane ? st.lane->spawn_index : 0u; });
+			teleport_lane();
 			add(tag + " loadout", 1.0, [team, kit, tag](State &st, double, bool) {
 				const host::KitLoadout &l = st.loadout(team, kit);
 				bool defs_ok = st.f().own_weapons_valid;
@@ -958,126 +1449,18 @@ void M2aCheck::State::build_kits() {
 				st.row(tag + ".spawned_as", double(st.f().own_kit) + 10.0 * double(st.f().own_team), fmt("kit %u team %u (value kit + 10 x team)", kit, team),
 						st.f().own_kit == kit && st.f().own_team == team);
 				st.row(tag + ".slot_defs", defs_ok ? 1.0 : 0.0, "slots 0, 1, 6, 7 hold the kit table's defs", defs_ok);
-				st.slot_cursor = 0;
-				st.notes.clear();
 				return true;
 			});
-			for (const uint8_t slot : { uint8_t(1), uint8_t(6), uint8_t(7), uint8_t(0) }) {
-				add(fmt("%s deploy %u", tag.c_str(), unsigned(slot)), 6.0, [slot](State &st, double, bool p_first) {
-					if (p_first) {
-						const Action key = slot == 1 ? Action::Sidearm : (slot == 6 ? Action::Grenade : (slot == 7 ? Action::Knife : Action::Primary));
-						st.mapper().m2a_script_press(key); // the 1 / 2 / G / F keys' path
-					}
-					return st.ready() && st.g.weapon.active_slot == slot;
-				});
-				add(fmt("%s item %u", tag.c_str(), unsigned(slot)), 1.0, [slot, team, kit, tag](State &st, double p_t, bool) {
-					if (p_t < 0.1) {
-						return false; // one presented frame with the item in hand
-					}
-					const host::KitLoadout &l = st.loadout(team, kit);
-					const Bf3Viewmodel *vm = st.g.own_viewmodel();
-					const bf3::render::ViewmodelItem *item = vm != nullptr ? vm->current_item() : nullptr;
-					const bool ok = item != nullptr && lower(item->unlock) == lower(l.unlocks[slot]) && st.g.vm_item == st.g.item_of(team, l.defs[slot]);
-					st.row(fmt("%s.item_%u", tag.c_str(), unsigned(slot)), double(st.g.vm_item),
-							fmt("the viewmodel holds %s (PresentedWeapon::def -> kit unlock)", short_unlock(l.unlocks[slot]).c_str()), ok);
-					return true;
-				});
-			}
-			add(tag + " fire and reload", 8.0, [](State &st, double p_t, bool p_first) {
-				if (p_first) {
-					st.mark();
-					st.mapper().m2a_script_press(Action::Fire);
-					st.t_mark = 0;
+			for (const uint8_t slot : { uint8_t(1), uint8_t(7), uint8_t(6), uint8_t(0) }) {
+				kit_deploy(tag, team, kit, slot);
+				if (slot == 1 || slot == 0) {
+					kit_gaps(tag, slot);
+					kit_fire_reload(tag, slot);
+				} else if (slot == 7) {
+					kit_knife(tag);
+				} else {
+					kit_m67(tag);
 				}
-				if (st.t_mark == 0 && p_t > 0.5 && st.ready()) {
-					st.mapper().m2a_script_press(Action::Reload);
-					st.t_mark = p_t;
-				}
-				return st.t_mark > 0 && p_t > st.t_mark + 0.5 && st.ready();
-			});
-			add(tag + " fire rows", 1.0, [tag](State &st, double, bool) {
-				const size_t serv = st.g.server_shots.size() - st.mark_server;
-				// The magazine is refilled at the commit (ReloadThreshold); the soldier is ready again from there.
-				bool reload_started = false, reload_finished = false;
-				for (size_t i = st.mark_timed; i < st.g.server_timed.size(); ++i) {
-					reload_started = reload_started || st.g.server_timed[i].event.event == sw::weapon_events::kReloadStarted;
-					reload_finished = reload_finished || st.g.server_timed[i].event.event == sw::weapon_events::kReloadCommitted ||
-							st.g.server_timed[i].event.event == sw::weapon_events::kReloadFinished;
-				}
-				reload_finished = reload_finished && st.g.weapon.magazine == st.g.weapon.magazine_capacity;
-				st.row(tag + ".fires", double(serv), "the primary fired one shot (server)", serv == 1);
-				std::string seen;
-				for (size_t i = st.mark_timed; i < st.g.server_timed.size() && seen.size() < 200; ++i) {
-					seen += fmt(" %x@%u", st.g.server_timed[i].event.event, unsigned(st.g.server_timed[i].event.weapon_slot));
-				}
-				st.row(tag + ".reloads", reload_finished ? 1.0 : 0.0,
-						fmt("the primary reloaded (server ReloadStarted .. Committed, the magazine full: %d); timed events:%s", st.g.weapon.magazine, seen.c_str()),
-						reload_started && reload_finished);
-				return true;
-			});
-			if (team == 1 && kit == 0) {
-				// The knife on the target bot 1.2 m ahead, then the M67's fuse along the lane.
-				teleport_lane();
-				place_target(1.3f);
-				select_slot(7);
-				add("knife", 4.0, [](State &st, double p_t, bool p_first) {
-					if (p_first) {
-						st.mark();
-						if (!st.report.targets.empty()) {
-							sw::zone_aim_point(st.report.targets[0].target, sw::HitZone::Chest, st.point);
-							st.aim_at(st.eye(), st.point);
-						}
-					}
-					if (p_t >= 0.2 && p_t < 0.25) {
-						st.mapper().m2a_script_press(Action::Fire);
-					}
-					return p_t >= 1.5;
-				});
-				add("knife row", 1.0, [](State &st, double, bool) {
-					uint32_t hits = 0;
-					for (size_t i = st.mark_damage; i < st.g.server_damage.size(); ++i) {
-						const M2aServerRecorder::Damage &d = st.g.server_damage[i];
-						hits += d.event.attacker_slot == st.g.own_slot && d.event.target == 0 && d.applied ? 1 : 0;
-					}
-					st.row("e11.knife_hit", double(hits), "the knife hit the target bot (server damage applied)", hits >= 1);
-					return true;
-				});
-				teleport_lane();
-				select_slot(6);
-				add("M67 throw", 8.0, [](State &st, double p_t, bool p_first) {
-					if (p_first) {
-						st.mark();
-						st.detonation_time = -1;
-						st.mapper().script_view(st.mapper().view().yaw, float(25.0 * kPi / 180.0));
-						st.mapper().m2a_script_hold(Action::Fire, true);
-					}
-					if (p_t >= 0.5) {
-						st.mapper().m2a_script_hold(Action::Fire, false);
-					}
-					for (const host::PresentEvent &e : st.g.events) {
-						if (e.kind == host::PresentKind::Detonation && e.slot == st.g.own_slot && st.detonation_time < 0) {
-							st.detonation_time = e.time;
-						}
-					}
-					return p_t >= 5.5;
-				});
-				add("M67 row", 1.0, [](State &st, double, bool) {
-					sw::SimTime thrown = -1, spawned = -1;
-					for (size_t i = st.mark_server; i < st.g.server_shots.size(); ++i) {
-						if (st.g.server_shots[i].shot.weapon_slot == 6) {
-							thrown = st.g.server_shots[i].shot.time;
-							spawned = st.g.server_shots[i].shot.spawn_time;
-							break;
-						}
-					}
-					st.row("e11.m67_thrown", thrown >= 0 ? 1.0 : 0.0, "the M67 left the hand (server shot on slot 6)", thrown >= 0);
-					const double fuse = thrown >= 0 && st.detonation_time >= 0 ? sw::units_to_seconds(st.detonation_time - spawned) : -1.0;
-					st.row("e11.m67_fuse_s", fuse, fmt("Detonation event 3.6 +- 0.1 s after the projectile spawned (thrown %.3f s before it)",
-															thrown >= 0 ? sw::units_to_seconds(spawned - thrown) : 0.0),
-							fuse >= 3.5 && fuse <= 3.7);
-					return true;
-				});
-				select_slot(0);
 			}
 		}
 	}
@@ -1089,6 +1472,259 @@ void M2aCheck::State::build_kits() {
 		return p_t >= 0.3;
 	});
 	respawn_at([](State &st) { return st.lane ? st.lane->spawn_index : 0u; });
+}
+
+// E11: the slot's key (1 / 2 / G / F path), the item in hand, its deploy clip drawn, its clip coverage.
+void M2aCheck::State::kit_deploy(const std::string &p_tag, uint8_t p_team, uint8_t p_kit, uint8_t p_slot) {
+	add(fmt("%s deploy %u", p_tag.c_str(), unsigned(p_slot)), 6.0, [p_slot](State &st, double, bool p_first) {
+		if (p_first) {
+			st.mark();
+			const Action key = p_slot == 1 ? Action::Sidearm : (p_slot == 6 ? Action::Grenade : (p_slot == 7 ? Action::Knife : Action::Primary));
+			st.mapper().m2a_script_press(key);
+		}
+		return st.ready() && st.g.weapon.active_slot == p_slot;
+	});
+	add(fmt("%s item %u", p_tag.c_str(), unsigned(p_slot)), 1.0, [p_slot, p_team, p_kit, p_tag](State &st, double p_t, bool) {
+		if (p_t < 0.1) {
+			return false; // one presented frame with the item in hand
+		}
+		const host::KitLoadout &l = st.loadout(p_team, p_kit);
+		const Bf3Viewmodel *vm = st.g.own_viewmodel();
+		const bf3::render::ViewmodelItem *item = vm != nullptr ? vm->current_item() : nullptr;
+		const bool ok = item != nullptr && lower(item->unlock) == lower(l.unlocks[p_slot]) && st.g.vm_item == st.g.item_of(p_team, l.defs[p_slot]);
+		const std::string leaf = short_unlock(l.unlocks[p_slot]);
+		st.row(fmt("%s.item_%u", p_tag.c_str(), unsigned(p_slot)), double(st.g.vm_item), fmt("the viewmodel holds %s (PresentedWeapon::def -> kit unlock)", leaf.c_str()), ok);
+		const bool deployed = (st.clips_seen & (1u << uint32_t(bf3::anim::VmClip::Deploy))) != 0;
+		st.row(fmt("%s.deploy_clip_%u", p_tag.c_str(), unsigned(p_slot)), deployed ? 1.0 : 0.0, "the viewmodel's action layer drew its Deploy clip (or stand-in) on the switch",
+				deployed);
+		if (item != nullptr) {
+			const bf3::render::ViewmodelCoverage cov = bf3::render::viewmodel_coverage(*item);
+			std::string list;
+			for (const bf3::render::ViewmodelCoverageEntry &e : cov.entries) {
+				list += fmt(" %s: %s", e.what, e.applicable ? bf3::render::viewmodel_clip_source_name(e.source) : "n/a");
+				if (e.applicable && e.source != bf3::render::ViewmodelClipSource::Missing) {
+					list += fmt(" '%s' %.3f s;", e.name.c_str(), double(e.seconds));
+				} else {
+					list += ";";
+				}
+			}
+			st.row(fmt("%s.vm_clips_%u", p_tag.c_str(), unsigned(p_slot)), double(cov.stand_ins),
+					fmt("%s: a deploy, fire and (firearms) reload clip or a counted stand-in (value: stand-ins; %u clips, %u n/a):%s", leaf.c_str(), cov.clips,
+							cov.not_applicable, list.c_str()),
+					cov.covered);
+		} else {
+			st.row(fmt("%s.vm_clips_%u", p_tag.c_str(), unsigned(p_slot)), 0.0, "the viewmodel has an item in hand", false);
+		}
+		return true;
+	});
+}
+
+// E1 (every other kit firearm, once per def): automatic fire held for 6 shots, every gap == the automatic mode's
+// interval; a weapon without an automatic mode tapped every other display frame (faster than its interval), every gap
+// >= the mode's interval and the smallest == it (W1's M9 rule).
+void M2aCheck::State::kit_gaps(const std::string &p_tag, uint8_t p_slot) {
+	(void)p_tag;
+	add(fmt("gaps %u", unsigned(p_slot)), 8.0, [](State &st, double p_t, bool p_first) {
+		const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
+		if (p_first) {
+			st.counter = d == nullptr || st.gap_defs_done.count(st.g.weapon.def) != 0 ? 9u : 0u; // 9: nothing to do
+			st.t_mark = 0;
+			st.taps = 0;
+		}
+		if (st.counter == 9u) {
+			return true;
+		}
+		bool has_auto = false;
+		for (uint8_t m = 0; m < std::min<uint8_t>(d->mode_count, 4); ++m) {
+			has_auto = has_auto || d->modes[m].logic == core::gameplay::FireLogic::Automatic;
+		}
+		const bool automatic = d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic == core::gameplay::FireLogic::Automatic;
+		if (st.counter == 0) { // the automatic mode first (B), where there is one
+			if (has_auto && !automatic) {
+				if (p_t - st.t_mark > 0.3) {
+					st.t_mark = p_t;
+					st.mapper().m2a_script_press(Action::FireMode);
+				}
+				return false;
+			}
+			if (!st.ready()) {
+				return false;
+			}
+			st.mark();
+			st.counter = 1;
+			st.t_mark = p_t;
+		}
+		const size_t shots = st.g.predicted_shots.size() - st.mark_predicted;
+		if (st.counter == 1) {
+			if (shots >= 6 || st.g.weapon.magazine == 0) {
+				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.counter = 2;
+				st.t_mark = p_t;
+				return false;
+			}
+			if (automatic) {
+				st.mapper().m2a_script_hold(Action::Fire, true);
+			} else if (++st.taps % 2 == 1) {
+				st.mapper().m2a_script_press(Action::Fire);
+			}
+			return false;
+		}
+		return p_t >= st.t_mark + 0.5;
+	});
+	add(fmt("gap rows %u", unsigned(p_slot)), 1.0, [](State &st, double, bool) {
+		if (st.counter == 9u) {
+			return true;
+		}
+		const uint16_t def_id = st.g.weapon.def;
+		const sw::WeaponSimDef *d = st.def(def_id);
+		st.gap_defs_done.insert(def_id);
+		const std::vector<host::PredictedShot> pred(st.g.predicted_shots.begin() + std::ptrdiff_t(st.mark_predicted), st.g.predicted_shots.end());
+		const sw::FireModeDef &mode = d->modes[std::min<size_t>(st.g.weapon.mode, 3)];
+		const bool automatic = mode.logic == core::gameplay::FireLogic::Automatic;
+		sw::SimTime min_gap = 0, max_gap = 0;
+		size_t equal = 0, at_least = 0;
+		for (size_t i = 1; i < pred.size(); ++i) {
+			const sw::SimTime gap = pred[i].shot.time - pred[i - 1].shot.time;
+			min_gap = i == 1 ? gap : std::min(min_gap, gap);
+			max_gap = i == 1 ? gap : std::max(max_gap, gap);
+			equal += gap == mode.interval ? 1 : 0;
+			at_least += gap >= mode.interval ? 1 : 0;
+		}
+		const size_t gaps = pred.empty() ? 0 : pred.size() - 1;
+		const bool ok = gaps >= 4 && (automatic ? equal == gaps : (at_least == gaps && min_gap == mode.interval));
+		const std::string leaf = d->variant.empty() ? fmt("def%u", unsigned(def_id)) : short_unlock(d->variant);
+		st.row("e1.gaps." + leaf, double(min_gap),
+				fmt("%s: %zu gaps, %s the mode's interval %" PRId64 " units (min %" PRId64 ", max %" PRId64 ")", automatic ? "held automatic" : "tapped single", gaps,
+						automatic ? "every one ==" : "every one >= and the smallest ==", int64_t(mode.interval), int64_t(min_gap), int64_t(max_gap)),
+				ok);
+		const size_t serv = st.g.server_shots.size() - st.mark_server;
+		st.row("e1.gaps." + leaf + ".server", double(serv), "the server fired the same shots", serv == pred.size());
+		return true;
+	});
+}
+
+// E11: one shot, then a reload; the fire and reload clips drawn; server == predicted.
+void M2aCheck::State::kit_fire_reload(const std::string &p_tag, uint8_t p_slot) {
+	const std::string tag = fmt("%s.slot%u", p_tag.c_str(), unsigned(p_slot));
+	add(tag + " fire", 4.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			st.mapper().m2a_script_press(Action::Fire);
+		}
+		return p_t > 0.4 && st.ready();
+	});
+	add(tag + " fire clip", 1.0, [tag](State &st, double, bool) {
+		const size_t serv = st.g.server_shots.size() - st.mark_server, pred = st.g.predicted_shots.size() - st.mark_predicted;
+		st.row(tag + ".fires", double(serv), "one shot (server and predicted)", serv == 1 && pred == 1);
+		const uint32_t fire = (1u << uint32_t(bf3::anim::VmClip::Fire)) | (1u << uint32_t(bf3::anim::VmClip::FireSingle));
+		st.row(tag + ".fire_clip", (st.clips_seen & fire) != 0 ? 1.0 : 0.0, "the viewmodel drew a Fire / FireSingle clip (or stand-in)", (st.clips_seen & fire) != 0);
+		return true;
+	});
+	add(tag + " reload", 8.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mapper().m2a_script_press(Action::Reload);
+		}
+		return p_t > 0.5 && st.ready() && st.g.weapon.magazine >= st.g.weapon.magazine_capacity;
+	});
+	wait(0.4); // the server's last events
+	add(tag + " rows", 1.0, [tag, p_slot](State &st, double, bool) {
+		bool started = false, committed = false;
+		std::string seen;
+		for (size_t i = st.mark_timed; i < st.g.server_timed.size(); ++i) {
+			const sw::TimedWeaponEvent &e = st.g.server_timed[i].event;
+			started = started || (e.event == sw::weapon_events::kReloadStarted && e.weapon_slot == p_slot);
+			committed = committed || (e.event == sw::weapon_events::kReloadCommitted && e.weapon_slot == p_slot);
+			if (seen.size() < 160) {
+				seen += fmt(" %x@%u", e.event, unsigned(e.weapon_slot));
+			}
+		}
+		st.row(tag + ".reloads", committed ? 1.0 : 0.0, fmt("server ReloadStarted .. Committed, the magazine full (%d); timed events:%s", st.g.weapon.magazine, seen.c_str()),
+				started && committed && st.g.weapon.magazine >= st.g.weapon.magazine_capacity);
+		const uint32_t reload = (1u << uint32_t(bf3::anim::VmClip::Reload)) | (1u << uint32_t(bf3::anim::VmClip::ReloadEmpty));
+		st.row(tag + ".reload_clip", (st.clips_seen & reload) != 0 ? 1.0 : 0.0, "the viewmodel drew a Reload clip (or stand-in)", (st.clips_seen & reload) != 0);
+		st.events_equal_row(tag + ".events_equal");
+		return true;
+	});
+}
+
+// E11: the knife at the target bot 1.3 m ahead (on the lane).
+void M2aCheck::State::kit_knife(const std::string &p_tag) {
+	const std::string tag = p_tag + ".slot7";
+	place_target(1.3f);
+	add(tag + " knife", 4.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			if (!st.report.targets.empty()) {
+				sw::zone_aim_point(st.report.targets[0].target, sw::HitZone::Chest, st.point);
+				st.aim_at(st.eye(), st.point);
+			}
+		}
+		if (p_t >= 0.2 && p_t - st.dt < 0.2) {
+			st.mapper().m2a_script_press(Action::Fire);
+		}
+		return p_t >= 1.5 && st.ready();
+	});
+	add(tag + " knife rows", 1.0, [tag](State &st, double, bool) {
+		uint32_t hits = 0;
+		for (size_t i = st.mark_damage; i < st.g.server_damage.size(); ++i) {
+			const M2aServerRecorder::Damage &d = st.g.server_damage[i];
+			hits += d.event.attacker_slot == st.g.own_slot && d.event.target == 0 && d.applied ? 1 : 0;
+		}
+		st.row(tag + ".knife_hit", double(hits), "the knife hit the target bot (server damage applied)", hits >= 1);
+		const uint32_t clip = 1u << uint32_t(bf3::anim::VmClip::Knife);
+		st.row(tag + ".fire_clip", (st.clips_seen & clip) != 0 ? 1.0 : 0.0, "the viewmodel drew its Knife clip (or stand-in)", (st.clips_seen & clip) != 0);
+		st.events_equal_row(tag + ".events_equal");
+		return true;
+	});
+}
+
+// E11: the M67 thrown 25 degrees up the lane (the target bot moved out of its arc first); its fuse.
+void M2aCheck::State::kit_m67(const std::string &p_tag) {
+	const std::string tag = p_tag + ".slot6";
+	teleport_lane();
+	place_target(18.0f);
+	add(tag + " throw", 8.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			st.detonation_time = -1;
+			st.mapper().script_view(st.mapper().view().yaw, float(25.0 * kPi / 180.0));
+			st.mapper().m2a_script_hold(Action::Fire, true);
+		}
+		if (p_t >= 0.5) {
+			st.mapper().m2a_script_hold(Action::Fire, false);
+		}
+		for (const host::PresentEvent &e : st.g.events) {
+			if (e.kind == host::PresentKind::Detonation && e.slot == st.g.own_slot && st.detonation_time < 0) {
+				st.detonation_time = e.time; // the server's DetonationEvent time (DetonationWire::time)
+			}
+		}
+		return p_t >= 5.5;
+	});
+	add(tag + " rows", 1.0, [tag](State &st, double, bool) {
+		sw::SimTime thrown = -1, spawned = -1;
+		uint16_t def_id = sw::kNoWeapon;
+		for (size_t i = st.mark_server; i < st.g.server_shots.size(); ++i) {
+			if (st.g.server_shots[i].shot.weapon_slot == 6) {
+				thrown = st.g.server_shots[i].shot.time;
+				spawned = st.g.server_shots[i].shot.spawn_time;
+				def_id = st.g.server_shots[i].shot.def;
+				break;
+			}
+		}
+		const sw::WeaponSimDef *d = st.def(def_id);
+		st.row(tag + ".m67_thrown", thrown >= 0 ? 1.0 : 0.0, "the M67 left the hand (server shot on slot 6)", thrown >= 0);
+		const sw::SimTime fuse = thrown >= 0 && st.detonation_time >= 0 ? st.detonation_time - spawned : -1;
+		const sw::SimTime want = sw::SimTime(std::llround(3.6 * double(sw::kTimeUnitsPerSecond)));
+		st.row(tag + ".m67_fuse_s", fuse >= 0 ? sw::units_to_seconds(fuse) : -1.0,
+				fmt("DetonationEvent - ShotEvent::spawn_time == 3.6 s exactly (%" PRId64 " units; the def's TimeToLive %" PRId64 "); release to detonation %.4f s",
+						int64_t(fuse), d != nullptr ? int64_t(d->projectile.time_to_live) : int64_t(-1),
+						thrown >= 0 && st.detonation_time >= 0 ? sw::units_to_seconds(st.detonation_time - thrown) : -1.0),
+				fuse == want && d != nullptr && fuse == d->projectile.time_to_live);
+		const uint32_t clip = 1u << uint32_t(bf3::anim::VmClip::Throw);
+		st.row(tag + ".fire_clip", (st.clips_seen & clip) != 0 ? 1.0 : 0.0, "the viewmodel drew its Throw clip (or stand-in)", (st.clips_seen & clip) != 0);
+		st.events_equal_row(tag + ".events_equal");
+		return true;
+	});
 }
 
 // E10: per frame, the HUD model against the presented weapon; names and icons of every kit item.
@@ -1126,8 +1762,26 @@ void M2aCheck::State::build_hud() {
 		st.first_mismatch.clear();
 		return true;
 	});
-	// A scripted 6 s: taps, a reload, ADS, a sidearm switch; every frame compared.
-	add("hud: frames", 10.0, [](State &st, double p_t, bool) {
+	// A scripted 6 s: taps, a reload, ADS, a sidearm switch; every frame compared: the model against the presented
+	// weapon, and what the widgets drew (Bf3HudDrawRecord, a frame later: they draw after the check) against the
+	// presented spread and the camera's FOV (the crosshair gap) and hudmpscreen's Ammo_01 slot (the ammo).
+	add("hud: frames", 10.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.hud_expect.clear();
+			st.gap_frames = st.gap_bad = st.ammo_frames = st.ammo_place_bad = st.ammo_font_bad = st.hud_stale = 0;
+			st.gap_err_max = 0;
+			st.ammo_x_min = 1e9;
+			st.ammo_x_max = -1e9;
+			st.hud_first_bad.clear();
+		}
+		st.hud_draw_account(p_t);
+		if (p_t >= 1.0 && p_t - st.dt < 1.0) {
+			st.save_shot("hud_hip");
+		} else if (p_t >= 2.9 && p_t - st.dt < 2.9) {
+			st.save_shot("hud_reload");
+		} else if (p_t >= 4.7 && p_t - st.dt < 4.7) {
+			st.save_shot("hud_ads");
+		}
 		const host::PresentedWeapon &w = st.g.weapon;
 		const bf3::core::ui::HudWeapon &m = st.g.hud_model.weapon;
 		if (w.valid && st.g.alive) {
@@ -1168,6 +1822,16 @@ void M2aCheck::State::build_hud() {
 	});
 	add("hud rows", 1.0, [](State &st, double, bool) {
 		st.row("e10.frames", double(st.frames_checked), ">= 240 frames with a weapon compared", st.frames_checked >= 240);
+		st.row("e10.crosshair_gap", st.gap_err_max,
+				fmt("the drawn gap == (h/2) tan(presented spread) / tan(camera vfov / 2) +- 0.5 px, hidden in ADS (%" PRIu64 " frames, %" PRIu64 " bad%s)", st.gap_frames,
+						st.gap_bad, st.hud_first_bad.empty() ? "" : (", first: " + st.hud_first_bad).c_str()),
+				st.gap_frames >= 120 && st.gap_bad == 0);
+		st.row("e10.ammo_slot", st.ammo_x_max,
+				fmt("the magazine drawn in $HUD_medium with its right end at Ammo_01 x 1194 +- 2 stage px (x %.2f..%.2f; %" PRIu64 " frames, %" PRIu64 " misplaced, %" PRIu64
+					" wrong font)",
+						st.ammo_x_min, st.ammo_x_max, st.ammo_frames, st.ammo_place_bad, st.ammo_font_bad),
+				st.ammo_frames >= 120 && st.ammo_place_bad == 0 && st.ammo_font_bad == 0);
+		st.row("e10.draws_matched", double(st.hud_stale), "frames whose widget record named no recent model serial (<= 10, a redraw that lagged)", st.hud_stale <= 10);
 		st.row("e10.model_mismatches", double(st.mismatches), "the HUD model equals the presented weapon every frame" + (st.first_mismatch.empty() ? std::string() : " (first: " + st.first_mismatch + ")"),
 				st.mismatches == 0);
 		const bool loaded = st.g.hud != nullptr && st.g.hud->is_loaded() && st.g.hud->has_layout();
@@ -1177,7 +1841,10 @@ void M2aCheck::State::build_hud() {
 	select_slot(0);
 }
 
-// E19: the ADS camera through the game (world FOV in and out, the look scale, refused while sprinting).
+// E19 through the game, per display frame: the viewmodel FOV at hip; the world FOV 55 -> 40 within the aiming
+// controller's FOV time +- 1 display frame of the presented ADS level's change, and back; the look scale; the
+// camera's recoil offset against the interpolated predicted recoil (hip and aimed); the springs at rest within their
+// settle time once the input stops; zoom refused while deploying and while sprinting.
 void M2aCheck::State::build_ads() {
 	add("ads: lane", 5.0, [](State &st, double, bool) {
 		if (st.g.world != nullptr && st.s.shared_level() != nullptr) {
@@ -1187,59 +1854,179 @@ void M2aCheck::State::build_ads() {
 	});
 	teleport_lane();
 	select_slot(0);
-	add("ads in", 3.0, [](State &st, double p_t, bool p_first) {
-		Camera3D *cam = st.s.cameras().first_person();
+	full_magazine();
+	add("ads: hip viewmodel fov", 2.0, [](State &st, double p_t, bool) {
+		if (p_t < 0.2) {
+			return false;
+		}
+		const Bf3Viewmodel *vm = st.g.own_viewmodel();
+		const bf3::render::ViewmodelItem *item = vm != nullptr ? vm->current_item() : nullptr;
+		const double want = item != nullptr ? double(item->render_fov) : -1.0;
+		const double weapon = vm != nullptr ? double(vm->applied_weapon_fov()) : -1.0, arms = vm != nullptr ? double(vm->applied_arms_fov()) : -1.0;
+		st.row("e19.viewmodel_fov_hip", weapon, fmt("the viewmodel's FOV (weapon %.2f, arms %.2f) == the item's RenderFov %.1f at hip", weapon, arms, want),
+				item != nullptr && std::fabs(weapon - want) <= 0.05 && std::fabs(arms - want) <= 0.05 && std::fabs(want - 55.0) <= 1e-3);
+		return true;
+	});
+	for (const bool in : { true, false }) {
+		const std::string tag = in ? "in" : "out";
+		add("ads " + tag, 3.0, [in](State &st, double p_t, bool p_first) {
+			if (p_first) {
+				st.samples.clear();
+				st.mapper().m2a_script_hold(Action::Ads, in);
+			}
+			st.sample(p_t);
+			return p_t >= 1.0;
+		});
+		add("ads " + tag + " rows", 1.0, [in, tag](State &st, double, bool) {
+			const Bf3Viewmodel *vm = st.g.own_viewmodel();
+			const bf3::anim::AdsParams p = vm != nullptr ? vm->ads_params() : bf3::anim::AdsParams();
+			const double target = in ? double(p.zoom_fov) : double(p.hip_fov);
+			const double fov_time = in ? double(p.fov_in_seconds) : double(p.fov_out_seconds);
+			// t0: the first frame presenting the new ADS level (the predicted kZoomWasDown of the press's tick: the
+			// press waits for its tick, the camera cannot start before it).
+			size_t i0 = st.samples.size(), ir = st.samples.size();
+			for (size_t i = 0; i < st.samples.size(); ++i) {
+				if (i0 == st.samples.size() && st.samples[i].zoomed == in) {
+					i0 = i;
+				}
+				if (i0 < st.samples.size() && ir == st.samples.size() && std::fabs(double(st.samples[i].fov) - target) <= 0.05) {
+					ir = i;
+				}
+			}
+			const double end = st.samples.empty() ? 0.0 : double(st.samples.back().fov);
+			st.row(std::string("e19.fov_") + (in ? "aimed" : "hip"), end, fmt("== the %s FOV %.1f +- 0.05", in ? "zoom" : "hip", target), std::fabs(end - target) <= 0.05);
+			const bool found = i0 < st.samples.size() && ir < st.samples.size();
+			double frame = 0;
+			for (size_t i = i0; found && i <= ir; ++i) {
+				frame = std::max(frame, st.samples[i].dt);
+			}
+			// From the last frame of the old level to the first at the target: the frames' deltas i0..ir (the camera steps each
+			// frame by its own delta; a sample's t excludes its own).
+			const double elapsed = found ? st.samples[ir].t - st.samples[i0].t + st.samples[ir].dt : -1.0;
+			st.row("e19.fov_" + tag + "_s", elapsed,
+					fmt("reached the FOV time %.3f s +- 1 display frame (%.4f s) after the presented ADS level changed", fov_time, frame),
+					found && std::fabs(elapsed - fov_time) <= frame + 1e-6);
+			const double latency = i0 < st.samples.size() ? st.samples[i0].t : -1.0;
+			st.row("e19.ads_" + tag + "_latency_s", latency, "the press reached the presented ADS level (input -> command tick -> prediction -> frame; <= 0.1 s)",
+					latency >= 0.0 && latency <= 0.1);
+			if (in) {
+				const float scale = vm != nullptr ? vm->look_scale() : 0.0f;
+				st.row("e19.look_scale", double(scale), fmt("== LookSpeedMultiplier aimed %.3f", double(p.look_speed_zoom)), std::fabs(scale - p.look_speed_zoom) <= 1e-4f);
+				const double sens = double(st.mapper().mouse_sensitivity) / std::max(1e-9, double(st.g.base_sensitivity));
+				st.row("e19.mouse_scaled", sens, "the mapper's mouse sensitivity follows the look scale", std::fabs(sens - double(scale)) <= 1e-4);
+			}
+			return true;
+		});
+	}
+	// The recoil offset: bursts at hip and aimed, the view held; every frame the camera's angles minus the view and
+	// the presentation kick equal the presented (interpolated predicted) recoil within 1e-4 degrees.
+	automatic_mode();
+	add("ads: recoil", 6.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
-			st.fov_samples.clear();
+			st.frames_checked = st.mismatches = 0;
+			st.first_damage = 0; // the worst error (degrees)
+			st.t_mark = 0; // the largest presented recoil pitch
+			st.samples.clear();
+		}
+		st.mapper().m2a_script_hold(Action::Ads, p_t >= 1.2);
+		st.mapper().m2a_script_hold(Action::Fire, (p_t >= 0.2 && p_t < 0.8) || (p_t >= 1.6 && p_t < 2.2));
+		Camera3D *cam = st.s.cameras().first_person();
+		const Bf3Viewmodel *vm = st.g.own_viewmodel();
+		if (cam != nullptr && vm != nullptr && st.g.weapon.valid && vm->is_visible()) {
+			double yaw = 0, pitch = 0;
+			camera_view_angles_of(cam, yaw, pitch);
+			const ViewAngles &v = st.mapper().view(); // the view the viewmodel placed the camera from this frame
+			constexpr double kDeg = kPi / 180.0;
+			double dy = yaw - double(v.yaw);
+			dy = std::remainder(dy, 2.0 * kPi);
+			const double rp = (pitch - double(v.pitch)) / kDeg - double(vm->output().camera_recoil_pitch_deg);
+			const double ry = dy / kDeg - double(vm->output().camera_recoil_yaw_deg);
+			const double err = std::max(std::fabs(rp - double(st.g.weapon.recoil.pitch)), std::fabs(ry - double(st.g.weapon.recoil.yaw)));
+			++st.frames_checked;
+			st.first_damage = std::max(st.first_damage, err);
+			st.t_mark = std::max(st.t_mark, double(std::fabs(st.g.weapon.recoil.pitch)));
+			st.mismatches += err > 1e-4 ? 1 : 0;
+		}
+		st.sample(p_t);
+		return p_t >= 2.2;
+	});
+	// Then the input stops: the springs come to rest within their settle time (the longest configured one).
+	add("ads: springs", 4.0, [](State &st, double p_t, bool) {
+		st.mapper().m2a_script_hold(Action::Ads, false);
+		st.sample(2.2 + p_t);
+		return p_t >= 3.0;
+	});
+	add("ads: recoil rows", 1.0, [](State &st, double, bool) {
+		st.row("e19.recoil_offset", st.first_damage,
+				fmt("|camera - view - kick - presented recoil| <= 1e-4 deg every frame (%" PRIu64 " frames, %" PRIu64 " over; largest presented recoil pitch %.3f deg)",
+						st.frames_checked, st.mismatches, st.t_mark),
+				st.frames_checked >= 30 && st.mismatches == 0 && st.t_mark > 0.2);
+		const bf3::anim::ViewmodelTuning &t = st.g.vm_tuning;
+		const double settle = std::max({ double(t.sway.settle_seconds), double(t.bob.settle_seconds), double(t.kick.settle_seconds), double(t.camera_recoil.settle_seconds) });
+		// The input stops at the frame of the last Shot cue (the fire release; the view and the soldier are still).
+		size_t last = st.samples.size();
+		for (size_t i = 1; i < st.samples.size(); ++i) {
+			if (st.samples[i].shot_cues != st.samples[i - 1].shot_cues) {
+				last = i;
+			}
+		}
+		size_t rest = st.samples.size();
+		for (size_t i = last; i < st.samples.size(); ++i) {
+			if (st.samples[i].at_rest) {
+				rest = i;
+				break;
+			}
+		}
+		double frame = 0;
+		for (size_t i = last; i < st.samples.size() && i <= rest; ++i) {
+			frame = std::max(frame, st.samples[i].dt);
+		}
+		const bool found = last < st.samples.size() && rest < st.samples.size();
+		const double took = found ? st.samples[rest].t - st.samples[last].t : -1.0;
+		st.row("e19.springs_settle_s", took, fmt("the springs at rest within the longest configured settle time %.2f s (+ 1 frame) of the last shot", settle),
+				found && took <= settle + frame + 1e-6);
+		return true;
+	});
+	wait_ready("ads: ready", 6.0);
+	// Zoom refused while deploying: ADS held from the switch to the sidearm on; the presented ADS level and the FOV
+	// stay at hip until the deploy ends, and the zoom follows once it has (the control).
+	add("ads while deploying", 4.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.samples.clear();
+			st.mapper().m2a_script_select(1);
 			st.mapper().m2a_script_hold(Action::Ads, true);
 		}
-		st.fov_samples.push_back({ p_t, cam != nullptr ? float(cam->get_fov()) : 0.0f });
-		return p_t >= 1.0;
-	});
-	add("ads in rows", 1.0, [](State &st, double, bool) {
-		const Bf3Viewmodel *vm = st.g.own_viewmodel();
-		const bf3::anim::AdsParams p = vm != nullptr ? vm->ads_params() : bf3::anim::AdsParams();
-		double reached = -1;
-		for (const auto &[t, fov] : st.fov_samples) {
-			if (reached < 0 && std::fabs(double(fov) - double(p.zoom_fov)) <= 0.05) {
-				reached = t;
-			}
-		}
-		const double end = st.fov_samples.empty() ? 0.0 : double(st.fov_samples.back().second);
-		// From the press: the command of the next tick, its first prediction, the frame that presents it, then the FOV time.
-		const double limit = double(p.fov_in_seconds) + 0.1;
-		st.row("e19.fov_aimed", end, fmt("== the zoom FOV %.1f +- 0.05", double(p.zoom_fov)), std::fabs(end - double(p.zoom_fov)) <= 0.05);
-		st.row("e19.fov_in_s", reached, fmt("reached within the FOV time %.3f s + 0.1 s of input and presentation latency", double(p.fov_in_seconds)),
-				reached >= 0 && reached <= limit);
-		const float scale = vm != nullptr ? vm->look_scale() : 0.0f;
-		st.row("e19.look_scale", double(scale), fmt("== LookSpeedMultiplier aimed %.3f", double(p.look_speed_zoom)), std::fabs(scale - p.look_speed_zoom) <= 1e-4f);
-		const double sens = double(st.mapper().mouse_sensitivity) / std::max(1e-9, double(st.g.base_sensitivity));
-		st.row("e19.mouse_scaled", sens, "the mapper's mouse sensitivity follows the look scale", std::fabs(sens - double(scale)) <= 1e-4);
-		return true;
-	});
-	add("ads out", 3.0, [](State &st, double p_t, bool p_first) {
-		Camera3D *cam = st.s.cameras().first_person();
-		if (p_first) {
-			st.fov_samples.clear();
+		st.sample(p_t);
+		if (p_t >= 2.5) {
 			st.mapper().m2a_script_hold(Action::Ads, false);
+			return true;
 		}
-		st.fov_samples.push_back({ p_t, cam != nullptr ? float(cam->get_fov()) : 0.0f });
-		return p_t >= 1.0;
+		return false;
 	});
-	add("ads out rows", 1.0, [](State &st, double, bool) {
+	add("ads deploy rows", 1.0, [](State &st, double, bool) {
 		const Bf3Viewmodel *vm = st.g.own_viewmodel();
 		const bf3::anim::AdsParams p = vm != nullptr ? vm->ads_params() : bf3::anim::AdsParams();
-		double reached = -1;
-		for (const auto &[t, fov] : st.fov_samples) {
-			if (reached < 0 && std::fabs(double(fov) - double(p.hip_fov)) <= 0.05) {
-				reached = t;
+		uint32_t deploying = 0, zoomed = 0, allowed = 0, zoomed_after = 0;
+		float lowest = 1000.0f;
+		for (const Sample &x : st.samples) {
+			if (x.phase == sw::WeaponPhase::Deploying) {
+				++deploying;
+				zoomed += x.zoomed ? 1 : 0;
+				allowed += x.ads_allowed ? 1 : 0;
+				lowest = std::min(lowest, x.fov);
+			} else if (x.phase == sw::WeaponPhase::Ready && x.zoomed) {
+				++zoomed_after;
 			}
 		}
-		const double end = st.fov_samples.empty() ? 0.0 : double(st.fov_samples.back().second);
-		st.row("e19.fov_hip", end, fmt("== the hip FOV %.1f +- 0.05", double(p.hip_fov)), std::fabs(end - double(p.hip_fov)) <= 0.05);
-		st.row("e19.fov_out_s", reached, fmt("reached within the FOV time %.3f s + 0.1 s", double(p.fov_out_seconds)), reached >= 0 && reached <= double(p.fov_out_seconds) + 0.1);
+		st.row("e19.deploy_frames", double(deploying), "frames presented while deploying with ADS held (> 5)", deploying > 5);
+		st.row("e19.ads_refused_deploying", double(zoomed + allowed),
+				fmt("no presented zoom (%u) and ads_allowed false (%u allowed) while deploying; the FOV stayed at the hip %.1f (lowest %.2f)", zoomed, allowed, double(p.hip_fov),
+						double(lowest)),
+				deploying > 5 && zoomed == 0 && allowed == 0 && std::fabs(double(lowest) - double(p.hip_fov)) <= 0.05);
+		st.row("e19.zoom_after_deploy", double(zoomed_after), "the held ADS zooms once the deploy has ended (frames)", zoomed_after > 0);
 		return true;
 	});
+	select_slot(0);
 	// Sprint, then ask for ADS: refused (the predicted zoom stays off, the FOV stays at the hip value).
 	add("ads while sprinting", 4.0, [](State &st, double p_t, bool p_first) {
 		Camera3D *cam = st.s.cameras().first_person();
@@ -1375,13 +2162,15 @@ void M2aCheck::State::build_play() {
 			mp.script_hold(InputAction::Sprint, false);
 			mp.m2a_script_hold(Action::Fire, std::fmod(cyc, 0.7) < 0.4);
 			mp.m2a_script_hold(Action::Ads, int(p_t / 8.0) % 2 == 1);
-			// The firefight shot: a bot within 45 m in the line of sight (the check's collision world).
+			// The firefight and ADS shots: a bot within 45 m in the line of sight (the check's collision world), drawn
+			// (tp's crowd built) and in the middle fifth of the frame (the aim has settled on it).
 			bool seen = st.g.world == nullptr;
+			const sim::Vec3 aim = { o.position[0], o.position[1] + std::max(0.5f, o.eye_height - 0.35f), o.position[2] };
 			if (!seen) {
-				const sim::Vec3 aim = { o.position[0], o.position[1] + std::max(0.5f, o.eye_height - 0.35f), o.position[2] };
-				seen = !st.g.world->ray(eye, { aim[0] - eye[0], aim[1] - eye[1], aim[2] - eye[2] }, sim::query_mask::kMovement);
+				seen = !st.g.world->ray(eye, { aim[0] - eye[0], aim[1] - eye[1], aim[2] - eye[2] }, sim::query_mask::kProjectile);
 			}
-			if (!st.play_shot_taken[3] && cyc >= 6.5 && best < 45.0f && seen) {
+			const bool framed = seen && best < 45.0f && st.g.crowd_built && st.centred(Vector3(aim[0], aim[1], aim[2]), 0.1f);
+			if (!st.play_shot_taken[3] && cyc >= 6.5 && framed) {
 				st.play_shot_taken[3] = st.save_shot("gx_firefight");
 			}
 			if (!st.g.weapon.zoomed) {
@@ -1389,7 +2178,7 @@ void M2aCheck::State::build_play() {
 			} else if (st.play_zoomed_since < 0) {
 				st.play_zoomed_since = p_t;
 			}
-			if (!st.play_shot_taken[1] && int(p_t / 8.0) % 2 == 1 && st.play_zoomed_since >= 0 && p_t - st.play_zoomed_since >= 0.4) {
+			if (!st.play_shot_taken[1] && int(p_t / 8.0) % 2 == 1 && st.play_zoomed_since >= 0 && p_t - st.play_zoomed_since >= 0.4 && framed) {
 				st.play_shot_taken[1] = st.save_shot("gx_ads");
 			}
 		} else {
@@ -1460,7 +2249,8 @@ void M2aCheck::State::build_play() {
 		st.row("play.bad_gunplay_events", double(cs.bad_gunplay_events), "== 0", cs.bad_gunplay_events == 0);
 		st.row("play.events_drained", double(st.g.events_drained), "> 0 events flowed", st.g.events_drained > 0);
 		st.row("play.remote_shots", double(st.g.remote_shots_seen), "> 0 RemoteShot events (bt's bots fire)", !OPENBF3_M2A_HAVE_BT || st.g.remote_shots_seen > 0);
-		st.row("play.killed_by_enemy", double(st.g.deaths_by_enemy), "own deaths by another soldier (reported)", true);
+		st.row("play.killed_by_enemy", double(st.g.deaths_by_enemy), "own deaths by another soldier (>= 1 with bt's bots: they fight back)",
+				!OPENBF3_M2A_HAVE_BT || st.g.deaths_by_enemy >= 1);
 		st.row("play.firefight_bots", double(st.g.firefight_bots), "bt's firefight bots in the match (reported)", true);
 		const bool crowd_ok = st.g.crowd != nullptr && st.g.crowd_built;
 		st.row("play.crowd_built", crowd_ok ? 1.0 : 0.0, "tp's 3p soldiers drawn (Bf3GameCrowd built; the capsules hidden)", crowd_ok);
@@ -1844,7 +2634,11 @@ void M2aCheck::State::build_fx() {
 		}
 		const sw::SurfaceMaterialTable &materials = *shared->gunplay->materials;
 		const float eye_h = st.f().eye_height_curr > 0.5f ? st.f().eye_height_curr : 1.6f;
+		st.water_search(materials, *shared, eye_h);
 		for (FxSurface &surface : st.fx_surfaces) {
+			if (surface.material == kFxWater) {
+				continue; // water_search
+			}
 			for (size_t i = 0; i < shared->spawns.size() && !surface.found; ++i) {
 				const sim::Vec3 &feet = shared->spawns[i].position;
 				const sim::Vec3 eye = { feet[0], feet[1] + eye_h, feet[2] };
@@ -1870,6 +2664,11 @@ void M2aCheck::State::build_fx() {
 				}
 			}
 			const FxNamedCell *named = fx_named_cell(surface.material);
+			if (surface.material == kFxWater && !surface.found) {
+				st.note(fmt("water (18): %" PRIu64 " water tags in %" PRIu64 " tiles of %" PRIu64 " tags searched, %" PRIu64 " rays from the spawns: none reachable (Metro: no water)",
+						st.water_tags, st.water_tag_tiles, st.tags_searched, st.water_rays));
+				continue;
+			}
 			st.note(surface.found ? fmt("%s (%u): spawn %u, %.1f m to (%.1f, %.1f, %.1f)", named->name, unsigned(surface.material), surface.spawn,
 											double(surface.distance), double(surface.point[0]), double(surface.point[1]), double(surface.point[2]))
 								  : fmt("%s (%u): no triangle within 30 m of a spawn", named->name, unsigned(surface.material)));
@@ -1878,8 +2677,10 @@ void M2aCheck::State::build_fx() {
 		st.fx_accounting = true;
 		return true;
 	});
-	for (size_t k = 0; k < 2; ++k) {
-		respawn_at([k](State &st) { return st.fx_surfaces[k].found ? st.fx_surfaces[k].spawn : 0u; });
+	for (size_t k = 0; k < 3; ++k) {
+		// The water segment only when the search found one (a new life is also a shot-id reuse risk, §9.5).
+		respawn_at([k](State &st) { return st.fx_surfaces[k].found ? st.fx_surfaces[k].spawn : 0u; },
+				[k](State &st) { return k < 2 || st.fx_surfaces[k].found; });
 		select_slot(0);
 		automatic_mode();
 		add(fmt("fx: segment %zu aim", k), 2.0, [k](State &st, double, bool p_first) {
@@ -1932,7 +2733,7 @@ void M2aCheck::State::build_fx() {
 				}
 				st.fx_oil_particles = n;
 			}
-			if (!st.fx_surfaces[k].found || st.fx_seg_shots >= kFxShots / 2) {
+			if (!st.fx_surfaces[k].found || st.fx_seg_shots >= (st.fx_surfaces[k].material == kFxWater ? kFxWaterShots : kFxShots / 2)) {
 				st.mapper().m2a_script_hold(Action::Fire, false);
 				return st.fx_oil_particles >= 0 || !st.fx_oil_started || k > 0;
 			}
@@ -2041,6 +2842,21 @@ void M2aCheck::State::build_fx() {
 			const FxNamedCell *named = fx_named_cell(surface.material);
 			const std::array<uint64_t, 4> row = st.fx_mat.count(surface.material) ? st.fx_mat[surface.material] : std::array<uint64_t, 4>{};
 			const std::string tag = std::string("e8.5.") + named->name;
+			if (surface.material == kFxWater) {
+				// E8 (5): Metro's collision tags searched for Water (18) reachable from a spawn; without one the water
+				// cell is fx.install's Caspian row (same trigger code, headless).
+				if (!surface.found) {
+					st.row(tag, double(st.water_tags),
+							fmt("Metro: no water (%" PRIu64 " Water tags in %" PRIu64 " tiles of %" PRIu64 " tags searched, none reachable from a spawn over %" PRIu64
+								" rays): the water cell is fx.install.cells' Caspian row",
+									st.water_tags, st.water_tag_tiles, st.tags_searched, st.water_rays),
+							st.tags_searched > 0);
+					continue;
+				}
+				st.row(tag + ".effect", double(row[1]), fmt("every impact on it started %s (%" PRIu64 " of %" PRIu64 ")", named->effect, row[1], row[0]), row[0] > 0 && row[1] == row[0]);
+				st.row(tag + ".no_decal", double(row[2]), "water leaves no decal", row[2] == 0);
+				continue;
+			}
 			st.row(tag + ".effect", double(row[1]), fmt("every impact on it started %s (%" PRIu64 " of %" PRIu64 ")%s", named->effect, row[1], row[0],
 															 st.fx_first_bad.empty() ? "" : (", first other: " + st.fx_first_bad).c_str()),
 					surface.found && row[0] > 0 && row[1] == row[0]);
@@ -2048,7 +2864,7 @@ void M2aCheck::State::build_fx() {
 		}
 		std::string others;
 		for (const auto &[m, row] : st.fx_mat) {
-			if (m != 8 && m != 2) {
+			if (m != 8 && m != 2 && m != kFxWater) {
 				others += fmt(" %u: %" PRIu64 " impacts (%" PRIu64 " as named)", unsigned(m), row[0], row[1]);
 			}
 		}
@@ -2058,7 +2874,6 @@ void M2aCheck::State::build_fx() {
 		st.row("e8.5.soldier", double(st.fx_soldier_ok), fmt("soldier contacts started %s (%" PRIu64 " of %" PRIu64 "), no decal (%" PRIu64 ")", kFxSoldierEffect, st.fx_soldier_ok,
 														 st.fx_soldier_starts, st.fx_soldier_decals),
 				st.fx_soldier_starts > 0 && st.fx_soldier_ok == st.fx_soldier_starts && st.fx_soldier_decals == 0);
-		st.row("e8.5.water", 0.0, "Metro: no water (the water cell is fx.install.cells' Caspian row, E8 (5))", true);
 		const uint64_t tracers = now.tracers - a.tracers, tracer_shots = now.tracer_shots - a.tracer_shots;
 		st.row("e8.7.tracers", double(tracers), fmt("tracer starts == shots flagged kTracer with a tracer effect (%" PRIu64 "; %" PRIu64 " OwnShot events flagged)", tracer_shots, st.fx_tracer_flags),
 				tracers == tracer_shots && tracer_shots == st.fx_tracer_flags && tracers > 0);
@@ -2266,6 +3081,7 @@ bool M2aCheck::frame(uint64_t p_now_ns, double p_dt) {
 		}
 	}
 	st.case_t += p_dt;
+	st.observe();
 	if (st.fx_accounting) {
 		st.fx_account(); // every frame from the surfaces to the rows: no event / start / cue is missed between steps
 	}

@@ -1063,6 +1063,13 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 	}
 	m2a_step_parts(*this, g, f, p_now_ns, p_delta, camera, own_vm, free_camera, others, n_others);
 	g.ms_total = ms_since(frame_t0); // E14's M2a main-thread additions (the labels and the check below are not counted)
+	// M1's status line names S1's bots (update_hud, just refreshed when its timer is 0): with bt's firefight bots the
+	// M2a scene says so instead.
+	if (hud_ != nullptr && done_ && hud_timer_ == 0.0 && g.firefight_bots > 0) {
+		const uint32_t shown = std::min<uint32_t>(f.other_count, g.firefight_bots + uint32_t(walkers_));
+		hud_->set_text(get_status_text() + to_godot(" | firefight bots " + std::to_string(g.firefight_bots) + (g.firefight_pairs ? " (bt, pairs)" : " (bt, free)") +
+				", others in the snapshot " + std::to_string(shown)));
+	}
 	// The labels: kill counter, next spawn, death screen with the respawn countdown.
 	const Vector2 vp = get_viewport() != nullptr ? get_viewport()->get_visible_rect().size : Vector2(1280, 720);
 	if (g.score_label != nullptr) {
