@@ -1205,3 +1205,25 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_w3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_w3_cl_dir}")
 endif()
+
+# M2a gx (docs/design/m2a-gx.md §5): the playable scene's in-game checks. godot.m2a runs --m2a-check on
+# res://scenes/m2a_metro.tscn (range, reload, hud, ads, audio, fx; a skipped case names its track), godot.m2a.kits
+# the 8 loadouts (E11), godot.m2a.play the scripted 5-minute play run (0 ERROR lines). Screenshots go to
+# $ENV{OPENBF3_GX_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/gx (gitignored, outside the
+# worktree). Exit 77 = skipped without OPENBF3_GODOT, an install, a window or a rendering device, or while
+# OPENBF3_USER_ACTIVE_FLAG exists. godot.m2a_firefight (E13 / E14 with bt's bots) and godot.m2a_load (E16 on the M2a
+# scene: godot_m1_load.cmake with -DSCENE) are the integrator's merge-pass rows. All share the project and its DLL
+# with the other godot.* rows and read the viewport (RUN_SERIAL). WINDOW: label window, the user-away tenure.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m2a godot_m2a.cmake WINDOW TIMEOUT 900)
+    openbf3_godot_row(godot.m2a.kits godot_m2a.cmake WINDOW TIMEOUT 900 ARGS -DCASES=kits)
+    openbf3_godot_row(godot.m2a.play godot_m2a.cmake WINDOW TIMEOUT 1500 ARGS -DCASES=play -DNO_ERRORS=1 "-DARGS=--respawn=3")
+    openbf3_godot_row(godot.m2a_firefight godot_m2a_firefight.cmake WINDOW TIMEOUT 900)
+    openbf3_godot_row(godot.m2a_load godot_m1_load.cmake WINDOW TIMEOUT 300 ARGS -DSCENE=res://scenes/m2a_metro.tscn -DUSER_ARGS=--bots=0)
+    set_tests_properties(godot.m2a godot.m2a.kits godot.m2a.play godot.m2a_firefight godot.m2a_load PROPERTIES RUN_SERIAL TRUE)
+    openbf3_cost(godot.m2a 1 80)
+    openbf3_cost(godot.m2a.kits 1 80)
+    openbf3_cost(godot.m2a.play 1 330)
+    openbf3_cost(godot.m2a_firefight 1 30)
+    openbf3_cost(godot.m2a_load 1 50)
+endif()
