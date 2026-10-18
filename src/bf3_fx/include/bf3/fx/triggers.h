@@ -197,6 +197,35 @@ struct DecalCue {
 	uint64_t seed = 0; // trigger_seed(.., Decal, 0): rotation
 	float start_age = 0.0f;
 };
+// fx3: a DecalTemplateData as the decal pool draws it. Size + U x RandomSize metres square, rotated Rotation +-
+// RandomRotation degrees about the normal [inferred: the field names; retail Size 0.2, RandomSize 0.16, RandomRotation
+// 180 on the concrete hit]. The texture is the diffuse TextureAsset beside it (pick_decal_texture [inferred: the
+// template names no texture; its ShaderGraph binds them]).
+struct DecalTemplate {
+	std::string name;
+	float size = 0.2f;
+	float random_size = 0.0f;
+	float rotation = 0.0f; // degrees
+	float random_rotation = 0.0f; // degrees
+	float normal_offset = 0.001f;
+	float clip_angle = 70.0f; // degrees (carried; Godot's Decal has no clip angle)
+	uint32_t tiles_x = 1, tiles_y = 1, tile_x = 0, tile_y = 0; // AtlasTile (a tiled decal draws its whole texture: counted)
+	std::string texture; // "" none found
+};
+// Reads p_name's DecalTemplateData (bounded reads; an error for a missing or malformed partition). p_textures: every
+// TextureAsset partition name of the level (lowercase).
+core::Result<DecalTemplate> load_decal_template(const core::EbxResolver &p_db, std::string_view p_name, std::span<const std::string> p_textures);
+// The diffuse texture of a decal [inferred]: "<decal>_d" when it exists, else the "_d" / "_c" texture in the decal's
+// folder with the longest common name prefix (not a "glow" one), else "". decal_glass_s_01 -> decal_glass_01_d,
+// decal_metalarmor_s_01 -> decal_metal_s_01_d, decal_scorchmark_m_01 -> decal_scorch_01_c.
+std::string pick_decal_texture(std::string_view p_decal, std::span<const std::string> p_textures);
+// One placement's square size (metres) and rotation (radians) from the cue's seed.
+struct DecalPlacement {
+	float size = 0.2f;
+	float rotation = 0.0f;
+};
+DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed);
+
 // An impact sound to play (au3: ImpactAudio::play_impact).
 struct ImpactSoundCue {
 	std::string_view patch; // ImpactCell::impact_sound (valid while the table lives)

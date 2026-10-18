@@ -413,6 +413,41 @@ TEST_CASE("frames, offsets, aim and fallback muzzles, seeds") {
 	CHECK(detonation_seed(kMatch, 1, 2) != detonation_seed(kMatch, 1, 3));
 }
 
+TEST_CASE("decal textures and placements") {
+	const std::vector<std::string> tex{ "decals/impacts/concrete/decal_concrete_s_01_d", "decals/impacts/concrete/decal_concrete_s_01_n",
+		"decals/impacts/glass/decal_glass_01_d", "decals/impacts/metal/decal_metal_s_01_d", "decals/impacts/metal/decal_metalglow_01_d",
+		"decals/impacts/scorch/d_scorch_01_n", "decals/impacts/scorch/decal_scorch_01_c", "decals/impacts/decal_s_01_d" };
+	CHECK(pick_decal_texture("Decals/Impacts/Concrete/Decal_Concrete_S_01", tex) == "decals/impacts/concrete/decal_concrete_s_01_d");
+	CHECK(pick_decal_texture("decals/impacts/glass/decal_glass_s_01", tex) == "decals/impacts/glass/decal_glass_01_d");
+	CHECK(pick_decal_texture("decals/impacts/metal/decal_metalarmor_s_01", tex) == "decals/impacts/metal/decal_metal_s_01_d");
+	CHECK(pick_decal_texture("decals/impacts/scorch/decal_scorchmark_m_01", tex) == "decals/impacts/scorch/decal_scorch_01_c");
+	CHECK(pick_decal_texture("decals/impacts/cloth/decal_cloth_s_01", tex).empty());
+	CHECK(pick_decal_texture("", tex).empty());
+	DecalTemplate d;
+	d.size = 0.2f;
+	d.random_size = 0.16f;
+	d.random_rotation = 180.0f;
+	float lo = 1, hi = 0, rmin = 10, rmax = -10;
+	for (uint64_t s = 0; s < 500; ++s) {
+		const DecalPlacement p = decal_placement(d, fx_mix64(s));
+		lo = std::min(lo, p.size);
+		hi = std::max(hi, p.size);
+		rmin = std::min(rmin, p.rotation);
+		rmax = std::max(rmax, p.rotation);
+	}
+	CHECK(lo >= 0.2f);
+	CHECK(hi <= 0.36f);
+	CHECK(hi - lo > 0.12f);
+	CHECK(rmin >= -3.1416f);
+	CHECK(rmax <= 3.1416f);
+	CHECK(rmax - rmin > 5.5f);
+	// Templates from synthetic EBX are covered by fx.install.cells on the retail ones; a missing one is an error.
+	fxt::MemResolver db;
+	CHECK_FALSE(load_decal_template(db, "decals/none", tex).ok());
+	REQUIRE(db.set("decals/syn/target", fxt::target(3)));
+	CHECK_FALSE(load_decal_template(db, "decals/syn/target", tex).ok()); // not a DecalTemplateData
+}
+
 TEST_CASE("name lists: fire table blueprints, impact sounds, effects, decals") {
 	std::unique_ptr<Syn> s = make_syn();
 	const std::vector<std::string> bp = s->fire->blueprints();
@@ -506,6 +541,7 @@ TEST_CASE("shots: 1p and 3p muzzles, shells per firearm shot, fallbacks, knife, 
 	CHECK(t.stats().shells == 3);
 	t.set_config(cfg);
 	// E8 (3)'s rule on the synthetic 1p muzzle (component 1, SpawnProbability 0.75): 1,000 OwnShots.
+	t.on_muzzles(std::span<const MuzzleSample>(&own, 1));
 	uint32_t flash = 0, shots = 0;
 	for (uint32_t i = 100; i < 1100; ++i) {
 		hk::PresentEvent e = ev(hk::PresentKind::OwnShot, 1, i, 0, { 0, 1.6f, 0 }, { 0, 0, 1 });
@@ -798,8 +834,8 @@ TEST_CASE("timelines: pending until the clock passes, start ages, invalid clocks
 	CHECK(t.starts().empty());
 	t.on_events({}, clock_at(5 * u + u / 2), kNear);
 	CHECK(t.pending() == 0);
-	REQUIRE(starts_of(t, kMuzz1p).size() == 1);
-	CHECK(starts_of(t, kMuzz1p)[0]->start_age == doctest::Approx(0.5f));
+	REQUIRE(starts_of(t, kMuzz3p).size() == 1);
+	CHECK(starts_of(t, kMuzz3p)[0]->start_age == doctest::Approx(0.5f));
 	// An invalid render clock holds a remote shot; Immediate events never wait.
 	hk::PresentClock invalid = clock_at(0);
 	invalid.render_valid = false;
@@ -815,6 +851,7 @@ TEST_CASE("timelines: pending until the clock passes, start ages, invalid clocks
 	t.on_events({}, clock_at(u), kNear);
 	CHECK(t.pending() == 0);
 	REQUIRE(starts_of(t, kMuzz3p).size() == 1);
+	CHECK(starts_of(t, kMuzz3p)[0]->slot == 4);
 	CHECK(starts_of(t, kMuzz3p)[0]->start_age == doctest::Approx(1.0f));
 	// The pending list keeps the newest kMaxPendingStarts; the oldest are dropped and counted.
 	std::vector<hk::PresentEvent> many;
@@ -827,12 +864,12 @@ TEST_CASE("timelines: pending until the clock passes, start ages, invalid clocks
 	CHECK(t.stats().pending_now == kMaxPendingStarts);
 	t.on_events({}, clock_at(101 * u), kNear);
 	CHECK(t.pending() == 0);
-	CHECK(starts_of(t, kMuzz1p).size() == kMaxPendingStarts);
+	CHECK(starts_of(t, kMuzz3p).size() == kMaxPendingStarts);
 	// A huge age clamps to kMaxStartAge.
 	hk::PresentEvent old = ev(hk::PresentKind::OwnShot, 1, 5000, 0, { 0, 1.6f, 0 }, { 0, 0, 1 }, 0);
 	t.on_events(std::span<const hk::PresentEvent>(&old, 1), clock_at(int64_t(1.0e7) * u), kNear);
-	REQUIRE(starts_of(t, kMuzz1p).size() == 1);
-	CHECK(starts_of(t, kMuzz1p)[0]->start_age == kMaxStartAge);
+	REQUIRE(starts_of(t, kMuzz3p).size() == 1);
+	CHECK(starts_of(t, kMuzz3p)[0]->start_age == kMaxStartAge);
 }
 
 TEST_CASE("duplicates: a replayed stream starts nothing twice (E8 (7) double starts counted)") {
@@ -934,6 +971,7 @@ TEST_CASE("hostile events and inputs: non-finite, unknown kinds and defs, no tab
 	// A named blueprint that does not compile is counted once per start attempt.
 	auto broken = std::make_shared<FireEffectTable>(*small_fire_table());
 	broken->defs[0].first_person[0].blueprint = "fx/syn/missing";
+	broken->defs[0].third_person[0].blueprint = "fx/syn/missing"; // no muzzle sample: the 3p list plays
 	FxTriggers b(world, *s->library, broken, {});
 	hk::PresentEvent own = ev(hk::PresentKind::OwnShot, 1, 61, 0, { 0, 1.6f, 0 }, { 0, 0, 1 });
 	b.on_events(std::span<const hk::PresentEvent>(&own, 1), clock_at(0), kNear);
@@ -1409,14 +1447,32 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 		CHECK(t.decals()[0].decal == kScorchDecal);
 		CHECK(metro->sources->level->partition_by_name(kScorchDecal) != nullptr);
 	}
-	// Every decal the cells name and the scorch mark is a DecalTemplateData in the level.
-	for (const std::string &d : impact_decal_names(*metro->impacts)) {
-		const core::EbxPartition *p = metro->sources->level->partition_by_name(d);
-		CHECK_MESSAGE(p != nullptr, d);
-		if (p != nullptr) {
-			CHECK_MESSAGE(p->primary().type_name() == "DecalTemplateData", d);
+	// Every decal the cells name and the scorch mark is a DecalTemplateData in the level with a diffuse texture.
+	std::vector<std::string> textures;
+	for (const core::EbxLibrary::Entry &e : metro->sources->level->entries()) {
+		if (e.partition->primary().type_name() == "TextureAsset") {
+			textures.emplace_back(e.name);
 		}
 	}
+	size_t with_texture = 0;
+	for (const std::string &d : impact_decal_names(*metro->impacts)) {
+		core::Result<DecalTemplate> dt = load_decal_template(*metro->sources->level, d, textures);
+		CHECK_MESSAGE(dt.ok(), (dt.ok() ? d : dt.error().message));
+		if (!dt.ok()) {
+			continue;
+		}
+		with_texture += dt->texture.empty() ? 0 : 1;
+		const std::string l = leaf(d);
+		if (l == "decal_concrete_s_01" || l == "decal_brick_s_01" || l == "decal_glass_s_01" || l == "decal_metalarmor_s_01" || l == "decal_scorchmark_m_01") {
+			CHECK_MESSAGE(!dt->texture.empty(), d); // the named cells' decals and the scorch mark
+			CHECK_MESSAGE(metro->sources->level->partition_by_name(dt->texture) != nullptr, dt->texture);
+		}
+		CHECK_MESSAGE(dt->tiles_x * dt->tiles_y >= 1, d);
+		MESSAGE("decal " << leaf(d) << ": size " << dt->size << " + " << dt->random_size << ", rotation " << dt->rotation << " +- " << dt->random_rotation
+						 << ", tiles " << dt->tiles_x << " x " << dt->tiles_y << ", texture " << (dt->texture.empty() ? std::string("-") : leaf(dt->texture)));
+	}
+	MESSAGE("decals: " << with_texture << " of " << impact_decal_names(*metro->impacts).size() << " with a diffuse texture");
+	CHECK(with_texture + 2 >= impact_decal_names(*metro->impacts).size()); // cloth and plastic have none on Metro
 	MESSAGE("Metro water: " << std::string(metro_water ? "a Water (18) triangle exists" : "no water") << " (" << triangles_of[18] << " triangles)");
 	// The Caspian water fallback: the same trigger code on Caspian's grid (MP_007, lazily read).
 	const auto t5 = std::chrono::steady_clock::now();

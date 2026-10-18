@@ -377,6 +377,91 @@ std::vector<std::string> impact_decal_names(const ImpactTable &p_table) {
 	return { names.begin(), names.end() };
 }
 
+std::string pick_decal_texture(std::string_view p_decal, std::span<const std::string> p_textures) {
+	const std::string decal = detail::canonical_name(p_decal);
+	const size_t slash = decal.rfind('/');
+	const std::string folder = slash == std::string::npos ? std::string() : decal.substr(0, slash + 1);
+	const std::string leaf = decal.substr(folder.size());
+	std::string best;
+	size_t best_prefix = 0;
+	for (const std::string &t : p_textures) {
+		if (t == decal + "_d") {
+			return t;
+		}
+		if (t.size() <= folder.size() || t.compare(0, folder.size(), folder) != 0 || t.find('/', folder.size()) != std::string::npos) {
+			continue;
+		}
+		const std::string_view tl = std::string_view(t).substr(folder.size());
+		const bool diffuse = tl.ends_with("_d") || tl.ends_with("_c");
+		if (!diffuse || tl.find("glow") != std::string_view::npos) {
+			continue;
+		}
+		size_t prefix = 0;
+		while (prefix < tl.size() && prefix < leaf.size() && tl[prefix] == leaf[prefix]) {
+			++prefix;
+		}
+		if (prefix > best_prefix || (prefix == best_prefix && !best.empty() && t < best)) {
+			best_prefix = prefix;
+			best = t;
+		}
+	}
+	return best_prefix >= 6 ? best : std::string(); // at least "decal_"
+}
+
+core::Result<DecalTemplate> load_decal_template(const core::EbxResolver &p_db, std::string_view p_name, std::span<const std::string> p_textures) {
+	const std::string name = detail::canonical_name(p_name);
+	const core::EbxPartition *part = p_db.partition_by_name(name);
+	if (part == nullptr) {
+		return core::make_error(name + ": decal partition not found");
+	}
+	const core::EbxInstance primary = part->primary();
+	if (primary.type_name() != "DecalTemplateData") {
+		return core::make_error(name + ": primary is " + std::string(primary.type_name()) + ", not DecalTemplateData");
+	}
+	gp::WorkBudget budget(1024);
+	detail::Reader r(p_db, budget);
+	r.set_where(name);
+	const core::EbxStruct s = primary.data();
+	DecalTemplate t;
+	t.name = name;
+	t.size = r.number_or(s, "Size", 0.2f);
+	t.random_size = r.number_or(s, "RandomSize", 0.0f);
+	t.rotation = r.number_or(s, "Rotation", 0.0f);
+	t.random_rotation = r.number_or(s, "RandomRotation", 0.0f);
+	t.normal_offset = r.number_or(s, "NormalOffset", 0.001f);
+	t.clip_angle = r.number_or(s, "ClipAngle", 70.0f);
+	if (const std::optional<core::EbxValue> tile = r.maybe(s, "AtlasTile")) {
+		if (const std::optional<core::EbxStruct> ts = tile->as_struct()) {
+			auto count = [&](std::string_view p_field, uint32_t p_default) {
+				const float v = r.number_or(*ts, p_field, float(p_default));
+				return v >= 0.0f && v <= 64.0f ? uint32_t(v) : p_default;
+			};
+			t.tiles_x = std::max(1u, count("TileCountX", 1));
+			t.tiles_y = std::max(1u, count("TileCountY", 1));
+			t.tile_x = count("TileIndexX", 0);
+			t.tile_y = count("TileIndexY", 0);
+		}
+	}
+	if (!r.ok()) {
+		return r.error();
+	}
+	if (!(t.size > 0.0f) || t.size > 100.0f) {
+		return core::make_error(name + ": Size " + std::to_string(t.size) + " out of (0, 100]");
+	}
+	t.random_size = std::clamp(t.random_size, 0.0f, 100.0f);
+	t.random_rotation = std::clamp(t.random_rotation, 0.0f, 360.0f);
+	t.texture = pick_decal_texture(name, p_textures);
+	return t;
+}
+
+DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed) {
+	DecalPlacement d;
+	d.size = p_template.size + fx_unit(fx_mix64(p_seed ^ 0x51ull)) * p_template.random_size;
+	const float deg = p_template.rotation + (2.0f * fx_unit(fx_mix64(p_seed ^ 0x52ull)) - 1.0f) * p_template.random_rotation;
+	d.rotation = deg * (kPi / 180.0f);
+	return d;
+}
+
 void effect_sound_cues(std::span<const FxEvent> p_events, std::vector<EffectSoundCue> &r_out) {
 	for (const FxEvent &e : p_events) {
 		if (e.kind != FxEvent::Kind::SoundStart && e.kind != FxEvent::Kind::SoundStop) {
@@ -604,7 +689,6 @@ struct FxTriggers::Impl {
 		if (w->firearm) {
 			++stats.firearm_shots;
 		}
-		const std::vector<FireEffect> &list = own ? w->first_person : w->third_person;
 		MuzzleSample m;
 		if (const MuzzleSample *s = muzzle_for(p_e.slot, own)) {
 			m = *s;
@@ -614,7 +698,10 @@ struct FxTriggers::Impl {
 			m = aim_muzzle(p_e.slot, origin, dir, {});
 			++stats.muzzle_fallbacks;
 		}
+		// The 1p list in the 1p pass only at the viewmodel's muzzle; otherwise (free camera, no viewmodel, others)
+		// the 3p list where the world draws it.
 		const bool first_person = own && m.first_person;
+		const std::vector<FireEffect> &list = first_person ? w->first_person : w->third_person;
 		for (size_t i = 0; i < list.size(); ++i) {
 			const FireEffect &fe = list[i];
 			if (fe.shell && (!config.shells || !w->firearm)) {
