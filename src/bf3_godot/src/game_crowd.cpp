@@ -33,6 +33,7 @@
 #include "bf3/render/soldier_assets.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/world3d.hpp>
@@ -111,6 +112,9 @@ struct Bf3GameCrowd::Impl {
 	std::unique_ptr<core::WorkerGroup> lanes;
 	std::unique_ptr<anim::CrowdEvaluator> eval;
 	std::unique_ptr<SkinUploader> uploader;
+	// False under the headless display (the dummy RenderingServer refuses instances and skeletons): the crowd poses,
+	// counts and publishes its muzzles (FX / audio) but draws nothing.
+	bool draw = true;
 	RID scenario;
 	std::array<std::vector<WeaponMesh>, 2> weapon_meshes;
 	struct WeaponDraw {
@@ -312,55 +316,64 @@ void Bf3GameCrowd::Impl::draw_weapons(const M2aFrame &p_frame) {
 	stats.soldiers = 0;
 	for (uint32_t i = 0; i < kCrowdSoldiers; ++i) {
 		const bool drawn = eval->drawn(i) && (inputs[i].flags & anim::crowd_flags::kHidden) == 0;
-		if (drawn != soldier_visible[i]) {
+		if (draw && drawn != soldier_visible[i]) {
 			uploader->set_soldier_visible(i, drawn);
-			soldier_visible[i] = drawn;
 		}
+		soldier_visible[i] = drawn;
 		WeaponDraw &d = weapon_draws[i];
 		const uint32_t team = i / kSlotsPerTeam;
 		const uint8_t item = drawn ? eval->weapon_of(i) : anim::kNoCrowdWeapon;
-		const bool has_mesh = item != anim::kNoCrowdWeapon && team < 2 && item < weapon_meshes[team].size() && weapon_meshes[team][item].mesh.is_valid();
-		if (!drawn) {
+		const bool has_item = item != anim::kNoCrowdWeapon && team < 2 && item < weapon_meshes[team].size() && weapon_meshes[team][item].binds > 0;
+		const bool has_mesh = has_item && (!draw || weapon_meshes[team][item].mesh.is_valid());
+		auto hide_weapon = [&] {
 			if (d.visible) {
-				rs->instance_set_visible(d.instance, false);
+				if (draw) {
+					rs->instance_set_visible(d.instance, false);
+				}
 				d.visible = false;
 			}
+		};
+		if (!drawn) {
+			hide_weapon();
 			continue;
 		}
 		++stats.soldiers;
 		if (!has_mesh) {
-			if (d.visible) {
-				rs->instance_set_visible(d.instance, false);
-				d.visible = false;
-			}
+			hide_weapon();
 		} else {
 			const WeaponMesh &wm = weapon_meshes[team][item];
 			bool rebased = false;
-			if (!d.instance.is_valid()) {
+			if (draw && !d.instance.is_valid()) {
 				d.instance = rs->instance_create();
 				d.skeleton = rs->skeleton_create();
 				rs->instance_set_scenario(d.instance, scenario);
 			}
 			if (d.item != item) {
-				rs->instance_set_base(d.instance, wm.mesh->get_rid());
-				rs->skeleton_allocate_data(d.skeleton, wm.binds, false);
-				rs->instance_attach_skeleton(d.instance, d.skeleton);
-				rs->instance_set_custom_aabb(d.instance, wm.aabb);
+				if (draw) {
+					rs->instance_set_base(d.instance, wm.mesh->get_rid());
+					rs->skeleton_allocate_data(d.skeleton, wm.binds, false);
+					rs->instance_attach_skeleton(d.instance, d.skeleton);
+					rs->instance_set_custom_aabb(d.instance, wm.aabb);
+				}
 				d.item = item;
 				d.binds = wm.binds;
 				rebased = true;
 				++stats.weapon_rebases;
 			}
 			if (!d.visible) {
-				rs->instance_set_visible(d.instance, true);
+				if (draw) {
+					rs->instance_set_visible(d.instance, true);
+				}
 				d.visible = true;
 			}
-			rs->instance_set_transform(d.instance, roots[i]);
-			if (rebased || eval->changed(i)) {
-				const std::span<const anim::Mat34> palette = eval->weapon_palette(i);
-				const int32_t n = std::min<int32_t>(d.binds, int32_t(palette.size()));
-				for (int32_t b = 0; b < n; ++b) {
-					rs->skeleton_bone_set_transform(d.skeleton, b, to_godot(palette[size_t(b)]));
+			if (draw) {
+				rs->instance_set_transform(d.instance, roots[i]);
+				if (rebased || eval->changed(i)) {
+					const std::span<const anim::Mat34> palette = eval->weapon_palette(i);
+					const int32_t n = std::min<int32_t>(d.binds, int32_t(palette.size()));
+					for (int32_t b = 0; b < n; ++b) {
+						rs->skeleton_bone_set_transform(d.skeleton, b, to_godot(palette[size_t(b)]));
+					}
 				}
 			}
 			++stats.weapon_instances;
@@ -539,13 +552,18 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 	}
 	std::string err;
 	if (!m.uploader->build(*m.assets, *m.eval, team_of, m.scenario, &err)) {
-		m.clear_draw();
-		return fail(err);
+		m.uploader->clear();
+		m.uploader.reset();
+		if (DisplayServer::get_singleton()->get_name() != String("headless")) {
+			m.clear_draw();
+			return fail(err);
+		}
+		m.draw = false;
+		log("headless display: " + err + "; posing without drawing (muzzles still published)");
 	}
-	m.soldier_visible.assign(kCrowdSoldiers, true);
-	for (uint32_t i = 0; i < kCrowdSoldiers; ++i) {
+	m.soldier_visible.assign(kCrowdSoldiers, false);
+	for (uint32_t i = 0; m.draw && i < kCrowdSoldiers; ++i) {
 		m.uploader->set_soldier_visible(i, false);
-		m.soldier_visible[i] = false;
 	}
 	// The items' meshes: one RS mesh per (team, item), textures from the soldier set or the weapon set.
 	std::map<std::string, Ref<Texture2D>> textures;
@@ -573,7 +591,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 			Vector3 lo, hi;
 			for (const render::PreparedSurface &s : part.prepared.surfaces) {
 				Ref<Material> mat;
-				if (s.material_index < part.materials.slots.size()) {
+				if (m.draw && s.material_index < part.materials.slots.size()) {
 					mat = make_standard_material(part.materials.slots[s.material_index], !s.tangents.empty(), find_texture, MaterialOptions{});
 				}
 				materials.push_back(mat);
@@ -582,7 +600,9 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 				hi = have ? hi.max(b) : b;
 				have = true;
 			}
-			if (have) {
+			if (have && !m.draw) {
+				wm.binds = int32_t(part.binds.size()); // posed and counted, not drawn
+			} else if (have) {
 				const render::PreparedSurface *first = part.prepared.surfaces.data();
 				wm.mesh = make_array_mesh(part.prepared, [&](const render::PreparedSurface &p_s) -> Ref<Material> {
 					const size_t index = size_t(&p_s - first);
@@ -594,7 +614,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 				wm.aabb = AABB(lo - grow, (hi - lo) + grow * 2.0f);
 				wm.binds = int32_t(part.binds.size());
 			}
-			if (wm.mesh.is_null()) {
+			if (m.draw && wm.mesh.is_null()) {
 				log("item " + part.spec.weapon_def + ": no mesh created (not drawn)");
 			}
 			m.weapon_meshes[t].push_back(wm);
@@ -623,7 +643,9 @@ void Bf3GameCrowd::step(const M2aFrame &p_frame) {
 	}
 	m.build_inputs(p_frame);
 	m.eval->wait_and_publish(*m.lanes);
-	m.uploader->upload(*m.eval, m.roots, m.upload_stats);
+	if (m.uploader) {
+		m.uploader->upload(*m.eval, m.roots, m.upload_stats);
+	}
 	m.draw_weapons(p_frame);
 	m.eval->set_inputs(m.inputs, std::clamp(p_frame.dt, 0.0, 0.25));
 	if (!m.eval->kick(*m.lanes)) {
