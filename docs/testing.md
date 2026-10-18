@@ -38,7 +38,9 @@ serially in the merge pass, e.g. memory gates), `bigmem` (peak above 8 GB), `asa
 The test presets carry the filters, so a bare `ctest --preset dev` is always the safe branch selection.
 `--all-tests` runs phases, never one mixed ctest call. A branch that changes what a timing row covers runs that row
 with its phase's preset, e.g. `ctest --preset dev-timing -R "^host\.gunplay\."`; the `dev-timing` preset also sets
-`OPENBF3_CL_TIMING=1`, the opt-in of `host.gunplay.client`'s Metro gates.
+`OPENBF3_CL_TIMING=1`, the opt-in of `host.gunplay.client`'s Metro gates, and `OPENBF3_CL_LOOPBACK_S=60`: in the merge
+pass E15's loopback plays 60 s (5 cycles of its 12 s script, every action 5 times, the same checks) instead of E15's
+10 minutes. The full 10 minutes run at the M2a gate, through the test binary directly (docs/design/m2a-cl.md, E15).
 
 A row that waits on wall-clock windows it does not measure (a reply within 0.5 s, a 60 Hz client in real time) is
 unlabelled only when it gives its alone results beside a `-j16` branch pass in repeated runs; the branch pass runs

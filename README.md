@@ -2316,6 +2316,10 @@ set OPENBF3_CL_TIMING=1
 b\dev\tests\test_gunplay_client.exe --test-suite=host-gunplay-client  :: Metro: E1 + E5, E12 lagcomp (+ control, stress), E15 loopback (10 min), two clients, install unchanged
 ```
 
+The merge pass runs `host.gunplay.client` through the `dev-timing` preset, which sets `OPENBF3_CL_LOOPBACK_S=60`
+(E15's loopback plays 5 cycles of its 12 s script instead of 10 minutes, with the same checks); the direct command above
+keeps the full 10 minutes for the M2a gate.
+
 Gates, measured 2026-10-17 on the dev preset (the timing cases are wall clock and **noisy** on this shared machine):
 
 | gate | threshold | measured |
