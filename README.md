@@ -2525,3 +2525,15 @@ descriptions: [docs/design/m2a-fx3.md](docs/design/m2a-fx3.md).
 | unit (incl. E15 late join) | `ctest --preset dev -R "^fx\.triggers\.unit$"` (also asan) | all cases | 14/14, 4,496 assertions, 0.34 s |
 | install cells (E8 (1), (3), (5), (7)) | `ctest --preset dev -R "^fx\.install\.cells$"` (also asan) | 0 preload failures; 1p flash in [710, 790] / 1000; G5's cells; water on Caspian | 72/72; 759 / 1000; met; `fx_impact_water_s`; 4.5 s |
 | demo | `ctest --preset dev-window -R "^godot\.fx3_demo$"` with `OPENBF3_GODOT_WINDOWED=1` (a window row) | `FX3 DEMO: PASS`, 7 captures | PASS, 7/7; FX main thread p50 0.16 / p99 0.47 ms; 30.1 s |
+
+Branch pass (2026-10-18; branch, unlocked, shared machine: indicative only):
+
+* **asan:** fx.triggers.unit, fx.install.cells, fx.unit, fx.render.unit and m2a.contract3 passed, with no
+  AddressSanitizer report.
+* **`tools\build.cmd dev --strict`** ran twice while other sessions were testing.
+  - The first run: all 130 rows functionally passed (2 skipped as on m2a/w3), with 2 budget violations from the load
+    (fx.unit 36.5 s, fx.install.cells 32.2 s).
+  - The second run: 5 budget violations, none on an fx3 row, and `core.ui.font`'s own cold-time check failed
+    (1.64 s against 1.0 s).
+  - Alone, the rows ran in 0.26 s (fx.triggers.unit), 0.49 s (fx.unit) and 3.06 s (fx.install.cells), with
+    core.ui.font passing. STRICT is to be re-run on an idle machine (m2a-fx3.md §10).

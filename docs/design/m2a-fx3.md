@@ -25,10 +25,10 @@ Shared files carry one `# M2a fx3` / `// M2a fx3` block at their end: `src/bf3_f
 ## 2. Data facts [verified on the install, `fx.install.cells`]
 
 * Metro TDM has 12 weapon defs: 10 firearms, all 10 with a tracer. They name 24 fire blueprints, and the impact
-  table names 48 impact effects: 72 blueprints preload with 0 failures (E8 (1)), uncached in 3 ms.
+  table names 48 impact effects: 72 blueprints preload with 0 failures (E8 (1)), uncached in 4–6 ms (branch).
 * The M16A3 (variant `weapons/m16a4/u_m16a4`) has 3 FireEffects1p entries. Entry 0 is
   `fx_muzz_generic_rifle_1p` at offset z 0.99, y 0.028, with UpdateTransform. Entry 1 is `fx_shellejection_m`
-  (the shell, recognised by `/shells/` in the name) at z 0.44. Its FireEffects3p list starts with
+  (the shell, recognised by `/shells/` in the name) at z 0.44, 0.55 m behind the flash. Its FireEffects3p list starts with
   `fx_muzz_generic_rifle_3p` and also has a shell. Trace effect `fx_tracer_generic_parent`, trace frequency 1, bullet
   material 1, `VisualConvergeDistance` 30 m.
 * The M67's projectile names `DetonationEffect` `fx_grenade_frag_01`. The knife has no muzzle and no shell.
@@ -226,6 +226,23 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
 | godot.fx3_demo (window) | `FX3 DEMO: PASS`: 0 preload failures; drawn == particles every frame; one shell per own shot; 0 double starts; impacts on concrete, metal and dirt; decals; a hit; 7 captures; install unchanged | PASS: 1,873 / 1,873 frames; 180 own + 3 remote shots, 366 muzzle starts, 180 shells, 63 tracers, 19 impacts, 18 decals, 1 soldier cell; FX main thread p50 0.16 / p99 0.47 ms; 30.1 s | `ctest --preset dev-window -R "^godot\.fx3_demo$"` with `OPENBF3_GODOT`, `OPENBF3_GODOT_WINDOWED=1` and `OPENBF3_USER_ACTIVE_FLAG` (a window row) |
 | install unchanged | layout.toc, cas.cat, every .sb/.toc | unchanged | fx.install.cells case "install unchanged", and godot.fx3_demo |
 
-## 10. Branch pass and asan
+## 10. Branch pass and asan (2026-10-18; branch, unlocked, shared machine: indicative only)
 
-See the README section `## M2a fx3` for the final run numbers.
+* **asan** (`toolsuild.cmd asan --no-test`, then
+  `ctest --preset asan -R "^(fx\.triggers\.unit|fx\.install\.cells|fx\.unit|fx\.render\.unit|m2a\.contract3)$"`):
+  5 / 5 rows passed with no AddressSanitizer report. That covers `decode_bc1`, `unkey_magenta`, `rgba_mip_chain`,
+  the decal-template reader, `load_fire_effects` and the triggers. Under asan, fx.triggers.unit took 3.4 s and
+  fx.install.cells 60.9 s (the asan preset has no time budget).
+* **`toolsuild.cmd dev --strict`**, run twice while other sessions were building and testing on the machine (one
+  of them was running ctest with host.gunplay.perf):
+  - **Pass 1:** 130 rows, 128 passed and 2 skipped (`core.cache_data` and `core.res`, as on m2a/w3), with 430 s of
+    test time (m2a/w3's own pass took 178 s). `test_budget` STRICT found 2 violations, both from the contention:
+    fx.unit at 36.5 s and fx.install.cells at 32.2 s, both without COST.
+  - **Pass 2:** 702 s of test time, with sim.terrain alone at 439 s. 129 of 130 rows passed. `core.ui.font` failed
+    its own wall-clock check (cold 1.64 s against a 1.0 s limit; not an fx3 row). STRICT found 5 violations, none on
+    an fx3 row: core.gameplay.tables.unit, sim.motor.unit, host.registry, sim.terrain.unit and anim.server_pose.
+  - **The fx rows alone, right after:** fx.triggers.unit 0.26 s, fx.unit 0.49 s, fx.install.cells 3.06 s, all within
+    their budgets (2 s unit and 15 s install). core.ui.font passed alone in 0.48 s.
+
+  So the strict gate has not been seen passing on this branch. Both failures follow the machine's load and move
+  between rows. It should be re-run on an idle machine (the merge pass).
