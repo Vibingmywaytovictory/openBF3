@@ -5,6 +5,9 @@ E14 and E16 are the integrator's timed rows), on branch `m2a/gx` from the W3.0 c
 wave 2's gunplay on, S1's walker bots (armed, not firing) drawn as M1 capsules, a human player who shoots, kills,
 dies and respawns. Bot AI (bt), 3p soldiers (tp), game audio (au3) and game effects (fx3) are not built here: their
 cases are skipped with "waiting for <track>", and the code that drives them is in place behind compile switches.
+The end-to-end step (§9) merged `m2a/w3` (bt, tp, au3, fx3) into `m2a/gx` (0040e33) and wired all four parts in:
+the playable scene now has bt's firefight bots that fight the player and each other, tp's 3p soldiers with their
+weapons, au3's game audio and fx3's effects, and the audio, fx and firefight cases run their bodies.
 
 ## 1. What the track adds
 
@@ -31,7 +34,7 @@ tools\play.cmd --kit=3 --team=2 --respawn=3 --bots=16
 `OPENBF3_GODOT` names the Godot executable (default `C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe`).
 User args (after `--`): `--kit=<0..3>` (assault, engineer, support, recon; default 0), `--team=<1|2>` (US, RU; default
 1), `--respawn=<s>` (default 5 s in the scene, 1 s for the checks; `GameServerConfig::respawn_ticks`), `--bots=<n>`
-(S1's walkers; default 24, at most 32: sv's `kMaxLagSlots`, m2a-w3.md §4). A bad value fails the load with a message.
+(bt's firefight bots since §9, S1's walkers before; default 24, at most 32: sv's `kMaxLagSlots`, m2a-w3.md §4). A bad value fails the load with a message.
 
 | input | action |
 |---|---|
@@ -78,8 +81,8 @@ grey (team unknown), blue (friend) or red (enemy) from W3.0's team field; they a
   keeps M1's `--m1-load-check` and shots (E16 uses them).
 * The wave-3 parts (`Bf3GameFx`, `Bf3GameAudio`, `Bf3GameCrowd`) are created and stepped in m2a_game.h's order only
   when the CMake `M2a gx` block finds their track's `.cpp` (`OPENBF3_M2A_HAVE_FX / _AUDIO / _CROWD`), and the
-  firefight case only when `firefight_brain.cpp` no longer carries the W3.0 stub (`OPENBF3_M2A_HAVE_BT`). On this
-  branch all four are 0: that code is not compiled here and must be built and run after the merges.
+  firefight case only when `firefight_brain.cpp` no longer carries the W3.0 stub (`OPENBF3_M2A_HAVE_BT`). Since the
+  end-to-end step (§9) all four are 1.
 
 ## 4. The check (m2a_check.cpp)
 
@@ -96,8 +99,9 @@ case has a step timeout and a case timeout (180 s; kits 420 s; play its length +
 | hud | E10 | the localised name and `_small` icon of every kit item; every frame the HUD model against the presented weapon |
 | ads | E19 | world FOV 55 -> 40 -> 55 within the aiming controller's FOV times + 0.1 s, the look scale, the mapper's mouse scale, ADS refused while sprinting |
 | play | the play gate | the scripted 5-minute run (§6) |
-| audio, fx | E7, E8 | skipped: "waiting for au3" / "waiting for fx3" |
-| firefight | E13, E14 | `--m2a-firefight`; skipped: "waiting for bt" |
+| audio | E7 | au3's G7 script in the game (§9): the own soldier fires, heard in 3p through a listener on the aim axis; recorded and analysed by au3's `GameAudioCheck` |
+| fx | E8 | 1,000 M16A3 shots at Metro concrete and brick, the client-local oilfire, a soldier hit, the cue counts (§9) |
+| firefight | E9, E13, E14 | `--m2a-firefight`: 64 bt bots in pairs, 2560 x 1440, FX on / off windows (§9); the integrator's timed row |
 
 The play case: a 30 s movement pattern (walk, sprint, strafe, back, crouch, jumps) with the view sweeping; every 8 s
 2.5 s of bursts at the nearest enemy within 80 m (every second engagement aimed down the sights); a reload every
@@ -117,10 +121,10 @@ All in the `# M2a gx` block of tests/CMakeLists.txt, registered with `openbf3_go
 
 | row | script | COST | runs |
 |---|---|---|---|
-| `godot.m2a` | `godot_m2a.cmake` (cases range, reload, hud, ads, audio, fx) | 80 | branch, by hand, window preset |
+| `godot.m2a` | `godot_m2a.cmake` (cases range, reload, hud, ads, audio, fx) | 350 | branch, by hand, window preset |
 | `godot.m2a.kits` | `godot_m2a.cmake -DCASES=kits` | 80 | branch, by hand |
 | `godot.m2a.play` | `godot_m2a.cmake -DCASES=play -DNO_ERRORS=1 -DARGS=--respawn=3` | 330 | branch, by hand |
-| `godot.m2a_firefight` | `godot_m2a_firefight.cmake` (E9, E13 / E14 with bt; exit 77 while the case is skipped) | 30 | the integrator's merge pass |
+| `godot.m2a_firefight` | `godot_m2a_firefight.cmake` (E9, E13 / E14 with bt; exit 77 off a 2560 x 1440 primary screen) | 30 | the integrator's merge pass |
 | `godot.m2a_load` | `godot_m1_load.cmake -DSCENE=res://scenes/m2a_metro.tscn -DUSER_ARGS=--bots=0` (E16) | 50 | the integrator's merge pass |
 
 `godot.m2a.play` is longer than test_budget's 120 s window budget by design (its gate is 5 minutes); test_budget
@@ -166,8 +170,8 @@ Results per case (godot.m2a, godot.m2a.kits, godot.m2a.play):
 
 ## 7. Screenshots
 
-In `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\gx\` (gitignored, outside the worktree), 1152 x 648, from
-the last godot.m2a.play run:
+In `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\gx\` (gitignored, outside the worktree), 1152 x 648. The
+end-to-end step's play run replaced them (§9.4); the phase 1 run's are described here:
 
 * `gx_hip.png`: crouched beside the shuttered shop fronts of the park, the M16A3 viewmodel at the hip with the
   hands, the four-tick crosshair at the centre, HUD `25 / 155`, M16A3 name and icon, health 100 %, the minimap at the
@@ -185,8 +189,8 @@ the last godot.m2a.play run:
 
 ## 8. Open items
 
-* audio (E7), fx (E8), firefight (E9, E13, E14) and the crowd's capsule hiding wait for au3, fx3, bt and tp. The
-  `#if OPENBF3_M2A_HAVE_*` code that builds and steps those parts is not compiled on this branch.
+* (phase 1; closed by §9) audio (E7), fx (E8), firefight (E9, E13, E14) and the crowd's capsule hiding waited for au3,
+  fx3, bt and tp. The end-to-end step's open items are in §9.5.
 * The viewmodel thread cannot be cancelled: a quit during `open_viewmodel_sources` waits for it (m2a_shutdown).
 * `remote_shots` is 0 because S1's walkers are armed but do not fire; damage to the player in the play run comes
   from the falls (the range case proves damage dealt; bt's bots will prove damage taken from bots).
@@ -195,3 +199,161 @@ the last godot.m2a.play run:
   ready at +4.14 s after `_ready`, with the gunplay tables (nothing cached) and the viewmodel sets (3.39 s on their
   own thread, joined in `m2a_load_assets`) on the load. If the quiet-lock run also misses, the fallback is to join the
   viewmodel thread after Done (the viewmodel appears a few frames later) or to cache the gunplay tables.
+
+## 9. The end-to-end step (as built)
+
+### 9.1 What changed
+
+* Merge `m2a/w3` into `m2a/gx` (0040e33, `--no-ff`): the shared files (README.md, src/bf3_godot/CMakeLists.txt,
+  tests/CMakeLists.txt) keep both sides, w3's blocks first and then gx's block.
+* The session (`level_session_m2a.cpp`, 3f1ce54):
+  * `m2a_load_assets` loads `Bf3GameFx`, `Bf3GameAudio` (fx's impact sound names; the auditions' superbundles only for
+    the audio case) and `Bf3GameCrowd` on the loader thread, each timed. A part that fails is dropped with an
+    `[m2a] ERROR` line, and the game runs on without it.
+  * `m2a_server_config`: `--bots=n` are bt's firefight bots (`FirefightConfig`, Free mode, walking). S1's bot level
+    stays for walking (`BotFillConfig` count 0). The playable scene defaults to 24 bots, the play case to 16, and the
+    cap is 32 (sv's `kMaxLagSlots`). `--m2a-firefight` uses 64 bots in Pairs mode, with the observer in slot 64.
+  * Every frame, in m2a_game.h's order:
+    1. crowd step;
+    2. muzzles: the own 1p muzzle from `Bf3GameFx::own_muzzle` (a stand-in sample when the viewmodel has no muzzle
+       joint), then the crowd's 3p muzzles;
+    3. FX step, with the 1p projection kept equal to the viewmodel's FOV;
+    4. audio step, which also takes the FX step's impact and effect sound cues.
+  * The capsules hide once the crowd is built. Deaths by an enemy are counted.
+* The check (`m2a_check.cpp`): the audio, fx and firefight case bodies (3f1ce54, 5b26f05, 9a28eb7, 486f003); the
+  skips stay only for a build without the track (`OPENBF3_M2A_HAVE_* = 0`).
+* Named replacements in other tracks' files, each in its own commit:
+  * fx3's `game_fx.cpp` `resolve()` (b7652bc): a partition that holds an `EmitterDocument` counts as one. MP_012's
+    oilfire partition has `EmitterTemplateData` as its primary instance, so `start_effect` refused it before.
+  * au3's `tests/audio_router_tests.cpp` (589a3b0): `m2a_fake::impact_sound_names` deleted for the real
+    `bf3::fx::impact_sound_names`.
+* tests/CMakeLists.txt gx block: `godot.m2a` COST 80 -> 350 (audio and fx now run).
+
+### 9.2 The cases
+
+* audio (E7): au3's G7 script (`game_check_script()`, 17 steps, 10 rounds per burst) in the game.
+  * Setup: on a new life (the earlier cases of a run spend the bag), the own soldier stands at the range lane with the
+    M16A3 on automatic, aimed 60 degrees up. Its rounds leave Metro, so no impact sound reaches the recording.
+  * A probe round's OwnShot position is the emitter. Per step, the listener (`M2aGame::listener_override`) sits on
+    the aim axis at the step's distance.
+  * The own soldier is heard in 3p: `M2aFrame::free_camera` is true while the override is on. This is a deviation from
+    au's headless G7 shooter, which was a remote soldier. The free camera sends a neutral command, so the own soldier
+    could not fire in it.
+  * The auditions (M98B, RPG-7, M1A2) play at the emitter.
+  * au3's `GameAudioCheck` records the mix, and `analyse_game_check` gives the rows. The recording goes to
+    `b\shots\gx\gx_e7.wav`.
+* fx (E8):
+  * The two surfaces are found by a ray scan from every spawn: the first triangle 6-30 m out, facing the shooter, of
+    PhysicsMaterialIndex 8 (concrete) and of 2 (brick).
+  * 500 M16A3 shots at each surface, automatic, with reloads. When the bag runs dry, a new life at the same spawn
+    refills it. The SpawnAt waits 1 s after the last shot (§9.5).
+  * The oilfire starts 20 m ahead through `Bf3GameFx::start_effect`, client-locally, and its live particles are read
+    after 15 s.
+  * Three single rounds go at the target bot's chest at 8 m (the fx case now has the target bot).
+  * The check accounts every frame from the scan to the rows. Impact starts are matched to their Impact event over
+    frames (the start waits for its timeline) and by position (a penetrating round leaves several impacts).
+  * Impact sounds are counted against the static Impact events whose cell names a sound. Cells without one play none:
+    Metro's table has such cells. Soldier-cell sounds are told apart by position.
+* firefight (E9, E13, E14), the integrator's timed row:
+  * The window is 2560 x 1440 borderless with vsync off, and render time is measured. The case skips when the primary
+    screen is not 2560 x 1440.
+  * The observer stands at the range lane. A 10 s warm-up comes first, then 12 alternating windows of 5 s, FX on and
+    off. In an off window the FX step does not run and `Bf3FxRenderer::hide_all()` hides the instances.
+  * Rows: 64 bots, bursts, remote shots, E9's lights / particles / FX main-thread p99 <= 1.0 ms / FX GPU <= 2.0 ms, and
+    E14's frame p99 <= 16.7 ms / M2a main p99 <= 3.0 ms / crowd step p99 <= 2.0 ms / 0 audio underruns / 0 event
+    overflows.
+  * Not run on the branch (TIMING rule).
+* play: new rows:
+  * remote shots > 0 (bt's bots fire);
+  * deaths by an enemy, and the bot count (reported);
+  * the crowd built, with its frames;
+  * FX built, with its muzzle and impact counts;
+  * audio built, with seconds mixed;
+  * late audio commands, gated with `OPENBF3_AU3_GATE_LATE=1` (§9.5).
+
+### 9.3 Results
+
+Measured 2026-10-18 on the branch: windowed, one row at a time, warm cache. Shared machine, unlocked, so wall times
+are indicative only.
+
+| row | result |
+|---|---|
+| `godot.m2a` | PASS, 6 / 6 cases (range 27.7 s, reload 12.8 s, hud 7.7 s, ads 4.3 s, audio 124.5 s, fx 163.0 s); 0 ERROR lines; 348.8 s |
+| `godot.m2a.kits` | PASS, 67 / 67 rows, 61.2 s case, 69.5 s row |
+| `godot.m2a.play` | PASS, every row, 0 ERROR lines, 300.4 s scripted, 310.5 s row |
+
+* audio (E7):
+  * windows: every step's windows as scripted;
+  * onsets: 10 per burst at every distance, spacing within 96 frames (mean gap 3600.3-3606.6 frames, expected 3600);
+  * levels: near - mid 45.3 dB, mid - far 13.4 dB;
+  * high-pass filter: mix 16.2 dB, noise tap 18.5 dB, noise prediction off by 0.75 dB;
+  * Fire gate at 320 m: -144 dB;
+  * auditions inside their bands: M98B at 325 m 0.5 (-93.0 dBFS), RPG-7 at 67.5 m 0.5 (-47.9 dBFS), M1A2 at 32.5 m 0.5
+    (-67.4 dBFS) and at 90 m 0.5 (-98.8 dBFS); 0 or 1 outside them;
+  * kit items: 12 (10 drivers, 2 one-shots), 44 programs, 0 failures;
+  * every count 0: short / late blocks, late commands, mixer refusals, skipped steps, dropped frames, ring overflows.
+* fx (E8):
+  * 72 blueprints preloaded, 0 failures; atlas 52 / 52, 0 fallbacks;
+  * 1,003 shots with a 1p muzzle start, the `_1p_flash` in 0.759 of them (761);
+  * drawn instances equal to `FxWorld::particles()` on all 29,250 frames (0 mismatches);
+  * oilfire: 80 live particles after 15 s;
+  * concrete 500 / 500 impacts started `fx_impact_concrete_01_s_xp2` with `decal_concrete_s_01` (500 / 500);
+  * brick 500 / 500 `fx_impact_concrete_01_s` with `decal_brick_s_01` (500 / 500);
+  * soldier 3 / 3 `fx_impact_soldier_body_s`, 0 decals;
+  * Metro has no water, so the Caspian row (`fx.install` "cells") covers it;
+  * tracers 1,003 = shots flagged 1,003; shells 1,003 = firearm shots;
+  * impact sounds 1,000 = expected 1,000 (1,000 Impact events, 0 culled);
+  * 0 double starts.
+* play: in 300 s:
+  * 16 firefight bots, 9,178 remote shots, 123 team kills (US 68 : RU 55);
+  * the player: 355 own shots, 5 kills, 6 deaths (3 by an enemy, the rest falls), 6 respawns, the team switch at
+    120 s;
+  * crowd: 50,791 crowd steps (0 frozen, 0 unknown weapons);
+  * FX: 19,062 muzzle starts (0 remote shots without a crowd muzzle), 13,035 impact cells started, 11,275 decals,
+    5 double starts (reported, §9.5);
+  * audio: 300.8 s mixed, 96 voices at peak, 12,404 impact sounds, 384 reloads, 5 late commands (reported, §9.5);
+  * 0 event overflows, 0 bad gunplay events, 0 weapon reconciliations.
+* A 40 s scripted smoke run with 16 bots (before the rows) loaded:
+  * fx: 72 blueprints, 0 failures;
+  * audio: 44 programs;
+  * crowd: 4 pose lanes;
+  * the firefight: 16 Free bots, max slots 64.
+
+  The bots fought each other (US 11 : RU 6), and the player was damaged and killed by bots.
+
+### 9.4 Screenshots (the end-to-end play run)
+
+In `b\shots\gx\`, 1152 x 648:
+
+* `gx_hip.png`: the M16A3 at the hip in a room by a doorway. FX3's impact smoke and decals are on the wall left of the
+  crosshair. HUD `26 / 155`, `US 1 : RU 1`: the bots are already scoring.
+* `gx_ads.png`: the M9 aimed down its sights (the play script switches to the sidearm), the crosshair hidden, HUD
+  `15 / 64`.
+* `gx_reload.png`: the M9 tilted in its reload clip, HUD `12 / 64`. An orange-brown strip runs from the pistol to the
+  lower right edge of the frame (§9.5).
+* `gx_firefight.png`: the M16A3 in the park in front of the hotel fence. A dark 3p soldier stands at the fence in the
+  centre. Score `US 25 : RU 20`, `kills 1 deaths 2`.
+* `gx_death.png`: `KILLED BY slot 9 (RU)` with `respawn in 1.5 s`. A 3p soldier with helmet, gear and rifle (tp) fills
+  the lower left, and the viewmodel and the weapon HUD are hidden.
+* `gx_e7.wav`: E7's recording (the audio case).
+
+### 9.5 Open items
+
+* Shot ids are reused across a respawn (cl / fx3). `next_shot_index` is kept across lives. A shot predicted after the
+  server's respawn tick never happens on the server, and the new life's first real shot gets the same id. fx3's
+  triggers then drop that shot's effects as a repeat and count a double start: 5 in the play run, 4 in the fx case
+  before its 1 s wait.
+  * The fx case still gates 0 (E8 (7)). The play row reports the count.
+  * A fix belongs to fx3 (forget the own slot's shot keys on its Spawn event) or cl.
+* Late audio commands in the play run: 5 (8 in an earlier run). Each is a game-thread stall over the 21.3 ms
+  scheduling lead. This is wall clock, so the row reports it on the branch, and `OPENBF3_AU3_GATE_LATE=1` gates it
+  (as with E7's late blocks).
+* The M9 reload clip shows an orange-brown strip stretched from the pistol to the frame edge (`gx_reload.png`). It
+  looks like a viewmodel skinning or part artefact of the M9's reload; not investigated.
+* The own 1p muzzle used the stand-in sample on 3,641 frames of 47,746, where the viewmodel had no muzzle joint (knife,
+  grenade, switching). It is reported, not gated.
+* `godot.m2a_firefight` (E9, E13, E14) and `godot.m2a_load` (E16) were not run on the branch (TIMING rule). They are
+  the integrator's merge-pass rows.
+* The wave-2 fakes in `vm_script.{h,cpp}` (`m2a_fake::present_weapon`), `tests/anim_viewmodel_tests.cpp` and
+  `tests/m2a_contract_tests.cpp` stay. They are the reference predicates of those tests, and the real parts do not
+  replace them one for one.

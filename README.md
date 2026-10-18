@@ -2670,22 +2670,25 @@ Controls are M1's mouse look, WASD, Shift, Space, Ctrl, Z and F6, plus:
 * Esc to release the mouse (every held button is released too; the click that captures it again never fires).
 
 The scene shows the HUD, the viewmodel of the own team, the kill counter (`kills k deaths d   US a : RU b`) and the
-death screen (killer slot or fall, respawn countdown; the viewmodel and the weapon HUD hidden). S1's walker bots are
-armed but do not fire; they are drawn as capsules tinted friend (blue) or foe (red).
+death screen (killer slot or fall, respawn countdown; the viewmodel and the weapon HUD hidden).
 
-Phase 1 skips bot AI, 3p soldiers, game audio and game effects. Their check cases are skipped with "waiting for
-bt / tp / au3 / fx3", and the code that drives them is compiled once their files land (the `OPENBF3_M2A_HAVE_*`
-switches of the `M2a gx` CMake block).
+Since the end-to-end step (`m2a/w3` merged, m2a-gx.md §9) the match has:
+* bt's firefight bots, which fight the player and each other;
+* tp's 3p soldiers with their weapons, which replace the capsules;
+* au3's game audio: weapons, impacts and reloads in 3D, the own weapon in 1p;
+* fx3's effects: muzzle flashes, tracers, shells, impact effects and decals.
 
-Gates, measured 2026-10-18 on the branch (windowed rows one at a time, shared machine). Every windowed row needs
-`set OPENBF3_GODOT=<exe>` and `set OPENBF3_GODOT_WINDOWED=1`:
+A part that fails to load is dropped with an `[m2a] ERROR` line, and the game runs on without it.
+
+Gates, measured 2026-10-18 on the branch (windowed rows one at a time, shared machine; wall times indicative only).
+Every windowed row needs `set OPENBF3_GODOT=<exe>` and `set OPENBF3_GODOT_WINDOWED=1`:
 
 | gate | command | threshold | measured |
 |---|---|---|---|
-| functional cases (E1, E3, E5, E10, E19) | `ctest --preset dev-window -R "^godot\.m2a$"` | `M2A CHECK: PASS`; audio / fx skipped with their track | 4 pass (range, reload, hud, ads), 0 fail, 2 skip; 58 s |
+| functional cases (E1, E3, E5, E7, E8, E10, E19) | `ctest --preset dev-window -R "^godot\.m2a$"` | `M2A CHECK: PASS` | 6 / 6 cases pass (range, reload, hud, ads, audio, fx); 0 ERROR lines; 349 s |
 | kits (E11) | `ctest --preset dev-window -R "^godot\.m2a\.kits$"` | `M2A CHECK: PASS` | 67 / 67 rows (8 loadouts, knife hit, M67 fuse 3.6 s); 67 s |
-| 5-minute play, 0 errors | `ctest --preset dev-window -R "^godot\.m2a\.play$"` | `M2A CHECK: PASS`, 0 `ERROR` lines | PASS: 3 deaths, 3 respawns, 403 own shots, 4 kills, team switch, 0 event overflows; 0 ERROR lines; 312 s |
-| screenshots | the play row (to `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\gx\`) | hip, ADS, reload, firefight, death | 5 / 5 (m2a-gx.md §7) |
+| 5-minute play, 0 errors | `ctest --preset dev-window -R "^godot\.m2a\.play$"` | `M2A CHECK: PASS`, 0 `ERROR` lines | PASS. 16 bt bots, 9,178 remote shots, team kills US 68 : RU 55. The player: 355 own shots, 5 kills, 6 deaths (3 by bots), 6 respawns, the team switch. Crowd, FX and audio built (300.8 s mixed, 13,035 impact cells). 0 event overflows; 0 ERROR lines; 310 s |
+| screenshots | the play row (to `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\gx\`) | hip, ADS, reload, firefight, death | 5 / 5 (m2a-gx.md §9.4), plus E7's recording `gx_e7.wav` |
 | branch pass | `tools\build.cmd dev --strict` | every row passes, no budget violation | 128 rows: 126 passed, 2 skipped (`core.cache_data`, `core.res`), 0 failed, in two runs (556 s and 627 s on a busy machine). `--strict` exited 1 both times, on rows of other tracks that have no COST and went over 30 s under the load (run 1: `render.s3` 31.9 s; run 2: `anim`, `anim.s3`, `render.s3`, `sim.terrain.unit`, `fx.unit`, `anim.server_pose`). test_budget STRICT over the five gx rows (window preset): 0 violations |
 | E16 on the M2a scene | `ctest --preset dev-window -R "^godot\.m2a_load$"` | cold <= 15 s, warm <= 5 s | the integrator's row. One run on the branch (unlocked, shared machine, indicative only): cold 4.34 s pass, warm 5.42 s over the threshold |
-| E9, E13 / E14 | `ctest --preset dev-window -R "^godot\.m2a_firefight$"` | m2a.md E9, E14 | the integrator's row; skipped until bt lands |
+| E9, E13 / E14 | `ctest --preset dev-window -R "^godot\.m2a_firefight$"` | m2a.md E9, E14 | the integrator's row (64 bt bots, 2560 x 1440, FX on / off windows); not run on the branch (TIMING rule) |

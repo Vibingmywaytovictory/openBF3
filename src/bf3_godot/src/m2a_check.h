@@ -23,12 +23,18 @@
 //              the localised name and icon of every kit item (12 / 12)
 //   ads        E19: ADS world FOV 55 -> 40 and back within the aiming FOV times, the look scale, ADS refused while
 //              sprinting
-//   audio      E7 (au3): skipped with "waiting for au3" until Bf3GameAudio lands
-//   fx         E8 (fx3): skipped with "waiting for fx3" until Bf3GameFx lands
+//   audio      E7 (au3): au3's G7 script in the game on a new life; the own soldier fires aimed 60 degrees up and is
+//              heard in 3p through a listener on the aim axis (M2aGame::listener_override); au3's GameAudioCheck
+//              records the mix and analyse_game_check's rows are the case's (gx_e7.wav in the shots directory)
+//   fx         E8 (fx3): 500 M16A3 shots each at Metro concrete and brick (the 1p flash fraction, drawn ==
+//              particles, the named cells' effects and decals), the client-local oilfire after 15 s, a soldier hit,
+//              the cue counts (tracers, shells, impact sounds, 0 double starts)
 //   play       the scripted 5-minute play run: the input mapper drives move / look / fire / reload / switch / die
 //              (fall damage) / respawn among the bots; every subsystem built, events flowing, deaths and respawns
 //              seen; the ctest script fails it on any ERROR line in the log
-//   firefight  E13 / E14 with bt's bots (--m2a-firefight): skipped with "waiting for bt" until bt lands
+//   firefight  E9 / E13 / E14 with bt's bots (--m2a-firefight): 64 bots in pairs, 2560 x 1440 borderless (skipped on
+//              another primary screen), 10 s warm-up, 12 windows of 5 s FX on / off (M2aGame::fx_off); a timing case
+//   A case is skipped with "waiting for <track>" only in a build without that track (OPENBF3_M2A_HAVE_* = 0).
 
 #include "bf3/core/result.h"
 
