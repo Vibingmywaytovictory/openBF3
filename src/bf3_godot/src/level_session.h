@@ -291,6 +291,25 @@ private:
 	NavOverlay nav_draw_;
 	std::string bots_line_; // written by the loader before session_ready_
 	bool s1_reported_ = false;
+
+	// M2a w3 [G7] (W3.0 contract, docs/design/m2a-w3.md; owner gx): the wave-3 hooks (level_session_m2a.cpp) and the
+	// state they own (M2aSession, level_session_m2a.h). Each hook is called from one tagged line in
+	// level_session.cpp; W3.0's bodies do nothing, so M1, S1 and S3 behave exactly as before.
+	struct M2aSession;
+	struct M2aSessionDeleter {
+		void operator()(M2aSession *p_session) const;
+	};
+	void m2a_parse_args(); // end of parse_args
+	void m2a_load_options(bf3::host::SharedLoadOptions &r_options); // run_loader: before load_shared_level
+	// run_loader: after the S1 bot level, before Phase D (shared_ is set); false fails the load with *r_error.
+	bool m2a_load_assets(const bf3::host::LevelDatabase &p_db, bf3::core::Cache *p_cache, unsigned p_threads, std::string *r_error);
+	void m2a_server_config(bf3::host::GameServerConfig &r_game); // start_session: before the ServerConfig
+	void m2a_client_config(bf3::host::ClientSessionConfig &r_config) const; // client_config: before it returns
+	void m2a_presented(double p_delta, uint64_t p_now_ns); // _process: every frame after set_input (drains events)
+	bool m2a_frame(double p_delta, uint64_t p_now_ns); // _process after Done, after the S1 calls; true: frame handled
+	void m2a_input(const godot::Ref<godot::InputEvent> &p_event); // _unhandled_input: after the mapper
+	void m2a_shutdown(); // shutdown: after the loader joined, before the client stops
+	std::unique_ptr<M2aSession, M2aSessionDeleter> m2a_;
 };
 
 } // namespace bf3::godot_side

@@ -5,6 +5,7 @@
 #include "game_audio.h"
 #include "game_crowd.h"
 #include "game_fx.h"
+#include "level_session_m2a.h"
 #include "m2a_check.h"
 #include "m2a_game.h"
 #include "viewmodel_muzzle.h"
