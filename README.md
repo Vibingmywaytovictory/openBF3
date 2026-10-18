@@ -2514,7 +2514,10 @@ descriptions: [docs/design/m2a-fx3.md](docs/design/m2a-fx3.md).
 * **`Bf3GameFx`** (`game_fx.h`) is what gx wires into the playable scene. It holds:
   - the load on the loader thread: its own uncached library, the atlas and the preload of every fire and impact
     blueprint;
-  - fx2's renderer and light pool, and the decal pool (Godot `Decal`s; the magenta-keyed BC1 decals are un-keyed);
+  - fx2's renderer and light pool, and the decal pool (Godot `Decal`s). Every decal texture passes one rule
+    (`fx::prepare_decal_texture`): a real alpha is kept, a magenta-keyed BC1 one is un-keyed to grey with alpha, and
+    an opaque one is refused (Metro's brick texture is a channel mask, so brick hits leave no mark rather than a red
+    square);
   - `own_muzzle` from G6, `sound_cues` / `effect_sound_cues` for au3, and a client-local `start_effect`.
 * **Demo:** `<godot> --path bf3-opensource res://scenes/fx3_demo.tscn -- --fx3-check --fx3-shot-dir=<dir>` drives
   the game path on Metro. It captures the 1p muzzle flash, impacts on concrete, metal and dirt (a Sand sandbag),

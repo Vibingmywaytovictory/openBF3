@@ -44,8 +44,12 @@ Shared files carry one `# M2a fx3` / `// M2a fx3` block at their end: `src/bf3_f
 * The 32 impact sounds and 16 decal templates the cells name. 14 of the decals have a diffuse texture beside them.
   `decal_cloth_s_01` and `decal_plastic_s_01` have none on Metro.
 * Decal textures: the concrete, glass and scorch ones are BC3 with a real alpha. The metal, brick, stone, wood and
-  generic `decal_s_01` ones are BC1 with no alpha. Those are keyed on magenta: decompressed, the background is pure
-  (255, 0, 255) and the hole's halo blends towards it, with mean RGB (0.90, 0.01, 0.90). The template names no texture
+  generic `decal_s_01` ones are BC1 with no alpha. Four of those (metal, stone, wood, `decal_s_01`) are keyed on
+  magenta: decompressed, the background is pure (255, 0, 255) and the hole's halo blends towards it, with mean RGB
+  (0.90, 0.01, 0.90); their key share is 61-95 %. **Brick is not keyed** (corrected after verification; the first
+  notes listed it as keyed): `decal_brick_s_01_d` is a red (255, 0, 0) square around a yellow-to-green blob, mean
+  RGB (0.87, 0.44, 0.00), 0 % key and 0 % see-through. It is a channel mask, not a colour texture, and drawn as an
+  albedo it was an opaque red square on every Brick hit. It is now refused (§5). The template names no texture
   (its ShaderGraph binds them), so `pick_decal_texture` infers it [inferred].
 
 ## 3. Contract corrections
@@ -126,29 +130,47 @@ Shared files carry one `# M2a fx3` / `// M2a fx3` block at their end: `src/bf3_f
   An EffectBlueprint of the level goes through the library. Any other effect, and every EmitterDocument, goes through
   `compile_effect` / `compile_emitter_effect`, kept for at most 256 names. Failures are counted.
 * **`shutdown`** frees the renderer and the decal root by ObjectID, so a parent that freed them first is safe. It is
-  idempotent.
+  idempotent. A `load` after a `shutdown` (or after a failed load) starts from nothing: the catalogue, notes, stats
+  and tables are reset on the loader thread (no Godot node is touched there).
 
 ## 5. Decals
 
 * `load_decal_template` reads DecalTemplateData's Size, RandomSize, Rotation, RandomRotation, NormalOffset, ClipAngle
-  and AtlasTile. It applies bounded reads, and a Size outside (0, 100] is an error. `decal_placement` draws a size of
+  and AtlasTile. It applies bounded reads; a Size outside (0, 100] and a non-finite RandomSize, Rotation,
+  RandomRotation, NormalOffset or ClipAngle are errors (a NaN passed `std::clamp` before). A non-finite FireEffectData
+  Offset or Rotation fails that def's fire lists with a note, like any other read error. `decal_placement` draws a size of
   Size + U x RandomSize and a rotation of Rotation ± RandomRotation from the cue's seed
   (`trigger_seed(.., Decal, 0)`).
 * `FxDecalAssets::load` runs on the loader thread. It loads each named template, picks its texture, then loads it
   with `res::load_texture` and prepares it with `prepare_texture(Color)`.
-  - A BC1 texture whose texels are at least 20 % key (R, B ≥ 230 and G ≤ 25) is decoded (`decode_bc1`). It is then
-    un-keyed: each texel is read as a × colour + (1 - a) × magenta, so 1 - a = min(R, B) - G [inferred].
-  - Un-keyed textures get an alpha-weighted RGBA8 mip chain (`rgba_mip_chain`).
-  - On Metro 9 textures load, 4 of them un-keyed, 5.3 MiB in 0.01–0.04 s.
-  - The decoder is hostile-safe: it refuses a zero or > 4096 size and short input (unit case "decal keys", also under
-    asan).
+* **The decal-texture rule** (`fx::prepare_decal_texture`, Godot-free, the one call that decides every decal texture):
+  - Level 0 is decoded: BC1 (`decode_bc1`), BC3 (`decode_bc3`: 4-colour block, BC4-style alpha), RGBA8 as is. Any
+    other format (BC2, BC4, BC5, L8, RG8) is `Unsupported` and refused.
+  - A texture whose texels are at least 20 % key (R, B ≥ 230 and G ≤ 25) is un-keyed: each texel is read as
+    a × grey + (1 - a) × magenta, so 1 - a = min(R, B) - G and the grey is G / a [inferred]. The grey goes into all
+    three channels: R and B carry the key, and what they hold beyond the grey is off the model (the first version
+    kept it as hue, and stone's cracks drew saturated blue and metal's hole blue-violet). Un-keyed textures get an
+    alpha-weighted RGBA8 mip chain (`rgba_mip_chain`).
+  - The texture is drawn only when at least 5 % of level 0 is see-through (alpha < 128, after un-keying;
+    `kMinDecalTransparentShare`). A decal that covers its whole square is a mask or a mistake, never a bullet mark.
+    Anything else is `Opaque` and refused: the decal is untextured (skipped and counted; `FxDecalAssets::refused`, a
+    load note "opaque (BC1, 0 % see-through): not drawn").
+  - On Metro: 9 textures load, 4 un-keyed (see-through: `decal_s_01_d` 94 %, metal 97 %, stone 99 %, wood 75 %),
+    4 with a real alpha (concrete_s 55 %, concrete_l 74 %, glass 98 %, scorch 89 %), brick refused (0 %); 5.2 MiB in
+    0.03 s. fx.install.cells runs the rule over every Metro decal texture and checks brick refused, the named cells'
+    other decals and the scorch mark drawn, and every drawn one see-through on 5-99.9 % of its texels.
+  - The decoders are hostile-safe: a zero or > 4096 size and short input are errors (unit cases "decal keys" and
+    "decal texture rule", also under asan).
+  - Brick hits therefore leave no mark on Metro. A brick-coloured mark would need the mask's meaning (BF3's decal
+    shader), which is not known.
 * `FxDecalPool` places Godot `Decal` nodes. The basis is the cue's effect frame (+Y = normal), turned about +Y by
   the placement rotation. Godot decals project along -Y. The box is size × 0.12 × size, NormalOffset above the
   surface.
   - Albedo mix is 1. The normal fade is 0.5 cos(ClipAngle) + 0.5 [inferred from Godot's shader], and the upper and
     lower fades are 0.3.
   - Past 256 decals the oldest node is reused. A decal fades out over 5 s once it is 30 s old.
-  - A cue without a template or texture is skipped and counted. Cloth and plastic are the untextured ones on Metro.
+  - A cue without a template or texture is skipped and counted. Cloth and plastic (no texture) and brick (refused)
+    are the untextured ones on Metro.
 
 ## 6. Demo (`res://scenes/fx3_demo.tscn`, `--fx3-check`)
 
@@ -187,7 +209,7 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
 | `fx3_muzzle_1p.png` | The 1p M16A3 flash from the 1p pass: a bright yellow-white fireball right of centre and below it, with the orange muzzle light on the station floor. The capsule stand-in is 4 m ahead. The flash is at fx2's nominal camera point (no viewmodel mesh is loaded), so it floats in front of the camera with no weapon behind it. Shell stand-in boxes show at the bottom. |
 | `fx3_impact_concrete.png` | A top-down view of a Concrete floor 1.5 m away, 0.1 s after 6 impacts. A dark dust burst with streaks fills the centre, debris specks surround it, and the decals are under the dust. |
 | `fx3_decals_concrete.png` | The same view 5.5 s later. The dust has gone, and the 6 overlapping `decal_concrete_s_01` marks remain as a grey-brown chipped patch. |
-| `fx3_impact_metal.png` | A Metal panel (orange, weathered). A bright spark glow with fine sparks, and 6 small round bullet-hole decals (`decal_metal_s_01_d` un-keyed). Before the un-keying fix these drew as magenta squares. |
+| `fx3_impact_metal.png` | A Metal panel (orange, weathered). A bright spark glow with fine sparks, and 6 small round bullet-hole decals (`decal_metal_s_01_d` un-keyed). Before the un-keying fix these drew as magenta squares; since the grey rule (§5) they are faint grey rings with no blue core (re-captured 2026-10-18). |
 | `fx3_impact_dirt.png` | A top-down view of a Sand-material sandbag. A pale blue-grey sand puff, and 6 small dark holes on the bag (generic `decal_s_01`). |
 | `fx3_hit_soldier.png` | The grey capsule 2.2 m away, 0.08 s after a chest Hit: dark red-black spray particles of `fx_impact_soldier_body_s` on its chest. |
 | `fx3_tracers.png` | The main pose 0.03 s after 3 remote shots from 6 m to the right. A thin tracer streak crosses the left half, the 3p muzzle smoke shows near the shooter, and the own tracer glow lights the capsule. |
@@ -199,8 +221,18 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
   material, which the Detonation event does not carry.
 * **Metro has no Water** triangle. The water cell is checked on Caspian in `fx.install.cells` (E8 (5)).
 * **Tiled decals** (AtlasTile > 1) would draw their whole texture. None are tiled on Metro (all 1 × 1).
-* **Untextured decals.** Cloth and plastic have no texture on Metro, so they are skipped and counted.
-* **Inferred decal textures.** The texture choice and the magenta-key meaning are inferred.
+* **Untextured decals.** Cloth and plastic have no texture on Metro, and brick's texture is an opaque channel mask
+  that the decal-texture rule refuses (§5), so they are skipped and counted. Brick hits show their impact effect and
+  sound but no mark.
+* **Inferred decal textures.** The texture choice and the magenta-key meaning (a grey over magenta) are inferred.
+  The un-keyed stone decal now reads as dark grey cracks and metal as a grey hole with a pale rim; the look is the
+  user's call.
+* **Late join replays no recording.** fx.triggers.unit case "late join" builds the RemoteShot events itself the way
+  `client_session.cpp` emits them (`effect_seed(match, slot, shot)`, the `kTracer` flag; checked equal to its lines
+  1678-1686 on 2026-10-18) and takes the Impact events from cl's real `ClientProjectiles`. A later change to
+  ClientSession's RemoteShot emission would not be caught there; a <= 2 s unit row cannot run a session.
+* **E8 (5)'s oracle is a copy.** fx.install.cells lists fx G5's named Metro cells as literals; G5's table is local to
+  `fx_harness.cpp` (fx's file) and not exported. The values equal G5's today and can drift.
 * **Debris.** Debris mesh components draw as fx2's mesh stand-ins (boxes).
 * **The demo's 1p muzzle** is G6's camera stand-in, not a weapon joint. Loading a viewmodel in the demo would add
   seconds; gx's scene has it.
