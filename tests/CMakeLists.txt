@@ -1225,3 +1225,9 @@ endif()
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     openbf3_godot_row(godot.m2a_tp_crowd godot_m2a_tp_crowd.cmake HEADLESS TIMEOUT 480)
 endif()
+# COST (docs/testing.md §4): both rows load the soldier assets, the level's gunplay tables and every kit item's 3p
+# weapon from the install (no lighter subset proves the per-item meshes); alone 2.9 s (render.crowd_weapons) and 9.4 s
+# (godot.m2a_tp_crowd, the crowd load 3.4 s of it), but 34 s and 39 s inside the 16-job branch pass (2026-10-18), so
+# they start early.
+openbf3_cost(render.crowd_weapons 1 5)
+openbf3_cost(godot.m2a_tp_crowd 1 10)
