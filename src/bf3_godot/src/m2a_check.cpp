@@ -1504,6 +1504,8 @@ void M2aCheck::State::build_play() {
 // pick their own targets), and the own soldier's 3p route is the router's remote route with the own slot.
 void M2aCheck::State::build_audio() {
 	add("audio: built", 20.0, [](State &st, double, bool) { return st.g.audio != nullptr && st.g.audio->built(); });
+	// A new life first: the earlier cases of the run spend the bag, and the 17 steps need ~170 rounds of one life's ~190.
+	respawn_at([](State &) { return 0u; });
 	add("audio: range lane", 5.0, [](State &st, double, bool) {
 		if (st.g.world != nullptr && st.s.shared_level() != nullptr) {
 			st.lane = sw::find_range_lane(*st.g.world, st.s.shared_level()->spawns, st.f().eye_height_curr, 30.0f);
