@@ -246,8 +246,8 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
 
 | gate | threshold | measured | command |
 |---|---|---|---|
-| fx.triggers.unit | all cases pass, ≤ 2 s | 14 / 14 cases, 4,496 assertions, 0.34 s. Synthetic flash 766 / 1000; concrete choices 103 / 97 over 200 seeds, widest spread 29.8° (limit 30); late join: 87 starts over 25 remote shots, 25 impacts and 2 variants, identical between the two clients | `ctest --preset dev -R "^fx\.triggers\.unit$"` |
-| fx.install.cells | both cases pass, ≤ 15 s | 2 / 2 cases, 142 assertions, 4.5 s (4.1 s of loading) | `ctest --preset dev -R "^fx\.install\.cells$"` |
+| fx.triggers.unit | all cases pass, ≤ 2 s | 15 / 15 cases, 4,530 assertions, 0.21-0.35 s (after the decal-texture fix; 14 cases and 4,496 assertions before). Synthetic flash 766 / 1000; concrete choices 103 / 97 over 200 seeds, widest spread 29.8° (limit 30); late join: 87 starts over 25 remote shots, 25 impacts and 2 variants, identical between the two clients | `ctest --preset dev -R "^fx\.triggers\.unit$"` |
+| fx.install.cells | both cases pass, ≤ 15 s | 2 / 2 cases, 194 assertions, 2.9-4.3 s alone (11.1 s in the strict pass); the decal-texture rule over Metro's 9 decal textures: brick refused, 8 drawn, 0.03 s | `ctest --preset dev -R "^fx\.install\.cells$"` |
 | E8 (1) | every blueprint of the kits and the impact table compiles | 72 / 72, 0 failures | same (fx.install.cells) |
 | E8 (3), Godot-free half | `_1p_flash` in [710, 790] of 1,000 M16A3 OwnShots | 759 / 1000 | same |
 | E8 (5) | the in-game cells start fx G5's named effects and decals; water: Metro's tags, else Caspian | Concrete, Brick, Glass, Metal as G5; soldier zones; "Metro: no water"; Caspian water → `fx_impact_water_s` | same |
@@ -255,7 +255,7 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
 | E15 variant row | the same (effect, variant) per remote shot on both clients | equal | fx.triggers.unit case "late join" |
 | m2a.contract3 | fx3 rows run (no PENDING) | 10 / 10 cases, 336 assertions | `ctest --preset dev -R "^m2a\.contract3$"` |
 | asan | the new decoder, the template reader and the triggers under ASan | see §10 | `ctest --preset asan -R "^fx\.(triggers\.unit|install\.cells)$"` |
-| godot.fx3_demo (window) | `FX3 DEMO: PASS`: 0 preload failures; drawn == particles every frame; one shell per own shot; 0 double starts; impacts on concrete, metal and dirt; decals; a hit; 7 captures; install unchanged | PASS: 1,873 / 1,873 frames; 180 own + 3 remote shots, 366 muzzle starts, 180 shells, 63 tracers, 19 impacts, 18 decals, 1 soldier cell; FX main thread p50 0.16 / p99 0.47 ms; 30.1 s | `ctest --preset dev-window -R "^godot\.fx3_demo$"` with `OPENBF3_GODOT`, `OPENBF3_GODOT_WINDOWED=1` and `OPENBF3_USER_ACTIVE_FLAG` (a window row) |
+| godot.fx3_demo (window) | `FX3 DEMO: PASS`: 0 preload failures; drawn == particles every frame; one shell per own shot; 0 double starts; impacts on concrete, metal and dirt; decals; a hit; 7 captures; install unchanged | PASS (re-run after the decal fix): 2,595 / 2,595 frames; 180 own + 3 remote shots, 366 muzzle starts, 180 shells, 63 tracers, 19 impacts, 18 decals, 1 soldier cell; decals: 8 textures, 4 un-keyed, 1 refused (brick); FX main thread p50 0.09 / p99 0.16 ms; 24.7 s | `ctest --preset dev-window -R "^godot\.fx3_demo$"` with `OPENBF3_GODOT`, `OPENBF3_GODOT_WINDOWED=1` and `OPENBF3_USER_ACTIVE_FLAG` (a window row) |
 | install unchanged | layout.toc, cas.cat, every .sb/.toc | unchanged | fx.install.cells case "install unchanged", and godot.fx3_demo |
 
 ## 10. Branch pass and asan (2026-10-18; branch, unlocked, shared machine: indicative only)
@@ -276,5 +276,11 @@ and `--fx3-dump-decals=<dir>` writes them as PNGs (refused inside the install; s
   - **The fx rows alone, right after:** fx.triggers.unit 0.26 s, fx.unit 0.49 s, fx.install.cells 3.06 s, all within
     their budgets (2 s unit and 15 s install). core.ui.font passed alone in 0.48 s.
 
-  So the strict gate has not been seen passing on this branch. Both failures follow the machine's load and move
-  between rows. It should be re-run on an idle machine (the merge pass).
+  So the strict gate was not seen passing in those two runs. Both failures followed the machine's load and moved
+  between rows.
+* **After the verifier's fixes** (decal-texture rule, COST 5 on fx.install.cells): `toolsuild.cmd dev --strict`
+  exit 0: 130 rows, 128 passed and 2 skipped (`core.cache_data`, `core.res`), 0 failed, **0 STRICT violations**
+  (budget warnings only, none on an fx3 row); phase wall 193 s. fx.unit 1.6 s, fx.install.cells 11.1 s,
+  fx.triggers.unit 0.35 s. asan after the fixes: the same 5 rows passed with no AddressSanitizer report
+  (fx.triggers.unit 2.2 s, fx.install.cells 49.4 s), now also covering `decode_bc3`, `transparent_share` and
+  `prepare_decal_texture`.
