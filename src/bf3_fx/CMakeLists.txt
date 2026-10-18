@@ -46,3 +46,8 @@ target_sources(bf3_fx PRIVATE
     include/bf3/fx/triggers.h
 )
 target_link_libraries(bf3_fx PUBLIC bf3_host)
+
+# M2a fx3 (docs/design/m2a-fx3.md): VFX3's triggers (bf3/fx/triggers.h).
+target_sources(bf3_fx PRIVATE
+    src/triggers.cpp
+)
