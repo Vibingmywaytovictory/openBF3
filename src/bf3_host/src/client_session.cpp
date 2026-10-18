@@ -133,6 +133,7 @@ struct ClientSession::Impl {
 	std::unique_ptr<PresentationFrame> shared_frame = std::make_unique<PresentationFrame>();
 	std::mutex debug_mutex;
 	std::deque<net::DebugRequest> debug_out;
+	std::deque<net::KitSelect> kit_out; // M2a w3 [G4]: send_kit_select's queue (under debug_mutex)
 	std::deque<net::DebugReport> reports;
 	std::atomic<int32_t> shift_request{ 0 };
 	std::atomic<uint32_t> stall_request_ms{ 0 };
@@ -992,6 +993,16 @@ struct ClientSession::Impl {
 					submit(net::kChannelReliable, net::encode_debug(q), now);
 				}
 			}
+			{ // M2a w3 [G4]: the KitSelects queued by send_kit_select, in order
+				std::deque<net::KitSelect> kits; // M2a w3 [G4]
+				{ // M2a w3 [G4]
+					std::lock_guard lock(debug_mutex); // M2a w3 [G4]
+					kits.swap(kit_out); // M2a w3 [G4]
+				} // M2a w3 [G4]
+				for (const net::KitSelect &k : kits) { // M2a w3 [G4]
+					submit(net::kChannelReliable, net::encode_kit_select(k), now); // M2a w3 [G4]
+				} // M2a w3 [G4]
+			} // M2a w3 [G4]
 			release_out(now);
 			if (clock_running && connected) {
 				const double clock = clock_ticks(now);
@@ -2032,6 +2043,16 @@ void ClientSession::take_own_test_samples(std::vector<OwnTestSample> &r_samples)
 	std::lock_guard lock(impl_->cl_log_mutex);
 	r_samples.insert(r_samples.end(), impl_->cl_sample_log.begin(), impl_->cl_sample_log.end());
 	impl_->cl_sample_log.clear();
+}
+
+// ---- M2a w3 (G4, docs/design/m2a-w3.md) ---------------------------------------------------------------------------
+
+void ClientSession::send_kit_select(const net::KitSelect &p_select) {
+	std::lock_guard lock(impl_->debug_mutex);
+	if (impl_->kit_out.size() >= 16) {
+		impl_->kit_out.pop_front(); // the newest win: a key held down never grows the queue
+	}
+	impl_->kit_out.push_back(p_select);
 }
 
 } // namespace bf3::host

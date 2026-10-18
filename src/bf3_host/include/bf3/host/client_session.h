@@ -354,6 +354,11 @@ public:
 	PresentationEvents &events();
 	void take_predicted(std::vector<struct PredictedShot> &r_shots, std::vector<struct PredictedTimed> &r_timed);
 	void take_own_test_samples(std::vector<OwnTestSample> &r_samples);
+	// M2a w3 (G4, docs/design/m2a-w3.md): a KitSelect {kit, team} for the next spawn at any time after start (the K / T
+	// keys; ClientSessionConfig::send_kit_select only goes with Ready). Any thread: queued (the newest 16 kept) and sent
+	// reliably by the client thread at its next loop. The server applies it at the next spawn; a team change needs its
+	// dev_commands (sv).
+	void send_kit_select(const net::KitSelect &p_select);
 
 	// Stops and joins every running ClientSession of the process (extension deinit safety net).
 	static size_t stop_all();
