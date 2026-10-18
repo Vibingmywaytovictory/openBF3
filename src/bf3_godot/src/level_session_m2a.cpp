@@ -383,6 +383,26 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 	// The viewmodel sets on their own thread (level_session_m2a.h): its own cache handle (shared with the loader's
 	// when open), the level superbundle's Ant banks and EBX, the mode's 8 loadouts, then the US and RU sets.
 	M2aSession *g = m2a_.get();
+#if OPENBF3_M2A_HAVE_CROWD
+	// M2a w3 integration (E16): the crowd's SharedLevel-free half on its own thread, with its own cache handle (shared
+	// with the loader's when open), as the viewmodel thread below.
+	g->crowd = std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)>(new Bf3GameCrowd(), &delete_part<Bf3GameCrowd>);
+	g->crowd_loader = std::thread([this, g]() {
+		const double t0 = steady_s();
+		std::shared_ptr<bf3::core::Cache> cache;
+		if (!no_cache_) {
+			AcquiredCache acquired = acquire_cache(cache_root_, guard_);
+			if (acquired.status == bf3::core::CacheStatus::Ok) {
+				cache = acquired.cache;
+			}
+		}
+		if (const bf3::core::Status s = g->crowd->load_body(install_, cache.get(), &stop_); !s.ok()) {
+			g->crowd_body_error = s.error().message;
+		}
+		cache.reset(); // the last holder closes the cache on this thread
+		g->crowd_body_seconds = steady_s() - t0;
+	});
+#endif
 	g->vm_loader = std::thread([this, g]() {
 		const double t0 = steady_s();
 		std::shared_ptr<bf3::core::Cache> cache;
@@ -524,13 +544,24 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 #if OPENBF3_M2A_HAVE_CROWD
 		{
 			const double t0 = steady_s();
-			g.crowd = std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)>(new Bf3GameCrowd(), &delete_part<Bf3GameCrowd>);
-			if (const bf3::core::Status s = g.crowd->load(li); !s.ok()) {
+			// M2a w3 integration (E16): the body half ran on crowd_loader (m2a_load_options); join it, then the items.
+			if (g.crowd_loader.joinable()) {
+				g.crowd_loader.join();
+			}
+			const double t_join = steady_s();
+			if (g.crowd == nullptr) {
+				g.crowd = std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)>(new Bf3GameCrowd(), &delete_part<Bf3GameCrowd>);
+			}
+			if (!g.crowd_body_error.empty()) {
+				note("[m2a] ERROR crowd load: " + g.crowd_body_error);
+				g.crowd.reset();
+			} else if (const bf3::core::Status s = g.crowd->load(li); !s.ok()) {
 				note("[m2a] ERROR crowd load: " + s.error().message);
 				g.crowd.reset();
 			} else {
-				char line[128];
-				std::snprintf(line, sizeof(line), "[m2a] crowd loaded in %.2f s", steady_s() - t0);
+				char line[192];
+				std::snprintf(line, sizeof(line), "[m2a] crowd loaded in %.2f s after the SharedLevel (waited %.2f s for its body thread, %.2f s there)", steady_s() - t0,
+						t_join - t0, g.crowd_body_seconds);
 				note(line);
 			}
 		}
@@ -1162,6 +1193,9 @@ void Bf3LevelSession::m2a_shutdown() {
 	M2aSession &g = *m2a_;
 	if (g.vm_loader.joinable()) {
 		g.vm_loader.join(); // open_viewmodel_sources cannot be cancelled: a quit during it waits for it
+	}
+	if (g.crowd_loader.joinable()) {
+		g.crowd_loader.join(); // M2a w3 integration (E16): a loader that failed before m2a_load_assets
 	}
 	g.check.reset();
 #if OPENBF3_M2A_HAVE_CROWD

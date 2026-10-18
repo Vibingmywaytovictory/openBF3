@@ -23,10 +23,12 @@
 #include "m2a_game.h"
 
 #include "bf3/anim/crowd_eval.h"
+#include "bf3/core/install_reader.h"
 #include "bf3/core/result.h"
 #include "bf3/fx/triggers.h"
 #include "bf3/render/crowd_weapons.h"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -57,6 +59,9 @@ public:
 	Bf3GameCrowd &operator=(const Bf3GameCrowd &) = delete;
 
 	core::Status load(const M2aLoadInputs &p_in);
+	// M2a w3 integration (E16): the SharedLevel-free half of load() (soldier assets, stance and move clips, aim), on any
+	// one thread before load(); load() then only adds the kit items' 3p weapons. Optional: load() runs it when not done.
+	core::Status load_body(const core::InstallReader &p_reader, core::Cache *p_cache, const std::atomic<bool> *p_stop);
 	bool loaded() const;
 	bool build(godot::Node3D *p_parent, std::string *r_error);
 	bool built() const;

@@ -43,10 +43,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <deque>
 #include <map>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -107,6 +109,11 @@ struct Bf3GameCrowd::Impl {
 	std::array<std::vector<anim::CrowdWeapon>, 2> views;
 	std::vector<anim::CrowdTeam> teams;
 	std::atomic<bool> loaded{ false };
+	// M2a w3 integration (E16): load_body's result until load() takes it (one thread at a time: the session joins
+	// its crowd thread before load()).
+	std::unique_ptr<render::SoldierAssets> body;
+	std::vector<std::string> body_notes;
+	std::array<double, 2> body_seconds{}; // soldier assets; stance and move clips and the aim measure
 	// Built (main thread).
 	bool built = false;
 	std::unique_ptr<core::WorkerGroup> lanes;
@@ -419,6 +426,75 @@ Bf3GameCrowd::~Bf3GameCrowd() {
 	shutdown();
 }
 
+// M2a w3 integration (E16): the half of the load that needs no SharedLevel (the soldier assets, lc's stance clips, tp's
+// moves, the aim measure). The level session runs it on its own thread beside load_shared_level (m2a_load_options);
+// load() runs it itself when nobody did.
+core::Status Bf3GameCrowd::load_body(const core::InstallReader &p_reader, core::Cache *p_cache, const std::atomic<bool> *p_stop) {
+	Impl &m = *impl_;
+	if (m.loaded.load(std::memory_order_acquire) || m.body != nullptr) {
+		return core::make_error("crowd: already loaded");
+	}
+	auto stopped = [&] { return p_stop != nullptr && p_stop->load(std::memory_order_relaxed); };
+	const auto clock_s = [] { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); };
+	const double t_start = clock_s();
+	render::SoldierSpec spec;
+	// The clip package's Ant source (about 1.1 s warm on Metro) opens on a second thread while the soldier assets load;
+	// it is joined before any return.
+	std::optional<core::Result<std::shared_ptr<core::Install>>> install;
+	std::optional<core::Result<std::unique_ptr<core::ant::AntInstallSource>>> source;
+	std::thread ant_opener([&] {
+		install.emplace(core::Install::open(p_reader));
+		if (*install) {
+			source.emplace(core::ant::AntInstallSource::open(**install));
+		}
+	});
+	core::Result<std::unique_ptr<render::SoldierAssets>> assets = render::load_soldier_assets(p_reader, spec, nullptr, p_cache);
+	ant_opener.join();
+	if (!assets) {
+		return core::error_at("crowd soldier assets", assets.error());
+	}
+	if (stopped()) {
+		return core::make_error("crowd: stopped");
+	}
+	const double t_assets = clock_s();
+	m.body_notes.clear();
+	// lc's stance clips and tp's moves, from the clip set's package (a failure is a note: the stand clips stand in).
+	{
+		if (install && *install) {
+			if (source && *source) {
+				core::Result<anim::ServerPoseClips> pose = anim::load_server_pose_clips(***source, *(*assets)->library);
+				if (pose) {
+					m.pose = std::move(*pose);
+					m.have_pose = true;
+				} else {
+					m.body_notes.push_back("stance clips: " + pose.error().message + " (every stance drawn standing)");
+				}
+			}
+		}
+		core::Result<anim::CrowdMoveClips> moves = anim::load_crowd_move_clips((*assets)->clips, *(*assets)->library);
+		if (moves) {
+			m.moves = std::move(*moves);
+			m.have_moves = true;
+			for (const std::string &n : m.moves.notes) {
+				m.body_notes.push_back("move clips: " + n);
+			}
+		} else {
+			m.body_notes.push_back("move clips: " + moves.error().message);
+		}
+	}
+	m.config = anim::CrowdConfig{};
+	m.config.lod = (*assets)->lod;
+	core::Result<anim::AimMeasure> aim = anim::measure_aim((*assets)->clips, m.config.aim_order);
+	if (aim && aim->qualifies()) {
+		m.config.aim_up_full_pitch_deg = aim->up_deg;
+		m.config.aim_down_full_pitch_deg = -aim->down_deg;
+	}
+	m.body_seconds[0] = t_assets - t_start;
+	m.body_seconds[1] = clock_s() - t_assets;
+	m.body = std::move(*assets);
+	return core::Status::success();
+}
+
 core::Status Bf3GameCrowd::load(const M2aLoadInputs &p_in) {
 	Impl &m = *impl_;
 	if (m.loaded.load(std::memory_order_acquire)) {
@@ -429,18 +505,22 @@ core::Status Bf3GameCrowd::load(const M2aLoadInputs &p_in) {
 	}
 	auto stopped = [&] { return p_in.stop != nullptr && p_in.stop->load(std::memory_order_relaxed); };
 	const core::InstallReader &reader = p_in.db->install->reader();
-	render::SoldierSpec spec;
-	core::Result<std::unique_ptr<render::SoldierAssets>> assets = render::load_soldier_assets(reader, spec, nullptr, p_in.cache);
-	if (!assets) {
-		return core::error_at("crowd soldier assets", assets.error());
+	const bool body_before = m.body != nullptr;
+	if (!body_before) {
+		if (const core::Status s = load_body(reader, p_in.cache, p_in.stop); !s.ok()) {
+			return s;
+		}
 	}
 	if (stopped()) {
 		return core::make_error("crowd: stopped");
 	}
+	const auto clock_s = [] { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); };
+	const double t_start = clock_s();
+	render::SoldierSpec spec;
 	const host::GunplayLevel *gunplay = p_in.shared ? p_in.shared->gunplay.get() : nullptr;
 	const CrowdItemLists lists = crowd_item_specs(gunplay, spec);
 	core::Result<std::unique_ptr<render::CrowdWeaponSet>> weapons =
-			render::load_crowd_weapons(reader, spec, **assets, { std::span<const render::CrowdWeaponSpec>(lists.teams[0]), std::span<const render::CrowdWeaponSpec>(lists.teams[1]) },
+			render::load_crowd_weapons(reader, spec, *m.body, { std::span<const render::CrowdWeaponSpec>(lists.teams[0]), std::span<const render::CrowdWeaponSpec>(lists.teams[1]) },
 					p_in.cache);
 	if (!weapons) {
 		return core::error_at("crowd weapons", weapons.error());
@@ -448,45 +528,22 @@ core::Status Bf3GameCrowd::load(const M2aLoadInputs &p_in) {
 	for (const std::string &n : lists.notes) {
 		(*weapons)->notes.push_back(n);
 	}
+	for (const std::string &n : m.body_notes) {
+		(*weapons)->notes.push_back(n);
+	}
+	m.body_notes.clear();
 	if (stopped()) {
 		return core::make_error("crowd: stopped");
 	}
-	// lc's stance clips and tp's moves, from the clip set's package (a failure is a note: the stand clips stand in).
 	{
-		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
-		if (install) {
-			core::Result<std::unique_ptr<core::ant::AntInstallSource>> source = core::ant::AntInstallSource::open(*install);
-			if (source) {
-				core::Result<anim::ServerPoseClips> pose = anim::load_server_pose_clips(**source, *(*assets)->library);
-				if (pose) {
-					m.pose = std::move(*pose);
-					m.have_pose = true;
-				} else {
-					(*weapons)->notes.push_back("stance clips: " + pose.error().message + " (every stance drawn standing)");
-				}
-			}
-		}
-		core::Result<anim::CrowdMoveClips> moves = anim::load_crowd_move_clips((*assets)->clips, *(*assets)->library);
-		if (moves) {
-			m.moves = std::move(*moves);
-			m.have_moves = true;
-			for (const std::string &n : m.moves.notes) {
-				(*weapons)->notes.push_back("move clips: " + n);
-			}
-		} else {
-			(*weapons)->notes.push_back("move clips: " + moves.error().message);
-		}
+		char line[224];
+		std::snprintf(line, sizeof(line), "load: soldier assets %.2f s, stance and move clips and aim %.2f s (%s), weapons %.2f s", m.body_seconds[0], m.body_seconds[1],
+				body_before ? "on the session's crowd thread" : "here", clock_s() - t_start);
+		(*weapons)->notes.push_back(line);
 	}
 	// The body meshes without the default weapon part (the items draw the weapons).
-	render::strip_team_weapon_parts(**assets);
-	m.config = anim::CrowdConfig{};
-	m.config.lod = (*assets)->lod;
-	core::Result<anim::AimMeasure> aim = anim::measure_aim((*assets)->clips, m.config.aim_order);
-	if (aim && aim->qualifies()) {
-		m.config.aim_up_full_pitch_deg = aim->up_deg;
-		m.config.aim_down_full_pitch_deg = -aim->down_deg;
-	}
-	m.assets = std::move(*assets);
+	render::strip_team_weapon_parts(*m.body);
+	m.assets = std::move(m.body);
 	m.weapons = std::move(*weapons);
 	m.teams.assign(2, anim::CrowdTeam{});
 	for (uint32_t t = 0; t < 2; ++t) {

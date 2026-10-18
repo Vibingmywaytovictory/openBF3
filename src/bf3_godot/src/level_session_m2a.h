@@ -250,6 +250,12 @@ struct Bf3LevelSession::M2aSession : M2aGame {
 	std::atomic<bool> vm_done{ false };
 	bool vm_built = false; // the build was attempted (main thread)
 	bf3::render::LoadProgress vm_progress;
+	// M2a w3 integration (E16): Bf3GameCrowd::load_body (soldier assets, stance and move clips) on its own thread
+	// beside load_shared_level, from m2a_load_options; m2a_load_assets joins it before the crowd's load(). The status
+	// is written before the join.
+	std::thread crowd_loader;
+	std::string crowd_body_error;
+	double crowd_body_seconds = 0;
 	std::unique_ptr<M2aCheck> check;
 	bool finished = false;
 };
