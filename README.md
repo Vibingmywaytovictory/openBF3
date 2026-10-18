@@ -2571,3 +2571,33 @@ Track tp of M2a wave 3 is on branch `m2a/tp`, from the W3.0 contract. Design: [d
   - `ctest --preset dev -R "^render\.crowd_weapons$"`: install.
   - `ctest --preset dev -R "^godot\.m2a_tp_crowd$"`: headless, `M2A TP CROWD CHECK: PASS`.
   - `m2a.contract3` has `kTpLanded` set.
+
+## M2a au3: game audio
+
+<!-- # M2a au3 -->
+Track `au3` of M2a wave 3, on branch `m2a/au3`. Design: [docs/design/m2a.md](docs/design/m2a.md) §12.3, gate E7.
+As built, with the measured results and one command per gate: [docs/design/m2a-au3.md](docs/design/m2a-au3.md).
+
+* **Router** (`bf3/audio/weapon_audio.h`, Godot-free):
+  - **Own fire** runs on the Predicted timeline: one first-person driver per trigger hold, with its rounds on the shot
+    index grid.
+  - **Others' fire** runs on the Render timeline. A RemoteShot starts the burst on its exact frame, and the newest
+    records decide the end on time. The records also fill rounds whose datagram was lost.
+  - **Reloads, the knife and the M67** are one-shots.
+  - **Voice limit:** 32 drivers, the farthest released tail stolen, the rest culled; 64 one-shots; a 96-instance mixer.
+  - **Listener:** after every listener move, every emitter is sent again.
+* **Clock:** `SimMixerClock` places events on the mixer clock with the measured output latency and a bias.
+* **Impacts** (`impact_audio.h`): fx3's impact and effect sound patches, compiled once.
+* **Godot** (`src/bf3_godot/src/game_audio.h`): `Bf3GameAudio` owns the game mixer, its stream and the player
+  "Bf3GameMixer". It has `load`, `build`, `step` and the client-local `audition`. Its Godot-free halves are in
+  `bf3/audio/game_audio_frame.h`, and the offline rows run them.
+* **E7** (`game_audio_check.h`): `GameAudioCheck` records the mix and the shooter's voice taps.
+  `analyse_game_check` judges the recording with au's `analyse_check` and the in-game rows. Item 4's M1A2 patch is
+  not on Metro's mount: it loads from MP_001 (`kAuditionSuperbundles`) with a bank of its own. A step that cannot run
+  fails (`skipped.<step>`); it never reads as a pass.
+* **Tests:**
+  - `ctest --preset dev -R "^audio\.(router|game)"` runs the unit suite and the install rows. `audio.game` covers the
+    kits, the offline E7 rehearsal and a scene for the ear; `audio.game.crowd` runs 64 shooters for 60 s.
+  - The rows write their WAVs to `b\dev\shots\<row>\`, which is gitignored. Copies for listening are in
+    `C:\Users\olku\BF3 reimplementation\openBF3\b\shots\au3\`.
+  - `audio.game.underruns` gates the underrun count (a wall-clock measure) and runs on main only.
