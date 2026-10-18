@@ -101,6 +101,9 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (scripted_ || p_event.is_null()) {
 		return;
 	}
+	if (m2a_handle_event(p_event)) { // M2a gx [mapper]: the weapon actions; the capture click never fires
+		return;
+	}
 	if (const InputEventMouseMotion *mm = Object::cast_to<InputEventMouseMotion>(p_event.ptr())) {
 		if (captured_) {
 			const Vector2 rel = mm->get_relative();
@@ -229,6 +232,7 @@ bf3::host::InputSample InputMapper::sample() const {
 		s.move_right = float(int(held(InputAction::Right)) - int(held(InputAction::Left)));
 		s.held_buttons = held(InputAction::Sprint) ? sim::buttons::kSprint : 0u;
 	}
+	m2a_sample(s); // M2a gx [mapper]: weapon bits, fire_presses, the view sample (no-op unless m2a_enable)
 	return s;
 }
 
@@ -238,6 +242,290 @@ Vector3 InputMapper::free_move() const {
 	}
 	return Vector3(float(int(held(InputAction::Right)) - int(held(InputAction::Left))), float(int(held(InputAction::Up)) - int(held(InputAction::Down))),
 			float(int(held(InputAction::Forward)) - int(held(InputAction::Back))));
+}
+
+} // namespace bf3::godot_side
+
+// ---- M2a gx (docs/design/m2a.md §5.1; docs/design/m2a-gx.md) -----------------------------------------------------
+
+#include "bf3/sim/weapons/weapon_input.h"
+
+namespace bf3::godot_side {
+
+namespace {
+
+struct M2aActionKey {
+	InputMapper::M2aAction action;
+	const char *name;
+	Key key; // KEY_NONE: a mouse button
+	MouseButton button;
+};
+// m2a.md §5.1: fire left mouse, ADS right mouse (held), R reload, 1 primary, 2 sidearm, G grenade, F knife, B fire
+// mode, K / T kit and team for the next spawn (physical keys, as M1's).
+constexpr M2aActionKey kM2aActions[] = {
+	{ InputMapper::M2aAction::Fire, "bf3_fire", KEY_NONE, MOUSE_BUTTON_LEFT },
+	{ InputMapper::M2aAction::Ads, "bf3_ads", KEY_NONE, MOUSE_BUTTON_RIGHT },
+	{ InputMapper::M2aAction::Reload, "bf3_reload", KEY_R, MOUSE_BUTTON_NONE },
+	{ InputMapper::M2aAction::Primary, "bf3_primary", KEY_1, MOUSE_BUTTON_NONE },
+	{ InputMapper::M2aAction::Sidearm, "bf3_sidearm", KEY_2, MOUSE_BUTTON_NONE },
+	{ InputMapper::M2aAction::Grenade, "bf3_grenade", KEY_G, MOUSE_BUTTON_NONE },
+	{ InputMapper::M2aAction::Knife, "bf3_knife", KEY_F, MOUSE_BUTTON_NONE },
+	{ InputMapper::M2aAction::FireMode, "bf3_fire_mode", KEY_B, MOUSE_BUTTON_NONE },
+	{ InputMapper::M2aAction::Kit, "bf3_kit", KEY_K, MOUSE_BUTTON_NONE },
+	{ InputMapper::M2aAction::Team, "bf3_team", KEY_T, MOUSE_BUTTON_NONE },
+};
+static_assert(sizeof(kM2aActions) / sizeof(kM2aActions[0]) == InputMapper::kM2aActionCount);
+
+// The weapon slots the wheel visits, in order (m2a.md §5.6: primary, sidearm, grenade, knife).
+constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 6, 7 };
+
+} // namespace
+
+const char *InputMapper::m2a_action_name(M2aAction p_action) {
+	const size_t i = size_t(p_action);
+	return i < kM2aActionCount ? kM2aActions[i].name : "bf3_unknown";
+}
+
+void InputMapper::m2a_enable(bool p_on) {
+	m2a_.enabled = p_on;
+	if (!p_on || m2a_.installed) {
+		return;
+	}
+	InputMap *map = InputMap::get_singleton();
+	for (const M2aActionKey &a : kM2aActions) {
+		if (map->has_action(a.name)) {
+			continue; // a project-file action of the same name wins (rebinding)
+		}
+		map->add_action(a.name);
+		if (a.key != KEY_NONE) {
+			Ref<InputEventKey> key;
+			key.instantiate();
+			key->set_physical_keycode(a.key);
+			map->action_add_event(a.name, key);
+		} else {
+			Ref<InputEventMouseButton> mb;
+			mb.instantiate();
+			mb->set_button_index(a.button);
+			map->action_add_event(a.name, mb);
+		}
+	}
+	m2a_.installed = true;
+}
+
+void InputMapper::m2a_set_weapons_allowed(bool p_allowed) {
+	if (m2a_.allowed && !p_allowed) {
+		m2a_.held.fill(false);
+		m2a_.reload_until_ns = 0;
+	}
+	m2a_.allowed = p_allowed;
+}
+
+void InputMapper::m2a_set_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_filled) {
+	m2a_.active = p_active;
+	m2a_.pending = p_pending;
+	m2a_.filled = p_filled;
+	// The wanted slot is a level, but kept only until the sim takes it: a stale level would switch back to the grenade
+	// after a throw, or re-select a slot after the next spawn.
+	if (m2a_.wanted != 0xFF && (m2a_.wanted == p_active || m2a_.wanted == p_pending || (p_filled & (1u << m2a_.wanted)) == 0)) {
+		m2a_.wanted = 0xFF;
+	}
+}
+
+void InputMapper::m2a_select(uint8_t p_slot) {
+	if (p_slot < sim::weapons::kMaxWeaponSlots && (m2a_.filled == 0 || (m2a_.filled & (1u << p_slot)) != 0)) {
+		m2a_.wanted = p_slot;
+	}
+}
+
+void InputMapper::m2a_cycle(int p_direction) {
+	constexpr int n = int(sizeof(kM2aWheelSlots));
+	const uint8_t from = m2a_.wanted != 0xFF ? m2a_.wanted : (m2a_.pending != 0xFF ? m2a_.pending : m2a_.active);
+	int at = 0;
+	for (int i = 0; i < n; ++i) {
+		if (kM2aWheelSlots[i] == from) {
+			at = i;
+		}
+	}
+	for (int step = 1; step <= n; ++step) {
+		const uint8_t s = kM2aWheelSlots[size_t(((at + p_direction * step) % n + n) % n)];
+		if ((m2a_.filled & (1u << s)) != 0) {
+			if (s != from) {
+				m2a_.wanted = s;
+			}
+			return;
+		}
+	}
+}
+
+bool InputMapper::m2a_handle_event(const Ref<InputEvent> &p_event) {
+	if (!m2a_.enabled) {
+		return false;
+	}
+	if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
+		if (!captured_) {
+			if (mb->is_pressed() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
+				// The click that captures the mouse never fires (the review's playability rule): the fire level
+				// stays off until this button goes up.
+				set_capture(true);
+				m2a_.swallow_fire = true;
+				++m2a_.swallowed_clicks;
+			}
+			return true;
+		}
+		if (!mb->is_pressed() || free_camera_) {
+			return false;
+		}
+		if (mb->get_button_index() == MOUSE_BUTTON_LEFT && m2a_.allowed && !m2a_.swallow_fire) {
+			++m2a_.fire_presses;
+		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP && m2a_.allowed) {
+			m2a_cycle(-1);
+		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN && m2a_.allowed) {
+			m2a_cycle(1);
+		}
+		return false;
+	}
+	if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
+		if (key->is_pressed() && !key->is_echo() && key->get_keycode() == KEY_ESCAPE) {
+			// Esc releases every held button (and M1's handler releases the mouse).
+			m2a_.held.fill(false);
+			m2a_.reload_until_ns = 0;
+			return false;
+		}
+	}
+	if (!captured_) {
+		return false;
+	}
+	for (const M2aActionKey &a : kM2aActions) {
+		if (a.key == KEY_NONE || !p_event->is_action_pressed(a.name, false, false)) {
+			continue;
+		}
+		m2a_script_press(a.action);
+	}
+	return false;
+}
+
+void InputMapper::m2a_script_hold(M2aAction p_action, bool p_held) {
+	if (size_t(p_action) < kM2aActionCount) {
+		m2a_.held[size_t(p_action)] = p_held;
+	}
+}
+
+void InputMapper::m2a_script_press(M2aAction p_action) {
+	switch (p_action) {
+		case M2aAction::Fire:
+			if (m2a_.allowed && !free_camera_) {
+				++m2a_.fire_presses;
+			}
+			break;
+		case M2aAction::Reload:
+			if (m2a_.allowed && !free_camera_) {
+				m2a_.reload_until_ns = (m2a_.now_ns != 0 ? m2a_.now_ns : 1) + kM2aReloadHoldNs;
+			}
+			break;
+		case M2aAction::Primary:
+			m2a_select(0);
+			break;
+		case M2aAction::Sidearm:
+			m2a_select(1);
+			break;
+		case M2aAction::Grenade:
+			m2a_select(6);
+			break;
+		case M2aAction::Knife:
+			m2a_select(7);
+			break;
+		case M2aAction::FireMode:
+			if (m2a_.allowed && !free_camera_) {
+				m2a_.mode_counter = uint8_t((m2a_.mode_counter + 1u) & 3u);
+			}
+			break;
+		case M2aAction::Kit:
+			++m2a_.kit_presses;
+			break;
+		case M2aAction::Team:
+			++m2a_.team_presses;
+			break;
+		default:
+			break;
+	}
+}
+
+void InputMapper::m2a_script_select(uint8_t p_slot) {
+	if (p_slot == 0xFF) {
+		m2a_.wanted = 0xFF;
+	} else {
+		m2a_select(p_slot);
+	}
+}
+
+uint32_t InputMapper::m2a_take_kit_presses() {
+	const uint32_t n = m2a_.kit_presses;
+	m2a_.kit_presses = 0;
+	return n;
+}
+
+uint32_t InputMapper::m2a_take_team_presses() {
+	const uint32_t n = m2a_.team_presses;
+	m2a_.team_presses = 0;
+	return n;
+}
+
+void InputMapper::m2a_frame(const bf3::host::PresentationFrame &p_frame, uint64_t p_now_ns) {
+	if (!m2a_.enabled) {
+		return;
+	}
+	m2a_.frame = &p_frame;
+	m2a_.now_ns = p_now_ns;
+	if (life_ != m2a_.life) {
+		// A new life: its weapons start on the primary (wp's spawn rule), so the wanted slot starts from scratch.
+		m2a_.life = life_;
+		m2a_.wanted = 0xFF;
+	}
+	if (scripted_) {
+		return;
+	}
+	if (!captured_) {
+		m2a_.held.fill(false);
+		return;
+	}
+	Input *in = Input::get_singleton();
+	for (const M2aActionKey &a : kM2aActions) {
+		m2a_.held[size_t(a.action)] = in->is_action_pressed(a.name);
+	}
+	if (m2a_.swallow_fire) {
+		if (m2a_.held[size_t(M2aAction::Fire)]) {
+			m2a_.held[size_t(M2aAction::Fire)] = false;
+		} else {
+			m2a_.swallow_fire = false;
+		}
+	}
+}
+
+void InputMapper::m2a_sample(bf3::host::InputSample &r_sample) const {
+	if (!m2a_.enabled) {
+		return;
+	}
+	if (m2a_.frame != nullptr) {
+		bf3::host::set_view_sample(r_sample, *m2a_.frame, m2a_.now_ns);
+	}
+	if (!scripted_ && !captured_ && DisplayServer::get_singleton()->get_name() != String("headless")) {
+		// The mouse is released (Esc, or not yet captured): no buttons and no movement.
+		r_sample.move_forward = 0.0f;
+		r_sample.move_right = 0.0f;
+		r_sample.held_buttons = 0;
+		return;
+	}
+	r_sample.fire_presses = m2a_.fire_presses;
+	if (!m2a_.allowed || free_camera_) {
+		return;
+	}
+	sim::weapons::WeaponInput w;
+	w.fire = m2a_.held[size_t(M2aAction::Fire)];
+	w.zoom = m2a_.held[size_t(M2aAction::Ads)];
+	w.reload = m2a_.held[size_t(M2aAction::Reload)] || (m2a_.reload_until_ns != 0 && m2a_.now_ns < m2a_.reload_until_ns);
+	w.fire_mode_counter = m2a_.mode_counter;
+	w.select_slot = m2a_.wanted;
+	r_sample.held_buttons = sim::weapons::with_weapon_input(r_sample.held_buttons, w);
 }
 
 } // namespace bf3::godot_side

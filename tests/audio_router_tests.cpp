@@ -1244,25 +1244,6 @@ TEST_SUITE("audio-router") {
 // =====================================================================================================================
 // audio-game: the install rows (exit 77 without an install; install.unchanged in each case).
 
-// fx3's fx::impact_sound_names (triggers.h) is declared by the W3.0 contract but not merged on this branch: the same
-// rule over the public ImpactTable::cell (every cell's impact_sound, deduplicated and sorted), test-local.
-namespace m2a_fake {
-std::vector<std::string> impact_sound_names(const bf3::fx::ImpactTable &p_table) {
-	std::vector<std::string> out;
-	for (size_t r = 0; r < p_table.rows(); ++r) {
-		for (size_t c = 0; c < p_table.rows(); ++c) {
-			const std::string &n = p_table.cell(r, c).impact_sound;
-			if (!n.empty()) {
-				out.push_back(n);
-			}
-		}
-	}
-	std::sort(out.begin(), out.end());
-	out.erase(std::unique(out.begin(), out.end()), out.end());
-	return out;
-}
-} // namespace m2a_fake
-
 namespace {
 
 constexpr const char *kM16Patch = "sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02";
@@ -1312,7 +1293,7 @@ GameFixture *game_fixture() {
 		gameplay::WorkBudget budget{ bf3::fx::kDefaultCompileWorkLimit };
 		Result<bf3::fx::ImpactTable> table = bf3::fx::ImpactTable::load(made->metro->db(), *grid, budget);
 		if (table) {
-			made->impact_names = m2a_fake::impact_sound_names(*table);
+			made->impact_names = bf3::fx::impact_sound_names(*table);
 		} else {
 			made->impact_note = "impact table: " + table.error().message;
 		}

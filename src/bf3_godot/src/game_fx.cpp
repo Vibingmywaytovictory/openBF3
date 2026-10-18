@@ -132,7 +132,11 @@ struct Bf3GameFx::Impl {
 		if (part == nullptr) {
 			return core::Error{ "start_effect: " + full + " does not parse" };
 		}
-		const std::string_view type = part->primary().type_name();
+		// An emitter partition's primary instance is its EmitterTemplateData; the EmitterDocument sits beside it (MP_012's
+		// oilfire, E8 (4)), so the partition counts as an EmitterDocument when it holds one.
+		const std::string_view type = part->primary().type_name() == "EffectBlueprint" || part->instances_of("EmitterDocument").empty()
+				? part->primary().type_name()
+				: std::string_view("EmitterDocument");
 		std::shared_ptr<const fx::EffectDef> def;
 		if (type == "EffectBlueprint" && db == sources->level.get()) {
 			core::Result<std::shared_ptr<const fx::EffectDef>> d = library->get(full);

@@ -201,3 +201,29 @@ target_sources(bf3_godot PRIVATE
     src/fx3_demo.cpp
     src/fx3_demo.h
 )
+
+# M2a gx (docs/design/m2a-gx.md): the in-game check (M2aCheck) and the playable scene's wiring
+# (level_session_m2a.cpp's hook bodies). The wave-3 parts are linked in by their owners' blocks; the hooks build them
+# only when their body is in the tree (the file's presence: no edit here when tp, au3, fx3 or bt merge).
+target_sources(bf3_godot PRIVATE
+    src/m2a_check.cpp
+)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/game_fx.cpp")
+    target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2A_HAVE_FX=1)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/game_audio.cpp")
+    target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2A_HAVE_AUDIO=1)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/game_crowd.cpp")
+    target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2A_HAVE_CROWD=1)
+endif()
+# bt: W3.0's firefight_brain.cpp is a stub that says so; bt's body does not.
+set(_m2a_gx_brain "${CMAKE_CURRENT_SOURCE_DIR}/../bf3_host/src/firefight_brain.cpp")
+if(EXISTS "${_m2a_gx_brain}")
+    file(READ "${_m2a_gx_brain}" _m2a_gx_brain_text)
+    string(FIND "${_m2a_gx_brain_text}" "W3.0 stub" _m2a_gx_stub)
+    if(_m2a_gx_stub EQUAL -1)
+        target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2A_HAVE_BT=1)
+    endif()
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_m2a_gx_brain}")

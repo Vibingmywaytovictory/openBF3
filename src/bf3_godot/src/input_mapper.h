@@ -117,6 +117,66 @@ private:
 	bool scripted_ = false;
 	bool captured_ = false;
 	bool actions_installed_ = false;
+
+	// ---- M2a gx [mapper] (named insertion; docs/design/m2a.md §5.1, docs/design/m2a-gx.md) -------------------------
+	// The weapon input of the M2a scene. Off (the default) the mapper is exactly M1's. On (m2a_enable, the M2a level
+	// session): left mouse fire (held level + fire_presses), right mouse ADS (held), R reload, 1 primary, 2 sidearm,
+	// G grenade (slot 6), F knife (slot 7), the mouse wheel cycles the filled slots, B fire mode (the 2-bit counter),
+	// K / T count presses for the session's KitSelect (kit and team for the next spawn). The click that captures the
+	// mouse never fires (the fire level stays off until that button is released); while the mouse is released (Esc)
+	// sample() carries no buttons and no movement. Weapon bits only while m2a_set_weapons_allowed (alive, spawned).
+public:
+	enum class M2aAction : uint8_t { Fire = 0, Ads, Reload, Primary, Sidearm, Grenade, Knife, FireMode, Kit, Team, Count };
+	static constexpr size_t kM2aActionCount = size_t(M2aAction::Count);
+	static const char *m2a_action_name(M2aAction p_action); // "bf3_fire", ...
+	// R held or tapped: the reload level stays up at least this long after a press, so a tap shorter than a client tick
+	// still reaches a command (a level, never an edge: wp reads it as "asking for a reload").
+	static constexpr uint64_t kM2aReloadHoldNs = 100'000'000;
+	void m2a_enable(bool p_on); // installs the bf3_fire ... bf3_team actions (idempotent)
+	bool m2a_enabled() const { return m2a_.enabled; }
+	void m2a_set_weapons_allowed(bool p_allowed); // false: no weapon bits, presses ignored (dead, before Spawned)
+	bool m2a_weapons_allowed() const { return m2a_.allowed; }
+	// The presented own weapons (for the wheel and to drop a satisfied wanted slot): active and pending slot (0xFF
+	// none), one bit per filled slot.
+	void m2a_set_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_filled);
+	// Main thread, every frame after poll_devices and before sample(): the drawn frame and its time for the view
+	// sample (host::set_view_sample), the device levels of the weapon actions, a new life (the wanted slot resets).
+	void m2a_frame(const bf3::host::PresentationFrame &p_frame, uint64_t p_now_ns);
+	// Scripted weapon input (the checks), as script_hold / script_press.
+	void m2a_script_hold(M2aAction p_action, bool p_held);
+	void m2a_script_press(M2aAction p_action);
+	void m2a_script_select(uint8_t p_slot); // the wanted slot directly (0xFF keep)
+	bool m2a_held(M2aAction p_action) const { return size_t(p_action) < kM2aActionCount && m2a_.held[size_t(p_action)]; }
+	uint32_t m2a_fire_presses() const { return m2a_.fire_presses; }
+	uint8_t m2a_wanted_slot() const { return m2a_.wanted; }
+	uint8_t m2a_fire_mode_counter() const { return m2a_.mode_counter; }
+	uint32_t m2a_take_kit_presses(); // K presses since the last call
+	uint32_t m2a_take_team_presses(); // T presses since the last call
+	uint64_t m2a_swallowed_clicks() const { return m2a_.swallowed_clicks; }
+
+private:
+	bool m2a_handle_event(const godot::Ref<godot::InputEvent> &p_event); // true: consumed (handle_event returns)
+	void m2a_sample(bf3::host::InputSample &r_sample) const; // sample(): the weapon bits, fire_presses, view sample
+	void m2a_select(uint8_t p_slot);
+	void m2a_cycle(int p_direction);
+	struct M2aInput {
+		bool enabled = false;
+		bool installed = false;
+		bool allowed = false;
+		bool swallow_fire = false; // the capture click is still held
+		std::array<bool, kM2aActionCount> held{};
+		uint32_t fire_presses = 0;
+		uint8_t wanted = 0xFF; // the wanted slot level (0xFF keep)
+		uint8_t mode_counter = 0;
+		uint8_t active = 0, pending = 0xFF;
+		uint16_t filled = 0;
+		uint32_t kit_presses = 0, team_presses = 0;
+		uint64_t reload_until_ns = 0;
+		uint64_t now_ns = 0;
+		uint32_t life = 0;
+		uint64_t swallowed_clicks = 0;
+		const bf3::host::PresentationFrame *frame = nullptr;
+	} m2a_;
 };
 
 } // namespace bf3::godot_side
