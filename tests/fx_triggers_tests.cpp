@@ -1386,6 +1386,15 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 			by_material.emplace(pair.physics_material, &tri);
 		}
 	}
+	{
+		std::string census;
+		for (const auto &[m, count] : triangles_of) {
+			const ImpactCell *cell = metro->impacts->select(1, m);
+			census += (census.empty() ? "" : ", ") + std::to_string(int(m)) + " " + std::string(metro->impacts->material_name(m)) + " " + std::to_string(count) +
+					(cell != nullptr && !cell->effects.empty() ? " (" + leaf(cell->effects[0]) + ")" : " (no effect)");
+		}
+		MESSAGE("Metro collision triangles by PhysicsMaterialIndex: " << census);
+	}
 	uint32_t id = 5000;
 	size_t checked = 0;
 	bool metro_water = false;
