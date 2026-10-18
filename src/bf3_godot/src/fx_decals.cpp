@@ -50,21 +50,42 @@ FxDecalAssets FxDecalAssets::load(const core::EbxLibrary &p_level, const core::L
 					t->texture.clear();
 					++out.without_texture;
 				} else {
-					// A magenta-keyed BC1 decal becomes RGBA8 with the key as alpha (fx::unkey_magenta).
-					if (prepared->format == render::GpuFormat::Bc1) {
-						core::Result<std::vector<uint8_t>> rgba = fx::decode_bc1(prepared->data, prepared->width, prepared->height);
-						if (rgba && fx::magenta_share(*rgba) >= fx::kMagentaKeyedShare) {
-							fx::unkey_magenta(*rgba);
-							uint32_t levels = 0;
-							prepared->data = fx::rgba_mip_chain(*rgba, prepared->width, prepared->height, &levels);
+					// The decal-texture rule (fx::prepare_decal_texture): a real alpha is kept, a magenta-keyed texture
+					// becomes RGBA8 with the key as alpha, anything else (decal_brick_s_01_d's channel mask) is refused.
+					fx::DecalPixelFormat pf = fx::DecalPixelFormat::Other;
+					switch (prepared->format) {
+						case render::GpuFormat::Bc1:
+							pf = fx::DecalPixelFormat::Bc1;
+							break;
+						case render::GpuFormat::Bc3:
+							pf = fx::DecalPixelFormat::Bc3;
+							break;
+						case render::GpuFormat::Rgba8:
+							pf = fx::DecalPixelFormat::Rgba8;
+							break;
+						default:
+							break;
+					}
+					core::Result<fx::DecalTexturePrep> rule = fx::prepare_decal_texture(pf, prepared->data, prepared->width, prepared->height);
+					if (!rule || !rule->usable()) {
+						out.errors.push_back(t->texture + ": " +
+								(rule ? std::string(fx::decal_texture_kind_name(rule->kind)) + " (" + render::gpu_format_name(prepared->format) + ", " +
+												std::to_string(int(std::lround(rule->transparent * 100.0f))) + " % see-through): not drawn" :
+										rule.error().message));
+						++out.refused;
+						t->texture.clear();
+						++out.without_texture;
+					} else {
+						if (rule->kind == fx::DecalTextureKind::MagentaKeyed) {
+							prepared->data = std::move(rule->rgba_chain);
 							prepared->format = render::GpuFormat::Rgba8;
-							prepared->levels = levels;
-							prepared->stored_levels = levels;
+							prepared->levels = rule->levels;
+							prepared->stored_levels = rule->levels;
 							++out.unkeyed;
 						}
+						out.texture_bytes += prepared->data.size();
+						out.textures.emplace(t->texture, std::move(*prepared));
 					}
-					out.texture_bytes += prepared->data.size();
-					out.textures.emplace(t->texture, std::move(*prepared));
 				}
 			}
 		}

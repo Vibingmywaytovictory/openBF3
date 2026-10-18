@@ -3,7 +3,9 @@
 // fx::kMaxDecals Godot Decal nodes under one Node3D; a new decal past the cap takes the oldest node. Each decal is a
 // DecalTemplateData (fx::DecalTemplate: Size + U x RandomSize metres square, Rotation +- RandomRotation about the
 // normal, fx::decal_placement from the cue's seed) with its diffuse texture (fx::pick_decal_texture [inferred]) as
-// the albedo; a magenta-keyed BC1 texture is un-keyed to RGBA8 with alpha on the loader thread (fx::unkey_magenta).
+// the albedo. Each texture passes fx::prepare_decal_texture on the loader thread: a real alpha is kept, a magenta-keyed
+// one is un-keyed to RGBA8 with alpha (fx::unkey_magenta), anything else (opaque: decal_brick_s_01_d's channel mask)
+// is refused and its decals are untextured (counted).
 // A decal fades out over kDecalFadeOutSeconds once it is fx::kDecalFadeSeconds old.
 // Godot's Decal projects along its local -Y, so the node's basis is the cue's effect frame (local +Y = the surface
 // normal) turned about Y by the placement's rotation; its box is size x kDecalDepth x size, centred NormalOffset above
@@ -40,6 +42,7 @@ struct FxDecalAssets {
 	std::vector<std::string> errors; // "<decal or texture>: <message>" (counted, the decal is skipped or untextured)
 	uint32_t without_texture = 0; // templates with no texture found
 	uint32_t unkeyed = 0; // magenta-keyed BC1 textures converted to RGBA8 with alpha (fx::unkey_magenta)
+	uint32_t refused = 0; // textures fx::prepare_decal_texture refused (opaque, unsupported or undecodable): untextured
 	uint64_t texture_bytes = 0;
 
 	// p_names: every decal the impact table's cells name and the scorch mark (fx::impact_decal_names + kScorchDecal).

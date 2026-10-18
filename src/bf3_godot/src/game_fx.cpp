@@ -171,6 +171,25 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 	if (m.loaded) {
 		return core::Error{ "Bf3GameFx::load: loaded already" };
 	}
+	// A load after a shutdown (or after a failed load) starts from nothing: no catalogue, notes or tables carried over.
+	// (Loader thread: no Godot node is touched; shutdown cleared the decal pool and the renderer on the main thread.)
+	m.triggers.reset();
+	m.world.reset();
+	m.local_defs.clear();
+	m.library.reset();
+	m.fire.reset();
+	m.impacts.reset();
+	m.pixels = {};
+	m.atlas.reset();
+	m.decal_assets = {};
+	m.wide.reset();
+	m.sources.reset();
+	m.catalogue.clear();
+	m.wide_tried = false;
+	m.muzzles.clear();
+	m.effect_cues.clear();
+	m.notes.clear();
+	m.stats = {};
 	if (p_in.db == nullptr || !p_in.db->install || !p_in.shared) {
 		return core::Error{ "Bf3GameFx::load: no level database or shared level" };
 	}
@@ -281,8 +300,9 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		m.decal_assets = FxDecalAssets::load(lib, lib.mount(0), names);
 		m.stats.decal_templates = uint32_t(m.decal_assets.templates.size());
 		m.stats.decal_templates_untextured = m.decal_assets.without_texture;
-		m.notes.push_back(fmt("decals: %zu templates of %zu names, %u without a texture, %zu textures (%u magenta-keyed BC1 un-keyed; %.1f MiB), %.2f s",
+		m.notes.push_back(fmt("decals: %zu templates of %zu names, %u without a texture, %zu textures (%u magenta-keyed un-keyed, %u refused; %.1f MiB), %.2f s",
 				m.decal_assets.templates.size(), names.size(), m.decal_assets.without_texture, m.decal_assets.textures.size(), m.decal_assets.unkeyed,
+				m.decal_assets.refused,
 				double(m.decal_assets.texture_bytes) / 1048576.0, since(td)));
 		m.note_errors("decal", m.decal_assets.errors);
 	}

@@ -20,6 +20,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
+#include "bf3/core/res/res_loader.h"
 #include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/fx_harness.h"
@@ -30,6 +31,7 @@
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/presentation_events.h"
+#include "bf3/render/texture_prep.h"
 #include "bf3/sim/weapons/sim_time.h"
 
 #include <algorithm>
@@ -471,15 +473,19 @@ TEST_CASE("decal keys: BC1 decode, the magenta key, the RGBA mip chain, hostile 
 	REQUIRE(t3.ok());
 	CHECK((*t3)[3] == 0);
 	// Un-keying: magenta becomes transparent; a grey texel blended half over magenta comes back grey at alpha 0.5; a
-	// texel with no magenta in it stays.
-	std::vector<uint8_t> px{ 255, 0, 255, 255, 191, 64, 191, 255, 100, 120, 90, 255 };
+	// texel with no magenta in it keeps its alpha and becomes its grey (G); a bluish texel over magenta (stone's cracks,
+	// R < B) comes back grey, not blue.
+	std::vector<uint8_t> px{ 255, 0, 255, 255, 191, 64, 191, 255, 100, 120, 90, 255, 128, 0, 255, 255 };
 	unkey_magenta(px);
 	CHECK(px[3] == 0);
 	CHECK(px[7] == doctest::Approx(128).epsilon(0.02));
 	CHECK(px[4] == doctest::Approx(127).epsilon(0.03));
 	CHECK(px[5] == doctest::Approx(127).epsilon(0.03));
 	CHECK(px[6] == doctest::Approx(127).epsilon(0.03));
-	CHECK(std::vector<uint8_t>(px.begin() + 8, px.end()) == std::vector<uint8_t>{ 100, 120, 90, 255 });
+	CHECK(std::vector<uint8_t>(px.begin() + 8, px.begin() + 12) == std::vector<uint8_t>{ 120, 120, 120, 255 });
+	CHECK(px[12] == px[14]); // no blue left
+	CHECK(px[12] == 0);
+	CHECK(px[15] == doctest::Approx(127).epsilon(0.02));
 	// The mip chain of a 4 x 2 level: 4x2, 2x1, 1x1; alpha-weighted (a transparent texel adds no colour).
 	std::vector<uint8_t> level(4 * 2 * 4, 0);
 	for (size_t i = 0; i < 8; ++i) {
@@ -501,6 +507,75 @@ TEST_CASE("decal keys: BC1 decode, the magenta key, the RGBA mip chain, hostile 
 	CHECK(levels == 0);
 	CHECK(rgba_mip_chain(level, 0, 2, nullptr).empty());
 	CHECK(magenta_share({}) == 0.0f);
+}
+
+TEST_CASE("decal texture rule: BC3 decode, alpha, magenta key, opaque masks refused, hostile input") {
+	// A BC3 block: alpha endpoints 255 / 0 (8-value mode), indices 0 (255) in texels 0..7, 1 (0) in texels 8..15;
+	// colour c0 = white, c1 = black, all index 0 (white).
+	std::array<uint8_t, 16> bc3{};
+	bc3[0] = 255;
+	bc3[1] = 0;
+	// 3-bit indices: texels 8..15 index 1 -> bits 24..47 = 0b001 repeated.
+	uint64_t abits = 0;
+	for (int i = 8; i < 16; ++i) {
+		abits |= uint64_t(1) << (3 * i);
+	}
+	for (int i = 0; i < 6; ++i) {
+		bc3[size_t(2 + i)] = uint8_t(abits >> (8 * i));
+	}
+	bc3[8] = 0xFF;
+	bc3[9] = 0xFF; // c0 = white
+	bc3[10] = 0;
+	bc3[11] = 0; // c1 = black; indices 0
+	core::Result<std::vector<uint8_t>> d3 = decode_bc3(bc3, 4, 4);
+	REQUIRE(d3.ok());
+	CHECK((*d3)[3] == 255);
+	CHECK((*d3)[8 * 4 + 3] == 0);
+	CHECK((*d3)[0] == 255);
+	CHECK(transparent_share(*d3) == doctest::Approx(0.5f));
+	CHECK_FALSE(decode_bc3(std::span<const uint8_t>(bc3.data(), 15), 4, 4).ok());
+	CHECK_FALSE(decode_bc3(bc3, 0, 4).ok());
+	// The BC3 block has a real alpha: kept as prepared.
+	core::Result<DecalTexturePrep> a = prepare_decal_texture(DecalPixelFormat::Bc3, bc3, 4, 4);
+	REQUIRE(a.ok());
+	CHECK(a->kind == DecalTextureKind::Alpha);
+	CHECK(a->usable());
+	CHECK(a->rgba_chain.empty());
+	// A magenta-keyed BC1 block (a quarter key, the rest magenta blends and black): un-keyed to an RGBA8 chain.
+	const uint16_t m0 = uint16_t((31u << 11) | 31u);
+	const std::array<uint8_t, 8> keyed{ uint8_t(m0 & 0xFF), uint8_t(m0 >> 8), 0, 0, 0x00, 0x55, 0xAA, 0xFF };
+	core::Result<DecalTexturePrep> k = prepare_decal_texture(DecalPixelFormat::Bc1, keyed, 4, 4);
+	REQUIRE(k.ok());
+	CHECK(k->kind == DecalTextureKind::MagentaKeyed);
+	CHECK(k->magenta == doctest::Approx(0.25f));
+	CHECK(k->transparent >= kMinDecalTransparentShare);
+	CHECK(k->levels == 3);
+	CHECK(k->rgba_chain.size() == (16 + 4 + 1) * 4);
+	// decal_brick_s_01_d's shape: a red background around a yellow-green blob, opaque BC1, no key: refused.
+	const uint16_t red = uint16_t(31u << 11), yellow = uint16_t((31u << 11) | (63u << 5));
+	const std::array<uint8_t, 8> mask{ uint8_t(yellow & 0xFF), uint8_t(yellow >> 8), uint8_t(red & 0xFF), uint8_t(red >> 8), 0x05, 0x50, 0x05, 0x50 };
+	core::Result<DecalTexturePrep> o = prepare_decal_texture(DecalPixelFormat::Bc1, mask, 4, 4);
+	REQUIRE(o.ok());
+	CHECK(o->kind == DecalTextureKind::Opaque);
+	CHECK_FALSE(o->usable());
+	CHECK(o->transparent == 0.0f);
+	// An opaque RGBA8 level is refused too; one with a quarter see-through is kept.
+	std::vector<uint8_t> rgba(4 * 4 * 4, 200);
+	CHECK(prepare_decal_texture(DecalPixelFormat::Rgba8, rgba, 4, 4)->kind == DecalTextureKind::Opaque);
+	for (size_t i = 0; i < 4; ++i) {
+		rgba[i * 4 + 3] = 0;
+	}
+	CHECK(prepare_decal_texture(DecalPixelFormat::Rgba8, rgba, 4, 4)->kind == DecalTextureKind::Alpha);
+	// No alpha to read (BC4/BC5/L8/RG8, or BC2): refused without decoding.
+	CHECK(prepare_decal_texture(DecalPixelFormat::Other, rgba, 4, 4)->kind == DecalTextureKind::Unsupported);
+	CHECK(std::string(decal_texture_kind_name(DecalTextureKind::Opaque)) == "opaque");
+	// Hostile: short data, zero or oversized levels are errors, never a read past the end.
+	CHECK_FALSE(prepare_decal_texture(DecalPixelFormat::Rgba8, std::span<const uint8_t>(rgba.data(), 63), 4, 4).ok());
+	CHECK_FALSE(prepare_decal_texture(DecalPixelFormat::Bc1, std::span<const uint8_t>(keyed.data(), 4), 4, 4).ok());
+	CHECK_FALSE(prepare_decal_texture(DecalPixelFormat::Bc3, bc3, 8, 8).ok());
+	CHECK_FALSE(prepare_decal_texture(DecalPixelFormat::Bc1, keyed, 0, 4).ok());
+	CHECK_FALSE(prepare_decal_texture(DecalPixelFormat::Rgba8, rgba, 5000, 4).ok());
+	CHECK(transparent_share({}) == 0.0f);
 }
 
 TEST_CASE("name lists: fire table blueprints, impact sounds, effects, decals") {
@@ -1537,6 +1612,58 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 	}
 	MESSAGE("decals: " << with_texture << " of " << impact_decal_names(*metro->impacts).size() << " with a diffuse texture");
 	CHECK(with_texture + 2 >= impact_decal_names(*metro->impacts).size()); // cloth and plastic have none on Metro
+	// The decal-texture rule (fx::prepare_decal_texture, the same call FxDecalAssets::load makes on Bf3GameFx's loader
+	// thread): every texture a decal would draw has a real see-through part. Metro's brick decal texture is an opaque
+	// channel mask (no key, no alpha) and is refused; the named cells' other decals and the scorch mark are drawn.
+	{
+		std::map<std::string, std::vector<std::string>> texture_of; // texture -> the decal leaves naming it
+		for (const std::string &d : impact_decal_names(*metro->impacts)) {
+			core::Result<DecalTemplate> dt = load_decal_template(*metro->sources->level, d, textures);
+			if (dt.ok() && !dt->texture.empty()) {
+				texture_of[dt->texture].push_back(leaf(d));
+			}
+		}
+		const auto tt = std::chrono::steady_clock::now();
+		std::map<std::string, DecalTextureKind> kind_of; // by decal leaf
+		size_t usable = 0;
+		for (const auto &[texture, decals] : texture_of) {
+			core::Result<core::res::LoadedTexture> loaded = core::res::load_texture(metro->sources->level->mount(0), texture);
+			REQUIRE_MESSAGE(loaded.ok(), texture);
+			core::Result<render::PreparedTexture> prepared = render::prepare_texture(*loaded, render::TextureRole::Color);
+			REQUIRE_MESSAGE(prepared.ok(), texture);
+			DecalPixelFormat pf = DecalPixelFormat::Other;
+			if (prepared->format == render::GpuFormat::Bc1) {
+				pf = DecalPixelFormat::Bc1;
+			} else if (prepared->format == render::GpuFormat::Bc3) {
+				pf = DecalPixelFormat::Bc3;
+			} else if (prepared->format == render::GpuFormat::Rgba8) {
+				pf = DecalPixelFormat::Rgba8;
+			}
+			core::Result<DecalTexturePrep> rule = prepare_decal_texture(pf, prepared->data, prepared->width, prepared->height);
+			REQUIRE_MESSAGE(rule.ok(), texture);
+			for (const std::string &d : decals) {
+				kind_of[d] = rule->kind;
+			}
+			if (rule->usable()) {
+				++usable;
+				CHECK_MESSAGE(rule->transparent >= kMinDecalTransparentShare, texture);
+				CHECK_MESSAGE(rule->transparent < 0.999f, texture); // and something to draw
+			}
+			std::string names;
+			for (const std::string &d : decals) {
+				names += (names.empty() ? "" : ", ") + d;
+			}
+			MESSAGE("decal texture " << leaf(texture) << " (" << names << "): " << std::string(render::gpu_format_name(prepared->format)) << " " << prepared->width
+									 << "x" << prepared->height << ", magenta " << rule->magenta << ", see-through " << rule->transparent << " -> "
+									 << std::string(decal_texture_kind_name(rule->kind)));
+		}
+		CHECK(kind_of["decal_brick_s_01"] == DecalTextureKind::Opaque);
+		for (const char *d : { "decal_concrete_s_01", "decal_glass_s_01", "decal_metalarmor_s_01", "decal_scorchmark_m_01" }) {
+			CHECK_MESSAGE(kind_of.count(d) == 1, std::string(d));
+			CHECK_MESSAGE((kind_of.count(d) == 1 && (kind_of[d] == DecalTextureKind::Alpha || kind_of[d] == DecalTextureKind::MagentaKeyed)), std::string(d));
+		}
+		MESSAGE("decal textures: " << usable << " of " << texture_of.size() << " drawn (" << kind_of.size() << " decals), the rest refused, " << since(tt) << " s");
+	}
 	MESSAGE("Metro water: " << std::string(metro_water ? "a Water (18) triangle exists" : "no water") << " (" << triangles_of[18] << " triangles)");
 	// The Caspian water fallback: the same trigger code on Caspian's grid (MP_007, lazily read).
 	const auto t5 = std::chrono::steady_clock::now();

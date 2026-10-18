@@ -226,23 +226,61 @@ struct DecalPlacement {
 };
 DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed);
 
-// fx3: BF3's BC1 impact decal textures (decal_metal_s_01_d, decal_brick_s_01_d, decal_stone_s_01_d,
-// decal_wood_s_01_d, decal_s_01_d on Metro) carry no alpha: they are colour-keyed on magenta [verified: decompressed,
-// the background is pure (255, 0, 255), the hole's halo blends towards it, means (0.90, 0.01, 0.90); the BC3 decals
-// (concrete, glass, scorch) carry a real alpha]. How BF3's decal shader uses the key is [inferred]: each texel is read
-// as a x colour + (1 - a) x magenta with a grey-ish colour, so 1 - a = min(R, B) - G.
+// fx3: four of BF3's BC1 impact decal textures on Metro (decal_metal_s_01_d, decal_stone_s_01_d, decal_wood_s_01_d,
+// decal_s_01_d) carry no alpha: they are colour-keyed on magenta [verified: decompressed, the background is pure
+// (255, 0, 255), the hole's halo blends towards it, means (0.90, 0.01, 0.90); the BC3 decals (concrete, glass, scorch)
+// carry a real alpha]. How BF3's decal shader uses the key is [inferred]: each texel is read as a x grey + (1 - a) x
+// magenta, so 1 - a = min(R, B) - G and the grey is G / a. The fifth BC1 one, decal_brick_s_01_d, is neither keyed
+// nor alpha-carrying [verified: a red (255, 0, 0) background around a yellow-to-green blob, mean (0.87, 0.44, 0.00):
+// a channel mask, not a colour]: prepare_decal_texture refuses it (DecalTextureKind::Opaque) and the decal is
+// untextured (docs/design/m2a-fx3.md §5).
 // The BC1 blocks of a w x h level as RGBA8 (BC1's 3-colour mode: index 3 transparent black). An error when the bytes
 // are fewer than the blocks need or the size is 0 or above 4096.
 core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height);
 // The share of texels that are the key (R, B >= 230, G <= 25): keyed when >= kMagentaKeyedShare.
 inline constexpr float kMagentaKeyedShare = 0.2f;
 float magenta_share(std::span<const uint8_t> p_rgba);
-// Un-blends every texel in place: a = 1 - clamp(min(R, B) - G), colour = (R - k, G, B - k) / a (k = 1 - a); a texel
-// with a < 1/255 becomes (0, 0, 0, 0).
+// Un-blends every texel in place: k = clamp(min(R, B) - G), a = 1 - k, colour = grey G / a in all three channels (the
+// key adds nothing to G; the R and B left over, R - k and B - k, are off the grey model and dropped: kept, they drew
+// stone's cracks blue); a texel with a < 1/255 becomes (0, 0, 0, 0). The texel's own alpha multiplies a.
 void unkey_magenta(std::span<uint8_t> r_rgba);
 // The full mip chain of an RGBA8 level (each level halves, at least 1 texel; alpha-weighted 2 x 2 box): level 0 first,
 // tightly packed; r_levels counts the levels (Godot's chain length). Empty for a size of 0 or too few bytes.
 std::vector<uint8_t> rgba_mip_chain(std::span<const uint8_t> p_level0, uint32_t p_width, uint32_t p_height, uint32_t *r_levels);
+// The BC3 blocks of a w x h level as RGBA8 (colour block always 4-colour, alpha block BC4-style). Errors as decode_bc1.
+core::Result<std::vector<uint8_t>> decode_bc3(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height);
+// The share of texels with alpha < 128.
+float transparent_share(std::span<const uint8_t> p_rgba);
+// A decal texture is drawn only when at least this share of its level 0 is see-through (after un-keying): a decal
+// that covers its whole square is a mask or a mistake, never a bullet mark (decal_brick_s_01_d).
+inline constexpr float kMinDecalTransparentShare = 0.05f;
+// The pixel formats a decal texture can arrive in (render::GpuFormat, without the dependency); Other: no alpha
+// (BC4, BC5, L8, RG8) or not decodable here (BC2): refused.
+enum class DecalPixelFormat : uint8_t {
+	Bc1,
+	Bc3,
+	Rgba8,
+	Other,
+};
+enum class DecalTextureKind : uint8_t {
+	Alpha, // a real alpha: uploaded as prepared
+	MagentaKeyed, // un-keyed to RGBA8 with a full mip chain (DecalTexturePrep::rgba_chain)
+	Opaque, // neither keyed nor see-through: refused, the decal is untextured
+	Unsupported, // DecalPixelFormat::Other: refused
+};
+const char *decal_texture_kind_name(DecalTextureKind p_kind);
+struct DecalTexturePrep {
+	DecalTextureKind kind = DecalTextureKind::Unsupported;
+	float magenta = 0.0f; // magenta_share of level 0 as stored
+	float transparent = 0.0f; // transparent_share of level 0 as drawn (after un-keying)
+	std::vector<uint8_t> rgba_chain; // MagentaKeyed only: the un-keyed RGBA8 chain (rgba_mip_chain)
+	uint32_t levels = 0; // levels in rgba_chain
+	bool usable() const { return kind == DecalTextureKind::Alpha || kind == DecalTextureKind::MagentaKeyed; }
+};
+// The decal-texture rule (docs/design/m2a-fx3.md §5): decodes level 0 (the first bytes of p_data), un-keys a magenta-
+// keyed one (magenta_share >= kMagentaKeyedShare, any decodable format), then keeps it only when transparent_share >=
+// kMinDecalTransparentShare. An error for a size of 0 or above 4096 or too few bytes; Godot-free (loader thread).
+core::Result<DecalTexturePrep> prepare_decal_texture(DecalPixelFormat p_format, std::span<const uint8_t> p_data, uint32_t p_width, uint32_t p_height);
 
 // An impact sound to play (au3: ImpactAudio::play_impact).
 struct ImpactSoundCue {

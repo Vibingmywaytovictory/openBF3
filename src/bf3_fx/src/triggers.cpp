@@ -127,6 +127,10 @@ void read_fire_list(detail::Reader &r, const core::EbxStruct &p_ffd, std::string
 		const Vec3 offset = r.vec3(*s, "Offset");
 		const std::optional<core::EbxValue> rot = r.maybe(*s, "Rotation");
 		const Vec3 rotation = rot ? r.vec3(*s, "Rotation") : Vec3{};
+		if (!finite3(offset) || !finite3(rotation)) {
+			r.fail(std::string(p_field) + ": a non-finite Offset or Rotation");
+			return;
+		}
 		fe.offset = fire_effect_offset(offset, rotation);
 		fe.update_transform = r.flag_or(*s, "UpdateTransform", false);
 		fe.disable_during_zoom = r.flag_or(*s, "DisableDuringZoom", false);
@@ -448,6 +452,11 @@ core::Result<DecalTemplate> load_decal_template(const core::EbxResolver &p_db, s
 	if (!(t.size > 0.0f) || t.size > 100.0f) {
 		return core::make_error(name + ": Size " + std::to_string(t.size) + " out of (0, 100]");
 	}
+	for (const float v : { t.random_size, t.rotation, t.random_rotation, t.normal_offset, t.clip_angle }) {
+		if (!std::isfinite(v)) {
+			return core::make_error(name + ": a non-finite RandomSize, Rotation, RandomRotation, NormalOffset or ClipAngle");
+		}
+	}
 	t.random_size = std::clamp(t.random_size, 0.0f, 100.0f);
 	t.random_rotation = std::clamp(t.random_rotation, 0.0f, 360.0f);
 	t.texture = pick_decal_texture(name, p_textures);
@@ -462,13 +471,18 @@ DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed)
 	return d;
 }
 
-core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height) {
+namespace {
+
+// BC1 / BC3 level decode: p_stride bytes per block, the colour block at p_stride - 8, the BC4-style alpha block at 0
+// (BC3); BC3's colour block is always 4-colour.
+core::Result<std::vector<uint8_t>> decode_bc_level(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height, bool p_bc3, const char *p_what) {
 	if (p_width == 0 || p_height == 0 || p_width > 4096 || p_height > 4096) {
-		return core::Error{ "decode_bc1: size out of range" };
+		return core::Error{ std::string(p_what) + ": size out of range" };
 	}
+	const size_t stride = p_bc3 ? 16 : 8;
 	const uint32_t bw = (p_width + 3) / 4, bh = (p_height + 3) / 4;
-	if (p_blocks.size() < size_t(bw) * bh * 8) {
-		return core::Error{ "decode_bc1: fewer bytes than the blocks need" };
+	if (p_blocks.size() < size_t(bw) * bh * stride) {
+		return core::Error{ std::string(p_what) + ": fewer bytes than the blocks need" };
 	}
 	std::vector<uint8_t> out(size_t(p_width) * p_height * 4);
 	auto expand = [](uint32_t p_c, uint8_t *r_rgb) {
@@ -479,13 +493,15 @@ core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks,
 	};
 	for (uint32_t by = 0; by < bh; ++by) {
 		for (uint32_t bx = 0; bx < bw; ++bx) {
-			const uint8_t *b = p_blocks.data() + (size_t(by) * bw + bx) * 8;
+			const uint8_t *block = p_blocks.data() + (size_t(by) * bw + bx) * stride;
+			const uint8_t *b = block + (stride - 8);
 			const uint32_t c0 = uint32_t(b[0]) | (uint32_t(b[1]) << 8), c1 = uint32_t(b[2]) | (uint32_t(b[3]) << 8);
+			const bool four = p_bc3 || c0 > c1;
 			uint8_t pal[4][4] = {};
 			expand(c0, pal[0]);
 			expand(c1, pal[1]);
 			for (int k = 0; k < 3; ++k) {
-				if (c0 > c1) {
+				if (four) {
 					pal[2][k] = uint8_t((2 * pal[0][k] + pal[1][k] + 1) / 3);
 					pal[3][k] = uint8_t((pal[0][k] + 2 * pal[1][k] + 1) / 3);
 				} else {
@@ -494,7 +510,30 @@ core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks,
 				}
 			}
 			pal[0][3] = pal[1][3] = pal[2][3] = 255;
-			pal[3][3] = c0 > c1 ? 255 : 0;
+			pal[3][3] = four ? 255 : 0;
+			uint8_t alpha[16];
+			if (p_bc3) {
+				const int a0 = block[0], a1 = block[1];
+				int ap[8] = { a0, a1, 0, 0, 0, 0, 0, 0 };
+				if (a0 > a1) {
+					for (int i = 1; i <= 6; ++i) {
+						ap[i + 1] = ((7 - i) * a0 + i * a1 + 3) / 7;
+					}
+				} else {
+					for (int i = 1; i <= 4; ++i) {
+						ap[i + 1] = ((5 - i) * a0 + i * a1 + 2) / 5;
+					}
+					ap[6] = 0;
+					ap[7] = 255;
+				}
+				uint64_t abits = 0;
+				for (int i = 0; i < 6; ++i) {
+					abits |= uint64_t(block[2 + i]) << (8 * i);
+				}
+				for (int i = 0; i < 16; ++i) {
+					alpha[i] = uint8_t(ap[(abits >> (3 * i)) & 7]);
+				}
+			}
 			const uint32_t bits = uint32_t(b[4]) | (uint32_t(b[5]) << 8) | (uint32_t(b[6]) << 16) | (uint32_t(b[7]) << 24);
 			for (uint32_t i = 0; i < 16; ++i) {
 				const uint32_t x = bx * 4 + (i & 3), y = by * 4 + (i >> 2);
@@ -506,11 +545,21 @@ core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks,
 				o[0] = c[0];
 				o[1] = c[1];
 				o[2] = c[2];
-				o[3] = c[3];
+				o[3] = p_bc3 ? alpha[i] : c[3];
 			}
 		}
 	}
 	return out;
+}
+
+} // namespace
+
+core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height) {
+	return decode_bc_level(p_blocks, p_width, p_height, false, "decode_bc1");
+}
+
+core::Result<std::vector<uint8_t>> decode_bc3(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height) {
+	return decode_bc_level(p_blocks, p_width, p_height, true, "decode_bc3");
 }
 
 float magenta_share(std::span<const uint8_t> p_rgba) {
@@ -540,11 +589,88 @@ void unkey_magenta(std::span<uint8_t> r_rgba) {
 			continue;
 		}
 		const float a0 = float(t[3]) / 255.0f;
-		t[0] = q((r - k) / a);
-		t[1] = q(g / a);
-		t[2] = q((b - k) / a);
+		const uint8_t grey = q(g / a);
+		t[0] = grey;
+		t[1] = grey;
+		t[2] = grey;
 		t[3] = q(a * a0);
 	}
+}
+
+float transparent_share(std::span<const uint8_t> p_rgba) {
+	const size_t n = p_rgba.size() / 4;
+	if (n == 0) {
+		return 0.0f;
+	}
+	size_t clear = 0;
+	for (size_t i = 0; i < n; ++i) {
+		clear += p_rgba[i * 4 + 3] < 128 ? 1 : 0;
+	}
+	return float(double(clear) / double(n));
+}
+
+const char *decal_texture_kind_name(DecalTextureKind p_kind) {
+	switch (p_kind) {
+		case DecalTextureKind::Alpha:
+			return "alpha";
+		case DecalTextureKind::MagentaKeyed:
+			return "magenta-keyed";
+		case DecalTextureKind::Opaque:
+			return "opaque";
+		case DecalTextureKind::Unsupported:
+			return "unsupported";
+	}
+	return "?";
+}
+
+core::Result<DecalTexturePrep> prepare_decal_texture(DecalPixelFormat p_format, std::span<const uint8_t> p_data, uint32_t p_width, uint32_t p_height) {
+	DecalTexturePrep out;
+	if (p_width == 0 || p_height == 0 || p_width > 4096 || p_height > 4096) {
+		return core::Error{ "prepare_decal_texture: size out of range" };
+	}
+	core::Result<std::vector<uint8_t>> rgba = core::Error{ "" };
+	switch (p_format) {
+		case DecalPixelFormat::Bc1:
+			rgba = decode_bc1(p_data, p_width, p_height);
+			break;
+		case DecalPixelFormat::Bc3:
+			rgba = decode_bc3(p_data, p_width, p_height);
+			break;
+		case DecalPixelFormat::Rgba8: {
+			const size_t bytes = size_t(p_width) * p_height * 4;
+			if (p_data.size() < bytes) {
+				return core::Error{ "prepare_decal_texture: fewer bytes than an RGBA8 level needs" };
+			}
+			rgba = std::vector<uint8_t>(p_data.begin(), p_data.begin() + ptrdiff_t(bytes));
+			break;
+		}
+		case DecalPixelFormat::Other:
+			out.kind = DecalTextureKind::Unsupported;
+			return out;
+	}
+	if (!rgba) {
+		return rgba.error();
+	}
+	out.magenta = magenta_share(*rgba);
+	const bool keyed = out.magenta >= kMagentaKeyedShare;
+	if (keyed) {
+		unkey_magenta(*rgba);
+	}
+	out.transparent = transparent_share(*rgba);
+	if (out.transparent < kMinDecalTransparentShare) {
+		out.kind = DecalTextureKind::Opaque;
+		return out;
+	}
+	if (keyed) {
+		out.kind = DecalTextureKind::MagentaKeyed;
+		out.rgba_chain = rgba_mip_chain(*rgba, p_width, p_height, &out.levels);
+		if (out.rgba_chain.empty()) {
+			return core::Error{ "prepare_decal_texture: no mip chain" };
+		}
+	} else {
+		out.kind = DecalTextureKind::Alpha;
+	}
+	return out;
 }
 
 std::vector<uint8_t> rgba_mip_chain(std::span<const uint8_t> p_level0, uint32_t p_width, uint32_t p_height, uint32_t *r_levels) {
