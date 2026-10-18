@@ -1220,3 +1220,8 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_tp_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(render.crowd_weapons PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_tp_cl_dir}")
 endif()
+# godot.m2a_tp_crowd (headless, functional; tests/godot_m2a_tp_crowd.cmake): Bf3GameCrowd in the level through
+# Bf3TpCrowdCheck (res://scenes/m2a_tp_crowd.tscn -- --tp-check).
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m2a_tp_crowd godot_m2a_tp_crowd.cmake HEADLESS TIMEOUT 480)
+endif()
