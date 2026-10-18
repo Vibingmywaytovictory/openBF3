@@ -38,3 +38,11 @@ target_sources(bf3_fx PRIVATE
     src/render_prep.cpp
     src/atlas_pixels.cpp
 )
+
+# M2a w3 (W3.0 contract, docs/design/m2a-w3.md; owner fx3): VFX3's triggers. They read the client's presentation
+# types (PresentEvent, PresentClock, the effect seeds of client_projectiles.h), so bf3_fx links bf3_host; bf3_host
+# and every server module still never link bf3_fx (VFX4 rule).
+target_sources(bf3_fx PRIVATE
+    include/bf3/fx/triggers.h
+)
+target_link_libraries(bf3_fx PUBLIC bf3_host)
