@@ -1205,3 +1205,15 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_w3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2a.contract3 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_w3_cl_dir}")
 endif()
+
+# M2a au3 (docs/design/m2a-au3.md): the game's weapon audio. audio.router.unit runs the data-free audio-router suite
+# (synthetic programs through WeaponAudioRouter, ImpactAudio and SimMixerClock on an offline MixerCore; a unit row,
+# <= 2 s).
+openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h)
+target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_host bf3_core)
+add_test(NAME audio.router.unit COMMAND test_audio_router --test-suite=audio-router)
+set_tests_properties(audio.router.unit PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_au3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.router.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au3_cl_dir}")
+endif()

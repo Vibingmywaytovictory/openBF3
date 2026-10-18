@@ -75,6 +75,17 @@ core::Result<std::shared_ptr<const ImpactSoundCache>> ImpactSoundCache::build(co
 	return std::shared_ptr<const ImpactSoundCache>(std::move(cache));
 }
 
+std::shared_ptr<const ImpactSoundCache> ImpactSoundCache::from_programs(
+		std::span<const std::pair<std::string, std::shared_ptr<const ca::SoundProgram>>> p_programs) {
+	auto cache = std::make_shared<ImpactSoundCache>();
+	for (const auto &[name, program] : p_programs) {
+		if (!name.empty() && program) {
+			cache->programs_.emplace(name, program);
+		}
+	}
+	return cache;
+}
+
 std::shared_ptr<const ca::SoundProgram> ImpactSoundCache::find(std::string_view p_patch) const {
 	const auto it = programs_.find(std::string(p_patch));
 	return it == programs_.end() ? nullptr : it->second;

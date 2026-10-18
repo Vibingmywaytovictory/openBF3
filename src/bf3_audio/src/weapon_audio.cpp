@@ -40,7 +40,9 @@ bool has_event(const ca::SoundProgram &p_program, uint32_t p_hash) {
 	return false;
 }
 
-uint32_t pick_one_shot_event(const ca::SoundProgram &p_program) {
+} // namespace
+
+uint32_t one_shot_event_of(const ca::SoundProgram &p_program) {
 	if (p_program.start_event != 0) {
 		return p_program.start_event;
 	}
@@ -52,6 +54,8 @@ uint32_t pick_one_shot_event(const ca::SoundProgram &p_program) {
 	}
 	return 0;
 }
+
+namespace {
 
 bool same_emitter(const EmitterState &p_a, const EmitterState &p_b) {
 	const auto eq = [](const Vec3 &a, const Vec3 &b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
@@ -99,8 +103,8 @@ uint64_t SimMixerClock::frame_of(sw::SimTime p_time, host::PresentTimeline p_tim
 		++late_;
 		return earliest;
 	}
-	// (t - now) in frames, rounded; the SimTime difference of two valid clocks is far below 2^53.
-	const double delta = double(p_time - now_.now(p_timeline)) * double(config_.rate) / double(sw::kTimeUnitsPerSecond);
+	// (t - now) in frames, rounded. In doubles: a hostile time far from now must not overflow the difference.
+	const double delta = (double(p_time) - double(now_.now(p_timeline))) * double(config_.rate) / double(sw::kTimeUnitsPerSecond);
 	if (!std::isfinite(delta)) {
 		++late_;
 		return earliest;
@@ -195,7 +199,7 @@ core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, 
 			}
 		}
 		if (src.one_shot) {
-			d.one_shot_event = pick_one_shot_event(*d.program);
+			d.one_shot_event = one_shot_event_of(*d.program);
 			if (d.one_shot_event == 0) {
 				d.error = "one-shot patch has no start, Fire or Melee event";
 				d.program.reset();
@@ -409,6 +413,9 @@ struct WeaponAudioRouter::Impl {
 	bool listener_set = false;
 	uint32_t own_burst_counter = 0;
 	uint64_t frame_counter = 0;
+	// set_others_newest: the server time up to which RemoteShots and records are in (valid once set this frame).
+	sw::SimTime horizon = 0;
+	bool horizon_valid = false;
 
 	// One driver instance in the mixer: a burst while held, its tail after the trigger up.
 	enum class OpKind : uint8_t { Down, Round, Up, Stop };
@@ -456,12 +463,6 @@ struct WeaponAudioRouter::Impl {
 	};
 	std::vector<Voice> voices; // <= config.max_weapon_voices
 
-	struct PendingShot {
-		sw::SimTime time = 0;
-		uint32_t id = 0;
-		uint16_t def = sw::kNoWeapon;
-		EmitterState emitter;
-	};
 	struct Track {
 		InstanceHandle held = kNoInstance; // the slot's running burst
 		bool seen = false;
@@ -474,8 +475,13 @@ struct WeaponAudioRouter::Impl {
 		uint64_t present_frame = 0;
 		EmitterState emitter;
 		float distance = 0.0f;
-		std::vector<PendingShot> pending; // RemoteShots not yet in a burst, oldest first
 		sw::SimTime last_event_time = std::numeric_limits<sw::SimTime>::min();
+		// Bursts started from RemoteShots since the newest record: the guess of the burst_seq sv gave them.
+		uint8_t seq_ahead = 0;
+		// The newest evidence of the slot's last ended burst: an older firing record never restarts it.
+		sw::SimTime ended_evidence = std::numeric_limits<sw::SimTime>::min();
+		// The newest record's firing sample (set_others_newest): a shot within two ticks before it.
+		sw::SimTime newest_fire = std::numeric_limits<sw::SimTime>::min();
 	};
 	std::array<Track, 256> tracks{};
 	Track own;
@@ -647,8 +653,17 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	void post_round(Voice &r_v, uint32_t p_round, sw::SimTime p_time, bool p_from_event) {
-		if (p_round < r_v.next_round || r_v.single) {
+		if (p_round < r_v.next_round || r_v.single || !r_v.held) {
 			return;
+		}
+		// Shot indices are contiguous per soldier: a gap before an event's round is shots whose datagrams were lost.
+		// They were fired, so they sound on their grid frames (counted as state rounds); a long gap is not filled.
+		if (p_from_event && p_round - r_v.next_round <= 64) {
+			for (uint32_t k = r_v.next_round; k < p_round; ++k) {
+				r_v.ops.push_back(Op{ OpKind::Round, k, 0 });
+				++stats.rounds;
+				++stats.state_rounds;
+			}
 		}
 		r_v.next_round = p_round + 1;
 		r_v.last_round = p_round;
@@ -777,6 +792,14 @@ struct WeaponAudioRouter::Impl {
 		post_round(*v, p_e.id - v->first_id, p_e.time, true);
 	}
 
+	sw::SimTime other_hold_units(const Voice &p_v) const {
+		return interval_units(p_v) + sw::SimTime(std::llround(config.other_hold_ticks * double(sw::kTimeUnitsPerTick)));
+	}
+
+	// A RemoteShot arrives about the render delay before the render clock reaches its time, so it starts the burst on
+	// its exact frame (in the future); the records only extend it (and start one when every RemoteShot of it was
+	// lost). The seed is sound_seed(slot, burst_seq) with sv's burst_seq for the burst: the newest record's plus one
+	// (sv counts a burst when a tick has shots after one without), plus the bursts started since that record.
 	void remote_shot(const host::PresentEvent &p_e, SimMixerClock &r_clock) {
 		if (p_e.slot == own_slot) {
 			return; // cl emits OwnShot for the own soldier
@@ -787,44 +810,60 @@ struct WeaponAudioRouter::Impl {
 			++stats.unbound_defs;
 			return;
 		}
-		const EmitterState em = event_emitter(p_e);
+		EmitterState em = event_emitter(p_e);
+		if (t.seen && t.present_frame + 2 >= frame_counter) {
+			em = t.emitter; // the presented muzzle (the shot origin is the server's eye position)
+		}
+		const float dist = distance(em.position, listener.position);
 		t.last_event_time = std::max(t.last_event_time, p_e.time);
+		const uint64_t frame = r_clock.frame_of(p_e.time, host::PresentTimeline::Render);
 		if (d->form == WeaponAudioForm::OneShot) {
-			const float dist = distance(em.position, listener.position);
 			if (dist <= config.max_weapon_distance_m) {
-				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, r_clock.frame_of(p_e.time, host::PresentTimeline::Render),
-						false);
+				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, frame, false);
 			}
 			return;
 		}
-		// A running burst of the same def takes the shot as a round (exact: its shot index); otherwise the shot waits
-		// for the records to start the burst at render time (on_others), so the burst seed is the record's.
-		if (t.held != kNoInstance) {
-			if (Voice *v = voice(t.held)) {
-				if (v->def == p_e.def && !v->single) {
-					v->last_evidence = std::max(v->last_evidence, p_e.time);
-					v->last_event_time = std::max(v->last_event_time, p_e.time);
-					if (!v->have_id) {
-						// The burst started from the records: anchor the shot indices at this shot's round by its time.
-						const sw::SimTime iu = interval_units(*v);
-						const int64_t k = iu > 0 ? std::llround(double(p_e.time - v->first_time) / double(iu)) : 0;
-						if (k >= 0 && uint64_t(k) <= p_e.id) {
-							v->have_id = true;
-							v->first_id = p_e.id - uint32_t(k);
-						}
-					}
-					if (v->have_id && p_e.id >= v->first_id) {
-						post_round(*v, p_e.id - v->first_id, p_e.time, true);
-					}
-					return;
-				}
+		Voice *v = t.held != kNoInstance ? voice(t.held) : nullptr;
+		if (v != nullptr && v->def == p_e.def && !v->single && v->have_id && p_e.id > v->first_id) {
+			// The same burst when the shot sits on its round grid and follows its last round within the hold.
+			const sw::SimTime iu = interval_units(*v);
+			const uint32_t k = p_e.id - v->first_id;
+			const sw::SimTime on_grid = v->first_time + sw::SimTime(k) * iu;
+			const bool grid = iu > 0 && std::llabs(p_e.time - on_grid) <= iu / 2;
+			sw::SimTime last = std::max(v->last_round_time, v->last_evidence);
+			if (t.newest_fire > v->first_time) {
+				last = std::max(last, t.newest_fire); // a lost RemoteShot between: the newest records saw it fire
+			}
+			const bool close = p_e.time - last <= other_hold_units(*v);
+			if (grid && close && k < 100000) {
+				v->last_evidence = std::max(v->last_evidence, p_e.time);
+				v->last_event_time = std::max(v->last_event_time, p_e.time);
+				post_round(*v, k, p_e.time, true);
+				return;
 			}
 		}
-		if (t.pending.size() >= config.pending_remote_shots && !t.pending.empty()) {
-			t.pending.erase(t.pending.begin());
-			++stats.remote_shots_dropped;
+		if (v != nullptr) {
+			if (v->def == p_e.def && v->have_id && p_e.id <= v->first_id + v->last_round) {
+				return; // a duplicate or a reordered old shot of the running burst
+			}
+			trigger_up(*v);
+			t.ended_evidence = std::max(v->last_evidence, v->last_event_time);
+			t.held = kNoInstance;
 		}
-		t.pending.push_back(PendingShot{ p_e.time, p_e.id, p_e.def, em });
+		const uint8_t seq = uint8_t((t.burst_seq + 1u + t.seq_ahead) & 0x0F);
+		v = start_burst(t, false, p_e.slot, p_e.def, sound_seed(p_e.slot, seq), frame, p_e.time, host::PresentTimeline::Render, em, dist, false);
+		if (v == nullptr) {
+			return;
+		}
+		t.seq_ahead = uint8_t(std::min<uint32_t>(t.seq_ahead + 1u, 15u));
+		v->have_id = true;
+		v->first_id = p_e.id;
+		v->last_event_time = p_e.time;
+		++stats.event_rounds;
+		if (v->single) {
+			trigger_up(*v);
+			t.held = kNoInstance;
+		}
 	}
 
 	void on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock) {
@@ -875,7 +914,6 @@ struct WeaponAudioRouter::Impl {
 						Track &t = tracks[e.slot];
 						end_track(t);
 						t.weapon_seen = false;
-						t.pending.clear();
 					}
 					break;
 				default:
@@ -936,7 +974,8 @@ struct WeaponAudioRouter::Impl {
 		return e;
 	}
 
-	// The records start a burst at render time; a RemoteShot already received for it gives its exact first round.
+	// Every RemoteShot of a burst was lost: the records start it at the evidence's time (counted late by the clock
+	// when that is behind the mixer: the render clock is already there).
 	void start_other_from_state(Track &r_t, uint8_t p_slot, uint16_t p_def, uint8_t p_burst_seq, sw::SimTime p_evidence, SimMixerClock &r_clock) {
 		const WeaponAudioDef *d = def_of(p_def);
 		if (d == nullptr || d->form != WeaponAudioForm::Driver) {
@@ -945,43 +984,12 @@ struct WeaponAudioRouter::Impl {
 			}
 			return; // knife / M67: their one-shots come from RemoteShot only (no loop to keep alive)
 		}
-		const sw::SimTime interval = sw::SimTime(std::llround(d->binding.shot_interval_seconds * double(sw::kTimeUnitsPerSecond)));
-		const sw::SimTime window_lo = p_evidence - interval - 2 * sw::kTimeUnitsPerTick;
-		// The earliest pending shot of this def inside the sample's window is round 0.
-		const PendingShot *first = nullptr;
-		for (const PendingShot &s : r_t.pending) {
-			if (s.def == p_def && s.time > window_lo && s.time <= p_evidence + interval && (first == nullptr || s.time < first->time)) {
-				first = &s;
-			}
-		}
-		const sw::SimTime t0 = first != nullptr ? first->time : p_evidence;
-		const EmitterState em = r_t.emitter;
-		Voice *v = start_burst(r_t, false, p_slot, p_def, sound_seed(p_slot, p_burst_seq), r_clock.frame_of(t0, host::PresentTimeline::Render), t0,
-				host::PresentTimeline::Render, em, r_t.distance, false);
+		Voice *v = start_burst(r_t, false, p_slot, p_def, sound_seed(p_slot, p_burst_seq), r_clock.frame_of(p_evidence, host::PresentTimeline::Render),
+				p_evidence, host::PresentTimeline::Render, r_t.emitter, r_t.distance, false);
 		if (v == nullptr) {
 			return;
 		}
-		v->last_evidence = std::max(p_evidence, t0);
-		if (first != nullptr) {
-			v->have_id = true;
-			v->first_id = first->id;
-			v->last_event_time = first->time;
-			++stats.event_rounds;
-			const uint32_t first_id = first->id;
-			std::vector<PendingShot> rest;
-			for (const PendingShot &s : r_t.pending) {
-				if (s.def == p_def && s.id > first_id) {
-					rest.push_back(s);
-				}
-			}
-			std::sort(rest.begin(), rest.end(), [](const PendingShot &a, const PendingShot &b) { return a.id < b.id; });
-			for (const PendingShot &s : rest) {
-				v->last_evidence = std::max(v->last_evidence, s.time);
-				v->last_event_time = std::max(v->last_event_time, s.time);
-				post_round(*v, s.id - first_id, s.time, true);
-			}
-		}
-		r_t.pending.clear();
+		++stats.state_rounds;
 		if (v->single) {
 			trigger_up(*v);
 			r_t.held = kNoInstance;
@@ -1005,7 +1013,6 @@ struct WeaponAudioRouter::Impl {
 			if (t.seen && s.generation != t.generation) {
 				end_track(t); // a new life
 				t.weapon_seen = false;
-				t.pending.clear();
 			}
 			t.seen = true;
 			t.generation = s.generation;
@@ -1030,60 +1037,98 @@ struct WeaponAudioRouter::Impl {
 				v = nullptr;
 			}
 			bool evidence = false;
+			const sw::SimTime when = sw::SimTime(w.sample_tick) * sw::kTimeUnitsPerTick;
 			if (t.weapon_seen) {
 				evidence = w.burst_seq != t.burst_seq || (w.firing && w.sample_tick != t.last_firing_tick);
 				if (w.reload_seq != t.reload_seq) {
 					const WeaponAudioDef *d = def_of(w.def);
 					if (d != nullptr && d->program && d->has_reload && t.distance <= config.max_weapon_distance_m &&
 							one_shot(d->program, kHashReload, sound_seed(s.slot, 0x80000000u | (uint32_t(w.reload_seq) << 8) | w.generation), t.emitter,
-									r_clock.frame_of(sw::SimTime(w.sample_tick) * sw::kTimeUnitsPerTick, host::PresentTimeline::Render), false)) {
+									r_clock.frame_of(when, host::PresentTimeline::Render), false)) {
 						++stats.reloads;
 					}
 				}
 			} else {
 				evidence = w.firing;
 			}
+			if (w.sample_tick != t.last_firing_tick || !t.weapon_seen) {
+				t.seq_ahead = 0; // a newer record: its burst_seq counts the bursts up to its tick
+			}
 			t.weapon_seen = true;
 			t.burst_seq = w.burst_seq;
 			t.reload_seq = w.reload_seq;
 			t.def = w.def;
-			if (w.firing) {
-				t.last_firing_tick = w.sample_tick;
-			}
-			if (evidence) {
-				const sw::SimTime when = sw::SimTime(w.sample_tick) * sw::kTimeUnitsPerTick;
+			t.last_firing_tick = w.sample_tick;
+			// A record no newer than the last ended burst's evidence belongs to that burst.
+			if (evidence && w.firing && when > t.ended_evidence) {
 				if (v == nullptr) {
 					start_other_from_state(t, s.slot, w.def, w.burst_seq, when, r_clock);
-					v = t.held != kNoInstance ? voice(t.held) : nullptr;
 				} else {
 					v->last_evidence = std::max(v->last_evidence, when);
 				}
 			}
-			// Rounds the RemoteShots did not place (a lost datagram): one per interval up to the newest evidence.
-			if (v != nullptr && v->held && !v->single) {
-				const sw::SimTime iu = interval_units(*v);
-				if (iu > 0 && v->last_evidence > v->last_event_time + iu) {
-					const int64_t k_max = (v->last_evidence - v->first_time) / iu;
-					for (int64_t k = int64_t(v->next_round); k <= k_max && k < 100000; ++k) {
-						post_round(*v, uint32_t(k), v->first_time + k * iu, false);
-					}
+		}
+		// Every held burst of the others: rounds the RemoteShots did not place (a lost datagram), one per interval up to
+		// the newest evidence; the end when the render clock passes its last evidence by an interval plus the hold.
+		for (size_t i = 0; i < voices.size(); ++i) {
+			Voice &v = voices[i];
+			if (v.own || !v.held) {
+				continue;
+			}
+			const sw::SimTime iu = interval_units(v);
+			Track &vt = tracks[v.slot];
+			const bool ahead = horizon_valid && v.have_id; // a RemoteShot burst with the newest records known
+			if (ahead && vt.newest_fire > v.first_time) {
+				v.last_evidence = std::max(v.last_evidence, vt.newest_fire);
+			}
+			// A firing record says a shot fell within two ticks before its sample: the round nearest the sample on the
+			// burst's grid (rounded, so a sample up to two ticks after a known shot names that shot).
+			if (!v.single && iu > 0 && v.last_evidence > v.last_event_time + iu / 2 && v.last_evidence > v.first_time) {
+				const int64_t k_max = std::llround(double(v.last_evidence - v.first_time) / double(iu));
+				for (int64_t k = int64_t(v.next_round); k <= k_max && k < 100000; ++k) {
+					post_round(v, uint32_t(k), v.first_time + k * iu, false);
 				}
-				// The burst ends when the render clock passes its last evidence by an interval plus the hold.
-				if (now.render_valid) {
-					const sw::SimTime last = std::max(v->last_evidence, v->last_event_time);
-					const double hold = double(iu) + config.other_hold_ticks * double(sw::kTimeUnitsPerTick);
-					if (double(now.render - last) > hold) {
-						trigger_up(*v);
-						t.held = kNoInstance;
-					}
+			}
+			// The end: with the newest records, once they and the RemoteShots run past the last shot by an interval
+			// plus other_event_hold_ticks (decided about the render delay early, so the stop event lands half an
+			// interval after the last round on time); without them once the render clock passes the last evidence by
+			// an interval plus other_hold_ticks.
+			const sw::SimTime last = std::max({ v.last_evidence, v.last_event_time, v.last_round_time });
+			bool end = false;
+			if (ahead) {
+				end = horizon - last > iu + sw::SimTime(std::llround(config.other_event_hold_ticks * double(sw::kTimeUnitsPerTick)));
+			} else if (now.render_valid) {
+				end = now.render - last > other_hold_units(v);
+			}
+			if (end) {
+				trigger_up(v);
+				// The records show firing up to two ticks after a shot: those samples belong to this burst.
+				vt.ended_evidence = std::max(vt.ended_evidence, last + 2 * sw::kTimeUnitsPerTick);
+				if (vt.held == v.handle) {
+					vt.held = kNoInstance;
 				}
 			}
 		}
+		horizon_valid = false; // set_others_newest again next frame
 		// Soldiers not drawn this frame (left, out of the window): their bursts end.
 		for (uint32_t slot = 0; slot < tracks.size(); ++slot) {
 			Track &t = tracks[slot];
 			if (t.held != kNoInstance && t.present_frame != frame_counter) {
 				end_track(t);
+			}
+		}
+	}
+
+	void set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sw::SimTime p_horizon) {
+		horizon = p_horizon;
+		horizon_valid = true;
+		for (const host::PresentedOtherWeapon &w : p_newest) {
+			if (!w.valid || w.slot == own_slot) {
+				continue;
+			}
+			Track &t = tracks[w.slot];
+			if (w.firing) {
+				t.newest_fire = std::max(t.newest_fire, sw::SimTime(w.sample_tick) * sw::kTimeUnitsPerTick);
 			}
 		}
 	}
@@ -1199,6 +1244,10 @@ void WeaponAudioRouter::set_listener(const ListenerState &p_listener) {
 
 void WeaponAudioRouter::on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock) {
 	impl_->on_events(p_events, r_clock);
+}
+
+void WeaponAudioRouter::set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon) {
+	impl_->set_others_newest(p_newest, p_horizon);
 }
 
 void WeaponAudioRouter::on_others(std::span<const host::PresentedSoldier> p_soldiers, std::span<const host::PresentedOtherWeapon> p_weapons,
