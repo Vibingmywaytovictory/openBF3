@@ -176,3 +176,8 @@ target_sources(bf3_godot PRIVATE
     src/viewmodel_muzzle.cpp
     src/m2a_w3_headers.cpp
 )
+
+# M2a au3 (docs/design/m2a-au3.md): Bf3GameAudio, the game's mixer, stream and player over bf3_audio's router.
+target_sources(bf3_godot PRIVATE
+    src/game_audio.cpp
+)

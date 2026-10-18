@@ -42,6 +42,12 @@ struct GameAudioStats {
 	uint64_t clock_late = 0; // SimMixerClock::late()
 	uint64_t output_latency_frames = 0;
 	uint32_t programs = 0, program_failures = 0; // weapon + impact patches compiled at load
+	// au3 additions.
+	uint32_t one_shots_live = 0, one_shots_peak = 0;
+	uint64_t one_shots_stolen = 0, one_shots_failed = 0;
+	uint64_t starved_voices = 0, feedback_drops = 0, max_block_ns = 0; // MixerStats (max_block_ns: report only)
+	int64_t bias_frames = 0;
+	uint64_t auditions = 0;
 };
 
 class Bf3GameAudio {
@@ -60,6 +66,10 @@ public:
 	bool built() const;
 	// Main thread, every display frame.
 	void step(const M2aFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues);
+	// au3 addition (m2a-w3.md §4.1 "effect sounds"): the same, with the running effects' SoundStart / SoundStop of
+	// this frame (fx3's accessor), keyed by effect and component; their patches compile at load when they are among
+	// p_impact_sounds, and compile on first use otherwise (main thread, counted in program_failures on failure).
+	void step(const M2aFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues, std::span<const audio::EffectSoundRequest> p_effect_sounds);
 	// E7 item 4 (client-local). p_position in world space, Frostbite axes.
 	bool audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error);
 	// E7: the check's recorder (MixTap + router observer); null detaches. Set before the check's first step.

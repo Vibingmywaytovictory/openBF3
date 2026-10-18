@@ -119,6 +119,7 @@ public:
 	void set_guard(const core::PathGuard &p_guard);
 	core::Status write_wav(const core::PathGuard &p_guard, const std::filesystem::path &p_path) const;
 	const GameCheckScript &script() const;
+	int64_t current_step() const; // begin_step's, -1 before the first or after an out-of-range step
 	uint32_t rate() const;
 	uint64_t start_frame() const;
 	uint64_t total_frames() const;

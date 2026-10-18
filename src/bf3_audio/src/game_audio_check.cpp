@@ -352,6 +352,10 @@ core::Status GameAudioCheck::write_wav(const core::PathGuard &p_guard, const std
 	return bf3::audio::write_wav(p_guard, p_path, std::span<const float>(st.mix.data(), size_t(frames) * 2), 2, st.rate);
 }
 
+int64_t GameAudioCheck::current_step() const {
+	return state_->step;
+}
+
 const GameCheckScript &GameAudioCheck::script() const {
 	return state_->script;
 }
