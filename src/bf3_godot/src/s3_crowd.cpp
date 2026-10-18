@@ -353,8 +353,13 @@ bool Bf3Crowd::build(std::string *r_error) {
 		teams_[t].weapon_local = team.weapon_local;
 	}
 	const unsigned hc = std::thread::hardware_concurrency();
-	const unsigned lanes = std::clamp(hc == 0 ? 2u : (hc > 4 ? hc - 4 : 0u), 2u, 6u);
-	lanes_ = std::make_unique<bf3::core::WorkerGroup>(lanes, "s3 pose");
+	unsigned lanes = std::clamp(hc == 0 ? 2u : (hc > 4 ? hc - 4 : 0u), 2u, 6u);
+	// M2a w3 integration (m2a.md §3, §16 Q11): --s3-lanes=<1..16> overrides S3's rule for the lane re-measure with the
+	// M2a rule's 4 lanes (crowd_lanes(hc, true)) next to the session's listen server.
+	if (has_user_arg("s3-lanes")) {
+		lanes = unsigned(std::clamp(std::atoi(user_arg_value("s3-lanes").c_str()), 1, 16));
+	}
+	lanes_ =std::make_unique<bf3::core::WorkerGroup>(lanes, "s3 pose");
 	log(fmt("pose lanes: %u (hardware_concurrency %u)", lanes, hc));
 	if (!make_evaluator(check_ ? false : lod_, r_error)) {
 		return false;
