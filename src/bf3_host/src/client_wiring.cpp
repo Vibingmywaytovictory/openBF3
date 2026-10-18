@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace bf3::host {
 
@@ -87,6 +88,26 @@ size_t present_other_weapons(const PresentationFrame &p_frame, double p_render_t
 		r_out[n++] = weapon_of_track(t, p_render_ticks, extra);
 	}
 	return n;
+}
+
+PresentClock present_clock(const PresentationFrame &p_frame, uint64_t p_now_ns) {
+	PresentClock c;
+	c.now_ns = p_now_ns;
+	if (!p_frame.valid) {
+		return c;
+	}
+	constexpr double kUnits = double(sim::weapons::kTimeUnitsPerTick);
+	if (p_frame.tick > 0) {
+		const double own = double(p_frame.tick) - 1.0 + present_own_fraction(p_frame, p_now_ns);
+		c.predicted = sim::weapons::SimTime(std::llround(own * kUnits));
+		c.predicted_valid = true;
+	}
+	const double render = present_render_ticks(p_frame, p_now_ns);
+	if (std::isfinite(render) && render > 0.0) {
+		c.render = sim::weapons::SimTime(std::llround(render * kUnits));
+		c.render_valid = true;
+	}
+	return c;
 }
 
 core::Result<std::shared_ptr<const ClientGunplayInputs>> make_client_gunplay_inputs(const SharedLevel &p_level) {

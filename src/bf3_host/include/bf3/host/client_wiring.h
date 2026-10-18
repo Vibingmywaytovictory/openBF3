@@ -21,6 +21,8 @@
 #include "bf3/core/result.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/presentation_events.h"
+#include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <cstddef>
@@ -53,6 +55,32 @@ PresentedOtherWeapon present_other_weapon(const PresentationFrame &p_frame, uint
 // Every other soldier at once, in present_others' order (so r_out[i] belongs to present_others' r_out[i] for the same
 // frame and time): writes at most r_out.size() entries, returns the count.
 size_t present_other_weapons(const PresentationFrame &p_frame, double p_render_ticks, std::span<PresentedOtherWeapon> r_out);
+
+// The two presentation clocks of one display frame (m2a.md §8.3), in sim::weapons::SimTime units, so the main thread
+// places a PresentEvent's `time` on its timeline: the effect's start age (fx3) and the sound's mixer frame (au3,
+// SimMixerClock) are (now - time) and (time - now) on that clock.
+//   predicted  the own soldier as the camera shows it at p_now_ns: own_prev is the state after tick - 1 (time
+//              tick_end(tick - 1)), own_curr after tick, so (tick - 1 + present_own_fraction) x kTimeUnitsPerTick;
+//   render     the others as present_others draws them: a sample of server tick T is the state at tick_end(T), so
+//              present_render_ticks x kTimeUnitsPerTick.
+// valid false when the frame has no own tick yet (predicted) or no render clock yet (render); Immediate events need
+// neither.
+struct PresentClock {
+	bool predicted_valid = false;
+	bool render_valid = false;
+	sim::weapons::SimTime predicted = 0;
+	sim::weapons::SimTime render = 0;
+	uint64_t now_ns = 0;
+	// The time on p_timeline (Immediate: 0, the caller does not map it).
+	sim::weapons::SimTime now(PresentTimeline p_timeline) const {
+		return p_timeline == PresentTimeline::Predicted ? predicted : (p_timeline == PresentTimeline::Render ? render : 0);
+	}
+	bool valid(PresentTimeline p_timeline) const {
+		return p_timeline == PresentTimeline::Predicted ? predicted_valid : (p_timeline == PresentTimeline::Render ? render_valid : true);
+	}
+};
+static_assert(std::is_trivially_copyable_v<PresentClock>);
+PresentClock present_clock(const PresentationFrame &p_frame, uint64_t p_now_ns);
 
 // G5: the client's weapon inputs from a level loaded with SharedLoadOptions::gunplay (cl's client_gunplay_inputs).
 core::Result<std::shared_ptr<const ClientGunplayInputs>> make_client_gunplay_inputs(const SharedLevel &p_level);

@@ -27,3 +27,13 @@ add_library(bf3_audio STATIC
 target_include_directories(bf3_audio PUBLIC include)
 target_link_libraries(bf3_audio PUBLIC bf3_core)
 openbf3_module(bf3_audio)
+
+# M2a w3 (W3.0 contract, docs/design/m2a-w3.md; owner au3): the weapon router, impact sounds and the in-game check.
+# bf3_audio reads the client's presentation types (PresentEvent, PresentedSoldier, PresentClock), so it links
+# bf3_host; bf3_host never links bf3_audio.
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/weapon_audio.h
+    include/bf3/audio/impact_audio.h
+    include/bf3/audio/game_audio_check.h
+)
+target_link_libraries(bf3_audio PUBLIC bf3_host)
