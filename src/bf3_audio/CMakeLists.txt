@@ -45,4 +45,6 @@ target_sources(bf3_audio PRIVATE
     src/game_audio_check.cpp
     src/kit_audio.cpp
     include/bf3/audio/kit_audio.h
+    src/game_audio_frame.cpp
+    include/bf3/audio/game_audio_frame.h
 )

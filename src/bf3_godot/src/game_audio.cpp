@@ -6,6 +6,7 @@
 #include "godot_util.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/audio/game_audio_frame.h"
 #include "bf3/audio/kit_audio.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/level/level.h"
@@ -100,7 +101,8 @@ struct Bf3GameAudio::Impl {
 	ba::GameAudioCheck *check = nullptr;
 	// Per frame.
 	std::vector<ba::MuzzlePoint> muzzles;
-	std::array<host::PresentedOtherWeapon, net::kMaxSlots> newest{};
+	std::vector<ba::ImpactSoundRequest> impact_requests;
+	ba::GameAudioDriver driver;
 	ba::ListenerState listener;
 	uint64_t auditions_started = 0;
 	int64_t lead_frames = 2 * int64_t(ba::kBlockFrames);
@@ -267,24 +269,19 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 	m.clock->set_bias_frames(int64_t(latency) + m.lead_frames + kBiasMarginFrames);
 	m.clock->set_now(p_frame.clock);
 	// The listener is the active camera.
-	m.listener.position = vec(p_frame.camera.trans);
-	m.listener.forward = vec(p_frame.camera.forward);
-	m.listener.up = vec(p_frame.camera.up);
-	m.listener.velocity = vec(p_frame.camera_velocity);
-	m.router->set_own_slot(p_frame.own_slot);
-	m.router->set_own_first_person(p_frame.own_alive && !p_frame.free_camera);
-	if (p_frame.frame != nullptr && p_frame.frame->own_weapons_valid) {
-		m.router->set_own_trigger((p_frame.frame->own_weapons_curr.timers[0].flags & sw::slot_flags::kTriggerDown) != 0);
-	}
-	m.router->set_listener(m.listener);
-	m.impacts->set_listener(m.listener);
-	// The others' fields at the newest received tick: RemoteShot bursts end on time (weapon_audio.h).
-	if (p_frame.frame != nullptr && p_frame.frame->valid) {
-		const size_t n = host::present_other_weapons(*p_frame.frame, double(p_frame.frame->newest_tick), m.newest);
-		m.router->set_others_newest(std::span<const host::PresentedOtherWeapon>(m.newest.data(), n),
-				sw::SimTime(p_frame.frame->newest_tick + 1) * sw::kTimeUnitsPerTick);
-	}
-	m.router->on_events(p_frame.events, *m.clock);
+	ba::GameAudioInputs in;
+	in.frame = p_frame.frame;
+	in.now_ns = p_frame.now_ns;
+	in.events = p_frame.events;
+	in.others = p_frame.others;
+	in.other_weapons = p_frame.other_weapons;
+	in.listener.position = vec(p_frame.camera.trans);
+	in.listener.forward = vec(p_frame.camera.forward);
+	in.listener.up = vec(p_frame.camera.up);
+	in.listener.velocity = vec(p_frame.camera_velocity);
+	in.own_slot = p_frame.own_slot;
+	in.own_first_person = p_frame.own_alive && !p_frame.free_camera;
+	m.listener = in.listener;
 	// Each other's 3p muzzle when the crowd has one (fx's MuzzleSample: +Y of the effect frame is the barrel).
 	m.muzzles.assign(p_frame.others.size(), ba::MuzzlePoint{});
 	for (size_t i = 0; i < p_frame.others.size(); ++i) {
@@ -297,7 +294,8 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 			}
 		}
 	}
-	m.router->on_others(p_frame.others, p_frame.other_weapons, m.muzzles, *m.clock);
+	in.muzzles = m.muzzles;
+	m.impact_requests.clear();
 	for (const fx::ImpactSoundCue &c : p_impact_cues) {
 		ba::ImpactSoundRequest r;
 		r.patch = c.patch;
@@ -306,12 +304,9 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 		r.seed = c.seed;
 		r.time = c.time;
 		r.timeline = c.timeline;
-		m.impacts->play_impact(r, *m.clock);
+		m.impact_requests.push_back(r);
 	}
-	for (const audio::EffectSoundRequest &e : p_effect_sounds) {
-		m.impacts->on_effect_sound(e, *m.clock);
-	}
-	m.router->update(p_frame.now_ns);
+	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds);
 }
 
 bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error) {
