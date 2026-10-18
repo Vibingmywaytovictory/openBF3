@@ -14,6 +14,7 @@
 
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/game_audio_check.h"
+#include "bf3/audio/game_audio_frame.h"
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/weapon_audio.h"
@@ -60,6 +61,9 @@ public:
 	// Loader thread: the kit items' patches (load_weapon_audio over the SharedLevel's GunplayLevel::defs), the impact
 	// sounds (p_impact_sounds: Bf3GameFx::impact_sound_names), the wave bank over every compiled program.
 	core::Status load(const M2aLoadInputs &p_in, std::span<const std::string> p_impact_sounds);
+	// au3 addition: before load. Default: the E7 audition patches the level lacks (Metro: the M1A2) are compiled from
+	// audio::kAuditionSuperbundles on the loader thread; an empty audition_superbundles skips that (item 4 then fails).
+	void set_load_options(const audio::GameAudioLoadOptions &p_options);
 	bool loaded() const;
 	// Main thread, after load returned success.
 	bool build(godot::Node *p_parent, std::string *r_error);
@@ -71,7 +75,8 @@ public:
 	// at load); any other is counted in ImpactAudioStats::unknown_patches and stays silent (no compile on the main
 	// thread).
 	void step(const M2aFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues, std::span<const audio::EffectSoundRequest> p_effect_sounds);
-	// E7 item 4 (client-local). p_position in world space, Frostbite axes.
+	// E7 item 4 (client-local). p_position in world space, Frostbite axes. A refusal with a check set skips the check's
+	// current step (GameAudioCheck::skip_step: a failing row, and step_done turns true).
 	bool audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error);
 	// E7: the check's recorder (MixTap + router observer); null detaches. Set before the check's first step.
 	void set_check(audio::GameAudioCheck *p_check);

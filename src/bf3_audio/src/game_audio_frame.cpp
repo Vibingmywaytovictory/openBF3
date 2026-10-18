@@ -3,12 +3,15 @@
 #include "bf3/audio/game_audio_frame.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/core/ebx_db.h"
 #include "bf3/core/level/level.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 
 namespace bf3::audio {
 
@@ -54,8 +57,55 @@ core::Result<std::shared_ptr<const ca::SoundProgram>> compile_patch_lenient(cons
 	return compile_patch(p_db, p_patch, lenient);
 }
 
-core::Result<GameAudioAssets> load_game_audio_assets(const core::Install &p_install, const core::level::LoadedLevel &p_level,
-		const host::GunplayLevel &p_gunplay, std::span<const std::string> p_impact_sounds, unsigned p_threads, const std::atomic<bool> *p_stop) {
+namespace {
+
+// E7 item 4 from GameAudioLoadOptions::audition_superbundles: the program (compiled from a lazily mounted library of
+// those superbundles) and a bank over its waves from the mount of the superbundle that holds the patch.
+core::Result<GameAuditionAsset> load_library_audition(const core::Install &p_install, const core::EbxLibrary &p_lib, std::string_view p_patch,
+		unsigned p_threads, size_t *r_missing) {
+	core::Result<std::shared_ptr<const ca::SoundProgram>> p = compile_patch_lenient(p_lib, p_patch);
+	if (!p) {
+		return p.error();
+	}
+	const std::optional<core::EbxLibrary::Origin> origin = p_lib.origin(p_patch);
+	size_t sb = p_lib.superbundle_count();
+	for (size_t i = 0; origin && i < p_lib.superbundle_count(); ++i) {
+		if (p_lib.superbundle(i) == origin->superbundle) {
+			sb = i;
+		}
+	}
+	if (sb >= p_lib.superbundle_count()) {
+		return core::make_error(std::string(p_patch) + ": compiled, but its superbundle is unknown");
+	}
+	size_t missing = 0;
+	core::Result<std::vector<ca::SoundWaveInfo>> waves = read_program_waves(p_lib, std::span<const std::shared_ptr<const ca::SoundProgram>>(&*p, 1), &missing);
+	if (!waves) {
+		return waves.error();
+	}
+	if (r_missing != nullptr) {
+		*r_missing += missing;
+	}
+	ca::WaveBankOptions bo;
+	bo.threads = p_threads;
+	core::Result<std::shared_ptr<const ca::WaveBank>> bank = ca::WaveBank::load(p_install, p_lib.mount(sb), std::move(*waves), bo);
+	if (!bank) {
+		return bank.error();
+	}
+	GameAuditionAsset a;
+	a.program = *p;
+	a.bank = *bank;
+	a.source = origin->superbundle;
+	return a;
+}
+
+} // namespace
+
+core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const core::Install> &p_install, const core::level::LoadedLevel &p_level,
+		const host::GunplayLevel &p_gunplay, std::span<const std::string> p_impact_sounds, unsigned p_threads, const std::atomic<bool> *p_stop,
+		const GameAudioLoadOptions &p_options) {
+	if (!p_install) {
+		return core::make_error("load_game_audio_assets: no install");
+	}
 	const core::EbxDb &db = p_level.db();
 	const auto stopped = [&]() { return p_stop != nullptr && p_stop->load(std::memory_order_relaxed); };
 	GameAudioAssets a;
@@ -84,15 +134,45 @@ core::Result<GameAudioAssets> load_game_audio_assets(const core::Install &p_inst
 	for (const std::string &e : (*cache)->errors()) {
 		a.report.push_back("impact " + e);
 	}
-	// E7 item 4: the audition patches, when the level's mount has them (else a reported skip).
+	// E7 item 4: the audition patches from the level's mount, else from the audition superbundles (their own banks).
+	std::vector<std::string> from_library;
 	for (const GameAuditionItem &item : game_audition_items()) {
 		core::Result<std::shared_ptr<const ca::SoundProgram>> p = compile_patch_lenient(db, item.patch);
 		if (p) {
-			a.auditions.emplace(item.patch, *p);
-			a.report.push_back("audition " + item.name + " [" + item.patch + "]: compiled");
+			a.auditions.emplace(item.patch, GameAuditionAsset{ *p, nullptr, "level" });
+			a.report.push_back("audition " + item.name + " [" + item.patch + "]: compiled from the level");
+		} else if (!p_options.audition_superbundles.empty()) {
+			from_library.push_back(item.patch);
 		} else {
-			a.report.push_back("audition " + item.name + " [" + item.patch + "]: skipped (" + p.error().message + ")");
+			a.audition_failures.push_back(item.patch);
+			a.report.push_back("audition " + item.name + " [" + item.patch + "]: NOT LOADED (" + p.error().message + "; no audition superbundles)");
 		}
+	}
+	if (!from_library.empty()) {
+		const auto t0 = std::chrono::steady_clock::now();
+		const std::vector<std::string> sbs = core::expand_superbundles(*p_install, p_options.audition_superbundles);
+		core::Result<std::unique_ptr<core::EbxLibrary>> lib = core::EbxLibrary::open(p_install, sbs, p_threads);
+		for (const std::string &patch : from_library) {
+			core::Result<GameAuditionAsset> r = lib ? load_library_audition(*p_install, **lib, patch, p_threads, &a.audition_waves_missing)
+													: core::Result<GameAuditionAsset>(lib.error());
+			if (r) {
+				char waves_line[96];
+				std::snprintf(waves_line, sizeof(waves_line), ", %zu resident waves of its own (%.1f MiB)", r->bank->stats().resident_waves,
+						double(r->bank->stats().resident_bytes) / double(1 << 20));
+				a.report.push_back("audition [" + patch + "]: compiled from " + r->source + waves_line);
+				a.auditions.emplace(patch, std::move(*r));
+			} else {
+				a.audition_failures.push_back(patch);
+				a.report.push_back("audition [" + patch + "]: NOT LOADED (not on the level's mount; " + p_options.audition_superbundles + ": " + r.error().message + ")");
+			}
+			if (stopped()) {
+				return core::make_error("load_game_audio_assets: stopped");
+			}
+		}
+		char line[160];
+		std::snprintf(line, sizeof(line), "auditions from %s: %zu patches in %.3f s (loader thread)", p_options.audition_superbundles.c_str(),
+				from_library.size(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+		a.report.push_back(line);
 	}
 	if (stopped()) {
 		return core::make_error("load_game_audio_assets: stopped");
@@ -110,8 +190,10 @@ core::Result<GameAudioAssets> load_game_audio_assets(const core::Install &p_inst
 	for (const std::shared_ptr<const ca::SoundProgram> &p : a.impacts->programs()) {
 		all.push_back(p);
 	}
-	for (const auto &[name, p] : a.auditions) {
-		all.push_back(p);
+	for (const auto &[name, au] : a.auditions) {
+		if (!au.bank) {
+			all.push_back(au.program); // from the level: its waves go in the level bank
+		}
 	}
 	core::Result<std::vector<ca::SoundWaveInfo>> waves = read_program_waves(db, all, &a.waves_missing);
 	if (!waves) {
@@ -119,11 +201,16 @@ core::Result<GameAudioAssets> load_game_audio_assets(const core::Install &p_inst
 	}
 	ca::WaveBankOptions bo;
 	bo.threads = p_threads;
-	core::Result<std::shared_ptr<const ca::WaveBank>> bank = ca::WaveBank::load(p_install, p_level.mount(), std::move(*waves), bo);
+	core::Result<std::shared_ptr<const ca::WaveBank>> bank = ca::WaveBank::load(*p_install, p_level.mount(), std::move(*waves), bo);
 	if (!bank) {
 		return bank.error();
 	}
 	a.bank = *bank;
+	for (auto &[name, au] : a.auditions) {
+		if (!au.bank) {
+			au.bank = a.bank;
+		}
+	}
 	char line[160];
 	std::snprintf(line, sizeof(line), "bank: %zu programs, %u resident waves, %zu waves not in the level", all.size(),
 			unsigned(a.bank->stats().resident_waves), a.waves_missing);

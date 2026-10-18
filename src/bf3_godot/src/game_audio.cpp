@@ -72,7 +72,8 @@ struct Bf3GameAudio::Impl {
 	std::shared_ptr<const ba::WeaponAudioTable> table;
 	ba::KitAudioSources kits;
 	std::shared_ptr<const ba::ImpactSoundCache> impacts_cache;
-	std::map<std::string, std::shared_ptr<const ca::SoundProgram>, std::less<>> auditions; // compiled patches by name
+	std::map<std::string, ba::GameAuditionAsset, std::less<>> auditions; // compiled patches and their banks by name
+	ba::GameAudioLoadOptions load_options;
 	std::shared_ptr<const ca::WaveBank> bank;
 	std::vector<std::string> report;
 	uint32_t programs = 0, program_failures = 0;
@@ -114,7 +115,8 @@ core::Status Bf3GameAudio::load(const M2aLoadInputs &p_in, std::span<const std::
 		return core::make_error("Bf3GameAudio::load: the shared level has no gunplay tables (SharedLoadOptions::gunplay)");
 	}
 	m.db = p_in.db;
-	core::Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(*p_in.db->install, *p_in.db->level, *p_in.shared->gunplay, p_impact_sounds, p_in.threads, p_in.stop);
+	core::Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(p_in.db->install, *p_in.db->level, *p_in.shared->gunplay, p_impact_sounds, p_in.threads, p_in.stop,
+			m.load_options);
 	if (!a) {
 		return a.error();
 	}
@@ -128,6 +130,10 @@ core::Status Bf3GameAudio::load(const M2aLoadInputs &p_in, std::span<const std::
 	m.program_failures = a->program_failures;
 	m.loaded.store(true, std::memory_order_release);
 	return core::Status::success();
+}
+
+void Bf3GameAudio::set_load_options(const audio::GameAudioLoadOptions &p_options) {
+	impl_->load_options = p_options;
 }
 
 bool Bf3GameAudio::loaded() const {
@@ -245,14 +251,20 @@ bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position
 		if (r_error != nullptr) {
 			*r_error = p_why;
 		}
+		// The check's audition step cannot run: it fails (skip_step), and the driver's step_done poll moves on.
+		if (m.check != nullptr && m.check->current_step() >= 0) {
+			m.check->skip_step(uint32_t(m.check->current_step()), p_why);
+		}
 		return false;
 	};
 	if (!m.built) {
 		return fail("Bf3GameAudio::audition: not built");
 	}
 	std::shared_ptr<const ca::SoundProgram> program;
+	std::shared_ptr<const ca::WaveBank> bank = m.bank;
 	if (auto it = m.auditions.find(p_patch); it != m.auditions.end()) {
-		program = it->second;
+		program = it->second.program;
+		bank = it->second.bank ? it->second.bank : m.bank;
 	} else if (m.impacts_cache && (program = m.impacts_cache->find(p_patch))) {
 	} else {
 		if (m.db == nullptr || !m.db->level) {
@@ -264,10 +276,12 @@ bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position
 			return fail(std::string(p_patch) + ": " + p.error().message);
 		}
 		program = *p;
-		m.auditions.emplace(std::string(p_patch), program); // its waves are not in the bank unless loaded: starved, counted
+		// Its waves are not in the bank unless loaded: starved, counted. The E7 items are loaded at load (from the
+		// level or GameAudioLoadOptions::audition_superbundles), never here.
+		m.auditions.emplace(std::string(p_patch), ba::GameAuditionAsset{ program, m.bank, "level (lazy)" });
 	}
 	const uint64_t seed = ba::sound_seed(0xA0D1u, uint32_t(m.auditions_started));
-	if (!ba::start_audition(*m.pool, *m.mixer, program, m.bank, m.tuning, m.listener, vec(p_position), seed, m.clock->earliest_frame(), m.check)) {
+	if (!ba::start_audition(*m.pool, *m.mixer, program, bank, m.tuning, m.listener, vec(p_position), seed, m.clock->earliest_frame(), m.check)) {
 		return fail("Bf3GameAudio::audition: the one-shot pool refused");
 	}
 	++m.auditions_started;

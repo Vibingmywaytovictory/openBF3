@@ -165,6 +165,8 @@ struct GameAudioCheck::State {
 	float step_distance = 0.0f;
 	std::vector<GameCheckWindow> windows;
 	std::vector<uint32_t> per_step; // windows taken per step
+	std::vector<uint8_t> skipped_step; // per step: skip_step was called
+	std::vector<Skip> skips;
 	core::PathGuard guard;
 	AudioTuning tuning;
 };
@@ -186,6 +188,7 @@ GameAudioCheck::GameAudioCheck(const GameCheckScript &p_script, uint32_t p_rate,
 	}
 	st.windows.reserve(size_t(std::min<uint64_t>(bursts, 4096)));
 	st.per_step.assign(p_script.steps.size(), 0);
+	st.skipped_step.assign(p_script.steps.size(), 0);
 	st.recorded_until.store(p_start_frame, std::memory_order_relaxed);
 }
 
@@ -325,7 +328,7 @@ void GameAudioCheck::on_audition(uint32_t p_step, uint64_t p_seed, uint64_t p_fr
 
 bool GameAudioCheck::step_done(uint32_t p_step) const {
 	const State &st = *state_;
-	if (p_step >= st.script.steps.size()) {
+	if (p_step >= st.script.steps.size() || st.skipped_step[p_step] != 0) {
 		return true;
 	}
 	if (st.per_step[p_step] < st.script.steps[p_step].bursts) {
@@ -339,6 +342,19 @@ bool GameAudioCheck::step_done(uint32_t p_step) const {
 		}
 	}
 	return true;
+}
+
+void GameAudioCheck::skip_step(uint32_t p_step, std::string p_reason) {
+	State &st = *state_;
+	if (p_step >= st.script.steps.size() || st.skipped_step[p_step] != 0) {
+		return; // out of range or already skipped: bounded (one entry per step)
+	}
+	st.skipped_step[p_step] = 1;
+	st.skips.push_back(Skip{ p_step, std::move(p_reason) });
+}
+
+std::span<const GameAudioCheck::Skip> GameAudioCheck::skipped() const {
+	return state_->skips;
 }
 
 std::span<const GameCheckWindow> GameAudioCheck::windows() const {
@@ -429,6 +445,12 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 		return p_step.name;
 	};
 
+	// A skipped step fails (E7: a skipped audition item is not met).
+	for (const GameAudioCheck::Skip &k : p_check.skipped()) {
+		if (k.step < p_script.steps.size()) {
+			row("skipped." + p_script.steps[k.step].name, 1.0, "never skipped (" + k.reason + ")", false);
+		}
+	}
 	// Coverage: every step recorded its bursts.
 	for (uint32_t s = 0; s < p_script.steps.size(); ++s) {
 		const GameCheckStep &step = p_script.steps[s];

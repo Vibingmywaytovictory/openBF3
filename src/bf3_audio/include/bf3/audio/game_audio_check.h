@@ -40,7 +40,8 @@ namespace bf3::audio {
 inline constexpr std::array<float, 6> kGameCheckDistances{ 5.0f, 20.0f, 100.0f, 150.0f, 280.0f, 320.0f };
 
 // E7 item 4: the client-local auditions (au §10.2 bands). The patch partitions and band distances are au3's to
-// resolve from the data (game_check_script fills them; an item it cannot resolve is a reported skip, not a pass).
+// resolve from the data (game_check_script fills them; an item the game cannot load or play is skipped through
+// GameAudioCheck::skip_step, and analyse_game_check FAILS its step: E7 item 4 is not met with a skipped item).
 struct GameAuditionItem {
 	std::string name; // "m98b", "rpg7", "m1a2"
 	std::string patch; // the SoundPatchAsset partition ("" until resolved)
@@ -70,7 +71,7 @@ struct GameCheckScript {
 	CheckScript analysis; // the rules (spacing, tolerances) handed to analyse_check; segments are filled per run
 };
 
-// The six distances x 2 bursts, then the audition items (au3 resolves their patches; unresolved: reported skips).
+// The six distances x 2 bursts, then the audition items (au3 resolves their patches; unresolved: failing rows).
 GameCheckScript game_check_script();
 std::vector<GameAuditionItem> game_audition_items();
 
@@ -115,7 +116,15 @@ public:
 	// An audition one-shot (Bf3GameAudio::audition) of step p_step started at p_frame.
 	void on_audition(uint32_t p_step, uint64_t p_seed, uint64_t p_frame, PatchInstance &r_instance);
 
-	bool step_done(uint32_t p_step) const; // its bursts recorded and their tails past
+	bool step_done(uint32_t p_step) const; // its bursts recorded and their tails past, or skipped
+	// au3 addition: a step the driver cannot run (an audition whose patch loaded from no source). step_done is then
+	// true; analyse_game_check fails it ("skipped.<step>" and its "windows.<step>" row), never a silent pass.
+	void skip_step(uint32_t p_step, std::string p_reason);
+	struct Skip {
+		uint32_t step = 0;
+		std::string reason;
+	};
+	std::span<const Skip> skipped() const;
 	std::span<const GameCheckWindow> windows() const;
 	core::Status write_wav(const std::filesystem::path &p_path) const; // --audio-record (scratch or user cache only)
 	// au3 additions. write_wav above goes through the guard set here (none set: refused, PathGuard NoRoots).

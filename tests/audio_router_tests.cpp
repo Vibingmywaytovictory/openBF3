@@ -1216,6 +1216,26 @@ TEST_SUITE("audio-router") {
 		CHECK(!rep.rows.empty());
 		CHECK(rep.table().find("windows.d5") != std::string::npos);
 		CHECK(rep.table().find("mixer.late_blocks") != std::string::npos);
+		// A skipped step is done and FAILS (E7: a skipped audition item is not met), never a silent pass.
+		{
+			ba::GameAudioCheck skipping(small, kRate, 0);
+			skipping.begin_step(0, 5.0f);
+			CHECK(!skipping.step_done(0));
+			skipping.skip_step(0, "no such patch");
+			skipping.skip_step(0, "twice"); // bounded: one entry per step
+			skipping.skip_step(9, "out of range");
+			CHECK(skipping.step_done(0));
+			REQUIRE(skipping.skipped().size() == 1);
+			CHECK(skipping.skipped()[0].reason == "no such patch");
+			const ba::CheckReport sr = ba::analyse_game_check(small, skipping, ba::GameCheckCounters{}, ba::AudioTuning{}, kRate);
+			bool skipped_failed = false, windows_failed = false;
+			for (const ba::CheckRow &row : sr.rows) {
+				skipped_failed = skipped_failed || (row.name == "skipped.d5" && !row.pass);
+				windows_failed = windows_failed || (row.name == "windows.d5" && !row.pass);
+			}
+			CHECK(skipped_failed);
+			CHECK(windows_failed);
+		}
 		r.router->set_observer(nullptr);
 		r.mixer->set_tap(&r.capture);
 	}
@@ -1299,7 +1319,7 @@ GameFixture *game_fixture() {
 	} else {
 		made->impact_note = "impact table: no material grid for " + made->metro->root_name;
 	}
-	Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(*made->install, *made->metro, *made->gunplay, made->impact_names, 0);
+	Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(made->install, *made->metro, *made->gunplay, made->impact_names, 0);
 	REQUIRE_MESSAGE(a.ok(), (a.ok() ? std::string() : a.error().message));
 	made->assets = std::move(*a);
 	std::ifstream cfg(OPENBF3_AUDIO_TUNING_CFG, std::ios::binary);
@@ -1644,6 +1664,20 @@ TEST_SUITE("audio-game") {
 		CHECK(a.impacts->compiled() > 0);
 		CHECK(a.bank);
 		CHECK(a.waves_missing == 0);
+		// E7 item 4: every audition item loads (the M1A2 from kAuditionSuperbundles, with a bank of its own).
+		for (const ba::GameAuditionItem &item : ba::game_audition_items()) {
+			const auto it = a.auditions.find(item.patch);
+			REQUIRE_MESSAGE(it != a.auditions.end(), item.name, " not loaded");
+			CHECK(it->second.program);
+			REQUIRE(it->second.bank);
+			CHECK(it->second.bank->stats().resident_waves > 0);
+		}
+		CHECK(a.audition_failures.empty());
+		CHECK(a.audition_waves_missing == 0);
+		const auto m1a2 = a.auditions.find(std::string_view("sound/vehicles/land/m1a2_abrams/m1a2_abrams"));
+		REQUIRE(m1a2 != a.auditions.end());
+		CHECK(m1a2->second.source == ba::kAuditionSuperbundles);
+		CHECK(m1a2->second.bank != a.bank);
 		check_game_unchanged(*f);
 	}
 
@@ -1656,17 +1690,9 @@ TEST_SUITE("audio-game") {
 		const ba::WeaponAudioTable &table = *f->assets.table;
 		const uint16_t m16 = def_of_patch(table, kM16Patch);
 		REQUIRE(m16 != sw::kNoWeapon);
-		// The script: the game's, minus the auditions whose patch the mount lacks (reported skips).
+		// The script: the game's, every step (an audition the assets lack is skipped through skip_step and fails).
 		ba::GameCheckScript script = ba::game_check_script();
 		std::string skips;
-		for (size_t i = 0; i < script.steps.size();) {
-			if (script.steps[i].audition && !f->assets.auditions.contains(script.steps[i].patch)) {
-				skips += " " + script.steps[i].name;
-				script.steps.erase(script.steps.begin() + ptrdiff_t(i));
-			} else {
-				++i;
-			}
-		}
 		script.analysis.shot_interval_s = table.defs[m16].shot_interval_s;
 		script.analysis.expected_spacing_frames = table.defs[m16].shot_interval_s * double(ba::kMixRate);
 		const sw::SimTime interval = sw::SimTime(std::llround(table.defs[m16].shot_interval_s * double(sw::kTimeUnitsPerSecond)));
@@ -1736,9 +1762,15 @@ TEST_SUITE("audio-game") {
 				const host::PresentedSoldier *s = rig.soldier(kShooter);
 				REQUIRE(s != nullptr);
 				const uint64_t seed = ba::sound_seed(0xA0D1u, auditions);
-				CHECK(ba::start_audition(*rig.pool, *rig.mixer, f->assets.auditions.find(st.patch)->second, f->assets.bank, f->tuning, rig.listener,
-						standin_muzzle(*s), seed, rig.clock->earliest_frame(), &check));
-				++auditions;
+				const auto it = f->assets.auditions.find(st.patch);
+				if (it == f->assets.auditions.end()) {
+					check.skip_step(uint32_t(step), "not loaded"); // Bf3GameAudio::audition's refusal does the same
+					skips += " " + st.name;
+				} else {
+					CHECK(ba::start_audition(*rig.pool, *rig.mixer, it->second.program, it->second.bank, f->tuning, rig.listener, standin_muzzle(*s), seed,
+							rig.clock->earliest_frame(), &check));
+					++auditions;
+				}
 				audition_started = true;
 			}
 			net.trim(shooters);
@@ -1768,6 +1800,9 @@ TEST_SUITE("audio-game") {
 			}
 		}
 		CHECK(failed == 0);
+		CHECK(skips.empty());
+		CHECK(check.skipped().empty());
+		CHECK(auditions == 10);
 		CHECK(run_s <= script.timeout_s);
 		CHECK(check.dropped_frames() == 0);
 		CHECK(rig.router->stats().mixer_refusals == 0);
