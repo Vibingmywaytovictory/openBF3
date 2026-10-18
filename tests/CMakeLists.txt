@@ -1232,6 +1232,8 @@ openbf3_cost(host.gunplay.replay 3 12)
 openbf3_cost(host.gunplay.perf 1 13)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2a_bt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    # Under asan (2026-10-18, the two rows side by side on a loaded machine): firefight 563 s, replay 431 s.
+    set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES TIMEOUT 1800)
     set_tests_properties(host.gunplay.firefight host.gunplay.replay host.gunplay.perf PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2a_bt_cl_dir}")
 endif()

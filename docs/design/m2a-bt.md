@@ -162,6 +162,11 @@ The new rows read 58.1 s (`host.gunplay.firefight`) and 48.4 s (`host.gunplay.re
 phase (warnings only). Alone they take 13.8 s / 30.9 s CPU and 11.4 s / 38.0 s CPU, which are their COST /
 PROCESSORS. `m2a.contract3` passed in 0.32 s with `kBtLanded = true`.
 
+**asan.** `ctest --preset asan -R "^(m2a\.contract3|host\.gunplay\.(firefight|replay))$"` passed with no
+AddressSanitizer report. `m2a.contract3` took 0.21 s, `host.gunplay.replay` 431 s and `host.gunplay.firefight` 563 s;
+the two ran side by side on the loaded machine. Under asan the three rows get a TIMEOUT of 1,800 s. They stay below
+`asan_sweep`'s 600 s, though not by much on a busy machine.
+
 ## Open issues
 
 * `GameServer` accepts more than 64 slots with gunplay on, but slots 64 and above are never hit (lag_comp.cpp
