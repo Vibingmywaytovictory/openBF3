@@ -884,6 +884,7 @@ void Bf3LevelSession::_process(double p_delta) {
 		client_->read_presentation(*frame_);
 		mapper_.adopt(*frame_);
 		mapper_.poll_devices();
+		mapper_.m2a_frame(*frame_, now_ns); // M2a gx [view]: the drawn frame for the view sample, the weapon levels
 		client_->set_input(mapper_.sample());
 		m2a_presented(p_delta, now_ns); // M2a w3 [G7]
 	}
