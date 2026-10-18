@@ -778,4 +778,379 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 	return e;
 }
 
+void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
+	Soldier &s = soldiers[p_i];
+	M2a &x = *m2a;
+	M2a::Soldier &xs = x.soldiers[p_i];
+	s.skipped_lod = s.hidden = s.two_cycle = s.idle_mix = s.reloading = s.aiming = false;
+	s.loco_clips = 0;
+	xs.transition = xs.moving = xs.firing = xs.dying = xs.wrote_weapon = xs.wrote_muzzle = false;
+	s.tier = int8_t(temporal_lod_tier(config.lod, s.input.camera_distance));
+	s.clock += dt;
+	const auto finish = [&] { s.done_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(); };
+	// Events on the input clock, seen whether or not the soldier is due (temporal LOD must not lose a death or a shot).
+	if (s.input.dead && !xs.dead) {
+		xs.dead = true;
+		xs.dead_since = s.clock;
+		xs.death_stance = uint8_t(std::min<uint32_t>(s.input.target_pose, 2));
+		xs.hide_counted = false;
+		++xs.deaths;
+	} else if (!s.input.dead && xs.dead) {
+		xs.dead = false; // a respawn: alive again
+	}
+	if (s.input.fire_seq != xs.fire_seq) {
+		if (xs.fire_seen) {
+			xs.fire_since = s.clock;
+		}
+		xs.fire_seq = s.input.fire_seq;
+	}
+	xs.fire_seen = true;
+	const double dead_age = xs.dead ? s.clock - xs.dead_since : 0.0;
+	xs.hidden = xs.dead && dead_age >= double(kCrowdDeathHideSeconds);
+	if (xs.hidden && !xs.hide_counted) {
+		xs.hide_counted = true;
+		++xs.hidden_count;
+	}
+	if ((s.input.flags & crowd_flags::kHidden) != 0 || xs.hidden) {
+		s.hidden = true;
+		finish();
+		return;
+	}
+	// Temporal LOD: as S3 (a dying soldier is always due, so the fall stays smooth).
+	if (config.temporal_lod && s.ever && !xs.dead) {
+		const float interval = temporal_lod_interval(config.lod, s.input.camera_distance);
+		bool due = true;
+		if (interval < 0.0f) {
+			due = false; // FarPolicy::Freeze
+		} else if (interval > 0.0f) {
+			const int64_t bucket = int64_t(std::floor(s.clock / double(interval) + double(stagger_of(p_i))));
+			due = bucket != s.lod_bucket;
+			s.lod_bucket = bucket;
+		}
+		if (!due) {
+			s.skipped_lod = true;
+			finish();
+			return;
+		}
+	} else if (config.temporal_lod) {
+		const float interval = temporal_lod_interval(config.lod, s.input.camera_distance);
+		if (interval > 0.0f) {
+			s.lod_bucket = int64_t(std::floor(s.clock / double(interval) + double(stagger_of(p_i))));
+		}
+	}
+	const float step = float(std::max(0.0, s.clock - s.last_eval_clock));
+	s.last_eval_clock = s.clock;
+	s.ever = true;
+	const uint32_t team_index = std::min<uint32_t>(s.input.team, uint32_t(teams.size() - 1));
+	const Team &team = teams[team_index];
+	const M2a::Team &xteam = x.teams[team_index];
+	const Skeleton &rig = clips->rig;
+
+	// The soldier's weapon (R5): CrowdTeam::weapons[weapon], item 0 past the end; the team's fields without items.
+	uint8_t widx = kNoCrowdWeapon;
+	const M2a::Weapon *weapon = nullptr;
+	if (!xteam.weapons.empty()) {
+		widx = s.input.weapon;
+		if (widx >= xteam.weapons.size()) {
+			++xs.bad_weapon;
+			widx = 0;
+		}
+		weapon = &xteam.weapons[widx];
+	}
+	const BoneMask *weapon_joints = weapon != nullptr ? weapon->weapon_joints : team.weapon_joints;
+	const std::vector<Xform> &weapon_local = weapon != nullptr ? weapon->weapon_local : team.weapon_local;
+	const CrowdClipData *reload = weapon != nullptr ? weapon->reload : team.reload;
+	const float reload_rate = weapon != nullptr ? weapon->reload_rate : team.reload_rate;
+	const float reload_seconds = weapon != nullptr ? weapon->reload_seconds : team.reload_seconds;
+	if (widx != xs.held) {
+		if (xs.held != kNoCrowdWeapon && s.reload_t >= 0.0f) {
+			s.reload_t = -1.0f; // the reload belonged to the other weapon
+			++xs.cancelled;
+		}
+		xs.held = widx;
+	}
+
+	// The stance (hostile values clamped and counted).
+	uint8_t from = s.input.pose, to = s.input.target_pose;
+	if (from > 2 || to > 2) {
+		++xs.bad_stance;
+		from = std::min<uint8_t>(from, 2);
+		to = std::min<uint8_t>(to, 2);
+	}
+	float tr = s.input.transition;
+	if (!std::isfinite(tr)) {
+		++xs.bad_stance;
+		tr = 0.0f;
+	}
+	tr = std::clamp(tr, 0.0f, 1.0f);
+	const bool in_transition = from != to;
+	const uint8_t stance = in_transition ? from : to; // a transition aims with its source stance (the table's rule)
+	xs.stance = to;
+	const M2a::Stance &aim_stance = x.stances[stance];
+
+	// 1. Locomotion of a steady stance, or the transition clip.
+	auto loco_blend = [&](const M2a::Stance &p_st, LocalPose &r_out) {
+		const float yaw = s.input.yaw;
+		const float cy = std::cos(yaw), sy = std::sin(yaw);
+		const Vec3 v = s.input.velocity;
+		const Vec3 local{ v.x * cy - v.z * sy, 0.0f, v.x * sy + v.z * cy };
+		const LocoWeights w = locomotion_weights(p_st.loco, local, config.loco);
+		if (w.cycle_seconds > 0.0f) {
+			s.phase = advance_phase(s.phase, step, w.cycle_seconds);
+		}
+		std::array<const LocalPose *, 3> inputs{};
+		std::array<float, 3> weights{};
+		size_t n = 0;
+		uint32_t cycles = 0;
+		for (size_t c = 0; c < kLocoClips && n < 3; ++c) {
+			if (!(w.weight[c] > 0.0f)) {
+				continue;
+			}
+			if (c == size_t(LocoClip::Idle)) {
+				inputs[n] = p_st.idle;
+			} else {
+				const CrowdClipData &clip = *p_st.cycle[c];
+				LocalPose &dst = s.sample[cycles];
+				if (c == size_t(LocoClip::Bwd) && p_st.cycle_bwd2 != nullptr) {
+					// Crouch backward: the two 45 degree cycles at one phase, 50/50.
+					const CrowdClipData &c2 = *p_st.cycle_bwd2;
+					sample_pose(rig, clip.clip, clip.tracks, s.phase * float(clip.tracks.end_frame), xs.extra, s.scratch);
+					sample_pose(rig, c2.clip, c2.tracks, s.phase * float(c2.tracks.end_frame), xs.extra2, s.scratch);
+					blend_poses(xs.extra, xs.extra2, 0.5f, dst);
+				} else {
+					sample_pose(rig, clip.clip, clip.tracks, s.phase * float(clip.tracks.end_frame), dst, s.scratch);
+				}
+				inputs[n] = &dst;
+				++cycles;
+			}
+			weights[n] = w.weight[c];
+			++n;
+		}
+		s.loco_clips = uint8_t(n);
+		s.two_cycle = cycles >= 2;
+		s.idle_mix = w.weight[size_t(LocoClip::Idle)] > 0.0f && cycles >= 1;
+		xs.moving = cycles >= 1;
+		if (n == 1) {
+			r_out = *inputs[0];
+		} else {
+			blend_poses(inputs.data(), weights.data(), n, r_out);
+		}
+	};
+	auto stance_pose = [&](LocalPose &r_out) {
+		if (in_transition) {
+			xs.transition = true;
+			const int row = transition_row(from, to);
+			const CrowdClipData *clip = row >= 0 ? x.transitions[size_t(row)] : nullptr;
+			if (clip != nullptr) {
+				sample_pose(rig, clip->clip, clip->tracks, tr * float(clip->tracks.end_frame), r_out, s.scratch);
+			} else {
+				// lc's stand-in rule for a missing transition row: the lerp of the two stance idles by the fraction.
+				++xs.fallbacks;
+				blend_poses(*x.stances[from].idle, *x.stances[to].idle, tr, r_out);
+			}
+			return;
+		}
+		const M2a::Stance &st = x.stances[to];
+		if (to != 0 && (st.idle_fallback || st.moves_fallback)) {
+			++xs.fallbacks;
+		}
+		loco_blend(st, r_out);
+	};
+	if (xs.dead) {
+		xs.dying = true;
+		const M2a::Stance &ds = x.stances[xs.death_stance];
+		if (x.death == CrowdDeathStyle::Clip && ds.death != nullptr) {
+			const float frame = std::min(float(dead_age) * ds.death->tracks.fps, float(ds.death->tracks.end_frame));
+			sample_pose(rig, ds.death->clip, ds.death->tracks, frame, s.pose, s.scratch);
+		} else {
+			// m2a.md §16 Q13: the alive pose to the prone idle over kCrowdDeathBlendSeconds.
+			stance_pose(xs.alive);
+			const float w = std::min(1.0f, float(dead_age) / kCrowdDeathBlendSeconds);
+			blend_poses(xs.alive, *x.stances[2].idle, w, s.pose);
+		}
+	} else {
+		stance_pose(s.pose);
+	}
+	// 2. The sim owns the root: its translation back to rest.
+	if (clips->root_joint >= 0 && size_t(clips->root_joint) < s.pose.joints.size()) {
+		s.pose.joints[size_t(clips->root_joint)].t = rig.bone(size_t(clips->root_joint)).rest.t;
+	}
+	// 3. Weapon layout of the joints the locomotion clips leave undriven (the soldier's weapon).
+	if (weapon_joints != nullptr && !weapon_local.empty()) {
+		const size_t m = std::min(s.pose.joints.size(), weapon_joints->size());
+		for (size_t j = 0; j < m; ++j) {
+			if (weapon_joints->weight[j] > 0.0f) {
+				s.pose.joints[j] = weapon_local[j];
+			}
+		}
+	}
+	// 4. Masked upper-body reload (the soldier's weapon's clip); none while dead.
+	if (xs.dead) {
+		s.reload_pending = false;
+		s.reload_t = -1.0f;
+	}
+	if (s.reload_pending) {
+		s.reload_pending = false;
+		if (s.reload_t < 0.0f && reload != nullptr) {
+			s.reload_t = 0.0f;
+		}
+	} else if (s.reload_t >= 0.0f) {
+		s.reload_t += step;
+	}
+	if (s.reload_t >= 0.0f && reload != nullptr) {
+		if (s.reload_t >= reload_seconds) {
+			s.reload_t = -1.0f;
+		} else {
+			const float rw = std::min({ 1.0f, s.reload_t / kReloadRampSeconds, (reload_seconds - s.reload_t) / kReloadRampSeconds });
+			const CrowdClipData &clip = *reload;
+			LocalPose &dst = s.sample[2];
+			sample_pose(rig, clip.clip, clip.tracks, s.reload_t * reload_rate * clip.tracks.fps, dst, s.scratch);
+			override_masked(s.pose, dst, clip.mask, rw);
+			s.reloading = rw > 0.0f;
+		}
+	}
+	// 4b. Fire: the crouch fire clip from its start, or a short aim kick (stand, prone, transitions).
+	float kick = 0.0f;
+	const double fire_age = s.clock - xs.fire_since;
+	if (!xs.dead && fire_age >= 0.0) {
+		if (!in_transition && to == 1 && x.crouch_fire != nullptr) {
+			const CrowdClipData &clip = *x.crouch_fire;
+			const float dur = clip.tracks.duration_seconds();
+			if (fire_age < double(dur)) {
+				const float frame = float(fire_age) * clip.tracks.fps;
+				if (clip.additive) {
+					xs.extra = x.identity;
+					if (core::ant::sample_clip(clip.clip, frame, s.scratch)) {
+						apply_clip_pose(clip.tracks, s.scratch, xs.extra);
+						apply_additive(s.pose, xs.extra, clip.mask, 1.0f, config.aim_order);
+						xs.firing = true;
+					}
+				} else if (sample_pose(rig, clip.clip, clip.tracks, frame, xs.extra, s.scratch)) {
+					const float fw = std::min({ 1.0f, float(fire_age) / kReloadRampSeconds, (dur - float(fire_age)) / kReloadRampSeconds });
+					override_masked(s.pose, xs.extra, clip.mask, std::max(0.0f, fw));
+					xs.firing = true;
+				}
+			}
+		} else if (fire_age < double(kCrowdFireKickSeconds)) {
+			kick = kCrowdFireKickDeg * kDegToRad * (1.0f - float(fire_age) / kCrowdFireKickSeconds);
+			xs.firing = true;
+		}
+	}
+	// 5. Additive aim of the stance (none while dead).
+	if (!xs.dead) {
+		const float pitch = kick != 0.0f ? s.input.pitch + kick : s.input.pitch;
+		const bool up = pitch > 0.0f;
+		const float full_deg = up ? aim_stance.up_full_deg : aim_stance.down_full_deg;
+		if (pitch != 0.0f && full_deg > 0.0f) {
+			const float aw = std::min(1.0f, std::fabs(pitch) / (full_deg * kDegToRad));
+			const BoneMask *mask = up ? aim_stance.up_mask : aim_stance.down_mask;
+			if (mask != nullptr && aw > 0.0f) {
+				apply_additive(s.pose, up ? *aim_stance.aim_up : *aim_stance.aim_down, *mask, aw, config.aim_order);
+				s.aiming = true;
+			}
+		}
+	}
+	// 6. Model pose, body palette, weapon palette and muzzle into the back buffers.
+	const uint8_t back = uint8_t(s.front ^ 1);
+	model_pose(rig, s.pose, s.model[back]);
+	skin_matrices(s.model[back], team.binds->binds(), s.palette[back]);
+	s.binds[back] = uint32_t(team.binds->size());
+	xs.weapon[back] = widx;
+	xs.muzzle_ok[back] = false;
+	xs.weapon_binds[back] = 0;
+	if (weapon != nullptr) {
+		skin_matrices(s.model[back], weapon->binds->binds(), xs.weapon_palette[back]);
+		xs.weapon_binds[back] = uint32_t(weapon->binds->size());
+		xs.wrote_weapon = true;
+		if (weapon->muzzle_joint >= 0 && size_t(weapon->muzzle_joint) < s.model[back].size()) {
+			xs.muzzle[back] = xform_mul(s.model[back][size_t(weapon->muzzle_joint)], weapon->muzzle_offset);
+			xs.muzzle_ok[back] = true;
+			xs.wrote_muzzle = true;
+		}
+	}
+	s.evaluated = true;
+	finish();
+}
+
+bool CrowdEvaluator::muzzle_model(uint32_t p_i, Xform &r_model) const {
+	const Impl &m = *impl_;
+	if (!m.m2a || !drawn(p_i)) {
+		return false;
+	}
+	const Impl::Soldier &s = m.soldiers[p_i];
+	const Impl::M2a::Soldier &xs = m.m2a->soldiers[p_i];
+	if (!xs.muzzle_ok[s.front]) {
+		return false;
+	}
+	r_model = xs.muzzle[s.front];
+	return true;
+}
+
+uint8_t CrowdEvaluator::weapon_of(uint32_t p_i) const {
+	const Impl &m = *impl_;
+	if (!m.m2a || !drawn(p_i)) {
+		return kNoCrowdWeapon;
+	}
+	return m.m2a->soldiers[p_i].weapon[m.soldiers[p_i].front];
+}
+
+std::span<const Mat34> CrowdEvaluator::weapon_palette(uint32_t p_i) const {
+	if (weapon_of(p_i) == kNoCrowdWeapon) {
+		return {};
+	}
+	const Impl &m = *impl_;
+	const Impl::M2a::Soldier &xs = m.m2a->soldiers[p_i];
+	const uint8_t f = m.soldiers[p_i].front;
+	return std::span<const Mat34>(xs.weapon_palette[f].data(), std::min<size_t>(xs.weapon_palette[f].size(), xs.weapon_binds[f]));
+}
+
+bool CrowdEvaluator::drawn(uint32_t p_i) const {
+	const Impl &m = *impl_;
+	if (p_i >= m.soldiers.size()) {
+		return false;
+	}
+	const Impl::Soldier &s = m.soldiers[p_i];
+	if (!s.ever || (s.input.flags & crowd_flags::kHidden) != 0) {
+		return false;
+	}
+	return !m.m2a || !m.m2a->soldiers[p_i].hidden;
+}
+
+CrowdM2aStats CrowdEvaluator::m2a_stats() const {
+	CrowdM2aStats r;
+	const Impl &m = *impl_;
+	if (!m.m2a) {
+		return r;
+	}
+	for (size_t i = 0; i < m.soldiers.size(); ++i) {
+		const Impl::Soldier &s = m.soldiers[i];
+		const Impl::M2a::Soldier &xs = m.m2a->soldiers[i];
+		r.stance_fallbacks += xs.fallbacks;
+		r.bad_weapon += xs.bad_weapon;
+		r.bad_stance += xs.bad_stance;
+		r.reloads_cancelled += xs.cancelled;
+		r.deaths += xs.deaths;
+		r.death_hidden += xs.hidden_count;
+		if (!s.changed) {
+			continue;
+		}
+		if (xs.transition) {
+			++r.transitions;
+		} else if (xs.stance == 0) {
+			++r.stand;
+		} else if (xs.stance == 1) {
+			++r.crouch;
+		} else {
+			++r.prone;
+		}
+		r.moving_crouch += !xs.transition && xs.stance == 1 && xs.moving ? 1 : 0;
+		r.moving_prone += !xs.transition && xs.stance == 2 && xs.moving ? 1 : 0;
+		r.firing += xs.firing ? 1 : 0;
+		r.dying += xs.dying ? 1 : 0;
+		r.weapon_palettes += xs.wrote_weapon ? 1 : 0;
+		r.muzzles += xs.wrote_muzzle ? 1 : 0;
+	}
+	return r;
+}
+
 } // namespace bf3::anim
