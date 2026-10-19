@@ -443,6 +443,19 @@ bool finite_xform(const Xform &p_x) {
 
 } // namespace
 
+// PT1 run [decl]: BF3's move groups per soldier (defined in the PT1 run block at the end of this file).
+struct CrowdPt1Run; // PT1 run [decl]
+struct CrowdPt1RunDeleter { // PT1 run [decl]
+	void operator()(CrowdPt1Run *p_run) const; // PT1 run [decl]
+}; // PT1 run [decl]
+struct CrowdPt1Stats { // PT1 run [decl]
+	uint32_t sampled = 0, moving = 0; // PT1 run [decl]: clips sampled (the idle counts when weighted), moving clips weighted
+	bool idle_mix = false; // PT1 run [decl]
+}; // PT1 run [decl]
+std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers); // PT1 run [decl]
+bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle, // PT1 run [decl]
+		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdPt1Stats &r_stats); // PT1 run [decl]
+
 struct CrowdEvaluator::Impl::M2a {
 	struct Weapon {
 		const SkinBinds *binds = nullptr;
@@ -1174,6 +1187,173 @@ CrowdM2aStats CrowdEvaluator::m2a_stats() const {
 		r.muzzles += xs.wrote_muzzle ? 1 : 0;
 	}
 	return r;
+}
+
+} // namespace bf3::anim
+
+// ---- PT1 run (docs/design/pt1-run.md; crowd_eval.h's PT1 run block) ---------------------------------------------------
+// BF3's move groups for the stand and crouch locomotion of the M2a path: per soldier the sprint and moving weights and
+// the term poses (lane scratch of that soldier).
+
+namespace bf3::anim {
+
+struct CrowdPt1Run {
+	struct Soldier {
+		float sprint_w = 0.0f; // 0 run .. 1 sprint
+		float move_w = 0.0f; // 0 stance idle .. 1 the group
+		uint8_t stance = 0xFF; // the stance of the last evaluation (a change starts the weights at their targets)
+		std::array<LocalPose, kMaxMoveGroupTerms> term;
+		LocalPose group_a, group_b;
+	};
+	const CrowdMoveGroupSet *set = nullptr;
+	std::vector<Soldier> soldiers;
+};
+
+void CrowdPt1RunDeleter::operator()(CrowdPt1Run *p_run) const {
+	delete p_run;
+}
+
+std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers) {
+	std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> run(new CrowdPt1Run());
+	run->set = &p_set;
+	run->soldiers.resize(p_soldiers);
+	for (CrowdPt1Run::Soldier &x : run->soldiers) {
+		for (LocalPose &t : x.term) {
+			t = rest_pose(p_rig);
+		}
+		x.group_a = rest_pose(p_rig);
+		x.group_b = rest_pose(p_rig);
+	}
+	return run;
+}
+
+namespace {
+
+// The group's terms sampled over p_idle at the shared phase and blended into r_out; the clips sampled.
+uint32_t pt1_group_pose(const CrowdMoveGroup &p_group, const MoveGroupWeights &p_w, float p_phase, const LocalPose &p_idle,
+		std::array<LocalPose, kMaxMoveGroupTerms> &r_term, core::ant::ClipPose &r_scratch, LocalPose &r_out) {
+	std::array<const LocalPose *, kMaxMoveGroupTerms> inputs{};
+	std::array<float, kMaxMoveGroupTerms> weights{};
+	uint32_t n = 0;
+	for (uint32_t k = 0; k < p_w.count && k < kMaxMoveGroupTerms; ++k) {
+		const MoveGroupTerm &t = p_w.terms[k];
+		if (t.clip >= p_group.clips.size() || !(t.weight > 0.0f)) {
+			continue;
+		}
+		const CrowdClipData &c = p_group.clips[t.clip];
+		float frame = 0.0f;
+		if (p_group.timing[t.clip].seconds > 0.0f) {
+			float u = p_phase + t.start_phase;
+			u -= std::floor(u);
+			frame = u * float(c.tracks.end_frame);
+		}
+		LocalPose &dst = r_term[n];
+		dst = p_idle;
+		if (core::ant::sample_clip(c.clip, frame, r_scratch)) {
+			apply_clip_pose(c.tracks, r_scratch, dst);
+		}
+		inputs[n] = &dst;
+		weights[n] = t.weight;
+		++n;
+	}
+	if (n == 0) {
+		r_out = p_idle;
+	} else if (n == 1) {
+		r_out = *inputs[0];
+	} else {
+		blend_poses(inputs.data(), weights.data(), n, r_out);
+	}
+	return n;
+}
+
+float pt1_ramp(float p_w, float p_target, float p_step, float p_seconds) {
+	const float d = p_seconds > 0.0f ? p_step / p_seconds : 1.0f;
+	return p_w < p_target ? std::min(p_target, p_w + d) : std::max(p_target, p_w - d);
+}
+
+} // namespace
+
+bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
+		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdPt1Stats &r_stats) {
+	(void)p_rig;
+	r_stats = CrowdPt1Stats{};
+	if (r_run.set == nullptr || p_i >= r_run.soldiers.size() || p_stance > 1) {
+		return false; // prone (no BF3 move group) or out of range: the stance's cycles
+	}
+	const CrowdMoveGroup &main = r_run.set->get(p_stance == 0 ? CrowdMoveGroupRole::Run : CrowdMoveGroupRole::Sneak);
+	if (!main.ok) {
+		return false;
+	}
+	const CrowdMoveGroup &sprint_group = r_run.set->get(CrowdMoveGroupRole::Sprint);
+	const bool can_sprint = p_stance == 0 && sprint_group.ok;
+	CrowdPt1Run::Soldier &x = r_run.soldiers[p_i];
+	const float step = std::isfinite(p_step) ? std::clamp(p_step, 0.0f, 1.0f) : 0.0f;
+	// The local velocity, as S3's run blend computes it.
+	const float cy = std::cos(p_input.yaw), sy = std::sin(p_input.yaw);
+	const Vec3 v = p_input.velocity;
+	Vec3 local{ v.x * cy - v.z * sy, 0.0f, v.x * sy + v.z * cy };
+	if (!std::isfinite(local.x) || !std::isfinite(local.z)) {
+		local = Vec3{};
+	}
+	const float speed = std::sqrt(local.x * local.x + local.z * local.z);
+	const MoveGroupOptions &opt = r_run.set->options;
+	const MoveGroupWeights wa = move_group_weights(main.def, main.timing, move_group_x(local, main.x_sign), speed, opt);
+	const bool sprinting = can_sprint && p_input.sprinting;
+	const float sprint_target = sprinting ? 1.0f : 0.0f;
+	const float move_target = (!wa.below_min_speed || sprinting) ? 1.0f : 0.0f;
+	if (x.stance != uint8_t(p_stance)) {
+		x.stance = uint8_t(p_stance);
+		x.sprint_w = sprint_target;
+		x.move_w = move_target;
+	} else {
+		x.sprint_w = pt1_ramp(x.sprint_w, sprint_target, step, kCrowdSprintBlendSeconds);
+		x.move_w = pt1_ramp(x.move_w, move_target, step, kCrowdMoveBlendSeconds);
+	}
+	if (!can_sprint) {
+		x.sprint_w = 0.0f;
+	}
+	const float sw = x.sprint_w;
+	MoveGroupWeights ws;
+	if (sw > 0.0f) {
+		ws = move_group_weights(sprint_group.def, sprint_group.timing, move_group_x(local, sprint_group.x_sign), speed, opt);
+	}
+	// The shared phase: the groups' rates blended by the sprint weight.
+	float cps = wa.cycles_per_second;
+	if (sw > 0.0f) {
+		const float b = ws.cycles_per_second;
+		cps = cps > 0.0f && b > 0.0f ? (1.0f - sw) * cps + sw * b : (b > 0.0f ? b : cps);
+	}
+	if (x.move_w > 0.0f && cps > 0.0f && std::isfinite(cps)) {
+		r_phase = advance_phase(r_phase, step, 1.0f / cps);
+	}
+	if (!(x.move_w > 0.0f)) {
+		r_out = p_idle;
+		r_stats.sampled = 1;
+		return true;
+	}
+	uint32_t sampled = 0, moving = 0;
+	if (sw >= 1.0f) {
+		sampled += pt1_group_pose(sprint_group, ws, r_phase, p_idle, x.term, r_scratch, x.group_a);
+		moving += ws.moving;
+	} else {
+		sampled += pt1_group_pose(main, wa, r_phase, p_idle, x.term, r_scratch, x.group_a);
+		moving += wa.moving;
+		if (sw > 0.0f) {
+			sampled += pt1_group_pose(sprint_group, ws, r_phase, p_idle, x.term, r_scratch, x.group_b);
+			moving += ws.moving;
+			blend_poses(x.group_a, x.group_b, sw, x.group_a);
+		}
+	}
+	if (x.move_w >= 1.0f) {
+		r_out = x.group_a;
+	} else {
+		blend_poses(p_idle, x.group_a, x.move_w, r_out);
+		++sampled;
+		r_stats.idle_mix = moving >= 1;
+	}
+	r_stats.sampled = sampled;
+	r_stats.moving = moving;
+	return true;
 }
 
 } // namespace bf3::anim
