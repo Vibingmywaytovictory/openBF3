@@ -11,6 +11,13 @@
 #include <cstring>
 #include <string>
 
+#if defined(_M_X64) || defined(__x86_64__) || defined(__SSE2__) // integ/m2b-w1 [xas groups]
+#include <emmintrin.h> // integ/m2b-w1 [xas groups]
+#define OPENBF3_XAS_SSE2 1 // integ/m2b-w1 [xas groups]
+#else // integ/m2b-w1 [xas groups]
+#define OPENBF3_XAS_SSE2 0 // integ/m2b-w1 [xas groups]
+#endif // integ/m2b-w1 [xas groups]
+
 namespace bf3::core::audio {
 
 namespace {
@@ -77,30 +84,91 @@ Result<uint32_t> data_block_frames(std::span<const uint8_t> p_chunk, size_t p_at
 } // namespace
 
 void decode_xas_frame(std::span<const uint8_t, kXasFrameBytes> p_frame, std::array<int16_t, kXasFrameSamples> &r_out) {
-	for (size_t group = 0; group < 4; ++group) {
-		const uint32_t header = uint32_t(p_frame[group * 4]) | (uint32_t(p_frame[group * 4 + 1]) << 8) | (uint32_t(p_frame[group * 4 + 2]) << 16) |
-				(uint32_t(p_frame[group * 4 + 3]) << 24);
-		const int32_t coef1 = kXasCoefficients[header & 3][0];
-		const int32_t coef2 = kXasCoefficients[header & 3][1];
-		int32_t hist2 = int32_t(int16_t(uint16_t(header & 0xfff0)));
-		int32_t hist1 = int32_t(int16_t(uint16_t((header >> 16) & 0xfff0)));
-		const int32_t shift = 20 - int32_t((header >> 16) & 0x0f);
-		const size_t base = group * kXasGroupSamples;
-		r_out[base] = int16_t(hist2);
-		r_out[base + 1] = int16_t(hist1);
-		for (size_t row = 0; row < 15; ++row) {
-			const uint8_t byte = p_frame[16 + row * 4 + group];
-			const uint8_t nibbles[2] = { uint8_t(byte >> 4), uint8_t(byte & 0x0f) };
-			for (size_t half = 0; half < 2; ++half) {
-				const int32_t nibble = int32_t(int8_t(uint8_t(nibbles[half] << 4))) >> 4;
-				int32_t sample = ((nibble * (int32_t(1) << shift)) + hist1 * coef1 + hist2 * coef2 + 128) >> 8;
-				sample = std::clamp(sample, int32_t(-32768), int32_t(32767));
-				r_out[base + 2 + row * 2 + half] = int16_t(sample);
-				hist2 = hist1;
-				hist1 = sample;
-			}
-		}
-	}
+	// integ/m2b-w1 [xas groups] (E11, docs/design/m2b.md "M2b integ-w1"): the four groups' predictors run side by side,
+	// the same integer arithmetic per sample in the same order within a group, so the output is unchanged; each
+	// group's serial dependency chain (multiply, shift, clamp) no longer waits on the one before it.
+	// The SSE2 path: one register lane per group. _mm_madd_epi16 of (hist1, hist2) with (coef1, coef2) is the predictor
+	// (both int16), the nibble term nibble * 2^shift is precomputed per row (it does not depend on the history), and
+	// _mm_packs_epi32 saturates to int16 exactly as the clamp does.
+#if OPENBF3_XAS_SSE2 // integ/m2b-w1 [xas groups]
+	alignas(16) int16_t c16[8], h16[8], m2[8], m1[8]; // integ/m2b-w1 [xas groups]
+	for (size_t group = 0; group < 4; ++group) { // integ/m2b-w1 [xas groups]
+		const uint32_t header = uint32_t(p_frame[group * 4]) | (uint32_t(p_frame[group * 4 + 1]) << 8) | (uint32_t(p_frame[group * 4 + 2]) << 16) | // integ/m2b-w1 [xas groups]
+				(uint32_t(p_frame[group * 4 + 3]) << 24); // integ/m2b-w1 [xas groups]
+		const int16_t h2 = int16_t(uint16_t(header & 0xfff0)); // integ/m2b-w1 [xas groups]
+		const int16_t h1 = int16_t(uint16_t((header >> 16) & 0xfff0)); // integ/m2b-w1 [xas groups]
+		const int32_t shift = 20 - int32_t((header >> 16) & 0x0f); // 5 .. 20 // integ/m2b-w1 [xas groups]
+		const int32_t s1 = std::min(shift, int32_t(14)); // nibble * 2^shift = (nibble * 2^(shift - s1)) * 2^s1, both factors int16 // integ/m2b-w1 [xas groups]
+		c16[group * 2] = int16_t(kXasCoefficients[header & 3][0]); // integ/m2b-w1 [xas groups]
+		c16[group * 2 + 1] = int16_t(kXasCoefficients[header & 3][1]); // integ/m2b-w1 [xas groups]
+		h16[group * 2] = h1; // integ/m2b-w1 [xas groups]
+		h16[group * 2 + 1] = h2; // integ/m2b-w1 [xas groups]
+		m2[group] = int16_t(1 << (shift - s1)); // integ/m2b-w1 [xas groups]
+		m2[group + 4] = 0; // integ/m2b-w1 [xas groups]
+		m1[group * 2] = int16_t(1 << s1); // integ/m2b-w1 [xas groups]
+		m1[group * 2 + 1] = 0; // integ/m2b-w1 [xas groups]
+		const size_t base = group * kXasGroupSamples; // integ/m2b-w1 [xas groups]
+		r_out[base] = h2; // integ/m2b-w1 [xas groups]
+		r_out[base + 1] = h1; // integ/m2b-w1 [xas groups]
+	} // integ/m2b-w1 [xas groups]
+	const __m128i zero = _mm_setzero_si128(); // integ/m2b-w1 [xas groups]
+	const __m128i coef = _mm_load_si128(reinterpret_cast<const __m128i *>(c16)); // integ/m2b-w1 [xas groups]
+	const __m128i mul2 = _mm_load_si128(reinterpret_cast<const __m128i *>(m2)); // integ/m2b-w1 [xas groups]
+	const __m128i mul1 = _mm_load_si128(reinterpret_cast<const __m128i *>(m1)); // integ/m2b-w1 [xas groups]
+	const __m128i round = _mm_set1_epi32(128); // integ/m2b-w1 [xas groups]
+	__m128i hist = _mm_load_si128(reinterpret_cast<const __m128i *>(h16)); // lane g: low int16 hist1, high int16 hist2 // integ/m2b-w1 [xas groups]
+	alignas(16) int16_t steps[30][4]; // integ/m2b-w1 [xas groups]
+	for (size_t row = 0; row < 15; ++row) { // integ/m2b-w1 [xas groups]
+		uint32_t bytes; // integ/m2b-w1 [xas groups]
+		std::memcpy(&bytes, &p_frame[16 + row * 4], 4); // one byte per group // integ/m2b-w1 [xas groups]
+		const __m128i b = _mm_unpacklo_epi8(_mm_cvtsi32_si128(int32_t(bytes)), zero); // int16 lanes 0..3 // integ/m2b-w1 [xas groups]
+		const __m128i hi = _mm_srai_epi16(_mm_slli_epi16(_mm_srli_epi16(b, 4), 12), 12); // the signed high nibble // integ/m2b-w1 [xas groups]
+		const __m128i lo = _mm_srai_epi16(_mm_slli_epi16(b, 12), 12); // the signed low nibble // integ/m2b-w1 [xas groups]
+		const __m128i terms[2] = { // integ/m2b-w1 [xas groups]
+			_mm_add_epi32(_mm_madd_epi16(_mm_unpacklo_epi16(_mm_mullo_epi16(hi, mul2), zero), mul1), round), // integ/m2b-w1 [xas groups]
+			_mm_add_epi32(_mm_madd_epi16(_mm_unpacklo_epi16(_mm_mullo_epi16(lo, mul2), zero), mul1), round), // integ/m2b-w1 [xas groups]
+		}; // integ/m2b-w1 [xas groups]
+		for (size_t half = 0; half < 2; ++half) { // integ/m2b-w1 [xas groups]
+			const __m128i sample = _mm_srai_epi32(_mm_add_epi32(terms[half], _mm_madd_epi16(hist, coef)), 8); // integ/m2b-w1 [xas groups]
+			const __m128i packed = _mm_packs_epi32(sample, sample); // the clamp to int16 // integ/m2b-w1 [xas groups]
+			_mm_storel_epi64(reinterpret_cast<__m128i *>(steps[row * 2 + half]), packed); // integ/m2b-w1 [xas groups]
+			hist = _mm_or_si128(_mm_slli_epi32(hist, 16), _mm_unpacklo_epi16(packed, zero)); // integ/m2b-w1 [xas groups]
+		} // integ/m2b-w1 [xas groups]
+	} // integ/m2b-w1 [xas groups]
+	for (size_t group = 0; group < 4; ++group) { // integ/m2b-w1 [xas groups]
+		for (size_t step = 0; step < 30; ++step) { // integ/m2b-w1 [xas groups]
+			r_out[group * kXasGroupSamples + 2 + step] = steps[step][group]; // integ/m2b-w1 [xas groups]
+		} // integ/m2b-w1 [xas groups]
+	} // integ/m2b-w1 [xas groups]
+#else // integ/m2b-w1 [xas groups]
+	int32_t coef1[4], coef2[4], hist1[4], hist2[4], shift[4]; // integ/m2b-w1 [xas groups]
+	for (size_t group = 0; group < 4; ++group) { // integ/m2b-w1 [xas groups]
+		const uint32_t header = uint32_t(p_frame[group * 4]) | (uint32_t(p_frame[group * 4 + 1]) << 8) | (uint32_t(p_frame[group * 4 + 2]) << 16) | // integ/m2b-w1 [xas groups]
+				(uint32_t(p_frame[group * 4 + 3]) << 24); // integ/m2b-w1 [xas groups]
+		coef1[group] = kXasCoefficients[header & 3][0]; // integ/m2b-w1 [xas groups]
+		coef2[group] = kXasCoefficients[header & 3][1]; // integ/m2b-w1 [xas groups]
+		hist2[group] = int32_t(int16_t(uint16_t(header & 0xfff0))); // integ/m2b-w1 [xas groups]
+		hist1[group] = int32_t(int16_t(uint16_t((header >> 16) & 0xfff0))); // integ/m2b-w1 [xas groups]
+		shift[group] = 20 - int32_t((header >> 16) & 0x0f); // integ/m2b-w1 [xas groups]
+		const size_t base = group * kXasGroupSamples; // integ/m2b-w1 [xas groups]
+		r_out[base] = int16_t(hist2[group]); // integ/m2b-w1 [xas groups]
+		r_out[base + 1] = int16_t(hist1[group]); // integ/m2b-w1 [xas groups]
+	} // integ/m2b-w1 [xas groups]
+	for (size_t row = 0; row < 15; ++row) { // integ/m2b-w1 [xas groups]
+		for (size_t half = 0; half < 2; ++half) { // integ/m2b-w1 [xas groups]
+			for (size_t group = 0; group < 4; ++group) { // integ/m2b-w1 [xas groups]
+				const uint8_t byte = p_frame[16 + row * 4 + group]; // integ/m2b-w1 [xas groups]
+				const uint8_t nib = half == 0 ? uint8_t(byte >> 4) : uint8_t(byte & 0x0f); // integ/m2b-w1 [xas groups]
+				const int32_t nibble = int32_t(int8_t(uint8_t(nib << 4))) >> 4; // integ/m2b-w1 [xas groups]
+				int32_t sample = ((nibble * (int32_t(1) << shift[group])) + hist1[group] * coef1[group] + hist2[group] * coef2[group] + 128) >> 8; // integ/m2b-w1 [xas groups]
+				sample = std::clamp(sample, int32_t(-32768), int32_t(32767)); // integ/m2b-w1 [xas groups]
+				r_out[group * kXasGroupSamples + 2 + row * 2 + half] = int16_t(sample); // integ/m2b-w1 [xas groups]
+				hist2[group] = hist1[group]; // integ/m2b-w1 [xas groups]
+				hist1[group] = sample; // integ/m2b-w1 [xas groups]
+			} // integ/m2b-w1 [xas groups]
+		} // integ/m2b-w1 [xas groups]
+	} // integ/m2b-w1 [xas groups]
+#endif // integ/m2b-w1 [xas groups]
 }
 
 Result<SoundStreamHeader> parse_stream_header(std::span<const uint8_t> p_chunk, size_t p_offset) {
@@ -324,7 +392,19 @@ Result<uint32_t> StreamDecoder::read(float *r_out, uint32_t p_frames) {
 			const uint32_t n = std::min(block_frames_left_, kXasFrameSamples); // PCM16 is buffered 128 frames at a time too
 			if (header_.codec == SoundCodec::EaXas) {
 				std::array<int16_t, kXasFrameSamples> one{};
-				for (size_t ch = 0; ch < lanes; ++ch) {
+				if (lanes == 1) { // integ/m2b-w1 [xas groups]: mono and stereo copy with a fixed stride, the same values
+					decode_xas_frame(std::span<const uint8_t, kXasFrameBytes>(chunk_ + cursor_, kXasFrameBytes), one); // integ/m2b-w1 [xas groups]
+					std::memcpy(buffer_.data(), one.data(), size_t(n) * sizeof(int16_t)); // integ/m2b-w1 [xas groups]
+				} else if (lanes == 2) { // integ/m2b-w1 [xas groups]
+					std::array<int16_t, kXasFrameSamples> two{}; // integ/m2b-w1 [xas groups]
+					decode_xas_frame(std::span<const uint8_t, kXasFrameBytes>(chunk_ + cursor_, kXasFrameBytes), one); // integ/m2b-w1 [xas groups]
+					decode_xas_frame(std::span<const uint8_t, kXasFrameBytes>(chunk_ + cursor_ + kXasFrameBytes, kXasFrameBytes), two); // integ/m2b-w1 [xas groups]
+					for (uint32_t i = 0; i < n; ++i) { // integ/m2b-w1 [xas groups]
+						buffer_[i * 2] = one[i]; // integ/m2b-w1 [xas groups]
+						buffer_[i * 2 + 1] = two[i]; // integ/m2b-w1 [xas groups]
+					} // integ/m2b-w1 [xas groups]
+				} // integ/m2b-w1 [xas groups]
+				for (size_t ch = 0; lanes > 2 && ch < lanes; ++ch) { // integ/m2b-w1 [xas groups]: `lanes > 2 &&` added
 					decode_xas_frame(std::span<const uint8_t, kXasFrameBytes>(chunk_ + cursor_ + ch * kXasFrameBytes, kXasFrameBytes), one);
 					for (uint32_t i = 0; i < n; ++i) {
 						buffer_[i * lanes + ch] = one[i];
