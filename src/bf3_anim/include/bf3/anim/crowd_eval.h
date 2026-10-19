@@ -89,6 +89,7 @@ struct CrowdSoldierInput {
 	// When dead falls to false with revived set, the soldier stands up from its corpse pose at the same place over
 	// kCrowdReviveBlendSeconds instead of restarting alive at once. Default false: M2a and S3 unchanged.
 	bool revived = false; // M2b W2.0 (cam)
+	bool sprinting = false; // PT1 run [field]: the sim's kSprinting (stand draws MP_SprintMoveGroup with CrowdStanceSet::move_groups)
 };
 
 struct CrowdConfig {
@@ -296,6 +297,7 @@ struct CrowdStanceSet {
 	// M2b W2.0 (docs/design/m2b.md §2.6 #17, §4; cam): seconds a corpse is drawn after `dead` rose (the hide above).
 	// The default keeps M2a's kCrowdDeathHideSeconds; the M2b scene sets kCrowdCorpseSeconds (or SoldierDef::time_for_corpse).
 	float corpse_seconds = kCrowdDeathHideSeconds; // M2b W2.0 (cam)
+	const CrowdMoveGroupSet *move_groups = nullptr; // PT1 run [field]: BF3's move groups for stand and crouch (null: S3's / tp's cycles)
 };
 
 struct CrowdM2aStats {
@@ -337,5 +339,25 @@ inline constexpr float kCrowdReviveBlendSeconds = 0.5f; // prone -> stand (m2b.m
 namespace bf3::anim {
 
 inline constexpr float kCrowdMaxCorpseSeconds = 3600.0f;
+
+} // namespace bf3::anim
+
+// ---- PT1 run (docs/design/pt1-run.md) --------------------------------------------------------------------------------
+// With CrowdStanceSet::move_groups, step 1's steady stand and crouch locomotion is BF3's move group (move_group.h)
+// instead of S3's run blend / tp's cycles (the [movegroup] replacement in crowd_eval.cpp's loco_blend):
+//   * stand: MP_RunMoveGroup_PC, and MP_SprintMoveGroup while CrowdSoldierInput::sprinting; crouch:
+//     MP_SneakMoveGroup_PC. Prone keeps tp's Crawl cycles (BF3 has no prone move group). A group that did not load
+//     (CrowdMoveGroup::ok false) keeps the stance's cycles.
+//   * the terms of move_group_weights at the soldier's local velocity, sampled over the stance idle (the joints a clip
+//     leaves undriven keep the idle, e.g. the fingers of the FullBodyWeaponRootNoFingers sprint), at one shared phase;
+//   * the sprint weight ramps 0 <-> 1 over kCrowdSprintBlendSeconds (run and sprint blended, the phase rate blended
+//     with them), and the moving weight (the group over the stance idle) over kCrowdMoveBlendSeconds: 0 below the
+//     group's MinSpeed (MP_Run 0.01 m/tick = 0.6 m/s) unless sprinting, else 1.
+// Without move_groups (S3's scenes, the M2a / M2b rows' synthetic stance sets) nothing changes.
+
+namespace bf3::anim {
+
+inline constexpr float kCrowdSprintBlendSeconds = 0.2f; // [named default, measured = false]
+inline constexpr float kCrowdMoveBlendSeconds = 0.2f; // [named default, measured = false]
 
 } // namespace bf3::anim
