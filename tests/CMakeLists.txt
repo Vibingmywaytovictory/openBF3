@@ -1478,3 +1478,28 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2b_w2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2b.contract2 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w2_cl_dir}")
 endif()
+
+# M2b gx (docs/design/m2b.md §11 gx row; docs/design/m2b-gx.md §5): m2b.gx.unit, the M2b session's Godot-free rules
+# (m2b_game.cpp: the play.cmd args with hostile values, the spawn screen and Deploy rules, the SpawnRequest resend, the
+# play check's row verdicts and skips) and R13 (FxTriggers accepts PresentKind::Revive). No install, no Godot; a
+# functional row (< 2 s), parallel-safe. godot.m2b.play (E9: the scripted TDM round, tests/godot_m2b.cmake) and
+# godot.m2b_load (E12: the load to the spawn screen, godot_m1_load.cmake on the M2b scene) are WINDOW rows: the
+# wave-2 merge pass's user-away phase, never a branch pass. Screenshots: $ENV{OPENBF3_GX_SHOTS}, default
+# b/shots/gx under the main checkout (gitignored).
+openbf3_test(test_m2b_gx test_main.cpp m2b_gx_tests.cpp test_support.h ${CMAKE_SOURCE_DIR}/src/bf3_godot/src/m2b_game.cpp)
+target_link_libraries(test_m2b_gx PRIVATE bf3_host bf3_anim bf3_fx bf3_render)
+target_include_directories(test_m2b_gx PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+add_test(NAME m2b.gx.unit COMMAND test_m2b_gx --test-suite=m2b-gx)
+set_tests_properties(m2b.gx.unit PROPERTIES TIMEOUT 60)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2b_gx_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2b.gx.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_gx_cl_dir}")
+endif()
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.m2b.play godot_m2b.cmake WINDOW TIMEOUT 600 ARGS "-DARGS=--kill-limit=15 --preround=0")
+    openbf3_godot_row(godot.m2b_load godot_m1_load.cmake WINDOW TIMEOUT 300 ARGS -DSCENE=res://scenes/m2b_metro.tscn "-DUSER_ARGS=--bots=0 --deploy-screen=0")
+    set_tests_properties(godot.m2b.play godot.m2b_load PROPERTIES RUN_SERIAL TRUE)
+    # Estimates until the merge pass measures them (docs/testing.md COST): load about 50 s warm plus the round.
+    openbf3_cost(godot.m2b.play 1 150)
+    openbf3_cost(godot.m2b_load 1 50)
+endif()

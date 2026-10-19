@@ -177,6 +177,39 @@ private:
 		uint64_t swallowed_clicks = 0;
 		const bf3::host::PresentationFrame *frame = nullptr;
 	} m2a_;
+
+	// ---- M2b gx [mapper] (docs/design/m2b.md §4, §11 gx row; docs/design/m2b-gx.md) ----------------------------------
+	// The M2b scene's keys. Off (the default) the mapper is exactly M2a's. On (m2b_enable, the M2b session): 3 selects
+	// weapon slot 2 (the gadget slot: the assault kit's defibrillator with the TDM kits), Tab shows the scoreboard while
+	// held, and while the spawn screen is up (m2b_set_spawn_screen) 1-4 pick the kit (assault, engineer, support,
+	// recon), Enter (or keypad Enter) deploys and mouse clicks never capture the mouse (they belong to the screen's
+	// buttons). The session takes the presses each frame (m2b_take_kit, m2b_take_deploy_presses).
+public:
+	enum class M2bAction : uint8_t { Gadget = 0, Scoreboard, Deploy, Kit1, Kit2, Kit3, Kit4, Count };
+	static constexpr size_t kM2bActionCount = size_t(M2bAction::Count);
+	static const char *m2b_action_name(M2bAction p_action); // "bf3_gadget", ...
+	void m2b_enable(bool p_on); // installs the bf3_gadget ... bf3_kit_4 actions (idempotent)
+	bool m2b_enabled() const { return m2b_.enabled; }
+	void m2b_set_spawn_screen(bool p_up);
+	bool m2b_spawn_screen() const { return m2b_.spawn_screen; }
+	bool m2b_scoreboard_held() const; // Tab: the device level, or the scripted hold
+	int m2b_take_kit(); // the last kit key (0..3) pressed on the spawn screen since the last call; -1 none
+	uint32_t m2b_take_deploy_presses(); // Enter presses on the spawn screen since the last call
+	// Scripted (the M2b check), as script_press / script_hold.
+	void m2b_script_press(M2bAction p_action);
+	void m2b_script_hold(M2bAction p_action, bool p_held);
+
+private:
+	bool m2b_handle_event(const godot::Ref<godot::InputEvent> &p_event); // true: consumed (handle_event returns)
+	struct M2bInput {
+		bool enabled = false;
+		bool installed = false;
+		bool spawn_screen = false;
+		bool scoreboard_scripted = false;
+		int kit = -1;
+		uint32_t deploy_presses = 0;
+		uint64_t consumed_clicks = 0;
+	} m2b_;
 };
 
 } // namespace bf3::godot_side

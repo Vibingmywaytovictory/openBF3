@@ -248,3 +248,12 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/death_camera.cpp")
     target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2B_HAVE_CAM=1)
 endif()
+
+# M2b gx (docs/design/m2b.md §11 gx row; docs/design/m2b-gx.md): the M2b scene's session (level_session_m2b.cpp: the
+# hook bodies behind the `// M2b gx [<tag>]` lines of level_session_m2a.cpp), its Godot-free rules (m2b_game.cpp, also
+# compiled by tests/m2b_gx_tests.cpp) and the M2b check (m2b_check.cpp).
+target_sources(bf3_godot PRIVATE
+    src/level_session_m2b.cpp
+    src/m2b_check.cpp
+    src/m2b_game.cpp
+)
