@@ -233,6 +233,9 @@ struct GameServer::Impl {
 			return false;
 		}
 		size_t index = p_point;
+		if (index == SIZE_MAX) { // M2b ru R1: the rules' scored chooser over this list (SIZE_MAX: no rules, or its fallback)
+			index = sv_choose_spawn(p_slot, points, p_tick); // M2b ru R1
+		} // M2b ru R1
 		if (index == SIZE_MAX) {
 			index = sim::choose_spawn(points, s.team, live_positions(p_slot), config.level->spawn_protection_radius, splitmix64(rng));
 			if (index == SIZE_MAX) {
@@ -328,7 +331,7 @@ struct GameServer::Impl {
 		s.used = true;
 		s.remote = true;
 		s.peer = p_peer;
-		s.team = 1; // M1: the local player is on Team 1 (docs §8.2)
+		s.team = sv_rules_on() ? int(sv_connect(size_t(at), false, p_hello.name)) : 1; // M1: Team 1 (docs §8.2); M2b ru R2: AutoTeam's team
 		s.hello = true;
 		net::MatchInfo m;
 		m.level = config.level->level;
@@ -340,7 +343,9 @@ struct GameServer::Impl {
 		m.source_digest = config.level->source_digest;
 		m.motor_hash = motor_hash;
 		sv_match_info(size_t(at), m); // M2a sv [ctrl]: match seed, weapon / kit hashes, flags; the slot's lag history
+		sv_rules_match_info(m); // M2b ru [snap]: the phase, logic_digest, rules_flags
 		send(p_peer, net::kChannelReliable, net::encode_match_info(m));
+		sv_rules_join(size_t(at)); // M2b ru [snap]: the full MatchState and PlayerList after MatchInfo
 	}
 
 	// Trace and SetSeed act at once; Teleport, SpawnAt and SpawnSweep wait for the rules step.
@@ -657,12 +662,14 @@ struct GameServer::Impl {
 			}
 			const bool was_alive = alive(s.state);
 			const sim::SoldierState sv_before = s.state; // M2a sv [loop]
+			sv_restrict(s); // M2b ru [cmd]: the pre-round freeze (net::restrict_command), before the motor and the weapons
 			motor.step(s.state, s.last);
 			++times.motor_steps; // S1
 			sv_step_soldier(s, sv_before, was_alive); // M2a sv [loop]: step 4a, the weapons after the motor
 			if (was_alive && !alive(s.state) && !s.dummy) {
-				s.want_spawn = true;
-				s.respawn_at = n + config.respawn_ticks;
+				const std::optional<uint32_t> respawn = sv_policy().respawn_tick(uint8_t(&s - slots.data()), n); // M2b ru R3 (M2a: n + respawn_ticks)
+				s.want_spawn = respawn.has_value(); // M2b ru R3
+				s.respawn_at = respawn.value_or(0); // M2b ru R3
 			}
 		}
 		last_step_ms = ms_since(step_start);
@@ -710,6 +717,7 @@ struct GameServer::Impl {
 		if (config.snapshot_divisor <= 1 || n % config.snapshot_divisor == 0) {
 			send_snapshots(n, net::monotonic_ns());
 		}
+		sv_send_rules(n); // M2b ru [snap]: MatchState on change, PlayerList changes at most every kPlayerListIntervalTicks
 		for (OutDatagram &d : pending_out) {
 			r_out.push_back(std::move(d));
 		}
@@ -730,6 +738,14 @@ struct GameServer::Impl {
 		s.team = p_team;
 		s.bot = p_bot;
 		s.source = std::move(p_source);
+		if (sv_rules_on()) { // M2b ru [add]: AutoTeam's team for every server-side soldier
+			s.team = int(sv_connect(size_t(at), true, "")); // M2b ru [add]
+			if (s.team == 0) { // M2b ru [add]: a spectator slot (>= 64) or both teams full: no soldier
+				sv_rules_leave(size_t(at)); // M2b ru [add]
+				reset_slot(s); // M2b ru [add]
+				return -1; // M2b ru [add]
+			} // M2b ru [add]
+		} // M2b ru [add]
 		if (!spawn(size_t(at), SIZE_MAX, tick)) {
 			reset_slot(s);
 			return -1;
@@ -766,6 +782,17 @@ struct GameServer::Impl {
 	core::Status sv_revive(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, float p_health, sim::Tick p_tick); // M2b ru [sv]
 	void sv_unspawn(size_t p_slot); // M2b ru [sv]
 	void sv_orders(sim::Tick p_tick, std::span<const RulesOrder> p_orders); // M2b ru [sv]
+	// M2b ru [sv] (as built): the hooks the inline bodies above call (Sv is incomplete there).
+	bool sv_rules_on() const; // M2b ru [sv]
+	uint8_t sv_connect(size_t p_slot, bool p_bot, std::string_view p_name); // M2b ru [sv]: R2, [add]
+	void sv_rules_leave(size_t p_slot); // M2b ru [sv]
+	bool sv_waits_for_deploy(size_t p_slot) const; // M2b ru [sv]: R10
+	void sv_restrict(Slot &r_slot); // M2b ru [sv]: [cmd]
+	size_t sv_choose_spawn(size_t p_slot, const std::vector<sim::SpawnPoint> &p_points, sim::Tick p_tick); // M2b ru [sv]: R1
+	void sv_rules_match_info(net::MatchInfo &r_message) const; // M2b ru [sv]: [snap]
+	void sv_rules_join(size_t p_slot); // M2b ru [sv]: [snap]
+	void sv_send_rules(sim::Tick p_tick); // M2b ru [sv]: [snap]
+	void sv_spawn_request(int p_slot, std::span<const uint8_t> p_datagram); // M2b ru [sv]: [recv]
 };
 
 GameServer::GameServer() :
@@ -835,6 +862,7 @@ void GameServer::on_disconnect(uint32_t p_peer) {
 			m.sweep.requester = UINT32_MAX; // the sweep finishes without a receiver
 		}
 		m.sv_disconnect(size_t(at)); // M2a sv [ctrl]
+		m.sv_rules_leave(size_t(at)); // M2b ru [add]: the player leaves the rules (its row, AutoTeam)
 		m.reset_slot(m.slots[size_t(at)]);
 	}
 }
@@ -867,7 +895,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			if (r->source_digest != m.config.level->source_digest) {
 				std::fprintf(stderr, "GameServer: slot %d's source digest differs from the server's (M1: logged only)\n", at);
 			}
-			if (!s.spawned) {
+			if (!s.spawned && !m.sv_waits_for_deploy(size_t(at))) { // M2b ru R10: a deploy-screen slot spawns on its SpawnRequest
 				s.want_spawn = true;
 			}
 			return;
@@ -904,6 +932,9 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 		case net::MessageType::KitSelect: // M2a sv [ctrl]
 			m.sv_kit_select(at, p_datagram); // M2a sv [ctrl]
 			return; // M2a sv [ctrl]
+		case net::MessageType::SpawnRequest: // M2b ru [recv]
+			m.sv_spawn_request(at, p_datagram); // M2b ru [recv]
+			return; // M2b ru [recv]
 		default:
 			++m.bad_datagrams; // a server-to-client message from a client
 			return;
@@ -996,20 +1027,38 @@ struct GameServer::Impl::Sv {
 		Impl *m = nullptr;
 		void hit(const net::HitEvent &p_event) override { m->sv->combat.hits.push_back(p_event); }
 		void death(const net::DeathEvent &p_event) override {
-			m->sv->combat.deaths.push_back(p_event);
-			if (p_event.victim >= m->slots.size()) {
-				return;
-			}
-			Slot &s = m->slots[p_event.victim];
-			// A fall death already asked M1's timer in the motor loop; a damage death asks the policy here.
-			if (s.used && !s.dummy && !s.want_spawn) {
-				const std::optional<uint32_t> at = m->sv->respawn->respawn_tick(p_event.victim, m->tick + 1u);
-				if (at) {
-					s.want_spawn = true;
-					s.respawn_at = *at;
+			// M2b ru R8: the policy first, then the event stamped with what it decided (0 / 0 / 0 without rules, so M2a's
+			// events are unchanged), then the rules.
+			if (p_event.victim < m->slots.size()) { // M2b ru R8
+				Slot &s = m->slots[p_event.victim];
+				// A fall death already asked the policy in the motor loop (R3); a damage death asks it here.
+				if (s.used && !s.dummy && !s.want_spawn) {
+					const std::optional<uint32_t> at = m->sv_policy().respawn_tick(p_event.victim, m->tick + 1u); // M2b ru R8
+					if (at) {
+						s.want_spawn = true;
+						s.respawn_at = *at;
+					}
 				}
-			}
+			} // M2b ru R8
+			net::DeathEvent e = p_event; // M2b ru R8
+			TdmRules *tdm = m->sv->rules.get(); // M2b ru R8
+			if (tdm != nullptr) { // M2b ru R8
+				e.respawn_tick = tdm->earliest_respawn(p_event.victim); // M2b ru R8
+				e.revive_until = tdm->revive_until(p_event.victim); // M2b ru R8
+				const bool fall = p_event.killer == p_event.victim || p_event.killer >= m->sv->tick_states.size(); // M2b ru R8
+				e.killer_health = fall ? 0.0f : m->sv->tick_states[p_event.killer].health; // M2b ru R8
+			} // M2b ru R8
+			m->sv->combat.deaths.push_back(e); // M2b ru R8
+			if (tdm != nullptr) { // M2b ru R8
+				tdm->death(e); // M2b ru R8
+			} // M2b ru R8
 		}
+		void revive(const net::ReviveEvent &p_event) override { // M2b ru [orders]: sv_orders' revives, then the rules' score
+			m->sv->combat.revives.push_back(p_event); // M2b ru [orders]
+			if (m->sv->rules != nullptr) { // M2b ru [orders]
+				m->sv->rules->revive(p_event); // M2b ru [orders]
+			} // M2b ru [orders]
+		} // M2b ru [orders]
 		void detonation(const net::DetonationWire &p_event) override { m->sv->combat.detonations.push_back(p_event); }
 	};
 	struct View final : ServerView {
@@ -1042,6 +1091,23 @@ struct GameServer::Impl::Sv {
 		}
 		const sim::CollisionWorld &world() const override { return *m->world; }
 		sim::Tick tick() const override { return m->tick + 1u; }
+		// M2b ru [view] (#10): the rules' part; ServerView's defaults without rules.
+		std::span<const DownedSoldier> downed() const override { // M2b ru [view]
+			return m->sv->rules != nullptr ? m->sv->rules->downed() : ServerView::downed(); // M2b ru [view]
+		} // M2b ru [view]
+		net::MatchPhase phase() const override { // M2b ru [view]
+			return m->sv->rules != nullptr ? m->sv->rules->phase() : ServerView::phase(); // M2b ru [view]
+		} // M2b ru [view]
+		bool input_restricted() const override { // M2b ru [view]
+			return m->sv->rules != nullptr ? m->sv->rules->input_restricted() : ServerView::input_restricted(); // M2b ru [view]
+		} // M2b ru [view]
+		uint8_t kit(uint8_t p_slot) const override { // M2b ru [view]: the rules' kit, or the slot's KitSelect kit (kKeepKit)
+			if (m->sv->rules == nullptr) { // M2b ru [view]
+				return ServerView::kit(p_slot); // M2b ru [view]
+			} // M2b ru [view]
+			const uint8_t k = m->sv->rules->kit_of(p_slot); // M2b ru [view]
+			return k != kKeepKit ? k : (m->sv->gunplay != nullptr ? m->sv->gunplay->kit(p_slot) : uint8_t(0)); // M2b ru [view]
+		} // M2b ru [view]
 	};
 	struct Placement {
 		size_t slot = 0;
@@ -1075,6 +1141,9 @@ struct GameServer::Impl::Sv {
 	// M2b ru [sv] (W1.0, #20): the TDM rules (null without GameServerConfig::rules.mode == Tdm), made in [init]. The
 	// deleter is set where the rules are created (the pattern of Impl::sv), so this file links before TdmRules' bodies.
 	std::unique_ptr<TdmRules, void (*)(TdmRules *)> rules{ nullptr, nullptr }; // M2b ru [sv]
+	std::vector<RulesOrder> orders; // M2b ru [sv]: this tick's, from [rules] to [orders]
+	sim::Tick player_list_tick = 0; // M2b ru [sv]: the last PlayerList change sent ([snap])
+	bool player_list_sent = false; // M2b ru [sv]
 };
 
 core::Status GameServer::Impl::sv_init() {
@@ -1087,9 +1156,16 @@ core::Status GameServer::Impl::sv_init() {
 	v.respawn = std::move(fixed);
 	v.per_slot.resize(slots.size());
 	v.frame = shot_frame(*config.level->static_world);
+	const bool tdm = config.rules.mode == MatchRulesConfig::Mode::Tdm; // M2b ru [init]
+	if (tdm && (config.level->logic == nullptr || config.level->gunplay == nullptr)) { // M2b ru [init]
+		return core::make_error("GameServer: TDM rules need the level's logic graph and gunplay tables (SharedLoadOptions::tdm, ::gunplay)"); // M2b ru [init]
+	} // M2b ru [init]
 	if (config.level->gunplay == nullptr) {
 		return core::Status::success(); // M1's game
 	}
+	if (tdm) { // M2b ru [init] (#8): the defibrillator's def id
+		config.gunplay.defib_def = config.level->gunplay->kits.defib_def; // M2b ru [init]
+	} // M2b ru [init]
 	const GunplayConfig &g = config.gunplay;
 	if (!config.dev_commands && (g.exact_aim || g.infinite_magazine || g.target_bots > 0 || g.player_team != 0 || g.observer != nullptr)) {
 		return core::make_error("GameServer: exact_aim, infinite_magazine, target bots, a player team and the observer are dev options (dev_commands)");
@@ -1104,6 +1180,14 @@ core::Status GameServer::Impl::sv_init() {
 	v.gunplay = std::move(*created);
 	v.gunplay->set_world(*world);
 	v.gunplay->set_match_seed(g.match_seed != 0 ? g.match_seed : derive_match_seed(config.seed, config.level->gunplay->level_hash));
+	if (tdm) { // M2b ru [init]: the rules, before the target bots so every server-side soldier gets AutoTeam's team ([add])
+		core::Result<std::unique_ptr<TdmRules>> rules = TdmRules::create(*config.level, config.bots != nullptr ? config.bots->level : nullptr, config.rules, // M2b ru [init]
+				v.gunplay->match_seed(), uint32_t(slots.size())); // M2b ru [init]
+		if (!rules) { // M2b ru [init]
+			return core::error_at("GameServer", rules.error()); // M2b ru [init]
+		} // M2b ru [init]
+		v.rules = std::unique_ptr<TdmRules, void (*)(TdmRules *)>(rules->release(), [](TdmRules *p) { delete p; }); // M2b ru [init]
+	} // M2b ru [init]
 	for (uint32_t i = 0; i < g.target_bots; ++i) {
 		auto source = std::make_unique<TargetBotSource>(TargetBotConfig{});
 		TargetBotSource *raw = source.get();
@@ -1156,6 +1240,13 @@ void GameServer::Impl::sv_rules(sim::Tick p_tick) {
 		// The projectiles once for all against the present and rewound targets, then damage, deaths, detonations.
 		v.gunplay->step_projectiles(p_tick, v.tick_states);
 		v.gunplay->apply_rules(p_tick, v.tick_states, v.sink);
+		v.orders.clear(); // M2b ru [rules]
+		if (v.rules != nullptr) { // M2b ru [rules]: the logic, regen, man-down, the defib test, the round flow
+			const core::Status st = v.rules->step(p_tick, v.view, *v.gunplay, v.tick_states, v.orders); // M2b ru [rules]
+			if (!st.ok()) { // M2b ru [rules]
+				std::fprintf(stderr, "GameServer: tdm rules: %s\n", st.error().message.c_str()); // M2b ru [rules]
+			} // M2b ru [rules]
+		} // M2b ru [rules]
 		for (size_t i = 0; i < slots.size(); ++i) {
 			if (slots[i].used && slots[i].spawned && !slots[i].dummy) {
 				slots[i].state = v.tick_states[i];
@@ -1171,6 +1262,11 @@ void GameServer::Impl::sv_rules(sim::Tick p_tick) {
 			std::fprintf(stderr, "GameServer: place_soldier: %s\n", st.error().message.c_str());
 		}
 	}
+	if (v.rules != nullptr && !v.orders.empty()) { // M2b ru [orders]: spawns, revives, unspawns in vector order
+		const std::vector<RulesOrder> orders = std::move(v.orders); // M2b ru [orders]
+		v.orders.clear(); // M2b ru [orders]
+		sv_orders(p_tick, orders); // M2b ru [orders]
+	} // M2b ru [orders]
 }
 
 core::Status GameServer::Impl::sv_place(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose, sim::Tick p_tick) {
@@ -1217,7 +1313,13 @@ void GameServer::Impl::sv_on_spawn(size_t p_slot, sim::Tick p_tick) {
 		s.team = ps.next_team; // KitSelect's team (dev_commands), from this life on
 		ps.next_team = 0;
 	}
-	if (!s.remote) {
+	if (sv->rules != nullptr) { // M2b ru R7: the rules' team (AutoTeam, a balance move, the rotation) and kit
+		s.team = sv->rules->team_of(uint8_t(p_slot)); // M2b ru R7
+		if (const uint8_t k = sv->rules->kit_of(uint8_t(p_slot)); k != kKeepKit) { // M2b ru R7
+			ps.kit = k; // M2b ru R7
+		} // M2b ru R7
+		sv->rules->on_spawned(uint8_t(p_slot), p_tick); // M2b ru R7
+	} else if (!s.remote) { // M2b ru R7 (else: M2a)
 		ps.kit = uint8_t(p_slot % kKitCount); // server-side soldiers: kit = slot % 4 (§5.6)
 	}
 	if (sv->gunplay != nullptr && !s.dummy) {
@@ -1399,7 +1501,7 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 		}
 	}
 	// The combat events since the previous snapshot tick, reliable, to every client (§4.3, §7.4).
-	if (!v.combat.hits.empty() || !v.combat.deaths.empty() || !v.combat.detonations.empty()) {
+	if (!v.combat.hits.empty() || !v.combat.deaths.empty() || !v.combat.detonations.empty() || !v.combat.revives.empty()) { // M2b ru [snap]: revives
 		net::CombatEvents c = v.combat;
 		c.server_tick = p_snapshot.server_tick;
 		size_t clamped = 0;
@@ -1554,6 +1656,213 @@ const ServerView &GameServer::view() const {
 
 const Gunplay *GameServer::gunplay() const {
 	return impl_->sv != nullptr ? impl_->sv->gunplay.get() : nullptr;
+}
+
+// ---- M2b ru [sv] (docs/design/m2b.md §2.6 #20, §3.2-§3.6; docs/design/m2b-ru.md §5): the rules' side of the server.
+// The named insertions above call these. Server thread only. Without GameServerConfig::rules every one is a no-op
+// (or M2a's policy), so the M2a paths are unchanged.
+
+RespawnPolicy &GameServer::Impl::sv_policy() {
+	if (sv->rules != nullptr) {
+		return *sv->rules;
+	}
+	return *sv->respawn;
+}
+
+bool GameServer::Impl::sv_rules_on() const {
+	return sv != nullptr && sv->rules != nullptr;
+}
+
+uint8_t GameServer::Impl::sv_connect(size_t p_slot, bool p_bot, std::string_view p_name) {
+	if (!sv_rules_on() || p_slot >= slots.size()) {
+		return 1;
+	}
+	return sv->rules->on_connect(uint8_t(p_slot), p_bot, p_name);
+}
+
+void GameServer::Impl::sv_rules_leave(size_t p_slot) {
+	if (sv_rules_on() && p_slot < slots.size()) {
+		sv->rules->on_disconnect(uint8_t(p_slot));
+	}
+}
+
+bool GameServer::Impl::sv_waits_for_deploy(size_t p_slot) const {
+	if (!sv_rules_on() || p_slot >= slots.size()) {
+		return false;
+	}
+	// With the deploy screen the slot spawns on its first accepted SpawnRequest; a spectator (team 0) never spawns.
+	return config.rules.deploy_screen || sv->rules->team_of(uint8_t(p_slot)) == 0;
+}
+
+void GameServer::Impl::sv_restrict(Slot &r_slot) {
+	if (sv_rules_on() && !r_slot.dummy) {
+		r_slot.last = sv->rules->apply_input_restriction(r_slot.last);
+	}
+}
+
+size_t GameServer::Impl::sv_choose_spawn(size_t p_slot, const std::vector<sim::SpawnPoint> &p_points, sim::Tick p_tick) {
+	if (!sv_rules_on() || p_slot >= slots.size()) {
+		return SIZE_MAX;
+	}
+	return sv->rules->choose_spawn(uint8_t(p_slot), p_points, sv->view, p_tick);
+}
+
+void GameServer::Impl::sv_rules_match_info(net::MatchInfo &r_message) const {
+	if (!sv_rules_on()) {
+		return;
+	}
+	r_message.phase = sv->rules->phase();
+	r_message.logic_digest = config.level->logic_digest;
+	r_message.rules_flags = uint8_t(net::rules_flags::kTdm | (config.rules.deploy_screen ? net::rules_flags::kDeployScreen : 0u) |
+			(config.rules.revive ? net::rules_flags::kRevive : 0u));
+}
+
+void GameServer::Impl::sv_rules_join(size_t p_slot) {
+	if (!sv_rules_on() || p_slot >= slots.size() || !slots[p_slot].remote) {
+		return;
+	}
+	const uint32_t peer = slots[p_slot].peer;
+	std::vector<uint8_t> state = net::encode_match_state(sv->rules->match_state());
+	if (!state.empty()) { // empty: the W1.0 codec stub (nt), nothing to send
+		send(peer, net::kChannelReliable, std::move(state));
+	}
+	size_t clamped = 0;
+	std::vector<uint8_t> list = net::encode_player_list(sv->rules->player_list(tick, true), &clamped);
+	if (!list.empty()) {
+		send(peer, net::kChannelReliable, std::move(list));
+	}
+}
+
+void GameServer::Impl::sv_send_rules(sim::Tick p_tick) {
+	if (!sv_rules_on()) {
+		return;
+	}
+	Sv &v = *sv;
+	TdmRules &rules = *v.rules;
+	const bool state_changed = rules.match_state_changed();
+	const bool list_due = rules.players_changed() && (!v.player_list_sent || p_tick - v.player_list_tick >= net::kPlayerListIntervalTicks);
+	if (!state_changed && !list_due) {
+		return;
+	}
+	std::vector<uint8_t> state;
+	std::vector<uint8_t> list;
+	if (state_changed) {
+		state = net::encode_match_state(rules.match_state());
+	}
+	if (list_due) {
+		size_t clamped = 0;
+		list = net::encode_player_list(rules.player_list(p_tick, false), &clamped);
+		v.player_list_tick = p_tick;
+		v.player_list_sent = true;
+	}
+	for (const Slot &s : slots) {
+		if (!s.used || !s.remote || !s.hello) {
+			continue;
+		}
+		if (!state.empty()) {
+			send(s.peer, net::kChannelReliable, state);
+		}
+		if (!list.empty()) {
+			send(s.peer, net::kChannelReliable, list);
+		}
+	}
+	if (state_changed) {
+		rules.mark_state_sent();
+	}
+	if (list_due) {
+		rules.mark_players_sent();
+	}
+}
+
+void GameServer::Impl::sv_spawn_request(int p_slot, std::span<const uint8_t> p_datagram) {
+	core::Result<net::SpawnRequest> r = net::decode_spawn_request(p_datagram);
+	if (!r || p_slot < 0 || size_t(p_slot) >= slots.size() || !sv_rules_on()) {
+		++bad_datagrams; // undecodable, from no slot, or to a server without rules
+		return;
+	}
+	(void)sv->rules->request_spawn(uint8_t(p_slot), r->kit, r->spawn_choice, tick + 1u); // refusals are counted in RulesStats
+}
+
+core::Status GameServer::Impl::sv_revive(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, float p_health, sim::Tick p_tick) {
+	if (p_slot >= slots.size() || !slots[p_slot].used || slots[p_slot].dummy) {
+		return core::make_error("revive: no soldier slot " + std::to_string(p_slot));
+	}
+	Slot &s = slots[p_slot];
+	if (s.spawned && alive(s.state)) {
+		return core::make_error("revive: slot " + std::to_string(p_slot) + " is alive");
+	}
+	if (!std::isfinite(p_position[0]) || !std::isfinite(p_position[1]) || !std::isfinite(p_position[2]) || !std::isfinite(p_health) || p_health <= 0.0f) {
+		return core::make_error("revive: bad position or health");
+	}
+	// A new life at the corpse, stamped p_tick (the motor's precondition holds), no spawn immunity (§3.6).
+	s.state = motor.spawn_state(p_position, p_yaw, s.state.life + 1u, p_tick, false);
+	s.state.health = std::min(p_health, s.state.health);
+	s.state.events = uint16_t(s.state.events | sim::soldier_events::kSpawned);
+	s.spawned = true;
+	s.want_spawn = false;
+	s.respawn_at = 0; // the respawn loop must not respawn the revived soldier at its old tick
+	s.last = sim::hold_command(s.state);
+	s.own_events = uint16_t(s.own_events | s.state.events);
+	sv_on_spawn(p_slot, p_tick);
+	if (s.remote) {
+		net::Spawned m;
+		m.slot = uint8_t(p_slot);
+		m.spawn_index = 0; // not a spawn point
+		m.state = s.state;
+		m.revived = true;
+		sv_spawned(p_slot, m);
+		send(s.peer, net::kChannelReliable, net::encode_spawned(m));
+	}
+	return core::Status::success();
+}
+
+void GameServer::Impl::sv_unspawn(size_t p_slot) {
+	if (p_slot >= slots.size() || !slots[p_slot].used || slots[p_slot].dummy) {
+		return;
+	}
+	Slot &s = slots[p_slot];
+	s.spawned = false;
+	s.want_spawn = false;
+	s.respawn_at = 0;
+	if (sv != nullptr && sv->gunplay != nullptr) {
+		sv->gunplay->clear(uint8_t(p_slot));
+	}
+}
+
+void GameServer::Impl::sv_orders(sim::Tick p_tick, std::span<const RulesOrder> p_orders) {
+	for (const RulesOrder &o : p_orders) {
+		if (o.slot >= slots.size() || !slots[o.slot].used || slots[o.slot].dummy) {
+			continue;
+		}
+		Slot &s = slots[o.slot];
+		switch (o.kind) {
+			case RulesOrder::Kind::Spawn:
+				if (!s.spawned || !alive(s.state)) {
+					spawn(o.slot, SIZE_MAX, p_tick); // R1 picks the point, R7 the kit and team
+				}
+				break;
+			case RulesOrder::Kind::Revive: {
+				const core::Status st = sv_revive(o.slot, o.position, o.yaw, o.health, p_tick);
+				if (!st.ok()) {
+					std::fprintf(stderr, "GameServer: %s\n", st.error().message.c_str());
+					break;
+				}
+				net::ReviveEvent e;
+				e.reviver = o.reviver;
+				e.revived = o.slot;
+				e.tick = p_tick;
+				sv->sink.revive(e); // CombatEvents, then the rules' score
+				break;
+			}
+			case RulesOrder::Kind::Unspawn:
+				sv_unspawn(o.slot);
+				break;
+		}
+	}
+}
+
+const TdmRules *GameServer::rules() const {
+	return impl_->sv != nullptr ? impl_->sv->rules.get() : nullptr;
 }
 
 } // namespace bf3::host
