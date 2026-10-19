@@ -444,6 +444,9 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 			return;
 		}
 		g->vm_kits = std::move(*kits);
+		if (g->m2b) { // M2b gx [defib]: the TDM assault kits carry the defibrillator in slot 2 (cam's add_assault_gadget)
+			render::add_assault_gadget(g->vm_kits, host::kTdmAssaultGadget); // M2b gx [defib]
+		} // M2b gx [defib]
 		for (const int team : { 1, 2 }) {
 			if (stop_.load(std::memory_order_acquire)) {
 				fail("stopped");
