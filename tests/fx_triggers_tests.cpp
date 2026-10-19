@@ -1699,3 +1699,26 @@ TEST_CASE("install unchanged") {
 }
 
 } // TEST_SUITE fx-install-cells
+
+// ---- M2b cam [revive kind] (docs/design/m2b-cam.md): FxTriggers::sane accepts PresentKind::Revive (the integ-w1 open
+// item: wave 1 counted every Revive as rejected). A Revive starts no effect; a kind past Revive is still rejected.
+TEST_SUITE("fx-triggers-unit") {
+	TEST_CASE("M2b cam: a Revive event is accepted and starts nothing; a kind past Revive is rejected") {
+		std::unique_ptr<Syn> s = make_syn();
+		FxWorld world;
+		FxTriggers t(world, *s->library, s->fire, {});
+		std::vector<hk::PresentEvent> events;
+		hk::PresentEvent revive = ev(hk::PresentKind::Revive, 3, 0, 0, { 0, 0, 0 }, { 0, 0, 0 });
+		revive.aux = 4;
+		events.push_back(revive);
+		hk::PresentEvent past = revive;
+		past.kind = hk::PresentKind(uint8_t(hk::PresentKind::Revive) + 1);
+		events.push_back(past);
+		t.on_events(events, clock_at(0), kNear);
+		CHECK(t.stats().events == 2);
+		CHECK(t.stats().rejected == 1);
+		CHECK(t.starts().empty());
+		CHECK(t.decals().empty());
+		CHECK(t.sounds().empty());
+	}
+}
