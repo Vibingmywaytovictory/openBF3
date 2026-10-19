@@ -64,7 +64,7 @@ namespace {
 constexpr bool kNtLanded = false; // nt: the v3 codecs (R9), kProtocolVersion 3
 constexpr bool kRuLanded = false; // ru: [abort hash], the KitTable defib hash, the rules in GameServer::init ([init])
 constexpr bool kBbLanded = false; // bb: add_tdm_bots
-constexpr bool kAuLanded = false; // au: HdrWindow (E10's window numbers)
+constexpr bool kAuLanded = true; // au: HdrWindow (E10's window numbers)
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2b.contract: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);

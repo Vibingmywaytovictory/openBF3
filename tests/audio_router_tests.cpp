@@ -20,6 +20,7 @@
 #include "bf3/audio/kit_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/audio/voice_cull.h" // M2b au
 #include "bf3/audio/wav_io.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/audio/weapon_sound.h"
@@ -2024,6 +2025,41 @@ TEST_SUITE("audio-game") {
 			}
 		} tap;
 		GameRig rig(*f, &tap);
+		// M2b au (E11, docs/design/m2b.md §6, docs/design/m2b-au.md): the same render through the A3 mixer, built as
+		// Bf3GameAudio builds it: the install's HdrSetting and scopes over the level's programs, MixerConfig::max_voices
+		// = kGameMixerVoices (128) over kGameMixerInstances slots. The rig's mixer, pool, clock, router and impacts are
+		// rebuilt over it before the first frame.
+		{
+			std::vector<std::shared_ptr<const SoundProgram>> programs;
+			for (const ba::WeaponAudioDef &d : table.defs) {
+				programs.push_back(d.program);
+				programs.push_back(d.explosion);
+			}
+			const std::vector<std::shared_ptr<const SoundProgram>> more = f->assets.impacts->programs();
+			programs.insert(programs.end(), more.begin(), more.end());
+			const ba::MixerA3Assets a3 = ba::load_mixer_a3(f->metro->db(), programs);
+			REQUIRE_MESSAGE(a3.hdr.has_value(), a3.notes);
+			REQUIRE_MESSAGE(a3.scopes != nullptr, a3.notes);
+			MESSAGE("A3: " << a3.scopes->scopes.size() << " scopes, " << a3.scoped_patches << " of " << programs.size() << " programs scoped");
+			rig.router.reset(); // everything that refers to the old mixer goes before it
+			rig.impacts.reset();
+			rig.clock.reset();
+			rig.pool.reset();
+			ba::MixerConfig mc;
+			mc.max_instances = ba::kGameMixerInstances;
+			mc.command_capacity = 8192;
+			mc.schedule_lead_blocks = uint32_t(std::max(1.0f, f->tuning.schedule_lead_blocks));
+			mc.max_voices = ba::kGameMixerVoices;
+			ba::apply_mixer_a3(a3, mc);
+			rig.mixer = std::make_unique<ba::MixerCore>(mc);
+			rig.mixer->set_tap(&tap);
+			rig.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
+			ba::SimMixerClockConfig cc;
+			cc.bias_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames) + 2 * int64_t(ba::kBlockFrames) + 800;
+			rig.clock = std::make_unique<ba::SimMixerClock>(*rig.mixer, cc);
+			rig.router = std::make_unique<ba::WeaponAudioRouter>(*rig.mixer, f->assets.table, f->assets.bank, f->tuning, *rig.pool);
+			rig.impacts = std::make_unique<ba::ImpactAudio>(*rig.mixer, f->assets.impacts, f->assets.bank, f->tuning, *rig.pool);
+		}
 		rig.listener.position = { 0.0f, 1.6f, 0.0f };
 		std::mt19937_64 rng(0xA03u);
 		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
@@ -2156,7 +2192,8 @@ TEST_SUITE("audio-game") {
 		CHECK(ms.peak_instances.load() <= ba::kGameMixerInstances);
 		CHECK(ws.mixer_refusals == 0);
 		CHECK(ws.bursts > 100);
-		CHECK(ws.culled > 0); // more shooters than voices
+		// M2b au R6: the mixer culls now (pre-cull, scopes, the 128 cap), the router only past max_weapon_distance_m.
+		CHECK(ws.culled + ms.culled_precull.load() + ms.culled_scope.load() + ms.culled_cap.load() > 0); // M2b au R6 (A2: ws.culled > 0)
 		CHECK(ws.reloads > 0);
 		CHECK(is.impacts > 0);
 		CHECK(rig.pool->failed() == 0);
@@ -2165,6 +2202,31 @@ TEST_SUITE("audio-game") {
 		CHECK(rms_db > -60.0);
 		if (gate_late_blocks()) {
 			CHECK(ms.late_blocks.load() == 0); // the underrun gate: main only (timing label)
+		}
+		// M2b au (E11): the A3 checks. Live voices <= 128 in every block (deterministic, every run); the mix CPU share
+		// p99 <= 0.10 of the block (10 % of a core) is a wall-clock gate: main only (OPENBF3_AU3_GATE_LATE=1, the timing
+		// row audio.game.underruns), printed elsewhere as indicative only.
+		{
+			const ba::MixerProfile prof = ba::read_mixer_profile(ms);
+			uint64_t hist_blocks = 0;
+			for (const std::atomic<uint64_t> &h : ms.mix_ns_hist) {
+				hist_blocks += h.load();
+			}
+			char a3line[700];
+			std::snprintf(a3line, sizeof(a3line),
+					"E11 (A3): %s\n  blocks %llu (histogram %llu), mix p99 share < %.2f (gate <= 0.10: %s), live voices max %u (gate <= 128), culled pre %llu / scope "
+					"%llu / cap %llu, window now %.1f .. %.1f dB",
+					ba::format_mixer_profile(prof).c_str(), (unsigned long long)prof.blocks, (unsigned long long)hist_blocks, prof.share_p99,
+					gate_late_blocks() ? "gated" : "branch, indicative only", prof.live_voices_max, (unsigned long long)prof.culled_precull,
+					(unsigned long long)prof.culled_scope, (unsigned long long)prof.culled_cap, double(prof.window_bottom_db), double(prof.window_top_db));
+			MESSAGE(a3line);
+			CHECK(hist_blocks == prof.blocks);
+			CHECK(prof.live_voices_max <= ba::kGameMixerVoices);
+			CHECK(prof.live_voices_max > 0);
+			CHECK(prof.culled_precull > 0); // far shooters start below the window while the own M16A3 holds it up
+			if (gate_late_blocks()) {
+				CHECK(prof.share_p99 <= 0.10);
+			}
 		}
 		check_game_unchanged(*f);
 	}
