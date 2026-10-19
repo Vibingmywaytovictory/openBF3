@@ -488,6 +488,7 @@ void pt1_delete_capture(Pt1Capture *p_capture) {
 namespace {
 
 constexpr double kPt1HitchMs = 50.0;
+constexpr int kPt1AudioThreadPriority = 2; // THREAD_PRIORITY_HIGHEST
 constexpr size_t kPt1MaxEvents = size_t(1) << 20;
 
 void pt1_drain(ba::MixerCore &r_mixer, Pt1Capture &r_c) {
@@ -512,6 +513,12 @@ void pt1_drain(ba::MixerCore &r_mixer, Pt1Capture &r_c) {
 template <class Impl>
 void pt1_capture_begin(Impl &r_m) {
 	r_m.pt1.reset(new Pt1Capture());
+	// [prio]: Godot's audio thread runs at normal priority (0); --audio-thread-priority=<-2..2|15|keep>, default 2
+	// (THREAD_PRIORITY_HIGHEST) [inferred], measured = false. Set at the next _mix, on that thread.
+	const std::string prio = user_arg_value("audio-thread-priority");
+	if (prio != "keep") {
+		pt1_request_audio_thread_priority(prio.empty() ? kPt1AudioThreadPriority : std::atoi(prio.c_str()));
+	}
 	const std::string dir = user_arg_value("audio-capture");
 	if (dir.empty() || r_m.mixer == nullptr) {
 		return;
@@ -562,13 +569,15 @@ void pt1_capture_end(Impl &r_m) {
 	const ba::MixerStats &ms = r_m.mixer->stats();
 	char line[600];
 	const int prio = pt1_audio_thread_priority();
+	const int prio_set = pt1_audio_thread_priority_set();
 	std::snprintf(line, sizeof(line),
-			"; mixer: %llu blocks, %llu late, %llu late commands, %llu starved, %llu decode errors, %llu ring overflows, max block %.3f ms, max call gap %.1f ms, output latency %llu frames, audio thread priority %s%d; main "
+			"; mixer: %llu blocks, %llu late, %llu late commands, %llu starved, %llu decode errors, %llu ring overflows, max block %.3f ms, max call gap %.1f ms, output latency %llu frames, audio thread priority %s%d -> %s%d; main "
 			"thread hitches > %.0f ms: %llu (max %.0f ms)",
 			(unsigned long long)ms.blocks.load(), (unsigned long long)ms.late_blocks.load(), (unsigned long long)ms.late_commands.load(), (unsigned long long)ms.starved_voices.load(), (unsigned long long)ms.decode_errors.load(),
 			(unsigned long long)ms.ring_overflows.load(), double(ms.max_block_ns.load()) / 1e6,
 			double(ms.max_call_gap_ns.load()) / 1e6, (unsigned long long)(r_m.clock ? r_m.clock->output_latency_frames() : 0),
-			prio == kPt1NoPriority ? "unknown " : "", prio == kPt1NoPriority ? 0 : prio, kPt1HitchMs, (unsigned long long)c->hitch_count, c->hitch_max_ms);
+			prio == kPt1NoPriority ? "unknown " : "", prio == kPt1NoPriority ? 0 : prio, prio_set == kPt1NoPriority ? "unchanged " : "",
+			prio_set == kPt1NoPriority ? 0 : prio_set, kPt1HitchMs, (unsigned long long)c->hitch_count, c->hitch_max_ms);
 	UtilityFunctions::print(String::utf8(("[pt1] audio health: " + ba::format_mixer_cuts(r_m.mixer->pt1_cut_stats()) + line).c_str()));
 	if (c->dir.empty()) {
 		return;
