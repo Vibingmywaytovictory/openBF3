@@ -39,6 +39,10 @@ using namespace bf3::tools::antdump;
 
 namespace {
 
+// PT1 run [controller]: a clip by "controller:<ClipControllerAsset name>" (clip names are not unique, s3.md §4.1), else
+// by __name (defined in the PT1 run block at the end of this file).
+GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name);
+
 int usage() {
 	std::fprintf(stderr,
 			"usage (<input> = <export_dir> | --install | --install=<dir>):\n"
@@ -237,7 +241,7 @@ int cmd_clip(const Args &p_args) {
 	if (!p) {
 		return 1;
 	}
-	const GdStruct clip = AntLibrary::find_clip(*p, p_args.pos[1]);
+	const GdStruct clip = pt1_find_clip(s.library, *p, p_args.pos[1]); // PT1 run [controller]
 	if (!clip.valid()) {
 		std::fprintf(stderr, "antdump: no clip named \"%s\" in %s\n", p_args.pos[1].c_str(), p_args.pos[0].c_str());
 		return 1;
@@ -422,7 +426,7 @@ int cmd_sample(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? AntLibrary::find_clip(*p, p_args.pos[1]) : GdStruct();
+	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct(); // PT1 run [controller]
 	DecodedClip d;
 	ClipBinding b;
 	if (!clip.valid() || !decode_clip(clip, d).ok() || !s.library.bind(*p, clip, b).ok()) {
@@ -510,7 +514,7 @@ int cmd_rigmap(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? AntLibrary::find_clip(*p, p_args.pos[1]) : GdStruct();
+	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct(); // PT1 run [controller]
 	DecodedClip d;
 	ClipBinding b;
 	ClipHeader h;
@@ -841,6 +845,31 @@ int cmd_objects(const Args &p_args) {
 	}
 	std::fprintf(stderr, "antdump: %ld objects shown\n", shown);
 	return 0;
+}
+
+// PT1 run [controller]: see the declaration at the top of this file. A controller name that binds 0 clips falls back to
+// nothing (invalid); 2+ clips: the first, with a warning on stderr.
+GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name) {
+	static constexpr std::string_view kPrefix = "controller:";
+	if (p_name.rfind(kPrefix, 0) != 0) {
+		return AntLibrary::find_clip(p_package, p_name);
+	}
+	const std::string_view want = std::string_view(p_name).substr(kPrefix.size());
+	GdStruct found;
+	uint32_t matches = 0;
+	for (uint32_t index : AntLibrary::clips(p_package)) {
+		const GdStruct clip = p_package.object(index);
+		ClipBinding b;
+		if (p_library.bind(p_package, clip, b).ok() && b.controller_name == want) {
+			if (matches++ == 0) {
+				found = clip;
+			}
+		}
+	}
+	if (matches > 1) {
+		std::fprintf(stderr, "antdump: controller %.*s binds %u clips; the first is used\n", int(want.size()), want.data(), matches);
+	}
+	return found;
 }
 
 } // namespace
