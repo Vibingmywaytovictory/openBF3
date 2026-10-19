@@ -487,6 +487,10 @@ struct CrowdEvaluator::Impl::M2a {
 		uint8_t death_stance = 0;
 		bool hidden = false; // hidden after the death timer
 		bool hide_counted = false;
+		bool rising = false; // M2b cam [revive]: standing up from the corpse pose (kCrowdReviveBlendSeconds)
+		double rise_since = 0.0; // M2b cam [revive]
+		LocalPose corpse; // M2b cam [revive]: the corpse pose the stand-up starts from
+		uint64_t revives = 0; // M2b cam [revive]
 		LocalPose extra, extra2, alive; // lane scratch
 		// The job's flags (read by m2a_stats after publish).
 		uint8_t stance = 0;
@@ -501,6 +505,7 @@ struct CrowdEvaluator::Impl::M2a {
 	std::array<const CrowdClipData *, core::gameplay::kCapsuleTransitions> transitions{};
 	const CrowdClipData *crouch_fire = nullptr;
 	CrowdDeathStyle death = kCrowdDeathDefault;
+	float corpse_seconds = kCrowdDeathHideSeconds; // M2b cam [corpse]: CrowdStanceSet::corpse_seconds
 	LocalPose identity; // the additive base of the crouch fire
 	std::vector<Soldier> soldiers;
 };
@@ -662,6 +667,10 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 	std::unique_ptr<Impl::M2a, Impl::M2aDeleter> x(new Impl::M2a());
 	x->teams = std::move(m2a_teams);
 	x->death = p_stance.death;
+	if (!std::isfinite(p_stance.corpse_seconds) || p_stance.corpse_seconds < 0.0f || p_stance.corpse_seconds > kCrowdMaxCorpseSeconds) { // M2b cam [corpse]
+		return core::make_error("crowd: corpse_seconds " + std::to_string(p_stance.corpse_seconds) + " outside [0, 3600]"); // M2b cam [corpse]
+	} // M2b cam [corpse]
+	x->corpse_seconds = p_stance.corpse_seconds; // M2b cam [corpse]
 	x->identity = identity_pose(rig);
 	core::ant::ClipPose scratch;
 	{
@@ -795,8 +804,16 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 		xs.death_stance = uint8_t(std::min<uint32_t>(s.input.target_pose, 2));
 		xs.hide_counted = false;
 		++xs.deaths;
+		xs.rising = false; // M2b cam [revive]
 	} else if (!s.input.dead && xs.dead) {
 		xs.dead = false; // a respawn: alive again
+		// M2b cam [revive]: a revive stands the corpse up from its last pose, at the same place (m2b.md §4).
+		xs.rising = s.input.revived && s.pose.joints.size() == clips->rig.size(); // M2b cam [revive]
+		if (xs.rising) { // M2b cam [revive]
+			xs.rise_since = s.clock; // M2b cam [revive]
+			xs.corpse = s.pose; // M2b cam [revive]
+			++xs.revives; // M2b cam [revive]
+		} // M2b cam [revive]
 	}
 	if (s.input.fire_seq != xs.fire_seq) {
 		if (xs.fire_seen) {
@@ -806,7 +823,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	}
 	xs.fire_seen = true;
 	const double dead_age = xs.dead ? s.clock - xs.dead_since : 0.0;
-	xs.hidden = xs.dead && dead_age >= double(kCrowdDeathHideSeconds);
+	xs.hidden = xs.dead && dead_age >= double(x.corpse_seconds); // M2b cam [corpse]
 	if (xs.hidden && !xs.hide_counted) {
 		xs.hide_counted = true;
 		++xs.hidden_count;
@@ -817,7 +834,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 		return;
 	}
 	// Temporal LOD: as S3 (a dying soldier is always due, so the fall stays smooth).
-	if (config.temporal_lod && s.ever && !xs.dead) {
+	if (config.temporal_lod && s.ever && !xs.dead && !xs.rising) { // M2b cam [revive]: a stand-up is always due
 		const float interval = temporal_lod_interval(config.lod, s.input.camera_distance);
 		bool due = true;
 		if (interval < 0.0f) {
@@ -969,7 +986,11 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			const float w = std::min(1.0f, float(dead_age) / kCrowdDeathBlendSeconds);
 			blend_poses(xs.alive, *x.stances[2].idle, w, s.pose);
 		}
+	} else if (xs.rising && s.clock - xs.rise_since < double(kCrowdReviveBlendSeconds)) { // M2b cam [revive]
+		stance_pose(xs.alive); // M2b cam [revive]
+		blend_poses(xs.corpse, xs.alive, float((s.clock - xs.rise_since) / double(kCrowdReviveBlendSeconds)), s.pose); // M2b cam [revive]
 	} else {
+		xs.rising = false; // M2b cam [revive]
 		stance_pose(s.pose);
 	}
 	// 2. The sim owns the root: its translation back to rest.
@@ -1132,6 +1153,7 @@ CrowdM2aStats CrowdEvaluator::m2a_stats() const {
 		r.reloads_cancelled += xs.cancelled;
 		r.deaths += xs.deaths;
 		r.death_hidden += xs.hidden_count;
+		r.revives += xs.revives; // M2b cam [revive]
 		if (!s.changed) {
 			continue;
 		}
