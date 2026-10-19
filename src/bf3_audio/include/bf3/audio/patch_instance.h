@@ -150,6 +150,27 @@ struct PatchInstanceStats {
 	uint64_t unknown_inputs = 0; // set_parameter / post_event with a hash the program does not have
 };
 
+// M2b au [a3] (docs/design/m2b.md §6.1, R5; docs/design/m2b-au.md): the HDR window one mixer block applies to the
+// instance's EnableHdr outputs (MixerCore sets it before process_block when MixerConfig::hdr is set). Inactive: the
+// fixed window of AudioTuning (window_top_db, window_headroom_db) for every output, as in M2a.
+struct HdrVoiceWindow { // M2b au [a3]
+	bool active = false;
+	bool suspended = false; // below the window's bottom: the HDR sends ramp to silence, the instance keeps advancing
+	float top_db = 0.0f;
+	float headroom_db = 0.0f;
+	float overshoot_db = 0.0f; // AllowedOvershoot: an output louder than top + this sounds at top + this
+};
+// M2b au [a3]: what the voice cull reads of an instance (voice_cull.h): the loudness at the listener = the patch's
+// Loudness + the loudest output's distance curve at the current geometry + Gain + its last cone attenuation, over the
+// EnableHdr outputs (hdr true) or, without one, over every output (hdr false).
+struct VoiceCullInfo { // M2b au [a3]
+	float loudness_db = 0.0f;
+	bool hdr = false;
+	float distance_m = 0.0f;
+	Vec3 position;
+	uint32_t voices = 0; // busy sampler slots (playing, or armed to start)
+};
+
 class PatchInstance {
 public:
 	// Binds the program's waves to p_bank (a wave the bank lacks plays silence and counts starved_slots) and the
@@ -197,6 +218,8 @@ public:
 	void set_sampler_trace(SamplerTrace *r_trace);
 	const core::audio::SoundProgram &program() const;
 	const PatchInstanceStats &stats() const;
+	void set_hdr_window(const HdrVoiceWindow &p_window); // M2b au [a3]: audio thread, before process_block
+	VoiceCullInfo cull_info() const; // M2b au [a3]: audio thread
 
 	PatchInstance(const PatchInstance &) = delete;
 	PatchInstance &operator=(const PatchInstance &) = delete;

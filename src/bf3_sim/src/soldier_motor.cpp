@@ -262,6 +262,12 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, MotorSt
 	if (s.protect_ticks > 0) {
 		--s.protect_ticks;
 	}
+	// M2b ru [abort] (docs/design/m2b.md §3.3, §2.6 #19): an abort input ends the spawn immunity on this tick, the
+	// same on the server and in the client's prediction (MotorParams::protect_abort_*; 0 / false = M2a).
+	const bool abort_moved = p.protect_abort_move && (p_command.move_forward != 0 || p_command.move_right != 0); // M2b ru [abort]
+	if (s.protect_ticks > 0 && ((p_command.buttons & p.protect_abort_buttons) != 0 || abort_moved)) { // M2b ru [abort]
+		s.protect_ticks = 0; // M2b ru [abort]
+	} // M2b ru [abort]
 	if (s.jump_penalty_ticks > 0) {
 		--s.jump_penalty_ticks;
 	}

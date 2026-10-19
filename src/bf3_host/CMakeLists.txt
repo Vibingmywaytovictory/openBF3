@@ -106,3 +106,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/tdm_brain.h
     src/tdm_brain.cpp
 )
+
+# M2b ru (docs/design/m2b.md §3.2-§3.6; docs/design/m2b-ru.md): the TDM rules on the server thread.
+target_sources(bf3_host PRIVATE
+    src/tdm_rules.cpp
+)

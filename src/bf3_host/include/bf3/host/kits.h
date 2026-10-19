@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view> // M2b ru
 #include <vector>
 
 namespace bf3::host {
@@ -60,6 +61,8 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 struct KitTableOptions {
 	std::string assault_gadget;
 };
+// M2b ru (as built): the TDM kits' assault gadget [verified: bf3dump weapon defibrillator] (the variant, lowercase).
+inline constexpr std::string_view kTdmAssaultGadget = "weapons/gadgets/defibrillator/u_defib";
 core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs, const KitTableOptions &p_options);
 // FNV-1a 64 over every loadout (team, kit, def ids, active) in order: the client refuses another server's kits.

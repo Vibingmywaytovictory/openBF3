@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits> // M2b au [a3]
 
 namespace bf3::audio {
 
@@ -299,6 +300,7 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 	if (!finite(p_emitter.position) || !finite(p_listener.position) || !finite(p_emitter.velocity) || !finite(p_listener.velocity)) {
 		return;
 	}
+	st.emitter_position = p_emitter.position; // M2b au [a3]
 	Geometry &g = st.geometry;
 	const Vec3 d = sub(p_emitter.position, p_listener.position);
 	g.distance = length(d);
@@ -367,6 +369,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 		std::fill_n(st.tap_buffers[t].data(), p_frames, 0.0f);
 	}
 	const float window_db = p.loudness_db - st.tuning.window_top_db - st.tuning.window_headroom_db + st.tuning.master_gain_db;
+	// M2b au R5 (docs/design/m2b.md §6.1): an EnableHdr output takes the HDR window's gain when the mixer runs one.
+	const float hdr_window_db = p.loudness_db - st.hdr.top_db - st.hdr.headroom_db + st.tuning.master_gain_db; // M2b au R5
 	const float pan_scale = db_to_gain(st.tuning.pan_law_db) / 0.70710678f;
 	for (uint16_t v : p.voice_order) {
 		const ca::SoundVoice &voice = p.voices[v];
@@ -385,9 +389,20 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 			}
 			tapped = true;
 		};
+		bool quiet = false, quiet_known = false; // M2b au [quiet]
 		for (uint16_t k = 0; k < voice.plugins_count; ++k) {
 			const uint32_t g = voice.plugins_begin + k;
 			PluginState &ps = st.plugins[g];
+			if (ps.role == PluginRole::Slot) { // M2b au [quiet]: a slot renders, the plugins after it are checked again
+				quiet = quiet_known = false; // M2b au [quiet]
+			} else if (!quiet_known) { // M2b au [quiet]
+				quiet = !tapping && st.voice_quiet(voice, k, ch[0], ch[1], p_frames); // M2b au [quiet]
+				quiet_known = true; // M2b au [quiet]
+			} // M2b au [quiet]
+			if (quiet) { // M2b au [quiet]
+				st.quiet_plugin(ps, rate, window_db, hdr_window_db); // M2b au [quiet]
+				continue; // M2b au [quiet]
+			} // M2b au [quiet]
 			switch (ps.role) {
 				case PluginRole::Slot:
 					st.render_slot(st.samplers[ps.output], ps.index - st.samplers[ps.output].slots_begin, ch[0], ch[1], p_frame, p_frames);
@@ -470,7 +485,12 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					float target = 1.0f;
 					if (ps.output != UINT32_MAX) {
 						const OutputState &o = st.outputs[ps.output];
-						target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
+						if (st.hdr.active && p.outputs[ps.output].enable_hdr) { // M2b au R5
+							const float over = std::max(0.0f, p.loudness_db + o.curve_gain_db + o.cone_db - (st.hdr.top_db + st.hdr.overshoot_db)); // M2b au R5
+							target = st.hdr.suspended ? 0.0f : db_to_gain(o.curve_gain_db + o.cone_db + hdr_window_db - over); // M2b au R5
+						} else { // M2b au R5
+							target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
+						} // M2b au R5
 					}
 					if (c.to_bus && c.bus == ca::MasterBus::Lfe) {
 						target *= db_to_gain(st.tuning.lfe_fold_db);
@@ -698,6 +718,152 @@ const ca::SoundProgram &PatchInstance::program() const {
 
 const PatchInstanceStats &PatchInstance::stats() const {
 	return state_->stats;
+}
+
+// M2b au [a3] (docs/design/m2b.md §6, docs/design/m2b-au.md): the HDR window and the cull's view of the instance.
+
+void PatchInstance::set_hdr_window(const HdrVoiceWindow &p_window) {
+	state_->hdr = p_window;
+}
+
+VoiceCullInfo PatchInstance::cull_info() const {
+	const State &st = *state_;
+	const ca::SoundProgram &p = *st.program;
+	VoiceCullInfo info;
+	info.distance_m = st.geometry.distance;
+	info.position = st.emitter_position;
+	bool any_hdr = false;
+	for (const ca::SoundOutput &out : p.outputs) {
+		any_hdr = any_hdr || out.enable_hdr;
+	}
+	// The curve at the current distance (as State::evaluate_program computes it), so a voice that has not been
+	// evaluated yet (its first block) is measured where it is.
+	const float metres = st.geometry.distance;
+	float loudest = -std::numeric_limits<float>::infinity();
+	for (size_t o = 0; o < p.outputs.size(); ++o) {
+		const ca::SoundOutput &out = p.outputs[o];
+		if (any_hdr && !out.enable_hdr) {
+			continue;
+		}
+		float d = metres;
+		if (metres < out.min_distance) {
+			d = metres + (out.min_distance - metres) * st.tuning.min_distance_clamp;
+		}
+		const float cone = o < st.outputs.size() ? st.outputs[o].cone_db : 0.0f;
+		const float at = out.attenuation.evaluate(d * st.tuning.curve_x_metres) + out.gain_db + cone;
+		if (std::isfinite(at)) {
+			loudest = std::max(loudest, at);
+		}
+	}
+	for (const SlotState &sl : st.slots) {
+		info.voices += (sl.play.active || sl.pending.armed) ? 1 : 0;
+	}
+	info.hdr = any_hdr;
+	info.loudness_db = p.loudness_db + (std::isfinite(loudest) ? loudest : 0.0f);
+	return info;
+}
+
+// M2b au [quiet] (docs/design/m2b-au.md "Quiet voices"): render() walks every voice of the patch every sub-block, and a
+// weapon patch has 25-32 voices of which a few play (the 64-shooter load: 3,420 voice chains for 396 busy slots). A
+// voice is quiet from plugin p_from on when its buffer holds only zeros there, no later plugin of it is a delay line,
+// and every later filter's state is zero: then each later plugin's output is zero whatever it does (a gain, filter
+// or pan of zeros with a zero state, a send adding zeros), so render() skips the per-sample work and quiet_plugin
+// moves the plugin's state exactly as the full path would (gain ramps to their targets, filter coefficients to their
+// designed values). The mix is unchanged; only the sign of a zero sample inside a voice buffer may differ.
+
+bool PatchInstance::State::voice_quiet(const ca::SoundVoice &p_voice, uint16_t p_from, const float *p_left, const float *p_right, uint32_t p_frames) const {
+	for (uint16_t k = p_from; k < p_voice.plugins_count; ++k) {
+		const PluginState &ps = plugins[p_voice.plugins_begin + k];
+		switch (ps.role) {
+			case PluginRole::Delay:
+				if (ps.delay_frames >= 2) {
+					return false;
+				}
+				break;
+			case PluginRole::HighPass:
+			case PluginRole::LowPass:
+			case PluginRole::BandPass:
+			case PluginRole::Peaking:
+				if (ps.biquad[0].z1 != 0.0f || ps.biquad[0].z2 != 0.0f || ps.biquad[1].z1 != 0.0f || ps.biquad[1].z2 != 0.0f) {
+					return false;
+				}
+				break;
+			case PluginRole::Slot:
+				return true; // the slot itself renders (render() re-checks after it)
+			default:
+				break;
+		}
+	}
+	for (uint32_t i = 0; i < p_frames; ++i) {
+		if (p_left[i] != 0.0f || p_right[i] != 0.0f) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p_window_db, float p_hdr_window_db) {
+	const ca::SoundProgram &p = *program;
+	// Biquad::process on zeros from a zero state: the state stays zero and the coefficients become the target, except
+	// when both are the identity (the bit-exact pass-through leaves them).
+	const auto biquads = [&](const BiquadCoefficients &p_target) {
+		for (Biquad &b : r_ps.biquad) {
+			const bool id_now = b.c.b0 == 1.0f && b.c.b1 == 0.0f && b.c.b2 == 0.0f && b.c.a1 == 0.0f && b.c.a2 == 0.0f;
+			const bool id_target = p_target.b0 == 1.0f && p_target.b1 == 0.0f && p_target.b2 == 0.0f && p_target.a1 == 0.0f && p_target.a2 == 0.0f;
+			if (!(id_now && id_target)) {
+				b.c = p_target;
+			}
+			b.z1 = b.z2 = 0.0f;
+		}
+	};
+	switch (r_ps.role) {
+		case PluginRole::SlotGain:
+		case PluginRole::Gain: {
+			float target = r_ps.role == PluginRole::SlotGain ? samplers[r_ps.output].amplitude : r_ps.attribute(0);
+			target = std::isfinite(target) ? std::clamp(target, 0.0f, 16.0f) : 0.0f;
+			r_ps.gain_prev = target;
+			r_ps.gain_started = true;
+			break;
+		}
+		case PluginRole::HighPass:
+		case PluginRole::LowPass:
+			biquads(BiquadCoefficients::design(r_ps.role == PluginRole::HighPass ? BiquadShape::HighPass : BiquadShape::LowPass, p_rate, r_ps.attribute(0),
+					tuning.iir2_q, 0.0f));
+			break;
+		case PluginRole::BandPass: {
+			const float f = r_ps.attribute(0), bw = r_ps.attribute(1);
+			const float q = bw > 0.0f ? f / bw : 0.70710678f;
+			biquads(BiquadCoefficients::design(BiquadShape::BandPass, p_rate, f, q, 0.0f));
+			break;
+		}
+		case PluginRole::Peaking:
+			biquads(BiquadCoefficients::design(BiquadShape::Peaking, p_rate, r_ps.attribute(0), r_ps.attribute(2), gain_to_db(std::max(0.0f, r_ps.attribute(1)))));
+			break;
+		case PluginRole::Send: {
+			if (r_ps.reverb_send) {
+				break;
+			}
+			const ca::SoundConnection &c = p.connections[r_ps.index];
+			float target = 1.0f;
+			if (r_ps.output != UINT32_MAX) {
+				const OutputState &o = outputs[r_ps.output];
+				if (hdr.active && p.outputs[r_ps.output].enable_hdr) {
+					const float over = std::max(0.0f, p.loudness_db + o.curve_gain_db + o.cone_db - (hdr.top_db + hdr.overshoot_db));
+					target = hdr.suspended ? 0.0f : db_to_gain(o.curve_gain_db + o.cone_db + p_hdr_window_db - over);
+				} else {
+					target = db_to_gain(o.curve_gain_db + o.cone_db + p_window_db);
+				}
+			}
+			if (c.to_bus && c.bus == ca::MasterBus::Lfe) {
+				target *= db_to_gain(tuning.lfe_fold_db);
+			}
+			r_ps.gain_prev = target;
+			r_ps.gain_started = true;
+			break;
+		}
+		default:
+			break; // Slot never reaches here; Delay (a zero-length line), Damping, Pan and Pass keep no state
+	}
 }
 
 } // namespace bf3::audio

@@ -55,3 +55,9 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/hdr_window.h
     include/bf3/audio/voice_cull.h
 )
+
+# M2b au (docs/design/m2b.md §2.6 #15, §6; docs/design/m2b-au.md): the HDR window and the voice cull.
+target_sources(bf3_audio PRIVATE
+    src/hdr_window.cpp
+    src/voice_cull.cpp
+)

@@ -2790,6 +2790,124 @@ Measured 2026-10-19, head of `m2b/w1`:
 * **`m2b.contract`:** 5 cases and 97 assertions, 0.02 s.
 * **`ctest --preset dev-window -N`:** 13 rows, with the three retired rows excluded.
 
+## M2b nt: protocol v3 and the client session
+
+<!-- # M2b nt -->
+Track nt of M2b wave 1, on branch `m2b/nt` from the W1.0 contract head 01a26e8. Design:
+[docs/design/m2b.md](docs/design/m2b.md) §3.7 and §2.6 #11, #12. As-built notes, the measured results and one command
+per gate: [docs/design/m2b-nt.md](docs/design/m2b-nt.md).
+
+* **Protocol v3.** `kProtocolVersion` is 3. The six W1.0 stubs are real codecs: `MatchState` (40 bytes),
+  `PlayerList` (up to 64 rows, names of at most 16 bytes of valid UTF-8) and `SpawnRequest` (3 bytes). The v3 fields
+  are on the wire too: `MatchInfo::logic_digest` and `rules_flags`, `Spawned::revived`, and in `CombatEvents` the death
+  stamp (respawn tick, revive end, killer health) and the revives. The decoders bound every count, check every enum
+  and refuse trailing bytes. The encoders write one canonical form and count every change they make.
+* **The client session.**
+  - MatchState and PlayerList go into the `PresentationFrame` (`match`, `players`).
+  - The own death's respawn tick and revive end go into `own_respawn_tick` and `own_revive_until`.
+  - A revive becomes a `PresentKind::Revive` event. A revived life's Spawn event carries `present_flags::kRevived`.
+  - Every predicted command gets the pre-round restriction (`net::restrict_command`), as the server's commands do.
+  - Prediction stops at `MatchState::unspawn_tick` (`own_unspawned`).
+  - A TDM server refuses a client whose load has no logic graph or a different logic digest.
+  - `send_spawn_request(kit)` sends the Deploy.
+* **The M2a gate's double starts (shot ids reused after a respawn).** The client emitted shots that it predicted
+  after the server's death tick. The next life started at the server's shot index, so its real shots reused those ids,
+  and the effect triggers dropped them as repeats. `OwnShotIds` now gives the own shots presented ids that never
+  repeat. The server's later events about an own shot map to the same ids.
+* **Tests.**
+  - `ctest --test-dir b\dev -R "^net\.proto\.unit$"`: the v3 round trips and hostile bytes.
+  - `ctest --test-dir b\dev -R "^net\.proto\.fuzz$"`: 18 message types, 0 unstable, every structured malformed case
+    refused (E7's wire half).
+  - `ctest --test-dir b\dev -R "^host\.client\.m2b\.unit$"`: reproduces the shot-id reuse on the client's weapon-lane
+    path, then shows 0 repeats with the fix.
+  - `ctest --test-dir b\dev -R "^m2b\.contract$"`: no nt PENDING left.
+
+## M2b au: audio A3
+
+<!-- # M2b au -->
+Track `au` of M2b wave 1, on branch `m2b/au` from the W1.0 contract (01a26e8). Design:
+[docs/design/m2b.md](docs/design/m2b.md) §6, gates E10 and E11, R5 and R6. As built, with the measured results and
+one command per gate: [docs/design/m2b-au.md](docs/design/m2b-au.md).
+
+* **Data** (Godot-free, read-only):
+  - `read_hdr_setting` reads the one HdrSetting in `sound/soundstates`: window 45 dB, min top 80, min bottom 35,
+    attack 0.05 s, release 0.035 to 0.85 s on a 5-point curve, headroom 5, overshoot 3.
+  - `read_scopes` reads the 33 scopes of `sound/audiosystem`, and `map_patch_scopes` gives each compiled patch its
+    `Scope`.
+* **HDR window** (`hdr_window.h`): the mixer steps the window every block on the loudest HDR voice. An EnableHdr
+  output then sounds at Loudness - top - Headroom (R5). A voice below the bottom is suspended: silent, still playing.
+* **Culling** (`voice_cull.h`), in this order:
+  1. pre-cull a starting HDR voice below bottom - 3 dB;
+  2. the scopes: duplicates, then the closest N, then the newest or oldest N;
+  3. the cap of 128 sampler voices (busy slots, not instances).
+
+  A dropped one-shot comes back finished, and a culled loop waits as pending. The router's own limits became that
+  one cap (R6).
+* **Profiler:**
+  - The mixer times every block into a 16-bucket histogram of its share of the block's 10.67 ms.
+  - `format_mixer_profile` prints one line: the mix share, the voices, the culls, the suspended voices and the
+    window.
+  - `Bf3GameAudio` reads the A3 data at load, and `game_audio_profile_text()` is the readout for an overlay.
+* **Render cost:** a silent voice chain skips its per-sample work and the mix stays exactly the same (`[quiet]`).
+* **Tests:**
+  - `ctest --test-dir b\dev -R "^audio\.hdr\."` runs E10. `audio.hdr.unit` is data-free; `audio.hdr.install` reads
+    the retail setting and scopes, and exits 77 without an install.
+  - `audio.game.crowd` runs E11's functional checks on 64 shooters: live voices at most 128, the cull counts and the
+    histogram.
+  - The p99 share gate (≤ 0.10) and the late-block gate run only in the merge pass, in `audio.game.underruns`.
+
+Measured 2026-10-19 on `m2b/au` (wall-clock values indicative only):
+
+* **E10:** met. Top 80 / 35 for the footstep. Top 110 in 5 blocks (53.3 ms) for the shot, bottom 65, the 63 dB source
+  suspended.
+* **E11 voices:** at most 128. Culled: 717 pre-cull, 207 scope, 397 cap.
+* **64-shooter mix:** 8.5 s of wall time for 66 s of audio, against M2a's 10.2 s, with 0 late blocks.
+* **E11 share:** p99 below 0.20, so the 0.10 gate is probably not met; docs/design/m2b-au.md §10 has the follow-up.
+
+## M2b ru: TDM rules and the server flow
+
+<!-- # M2b ru -->
+Design: [docs/design/m2b.md](docs/design/m2b.md) §3.1-§3.6, §2.6 #1-#10 and #19-#22, the R table of §11; as built,
+the measured gates and the open issues: [docs/design/m2b-ru.md](docs/design/m2b-ru.md).
+
+* **Load.** `SharedLoadOptions::tdm` builds Metro TDM's logic graph as bf3dump does (digest `6f6a0693b3924bde`),
+  reads the round natives' EBX fields (kill limit 100, 4 players to start, PlayerKilledDelay 5 s, AutoTeam, the
+  pre-round input restriction), the data's scoring rows, `bf3-opensource/config/tdm_tuning.cfg` (every number the
+  data does not decide, `measured = false`), the TDM kits (the defibrillator in the assault gadget slot) and the spawn
+  immunity's abort inputs (into the motor params, so the client predicts them).
+* **Rules.** `TdmRules` (`bf3_host`, `bf3/host/tdm_rules.h`) runs the round natives on the LogicRuntime and is the
+  server's respawn policy and combat sink: kills and deaths per team and player, respawn at death + 5 s (a bot near a
+  living assault teammate waits 8 s for a revive), regen after 10 s at 5 hp/s, the defibrillator's revive (a new life
+  at the corpse with 20 hp, the same kit and team, the kill taken back, 100 points), SpawnRequest refusals, the scored spawn choice, AutoTeam
+  teams and the bots' kits. The GameServer calls it through named insertions (`// M2b ru [..]`, R1-R10).
+* **On the wire.** Since the w1 merge the v3 messages (nt's codecs: MatchState, PlayerList, SpawnRequest,
+  Spawned.revived, the death stamps, ReviveEvent) travel, and host.tdm.server's scripted peers decode them.
+
+Commands (read-only on the install; the cases print BF3-derived numbers, keep the logs out of the repo):
+
+```bat
+ctest --test-dir b\dev -R "^host\.tdm\.server$"                                                     :: all cases (~9 s, one Metro TDM load)
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=tuning*     :: the tuning parser, hostile text
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=health*     :: E3 regen and spawn immunity
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=respawn*    :: E4 respawn, R10, the M2a hashes
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=revive*     :: E5 revive
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=hostile*    :: E7 server half
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=install*    :: install unchanged
+ctest --preset dev-timing -R "^host\.tdm\.client$"                                                  :: E13 (timing; skipped until bb)
+```
+
+Measured 2026-10-19 on the dev preset, `m2b/ru` (tick counts, the same on every run):
+
+| gate | measured |
+|---|---|
+| E3 | regen from T + 600 at 0.08334 hp per tick, a second drop restarts it; immunity 120 ticks, Fire / move at +30 end it at +30, server = local motor (0 mismatches) |
+| E4 | respawn at death + 300 (+480 next to an assault teammate), the rules' kit; a deploy-screen Ready spawns nothing; M2a hashes kit `31b45dc7cc3f4271`, weapon `b8fd23d8ccfc4c63`, motor `6d75dd5f51d95090` (equal to main 47871fa's); a SpawnRequest for respawn_tick - 1 refused, for respawn_tick accepted, Spawned in that tick with the kit; the peer's DeathEvent respawn_tick = death + 300; MatchState / PlayerList at the peer = the rules'; a v2 Hello kicked |
+| E5 | bot and peer revived at the corpse (0.000 m), 20 hp, life + 1, the same kit and team, enemy kills 1 -> 0, medic +100; living target and enemy medic refused; Spawned.revived = 1 and the ReviveEvent at the peers; deploy screen: 0 revives after the man-down window, a deploy ends the man-down at once |
+| E7 | refusals counted by kind; 300 hostile v3 datagrams, all counted (298 bad, 2 judged by the rules); a SpawnRequest in RoundOver refused; asan: host.tdm.server, sim.weapons.unit, m2b.contract pass, no report |
+| E13 | not run (timing row; skips with PENDING (bb) until bb's add_tdm_bots) |
+| install.unchanged | clean (256 files) |
+| branch pass | `tools\build.cmd dev` after the w1 merge (nt in): 140 rows, 138 passed, 2 skipped, 0 failed, 192.0 s |
+
 ## M2b bb: TDM bots
 
 <!-- # M2b bb -->

@@ -233,6 +233,16 @@ struct ClientStats {
 	uint64_t events_overflow = 0; // PresentationEvents pushes refused (ring full; E14 gates 0)
 	sim::WeaponLaneStats lane;
 	ClientProjectilesStats projectiles;
+	// M2b nt (docs/design/m2b-nt.md §3): the v3 arrivals and the client's rules.
+	uint64_t match_states = 0; // M2b nt: MatchState decoded
+	uint64_t player_lists = 0; // M2b nt: PlayerList decoded
+	uint64_t revives = 0; // M2b nt: ReviveEvents taken (PresentKind::Revive)
+	uint64_t bad_m2b_datagrams = 0; // M2b nt: MatchState / PlayerList that failed to decode
+	uint64_t restricted_commands = 0; // M2b nt: predicted commands net::restrict_command changed
+	uint64_t unspawned_ticks = 0; // M2b nt: client ticks not predicted while own_unspawned
+	uint64_t spawn_requests = 0; // M2b nt: SpawnRequests sent
+	uint64_t own_shot_id_resets = 0; // M2b nt: OwnShotIds segments opened by a reused shot index
+	bool rules_mismatch = false; // M2b nt: refused on MatchInfo's rules_flags / logic_digest
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -438,5 +448,85 @@ double present_render_ticks(const PresentationFrame &p_frame, uint64_t p_now_ns)
 sim::ViewQuality present_view_quality(const PresentationFrame &p_frame, double p_render_ticks);
 // Main thread, every frame the input is sampled for: puts the drawn frame's view sample into r_input.
 void set_view_sample(InputSample &r_input, const PresentationFrame &p_frame, uint64_t p_now_ns);
+
+} // namespace bf3::host
+
+// ---- M2b nt (docs/design/m2b.md §2.6 #12, §3.4, §3.6, §3.7; as built: docs/design/m2b-nt.md §3) --------------------
+// The client half of protocol v3: ClientSession takes MatchState, PlayerList and the CombatEvents' death stamp and
+// revives into the PresentationFrame (match, players, own_respawn_tick, own_revive_until, own_unspawned) and the events
+// ring (PresentKind::Revive; Death's value / extra / seed, presentation_events.h), applies net::restrict_command to every
+// predicted command, stops predicting once MatchState::unspawn_tick removed the own soldier, refuses a MatchInfo whose
+// rules_flags this client's load cannot follow, sends send_spawn_request's SpawnRequests and gives the own shots ids
+// that never repeat (OwnShotIds). The pure parts below are what host.client.m2b.unit tests without sockets.
+
+namespace bf3::host {
+
+// The presented ids of the own shots (m2b.md §3.7: the M2a gate's shot-id reuse, m2a-gate.md:108). The server keeps
+// next_shot_index over lives (gunplay.cpp:407); the own client emits an OwnShot at each first prediction, and some of
+// them the server never fires: the shots predicted after the server's death tick (the replay from the Dead state
+// drops them, its events are not emitted again) and those before a weapon rebase that lowers the index. Their ids
+// come back for the real shots that follow (the next life starts at the server's index), and the effect triggers,
+// which start once per (kind, slot, id, pellet, ordinal), drop those real shots as double starts.
+// OwnShotIds gives every own OwnShot a presented id that never repeats. emit() takes the real index: one not above the
+// last one emitted (a reuse) opens a segment whose offset puts it above every presented id so far; within a segment
+// the presented ids follow the real ones (bursts stay consecutive, weapon_audio.cpp). lookup() maps the real index of
+// a later event about an own shot: the newest emission of that index among the last kRecent, else the newest segment
+// that starts at or below it, else the index itself. Without a reuse every presented id equals the real index.
+class OwnShotIds {
+public:
+	static constexpr size_t kSegments = 16; // the oldest is dropped beyond this
+	static constexpr size_t kRecent = 256; // emissions remembered for lookup (a few seconds of automatic fire)
+	uint32_t emit(uint32_t p_shot_index);
+	uint32_t lookup(uint32_t p_shot_index) const;
+	uint64_t resets() const { return resets_; } // segments opened by a reused index
+	size_t segments() const { return segment_count_; }
+
+private:
+	struct Segment {
+		uint32_t from = 0;
+		uint32_t offset = 0;
+	};
+	struct Pair {
+		uint32_t real = 0;
+		uint32_t presented = 0;
+	};
+	std::array<Segment, kSegments> segments_{};
+	size_t segment_count_ = 0;
+	std::array<Pair, kRecent> recent_{};
+	size_t recent_next_ = 0;
+	size_t recent_count_ = 0;
+	bool any_ = false;
+	uint32_t last_real_ = 0;
+	uint64_t next_presented_ = 0; // one past the highest presented id
+	uint64_t resets_ = 0;
+};
+
+// Rewrites r_event.id when the event names an own shot (slot == p_own_slot): an OwnShot through emit(); through
+// lookup() the own world's Impact and SoldierContact (timeline Predicted), a Hit or a weapon Death with kOwnShooter
+// and a Detonation of the own slot. The effect seeds stay those of the real index. Returns whether the id changed.
+bool present_own_shot_id(OwnShotIds &r_ids, uint8_t p_own_slot, PresentEvent &r_event);
+
+// The player rows as the client keeps them (PlayerList applied in arrival order, ch1 is ordered): a full list replaces
+// every row, a changed-rows list updates its rows and removes its removed slots.
+struct PlayerTable {
+	std::array<net::PlayerRow, net::kMaxPlayerRows> rows{};
+	std::array<bool, net::kMaxPlayerRows> present{};
+};
+void apply_player_list(PlayerTable &r_table, const net::PlayerList &p_list);
+// The present rows in ascending slot into r_rows (the rest zeroed); returns how many (PresentationFrame::player_count).
+uint8_t player_rows(const PlayerTable &p_table, std::array<net::PlayerRow, net::kMaxPlayerRows> &r_rows);
+
+// Whether the own life that spawned at p_life_spawn_tick is unspawned at client tick p_tick (m2b.md §3.4 step 5):
+// UnSpawnAllSoldiers removed every soldier without a death at MatchState::unspawn_tick, so the client stops
+// predicting the life from that tick on; a life spawned at or after it (the restart) predicts again.
+constexpr bool own_unspawned_at(bool p_match_valid, const net::MatchState &p_match, sim::Tick p_life_spawn_tick, sim::Tick p_tick) {
+	return p_match_valid && p_match.unspawn_tick != 0 && p_life_spawn_tick < p_match.unspawn_tick && p_tick >= p_match.unspawn_tick;
+}
+
+// The rules_flags check on MatchInfo (m2b.md §3.7): nullptr when this client's load can follow the server's rules,
+// else the refusal reason. A TDM server (rules_flags::kTdm) needs this client's SharedLoadOptions::tdm load (a logic
+// graph, p_has_logic: SharedLevel::logic) whose digest (SharedLevel::logic_digest) equals MatchInfo::logic_digest when the
+// server sends one.
+const char *rules_refusal(const net::MatchInfo &p_match, bool p_has_logic, uint64_t p_logic_digest);
 
 } // namespace bf3::host

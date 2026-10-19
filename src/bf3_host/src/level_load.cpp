@@ -10,6 +10,14 @@
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/level/world.h"
 #include "bf3/sim/static_world.h"
+// M2b ru (#3): the TDM load.
+#include "bf3/core/gameplay/logic_graph.h"
+#include "bf3/core/gameplay/logic_world.h"
+#include "bf3/core/gameplay/mode_def.h"
+#include "bf3/host/gunplay.h"
+#include "bf3/host/tdm_rules.h"
+#include "bf3/net/protocol.h"
+#include "bf3/sim/logic/round_natives.h"
 
 #include <algorithm>
 #include <chrono>
@@ -221,6 +229,8 @@ core::Result<LevelDatabase> open_level_database(std::shared_ptr<const core::Inst
 	return db;
 }
 
+core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions &p_options, SharedLevel &r_level); // M2b ru (below)
+
 core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDatabase &p_db, const SharedLoadOptions &p_options, LoadProgress *p_progress) {
 	if (p_db.level == nullptr || p_db.world == nullptr) {
 		return core::make_error("load_shared_level: no level database");
@@ -293,11 +303,17 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		p_progress->end(LoadStage::Shapes);
 	}
 	if (p_options.gunplay) { // M2a sv (named insertion: the gunplay tables, SharedLoadOptions::gunplay)
-		const core::Status gunplay = load_shared_gunplay(p_db, *shared); // M2a sv
+		const core::Status gunplay = load_shared_gunplay(p_db, *shared, p_options); // M2a sv; M2b ru (#3): the options (the TDM kits)
 		if (!gunplay.ok()) { // M2a sv
 			return core::error_at("load_shared_level: gunplay", gunplay.error()); // M2a sv
 		} // M2a sv
 	} // M2a sv
+	if (p_options.tdm) { // M2b ru (#3): the logic graph, the natives' fields, tdm_tuning.cfg, the immunity abort
+		const core::Status tdm = load_shared_tdm(p_db, p_options, *shared); // M2b ru
+		if (!tdm.ok()) { // M2b ru
+			return core::error_at("load_shared_level: tdm", tdm.error()); // M2b ru
+		} // M2b ru
+	} // M2b ru
 	sample_working_set(p_progress);
 	return std::shared_ptr<const SharedLevel>(std::move(shared));
 }
@@ -311,6 +327,276 @@ std::shared_ptr<const SharedLevel> synthetic_shared_level(std::shared_ptr<const 
 	shared->spawns = std::move(p_spawns);
 	shared->motor = p_motor;
 	return shared;
+}
+
+// ---- M2b ru (docs/design/m2b.md §2.6 #3, §3.2 "Load", §3.3; docs/design/m2b-ru.md §2) -----------------------------
+
+namespace {
+
+namespace gp = core::gameplay;
+
+std::optional<double> ebx_number(const core::EbxInstance &p_entity, std::string_view p_field) {
+	const std::optional<core::EbxValue> v = p_entity.get(p_field);
+	if (!v || v->kind() == core::EbxValue::Kind::Bool) {
+		return std::nullopt;
+	}
+	if (const std::optional<double> d = v->as_f64()) {
+		return std::isfinite(*d) ? d : std::nullopt;
+	}
+	if (const std::optional<int64_t> i = v->as_i64()) {
+		return double(*i);
+	}
+	return std::nullopt;
+}
+
+std::optional<bool> ebx_bool(const core::EbxInstance &p_entity, std::string_view p_field) {
+	const std::optional<core::EbxValue> v = p_entity.get(p_field);
+	if (!v || v->kind() != core::EbxValue::Kind::Bool) {
+		return std::nullopt;
+	}
+	return v->as_bool();
+}
+
+// TeamId / Team: an enum whose name is Team1 / Team2 (or its value 1 / 2); 0 otherwise.
+uint8_t ebx_team(const core::EbxInstance &p_entity, std::string_view p_field) {
+	const std::optional<core::EbxValue> v = p_entity.get(p_field);
+	if (!v) {
+		return 0;
+	}
+	if (const std::optional<std::string_view> name = v->enum_name()) {
+		return *name == "Team1" ? 1 : (*name == "Team2" ? 2 : 0);
+	}
+	const std::optional<int64_t> i = v->as_i64();
+	return i && (*i == 1 || *i == 2) ? uint8_t(*i) : 0;
+}
+
+void read_native_params(const gp::LogicWorld &p_world, const gp::LogicGraph &p_graph, sim::logic::RoundNativeParams &r_params) {
+	using T = gp::LogicTypeId;
+	bool pre = false, human = false, auto_team = false, restriction = false;
+	for (const gp::LogicObject &ob : p_world.objects()) {
+		const T type = gp::logic_type_of(ob.entity.type_name());
+		if (type != T::KillCounter && type != T::PreRound && type != T::HumanPlayer && type != T::AutoTeam && type != T::InputRestriction) {
+			continue;
+		}
+		const core::EbxInstance &e = ob.entity;
+		if (type == T::KillCounter) {
+			for (const uint32_t node : p_graph.nodes_with_guid(e.guid())) {
+				if (p_graph.nodes()[node].type != T::KillCounter) {
+					continue;
+				}
+				bool seen = false;
+				for (const sim::logic::RoundNativeParams::KillCounter &k : r_params.kill_counters) {
+					seen |= k.node == node;
+				}
+				if (seen || r_params.kill_counters.size() >= 64) {
+					continue;
+				}
+				sim::logic::RoundNativeParams::KillCounter k;
+				k.node = node;
+				k.team = ebx_team(e, "TeamId");
+				k.max_kill_count = int32_t(std::clamp(ebx_number(e, "MaxKillCount").value_or(100.0), 0.0, 100000.0));
+				k.enemy_weight = float(std::clamp(ebx_number(e, "EnemyWeight").value_or(1.0), -100.0, 100.0));
+				k.ignore_ai = ebx_bool(e, "IgnoreAI").value_or(false);
+				r_params.kill_counters.push_back(k);
+			}
+		} else if (type == T::PreRound && !pre) {
+			pre = true;
+			r_params.round_min_players = int32_t(std::clamp(ebx_number(e, "RoundMinPlayerCount").value_or(4.0), 0.0, 256.0));
+			r_params.round_max_players = int32_t(std::clamp(ebx_number(e, "RoundMaxPlayerCount").value_or(8.0), 0.0, 256.0));
+			r_params.round_restart_countdown_s = float(std::clamp(ebx_number(e, "RoundRestartCountdown").value_or(10.0), 0.0, 3600.0));
+		} else if (type == T::HumanPlayer && !human) {
+			human = true;
+			r_params.player_killed_delay_s = float(std::clamp(ebx_number(e, "PlayerKilledDelay").value_or(5.0), 0.0, 3600.0));
+		} else if (type == T::AutoTeam && !auto_team) {
+			auto_team = true;
+			r_params.auto_balance = ebx_bool(e, "AutoBalance").value_or(true);
+			r_params.rotate_team_on_new_round = ebx_bool(e, "RotateTeamOnNewRound").value_or(true);
+			r_params.balance_player_count = int32_t(std::clamp(ebx_number(e, "PlayerCountNeededToAutoBalance").value_or(8.0), 0.0, 256.0));
+			r_params.balance_team_difference = int32_t(std::clamp(ebx_number(e, "TeamDifferenceToAutoBalance").value_or(3.0), 0.0, 256.0));
+		} else if (type == T::InputRestriction && !restriction) {
+			restriction = true;
+			namespace rb = net::restrict_bits;
+			static const std::pair<const char *, uint32_t> kFields[] = { { "Throttle", rb::kThrottle }, { "Strafe", rb::kStrafe }, { "Yaw", rb::kYaw },
+				{ "Pitch", rb::kPitch }, { "Jump", rb::kJump }, { "ChangePose", rb::kCrouch }, { "Prone", rb::kProne }, { "Fire", rb::kFire },
+				{ "Zoom", rb::kZoom }, { "Reload", rb::kReload }, { "Sprint", rb::kSprint }, { "MeleeAttack", rb::kMelee },
+				{ "ThrowGrenade", rb::kThrowGrenade } };
+			uint32_t allowed = 0;
+			for (const auto &[field, bit] : kFields) {
+				const std::optional<bool> b = ebx_bool(e, field);
+				if (!b) {
+					r_params.notes.push_back(std::string("InputRestriction.") + field + " not read (allowed)");
+				}
+				if (b.value_or(true)) {
+					allowed |= bit;
+				}
+			}
+			r_params.restrict_allowed = allowed;
+		}
+	}
+	const bool counters = !r_params.kill_counters.empty();
+	r_params.from_data = pre && human && auto_team && restriction && counters;
+	if (!r_params.from_data) {
+		r_params.notes.push_back(std::string("natives: missing") + (pre ? "" : " PreRound") + (human ? "" : " HumanPlayer") + (auto_team ? "" : " AutoTeam") +
+				(restriction ? "" : " InputRestriction") + (counters ? "" : " KillCounter") + " (the named defaults)");
+	}
+}
+
+// The immunity abort (§3.3): the data's raw EntryInputActionEnum values, by their names when the type info has them,
+// else by tdm_tuning.cfg's immunity_abort_map.
+void set_immunity_abort(const core::level::LoadedLevel &p_level, const TdmTuning &p_tuning, SharedLevel &r_level) {
+	core::Result<gp::SoldierDef> soldier = gp::read_soldier_def(p_level.db());
+	if (!soldier) {
+		r_level.tdm_notes.push_back("immunity abort: no soldier def (" + soldier.error().message + "): none");
+		return;
+	}
+	std::vector<std::optional<std::string>> names;
+	if (const core::EbxPartition *partition = p_level.db().partition_by_name("characters/soldiers/mpsoldier")) {
+		if (const std::optional<core::EbxInstance> entity = p_level.db().follow(partition->primary().data(), "Object")) {
+			if (const std::optional<core::EbxInstance> health = p_level.db().follow(entity->data(), "HealthModule")) {
+				if (const std::optional<core::EbxValue> list = health->get("AbortSpawnImmortalityInputs")) {
+					if (const core::OptionalEbxArray array = list->as_array()) {
+						for (const core::EbxValue v : *array) {
+							if (names.size() >= kMaxImmunityAbortEntries) {
+								break;
+							}
+							const std::optional<std::string_view> n = v.enum_name();
+							names.push_back(n ? std::optional<std::string>(std::string(*n)) : std::nullopt);
+						}
+					}
+				}
+			}
+		}
+	}
+	bool any_name = false;
+	for (const std::optional<std::string> &n : names) {
+		any_name |= n.has_value();
+	}
+	uint32_t buttons = 0;
+	bool move = false;
+	std::string mapped, unmapped;
+	const std::vector<int32_t> &values = soldier->abort_spawn_immortality_inputs;
+	for (size_t i = 0; i < values.size() && i < kMaxImmunityAbortEntries; ++i) {
+		const int32_t value = values[i];
+		const std::optional<std::string> name = i < names.size() ? names[i] : std::nullopt;
+		std::string label = std::to_string(value);
+		bool done = false;
+		if (any_name && name) {
+			// By name [inferred: only the name -> command-bit step]; an "EIA" prefix is dropped.
+			std::string_view n = *name;
+			if (n.rfind("EIA", 0) == 0) {
+				n.remove_prefix(3);
+			}
+			label += "=" + *name;
+			static const std::pair<const char *, uint32_t> kNames[] = { { "Fire", sim::buttons::kFire }, { "Jump", sim::buttons::kJump },
+				{ "Sprint", sim::buttons::kSprint }, { "Zoom", sim::buttons::kZoom }, { "Reload", sim::buttons::kReload } };
+			if (n == "Throttle" || n == "Strafe") {
+				move = true;
+				done = true;
+			}
+			for (const auto &[word, bit] : kNames) {
+				if (n == word) {
+					buttons |= bit;
+					done = true;
+				}
+			}
+		} else if (!any_name) {
+			for (const ImmunityAbortEntry &m : p_tuning.immunity_abort_map) {
+				if (m.value == value) {
+					buttons |= m.buttons;
+					move |= m.move;
+					done = true;
+				}
+			}
+		}
+		std::string &list = done ? mapped : unmapped;
+		list += (list.empty() ? "" : " ") + label;
+	}
+	r_level.motor.protect_abort_buttons = buttons;
+	r_level.motor.protect_abort_move = move;
+	r_level.tdm_notes.push_back(std::string("immunity abort: ") +
+			(any_name ? "by the enum names" : "by tdm_tuning.cfg's immunity_abort_map (the type info has no enum names)") + "; mapped {" + mapped +
+			"}, unmapped {" + unmapped + "} [inferred, measured = false]");
+}
+
+} // namespace
+
+core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions &p_options, SharedLevel &r_level) {
+	if (p_db.level == nullptr) {
+		return core::make_error("tdm: no level database");
+	}
+	const auto clock = std::chrono::steady_clock::now();
+	const core::level::LoadedLevel &level = *p_db.level;
+	gp::LogicGraphOptions go;
+	go.mode = level.mode;
+	go.side = gp::LogicSide::Server;
+	gp::LogicWorldOptions wo; // as build_logic_graph(db, root, options) makes it, so the digest is bf3dump's
+	wo.mode = go.mode;
+	wo.expand_root_objects = true;
+	wo.max_depth = go.max_depth;
+	wo.max_scopes = go.max_scopes;
+	wo.max_objects = go.max_objects;
+	wo.max_walk_steps = go.max_walk_steps;
+	wo.max_query_steps = go.max_query_steps;
+	wo.max_work = go.max_work;
+	core::Result<gp::LogicWorld> world = gp::LogicWorld::build(level.db(), level.root(), wo);
+	if (!world) {
+		return core::error_at("tdm: logic graph walk", world.error());
+	}
+	core::Result<gp::LogicGraph> graph = gp::build_logic_graph(*world, go);
+	if (!graph) {
+		return core::error_at("tdm: logic graph", graph.error());
+	}
+	auto shared_graph = std::make_shared<const gp::LogicGraph>(std::move(*graph));
+	r_level.logic_digest = shared_graph->digest();
+	auto params = std::make_shared<sim::logic::RoundNativeParams>();
+	read_native_params(*world, *shared_graph, *params);
+	r_level.logic = std::move(shared_graph);
+	for (const std::string &n : params->notes) {
+		r_level.tdm_notes.push_back(n);
+	}
+	r_level.logic_natives = std::move(params);
+
+	core::Result<TdmTuning> tuning = load_tdm_tuning(p_options.tdm_tuning_cfg);
+	if (!tuning) {
+		return tuning.error();
+	}
+	core::Result<gp::ScoringTable> scoring = gp::read_scoring(level.db());
+	if (scoring) {
+		const auto row = [&](std::string_view p_sid, int32_t &r_value) {
+			if (const std::optional<double> v = scoring->score(p_sid); v && std::isfinite(*v) && std::fabs(*v) <= 100000.0) {
+				r_value = int32_t(std::lround(*v));
+			} else {
+				r_level.tdm_notes.push_back("scoring: no " + std::string(p_sid) + " row (default " + std::to_string(r_value) + ")");
+			}
+		};
+		row("ID_SCORE_KILL", tuning->score_kill);
+		row("ID_SCORE_HEADSHOT", tuning->score_headshot);
+		row("ID_SCORE_REVIVE", tuning->score_revive);
+	} else {
+		r_level.tdm_notes.push_back("scoring: " + scoring.error().message + " (the defaults)");
+	}
+	set_immunity_abort(level, *tuning, r_level);
+	r_level.tdm_tuning = std::make_shared<const TdmTuning>(std::move(*tuning));
+	r_level.seconds_logic = seconds_since(clock);
+	return core::Status::success();
+}
+
+// The 3-argument load_shared_gunplay (#3): the 2-argument one (gunplay.cpp, M2a) with SharedLoadOptions::tdm's kits.
+core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level, const SharedLoadOptions &p_options) {
+	if (p_db.install == nullptr || p_db.level == nullptr) {
+		return core::make_error("load_shared_gunplay: no level database");
+	}
+	const auto clock = std::chrono::steady_clock::now();
+	const std::string id = p_db.level->info.id.empty() ? p_db.level->root_name : p_db.level->info.id;
+	GunplayLoadOptions o;
+	o.tdm_kits = p_options.tdm;
+	core::Result<std::shared_ptr<const GunplayLevel>> g = load_gunplay_level(p_db.install, id, p_db.level->mode, o);
+	if (!g) {
+		return g.error();
+	}
+	r_level.gunplay = std::move(*g);
+	r_level.seconds_gunplay = seconds_since(clock);
+	return core::Status::success();
 }
 
 } // namespace bf3::host

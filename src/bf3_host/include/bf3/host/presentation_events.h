@@ -28,7 +28,8 @@
 //   Death                 slot = killer, aux = victim, def, id = shot index, flags kHeadshot, material = zone
 //   Detonation            slot = shooter, id = shot index, def, pos, dir = normal, flags kDud
 //   Spawn                 slot, aux = kit, extra = team, id = life
-//   Revive (M2b W1.0)     slot = reviver, aux = revived, id = the revived slot's new life, timeline Render (owner nt)
+//   Revive (M2b W1.0)     slot = reviver, aux = revived, timeline Render (owner nt; the fields as built: the M2b nt
+//                         block at the end of this file)
 
 #include "bf3/sim/weapons/sim_time.h"
 
@@ -90,3 +91,19 @@ private:
 };
 
 } // namespace bf3::host
+
+// ---- M2b nt (docs/design/m2b.md §3.4, §3.6, §3.7; as built: docs/design/m2b-nt.md §3) ------------------------------
+// The v3 fields, as ClientSession fills them:
+//   Death     + value = the killer's health at the kill (DeathEvent::killer_health, 0 for a fall), extra =
+//             DeathEvent::respawn_tick, seed = DeathEvent::revive_until (0 = not revivable); all 0 with rules off
+//   Revive    slot = reviver, aux = revived, id = the server tick of the revive (ReviveEvent::tick; W1.0 named the new
+//             life, which the wire does not carry for another slot: the revived slot's next generation in the
+//             snapshots is it), time = tick_end(tick), flags kOwnShooter (the own soldier revived) / kOwnVictim (the own
+//             soldier was revived), timeline Render
+//   Spawn     + flags kRevived: the own life is a revive (Spawned::revived), not a deploy
+// The own shots' ids are the presented ids of OwnShotIds (client_session.h): equal to the shot index unless an index
+// was reused (a new life after shots the server never fired), then above every id presented before.
+
+namespace bf3::host::present_flags {
+inline constexpr uint8_t kRevived = 1u << 5; // Spawn: Spawned::revived (M2b nt)
+} // namespace bf3::host::present_flags

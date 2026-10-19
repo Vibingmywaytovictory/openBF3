@@ -484,14 +484,18 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	d.hold_power_per_second = c.rate(f.hold_power_per_second, "HoldAndReleaseData.PowerIncreasePerSecond");
 
 	// Ammunition.
-	if (f.magazine_capacity < 0 || f.magazine_capacity > kMaxMagazine) {
+	// M2b ru R11 (docs/design/m2b.md §2.6 #22, §3.6): MagazineCapacity -1 is a gadget without a magazine (the
+	// defibrillator, ammo "-1 x 1"): unlimited, one round that a shot never takes, no reload. Any other negative
+	// capacity still fails.
+	const bool gadget_without_magazine = f.magazine_capacity == -1; // M2b ru R11
+	if ((f.magazine_capacity < 0 && !gadget_without_magazine) || f.magazine_capacity > kMaxMagazine) { // M2b ru R11
 		c.fail("MagazineCapacity", "= " + std::to_string(f.magazine_capacity) + " is outside [0, " + std::to_string(kMaxMagazine) + "]");
 	}
-	d.magazine_capacity = std::clamp(f.magazine_capacity, 0, kMaxMagazine);
+	d.magazine_capacity = gadget_without_magazine ? 1 : std::clamp(f.magazine_capacity, 0, kMaxMagazine); // M2b ru R11
 	if (f.number_of_magazines > kMaxMagazines) {
 		c.fail("NumberOfMagazines", "= " + std::to_string(f.number_of_magazines) + " is above " + std::to_string(kMaxMagazines));
 	}
-	d.unlimited_ammo = f.number_of_magazines < 0;
+	d.unlimited_ammo = f.number_of_magazines < 0 || gadget_without_magazine; // M2b ru R11
 	d.magazines = std::clamp(f.number_of_magazines, 0, kMaxMagazines);
 	if (f.bullets_per_shell < 1 || f.bullets_per_shell > kMaxPellets) {
 		c.fail("NumberOfBulletsPerShell", "= " + std::to_string(f.bullets_per_shell) + " is outside [1, " + std::to_string(kMaxPellets) + "]");

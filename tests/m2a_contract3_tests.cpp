@@ -105,7 +105,7 @@ static_assert(uint8_t(host::PresentTimeline::Predicted) == 0 && uint8_t(host::Pr
 		uint8_t(host::PresentTimeline::Immediate) == 2);
 
 // Limits (§12.2, §12.3, §16 Q9, E7) and the crowd's weapon bound.
-static_assert(audio::kMaxWeaponVoices == 32 && audio::kMaxOneShotVoices == 64 && audio::kGameMixerInstances == 96);
+static_assert(audio::kMaxWeaponVoices == 128 && audio::kMaxOneShotVoices == 128 && audio::kGameMixerInstances == 256); // M2b au R6 (A2: 32 / 64 / 96)
 static_assert(fx::kMaxDecals == 256 && fx::kDecalFadeSeconds == 30.0f && fx::kTracerConvergeM == 30.0f);
 static_assert(audio::kGameCheckDistances == std::array<float, 6>{ 5.0f, 20.0f, 100.0f, 150.0f, 280.0f, 320.0f });
 static_assert(anim::kMaxCrowdWeapons == 8 && anim::kCrowdLanesListenMax == 4);

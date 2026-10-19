@@ -195,7 +195,12 @@ gp::CapsulePoseTable build_capsules(std::shared_ptr<const core::Install> p_insta
 } // namespace
 
 core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id,
-		std::string_view p_mode) {
+		std::string_view p_mode) { // M2b ru [kits]: the 3-argument form passes default options (M2a unchanged)
+	return load_gunplay_level(std::move(p_install), p_level_id, p_mode, GunplayLoadOptions{}); // M2b ru [kits]
+} // M2b ru [kits]
+
+core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id, // M2b ru [kits]
+		std::string_view p_mode, const GunplayLoadOptions &p_options) { // M2b ru [kits]
 	const std::string where = "load_gunplay_level " + std::string(p_level_id) + " " + std::string(p_mode);
 	if (p_install == nullptr) {
 		return core::make_error(where + ": no install");
@@ -252,6 +257,9 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 			kits.push_back(std::move(*kit));
 		}
 	}
+	if (p_options.tdm_kits) { // M2b ru [kits]: the assault gadget (#9), resolved with the kit slots' defs
+		variants.insert(std::string(kTdmAssaultGadget)); // M2b ru [kits]
+	} // M2b ru [kits]
 	for (const std::string &v : variants) {
 		core::Result<gp::WeaponDef> def = w->catalog->resolve(v);
 		if (!def) {
@@ -259,7 +267,11 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 		}
 		level->defs.push_back(std::move(*def));
 	}
-	core::Result<KitTable> table = make_kit_table(mode->teams, kits, level->defs);
+	KitTableOptions kit_options; // M2b ru [kits]
+	if (p_options.tdm_kits) { // M2b ru [kits]
+		kit_options.assault_gadget = std::string(kTdmAssaultGadget); // M2b ru [kits]
+	} // M2b ru [kits]
+	core::Result<KitTable> table = make_kit_table(mode->teams, kits, level->defs, kit_options); // M2b ru [kits]
 	if (!table) {
 		return core::error_at(where, table.error());
 	}

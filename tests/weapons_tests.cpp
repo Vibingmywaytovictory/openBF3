@@ -292,7 +292,7 @@ TEST_SUITE("weapons-unit") {
 			{ "NumberOfBulletsPerShell", [](auto &w) { w.fire.bullets_per_shell = 65; } },
 			{ "NumberOfBulletsPerShell", [](auto &w) { w.fire.bullets_per_shell = 0; } },
 			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = 10'001; } },
-			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = -1; } },
+			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = -2; } }, // M2b ru R12: -1 is a gadget without a magazine (R11)
 			{ "NumberOfMagazines", [](auto &w) { w.fire.number_of_magazines = 1'001; } },
 			{ "TraceFrequency", [](auto &w) { w.fire.trace_frequency = 1'001; } },
 			{ "ShotConfigData.InitialSpeed", [](auto &w) { w.fire.initial_speed = { 0, 0, 5'001 }; } },
@@ -1069,5 +1069,63 @@ TEST_SUITE("weapons-unit") {
 		CHECK(all.worst_shots <= kMaxShotsPerTick);
 		CHECK(all.worst_timed <= kMaxTimedEventsPerTick);
 		CHECK(all.shots >= 200); // a floor: the run must fire (bolt rifles fire ~6 in 600 random ticks, automatics ~40)
+	}
+}
+
+// M2b ru (docs/design/m2b.md §2.6 #22, §3.6; docs/design/m2b-ru.md §4): the defibrillator as a weapon. A synthetic
+// u_defib with the data's numbers (bf3dump weapon weapons/gadgets/defibrillator/u_defib: fltAutomaticFire 60 rpm, ammo
+// "-1 x 1", rtMagazine 3.6 s, instant hit, v0 1.75 m/s, ttl 1 s, damage 0) builds (R11: capacity -1 is a gadget
+// without a magazine); held 3 s it fires 3 shots, never reloads and never empties; each shot is one 1.75 m segment
+// with 0 damage (TdmRules tests the segment against the corpses, §3.6).
+TEST_SUITE("weapons-unit") {
+	TEST_CASE("sim.weapons.unit: M2b ru the defibrillator: capacity -1 builds, 3 shots in 3 s, no reload, 0 damage") {
+		Synthetic s;
+		s.def = weapon("weapons/gadgets/defibrillator/u_defib", core::gameplay::FireLogic::Automatic, 60);
+		s.def.deploy_time = 0.4f;
+		core::gameplay::FireFunction &f = s.def.fire;
+		f.magazine_capacity = -1;
+		f.number_of_magazines = 1;
+		f.reload_type = core::gameplay::ReloadType::Magazine;
+		f.reload_time = 3.6f;
+		f.reload_time_bullets_left = -1.0f;
+		f.always_auto_reload = false;
+		f.trace_frequency = 0;
+		f.initial_speed = { 0, 0, 1.75f };
+		for (core::gameplay::Dispersion &d : f.weapon_dispersion) {
+			d = { 0, 0, 0, 5 };
+		}
+		core::gameplay::ProjectileDef &p = s.def.projectile;
+		p.kind = core::gameplay::ProjectileKind::Bullet;
+		p.gravity = 0;
+		p.time_to_live = 1.0f;
+		p.start_damage = 0;
+		p.end_damage = 0;
+		p.damage_falloff_start = 5;
+		p.damage_falloff_end = 5;
+		p.instant_hit = true;
+		auto materials = std::make_shared<const SurfaceMaterialTable>();
+		const WeaponSimDef d = sim_def(s, *materials);
+		CHECK(d.unlimited_ammo);
+		CHECK(d.magazine_capacity == 1);
+		CHECK(d.projectile.instant_hit);
+		CHECK(d.projectile.start_damage == 0.0f);
+		const std::shared_ptr<const WeaponTable> t = table_of({ s });
+		Driver dr(t, { 0 });
+		dr.idle_until_ready();
+		const int32_t magazine = dr.st.current().magazine;
+		for (int i = 0; i < 180; ++i) {
+			dr.step(fire(true, false));
+		}
+		std::printf("M2b ru defib: %zu shots in 180 ticks, magazine %d -> %d, events %05x\n", dr.shots.size(), magazine, dr.st.current().magazine,
+				unsigned(dr.all_events));
+		CHECK(dr.shots.size() == 3);
+		CHECK(dr.st.current().magazine == magazine);
+		CHECK((dr.all_events & (weapon_events::kReloadStarted | weapon_events::kReloadFinished)) == 0);
+		for (const ShotEvent &e : dr.shots) {
+			CHECK(e.def == 0);
+		}
+		if (dr.shots.size() >= 2) {
+			CHECK(dr.shots[1].time - dr.shots[0].time == seconds_to_units(1.0));
+		}
 	}
 }

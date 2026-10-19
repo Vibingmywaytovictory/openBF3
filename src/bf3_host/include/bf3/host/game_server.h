@@ -204,6 +204,9 @@ public:
 	const ServerView &view() const;
 	// M2a sv: the gunplay part (null without SharedLevel::gunplay). Server thread.
 	const Gunplay *gunplay() const;
+	// M2b ru [sv] (as built, docs/design/m2b-ru.md §5): the TDM rules (null without GameServerConfig::rules.mode ==
+	// Tdm): MatchState, the player rows, RulesStats, the natives' coverage for the tests and tools. Server thread.
+	const TdmRules *rules() const; // M2b ru [sv]
 
 private:
 	struct Impl;

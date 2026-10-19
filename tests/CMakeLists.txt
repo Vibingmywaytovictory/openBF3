@@ -1366,6 +1366,60 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     set_property(TEST godot.m2a godot.m2a.kits godot.m2a.play APPEND PROPERTY LABELS retired)
 endif()
 
+# M2b nt (docs/design/m2b.md §2.6 #12, §3.7; docs/design/m2b-nt.md §4): host.client.m2b.unit, the client half of
+# protocol v3 without sockets: the M2a gate's shot-id reuse reproduced on the client's weapon-lane path (death, replay,
+# respawn) and fixed by OwnShotIds, present_own_shot_id per event kind, the PlayerList table, own_unspawned_at,
+# rules_refusal and the restriction on predicted commands. No install (the synthetic floor); a unit row (< 2 s),
+# functional, parallel-safe. The ClientSession wiring runs in ru's host.tdm.client (E13, timing).
+openbf3_test(test_client_m2b test_main.cpp client_session_m2b_tests.cpp gunplay_fixture.h weapons_support.h test_support.h)
+target_link_libraries(test_client_m2b PRIVATE bf3_host)
+target_compile_definitions(test_client_m2b PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME host.client.m2b.unit COMMAND test_client_m2b --test-suite=host-client-m2b)
+set_tests_properties(host.client.m2b.unit PROPERTIES TIMEOUT 60)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2b_nt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.client.m2b.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_nt_cl_dir}")
+endif()
+
+# M2b au (docs/design/m2b.md §6, E10; docs/design/m2b-au.md): audio A3. audio.hdr.unit: install-free (the HDR window's
+# E10 numbers alone and through MixerCore with synthetic HDR sources, R5's gain, pre-cull, suspension, the scope rules,
+# the 128-voice cap, the profiler, hostile settings and spans), a unit row (<= 2 s). audio.hdr.install: the retail
+# HdrSetting and the 33 scopes on MP_Subway, the patch -> scope map, install unchanged; exits 77 without an install.
+# Both in the asan preset (hdr_setting.cpp and sound_scope.cpp are new parsers).
+openbf3_test(test_audio_hdr test_main.cpp audio_hdr_tests.cpp test_support.h)
+target_link_libraries(test_audio_hdr PRIVATE bf3_audio bf3_core)
+add_test(NAME audio.hdr.unit COMMAND test_audio_hdr --test-suite=audio-hdr)
+add_test(NAME audio.hdr.install COMMAND test_audio_hdr --test-suite=audio-hdr-install)
+set_tests_properties(audio.hdr.unit PROPERTIES TIMEOUT 120)
+set_tests_properties(audio.hdr.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_au_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.hdr.unit audio.hdr.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au_cl_dir}")
+endif()
+
+# M2b ru (docs/design/m2b.md §11 E3-E5, E7's server half, E13; docs/design/m2b-ru.md §6): test_host_tdm runs the TDM
+# rules inside the real GameServer on Metro TDM, one load per process (tests/tdm_fixture.h: load_tdm_level_once, the
+# ScriptedPeer, run_tdm). host.tdm.server (E3 health*, E4 respawn*, E5 revive*, E7 hostile*, install unchanged) steps
+# the server back to back on the test thread: no sockets, no wall-clock wait, parallel-safe, functional (no label).
+# host.tdm.client (E13) is the real ServerHost + ClientSession path: sockets and real time, so it is a timing row (the
+# merge pass, serially); it runs only once nt's v3 codecs and bb's brains are in (exits 77 = skipped before).
+# Exits 77 = skipped without an install. Also runs under the asan preset (the hostile case feeds the v3 messages).
+openbf3_test(test_host_tdm test_main.cpp host_tdm_server_tests.cpp host_tdm_client_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+target_link_libraries(test_host_tdm PRIVATE bf3_host)
+target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\""
+    "OPENBF3_TDM_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/tdm_tuning.cfg\"")
+add_test(NAME host.tdm.server COMMAND test_host_tdm --test-suite=host-tdm-server)
+set_tests_properties(host.tdm.server PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.tdm.client COMMAND test_host_tdm --test-suite=host-tdm-client)
+set_tests_properties(host.tdm.client PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
+openbf3_label(timing host.tdm.client)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ru_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.tdm.server host.tdm.client PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ru_cl_dir}")
+    set_tests_properties(host.tdm.server PROPERTIES TIMEOUT 400) # asan: 127 s measured (2026-10-19), about 3x
+endif()
+
 # M2b bb (docs/design/m2b.md §1 E1, E2, E6, E8, §5, §11; docs/design/m2b-bb.md): the TDM bots' rows in test_host_tdm (one
 # executable with ru's host.tdm.server cases, so each row loads the shared Metro TDM level once per process; ru's block
 # creates the target when it is first, else this one does). host.tdm.bots.unit: functional, data-free (< 2 s).
