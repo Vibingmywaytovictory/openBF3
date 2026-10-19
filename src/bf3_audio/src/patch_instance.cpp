@@ -1024,4 +1024,8 @@ void PatchInstance::set_loudness_outputs(std::span<const uint16_t> p_outputs) {
 	state_->loudness_hint = m;
 }
 
+void PatchInstance::skip_stop_event() { // PT1 rld [no stop]
+	state_->stop_seen = true;
+}
+
 } // namespace bf3::audio

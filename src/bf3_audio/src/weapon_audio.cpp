@@ -1240,6 +1240,7 @@ struct WeaponAudioRouter::Impl {
 		const std::vector<uint16_t> *outputs = &ev.outputs;
 		o.before_start = [p_param, p_value, obs, cue, outputs](PatchInstance &r_instance, InstanceHandle) {
 			r_instance.set_loudness_outputs(*outputs);
+			r_instance.skip_stop_event(); // the pool's Stop would post the trigger release: a phantom round on single-fire patches
 			if (p_param != 0) {
 				r_instance.set_parameter(p_param, p_value);
 			}

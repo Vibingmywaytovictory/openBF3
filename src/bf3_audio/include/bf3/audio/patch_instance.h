@@ -224,6 +224,11 @@ public:
 	// while no sampler slot is busy yet (the first block after a start). Empty: every output, as before. Call it before
 	// the Start command hands the instance to the mixer.
 	void set_loudness_outputs(std::span<const uint16_t> p_outputs);
+	// PT1 rld [no stop] (docs/design/pt1-rld.md): treat the program's stop event as seen: the instance ends when its
+	// samplers are idle, and the mixer's Stop posts nothing. For one-shots started by another event (Reload, Action,
+	// Bolt) of a weapon patch, whose stop event is the trigger release: on a single-fire patch it fires a round.
+	// Before the Start command, like set_loudness_outputs.
+	void skip_stop_event();
 
 	PatchInstance(const PatchInstance &) = delete;
 	PatchInstance &operator=(const PatchInstance &) = delete;
