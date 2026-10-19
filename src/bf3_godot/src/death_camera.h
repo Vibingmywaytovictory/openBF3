@@ -32,6 +32,8 @@ struct DeathCameraParams {
 	float up_m = 1.6f; // above the corpse's feet
 	float eye_height_m = 0.4f; // the point on the corpse the camera looks at first (a prone body)
 	float camera_radius_m = 0.2f; // kept from the static world
+	// cam (as built, docs/design/m2b-cam.md): the point on the killer the camera turns to, above its presented feet.
+	float killer_height_m = 1.2f;
 };
 static_assert(std::is_trivially_copyable_v<DeathCameraParams>);
 
@@ -83,6 +85,7 @@ private:
 	bool active_ = false;
 	bool killer_seen_ = false;
 	fx::Vec3 last_killer_{};
+	bool turned_counted_ = false; // cam: killer_views counted for this view
 	DeathCameraStats stats_;
 };
 
