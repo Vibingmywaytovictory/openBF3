@@ -2907,3 +2907,54 @@ Measured 2026-10-19 on the dev preset, `m2b/ru` (tick counts, the same on every 
 | E13 | not run (timing row; skips with PENDING (bb) until bb's add_tdm_bots) |
 | install.unchanged | clean (256 files) |
 | branch pass | `tools\build.cmd dev` after the w1 merge (nt in): 140 rows, 138 passed, 2 skipped, 0 failed, 192.0 s |
+
+## M2b bb: TDM bots
+
+<!-- # M2b bb -->
+Track bb of M2b wave 1, on branch `m2b/bb` from the W1.0 head 01a26e8. Design: [docs/design/m2b.md](docs/design/m2b.md)
+§5, E1, E2, E6, E8. As-built notes, the named constants and the differences from the design:
+[docs/design/m2b-bb.md](docs/design/m2b-bb.md).
+
+The TDM bots are `bf3_host` `TdmBrain`s that `add_tdm_bots` puts on the server through `GameServerConfig::tdm_bots`.
+They read only `ServerView` (with the rules' `downed()`, `phase()`, `input_restricted()` and `kit()`) and the
+gunplay's shots:
+* **Perception** (`bf3_sim` `perception.cpp`): every 6 ticks per bot, a 160° x 90° cone to 120 m, chest and head rays
+  for the nearest 4 (the clear one is the aim point), detection faster for near, moving and firing enemies; hearing gives a position estimate, never a
+  detection; 3 s to forget.
+* **Aim** (`aim_model.cpp`): a skill-scaled error cone that narrows with time on target, lead and drop for projectile
+  weapons, recoil compensation by skill.
+* **Behaviour**: target scores with a switch margin and a reaction delay; bursts by range, aiming down the sights,
+  no fire through a teammate, blind fire at a lost target, the M67, the knife from behind, reload and sidearm;
+  strafing, hunting the last known enemy (given up after 20 s), a contact heat grid for roaming; retreat and regen
+  wait; assault bots revive downed teammates with the defibrillator; idle in the pre-round. Seeds are
+  `match_seed ^ slot`. The bots join through `GameServer::add_local_bot` (the named insertion `[bot spawn]`), so they
+  spawn on the main nav component, never on the level's nav-island spawns. `[bot spawn]` and `[spawn transform]` are
+  listed as contract additions in the `## M2b bb` block at the end of m2b.md, for the integrator to confirm.
+* **Tuning**: `bf3-opensource/config/bot_tuning.cfg` holds every default (all [inferred], measured = false: no VU
+  session measured BF3's bots). Unknown keys and out-of-range values fail the load.
+* **Preview**: `tools\play.cmd --tdm --bots=31` runs the M2a scene with the TDM rules and TDM bots; the match state prints as `[m2b] match: ...` lines. `tools\play.cmd --help` lists the options.
+
+Commands:
+
+```bat
+tools\build.cmd dev                                                        :: the branch pass
+ctest --test-dir b\dev -R "^host\.tdm\.bots\.unit$" --output-on-failure   :: perception, aim, tuning, brain (no install)
+ctest --test-dir b\dev -R "^m2b\.contract$"                               :: the W1.0 contract with kBbLanded
+ctest --test-dir b\asan -R "^host\.tdm\.bots\.unit$" --output-on-failure  :: asan (after cmake --build --preset asan --target test_host_tdm)
+ctest --test-dir b\dev -R "^host\.tdm\.(round|bots|replay)$"              :: E1, E2, E6 (Metro TDM; skip without an install)
+ctest --preset dev-timing -R "^host\.tdm\.perf$"                          :: E8, timing row (merge pass on main)
+```
+
+Measured 2026-10-19 on the dev preset, `m2b/bb` after the merge of `m2b/w1` (nt, au, ru), unlocked, shared machine
+(times indicative only):
+
+| gate | threshold | measured |
+|---|---|---|
+| branch pass `toolsuild.cmd dev` | every row passes or skips as before | 146 rows: 144 passed, 2 skipped (`core.cache_data`, `core.res` as before), 0 failed, 197.4 s, exit 0 |
+| host.tdm.bots.unit | all cases pass, data-free budget 2 s | 7 cases passed, 0.10 s |
+| m2b.contract | passes with every track landed | passed, 0.37 s |
+| asan host.tdm.bots.unit | no asan report | passed before the merge (0.68 s); after the merge the verification pass ran it (0.60 s) and `host.tdm.replay` (195 s) under asan, 0 reports; not rerun after `[spawn transform]` |
+| E1 host.tdm.round | m2b.md E1 | passes: 0 `Recorded` deliveries to the TDM types (70 handled; 42 to other types, printed), RoundOver at tick 17,634 (≤ 21,600), winner 1 at 100 / 95, the peer's MatchState the same, 0 runtime faults, rounds 1, the restart in place 0 / 0; 35.7 s in the pass (13.7 s alone). The first run after the merge failed on the `BlueprintTransform` property of the two HQ spawns at tick 1, fixed by the named insertion `[spawn transform]` in `round_natives.cpp` |
+| E2 host.tdm.bots | pooled K/D in [0.75, 1.33], 0 sight, 0 stale aim, 0 stuck, 0 bad spawns, revives ≥ 1 | pooled 149 / 131 = 1.137 (seeds 1.190, 0.980, 1.282), 0 / 0 / 0 / 0, revives 4; 23.0 s in the pass (9.6 s alone) |
+| E6 host.tdm.replay | same seed 0 differing ticks, another seed differs | 0 / 3,179 ticks differ, trace and MatchState bytes equal; seed 12 differs on 3,179; 20.7 s in the pass (7.3 s alone) |
+| E8 host.tdm.perf | perception ≤ 0.2 ms/tick p99, brains ≤ 1.5 ms/tick p99, tick ≤ 4 ms p99 | not run: timing row, runs on main after the merge |

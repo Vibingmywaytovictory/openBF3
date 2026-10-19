@@ -188,6 +188,9 @@ public:
 
 	// A server-side soldier (bot / walker): takes a free slot, spawns at choose_spawn. Returns the slot or -1.
 	int add_local_soldier(std::unique_ptr<CommandSource> p_source, int p_team);
+	// M2b bb [bot spawn]: add_local_soldier with the slot's bot mark, so its spawns choose among BotLevel::spawns (the
+	// main nav component) when BotFillConfig::spawn_in_main, as S1's bots do; add_tdm_bots adds the TDM bots so.
+	int add_local_bot(std::unique_ptr<CommandSource> p_source, int p_team); // M2b bb [bot spawn]
 	GameServerStats stats() const; // server thread; ServerHost publishes a copy for other threads
 	// S1 (docs/design/s1.md §6.1): the parts of the last tick, by reference (no copy of the 128-entry slot list that
 	// stats() makes); server thread, valid until the next tick.

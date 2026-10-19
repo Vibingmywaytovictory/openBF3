@@ -163,3 +163,9 @@ target_sources(bf3_sim PRIVATE
 target_sources(bf3_sim PRIVATE
     src/logic/round_natives.cpp
 )
+
+# M2b bb (docs/design/m2b.md §5.1, §5.3; docs/design/m2b-bb.md): the bot perception and aim model bodies.
+target_sources(bf3_sim PRIVATE
+    src/bots/perception.cpp
+    src/bots/aim_model.cpp
+)

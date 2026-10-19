@@ -70,6 +70,12 @@ namespace render = bf3::render;
 namespace sim = bf3::sim;
 namespace sw = bf3::sim::weapons;
 
+// M2b bb [tdm]: the --tdm preview (the // M2b bb block at the end of this file).
+void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::string &p_preround);
+void m2b_bb_tdm_load(host::SharedLoadOptions &r_options);
+void m2b_bb_tdm_server(host::GameServerConfig &r_game, uint32_t p_bots, std::vector<std::string> &r_notes);
+void m2b_bb_tdm_frame(const host::PresentationFrame &p_frame);
+
 namespace {
 
 constexpr uint32_t kMaxPlayableBots = 32; // m2a-w3.md §4: sv's kMaxLagSlots rule keeps the player rewindable
@@ -318,6 +324,7 @@ void Bf3LevelSession::m2a_parse_args() {
 		bots_ = kMaxPlayableBots;
 	}
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
+	m2b_bb_tdm_args(has_user_arg("tdm"), user_arg_value("kill-limit"), user_arg_value("preround")); // M2b bb [tdm]
 	if (!has_user_arg("walkers")) {
 		walkers_ = 0; // M1's scripted walkers are not soldiers with weapons
 	}
@@ -377,6 +384,7 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 		return;
 	}
 	r_options.gunplay = true; // the weapons, kits and capsule pose table (sv)
+	m2b_bb_tdm_load(r_options); // M2b bb [tdm]
 	if (!scene_) {
 		return; // headless: no viewmodel (nothing draws it)
 	}
@@ -609,6 +617,7 @@ void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
 		std::snprintf(line, sizeof(line), "[m2a] firefight bots: %u (%s), max slots %u", bots_, g.firefight_pairs ? "pairs" : "free", r_game.max_slots);
 		g.part_notes.push_back(line); // loader thread: printed on the first frame
 	}
+	m2b_bb_tdm_server(r_game, bots_, g.part_notes); // M2b bb [tdm]
 }
 
 void Bf3LevelSession::m2a_client_config(host::ClientSessionConfig &r_config) const {
@@ -986,6 +995,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
 	};
 	const host::PresentationFrame &f = *frame_;
+	m2b_bb_tdm_frame(f); // M2b bb [tdm]
 	if (!g.built) {
 		for (const std::string &n : g.part_notes) {
 			UtilityFunctions::print(to_godot(n));
@@ -1230,6 +1240,121 @@ void Bf3LevelSession::m2a_shutdown() {
 	if (g.recorder != nullptr) {
 		g.recorder->watch_slot(-1);
 	}
+}
+
+} // namespace bf3::godot_side
+
+// M2b bb (docs/design/m2b.md §11 "bb's --tdm preview"; docs/design/m2b-bb.md): `tools\play.cmd --tdm` on the M2a scene,
+// a preview between the waves, compiled and not a row (nothing gates on it; the wave-2 scene is the real path). It
+// turns the TDM rules on without the deploy screen (the M2a automatic respawn and the KitSelect kit), sets
+// SharedLoadOptions::tdm for the one load the server and the client share (else the client's rules_flags check
+// refuses it), and replaces the firefight bots with GameServerConfig::tdm_bots (config/bot_tuning.cfg). The M2a scene
+// has no TDM HUD, so every MatchState change prints one console line (phase, the two counts, the kill limit, the
+// winner). --kill-limit=N and --preround=S pass to the rules (dev options, Q12). The state is file-static: set on the
+// main thread in m2a_parse_args before the loader thread starts, read by that thread afterwards.
+#include "bf3/host/tdm_brain.h"
+
+#include <godot_cpp/classes/project_settings.hpp>
+
+#include <atomic>
+#include <memory>
+#include <string>
+
+namespace bf3::godot_side {
+
+namespace {
+
+struct M2bTdmPreview {
+	bool on = false;
+	int kill_limit = 0;
+	float preround_s = -1.0f;
+	std::string tuning_cfg;
+	bool have_match = false;
+	bf3::net::MatchState last;
+};
+M2bTdmPreview s_m2b_tdm;
+
+const char *m2b_phase_name(bf3::net::MatchPhase p_phase) {
+	switch (p_phase) {
+		case bf3::net::MatchPhase::Loading:
+			return "loading";
+		case bf3::net::MatchPhase::PreRound:
+			return "pre-round";
+		case bf3::net::MatchPhase::InRound:
+			return "in round";
+		case bf3::net::MatchPhase::RoundOver:
+			return "round over";
+	}
+	return "?";
+}
+
+} // namespace
+
+void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::string &p_preround) {
+	s_m2b_tdm = M2bTdmPreview();
+	if (!p_tdm) {
+		return;
+	}
+	s_m2b_tdm.on = true;
+	if (!p_kill_limit.empty()) {
+		s_m2b_tdm.kill_limit = std::clamp(std::atoi(p_kill_limit.c_str()), 0, 100000);
+	}
+	if (!p_preround.empty()) {
+		const double s = std::atof(p_preround.c_str());
+		s_m2b_tdm.preround_s = std::isfinite(s) ? float(std::clamp(s, 0.0, 600.0)) : -1.0f;
+	}
+	const std::string cfg = to_std(ProjectSettings::get_singleton()->globalize_path("res://config/bot_tuning.cfg"));
+	s_m2b_tdm.tuning_cfg = std::filesystem::exists(utf8_path(cfg)) ? cfg : std::string();
+	char line[320];
+	std::snprintf(line, sizeof(line), "[m2b] --tdm preview: TDM rules on (no deploy screen, KitSelect kit), TDM bots, kill limit %s, pre-round %s, tuning %s",
+			s_m2b_tdm.kill_limit > 0 ? std::to_string(s_m2b_tdm.kill_limit).c_str() : "data (100)",
+			s_m2b_tdm.preround_s >= 0.0f ? (std::to_string(s_m2b_tdm.preround_s) + " s").c_str() : "data (10 s)",
+			s_m2b_tdm.tuning_cfg.empty() ? "built-in defaults" : s_m2b_tdm.tuning_cfg.c_str());
+	UtilityFunctions::print(line);
+}
+
+void m2b_bb_tdm_load(host::SharedLoadOptions &r_options) {
+	if (s_m2b_tdm.on) {
+		r_options.tdm = true; // the logic graph, the TDM kits and the immunity abort (ru's load)
+	}
+}
+
+void m2b_bb_tdm_server(host::GameServerConfig &r_game, uint32_t p_bots, std::vector<std::string> &r_notes) {
+	if (!s_m2b_tdm.on) {
+		return;
+	}
+	r_game.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+	r_game.rules.deploy_screen = false;
+	r_game.rules.revive = true;
+	r_game.rules.kill_limit_override = s_m2b_tdm.kill_limit;
+	r_game.rules.preround_override_s = s_m2b_tdm.preround_s;
+	r_game.rules.max_players = 32;
+	r_game.firefight = nullptr; // the TDM bots replace the firefight bots
+	if (p_bots > 0) {
+		auto bots = std::make_shared<host::TdmBotConfig>();
+		bots->count = std::min<uint32_t>(p_bots, 31u); // 16 v 16 with the player
+		bots->tuning_cfg = s_m2b_tdm.tuning_cfg;
+		r_game.tdm_bots = bots;
+	}
+	r_notes.push_back("[m2b] --tdm preview: " + std::to_string(r_game.tdm_bots != nullptr ? r_game.tdm_bots->count : 0u) +
+			" TDM bots, teams by AutoTeam, the round flow from the Metro TDM logic graph");
+}
+
+void m2b_bb_tdm_frame(const host::PresentationFrame &p_frame) {
+	if (!s_m2b_tdm.on || !p_frame.match_valid) {
+		return;
+	}
+	const bf3::net::MatchState &m = p_frame.match;
+	const bf3::net::MatchState &l = s_m2b_tdm.last;
+	if (s_m2b_tdm.have_match && m.phase == l.phase && m.kills == l.kills && m.kill_limit == l.kill_limit && m.winner == l.winner) {
+		return;
+	}
+	s_m2b_tdm.have_match = true;
+	s_m2b_tdm.last = m;
+	char line[192];
+	std::snprintf(line, sizeof(line), "[m2b] match: %s, US %d - RU %d of %d%s", m2b_phase_name(m.phase), m.kills[0], m.kills[1], m.kill_limit,
+			m.winner == 1 ? ", US wins" : (m.winner == 2 ? ", RU wins" : ""));
+	UtilityFunctions::print(line);
 }
 
 } // namespace bf3::godot_side

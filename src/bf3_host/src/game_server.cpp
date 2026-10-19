@@ -1866,3 +1866,14 @@ const TdmRules *GameServer::rules() const {
 }
 
 } // namespace bf3::host
+
+// M2b bb (docs/design/m2b-bb.md §2): [bot spawn] add_local_bot, the TDM bots' join. The level's TDM spawns include
+// points on nav islands (enclosed areas the walker has no path out of); a slot with the bot mark spawns among the
+// BotLevel's main-component spawns instead (GameServer::Impl::spawn, S1's list), the rules' scored chooser over it.
+namespace bf3::host {
+
+int GameServer::add_local_bot(std::unique_ptr<CommandSource> p_source, int p_team) {
+	return impl_->add_local(std::move(p_source), p_team, true);
+}
+
+} // namespace bf3::host

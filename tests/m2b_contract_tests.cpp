@@ -63,7 +63,7 @@ namespace {
 // ---- the tracks' switches (each set to true by its owner, in the commit that lands the body) ------------------
 constexpr bool kNtLanded = true; // nt: the v3 codecs (R9), kProtocolVersion 3
 constexpr bool kRuLanded = true; // ru: [abort hash], the KitTable defib hash, the rules in GameServer::init ([init])
-constexpr bool kBbLanded = false; // bb: add_tdm_bots
+constexpr bool kBbLanded = true; // bb: add_tdm_bots
 constexpr bool kAuLanded = true; // au: HdrWindow (E10's window numbers)
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {

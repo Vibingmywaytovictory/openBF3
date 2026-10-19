@@ -405,6 +405,9 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 					s.restart_flag = true;
 					s.phase = RoundPhase::Restarting;
 					s.note(e.node, NativeTimelineEntry::What::Input, e.port);
+				} else if ((type == T::CharacterSpawn || type == T::AlternateSpawn) && dir == D::PropertyIn && // M2b bb [spawn transform]
+						e.port == id("BlueprintTransform")) { // M2b bb [spawn transform]: the reference's placement at tick 1
+					// M2b bb [spawn transform]: the points come from SharedLevel::spawns, placed at load; nothing to move.
 				} else {
 					handled = false;
 				}

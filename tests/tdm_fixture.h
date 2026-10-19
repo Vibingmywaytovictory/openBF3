@@ -650,3 +650,228 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 }
 
 } // namespace bf3::test::tdm
+
+// M2b bb (docs/design/m2b.md §1 E2, E8, §5; docs/design/m2b-bb.md): additive counters for the bots' rows. A BotChecks
+// is the TDM brains' observer (tdm_brain.h TdmBotObserver) plus an after-tick hook, attached to a TdmRunConfig by
+// attach_bot_checks (it chains any configure_bots / on_tick already set) and read back with apply_bot_checks after
+// run_tdm. Everything it counts it checks itself, independently of the brains:
+//   sight     every detection re-casts the eye -> head and eye -> chest rays (query_mask::kProjectile) on the
+//             server's world at that tick from the target's state; neither clear = a sight violation (E2: 0);
+//   aim       every aimed fire tick whose target's last clear ray is more than kStaleAimTicks old = stale (E2: 0);
+//             blind fire at a last-known position is counted apart;
+//   stuck     per bot, windows of TdmRunConfig::stuck_window_ticks on one life; a window whose farthest horizontal
+//             distance from its start stays under stuck_metres is stuck (M2a's firefight metric). The bot's
+//             Restricted (freeze, round end), RegenWait and Revive ticks restart its window (E2 leaves them out);
+//   timing    TdmBotStats::last_perception_ns / last_brains_ns after every tick (E8).
+// Server thread only (the observer runs inside GameServer::tick, the after-tick hook right after it).
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/static_world.h"
+
+#include <cmath>
+#include <set>
+
+namespace bf3::test::tdm {
+
+inline constexpr uint32_t kStaleAimTicks = 30; // E2
+
+struct BotChecks final : host::TdmBotObserver {
+	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
+	sim::bots::PerceptionParams perception;
+	std::shared_ptr<host::TdmBotStats> stats;
+	uint32_t window_ticks = 1200;
+	float window_metres = 1.0f;
+
+	uint64_t detections = 0, sight_violations = 0;
+	uint64_t aimed_fire_ticks = 0, stale_aim_shots = 0, blind_fire_ticks = 0;
+	uint64_t windows = 0, stuck_windows = 0;
+	std::set<uint8_t> stuck_slots;
+	std::array<uint64_t, host::kTdmBotActivityCount> activity_ticks{};
+	std::vector<double> perception_ms, brains_ms;
+
+	struct Window {
+		bool open = false;
+		uint32_t life = 0;
+		sim::Tick start = 0;
+		sim::Vec3 anchor{};
+		float farthest = 0.0f;
+		std::array<uint32_t, host::kTdmBotActivityCount> acts{}; // the window's ticks per activity
+	};
+	std::array<Window, 256> win{};
+	// The first stuck windows (bounded), for the report: where, when and what the bot was doing.
+	struct StuckReport {
+		uint8_t slot = 0;
+		sim::Tick tick = 0;
+		sim::Vec3 position{};
+		float farthest = 0.0f;
+		std::array<uint32_t, host::kTdmBotActivityCount> acts{};
+	};
+	static constexpr size_t kMaxStuckReports = 16;
+	std::vector<StuckReport> stuck_reports;
+	std::array<uint32_t, 3> team_slots{}; // the bots per team at the last tick ([0]: none)
+	host::GunplayStats gunplay{}; // the server's gunplay counters at the last tick (shots, hits, refusals)
+	std::vector<net::PlayerRow> players; // the rules' rows at the last tick (the per-slot report)
+	// Where the bots of each team spawned and died (sums for the centroids; [team]).
+	std::array<double, 3> spawn_x{}, spawn_z{}, death_x{}, death_z{};
+	std::array<uint32_t, 3> spawn_n{}, death_n{};
+	std::array<uint32_t, 256> seen_life{};
+	std::array<uint8_t, 256> was_alive{};
+	std::array<sim::Vec3, 256> last_position{};
+	std::array<host::TdmBotActivity, 256> last{};
+	std::array<uint8_t, 256> is_bot{};
+
+	void detected(const host::ServerView &p_view, sim::Tick, uint8_t, uint8_t p_target, const sim::Vec3 &p_eye) override {
+		++detections;
+		const std::span<const sim::SoldierState> states = p_view.states();
+		if (p_target >= states.size()) {
+			++sight_violations;
+			return;
+		}
+		const sim::SoldierState &t = states[p_target];
+		const sim::Vec3 head = sim::bots::perception_head(perception, t, eye_heights);
+		const sim::Vec3 chest = sim::bots::perception_chest(perception, t, eye_heights);
+		const auto clear = [&](const sim::Vec3 &p_to) {
+			return !p_view.world().ray(p_eye, { p_to[0] - p_eye[0], p_to[1] - p_eye[1], p_to[2] - p_eye[2] }, sim::query_mask::kProjectile);
+		};
+		if (!clear(head) && !clear(chest)) {
+			++sight_violations;
+		}
+	}
+	void fired(const host::ServerView &, sim::Tick p_tick, uint8_t, int, sim::Tick p_last_visible, bool p_blind) override {
+		if (p_blind) {
+			++blind_fire_ticks;
+			return;
+		}
+		++aimed_fire_ticks;
+		if (p_tick > p_last_visible + kStaleAimTicks) {
+			++stale_aim_shots;
+		}
+	}
+	void activity(sim::Tick, uint8_t p_bot, host::TdmBotActivity p_activity) override {
+		last[p_bot] = p_activity;
+		is_bot[p_bot] = 1;
+		++activity_ticks[size_t(p_activity)];
+	}
+	// After every tick: the stuck windows and the timing.
+	void after_tick(sim::Tick p_tick, host::GameServer &r_server) {
+		const std::span<const sim::SoldierState> states = r_server.view().states();
+		team_slots = {};
+		if (const host::Gunplay *g = r_server.gunplay(); g != nullptr) {
+			gunplay = g->stats();
+		}
+		if (const host::TdmRules *rules = r_server.rules(); rules != nullptr) {
+			const std::span<const net::PlayerRow> rows = rules->players();
+			players.assign(rows.begin(), rows.end());
+		}
+		for (size_t s = 0; s < states.size() && s < win.size(); ++s) {
+			if (is_bot[s] != 0) {
+				const uint8_t t = r_server.view().team(uint8_t(s));
+				++team_slots[t < 3 ? t : 0];
+				const bool alive = r_server.view().alive(uint8_t(s));
+				if (t == 1 || t == 2) {
+					if (alive && seen_life[s] != states[s].life + 1u) {
+						seen_life[s] = states[s].life + 1u;
+						spawn_x[t] += states[s].position[0];
+						spawn_z[t] += states[s].position[2];
+						++spawn_n[t];
+					}
+					if (!alive && was_alive[s] != 0) {
+						death_x[t] += states[s].position[0];
+						death_z[t] += states[s].position[2];
+						++death_n[t];
+					}
+				}
+				was_alive[s] = alive ? 1 : 0;
+				last_position[s] = states[s].position;
+			}
+		}
+		for (size_t s = 0; s < states.size() && s < win.size(); ++s) {
+			if (is_bot[s] == 0) {
+				continue;
+			}
+			Window &w = win[s];
+			const host::TdmBotActivity a = last[s];
+			const bool exempt = a == host::TdmBotActivity::Dead || a == host::TdmBotActivity::Restricted || a == host::TdmBotActivity::RegenWait ||
+					a == host::TdmBotActivity::Revive || !r_server.view().alive(uint8_t(s));
+			if (exempt || !w.open || w.life != states[s].life) {
+				w.open = !exempt;
+				w.life = states[s].life;
+				w.start = p_tick;
+				w.anchor = states[s].position;
+				w.farthest = 0.0f;
+				w.acts = {};
+				continue;
+			}
+			++w.acts[size_t(a)];
+			const float dx = states[s].position[0] - w.anchor[0], dz = states[s].position[2] - w.anchor[2];
+			w.farthest = std::max(w.farthest, std::sqrt(dx * dx + dz * dz));
+			if (p_tick - w.start >= window_ticks) {
+				++windows;
+				if (w.farthest < window_metres) {
+					++stuck_windows;
+					stuck_slots.insert(uint8_t(s));
+					if (stuck_reports.size() < kMaxStuckReports) {
+						stuck_reports.push_back({ uint8_t(s), p_tick, states[s].position, w.farthest, w.acts });
+					}
+				}
+				w.start = p_tick;
+				w.anchor = states[s].position;
+				w.farthest = 0.0f;
+				w.acts = {};
+			}
+		}
+		if (stats != nullptr) {
+			perception_ms.push_back(double(stats->last_perception_ns.load(std::memory_order_relaxed)) * 1e-6);
+			brains_ms.push_back(double(stats->last_brains_ns.load(std::memory_order_relaxed)) * 1e-6);
+		}
+	}
+};
+
+// Chains the checks into p_config (configure_bots sets the observer and the stats; on_tick runs after_tick).
+inline std::shared_ptr<BotChecks> attach_bot_checks(TdmRunConfig &r_config, const TdmLevel *p_level) {
+	auto checks = std::make_shared<BotChecks>();
+	if (p_level != nullptr && p_level->shared != nullptr) {
+		for (size_t i = 0; i < 3; ++i) {
+			if (p_level->shared->motor.poses[i].eye_height > 0.0f) {
+				checks->eye_heights[i] = p_level->shared->motor.poses[i].eye_height;
+			}
+		}
+	}
+	checks->window_ticks = r_config.stuck_window_ticks;
+	checks->window_metres = r_config.stuck_metres;
+	checks->stats = std::make_shared<host::TdmBotStats>();
+	std::function<void(host::TdmBotConfig &)> bots_before = r_config.configure_bots;
+	r_config.configure_bots = [checks, bots_before](host::TdmBotConfig &r_bots) {
+		if (bots_before) {
+			bots_before(r_bots);
+		}
+		checks->perception = r_bots.perception;
+		r_bots.observer = checks;
+		r_bots.stats = checks->stats;
+	};
+	std::function<void(sim::Tick, host::GameServer &, ScriptedPeer *)> tick_before = r_config.on_tick;
+	r_config.on_tick = [checks, tick_before](sim::Tick p_tick, host::GameServer &r_server, ScriptedPeer *p_peer) {
+		checks->after_tick(p_tick, r_server);
+		if (tick_before) {
+			tick_before(p_tick, r_server, p_peer);
+		}
+	};
+	return checks;
+}
+
+// The checks' counts into the result's E2 / E8 fields (the brains' own view of stuck bots replaces run_tdm's, which
+// cannot tell a regen wait from a stuck bot; run_tdm's value is kept in r_result_stuck_m2a when given).
+inline void apply_bot_checks(const BotChecks &p_checks, TdmRunResult &r_result, uint32_t *r_result_stuck_m2a = nullptr) {
+	if (r_result_stuck_m2a != nullptr) {
+		*r_result_stuck_m2a = r_result.stuck_bots;
+	}
+	r_result.sight_violations = uint32_t(std::min<uint64_t>(p_checks.sight_violations, UINT32_MAX));
+	r_result.stale_aim_shots = uint32_t(std::min<uint64_t>(p_checks.stale_aim_shots, UINT32_MAX));
+	r_result.blind_fire = uint32_t(std::min<uint64_t>(p_checks.blind_fire_ticks, UINT32_MAX));
+	r_result.stuck_bots = uint32_t(p_checks.stuck_slots.size());
+	if (!p_checks.perception_ms.empty()) {
+		r_result.perception_ms = p_checks.perception_ms;
+		r_result.brains_ms = p_checks.brains_ms;
+	}
+}
+
+} // namespace bf3::test::tdm

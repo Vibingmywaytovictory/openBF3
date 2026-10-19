@@ -973,3 +973,14 @@ cases in `sim.weapons.unit`, `net.proto*` and `anim.s3.unit`, and new checks in 
 | Q15 | KillCounter's TeamKillWeight / NeutralTeamWeight are not decoded | **team kills count 0**, `measured = false`; ru decodes them if cheap |
 | Q16 | A bot that dies near a living assault teammate waits for a revive (§3.4) | **yes**: 20 m, up to 8 s, `measured = false`; without it bot revives are rare (the window would be 5 s) |
 | Q17 | Fold cam into ui to save one track's start-up | **no** while the 3–5-tracks-per-wave rule holds; yes if the weekly budget is tight (cam's work is small and on disjoint files) |
+
+## M2b bb: contract additions (wave 1, for the integrator to confirm)
+
+<!-- # M2b bb -->
+Two named insertions of track bb into ru's files, made after the w1 merge (as built: docs/design/m2b-bb.md §2). Each
+is in its own commit, every line marked `// M2b bb [tag]`; no existing line changed.
+
+| tag | file | what | why |
+|---|---|---|---|
+| `[bot spawn]` | game_server.h (after `add_local_soldier`), game_server.cpp (an `// M2b bb` end block) | `int GameServer::add_local_bot(std::unique_ptr<CommandSource>, int team)`: `add_local` with the bot mark; `add_tdm_bots` uses it instead of `add_local_soldier` (§2.6 table above) | §3.5 and Q11 want the TDM bots on S1's main-component list (`spawn_in_main`), which `spawn()` selects only for a slot with the bot mark; `add_local_soldier` sets none. Without it 1-3 bots per team spawned on nav islands on Metro and E2's K/D left its band |
+| `[spawn transform]` | round_natives.cpp, `RoundNatives::apply`, the `default:` case of the meaning switch | a CharacterSpawn / AlternateSpawn `BlueprintTransform` property input is handled (no effect) | the two CharacterSpawnReference HQ nodes receive it at tick 1; Recorded, it failed E1's coverage check (§3.1) |

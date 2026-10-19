@@ -57,6 +57,12 @@ struct PerceivedEnemy {
 	bool heard = false; // known only from a shot
 	Tick last_seen = 0; // tick of the last clear ray (or the heard shot)
 	Vec3 last_position{}; // feet where it was last seen (heard: the estimate)
+	// bb (as built): the tick of the last clear ray only (a heard shot never sets it; E2's stale-aim check), and the
+	// enemy's feet and velocity at that ray.
+	Tick last_visible = 0;
+	bool ever_visible = false;
+	Vec3 last_velocity{};
+	bool chest_visible = false; // the last clear ray was the chest one (else only the head was clear)
 };
 
 // The world as one bot's perception tick reads it. Spans index by slot.
@@ -74,6 +80,10 @@ struct PerceptionInput {
 	std::span<const HeardShot> shots;
 	const CollisionWorld *world = nullptr; // null: no rays (units)
 	uint64_t seed = 0; // the bot's stream for the hearing error
+	// bb (as built): the pose eye heights (MotorParams::poses[].eye_height; stand, crouch, prone). A target's head is
+	// its feet + head_height_m x eye(pose) / eye(stand), its chest feet + chest_height_m x the same ratio.
+	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
+	uint32_t ray_mask = 0; // CollisionWorld query mask; 0 = query_mask::kProjectile (what bullets hit)
 };
 
 // The perception tick of a slot (the stagger rule): (tick + slot) % update_ticks == 0.
@@ -88,10 +98,22 @@ public:
 	std::span<const PerceivedEnemy> enemies() const; // known enemies, ascending slot
 	const PerceivedEnemy *find(uint8_t p_slot) const;
 	const PerceptionParams &params() const;
+	// bb (as built): the slots that reached detection 1 in the last update (ascending), and the shots it heard.
+	std::span<const uint8_t> newly_detected() const;
+	uint32_t heard_last() const;
 
 private:
 	PerceptionParams params_;
 	std::vector<PerceivedEnemy> enemies_;
+	std::vector<uint8_t> newly_;
+	uint32_t heard_ = 0;
 };
+
+// The detection time at p_distance (linear from detect_near_s at near_m to detect_far_s at far_m, clamped at both
+// ends; never below one tick).
+float detection_time(const PerceptionParams &p_params, float p_distance);
+// The head and chest points of a soldier for the perception rays (the PerceptionInput rule above).
+Vec3 perception_head(const PerceptionParams &p_params, const SoldierState &p_state, const float p_eye_heights[3]);
+Vec3 perception_chest(const PerceptionParams &p_params, const SoldierState &p_state, const float p_eye_heights[3]);
 
 } // namespace bf3::sim::bots
