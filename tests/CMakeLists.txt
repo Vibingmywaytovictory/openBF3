@@ -1548,3 +1548,23 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_pt1_snd_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(audio.cuts.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_pt1_snd_cl_dir}")
 endif()
+
+# PT1 rld (docs/design/pt1-rld.md): reload and weapon foley sounds. audio.foley.install loads Metro TDM's kit audio
+# once (like audio.game) and checks, from the data, which weapon event starts which foley wave of the kit patches (the
+# trigger table: event, wave, frame) and that the reload is audible in the offline mix (1p alone and after an emptied
+# magazine, 3p at 5 / 15 / 25 m), with install.unchanged; 77 without an install. Functional, parallel-safe (its WAVs
+# go to <build>/shots/audio.foley); within the install-row budget (<= 15 s).
+openbf3_test(test_audio_foley test_main.cpp audio_foley_tests.cpp test_support.h)
+target_link_libraries(test_audio_foley PRIVATE bf3_audio bf3_host bf3_core)
+target_compile_definitions(test_audio_foley PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg"
+    OPENBF3_PT1_SHOTS="${CMAKE_BINARY_DIR}/shots")
+add_test(NAME audio.foley.install COMMAND test_audio_foley --test-suite=audio-foley)
+set_tests_properties(audio.foley.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+openbf3_cost(audio.foley.install 1 8)
+# audio.foley.unit: read_weapon_foley / voice_outputs on a hostile synthetic program (no install; the asan row of
+# the new reader with the install row's 300 corruptions of a real program).
+add_test(NAME audio.foley.unit COMMAND test_audio_foley --test-suite=audio-foley-unit)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_pt1_rld_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.foley.install audio.foley.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_pt1_rld_cl_dir}")
+endif()

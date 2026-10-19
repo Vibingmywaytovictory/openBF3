@@ -310,6 +310,7 @@ std::shared_ptr<ba::WeaponAudioTable> make_table(const TestWave &w, const Weapon
 		d.fire_mode = p_mode;
 		d.shot_interval_s = p_interval;
 		d.has_reload = true;
+		d.foley = ba::read_weapon_foley(*p_weapon.program); // PT1 rld [foley]: as load_weapon_audio fills it
 		Result<ba::WeaponSoundBinding> b = ba::bind_weapon_sound(p_weapon.program, p_interval, kRate);
 		REQUIRE(b.ok());
 		d.binding = *b;

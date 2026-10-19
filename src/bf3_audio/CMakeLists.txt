@@ -61,3 +61,9 @@ target_sources(bf3_audio PRIVATE
     src/hdr_window.cpp
     src/voice_cull.cpp
 )
+
+# PT1 rld (docs/design/pt1-rld.md): the weapon foley inputs of a kit patch, read from its sound graph.
+target_sources(bf3_audio PRIVATE
+    src/weapon_foley.cpp
+    include/bf3/audio/weapon_foley.h
+)

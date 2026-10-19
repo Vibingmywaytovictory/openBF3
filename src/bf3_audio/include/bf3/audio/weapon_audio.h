@@ -31,6 +31,7 @@
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/audio/weapon_foley.h" // PT1 rld [foley]
 #include "bf3/audio/weapon_sound.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
@@ -134,6 +135,7 @@ struct WeaponAudioDef {
 	uint32_t one_shot_event = 0; // OneShot: the event a use posts (DefaultStartEvent, else Fire, else Melee)
 	bool has_reload = false; // the program takes the Reload event (kHashReload): reload one-shots
 	double shot_interval_s = 0.0; // the source's (Driver: also binding.shot_interval_seconds)
+	WeaponFoley foley; // PT1 rld [foley]: the reload / Action / Bolt inputs read from the program (weapon_foley.h)
 };
 
 // The match's weapon sounds, by WeaponTable def id (GunplayLevel::defs order). Built on the loader thread.
@@ -209,6 +211,9 @@ public:
 	// Stop for one live one-shot (an effect's SoundStop): its stop event, then it returns when silent.
 	bool stop(MixerCore &r_mixer, InstanceHandle p_handle);
 	uint64_t forgotten() const; // aged out without a finished feedback
+	// PT1 rld [follow] (docs/design/pt1-rld.md): moves one live one-shot (SetEmitter now, and resend_emitters keeps the
+	// new emitter). False: not live, or the ring was full (the stored emitter is updated either way).
+	bool set_emitter(MixerCore &r_mixer, InstanceHandle p_handle, const EmitterState &p_emitter);
 
 private:
 	struct Entry {
@@ -276,6 +281,9 @@ struct WeaponAudioStats {
 	uint64_t forgotten = 0; // released driver instances aged out without a finished feedback
 	uint64_t emitter_updates = 0; // SetEmitter commands (listener moves and moving shooters)
 	uint64_t detonations = 0; // explosion one-shots
+	uint64_t foley = 0; // PT1 rld [stats]: Action / Bolt one-shots (deploy, zoom, dry fire, fire mode, bolt)
+	uint64_t foley_releases = 0; // PT1 rld [stats]: reload sounds cut short (the reload's release event posted)
+	uint64_t foley_out_of_reach = 0; // PT1 rld [stats]: foley of another soldier beyond its event's distance band
 };
 static_assert(std::is_trivially_copyable_v<WeaponAudioStats>);
 
@@ -286,6 +294,9 @@ public:
 	virtual ~WeaponAudioObserver() = default;
 	virtual void on_driver_instance(uint8_t p_slot, uint64_t p_seed, uint64_t p_first_round_frame, PatchInstance &r_instance) = 0;
 	virtual void on_trigger_up(uint8_t p_slot, uint64_t p_seed, uint64_t p_stop_frame) = 0;
+	// PT1 rld [observer]: every foley cue the router posts (reloads, their releases, Action, Bolt), with the one-shot's
+	// instance before its Start command (null for a release, which goes to a running instance).
+	virtual void on_foley(const FoleyCue &, PatchInstance *) {}
 };
 
 class WeaponAudioRouter {
@@ -309,6 +320,10 @@ public:
 	void set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon);
 	// The active camera; re-sends every live instance's emitter.
 	void set_listener(const ListenerState &p_listener);
+	// PT1 rld [own weapons], before on_events each frame: the presented own weapons (PresentationFrame's
+	// own_weapons_curr when own_weapons_valid, else nothing): the magazine a reload starts with (empty or tactical), the
+	// zoom flag and the dry-fire tick flag. Null: unknown (a reload then plays the data's default, the long one).
+	void set_own_weapons(const host::PresentationFrame *p_frame);
 	// The drained events of this frame, oldest first (the ring's order): OwnShot, OwnTimed, RemoteShot, Detonation,
 	// Death (a dead shooter's burst ends), Spawn (a new life resets the slot's driver).
 	void on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock);

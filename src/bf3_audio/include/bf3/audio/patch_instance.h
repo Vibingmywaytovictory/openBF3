@@ -53,6 +53,7 @@
 #include "bf3/core/result.h"
 
 #include <cstdint>
+#include <limits> // PT1 rld [bypass headroom]
 #include <memory>
 #include <optional>
 #include <span>
@@ -159,6 +160,9 @@ struct HdrVoiceWindow { // M2b au [a3]
 	float top_db = 0.0f;
 	float headroom_db = 0.0f;
 	float overshoot_db = 0.0f; // AllowedOvershoot: an output louder than top + this sounds at top + this
+	// PT1 rld [bypass headroom]: the top this instance would set alone, max(WindowMinTop, its cull loudness); the
+	// BypassHeadroom outputs are never lowered below it (unset: no bypass).
+	float alone_top_db = std::numeric_limits<float>::infinity(); // PT1 rld [bypass headroom]
 };
 // M2b au [a3]: what the voice cull reads of an instance (voice_cull.h): the loudness at the listener = the patch's
 // Loudness + the loudest output's distance curve at the current geometry + Gain + its last cone attenuation, over the
@@ -239,6 +243,15 @@ public:
 	void pt1_set_fade(float p_level); // PT1 snd [fade]
 	bool pt1_fade_done() const; // PT1 snd [fade]: no fade running
 	float pt1_fade_level() const; // PT1 snd [fade]
+	// PT1 rld [live outputs] (docs/design/pt1-rld.md): the outputs (indices into SoundProgram::outputs) the cull counts
+	// while no sampler slot is busy yet (the first block after a start). Empty: every output, as before. Call it before
+	// the Start command hands the instance to the mixer.
+	void set_loudness_outputs(std::span<const uint16_t> p_outputs);
+	// PT1 rld [no stop] (docs/design/pt1-rld.md): treat the program's stop event as seen: the instance ends when its
+	// samplers are idle, and the mixer's Stop posts nothing. For one-shots started by another event (Reload, Action,
+	// Bolt) of a weapon patch, whose stop event is the trigger release: on a single-fire patch it fires a round.
+	// Before the Start command, like set_loudness_outputs.
+	void skip_stop_event();
 
 	PatchInstance(const PatchInstance &) = delete;
 	PatchInstance &operator=(const PatchInstance &) = delete;

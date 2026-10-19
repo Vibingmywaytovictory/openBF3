@@ -45,6 +45,8 @@ bool one_plugin_node(SoundNodeType t) {
 
 constexpr uint32_t kMaxDelaySeconds = 4;
 
+std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p); // PT1 rld [live outputs]: in the PT1 rld block at the end
+
 } // namespace
 
 PatchInstance::~PatchInstance() = default;
@@ -251,6 +253,14 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.voice_buffers.assign(p.voices.size() * 2 * kMaxSubBlock, 0.0f);
 	st.voice_tapped.assign(p.voices.size(), 0);
 	st.voice_live.assign(p.voices.size(), 0); // integ/m2b-w1 [lazy zero]
+	if (p.outputs.size() <= 64) { // PT1 rld [live outputs]: the outputs each slot's voice feeds (more than 64: unknown, all)
+		const std::vector<uint64_t> masks = voice_output_masks(p);
+		for (SlotState &sl : st.slots) {
+			if (sl.voice < masks.size()) {
+				sl.outputs_mask = masks[sl.voice];
+			}
+		}
+	}
 	self->slot_views_.resize(st.slots.size());
 	return self;
 }
@@ -573,8 +583,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					if (ps.output != UINT32_MAX) {
 						const OutputState &o = st.outputs[ps.output];
 						if (st.hdr.active && p.outputs[ps.output].enable_hdr) { // M2b au R5
-							const float over = std::max(0.0f, p.loudness_db + o.curve_gain_db + o.cone_db - (st.hdr.top_db + st.hdr.overshoot_db)); // M2b au R5
-							target = st.hdr.suspended ? 0.0f : db_to_gain(o.curve_gain_db + o.cone_db + hdr_window_db - over); // M2b au R5
+							target = st.hdr_send_gain(o, hdr_window_db); // PT1 rld [bypass headroom]: replaces the R5 over / target lines (moved into it)
 						} else { // M2b au R5
 							target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
 						} // M2b au R5
@@ -865,24 +874,39 @@ VoiceCullInfo PatchInstance::cull_info() const {
 	// The curve at the current distance (as State::evaluate_program computes it), so a voice that has not been
 	// evaluated yet (its first block) is measured where it is.
 	const float metres = st.geometry.distance;
-	float loudest = -std::numeric_limits<float>::infinity();
-	for (size_t o = 0; o < p.outputs.size(); ++o) {
-		const ca::SoundOutput &out = p.outputs[o];
-		if (any_hdr && !out.enable_hdr) {
-			continue;
-		}
-		float d = metres;
-		if (metres < out.min_distance) {
-			d = metres + (out.min_distance - metres) * st.tuning.min_distance_clamp;
-		}
-		const float cone = o < st.outputs.size() ? st.outputs[o].cone_db : 0.0f;
-		const float at = out.attenuation.evaluate(d * st.tuning.curve_x_metres) + out.gain_db + cone;
-		if (std::isfinite(at)) {
-			loudest = std::max(loudest, at);
-		}
-	}
+	// PT1 rld [live outputs] (docs/design/pt1-rld.md): only the outputs the busy slots feed (a reload instance's gunshot
+	// outputs play nothing and put the window top 21 dB over it); none busy yet: the starter's hint, else every output.
+	uint64_t live = 0;
 	for (const SlotState &sl : st.slots) {
-		info.voices += (sl.play.active || sl.pending.armed) ? 1 : 0;
+		const bool busy = sl.play.active || sl.pending.armed;
+		info.voices += busy ? 1 : 0;
+		live |= busy ? sl.outputs_mask : 0;
+	}
+	if (live == 0) {
+		live = st.loudness_hint != 0 ? st.loudness_hint : ~uint64_t(0);
+	}
+	const auto loudest_of = [&](uint64_t p_mask) {
+		float loudest = -std::numeric_limits<float>::infinity();
+		for (size_t o = 0; o < p.outputs.size(); ++o) {
+			const ca::SoundOutput &out = p.outputs[o];
+			if ((any_hdr && !out.enable_hdr) || (o < 64 && (p_mask & (uint64_t(1) << o)) == 0)) {
+				continue;
+			}
+			float d = metres;
+			if (metres < out.min_distance) {
+				d = metres + (out.min_distance - metres) * st.tuning.min_distance_clamp;
+			}
+			const float cone = o < st.outputs.size() ? st.outputs[o].cone_db : 0.0f;
+			const float at = out.attenuation.evaluate(d * st.tuning.curve_x_metres) + out.gain_db + cone;
+			if (std::isfinite(at)) {
+				loudest = std::max(loudest, at);
+			}
+		}
+		return loudest;
+	};
+	float loudest = loudest_of(live);
+	if (!std::isfinite(loudest) && live != ~uint64_t(0)) {
+		loudest = loudest_of(~uint64_t(0)); // the busy voices feed no (EnableHdr) output: as before
 	}
 	info.hdr = any_hdr;
 	info.loudness_db = p.loudness_db + (std::isfinite(loudest) ? loudest : 0.0f);
@@ -974,8 +998,7 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 			if (r_ps.output != UINT32_MAX) {
 				const OutputState &o = outputs[r_ps.output];
 				if (hdr.active && p.outputs[r_ps.output].enable_hdr) {
-					const float over = std::max(0.0f, p.loudness_db + o.curve_gain_db + o.cone_db - (hdr.top_db + hdr.overshoot_db));
-					target = hdr.suspended ? 0.0f : db_to_gain(o.curve_gain_db + o.cone_db + p_hdr_window_db - over);
+					target = hdr_send_gain(o, p_hdr_window_db); // PT1 rld [bypass headroom]: replaces the over / target lines (moved into it)
 				} else {
 					target = db_to_gain(o.curve_gain_db + o.cone_db + p_window_db);
 				}
@@ -1032,6 +1055,81 @@ bool PatchInstance::pt1_fade_done() const {
 
 float PatchInstance::pt1_fade_level() const {
 	return state_->pt1_fade;
+}
+
+// PT1 rld (docs/design/pt1-rld.md): the voice cull's live outputs.
+
+namespace {
+
+// PT1 rld [live outputs]: per voice, bit o = the voice reaches output o (the voice holding the
+// output's main send, or its low pass) through its voice sends. Bounded: at most one pass per voice.
+std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p) {
+	const size_t nv = p_p.voices.size();
+	std::vector<uint64_t> m(nv, 0);
+	for (size_t o = 0; o < p_p.outputs.size() && o < 64; ++o) {
+		const ca::SoundOutput &so = p_p.outputs[o];
+		const uint16_t v = so.main_send_plugin.valid() ? so.main_send_plugin.voice : so.low_pass.voice;
+		if (v < nv) {
+			m[v] |= uint64_t(1) << o;
+		}
+	}
+	for (size_t pass = 0; pass < nv; ++pass) {
+		bool changed = false;
+		for (size_t v = 0; v < nv; ++v) {
+			const ca::SoundVoice &voice = p_p.voices[v];
+			for (uint32_t k = 0; k < voice.plugins_count && size_t(voice.plugins_begin) + k < p_p.plugins.size(); ++k) {
+				const uint16_t c = p_p.plugins[voice.plugins_begin + k].connection;
+				if (c == ca::kNoRegister || c >= p_p.connections.size() || p_p.connections[c].to_bus) {
+					continue;
+				}
+				const uint16_t to = p_p.connections[c].voice;
+				if (to < nv && (m[v] | m[to]) != m[v]) {
+					m[v] |= m[to];
+					changed = true;
+				}
+			}
+		}
+		if (!changed) {
+			break;
+		}
+	}
+	return m;
+}
+
+} // namespace
+
+void PatchInstance::set_loudness_outputs(std::span<const uint16_t> p_outputs) {
+	uint64_t m = 0;
+	for (const uint16_t o : p_outputs) {
+		m |= o < 64 ? uint64_t(1) << o : 0;
+	}
+	state_->loudness_hint = m;
+}
+
+void PatchInstance::skip_stop_event() { // PT1 rld [no stop]
+	state_->stop_seen = true;
+}
+
+// PT1 rld [bypass headroom] (docs/design/pt1-rld.md "BypassHeadroom"): the send gain of an EnableHdr output under the
+// mixer's window (p_hdr_window_db = Loudness - top - Headroom + master). An output whose BypassHeadroom port is on
+// (on every output of the kit firearms, driven by IsFirstPerson: the own 1p sounds) is never lowered below the window
+// top its instance would set alone, max(WindowMinTop, the instance's cull loudness), which the mixer passes as
+// alone_top_db: louder sounds (the own burst's reflections tail, another soldier's shot) do not duck it, and it is
+// not suspended. The own gunshot sets the top itself, so it is unchanged; the own reload (79.5 dB) plays at the
+// 80 dB window it has alone. What BF3 does with the port is not known: a named default, measured = false. With the
+// port off this is M2b au R5's gain unchanged.
+float PatchInstance::State::hdr_send_gain(const detail::OutputState &p_o, float p_hdr_window_db) const {
+	const ca::SoundProgram &p = *program;
+	const float level = p.loudness_db + p_o.curve_gain_db + p_o.cone_db;
+	float top = hdr.top_db;
+	if (p_o.bypass_headroom && std::isfinite(hdr.alone_top_db)) {
+		top = std::min(hdr.top_db, hdr.alone_top_db);
+	} else if (hdr.suspended) {
+		return 0.0f;
+	}
+	const float window_db = p_hdr_window_db + (hdr.top_db - top);
+	const float over = std::max(0.0f, level - (top + hdr.overshoot_db));
+	return db_to_gain(p_o.curve_gain_db + p_o.cone_db + window_db - over);
 }
 
 } // namespace bf3::audio
