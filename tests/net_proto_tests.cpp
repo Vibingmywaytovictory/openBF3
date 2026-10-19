@@ -28,6 +28,9 @@ namespace {
 int decode_reencode_v2(net::MessageType p_type, std::span<const uint8_t> p_bytes);
 bool same_report_v2(const net::DebugReport &p_a, const net::DebugReport &p_b);
 void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out);
+// M2b nt: protocol v3 helpers, defined in the "M2b nt" block at the end of this file.
+int decode_reencode_v3(net::MessageType p_type, std::span<const uint8_t> p_bytes);
+void append_v3_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out);
 
 // splitmix64: the tests' own seeded stream (independent of the netsim's).
 struct Rng {
@@ -258,6 +261,9 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 		case net::MessageType::ShotEvents:
 		case net::MessageType::CombatEvents:
 		case net::MessageType::KitSelect:
+		case net::MessageType::MatchState: // M2b nt: v3
+		case net::MessageType::PlayerList: // M2b nt
+		case net::MessageType::SpawnRequest: // M2b nt
 			return decode_reencode_v2(*type, p_bytes);
 	}
 	return -1;
@@ -314,6 +320,7 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> sample_datagrams() {
 	}
 	out.emplace_back("DebugReport", net::encode_debug_report(rep));
 	append_v2_samples(out); // M2a nt
+	append_v3_samples(out); // M2b nt
 	return out;
 }
 
@@ -628,7 +635,7 @@ TEST_SUITE("net-proto") {
 			const uint8_t b = uint8_t(t);
 			known += net::peek_type(std::span<const uint8_t>(&b, 1)).has_value() ? 1 : 0;
 		}
-		CHECK(known == 15); // M2a nt: + SnapshotOthers, ShotEvents, CombatEvents, KitSelect
+		CHECK(known == 18); // M2a nt: + SnapshotOthers, ShotEvents, CombatEvents, KitSelect; M2b nt (R9): + MatchState, PlayerList, SpawnRequest
 		const uint8_t s = 1;
 		CHECK(net::peek_type(std::span<const uint8_t>(&s, 1)) == net::MessageType::Snapshot);
 	}
@@ -682,7 +689,7 @@ TEST_SUITE("net-proto") {
 		{
 			const net::Spawned s{ 5, 101, sample_state(rng, 4242) };
 			const std::vector<uint8_t> b = net::encode_spawned(s);
-			CHECK(b.size() == 1 + 1 + 4 + 77 + 2); // the own-state block is 77 bytes (docs §7.3); M2a nt v2: + kit, team
+			CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 1); // the own-state block is 77 bytes (docs §7.3); M2a nt v2: + kit, team; M2b nt v3: + revived
 			auto d = net::decode_spawned(b);
 			REQUIRE(d);
 			CHECK(d->slot == 5);
@@ -1092,6 +1099,7 @@ TEST_SUITE("net-proto") {
 				write_state_raw(w, s, p_pose, p_mode);
 				w.write_bits(0, 8); // M2a nt v2: kit
 				w.write_bits(1, 8); // team
+				w.write_bool(false); // M2b nt v3: revived
 			});
 		};
 		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f)));
@@ -1136,7 +1144,7 @@ TEST_SUITE("net-proto") {
 				w.write_bits(p_phase, 8);
 				w.write_bool(false);
 				w.write_bits(0, 64);
-				for (const unsigned bits : { 64u, 64u, 8u, 64u, 8u }) { // M2a nt v2: match seed, weapon hash, flags, kit hash, rewind ticks
+				for (const unsigned bits : { 64u, 64u, 8u, 64u, 8u, 64u, 8u }) { // M2a nt v2: match seed, weapon hash, flags, kit hash, rewind ticks; M2b nt v3: logic digest, rules flags
 					w.write_bits(0, bits);
 				}
 			});
@@ -1966,7 +1974,7 @@ int decode_reencode_v2(net::MessageType p_type, std::span<const uint8_t> p_bytes
 			return b && b->kit == a->kit && b->team == a->team ? 1 : 0;
 		}
 		default:
-			return -1;
+			return decode_reencode_v3(p_type, p_bytes); // M2b nt: v3 (the M2b nt block at the end of this file)
 	}
 }
 
@@ -2024,12 +2032,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 2);
+		CHECK(net::kProtocolVersion == 3); // M2b nt (R9): v3
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 2);
-		CHECK(net::MatchInfo{}.protocol == 2);
+		CHECK(net::Hello{}.protocol == 3); // M2b nt: v3
+		CHECK(net::MatchInfo{}.protocol == 3); // M2b nt: v3
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -2059,7 +2067,7 @@ TEST_SUITE("net-proto") {
 				s.kit = kit;
 				s.team = team;
 				const std::vector<uint8_t> b = net::encode_spawned(s);
-				CHECK(b.size() == 1 + 1 + 4 + 77 + 2);
+				CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 1); // M2b nt v3: + revived
 				auto d = net::decode_spawned(b);
 				CHECK(d.ok() == (kit < net::kMaxKits && team <= net::kMaxTeam));
 				if (d) {
@@ -2752,16 +2760,19 @@ TEST_SUITE("net-proto") {
 			w.write_varint(200);
 			w.write_varint(57);
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 		}), kFrame));
 		CHECK_FALSE(net::decode_combat_events(message(tick, [](net::BitWriter &w) {
 			w.write_varint(0);
 			w.write_varint(~0ull);
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 		}), kFrame));
 		CHECK_FALSE(net::decode_combat_events(message(tick, [](net::BitWriter &w) {
 			w.write_varint(0);
 			w.write_varint(10); // the bytes are not there
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 		}), kFrame));
 		const auto death = [](net::BitWriter &w, uint32_t p_back) {
 			w.write_bits(1, 7);
@@ -2772,23 +2783,27 @@ TEST_SUITE("net-proto") {
 			w.write_bool(false);
 			w.write_varint(p_back);
 			w.write_bits(0, 16);
+			w.write_bool(false); // M2b nt: v3, not stamped
 		};
 		CHECK(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
 			w.write_varint(0);
 			w.write_varint(1);
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 			death(w, tick - 1);
 		}), kFrame));
 		CHECK_FALSE(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
 			w.write_varint(0);
 			w.write_varint(1);
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 			death(w, tick); // before tick 1
 		}), kFrame));
 		CHECK_FALSE(net::decode_combat_events(message(0, [&](net::BitWriter &w) {
 			w.write_varint(0);
 			w.write_varint(1);
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 			death(w, 0); // server tick 0 holds no time
 		}), kFrame));
 		const auto detonation = [](net::BitWriter &w, uint32_t p_def) {
@@ -2808,12 +2823,14 @@ TEST_SUITE("net-proto") {
 			w.write_varint(0);
 			w.write_varint(0);
 			w.write_varint(1);
+			w.write_varint(0); // M2b nt: v3, the revive count
 			detonation(w, 254);
 		}), kFrame));
 		CHECK_FALSE(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
 			w.write_varint(0);
 			w.write_varint(0);
 			w.write_varint(1);
+			w.write_varint(0); // M2b nt: v3, the revive count
 			detonation(w, 255);
 		}), kFrame));
 		const auto hit = [](net::BitWriter &w, uint32_t p_damage) {
@@ -2836,12 +2853,14 @@ TEST_SUITE("net-proto") {
 			w.write_varint(1);
 			w.write_varint(0);
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 			hit(w, 10'000'000);
 		}), kFrame));
 		CHECK_FALSE(net::decode_combat_events(message(tick, [&](net::BitWriter &w) {
 			w.write_varint(1);
 			w.write_varint(0);
 			w.write_varint(0);
+			w.write_varint(0); // M2b nt: v3, the revive count
 			hit(w, 10'000'001);
 		}), kFrame));
 	}
@@ -2983,5 +3002,477 @@ TEST_SUITE("net-proto") {
 		so.others[4].team = 3;
 		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(s)));
 		CHECK_FALSE(net::decode_snapshot_others(net::encode_snapshot_others(so)));
+	}
+}
+
+// M2b nt (R9, docs/design/m2b.md §3.7, docs/design/m2b-nt.md §2): protocol v3. MatchState, PlayerList and
+// SpawnRequest; the v3 fields of MatchInfo, Spawned and CombatEvents (the death stamp, the revives). The decoders take
+// hostile bytes: the generic truncation / mutation cases above run on append_v3_samples too.
+namespace {
+
+net::PlayerRow sample_row(Rng &r_rng, uint8_t p_slot) {
+	net::PlayerRow row;
+	row.slot = p_slot;
+	row.team = uint8_t(r_rng.below(3));
+	row.kit = uint8_t(r_rng.below(4));
+	row.bot = (r_rng.next() & 1) != 0;
+	row.alive = (r_rng.next() & 1) != 0;
+	row.ping_ms = uint16_t(r_rng.next());
+	row.kills = uint16_t(r_rng.next());
+	row.deaths = uint16_t(r_rng.next());
+	row.score = int32_t(uint32_t(r_rng.next()));
+	const std::string name = "p" + std::to_string(p_slot) + (p_slot % 3 == 0 ? "\xC3\xA9\xE2\x82\xAC" : "");
+	net::set_player_name(row, name);
+	return row;
+}
+
+net::MatchState sample_match_state(Rng &r_rng) {
+	net::MatchState m;
+	m.phase = net::MatchPhase(r_rng.below(4));
+	m.round_start_tick = uint32_t(r_rng.next());
+	m.countdown_end_tick = uint32_t(r_rng.next());
+	m.kills = { int32_t(uint32_t(r_rng.next())), -int32_t(r_rng.below(5)) };
+	m.kill_limit = int32_t(r_rng.below(1000));
+	m.winner = uint8_t(r_rng.below(3));
+	m.killer_camera = (r_rng.next() & 1) != 0;
+	m.round_end_tick = uint32_t(r_rng.next());
+	m.unspawn_tick = uint32_t(r_rng.next());
+	m.restart_tick = uint32_t(r_rng.next());
+	m.restrict_until_tick = UINT32_MAX;
+	m.restrict_mask = uint32_t(r_rng.next()) & net::restrict_bits::kAll;
+	return m;
+}
+
+bool same_match_state(const net::MatchState &p_a, const net::MatchState &p_b) {
+	return p_a.phase == p_b.phase && p_a.round_start_tick == p_b.round_start_tick && p_a.countdown_end_tick == p_b.countdown_end_tick &&
+			p_a.kills == p_b.kills && p_a.kill_limit == p_b.kill_limit && p_a.winner == p_b.winner && p_a.killer_camera == p_b.killer_camera &&
+			p_a.round_end_tick == p_b.round_end_tick && p_a.unspawn_tick == p_b.unspawn_tick && p_a.restart_tick == p_b.restart_tick &&
+			p_a.restrict_until_tick == p_b.restrict_until_tick && p_a.restrict_mask == p_b.restrict_mask;
+}
+
+bool same_row(const net::PlayerRow &p_a, const net::PlayerRow &p_b) {
+	return p_a.slot == p_b.slot && p_a.team == p_b.team && p_a.kit == p_b.kit && p_a.bot == p_b.bot && p_a.alive == p_b.alive &&
+			p_a.name_bytes == p_b.name_bytes && p_a.ping_ms == p_b.ping_ms && p_a.kills == p_b.kills && p_a.deaths == p_b.deaths &&
+			p_a.score == p_b.score && p_a.name == p_b.name;
+}
+
+bool same_player_list(const net::PlayerList &p_a, const net::PlayerList &p_b) {
+	if (p_a.server_tick != p_b.server_tick || p_a.full != p_b.full || p_a.rows.size() != p_b.rows.size() || p_a.removed != p_b.removed) {
+		return false;
+	}
+	for (size_t i = 0; i < p_a.rows.size(); ++i) {
+		if (!same_row(p_a.rows[i], p_b.rows[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// sample_combat with the v3 fields: every other death stamped, p_revives revives.
+net::CombatEvents sample_combat_v3(Rng &r_rng, sim::Tick p_tick, size_t p_hits, size_t p_deaths, size_t p_detonations, size_t p_revives) {
+	net::CombatEvents m = sample_combat(r_rng, p_tick, p_hits, p_deaths, p_detonations);
+	for (size_t i = 0; i < m.deaths.size(); i += 2) {
+		m.deaths[i].respawn_tick = p_tick + 600;
+		m.deaths[i].revive_until = p_tick + 300;
+		m.deaths[i].killer_health = r_rng.uniform(1, 100);
+	}
+	for (size_t i = 0; i < p_revives; ++i) {
+		m.revives.push_back({ uint8_t(r_rng.below(128)), uint8_t(r_rng.below(128)), p_tick - r_rng.below(40) });
+	}
+	return m;
+}
+
+int decode_reencode_v3(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
+	switch (p_type) {
+		case net::MessageType::MatchState: {
+			auto a = net::decode_match_state(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_match_state(net::encode_match_state(*a));
+			return b && same_match_state(*a, *b) ? 1 : 0;
+		}
+		case net::MessageType::PlayerList: {
+			auto a = net::decode_player_list(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			size_t clamped = 0;
+			auto b = net::decode_player_list(net::encode_player_list(*a, &clamped));
+			return b && clamped == 0 && same_player_list(*a, *b) ? 1 : 0;
+		}
+		case net::MessageType::SpawnRequest: {
+			auto a = net::decode_spawn_request(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_spawn_request(net::encode_spawn_request(*a));
+			return b && b->kit == a->kit && b->spawn_choice == a->spawn_choice ? 1 : 0;
+		}
+		default:
+			return -1;
+	}
+}
+
+void append_v3_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out) {
+	Rng rng(0x3003);
+	r_out.emplace_back("MatchState", net::encode_match_state(sample_match_state(rng)));
+	net::PlayerList full;
+	full.server_tick = 90000;
+	full.full = true;
+	for (uint8_t s = 0; s < 12; ++s) {
+		full.rows.push_back(sample_row(rng, uint8_t(s * 5)));
+	}
+	r_out.emplace_back("PlayerList (full)", net::encode_player_list(full));
+	net::PlayerList delta;
+	delta.server_tick = 90015;
+	delta.rows.push_back(sample_row(rng, 3));
+	delta.rows.push_back(sample_row(rng, 63));
+	delta.removed = { 0, 7, 40 };
+	r_out.emplace_back("PlayerList (delta)", net::encode_player_list(delta));
+	r_out.emplace_back("SpawnRequest", net::encode_spawn_request({ 2, 0 }));
+	r_out.emplace_back("CombatEvents (v3)", net::encode_combat_events(sample_combat_v3(rng, 88888, 2, 3, 1, 2), kFrame));
+	net::MatchInfo mi;
+	mi.level = "MP_Subway";
+	mi.mode = "TeamDeathMatch0";
+	mi.logic_digest = 0xFEDCBA9876543210ull;
+	mi.rules_flags = net::rules_flags::kTdm | net::rules_flags::kDeployScreen | net::rules_flags::kRevive;
+	r_out.emplace_back("MatchInfo (v3)", net::encode_match_info(mi));
+	net::Spawned sp{ 5, 18, sample_state(rng, 4100) };
+	sp.kit = 1;
+	sp.team = 1;
+	sp.revived = true;
+	r_out.emplace_back("Spawned (v3 revived)", net::encode_spawned(sp));
+}
+
+} // namespace
+
+TEST_SUITE("net-proto") {
+	TEST_CASE("proto v3: MatchState round trips every field; hostile bytes are refused") {
+		Rng rng(331);
+		for (int i = 0; i < 200; ++i) {
+			const net::MatchState m = sample_match_state(rng);
+			const std::vector<uint8_t> b = net::encode_match_state(m);
+			REQUIRE(b.size() == 1 + 39); // 312 bits
+			auto d = net::decode_match_state(b);
+			REQUIRE(d);
+			CHECK(same_match_state(m, *d));
+		}
+		net::MatchState m;
+		CHECK(net::decode_match_state(net::encode_match_state(m))->restrict_mask == net::restrict_bits::kAll);
+		// Out-of-range values never reach the wire: the encoder writes the nearest legal value.
+		m.phase = net::MatchPhase(9);
+		m.winner = 7;
+		m.kill_limit = -3;
+		auto dm = net::decode_match_state(net::encode_match_state(m));
+		REQUIRE(dm);
+		CHECK(dm->phase == net::MatchPhase::RoundOver);
+		CHECK(dm->winner == 2);
+		CHECK(dm->kill_limit == 0);
+		const auto state = [](uint32_t p_phase, uint32_t p_winner, int32_t p_limit) {
+			return craft(net::MessageType::MatchState, [&](net::BitWriter &w) {
+				w.write_bits(p_phase, 8);
+				w.write_bits(0, 32);
+				w.write_bits(0, 32);
+				w.write_signed(0, 32);
+				w.write_signed(0, 32);
+				w.write_signed(p_limit, 32);
+				w.write_bits(p_winner, 2);
+				w.write_bool(true);
+				for (int k = 0; k < 4; ++k) {
+					w.write_bits(0, 32);
+				}
+				w.write_bits(0, 13);
+			});
+		};
+		CHECK(net::decode_match_state(state(3, 2, 100)));
+		CHECK_FALSE(net::decode_match_state(state(4, 0, 100)));
+		CHECK_FALSE(net::decode_match_state(state(0, 3, 100)));
+		CHECK_FALSE(net::decode_match_state(state(0, 0, -1)));
+		std::vector<uint8_t> extra = state(1, 1, 5);
+		extra.push_back(0);
+		CHECK_FALSE(net::decode_match_state(extra));
+	}
+
+	TEST_CASE("proto v3: PlayerList round trips full and delta lists; the encoder canonicalises and counts") {
+		Rng rng(332);
+		net::PlayerList full;
+		full.server_tick = 1234;
+		full.full = true;
+		for (uint8_t s = 0; s < net::kMaxPlayerRows; ++s) {
+			full.rows.push_back(sample_row(rng, s));
+		}
+		size_t clamped = 99;
+		const std::vector<uint8_t> b = net::encode_player_list(full, &clamped);
+		CHECK(clamped == 0);
+		auto d = net::decode_player_list(b);
+		REQUIRE(d);
+		CHECK(same_player_list(full, *d));
+		MESSAGE("PlayerList: 64 rows ", b.size(), " B");
+		CHECK(b.size() <= 1 + 5 + 64 * 29);
+		CHECK(net::player_name(d->rows[3]) == "p3\xC3\xA9\xE2\x82\xAC");
+		// The canonical form, 8 changes counted: a second row of slot 9 (1), a row of slot 64 (2), team 3 written 0
+		// (3), kit 7 written 3 (4), a name with a broken UTF-8 tail cut (5), removed 30 twice (6), removed 2 = a row's
+		// slot (7), removed 70 >= 64 (8); the rows go out sorted.
+		net::PlayerList messy;
+		messy.server_tick = 99;
+		messy.rows.push_back(sample_row(rng, 9));
+		messy.rows.push_back(sample_row(rng, 2));
+		messy.rows.push_back(sample_row(rng, 9));
+		messy.rows.push_back(sample_row(rng, 64));
+		messy.rows[1].team = 3;
+		messy.rows[0].kit = 7;
+		messy.rows[0].name = {};
+		std::memcpy(messy.rows[0].name.data(), "abc\xE2\x82", 5);
+		messy.rows[0].name_bytes = 5;
+		messy.removed = { 30, 30, 2, 70 };
+		auto dm = net::decode_player_list(net::encode_player_list(messy, &clamped));
+		REQUIRE(dm);
+		CHECK(clamped == 8);
+		REQUIRE(dm->rows.size() == 2);
+		CHECK(dm->rows[0].slot == 2);
+		CHECK(dm->rows[0].team == 0);
+		CHECK(dm->rows[1].slot == 9);
+		CHECK(dm->rows[1].kit == 3);
+		CHECK(net::player_name(dm->rows[1]) == "abc");
+		CHECK(dm->removed == std::vector<uint8_t>{ 30 });
+		// A full list carries no removed slots.
+		net::PlayerList full_removed = full;
+		full_removed.rows.resize(3);
+		full_removed.removed = { 50 };
+		auto df = net::decode_player_list(net::encode_player_list(full_removed, &clamped));
+		REQUIRE(df);
+		CHECK(clamped == 1);
+		CHECK(df->removed.empty());
+		// More than 64 rows cannot exist (one per slot < 64): every extra row is dropped and counted.
+		net::PlayerList many = full;
+		for (uint8_t s = 0; s < 10; ++s) {
+			many.rows.push_back(sample_row(rng, s));
+		}
+		CHECK(net::decode_player_list(net::encode_player_list(many, &clamped))->rows.size() == net::kMaxPlayerRows);
+		CHECK(clamped == 10);
+	}
+
+	TEST_CASE("proto v3: hostile PlayerList bytes are refused") {
+		const auto list = [](bool p_full, uint32_t p_rows, uint32_t p_removed, auto &&p_body) {
+			return craft(net::MessageType::PlayerList, [&](net::BitWriter &w) {
+				w.write_bits(7, 32);
+				w.write_bool(p_full);
+				w.write_bits(p_rows, 7);
+				w.write_bits(p_removed, 7);
+				p_body(w);
+			});
+		};
+		// A row whose name_bytes field says p_name_bytes and whose name is p_name (the bytes actually written).
+		const auto row = [](net::BitWriter &w, uint32_t p_slot, uint32_t p_team, uint32_t p_name_bytes, std::string_view p_name) {
+			w.write_bits(p_slot, 6);
+			w.write_bits(p_team, 2);
+			w.write_bits(1, 2);
+			w.write_bool(false);
+			w.write_bool(true);
+			w.write_bits(p_name_bytes, 5);
+			w.write_bits(30, 16);
+			w.write_bits(1, 16);
+			w.write_bits(2, 16);
+			w.write_signed(-100, 32);
+			for (const char ch : p_name) {
+				w.write_bits(uint8_t(ch), 8);
+			}
+		};
+		const auto none = [](net::BitWriter &) {};
+		auto ok = net::decode_player_list(list(false, 2, 1, [&](net::BitWriter &w) {
+			row(w, 1, 2, 3, "abc");
+			row(w, 5, 0, 0, "");
+			w.write_bits(9, 6);
+		}));
+		REQUIRE(ok);
+		CHECK(ok->rows[0].score == -100);
+		CHECK(net::player_name(ok->rows[0]) == "abc");
+		CHECK(ok->removed == std::vector<uint8_t>{ 9 });
+		CHECK(net::decode_player_list(list(true, 0, 0, none)));
+		CHECK_FALSE(net::decode_player_list(list(false, 65, 0, none))); // above the bound
+		CHECK_FALSE(net::decode_player_list(list(false, 0, 65, none)));
+		CHECK_FALSE(net::decode_player_list(list(false, 64, 0, none))); // the bytes are not there
+		CHECK_FALSE(net::decode_player_list(list(true, 0, 1, [](net::BitWriter &w) { w.write_bits(3, 6); }))); // full with removed
+		CHECK_FALSE(net::decode_player_list(list(false, 2, 0, [&](net::BitWriter &w) {
+			row(w, 5, 1, 0, "");
+			row(w, 5, 1, 0, ""); // not ascending
+		})));
+		CHECK_FALSE(net::decode_player_list(list(false, 2, 0, [&](net::BitWriter &w) {
+			row(w, 6, 1, 0, "");
+			row(w, 5, 1, 0, "");
+		})));
+		CHECK_FALSE(net::decode_player_list(list(false, 1, 0, [&](net::BitWriter &w) { row(w, 1, 3, 0, ""); }))); // team 3
+		CHECK_FALSE(net::decode_player_list(list(false, 1, 0, [&](net::BitWriter &w) { row(w, 1, 1, 17, "abcdefghijklmnopq"); }))); // > 16
+		CHECK_FALSE(net::decode_player_list(list(false, 1, 0, [&](net::BitWriter &w) { row(w, 1, 1, 2, "\xC3("); }))); // bad UTF-8
+		CHECK_FALSE(net::decode_player_list(list(false, 1, 0, [&](net::BitWriter &w) { row(w, 1, 1, 4, "ab"); }))); // beyond the bytes
+		CHECK_FALSE(net::decode_player_list(list(false, 1, 1, [&](net::BitWriter &w) {
+			row(w, 4, 1, 0, "");
+			w.write_bits(4, 6); // removed and a row
+		})));
+		CHECK_FALSE(net::decode_player_list(list(false, 0, 2, [](net::BitWriter &w) {
+			w.write_bits(8, 6);
+			w.write_bits(8, 6); // removed twice
+		})));
+		std::vector<uint8_t> extra = list(false, 0, 0, none);
+		extra.push_back(0);
+		CHECK_FALSE(net::decode_player_list(extra));
+	}
+
+	TEST_CASE("proto v3: set_player_name keeps the longest valid UTF-8 prefix of at most 16 bytes") {
+		net::PlayerRow row;
+		CHECK_FALSE(net::set_player_name(row, "short"));
+		CHECK(net::player_name(row) == "short");
+		CHECK(net::set_player_name(row, "0123456789abcdefXYZ"));
+		CHECK(net::player_name(row) == "0123456789abcdef");
+		// 15 ASCII bytes and a 2-byte character: the character does not fit, the cut lands on the boundary.
+		CHECK(net::set_player_name(row, "0123456789abcde\xC3\xA9"));
+		CHECK(net::player_name(row) == "0123456789abcde");
+		CHECK(row.name[15] == 0);
+		CHECK(net::set_player_name(row, "ab\xFF"));
+		CHECK(net::player_name(row) == "ab");
+		CHECK_FALSE(net::set_player_name(row, ""));
+		CHECK(row.name_bytes == 0);
+	}
+
+	TEST_CASE("proto v3: SpawnRequest round trips any value; the v3 fields of MatchInfo and Spawned") {
+		for (const uint32_t kit : { 0u, 3u, 4u, 255u }) {
+			auto d = net::decode_spawn_request(net::encode_spawn_request({ uint8_t(kit), uint8_t(kit ^ 1u) }));
+			REQUIRE(d);
+			CHECK(d->kit == kit);
+			CHECK(d->spawn_choice == uint8_t(kit ^ 1u));
+		}
+		CHECK(net::encode_spawn_request({}).size() == 3);
+		std::vector<uint8_t> short_request = net::encode_spawn_request({});
+		short_request.pop_back();
+		CHECK_FALSE(net::decode_spawn_request(short_request));
+		net::MatchInfo mi;
+		mi.logic_digest = 0x0102030405060708ull;
+		mi.rules_flags = net::rules_flags::kTdm | net::rules_flags::kRevive;
+		auto dmi = net::decode_match_info(net::encode_match_info(mi));
+		REQUIRE(dmi);
+		CHECK(dmi->logic_digest == mi.logic_digest);
+		CHECK(dmi->rules_flags == mi.rules_flags);
+		mi.rules_flags = 1u << 3; // unknown
+		CHECK_FALSE(net::decode_match_info(net::encode_match_info(mi)));
+		Rng rng(333);
+		for (const bool revived : { false, true }) {
+			net::Spawned sp{ 7, 3, sample_state(rng, 500) };
+			sp.revived = revived;
+			auto d = net::decode_spawned(net::encode_spawned(sp));
+			REQUIRE(d);
+			CHECK(d->revived == revived);
+		}
+	}
+
+	TEST_CASE("proto v3: CombatEvents carries the death stamp and the revives; an unstamped death costs one bit") {
+		Rng rng(334);
+		const sim::Tick tick = 7000;
+		const net::CombatEvents m = sample_combat_v3(rng, tick, 3, 4, 1, 5);
+		size_t clamped = 99;
+		auto d = net::decode_combat_events(net::encode_combat_events(m, kFrame, &clamped), kFrame);
+		REQUIRE(d);
+		CHECK(clamped == 0);
+		REQUIRE(d->deaths.size() == 4);
+		REQUIRE(d->revives.size() == 5);
+		for (size_t i = 0; i < 4; ++i) {
+			CHECK(d->deaths[i].respawn_tick == m.deaths[i].respawn_tick);
+			CHECK(d->deaths[i].revive_until == m.deaths[i].revive_until);
+			CHECK(std::fabs(d->deaths[i].killer_health - m.deaths[i].killer_health) <= 0.005f + 1e-4f);
+		}
+		for (size_t i = 0; i < 5; ++i) {
+			CHECK(d->revives[i].reviver == m.revives[i].reviver);
+			CHECK(d->revives[i].revived == m.revives[i].revived);
+			CHECK(d->revives[i].tick == m.revives[i].tick);
+		}
+		const size_t empty = net::encode_combat_events(sample_combat_v3(rng, tick, 0, 0, 0, 0), kFrame).size();
+		const size_t one_rev = net::encode_combat_events(sample_combat_v3(rng, tick, 0, 0, 0, 1), kFrame).size();
+		net::CombatEvents stamped = sample_combat_v3(rng, tick, 0, 1, 0, 0);
+		net::CombatEvents plain = stamped;
+		plain.deaths[0].respawn_tick = 0;
+		plain.deaths[0].revive_until = 0;
+		plain.deaths[0].killer_health = 0;
+		const size_t stamped_size = net::encode_combat_events(stamped, kFrame).size();
+		const size_t plain_size = net::encode_combat_events(plain, kFrame).size();
+		MESSAGE("CombatEvents v3: empty ", empty, " B; one revive +", one_rev - empty, " B; a stamped death ", stamped_size, " B, unstamped ",
+				plain_size, " B");
+		CHECK(empty == 1 + 4 + 4);
+		CHECK(one_rev - empty <= 3);
+		CHECK(stamped_size - plain_size == 11); // 32 + 32 + 24 bits
+		// Revives count in the bound, after hits, deaths and detonations; a revive after the message's tick is clamped.
+		net::CombatEvents many = sample_combat_v3(rng, tick, 250, 0, 0, 20);
+		auto dmany = net::decode_combat_events(net::encode_combat_events(many, kFrame, &clamped), kFrame);
+		REQUIRE(dmany);
+		CHECK(dmany->revives.size() == net::kMaxCombatEventsPerMessage - 250);
+		CHECK(clamped == 14);
+		net::CombatEvents late = sample_combat_v3(rng, tick, 0, 0, 0, 2);
+		late.revives[0].tick = tick + 5;
+		late.revives[1].revived = 200;
+		auto dlate = net::decode_combat_events(net::encode_combat_events(late, kFrame, &clamped), kFrame);
+		REQUIRE(dlate);
+		CHECK(clamped == 2);
+		REQUIRE(dlate->revives.size() == 1);
+		CHECK(dlate->revives[0].tick == tick);
+		net::CombatEvents hot = sample_combat_v3(rng, tick, 0, 1, 0, 0);
+		hot.deaths[0].killer_health = 1e9f;
+		auto dhot = net::decode_combat_events(net::encode_combat_events(hot, kFrame, &clamped), kFrame);
+		REQUIRE(dhot);
+		CHECK(dhot->deaths[0].killer_health == 100000.0f);
+		CHECK(clamped == 1);
+		// Hostile: a revive before tick 0, revive counts above the bound or beyond the bytes, a killer health code
+		// above 100,000 hp.
+		const auto message = [&](auto &&p_body) {
+			return craft(net::MessageType::CombatEvents, [&](net::BitWriter &w) {
+				w.write_bits(tick, 32);
+				p_body(w);
+			});
+		};
+		const auto revive = [](net::BitWriter &w, uint64_t p_back) {
+			w.write_bits(1, 7);
+			w.write_bits(2, 7);
+			w.write_varint(p_back);
+		};
+		const auto counts = [](net::BitWriter &w, uint64_t p_deaths, uint64_t p_revives) {
+			w.write_varint(0);
+			w.write_varint(p_deaths);
+			w.write_varint(0);
+			w.write_varint(p_revives);
+		};
+		CHECK(net::decode_combat_events(message([&](net::BitWriter &w) {
+			counts(w, 0, 1);
+			revive(w, tick);
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message([&](net::BitWriter &w) {
+			counts(w, 0, 1);
+			revive(w, tick + 1);
+		}), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message([&](net::BitWriter &w) { counts(w, 0, 257); }), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message([&](net::BitWriter &w) { counts(w, 0, ~0ull); }), kFrame));
+		CHECK_FALSE(net::decode_combat_events(message([&](net::BitWriter &w) { counts(w, 0, 40); }), kFrame)); // the bytes are not there
+		const auto death = [&](net::BitWriter &w, uint32_t p_killer_hp) {
+			w.write_bits(1, 7);
+			w.write_bits(2, 7);
+			w.write_bits(3, 8);
+			w.write_bits(1, 2);
+			w.write_bits(77, 32);
+			w.write_bool(false);
+			w.write_varint(1);
+			w.write_bits(0, 16);
+			w.write_bool(true);
+			w.write_bits(tick + 600, 32);
+			w.write_bits(tick + 300, 32);
+			w.write_bits(p_killer_hp, 24);
+		};
+		auto dd = net::decode_combat_events(message([&](net::BitWriter &w) {
+			counts(w, 1, 0);
+			death(w, 10'000'000);
+		}), kFrame);
+		REQUIRE(dd);
+		CHECK(dd->deaths[0].respawn_tick == tick + 600);
+		CHECK(dd->deaths[0].killer_health == 100000.0f);
+		CHECK_FALSE(net::decode_combat_events(message([&](net::BitWriter &w) {
+			counts(w, 1, 0);
+			death(w, 10'000'001);
+		}), kFrame));
 	}
 }
