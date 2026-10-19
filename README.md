@@ -2838,8 +2838,8 @@ the measured gates and the open issues: [docs/design/m2b-ru.md](docs/design/m2b-
   living assault teammate waits 8 s for a revive), regen after 10 s at 5 hp/s, the defibrillator's revive (a new life
   at the corpse with 20 hp, the kill taken back, 100 points), SpawnRequest refusals, the scored spawn choice, AutoTeam
   teams and the bots' kits. The GameServer calls it through named insertions (`// M2b ru [..]`, R1-R10).
-* **Not yet on the wire.** The v3 messages (MatchState, PlayerList, SpawnRequest, Spawned.revived, the death stamps)
-  are nt's; until they land the server builds them and sends nothing.
+* **On the wire.** Since the w1 merge the v3 messages (nt's codecs: MatchState, PlayerList, SpawnRequest,
+  Spawned.revived, the death stamps, ReviveEvent) travel, and host.tdm.server's scripted peers decode them.
 
 Commands (read-only on the install; the cases print BF3-derived numbers, keep the logs out of the repo):
 
@@ -2851,7 +2851,7 @@ b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=respawn* 
 b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=revive*     :: E5 revive
 b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=hostile*    :: E7 server half
 b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=install*    :: install unchanged
-ctest --preset dev-timing -R "^host\.tdm\.client$"                                                  :: E13 (timing; skipped until nt and bb)
+ctest --preset dev-timing -R "^host\.tdm\.client$"                                                  :: E13 (timing; skipped until bb)
 ```
 
 Measured 2026-10-19 on the dev preset, `m2b/ru` (tick counts, the same on every run):
@@ -2859,9 +2859,9 @@ Measured 2026-10-19 on the dev preset, `m2b/ru` (tick counts, the same on every 
 | gate | measured |
 |---|---|
 | E3 | regen from T + 600 at 0.08334 hp per tick, a second drop restarts it; immunity 120 ticks, Fire / move at +30 end it at +30, server = local motor (0 mismatches) |
-| E4 | respawn at death + 300 (+480 next to an assault teammate), the rules' kit; a deploy-screen Ready spawns nothing; M2a hashes kit `31b45dc7cc3f4271`, weapon `b8fd23d8ccfc4c63`, motor `6d75dd5f51d95090`; SpawnRequest on the wire PENDING (nt) |
-| E5 | bot and peer revived at the corpse (0.000 m), 20 hp, life + 1, enemy kills 1 -> 0, medic +100; living target and enemy medic refused; Spawned.revived PENDING (nt) |
-| E7 | refusals counted by kind; 300 hostile v3 datagrams, 300 counted; RoundOver refusal not exercised; asan: host.tdm.server, sim.weapons.unit, m2b.contract pass, no report |
-| E13 | not run (timing row; needs nt and bb) |
+| E4 | respawn at death + 300 (+480 next to an assault teammate), the rules' kit; a deploy-screen Ready spawns nothing; M2a hashes kit `31b45dc7cc3f4271`, weapon `b8fd23d8ccfc4c63`, motor `6d75dd5f51d95090` (equal to main 47871fa's); a SpawnRequest for respawn_tick - 1 refused, for respawn_tick accepted, Spawned in that tick with the kit; the peer's DeathEvent respawn_tick = death + 300; MatchState / PlayerList at the peer = the rules'; a v2 Hello kicked |
+| E5 | bot and peer revived at the corpse (0.000 m), 20 hp, life + 1, enemy kills 1 -> 0, medic +100; living target and enemy medic refused; Spawned.revived = 1 and the ReviveEvent at the peers; deploy screen: 0 revives after the man-down window, a deploy ends the man-down at once |
+| E7 | refusals counted by kind; 300 hostile v3 datagrams, all counted (298 bad, 2 judged by the rules); a SpawnRequest in RoundOver refused; asan: host.tdm.server, sim.weapons.unit, m2b.contract pass, no report |
+| E13 | not run (timing row; skips with PENDING (bb) until bb's add_tdm_bots) |
 | install.unchanged | clean (256 files) |
-| branch pass | `tools\build.cmd dev`: 139 rows, 137 passed, 2 skipped, 0 failed, 193.4 s |
+| branch pass | `tools\build.cmd dev` after the w1 merge (nt in): 140 rows, 138 passed, 2 skipped, 0 failed, 192.0 s |

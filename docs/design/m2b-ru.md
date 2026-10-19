@@ -112,16 +112,16 @@ the incomplete `Sv`.
   score), Unspawn.
 * `[recv]`: SpawnRequest -> `request_spawn(slot, kit, choice, tick + 1)`; an undecodable one counts in bad_datagrams.
 * `[snap]`: MatchInfo carries phase, logic_digest and rules_flags; a joining peer gets MatchState and a full
-  PlayerList; MatchState goes on change, changed rows at most every 15 ticks. With the W1.0 codec stubs the encoders
-  return empty and nothing is sent.
+  PlayerList; MatchState goes on change, changed rows at most every 15 ticks. Since the w1 merge (nt's v3 codecs,
+  b0f67f7) they travel; host.tdm.server's peers decode them.
 * `[view]`: `downed`, `phase`, `input_restricted`, `kit` from the rules (the defaults without them).
 
 **Where it differs from the design.**
 * A revive's score and the kill taken back show in the rows and MatchState one tick after the revive: the rows are
   the rules' step's, and the Revive order is applied after that step (the runtime's events go into the next step
   anyway). host.tdm.server checks them two ticks later.
-* The DeathEvent stamps (respawn_tick, revive_until, killer_health) are in `CombatEvents::deaths` on the server, but
-  the v2 combat codec does not carry them; they travel once nt's v3 codec lands.
+* A deploy-screen human's man-down window is longer than its respawn delay (measured: respawn_tick death + 300,
+  revive_until death + 780), so it can deploy inside the window; the accepted SpawnRequest ends the man-down at once.
 
 ## 6. Tests
 
@@ -130,15 +130,17 @@ which the shared level 3.2 s, gunplay 2.1 s, logic 0.02 s, the bot nav cold on a
 
 * **host.tdm.server** (functional, no label, parallel-safe; exits 77 without an install): the GameServer stepped back
   to back on the test thread with `ScriptedPeer`s and scripted server-side soldiers; no sockets, no wall-clock wait.
-  Cases `tuning`, `health*` (E3), `respawn*` (E4), `revive*` (E5), `hostile*` (E7, server half), `install unchanged`.
-* **host.tdm.client** (label `timing`, RUN_SERIAL): E13 through ServerHost + ClientSession. Written against the W1.0
-  declarations; it exits 77 with PENDING until `net::kProtocolVersion` is 3 (nt), and needs bb's `add_tdm_bots`. Not
-  run on this branch (a timing row, docs/testing.md).
+  Cases `tuning`, `health*` (E3), `respawn*` (E4), `revive*` (E5: two cases, the second with the deploy screen),
+  `hostile*` (E7, server half), `install unchanged`. Since the w1 merge every wire part runs on nt's v3 codecs (no
+  PENDING left).
+* **host.tdm.client** (label `timing`, RUN_SERIAL): E13 through ServerHost + ClientSession. nt's client is in; the
+  case first inits a GameServer with one TDM bot and exits 77 with PENDING (bb) while `add_tdm_bots` is the W1.0
+  stub. Its body (the sockets and real time) is not run on this branch (a timing row, docs/testing.md).
 * `sim.weapons.unit`: the defibrillator case (a synthetic u_defib with the data's numbers).
 * `m2b.contract`: `kRuLanded = true` (the `[abort hash]` and defib hash rows, `[init]` refusing rules without logic).
 
 `tests/tdm_fixture.h` bodies, as built: `ScriptedPeer` connects in its constructor, sends nothing for a SpawnRequest
-while the encoder is the W1.0 stub, stamps commands for `current_tick() + 1`, and keeps every decoded message;
+whose encoding is empty (never with nt's codec), stamps commands for `current_tick() + 1`, and keeps every decoded message;
 `run_tdm` runs 64 slots with dev commands, a `BotFillConfig` with count 0 (the BotLevel for walking), `tdm_bots` only
 when `bots > 0`, the peer's SpawnRequest every 30 ticks while dead (deploy screen), and a per-tick world hash over the
 soldier states, the weapons states, the teams and the MatchState bytes. `TdmRunConfig::keep_trace_records` is not
@@ -153,37 +155,27 @@ command per gate (the dev build directory; `--test-case` takes the case name's p
 |---|---|---|---|---|
 | E3 health | no regen before T + 600, then 1/12 hp per tick ± 1 tick; a new hit restarts the delay | first regen at T + 600 after both drops (79.98 hp left each), 61 steps of 0.08334 hp; SoldierDef 10 s / 5 hp/s | yes | `b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=health*` |
 | E3 immunity | 120 ticks from the spawn; Fire ends it, moving ends it; the server equals a local `SoldierMotor` over the client's MotorParams | idle +120, Fire at +30 -> +30, move at +30 -> +30; 0 per-tick protect_ticks mismatches (the abort map is [inferred], §2) | yes | same as E3 health |
-| E4 respawn (server) | DeathEvent respawn_tick = death + 300; bots respawn by themselves with the rules' kit; a deploy-screen Ready spawns nothing | +300 (respawned exactly at earliest_respawn), +480 next to a living assault teammate (revive wait), +300 for its enemy; gunplay kit == rules kit; R10: 0 spawns in 120 ticks | yes | `b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=respawn*` |
-| E4 M2a hashes | a load without the TDM kits gives M2a's kit_table_hash, weapon hash, motor_params_hash | M2a kit `31b45dc7cc3f4271`, weapon `b8fd23d8ccfc4c63`, motor `6d75dd5f51d95090` (TDM: `838d62104f6fb483`, `ffccf2d398c49167`, `d251e770c41372ef`); recorded from this branch's M2a path, **not** from a main 47871fa build (§8) | partly | same as E4 respawn |
-| E4 SpawnRequest (wire) | refused before respawn_tick, accepted at it, Spawned within 1 tick with the kit | PENDING (nt): the W1.0 encoder is empty; the refusal order itself is E7's | no (nt) | same as E4 respawn |
+| E4 respawn (server) | DeathEvent respawn_tick = death + 300; bots respawn by themselves with the rules' kit; a deploy-screen Ready spawns nothing | +300 (respawned exactly at earliest_respawn), +480 next to a living assault teammate (revive wait), +300 for its enemy; gunplay kit == rules kit; R10: 0 spawns in 120 ticks after Ready | yes | `b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=respawn*` |
+| E4 M2a hashes | a load without the TDM kits gives M2a's kit_table_hash, weapon hash, motor_params_hash | M2a kit `31b45dc7cc3f4271`, weapon `b8fd23d8ccfc4c63`, motor `6d75dd5f51d95090` (TDM: `838d62104f6fb483`, `ffccf2d398c49167`, `d251e770c41372ef`); measured from main 47871fa: a scratch program linked against `openBF3\b\dev`'s libraries (built 06:28 from 47871fa's src; no src change on main since) printed the same three for `load_shared_level` (gunplay) + `make_match_table`, install clean | yes | same as E4 respawn |
+| E4 SpawnRequest (wire) | refused before respawn_tick, accepted at it, Spawned within 1 tick with the kit | first deploy: Spawned in the request tick's own output (+0), kit 2; after a fall death at 437 the peer decoded DeathEvent respawn_tick 737 (+300, = earliest_respawn), revive_until 1217 (+780), killer_health 0; a request for 736 refused TooEarly (no Spawned), for 737 accepted, Spawned in 737's output with kit 3, life 1 -> 2; MatchState bytes at the peer = the rules', 4 player rows, 0 differ, 0 decode errors; a v2 Hello gets Kick "protocol 2 (server 3)" | yes | same as E4 respawn |
 | E5 revive (server) | a teammate's defib inside the window: a new life at the corpse with 20 hp, enemy count -1, reviver +100; a living target and an enemy medic do nothing; no stale respawn | bot and peer victims: revived +78 / +72 ticks after the death, life 1 -> 2, 20.00 hp, 0.000 m from the corpse, no immunity, team 2 kills 1 -> 0, medic score 0 -> 100; living target 3 shots refused; enemy medic refused; life unchanged past the old respawn tick | yes | `b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=revive*` |
-| E5 wire and deploy | Spawned.revived = 1 at the peer; after the window and after the victim deployed nothing happens | PENDING (nt): the v2 Spawned codec has no revived bit; the expired and deployed cases need a deploy-screen peer (SpawnRequest) | no (nt) | same as E5 |
-| E7 (server half) | SpawnRequests counted by refusal: alive, too early, bad kit, twice in a tick, RoundOver, spectator; hostile v3 datagrams counted, nothing crashes | refusals on TdmRules: 10 requests, accepted 2, alive 2, too early 1, bad kit 2, phase 1, rate 1, spectator 1; 300 hostile datagrams, 300 counted bad, 0 runtime faults, 0 precondition failures; the RoundOver refusal is not exercised (§8); `parse_tdm_tuning`: 16 hostile lines refused with the line named, 3,000 mutations (1,261 still parse), no crash | yes (RoundOver: no) | `b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=hostile*` and `--test-case=tuning*` |
-| E7 asan | 0 asan reports in ru's rows | `host.tdm.server` 127.1 s (all 6 cases), `sim.weapons.unit` 1.5 s, `m2b.contract` 0.1 s under the asan preset: 3 / 3 passed, no sanitizer report | yes | `cmake --preset asan`, `cmake --build b\asan --target test_host_tdm test_weapons test_m2b_contract`, `ctest --test-dir b\asan -R "^(host\.tdm\.server|sim\.weapons\.unit|m2b\.contract)$"` |
-| E13 | the real client path (deploy screen, freeze, death stamps, RoundOver) <= 30 s | not run: a timing row (the merge pass), and it needs nt's v3 client and bb's brains; it exits 77 with PENDING until `kProtocolVersion` is 3 | no (nt, bb) | `ctest --preset dev-timing -R "^host\.tdm\.client$"` |
+| E5 wire and deploy | Spawned.revived = 1 at the peer; after the window and after the victim deployed nothing happens | the peer victim's Spawned.revived = 1; at the medic's peer DeathEvent respawn_tick / revive_until = the rules' (+480 / +480 bot, +300 / +300 peer), killer_health 100, ReviveEvent reviver = the medic, tick = the new life's; deploy screen: died at 114 (respawn +300, revive until +780), after the window 3 defib shots, 0 revives, the victim still down; deployed at death + 300 (inside the window): revive_until 0 and no downed entry at once, 130 ticks of paddles, 0 revives, life 2 -> 3, Spawned.revived 0 | yes | same as E5 |
+| E7 (server half) | SpawnRequests counted by refusal: alive, too early, bad kit, twice in a tick, RoundOver, spectator; hostile v3 datagrams counted, nothing crashes | refusals on TdmRules: 10 requests, accepted 2, alive 2, too early 1, bad kit 2, phase 1, rate 1, spectator 1; 300 hostile datagrams: 298 counted bad, 2 decoded and judged by the rules (bad + requests = sent), 0 runtime faults, 0 precondition failures; RoundOver (kill limit 1, a bot's kill): a SpawnRequest through `[recv]` refused Phase (0 -> 1), no Spawned; `parse_tdm_tuning`: 16 hostile lines refused with the line named, 3,000 mutations (1,261 still parse), no crash | yes | `b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=hostile*` and `--test-case=tuning*` |
+| E7 asan | 0 asan reports in ru's rows | `host.tdm.server` 127.1 s (the 6 cases before the w1 merge), `sim.weapons.unit` 1.5 s, `m2b.contract` 0.1 s under the asan preset: 3 / 3 passed, no sanitizer report; not re-run after the merge (the new cases are test code; the verifier's asan pass covers them and nt's fuzz cases) | yes | `cmake --preset asan`, `cmake --build b\asan --target test_host_tdm test_weapons test_m2b_contract`, `ctest --test-dir b\asan -R "^(host\.tdm\.server|sim\.weapons\.unit|m2b\.contract)$"` |
+| E13 | the real client path (deploy screen, freeze, death stamps, RoundOver) <= 30 s | not run: a timing row (the merge pass); nt is in, bb's brains are not: the case exits 77 with PENDING (bb) at its probe | no (bb) | `ctest --preset dev-timing -R "^host\.tdm\.client$"` |
 | defib weapon (#22) | u_defib builds with capacity -1; held 3 s: 3 shots, no reload, 0 damage | 3 shots in 180 ticks, magazine 1 -> 1, no reload event, 1 s apart | yes | `b\dev\tests\test_weapons.exe --test-suite=weapons-unit --test-case=*defibrillator*` |
-| m2b.contract (ru rows) | `[abort hash]` and the defib hash change the hashes; rules without logic refused | pass (5 cases, 101 assertions; nt / bb / au PENDING) | yes | `ctest --test-dir b\dev -R "^m2b\.contract$"` |
+| m2b.contract (ru rows) | `[abort hash]` and the defib hash change the hashes; rules without logic refused | pass after the w1 merge (kNtLanded and kRuLanded true; bb / au PENDING) | yes | `ctest --test-dir b\dev -R "^m2b\.contract$"` |
 | install.unchanged | the install unchanged after the TDM load and every case | `install.unchanged: clean (256 files)` | yes | `b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=install*` |
-| branch pass | every functional row passes | 139 rows: 137 passed, 2 skipped (`core.cache_data`, `core.res`, as on m2b/w1), 0 failed; 193.4 s ctest wall; no budget violation (warnings as before); `host.tdm.server` 8.6 s (install-row budget 15 s; indicative only) | yes | `tools\build.cmd dev` |
+| branch pass | every functional row passes | after the w1 merge (nt in, b0f67f7 + ec8673a): 140 rows, 138 passed, 2 skipped (`core.cache_data`, `core.res`, as on m2b/w1), 0 failed, 192.0 s ctest wall; budget warnings only; `host.tdm.server` 24.1 s in the parallel pass, 6.7 s alone (7 cases; indicative only). Before the merge: 139 rows, 193.4 s | yes | `tools\build.cmd dev` |
 
 ## 8. Open issues and handoff
 
-* **nt (wire).** These cases wait for nt's v3 codecs and are marked PENDING (nt) in host.tdm.server: the
-  ScriptedPeer decoding Spawned.revived, MatchState and PlayerList; a SpawnRequest through the server's `[recv]`
-  (accepted at respawn_tick with Spawned within 1 tick, refused before); the DeathEvent stamps (respawn_tick,
-  revive_until, killer_health) and ReviveEvent in CombatEvents on the wire; kProtocolVersion 3 with a v2 client
-  refused by Kick; E5's "after the window" and "after the victim deployed" (they need a deploy-screen peer). After nt
-  merges, the guarded branches in `respawn*`, `revive*` and `hostile*` run without edits; `host.tdm.client` (E13)
-  starts running once `kProtocolVersion` is 3.
-* **bb.** E13 needs `add_tdm_bots` (7 bots). `run_tdm` sets `tdm_bots` only for `bots > 0`; `sight_violations`,
+* **nt (wire): done** in the dependency step (w1 merged into m2b/ru, b0f67f7): every former PENDING (nt) case runs on
+  the real codecs (§7 E4 SpawnRequest, E5 wire and deploy, E7 RoundOver and the v2 Kick).
+* **bb.** E13 needs `add_tdm_bots` (7 bots); host.tdm.client skips with PENDING (bb) until then. `run_tdm` sets `tdm_bots` only for `bots > 0`; `sight_violations`,
   `stale_aim_shots` are bb's to count.
 * **E13's revive half** (a scripted assault bot reviving the client) is not in host.tdm.client: a bot's kit is the
   rules' seeded draw, so the row would need a seed search or a dev kit override. The server side is E5's.
-* **The M2a hash constants** are recorded from this branch's M2a path (the 3-argument `load_gunplay_level`, the motor
-  without the abort fields), not from a build of main 47871fa. They equal main's as long as those paths are main's;
-  the merge pass's M2a rows check it end to end.
-* **The RoundOver SpawnRequest refusal** is implemented (Phase) but no case reaches RoundOver with a deploy peer; it
-  comes with E1's round rows (`host.tdm.round`, bb / integration) or once nt's SpawnRequest travels.
 * **[inferred] mechanics** (`measured = false`): the immunity abort map (Metro's type info has no enum names), the
   revive wait 20 m / 8 s, the corpse and living spheres, the bot kit weights, the spawn scoring constants, team kill
   weight 0, the one-tick lag of a revive's score in the rows.
