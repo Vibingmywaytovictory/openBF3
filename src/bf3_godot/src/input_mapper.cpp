@@ -101,6 +101,9 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (scripted_ || p_event.is_null()) {
 		return;
 	}
+	if (m2b_handle_event(p_event)) { // M2b gx [mapper]: the spawn screen's keys and clicks, 3, Tab
+		return; // M2b gx [mapper]
+	} // M2b gx [mapper]
 	if (m2a_handle_event(p_event)) { // M2a gx [mapper]: the weapon actions; the capture click never fires
 		return;
 	}
@@ -277,7 +280,7 @@ constexpr M2aActionKey kM2aActions[] = {
 static_assert(sizeof(kM2aActions) / sizeof(kM2aActions[0]) == InputMapper::kM2aActionCount);
 
 // The weapon slots the wheel visits, in order (m2a.md §5.6: primary, sidearm, grenade, knife).
-constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 6, 7 };
+constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 2, 6, 7 }; // M2b gx [wheel]: slot 2 (the gadget; empty in M2a's kits, so the wheel skips it there)
 
 } // namespace
 

@@ -1233,7 +1233,7 @@ struct FxTriggers::Impl {
 				return false;
 			}
 		}
-		return uint8_t(p_e.kind) <= uint8_t(hk::PresentKind::Spawn) && uint8_t(p_e.timeline) <= uint8_t(hk::PresentTimeline::Immediate);
+		return uint8_t(p_e.kind) <= uint8_t(hk::PresentKind::Revive) && uint8_t(p_e.timeline) <= uint8_t(hk::PresentTimeline::Immediate);
 	}
 
 	void dispatch(const hk::PresentEvent &p_e, float p_age) {
