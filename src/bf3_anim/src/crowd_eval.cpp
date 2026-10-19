@@ -521,6 +521,7 @@ struct CrowdEvaluator::Impl::M2a {
 	float corpse_seconds = kCrowdDeathHideSeconds; // M2b cam [corpse]: CrowdStanceSet::corpse_seconds
 	LocalPose identity; // the additive base of the crouch fire
 	std::vector<Soldier> soldiers;
+	std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> pt1; // PT1 run [state]: CrowdStanceSet::move_groups (null: none)
 };
 
 void CrowdEvaluator::Impl::M2aDeleter::operator()(M2a *p_m2a) const {
