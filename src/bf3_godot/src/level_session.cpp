@@ -773,7 +773,7 @@ void Bf3LevelSession::try_done() {
 		return;
 	}
 	const host::PresentationFrame &f = *frame_;
-	const bool spawned = f.valid && f.stats.spawned && f.own_curr.life > 0 && mapper_.adopted_life() == f.own_curr.life;
+	const bool spawned = (f.valid && f.stats.spawned && f.own_curr.life > 0 && mapper_.adopted_life() == f.own_curr.life) || m2b_join_ready(); // M2b gx [done]
 	if (spawned && progress_.end_us[size_t(host::LoadStage::Spawn)].load(std::memory_order_relaxed) == 0) {
 		progress_.advance(host::LoadStage::Spawn);
 		progress_.end(host::LoadStage::Spawn);

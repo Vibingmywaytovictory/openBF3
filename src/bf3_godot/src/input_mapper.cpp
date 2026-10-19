@@ -101,6 +101,9 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (scripted_ || p_event.is_null()) {
 		return;
 	}
+	if (m2b_handle_event(p_event)) { // M2b gx [mapper]: the spawn screen's keys and clicks, 3, Tab
+		return; // M2b gx [mapper]
+	} // M2b gx [mapper]
 	if (m2a_handle_event(p_event)) { // M2a gx [mapper]: the weapon actions; the capture click never fires
 		return;
 	}
@@ -277,7 +280,7 @@ constexpr M2aActionKey kM2aActions[] = {
 static_assert(sizeof(kM2aActions) / sizeof(kM2aActions[0]) == InputMapper::kM2aActionCount);
 
 // The weapon slots the wheel visits, in order (m2a.md §5.6: primary, sidearm, grenade, knife).
-constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 6, 7 };
+constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 2, 6, 7 }; // M2b gx [wheel]: slot 2 (the gadget; empty in M2a's kits, so the wheel skips it there)
 
 } // namespace
 
@@ -526,6 +529,159 @@ void InputMapper::m2a_sample(bf3::host::InputSample &r_sample) const {
 	w.fire_mode_counter = m2a_.mode_counter;
 	w.select_slot = m2a_.wanted;
 	r_sample.held_buttons = sim::weapons::with_weapon_input(r_sample.held_buttons, w);
+}
+
+} // namespace bf3::godot_side
+
+// ---- M2b gx (docs/design/m2b.md §4, §11 gx row; docs/design/m2b-gx.md) ------------------------------------------
+
+namespace bf3::godot_side {
+
+namespace {
+
+struct M2bActionKey {
+	InputMapper::M2bAction action;
+	const char *name;
+	Key key;
+	Key key2; // KEY_NONE: none
+};
+// m2b.md §1.1: the defibrillator on 3 (weapon slot 2), Tab the scoreboard, Enter deploys, 1-4 the spawn screen's kits
+// (physical keys, as M1's and M2a's; 1 and 2 are the weapon keys while alive, the kit keys only on the spawn screen).
+constexpr M2bActionKey kM2bActions[] = {
+	{ InputMapper::M2bAction::Gadget, "bf3_gadget", KEY_3, KEY_NONE },
+	{ InputMapper::M2bAction::Scoreboard, "bf3_scoreboard", KEY_TAB, KEY_NONE },
+	{ InputMapper::M2bAction::Deploy, "bf3_deploy", KEY_ENTER, KEY_KP_ENTER },
+	{ InputMapper::M2bAction::Kit1, "bf3_kit_1", KEY_1, KEY_NONE },
+	{ InputMapper::M2bAction::Kit2, "bf3_kit_2", KEY_2, KEY_NONE },
+	{ InputMapper::M2bAction::Kit3, "bf3_kit_3", KEY_3, KEY_NONE },
+	{ InputMapper::M2bAction::Kit4, "bf3_kit_4", KEY_4, KEY_NONE },
+};
+static_assert(sizeof(kM2bActions) / sizeof(kM2bActions[0]) == InputMapper::kM2bActionCount);
+
+} // namespace
+
+const char *InputMapper::m2b_action_name(M2bAction p_action) {
+	const size_t i = size_t(p_action);
+	return i < kM2bActionCount ? kM2bActions[i].name : "bf3_unknown";
+}
+
+void InputMapper::m2b_enable(bool p_on) {
+	m2b_.enabled = p_on;
+	if (!p_on || m2b_.installed) {
+		return;
+	}
+	InputMap *map = InputMap::get_singleton();
+	for (const M2bActionKey &a : kM2bActions) {
+		if (map->has_action(a.name)) {
+			continue; // a project-file action of the same name wins (rebinding)
+		}
+		map->add_action(a.name);
+		for (const Key k : { a.key, a.key2 }) {
+			if (k == KEY_NONE) {
+				continue;
+			}
+			Ref<InputEventKey> key;
+			key.instantiate();
+			key->set_physical_keycode(k);
+			map->action_add_event(a.name, key);
+		}
+	}
+	m2b_.installed = true;
+}
+
+void InputMapper::m2b_set_spawn_screen(bool p_up) {
+	if (p_up && !m2b_.spawn_screen) {
+		m2b_.kit = -1; // presses from before the screen came up are not a choice
+		m2b_.deploy_presses = 0;
+	}
+	m2b_.spawn_screen = p_up;
+}
+
+bool InputMapper::m2b_scoreboard_held() const {
+	if (!m2b_.enabled) {
+		return false;
+	}
+	if (scripted_) {
+		return m2b_.scoreboard_scripted;
+	}
+	return Input::get_singleton()->is_action_pressed(kM2bActions[size_t(M2bAction::Scoreboard)].name);
+}
+
+int InputMapper::m2b_take_kit() {
+	const int k = m2b_.kit;
+	m2b_.kit = -1;
+	return k;
+}
+
+uint32_t InputMapper::m2b_take_deploy_presses() {
+	const uint32_t n = m2b_.deploy_presses;
+	m2b_.deploy_presses = 0;
+	return n;
+}
+
+void InputMapper::m2b_script_press(M2bAction p_action) {
+	switch (p_action) {
+		case M2bAction::Gadget:
+			if (!m2b_.spawn_screen) {
+				m2a_select(2);
+			} else {
+				m2b_.kit = 2;
+			}
+			break;
+		case M2bAction::Deploy:
+			if (m2b_.spawn_screen) {
+				++m2b_.deploy_presses;
+			}
+			break;
+		case M2bAction::Kit1:
+		case M2bAction::Kit2:
+		case M2bAction::Kit3:
+		case M2bAction::Kit4:
+			if (m2b_.spawn_screen) {
+				m2b_.kit = int(p_action) - int(M2bAction::Kit1);
+			} else if (p_action == M2bAction::Kit3) {
+				m2a_select(2); // 3 while alive is the gadget slot
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+void InputMapper::m2b_script_hold(M2bAction p_action, bool p_held) {
+	if (p_action == M2bAction::Scoreboard) {
+		m2b_.scoreboard_scripted = p_held;
+	}
+}
+
+bool InputMapper::m2b_handle_event(const Ref<InputEvent> &p_event) {
+	if (!m2b_.enabled) {
+		return false;
+	}
+	if (m2b_.spawn_screen) {
+		if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
+			// The spawn screen's buttons take their clicks before _unhandled_input; a click beside them must not capture
+			// the mouse (M1's and M2a's handlers would) while the screen is up.
+			if (mb->is_pressed()) {
+				++m2b_.consumed_clicks;
+			}
+			return true;
+		}
+		if (Object::cast_to<InputEventMouseMotion>(p_event.ptr()) != nullptr) {
+			return true; // no look while the screen is up (the mouse is free)
+		}
+		for (const M2bAction a : { M2bAction::Kit1, M2bAction::Kit2, M2bAction::Kit3, M2bAction::Kit4, M2bAction::Deploy }) {
+			if (p_event->is_action_pressed(m2b_action_name(a), false, false)) {
+				m2b_script_press(a);
+				return true; // 1 / 2 are not weapon selections here
+			}
+		}
+		return false;
+	}
+	if (captured_ && p_event->is_action_pressed(m2b_action_name(M2bAction::Gadget), false, false)) {
+		m2b_script_press(M2bAction::Gadget);
+	}
+	return false;
 }
 
 } // namespace bf3::godot_side

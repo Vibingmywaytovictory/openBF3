@@ -13,6 +13,7 @@
 // branch links before they land and picks them up after the merge without an edit (docs/design/m2a-gx.md §3).
 
 #include "level_session_m2a.h"
+#include "level_session_m2b.h" // M2b gx [include]
 
 #include "bf3_localisation.h"
 #include "game_audio.h"
@@ -325,6 +326,7 @@ void Bf3LevelSession::m2a_parse_args() {
 	}
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
 	m2b_bb_tdm_args(has_user_arg("tdm"), user_arg_value("kill-limit"), user_arg_value("preround")); // M2b bb [tdm]
+	m2b_gx_args(g, has_meta("openbf3_m2b") && bool(get_meta("openbf3_m2b")), mapper_, bots_, quit_after_, error); // M2b gx [args]
 	if (!has_user_arg("walkers")) {
 		walkers_ = 0; // M1's scripted walkers are not soldiers with weapons
 	}
@@ -385,6 +387,7 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 	}
 	r_options.gunplay = true; // the weapons, kits and capsule pose table (sv)
 	m2b_bb_tdm_load(r_options); // M2b bb [tdm]
+	m2b_gx_load(*m2a_, r_options); // M2b gx [load]
 	if (!scene_) {
 		return; // headless: no viewmodel (nothing draws it)
 	}
@@ -441,6 +444,9 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 			return;
 		}
 		g->vm_kits = std::move(*kits);
+		if (g->m2b) { // M2b gx [defib]: the TDM assault kits carry the defibrillator in slot 2 (cam's add_assault_gadget)
+			render::add_assault_gadget(g->vm_kits, host::kTdmAssaultGadget); // M2b gx [defib]
+		} // M2b gx [defib]
 		for (const int team : { 1, 2 }) {
 			if (stop_.load(std::memory_order_acquire)) {
 				fail("stopped");
@@ -618,6 +624,7 @@ void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
 		g.part_notes.push_back(line); // loader thread: printed on the first frame
 	}
 	m2b_bb_tdm_server(r_game, bots_, g.part_notes); // M2b bb [tdm]
+	m2b_gx_server(g, r_game, bots_); // M2b gx [server]
 }
 
 void Bf3LevelSession::m2a_client_config(host::ClientSessionConfig &r_config) const {
@@ -761,6 +768,7 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 	}
 	mapper_.m2a_set_slots(g.weapon.valid ? g.weapon.active_slot : uint8_t(0), g.weapon.valid ? g.weapon.pending_slot : uint8_t(0xFF), filled);
 	mapper_.m2a_set_weapons_allowed(done_ && g.alive && g.weapon.valid);
+	m2b_gx_presented(g, *client_, f, mapper_, p_now_ns); // M2b gx [presented]: the spawn screen takes K / T first
 	// 5. K / T: the next spawn's kit and team, sent as a KitSelect only once spawned (m2a-w3.md §4.1 G4 timing).
 	if (const uint32_t k = mapper_.m2a_take_kit_presses(); k > 0) {
 		g.next_kit = uint8_t((g.next_kit + k) % host::kKitCount);
@@ -1122,6 +1130,9 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		g.hud->set_visible(!free_camera);
 	}
 	g.ms_hud = ms_since(part_t0);
+	if (m2b_gx_frame(*this, g, f, p_now_ns, p_delta, camera, free_camera, headless_)) { // M2b gx [frame]
+		return true; // M2b gx [frame]: the M2b check finished the run
+	} // M2b gx [frame]
 	// The others: friend / foe tint (W3.0's team field, in present_others' order), hidden once tp's crowd draws them.
 	const double render_ticks = host::present_render_ticks(f, p_now_ns);
 	std::array<host::PresentedOtherWeapon, bf3::net::kMaxSlots> others{};
@@ -1222,6 +1233,7 @@ void Bf3LevelSession::m2a_shutdown() {
 		g.crowd_loader.join(); // M2a w3 integration (E16): a loader that failed before m2a_load_assets
 	}
 	g.check.reset();
+	m2b_gx_shutdown(g); // M2b gx [shutdown]
 #if OPENBF3_M2A_HAVE_CROWD
 	if (g.crowd != nullptr) {
 		g.crowd->shutdown();

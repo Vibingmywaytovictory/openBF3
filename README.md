@@ -3118,3 +3118,52 @@ Measured 2026-10-19, dev preset, `m2b/ui`:
 | run time (demo) | headless 9/9 rows; windowed 16/16 rows and 7 screenshots in `openBF3\b\shots\ui\` (gitignored); 0 missing fonts, icons or strings |
 | E9 | not run here: gx's `godot.m2b.play` in the wave-2 merge pass |
 | branch pass | `tools\build.cmd dev`: 149 rows, 147 passed, 2 skipped (as before), 0 failed, 386.6 s ctest wall (indicative only) |
+
+## M2b: the playable TDM scene (gx)
+
+<!-- # M2b gx -->
+`tools\play.cmd` now opens the M2b scene (`res://scenes/m2b_metro.tscn`): a Metro TDM round, you and 31 TDM bots
+(16 v 16). The teams are AutoTeam's, and the round runs the Metro TDM logic graph. The track is on branch `m2b/gx`,
+from the W2.0 contract. As-built notes, named defaults and gates:
+[docs/design/m2b-gx.md](docs/design/m2b-gx.md).
+
+* **Play.**
+  - `tools\play.cmd` starts the round. Useful options: `--kill-limit=N`, `--preround=S`, `--bots=0..31` and
+    `--deploy-screen=0` (M2a's automatic respawn).
+  - `tools\play.cmd --m2a` keeps the M2a scene, and bb's `--tdm` preview still runs on it.
+  - `tools\play.cmd --help` lists the keys.
+* **Keys.**
+  - On the spawn screen: 1-4 pick the kit (assault, engineer, support, recon), or click it. Enter (or the Deploy
+    button) spawns once the respawn time is over. The game resends the request every 30 server ticks until the
+    server spawns you.
+  - In game: Tab shows the scoreboard, and 3 selects weapon slot 2 (assault: the defibrillator). The M2a weapon
+    keys are unchanged.
+* **ui and cam.** The TDM screens (ui: kill feed, scoreboard, spawn screen, kill card, pre-round, round end) and
+  the death view and 15 s corpses (cam) are built when their code is in the tree, which it is since the merge of
+  `m2b/w2` (reconfigure after a merge). Without them a status line shows the phase, the score, the kit and
+  "ENTER: deploy". In an M2b session the assault kit carries the defibrillator in 1p (gx's `[defib]` line).
+* **Test.**
+  - `ctest --test-dir b\dev -R "^m2b\.gx\.unit$"`: the Godot-free rules (the args with hostile values, the spawn
+    screen and Deploy rules, the resend, E9's verdicts and skips) and R13 (`FxTriggers` accepts Revive).
+  - `godot.m2b.play` (E9, the scripted round) and `godot.m2b_load` (E12) are WINDOW rows for the merge pass.
+
+Measured 2026-10-19, `m2b/gx`, shared machine (times indicative only):
+
+* **`m2b.gx.unit`:** 5 cases, 197 assertions, pass.
+* **The play check, headless, by hand** (`--m2b-check=play --kill-limit=15 --preround=0`):
+  - all 7 gx rows pass, and the ui (6) and cam (1) rows skip "waiting for";
+  - the run: the spawn screen at join, a deploy as assault, an own death at 27 s, a deploy as engineer, RoundOver
+    at 39.6 s (RU 15 - US 8), 24 deaths received;
+  - install unchanged: yes.
+* **Branch pass:** 148 rows: 146 passed, 2 skipped (`core.cache_data`, `core.res`, as before), 0 failed; 331.7 s of ctest wall time; exit 0. One "budget VIOLATION" line is for `host.tdm.server` (wave 1's row: 63.1 s without COST under the parallel load), not a gx row.
+* **After the ui and cam merge** (headless play check, by hand): M2B CHECK: PASS, 13 rows pass, `missing_lookups`
+  skips headless (a window row), none "waiting for"; 23 feed lines for 23 deaths, 0 of 172 Tab samples off,
+  1 death view with 0 bad inputs; RoundOver at 39.6 s (US 7 - RU 15); install unchanged: yes. The rows the merge
+  touches (m2b.gx.unit, m2b.contract, m2b.contract2, m2b.cam.unit, ui.hud.tdm.unit / .install, fx.triggers.unit,
+  godot.m2a_viewmodel, godot.m2a_tp_crowd) pass.
+* **The verify fix: a reliable own death in E9** (m2b-gx.md §6.1). The play script now puts the player in front of
+  the nearest enemy 6 s into a life and every 4 s until the first own death (the drop is the last resort at 26 s), a
+  death right before RoundOver no longer counts against the after-death spawn screen, and the Tab scoreboard gives
+  way to the round-end screen. One run each, by hand: headless PASS (own death at 9.0 s, RoundOver at 40.8 s);
+  windowed PASS, 14/14 rows, 0 ERROR lines, `missing_lookups` 0 (own death at 12.7 s by a bot, deploy engineer at
+  17.9 s, RoundOver at 33.8 s, 5 screenshots); install unchanged: yes.

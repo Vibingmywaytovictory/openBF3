@@ -309,6 +309,7 @@ private:
 	bool m2a_frame(double p_delta, uint64_t p_now_ns); // _process after Done, after the S1 calls; true: frame handled
 	void m2a_input(const godot::Ref<godot::InputEvent> &p_event); // _unhandled_input: after the mapper
 	void m2a_shutdown(); // shutdown: after the loader joined, before the client stops
+	bool m2b_join_ready() const; // M2b gx [done]: try_done's spawn screen at join (level_session_m2b.cpp)
 	std::unique_ptr<M2aSession, M2aSessionDeleter> m2a_;
 };
 
