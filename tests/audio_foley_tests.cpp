@@ -17,8 +17,10 @@
 #include "bf3/audio/wav_io.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/audio/weapon_foley.h"
+#include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
+#include "bf3/core/ebx.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
@@ -328,6 +330,66 @@ const char *cue_kind(ba::FoleyCueKind p_k) {
 	return "?";
 }
 
+std::string output_label(uint32_t p_hash) {
+	for (const char *n : { "Cone", "Flat", "Handling", "LFE", "Direct", "Interior" }) {
+		if (ebx_name_hash(n) == p_hash) {
+			return n;
+		}
+	}
+	return "#" + std::to_string(p_hash);
+}
+
+// What drives output p_o's BypassHeadroom port (port 0 of the Cone, Flat and Direct outputs): "IsFirstPerson" (or
+// the input's hash) through a ReceiveEntry, "reg <n>" for another register, "const <x>" when not connected.
+std::string bypass_source(const ca::SoundProgram &p_p, size_t p_o) {
+	const ca::SoundOutput &out = p_p.outputs[p_o];
+	if (out.node >= p_p.nodes.size() || p_p.nodes[out.node].ports_count == 0 || p_p.nodes[out.node].ports_begin >= p_p.ports.size()) {
+		return "none";
+	}
+	const ca::SoundPort &bp = p_p.ports[p_p.nodes[out.node].ports_begin];
+	if (!bp.connected()) {
+		char b[32];
+		std::snprintf(b, sizeof(b), "const %g", double(bp.constant));
+		return b;
+	}
+	const auto input_name = [&](uint16_t p_reg) -> std::string {
+		for (const ca::SoundInput &in : p_p.inputs) {
+			if (in.reg == p_reg) {
+				return in.name_hash == ba::kHashIsFirstPerson ? std::string("IsFirstPerson") : "#" + std::to_string(in.name_hash);
+			}
+		}
+		return {};
+	};
+	if (const std::string direct = input_name(bp.reg); !direct.empty()) {
+		return direct;
+	}
+	for (const ca::SoundNode &n : p_p.nodes) {
+		if (n.type != ca::SoundNodeType::ReceiveEntry || n.ports_count < 2 || size_t(n.ports_begin) + 1 >= p_p.ports.size() ||
+				p_p.ports[n.ports_begin].reg != bp.reg) {
+			continue;
+		}
+		const uint16_t src = p_p.ports[n.ports_begin + 1].reg;
+		for (const ca::SoundInput &in : p_p.inputs) {
+			if (in.reg == src) {
+				return in.name_hash == ba::kHashIsFirstPerson ? std::string("IsFirstPerson") : "#" + std::to_string(in.name_hash);
+			}
+		}
+	}
+	// Another node writes it: name its type (sound_ports.h output_ports).
+	for (const ca::SoundNode &n : p_p.nodes) {
+		if (n.type >= ca::SoundNodeType::Count) {
+			continue;
+		}
+		const uint32_t outs = ca::port::output_ports(n.type);
+		for (uint16_t k = 0; k < n.ports_count && k < 32 && size_t(n.ports_begin) + k < p_p.ports.size(); ++k) {
+			if (((outs >> k) & 1u) != 0 && p_p.ports[n.ports_begin + k].reg == bp.reg) {
+				return "reg " + std::to_string(bp.reg) + " from " + std::string(ca::sound_node_type_info(n.type).ebx_name);
+			}
+		}
+	}
+	return "reg " + std::to_string(bp.reg);
+}
+
 std::filesystem::path shots_dir() {
 	return std::filesystem::path(OPENBF3_PT1_SHOTS) / "audio.foley";
 }
@@ -371,6 +433,18 @@ TEST_SUITE("audio-foley") {
 					"; IsShortReload waves [" + waves + "]; ActionType waves [" + actions + "]";
 			MESSAGE(line);
 			std::printf("%s\n", line.c_str());
+			// Each output's BypassHeadroom source (PT1 rld [bypass headroom]: an output driven by IsFirstPerson).
+			std::string bypass;
+			for (size_t o = 0; o < d.program->outputs.size(); ++o) {
+				const ca::SoundOutput &out = d.program->outputs[o];
+				char b[160];
+				std::snprintf(b, sizeof(b), "%s#%zu %s%s %s", bypass.empty() ? "" : ", ", o, out.enable_hdr ? "hdr " : "",
+						output_label(out.name_hash).c_str(), bypass_source(*d.program, o).c_str());
+				bypass += b;
+			}
+			const std::string bline = "pt1 rld data: def " + std::to_string(i) + " BypassHeadroom: " + bypass;
+			MESSAGE(bline);
+			std::printf("%s\n", bline.c_str());
 			if (d.form == ba::WeaponAudioForm::Driver) {
 				++firearms;
 			}
@@ -481,7 +555,9 @@ TEST_SUITE("audio-foley") {
 		}
 		// 3) The voice cull's loudness of the reload instance at the listener, against each EnableHdr output's own.
 		std::string outs;
-		float cull_db = 0.0f, cull_hint_db = 0.0f;
+		float cull_db = 0.0f, cull_hint_db = 0.0f, reload_out_db = -300.0f, bypass_1p = -1.0f, bypass_3p = -1.0f;
+		uint16_t bypass_reg = ca::kNoRegister;
+		const int first_person_reg = d.program->input_register(ba::kHashIsFirstPerson).value_or(ca::kNoRegister);
 		{
 			Result<std::unique_ptr<ba::PatchInstance>> pi = ba::PatchInstance::create(d.program, f->assets.bank, f->tuning, 1, ba::kMixRate);
 			REQUIRE(pi.ok());
@@ -504,16 +580,33 @@ TEST_SUITE("audio-foley") {
 				const float dist = std::max(0.0f, out.min_distance) * f->tuning.min_distance_clamp;
 				const float at = p.loudness_db + out.attenuation.evaluate(dist * f->tuning.curve_x_metres) + out.gain_db;
 				const bool handling = std::find(fo.reload.outputs.begin(), fo.reload.outputs.end(), uint16_t(o)) != fo.reload.outputs.end();
+				reload_out_db = handling ? std::max(reload_out_db, at) : reload_out_db;
 				char b[96];
 				std::snprintf(b, sizeof(b), "%s#%zu %.1f dB%s", outs.empty() ? "" : ", ", o, double(at), handling ? " (the reload's)" : "");
 				outs += b;
+			}
+			// PT1 rld [bypass headroom]: the Handling output's BypassHeadroom port after one evaluation with IsFirstPerson 1
+			// and 0: the data drives the port from IsFirstPerson (on every output of the kit firearms, the same register).
+			for (const uint16_t o : fo.reload.outputs) {
+				const ca::SoundNode &n = p.nodes[p.outputs[o].node];
+				REQUIRE(n.ports_count > 0);
+				const ca::SoundPort &bp = p.ports[n.ports_begin];
+				bypass_reg = bp.reg;
+				for (const float fp : { 1.0f, 0.0f }) {
+					(*pi)->set_parameter(ba::kHashIsFirstPerson, fp);
+					(*pi)->evaluate(0.01);
+					const float v = bp.connected() ? (*pi)->value(bp.reg) : bp.constant;
+					bypass_1p = fp > 0.5f ? v : bypass_1p;
+					bypass_3p = fp > 0.5f ? bypass_3p : v;
+				}
 			}
 		}
 		char line[1200];
 		std::snprintf(line, sizeof(line),
 				"pt1 rld: own M16A3 1p: cull loudness of a reload instance at the listener before its first block %.1f dB without a hint, %.1f dB with "
-				"the reload's outputs; EnableHdr outputs at 0 m: %s",
-				double(cull_db), double(cull_hint_db), outs.c_str());
+				"the reload's outputs; EnableHdr outputs at 0 m: %s; the Handling output's BypassHeadroom (register %u; IsFirstPerson's %d) %.0f with IsFirstPerson 1, "
+				"%.0f with 0",
+				double(cull_db), double(cull_hint_db), outs.c_str(), unsigned(bypass_reg), first_person_reg, double(bypass_1p), double(bypass_3p));
 		MESSAGE(line);
 		std::printf("%s\n", line);
 		std::snprintf(line, sizeof(line),
@@ -527,7 +620,13 @@ TEST_SUITE("audio-foley") {
 		CHECK(alone_reloads == 1);
 		CHECK(alone_db > -25.0);
 		CHECK(alone_top < 81.0f);
-		CHECK(std::fabs(cull_hint_db - 79.5f) < 1.0f);
+		CHECK(std::fabs(cull_hint_db - reload_out_db) < 0.1f); // the reload's own outputs, computed from the data
+		CHECK(bypass_1p == 1.0f);
+		CHECK(bypass_3p == 0.0f);
+		// PT1 rld [bypass headroom]: after the burst the Handling output (BypassHeadroom = IsFirstPerson) is not ducked
+		// under the reflections tail's window: audible as when alone, while the window top stays the tail's.
+		CHECK(empty_db > -25.0);
+		CHECK(empty_db > alone_db - 3.0);
 		CHECK(std::fabs(walk_late - alone_late) < 1.0);
 		check_unchanged(*f);
 	}
@@ -745,13 +844,13 @@ TEST_SUITE("audio-foley") {
 		// One soldier (slot 5) p_metres in front of the listener, facing it; the reload starts at 1 s (reload_seq 0 -> 1);
 		// with p_switch_s > 0 he switches to the M9 then.
 		struct Result3p {
-			double db = 0.0, floor = 0.0;
+			double db = 0.0, floor = 0.0, late = 0.0;
 			uint64_t reloads = 0, out_of_reach = 0, releases = 0;
 			std::vector<FoleyRecorder::Cue> cues;
 			double played_s = 0.0;
 			std::string wave;
 		};
-		const auto run = [&](float p_metres, double p_switch_s, const char *p_wav) {
+		const auto run = [&](float p_metres, double p_switch_s, const char *p_wav, float p_walk_mps = 0.0f) {
 			Result3p r;
 			Rig rig(*f);
 			FoleyRecorder rec;
@@ -776,11 +875,15 @@ TEST_SUITE("audio-foley") {
 					w.def = m9;
 					w.phase = sw::WeaponPhase::Deploying;
 				}
+				if (fi > 60) {
+					s.position[2] += p_walk_mps / 60.0f; // walking away from the listener during the reload
+				}
 				w.sample_tick = uint32_t(kTicks0 + double(fi));
 				rig.frame({}, std::span<const host::PresentedSoldier>(&s, 1), std::span<const host::PresentedOtherWeapon>(&w, 1));
 			}
 			r.floor = rig.loudest_db(0.0, 0.9);
 			r.db = rig.loudest_db(1.0, p_switch_s > 0.0 ? p_switch_s : 3.9);
+			r.late = rig.loudest_db(2.5, 3.9);
 			r.reloads = rig.router->stats().reloads;
 			r.out_of_reach = rig.router->stats().foley_out_of_reach;
 			r.releases = rig.router->stats().foley_releases;
@@ -800,6 +903,7 @@ TEST_SUITE("audio-foley") {
 		const Result3p at15 = run(15.0f, 0.0, "reload_3p_15m.wav");
 		const Result3p at25 = run(25.0f, 0.0, "reload_3p_25m.wav");
 		const Result3p cut = run(5.0f, 1.8, "reload_3p_5m_switch.wav");
+		const Result3p walk = run(5.0f, 0.0, "reload_3p_5m_walk_away.wav", 3.0f); // PT1 rld [follow]
 		CHECK(at5.reloads == 1);
 		CHECK(at15.reloads == 1);
 		REQUIRE(!at5.cues.empty());
@@ -820,12 +924,18 @@ TEST_SUITE("audio-foley") {
 		CHECK(cut.cues[2].cue.kind == ba::FoleyCueKind::Action);
 		CHECK(cut.cues[2].cue.action == ba::FoleyAction::Deploy);
 		CHECK(cut.cues[2].cue.def == m9);
-		char line[400];
+		// PT1 rld [follow]: walking away at 3 m/s (9.5-13.7 m over the reload's last 1.4 s) the reload follows him: its
+		// end is quieter than the standing one's at 5 m (it stayed at the start before the fix: the same level).
+		CHECK(walk.reloads == 1);
+		CHECK(walk.late < at5.late - 6.0);
+		CHECK(walk.late > at15.floor + 10.0);
+		char line[600];
 		std::snprintf(line, sizeof(line),
 				"pt1 rld: another soldier's M16A3 reload 3p (floor %.1f dBFS): 5 m %.1f dBFS (%.2f s played), 15 m %.1f dBFS, 25 m %llu one-shots "
-				"(%llu beyond the data's 19 m reach); switched 0.8 s in: %.2f s played, %llu release",
+				"(%llu beyond the data's 19 m reach); switched 0.8 s in: %.2f s played, %llu release; the reload's 2.5-3.9 s standing at 5 m %.1f dBFS, "
+				"walking away 3 m/s %.1f dBFS",
 				at5.floor, at5.db, at5.played_s, at15.db, (unsigned long long)at25.reloads, (unsigned long long)at25.out_of_reach, cut.played_s,
-				(unsigned long long)cut.releases);
+				(unsigned long long)cut.releases, at5.late, walk.late);
 		MESSAGE(line);
 		std::printf("%s\n", line);
 		check_unchanged(*f);
