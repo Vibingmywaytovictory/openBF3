@@ -2729,3 +2729,18 @@ Every windowed row needs `set OPENBF3_GODOT=<exe>` and `set OPENBF3_GODOT_WINDOW
 | branch pass | `tools\build.cmd dev --strict` | every row passes, no budget violation | after the verify fix: exit 0, 137 rows, 135 passed, 2 skipped (`core.cache_data`, `core.res`), 0 failed, 0 STRICT violations; 187 s |
 | E16 on the M2a scene | `ctest --preset dev-window -R "^godot\.m2a_load$"` | cold <= 15 s, warm <= 5 s | the integrator's row. One run on the branch (unlocked, shared machine, indicative only): cold 4.34 s pass, warm 5.42 s over the threshold |
 | E9, E13 / E14 | `ctest --preset dev-window -R "^godot\.m2a_firefight$"` | m2a.md E9, E14 | the integrator's row (64 bt bots, 2560 x 1440, FX on / off windows); not run on the branch (TIMING rule) |
+
+## M2a gate pass
+
+<!-- # M2a gate -->
+
+**M2a results.** The integrator's gate pass (m2a.md §15.1 step 7, on `integ/w3`, 2026-10-19) ran every exit
+criterion E1–E19 in the running game, with every wall-clock and GPU row under the quiet lock: all 19 pass, no
+threshold changed, no WARN. Fire timing is tick-exact (31 shots, 30 gaps of 75 ms, predicted = server field for
+field); the drop is 1.60 m at 300 m and the client's flight of the same shot ends 0.0000 mm from the server's;
+shots to kill, headshot multipliers and reload times match the tables to 1e-3; lag-compensated hits 500 / 500 at
+"150/2"; the server tick p99 is 1.69 ms with 64 firing bots, the client frame p99 6.06 ms at 2560 × 1440, Metro
+loads in 5.4 s cold / 4.4 s warm, and the install is unchanged. The gate fixed two gaps (E16 now prints the VRAM,
+E2's client half got its own case). Row by row, the playable check and what is left to judge by eye and ear:
+[docs/design/m2a-gate.md](docs/design/m2a-gate.md). **Play it:** `tools\play.cmd` (Metro TDM, assault kit on US,
+24 firefight bots; `--bots=N` up to 32, `--kit=K`, `--team=T`, `--respawn=S`).
