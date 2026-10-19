@@ -48,3 +48,10 @@ target_sources(bf3_audio PRIVATE
     src/game_audio_frame.cpp
     include/bf3/audio/game_audio_frame.h
 )
+
+# M2b W1.0 (docs/design/m2b.md §2.6 #15, §6; docs/design/m2b-w1.md): the A3 mixer headers (owner au, who adds
+# hdr_window.cpp and voice_cull.cpp in a block of its own).
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/hdr_window.h
+    include/bf3/audio/voice_cull.h
+)

@@ -327,3 +327,10 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/audio/sound_wave.h
     include/bf3/core/audio/wave_bank.h
 )
+
+# M2b W1.0 (docs/design/m2b.md §2.6 #14, §6; docs/design/m2b-w1.md): the A3 readers' headers (owner au, who adds the
+# bodies in a block of its own).
+target_sources(bf3_core PRIVATE
+    include/bf3/core/audio/hdr_setting.h
+    include/bf3/core/audio/sound_scope.h
+)
