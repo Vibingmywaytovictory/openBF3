@@ -250,6 +250,7 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.delay_pool.assign(delay_floats, 0.0f);
 	st.voice_buffers.assign(p.voices.size() * 2 * kMaxSubBlock, 0.0f);
 	st.voice_tapped.assign(p.voices.size(), 0);
+	st.voice_live.assign(p.voices.size(), 0); // integ/m2b-w1 [lazy zero]
 	self->slot_views_.resize(st.slots.size());
 	return self;
 }
@@ -339,6 +340,73 @@ void sort_events(std::array<PendingEvent, kMaxEventsPerBlock> &r_events, uint32_
 	}
 }
 
+// integ/m2b-w1 [biquad pair] (E11, docs/design/m2b.md "M2b integ-w1"): Biquad::process (dsp.cpp) over a voice's two
+// channels in one loop, the same arithmetic per channel, so the output is unchanged; the two channels' recurrences
+// overlap instead of running one after the other. Channels whose coefficients differ take Biquad::process each.
+bool same_coefficients(const BiquadCoefficients &p_a, const BiquadCoefficients &p_b) { // integ/m2b-w1 [biquad pair]
+	return p_a.b0 == p_b.b0 && p_a.b1 == p_b.b1 && p_a.b2 == p_b.b2 && p_a.a1 == p_b.a1 && p_a.a2 == p_b.a2; // integ/m2b-w1 [biquad pair]
+} // integ/m2b-w1 [biquad pair]
+
+void process_biquad_pair(Biquad (&r_bq)[2], float *r_left, float *r_right, uint32_t p_frames, const BiquadCoefficients &p_target) { // integ/m2b-w1 [biquad pair]
+	if (p_frames == 0 || !same_coefficients(r_bq[0].c, r_bq[1].c)) { // integ/m2b-w1 [biquad pair]
+		r_bq[0].process(r_left, p_frames, p_target); // integ/m2b-w1 [biquad pair]
+		r_bq[1].process(r_right, p_frames, p_target); // integ/m2b-w1 [biquad pair]
+		return; // integ/m2b-w1 [biquad pair]
+	} // integ/m2b-w1 [biquad pair]
+	const BiquadCoefficients identity; // integ/m2b-w1 [biquad pair]
+	if (same_coefficients(r_bq[0].c, identity) && same_coefficients(p_target, identity)) { // integ/m2b-w1 [biquad pair]
+		r_bq[0].z1 = r_bq[0].z2 = r_bq[1].z1 = r_bq[1].z2 = 0.0f; // integ/m2b-w1 [biquad pair]
+		return; // the bit exact pass-through // integ/m2b-w1 [biquad pair]
+	} // integ/m2b-w1 [biquad pair]
+	const BiquadCoefficients &c = r_bq[0].c; // integ/m2b-w1 [biquad pair]
+	const bool ramp = !same_coefficients(c, p_target); // integ/m2b-w1 [biquad pair]
+	float b0 = c.b0, b1 = c.b1, b2 = c.b2, a1 = c.a1, a2 = c.a2; // integ/m2b-w1 [biquad pair]
+	float l1 = r_bq[0].z1, l2 = r_bq[0].z2, q1 = r_bq[1].z1, q2 = r_bq[1].z2; // integ/m2b-w1 [biquad pair]
+	if (ramp) { // integ/m2b-w1 [biquad pair]
+		const float inv = 1.0f / float(p_frames); // integ/m2b-w1 [biquad pair]
+		const float db0 = (p_target.b0 - b0) * inv, db1 = (p_target.b1 - b1) * inv, db2 = (p_target.b2 - b2) * inv; // integ/m2b-w1 [biquad pair]
+		const float da1 = (p_target.a1 - a1) * inv, da2 = (p_target.a2 - a2) * inv; // integ/m2b-w1 [biquad pair]
+		for (uint32_t i = 0; i < p_frames; ++i) { // integ/m2b-w1 [biquad pair]
+			b0 += db0; // integ/m2b-w1 [biquad pair]
+			b1 += db1; // integ/m2b-w1 [biquad pair]
+			b2 += db2; // integ/m2b-w1 [biquad pair]
+			a1 += da1; // integ/m2b-w1 [biquad pair]
+			a2 += da2; // integ/m2b-w1 [biquad pair]
+			const float x = r_left[i], u = r_right[i]; // integ/m2b-w1 [biquad pair]
+			const float y = b0 * x + l1, w = b0 * u + q1; // integ/m2b-w1 [biquad pair]
+			l1 = b1 * x - a1 * y + l2; // integ/m2b-w1 [biquad pair]
+			q1 = b1 * u - a1 * w + q2; // integ/m2b-w1 [biquad pair]
+			l2 = b2 * x - a2 * y; // integ/m2b-w1 [biquad pair]
+			q2 = b2 * u - a2 * w; // integ/m2b-w1 [biquad pair]
+			r_left[i] = y; // integ/m2b-w1 [biquad pair]
+			r_right[i] = w; // integ/m2b-w1 [biquad pair]
+		} // integ/m2b-w1 [biquad pair]
+	} else { // integ/m2b-w1 [biquad pair]
+		for (uint32_t i = 0; i < p_frames; ++i) { // integ/m2b-w1 [biquad pair]
+			const float x = r_left[i], u = r_right[i]; // integ/m2b-w1 [biquad pair]
+			const float y = b0 * x + l1, w = b0 * u + q1; // integ/m2b-w1 [biquad pair]
+			l1 = b1 * x - a1 * y + l2; // integ/m2b-w1 [biquad pair]
+			q1 = b1 * u - a1 * w + q2; // integ/m2b-w1 [biquad pair]
+			l2 = b2 * x - a2 * y; // integ/m2b-w1 [biquad pair]
+			q2 = b2 * u - a2 * w; // integ/m2b-w1 [biquad pair]
+			r_left[i] = y; // integ/m2b-w1 [biquad pair]
+			r_right[i] = w; // integ/m2b-w1 [biquad pair]
+		} // integ/m2b-w1 [biquad pair]
+	} // integ/m2b-w1 [biquad pair]
+	if (!std::isfinite(l1) || !std::isfinite(l2)) { // integ/m2b-w1 [biquad pair]
+		l1 = l2 = 0.0f; // integ/m2b-w1 [biquad pair]
+	} // integ/m2b-w1 [biquad pair]
+	if (!std::isfinite(q1) || !std::isfinite(q2)) { // integ/m2b-w1 [biquad pair]
+		q1 = q2 = 0.0f; // integ/m2b-w1 [biquad pair]
+	} // integ/m2b-w1 [biquad pair]
+	r_bq[0].z1 = l1; // integ/m2b-w1 [biquad pair]
+	r_bq[0].z2 = l2; // integ/m2b-w1 [biquad pair]
+	r_bq[1].z1 = q1; // integ/m2b-w1 [biquad pair]
+	r_bq[1].z2 = q2; // integ/m2b-w1 [biquad pair]
+	r_bq[0].c = p_target; // integ/m2b-w1 [biquad pair]
+	r_bq[1].c = p_target; // integ/m2b-w1 [biquad pair]
+} // integ/m2b-w1 [biquad pair]
+
 void add_scaled(float *r_dst, const float *p_src, uint32_t p_frames, float p_from, float p_to) {
 	if (p_from == p_to) {
 		for (uint32_t i = 0; i < p_frames; ++i) {
@@ -360,11 +428,24 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 	State &st = *state_;
 	const ca::SoundProgram &p = *st.program;
 	const float rate = float(st.mix_rate);
-	for (size_t v = 0; v < p.voices.size(); ++v) {
-		std::fill_n(st.voice(uint16_t(v), 0) + p_offset, p_frames, 0.0f);
-		std::fill_n(st.voice(uint16_t(v), 1) + p_offset, p_frames, 0.0f);
-	}
 	const bool tapping = st.tap_count > 0;
+	// integ/m2b-w1 [lazy zero] (E11, docs/design/m2b.md "M2b integ-w1"): a voice's sub-block range is zeroed when
+	// something first writes or reads it (a busy slot, a plugin that runs, a send into it), not up front; a voice
+	// nothing touched holds zeros by definition, so the [quiet] check needs no scan of it. Taps read every voice, so
+	// they zero all of them as before.
+	const auto touch = [&](uint16_t p_v) { // integ/m2b-w1 [lazy zero]
+		if (!st.voice_live[p_v]) { // integ/m2b-w1 [lazy zero]
+			std::fill_n(st.voice(p_v, 0) + p_offset, p_frames, 0.0f); // integ/m2b-w1 [lazy zero]
+			std::fill_n(st.voice(p_v, 1) + p_offset, p_frames, 0.0f); // integ/m2b-w1 [lazy zero]
+			st.voice_live[p_v] = 1; // integ/m2b-w1 [lazy zero]
+		} // integ/m2b-w1 [lazy zero]
+	}; // integ/m2b-w1 [lazy zero]
+	std::fill(st.voice_live.begin(), st.voice_live.end(), uint8_t(0)); // integ/m2b-w1 [lazy zero]
+	if (tapping) { // integ/m2b-w1 [lazy zero]
+		for (size_t v = 0; v < p.voices.size(); ++v) { // integ/m2b-w1 [lazy zero]
+			touch(uint16_t(v)); // integ/m2b-w1 [lazy zero]
+		} // integ/m2b-w1 [lazy zero]
+	} // integ/m2b-w1 [lazy zero]
 	for (uint32_t t = 0; t < st.tap_count; ++t) {
 		std::fill_n(st.tap_buffers[t].data(), p_frames, 0.0f);
 	}
@@ -396,13 +477,18 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 			if (ps.role == PluginRole::Slot) { // M2b au [quiet]: a slot renders, the plugins after it are checked again
 				quiet = quiet_known = false; // M2b au [quiet]
 			} else if (!quiet_known) { // M2b au [quiet]
-				quiet = !tapping && st.voice_quiet(voice, k, ch[0], ch[1], p_frames); // M2b au [quiet]
+				quiet = !tapping && st.voice_quiet(voice, k, ch[0], ch[1], st.voice_live[v] ? p_frames : 0u); // M2b au [quiet]; integ/m2b-w1 [lazy zero]: no scan of an untouched voice
 				quiet_known = true; // M2b au [quiet]
 			} // M2b au [quiet]
 			if (quiet) { // M2b au [quiet]
 				st.quiet_plugin(ps, rate, window_db, hdr_window_db); // M2b au [quiet]
 				continue; // M2b au [quiet]
 			} // M2b au [quiet]
+			if (ps.role != PluginRole::Slot) { // integ/m2b-w1 [lazy zero]
+				touch(v); // integ/m2b-w1 [lazy zero]
+			} else if (const SlotState &sl = st.slots[ps.index]; sl.play.active || sl.pending.armed) { // integ/m2b-w1 [lazy zero]
+				touch(v); // integ/m2b-w1 [lazy zero]: an idle slot writes nothing
+			} // integ/m2b-w1 [lazy zero]
 			switch (ps.role) {
 				case PluginRole::Slot:
 					st.render_slot(st.samplers[ps.output], ps.index - st.samplers[ps.output].slots_begin, ch[0], ch[1], p_frame, p_frames);
@@ -424,23 +510,20 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 				case PluginRole::LowPass: {
 					const BiquadCoefficients c = BiquadCoefficients::design(ps.role == PluginRole::HighPass ? BiquadShape::HighPass : BiquadShape::LowPass, rate,
 							ps.attribute(0), st.tuning.iir2_q, 0.0f);
-					ps.biquad[0].process(ch[0], p_frames, c);
-					ps.biquad[1].process(ch[1], p_frames, c);
+					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c); // integ/m2b-w1 [biquad pair]
 					break;
 				}
 				case PluginRole::BandPass: {
 					const float f = ps.attribute(0), bw = ps.attribute(1);
 					const float q = bw > 0.0f ? f / bw : 0.70710678f; // Bandwidth in Hz [inferred]
 					const BiquadCoefficients c = BiquadCoefficients::design(BiquadShape::BandPass, rate, f, q, 0.0f);
-					ps.biquad[0].process(ch[0], p_frames, c);
-					ps.biquad[1].process(ch[1], p_frames, c);
+					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c); // integ/m2b-w1 [biquad pair]
 					break;
 				}
 				case PluginRole::Peaking: {
 					const BiquadCoefficients c =
 							BiquadCoefficients::design(BiquadShape::Peaking, rate, ps.attribute(0), ps.attribute(2), gain_to_db(std::max(0.0f, ps.attribute(1))));
-					ps.biquad[0].process(ch[0], p_frames, c);
-					ps.biquad[1].process(ch[1], p_frames, c);
+					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c); // integ/m2b-w1 [biquad pair]
 					break;
 				}
 				case PluginRole::Delay: {
@@ -506,6 +589,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 								dst = r_buses.channels[size_t(c.bus)][chn] + p_offset;
 							}
 						} else if (c.voice != v) {
+							touch(c.voice); // integ/m2b-w1 [lazy zero]
 							dst = st.voice(c.voice, uint32_t(chn)) + p_offset;
 						}
 						if (dst != nullptr) {

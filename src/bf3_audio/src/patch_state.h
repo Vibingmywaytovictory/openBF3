@@ -212,6 +212,7 @@ struct PatchInstance::State {
 	std::vector<float> voice_buffers; // per voice: 2 planar channels of kMaxSubBlock
 	std::vector<float> delay_pool;
 	std::vector<uint8_t> voice_tapped; // per voice: bit t = tap t takes it
+	std::vector<uint8_t> voice_live; // integ/m2b-w1 [lazy zero]: per voice, 1 once render() zeroed its sub-block range
 	std::array<std::array<float, detail::kMaxSubBlock>, kMaxVoiceTaps> tap_buffers{};
 	std::array<VoiceTap *, kMaxVoiceTaps> taps{};
 	uint32_t tap_count = 0;
