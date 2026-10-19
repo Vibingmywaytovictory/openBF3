@@ -1342,3 +1342,18 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     openbf3_cost(godot.m2a_firefight 1 80)
     openbf3_cost(godot.m2a_load 1 50)
 endif()
+
+# M2b W1.0 (W1.0 contract, docs/design/m2b.md §11, §2.6; docs/design/m2b-w1.md): m2b.contract compiles every wave-1
+# interface header together with tests/tdm_fixture.h and pins the shapes (PresentEvent 64 B, net::PlayerRow 32 B), the
+# enum values of §2.6 #5 and #11, the W1.0 defaults, net::restrict_command, the M2a hashes a default load keeps and the
+# W1.0 stubs (the v3 codecs, add_tdm_bots). Rows that need a track's body print PENDING until the track sets its
+# switch. No install; a contract row (< 2 s), functional, parallel-safe.
+openbf3_test(test_m2b_contract test_main.cpp m2b_contract_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+target_link_libraries(test_m2b_contract PRIVATE bf3_host bf3_audio)
+target_compile_definitions(test_m2b_contract PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME m2b.contract COMMAND test_m2b_contract --test-suite=m2b-contract)
+set_tests_properties(m2b.contract PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2b_w1_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2b.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w1_cl_dir}")
+endif()
