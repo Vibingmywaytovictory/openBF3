@@ -6,6 +6,8 @@
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/kit_appearance.h" // PT1 iff [kits]
+#include "bf3/core/gameplay/kit_def.h" // PT1 iff [kits]
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
@@ -127,6 +129,9 @@ core::Result<uint32_t> weapon_ant_ref(const core::EbxLibrary &p_library, const s
 	}
 	return uint32_t(*v);
 }
+
+// PT1 iff [kits]: the kits' own parts joined to the team's (defined in the PT1 iff block at the end of this file).
+void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes); // PT1 iff [kits]
 
 } // namespace
 
@@ -255,6 +260,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 			return parts.error();
 		}
 		team.parts = std::move(*parts);
+		pt1_join_kit_parts(lib, ts, team, a->notes); // PT1 iff [kits]
 		SoldierPart weapon;
 		weapon.mesh = ts.weapon_mesh;
 		weapon.weapon = true;
@@ -533,4 +539,110 @@ PinchReport measure_pinch(const SoldierTeam &p_team, const anim::Skeleton &p_rig
 	return r;
 }
 
+} // namespace bf3::render
+
+// PT1 iff (docs/design/pt1-iff.md §2.1) -------------------------------------------------------------------------------
+namespace bf3::render {
+namespace {
+
+// The KitRole of a kit partition by its name (gameplay/kits/usengineer -> 1), as host/kits.cpp does; -1 when none.
+int pt1_kit_role(std::string_view p_kit) {
+	const std::string k = core::to_lower_ascii(p_kit);
+	const char *words[4] = { "assault", "engineer", "support", "recon" };
+	const size_t slash = k.find_last_of('/');
+	const std::string_view tail = std::string_view(k).substr(slash == std::string::npos ? 0 : slash + 1);
+	for (int r = 0; r < 4; ++r) {
+		if (tail.find(words[r]) != std::string_view::npos) {
+			return r;
+		}
+	}
+	return -1;
+}
+
+void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes) {
+	if (p_spec.team_data.empty()) {
+		return; // S3: one appearance, every part on every kit
+	}
+	const core::EbxPartition *team = p_library.partition_by_name(p_spec.team_data);
+	if (team == nullptr) {
+		r_notes.push_back("kits: " + p_spec.team_data + " not found (every kit wears " + p_spec.appearance + ")");
+		return;
+	}
+	core::gameplay::WorkBudget budget;
+	core::Result<core::gameplay::TeamDef> td = core::gameplay::read_team_data(p_library, team->primary(), &budget);
+	if (!td) {
+		r_notes.push_back("kits: " + p_spec.team_data + ": " + td.error().message + " (every kit wears " + p_spec.appearance + ")");
+		return;
+	}
+	for (const std::string &kit : td->kits) {
+		const int role = pt1_kit_role(kit);
+		if (role < 0 || !r_team.kit_appearances[size_t(role)].empty()) {
+			r_notes.push_back("kits: " + kit + ": no role or a second kit of its role (skipped)");
+			continue;
+		}
+		core::Result<core::gameplay::KitAppearance> ka = core::gameplay::read_kit_appearance(p_library, kit, &budget);
+		if (!ka) {
+			r_notes.push_back("kits: " + ka.error().message + " (the kit wears " + p_spec.appearance + ")");
+			continue;
+		}
+		r_team.kit_appearances[size_t(role)] = ka->appearance;
+	}
+	// The base parts belong to the kits without an appearance of their own (or whose appearance is the base one).
+	uint8_t base_mask = 0;
+	for (size_t k = 0; k < 4; ++k) {
+		if (r_team.kit_appearances[k].empty() || core::iequals_ascii(r_team.kit_appearances[k], p_spec.appearance)) {
+			base_mask = uint8_t(base_mask | (1u << k));
+		}
+	}
+	for (SoldierPart &p : r_team.parts) {
+		p.kit_mask = base_mask;
+	}
+	std::vector<SoldierPart> joined;
+	std::string line = "kits " + p_spec.team_data + ":";
+	for (size_t k = 0; k < 4; ++k) {
+		if ((base_mask & (1u << k)) != 0) {
+			line += " " + std::to_string(k) + "=" + p_spec.appearance;
+			continue;
+		}
+		std::vector<std::string> notes;
+		core::Result<std::vector<SoldierPart>> parts = appearance_parts(p_library, r_team.kit_appearances[k], notes);
+		if (!parts) {
+			r_notes.push_back("kits: " + parts.error().message + " (kit " + std::to_string(k) + " wears " + p_spec.appearance + ")");
+			for (SoldierPart &p : r_team.parts) {
+				p.kit_mask = uint8_t(p.kit_mask | (1u << k));
+			}
+			r_team.kit_appearances[k].clear();
+			continue;
+		}
+		for (const std::string &n : notes) {
+			r_notes.push_back(n);
+		}
+		line += " " + std::to_string(k) + "=" + r_team.kit_appearances[k];
+		for (SoldierPart &np : *parts) {
+			auto same = [&](const SoldierPart &p_old) { return p_old.mesh == np.mesh && p_old.variation == np.variation; };
+			const auto it = std::find_if(r_team.parts.begin(), r_team.parts.end(), same);
+			if (it != r_team.parts.end()) {
+				it->kit_mask = uint8_t(it->kit_mask | (1u << k));
+				continue;
+			}
+			const auto jt = std::find_if(joined.begin(), joined.end(), same);
+			if (jt != joined.end()) {
+				jt->kit_mask = uint8_t(jt->kit_mask | (1u << k));
+				continue;
+			}
+			np.kit_mask = uint8_t(1u << k);
+			joined.push_back(std::move(np));
+		}
+	}
+	for (SoldierPart &p : joined) {
+		r_team.parts.push_back(std::move(p));
+	}
+	// A base part no kit wears any more is dropped (no draw, no binds).
+	r_team.parts.erase(std::remove_if(r_team.parts.begin(), r_team.parts.end(), [](const SoldierPart &p_part) { return p_part.kit_mask == 0; }),
+			r_team.parts.end());
+	line += "; " + std::to_string(r_team.parts.size()) + " body parts in all";
+	r_notes.push_back(line);
+}
+
+} // namespace
 } // namespace bf3::render

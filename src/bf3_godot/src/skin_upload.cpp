@@ -46,7 +46,12 @@ struct TeamMesh {
 	Ref<Skin> skin;
 };
 
-bool build_team_meshes(const bf3::render::SoldierAssets &p_assets, std::array<TeamMesh, 2> &r_teams, std::string *r_error) {
+// PT1 iff [kits] (replaces build_team_meshes; docs/design/pt1-iff.md §2.1): one mesh per (team, kit) over the parts
+// whose SoldierPart::kit_mask names the kit; a kit wearing the same parts as an earlier kit of its team shares that
+// mesh (S3's assets, every mask 0x0F: one mesh per team, as before). Textures and materials are made once for all.
+// r_teams = kit 0's meshes; r_kits (when given) every kit's.
+bool build_team_meshes(const bf3::render::SoldierAssets &p_assets, std::array<TeamMesh, 2> &r_teams, std::string *r_error,
+		std::array<std::array<TeamMesh, 2>, 4> *r_kits = nullptr) {
 	std::map<std::string, Ref<Texture2D>> textures;
 	for (const bf3::render::PreparedTexture &t : p_assets.textures) {
 		const Ref<ImageTexture> tex = make_texture(t);
@@ -58,56 +63,95 @@ bool build_team_meshes(const bf3::render::SoldierAssets &p_assets, std::array<Te
 		const auto it = textures.find(p_name);
 		return it == textures.end() ? Ref<Texture2D>() : it->second;
 	};
+	std::array<std::array<TeamMesh, 2>, 4> kits;
 	for (size_t t = 0; t < r_teams.size(); ++t) {
 		const bf3::render::SoldierTeam &team = p_assets.teams[t];
-		bf3::render::PreparedMesh merged;
-		merged.name = team.appearance;
-		merged.skinned = true;
-		std::vector<Ref<Material>> materials;
 		std::map<std::pair<size_t, uint32_t>, Ref<StandardMaterial3D>> by_slot;
-		bool have_bounds = false;
-		Vector3 lo, hi;
-		for (size_t p = 0; p < team.parts.size(); ++p) {
-			const bf3::render::SoldierPart &part = team.parts[p];
-			for (const bf3::render::PreparedSurface &s : part.prepared.surfaces) {
-				merged.surfaces.push_back(s);
-				Ref<Material> m;
-				if (s.material_index < part.materials.slots.size()) {
-					Ref<StandardMaterial3D> &cached = by_slot[{ p, s.material_index }];
-					if (cached.is_null()) {
-						cached = make_standard_material(part.materials.slots[s.material_index], !s.tangents.empty(), find_texture, MaterialOptions{});
-					}
-					m = cached;
+		std::array<std::vector<bool>, 4> worn;
+		for (size_t k = 0; k < kits.size(); ++k) {
+			worn[k].resize(team.parts.size());
+			for (size_t p = 0; p < team.parts.size(); ++p) {
+				worn[k][p] = (team.parts[p].kit_mask & (1u << k)) != 0;
+			}
+			bool shared = false;
+			for (size_t e = 0; e < k; ++e) {
+				if (worn[e] == worn[k] && kits[e][t].mesh.is_valid()) {
+					kits[k][t] = kits[e][t];
+					shared = true;
+					break;
 				}
-				materials.push_back(m);
-				const Vector3 a(s.aabb_min[0], s.aabb_min[1], s.aabb_min[2]), b(s.aabb_max[0], s.aabb_max[1], s.aabb_max[2]);
-				lo = have_bounds ? lo.min(a) : a;
-				hi = have_bounds ? hi.max(b) : b;
-				have_bounds = true;
 			}
-		}
-		if (merged.surfaces.empty()) {
-			if (r_error != nullptr) {
-				*r_error = "team " + std::to_string(t) + " has no surfaces";
+			if (shared) {
+				continue;
 			}
-			return false;
-		}
-		const bf3::render::PreparedSurface *first = merged.surfaces.data();
-		r_teams[t].mesh = make_array_mesh(merged, [&](const bf3::render::PreparedSurface &p_s) -> Ref<Material> {
-			const size_t index = size_t(&p_s - first);
-			return index < materials.size() ? materials[index] : Ref<Material>();
-		});
-		if (r_teams[t].mesh.is_null() || r_teams[t].mesh->get_surface_count() != int32_t(merged.surfaces.size())) {
-			if (r_error != nullptr) {
-				*r_error = "team " + std::to_string(t) + ": the merged mesh was not created";
+			bf3::render::PreparedMesh merged;
+			merged.name = team.kit_appearances[k].empty() ? team.appearance : team.kit_appearances[k];
+			merged.skinned = true;
+			std::vector<Ref<Material>> materials;
+			bool have_bounds = false;
+			Vector3 lo, hi;
+			for (size_t p = 0; p < team.parts.size(); ++p) {
+				if (!worn[k][p]) {
+					continue;
+				}
+				const bf3::render::SoldierPart &part = team.parts[p];
+				for (const bf3::render::PreparedSurface &s : part.prepared.surfaces) {
+					merged.surfaces.push_back(s);
+					Ref<Material> m;
+					if (s.material_index < part.materials.slots.size()) {
+						Ref<StandardMaterial3D> &cached = by_slot[{ p, s.material_index }];
+						if (cached.is_null()) {
+							cached = make_standard_material(part.materials.slots[s.material_index], !s.tangents.empty(), find_texture, MaterialOptions{});
+						}
+						m = cached;
+					}
+					materials.push_back(m);
+					const Vector3 a(s.aabb_min[0], s.aabb_min[1], s.aabb_min[2]), b(s.aabb_max[0], s.aabb_max[1], s.aabb_max[2]);
+					lo = have_bounds ? lo.min(a) : a;
+					hi = have_bounds ? hi.max(b) : b;
+					have_bounds = true;
+				}
 			}
-			return false;
+			if (merged.surfaces.empty()) {
+				if (r_error != nullptr) {
+					*r_error = "team " + std::to_string(t) + " kit " + std::to_string(k) + " has no surfaces";
+				}
+				return false;
+			}
+			const bf3::render::PreparedSurface *first = merged.surfaces.data();
+			kits[k][t].mesh = make_array_mesh(merged, [&](const bf3::render::PreparedSurface &p_s) -> Ref<Material> {
+				const size_t index = size_t(&p_s - first);
+				return index < materials.size() ? materials[index] : Ref<Material>();
+			});
+			if (kits[k][t].mesh.is_null() || kits[k][t].mesh->get_surface_count() != int32_t(merged.surfaces.size())) {
+				if (r_error != nullptr) {
+					*r_error = "team " + std::to_string(t) + " kit " + std::to_string(k) + ": the merged mesh was not created";
+				}
+				return false;
+			}
+			const Vector3 grow(1.0f, 1.0f, 1.0f);
+			kits[k][t].aabb = AABB(lo - grow, (hi - lo) + grow * 2.0f);
+			kits[k][t].skin = k == 0 ? make_skin(team.binds.binds()) : kits[0][t].skin;
 		}
-		const Vector3 grow(1.0f, 1.0f, 1.0f);
-		r_teams[t].aabb = AABB(lo - grow, (hi - lo) + grow * 2.0f);
-		r_teams[t].skin = make_skin(team.binds.binds());
+	}
+	r_teams = kits[0];
+	if (r_kits != nullptr) {
+		*r_kits = kits;
 	}
 	return true;
+}
+
+// PT1 iff [kits]: distinct meshes of a [kit][team] table.
+uint32_t count_kit_meshes(const std::array<std::array<TeamMesh, 2>, 4> &p_kits) {
+	std::vector<const ArrayMesh *> seen;
+	for (const auto &kit : p_kits) {
+		for (const TeamMesh &m : kit) {
+			if (m.mesh.is_valid() && std::find(seen.begin(), seen.end(), m.mesh.ptr()) == seen.end()) {
+				seen.push_back(m.mesh.ptr());
+			}
+		}
+	}
+	return uint32_t(seen.size());
 }
 
 // ---- A: Skeleton3D ----------------------------------------------------------------------------------------------
@@ -129,7 +173,7 @@ public:
 			}
 			return false;
 		}
-		if (!build_team_meshes(p_assets, teams_, r_error)) {
+		if (!build_team_meshes(p_assets, teams_, r_error, &kits_)) { // PT1 iff [kits]
 			return false;
 		}
 		const bf3::anim::Skeleton &rig = p_assets.clips.rig;
@@ -172,9 +216,30 @@ public:
 			mi->set_skeleton_path(NodePath(".."));
 			nodes_.push_back(sk->get_instance_id());
 			skeletons_.push_back(sk);
+			meshes_.push_back(mi); // PT1 iff [kits]
+			kit_of_.push_back(uint16_t(team << 8)); // PT1 iff [kits]: team << 8 | kit
 		}
 		return true;
 	}
+
+	// PT1 iff [kits]
+	void set_soldier_kit(uint32_t p_soldier, uint8_t p_kit) override {
+		if (p_soldier >= meshes_.size()) {
+			return;
+		}
+		const size_t team = kit_of_[p_soldier] >> 8;
+		const size_t kit = p_kit < kits_.size() ? p_kit : 0;
+		if ((kit_of_[p_soldier] & 0xFF) == kit) {
+			return;
+		}
+		kit_of_[p_soldier] = uint16_t(team << 8 | kit);
+		const TeamMesh &m = kits_[kit][team];
+		if (m.mesh.is_valid() && meshes_[p_soldier]->get_mesh() != m.mesh) {
+			meshes_[p_soldier]->set_mesh(m.mesh);
+			meshes_[p_soldier]->set_custom_aabb(m.aabb);
+		}
+	}
+	uint32_t kit_meshes() const override { return count_kit_meshes(kits_); } // PT1 iff [kits]
 
 	void upload(const bf3::anim::CrowdEvaluator &p_eval, std::span<const Transform3D> p_roots, SkinUploadStats &r_stats) override {
 		r_stats = SkinUploadStats{};
@@ -223,12 +288,18 @@ public:
 		}
 		nodes_.clear();
 		skeletons_.clear();
+		meshes_.clear(); // PT1 iff [kits]
+		kit_of_.clear(); // PT1 iff [kits]
+		kits_ = {}; // PT1 iff [kits]
 		teams_ = {};
 	}
 
 private:
 	Node *parent_ = nullptr;
 	std::array<TeamMesh, 2> teams_;
+	std::array<std::array<TeamMesh, 2>, 4> kits_; // PT1 iff [kits]: [kit][team]
+	std::vector<MeshInstance3D *> meshes_; // PT1 iff [kits]
+	std::vector<uint16_t> kit_of_; // PT1 iff [kits]
 	std::vector<int32_t> parents_;
 	std::vector<int32_t> driven_;
 	std::vector<uint64_t> nodes_;
@@ -245,7 +316,7 @@ public:
 
 	bool build(const bf3::render::SoldierAssets &p_assets, const bf3::anim::CrowdEvaluator &p_eval, std::span<const uint8_t> p_team_of, RID p_scenario,
 			std::string *r_error) override {
-		if (!build_team_meshes(p_assets, teams_, r_error)) {
+		if (!build_team_meshes(p_assets, teams_, r_error, &kits_)) { // PT1 iff [kits]
 			return false;
 		}
 		RenderingServer *rs = RenderingServer::get_singleton();
@@ -270,6 +341,7 @@ public:
 			rs->instance_attach_skeleton(s.instance, s.skeleton);
 			rs->instance_set_custom_aabb(s.instance, teams_[team].aabb);
 			s.binds = binds;
+			s.team = uint8_t(team); // PT1 iff [kits]
 			soldiers_.push_back(s);
 		}
 		return true;
@@ -324,16 +396,42 @@ public:
 			}
 		}
 		soldiers_.clear();
+		kits_ = {}; // PT1 iff [kits]
 		teams_ = {};
 	}
+
+	// PT1 iff [kits]: the instance's base becomes the kit's mesh (the skeleton stays attached; the bounds are set again).
+	void set_soldier_kit(uint32_t p_soldier, uint8_t p_kit) override {
+		if (p_soldier >= soldiers_.size() || !soldiers_[p_soldier].instance.is_valid()) {
+			return;
+		}
+		Soldier &s = soldiers_[p_soldier];
+		const uint8_t kit = p_kit < kits_.size() ? p_kit : uint8_t(0);
+		if (s.kit == kit) {
+			return;
+		}
+		const TeamMesh &from = kits_[s.kit][s.team];
+		const TeamMesh &to = kits_[kit][s.team];
+		s.kit = kit;
+		if (to.mesh.is_null() || to.mesh == from.mesh) {
+			return;
+		}
+		RenderingServer *rs = RenderingServer::get_singleton();
+		rs->instance_set_base(s.instance, to.mesh->get_rid());
+		rs->instance_set_custom_aabb(s.instance, to.aabb);
+	}
+	uint32_t kit_meshes() const override { return count_kit_meshes(kits_); } // PT1 iff [kits]
 
 private:
 	struct Soldier {
 		RID instance;
 		RID skeleton;
 		int32_t binds = 0;
+		uint8_t team = 0; // PT1 iff [kits]
+		uint8_t kit = 0; // PT1 iff [kits]: the mesh drawn (kit 0 from build)
 	};
 	std::array<TeamMesh, 2> teams_;
+	std::array<std::array<TeamMesh, 2>, 4> kits_; // PT1 iff [kits]: [kit][team]
 	std::vector<Soldier> soldiers_;
 };
 

@@ -73,6 +73,11 @@ public:
 	virtual void set_soldier_visible(uint32_t p_soldier, bool p_visible) = 0;
 	// Frees every RID / node it created. Main thread.
 	virtual void clear() = 0;
+	// PT1 iff [kits] (docs/design/pt1-iff.md §2.1): soldier p_soldier wears kit p_kit's mesh of its team (host::KitRole;
+	// out of range: kit 0). Main thread; a no-op where every kit wears the same parts (S3).
+	virtual void set_soldier_kit(uint32_t p_soldier, uint8_t p_kit) { (void)p_soldier, (void)p_kit; } // PT1 iff [kits]
+	// PT1 iff [kits]: distinct (team, kit) meshes built (2 when every kit shares its team's mesh).
+	virtual uint32_t kit_meshes() const { return 0; } // PT1 iff [kits]
 	// Diagnostic (--s3-diag, never in a gated run): false makes upload() push the roots only, so a run can split
 	// Godot's hidden cost into the instance-transform part and the skeleton part.
 	void set_palette_upload(bool p_on) { palette_upload_ = p_on; }

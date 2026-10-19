@@ -110,8 +110,13 @@ namespace bf3::host {
 struct BotLevel;
 } // namespace bf3::host
 
+namespace bf3::sim { // PT1 iff [context]
+class CollisionWorld; // PT1 iff [context]
+} // namespace bf3::sim // PT1 iff [context]
+
 namespace bf3::godot_side {
 
+class Bf3UiAssets; // PT1 iff [context]
 class M1Check;
 class M1LoadCheck;
 class ShotRunner;
@@ -174,6 +179,10 @@ public:
 	uint64_t others_presented() const { return others_presented_; }
 	uint64_t others_extrapolated() const { return others_extrapolated_; }
 	void reset_others_counts() { others_presented_ = others_extrapolated_ = 0; }
+	// PT1 iff [context] (pt1_iff.cpp; docs/design/pt1-iff.md): the M2a session's static collision world and UI assets for the
+	// nametags' line of sight and font; null outside an M2a / M2b session or before they exist. Main thread.
+	const bf3::sim::CollisionWorld *pt1_iff_world() const; // PT1 iff [context]
+	Bf3UiAssets *pt1_iff_ui_assets() const; // PT1 iff [context]
 	// Stops the client and starts a new one with this netsim profile (E2 runs); the mapper forgets the adopted life.
 	bool restart_client(const std::string &p_netsim, uint64_t p_seed, std::string *r_error);
 	// Saves the viewport to p_path (refused inside the install). Main thread.

@@ -3281,3 +3281,53 @@ Measured 2026-10-19 on `pt1/rld`:
   stays at the tail's 100.4 dB.
 * **Another soldier's reload, walking away at 3 m/s from 5 m:** its last 1.4 s -39.9 dBFS, against -26.6 dBFS standing
   (it stayed at the start before).
+
+## PT1 iff: telling friend from foe
+
+<!-- # PT1 iff -->
+Playtest track "iff", on branch `pt1/iff` from main 6a4061e. The playtest said "can't tell who is friendly and who
+isn't". The root causes with their evidence, the fix, the measured before / after and one command per check are in
+[docs/design/pt1-iff.md](docs/design/pt1-iff.md).
+
+* **Root causes.**
+  - The M2b minimap still ran M1's loop, which drew every other soldier as an enemy: 31 orange arrows per frame, 15 of
+    them teammates.
+  - No code drew BF3's nametags (UINametagCompData) over soldiers.
+  - The 3p crowd drew one appearance per team, the assault one, for every kit.
+* **Minimap.** It now shows every live teammate as a blue Friendly arrow. An enemy shows only for 3.15 s after each of
+  its shots (ActiveSpottedTime 7 x SpotOnFireMultiplier 0.45, from the soldier's SpottingTargetComponentData).
+  M1 and M2a keep their minimap: the new code runs only once a MatchState arrives.
+* **Nametags** (`pt1_iff.{h,cpp}`, rules in `bf3/core/ui/nametags.h`), from UINametagCompData:
+  - over every teammate, the hud3dicons Friendly arrow, through walls;
+  - within 15 m (ShowLabelRange), or when looked at, also the kit icon and the name in FriendlyTint (0, 0.8, 0.8);
+  - over an enemy, nothing, except the name in EnemyTint (1, 0.38, 0) while the crosshair is on him and a ray to him
+    is clear.
+* **3p kits.** Each kit wears its own appearance, read from the kit's VisualTable, its default camo and that camo's
+  LinkedTo. That gives 8 meshes instead of 2. S3's spec is unchanged.
+* **Kill feed and scoreboard.** No change. Their colours are already relative to the local team, and the data names no
+  colours for them.
+* **Inferred, `measured = false`:** the stage units, the anchor, the look-at curve, the reveal rule and the kit-name
+  rule (pt1-iff.md §3).
+* **Look at it:**
+
+  ```
+  "%OPENBF3_GODOT%" --path bf3-opensource res://scenes/m2b_metro.tscn -- --deploy-screen=0 --preround=120 --iff-shots=b\shots\pt1-iff
+  ```
+
+  This saves a teammate and an enemy at 6, 15 and 35 m, then quits. Or play the M2b scene as usual.
+* **Tests.**
+  - `ctest --test-dir b\dev -R "^pt1\.iff\.unit$"` (new, data-free): the rules and recorded frames.
+  - `ctest --test-dir b\dev -R "^pt1\.iff\.install$"` (new, 77 without an install): the data values, the 8 kit
+    appearances, the crowd's kit parts, the fuzz and install.unchanged.
+
+Measured 2026-10-19, `pt1/iff`, shared machine (times indicative only):
+
+* **Capture**, 31 bots, pre-round, 1956 frames:
+  - minimap: 15.0 Friendly arrows per frame, 0 enemies shown (16 hidden), 0 teammates as enemies (was 15.0);
+  - nametags: 10.1 friendly icons, 1.30 friendly names and 0.363 enemy names per frame;
+  - cost: 27.5 us of main thread per frame on average;
+  - 6 of 6 views saved.
+* **Live round** (`--iff-live=60 --preround=0`, 4872 frames): 13.3 Friendly and 6.7 revealed-enemy arrows per frame
+  (8.1 enemies hidden), at most 12 revealed at once.
+* **Rows:** `pt1.iff.unit` 8 cases, 1859 assertions, 0.24 s; `pt1.iff.install` 5 cases, 103 assertions, 1.7 s;
+  install unchanged.
