@@ -63,6 +63,8 @@ constexpr uint32_t kCrowdSoldiers = kSlotsPerTeam * anim::kMaxCrowdTeams;
 static_assert(kCrowdSoldiers <= anim::kMaxCrowdSoldiers);
 constexpr size_t kMaxPending = 1024; // events waiting for the render clock (beyond: the oldest is applied early, counted)
 constexpr float kCorpseExtraSeconds = 0.5f; // a corpse input outlives the evaluator's hide by this much, then kHidden
+constexpr uint32_t kCamLaneOffset = uint32_t(net::kMaxPlayerRows); // M2b cam [corpse]: a slot's second crowd index
+static_assert(kCamLaneOffset * 2 == kSlotsPerTeam); // M2b cam [corpse]
 
 void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[crowd] " + p_line));
@@ -147,8 +149,26 @@ struct Bf3GameCrowd::Impl {
 		bool reload_known = false;
 		uint32_t sample_tick = 0;
 		uint8_t weapon = 0;
+		uint8_t lane = 0; // M2b cam [corpse]: this life's crowd index is team x 128 + slot + lane x kCamLaneOffset
+		bool revived = false; // M2b cam [revive]: this life began as a revive (CrowdSoldierInput::revived)
+		double revive_wait = -1.0; // M2b cam [revive]: seconds since a Revive event named the slot (< 0: none)
 	};
 	std::array<Slot, kSlotsPerTeam> slots{};
+	// M2b cam [corpse]: the M2b corpse state (set_corpse_seconds; the // M2b cam block at the end of this file).
+	struct CamCorpse { // M2b cam [corpse]: a corpse drawn on its own crowd index while its slot lives again
+		bool active = false; // M2b cam [corpse]
+		uint32_t index = 0; // M2b cam [corpse]
+		double seconds = 0.0; // M2b cam [corpse]: since the death
+		anim::CrowdSoldierInput input; // M2b cam [corpse]
+	}; // M2b cam [corpse]
+	std::array<std::array<CamCorpse, 2>, kSlotsPerTeam> cam_corpses{}; // M2b cam [corpse]: [slot][lane]
+	float corpse_seconds = anim::kCrowdDeathHideSeconds; // M2b cam [corpse]
+	bool cam_m2b = false; // M2b cam [corpse]: set_corpse_seconds ran (two indices per slot, the own corpse)
+	uint64_t cam_counts[5] = {}; // M2b cam [corpse]: lane flips, corpses cut short, skipped slots, stale revives, own corpses
+	bool cam_event(const host::PresentEvent &p_e, const M2aFrame &p_frame); // M2b cam [revive]
+	void cam_new_life(uint32_t p_slot, Slot &r_s); // M2b cam [corpse] [revive]
+	void cam_draw_corpses(double p_dt, const anim::Vec3 &p_camera); // M2b cam [corpse]
+	void cam_log() const; // M2b cam [corpse]
 	struct Pending {
 		host::PresentKind kind;
 		host::PresentTimeline timeline;
@@ -199,6 +219,9 @@ void Bf3GameCrowd::Impl::apply(const Pending &p_e) {
 void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 	// 1. Events.
 	for (const host::PresentEvent &e : p_frame.events) {
+		if (cam_event(e, p_frame)) { // M2b cam [revive]: Revive events and the own death, applied at once
+			continue; // M2b cam [revive]
+		} // M2b cam [revive]
 		Pending p{ e.kind, e.timeline, e.slot, e.time };
 		if (e.kind == host::PresentKind::Death) {
 			p.slot = e.aux; // the victim
@@ -238,6 +261,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		const host::PresentedOtherWeapon *w = i < p_frame.other_weapons.size() && p_frame.other_weapons[i].valid ? &p_frame.other_weapons[i] : nullptr;
 		const uint8_t team = w != nullptr && w->team != 0 ? anim::crowd_team_of_wire(w->team) : (s.known ? s.team : uint8_t(0));
 		if (!s.known || s.generation != o.generation) {
+			cam_new_life(o.slot, s); // M2b cam [corpse] [revive]: the corpse moves to its own index, or stands up
 			s.dead = false; // a new life
 			s.reload_known = false;
 			s.fire_seq = 0;
@@ -293,16 +317,21 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		if (!s.known) {
 			continue;
 		}
+		if (cam_m2b && slot >= kCamLaneOffset) { // M2b cam [corpse]: the index belongs to slot - 64's second lane
+			++cam_counts[2]; // M2b cam [corpse]
+			continue; // M2b cam [corpse]
+		} // M2b cam [corpse]
 		if (s.dead) {
 			s.dead_seconds += dt;
 		}
-		const bool corpse = s.dead && s.dead_seconds < double(anim::kCrowdDeathHideSeconds + kCorpseExtraSeconds);
+		const bool corpse = s.dead && s.dead_seconds < double(corpse_seconds + kCorpseExtraSeconds); // M2b cam [corpse]
 		if (!s.present && !corpse) {
 			continue;
 		}
-		const uint32_t index = uint32_t(s.team) * kSlotsPerTeam + slot;
+		const uint32_t index = uint32_t(s.team) * kSlotsPerTeam + slot + uint32_t(s.lane) * kCamLaneOffset; // M2b cam [corpse]
 		anim::CrowdSoldierInput in = s.input;
 		in.dead = s.dead;
+		in.revived = s.revived; // M2b cam [revive]
 		if (!s.present) {
 			in.velocity = anim::Vec3{};
 			in.flags = 0; // a corpse: no reload start
@@ -312,6 +341,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		root_x[index] = root;
 		roots[index] = Transform3D(Basis(Vector3(0, 1, 0), in.yaw), Vector3(in.position.x, in.position.y, in.position.z));
 	}
+	cam_draw_corpses(dt, cam); // M2b cam [corpse]
 }
 
 void Bf3GameCrowd::Impl::draw_weapons(const M2aFrame &p_frame) {
@@ -594,6 +624,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 	anim::CrowdStanceSet stance;
 	stance.pose = m.have_pose ? &m.pose : nullptr;
 	stance.moves = m.have_moves ? &m.moves : nullptr;
+	stance.corpse_seconds = m.corpse_seconds; // M2b cam [corpse]
 	core::Result<std::unique_ptr<anim::CrowdEvaluator>> e = anim::CrowdEvaluator::make(m.assets->clips, stance, m.teams, kCrowdSoldiers, m.config);
 	if (!e) {
 		return fail(e.error().message);
@@ -725,6 +756,7 @@ void Bf3GameCrowd::shutdown() {
 		return;
 	}
 	m.shut_down = true;
+	m.cam_log(); // M2b cam [corpse]
 	if (m.eval && m.lanes) {
 		m.eval->wait_and_publish(*m.lanes);
 	}
@@ -733,6 +765,183 @@ void Bf3GameCrowd::shutdown() {
 	m.lanes.reset();
 	m.muzzles.clear();
 	m.built = false;
+}
+
+} // namespace bf3::godot_side
+
+// ---- M2b cam (docs/design/m2b.md §4, §2.6 #17; as built: docs/design/m2b-cam.md) ---------------------------------
+// The 3p corpse and the revive stand-up in the M2b scene (set_corpse_seconds before build() turns it on; M2a never
+// calls it, so its crowd is unchanged):
+//   * a corpse stays drawn for corpse_seconds (anim::kCrowdCorpseSeconds, 15 s) through CrowdStanceSet::corpse_seconds;
+//   * every slot below 64 owns two crowd indices (team x 128 + slot, and + 64: the lanes; TDM's slots are below
+//     net::kMaxPlayerRows, slots >= 64 are spectators and are not drawn here, counted). A slot that lives again while
+//     its corpse is still drawn (a bot respawns after 5-8 s) keeps the corpse in a CamCorpse record on the lane it died
+//     on and draws the new life on the other lane, so the corpse keeps its pose, place and time. An older corpse on
+//     the lane the new life takes (two deaths within the corpse time) is cut short (counted);
+//   * a Revive event (aux = the revived slot, applied when drained, before the render clock shows the new life) marks
+//     the slot's next life as a revive: that life stays on the corpse's lane with CrowdSoldierInput::revived, and the
+//     evaluator stands the corpse up over kCrowdReviveBlendSeconds at the same place (crowd_eval.cpp [revive]). A
+//     Revive whose life does not show within kCamReviveWaitSeconds is dropped (counted);
+//   * the own soldier is never in present_others, so the own Death event (aux = the own slot) draws the own body as a
+//     corpse from the frame's own state (position, yaw, stance, team, held weapon) for the death camera to look at;
+//     the own Spawn event (a deploy or a revive: the 1p view takes over) removes it.
+namespace bf3::godot_side {
+
+namespace {
+
+constexpr double kCamReviveWaitSeconds = 2.0; // [inferred]: the revived life shows in the snapshots well within this
+
+} // namespace
+
+void Bf3GameCrowd::set_corpse_seconds(float p_seconds) {
+	Impl &m = *impl_;
+	if (m.built) {
+		log("set_corpse_seconds after build(): ignored (the evaluator was made with " + std::to_string(m.corpse_seconds) + " s)");
+		return;
+	}
+	if (!std::isfinite(p_seconds) || p_seconds < 0.0f || p_seconds > anim::kCrowdMaxCorpseSeconds) {
+		log("set_corpse_seconds(" + std::to_string(p_seconds) + "): outside [0, " + std::to_string(anim::kCrowdMaxCorpseSeconds) + "], using " +
+				std::to_string(anim::kCrowdCorpseSeconds));
+		p_seconds = anim::kCrowdCorpseSeconds;
+	}
+	m.corpse_seconds = p_seconds;
+	m.cam_m2b = true;
+}
+
+bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const M2aFrame &p_frame) {
+	if (p_e.kind == host::PresentKind::Revive) {
+		if (p_e.aux < kSlotsPerTeam && p_e.aux != p_frame.own_slot) {
+			slots[p_e.aux].revive_wait = 0.0;
+		}
+		return true; // the pending list has no use for it
+	}
+	if (!cam_m2b || p_frame.own_slot >= kCamLaneOffset) {
+		return false;
+	}
+	const uint8_t own = p_frame.own_slot;
+	if (p_e.kind == host::PresentKind::Spawn && p_e.slot == own) {
+		for (CamCorpse &c : cam_corpses[own]) {
+			c.active = false; // the 1p view takes over (a deploy or the own revive)
+		}
+		return false;
+	}
+	if (p_e.kind != host::PresentKind::Death || p_e.aux != own) {
+		return false;
+	}
+	const host::PresentationFrame *f = p_frame.frame;
+	if (f == nullptr || !f->valid) {
+		return true;
+	}
+	const sim::SoldierState &st = f->own_curr;
+	const anim::Vec3 pos{ st.position[0] + f->visual_offset[0], st.position[1] + f->visual_offset[1], st.position[2] + f->visual_offset[2] };
+	if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(pos.z)) {
+		return true;
+	}
+	const uint8_t wire_team = f->own_team != 0 ? f->own_team : p_frame.own_team;
+	const uint8_t team = anim::crowd_team_of_wire(wire_team);
+	CamCorpse &c = cam_corpses[own][0];
+	c.input = anim::CrowdSoldierInput{};
+	c.input.position = pos;
+	c.input.yaw = sim::yaw_radians(st.yaw);
+	c.input.pose = uint8_t(std::min<uint32_t>(uint32_t(st.pose), 2));
+	c.input.target_pose = uint8_t(std::min<uint32_t>(uint32_t(st.target_pose), 2));
+	c.input.team = team;
+	c.input.dead = true;
+	c.input.weapon = 0;
+	if (f->own_weapons_valid && f->own_weapons_curr.active < f->own_weapons_curr.slots.size()) {
+		const uint16_t def = f->own_weapons_curr.slots[f->own_weapons_curr.active].def;
+		const int32_t idx = def != sim::weapons::kNoWeapon ? render::crowd_weapon_index(*weapons, team, def) : -1;
+		c.input.weapon = idx >= 0 ? uint8_t(idx) : uint8_t(0);
+	}
+	c.index = uint32_t(team) * kSlotsPerTeam + own;
+	c.seconds = 0.0;
+	c.active = true;
+	cam_corpses[own][1].active = false;
+	++cam_counts[4];
+	return true;
+}
+
+void Bf3GameCrowd::Impl::cam_new_life(uint32_t p_slot, Slot &r_s) {
+	if (!r_s.known) {
+		return; // the slot's first life
+	}
+	if (r_s.revive_wait >= 0.0) {
+		// The revived life: the corpse's lane; the evaluator stands the corpse up.
+		r_s.revive_wait = -1.0;
+		r_s.revived = true;
+		return;
+	}
+	r_s.revived = false;
+	if (!cam_m2b || p_slot >= kCamLaneOffset) {
+		return;
+	}
+	const bool corpse = r_s.dead && r_s.dead_seconds < double(corpse_seconds + kCorpseExtraSeconds);
+	if (!corpse) {
+		return;
+	}
+	CamCorpse &c = cam_corpses[p_slot][r_s.lane];
+	c.active = true;
+	c.index = uint32_t(r_s.team) * kSlotsPerTeam + p_slot + uint32_t(r_s.lane) * kCamLaneOffset;
+	c.seconds = r_s.dead_seconds;
+	c.input = r_s.input;
+	c.input.dead = true;
+	c.input.revived = false;
+	c.input.velocity = anim::Vec3{};
+	c.input.flags = 0;
+	r_s.lane = uint8_t(r_s.lane ^ 1u);
+	++cam_counts[0];
+	// The lane the new life takes: the life's team is only known after this call, so an older corpse there goes.
+	CamCorpse &other = cam_corpses[p_slot][r_s.lane];
+	if (other.active) {
+		other.active = false;
+		++cam_counts[1];
+	}
+}
+
+void Bf3GameCrowd::Impl::cam_draw_corpses(double p_dt, const anim::Vec3 &p_camera) {
+	for (Slot &s : slots) {
+		if (s.revive_wait >= 0.0) {
+			s.revive_wait += p_dt;
+			if (s.revive_wait > kCamReviveWaitSeconds) {
+				s.revive_wait = -1.0;
+				++cam_counts[3];
+			}
+		}
+	}
+	if (!cam_m2b) {
+		return;
+	}
+	for (uint32_t slot = 0; slot < kCamLaneOffset; ++slot) {
+		for (CamCorpse &c : cam_corpses[slot]) {
+			if (!c.active) {
+				continue;
+			}
+			c.seconds += p_dt;
+			if (c.seconds >= double(corpse_seconds + kCorpseExtraSeconds) || c.index >= inputs.size()) {
+				c.active = false;
+				continue;
+			}
+			anim::CrowdSoldierInput in = c.input;
+			in.camera_distance = std::sqrt((in.position.x - p_camera.x) * (in.position.x - p_camera.x) + (in.position.y - p_camera.y) * (in.position.y - p_camera.y) +
+					(in.position.z - p_camera.z) * (in.position.z - p_camera.z));
+			inputs[c.index] = in;
+			root_x[c.index] = anim::Xform{ yaw_quat(in.yaw), in.position };
+			roots[c.index] = godot::Transform3D(godot::Basis(godot::Vector3(0, 1, 0), in.yaw), godot::Vector3(in.position.x, in.position.y, in.position.z));
+		}
+	}
+}
+
+void Bf3GameCrowd::Impl::cam_log() const {
+	if (!cam_m2b) {
+		return;
+	}
+	char line[320];
+	std::snprintf(line, sizeof(line),
+			"M2b corpses (%.1f s): %llu kept on the second lane, %llu cut short, %llu own corpses, %llu slot-frames >= 64 skipped, %llu revives without a new life; "
+			"evaluator revives %llu",
+			double(corpse_seconds), (unsigned long long)cam_counts[0], (unsigned long long)cam_counts[1], (unsigned long long)cam_counts[4],
+			(unsigned long long)cam_counts[2], (unsigned long long)cam_counts[3], (unsigned long long)(eval ? eval->m2a_stats().revives : 0));
+	log(line);
 }
 
 } // namespace bf3::godot_side

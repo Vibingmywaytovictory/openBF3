@@ -1479,6 +1479,36 @@ if(OPENBF3_ASAN)
     set_tests_properties(m2b.contract2 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w2_cl_dir}")
 endif()
 
+# M2b cam (docs/design/m2b.md §4, §2.6 #17; as built: docs/design/m2b-cam.md): m2b.cam.unit, the death camera beyond
+# m2b.contract2's case (no killer, the killer camera off, continuity, the killer lost, hostile inputs and params, a wall
+# pulling the camera in on a synthetic static world), in test_m2b_contract2 (which links death_camera.cpp). No install,
+# no Godot; functional, parallel-safe, < 1 s. cam's other cases are in existing rows: "revive" in anim.s3.unit and the
+# Revive kind in fx.triggers.unit.
+target_sources(test_m2b_contract2 PRIVATE m2b_cam_tests.cpp)
+add_test(NAME m2b.cam.unit COMMAND test_m2b_contract2 --test-suite=m2b-cam-unit)
+set_tests_properties(m2b.cam.unit PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    set_tests_properties(m2b.cam.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w2_cl_dir}")
+endif()
+
+# M2b ui (docs/design/m2b.md §4, §2.6 #16, §11 wave 2; docs/design/m2b-ui.md §4): ui.hud.tdm.unit runs fill_hud_tdm over
+# a recorded round of display frames (the pre-round, deploy, kills, the own death's kill card, the spawn screen's timer
+# and revive window, the round end, the restart), the players by slot, the kill-feed ring, the kit bar, hostile inputs
+# and the lookup lists' shape; data-free (<= 2 s). ui.hud.tdm.install resolves every string, font, atlas icon and
+# placement the screens look up (src/bf3_godot/src/hud_tdm_text.h) and the 13 TDM kit items' names and _small icons
+# against the install, with install.unchanged (77 without an install; <= 15 s). Functional, parallel-safe.
+openbf3_test(test_ui_hud_tdm test_main.cpp ui_hud_tdm_tests.cpp test_support.h)
+target_link_libraries(test_ui_hud_tdm PRIVATE bf3_host)
+target_include_directories(test_ui_hud_tdm PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+add_test(NAME ui.hud.tdm.unit COMMAND test_ui_hud_tdm --test-suite=ui-hud-tdm-unit)
+add_test(NAME ui.hud.tdm.install COMMAND test_ui_hud_tdm --test-suite=ui-hud-tdm-install)
+set_tests_properties(ui.hud.tdm.unit PROPERTIES TIMEOUT 120)
+set_tests_properties(ui.hud.tdm.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui_tdm_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui.hud.tdm.unit ui.hud.tdm.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui_tdm_cl_dir}")
+endif()
+
 # M2b gx (docs/design/m2b.md §11 gx row; docs/design/m2b-gx.md §5): m2b.gx.unit, the M2b session's Godot-free rules
 # (m2b_game.cpp: the play.cmd args with hostile values, the spawn screen and Deploy rules, the SpawnRequest resend, the
 # play check's row verdicts and skips) and R13 (FxTriggers accepts PresentKind::Revive). No install, no Godot; a

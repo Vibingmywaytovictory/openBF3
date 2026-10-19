@@ -50,8 +50,8 @@ namespace gs = bf3::godot_side;
 namespace {
 
 // ---- the tracks' switches (each set to true by its owner, in the commit that lands the body) ------------------
-constexpr bool kUiLanded = false; // ui: fill_hud_tdm (src/bf3_host/src/hud_feed_tdm.cpp)
-constexpr bool kCamLanded = false; // cam: Bf3DeathCamera (src/bf3_godot/src/death_camera.cpp)
+constexpr bool kUiLanded = true; // ui: fill_hud_tdm (src/bf3_host/src/hud_feed_tdm.cpp)
+constexpr bool kCamLanded = true; // cam: Bf3DeathCamera (src/bf3_godot/src/death_camera.cpp)
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2b.contract2: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);

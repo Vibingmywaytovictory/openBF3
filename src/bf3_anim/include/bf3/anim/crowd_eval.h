@@ -314,6 +314,7 @@ struct CrowdM2aStats {
 	uint64_t reloads_cancelled = 0; // a weapon change during a reload
 	uint64_t deaths = 0; // dead rose
 	uint64_t death_hidden = 0; // soldiers hidden after kCrowdDeathHideSeconds (counted once per death)
+	uint64_t revives = 0; // M2b cam [revive]: dead fell with CrowdSoldierInput::revived set (a stand-up started)
 };
 
 } // namespace bf3::anim
@@ -328,5 +329,13 @@ namespace bf3::anim {
 
 inline constexpr float kCrowdCorpseSeconds = 15.0f; // SoldierDef::time_for_corpse on Metro (m2b.md §4) [named default]
 inline constexpr float kCrowdReviveBlendSeconds = 0.5f; // prone -> stand (m2b.md §4) [inferred]
+
+} // namespace bf3::anim
+
+// M2b cam (docs/design/m2b-cam.md): CrowdEvaluator::make refuses a CrowdStanceSet::corpse_seconds that is not finite
+// or outside [0, kCrowdMaxCorpseSeconds] (an error, never a clamp: the caller set it).
+namespace bf3::anim {
+
+inline constexpr float kCrowdMaxCorpseSeconds = 3600.0f;
 
 } // namespace bf3::anim

@@ -79,6 +79,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	// M2a fx3 (docs/design/m2a-fx3.md): Bf3Fx3Demo (registered in fx3_demo.cpp)
 	void openbf3_register_m2a_fx3();
 	openbf3_register_m2a_fx3();
+	// M2b ui (docs/design/m2b-ui.md): the TDM HUD screens and their base (registered in hud_tdm.cpp)
+	void openbf3_register_m2b_ui();
+	openbf3_register_m2b_ui();
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

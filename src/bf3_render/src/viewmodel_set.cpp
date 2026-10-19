@@ -1285,8 +1285,34 @@ ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_
 				spec.items.push_back(item);
 			}
 		}
+		if (!k.gadget.empty() && seen.insert(k.gadget).second) { // M2b cam [defib]: the kit's slot 2 after its four
+			ViewmodelItemSpec item; // M2b cam [defib]
+			item.unlock = k.gadget; // M2b cam [defib]
+			spec.items.push_back(item); // M2b cam [defib]
+		} // M2b cam [defib]
 	}
 	return spec;
+}
+
+} // namespace bf3::render
+
+// ---- M2b cam (docs/design/m2b.md §4; as built: docs/design/m2b-cam.md): see viewmodel_set.h ---------------------------
+namespace bf3::render {
+
+size_t add_assault_gadget(std::span<ViewmodelKit> r_kits, std::string_view p_unlock) {
+	if (p_unlock.empty()) {
+		return 0;
+	}
+	size_t n = 0;
+	for (ViewmodelKit &k : r_kits) {
+		const size_t slash = k.kit.find_last_of('/');
+		const std::string_view name = std::string_view(k.kit).substr(slash == std::string::npos ? 0 : slash + 1);
+		if (name.size() >= 7 && name.substr(name.size() - 7) == "assault") {
+			k.gadget = std::string(p_unlock);
+			++n;
+		}
+	}
+	return n;
 }
 
 } // namespace bf3::render
