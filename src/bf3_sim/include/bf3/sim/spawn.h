@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span> // M2b W1.0
 #include <string>
 #include <vector>
 
@@ -123,5 +124,36 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 // and returns the first floor point whose normal is within 2 degrees of up over a 1 m patch and from which a
 // stand capsule swept p_clearance metres straight up hits nothing. nullopt when none.
 std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionWorld &p_world, float p_clearance = 50.0f, float p_grid = 5.0f);
+
+// ---- M2b W1.0 (docs/design/m2b.md §3.5, §2.6 #6; owner ru): the scored TDM spawn choice --------------------------
+// Stateless over any point list (the rules keep the deaths ring), so host::TdmRules::choose_spawn runs it over the list
+// GameServer::spawn() selected for the slot (BotLevel's main-component list for a bot with spawn_in_main, else
+// SharedLevel::spawns) and the index refers to that list. The rule [inferred, named defaults in tdm_tuning.cfg]:
+// (1) the points of the slot's team or neutral; (2) drop points with an enemy within protection_radius; (3) drop points
+// where friendly_block_count teammates died within friendly_block_radius inside friendly_block_ticks; (4) TryToSpawn-
+// OutOfSight: rank the survivors by the distance to the nearest enemy and test eye-to-chest rays from the 4 nearest
+// enemies to the best 4 (<= max_los_rays); points seen by none rank first; (5) the best, ties by the seeded draw.
+struct FriendlyDeath {
+	Vec3 position{};
+	uint32_t tick = 0;
+	uint8_t team = 0;
+};
+struct SpawnQuery {
+	std::span<const SpawnPoint> points;
+	uint8_t team = 0; // points with a team != 0 and != team are skipped
+	std::span<const Vec3> enemies; // feet of the living enemies
+	std::span<const Vec3> enemy_eyes; // their eyes (same order)
+	std::span<const FriendlyDeath> recent_deaths; // the rules' ring of the last friendly_block_ticks
+	float protection_radius = 10.0f; // SpawnProtectionRadius [verified, Metro TDM]
+	float friendly_block_radius = 30.0f; // [inferred]: the data gives only the count and the time
+	int friendly_block_count = 3; // SpawnProtectionFriendlyKilledCount [verified]
+	uint32_t friendly_block_ticks = 1800; // 30 s [verified]
+	uint32_t tick = 0;
+	uint64_t seed = 0; // splitmix64(match_seed ^ slot ^ tick)
+	int max_los_rays = 16;
+	const CollisionWorld *world = nullptr; // null: no line-of-sight term
+};
+// SIZE_MAX when nothing survives (1)-(3): the caller then falls back to choose_spawn (counted).
+size_t choose_spawn_scored(const SpawnQuery &p_query);
 
 } // namespace bf3::sim
