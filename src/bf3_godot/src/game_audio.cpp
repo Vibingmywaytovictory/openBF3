@@ -8,6 +8,7 @@
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/game_audio_frame.h"
 #include "bf3/audio/kit_audio.h"
+#include "bf3/audio/voice_cull.h" // M2b au [a3]
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/level/level.h"
 #include "bf3/host/client_wiring.h"
@@ -66,6 +67,9 @@ ba::Vec3 vec(const fx::Vec3 &p_v) {
 
 } // namespace
 
+template <class Impl>
+ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m); // M2b au [a3] (defined in the M2b au block below)
+
 struct Bf3GameAudio::Impl {
 	// Load (loader thread), read-only afterwards.
 	const host::LevelDatabase *db = nullptr;
@@ -77,6 +81,7 @@ struct Bf3GameAudio::Impl {
 	std::shared_ptr<const ca::WaveBank> bank;
 	std::vector<std::string> report;
 	uint32_t programs = 0, program_failures = 0;
+	ba::MixerA3Assets a3; // M2b au [a3]: the HdrSetting and scopes, read at load (docs/design/m2b-au.md)
 	std::atomic<bool> loaded{ false };
 	// Build (main thread).
 	ba::AudioTuning tuning;
@@ -128,6 +133,7 @@ core::Status Bf3GameAudio::load(const M2aLoadInputs &p_in, std::span<const std::
 	m.report = std::move(a->report);
 	m.programs = a->programs;
 	m.program_failures = a->program_failures;
+	m.a3 = load_a3(p_in.db->level->db(), m); // M2b au [a3]
 	m.loaded.store(true, std::memory_order_release);
 	return core::Status::success();
 }
@@ -164,6 +170,8 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	mc.max_instances = ba::kGameMixerInstances;
 	mc.command_capacity = kCommandCapacity;
 	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, m.tuning.schedule_lead_blocks));
+	mc.max_voices = ba::kGameMixerVoices; // M2b au [a3]
+	ba::apply_mixer_a3(m.a3, mc); // M2b au [a3]
 	m.lead_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames);
 	m.mixer = std::make_shared<ba::MixerCore>(mc);
 	m.mixer->set_tap(&m.tap); // before the audio thread sees the mixer
@@ -373,6 +381,47 @@ void Bf3GameAudio::shutdown() {
 	m.pool.reset();
 	m.check = nullptr;
 	m.built = false;
+}
+
+// M2b au (docs/design/m2b.md §6, docs/design/m2b-au.md): the A3 inputs read at load and the profiler readout.
+
+// Loader thread: the HdrSetting and the scopes of every program the game plays (the kit items, the M67 explosions,
+// the impact and effect sounds, the auditions). A part that does not read is noted in the load report; the mixer
+// then runs without it.
+template <class Impl>
+ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
+	std::vector<std::shared_ptr<const ca::SoundProgram>> programs;
+	if (r_m.table) {
+		for (const ba::WeaponAudioDef &d : r_m.table->defs) {
+			programs.push_back(d.program);
+			programs.push_back(d.explosion);
+		}
+	}
+	if (r_m.impacts_cache) {
+		const std::vector<std::shared_ptr<const ca::SoundProgram>> more = r_m.impacts_cache->programs();
+		programs.insert(programs.end(), more.begin(), more.end());
+	}
+	for (const auto &a : r_m.auditions) {
+		programs.push_back(a.second.program);
+	}
+	ba::MixerA3Assets a3 = ba::load_mixer_a3(p_db, programs);
+	char line[200];
+	std::snprintf(line, sizeof(line), "audio A3: HDR window %s, %zu scopes, %zu of %zu programs scoped", a3.hdr ? "from the data" : "absent (fixed window)",
+			a3.scopes ? a3.scopes->scopes.size() : size_t(0), a3.scoped_patches, programs.size());
+	r_m.report.push_back(line);
+	if (!a3.notes.empty()) {
+		r_m.report.push_back(a3.notes);
+	}
+	return a3;
+}
+
+audio::MixerProfile game_audio_profile(const Bf3GameAudio &p_audio) {
+	const audio::MixerCore *mixer = p_audio.mixer();
+	return mixer != nullptr ? audio::read_mixer_profile(mixer->stats()) : audio::MixerProfile{};
+}
+
+std::string game_audio_profile_text(const Bf3GameAudio &p_audio) {
+	return p_audio.mixer() != nullptr ? audio::format_mixer_profile(game_audio_profile(p_audio)) : std::string("audio A3: not built");
 }
 
 } // namespace bf3::godot_side
