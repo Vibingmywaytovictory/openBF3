@@ -65,4 +65,15 @@ private:
 	std::shared_ptr<bf3::audio::MixerCore> mixer_;
 };
 
+// PT1 snd (docs/design/pt1-snd.md): the Win32 priority of the thread Godot calls _mix on (GetThreadPriority, read once
+// at the first _mix), for the audio health line; kPt1NoPriority before the first call or off Windows.
+inline constexpr int kPt1NoPriority = -1000;
+int pt1_audio_thread_priority();
+// PT1 snd [prio]: a priority to set on that thread at the next _mix (SetThreadPriority; kPt1NoPriority leaves it).
+// Bf3GameAudio asks for THREAD_PRIORITY_HIGHEST (2): in windowed rounds blocks of up to 107 ms were measured beside
+// the main thread's hitches while the mixer's own work stayed under 4 ms (docs/design/pt1-snd.md §3.4).
+// pt1_audio_thread_priority_set() is the priority after the change (kPt1NoPriority when none was asked or it failed).
+void pt1_request_audio_thread_priority(int p_priority);
+int pt1_audio_thread_priority_set();
+
 } // namespace bf3::godot_side

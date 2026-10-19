@@ -226,6 +226,23 @@ struct PatchInstance::State {
 	// exactly where the full path would leave it, so the render is unchanged.
 	bool voice_quiet(const core::audio::SoundVoice &p_voice, uint16_t p_from, const float *p_left, const float *p_right, uint32_t p_frames) const; // M2b au [quiet]
 	void quiet_plugin(detail::PluginState &r_ps, float p_rate, float p_window_db, float p_hdr_window_db); // M2b au [quiet]
+	// PT1 snd [edge] (docs/design/pt1-snd.md): what the instance's sends wrote to the buses at the first and the last
+	// frame of the last rendered sub-block (per channel, summed over the sends): a cut after it leaves a step of |edge|
+	// in the mix, a start a step of |head|. pt1_abrupt counts gain ramps of a send that moved more than 3 dB within a
+	// sub-block shorter than 64 frames with signal on it, pt1_abrupt_max their largest per-sample step (signal x gain).
+	float pt1_edge[2] = { 0.0f, 0.0f }; // PT1 snd [edge]
+	float pt1_head[2] = { 0.0f, 0.0f }; // PT1 snd [edge]
+	uint64_t pt1_abrupt = 0; // PT1 snd [edge]
+	float pt1_abrupt_max = 0.0f; // PT1 snd [edge]
+	// PT1 snd [fade]: the output fade the mixer runs over a cut (PatchInstance::pt1_fade_to): the sends to the buses are
+	// scaled by it; it moves linearly by pt1_fade_step per frame for pt1_fade_left frames, then holds pt1_fade_target.
+	float pt1_fade = 1.0f; // PT1 snd [fade]
+	float pt1_fade_step = 0.0f; // PT1 snd [fade]
+	float pt1_fade_target = 1.0f; // PT1 snd [fade]
+	uint32_t pt1_fade_left = 0; // PT1 snd [fade]
+	float pt1_fade_at(uint32_t p_i) const { // PT1 snd [fade]: the fade at frame p_i of the sub-block
+		return p_i < pt1_fade_left ? pt1_fade + pt1_fade_step * float(p_i + 1) : pt1_fade_target; // PT1 snd [fade]
+	} // PT1 snd [fade]
 
 	float *voice(uint16_t p_voice, uint32_t p_channel) { return voice_buffers.data() + (size_t(p_voice) * 2 + p_channel) * detail::kMaxSubBlock; }
 	float read(const core::audio::SoundPort &p_port) const { return p_port.reg == core::audio::kNoRegister ? p_port.constant : registers[p_port.reg]; }

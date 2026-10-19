@@ -70,6 +70,31 @@ struct MixerConfig {
 	std::optional<core::audio::HdrSetting> hdr; // M2b W1.0 (au)
 	uint32_t max_voices = 128; // M2b W1.0 (au)
 	std::shared_ptr<const core::audio::ScopeTable> scopes; // M2b W1.0 (au)
+	// PT1 snd [fade] (docs/design/pt1-snd.md): a voice the mixer stops while it sounds (a cull drop, a Kill, a loop
+	// parked as pending) fades out over this many frames instead of stopping at once, and a parked loop that resumes
+	// fades in over them. 0: M2a / A3's cuts. [inferred] default one block (10.7 ms), measured = false: the data has no
+	// voice fade time (AudioSystemAsset has none).
+	uint32_t pt1_cut_fade_frames = 512; // PT1 snd [fade]
+	// PT1 snd [hold] (docs/design/pt1-snd.md): hysteresis at the voice cap. A voice that sounded in the last block ranks
+	// pt1_cap_hold_db louder (CullVoice::hold_db), and an instance counts the most sampler voices it had busy over the
+	// last pt1_voice_hold_blocks blocks, so the voice at the cap's edge does not park and resume every few blocks when
+	// other weapons' busy slots go up and down. [inferred] defaults 3 dB and 47 blocks (0.5 s), measured = false: the
+	// data has no voice priority or virtualisation rule. 0 / 0: au's cap.
+	float pt1_cap_hold_db = 3.0f; // PT1 snd [hold]
+	uint32_t pt1_voice_hold_blocks = 47; // PT1 snd [hold]
+	// PT1 snd [hold]: a parked loop resumes only when this many sampler voices stay free after it (CullVoice::
+	// resume_margin), at most max_voices / 16. [inferred] default 8 of 128, measured = false.
+	uint32_t pt1_resume_margin = 8; // PT1 snd [hold]
+	// PT1 snd [limit] (docs/design/pt1-snd.md §3.4): a peak limiter on the stereo output, after output_gain. Windowed
+	// rounds reached 2.4 (+7.6 dBFS) in 43 to 176 episodes a round, clipped downstream: the HdrSetting's energy terms
+	// (CompressFactor, DischargeFactor, MaxAllowedEnergy) have no known formula (Q9), so nothing in A3 bounds the sum.
+	// The block is the lookahead: the gain ramps down over pt1_limit_attack_frames before a peak in the same block, and
+	// back up with a pt1_limit_release_ms time constant. A block under the ceiling at unity gain is not touched (the
+	// same samples as without it). [inferred] defaults -0.3 dBFS, 48 frames (1 ms), 80 ms, measured = false. A
+	// ceiling <= 0 turns it off.
+	float pt1_limit_ceiling = 0.966f; // PT1 snd [limit]
+	uint32_t pt1_limit_attack_frames = 48; // PT1 snd [limit]
+	float pt1_limit_release_ms = 80.0f; // PT1 snd [limit]
 };
 
 using InstanceHandle = uint32_t; // allocated by the game side, never reused within a mixer's lifetime
@@ -149,6 +174,48 @@ public:
 	virtual void on_block(const float *p_interleaved_stereo, uint32_t p_frames, uint64_t p_first_frame) = 0;
 };
 
+// PT1 snd (docs/design/pt1-snd.md): voice cut diagnostics, the measurement behind the playtest's "sound glitching".
+// A cut is a moment an instance's contribution to the mix changes without a ramp: it stops being rendered (a cull
+// drop, a Kill, a loop parked as pending, its natural finish) or starts (a Start, a pending loop resumed). Its step is
+// the |sample| the instance's sends wrote at the frame before the cut (PatchInstance::pt1_edge().edge), or the first
+// frame after a start (.head): the discontinuity the cut leaves in the mix. Suspend / Unsuspend are the HDR window's
+// transitions (the sends ramp over one sub-block). Fade: a cut that pt1's fade turned into a ramp (its step is the
+// level the fade starts from). CallGap: a mix() call that came more than kPt1LateCallMs after the previous one
+// (Godot's audio thread late; step = the gap in ms). LateBlock: a block that took longer than its real-time length to
+// render (MixerStats::late_blocks; step = its wall time in ms), with its frame, to set against the main thread's hitches.
+enum class MixerCutKind : uint8_t { Drop = 0, Pend, Kill, Finish, Start, Resume, Suspend, Unsuspend, Fade, CallGap, LateBlock, Count };
+inline constexpr size_t kMixerCutKinds = size_t(MixerCutKind::Count);
+inline constexpr float kPt1AudibleStep = 1.0e-3f; // -60 dBFS
+inline constexpr float kPt1LoudStep = 1.0e-2f; // -40 dBFS
+inline constexpr double kPt1LateCallMs = 25.0; // a mix() call gap above it counts (Godot calls about every 10.7 ms)
+struct MixerCutEvent {
+	uint64_t frame = 0; // MixerClock frame of the block the cut lands in
+	InstanceHandle handle = kNoInstance;
+	MixerCutKind kind = MixerCutKind::Drop;
+	float step = 0.0f;
+	float loudness_db = 0.0f; // the cull's loudness at the listener (0 for CallGap)
+	float distance_m = 0.0f;
+	char program[48] = {}; // the program's name, truncated
+};
+struct MixerCutStats {
+	std::atomic<uint64_t> events[kMixerCutKinds]{}; // every cut
+	std::atomic<uint64_t> audible[kMixerCutKinds]{}; // step > kPt1AudibleStep
+	std::atomic<uint64_t> loud[kMixerCutKinds]{}; // step > kPt1LoudStep
+	std::atomic<float> step_max[kMixerCutKinds]{};
+	std::atomic<uint64_t> abrupt_gain{ 0 }; // PatchInstance InstanceEdge::abrupt_gain, summed over the instances
+	std::atomic<float> abrupt_gain_max{ 0.0f };
+	std::atomic<uint64_t> calls{ 0 }; // mix() calls
+	std::atomic<uint64_t> call_frames_min{ ~0ull }, call_frames_max{ 0 };
+	std::atomic<uint64_t> gap_hist[8]{}; // mix() call gaps: < 5, 10, 15, 20, 30, 50, 100 ms, >= 100 ms
+	std::atomic<uint64_t> event_drops{ 0 }; // the event ring was full
+	std::atomic<uint64_t> overs_in{ 0 }, overs_out{ 0 }; // PT1 snd [limit]: frames above 1.0 before / after the limiter
+	std::atomic<uint64_t> limit_blocks{ 0 }; // PT1 snd [limit]: blocks with a gain below -0.1 dB
+	std::atomic<uint64_t> limit_edge_steps{ 0 }; // PT1 snd [limit]: a peak in a block's first frames, faster than the attack
+	std::atomic<float> limit_min_gain{ 1.0f }; // PT1 snd [limit]
+};
+inline constexpr std::array<double, 7> kPt1GapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
+const char *mixer_cut_kind_name(MixerCutKind p_kind);
+
 class MixerCore {
 public:
 	explicit MixerCore(const MixerConfig &p_config);
@@ -167,6 +234,11 @@ public:
 	// whole buffer (silence when idle) and returns p_frames.
 	uint32_t mix(float *r_interleaved_stereo, uint32_t p_frames);
 	void set_tap(MixTap *p_tap); // set before the audio thread starts or while it is stopped
+	// PT1 snd (docs/design/pt1-snd.md): the cut counters (any thread, relaxed); with recording on (set before the audio
+	// thread starts), every cut is also queued as a MixerCutEvent for pt1_poll_cuts (game thread).
+	const MixerCutStats &pt1_cut_stats() const; // PT1 snd
+	void pt1_record_cuts(bool p_on); // PT1 snd
+	size_t pt1_poll_cuts(std::span<MixerCutEvent> r_out); // PT1 snd
 
 	MixerCore(const MixerCore &) = delete;
 	MixerCore &operator=(const MixerCore &) = delete;
@@ -202,5 +274,9 @@ struct MixerProfile {
 };
 MixerProfile read_mixer_profile(const MixerStats &p_stats, uint32_t p_mix_rate = kMixRate);
 std::string format_mixer_profile(const MixerProfile &p_profile);
+
+// PT1 snd (docs/design/pt1-snd.md): a one-line readout of MixerCutStats (the counts per kind, the audible and loud
+// ones, the largest steps, the abrupt gain ramps and the mix() call gaps).
+std::string format_mixer_cuts(const MixerCutStats &p_stats);
 
 } // namespace bf3::audio
