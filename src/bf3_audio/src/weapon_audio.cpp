@@ -894,6 +894,7 @@ struct WeaponAudioRouter::Impl {
 					break;
 				}
 				case host::PresentKind::Death:
+					foley_death(e.aux, r_clock); // PT1 rld [death]: a death cuts the soldier's running reload sound
 					if (e.aux == own_slot) {
 						end_track(own);
 					} else {
