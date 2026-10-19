@@ -157,3 +157,9 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/bots/perception.h
     include/bf3/sim/bots/aim_model.h
 )
+
+# M2b bb (docs/design/m2b.md §5.1, §5.3; docs/design/m2b-bb.md): the bot perception and aim model bodies.
+target_sources(bf3_sim PRIVATE
+    src/bots/perception.cpp
+    src/bots/aim_model.cpp
+)
