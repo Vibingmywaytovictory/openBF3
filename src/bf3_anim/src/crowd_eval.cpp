@@ -788,6 +788,9 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			d.aim_down = &d.aim_down_own;
 		}
 	}
+	if (p_stance.move_groups != nullptr) { // PT1 run [make]
+		x->pt1 = crowd_pt1_make(*p_stance.move_groups, rig, p_soldiers); // PT1 run [make]
+	} // PT1 run [make]
 	x->soldiers.resize(p_soldiers);
 	for (Impl::M2a::Soldier &xs : x->soldiers) {
 		for (int k = 0; k < 2; ++k) {
