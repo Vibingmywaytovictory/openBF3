@@ -639,9 +639,13 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		// SoldierWeaponData: WeaponStates[0].Mesh1p, AnimationData, ZoomRenderFov.
 		std::string mesh = spec.mesh;
 		std::string package = spec.ant_package;
+		std::optional<int64_t> pt1_ant_ref; // PT1 run [load]: WeaponStates[0].Weapon.AssetId
 		if (const core::EbxPartition *bp = lib.partition_by_name(def->blueprint)) {
 			if (const std::optional<core::EbxInstance> swd = lib.follow(bp->primary().data(), "Object")) {
 				uint32_t clamped = 0;
+				if (const std::optional<core::EbxValue> id = swd->get_path("WeaponStates[0].Weapon.AssetId")) { // PT1 run [load]
+					pt1_ant_ref = id->as_i64(); // PT1 run [load]
+				} // PT1 run [load]
 				read_default_attachments(lib, *swd, set->rig, spec.unlock, item.attachments, set->notes);
 				item.zoom_render_fov_data = sane(number(swd->get("ZoomRenderFov")), 0.0f, 0.0f, 170.0f, clamped);
 				if (mesh.empty()) {
@@ -743,6 +747,11 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				}
 			}
 		}
+		if (pt1_ant_ref && *pt1_ant_ref >= 0 && *pt1_ant_ref <= int64_t(UINT32_MAX)) { // PT1 run [load]
+			load_viewmodel_locomotion(ant, set->rig, uint32_t(*pt1_ant_ref), item, set->notes); // PT1 run [load]
+		} else { // PT1 run [load]
+			set->notes.push_back(spec.unlock + " 1p locomotion: no WeaponStates[0].Weapon.AssetId (the procedural bob)"); // PT1 run [load]
+		} // PT1 run [load]
 		// A zoom clip drives the transition only when its ends land on the poses it joins.
 		const ViewmodelClip &idle = item.clips[size_t(Role::Idle)];
 		const ViewmodelClip &zoom = item.clips[size_t(Role::ZoomIdle)];
@@ -1313,6 +1322,112 @@ size_t add_assault_gadget(std::span<ViewmodelKit> r_kits, std::string_view p_unl
 		}
 	}
 	return n;
+}
+
+} // namespace bf3::render
+
+// ---- PT1 run (docs/design/pt1-run.md; viewmodel_set.h's PT1 run block) ------------------------------------------------
+
+namespace bf3::render {
+
+namespace {
+
+std::string pt1_route_path(const anim::AntClipRoute &p_route) {
+	std::string out;
+	for (const std::string &h : p_route.path) {
+		out += (out.empty() ? "" : " -> ") + h;
+	}
+	return out;
+}
+
+// One chooser routed to its additive clip on the rig; r_clip stays Missing (and a note says why) otherwise.
+void pt1_load_delta(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser, const anim::ChooserIndices &p_indices,
+		const std::string &p_where, ViewmodelClip &r_clip, float &r_start, float &r_end, std::string &r_path, std::vector<std::string> &r_notes) {
+	core::Result<anim::AntClipRoute> route = anim::route_ant_controller(p_library, "IndexChooserControllerAsset", p_chooser, p_indices);
+	if (!route) {
+		r_notes.push_back(p_where + " " + std::string(p_chooser) + ": " + route.error().message + " (no delta)");
+		return;
+	}
+	r_path = pt1_route_path(*route);
+	const core::ant::AntPackage *sp = p_library.static_package();
+	const core::ant::AntPackage *pkg = route->controller_package != nullptr ? route->controller_package : sp;
+	core::ant::GdStruct c = pkg != nullptr ? pkg->find(route->anim_index) : core::ant::GdStruct{};
+	if ((!c.valid() || !core::ant::is_clip(c)) && sp != nullptr && pkg != sp) {
+		pkg = sp;
+		c = sp->find(route->anim_index);
+	}
+	if (!c.valid() || !core::ant::is_clip(c)) {
+		r_notes.push_back(p_where + " " + std::string(p_chooser) + ": " + route->controller + "'s Anim is not a clip (no delta)");
+		return;
+	}
+	bool unsupported = false;
+	ViewmodelClip clip;
+	if (const core::Status st = load_role_clip(p_library, *pkg, c, p_rig, clip, unsupported); !st.ok()) {
+		r_notes.push_back(p_where + " " + std::string(p_chooser) + ": " + st.error().message + " (no delta)");
+		return;
+	}
+	if (!clip.clip.clip.additive || clip.tracks.end_frame == 0) {
+		r_notes.push_back(p_where + " " + std::string(p_chooser) + ": " + clip.name + " is not an additive cycle (no delta)");
+		return;
+	}
+	// The sequence's tick window in clip frames (ticks = frames / FPSScale), clamped to the clip.
+	const float scale = std::isfinite(route->fps_scale) && route->fps_scale > 0.0f ? route->fps_scale : 0.5f;
+	const float end = float(clip.tracks.end_frame);
+	r_start = std::clamp(route->start_in_tick * scale, 0.0f, end);
+	r_end = std::clamp(route->end_in_tick * scale, 0.0f, end);
+	if (!(r_end > r_start)) {
+		r_start = 0.0f;
+		r_end = end;
+	}
+	r_clip = std::move(clip);
+	char line[200];
+	std::snprintf(line, sizeof(line), ": %s frames %.0f .. %.0f of %u (%s)", r_clip.name.c_str(), double(r_start), double(r_end), r_clip.tracks.end_frame,
+			r_clip.controller.c_str());
+	r_notes.push_back(p_where + " " + std::string(p_chooser) + line);
+}
+
+anim::VmDeltaClip pt1_delta_ref(const ViewmodelClip &p_clip, float p_start, float p_end) {
+	anim::VmDeltaClip d;
+	if (p_clip.source == Source::Clip) {
+		d.clip.clip = &p_clip.clip.clip;
+		d.clip.tracks = &p_clip.tracks;
+		d.clip.seconds = p_clip.seconds;
+		d.start_frame = p_start;
+		d.end_frame = p_end;
+	}
+	return d;
+}
+
+} // namespace
+
+void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref, ViewmodelItem &r_item,
+		std::vector<std::string> &r_notes) {
+	const std::string where = r_item.unlock + " 1p locomotion";
+	core::Result<uint32_t> type = anim::weapon_type_index(p_library, p_ant_ref);
+	if (!type) {
+		r_notes.push_back(where + ": " + type.error().message + " (the procedural bob)");
+		return;
+	}
+	auto l = std::make_shared<ViewmodelLocomotionClips>();
+	l->weapon_type = *type;
+	anim::ChooserIndices idx;
+	idx.weapon_type = *type;
+	pt1_load_delta(p_library, p_rig, kVmRunDeltaChooser, idx, where, l->run, l->run_start_frame, l->run_end_frame, l->run_path, r_notes);
+	pt1_load_delta(p_library, p_rig, kVmSprintDeltaChooser, idx, where, l->sprint, l->sprint_start_frame, l->sprint_end_frame, l->sprint_path, r_notes);
+	if (l->run.source != Source::Clip && l->sprint.source != Source::Clip) {
+		r_notes.push_back(where + ": weapon type " + std::to_string(*type) + ", no delta (the procedural bob)");
+		return;
+	}
+	r_item.pt1_locomotion = std::move(l);
+}
+
+anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item) {
+	anim::VmLocomotion out;
+	if (const ViewmodelLocomotionClips *l = p_item.pt1_locomotion.get()) {
+		out.run = pt1_delta_ref(l->run, l->run_start_frame, l->run_end_frame);
+		out.sprint = pt1_delta_ref(l->sprint, l->sprint_start_frame, l->sprint_end_frame);
+	}
+	return out;
 }
 
 } // namespace bf3::render
