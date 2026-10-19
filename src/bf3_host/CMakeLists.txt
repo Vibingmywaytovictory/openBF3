@@ -97,3 +97,12 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/firefight_run.h
     src/firefight_run.cpp
 )
+
+# M2b W1.0 (docs/design/m2b.md §2.6, §11; docs/design/m2b-w1.md): the wave-1 bf3_host interface headers, and the one
+# hook GameServer::init links against (tdm_brain.cpp: add_tdm_bots, a W1.0 stub bb replaces). ru adds tdm_rules.cpp
+# in a block of its own.
+target_sources(bf3_host PRIVATE
+    include/bf3/host/tdm_rules.h
+    include/bf3/host/tdm_brain.h
+    src/tdm_brain.cpp
+)
