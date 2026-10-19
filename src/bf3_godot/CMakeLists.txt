@@ -248,3 +248,9 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/death_camera.cpp")
     target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2B_HAVE_CAM=1)
 endif()
+
+# M2b cam (docs/design/m2b.md §4, §2.6 #17; as built: docs/design/m2b-cam.md): Bf3DeathCamera's body (Godot-free; the
+# M2b W2.0 block above defines OPENBF3_M2B_HAVE_CAM from this file's presence, and m2b.contract2 compiles it too).
+target_sources(bf3_godot PRIVATE
+    src/death_camera.cpp
+)

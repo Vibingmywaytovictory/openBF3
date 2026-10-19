@@ -3024,3 +3024,44 @@ Measured 2026-10-19, `m2b/w2`, shared machine (times indicative only):
 * **`tools\build.cmd dev`:** 147 rows, 145 passed and 2 skipped (`core.cache_data`, `core.res`, as before), with
   204.1 s of ctest wall time and exit 0. There were no budget violations, only the existing warnings.
 * **`m2b.contract2`:** 4 cases and 84 assertions, 0.01 s. ui and cam are pending.
+
+## M2b cam: death view and 3p corpse
+
+<!-- # M2b cam -->
+Track cam of M2b wave 2, on branch `m2b/cam` from the W2.0 head 5191059. Design:
+[docs/design/m2b.md](docs/design/m2b.md) §4, §2.6 #17 and §12 J3. As-built notes, the measured results and one command
+per gate: [docs/design/m2b-cam.md](docs/design/m2b-cam.md).
+
+* **Corpses stay 15 s.** `Bf3GameCrowd::set_corpse_seconds` (the M2b scene calls it before `build()`) keeps a corpse
+  drawn for `kCrowdCorpseSeconds`. M2a never calls it, so its 3 s stays. A bot that respawns before its corpse is gone
+  draws its new life on a second crowd index, so the corpse stays where it fell. The own body is drawn as a corpse
+  too, so the death camera has something to look at.
+* **Revive stand-up.** A `Revive` event marks the revived slot. Its next life stands up from the corpse pose over
+  0.5 s at the same place, instead of popping up standing.
+* **The death camera** (`Bf3DeathCamera`, Godot-free): from the 1p eye it pulls back behind the corpse (1 s). With the
+  killer camera on and the killer drawn, it swings to look past the corpse at the killer (0.75 s) and follows the
+  killer. It is finished at 4 s (the kill card's time) and holds until the game ends it. A wall pulls it in. Every
+  number is a named default with `measured = false`.
+* **The defibrillator in hand.** Its 1p mesh resolves (`bf3dump vm skin weapons/gadgets/defibrillator/u_defib`: PASS,
+  0 stretched surfaces). A TDM load calls `render::add_assault_gadget` and gets it as one more viewmodel item for the
+  assault kits.
+* **FX.** `FxTriggers::sane` now accepts `PresentKind::Revive` (the integ-w1 open item, which m2b-w2.md had given to
+  gx). A Revive event starts no effect.
+* **Still to do (gx).** gx wires these into the M2b scene: `set_corpse_seconds`, `add_assault_gadget`, and the death
+  camera's begin / step / end and its transform onto the Camera3D. m2b-cam.md §6 lists each call. Until then nothing of
+  cam can be seen in a scene, so there are no screenshots. The look is for the wave-2 playtest.
+* **Tests.**
+  - `ctest --test-dir b\dev -R "^m2b\.contract2$"`: cam's death-camera case runs (no PENDING (cam)).
+  - `ctest --test-dir b\dev -R "^m2b\.cam\.unit$"` (new): the death camera without a killer, with the killer camera
+    off, continuity, the killer lost, hostile inputs and params, the wall; the defib item set.
+  - `ctest --test-dir b\dev -R "^anim\.s3\.unit$"`, case `revive`: 15 s corpses, the stand-up, a plain respawn, LOD,
+    hostile corpse times.
+  - `ctest --test-dir b\dev -R "^fx\.triggers\.unit$"`: a Revive event is accepted.
+
+Measured 2026-10-19, `m2b/cam`, shared machine (times indicative only):
+
+* **`tools\build.cmd dev`:** 148 rows, 146 passed and 2 skipped (`core.cache_data`, `core.res`, as before), 0 failed,
+  331.3 s of ctest wall time, exit 0. Only the existing budget warnings, none on a cam row.
+* **The cam rows:** `m2b.contract2` 4 cases, 95 assertions; `m2b.cam.unit` 3 cases, 701 assertions; the `revive`
+  case 41 assertions; all under 1 s.
+* **Asan:** the same four rows built and run under the asan preset passed with 0 reports.

@@ -1478,3 +1478,15 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2b_w2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2b.contract2 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w2_cl_dir}")
 endif()
+
+# M2b cam (docs/design/m2b.md §4, §2.6 #17; as built: docs/design/m2b-cam.md): m2b.cam.unit, the death camera beyond
+# m2b.contract2's case (no killer, the killer camera off, continuity, the killer lost, hostile inputs and params, a wall
+# pulling the camera in on a synthetic static world), in test_m2b_contract2 (which links death_camera.cpp). No install,
+# no Godot; functional, parallel-safe, < 1 s. cam's other cases are in existing rows: "revive" in anim.s3.unit and the
+# Revive kind in fx.triggers.unit.
+target_sources(test_m2b_contract2 PRIVATE m2b_cam_tests.cpp)
+add_test(NAME m2b.cam.unit COMMAND test_m2b_contract2 --test-suite=m2b-cam-unit)
+set_tests_properties(m2b.cam.unit PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    set_tests_properties(m2b.cam.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w2_cl_dir}")
+endif()
