@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 
@@ -223,6 +224,14 @@ Pt1Iff::Pt1Iff(Bf3LevelSession *p_session, CanvasLayer *p_layer, Ref<ImageTextur
 			shots_ = std::make_unique<Shots>();
 			shots_->dir = a.substr(12);
 		}
+		if (a.rfind("--iff-live=", 0) == 0 && a.size() > 11) {
+			const double v = std::atof(a.c_str() + 11);
+			live_seconds_ = std::isfinite(v) ? std::clamp(v, 0.0, 3600.0) : 0.0;
+		}
+	}
+	if (live_seconds_ > 0.0 && shots_ != nullptr) {
+		live_dir_ = shots_->dir; // --iff-live: no teleports, one screenshot at the end into the --iff-shots folder
+		shots_.reset();
 	}
 	loader_ = std::thread([this]() { run_loader(); });
 }
@@ -465,6 +474,29 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 	}
 	if (shots_ != nullptr) {
 		step_shots(p_camera, now_s);
+	}
+	if (live_seconds_ > 0.0) {
+		// --iff-live=<s>: a live round as it plays, from the own spawn; the summary and one screenshot, then quit.
+		const bool alive = f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0;
+		if (live_start_s_ < 0.0 && alive && applied_) {
+			live_start_s_ = now_s;
+			stats_ = Pt1IffStats{};
+			reveal_peak_ = 0;
+		}
+		reveal_peak_ = std::max<uint32_t>(reveal_peak_, counts.enemy);
+		if (live_start_s_ >= 0.0 && now_s - live_start_s_ >= live_seconds_) {
+			live_seconds_ = 0.0;
+			log_summary();
+			UtilityFunctions::print(to_godot("[pt1-iff] live: " + std::to_string(stats_.frames) + " frames, at most " + std::to_string(reveal_peak_) +
+					" enemies revealed at once, " + std::to_string(reveal_.reveals()) + " reveals started"));
+			int code = 0;
+			if (!live_dir_.empty()) {
+				const std::string path = live_dir_ + "/iff_live_end.png";
+				code = session_->save_screenshot(path) ? 0 : 1;
+				UtilityFunctions::print(to_godot("[pt1-iff] live screenshot -> " + path));
+			}
+			session_->finish(code);
+		}
 	}
 }
 

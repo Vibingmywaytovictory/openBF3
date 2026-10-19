@@ -20,6 +20,9 @@
 //             teammate and the nearest enemy at 6, 15 and 35 m, looks at each and saves a screenshot per view plus
 //             the atlas frames used (iff_atlas_frames.png), logs what each tag decided, then quits (exit 0, 1 when a
 //             view failed). Use --preround=120 so nobody moves or fires meanwhile.
+//   live      --iff-live=<s> (windowed, M2b scene): from the own spawn, s seconds of the round as it plays (no
+//             teleports), then the summary, the most enemies revealed at once and (with --iff-shots=<dir>) one
+//             screenshot iff_live_end.png, then quits.
 
 #include "iff_frame.h"
 #include "minimap_control.h"
@@ -146,6 +149,11 @@ private:
 	// --iff-shots
 	struct Shots;
 	std::unique_ptr<Shots> shots_;
+	// --iff-live=<seconds> (with --iff-shots=<dir> for the end screenshot)
+	double live_seconds_ = 0.0;
+	double live_start_s_ = -1.0;
+	uint32_t reveal_peak_ = 0;
+	std::string live_dir_;
 };
 
 } // namespace bf3::godot_side

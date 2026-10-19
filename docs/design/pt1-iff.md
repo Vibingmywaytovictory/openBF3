@@ -141,6 +141,7 @@ Shared machine, 2026-10-19, `b\dev`, warm cache. The Godot numbers come from `--
 | minimap arrows per frame | 31.0 orange, 15.0 of them teammates | 15.0 Friendly (blue) + 0.0 revealed enemies (16.0 enemies hidden; nobody fires in the pre-round) |
 | recorded frames (`frames.before_after`, 41 frames) | 287 enemy arrows, 123 teammates as enemies | 123 Friendly + 30 revealed-enemy arrows (one shot, 3.15 s), 0 teammates as enemies |
 | nametags per frame | none (no code) | 10.1 friendly icons, 1.30 friendly names, 0.363 enemy names |
+| live round (`--iff-live=60 --preround=0`, 4872 frames) | the M1 rule: 28.1 orange arrows per frame | 13.3 Friendly + 6.7 revealed enemies per frame (8.1 hidden), at most 12 revealed at once |
 | LOS rays (1956 frames) | none | 721 rays, 5 blocked |
 | Pt1Iff main-thread cost | none | 27.5 us per frame on average, 603.9 us at most |
 | 3p meshes | 2 (one per team; all kits assault) | 8 distinct (team, kit) meshes; US 15 body parts, 118 binds (was 113); RU 12 body parts, 113 binds (was 107); cap 256 |
@@ -155,7 +156,9 @@ committed). Each nominal distance is followed by the measured eye-to-anchor dist
 * `iff_teammate_35m.png` (35.0 m): the same with the crosshair on him;
 * `iff_enemy_06m.png` (6.0 m), `iff_enemy_15m.png` (12.8 m), `iff_enemy_35m.png` (29.8 m): no icon, the name in
   orange because the crosshair is on him;
-* `iff_atlas_frames.png`: the hud3dicons frames used, x4.
+* `iff_atlas_frames.png`: the hud3dicons frames used, x4;
+* `iff_live_end.png`: the end of a 60 s live round (`--iff-live=60`); the minimap shows the blue teammates and the
+  orange enemies whose fire revealed them.
 
 In the teammate shots, the far teammates show only the small blue arrow. The minimap in every shot shows blue arrows
 only.
@@ -185,7 +188,8 @@ What the user has to judge: the size of the 12-stage-unit names and the 16-unit 
 * Asan: `cmake --build --preset asan --target test_pt1_iff`, then `ctest --preset asan -R "^pt1\.iff"`.
 * The capture (windowed, under two minutes; never in a pass):
   `"%OPENBF3_GODOT%" --path bf3-opensource res://scenes/m2b_metro.tscn -- --deploy-screen=0 --preround=120 --iff-shots=<dir>`.
-  It exits 0 when every view was saved. The log carries `[pt1-iff]` lines: the data read, each view's decision, and
+  It exits 0 when every view was saved. `--iff-live=60 --preround=0` (with `--iff-shots=<dir>`) instead plays 60 s
+  of the round from the own spawn, logs the summary and saves `iff_live_end.png`. The log carries `[pt1-iff]` lines: the data read, each view's decision, and
   the summary with the per-frame counts above.
 
 ## 7. Merge-pass rows the diff touches

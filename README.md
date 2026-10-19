@@ -3231,5 +3231,7 @@ Measured 2026-10-19, `pt1/iff`, shared machine (times indicative only):
   - nametags: 10.1 friendly icons, 1.30 friendly names and 0.363 enemy names per frame;
   - cost: 27.5 us of main thread per frame on average;
   - 6 of 6 views saved.
+* **Live round** (`--iff-live=60 --preround=0`, 4872 frames): 13.3 Friendly and 6.7 revealed-enemy arrows per frame
+  (8.1 enemies hidden), at most 12 revealed at once.
 * **Rows:** `pt1.iff.unit` 8 cases, 1859 assertions, 0.24 s; `pt1.iff.install` 5 cases, 103 assertions, 1.7 s;
   install unchanged.
