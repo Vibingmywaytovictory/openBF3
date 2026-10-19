@@ -160,6 +160,8 @@ struct ViewmodelAttachment {
 };
 inline constexpr std::string_view kDefaultSocketUnlockPrefix = "weapons/common/no";
 
+struct ViewmodelLocomotionClips; // PT1 run [decl]: BF3's 1p run / sprint deltas (the PT1 run block at the end of this file)
+
 struct ViewmodelItem {
 	std::string unlock;
 	ViewmodelPart weapon; // the 1p mesh, materials, prepared mesh
@@ -185,6 +187,7 @@ struct ViewmodelItem {
 	std::vector<ViewmodelAttachment> attachments; // the default customization's rigid accessories
 	std::vector<ViewmodelSlotLook> weapon_looks; // per material slot of weapon
 	uint32_t hidden_surfaces = 0; // weapon surfaces left out (the knife's dog tags, kDogTagTexture)
+	std::shared_ptr<const ViewmodelLocomotionClips> pt1_locomotion; // PT1 run [decl]: null = none (the procedural bob)
 };
 
 // vm: the animator's clip table of an item (stand-ins as VmClipRef::stand_in with the stand-in's seconds).
@@ -309,5 +312,32 @@ namespace bf3::render {
 // weapons/gadgets/defibrillator/u_defib, mesh defibrillator_1p_mesh, Deploy and IdlePose clips, the Fire curve not
 // decoded (a stand-in), 0 stretched surfaces, install unchanged].
 size_t add_assault_gadget(std::span<ViewmodelKit> r_kits, std::string_view p_unlock);
+
+} // namespace bf3::render
+
+// ---- PT1 run (docs/design/pt1-run.md; viewmodel_anim.h's PT1 run block) -----------------------------------------------
+// The item's 1p run and sprint deltas, as BF3's 1P_MovementStateFlow routes them: 1P_RunLoopChooser and
+// Wep_SprintDeltaChooser of s_basicassets indexed by the item's WeaponTypeEnum (WeaponStates[0].Weapon's WeaponAsset
+// -> WeaponClassEnum, anim::weapon_type_index), followed to one additive clip each with the sequence's tick window.
+#include "bf3/anim/move_group.h"
+
+namespace bf3::render {
+
+inline constexpr std::string_view kVmRunDeltaChooser = "1P_RunLoopChooser";
+inline constexpr std::string_view kVmSprintDeltaChooser = "Wep_SprintDeltaChooser";
+
+struct ViewmodelLocomotionClips {
+	uint32_t weapon_type = 0; // anim::AntWeaponType
+	ViewmodelClip run, sprint; // Source::Missing when the route ends elsewhere (not additive, not on the rig)
+	float run_start_frame = 0, run_end_frame = 0, sprint_start_frame = 0, sprint_end_frame = 0; // clip frames
+	std::string run_path, sprint_path; // the routes (reports)
+};
+
+// The item's deltas: Wep AssetId p_ant_ref (WeaponStates[0].Weapon.AssetId). Failures leave the item without them and
+// add a note; nothing here fails the set.
+void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref, ViewmodelItem &r_item,
+		std::vector<std::string> &r_notes);
+// The animator's VmLocomotion of an item (empty without pt1_locomotion; the item must outlive the animator).
+anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item);
 
 } // namespace bf3::render
