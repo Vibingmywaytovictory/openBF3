@@ -2789,3 +2789,51 @@ Measured 2026-10-19, head of `m2b/w1`:
   193.7 s of ctest wall time and exit 0. There were no budget violations, only the existing warnings.
 * **`m2b.contract`:** 5 cases and 97 assertions, 0.02 s.
 * **`ctest --preset dev-window -N`:** 13 rows, with the three retired rows excluded.
+
+## M2b bb: TDM bots
+
+<!-- # M2b bb -->
+Track bb of M2b wave 1, on branch `m2b/bb` from the W1.0 head 01a26e8. Design: [docs/design/m2b.md](docs/design/m2b.md)
+§5, E1, E2, E6, E8. As-built notes, the named constants and the differences from the design:
+[docs/design/m2b-bb.md](docs/design/m2b-bb.md).
+
+The TDM bots are `bf3_host` `TdmBrain`s that `add_tdm_bots` puts on the server through `GameServerConfig::tdm_bots`.
+They read only `ServerView` (with the rules' `downed()`, `phase()`, `input_restricted()` and `kit()`) and the
+gunplay's shots:
+* **Perception** (`bf3_sim` `perception.cpp`): every 6 ticks per bot, a 160° x 90° cone to 120 m, head and chest rays
+  for the nearest 4, detection faster for near, moving and firing enemies; hearing gives a position estimate, never a
+  detection; 3 s to forget.
+* **Aim** (`aim_model.cpp`): a skill-scaled error cone that narrows with time on target, lead and drop for projectile
+  weapons, recoil compensation by skill.
+* **Behaviour**: target scores with a switch margin and a reaction delay; bursts by range, blind fire at a lost
+  target, the M67, the knife from behind, reload and sidearm; strafing, hunting the last known enemy, a contact heat
+  grid for roaming; retreat and regen wait; assault bots revive downed teammates with the defibrillator; idle in the
+  pre-round. Seeds are `match_seed ^ slot`.
+* **Tuning**: `bf3-opensource/config/bot_tuning.cfg` holds every default (all [inferred], measured = false: no VU
+  session measured BF3's bots). Unknown keys and out-of-range values fail the load.
+* **Preview**: `tools\play.cmd --tdm --bots=31` runs the M2a scene with the TDM rules and TDM bots (once ru's TDM load
+  is merged); the match state prints as `[m2b] match: ...` lines. `tools\play.cmd --help` lists the options.
+
+Commands:
+
+```bat
+tools\build.cmd dev                                                        :: the branch pass
+ctest --test-dir b\dev -R "^host\.tdm\.bots\.unit$" --output-on-failure   :: perception, aim, tuning, brain (no install)
+ctest --test-dir b\dev -R "^m2b\.contract$"                               :: the W1.0 contract with kBbLanded
+ctest --test-dir b\asan -R "^host\.tdm\.bots\.unit$" --output-on-failure  :: asan (after cmake --build --preset asan --target test_host_tdm)
+ctest --test-dir b\dev -R "^host\.tdm\.(round|bots|replay)$"              :: E1, E2, E6 (skip until ru + nt merge)
+ctest --preset dev-timing -R "^host\.tdm\.perf$"                          :: E8, timing row (merge pass on main)
+```
+
+Measured 2026-10-19 on the dev preset (branch, unlocked, shared machine):
+
+| gate | threshold | measured |
+|---|---|---|
+| branch pass `tools\build.cmd dev` | every row passes or skips as before | 142 rows: 137 passed, 5 skipped (`core.cache_data`, `core.res` as before; `host.tdm.round`, `.bots`, `.replay` pending ru + nt), 210.3 s, exit 0 |
+| host.tdm.bots.unit | all cases pass, data-free budget 2 s | 6 cases, 256 assertions, 0.17 s |
+| m2b.contract | passes with kBbLanded | passed, 0.51 s |
+| asan host.tdm.bots.unit | no asan report | passed, 0 asan reports, 0.68 s (asan preset, target test_host_tdm) |
+| E1 host.tdm.round | m2b.md E1 | pending: needs ru + nt merged into m2b/w1 |
+| E2 host.tdm.bots | m2b.md E2 | pending: needs ru + nt |
+| E6 host.tdm.replay | m2b.md E6 | pending: needs ru + nt |
+| E8 host.tdm.perf | perception ≤ 0.2 ms/tick p99, brains ≤ 1.5 ms/tick p99, tick ≤ 4 ms p99 | pending: timing row, runs on main after the merge |

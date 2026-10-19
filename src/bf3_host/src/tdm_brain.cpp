@@ -22,7 +22,8 @@
 //   activity    Revive (assault, not engaged for revive_idle_s, a downed teammate in reach of its window) > Retreat /
 //               RegenWait (below retreat_below_hp) > Fight (a visible target) > Grenade (a lost target behind cover
 //               15-35 m away) > Hunt (a known enemy: the last seen or heard position) > Roam (a heat cell or S1's random
-//               nav point; without a walker the bot stands and looks around, a new heading every 1.5-3 s, held while an enemy in sight is being detected);
+//               nav point; without a walker the bot stands and looks around: a new heading every 1.5-3 s, held
+//               while an enemy in sight is being detected);
 //   aim         the target's chest (perception_chest) led by the weapon's muzzle speed and gravity, plus a seeded
 //               error of sigma = aim_error(skill, time on target, moving, crossing speed), redrawn every kErrorTicks;
 //               the view turns at most kTurnRateDegS; the command subtracts skill x the weapon's recoil offset;
