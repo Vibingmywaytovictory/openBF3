@@ -2263,6 +2263,24 @@ Also: bb's two contract additions and au's sampler-voice cap are confirmed (m2b.
 backspace byte in bb's README row is fixed. Logs are in the scratchpad `m2b-integ-w1\`; captures (gitignored) are in
 `openBF3\b\shots\integm2bw1\`.
 
+<!-- integration (integ/m2b-w2) -->
+**Seventh integration: M2b wave 2 (`integ/m2b-w2`, 2026-10-19).** On `m2b/w2` 4a7e9f4 (the W2.0 contract with ui,
+cam and gx merged); `main` 545640c was already in it, so its `--no-ff` merge was a no-op. The branch pass
+(`tools\build.cmd dev`) passed: 151 rows, 149 passed, `core.cache_data` and `core.res` skipped as before, 0 failed,
+199.8 s. The wave-2 merge pass ran the `window` phase only (m2b.md §11.1 step 5; no timing row executes a file the
+wave changed), under the quiet lock with the user away: 15 / 15 rows passed, among them E9 `godot.m2b.play` (59.7 s),
+E12 `godot.m2b_load` (warm 4.27 s, limit 5 s) and `godot.m2a_firefight` (E14's 0 underruns with the A3 mixer). The
+play check through `tools\play.cmd` (one scripted round, `--kill-limit=15`, the 10 s pre-round) passed 14 / 14 on its
+second run: the spawn screen at join, two deploys with the chosen kits, two own deaths with the kill card and the
+death view, a revive by a bot, 22 feed lines for 22 deaths, the scoreboard equal to MatchState in 151 Tab samples, and
+the round end at US 15 - RU 5. Two changes, each in its own commit: `[revived seek]` (m2b_check.cpp: the first play
+run failed `play.deploys` because a bot revived the player and the script stopped seeking) and `[passed output]`
+(timing_pass.cmake keeps a passed row's whole output in the junit, which had cut E9's and E14's numbers). Every exit
+criterion E1-E14 with its value and log: [docs/design/m2b-results.md](docs/design/m2b-results.md). Open: with the
+play defaults (31 bots, spawn screen) the load to the spawn screen is 5.8-6.0 s, over E12's 5 s, which the row times
+without bots; the minimap covers part of the spawn screen's ASSAULT card; the M1 debug overlay still shows. Logs are
+in the scratchpad `m2b-integ-w2\`; captures (gitignored) are in `openBF3\b\shots\integm2bw2\`.
+
 ## M2a wave 2 contract (W2.0)
 
 <!-- # M2a w2 -->

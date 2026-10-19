@@ -1015,3 +1015,22 @@ Made on `integ/m2b-w1` (README "Sixth integration").
   The audio rows pass, in dev and under asan. Re-measured under the quiet lock: wall 4.05 s (was 8.64 s), max block
   1.505 ms, p50 and p99 < 0.08, 0 late blocks, 128 live voices at most. E11 passes.
 * **Open:** in wave 2, `fx::FxTriggers::sane` should accept `PresentKind::Revive` (m2b-nt.md).
+
+## M2b integ-w2: integrator decisions (wave 2)
+
+<!-- # M2b integ-w2 -->
+Made on `integ/m2b-w2` (README "Seventh integration"; results: [m2b-results.md](m2b-results.md)).
+
+* **Confirmed: gx's `[include]`, `[done]` and `[defib]`** (m2b-gx.md §1). `[done]` is a named replacement in
+  `Bf3LevelSession::try_done` that m2b-w2.md did not list: with the deploy screen, Done comes with the spawn screen at
+  join, since R10 spawns nothing before Deploy. `[include]` and `[defib]` are additive and marked.
+* **Confirmed: R13 is cam's line** (`// M2b cam [revive kind]` in `FxTriggers::sane`); gx made the identical change
+  and kept cam's at its merge.
+* **No timing phase in the wave-2 merge pass** (§11.1 step 5): no timing row calls `CrowdEvaluator`, `FxTriggers`,
+  `fill_hud*` or the viewmodel set, the only wave-2 sources outside bf3_godot.
+* **E12 stays the load without bots** (`--bots=0 --deploy-screen=0`, M2a E16's precedent): warm 4.27 s. With the play
+  defaults the load to the spawn screen is 5.8-6.0 s; recorded as open, not gated.
+* **Named insertion `[revived seek]`** (m2b_check.cpp): the play script seeks an enemy until a death is followed by a
+  deploy, because a bot's revive gives a life without one.
+* **Named replacement `[passed output]`** (tools/timing_pass.cmake): the merge-pass junit keeps a passed row's whole
+  output, so the gate numbers stay in the log.
