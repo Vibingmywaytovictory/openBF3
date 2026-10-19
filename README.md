@@ -2789,3 +2789,45 @@ Measured 2026-10-19, head of `m2b/w1`:
   193.7 s of ctest wall time and exit 0. There were no budget violations, only the existing warnings.
 * **`m2b.contract`:** 5 cases and 97 assertions, 0.02 s.
 * **`ctest --preset dev-window -N`:** 13 rows, with the three retired rows excluded.
+
+## M2b au: audio A3
+
+<!-- # M2b au -->
+Track `au` of M2b wave 1, on branch `m2b/au` from the W1.0 contract (01a26e8). Design:
+[docs/design/m2b.md](docs/design/m2b.md) §6, gates E10 and E11, R5 and R6. As built, with the measured results and
+one command per gate: [docs/design/m2b-au.md](docs/design/m2b-au.md).
+
+* **Data** (Godot-free, read-only):
+  - `read_hdr_setting` reads the one HdrSetting in `sound/soundstates`: window 45 dB, min top 80, min bottom 35,
+    attack 0.05 s, release 0.035 to 0.85 s on a 5-point curve, headroom 5, overshoot 3.
+  - `read_scopes` reads the 33 scopes of `sound/audiosystem`, and `map_patch_scopes` gives each compiled patch its
+    `Scope`.
+* **HDR window** (`hdr_window.h`): the mixer steps the window every block on the loudest HDR voice. An EnableHdr
+  output then sounds at Loudness - top - Headroom (R5). A voice below the bottom is suspended: silent, still playing.
+* **Culling** (`voice_cull.h`), in this order:
+  1. pre-cull a starting HDR voice below bottom - 3 dB;
+  2. the scopes: duplicates, then the closest N, then the newest or oldest N;
+  3. the cap of 128 sampler voices (busy slots, not instances).
+
+  A dropped one-shot comes back finished, and a culled loop waits as pending. The router's own limits became that
+  one cap (R6).
+* **Profiler:**
+  - The mixer times every block into a 16-bucket histogram of its share of the block's 10.67 ms.
+  - `format_mixer_profile` prints one line: the mix share, the voices, the culls, the suspended voices and the
+    window.
+  - `Bf3GameAudio` reads the A3 data at load, and `game_audio_profile_text()` is the readout for an overlay.
+* **Render cost:** a silent voice chain skips its per-sample work and the mix stays exactly the same (`[quiet]`).
+* **Tests:**
+  - `ctest --test-dir b\dev -R "^audio\.hdr\."` runs E10. `audio.hdr.unit` is data-free; `audio.hdr.install` reads
+    the retail setting and scopes, and exits 77 without an install.
+  - `audio.game.crowd` runs E11's functional checks on 64 shooters: live voices at most 128, the cull counts and the
+    histogram.
+  - The p99 share gate (≤ 0.10) and the late-block gate run only in the merge pass, in `audio.game.underruns`.
+
+Measured 2026-10-19 on `m2b/au` (wall-clock values indicative only):
+
+* **E10:** met. Top 80 / 35 for the footstep. Top 110 in 5 blocks (53.3 ms) for the shot, bottom 65, the 63 dB source
+  suspended.
+* **E11 voices:** at most 128. Culled: 717 pre-cull, 207 scope, 397 cap.
+* **64-shooter mix:** 8.5 s of wall time for 66 s of audio, against M2a's 10.2 s, with 0 late blocks.
+* **E11 share:** p99 below 0.20, so the 0.10 gate is probably not met; docs/design/m2b-au.md §10 has the follow-up.
