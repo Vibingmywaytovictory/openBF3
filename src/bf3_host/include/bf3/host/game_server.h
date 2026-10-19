@@ -40,6 +40,7 @@
 #include "bf3/host/bot_fill_stats.h"
 #include "bf3/host/gunplay.h" // M2a sv
 #include "bf3/host/server_view.h" // M2a sv
+#include "bf3/host/tdm_rules.h" // M2b ru [cfg]: MatchRulesConfig (W1.0)
 #include "bf3/host/level_load.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
@@ -100,6 +101,10 @@ struct GameServerConfig {
 	// M2a w3 (G3, docs/design/m2a-w3.md; firefight_brain.h, owner bt): firefight stub bots, added by init after the
 	// target bots, the walkers and S1's bots through add_firefight_bots. Null = none.
 	std::shared_ptr<const struct FirefightConfig> firefight;
+	// M2b (docs/design/m2b.md §2.6 #1, §3.2; W1.0): the TDM rules (tdm_rules.h; mode None = M2a unchanged) and the TDM
+	// bots (tdm_brain.h, owner bb), added by init after every M2a source through add_tdm_bots. Null = none.
+	MatchRulesConfig rules; // M2b ru [cfg]
+	std::shared_ptr<const struct TdmBotConfig> tdm_bots; // M2b ru [cfg]
 };
 
 struct OutDatagram {

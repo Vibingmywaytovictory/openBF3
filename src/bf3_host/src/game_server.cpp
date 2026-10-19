@@ -5,6 +5,7 @@
 
 #include "bot_director.h" // S1 bots (docs/design/s1.md §8)
 #include "bf3/host/firefight_brain.h" // M2a w3 [G3 firefight]
+#include "bf3/host/tdm_brain.h" // M2b ru [tdm bots] (W1.0)
 
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
@@ -758,6 +759,13 @@ struct GameServer::Impl {
 	void sv_trace_tick(size_t p_slot); // M2a sv [impl]
 	void sv_trace_report(size_t p_slot, net::DebugReport &r_report); // M2a sv [impl]
 	void sv_stats(GameServerStats &r_stats) const; // M2a sv [impl]
+	// M2b ru [sv] (W1.0; docs/design/m2b.md §2.6 #20, declared only, ru defines them): the policy the deaths ask (the
+	// rules when present, else Sv::respawn), a revive's new life at the corpse (any slot, remote ones with
+	// Spawned{revived}), the removal without a death, and the rules' orders in [orders].
+	RespawnPolicy &sv_policy(); // M2b ru [sv]
+	core::Status sv_revive(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, float p_health, sim::Tick p_tick); // M2b ru [sv]
+	void sv_unspawn(size_t p_slot); // M2b ru [sv]
+	void sv_orders(sim::Tick p_tick, std::span<const RulesOrder> p_orders); // M2b ru [sv]
 };
 
 GameServer::GameServer() :
@@ -809,6 +817,9 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 		}
 	}
 	BF3_TRY(add_firefight_bots(*this, p_config)); // M2a w3 [G3 firefight]: bt's FirefightBrains (GameServerConfig::firefight)
+	if (p_config.tdm_bots != nullptr) { // M2b ru [tdm bots] (W1.0): bb's TdmBrains, after sv_init created the rules
+		BF3_TRY(add_tdm_bots(*this, p_config)); // M2b ru [tdm bots]
+	} // M2b ru [tdm bots]
 	return core::Status::success();
 }
 
@@ -1061,6 +1072,9 @@ struct GameServer::Impl::Sv {
 	std::vector<net::OtherSoldier> overflow; // this client's others beyond its Snapshot
 	uint64_t main_mask = 0;
 	std::vector<net::RemoteShot> remote;
+	// M2b ru [sv] (W1.0, #20): the TDM rules (null without GameServerConfig::rules.mode == Tdm), made in [init]. The
+	// deleter is set where the rules are created (the pattern of Impl::sv), so this file links before TdmRules' bodies.
+	std::unique_ptr<TdmRules, void (*)(TdmRules *)> rules{ nullptr, nullptr }; // M2b ru [sv]
 };
 
 core::Status GameServer::Impl::sv_init() {
