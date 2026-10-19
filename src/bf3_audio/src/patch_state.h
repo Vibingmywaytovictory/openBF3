@@ -218,6 +218,8 @@ struct PatchInstance::State {
 	SamplerTrace *trace = nullptr;
 
 	PatchInstanceStats stats;
+	HdrVoiceWindow hdr; // M2b au [a3]: set by the mixer per block (patch_instance.h)
+	Vec3 emitter_position; // M2b au [a3]: the last set_geometry's emitter (the cull's DuplicateSpawn distance)
 
 	float *voice(uint16_t p_voice, uint32_t p_channel) { return voice_buffers.data() + (size_t(p_voice) * 2 + p_channel) * detail::kMaxSubBlock; }
 	float read(const core::audio::SoundPort &p_port) const { return p_port.reg == core::audio::kNoRegister ? p_port.constant : registers[p_port.reg]; }

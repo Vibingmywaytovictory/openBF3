@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits> // M2b au [a3]
 
 namespace bf3::audio {
 
@@ -299,6 +300,7 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 	if (!finite(p_emitter.position) || !finite(p_listener.position) || !finite(p_emitter.velocity) || !finite(p_listener.velocity)) {
 		return;
 	}
+	st.emitter_position = p_emitter.position; // M2b au [a3]
 	Geometry &g = st.geometry;
 	const Vec3 d = sub(p_emitter.position, p_listener.position);
 	g.distance = length(d);
@@ -367,6 +369,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 		std::fill_n(st.tap_buffers[t].data(), p_frames, 0.0f);
 	}
 	const float window_db = p.loudness_db - st.tuning.window_top_db - st.tuning.window_headroom_db + st.tuning.master_gain_db;
+	// M2b au R5 (docs/design/m2b.md §6.1): an EnableHdr output takes the HDR window's gain when the mixer runs one.
+	const float hdr_window_db = p.loudness_db - st.hdr.top_db - st.hdr.headroom_db + st.tuning.master_gain_db; // M2b au R5
 	const float pan_scale = db_to_gain(st.tuning.pan_law_db) / 0.70710678f;
 	for (uint16_t v : p.voice_order) {
 		const ca::SoundVoice &voice = p.voices[v];
@@ -470,7 +474,12 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					float target = 1.0f;
 					if (ps.output != UINT32_MAX) {
 						const OutputState &o = st.outputs[ps.output];
-						target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
+						if (st.hdr.active && p.outputs[ps.output].enable_hdr) { // M2b au R5
+							const float over = std::max(0.0f, p.loudness_db + o.curve_gain_db + o.cone_db - (st.hdr.top_db + st.hdr.overshoot_db)); // M2b au R5
+							target = st.hdr.suspended ? 0.0f : db_to_gain(o.curve_gain_db + o.cone_db + hdr_window_db - over); // M2b au R5
+						} else { // M2b au R5
+							target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
+						} // M2b au R5
 					}
 					if (c.to_bus && c.bus == ca::MasterBus::Lfe) {
 						target *= db_to_gain(st.tuning.lfe_fold_db);
@@ -698,6 +707,49 @@ const ca::SoundProgram &PatchInstance::program() const {
 
 const PatchInstanceStats &PatchInstance::stats() const {
 	return state_->stats;
+}
+
+// M2b au [a3] (docs/design/m2b.md §6, docs/design/m2b-au.md): the HDR window and the cull's view of the instance.
+
+void PatchInstance::set_hdr_window(const HdrVoiceWindow &p_window) {
+	state_->hdr = p_window;
+}
+
+VoiceCullInfo PatchInstance::cull_info() const {
+	const State &st = *state_;
+	const ca::SoundProgram &p = *st.program;
+	VoiceCullInfo info;
+	info.distance_m = st.geometry.distance;
+	info.position = st.emitter_position;
+	bool any_hdr = false;
+	for (const ca::SoundOutput &out : p.outputs) {
+		any_hdr = any_hdr || out.enable_hdr;
+	}
+	// The curve at the current distance (as State::evaluate_program computes it), so a voice that has not been
+	// evaluated yet (its first block) is measured where it is.
+	const float metres = st.geometry.distance;
+	float loudest = -std::numeric_limits<float>::infinity();
+	for (size_t o = 0; o < p.outputs.size(); ++o) {
+		const ca::SoundOutput &out = p.outputs[o];
+		if (any_hdr && !out.enable_hdr) {
+			continue;
+		}
+		float d = metres;
+		if (metres < out.min_distance) {
+			d = metres + (out.min_distance - metres) * st.tuning.min_distance_clamp;
+		}
+		const float cone = o < st.outputs.size() ? st.outputs[o].cone_db : 0.0f;
+		const float at = out.attenuation.evaluate(d * st.tuning.curve_x_metres) + out.gain_db + cone;
+		if (std::isfinite(at)) {
+			loudest = std::max(loudest, at);
+		}
+	}
+	for (const SlotState &sl : st.slots) {
+		info.voices += (sl.play.active || sl.pending.armed) ? 1 : 0;
+	}
+	info.hdr = any_hdr;
+	info.loudness_db = p.loudness_db + (std::isfinite(loudest) ? loudest : 0.0f);
+	return info;
 }
 
 } // namespace bf3::audio
