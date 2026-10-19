@@ -355,8 +355,8 @@ core::Result<MoveGroupDef> read_move_group(const AntLibrary &p_library, std::str
 		return core::make_error(where + ": " + std::to_string(items.size()) + " directions (1.." + std::to_string(kMaxMoveGroupDirections) + ")");
 	}
 	if (!outer.read_float("Min", def.x_min) || !outer.read_float("Max", def.x_max) || !finite(def.x_min) || !finite(def.x_max) || !(def.x_max >= def.x_min) ||
-			def.x_max - def.x_min > 4.0f * kTwoPi) {
-		return core::make_error(where + ": the angle array has no finite Min <= Max within 4 turns");
+			std::fabs(def.x_min) > kMaxMoveGroupAngle || std::fabs(def.x_max) > kMaxMoveGroupAngle) {
+		return core::make_error(where + ": the angle array has no finite Min <= Max within +-" + std::to_string(kMaxMoveGroupAngle) + " rad");
 	}
 	std::vector<uint32_t> item_guid; // per clip: the StreetMoveGroupItem it came from first (reports)
 	for (uint32_t d = 0; d < items.size(); ++d) {
@@ -366,8 +366,8 @@ core::Result<MoveGroupDef> read_move_group(const AntLibrary &p_library, std::str
 		const GdStruct di = items.element(d);
 		MoveGroupDirection dir;
 		GdGuid ig;
-		if (!di.valid() || !di.read_float("X", dir.x) || !finite(dir.x) || !di.read_guid("Clip", ig) || ig.is_null()) {
-			return core::make_error(where + ": direction " + std::to_string(d) + " has no X or Clip");
+		if (!di.valid() || !di.read_float("X", dir.x) || !finite(dir.x) || std::fabs(dir.x) > kMaxMoveGroupAngle || !di.read_guid("Clip", ig) || ig.is_null()) {
+			return core::make_error(where + ": direction " + std::to_string(d) + " has no X within +-" + std::to_string(kMaxMoveGroupAngle) + " rad or no Clip");
 		}
 		const GdStruct inner = p_library.resolve(opkg, ig);
 		if (!inner.valid() || inner.type_name() != "BlendArrayAsset") {
@@ -445,15 +445,16 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 	if (std::fabs(x) > 1.0e4f) {
 		x = 0.0f;
 	}
-	if (p_def.x_max > p_def.x_min) {
-		while (x < p_def.x_min) {
-			x += kTwoPi;
-		}
-		while (x >= p_def.x_min + kTwoPi) {
-			x -= kTwoPi;
+	// One floor-based step, no loop: a hand-built or hostile def with a huge Min (read_move_group bounds it) cannot stall
+	// the crowd workers. Rounding at the edge is caught by the clamp. A non-finite Min / Max gives the X 0.
+	const bool range_ok = std::isfinite(p_def.x_min) && std::isfinite(p_def.x_max) && p_def.x_max >= p_def.x_min;
+	if (range_ok && p_def.x_max > p_def.x_min) {
+		const float turns = std::floor((x - p_def.x_min) / kTwoPi);
+		if (std::isfinite(turns)) {
+			x -= turns * kTwoPi;
 		}
 	}
-	x = std::clamp(x, p_def.x_min, p_def.x_max);
+	x = range_ok ? std::clamp(x, p_def.x_min, p_def.x_max) : 0.0f;
 	out.x = x;
 	const std::vector<MoveGroupDirection> &dirs = p_def.directions;
 	size_t lo = 0, hi = 0;
@@ -538,6 +539,15 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 				return;
 			}
 		}
+		// No bracket: the entries are sorted by the data's Velocity, and root * ItemSpeed may not keep that order. The
+		// nearest entry takes the whole weight, so the weights still sum to 1.
+		size_t best = 0;
+		for (size_t e = 1; e < n; ++e) {
+			if (std::fabs(v - vel[e]) < std::fabs(v - vel[best])) {
+				best = e;
+			}
+		}
+		add(p_dir.entries[best].clip, p_w, p_dir.entries[best].item_speed, start_of(p_dir.entries[best]));
 	};
 	inner(dirs[lo], lo == hi ? 1.0f : 1.0f - t);
 	if (hi != lo) {

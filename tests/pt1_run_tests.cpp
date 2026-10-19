@@ -341,6 +341,52 @@ TEST_SUITE("pt1-run-unit") {
 		CHECK(move_group_x(Vec3{ 0, 0, -1 }, 1.0f) == doctest::Approx(kPi));
 	}
 
+	TEST_CASE("move group weights: hostile def (huge or non-finite Min / Max, root order against the data's)") {
+		const std::vector<MoveGroupClipTiming> tm = synth_run_timing();
+		const float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
+		// The verifier's case: Min 1e9 stalled the old X wrap loop at x = 1.342e8 (adding 2 pi no longer changed the float).
+		const std::pair<float, float> ranges[] = { { 1.0e9f, 1.0e9f + 1.0f }, { -1.0e9f, -1.0e9f + 64.0f }, { 1.0e6f, 1.0e6f + 3.0f },
+			{ -3.0e38f, 3.0e38f }, { nan, 1.0f }, { 0.0f, inf }, { 2.0f, 1.0f } };
+		for (const auto &[lo, hi] : ranges) {
+			MoveGroupDef d = synth_run_group();
+			d.x_min = lo;
+			d.x_max = hi;
+			for (float x : { 0.0f, -kPi, 2.0f, 1.0e4f, nan }) {
+				const MoveGroupWeights w = move_group_weights(d, tm, x, 4.0f);
+				CHECK(std::isfinite(w.x));
+				CHECK(w.count >= 1);
+				float sum = 0.0f;
+				for (uint32_t k = 0; k < w.count; ++k) {
+					sum += w.terms[k].weight;
+				}
+				CHECK(sum == doctest::Approx(1.0));
+			}
+		}
+		// The X wrap: one turn below Min comes back into [Min, Min + 2 pi).
+		const MoveGroupDef d = synth_run_group();
+		CHECK(move_group_weights(d, tm, -kPi + 0.5f - 2.0f * kPi, 4.0f).x == doctest::Approx(-kPi + 0.5f).epsilon(1e-4));
+		CHECK(move_group_weights(d, tm, 0.25f + 6.0f * kPi, 4.0f).x == doctest::Approx(0.25).epsilon(1e-4));
+		// Entries sorted by the data's Velocity whose root * ItemSpeed order disagrees (6, 2, 4 m/s): still one term set
+		// whose weights sum to 1 at every speed.
+		MoveGroupDef r = synth_run_group();
+		for (MoveGroupDirection &dir : r.directions) {
+			dir.entries = { MoveGroupEntry{ 0.02f, 1.0f, 0.0f, 0.0f, 1 }, MoveGroupEntry{ 0.04f, 1.0f, 0.0f, 0.0f, 2 },
+				MoveGroupEntry{ 0.06f, 1.0f, 0.0f, 0.0f, 3 } };
+		}
+		std::vector<MoveGroupClipTiming> rt = tm;
+		rt[1].root_velocity = 6.0f / 60.0f;
+		rt[2].root_velocity = 2.0f / 60.0f;
+		rt[3].root_velocity = 4.0f / 60.0f;
+		for (float speed : { 1.0f, 3.0f, 3.5f, 4.0f, 5.0f, 8.0f }) {
+			const MoveGroupWeights w = move_group_weights(r, rt, 0.0f, speed, MoveGroupOptions{ true });
+			float sum = 0.0f;
+			for (uint32_t k = 0; k < w.count; ++k) {
+				sum += w.terms[k].weight;
+			}
+			CHECK(sum == doctest::Approx(1.0));
+		}
+	}
+
 	TEST_CASE("crowd evaluator with move groups: run, sprint and its ramp, crouch sneak, prone unchanged, idle below MinSpeed") {
 		SynthPt1 s;
 		CrowdStanceSet stance;

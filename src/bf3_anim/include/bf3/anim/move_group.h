@@ -54,6 +54,7 @@ inline constexpr uint32_t kMaxMoveGroupDirections = 16;
 inline constexpr uint32_t kMaxMoveGroupEntries = 8; // per direction
 inline constexpr uint32_t kMaxMoveGroupClips = 32;
 inline constexpr size_t kMaxMoveGroupTerms = 4; // two directions x two entries
+inline constexpr float kMaxMoveGroupAngle = 25.2f; // |Min|, |Max| and every direction X, radians (four turns; the data uses -pi..1.5 pi)
 inline constexpr bool kMoveGroupVelocityFromRoot = true; // [named default, measured = false] (above)
 
 // WeaponTypeEnum of s_basicassets (the WeaponType_EnumGamestate enumeration) [verified 2026-10-19].
@@ -112,7 +113,8 @@ struct MoveGroupDef {
 };
 
 // Reads the StreetMoveGroupControllerAsset p_name (unique in the static package). Fails on a missing or repeated name,
-// a missing field, an empty or oversized array, non-finite numbers, or a route that fails (above).
+// a missing field, an empty or oversized array, non-finite numbers, an angle beyond kMaxMoveGroupAngle, or a route that
+// fails (above).
 core::Result<MoveGroupDef> read_move_group(const core::ant::AntLibrary &p_library, std::string_view p_name, const ChooserIndices &p_indices);
 
 struct MoveGroupClipTiming {

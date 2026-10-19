@@ -3222,7 +3222,7 @@ Root causes with evidence, the fix, before / after numbers and one command per c
 
 Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicative only:
 
-* **`anim.pt1_run.unit`:** 7 cases, 359 assertions, pass, 0.36 s.
+* **`anim.pt1_run.unit`:** 8 cases, 472 assertions, pass, 0.03 s (including the hostile move-group def case).
 * **`anim.pt1_run`:** 4 cases, pass, about 1.6 s.
 * **Changes after the fix:**
   * 3p run at 4.0 m/s: 0.600 s cycle (was 0.693).

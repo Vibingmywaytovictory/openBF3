@@ -211,12 +211,19 @@ Measured on the 1p rig (`anim.pt1_run`, case "1p deltas"):
   one clip controller (`route_ant_controller`, at most 8 hops).
 * `WorkBudget` is charged on every scan and hop.
 * Arrays are capped at 16 directions, 8 entries and 32 clips. Non-finite numbers fail the read.
+* Min, Max and every direction X must lie within ±`kMaxMoveGroupAngle` (25.2 rad, four turns). The data uses −π..1.5π.
+  A verifier found that without this bound, hostile data with Min = 1e9 hung the old X wrap loop. In float32 it
+  stalled at x = 1.342e8, where adding 2π no longer changes the float.
 
 `move_group_weights` is the model [inferred from the data's shape]:
 
-* X = x_sign × atan2(x, z), wrapped into [Min, Min + 2π).
+* X = x_sign × atan2(x, z), wrapped into [Min, Min + 2π) by one floor step (no loop), then clamped to [Min, Max].
+  A def with a non-finite or inverted range gives X = 0.
 * The two directions that bracket X get linear weights.
 * In each direction, the two entries that bracket the speed get linear weights. Each plays at its ItemSpeed.
+* If no pair brackets the speed, the nearest entry takes the whole weight. This is a guard for root × ItemSpeed
+  orders that disagree with the data's Velocity order. With the ends handled first, a bracket always exists, so the
+  guard only keeps the weights summing to 1 if that ever changes.
 * Above the last entry, the rate is ItemSpeed × (1 + OneToOneSpeed × (v / V − 1)).
 * One normalised phase is shared by all terms. It advances at the weighted mean of rate / seconds of the moving
   terms.
@@ -344,10 +351,10 @@ Weapon top edge (y) and centroid of the dark pixels (x), in pixels at 1152 × 64
 
 | Check | Command | Result (2026-10-19) |
 |---|---|---|
-| Clip choice, cycle rate per speed, stride identity, hostile input, crowd evaluator, 1p animator (data-free) | `ctest --preset dev -R "^anim\.pt1_run\.unit$"` (= `b\dev\tests\test_pt1_run.exe --test-suite=pt1-run-unit`) | 7 cases, 359 assertions, pass, 0.36 s |
+| Clip choice, cycle rate per speed, stride identity, hostile input, crowd evaluator, 1p animator (data-free) | `ctest --preset dev -R "^anim\.pt1_run\.unit$"` (= `b\dev\tests\test_pt1_run.exe --test-suite=pt1-run-unit`) | 8 cases, 472 assertions, pass, 0.03 s (with the hostile-def case) |
 | Move group data, chosen clips, cycle and stride per gait before / after, 1p routes and cadence, install unchanged | `ctest --preset dev -R "^anim\.pt1_run$"` (= `b\dev\tests\test_pt1_run.exe --test-suite=pt1-run`) | 4 cases, pass, about 1.6 s |
 | The data | `b\dev\tools\antdump\antdump.exe objects --install s_basicassets StreetMoveGroupControllerAsset` | §2 |
-| Asan (the new readers and the delta layer) | `ctest --preset asan -R "^anim\.pt1_run"` | both pass: 0.06 s and 18.0 s |
+| Asan (the new readers and the delta layer) | `ctest --preset asan -R "^anim\.pt1_run"` | both pass: 0.08 s and 29.7 s (after the hostile-def fix) |
 | Captures | the two commands in §5.3 | §5.3 |
 
 ## 7. For the user to judge
