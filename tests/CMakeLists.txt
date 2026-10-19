@@ -1546,7 +1546,10 @@ target_compile_definitions(test_audio_foley PRIVATE OPENBF3_AUDIO_TUNING_CFG="${
 add_test(NAME audio.foley.install COMMAND test_audio_foley --test-suite=audio-foley)
 set_tests_properties(audio.foley.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 openbf3_cost(audio.foley.install 1 8)
+# audio.foley.unit: read_weapon_foley / voice_outputs on a hostile synthetic program (no install; the asan row of
+# the new reader with the install row's 300 corruptions of a real program).
+add_test(NAME audio.foley.unit COMMAND test_audio_foley --test-suite=audio-foley-unit)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_pt1_rld_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(audio.foley.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_pt1_rld_cl_dir}")
+    set_tests_properties(audio.foley.install audio.foley.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_pt1_rld_cl_dir}")
 endif()

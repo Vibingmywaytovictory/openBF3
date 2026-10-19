@@ -830,4 +830,161 @@ TEST_SUITE("audio-foley") {
 		std::printf("%s\n", line);
 		check_unchanged(*f);
 	}
+	TEST_CASE("read_weapon_foley on 300 corruptions of the M16A3 program: no crash, bounded") {
+		FoleyFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const uint16_t m16 = def_of_patch(*f->assets.table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		const ca::SoundProgram &base = *f->assets.table->defs[m16].program;
+		uint64_t state = 0x9E3779B97F4A7C15ull;
+		const auto next = [&state]() {
+			state ^= state << 13;
+			state ^= state >> 7;
+			state ^= state << 17;
+			return state;
+		};
+		size_t present = 0;
+		for (int it = 0; it < 300; ++it) {
+			ca::SoundProgram p = base;
+			for (int k = 0; k < 24; ++k) {
+				const uint64_t r = next();
+				switch (r % 7) {
+					case 0:
+						if (!p.ports.empty()) {
+							p.ports[(r >> 8) % p.ports.size()].reg = uint16_t(r >> 32);
+						}
+						break;
+					case 1:
+						if (!p.nodes.empty()) {
+							ca::SoundNode &n = p.nodes[(r >> 8) % p.nodes.size()];
+							n.ports_begin = uint32_t(r >> 32);
+							n.children_count = uint16_t(r >> 48);
+						}
+						break;
+					case 2:
+						if (!p.plugins.empty()) {
+							p.plugins[(r >> 8) % p.plugins.size()].connection = uint16_t(r >> 32);
+						}
+						break;
+					case 3:
+						if (!p.connections.empty()) {
+							p.connections[(r >> 8) % p.connections.size()].voice = uint16_t(r >> 32);
+						}
+						break;
+					case 4:
+						if (!p.outputs.empty()) {
+							p.outputs[(r >> 8) % p.outputs.size()].main_send_plugin.voice = uint16_t(r >> 32);
+						}
+						break;
+					case 5:
+						if (!p.children.empty()) {
+							p.children[(r >> 8) % p.children.size()] = uint32_t(r >> 32);
+						}
+						break;
+					default:
+						if (!p.inputs.empty()) {
+							p.inputs[(r >> 8) % p.inputs.size()].reg = uint16_t(r >> 32);
+						}
+						break;
+				}
+			}
+			const ba::WeaponFoley fo = ba::read_weapon_foley(p);
+			present += fo.reload.present ? 1 : 0;
+			CHECK(fo.reload.samplers.size() <= p.nodes.size());
+			CHECK(fo.reload.outputs.size() <= p.outputs.size());
+			CHECK(fo.action.outputs.size() <= p.outputs.size());
+			(void)ba::describe_weapon_foley(p, fo);
+		}
+		MESSAGE("pt1 rld: 300 corrupted M16A3 programs read, Reload still present in " << present);
+		check_unchanged(*f);
+	}
+}
+
+TEST_SUITE("audio-foley-unit") {
+	TEST_CASE("read_weapon_foley on a hostile program: out-of-range ranges, registers and a send cycle") {
+		ca::SoundProgram p;
+		p.registers = 4;
+		ca::SoundInput bad;
+		bad.name_hash = ba::kHashActionType;
+		bad.reg = 9; // past the registers
+		p.inputs.push_back(bad);
+		ca::SoundInput reload;
+		reload.name_hash = 3294210644u; // Reload
+		reload.reg = 1;
+		reload.event = true;
+		p.inputs.push_back(reload);
+		ca::SoundNode receive;
+		receive.type = ca::SoundNodeType::Receive;
+		receive.children_begin = 1000; // past children
+		receive.children_count = 7;
+		p.nodes.push_back(receive);
+		ca::SoundNode sampler;
+		sampler.type = ca::SoundNodeType::Sampler;
+		sampler.ports_begin = 0xFFFFFFF0u; // past ports
+		sampler.ports_count = 40;
+		sampler.plugins_begin = 77;
+		sampler.plugins_count = 8;
+		p.nodes.push_back(sampler);
+		ca::SoundNode fader;
+		fader.type = ca::SoundNodeType::MultiCrossfader;
+		fader.ports_begin = 0;
+		fader.ports_count = 3;
+		fader.children_count = 5; // no children pool
+		p.nodes.push_back(fader);
+		ca::SoundPort port;
+		port.reg = 3;
+		p.ports.push_back(port);
+		port.reg = 60000; // past the registers
+		p.ports.push_back(port);
+		port.reg = 1;
+		p.ports.push_back(port);
+		// Voices 0 -> 1 -> 0 (a cycle), a send to a missing connection and to a voice past the voices.
+		ca::SoundVoice v;
+		v.plugins_begin = 0;
+		v.plugins_count = 2;
+		p.voices.push_back(v);
+		v.plugins_begin = 2;
+		v.plugins_count = 5; // 2 past the plugins
+		p.voices.push_back(v);
+		ca::SoundVoicePlugin pl;
+		pl.connection = 0;
+		p.plugins.push_back(pl);
+		pl.connection = 9; // no such connection
+		p.plugins.push_back(pl);
+		pl.connection = 1;
+		p.plugins.push_back(pl);
+		pl.connection = 2;
+		p.plugins.push_back(pl);
+		ca::SoundConnection c;
+		c.voice = 1;
+		p.connections.push_back(c);
+		c.voice = 0;
+		p.connections.push_back(c);
+		c.voice = 500; // past the voices
+		p.connections.push_back(c);
+		ca::SoundOutput out;
+		out.main_send_plugin.voice = 1;
+		p.outputs.push_back(out);
+		out.main_send_plugin.voice = 300; // past the voices
+		p.outputs.push_back(out);
+		const ba::WeaponFoley fo = ba::read_weapon_foley(p);
+		CHECK(fo.reload.present);
+		CHECK(fo.reload.samplers.empty());
+		CHECK(fo.reload.release_event == 0u);
+		CHECK(!fo.action.present);
+		CHECK(!fo.action_type_param); // its register is out of range: not an input
+		CHECK(fo.action_waves.empty());
+		const std::vector<uint16_t> o0 = ba::voice_outputs(p, 0);
+		CHECK(o0 == std::vector<uint16_t>{ 0 }); // through the cycle to voice 1, which holds output 0's send
+		CHECK(ba::voice_outputs(p, 1) == std::vector<uint16_t>{ 0 });
+		CHECK(ba::voice_outputs(p, 9).empty());
+		CHECK(!ba::describe_weapon_foley(p, fo).empty());
+		// An empty program.
+		const ba::WeaponFoley none = ba::read_weapon_foley(ca::SoundProgram{});
+		CHECK(!none.reload.present);
+		CHECK(!none.action.present);
+		CHECK(!none.bolt.present);
+	}
 }
