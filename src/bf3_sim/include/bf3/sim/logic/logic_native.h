@@ -57,6 +57,22 @@ enum class NativePortMeaning : uint8_t {
 	RoundStarted, // EventIn (RoundOver) / EventOut (PreRound)
 	OnRoundOver, // EventOut
 	Activate, // EventIn: an MCOM's interaction armed by the base chain
+	// M2b W1.0 (docs/design/m2b.md §2.6 #5, §3.1): the TDM natives' ports (RoundNatives, round_natives.h). ru adds the
+	// type-scoped binding rows (R4); the stubs' switch records every one of them (its default), so S4 stays bit-equal.
+	Kills, // PropertyOut int (KillCounter)
+	KillLimit, // PropertyOut int (KillCounter)
+	TeamWins, // EventIn (RoundOver)
+	StopTime, // EventIn (RoundOver)
+	UnSpawnAllSoldiers, // EventIn (HumanPlayer)
+	OnPlayerSpawned, // EventOut (HumanPlayer)
+	OnPlayerDied, // EventOut (HumanPlayer)
+	OnSpectatorEnter, // EventOut (HumanPlayer)
+	PlayerEnter, // EventIn (AutoTeam)
+	DisableAllowedToSpawnOn, // EventIn (AutoTeam)
+	Deactivate, // EventIn (InputRestriction; Activate above is scoped by native_port(type, ...))
+	RestartLevel, // EventIn (LevelControl)
+	StartRound, // EventOut (PreRound)
+	EnablePlayerMovement, // EventOut (PreRound)
 };
 
 // One known port of a native type. `name` is empty for the ports whose name is not recoverable from the hash.
