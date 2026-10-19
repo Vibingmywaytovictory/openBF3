@@ -204,6 +204,9 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 		mc.pt1_voice_hold_blocks = 0; // PT1 snd [hold]
 		mc.pt1_resume_margin = 0; // PT1 snd [hold]
 	} // PT1 snd [hold]
+	if (user_arg_value("audio-limit") == "0") { // PT1 snd [limit]: no output limiter (A/B)
+		mc.pt1_limit_ceiling = 0.0f; // PT1 snd [limit]
+	} // PT1 snd [limit]
 	m.lead_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames);
 	m.mixer = std::make_shared<ba::MixerCore>(mc);
 	m.mixer->set_tap(&m.tap); // before the audio thread sees the mixer
