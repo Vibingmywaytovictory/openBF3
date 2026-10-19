@@ -880,6 +880,8 @@ TEST_SUITE("host-tdm-server") {
 			CHECK(s1.revives == 0u);
 			CHECK(is_alive(m->state(victim)));
 			const uint32_t life = m->state(victim)->life;
+			const uint8_t kit_before = m->server.gunplay()->kit(uint8_t(victim));
+			const uint8_t team_before = m->server.gunplay()->team(uint8_t(victim));
 			// 2. The kill.
 			const int32_t team2_before = m->rules().match_state().kills[1];
 			shooter_fire = true;
@@ -905,6 +907,7 @@ TEST_SUITE("host-tdm-server") {
 			CHECK(team2_kill == team2_before + 1);
 			CHECK(m->rules().downed().size() == 1u);
 			CHECK(respawn_at == died + (victim_peer ? 300u : 480u)); // a bot next to a living assault teammate waits for the revive
+			const uint8_t kit_while_down = m->rules().kit_of(uint8_t(victim)); // a bot's next-life draw (kKeepKit for the peer)
 			// 3. The enemy medic's paddles on the corpse: refused.
 			const uint64_t refused1 = m->rules().stats().defib_refused;
 			enemy_fire = true;
@@ -945,6 +948,15 @@ TEST_SUITE("host-tdm-server") {
 			REQUIRE(m->row(medic.slot()) != nullptr);
 			CHECK(m->row(medic.slot())->score == medic_score + 100);
 			CHECK(m->rules().downed().empty());
+			// §3.6: the same kit and team (a bot's next-life draw made at its death is not used by a revive).
+			std::printf("E5 (%s victim): kit %u -> %u (next-life draw while down %u), team %u -> %u\n", victim_peer ? "peer" : "bot",
+					unsigned(kit_before), unsigned(m->server.gunplay()->kit(uint8_t(victim))), unsigned(kit_while_down), unsigned(team_before),
+					unsigned(m->server.gunplay()->team(uint8_t(victim))));
+			CHECK(m->server.gunplay()->kit(uint8_t(victim)) == kit_before);
+			CHECK(m->server.gunplay()->team(uint8_t(victim)) == team_before);
+			if (victim_bot != nullptr) {
+				CHECK(m->rules().kit_of(uint8_t(victim)) == kit_before);
+			}
 			if (victim_p != nullptr) {
 				REQUIRE(victim_p->spawned.size() == spawned_before + 1u);
 				const net::Spawned &sp = victim_p->spawned.back();

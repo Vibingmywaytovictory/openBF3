@@ -581,7 +581,9 @@ std::optional<uint32_t> TdmRules::respawn_tick(uint8_t p_slot, uint32_t p_death_
 	s.death_tick = p_death_tick;
 	s.earliest = p_death_tick + m.delay_ticks;
 	const lg::RoundPhase phase = m.natives ? m.natives->phase() : lg::RoundPhase::Restarting;
-	const bool revive = m.config.revive && m.gunplay->kits.defib_def != sim::weapons::kNoWeapon;
+	// A victim AutoTeam's balance moves at this death is not revivable: its old team's medic would raise it on the new team.
+	const bool moving = m.natives && m.natives->moves_at_death(p_slot);
+	const bool revive = m.config.revive && m.gunplay->kits.defib_def != sim::weapons::kNoWeapon && !moving;
 	if (phase == lg::RoundPhase::RoundOver || phase == lg::RoundPhase::Restarting || p_slot >= net::kMaxPlayerRows) {
 		s.revive_until = 0;
 		return std::nullopt;
@@ -651,6 +653,9 @@ void TdmRules::death(const net::DeathEvent &p_event) {
 	if (counting) {
 		s.deaths = uint16_t(std::min<uint32_t>(s.deaths + 1u, 0xFFFFu));
 	}
+	if (m.team_of(v) != vteam) {
+		s.revive_until = 0; // moved by AutoTeam's balance at this death (normally foreseen by respawn_tick): no man-down
+	}
 	s.alive = false;
 	s.team_at_death = vteam;
 	s.pending_spawn = false;
@@ -661,7 +666,7 @@ void TdmRules::death(const net::DeathEvent &p_event) {
 		s.corpse_yaw = m.last_states[v].yaw;
 	}
 	if (s.bot) {
-		s.kit = m.draw_kit(v, s.life + 1u); // the next life's kit (§3.2)
+		s.kit = m.draw_kit(v, s.life + 1u); // the next life's kit (§3.2); a revive restores row_kit (§3.6)
 	}
 	m.remove_downed(v);
 	if (s.revive_until > now && v < net::kMaxPlayerRows) {
@@ -960,7 +965,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				}
 				bool revivable = false;
 				for (const DownedSoldier &d : m.downed) {
-					revivable |= d.slot == i && d.team == team && d.until_tick >= p_tick;
+					revivable |= d.slot == i && d.team == team && d.team == m.team_of(i) && d.until_tick >= p_tick;
 				}
 				if (!revivable) {
 					refused = true;
@@ -975,7 +980,13 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				++(refused ? m.stats.defib_refused : m.stats.defib_misses);
 				continue;
 			}
-			const Impl::Slot &target = m.slots[size_t(best)];
+			Impl::Slot &target = m.slots[size_t(best)];
+			// §3.6: a revive is a new life with the same kit. A bot's next-life draw (made at its death) is replaced by the
+			// dead life's kit, which the GameServer's R7 reads (kit_of) when it carries the order out; the team is the
+			// victim's at death (checked above: d.team == team_of).
+			if (target.bot || target.deploy) {
+				target.kit = target.row_kit;
+			}
 			RulesOrder o;
 			o.kind = RulesOrder::Kind::Revive;
 			o.slot = uint8_t(best);

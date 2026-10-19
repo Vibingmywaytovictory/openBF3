@@ -616,6 +616,10 @@ uint32_t RoundNatives::balance_moves() const {
 	return state_->moves;
 }
 
+bool RoundNatives::moves_at_death(uint8_t p_slot) const {
+	return state_->balance_candidate == int(p_slot) && state_->entered[p_slot];
+}
+
 uint32_t RoundNatives::players() const {
 	return state_->player_count();
 }

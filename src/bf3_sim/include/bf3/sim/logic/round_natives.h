@@ -126,6 +126,7 @@ public:
 	std::span<const NativeTimelineEntry> timeline() const;
 	// M2b ru (as built).
 	uint32_t balance_moves() const; // AutoTeam moves applied (at the moved player's death)
+	bool moves_at_death(uint8_t p_slot) const; // AutoTeam's balance has picked this player: its next death moves it
 	uint32_t players() const; // players in the game with a team (PreRound's count)
 	const RoundNativeParams &params() const;
 
