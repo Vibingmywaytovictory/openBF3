@@ -24,6 +24,7 @@ inline constexpr uint8_t kKitCount = 4; // assault, engineer, support, recon
 inline constexpr uint8_t kKitTeams = 2; // teams 1 and 2 (index team - 1)
 inline constexpr std::array<uint8_t, 4> kKitSlots{ 0, 1, 6, 7 }; // the WeaponSlots M2a resolves
 inline constexpr uint8_t kNoTeamChange = 0; // KitSelect team 0: keep the current team
+inline constexpr uint8_t kKitGadgetSlot = 2; // M2b W1.0 (ru): the assault gadget slot (the defibrillator with TDM kits, #9)
 
 enum class KitRole : uint8_t { Assault = 0, Engineer = 1, Support = 2, Recon = 3 };
 const char *kit_role_name(KitRole p_role);
@@ -40,6 +41,9 @@ struct KitTable {
 	std::array<std::array<KitLoadout, kKitCount>, kKitTeams> loadouts{}; // [team - 1][kit]
 	std::vector<std::string> skipped; // "<kit>/<slot>: <unlock>" for the slots M2a leaves empty
 	uint64_t hash = 0; // kit_table_hash: MatchInfo::kit_hash
+	// M2b W1.0 (ru, #9): the def id of KitTableOptions::assault_gadget in assault slot kKitGadgetSlot (both teams),
+	// sim::weapons::kNoWeapon without the option. Hashed only when set, so an M2a table's hash is unchanged.
+	uint16_t defib_def = sim::weapons::kNoWeapon;
 
 	const KitLoadout &loadout(uint8_t p_team, uint8_t p_kit) const; // team 1..2, kit < kKitCount (clamped)
 };
@@ -49,6 +53,15 @@ struct KitTable {
 // does not list kKitCount kits, or a resolved slot's unlock has no def.
 core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs);
+// M2b W1.0 (docs/design/m2b.md §2.6 #9, §3.6, J1; owner ru): with a non-empty assault_gadget (the defibrillator
+// variant, weapons/gadgets/defibrillator/u_defib), the assault kit of both teams gets that def in slot kKitGadgetSlot
+// and KitTable::defib_def is set. Empty = M2a: the 3-argument make_kit_table calls this one with empty options and its
+// table, hash and callers are unchanged. kKitSlots is not changed.
+struct KitTableOptions {
+	std::string assault_gadget;
+};
+core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
+		std::span<const core::gameplay::WeaponDef> p_defs, const KitTableOptions &p_options);
 // FNV-1a 64 over every loadout (team, kit, def ids, active) in order: the client refuses another server's kits.
 uint64_t kit_table_hash(const KitTable &p_table);
 

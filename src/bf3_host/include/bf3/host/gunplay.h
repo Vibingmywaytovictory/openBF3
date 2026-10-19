@@ -110,6 +110,9 @@ struct GunplayConfig {
 	uint8_t player_kit = 0;
 	uint8_t player_team = 0;
 	std::shared_ptr<GunplayObserver> observer; // dev / tests
+	// M2b W1.0 (docs/design/m2b.md §2.6 #8, §3.6; owner ru): the defibrillator's def id (KitTable::defib_def), set by the
+	// loader when the TDM kits resolve it; sim::weapons::kNoWeapon = none. TdmRules tests interval_shots() for it.
+	uint16_t defib_def = sim::weapons::kNoWeapon;
 };
 
 struct GunplayStats {
@@ -144,6 +147,8 @@ public:
 	virtual void hit(const net::HitEvent &p_event) = 0;
 	virtual void death(const net::DeathEvent &p_event) = 0;
 	virtual void detonation(const net::DetonationWire &p_event) = 0;
+	// M2b W1.0 (docs/design/m2b.md §2.6 #7, §3.6; owner ru): a revive (TdmRules' defib test); empty by default.
+	virtual void revive(const net::ReviveEvent &p_event) { (void)p_event; }
 };
 
 // When a dead slot respawns (M2a: M1's fixed GameServerConfig::respawn_ticks; M2b: the S4 interpreter).
@@ -180,6 +185,14 @@ uint64_t derive_match_seed(uint64_t p_server_seed, uint64_t p_level_hash);
 // the retail clips (lc's builder). Read-only on the install; nothing is cached.
 core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id,
 		std::string_view p_mode);
+// M2b W1.0 (docs/design/m2b.md §2.6 #9; owner ru): the TDM kits. tdm_kits resolves KitTableOptions::assault_gadget
+// (the defibrillator) into the level's defs and fills assault slot kKitGadgetSlot ([kits], gunplay.cpp). The
+// 3-argument form stays (default options), so its callers and the M2a table are unchanged.
+struct GunplayLoadOptions {
+	bool tdm_kits = false;
+};
+core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id,
+		std::string_view p_mode, const GunplayLoadOptions &p_options);
 // The whole-table stand-in: every stance row at every pitch is wp's standin_target layout of that stance (local frame),
 // every transition row the lerp of its two stance rows by the fraction; every row tagged kStandIn.
 core::Result<core::gameplay::CapsulePoseTable> standin_capsule_table(const core::gameplay::SoldierDef &p_soldier,
