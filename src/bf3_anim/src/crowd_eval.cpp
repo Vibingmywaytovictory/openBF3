@@ -924,6 +924,16 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 
 	// 1. Locomotion of a steady stance, or the transition clip.
 	auto loco_blend = [&](const M2a::Stance &p_st, LocalPose &r_out) {
+		if (x.pt1) { // PT1 run [movegroup]: BF3's move group for stand and crouch (the PT1 run block)
+			CrowdPt1Stats ps; // PT1 run [movegroup]
+			if (crowd_pt1_pose(*x.pt1, p_i, size_t(&p_st - x.stances.data()), s.input, step, *p_st.idle, rig, s.phase, s.scratch, r_out, ps)) { // PT1 run [movegroup]
+				s.loco_clips = uint8_t(std::min<uint32_t>(ps.sampled, 255)); // PT1 run [movegroup]
+				s.two_cycle = ps.moving >= 2; // PT1 run [movegroup]
+				s.idle_mix = ps.idle_mix; // PT1 run [movegroup]
+				xs.moving = ps.moving >= 1; // PT1 run [movegroup]
+				return; // PT1 run [movegroup]
+			} // PT1 run [movegroup]
+		} // PT1 run [movegroup]
 		const float yaw = s.input.yaw;
 		const float cy = std::cos(yaw), sy = std::sin(yaw);
 		const Vec3 v = s.input.velocity;
