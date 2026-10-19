@@ -29,6 +29,12 @@
 #include <cstdio>
 #include <map>
 #include <mutex>
+#include <chrono> // PT1 snd [capture]
+#include "bf3/audio/wav_io.h" // PT1 snd [capture]
+#include "bf3/core/install.h" // PT1 snd [capture]
+#include <godot_cpp/variant/utility_functions.hpp> // PT1 snd [capture]
+#include <filesystem> // PT1 snd [capture]
+#include <fstream> // PT1 snd [capture]
 
 using namespace godot;
 namespace ba = bf3::audio;
@@ -52,13 +58,20 @@ public:
 		if (ba::MixTap *t = target_.load(std::memory_order_acquire)) {
 			t->on_block(p_interleaved_stereo, p_frames, p_first_frame);
 		}
+		if (ba::MixTap *t = pt1_capture_.load(std::memory_order_acquire)) { // PT1 snd [capture]
+			t->on_block(p_interleaved_stereo, p_frames, p_first_frame); // PT1 snd [capture]
+		} // PT1 snd [capture]
 	}
 	void set(ba::MixTap *p_tap) {
 		target_.store(p_tap, std::memory_order_release);
 	}
+	void pt1_set_capture(ba::MixTap *p_tap) { // PT1 snd [capture]
+		pt1_capture_.store(p_tap, std::memory_order_release); // PT1 snd [capture]
+	} // PT1 snd [capture]
 
 private:
 	std::atomic<ba::MixTap *> target_{ nullptr };
+	std::atomic<ba::MixTap *> pt1_capture_{ nullptr }; // PT1 snd [capture]: --audio-capture's recorder
 };
 
 ba::Vec3 vec(const fx::Vec3 &p_v) {
@@ -69,6 +82,14 @@ ba::Vec3 vec(const fx::Vec3 &p_v) {
 
 template <class Impl>
 ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m); // M2b au [a3] (defined in the M2b au block below)
+struct Pt1Capture; // PT1 snd [capture] (the PT1 snd block below)
+void pt1_delete_capture(Pt1Capture *p_capture); // PT1 snd [capture]
+template <class Impl>
+void pt1_capture_begin(Impl &r_m); // PT1 snd [capture]: build(), before the player starts
+template <class Impl>
+void pt1_capture_step(Impl &r_m); // PT1 snd [capture]: step()
+template <class Impl>
+void pt1_capture_end(Impl &r_m); // PT1 snd [capture]: shutdown(), after the audio thread left the mixer
 
 struct Bf3GameAudio::Impl {
 	// Load (loader thread), read-only afterwards.
@@ -102,6 +123,7 @@ struct Bf3GameAudio::Impl {
 	ba::ListenerState listener;
 	uint64_t auditions_started = 0;
 	int64_t lead_frames = 2 * int64_t(ba::kBlockFrames);
+	std::unique_ptr<Pt1Capture, void (*)(Pt1Capture *)> pt1{ nullptr, &pt1_delete_capture }; // PT1 snd [capture]
 };
 
 Bf3GameAudio::Bf3GameAudio() :
@@ -188,6 +210,7 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	m.player->set_bus("Master");
 	m.player->set_stream(m.stream);
 	p_parent->add_child(m.player);
+	pt1_capture_begin(m); // PT1 snd [capture]
 	m.player->play();
 	m.built = true;
 	return true;
@@ -251,6 +274,7 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 		m.impact_requests.push_back(r);
 	}
 	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds);
+	pt1_capture_step(m); // PT1 snd [capture]
 }
 
 bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error) {
@@ -363,7 +387,9 @@ void Bf3GameAudio::shutdown() {
 			ours->set_mixer(nullptr);
 		}
 		m.tap.set(nullptr);
+		m.tap.pt1_set_capture(nullptr); // PT1 snd [capture]
 		AudioServer::get_singleton()->unlock();
+		pt1_capture_end(m); // PT1 snd [capture]
 		if (Node *parent = m.player->get_parent()) {
 			parent->remove_child(m.player);
 		}
@@ -422,6 +448,162 @@ audio::MixerProfile game_audio_profile(const Bf3GameAudio &p_audio) {
 
 std::string game_audio_profile_text(const Bf3GameAudio &p_audio) {
 	return p_audio.mixer() != nullptr ? audio::format_mixer_profile(game_audio_profile(p_audio)) : std::string("audio A3: not built");
+}
+
+// PT1 snd (docs/design/pt1-snd.md): the audio health line and --audio-capture.
+//   Every game mixer prints one "[pt1] audio health:" line at shutdown: the voice cuts and their steps
+//   (mixer_core.h MixerCutStats), the abrupt gain ramps, the mix() call gaps of Godot's audio thread, the late blocks,
+//   the main thread's frame hitches (> 50 ms between two step() calls) and the audio thread's priority, so a
+//   playtest's godot.log says whether and why the sound glitched.
+//   --audio-capture=<dir> (user arg) also records the mix into <dir>/mix.wav (float, 48 kHz stereo, the first
+//   --audio-capture-seconds=S, default 150), every cut into <dir>/cuts.csv and every hitch into <dir>/hitches.csv.
+//   They are derived data (b\shots\pt1-snd\, never committed), written through the install's PathGuard.
+
+struct Pt1Capture {
+	std::filesystem::path dir; // empty: no capture, the health line only
+	std::unique_ptr<ba::WavRecorder> wav;
+	std::vector<ba::MixerCutEvent> events;
+	std::vector<std::pair<uint64_t, double>> hitches; // (mixer clock, ms since the previous step)
+	std::chrono::steady_clock::time_point last_step{};
+	bool have_step = false;
+	uint64_t hitch_count = 0, events_lost = 0;
+	double hitch_max_ms = 0.0;
+};
+
+void pt1_delete_capture(Pt1Capture *p_capture) {
+	delete p_capture;
+}
+
+namespace {
+
+constexpr double kPt1HitchMs = 50.0;
+constexpr size_t kPt1MaxEvents = size_t(1) << 20;
+
+void pt1_drain(ba::MixerCore &r_mixer, Pt1Capture &r_c) {
+	std::array<ba::MixerCutEvent, 256> batch;
+	for (;;) {
+		const size_t n = r_mixer.pt1_poll_cuts(batch);
+		for (size_t i = 0; i < n; ++i) {
+			if (r_c.events.size() < kPt1MaxEvents) {
+				r_c.events.push_back(batch[i]);
+			} else {
+				++r_c.events_lost;
+			}
+		}
+		if (n < batch.size()) {
+			return;
+		}
+	}
+}
+
+} // namespace
+
+template <class Impl>
+void pt1_capture_begin(Impl &r_m) {
+	r_m.pt1.reset(new Pt1Capture());
+	const std::string dir = user_arg_value("audio-capture");
+	if (dir.empty() || r_m.mixer == nullptr) {
+		return;
+	}
+	double seconds = 150.0;
+	if (const std::string s = user_arg_value("audio-capture-seconds"); !s.empty()) {
+		const double v = std::atof(s.c_str());
+		seconds = std::isfinite(v) ? std::clamp(v, 1.0, 1800.0) : seconds;
+	}
+	r_m.pt1->dir = std::filesystem::path(dir);
+	r_m.pt1->wav = std::make_unique<ba::WavRecorder>(ba::kMixRate, seconds);
+	r_m.pt1->events.reserve(size_t(1) << 16);
+	r_m.mixer->pt1_record_cuts(true);
+	r_m.tap.pt1_set_capture(r_m.pt1->wav.get()); // before the player starts
+}
+
+template <class Impl>
+void pt1_capture_step(Impl &r_m) {
+	Pt1Capture *c = r_m.pt1.get();
+	if (c == nullptr || r_m.mixer == nullptr) {
+		return;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	if (c->have_step) {
+		const double ms = std::chrono::duration<double, std::milli>(now - c->last_step).count();
+		if (ms > kPt1HitchMs) {
+			++c->hitch_count;
+			c->hitch_max_ms = std::max(c->hitch_max_ms, ms);
+			if (!c->dir.empty() && c->hitches.size() < kPt1MaxEvents) {
+				c->hitches.emplace_back(r_m.mixer->clock(), ms);
+			}
+		}
+	}
+	c->last_step = now;
+	c->have_step = true;
+	if (!c->dir.empty()) {
+		pt1_drain(*r_m.mixer, *c);
+	}
+}
+
+template <class Impl>
+void pt1_capture_end(Impl &r_m) {
+	Pt1Capture *c = r_m.pt1.get();
+	if (c == nullptr || r_m.mixer == nullptr) {
+		return;
+	}
+	const ba::MixerStats &ms = r_m.mixer->stats();
+	char line[400];
+	const int prio = pt1_audio_thread_priority();
+	std::snprintf(line, sizeof(line),
+			"; mixer: %llu blocks, %llu late, max block %.3f ms, max call gap %.1f ms, output latency %llu frames, audio thread priority %s%d; main "
+			"thread hitches > %.0f ms: %llu (max %.0f ms)",
+			(unsigned long long)ms.blocks.load(), (unsigned long long)ms.late_blocks.load(), double(ms.max_block_ns.load()) / 1e6,
+			double(ms.max_call_gap_ns.load()) / 1e6, (unsigned long long)(r_m.clock ? r_m.clock->output_latency_frames() : 0),
+			prio == kPt1NoPriority ? "unknown " : "", prio == kPt1NoPriority ? 0 : prio, kPt1HitchMs, (unsigned long long)c->hitch_count, c->hitch_max_ms);
+	UtilityFunctions::print(String::utf8(("[pt1] audio health: " + ba::format_mixer_cuts(r_m.mixer->pt1_cut_stats()) + line).c_str()));
+	if (c->dir.empty()) {
+		return;
+	}
+	pt1_drain(*r_m.mixer, *c);
+	const core::PathGuard guard = r_m.db != nullptr && r_m.db->install ? r_m.db->install->reader().write_guard() : core::PathGuard();
+	std::error_code ec;
+	std::filesystem::create_directories(c->dir, ec);
+	std::string result = "[pt1] audio capture " + c->dir.string() + ":";
+	if (const core::Status st = c->wav->save(guard, c->dir / "mix.wav"); st.ok()) {
+		char part[96];
+		std::snprintf(part, sizeof(part), " mix.wav %.1f s (%llu frames past the end dropped)", double(c->wav->samples().size()) / 2.0 / double(ba::kMixRate),
+				(unsigned long long)c->wav->dropped_frames());
+		result += part;
+	} else {
+		result += " mix.wav ERROR " + st.error().message;
+	}
+	const auto write_text = [&](const char *p_name, const std::string &p_text) {
+		const std::filesystem::path path = c->dir / p_name;
+		if (!guard.allows_write(path)) {
+			result += std::string(" ") + p_name + " refused by the path guard";
+			return;
+		}
+		std::ofstream f(path, std::ios::binary | std::ios::trunc);
+		f << p_text;
+		result += std::string(" ") + p_name + (f.good() ? "" : " (write failed)");
+	};
+	std::string csv = "frame,time_s,kind,handle,step,loudness_db,distance_m,program\n";
+	for (const ba::MixerCutEvent &e : c->events) {
+		char row[160];
+		std::snprintf(row, sizeof(row), "%llu,%.5f,%s,%u,%.6g,%.2f,%.2f,", (unsigned long long)e.frame, double(e.frame) / double(ba::kMixRate),
+				ba::mixer_cut_kind_name(e.kind), unsigned(e.handle), double(e.step), double(e.loudness_db), double(e.distance_m));
+		csv += row;
+		csv += e.program;
+		csv += '\n';
+	}
+	write_text("cuts.csv", csv);
+	std::string hitches = "frame,time_s,gap_ms\n";
+	for (const auto &h : c->hitches) {
+		char row[96];
+		std::snprintf(row, sizeof(row), "%llu,%.5f,%.2f\n", (unsigned long long)h.first, double(h.first) / double(ba::kMixRate), h.second);
+		hitches += row;
+	}
+	write_text("hitches.csv", hitches);
+	char tail[96];
+	std::snprintf(tail, sizeof(tail), "; %zu cuts (%llu lost), %zu hitches", c->events.size(), (unsigned long long)c->events_lost, c->hitches.size());
+	result += tail;
+	UtilityFunctions::print(String::utf8(result.c_str()));
 }
 
 } // namespace bf3::godot_side

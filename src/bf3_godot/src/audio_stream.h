@@ -65,4 +65,9 @@ private:
 	std::shared_ptr<bf3::audio::MixerCore> mixer_;
 };
 
+// PT1 snd (docs/design/pt1-snd.md): the Win32 priority of the thread Godot calls _mix on (GetThreadPriority, read once
+// at the first _mix), for the audio health line; kPt1NoPriority before the first call or off Windows.
+inline constexpr int kPt1NoPriority = -1000;
+int pt1_audio_thread_priority();
+
 } // namespace bf3::godot_side
