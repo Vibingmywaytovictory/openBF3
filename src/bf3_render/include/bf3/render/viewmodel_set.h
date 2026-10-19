@@ -277,6 +277,7 @@ struct ViewmodelKit {
 	std::string team; // "US" (team 1) / "RU" (team 2)
 	std::string kit; // gameplay/kits/usassault ...
 	std::array<std::string, 4> unlocks; // slots 0, 1, 6, 7
+	std::string gadget; // M2b cam [defib]: slot 2 (bf3_host kKitGadgetSlot); "" = none (M2a; add_assault_gadget below)
 };
 inline constexpr std::string_view kViewmodelKitsMode = "TeamDeathMatch0"; // §5.6: the Metro TDM loadouts
 inline constexpr size_t kViewmodelKitsPerTeam = 4; // assault, engineer, support, recon
@@ -293,5 +294,20 @@ std::span<const ViewmodelKit> documented_viewmodel_kits();
 std::string viewmodel_kits_difference(std::span<const ViewmodelKit> p_data, std::span<const ViewmodelKit> p_documented);
 // The set of one team (1 = US, 2 = RU): every distinct item of its kits in p_kits, with the team's arms.
 ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_team);
+
+} // namespace bf3::render
+
+// ---- M2b cam (docs/design/m2b.md §4; as built: docs/design/m2b-cam.md) ----------------------------------------------
+namespace bf3::render {
+
+// The defibrillator in hand: with the TDM kit table (bf3_host make_kit_table with KitTableOptions::assault_gadget, i.e.
+// SharedLoadOptions::tdm) the assault kits carry p_unlock (host::kTdmAssaultGadget) in slot 2. This sets it as the
+// assault kits' ViewmodelKit::gadget (a kit whose name's last component ends in "assault": usassault, ruassault), so
+// team_viewmodel_set adds it as one more item and the def -> item map of the kit table finds it. Call it on
+// read_viewmodel_kits' result before team_viewmodel_set, only for a TDM load (M2a's item set is unchanged). Returns the
+// kits that got it. The defib's 1p mesh resolves like the kit weapons' [verified 2026-10-19: bf3dump vm skin
+// weapons/gadgets/defibrillator/u_defib, mesh defibrillator_1p_mesh, Deploy and IdlePose clips, the Fire curve not
+// decoded (a stand-in), 0 stretched surfaces, install unchanged].
+size_t add_assault_gadget(std::span<ViewmodelKit> r_kits, std::string_view p_unlock);
 
 } // namespace bf3::render

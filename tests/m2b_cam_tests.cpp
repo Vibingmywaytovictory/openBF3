@@ -2,16 +2,20 @@
 // m2b.contract2 case (which checks the turn to the killer, the end and a NaN corpse): without a killer or with the killer
 // camera off it stays on the corpse; the view starts at the 1p eye and is continuous; a killer that is no longer drawn
 // keeps the last position; a non-finite killer or clock is counted (the clock ends the view); hostile params fall back
-// to the named defaults; a wall behind the corpse pulls the camera in (a synthetic static world). Compiled into
+// to the named defaults; a wall behind the corpse pulls the camera in (a synthetic static world); the defibrillator joins
+// the assault kits' viewmodel item set only through render::add_assault_gadget (M2b cam [defib]). Compiled into
 // test_m2b_contract2 (death_camera.cpp is linked there), functional, parallel-safe, no install, no Godot.
 
 #include <doctest/doctest.h>
 
 #include "death_camera.h"
 
+#include "bf3/host/kits.h"
+#include "bf3/render/viewmodel_set.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -192,5 +196,34 @@ TEST_SUITE("m2b-cam-unit") {
 		gs::Bf3DeathCamera open;
 		open.begin(start_at_origin(0xFF), 0.0);
 		CHECK(open.step(2.0, nullptr, nullptr).camera.trans.z == doctest::Approx(-p.back_m).epsilon(1e-3));
+	}
+}
+
+TEST_SUITE("m2b-cam-unit") {
+	TEST_CASE("defib viewmodel: add_assault_gadget puts slot 2 into the assault kits' item set, M2a's set unchanged") {
+		const std::span<const bf3::render::ViewmodelKit> documented = bf3::render::documented_viewmodel_kits();
+		std::vector<bf3::render::ViewmodelKit> kits(documented.begin(), documented.end());
+		REQUIRE(kits.size() == 8);
+		const auto has = [](const bf3::render::ViewmodelSetSpec &p_spec, std::string_view p_unlock) {
+			return std::count_if(p_spec.items.begin(), p_spec.items.end(), [&](const bf3::render::ViewmodelItemSpec &p_i) { return p_i.unlock == p_unlock; });
+		};
+		const std::string defib(bf3::host::kTdmAssaultGadget);
+		const bf3::render::ViewmodelSetSpec us_m2a = bf3::render::team_viewmodel_set(kits, 1);
+		const bf3::render::ViewmodelSetSpec ru_m2a = bf3::render::team_viewmodel_set(kits, 2);
+		CHECK(has(us_m2a, defib) == 0);
+		CHECK(us_m2a.items.size() == 7); // 4 primaries, the sidearm, M67, knife
+		CHECK(bf3::render::add_assault_gadget(kits, "") == 0);
+		CHECK(bf3::render::add_assault_gadget(kits, defib) == 2); // usassault, ruassault
+		for (const bf3::render::ViewmodelKit &k : kits) {
+			CHECK((k.gadget == defib) == (k.kit.find("assault") != std::string::npos));
+		}
+		const bf3::render::ViewmodelSetSpec us = bf3::render::team_viewmodel_set(kits, 1);
+		const bf3::render::ViewmodelSetSpec ru = bf3::render::team_viewmodel_set(kits, 2);
+		CHECK(has(us, defib) == 1);
+		CHECK(has(ru, defib) == 1);
+		CHECK(us.items.size() == us_m2a.items.size() + 1);
+		CHECK(ru.items.size() == ru_m2a.items.size() + 1);
+		CHECK(us.items[4].unlock == defib); // after the assault kit's four slots
+		CHECK(bf3::render::viewmodel_kits_difference(kits, documented).empty()); // the four slots are untouched
 	}
 }
