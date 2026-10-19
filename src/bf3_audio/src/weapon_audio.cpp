@@ -914,6 +914,7 @@ struct WeaponAudioRouter::Impl {
 					break;
 			}
 		}
+		foley_own_state(r_clock); // PT1 rld [own weapons]: zoom and dry fire from the presented own weapons
 		// The own burst ends when the trigger is up, or when the predicted clock passed the next round's time.
 		if (own.held != kNoInstance) {
 			Voice *v = voice(own.held);
@@ -1534,6 +1535,14 @@ void WeaponAudioRouter::set_observer(WeaponAudioObserver *p_observer) {
 
 const WeaponAudioStats &WeaponAudioRouter::stats() const {
 	return impl_->stats;
+}
+
+// PT1 rld [own weapons] (docs/design/pt1-rld.md)
+void WeaponAudioRouter::set_own_weapons(const host::PresentationFrame *p_frame) {
+	impl_->own_weapons_valid = p_frame != nullptr && p_frame->own_weapons_valid;
+	if (impl_->own_weapons_valid) {
+		impl_->own_weapons = p_frame->own_weapons_curr;
+	}
 }
 
 } // namespace bf3::audio

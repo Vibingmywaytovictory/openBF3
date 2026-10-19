@@ -34,6 +34,7 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 		r_router.set_others_newest(std::span<const host::PresentedOtherWeapon>(newest_.data(), n),
 				sw::SimTime(p_in.frame->newest_tick + 1) * sw::kTimeUnitsPerTick);
 	}
+	r_router.set_own_weapons(p_in.frame); // PT1 rld [own weapons]: the reload's magazine, the zoom, dry fire
 	r_router.on_events(p_in.events, r_clock);
 	r_router.on_others(p_in.others, p_in.other_weapons, p_in.muzzles, r_clock);
 	if (r_impacts != nullptr) {

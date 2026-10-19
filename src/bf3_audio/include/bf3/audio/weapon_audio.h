@@ -317,6 +317,10 @@ public:
 	void set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon);
 	// The active camera; re-sends every live instance's emitter.
 	void set_listener(const ListenerState &p_listener);
+	// PT1 rld [own weapons], before on_events each frame: the presented own weapons (PresentationFrame's
+	// own_weapons_curr when own_weapons_valid, else nothing): the magazine a reload starts with (empty or tactical), the
+	// zoom flag and the dry-fire tick flag. Null: unknown (a reload then plays the data's default, the long one).
+	void set_own_weapons(const host::PresentationFrame *p_frame);
 	// The drained events of this frame, oldest first (the ring's order): OwnShot, OwnTimed, RemoteShot, Detonation,
 	// Death (a dead shooter's burst ends), Spawn (a new life resets the slot's driver).
 	void on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock);
