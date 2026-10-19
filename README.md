@@ -2744,3 +2744,48 @@ loads in 5.4 s cold / 4.4 s warm, and the install is unchanged. The gate fixed t
 E2's client half got its own case). Row by row, the playable check and what is left to judge by eye and ear:
 [docs/design/m2a-gate.md](docs/design/m2a-gate.md). **Play it:** `tools\play.cmd` (Metro TDM, assault kit on US,
 24 firefight bots; `--bots=N` up to 32, `--kit=K`, `--team=T`, `--respawn=S`).
+
+## M2b wave 1 contract (W1.0)
+
+<!-- # M2b W1.0 -->
+These are the integrator's contract commits for M2b wave 1, on branch `m2b/w1` from `main` 36eb5af. Design:
+[docs/design/m2b.md](docs/design/m2b.md) §2.6 and §11. As-built notes, and where the code was followed over the
+design: [docs/design/m2b-w1.md](docs/design/m2b-w1.md).
+
+* **Interfaces.** The commits declare §2.6 #1-#15 and #19-#22, for the tracks nt, ru, bb and au:
+  - protocol v3 (`MatchState`, `PlayerList`, `SpawnRequest`, `ReviveEvent` and the new fields);
+  - the client frame's match fields and `send_spawn_request`;
+  - `PresentKind::Revive`;
+  - `NativePortMeaning` 16-29;
+  - the motor's immunity-abort fields;
+  - `round_natives.h` and the scored spawn choice;
+  - `perception.h` and `aim_model.h`;
+  - ServerView's `downed`, `phase`, `input_restricted` and `kit`, with default bodies;
+  - the kit and gunplay options;
+  - `SharedLevel::logic` and `SharedLoadOptions::tdm`;
+  - `tdm_rules.h` and `tdm_brain.h`;
+  - GameServer's `[cfg]`, `[tdm bots]` and `[sv]`;
+  - the A3 audio headers and MixerCore fields;
+  - `tests/tdm_fixture.h`.
+* **Stubs.** The tracks write the bodies. Until nt lands, the six v3 codecs are stubs: encoders return an empty
+  vector, and decoders return the error "v3 codec: nt". `add_tdm_bots` refuses a config with bots until bb lands.
+  Every stub line is marked `// M2b W1.0 stub`. `net::restrict_command`, the pre-round freeze both ends apply, is
+  written in full.
+* **Q8.** `godot.m2a`, `godot.m2a.kits` and `godot.m2a.play` carry the label `retired`, and the `dev-window` preset
+  excludes it. They stay runnable by name: `ctest --test-dir b\dev -R "^godot\.m2a$"`.
+* **Test.** `ctest --test-dir b\dev -R "^m2b\.contract$"` compiles every wave-1 header together. It pins:
+  - the shapes (`PlayerRow` 32 B, `PresentEvent` 64 B);
+  - the enum values;
+  - the defaults of every new field;
+  - the `restrict_command` rows;
+  - the M2a hashes (`motor_params_hash` default `0x346282435cd97947`, `kit_table_hash` default `0xa23fb7a00909ad6d`).
+
+  It also runs the stubs and GameServer::init with the hooks. A row that needs a track prints `PENDING (<key>)` until
+  that track sets its switch.
+
+Measured 2026-10-19, head of `m2b/w1`:
+
+* **`tools\build.cmd dev`:** 138 rows, 136 passed and 2 skipped (`core.cache_data`, `core.res`, as before), with
+  193.7 s of ctest wall time and exit 0. There were no budget violations, only the existing warnings.
+* **`m2b.contract`:** 5 cases and 97 assertions, 0.02 s.
+* **`ctest --preset dev-window -N`:** 13 rows, with the three retired rows excluded.

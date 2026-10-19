@@ -160,3 +160,10 @@ failed `split_cover` row as violations; the other budgets warn.
 * The merge workflow runs the merge pass only through `tools\build.cmd dev --phase ...` (or `--timing`), never as
   `ctest --preset dev -R <regex>`: the `dev` preset excludes the timing, realtime and window rows, so such a call
   selects almost none of them and still passes.
+
+# M2b W1.0
+
+`retired` (docs/design/m2b.md §13 Q8) is an extra label, not a scheduling label. A row that carries it keeps its
+scheduling label, and the `dev-window` preset's filter excludes it, so no merge pass runs it. It stays runnable by
+name through the build directory, e.g. `ctest --test-dir b\dev -R "^godot\.m2a$"`. Since W1.0 it is on `godot.m2a`
+(391 s) and `godot.m2a.kits` (159 s), which are both over the 120 s window budget, and on `godot.m2a.play`.
