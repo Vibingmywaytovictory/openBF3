@@ -63,6 +63,11 @@ public:
 	// one thread before load(); load() then only adds the kit items' 3p weapons. Optional: load() runs it when not done.
 	core::Status load_body(const core::InstallReader &p_reader, core::Cache *p_cache, const std::atomic<bool> *p_stop);
 	bool loaded() const;
+	// M2b W2.0 (docs/design/m2b.md §2.6 #17, §4; cam): before build(), the seconds a corpse stays drawn
+	// (anim::CrowdStanceSet::corpse_seconds; anim::kCrowdCorpseSeconds in the M2b scene, M2a's 3 s when never called).
+	// step() takes the revives from M2aFrame::events (PresentKind::Revive, aux = the revived slot) and sets
+	// CrowdSoldierInput::revived for that slot's next life.
+	void set_corpse_seconds(float p_seconds); // M2b W2.0 (cam)
 	bool build(godot::Node3D *p_parent, std::string *r_error);
 	bool built() const;
 	void step(const M2aFrame &p_frame);

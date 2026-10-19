@@ -85,6 +85,10 @@ struct CrowdSoldierInput {
 	uint8_t fire_seq = 0; // changes once per shot (or per burst seq change): the upper-body fire kick
 	bool ads = false;
 	bool dead = false; // blend to prone over 0.5 s, hidden after 3 s (m2a.md §16 Q13)
+	// M2b W2.0 (docs/design/m2b.md §2.6 #17, §4; cam): this life began as a revive (PresentKind::Revive, Spawned::revived).
+	// When dead falls to false with revived set, the soldier stands up from its corpse pose at the same place over
+	// kCrowdReviveBlendSeconds instead of restarting alive at once. Default false: M2a and S3 unchanged.
+	bool revived = false; // M2b W2.0 (cam)
 };
 
 struct CrowdConfig {
@@ -289,6 +293,9 @@ struct CrowdStanceSet {
 	const ServerPoseClips *pose = nullptr; // lc's stance idles, aims and transitions (null: every stance drawn standing, counted)
 	const CrowdMoveClips *moves = nullptr; // tp's moves, crouch fire and deaths (null: stand cycles, kicks, BlendToProne)
 	CrowdDeathStyle death = kCrowdDeathDefault;
+	// M2b W2.0 (docs/design/m2b.md §2.6 #17, §4; cam): seconds a corpse is drawn after `dead` rose (the hide above).
+	// The default keeps M2a's kCrowdDeathHideSeconds; the M2b scene sets kCrowdCorpseSeconds (or SoldierDef::time_for_corpse).
+	float corpse_seconds = kCrowdDeathHideSeconds; // M2b W2.0 (cam)
 };
 
 struct CrowdM2aStats {
@@ -308,5 +315,18 @@ struct CrowdM2aStats {
 	uint64_t deaths = 0; // dead rose
 	uint64_t death_hidden = 0; // soldiers hidden after kCrowdDeathHideSeconds (counted once per death)
 };
+
+} // namespace bf3::anim
+
+// ---- M2b W2.0 (docs/design/m2b.md §2.6 #17, §4; owner cam; contract: docs/design/m2b-w2.md) -----------------------
+// The 3p corpse and the revive stand-up. kCrowdDeathHideSeconds (3 s) stays M2a's; the M2b scene keeps a corpse for
+// kCrowdCorpseSeconds through CrowdStanceSet::corpse_seconds (cam's named replacement [corpse] at crowd_eval.cpp's
+// hide test reads it). A revive (CrowdSoldierInput::revived) blends the corpse pose back to the alive stand over
+// kCrowdReviveBlendSeconds (cam's [revive] insertion), at the same place. Ragdolls are out of M2b (§12 J3).
+
+namespace bf3::anim {
+
+inline constexpr float kCrowdCorpseSeconds = 15.0f; // SoldierDef::time_for_corpse on Metro (m2b.md §4) [named default]
+inline constexpr float kCrowdReviveBlendSeconds = 0.5f; // prone -> stand (m2b.md §4) [inferred]
 
 } // namespace bf3::anim
