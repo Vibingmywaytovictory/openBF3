@@ -579,8 +579,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					if (ps.output != UINT32_MAX) {
 						const OutputState &o = st.outputs[ps.output];
 						if (st.hdr.active && p.outputs[ps.output].enable_hdr) { // M2b au R5
-							const float over = std::max(0.0f, p.loudness_db + o.curve_gain_db + o.cone_db - (st.hdr.top_db + st.hdr.overshoot_db)); // M2b au R5
-							target = st.hdr.suspended ? 0.0f : db_to_gain(o.curve_gain_db + o.cone_db + hdr_window_db - over); // M2b au R5
+							target = st.hdr_send_gain(o, hdr_window_db); // PT1 rld [bypass headroom]: replaces the R5 over / target lines (moved into it)
 						} else { // M2b au R5
 							target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
 						} // M2b au R5
@@ -957,8 +956,7 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 			if (r_ps.output != UINT32_MAX) {
 				const OutputState &o = outputs[r_ps.output];
 				if (hdr.active && p.outputs[r_ps.output].enable_hdr) {
-					const float over = std::max(0.0f, p.loudness_db + o.curve_gain_db + o.cone_db - (hdr.top_db + hdr.overshoot_db));
-					target = hdr.suspended ? 0.0f : db_to_gain(o.curve_gain_db + o.cone_db + p_hdr_window_db - over);
+					target = hdr_send_gain(o, p_hdr_window_db); // PT1 rld [bypass headroom]: replaces the over / target lines (moved into it)
 				} else {
 					target = db_to_gain(o.curve_gain_db + o.cone_db + p_window_db);
 				}
@@ -1026,6 +1024,28 @@ void PatchInstance::set_loudness_outputs(std::span<const uint16_t> p_outputs) {
 
 void PatchInstance::skip_stop_event() { // PT1 rld [no stop]
 	state_->stop_seen = true;
+}
+
+// PT1 rld [bypass headroom] (docs/design/pt1-rld.md "BypassHeadroom"): the send gain of an EnableHdr output under the
+// mixer's window (p_hdr_window_db = Loudness - top - Headroom + master). An output whose BypassHeadroom port is on
+// (on every output of the kit firearms, driven by IsFirstPerson: the own 1p sounds) is never lowered below the window
+// top its instance would set alone, max(WindowMinTop, the instance's cull loudness), which the mixer passes as
+// alone_top_db: louder sounds (the own burst's reflections tail, another soldier's shot) do not duck it, and it is
+// not suspended. The own gunshot sets the top itself, so it is unchanged; the own reload (79.5 dB) plays at the
+// 80 dB window it has alone. What BF3 does with the port is not known: a named default, measured = false. With the
+// port off this is M2b au R5's gain unchanged.
+float PatchInstance::State::hdr_send_gain(const detail::OutputState &p_o, float p_hdr_window_db) const {
+	const ca::SoundProgram &p = *program;
+	const float level = p.loudness_db + p_o.curve_gain_db + p_o.cone_db;
+	float top = hdr.top_db;
+	if (p_o.bypass_headroom && std::isfinite(hdr.alone_top_db)) {
+		top = std::min(hdr.top_db, hdr.alone_top_db);
+	} else if (hdr.suspended) {
+		return 0.0f;
+	}
+	const float window_db = p_hdr_window_db + (hdr.top_db - top);
+	const float over = std::max(0.0f, level - (top + hdr.overshoot_db));
+	return db_to_gain(p_o.curve_gain_db + p_o.cone_db + window_db - over);
 }
 
 } // namespace bf3::audio

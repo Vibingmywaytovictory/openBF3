@@ -473,6 +473,10 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 			}
 		}
 		outputs[o].cone_db = cone;
+		// PT1 rld [bypass headroom]: port 0 of the Cone, Flat and Direct outputs (the weapons' Handling: IsFirstPerson).
+		static_assert(cp::ConeBypassHeadroom == 0); // PT1 rld [bypass headroom]
+		outputs[o].bypass_headroom = out.node < p.nodes.size() && p.nodes[out.node].ports_count > 0 && p.nodes[out.node].ports_begin < p.ports.size() && // PT1 rld [bypass headroom]
+				read(port(p.nodes[out.node], 0)) > 0.5f; // PT1 rld [bypass headroom]
 	}
 }
 

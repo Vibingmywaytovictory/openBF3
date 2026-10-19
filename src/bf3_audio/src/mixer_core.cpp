@@ -577,6 +577,7 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 			w.top_db = window.top_db();
 			w.headroom_db = h.headroom_db;
 			w.overshoot_db = h.allowed_overshoot_db;
+			w.alone_top_db = std::max(h.window_min_top_db, cull_voices[k].loudness_db); // PT1 rld [bypass headroom]
 			w.suspended = w.active && window.suspended(cull_voices[k].loudness_db);
 			suspended += w.suspended ? 1 : 0;
 			s.instance->set_hdr_window(w);

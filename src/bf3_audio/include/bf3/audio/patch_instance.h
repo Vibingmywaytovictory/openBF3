@@ -53,6 +53,7 @@
 #include "bf3/core/result.h"
 
 #include <cstdint>
+#include <limits> // PT1 rld [bypass headroom]
 #include <memory>
 #include <optional>
 #include <span>
@@ -159,6 +160,9 @@ struct HdrVoiceWindow { // M2b au [a3]
 	float top_db = 0.0f;
 	float headroom_db = 0.0f;
 	float overshoot_db = 0.0f; // AllowedOvershoot: an output louder than top + this sounds at top + this
+	// PT1 rld [bypass headroom]: the top this instance would set alone, max(WindowMinTop, its cull loudness); the
+	// BypassHeadroom outputs are never lowered below it (unset: no bypass).
+	float alone_top_db = std::numeric_limits<float>::infinity(); // PT1 rld [bypass headroom]
 };
 // M2b au [a3]: what the voice cull reads of an instance (voice_cull.h): the loudness at the listener = the patch's
 // Loudness + the loudest output's distance curve at the current geometry + Gain + its last cone attenuation, over the
