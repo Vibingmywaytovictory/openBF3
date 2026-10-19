@@ -54,7 +54,9 @@ function(run_phase p_phase r_rc r_ran r_hard)
 	set(junit "${BDIR}/ctest-${PRESET}-${p_phase}.xml")
 	file(REMOVE "${junit}")
 	message("timing_pass: phase ${p_phase}: ctest --preset ${PRESET}-${p_phase}")
-	execute_process(COMMAND "${_ctest}" --preset ${PRESET}-${p_phase} --output-junit "${junit}" ${ARGN}
+	# integ/m2b-w2 [passed output]: keep a passed row's whole output (ctest cuts it to 1,024 bytes by default), so the
+	# junit file holds the gate numbers the merge pass measured.
+	execute_process(COMMAND "${_ctest}" --preset ${PRESET}-${p_phase} --output-junit "${junit}" --test-output-size-passed 1048576 ${ARGN}
 		WORKING_DIRECTORY "${_root}" RESULT_VARIABLE rc)
 	if(EXISTS "${junit}")
 		execute_process(COMMAND "${CMAKE_COMMAND}" "-DJUNIT=${junit}" "-DTESTDIR=${BDIR}" -DSTRICT=${STRICT}
