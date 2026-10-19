@@ -211,6 +211,9 @@ public:
 	// Stop for one live one-shot (an effect's SoundStop): its stop event, then it returns when silent.
 	bool stop(MixerCore &r_mixer, InstanceHandle p_handle);
 	uint64_t forgotten() const; // aged out without a finished feedback
+	// PT1 rld [follow] (docs/design/pt1-rld.md): moves one live one-shot (SetEmitter now, and resend_emitters keeps the
+	// new emitter). False: not live, or the ring was full (the stored emitter is updated either way).
+	bool set_emitter(MixerCore &r_mixer, InstanceHandle p_handle, const EmitterState &p_emitter);
 
 private:
 	struct Entry {

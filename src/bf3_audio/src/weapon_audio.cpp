@@ -1210,6 +1210,10 @@ struct WeaponAudioRouter::Impl {
 		bool ads = false;
 		InstanceHandle reload = kNoInstance; // the running reload one-shot (for its release)
 		uint16_t reload_def = sw::kNoWeapon;
+		// PT1 rld [follow]: the soldier's foley one-shots still playing, moved with him (a 2.9 s reload at 3 m/s is 9 m).
+		std::array<InstanceHandle, 4> live = { kNoInstance, kNoInstance, kNoInstance, kNoInstance };
+		uint8_t next_live = 0;
+		EmitterState at; // the emitter last sent to them
 	};
 	std::array<OtherFoley, 256> other_foley{};
 	InstanceHandle own_reload = kNoInstance;
@@ -1256,6 +1260,17 @@ struct WeaponAudioRouter::Impl {
 		const InstanceHandle h = pool.last_handle();
 		if (p_cue.own && p_cue.first_person) {
 			own_foley.push_back(h);
+		} else if (!p_cue.own && p_cue.slot < other_foley.size()) { // PT1 rld [follow]
+			OtherFoley &of = other_foley[p_cue.slot];
+			size_t k = of.live.size();
+			for (size_t i = 0; i < of.live.size() && k == of.live.size(); ++i) {
+				k = of.live[i] == kNoInstance || !pool.contains(of.live[i]) ? i : k;
+			}
+			if (k == of.live.size()) {
+				k = of.next_live++ % of.live.size(); // all four still playing: the oldest slot in turn
+			}
+			of.live[k] = h;
+			of.at = p_emitter;
 		}
 		return h;
 	}
@@ -1415,6 +1430,17 @@ struct WeaponAudioRouter::Impl {
 	// reload cut short) and ads (zoom). Called once per drawn soldier with a weapon record, before the bursts' use of it.
 	void foley_other(const host::PresentedSoldier &p_s, const host::PresentedOtherWeapon &p_w, const Track &p_t, SimMixerClock &r_clock) {
 		OtherFoley &o = other_foley[p_s.slot];
+		// PT1 rld [follow]: the running foley one-shots move to the soldier's muzzle of this frame.
+		if (!same_emitter(o.at, p_t.emitter)) {
+			for (InstanceHandle &h : o.live) {
+				if (h != kNoInstance && !pool.contains(h)) {
+					h = kNoInstance;
+				} else if (h != kNoInstance && pool.set_emitter(mixer, h, p_t.emitter)) {
+					++stats.emitter_updates;
+				}
+			}
+			o.at = p_t.emitter;
+		}
 		const bool same_life = o.seen && o.generation == p_s.generation && p_t.weapon_seen;
 		const sw::SimTime when = sw::SimTime(p_w.sample_tick) * sw::kTimeUnitsPerTick;
 		FoleyCue c;
@@ -1472,7 +1498,7 @@ struct WeaponAudioRouter::Impl {
 			if (!pool.contains(own_foley[i])) {
 				continue;
 			}
-			if (own_first_person && mixer.push(emitter_command(own_foley[i], own_foley_emitter()))) {
+			if (own_first_person && pool.set_emitter(mixer, own_foley[i], own_foley_emitter())) { // PT1 rld [follow]: the pool keeps it too
 				++stats.emitter_updates;
 			}
 			own_foley[keep++] = own_foley[i];
@@ -1540,6 +1566,17 @@ void WeaponAudioRouter::set_observer(WeaponAudioObserver *p_observer) {
 
 const WeaponAudioStats &WeaponAudioRouter::stats() const {
 	return impl_->stats;
+}
+
+// PT1 rld [follow] (docs/design/pt1-rld.md)
+bool OneShotPool::set_emitter(MixerCore &r_mixer, InstanceHandle p_handle, const EmitterState &p_emitter) {
+	for (Entry &e : live_) {
+		if (e.handle == p_handle) {
+			e.emitter = p_emitter;
+			return r_mixer.push(emitter_command(p_handle, p_emitter));
+		}
+	}
+	return false;
 }
 
 // PT1 rld [own weapons] (docs/design/pt1-rld.md)
