@@ -36,6 +36,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -151,6 +152,7 @@ struct Rig {
 	ba::ListenerState listener;
 	std::vector<float> top_db; // the window top after each display frame
 	uint64_t frame_index = 0;
+	const host::PresentationFrame *own_frame = nullptr; // the presented own weapons (null: unknown)
 
 	explicit Rig(const FoleyFixture &p_f) {
 		ba::MixerConfig mc;
@@ -183,6 +185,7 @@ struct Rig {
 		clock->set_now(c);
 		router->set_own_trigger(p_trigger);
 		router->set_listener(listener);
+		router->set_own_weapons(own_frame); // as GameAudioDriver::step
 		router->on_events(p_events, *clock);
 		router->on_others(p_others, p_weapons, {}, *clock);
 		router->update(c.now_ns);
@@ -230,6 +233,99 @@ host::PresentEvent own_shot(uint16_t p_def, uint32_t p_id, double p_seconds) {
 	e.id = p_id;
 	e.time = at(p_seconds);
 	return e;
+}
+
+// Every foley cue the router posts, each one-shot's sampler trace attached before its Start (the trace outlives the
+// instance: the deque never moves its elements).
+struct FoleyRecorder final : ba::WeaponAudioObserver {
+	struct Cue {
+		ba::FoleyCue cue;
+		ba::SamplerTrace *trace = nullptr;
+	};
+	std::vector<Cue> cues;
+	std::deque<ba::SamplerTrace> traces;
+	void on_driver_instance(uint8_t, uint64_t, uint64_t, ba::PatchInstance &) override {}
+	void on_trigger_up(uint8_t, uint64_t, uint64_t) override {}
+	void on_foley(const ba::FoleyCue &p_cue, ba::PatchInstance *r_instance) override {
+		Cue c;
+		c.cue = p_cue;
+		if (r_instance != nullptr) {
+			traces.emplace_back();
+			traces.back().entries.resize(256);
+			r_instance->set_sampler_trace(&traces.back());
+			c.trace = &traces.back();
+		}
+		cues.push_back(c);
+	}
+};
+
+// What one cue's instance played: the first Trigger's wave and frame, and the frame its slot went idle.
+struct Played {
+	bool triggered = false;
+	std::string wave;
+	uint64_t start = 0;
+	uint64_t end = 0; // the frame the first Trigger's slot went idle
+	uint32_t node = 0;
+	uint8_t slot = 0;
+	uint32_t others = 0;
+	std::string other_waves;
+};
+
+Played played(const FoleyFixture &p_f, const FoleyRecorder::Cue &p_c) {
+	Played p;
+	if (p_c.trace == nullptr) {
+		return p;
+	}
+	for (uint32_t i = 0; i < p_c.trace->count && i < p_c.trace->entries.size(); ++i) {
+		const ba::SamplerTraceEntry &e = p_c.trace->entries[i];
+		if (e.kind == ba::SamplerTraceKind::Trigger && !p.triggered) {
+			p.triggered = true;
+			p.start = e.frame;
+			p.wave = e.wave < p_f.assets.bank->waves().size() ? p_f.assets.bank->waves()[e.wave].name : std::string("?");
+			const size_t slash = p.wave.rfind('/');
+			p.wave = slash == std::string::npos ? p.wave : p.wave.substr(slash + 1);
+			p.node = e.node;
+			p.slot = e.slot;
+		} else if (e.kind == ba::SamplerTraceKind::End && p.triggered && e.node == p.node && e.slot == p.slot && p.end == 0) {
+			p.end = e.frame;
+		} else if (e.kind == ba::SamplerTraceKind::Trigger && p.triggered && e.node != p.node) {
+			++p.others; // another sampler of the instance (the pool's Stop posts the patch's stop event)
+			const std::string n = e.wave < p_f.assets.bank->waves().size() ? p_f.assets.bank->waves()[e.wave].name : std::string("?");
+			p.other_waves += (p.other_waves.empty() ? "" : ", ") + n.substr(n.rfind('/') + 1) + " at +" +
+					std::to_string(int((double(e.frame) - double(p.start)) * 1000.0 / ba::kMixRate)) + " ms";
+		}
+	}
+	return p;
+}
+
+// "2 var x 3 seg, loop -1..-1" of the bank wave whose name ends with p_name.
+std::string wave_shape(const FoleyFixture &p_f, const std::string &p_name) {
+	for (const ca::SoundWaveInfo &w : p_f.assets.bank->waves()) {
+		if (w.name.size() >= p_name.size() && w.name.compare(w.name.size() - p_name.size(), p_name.size(), p_name) == 0) {
+			std::string segs;
+			for (const ca::WaveVariation &v : w.variations) {
+				segs += (segs.empty() ? "" : "/") + std::to_string(v.segments.size());
+			}
+			const int lf = w.variations.empty() ? -1 : w.variations[0].first_loop_segment;
+			const int ll = w.variations.empty() ? -1 : w.variations[0].last_loop_segment;
+			return std::to_string(w.variations.size()) + " var, segments " + segs + ", loop " + std::to_string(lf) + ".." + std::to_string(ll);
+		}
+	}
+	return "not in the bank";
+}
+
+const char *cue_kind(ba::FoleyCueKind p_k) {
+	switch (p_k) {
+		case ba::FoleyCueKind::Reload:
+			return "Reload";
+		case ba::FoleyCueKind::ReloadRelease:
+			return "ReloadRelease";
+		case ba::FoleyCueKind::Action:
+			return "Action";
+		case ba::FoleyCueKind::Bolt:
+			return "Bolt";
+	}
+	return "?";
 }
 
 std::filesystem::path shots_dir() {
@@ -385,7 +481,7 @@ TEST_SUITE("audio-foley") {
 		}
 		// 3) The voice cull's loudness of the reload instance at the listener, against each EnableHdr output's own.
 		std::string outs;
-		float cull_db = 0.0f;
+		float cull_db = 0.0f, cull_hint_db = 0.0f;
 		{
 			Result<std::unique_ptr<ba::PatchInstance>> pi = ba::PatchInstance::create(d.program, f->assets.bank, f->tuning, 1, ba::kMixRate);
 			REQUIRE(pi.ok());
@@ -396,6 +492,8 @@ TEST_SUITE("audio-foley") {
 			li.forward = { 0.0f, 0.0f, 1.0f };
 			(*pi)->set_geometry(em, li);
 			cull_db = (*pi)->cull_info().loudness_db;
+			(*pi)->set_loudness_outputs(d.foley.reload.outputs); // what the router's reload one-shot names (PT1 rld [live outputs])
+			cull_hint_db = (*pi)->cull_info().loudness_db;
 			const ca::SoundProgram &p = *d.program;
 			const ba::WeaponFoley fo = ba::read_weapon_foley(p);
 			for (size_t o = 0; o < p.outputs.size(); ++o) {
@@ -413,14 +511,321 @@ TEST_SUITE("audio-foley") {
 		}
 		char line[1200];
 		std::snprintf(line, sizeof(line),
-				"pt1 rld: own M16A3 1p: cull loudness of a reload instance at the listener %.1f dB; EnableHdr outputs at 0 m: %s", double(cull_db),
-				outs.c_str());
+				"pt1 rld: own M16A3 1p: cull loudness of a reload instance at the listener before its first block %.1f dB without a hint, %.1f dB with "
+				"the reload's outputs; EnableHdr outputs at 0 m: %s",
+				double(cull_db), double(cull_hint_db), outs.c_str());
 		MESSAGE(line);
 		std::printf("%s\n", line);
 		std::snprintf(line, sizeof(line),
 				"pt1 rld: own M16A3 1p: reload alone %.1f dBFS (floor %.1f, window top %.1f dB, %llu reload one-shots); 30-round burst %.1f dBFS; "
 				"the reload 0.6-2.9 s after it %.1f dBFS (window top %.1f dB); its 1.5-2.9 s standing %.1f dBFS, walking 3 m/s %.1f dBFS",
 				alone_db, alone_floor, double(alone_top), (unsigned long long)alone_reloads, fire_db, empty_db, double(empty_top), alone_late, walk_late);
+		MESSAGE(line);
+		std::printf("%s\n", line);
+		// Audible: the reload alone within the HDR window its own output sets (not 21 dB under the gunshot outputs), and
+		// the own 1p reload moves with the soldier.
+		CHECK(alone_reloads == 1);
+		CHECK(alone_db > -25.0);
+		CHECK(alone_top < 81.0f);
+		CHECK(std::fabs(cull_hint_db - 79.5f) < 1.0f);
+		CHECK(std::fabs(walk_late - alone_late) < 1.0);
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("the own soldier's foley triggers: which event starts which wave, in order, at which frame (1p)") {
+		FoleyFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const uint16_t m16 = def_of_patch(*f->assets.table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		const ba::WeaponAudioDef &d = f->assets.table->defs[m16];
+		REQUIRE(d.foley.reload.present);
+		REQUIRE(d.foley.reload_waves.size() == 2);
+		REQUIRE(d.foley.action_waves.size() >= size_t(ba::kFoleyActionCount));
+		Rig rig(*f);
+		FoleyRecorder rec;
+		rig.router->set_observer(&rec);
+		auto own = std::make_unique<host::PresentationFrame>();
+		own->own_weapons_valid = true;
+		own->own_weapons_curr.active = 0;
+		own->own_weapons_curr.slots[0].def = m16;
+		own->own_weapons_curr.slots[0].magazine = 30;
+		own->own_weapons_curr.timers[0].slot = 0;
+		rig.own_frame = own.get();
+		// The script: (seconds, the weapon event or a presented-state change, the magazine the reload starts with).
+		struct Step {
+			double t;
+			uint32_t event; // 0: a presented-state step (below)
+			int32_t magazine;
+			int state; // 1 dry fire tick, 2 zoom down, 3 zoom up
+		};
+		const Step script[] = {
+			{ 0.5, sw::weapon_events::kDeployStarted, 30, 0 },
+			{ 1.0, sw::weapon_events::kReloadStarted, 12, 0 }, // tactical
+			{ 3.5, sw::weapon_events::kReloadStarted, 0, 0 }, // empty
+			{ 7.0, sw::weapon_events::kReloadStarted, 5, 0 },
+			{ 7.6, sw::weapon_events::kReloadCancelled, 5, 0 }, // a sprint cuts it
+			{ 8.5, 0, 0, 1 }, // a trigger pull on an empty magazine, nothing in reserve
+			{ 9.0, sw::weapon_events::kFireModeChanged, 30, 0 },
+			{ 9.5, 0, 30, 2 },
+			{ 10.0, 0, 30, 3 },
+			{ 10.5, sw::weapon_events::kReloadStarted, 3, 0 },
+			{ 11.0, sw::weapon_events::kDeployStarted, 3, 0 }, // a switch cuts it
+		};
+		size_t next = 0;
+		for (int fi = 0; fi < int(13.5 * 60); ++fi) {
+			std::vector<host::PresentEvent> ev;
+			own->own_weapons_curr.events = 0;
+			while (next < std::size(script) && std::llround(script[next].t * 60.0) == fi) {
+				const Step &s = script[next];
+				own->own_weapons_curr.slots[0].magazine = s.magazine;
+				if (s.event != 0) {
+					ev.push_back(own_timed(m16, s.event, s.t));
+				} else if (s.state == 1) {
+					own->own_weapons_curr.events = sw::weapon_events::kDryFire;
+				} else if (s.state == 2) {
+					own->own_weapons_curr.timers[0].flags |= sw::slot_flags::kZoomWasDown;
+				} else if (s.state == 3) {
+					own->own_weapons_curr.timers[0].flags &= uint8_t(~sw::slot_flags::kZoomWasDown);
+				}
+				++next;
+			}
+			rig.frame(ev);
+		}
+		// The expected cues, in order: the kind, the action or the reload's IsShortReload, the cause's time, the wave.
+		struct Want {
+			ba::FoleyCueKind kind;
+			int what; // Action: FoleyAction; Reload: IsShortReload
+			double t;
+		};
+		const Want want[] = {
+			{ ba::FoleyCueKind::Action, int(ba::FoleyAction::Deploy), 0.5 },
+			{ ba::FoleyCueKind::Reload, 1, 1.0 },
+			{ ba::FoleyCueKind::Reload, 0, 3.5 },
+			{ ba::FoleyCueKind::Reload, 1, 7.0 },
+			{ ba::FoleyCueKind::ReloadRelease, 0, 7.6 },
+			{ ba::FoleyCueKind::Action, int(ba::FoleyAction::DryFire), 8.5 },
+			{ ba::FoleyCueKind::Action, int(ba::FoleyAction::FireMode), 9.0 },
+			{ ba::FoleyCueKind::Action, int(ba::FoleyAction::Zoom), 9.5 },
+			{ ba::FoleyCueKind::Reload, 1, 10.5 },
+			{ ba::FoleyCueKind::ReloadRelease, 0, 11.0 },
+			{ ba::FoleyCueKind::Action, int(ba::FoleyAction::Deploy), 11.0 },
+		};
+		CHECK(rec.cues.size() == std::size(want));
+		std::string table;
+		double worst_lag_ms = 0.0;
+		uint64_t last_frame = 0;
+		for (size_t i = 0; i < std::min(rec.cues.size(), std::size(want)); ++i) {
+			const FoleyRecorder::Cue &c = rec.cues[i];
+			const Want &w = want[i];
+			CAPTURE(i);
+			CHECK(c.cue.kind == w.kind);
+			CHECK(c.cue.own);
+			CHECK(c.cue.first_person);
+			CHECK(c.cue.time == at(w.t));
+			CHECK(c.cue.frame >= last_frame); // in order on the mix timeline
+			last_frame = c.cue.frame;
+			const Played p = played(*f, c);
+			std::string expect_wave;
+			if (w.kind == ba::FoleyCueKind::Action) {
+				CHECK(int(c.cue.action) == w.what);
+				expect_wave = d.foley.action_waves[size_t(w.what)];
+			} else if (w.kind == ba::FoleyCueKind::Reload) {
+				CHECK(int(c.cue.short_reload) == w.what);
+				expect_wave = d.foley.reload_waves[size_t(w.what)];
+			}
+			if (!expect_wave.empty()) {
+				CHECK(p.triggered);
+				CHECK(p.wave == expect_wave);
+				// The wave starts with the event: the frame its time maps to (the viewmodel clip's start), plus the
+				// data's sampler Offset, within one mix block.
+				const double lag_ms = (double(p.start) - double(c.cue.frame)) * 1000.0 / double(ba::kMixRate);
+				CHECK(p.start >= c.cue.frame);
+				CHECK(lag_ms <= 1000.0 * double(ba::kBlockFrames) / double(ba::kMixRate) + 16.0);
+				worst_lag_ms = std::max(worst_lag_ms, lag_ms);
+			}
+			char row[240];
+			if (c.cue.kind == ba::FoleyCueKind::ReloadRelease) {
+				std::snprintf(row, sizeof(row), "\n  %5.2f s %-13s           -> #%u to the running reload, at the event's frame %llu", w.t, cue_kind(c.cue.kind),
+						d.foley.reload.release_event, (unsigned long long)c.cue.frame);
+			} else {
+				std::snprintf(row, sizeof(row), "\n  %5.2f s %-13s %-9s -> %s, starts %+.1f ms after the event's frame, %.2f s long", w.t, cue_kind(c.cue.kind),
+						c.cue.kind == ba::FoleyCueKind::Action ? ba::foley_action_name(c.cue.action) : (c.cue.short_reload > 0 ? "tactical" : "empty"),
+						p.triggered ? p.wave.c_str() : "(nothing started)", p.triggered ? (double(p.start) - double(c.cue.frame)) * 1000.0 / ba::kMixRate : 0.0,
+						p.triggered && p.end > p.start ? double(p.end - p.start) / ba::kMixRate : 0.0);
+			}
+			table += row;
+		}
+		// The release goes to the running reload; the reload wave is one segment and its sampler LtNone, which a Release
+		// ends after its current segment (docs/design/m2a-audio.md section 6.3, as built): it plays to its end.
+		if (rec.cues.size() >= 5) {
+			const Played full = played(*f, rec.cues[2]);
+			const double full_s = full.end > full.start ? double(full.end - full.start) / ba::kMixRate : 0.0;
+			CHECK(full_s > 2.5); // the empty reload plays its whole wave (2.9 s)
+		}
+		CHECK(rig.router->stats().reloads == 4);
+		CHECK(rig.router->stats().foley == 5);
+		CHECK(rig.router->stats().foley_releases == 2);
+		const std::string line = "pt1 rld: own M16A3 1p trigger table (event -> cue -> wave):" + table;
+		MESSAGE(line);
+		std::printf("%s\n", line.c_str());
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("every kit firearm's empty and tactical reload play their whole wave (1p)") {
+		FoleyFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		std::string table;
+		for (size_t di = 0; di < f->assets.table->defs.size(); ++di) {
+			const ba::WeaponAudioDef &d = f->assets.table->defs[di];
+			if (d.form != ba::WeaponAudioForm::Driver || !d.foley.reload.present) {
+				continue;
+			}
+			double len[2] = { 0.0, 0.0 };
+			std::string wave[2];
+			std::string others[2];
+			for (int tactical = 0; tactical < 2; ++tactical) {
+				Rig rig(*f);
+				FoleyRecorder rec;
+				rig.router->set_observer(&rec);
+				auto own = std::make_unique<host::PresentationFrame>();
+				own->own_weapons_valid = true;
+				own->own_weapons_curr.slots[0].def = uint16_t(di);
+				own->own_weapons_curr.slots[0].magazine = tactical ? 7 : 0;
+				rig.own_frame = own.get();
+				for (int fi = 0; fi < 8 * 60; ++fi) {
+					std::vector<host::PresentEvent> ev;
+					if (fi == 30) {
+						ev.push_back(own_timed(uint16_t(di), sw::weapon_events::kReloadStarted, 0.5));
+					}
+					rig.frame(ev);
+				}
+				REQUIRE(rec.cues.size() == 1);
+				const Played p = played(*f, rec.cues[0]);
+				CHECK_MESSAGE(p.triggered, d.patch);
+				CHECK_MESSAGE(p.wave == d.foley.reload_waves[size_t(tactical)], d.patch);
+				// Nothing else of the patch plays: the one-shot never gets the trigger release (a round on single fire).
+				CHECK_MESSAGE(p.others == 0, (d.patch + ": " + p.other_waves));
+				len[tactical] = p.end > p.start ? double(p.end - p.start) / ba::kMixRate : 0.0;
+				wave[tactical] = p.wave;
+				others[tactical] = p.other_waves;
+			}
+			// The empty reload is the longer wave; neither is cut by the one-shot pool's Stop (3 s after the start).
+			CHECK_MESSAGE(len[0] > len[1], d.patch);
+			char row[200];
+			std::snprintf(row, sizeof(row), "\n  %-12s empty %-34s %.2f s, tactical %-34s %.2f s", d.patch.substr(d.patch.rfind('/') + 1).c_str(), wave[0].c_str(),
+					len[0], wave[1].c_str(), len[1]);
+			table += row;
+			table += "\n    long: " + wave_shape(*f, wave[0]) + "; short: " + wave_shape(*f, wave[1]) + "; other samplers: [" + others[0] + "] [" + others[1] + "]";
+		}
+		const std::string line = "pt1 rld: kit reload waves as played:" + table;
+		MESSAGE(line);
+		std::printf("%s\n", line.c_str());
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("another soldier's reload in 3p: positioned, within the data's reach, cut by a switch") {
+		FoleyFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const uint16_t m16 = def_of_patch(*f->assets.table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		const ba::WeaponAudioDef &d = f->assets.table->defs[m16];
+		uint16_t m9 = sw::kNoWeapon;
+		for (size_t i = 0; i < f->assets.table->defs.size(); ++i) {
+			if (f->assets.table->defs[i].patch.find("/m9/") != std::string::npos) {
+				m9 = uint16_t(i);
+			}
+		}
+		REQUIRE(m9 != sw::kNoWeapon);
+		// One soldier (slot 5) p_metres in front of the listener, facing it; the reload starts at 1 s (reload_seq 0 -> 1);
+		// with p_switch_s > 0 he switches to the M9 then.
+		struct Result3p {
+			double db = 0.0, floor = 0.0;
+			uint64_t reloads = 0, out_of_reach = 0, releases = 0;
+			std::vector<FoleyRecorder::Cue> cues;
+			double played_s = 0.0;
+			std::string wave;
+		};
+		const auto run = [&](float p_metres, double p_switch_s, const char *p_wav) {
+			Result3p r;
+			Rig rig(*f);
+			FoleyRecorder rec;
+			rig.router->set_observer(&rec);
+			host::PresentedSoldier s;
+			s.slot = 5;
+			s.generation = 1;
+			s.position = { 0.0f, 0.0f, p_metres };
+			s.yaw = 3.14159265f; // facing -Z, the listener
+			host::PresentedOtherWeapon w;
+			w.valid = true;
+			w.slot = 5;
+			w.generation = 1;
+			w.def = m16;
+			w.phase = sw::WeaponPhase::Ready;
+			for (int fi = 0; fi < 4 * 60; ++fi) {
+				if (fi == 60) {
+					w.reload_seq = 1;
+					w.phase = sw::WeaponPhase::Reloading;
+				}
+				if (p_switch_s > 0.0 && fi == int(std::llround(p_switch_s * 60.0))) {
+					w.def = m9;
+					w.phase = sw::WeaponPhase::Deploying;
+				}
+				w.sample_tick = uint32_t(kTicks0 + double(fi));
+				rig.frame({}, std::span<const host::PresentedSoldier>(&s, 1), std::span<const host::PresentedOtherWeapon>(&w, 1));
+			}
+			r.floor = rig.loudest_db(0.0, 0.9);
+			r.db = rig.loudest_db(1.0, p_switch_s > 0.0 ? p_switch_s : 3.9);
+			r.reloads = rig.router->stats().reloads;
+			r.out_of_reach = rig.router->stats().foley_out_of_reach;
+			r.releases = rig.router->stats().foley_releases;
+			r.cues = rec.cues;
+			for (FoleyRecorder::Cue &c : r.cues) {
+				c.trace = nullptr; // the traces end with the recorder
+			}
+			if (!rec.cues.empty() && rec.cues[0].cue.kind == ba::FoleyCueKind::Reload) {
+				const Played p = played(*f, rec.cues[0]);
+				r.played_s = p.end > p.start ? double(p.end - p.start) / ba::kMixRate : 0.0;
+				r.wave = p.wave;
+			}
+			write_wav(*f, p_wav, rig.tap.mix);
+			return r;
+		};
+		const Result3p at5 = run(5.0f, 0.0, "reload_3p_5m.wav");
+		const Result3p at15 = run(15.0f, 0.0, "reload_3p_15m.wav");
+		const Result3p at25 = run(25.0f, 0.0, "reload_3p_25m.wav");
+		const Result3p cut = run(5.0f, 1.8, "reload_3p_5m_switch.wav");
+		CHECK(at5.reloads == 1);
+		CHECK(at15.reloads == 1);
+		REQUIRE(!at5.cues.empty());
+		CHECK(!at5.cues[0].cue.own);
+		CHECK(!at5.cues[0].cue.first_person);
+		CHECK(at5.cues[0].cue.short_reload == -1); // the others' magazine is not on the wire: the data's default (long)
+		CHECK(at5.wave == d.foley.reload_waves[0]);
+		CHECK(std::fabs(at5.cues[0].cue.distance_m - 5.0f) < 0.6f);
+		CHECK(at5.db > at15.db + 6.0); // positioned: the Handling curve
+		CHECK(at15.db > at15.floor + 20.0);
+		// 25 m is past the reload's crossfader (19 m): the data starts nothing there, so no one-shot is spent on it.
+		CHECK(at25.reloads == 0);
+		CHECK(at25.out_of_reach == 1);
+		// The switch at 1.8 s: the release of the running reload, then the M9's deploy.
+		CHECK(cut.releases == 1);
+		REQUIRE(cut.cues.size() == 3);
+		CHECK(cut.cues[1].cue.kind == ba::FoleyCueKind::ReloadRelease);
+		CHECK(cut.cues[2].cue.kind == ba::FoleyCueKind::Action);
+		CHECK(cut.cues[2].cue.action == ba::FoleyAction::Deploy);
+		CHECK(cut.cues[2].cue.def == m9);
+		char line[400];
+		std::snprintf(line, sizeof(line),
+				"pt1 rld: another soldier's M16A3 reload 3p (floor %.1f dBFS): 5 m %.1f dBFS (%.2f s played), 15 m %.1f dBFS, 25 m %llu one-shots "
+				"(%llu beyond the data's 19 m reach); switched 0.8 s in: %.2f s played, %llu release",
+				at5.floor, at5.db, at5.played_s, at15.db, (unsigned long long)at25.reloads, (unsigned long long)at25.out_of_reach, cut.played_s,
+				(unsigned long long)cut.releases);
 		MESSAGE(line);
 		std::printf("%s\n", line);
 		check_unchanged(*f);
