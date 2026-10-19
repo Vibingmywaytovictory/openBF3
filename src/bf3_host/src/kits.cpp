@@ -74,7 +74,26 @@ const KitLoadout &KitTable::loadout(uint8_t p_team, uint8_t p_kit) const {
 
 core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs) {
+	return make_kit_table(p_teams, p_kits, p_defs, KitTableOptions{}); // M2b ru (#9): M2a = empty options
+}
+
+// M2b ru (#9): the M2a body, plus the assault gadget when p_options names one.
+core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
+		std::span<const core::gameplay::WeaponDef> p_defs, const KitTableOptions &p_options) {
 	using core::gameplay::WeaponSlot;
+	size_t gadget = p_defs.size(); // M2b ru: the def id of p_options.assault_gadget
+	if (!p_options.assault_gadget.empty()) {
+		const std::string want = lower(p_options.assault_gadget);
+		for (size_t d = 0; d < p_defs.size(); ++d) {
+			if (lower(p_defs[d].variant) == want) {
+				gadget = d;
+				break;
+			}
+		}
+		if (gadget == p_defs.size() || gadget >= size_t(sim::weapons::kNoWeapon)) {
+			return core::make_error("kits: the assault gadget " + p_options.assault_gadget + " has no weapon def");
+		}
+	}
 	KitTable table;
 	for (uint8_t t = 0; t < kKitTeams; ++t) {
 		const int team_id = int(t) + 1;
@@ -146,6 +165,12 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 					return core::make_error("kits: " + asset + " has no weapon in slot " + std::to_string(s));
 				}
 			}
+			if (gadget != p_defs.size() && role == KitRole::Assault) { // M2b ru (#9): the defibrillator in slot 2
+				l.defs[kKitGadgetSlot] = uint16_t(gadget);
+				l.unlocks[kKitGadgetSlot] = lower(p_options.assault_gadget);
+				const std::string skipped = std::string(kit_role_name(role)) + "/" + std::to_string(team_id) + "/" + std::to_string(kKitGadgetSlot) + ": ";
+				std::erase_if(table.skipped, [&](const std::string &p_entry) { return p_entry.rfind(skipped, 0) == 0; });
+			}
 			filled[size_t(role)] = true;
 		}
 		for (uint8_t k = 0; k < kKitCount; ++k) {
@@ -153,6 +178,9 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 				return core::make_error("kits: team " + std::to_string(team_id) + " has no " + kit_role_name(KitRole(k)) + " kit");
 			}
 		}
+	}
+	if (gadget != p_defs.size()) { // M2b ru (#9)
+		table.defib_def = uint16_t(gadget);
 	}
 	table.hash = kit_table_hash(table);
 	return table;
@@ -169,6 +197,9 @@ uint64_t kit_table_hash(const KitTable &p_table) {
 			}
 			fnv_value(h, l.active);
 		}
+	}
+	if (p_table.defib_def != sim::weapons::kNoWeapon) { // M2b ru (#9): hashed only when set, so M2a's hash stays
+		fnv_value(h, p_table.defib_def);
 	}
 	return h;
 }
