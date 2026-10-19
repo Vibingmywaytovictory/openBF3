@@ -313,6 +313,78 @@ sim::Command aim_command(const Match &p_match, sim::Tick p_tick, const sim::Sold
 } // namespace
 
 TEST_SUITE("host-tdm-server") {
+	// The tuning parser (a new parser: hostile text fails with an error naming the line, never crashes; also under asan).
+	TEST_CASE("tuning: the shipped tdm_tuning.cfg, hostile text, 3,000 mutations") {
+		const std::string text = tg::read_text(OPENBF3_TDM_TUNING_CFG);
+		REQUIRE(!text.empty());
+		core::Result<host::TdmTuning> shipped = host::parse_tdm_tuning(text);
+		REQUIRE_MESSAGE(shipped.ok(), (shipped.ok() ? std::string() : shipped.error().message));
+		const host::TdmTuning defaults;
+		CHECK(shipped->revive_wait_s == defaults.revive_wait_s);
+		CHECK(shipped->defib_range_m == defaults.defib_range_m);
+		CHECK(shipped->bot_kit_weights == defaults.bot_kit_weights);
+		CHECK(shipped->immunity_abort_map.size() == 3u);
+		CHECK_FALSE(shipped->measured);
+		const char *hostile[] = {
+			"revive_wait_s", // no '='
+			"nonsense = 1",
+			"revive_wait_s = nan",
+			"revive_wait_s = inf",
+			"revive_wait_s = -1",
+			"revive_wait_s = 1e30",
+			"score_kill = 99999999999999999999",
+			"bot_kit_weights = 1 2 3",
+			"bot_kit_weights = 0 0 0 0",
+			"bot_kit_weights = 1 2 3 4 5",
+			"bot_kit_weights = 1 x 3 4",
+			"immunity_abort_map = 7",
+			"immunity_abort_map = 7:teleport",
+			"immunity_abort_map = x:fire",
+			"revive_takes_kill = maybe",
+			"spawn_los_rays = 65",
+		};
+		for (const char *h : hostile) {
+			CAPTURE(h);
+			core::Result<host::TdmTuning> r = host::parse_tdm_tuning(h);
+			CHECK_FALSE(r.ok());
+			if (!r.ok()) {
+				CHECK(r.error().message.find("line 1") != std::string::npos);
+			}
+		}
+		std::string many = "immunity_abort_map =";
+		for (size_t i = 0; i <= host::kMaxImmunityAbortEntries; ++i) {
+			many += " " + std::to_string(i) + ":fire";
+		}
+		CHECK_FALSE(host::parse_tdm_tuning(many).ok());
+		CHECK_FALSE(host::parse_tdm_tuning(std::string(host::kMaxTdmTuningBytes + 1, '#')).ok());
+		// Mutations of the shipped file: every result is a value or an error.
+		uint64_t rng = 20261019u;
+		size_t ok = 0;
+		for (int i = 0; i < 3000; ++i) {
+			std::string m = text;
+			for (int k = 0; k < 4; ++k) {
+				rng = sw::splitmix64(rng);
+				const size_t at = size_t(rng % m.size());
+				switch ((rng >> 32) % 3u) {
+					case 0:
+						m[at] = char(rng >> 40);
+						break;
+					case 1:
+						m.erase(at, 1 + size_t((rng >> 48) % 8u));
+						break;
+					default:
+						m.insert(at, 1, "=:# -.0123456789en\n"[(rng >> 40) % 19u]);
+						break;
+				}
+				if (m.empty()) {
+					m = "#";
+				}
+			}
+			ok += host::parse_tdm_tuning(m).ok() ? 1u : 0u;
+		}
+		std::printf("tdm tuning: %zu of 3000 mutations still parse\n", ok);
+	}
+
 	// E3: regen and spawn immunity.
 	TEST_CASE("health: regen after damage, a new hit restarts the delay; spawn immunity and its abort inputs") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
