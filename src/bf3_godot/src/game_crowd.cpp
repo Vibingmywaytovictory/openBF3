@@ -107,6 +107,8 @@ struct Bf3GameCrowd::Impl {
 	bool have_pose = false;
 	anim::CrowdMoveClips moves;
 	bool have_moves = false;
+	anim::CrowdMoveGroupSet move_groups; // PT1 run [load]: BF3's move groups (docs/design/pt1-run.md)
+	bool have_move_groups = false; // PT1 run [load]
 	anim::CrowdConfig config;
 	std::array<std::vector<anim::CrowdWeapon>, 2> views;
 	std::vector<anim::CrowdTeam> teams;
@@ -511,6 +513,16 @@ core::Status Bf3GameCrowd::load_body(const core::InstallReader &p_reader, core::
 		} else {
 			m.body_notes.push_back("move clips: " + moves.error().message);
 		}
+		core::Result<anim::CrowdMoveGroupSet> groups = anim::load_crowd_move_groups((*assets)->clips, *(*assets)->library); // PT1 run [load]
+		if (groups) { // PT1 run [load]
+			m.move_groups = std::move(*groups); // PT1 run [load]
+			m.have_move_groups = true; // PT1 run [load]
+			for (const std::string &n : m.move_groups.notes) { // PT1 run [load]
+				m.body_notes.push_back("move groups: " + n); // PT1 run [load]
+			} // PT1 run [load]
+		} else { // PT1 run [load]
+			m.body_notes.push_back("move groups: " + groups.error().message + " (S3's and tp's cycles)"); // PT1 run [load]
+		} // PT1 run [load]
 	}
 	m.config = anim::CrowdConfig{};
 	m.config.lod = (*assets)->lod;
