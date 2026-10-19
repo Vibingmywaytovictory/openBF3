@@ -1000,5 +1000,18 @@ Made on `integ/m2b-w1` (README "Sixth integration").
   thresholds are unchanged.
 * **Named insertion `[ray any]`** (E8): `CollisionWorld::ray_any` (collision_world.h / .cpp), and perception.cpp's two
   line-of-sight rays call it. Every line is marked `// integ/m2b-w1 [ray any]`, and the results are identical to `ray()`.
-* **Open:** E11's mix share p99 <= 0.10 is not met (the < 0.20 bucket), which needs a sampler optimization pass. In
-  wave 2, `fx::FxTriggers::sane` should accept `PresentKind::Revive` (m2b-nt.md).
+* **Named insertions `[xas groups]`, `[slot fast]`, `[lazy zero]`, `[biquad pair]`** (E11). The wave-1 merge pass
+  failed E11 on the mix share: p99 in the < 0.20 bucket, p50 < 0.15, max block 2.54 ms. These four insertions fix it
+  without changing a sample:
+  - `[xas groups]`: `decode_xas_frame` (sound_stream.cpp) runs the four group predictors together, in SSE2 lanes on
+    x86-64; `StreamDecoder::read` copies mono and stereo with a fixed stride.
+  - `[slot fast]`: `render_slot`'s resampler loop (patch_sampler.cpp) keeps its history and phase in registers, with
+    the two channels in two SSE2 lanes, while the slot has no fade and its input is buffered.
+  - `[lazy zero]`: `PatchInstance::render` zeroes a voice's buffer only when something writes or reads it, so the
+    silent voices of a weapon patch cost neither the fill nor au's `[quiet]` scan.
+  - `[biquad pair]`: one loop runs both channels' biquads.
+
+  The 64-shooter mix is bit-identical: an FNV-1a hash over every mixed block was 4a27abc862d46310 before and after.
+  The audio rows pass, in dev and under asan. Re-measured under the quiet lock: wall 4.05 s (was 8.64 s), max block
+  1.505 ms, p50 and p99 < 0.08, 0 late blocks, 128 live voices at most. E11 passes.
+* **Open:** in wave 2, `fx::FxTriggers::sane` should accept `PresentKind::Revive` (m2b-nt.md).

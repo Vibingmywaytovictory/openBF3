@@ -2244,10 +2244,14 @@ passed. Two fixes came out of it, each in its own commit:
   line-of-sight rays use it. Bot behaviour is byte-identical: E1 RoundOver at tick 17,634 at 100 / 95, E2 pooled
   149 / 131. Re-measured under the lock: perception 0.180 ms, brains 0.298 ms, tick 1.319 ms (p99).
 
-**E11** (`audio.game.underruns`) is still failing on the mix CPU share: p99 lies in the < 0.20 bucket against
-<= 0.10. Its other gates pass: 0 late blocks, max block 2.54 of 10.67 ms, 128 live voices at most. Most of the cost
-is M2a's sampler slot rendering (m2b-au.md), so this is a follow-up and the gate is not weakened. The play check
-(user away, 2 minutes each, `--m2a-check=play --m2a-play-seconds=120`):
+**E11** (`audio.game.underruns`) failed on the mix CPU share: p99 in the < 0.20 bucket against <= 0.10. Four named
+insertions halve the mix cost without changing a sample (the 64-shooter output hash is equal before and after):
+`[xas groups]` (the XAS decoder's group predictors run together, in SSE2 lanes), `[slot fast]` (the sampler's resampler
+keeps its state in registers), `[lazy zero]` (silent voices are neither zeroed nor scanned) and `[biquad pair]`.
+Re-measured under the lock, E11 passes: p50 and p99 < 0.08, max block 1.505 ms, 0 late blocks, 128 live voices at
+most, 4.05 s for the 66 s render (was 8.64 s). `audio.decode.perf` and `audio.bank` pass, and the audio rows pass in
+dev and under asan. The play check (user away, 2 minutes each, `--m2a-check=play --m2a-play-seconds=120`) ran before
+these insertions; they leave the mix bit-identical:
 * **M2a scene**: bots fire (6,362 remote shots), a fall death respawns, 120.9 s of audio mixed (12 late commands,
   reported), 0 event overflows, and the install is unchanged. The fall, team-switch and kit rows fail only because
   the case's 300 s schedule does not fit in 120 s.
