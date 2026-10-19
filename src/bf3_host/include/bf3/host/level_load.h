@@ -45,6 +45,9 @@ namespace bf3::core::level {
 class LoadedLevel;
 class World;
 } // namespace bf3::core::level
+namespace bf3::core::gameplay {
+class LogicGraph; // M2b W1.0 (ru): bf3/core/gameplay/logic_graph.h
+} // namespace bf3::core::gameplay
 
 namespace bf3::host {
 
@@ -120,6 +123,12 @@ struct SharedLevel {
 	// GameServer runs M1's game unchanged.
 	std::shared_ptr<const GunplayLevel> gunplay;
 	double seconds_gunplay = 0.0;
+	// M2b W1.0 (docs/design/m2b.md §2.6 #3, §3.2 "Load"; owner ru): with SharedLoadOptions::tdm, the mode's logic graph
+	// (build_logic_graph as bf3dump builds it; 0.16 s on Metro, not cached) and its digest (MatchInfo::logic_digest).
+	// Null / 0 without it: no rules can run.
+	std::shared_ptr<const core::gameplay::LogicGraph> logic;
+	uint64_t logic_digest = 0;
+	double seconds_logic = 0.0;
 };
 
 struct SharedLoadOptions {
@@ -134,6 +143,11 @@ struct SharedLoadOptions {
 	// kits, the capsule pose table from the retail clips; ~1.5 s on Metro [measured, noisy], nothing cached). Off by
 	// default so M1's load and its E4 / E5 numbers stay as they were until the integration turns it on.
 	bool gunplay = false;
+	// M2b W1.0 (docs/design/m2b.md §2.6 #3; owner ru): one switch for the three TDM load parts: the logic graph
+	// (SharedLevel::logic), the assault gadget of #9 (GunplayLoadOptions::tdm_kits; needs gunplay) and the motor's
+	// immunity abort of #19 (MotorParams::protect_abort_*). Off: the M2a load, tables and hashes, unchanged. A client
+	// makes the same load as its server (MatchInfo::rules_flags).
+	bool tdm = false;
 };
 
 // On the loader thread that owns p_db.
@@ -148,5 +162,8 @@ std::shared_ptr<const SharedLevel> synthetic_shared_level(std::shared_ptr<const 
 // (gunplay.h load_gunplay_level). load_shared_level calls it when SharedLoadOptions::gunplay is set; a tool that holds
 // a SharedLevel it built itself may call it too.
 core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level);
+// M2b W1.0 (#3; owner ru): the same with the load options (SharedLoadOptions::tdm: the TDM kits); the 2-argument form
+// passes default options.
+core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level, const SharedLoadOptions &p_options);
 
 } // namespace bf3::host
