@@ -1146,6 +1146,7 @@ struct WeaponAudioRouter::Impl {
 			v.emitter_dirty = true;
 		}
 		stats.emitter_updates += pool.resend_emitters(mixer);
+		foley_follow_listener(); // PT1 rld [listener]: after the pool's re-send, the own 1p foley at the new listener
 	}
 
 	void update() {
