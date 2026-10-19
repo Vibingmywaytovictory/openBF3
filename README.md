@@ -2281,6 +2281,36 @@ play defaults (31 bots, spawn screen) the load to the spawn screen is 5.8-6.0 s,
 without bots; the minimap covers part of the spawn screen's ASSAULT card; the M1 debug overlay still shows. Logs are
 in the scratchpad `m2b-integ-w2\`; captures (gitignored) are in `openBF3\b\shots\integm2bw2\`.
 
+<!-- integration (integ/pt1) -->
+**Playtest 1 fixes (`integ/pt1`, 2026-10-19).** From `main` 6a4061e, each with its own `--no-ff` merge commit, in
+this order: `pt1/snd` (sound glitching), `pt1/rld` (reload sounds), `pt1/iff` (friend or foe), `pt1/run` (the running
+animation); see the sections "PT1 snd" to "PT1 run" below. The only code conflict was snd's and rld's end blocks in
+`patch_instance.cpp` / `.h` (both kept). The rest were end blocks of `tests/CMakeLists.txt` and this README, also
+both kept. `audio.foley.install` on the merged mixer: the reload after a burst is still -19.3 dBFS (alone -19.2). The
+30-round burst's loudest 20 ms went from -0.5 to -5.7 dBFS, because snd's limiter now catches the burst's float peaks
+of about +6 dBFS. One addition, in its own commit: `[foley stats]` (game_audio.cpp prints a `[pt1] weapon foley:`
+line after the audio health line, the play check's reload evidence). The branch pass (`tools\build.cmd dev`) passed:
+158 rows, `core.cache_data` and `core.res` skipped as before, 0 failed, 208 s. The merge pass, under the quiet lock
+with the user away, ran the rows the diff reaches:
+* timing: `audio.game.underruns` (E11), passed: p99 under 0.08 against the 0.10 gate, 0 late blocks, max block 1.25 ms;
+* window, 8/8 passed: `godot.s3_crowd`, `godot.ui2`, `godot.m2a_hud`, `godot.audio` (31/31), `godot.m2a_firefight`
+  (E14: 0 underruns, frame p99 7.4 ms), `godot.m2a_load` (warm 4.44 s), `godot.m2b.play` and `godot.m2b_load` (E12
+  warm 4.52 s, limit 5 s).
+
+No other timing row runs a changed function. The play check (`tools\play.cmd --m2b-check=play --kill-limit=20`, the
+10 s pre-round) passed 14/14. The round ended at 70.4 s, US 20 - RU 17. Its numbers:
+* audio, the health line: 0 drop / pend / kill / resume cuts above -60 dBFS, 0 late blocks (max block 2.45 ms, audio
+  thread priority 0 -> 2), and 582 frames over 0 dBFS before the limiter, 0 after;
+* audio, `tools\audio_capture_check.py` on the 73.7 s `mix.wav`: 0 cuts visible in the mix, 0 flapping loops;
+* reloads: 30 reloads and 40 foley one-shots;
+* friend or foe, per frame: the minimap showed 13.1 friendly and 6.4 revealed enemy arrows (the M1 loop drew 27.4
+  soldiers as enemies); 11.0 friendly icons, 1.79 friendly names and 0.040 enemy names;
+* the crowd loaded BF3's run, sprint and sneak move groups and 8 (team, kit) meshes.
+
+Open: 8 main-thread hitches over 50 ms (max 209 ms), and the load to the spawn screen with 31 bots is still 5.70 s.
+The HUD finding is not in this integration. Logs are in the scratchpad `pt1-integ\`; the captures (mix.wav, cuts.csv,
+5 screenshots; gitignored) are in `openBF3\b\shots\pt1-integ\play\`.
+
 ## M2a wave 2 contract (W2.0)
 
 <!-- # M2a w2 -->
