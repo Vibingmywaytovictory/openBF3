@@ -40,11 +40,14 @@
 // reported beside them.
 
 #include "bf3/audio/patch_instance.h"
+#include "bf3/core/audio/hdr_setting.h" // M2b W1.0 (au)
+#include "bf3/core/audio/sound_scope.h" // M2b W1.0 (au)
 #include "bf3/core/audio/wave_bank.h"
 
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional> // M2b W1.0 (au)
 #include <span>
 #include <vector>
 
@@ -59,6 +62,12 @@ struct MixerConfig {
 	uint32_t command_capacity = 1024; // power of two
 	float output_gain_db = 0.0f;
 	uint32_t schedule_lead_blocks = 2; // AudioTuning::schedule_lead_blocks
+	// M2b W1.0 (docs/design/m2b.md §6, §2.6 #15; owner au): A3. hdr: the HDR window (hdr_window.h) for kFlagEnableHdr
+	// patches (nullopt: today's fixed window for every patch); max_voices: the one voice cap that replaces the router's
+	// three limits (R6); scopes: the voice scopes (voice_cull.h; null: no scope step).
+	std::optional<core::audio::HdrSetting> hdr; // M2b W1.0 (au)
+	uint32_t max_voices = 128; // M2b W1.0 (au)
+	std::shared_ptr<const core::audio::ScopeTable> scopes; // M2b W1.0 (au)
 };
 
 using InstanceHandle = uint32_t; // allocated by the game side, never reused within a mixer's lifetime
@@ -105,6 +114,20 @@ struct MixerStats {
 	std::atomic<uint64_t> max_call_gap_ns{ 0 }; // report only: longest wall gap between two mix() calls
 	std::atomic<uint64_t> acked_epoch{ 0 };
 	std::atomic<uint64_t> feedback_drops{ 0 };
+	// M2b W1.0 (docs/design/m2b.md §6.3, §2.6 #15; owner au): the A3 profiler (written by the audio thread, read by
+	// the game thread, relaxed). The mix CPU time per block (steady_clock around the block's mix, ns) with a 16-bucket
+	// histogram (au's bucket edges), the most live voices in one block, the culled voices per step, the suspended
+	// voices of the last block and the window edges. blocks (above) already counts the blocks.
+	std::atomic<uint64_t> mix_ns_last{ 0 }; // M2b W1.0 (au)
+	std::atomic<uint64_t> mix_ns_max{ 0 }; // M2b W1.0 (au)
+	std::atomic<uint64_t> mix_ns_hist[16]{}; // M2b W1.0 (au)
+	std::atomic<uint32_t> live_voices_max{ 0 }; // M2b W1.0 (au)
+	std::atomic<uint64_t> culled_precull{ 0 }; // M2b W1.0 (au)
+	std::atomic<uint64_t> culled_scope{ 0 }; // M2b W1.0 (au)
+	std::atomic<uint64_t> culled_cap{ 0 }; // M2b W1.0 (au)
+	std::atomic<uint32_t> suspended{ 0 }; // M2b W1.0 (au)
+	std::atomic<float> window_top_db{ 0.0f }; // M2b W1.0 (au)
+	std::atomic<float> window_bottom_db{ 0.0f }; // M2b W1.0 (au)
 };
 
 // Audio thread -> game thread, once per block per instance that has news: haptics (CameraShake / PadRumble) and
