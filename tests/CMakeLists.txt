@@ -1424,8 +1424,8 @@ endif()
 # executable with ru's host.tdm.server cases, so each row loads the shared Metro TDM level once per process; ru's block
 # creates the target when it is first, else this one does). host.tdm.bots.unit: functional, data-free (< 2 s).
 # host.tdm.round (E1), host.tdm.bots (E2: three seeds in parallel_map, PROCESSORS 3) and host.tdm.replay (E6: three runs
-# in parallel_map): functional, stepped (no wall-clock wait), install rows (exit 77 without one, or while ru's run_tdm
-# and nt's codecs are not on the branch). host.tdm.perf (E8): timing, RUN_SERIAL, the wave-1 merge pass only.
+# in parallel_map): functional, stepped (no wall-clock wait), install rows (exit 77 without one). host.tdm.perf (E8):
+# timing, RUN_SERIAL, the wave-1 merge pass only.
 if(NOT TARGET test_host_tdm)
     openbf3_test(test_host_tdm test_main.cpp host_tdm_round_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
     target_link_libraries(test_host_tdm PRIVATE bf3_host)

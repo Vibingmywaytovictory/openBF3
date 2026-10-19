@@ -17,7 +17,8 @@ measured = false. The playtest tunes them through `config/bot_tuning.cfg`.
 | `src/bf3_host/src/tdm_brain.cpp` (+ additions to `tdm_brain.h`) | the TDM brain (replaces the W1.0 stub), `TdmShared`, `add_tdm_bots`, `parse_bot_tuning` / `load_bot_tuning`, the `TdmBotObserver` hooks |
 | `bf3-opensource/config/bot_tuning.cfg` | every tuning default, documented; the shipped file equals the compiled-in defaults (a unit case pins it) |
 | `tests/host_tdm_round_tests.cpp` | `host.tdm.bots.unit`, `host.tdm.round` (E1), `host.tdm.bots` (E2), `host.tdm.replay` (E6), `host.tdm.perf` (E8) |
-| `tests/tdm_fixture.h` `// M2b bb` block | `BotChecks` (the E2 sight, stale-aim, blind-fire and stuck checks as a `TdmBotObserver`), `attach_bot_checks`, `apply_bot_checks` |
+| `tests/tdm_fixture.h` `// M2b bb` block | `BotChecks` (the E2 sight, stale-aim, blind-fire and stuck checks as a `TdmBotObserver`; after the merge also the stuck reports, bots per team, the gunplay counters, the player rows and the spawn / death centroids the E rows print), `attach_bot_checks`, `apply_bot_checks` |
+| `game_server.{h,cpp}` named insertion `[bot spawn]` (after the w1 merge, §2) | `GameServer::add_local_bot`: `add_local` with the bot mark (the main-component spawns) |
 | `tests/CMakeLists.txt` `# M2b bb` block | the `test_host_tdm` executable (created if ru has not), the five rows, labels, COSTs, timeouts, asan settings |
 | `src/bf3_sim/CMakeLists.txt` `# M2b bb` block | the two new sources |
 | `tests/m2b_contract_tests.cpp` | `kBbLanded = true` (the owner's switch) |
@@ -28,8 +29,9 @@ measured = false. The playtest tunes them through `config/bot_tuning.cfg`.
 
 * A bot perceives on `(tick + slot) % update_ticks == 0` (6: one sixth of the bots per tick).
 * Candidates: every live enemy inside the 160° x 90° view cone within 120 m, nearest first (already-detected ones
-  first among equals, then by slot). Only the first `max_candidates` (4) get rays: eye to head, and eye to chest only
-  when the head ray is blocked. The rays use `query_mask::kProjectile`.
+  first among equals, then by slot). Only the first `max_candidates` (4) get rays: eye to chest, and eye to head only
+  when the chest ray is blocked (after the w1 merge; it was head first). `PerceivedEnemy::chest_visible` records which
+  one was clear, so the brain aims at a point it can see. The rays use `query_mask::kProjectile`.
 * Head and chest points: the feet plus `head_height_m` / `chest_height_m` scaled by the pose's eye height over the
   standing eye height (`perception_head`, `perception_chest`), so a crouched or prone enemy is aimed at lower.
 * Detection: `detection += dt (1 + moving + firing) / detection_time(d)`, detected at 1. `detection_time` runs
@@ -45,8 +47,8 @@ measured = false. The playtest tunes them through `config/bot_tuning.cfg`.
 
 * `sigma = k(skill) (e_inf + (e0 - e_inf) exp(-t / tau)) + moving_penalty + crossing_deg_per_mps x crossing speed`,
   `k(skill) = max(0.25, 1 + 2 skill_scale (0.5 - skill))` (1 at 0.5, 1.4 at 0.3, 0.4 at 0.8), clamped to [0, 45]°.
-* The brain draws a gaussian error with that sigma every 6 ticks (pitch at 0.6 of yaw) and aims at the chest point,
-  led by `lead_point` (three fixed-point iterations, at most 5 s of flight, the drop `-0.5 g t²`) unless the weapon
+* The brain draws a gaussian error with that sigma every 6 ticks (pitch at 0.6 of yaw) and aims at the chest point
+  (only the head ray clear: 0.1 m below the head point), led by `lead_point` (three fixed-point iterations, at most 5 s of flight, the drop `-0.5 g t²`) unless the weapon
   is instant hit.
 * The command subtracts `skill x` the weapon's current recoil offset (better bots compensate more).
 * The view turns at most 540°/s in yaw (S1's walker rate) and 360°/s in pitch.
@@ -65,11 +67,13 @@ measured = false. The playtest tunes them through `config/bot_tuning.cfg`.
 Priority, highest first: Revive > Grenade > Retreat / RegenWait > Fight > blind fire > Hunt / Roam.
 
 * **Restricted.** `input_restricted()` or a phase other than InRound: an idle command.
-* **Fight.** Aim and fire (§1.2). Within 25 m it strafes legs of 2-6 m (checking there is floor ahead); beyond it
-  pushes in; beyond 40 m a bot with skill above 0.5 crouches and holds. The knife within 2 m from behind (more than
-  100° off the target's view).
+* **Fight.** Aim and fire (§1.2), aiming down the sights (`kZoom`) beyond 6 m. Within 25 m it strafes legs of 2-6 m
+  (checking there is floor ahead); beyond it pushes in (strafing when there is no path); beyond 40 m a bot with skill
+  above 0.5 crouches and holds for at most 4 s per target, then pushes in. The knife within 2 m from behind (more
+  than 100° off the target's view).
 * **Fire.** Within 4° of the aim, with the last clear ray at most 12 ticks old and the reaction elapsed. Bursts of 6
-  rounds close falling to 3 at 60 m, single shots beyond 60 m, taps for semi-automatic weapons; the fire mode is
+  rounds close falling to 3 at 60 m with 0.15-0.35 s between bursts, single shots beyond 60 m, taps for
+  semi-automatic weapons; no shot while a living teammate's chest is within 0.8 m of the line of fire; the fire mode is
   switched to automatic when the weapon has one. Reload at an empty magazine, or below 30 % with nothing in sight. The
   sidearm when the primary is empty for good.
 * **Blind fire.** When a target is lost, one burst at its last-known position with probability `blind_fire_share`
@@ -77,6 +81,11 @@ Priority, highest first: Revive > Grenade > Retreat / RegenWait > Fight > blind 
 * **Grenade.** A lost target behind cover 15-35 m away, at most every 20 s: switch to slot 6, hold, release towards
   the last-known position.
 * **Hunt.** Walk to the last seen or heard position of a known enemy; arriving there forgets what was known before.
+  A hunt that finds nobody in 20 s is given up: the bot forgets it and roams for 10 s (`hunts_given_up`).
+* **Off the main component.** Every 30 ticks the bot checks that its feet are on the nav's main component. Off it,
+  it walks straight at the nearest main-component nav point found on rings of 2-32 m around it (else the nearest
+  main-component spawn), jumping when it makes no progress for 45 ticks (`off_main_ticks`). With the bots on the
+  main-component spawns (§1.6) the E rows measure 0 such ticks.
 * **Roam.** Every 10 s at most, a goal drawn by weight from the contact heat grid (64 x 64 cells of 16 m, centred on
   the mean spawn point; shots add 0.05, deaths 1, decay over 30 s) within 160 m, else S1's random nav points.
   `hunt_share` (0.85) of the walker's legs go to the brain's goal.
@@ -106,6 +115,9 @@ Priority, highest first: Revive > Grenade > Retreat / RegenWait > Fight > blind 
   not refused.
 * With the rules on, team 0 (AutoTeam decides) and the kit from `ServerView::kit()`; without rules, the M2a teams
   `1 + ((i + i / 4) % 2)` and the gunplay's kit.
+* The bots join through `GameServer::add_local_bot` (the named insertion `[bot spawn]`, §2): the slot carries the
+  bot mark, so every spawn of it chooses among `BotLevel::spawns` (the main nav component, S1's list) when
+  `BotFillConfig::spawn_in_main` (the default), with the rules' scored chooser over that list.
 
 ### 1.7 Tuning file
 
@@ -118,13 +130,32 @@ parse writes into a copy). Integer keys: `count`, `burst_min_rounds`, `burst_max
 
 1. **Look around without a walker** (§1.4): not in §5; added because the unit case on the synthetic floor (spawns on
    a circle facing outwards) never produced a detection without it.
-2. **The bots join through `add_local_soldier`**, which passes bot = false, so the TDM bots spawn on the level's
-   spawns (with the rules on: the scored spawn choice), not on the main-component list the M2a fill used. Open issue
-   for the integration.
+2. **The bots join through `add_local_bot`, not `add_local_soldier`** (a named insertion outside the m2b.md contract:
+   `[bot spawn]`, the declaration in `game_server.h` and the body in an `// M2b bb` end block of `game_server.cpp`,
+   commit eac1472). The first E2 run on Metro after the merge had 1-3 bots per team that never killed nor died in a
+   whole round: the level's TDM spawns include points on nav islands at y = 64.6-65 (around (-213, -479), (-219,
+   -524), (-178, -537), (-230, -490)), enclosed areas the walker has no path out of (walking straight out failed too:
+   0.00 m in 20 s windows). Team 2 had more of them, so the pooled K/D was 1.31-1.55 for team 1. With the bot mark the
+   TDM bots spawn among the main-component spawns; the next E2 run had 0 off-main ticks and a pooled K/D of 1.137.
+   **A human peer can still spawn on those points** (the rules' chooser runs over the level's spawns for peers): an
+   open issue for ru's spawn choice.
 3. **Stuck bots.** E2's stuck count is `BotChecks`' own, which leaves out Dead, Restricted, RegenWait and Revive ticks
    as §E2 says; the M2a-style count from `run_tdm` is kept and printed beside it.
-4. **E1's coverage and the peer's MatchState.** `RoundNatives::coverage()` and the decoded peer `MatchState` need
-   accessors from ru's fixture; the E1 case checks them once those exist (see §4).
+4. **E1's coverage and the peer's MatchState** (after the w1 merge). `run_tdm` returns neither the server nor the
+   peer, so the E1 case captures both in `TdmRunConfig::on_tick`: a copy of `TdmRules::natives().coverage()` and every
+   `MatchState` the peer decoded. It checks 0 `Recorded` deliveries for the nine TDM types of §3.1
+   (`CharacterSpawnReference` is `LogicTypeId::CharacterSpawn`), the peer's RoundOver winner and counts against the
+   rules', and 0 / 0 after the restart in place. Recorded deliveries to other native types are printed, not checked.
+   **It fails** on ru's `RoundNatives`: the two `CharacterSpawnReferenceObjectData` nodes 3532 / 3533 (the TDM HQ
+   spawns, Team = team2 / team1) get the property input `BlueprintTransform` (port id -409930682) at tick 1, which
+   `RoundNatives::apply` hands to the stubs as Recorded (no `native_port` binding for it in `logic_native.cpp`'s
+   spawner rows). The fix is ru's (bind or accept it); the check stays strict.
+5. **The fixes after the merge (the first Metro runs, §1.1-§1.4):** aim at the visible point (chest first), hold
+   fire for a teammate in the line of fire (team damage dropped 308 -> 16-47 per round), aim down the sights, the 4 s
+   cap on the crouched hold (two bots had held a 62 m duel for 65 s and counted as stuck), shorter burst pauses, the
+   hunt give-up and the island walk-out. All [inferred] named constants in `tdm_brain.cpp` (`kHeadAimDrop`,
+   `kFriendlyLineMetres`, `kZoomBeyondMetres`, `kHoldTicks`, `kBurstPause*S`, `kHuntGiveUpTicks`, `kHuntBlockTicks`,
+   `kIsland*`); m2b.md §5 does not give them. The §5.3 aim numbers are unchanged.
 
 ## 3. Rows
 
@@ -136,10 +167,9 @@ parse writes into a copy). Integer keys: `count`, `burst_min_rounds`, `burst_max
 | `host.tdm.replay` | host-tdm-replay | none | 3 10 | E6, seeds 11 / 11 / 12 |
 | `host.tdm.perf` | host-tdm-perf | timing (RUN_SERIAL) | 1 20 | E8, 64 bots, never run on the branch |
 
-Each install case prints and checks `install.unchanged`. Until ru and nt are merged into `m2b/w1`, the four install
-rows print `PENDING (ru+nt)` and exit 77 (skipped): `kRuNtLanded` in `host_tdm_round_tests.cpp` is false, and the
-cases that call ru's `run_tdm` / `load_tdm_level_once` sit behind `if constexpr (kRuNtLanded)` so the tree links
-without ru's bodies.
+Each install case prints and checks `install.unchanged`. Since m2b/w1 (nt, au, ru) was merged into `m2b/bb`,
+`kRuNtLanded` in `host_tdm_round_tests.cpp` is true: the install rows run ru's `run_tdm` / `load_tdm_level_once` and
+skip (exit 77) only without an install.
 
 ## 4. Gates, one command each
 
@@ -149,17 +179,15 @@ without ru's bodies.
 * Asan (the new parser `parse_bot_tuning`, perception and aim on hostile values): `cmake --preset asan`, then
   `cmake --build --preset asan --target test_host_tdm`, then
   `ctest --test-dir b\asan -R "^host\.tdm\.bots\.unit$" --output-on-failure`.
-* E1 (after the ru + nt merge): `ctest --test-dir b\dev -R "^host\.tdm\.round$" --output-on-failure`.
-* E2 (after the merge): `ctest --test-dir b\dev -R "^host\.tdm\.bots$" --output-on-failure`.
-* E6 (after the merge): `ctest --test-dir b\dev -R "^host\.tdm\.replay$" --output-on-failure`.
+* E1: `ctest --test-dir b\dev -R "^host\.tdm\.round$" --output-on-failure`.
+* E2: `ctest --test-dir b\dev -R "^host\.tdm\.bots$" --output-on-failure`.
+* E6: `ctest --test-dir b\dev -R "^host\.tdm\.replay$" --output-on-failure`.
 * E8 (the wave-1 merge pass on main, timing): `ctest --preset dev-timing -R "^host\.tdm\.perf$"`.
-* Preview (not a row): `tools\play.cmd --tdm --bots=31` (after ru's load lands; `tools\play.cmd --help` lists it).
+* Preview (not a row): `tools\play.cmd --tdm --bots=31` (`tools\play.cmd --help` lists it).
 
 Measured results: README "M2b bb: TDM bots".
 
-Pending until ru and nt are merged into `m2b/w1` (then set `kRuNtLanded = true`):
-* E1 `host.tdm.round`, E2 `host.tdm.bots`, E6 `host.tdm.replay`, E8 `host.tdm.perf` (timing);
-* E1's `RoundNatives::coverage()` check (0 Recorded) and the peer-decoded MatchState comparison: the accessors come
-  from ru's fixture;
-* E2's scored-spawn check (0 spawns with an enemy within 10 m): `run_tdm` reports it;
-* the COSTs above are the estimates from m2b.md, not yet measured.
+Still open after the w1 merge:
+* E1 fails on the `BlueprintTransform` deliveries (§2 item 4, ru's `RoundNatives`); everything else in E1 passes.
+* E8 `host.tdm.perf` (timing) runs in the merge pass on main.
+* Human peers can spawn on the nav-island spawns (§2 item 2, ru's spawn choice).

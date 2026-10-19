@@ -2918,19 +2918,20 @@ Track bb of M2b wave 1, on branch `m2b/bb` from the W1.0 head 01a26e8. Design: [
 The TDM bots are `bf3_host` `TdmBrain`s that `add_tdm_bots` puts on the server through `GameServerConfig::tdm_bots`.
 They read only `ServerView` (with the rules' `downed()`, `phase()`, `input_restricted()` and `kit()`) and the
 gunplay's shots:
-* **Perception** (`bf3_sim` `perception.cpp`): every 6 ticks per bot, a 160° x 90° cone to 120 m, head and chest rays
-  for the nearest 4, detection faster for near, moving and firing enemies; hearing gives a position estimate, never a
+* **Perception** (`bf3_sim` `perception.cpp`): every 6 ticks per bot, a 160° x 90° cone to 120 m, chest and head rays
+  for the nearest 4 (the clear one is the aim point), detection faster for near, moving and firing enemies; hearing gives a position estimate, never a
   detection; 3 s to forget.
 * **Aim** (`aim_model.cpp`): a skill-scaled error cone that narrows with time on target, lead and drop for projectile
   weapons, recoil compensation by skill.
-* **Behaviour**: target scores with a switch margin and a reaction delay; bursts by range, blind fire at a lost
-  target, the M67, the knife from behind, reload and sidearm; strafing, hunting the last known enemy, a contact heat
-  grid for roaming; retreat and regen wait; assault bots revive downed teammates with the defibrillator; idle in the
-  pre-round. Seeds are `match_seed ^ slot`.
+* **Behaviour**: target scores with a switch margin and a reaction delay; bursts by range, aiming down the sights,
+  no fire through a teammate, blind fire at a lost target, the M67, the knife from behind, reload and sidearm;
+  strafing, hunting the last known enemy (given up after 20 s), a contact heat grid for roaming; retreat and regen
+  wait; assault bots revive downed teammates with the defibrillator; idle in the pre-round. Seeds are
+  `match_seed ^ slot`. The bots join through `GameServer::add_local_bot` (the named insertion `[bot spawn]`), so they
+  spawn on the main nav component, never on the level's nav-island spawns.
 * **Tuning**: `bf3-opensource/config/bot_tuning.cfg` holds every default (all [inferred], measured = false: no VU
   session measured BF3's bots). Unknown keys and out-of-range values fail the load.
-* **Preview**: `tools\play.cmd --tdm --bots=31` runs the M2a scene with the TDM rules and TDM bots (once ru's TDM load
-  is merged); the match state prints as `[m2b] match: ...` lines. `tools\play.cmd --help` lists the options.
+* **Preview**: `tools\play.cmd --tdm --bots=31` runs the M2a scene with the TDM rules and TDM bots; the match state prints as `[m2b] match: ...` lines. `tools\play.cmd --help` lists the options.
 
 Commands:
 
@@ -2939,19 +2940,20 @@ tools\build.cmd dev                                                        :: th
 ctest --test-dir b\dev -R "^host\.tdm\.bots\.unit$" --output-on-failure   :: perception, aim, tuning, brain (no install)
 ctest --test-dir b\dev -R "^m2b\.contract$"                               :: the W1.0 contract with kBbLanded
 ctest --test-dir b\asan -R "^host\.tdm\.bots\.unit$" --output-on-failure  :: asan (after cmake --build --preset asan --target test_host_tdm)
-ctest --test-dir b\dev -R "^host\.tdm\.(round|bots|replay)$"              :: E1, E2, E6 (skip until ru + nt merge)
+ctest --test-dir b\dev -R "^host\.tdm\.(round|bots|replay)$"              :: E1, E2, E6 (Metro TDM; skip without an install)
 ctest --preset dev-timing -R "^host\.tdm\.perf$"                          :: E8, timing row (merge pass on main)
 ```
 
-Measured 2026-10-19 on the dev preset (branch, unlocked, shared machine):
+Measured 2026-10-19 on the dev preset, `m2b/bb` after the merge of `m2b/w1` (nt, au, ru), unlocked, shared machine
+(times indicative only):
 
 | gate | threshold | measured |
 |---|---|---|
-| branch pass `tools\build.cmd dev` | every row passes or skips as before | 142 rows: 137 passed, 5 skipped (`core.cache_data`, `core.res` as before; `host.tdm.round`, `.bots`, `.replay` pending ru + nt), 210.3 s, exit 0 |
-| host.tdm.bots.unit | all cases pass, data-free budget 2 s | 6 cases, 256 assertions, 0.17 s |
-| m2b.contract | passes with kBbLanded | passed, 0.51 s |
-| asan host.tdm.bots.unit | no asan report | passed, 0 asan reports, 0.68 s (asan preset, target test_host_tdm) |
-| E1 host.tdm.round | m2b.md E1 | pending: needs ru + nt merged into m2b/w1 |
-| E2 host.tdm.bots | m2b.md E2 | pending: needs ru + nt |
-| E6 host.tdm.replay | m2b.md E6 | pending: needs ru + nt |
-| E8 host.tdm.perf | perception ≤ 0.2 ms/tick p99, brains ≤ 1.5 ms/tick p99, tick ≤ 4 ms p99 | pending: timing row, runs on main after the merge |
+| branch pass `toolsuild.cmd dev` | every row passes or skips as before | 146 rows: 143 passed, 2 skipped (`core.cache_data`, `core.res` as before), **1 failed: `host.tdm.round`** (the E1 coverage check below), 210.6 s |
+| host.tdm.bots.unit | all cases pass, data-free budget 2 s | 7 cases passed, 0.10 s |
+| m2b.contract | passes with every track landed | passed, 0.37 s |
+| asan host.tdm.bots.unit | no asan report | passed before the merge (0.68 s); not rerun after it (the perception change only swaps the ray order) |
+| E1 host.tdm.round | m2b.md E1 | **fails one check**: 2 `Recorded` deliveries to `CharacterSpawn` (the `BlueprintTransform` property of the two HQ spawns at tick 1, ru's `RoundNatives`). The rest passes: RoundOver at tick 17,634 (≤ 21,600), 100 / 95, the peer's MatchState the same, 0 runtime faults, rounds 1, the restart in place 0 / 0; 38.5 s in the pass (17.1 s alone) |
+| E2 host.tdm.bots | pooled K/D in [0.75, 1.33], 0 sight, 0 stale aim, 0 stuck, 0 bad spawns, revives ≥ 1 | pooled 149 / 131 = 1.137 (seeds 1.190, 0.980, 1.282), 0 / 0 / 0 / 0, revives 4; 21.4 s in the pass |
+| E6 host.tdm.replay | same seed 0 differing ticks, another seed differs | 0 / 3,179 ticks differ, trace and MatchState bytes equal; seed 12 differs on 3,179; 14.2 s in the pass |
+| E8 host.tdm.perf | perception ≤ 0.2 ms/tick p99, brains ≤ 1.5 ms/tick p99, tick ≤ 4 ms p99 | not run: timing row, runs on main after the merge |
