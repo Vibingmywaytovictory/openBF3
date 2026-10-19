@@ -7,6 +7,13 @@
 #include <algorithm>
 #include <cmath>
 
+#if defined(_M_X64) || defined(__x86_64__) || defined(__SSE2__) // integ/m2b-w1 [slot fast]
+#include <emmintrin.h> // integ/m2b-w1 [slot fast]
+#define OPENBF3_SLOT_SSE2 1 // integ/m2b-w1 [slot fast]
+#else // integ/m2b-w1 [slot fast]
+#define OPENBF3_SLOT_SSE2 0 // integ/m2b-w1 [slot fast]
+#endif // integ/m2b-w1 [slot fast]
+
 namespace bf3::audio {
 
 using namespace detail;
@@ -21,6 +28,104 @@ bool on(float p_v) {
 float catmull_rom(float p0, float p1, float p2, float p3, float t) {
 	return p1 + 0.5f * t * (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
 }
+
+// integ/m2b-w1 [slot fast] (E11, docs/design/m2b.md "M2b integ-w1"): render_slot's resampler loop for a slot without a
+// fade whose next input frames are buffered (mono or stereo), with its history and phase in registers. The same
+// arithmetic as catmull_rom in the same order, per channel; the SSE2 path holds the two channels in two lanes of one
+// register, which rounds each lane exactly as the scalar code does. Returns true at frame r_i when its next input
+// frame is not buffered: the caller pulls it through pull(), at the same r_i and play.frac as the general loop.
+bool resample_buffered(SlotPlay &r_play, uint32_t p_count, double p_ratio, float *r_left, float *r_right, uint32_t &r_i, uint32_t p_limit) { // integ/m2b-w1 [slot fast]
+	double frac = r_play.frac; // integ/m2b-w1 [slot fast]
+	uint32_t pos = r_play.input_pos, out = r_play.frames_out, i = r_i; // integ/m2b-w1 [slot fast]
+	const float *in = r_play.input.data(); // integ/m2b-w1 [slot fast]
+	const bool mono = r_play.channels == 1; // integ/m2b-w1 [slot fast]
+	bool slow = false; // integ/m2b-w1 [slot fast]
+#if OPENBF3_SLOT_SSE2 // integ/m2b-w1 [slot fast]
+	__m128 h0 = _mm_setr_ps(r_play.history[0][0], r_play.history[0][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
+	__m128 h1 = _mm_setr_ps(r_play.history[1][0], r_play.history[1][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
+	__m128 h2 = _mm_setr_ps(r_play.history[2][0], r_play.history[2][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
+	__m128 h3 = _mm_setr_ps(r_play.history[3][0], r_play.history[3][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
+	const __m128 k05 = _mm_set1_ps(0.5f), k2 = _mm_set1_ps(2.0f), k3 = _mm_set1_ps(3.0f), k4 = _mm_set1_ps(4.0f), k5 = _mm_set1_ps(5.0f); // integ/m2b-w1 [slot fast]
+	for (; i < p_limit; ++i) { // integ/m2b-w1 [slot fast]
+		// catmull_rom: p1 + 0.5f * t * (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0))) // integ/m2b-w1 [slot fast]
+		const __m128 t = _mm_set1_ps(float(frac)); // integ/m2b-w1 [slot fast]
+		const __m128 inner = _mm_mul_ps(t, _mm_sub_ps(_mm_add_ps(_mm_mul_ps(k3, _mm_sub_ps(h1, h2)), h3), h0)); // integ/m2b-w1 [slot fast]
+		const __m128 mid = _mm_mul_ps(t, _mm_add_ps(_mm_sub_ps(_mm_add_ps(_mm_sub_ps(_mm_mul_ps(k2, h0), _mm_mul_ps(k5, h1)), _mm_mul_ps(k4, h2)), h3), inner)); // integ/m2b-w1 [slot fast]
+		const __m128 y = _mm_add_ps(h1, _mm_mul_ps(_mm_mul_ps(k05, t), _mm_add_ps(_mm_sub_ps(h2, h0), mid))); // integ/m2b-w1 [slot fast]
+		r_left[i] += _mm_cvtss_f32(y); // integ/m2b-w1 [slot fast]
+		r_right[i] += _mm_cvtss_f32(_mm_shuffle_ps(y, y, _MM_SHUFFLE(1, 1, 1, 1))); // integ/m2b-w1 [slot fast]
+		++out; // integ/m2b-w1 [slot fast]
+		frac += p_ratio; // integ/m2b-w1 [slot fast]
+		while (frac >= 1.0) { // integ/m2b-w1 [slot fast]
+			if (pos >= p_count) { // integ/m2b-w1 [slot fast]
+				slow = true; // integ/m2b-w1 [slot fast]
+				break; // integ/m2b-w1 [slot fast]
+			} // integ/m2b-w1 [slot fast]
+			frac -= 1.0; // integ/m2b-w1 [slot fast]
+			h0 = h1; // integ/m2b-w1 [slot fast]
+			h1 = h2; // integ/m2b-w1 [slot fast]
+			h2 = h3; // integ/m2b-w1 [slot fast]
+			h3 = mono ? _mm_set1_ps(in[pos]) : _mm_castpd_ps(_mm_load_sd(reinterpret_cast<const double *>(in + size_t(pos) * 2))); // integ/m2b-w1 [slot fast]
+			++pos; // integ/m2b-w1 [slot fast]
+		} // integ/m2b-w1 [slot fast]
+		if (slow) { // integ/m2b-w1 [slot fast]
+			break; // integ/m2b-w1 [slot fast]
+		} // integ/m2b-w1 [slot fast]
+	} // integ/m2b-w1 [slot fast]
+	float lanes[4][4]; // integ/m2b-w1 [slot fast]
+	_mm_storeu_ps(lanes[0], h0); // integ/m2b-w1 [slot fast]
+	_mm_storeu_ps(lanes[1], h1); // integ/m2b-w1 [slot fast]
+	_mm_storeu_ps(lanes[2], h2); // integ/m2b-w1 [slot fast]
+	_mm_storeu_ps(lanes[3], h3); // integ/m2b-w1 [slot fast]
+	for (int k = 0; k < 4; ++k) { // integ/m2b-w1 [slot fast]
+		r_play.history[k][0] = lanes[k][0]; // integ/m2b-w1 [slot fast]
+		r_play.history[k][1] = lanes[k][1]; // integ/m2b-w1 [slot fast]
+	} // integ/m2b-w1 [slot fast]
+#else // integ/m2b-w1 [slot fast]
+	float h0l = r_play.history[0][0], h0r = r_play.history[0][1], h1l = r_play.history[1][0], h1r = r_play.history[1][1]; // integ/m2b-w1 [slot fast]
+	float h2l = r_play.history[2][0], h2r = r_play.history[2][1], h3l = r_play.history[3][0], h3r = r_play.history[3][1]; // integ/m2b-w1 [slot fast]
+	for (; i < p_limit; ++i) { // integ/m2b-w1 [slot fast]
+		const float t = float(frac); // integ/m2b-w1 [slot fast]
+		r_left[i] += catmull_rom(h0l, h1l, h2l, h3l, t); // integ/m2b-w1 [slot fast]
+		r_right[i] += catmull_rom(h0r, h1r, h2r, h3r, t); // integ/m2b-w1 [slot fast]
+		++out; // integ/m2b-w1 [slot fast]
+		frac += p_ratio; // integ/m2b-w1 [slot fast]
+		while (frac >= 1.0) { // integ/m2b-w1 [slot fast]
+			if (pos >= p_count) { // integ/m2b-w1 [slot fast]
+				slow = true; // integ/m2b-w1 [slot fast]
+				break; // integ/m2b-w1 [slot fast]
+			} // integ/m2b-w1 [slot fast]
+			frac -= 1.0; // integ/m2b-w1 [slot fast]
+			const float *x = in + size_t(pos) * (mono ? 1u : 2u); // integ/m2b-w1 [slot fast]
+			++pos; // integ/m2b-w1 [slot fast]
+			h0l = h1l; // integ/m2b-w1 [slot fast]
+			h0r = h1r; // integ/m2b-w1 [slot fast]
+			h1l = h2l; // integ/m2b-w1 [slot fast]
+			h1r = h2r; // integ/m2b-w1 [slot fast]
+			h2l = h3l; // integ/m2b-w1 [slot fast]
+			h2r = h3r; // integ/m2b-w1 [slot fast]
+			h3l = x[0]; // integ/m2b-w1 [slot fast]
+			h3r = mono ? x[0] : x[1]; // integ/m2b-w1 [slot fast]
+		} // integ/m2b-w1 [slot fast]
+		if (slow) { // integ/m2b-w1 [slot fast]
+			break; // integ/m2b-w1 [slot fast]
+		} // integ/m2b-w1 [slot fast]
+	} // integ/m2b-w1 [slot fast]
+	r_play.history[0][0] = h0l; // integ/m2b-w1 [slot fast]
+	r_play.history[0][1] = h0r; // integ/m2b-w1 [slot fast]
+	r_play.history[1][0] = h1l; // integ/m2b-w1 [slot fast]
+	r_play.history[1][1] = h1r; // integ/m2b-w1 [slot fast]
+	r_play.history[2][0] = h2l; // integ/m2b-w1 [slot fast]
+	r_play.history[2][1] = h2r; // integ/m2b-w1 [slot fast]
+	r_play.history[3][0] = h3l; // integ/m2b-w1 [slot fast]
+	r_play.history[3][1] = h3r; // integ/m2b-w1 [slot fast]
+#endif // integ/m2b-w1 [slot fast]
+	r_play.frac = frac; // integ/m2b-w1 [slot fast]
+	r_play.input_pos = pos; // integ/m2b-w1 [slot fast]
+	r_play.frames_out = out; // integ/m2b-w1 [slot fast]
+	r_i = i; // integ/m2b-w1 [slot fast]
+	return slow; // integ/m2b-w1 [slot fast]
+} // integ/m2b-w1 [slot fast]
 
 struct NextSegment {
 	bool play = false;
@@ -422,7 +527,36 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 			continue;
 		}
 		const double ratio = double(play.rate) / double(mix_rate) * double(s.pitch);
-		for (; i < limit; ++i) {
+		// integ/m2b-w1 [slot fast]: resample_buffered runs the loop below while no fade is on and the input is buffered
+		// (the stores to r_left / r_right may alias play's float members, so the general loop reloads them every frame);
+		// a frame whose input is not buffered pulls it through pull(), and the fast loop resumes with the same ratio.
+		bool general = true; // integ/m2b-w1 [slot fast]
+		if (slot.fade_step == 0.0f && slot.fade == 1.0f && (play.channels == 1 || play.channels == 2)) { // integ/m2b-w1 [slot fast]
+			general = false; // integ/m2b-w1 [slot fast]
+			for (;;) { // integ/m2b-w1 [slot fast]
+				const uint32_t count = play.source_done ? 0u : play.input_count; // integ/m2b-w1 [slot fast]: pull() feeds zeros then
+				const bool slow = resample_buffered(play, count, ratio, r_left, r_right, i, limit); // integ/m2b-w1 [slot fast]
+				if (!slow) { // integ/m2b-w1 [slot fast]
+					break; // integ/m2b-w1 [slot fast]: i == limit
+				} // integ/m2b-w1 [slot fast]
+				while (play.frac >= 1.0 && play.active) { // integ/m2b-w1 [slot fast]: the rest of frame i's pulls, as below
+					play.frac -= 1.0; // integ/m2b-w1 [slot fast]
+					pull(p_first_frame + i + 1); // integ/m2b-w1 [slot fast]
+					if (play.flush >= 3) { // integ/m2b-w1 [slot fast]
+						end_slot(p_first_frame + i + 1); // integ/m2b-w1 [slot fast]
+					} // integ/m2b-w1 [slot fast]
+				} // integ/m2b-w1 [slot fast]
+				++i; // integ/m2b-w1 [slot fast]
+				if (!play.active || i >= limit) { // integ/m2b-w1 [slot fast]
+					break; // integ/m2b-w1 [slot fast]
+				} // integ/m2b-w1 [slot fast]
+				if (play.channels != 1 && play.channels != 2) { // integ/m2b-w1 [slot fast]: a new segment with other channels
+					general = true; // integ/m2b-w1 [slot fast]
+					break; // integ/m2b-w1 [slot fast]
+				} // integ/m2b-w1 [slot fast]
+			} // integ/m2b-w1 [slot fast]
+		} // integ/m2b-w1 [slot fast]
+		for (; general && i < limit; ++i) { // integ/m2b-w1 [slot fast]: `general &&` added
 			const float t = float(play.frac);
 			float l = catmull_rom(play.history[0][0], play.history[1][0], play.history[2][0], play.history[3][0], t);
 			float r = catmull_rom(play.history[0][1], play.history[1][1], play.history[2][1], play.history[3][1], t);
