@@ -1025,6 +1025,20 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(line);
 		}
 	}
+	// E16 prints the VRAM next to the peak working set: the first frame after Done (everything loaded) and 60 frames on,
+	// once the viewmodel and UI nodes built on the first frame have been drawn.
+	if (g.frames == 1 || g.frames == 60) {
+		RenderingServer *rs_info = RenderingServer::get_singleton();
+		if (rs_info != nullptr) {
+			const double to_mib = 1.0 / (1024.0 * 1024.0);
+			char line[256];
+			std::snprintf(line, sizeof(line), "[m2a] video memory at frame %llu after Done: used %.1f MiB (textures %.1f MiB, buffers %.1f MiB)",
+					static_cast<unsigned long long>(g.frames), double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_VIDEO_MEM_USED)) * to_mib,
+					double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_TEXTURE_MEM_USED)) * to_mib,
+					double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_BUFFER_MEM_USED)) * to_mib);
+			UtilityFunctions::print(line);
+		}
+	}
 	if (g.hud != nullptr && g.hud->is_loaded() && !g.hud_names_applied) {
 		g.hud_names_applied = true;
 		const size_t filled = g.hud->item_index() != nullptr ? host::apply_item_names(g.hud_static, *g.hud->item_index()) : 0;
