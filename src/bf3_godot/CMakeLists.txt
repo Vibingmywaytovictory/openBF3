@@ -254,3 +254,27 @@ endif()
 target_sources(bf3_godot PRIVATE
     src/death_camera.cpp
 )
+
+# M2b ui (docs/design/m2b.md §4, §2.6 #16; docs/design/m2b-ui.md): Bf3TdmHud and its six screens (kill feed,
+# scoreboard, spawn screen, kill card, pre-round, round end), the strings, fonts, icons and placements they look up
+# (hud_tdm_text.h, Godot-free: ui.hud.tdm.install resolves the same lists). hud_tdm.cpp's presence turns on
+# OPENBF3_M2B_HAVE_UI (the "M2b W2.0" block above).
+target_sources(bf3_godot PRIVATE
+    src/hud_tdm.cpp
+    src/hud_tdm_screen.h
+    src/hud_tdm_text.h
+    src/hud_killfeed.h
+    src/hud_killfeed.cpp
+    src/hud_scoreboard.h
+    src/hud_scoreboard.cpp
+    src/spawn_screen.h
+    src/spawn_screen.cpp
+    src/kill_card.h
+    src/kill_card.cpp
+    src/pre_round.h
+    src/pre_round.cpp
+    src/round_end.h
+    src/round_end.cpp
+    src/hud_tdm_demo.h
+    src/hud_tdm_demo.cpp
+)

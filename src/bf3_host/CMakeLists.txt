@@ -111,3 +111,8 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/tdm_rules.cpp
 )
+
+# M2b ui (docs/design/m2b.md §4, §2.6 #16; docs/design/m2b-ui.md): the M2b half of the HUD feed (fill_hud_tdm).
+target_sources(bf3_host PRIVATE
+    src/hud_feed_tdm.cpp
+)

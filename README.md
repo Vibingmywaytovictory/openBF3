@@ -3065,3 +3065,56 @@ Measured 2026-10-19, `m2b/cam`, shared machine (times indicative only):
 * **The cam rows:** `m2b.contract2` 4 cases, 95 assertions; `m2b.cam.unit` 3 cases, 701 assertions; the `revive`
   case 41 assertions; all under 1 s.
 * **Asan:** the same four rows built and run under the asan preset passed with 0 reports.
+
+## M2b ui: the TDM HUD screens
+
+<!-- # M2b ui -->
+Design: [docs/design/m2b.md](docs/design/m2b.md) §4, §2.6 #16 and E9. The as-built notes, the lookups, the measured
+gates and the open issues are in [docs/design/m2b-ui.md](docs/design/m2b-ui.md).
+
+* **Feed.** `host::fill_hud_tdm` (src/bf3_host/src/hud_feed_tdm.cpp) runs after `fill_hud` with the same drained
+  events. It fills the M2b half of `HudModel` from the frame's `MatchState`, player rows and Death / Spawn events:
+  - the players by server slot and the sorted team lists;
+  - the kill counter;
+  - the kill feed (a ring of 8);
+  - the kill card (4 s after the own death);
+  - the spawn screen (kit bar, deploy timer, revive window);
+  - the pre-round countdown and freeze;
+  - the round end.
+
+  Hostile values are clamped or skipped and counted, never used as an index.
+* **Screens.** `Bf3TdmHud` (src/bf3_godot/src/hud_tdm.cpp) builds six Controls under the game's parent:
+  - the kill feed, top right, with the `_small` weapon icons and a drawn headshot mark, plus the team counter at the
+    top centre;
+  - the scoreboard, two teams, while Tab is held;
+  - the spawn screen: four kit cards with their loadouts, and a Deploy button the game polls with
+    `take_kit_click` / `take_deploy_click`;
+  - the kill card;
+  - the pre-round box;
+  - the round-end panel.
+
+  They draw with BF3's fonts ($HUD_medium, $Menu_medium, $Menu_bold), 24 localised strings, iconsingame icons and the
+  hudmpscreen / spawnscreenpc placements, all read from the install at run time. A missing lookup is counted in
+  `TdmHudRecords` and drawn with a fallback.
+* **Wiring.** gx wires the screens into the M2b game. On this branch, `Bf3TdmHudDemo` drives them with hand-made
+  models and saves screenshots.
+
+Commands (read-only on the install; keep logs and screenshots out of the repo):
+
+```bat
+ctest --test-dir b\dev -R "^ui\.hud\.tdm\.(unit|install)$"      :: the feed from recorded frames; every lookup on the install
+ctest --test-dir b\dev -R "^m2b\.contract2$"                   :: the contract, ui case active
+:: the screens in Godot: a scratch scene with Bf3Localisation, Bf3UiAssets and Bf3TdmHudDemo (docs/design/m2b-ui.md §5)
+"C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe" --path bf3-opensource --resolution 1280x720 <scratch>\tdm_hud_demo.tscn -- --tdm-shots=<dir>
+```
+
+Measured 2026-10-19, dev preset, `m2b/ui`:
+
+| gate | measured |
+|---|---|
+| ui.hud.tdm.unit | 7 cases pass in 0.05 s (budget 2 s). The recorded round has 255 frames, 7 deaths = 7 feed lines, 2 kill cards and 0 mismatching frames; 10 or more hostile inputs were counted and clamped |
+| ui.hud.tdm.install | 0.55 s (budget 15 s): 24/24 strings, 3/3 fonts, 5/5 icons, 3/3 placements, 13/13 kit items with name and `_small` icon; install.unchanged clean (256 files) |
+| m2b.contract2 | 4 cases and 113 assertions pass, ui case active (cam still pending) |
+| run time (demo) | headless 9/9 rows; windowed 16/16 rows and 7 screenshots in `openBF3\b\shots\ui\` (gitignored); 0 missing fonts, icons or strings |
+| E9 | not run here: gx's `godot.m2b.play` in the wave-2 merge pass |
+| branch pass | `tools\build.cmd dev`: 149 rows, 147 passed, 2 skipped (as before), 0 failed, 386.6 s ctest wall (indicative only) |
