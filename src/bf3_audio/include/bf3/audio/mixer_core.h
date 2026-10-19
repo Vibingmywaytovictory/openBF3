@@ -171,8 +171,9 @@ public:
 // frame after a start (.head): the discontinuity the cut leaves in the mix. Suspend / Unsuspend are the HDR window's
 // transitions (the sends ramp over one sub-block). Fade: a cut that pt1's fade turned into a ramp (its step is the
 // level the fade starts from). CallGap: a mix() call that came more than kPt1LateCallMs after the previous one
-// (Godot's audio thread late; step = the gap in ms).
-enum class MixerCutKind : uint8_t { Drop = 0, Pend, Kill, Finish, Start, Resume, Suspend, Unsuspend, Fade, CallGap, Count };
+// (Godot's audio thread late; step = the gap in ms). LateBlock: a block that took longer than its real-time length to
+// render (MixerStats::late_blocks; step = its wall time in ms), with its frame, to set against the main thread's hitches.
+enum class MixerCutKind : uint8_t { Drop = 0, Pend, Kill, Finish, Start, Resume, Suspend, Unsuspend, Fade, CallGap, LateBlock, Count };
 inline constexpr size_t kMixerCutKinds = size_t(MixerCutKind::Count);
 inline constexpr float kPt1AudibleStep = 1.0e-3f; // -60 dBFS
 inline constexpr float kPt1LoudStep = 1.0e-2f; // -40 dBFS

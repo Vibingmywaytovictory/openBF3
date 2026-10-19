@@ -496,6 +496,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 	const uint64_t budget_ns = uint64_t(kBlockFrames) * 1000000000ull / std::max<uint32_t>(m.config.mix_rate, 1);
 	if (ns > budget_ns) {
 		stats.late_blocks.fetch_add(1, std::memory_order_relaxed);
+		m.pt1_event(MixerCutKind::LateBlock, kNoInstance, float(double(ns) / 1e6), nullptr); // PT1 snd [cuts]
 	}
 	record_mix_ns(stats, ns, budget_ns); // M2b au [profile] (mixer_core.h)
 }
@@ -784,7 +785,7 @@ void MixerCore::Impl::pt1_event(MixerCutKind p_kind, InstanceHandle p_handle, fl
 	const size_t k = std::min(size_t(p_kind), kMixerCutKinds - 1);
 	const float step = std::isfinite(p_step) ? std::fabs(p_step) : 0.0f;
 	cut_stats.events[k].fetch_add(1, std::memory_order_relaxed);
-	if (p_kind != MixerCutKind::CallGap) {
+	if (p_kind != MixerCutKind::CallGap && p_kind != MixerCutKind::LateBlock) {
 		if (step > kPt1AudibleStep) {
 			cut_stats.audible[k].fetch_add(1, std::memory_order_relaxed);
 		}
@@ -845,7 +846,7 @@ size_t MixerCore::pt1_poll_cuts(std::span<MixerCutEvent> r_out) {
 }
 
 const char *mixer_cut_kind_name(MixerCutKind p_kind) {
-	static const char *const kNames[kMixerCutKinds] = { "drop", "pend", "kill", "finish", "start", "resume", "suspend", "unsuspend", "fade", "callgap" };
+	static const char *const kNames[kMixerCutKinds] = { "drop", "pend", "kill", "finish", "start", "resume", "suspend", "unsuspend", "fade", "callgap", "lateblock" };
 	return size_t(p_kind) < kMixerCutKinds ? kNames[size_t(p_kind)] : "?";
 }
 
@@ -853,7 +854,7 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 	std::string out = "audio cuts (events / > -60 dBFS / > -40 dBFS / max step):";
 	char part[200];
 	for (size_t k = 0; k < kMixerCutKinds; ++k) {
-		if (MixerCutKind(k) == MixerCutKind::CallGap) {
+		if (MixerCutKind(k) == MixerCutKind::CallGap || MixerCutKind(k) == MixerCutKind::LateBlock) {
 			continue;
 		}
 		std::snprintf(part, sizeof(part), " %s %llu/%llu/%llu/%.4f", mixer_cut_kind_name(MixerCutKind(k)), (unsigned long long)p_stats.events[k].load(),
@@ -871,8 +872,10 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 		out += part;
 	}
 	const size_t g = size_t(MixerCutKind::CallGap);
-	std::snprintf(part, sizeof(part), "; late calls (> %.0f ms) %llu, max %.1f ms; event drops %llu", kPt1LateCallMs, (unsigned long long)p_stats.events[g].load(),
-			double(p_stats.step_max[g].load()), (unsigned long long)p_stats.event_drops.load());
+	const size_t lb = size_t(MixerCutKind::LateBlock);
+	std::snprintf(part, sizeof(part), "; late calls (> %.0f ms) %llu, max %.1f ms; late blocks %llu, max %.1f ms; event drops %llu", kPt1LateCallMs,
+			(unsigned long long)p_stats.events[g].load(), double(p_stats.step_max[g].load()), (unsigned long long)p_stats.events[lb].load(),
+			double(p_stats.step_max[lb].load()), (unsigned long long)p_stats.event_drops.load());
 	out += part;
 	return out;
 }
