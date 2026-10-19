@@ -197,6 +197,11 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	if (const std::string fade = user_arg_value("audio-cut-fade"); !fade.empty()) { // PT1 snd [fade]: frames; 0 = the old cuts (A/B)
 		mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800)); // PT1 snd [fade]
 	} // PT1 snd [fade]
+	if (user_arg_value("audio-cap-hold") == "0") { // PT1 snd [hold]: au's cap without hysteresis (A/B)
+		mc.pt1_cap_hold_db = 0.0f; // PT1 snd [hold]
+		mc.pt1_voice_hold_blocks = 0; // PT1 snd [hold]
+		mc.pt1_resume_margin = 0; // PT1 snd [hold]
+	} // PT1 snd [hold]
 	m.lead_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames);
 	m.mixer = std::make_shared<ba::MixerCore>(mc);
 	m.mixer->set_tap(&m.tap); // before the audio thread sees the mixer
