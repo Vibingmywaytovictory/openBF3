@@ -31,6 +31,7 @@
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/audio/weapon_foley.h" // PT1 rld [foley]
 #include "bf3/audio/weapon_sound.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
@@ -134,6 +135,7 @@ struct WeaponAudioDef {
 	uint32_t one_shot_event = 0; // OneShot: the event a use posts (DefaultStartEvent, else Fire, else Melee)
 	bool has_reload = false; // the program takes the Reload event (kHashReload): reload one-shots
 	double shot_interval_s = 0.0; // the source's (Driver: also binding.shot_interval_seconds)
+	WeaponFoley foley; // PT1 rld [foley]: the reload / Action / Bolt inputs read from the program (weapon_foley.h)
 };
 
 // The match's weapon sounds, by WeaponTable def id (GunplayLevel::defs order). Built on the loader thread.

@@ -190,6 +190,7 @@ core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, 
 		}
 		d.program = *prog;
 		d.has_reload = has_event(*d.program, kHashReload);
+		d.foley = read_weapon_foley(*d.program); // PT1 rld [foley]
 		if (!src.explosion_sound.empty()) {
 			const core::Result<std::shared_ptr<const ca::SoundProgram>> &ex = compile(src.explosion_sound);
 			if (ex) {
@@ -1206,6 +1207,285 @@ struct WeaponAudioRouter::Impl {
 		mixer.reclaim();
 		stats.weapon_voices = uint32_t(voices.size());
 		stats.peak_weapon_voices = std::max(stats.peak_weapon_voices, stats.weapon_voices);
+	}
+
+	// PT1 rld [foley] (docs/design/pt1-rld.md, weapon_foley.h): the reload, Action and Bolt one-shots of the weapon
+	// patches, posted where the weapon state changes. The own soldier's come from the sim's timed events (exact times
+	// on the Predicted timeline, so they start with the viewmodel clip of the same event) and the presented own weapons
+	// (dry fire, zoom); the others' from their presented fields on the Render timeline (the frame the crowd shows the
+	// change). The own 1p one-shots follow the listener; the others' sit at the shooter's muzzle and are not started
+	// beyond their event's distance band (the data's crossfader would start nothing there).
+	struct OtherFoley {
+		bool seen = false;
+		uint8_t generation = 0;
+		uint16_t def = sw::kNoWeapon;
+		sw::WeaponPhase phase = sw::WeaponPhase::None;
+		bool ads = false;
+		InstanceHandle reload = kNoInstance; // the running reload one-shot (for its release)
+		uint16_t reload_def = sw::kNoWeapon;
+	};
+	std::array<OtherFoley, 256> other_foley{};
+	InstanceHandle own_reload = kNoInstance;
+	uint16_t own_reload_def = sw::kNoWeapon;
+	std::vector<InstanceHandle> own_foley; // the own 1p foley one-shots still in the pool (they follow the listener)
+	bool own_weapons_valid = false;
+	net::WeaponsWire own_weapons{};
+	bool own_weapons_seen = false;
+	net::WeaponsWire own_weapons_last{};
+	bool own_zoom = false;
+	uint32_t foley_counter = 0;
+
+	// Starts a foley one-shot: p_event, after p_param = p_value when p_param != 0. kNoInstance when refused.
+	InstanceHandle foley_start(const FoleyCue &p_cue, uint32_t p_event, uint32_t p_param, float p_value, const EmitterState &p_emitter) {
+		const WeaponAudioDef *d = def_of(p_cue.def);
+		if (d == nullptr || !d->program) {
+			return kNoInstance;
+		}
+		OneShotOptions o;
+		o.event = p_event;
+		o.set_first_person = true;
+		o.first_person = p_cue.first_person;
+		o.mix_rate = config.mix_rate;
+		WeaponAudioObserver *obs = observer;
+		const FoleyCue cue = p_cue;
+		o.before_start = [p_param, p_value, obs, cue](PatchInstance &r_instance, InstanceHandle) {
+			if (p_param != 0) {
+				r_instance.set_parameter(p_param, p_value);
+			}
+			if (obs != nullptr) {
+				obs->on_foley(cue, &r_instance);
+			}
+		};
+		const uint64_t seed = sound_seed(p_cue.slot, 0x20000000u | (++foley_counter & 0x0FFFFFFFu));
+		if (!pool.start(mixer, d->program, bank, tuning, seed, p_emitter, listener, p_cue.frame, o)) {
+			return kNoInstance;
+		}
+		++stats.one_shots;
+		const InstanceHandle h = pool.last_handle();
+		if (p_cue.own && p_cue.first_person) {
+			own_foley.push_back(h);
+		}
+		return h;
+	}
+
+	// The reload's release event on its running instance (the reload was cut short).
+	void foley_release(InstanceHandle &r_handle, uint16_t p_def, const FoleyCue &p_cue) {
+		if (r_handle == kNoInstance) {
+			return;
+		}
+		const WeaponAudioDef *d = def_of(p_def);
+		if (d != nullptr && d->foley.reload.release_event != 0 && pool.contains(r_handle)) {
+			MixerCommand c;
+			c.type = MixerCommandType::PostEvent;
+			c.handle = r_handle;
+			c.name_hash = d->foley.reload.release_event;
+			c.at_frame = p_cue.frame;
+			if (mixer.push(c)) {
+				++stats.foley_releases;
+				if (observer != nullptr) {
+					FoleyCue rc = p_cue;
+					rc.kind = FoleyCueKind::ReloadRelease;
+					rc.def = p_def;
+					observer->on_foley(rc, nullptr);
+				}
+			}
+		}
+		r_handle = kNoInstance;
+	}
+
+	EmitterState own_foley_emitter() const {
+		EmitterState e;
+		e.position = listener.position;
+		e.forward = listener.forward;
+		return e;
+	}
+
+	FoleyCue own_cue(uint16_t p_def, sw::SimTime p_time, uint64_t p_frame) const {
+		FoleyCue c;
+		c.own = true;
+		c.first_person = own_first_person;
+		c.slot = own_slot;
+		c.def = p_def;
+		c.time = p_time;
+		c.frame = p_frame;
+		return c;
+	}
+
+	void foley_action(FoleyCue &r_cue, FoleyAction p_action, const EmitterState &p_emitter) {
+		const WeaponAudioDef *d = def_of(r_cue.def);
+		if (d == nullptr || !d->foley.action.present) {
+			return;
+		}
+		// A patch without ActionType (the knife: Action alone plays its deploy) takes the event only for a deploy.
+		if (!d->foley.action_type_param && p_action != FoleyAction::Deploy) {
+			return;
+		}
+		if (!r_cue.own && r_cue.distance_m > d->foley.action.reach_m) {
+			++stats.foley_out_of_reach;
+			return;
+		}
+		r_cue.kind = FoleyCueKind::Action;
+		r_cue.action = p_action;
+		if (foley_start(r_cue, kHashAction, d->foley.action_type_param ? kHashActionType : 0, float(uint8_t(p_action)), p_emitter) != kNoInstance) {
+			++stats.foley;
+		}
+	}
+
+	void foley_reload(FoleyCue &r_cue, int32_t p_magazine, const EmitterState &p_emitter, InstanceHandle &r_handle, uint16_t &r_handle_def) {
+		const WeaponAudioDef *d = def_of(r_cue.def);
+		if (d == nullptr || !d->foley.reload.present) {
+			return;
+		}
+		if (!r_cue.own && r_cue.distance_m > d->foley.reload.reach_m) {
+			++stats.foley_out_of_reach;
+			return;
+		}
+		r_cue.kind = FoleyCueKind::Reload;
+		// IsShortReload: 1 when rounds are left (tactical), 0 when empty; unknown: not set (the data's default 0).
+		uint32_t param = 0;
+		if (d->foley.short_reload_param && p_magazine >= 0) {
+			param = kHashIsShortReload;
+			r_cue.short_reload = p_magazine > 0 ? 1 : 0;
+		}
+		r_handle = foley_start(r_cue, kHashReload, param, r_cue.short_reload > 0 ? 1.0f : 0.0f, p_emitter);
+		r_handle_def = r_cue.def;
+		if (r_handle != kNoInstance) {
+			++stats.reloads;
+		}
+	}
+
+	// OwnTimed: kReloadStarted, kReloadCancelled, kDeployStarted, kFireModeChanged, kBoltStarted.
+	void foley_own_timed(const host::PresentEvent &p_e, SimMixerClock &r_clock) {
+		FoleyCue c = own_cue(p_e.def, p_e.time, r_clock.frame_of(p_e.time, host::PresentTimeline::Predicted));
+		const EmitterState em = own_foley_emitter();
+		switch (p_e.id) {
+			case sw::weapon_events::kReloadStarted: {
+				int32_t magazine = -1;
+				if (own_weapons_valid && p_e.aux < sw::kMaxWeaponSlots && own_weapons.slots[p_e.aux].def == p_e.def) {
+					magazine = own_weapons.slots[p_e.aux].magazine; // unchanged until the commit at 85 % of the reload
+				}
+				foley_reload(c, magazine, em, own_reload, own_reload_def);
+				break;
+			}
+			case sw::weapon_events::kReloadCancelled:
+				foley_release(own_reload, own_reload_def, c);
+				break;
+			case sw::weapon_events::kDeployStarted:
+				foley_release(own_reload, own_reload_def, c); // a switch cuts a running reload
+				foley_action(c, FoleyAction::Deploy, em);
+				break;
+			case sw::weapon_events::kFireModeChanged:
+				foley_action(c, FoleyAction::FireMode, em);
+				break;
+			case sw::weapon_events::kBoltStarted: {
+				const WeaponAudioDef *d = def_of(p_e.def);
+				if (d != nullptr && d->foley.bolt.present) {
+					c.kind = FoleyCueKind::Bolt;
+					if (foley_start(c, kHashBolt, 0, 0.0f, em) != kNoInstance) {
+						++stats.foley;
+					}
+				}
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	// The presented own weapons of this frame: the zoom's rising edge and the dry-fire tick flag (no timed events).
+	void foley_own_state(SimMixerClock &r_clock) {
+		if (!own_weapons_valid) {
+			own_weapons_seen = false;
+			return;
+		}
+		const net::WeaponsWire &w = own_weapons;
+		const bool zoom = w.active < sw::kMaxWeaponSlots && w.timers[0].slot == w.active && (w.timers[0].flags & sw::slot_flags::kZoomWasDown) != 0;
+		const bool fresh = !own_weapons_seen || !(w == own_weapons_last);
+		const uint16_t def = w.active < sw::kMaxWeaponSlots ? w.slots[w.active].def : sw::kNoWeapon;
+		const host::PresentClock &now = r_clock.now();
+		if (own_weapons_seen && def != sw::kNoWeapon && now.predicted_valid) {
+			const uint64_t frame = r_clock.frame_of(now.predicted, host::PresentTimeline::Predicted);
+			if (zoom && !own_zoom) {
+				FoleyCue c = own_cue(def, now.predicted, frame);
+				foley_action(c, FoleyAction::Zoom, own_foley_emitter());
+			}
+			if (fresh && (w.events & sw::weapon_events::kDryFire) != 0) {
+				FoleyCue c = own_cue(def, now.predicted, frame);
+				foley_action(c, FoleyAction::DryFire, own_foley_emitter());
+			}
+		}
+		own_zoom = zoom;
+		own_weapons_last = w;
+		own_weapons_seen = true;
+	}
+
+	// Another soldier's presented fields: reload_seq (a reload started), the def (a switch: deploy), the phase (a
+	// reload cut short) and ads (zoom). Called once per drawn soldier with a weapon record, before the bursts' use of it.
+	void foley_other(const host::PresentedSoldier &p_s, const host::PresentedOtherWeapon &p_w, const Track &p_t, SimMixerClock &r_clock) {
+		OtherFoley &o = other_foley[p_s.slot];
+		const bool same_life = o.seen && o.generation == p_s.generation && p_t.weapon_seen;
+		const sw::SimTime when = sw::SimTime(p_w.sample_tick) * sw::kTimeUnitsPerTick;
+		FoleyCue c;
+		c.slot = p_s.slot;
+		c.def = p_w.def;
+		c.time = when;
+		c.frame = r_clock.frame_of(when, host::PresentTimeline::Render);
+		c.distance_m = p_t.distance;
+		if (same_life) {
+			const bool reloading = o.phase == sw::WeaponPhase::Reloading || o.phase == sw::WeaponPhase::ReloadShell;
+			if (o.reload != kNoInstance && (p_w.def != o.reload_def || (reloading && p_w.phase == sw::WeaponPhase::Deploying))) {
+				foley_release(o.reload, o.reload_def, c);
+			}
+			if (p_w.reload_seq != p_t.reload_seq) {
+				FoleyCue rc = c;
+				foley_reload(rc, -1, p_t.emitter, o.reload, o.reload_def); // the others' magazine is not sent: the data's default
+			}
+			if (p_w.def != o.def && p_w.def != sw::kNoWeapon) {
+				FoleyCue dc = c;
+				foley_action(dc, FoleyAction::Deploy, p_t.emitter);
+			}
+			if (p_w.ads && !o.ads && p_w.def == o.def) {
+				FoleyCue zc = c;
+				foley_action(zc, FoleyAction::Zoom, p_t.emitter);
+			}
+		} else {
+			o.reload = kNoInstance;
+		}
+		o.seen = true;
+		o.generation = p_s.generation;
+		o.def = p_w.def;
+		o.phase = p_w.phase;
+		o.ads = p_w.ads;
+	}
+
+	// A death cuts the soldier's running reload sound.
+	void foley_death(uint8_t p_slot, SimMixerClock &r_clock) {
+		FoleyCue c;
+		c.slot = p_slot;
+		const host::PresentClock &now = r_clock.now();
+		if (p_slot == own_slot) {
+			c.own = true;
+			c.frame = r_clock.frame_of(now.predicted, host::PresentTimeline::Predicted);
+			foley_release(own_reload, own_reload_def, c);
+		} else {
+			c.frame = r_clock.frame_of(now.render, host::PresentTimeline::Render);
+			foley_release(other_foley[p_slot].reload, other_foley[p_slot].reload_def, c);
+		}
+	}
+
+	// The own 1p foley stays at the listener (the camera moves during a reload).
+	void foley_follow_listener() {
+		size_t keep = 0;
+		for (size_t i = 0; i < own_foley.size(); ++i) {
+			if (!pool.contains(own_foley[i])) {
+				continue;
+			}
+			if (own_first_person && mixer.push(emitter_command(own_foley[i], own_foley_emitter()))) {
+				++stats.emitter_updates;
+			}
+			own_foley[keep++] = own_foley[i];
+		}
+		own_foley.resize(keep);
 	}
 };
 
