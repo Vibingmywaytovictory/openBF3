@@ -104,12 +104,12 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			if (!cur.read_guid("Anim", anim) || anim.is_null()) {
 				return core::make_error(label(cur) + ": no Anim");
 			}
-			uint32_t ticks = 0;
-			float fps = 0.0f, scale = 0.0f;
-			if (!cur.read_u32("NumTicks", ticks) || !cur.read_float("FPS", fps) || !cur.read_float("FPSScale", scale) || !finite(fps) || !finite(scale) ||
-					!(fps > 0.0f) || !(scale > 0.0f)) {
+			float ticks_f = 0.0f, fps = 0.0f, scale = 0.0f; // NumTicks is stored as a float or an integer
+			if (!cur.read_float("NumTicks", ticks_f) || !cur.read_float("FPS", fps) || !cur.read_float("FPSScale", scale) || !finite(ticks_f) || !finite(fps) ||
+					!finite(scale) || ticks_f < 0.0f || ticks_f > 1.0e7f || !(fps > 0.0f) || !(scale > 0.0f)) {
 				return core::make_error(label(cur) + ": no NumTicks / FPS / FPSScale");
 			}
+			const uint32_t ticks = uint32_t(ticks_f);
 			route.clip_controller = cur.guid().index();
 			route.controller = std::string(cur.name());
 			route.controller_package = pkg;

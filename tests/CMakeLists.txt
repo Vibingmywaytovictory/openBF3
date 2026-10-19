@@ -1533,3 +1533,19 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     openbf3_cost(godot.m2b.play 1 150)
     openbf3_cost(godot.m2b_load 1 50)
 endif()
+
+# PT1 run (docs/design/pt1-run.md): anim.pt1_run.unit (move_group_weights on a synthetic group of MP_Run's shape: the
+# clip choice per direction and speed, the cycle rate per speed, the stride / ground speed identity, hostile input; the
+# crowd evaluator with synthetic move groups: run, sprint and its ramp, crouch, prone, idle; no data, functional,
+# under 2 s) and anim.pt1_run (the install, read-only: the three move groups as read, the cycle rate and the evaluated
+# feet's stride against the ground per speed before and after, install.unchanged; exits 77 without an install).
+openbf3_test(test_pt1_run test_main.cpp pt1_run_tests.cpp test_support.h)
+target_link_libraries(test_pt1_run PRIVATE bf3_anim)
+add_test(NAME anim.pt1_run.unit COMMAND test_pt1_run --test-suite=pt1-run-unit)
+add_test(NAME anim.pt1_run COMMAND test_pt1_run --test-suite=pt1-run)
+set_tests_properties(anim.pt1_run PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(anim.pt1_run.unit anim.pt1_run PROPERTIES TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_pt1_run_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(anim.pt1_run.unit anim.pt1_run PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_pt1_run_cl_dir}")
+endif()
