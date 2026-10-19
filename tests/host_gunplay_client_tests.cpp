@@ -2504,3 +2504,161 @@ TEST_SUITE("host-gunplay-client") {
 		tg::check_install_unchanged(*m);
 	}
 }
+
+// M2a gate
+// E2's client half, added at the M2a gate pass (docs/design/m2a-gate.md): m2a.md §1 E2 asks for "the client's
+// cosmetic flight of the same shot within 1 mm of the server's at 300 m". sv measured the server half (the drop and
+// the expiry, host.gunplay.server case "drop") and left the client half to this suite (m2a-sv.md, measurement notes),
+// whose case list had no E2 row. ClientProjectiles keeps its in-flight positions inside, so the two flights are
+// compared where they end: on sv's sky lane (find_sky_lane, 40 m above Metro's static world) the shooter looks down at
+// the world about 300 m out (a ray search over the pitch along the lane), fires single M16A3 rounds, and the client's
+// own-world Impact event (Predicted timeline, slot = the own slot, id = the shot index) is compared with the server's
+// ImpactEvent of the same shot (a GunplayObserver): the first static impact of each shot, positions within 1 mm.
+#include "bf3/host/target_bots.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/weapons/spread_recoil.h"
+
+namespace {
+
+class GateImpactLog final : public host::GunplayObserver {
+public:
+	void projectiles(uint32_t p_tick, const sw::ProjectileStepOutput &p_out, std::span<const sw::Projectile> p_live) override {
+		(void)p_tick, (void)p_live;
+		std::lock_guard lock(mutex_);
+		for (const sw::ImpactEvent &e : p_out.impacts) {
+			if (impacts_.size() < 65536) {
+				impacts_.push_back(e);
+			}
+		}
+	}
+	std::vector<sw::ImpactEvent> impacts() const {
+		std::lock_guard lock(mutex_);
+		return impacts_;
+	}
+
+private:
+	mutable std::mutex mutex_;
+	std::vector<sw::ImpactEvent> impacts_;
+};
+
+void run_e2_client_flight(const Arena &p_arena) {
+	auto log = std::make_shared<GateImpactLog>();
+	auto game = std::make_shared<host::GameServerConfig>();
+	game->level = p_arena.level;
+	game->max_slots = 64;
+	game->dev_commands = true;
+	game->seed = 1;
+	game->gunplay.mechanics_cfg = mechanics_cfg_path();
+	game->gunplay.observer = log;
+	host::ServerConfig sc;
+	sc.game = game;
+	host::ServerHost server;
+	std::string err;
+	REQUIRE_MESSAGE(server.start(sc, &err), err);
+	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(p_arena.level->static_world);
+	REQUIRE(world.ok());
+	core::Result<host::SkyLane> lane = host::find_sky_lane(**world, 975.0f, sw::BallisticsLimits{}.world_margin);
+	REQUIRE_MESSAGE(lane.ok(), (lane.ok() ? std::string() : lane.error().message));
+	// The pitch whose ray from the lane's eye meets the world closest to 300 m out (horizontally).
+	int16_t best_pitch = 0;
+	float best_distance = -1.0f;
+	for (int k = 4; k <= 240; ++k) {
+		const int16_t q = sim::quantize_pitch(-float(k) * 0.25f * 3.14159265f / 180.0f);
+		const sim::Vec3 d = sw::aim_direction(lane->yaw, q, {});
+		const sim::Vec3 delta{ d[0] * 600.0f, d[1] * 600.0f, d[2] * 600.0f };
+		sim::StaticHit hit;
+		if (!(*world)->ray(lane->eye, delta, sim::query_mask::kProjectile, &hit)) {
+			continue;
+		}
+		const float h = std::hypot(hit.position[0] - lane->eye[0], hit.position[2] - lane->eye[2]);
+		if (best_distance < 0.0f || std::fabs(h - 340.0f) < std::fabs(best_distance - 340.0f)) {
+			best_distance = h;
+			best_pitch = q;
+		}
+	}
+	std::printf("E2 client flight: sky lane eye (%.1f, %.1f, %.1f) yaw %u; aim pitch %.2f deg meets the world %.1f m out (ray)\n", double(lane->eye[0]),
+			double(lane->eye[1]), double(lane->eye[2]), unsigned(lane->yaw), double(sim::pitch_radians(best_pitch)) * 180.0 / 3.14159265358979, double(best_distance));
+	REQUIRE(best_distance >= 300.0f);
+	REQUIRE(best_distance <= 400.0f);
+	Player p;
+	REQUIRE(p.start(server.port(), "off", 41, {}, 1, p_arena.level));
+	REQUIRE(p.wait_spawned());
+	const uint8_t own = uint8_t(p.client.stats().slot);
+	constexpr int kShots = 8; // in-air hip spread scatters them: the rounds whose impact is 300 m or more out count
+	for (int k = 0; k < kShots; ++k) {
+		// Alive (the previous fall may have killed it; a new life is adopted by poll) and deployed.
+		const auto start = std::chrono::steady_clock::now();
+		while (tg::seconds_since(start) < 15.0 && !(p.frame->valid && p.frame->own_curr.mode != sim::MoveMode::Dead && p.input.life == p.frame->own_curr.life)) {
+			p.poll();
+			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		}
+		p.run_for(1.2);
+		REQUIRE(p.teleport(lane->feet, lane->yaw).has_value());
+		p.input.yaw = sim::yaw_radians(lane->yaw);
+		p.input.pitch = sim::pitch_radians(best_pitch);
+		p.run_for(0.05); // the view reaches the command
+		p.input.held_buttons = sim::buttons::kFire;
+		p.run_for(0.04); // one tick held: one round (75 ms interval)
+		p.input.held_buttons = 0;
+		p.run_for(2.0); // the flight (about 0.5 s) and the fall
+	}
+	std::vector<host::PredictedShot> shots;
+	std::vector<host::PredictedTimed> timed;
+	p.client.take_predicted(shots, timed);
+	p.client.stop();
+	server.stop();
+	const std::vector<sw::ImpactEvent> server_impacts = log->impacts();
+	size_t compared = 0, within = 0, past_300 = 0;
+	double worst = 0.0;
+	for (const host::PredictedShot &s : shots) {
+		const host::PresentEvent *c = nullptr;
+		for (const host::PresentEvent &e : p.events) {
+			if (e.kind == host::PresentKind::Impact && e.timeline == host::PresentTimeline::Predicted && e.slot == own && e.id == s.shot.shot_index && e.pellet == 0) {
+				c = &e;
+				break;
+			}
+		}
+		const sw::ImpactEvent *v = nullptr;
+		for (const sw::ImpactEvent &e : server_impacts) {
+			if (e.player_slot == own && e.shot_index == s.shot.shot_index && e.pellet == 0 && e.kind == sw::ImpactKind::Static) {
+				v = &e;
+				break;
+			}
+		}
+		if (c == nullptr || v == nullptr) {
+			std::printf("E2 client flight: shot %u: client impact %s, server impact %s (origin %.1f %.1f %.1f, direction pitch %.2f deg)\n", unsigned(s.shot.shot_index),
+					c ? "yes" : "no", v ? "yes" : "no", double(s.shot.origin[0]), double(s.shot.origin[1]), double(s.shot.origin[2]),
+					std::asin(double(s.shot.direction[1])) * 180.0 / 3.14159265358979);
+			continue;
+		}
+		const double dx = double(c->pos[0]) - double(v->position[0]), dy = double(c->pos[1]) - double(v->position[1]), dz = double(c->pos[2]) - double(v->position[2]);
+		const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+		const double h = std::hypot(double(v->position[0]) - double(s.shot.origin[0]), double(v->position[2]) - double(s.shot.origin[2]));
+		++compared;
+		within += d <= 1e-3 ? 1u : 0u;
+		worst = std::max(worst, d);
+		std::printf("E2 client flight: shot %u: origin (%.1f, %.1f, %.1f), direction pitch %.2f deg, impact %.2f m out (horizontal), client - server %.4f mm\n",
+				unsigned(s.shot.shot_index), double(s.shot.origin[0]), double(s.shot.origin[1]), double(s.shot.origin[2]),
+				std::asin(double(s.shot.direction[1])) * 180.0 / 3.14159265358979, h, d * 1000.0);
+		past_300 += h >= 300.0 ? 1u : 0u;
+	}
+	std::printf("E2 client flight (%s): %zu predicted shots, %zu with both impacts compared (%zu of them 300 m or more out), %zu within 1 mm, worst %.4f mm\n",
+			p_arena.name, shots.size(), compared, past_300, within, worst * 1000.0);
+	CHECK(past_300 >= 3);
+	CHECK(within == compared);
+}
+
+} // namespace
+
+TEST_SUITE("host-gunplay-client") {
+	TEST_CASE("host.gunplay.client: E2 client flight on Metro: the cosmetic flight of an own shot ends within 1 mm of the server's about 300 m out") {
+		if (!timing_enabled("E2 client flight")) {
+			return;
+		}
+		const std::optional<Arena> metro = metro_arena();
+		if (!metro) {
+			return;
+		}
+		run_e2_client_flight(*metro);
+	}
+}
