@@ -124,6 +124,7 @@ struct Bf3GameAudio::Impl {
 	uint64_t auditions_started = 0;
 	int64_t lead_frames = 2 * int64_t(ba::kBlockFrames);
 	std::unique_ptr<Pt1Capture, void (*)(Pt1Capture *)> pt1{ nullptr, &pt1_delete_capture }; // PT1 snd [capture]
+	core::PathGuard pt1_guard; // PT1 snd [capture]: the install's, taken in load()
 };
 
 Bf3GameAudio::Bf3GameAudio() :
@@ -142,6 +143,7 @@ core::Status Bf3GameAudio::load(const M2aLoadInputs &p_in, std::span<const std::
 		return core::make_error("Bf3GameAudio::load: the shared level has no gunplay tables (SharedLoadOptions::gunplay)");
 	}
 	m.db = p_in.db;
+	m.pt1_guard = p_in.db->install->reader().write_guard(); // PT1 snd [capture]: the loader frees the database after load
 	core::Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(p_in.db->install, *p_in.db->level, *p_in.shared->gunplay, p_impact_sounds, p_in.threads, p_in.stop,
 			m.load_options);
 	if (!a) {
@@ -469,6 +471,7 @@ std::string game_audio_profile_text(const Bf3GameAudio &p_audio) {
 
 struct Pt1Capture {
 	std::filesystem::path dir; // empty: no capture, the health line only
+	core::PathGuard guard; // Impl::pt1_guard: m.db is not used here, the loader frees the database after load
 	std::unique_ptr<ba::WavRecorder> wav;
 	std::vector<ba::MixerCutEvent> events;
 	std::vector<std::pair<uint64_t, double>> hitches; // (mixer clock, ms since the previous step)
@@ -519,6 +522,7 @@ void pt1_capture_begin(Impl &r_m) {
 		seconds = std::isfinite(v) ? std::clamp(v, 1.0, 1800.0) : seconds;
 	}
 	r_m.pt1->dir = std::filesystem::path(dir);
+	r_m.pt1->guard = r_m.pt1_guard;
 	r_m.pt1->wav = std::make_unique<ba::WavRecorder>(ba::kMixRate, seconds);
 	r_m.pt1->events.reserve(size_t(1) << 16);
 	r_m.mixer->pt1_record_cuts(true);
@@ -556,12 +560,13 @@ void pt1_capture_end(Impl &r_m) {
 		return;
 	}
 	const ba::MixerStats &ms = r_m.mixer->stats();
-	char line[400];
+	char line[600];
 	const int prio = pt1_audio_thread_priority();
 	std::snprintf(line, sizeof(line),
-			"; mixer: %llu blocks, %llu late, max block %.3f ms, max call gap %.1f ms, output latency %llu frames, audio thread priority %s%d; main "
+			"; mixer: %llu blocks, %llu late, %llu late commands, %llu starved, %llu decode errors, %llu ring overflows, max block %.3f ms, max call gap %.1f ms, output latency %llu frames, audio thread priority %s%d; main "
 			"thread hitches > %.0f ms: %llu (max %.0f ms)",
-			(unsigned long long)ms.blocks.load(), (unsigned long long)ms.late_blocks.load(), double(ms.max_block_ns.load()) / 1e6,
+			(unsigned long long)ms.blocks.load(), (unsigned long long)ms.late_blocks.load(), (unsigned long long)ms.late_commands.load(), (unsigned long long)ms.starved_voices.load(), (unsigned long long)ms.decode_errors.load(),
+			(unsigned long long)ms.ring_overflows.load(), double(ms.max_block_ns.load()) / 1e6,
 			double(ms.max_call_gap_ns.load()) / 1e6, (unsigned long long)(r_m.clock ? r_m.clock->output_latency_frames() : 0),
 			prio == kPt1NoPriority ? "unknown " : "", prio == kPt1NoPriority ? 0 : prio, kPt1HitchMs, (unsigned long long)c->hitch_count, c->hitch_max_ms);
 	UtilityFunctions::print(String::utf8(("[pt1] audio health: " + ba::format_mixer_cuts(r_m.mixer->pt1_cut_stats()) + line).c_str()));
@@ -569,7 +574,7 @@ void pt1_capture_end(Impl &r_m) {
 		return;
 	}
 	pt1_drain(*r_m.mixer, *c);
-	const core::PathGuard guard = r_m.db != nullptr && r_m.db->install ? r_m.db->install->reader().write_guard() : core::PathGuard();
+	const core::PathGuard &guard = c->guard; // NoRoots (every write refused) without an install
 	std::error_code ec;
 	std::filesystem::create_directories(c->dir, ec);
 	std::string result = "[pt1] audio capture " + c->dir.string() + ":";
