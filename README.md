@@ -3024,3 +3024,39 @@ Measured 2026-10-19, `m2b/w2`, shared machine (times indicative only):
 * **`tools\build.cmd dev`:** 147 rows, 145 passed and 2 skipped (`core.cache_data`, `core.res`, as before), with
   204.1 s of ctest wall time and exit 0. There were no budget violations, only the existing warnings.
 * **`m2b.contract2`:** 4 cases and 84 assertions, 0.01 s. ui and cam are pending.
+
+## M2b: the playable TDM scene (gx)
+
+<!-- # M2b gx -->
+`tools\play.cmd` now opens the M2b scene (`res://scenes/m2b_metro.tscn`): a Metro TDM round, you and 31 TDM bots
+(16 v 16). The teams are AutoTeam's, and the round runs the Metro TDM logic graph. The track is on branch `m2b/gx`,
+from the W2.0 contract. As-built notes, named defaults and gates:
+[docs/design/m2b-gx.md](docs/design/m2b-gx.md).
+
+* **Play.**
+  - `tools\play.cmd` starts the round. Useful options: `--kill-limit=N`, `--preround=S`, `--bots=0..31` and
+    `--deploy-screen=0` (M2a's automatic respawn).
+  - `tools\play.cmd --m2a` keeps the M2a scene, and bb's `--tdm` preview still runs on it.
+  - `tools\play.cmd --help` lists the keys.
+* **Keys.**
+  - On the spawn screen: 1-4 pick the kit (assault, engineer, support, recon), or click it. Enter (or the Deploy
+    button) spawns once the respawn time is over. The game resends the request every 30 server ticks until the
+    server spawns you.
+  - In game: Tab shows the scoreboard, and 3 selects weapon slot 2 (assault: the defibrillator). The M2a weapon
+    keys are unchanged.
+* **Before ui and cam land.** The TDM screens (ui) and the death view (cam) are built only when their code is in
+  the tree. Until then, a status line shows the phase, the score, the kit and "ENTER: deploy".
+* **Test.**
+  - `ctest --test-dir b\dev -R "^m2b\.gx\.unit$"`: the Godot-free rules (the args with hostile values, the spawn
+    screen and Deploy rules, the resend, E9's verdicts and skips) and R13 (`FxTriggers` accepts Revive).
+  - `godot.m2b.play` (E9, the scripted round) and `godot.m2b_load` (E12) are WINDOW rows for the merge pass.
+
+Measured 2026-10-19, `m2b/gx`, shared machine (times indicative only):
+
+* **`m2b.gx.unit`:** 5 cases, 197 assertions, pass.
+* **The play check, headless, by hand** (`--m2b-check=play --kill-limit=15 --preround=0`):
+  - all 7 gx rows pass, and the ui (6) and cam (1) rows skip "waiting for";
+  - the run: the spawn screen at join, a deploy as assault, an own death at 27 s, a deploy as engineer, RoundOver
+    at 39.6 s (RU 15 - US 8), 24 deaths received;
+  - install unchanged: yes.
+* **Branch pass:** 148 rows: 146 passed, 2 skipped (`core.cache_data`, `core.res`, as before), 0 failed; 331.7 s of ctest wall time; exit 0. One "budget VIOLATION" line is for `host.tdm.server` (wave 1's row: 63.1 s without COST under the parallel load), not a gx row.
