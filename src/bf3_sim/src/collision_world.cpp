@@ -298,6 +298,26 @@ bool CollisionWorld::ray(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_m
 	return true;
 }
 
+// integ/m2b-w1 [ray any]: ray() with Jolt's any-hit collector (the first hit ends the query); the same filters and
+// back-face mode, so it is true exactly when ray() is.
+bool CollisionWorld::ray_any(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_mask) const { // integ/m2b-w1 [ray any]
+	const Impl &w = *impl_; // integ/m2b-w1 [ray any]
+	if (!finite3(p_origin) || !finite3(p_delta)) { // integ/m2b-w1 [ray any]
+		return false; // integ/m2b-w1 [ray any]
+	} // integ/m2b-w1 [ray any]
+	const JPH::Vec3 delta = to_jolt(p_delta); // integ/m2b-w1 [ray any]
+	if (delta.LengthSq() <= 0.0f) { // integ/m2b-w1 [ray any]
+		return false; // integ/m2b-w1 [ray any]
+	} // integ/m2b-w1 [ray any]
+	const JPH::RRayCast cast(JPH::RVec3(to_jolt(p_origin)), delta); // integ/m2b-w1 [ray any]
+	JPH::RayCastSettings settings; // integ/m2b-w1 [ray any]
+	settings.SetBackFaceMode(JPH::EBackFaceMode::CollideWithBackFaces); // integ/m2b-w1 [ray any]
+	JPH::AnyHitCollisionCollector<JPH::CastRayCollector> collector; // integ/m2b-w1 [ray any]
+	w.system->GetNarrowPhaseQueryNoLock().CastRay(cast, settings, collector, w.broadphase_filter(p_mask), w.object_filter(p_mask), w.body_filter, // integ/m2b-w1 [ray any]
+			w.shape_filter); // integ/m2b-w1 [ray any]
+	return collector.HadHit(); // integ/m2b-w1 [ray any]
+} // integ/m2b-w1 [ray any]
+
 bool CollisionWorld::sweep_capsule(const Vec3 &p_feet, float p_radius, float p_height, const Vec3 &p_delta, uint32_t p_mask, StaticHit *r_hit) const {
 	const Impl &w = *impl_;
 	if (!finite3(p_feet) || !finite3(p_delta)) {

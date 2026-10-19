@@ -57,6 +57,9 @@ public:
 
 	// Closest hit of the segment p_origin -> p_origin + p_delta against the layers in p_mask (query_mask::).
 	bool ray(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_mask, StaticHit *r_hit = nullptr) const;
+	// integ/m2b-w1 [ray any]: whether that segment hits anything in p_mask, the same answer as ray() without a hit record;
+	// the query ends at the first hit it finds (line-of-sight tests: the bots' perception, E8).
+	bool ray_any(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_mask) const; // integ/m2b-w1 [ray any]
 	// First contact of an upright capsule (feet at p_feet, total height p_height incl. both caps, radius
 	// p_radius) swept by p_delta. A start already in contact reports fraction 0.
 	bool sweep_capsule(const Vec3 &p_feet, float p_radius, float p_height, const Vec3 &p_delta, uint32_t p_mask, StaticHit *r_hit = nullptr) const;
