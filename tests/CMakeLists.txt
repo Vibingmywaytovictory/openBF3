@@ -1478,3 +1478,21 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2b_w2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2b.contract2 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w2_cl_dir}")
 endif()
+
+# M2b ui (docs/design/m2b.md §4, §2.6 #16, §11 wave 2; docs/design/m2b-ui.md §4): ui.hud.tdm.unit runs fill_hud_tdm over
+# a recorded round of display frames (the pre-round, deploy, kills, the own death's kill card, the spawn screen's timer
+# and revive window, the round end, the restart), the players by slot, the kill-feed ring, the kit bar, hostile inputs
+# and the lookup lists' shape; data-free (<= 2 s). ui.hud.tdm.install resolves every string, font, atlas icon and
+# placement the screens look up (src/bf3_godot/src/hud_tdm_text.h) and the 13 TDM kit items' names and _small icons
+# against the install, with install.unchanged (77 without an install; <= 15 s). Functional, parallel-safe.
+openbf3_test(test_ui_hud_tdm test_main.cpp ui_hud_tdm_tests.cpp test_support.h)
+target_link_libraries(test_ui_hud_tdm PRIVATE bf3_host)
+target_include_directories(test_ui_hud_tdm PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+add_test(NAME ui.hud.tdm.unit COMMAND test_ui_hud_tdm --test-suite=ui-hud-tdm-unit)
+add_test(NAME ui.hud.tdm.install COMMAND test_ui_hud_tdm --test-suite=ui-hud-tdm-install)
+set_tests_properties(ui.hud.tdm.unit PROPERTIES TIMEOUT 120)
+set_tests_properties(ui.hud.tdm.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ui_tdm_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ui.hud.tdm.unit ui.hud.tdm.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ui_tdm_cl_dir}")
+endif()
