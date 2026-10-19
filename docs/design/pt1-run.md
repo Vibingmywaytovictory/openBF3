@@ -369,5 +369,5 @@ Weapon top edge (y) and centroid of the dark pixels (x), in pixels at 1152 × 64
   "at most its settle time".
 * **`anim.s3` / `anim.s3.unit`:** the synthetic sets are unchanged.
 
-The branch pass (`toolsuild.cmd dev`) had 153 rows: 151 passed, 2 skipped as before, 0 failed, exit 0. The README
+The branch pass (`tools\build.cmd dev`) had 153 rows: 151 passed, 2 skipped as before, 0 failed, exit 0. The README
 section gives the details.
