@@ -82,6 +82,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	// M2b ui (docs/design/m2b-ui.md): the TDM HUD screens and their base (registered in hud_tdm.cpp)
 	void openbf3_register_m2b_ui();
 	openbf3_register_m2b_ui();
+	// PT1 iff (docs/design/pt1-iff.md): Bf3Nametags (registered in pt1_iff.cpp) // PT1 iff [register]
+	void openbf3_register_pt1_iff(); // PT1 iff [register]
+	openbf3_register_pt1_iff(); // PT1 iff [register]
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {
