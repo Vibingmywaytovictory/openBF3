@@ -2060,6 +2060,9 @@ TEST_SUITE("audio-game") {
 				mc.pt1_voice_hold_blocks = 0; // PT1 snd [hold]
 				mc.pt1_resume_margin = 0; // PT1 snd [hold]
 			} // PT1 snd [hold]
+			if (env_value("OPENBF3_PT1_LIMIT") == "0") { // PT1 snd [limit]: A/B measurement only
+				mc.pt1_limit_ceiling = 0.0f; // PT1 snd [limit]
+			} // PT1 snd [limit]
 			if (const std::string m = env_value("OPENBF3_PT1_RESUME_MARGIN"); !m.empty()) { // PT1 snd [hold]: A/B measurement only
 				mc.pt1_resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128)); // PT1 snd [hold]
 			} // PT1 snd [hold]
@@ -2232,7 +2235,8 @@ TEST_SUITE("audio-game") {
 		} // PT1 snd [cuts]
 		MESSAGE("PT1 snd: " << pt1_cuts.size() << " cuts recorded; " << pt1_parks << " parks of " << pt1_per.size() << " loops, " << pt1_short_parks // PT1 snd [cuts]
 							<< " parked for < 0.25 s, " << pt1_flaps << " re-parks within 1 s on " << pt1_flapping << " loops"); // PT1 snd [cuts]
-		if (env_value("OPENBF3_PT1_CUT_FADE").empty() && env_value("OPENBF3_PT1_CAP_HOLD").empty() && env_value("OPENBF3_PT1_RESUME_MARGIN").empty()) { // PT1 snd [cuts]: the defaults
+		if (env_value("OPENBF3_PT1_CUT_FADE").empty() && env_value("OPENBF3_PT1_CAP_HOLD").empty() && env_value("OPENBF3_PT1_RESUME_MARGIN").empty() && // PT1 snd [cuts]: the defaults
+				env_value("OPENBF3_PT1_LIMIT").empty()) { // PT1 snd [limit]
 			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats(); // PT1 snd [cuts]
 			for (const ba::MixerCutKind k : { ba::MixerCutKind::Drop, ba::MixerCutKind::Pend, ba::MixerCutKind::Kill, ba::MixerCutKind::Finish, ba::MixerCutKind::Resume }) { // PT1 snd [cuts]
 				INFO(ba::mixer_cut_kind_name(k)); // PT1 snd [cuts]
@@ -2242,6 +2246,7 @@ TEST_SUITE("audio-game") {
 			CHECK(pt1_short_parks * 20 <= pt1_parks); // PT1 snd [cuts]: [hold] (merged A3: 1843 of 3234)
 			CHECK(pt1_flaps * 20 <= pt1_parks); // PT1 snd [cuts]: [hold] (merged A3: 1931 of 3234)
 			CHECK(cs.event_drops.load() == 0); // PT1 snd [cuts]
+			CHECK(cs.overs_out.load() == 0); // PT1 snd [limit] (without it: the mix peaks at 2.6)
 		} // PT1 snd [cuts]
 		CHECK(ms.short_blocks.load() == 0);
 		CHECK(ms.late_commands.load() == 0);
