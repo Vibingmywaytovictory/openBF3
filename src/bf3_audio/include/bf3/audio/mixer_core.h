@@ -85,6 +85,16 @@ struct MixerConfig {
 	// PT1 snd [hold]: a parked loop resumes only when this many sampler voices stay free after it (CullVoice::
 	// resume_margin), at most max_voices / 16. [inferred] default 8 of 128, measured = false.
 	uint32_t pt1_resume_margin = 8; // PT1 snd [hold]
+	// PT1 snd [limit] (docs/design/pt1-snd.md §3.4): a peak limiter on the stereo output, after output_gain. Windowed
+	// rounds reached 2.4 (+7.6 dBFS) in 43 to 176 episodes a round, clipped downstream: the HdrSetting's energy terms
+	// (CompressFactor, DischargeFactor, MaxAllowedEnergy) have no known formula (Q9), so nothing in A3 bounds the sum.
+	// The block is the lookahead: the gain ramps down over pt1_limit_attack_frames before a peak in the same block, and
+	// back up with a pt1_limit_release_ms time constant. A block under the ceiling at unity gain is not touched (the
+	// same samples as without it). [inferred] defaults -0.3 dBFS, 48 frames (1 ms), 80 ms, measured = false. A
+	// ceiling <= 0 turns it off.
+	float pt1_limit_ceiling = 0.966f; // PT1 snd [limit]
+	uint32_t pt1_limit_attack_frames = 48; // PT1 snd [limit]
+	float pt1_limit_release_ms = 80.0f; // PT1 snd [limit]
 };
 
 using InstanceHandle = uint32_t; // allocated by the game side, never reused within a mixer's lifetime
@@ -198,6 +208,10 @@ struct MixerCutStats {
 	std::atomic<uint64_t> call_frames_min{ ~0ull }, call_frames_max{ 0 };
 	std::atomic<uint64_t> gap_hist[8]{}; // mix() call gaps: < 5, 10, 15, 20, 30, 50, 100 ms, >= 100 ms
 	std::atomic<uint64_t> event_drops{ 0 }; // the event ring was full
+	std::atomic<uint64_t> overs_in{ 0 }, overs_out{ 0 }; // PT1 snd [limit]: frames above 1.0 before / after the limiter
+	std::atomic<uint64_t> limit_blocks{ 0 }; // PT1 snd [limit]: blocks with a gain below 1
+	std::atomic<uint64_t> limit_edge_steps{ 0 }; // PT1 snd [limit]: a peak in a block's first frames, faster than the attack
+	std::atomic<float> limit_min_gain{ 1.0f }; // PT1 snd [limit]
 };
 inline constexpr std::array<double, 7> kPt1GapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
 const char *mixer_cut_kind_name(MixerCutKind p_kind);

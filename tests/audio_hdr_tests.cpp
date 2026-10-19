@@ -1209,6 +1209,65 @@ TEST_SUITE("audio-cuts") {
 		CHECK(count(r, ba::CullVerdict::Keep) == 3);
 	}
 
+	TEST_CASE("PT1 snd: the output limiter keeps the mix under its ceiling and leaves a quiet mix untouched") {
+		// Windowed rounds: the mix reached 2.4 (+7.6 dBFS) in 43 to 176 episodes a round (docs/design/pt1-snd.md §3.4).
+		for (const float ceiling : { 0.0f, 0.966f }) {
+			ba::MixerConfig c = cut_config(512, 128);
+			c.output_gain_db = 45.0f; // the 90 dB tone peaks at about 2.4
+			c.pt1_limit_ceiling = ceiling;
+			Rig rig(c);
+			const ba::InstanceHandle h = rig.start(Source{ 90.0f, false, true, 1 });
+			rig.step(8);
+			const double peak = peak_of(rig.rec.left, 0, rig.frames());
+			const double step = max_step(rig.rec.left);
+			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			MESSAGE("ceiling " << ceiling << ": peak " << peak << ", largest step " << step << ", over 0 dBFS " << cs.overs_in.load() << " / "
+								<< cs.overs_out.load() << ", " << ba::format_mixer_cuts(cs).substr(ba::format_mixer_cuts(cs).find("; limiter")));
+			CHECK(cs.overs_in.load() > 0);
+			if (ceiling == 0.0f) {
+				CHECK(peak > 2.0);
+				CHECK(cs.overs_out.load() == cs.overs_in.load());
+			} else {
+				CHECK(peak <= 0.966 + 1e-6);
+				CHECK(cs.overs_out.load() == 0);
+				CHECK(cs.limit_blocks.load() > 0);
+				CHECK(step < 2.45 * kToneSlope); // never steeper than the unlimited tone (its attack starts on the tone's first rise)
+				const std::vector<float> held(rig.rec.left.begin() + 2 * ba::kBlockFrames, rig.rec.left.end());
+				CHECK(max_step(held) < 0.966 * kToneSlope * 1.05); // held down: the limited tone's own slope, no gain steps
+				CHECK(cs.limit_edge_steps.load() <= 1); // only the tone's first block can start on its peak
+			}
+			rig.kill(h);
+			rig.step(60); // 0.64 s of release after the Kill
+		}
+		// A mix under the ceiling: the same samples with the limiter on and off.
+		std::vector<float> on, off;
+		for (const float ceiling : { 0.0f, 0.966f }) {
+			ba::MixerConfig c = cut_config(512, 128);
+			c.pt1_limit_ceiling = ceiling;
+			Rig rig(c);
+			rig.start(Source{ 90.0f, false, true, 1 });
+			rig.step(6);
+			(ceiling == 0.0f ? off : on) = rig.rec.left;
+			CHECK(rig.mixer->pt1_cut_stats().limit_blocks.load() == 0);
+		}
+		CHECK(on == off);
+		// Hostile settings: NaN ceiling (off), zero attack and release (clamped).
+		ba::MixerConfig c = cut_config(512, 128);
+		c.output_gain_db = 45.0f;
+		c.pt1_limit_ceiling = std::numeric_limits<float>::quiet_NaN();
+		c.pt1_limit_attack_frames = 0;
+		c.pt1_limit_release_ms = -1.0f;
+		Rig rig(c);
+		rig.start(Source{ 90.0f, false, true, 1 });
+		rig.step(4);
+		CHECK(rig.mixer->pt1_cut_stats().limit_blocks.load() == 0);
+		c.pt1_limit_ceiling = 0.5f;
+		Rig rig2(c);
+		rig2.start(Source{ 90.0f, false, true, 1 });
+		rig2.step(4);
+		CHECK(peak_of(rig2.rec.left, 0, rig2.frames()) <= 0.5 + 1e-6);
+	}
+
 	TEST_CASE("PT1 snd: the cut readout, the event ring and hostile fades") {
 		Rig rig(cut_config(512, 128));
 		rig.mixer->pt1_record_cuts(true);

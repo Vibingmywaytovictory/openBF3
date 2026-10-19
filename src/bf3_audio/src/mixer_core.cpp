@@ -8,6 +8,7 @@
 #include "bf3/audio/voice_cull.h" // M2b au [a3]
 
 #include <algorithm>
+#include <array> // PT1 snd [limit]
 #include <chrono>
 #include <cmath>
 #include <cstdio> // M2b au
@@ -138,6 +139,9 @@ struct MixerCore::Impl {
 	void pt1_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance); // PT1 snd [cuts]
 	// PT1 snd [fade]: true when the slot now fades out instead of being cut (it sounded in the last block and fades are on).
 	bool pt1_begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind); // PT1 snd [fade]
+	float pt1_limit_gain = 1.0f; // PT1 snd [limit]: the gain at the last frame of the last block
+	std::array<float, kBlockFrames> pt1_limit_g{}; // PT1 snd [limit]
+	void pt1_limit(); // PT1 snd [limit]: on `block`, before the tap
 
 	explicit Impl(const MixerConfig &p_config) :
 			config(p_config), commands(p_config.command_capacity), returns(std::max<uint32_t>(p_config.max_instances, 1) * 2),
@@ -485,6 +489,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		m.block[size_t(i) * 2] = l * m.output_gain;
 		m.block[size_t(i) * 2 + 1] = r * m.output_gain;
 	}
+	m.pt1_limit(); // PT1 snd [limit]
 	if (m.tap != nullptr) {
 		m.tap->on_block(m.block.data(), kBlockFrames, first);
 	}
@@ -845,6 +850,61 @@ size_t MixerCore::pt1_poll_cuts(std::span<MixerCutEvent> r_out) {
 	return n;
 }
 
+void MixerCore::Impl::pt1_limit() {
+	float *x = block.data();
+	const float c = config.pt1_limit_ceiling;
+	const bool on = std::isfinite(c) && c > 0.0f;
+	uint64_t over_in = 0;
+	bool any = false;
+	for (uint32_t i = 0; i < kBlockFrames; ++i) {
+		const float p = std::max(std::fabs(x[size_t(i) * 2]), std::fabs(x[size_t(i) * 2 + 1])); // NaN: compares false
+		over_in += p > 1.0f ? 1u : 0u;
+		any = any || (on && p > c);
+		pt1_limit_g[i] = on && p > c ? c / p : 1.0f;
+	}
+	if (over_in > 0) {
+		cut_stats.overs_in.fetch_add(over_in, std::memory_order_relaxed);
+	}
+	if (!on || (!any && pt1_limit_gain >= 1.0f)) {
+		if (!on) {
+			cut_stats.overs_out.fetch_add(over_in, std::memory_order_relaxed);
+		}
+		return; // unity gain: the samples as they were
+	}
+	const float attack = 1.0f / float(std::clamp<uint32_t>(config.pt1_limit_attack_frames, 1, kBlockFrames));
+	const double release_frames = std::clamp(std::isfinite(config.pt1_limit_release_ms) ? double(config.pt1_limit_release_ms) : 80.0, 1.0, 10000.0) *
+			double(config.mix_rate) / 1000.0;
+	const float k = float(1.0 - std::exp(-1.0 / release_frames));
+	// Backward: the gain falls at most `attack` per frame towards a peak, so it is already down when the peak comes.
+	for (uint32_t i = kBlockFrames - 1; i-- > 0;) {
+		pt1_limit_g[i] = std::min(pt1_limit_g[i], pt1_limit_g[i + 1] + attack);
+	}
+	// Forward: never above the backward gain, rising back with the release time constant.
+	float h = pt1_limit_gain, lowest = 1.0f;
+	uint64_t over_out = 0;
+	if (pt1_limit_g[0] < h - attack) {
+		cut_stats.limit_edge_steps.fetch_add(1, std::memory_order_relaxed); // the peak came too early in the block
+	}
+	for (uint32_t i = 0; i < kBlockFrames; ++i) {
+		h = std::min(pt1_limit_g[i], h + (1.0f - h) * k);
+		h = h > 1.0f - 1.0e-6f ? 1.0f : h;
+		lowest = std::min(lowest, h);
+		x[size_t(i) * 2] *= h;
+		x[size_t(i) * 2 + 1] *= h;
+		over_out += std::max(std::fabs(x[size_t(i) * 2]), std::fabs(x[size_t(i) * 2 + 1])) > 1.0f ? 1u : 0u;
+	}
+	pt1_limit_gain = h;
+	if (lowest < 1.0f) {
+		cut_stats.limit_blocks.fetch_add(1, std::memory_order_relaxed);
+	}
+	if (lowest < cut_stats.limit_min_gain.load(std::memory_order_relaxed)) {
+		cut_stats.limit_min_gain.store(lowest, std::memory_order_relaxed);
+	}
+	if (over_out > 0) {
+		cut_stats.overs_out.fetch_add(over_out, std::memory_order_relaxed);
+	}
+}
+
 const char *mixer_cut_kind_name(MixerCutKind p_kind) {
 	static const char *const kNames[kMixerCutKinds] = { "drop", "pend", "kill", "finish", "start", "resume", "suspend", "unsuspend", "fade", "callgap", "lateblock" };
 	return size_t(p_kind) < kMixerCutKinds ? kNames[size_t(p_kind)] : "?";
@@ -876,6 +936,11 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 	std::snprintf(part, sizeof(part), "; late calls (> %.0f ms) %llu, max %.1f ms; late blocks %llu, max %.1f ms; event drops %llu", kPt1LateCallMs,
 			(unsigned long long)p_stats.events[g].load(), double(p_stats.step_max[g].load()), (unsigned long long)p_stats.events[lb].load(),
 			double(p_stats.step_max[lb].load()), (unsigned long long)p_stats.event_drops.load());
+	out += part;
+	const float lg = p_stats.limit_min_gain.load();
+	std::snprintf(part, sizeof(part), "; limiter: %llu blocks, down to %.1f dB, %llu edge steps; frames over 0 dBFS %llu before it, %llu after",
+			(unsigned long long)p_stats.limit_blocks.load(), lg > 0.0f ? 20.0 * std::log10(double(lg)) : -999.0, (unsigned long long)p_stats.limit_edge_steps.load(),
+			(unsigned long long)p_stats.overs_in.load(), (unsigned long long)p_stats.overs_out.load());
 	out += part;
 	return out;
 }
