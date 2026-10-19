@@ -3185,3 +3185,54 @@ Measured 2026-10-19, `m2b/gx`, shared machine (times indicative only):
   way to the round-end screen. One run each, by hand: headless PASS (own death at 9.0 s, RoundOver at 40.8 s);
   windowed PASS, 14/14 rows, 0 ERROR lines, `missing_lookups` 0 (own death at 12.7 s by a bot, deploy engineer at
   17.9 s, RoundOver at 33.8 s, 5 screenshots); install unchanged: yes.
+
+## PT1 run: the running animation
+
+<!-- # PT1 run -->
+Playtest finding PT1 "run", on branch `pt1/run`. The M2b playtest said: "the running animation is wrong and too fast".
+Root causes with evidence, the fix, before / after numbers and one command per check:
+[docs/design/pt1-run.md](docs/design/pt1-run.md).
+
+* **3p.** The crowd now plays BF3's own move groups from s_basicassets (`bf3/anim/move_group.h`):
+  * `MP_RunMoveGroup_PC` when standing;
+  * `MP_SprintMoveGroup` while the soldier's kSprinting flag is set;
+  * `MP_SneakMoveGroup_PC` when crouched.
+
+  Each clip plays at its data rate. Prone keeps its old cycles. Before this, the crowd used S3's hand-made run blend.
+  It had no sprint clip: at 6.5 m/s it played Rifle_RunFwd at 1.4×, 281 steps/min. BF3's Rifle_Sprint gives 251.
+  Crouching was clamped, so the feet slid at 0.36 m/s (now 0.04).
+* **1p.** The own arms and weapon now play BF3's additive run and sprint deltas, chosen per weapon type:
+  * run: `1P_RunLoopChooser` at speed / 3.6 m/s;
+  * sprint: `Wep_SprintDeltaChooser` at rate 1.
+
+  These replace the procedural bob, which ran at 2.7 / 5.4 Hz at sprint. BF3's sprint delta runs at 1.67 / 3.33 Hz.
+* **Motor.** The motor's speeds already matched PhysicsMotion (4.0, 6.5 and 2.0 m/s), so they are unchanged.
+* **Before / after from one build.** `--pt1-off` draws the old cycles and the old bob.
+* **Captures** (they go to `b\shots\pt1-run\`):
+  * 3p: `Godot --path bf3-opensource res://scenes/m2a_tp_crowd.tscn -- --pt1-run [--pt1-off] --tp-shots=<dir>`, a
+    0.6 s sequence of four runners;
+  * 1p: `Godot --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --pt1-run-shots [--pt1-off] --vm-shots=<dir>`,
+    the M16A4 running and sprinting.
+* **Tests:**
+  * `ctest --preset dev -R "^anim\.pt1_run\.unit$"`: data-free. It covers the clip choice per direction, the cycle
+    rate per speed, the stride against the ground speed, hostile input, the crowd evaluator, and the 1p animator with
+    synthetic deltas.
+  * `ctest --preset dev -R "^anim\.pt1_run$"`: install, read-only. It covers the three groups as read, each gait's
+    cycle and toe stride before and after, the 1p routes for six weapons and their cadence, and install unchanged.
+
+Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicative only:
+
+* **`anim.pt1_run.unit`:** 7 cases, 359 assertions, pass, 0.36 s.
+* **`anim.pt1_run`:** 4 cases, pass, about 1.6 s.
+* **Changes after the fix:**
+  * 3p run at 4.0 m/s: 0.600 s cycle (was 0.693).
+  * Sprint at 6.5 m/s: 0.479 s (was 0.427).
+  * Crouch at 2.0 m/s: stride / ground 0.990 (was 0.820).
+  * 1p sprint sway: 1.60 / 3.30 Hz (was 2.70 / 5.40).
+* **Branch pass** (`tools\build.cmd dev`): 153 rows, 151 passed and 2 skipped (`core.cache_data` and `core.res`, as
+  before), 0 failed, 390.8 s of ctest wall time, exit 0.
+  * In the pass, `anim.pt1_run.unit` took 0.04 s and `anim.pt1_run` took 3.6 s.
+  * The three "budget VIOLATION" lines are for `anim`, `render` and `godot.m9_reload` under the parallel load. They
+    are not PT1 rows.
+* **Asan** (`ctest --preset asan -R "^anim\.pt1_run"`): both rows pass. `anim.pt1_run.unit` took 0.06 s and
+  `anim.pt1_run` took 18.0 s.
