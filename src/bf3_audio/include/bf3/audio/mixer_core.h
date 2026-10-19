@@ -44,11 +44,13 @@
 #include "bf3/core/audio/sound_scope.h" // M2b W1.0 (au)
 #include "bf3/core/audio/wave_bank.h"
 
+#include <array> // M2b au
 #include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional> // M2b W1.0 (au)
 #include <span>
+#include <string> // M2b au
 #include <vector>
 
 namespace bf3::audio {
@@ -174,5 +176,31 @@ private:
 	std::unique_ptr<Impl> impl_;
 	MixerStats stats_;
 };
+
+// M2b au (docs/design/m2b.md §6.3, docs/design/m2b-au.md "Profiler"): the A3 profiler. render_block times every
+// block (steady_clock around the whole block: commands, cull, window, rendering, the tap) and files the share of the
+// block's real-time duration (512 frames at 48 kHz = 10.67 ms) into MixerStats::mix_ns_hist: bucket i < 15 holds the
+// blocks with share < kMixHistEdges[i] (and >= the edge before it), bucket 15 those at or above the last edge (a late
+// block). E11 reads the p99 from the histogram: an upper bound, exact at the edges (0.10 is one).
+inline constexpr size_t kMixHistBuckets = 16;
+inline constexpr std::array<float, kMixHistBuckets - 1> kMixHistEdges = { 0.01f, 0.02f, 0.03f, 0.04f, 0.05f, 0.06f, 0.08f, 0.10f, 0.12f, 0.15f, 0.20f, 0.30f,
+	0.50f, 0.75f, 1.00f };
+// Audio thread (render_block): one block's mix time against its real-time duration.
+void record_mix_ns(MixerStats &r_stats, uint64_t p_ns, uint64_t p_block_ns);
+// The upper edge of the histogram bucket that holds the p_q quantile of the mix share (0.99: p99); +inf when that is
+// the last bucket; 0 before the first block.
+double mix_share_quantile(const MixerStats &p_stats, double p_q);
+// A plain snapshot of the A3 counters (any thread, relaxed reads) and its one-line readout.
+struct MixerProfile {
+	uint64_t blocks = 0, block_ns = 0, mix_ns_last = 0, mix_ns_max = 0;
+	double share_p50 = 0.0, share_p99 = 0.0; // histogram upper bounds (mix_share_quantile)
+	// live_instances: the instances rendered in the last block; live_voices_max: the most sampler voices the cull kept in
+	// one block (voice_cull.h: the cap counts sampler voices).
+	uint32_t live_instances = 0, live_voices_max = 0, suspended = 0;
+	uint64_t culled_precull = 0, culled_scope = 0, culled_cap = 0;
+	float window_top_db = 0.0f, window_bottom_db = 0.0f; // 0 / 0 without an HdrSetting
+};
+MixerProfile read_mixer_profile(const MixerStats &p_stats, uint32_t p_mix_rate = kMixRate);
+std::string format_mixer_profile(const MixerProfile &p_profile);
 
 } // namespace bf3::audio
