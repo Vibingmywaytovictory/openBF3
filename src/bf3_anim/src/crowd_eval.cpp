@@ -673,7 +673,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		// team with another bind count); its evaluation sets its own team's count.
 		s.binds = { 0, 0 };
 	}
-	if (!any_weapons && p_stance.pose == nullptr && p_stance.moves == nullptr) {
+	if (!any_weapons && p_stance.pose == nullptr && p_stance.moves == nullptr && p_stance.move_groups == nullptr) { // PT1 run [path]: move groups need the M2a path
 		return e; // S3's evaluator
 	}
 
