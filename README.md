@@ -3138,8 +3138,10 @@ from the W2.0 contract. As-built notes, named defaults and gates:
     server spawns you.
   - In game: Tab shows the scoreboard, and 3 selects weapon slot 2 (assault: the defibrillator). The M2a weapon
     keys are unchanged.
-* **Before ui and cam land.** The TDM screens (ui) and the death view (cam) are built only when their code is in
-  the tree. Until then, a status line shows the phase, the score, the kit and "ENTER: deploy".
+* **ui and cam.** The TDM screens (ui: kill feed, scoreboard, spawn screen, kill card, pre-round, round end) and
+  the death view and 15 s corpses (cam) are built when their code is in the tree, which it is since the merge of
+  `m2b/w2` (reconfigure after a merge). Without them a status line shows the phase, the score, the kit and
+  "ENTER: deploy". In an M2b session the assault kit carries the defibrillator in 1p (gx's `[defib]` line).
 * **Test.**
   - `ctest --test-dir b\dev -R "^m2b\.gx\.unit$"`: the Godot-free rules (the args with hostile values, the spawn
     screen and Deploy rules, the resend, E9's verdicts and skips) and R13 (`FxTriggers` accepts Revive).
@@ -3154,3 +3156,8 @@ Measured 2026-10-19, `m2b/gx`, shared machine (times indicative only):
     at 39.6 s (RU 15 - US 8), 24 deaths received;
   - install unchanged: yes.
 * **Branch pass:** 148 rows: 146 passed, 2 skipped (`core.cache_data`, `core.res`, as before), 0 failed; 331.7 s of ctest wall time; exit 0. One "budget VIOLATION" line is for `host.tdm.server` (wave 1's row: 63.1 s without COST under the parallel load), not a gx row.
+* **After the ui and cam merge** (headless play check, by hand): M2B CHECK: PASS, 13 rows pass, `missing_lookups`
+  skips headless (a window row), none "waiting for"; 23 feed lines for 23 deaths, 0 of 172 Tab samples off,
+  1 death view with 0 bad inputs; RoundOver at 39.6 s (US 7 - RU 15); install unchanged: yes. The rows the merge
+  touches (m2b.gx.unit, m2b.contract, m2b.contract2, m2b.cam.unit, ui.hud.tdm.unit / .install, fx.triggers.unit,
+  godot.m2a_viewmodel, godot.m2a_tp_crowd) pass.

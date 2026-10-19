@@ -38,7 +38,8 @@ Named insertions in other code (commit af3a8ec, which names each one):
 | `level_session.h`, after the M2a hooks | `[done]` | `bool m2b_join_ready() const;` |
 | `input_mapper.cpp` `handle_event` | `[mapper]` | `if (m2b_handle_event(p_event)) return;` before the M2a gx line |
 | `input_mapper.cpp` `kM2aWheelSlots` | `[wheel]` (replacement) | `{ 0, 1, 2, 6, 7 }`: slot 2 (the gadget) in the wheel. M2a's kits leave it empty, so the wheel skips it there |
-| `bf3_fx/src/triggers.cpp` `FxTriggers::sane` | R13 (replacement) | `<= PresentKind::Spawn` becomes `<= PresentKind::Revive` |
+| `bf3_fx/src/triggers.cpp` `FxTriggers::sane` | R13 (replacement) | `<= PresentKind::Spawn` becomes `<= PresentKind::Revive`. cam made the same change (`// M2b cam [revive kind]`); the merge of `m2b/w2` keeps cam's line, so R13 is now cam's |
+| `level_session_m2a.cpp` viewmodel loader, after `g->vm_kits = std::move(*kits);` (commit f5f0c78, after the ui / cam merge) | `[defib]` | `if (g->m2b) render::add_assault_gadget(g->vm_kits, host::kTdmAssaultGadget);`: the assault viewmodel sets carry the defibrillator in slot 2 (m2b-cam.md §6 item 2) |
 
 ## 2. The session
 
@@ -158,14 +159,49 @@ Rows:
 | E9 (godot.m2b.play) | M2B CHECK PASS in a window, 0 ERROR lines, no "waiting for" in the merge pass | not run: a WINDOW row for the wave-2 merge pass (ui and cam not merged here) | `set OPENBF3_GODOT_WINDOWED=1` then `ctest --test-dir b\dev -R "^godot\.m2b\.play$"` |
 | E12 (godot.m2b_load) | m2b.md §1 E12 load budget | not run: a WINDOW row for the merge pass | `set OPENBF3_GODOT_WINDOWED=1` then `ctest --test-dir b\dev -R "^godot\.m2b_load$"` |
 | play.cmd | the M2b scene by default; `--m2a` / `--tdm` select the M2a scene; `--bots=` wins | 6 argument sets dry-run through a copy that echoes the Godot line: all as expected | `tools\play.cmd`, `tools\play.cmd --m2a`, `tools\play.cmd --help` |
-| ui / cam code paths compile | `level_session_m2b.cpp`, `m2b_check.cpp` compile with `-DOPENBF3_M2B_HAVE_UI=1 -DOPENBF3_M2B_HAVE_CAM=1` | both compile, 0 warnings (/W4); not linked (no bodies yet) | the TU compile commands from `b\dev\compile_commands.json` with the two defines added |
+| ui / cam code paths compile | `level_session_m2b.cpp`, `m2b_check.cpp` compile with `-DOPENBF3_M2B_HAVE_UI=1 -DOPENBF3_M2B_HAVE_CAM=1` | before the merge: both compile, 0 warnings (/W4), not linked. After the merge (§6): built and linked with both switches on from the reconfigure, 0 warnings in gx's files | `tools\build.cmd dev --no-test` |
+| E9 all rows (headless, after the ui / cam merge) | M2B CHECK PASS, no "waiting for" row, install unchanged | 13 PASS, 1 SKIP (`missing_lookups`, headless), 0 "waiting for"; install unchanged: yes (§6) | `"%OPENBF3_GODOT%" --headless --path bf3-opensource res://scenes/m2b_metro.tscn -- --m2b-check=play --kill-limit=15 --preround=0` |
+| the rows the merge touches | pass | m2b.gx.unit, m2b.contract, m2b.contract2, m2b.cam.unit, ui.hud.tdm.unit, ui.hud.tdm.install, fx.triggers.unit, godot.m2a_viewmodel, godot.m2a_tp_crowd: 10/10 (with the setup fixture) passed, 10.8 s | `ctest --test-dir b\dev -j 8 -R "^(m2b\.gx\.unit\|m2b\.contract2?\|m2b\.cam\.unit\|ui\.hud\.tdm\.(unit\|install)\|fx\.triggers\.unit\|godot\.m2a_viewmodel\|godot\.m2a_tp_crowd)$"` |
 | branch pass | every functional row passes, install.unchanged | 148 rows: 146 passed, 2 skipped (`core.cache_data`, `core.res`, as before), 0 failed; 331.7 s of ctest wall time; exit 0. One "budget VIOLATION" line is for `host.tdm.server` (wave 1's row: 63.1 s without COST under the parallel load), not a gx row | `tools\build.cmd dev` |
 
-## 6. Handoff (merge pass)
+## 6. The dependency step: ui and cam merged (2026-10-19)
 
-* ui and cam rows: E9's 6 ui rows and 1 cam row pass only after their merges. A reconfigure is needed after the
-  merge, because `OPENBF3_M2B_HAVE_UI` / `_CAM` come from configure-time `EXISTS` checks. The code under them
-  (`fill_hud_tdm`, `Bf3TdmHud`, `Bf3DeathCamera`, `set_corpse_seconds`, `TdmHudRecords`) was compiled on this branch
-  against the W2.0 headers with both switches forced on: `level_session_m2b.cpp` and `m2b_check.cpp` compile with
-  `/W4` and no warnings, into scratch objects. It has not been linked or run, because the bodies are ui's and cam's.
-* The windowed run of E9 and E12, and the screenshots for the user's look, are the merge pass's.
+`m2b/w2` (ui c459aac, cam 2c0818b) was merged into `m2b/gx` with `--no-ff` (081c749). The four conflicts were the
+end-of-file blocks (README, both CMake files: cam, ui, then gx) and R13's line in `FxTriggers::sane`, where cam
+made the identical change; cam's tagged line was kept. There were no `m2b_fake` stand-ins in gx's code to replace:
+gx built ui's and cam's parts behind `OPENBF3_M2B_HAVE_UI` / `_CAM`, which the reconfigure now turns on (64 TUs
+each in `compile_commands.json`), so the real `fill_hud_tdm`, `Bf3TdmHud`, `Bf3DeathCamera` and
+`Bf3GameCrowd::set_corpse_seconds` are linked and run.
+
+Against cam's "what gx calls" (m2b-cam.md §6), three fixes (commit ff4c180) and one insertion (f5f0c78):
+
+* **The camera basis.** `m2b_camera_transform` put `right` in the Godot basis' x column. cam's frame has
+  `right = up x forward`, so Godot's x column is `-right` (the inverse of `m2a_frame_of`); the old basis was
+  mirrored.
+* **The corpse.** `DeathCameraStart::corpse` is the presented own feet, `own_curr.position + visual_offset`.
+* **The yaw.** `DeathCameraStart::yaw_rad` is `sim::yaw_radians(own_curr.yaw)` (the death's view), not the
+  mapper's live mouse yaw.
+* **`[defib]`** (§1's table): the TDM assault viewmodel sets get the defibrillator in slot 2, which the 3 key and
+  the wheel's slot 2 select.
+
+ui's handoff (m2b-ui.md §7) was already met by the code written against the contract: `fill_hud_tdm` after
+`fill_hud` with the same drained events, `spawn_kit` fed back, `set_model` every frame, the mouse from
+`wants_mouse()`, the clicks taken once per frame, the HUD built on the M2a HUD's CanvasLayer (the M2a `Bf3Hud` is in
+the tree for the weapon icons). `Bf3TdmHud` is built in a window only; headless, ui's rows read
+`HudTdmFeedState` and the model.
+
+**The headless play check after the merge** (one run, by hand; indicative only): M2B CHECK: PASS, 13 rows pass,
+1 skip, 0 "waiting for". `kill_feed_lines` 23 == the 23 deaths received; `scoreboard_kills_mismatch` 0 of 172 Tab
+samples; `kill_card_bad` 0 of 1; `spawn_screen_shown` 2; `round_end_screen` 1; `death_views` 1 with 0 bad inputs;
+`missing_lookups` skips headless (nothing is drawn; a window row). The run: deploy assault (life 1 at 1.2 s), the
+seek-enemy teleport at 20 s, own death at 27.0 s, deploy engineer (life 2 at 32.3 s), RoundOver at 39.6 s (US 7 -
+RU 15), 42.6 s of play, 46.1 s wall with the load; install unchanged: yes.
+
+Not exercisable headless (the scene's crowd and viewmodels are off headless): the 15 s corpses and the own corpse
+(`set_corpse_seconds`), the defibrillator in 1p, the death view on screen. They are E9's window run
+(`godot.m2b.play`) and the user's playtest.
+
+## 7. Handoff (merge pass)
+
+* The windowed run of E9 and E12, and the screenshots for the user's look, are the merge pass's. In a window the ui
+  rows also check the drawn records (`TdmHudRecords`) and `missing_lookups`.
