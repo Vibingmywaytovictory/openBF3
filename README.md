@@ -3185,3 +3185,54 @@ Measured 2026-10-19, `m2b/gx`, shared machine (times indicative only):
   way to the round-end screen. One run each, by hand: headless PASS (own death at 9.0 s, RoundOver at 40.8 s);
   windowed PASS, 14/14 rows, 0 ERROR lines, `missing_lookups` 0 (own death at 12.7 s by a bot, deploy engineer at
   17.9 s, RoundOver at 33.8 s, 5 screenshots); install unchanged: yes.
+
+## PT1 snd: sound glitching
+
+<!-- # PT1 snd -->
+Track `snd` of the first playtest fixes, on branch `pt1/snd` from main 6a4061e. The finding: "Sound glitching
+sometimes". Root causes with the measurements, the fixes, before and after, and one command per check:
+[docs/design/pt1-snd.md](docs/design/pt1-snd.md).
+
+**What was wrong.** Measured in windowed M2b rounds of our own mixer, and in the offline 64-shooter render:
+
+* **Hard cuts.** The 128-voice cap parked sounding loops and dropped sounding one-shots between two samples, and a
+  Kill stopped a voice at once. In one round, 128 cuts were above -40 dBFS, the largest -16 dBFS.
+* **Flapping.** Loops at the cap's edge were parked and resumed every 10 to 200 ms (offline: 1843 of 3234 parks
+  shorter than 0.25 s).
+* **Clipping.** The mix went over 0 dBFS in 43 to 176 episodes a round, up to +7.6 dBFS. The HDR energy terms are not
+  applied (Q9), so nothing bounded the sum.
+* **Late blocks.** Up to 107 ms, at the round end. Godot's audio thread runs at normal priority, and it stalled
+  beside the main thread's hitches.
+
+**What changed** (named defaults, [inferred], measured = false):
+
+* `[fade]`: those cuts fade over one block (10.7 ms), and a resumed loop fades in.
+* `[hold]`: the cap holds a sounding voice by 3 dB and its busiest 0.5 s. A parked loop resumes only with 8 voices to
+  spare.
+* `[limit]`: a peak limiter at -0.3 dBFS on the output, using the block as lookahead (no latency). A mix under the
+  ceiling is left exactly as it was.
+* `[prio]`: `THREAD_PRIORITY_HIGHEST` on Godot's audio thread.
+
+**After**, in windowed rounds:
+
+* 0 audible cuts;
+* at most 7 loops parked more than twice, against 65;
+* 0 frames over 0 dBFS;
+* 0 late blocks in three rounds.
+
+**Diagnostics:**
+
+* Every game mixer prints one `[pt1] audio health:` line at shutdown: the cuts, call gaps, late blocks, the limiter,
+  hitches and the thread priority.
+* `--audio-capture=<dir>` records `mix.wav`, `cuts.csv` and `hitches.csv` (derived data, under `b\shots`).
+  `python -I tools\audio_capture_check.py <dir>` analyses them.
+* A/B switches: `--audio-cut-fade=0 --audio-cap-hold=0 --audio-limit=0 --audio-thread-priority=keep` give the merged
+  mixer.
+
+**Rows:**
+
+* `audio.cuts.unit` (new, data-free, 7 cases);
+* `audio.game.crowd`: the 64-shooter case now checks 0 audible cuts, flaps under 1 in 20 parks, and 0 overs.
+
+`audio.game.underruns` (E11), `godot.m2a_firefight` (E14) and `godot.audio` (G8) are the merge-pass rows the diff
+touches.

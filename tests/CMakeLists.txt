@@ -1538,9 +1538,10 @@ endif()
 # MixerCore): a Kill, a cap drop of a playing one-shot and a loop parked / resumed by the cap each leave a step of up to
 # the voice's level with the cut fade off, and no step above the tone's own slope with it on; the cut counters, the
 # event ring and hostile fades; the cap's hold and resume margin (a sounding loop is not parked for a newcomer < 3 dB
-# louder; a parked one resumes only with 8 voices to spare). A unit row (<= 2 s), parallel-safe, also in the asan preset.
-# The real-data counterpart is audio.game.crowd (64 shooters): no audible cut, fewer than 1 in 20 parks short or
-# re-parked within 1 s (checks in the existing case, so audio.game.underruns runs them too).
+# louder; a parked one resumes only with 8 voices to spare); the output limiter (under its ceiling, a quiet mix
+# untouched). A unit row (<= 2 s), parallel-safe, also in the asan preset. The real-data counterpart is
+# audio.game.crowd (64 shooters): no audible cut, fewer than 1 in 20 parks short or re-parked within 1 s, no frame
+# over 0 dBFS (checks in the existing case, so audio.game.underruns runs them too).
 add_test(NAME audio.cuts.unit COMMAND test_audio_hdr --test-suite=audio-cuts)
 set_tests_properties(audio.cuts.unit PROPERTIES TIMEOUT 120)
 if(OPENBF3_ASAN)
