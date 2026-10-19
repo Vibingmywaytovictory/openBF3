@@ -6,13 +6,17 @@
 //             ticks, ended by Fire and by moving (the abort map), the server equal to a local SoldierMotor over the same
 //             MotorParams (what the client predicts with)
 //   respawn*  E4: a bot's death -> respawn at death + 300 (+ the revive wait near an assault teammate), the rules' kit;
-//             a deploy-screen peer is not spawned by Ready (R10); the M2a hashes of a load without the TDM kits
+//             a deploy-screen peer is not spawned by Ready (R10), only by an accepted SpawnRequest; after its death the
+//             DeathEvent's stamps reach it, a SpawnRequest before respawn_tick is refused, at it accepted and Spawned
+//             follows within 1 tick with the kit; MatchState / PlayerList at the peer equal the rules'; a v2 Hello is
+//             kicked; the M2a hashes of a load without the TDM kits (equal to main 47871fa's)
 //   revive*   E5: a scripted enemy kills a bot (and a peer), a peer medic's defibrillator brings it back at the corpse with
-//             20 hp as a new life; the kill comes off the enemy count, the medic scores 100; a living target and an
-//             enemy medic are refused; the revived bot is not respawned at its old tick
-//   hostile*  E7 (server half): SpawnRequest refusals by kind (TdmRules directly) and hostile v3 datagrams (counted)
-// The wire parts that need nt's v3 codecs (SpawnRequest accepted through the server, MatchState / PlayerList at the
-// peer, Spawned.revived, the DeathEvent stamps on the wire) print PENDING (nt) until the codecs return bytes.
+//             20 hp as a new life (Spawned.revived, the ReviveEvent and the death stamps on the wire); the kill comes
+//             off the enemy count, the medic scores 100; a living target and an enemy medic are refused; the revived
+//             bot is not respawned at its old tick; with the deploy screen: nothing after the man-down window, and a
+//             deploy (accepted SpawnRequest) ends the man-down at once
+//   hostile*  E7 (server half): SpawnRequest refusals by kind (TdmRules directly, and in RoundOver through the server)
+//             and hostile v3 datagrams (counted)
 // Exits 77 (skipped) without an install.
 
 #include <doctest/doctest.h>
@@ -44,6 +48,8 @@ namespace sw = bf3::sim::weapons;
 namespace {
 
 // E4: the M2a hashes of Metro TDM without the TDM kits and the immunity abort (printed by the respawn case; see there).
+// Measured from main 47871fa (2026-10-19): a scratch program linked against openBF3\b\dev's libraries, built from
+// 47871fa's src, printed these three for load_shared_level (gunplay) + make_match_table (docs/design/m2b-ru.md §7).
 constexpr uint64_t kM2aKitHash = 0x31b45dc7cc3f4271ull;
 constexpr uint64_t kM2aWeaponHash = 0xb8fd23d8ccfc4c63ull;
 constexpr uint64_t kM2aMotorHash = 0x6d75dd5f51d95090ull;
@@ -59,11 +65,6 @@ float distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 
 sim::Vec3 add(const sim::Vec3 &p_a, float p_x, float p_y, float p_z) {
 	return { p_a[0] + p_x, p_a[1] + p_y, p_a[2] + p_z };
-}
-
-void pending_nt(const char *p_what) {
-	std::printf("host.tdm.server: PENDING (nt): %s\n", p_what);
-	MESSAGE((std::string("PENDING (nt): ") + p_what));
 }
 
 // A scripted server-side soldier (AutoTeam gives it a team and the rules a bot kit, [add]).
@@ -178,7 +179,7 @@ host::MatchRulesConfig tdm_rules_config(bool p_deploy) {
 	return c;
 }
 
-std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, uint64_t p_seed = 7) {
+std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, uint64_t p_seed = 7, int p_kill_limit = 0) {
 	auto m = std::make_unique<Match>();
 	m->level = p_level.shared;
 	host::GameServerConfig cfg;
@@ -189,6 +190,7 @@ std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, 
 	cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
 	cfg.gunplay.player_kit = 0; // a peer without KitSelect is assault (the medic)
 	cfg.rules = tdm_rules_config(p_deploy);
+	cfg.rules.kill_limit_override = p_kill_limit; // 0: the data's (KillCounter.MaxKillCount)
 	const core::Status st = m->server.init(cfg);
 	REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 	REQUIRE(m->server.rules() != nullptr);
@@ -308,6 +310,45 @@ sim::Command aim_command(const Match &p_match, sim::Tick p_tick, const sim::Sold
 	sim::Command c = sim::idle_command(p_tick, sim::quantize_yaw(yaw), sim::quantize_pitch(pitch), p_pose);
 	c.buttons = p_buttons;
 	return c;
+}
+
+// The newest DeathEvent of p_victim that reached p_peer in CombatEvents (decoded with nt's v3 codec), or null.
+const net::DeathEvent *last_death(const tdm::ScriptedPeer &p_peer, int p_victim) {
+	for (auto c = p_peer.combat.rbegin(); c != p_peer.combat.rend(); ++c) {
+		for (auto d = c->deaths.rbegin(); d != c->deaths.rend(); ++d) {
+			if (int(d->victim) == p_victim) {
+				return &*d;
+			}
+		}
+	}
+	return nullptr;
+}
+
+const net::ReviveEvent *last_revive(const tdm::ScriptedPeer &p_peer, int p_revived) {
+	for (auto c = p_peer.combat.rbegin(); c != p_peer.combat.rend(); ++c) {
+		for (auto r = c->revives.rbegin(); r != c->revives.rend(); ++r) {
+			if (int(r->revived) == p_revived) {
+				return &*r;
+			}
+		}
+	}
+	return nullptr;
+}
+
+// The peer's applied PlayerList against the rules' rows (every field but ping_ms); the number of differing rows.
+size_t player_rows_differ(const tdm::ScriptedPeer &p_peer, const host::TdmRules &p_rules) {
+	const std::span<const net::PlayerRow> want = p_rules.players();
+	size_t differ = want.size() > p_peer.players.size() ? want.size() - p_peer.players.size() : p_peer.players.size() - want.size();
+	for (const net::PlayerRow &w : want) {
+		auto at = std::find_if(p_peer.players.begin(), p_peer.players.end(), [&](const net::PlayerRow &r) { return r.slot == w.slot; });
+		if (at == p_peer.players.end()) {
+			continue; // counted by the size difference or by a row of another slot below
+		}
+		const bool same = at->team == w.team && at->kit == w.kit && at->bot == w.bot && at->alive == w.alive && at->kills == w.kills &&
+				at->deaths == w.deaths && at->score == w.score && net::player_name(*at) == net::player_name(w);
+		differ += same ? 0u : 1u;
+	}
+	return differ;
 }
 
 } // namespace
@@ -630,16 +671,99 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(q.slot() >= 0);
 		CHECK_FALSE(is_alive(d->state(q.slot())));
 		CHECK(q.spawned.empty());
-		if (!net::encode_spawn_request(net::SpawnRequest{ 2, 0 }).empty()) {
-			q.spawn_request(2);
+		REQUIRE(!net::encode_spawn_request(net::SpawnRequest{ 2, 0 }).empty()); // nt's v3 codec
+		// A SpawnRequest delivered before tick R (the tick about to run) spawns the peer; Spawned arrives in R's output
+		// or the next tick's (E4: within 1 tick).
+		const auto request_and_wait = [&](uint8_t p_kit) -> std::pair<sim::Tick, sim::Tick> {
+			const size_t before = q.spawned.size();
+			const sim::Tick request_tick = d->now() + 1u;
+			q.spawn_request(p_kit);
+			sim::Tick arrived = 0;
+			for (int i = 0; i < 5 && arrived == 0; ++i) {
+				d->tick();
+				arrived = q.spawned.size() > before ? d->now() : 0;
+			}
+			return { request_tick, arrived };
+		};
+		const auto [rq1, at1] = request_and_wait(2);
+		std::printf("E4 deploy: SpawnRequest kit 2 for tick %u, Spawned in tick %u's output (+%u)\n", unsigned(rq1), unsigned(at1), unsigned(at1 - rq1));
+		REQUIRE(at1 != 0);
+		CHECK(at1 <= rq1 + 1u);
+		CHECK(q.spawned.back().kit == 2);
+		CHECK_FALSE(q.spawned.back().revived);
+		CHECK(is_alive(d->state(q.slot())));
+		CHECK(d->server.gunplay()->kit(uint8_t(q.slot())) == 2);
+		// Its death (a lethal drop): the stamps reach the peer; a request before respawn_tick is refused, at it accepted.
+		const std::optional<Drop> lethal = find_drop(*d, true);
+		REQUIRE(lethal.has_value());
+		d->ticks(130); // past the spawn immunity (a teleport ends it anyway)
+		const uint32_t qlife = d->state(q.slot())->life;
+		d->teleport(q, add(lethal->floor, 0.0f, lethal->height, 0.0f));
+		sim::Tick qdied = 0;
+		REQUIRE(d->until(
+				[&] {
+					if (!is_alive(d->state(q.slot()))) {
+						qdied = d->now();
+					}
+					return qdied != 0;
+				},
+				900));
+		d->tick();
+		const uint32_t q_earliest = d->rules().earliest_respawn(uint8_t(q.slot()));
+		const net::DeathEvent *qd = last_death(q, q.slot());
+		REQUIRE(qd != nullptr);
+		std::printf("E4 deploy: the peer died at %u; DeathEvent at the peer: respawn_tick %u (+%u), revive_until %u (+%u), killer_health %.2f; rules "
+					"earliest_respawn %u\n",
+				unsigned(qdied), unsigned(qd->respawn_tick), unsigned(qd->respawn_tick - qdied), unsigned(qd->revive_until),
+				unsigned(qd->revive_until - qdied), qd->killer_health, unsigned(q_earliest));
+		CHECK(qd->respawn_tick == qdied + 300u);
+		CHECK(qd->respawn_tick == q_earliest);
+		CHECK(qd->revive_until == d->rules().revive_until(uint8_t(q.slot())));
+		CHECK(qd->killer_health == 0.0f); // a fall
+		CHECK_FALSE(is_alive(d->state(q.slot()))); // a deploy-screen peer waits for its request
+		while (d->now() + 1u < q_earliest - 1u) {
 			d->tick();
-			d->tick();
-			REQUIRE(!q.spawned.empty());
-			CHECK(q.spawned.back().kit == 2);
-			CHECK(is_alive(d->state(q.slot())));
-		} else {
-			pending_nt("a deploy-screen SpawnRequest through the server spawns the peer with its kit within 1 tick");
 		}
+		const uint64_t early0 = d->rules().stats().refused[size_t(host::SpawnRefusal::TooEarly)];
+		const size_t spawned_before = q.spawned.size();
+		q.spawn_request(3); // for respawn_tick - 1
+		d->tick();
+		CHECK(d->rules().stats().refused[size_t(host::SpawnRefusal::TooEarly)] == early0 + 1u);
+		CHECK(q.spawned.size() == spawned_before);
+		CHECK_FALSE(is_alive(d->state(q.slot())));
+		const auto [rq2, at2] = request_and_wait(3); // for respawn_tick
+		std::printf("E4 deploy: request for %u refused (too early), for %u accepted, Spawned in tick %u's output, kit %u, life %u -> %u\n",
+				unsigned(rq2 - 1u), unsigned(rq2), unsigned(at2), unsigned(q.spawned.empty() ? 0 : q.spawned.back().kit), unsigned(qlife),
+				unsigned(d->state(q.slot())->life));
+		CHECK(rq2 == q_earliest);
+		REQUIRE(at2 != 0);
+		CHECK(at2 <= rq2 + 1u);
+		CHECK(q.spawned.back().kit == 3);
+		CHECK(d->server.gunplay()->kit(uint8_t(q.slot())) == 3);
+		CHECK(d->state(q.slot())->life == qlife + 1u);
+		// MatchState and PlayerList at the peer (decoded with nt's codecs) equal the rules'.
+		d->ticks(net::kPlayerListIntervalTicks + 2u);
+		REQUIRE(q.match_state.has_value());
+		CHECK(net::encode_match_state(*q.match_state) == net::encode_match_state(d->rules().match_state()));
+		const size_t differ = player_rows_differ(q, d->rules());
+		std::printf("E4 deploy: %zu MatchStates and %zu player rows at the peer, %zu rows differ from the rules', %llu decode errors\n", q.match_states.size(),
+				q.players.size(), differ, (unsigned long long)q.decode_errors);
+		CHECK(differ == 0u);
+		CHECK(q.players.size() == 4u);
+		CHECK(q.decode_errors == 0u);
+		// A v2 client is refused with Kick (E7).
+		d->peers.push_back(std::make_unique<tdm::ScriptedPeer>(d->server, 99u, "v2"));
+		d->scripts.emplace_back();
+		tdm::ScriptedPeer &v2 = *d->peers.back();
+		net::Hello old;
+		old.protocol = 2;
+		old.name = "v2";
+		d->server.on_receive(v2.peer(), net::kChannelReliable, net::encode_hello(old));
+		d->tick();
+		std::printf("E4/E7: a v2 Hello: %s\n", v2.kick ? ("Kick \"" + v2.kick->reason + "\"").c_str() : "no Kick");
+		CHECK(v2.kick.has_value());
+		CHECK_FALSE(v2.match_info.has_value());
+		CHECK(d->rules().stats().runtime_faults == 0u);
 
 		// The M2a hashes: a load without the TDM kits (the 3-argument load_gunplay_level) and the motor without the
 		// immunity abort give M2a's values; the TDM load's differ only by the defibrillator and the abort.
@@ -827,12 +951,22 @@ TEST_SUITE("host-tdm-server") {
 				CHECK(sp.state.life == back.life);
 				CHECK(sp.spawn_index == 0u);
 				CHECK(distance(sp.state.position, corpse) < 0.25f);
-				if constexpr (net::kProtocolVersion >= 3) {
-					CHECK(sp.revived);
-				} else {
-					pending_nt("Spawned.revived on the wire (the v2 Spawned codec has no revived bit)");
-				}
+				CHECK(sp.revived);
 			}
+			// On the wire (nt's v3 CombatEvents, at the medic's peer): the death's stamps and the revive.
+			const net::DeathEvent *de = last_death(medic, victim);
+			const net::ReviveEvent *re = last_revive(medic, victim);
+			REQUIRE(de != nullptr);
+			REQUIRE(re != nullptr);
+			std::printf("E5 (%s victim): at the medic's peer: DeathEvent respawn_tick +%u, revive_until +%u, killer_health %.2f; ReviveEvent reviver %u "
+						"revived %u tick %u (revived at %u)\n",
+					victim_peer ? "peer" : "bot", unsigned(de->respawn_tick - died), unsigned(de->revive_until - died), de->killer_health,
+					unsigned(re->reviver), unsigned(re->revived), unsigned(re->tick), unsigned(revived));
+			CHECK(de->respawn_tick == respawn_at);
+			CHECK(de->revive_until == revive_until);
+			CHECK(de->killer_health > 0.0f);
+			CHECK(int(re->reviver) == medic.slot());
+			CHECK(re->tick == back.tick);
 			// 5. The revived soldier is not respawned at its old respawn tick, and a defib at the living one is refused.
 			const uint64_t refused2 = s2.defib_refused;
 			medic_fire = true;
@@ -846,7 +980,130 @@ TEST_SUITE("host-tdm-server") {
 			CHECK(m->rules().stats().defib_refused > refused2);
 			CHECK(m->rules().stats().runtime_faults == 0u);
 		}
-		pending_nt("after the man-down window and after the victim deployed (needs a deploy-screen peer: SpawnRequest)");
+	}
+
+	// E5 with the deploy screen: a peer victim's man-down window runs out (the medic's paddles do nothing after it), and a
+	// deploy (an accepted SpawnRequest at respawn_tick, inside the window: a deploy-screen death's window is longer) ends
+	// the man-down at once.
+	TEST_CASE("revive: deploy screen, after the man-down window and after the victim deployed") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, true, 21u);
+		// Join order sets AutoTeam's teams: medic 1, shooter 2, victim 1, a bot 2.
+		tdm::ScriptedPeer &medic = m->join("medic");
+		medic.ready();
+		Script *shooter = m->bot();
+		tdm::ScriptedPeer &victim_p = m->join("victim");
+		victim_p.ready();
+		m->bot();
+		REQUIRE(wait_in_round(*m));
+		medic.spawn_request(0);
+		victim_p.spawn_request(2);
+		m->ticks(3);
+		const int victim = victim_p.slot();
+		REQUIRE(is_alive(m->state(medic.slot())));
+		REQUIRE(is_alive(m->state(victim)));
+		REQUIRE(m->rules().team_of(uint8_t(medic.slot())) == 1);
+		REQUIRE(m->rules().team_of(uint8_t(victim)) == 1);
+		REQUIRE(m->rules().team_of(uint8_t(shooter->slot)) == 2);
+		REQUIRE(m->server.gunplay()->kit(uint8_t(medic.slot())) == 0);
+		const std::optional<Patch> patch = find_patch(*m, 3.0f);
+		REQUIRE(patch.has_value());
+		const sim::Vec3 corpse_centre = add(patch->victim, 0.0f, 0.3f, 0.0f);
+		bool medic_fire = false, shooter_fire = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const bool press = medic_fire && (p_tick % 60u) < 50u;
+			return aim_command(*m, p_tick, p_state, corpse_centre, sim::Pose::Crouch, select_and_fire(host::kKitGadgetSlot, press));
+		};
+		shooter->fn = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::SoldierState *v = m->state(victim);
+			const sim::Vec3 chest = v != nullptr ? add(v->position, 0.0f, 1.2f, 0.0f) : patch->victim;
+			return aim_command(*m, p_tick, p_state, chest, sim::Pose::Stand, select_and_fire(0, shooter_fire && (p_tick % 6u) < 3u));
+		};
+		const sim::Vec3 away = m->level->spawns[(patch->spawn + 50u) % m->level->spawns.size()].position;
+		// One kill of the victim at the patch: the death tick, the respawn tick and the man-down end.
+		struct Kill {
+			sim::Tick died = 0;
+			uint32_t respawn_at = 0, revive_until = 0, life = 0;
+		};
+		const auto kill = [&]() -> Kill {
+			m->teleport(victim_p, add(patch->victim, 0.0f, 0.05f, 0.0f));
+			m->teleport(medic, add(patch->medic, 0.0f, 0.05f, 0.0f));
+			m->place(shooter->slot, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+			m->ticks(90); // the medic's switch to the gadget slot and crouch
+			Kill k;
+			k.life = m->state(victim)->life;
+			shooter_fire = true;
+			m->until(
+					[&] {
+						if (!is_alive(m->state(victim))) {
+							k.died = m->now();
+						}
+						return k.died != 0;
+					},
+					900);
+			shooter_fire = false;
+			m->place(shooter->slot, away);
+			m->tick();
+			k.respawn_at = m->rules().earliest_respawn(uint8_t(victim));
+			k.revive_until = m->rules().revive_until(uint8_t(victim));
+			return k;
+		};
+		// 1. The man-down window runs out: the paddles after it do nothing; the victim stays down until it deploys.
+		const Kill k1 = kill();
+		REQUIRE(k1.died != 0);
+		std::printf("E5 deploy: died at %u, respawn +%u, revive until +%u, downed %zu\n", unsigned(k1.died), unsigned(k1.respawn_at - k1.died),
+				unsigned(k1.revive_until - k1.died), m->rules().downed().size());
+		CHECK(k1.revive_until > k1.died);
+		CHECK(m->rules().downed().size() == 1u);
+		while (m->now() < k1.revive_until + 5u) {
+			m->tick();
+		}
+		const host::RulesStats s0 = m->rules().stats();
+		medic_fire = true;
+		m->ticks(130);
+		medic_fire = false;
+		const host::RulesStats s1 = m->rules().stats();
+		std::printf("E5 deploy: after the window: %" PRIu64 " defib shots, %" PRIu64 " refused, %" PRIu64 " misses, revives %" PRIu64 ", downed %zu\n",
+				s1.defib_shots - s0.defib_shots, s1.defib_refused - s0.defib_refused, s1.defib_misses - s0.defib_misses, s1.revives,
+				m->rules().downed().size());
+		CHECK(s1.defib_shots > s0.defib_shots);
+		CHECK(s1.revives == 0u);
+		CHECK_FALSE(is_alive(m->state(victim)));
+		CHECK(m->state(victim)->life == k1.life);
+		const size_t spawned1 = victim_p.spawned.size();
+		victim_p.spawn_request(2);
+		m->ticks(2);
+		REQUIRE(victim_p.spawned.size() == spawned1 + 1u);
+		CHECK_FALSE(victim_p.spawned.back().revived);
+		CHECK(m->state(victim)->life == k1.life + 1u);
+		// 2. The victim deploys: the accepted SpawnRequest ends the man-down before its spawn (revive_until 0, no downed
+		// entry), so the paddles at the corpse do nothing.
+		m->ticks(130); // past the spawn immunity
+		const Kill k2 = kill();
+		REQUIRE(k2.died != 0);
+		CHECK(k2.respawn_at < k2.revive_until); // the deploy falls inside the man-down window
+		while (m->now() + 1u < k2.respawn_at) {
+			m->tick();
+		}
+		const uint64_t accepted = m->rules().stats().spawns_accepted;
+		victim_p.spawn_request(1);
+		CHECK(m->rules().stats().spawns_accepted == accepted + 1u);
+		CHECK(m->rules().revive_until(uint8_t(victim)) == 0u);
+		CHECK(m->rules().downed().empty());
+		medic_fire = true;
+		m->ticks(130);
+		medic_fire = false;
+		std::printf("E5 deploy: deployed at %u (death + %u): revive_until %u, downed %zu, revives %" PRIu64 ", life %u -> %u, revived %d\n",
+				unsigned(k2.respawn_at), unsigned(k2.respawn_at - k2.died), unsigned(m->rules().revive_until(uint8_t(victim))), m->rules().downed().size(),
+				m->rules().stats().revives, unsigned(k2.life), unsigned(m->state(victim)->life), victim_p.spawned.back().revived ? 1 : 0);
+		CHECK(m->rules().stats().revives == 0u);
+		CHECK(m->state(victim)->life == k2.life + 1u);
+		CHECK(victim_p.spawned.back().kit == 1);
+		CHECK_FALSE(victim_p.spawned.back().revived);
+		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
 	// E7 (server half): SpawnRequest refusals by kind, and hostile v3 datagrams at the server.
@@ -915,11 +1172,8 @@ TEST_SUITE("host-tdm-server") {
 			rng = sw::splitmix64(rng);
 			return rng;
 		};
-		std::vector<uint8_t> valid = net::encode_spawn_request(net::SpawnRequest{ 1, 0 });
-		const bool codec = !valid.empty();
-		if (!codec) {
-			valid = { uint8_t(net::MessageType::SpawnRequest), 1, 0 };
-		}
+		const std::vector<uint8_t> valid = net::encode_spawn_request(net::SpawnRequest{ 1, 0 });
+		REQUIRE(!valid.empty()); // nt's v3 codec
 		for (int round = 0; round < 60; ++round) {
 			for (size_t cut = 1; cut < valid.size(); ++cut) {
 				m->server.on_receive(p.peer(), net::kChannelReliable, std::span<const uint8_t>(valid.data(), cut));
@@ -941,12 +1195,39 @@ TEST_SUITE("host-tdm-server") {
 		const uint64_t bad = m->server.stats().bad_datagrams - bad0;
 		std::printf("E7 hostile datagrams: %" PRIu64 " sent, %" PRIu64 " counted bad, %" PRIu64 " spawn requests reached the rules, the peer %s\n", sent, bad,
 				m->rules().stats().spawn_requests, is_alive(m->state(p.slot())) ? "alive" : "not spawned");
-		CHECK(bad >= sent - (codec ? 60u : 0u)); // every one but (with nt's codec) a random body that happens to decode
+		CHECK(bad + m->rules().stats().spawn_requests == sent); // every one counted: bad, or a decoded request the rules judged
 		CHECK(m->rules().stats().runtime_faults == 0u);
 		CHECK(m->server.stats().step_precondition_failures == 0u);
-		if (!codec) {
-			pending_nt("hostile SpawnRequests that decode (the refusals through the server's [recv]); a v2 client refused with Kick");
-		}
+
+		// A SpawnRequest in RoundOver, through the server's [recv]: kill limit 1, a scripted bot kills another.
+		std::unique_ptr<Match> o = start_match(*level, true, 31u, 1);
+		Script *killer = o->bot(); // team 1
+		Script *target = o->bot(); // team 2
+		o->bot();
+		tdm::ScriptedPeer &late = o->join("late"); // team 2, never deploys
+		late.ready();
+		REQUIRE(wait_in_round(*o));
+		o->ticks(130); // past the bots' spawn immunity
+		const std::optional<Patch> patch = find_patch(*o, 3.0f);
+		REQUIRE(patch.has_value());
+		o->place(target->slot, add(patch->victim, 0.0f, 0.05f, 0.0f));
+		o->place(killer->slot, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+		killer->fn = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::SoldierState *v = o->state(target->slot);
+			const sim::Vec3 chest = v != nullptr ? add(v->position, 0.0f, 1.2f, 0.0f) : patch->victim;
+			return aim_command(*o, p_tick, p_state, chest, sim::Pose::Stand, select_and_fire(0, (p_tick % 6u) < 3u));
+		};
+		REQUIRE(o->until([&] { return o->rules().phase() == net::MatchPhase::RoundOver; }, 900));
+		killer->fn = nullptr;
+		const uint64_t phase0 = o->rules().stats().refused[size_t(host::SpawnRefusal::Phase)];
+		late.spawn_request(0);
+		o->ticks(2);
+		std::printf("E7 RoundOver: kills %d / %d, a SpawnRequest refused (phase %" PRIu64 " -> %" PRIu64 "), the peer %s\n", o->rules().match_state().kills[0],
+				o->rules().match_state().kills[1], phase0, o->rules().stats().refused[size_t(host::SpawnRefusal::Phase)],
+				is_alive(o->state(late.slot())) ? "spawned" : "not spawned");
+		CHECK(o->rules().stats().refused[size_t(host::SpawnRefusal::Phase)] == phase0 + 1u);
+		CHECK(late.spawned.empty());
+		CHECK_FALSE(is_alive(o->state(late.slot())));
 	}
 
 	TEST_CASE("install unchanged") {

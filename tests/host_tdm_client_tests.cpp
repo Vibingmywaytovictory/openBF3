@@ -9,7 +9,8 @@
 //     server's rules stamped them (respawn = death + 300, revive_until > death)
 //   * MatchState reaches RoundOver (kill limit 5) within 30 s
 // It needs nt's v3 codecs and client (kProtocolVersion 3, send_spawn_request, the frame's match fields) and bb's
-// brains (add_tdm_bots); before both it exits 77 (skipped) with PENDING. The revive half of E13 (a scripted assault bot
+// brains (add_tdm_bots); before both it exits 77 (skipped) with PENDING (nt is in since the w1 merge; the bb probe
+// below inits a GameServer with one TDM bot and skips while the W1.0 stub refuses it). The revive half of E13 (a scripted assault bot
 // revives the client) is not in this row yet (docs/design/m2b-ru.md §8): host.tdm.server's revive case covers the
 // server side and the peer's Spawned.
 // Exits 77 (skipped) without an install.
@@ -42,6 +43,27 @@ TEST_SUITE("host-tdm-client") {
 			tdm::TdmLevel *level = tdm::load_tdm_level_once();
 			if (level == nullptr) {
 				return;
+			}
+			{ // bb's add_tdm_bots: until bb lands, the W1.0 stub refuses a config with TDM bots (skipped, PENDING)
+				host::GameServer probe;
+				host::GameServerConfig c;
+				c.level = level->shared;
+				c.max_slots = 16;
+				c.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+				c.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+				auto fill = std::make_shared<host::BotFillConfig>();
+				fill->level = level->bots;
+				fill->count = 0;
+				c.bots = fill;
+				auto bots = std::make_shared<host::TdmBotConfig>();
+				bots->count = 1;
+				c.tdm_bots = bots;
+				const core::Status st = probe.init(c);
+				if (!st.ok() && st.error().message.find("W1.0 stub") != std::string::npos) {
+					std::printf("host.tdm.client: PENDING (bb): %s\n", st.error().message.c_str());
+					bf3::test::skip_install_case("host.tdm.client needs bb's add_tdm_bots");
+					return;
+				}
 			}
 			tg::SessionOptions so;
 			so.max_slots = 64;
