@@ -182,3 +182,49 @@ struct CrowdMoveClips {
 core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library, const CrowdMoveClipNames &p_names = {});
 
 } // namespace bf3::anim
+
+// ---- PT1 run (docs/design/pt1-run.md) --------------------------------------------------------------------------------
+//
+// BF3's 3p move groups (move_group.h) with their clips on the crowd rig: the stand run, the sprint and the crouch
+// sneak. The clips are the ClipControllerAssets the groups' choosers pick for ChooserIndices (Rifle), each loaded from
+// the clip set's package by its controller's Anim index (so a controller name that occurs twice in the package, as
+// Rifle_SneakBwd, is no ambiguity). Each clip's length and root motion are measured as load_crowd_clips measures the
+// S3 cycles; the outer X sign (move_group_x) is the one that puts the measured root directions of the moving clips on
+// their directions' X (MP_Run: -1, the left run at X -pi/2 moves towards +X of the rig).
+
+#include "bf3/anim/move_group.h"
+
+namespace bf3::anim {
+
+enum class CrowdMoveGroupRole : uint8_t { Run, Sprint, Sneak, Count };
+inline constexpr size_t kCrowdMoveGroupRoles = size_t(CrowdMoveGroupRole::Count);
+
+struct CrowdMoveGroupNames {
+	std::array<std::string, kCrowdMoveGroupRoles> groups{ "MP_RunMoveGroup_PC", "MP_SprintMoveGroup", "MP_SneakMoveGroup_PC" };
+	ChooserIndices indices; // Rifle: the crowd draws every item with the rifle cycles (as S3; pt1-run.md §6)
+};
+
+struct CrowdMoveGroup {
+	bool ok = false; // read, every clip loaded and measured
+	MoveGroupDef def;
+	std::vector<CrowdClipData> clips; // per def.clips, bound into CrowdClipSet::package, tracked on CrowdClipSet::rig
+	std::vector<MoveGroupClipTiming> timing; // per def.clips (poses: seconds 0)
+	std::vector<Vec3> root_dir; // per def.clips: the measured unit root direction (zero for poses)
+	float x_sign = -1.0f; // move_group_x's sign (measured)
+	float worst_direction_deg = 0.0f; // the largest |measured root heading - its direction's X| over the moving clips
+};
+
+struct CrowdMoveGroupSet {
+	std::array<CrowdMoveGroup, kCrowdMoveGroupRoles> groups;
+	MoveGroupOptions options;
+	std::vector<std::string> notes; // per group: what was read, or why it is not ok
+
+	const CrowdMoveGroup &get(CrowdMoveGroupRole p_role) const { return groups[size_t(p_role)]; }
+};
+
+// Reads the named groups and loads their clips from p_set's package onto p_set's rig. Fails only when p_set has no
+// package or rig or the library no static package; a group that does not read or load is a note (ok false) and the
+// evaluator then keeps the stance's S3 / tp cycles for it.
+core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library, const CrowdMoveGroupNames &p_names = {});
+
+} // namespace bf3::anim

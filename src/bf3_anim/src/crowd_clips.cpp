@@ -559,3 +559,135 @@ core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, co
 }
 
 } // namespace bf3::anim
+
+// ---- PT1 run (docs/design/pt1-run.md): BF3's move groups on the crowd rig (crowd_clips.h) ----------------------------
+
+namespace bf3::anim {
+
+namespace {
+
+float pt1_wrap_pi(float p_a) {
+	constexpr float kPi = 3.14159265358979f;
+	if (!std::isfinite(p_a) || std::fabs(p_a) > 1.0e4f) {
+		return 0.0f;
+	}
+	while (p_a > kPi) {
+		p_a -= 2.0f * kPi;
+	}
+	while (p_a <= -kPi) {
+		p_a += 2.0f * kPi;
+	}
+	return p_a;
+}
+
+} // namespace
+
+core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set, const AntLibrary &p_library, const CrowdMoveGroupNames &p_names) {
+	if (!p_set.package || p_set.rig.size() == 0 || p_set.root_joint < 0 || p_library.static_package() == nullptr) {
+		return core::make_error("crowd move groups: no clip package, rig, root joint or static package");
+	}
+	const AntPackage &pkg = *p_set.package;
+	const core::ant::AntRig *rig = p_set.get(CrowdClip::Idle).binding.rig;
+	CrowdMoveGroupSet out;
+	LocalPose pose;
+	core::ant::ClipPose scratch;
+	std::vector<Xform> model;
+	for (size_t r = 0; r < kCrowdMoveGroupRoles; ++r) {
+		CrowdMoveGroup &g = out.groups[r];
+		const std::string where = "move group " + p_names.groups[r];
+		core::Result<MoveGroupDef> def = read_move_group(p_library, p_names.groups[r], p_names.indices);
+		if (!def) {
+			out.notes.push_back(def.error().message);
+			continue;
+		}
+		g.def = std::move(*def);
+		std::string why;
+		for (const AntClipRoute &route : g.def.clips) {
+			GdStruct clip = pkg.find(route.anim_index);
+			const AntPackage *clip_package = &pkg;
+			if ((!clip.valid() || !core::ant::is_clip(clip)) && route.controller_package != nullptr) {
+				clip = route.controller_package->find(route.anim_index);
+				clip_package = route.controller_package;
+			}
+			if (!clip.valid() || !core::ant::is_clip(clip)) {
+				why = route.controller + ": Anim " + hex(route.anim_index) + " is not a clip of " + pkg.name();
+				break;
+			}
+			core::Result<CrowdClipData> d = make_clip(p_library, *clip_package, clip, where + " " + route.controller);
+			if (!d) {
+				why = d.error().message;
+				break;
+			}
+			if (d->binding.rig != rig) {
+				why = route.controller + " binds to rig " + std::string(d->binding.rig->name) + ", not the crowd rig";
+				break;
+			}
+			if (core::Status s = track_clip(*d, p_set.rig, where + " " + route.controller); !s.ok()) {
+				why = s.error().message;
+				break;
+			}
+			MoveGroupClipTiming tm;
+			Vec3 dir{};
+			if (d->tracks.end_frame > 1) {
+				tm.seconds = d->tracks.duration_seconds();
+				const Vec3 a = joint_model_position(p_set.rig, *d, p_set.root_joint, 0.0f, pose, scratch, model);
+				const Vec3 b = joint_model_position(p_set.rig, *d, p_set.root_joint, float(d->tracks.end_frame), pose, scratch, model);
+				const float dx = b.x - a.x, dz = b.z - a.z;
+				const float len = std::sqrt(dx * dx + dz * dz);
+				if (tm.seconds > 0.0f && std::isfinite(len) && len > 1.0e-3f) {
+					tm.root_velocity = len / (tm.seconds * kAntTicksPerSecond);
+					dir = Vec3{ dx / len, 0.0f, dz / len };
+				}
+			}
+			g.clips.push_back(std::move(*d));
+			g.timing.push_back(tm);
+			g.root_dir.push_back(dir);
+		}
+		if (!why.empty()) {
+			out.notes.push_back(where + ": " + why + " (the stance keeps its cycles)");
+			g.clips.clear();
+			g.timing.clear();
+			g.root_dir.clear();
+			continue;
+		}
+		// The outer X sign that puts the moving clips' measured root headings on their directions' X.
+		float err[2] = { 0.0f, 0.0f }, worst[2] = { 0.0f, 0.0f };
+		uint32_t measured = 0;
+		for (const MoveGroupDirection &d : g.def.directions) {
+			for (const MoveGroupEntry &e : d.entries) {
+				const Vec3 &rd = g.root_dir[e.clip];
+				if (!(e.velocity > 0.0f) || (rd.x == 0.0f && rd.z == 0.0f)) {
+					continue;
+				}
+				++measured;
+				const float h = std::atan2(rd.x, rd.z);
+				for (int s = 0; s < 2; ++s) {
+					const float off = std::fabs(pt1_wrap_pi(d.x - (s == 0 ? 1.0f : -1.0f) * h));
+					err[s] += off;
+					worst[s] = std::max(worst[s], off);
+				}
+			}
+		}
+		if (measured == 0) {
+			out.notes.push_back(where + ": no moving clip with root motion (the stance keeps its cycles)");
+			continue;
+		}
+		const int s = err[1] <= err[0] ? 1 : 0;
+		g.x_sign = s == 0 ? 1.0f : -1.0f;
+		g.worst_direction_deg = worst[s] * 57.2957795f;
+		g.ok = true;
+		char line[256];
+		std::snprintf(line, sizeof(line), "%s: %zu directions, %zu clips, OneToOneSpeed %g, MinSpeed %g m/tick, X sign %+.0f (worst direction %.1f deg)",
+				where.c_str(), g.def.directions.size(), g.def.clips.size(), double(g.def.one_to_one_speed), double(g.def.min_speed), double(g.x_sign),
+				double(g.worst_direction_deg));
+		out.notes.push_back(line);
+		for (size_t c = 0; c < g.clips.size(); ++c) {
+			std::snprintf(line, sizeof(line), "  %s: %u frames, %.3f s, root %.3f m/s", g.def.clips[c].controller.c_str(), g.clips[c].tracks.end_frame,
+					double(g.timing[c].seconds), double(g.timing[c].root_velocity * kAntTicksPerSecond));
+			out.notes.push_back(line);
+		}
+	}
+	return out;
+}
+
+} // namespace bf3::anim
