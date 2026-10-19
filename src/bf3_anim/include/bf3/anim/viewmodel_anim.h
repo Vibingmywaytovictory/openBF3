@@ -151,7 +151,11 @@ struct ViewmodelOutput {
 	uint32_t base_clip = uint32_t(VmClip::Idle); // Idle, ZoomIdle, ZoomIn, ZoomOut or Sprint: what drives the base layer
 	float sprint_weight = 0;
 	uint32_t shots = 0; // Shot cues handled since reset()
+	float pt1_run_weight = 0, pt1_sprint_weight = 0; // PT1 run [api]: the 1p run / sprint deltas' weights (0 without them)
+	float pt1_run_frame = 0, pt1_sprint_frame = 0; // PT1 run [api]: their clip frames
 };
+
+struct VmLocomotion; // PT1 run [api]: BF3's 1p run and sprint deltas (the PT1 run block at the end of this file)
 
 class ViewmodelAnimator {
 public:
@@ -168,6 +172,8 @@ public:
 	const ViewmodelTuning &tuning() const;
 	// The spring states (sway x, sway y, bob amplitude, kick back, kick pitch, camera pitch, camera yaw) for checks.
 	std::array<SpringState, 7> springs() const;
+	// PT1 run [api]: the item's 1p run / sprint deltas (the clips must outlive the animator); an empty set restores the bob.
+	void set_locomotion(const VmLocomotion &p_locomotion); // PT1 run [api]
 
 private:
 	struct Impl;
@@ -238,5 +244,37 @@ struct ViewAngles {
 };
 ViewAngles camera_view_angles(double p_view_yaw, double p_view_pitch, float p_recoil_pitch_deg, float p_recoil_yaw_deg, float p_kick_pitch_deg,
 		float p_kick_yaw_deg);
+
+} // namespace bf3::anim
+
+// ---- PT1 run (docs/design/pt1-run.md) --------------------------------------------------------------------------------
+// BF3's 1p locomotion (s_basicassets 1P_MovementStateFlow) [verified data 2026-10-19, antdump objects]:
+//   * running (RunNode): 1P_RunLoopChooser[WeaponType] -> e.g. 1P_RifleNoiseLayer -> Rifle_RunFwdLoopSeq (Looping): the
+//     additive Rifle_RunFwdDelta (110 frames, 1P_Upperbody_DOF) over its sequence window StartInTime 28 .. EndInTime 180
+//     ticks (frames 14 .. 90), under the SpeedScaleControllerAsset 1P_MovementSpeed_SpeedController whose SpeedValue
+//     1P_RunSpeed_ESIG is OutMovementSpeed / 0.06 m per tick: the rate is speed / kVmRunSpeedUnit;
+//   * sprinting (SprintNode): Wep_SprintDeltaChooser[WeaponType] -> Rifle_SprintDeltaSeq (Looping): Rifle_SprintDelta
+//     (72 frames, the whole clip) at rate 1;
+//   * moving: OutMovementSpeed_EBOOL, speed > 0.0015 m per tick (kVmMovingSpeed).
+// The animator applies them as additive layers after the action layer (LocalPost, the crowd aim's order [inferred]):
+// run at moving (ramped over sprint_blend_seconds) x (1 - sprint weight) x (1 - ADS) [named default, measured = false:
+// BF3's zoomed moves are other nodes], sprint at the base layer's sprint weight. With either delta the procedural bob
+// is off. The camera stays on the camera: Bf3Viewmodel holds the rig's CameraJoint at the camera, so the deltas show
+// as the arms' and weapon's motion relative to the view [named default, measured = false].
+
+namespace bf3::anim {
+
+inline constexpr float kVmRunSpeedUnit = 0.06f * 60.0f; // m/s at rate 1 (1P_RunSpeed_ESIG = OutMovementSpeed / 0.06)
+inline constexpr float kVmMovingSpeed = 0.0015f * 60.0f; // m/s (OutMovementSpeed_EBOOL's threshold, 0.0015 m/tick)
+
+struct VmDeltaClip {
+	VmClipRef clip; // an additive clip on the 1p rig (clip and tracks null: none)
+	float start_frame = 0.0f, end_frame = 0.0f; // the loop window (clip frames)
+};
+
+struct VmLocomotion {
+	VmDeltaClip run; // played at speed / kVmRunSpeedUnit
+	VmDeltaClip sprint; // played at rate 1
+};
 
 } // namespace bf3::anim
