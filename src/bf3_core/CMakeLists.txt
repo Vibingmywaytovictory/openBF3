@@ -340,3 +340,12 @@ target_sources(bf3_core PRIVATE
     src/audio/hdr_setting.cpp
     src/audio/sound_scope.cpp
 )
+
+# PT1 iff (docs/design/pt1-iff.md): the nametag / minimap rules and their readers (UINametagCompData, the soldier's
+# SpottingTargetComponentData) and the kit's default 3p appearance.
+target_sources(bf3_core PRIVATE
+    src/ui/nametags.cpp
+    include/bf3/core/ui/nametags.h
+    src/gameplay/kit_appearance.cpp
+    include/bf3/core/gameplay/kit_appearance.h
+)
