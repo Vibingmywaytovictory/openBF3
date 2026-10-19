@@ -220,6 +220,10 @@ public:
 	const PatchInstanceStats &stats() const;
 	void set_hdr_window(const HdrVoiceWindow &p_window); // M2b au [a3]: audio thread, before process_block
 	VoiceCullInfo cull_info() const; // M2b au [a3]: audio thread
+	// PT1 rld [live outputs] (docs/design/pt1-rld.md): the outputs (indices into SoundProgram::outputs) the cull counts
+	// while no sampler slot is busy yet (the first block after a start). Empty: every output, as before. Call it before
+	// the Start command hands the instance to the mixer.
+	void set_loudness_outputs(std::span<const uint16_t> p_outputs);
 
 	PatchInstance(const PatchInstance &) = delete;
 	PatchInstance &operator=(const PatchInstance &) = delete;

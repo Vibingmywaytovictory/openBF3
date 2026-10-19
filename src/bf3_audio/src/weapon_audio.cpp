@@ -1235,7 +1235,11 @@ struct WeaponAudioRouter::Impl {
 		o.mix_rate = config.mix_rate;
 		WeaponAudioObserver *obs = observer;
 		const FoleyCue cue = p_cue;
-		o.before_start = [p_param, p_value, obs, cue](PatchInstance &r_instance, InstanceHandle) {
+		// The cull's loudness before the first block: the outputs this event's voices feed (patch_instance.h).
+		const FoleyEvent &ev = p_cue.kind == FoleyCueKind::Action ? d->foley.action : p_cue.kind == FoleyCueKind::Bolt ? d->foley.bolt : d->foley.reload;
+		const std::vector<uint16_t> *outputs = &ev.outputs;
+		o.before_start = [p_param, p_value, obs, cue, outputs](PatchInstance &r_instance, InstanceHandle) {
+			r_instance.set_loudness_outputs(*outputs);
 			if (p_param != 0) {
 				r_instance.set_parameter(p_param, p_value);
 			}

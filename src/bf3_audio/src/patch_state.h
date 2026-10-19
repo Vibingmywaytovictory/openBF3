@@ -82,6 +82,7 @@ struct SlotState {
 	bool fade_kill = false; // ends the slot when the fade reaches 0
 	uint16_t voice = 0xffff; // the slot's voice (SndPlayer ref)
 	uint32_t gain_plugin = UINT32_MAX; // global plugin index of the slot's Gai0
+	uint64_t outputs_mask = ~uint64_t(0); // PT1 rld [live outputs]: bit o = the slot's voice feeds output o (all: unknown)
 };
 
 struct SamplerState {
@@ -221,6 +222,7 @@ struct PatchInstance::State {
 	PatchInstanceStats stats;
 	HdrVoiceWindow hdr; // M2b au [a3]: set by the mixer per block (patch_instance.h)
 	Vec3 emitter_position; // M2b au [a3]: the last set_geometry's emitter (the cull's DuplicateSpawn distance)
+	uint64_t loudness_hint = 0; // PT1 rld [live outputs]: set_loudness_outputs (0: none)
 	// M2b au [quiet] (patch_instance.cpp, docs/design/m2b-au.md "Quiet voices"): a voice whose buffer is silent and whose
 	// remaining plugins are at rest skips their per-sample work; quiet_plugin keeps their ramp and coefficient state
 	// exactly where the full path would leave it, so the render is unchanged.

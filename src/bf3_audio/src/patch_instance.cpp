@@ -45,6 +45,8 @@ bool one_plugin_node(SoundNodeType t) {
 
 constexpr uint32_t kMaxDelaySeconds = 4;
 
+std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p); // PT1 rld [live outputs]: in the PT1 rld block at the end
+
 } // namespace
 
 PatchInstance::~PatchInstance() = default;
@@ -251,6 +253,14 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.voice_buffers.assign(p.voices.size() * 2 * kMaxSubBlock, 0.0f);
 	st.voice_tapped.assign(p.voices.size(), 0);
 	st.voice_live.assign(p.voices.size(), 0); // integ/m2b-w1 [lazy zero]
+	if (p.outputs.size() <= 64) { // PT1 rld [live outputs]: the outputs each slot's voice feeds (more than 64: unknown, all)
+		const std::vector<uint64_t> masks = voice_output_masks(p);
+		for (SlotState &sl : st.slots) {
+			if (sl.voice < masks.size()) {
+				sl.outputs_mask = masks[sl.voice];
+			}
+		}
+	}
 	self->slot_views_.resize(st.slots.size());
 	return self;
 }
@@ -823,24 +833,39 @@ VoiceCullInfo PatchInstance::cull_info() const {
 	// The curve at the current distance (as State::evaluate_program computes it), so a voice that has not been
 	// evaluated yet (its first block) is measured where it is.
 	const float metres = st.geometry.distance;
-	float loudest = -std::numeric_limits<float>::infinity();
-	for (size_t o = 0; o < p.outputs.size(); ++o) {
-		const ca::SoundOutput &out = p.outputs[o];
-		if (any_hdr && !out.enable_hdr) {
-			continue;
-		}
-		float d = metres;
-		if (metres < out.min_distance) {
-			d = metres + (out.min_distance - metres) * st.tuning.min_distance_clamp;
-		}
-		const float cone = o < st.outputs.size() ? st.outputs[o].cone_db : 0.0f;
-		const float at = out.attenuation.evaluate(d * st.tuning.curve_x_metres) + out.gain_db + cone;
-		if (std::isfinite(at)) {
-			loudest = std::max(loudest, at);
-		}
-	}
+	// PT1 rld [live outputs] (docs/design/pt1-rld.md): only the outputs the busy slots feed (a reload instance's gunshot
+	// outputs play nothing and put the window top 21 dB over it); none busy yet: the starter's hint, else every output.
+	uint64_t live = 0;
 	for (const SlotState &sl : st.slots) {
-		info.voices += (sl.play.active || sl.pending.armed) ? 1 : 0;
+		const bool busy = sl.play.active || sl.pending.armed;
+		info.voices += busy ? 1 : 0;
+		live |= busy ? sl.outputs_mask : 0;
+	}
+	if (live == 0) {
+		live = st.loudness_hint != 0 ? st.loudness_hint : ~uint64_t(0);
+	}
+	const auto loudest_of = [&](uint64_t p_mask) {
+		float loudest = -std::numeric_limits<float>::infinity();
+		for (size_t o = 0; o < p.outputs.size(); ++o) {
+			const ca::SoundOutput &out = p.outputs[o];
+			if ((any_hdr && !out.enable_hdr) || (o < 64 && (p_mask & (uint64_t(1) << o)) == 0)) {
+				continue;
+			}
+			float d = metres;
+			if (metres < out.min_distance) {
+				d = metres + (out.min_distance - metres) * st.tuning.min_distance_clamp;
+			}
+			const float cone = o < st.outputs.size() ? st.outputs[o].cone_db : 0.0f;
+			const float at = out.attenuation.evaluate(d * st.tuning.curve_x_metres) + out.gain_db + cone;
+			if (std::isfinite(at)) {
+				loudest = std::max(loudest, at);
+			}
+		}
+		return loudest;
+	};
+	float loudest = loudest_of(live);
+	if (!std::isfinite(loudest) && live != ~uint64_t(0)) {
+		loudest = loudest_of(~uint64_t(0)); // the busy voices feed no (EnableHdr) output: as before
 	}
 	info.hdr = any_hdr;
 	info.loudness_db = p.loudness_db + (std::isfinite(loudest) ? loudest : 0.0f);
@@ -948,6 +973,55 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 		default:
 			break; // Slot never reaches here; Delay (a zero-length line), Damping, Pan and Pass keep no state
 	}
+}
+
+// PT1 rld (docs/design/pt1-rld.md): the voice cull's live outputs.
+
+namespace {
+
+// PT1 rld [live outputs]: per voice, bit o = the voice reaches output o (the voice holding the
+// output's main send, or its low pass) through its voice sends. Bounded: at most one pass per voice.
+std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p) {
+	const size_t nv = p_p.voices.size();
+	std::vector<uint64_t> m(nv, 0);
+	for (size_t o = 0; o < p_p.outputs.size() && o < 64; ++o) {
+		const ca::SoundOutput &so = p_p.outputs[o];
+		const uint16_t v = so.main_send_plugin.valid() ? so.main_send_plugin.voice : so.low_pass.voice;
+		if (v < nv) {
+			m[v] |= uint64_t(1) << o;
+		}
+	}
+	for (size_t pass = 0; pass < nv; ++pass) {
+		bool changed = false;
+		for (size_t v = 0; v < nv; ++v) {
+			const ca::SoundVoice &voice = p_p.voices[v];
+			for (uint32_t k = 0; k < voice.plugins_count && size_t(voice.plugins_begin) + k < p_p.plugins.size(); ++k) {
+				const uint16_t c = p_p.plugins[voice.plugins_begin + k].connection;
+				if (c == ca::kNoRegister || c >= p_p.connections.size() || p_p.connections[c].to_bus) {
+					continue;
+				}
+				const uint16_t to = p_p.connections[c].voice;
+				if (to < nv && (m[v] | m[to]) != m[v]) {
+					m[v] |= m[to];
+					changed = true;
+				}
+			}
+		}
+		if (!changed) {
+			break;
+		}
+	}
+	return m;
+}
+
+} // namespace
+
+void PatchInstance::set_loudness_outputs(std::span<const uint16_t> p_outputs) {
+	uint64_t m = 0;
+	for (const uint16_t o : p_outputs) {
+		m |= o < 64 ? uint64_t(1) << o : 0;
+	}
+	state_->loudness_hint = m;
 }
 
 } // namespace bf3::audio
