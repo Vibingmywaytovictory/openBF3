@@ -327,7 +327,7 @@ FoleyEvent trace_foley_event(const ca::SoundProgram &p_p, uint32_t p_hash) {
 	// The outputs the samplers' voices feed (SndPlayer of every slot: 4 plugin refs per slot).
 	for (uint32_t s : ev.samplers) {
 		const ca::SoundNode &n = p_p.nodes[s];
-		for (uint16_t k = 0; k < n.plugins_count; k += ca::port::kSamplerSlotPlugins) {
+		for (uint32_t k = 0; k < n.plugins_count; k += ca::port::kSamplerSlotPlugins) { // uint32_t: no wrap at 65535
 			if (size_t(n.plugins_begin) + k >= p_p.plugin_refs.size()) {
 				break;
 			}
