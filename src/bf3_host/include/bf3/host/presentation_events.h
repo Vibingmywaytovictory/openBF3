@@ -28,6 +28,7 @@
 //   Death                 slot = killer, aux = victim, def, id = shot index, flags kHeadshot, material = zone
 //   Detonation            slot = shooter, id = shot index, def, pos, dir = normal, flags kDud
 //   Spawn                 slot, aux = kit, extra = team, id = life
+//   Revive (M2b W1.0)     slot = reviver, aux = revived, id = the revived slot's new life, timeline Render (owner nt)
 
 #include "bf3/sim/weapons/sim_time.h"
 
@@ -40,7 +41,7 @@
 
 namespace bf3::host {
 
-enum class PresentKind : uint8_t { OwnShot = 0, OwnTimed = 1, RemoteShot = 2, Impact = 3, SoldierContact = 4, Hit = 5, Death = 6, Detonation = 7, Spawn = 8 };
+enum class PresentKind : uint8_t { OwnShot = 0, OwnTimed = 1, RemoteShot = 2, Impact = 3, SoldierContact = 4, Hit = 5, Death = 6, Detonation = 7, Spawn = 8, Revive = 9 /* M2b W1.0 (nt) */ };
 enum class PresentTimeline : uint8_t { Predicted = 0, Render = 1, Immediate = 2 };
 
 namespace present_flags {
