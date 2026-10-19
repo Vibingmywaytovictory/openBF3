@@ -498,6 +498,7 @@ struct ClientSession::Impl {
 				core::Result<net::Spawned> s = net::decode_spawned(p_d.bytes);
 				if (s && pending_spawned.size() < 16) {
 					cl_spawned(*s); // M2a cl: the life's kit and team
+					m2b_spawned(*s); // M2b nt: Spawned::revived
 					if (s->state.tick > anchor_tick) {
 						anchor_tick = s->state.tick;
 						anchor_ns = p_now;
@@ -565,6 +566,9 @@ struct ClientSession::Impl {
 				connected = false;
 				return;
 			default:
+				if (m2b_datagram(*type, p_d)) { // M2b nt: MatchState, PlayerList
+					return; // M2b nt
+				} // M2b nt
 				cl_datagram(*type, p_d, p_now); // M2a cl: SnapshotOthers, ShotEvents, CombatEvents
 				return;
 		}
@@ -782,7 +786,7 @@ struct ClientSession::Impl {
 		const sim::Tick c = next_tick;
 		const sim::PredictionEntry *made = nullptr;
 		sim::Command cmd;
-		if (have_own && c > 0) {
+		if (have_own && c > 0 && !m2b_unspawned(c)) { // M2b nt: && !m2b_unspawned(c) (MatchState::unspawn_tick)
 			// 5. the base rule.
 			if (ring->find(c - 1u) == nullptr) {
 				const sim::PredictionEntry *b = ring->newest_at_or_below(c - 1u);
@@ -800,6 +804,7 @@ struct ClientSession::Impl {
 			const sim::PredictionEntry *base = ring->find(c - 1u);
 			cmd = sample_command(c);
 			cl_command_made(cmd, p_now); // M2a cl: fire_presses, the view sample, the received state
+			m2b_command(cmd); // M2b nt: MatchState's restriction (net::restrict_command), as the server's [cmd]
 			if (base == nullptr || cmd.tick != base->state.tick + 1u) {
 				++stats.step_precondition_failures;
 				assert(false && "ClientSession: prediction base missing");
@@ -906,6 +911,7 @@ struct ClientSession::Impl {
 		}
 		f.other_count = n;
 		cl_publish_end(f, p_now); // M2a cl: weapon views, newest seq, others_ahead, the remote world, stats
+		m2b_publish(f); // M2b nt: match, players, the own death stamp, own_unspawned
 		stats.connected = connected;
 		stats.client_tick = next_tick;
 		stats.target_buffer_ticks = target;
@@ -1003,6 +1009,7 @@ struct ClientSession::Impl {
 					submit(net::kChannelReliable, net::encode_kit_select(k), now); // M2a w3 [G4]
 				} // M2a w3 [G4]
 			} // M2a w3 [G4]
+			m2b_send(now); // M2b nt: send_spawn_request's queue
 			release_out(now);
 			if (clock_running && connected) {
 				const double clock = clock_ticks(now);
@@ -1023,6 +1030,32 @@ struct ClientSession::Impl {
 			host->disconnect_all();
 		}
 	}
+
+	// ---- M2b nt (docs/design/m2b.md §2.6 #12, §3.4, §3.6, §3.7; as built: docs/design/m2b-nt.md §3) ----------------
+	// Client thread unless noted. Defined in the M2b nt block at the end of this file; called at the named insertion
+	// points (handle_datagram, client_tick, publish, run, cl_push, cl_match_info, cl_datagram, cl_predict_weapons).
+	bool m2b_match_valid = false; // M2b nt
+	net::MatchState m2b_match; // M2b nt
+	PlayerTable m2b_players; // M2b nt
+	bool m2b_death_valid = false; // M2b nt: the own death's stamp holds for the life m2b_death_life
+	uint32_t m2b_death_life = 0; // M2b nt
+	sim::Tick m2b_respawn_tick = 0; // M2b nt
+	sim::Tick m2b_revive_until = 0; // M2b nt
+	bool m2b_unspawned_now = false; // M2b nt: the newest client tick did not predict (own_unspawned)
+	std::array<uint32_t, 8> m2b_revived_lives{}; // M2b nt: the lives Spawned::revived named, by life % 8 (0 = none)
+	OwnShotIds m2b_shot_ids; // M2b nt
+	PresentationEvents m2b_own_events; // M2b nt: step_own's events, drained through cl_push (the presented ids)
+	std::deque<uint8_t> m2b_spawn_out; // M2b nt: send_spawn_request's queue (under debug_mutex)
+	bool m2b_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d); // M2b nt: true = handled here
+	void m2b_spawned(const net::Spawned &p_spawned); // M2b nt
+	void m2b_combat(const net::CombatEvents &p_events); // M2b nt
+	bool m2b_rules(const net::MatchInfo &p_match); // M2b nt: false = refused (cl_refuse)
+	void m2b_command(sim::Command &r_command); // M2b nt
+	bool m2b_unspawned(sim::Tick p_tick); // M2b nt: once per client tick
+	void m2b_push(PresentEvent &r_event); // M2b nt
+	void m2b_drain_own(); // M2b nt
+	void m2b_send(uint64_t p_now); // M2b nt
+	void m2b_publish(PresentationFrame &r_frame); // M2b nt
 };
 
 ClientSession::ClientSession() :
@@ -1489,7 +1522,9 @@ void ClientSession::Impl::ClEmit::emitted(const sim::Command &p_command, const s
 }
 
 void ClientSession::Impl::cl_push(const PresentEvent &p_event) {
-	if (!cl_events.push(p_event)) {
+	PresentEvent e = p_event; // M2b nt: the own shots' presented ids, the revived spawn
+	m2b_push(e); // M2b nt
+	if (!cl_events.push(e)) { // M2b nt: e (was p_event)
 		++stats.events_overflow;
 	}
 }
@@ -1516,6 +1551,9 @@ void ClientSession::Impl::cl_refuse(const char *p_reason) {
 
 bool ClientSession::Impl::cl_match_info(const net::MatchInfo &p_match, uint64_t p_now) {
 	stats.slot = p_match.slot;
+	if (!m2b_rules(p_match)) { // M2b nt: the rules_flags check (m2b.md §3.7)
+		return false; // M2b nt
+	} // M2b nt
 	if (p_match.weapon_hash != 0) {
 		if (config.gunplay == nullptr && config.gunplay_from_level && level->gunplay != nullptr) {
 			// The level's own tables (sv's GunplayLevel): what the server's Gunplay builds its table from.
@@ -1740,6 +1778,9 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				ev.id = d.shot_index;
 				ev.material = uint32_t(d.zone);
 				ev.time = d.time;
+				ev.value = d.killer_health; // M2b nt: the v3 stamp (presentation_events.h)
+				ev.extra = d.respawn_tick; // M2b nt
+				ev.seed = d.revive_until; // M2b nt
 				cl_push(ev);
 				++stats.combat_deaths;
 			}
@@ -1761,6 +1802,7 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				cl_push(ev);
 				++stats.combat_detonations;
 			}
+			m2b_combat(*e); // M2b nt: the own death stamp, the revives
 			return;
 		}
 		default:
@@ -1953,7 +1995,8 @@ void ClientSession::Impl::cl_predict_weapons(const sim::Command &p_command, cons
 		cl_lane->put(cl_lane->step(from, p_command, p_before, p_after));
 	}
 	if (cl_projectiles != nullptr) {
-		cl_projectiles->step_own(p_command.tick, *world, cl_records, cl_events);
+		cl_projectiles->step_own(p_command.tick, *world, cl_records, m2b_own_events); // M2b nt: was cl_events
+		m2b_drain_own(); // M2b nt: into cl_events through cl_push (the presented ids)
 	}
 }
 

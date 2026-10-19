@@ -233,6 +233,16 @@ struct ClientStats {
 	uint64_t events_overflow = 0; // PresentationEvents pushes refused (ring full; E14 gates 0)
 	sim::WeaponLaneStats lane;
 	ClientProjectilesStats projectiles;
+	// M2b nt (docs/design/m2b-nt.md §3): the v3 arrivals and the client's rules.
+	uint64_t match_states = 0; // M2b nt: MatchState decoded
+	uint64_t player_lists = 0; // M2b nt: PlayerList decoded
+	uint64_t revives = 0; // M2b nt: ReviveEvents taken (PresentKind::Revive)
+	uint64_t bad_m2b_datagrams = 0; // M2b nt: MatchState / PlayerList that failed to decode
+	uint64_t restricted_commands = 0; // M2b nt: predicted commands net::restrict_command changed
+	uint64_t unspawned_ticks = 0; // M2b nt: client ticks not predicted while own_unspawned
+	uint64_t spawn_requests = 0; // M2b nt: SpawnRequests sent
+	uint64_t own_shot_id_resets = 0; // M2b nt: OwnShotIds segments opened by a reused shot index
+	bool rules_mismatch = false; // M2b nt: refused on MatchInfo's rules_flags / logic_digest
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
