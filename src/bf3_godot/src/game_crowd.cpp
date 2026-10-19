@@ -152,6 +152,7 @@ struct Bf3GameCrowd::Impl {
 		uint8_t lane = 0; // M2b cam [corpse]: this life's crowd index is team x 128 + slot + lane x kCamLaneOffset
 		bool revived = false; // M2b cam [revive]: this life began as a revive (CrowdSoldierInput::revived)
 		double revive_wait = -1.0; // M2b cam [revive]: seconds since a Revive event named the slot (< 0: none)
+		uint8_t kit = 0; // PT1 iff [kits]: the player row's kit while alive (a corpse keeps its life's)
 	};
 	std::array<Slot, kSlotsPerTeam> slots{};
 	// M2b cam [corpse]: the M2b corpse state (set_corpse_seconds; the // M2b cam block at the end of this file).
@@ -169,6 +170,8 @@ struct Bf3GameCrowd::Impl {
 	void cam_new_life(uint32_t p_slot, Slot &r_s); // M2b cam [corpse] [revive]
 	void cam_draw_corpses(double p_dt, const anim::Vec3 &p_camera); // M2b cam [corpse]
 	void cam_log() const; // M2b cam [corpse]
+	std::array<uint8_t, kCrowdSoldiers> pt1_kit_of{}; // PT1 iff [kits]: the kit (host::KitRole) each crowd index wears
+	static uint8_t pt1_row_kit(const host::PresentationFrame *p_frame, uint8_t p_slot, uint8_t p_fallback); // PT1 iff [kits]
 	struct Pending {
 		host::PresentKind kind;
 		host::PresentTimeline timeline;
@@ -305,6 +308,9 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		in.weapon = s.weapon;
 		in.fire_seq = s.fire_seq;
 		s.input = in;
+		if ((o.flags & sim::soldier_flags::kAlive) != 0 && !s.dead) { // PT1 iff [kits]
+			s.kit = pt1_row_kit(p_frame.frame, o.slot, s.kit); // PT1 iff [kits]
+		} // PT1 iff [kits]
 	}
 	// The inputs of every index: present soldiers, corpses, the rest hidden.
 	for (anim::CrowdSoldierInput &in : inputs) {
@@ -337,6 +343,9 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 			in.flags = 0; // a corpse: no reload start
 		}
 		inputs[index] = in;
+		if (!s.dead) { // PT1 iff [kits]: a corpse keeps the kit its index wore
+			pt1_kit_of[index] = s.kit; // PT1 iff [kits]
+		} // PT1 iff [kits]
 		const anim::Xform root{ yaw_quat(in.yaw), in.position };
 		root_x[index] = root;
 		roots[index] = Transform3D(Basis(Vector3(0, 1, 0), in.yaw), Vector3(in.position.x, in.position.y, in.position.z));
@@ -356,6 +365,9 @@ void Bf3GameCrowd::Impl::draw_weapons(const M2aFrame &p_frame) {
 		if (draw && drawn != soldier_visible[i]) {
 			uploader->set_soldier_visible(i, drawn);
 		}
+		if (draw && drawn) { // PT1 iff [kits]: a no-op unless the kit's mesh differs from the drawn one
+			uploader->set_soldier_kit(i, pt1_kit_of[i]); // PT1 iff [kits]
+		} // PT1 iff [kits]
 		soldier_visible[i] = drawn;
 		WeaponDraw &d = weapon_draws[i];
 		const uint32_t team = i / kSlotsPerTeam;
@@ -468,6 +480,8 @@ core::Status Bf3GameCrowd::load_body(const core::InstallReader &p_reader, core::
 	const auto clock_s = [] { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); };
 	const double t_start = clock_s();
 	render::SoldierSpec spec;
+	spec.teams[0].team_data = "gameplay/teams/us"; // PT1 iff [kits]: each kit's own appearance (crowd team 0 = wire team 1, US)
+	spec.teams[1].team_data = "gameplay/teams/ru"; // PT1 iff [kits]
 	// The clip package's Ant source (about 1.1 s warm on Metro) opens on a second thread while the soldier assets load;
 	// it is joined before any return.
 	std::optional<core::Result<std::shared_ptr<core::Install>>> install;
@@ -716,6 +730,9 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 	std::snprintf(line, sizeof(line), "built: %u soldier indices (%u slots x 2 teams), %u pose lanes, items %zu + %zu, stance clips %s, moves %s", kCrowdSoldiers,
 			kSlotsPerTeam, lanes, m.weapon_meshes[0].size(), m.weapon_meshes[1].size(), m.have_pose ? "yes" : "no", m.have_moves ? "yes" : "no");
 	log(line);
+	if (m.uploader) { // PT1 iff [kits]
+		log("PT1 iff kits: " + std::to_string(m.uploader->kit_meshes()) + " distinct (team, kit) meshes"); // PT1 iff [kits]
+	} // PT1 iff [kits]
 	m.built = true;
 	return true;
 }
@@ -854,6 +871,9 @@ bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const M2aFrame
 		c.input.weapon = idx >= 0 ? uint8_t(idx) : uint8_t(0);
 	}
 	c.index = uint32_t(team) * kSlotsPerTeam + own;
+	if (c.index < pt1_kit_of.size()) { // PT1 iff [kits]: the own corpse wears the own kit
+		pt1_kit_of[c.index] = f->own_kit < 4 ? f->own_kit : uint8_t(0); // PT1 iff [kits]
+	} // PT1 iff [kits]
 	c.seconds = 0.0;
 	c.active = true;
 	cam_corpses[own][1].active = false;
@@ -942,6 +962,27 @@ void Bf3GameCrowd::Impl::cam_log() const {
 			double(corpse_seconds), (unsigned long long)cam_counts[0], (unsigned long long)cam_counts[1], (unsigned long long)cam_counts[4],
 			(unsigned long long)cam_counts[2], (unsigned long long)cam_counts[3], (unsigned long long)(eval ? eval->m2a_stats().revives : 0));
 	log(line);
+}
+
+} // namespace bf3::godot_side
+
+// ---- PT1 iff (docs/design/pt1-iff.md §2.1) --------------------------------------------------------------------------
+// The kit each soldier wears in 3p: its player row's kit (net::PlayerRow::kit, host::KitRole), read while the soldier
+// is alive, so a corpse keeps the look of the life it died in. The uploader swaps the instance's mesh only when the
+// kit's (team, kit) mesh differs from the one drawn (skin_upload.cpp [kits]).
+namespace bf3::godot_side {
+
+uint8_t Bf3GameCrowd::Impl::pt1_row_kit(const host::PresentationFrame *p_frame, uint8_t p_slot, uint8_t p_fallback) {
+	if (p_frame == nullptr) {
+		return p_fallback;
+	}
+	const size_t rows = std::min<size_t>(p_frame->player_count, p_frame->players.size());
+	const auto end = p_frame->players.begin() + std::ptrdiff_t(rows);
+	const auto it = std::lower_bound(p_frame->players.begin(), end, p_slot, [](const net::PlayerRow &p_row, uint8_t p_s) { return p_row.slot < p_s; });
+	if (it == end || it->slot != p_slot || it->kit >= 4) {
+		return p_fallback;
+	}
+	return it->kit;
 }
 
 } // namespace bf3::godot_side

@@ -65,6 +65,10 @@ struct SoldierTeamSpec {
 	std::string weapon_mesh; // 3p weapon SkinnedMeshAsset
 	std::string weapon_unlock; // SoldierWeaponData partition: WeaponStates[0].Weapon (AntRef) -> reload chooser index
 	std::string weapon_def; // WeaponDef source for the reload time (reload playback rate, s3.md §5.4)
+	// PT1 iff [kits] (docs/design/pt1-iff.md §2.1): the team's TeamData (gameplay/teams/us). Set: each kit's default
+	// appearance (core::gameplay::read_kit_appearance) joins the team's parts, SoldierPart::kit_mask says which kits wear
+	// a part; empty (the default, S3): `appearance` alone, every part worn by every kit, exactly as before.
+	std::string team_data; // PT1 iff [kits]
 };
 
 struct SoldierSpec {
@@ -88,6 +92,7 @@ struct SoldierPart {
 	std::string variation; // ObjectVariation partition ("" = default)
 	uint32_t variation_hash = 0;
 	bool weapon = false; // skinned against weapon_skeleton
+	uint8_t kit_mask = 0x0F; // PT1 iff [kits]: bit k = kit k (host::KitRole) wears the part
 	MeshMaterials materials;
 	PreparedMesh prepared; // LOD SoldierSpec::lod, bones = indices into the team's SkinBinds
 	core::CachedItem cache;
@@ -96,6 +101,7 @@ struct SoldierPart {
 
 struct SoldierTeam {
 	std::string appearance;
+	std::array<std::string, 4> kit_appearances; // PT1 iff [kits]: per host::KitRole ("" = `appearance`)
 	std::vector<SoldierPart> parts; // body parts in appearance order, then the weapon
 	anim::SkinBinds binds; // one list for every part of the team: one skeleton per soldier
 	// crowd_eval.h step 3 (rig-sized): 1 for the rig joints that are weaponske01 bones below Wep_Root and that the
