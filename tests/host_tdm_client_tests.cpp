@@ -1,6 +1,6 @@
 // host.tdm.client (docs/design/m2b.md §11 E13; docs/design/m2b-ru.md §6; owner ru, label timing): the real client path
 // on Metro TDM: ServerHost + ClientSession over ENet loopback (tests/gunplay_fixture.h start_session), rules on with the
-// deploy screen, 7 TDM bots, kill limit 5, pre-round 3 s. It waits on real time and sockets, so it is a timing row (the
+// deploy screen, 31 TDM bots (m2b.md: 7; changed at integ/m2b-w1, see below), kill limit 5, pre-round 3 s. It waits on real time and sockets, so it is a timing row (the
 // merge pass, serially, docs/testing.md §1) and is never run on a branch.
 //   * no Spawned (no own life) before the first send_spawn_request; Spawned after it
 //   * the pre-round freeze predicted by the client: 0 corrections above teleport_above_m and 0 predicted shots while
@@ -21,6 +21,9 @@
 #include "tdm_fixture.h"
 
 #include "bf3/host/tdm_brain.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/spawn.h"
 
 #include <chrono>
 #include <cstdio>
@@ -65,6 +68,19 @@ TEST_SUITE("host-tdm-client") {
 					return;
 				}
 			}
+			// integ/m2b-w1: the scripted death needs a floor with open sky above it. 60 m above the spawn point put the
+			// soldier inside Metro's ceiling or onto a nearby roof (no death). M1's E1d spot (sim::find_drop_spot: a flat
+			// floor with 50 m of clearance) and its 46 m drop, which the sim.motor E1d case shows is lethal on Metro.
+			std::optional<sim::Vec3> drop;
+			{
+				core::Result<std::unique_ptr<sim::CollisionWorld>> w = sim::CollisionWorld::create(level->shared->static_world);
+				REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
+				sim::SoldierMotor motor;
+				const core::Status mi = motor.init(**w, level->shared->motor);
+				REQUIRE_MESSAGE(mi.ok(), (mi.ok() ? std::string() : mi.error().message));
+				drop = sim::find_drop_spot(motor, **w);
+			}
+			REQUIRE(drop.has_value());
 			tg::SessionOptions so;
 			so.max_slots = 64;
 			so.client_mechanics_cfg = OPENBF3_MECHANICS_CFG;
@@ -79,7 +95,9 @@ TEST_SUITE("host-tdm-client") {
 				fill->level = level->bots;
 				r_cfg.bots = fill;
 				auto bots = std::make_shared<host::TdmBotConfig>();
-				bots->count = 7;
+				// integ/m2b-w1: 31 bots (the playable default, 16 v 16 with the client), not m2b.md's 7: the TDM bots make
+				// about 0.02 kills per bot per second (E1: 0.68 kills/s for 32), and 7 bots reached 3 / 1 of 5 in 30 s.
+				bots->count = 31;
 				r_cfg.tdm_bots = bots;
 			};
 			const auto start = std::chrono::steady_clock::now();
@@ -117,9 +135,13 @@ TEST_SUITE("host-tdm-client") {
 			CHECK(restricted_shots == 0u);
 			CHECK(after.teleports == before.teleports);
 			// A scripted death: up and down.
-			const sim::Vec3 at = s->frame->own_curr.position;
-			REQUIRE(tg::teleport(*s, { at[0], at[1] + 60.0f, at[2] }, s->frame->own_curr.yaw).has_value());
+			const std::optional<net::DebugReport> moved = tg::teleport(*s, { (*drop)[0], (*drop)[1] + 46.0f, (*drop)[2] }, s->frame->own_curr.yaw);
+			REQUIRE(moved.has_value());
+			CHECK(moved->ok);
 			tg::run_for(*s, 5.0);
+			std::printf("E13 drop at (%.1f, %.1f, %.1f) + 46 m: life %u, health %.1f, alive %d\n", double((*drop)[0]), double((*drop)[1]),
+					double((*drop)[2]), unsigned(s->frame->own_curr.life), double(s->frame->own_curr.health),
+					int((s->frame->own_curr.flags & sim::soldier_flags::kAlive) != 0));
 			std::printf("E13 death: own_respawn_tick %u, own_revive_until %u, server tick ~%u\n", unsigned(s->frame->own_respawn_tick),
 					unsigned(s->frame->own_revive_until), unsigned(s->frame->match.round_start_tick));
 			CHECK(s->frame->own_respawn_tick != 0u);
@@ -133,8 +155,9 @@ TEST_SUITE("host-tdm-client") {
 					s->client.send_spawn_request(0);
 				}
 			}
-			std::printf("E13: %s after %.1f s (total %.1f s)\n", s->frame->match.phase == net::MatchPhase::RoundOver ? "RoundOver" : "no RoundOver",
-					tg::seconds_since(round_start), tg::seconds_since(start));
+			std::printf("E13: %s after %.1f s (total %.1f s), kills %d / %d of %d, winner %u\n",
+					s->frame->match.phase == net::MatchPhase::RoundOver ? "RoundOver" : "no RoundOver", tg::seconds_since(round_start), tg::seconds_since(start),
+					int(s->frame->match.kills[0]), int(s->frame->match.kills[1]), int(s->frame->match.kill_limit), unsigned(s->frame->match.winner));
 			CHECK(s->frame->match.phase == net::MatchPhase::RoundOver);
 			CHECK(tg::seconds_since(start) <= 60.0);
 		}
