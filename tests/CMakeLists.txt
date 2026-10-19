@@ -1533,3 +1533,20 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     openbf3_cost(godot.m2b.play 1 150)
     openbf3_cost(godot.m2b_load 1 50)
 endif()
+
+# PT1 iff (docs/design/pt1-iff.md): pt1.iff.unit runs the friend-or-foe rules (bf3/core/ui/nametags.h: the relation,
+# the look-at radius, the nametag decision, the minimap's fire-reveal window; bf3/core/gameplay/kit_appearance.h's
+# naming rule) and src/bf3_godot/src/iff_frame.cpp on recorded display frames; data-free (<= 2 s). pt1.iff.install
+# reads UINametagCompData, the soldier's SpottingTargetComponentData and the 8 kits' default appearances on Metro,
+# fuzzes their partitions and checks install.unchanged (77 without an install; <= 15 s). Functional, parallel-safe.
+openbf3_test(test_pt1_iff test_main.cpp pt1_iff_tests.cpp test_support.h ui2_test_support.h ${CMAKE_SOURCE_DIR}/src/bf3_godot/src/iff_frame.cpp)
+target_link_libraries(test_pt1_iff PRIVATE bf3_host bf3_render)
+target_include_directories(test_pt1_iff PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+add_test(NAME pt1.iff.unit COMMAND test_pt1_iff --test-suite=pt1-iff-unit)
+add_test(NAME pt1.iff.install COMMAND test_pt1_iff --test-suite=pt1-iff-install)
+set_tests_properties(pt1.iff.unit PROPERTIES TIMEOUT 60)
+set_tests_properties(pt1.iff.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_pt1_iff_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(pt1.iff.unit pt1.iff.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_pt1_iff_cl_dir}")
+endif()
