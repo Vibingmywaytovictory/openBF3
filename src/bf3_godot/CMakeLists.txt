@@ -287,3 +287,13 @@ target_sources(bf3_godot PRIVATE
     src/m2b_check.cpp
     src/m2b_game.cpp
 )
+
+# PT1 iff (docs/design/pt1-iff.md): the friend-or-foe parts of the M2b scene: the minimap's soldiers by team, the
+# nametags (Bf3Nametags) and --iff-shots (pt1_iff.cpp, created by Bf3MinimapHud's `// PT1 iff` lines), and their
+# Godot-free per-frame assembly (iff_frame.cpp, also compiled by tests/pt1_iff_tests.cpp).
+target_sources(bf3_godot PRIVATE
+    src/pt1_iff.h
+    src/pt1_iff.cpp
+    src/iff_frame.h
+    src/iff_frame.cpp
+)
