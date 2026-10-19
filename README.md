@@ -2789,3 +2789,35 @@ Measured 2026-10-19, head of `m2b/w1`:
   193.7 s of ctest wall time and exit 0. There were no budget violations, only the existing warnings.
 * **`m2b.contract`:** 5 cases and 97 assertions, 0.02 s.
 * **`ctest --preset dev-window -N`:** 13 rows, with the three retired rows excluded.
+
+## M2b nt: protocol v3 and the client session
+
+<!-- # M2b nt -->
+Track nt of M2b wave 1, on branch `m2b/nt` from the W1.0 contract head 01a26e8. Design:
+[docs/design/m2b.md](docs/design/m2b.md) §3.7 and §2.6 #11, #12. As-built notes, the measured results and one command
+per gate: [docs/design/m2b-nt.md](docs/design/m2b-nt.md).
+
+* **Protocol v3.** `kProtocolVersion` is 3. The six W1.0 stubs are real codecs: `MatchState` (40 bytes),
+  `PlayerList` (up to 64 rows, names of at most 16 bytes of valid UTF-8) and `SpawnRequest` (3 bytes). The v3 fields
+  are on the wire too: `MatchInfo::logic_digest` and `rules_flags`, `Spawned::revived`, and in `CombatEvents` the death
+  stamp (respawn tick, revive end, killer health) and the revives. The decoders bound every count, check every enum
+  and refuse trailing bytes. The encoders write one canonical form and count every change they make.
+* **The client session.**
+  - MatchState and PlayerList go into the `PresentationFrame` (`match`, `players`).
+  - The own death's respawn tick and revive end go into `own_respawn_tick` and `own_revive_until`.
+  - A revive becomes a `PresentKind::Revive` event. A revived life's Spawn event carries `present_flags::kRevived`.
+  - Every predicted command gets the pre-round restriction (`net::restrict_command`), as the server's commands do.
+  - Prediction stops at `MatchState::unspawn_tick` (`own_unspawned`).
+  - A TDM server refuses a client whose load has no logic graph or a different logic digest.
+  - `send_spawn_request(kit)` sends the Deploy.
+* **The M2a gate's double starts (shot ids reused after a respawn).** The client emitted shots that it predicted
+  after the server's death tick. The next life started at the server's shot index, so its real shots reused those ids,
+  and the effect triggers dropped them as repeats. `OwnShotIds` now gives the own shots presented ids that never
+  repeat. The server's later events about an own shot map to the same ids.
+* **Tests.**
+  - `ctest --test-dir b\dev -R "^net\.proto\.unit$"`: the v3 round trips and hostile bytes.
+  - `ctest --test-dir b\dev -R "^net\.proto\.fuzz$"`: 18 message types, 0 unstable, every structured malformed case
+    refused (E7's wire half).
+  - `ctest --test-dir b\dev -R "^host\.client\.m2b\.unit$"`: reproduces the shot-id reuse on the client's weapon-lane
+    path, then shows 0 repeats with the fix.
+  - `ctest --test-dir b\dev -R "^m2b\.contract$"`: no nt PENDING left.

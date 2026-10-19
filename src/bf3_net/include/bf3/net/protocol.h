@@ -28,12 +28,13 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view> // M2b nt
 #include <type_traits> // M2b W1.0
 #include <vector>
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 2; // bump on any wire change (2: M2a, docs/design/m2a.md §7)
+inline constexpr uint16_t kProtocolVersion = 3; // bump on any wire change (2: M2a, docs/design/m2a.md §7; 3: M2b nt, docs/design/m2b.md §3.7)
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -489,8 +490,9 @@ struct CombatEvents {
 // health in 1/100 hp in 24 bits (0..100,000; a larger code is refused); slots in 7 bits; positions as shot origins. The message is reliable,
 // so nothing is dropped silently: a value outside its range is clamped and counted in r_clamped (a position outside
 // the frame, a negative or huge amount, a time after the message's tick), and events beyond
-// kMaxCombatEventsPerMessage (hits first, then deaths, then detonations) or with a slot >= 128 are cut and counted
-// there too (the GameServer sends one message per snapshot, far below the bound).
+// kMaxCombatEventsPerMessage (hits first, then deaths, then detonations, then revives) or with a slot >= 128 are cut
+// and counted there too (the GameServer sends one message per snapshot, far below the bound). M2b v3: the death
+// fields and the revives as the v3 table at the end of this file says.
 std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const ShotQuantization &p_frame, size_t *r_clamped = nullptr);
 core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame);
 
@@ -503,12 +505,28 @@ std::vector<uint8_t> encode_kit_select(const KitSelect &p_message);
 core::Result<KitSelect> decode_kit_select(std::span<const uint8_t> p_datagram);
 
 // M2b W1.0 (docs/design/m2b.md §2.6 #11, §3.7; the W1.0 contract, docs/design/m2b-w1.md). Protocol v3: the round, the
-// player rows and the spawn screen. Declared in W1.0; the wire formats and codecs are nt's (R9). Until nt lands, the
-// encoders return an empty vector and the decoders the error "v3 codec: nt" (protocol.cpp, each line marked
-// "M2b W1.0 stub"), and a sender skips an empty vector. kProtocolVersion stays 2 in W1.0: nt sets it to 3 with the
-// codecs (two existing rows pin 2: net.proto.unit and m2a.contract; nt updates both, m2b-w1.md). Every message is
-// on ch1 (reliable, ordered). Decoders bound every count (<= kMaxPlayerRows rows, names <= kMaxPlayerNameBytes of
-// valid UTF-8) and refuse trailing bytes.
+// player rows and the spawn screen. Declared in W1.0; the wire formats and codecs are nt's (R9; as built:
+// docs/design/m2b-nt.md §2). Every message is on ch1 (reliable, ordered). Decoders bound every count (<=
+// kMaxPlayerRows rows, names <= kMaxPlayerNameBytes of valid UTF-8), check every enum and refuse trailing bytes.
+// As built (nt), the bodies after the type byte:
+//   MatchState    u8 phase (<= RoundOver) | u32 round_start_tick | u32 countdown_end_tick | i32 kills[0] | i32 kills[1] |
+//                 i32 kill_limit (>= 0) | u2 winner (<= 2) | bool killer_camera | u32 round_end_tick | u32 unspawn_tick |
+//                 u32 restart_tick | u32 restrict_until_tick | 13 bits restrict_mask (restrict_bits::kAll). 39 bytes.
+//   PlayerList    u32 server_tick | bool full | u7 row count (<= 64) | u7 removed count (<= 64; 0 when full) | the rows,
+//                 strictly ascending slot | the removed slots (u6), strictly ascending, none of them a row's.
+//                 A row: u6 slot | u2 team (<= 2) | u2 kit | bool bot | bool alive | u5 name_bytes (<= 16) | u16 ping_ms |
+//                 u16 kills | u16 deaths | i32 score | name_bytes bytes of valid UTF-8 (the rest of name reads 0).
+//                 13-29 bytes a row. The encoder writes the canonical form: rows by ascending slot (a second row of a
+//                 slot, a slot >= 64 dropped), team > 2 written 0, kit >= 4 written 3, a name cut to its longest
+//                 valid UTF-8 prefix of at most 16 bytes, removed slots deduplicated and without the rows' slots;
+//                 each such change counts in r_clamped.
+//   SpawnRequest  u8 kit | u8 spawn_choice. Any value decodes: the server validates both and counts a refusal
+//                 (TdmRules::request_spawn, SpawnRefusal::BadKit), so the decoder does not hide a hostile kit from it.
+//   MatchInfo     + u64 logic_digest | u8 rules_flags (unknown bits refused). Spawned + bool revived.
+//   CombatEvents  + a varint revive count after the detonation count (all four within kMaxCombatEventsPerMessage);
+//                 a death gains bool stamped, then (when stamped) u32 respawn_tick | u32 revive_until | 24 bits
+//                 killer_health in 1/100 hp; a revive: u7 reviver | u7 revived | varint ticks back from server_tick
+//                 (a revive after the message's tick is written at it and counted in r_clamped).
 
 // MatchInfo::rules_flags (what the server's load has; the client makes the same SharedLoadOptions::tdm load).
 namespace rules_flags {
@@ -624,10 +642,17 @@ struct SpawnRequest {
 
 std::vector<uint8_t> encode_match_state(const MatchState &p_message);
 core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram);
-// r_clamped counts rows beyond kMaxPlayerRows and names cut to kMaxPlayerNameBytes (on a UTF-8 boundary).
+// r_clamped counts rows beyond kMaxPlayerRows and names cut to kMaxPlayerNameBytes (on a UTF-8 boundary), and every
+// other change the encoder makes to reach the canonical form (the PlayerList line of the table above).
 std::vector<uint8_t> encode_player_list(const PlayerList &p_message, size_t *r_clamped = nullptr);
 core::Result<PlayerList> decode_player_list(std::span<const uint8_t> p_datagram);
 std::vector<uint8_t> encode_spawn_request(const SpawnRequest &p_message);
 core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datagram);
+
+// M2b nt: a row's name. set_player_name writes the longest prefix of p_name that is valid UTF-8 of at most
+// kMaxPlayerNameBytes bytes (the server's truncation of a Hello name, §9.3), zero-fills the rest and returns whether
+// p_name was cut; player_name reads the used bytes.
+bool set_player_name(PlayerRow &r_row, std::string_view p_name);
+std::string_view player_name(const PlayerRow &p_row);
 
 } // namespace bf3::net

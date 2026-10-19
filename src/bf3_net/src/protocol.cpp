@@ -39,6 +39,7 @@ constexpr unsigned kOtherTeamBits = 2; // M2a w3 (G1, docs/design/m2a-w3.md): Ot
 constexpr unsigned kOtherBitsV2 = kOtherBits + kOtherWeaponBits + kOtherTeamBits;
 static_assert(kOtherWeaponBits == 19 && kOtherBitsV2 == 180); // m2a.md §7.3: 19 more bits; W3.0 G1: + 2 team bits, 180 per other
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
+constexpr uint8_t kKnownRulesFlags = rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive; // M2b nt: v3
 constexpr unsigned kWireSlotBits = 7; // shot and combat slots < kMaxSlots
 static_assert((size_t(1) << kWireSlotBits) == kMaxSlots);
 constexpr int32_t kOtherPitchMaxCode = (1 << (quant::kSoldierPitchBits - 1)) - 1; // 2047: 8188 Command steps
@@ -832,6 +833,9 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::ShotEvents:
 		case MessageType::CombatEvents:
 		case MessageType::KitSelect:
+		case MessageType::MatchState: // M2b nt: v3
+		case MessageType::PlayerList: // M2b nt
+		case MessageType::SpawnRequest: // M2b nt
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -877,6 +881,8 @@ std::vector<uint8_t> encode_match_info(const MatchInfo &p_message) {
 	w.write_bits(p_message.weapon_flags, 8);
 	w.write_bits(p_message.kit_hash, 64);
 	w.write_bits(p_message.max_rewind_ticks, 8);
+	w.write_bits(p_message.logic_digest, 64); // M2b nt: v3 (m2b.md §3.7, §3.8)
+	w.write_bits(p_message.rules_flags, 8); // M2b nt
 	return finish(w);
 }
 
@@ -902,12 +908,17 @@ core::Result<MatchInfo> decode_match_info(std::span<const uint8_t> p_datagram) {
 	m.weapon_flags = uint8_t(r.read_bits(8));
 	m.kit_hash = r.read_bits(64);
 	m.max_rewind_ticks = uint8_t(r.read_bits(8));
+	m.logic_digest = r.read_bits(64); // M2b nt: v3
+	m.rules_flags = uint8_t(r.read_bits(8)); // M2b nt
 	if (r.failed()) {
 		return fail("MatchInfo", "truncated");
 	}
 	if ((m.weapon_flags & ~kKnownWeaponFlags) != 0) {
 		return fail("MatchInfo", "unknown weapon flags");
 	}
+	if ((m.rules_flags & ~kKnownRulesFlags) != 0) { // M2b nt
+		return fail("MatchInfo", "unknown rules flags"); // M2b nt
+	} // M2b nt
 	if (m.sim_hz == 0 || m.snapshot_divisor == 0) {
 		return fail("MatchInfo", "zero tick rate or snapshot divisor");
 	}
@@ -945,6 +956,7 @@ std::vector<uint8_t> encode_spawned(const Spawned &p_message) {
 	write_state(w, p_message.state);
 	w.write_bits(p_message.kit, 8); // v2 (m2a.md §7.4)
 	w.write_bits(p_message.team, 8);
+	w.write_bool(p_message.revived); // M2b nt: v3 (m2b.md §3.6)
 	return finish(w);
 }
 
@@ -959,6 +971,7 @@ core::Result<Spawned> decode_spawned(std::span<const uint8_t> p_datagram) {
 	const bool state_ok = read_state(r, m.state);
 	const uint64_t kit = r.read_bits(8);
 	const uint64_t team = r.read_bits(8);
+	m.revived = r.read_bool(); // M2b nt: v3
 	if (r.failed()) {
 		return fail("Spawned", "truncated");
 	}
@@ -1805,8 +1818,9 @@ static_assert(kHpMaxCode < (1u << kHpBits));
 constexpr unsigned kNormalBits = 8;
 constexpr size_t kTimeMinBits = 8 + kTickFractionBits;
 constexpr size_t kHitMinBits = 7 + 7 + 32 + 6 + 2 + 2 * kHpBits + 3 * kFramePositionBits + 2 * kNormalBits + kTimeMinBits;
-constexpr size_t kDeathMinBits = 7 + 7 + 8 + 2 + 32 + 1 + kTimeMinBits;
+constexpr size_t kDeathMinBits = 7 + 7 + 8 + 2 + 32 + 1 + kTimeMinBits + 1; // M2b nt: + the v3 stamped bit
 constexpr size_t kDetonationMinBits = 7 + 32 + 8 + 3 * kFramePositionBits + 2 * kNormalBits + 1 + kTimeMinBits;
+constexpr size_t kReviveMinBits = 7 + 7 + 8; // M2b nt: v3 (reviver, revived, a one-group varint)
 
 uint32_t hp_code(float p_hp, size_t &r_clamped) {
 	const double t = double(p_hp) * kHpScale + 0.5;
@@ -1880,11 +1894,21 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 		detonations.push_back(&d);
 		--budget;
 	}
+	std::vector<const ReviveEvent *> revives; // M2b nt: v3
+	for (const ReviveEvent &v : p_message.revives) { // M2b nt
+		if (v.reviver >= kMaxSlots || v.revived >= kMaxSlots || budget == 0) { // M2b nt
+			++clamped; // M2b nt
+			continue; // M2b nt
+		} // M2b nt
+		revives.push_back(&v); // M2b nt
+		--budget; // M2b nt
+	} // M2b nt
 	BitWriter w = begin(MessageType::CombatEvents);
 	w.write_bits(p_message.server_tick, 32);
 	w.write_varint(hits.size());
 	w.write_varint(deaths.size());
 	w.write_varint(detonations.size());
+	w.write_varint(revives.size()); // M2b nt
 	for (const HitEvent *h : hits) {
 		w.write_bits(h->victim, kWireSlotBits);
 		w.write_bits(h->shooter, kWireSlotBits);
@@ -1911,6 +1935,15 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 		w.write_bits(d->shot_index, 32);
 		w.write_bool(d->headshot);
 		write_event_time(w, d->time, p_message.server_tick, clamped);
+		// M2b nt: v3, the rules' stamp (m2b.md §3.4 R8); one 0 bit with rules off.
+		const uint32_t killer_hp = hp_code(d->killer_health, clamped); // M2b nt
+		const bool stamped = d->respawn_tick != 0 || d->revive_until != 0 || killer_hp != 0; // M2b nt
+		w.write_bool(stamped); // M2b nt
+		if (stamped) { // M2b nt
+			w.write_bits(d->respawn_tick, 32); // M2b nt
+			w.write_bits(d->revive_until, 32); // M2b nt
+			w.write_bits(killer_hp, kHpBits); // M2b nt
+		} // M2b nt
 	}
 	for (const DetonationWire *d : detonations) {
 		w.write_bits(d->shooter, kWireSlotBits);
@@ -1921,6 +1954,14 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 		w.write_bool(d->dud);
 		write_event_time(w, d->time, p_message.server_tick, clamped);
 	}
+	for (const ReviveEvent *v : revives) { // M2b nt: v3
+		w.write_bits(v->reviver, kWireSlotBits); // M2b nt
+		w.write_bits(v->revived, kWireSlotBits); // M2b nt
+		if (v->tick > p_message.server_tick) { // M2b nt
+			++clamped; // M2b nt: a revive after the message's tick goes out at it
+		} // M2b nt
+		w.write_varint(v->tick <= p_message.server_tick ? p_message.server_tick - v->tick : 0u); // M2b nt
+	} // M2b nt
 	if (r_clamped) {
 		*r_clamped = clamped;
 	}
@@ -1937,11 +1978,14 @@ core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datag
 	const uint64_t nh = r.read_varint();
 	const uint64_t nd = r.read_varint();
 	const uint64_t nt = r.read_varint();
+	const uint64_t nr = r.read_varint(); // M2b nt: v3 revives
 	if (r.failed()) {
 		return fail("CombatEvents", "truncated");
 	}
 	if (nh > kMaxCombatEventsPerMessage || nd > kMaxCombatEventsPerMessage || nt > kMaxCombatEventsPerMessage ||
-			nh + nd + nt > kMaxCombatEventsPerMessage || nh * kHitMinBits + nd * kDeathMinBits + nt * kDetonationMinBits > r.bits_left()) {
+			nr > kMaxCombatEventsPerMessage || // M2b nt
+			nh + nd + nt + nr > kMaxCombatEventsPerMessage || // M2b nt: nr added to the M2a sum
+			nh * kHitMinBits + nd * kDeathMinBits + nt * kDetonationMinBits + nr * kReviveMinBits > r.bits_left()) { // M2b nt: nr added
 		return fail("CombatEvents", "event count out of range");
 	}
 	m.hits.resize(size_t(nh));
@@ -1976,6 +2020,15 @@ core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datag
 		if (!read_event_time(r, m.server_tick, d.time)) {
 			return fail("CombatEvents", r.failed() ? "truncated" : "death time out of range");
 		}
+		if (r.read_bool()) { // M2b nt: v3, the rules' stamp
+			d.respawn_tick = sim::Tick(r.read_bits(32)); // M2b nt
+			d.revive_until = sim::Tick(r.read_bits(32)); // M2b nt
+			const uint32_t killer_hp = uint32_t(r.read_bits(kHpBits)); // M2b nt
+			if (killer_hp > kHpMaxCode) { // M2b nt
+				return fail("CombatEvents", "killer health out of range"); // M2b nt
+			} // M2b nt
+			d.killer_health = hp_value(killer_hp); // M2b nt
+		} // M2b nt
 	}
 	m.detonations.resize(size_t(nt));
 	for (DetonationWire &d : m.detonations) {
@@ -1993,6 +2046,16 @@ core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datag
 		}
 		d.def = uint16_t(def);
 	}
+	m.revives.resize(size_t(nr)); // M2b nt: v3
+	for (ReviveEvent &v : m.revives) { // M2b nt
+		v.reviver = uint8_t(r.read_bits(kWireSlotBits)); // M2b nt
+		v.revived = uint8_t(r.read_bits(kWireSlotBits)); // M2b nt
+		const uint64_t back = r.read_varint(); // M2b nt
+		if (r.failed() || back > m.server_tick) { // M2b nt
+			return fail("CombatEvents", r.failed() ? "truncated" : "revive tick out of range"); // M2b nt
+		} // M2b nt
+		v.tick = sim::Tick(m.server_tick - back); // M2b nt
+	} // M2b nt
 	return close(r, std::move(m), "CombatEvents");
 }
 
@@ -2025,13 +2088,248 @@ core::Result<KitSelect> decode_kit_select(std::span<const uint8_t> p_datagram) {
 	return close(r, std::move(m), "KitSelect");
 }
 
-// M2b W1.0 (docs/design/m2b.md §11 "The one production stub"; docs/design/m2b-w1.md): the v3 codecs, so ru, bb and nt
-// link on parallel branches. nt replaces these bodies (R9); a sender skips an empty vector.
-std::vector<uint8_t> encode_match_state(const MatchState &) { return {}; } // M2b W1.0 stub
-core::Result<MatchState> decode_match_state(std::span<const uint8_t>) { return core::make_error("v3 codec: nt"); } // M2b W1.0 stub
-std::vector<uint8_t> encode_player_list(const PlayerList &, size_t *) { return {}; } // M2b W1.0 stub
-core::Result<PlayerList> decode_player_list(std::span<const uint8_t>) { return core::make_error("v3 codec: nt"); } // M2b W1.0 stub
-std::vector<uint8_t> encode_spawn_request(const SpawnRequest &) { return {}; } // M2b W1.0 stub
-core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t>) { return core::make_error("v3 codec: nt"); } // M2b W1.0 stub
+// ---- M2b nt: protocol v3 (docs/design/m2b.md §3.7, §9.3; R9 replaced the W1.0 stubs; the formats: protocol.h) ----
+
+namespace {
+
+constexpr unsigned kRowSlotBits = 6; // PlayerRow::slot < kMaxPlayerRows
+constexpr unsigned kRowCountBits = 7; // 0 .. kMaxPlayerRows
+constexpr unsigned kNameBytesBits = 5; // 0 .. kMaxPlayerNameBytes
+constexpr unsigned kRestrictMaskBits = 13;
+constexpr size_t kRowMinBits = kRowSlotBits + 2 + 2 + 1 + 1 + kNameBytesBits + 16 + 16 + 16 + 32;
+static_assert((size_t(1) << kRowSlotBits) == kMaxPlayerRows && (size_t(1) << (kRowCountBits - 1)) == kMaxPlayerRows);
+static_assert(kMaxPlayerNameBytes < (size_t(1) << kNameBytesBits));
+static_assert(restrict_bits::kAll == (1u << kRestrictMaskBits) - 1u);
+static_assert(kMaxKits == 4, "PlayerRow::kit travels in 2 bits");
+
+// The longest prefix of the row's name (at most kMaxPlayerNameBytes, at most name_bytes) that is valid UTF-8.
+size_t valid_name_bytes(const PlayerRow &p_row) {
+	size_t n = std::min<size_t>(p_row.name_bytes, kMaxPlayerNameBytes);
+	while (n > 0 && !valid_utf8(std::string_view(p_row.name.data(), n))) {
+		--n;
+	}
+	return n;
+}
+
+} // namespace
+
+std::vector<uint8_t> encode_match_state(const MatchState &p_message) {
+	BitWriter w = begin(MessageType::MatchState);
+	w.write_bits(std::min<uint8_t>(uint8_t(p_message.phase), uint8_t(MatchPhase::RoundOver)), 8);
+	w.write_bits(p_message.round_start_tick, 32);
+	w.write_bits(p_message.countdown_end_tick, 32);
+	w.write_signed(p_message.kills[0], 32);
+	w.write_signed(p_message.kills[1], 32);
+	w.write_signed(std::max<int32_t>(p_message.kill_limit, 0), 32);
+	w.write_bits(std::min<uint8_t>(p_message.winner, kMaxTeam), 2);
+	w.write_bool(p_message.killer_camera);
+	w.write_bits(p_message.round_end_tick, 32);
+	w.write_bits(p_message.unspawn_tick, 32);
+	w.write_bits(p_message.restart_tick, 32);
+	w.write_bits(p_message.restrict_until_tick, 32);
+	w.write_bits(p_message.restrict_mask & restrict_bits::kAll, kRestrictMaskBits);
+	return finish(w);
+}
+
+core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram) {
+	BitReader r(p_datagram);
+	if (!open(r, MessageType::MatchState)) {
+		return fail("MatchState", "wrong type");
+	}
+	MatchState m;
+	const uint64_t phase = r.read_bits(8);
+	m.round_start_tick = sim::Tick(r.read_bits(32));
+	m.countdown_end_tick = sim::Tick(r.read_bits(32));
+	m.kills[0] = int32_t(r.read_signed(32));
+	m.kills[1] = int32_t(r.read_signed(32));
+	m.kill_limit = int32_t(r.read_signed(32));
+	const uint64_t winner = r.read_bits(2);
+	m.killer_camera = r.read_bool();
+	m.round_end_tick = sim::Tick(r.read_bits(32));
+	m.unspawn_tick = sim::Tick(r.read_bits(32));
+	m.restart_tick = sim::Tick(r.read_bits(32));
+	m.restrict_until_tick = sim::Tick(r.read_bits(32));
+	m.restrict_mask = uint32_t(r.read_bits(kRestrictMaskBits));
+	if (r.failed()) {
+		return fail("MatchState", "truncated");
+	}
+	if (phase > uint8_t(MatchPhase::RoundOver)) {
+		return fail("MatchState", "unknown phase");
+	}
+	if (winner > kMaxTeam) {
+		return fail("MatchState", "winner out of range");
+	}
+	if (m.kill_limit < 0) {
+		return fail("MatchState", "negative kill limit");
+	}
+	m.phase = MatchPhase(phase);
+	m.winner = uint8_t(winner);
+	return close(r, m, "MatchState");
+}
+
+std::vector<uint8_t> encode_player_list(const PlayerList &p_message, size_t *r_clamped) {
+	size_t clamped = 0;
+	// The canonical form: one row per slot (the first wins), ascending; removed slots once, never a row's slot.
+	std::array<const PlayerRow *, kMaxPlayerRows> by_slot{};
+	for (const PlayerRow &row : p_message.rows) {
+		if (row.slot >= kMaxPlayerRows || by_slot[row.slot] != nullptr) {
+			++clamped;
+			continue;
+		}
+		by_slot[row.slot] = &row;
+	}
+	std::array<bool, kMaxPlayerRows> removed{};
+	for (const uint8_t slot : p_message.removed) {
+		if (p_message.full || slot >= kMaxPlayerRows || removed[slot] || by_slot[slot] != nullptr) {
+			++clamped;
+			continue;
+		}
+		removed[slot] = true;
+	}
+	size_t row_count = 0, removed_count = 0;
+	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
+		row_count += by_slot[s] != nullptr ? 1u : 0u;
+		removed_count += removed[s] ? 1u : 0u;
+	}
+	BitWriter w = begin(MessageType::PlayerList);
+	w.write_bits(p_message.server_tick, 32);
+	w.write_bool(p_message.full);
+	w.write_bits(row_count, kRowCountBits);
+	w.write_bits(removed_count, kRowCountBits);
+	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
+		const PlayerRow *row = by_slot[s];
+		if (row == nullptr) {
+			continue;
+		}
+		const size_t name_bytes = valid_name_bytes(*row);
+		if (name_bytes != row->name_bytes) {
+			++clamped;
+		}
+		if (row->team > kMaxTeam || row->kit >= kMaxKits) {
+			++clamped;
+		}
+		w.write_bits(s, kRowSlotBits);
+		w.write_bits(row->team <= kMaxTeam ? row->team : 0u, 2);
+		w.write_bits(std::min<uint8_t>(row->kit, kMaxKits - 1), 2);
+		w.write_bool(row->bot);
+		w.write_bool(row->alive);
+		w.write_bits(name_bytes, kNameBytesBits);
+		w.write_bits(row->ping_ms, 16);
+		w.write_bits(row->kills, 16);
+		w.write_bits(row->deaths, 16);
+		w.write_signed(row->score, 32);
+		for (size_t k = 0; k < name_bytes; ++k) {
+			w.write_bits(uint8_t(row->name[k]), 8);
+		}
+	}
+	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
+		if (removed[s]) {
+			w.write_bits(s, kRowSlotBits);
+		}
+	}
+	if (r_clamped) {
+		*r_clamped = clamped;
+	}
+	return finish(w);
+}
+
+core::Result<PlayerList> decode_player_list(std::span<const uint8_t> p_datagram) {
+	BitReader r(p_datagram);
+	if (!open(r, MessageType::PlayerList)) {
+		return fail("PlayerList", "wrong type");
+	}
+	PlayerList m;
+	m.server_tick = sim::Tick(r.read_bits(32));
+	m.full = r.read_bool();
+	const uint64_t rows = r.read_bits(kRowCountBits);
+	const uint64_t removed = r.read_bits(kRowCountBits);
+	if (r.failed()) {
+		return fail("PlayerList", "truncated");
+	}
+	if (rows > kMaxPlayerRows || removed > kMaxPlayerRows || (m.full && removed != 0) ||
+			rows * kRowMinBits + removed * kRowSlotBits > r.bits_left()) {
+		return fail("PlayerList", "row count out of range");
+	}
+	std::array<bool, kMaxPlayerRows> present{};
+	m.rows.resize(size_t(rows));
+	for (size_t i = 0; i < m.rows.size(); ++i) {
+		PlayerRow &row = m.rows[i];
+		row.slot = uint8_t(r.read_bits(kRowSlotBits));
+		const uint64_t team = r.read_bits(2);
+		row.kit = uint8_t(r.read_bits(2));
+		row.bot = r.read_bool();
+		row.alive = r.read_bool();
+		const uint64_t name_bytes = r.read_bits(kNameBytesBits);
+		row.ping_ms = uint16_t(r.read_bits(16));
+		row.kills = uint16_t(r.read_bits(16));
+		row.deaths = uint16_t(r.read_bits(16));
+		row.score = int32_t(r.read_signed(32));
+		if (r.failed()) {
+			return fail("PlayerList", "truncated");
+		}
+		if (i > 0 && row.slot <= m.rows[i - 1].slot) {
+			return fail("PlayerList", "rows not in ascending slot order");
+		}
+		if (team > kMaxTeam) {
+			return fail("PlayerList", "team out of range");
+		}
+		if (name_bytes > kMaxPlayerNameBytes || name_bytes * 8 > r.bits_left()) {
+			return fail("PlayerList", "bad name length");
+		}
+		row.team = uint8_t(team);
+		row.name_bytes = uint8_t(name_bytes);
+		for (size_t k = 0; k < name_bytes; ++k) {
+			row.name[k] = char(r.read_bits(8));
+		}
+		if (r.failed() || !valid_utf8(std::string_view(row.name.data(), row.name_bytes))) {
+			return fail("PlayerList", "bad name");
+		}
+		present[row.slot] = true;
+	}
+	m.removed.resize(size_t(removed));
+	for (size_t i = 0; i < m.removed.size(); ++i) {
+		m.removed[i] = uint8_t(r.read_bits(kRowSlotBits));
+		if (r.failed()) {
+			return fail("PlayerList", "truncated");
+		}
+		if ((i > 0 && m.removed[i] <= m.removed[i - 1]) || present[m.removed[i]]) {
+			return fail("PlayerList", "removed slots not ascending or also a row");
+		}
+	}
+	return close(r, std::move(m), "PlayerList");
+}
+
+std::vector<uint8_t> encode_spawn_request(const SpawnRequest &p_message) {
+	BitWriter w = begin(MessageType::SpawnRequest);
+	w.write_bits(p_message.kit, 8);
+	w.write_bits(p_message.spawn_choice, 8);
+	return finish(w);
+}
+
+core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datagram) {
+	BitReader r(p_datagram);
+	if (!open(r, MessageType::SpawnRequest)) {
+		return fail("SpawnRequest", "wrong type");
+	}
+	SpawnRequest m;
+	m.kit = uint8_t(r.read_bits(8)); // any value: the server validates and counts (protocol.h)
+	m.spawn_choice = uint8_t(r.read_bits(8));
+	return close(r, m, "SpawnRequest");
+}
+
+bool set_player_name(PlayerRow &r_row, std::string_view p_name) {
+	r_row.name = {};
+	size_t n = std::min(p_name.size(), kMaxPlayerNameBytes);
+	while (n > 0 && !valid_utf8(p_name.substr(0, n))) {
+		--n;
+	}
+	std::copy_n(p_name.data(), n, r_row.name.data());
+	r_row.name_bytes = uint8_t(n);
+	return n != p_name.size();
+}
+
+std::string_view player_name(const PlayerRow &p_row) {
+	return std::string_view(p_row.name.data(), std::min<size_t>(p_row.name_bytes, kMaxPlayerNameBytes));
+}
 
 } // namespace bf3::net

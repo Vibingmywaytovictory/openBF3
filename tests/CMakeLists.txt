@@ -1365,3 +1365,18 @@ endif()
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     set_property(TEST godot.m2a godot.m2a.kits godot.m2a.play APPEND PROPERTY LABELS retired)
 endif()
+
+# M2b nt (docs/design/m2b.md §2.6 #12, §3.7; docs/design/m2b-nt.md §4): host.client.m2b.unit, the client half of
+# protocol v3 without sockets: the M2a gate's shot-id reuse reproduced on the client's weapon-lane path (death, replay,
+# respawn) and fixed by OwnShotIds, present_own_shot_id per event kind, the PlayerList table, own_unspawned_at,
+# rules_refusal and the restriction on predicted commands. No install (the synthetic floor); a unit row (< 2 s),
+# functional, parallel-safe. The ClientSession wiring runs in ru's host.tdm.client (E13, timing).
+openbf3_test(test_client_m2b test_main.cpp client_session_m2b_tests.cpp gunplay_fixture.h weapons_support.h test_support.h)
+target_link_libraries(test_client_m2b PRIVATE bf3_host)
+target_compile_definitions(test_client_m2b PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+add_test(NAME host.client.m2b.unit COMMAND test_client_m2b --test-suite=host-client-m2b)
+set_tests_properties(host.client.m2b.unit PROPERTIES TIMEOUT 60)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2b_nt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.client.m2b.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_nt_cl_dir}")
+endif()
