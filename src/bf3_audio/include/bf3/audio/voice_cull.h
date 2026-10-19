@@ -58,6 +58,15 @@ struct CullVoice {
 	bool starting = false; // started this block (pre-cull and DuplicateSpawn apply to it)
 	bool hdr = true; // as built (au): an HDR voice (an output with EnableHdr): pre-cull applies
 	uint32_t voices = 1; // as built (au): its sampler voices against the cap (0 counts as 1, above kMaxCullVoices as that)
+	// PT1 snd [hold] (docs/design/pt1-snd.md): added to loudness_db in the cap's ranking only (not pre-cull, not the
+	// scopes): MixerCore gives a voice that sounded in the last block MixerConfig::pt1_cap_hold_db, so a parked loop
+	// takes its place only when it is louder by more than that (without it, voices of equal loudness at the cap's edge
+	// swapped every few blocks: docs/design/pt1-snd.md §2).
+	float hold_db = 0.0f; // PT1 snd [hold]
+	// PT1 snd [hold]: a parked voice comes back only when this many sampler voices stay free after it (at most
+	// kMaxCullVoices), so the voice that just came back is not parked again by the next small rise in the others' busy
+	// slots. Counts in its own fit test only, not against the others.
+	uint32_t resume_margin = 0; // PT1 snd [hold]
 };
 
 enum class CullVerdict : uint8_t { Keep = 0, Precull = 1, Scope = 2, Cap = 3, Pending = 4 };

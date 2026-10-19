@@ -182,12 +182,14 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 	// the older first among equals) fill max_voices; the first that does not fit and every voice after it go.
 	const auto weight = [&](size_t k) { return uint64_t(std::clamp<uint32_t>(p_voices[k].voices, 1, kMaxCullVoices)); };
 	uint64_t total = 0;
+	uint64_t pt1_margin = 0; // PT1 snd [hold]: the largest resume margin of a kept voice
 	for (size_t i = 0; i < n; ++i) {
 		total += c.kept(i) ? weight(i) : 0;
+		pt1_margin = std::max<uint64_t>(pt1_margin, c.kept(i) ? std::min<uint32_t>(p_voices[i].resume_margin, kMaxCullVoices) : 0u); // PT1 snd [hold]
 	}
-	if (total > p_max_voices) {
+	if (total + pt1_margin > p_max_voices) { // PT1 snd [hold]: was total > p_max_voices
 		const auto score = [&](size_t k) {
-			const float s = p_voices[k].loudness_db * p_voices[k].priority;
+			const float s = (p_voices[k].loudness_db + (std::isfinite(p_voices[k].hold_db) ? p_voices[k].hold_db : 0.0f)) * p_voices[k].priority; // PT1 snd [hold]: + hold_db
 			return std::isfinite(s) ? s : -std::numeric_limits<float>::max();
 		};
 		const auto better = [&](size_t b, size_t a) {
@@ -199,7 +201,7 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 			if (!c.kept(a)) {
 				continue;
 			}
-			uint64_t before = weight(a); // a and every kept voice ranked above it
+			uint64_t before = weight(a) + std::min<uint32_t>(p_voices[a].resume_margin, kMaxCullVoices); // a and every kept voice ranked above it; PT1 snd [hold]: + its resume margin
 			for (size_t b = 0; b < n && before <= p_max_voices; ++b) {
 				if (b != a && c.kept(b) && better(b, a)) {
 					before += weight(b);

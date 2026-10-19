@@ -171,6 +171,14 @@ struct VoiceCullInfo { // M2b au [a3]
 	uint32_t voices = 0; // busy sampler slots (playing, or armed to start)
 };
 
+// PT1 snd [edge] (docs/design/pt1-snd.md): an instance's output at the edges of its last block (PatchInstance::pt1_edge).
+struct InstanceEdge { // PT1 snd [edge]
+	float edge = 0.0f; // max over channels of |the last frame it added to the buses| // PT1 snd [edge]
+	float head = 0.0f; // the same for the block's first frame // PT1 snd [edge]
+	uint64_t abrupt_gain = 0; // send gain ramps of > 3 dB inside a sub-block of < 64 frames with signal (cumulative) // PT1 snd [edge]
+	float abrupt_gain_max = 0.0f; // their largest per-sample step, |signal| x |gain step| // PT1 snd [edge]
+}; // PT1 snd [edge]
+
 class PatchInstance {
 public:
 	// Binds the program's waves to p_bank (a wave the bank lacks plays silence and counts starved_slots) and the
@@ -220,6 +228,17 @@ public:
 	const PatchInstanceStats &stats() const;
 	void set_hdr_window(const HdrVoiceWindow &p_window); // M2b au [a3]: audio thread, before process_block
 	VoiceCullInfo cull_info() const; // M2b au [a3]: audio thread
+	// PT1 snd [edge] (docs/design/pt1-snd.md): the largest |sample| the instance's sends wrote to the buses at the last
+	// (edge) and the first (head) frame of its last process_block: the step a cut after it, or its start, leaves in the
+	// mix. abrupt_gain: see InstanceEdge. Audio thread (or the owning thread offline).
+	InstanceEdge pt1_edge() const; // PT1 snd [edge]
+	// PT1 snd [fade] (docs/design/pt1-snd.md): an output fade over the instance's sends to the buses, which the mixer runs
+	// instead of a cut (a cull drop, a Kill, a loop parked or resumed): from the current level to p_target (clamped to
+	// [0, 1]) linearly over p_frames frames (0: at once). pt1_set_fade jumps (for a silent instance). Audio thread.
+	void pt1_fade_to(float p_target, uint32_t p_frames); // PT1 snd [fade]
+	void pt1_set_fade(float p_level); // PT1 snd [fade]
+	bool pt1_fade_done() const; // PT1 snd [fade]: no fade running
+	float pt1_fade_level() const; // PT1 snd [fade]
 
 	PatchInstance(const PatchInstance &) = delete;
 	PatchInstance &operator=(const PatchInstance &) = delete;

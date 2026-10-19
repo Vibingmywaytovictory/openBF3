@@ -449,6 +449,10 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 	for (uint32_t t = 0; t < st.tap_count; ++t) {
 		std::fill_n(st.tap_buffers[t].data(), p_frames, 0.0f);
 	}
+	st.pt1_edge[0] = st.pt1_edge[1] = 0.0f; // PT1 snd [edge]: the last sub-block's values stay
+	if (p_offset == 0) { // PT1 snd [edge]
+		st.pt1_head[0] = st.pt1_head[1] = 0.0f; // PT1 snd [edge]
+	} // PT1 snd [edge]
 	const float window_db = p.loudness_db - st.tuning.window_top_db - st.tuning.window_headroom_db + st.tuning.master_gain_db;
 	// M2b au R5 (docs/design/m2b.md §6.1): an EnableHdr output takes the HDR window's gain when the mixer runs one.
 	const float hdr_window_db = p.loudness_db - st.hdr.top_db - st.hdr.headroom_db + st.tuning.master_gain_db; // M2b au R5
@@ -592,9 +596,37 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 							touch(c.voice); // integ/m2b-w1 [lazy zero]
 							dst = st.voice(c.voice, uint32_t(chn)) + p_offset;
 						}
-						if (dst != nullptr) {
+						const bool pt1_faded = c.to_bus && (st.pt1_fade_left > 0 || st.pt1_fade != 1.0f); // PT1 snd [fade]
+						if (dst != nullptr && !pt1_faded) { // PT1 snd [fade]: `&& !pt1_faded` added
 							add_scaled(dst, ch[chn], p_frames, ps.gain_prev, target);
 						}
+						if (dst != nullptr && pt1_faded) { // PT1 snd [fade]: add_scaled's ramp times the output fade
+							const float step = (target - ps.gain_prev) / float(p_frames); // PT1 snd [fade]
+							float g = ps.gain_prev; // PT1 snd [fade]
+							for (uint32_t i = 0; i < p_frames; ++i) { // PT1 snd [fade]
+								g += step; // PT1 snd [fade]
+								dst[i] += ch[chn][i] * g * st.pt1_fade_at(i); // PT1 snd [fade]
+							} // PT1 snd [fade]
+						} // PT1 snd [fade]
+						if (dst != nullptr && c.to_bus) { // PT1 snd [edge]
+							const float g0 = (ps.gain_prev + (target - ps.gain_prev) / float(p_frames)) * st.pt1_fade_at(0); // PT1 snd [edge]: the first gain; [fade] x fade
+							st.pt1_edge[chn] += ch[chn][p_frames - 1] * target * st.pt1_fade_at(p_frames - 1); // PT1 snd [edge]; [fade] x fade
+							if (p_offset == 0) { // PT1 snd [edge]
+								st.pt1_head[chn] += ch[chn][0] * g0; // PT1 snd [edge]
+							} // PT1 snd [edge]
+							const float hi = std::max(ps.gain_prev, target), lo = std::min(ps.gain_prev, target); // PT1 snd [edge]
+							if (p_frames < 64 && hi > 0.0f && lo < hi * 0.70794578f) { // PT1 snd [edge]: > 3 dB within < 64 frames
+								float peak = 0.0f; // PT1 snd [edge]
+								for (uint32_t i = 0; i < p_frames; ++i) { // PT1 snd [edge]
+									peak = std::max(peak, std::fabs(ch[chn][i])); // PT1 snd [edge]
+								} // PT1 snd [edge]
+								const float jump = peak * (hi - lo) / float(p_frames); // PT1 snd [edge]
+								if (jump > 1.0e-3f) { // PT1 snd [edge]
+									++st.pt1_abrupt; // PT1 snd [edge]
+									st.pt1_abrupt_max = std::max(st.pt1_abrupt_max, jump); // PT1 snd [edge]
+								} // PT1 snd [edge]
+							} // PT1 snd [edge]
+						} // PT1 snd [edge]
 					}
 					ps.gain_prev = target;
 					break;
@@ -608,6 +640,16 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 	for (uint32_t t = 0; t < st.tap_count; ++t) {
 		st.taps[t]->on_voices(st.tap_buffers[t].data(), p_frames, p_frame);
 	}
+	if (st.pt1_fade_left > 0) { // PT1 snd [fade]: the fade moves on by the sub-block
+		if (st.pt1_fade_left <= p_frames) { // PT1 snd [fade]
+			st.pt1_fade = st.pt1_fade_target; // PT1 snd [fade]
+			st.pt1_fade_left = 0; // PT1 snd [fade]
+			st.pt1_fade_step = 0.0f; // PT1 snd [fade]
+		} else { // PT1 snd [fade]
+			st.pt1_fade += st.pt1_fade_step * float(p_frames); // PT1 snd [fade]
+			st.pt1_fade_left -= p_frames; // PT1 snd [fade]
+		} // PT1 snd [fade]
+	} // PT1 snd [fade]
 }
 
 void PatchInstance::process_block(BusBuffers &r_buses) {
@@ -948,6 +990,48 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 		default:
 			break; // Slot never reaches here; Delay (a zero-length line), Damping, Pan and Pass keep no state
 	}
+}
+
+// PT1 snd (docs/design/pt1-snd.md): the instance's output at the edges of its last block.
+
+InstanceEdge PatchInstance::pt1_edge() const {
+	const State &st = *state_;
+	InstanceEdge e;
+	e.edge = std::max(std::fabs(st.pt1_edge[0]), std::fabs(st.pt1_edge[1]));
+	e.head = std::max(std::fabs(st.pt1_head[0]), std::fabs(st.pt1_head[1]));
+	e.abrupt_gain = st.pt1_abrupt;
+	e.abrupt_gain_max = st.pt1_abrupt_max;
+	return e;
+}
+
+void PatchInstance::pt1_fade_to(float p_target, uint32_t p_frames) {
+	State &st = *state_;
+	const float target = std::isfinite(p_target) ? std::clamp(p_target, 0.0f, 1.0f) : 0.0f;
+	st.pt1_fade_target = target;
+	if (p_frames == 0) {
+		st.pt1_fade = target;
+		st.pt1_fade_left = 0;
+		st.pt1_fade_step = 0.0f;
+		return;
+	}
+	st.pt1_fade_left = p_frames;
+	st.pt1_fade_step = (target - st.pt1_fade) / float(p_frames);
+}
+
+void PatchInstance::pt1_set_fade(float p_level) {
+	State &st = *state_;
+	st.pt1_fade = std::isfinite(p_level) ? std::clamp(p_level, 0.0f, 1.0f) : 0.0f;
+	st.pt1_fade_target = st.pt1_fade;
+	st.pt1_fade_left = 0;
+	st.pt1_fade_step = 0.0f;
+}
+
+bool PatchInstance::pt1_fade_done() const {
+	return state_->pt1_fade_left == 0;
+}
+
+float PatchInstance::pt1_fade_level() const {
+	return state_->pt1_fade;
 }
 
 } // namespace bf3::audio

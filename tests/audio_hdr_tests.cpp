@@ -745,7 +745,7 @@ TEST_SUITE("audio-hdr") {
 			CHECK(rig.mixer->stats().culled_cap.load() == 0); // loops pend, they are not dropped
 			CHECK(rig.finished.empty());
 			rig.kill(loops[0]);
-			rig.step(1);
+			rig.step(2); // PT1 snd [fade]: was step(1); the killed loop fades out over one block, its voice held in the cap
 			CHECK(rig.mixer->stats().active_instances.load() == 4); // the loudest pending one resumed
 			// A one-shot over the cap is dropped (Cap) and comes back finished.
 			Source quiet{ 90.0f, false, false, 30, 1.0f };
@@ -1020,5 +1020,225 @@ TEST_SUITE("audio-hdr-install") {
 		CHECK_FALSE(read_scopes(*f->subway, &tiny).ok());
 		const SnapshotDiff diff = diff_snapshots(*f->before, f->reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+}
+
+// =====================================================================================================================
+// PT1 snd (docs/design/pt1-snd.md): audio-cuts (audio.cuts.unit, data-free, < 2 s). The playtest's "sound glitching":
+// the mixer stopped a sounding voice between two samples (a Kill, a cap drop of a playing one-shot, a loop parked as
+// pending and resumed), a step of up to the voice's level. Each case runs with the cut fade off (pt1_cut_fade_frames
+// = 0, the A3 mixer as merged: the detector must see the step) and on (the default: no step above the tone's own
+// slope). The 1 kHz tone's largest sample-to-sample step is 2 pi 1000 / 48000 = 0.131 of its peak.
+
+namespace {
+
+constexpr double kToneSlope = 2.0 * kPi * 1000.0 / 48000.0;
+
+double max_step(const std::vector<float> &p_x) {
+	double m = 0.0;
+	for (size_t i = 1; i < p_x.size(); ++i) {
+		m = std::max(m, double(std::fabs(p_x[i] - p_x[i - 1])));
+	}
+	return m;
+}
+
+double peak_of(const std::vector<float> &p_x, size_t p_from, size_t p_to) {
+	double m = 0.0;
+	for (size_t i = p_from; i < std::min(p_to, p_x.size()); ++i) {
+		m = std::max(m, double(std::fabs(p_x[i])));
+	}
+	return m;
+}
+
+// p_hold false: the cap without the [hold] hysteresis, for the cases that test the fades alone (1 dB apart).
+ba::MixerConfig cut_config(uint32_t p_fade, uint32_t p_voices, bool p_hold = true) {
+	ba::MixerConfig c;
+	c.max_voices = p_voices;
+	c.max_instances = 8;
+	c.pt1_cut_fade_frames = p_fade;
+	if (!p_hold) {
+		c.pt1_cap_hold_db = 0.0f;
+		c.pt1_voice_hold_blocks = 0;
+		c.pt1_resume_margin = 0;
+	}
+	return c;
+}
+
+} // namespace
+
+TEST_SUITE("audio-cuts") {
+	TEST_CASE("PT1 snd: a Kill fades the voice out over one block instead of a step") {
+		for (const uint32_t fade : { 0u, 512u }) {
+			Rig rig(cut_config(fade, 128));
+			const ba::InstanceHandle h = rig.start(Source{ 90.0f, false, true, 1 });
+			rig.step(4);
+			const double peak = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			REQUIRE(peak > 0.01);
+			rig.kill(h);
+			rig.step(3);
+			const double ratio = max_step(rig.rec.left) / peak;
+			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const size_t kill = size_t(ba::MixerCutKind::Kill), fd = size_t(ba::MixerCutKind::Fade);
+			MESSAGE("fade " << fade << ": peak " << peak << ", largest step / peak " << ratio << " (tone " << kToneSlope << "), kill step "
+							<< cs.step_max[kill].load());
+			CHECK(rig.mixer->stats().active_instances.load() == 0);
+			CHECK(cs.events[kill].load() == 1);
+			if (fade == 0) {
+				CHECK(ratio > 0.5); // the cut: the tone's level at the block's end, |sin(10.67 x 2 pi)| = 0.87
+				CHECK(cs.audible[kill].load() == 1);
+				CHECK(cs.events[fd].load() == 0);
+			} else {
+				CHECK(ratio < kToneSlope * 1.05);
+				CHECK(cs.step_max[kill].load() < 1.0e-4f); // the cut lands on silence
+				CHECK(cs.events[fd].load() == 1);
+				CHECK(cs.step_max[fd].load() > 0.01f); // what it faded from
+			}
+		}
+	}
+
+	TEST_CASE("PT1 snd: the cap parks a sounding loop with a fade out and resumes it with a fade in") {
+		for (const uint32_t fade : { 0u, 512u }) {
+			Rig rig(cut_config(fade, 1, false));
+			rig.start(Source{ 90.0f, false, true, 1, 1.0f }, 1.0f); // 89 dB at the listener
+			rig.step(4);
+			const double pa = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			const ba::InstanceHandle b = rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f); // 90 dB: A goes over the cap
+			rig.step(4);
+			const double pb = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
+			rig.kill(b);
+			rig.step(6); // b fades, then A resumes
+			CHECK(rig.mixer->stats().live_voices_max.load() <= 1); // the fading voice counts against the cap
+			CHECK(rig.mixer->stats().active_instances.load() == 1);
+			const double pa2 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			CHECK(pa2 == doctest::Approx(pa).epsilon(0.02)); // A plays again
+			const double ratio = max_step(rig.rec.left) / (pa + pb);
+			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			MESSAGE("fade " << fade << ": peaks " << pa << " / " << pb << ", largest step / (sum of peaks) " << ratio << ", pend "
+							<< cs.events[size_t(ba::MixerCutKind::Pend)].load() << " (max step " << cs.step_max[size_t(ba::MixerCutKind::Pend)].load()
+							<< "), resume max step " << cs.step_max[size_t(ba::MixerCutKind::Resume)].load());
+			CHECK(cs.events[size_t(ba::MixerCutKind::Pend)].load() == 1);
+			CHECK(cs.events[size_t(ba::MixerCutKind::Resume)].load() == 1);
+			if (fade == 0) {
+				CHECK(ratio > 0.3);
+			} else {
+				CHECK(ratio < kToneSlope * 1.05);
+				CHECK(cs.step_max[size_t(ba::MixerCutKind::Pend)].load() < 1.0e-4f);
+				CHECK(cs.step_max[size_t(ba::MixerCutKind::Resume)].load() < 0.01f * float(pa)); // the first frame of the fade in
+			}
+		}
+	}
+
+	TEST_CASE("PT1 snd: a playing one-shot dropped by the cap comes back finished at once and fades out") {
+		for (const uint32_t fade : { 0u, 512u }) {
+			Rig rig(cut_config(fade, 1, false));
+			const ba::InstanceHandle a = rig.start(Source{ 90.0f, false, false, 1, 1.0f }, 1.0f); // a 0.1 s one-shot, 89 dB
+			rig.step(2); // its last frame before the drop is near the tone's crest
+			const double pa = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			rig.start(Source{ 91.0f, false, false, 2, 1.0f }, 1.0f);
+			rig.step(1);
+			CHECK(rig.was_finished(a)); // the game frees it in the block of the drop, fade or not
+			CHECK(rig.mixer->stats().culled_cap.load() == 1);
+			rig.step(3);
+			const double pb = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			const double ratio = max_step(rig.rec.left) / (pa + pb);
+			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			MESSAGE("fade " << fade << ": largest step / (sum of peaks) " << ratio << ", drop max step " << cs.step_max[size_t(ba::MixerCutKind::Drop)].load());
+			CHECK(cs.events[size_t(ba::MixerCutKind::Drop)].load() == 1);
+			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
+			if (fade == 0) {
+				CHECK(ratio > 0.3);
+			} else {
+				CHECK(ratio < kToneSlope * 1.05);
+				CHECK(cs.step_max[size_t(ba::MixerCutKind::Drop)].load() < 1.0e-4f);
+			}
+		}
+	}
+
+	TEST_CASE("PT1 snd: the cap's hold keeps a sounding loop against a newcomer less than pt1_cap_hold_db louder") {
+		// 64 shooters (audio.game.underruns): without the hold, loops of equal loudness at the cap's edge parked and
+		// resumed every 10-200 ms (1931 re-parks within 1 s of a resume on 161 loops in 66 s).
+		for (const bool hold : { false, true }) {
+			Rig rig(cut_config(512, 1, hold));
+			rig.start(Source{ 90.0f, false, true, 1, 1.0f }, 1.0f); // A: 89 dB
+			rig.step(4);
+			const double pa = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f); // B: 90 dB, 1 dB louder
+			rig.step(4);
+			const double p1 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const uint64_t parks = cs.events[size_t(ba::MixerCutKind::Pend)].load();
+			MESSAGE("hold " << hold << ": A " << pa << ", after B started " << p1 << ", parks " << parks);
+			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
+			if (hold) {
+				CHECK(p1 == doctest::Approx(pa).epsilon(0.02)); // A keeps the voice, B waits
+				CHECK(parks == 0);
+				rig.start(Source{ 95.0f, false, true, 3, 1.0f }, 1.0f); // C: 94 dB, more than the hold louder
+				rig.step(4);
+				CHECK(cs.events[size_t(ba::MixerCutKind::Pend)].load() == 1); // A parks for C
+				const double p2 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
+				CHECK(p2 > pa * 1.4); // C sounds (+5 dB)
+			} else {
+				CHECK(p1 > pa * 1.05); // B takes the voice (+1 dB)
+				CHECK(parks == 1);
+			}
+		}
+	}
+
+	TEST_CASE("PT1 snd: a parked voice resumes only with its resume margin free") {
+		// 64 shooters: with the hold alone, 618 of 1688 parks lasted < 0.25 s (the loop came back in the gap a finished
+		// one-shot left and was parked again by the next start); with an 8-voice margin 12 of 958.
+		std::vector<ba::CullVoice> v(4);
+		for (size_t i = 0; i < v.size(); ++i) {
+			v[i].handle = ba::InstanceHandle(i + 1);
+			v[i].loudness_db = 80.0f - float(i);
+			v[i].hdr = false;
+			v[i].looping = true;
+			v[i].start_frame = i;
+		}
+		ba::CullCounts c;
+		CHECK(count(cull(v, nullptr, 0.0f, 4, c), ba::CullVerdict::Keep) == 4); // fits
+		v[3].resume_margin = 1; // the quietest was parked: it needs one more voice free
+		std::vector<ba::CullVerdict> r = cull(v, nullptr, 0.0f, 4, c);
+		CHECK(count(r, ba::CullVerdict::Keep) == 3);
+		CHECK(r[3] != ba::CullVerdict::Keep);
+		CHECK(count(cull(v, nullptr, 0.0f, 5, c), ba::CullVerdict::Keep) == 4); // one spare voice: it resumes
+		v[0].resume_margin = 4000000000u; // hostile: clamped to kMaxCullVoices, the others unaffected
+		r = cull(v, nullptr, 0.0f, 5, c);
+		CHECK(r[0] != ba::CullVerdict::Keep);
+		CHECK(count(r, ba::CullVerdict::Keep) == 3);
+	}
+
+	TEST_CASE("PT1 snd: the cut readout, the event ring and hostile fades") {
+		Rig rig(cut_config(512, 128));
+		rig.mixer->pt1_record_cuts(true);
+		const ba::InstanceHandle h = rig.start(Source{ 90.0f, false, true, 1 });
+		rig.step(2);
+		rig.kill(h);
+		rig.kill(h); // a second Kill of a fading voice changes nothing
+		rig.step(2);
+		std::array<ba::MixerCutEvent, 16> ev{};
+		const size_t n = rig.mixer->pt1_poll_cuts(ev);
+		REQUIRE(n == 3); // start, fade, kill
+		CHECK(ev[0].kind == ba::MixerCutKind::Start);
+		CHECK(ev[1].kind == ba::MixerCutKind::Fade);
+		CHECK(ev[2].kind == ba::MixerCutKind::Kill);
+		CHECK(ev[2].frame == ev[1].frame); // the fade starts at the block's first frame and ends with it
+		CHECK(std::string(ev[1].program) == "a3_source");
+		const std::string line = ba::format_mixer_cuts(rig.mixer->pt1_cut_stats());
+		MESSAGE(line);
+		CHECK(line.find("kill 1/0/0/") != std::string::npos);
+		CHECK(line.find("fade 1/1/1/") != std::string::npos);
+		// Hostile fade targets and lengths are clamped; a zero-length fade jumps.
+		Result<std::unique_ptr<ba::PatchInstance>> inst =
+				ba::PatchInstance::create(source_program(rig.wave, Source{}), rig.wave.bank, ba::AudioTuning{}, 7, ba::kMixRate);
+		REQUIRE(inst.ok());
+		(*inst)->pt1_fade_to(std::numeric_limits<float>::quiet_NaN(), 10);
+		CHECK_FALSE((*inst)->pt1_fade_done());
+		(*inst)->pt1_fade_to(5.0f, 0);
+		CHECK((*inst)->pt1_fade_done());
+		CHECK((*inst)->pt1_fade_level() == 1.0f);
+		(*inst)->pt1_set_fade(-3.0f);
+		CHECK((*inst)->pt1_fade_level() == 0.0f);
 	}
 }
