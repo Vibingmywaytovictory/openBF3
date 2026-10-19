@@ -377,6 +377,65 @@ struct HudTeam {
 	HudPlayerList sorted_players{}; // SortedPlayers (M2b)
 };
 
+// ---- M2b W2.0 (docs/design/m2b.md §2.6 #16, §4; owner ui; contract: docs/design/m2b-w2.md) -------------------------
+// The four M2b screens that no bound component type above carries: the kill card (UIKillCardCompData), the round end
+// (EndOfRound), the pre-round (PreRound) and the spawn screen (the spawnscreenpc flow; TDM spawns are random, so it has
+// no point choice). They are not kHudBindings rows (the 11 bound types are unchanged, ui.hud.sources stays as it is);
+// host::fill_hud_tdm (bf3/host/hud_feed.h) fills them. Times are seconds left, computed by the feed from the server
+// ticks it is given, so the screens never read a tick. Players are indices into HudModel::players, which the M2b
+// feed fills by server slot (players[slot], kHudMaxPlayers == net::kMaxPlayerRows, pinned by m2b.contract2).
+inline constexpr size_t kHudTopPlayers = 3; // EndOfRound's top players (TopPlayer1Name .. TopPlayer3Name)
+inline constexpr size_t kHudKitCount = 4; // assault, engineer, support, recon (host::kKitCount)
+inline constexpr size_t kHudSpawnKitItems = 5; // the kit bar's items per kit: weapon slots 0, 1, 2, 6, 7 (host::kHudSpawnSlots)
+
+// The own death's kill card (4 s after the own death, with the death camera; m2b.md §4).
+struct HudKillCard {
+	uint32_t serial = 0; // increases per own death that made a card; 0 = never
+	bool visible = false;
+	uint8_t killer = kHudNoPlayer; // into players; kHudNoPlayer: no other soldier (a fall, a suicide)
+	int8_t killer_kit = -1; // HudPlayer::kit of the killer's row (-1 unknown)
+	bool headshot = false;
+	bool suicide = false; // the killer was the victim (fall damage)
+	uint32_t item_id = 0; // the weapon's unlock identifier (_small icon), 0 for a fall
+	uint32_t weapon_name_sid_hash = 0; // text_hash of the weapon's name, 0 for a fall
+	float distance_m = -1.0f; // own corpse to the killer's presented position at the death; < 0 unknown
+	float killer_health = 0.0f; // DeathEvent::killer_health (hp, 0..100)
+	float seconds_left = 0.0f; // until the card hides
+};
+
+// The round end (on MatchState RoundOver, until the restart).
+struct HudEndOfRound {
+	bool visible = false;
+	int8_t winner = 0; // 0 none, 1, 2
+	bool local_won = false;
+	std::array<int32_t, 2> team_kills{}; // MatchState::kills (team 1, team 2)
+	int32_t kill_limit = 0;
+	std::array<uint8_t, kHudTopPlayers> top_players{ kHudNoPlayer, kHudNoPlayer, kHudNoPlayer }; // by score, into players
+	float seconds_to_next_round = 0.0f; // MatchState::restart_tick; 0 while not scheduled
+};
+
+// The spawn screen (at join and after each own death once the kill card is gone; m2b.md §4).
+struct HudSpawnScreen {
+	bool visible = false;
+	bool at_join = false; // no own life yet this round (no timer, no revive line)
+	uint8_t selected_kit = 0; // the kit Deploy sends (the screen's selection, kept by the game: HudFeedInput::spawn_kit)
+	bool can_deploy = false; // a SpawnRequest would be accepted: the server tick reached own_respawn_tick, phase PreRound / InRound
+	float seconds_to_deploy = 0.0f; // until can_deploy (0 when it already is)
+	bool revive_possible = false; // the own man-down window is open (own_revive_until)
+	float seconds_revive_left = 0.0f;
+	// The kit bar: per kit the unlock identifiers of slots 0, 1, 2, 6, 7 of the own team's loadout (0 = empty slot;
+	// assault's slot 2 is the defibrillator with TDM kits).
+	std::array<std::array<uint32_t, kHudSpawnKitItems>, kHudKitCount> kit_items{};
+};
+
+// The pre-round (MatchState PreRound: the countdown and the input freeze).
+struct HudPreRound {
+	bool visible = false;
+	bool counting_down = false; // MatchState::countdown_end_tick set (else: waiting for players)
+	float seconds_left = 0.0f; // until StartRound
+	bool input_restricted = false; // MatchState::restrict_until_tick not reached: the freeze is on
+};
+
 // ---- the model ---------------------------------------------------------------------------------------------------------
 
 struct HudModel {
@@ -399,6 +458,10 @@ struct HudModel {
 	HudSpawnLogic spawn_logic; // UISpawnLogicCompData
 	HudSquad squad; // UISquadCompData
 	HudTeam team; // UITeamCompData
+	HudKillCard kill_card; // M2b W2.0 (ui): the own death's kill card
+	HudEndOfRound end_of_round; // M2b W2.0 (ui)
+	HudSpawnScreen spawn_screen; // M2b W2.0 (ui)
+	HudPreRound pre_round; // M2b W2.0 (ui)
 };
 static_assert(std::is_trivially_copyable_v<HudModel>);
 
