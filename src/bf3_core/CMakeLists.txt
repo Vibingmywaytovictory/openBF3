@@ -334,3 +334,9 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/audio/hdr_setting.h
     include/bf3/core/audio/sound_scope.h
 )
+
+# M2b au (docs/design/m2b.md §2.6 #14, §6; docs/design/m2b-au.md): the HdrSetting and scope readers.
+target_sources(bf3_core PRIVATE
+    src/audio/hdr_setting.cpp
+    src/audio/sound_scope.cpp
+)
