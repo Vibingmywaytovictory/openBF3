@@ -636,6 +636,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 	anim::CrowdStanceSet stance;
 	stance.pose = m.have_pose ? &m.pose : nullptr;
 	stance.moves = m.have_moves ? &m.moves : nullptr;
+	stance.move_groups = m.have_move_groups ? &m.move_groups : nullptr; // PT1 run [stance]
 	stance.corpse_seconds = m.corpse_seconds; // M2b cam [corpse]
 	core::Result<std::unique_ptr<anim::CrowdEvaluator>> e = anim::CrowdEvaluator::make(m.assets->clips, stance, m.teams, kCrowdSoldiers, m.config);
 	if (!e) {
