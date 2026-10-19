@@ -62,6 +62,7 @@ struct PerceivedEnemy {
 	Tick last_visible = 0;
 	bool ever_visible = false;
 	Vec3 last_velocity{};
+	bool chest_visible = false; // the last clear ray was the chest one (else only the head was clear)
 };
 
 // The world as one bot's perception tick reads it. Spans index by slot.

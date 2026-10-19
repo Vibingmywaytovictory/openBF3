@@ -4,7 +4,8 @@
 // One update (the caller checks perception_tick):
 //   candidates  every live enemy (team != 0 and != ours) in the FOV (fov_h x fov_v around the view) within
 //               max_range_m, nearest first, the enemies already detected first among equals; the first
-//               max_candidates get rays (eye -> head; eye -> chest only when the head ray is blocked);
+//               max_candidates get rays (eye -> chest; eye -> head only when the chest ray is blocked; the clear
+//               one is recorded, so the brain aims at a point it can see);
 //   seen        a clear ray: detection += dt (1 + moving + firing) / detection_time(distance), detected at 1,
 //               last_visible = the tick; the feet and velocity recorded;
 //   unseen      a detected enemy is forgotten forget_s after its last sight (or heard shot); a partly detected one
@@ -201,14 +202,16 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 		const uint8_t s = cands[k].slot;
 		const SoldierState &st = p_in.states[s];
 		bool clear = false;
+		bool chest_clear = true;
 		if (p_in.world != nullptr) {
-			const Vec3 head = perception_head(params_, st, p_in.eye_heights);
+			const Vec3 chest = perception_chest(params_, st, p_in.eye_heights);
 			++rays;
-			clear = !p_in.world->ray(p_in.eye, { head[0] - p_in.eye[0], head[1] - p_in.eye[1], head[2] - p_in.eye[2] }, mask);
+			clear = !p_in.world->ray(p_in.eye, { chest[0] - p_in.eye[0], chest[1] - p_in.eye[1], chest[2] - p_in.eye[2] }, mask);
 			if (!clear) {
-				const Vec3 chest = perception_chest(params_, st, p_in.eye_heights);
+				chest_clear = false;
+				const Vec3 head = perception_head(params_, st, p_in.eye_heights);
 				++rays;
-				clear = !p_in.world->ray(p_in.eye, { chest[0] - p_in.eye[0], chest[1] - p_in.eye[1], chest[2] - p_in.eye[2] }, mask);
+				clear = !p_in.world->ray(p_in.eye, { head[0] - p_in.eye[0], head[1] - p_in.eye[1], head[2] - p_in.eye[2] }, mask);
 			}
 		} else {
 			clear = true; // units without a world: the FOV and range decide
@@ -229,6 +232,7 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 			newly_.push_back(s);
 		}
 		e.visible = true;
+		e.chest_visible = chest_clear;
 		e.heard = false;
 		e.last_seen = p_in.tick;
 		e.last_visible = p_in.tick;

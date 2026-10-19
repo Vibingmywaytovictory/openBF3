@@ -124,6 +124,22 @@ constexpr uint32_t kKnifeTicks = 45;
 constexpr uint32_t kBlindTicks = 40;
 constexpr float kTacticalReload = 0.3f; // §5.5: reload below 30 % with no target
 constexpr uint8_t kSlotPrimary = 0, kSlotSidearm = 1, kSlotGrenade = 6, kSlotKnife = 7;
+// After the w1 merge (the first runs on Metro TDM, docs/design/m2b-bb.md §2): aim at the point the last clear ray saw
+// (the chest, else just below the head point), hold fire while a teammate stands in the line of fire, aim down the
+// sights in a fight, and hold a crouched long-range position only so long before pushing in or strafing.
+constexpr float kHeadAimDrop = 0.1f; // only the head ray clear: aim this far below the head point
+constexpr float kFriendlyLineMetres = 0.8f; // a teammate's chest this close to the shot line holds the fire
+constexpr float kZoomBeyondMetres = 6.0f; // aim down the sights at targets beyond this
+constexpr uint32_t kHoldTicks = 240; // a crouched hold at most 4 s per target, then push in (or strafe)
+constexpr float kBurstPauseMinS = 0.15f, kBurstPauseMaxS = 0.35f; // between bursts (was 0.3-0.6 s before the merge)
+constexpr uint32_t kHuntGiveUpTicks = 1200; // a hunt without a fight this long (20 s) is given up ...
+constexpr uint32_t kHuntBlockTicks = 600; // ... and the bot roams 10 s before it hunts again
+// A bot whose feet are off the nav's main component (a level spawn on a nav island: the walker has no path out) walks
+// straight at the nearest main-component spawn of the BotLevel, jumping when it stops making progress.
+constexpr uint32_t kIslandCheckTicks = 30;
+constexpr uint32_t kIslandJumpTicks = 45;
+constexpr float kIslandProgressMetres = 0.5f;
+constexpr float kIslandRings[] = { 2.0f, 4.0f, 6.0f, 9.0f, 12.0f, 16.0f, 24.0f, 32.0f };
 constexpr size_t kMaxBrainSlots = 256;
 
 constexpr float kDeg = sim::kPi / 180.0f;
@@ -416,6 +432,12 @@ struct TdmBrain::Impl {
 	sim::Tick blind_until = 0;
 	sim::Vec3 blind_at{};
 	sim::Tick searched_tick = 0; // known enemies last seen before this were searched
+	sim::Tick hunt_since = 0, hunt_block_until = 0; // the current hunt's start; no hunting before the block's end
+	// Off the main component (kIslandCheckTicks).
+	bool off_main = false;
+	sim::Vec3 exit_at{};
+	sim::Vec3 exit_from{};
+	sim::Tick exit_progress_tick = 0;
 	// Fire.
 	bool bursting = false;
 	uint32_t burst_rounds = 0, burst_start = 0;
@@ -476,6 +498,9 @@ struct TdmBrain::Impl {
 		loss_handled = true;
 		blind_until = 0;
 		searched_tick = 0;
+		hunt_since = hunt_block_until = 0;
+		off_main = false;
+		exit_progress_tick = 0;
 		bursting = false;
 		pause_until = next_tap = p_tick;
 		tapped = false;
@@ -537,14 +562,90 @@ struct TdmBrain::Impl {
 		goals.clear();
 	}
 
-	// The walker's move this tick in world (x, z), its yaw and sprint / pose wishes; false without a walker.
-	bool walk(sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint, sim::Pose &r_pose) {
+	// Whether the feet are on the main component; off it, the nearest main-component spawn of the BotLevel is the exit.
+	void check_island(sim::Tick p_tick, const sim::SoldierState &p_state) {
+		TdmShared &sh = *shared;
+		BotNav &nav = *sh.nav;
+		sim::NavPolyRef poly = 0;
+		sim::Vec3 at{};
+		bool on_main = true;
+		if (nav.query->nearest(p_state.position, { 1.0f, 2.5f, 1.0f }, &poly, &at) && poly != 0) {
+			on_main = sim::nav_poly_component(nav.query->world(), nav.level->components, poly) == nav.level->main_component;
+		}
+		if (on_main || nav.level->spawns.points.empty()) {
+			off_main = false;
+			return;
+		}
+		if (!off_main) {
+			// The exit: the nearest main-component nav point on rings around the feet (kIslandRings x 16 directions x
+			// 3 heights, the first ring that has one), else the nearest main-component spawn of the BotLevel.
+			float best = 1e30f;
+			for (const float r : kIslandRings) {
+				for (int k = 0; k < 16; ++k) {
+					const float a = float(k) * (sim::kTwoPi / 16.0f);
+					for (const float dy : { 0.0f, -2.5f, -5.0f }) {
+						const sim::Vec3 probe = add(p_state.position, r * std::sin(a), dy, r * std::cos(a));
+						sim::NavPolyRef q = 0;
+						sim::Vec3 qa{};
+						if (!nav.query->nearest(probe, { 1.0f, 1.5f, 1.0f }, &q, &qa) || q == 0 ||
+								sim::nav_poly_component(nav.query->world(), nav.level->components, q) != nav.level->main_component) {
+							continue;
+						}
+						const float d = distance(qa, p_state.position);
+						if (d < best) {
+							best = d;
+							exit_at = qa;
+						}
+					}
+				}
+				if (best < 1e30f) {
+					break;
+				}
+			}
+			const bool found = best < 1e30f;
+			for (const sim::SpawnPoint &sp : nav.level->spawns.points) {
+				const float d = horizontal(sp.position, p_state.position);
+				if (!found && finite3(sp.position) && d < best) {
+					best = d;
+					exit_at = sp.position;
+				}
+			}
+			exit_from = p_state.position;
+			exit_progress_tick = p_tick;
+			clear_goal();
+		}
+		off_main = true;
+	}
+
+	// The walker's move this tick in world (x, z), its yaw and sprint / pose / jump wishes; false without a walker. Off
+	// the main component: straight at the island exit instead.
+	bool walk(sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint, sim::Pose &r_pose, bool &r_jump) {
+		r_jump = false;
 		TdmShared &sh = *shared;
 		if (sh.nav == nullptr) {
 			return false;
 		}
 		if (!walker.has_value()) {
 			walker.emplace(slot, mix(seed ^ 0x57414C4Bull), sh.walker); // "WALK"
+		}
+		if ((p_tick + slot) % kIslandCheckTicks == 0) {
+			check_island(p_tick, p_state);
+		}
+		if (off_main) {
+			sh.count(&TdmBotStats::off_main_ticks, uint64_t(1));
+			const float dx = exit_at[0] - p_state.position[0], dz = exit_at[2] - p_state.position[2];
+			const float l = std::sqrt(dx * dx + dz * dz);
+			r_dx = l > 0.1f ? dx / l : 0.0f;
+			r_dz = l > 0.1f ? dz / l : 0.0f;
+			r_yaw = yaw_of(dx, dz);
+			r_sprint = true;
+			r_pose = sim::Pose::Stand;
+			if (horizontal(p_state.position, exit_from) >= kIslandProgressMetres) {
+				exit_from = p_state.position;
+				exit_progress_tick = p_tick;
+			}
+			r_jump = p_tick - exit_progress_tick >= kIslandJumpTicks && (p_tick - exit_progress_tick) % kIslandJumpTicks == 0;
+			return true;
 		}
 		const sim::bots::WalkerView wv = sh.nav->view(p_tick, slot, p_state, goals, sh.eye_of(sim::Pose::Stand));
 		const sim::Command wc = walker->command(wv);
@@ -933,10 +1034,13 @@ struct TdmBrain::Impl {
 		} else if (blind_until > p_tick) {
 			act = TdmBotActivity::Fight;
 		} else {
-			act = known_enemy(p_tick, p_state) >= 0 ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
+			act = p_tick >= hunt_block_until && known_enemy(p_tick, p_state) >= 0 ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
 		}
 		if (act == TdmBotActivity::Retreat && visible) {
 			clear_since = p_tick;
+		}
+		if (act == TdmBotActivity::Hunt && activity != TdmBotActivity::Hunt) {
+			hunt_since = p_tick;
 		}
 		set_activity(p_tick, act);
 
@@ -946,6 +1050,7 @@ struct TdmBrain::Impl {
 		sim::Pose pose = sim::Pose::Stand;
 		float want_yaw = view_yaw, want_pitch = 0.0f;
 		bool have_aim = false; // aimed at a point (aligned check)
+		bool zoom = false; // aim down the sights (kZoom)
 		float target_distance = 0.0f;
 		uint8_t want_slot = sidearm ? kSlotSidearm : kSlotPrimary;
 		Trigger trigger = Trigger::None;
@@ -959,9 +1064,10 @@ struct TdmBrain::Impl {
 		};
 		float walk_dx = 0.0f, walk_dz = 0.0f, walk_yaw = view_yaw;
 		bool walk_sprint = false;
+		bool walk_jump = false; // the island exit's jump (walk)
 		sim::Pose walk_pose = sim::Pose::Stand;
 		const auto do_walk = [&]() {
-			if (walk(p_tick, p_state, walk_dx, walk_dz, walk_yaw, walk_sprint, walk_pose)) {
+			if (walk(p_tick, p_state, walk_dx, walk_dz, walk_yaw, walk_sprint, walk_pose, walk_jump)) {
 				move_dx = walk_dx;
 				move_dz = walk_dz;
 				pose = walk_pose;
@@ -995,8 +1101,12 @@ struct TdmBrain::Impl {
 					const sim::Vec3 chest = sh.chest_point(ts);
 					const sw::WeaponSimDef *d = slot_def(ws != nullptr ? ws->active : 0);
 					sim::Vec3 point = chest;
+					if (te != nullptr && !te->chest_visible) {
+						point = add(sim::bots::perception_head(c.perception, ts, sh.host.eye_heights), 0.0f, -kHeadAimDrop, 0.0f);
+					}
+					const sim::Vec3 mark = point;
 					if (d != nullptr && !d->projectile.instant_hit) {
-						point = sim::bots::lead_point(eye, chest, ts.velocity, d->projectile.muzzle_speed, d->projectile.gravity);
+						point = sim::bots::lead_point(eye, mark, ts.velocity, d->projectile.muzzle_speed, d->projectile.gravity);
 					}
 					target_distance = aim_at(point);
 					// The error cone (§5.3).
@@ -1030,17 +1140,19 @@ struct TdmBrain::Impl {
 						trigger = Trigger::Knife;
 						aim_at(chest);
 					}
-					// Movement while engaged: strafe close, push in from range, hold and crouch far away (skilled).
+					zoom = target_distance > kZoomBeyondMetres && trigger == Trigger::Aimed;
+					// Movement while engaged: strafe close, push in from range, hold and crouch far away (skilled) for
+					// at most kHoldTicks, then push in; strafe when there is no path.
 					if (target_distance < c.engage_strafe_m) {
 						strafe(p_tick, world, p_state, move_dx, move_dz);
-					} else {
+					} else if (target_distance > c.crouch_beyond_m && skill > 0.5f && p_tick - target_since < kHoldTicks) {
 						strafing = false;
-						if (target_distance > c.crouch_beyond_m && skill > 0.5f) {
-							pose = sim::Pose::Crouch;
-						} else if (set_goal(p_tick, ts.position, kHuntArriveMetres, false)) {
-							do_walk();
-							pose = sim::Pose::Stand;
-						}
+						pose = sim::Pose::Crouch;
+					} else if (set_goal(p_tick, ts.position, kHuntArriveMetres, false) && do_walk()) {
+						strafing = false;
+						pose = sim::Pose::Stand;
+					} else {
+						strafe(p_tick, world, p_state, move_dx, move_dz);
 					}
 				} else {
 					// Blind fire at the lost target's last-known chest.
@@ -1084,6 +1196,14 @@ struct TdmBrain::Impl {
 				grenade_step(p_tick, eye, want_slot, trigger, want_yaw, want_pitch, have_aim);
 				break;
 			case TdmBotActivity::Hunt: {
+				if (p_tick - hunt_since > kHuntGiveUpTicks) {
+					// A hunt that never found anyone (the place unreachable, or the heard shots keep coming from where
+					// the walker cannot go): forget it and roam for a while.
+					searched_tick = p_tick;
+					hunt_block_until = p_tick + kHuntBlockTicks;
+					clear_goal();
+					sh.count(&TdmBotStats::hunts_given_up, uint64_t(1));
+				}
 				const int k = known_enemy(p_tick, p_state);
 				if (k >= 0) {
 					const sim::bots::PerceivedEnemy *e = perception.find(uint8_t(k));
@@ -1220,14 +1340,15 @@ struct TdmBrain::Impl {
 					}
 				} else if (trigger == Trigger::Aimed || trigger == Trigger::Blind) {
 					const bool ready = trigger == Trigger::Blind || p_tick >= react_at;
-					const bool want_fire = in_hand && aligned && ready && !busy && !reload && ss.magazine > 0 && !sprint;
+					const bool want_fire = in_hand && aligned && ready && !busy && !reload && ss.magazine > 0 && !sprint &&
+							!friend_in_line(p_state, eye, target_distance);
 					const bool single = target_distance > kSingleShotBeyondMetres || trigger == Trigger::Blind;
 					if (automatic && !single) {
 						if (bursting) {
 							const uint32_t fired = ws->next_shot_index - burst_start;
 							if (fired >= burst_rounds || !want_fire) {
 								bursting = false;
-								pause_until = p_tick + sim::seconds_to_ticks(uniform(rng, 0.3f, 0.6f));
+								pause_until = p_tick + sim::seconds_to_ticks(uniform(rng, kBurstPauseMinS, kBurstPauseMaxS));
 							} else {
 								fire = true;
 							}
@@ -1256,6 +1377,7 @@ struct TdmBrain::Impl {
 					}
 				}
 				in.fire = fire;
+				in.zoom = zoom && gun && in_hand && !busy;
 				// Recoil compensation (§5.3): skill x the kick, on the command only (the view keeps its own aim).
 				if (gun) {
 					comp_yaw = skill * ss.recoil.yaw * kDeg;
@@ -1274,12 +1396,36 @@ struct TdmBrain::Impl {
 		cmd.move_forward = sim::quantize_axis(std::clamp(std::isfinite(fwd) ? fwd : 0.0f, -1.0f, 1.0f));
 		cmd.move_right = sim::quantize_axis(std::clamp(std::isfinite(rgt) ? rgt : 0.0f, -1.0f, 1.0f));
 		uint32_t b = sprint ? sim::buttons::kSprint : 0u;
+		if (walk_jump) {
+			b |= sim::buttons::kJump;
+		}
 		b = sw::with_weapon_input(b, in);
 		cmd.buttons = b;
 		return cmd;
 	}
 
 	bool state_health_ok(const sim::SoldierState &p_state) const { return p_state.health >= cfg().retreat_below_hp; }
+
+	// A living teammate whose chest is within kFriendlyLineMetres of the view's shot line, nearer than the target.
+	bool friend_in_line(const sim::SoldierState &p_self, const sim::Vec3 &p_eye, float p_length) const {
+		const TdmShared &sh = *shared;
+		const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
+		const std::span<const sim::SoldierState> states = sh.host.view->states();
+		const sim::Vec3 dir = view_dir(view_yaw, view_pitch);
+		const float length = std::max(p_length - 0.5f, 0.0f);
+		for (size_t s = 0; s < states.size() && s < sh.teams.size() && s < sh.alive.size(); ++s) {
+			if (s == slot || team == 0 || sh.teams[s] != team || sh.alive[s] == 0 || !finite3(states[s].position)) {
+				continue;
+			}
+			if (horizontal(states[s].position, p_self.position) > length + 1.0f) {
+				continue;
+			}
+			if (ray_point_distance(p_eye, dir, length, sh.chest_point(states[s])) <= kFriendlyLineMetres) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	// The nearest known enemy (seen or heard) not searched since; -1 for none.
 	int known_enemy(sim::Tick p_tick, const sim::SoldierState &p_self) const {
@@ -1684,7 +1830,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 		TdmBrain *raw = brain.get();
 		// Rules: team 0 = AutoTeam's choice ([add]). Without rules M2a's firefight teams (every team gets every kit).
 		const int team = host.rules ? 0 : 1 + int((i + i / 4u) % 2u);
-		const int slot = r_server.add_local_soldier(std::move(brain), team);
+		const int slot = r_server.add_local_bot(std::move(brain), team); // the main-component spawns (S1's bot list)
 		if (slot < 0) {
 			return core::make_error("tdm bots: no slot for bot " + std::to_string(i) + " of " + std::to_string(count));
 		}

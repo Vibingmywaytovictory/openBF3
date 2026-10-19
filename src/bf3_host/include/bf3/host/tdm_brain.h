@@ -84,6 +84,8 @@ struct TdmBotStats {
 	std::atomic<uint64_t> walker_resets{ 0 }; // a new movement goal handed to the walker
 	std::atomic<uint64_t> heat_goals{ 0 }; // roam goals drawn from the contact heat grid
 	std::atomic<uint32_t> walk_unavailable{ 0 }; // 1: no BotLevel (GameServerConfig::bots): the bots stand and fight
+	std::atomic<uint64_t> off_main_ticks{ 0 }; // bot-ticks found off the nav's main component (they walk straight out)
+	std::atomic<uint64_t> hunts_given_up{ 0 }; // hunts that found nobody in 20 s (the bot roams 10 s instead)
 	std::atomic<uint64_t> activity_ticks[kTdmBotActivityCount]{}; // bot-ticks per TdmBotActivity
 	// Per tick (the last tick's, wall nanoseconds on the server thread; E8 reads them through the fixture).
 	std::atomic<uint64_t> last_perception_ns{ 0 };

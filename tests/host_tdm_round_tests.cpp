@@ -16,10 +16,11 @@
 //                       seed differs.
 //   host-tdm-perf       host.tdm.perf (E8, timing, the wave-1 merge pass only): 64 bots, 120 s: perception <= 0.2 ms,
 //                       brains <= 1.5 ms, server tick <= 4 ms at p99 (report only under asan).
-// The install rows wait for ru's run_tdm and nt's codecs (kRuNtLanded below); until both are in the branch they skip
-// (exit 77) with a PENDING line, never pass empty. Every install suite ends with the install-unchanged check.
+// The install rows need ru's run_tdm and nt's codecs (kRuNtLanded below, true since the w1 merge); they skip (exit 77)
+// only without an install. Every install suite ends with the install-unchanged check.
 #include <doctest/doctest.h>
 
+#include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/server_view.h"
@@ -28,6 +29,7 @@
 #include "bf3/sim/bots/perception.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/static_world.h"
 
 #include "gunplay_fixture.h"
@@ -51,9 +53,9 @@ namespace sb = bf3::sim::bots;
 
 namespace {
 
-// ru's run_tdm / load_tdm_level_once bodies and nt's v3 codecs (the peer decodes MatchState): set to true in the
-// commit that merges both into this branch (docs/design/m2b-bb.md "Pending").
-constexpr bool kRuNtLanded = false;
+// ru's run_tdm / load_tdm_level_once bodies and nt's v3 codecs (the peer decodes MatchState): true since m2b/w1 (nt,
+// ru) was merged into this branch.
+constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
@@ -82,6 +84,20 @@ std::unique_ptr<sim::CollisionWorld> wall_world() {
 	}
 	quad(t, { -5, 0, 10 }, { -5, 4, 10 }, { 5, 4, 10 }, { 5, 0, 10 });
 	quad(t, { -5, 0, 10 }, { 5, 0, 10 }, { 5, 4, 10 }, { -5, 4, 10 });
+	core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes = sim::build_static_world(std::span<const sim::StaticTriangle>(t));
+	REQUIRE(shapes.ok());
+	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(*shapes);
+	REQUIRE(world.ok());
+	return std::move(*world);
+}
+
+// The floor and a low wall 1.45 m high across x = -5 .. 5 at z = 18: an eye at 1.6 m at the origin sees the head
+// (1.6 m) of a soldier at (0, 0, 20) over it, not the chest (1.3 m).
+std::unique_ptr<sim::CollisionWorld> low_wall_world() {
+	std::vector<sim::StaticTriangle> t;
+	quad(t, { -100, 0, -100 }, { -100, 0, 100 }, { 100, 0, 100 }, { 100, 0, -100 });
+	quad(t, { -5, 0, 18 }, { -5, 1.45f, 18 }, { 5, 1.45f, 18 }, { 5, 0, 18 });
+	quad(t, { -5, 0, 18 }, { 5, 0, 18 }, { 5, 1.45f, 18 }, { -5, 1.45f, 18 });
 	core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes = sim::build_static_world(std::span<const sim::StaticTriangle>(t));
 	REQUIRE(shapes.ok());
 	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(*shapes);
@@ -256,11 +272,41 @@ TEST_SUITE("host-tdm-bots-unit") {
 		m.firing = {};
 		sb::Perception pm(params);
 		m.tick = 6;
-		CHECK(pm.update(m) == 4u); // the head rays are clear: one ray each for the 4 nearest
+		CHECK(pm.update(m) == 4u); // the chest rays are clear: one ray each for the 4 nearest
+		CHECK(pm.find(1)->chest_visible);
 		CHECK(pm.enemies().size() == 4u);
 		CHECK(pm.find(1) != nullptr);
 		CHECK(pm.find(4) != nullptr);
 		CHECK(pm.find(5) == nullptr);
+	}
+
+	TEST_CASE("perception: the chest ray first; only the head over a low wall is recorded as such") {
+		const std::unique_ptr<sim::CollisionWorld> world = low_wall_world();
+		sb::PerceptionParams params;
+		std::vector<sim::SoldierState> states(3);
+		const std::vector<uint8_t> teams{ 1, 2, 2 };
+		states[0] = soldier_at({ 0, 0, 0 });
+		states[1] = soldier_at({ 0, 0, 20 }); // behind the low wall: the head shows
+		states[2] = soldier_at({ 15, 0, 20 }); // in the open
+		sb::Perception p(params);
+		sb::PerceptionInput in;
+		in.self = 0;
+		in.team = 1;
+		in.eye = { 0, 1.6f, 0 };
+		in.yaw = sim::quantize_yaw(0.0f);
+		in.states = states;
+		in.teams = teams;
+		in.world = world.get();
+		in.tick = 6;
+		CHECK(p.update(in) == 3u); // 2 is clear on the chest ray; 1 needs the head ray too
+		const sb::PerceivedEnemy *e1 = p.find(1);
+		const sb::PerceivedEnemy *e2 = p.find(2);
+		REQUIRE(e1 != nullptr);
+		REQUIRE(e2 != nullptr);
+		CHECK(e1->visible);
+		CHECK_FALSE(e1->chest_visible);
+		CHECK(e2->visible);
+		CHECK(e2->chest_visible);
 	}
 
 	TEST_CASE("perception: hearing gives a position estimate, never a detection; hostile values are skipped") {
@@ -557,6 +603,64 @@ namespace {
 			p_r.spawns_enemy_within_10m, p_r.seconds_init, p_r.seconds_run);
 }
 
+// The brains' own breakdown beside the E rows' numbers (what the bots spent their ticks on, how much they fired).
+// p_slots: the per-slot scoreboard (E2; after E1's restart in place it is the new round's, so E1 leaves it out).
+[[maybe_unused]] void print_checks(const char *p_row, const tt::BotChecks &p_checks, bool p_slots = true) {
+	uint64_t total = 0;
+	for (const uint64_t n : p_checks.activity_ticks) {
+		total += n;
+	}
+	std::printf("%s: detections %llu, aimed fire ticks %llu, blind fire ticks %llu, stuck windows %llu / %llu; bot-ticks:", p_row,
+			(unsigned long long)p_checks.detections, (unsigned long long)p_checks.aimed_fire_ticks, (unsigned long long)p_checks.blind_fire_ticks,
+			(unsigned long long)p_checks.stuck_windows, (unsigned long long)p_checks.windows);
+	for (size_t i = 0; i < p_checks.activity_ticks.size(); ++i) {
+		std::printf(" %s %.1f%%", host::tdm_bot_activity_name(host::TdmBotActivity(i)), total > 0 ? 100.0 * double(p_checks.activity_ticks[i]) / double(total) : 0.0);
+	}
+	std::printf("\n");
+	std::printf("%s: bots per team at the end: %u / %u (no team %u); gunplay: shots %llu, hits %llu, deaths %llu, protected refused %llu, team damage "
+				"dropped %llu\n",
+			p_row, p_checks.team_slots[1], p_checks.team_slots[2], p_checks.team_slots[0], (unsigned long long)p_checks.gunplay.shots,
+			(unsigned long long)p_checks.gunplay.hits, (unsigned long long)p_checks.gunplay.deaths, (unsigned long long)p_checks.gunplay.protected_refused,
+			(unsigned long long)p_checks.gunplay.team_damage_dropped);
+	for (uint8_t team = 1; team <= 2 && p_slots; ++team) {
+		const double sn = std::max<double>(p_checks.spawn_n[team], 1.0), dn = std::max<double>(p_checks.death_n[team], 1.0);
+		std::printf("%s: team %u: %u spawns around (%.1f, %.1f), %u deaths around (%.1f, %.1f)\n", p_row, unsigned(team), p_checks.spawn_n[team],
+				p_checks.spawn_x[team] / sn, p_checks.spawn_z[team] / sn, p_checks.death_n[team], p_checks.death_x[team] / dn, p_checks.death_z[team] / dn);
+		std::printf("%s: team %u slot:kit:kills/deaths:", p_row, unsigned(team));
+		for (const net::PlayerRow &row : p_checks.players) {
+			if (row.team == team) {
+				std::printf(" %u:%u:%u/%u", unsigned(row.slot), unsigned(row.kit), unsigned(row.kills), unsigned(row.deaths));
+			}
+		}
+		std::printf("\n");
+		for (const net::PlayerRow &row : p_checks.players) {
+			if (row.team == team && row.kills == 0 && row.deaths == 0 && row.slot < p_checks.last_position.size()) {
+				const sim::Vec3 &at = p_checks.last_position[row.slot];
+				std::printf("%s:   slot %u never killed nor died: at (%.1f, %.1f, %.1f), %s\n", p_row, unsigned(row.slot), at[0], at[1], at[2],
+						host::tdm_bot_activity_name(p_checks.last[row.slot]));
+			}
+		}
+	}
+	for (const tt::BotChecks::StuckReport &st : p_checks.stuck_reports) {
+		std::printf("%s: stuck slot %u at tick %u, (%.1f, %.1f, %.1f), farthest %.2f m; window ticks:", p_row, unsigned(st.slot), st.tick, st.position[0],
+				st.position[1], st.position[2], st.farthest);
+		for (size_t i = 0; i < st.acts.size(); ++i) {
+			if (st.acts[i] != 0) {
+				std::printf(" %s %u", host::tdm_bot_activity_name(host::TdmBotActivity(i)), st.acts[i]);
+			}
+		}
+		std::printf("\n");
+	}
+	if (p_checks.stats != nullptr) {
+		const host::TdmBotStats &s = *p_checks.stats;
+		const auto v = [](const auto &p_a) { return (unsigned long long)p_a.load(std::memory_order_relaxed); };
+		std::printf("%s: stats: walk unavailable %llu, retargets %llu, bursts %llu, blind %llu, grenades %llu, revive attempts %llu / shots %llu / "
+					"aborts %llu, retreats %llu, reloads %llu, sidearm %llu, knife %llu, walker resets %llu, heat goals %llu, heard %llu, hunts given up %llu, off-main bot-ticks %llu\n",
+				p_row, v(s.walk_unavailable), v(s.retargets), v(s.bursts), v(s.blind_fire), v(s.grenades), v(s.revive_attempts), v(s.revive_shots),
+				v(s.revive_aborts), v(s.retreats), v(s.reloads), v(s.sidearm_switches), v(s.knife_attacks), v(s.walker_resets), v(s.heat_goals), v(s.heard), v(s.hunts_given_up), v(s.off_main_ticks));
+	}
+}
+
 [[maybe_unused]] double percentile(std::vector<double> p_values, double p_q) {
 	if (p_values.empty()) {
 		return 0.0;
@@ -580,22 +684,112 @@ TEST_SUITE("host-tdm-round") {
 			tt::TdmRunConfig c = base_config(1, 31, true, 0);
 			c.max_ticks = 21600 + 3600 + 300; // the 6-minute hard stop on the round, then the round end and the restart
 			c.after_round_ticks = 3600 + 240; // the 60 s round end + the restart's first ticks
+			// What the run's server and peer hold, captured after every tick (both are gone when run_tdm returns): the
+			// natives' coverage (RoundNatives::coverage(), m2b.md §3.1) and every MatchState the peer decoded.
+			std::vector<sim::logic::RoundNatives::NativeCoverage> coverage;
+			std::vector<net::MatchState> peer_states;
+			std::optional<net::MatchState> server_over; // the rules' MatchState on the first RoundOver tick
+			uint64_t peer_decode_errors = 0;
+			const core::gameplay::LogicGraph *graph = level->shared->logic.get();
+			size_t timeline_seen = 0;
+			std::vector<sim::logic::NativeTimelineEntry> spawn_inputs;
+			c.on_tick = [&](sim::Tick, host::GameServer &r_server, tt::ScriptedPeer *p_peer) {
+				if (const host::TdmRules *rules = r_server.rules(); rules != nullptr) {
+					const std::span<const sim::logic::RoundNatives::NativeCoverage> cov = rules->natives().coverage();
+					coverage.assign(cov.begin(), cov.end());
+					if (!server_over && rules->phase() == net::MatchPhase::RoundOver) {
+						server_over = rules->match_state();
+					}
+					// The unhandled inputs to the TDM types (RoundNatives notes them as Input entries), for the report.
+					const std::span<const sim::logic::NativeTimelineEntry> tl = rules->natives().timeline();
+					for (; timeline_seen < tl.size(); ++timeline_seen) {
+						const sim::logic::NativeTimelineEntry &e = tl[timeline_seen];
+						if (e.what == sim::logic::NativeTimelineEntry::What::Input && graph != nullptr && e.node < graph->nodes().size() &&
+								graph->nodes()[e.node].type == core::gameplay::LogicTypeId::CharacterSpawn && spawn_inputs.size() < 16) {
+							spawn_inputs.push_back(e);
+						}
+					}
+				}
+				if (p_peer != nullptr) {
+					for (size_t i = peer_states.size(); i < p_peer->match_states.size(); ++i) {
+						peer_states.push_back(p_peer->match_states[i]);
+					}
+					peer_decode_errors = p_peer->decode_errors;
+				}
+			};
 			const std::shared_ptr<tt::BotChecks> checks = tt::attach_bot_checks(c, level);
 			core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
 			REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
+			if (!r.ok()) {
+				return; // doctest here has no exceptions: a failed REQUIRE does not leave the case
+			}
 			tt::apply_bot_checks(*checks, *r);
 			print_result("host.tdm.round", *r);
+			print_checks("host.tdm.round", *checks, false);
 			CHECK(r->failure.empty());
-			REQUIRE(r->round_over);
-			CHECK(r->round_over_tick <= 21600u);
-			REQUIRE((r->winner == 1 || r->winner == 2));
-			CHECK(r->kills[r->winner] >= 100);
-			CHECK(r->kills[3 - r->winner] < 100);
 			CHECK_FALSE(r->runtime_faulted);
-			CHECK(r->rules.rounds >= 1u);
+			CHECK(r->rules.runtime_faults == 0u);
+			// Every native delivery to a TDM type of §3.1 handled by RoundNatives, 0 Recorded (CharacterSpawnReference
+			// is LogicTypeId::CharacterSpawn).
+			using LT = core::gameplay::LogicTypeId;
+			const LT tdm_types[] = { LT::KillCounter, LT::PreRound, LT::RoundOver, LT::HumanPlayer, LT::AutoTeam, LT::InputRestriction, LT::LevelControl,
+				LT::CharacterSpawn, LT::AlternateSpawn };
+			CHECK_FALSE(coverage.empty());
+			uint32_t tdm_handled = 0, tdm_recorded = 0, other_recorded = 0;
+			for (const sim::logic::RoundNatives::NativeCoverage &row : coverage) {
+				const bool tdm = std::find(std::begin(tdm_types), std::end(tdm_types), row.type) != std::end(tdm_types);
+				if (!tdm) {
+					other_recorded += row.recorded;
+					continue;
+				}
+				tdm_handled += row.handled;
+				tdm_recorded += row.recorded;
+				CHECK_MESSAGE(row.recorded == 0u, "LogicTypeId " << int(row.type) << " recorded " << row.recorded);
+			}
+			std::printf("host.tdm.round: natives coverage: %zu types, TDM deliveries handled %u, recorded %u; other types recorded %u\n", coverage.size(),
+					tdm_handled, tdm_recorded, other_recorded);
+			for (const sim::logic::NativeTimelineEntry &e : spawn_inputs) {
+				std::printf("host.tdm.round: CharacterSpawn node %u input port %lld at tick %u went to the stubs\n", e.node, (long long)e.value, e.tick);
+			}
+			CHECK(tdm_handled > 0u);
+			CHECK(peer_decode_errors == 0u);
+			REQUIRE(r->round_over);
+			REQUIRE((r->winner == 1 || r->winner == 2));
+			if (!r->round_over || (r->winner != 1 && r->winner != 2)) {
+				return;
+			}
+			CHECK(r->round_over_tick <= 21600u);
+			CHECK(r->rules.rounds == 1u); // RoundOver fired once
 			CHECK(r->rules.restarts >= 1u);
-			// The peer's MatchState: RoundOver with the same winner and counts; the last one after the restart has 0 / 0.
-			// (run_tdm's peer; E1 needs the peer, so it is part of the run.)
+			// The rules' counts on the RoundOver tick (run_tdm's kills are the end of the run, after the restart).
+			REQUIRE(server_over.has_value());
+			if (!server_over) {
+				return;
+			}
+			const int w = int(r->winner) - 1;
+			CHECK(server_over->winner == r->winner);
+			CHECK(server_over->kills[size_t(w)] >= 100);
+			CHECK(server_over->kills[size_t(1 - w)] < 100);
+			// The peer's MatchState: RoundOver with the same winner and the same two counts; the first one after the
+			// restart in place has both counts 0.
+			const auto over = std::find_if(peer_states.begin(), peer_states.end(), [](const net::MatchState &p_s) { return p_s.phase == net::MatchPhase::RoundOver; });
+			REQUIRE(over != peer_states.end());
+			if (over == peer_states.end()) {
+				return;
+			}
+			CHECK(over->winner == server_over->winner);
+			CHECK(over->kills == server_over->kills);
+			const auto restarted = std::find_if(over, peer_states.end(), [](const net::MatchState &p_s) { return p_s.phase != net::MatchPhase::RoundOver; });
+			REQUIRE(restarted != peer_states.end());
+			if (restarted == peer_states.end()) {
+				return;
+			}
+			std::printf("host.tdm.round: rules at RoundOver: winner %u, %d / %d; peer MatchStates %zu: RoundOver winner %u, %d / %d; first after the "
+						"restart: phase %d, %d / %d (run end %d / %d)\n",
+					unsigned(server_over->winner), server_over->kills[0], server_over->kills[1], peer_states.size(), unsigned(over->winner), over->kills[0],
+					over->kills[1], int(restarted->phase), restarted->kills[0], restarted->kills[1], peer_states.back().kills[0], peer_states.back().kills[1]);
+			CHECK(restarted->kills[0] == 0);
+			CHECK(restarted->kills[1] == 0);
 		}
 	}
 	TEST_CASE("host-tdm-round: install unchanged") {
@@ -623,6 +817,7 @@ TEST_SUITE("host-tdm-bots") {
 				std::string error;
 				tt::TdmRunResult result;
 				uint32_t stuck_m2a = 0;
+				std::shared_ptr<tt::BotChecks> checks;
 			};
 			const std::vector<Run> runs = core::parallel_map<Run>(3, [&](size_t i) {
 				Run run;
@@ -636,6 +831,7 @@ TEST_SUITE("host-tdm-bots") {
 				}
 				run.result = std::move(*r);
 				tt::apply_bot_checks(*checks, run.result, &run.stuck_m2a);
+				run.checks = checks;
 				return run;
 			}, 3);
 			int32_t k1 = 0, k2 = 0;
@@ -646,6 +842,9 @@ TEST_SUITE("host-tdm-bots") {
 				std::printf("host.tdm.bots seed %zu: ", i + 1);
 				print_result("", r);
 				std::printf("  (run_tdm's own stuck count, without the exemptions: %u)\n", runs[i].stuck_m2a);
+				if (runs[i].checks != nullptr) {
+					print_checks("  checks", *runs[i].checks);
+				}
 				CHECK(r.failure.empty());
 				CHECK(r.round_over);
 				CHECK(r.sight_violations == 0u);
@@ -758,6 +957,9 @@ TEST_SUITE("host-tdm-perf") {
 			const std::shared_ptr<tt::BotChecks> checks = tt::attach_bot_checks(c, level);
 			core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
 			REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
+			if (!r.ok()) {
+				return;
+			}
 			tt::apply_bot_checks(*checks, *r);
 			const auto window = [](const std::vector<double> &p_v) {
 				return p_v.size() > 600 ? std::vector<double>(p_v.begin() + 600, p_v.end()) : p_v;

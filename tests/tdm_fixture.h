@@ -694,8 +694,28 @@ struct BotChecks final : host::TdmBotObserver {
 		sim::Tick start = 0;
 		sim::Vec3 anchor{};
 		float farthest = 0.0f;
+		std::array<uint32_t, host::kTdmBotActivityCount> acts{}; // the window's ticks per activity
 	};
 	std::array<Window, 256> win{};
+	// The first stuck windows (bounded), for the report: where, when and what the bot was doing.
+	struct StuckReport {
+		uint8_t slot = 0;
+		sim::Tick tick = 0;
+		sim::Vec3 position{};
+		float farthest = 0.0f;
+		std::array<uint32_t, host::kTdmBotActivityCount> acts{};
+	};
+	static constexpr size_t kMaxStuckReports = 16;
+	std::vector<StuckReport> stuck_reports;
+	std::array<uint32_t, 3> team_slots{}; // the bots per team at the last tick ([0]: none)
+	host::GunplayStats gunplay{}; // the server's gunplay counters at the last tick (shots, hits, refusals)
+	std::vector<net::PlayerRow> players; // the rules' rows at the last tick (the per-slot report)
+	// Where the bots of each team spawned and died (sums for the centroids; [team]).
+	std::array<double, 3> spawn_x{}, spawn_z{}, death_x{}, death_z{};
+	std::array<uint32_t, 3> spawn_n{}, death_n{};
+	std::array<uint32_t, 256> seen_life{};
+	std::array<uint8_t, 256> was_alive{};
+	std::array<sim::Vec3, 256> last_position{};
 	std::array<host::TdmBotActivity, 256> last{};
 	std::array<uint8_t, 256> is_bot{};
 
@@ -734,6 +754,36 @@ struct BotChecks final : host::TdmBotObserver {
 	// After every tick: the stuck windows and the timing.
 	void after_tick(sim::Tick p_tick, host::GameServer &r_server) {
 		const std::span<const sim::SoldierState> states = r_server.view().states();
+		team_slots = {};
+		if (const host::Gunplay *g = r_server.gunplay(); g != nullptr) {
+			gunplay = g->stats();
+		}
+		if (const host::TdmRules *rules = r_server.rules(); rules != nullptr) {
+			const std::span<const net::PlayerRow> rows = rules->players();
+			players.assign(rows.begin(), rows.end());
+		}
+		for (size_t s = 0; s < states.size() && s < win.size(); ++s) {
+			if (is_bot[s] != 0) {
+				const uint8_t t = r_server.view().team(uint8_t(s));
+				++team_slots[t < 3 ? t : 0];
+				const bool alive = r_server.view().alive(uint8_t(s));
+				if (t == 1 || t == 2) {
+					if (alive && seen_life[s] != states[s].life + 1u) {
+						seen_life[s] = states[s].life + 1u;
+						spawn_x[t] += states[s].position[0];
+						spawn_z[t] += states[s].position[2];
+						++spawn_n[t];
+					}
+					if (!alive && was_alive[s] != 0) {
+						death_x[t] += states[s].position[0];
+						death_z[t] += states[s].position[2];
+						++death_n[t];
+					}
+				}
+				was_alive[s] = alive ? 1 : 0;
+				last_position[s] = states[s].position;
+			}
+		}
 		for (size_t s = 0; s < states.size() && s < win.size(); ++s) {
 			if (is_bot[s] == 0) {
 				continue;
@@ -748,8 +798,10 @@ struct BotChecks final : host::TdmBotObserver {
 				w.start = p_tick;
 				w.anchor = states[s].position;
 				w.farthest = 0.0f;
+				w.acts = {};
 				continue;
 			}
+			++w.acts[size_t(a)];
 			const float dx = states[s].position[0] - w.anchor[0], dz = states[s].position[2] - w.anchor[2];
 			w.farthest = std::max(w.farthest, std::sqrt(dx * dx + dz * dz));
 			if (p_tick - w.start >= window_ticks) {
@@ -757,10 +809,14 @@ struct BotChecks final : host::TdmBotObserver {
 				if (w.farthest < window_metres) {
 					++stuck_windows;
 					stuck_slots.insert(uint8_t(s));
+					if (stuck_reports.size() < kMaxStuckReports) {
+						stuck_reports.push_back({ uint8_t(s), p_tick, states[s].position, w.farthest, w.acts });
+					}
 				}
 				w.start = p_tick;
 				w.anchor = states[s].position;
 				w.farthest = 0.0f;
+				w.acts = {};
 			}
 		}
 		if (stats != nullptr) {
