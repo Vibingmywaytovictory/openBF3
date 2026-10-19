@@ -152,6 +152,12 @@ struct SpawnQuery {
 	uint64_t seed = 0; // splitmix64(match_seed ^ slot ^ tick)
 	int max_los_rays = 16;
 	const CollisionWorld *world = nullptr; // null: no line-of-sight term
+	// M2b ru (as built, docs/design/m2b-ru.md): the nearest-enemy distance ranks only up to this many metres; points
+	// beyond it tie and the seeded draw picks among them, so the spawns spread over the map instead of piling at the
+	// one point farthest from every enemy. 0 = rank by the raw distance (m2b.md §3.5 as written). tdm_tuning.cfg
+	// spawn_safe_distance_m (40) [inferred, measured = false].
+	float safe_distance = 0.0f;
+	float chest_height = 1.3f; // the point's ray target above its feet (eye-to-chest, step (4)) [inferred]
 };
 // SIZE_MAX when nothing survives (1)-(3): the caller then falls back to choose_spawn (counted).
 size_t choose_spawn_scored(const SpawnQuery &p_query);

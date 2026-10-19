@@ -593,6 +593,12 @@ uint64_t motor_params_hash(const MotorParams &p_params) {
 		hash_speed(h, pp.jumping);
 	}
 	hash_tuning(h, p_params.tuning);
+	// M2b ru [abort hash] (docs/design/m2b.md §2.6 #19): the immunity abort only when it is set, so M2a's hash (the
+	// default fields) is unchanged.
+	if (p_params.protect_abort_buttons != 0 || p_params.protect_abort_move) { // M2b ru [abort hash]
+		hash_value(h, p_params.protect_abort_buttons); // M2b ru [abort hash]
+		hash_value(h, uint8_t(p_params.protect_abort_move ? 1 : 0)); // M2b ru [abort hash]
+	} // M2b ru [abort hash]
 	return h;
 }
 

@@ -1396,3 +1396,26 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_au_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(audio.hdr.unit audio.hdr.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au_cl_dir}")
 endif()
+
+# M2b ru (docs/design/m2b.md §11 E3-E5, E7's server half, E13; docs/design/m2b-ru.md §6): test_host_tdm runs the TDM
+# rules inside the real GameServer on Metro TDM, one load per process (tests/tdm_fixture.h: load_tdm_level_once, the
+# ScriptedPeer, run_tdm). host.tdm.server (E3 health*, E4 respawn*, E5 revive*, E7 hostile*, install unchanged) steps
+# the server back to back on the test thread: no sockets, no wall-clock wait, parallel-safe, functional (no label).
+# host.tdm.client (E13) is the real ServerHost + ClientSession path: sockets and real time, so it is a timing row (the
+# merge pass, serially); it runs only once nt's v3 codecs and bb's brains are in (exits 77 = skipped before).
+# Exits 77 = skipped without an install. Also runs under the asan preset (the hostile case feeds the v3 messages).
+openbf3_test(test_host_tdm test_main.cpp host_tdm_server_tests.cpp host_tdm_client_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+target_link_libraries(test_host_tdm PRIVATE bf3_host)
+target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\""
+    "OPENBF3_TDM_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/tdm_tuning.cfg\"")
+add_test(NAME host.tdm.server COMMAND test_host_tdm --test-suite=host-tdm-server)
+set_tests_properties(host.tdm.server PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.tdm.client COMMAND test_host_tdm --test-suite=host-tdm-client)
+set_tests_properties(host.tdm.client PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
+openbf3_label(timing host.tdm.client)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_ru_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.tdm.server host.tdm.client PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ru_cl_dir}")
+    set_tests_properties(host.tdm.server PROPERTIES TIMEOUT 400) # asan: 127 s measured (2026-10-19), about 3x
+endif()

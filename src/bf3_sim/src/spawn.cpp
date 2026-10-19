@@ -406,4 +406,132 @@ std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionW
 	return std::nullopt;
 }
 
+// ---- M2b ru (docs/design/m2b.md §3.5): the scored TDM spawn choice ---------------------------------------------------
+
+namespace {
+
+uint64_t spawn_mix(uint64_t p_x) {
+	uint64_t z = p_x + 0x9E3779B97F4A7C15ull;
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+	return z ^ (z >> 31);
+}
+
+float spawn_dist2(const Vec3 &p_a, const Vec3 &p_b) {
+	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
+	return dx * dx + dy * dy + dz * dz;
+}
+
+bool spawn_finite(const Vec3 &p_v) {
+	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
+}
+
+} // namespace
+
+size_t choose_spawn_scored(const SpawnQuery &p_query) {
+	struct Candidate {
+		size_t index = 0;
+		float score = 0; // the nearest enemy's distance, capped at safe_distance
+		uint64_t draw = 0;
+	};
+	const float r = std::isfinite(p_query.protection_radius) ? std::max(0.0f, p_query.protection_radius) : 0.0f;
+	const float r2 = r * r;
+	const float block = std::isfinite(p_query.friendly_block_radius) ? std::max(0.0f, p_query.friendly_block_radius) : 0.0f;
+	const float block2 = block * block;
+	const float safe = std::isfinite(p_query.safe_distance) && p_query.safe_distance > 0.0f ? p_query.safe_distance : INFINITY;
+	std::vector<Candidate> candidates;
+	candidates.reserve(p_query.points.size());
+	for (size_t i = 0; i < p_query.points.size(); ++i) {
+		const SpawnPoint &p = p_query.points[i];
+		// (1) the slot's team or neutral.
+		if (p.team != 0 && p.team != int(p_query.team)) {
+			continue;
+		}
+		if (!spawn_finite(p.position)) {
+			continue;
+		}
+		// (2) no enemy within the protection radius; the nearest enemy's distance for (4).
+		float nearest2 = INFINITY;
+		for (const Vec3 &e : p_query.enemies) {
+			if (spawn_finite(e)) {
+				nearest2 = std::min(nearest2, spawn_dist2(e, p.position));
+			}
+		}
+		if (nearest2 < r2) {
+			continue;
+		}
+		// (3) not where friendly_block_count teammates died recently.
+		if (p_query.friendly_block_count > 0) {
+			int deaths = 0;
+			for (const FriendlyDeath &d : p_query.recent_deaths) {
+				if (d.team == p_query.team && p_query.tick >= d.tick && p_query.tick - d.tick <= p_query.friendly_block_ticks &&
+						spawn_dist2(d.position, p.position) <= block2) {
+					++deaths;
+				}
+			}
+			if (deaths >= p_query.friendly_block_count) {
+				continue;
+			}
+		}
+		Candidate c;
+		c.index = i;
+		c.score = std::min(std::sqrt(nearest2), safe);
+		c.draw = spawn_mix(p_query.seed ^ (uint64_t(i) * 0x9E3779B97F4A7C15ull));
+		candidates.push_back(c);
+	}
+	if (candidates.empty()) {
+		return SIZE_MAX;
+	}
+	// (4) rank by the (capped) nearest-enemy distance, ties by the seeded draw (5).
+	std::sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {
+		if (a.score != b.score) {
+			return a.score > b.score;
+		}
+		return a.draw != b.draw ? a.draw < b.draw : a.index < b.index;
+	});
+	if (p_query.world == nullptr || p_query.enemies.empty() || p_query.max_los_rays <= 0) {
+		return candidates.front().index;
+	}
+	// TryToSpawnOutOfSight: the best 4, eye-to-chest rays from the 4 nearest enemies of each (<= max_los_rays in all);
+	// the first one no enemy sees wins, else the best.
+	constexpr size_t kBest = 4;
+	constexpr size_t kEnemies = 4;
+	int rays = 0;
+	const size_t tested = std::min(kBest, candidates.size());
+	for (size_t k = 0; k < tested; ++k) {
+		const SpawnPoint &p = p_query.points[candidates[k].index];
+		Vec3 chest = p.position;
+		chest[1] += std::isfinite(p_query.chest_height) ? p_query.chest_height : 1.3f;
+		std::pair<float, size_t> near[kEnemies] = {};
+		size_t near_count = 0;
+		for (size_t e = 0; e < p_query.enemies.size() && e < p_query.enemy_eyes.size(); ++e) {
+			if (!spawn_finite(p_query.enemy_eyes[e]) || !spawn_finite(p_query.enemies[e])) {
+				continue;
+			}
+			const std::pair<float, size_t> entry{ spawn_dist2(p_query.enemies[e], p.position), e };
+			if (near_count < kEnemies) {
+				near[near_count++] = entry;
+				std::sort(near, near + near_count);
+			} else if (entry < near[kEnemies - 1]) {
+				near[kEnemies - 1] = entry;
+				std::sort(near, near + kEnemies);
+			}
+		}
+		bool seen = false;
+		for (size_t n = 0; n < near_count && !seen; ++n) {
+			if (rays >= p_query.max_los_rays) {
+				return candidates.front().index; // the ray budget ran out: the best ranked
+			}
+			++rays;
+			const Vec3 &eye = p_query.enemy_eyes[near[n].second];
+			const Vec3 delta{ chest[0] - eye[0], chest[1] - eye[1], chest[2] - eye[2] };
+			seen = !p_query.world->ray(eye, delta, query_mask::kProjectile);
+		}
+		if (!seen) {
+			return candidates[k].index;
+		}
+	}
+	return candidates.front().index;
+}
+
 } // namespace bf3::sim

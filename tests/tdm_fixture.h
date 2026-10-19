@@ -149,3 +149,504 @@ struct TdmRunResult {
 core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunConfig &p_config);
 
 } // namespace bf3::test::tdm
+
+// ---- M2b ru: the bodies (docs/design/m2b-ru.md §6) ------------------------------------------------------------------
+// Inline, so every executable that includes this header gets them (m2b.contract compiles them and calls none). They
+// use doctest's REQUIRE / CHECK and gunplay_fixture.h's shipped motor tuning, so the including target defines
+// OPENBF3_MOTOR_TUNING_CFG for load_tdm_level_once; OPENBF3_MECHANICS_CFG and OPENBF3_TDM_TUNING_CFG are optional
+// (else GunplayConfig's relative default / TdmTuning{}, whose values equal the shipped file's).
+
+#include <doctest/doctest.h>
+
+#include "bf3/core/cache/disk_cache.h"
+#include "bf3/host/gunplay.h"
+#include "bf3/sim/weapons/weapon_sim.h"
+#include "gunplay_fixture.h"
+#include "test_support.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <thread>
+
+namespace bf3::test::tdm {
+
+namespace detail {
+
+inline double seconds_since(std::chrono::steady_clock::time_point p_start) {
+	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
+}
+
+// The quantisation frame of the loaded level's shot origins (CombatEvents decode with it); zero before a load.
+inline net::ShotQuantization &frame() {
+	static net::ShotQuantization s_frame;
+	return s_frame;
+}
+
+struct Fnv {
+	uint64_t h = 0xcbf29ce484222325ull;
+	void bytes(const void *p_data, size_t p_size) {
+		const uint8_t *b = static_cast<const uint8_t *>(p_data);
+		for (size_t i = 0; i < p_size; ++i) {
+			h ^= b[i];
+			h *= 0x100000001b3ull;
+		}
+	}
+	template <typename T>
+	void add(const T &p_value) {
+		bytes(&p_value, sizeof(T));
+	}
+};
+
+inline std::string default_mechanics_cfg() {
+#ifdef OPENBF3_MECHANICS_CFG
+	return OPENBF3_MECHANICS_CFG;
+#else
+	return std::string(sim::weapons::kMechanicsTuningPath);
+#endif
+}
+
+inline std::string default_tdm_tuning_cfg() {
+#ifdef OPENBF3_TDM_TUNING_CFG
+	return OPENBF3_TDM_TUNING_CFG;
+#else
+	return std::string(); // TdmTuning{} (the shipped file's values)
+#endif
+}
+
+} // namespace detail
+
+#ifdef OPENBF3_MOTOR_TUNING_CFG
+inline TdmLevel *load_tdm_level_once() {
+	static std::unique_ptr<TdmLevel> s_level;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_level == nullptr) {
+			bf3::test::skip_install_case("no BF3 install or no TDM load (see the first TDM case)");
+		}
+		return s_level.get();
+	}
+	s_tried = true;
+	auto l = std::make_unique<TdmLevel>();
+	l->reader = std::make_unique<core::InstallReader>();
+	if (!l->reader->locate({})) {
+		bf3::test::skip_install_case(l->reader->describe().c_str());
+		return nullptr;
+	}
+	l->before = l->reader->snapshot();
+	core::Result<std::shared_ptr<core::Install>> opened = core::Install::open(*l->reader);
+	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
+	if (!opened.ok()) {
+		return nullptr;
+	}
+	l->install = *opened;
+	// A fresh scratch cache root per process (parallel-safe; never the repo, never the install).
+	l->cache_root = std::filesystem::temp_directory_path() /
+			("openbf3-tdm-" + std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	std::error_code ec;
+	std::filesystem::remove_all(l->cache_root, ec);
+	core::Cache cache;
+	core::CacheOptions co;
+	co.root = l->cache_root;
+	co.guard = l->reader->write_guard();
+	std::string detail_text;
+	REQUIRE_MESSAGE(cache.open(std::move(co), &detail_text) == core::CacheStatus::Ok, detail_text);
+	host::SharedLoadOptions options;
+	options.cache = &cache;
+	options.tuning = bf3::test::gunplay::shipped_motor_tuning();
+	options.gunplay = true;
+	options.tdm = true;
+	options.tdm_tuning_cfg = detail::default_tdm_tuning_cfg();
+	host::LoadProgress progress;
+	const auto start = std::chrono::steady_clock::now();
+	core::Result<host::LevelDatabase> db = host::open_level_database(l->install, "MP_Subway", "TeamDeathMatch0", 0, &progress);
+	REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
+	if (!db.ok()) {
+		return nullptr;
+	}
+	core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, options, &progress);
+	REQUIRE_MESSAGE(shared.ok(), (shared.ok() ? std::string() : shared.error().message));
+	if (!shared.ok()) {
+		return nullptr;
+	}
+	l->shared = *shared;
+	const double seconds_shared = detail::seconds_since(start);
+	host::BotLoadOptions bo;
+	bo.cache = &cache;
+	bo.threads = std::max(1u, std::thread::hardware_concurrency() / 2u);
+	bo.seed = 1;
+	core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*db, *l->shared, bo, nullptr);
+	REQUIRE_MESSAGE(bots.ok(), (bots.ok() ? std::string() : bots.error().message));
+	if (!bots.ok()) {
+		return nullptr;
+	}
+	l->bots = *bots;
+	cache.close();
+	l->seconds_load = detail::seconds_since(start);
+	detail::frame() = host::shot_frame(*l->shared->static_world);
+	std::printf("tdm fixture: Metro TDM loaded in %.2f s (shared %.2f s: gunplay %.2f s, logic %.2f s; bots %.2f s), %zu spawns, logic digest "
+				"%016llx\n",
+			l->seconds_load, seconds_shared, l->shared->seconds_gunplay, l->shared->seconds_logic, l->seconds_load - seconds_shared,
+			l->shared->spawns.size(), (unsigned long long)l->shared->logic_digest);
+	for (const std::string &n : l->shared->tdm_notes) {
+		std::printf("tdm fixture: note: %s\n", n.c_str());
+	}
+	if (l->shared->logic == nullptr || l->shared->gunplay == nullptr) {
+		FAIL("the TDM load made no logic graph or no gunplay tables");
+		return nullptr;
+	}
+	s_level = std::move(l);
+	return s_level.get();
+}
+#endif
+
+inline void check_install_unchanged(TdmLevel &r_level) {
+	const core::SnapshotDiff diff = core::diff_snapshots(r_level.before, r_level.reader->snapshot());
+	CHECK_MESSAGE(diff.clean(), diff.summary());
+	std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(), r_level.before.files.size());
+	std::error_code ec;
+	std::filesystem::remove_all(r_level.cache_root, ec);
+}
+
+// ---- ScriptedPeer -----------------------------------------------------------------------------------------------
+
+inline ScriptedPeer::ScriptedPeer(host::GameServer &r_server, uint32_t p_peer, std::string p_name) :
+		server_(&r_server), peer_(p_peer), name_(std::move(p_name)) {
+	server_->on_connect(peer_);
+}
+
+inline void ScriptedPeer::hello() {
+	net::Hello h;
+	h.name = name_;
+	server_->on_receive(peer_, net::kChannelReliable, net::encode_hello(h));
+}
+
+inline void ScriptedPeer::ready() {
+	server_->on_receive(peer_, net::kChannelReliable, net::encode_ready({}));
+}
+
+inline void ScriptedPeer::spawn_request(uint8_t p_kit, uint8_t p_spawn_choice) {
+	net::SpawnRequest q;
+	q.kit = p_kit;
+	q.spawn_choice = p_spawn_choice;
+	const std::vector<uint8_t> bytes = net::encode_spawn_request(q);
+	if (bytes.empty()) {
+		return; // the W1.0 codec stub (nt): nothing to send
+	}
+	server_->on_receive(peer_, net::kChannelReliable, bytes);
+}
+
+inline void ScriptedPeer::kit_select(const net::KitSelect &p_select) {
+	server_->on_receive(peer_, net::kChannelReliable, net::encode_kit_select(p_select));
+}
+
+inline void ScriptedPeer::debug(const net::DebugRequest &p_request) {
+	server_->on_receive(peer_, net::kChannelReliable, net::encode_debug(p_request));
+}
+
+inline void ScriptedPeer::command(sim::Command p_command) {
+	p_command.tick = server_->current_tick() + 1u;
+	p_command.sequence = ++sequence_;
+	net::CommandPacket p;
+	p.count = 1;
+	p.commands[0] = p_command;
+	if (last_snapshot) {
+		p.newest_snapshot = last_snapshot->seq;
+	}
+	server_->on_receive(peer_, net::kChannelUnreliable, net::encode_command_packet(p));
+}
+
+inline int ScriptedPeer::slot() const {
+	return match_info ? int(match_info->slot) : -1;
+}
+
+inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
+	for (const host::OutDatagram &d : p_out) {
+		if (d.peer != peer_) {
+			continue;
+		}
+		const std::optional<net::MessageType> type = net::peek_type(d.bytes);
+		if (!type) {
+			++decode_errors;
+			continue;
+		}
+		bool ok = true;
+		switch (*type) {
+			case net::MessageType::MatchInfo: {
+				core::Result<net::MatchInfo> m = net::decode_match_info(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					match_info = *m;
+				}
+				break;
+			}
+			case net::MessageType::MatchState: {
+				core::Result<net::MatchState> m = net::decode_match_state(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					match_state = *m;
+					match_states.push_back(*m);
+				}
+				break;
+			}
+			case net::MessageType::PlayerList: {
+				core::Result<net::PlayerList> m = net::decode_player_list(d.bytes);
+				ok = m.ok();
+				if (!ok) {
+					break;
+				}
+				if (m->full) {
+					players = m->rows;
+				} else {
+					for (const uint8_t gone : m->removed) {
+						std::erase_if(players, [&](const net::PlayerRow &r) { return r.slot == gone; });
+					}
+					for (const net::PlayerRow &row : m->rows) {
+						auto at = std::find_if(players.begin(), players.end(), [&](const net::PlayerRow &r) { return r.slot == row.slot; });
+						if (at != players.end()) {
+							*at = row;
+						} else {
+							players.push_back(row);
+						}
+					}
+				}
+				std::sort(players.begin(), players.end(), [](const net::PlayerRow &a, const net::PlayerRow &b) { return a.slot < b.slot; });
+				break;
+			}
+			case net::MessageType::Spawned: {
+				core::Result<net::Spawned> m = net::decode_spawned(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					spawned.push_back(*m);
+				}
+				break;
+			}
+			case net::MessageType::CombatEvents: {
+				core::Result<net::CombatEvents> m = net::decode_combat_events(d.bytes, detail::frame());
+				ok = m.ok();
+				if (ok) {
+					combat.push_back(std::move(*m));
+				}
+				break;
+			}
+			case net::MessageType::Snapshot: {
+				core::Result<net::Snapshot> m = net::decode_snapshot(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					last_snapshot = std::move(*m);
+				}
+				break;
+			}
+			case net::MessageType::Kick: {
+				core::Result<net::Kick> m = net::decode_kick(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					kick = *m;
+				}
+				break;
+			}
+			default:
+				break; // DebugReport, SnapshotOthers, ShotEvents: not scripted
+		}
+		if (!ok) {
+			++decode_errors;
+		}
+	}
+}
+
+// ---- run_tdm ----------------------------------------------------------------------------------------------------
+
+inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunConfig &p_config) {
+	if (p_level.shared == nullptr || p_level.shared->logic == nullptr || p_level.shared->gunplay == nullptr) {
+		return core::make_error("run_tdm: the level has no logic graph or no gunplay tables (SharedLoadOptions::tdm / ::gunplay)");
+	}
+	TdmRunResult r;
+	const auto start = std::chrono::steady_clock::now();
+	auto server = std::make_unique<host::GameServer>();
+	host::GameServerConfig cfg;
+	cfg.level = p_level.shared;
+	cfg.max_slots = 64;
+	cfg.dev_commands = true;
+	cfg.seed = p_config.seed;
+	cfg.gunplay.mechanics_cfg = p_config.mechanics_cfg.empty() ? detail::default_mechanics_cfg() : p_config.mechanics_cfg;
+	cfg.rules = p_config.rules;
+	if (p_level.bots != nullptr) {
+		auto fill = std::make_shared<host::BotFillConfig>();
+		fill->level = p_level.bots;
+		fill->count = 0; // the BotLevel for walking; the TDM brains are add_tdm_bots'
+		cfg.bots = fill;
+	}
+	std::shared_ptr<host::TdmBotStats> bot_stats;
+	if (p_config.bots > 0) {
+		auto b = std::make_shared<host::TdmBotConfig>();
+		b->count = p_config.bots;
+		b->stats = std::make_shared<host::TdmBotStats>();
+		if (p_config.configure_bots) {
+			p_config.configure_bots(*b);
+		}
+		bot_stats = b->stats;
+		cfg.tdm_bots = b;
+	}
+	if (p_config.configure_server) {
+		p_config.configure_server(cfg);
+	}
+	const core::Status st = server->init(cfg);
+	if (!st.ok()) {
+		r.failure = "init: " + st.error().message;
+		return r;
+	}
+	const host::TdmRules *rules = server->rules();
+	if (rules == nullptr) {
+		r.failure = "init made no rules (GameServerConfig::rules.mode)";
+		return r;
+	}
+	std::vector<host::OutDatagram> out;
+	std::unique_ptr<ScriptedPeer> peer;
+	detail::Fnv match_bytes;
+	const auto step = [&] {
+		out.clear();
+		server->tick(out);
+		if (peer != nullptr) {
+			peer->receive(out);
+			for (const host::OutDatagram &d : out) {
+				const std::optional<net::MessageType> t = net::peek_type(d.bytes);
+				if (d.peer == peer->peer() && t && (*t == net::MessageType::MatchState || *t == net::MessageType::PlayerList)) {
+					match_bytes.bytes(d.bytes.data(), d.bytes.size());
+				}
+			}
+		}
+	};
+	if (p_config.peer) {
+		peer = std::make_unique<ScriptedPeer>(*server, 1u, "peer");
+		peer->hello();
+		step();
+		peer->ready();
+		if (p_config.rules.deploy_screen) {
+			peer->spawn_request(p_config.peer_kit);
+		}
+	}
+	r.seconds_init = detail::seconds_since(start);
+	const auto run_start = std::chrono::steady_clock::now();
+	// The stuck metric (M2a's): a bot alive for a whole window that moved less than stuck_metres horizontally.
+	struct Track {
+		uint32_t life = 0;
+		sim::Tick since = 0;
+		sim::Vec3 at{};
+		bool counted = false;
+	};
+	std::vector<Track> tracks(cfg.max_slots);
+	sim::Tick peer_respawn = 0;
+	sim::Tick last_request = 0;
+	size_t combat_seen = 0;
+	const sim::Tick first = server->current_tick();
+	for (uint32_t i = 0; i < p_config.max_ticks; ++i) {
+		if (peer != nullptr && p_config.rules.deploy_screen && peer->slot() >= 0) {
+			const sim::SoldierState *own = server->soldier(uint32_t(peer->slot()));
+			const bool alive = own != nullptr && (own->flags & sim::soldier_flags::kAlive) != 0;
+			const sim::Tick next = server->current_tick() + 1u;
+			if (!alive && next >= peer_respawn && next >= last_request + 30u) {
+				peer->spawn_request(p_config.peer_kit);
+				last_request = next;
+			}
+		}
+		step();
+		const sim::Tick now = server->current_tick();
+		r.ticks = now - first;
+		const host::GameServerTickTimes &tt = server->last_tick_times();
+		r.tick_ms.push_back(tt.tick_ms);
+		if (bot_stats != nullptr) {
+			r.perception_ms.push_back(double(bot_stats->last_perception_ns.load()) * 1e-6);
+			r.brains_ms.push_back(double(bot_stats->last_brains_ns.load()) * 1e-6);
+		}
+		const host::Gunplay *gunplay = server->gunplay();
+		const host::ServerView &view = server->view();
+		if (p_config.hashes) {
+			detail::Fnv h;
+			h.add(now);
+			for (uint32_t s = 0; s < cfg.max_slots; ++s) {
+				const sim::SoldierState *state = server->soldier(s);
+				if (state == nullptr) {
+					continue;
+				}
+				h.add(s);
+				h.add(sim::soldier_state_hash(*state));
+				if (gunplay != nullptr) {
+					h.add(sim::weapons::soldier_weapons_hash(gunplay->weapons(uint8_t(s))));
+				}
+				h.add(view.team(uint8_t(s)));
+			}
+			const net::MatchState &ms = rules->match_state();
+			h.add(ms);
+			r.world_hashes.push_back(h.h);
+		}
+		if (peer != nullptr) {
+			for (; combat_seen < peer->combat.size(); ++combat_seen) {
+				for (const net::DeathEvent &d : peer->combat[combat_seen].deaths) {
+					if (int(d.victim) == peer->slot()) {
+						peer_respawn = std::max(peer_respawn, d.respawn_tick);
+					}
+				}
+			}
+		}
+		for (const net::PlayerRow &row : rules->players()) {
+			if (!row.bot || row.slot >= tracks.size()) {
+				continue;
+			}
+			const sim::SoldierState *state = server->soldier(row.slot);
+			Track &t = tracks[row.slot];
+			const bool alive = state != nullptr && (state->flags & sim::soldier_flags::kAlive) != 0;
+			if (!alive || state->life != t.life) {
+				t = Track{};
+				if (alive) {
+					t.life = state->life;
+					t.since = now;
+					t.at = state->position;
+				}
+				continue;
+			}
+			if (now - t.since >= p_config.stuck_window_ticks) {
+				const float dx = state->position[0] - t.at[0], dz = state->position[2] - t.at[2];
+				if (std::sqrt(dx * dx + dz * dz) < p_config.stuck_metres && !t.counted) {
+					++r.stuck_bots;
+					t.counted = true;
+				}
+				t.since = now;
+				t.at = state->position;
+			}
+		}
+		if (p_config.on_tick) {
+			p_config.on_tick(now, *server, peer.get());
+		}
+		if (!r.round_over && rules->phase() == net::MatchPhase::RoundOver) {
+			r.round_over = true;
+			r.round_over_tick = now;
+			r.winner = rules->match_state().winner;
+		}
+		if (r.round_over && now >= r.round_over_tick + p_config.after_round_ticks) {
+			break;
+		}
+	}
+	r.seconds_run = detail::seconds_since(run_start);
+	const net::MatchState &ms = rules->match_state();
+	r.kills[1] = ms.kills[0];
+	r.kills[2] = ms.kills[1];
+	for (const net::PlayerRow &row : rules->players()) {
+		if (row.team == 1 || row.team == 2) {
+			r.deaths[row.team] += row.deaths;
+		}
+	}
+	r.team_kd = r.kills[2] != 0 ? double(r.kills[1]) / double(r.kills[2]) : double(r.kills[1]);
+	r.rules = rules->stats();
+	r.revives = uint32_t(r.rules.revives);
+	r.spawns_scored = uint32_t(r.rules.spawns_scored);
+	r.spawns_fallback = uint32_t(r.rules.spawn_fallbacks);
+	r.spawns_enemy_within_10m = uint32_t(r.rules.spawns_enemy_within_10m);
+	r.blind_fire = bot_stats != nullptr ? uint32_t(bot_stats->blind_fire.load()) : 0u;
+	r.runtime_faulted = rules->faulted();
+	r.trace_hash = rules->trace().hash;
+	r.match_bytes_hash = match_bytes.h;
+	return r;
+}
+
+} // namespace bf3::test::tdm

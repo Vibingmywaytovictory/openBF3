@@ -2863,3 +2863,47 @@ Measured 2026-10-19 on `m2b/au` (wall-clock values indicative only):
 * **E11 voices:** at most 128. Culled: 717 pre-cull, 207 scope, 397 cap.
 * **64-shooter mix:** 8.5 s of wall time for 66 s of audio, against M2a's 10.2 s, with 0 late blocks.
 * **E11 share:** p99 below 0.20, so the 0.10 gate is probably not met; docs/design/m2b-au.md §10 has the follow-up.
+
+## M2b ru: TDM rules and the server flow
+
+<!-- # M2b ru -->
+Design: [docs/design/m2b.md](docs/design/m2b.md) §3.1-§3.6, §2.6 #1-#10 and #19-#22, the R table of §11; as built,
+the measured gates and the open issues: [docs/design/m2b-ru.md](docs/design/m2b-ru.md).
+
+* **Load.** `SharedLoadOptions::tdm` builds Metro TDM's logic graph as bf3dump does (digest `6f6a0693b3924bde`),
+  reads the round natives' EBX fields (kill limit 100, 4 players to start, PlayerKilledDelay 5 s, AutoTeam, the
+  pre-round input restriction), the data's scoring rows, `bf3-opensource/config/tdm_tuning.cfg` (every number the
+  data does not decide, `measured = false`), the TDM kits (the defibrillator in the assault gadget slot) and the spawn
+  immunity's abort inputs (into the motor params, so the client predicts them).
+* **Rules.** `TdmRules` (`bf3_host`, `bf3/host/tdm_rules.h`) runs the round natives on the LogicRuntime and is the
+  server's respawn policy and combat sink: kills and deaths per team and player, respawn at death + 5 s (a bot near a
+  living assault teammate waits 8 s for a revive), regen after 10 s at 5 hp/s, the defibrillator's revive (a new life
+  at the corpse with 20 hp, the same kit and team, the kill taken back, 100 points), SpawnRequest refusals, the scored spawn choice, AutoTeam
+  teams and the bots' kits. The GameServer calls it through named insertions (`// M2b ru [..]`, R1-R10).
+* **On the wire.** Since the w1 merge the v3 messages (nt's codecs: MatchState, PlayerList, SpawnRequest,
+  Spawned.revived, the death stamps, ReviveEvent) travel, and host.tdm.server's scripted peers decode them.
+
+Commands (read-only on the install; the cases print BF3-derived numbers, keep the logs out of the repo):
+
+```bat
+ctest --test-dir b\dev -R "^host\.tdm\.server$"                                                     :: all cases (~9 s, one Metro TDM load)
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=tuning*     :: the tuning parser, hostile text
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=health*     :: E3 regen and spawn immunity
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=respawn*    :: E4 respawn, R10, the M2a hashes
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=revive*     :: E5 revive
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=hostile*    :: E7 server half
+b\dev\tests\test_host_tdm.exe --test-suite=host-tdm-server --test-case=install*    :: install unchanged
+ctest --preset dev-timing -R "^host\.tdm\.client$"                                                  :: E13 (timing; skipped until bb)
+```
+
+Measured 2026-10-19 on the dev preset, `m2b/ru` (tick counts, the same on every run):
+
+| gate | measured |
+|---|---|
+| E3 | regen from T + 600 at 0.08334 hp per tick, a second drop restarts it; immunity 120 ticks, Fire / move at +30 end it at +30, server = local motor (0 mismatches) |
+| E4 | respawn at death + 300 (+480 next to an assault teammate), the rules' kit; a deploy-screen Ready spawns nothing; M2a hashes kit `31b45dc7cc3f4271`, weapon `b8fd23d8ccfc4c63`, motor `6d75dd5f51d95090` (equal to main 47871fa's); a SpawnRequest for respawn_tick - 1 refused, for respawn_tick accepted, Spawned in that tick with the kit; the peer's DeathEvent respawn_tick = death + 300; MatchState / PlayerList at the peer = the rules'; a v2 Hello kicked |
+| E5 | bot and peer revived at the corpse (0.000 m), 20 hp, life + 1, the same kit and team, enemy kills 1 -> 0, medic +100; living target and enemy medic refused; Spawned.revived = 1 and the ReviveEvent at the peers; deploy screen: 0 revives after the man-down window, a deploy ends the man-down at once |
+| E7 | refusals counted by kind; 300 hostile v3 datagrams, all counted (298 bad, 2 judged by the rules); a SpawnRequest in RoundOver refused; asan: host.tdm.server, sim.weapons.unit, m2b.contract pass, no report |
+| E13 | not run (timing row; skips with PENDING (bb) until bb's add_tdm_bots) |
+| install.unchanged | clean (256 files) |
+| branch pass | `tools\build.cmd dev` after the w1 merge (nt in): 140 rows, 138 passed, 2 skipped, 0 failed, 192.0 s |
