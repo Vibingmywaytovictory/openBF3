@@ -209,7 +209,8 @@ TEST_SUITE("m2b-contract2") {
 		REQUIRE(ok.ok());
 		REQUIRE(ok->size() == 1);
 		CHECK((*ok)[0] == gs::M2bCase::Play);
-		for (const char *bad : { "", "Play", "play,play", "play,", ",play", "all", "play,fx", std::string(4096, 'p').c_str() }) {
+		const std::string long_arg(4096, 'p'); // named: a temporary in the range-init would die before the loop body (C++20)
+		for (const char *bad : { "", "Play", "play,play", "play,", ",play", "all", "play,fx", long_arg.c_str() }) {
 			CHECK_MESSAGE(!gs::parse_m2b_cases(bad).ok(), bad);
 		}
 	}
