@@ -50,3 +50,10 @@ target_sources(bf3_anim PRIVATE
 target_sources(bf3_anim PRIVATE
     src/viewmodel_anim.cpp
 )
+
+# PT1 run (docs/design/pt1-run.md): BF3's move groups and controller routes (the 3p run / sprint / sneak and the 1p
+# run and sprint deltas).
+target_sources(bf3_anim PRIVATE
+    src/move_group.cpp
+    include/bf3/anim/move_group.h
+)
