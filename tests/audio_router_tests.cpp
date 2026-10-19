@@ -57,6 +57,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map> // PT1 snd [cuts]
 #include <memory>
 #include <optional>
 #include <random>
@@ -2051,6 +2052,17 @@ TEST_SUITE("audio-game") {
 			mc.schedule_lead_blocks = uint32_t(std::max(1.0f, f->tuning.schedule_lead_blocks));
 			mc.max_voices = ba::kGameMixerVoices;
 			ba::apply_mixer_a3(a3, mc);
+			if (const std::string fade = env_value("OPENBF3_PT1_CUT_FADE"); !fade.empty()) { // PT1 snd [fade]: A/B measurement only
+				mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800)); // PT1 snd [fade]
+			} // PT1 snd [fade]
+			if (env_value("OPENBF3_PT1_CAP_HOLD") == "0") { // PT1 snd [hold]: A/B measurement only
+				mc.pt1_cap_hold_db = 0.0f; // PT1 snd [hold]
+				mc.pt1_voice_hold_blocks = 0; // PT1 snd [hold]
+				mc.pt1_resume_margin = 0; // PT1 snd [hold]
+			} // PT1 snd [hold]
+			if (const std::string m = env_value("OPENBF3_PT1_RESUME_MARGIN"); !m.empty()) { // PT1 snd [hold]: A/B measurement only
+				mc.pt1_resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128)); // PT1 snd [hold]
+			} // PT1 snd [hold]
 			rig.mixer = std::make_unique<ba::MixerCore>(mc);
 			rig.mixer->set_tap(&tap);
 			rig.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
@@ -2099,6 +2111,15 @@ TEST_SUITE("audio-game") {
 			}
 			t += double(rounds) * 4.5 + 30.0 + 90.0 * unit(rng);
 		}
+		// PT1 snd [cuts]: every cut of the run (the event ring, drained after each frame) for the flap count below.
+		rig.mixer->pt1_record_cuts(true); // PT1 snd [cuts]
+		std::vector<ba::MixerCutEvent> pt1_cuts; // PT1 snd [cuts]
+		const auto pt1_drain = [&] { // PT1 snd [cuts]
+			std::array<ba::MixerCutEvent, 512> batch; // PT1 snd [cuts]
+			for (size_t n = rig.mixer->pt1_poll_cuts(batch); n > 0; n = rig.mixer->pt1_poll_cuts(batch)) { // PT1 snd [cuts]
+				pt1_cuts.insert(pt1_cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n)); // PT1 snd [cuts]
+			} // PT1 snd [cuts]
+		}; // PT1 snd [cuts]
 		NetStream net;
 		std::vector<host::PresentEvent> events;
 		std::vector<ba::ImpactSoundRequest> impacts;
@@ -2150,6 +2171,7 @@ TEST_SUITE("audio-game") {
 				impacts.push_back(r);
 			}
 			rig.frame(*net.frame, now_ns, events, 0, impacts);
+			pt1_drain(); // PT1 snd [cuts]
 			net.trim(shooters);
 		}
 		// Let every tail end (the pool's 3 s stop, the drivers' release).
@@ -2161,6 +2183,7 @@ TEST_SUITE("audio-game") {
 			net.publish(t, now_ns, shooters);
 			net.frame->own_weapons_curr.timers[0].flags = 0;
 			rig.frame(*net.frame, now_ns, events, 0);
+			pt1_drain(); // PT1 snd [cuts]
 		}
 		const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		const ba::MixerStats &ms = rig.mixer->stats();
@@ -2183,6 +2206,43 @@ TEST_SUITE("audio-game") {
 				unsigned(rig.pool->peak()), (unsigned long long)rig.pool->stolen(), (unsigned long long)rig.pool->failed(), (unsigned long long)is.impacts,
 				(unsigned long long)is.unknown_patches, (unsigned long long)reloads, rms_db, double(tap.peak), (unsigned long long)tap.non_finite);
 		MESSAGE(line);
+		MESSAGE(ba::format_mixer_cuts(rig.mixer->pt1_cut_stats())); // PT1 snd [cuts]
+		// PT1 snd [cuts]: flapping loops: parked by the cap, resumed, parked again
+		std::map<ba::InstanceHandle, std::vector<std::pair<uint64_t, bool>>> pt1_per; // PT1 snd [cuts]: (frame, parked)
+		for (const ba::MixerCutEvent &e : pt1_cuts) { // PT1 snd [cuts]
+			if (e.kind == ba::MixerCutKind::Pend || e.kind == ba::MixerCutKind::Resume) { // PT1 snd [cuts]
+				pt1_per[e.handle].emplace_back(e.frame, e.kind == ba::MixerCutKind::Pend); // PT1 snd [cuts]
+			} // PT1 snd [cuts]
+		} // PT1 snd [cuts]
+		uint64_t pt1_parks = 0, pt1_short_parks = 0, pt1_flaps = 0; // PT1 snd [cuts]
+		size_t pt1_flapping = 0; // PT1 snd [cuts]
+		for (const auto &[h, v] : pt1_per) { // PT1 snd [cuts]
+			uint64_t mine = 0; // PT1 snd [cuts]
+			for (size_t i = 0; i < v.size(); ++i) { // PT1 snd [cuts]
+				pt1_parks += v[i].second ? 1 : 0; // PT1 snd [cuts]
+				if (v[i].second && i + 1 < v.size() && !v[i + 1].second && v[i + 1].first - v[i].first < ba::kMixRate / 4) { // PT1 snd [cuts]
+					++pt1_short_parks; // PT1 snd [cuts]: silent for less than 0.25 s: a gap inside the sound
+				} // PT1 snd [cuts]
+				if (v[i].second && i >= 2 && !v[i - 1].second && v[i - 2].second && v[i].first - v[i - 2].first < ba::kMixRate) { // PT1 snd [cuts]
+					++mine; // PT1 snd [cuts]: parked again within 1 s of the park before
+				} // PT1 snd [cuts]
+			} // PT1 snd [cuts]
+			pt1_flaps += mine; // PT1 snd [cuts]
+			pt1_flapping += mine > 0 ? 1 : 0; // PT1 snd [cuts]
+		} // PT1 snd [cuts]
+		MESSAGE("PT1 snd: " << pt1_cuts.size() << " cuts recorded; " << pt1_parks << " parks of " << pt1_per.size() << " loops, " << pt1_short_parks // PT1 snd [cuts]
+							<< " parked for < 0.25 s, " << pt1_flaps << " re-parks within 1 s on " << pt1_flapping << " loops"); // PT1 snd [cuts]
+		if (env_value("OPENBF3_PT1_CUT_FADE").empty() && env_value("OPENBF3_PT1_CAP_HOLD").empty() && env_value("OPENBF3_PT1_RESUME_MARGIN").empty()) { // PT1 snd [cuts]: the defaults
+			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats(); // PT1 snd [cuts]
+			for (const ba::MixerCutKind k : { ba::MixerCutKind::Drop, ba::MixerCutKind::Pend, ba::MixerCutKind::Kill, ba::MixerCutKind::Finish, ba::MixerCutKind::Resume }) { // PT1 snd [cuts]
+				INFO(ba::mixer_cut_kind_name(k)); // PT1 snd [cuts]
+				CHECK(cs.audible[size_t(k)].load() == 0); // PT1 snd [cuts]: [fade] (merged A3: 1833 audible parks, 1086 resumes, 36 drops in this run)
+			} // PT1 snd [cuts]
+			CHECK(pt1_parks > 0); // PT1 snd [cuts]: the cap is reached (the flap counts below mean something)
+			CHECK(pt1_short_parks * 20 <= pt1_parks); // PT1 snd [cuts]: [hold] (merged A3: 1843 of 3234)
+			CHECK(pt1_flaps * 20 <= pt1_parks); // PT1 snd [cuts]: [hold] (merged A3: 1931 of 3234)
+			CHECK(cs.event_drops.load() == 0); // PT1 snd [cuts]
+		} // PT1 snd [cuts]
 		CHECK(ms.short_blocks.load() == 0);
 		CHECK(ms.late_commands.load() == 0);
 		CHECK(ms.ring_overflows.load() == 0);
