@@ -877,18 +877,8 @@ struct WeaponAudioRouter::Impl {
 					own_shot(e, r_clock);
 					break;
 				case host::PresentKind::OwnTimed:
-					if ((e.id & sw::weapon_events::kReloadStarted) != 0) {
-						const WeaponAudioDef *d = def_of(e.def);
-						if (d != nullptr && d->program && d->has_reload) {
-							EmitterState em;
-							em.position = listener.position;
-							em.forward = listener.forward;
-							if (one_shot(d->program, kHashReload, sound_seed(own_slot, 0x80000000u | own_burst_counter++), em,
-										r_clock.frame_of(e.time, host::PresentTimeline::Predicted), own_first_person)) {
-								++stats.reloads;
-							}
-						}
-					}
+					// PT1 rld [own timed]: replaces the Reload-only one-shot: Reload (+ IsShortReload), its release, Action, Bolt.
+					foley_own_timed(e, r_clock);
 					break;
 				case host::PresentKind::RemoteShot:
 					remote_shot(e, r_clock);
