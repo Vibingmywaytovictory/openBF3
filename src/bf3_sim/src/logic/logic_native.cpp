@@ -74,6 +74,22 @@ std::vector<NativePortBinding> build_bindings() {
 	add(T::GameInteraction, D::EventIn, id("Enable"), M::Enable, "Enable");
 	add(T::GameInteraction, D::EventIn, id("Disable"), M::Disable, "Disable");
 	add(T::GameInteraction, D::EventIn, -686199110, M::Activate, ""); // unnamed; the Rush crate interaction's arm input
+	// M2b ru R4 (docs/design/m2b.md §2.6 #5, §3.1): the TDM natives' ports (RoundNatives, round_natives.h); the stubs'
+	// switch records every one of them (its default), so the S4 rows stay bit-equal.
+	add(T::KillCounter, D::PropertyOut, id("Kills"), M::Kills, "Kills"); // M2b ru R4
+	add(T::KillCounter, D::PropertyOut, id("KillLimit"), M::KillLimit, "KillLimit"); // M2b ru R4
+	add(T::RoundOver, D::EventIn, id("TeamWins"), M::TeamWins, "TeamWins"); // M2b ru R4
+	add(T::RoundOver, D::EventIn, id("StopTime"), M::StopTime, "StopTime"); // M2b ru R4
+	add(T::HumanPlayer, D::EventIn, id("UnSpawnAllSoldiers"), M::UnSpawnAllSoldiers, "UnSpawnAllSoldiers"); // M2b ru R4
+	add(T::HumanPlayer, D::EventOut, id("OnPlayerSpawned"), M::OnPlayerSpawned, "OnPlayerSpawned"); // M2b ru R4
+	add(T::HumanPlayer, D::EventOut, id("OnPlayerDied"), M::OnPlayerDied, "OnPlayerDied"); // M2b ru R4
+	add(T::HumanPlayer, D::EventOut, id("OnSpectatorEnter"), M::OnSpectatorEnter, "OnSpectatorEnter"); // M2b ru R4
+	add(T::AutoTeam, D::EventIn, id("PlayerEnter"), M::PlayerEnter, "PlayerEnter"); // M2b ru R4
+	add(T::AutoTeam, D::EventIn, id("DisableAllowedToSpawnOn"), M::DisableAllowedToSpawnOn, "DisableAllowedToSpawnOn"); // M2b ru R4
+	add(T::InputRestriction, D::EventIn, id("Activate"), M::Activate, "Activate"); // M2b ru R4
+	add(T::InputRestriction, D::EventIn, id("Deactivate"), M::Deactivate, "Deactivate"); // M2b ru R4
+	add(T::LevelControl, D::EventIn, id("RestartLevel"), M::RestartLevel, "RestartLevel"); // M2b ru R4
+	add(T::PreRound, D::EventOut, id("EnablePlayerMovement"), M::EnablePlayerMovement, "EnablePlayerMovement"); // M2b ru R4
 	// The remaining S4 natives: enable state only.
 	for (const T t : { T::CombatAreaTrigger, T::SurroundingGeometry, T::TicketCounter, T::LifeCounter, T::KillCounter, T::AutoTeam, T::Objective,
 				 T::DamageAreaTrigger, T::ClearAreaTrigger, T::GeometryTrigger, T::UnderFireTrigger, T::FriendZone, T::Predestruction, T::LevelControl,
