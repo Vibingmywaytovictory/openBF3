@@ -276,6 +276,9 @@ struct WeaponAudioStats {
 	uint64_t forgotten = 0; // released driver instances aged out without a finished feedback
 	uint64_t emitter_updates = 0; // SetEmitter commands (listener moves and moving shooters)
 	uint64_t detonations = 0; // explosion one-shots
+	uint64_t foley = 0; // PT1 rld [stats]: Action / Bolt one-shots (deploy, zoom, dry fire, fire mode, bolt)
+	uint64_t foley_releases = 0; // PT1 rld [stats]: reload sounds cut short (the reload's release event posted)
+	uint64_t foley_out_of_reach = 0; // PT1 rld [stats]: foley of another soldier beyond its event's distance band
 };
 static_assert(std::is_trivially_copyable_v<WeaponAudioStats>);
 
