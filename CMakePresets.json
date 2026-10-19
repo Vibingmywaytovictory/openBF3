@@ -80,7 +80,7 @@
       "configurePreset": "dev",
       "displayName": "dev-window: the windowed Godot rows (label window), serial, the user-away tenure only",
       "execution": { "jobs": 1 },
-      "filter": { "include": { "label": "^window$" } }
+      "filter": { "include": { "label": "^window$" }, "exclude": { "label": "^retired$" } }
     },
     {
       "name": "asan",

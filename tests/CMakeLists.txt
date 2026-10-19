@@ -1357,3 +1357,11 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2b_w1_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(m2b.contract PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w1_cl_dir}")
 endif()
+
+# M2b W1.0 (docs/design/m2b.md §11, §13 Q8; docs/design/m2b-w1.md): the three over-budget M2a window rows leave the
+# default window set. The extra label `retired` (not a scheduling label, docs/testing.md §1) and the dev-window
+# preset's exclude filter (CMakePresets.json) keep them out of every M2b merge pass; they stay runnable by name, e.g.
+# `ctest --test-dir b\dev -R "^godot\.m2a$"`. godot.m2a_firefight (E14) and godot.m2a_load stay in the window set.
+if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    set_property(TEST godot.m2a godot.m2a.kits godot.m2a.play APPEND PROPERTY LABELS retired)
+endif()
