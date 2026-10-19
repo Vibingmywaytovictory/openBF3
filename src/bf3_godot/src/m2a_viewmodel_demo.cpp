@@ -461,6 +461,15 @@ void Bf3M2aViewmodelDemo::begin_kit(size_t p_kit) {
 			add(slot, "knife", m->time_s);
 		}
 	}
+	if (has_user_arg("pt1-run-shots")) { // PT1 run [shots]: the first kit's primary while running (hip + 0.2 s) and sprinting
+		captures_.clear(); // PT1 run [shots]
+		for (const char *mark : { "hip", "sprint" }) { // PT1 run [shots]
+			const vm_script::Mark *m = p_kit == 0 ? kit.run.mark(0, mark) : nullptr; // PT1 run [shots]
+			for (int i = 0; m != nullptr && i < 8; ++i) { // PT1 run [shots]: every 0.05 s over 0.35 s
+				add(0, (std::string("pt1_") + mark + "_" + std::to_string(i)).c_str(), m->time_s + 0.2 + 0.05 * i); // PT1 run [shots]
+			} // PT1 run [shots]
+		} // PT1 run [shots]
+	} // PT1 run [shots]
 	std::sort(captures_.begin(), captures_.end(), [](const Capture &p_a, const Capture &p_b) { return p_a.time_s < p_b.time_s; });
 }
 
