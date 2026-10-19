@@ -3185,3 +3185,43 @@ Measured 2026-10-19, `m2b/gx`, shared machine (times indicative only):
   way to the round-end screen. One run each, by hand: headless PASS (own death at 9.0 s, RoundOver at 40.8 s);
   windowed PASS, 14/14 rows, 0 ERROR lines, `missing_lookups` 0 (own death at 12.7 s by a bot, deploy engineer at
   17.9 s, RoundOver at 33.8 s, 5 screenshots); install unchanged: yes.
+
+## PT1 rld: reload and weapon foley sounds
+
+<!-- # PT1 rld -->
+Track `rld` of the first playtest fixes, on branch `pt1/rld`. It fixes the M2b playtest finding "no sounds for
+reloads". Root causes, the fix and the numbers: [docs/design/pt1-rld.md](docs/design/pt1-rld.md).
+
+* **From the data** (`weapon_foley.h`, Godot-free): each kit weapon patch takes these inputs:
+  - `Reload`, with `IsShortReload` picking between the long (empty) and the short (tactical) wave;
+  - the reload's release event (#3520090073);
+  - `Action`, with `ActionType` picking deploy, zoom, the dry-fire click, bipod, light or fire-mode switch;
+  - `Bolt`.
+
+  The reader gives each event's samplers, its distance reach and the outputs it feeds.
+* **Posted where the weapon state changes:**
+  - the own soldier's sim events (reload start and cancel, deploy, fire mode, bolt), at the frame the viewmodel uses
+    for them;
+  - the own presented weapons (zoom, dry fire);
+  - the others' presented fields (`reload_seq`, a weapon change, ads), at the shooter, within the data's reach.
+* **Why they were silent:** the voice cull counted a reload instance at its gunshot outputs (100.4 dB) instead of its
+  Handling output (79.5 dB). The HDR window therefore put the reload 21 dB down. The cull now counts only the outputs
+  the busy voices feed.
+* **Also fixed:**
+  - the own 1p reload no longer stays where it started;
+  - the foley one-shots no longer get the trigger release 3 s later, which fired a phantom round on the M9, MP443,
+    MK11 and SVD.
+* **Tests:**
+  - `ctest --test-dir b\dev -R "^audio\.foley\."`;
+  - `audio.foley.install` runs the trigger table, every kit reload, 3p at 5 / 15 / 25 m, the offline mix and 300
+    corrupted programs, and exits 77 without an install;
+  - `audio.foley.unit` reads hostile synthetic programs.
+
+Measured 2026-10-19 on `pt1/rld`:
+
+* **Own M16A3 reload alone:** -39.6 dBFS before, -19.2 dBFS after (window top 100.4 -> 80.0 dB). Walking at 3 m/s:
+  -50.8 -> -19.2 dBFS.
+* **Every trigger:** the wave starts +0.0 ms after its event's frame. Tactical reloads play the short wave and empty
+  ones the long wave, on all 10 kit firearms.
+* **Still open:** a reload started right after a full-auto burst stays under the burst's reflections tail (-39.7 dBFS
+  for about 3 s). See pt1-rld.md §5.
