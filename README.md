@@ -2197,6 +2197,38 @@ firefight bots (bt), E14 (the client frame budget in the firefight), E16 (load a
 3p crowd fed from cl's `present_weapon` / events in `level_session`, and `SharedLoadOptions::gunplay` turned on for the
 M2a scene (it stays off by default, so M1's E4 / E5 are unchanged).
 
+<!-- integration (integ/w3) -->
+**Fifth integration: M2a wave 3 (`integ/w3`, 2026-10-19).** On `m2a/w3` 494b2df (the W3.0 contract with bt, tp, au3
+and fx3 merged; its own merge is a no-op), each with its own `--no-ff` merge commit: `m2a/gx` 3203a74, then `main`
+5d5ed94 (the E15 loopback length in `dev-timing`). Neither merge had a conflict. The branch pass
+(`tools\build.cmd dev --strict`) passed after every change: 137 rows, 135 passed, `core.cache_data` and `core.res`
+skipped as before, 0 failed, 0 STRICT violations (185-193 s). The first merge pass (`main-timing.ps1`, quiet lock)
+passed realtime 10 / 10 and timing 16 / 16 and failed two window rows; both are fixed here, each in its own commit.
+* **E16** (`godot.m2a_load`): the warm load missed (first controllable frame 6.40 s, limit 5 s). `Bf3GameCrowd::load`
+  ran 2.9 s on the loader after the SharedLevel. tp's `load_body` (soldier assets, stance and move clips, with the
+  1.1 s Ant source open on a second thread) now runs on its own thread beside `load_shared_level`, and `load()` adds
+  only the 3p weapons (0.3 s). Under the lock: cold 5.31 s, warm 4.27 s, peak working set 1,625 MiB.
+* **`godot.m2a.play`** failed `play.screenshots` 4 / 5 in both merge passes: no bot was framed for the ADS shot in the
+  first and for the firefight shot in the second (every other play row passed). In the last 60 s each shot may now
+  be taken unframed, and the row names that fallback. Rerun under the lock: PASS, 5 / 5, both shots framed (28.1 m
+  and 27.9 m).
+
+The second merge pass on the E16 fix again passed realtime and timing (`host.gunplay.client` 448 s) and 15 of the 16
+window rows. Its one failure was the play row fixed above, which then passed alone under the lock. Gate numbers from
+one quiet-lock tenure: E13 `host.gunplay.perf` tick p99 1.688 ms (gate 8.0), weapons + projectiles + rewind 7.5 % of
+the mean tick, 64 / 64 bots fired. E9 / E14 `godot.m2a_firefight` (64 bots, 2560 x 1440): FX main p99 0.48 ms, FX GPU
+0.18 ms, at most 3 lights and 1,568 particles, frame p99 6.23 ms, M2a main p99 0.88 ms, crowd step p99 0.20 ms, 0
+underruns, 0 overflows. m2a.md §3's lane re-measure (`s3_crowd.tscn --s3-lanes=4`, the session's listen server idle,
+`--walkers=0`) passed S3 CHECK: G1a p99 0.383 ms (limit 2.0, so the 4-lane rule stands), G1b 1.568 ms, G2 p99 9.52 /
+9.82 ms, G3 16 / 16. `godot.s3_crowd` on S3's own 6 lanes passed in both merge passes. Under `ctest --preset asan`,
+17 / 17 wave-3 Godot-free rows passed with no AddressSanitizer report: `m2a.contract3`, `host.gunplay.firefight` /
+`.replay` / `.perf`, `s3.contract`, `anim.s3.unit`, `anim.s3`, `render.s3`, `render.crowd_weapons`,
+`anim.server_pose`, `audio.router.unit`, `audio.game`, `audio.game.crowd`, `fx.triggers.unit`, `fx.install.cells`,
+`fx.unit` and `fx.render.unit`. The install was unchanged (256 files) in every install row. Other changes:
+`godot.m2a_firefight` COST is now 80, `godot.m2a.play` is in test_budget's `gate_length_rows`, and the
+`tools<BS>uild.cmd` typo in fx3's notes is fixed. Captures (gitignored): `openBF3\b\shots\gx\` and
+`openBF3\b\shots\integw3\s3_lanes4\`.
+
 ## M2a wave 2 contract (W2.0)
 
 <!-- # M2a w2 -->
