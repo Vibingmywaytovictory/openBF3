@@ -19,6 +19,7 @@
 #include "bf3/host/presentation_events.h"
 
 #include <array>
+#include <cmath>
 #include <limits>
 #include <string>
 
@@ -172,6 +173,36 @@ TEST_CASE("m2b.gx.unit the spawn screen and Deploy") {
 	CHECK(!m2b_can_deploy(true, ms, 1000, 0));
 	ms.phase = net::MatchPhase::Loading;
 	CHECK(!m2b_can_deploy(true, ms, 1000, 0));
+}
+
+TEST_CASE("m2b.gx.unit the scoreboard at RoundOver and the play script's helpers") {
+	CHECK(m2b_scoreboard_shown(true, true, net::MatchPhase::InRound));
+	CHECK(!m2b_scoreboard_shown(false, true, net::MatchPhase::InRound));
+	CHECK(!m2b_scoreboard_shown(true, true, net::MatchPhase::RoundOver)); // the round end takes precedence
+	CHECK(m2b_scoreboard_shown(true, false, net::MatchPhase::RoundOver)); // no match known: Tab as held
+
+	// The screen window ends at RoundOver: a death 2 s before it never had the 8 s, however long the run goes on.
+	CHECK(m2b_death_had_screen_time(10.0, 18.0, -1.0, 8.0));
+	CHECK(!m2b_death_had_screen_time(10.0, 17.9, -1.0, 8.0));
+	CHECK(!m2b_death_had_screen_time(30.0, 60.0, 32.0, 8.0));
+	CHECK(m2b_death_had_screen_time(10.0, 60.0, 32.0, 8.0));
+
+	// In front of the enemy along its view (forward = (sin yaw, cos yaw)), facing back at it.
+	const sim::Vec3 enemy{ 10.0f, 2.0f, -4.0f };
+	M2bSeekSpot s = m2b_seek_spot(enemy, 0.0f, 6.0f);
+	CHECK(s.position[0] == doctest::Approx(10.0f));
+	CHECK(s.position[1] == doctest::Approx(2.0f));
+	CHECK(s.position[2] == doctest::Approx(2.0f));
+	CHECK(std::abs(s.yaw) == doctest::Approx(3.14159265f));
+	s = m2b_seek_spot(enemy, 1.5707963f, 6.0f);
+	CHECK(s.position[0] == doctest::Approx(16.0f));
+	CHECK(s.position[2] == doctest::Approx(-4.0f).epsilon(1e-3));
+	CHECK(s.yaw == doctest::Approx(-1.5707963f));
+	// facing it: the direction from the spot to the enemy is the spot's forward
+	CHECK(std::sin(s.yaw) == doctest::Approx(-1.0f));
+	s = m2b_seek_spot(enemy, std::nanf(""), 6.0f);
+	CHECK(s.position == enemy);
+	CHECK(s.yaw == 0.0f);
 }
 
 TEST_CASE("m2b.gx.unit the SpawnRequest and its resend") {

@@ -5,6 +5,7 @@
 
 #include "bf3/host/hud_feed.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -125,6 +126,32 @@ void m2b_deploy_spawned(M2bDeploy &r_deploy) {
 	r_deploy.armed = false;
 	r_deploy.sent = false;
 	r_deploy.sent_tick = 0;
+}
+
+bool m2b_scoreboard_shown(bool p_held, bool p_match_valid, net::MatchPhase p_phase) {
+	return p_held && !(p_match_valid && p_phase == net::MatchPhase::RoundOver);
+}
+
+bool m2b_death_had_screen_time(double p_death_t, double p_now_t, double p_round_over_t, double p_need_s) {
+	const double end = p_round_over_t >= 0.0 ? std::min(p_now_t, p_round_over_t) : p_now_t;
+	return end - p_death_t >= p_need_s;
+}
+
+M2bSeekSpot m2b_seek_spot(const sim::Vec3 &p_enemy, float p_enemy_yaw, float p_metres) {
+	M2bSeekSpot r;
+	r.position = p_enemy;
+	if (!std::isfinite(p_enemy_yaw) || !std::isfinite(p_metres) || !std::isfinite(p_enemy[0]) || !std::isfinite(p_enemy[1]) || !std::isfinite(p_enemy[2])) {
+		r.yaw = 0.0f;
+		return r;
+	}
+	r.position[0] += std::sin(p_enemy_yaw) * p_metres;
+	r.position[2] += std::cos(p_enemy_yaw) * p_metres;
+	constexpr float kPi = 3.14159265358979323846f;
+	r.yaw = p_enemy_yaw + kPi;
+	if (r.yaw > kPi) {
+		r.yaw -= 2.0f * kPi;
+	}
+	return r;
 }
 
 std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, bool p_have_cam) {

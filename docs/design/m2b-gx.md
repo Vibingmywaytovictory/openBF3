@@ -111,9 +111,12 @@ Named defaults (measured = false):
 * M2a's `[m2a] firefight bots: 31 (free)` line still prints in an M2b session, because M2a's server config runs
   before gx's `[server]`, which then removes the firefight bots. The `[m2b] 31 TDM bots` line that follows is the
   true one.
-* The E9 check makes sure of at least one own death. After 20 s alive in a round, a dev Teleport puts the player
-  4 m behind the nearest enemy, facing it (the player never fires). After 38 s, a 60 m drop kills it (M1's fall
-  damage).
+* The E9 check makes sure of at least one own death by a soldier (the kill card and the death view need a killer).
+  Until the first own death, 6 s into a life and then every 4 s, a dev Teleport puts the player 6 m in front of the
+  nearest enemy along its view, facing it (another enemy than the last one when there is one; the player never
+  fires). After 26 s still alive, a 60 m drop is the last resort (no killer: `kill_card_bad` still fails then).
+  Before the verify fix (§6.1) the seek came at 20 s, once, 4 m behind the enemy, and the drop at 38 s: too late for
+  a 15-kill round.
 
 ## 4. The play check (E9)
 
@@ -200,6 +203,39 @@ RU 15), 42.6 s of play, 46.1 s wall with the load; install unchanged: yes.
 Not exercisable headless (the scene's crowd and viewmodels are off headless): the 15 s corpses and the own corpse
 (`set_corpse_seconds`), the defibrillator in 1p, the death view on screen. They are E9's window run
 (`godot.m2b.play`) and the user's playtest.
+
+### 6.1 The verify fix: a reliable own death in E9 (2026-10-19)
+
+The verifier's one windowed E9 run failed: the player was not killed before RoundOver at 42.2 s (no own death, one
+deploy, no kill card, no death view). The headless pass had passed only because a bot happened to kill the player at
+27 s. The script's fallbacks were too late for a 15-kill round (about 35-45 s): one seek at 20 s, 4 m behind an
+enemy (which then did not turn), and the 60 m drop at 38 s (still falling at RoundOver).
+
+The fix (`m2b_check.cpp`, helpers in `m2b_game.{h,cpp}` covered by `m2b.gx.unit`):
+
+* **The seek.** Until the first own death: 6 s into the life, then every 4 s, the player is put 6 m in front of the
+  nearest enemy along its view (`m2b_seek_spot`), facing it, another enemy than the last one sought when there is
+  one. The bot sees it at once (inside its near detection).
+* **The drop** is the last resort at 26 s and only while no own death exists.
+* **The after-death screen row** counts a death as "had time" only while the round was on for the kill card plus
+  the grace after it (`m2b_death_had_screen_time`: the window ends at RoundOver, where no spawn screen shows). A
+  death a few seconds before RoundOver no longer fails the row.
+* **Tab at RoundOver.** The script lets Tab go when RoundOver arrives, and the session hides the Tab scoreboard in
+  RoundOver (`m2b_scoreboard_shown`, in `level_session_m2b.cpp`), so the round-end screen is not covered by it
+  (the verifier's `gx_m2b_round_end.png` had the scoreboard on top) [inferred: BF3's round end replaces the in-round
+  overlays].
+
+Measured after the fix, one run each (indicative only):
+
+| run | result |
+|---|---|
+| `m2b.gx.unit`, `m2b.contract`, `m2b.contract2` | 3/3 passed (the new case: the scoreboard at RoundOver, the screen-time window, the seek spot) |
+| headless E9 (`--headless ... --m2b-check=play --kill-limit=15 --preround=0`) | M2B CHECK: PASS, 13 pass + `missing_lookups` SKIP (headless). Life 1 at 1.2 s, seek at 7.2 s (enemy slot 2), own death at 9.0 s (killer 2), deploy engineer at 14.3 s, RoundOver at 40.8 s (US 13 - RU 15); 28 == 28 feed lines, 172 Tab samples 0 mismatches, 1 kill card 0 bad, 1 death view; install unchanged: yes |
+| windowed E9 (the same args plus `--m2b-shots=<openBF3>\b\shots\gx`, by hand, user-active flag absent) | M2B CHECK: PASS, 14/14 rows, 0 ERROR lines, `missing_lookups` 0. Life 1 at 1.8 s, seeks at 7.8 s (slot 30) and 11.8 s (slot 4), own death at 12.7 s (killer 4), deploy engineer at 17.9 s, RoundOver at 33.8 s (US 6 - RU 15); 21 == 21 feed lines, 115 Tab samples 0 mismatches, 1 kill card 0 bad, 1 death view 0 bad inputs; 5 screenshots; install unchanged: yes |
+
+What the captures show (`b\shots\gx`): `gx_m2b_killcard.png` has the kill card (KILLED BY bot, M27 IAR, HEADSHOT,
+7 M, the killer's health 100) over the death view, pulled back with the killer in the frame; `gx_m2b_round_end.png`
+has the round-end screen ("YOUR TEAM WON", RU 15 / US 6, the top three) and no scoreboard on top.
 
 ## 7. Handoff (merge pass)
 

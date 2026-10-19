@@ -3161,3 +3161,9 @@ Measured 2026-10-19, `m2b/gx`, shared machine (times indicative only):
   1 death view with 0 bad inputs; RoundOver at 39.6 s (US 7 - RU 15); install unchanged: yes. The rows the merge
   touches (m2b.gx.unit, m2b.contract, m2b.contract2, m2b.cam.unit, ui.hud.tdm.unit / .install, fx.triggers.unit,
   godot.m2a_viewmodel, godot.m2a_tp_crowd) pass.
+* **The verify fix: a reliable own death in E9** (m2b-gx.md §6.1). The play script now puts the player in front of
+  the nearest enemy 6 s into a life and every 4 s until the first own death (the drop is the last resort at 26 s), a
+  death right before RoundOver no longer counts against the after-death spawn screen, and the Tab scoreboard gives
+  way to the round-end screen. One run each, by hand: headless PASS (own death at 9.0 s, RoundOver at 40.8 s);
+  windowed PASS, 14/14 rows, 0 ERROR lines, `missing_lookups` 0 (own death at 12.7 s by a bot, deploy engineer at
+  17.9 s, RoundOver at 33.8 s, 5 screenshots); install unchanged: yes.

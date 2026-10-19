@@ -117,6 +117,22 @@ bool m2b_deploy_step(M2bDeploy &r_deploy, bool p_screen_up, bool p_can_deploy, s
 // A new own life arrived: the armed request is done.
 void m2b_deploy_spawned(M2bDeploy &r_deploy);
 
+// The Tab scoreboard is drawn while Tab is held, except in RoundOver: the round-end screen takes precedence then
+// [inferred: BF3's end of round replaces the in-round overlays].
+bool m2b_scoreboard_shown(bool p_held, bool p_match_valid, net::MatchPhase p_phase);
+
+// The play script's helpers (m2b_check.cpp; pure so m2b.gx.unit covers them).
+// An own death "had time" for the spawn screen when the round stayed on for p_need_s after it: the run's clock at
+// p_now_t, or the RoundOver time p_round_over_t (< 0: none yet) if earlier, since no spawn screen shows in RoundOver.
+bool m2b_death_had_screen_time(double p_death_t, double p_now_t, double p_round_over_t, double p_need_s);
+// Where the script puts the player to get shot: p_metres in front of an enemy along its view (sim's yaw: forward is
+// (sin yaw, 0, cos yaw)), facing it, so the enemy's perception sees it at once. Non-finite input: the enemy's spot.
+struct M2bSeekSpot {
+	sim::Vec3 position{};
+	float yaw = 0.0f; // radians, facing the enemy
+};
+M2bSeekSpot m2b_seek_spot(const sim::Vec3 &p_enemy, float p_enemy_yaw, float p_metres);
+
 // The play case (E9) as counted by m2b_check.cpp. "ui" rows read fill_hud_tdm's model (headless) and, in a window,
 // Bf3TdmHud's records; "cam" rows Bf3DeathCamera's stats.
 struct M2bPlayTally {

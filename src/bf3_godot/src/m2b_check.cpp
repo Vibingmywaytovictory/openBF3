@@ -54,8 +54,14 @@ constexpr double kM2bJoinShotDelayS = 1.5; // the join spawn screen's screenshot
 constexpr double kM2bChooseDelayS = 0.6; // a kit key, then Deploy, this long after the spawn screen came up
 constexpr double kM2bTabEveryS = 9.0; // Tab held for kM2bTabHoldS this often while alive
 constexpr double kM2bTabHoldS = 0.6;
-constexpr double kM2bSeekEnemyAfterS = 20.0; // alive this long without dying: a Teleport next to an enemy bot
-constexpr double kM2bFallAfterS = 38.0; // still alive: a Teleport 60 m up (M1's fall damage), so E9 has an own death
+// E9 needs an own death by a soldier (the kill card, the death view) and a second deploy well before a 15-kill round
+// ends (about 40 s): until the first own death the script puts the player in front of the nearest enemy, again every
+// kM2bSeekEveryS with another enemy if one is there, and drops it as the last resort (no killer: the kill card row
+// still fails then, honestly).
+constexpr double kM2bSeekEnemyAfterS = 6.0; // alive this long without an own death yet: the first Teleport to an enemy
+constexpr double kM2bSeekEveryS = 4.0; // still alive: the next enemy
+constexpr float kM2bSeekFrontMetres = 6.0f; // in front of the enemy along its view, facing it (inside its near detection)
+constexpr double kM2bFallAfterS = 26.0; // still alive: a Teleport 60 m up (M1's fall damage)
 constexpr double kM2bScreenGraceS = 4.0; // a death counts for the after-death row when this much time follows its kill card
 constexpr double kM2bRoundOverHoldS = 3.0; // the run ends this long after RoundOver (the round-end screen's shot)
 constexpr double kM2bHardEndAfterS = 45.0; // past play_seconds without a RoundOver: the run ends (round_over fails)
@@ -84,7 +90,9 @@ struct M2bCheck::State {
 	uint32_t life_seen = 0;
 	bool was_alive = false;
 	double life_t0 = -1.0;
-	bool sought_enemy = false, dropped = false;
+	double next_seek = -1.0; // the next Teleport to an enemy (run clock); < 0: none this life
+	uint8_t last_sought = 0xFF; // the enemy slot of the last Teleport
+	bool dropped = false;
 	double tab_until = -1.0, next_tab = 0.0;
 	bool tab_shot = false;
 	// The own deaths.
@@ -140,7 +148,7 @@ struct M2bCheck::State {
 			return;
 		}
 		death_pending = false;
-		const bool had_time = p_t - death_t >= host::kKillCardSeconds + kM2bScreenGraceS || death_screen_seen;
+		const bool had_time = m2b_death_had_screen_time(death_t, p_t, round_over_t, host::kKillCardSeconds + kM2bScreenGraceS);
 		if (death_screen_seen) {
 			++tally.deaths_checked;
 			++tally.screens_after_death;
@@ -181,7 +189,8 @@ struct M2bCheck::State {
 			life_seen = fr.own_curr.life;
 			++lives_seen;
 			life_t0 = p_t;
-			sought_enemy = dropped = false;
+			next_seek = p_t + kM2bSeekEnemyAfterS;
+			dropped = false;
 			resolve_death(revived, p_t);
 			if (!revived) {
 				tally.kits_deployed_mask |= 1u << std::min<uint8_t>(fr.own_kit, 3);
@@ -232,7 +241,12 @@ struct M2bCheck::State {
 				++deploy_index;
 			}
 		}
-		// Alive: stand in the open, hold Tab now and then; seek an enemy, then fall, if nobody comes.
+		// RoundOver: Tab is let go (the round-end screen shows; a scoreboard held then would stay up).
+		if (round_over && tab_until >= 0.0) {
+			mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
+			tab_until = -1.0;
+		}
+		// Alive: stand in the open, hold Tab now and then; until the first own death, seek enemies, then fall.
 		if (g.alive && !round_over) {
 			if (tab_until < 0.0 && p_t >= next_tab) {
 				tab_until = p_t + kM2bTabHoldS;
@@ -250,11 +264,12 @@ struct M2bCheck::State {
 				}
 			}
 			const bool in_round = fr.match_valid && fr.match.phase == net::MatchPhase::InRound;
-			if (in_round && !sought_enemy && p_t - life_t0 >= kM2bSeekEnemyAfterS) {
-				sought_enemy = true;
-				seek_enemy(p_now_ns);
+			const bool need_death = m.own_deaths == 0;
+			if (in_round && need_death && next_seek >= 0.0 && p_t >= next_seek) {
+				next_seek = p_t + kM2bSeekEveryS;
+				seek_enemy(p_now_ns, p_t);
 			}
-			if (in_round && !dropped && p_t - life_t0 >= kM2bFallAfterS) {
+			if (in_round && need_death && !dropped && p_t - life_t0 >= kM2bFallAfterS) {
 				dropped = true;
 				sim::Vec3 up = fr.own_curr.position;
 				up[1] += 60.0f;
@@ -270,13 +285,14 @@ struct M2bCheck::State {
 		}
 	}
 
-	void seek_enemy(uint64_t p_now_ns) {
+	void seek_enemy(uint64_t p_now_ns, double p_t) {
 		const host::PresentationFrame &fr = f();
 		std::array<host::PresentedSoldier, net::kMaxSlots> others{};
 		const size_t n = fr.valid ? host::present_others(fr, p_now_ns, others) : 0;
 		const sim::Vec3 &me = fr.own_curr.position;
-		int best = -1;
-		float best_d = 1e30f;
+		// The nearest enemy, another than the last one sought when there is one (that one did not shoot).
+		int best = -1, best_other = -1;
+		float best_d = 1e30f, best_other_d = 1e30f;
 		for (size_t i = 0; i < n; ++i) {
 			const uint8_t team = g.slot_team[others[i].slot];
 			if (team == 0 || team == m.own_team) {
@@ -288,19 +304,24 @@ struct M2bCheck::State {
 				best_d = d;
 				best = int(i);
 			}
+			if (others[i].slot != last_sought && d < best_other_d) {
+				best_other_d = d;
+				best_other = int(i);
+			}
+		}
+		if (best_other >= 0) {
+			best = best_other;
 		}
 		if (best < 0) {
-			note("no enemy in view to walk to");
+			note(m2b_fmt("%.1f s: no enemy in view to walk to", p_t));
 			return;
 		}
-		// 4 m behind the enemy along its view, facing it (the player never fires: the bot turns and shoots).
+		// In front of the enemy, facing it (the player never fires: the bot sees it and shoots).
 		const host::PresentedSoldier &e = others[size_t(best)];
-		const float yaw = e.yaw;
-		sim::Vec3 at = e.position;
-		at[0] -= std::sin(yaw) * 4.0f;
-		at[2] -= std::cos(yaw) * 4.0f;
-		send_teleport(at, yaw);
-		note(m2b_fmt("alive %.0f s without a fight: teleported next to enemy slot %u", kM2bSeekEnemyAfterS, unsigned(e.slot)));
+		const M2bSeekSpot spot = m2b_seek_spot(e.position, e.yaw, kM2bSeekFrontMetres);
+		last_sought = e.slot;
+		send_teleport(spot.position, spot.yaw);
+		note(m2b_fmt("%.1f s, alive %.0f s without an own death: teleported in front of enemy slot %u", p_t, p_t - life_t0, unsigned(e.slot)));
 	}
 
 	void sample_scoreboard() {

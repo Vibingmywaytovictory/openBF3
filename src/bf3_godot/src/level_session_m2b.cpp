@@ -528,7 +528,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		m2b_build(r_game, m, p_headless);
 	}
 	InputMapper &mapper = r_session.mapper();
-	m.scoreboard_held = mapper.m2b_scoreboard_held();
+	m.scoreboard_held = m2b_scoreboard_shown(mapper.m2b_scoreboard_held(), f.match_valid, f.match.phase); // RoundOver: the round end instead
 	// 1. ui: the M2b screens from the same input and drained events as fill_hud (m2b_game.h's frame order).
 	auto t0 = std::chrono::steady_clock::now();
 #if OPENBF3_M2B_HAVE_UI
