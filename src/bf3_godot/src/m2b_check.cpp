@@ -264,12 +264,14 @@ struct M2bCheck::State {
 				}
 			}
 			const bool in_round = fr.match_valid && fr.match.phase == net::MatchPhase::InRound;
-			const bool need_death = m.own_deaths == 0;
+			// integ/m2b-w2 [revived seek]: a bot's revive gives a life without a deploy, so the script keeps seeking until
+			// a death was followed by a deploy (the merge pass's play check: revived at 14.9 s, then alive to RoundOver).
+			const bool need_death = m.own_deaths == 0 || m.deploys < 2;
 			if (in_round && need_death && next_seek >= 0.0 && p_t >= next_seek) {
 				next_seek = p_t + kM2bSeekEveryS;
 				seek_enemy(p_now_ns, p_t);
 			}
-			if (in_round && need_death && !dropped && p_t - life_t0 >= kM2bFallAfterS) {
+			if (in_round && m.own_deaths == 0 && !dropped && p_t - life_t0 >= kM2bFallAfterS) { // integ/m2b-w2 [revived seek]: the drop stays the first death's last resort
 				dropped = true;
 				sim::Vec3 up = fr.own_curr.position;
 				up[1] += 60.0f;
