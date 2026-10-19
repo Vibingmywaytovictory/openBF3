@@ -24,6 +24,7 @@
 #include "bf3/core/ui/swf_layout.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
+#include "bf3/net/protocol.h" // M2b W2.0 (ui): net::MatchState, net::PlayerRow in HudFeedInput
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
@@ -92,12 +93,37 @@ core::Result<HudStatic> make_hud_static(const sim::weapons::WeaponTable &p_table
 // Returns the number of rows filled.
 size_t apply_item_names(HudStatic &r_static, const core::ui::ItemIconIndex &p_items);
 
+struct KitTable; // M2b W2.0 (ui): bf3/host/kits.h
+// M2b W2.0 (ui, docs/design/m2b.md §4): the kill card's inputs that are not in the events or the frame. gx sets them in
+// the display frame that drains the own Death event (the killer's presented position is gone a few frames later).
+struct HudKillCardSource {
+	bool killer_seen = false; // the killer was drawn (present_others) when the own Death event was drained
+	float distance_m = -1.0f; // own position to the killer's presented position then (metres); < 0 unknown
+};
+
 struct HudFeedInput {
 	PresentedWeapon weapon; // present_weapon of this display frame
 	bool alive = false;
 	float health = 0; // the own soldier's presented health
 	sim::Pose pose = sim::Pose::Stand;
 	double now_s = 0; // presentation clock (seconds), for the hit indicator's timer
+	// M2b W2.0 (docs/design/m2b.md §2.6 #16, §4; ui reads them in fill_hud_tdm, gx sets them per display frame from
+	// the PresentationFrame; fill_hud ignores them, so M2a is unchanged). See the M2b W2.0 block at the end of this file.
+	bool m2b = false; // M2b W2.0 (ui): feed the M2b screens (false: fill_hud_tdm hides them)
+	bool match_valid = false; // M2b W2.0 (ui): PresentationFrame::match_valid
+	net::MatchState match; // M2b W2.0 (ui): PresentationFrame::match
+	std::span<const net::PlayerRow> players; // M2b W2.0 (ui): PresentationFrame::players[0, player_count), ascending slot
+	uint8_t own_slot = 0xFF; // M2b W2.0 (ui): ClientStats::slot once spawned (0xFF: none yet)
+	uint8_t own_team = 0; // M2b W2.0 (ui): PresentationFrame::own_team (0 unknown, 1, 2)
+	sim::Tick server_tick = 0; // M2b W2.0 (ui): the newest server tick received (PresentationFrame::newest_tick)
+	sim::Tick own_respawn_tick = 0; // M2b W2.0 (ui): PresentationFrame::own_respawn_tick
+	sim::Tick own_revive_until = 0; // M2b W2.0 (ui): PresentationFrame::own_revive_until
+	bool own_unspawned = false; // M2b W2.0 (ui): PresentationFrame::own_unspawned
+	bool spawned_this_round = false; // M2b W2.0 (ui): the own soldier had a life since the round (re)started
+	uint8_t spawn_kit = 0; // M2b W2.0 (ui): the spawn screen's selected kit (the game keeps it: keys, clicks)
+	bool scoreboard_held = false; // M2b W2.0 (ui): Tab held -> HudTeam::scoreboard_enabled
+	const KitTable *kits = nullptr; // M2b W2.0 (ui): the match's kits (ClientGunplayInputs), the kit bar's items
+	HudKillCardSource kill_card_source; // M2b W2.0 (ui): what only the game knows at the own death
 };
 
 // What the feed keeps between frames (the hit indicator's timer, counters for the gates).
@@ -207,5 +233,74 @@ struct HudTextAnchor {
 	float size = 0; // stage pixels (size x scale_y)
 };
 HudTextAnchor hud_text_anchor(const HudTextSlot &p_slot, float p_ascent_per_px);
+
+} // namespace bf3::host
+
+// ---- M2b W2.0 (docs/design/m2b.md §2.6 #16, §4; owner ui; contract: docs/design/m2b-w2.md) -------------------------
+// The M2b half of the feed: the kill feed, the scoreboard rows, the kill counter, the spawn screen, the kill card, the
+// pre-round and the round end, from HudFeedInput's M2b fields and the drained events. Pure and Godot-free like
+// fill_hud (ui.hud.tdm.unit tests it from recorded frames). gx calls it right after fill_hud in the same display
+// frame with the same input and the same drained span (the body is ui's: src/bf3_host/src/hud_feed_tdm.cpp).
+//
+// As fed (the rules ui's body follows; m2b.contract2's ui rows check the pinned ones once kUiLanded):
+//   players       HudModel::players[slot] from each PlayerRow (name, team, kit, alive, bot, kills, deaths, score, ping;
+//                 local = the own slot), player_count = the highest row slot + 1, local_player = own_slot,
+//                 local_team = own_team; slots without a row are cleared
+//   team          team1_players / team2_players / sorted_players by score (then kills, then slot), friendly_team /
+//                 enemy_team1 from own_team (1 when unknown), the friendly / enemy lists, top_player1..3_name,
+//                 the winner flags on RoundOver, scoreboard_enabled = scoreboard_held
+//   kill_counter  team1_kills / team2_kills = MatchState::kills, team1_max_kills = team2_max_kills = kill_limit, the
+//                 player / leading / enemy team values from own_team
+//   messages      each drained Death event (slot = killer, aux = victim) is one kill_message line: serial + 1, killer
+//                 and victim = their slots (killer = victim: suicide, a fall), item_id from p_static's row of the def
+//                 (0 without one), headshot (kHeadshot), team_kill from the two rows' teams; with kOwnShooter (and not
+//                 a suicide) also a local_kill_message line. The screen fades a line kKillFeedSeconds after it first
+//                 drew its serial (HudKill has no time: the control's own clock)
+//   kill_card     each drained Death event with kOwnVictim starts a card: serial + 1, visible for kKillCardSeconds of
+//                 now_s, killer / killer_kit / headshot / suicide, item_id and weapon_name_sid_hash from the def's row,
+//                 killer_health = the event's value, distance_m from kill_card_source; seconds_left counts down
+//   spawn_screen  visible while m2b, match_valid, the own soldier is not alive (or own_unspawned), no kill card is
+//                 visible and the phase is not RoundOver; at_join = !spawned_this_round; selected_kit = spawn_kit;
+//                 can_deploy = server_tick >= own_respawn_tick and the phase is PreRound or InRound; the seconds from
+//                 (own_respawn_tick - server_tick) / 60; revive_possible = server_tick < own_revive_until (and not at
+//                 join); kit_items from p_input.kits' loadouts of the own team (team 1 when unknown), slot order
+//                 kHudSpawnSlots, each def's item_id from p_static (0 for kNoWeapon or a def without a row)
+//   soldier       show_medic_revive = spawn_screen.revive_possible, time_until_revive = seconds_revive_left,
+//                 time_until_death = 0 (no interactive man-down, §3.6)
+//   spawn_logic   time_to_respawn = seconds_to_deploy, start_time_to_respawn = the own death's (respawn_tick - death
+//                 tick) / 60 when known
+//   pre_round     visible in PreRound; counting_down = countdown_end_tick != 0; seconds_left from it; input_restricted
+//                 = restrict_until_tick != 0 and server_tick < restrict_until_tick
+//   end_of_round  visible in RoundOver: winner, local_won, team_kills, kill_limit, top_players by score,
+//                 seconds_to_next_round from restart_tick (0 while not scheduled)
+// With m2b false every M2b screen is hidden (visible false) and the M2a fields fill_hud wrote are left as they are.
+// Hostile or odd inputs (a slot >= 64 in a row or an event, a phase past RoundOver, ticks in the past) are clamped or
+// skipped and counted in HudTdmFeedState::bad_inputs, never trusted as indices.
+namespace bf3::host {
+
+inline constexpr double kKillFeedSeconds = 5.0; // a kill-feed line's display time (m2b.md §4: the comp data's, default 5 s) [inferred]
+inline constexpr double kKillCardSeconds = 4.0; // the kill card and the death camera (m2b.md §4) [inferred]
+// The kit bar's weapon slots: kKitSlots plus the gadget slot kKitGadgetSlot (the defibrillator with TDM kits).
+inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };
+
+// What fill_hud_tdm keeps between frames.
+struct HudTdmFeedState {
+	uint32_t kill_serial = 0; // the last kill_message serial
+	uint32_t local_kill_serial = 0; // the last local_kill_message serial
+	uint32_t kill_card_serial = 0;
+	double kill_card_until_s = 0; // now_s at which the card hides
+	sim::Tick own_death_respawn_tick = 0; // the last own Death event's extra (respawn_tick), for start_time_to_respawn
+	sim::Tick own_death_tick = 0; // the server tick of that death (the event's time)
+	// Counters for the gates (E9) and the unit rows.
+	uint64_t deaths_fed = 0; // Death events made into kill-feed lines
+	uint64_t own_deaths = 0; // kill cards started
+	uint64_t unknown_defs = 0; // a Death's def without a HudStatic row (no icon)
+	uint64_t bad_inputs = 0; // rows / events / phases skipped or clamped
+	uint64_t frames = 0;
+};
+static_assert(std::is_trivially_copyable_v<HudTdmFeedState>);
+
+void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudTdmFeedState &r_state,
+		core::ui::HudModel &r_model);
 
 } // namespace bf3::host
