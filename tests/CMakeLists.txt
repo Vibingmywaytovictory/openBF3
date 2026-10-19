@@ -1533,3 +1533,17 @@ if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     openbf3_cost(godot.m2b.play 1 150)
     openbf3_cost(godot.m2b_load 1 50)
 endif()
+
+# PT1 snd (docs/design/pt1-snd.md): the playtest's "sound glitching". audio.cuts.unit: data-free (synthetic tones through
+# MixerCore): a Kill, a cap drop of a playing one-shot and a loop parked / resumed by the cap each leave a step of up to
+# the voice's level with the cut fade off, and no step above the tone's own slope with it on; the cut counters, the
+# event ring and hostile fades; the cap's hold and resume margin (a sounding loop is not parked for a newcomer < 3 dB
+# louder; a parked one resumes only with 8 voices to spare). A unit row (<= 2 s), parallel-safe, also in the asan preset.
+# The real-data counterpart is audio.game.crowd (64 shooters): no audible cut, fewer than 1 in 20 parks short or
+# re-parked within 1 s (checks in the existing case, so audio.game.underruns runs them too).
+add_test(NAME audio.cuts.unit COMMAND test_audio_hdr --test-suite=audio-cuts)
+set_tests_properties(audio.cuts.unit PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_pt1_snd_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.cuts.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_pt1_snd_cl_dir}")
+endif()
