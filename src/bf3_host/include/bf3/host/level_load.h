@@ -48,6 +48,9 @@ class World;
 namespace bf3::core::gameplay {
 class LogicGraph; // M2b W1.0 (ru): bf3/core/gameplay/logic_graph.h
 } // namespace bf3::core::gameplay
+namespace bf3::sim::logic {
+struct RoundNativeParams; // M2b ru: bf3/sim/logic/round_natives.h
+} // namespace bf3::sim::logic
 
 namespace bf3::host {
 
@@ -105,6 +108,7 @@ core::Result<LevelDatabase> open_level_database(std::shared_ptr<const core::Inst
 		unsigned p_threads, LoadProgress *p_progress);
 
 struct GunplayLevel; // M2a sv: gunplay.h
+struct TdmTuning; // M2b ru: tdm_rules.h
 
 struct SharedLevel {
 	std::string level; // MP_Subway
@@ -129,6 +133,12 @@ struct SharedLevel {
 	std::shared_ptr<const core::gameplay::LogicGraph> logic;
 	uint64_t logic_digest = 0;
 	double seconds_logic = 0.0;
+	// M2b ru (as built, docs/design/m2b-ru.md §2): with SharedLoadOptions::tdm, the TDM natives' EBX fields the graph
+	// does not carry (RoundNativeParams, read from the mode's LogicWorld), config/tdm_tuning.cfg with the data's scoring
+	// rows (TdmTuning), and what the TDM load could not read or had to infer (the immunity abort's mapping among them).
+	std::shared_ptr<const sim::logic::RoundNativeParams> logic_natives; // M2b ru
+	std::shared_ptr<const TdmTuning> tdm_tuning; // M2b ru
+	std::vector<std::string> tdm_notes; // M2b ru
 };
 
 struct SharedLoadOptions {
@@ -148,6 +158,7 @@ struct SharedLoadOptions {
 	// immunity abort of #19 (MotorParams::protect_abort_*). Off: the M2a load, tables and hashes, unchanged. A client
 	// makes the same load as its server (MatchInfo::rules_flags).
 	bool tdm = false;
+	std::string tdm_tuning_cfg; // M2b ru: with tdm, config/tdm_tuning.cfg (host::kTdmTuningPath); empty = TdmTuning{}
 };
 
 // On the loader thread that owns p_db.
