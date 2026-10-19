@@ -35,14 +35,54 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string> // M2b ru
+#include <vector> // M2b ru
 
 namespace bf3::sim::logic {
+
+// M2b ru (as built, docs/design/m2b-ru.md §2): the TDM natives' EBX fields the graph does not carry
+// (logic_graph.cpp reads only Enabled, and Team for RoundOver, for these types, and adding fields there would change
+// every graph digest). The loader reads them from the mode's LogicWorld (host level_load.cpp) by the nodes' entity
+// GUIDs; without them (null RoundNativeConfig::params, synthetic graphs) the Metro TDM values below are the named
+// defaults [verified: bf3dump logic fields MP_Subway TeamDeathMatch0].
+struct RoundNativeParams {
+	struct KillCounter {
+		uint32_t node = core::gameplay::kNoLogicIndex; // graph node index
+		uint8_t team = 0; // TeamId (0: the node order decides, team 1 then 2)
+		int32_t max_kill_count = 100;
+		float enemy_weight = 1.0f;
+		bool ignore_ai = false;
+	};
+	std::vector<KillCounter> kill_counters; // nodes not listed: the defaults, team by node order
+	// PreRound.
+	int32_t round_min_players = 4;
+	int32_t round_max_players = 8;
+	float round_restart_countdown_s = 10.0f;
+	// HumanPlayer.
+	float player_killed_delay_s = 5.0f;
+	// AutoTeam.
+	bool auto_balance = true;
+	bool rotate_team_on_new_round = true;
+	int32_t balance_player_count = 8; // PlayerCountNeededToAutoBalance
+	int32_t balance_team_difference = 3; // TeamDifferenceToAutoBalance
+	// InputRestriction: the allowed bits (net::restrict_bits values; Metro: Yaw, Pitch, Jump, ChangePose -> Crouch,
+	// Prone, Zoom, Reload).
+	uint32_t restrict_allowed = (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) | (1u << 6) | (1u << 8) | (1u << 9);
+	bool from_data = false; // the loader read the fields (false: the defaults above)
+	std::vector<std::string> notes; // what the loader could not read
+};
 
 struct RoundNativeConfig {
 	// Metro TDM's cap; 64 for E8's 64-bot run (AutoTeam's TamFullTeams would leave half the bots out otherwise).
 	uint8_t max_players = 32;
 	int kill_limit_override = 0; // > 0 replaces KillCounter.MaxKillCount (--kill-limit; dev, not in the digest, Q12)
 	float preround_override_s = -1.0f; // < 0: RoundRestartCountdown (10 s); 0: no countdown (tests, --preround=0)
+	// M2b ru (as built): the natives' fields (null: RoundNativeParams' defaults), team kills' weight (KillCounter
+	// TeamKillWeight is not decoded, Q15: 0), whether AutoTeam swaps the teams at the restart (Q4; false keeps them).
+	std::shared_ptr<const RoundNativeParams> params;
+	float team_kill_weight = 0.0f;
+	bool rotate_teams = true;
+	bool killer_camera = true; // the Setting "BFServer.IsKillerCameraEnabled" (not decoded: a named default)
 };
 
 enum class RoundPhase : uint8_t { PreRound = 0, InRound = 1, RoundOver = 2, Restarting = 3 };
@@ -65,6 +105,10 @@ public:
 	core::Status player_died(uint8_t p_slot, uint8_t p_team, int p_killer, uint8_t p_killer_team, LogicRuntime &r_runtime);
 	core::Status kill_undone(uint8_t p_killer_team, LogicRuntime &r_runtime); // a revive takes the kill back (§3.6, J4)
 	core::Status tick_round(Tick p_tick, LogicRuntime &r_runtime); // the PreRound countdown and the player counts
+	// M2b ru (as built): the restart in place (§3.4 step 5) makes a fresh RoundNatives and LogicRuntime over the same
+	// graph (LevelControl reloads the level's logic) and enters every player again with its team for the new round
+	// (RotateTeamOnNewRound's swap is applied by the caller).
+	core::Status player_enter_team(uint8_t p_slot, bool p_bot, uint8_t p_team, LogicRuntime &r_runtime);
 
 	// Graph -> game.
 	RoundPhase phase() const;
@@ -80,6 +124,10 @@ public:
 	float player_killed_delay_s() const; // HumanPlayer.PlayerKilledDelay (5.0 on Metro TDM)
 	bool killer_camera() const; // the Setting "BFServer.IsKillerCameraEnabled" (default true)
 	std::span<const NativeTimelineEntry> timeline() const;
+	// M2b ru (as built).
+	uint32_t balance_moves() const; // AutoTeam moves applied (at the moved player's death)
+	uint32_t players() const; // players in the game with a team (PreRound's count)
+	const RoundNativeParams &params() const;
 
 	// Per native type: deliveries this object handled vs. handed to the embedded stubs as Recorded (E1). One row per
 	// native type present in the graph, ascending LogicTypeId.

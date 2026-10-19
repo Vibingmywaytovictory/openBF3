@@ -157,3 +157,9 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/bots/perception.h
     include/bf3/sim/bots/aim_model.h
 )
+
+# M2b ru (docs/design/m2b.md §3.1, §3.5; docs/design/m2b-ru.md): the TDM natives behind S4's bindings. The scored
+# spawn choice is the additive block at the end of src/spawn.cpp (already listed).
+target_sources(bf3_sim PRIVATE
+    src/logic/round_natives.cpp
+)
