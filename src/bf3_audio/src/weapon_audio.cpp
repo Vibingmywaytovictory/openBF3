@@ -1031,18 +1031,12 @@ struct WeaponAudioRouter::Impl {
 				t.held = kNoInstance;
 				v = nullptr;
 			}
+			// PT1 rld [others]: replaces the Reload-only one-shot on a reload_seq change: Reload, its release, Action.
+			foley_other(s, w, t, r_clock);
 			bool evidence = false;
 			const sw::SimTime when = sw::SimTime(w.sample_tick) * sw::kTimeUnitsPerTick;
 			if (t.weapon_seen) {
 				evidence = w.burst_seq != t.burst_seq || (w.firing && w.sample_tick != t.last_firing_tick);
-				if (w.reload_seq != t.reload_seq) {
-					const WeaponAudioDef *d = def_of(w.def);
-					if (d != nullptr && d->program && d->has_reload && t.distance <= config.max_weapon_distance_m &&
-							one_shot(d->program, kHashReload, sound_seed(s.slot, 0x80000000u | (uint32_t(w.reload_seq) << 8) | w.generation), t.emitter,
-									r_clock.frame_of(when, host::PresentTimeline::Render), false)) {
-						++stats.reloads;
-					}
-				}
 			} else {
 				evidence = w.firing;
 			}
