@@ -1,6 +1,6 @@
 # M2b design: Metro TDM with bots
 
-Status: design for implementation, revision 2 (after review), 2026-10-19. M2b is the plan's next row after M2a; M3
+Status: design for implementation, revision 3 (after the second review), 2026-10-19. M2b is the plan's next row after M2a; M3
 (ENet, many clients, the logic ghost) follows it and §3.8 lists what M3 takes from here. Scope: milestone M2b of the plan
 ([research/PORTING-RESEARCH.md](../../research/PORTING-RESEARCH.md) §6, row "M2b", 6–9 slices: 3p soldiers,
 health / regen / death / respawn, kill feed, scoreboard, kill card, spawn screen; TDM through the S4 interpreter;
@@ -22,38 +22,48 @@ in git; caches only under the user cache root; never build in the main checkout.
 or bot code was opened for this design; the IW4L crates (the user's own Apache-2.0 code) may be ported with
 attribution (none is needed here).
 
-**Testing is lean (the user's direction).** Each track runs its own functional rows once on its branch. One merge
-pass per wave on main runs the `timing` and `window` rows once (docs/testing.md §1: window rows "never on branches").
-Then one verifier reads every log once, then the user's playtest (§11.1). There is no separate gate pass, no
-acceptance step that re-runs what the verifier read, and no repeated timing pass. Branch work never waits on a timing
-row.
+**Testing is lean (the user's direction).** Each track runs its own functional rows once on its branch. A wave's
+merges are batched: the merge workflow runs **one** merge pass after the wave's last merge, not one per track. The
+wave-1 pass runs the `timing` phase only (E8, E11, E13; wave 1 is the only wave that changes timed code) and no
+window phase. The wave-2 pass runs the `window` phase only (E9, E12; window rows "never on branches", docs/testing.md
+§1) and no timing phase, because wave 2 changes only Godot client code. Then one verifier reads one log per kind once,
+then the user's playtest (§11.1). There is no separate gate pass, no acceptance step that re-runs what the verifier
+read, and no timing row measured twice. Branch work never runs or waits on a timing row.
 
 ---
 
 ## 1. Exit criteria and how each one is measured
 
 Plan §6, M2b row: "a TDM round to 100 kills against 16 bots on Metro; a bots-only server produces kills; team K/D ≈ 1;
-64 bots firing keeps the audio thread under 10 % of a core with no xruns." The rows below run **in the running game**:
-headless through the real `ServerHost`, `GameServer` and `ClientSession` on Metro TDM (`host.tdm.*`, unlabelled
-unless marked), or in Godot through the real input mapping (`godot.m2b*`). Labels follow docs/testing.md §1: none =
-functional, every branch build at `-j16`; `timing` and `window` = the merge pass on main only.
+64 bots firing keeps the audio thread under 10 % of a core with no xruns." The rows below run **the real game code**
+on Metro TDM. The headless `host.tdm.*` rows step the real `GameServer` back to back on the test thread, the way M2a's
+`run_firefight` does (firefight_run.h:9–13: no ServerHost, no sockets, no wall-clock wait), with a **datagram-level
+scripted peer** (`tests/tdm_fixture.h`, #21) that sends Hello, Ready, SpawnRequest and CommandPackets through
+`GameServer::on_receive` and decodes the server's `OutDatagram`s (MatchState, PlayerList, Spawned, CombatEvents,
+snapshots). That makes them deterministic and fast. The real threaded `ServerHost` + `ClientSession` path runs in one
+short `timing` row (E13; ClientSession owns ENet, a client thread and a wall-clock time sync, client_session.h:318–330,
+so it cannot be stepped). The Godot rows use the real input mapping (`godot.m2b*`). Labels follow docs/testing.md
+§1: none = functional, every branch build at `-j16`; `timing` and `window` = the merge pass on main only.
 
 | id | criterion | threshold | measurement (row, label) |
 |---|---|---|---|
-| E1 | A TDM round to 100 kills through the interpreter, 1 scripted client + 31 bots (16 v 16) | `RoundOver` fires once with the team whose `KillCounter.Kills` (the runtime's output port) reached 100; the client's `MatchState` shows `RoundOver`, the same winner and the same two counts; the runtime never faults; every native delivery to a TDM type of §3.1 (KillCounter, PreRound, RoundOver, HumanPlayer, AutoTeam, InputRestriction, LevelControl, CharacterSpawnReference, AlternateSpawn) is handled by `RoundNatives`, 0 of them `Recorded` (`RoundNatives::coverage()`, §3.1); the round ends within 21,600 ticks (6 simulated minutes, a hard stop); after the 60 s round end the round restarts in place with both counts 0 | `host.tdm.round` (none; `--preround=0`; COST ≈ 25 s, see the estimate below the table) |
-| E2 | Bots-only server produces kills, team K/D ≈ 1, no seeing through walls, no stuck bots | 32 bots, seeds {1, 2, 3}, kill limit 50, one round each, the three in one process: every round reaches `RoundOver`; **pooled** team K/D (team-1 kills / team-2 kills over the 3 rounds) in [0.75, 1.33] (the per-seed values are printed, not gated); 0 sight detections of a target with no clear eye-to-head or eye-to-chest ray at that tick, and 0 aimed shots at a target whose last clear ray is more than 30 ticks old (blind fire at a last-known position is excluded and counted apart); 0 stuck bots (M2a's firefight metric: moved < 1 m in a 20 s window, freeze, regen-wait and revive ticks left out); 0 scored spawns (§3.5, the M2a fallback excluded and counted apart) with an enemy within 10 m; revives ≥ 1 over the 3 rounds. Reported, not gated: spawns outside the main nav component (the low-priority enclosed-spawn filter), fallback spawns | `host.tdm.bots` (none; `--preround=0`; the shared level loaded once, the 3 seeds in `parallel_map`, PROCESSORS 3, COST ≈ 15 s; `bf3dump tdm --bots=32 --seeds=1,2,3` prints the same table) |
-| E3 | Health, regen and spawn immunity | Damage at tick T: no regen before T + 600 (10 s), then +5 hp/s (1/12 hp per tick) to 100, ± 1 tick; a hit during regen restarts the delay; spawn immunity 120 ticks (2 s) from `Spawned`; any input of `SoldierDef::abort_spawn_immortality_inputs` that §3.3 maps onto a command bit ends it on both ends (the case presses Fire in one run and moves in another; both end it, and the client predicts the same `protect_ticks`) | `host.tdm.health` (none, unit-sized, scripted damage through the dev `Debug` requests) |
-| E4 | Death and respawn flow | `DeathEvent.respawn_tick` = death + 300 (PlayerKilledDelay 5 s); a `SpawnRequest` before it is refused, at or after it is accepted and `Spawned` follows within 1 tick with the requested kit; bots respawn at the earliest tick by themselves with the rules' kit; with rules off (`mode = None`, no `SharedLoadOptions::tdm`) the M2a rows pass unchanged in the same dev pass, and the case checks that such a load gives M2a's kit hash and `MotorParams` bytes (constants recorded in the case from main) | `host.tdm.respawn` (none) |
-| E5 | Revive | A downed teammate whose corpse a teammate's defibrillator shot reaches (§3.6) within 13 s (man-down) comes back at the corpse with 20 hp as a new life, `Spawned.revived = 1`; this holds for a bot and for the **remote** client's slot (a test-local scripted assault teammate fires the defib at the corpse); the enemy team's count drops by 1 (§3.6, default); the reviver scores 100; after 13 s, after the victim deploys, or from an enemy, nothing happens | `host.tdm.revive` (none) |
-| E6 | Determinism | Two headless runs of the same seed, 32 bots + the scripted client, kill limit 20, to `RoundOver` + 600 ticks: logic trace hash equal, per-tick snapshot hashes equal, 0 differing ticks; a third run with another seed differs | `host.tdm.replay` (none; its own 3 short runs in `parallel_map`, COST ≈ 10 s) |
-| E7 | Hostile input | The protocol fuzz extended to the v3 messages (0 crashes, 0 asan reports); the server ignores and counts: a SpawnRequest while alive, before `respawn_tick`, with a kit out of range, twice in a tick, in `RoundOver`, for a spectator slot ≥ 64; a v2 client is refused with `Kick` | `net.proto.fuzz` (existing row, new cases), `host.tdm.hostile` (none) |
-| E8 | Perception and bot budget | 64 bots TDM, 120 s simulated: perception ≤ 0.2 ms/tick p99; all bot brains ≤ 1.5 ms/tick p99; the server tick ≤ 4 ms p99 | `host.tdm.perf` (`timing`, the wave-1 merge pass) |
-| E9 | Client screens fed from the game | Scripted Godot play, 90 s, `--m2b-check=play --kill-limit=15 --preround=0` (the player stands in the open, so bots find it): kill-feed lines = deaths received; the scoreboard's kills per team = `MatchState`; the spawn screen appears after each own death (≥ 1) and Deploy spawns the chosen kit; the kill card names the killer and the weapon; the round-end screen appears on `RoundOver`; 0 missing font, icon or string lookups; 0 ERROR lines | `godot.m2b.play` (`window`, the wave-2 merge pass; COST ≈ 110 s with the load) |
+| E1 | A TDM round to 100 kills through the interpreter, 1 scripted peer + 31 bots (16 v 16) | `RoundOver` fires once with the team whose `KillCounter.Kills` (the runtime's output port) reached 100; the `MatchState` the peer decodes shows `RoundOver`, the same winner and the same two counts; the runtime never faults; every native delivery to a TDM type of §3.1 (KillCounter, PreRound, RoundOver, HumanPlayer, AutoTeam, InputRestriction, LevelControl, CharacterSpawnReference, AlternateSpawn) is handled by `RoundNatives`, 0 of them `Recorded` (`RoundNatives::coverage()`, §3.1); the round ends within 21,600 ticks (6 simulated minutes, a hard stop); after the 60 s round end the round restarts in place with both counts 0 | `host.tdm.round` (none; `--preround=0`; stepped; COST ≈ 25 s, see the estimate below the table) |
+| E2 | Bots-only server produces kills, team K/D ≈ 1, no seeing through walls, no stuck bots | 32 bots, seeds {1, 2, 3}, kill limit 50, one round each, the three in one process: every round reaches `RoundOver`; **pooled** team K/D (team-1 kills / team-2 kills over the 3 rounds) in [0.75, 1.33] (the per-seed values are printed, not gated); 0 sight detections of a target with no clear eye-to-head or eye-to-chest ray at that tick, and 0 aimed shots at a target whose last clear ray is more than 30 ticks old (blind fire at a last-known position is excluded and counted apart); 0 stuck bots (M2a's firefight metric: moved < 1 m in a 20 s window; freeze, regen-wait, revive-wait and revive ticks left out); 0 scored spawns (§3.5, the M2a fallback excluded and counted apart) with an enemy within 10 m; revives ≥ 1 over the 3 rounds | `host.tdm.bots` (none; `--preround=0`; stepped; the shared level loaded once, the 3 seeds in `parallel_map`, PROCESSORS 3, COST ≈ 15 s) |
+| E3 | Health, regen and spawn immunity | Damage at tick T: no regen before T + 600 (10 s), then +5 hp/s (1/12 hp per tick) to 100, ± 1 tick; a hit during regen restarts the delay; spawn immunity 120 ticks (2 s) from `Spawned`; any input of `SoldierDef::abort_spawn_immortality_inputs` that §3.3 maps onto a command bit ends it (the case presses Fire in one run and moves in another; both end it on the server, and a `sim::SoldierMotor` over the client's `MotorParams` given the same commands gives the same `protect_ticks`, which is what the client predicts with) | `host.tdm.server`, cases `health*` (none; scripted damage through the peer's dev `Debug` requests) |
+| E4 | Death and respawn flow | `DeathEvent.respawn_tick` = death + 300 (PlayerKilledDelay 5 s); a deploy-screen peer is **not** spawned by its Ready (R10) and spawns only after an accepted `SpawnRequest`; a `SpawnRequest` before `respawn_tick` is refused, at or after it is accepted and `Spawned` follows within 1 tick with the requested kit; bots respawn by themselves with the rules' kit; with rules off (`mode = None`, no `SharedLoadOptions::tdm`) the M2a rows pass unchanged in the same dev pass, and the case checks that such a load gives M2a's `kit_table_hash`, `weapon_table_hash` and `motor_params_hash` (constants recorded in the case from main 47871fa) | `host.tdm.server`, cases `respawn*` (none) |
+| E5 | Revive | A downed teammate whose corpse a teammate's defibrillator shot reaches (§3.6) inside its revive window comes back at the corpse with 20 hp as a new life, `Spawned.revived = 1`; this holds for a bot and for the **peer's** slot (a test-local scripted assault teammate fires the defib at the corpse; the peer decodes the `Spawned`); the enemy team's count drops by 1 (§3.6, default); the reviver scores 100; after the window, after the victim deployed, from an enemy, or at a living soldier, nothing happens; a revived bot is not respawned again at its old `respawn_at` | `host.tdm.server`, cases `revive*` (none) |
+| E6 | Determinism | Two stepped runs of the same seed, 32 bots + the scripted peer, kill limit 20, to `RoundOver` + 600 ticks: logic trace hash equal, per-tick world hash equal (run_firefight's hash: every slot's `soldier_state_hash` and `soldier_weapons_hash`, the projectiles, the tick's damage and detonations; firefight_run.h:24–26) and the decoded MatchState / PlayerList bytes equal, 0 differing ticks; a third run with another seed differs. Snapshot bytes are not compared: their `echo_hold_100us` is wall-clock (game_server.cpp:551) | `host.tdm.replay` (none; its own 3 short runs in `parallel_map`, COST ≈ 10 s) |
+| E7 | Hostile input | The protocol fuzz extended to the v3 messages: 0 crashes, and 0 asan reports in the asan run of ru's branch acceptance (it runs because ru touches src/bf3_sim, docs/testing.md §8; ru is accepted after nt is on main, so the new fuzz cases are in it); the server ignores and counts: a SpawnRequest while alive, before `respawn_tick`, with a kit out of range, twice in a tick, in `RoundOver`, for a spectator slot ≥ 64; a v2 client is refused with `Kick` | `net.proto.fuzz` (existing row, new cases), `host.tdm.server` cases `hostile*` (none) |
+| E8 | Perception and bot budget | 64 bots TDM (with `RoundNativeConfig::max_players = 64`; the default 32 is Metro TDM's cap, and AutoTeam's TamFullTeams would leave half the bots out), 120 s simulated: perception ≤ 0.2 ms/tick p99; all bot brains ≤ 1.5 ms/tick p99; the server tick ≤ 4 ms p99 | `host.tdm.perf` (`timing`, the wave-1 merge pass) |
+| E9 | Client screens fed from the game | Scripted Godot play, 90 s, `--m2b-check=play --kill-limit=15 --preround=0` (the player stands in the open, so bots find it): the spawn screen appears at join and after each own death (≥ 1), and Deploy spawns the chosen kit; kill-feed lines = deaths received; the scoreboard's kills per team = `MatchState`; the kill card names the killer and the weapon; the round-end screen appears on `RoundOver`; 0 missing font, icon or string lookups; 0 ERROR lines | `godot.m2b.play` (`window`, the wave-2 merge pass; COST ≈ 110 s with the load) |
 | E10 | HDR window oracle (plan §7.7) | Only a 71 dB footstep playing: window top 80, bottom 35 (± 0.5 dB); a 110 dB shot starts: the top reaches 110 within 0.05 s (± one 512-frame block), the bottom 65, and a 63 dB source is suspended; after the shot the top releases on the setting's spline; the scope rows of §6.2 (Bullet_Impact keeps the closest 5 within 1 m / 0.4 s; Death_Scream at most 4) | `audio.hdr.unit` (none, offline, synthetic sources through `MixerCore`) |
-| E11 | 64 bots firing: audio thread | The existing `godot.m2a_firefight` scene (64 bots in pairs in front of the observer, the audio worst case; slots as M2a: the observer in slot 64, rules off) with the A3 mixer: mix CPU per block / block duration ≤ 0.10 at p99 (MixerStats profiler), 0 late or short blocks (`Bf3AudioStream` underruns), live voices ≤ 128 every block | `godot.m2a_firefight` (`window`, the wave-2 merge pass; gx adds the A3 checks to its check block) |
+| E11 | 64 bots firing: audio thread | M2a au3's "64 shooters for 60 s" render (audio_router_tests.cpp:1990: Metro's kit patches, the real router, impacts) through the A3 mixer: mix CPU per block / block duration ≤ 0.10 at p99 (the `MixerStats` profiler), 0 late blocks (the existing `OPENBF3_AU3_GATE_LATE` gate), live voices ≤ 128 every block | `audio.game.underruns` (existing `timing` row; au adds the A3 checks; the wave-1 merge pass) |
 | E12 | Load | Warm load of `m2b_metro.tscn` ≤ 5 s (the M2a E16 limit; the logic graph adds a measured 0.15 s load + 0.008 s build) | `godot.m2b_load` (`window`, the wave-2 merge pass; the `godot_m1_load.cmake` script on the new scene) |
+| E13 | The real client path | Real `ServerHost` + `ClientSession` on Metro TDM, rules on, deploy screen, 7 bots, kill limit 5, pre-round 3 s: no `Spawned` before the first `send_spawn_request`; during the freeze the client predicts the restriction (0 corrections above `teleport_above_m`, 0 predicted shots while restricted); `Spawned` carries the requested kit; after a scripted death the frame's `own_respawn_tick` / `own_revive_until` equal the DeathEvent's; a revive by a scripted assault bot gives the client a new life (`Spawned.revived`); `MatchState` reaches `RoundOver`; ≤ 30 s | `host.tdm.client` (`timing`: real time and sockets, docs/testing.md §1; the wave-1 merge pass) |
 
-**Row cost estimates** (the basis of the COSTs; each track replaces them with its measured COST). M2a measured
+**Row cost estimates** (the basis of the COSTs; each track replaces them with its measured COST). Every
+functional `host.tdm.*` row is stepped (the GameServer ticks back to back, as `run_firefight` does), so wall time is
+CPU time, not simulated time. M2a measured
 64 Free bots at 1.909 ms p99 per server tick and E13's 64 Pairs bots at 7,200 ticks in 4.59 s wall (0.64 ms per tick);
 32 soldiers with perception: ≈ 0.5 ms per tick [inferred]. M2a's 64 Free bots made 3.0–3.6 kills/s; 32 bots on the same
 map ≈ 1–1.5 kills/s [inferred], so a round to 100 (≈ 190 kills with K/D ≈ 1, plus the kills revives undo) takes
@@ -61,7 +71,9 @@ map ≈ 1–1.5 kills/s [inferred], so a round to 100 (≈ 190 kills with K/D �
 level load (≈ 5–10 s with the gunplay tables). E1 ≈ 25 s; its 21,600-tick hard stop bounds it at ≈ 11 s of
 simulation, so it cannot cross the 60 s cap even at 2× under `-j16`. E2's three rounds to 50 run in parallel (≈ 3 s
 each). A round that hits the hard stop fails the row as a bot behaviour bug (bots that do not fight), not as a budget
-issue.
+issue. `host.tdm.server` (E3–E5, E7's server half) loads the shared level once per process and runs its short cases on
+fresh GameServers over it (docs/testing.md §4): ≈ 10 s load + ≈ 5 s of cases, COST ≈ 15 s. E13 is the only row on
+the real-time path; it is short by construction (kill limit 5, 7 bots, a 3 s pre-round) and bounded at 30 s.
 
 Bot behaviour targets of research/topics/06-bots.md §5 that are not rows above (the TTK-vs-skill table, ≤ 1 redeploy
 per bot-hour) are not built in M2b; the playtest judges the bots.
@@ -74,15 +86,16 @@ per bot-hour) are not built in M2b; the playtest judges the bots.
    with no enemy in sight; you cannot move or fire until the countdown ends.
 3. Fight. Check: bots turn towards gunfire, do not see through walls, miss more at range and on the first shots, strafe
    and push towards fights; your health regenerates 10 s after the last hit.
-4. Die once. Check: the kill card (killer, weapon, distance, the killer's health), the killer camera for about 4 s,
-   then the spawn screen with a timer (5 s) and "revive possible" while a medic can still reach you. Deploy again
+4. Die once. Check: the kill card (killer, weapon, distance, the killer's health) while the camera looks from your
+   body towards the killer for about 4 s, then the spawn screen with a timer (5 s) and "revive possible" while a medic can still reach you. Deploy again
    with another kit.
 5. Hold Tab: the scoreboard (two teams, kills, deaths, score, the bots marked), the team counts at the top.
 6. Play assault: the defibrillator is on key 3 (weapon slot 2, a new binding). Revive a downed teammate (aim at the body within 1.8 m and
    fire); watch a bot revive one, or get revived yourself while the spawn screen says "revive possible".
 7. Let the round end (or start with `tools\play.cmd --kill-limit=20`): the round-end screen with the winner, then the
    round restarts in place after 60 s.
-8. Report anything that feels wrong; the named defaults of §13 are the knobs (`config/tdm_tuning.cfg`, `config/bot_tuning.cfg`).
+8. The pre-round countdown runs before every round (J2); start with `--preround=0` if it gets in the way.
+9. Report anything that feels wrong; the named defaults of §13 are the knobs (`config/tdm_tuning.cfg`, `config/bot_tuning.cfg`).
 
 ---
 
@@ -93,20 +106,24 @@ per bot-hour) are not built in M2b; the playtest judges the bots.
 | seam | where | what M2b does with it |
 |---|---|---|
 | `CommandSource` | src/bf3_host/include/bf3/host/game_server.h:75–79 | the TDM bot brain is one, as FirefightBrain is |
-| `GameServerConfig` | game_server.h:81–103; `respawn_ticks = 60` at :88 | gains `rules` (§2.6 #1); `respawn_ticks` stays M2a's fallback |
+| `GameServerConfig` | game_server.h:81–103; `respawn_ticks = 60` at :88; `bots` (BotFillConfig, `spawn_in_main`) :96; `firefight` :102 | gains `rules` and `tdm_bots` (§2.6 #1); `respawn_ticks` stays M2a's fallback |
+| `GameServer::init` order | game_server.cpp:768–813 (`init` ends at :813): `sv_init()` at :792, S1's bots :799–810, `add_firefight_bots(*this, p_config)` at :811 | `[tdm bots]` after :811: `add_tdm_bots(*this, p_config)` when `config.tdm_bots` is set; it runs after `sv_init` created the rules, so `[add]`'s `on_connect` has them. ServerHost exposes no GameServer after init (server_host.h:23–35, the `game` config at :35), so a config member is the only way the Godot sessions can add TDM bots |
+| `GameServer::on_connect` / `on_receive` / `tick(out)` | game_server.h:176–181 | the stepped fixture (#21) drives these directly, as `run_firefight` does (firefight_run.cpp:305, :369) |
 | `GameServer::add_local_soldier` / `place_soldier` / `view()` / `gunplay()` | game_server.h:185, :196, :199, :201 | TDM bots are added through `add_local_soldier` (team 0 = AutoTeam's choice, `[add]`); `place_soldier` is **not** used for revive: `sv_place` refuses a client's slot (game_server.cpp:1167–1168; `place_soldier` itself at :1520) and never sends `Spawned` |
 | no hook for a custom `RespawnPolicy` or `CombatEventSink` | game_server.h (absent) | the missing interface #1 |
 | `Impl::Slot` (team, want_spawn, respawn_at, spawn_index, state, source) | src/bf3_host/src/game_server.cpp:88–122 | per-slot rules state lives in the rules, keyed by slot, not in `Slot` |
 | `add_local` (sets `s.team = p_team`, then `spawn` at once) | game_server.cpp:721–736 | `[add]`: with rules, the team comes from `TdmRules::on_connect` before the spawn |
-| `spawn()` with `sim::choose_spawn`; sends `net::Spawned` to a remote slot | game_server.cpp:224–270, call at :236, send at :258–263 | the call is replaced (R1) by the rules' spawn choice when rules are active; the revive path copies the send |
+| `spawn()` with `sim::choose_spawn`; sends `net::Spawned` to a remote slot | game_server.cpp:224–270: the point list is BotLevel's main-component list for a bot slot with `spawn_in_main`, else `config.level->spawns` (:227–230); the call at :236; the send at :258–263 | R1 passes **that same list** to the rules' chooser, so the returned index always refers to the list `spawn()` uses; the revive path copies the send |
+| Ready handler | game_server.cpp:859–861: `if (!s.spawned) s.want_spawn = true;` | R10: with rules and `deploy_screen`, Ready does not set `want_spawn` (the human waits on the spawn screen) |
 | `handle_hello` sets `s.team = 1` | game_server.cpp:300, :330 | AutoTeam picks the team (R2) |
 | `run_tick` | game_server.cpp:588–700: sources at step 3, the motor loop with `sv_step_soldier` (:661), fall death `respawn_at = n + config.respawn_ticks` (:662–665), `sv_rules(n)` (:672), respawn when `want_spawn && n >= respawn_at` (:673–677), debug, sweep, snapshots | the rules step goes in `sv_rules` (below); the fall-death lines ask the policy (R3) |
-| KitSelect dispatch | game_server.cpp:893; `sv_kit_select` :1433, team change refused without `dev_commands` :1452–1457 | kit choice moves to `SpawnRequest`; KitSelect stays for M2a rows |
-| `FixedRespawn` | game_server.cpp:978–982 | stays the default policy; the rules supply their own |
-| `Sink` | game_server.cpp:984–1003: `death` pushes the `DeathEvent` into `combat.deaths` **first** (:988), then asks `sv->respawn->respawn_tick(victim, tick + 1)` and sets `want_spawn` / `respawn_at` (:994–999) | R8 reorders it: the policy first, then the stamped event is pushed (§3.4) |
+| KitSelect dispatch | game_server.cpp:893; `sv_kit_select` :1433 sets `ps.kit` (:1451), team change refused without `dev_commands` :1452–1457 | kit choice moves to `SpawnRequest` with the deploy screen; KitSelect stays for M2a rows and for `--deploy-screen=0` |
+| `FixedRespawn`; `Sv::respawn` is a `std::unique_ptr<RespawnPolicy>` | game_server.cpp:978–982, :1052, made in `sv_init` :1071–1073 | stays the default policy; R3 and R8 ask `sv_policy()` (#20: the rules when present, else `*respawn`), so no unique_ptr is aliased |
+| `Sink` | game_server.cpp:984–1003: `death` pushes the `DeathEvent` into `combat.deaths` **first** (:988), then asks `sv->respawn->respawn_tick(victim, tick + 1)` and sets `want_spawn` / `respawn_at` (:994–999); it runs inside `apply_rules`, which works on `sv->tick_states` (:1143–1144) | R8 reorders it: the policy first, then the stamped event is pushed (§3.4); `killer_health` is read from `sv->tick_states[killer]`, the current tick's copy, not from the slots |
 | `View`, PerSlot, `sv_init` creating FixedRespawn | game_server.cpp:1004–1033, :1065, :1072 | `sv_init` creates the rules when `config.rules.mode == Tdm` |
 | `sv_rules`: `tick_states` built (:1136–1141), `step_projectiles` / `apply_rules` (:1143–1144), copied back into the slots (:1145–1149), then the placements (:1152–1158) | game_server.cpp:1130–1159 | `[rules]` between `apply_rules` and the copy-back (the only writable copy of every state: regen writes health there); `[orders]` after the placements |
-| `sv_place`, `sv_on_spawn` (`ps.kit = slot % kKitCount` for local soldiers, :1206–1208), `sv_spawned` | game_server.cpp:1162, :1196, :1214 | R7: with rules, `ps.kit = rules->kit_of(slot)` for every slot |
+| `sv_place`, `sv_on_spawn` (KitSelect's `next_team` :1202–1205, `ps.kit = slot % kKitCount` for local soldiers :1206–1208, then `gunplay->on_spawn(slot, kit, team)` :1209–1210), `sv_spawned` | game_server.cpp:1162, :1196, :1214 | R7: with rules, `s.team = rules->team_of(slot)`, the kit from `rules->kit_of(slot)` when it has one (a remote slot without the deploy screen keeps its KitSelect kit), and `rules->on_spawned(slot, tick)` |
+| snapshot fields | game_server.cpp:551: `echo_hold_100us` from `net::monotonic_ns()` | wall-clock, so E6 hashes the world, not the snapshot bytes |
 | `sv_match_info` | game_server.cpp:1410 | adds the logic digest and rules flags |
 | `CombatEventSink` (hit, death, detonation) | src/bf3_host/include/bf3/host/gunplay.h:141–147 | gains `revive` (default empty body) |
 | `RespawnPolicy::respawn_tick(slot, death_tick)` | gunplay.h:150–154 | the rules implement it |
@@ -117,7 +134,7 @@ per bot-hour) are not built in M2b; the playtest judges the bots.
 | `ServerView` | src/bf3_host/include/bf3/host/server_view.h:17–27 (states, team, alive, weapons, world, tick; all pure virtual, read-only); one implementer, `View` game_server.cpp:1004–1033 | gains `downed()`, `phase()`, `input_restricted()`, `kit()` with default bodies (#10) |
 | `SharedLevel`, `SharedLoadOptions`, `load_shared_level` | src/bf3_host/include/bf3/host/level_load.h:106–123, :125–137 (`gunplay` :137), :140 | gain the logic graph (#3) and the assault gadget option (#9) |
 | FirefightBrain | src/bf3_host/include/bf3/host/firefight_brain.h: `FirefightConfig` :74–102, seeds `match_seed ^ slot` :105, `FirefightBrain` :134–147, `add_firefight_bots` :151; as-built in docs/design/m2a-bt.md | the TDM brain starts from its code (perception, burst fire, hunt) |
-| BotSpawns / BotLevel / BotNav | src/bf3_host/include/bf3/host/bot_fill.h:74–81, :83–98 | the main nav component filters spawns for humans too |
+| BotSpawns / BotLevel / BotNav | src/bf3_host/include/bf3/host/bot_fill.h:74–81, :83–98 | TDM bots keep S1's main-component spawn list (`spawn_in_main`, the default, bot_fill.h:157); `TdmRules::create` takes `GameServerConfig::bots->level` for the nav |
 | `PresentKind`, `PresentEvent` (64 bytes; Death: slot = killer, aux = victim, def, flags kHeadshot, material = zone) | src/bf3_host/include/bf3/host/presentation_events.h:43, :54–71 | appends `Revive` |
 | `ClientSessionConfig`, `PresentationFrame`, `ClientSession` (`send_kit_select` :361) | src/bf3_host/include/bf3/host/client_session.h:103, :254–306, :318–369 | gains match state, player rows, `send_spawn_request` |
 | `fill_hud` | src/bf3_host/include/bf3/host/hud_feed.h:95 (HudFeedInput), :104, :126 | fills the kill feed, players, spawn and round-end parts |
@@ -151,6 +168,8 @@ per bot-hour) are not built in M2b; the playtest judges the bots.
 | `KillCounterDef`, `ModeDef`, `read_mode_def`, `ScoringTable` / `read_scoring` | src/bf3_core/include/bf3/core/gameplay/mode_def.h:75, :126, :164, :173–180 | kill limit check, scores |
 | WalkerBrain, PathService, BotGoal, WalkerParams, WalkerView | src/bf3_sim/include/bf3/sim/bots/walker_brain.h:43, :52, :76, :107, :119 | bot movement |
 | `instant_hit` | src/bf3_sim/include/bf3/sim/weapons/weapon_sim_def.h:83; src/bf3_sim/src/weapons/ballistics.cpp:445 (the knife) | the defibrillator uses it |
+| ammunition in `make_weapon_sim_def` | src/bf3_sim/src/weapons/weapon_sim_def.cpp:486–494: `MagazineCapacity < 0` fails the def (:487–489), capacity clamped to ≥ 0 (:490), `unlimited_ammo = NumberOfMagazines < 0` (:494); one failed def fails `make_weapon_table` (:617–620); `has_ammo` (src/bf3_sim/src/weapons/weapon_sim.cpp:51) needs `unlimited_ammo` or a round in the magazine; the hostile-def case expects capacity −1 to fail (tests/weapons_tests.cpp:295) | the defib is `ammo -1 x 1` (MagazineCapacity −1, NumberOfMagazines 1), so **on main it cannot be built** [verified: `bf3dump weapon-sim weapons/gadgets/defibrillator/u_defib` → "MagazineCapacity = -1 is outside [0, 10000]"]; R11 / R12 (§3.6) |
+| `motor_params_hash` | src/bf3_sim/src/motor_tuning.cpp:558 (every field hashed), declared soldier_motor.h:195; compared through `MatchInfo` (protocol.h:97) | `[abort hash]`: the #19 fields are hashed only when not default, so M2a's hash is unchanged |
 | `HudModel` (kHudMaxPlayers 64, kHudKillFeedSize 8; HudPlayer :59, HudKill :101, HudKillFeed :112, HudSoldier :240 with is_alive / health / show_medic_revive / time_until_revive / is_beeing_revived, HudKillCounter :287, HudMessages :309, HudSpawnPoints :332, HudSpawnLogic :339, HudTeam :359, HudModel :382) | src/bf3_core/include/bf3/core/ui/hud_model.h | no kill-card, end-of-round or spawn-screen struct yet (#16) |
 
 ### 2.4 Audio
@@ -180,26 +199,28 @@ per bot-hour) are not built in M2b; the playtest judges the bots.
 
 | # | interface | kind | declared in | owner |
 |---|---|---|---|---|
-| 1 | `GameServerConfig::rules` (`MatchRulesConfig`: `mode` None / Tdm, `deploy_screen`, `revive`, `kill_limit_override`, `preround_override_s`; §3.2) | struct-member insertion, game_server.h | W1.0 | ru |
-| 2 | `bf3/host/tdm_rules.h`: `TdmRules : RespawnPolicy, CombatEventSink`, `RulesOrder`, `SpawnRefusal`, `DownedSoldier` (§3.2) | new header | W1.0 | ru |
-| 3 | `SharedLoadOptions::tdm` (bool, one switch for the three TDM load parts: the logic graph, the assault gadget of #9, the motor's immunity abort of #19); `SharedLevel::logic` (`shared_ptr<const LogicGraph>`), `SharedLevel::logic_digest` (u64), `SharedLevel::seconds_logic` | struct-member insertions, level_load.h | W1.0 | ru |
+| 1 | `GameServerConfig::rules` (`MatchRulesConfig`: `mode` None / Tdm, `deploy_screen`, `revive`, `kill_limit_override`, `preround_override_s`, `max_players`; §3.2) and `GameServerConfig::tdm_bots` (`std::shared_ptr<const TdmBotConfig>`, null = none); the `[tdm bots]` line in `GameServer::init` after :811 that calls `add_tdm_bots(*this, p_config)` | struct-member insertions, game_server.h; one tagged line, game_server.cpp | W1.0 | ru (the line), bb (`add_tdm_bots`) |
+| 2 | `bf3/host/tdm_rules.h`: `TdmRules : RespawnPolicy, CombatEventSink`, `RulesOrder`, `SpawnRefusal`, `RulesStats` (§3.2) | new header | W1.0 | ru |
+| 3 | `SharedLoadOptions::tdm` (bool, one switch for the three TDM load parts: the logic graph, the assault gadget of #9, the motor's immunity abort of #19); `SharedLevel::logic` (`shared_ptr<const LogicGraph>`), `SharedLevel::logic_digest` (u64), `SharedLevel::seconds_logic`; the overload `load_shared_gunplay(const LevelDatabase &, SharedLevel &, const SharedLoadOptions &)` (the 2-argument form at level_load.h:150 stays and passes default options) | struct-member insertions + an overload, level_load.h | W1.0 | ru |
 | 4 | `bf3/sim/logic/round_natives.h`: `RoundNativeConfig`, `RoundPhase`, `RoundNatives`, `NativeCoverage` (§3.1) | new header | W1.0 | ru |
-| 5 | `NativePortMeaning` values appended (the ones not already at logic_native.h:55–58): `Kills`, `KillLimit`, `TeamWins`, `StopTime`, `UnSpawnAllSoldiers`, `OnPlayerSpawned`, `OnPlayerDied`, `OnSpectatorEnter`, `PlayerEnter`, `DisableAllowedToSpawnOn`, `Deactivate`, `RestartLevel`, `StartRound`, `EnablePlayerMovement`; the matching rows in logic_native.cpp's binding table (R4) | enum append + table rows | W1.0 | ru (S4's stubs treat every new meaning as `Recorded`, so S4's rows stay bit-equal) |
-| 6 | `bf3/sim/spawn.h`: `SpawnQuery`, `choose_spawn_scored(const SpawnQuery&)` (§3.5) | new declarations, additive block | W1.0 | ru |
-| 7 | `CombatEventSink::revive(const net::ReviveEvent&)` with an empty default body | virtual-member insertion, gunplay.h | W1.0 | ru |
+| 5 | `NativePortMeaning` values appended (the ones not already at logic_native.h:55–58): `Kills`, `KillLimit`, `TeamWins`, `StopTime`, `UnSpawnAllSoldiers`, `OnPlayerSpawned`, `OnPlayerDied`, `OnSpectatorEnter`, `PlayerEnter`, `DisableAllowedToSpawnOn`, `Deactivate`, `RestartLevel`, `StartRound`, `EnablePlayerMovement`; the matching type-scoped rows in logic_native.cpp's binding table (R4; `InputRestriction.Activate` is scoped by `native_port(type, …)`, so GameInteraction's `Activate` row is untouched) | enum append + table rows | W1.0 | ru (the stubs' `switch (meaning)` in logic_native.cpp has a `default:` that records, so every new meaning stays `Recorded` there and S4's rows stay bit-equal) |
+| 6 | `bf3/sim/spawn.h`: `SpawnQuery`, `FriendlyDeath`, `choose_spawn_scored(const SpawnQuery &)` (§3.5) | new declarations, additive block | W1.0 | ru |
+| 7 | `CombatEventSink::revive(const net::ReviveEvent &)` with an empty default body | virtual-member insertion, gunplay.h | W1.0 | ru |
 | 8 | `GunplayConfig::defib_def` (`uint16_t`, `kNoWeapon` = none; set by the loader when #9 resolves the defib) | member insertion, gunplay.h | W1.0 | ru |
-| 9 | `bf3/host/kits.h`: `struct KitTableOptions { std::string assault_gadget; }` (empty = M2a), a 4-argument `make_kit_table(teams, kits, defs, const KitTableOptions&)` overload (the 3-argument one stays and calls it with empty options), `kKitGadgetSlot = 2`, `KitTable::defib_def`; `load_gunplay_level` resolves the gadget into `level->defs` and fills assault slot 2 only with `SharedLoadOptions::tdm`. `kKitSlots` is not changed; with the option off the table, its hash and every caller are unchanged | new struct + overload + constant + member insertion, kits.h / kits.cpp / gunplay.cpp `[kits]` | W1.0 | ru |
-| 10 | `ServerView::downed()` (`std::span<const DownedSoldier>`: slot, team, until tick, corpse position), `phase()` (`net::MatchPhase`), `input_restricted()`, `kit(slot)`, **with default bodies** (empty, InRound, false, 0) so test fakes stay cheap | virtual-member insertions, server_view.h; `View` overrides in game_server.cpp `[view]` | W1.0 | ru (bb reads) |
-| 11 | protocol v3: `kProtocolVersion = 3`; `MessageType::MatchState = 25`, `PlayerList = 26`, `SpawnRequest = 27`; structs `MatchState`, `PlayerRow`, `PlayerList`, `SpawnRequest`, `ReviveEvent`; `DeathEvent::respawn_tick`, `revive_until`, `killer_health`; `CombatEvents::revives`; `MatchInfo::logic_digest`, `rules_flags`; `Spawned::revived`; their encode / decode declarations | constant change, enum values, new structs, member insertions, protocol.h | W1.0 | nt |
-| 12 | `ClientSession::send_spawn_request(uint8_t kit)`; `PresentationFrame::match` (`net::MatchState`), `players` (`std::array<net::PlayerRow, 64>` + `player_count`), `own_respawn_tick`, `own_revive_until`, `own_unspawned`; `PresentKind::Revive` appended | member insertions, client_session.h, presentation_events.h | W1.0 | nt |
-| 13 | `bf3/host/tdm_brain.h` (`TdmBotConfig`, `TdmBrain`, `add_tdm_bots`), `bf3/sim/bots/perception.h` (`PerceptionParams`, `Perception`), `bf3/sim/bots/aim_model.h` (`AimParams`, `aim_error`, `lead_point`) | new headers | W1.0 | bb |
+| 9 | `bf3/host/kits.h`: `struct KitTableOptions { std::string assault_gadget; }` (empty = M2a), a 4-argument `make_kit_table(teams, kits, defs, const KitTableOptions &)` overload (the 3-argument one at kits.h:50 stays and calls it with empty options), `kKitGadgetSlot = 2`, `KitTable::defib_def`; in gunplay.h `struct GunplayLoadOptions { bool tdm_kits = false; }` and a 4-argument `load_gunplay_level(install, level, mode, const GunplayLoadOptions &)` (the 3-argument form at gunplay.h:181 stays, so fx3_demo.cpp:230, tp_crowd_check.cpp:147 and the audio_router, fx_triggers and render_crowd_weapons tests keep calling it unchanged); the `[kits]` insertion resolves the gadget into `level->defs` and fills assault slot 2 only with `tdm_kits`. `kKitSlots` is not changed; with the option off the table, its hash and every caller are unchanged | new structs + overloads + constant + member insertion, kits.h / kits.cpp / gunplay.h / gunplay.cpp `[kits]` | W1.0 | ru |
+| 10 | `ServerView::downed()` (`std::span<const DownedSoldier>`), `phase()` (`net::MatchPhase`), `input_restricted()`, `kit(slot)`, **with default bodies** (empty, InRound, false, 0) so test fakes stay cheap; `struct DownedSoldier { uint8_t slot, team; uint32_t until_tick; sim::Vec3 corpse; uint16_t yaw; }` is declared **in server_view.h** (it needs only sim types; server_view.h adds `bf3/net/protocol.h` for `net::MatchPhase`, which bf3_host already links, and never includes tdm_rules.h or gunplay.h) | virtual-member insertions + struct, server_view.h; `View` overrides in game_server.cpp `[view]` | W1.0 | ru (bb reads) |
+| 11 | protocol v3: `kProtocolVersion = 3`; `MessageType::MatchState = 25`, `PlayerList = 26`, `SpawnRequest = 27`; structs `MatchState` (with `restrict_until_tick`, `restrict_mask`), `PlayerRow`, `PlayerList`, `SpawnRequest` (`kit`, and `spawn_choice` u8, 0 = random, reserved for M4's flag spawns), `ReviveEvent`; `DeathEvent::respawn_tick`, `revive_until`, `killer_health`; `CombatEvents::revives`; `MatchInfo::logic_digest`, `rules_flags`; `Spawned::revived`; their encode / decode declarations | constant change, enum values, new structs, member insertions, protocol.h | W1.0 | nt |
+| 12 | `ClientSession::send_spawn_request(uint8_t kit)`; `PresentationFrame::match` (`net::MatchState`), `players` (`std::array<net::PlayerRow, 64>` + `player_count`), `own_respawn_tick`, `own_revive_until`, `own_unspawned`; `PresentKind::Revive` appended; the client applies `MatchState`'s restriction to each predicted command whose tick is below `restrict_until_tick` (the same rule as `[cmd]`) | member insertions, client_session.h, presentation_events.h | W1.0 | nt |
+| 13 | `bf3/host/tdm_brain.h` (`TdmBotConfig`, `TdmBrain`, `add_tdm_bots(GameServer &, const GameServerConfig &)`), `bf3/sim/bots/perception.h` (`PerceptionParams`, `Perception`), `bf3/sim/bots/aim_model.h` (`AimParams`, `aim_error`, `lead_point`) | new headers | W1.0 | bb |
 | 14 | `bf3/core/audio/hdr_setting.h` (`HdrSetting`, `read_hdr_setting`), `bf3/core/audio/sound_scope.h` (`SoundScope`, `ScopeTable`, `read_scopes`, patch → scope index) | new headers | W1.0 | au |
-| 15 | `bf3/audio/hdr_window.h` (`HdrWindow`), `bf3/audio/voice_cull.h` (`cull_voices`); `MixerConfig::hdr`, `MixerConfig::max_voices` (128), `MixerConfig::scopes`; `MixerStats::mix_ns_last`, `mix_ns_max`, `mix_ns_hist[16]`, `blocks`, `culled_precull`, `culled_scope`, `culled_cap`, `suspended`, `window_top_db`, `window_bottom_db` | new headers + member insertions, mixer_core.h | W1.0 | au |
+| 15 | `bf3/audio/hdr_window.h` (`HdrWindow`), `bf3/audio/voice_cull.h` (`cull_voices`); `MixerConfig::hdr`, `MixerConfig::max_voices` (128), `MixerConfig::scopes`; `MixerStats::mix_ns_last`, `mix_ns_max`, `mix_ns_hist[16]`, `blocks`, `live_voices_max`, `culled_precull`, `culled_scope`, `culled_cap`, `suspended`, `window_top_db`, `window_bottom_db` | new headers + member insertions, mixer_core.h | W1.0 | au |
 | 16 | `HudKillCard`, `HudEndOfRound`, `HudSpawnScreen`, `HudPreRound` structs and their `HudModel` members (`kill_card`, `end_of_round`, `spawn_screen`, `pre_round`); `HudFeedInput::match`, `players`, `kill_card_source` | new structs + member insertions, hud_model.h, hud_feed.h | W2.0 | ui |
 | 17 | `src/bf3_godot/src/death_camera.h` (`Bf3DeathCamera`), `CrowdSoldierInput::revived`, `kCrowdCorpseSeconds` (replaces the 3 s hide for the M2b scene; the M2a constant stays) | new header + member insertion, crowd_eval.h | W2.0 | cam |
 | 18 | `src/bf3_godot/src/m2b_game.h` (`M2bLoadInputs`, `M2bFrame`), `level_session_m2b.h` (`M2bGame`), `m2b_check.h` | new headers | W2.0 | gx |
-| 19 | `sim::MotorParams::protect_abort_buttons` (u32, a `buttons::` mask) and `protect_abort_move` (bool), both default 0 / false (M2a unchanged); the motor clears `protect_ticks` when the tick's command presses a masked button or moves (`move_forward` / `move_right` ≠ 0) while protected. Set in `SharedLevel::motor` by the loader with `SharedLoadOptions::tdm` (§3.3), so server and client predict the same `protect_ticks` | member insertions, soldier_motor.h; an insertion in soldier_motor.cpp `[abort]` | W1.0 | ru |
-| 20 | GameServer internals (not public API, but other tracks' rows depend on them): `Sv::rules` (`std::unique_ptr<TdmRules>`); `Impl::sv_revive(slot, position, yaw, health, tick)` (any slot, remote ones included: a new life at the corpse, `sv_on_spawn`, and for a remote slot `net::Spawned{revived = 1}` as `spawn()` sends it at :258–263); `Impl::sv_unspawn(slot)` (spawned = false, want_spawn = false, `gunplay->clear`, no DeathEvent); `Impl::sv_orders(tick, std::span<const RulesOrder>)` | member insertions, game_server.cpp `[sv]` | W1.0 | ru |
+| 19 | `sim::MotorParams::protect_abort_buttons` (u32, a `buttons::` mask) and `protect_abort_move` (bool), both default 0 / false (M2a unchanged); the motor clears `protect_ticks` when the tick's command presses a masked button or moves (`move_forward` / `move_right` ≠ 0) while protected. Set in `SharedLevel::motor` by the loader with `SharedLoadOptions::tdm` (§3.3), so server and client predict the same `protect_ticks`. `motor_params_hash` (motor_tuning.cpp:558) hashes the two fields **only when they are not the default**, so M2a's hash stays the constant E4 checks | member insertions, soldier_motor.h; insertions in soldier_motor.cpp `[abort]` and motor_tuning.cpp `[abort hash]` | W1.0 | ru |
+| 20 | GameServer internals (not public API, but other tracks' rows depend on them): `Sv::rules` (`std::unique_ptr<TdmRules>`); `Impl::sv_policy()` (`RespawnPolicy &`: `*rules` when present, else `*respawn`); `Impl::sv_revive(slot, position, yaw, health, tick)` (any slot, remote ones included: a new life at the corpse, `want_spawn = false` and `respawn_at = 0` so the respawn loop at :673–677 does not respawn it again, `sv_on_spawn`, and for a remote slot `net::Spawned{revived = 1}` as `spawn()` sends it at :258–263); `Impl::sv_unspawn(slot)` (spawned = false, want_spawn = false, `gunplay->clear`, no DeathEvent); `Impl::sv_orders(tick, std::span<const RulesOrder>)` | member insertions, game_server.cpp `[sv]` | W1.0 | ru |
+| 21 | `tests/tdm_fixture.h`: `load_tdm_level_once()` (the shared Metro TDM level with gunplay, the logic graph and the BotLevel, one per process), `ScriptedPeer` (a datagram-level peer on `GameServer::on_connect` / `on_receive`: Hello, Ready, SpawnRequest, KitSelect, Debug and CommandPackets stamped for the tick about to run; it decodes MatchState, PlayerList, Spawned, CombatEvents and its snapshots from the tick's `OutDatagram`s), `TdmRunConfig`, `TdmRunResult` (kills per team, K/D, revives, stuck bots, spawn checks, per-tick world hash, trace hash, timings) and `run_tdm(const TdmRunConfig &)` (init, then `tick` back to back on the caller's thread, as firefight_run.h:9–13) | new test header | W1.0 | ru (the body; ru's cases need it first), bb (additive counters) |
+| 22 | The gadget-ammunition rule in `make_weapon_sim_def`: `MagazineCapacity == -1` means a gadget without a magazine: `unlimited_ammo = true`, `magazine_capacity = 1` (so `has_ammo` holds, a shot takes no round, weapon_sim.cpp:166, and `can_reload` is false); any other negative value still fails | named replacement R11 in weapon_sim_def.cpp:487–494 and R12 in weapons_tests.cpp:295 (the hostile case becomes −2); a new `sim.weapons.unit` case | W1.0 (the rule is stated in the contract; ru writes it) | ru |
 
 ---
 
@@ -299,8 +320,7 @@ the embedded stubs, so M4 adds them without changing an S4 or M2b row.
 ```cpp
 namespace bf3::host {
 struct MatchRulesConfig { enum class Mode : uint8_t { None, Tdm } mode = Mode::None; bool deploy_screen = false;
-	bool revive = true; int kill_limit_override = 0; float preround_override_s = -1.0f; };
-struct DownedSoldier { uint8_t slot = 0, team = 0; uint32_t until_tick = 0; sim::Vec3 corpse{}; uint16_t yaw = 0; };
+	bool revive = true; int kill_limit_override = 0; float preround_override_s = -1.0f; uint8_t max_players = 32; };
 // What the rules ask the GameServer to do this tick; executed by Impl::sv_orders in [orders] (#20), in vector order.
 struct RulesOrder {
 	enum class Kind : uint8_t { Spawn, Revive, Unspawn } kind = Kind::Spawn;
@@ -308,41 +328,56 @@ struct RulesOrder {
 	sim::Vec3 position{}; uint16_t yaw = 0; float health = 0;   // Revive only
 };
 enum class SpawnRefusal : uint8_t { None, Alive, TooEarly, BadKit, Phase, RateLimited, Spectator };
+inline constexpr uint8_t kKeepKit = 0xFF;   // kit_of: keep the slot's KitSelect kit (a remote slot without the deploy screen)
 class TdmRules final : public RespawnPolicy, public CombatEventSink {
 public:
-	static core::Result<std::unique_ptr<TdmRules>> create(const SharedLevel &, const MatchRulesConfig &, uint64_t match_seed,
-			uint32_t max_slots);
-	// RespawnPolicy (asked by Sink::death, R8, and the fall death, R3): bots and humans without the deploy screen get
-	// death + PlayerKilledDelay; a deploy-screen human and every death in RoundOver / Restarting get nullopt (the
-	// spawn then comes only as a RulesOrder::Spawn).
+	// p_bots: GameServerConfig::bots->level (may be null; the bots' nav and their spawn list).
+	static core::Result<std::unique_ptr<TdmRules>> create(const SharedLevel &, std::shared_ptr<const BotLevel> p_bots,
+			const MatchRulesConfig &, uint64_t match_seed, uint32_t max_slots);
+	// RespawnPolicy (asked through sv_policy() by Sink::death, R8, and the fall death, R3): bots and humans without the
+	// deploy screen get death + PlayerKilledDelay, or the longer revive wait of §3.4 for a bot near an assault
+	// teammate; a deploy-screen human and every death in RoundOver / Restarting get nullopt (the spawn then comes only
+	// as a RulesOrder::Spawn).
 	std::optional<uint32_t> respawn_tick(uint8_t slot, uint32_t death_tick) override;
 	uint32_t earliest_respawn(uint8_t slot) const;   // what R8 stamps into DeathEvent::respawn_tick (also for nullopt)
-	uint32_t revive_until(uint8_t slot) const;       // what R8 stamps into DeathEvent::revive_until (0: not revivable)
+	uint32_t revive_until(uint8_t slot) const;       // what R8 stamps into DeathEvent::revive_until (0: not revivable);
+	                                                 // for an auto-respawning slot min(man-down end, its respawn tick)
 	void hit(const net::HitEvent &) override; void death(const net::DeathEvent &) override;
 	void detonation(const net::DetonationWire &) override; void revive(const net::ReviveEvent &) override;
 	uint8_t on_connect(uint8_t slot, bool bot, std::string_view name);   // returns AutoTeam's team (1 / 2)
 	void on_disconnect(uint8_t slot);
+	void on_spawned(uint8_t slot, uint32_t tick);   // every spawn (R7): leaves the downed list, HumanPlayer.OnPlayerSpawned
 	SpawnRefusal request_spawn(uint8_t slot, uint8_t kit, uint32_t tick);
 	// [rules], inside sv_rules after apply_rules and before the copy-back: logic drain and natives, regen (writes
 	// r_states[slot].health), man-down expiry, the defib test over gunplay.interval_shots(), the round flow.
 	core::Status step(uint32_t tick, const ServerView &, const Gunplay &, std::span<sim::SoldierState> r_states,
 			std::vector<RulesOrder> &r_orders);
-	size_t choose_spawn(uint8_t slot, const ServerView &, uint32_t tick) const;  // §3.5; SIZE_MAX = use the M2a chooser
-	uint32_t apply_input_restriction(uint32_t buttons, int8_t &r_forward, int8_t &r_right) const;
+	// §3.5. p_points is the list spawn() chose for the slot (game_server.cpp:227-230); the result indexes it.
+	// SIZE_MAX = use the M2a chooser.
+	size_t choose_spawn(uint8_t slot, std::span<const sim::SpawnPoint> p_points, const ServerView &, uint32_t tick) const;
+	// [cmd]: a refused bit or axis reads as released for a command whose tick is below restrict_until_tick.
+	uint32_t apply_input_restriction(uint32_t command_tick, uint32_t buttons, int8_t &r_forward, int8_t &r_right) const;
 	std::span<const DownedSoldier> downed() const; net::MatchPhase phase() const; bool input_restricted() const;
 	const net::MatchState &match_state() const; std::span<const net::PlayerRow> players() const;
 	bool match_state_changed() const; bool players_changed() const;              // send on change (§3.7)
-	uint8_t team_of(uint8_t slot) const; uint8_t kit_of(uint8_t slot) const;   // kit: SpawnRequest's, or the bot draw
+	uint8_t team_of(uint8_t slot) const;   // AutoTeam's team, including a balance move or the round's rotation
+	uint8_t kit_of(uint8_t slot) const;    // SpawnRequest's kit, the bot draw, or kKeepKit
 	const sim::logic::LogicTrace &trace() const;                                // E6 (logic_runtime.h:138)
 	const RulesStats &stats() const;                                            // refusals, fallbacks, revives (E2, E7)
 };
 }
 ```
 
-**Kits.** A human's kit is the one of its accepted `SpawnRequest` (deploy screen) or of `KitSelect` (no deploy screen,
-M2a). A bot's kit is drawn by the rules at each death from `splitmix64(match_seed ^ slot ^ life)` with the weights of
-`tdm_tuning.cfg` (assault 40 %, engineer, support, recon 20 % each); the brain reads it through `ServerView::kit(slot)`
-(#10), so no interface carries a kit from bb to ru. R7 makes `sv_on_spawn` take `rules->kit_of(slot)` for every slot.
+**Kits.** A human's kit is the one of its accepted `SpawnRequest` (deploy screen). A remote slot without the deploy
+screen (M2a rows, `--deploy-screen=0`) keeps its `KitSelect` kit: `kit_of` returns `kKeepKit` for it and R7 leaves
+`ps.kit` as `sv_kit_select` set it (game_server.cpp:1451). A bot's kit is drawn by the rules at each death from
+`splitmix64(match_seed ^ slot ^ life)` with the weights of `tdm_tuning.cfg` (assault 40 %, engineer, support, recon
+20 % each); the brain reads it through `ServerView::kit(slot)` (#10), so no interface carries a kit from bb to ru.
+
+**Teams.** `team_of(slot)` is AutoTeam's current team: the join choice, a balance move (applied at the moved bot's
+next death) and RotateTeamOnNewRound's swap at the restart. R7 writes it into `s.team` before `gunplay->on_spawn`
+(game_server.cpp:1209–1210, which sets gunplay's friendly-fire teams), so `Spawned.team` and `sv_spawned` follow
+it; with rules on, KitSelect's `next_team` (:1202–1205) is ignored.
 
 **Slots ≥ 64 with rules on (the `kMaxLagSlots` limit).** lag_comp.cpp's RewindProvider answers hit targets for slots
 0–63 only (lag_comp.cpp:19, firefight_run.h:79). With rules on, a slot ≥ 64 is a **spectator**: `add_tdm_bots` never
@@ -354,22 +389,25 @@ changed. Without rules nothing changes: M2a's 64-bot runs keep their observer pe
 
 | tag | where | what |
 |---|---|---|
-| `[sv]` | the `Sv` struct and the Impl declarations (:740–752) | `std::unique_ptr<TdmRules> rules`; `sv_revive`, `sv_unspawn`, `sv_orders` (#20) |
-| `[init]` | `sv_init` (:1065) | with `config.rules.mode == Tdm`: fail unless `config.level->logic` and gunplay are set; create the rules; point `sv->respawn` **and** the sink's forward at them instead of `FixedRespawn` |
+| `[cfg]` | `GameServerConfig` (game_server.h:81–103), after `firefight` (:102) | `MatchRulesConfig rules;` and `std::shared_ptr<const struct TdmBotConfig> tdm_bots;` (#1) |
+| `[sv]` | the `Sv` struct and the Impl declarations (:740–752) | `std::unique_ptr<TdmRules> rules`; `sv_policy`, `sv_revive`, `sv_unspawn`, `sv_orders` (#20) |
+| `[init]` | `sv_init` (:1066–1073) | with `config.rules.mode == Tdm`: fail unless `config.level->logic` and gunplay are set; create the rules (passing `config.bots ? config.bots->level : nullptr`); `sv->respawn` stays the FixedRespawn, and `sv_policy()` returns the rules while they exist |
+| `[tdm bots]` | `GameServer::init`, after `add_firefight_bots` (:811) | `if (p_config.tdm_bots) BF3_TRY(add_tdm_bots(*this, p_config));` (after `sv_init` at :792, so the rules exist) |
 | `[add]` | `add_local` (:721–736), before the spawn | with rules: `s.team = rules->on_connect(at, bot, "")`; bots pass team 0 |
 | R2 | `handle_hello`, `s.team = 1` (:330) | `s.team = rules ? rules->on_connect(slot, false, hello.name) : 1` |
-| R8 | `Sink::death` (:986–1001) | reordered: ask the policy first, set `want_spawn` / `respawn_at` as today, then push a copy of the event with `respawn_tick = rules->earliest_respawn(victim)` and `revive_until = rules->revive_until(victim)` stamped (0 / 0 with rules off, so the M2a order and content are unchanged), then `rules->death(event)` |
-| `[cmd]` | the motor loop before `motor.step` (:659) | `s.last.buttons = rules->apply_input_restriction(...)` (a refused bit or axis reads as released) |
-| R3 | the fall death (:662–665) | `respawn_at` from `sv->respawn->respawn_tick` (want_spawn only when it has a value) |
+| R10 | the Ready handler, `if (!s.spawned) s.want_spawn = true;` (:859–861) | `if (!s.spawned && !(rules && config.rules.deploy_screen)) s.want_spawn = true;` — with the deploy screen the slot only becomes ready (its player row exists from `on_connect`) and spawns on its first accepted SpawnRequest |
+| R8 | `Sink::death` (:986–1001) | reordered: ask `sv_policy()` first, set `want_spawn` / `respawn_at` as today, then push a copy of the event with `respawn_tick = rules->earliest_respawn(victim)`, `revive_until = rules->revive_until(victim)` and `killer_health = sv->tick_states[killer].health` (the current tick's copy apply_rules is writing; 0 for a fall) stamped (0 / 0 / 0 with rules off, so the M2a order and content are unchanged), then `rules->death(event)` |
+| `[cmd]` | the motor loop before `motor.step` (:659) | `s.last.buttons = rules->apply_input_restriction(command tick, …)` (a refused bit or axis reads as released) |
+| R3 | the fall death (:662–665) | `respawn_at` from `sv_policy().respawn_tick` (want_spawn only when it has a value) |
 | `[rules]` | `sv_rules` between `apply_rules` (:1144) and the copy-back (:1145) | `rules->step(p_tick, view, *gunplay, tick_states, orders)` |
 | `[orders]` | `sv_rules` after the placements (:1158) | `sv_orders(p_tick, orders)`: Spawn → `spawn(slot, SIZE_MAX, tick)` (R1 picks the point); Revive → `sv_revive`; Unspawn → `sv_unspawn` |
-| R1 | `spawn()`, the `choose_spawn` call (:236) | `rules ? rules->choose_spawn(...)`, falling back to `sim::choose_spawn` on SIZE_MAX (counted) |
-| R7 | `sv_on_spawn`, `ps.kit = slot % kKitCount` (:1206–1208) | `if (rules) ps.kit = rules->kit_of(slot); else if (!s.remote) ps.kit = …` (the old line) |
+| R1 | `spawn()`, the `choose_spawn` call (:236) | `rules ? rules->choose_spawn(p_slot, points, view, p_tick)` over the `points` list :227–230 selected, falling back to `sim::choose_spawn` on SIZE_MAX (counted) |
+| R7 | `sv_on_spawn`, `ps.kit = slot % kKitCount` (:1206–1208) | `if (rules) { s.team = rules->team_of(slot); if (const uint8_t k = rules->kit_of(slot); k != kKeepKit) ps.kit = k; rules->on_spawned(slot, tick); } else if (!s.remote) ps.kit = …` (the old line) |
 | `[recv]` | the datagram dispatch next to KitSelect (:893) | `SpawnRequest` → `request_spawn` |
 | `[snap]` | the send step | `MatchState` and `PlayerList` on change, the full pair to a client after its `MatchInfo` |
 | `[view]` | `View` (:1004–1033) | the #10 overrides read `sv->rules` (defaults without rules) |
 
-Without `rules` every M2a path is unchanged (E4's bit-equal check).
+Without `rules` every M2a path is unchanged (E4's hash checks).
 
 **Load.** `load_shared_level` (level_load.h:140), on the loader thread, with `SharedLoadOptions::tdm`: build the graph
 the way bf3dump does (`build_logic_graph(db, root, options)`, logic_commands.cpp:160) and store it with its digest
@@ -398,29 +436,43 @@ HealSpeedBoost specialization), abort_spawn_immortality_inputs = {12, 0, 1, 7, 3
   default maps only what it can name with confidence, Fire and the two movement axes, and lists the unmapped values in
   the load notes. The mask goes into `SharedLevel::motor` (#19), so the server's motor and the client's prediction
   end the immunity on the same tick (`protect_ticks` is compared in `states_match`, client_session.cpp:69).
+  Before falling back to the hand-made table, ru checks whether the EBX type info of EntryInputActionEnum carries
+  member names the reader can print; if it does, the map is built from those names (Fire, Throttle, Strafe, ...) and
+  only the name → command-bit step is [inferred]. Until then E3 tests the mapping as configured, which is a named
+  default, not a measurement (§13 Q13).
 
 ### 3.4 Death and the respawn flow
 
-1. A death (gunplay's `apply_rules` or a fall) reaches `Sink::death`. R8 asks the policy, then pushes the event
-   stamped with `respawn_tick = death + round(PlayerKilledDelay·60)` (+300), `revive_until = death + man_down_time·60`
-   (+780, 0 when revive is off) and `killer_health` (the killer's health that tick, 0 for a fall), then calls
-   `TdmRules::death`: `player_died` to the natives, killer +100 (+10 headshot) from `read_scoring`
-   (mode_def.h:173–180), victim deaths +1; the victim joins the downed list until `revive_until`.
-2. **Bots** respawn at `respawn_tick` through the M2a loop (want_spawn / respawn_at, game_server.cpp:673–677), R1
-   picks the point and R7 the kit.
-3. **Humans with `deploy_screen`** get nullopt from the policy and wait for a `SpawnRequest {kit}`. The server refuses
-   it while alive, before `respawn_tick`, in `RoundOver` / `Restarting`, with a kit ≥ kKitCount, a second one in a tick,
-   or for a spectator slot; a refusal is counted (`RulesStats`) and otherwise silent: the spawn screen shows the timer
-   from `respawn_tick` itself. An accepted request becomes a `RulesOrder::Spawn` in the next `step`; deploying while
-   still revivable forfeits the revive (the slot leaves the downed list).
-4. **Humans without `deploy_screen`** (M2a rows, `--deploy-screen=0`): the M2a automatic respawn at `respawn_tick`.
+0. **Join.** A deploy-screen human's Ready does not spawn it (R10, game_server.cpp:859–861); it sits on the spawn
+   screen (E9's "at join") until its first accepted `SpawnRequest`. Bots and humans without the deploy screen spawn
+   at Ready / `add_local` as in M2a.
+1. A death (gunplay's `apply_rules` or a fall) reaches `Sink::death`. R8 asks `sv_policy()`, then pushes the event
+   stamped with `respawn_tick = death + round(PlayerKilledDelay·60)` (+300), `revive_until` (below; 0 when revive is
+   off) and `killer_health` (from `sv->tick_states`, 0 for a fall), then calls `TdmRules::death`: `player_died` to the
+   natives, killer +100 (+10 headshot) from `read_scoring` (mode_def.h:173–180), victim deaths +1; the victim joins the
+   downed list until `revive_until`.
+2. **Bots** respawn at their respawn tick through the M2a loop (want_spawn / respawn_at, game_server.cpp:673–677), R1
+   picks the point and R7 the kit and team. The respawn tick is death + 300, except that a bot that dies with a living
+   assault teammate within `revive_wait_radius_m` (20 m) of its corpse waits up to `revive_wait_s` (8 s, inside the 13 s
+   man-down) for a revive [inferred, named defaults in `tdm_tuning.cfg`, `measured = false`]. Without the wait a bot
+   would leave the downed list after 5 s, too soon for a teammate 20–30 m away. For every slot that respawns by
+   itself, `revive_until = min(death + man_down_time·60, respawn tick)`, so the downed list, `ServerView::downed()` and
+   the bots' revive test (§5.6) all use the real window. Whatever spawns a slot (the loop, an order, a revive) ends in
+   R7's `on_spawned`, which takes it off the downed list, so a living soldier is never "revived".
+3. **Humans with `deploy_screen`** get nullopt from the policy (`revive_until = death + 780`) and wait for a
+   `SpawnRequest {kit}`. The server refuses it while alive, before `respawn_tick`, in `RoundOver` / `Restarting`,
+   with a kit ≥ kKitCount, a second one in a tick, or for a spectator slot; a refusal is counted (`RulesStats`) and
+   otherwise silent: the spawn screen shows the timer from `respawn_tick` itself. An accepted request becomes a
+   `RulesOrder::Spawn` in the next `step`; deploying while still revivable forfeits the revive.
+4. **Humans without `deploy_screen`** (M2a rows, `--deploy-screen=0`): the M2a automatic respawn at `respawn_tick`,
+   with their KitSelect kit (`kKeepKit`, §3.2).
 5. `UnSpawnAllSoldiers` (1.75 s after `RoundOver`): one `RulesOrder::Unspawn` per spawned slot. `sv_unspawn` sets
    spawned = false and want_spawn = false and clears the weapons (`gunplay->clear`), with no DeathEvent and no score;
    unspawned slots drop out of the snapshots (the send loop skips `!s.spawned`, :683–686), so clients stop drawing
    them; `MatchState::unspawn_tick` tells the own client to stop predicting (`PresentationFrame::own_unspawned`, nt).
    At restart (`take_restart()`): counts 0, the downed list cleared, PreRound again; bots get a Spawn order each,
    humans see the spawn screen.
-6. Spawned → `player_spawned` to the natives; `protect_ticks` set by the motor as today.
+6. Spawned → `on_spawned` → `player_spawned` to the natives; `protect_ticks` set by the motor as today.
 
 **Respawn timer mapping:** PlayerKilledDelay → the earliest respawn is [inferred], `measured = false`.
 
@@ -428,39 +480,61 @@ HealSpeedBoost specialization), abort_spawn_immortality_inputs = {12, 0, 1, 7, 3
 
 Metro TDM has 102 points, all team 0, `LocationTextSid` ID_H_MP_DM_RANDOMSPAWN, SpawnProtectionRadius 10,
 SpawnProtectionFriendlyKilledCount 3 within 30 s, TryToSpawnOutOfSight true [verified: `bf3dump spawns`]. 92 of 102
-are in the main nav component; 10 are not (points 92, 96–101 and three others) [verified: `bf3dump nav
-components --points`].
+are in the main nav component [verified: `bf3dump nav components --points`].
+
+**Which list.** R1 hands the rules the list `spawn()` already selected (game_server.cpp:227–230): for a bot slot with
+`BotFillConfig::spawn_in_main` (the default, bot_fill.h:157), BotLevel's re-indexed main-component list, so bots never
+start where the nav cannot take them; for every other slot, `config.level->spawns` (all 102). The returned index
+always refers to that list, so no index crosses between the two lists. There is no enclosed-spawn filter for humans
+in M2b: the user said the spawn room is not important now (§13 Q11); the scored rule below already prefers open
+points out of sight.
 
 ```cpp
 namespace bf3::sim {
+struct FriendlyDeath { Vec3 position; uint32_t tick = 0; uint8_t team = 0; };
 struct SpawnQuery {
-	std::span<const SpawnPoint> points; std::span<const uint8_t> allowed;    // 1 = usable (team set, main component)
+	std::span<const SpawnPoint> points; uint8_t team = 0;                      // points with a team != 0 and != team are skipped
 	std::span<const Vec3> enemies; std::span<const Vec3> enemy_eyes;
-	std::span<const uint32_t> blocked_until_tick;                              // per point (friendly deaths)
-	float protection_radius = 10.0f; uint32_t tick = 0; uint64_t seed = 0; int max_los_rays = 16;
+	std::span<const FriendlyDeath> recent_deaths;                              // the rules' ring of the last 30 s
+	float protection_radius = 10.0f; float friendly_block_radius = 30.0f; int friendly_block_count = 3;
+	uint32_t friendly_block_ticks = 1800; uint32_t tick = 0; uint64_t seed = 0; int max_los_rays = 16;
 	const CollisionWorld *world = nullptr;                                     // null: no line-of-sight term
 };
 size_t choose_spawn_scored(const SpawnQuery &);   // SIZE_MAX when nothing survives (1)-(3)
 }
 ```
 
-The rule [inferred, named defaults in `tdm_tuning.cfg`]: (1) allowed points only: the team's spawner set, minus the
-points outside the main nav component (`BotLevel::main_component`, one bit per point computed once at load: the
-cheap filter for enclosed spawns; low priority, the user does not need it now, it is reported, not gated); (2) drop
-points with an enemy within the protection radius; (3) drop points blocked because 3 friendlies died within 30 m of
-them inside 30 s; (4) for TryToSpawnOutOfSight, rank the survivors by the distance to the nearest enemy and test
-eye-to-chest rays from the 4 nearest enemies to the best 4 (≤ 16 rays); points seen by none rank first; (5) take the
-best, ties by the seeded draw `splitmix64(match_seed ^ slot ^ tick)`. If nothing survives (1)–(3), the M2a chooser
-picks (counted as a fallback, E2 reports it). The 2 s immunity covers the rest.
+The rule [inferred, named defaults in `tdm_tuning.cfg`]: (1) the points of the slot's team (all of Metro TDM's are
+team 0, both teams use every point); (2) drop points with an enemy within the protection radius; (3) drop points
+where `friendly_block_count` (3, data) teammates died within `friendly_block_radius` inside `friendly_block_ticks`
+(30 s, data); the 30 m radius is [inferred]: the spawner data gives only the count and the time; (4) for
+TryToSpawnOutOfSight, rank the survivors by the distance to the nearest enemy and test eye-to-chest rays from the 4
+nearest enemies to the best 4 (≤ 16 rays); points seen by none rank first; (5) take the best, ties by the seeded draw
+`splitmix64(match_seed ^ slot ^ tick)`. The query is stateless (the deaths ring lives in the rules), so it works the
+same over either list. If nothing survives (1)–(3), the M2a chooser picks (counted as a fallback). The 2 s immunity
+covers the rest.
 
 ### 3.6 Revive
 
-* **Man-down.** A dead soldier is revivable until `revive_until` (13 s), unless it deployed. interactive_man_down 0:
-  no crawling.
+* **Man-down.** A dead soldier is revivable until its `revive_until` (§3.4: 13 s for a deploy-screen human, the
+  shorter auto-respawn window for the others), unless it deployed. interactive_man_down 0: no crawling.
 * **The defibrillator.** `weapons/gadgets/defibrillator/u_defib` [verified: `bf3dump weapon defibrillator`]: damage
-  giver "Defib", instant hit, max range 1.8 m, damage 0, 60 rpm, deploy 0.4 s, sound defibrillator_fire. The assault
-  kit's gadget1 defaults to none in the data (10 options, the defib among them, scoring-gated) [verified: `bf3dump
-  kits`]; with rules on M2b puts it in assault slot 2 (#9, §12 J1). It fires through the weapon sim like the knife (an
+  giver "Defib", instant hit, max range 1.8 m, damage 0, 60 rpm, deploy 0.4 s, sound defibrillator_fire, ammo
+  `-1 x 1` (the knife is `1 x -1`). The assault kit's gadget1 defaults to none in the data (10 options, the defib among
+  them, scoring-gated) [verified: `bf3dump kits`]; with rules on M2b puts it in assault slot 2 (#9, §12 J1).
+* **Making the weapon sim build it (R11, R12, #22).** On main the defib **cannot be built** [verified:
+  `bf3dump weapon-sim weapons/gadgets/defibrillator/u_defib` fails with "MagazineCapacity = -1 is outside [0,
+  10000]"]: weapon_sim_def.cpp:487–489 fails a negative capacity, one failed def fails `make_weapon_table`
+  (:617–620), and the table is built at gunplay.cpp:322, so every `SharedLoadOptions::tdm` load would fail. Even with
+  the check relaxed, the capacity clamps to 0, `unlimited_ammo` is false (`NumberOfMagazines` 1 ≥ 0, :494) and
+  `has_ammo` (weapon_sim.cpp:51) would never fire. R11 makes `MagazineCapacity == -1` a gadget without a magazine:
+  `unlimited_ammo = true`, `magazine_capacity = 1`; `has_ammo` then holds, a shot takes no round (weapon_sim.cpp:166),
+  and `can_reload` is false (the data's 5 s auto-replenish has nothing to refill). Any other negative capacity still
+  fails, so R12 changes the hostile case at weapons_tests.cpp:295 from −1 to −2. No table on main contains a def
+  with capacity −1 (each would have failed), so `weapon_table_hash` changes only for tables that now contain the
+  defib, i.e. only with `SharedLoadOptions::tdm`. ru adds a `sim.weapons.unit` case: u_defib's def builds and, held
+  for 3 s, fires 3 instant-hit shots (60 rpm) of range 1.8 m with 0 damage and no reload (`bf3dump weapon-sim` on u_defib then
+  builds too). The defib then fires through the weapon sim like the knife (an
   instant-hit projectile, weapon_sim_def.h:83, ballistics.cpp:445), so the server and the client see a normal
   `ShotEvent` with its def.
 * **The test (in `TdmRules::step`, not in gunplay or lag compensation).** A corpse is not a hit target: lag_comp.cpp:505
@@ -472,9 +546,10 @@ picks (counted as a fallback, E2 reports it). The 2 s immunity covers the rest.
   clear static-world ray from the origin to the centre. An enemy shooter, a living target or an expired man-down:
   nothing (counted).
 * **The revive.** A `RulesOrder::Revive {slot, corpse, yaw, post_revive_health}` → `sv_revive` (#20): a new life at the
-  corpse (`life + 1`, standing, no spawn immunity, health 20), `sv_on_spawn` (same kit), and for a remote slot
-  `net::Spawned{revived = 1}` sent exactly as `spawn()` sends it, so the human's client takes the new life like any
-  spawn. A `ReviveEvent {reviver, revived, tick}` goes into `CombatEvents` through the sink's `revive`.
+  corpse (`life + 1`, standing, no spawn immunity, health 20, the same kit), `want_spawn = false` and `respawn_at = 0`
+  (so the respawn loop at :673–677 does not respawn the revived bot at its old tick), `sv_on_spawn`, and for a remote
+  slot `net::Spawned{revived = 1}` sent exactly as `spawn()` sends it, so the human's client takes the new life like
+  any spawn. A `ReviveEvent {reviver, revived, tick}` goes into `CombatEvents` through the sink's `revive`.
 * **Score.** Reviver +100 (the scoring table's revive row; the 110 variant unused [plan §7.3]); the revived player's
   death −1; the killer keeps the personal kill; the killer team's `KillCounter` −1 (`kill_undone`) [inferred: BF3 TDM
   revives take kills back, default true, `measured = false`, §13 Q2].
@@ -488,13 +563,19 @@ on ch1; revision 1 wrongly put the events on ch2.
 
 | message | dir / channel | content | sent |
 |---|---|---|---|
-| `MatchState` (25) | S→C, ch1 | phase, round start tick, countdown end tick, kills[2], kill_limit, winner, round_end_tick, unspawn_tick, restart_tick, killer_camera bool | on change, and to a new client |
+| `MatchState` (25) | S→C, ch1 | phase, round start tick, countdown end tick, kills[2], kill_limit, winner, round_end_tick, unspawn_tick, restart_tick, `restrict_until_tick` (UINT32_MAX while restricted with no known end, 0 = none), `restrict_mask` (the InputRestriction allowed bits), killer_camera bool | on change, and to a new client |
 | `PlayerList` (26) | S→C, ch1 | ≤ 64 `PlayerRow` {slot, team, kit, bot, alive, kills, deaths, score (i32), ping, name ≤ 16 UTF-8 bytes} | full list on join; changed rows at most every 15 ticks |
-| `SpawnRequest` (27) | C→S, ch1 | kit (u8) | on Deploy |
+| `SpawnRequest` (27) | C→S, ch1 | kit (u8), `spawn_choice` (u8, 0 = random; M2b refuses any other value as `BadKit`; reserved so M4's Conquest spawn screen needs no protocol bump) | on Deploy |
 | `DeathEvent` + `respawn_tick`, `revive_until`, `killer_health` | ch1, in the existing CombatEvents | — | per death |
 | `ReviveEvent` in `CombatEvents::revives` | ch1 | reviver, revived, tick | per revive |
 | `MatchInfo` + `logic_digest`, `rules_flags` (tdm, deploy_screen, revive) | ch1 | — | handshake |
 | `Spawned` + `revived` | ch1 | — | per spawn and per revive |
+
+**The pre-round freeze on the client.** The server rewrites the buttons in `[cmd]` before the motor; a client that did
+not do the same would predict movement and shots the server drops (snap-backs and refused shots during the 10 s
+countdown, playtest step 2). So the restriction is a pure function of (command tick, `restrict_until_tick`,
+`restrict_mask`): the server applies it to the received command, and nt's client session applies the same function to
+each predicted command (#12). The countdown's end tick is known 10 s ahead, so both ends switch on the same tick.
 
 The kill feed is the DeathEvent stream (weapon def, headshot, zone). `kProtocolVersion = 3`; a v2 client gets `Kick`.
 A client whose own load disagrees with `rules_flags` (no TDM load while the server has one) is refused as a kit-hash
@@ -513,6 +594,7 @@ as M2a reported it otherwise.
 * M2b does not run a client-side logic graph. `MatchState` is a server summary; M3 adds the logic ghost (7 synced
   bools, `LogicRuntime::ghost()`) and the 41 networked events (the UIGraph round-over cue, the kills-remaining VO)
   through `LogicRuntime::networked()`, which the rules already collect and drop (counted).
+* M4's Conquest spawn screen (flags, squad) uses `SpawnRequest::spawn_choice`, which v3 already carries.
 * AutoTeam and the player rows already handle N humans (join, leave, names from `Hello`); a late joiner gets the full
   MatchState and PlayerList; M3 only adds sockets.
 * `LevelControl` restarts in place; M3's rotation replaces `take_restart()`'s handler. `MatchRulesConfig::Mode` gains
@@ -603,7 +685,8 @@ Knife at < 2 m from behind. The kit is the rules' draw (§3.2: assault 40 %, the
 ### 5.6 Revive
 
 An assault bot not engaged for 2 s sees a downed teammate (via `ServerView::downed()`, #10) within 30 m and
-`revive_until` − now > travel time + 1 s: it paths there, switches to slot 2, faces the corpse and fires once within
+`until_tick` − now > travel time + 1 s, where `until_tick` is the real window of §3.4 (13 s for a waiting human, up
+to the 8 s revive wait for a bot that died near an assault teammate): it paths there, switches to slot 2, faces the corpse and fires once within
 1.8 m at the corpse centre the rules test (§3.6); it gives up when shot at or when the man-down ends. Pre-round and
 round-end: the brain idles while `ServerView::input_restricted()` or `phase()` says so (the server would drop the
 inputs anyway, `[cmd]`).
@@ -651,14 +734,17 @@ priority; loops become pending (resume when a voice frees), one-shots are droppe
 ### 6.3 Profiler
 
 `MixerStats` (#15) gains the mix CPU time per block (`steady_clock` around the mix call,
-nanoseconds), a 16-bucket histogram, the culled counts per step, suspended voices and the window edges. `Bf3GameAudio`
-shows them in the dev overlay (F3) and the `godot.m2a_firefight` check reads them (E11): % of a core = mix_ns / block
-duration (512 frames at 48 kHz = 10.67 ms).
+nanoseconds), a 16-bucket histogram, the most live voices in a block, the culled counts per step, suspended voices
+and the window edges. `Bf3GameAudio` shows them in the dev overlay (F3). E11 reads them in M2a au3's 64-shooter
+render (`audio.game.underruns`, a timing row, so the CPU share is read on a quiet machine): % of a core = mix_ns /
+block duration (512 frames at 48 kHz = 10.67 ms).
 
-**How the M2a budgets carry over.** M2a's E14 gated the client frame in the same 64-bot firefight scene (frame p99
-≤ 16.7 ms, M2a main-thread additions ≤ 3.0 ms, 0 underruns; measured 6.06 ms / 0.906 ms / 0). E11 keeps that scene and
-its 0-underrun gate, and adds the audio thread's own share (≤ 10 % of a core) and the 128-voice cap; the frame gates
-of E14 stay where they are and are not re-measured by M2b.
+**How the M2a budgets carry over.** M2a's E14 gated the client frame in the 64-bot firefight scene (frame p99
+≤ 16.7 ms, M2a main-thread additions ≤ 3.0 ms, 0 underruns; measured 6.06 ms / 0.906 ms / 0). E11 measures the audio
+thread's own share (≤ 10 % of a core), 0 late blocks and the 128-voice cap offline with the same 64-shooter load the
+au3 row already renders, so it needs no window. `godot.m2a_firefight` stays in the default window set unchanged; the
+wave-2 window phase runs it anyway, so E14's 0-underrun gate also sees the A3 mixer in the real stream at no extra
+cost. M2b re-measures none of E14's frame gates.
 
 ---
 
@@ -695,11 +781,15 @@ state (the instance size × 128). The UI: no new atlases (ui1's are resident).
 
 The logic runtime draws from `LogicRuntimeOptions::root_seed = match_seed`; the natives iterate slots and nodes in index
 order; AutoTeam and spawn choices are pure functions of (state, match_seed, tick, slot); bots as §5.7. E6 checks the
-logic trace hash and the snapshot hashes. The audio and UI are client-only and not part of it.
+logic trace hash and the per-tick world hash over the stepped run; it does not compare snapshot bytes, because the
+snapshot's `echo_hold_100us` comes from the wall clock (game_server.cpp:551) and the jitter buffer stamps arrivals
+with `net::monotonic_ns()` (:870). The stepped fixture delivers each command before the tick it is for, so the
+buffer's contents, and with them the simulation, do not depend on the wall clock. The audio and UI are client-only
+and not part of it.
 
 ### 9.3 Hostile input
 
-The server never trusts a client: SpawnRequest validation (§3.4, counted refusals, a spectator slot ≥ 64 included);
+The server never trusts a client: SpawnRequest validation (§3.4, counted refusals, a spectator slot ≥ 64 included, a `spawn_choice` other than 0);
 the kit index range; a defib shot is tested by the server against its own downed list and corpse positions, so a
 client cannot revive an enemy, a living soldier or an expired corpse; the input restriction applies server-side to the received buttons;
 `PlayerList` names are server-truncated to 16 bytes of valid UTF-8 (a hostile `Hello` name cannot overflow a row);
@@ -718,17 +808,20 @@ written to the install.
 
 | key | wave | one line |
 |---|---|---|
-| ru | 1 | TDM rules: `RoundNatives`, `TdmRules`, health / regen, immunity abort, respawn policy, spawn selection, revive, the defib kit option, the GameServer wiring |
-| nt | 1 | protocol v3 codecs and the client session: messages, `send_spawn_request`, frame fields, unspawn, the shot-id fix, fuzz |
-| bb | 1 | `TdmBrain`: perception, target choice, aim model, movement, fighting, revive; `bf3dump tdm`; the end-to-end headless rows; `play.cmd --tdm` on the M2a scene |
-| au | 1 | audio A3: HdrSetting and scope readers, HDR window, culling, 128-voice cap, profiler |
+| ru | 1 | TDM rules: `RoundNatives`, `TdmRules`, health / regen, immunity abort, respawn policy, spawn selection, revive, the defib kit option and the weapon-sim gadget rule, the GameServer wiring, the stepped fixture, E13 |
+| nt | 1 | protocol v3 codecs and the client session: messages, `send_spawn_request`, frame fields, the client-side restriction, unspawn, the shot-id fix, fuzz |
+| bb | 1 | `TdmBrain`: perception, target choice, aim model, movement, fighting, revive; the end-to-end stepped rows; the optional `play.cmd --tdm` preview |
+| au | 1 | audio A3: HdrSetting and scope readers, HDR window, culling, 128-voice cap, profiler, the A3 checks in `audio.game.underruns` |
 | ui | 2 | HUD model additions and the screens: kill feed, scoreboard, spawn screen, kill card, pre-round, round end |
-| cam | 2 | death camera / killer cam, corpse time, revive stand-up in the crowd, the defib in hand |
-| gx | 2 | the M2b Godot scene, input, `play.cmd`, the Godot checks (E9, E11, E12), README; the one integration |
+| cam | 2 | death view (corpse to killer), corpse time, revive stand-up in the crowd, the defib in hand |
+| gx | 2 | the M2b Godot scene, input, `play.cmd`, the Godot checks (E9, E12), README; the one integration |
 
-Deferred from revision 1 to keep the tracks small (none is in the plan row): the `m2b_hud.tscn` demo scene, the
-`bf3dump tdm --perf --table` TTK report, the `bf3dump audio hdr / scopes` commands (audio.hdr.unit prints what it
-reads), score popups, nametags, and spawn line-of-sight with 64 rays (16 now).
+Cut to keep the tracks small (none is in the plan row): the `m2b_hud.tscn` demo scene, the `bf3dump tdm` commands
+(`host.tdm.bots` prints the E2 table; the TTK report), the `bf3dump audio hdr / scopes` commands (`audio.hdr.unit`
+prints what it reads), score popups, nametags, spawn line-of-sight with 64 rays (16 now), and the enclosed-spawn
+filter for humans with its E2 report (the user said the spawn room is not important now). cam stays a track of its
+own because the orchestration keeps 3–5 tracks per wave and it owns disjoint files (crowd, anim, camera); it runs in
+parallel with ui, so it adds no wall time. If the budget is tight, folding it into ui is the first saving (§13 Q17).
 
 ---
 
@@ -737,7 +830,11 @@ reads), score popups, nametags, and spawn line-of-sight with 64 rays (16 now).
 Two waves of parallel git worktrees. Each wave starts with a **contract commit** by the integrator (W1.0, W2.0): every
 header in that wave's interface column with declarations only, the struct-member and enum insertions of §2.6, and a
 compile-only ctest (`m2b.contract`, `m2b.contract2`) that pins the sizes of `PresentEvent` (64), `HudModel` (its new
-size), `net::PlayerRow`, and the enum values of §2.6 #5 and #11. Tracks fill in the bodies.
+size), `net::PlayerRow`, and the enum values of §2.6 #5 and #11. Tracks fill in the bodies. W1.0 also retires the
+three over-budget M2a window rows from the default window set (§13 Q8): it adds the label `retired` to `godot.m2a`,
+`godot.m2a.kits` and `godot.m2a.play` (tests/CMakeLists.txt:1333–1336) and `"exclude": { "label": "^retired$" }` to
+the `dev-window` preset's filter (CMakePresets.json:83); the rows stay runnable by name (`ctest -R ^godot\.m2a$`),
+and no merge pass of M2b runs them.
 
 **The one production stub.** So that ru, bb and nt link on parallel branches, W1.0 also defines the new v3 encode
 functions as stubs returning an empty byte vector and the decoders as returning an error "v3 codec: nt", each line
@@ -746,79 +843,100 @@ stub: a track that needs a part not yet merged uses a test-local fake in `namesp
 rebasing.
 
 **Shared files are edited additively** (the M2a §15 rules): each track appends a block headed `# M2b <key>` /
-`// M2b <key>` at the end of each library's `CMakeLists.txt`, `tests/CMakeLists.txt`, `tools/bf3dump/CMakeLists.txt`
-and `bf3dump.cpp`, `register_types.cpp`, `project.godot`, `README.md`. Named insertions are lines marked `// M2b <key>
-[tag]` (§3.2 lists ru's); no existing line changes except the named replacements:
+`// M2b <key>` at the end of each library's `CMakeLists.txt`, `tests/CMakeLists.txt`, `register_types.cpp`,
+`project.godot`, `README.md`. Named insertions are lines marked `// M2b <key> [tag]` (§3.2 lists ru's); no existing
+line changes except the named replacements:
 
 | # | owner | file | what |
 |---|---|---|---|
-| R1 | ru | game_server.cpp:236 | the spawn choice call → the rules' chooser when rules are active |
+| R1 | ru | game_server.cpp:236 | the spawn choice call → the rules' chooser over the list :227–230 selected, when rules are active |
 | R2 | ru | game_server.cpp:330 | `s.team = 1` → AutoTeam's team when rules are active |
-| R3 | ru | game_server.cpp:662–665 | the fall-death respawn lines → the policy |
+| R3 | ru | game_server.cpp:662–665 | the fall-death respawn lines → `sv_policy()` |
 | R4 | ru | logic_native.cpp:70–80 | the binding table gains the rows of §2.6 #5 (the old rows unchanged) |
 | R5 | au | patch_instance.cpp:369 | the fixed-window gain → the HDR window's gain for HDR patches |
 | R6 | au | weapon_audio.h:55–58 and its router | the three voice limits → the mixer's cap |
-| R7 | ru | game_server.cpp:1206–1208 | `ps.kit = slot % kKitCount` → the rules' kit when rules are active |
-| R8 | ru | game_server.cpp:986–1001 (`Sink::death`) | reordered: the policy first, then the stamped copy pushed, then `rules->death` |
+| R7 | ru | game_server.cpp:1206–1208 | `ps.kit = slot % kKitCount` → the rules' team, kit (or `kKeepKit`) and `on_spawned` when rules are active |
+| R8 | ru | game_server.cpp:986–1001 (`Sink::death`) | reordered: `sv_policy()` first, then the stamped copy pushed, then `rules->death` |
 | R9 | nt | protocol.cpp, the W1.0 stub bodies | the real v3 codecs |
+| R10 | ru | game_server.cpp:859–861 (Ready) | no `want_spawn` for a deploy-screen slot when rules are active |
+| R11 | ru | src/bf3_sim/src/weapons/weapon_sim_def.cpp:487–494 | `MagazineCapacity == -1` → a gadget without a magazine (#22) |
+| R12 | ru | tests/weapons_tests.cpp:295 | the hostile `MagazineCapacity` case −1 → −2 |
 
-**Test files, one owner each:** `host_tdm_server_tests.cpp` (ru: `host.tdm.health`, `.respawn`, `.revive`,
-`.hostile`), `host_tdm_round_tests.cpp` (bb: `host.tdm.round`, `.bots`, `.replay`; `host.tdm.perf` timing), the v3 block in
-`net_proto_tests.cpp` and `net_proto_fuzz.cpp` (nt), `audio_hdr_tests.cpp` (au: `audio.hdr.unit`),
-`ui_hud_tdm_tests.cpp` (ui: `ui.hud.tdm.unit`), `tests/godot_m2b*.cmake` and the A3 block of the M2a firefight check
-(gx). A shared fixture `tests/tdm_fixture.h` (headless ServerHost + ClientSession on Metro TDM with rules on, a scripted
-client) is created in W1.0; bb extends it additively.
+**Test files, one owner each:** `host_tdm_server_tests.cpp` (ru: `host.tdm.server` with the case groups `health*`,
+`respawn*`, `revive*`, `hostile*`, and `host.tdm.client`), `host_tdm_round_tests.cpp` (bb: `host.tdm.round`, `.bots`,
+`.replay`; `host.tdm.perf`), both in one executable `test_host_tdm` so each row loads the level once and the rows split
+with `openbf3_case_row` (docs/testing.md §6); the defib case in `weapons_tests.cpp` (ru, one additive case); the v3
+block in `net_proto_tests.cpp` and `net_proto_fuzz.cpp` (nt); `audio_hdr_tests.cpp` (au: `audio.hdr.unit`) and an
+additive A3 block in `audio_router_tests.cpp`'s 64-shooter case (au: E11); `ui_hud_tdm_tests.cpp` (ui:
+`ui.hud.tdm.unit` and `ui.hud.tdm.install`); `tests/godot_m2b*.cmake` (gx). `tests/tdm_fixture.h` (#21) is declared in
+W1.0; ru writes its body, bb adds counters to it additively.
 
 ### Wave 1
 
 | key | title | owns (creates / edits) | interfaces | depends on |
 |---|---|---|---|---|
-| ru | TDM rules and server flow | new `bf3/sim/logic/round_natives.h` + cpp; R4; additive block in `spawn.{h,cpp}` (`choose_spawn_scored`); `soldier_motor.{h,cpp}` (#19, `[abort]`); new `bf3/host/tdm_rules.h` + cpp; game_server.{h,cpp}: the tags of §3.2 and R1–R3, R7, R8; `level_load.{h,cpp}` (#3, the `tdm` load); `kits.{h,cpp}` (#9) and the `[kits]` insertion in `load_gunplay_level`; `gunplay.h` (#7, #8); `server_view.h` (#10); `config/tdm_tuning.cfg`; `host_tdm_server_tests.cpp` (E3, E4, E5, the server half of E7) | #1–#10, #19, #20 | nothing to start (the W1.0 codec stubs let it link); its remote-client cases (E5's human revive, E4's SpawnRequest over the wire) run after nt is on main, before ru merges |
-| nt | protocol v3 and client session | R9: `protocol.{h,cpp}` v3 codecs (#11); additive blocks in `client_session.{h,cpp}` (decode MatchState / PlayerList / ReviveEvent into the frame, `send_spawn_request`, the `revived` spawn, stop predicting at `unspawn_tick`, `rules_flags` check); `presentation_events.{h,cpp}` (`Revive`); the shot-id reuse fix on the client path with a row; `net_proto_tests.cpp` block, `net_proto_fuzz.cpp` cases (the wire half of E7). **No game_server edit** (the slot limit is ru's spectator rule) | #11, #12 | none; merges first |
-| bb | TDM bots | new `bf3/sim/bots/perception.h` + cpp, `aim_model.h` + cpp; new `bf3/host/tdm_brain.h` + cpp (reads `ServerView`, incl. `kit()` and `downed()`); `config/bot_tuning.cfg`; `bf3dump tdm` (`--bots --seeds --kill-limit`, the E2 table); `tdm_fixture.h` (additive); `host_tdm_round_tests.cpp` (E1, E2, E6 functional; E8 timing, not run on the branch); an additive `--tdm` block in `level_session_m2a.cpp` (rules on, deploy screen off, `add_tdm_bots` instead of the FirefightBrains: lets the user try TDM bots between the waves; compiled, not a row) | #13 | perception and aim units alone from the start; the brain against `ServerView` fakes; E1, E2, E6 after ru and nt are on main (bb merges last in wave 1) |
-| au | audio A3 | new `bf3/core/audio/hdr_setting.h` + cpp, `sound_scope.h` + cpp; new `bf3/audio/hdr_window.h` + cpp, `voice_cull.h` + cpp; additive blocks in `mixer_core.{h,cpp}` (#15), R5, R6; the profiler readout in `game_audio.{h,cpp}` (one block); `audio_hdr_tests.cpp` (E10) | #14, #15 | none |
+| ru | TDM rules and server flow | new `bf3/sim/logic/round_natives.h` + cpp; R4; additive block in `spawn.{h,cpp}` (`choose_spawn_scored`); `soldier_motor.{h,cpp}` (#19, `[abort]`) and `motor_tuning.cpp` (`[abort hash]`); R11 in `weapon_sim_def.cpp`, R12 and the defib case in `weapons_tests.cpp`; new `bf3/host/tdm_rules.h` + cpp; game_server.{h,cpp}: the tags of §3.2 (`[cfg]` `[sv]` `[init]` `[tdm bots]` `[add]` `[cmd]` `[rules]` `[orders]` `[recv]` `[snap]` `[view]`) and R1–R3, R7, R8, R10; `level_load.{h,cpp}` (#3, the `tdm` load); `kits.{h,cpp}`, `gunplay.h` (#7, #8, the #9 overload) and the `[kits]` insertion in `gunplay.cpp`; `server_view.h` (#10); `config/tdm_tuning.cfg`; the body of `tests/tdm_fixture.h`; `host_tdm_server_tests.cpp` (E3, E4, E5, the server half of E7; E13) | #1–#10, #19–#22 | nothing to start (the W1.0 codec stubs let it link); its wire-level cases (the peer decoding Spawned / MatchState) run after nt is on main, before ru merges |
+| nt | protocol v3 and client session | R9: `protocol.{h,cpp}` v3 codecs (#11); additive blocks in `client_session.{h,cpp}` (decode MatchState / PlayerList / ReviveEvent into the frame, `send_spawn_request`, the restriction applied to predicted commands, the `revived` spawn, stop predicting at `unspawn_tick`, `rules_flags` check); `presentation_events.{h,cpp}` (`Revive`); the shot-id reuse fix on the client path with a row; `net_proto_tests.cpp` block, `net_proto_fuzz.cpp` cases (the wire half of E7). **No game_server edit** (the slot limit is ru's spectator rule) | #11, #12 | none; merges first |
+| bb | TDM bots | new `bf3/sim/bots/perception.h` + cpp, `aim_model.h` + cpp; new `bf3/host/tdm_brain.h` + cpp (`add_tdm_bots`; reads `ServerView`, incl. `kit()` and `downed()`); `config/bot_tuning.cfg`; additive counters in `tdm_fixture.h`; `host_tdm_round_tests.cpp` (E1, E2, E6 functional; E8 timing, not run on the branch); an additive `--tdm` block in `level_session_m2a.cpp` (below) | #13 | perception and aim units alone from the start; the brain against `ServerView` fakes; E1, E2, E6 after ru and nt are on main (bb merges last in wave 1) |
+| au | audio A3 | new `bf3/core/audio/hdr_setting.h` + cpp, `sound_scope.h` + cpp; new `bf3/audio/hdr_window.h` + cpp, `voice_cull.h` + cpp; additive blocks in `mixer_core.{h,cpp}` (#15), R5, R6; the profiler readout in `game_audio.{h,cpp}` (one block); `audio_hdr_tests.cpp` (E10); the A3 block in `audio_router_tests.cpp` (E11's checks) | #14, #15 | none |
+
+**bb's `--tdm` preview (optional, untested).** `tools\play.cmd --tdm` on the M2a scene turns the rules on (no deploy
+screen: the M2a automatic respawn, the KitSelect kit), sets `SharedLoadOptions::tdm` for the server's and the
+client's load (or the client is refused by the `rules_flags` check) and sets `GameServerConfig::tdm_bots` instead of
+the FirefightBrains. The M2a scene has no TDM HUD, so the block prints one console line on every `MatchState` change
+(phase, the two counts, the kill limit, the winner). It is compiled, not a row: it is a preview for the user between
+the waves, labelled as such in `play.cmd --help`, and nothing gates on it. If it does not work, the user loses
+nothing: the wave-2 scene is the real path.
 
 ### Wave 2 (starts when wave 1 is on main)
 
 | key | title | owns (creates / edits) | interfaces | depends on |
 |---|---|---|---|---|
-| ui | TDM HUD screens | `hud_model.h` additions (#16); additive block in `hud_feed.{h,cpp}` (kill feed, players, spawn screen, kill card, pre-round, round end from the frame); new `src/bf3_godot/src/hud_killfeed.{h,cpp}`, `hud_scoreboard`, `spawn_screen`, `kill_card`, `round_end`, `pre_round`; `ui_hud_tdm_tests.cpp` (`ui.hud.tdm.unit`, headless: the HUD model from recorded frames, every string, font and icon lookup resolved) | #16 | nt (frame fields, on main) |
-| cam | death camera and 3p corpse | new `src/bf3_godot/src/death_camera.{h,cpp}`; additive blocks in `game_crowd.{h,cpp}` (corpse 15 s, revive stand-up) and `crowd_eval.h` (#17); the defib's slot-2 unlock in the viewmodel set if it resolves (§4); a "revive" case in `anim.s3.unit` | #17 | nt (Revive event, own death data, on main) |
-| gx | Godot integration | new `m2b_game.{h,cpp}`, `level_session_m2b.{h,cpp}` (rules on, deploy screen, TDM bots, feeds ui, cam, audio), `m2b_check.{h,cpp}` (`--m2b-check=play`, `--kill-limit`, `--preround`); additive blocks in `input_mapper.{h,cpp}` (Tab, Enter / click Deploy, the kit keys, KEY_3 → slot 2 and slot 2 in the wheel order at input_mapper.cpp:279); an additive A3 block in the M2a firefight check (E11's thresholds from `MixerStats`); `scenes/m2b_metro.tscn`; `tools/play.cmd` (new defaults; `--m2a` for the old scene); `tests/godot_m2b.cmake`, `godot.m2b_load`; README "M2b" | #18 | all of wave 1; ui and cam (their parts of the scene are skipped with a reason until they land) |
+| ui | TDM HUD screens | `hud_model.h` additions (#16); additive block in `hud_feed.{h,cpp}` (kill feed, players, spawn screen, kill card, pre-round, round end from the frame); new `src/bf3_godot/src/hud_killfeed.{h,cpp}`, `hud_scoreboard`, `spawn_screen`, `kill_card`, `round_end`, `pre_round`; `ui_hud_tdm_tests.cpp`: `ui.hud.tdm.unit` (data-free: the HUD model from recorded frames, ≤ 2 s) and `ui.hud.tdm.install` (every string, font and icon lookup resolved against ui1 / ui2 on the install, ≤ 15 s, with install.unchanged; the split of M2a's `ui.hud.feed.unit` / `.install`) | #16 | nt (frame fields, on main) |
+| cam | death view and 3p corpse | new `src/bf3_godot/src/death_camera.{h,cpp}`; additive blocks in `game_crowd.{h,cpp}` (corpse 15 s, revive stand-up) and `crowd_eval.h` (#17); the defib's slot-2 unlock in the viewmodel set if it resolves (§4); a "revive" case in `anim.s3.unit` | #17 | nt (Revive event, own death data, on main) |
+| gx | Godot integration | new `m2b_game.{h,cpp}`, `level_session_m2b.{h,cpp}` (rules on, deploy screen, `tdm_bots`, feeds ui, cam, audio), `m2b_check.{h,cpp}` (`--m2b-check=play`, `--kill-limit`, `--preround`); additive blocks in `input_mapper.{h,cpp}` (Tab, Enter / click Deploy, the kit keys, KEY_3 → slot 2 and slot 2 in the wheel order at input_mapper.cpp:279); `scenes/m2b_metro.tscn`; `tools/play.cmd` (new defaults; `--m2a` for the old scene); `tests/godot_m2b.cmake`, `godot.m2b_load`; README "M2b" | #18 | all of wave 1; ui and cam (their parts of the scene are skipped with a reason until they land) |
 
 ### 11.1 Integration order and the lean test plan
 
-1. **W1.0** contract commit (integrator): the wave-1 headers and insertions of §2.6 #1–#15, #19, #20, the codec stubs,
-   `tests/tdm_fixture.h`, `m2b.contract`.
-2. **nt** merges first; **au** and **ru** merge when done (ru after its remote-client cases ran on top of nt); **bb**
-   last, after it ran E1, E2 and E6 on top of ru and nt. Weekly-usage planning: nt, au and ru run in parallel; bb's
-   units run in parallel too, but its end-to-end rows wait for ru.
-3. **Wave-1 merge pass** on main, once after bb's merge (not one per track): the timing phase (E8 `host.tdm.perf` is
-   measured here) and the window phase in the user-away tenure (the M2a window rows as the regression check of au's
-   mixer). After it, `tools\play.cmd --tdm` gives the user TDM bots, regen and round restarts on the M2a scene.
+1. **W1.0** contract commit (integrator): the wave-1 headers and insertions of §2.6 #1–#15, #19–#22, the codec stubs,
+   the `tests/tdm_fixture.h` declarations, `m2b.contract`, and the `retired` label of Q8.
+2. **nt** merges first; **au** and **ru** merge when done (ru after its wire-level cases ran on top of nt, and after its
+   acceptance asan run, which also covers nt's fuzz cases, E7); **bb** last, after it ran E1, E2 and E6 on top of ru
+   and nt. Weekly-usage planning: nt, au and ru run in parallel; bb's units run in parallel too, but its end-to-end
+   rows wait for ru.
+3. **Wave-1 merge pass** on main, **once**, after bb's merge (the merge workflow batches the wave's four merges and
+   does not run a pass per merge): the `timing` phase only. It measures E8 (`host.tdm.perf`), E11
+   (`audio.game.underruns` with au's A3 checks) and E13 (`host.tdm.client`), together with the existing timing rows.
+   No window phase: wave 1 changes no Godot scene a window row would see except au's mixer, and E11 measures that
+   offline. After it, `tools\play.cmd --tdm` is the optional preview above.
 4. **W2.0** contract commit: #16–#18, `m2b.contract2`. **ui** and **cam** in parallel, then **gx**. gx is the one
    integration: on its branch it runs only functional rows (its cmake registration, the headless parts of the M2b
-   check, `ui.hud.tdm.unit` and `anim.s3.unit` as part of the dev pass); it never runs a window row.
-5. **Wave-2 merge pass** on main, once after gx's merge: the timing phase and the window phase once each, user away:
-   E9 `godot.m2b.play`, E11 `godot.m2a_firefight` (with the A3 checks), E12 `godot.m2b_load`, and E8 again only as
-   part of the standard timing phase.
-6. **One verifier** then reads every log once: the branch logs of E1–E7 and E10, the wave-1 pass for E8 (or the wave-2
-   pass's, the newer), the wave-2 pass for E9, E11 and E12. It checks each row against its threshold (no reruns except a
-   row that failed for a stated environmental reason, per the noise policy) and writes `docs/design/m2b-results.md`.
-   There is no gate pass and no acceptance step after it.
+   check, `ui.hud.tdm.*` and `anim.s3.unit` as part of the dev pass); it never runs a window row.
+5. **Wave-2 merge pass** on main, **once**, after gx's merge: the `window` phase only, user away: E9
+   `godot.m2b.play`, E12 `godot.m2b_load`, and the rest of the default window set (the three retired rows excluded;
+   `godot.m2a_firefight` included, so E14's 0-underrun gate sees the A3 mixer). No timing phase: by design wave 2 adds only Godot-side code, HUD model structs and a
+   new crowd constant, which no timing row's measured path runs. The rule the merge workflow applies: the timing phase
+   runs in the wave-2 pass only if the wave-2 diff changed a source file that a timing row links and executes; it
+   then runs only those rows.
+6. **One verifier** then reads one log of each kind once: main's dev pass after the wave-2 merge (or, when the §7
+   ledger rule skipped it, gx's accepted branch dev pass of the same tree), which holds every functional row (E1–E7,
+   E10, the units); ru's acceptance asan log (E7's asan half); the wave-1 timing log (E8, E11, E13); the wave-2
+   window log (E9, E12). It checks each row against its threshold (no reruns except a row that failed for a stated
+   environmental reason, per the noise policy) and writes `docs/design/m2b-results.md`. There is no gate pass and no
+   acceptance step after it.
 7. **The user's playtest** (§1.1).
 
-**Without rules** the GameServer keeps M2a's `FixedRespawn`, `choose_spawn`, team 1 and kit `slot % 4`, and the load
-without `SharedLoadOptions::tdm` makes the M2a kit table, motor and hashes, so every M2a row stays as it is.
+**Without rules** the GameServer keeps M2a's `FixedRespawn`, `choose_spawn`, team 1, Ready spawning and kit `slot % 4`,
+and the load without `SharedLoadOptions::tdm` makes the M2a kit table, weapon table, motor and hashes, so every M2a row
+stays as it is.
 
 **Test plan (lean).** Each track's rows are listed in its table row and run once on its branch (functional rows only;
-a branch never runs a `timing` or `window` row). New rows: 4 unit-sized (`host.tdm.health`, `.respawn`, `.revive`,
-`.hostile`), 3 simulated-time dev rows with stated COSTs below the 60 s cap (`host.tdm.round` ≈ 25 s, `.bots` ≈ 15 s
-with PROCESSORS 3, `.replay` ≈ 10 s; §1's estimate), `audio.hdr.unit`, `ui.hud.tdm.unit`, one timing row
-(`host.tdm.perf`), two new window rows (`godot.m2b.play` ≈ 110 s, `godot.m2b_load`) and new checks in one existing
-window row (`godot.m2a_firefight`). Once `godot.m2b.play` covers the playable path, gx drops `godot.m2a.play`,
-`godot.m2a` (391 s) and `godot.m2a.kits` (159 s), both over the 120 s window budget, from the default merge window set
-and keeps them runnable by name (§13 Q8). `godot.m2a_firefight` stays: it is E11.
+a branch never runs a `timing` or `window` row). New rows: `host.tdm.server` (≈ 15 s, one load for E3–E5 and E7's
+server cases), three stepped dev rows with stated COSTs below the 60 s cap (`host.tdm.round` ≈ 25 s, `.bots` ≈ 15 s
+with PROCESSORS 3, `.replay` ≈ 10 s; §1's estimate), `audio.hdr.unit`, `ui.hud.tdm.unit`, `ui.hud.tdm.install`, two
+timing rows (`host.tdm.perf`, `host.tdm.client`), two window rows (`godot.m2b.play` ≈ 110 s, `godot.m2b_load`), new
+cases in `sim.weapons.unit`, `net.proto*` and `anim.s3.unit`, and new checks in one existing timing row
+(`audio.game.underruns`). Each timing row is measured once (the wave-1 pass), each window row once (the wave-2 pass).
 
 ---
 
@@ -845,11 +963,13 @@ and keeps them runnable by name (§13 Q8). `godot.m2a_firefight` stays: it is E1
 | Q5 | AutoTeam with one human: may the balance move the human? | **no**, it moves bots first |
 | Q6 | Hearing radius without AILoudness (−1 in weapon patches) | **60 m**, `measured = false` |
 | Q7 | Enforce the TDM combat area (CombatAreaTrigger) in M2b? | **no**; the nav and the static world bound Metro; M4 adds out-of-bounds |
-| Q8 | Retire `godot.m2a.play`, `godot.m2a` and `godot.m2a.kits` from the default merge window set once `godot.m2b.play` covers the playable path? | **yes**, keep them runnable by name; `godot.m2a_firefight` stays (E11) |
+| Q8 | Retire `godot.m2a.play`, `godot.m2a` (391 s) and `godot.m2a.kits` (159 s; both over the 120 s window budget) from the default merge window set? | **yes, in W1.0** (the `retired` label, §11), so no M2b merge pass runs them; keep them runnable by name; `godot.m2a_firefight` stays (E14) |
 | Q9 | HDR CompressFactor / DischargeFactor / MaxAllowedEnergy | **not applied**, `measured = false` |
 | Q10 | Suppression aborting regen | **off** until a suppression system exists |
-| Q11 | Enclosed spawns: filter for humans too? | **yes**, the same main-component bit (cheap; low priority; reported, not gated) |
-| Q13 | The EntryInputActionEnum values of the immunity abort list beyond Fire and movement (§3.3) | **unmapped** until a name source exists; listed in the load notes, `measured = false` |
-| Q14 | E11 on the M2a Pairs scene (64 bots in front of the observer, rules off) instead of 64 roaming TDM bots | **yes**: it is the audio worst case, and it keeps M2a's slot layout (the observer in slot 64) |
-| Q15 | KillCounter's TeamKillWeight / NeutralTeamWeight are not decoded | **team kills count 0**, `measured = false`; ru decodes them if cheap |
+| Q11 | Enclosed spawns: filter them for humans? | **no, deferred**: the user said the spawn room is not important now; bots keep S1's main-component list (`spawn_in_main`), humans use all 102 points with the scored rule of §3.5 |
 | Q12 | Kill-limit override for tests and play | **`--kill-limit=N`**, dev only, not in MatchInfo's digest |
+| Q13 | The EntryInputActionEnum values of the immunity abort list beyond Fire and movement (§3.3) | **unmapped** until a name source exists; listed in the load notes, `measured = false` |
+| Q14 | E11 offline on au3's 64-shooter render instead of in a windowed scene | **yes**: the same 64-shooter load, a timing row measured once in the wave-1 pass, no window; `godot.m2a_firefight` (64 bots in front of the observer) still runs in the wave-2 window phase as E14 |
+| Q15 | KillCounter's TeamKillWeight / NeutralTeamWeight are not decoded | **team kills count 0**, `measured = false`; ru decodes them if cheap |
+| Q16 | A bot that dies near a living assault teammate waits for a revive (§3.4) | **yes**: 20 m, up to 8 s, `measured = false`; without it bot revives are rare (the window would be 5 s) |
+| Q17 | Fold cam into ui to save one track's start-up | **no** while the 3–5-tracks-per-wave rule holds; yes if the weekly budget is tight (cam's work is small and on disjoint files) |
