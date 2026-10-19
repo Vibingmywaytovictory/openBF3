@@ -1365,3 +1365,42 @@ endif()
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     set_property(TEST godot.m2a godot.m2a.kits godot.m2a.play APPEND PROPERTY LABELS retired)
 endif()
+
+# M2b bb (docs/design/m2b.md §1 E1, E2, E6, E8, §5, §11; docs/design/m2b-bb.md): the TDM bots' rows in test_host_tdm (one
+# executable with ru's host.tdm.server cases, so each row loads the shared Metro TDM level once per process; ru's block
+# creates the target when it is first, else this one does). host.tdm.bots.unit: functional, data-free (< 2 s).
+# host.tdm.round (E1), host.tdm.bots (E2: three seeds in parallel_map, PROCESSORS 3) and host.tdm.replay (E6: three runs
+# in parallel_map): functional, stepped (no wall-clock wait), install rows (exit 77 without one, or while ru's run_tdm
+# and nt's codecs are not on the branch). host.tdm.perf (E8): timing, RUN_SERIAL, the wave-1 merge pass only.
+if(NOT TARGET test_host_tdm)
+    openbf3_test(test_host_tdm test_main.cpp host_tdm_round_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+    target_link_libraries(test_host_tdm PRIVATE bf3_host)
+    target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+        "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
+else()
+    target_sources(test_host_tdm PRIVATE host_tdm_round_tests.cpp)
+endif()
+target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_BOT_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/bot_tuning.cfg\"")
+if(OPENBF3_ASAN)
+    target_compile_definitions(test_host_tdm PRIVATE OPENBF3_TIMING_REPORT_ONLY=1)
+endif()
+add_test(NAME host.tdm.bots.unit COMMAND test_host_tdm --test-suite=host-tdm-bots-unit)
+add_test(NAME host.tdm.round COMMAND test_host_tdm --test-suite=host-tdm-round)
+add_test(NAME host.tdm.bots COMMAND test_host_tdm --test-suite=host-tdm-bots)
+add_test(NAME host.tdm.replay COMMAND test_host_tdm --test-suite=host-tdm-replay)
+add_test(NAME host.tdm.perf COMMAND test_host_tdm --test-suite=host-tdm-perf)
+set_tests_properties(host.tdm.bots.unit PROPERTIES TIMEOUT 60)
+set_tests_properties(host.tdm.round host.tdm.bots host.tdm.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+set_tests_properties(host.tdm.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
+openbf3_label(timing host.tdm.perf)
+# m2b.md §1's estimates until measured on the branch with ru and nt merged (docs/design/m2b-bb.md): round 25 s, bots
+# 15 s on 3 lanes, replay 10 s on 3 lanes, perf about 20 s.
+openbf3_cost(host.tdm.round 1 25)
+openbf3_cost(host.tdm.bots 3 15)
+openbf3_cost(host.tdm.replay 3 10)
+openbf3_cost(host.tdm.perf 1 20)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2b_bb_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(host.tdm.bots.unit host.tdm.round host.tdm.bots host.tdm.replay host.tdm.perf PROPERTIES TIMEOUT 1800
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_bb_cl_dir}")
+endif()
