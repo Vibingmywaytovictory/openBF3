@@ -194,6 +194,9 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, m.tuning.schedule_lead_blocks));
 	mc.max_voices = ba::kGameMixerVoices; // M2b au [a3]
 	ba::apply_mixer_a3(m.a3, mc); // M2b au [a3]
+	if (const std::string fade = user_arg_value("audio-cut-fade"); !fade.empty()) { // PT1 snd [fade]: frames; 0 = the old cuts (A/B)
+		mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800)); // PT1 snd [fade]
+	} // PT1 snd [fade]
 	m.lead_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames);
 	m.mixer = std::make_shared<ba::MixerCore>(mc);
 	m.mixer->set_tap(&m.tap); // before the audio thread sees the mixer
