@@ -220,6 +220,11 @@ struct PatchInstance::State {
 	PatchInstanceStats stats;
 	HdrVoiceWindow hdr; // M2b au [a3]: set by the mixer per block (patch_instance.h)
 	Vec3 emitter_position; // M2b au [a3]: the last set_geometry's emitter (the cull's DuplicateSpawn distance)
+	// M2b au [quiet] (patch_instance.cpp, docs/design/m2b-au.md "Quiet voices"): a voice whose buffer is silent and whose
+	// remaining plugins are at rest skips their per-sample work; quiet_plugin keeps their ramp and coefficient state
+	// exactly where the full path would leave it, so the render is unchanged.
+	bool voice_quiet(const core::audio::SoundVoice &p_voice, uint16_t p_from, const float *p_left, const float *p_right, uint32_t p_frames) const; // M2b au [quiet]
+	void quiet_plugin(detail::PluginState &r_ps, float p_rate, float p_window_db, float p_hdr_window_db); // M2b au [quiet]
 
 	float *voice(uint16_t p_voice, uint32_t p_channel) { return voice_buffers.data() + (size_t(p_voice) * 2 + p_channel) * detail::kMaxSubBlock; }
 	float read(const core::audio::SoundPort &p_port) const { return p_port.reg == core::audio::kNoRegister ? p_port.constant : registers[p_port.reg]; }
