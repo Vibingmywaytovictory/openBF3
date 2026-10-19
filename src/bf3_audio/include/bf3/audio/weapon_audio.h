@@ -16,10 +16,13 @@
 //   - knife and M67: no driver loop; their swing / throw / explosion patches start as one-shots (OwnShot, RemoteShot,
 //     Detonation), WeaponAudioDef::form says which form a def uses (E7 item 1 lists it per kit item);
 //   - impacts and effect sounds: impact_audio.h (one OneShotPool shared with the router).
-// Voice limits until A3 (§16 Q9): at most kMaxWeaponVoices driver instances (nearest first; a culled one stops at
-// its next trigger up) and kMaxOneShotVoices one-shots (oldest stolen); Bf3GameAudio creates its mixer with
-// MixerConfig::max_instances = kGameMixerInstances, so the mixer's own cap is never what refuses an instance
-// (WeaponAudioStats::mixer_refusals is gated 0 in E7).
+// Voice limits (M2b au R6, docs/design/m2b.md §6.2): the mixer's one cap, MixerConfig::max_voices = kGameMixerVoices
+// (128 sampler voices, voice_cull.h), replaces the router's two A2 limits. The router keeps its per-source bookkeeping
+// (nearest first, a culled one stops at its next trigger up; the pool steals its oldest) at kMaxWeaponVoices and
+// kMaxOneShotVoices, both the cap, so it never culls below what the mixer would keep; Bf3GameAudio creates its
+// mixer with MixerConfig::max_instances = kGameMixerInstances (room for both at once, the culled loops pending
+// included), so the mixer's slot count is never what refuses an instance (WeaponAudioStats::mixer_refusals is gated
+// 0 in E7). A voice the mixer culls comes back as a finished feedback.
 // Seeds (§4.4): a burst's instance is seeded sound_seed(entity, burst seq) (patch_instance.h): for the others the
 // entity is the shooter's slot and the burst seq the record's 4-bit burst_seq (so every client renders the same
 // variant, E15); for the own soldier the router's own burst counter (only this client hears the 1p patch).
@@ -51,10 +54,11 @@
 
 namespace bf3::audio {
 
-// Voice limits (§12.3, §16 Q9) and the game mixer's instance cap.
-inline constexpr uint32_t kMaxWeaponVoices = 32;
-inline constexpr uint32_t kMaxOneShotVoices = 64;
-inline constexpr uint32_t kGameMixerInstances = 96; // MixerConfig::max_instances of Bf3GameAudio's mixer
+// Voice limits (§12.3, §16 Q9; M2b au R6: the mixer's 128-voice cap) and the game mixer's instance slots.
+inline constexpr uint32_t kGameMixerVoices = 128; // MixerConfig::max_voices of Bf3GameAudio's mixer (M2b au R6)
+inline constexpr uint32_t kMaxWeaponVoices = kGameMixerVoices; // M2b au R6 (A2: 32)
+inline constexpr uint32_t kMaxOneShotVoices = kGameMixerVoices; // M2b au R6 (A2: 64)
+inline constexpr uint32_t kGameMixerInstances = kMaxWeaponVoices + kMaxOneShotVoices; // MixerConfig::max_instances (M2b au R6; A2: 96)
 static_assert(kMaxWeaponVoices + kMaxOneShotVoices <= kGameMixerInstances);
 
 // One-shot events of the kit items without a DefaultStartEvent [verified 2026-10-18 on Metro: bf3dump dump of
