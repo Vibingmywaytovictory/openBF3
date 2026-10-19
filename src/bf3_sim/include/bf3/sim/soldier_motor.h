@@ -183,6 +183,14 @@ struct MotorParams {
 	Curve fall_damage_horizontal; // [M1: evaluated, not applied; docs §6.8]
 	std::array<PoseParams, kPoseCount> poses{};
 	MotorTuning tuning;
+	// M2b W1.0 (docs/design/m2b.md §3.3, §2.6 #19; owner ru): the spawn-immunity abort. While protect_ticks > 0, a
+	// command that presses a masked buttons:: bit, or moves (move_forward / move_right != 0) with protect_abort_move,
+	// clears protect_ticks in the motor ([abort], soldier_motor.cpp), so server and client predict the same tick. Set
+	// in SharedLevel::motor by the loader with SharedLoadOptions::tdm (SoldierDef::abort_spawn_immortality_inputs
+	// through tdm_tuning.cfg's immunity_abort_map). Default 0 / false = M2a; motor_params_hash ([abort hash],
+	// motor_tuning.cpp) hashes them only when not default, so M2a's hash is unchanged.
+	uint32_t protect_abort_buttons = 0; // M2b W1.0 (ru)
+	bool protect_abort_move = false; // M2b W1.0 (ru)
 };
 static_assert(std::is_trivially_copyable_v<MotorParams>);
 
