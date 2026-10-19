@@ -19,6 +19,8 @@ measured = false. The playtest tunes them through `config/bot_tuning.cfg`.
 | `tests/host_tdm_round_tests.cpp` | `host.tdm.bots.unit`, `host.tdm.round` (E1), `host.tdm.bots` (E2), `host.tdm.replay` (E6), `host.tdm.perf` (E8) |
 | `tests/tdm_fixture.h` `// M2b bb` block | `BotChecks` (the E2 sight, stale-aim, blind-fire and stuck checks as a `TdmBotObserver`; after the merge also the stuck reports, bots per team, the gunplay counters, the player rows and the spawn / death centroids the E rows print), `attach_bot_checks`, `apply_bot_checks` |
 | `game_server.{h,cpp}` named insertion `[bot spawn]` (after the w1 merge, §2) | `GameServer::add_local_bot`: `add_local` with the bot mark (the main-component spawns) |
+| `round_natives.cpp` named insertion `[spawn transform]` (after the w1 merge, §2) | `RoundNatives::apply` handles a CharacterSpawn / AlternateSpawn `BlueprintTransform` property input (E1's coverage) |
+| `docs/design/m2b.md` `## M2b bb` end block | the two named insertions above as contract additions, for the integrator to confirm |
 | `tests/CMakeLists.txt` `# M2b bb` block | the `test_host_tdm` executable (created if ru has not), the five rows, labels, COSTs, timeouts, asan settings |
 | `src/bf3_sim/CMakeLists.txt` `# M2b bb` block | the two new sources |
 | `tests/m2b_contract_tests.cpp` | `kBbLanded = true` (the owner's switch) |
@@ -138,7 +140,9 @@ parse writes into a copy). Integer keys: `count`, `burst_min_rounds`, `burst_max
    0.00 m in 20 s windows). Team 2 had more of them, so the pooled K/D was 1.31-1.55 for team 1. With the bot mark the
    TDM bots spawn among the main-component spawns; the next E2 run had 0 off-main ticks and a pooled K/D of 1.137.
    **A human peer can still spawn on those points** (the rules' chooser runs over the level's spawns for peers): an
-   open issue for ru's spawn choice.
+   open issue for ru's spawn choice (m2b.md Q11 defers it). The design wants this (§3.5 and Q11: bots keep S1's
+   main-component list), but §2.6 says the bots join through `add_local_soldier`, which sets no bot mark; the
+   `## M2b bb` end block of m2b.md lists `[bot spawn]` as a contract addition for the integrator to confirm.
 3. **Stuck bots.** E2's stuck count is `BotChecks`' own, which leaves out Dead, Restricted, RegenWait and Revive ticks
    as §E2 says; the M2a-style count from `run_tdm` is kept and printed beside it.
 4. **E1's coverage and the peer's MatchState** (after the w1 merge). `run_tdm` returns neither the server nor the
@@ -146,10 +150,14 @@ parse writes into a copy). Integer keys: `count`, `burst_min_rounds`, `burst_max
    `MatchState` the peer decoded. It checks 0 `Recorded` deliveries for the nine TDM types of §3.1
    (`CharacterSpawnReference` is `LogicTypeId::CharacterSpawn`), the peer's RoundOver winner and counts against the
    rules', and 0 / 0 after the restart in place. Recorded deliveries to other native types are printed, not checked.
-   **It fails** on ru's `RoundNatives`: the two `CharacterSpawnReferenceObjectData` nodes 3532 / 3533 (the TDM HQ
-   spawns, Team = team2 / team1) get the property input `BlueprintTransform` (port id -409930682) at tick 1, which
-   `RoundNatives::apply` hands to the stubs as Recorded (no `native_port` binding for it in `logic_native.cpp`'s
-   spawner rows). The fix is ru's (bind or accept it); the check stays strict.
+   The first run failed on ru's `RoundNatives`: the two `CharacterSpawnReferenceObjectData` nodes 3532 / 3533 (the
+   TDM HQ spawns, Team = team2 / team1) get the property input `BlueprintTransform` (port id -409930682) at tick 1,
+   which `RoundNatives::apply` handed to the stubs as Recorded (no `native_port` binding for it in `logic_native.cpp`'s
+   spawner rows). **Fixed** by the named insertion `[spawn transform]` (commit 030e2ff) in the `default:` case of
+   `RoundNatives::apply`'s meaning switch, beside ru's LevelControl case there: a CharacterSpawn / AlternateSpawn
+   `BlueprintTransform` property input is handled and changes nothing (the TDM points are the level's spawns, placed
+   at load; the two references are not among them, m2b.md §3.1). The check stays strict, and E1 passes. A binding row
+   in `logic_native.cpp` would have needed a new `NativePortMeaning`, which is more change for the same effect.
 5. **The fixes after the merge (the first Metro runs, §1.1-§1.4):** aim at the visible point (chest first), hold
    fire for a teammate in the line of fire (team damage dropped 308 -> 16-47 per round), aim down the sights, the 4 s
    cap on the crouched hold (two bots had held a 62 m duel for 65 s and counted as stuck), shorter burst pauses, the
@@ -162,10 +170,13 @@ parse writes into a copy). Integer keys: `count`, `burst_min_rounds`, `burst_max
 | row | suite | label | COST | what |
 |---|---|---|---|---|
 | `host.tdm.bots.unit` | host-tdm-bots-unit | none | (well under 30 s) | perception, aim model, tuning file, a brain on a fake ServerView, `add_tdm_bots` on the synthetic floor; no install |
-| `host.tdm.round` | host-tdm-round | none | 1 25 | E1 |
-| `host.tdm.bots` | host-tdm-bots | none | 3 15 | E2, seeds 1-3 in `parallel_map` |
-| `host.tdm.replay` | host-tdm-replay | none | 3 10 | E6, seeds 11 / 11 / 12 |
+| `host.tdm.round` | host-tdm-round | none | 1 14 | E1 |
+| `host.tdm.bots` | host-tdm-bots | none | 3 10 | E2, seeds 1-3 in `parallel_map` |
+| `host.tdm.replay` | host-tdm-replay | none | 3 8 | E6, seeds 11 / 11 / 12 |
 | `host.tdm.perf` | host-tdm-perf | timing (RUN_SERIAL) | 1 20 | E8, 64 bots, never run on the branch |
+
+The COSTs are the serial seconds measured alone on the branch after the w1 merge (round 13.7 s, bots 9.6 s, replay
+7.3 s); perf's is still m2b.md's estimate.
 
 Each install case prints and checks `install.unchanged`. Since m2b/w1 (nt, au, ru) was merged into `m2b/bb`,
 `kRuNtLanded` in `host_tdm_round_tests.cpp` is true: the install rows run ru's `run_tdm` / `load_tdm_level_once` and
@@ -188,6 +199,11 @@ skip (exit 77) only without an install.
 Measured results: README "M2b bb: TDM bots".
 
 Still open after the w1 merge:
-* E1 fails on the `BlueprintTransform` deliveries (§2 item 4, ru's `RoundNatives`); everything else in E1 passes.
+* The integrator confirms the two contract additions (`[bot spawn]`, `[spawn transform]`; m2b.md's `## M2b bb` block).
+* ru's `host.tdm.client` (E13, label timing, the merge pass) fails with bb's bots on this branch, run once by
+  mistake here (twice, the same result): the scripted fall (a teleport 60 m up) leaves `own_respawn_tick` and
+  `own_revive_until` at 0 (no death), and 7 bots with kill limit 5 reach no RoundOver within its 30 s. The first
+  does not involve the bots. The second is probably the bots' kill rate (about 0.02 kills per bot per second, below
+  m2b.md's estimate) against the row's 30 s window; not diagnosed further.
 * E8 `host.tdm.perf` (timing) runs in the merge pass on main.
 * Human peers can spawn on the nav-island spawns (§2 item 2, ru's spawn choice).

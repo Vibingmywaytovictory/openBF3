@@ -1447,11 +1447,11 @@ set_tests_properties(host.tdm.bots.unit PROPERTIES TIMEOUT 60)
 set_tests_properties(host.tdm.round host.tdm.bots host.tdm.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 set_tests_properties(host.tdm.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)
 openbf3_label(timing host.tdm.perf)
-# m2b.md §1's estimates until measured on the branch with ru and nt merged (docs/design/m2b-bb.md): round 25 s, bots
-# 15 s on 3 lanes, replay 10 s on 3 lanes, perf about 20 s.
-openbf3_cost(host.tdm.round 1 25)
-openbf3_cost(host.tdm.bots 3 15)
-openbf3_cost(host.tdm.replay 3 10)
+# Measured alone on m2b/bb with ru and nt merged (docs/design/m2b-bb.md): round 14 s, bots 10 s on 3 lanes, replay
+# 8 s on 3 lanes; perf is still m2b.md §1's estimate (about 20 s; a timing row, measured in the merge pass).
+openbf3_cost(host.tdm.round 1 14)
+openbf3_cost(host.tdm.bots 3 10)
+openbf3_cost(host.tdm.replay 3 8)
 openbf3_cost(host.tdm.perf 1 20)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2b_bb_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
