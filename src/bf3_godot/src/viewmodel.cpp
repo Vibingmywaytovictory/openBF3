@@ -258,6 +258,9 @@ void Bf3Viewmodel::select_item(int p_index) {
 	arms_->set_skin(n.skin); // every item's binds begin with the arms' binds
 	arms_->set_visible(true);
 	animator_ = std::make_unique<bf3::anim::ViewmodelAnimator>(set_->rig, n.refs, tuning_);
+	if (!has_user_arg("pt1-off")) { // PT1 run [ab]: --pt1-off keeps the procedural bob (the before captures)
+		animator_->set_locomotion(bf3::render::viewmodel_locomotion(set_->items[size_t(item_)])); // PT1 run [loco]: BF3's 1p run / sprint deltas
+	} // PT1 run [ab]
 	ads_params_ = bf3::render::viewmodel_ads_params(set_->items[size_t(item_)], tuning_);
 	viewmodel_fov_ = -1;
 	set_viewmodel_fov(ads_params_.render_fov);

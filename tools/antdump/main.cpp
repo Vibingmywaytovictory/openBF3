@@ -39,6 +39,10 @@ using namespace bf3::tools::antdump;
 
 namespace {
 
+// PT1 run [controller]: a clip by "controller:<ClipControllerAsset name>" (clip names are not unique, s3.md §4.1), else
+// by __name (defined in the PT1 run block at the end of this file).
+GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name);
+
 int usage() {
 	std::fprintf(stderr,
 			"usage (<input> = <export_dir> | --install | --install=<dir>):\n"
@@ -50,7 +54,8 @@ int usage() {
 			"  antdump sample  <input> <package> <clip name> <frame>\n"
 			"  antdump rigmap  <input> <package> <clip name> [--skeleton <ebx partition>]...\n"
 			"  antdump sources <input>\n"
-			"  antdump parity  <export_dir> --install[=<dir>] [--rows-only]\n");
+			"  antdump parity  <export_dir> --install[=<dir>] [--rows-only]\n"
+			"  antdump objects <input> <package> <type|-> [name substring|-] [--depth N] [--limit N]\n"); // PT1 run [objects]
 	return 2;
 }
 
@@ -100,7 +105,7 @@ bool parse_args(int argc, char **argv, Args &r_args) {
 		} else if (a.rfind("--install=", 0) == 0) {
 			r_args.input.install = true;
 			r_args.input.install_dir = a.substr(10);
-		} else if (a == "--digits" || a == "--out" || a == "--repeat" || a == "--skeleton") {
+		} else if (a == "--digits" || a == "--out" || a == "--repeat" || a == "--skeleton" || a == "--depth" || a == "--limit") { // PT1 run [objects]
 			if (i + 1 >= argc) {
 				return false;
 			}
@@ -236,7 +241,7 @@ int cmd_clip(const Args &p_args) {
 	if (!p) {
 		return 1;
 	}
-	const GdStruct clip = AntLibrary::find_clip(*p, p_args.pos[1]);
+	const GdStruct clip = pt1_find_clip(s.library, *p, p_args.pos[1]); // PT1 run [controller]
 	if (!clip.valid()) {
 		std::fprintf(stderr, "antdump: no clip named \"%s\" in %s\n", p_args.pos[1].c_str(), p_args.pos[0].c_str());
 		return 1;
@@ -421,7 +426,7 @@ int cmd_sample(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? AntLibrary::find_clip(*p, p_args.pos[1]) : GdStruct();
+	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct(); // PT1 run [controller]
 	DecodedClip d;
 	ClipBinding b;
 	if (!clip.valid() || !decode_clip(clip, d).ok() || !s.library.bind(*p, clip, b).ok()) {
@@ -509,7 +514,7 @@ int cmd_rigmap(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? AntLibrary::find_clip(*p, p_args.pos[1]) : GdStruct();
+	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct(); // PT1 run [controller]
 	DecodedClip d;
 	ClipBinding b;
 	ClipHeader h;
@@ -658,6 +663,215 @@ int cmd_parity(const Args &p_args) {
 	return r.ok() ? 0 : 1;
 }
 
+
+// PT1 run [objects]: `antdump objects <input> <package> <type|-> [name substring|-] [--depth N] [--limit N]` prints every
+// top-level object of that type (or any type, "-") whose __name contains the substring, field by field through the
+// __base chain, embedded structs and DataRefs (to --depth, default 3), with each Guid's target named
+// (docs/design/pt1-run.md: the Ant locomotion graph and the ClipControllerAsset Distance field).
+namespace pt1_objects {
+
+std::string guid_label(const AntLibrary &p_library, const AntPackage &p_from, const GdGuid &p_guid) {
+	if (p_guid.is_null()) {
+		return "null";
+	}
+	char buf[48];
+	std::snprintf(buf, sizeof(buf), "0x%x", p_guid.index());
+	const GdStruct t = p_library.resolve(p_from, p_guid);
+	if (!t.valid()) {
+		return std::string(buf) + " (unresolved)";
+	}
+	return std::string(buf) + " " + std::string(t.type_name()) + " '" + std::string(t.name()) + "'";
+}
+
+void dump_struct(const AntLibrary &p_library, const AntPackage &p_from, const GdStruct &p_s, int p_depth, int p_max_depth, const std::string &p_indent);
+
+void dump_primitive_array(const AntLibrary &p_library, const AntPackage &p_from, const GdArray &p_a, uint32_t p_hash, const std::string &p_indent,
+		int p_depth, int p_max_depth) {
+	const uint32_t n = std::min<uint32_t>(p_a.size(), 64);
+	for (uint32_t i = 0; i < n; ++i) {
+		std::printf("%s[%u] ", p_indent.c_str(), i);
+		if (p_hash == uint32_t(GdPrimitive::Float) || p_hash == uint32_t(GdPrimitive::Double)) {
+			float v = 0;
+			p_a.read_float(i, v);
+			std::printf("%g\n", v);
+		} else if (p_hash == uint32_t(GdPrimitive::Guid)) {
+			GdGuid g;
+			p_a.read_guid(i, g);
+			std::printf("%s\n", guid_label(p_library, p_from, g).c_str());
+		} else if (p_hash == uint32_t(GdPrimitive::String)) {
+			std::string_view s;
+			p_a.read_string(i, s);
+			std::printf("\"%.*s\"\n", int(s.size()), s.data());
+		} else if (p_hash >= uint32_t(GdPrimitive::Bool) && p_hash <= uint32_t(GdPrimitive::UInt64)) {
+			int64_t v = 0;
+			p_a.read_int(i, v);
+			std::printf("%lld\n", (long long)v);
+		} else {
+			const GdStruct e = p_a.element(i);
+			std::printf("%s\n", e.valid() ? std::string(e.type_name()).c_str() : "?");
+			if (e.valid() && p_depth < p_max_depth) {
+				dump_struct(p_library, p_from, e, p_depth + 1, p_max_depth, p_indent + "  ");
+			}
+		}
+	}
+	if (p_a.size() > n) {
+		std::printf("%s... %u more\n", p_indent.c_str(), p_a.size() - n);
+	}
+}
+
+void dump_struct(const AntLibrary &p_library, const AntPackage &p_from, const GdStruct &p_s, int p_depth, int p_max_depth, const std::string &p_indent) {
+	if (!p_s.valid()) {
+		return;
+	}
+	for (const GdField &f : p_s.layout()->fields) {
+		if (f.layout_hash == 0 || f.name.empty()) {
+			continue;
+		}
+		const std::string name(f.name);
+		if (name == "__base") {
+			const GdStruct b = p_s.base();
+			if (b.valid()) {
+				std::printf("%s(base %s)\n", p_indent.c_str(), std::string(b.type_name()).c_str());
+				dump_struct(p_library, p_from, b, p_depth, p_max_depth, p_indent);
+			}
+			continue;
+		}
+		std::printf("%s%s: ", p_indent.c_str(), name.c_str());
+		if (f.is_array()) {
+			const GdArray a = p_s.array(f.name);
+			std::printf("array[%u]\n", a.size());
+			dump_primitive_array(p_library, p_from, a, f.layout_hash, p_indent + "  ", p_depth, p_max_depth);
+			continue;
+		}
+		const uint32_t h = f.layout_hash;
+		if (h == uint32_t(GdPrimitive::Float) || h == uint32_t(GdPrimitive::Double)) {
+			if (f.count > 1) {
+				for (uint32_t i = 0; i < f.count; ++i) {
+					float v = 0;
+					p_s.read_float_at(f, i, v);
+					std::printf("%g ", v);
+				}
+				std::printf("\n");
+			} else {
+				float v = 0;
+				p_s.read_float(f.name, v);
+				std::printf("%g\n", v);
+			}
+		} else if (h >= uint32_t(GdPrimitive::Bool) && h <= uint32_t(GdPrimitive::UInt64)) {
+			if (f.count > 1) {
+				for (uint32_t i = 0; i < f.count; ++i) {
+					int64_t v = 0;
+					p_s.read_int_at(f, i, v);
+					std::printf("%lld ", (long long)v);
+				}
+				std::printf("\n");
+			} else {
+				int64_t v = 0;
+				p_s.read_int(f.name, v);
+				std::printf("%lld\n", (long long)v);
+			}
+		} else if (h >= uint32_t(GdPrimitive::Vector2) && h <= uint32_t(GdPrimitive::Quaternion)) {
+			float v[4] = {};
+			p_s.read_vec4(f.name, v);
+			std::printf("(%g, %g, %g, %g)\n", v[0], v[1], v[2], v[3]);
+		} else if (h == uint32_t(GdPrimitive::Guid)) {
+			GdGuid g;
+			p_s.read_guid(f.name, g);
+			std::printf("%s\n", guid_label(p_library, p_from, g).c_str());
+		} else if (h == uint32_t(GdPrimitive::String)) {
+			std::string_view s;
+			p_s.read_string(f.name, s);
+			std::printf("\"%.*s\"\n", int(s.size()), s.data());
+		} else if (h == uint32_t(GdPrimitive::DataRef)) {
+			const GdStruct r = p_s.ref(f.name);
+			std::printf("ref %s\n", r.valid() ? std::string(r.type_name()).c_str() : "null");
+			if (r.valid() && p_depth < p_max_depth) {
+				dump_struct(p_library, p_from, r, p_depth + 1, p_max_depth, p_indent + "  ");
+			}
+		} else if (h == uint32_t(GdPrimitive::Matrix44)) {
+			std::printf("matrix44\n");
+		} else {
+			const GdStruct e = p_s.embedded(f.name);
+			std::printf("%s\n", e.valid() ? std::string(e.type_name()).c_str() : "struct ?");
+			if (e.valid() && p_depth < p_max_depth) {
+				dump_struct(p_library, p_from, e, p_depth + 1, p_max_depth, p_indent + "  ");
+			}
+		}
+	}
+}
+
+// True when p_s or a base of it has the type name p_type.
+bool is_type(const GdStruct &p_s, std::string_view p_type) {
+	GdStruct s = p_s;
+	for (int i = 0; i < 16 && s.valid(); ++i) {
+		if (s.type_name() == p_type) {
+			return true;
+		}
+		s = s.base();
+	}
+	return false;
+}
+
+} // namespace pt1_objects
+
+int cmd_objects(const Args &p_args) {
+	Session s;
+	if (const int rc = open_session(p_args, s)) {
+		return rc;
+	}
+	std::unique_ptr<AntPackage> holder;
+	const AntPackage *p = get_package(s, p_args.pos[0], holder);
+	if (!p) {
+		return 1;
+	}
+	const std::string type = p_args.pos[1];
+	const std::string name = p_args.pos.size() >= 3 ? p_args.pos[2] : "-";
+	const char *depth_flag = p_args.value("--depth");
+	const char *limit_flag = p_args.value("--limit");
+	const int depth = depth_flag ? std::clamp(std::atoi(depth_flag), 0, 8) : 3;
+	const long limit = limit_flag ? std::max(1L, std::atol(limit_flag)) : 200L;
+	long shown = 0;
+	for (size_t i = 0; i < p->object_count() && shown < limit; ++i) {
+		const GdStruct o = p->object(i);
+		if (!o.valid() || (type != "-" && !pt1_objects::is_type(o, type))) {
+			continue;
+		}
+		if (name != "-" && std::string(o.name()).find(name) == std::string::npos) {
+			continue;
+		}
+		++shown;
+		std::printf("== %s '%s' guid 0x%x\n", std::string(o.type_name()).c_str(), std::string(o.name()).c_str(), o.guid().index());
+		pt1_objects::dump_struct(s.library, *p, o, 0, depth, "  ");
+	}
+	std::fprintf(stderr, "antdump: %ld objects shown\n", shown);
+	return 0;
+}
+
+// PT1 run [controller]: see the declaration at the top of this file. A controller name that binds 0 clips falls back to
+// nothing (invalid); 2+ clips: the first, with a warning on stderr.
+GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name) {
+	static constexpr std::string_view kPrefix = "controller:";
+	if (p_name.rfind(kPrefix, 0) != 0) {
+		return AntLibrary::find_clip(p_package, p_name);
+	}
+	const std::string_view want = std::string_view(p_name).substr(kPrefix.size());
+	GdStruct found;
+	uint32_t matches = 0;
+	for (uint32_t index : AntLibrary::clips(p_package)) {
+		const GdStruct clip = p_package.object(index);
+		ClipBinding b;
+		if (p_library.bind(p_package, clip, b).ok() && b.controller_name == want) {
+			if (matches++ == 0) {
+				found = clip;
+			}
+		}
+	}
+	if (matches > 1) {
+		std::fprintf(stderr, "antdump: controller %.*s binds %u clips; the first is used\n", int(want.size()), want.data(), matches);
+	}
+	return found;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -693,6 +907,9 @@ int main(int argc, char **argv) {
 	}
 	if (cmd == "parity") {
 		return cmd_parity(args);
+	}
+	if (cmd == "objects" && n >= 2) { // PT1 run [objects]
+		return cmd_objects(args);
 	}
 	return usage();
 }

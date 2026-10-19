@@ -107,6 +107,8 @@ struct Bf3GameCrowd::Impl {
 	bool have_pose = false;
 	anim::CrowdMoveClips moves;
 	bool have_moves = false;
+	anim::CrowdMoveGroupSet move_groups; // PT1 run [load]: BF3's move groups (docs/design/pt1-run.md)
+	bool have_move_groups = false; // PT1 run [load]
 	anim::CrowdConfig config;
 	std::array<std::vector<anim::CrowdWeapon>, 2> views;
 	std::vector<anim::CrowdTeam> teams;
@@ -284,6 +286,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		in.pose = uint8_t(o.pose);
 		in.target_pose = uint8_t(o.target_pose);
 		in.transition = o.transition;
+		in.sprinting = (o.flags & sim::soldier_flags::kSprinting) != 0; // PT1 run [sprint]: the run or the sprint move group
 		if (w != nullptr) {
 			if (w->def != sim::weapons::kNoWeapon) {
 				const int32_t idx = render::crowd_weapon_index(*weapons, team, w->def);
@@ -525,6 +528,16 @@ core::Status Bf3GameCrowd::load_body(const core::InstallReader &p_reader, core::
 		} else {
 			m.body_notes.push_back("move clips: " + moves.error().message);
 		}
+		core::Result<anim::CrowdMoveGroupSet> groups = anim::load_crowd_move_groups((*assets)->clips, *(*assets)->library); // PT1 run [load]
+		if (groups) { // PT1 run [load]
+			m.move_groups = std::move(*groups); // PT1 run [load]
+			m.have_move_groups = true; // PT1 run [load]
+			for (const std::string &n : m.move_groups.notes) { // PT1 run [load]
+				m.body_notes.push_back("move groups: " + n); // PT1 run [load]
+			} // PT1 run [load]
+		} else { // PT1 run [load]
+			m.body_notes.push_back("move groups: " + groups.error().message + " (S3's and tp's cycles)"); // PT1 run [load]
+		} // PT1 run [load]
 	}
 	m.config = anim::CrowdConfig{};
 	m.config.lod = (*assets)->lod;
@@ -638,6 +651,10 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 	anim::CrowdStanceSet stance;
 	stance.pose = m.have_pose ? &m.pose : nullptr;
 	stance.moves = m.have_moves ? &m.moves : nullptr;
+	stance.move_groups = m.have_move_groups ? &m.move_groups : nullptr; // PT1 run [stance]
+	if (has_user_arg("pt1-off")) { // PT1 run [ab]: --pt1-off draws S3's / tp's cycles (the before captures)
+		stance.move_groups = nullptr; // PT1 run [ab]
+	} // PT1 run [ab]
 	stance.corpse_seconds = m.corpse_seconds; // M2b cam [corpse]
 	core::Result<std::unique_ptr<anim::CrowdEvaluator>> e = anim::CrowdEvaluator::make(m.assets->clips, stance, m.teams, kCrowdSoldiers, m.config);
 	if (!e) {

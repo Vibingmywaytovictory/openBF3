@@ -171,6 +171,11 @@ void Bf3TpCrowdCheck::start_loader() {
 	});
 }
 
+// PT1 run [shots]: --pt1-run moves soldiers 1, 2, 10 and 11 (in place) and takes a shot every 0.05 s over 3.0 .. 3.6 s.
+bool pt1_run_mode(); // PT1 run [shots]
+void pt1_run_soldier(size_t p_k, host::PresentedSoldier &r_o); // PT1 run [shots]
+bool pt1_run_shot_at(double p_t, double p_step); // PT1 run [shots]
+
 void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSoldier> &r_others, std::vector<host::PresentedOtherWeapon> &r_weapons,
 		std::vector<host::PresentEvent> &r_events) {
 	const Script &s = *script_;
@@ -244,6 +249,9 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 			default:
 				break;
 		}
+		if (pt1_run_mode()) { // PT1 run [shots]
+			pt1_run_soldier(k, o); // PT1 run [shots]
+		} // PT1 run [shots]
 		r_others.push_back(o);
 		r_weapons.push_back(w);
 		// Fire: soldier 3 every 0.3 s, soldier 7 every 0.2 s (RemoteShot, sent up to 0.1 s ahead of its render time).
@@ -427,11 +435,18 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 	check_at(t_);
 	if (shots_) {
 		for (const double at : { 1.5, 2.25, 2.6, 6.5 }) {
+			if (pt1_run_mode()) { // PT1 run [shots]: its own sequence instead
+				break; // PT1 run [shots]
+			} // PT1 run [shots]
 			if (std::fabs(t_ - at) < kStep * 0.5) {
 				const std::string path = path_text(utf8_path(shot_dir_) / ("tp_crowd_" + std::to_string(shot_index_++) + ".png"));
 				log(std::string("shot ") + path + (session_->save_screenshot(path) ? "" : " FAILED"));
 			}
 		}
+		if (pt1_run_mode() && pt1_run_shot_at(t_, kStep)) { // PT1 run [shots]
+			const std::string path = path_text(utf8_path(shot_dir_) / ("pt1_run_" + std::to_string(shot_index_++) + ".png")); // PT1 run [shots]
+			log(std::string("shot ") + path + (session_->save_screenshot(path) ? "" : " FAILED")); // PT1 run [shots]
+		} // PT1 run [shots]
 	}
 	if (t_ >= kEnd) {
 		const GameCrowdStats end = crowd_.stats();
@@ -485,3 +500,49 @@ void Bf3TpCrowdCheck::shutdown() {
 void openbf3_register_m2a_tp() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TpCrowdCheck);
 }
+
+// ---- PT1 run (docs/design/pt1-run.md): --pt1-run, the run captures -------------------------------------------------
+
+#include "bf3/sim/soldier_state.h"
+
+namespace bf3::godot_side {
+
+bool pt1_run_mode() {
+	static const bool on = has_user_arg("pt1-run");
+	return on;
+}
+
+// In place (the animation only, as soldier 5): 1 runs forward at 4.0 m/s (the motor's stand speed), 2 sprints at 6.5 m/s,
+// 10 strafes left at 3.0 m/s (4.0 * 0.75), 11 crouch-walks forward at 2.0 m/s.
+void pt1_run_soldier(size_t p_k, host::PresentedSoldier &r_o) {
+	const float s = std::sin(r_o.yaw), c = std::cos(r_o.yaw);
+	switch (p_k) {
+		case 1:
+			r_o.velocity = sim::Vec3{ s * 4.0f, 0.0f, c * 4.0f };
+			break;
+		case 2:
+			r_o.velocity = sim::Vec3{ s * 6.5f, 0.0f, c * 6.5f };
+			r_o.flags = uint8_t(r_o.flags | sim::soldier_flags::kSprinting);
+			break;
+		case 10:
+			r_o.velocity = sim::Vec3{ c * 3.0f, 0.0f, -s * 3.0f };
+			break;
+		case 11:
+			r_o.velocity = sim::Vec3{ s * 2.0f, 0.0f, c * 2.0f };
+			r_o.pose = r_o.target_pose = sim::Pose::Crouch;
+			break;
+		default:
+			break;
+	}
+}
+
+bool pt1_run_shot_at(double p_t, double p_step) {
+	for (int i = 0; i <= 12; ++i) {
+		if (std::fabs(p_t - (3.0 + 0.05 * i)) < p_step * 0.5) {
+			return true;
+		}
+	}
+	return false;
+}
+
+} // namespace bf3::godot_side
