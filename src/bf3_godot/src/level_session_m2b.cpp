@@ -138,10 +138,11 @@ void m2b_free_label(Label *&r_label) {
 	}
 }
 
-// Godot's camera basis from a Frostbite-axes frame (right, up, forward = the view direction; a Camera3D looks down -Z).
+// Godot's camera basis from a Frostbite-axes frame (right = up x forward, up, forward = the view direction; a Camera3D
+// looks down -Z): x = -right, y = up, z = -forward (m2b-cam.md §6; m2a_frame_of is the inverse).
 Transform3D m2b_camera_transform(const fx::Transform &p_t) {
 	Basis b;
-	b.set_column(0, Vector3(p_t.right.x, p_t.right.y, p_t.right.z));
+	b.set_column(0, -Vector3(p_t.right.x, p_t.right.y, p_t.right.z));
 	b.set_column(1, Vector3(p_t.up.x, p_t.up.y, p_t.up.z));
 	b.set_column(2, -Vector3(p_t.forward.x, p_t.forward.y, p_t.forward.z));
 	return Transform3D(b, Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z));
@@ -580,9 +581,10 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		}
 		if (m.death_view_pending) {
 			DeathCameraStart st;
+			// The own feet as drawn (m2b-cam.md §6: own_curr + visual_offset) and the death's view yaw.
 			const sim::Vec3 &p = f.own_curr.position;
-			st.corpse = fx::Vec3{ p[0], p[1], p[2] };
-			st.yaw_rad = mapper.view().yaw;
+			st.corpse = fx::Vec3{ p[0] + f.visual_offset[0], p[1] + f.visual_offset[1], p[2] + f.visual_offset[2] };
+			st.yaw_rad = sim::yaw_radians(f.own_curr.yaw);
 			const Vector3 eye = r_session.cameras().last_eye();
 			st.eye = fx::Vec3{ eye.x, eye.y, eye.z };
 			st.killer_slot = m.own_killer == m.own_slot ? uint8_t(0xFF) : m.own_killer;
