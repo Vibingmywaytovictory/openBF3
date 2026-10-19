@@ -90,4 +90,11 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
+// M2b au (docs/design/m2b.md §6.3, docs/design/m2b-au.md "Profiler"): the A3 profiler readout for a dev overlay (the
+// M2b scene's, gx): the mix CPU share (last, max, p50 / p99 upper bounds of MixerStats' histogram), the live voices,
+// the culled counts per step, the suspended voices and the HDR window's edges. Main thread; relaxed reads of the
+// audio thread's counters. Zeros / "not built" before build().
+audio::MixerProfile game_audio_profile(const Bf3GameAudio &p_audio);
+std::string game_audio_profile_text(const Bf3GameAudio &p_audio);
+
 } // namespace bf3::godot_side

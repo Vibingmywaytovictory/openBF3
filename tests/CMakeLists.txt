@@ -1380,3 +1380,19 @@ if(OPENBF3_ASAN)
     get_filename_component(_openbf3_m2b_nt_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(host.client.m2b.unit PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_nt_cl_dir}")
 endif()
+
+# M2b au (docs/design/m2b.md §6, E10; docs/design/m2b-au.md): audio A3. audio.hdr.unit: install-free (the HDR window's
+# E10 numbers alone and through MixerCore with synthetic HDR sources, R5's gain, pre-cull, suspension, the scope rules,
+# the 128-voice cap, the profiler, hostile settings and spans), a unit row (<= 2 s). audio.hdr.install: the retail
+# HdrSetting and the 33 scopes on MP_Subway, the patch -> scope map, install unchanged; exits 77 without an install.
+# Both in the asan preset (hdr_setting.cpp and sound_scope.cpp are new parsers).
+openbf3_test(test_audio_hdr test_main.cpp audio_hdr_tests.cpp test_support.h)
+target_link_libraries(test_audio_hdr PRIVATE bf3_audio bf3_core)
+add_test(NAME audio.hdr.unit COMMAND test_audio_hdr --test-suite=audio-hdr)
+add_test(NAME audio.hdr.install COMMAND test_audio_hdr --test-suite=audio-hdr-install)
+set_tests_properties(audio.hdr.unit PROPERTIES TIMEOUT 120)
+set_tests_properties(audio.hdr.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_au_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(audio.hdr.unit audio.hdr.install PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_au_cl_dir}")
+endif()
