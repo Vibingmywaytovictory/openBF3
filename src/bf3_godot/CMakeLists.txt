@@ -269,4 +269,6 @@ target_sources(bf3_godot PRIVATE
     src/pre_round.cpp
     src/round_end.h
     src/round_end.cpp
+    src/hud_tdm_demo.h
+    src/hud_tdm_demo.cpp
 )

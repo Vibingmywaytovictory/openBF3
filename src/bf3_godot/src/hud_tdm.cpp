@@ -4,6 +4,7 @@
 
 #include "hud_controls.h"
 #include "hud_tdm_screen.h"
+#include "hud_tdm_demo.h"
 #include "hud_killfeed.h"
 #include "hud_scoreboard.h"
 #include "kill_card.h"
@@ -452,4 +453,5 @@ void openbf3_register_m2b_ui() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmKillCard);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmPreRound);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmRoundEnd);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmHudDemo);
 }

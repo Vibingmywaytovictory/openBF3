@@ -39,7 +39,7 @@ void Bf3TdmScoreboard::draw_screen() {
 	// The kill limit, centred in the header.
 	if (m.kill_counter.team1_max_kills > 0) {
 		const Vector2 at = tdm_at(*this, ui::HudAnchor::Centre, 640.0f, kScoreboardTop + 40.0f);
-		tdm_draw_text(*this, c.font(TdmFont::Number), at, std::to_string(m.kill_counter.team1_max_kills), tdm_px(16.0f, s), kTdmDimColour, 2);
+		tdm_draw_text(*this, c.font(TdmFont::Number), at, "/ " + std::to_string(m.kill_counter.team1_max_kills), tdm_px(16.0f, s), kTdmDimColour, 2);
 	}
 }
 
@@ -51,11 +51,12 @@ uint8_t Bf3TdmScoreboard::draw_team(const ui::HudPlayerList &p_list, int p_team,
 	const Ref<Font> title = c.font(TdmFont::Title);
 	const Ref<Font> text = c.font(TdmFont::Text);
 	const Ref<Font> num = c.font(TdmFont::Number);
-	// Header: the team's name and kills.
-	const Vector2 head = tdm_at(*this, ui::HudAnchor::Centre, p_left + 8.0f, kScoreboardTop + 34.0f);
-	tdm_draw_text(*this, title, head, c.text(p_team == 1 ? TdmText::TeamUs : TdmText::TeamRu), tdm_px(24.0f, s), team_col);
-	const Vector2 kills_at = tdm_at(*this, ui::HudAnchor::Centre, p_left + p_width - 8.0f, kScoreboardTop + 40.0f);
-	tdm_draw_text(*this, num, kills_at, std::to_string(p_kills), tdm_px(32.0f, s), team_col, 1);
+	// Header: the team's name at the outer edge, its kills towards the centre (the limit sits between the two counts).
+	const bool right_side = !p_friendly; // friendly on the left
+	const Vector2 head = tdm_at(*this, ui::HudAnchor::Centre, right_side ? p_left + p_width - 8.0f : p_left + 8.0f, kScoreboardTop + 34.0f);
+	tdm_draw_text(*this, title, head, c.text(p_team == 1 ? TdmText::TeamUs : TdmText::TeamRu), tdm_px(24.0f, s), team_col, right_side ? 1 : 0);
+	const Vector2 kills_at = tdm_at(*this, ui::HudAnchor::Centre, right_side ? p_left + 36.0f : p_left + p_width - 36.0f, kScoreboardTop + 40.0f);
+	tdm_draw_text(*this, num, kills_at, std::to_string(p_kills), tdm_px(32.0f, s), team_col, right_side ? 0 : 1);
 	// Columns: name | K | D | SCORE | PING (right edges, stage pixels from the column's left).
 	const float x_k = p_width * 0.62f;
 	const float x_d = p_width * 0.72f;

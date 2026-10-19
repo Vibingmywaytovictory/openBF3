@@ -47,6 +47,7 @@ void Bf3TdmKillFeed::draw_screen() {
 	const float gap = kKillFeedGap * s;
 	const Vector2 icon_size(kKillFeedIconWidth * s, kKillFeedIconHeight * s);
 	const float ascent = font.is_valid() ? float(font->get_ascent(size)) : float(size);
+	const bool covered = m.team.scoreboard_enabled; // the scoreboard's panel covers the feed's corner
 	uint8_t drawn = 0;
 	rec.kill_feed_newest_serial = feed.newest_serial;
 	// Newest first: serials newest, newest - 1, ... (the ring holds the last kHudKillFeedSize).
@@ -66,8 +67,8 @@ void Bf3TdmKillFeed::draw_screen() {
 			++rec.kill_feed_lines_started;
 		}
 		const double age = now - seen.first_s;
-		if (age >= host::kKillFeedSeconds) {
-			continue;
+		if (age >= host::kKillFeedSeconds || covered) {
+			continue; // faded, or under the scoreboard (counted and aged all the same)
 		}
 		const float alpha = age > host::kKillFeedSeconds - kKillFeedFadeSeconds ? float((host::kKillFeedSeconds - age) / kKillFeedFadeSeconds) : 1.0f;
 		const std::string killer = line.suicide ? std::string() : tdm_player_name(m, line.killer);
