@@ -292,7 +292,7 @@ TEST_SUITE("weapons-unit") {
 			{ "NumberOfBulletsPerShell", [](auto &w) { w.fire.bullets_per_shell = 65; } },
 			{ "NumberOfBulletsPerShell", [](auto &w) { w.fire.bullets_per_shell = 0; } },
 			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = 10'001; } },
-			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = -1; } },
+			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = -2; } }, // M2b ru R12: -1 is a gadget without a magazine (R11)
 			{ "NumberOfMagazines", [](auto &w) { w.fire.number_of_magazines = 1'001; } },
 			{ "TraceFrequency", [](auto &w) { w.fire.trace_frequency = 1'001; } },
 			{ "ShotConfigData.InitialSpeed", [](auto &w) { w.fire.initial_speed = { 0, 0, 5'001 }; } },
