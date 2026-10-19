@@ -28,6 +28,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits> // M2b W1.0
 #include <vector>
 
 namespace bf3::net {
@@ -71,6 +72,10 @@ enum class MessageType : uint8_t {
 	ShotEvents = 4, // ch0 S->C: remote shots since the previous snapshot (§7.4)
 	CombatEvents = 23, // ch1 S->C: hits, deaths, detonations (§7.4)
 	KitSelect = 24, // ch1 C->S: kit and team for the next spawn (§5.6)
+	// M2b protocol v3 (docs/design/m2b.md §3.7, §2.6 #11; declared in W1.0, codecs nt's, R9). Every one on ch1.
+	MatchState = 25, // S->C: round phase, team kills, kill limit, winner, the round's ticks, the input restriction
+	PlayerList = 26, // S->C: the player rows (full on join, changed rows at most every kPlayerListIntervalTicks)
+	SpawnRequest = 27, // C->S: Deploy on the spawn screen (kit, spawn choice)
 };
 // The type byte of a datagram, or nullopt when it is empty or unknown.
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -104,6 +109,10 @@ struct MatchInfo {
 	uint8_t weapon_flags = 0; // weapon_flags:: the match options; the client builds its table with them
 	uint64_t kit_hash = 0; // host::kit_table_hash
 	uint8_t max_rewind_ticks = 0; // host::LagCompConfig::max_rewind_ticks (21 = 350 ms, m2a.md §16 Q1)
+	// M2b v3 (docs/design/m2b.md §3.7, §3.8): the server's logic graph digest (SharedLevel::logic_digest; 0 without
+	// rules; M3's digest handshake compares it) and rules_flags:: (a client whose own load disagrees is refused, nt).
+	uint64_t logic_digest = 0; // M2b W1.0 (nt)
+	uint8_t rules_flags = 0; // M2b W1.0 (nt)
 };
 // M2a: MatchInfo::weapon_flags bits (docs/design/m2a.md §7.1).
 namespace weapon_flags {
@@ -128,6 +137,9 @@ struct Spawned {
 	// spawn_soldier_weapons with them and keeps the spawn tick (state.tick) for step_weapons_m2a.
 	uint8_t kit = 0;
 	uint8_t team = 1;
+	// M2b v3 (docs/design/m2b.md §3.6): a revive's new life at the corpse (no spawn protection, post-revive health),
+	// sent exactly as a spawn so the client takes the life like any other.
+	bool revived = false; // M2b W1.0 (nt)
 };
 
 struct Loading {
@@ -442,6 +454,12 @@ struct DeathEvent {
 	uint32_t shot_index = 0;
 	bool headshot = false;
 	sim::weapons::SimTime time = 0;
+	// M2b v3 (docs/design/m2b.md §3.4 R8): stamped by the server with rules on (all 0 with rules off). respawn_tick:
+	// the earliest tick a SpawnRequest is accepted / the slot respawns; revive_until: the man-down end (0: not
+	// revivable); killer_health: the killer's health in the tick of the kill (0 for a fall). The kill card reads them.
+	sim::Tick respawn_tick = 0; // M2b W1.0 (nt)
+	sim::Tick revive_until = 0; // M2b W1.0 (nt)
+	float killer_health = 0; // M2b W1.0 (nt)
 };
 // From wp's DetonationEvent, so every client places a grenade's explosion where the server's flew.
 struct DetonationWire {
@@ -453,12 +471,19 @@ struct DetonationWire {
 	sim::Vec3 normal{};
 	bool dud = false;
 };
+// M2b v3 (docs/design/m2b.md §3.6): a revive by a teammate's defibrillator, in CombatEvents (ch1).
+struct ReviveEvent { // M2b W1.0 (nt)
+	uint8_t reviver = 0;
+	uint8_t revived = 0;
+	sim::Tick tick = 0; // the server tick of the revive (the new life's Spawned state tick)
+};
 inline constexpr size_t kMaxCombatEventsPerMessage = 256;
 struct CombatEvents {
 	sim::Tick server_tick = 0;
 	std::vector<HitEvent> hits;
 	std::vector<DeathEvent> deaths;
 	std::vector<DetonationWire> detonations;
+	std::vector<ReviveEvent> revives; // M2b W1.0 (nt): counted in kMaxCombatEventsPerMessage with the others
 };
 // As built (nt): every event's time is a varint of ticks back from server_tick plus 16 bits of the tick; damage and
 // health in 1/100 hp in 24 bits (0..100,000; a larger code is refused); slots in 7 bits; positions as shot origins. The message is reliable,
@@ -476,5 +501,133 @@ struct KitSelect {
 };
 std::vector<uint8_t> encode_kit_select(const KitSelect &p_message);
 core::Result<KitSelect> decode_kit_select(std::span<const uint8_t> p_datagram);
+
+// M2b W1.0 (docs/design/m2b.md §2.6 #11, §3.7; the W1.0 contract, docs/design/m2b-w1.md). Protocol v3: the round, the
+// player rows and the spawn screen. Declared in W1.0; the wire formats and codecs are nt's (R9). Until nt lands, the
+// encoders return an empty vector and the decoders the error "v3 codec: nt" (protocol.cpp, each line marked
+// "M2b W1.0 stub"), and a sender skips an empty vector. kProtocolVersion stays 2 in W1.0: nt sets it to 3 with the
+// codecs (two existing rows pin 2: net.proto.unit and m2a.contract; nt updates both, m2b-w1.md). Every message is
+// on ch1 (reliable, ordered). Decoders bound every count (<= kMaxPlayerRows rows, names <= kMaxPlayerNameBytes of
+// valid UTF-8) and refuse trailing bytes.
+
+// MatchInfo::rules_flags (what the server's load has; the client makes the same SharedLoadOptions::tdm load).
+namespace rules_flags {
+inline constexpr uint8_t kTdm = 1u << 0; // MatchRulesConfig::mode == Tdm (SharedLoadOptions::tdm on both ends)
+inline constexpr uint8_t kDeployScreen = 1u << 1; // humans spawn on an accepted SpawnRequest only
+inline constexpr uint8_t kRevive = 1u << 2; // the defibrillator revives
+} // namespace rules_flags
+
+// MatchState::restrict_mask: what the level's InputRestriction entity ALLOWS while it is active (a set bit =
+// allowed). Metro TDM [verified, m2b.md §3.1]: Yaw, Pitch, Jump, Prone, Zoom and Reload allowed; Throttle, Strafe,
+// Fire, Sprint, Melee and ThrowGrenade refused. ru maps the entity's fields onto these bits (tdm_rules.h).
+namespace restrict_bits {
+inline constexpr uint32_t kThrottle = 1u << 0; // Command::move_forward
+inline constexpr uint32_t kStrafe = 1u << 1; // Command::move_right
+inline constexpr uint32_t kYaw = 1u << 2;
+inline constexpr uint32_t kPitch = 1u << 3;
+inline constexpr uint32_t kJump = 1u << 4; // buttons::kJump
+inline constexpr uint32_t kCrouch = 1u << 5;
+inline constexpr uint32_t kProne = 1u << 6;
+inline constexpr uint32_t kFire = 1u << 7; // buttons::kFire
+inline constexpr uint32_t kZoom = 1u << 8; // buttons::kZoom
+inline constexpr uint32_t kReload = 1u << 9; // buttons::kReload
+inline constexpr uint32_t kSprint = 1u << 10; // buttons::kSprint
+inline constexpr uint32_t kMelee = 1u << 11;
+inline constexpr uint32_t kThrowGrenade = 1u << 12;
+inline constexpr uint32_t kAll = (1u << 13) - 1;
+} // namespace restrict_bits
+
+// The pre-round freeze as ONE pure function of (command, restrict_until_tick, restrict_mask) that both ends apply
+// (m2b.md §3.7): the server to every received command before the motor (TdmRules::apply_input_restriction, [cmd]),
+// nt's client to every predicted command, so both switch on the same tick. Active while p_restrict_until_tick != 0
+// and the command's tick is below it (UINT32_MAX: restricted with no known end). A refused axis reads 0, a refused
+// button as released. Yaw, Pitch, Crouch and Prone are not applied (holding them needs the previous command; Metro
+// allows them), Melee and ThrowGrenade need Fire in M2b, so Fire covers them [inferred, measured = false].
+constexpr sim::Command restrict_command(sim::Command p_command, sim::Tick p_restrict_until_tick, uint32_t p_allowed) {
+	if (p_restrict_until_tick == 0 || p_command.tick >= p_restrict_until_tick) {
+		return p_command;
+	}
+	if ((p_allowed & restrict_bits::kThrottle) == 0) {
+		p_command.move_forward = 0;
+	}
+	if ((p_allowed & restrict_bits::kStrafe) == 0) {
+		p_command.move_right = 0;
+	}
+	uint32_t refused = 0;
+	if ((p_allowed & restrict_bits::kJump) == 0) {
+		refused |= sim::buttons::kJump;
+	}
+	if ((p_allowed & restrict_bits::kFire) == 0) {
+		refused |= sim::buttons::kFire;
+	}
+	if ((p_allowed & restrict_bits::kZoom) == 0) {
+		refused |= sim::buttons::kZoom;
+	}
+	if ((p_allowed & restrict_bits::kReload) == 0) {
+		refused |= sim::buttons::kReload;
+	}
+	if ((p_allowed & restrict_bits::kSprint) == 0) {
+		refused |= sim::buttons::kSprint;
+	}
+	p_command.buttons &= ~refused;
+	return p_command;
+}
+
+// The round as the server's rules see it, sent on change and in full to a new client after its MatchInfo (§3.7).
+// Trivially copyable (it sits in host::PresentationFrame).
+struct MatchState {
+	MatchPhase phase = MatchPhase::Loading;
+	sim::Tick round_start_tick = 0; // StartRound's tick (0 before the first)
+	sim::Tick countdown_end_tick = 0; // PreRound: when StartRound fires (0 = not counting down)
+	std::array<int32_t, 2> kills{}; // team 1, team 2: KillCounter.Kills (a revive takes one back, §3.6)
+	int32_t kill_limit = 0; // KillCounter.KillLimit (100 on Metro TDM; MatchRulesConfig::kill_limit_override)
+	uint8_t winner = 0; // 0 = none, 1, 2
+	bool killer_camera = true; // the Setting "BFServer.IsKillerCameraEnabled" (§3.1)
+	sim::Tick round_end_tick = 0; // RoundOver's tick
+	sim::Tick unspawn_tick = 0; // UnSpawnAllSoldiers' tick: the own client stops predicting (own_unspawned)
+	sim::Tick restart_tick = 0; // LevelControl's restart in place (0 = not scheduled)
+	sim::Tick restrict_until_tick = 0; // restrict_command: UINT32_MAX = restricted with no known end, 0 = none
+	uint32_t restrict_mask = restrict_bits::kAll; // restrict_bits:: allowed while restricted
+};
+static_assert(std::is_trivially_copyable_v<MatchState>);
+
+inline constexpr size_t kMaxPlayerRows = 64; // the rules' player slots (slots >= 64 are spectators, §3.2)
+inline constexpr size_t kMaxPlayerNameBytes = 16; // server-truncated to valid UTF-8 (a hostile Hello name, §9.3)
+inline constexpr uint32_t kPlayerListIntervalTicks = 15; // changed rows at most this often
+// One scoreboard row. 32 bytes, no padding (pinned by m2b.contract); trivially copyable (host::PresentationFrame).
+struct PlayerRow {
+	uint8_t slot = 0;
+	uint8_t team = 0; // 0 = none yet, 1, 2
+	uint8_t kit = 0; // host::KitRole of the current or last life
+	bool bot = false;
+	bool alive = false;
+	uint8_t name_bytes = 0; // used bytes of name (<= kMaxPlayerNameBytes)
+	uint16_t ping_ms = 0;
+	uint16_t kills = 0;
+	uint16_t deaths = 0;
+	int32_t score = 0; // the scoring table (kill 100, headshot +10, revive 100, §3.4, §3.6)
+	std::array<char, kMaxPlayerNameBytes> name{}; // UTF-8, not terminated
+};
+static_assert(std::is_trivially_copyable_v<PlayerRow>);
+struct PlayerList {
+	sim::Tick server_tick = 0;
+	bool full = false; // true: the whole list (join, a new client); false: the changed rows only
+	std::vector<PlayerRow> rows; // <= kMaxPlayerRows, ascending slot
+	std::vector<uint8_t> removed; // full == false: slots that left since the previous list
+};
+// Client -> server: Deploy (§3.4 step 3). The server refuses (counted, silent) while alive, before respawn_tick, in
+// RoundOver, with kit >= host::kKitCount or spawn_choice != 0, twice in a tick, or for a spectator slot.
+struct SpawnRequest {
+	uint8_t kit = 0; // host::KitRole
+	uint8_t spawn_choice = 0; // 0 = random; reserved for M4's flag spawns (M2b refuses any other value as BadKit)
+};
+
+std::vector<uint8_t> encode_match_state(const MatchState &p_message);
+core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram);
+// r_clamped counts rows beyond kMaxPlayerRows and names cut to kMaxPlayerNameBytes (on a UTF-8 boundary).
+std::vector<uint8_t> encode_player_list(const PlayerList &p_message, size_t *r_clamped = nullptr);
+core::Result<PlayerList> decode_player_list(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_spawn_request(const SpawnRequest &p_message);
+core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datagram);
 
 } // namespace bf3::net

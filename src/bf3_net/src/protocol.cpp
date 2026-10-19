@@ -2025,4 +2025,13 @@ core::Result<KitSelect> decode_kit_select(std::span<const uint8_t> p_datagram) {
 	return close(r, std::move(m), "KitSelect");
 }
 
+// M2b W1.0 (docs/design/m2b.md §11 "The one production stub"; docs/design/m2b-w1.md): the v3 codecs, so ru, bb and nt
+// link on parallel branches. nt replaces these bodies (R9); a sender skips an empty vector.
+std::vector<uint8_t> encode_match_state(const MatchState &) { return {}; } // M2b W1.0 stub
+core::Result<MatchState> decode_match_state(std::span<const uint8_t>) { return core::make_error("v3 codec: nt"); } // M2b W1.0 stub
+std::vector<uint8_t> encode_player_list(const PlayerList &, size_t *) { return {}; } // M2b W1.0 stub
+core::Result<PlayerList> decode_player_list(std::span<const uint8_t>) { return core::make_error("v3 codec: nt"); } // M2b W1.0 stub
+std::vector<uint8_t> encode_spawn_request(const SpawnRequest &) { return {}; } // M2b W1.0 stub
+core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t>) { return core::make_error("v3 codec: nt"); } // M2b W1.0 stub
+
 } // namespace bf3::net
