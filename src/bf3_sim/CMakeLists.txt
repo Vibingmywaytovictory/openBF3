@@ -149,3 +149,11 @@ target_sources(bf3_sim PRIVATE
 target_sources(bf3_sim PRIVATE
     src/weapons/mechanics_tuning.cpp
 )
+
+# M2b W1.0 (docs/design/m2b.md §2.6, §11; docs/design/m2b-w1.md): the wave-1 bf3_sim interface headers. ru adds
+# round_natives.cpp and the scored spawn choice, bb perception.cpp and aim_model.cpp, each in a block of its own.
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/round_natives.h
+    include/bf3/sim/bots/perception.h
+    include/bf3/sim/bots/aim_model.h
+)
