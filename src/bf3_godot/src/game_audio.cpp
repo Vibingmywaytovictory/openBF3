@@ -582,6 +582,11 @@ void pt1_capture_end(Impl &r_m) {
 			prio == kPt1NoPriority ? "unknown " : "", prio == kPt1NoPriority ? 0 : prio, prio_set == kPt1NoPriority ? "unchanged " : "",
 			prio_set == kPt1NoPriority ? 0 : prio_set, kPt1HitchMs, (unsigned long long)c->hitch_count, c->hitch_max_ms);
 	UtilityFunctions::print(String::utf8(("[pt1] audio health: " + ba::format_mixer_cuts(r_m.mixer->pt1_cut_stats()) + line).c_str()));
+	if (r_m.router) { // PT1 integ [foley stats]: the play check's reload / foley evidence (docs/design/pt1-rld.md)
+		const ba::WeaponAudioStats &rs = r_m.router->stats(); // PT1 integ [foley stats]
+		UtilityFunctions::print(String::utf8(("[pt1] weapon foley: " + std::to_string(rs.reloads) + " reloads, " + std::to_string(rs.foley) + " foley one-shots, " + // PT1 integ [foley stats]
+				std::to_string(rs.foley_releases) + " releases, " + std::to_string(rs.foley_out_of_reach) + " out of reach, " + std::to_string(rs.one_shots) + " pool one-shots").c_str())); // PT1 integ [foley stats]
+	} // PT1 integ [foley stats]
 	if (c->dir.empty()) {
 		return;
 	}
