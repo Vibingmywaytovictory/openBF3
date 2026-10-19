@@ -114,7 +114,7 @@ void Bf3Nametags::update(std::vector<NametagDraw> p_draws, float p_canvas_scale)
 	queue_redraw();
 }
 
-void Bf3Nametags::draw_frame(const ui::HudIcon *p_icon, ui::HudIconState p_state, Vector2 p_centre, float p_size, float p_alpha) {
+void Bf3Nametags::draw_frame(const ui::HudIcon *p_icon, ui::HudIconState p_state, Vector2 p_centre, float p_size, float p_alpha, const Color &p_modulate) {
 	if (p_icon == nullptr || !atlas_.is_valid()) {
 		return;
 	}
@@ -133,7 +133,7 @@ void Bf3Nametags::draw_frame(const ui::HudIcon *p_icon, ui::HudIconState p_state
 	const float texel = std::min(1.0f, p_size / float(std::max(r.width, r.height))) * canvas_scale_;
 	const float w = float(r.width) * texel, h = float(r.height) * texel;
 	draw_texture_rect_region(atlas_, Rect2(r.flip_x ? p_centre.x + w * 0.5f : p_centre.x - w * 0.5f, r.flip_y ? p_centre.y + h * 0.5f : p_centre.y - h * 0.5f, r.flip_x ? -w : w, r.flip_y ? -h : h),
-			Rect2(float(r.x), float(r.y), float(r.width), float(r.height)), Color(1, 1, 1, p_alpha));
+			Rect2(float(r.x), float(r.y), float(r.width), float(r.height)), Color(p_modulate.r, p_modulate.g, p_modulate.b, p_modulate.a * p_alpha));
 }
 
 void Bf3Nametags::_draw() {
@@ -166,8 +166,10 @@ void Bf3Nametags::_draw() {
 		const float x0 = d.anchor.x - total * 0.5f;
 		const float baseline = top - 2.0f * canvas_scale_;
 		if (kit != nullptr) {
-			draw_frame(kit, d.relation == ui::TagRelation::Squad ? ui::HudIconState::Squad : ui::HudIconState::Default,
-					Vector2(x0 + kit_w * 0.5f - 1.0f * canvas_scale_, baseline - ts.y * 0.35f), 16.0f, d.alpha);
+			// The Default frame is white: drawn in the relation's tint like the name [inferred]; Squad is green already.
+			const bool squad = d.relation == ui::TagRelation::Squad;
+			draw_frame(kit, squad ? ui::HudIconState::Squad : ui::HudIconState::Default, Vector2(x0 + kit_w * 0.5f - 1.0f * canvas_scale_, baseline - ts.y * 0.35f), 16.0f,
+					d.alpha, squad ? Color(1, 1, 1, 1) : tint);
 		}
 		draw_string_outline(font, Vector2(x0 + kit_w, baseline), d.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, glow, Color(0, 0, 0, 0.55f * d.alpha));
 		draw_string(font, Vector2(x0 + kit_w, baseline), d.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, tint);
@@ -188,6 +190,7 @@ struct Pt1Iff::Shots {
 	std::string dir;
 	int phase = 0; // 0 wait for the spawn, 1 views, 2 done
 	double alive_since = -1.0;
+	double first_s = -1.0; // the first step: the whole capture gives up after kShotsTimeoutSeconds
 	struct View {
 		bool enemy = false;
 		float metres = 0.0f;
@@ -298,15 +301,15 @@ void Pt1Iff::run_loader() {
 
 void Pt1Iff::log_summary() {
 	const double n = double(std::max<uint64_t>(1, stats_.frames));
-	char line[640];
+	char line[768];
 	std::snprintf(line, sizeof(line),
 			"[pt1-iff] %llu frames: minimap per frame %.1f friendly + %.1f revealed enemies (%.1f enemies hidden; the M1 loop drew %.1f others as "
 			"enemies); nametags per frame %.1f friendly icons, %.2f friendly names, %.3f enemy names; LOS rays %llu (%llu blocked); "
-			"%llu soldier-frames without a team; style %s, reveal %.2f s",
+			"%llu soldier-frames without a team; style %s, reveal %.2f s; main thread %.1f us per frame (max %.1f us)",
 			(unsigned long long)stats_.frames, double(stats_.minimap_friendly) / n, double(stats_.minimap_enemy) / n, double(stats_.minimap_hidden_enemies) / n,
 			double(stats_.m1_rule_enemy_icons) / n, double(stats_.friendly_icons) / n, double(stats_.friendly_names) / n, double(stats_.enemy_names) / n,
 			(unsigned long long)stats_.los_rays, (unsigned long long)stats_.los_blocked, (unsigned long long)stats_.unknown_team,
-			style_.from_data ? "from data" : "defaults", double(spotting_.fire_reveal_seconds()));
+			style_.from_data ? "from data" : "defaults", double(spotting_.fire_reveal_seconds()), double(stats_.frame_ns) / n * 1e-3, double(stats_.frame_max_ns) * 1e-3);
 	UtilityFunctions::print(line);
 }
 
@@ -346,6 +349,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 			}
 		}
 	}
+	const auto t_frame = std::chrono::steady_clock::now();
 	const host::PresentationFrame &f = session_->frame();
 	const uint64_t now_ns = net::monotonic_ns();
 	const double now_s = double(now_ns) * 1e-9;
@@ -450,6 +454,9 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 		tags_->update({}, 1.0f);
 	}
 	tags_->set_visible(show);
+	const uint64_t spent_ns = uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_frame).count());
+	stats_.frame_ns += spent_ns;
+	stats_.frame_max_ns = std::max(stats_.frame_max_ns, spent_ns);
 	if (summary_at_s_ < 0.0) {
 		summary_at_s_ = now_s + kSummaryEveryS;
 	} else if (now_s >= summary_at_s_) {
@@ -466,6 +473,18 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 	Shots &sh = *shots_;
 	if (sh.phase == 2) {
+		return;
+	}
+	constexpr double kShotsTimeoutSeconds = 240.0;
+	if (sh.first_s < 0.0) {
+		sh.first_s = p_now_s;
+	}
+	if (p_now_s - sh.first_s > kShotsTimeoutSeconds) {
+		UtilityFunctions::print(to_godot("[pt1-iff] shots: timed out after " + std::to_string(int(kShotsTimeoutSeconds)) + " s in phase " + std::to_string(sh.phase) +
+				" (view " + std::to_string(sh.at) + " of " + std::to_string(sh.views.size()) + ")"));
+		sh.phase = 2;
+		session_->mapper().set_scripted(false);
+		session_->finish(1);
 		return;
 	}
 	const host::PresentationFrame &f = session_->frame();
@@ -567,43 +586,79 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		return;
 	}
 	Shots::View &v = sh.views[sh.at];
-	const IffSoldier *target = nullptr;
-	for (size_t i = 0; i < n; ++i) {
-		if (soldiers[i].slot == v.slot && soldiers[i].alive) {
-			target = &soldiers[i];
-		}
-	}
-	if (target == nullptr) {
-		UtilityFunctions::print(to_godot("[pt1-iff] view " + std::to_string(sh.at) + ": slot " + std::to_string(v.slot) + " not presented"));
-		++sh.failures;
-		++sh.at;
-		sh.step = 0;
-		sh.t0 = p_now_s;
-		return;
-	}
-	const sim::Vec3 chest{ target->feet[0], target->feet[1] + target->eye_height * 0.75f, target->feet[2] };
-	if (sh.step == 0) {
-		// A spot v.metres from the target with a clear eye-to-chest ray and room to stand: the target's facing first,
-		// then turned by 30, 60, ... degrees.
-		bool found = false;
-		for (int k = 0; k < 12 && !found; ++k) {
-			const float turn = float((k + 1) / 2) * 0.5236f * (k % 2 == 0 ? 1.0f : -1.0f);
-			const float a = target->yaw + turn;
-			const sim::Vec3 spot{ target->feet[0] + v.metres * std::sin(a), target->feet[1], target->feet[2] + v.metres * std::cos(a) };
-			const sim::Vec3 eye{ spot[0], spot[1] + 1.6f, spot[2] };
+	// A spot about p_metres from p_target, on the ground, with room to stand and a clear eye-to-chest ray: 24
+	// directions from the target's facing, each at 1, 0.85 and 1.2 x the distance.
+	struct SpotTally {
+		uint32_t no_ground = 0, blocked = 0, no_sight = 0;
+	};
+	auto find_spot = [&](const IffSoldier &p_target, float p_metres, sim::Vec3 &r_spot, float &r_yaw, SpotTally &r_tally) {
+		const sim::Vec3 chest{ p_target.feet[0], p_target.feet[1] + p_target.eye_height * 0.75f, p_target.feet[2] };
+		for (int k = 0; k < 24 * 3; ++k) {
+			const int dir = k / 3;
+			const float scale = (k % 3) == 0 ? 1.0f : ((k % 3) == 1 ? 0.85f : 1.2f);
+			const float turn = float((dir + 1) / 2) * 0.2618f * (dir % 2 == 0 ? 1.0f : -1.0f);
+			const float a = p_target.yaw + turn;
+			const float r = p_metres * scale;
+			const sim::Vec3 above{ p_target.feet[0] + r * std::sin(a), p_target.feet[1] + 2.0f, p_target.feet[2] + r * std::cos(a) };
+			sim::StaticHit ground;
+			if (!world->ground_below(above, 6.0f, sim::query_mask::kMovement, &ground) || std::fabs(ground.position[1] - p_target.feet[1]) > 3.0f ||
+					ground.normal[1] < 0.7f) {
+				++r_tally.no_ground;
+				continue;
+			}
+			const sim::Vec3 spot{ ground.position[0], ground.position[1] + 0.05f, ground.position[2] };
 			if (world->overlap_capsule(spot, 0.4f, 1.8f, sim::query_mask::kMovement, 0.05f)) {
+				++r_tally.blocked;
 				continue;
 			}
+			const sim::Vec3 eye{ spot[0], spot[1] + 1.6f, spot[2] };
 			if (world->ray_any(eye, { chest[0] - eye[0], chest[1] - eye[1], chest[2] - eye[2] }, sim::query_mask::kProjectile)) {
+				++r_tally.no_sight;
 				continue;
 			}
-			v.spot = spot;
-			v.yaw = std::atan2(target->feet[0] - spot[0], target->feet[2] - spot[2]);
-			found = true;
+			r_spot = spot;
+			r_yaw = std::atan2(p_target.feet[0] - spot[0], p_target.feet[2] - spot[2]);
+			return true;
+		}
+		return false;
+	};
+	if (sh.step == 0) {
+		// The chosen soldier first, then the others of its relation nearest the own soldier first, until one has a spot.
+		const uint8_t want_team = [&] {
+			for (size_t i = 0; i < n; ++i) {
+				if (soldiers[i].slot == v.slot) {
+					return soldiers[i].team;
+				}
+			}
+			return uint8_t(v.enemy ? (own_team == 1 ? 2 : 1) : own_team);
+		}();
+		std::vector<std::pair<float, size_t>> order;
+		const sim::Vec3 &me = f.own_curr.position;
+		for (size_t i = 0; i < n; ++i) {
+			if (!soldiers[i].alive || soldiers[i].team != want_team) {
+				continue;
+			}
+			const float dx = soldiers[i].feet[0] - me[0], dz = soldiers[i].feet[2] - me[2];
+			order.emplace_back(soldiers[i].slot == v.slot ? -1.0f : dx * dx + dz * dz, i);
+		}
+		std::sort(order.begin(), order.end());
+		SpotTally tally;
+		bool found = false;
+		size_t tried = 0;
+		for (const auto &[d2, i] : order) {
+			(void)d2;
+			++tried;
+			if (find_spot(soldiers[i], v.metres, v.spot, v.yaw, tally)) {
+				v.slot = soldiers[i].slot;
+				found = true;
+				break;
+			}
 		}
 		if (!found) {
-			UtilityFunctions::print(to_godot("[pt1-iff] view " + std::to_string(sh.at) + ": no clear spot " + std::to_string(int(v.metres)) + " m from slot " +
-					std::to_string(v.slot) + ": skipped"));
+			UtilityFunctions::print(to_godot("[pt1-iff] view " + std::to_string(sh.at) + ": no clear spot " + std::to_string(int(v.metres)) + " m from any of " +
+					std::to_string(tried) + " soldiers of team " + std::to_string(want_team) + " (" + std::to_string(tally.no_ground) + " candidates without ground, " +
+					std::to_string(tally.blocked) + " blocked, " + std::to_string(tally.no_sight) + " without sight): skipped"));
+			++sh.failures;
 			++sh.at;
 			sh.t0 = p_now_s;
 			return;
@@ -620,6 +675,21 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		sh.t0 = p_now_s;
 		return;
 	}
+	const IffSoldier *target = nullptr;
+	for (size_t i = 0; i < n; ++i) {
+		if (soldiers[i].slot == v.slot && soldiers[i].alive) {
+			target = &soldiers[i];
+		}
+	}
+	if (target == nullptr) {
+		UtilityFunctions::print(to_godot("[pt1-iff] view " + std::to_string(sh.at) + ": slot " + std::to_string(v.slot) + " no longer presented alive"));
+		++sh.failures;
+		++sh.at;
+		sh.step = 0;
+		sh.t0 = p_now_s;
+		return;
+	}
+	const sim::Vec3 chest{ target->feet[0], target->feet[1] + target->eye_height * 0.75f, target->feet[2] };
 	const double waited = p_now_s - sh.t0;
 	if (sh.step == 1) {
 		// Look at the chest from the presented eye (the teleport has landed by now).

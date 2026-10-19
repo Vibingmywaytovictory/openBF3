@@ -30,6 +30,7 @@
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
@@ -80,7 +81,8 @@ protected:
 	static void _bind_methods();
 
 private:
-	void draw_frame(const core::ui::HudIcon *p_icon, core::ui::HudIconState p_state, godot::Vector2 p_centre, float p_size, float p_alpha);
+	void draw_frame(const core::ui::HudIcon *p_icon, core::ui::HudIconState p_state, godot::Vector2 p_centre, float p_size, float p_alpha,
+			const godot::Color &p_modulate = godot::Color(1, 1, 1, 1));
 
 	godot::Ref<godot::ImageTexture> atlas_;
 	const core::ui::HudIconAtlas *icons_ = nullptr;
@@ -103,6 +105,8 @@ struct Pt1IffStats {
 	uint64_t minimap_hidden_enemies = 0;
 	uint64_t m1_rule_enemy_icons = 0; // what the M1 loop would have drawn as enemies (every other soldier): the before
 	uint64_t unknown_team = 0; // soldier-frames without a team (no tag)
+	uint64_t frame_ns = 0; // main-thread time in Pt1Iff::frame (sum; the draw itself is Godot's)
+	uint64_t frame_max_ns = 0;
 };
 
 class Pt1Iff {
