@@ -289,6 +289,9 @@ public:
 	virtual ~WeaponAudioObserver() = default;
 	virtual void on_driver_instance(uint8_t p_slot, uint64_t p_seed, uint64_t p_first_round_frame, PatchInstance &r_instance) = 0;
 	virtual void on_trigger_up(uint8_t p_slot, uint64_t p_seed, uint64_t p_stop_frame) = 0;
+	// PT1 rld [observer]: every foley cue the router posts (reloads, their releases, Action, Bolt), with the one-shot's
+	// instance before its Start command (null for a release, which goes to a running instance).
+	virtual void on_foley(const FoleyCue &, PatchInstance *) {}
 };
 
 class WeaponAudioRouter {
