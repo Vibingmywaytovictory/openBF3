@@ -303,6 +303,17 @@ struct PresentationFrame {
 	sim::Tick newest_tick = 0;
 	uint8_t own_kit = 0;
 	uint8_t own_team = 0;
+	// M2b W1.0 (docs/design/m2b.md §2.6 #12, §3.7; nt fills them): the round as the server sent it (MatchState, the
+	// latest one; match_valid false until the first), the player rows (PlayerList applied: full lists replace, changed
+	// rows update; ascending slot), the own death's DeathEvent::respawn_tick / revive_until (0 while alive), and
+	// own_unspawned from MatchState::unspawn_tick (the own soldier was removed without a death: stop predicting).
+	bool match_valid = false; // M2b W1.0 (nt)
+	net::MatchState match; // M2b W1.0 (nt)
+	uint8_t player_count = 0; // M2b W1.0 (nt): used rows of players
+	std::array<net::PlayerRow, net::kMaxPlayerRows> players{}; // M2b W1.0 (nt)
+	sim::Tick own_respawn_tick = 0; // M2b W1.0 (nt)
+	sim::Tick own_revive_until = 0; // M2b W1.0 (nt)
+	bool own_unspawned = false; // M2b W1.0 (nt)
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 
@@ -359,6 +370,12 @@ public:
 	// reliably by the client thread at its next loop. The server applies it at the next spawn; a team change needs its
 	// dev_commands (sv).
 	void send_kit_select(const net::KitSelect &p_select);
+	// M2b W1.0 (docs/design/m2b.md §2.6 #12, §3.4; nt defines it): a SpawnRequest {p_kit, spawn_choice 0} (Deploy on the
+	// spawn screen). Any thread: queued and sent reliably by the client thread at its next loop, as send_kit_select.
+	// The server refuses it silently (counted) before DeathEvent::respawn_tick, while alive or in RoundOver.
+	// The client also applies MatchState's restriction (net::restrict_command) to each predicted command whose tick is
+	// below restrict_until_tick, the rule the server applies in [cmd].
+	void send_spawn_request(uint8_t p_kit);
 
 	// Stops and joins every running ClientSession of the process (extension deinit safety net).
 	static size_t stop_all();
