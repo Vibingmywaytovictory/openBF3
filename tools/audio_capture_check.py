@@ -2,7 +2,7 @@
 
 The capture is our own mixer's output in a real round (derived data under b/shots, never committed). The report:
 the mix's isolated sample steps (and how many sit more than 200 ms after any start, i.e. not a sound's onset), zero
-gaps inside sound (a decoder underflow), block-level drops, the cuts by kind with their steps, the cuts above
+gaps inside sound (a decoder underflow), block-level drops, the frames over 0 dBFS, the cuts by kind with their steps, the cuts above
 -40 dBFS that show in the mix, the loops parked more than twice, and the main thread's hitches.
 
 usage: python -I tools/audio_capture_check.py <capture dir> [--top N]     (needs numpy)
@@ -50,6 +50,12 @@ def main():
     x, rate = read_wav(d + '/mix.wav')
     n = len(x)
     print(f'mix.wav: {n / rate:.1f} s, peak {np.abs(x).max():.3f}, rms {20 * np.log10(np.sqrt(np.mean(x.astype(np.float64) ** 2)) + 1e-30):.1f} dBFS')
+    # frames over 0 dBFS (clipped downstream) and the clip episodes (runs of 512-frame blocks with one)
+    over = np.abs(x).max(axis=1) > 1.0
+    nbo = len(over) // BLOCK
+    bo = over[:nbo * BLOCK].reshape(nbo, BLOCK).any(axis=1)
+    episodes = int(np.sum(np.diff(np.concatenate([[0], bo.astype(np.int8)])) == 1))
+    print(f'frames over 0 dBFS: {int(over.sum())}, in {int(bo.sum())} blocks, {episodes} episodes')
     # first difference per channel
     dx = np.abs(np.diff(x, axis=0)).max(axis=1)
     # local scale: median |dx| over +-64 samples, via block medians of 128

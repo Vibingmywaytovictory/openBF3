@@ -894,7 +894,7 @@ void MixerCore::Impl::pt1_limit() {
 		over_out += std::max(std::fabs(x[size_t(i) * 2]), std::fabs(x[size_t(i) * 2 + 1])) > 1.0f ? 1u : 0u;
 	}
 	pt1_limit_gain = h;
-	if (lowest < 1.0f) {
+	if (lowest < 0.98855f) { // -0.1 dB: the long tail of the release is not counted
 		cut_stats.limit_blocks.fetch_add(1, std::memory_order_relaxed);
 	}
 	if (lowest < cut_stats.limit_min_gain.load(std::memory_order_relaxed)) {
@@ -938,7 +938,7 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 			double(p_stats.step_max[lb].load()), (unsigned long long)p_stats.event_drops.load());
 	out += part;
 	const float lg = p_stats.limit_min_gain.load();
-	std::snprintf(part, sizeof(part), "; limiter: %llu blocks, down to %.1f dB, %llu edge steps; frames over 0 dBFS %llu before it, %llu after",
+	std::snprintf(part, sizeof(part), "; limiter: %llu blocks below -0.1 dB, down to %.1f dB, %llu edge steps; frames over 0 dBFS %llu before it, %llu after",
 			(unsigned long long)p_stats.limit_blocks.load(), lg > 0.0f ? 20.0 * std::log10(double(lg)) : -999.0, (unsigned long long)p_stats.limit_edge_steps.load(),
 			(unsigned long long)p_stats.overs_in.load(), (unsigned long long)p_stats.overs_out.load());
 	out += part;

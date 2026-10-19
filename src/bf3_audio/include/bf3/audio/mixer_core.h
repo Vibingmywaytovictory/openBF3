@@ -209,7 +209,7 @@ struct MixerCutStats {
 	std::atomic<uint64_t> gap_hist[8]{}; // mix() call gaps: < 5, 10, 15, 20, 30, 50, 100 ms, >= 100 ms
 	std::atomic<uint64_t> event_drops{ 0 }; // the event ring was full
 	std::atomic<uint64_t> overs_in{ 0 }, overs_out{ 0 }; // PT1 snd [limit]: frames above 1.0 before / after the limiter
-	std::atomic<uint64_t> limit_blocks{ 0 }; // PT1 snd [limit]: blocks with a gain below 1
+	std::atomic<uint64_t> limit_blocks{ 0 }; // PT1 snd [limit]: blocks with a gain below -0.1 dB
 	std::atomic<uint64_t> limit_edge_steps{ 0 }; // PT1 snd [limit]: a peak in a block's first frames, faster than the attack
 	std::atomic<float> limit_min_gain{ 1.0f }; // PT1 snd [limit]
 };
