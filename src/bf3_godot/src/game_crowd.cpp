@@ -283,6 +283,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		in.pose = uint8_t(o.pose);
 		in.target_pose = uint8_t(o.target_pose);
 		in.transition = o.transition;
+		in.sprinting = (o.flags & sim::soldier_flags::kSprinting) != 0; // PT1 run [sprint]: the run or the sprint move group
 		if (w != nullptr) {
 			if (w->def != sim::weapons::kNoWeapon) {
 				const int32_t idx = render::crowd_weapon_index(*weapons, team, w->def);
