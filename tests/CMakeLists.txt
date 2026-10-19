@@ -1386,4 +1386,5 @@ openbf3_label(timing host.tdm.client)
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_ru_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(host.tdm.server host.tdm.client PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_ru_cl_dir}")
+    set_tests_properties(host.tdm.server PROPERTIES TIMEOUT 400) # asan: 127 s measured (2026-10-19), about 3x
 endif()
