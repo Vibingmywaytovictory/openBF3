@@ -64,8 +64,15 @@ How it was measured: `audio.foley.install` runs the game's mixer config offline 
    - Measured 3.0 s after a reload one-shot: the M9, MP443, MK11 and SVD patches started their whole shot (corebass,
      lfe, hifi, noise, reflections, shell casings).
    - The old reload one-shot did the same.
-7. (Noted, not fixed.) The mixer does not implement `BypassHeadroom = IsFirstPerson` on the Handling output. Its name
-   suggests that the own 1p handling escapes the HDR headroom. Ours obeys the window like every other output.
+7. **The own reload was ducked after firing** (found by the verifier). The mixer did not implement the outputs'
+   `BypassHeadroom` port. A reload started 0.1 s after a 30-round M16A3 burst measured **-39.7 dBFS** (window top
+   100.4 dB), the same as root cause 1's level: the burst's reflections tail (`reflections_close_openfield`, outputs 2
+   and 4) plays until 3.1 s after the last round and holds the top at the patch's static 100.4 dB. An empty reload
+   (2.9 s) after a magazine dump fell entirely inside that span.
+   - The data: on all 10 kit firearms, *every* output (Handling, Cone, both Flats, LFE) reads its BypassHeadroom
+     port from one register (M16A3: register 108). After one evaluation that register is 1 with IsFirstPerson 1 and 0
+     with IsFirstPerson 0 (IsFirstPerson is register 1). The knife's Cone has the constant 0; the M67's Cone reads
+     register 13.
 
 ## 3. The fix
 
@@ -74,7 +81,8 @@ How it was measured: `audio.foley.install` runs the game's mixer config offline 
     release event and the outputs its voices feed;
   - the wave names of the IsShortReload and ActionType switchers.
 
-  The reader is bounded: each register and node is visited once. On hostile data it fails soft and returns empty
+  The reader is bounded: each register and node is visited once, and the sampler-slot loop counts in `uint32_t` (a
+  `uint16_t` counter wrapped at 65535 on a hostile `plugins_count`). On hostile data it fails soft and returns empty
   fields. Its result is `WeaponAudioDef::foley`, filled at load.
 - **The router** (`weapon_audio.cpp`, PT1 rld insertions) posts the data's events where the weapon state changes.
   - **The own soldier, on the sim's timed events**, at their exact Predicted time:
@@ -102,6 +110,21 @@ How it was measured: `audio.foley.install` runs the game's mixer config offline 
   - Before any slot is busy (the first block), it counts the outputs the starter names: `set_loudness_outputs`, to which
     the router passes the event's outputs.
   - With no names, it counts all of them, as before.
+- **BypassHeadroom** (`// PT1 rld [bypass headroom]`: `patch_nodes.cpp` reads port 0 of each Cone, Flat and Direct
+  output every evaluation; `PatchInstance::State::hdr_send_gain` in `patch_instance.cpp` replaces the two copies of
+  M2b au R5's over / target lines; `HdrVoiceWindow::alone_top_db`, set in `mixer_core.cpp`).
+  - With the port on, an EnableHdr output's gain uses the top `min(window top, alone_top_db)`, where alone_top_db =
+    max(WindowMinTop, the instance's cull loudness): the top the instance would set if it played alone. It is not
+    suspended either.
+  - So the own 1p reload (79.5 dB) plays at the 80 dB window it has alone, whatever the own burst's tail does.
+    The own gunshot sets the top itself (alone_top 100.4 = top), so its gain is unchanged. 3p sounds (IsFirstPerson
+    0) keep R5's gain.
+  - BF3's meaning of the port is not known (its name suggests the own sounds skip the HDR headroom): this is a named
+    default, `measured = false`. One consequence to listen for: the own 1p sounds are not ducked by a louder 3p sound
+    (an explosion) either.
+- **The others' foley follows them** (`// PT1 rld [follow]`): `OneShotPool::set_emitter` moves a live one-shot and
+  keeps the new emitter for `resend_emitters`. The router keeps up to 4 running foley one-shots per other soldier and
+  moves them to his muzzle each frame it changes; the own 1p foley uses the same call.
 - **`PatchInstance::skip_stop_event`** (`// PT1 rld [no stop]`). The router's foley one-shots treat the stop event as
   already seen. They end when their samplers are idle, and the pool's Stop posts nothing to them.
 
@@ -126,11 +149,13 @@ The numbers come from `audio.foley.install`: the game's mixer configuration, run
 | cull loudness of a reload instance at its start | 100.4 dB | 79.5 dB (its Handling output) |
 | the same reload's last 1.4 s, walking at 3 m/s | -50.8 dBFS | -19.2 dBFS (the same as standing) |
 | 30-round M16A3 burst | -0.5 dBFS | -0.5 dBFS |
-| the reload 0.6-2.9 s after the burst's last round | -39.7 dBFS (top 100.4) | -39.7 dBFS (top 100.4); see open issue 1 |
+| the reload 0.6-2.9 s after the burst's last round | -39.7 dBFS (top 100.4) | **-19.3 dBFS** (top still 100.4: the tail's) |
+| the Handling output's BypassHeadroom, IsFirstPerson 1 / 0 | not read | 1 / 0 |
 | tactical reload wave | long (2.89 s): IsShortReload never set | `m16_reload_1p_short_wave`, 2.35 s |
 | deploy, zoom, dry fire, fire-mode switch | silent (never posted) | generic_deploy 0.94 s, zoom_iron_sight 0.94 s, trigger_click 0.21 s, firemodeswitch_us 0.05 s |
 | a reload one-shot on the M9 / MP443 / MK11 / SVD | a phantom shot 3.0 s later | nothing else plays (checked on all 10 firearms) |
 | another soldier's M16A3 reload, 3p | posted at any distance up to 1000 m | 5 m: -26.6 dBFS; 15 m: -48.0 dBFS; 25 m: not started (past the data's 19 m) |
+| the same, walking away at 3 m/s from 5 m: its 2.5-3.9 s | stayed at the start (the class of root cause 4) | -39.9 dBFS, against -26.6 dBFS standing |
 
 The own trigger table (M16A3, 1p). Each wave starts +0.0 ms after the frame its event's time maps to:
 
@@ -167,14 +192,9 @@ The pool's Stop at 3 s cuts none of them.
 
 ## 5. Open issues
 
-1. **A reload right after a burst is still under the burst's window.**
-   - The M16A3's reflections tail (`reflections_close_openfield`, which feeds outputs 2 and 4) plays until 3.1 s after
-     the last round. Under the patch's static Loudness, it holds the window top at 100.4 dB.
-   - So a reload started 0.1 s after the last round is -39.7 dBFS, against -19.2 dBFS alone. The window falls to 80 dB
-     0.2 s after the tail ends.
-   - This is the HDR model as built (m2b-au): a playing voice counts at its output's static loudness.
-   - BF3 may let the own 1p handling through with `BypassHeadroom = IsFirstPerson` (root cause 7). How that works is not
-     known, so it is not implemented.
+1. **BypassHeadroom is a named default** (`measured = false`, root cause 7). The tail itself still counts at its
+   output's static 100.4 dB (the HDR model as built, m2b-au), so 3p sounds stay ducked under the own burst's tail for
+   about 3 s, as before.
 2. **The others' sprint-cancelled reloads post no release.** The wire carries the phase but not the magazine, so a
    Reloading -> Ready cut looks the same as a finished reload. A switch or a death does post the release. Under LtNone
    this changes nothing audible today.
@@ -186,7 +206,8 @@ The pool's Stop at 3 s cuts none of them.
 
 From the worktree, after `tools\build.cmd dev`:
 
-- The data table, the own trigger table, every kit reload, 3p, the mix and the corruption sweep:
+- The data table (with each output's BypassHeadroom source), the own trigger table, every kit reload, 3p (and walking
+  away), the mix (alone, walking, after a burst) and the corruption sweep:
   `ctest --test-dir b\dev -R "^audio\.foley\.install$" -V`
 - The reader on a hostile synthetic program: `ctest --test-dir b\dev -R "^audio\.foley\.unit$" -V`
 - The same under asan: `tools\build.cmd asan --no-test`, then `ctest --test-dir b\asan -R "^audio\.foley\." -V`

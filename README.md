@@ -3207,8 +3207,11 @@ reloads". Root causes, the fix and the numbers: [docs/design/pt1-rld.md](docs/de
 * **Why they were silent:** the voice cull counted a reload instance at its gunshot outputs (100.4 dB) instead of its
   Handling output (79.5 dB). The HDR window therefore put the reload 21 dB down. The cull now counts only the outputs
   the busy voices feed.
+* **After firing:** every output of the kit firearms carries `BypassHeadroom = IsFirstPerson`. The mixer now keeps
+  such an output at the window its instance would set alone (a named default, `measured = false`), so the own reload
+  is not ducked under the own burst's reflections tail. The own gunshot sets the top itself and is unchanged.
 * **Also fixed:**
-  - the own 1p reload no longer stays where it started;
+  - the own 1p reload no longer stays where it started, and another soldier's foley moves with him;
   - the foley one-shots no longer get the trigger release 3 s later, which fired a phantom round on the M9, MP443,
     MK11 and SVD.
 * **Tests:**
@@ -3223,5 +3226,7 @@ Measured 2026-10-19 on `pt1/rld`:
   -50.8 -> -19.2 dBFS.
 * **Every trigger:** the wave starts +0.0 ms after its event's frame. Tactical reloads play the short wave and empty
   ones the long wave, on all 10 kit firearms.
-* **Still open:** a reload started right after a full-auto burst stays under the burst's reflections tail (-39.7 dBFS
-  for about 3 s). See pt1-rld.md §5.
+* **Reload 0.1 s after a 30-round burst:** -39.7 dBFS before, -19.3 dBFS after (alone: -19.2), while the window top
+  stays at the tail's 100.4 dB.
+* **Another soldier's reload, walking away at 3 m/s from 5 m:** its last 1.4 s -39.9 dBFS, against -26.6 dBFS standing
+  (it stayed at the start before).
