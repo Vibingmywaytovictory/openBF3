@@ -70,6 +70,12 @@ namespace render = bf3::render;
 namespace sim = bf3::sim;
 namespace sw = bf3::sim::weapons;
 
+// M2b bb [tdm]: the --tdm preview (the // M2b bb block at the end of this file).
+void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::string &p_preround);
+void m2b_bb_tdm_load(host::SharedLoadOptions &r_options);
+void m2b_bb_tdm_server(host::GameServerConfig &r_game, uint32_t p_bots, std::vector<std::string> &r_notes);
+void m2b_bb_tdm_frame(const host::PresentationFrame &p_frame);
+
 namespace {
 
 constexpr uint32_t kMaxPlayableBots = 32; // m2a-w3.md §4: sv's kMaxLagSlots rule keeps the player rewindable
@@ -318,6 +324,7 @@ void Bf3LevelSession::m2a_parse_args() {
 		bots_ = kMaxPlayableBots;
 	}
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
+	m2b_bb_tdm_args(has_user_arg("tdm"), user_arg_value("kill-limit"), user_arg_value("preround")); // M2b bb [tdm]
 	if (!has_user_arg("walkers")) {
 		walkers_ = 0; // M1's scripted walkers are not soldiers with weapons
 	}
@@ -377,6 +384,7 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 		return;
 	}
 	r_options.gunplay = true; // the weapons, kits and capsule pose table (sv)
+	m2b_bb_tdm_load(r_options); // M2b bb [tdm]
 	if (!scene_) {
 		return; // headless: no viewmodel (nothing draws it)
 	}
@@ -609,6 +617,7 @@ void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
 		std::snprintf(line, sizeof(line), "[m2a] firefight bots: %u (%s), max slots %u", bots_, g.firefight_pairs ? "pairs" : "free", r_game.max_slots);
 		g.part_notes.push_back(line); // loader thread: printed on the first frame
 	}
+	m2b_bb_tdm_server(r_game, bots_, g.part_notes); // M2b bb [tdm]
 }
 
 void Bf3LevelSession::m2a_client_config(host::ClientSessionConfig &r_config) const {
@@ -986,6 +995,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
 	};
 	const host::PresentationFrame &f = *frame_;
+	m2b_bb_tdm_frame(f); // M2b bb [tdm]
 	if (!g.built) {
 		for (const std::string &n : g.part_notes) {
 			UtilityFunctions::print(to_godot(n));
