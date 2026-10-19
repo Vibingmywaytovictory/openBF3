@@ -2992,3 +2992,35 @@ Measured 2026-10-19 on the dev preset, `m2b/bb` after the merge of `m2b/w1` (nt,
 | E2 host.tdm.bots | pooled K/D in [0.75, 1.33], 0 sight, 0 stale aim, 0 stuck, 0 bad spawns, revives ≥ 1 | pooled 149 / 131 = 1.137 (seeds 1.190, 0.980, 1.282), 0 / 0 / 0 / 0, revives 4; 23.0 s in the pass (9.6 s alone) |
 | E6 host.tdm.replay | same seed 0 differing ticks, another seed differs | 0 / 3,179 ticks differ, trace and MatchState bytes equal; seed 12 differs on 3,179; 20.7 s in the pass (7.3 s alone) |
 | E8 host.tdm.perf | perception ≤ 0.2 ms/tick p99, brains ≤ 1.5 ms/tick p99, tick ≤ 4 ms p99 | not run: timing row, runs on main after the merge |
+
+## M2b wave 2 contract (W2.0)
+
+<!-- # M2b W2.0 -->
+These are the integrator's contract commits for M2b wave 2, on branch `m2b/w2` from `main` 545640c (wave 1 merged).
+Design: [docs/design/m2b.md](docs/design/m2b.md) §2.6 #16-#18 and §11. As-built notes, the insertions each track
+makes, and where the code was followed over the design: [docs/design/m2b-w2.md](docs/design/m2b-w2.md).
+
+* **Interfaces.** The commits declare §2.6 #16-#18, for the tracks ui, cam and gx:
+  - ui: `HudKillCard`, `HudEndOfRound`, `HudSpawnScreen`, `HudPreRound` and their `HudModel` members; the M2b members
+    of `HudFeedInput`, `HudKillCardSource` and `fill_hud_tdm` (hud_feed.h); `Bf3TdmHud` (hud_tdm.h), the screens'
+    façade that gx builds;
+  - cam: `CrowdSoldierInput::revived`, `CrowdStanceSet::corpse_seconds`, `kCrowdCorpseSeconds` 15 s,
+    `Bf3GameCrowd::set_corpse_seconds`, `Bf3DeathCamera` (death_camera.h);
+  - gx: `m2b_game.h`, `m2b_check.h`, `level_session_m2b.h` (`M2bGame`), `M2aGame::m2b`.
+* **No stubs.** Nothing in the tree calls a wave-2 function yet. gx builds ui's and cam's parts only when their
+  bodies exist (`OPENBF3_M2B_HAVE_UI` / `_CAM`, from the files' presence), so the three branches link alone.
+* **Additive only.** `git diff --stat main..m2b/w2` shows 0 deleted lines.
+* **Test.** `ctest --test-dir b\dev -R "^m2b\.contract2$"` compiles every wave-2 header together. It pins:
+  - `HudModel` at 9,024 B (M2a 8,864, the M2a fields at their old offsets);
+  - the layouts of the four new structs;
+  - `kHudMaxPlayers == net::kMaxPlayerRows` (the M2b HUD's players are indexed by server slot);
+  - the W2.0 constants and defaults;
+  - the M2b check's case parser.
+
+  ui's `fill_hud_tdm` row and cam's death-camera row print `PENDING (<key>)` until the tracks set their switches.
+
+Measured 2026-10-19, `m2b/w2`, shared machine (times indicative only):
+
+* **`tools\build.cmd dev`:** 147 rows, 145 passed and 2 skipped (`core.cache_data`, `core.res`, as before), with
+  204.1 s of ctest wall time and exit 0. There were no budget violations, only the existing warnings.
+* **`m2b.contract2`:** 4 cases and 84 assertions, 0.01 s. ui and cam are pending.
