@@ -1458,3 +1458,23 @@ if(OPENBF3_ASAN)
     set_tests_properties(host.tdm.bots.unit host.tdm.round host.tdm.bots host.tdm.replay host.tdm.perf PROPERTIES TIMEOUT 1800
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_bb_cl_dir}")
 endif()
+
+# M2b W2.0 (W2.0 contract, docs/design/m2b.md §11, §2.6 #16-#18; docs/design/m2b-w2.md): m2b.contract2 compiles every
+# wave-2 interface header together (hud_model.h's M2b structs, hud_feed.h's M2b block, crowd_eval.h's corpse and revive
+# fields, and the Godot-free bf3_godot headers hud_tdm.h, death_camera.h, game_crowd.h, m2b_game.h, m2b_check.h,
+# level_session_m2b.h) and pins the new HudModel size, the new struct layouts, the W2.0 constants and defaults and the
+# M2b check's case parser. Rows that need a track's body print PENDING until the track sets its switch; cam's
+# Godot-free death_camera.cpp is compiled in once it exists. No install; a contract row (< 2 s), functional,
+# parallel-safe.
+openbf3_test(test_m2b_contract2 test_main.cpp m2b_contract2_tests.cpp test_support.h)
+target_link_libraries(test_m2b_contract2 PRIVATE bf3_host bf3_anim bf3_fx bf3_render)
+target_include_directories(test_m2b_contract2 PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
+if(EXISTS "${CMAKE_SOURCE_DIR}/src/bf3_godot/src/death_camera.cpp")
+    target_sources(test_m2b_contract2 PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src/death_camera.cpp)
+endif()
+add_test(NAME m2b.contract2 COMMAND test_m2b_contract2 --test-suite=m2b-contract2)
+set_tests_properties(m2b.contract2 PROPERTIES TIMEOUT 120)
+if(OPENBF3_ASAN)
+    get_filename_component(_openbf3_m2b_w2_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(m2b.contract2 PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_openbf3_m2b_w2_cl_dir}")
+endif()
