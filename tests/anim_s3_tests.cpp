@@ -1629,3 +1629,111 @@ TEST_SUITE("anim-s3") {
 		CHECK(diff.clean());
 	}
 }
+
+// ---- M2b cam (docs/design/m2b.md §4, §2.6 #17; as built: docs/design/m2b-cam.md) -------------------------------------
+// anim-s3-unit (synthetic, no data): the "revive" case. CrowdStanceSet::corpse_seconds keeps a corpse drawn for 15 s
+// instead of M2a's 3 s; a dead soldier that comes back with CrowdSoldierInput::revived stands up from its corpse pose
+// over kCrowdReviveBlendSeconds (crowd_eval.cpp [revive]), while a plain respawn is standing at once; the stand-up is
+// due every frame under temporal LOD; make() refuses a hostile corpse time.
+
+TEST_SUITE("anim-s3-unit") {
+	TEST_CASE("revive") {
+		SynthWeapons w;
+		SynthStance st(w.c);
+		st.set.corpse_seconds = kCrowdCorpseSeconds;
+		CrowdConfig config;
+		config.temporal_lod = false;
+		const double dt = 1.0 / 60.0;
+		auto e = CrowdEvaluator::make(w.c.set, st.set, w.teams_one, 3, config);
+		REQUIRE_MESSAGE(e.ok(), (e.ok() ? "" : e.error().message));
+		CrowdEvaluator &ev = **e;
+		auto run = [&](std::vector<CrowdSoldierInput> &p_in, int p_frames) {
+			for (int f = 0; f < p_frames; ++f) {
+				ev.set_inputs(p_in, dt);
+				ev.evaluate_all_here();
+			}
+		};
+		// 0 is revived, 1 respawns, 2 stays dead.
+		std::vector<CrowdSoldierInput> in(3);
+		run(in, 2);
+		for (CrowdSoldierInput &i : in) {
+			i.dead = true;
+		}
+		run(in, 120); // 2 s: prone (the Q13 blend is over)
+		for (uint32_t i = 0; i < 3; ++i) {
+			CHECK(hips_y(ev, i) == doctest::Approx(0.2f).epsilon(1e-4));
+		}
+		run(in, 180); // 5 s: M2a would have hidden them at 3 s
+		for (uint32_t i = 0; i < 3; ++i) {
+			CHECK(ev.drawn(i));
+		}
+		CHECK(ev.m2a_stats().death_hidden == 0);
+		CHECK(ev.m2a_stats().dying == 3);
+		// The revive and the respawn.
+		in[0].dead = false;
+		in[0].revived = true;
+		in[1].dead = false;
+		run(in, 1);
+		CHECK(ev.m2a_stats().revives == 1);
+		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4)); // the stand-up starts at the corpse pose
+		CHECK(hips_y(ev, 1) == doctest::Approx(1.0f).epsilon(1e-4)); // a respawn stands at once
+		CHECK(ev.drawn(0));
+		run(in, 15); // half of the 0.5 s
+		CHECK(hips_y(ev, 0) == doctest::Approx(0.6f).epsilon(1e-3));
+		CHECK(ev.m2a_stats().dying == 1); // only 2 is still a corpse
+		run(in, 16);
+		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4)); // standing: the stand-up is over
+		run(in, 30);
+		CHECK(ev.m2a_stats().revives == 1); // revived stays set over the life: no second stand-up without a death
+		// 2 is hidden at 15 s after its death (about 5.8 s so far).
+		run(in, 538); // 899 frames dead: just below 15 s
+		CHECK(ev.drawn(2));
+		run(in, 3);
+		CHECK(!ev.drawn(2));
+		CHECK(ev.m2a_stats().death_hidden == 1);
+		// A revived life that dies again falls again, and a second revive stands it up again.
+		in[0].dead = true;
+		run(in, 60);
+		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
+		in[0].dead = false;
+		run(in, 1);
+		CHECK(ev.m2a_stats().revives == 2);
+		CHECK(hips_y(ev, 0) < 0.25f);
+		// A stand-up is due every frame under temporal LOD (far away, where a living soldier is skipped).
+		{
+			CrowdConfig lod;
+			lod.temporal_lod = true;
+			auto d = CrowdEvaluator::make(w.c.set, st.set, w.teams_one, 2, lod);
+			REQUIRE(d.ok());
+			std::vector<CrowdSoldierInput> two(2);
+			two[0].camera_distance = two[1].camera_distance = 180.0f;
+			two[0].dead = true;
+			for (int f = 0; f < 144; ++f) {
+				(*d)->set_inputs(two, 1.0 / 144.0);
+				(*d)->evaluate_all_here();
+			}
+			two[0].dead = false;
+			two[0].revived = true;
+			uint32_t live = 0, rising = 0;
+			for (int f = 0; f < 60; ++f) { // 0.42 s of the 0.5 s stand-up
+				(*d)->set_inputs(two, 1.0 / 144.0);
+				(*d)->evaluate_all_here();
+				live += (*d)->changed(1) ? 1 : 0;
+				rising += (*d)->changed(0) ? 1 : 0;
+			}
+			CHECK(rising == 60);
+			CHECK(live < 30);
+			CHECK((*d)->m2a_stats().revives == 1);
+		}
+		// M2a's default corpse time is unchanged (3 s), and make() refuses a hostile one.
+		{
+			SynthStance m2a(w.c);
+			CHECK(m2a.set.corpse_seconds == kCrowdDeathHideSeconds);
+			for (const float bad : { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -1.0f, kCrowdMaxCorpseSeconds + 1.0f }) {
+				SynthStance h(w.c);
+				h.set.corpse_seconds = bad;
+				CHECK(!CrowdEvaluator::make(w.c.set, h.set, w.teams_one, 1, config).ok());
+			}
+		}
+	}
+}
