@@ -67,6 +67,7 @@ class Bf3LevelSession;
 class Bf3MinimapControl;
 class Bf3WorldIcons;
 class MinimapCheck;
+class Pt1Iff; // PT1 iff [hud]
 
 // The local player's team in the M1 game (docs/design/m1.md §8.2: "M1 puts the local player on Team 1"); the icon
 // states are relative to it (hud_icons.h objective_icon / soldier_icon). Replaced by the client's team in M2b.
@@ -170,6 +171,7 @@ private:
 	Bf3WorldIcons *icons_ = nullptr;
 	bf3::core::ui::MinimapView view_;
 	std::unique_ptr<MinimapCheck> check_runner_;
+	std::unique_ptr<Pt1Iff> pt1_iff_; // PT1 iff [hud]: the friend-or-foe minimap soldiers and nametags (pt1_iff.h), M2b only
 };
 
 } // namespace bf3::godot_side

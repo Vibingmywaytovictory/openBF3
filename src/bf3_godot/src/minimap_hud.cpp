@@ -7,6 +7,7 @@
 #include "level_session.h"
 #include "minimap_check.h"
 #include "minimap_control.h"
+#include "pt1_iff.h" // PT1 iff [hud]
 #include "world_icons.h"
 
 #include "bf3/core/ebx_db.h"
@@ -116,6 +117,7 @@ void Bf3MinimapHud::_bind_methods() {
 void Bf3MinimapHud::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		stop_.store(true);
+		pt1_iff_.reset(); // PT1 iff [hud]: joins its loader (it reads the session's install reader) before the session goes
 		if (loader_.joinable()) {
 			loader_.join();
 		}
@@ -457,6 +459,11 @@ void Bf3MinimapHud::update_view() {
 	}
 	std::vector<MinimapIconDraw> all = objectives;
 	const bf3::host::PresentationFrame &f = session_->frame();
+	// PT1 iff [hud]: in an M2b match (MatchState received) the other soldiers come from pt1_iff.h by the local team, and
+	// the nametags are drawn; M1's loop below (every other soldier as an enemy) stays for the M1 and M2a scenes.
+	if (pt1_iff_ == nullptr && f.match_valid) { // PT1 iff [hud]
+		pt1_iff_ = std::make_unique<Pt1Iff>(session_, this, atlas_, &a->atlas); // PT1 iff [hud]
+	} // PT1 iff [hud]
 	if (f.valid && f.other_count > 0) {
 		std::array<bf3::host::PresentedSoldier, bf3::net::kMaxSlots> out{};
 		const size_t n = bf3::host::present_others(f, bf3::net::monotonic_ns(), out);
