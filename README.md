@@ -2229,6 +2229,36 @@ underruns, 0 overflows. m2a.md §3's lane re-measure (`s3_crowd.tscn --s3-lanes=
 `tools<BS>uild.cmd` typo in fx3's notes is fixed. Captures (gitignored): `openBF3\b\shots\gx\` and
 `openBF3\b\shots\integw3\s3_lanes4\`.
 
+<!-- integration (integ/m2b-w1) -->
+**Sixth integration: M2b wave 1 (`integ/m2b-w1`, 2026-10-19).** On `m2b/w1` 883c053, which holds the W1.0 contract
+and nt, au, ru and bb merged. `main` 36eb5af is already in it, so its `--no-ff` merge was a no-op. The branch pass
+(`tools\build.cmd dev`) passed: 146 rows, 144 passed, `core.cache_data` and `core.res` skipped as before, 0 failed,
+203 s. The wave-1 merge pass ran the `timing` phase only (m2b.md §11.1 step 3), under the quiet lock: 18 rows, 16
+passed. Two fixes came out of it, each in its own commit:
+* **E13** (`host.tdm.client`): the row failed with bb's bots, in its script. The scripted fall now drops 46 m onto
+  M1's open-sky E1d spot (`sim::find_drop_spot`), because 60 m above a spawn point is inside Metro's ceiling. The row
+  runs 31 bots instead of 7, because 7 bots reached only 3 / 1 of the kill limit 5 in 30 s. Under the lock it passes
+  in 26.2 s: respawn = death + 300, RoundOver after 11.3 s of round.
+* **E8** (`host.tdm.perf`): it failed on perception p99 at 0.257 ms against a gate of 0.2. The named insertion
+  `[ray any]` adds `CollisionWorld::ray_any`, an any-hit query with the same filters, and perception's
+  line-of-sight rays use it. Bot behaviour is byte-identical: E1 RoundOver at tick 17,634 at 100 / 95, E2 pooled
+  149 / 131. Re-measured under the lock: perception 0.180 ms, brains 0.298 ms, tick 1.319 ms (p99).
+
+**E11** (`audio.game.underruns`) is still failing on the mix CPU share: p99 lies in the < 0.20 bucket against
+<= 0.10. Its other gates pass: 0 late blocks, max block 2.54 of 10.67 ms, 128 live voices at most. Most of the cost
+is M2a's sampler slot rendering (m2b-au.md), so this is a follow-up and the gate is not weakened. The play check
+(user away, 2 minutes each, `--m2a-check=play --m2a-play-seconds=120`):
+* **M2a scene**: bots fire (6,362 remote shots), a fall death respawns, 120.9 s of audio mixed (12 late commands,
+  reported), 0 event overflows, and the install is unchanged. The fall, team-switch and kit rows fail only because
+  the case's 300 s schedule does not fit in 120 s.
+* **`--tdm` preview** (31 TDM bots, `--kill-limit=30 --preround=3`): the `[m2b] match:` lines show pre-round, then
+  in round, then a revive taking a kill back (RU 12 to 11), then `round over, US 30 - RU 24 of 30, US wins`, with
+  bots fighting and respawning throughout.
+
+Also: bb's two contract additions and au's sampler-voice cap are confirmed (m2b.md `## M2b integ-w1`), and a
+backspace byte in bb's README row is fixed. Logs are in the scratchpad `m2b-integ-w1\`; captures (gitignored) are in
+`openBF3\b\shots\integm2bw1\`.
+
 ## M2a wave 2 contract (W2.0)
 
 <!-- # M2a w2 -->
@@ -2950,7 +2980,7 @@ Measured 2026-10-19 on the dev preset, `m2b/bb` after the merge of `m2b/w1` (nt,
 
 | gate | threshold | measured |
 |---|---|---|
-| branch pass `toolsuild.cmd dev` | every row passes or skips as before | 146 rows: 144 passed, 2 skipped (`core.cache_data`, `core.res` as before), 0 failed, 197.4 s, exit 0 |
+| branch pass `tools\build.cmd dev` | every row passes or skips as before | 146 rows: 144 passed, 2 skipped (`core.cache_data`, `core.res` as before), 0 failed, 197.4 s, exit 0 |
 | host.tdm.bots.unit | all cases pass, data-free budget 2 s | 7 cases passed, 0.10 s |
 | m2b.contract | passes with every track landed | passed, 0.37 s |
 | asan host.tdm.bots.unit | no asan report | passed before the merge (0.68 s); after the merge the verification pass ran it (0.60 s) and `host.tdm.replay` (195 s) under asan, 0 reports; not rerun after `[spawn transform]` |

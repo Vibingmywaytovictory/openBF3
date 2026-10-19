@@ -984,3 +984,21 @@ is in its own commit, every line marked `// M2b bb [tag]`; no existing line chan
 |---|---|---|---|
 | `[bot spawn]` | game_server.h (after `add_local_soldier`), game_server.cpp (an `// M2b bb` end block) | `int GameServer::add_local_bot(std::unique_ptr<CommandSource>, int team)`: `add_local` with the bot mark; `add_tdm_bots` uses it instead of `add_local_soldier` (§2.6 table above) | §3.5 and Q11 want the TDM bots on S1's main-component list (`spawn_in_main`), which `spawn()` selects only for a slot with the bot mark; `add_local_soldier` sets none. Without it 1-3 bots per team spawned on nav islands on Metro and E2's K/D left its band |
 | `[spawn transform]` | round_natives.cpp, `RoundNatives::apply`, the `default:` case of the meaning switch | a CharacterSpawn / AlternateSpawn `BlueprintTransform` property input is handled (no effect) | the two CharacterSpawnReference HQ nodes receive it at tick 1; Recorded, it failed E1's coverage check (§3.1) |
+
+## M2b integ-w1: integrator decisions (wave 1)
+
+<!-- # M2b integ-w1 -->
+Made on `integ/m2b-w1` (README "Sixth integration").
+
+* **Confirmed: bb's `[bot spawn]` and `[spawn transform]`** (the block above). `[bot spawn]` puts the TDM bots on S1's
+  main-component list, as §3.5 and Q11 intend. `[spawn transform]` handles a property input that has no effect. Both are
+  additive and marked.
+* **Confirmed: au's cap counts busy sampler voices, not patch instances** (m2b-au.md "The cap counts sampler voices").
+  A voice is one playing sound, and an instance-level cap of 128 made the 64-shooter mix 3-5 times slower than M2a's.
+* **E13 as built:** 31 TDM bots instead of 7. The TDM bots make about 0.02 kills per bot per second, so 7 bots reached
+  only 3 / 1 of the kill limit 5 in 30 s. The scripted death is a 46 m drop onto `sim::find_drop_spot`. The row's other
+  thresholds are unchanged.
+* **Named insertion `[ray any]`** (E8): `CollisionWorld::ray_any` (collision_world.h / .cpp), and perception.cpp's two
+  line-of-sight rays call it. Every line is marked `// integ/m2b-w1 [ray any]`, and the results are identical to `ray()`.
+* **Open:** E11's mix share p99 <= 0.10 is not met (the < 0.20 bucket), which needs a sampler optimization pass. In
+  wave 2, `fx::FxTriggers::sane` should accept `PresentKind::Revive` (m2b-nt.md).
