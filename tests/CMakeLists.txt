@@ -1540,7 +1540,7 @@ endif()
 # under 2 s) and anim.pt1_run (the install, read-only: the three move groups as read, the cycle rate and the evaluated
 # feet's stride against the ground per speed before and after, install.unchanged; exits 77 without an install).
 openbf3_test(test_pt1_run test_main.cpp pt1_run_tests.cpp test_support.h)
-target_link_libraries(test_pt1_run PRIVATE bf3_anim)
+target_link_libraries(test_pt1_run PRIVATE bf3_anim bf3_render)
 add_test(NAME anim.pt1_run.unit COMMAND test_pt1_run --test-suite=pt1-run-unit)
 add_test(NAME anim.pt1_run COMMAND test_pt1_run --test-suite=pt1-run)
 set_tests_properties(anim.pt1_run PROPERTIES SKIP_RETURN_CODE 77)

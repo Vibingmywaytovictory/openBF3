@@ -16,10 +16,14 @@
 #include "bf3/anim/layers.h"
 #include "bf3/anim/locomotion.h"
 #include "bf3/anim/move_group.h"
+#include "bf3/anim/pose.h"
+#include "bf3/anim/skeleton.h"
+#include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/render/viewmodel_set.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -799,6 +803,169 @@ TEST_SUITE("pt1-run") {
 		CHECK(sprint.def.clips[w65.terms[0].clip].controller == "Rifle_Sprint");
 	}
 
+	TEST_CASE("1p deltas: routes per weapon type, cadence and amplitude before and after") {
+		Pt1Data *d = pt1_or_skip();
+		if (d == nullptr) {
+			return;
+		}
+		const bf3::core::ant::AntLibrary &lib = *d->library;
+		const bf3::core::ant::AntRig *ant_rig = nullptr;
+		for (const bf3::core::ant::AntRig &r : lib.rigs()) {
+			if (r.name == "Venice1pAntSke01") {
+				ant_rig = &r;
+			}
+		}
+		REQUIRE(ant_rig != nullptr);
+		if (ant_rig == nullptr) {
+			return;
+		}
+		bf3::core::Result<Skeleton> rig = skeleton_from_rig(*ant_rig);
+		REQUIRE(rig.ok());
+		if (!rig.ok()) {
+			return;
+		}
+		// The weapons' AntRefs: s_basicassets' WeaponAsset by name (EBX WeaponStates[0].Weapon.AssetId is 0x1548 << 16 | its
+		// guid index's low 16 bits).
+		auto ant_ref = [&](std::string_view p_name) {
+			const bf3::core::ant::AntPackage &sp = *lib.static_package();
+			for (size_t i = 0; i < sp.object_count(); ++i) {
+				const bf3::core::ant::GdStruct o = sp.object(i);
+				if (o.type_name() == "WeaponAsset" && o.name() == p_name) {
+					return 0x15480000u | (o.guid().index() & 0xFFFFu);
+				}
+			}
+			return 0u;
+		};
+		struct Want {
+			const char *weapon;
+			uint32_t type;
+		};
+		const Want wants[] = { { "M16A2", 0 }, { "Fnminimi", 3 }, { "Smaw", 4 }, { "Glock18", 5 }, { "M40a5", 6 }, { "M1014", 7 } };
+		std::vector<std::shared_ptr<const bf3::render::ViewmodelLocomotionClips>> loaded;
+		for (const Want &w : wants) {
+			bf3::render::ViewmodelItem item;
+			item.unlock = w.weapon;
+			std::vector<std::string> notes;
+			const uint32_t ref = ant_ref(w.weapon);
+			REQUIRE(ref != 0u);
+			bf3::render::load_viewmodel_locomotion(lib, *rig, ref, item, notes);
+			for (const std::string &n : notes) {
+				MESSAGE(n);
+			}
+			REQUIRE(item.pt1_locomotion != nullptr);
+			if (!item.pt1_locomotion) {
+				continue;
+			}
+			CHECK(item.pt1_locomotion->weapon_type == w.type);
+			MESSAGE((std::string(w.weapon) + " run: " + item.pt1_locomotion->run_path));
+			MESSAGE((std::string(w.weapon) + " sprint: " + item.pt1_locomotion->sprint_path));
+			loaded.push_back(item.pt1_locomotion);
+		}
+		REQUIRE(!loaded.empty());
+		if (loaded.empty()) {
+			return;
+		}
+		const bf3::render::ViewmodelLocomotionClips &m16 = *loaded[0];
+		CHECK(m16.run.controller == "Rifle_RunFwdDelta");
+		CHECK(m16.run_start_frame == doctest::Approx(14.0f));
+		CHECK(m16.run_end_frame == doctest::Approx(90.0f));
+		CHECK(m16.sprint.controller == "Rifle_SprintDelta");
+		CHECK(m16.sprint_start_frame == doctest::Approx(0.0f));
+		CHECK(m16.sprint_end_frame == doctest::Approx(72.0f));
+
+		// Cadence and amplitude of the weapon against the camera: before (the procedural bob, weapon_offset in camera
+		// space) and after (BF3's deltas: Wep_Root in CameraJoint's frame). Per axis: the mean-crossing frequency and the
+		// peak-to-peak, over 10 s after 1 s.
+		const int32_t cam = rig->find("CameraJoint"), wep = rig->find("Wep_Root");
+		REQUIRE(cam >= 0);
+		REQUIRE(wep >= 0);
+		if (cam < 0 || wep < 0) {
+			return;
+		}
+		struct Axis {
+			double hz = 0, p2p_mm = 0;
+		};
+		auto measure = [](const std::vector<Vec3> &p_track) {
+			std::array<Axis, 3> out{};
+			const double seconds = double(p_track.size()) / 60.0;
+			for (int k = 0; k < 3; ++k) {
+				auto at = [&](size_t i) { return double(k == 0 ? p_track[i].x : k == 1 ? p_track[i].y : p_track[i].z); };
+				double mean = 0, lo = 1e9, hi = -1e9;
+				for (size_t i = 0; i < p_track.size(); ++i) {
+					mean += at(i);
+					lo = std::min(lo, at(i));
+					hi = std::max(hi, at(i));
+				}
+				mean /= double(p_track.size());
+				uint32_t ups = 0;
+				for (size_t i = 1; i < p_track.size(); ++i) {
+					ups += (at(i - 1) < mean && at(i) >= mean) ? 1 : 0;
+				}
+				out[size_t(k)].hz = double(ups) / seconds;
+				out[size_t(k)].p2p_mm = (hi - lo) * 1000.0;
+			}
+			return out;
+		};
+		const ViewmodelTuning tuning; // the defaults: bob_frequency 1.8 Hz as shipped (viewmodel_tuning.cfg's bob_amplitude is 0.008, not 0.01)
+		const std::array<VmClipRef, kVmClips> no_clips{};
+		struct Case {
+			const char *what;
+			float speed;
+			bool sprinting;
+		};
+		const Case cases[] = { { "run 4.0", 4.0f, false }, { "sprint 6.5", 6.5f, true } };
+		for (const Case &c : cases) {
+			std::vector<Vec3> before, after;
+			for (int pass = 0; pass < 2; ++pass) {
+				ViewmodelAnimator a(*rig, no_clips, tuning);
+				if (pass == 1) {
+					a.set_locomotion(bf3::render::viewmodel_locomotion([&] {
+						bf3::render::ViewmodelItem it;
+						it.pt1_locomotion = loaded[0];
+						return it;
+					}()));
+				}
+				ViewmodelFrameInput in;
+				in.speed = c.speed;
+				in.sprinting = c.sprinting;
+				LocalPose pose;
+				ViewmodelOutput out;
+				std::vector<Xform> model;
+				for (int f = 0; f < 660; ++f) {
+					in.time_s += 1.0 / 60.0;
+					in.dt = 1.0f / 60.0f;
+					a.step(in, {}, pose, out);
+					if (f < 60) {
+						continue;
+					}
+					if (pass == 0) {
+						before.push_back(out.weapon_offset.t);
+					} else {
+						model_pose(*rig, pose, model);
+						after.push_back(xform_mul(xform_inverse(model[size_t(cam)]), model[size_t(wep)]).t);
+						CHECK(out.pt1_run_weight + out.pt1_sprint_weight == doctest::Approx(1.0f));
+					}
+				}
+			}
+			const std::array<Axis, 3> b = measure(before), af = measure(after);
+			char line[300];
+			std::snprintf(line, sizeof(line),
+					"%-10s before (bob): x %.2f Hz %.1f mm, y %.2f Hz %.1f mm | after (deltas): x %.2f Hz %.1f mm, y %.2f Hz %.1f mm, z %.2f Hz %.1f mm", c.what,
+					b[0].hz, b[0].p2p_mm, b[1].hz, b[1].p2p_mm, af[0].hz, af[0].p2p_mm, af[1].hz, af[1].p2p_mm, af[2].hz, af[2].p2p_mm);
+			MESSAGE(line);
+			if (c.sprinting) {
+				// BF3's sprint delta: the weapon sways once per 18 frames sideways and twice up and down at rate 1
+				// (Rifle_SprintDelta, 72 frames), where the bob ran at 1.8 * 1.5 Hz and twice that.
+				CHECK(af[0].hz == doctest::Approx(30.0 / 18.0).epsilon(0.08));
+				CHECK(af[1].hz == doctest::Approx(30.0 / 9.0).epsilon(0.08));
+				CHECK(b[0].hz > 1.5 * af[0].hz);
+			} else {
+				// The run delta at speed / 3.6: once per stride pair sideways, as the 3p run at 4 m/s (Rifle_RunFwd 0.6 s).
+				CHECK(af[0].hz == doctest::Approx(1.0 / 0.6).epsilon(0.08));
+			}
+		}
+	}
+
 	TEST_CASE("install unchanged") {
 		Pt1Data *d = pt1_or_skip();
 		if (d == nullptr) {
@@ -806,5 +973,200 @@ TEST_SUITE("pt1-run") {
 		}
 		const bf3::core::SnapshotDiff diff = bf3::core::diff_snapshots(d->before, d->reader.snapshot());
 		CHECK(diff.clean());
+	}
+}
+
+// ---- 1p run / sprint deltas (viewmodel_anim.h's PT1 run block) ------------------------------------------------------
+
+namespace {
+
+// Root, CameraJoint, Wep_Root; the deltas turn Wep_Root about Y.
+Skeleton vm_rig() {
+	std::vector<Bone> bones(3);
+	bones[0].name = "Root";
+	bones[1].name = "CameraJoint";
+	bones[1].parent = 0;
+	bones[1].rest = Xform{ Quat{}, Vec3{ 0, 0.1f, 0 } };
+	bones[2].name = "Wep_Root";
+	bones[2].parent = 0;
+	bones[2].rest = Xform{ Quat{}, Vec3{ 0, 0, 0.3f } };
+	return *Skeleton::make(std::move(bones));
+}
+
+// An additive ramp on Wep_Root: Y rotation 0 .. p_deg over p_frames frames (30 fps).
+void vm_ramp(bf3::core::ant::DecodedClip &r_clip, ClipTracks &r_tracks, uint16_t p_frames, float p_deg) {
+	r_clip = {};
+	r_clip.codec = bf3::core::ant::ClipCodec::Raw;
+	r_clip.additive = true;
+	r_clip.num_keys = 2;
+	r_clip.num_quats = 1;
+	r_clip.end_frame = p_frames;
+	r_clip.key_times = { 0, p_frames };
+	r_clip.quats = { Quat{}, axis_angle(0, 1, 0, p_deg) };
+	r_tracks = {};
+	r_tracks.rotation_bone = { 2 };
+	r_tracks.fps = 30.0f;
+	r_tracks.end_frame = p_frames;
+	r_tracks.channels_bound = 1;
+}
+
+float y_deg(const Quat &p_q) {
+	return 2.0f * std::atan2(p_q.y, p_q.w) * 180.0f / kPi;
+}
+
+struct VmSynth {
+	Skeleton rig = vm_rig();
+	bf3::core::ant::DecodedClip run_clip, sprint_clip;
+	ClipTracks run_tracks, sprint_tracks;
+	std::array<VmClipRef, kVmClips> refs{};
+	VmLocomotion loco;
+
+	VmSynth() {
+		vm_ramp(run_clip, run_tracks, 60, 30.0f); // 0.5 deg per frame
+		vm_ramp(sprint_clip, sprint_tracks, 40, -40.0f); // -1 deg per frame
+		loco.run.clip.clip = &run_clip;
+		loco.run.clip.tracks = &run_tracks;
+		loco.run.start_frame = 14.0f;
+		loco.run.end_frame = 44.0f;
+		loco.sprint.clip.clip = &sprint_clip;
+		loco.sprint.clip.tracks = &sprint_tracks;
+		loco.sprint.start_frame = 0.0f;
+		loco.sprint.end_frame = 40.0f;
+	}
+};
+
+struct VmRun {
+	LocalPose pose;
+	ViewmodelOutput out;
+};
+
+VmRun vm_steps(ViewmodelAnimator &r_a, ViewmodelFrameInput &r_in, int p_steps) {
+	VmRun r;
+	for (int i = 0; i < p_steps; ++i) {
+		r_in.time_s += 1.0 / 60.0;
+		r_in.dt = 1.0f / 60.0f;
+		r_a.step(r_in, {}, r.pose, r.out);
+	}
+	return r;
+}
+
+} // namespace
+
+TEST_SUITE("pt1-run-unit") {
+	TEST_CASE("1p deltas: run rate per speed, sprint at rate 1, weights, the bob replaced") {
+		VmSynth s;
+		const ViewmodelTuning tuning; // sprint_blend_seconds 0.2
+		ViewmodelAnimator a(s.rig, s.refs, tuning);
+		a.set_locomotion(s.loco);
+		ViewmodelFrameInput in;
+		in.speed = kVmRunSpeedUnit; // rate 1: 30 frames per second
+		// 0.5 s: frame 14 + 15 = 29, the run delta at full weight (ramp 0.2 s), Wep_Root turned 29 * 0.5 deg.
+		VmRun r = vm_steps(a, in, 30);
+		CHECK(r.out.pt1_run_frame == doctest::Approx(29.0f).epsilon(0.002));
+		CHECK(r.out.pt1_run_weight == doctest::Approx(1.0f));
+		CHECK(r.out.pt1_sprint_weight == 0.0f);
+		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(14.5f).epsilon(0.01));
+		CHECK(std::fabs(r.out.weapon_offset.t.x) < 1e-6f); // no bob
+		CHECK(std::fabs(r.out.weapon_offset.t.y) < 1e-6f);
+		// Twice the speed, twice the rate: 0.5 s = 30 frames, wrapped in the 30-frame window: frame 29 again.
+		in.speed = 2.0f * kVmRunSpeedUnit;
+		r = vm_steps(a, in, 30);
+		CHECK(r.out.pt1_run_frame == doctest::Approx(29.0f).epsilon(0.002));
+		// 4 m/s: 33.3 frames per second.
+		in.speed = 4.0f;
+		const float f0 = r.out.pt1_run_frame;
+		r = vm_steps(a, in, 6);
+		CHECK(r.out.pt1_run_frame - f0 == doctest::Approx(0.1f * 30.0f * 4.0f / kVmRunSpeedUnit).epsilon(0.002));
+		// ADS takes the run delta out.
+		in.ads = 1.0f;
+		r = vm_steps(a, in, 1);
+		CHECK(r.out.pt1_run_weight == 0.0f);
+		in.ads = 0.0f;
+		// Sprint: the sprint delta at rate 1 whatever the speed, the run delta out with the sprint weight.
+		in.sprinting = true;
+		in.speed = 6.5f;
+		r = vm_steps(a, in, 6); // 0.1 s: half way
+		CHECK(r.out.pt1_sprint_weight == doctest::Approx(0.5f).epsilon(0.01));
+		CHECK(r.out.pt1_run_weight == doctest::Approx(0.5f).epsilon(0.01));
+		const float s0 = r.out.pt1_sprint_frame;
+		r = vm_steps(a, in, 18);
+		CHECK(r.out.pt1_sprint_weight == doctest::Approx(1.0f));
+		CHECK(r.out.pt1_run_weight == 0.0f);
+		CHECK(r.out.pt1_sprint_frame - s0 == doctest::Approx(9.0f).epsilon(0.002));
+		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(-r.out.pt1_sprint_frame).epsilon(0.01));
+		// Stopping (below 0.09 m/s): the run weight ramps out over 0.2 s; in the air it is out too.
+		in.sprinting = false;
+		in.speed = 0.05f;
+		r = vm_steps(a, in, 13);
+		CHECK(r.out.pt1_run_weight == 0.0f);
+		CHECK(r.out.pt1_sprint_weight == 0.0f);
+		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(0.0f));
+		in.speed = 4.0f;
+		in.grounded = false;
+		r = vm_steps(a, in, 12);
+		CHECK(r.out.pt1_run_weight == 0.0f);
+		// reset(): back to the window's start.
+		a.reset();
+		in.grounded = true;
+		in.time_s = 0;
+		r = vm_steps(a, in, 1);
+		CHECK(r.out.pt1_run_frame == doctest::Approx(14.0f + 30.0f * 4.0f / kVmRunSpeedUnit / 60.0f).epsilon(0.002));
+	}
+
+	TEST_CASE("1p deltas: without them the procedural bob; hostile input") {
+		VmSynth s;
+		const ViewmodelTuning tuning;
+		{
+			ViewmodelAnimator a(s.rig, s.refs, tuning);
+			ViewmodelFrameInput in;
+			in.speed = 4.0f;
+			const VmRun r = vm_steps(a, in, 40);
+			CHECK(r.out.pt1_run_weight == 0.0f);
+			CHECK(std::fabs(r.out.weapon_offset.t.x) + std::fabs(r.out.weapon_offset.t.y) > 1e-4f); // the bob
+		}
+		{
+			// An empty set (or unusable clips) restores the bob.
+			ViewmodelAnimator a(s.rig, s.refs, tuning);
+			a.set_locomotion(s.loco);
+			a.set_locomotion(VmLocomotion{});
+			VmLocomotion bad = s.loco;
+			ClipTracks empty_tracks = s.run_tracks;
+			empty_tracks.end_frame = 0;
+			bad.run.clip.tracks = &empty_tracks;
+			bad.sprint.clip.clip = nullptr;
+			a.set_locomotion(bad);
+			ViewmodelFrameInput in;
+			in.speed = 4.0f;
+			const VmRun r = vm_steps(a, in, 40);
+			CHECK(r.out.pt1_run_weight == 0.0f);
+			CHECK(std::fabs(r.out.weapon_offset.t.x) + std::fabs(r.out.weapon_offset.t.y) > 1e-4f);
+		}
+		{
+			// Windows outside the clip clamp to it; an empty or NaN window is the whole clip; NaN speed and dt stay finite.
+			ViewmodelAnimator a(s.rig, s.refs, tuning);
+			VmLocomotion odd = s.loco;
+			odd.run.start_frame = std::numeric_limits<float>::quiet_NaN();
+			odd.sprint.start_frame = 500.0f;
+			odd.sprint.end_frame = -3.0f;
+			a.set_locomotion(odd);
+			ViewmodelFrameInput in;
+			in.speed = std::numeric_limits<float>::quiet_NaN();
+			VmRun r = vm_steps(a, in, 5);
+			CHECK(std::isfinite(r.out.pt1_run_frame));
+			in.speed = 1.0e30f;
+			r = vm_steps(a, in, 5);
+			CHECK(std::isfinite(r.out.pt1_run_frame));
+			CHECK(r.out.pt1_run_frame >= 0.0f);
+			CHECK(r.out.pt1_run_frame < 60.0f);
+			in.sprinting = true;
+			in.speed = 6.5f;
+			r = vm_steps(a, in, 30);
+			CHECK(r.out.pt1_sprint_frame >= 0.0f);
+			CHECK(r.out.pt1_sprint_frame < 40.0f);
+			for (const Xform &x : r.pose.joints) {
+				CHECK(std::isfinite(x.q.w));
+				CHECK(std::isfinite(x.t.z));
+			}
+		}
 	}
 }
