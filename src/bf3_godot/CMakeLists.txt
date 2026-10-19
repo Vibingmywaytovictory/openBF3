@@ -227,3 +227,24 @@ if(EXISTS "${_m2a_gx_brain}")
     endif()
 endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_m2a_gx_brain}")
+
+# M2b W2.0 (W2.0 contract, docs/design/m2b.md §2.6 #16-#18, §11 wave 2; docs/design/m2b-w2.md): the wave-2 headers
+# (ui's Bf3TdmHud, cam's Bf3DeathCamera, gx's M2b game, session state and check) and a TU that compiles them together.
+# The owners add their .cpp files in their own blocks (ui: hud_tdm.cpp and its screens, bf3_host's hud_feed_tdm.cpp;
+# cam: death_camera.cpp; gx: level_session_m2b.cpp, m2b_check.cpp). gx builds ui's and cam's parts only when their body
+# is in the tree: OPENBF3_M2B_HAVE_UI / OPENBF3_M2B_HAVE_CAM from the files' presence (the M2a gx pattern), so gx's
+# branch links before they land and picks them up after the merge without an edit.
+target_sources(bf3_godot PRIVATE
+    src/hud_tdm.h
+    src/death_camera.h
+    src/m2b_game.h
+    src/m2b_check.h
+    src/level_session_m2b.h
+    src/m2b_w2_headers.cpp
+)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/hud_tdm.cpp")
+    target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2B_HAVE_UI=1)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/death_camera.cpp")
+    target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2B_HAVE_CAM=1)
+endif()

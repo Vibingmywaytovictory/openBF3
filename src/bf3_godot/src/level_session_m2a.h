@@ -121,6 +121,8 @@ private:
 	std::vector<Detonation> detonations_;
 };
 
+struct M2bGame; // M2b W2.0 (gx): level_session_m2b.h
+
 // What the M2a session keeps between frames, and what the check reads (main thread unless marked).
 struct M2aGame {
 	// ---- args (m2a_parse_args) ----
@@ -239,6 +241,10 @@ struct M2aGame {
 	Bf3Viewmodel *own_viewmodel() const { return own_team == 2 ? vm[1] : (own_team == 1 ? vm[0] : nullptr); }
 	// The viewmodel item of a def for a team (-1: none).
 	int item_of(uint8_t p_team, uint16_t p_def) const;
+
+	// M2b W2.0 (docs/design/m2b.md §2.6 #18; gx): the M2b session's state (level_session_m2b.h); null outside an M2b
+	// session (the scene's "openbf3_m2b" metadata, --m2b-check). gx makes it with its own deleter in its [args] line.
+	std::unique_ptr<M2bGame, void (*)(M2bGame *)> m2b{ nullptr, nullptr }; // M2b W2.0 (gx)
 };
 
 struct Bf3LevelSession::M2aSession : M2aGame {
