@@ -1,6 +1,3 @@
-// W3.0 contract (docs/design/m2a-w3.md G2, G5): the others' weapon fields at render time and the client's weapon
-// inputs from a SharedLevel. See client_wiring.h.
-
 #include "bf3/host/client_wiring.h"
 
 #include "bf3/host/gunplay.h"
@@ -14,7 +11,7 @@ namespace bf3::host {
 
 namespace {
 
-constexpr double kMsPerTick = 1000.0 / double(sim::kSimHz); // as client_session.cpp
+constexpr double kMsPerTick = 1000.0 / double(sim::kSimHz);
 
 PresentedOtherWeapon weapon_of_track(const OtherTrack &p_track, double p_render_ticks, double p_max_extra_ticks) {
 	PresentedOtherWeapon out;
@@ -32,8 +29,7 @@ PresentedOtherWeapon weapon_of_track(const OtherTrack &p_track, double p_render_
 	if (!sel.valid) {
 		return out;
 	}
-	// sample_other's discrete-field rule (other_sample.cpp): an interpolation switches at u >= 1 (u as a float, as
-	// there); before the oldest sample, a hold, an extrapolation: the selected sample a.
+
 	const net::TimedOther *src = &samples[sel.index_a];
 	if (p_render_ticks > double(src->server_tick) && sel.kind == net::SampleKind::Interpolate) {
 		const net::TimedOther &b = samples[sel.index_b];
@@ -61,7 +57,7 @@ double max_extra_ticks(const PresentationFrame &p_frame) {
 	return std::max(0.0, double(p_frame.extrapolate_max_ms)) / kMsPerTick;
 }
 
-} // namespace
+}
 
 PresentedOtherWeapon present_other_weapon(const PresentationFrame &p_frame, uint8_t p_slot, double p_render_ticks) {
 	const uint32_t count = std::min<uint32_t>(p_frame.other_count, uint32_t(p_frame.others.size()));
@@ -76,7 +72,7 @@ PresentedOtherWeapon present_other_weapon(const PresentationFrame &p_frame, uint
 }
 
 size_t present_other_weapons(const PresentationFrame &p_frame, double p_render_ticks, std::span<PresentedOtherWeapon> r_out) {
-	// present_others' loop: tracks in frame order, empty tracks skipped.
+
 	const uint32_t count = std::min<uint32_t>(p_frame.other_count, uint32_t(p_frame.others.size()));
 	const double extra = max_extra_ticks(p_frame);
 	size_t n = 0;
@@ -121,4 +117,4 @@ core::Result<std::shared_ptr<const ClientGunplayInputs>> make_client_gunplay_inp
 	return *in;
 }
 
-} // namespace bf3::host
+}

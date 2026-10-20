@@ -1,5 +1,3 @@
-// The E2 rest judge (docs/design/m1.md §1 E2; rest_check.h has the rule). Pure: host.session (T4) and godot.m1
-// (T6) feed it their recordings.
 #include "bf3/host/rest_check.h"
 
 #include <algorithm>
@@ -13,7 +11,7 @@ namespace {
 
 void fail(RestCycleResult &r_result, const char *p_format, double p_a = 0.0, double p_b = 0.0) {
 	if (!r_result.ok && r_result.failure[0] != '\0') {
-		return; // the first failure stays
+		return;
 	}
 	r_result.ok = false;
 	std::snprintf(r_result.failure.data(), r_result.failure.size(), p_format, p_a, p_b);
@@ -23,7 +21,7 @@ uint64_t add_seconds(uint64_t p_ns, double p_seconds) {
 	return p_ns + uint64_t(std::max(0.0, p_seconds) * 1e9);
 }
 
-} // namespace
+}
 
 std::vector<RestCycleResult> judge_rest(std::span<const RestSample> p_samples, const RestCheckOptions &p_options) {
 	std::vector<RestCycleResult> results;
@@ -34,7 +32,7 @@ std::vector<RestCycleResult> judge_rest(std::span<const RestSample> p_samples, c
 			++i;
 			continue;
 		}
-		// A rest period: the maximal run of idle samples [begin, end).
+
 		const size_t begin = i;
 		size_t end = i;
 		while (end < n && p_samples[end].input_idle) {
@@ -47,7 +45,7 @@ std::vector<RestCycleResult> judge_rest(std::span<const RestSample> p_samples, c
 		r.stop_tick = first.tick;
 		r.stop_ns = first.time_ns;
 		r.period_end_ns = p_samples[end - 1].time_ns;
-		// The rest: the first sample at rest speed, within max_stop_s of the stop.
+
 		size_t rest = end;
 		for (size_t k = begin; k < end; ++k) {
 			if (p_samples[k].horizontal_speed <= p_options.rest_speed) {
@@ -64,8 +62,7 @@ std::vector<RestCycleResult> judge_rest(std::span<const RestSample> p_samples, c
 		}
 		r.rest_ns = p_samples[rest].time_ns;
 		r.window_start_ns = add_seconds(r.rest_ns, p_options.settle_s);
-		// Reconciliations in the period: an increase of the cumulative count against the sample before. Only one at
-		// a snapshot tick <= stop + edge_ticks (the input-edge case) may move the window; any other one fails.
+
 		for (size_t k = begin; k < end; ++k) {
 			const uint64_t before = k > 0 ? p_samples[k - 1].reconciliations : p_samples[k].reconciliations;
 			if (p_samples[k].reconciliations <= before) {
@@ -86,7 +83,7 @@ std::vector<RestCycleResult> judge_rest(std::span<const RestSample> p_samples, c
 			fail(r, "the rest window does not fit the rest period (it ends %.2f s after the period, pushed %.0f)",
 					double(r.window_end_ns - r.period_end_ns) / 1e9, r.pushed ? 1.0 : 0.0);
 		}
-		// The window: no reconciliation, eye jitter below the bound, visual offset exactly 0.
+
 		float lo[3] = { INFINITY, INFINITY, INFINITY };
 		float hi[3] = { -INFINITY, -INFINITY, -INFINITY };
 		size_t in_window = 0;
@@ -126,4 +123,4 @@ std::vector<RestCycleResult> judge_rest(std::span<const RestSample> p_samples, c
 	return results;
 }
 
-} // namespace bf3::host
+}

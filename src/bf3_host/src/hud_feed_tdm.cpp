@@ -1,8 +1,3 @@
-// M2b ui: the M2b half of the HUD feed (bf3/host/hud_feed.h, the "M2b W2.0" block; docs/design/m2b.md §4, §2.6 #16;
-// as built: docs/design/m2b-ui.md §2). Pure and Godot-free: fill_hud_tdm writes the players by slot, the team lists,
-// the kill counter, the kill feed, the kill card, the spawn screen, the pre-round and the round end from HudFeedInput's
-// M2b fields and the drained presentation events. Every slot, team, kit and phase it reads is range-checked first;
-// a value out of range is skipped or clamped and counted in HudTdmFeedState::bad_inputs, never used as an index.
 #include "bf3/host/hud_feed.h"
 
 #include "bf3/host/kits.h"
@@ -21,14 +16,11 @@ namespace sw = bf3::sim::weapons;
 
 namespace {
 
-// Times further ahead than this are hostile (a tick in the far future) and clamped: one hour of server ticks.
 constexpr sim::Tick kMaxAheadTicks = sim::Tick(3600) * sim::kSimHz;
 
-// The team names (UITeamCompData Team1Name / Team2Name): "US", "RU" [verified 2026-10-19, bf3dump text].
 constexpr std::string_view kTeam1NameSid = "ID_M_US";
 constexpr std::string_view kTeam2NameSid = "ID_M_RU";
 
-// Seconds from p_now until p_until (0 when it passed); a gap above kMaxAheadTicks is clamped and counted.
 float seconds_until(sim::Tick p_now, sim::Tick p_until, uint64_t &r_bad) {
 	if (p_until <= p_now) {
 		return 0.0f;
@@ -47,7 +39,6 @@ struct Rank {
 	int16_t kills;
 };
 
-// Score, then kills, then the lower slot first.
 bool rank_before(const Rank &p_a, const Rank &p_b) {
 	if (p_a.score != p_b.score) {
 		return p_a.score > p_b.score;
@@ -72,11 +63,10 @@ void copy_name(const ui::HudPlayer &p_player, ui::HudPlayerName &r_name) {
 	r_name = p_player.name;
 }
 
-// One kill-feed line into a ring (newest at serial % size).
 void push_kill(ui::HudKillFeed &r_feed, uint32_t &r_serial, const ui::HudKill &p_line) {
 	++r_serial;
 	if (r_serial == 0) {
-		r_serial = 1; // 0 marks an empty slot: skip it on wrap-around
+		r_serial = 1;
 	}
 	ui::HudKill line = p_line;
 	line.serial = r_serial;
@@ -92,7 +82,7 @@ void hide_m2b(ui::HudModel &r_model) {
 	r_model.pre_round.visible = false;
 }
 
-} // namespace
+}
 
 void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudTdmFeedState &r_state,
 		ui::HudModel &r_model) {
@@ -102,7 +92,6 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		return;
 	}
 
-	// ---- the phase ------------------------------------------------------------------------------------------------
 	const bool match = p_input.match_valid;
 	net::MatchPhase phase = match ? p_input.match.phase : net::MatchPhase::Loading;
 	if (uint8_t(phase) > uint8_t(net::MatchPhase::RoundOver)) {
@@ -111,7 +100,6 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	}
 	const sim::Tick now_tick = p_input.server_tick;
 
-	// ---- the own slot and team --------------------------------------------------------------------------------------
 	uint8_t own_slot = p_input.own_slot;
 	if (own_slot != ui::kHudNoPlayer && own_slot >= ui::kHudMaxPlayers) {
 		++r_state.bad_inputs;
@@ -122,10 +110,9 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		++r_state.bad_inputs;
 		own_team = 0;
 	}
-	const uint8_t my_team = own_team != 0 ? own_team : 1; // the friendly side when unknown
+	const uint8_t my_team = own_team != 0 ? own_team : 1;
 	const uint8_t enemy_team = uint8_t(3 - my_team);
 
-	// ---- players by slot --------------------------------------------------------------------------------------------
 	std::array<bool, ui::kHudMaxPlayers> present{};
 	r_model.players.fill(ui::HudPlayer{});
 	size_t highest = 0;
@@ -165,7 +152,6 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	r_model.local_player = own_slot;
 	r_model.local_team = int8_t(own_team);
 
-	// ---- the team lists (UITeamCompData) -----------------------------------------------------------------------------
 	std::array<Rank, ui::kHudMaxPlayers> all{};
 	std::array<Rank, ui::kHudMaxPlayers> t1{};
 	std::array<Rank, ui::kHudMaxPlayers> t2{};
@@ -218,7 +204,6 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	team.enemy_team1_is_winner = round_over && winner != 0 && winner == enemy_team;
 	team.scoreboard_enabled = p_input.scoreboard_held;
 
-	// ---- the kill counter (UIKillCounterCompData) ----------------------------------------------------------------------
 	ui::HudKillCounter &kc = r_model.kill_counter;
 	const int32_t k1 = match ? std::max(p_input.match.kills[0], 0) : 0;
 	const int32_t k2 = match ? std::max(p_input.match.kills[1], 0) : 0;
@@ -243,7 +228,6 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	kc.leading_by_kills = mine - theirs;
 	kc.player_team_position = mine >= theirs ? 1 : 2;
 
-	// ---- the drained events: the kill feed and the kill card ----------------------------------------------------------
 	if (!std::isfinite(p_input.now_s)) {
 		++r_state.bad_inputs;
 	}
@@ -252,7 +236,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	ui::HudKillCard &card = r_model.kill_card;
 	for (const PresentEvent &e : p_drained) {
 		if (e.kind == PresentKind::Spawn) {
-			// A new own life (a deploy or a revive) ends the card early.
+
 			if (own_slot != ui::kHudNoPlayer && e.slot == own_slot) {
 				r_state.kill_card_until_s = 0;
 			}
@@ -293,7 +277,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		if ((e.flags & present_flags::kOwnVictim) == 0) {
 			continue;
 		}
-		// The own death: a new kill card.
+
 		++r_state.kill_card_serial;
 		if (r_state.kill_card_serial == 0) {
 			r_state.kill_card_serial = 1;
@@ -322,7 +306,6 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	card.visible = card_up;
 	card.seconds_left = card_up ? float(r_state.kill_card_until_s - now_s) : 0.0f;
 
-	// ---- the spawn screen --------------------------------------------------------------------------------------------
 	const bool dead = !p_input.alive || p_input.own_unspawned;
 	ui::HudSpawnScreen &sp = r_model.spawn_screen;
 	sp.visible = match && dead && !card_up && !round_over;
@@ -352,26 +335,23 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		}
 	}
 
-	// ---- the soldier's man-down fields, the spawn logic, the spawn points ------------------------------------------------
 	r_model.soldier.show_medic_revive = sp.revive_possible;
 	r_model.soldier.time_until_revive = sp.seconds_revive_left;
-	r_model.soldier.time_until_death = 0.0f; // no interactive man-down (m2b.md §3.6)
+	r_model.soldier.time_until_death = 0.0f;
 	r_model.soldier.is_interactive_man_down = false;
 	r_model.spawn_logic.time_to_respawn = sp.seconds_to_deploy;
 	const sim::Tick d0 = r_state.own_death_tick;
 	const sim::Tick d1 = r_state.own_death_respawn_tick;
 	r_model.spawn_logic.start_time_to_respawn = d1 > d0 && d1 - d0 <= kMaxAheadTicks ? float(double(d1 - d0) / double(sim::kSimHz)) : 0.0f;
 	r_model.spawn_points.can_spawn = sp.can_deploy;
-	r_model.spawn_points.has_valid_spawn = match; // TDM spawns are random (no point choice)
+	r_model.spawn_points.has_valid_spawn = match;
 
-	// ---- the pre-round -----------------------------------------------------------------------------------------------
 	ui::HudPreRound &pre = r_model.pre_round;
 	pre.visible = phase == net::MatchPhase::PreRound;
 	pre.counting_down = match && p_input.match.countdown_end_tick != 0;
 	pre.seconds_left = pre.counting_down ? seconds_until(now_tick, p_input.match.countdown_end_tick, r_state.bad_inputs) : 0.0f;
 	pre.input_restricted = match && p_input.match.restrict_until_tick != 0 && now_tick < p_input.match.restrict_until_tick;
 
-	// ---- the round end -----------------------------------------------------------------------------------------------
 	ui::HudEndOfRound &eor = r_model.end_of_round;
 	eor.visible = round_over;
 	eor.winner = int8_t(winner);
@@ -384,4 +364,4 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	eor.seconds_to_next_round = match && p_input.match.restart_tick != 0 ? seconds_until(now_tick, p_input.match.restart_tick, r_state.bad_inputs) : 0.0f;
 }
 
-} // namespace bf3::host
+}

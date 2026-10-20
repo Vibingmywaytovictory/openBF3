@@ -1,5 +1,3 @@
-// Partition databases. EbxDb is ported from IW4L ebx_bf3 (db.rs), Apache-2.0; EbxLibrary follows
-// the ebx-dump probe's load_db (research/probes/tools/ebx-dump/src/main.rs), parallelised.
 #include "bf3/core/ebx_db.h"
 
 #include "bf3/core/thread_pool.h"
@@ -8,8 +6,6 @@
 #include <chrono>
 
 namespace bf3::core {
-
-// --- EbxResolver ---------------------------------------------------------------------------------
 
 std::optional<EbxInstance> EbxResolver::instance(const Guid &p_partition, const Guid &p_instance) const {
 	const EbxPartition *p = partition(p_partition);
@@ -54,8 +50,6 @@ std::vector<EbxInstance> EbxResolver::follow_all(const EbxStruct &p_object, std:
 	return out;
 }
 
-// --- EbxDb ---------------------------------------------------------------------------------------
-
 bool EbxDb::insert(std::string_view p_name, std::unique_ptr<EbxPartition> p_partition) {
 	std::string key = to_lower_ascii(p_name);
 	if (by_name_.contains(key) || by_guid_.contains(p_partition->guid())) {
@@ -94,8 +88,6 @@ std::optional<std::string_view> EbxDb::name_of(const Guid &p_guid) const {
 	return std::string_view(partitions_[it->second].first);
 }
 
-// --- superbundle specs ---------------------------------------------------------------------------
-
 std::vector<std::string> expand_superbundles(const Install &p_install, std::string_view p_spec) {
 	std::vector<std::string> out;
 	size_t pos = 0;
@@ -118,8 +110,6 @@ std::vector<std::string> expand_superbundles(const Install &p_install, std::stri
 	}
 	return out;
 }
-
-// --- EbxLibrary ----------------------------------------------------------------------------------
 
 EbxLibrary::~EbxLibrary() = default;
 
@@ -151,7 +141,7 @@ Result<std::unique_ptr<EbxLibrary>> EbxLibrary::open(std::shared_ptr<const Insta
 		}
 		lib->mounts_.push_back(std::move(*m));
 	}
-	// Catalog: the first superbundle that holds a name wins.
+
 	for (uint32_t s = 0; s < lib->mounts_.size(); ++s) {
 		for (std::string &name : lib->mounts_[s].ebx_names()) {
 			std::string key = to_lower_ascii(name);
@@ -230,7 +220,6 @@ EbxLibrary::LoadReport EbxLibrary::load_all() {
 	report.parsed = slots_.size();
 	const auto t1 = std::chrono::steady_clock::now();
 
-	// Insert in catalog order with EbxDb's rules (the probe's load_db, superbundle by superbundle).
 	std::call_once(guid_once_, []() {});
 	slot_by_guid_.clear();
 	slot_by_guid_.reserve(slots_.size());
@@ -247,9 +236,9 @@ EbxLibrary::LoadReport EbxLibrary::load_all() {
 				continue;
 			}
 			if (slot.sb != s) {
-				// The first copy did not load (failed or duplicate GUID): retry from this superbundle.
+
 				if (slot.sb > s) {
-					continue; // cannot happen: the catalog holds the first superbundle
+					continue;
 				}
 				Result<std::unique_ptr<EbxPartition>> p = read_parse(s, name);
 				++report.parsed;
@@ -289,7 +278,7 @@ EbxLibrary::LoadReport EbxLibrary::load_all() {
 		sb_report.total_after = order_.size();
 		report.superbundles.push_back(std::move(sb_report));
 	}
-	// Bundle of origin for every loaded partition.
+
 	parallel_for(
 			order_.size(), [&](size_t i) {
 				Slot &slot = slots_[order_[i]];
@@ -378,4 +367,4 @@ std::vector<EbxLibrary::Entry> EbxLibrary::entries() const {
 	return out;
 }
 
-} // namespace bf3::core
+}

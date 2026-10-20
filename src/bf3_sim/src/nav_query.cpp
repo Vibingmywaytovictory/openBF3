@@ -1,6 +1,3 @@
-// NavQuery and NavCorridor (nav_query.h; docs/design/s1.md §5.6): Detour's dtNavMeshQuery with a fixed node pool,
-// the sliced A*, random points by area inside a component, and dtPathCorridor for the walkers. Area costs: walk 1,
-// crouch 1.5 (crouching is slower), drop 1.
 #include "nav_internal.h"
 
 #include <DetourCommon.h>
@@ -31,9 +28,7 @@ float unit(uint64_t &r_state) {
 	return float(splitmix64(r_state) >> 40) / float(1ull << 24);
 }
 
-} // namespace
-
-// ---- NavQuery -----------------------------------------------------------------------------------------------------
+}
 
 NavQuery::NavQuery(std::unique_ptr<Impl> p_impl) :
 		impl_(std::move(p_impl)) {}
@@ -237,7 +232,7 @@ NavPathStatus NavQuery::finish_path(std::vector<NavPolyRef> &r_polys) {
 void NavQuery::cancel_path() {
 	Impl &m = *impl_;
 	if (m.sliced_active) {
-		// Detour has no cancel: finalize into a scratch path and drop it.
+
 		dtPolyRef path[4];
 		int n = 0;
 		m.query->finalizeSlicedFindPath(path, &n, 4);
@@ -254,8 +249,6 @@ bool nav_closest_point(NavQuery &p_query, NavPolyRef p_poly, const Vec3 &p_point
 	*r_point = { out[0], out[1], out[2] };
 	return true;
 }
-
-// ---- NavCorridor ----------------------------------------------------------------------------------------------------
 
 struct NavCorridor::Impl {
 	dtPathCorridor corridor;
@@ -307,7 +300,7 @@ bool NavCorridor::move_position(NavQuery &p_query, const Vec3 &p_position) {
 	if (!ok) {
 		return false;
 	}
-	// moveAlongSurface clamps the corridor's position at the mesh edge: an agent far from it left the corridor.
+
 	const float *p = m.corridor.getPos();
 	const float dx = p[0] - p_position[0], dz = p[2] - p_position[2];
 	return dx * dx + dz * dz <= 1.0f && std::fabs(p[1] - p_position[1]) <= 2.5f;
@@ -381,4 +374,4 @@ NavPolyRef NavCorridor::first_poly() const {
 	return impl_->empty ? 0 : NavPolyRef(impl_->corridor.getFirstPoly());
 }
 
-} // namespace bf3::sim
+}

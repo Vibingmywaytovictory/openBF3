@@ -37,7 +37,7 @@ Transform3D to_godot(const bf3::anim::Xform &p_x) {
 
 Transform3D to_godot(const bf3::anim::Mat34 &p_m) {
 	const auto &m = p_m.m;
-	// Basis rows = matrix rows (Godot's Basis stores rows; its columns are the axes).
+
 	return Transform3D(Basis(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]), Vector3(m[0][3], m[1][3], m[2][3]));
 }
 
@@ -103,7 +103,7 @@ PackedInt32Array ints(const std::vector<int32_t> &p_values) {
 	return a;
 }
 
-} // namespace
+}
 
 Ref<ImageTexture> make_texture(const bf3::render::PreparedTexture &p_texture) {
 	PackedByteArray bytes;
@@ -227,4 +227,4 @@ Ref<StandardMaterial3D> make_standard_material(const bf3::render::MaterialSlot &
 	return m;
 }
 
-} // namespace bf3::godot_side
+}

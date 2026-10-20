@@ -1,7 +1,4 @@
 #pragma once
-// LoopbackClient: the in-process client's network thread for S0 (plan §2.3 "client network
-// thread", §2.6 listen setup). Connects to a ServerHost over 127.0.0.1 and pings it at a fixed
-// rate, so the overlay can show a live ENet round trip. Calls no Godot API.
 
 #include <atomic>
 #include <cstdint>
@@ -12,14 +9,14 @@
 namespace bf3::host {
 
 struct LoopbackClientStats {
-	bool running = false; // the network thread is alive (false again once it exits, on stop() or on failure)
+	bool running = false;
 	bool connected = false;
-	bool failed = false; // the thread exited on its own: error says why
+	bool failed = false;
 	std::string error;
 	uint64_t pings_sent = 0;
 	uint64_t pongs_received = 0;
 	double last_rtt_ms = 0.0;
-	double mean_rtt_ms = 0.0; // over all pongs
+	double mean_rtt_ms = 0.0;
 	double max_rtt_ms = 0.0;
 	uint32_t enet_rtt_ms = 0;
 };
@@ -47,7 +44,7 @@ private:
 	std::atomic<bool> connected_{ false };
 	std::atomic<bool> failed_{ false };
 	mutable std::mutex error_mutex_;
-	std::string error_; // under error_mutex_; set by the thread before failed_ is published
+	std::string error_;
 	std::atomic<uint64_t> sent_{ 0 };
 	std::atomic<uint64_t> received_{ 0 };
 	std::atomic<uint64_t> rtt_sum_us_{ 0 };
@@ -56,4 +53,4 @@ private:
 	std::atomic<uint32_t> enet_rtt_ms_{ 0 };
 };
 
-} // namespace bf3::host
+}

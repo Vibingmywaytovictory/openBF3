@@ -1,11 +1,3 @@
-// A soldier's hit target posed from the capsule pose table (docs/design/m2a.md §6.5; as built: docs/design/m2a-lc.md).
-// See posed_target.h.
-//
-// The local capsule is the bilinear blend of the table entries around (pitch, transition fraction): the two pitch
-// buckets around the pitch, and during a transition the two fractions around its progress. Then the yaw rotation of
-// the soldier frame (x left, y up, z forward; standin_target's convention) through the deterministic poly_sincos, and
-// the feet. Everything in double, rounded to float once per coordinate, so the server and a client that call it with
-// equal inputs get equal bits.
 #include "bf3/sim/weapons/posed_target.h"
 
 #include "bf3/sim/weapons/surface_materials.h"
@@ -28,18 +20,17 @@ using namespace detail;
 constexpr double kRadToDeg = 180.0 / kPiD;
 
 struct Blend {
-	size_t index[4]{}; // entry offsets (first capsule)
+	size_t index[4]{};
 	double weight[4]{};
 	size_t count = 0;
 };
 
-// The bucket below p_deg and the weight of the one above (p_deg clamped to the table's range).
 void pitch_bucket(const CapsulePoseTable &p_table, double p_deg, size_t &r_bucket, double &r_w) {
 	const double lo = double(p_table.pitch_deg.front());
 	const double hi = double(p_table.pitch_deg.back());
 	const double d = std::isfinite(p_deg) ? std::clamp(p_deg, lo, hi) : 0.0;
 	size_t b = 0;
-	size_t e = kCapsulePitchBuckets - 1; // binary search: the last bucket <= d, at most kCapsulePitchBuckets - 2
+	size_t e = kCapsulePitchBuckets - 1;
 	while (e - b > 1) {
 		const size_t m = (b + e) / 2;
 		if (double(p_table.pitch_deg[m]) <= d) {
@@ -54,7 +45,7 @@ void pitch_bucket(const CapsulePoseTable &p_table, double p_deg, size_t &r_bucke
 	r_w = p1 > p0 ? std::clamp((d - p0) / (p1 - p0), 0.0, 1.0) : 0.0;
 }
 
-} // namespace
+}
 
 HitTarget posed_target(const CapsulePoseTable &p_table, const TargetPose &p_pose) {
 	HitTarget t;
@@ -98,7 +89,7 @@ HitTarget posed_target(const CapsulePoseTable &p_table, const TargetPose &p_pose
 	const std::vector<CapsuleLocal> &src = bl.count == 4 ? p_table.transition : p_table.steady;
 	for (size_t k = 0; k < bl.count; ++k) {
 		if (bl.index[k] + n > src.size()) {
-			return t; // a table that failed capsule_pose_table_valid (caller bug): no capsules
+			return t;
 		}
 	}
 
@@ -132,7 +123,7 @@ HitTarget posed_target(const CapsulePoseTable &p_table, const TargetPose &p_pose
 		z.flags = e0.flags;
 	}
 	t.capsule_count = uint8_t(n);
-	// The bound sphere around every capsule (standin_target's rule).
+
 	DVec3 lo = to_d(t.capsules[0].a), hi = lo;
 	for (size_t i = 0; i < n; ++i) {
 		for (const Vec3 &e : { t.capsules[i].a, t.capsules[i].b }) {
@@ -195,4 +186,4 @@ core::Result<CapsuleTableData> capsule_table_data(const core::gameplay::SoldierD
 	return d;
 }
 
-} // namespace bf3::sim::weapons
+}

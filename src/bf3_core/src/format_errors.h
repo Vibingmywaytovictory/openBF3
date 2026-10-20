@@ -1,5 +1,4 @@
 #pragma once
-// Error constructors of the container readers, worded like IW4L superbundle_bf3 (error.rs).
 
 #include "bf3/core/result.h"
 
@@ -10,7 +9,6 @@
 
 namespace bf3::core::detail {
 
-// "0x" + p_digits lowercase hex digits (Rust {:#0Nx} with N = p_digits + 2).
 inline std::string hex_prefixed(uint64_t p_value, int p_digits) {
 	char text[32];
 	std::snprintf(text, sizeof(text), "0x%0*llx", p_digits, static_cast<unsigned long long>(p_value));
@@ -49,9 +47,6 @@ inline Error layout_error(const char *p_what, const char *p_problem) {
 	return make_error(std::string(p_what) + ": " + p_problem);
 }
 
-// Upper bound for one buffer whose size comes from metadata alone (a decoded payload, an assembled
-// delta bundle). Retail payloads and bundles stay far below it; a corrupt size that would exceed it
-// becomes an error instead of an allocation failure, which terminates (no exceptions).
 constexpr uint64_t kMaxMetadataSizedAlloc = uint64_t(1) << 30;
 
 inline Error out_of_memory(uint64_t p_bytes) {
@@ -65,7 +60,6 @@ inline Status need(const char *p_what, size_t p_have, size_t p_need) {
 	return {};
 }
 
-// Strict UTF-8 validation (Rust str::from_utf8 rules: no overlongs, no surrogates, <= U+10FFFF).
 inline bool valid_utf8(std::span<const uint8_t> p_bytes) {
 	size_t i = 0;
 	const size_t n = p_bytes.size();
@@ -113,4 +107,4 @@ inline bool valid_utf8(std::span<const uint8_t> p_bytes) {
 	return true;
 }
 
-} // namespace bf3::core::detail
+}

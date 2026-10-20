@@ -1,4 +1,3 @@
-// The 3p crowd clip set (S3; docs/design/s3.md §4.1, §5.2, §10). See crowd_clips.h.
 #include "bf3/anim/crowd_clips.h"
 
 #include "bf3/anim/clip_asset.h"
@@ -21,8 +20,6 @@ using core::ant::GdStruct;
 
 namespace {
 
-// Ant AssetIds of SoldierWeaponData.WeaponStates[].Weapon: 0x15480000 | low 16 bits of the s_basicassets guid index
-// (research 03 C8; s3.md §4.1).
 constexpr uint32_t kAntRefHigh = 0x15480000u;
 constexpr uint32_t kMaxRefHops = 16;
 constexpr uint32_t kMaxChooserDepth = 8;
@@ -33,7 +30,6 @@ std::string hex(uint32_t p_v) {
 	return b;
 }
 
-// The controller a clip of p_package is bound to (package-local first, then static), as AntLibrary::bind finds it.
 GdStruct controller_of(const AntLibrary &p_library, const AntPackage &p_package, const GdStruct &p_clip) {
 	const uint32_t index = p_clip.guid().index();
 	GdStruct c = p_package.controller_for(index);
@@ -43,7 +39,6 @@ GdStruct controller_of(const AntLibrary &p_library, const AntPackage &p_package,
 	return c;
 }
 
-// Decodes and binds p_clip of p_package and tracks it on p_rig (when given).
 core::Result<CrowdClipData> make_clip(const AntLibrary &p_library, const AntPackage &p_package, const GdStruct &p_clip, const std::string &p_what) {
 	CrowdClipData d;
 	AntResult r = core::ant::decode_clip(p_clip, d.clip);
@@ -76,7 +71,6 @@ core::Status track_clip(CrowdClipData &r_clip, const Skeleton &p_rig, const std:
 	return core::Status::success();
 }
 
-// Model-space position of p_joint at p_frame.
 Vec3 joint_model_position(const Skeleton &p_rig, const CrowdClipData &p_clip, int32_t p_joint, float p_frame, LocalPose &r_pose,
 		core::ant::ClipPose &r_scratch, std::vector<Xform> &r_model) {
 	sample_pose(p_rig, p_clip.clip, p_clip.tracks, p_frame, r_pose, r_scratch);
@@ -84,7 +78,7 @@ Vec3 joint_model_position(const Skeleton &p_rig, const CrowdClipData &p_clip, in
 	return r_model[size_t(p_joint)].t;
 }
 
-} // namespace
+}
 
 core::Result<CrowdClipSet> load_crowd_clips(const core::ant::AntPackageSource &p_source, const AntLibrary &p_library, const CrowdClipNames &p_names) {
 	CrowdClipSet set;
@@ -96,7 +90,6 @@ core::Result<CrowdClipSet> load_crowd_clips(const core::ant::AntPackageSource &p
 	const AntPackage &pkg = *set.package;
 	const std::string where = "crowd clips (" + pkg.name() + ")";
 
-	// One pass over the package's clips: the controller name of each (cheap: no bind), counted per wanted name.
 	core::gameplay::WorkBudget budget;
 	std::array<uint32_t, kCrowdClips> matches{};
 	std::array<GdStruct, kCrowdClips> found{};
@@ -131,7 +124,7 @@ core::Result<CrowdClipSet> load_crowd_clips(const core::ant::AntPackageSource &p
 		}
 		set.clips[k] = std::move(*d);
 	}
-	// Every clip on the idle clip's rig.
+
 	const core::ant::AntRig *rig = set.clips[size_t(CrowdClip::Idle)].binding.rig;
 	for (size_t k = 0; k < kCrowdClips; ++k) {
 		const core::ant::AntRig *other = set.clips[k].binding.rig;
@@ -157,7 +150,6 @@ core::Result<CrowdClipSet> load_crowd_clips(const core::ant::AntPackageSource &p
 		return core::make_error(where + ": the rig has no joint " + p_names.root_joint);
 	}
 
-	// Locomotion: durations and the measured root motion (rig model space, last frame minus first).
 	static constexpr std::array<std::pair<LocoClip, CrowdClip>, 5> kLoco{ { { LocoClip::Idle, CrowdClip::Idle }, { LocoClip::Fwd, CrowdClip::RunFwd },
 			{ LocoClip::Bwd, CrowdClip::RunBwd }, { LocoClip::Left, CrowdClip::RunLeft }, { LocoClip::Right, CrowdClip::RunRight } } };
 	LocalPose pose;
@@ -213,7 +205,7 @@ core::Result<uint32_t> weapon_choice_index(const AntLibrary &p_library, uint32_t
 	if (hits != 1) {
 		return core::make_error(where + ": " + std::to_string(hits) + " WeaponAssets with guid index low bits " + hex(low) + " (must be exactly one)");
 	}
-	// WeaponAsset.WeaponEnum -> EnumerationEnumeratorPair.Enumerator -> EnumerationValueAsset.Value.
+
 	uint32_t hops = 0;
 	auto follow = [&](const GdStruct &p_from, const char *p_field, const char *p_type, GdStruct &r_to) -> core::Status {
 		if (++hops > kMaxRefHops) {
@@ -257,7 +249,7 @@ core::Result<CrowdClipData> load_chosen_clip(const CrowdClipSet &p_set, const An
 	const AntPackage &pkg = *p_set.package;
 	const AntPackage &stat = *p_library.static_package();
 	core::gameplay::WorkBudget budget;
-	// The chooser: unique by name among the IndexChooserControllerAssets of s_basicassets and the package.
+
 	GdStruct chooser;
 	const AntPackage *chooser_package = nullptr;
 	uint32_t hits = 0;
@@ -277,7 +269,7 @@ core::Result<CrowdClipData> load_chosen_clip(const CrowdClipSet &p_set, const An
 	if (hits != 1) {
 		return core::make_error(where + ": " + std::to_string(hits) + " IndexChooserControllerAssets of that name (must be exactly one)");
 	}
-	// ChoiceAssetList[index], through chooser fallbacks at most kMaxChooserDepth deep, to a ClipControllerAsset.
+
 	GdStruct controller;
 	const AntPackage *controller_package = nullptr;
 	for (uint32_t depth = 0;; ++depth) {
@@ -312,7 +304,7 @@ core::Result<CrowdClipData> load_chosen_clip(const CrowdClipSet &p_set, const An
 		}
 		return core::make_error(where + ": entry " + hex(g.index()) + " is a " + std::string(entry.type_name()));
 	}
-	// The controller's clip: its Anim reference index names the clip in the package (as AntLibrary::bind maps it).
+
 	GdGuid anim;
 	if (!controller.read_guid("Anim", anim) || anim.is_null()) {
 		return core::make_error(where + ": controller " + hex(controller.guid().index()) + " has no Anim");
@@ -416,16 +408,12 @@ core::Result<AimMeasure> measure_aim(const CrowdClipSet &p_set, AdditiveOrder p_
 	return m;
 }
 
-} // namespace bf3::anim
-
-// ---- M2a tp (docs/design/m2a.md §9; docs/design/m2a-tp.md): the crouch and prone moves, the crouch fire, the deaths ----
+}
 
 namespace bf3::anim {
 
 namespace {
 
-// Root displacement of a move clip over its cycle (rig model space, last frame minus first; y dropped), as
-// load_crowd_clips measures the stand cycles.
 bool move_root_motion(const CrowdClipSet &p_set, const CrowdClipData &p_clip, Vec3 &r_displacement, float &r_duration) {
 	r_duration = p_clip.tracks.duration_seconds();
 	if (!(r_duration > 0.0f) || p_set.root_joint < 0 || size_t(p_set.root_joint) >= p_set.rig.size()) {
@@ -451,7 +439,7 @@ bool loco_info(const Vec3 &p_displacement, float p_duration, LocoClipInfo &r_inf
 	return true;
 }
 
-} // namespace
+}
 
 core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, const AntLibrary &p_library, const CrowdMoveClipNames &p_names) {
 	if (!p_set.package || p_set.rig.size() == 0) {
@@ -507,7 +495,7 @@ core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, co
 		out.clips[k] = std::move(*d);
 		out.present[k] = true;
 	}
-	// The stance move tables (crouch, prone), each direction from its measured root motion.
+
 	struct Dir {
 		LocoClip loco;
 		CrowdMoveClip clip;
@@ -527,14 +515,14 @@ core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, co
 			float duration = 0.0f;
 			bool have = false;
 			if (st == 0 && d.loco == LocoClip::Bwd) {
-				// The two backward diagonals at one phase: mean duration, mean displacement.
+
 				Vec3 a{}, b{};
 				float da = 0.0f, db = 0.0f;
 				have = out.has(CrowdMoveClip::SneakBwdLeft) && out.has(CrowdMoveClip::SneakBwdRight) &&
 						move_root_motion(p_set, out.get(CrowdMoveClip::SneakBwdLeft), a, da) && move_root_motion(p_set, out.get(CrowdMoveClip::SneakBwdRight), b, db);
 				if (have) {
 					duration = 0.5f * (da + db);
-					// Displacements per second, averaged, times the mean duration (the blend plays both at one phase).
+
 					disp = Vec3{ 0.5f * (a.x / da + b.x / db) * duration, 0.0f, 0.5f * (a.z / da + b.z / db) * duration };
 				}
 			} else {
@@ -558,9 +546,7 @@ core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, co
 	return out;
 }
 
-} // namespace bf3::anim
-
-// ---- PT1 run (docs/design/pt1-run.md): BF3's move groups on the crowd rig (crowd_clips.h) ----------------------------
+}
 
 namespace bf3::anim {
 
@@ -580,7 +566,7 @@ float pt1_wrap_pi(float p_a) {
 	return p_a;
 }
 
-} // namespace
+}
 
 core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set, const AntLibrary &p_library, const CrowdMoveGroupNames &p_names) {
 	if (!p_set.package || p_set.rig.size() == 0 || p_set.root_joint < 0 || p_library.static_package() == nullptr) {
@@ -650,7 +636,7 @@ core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set
 			g.root_dir.clear();
 			continue;
 		}
-		// The outer X sign that puts the moving clips' measured root headings on their directions' X.
+
 		float err[2] = { 0.0f, 0.0f }, worst[2] = { 0.0f, 0.0f };
 		uint32_t measured = 0;
 		for (const MoveGroupDirection &d : g.def.directions) {
@@ -690,4 +676,4 @@ core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set
 	return out;
 }
 
-} // namespace bf3::anim
+}

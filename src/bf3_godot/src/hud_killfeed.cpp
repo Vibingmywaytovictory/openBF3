@@ -1,4 +1,3 @@
-// M2b ui: the kill feed and the team kill counter (hud_killfeed.h).
 #include "hud_killfeed.h"
 
 #include "bf3/host/hud_feed.h"
@@ -14,14 +13,13 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-// The drawn headshot mark: a ring with a dot, p_size across, centred on p_c.
 void draw_headshot(CanvasItem &p_item, Vector2 p_c, float p_size, const Color &p_colour) {
 	const float r = 0.5f * p_size;
 	p_item.draw_arc(p_c, r * 0.8f, 0.0f, 6.2831853f, 20, p_colour, std::max(1.0f, p_size / 8.0f), true);
 	p_item.draw_circle(p_c, std::max(1.0f, r * 0.25f), p_colour);
 }
 
-} // namespace
+}
 
 void Bf3TdmKillFeed::update_screen() {
 	const ui::HudModel &m = ctx_->model;
@@ -47,10 +45,10 @@ void Bf3TdmKillFeed::draw_screen() {
 	const float gap = kKillFeedGap * s;
 	const Vector2 icon_size(kKillFeedIconWidth * s, kKillFeedIconHeight * s);
 	const float ascent = font.is_valid() ? float(font->get_ascent(size)) : float(size);
-	const bool covered = m.team.scoreboard_enabled; // the scoreboard's panel covers the feed's corner
+	const bool covered = m.team.scoreboard_enabled;
 	uint8_t drawn = 0;
 	rec.kill_feed_newest_serial = feed.newest_serial;
-	// Newest first: serials newest, newest - 1, ... (the ring holds the last kHudKillFeedSize).
+
 	for (size_t k = 0; k < feed.lines.size(); ++k) {
 		if (feed.newest_serial < k + 1) {
 			break;
@@ -58,7 +56,7 @@ void Bf3TdmKillFeed::draw_screen() {
 		const uint32_t serial = feed.newest_serial - uint32_t(k);
 		const ui::HudKill &line = feed.lines[serial % feed.lines.size()];
 		if (line.serial != serial) {
-			continue; // overwritten or never filled
+			continue;
 		}
 		Seen &seen = seen_[serial % seen_.size()];
 		if (seen.serial != serial) {
@@ -68,13 +66,13 @@ void Bf3TdmKillFeed::draw_screen() {
 		}
 		const double age = now - seen.first_s;
 		if (age >= host::kKillFeedSeconds || covered) {
-			continue; // faded, or under the scoreboard (counted and aged all the same)
+			continue;
 		}
 		const float alpha = age > host::kKillFeedSeconds - kKillFeedFadeSeconds ? float((host::kKillFeedSeconds - age) / kKillFeedFadeSeconds) : 1.0f;
 		const std::string killer = line.suicide ? std::string() : tdm_player_name(m, line.killer);
 		const std::string victim = tdm_player_name(m, line.victim);
 		const Ref<Texture2D> icon = c.weapon_icon(line.item_id);
-		// Widths, then right-aligned from the placement.
+
 		const float wk = killer.empty() ? 0.0f : tdm_text_width(font, killer, size) + gap;
 		const float wi = icon.is_valid() ? icon_size.x + gap : 0.0f;
 		const float wh = line.headshot ? icon_size.y + gap : 0.0f;
@@ -141,4 +139,4 @@ void Bf3TdmKillFeed::draw_counter() {
 	tdm_draw_text(*this, txt, Vector2(at.x + 1.75f * half, at.y), c.text(us ? TdmText::TeamRu : TdmText::TeamUs), small, kTdmEnemyColour, 1);
 }
 
-} // namespace bf3::godot_side
+}

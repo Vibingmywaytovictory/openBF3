@@ -1,5 +1,3 @@
-// Havok physics res: port of IW4L crates/resource_bf3/src/havok/mod.rs. Offsets inside the packfile
-// data are u32 with wrapping arithmetic exactly as there (every read is still bounds-checked).
 #include "bf3/core/res/havok.h"
 
 #include "res_reader.h"
@@ -18,31 +16,18 @@ namespace {
 constexpr uint8_t kMagic[8] = { 0x57, 0xE0, 0xE0, 0x57, 0x10, 0xC0, 0xC0, 0x10 };
 constexpr uint64_t kSectionHeaderBytes = 48;
 constexpr uint32_t kMaxShapeDepth = 64;
-// Shapes are a DAG in the file but a tree in memory: a shared child is decoded once per use, so a
-// hostile file (a List whose children all point at one heavy shape, or at a List like itself) could
-// make the walk exponential. Two budgets bound it, scaled by the packfile's data section plus a
-// floor. Measured on every Havok res of the 29 multiplayer levels (14,472 res, 2026-10-14):
-// * tree bytes (shape nodes, their arrays, chunk geometry counted again per chunk reusing it): at
-//   most 28.6 per data byte, the largest being XP3_Alborz's static model group (107 MB, 187,197
-//   nodes, from 3.76 MB of data); the budget allows 128 per data byte + 64 MiB (544 MB there);
-// * hull work (sum of n^2 over the convex leaves, n = the points havok_triangles hulls): at most
-//   19.1 M (the same res), under the floor alone; the budget is 64 per data byte + 32 M.
-// Retail depth is at most 4; a cycle is reported as such before the depth limit is reached.
+
 constexpr uint64_t kTreeBytesPerDataByte = 128;
 constexpr uint64_t kTreeBytesFloor = uint64_t(64) << 20;
 constexpr uint64_t kHullWorkPerDataByte = 64;
 constexpr uint64_t kHullWorkFloor = uint64_t(1) << 25;
-// Hull input points of the convex primitives (havok_geometry.cpp): a capsule or sphere is two caps
-// of three 12-point rings and a pole, a cylinder two rings, a box its corners.
+
 constexpr uint64_t kCapsulePoints = 2 * (3 * 12 + 1);
 constexpr uint64_t kCylinderPoints = 2 * 12;
 constexpr uint64_t kBoxPoints = 8;
-// group_subparts visits at most data / 4 + this many pointer slots: without sharing every visit
-// is a distinct 4-byte slot of the data section (retail trees hold at most 0.073 nodes per byte).
+
 constexpr uint64_t kGroupVisitsFloor = 4096;
 
-// A pointer slot at p_base + p_stride * p_index can only be a field inside the data section; loops
-// that only look up fixups stop there instead of spinning through a hostile element count.
 bool slot_in_data(const Packfile &p_pack, uint32_t p_base, uint64_t p_stride, uint64_t p_index) {
 	return uint64_t(p_base) + p_stride * p_index < p_pack.data.size();
 }
@@ -59,7 +44,6 @@ int32_t opt16(uint16_t p_value) {
 	return p_value == 0xFFFF ? -1 : int32_t(p_value);
 }
 
-// Reads over a packfile's data section (IW4L Packfile::u32 / f32 / vec3 / vec4).
 class PackReader {
 public:
 	PackReader(const Packfile &p_pack) :
@@ -74,17 +58,17 @@ public:
 	uint64_t tree_budget = 0;
 	uint64_t hull_work = 0;
 	uint64_t hull_budget = 0;
-	std::array<uint32_t, kMaxShapeDepth + 1> path{}; // object offsets from the root to the current shape
+	std::array<uint32_t, kMaxShapeDepth + 1> path{};
 
 	bool ok() const { return r.ok(); }
 	ResError error() const { return r.error(); }
 	bool fail(const ResError &p_e) { return r.fail(p_e); }
-	// Charges p_bytes of decoded tree; false (the error kept) once the budget is spent.
+
 	bool spend(uint64_t p_bytes, uint64_t p_at) {
 		tree_bytes += p_bytes;
 		return tree_bytes <= tree_budget || r.fail(ResError::malformed("shape tree size", p_at));
 	}
-	// Charges the hull of a convex leaf with p_points input points.
+
 	bool spend_hull(uint64_t p_points, uint64_t p_at) {
 		hull_work += p_points * p_points;
 		return hull_work <= hull_budget || r.fail(ResError::malformed("convex hull work", p_at));
@@ -351,7 +335,7 @@ ResError PackReader::compressed_mesh(uint32_t p_at, CompressedMesh &r_mesh) {
 		}
 		r_mesh.chunks.push_back(std::move(chunk));
 	}
-	// A chunk that reuses another one's geometry yields its triangles again (havok_triangles).
+
 	for (const CompressedChunk &chunk : r_mesh.chunks) {
 		if (chunk.reference >= 0 && size_t(chunk.reference) < r_mesh.chunks.size()) {
 			const CompressedChunk &g = r_mesh.chunks[size_t(chunk.reference)];
@@ -398,7 +382,6 @@ ResError PackReader::extended_mesh(uint32_t p_at, bool p_storage, uint32_t p_dep
 		r_mesh.shape_subparts.push_back(std::move(out));
 	}
 
-	// Storage meshes per triangle subpart (looked up per subpart); a null slot carries no data.
 	uint32_t storage_at = 0, storage_count = 0;
 	if (p_storage && !array(p_at + 240, storage_at, storage_count)) {
 		return r.error();
@@ -486,9 +469,7 @@ ResError PackReader::fill_storage(uint32_t p_subpart, uint32_t p_mesh, Triangles
 		return r.ok();
 	};
 	const uint32_t stride_elements = index_striding / width;
-	// A zero stride repeats triangle 0; refuse counts the index array cannot back (IW4L would
-	// allocate them all). The indices must also lie inside the data section: index_count alone is
-	// only bounded by Packfile::array to one byte per element, so check width * count here.
+
 	if (stride_elements == 0) {
 		if (!r.has(indices_at, uint64_t(width) * index_count)) {
 			return r.error();
@@ -533,10 +514,7 @@ ResError PackReader::fill_storage(uint32_t p_subpart, uint32_t p_mesh, Triangles
 	return ResError();
 }
 
-} // namespace
-
-// ---------------------------------------------------------------------------------------------
-// Packfile
+}
 
 ResError Packfile::parse(Bytes p_bytes, Bytes p_fixups, Packfile &r_packfile) {
 	r_packfile = Packfile();
@@ -711,9 +689,7 @@ ResError Packfile::array(uint32_t p_field, uint32_t &r_data, uint32_t &r_count) 
 	if (it == array_fixups_.end()) {
 		return ResError::malformed("array without data", p_field);
 	}
-	// Every element takes at least one byte of the data section, so a count the bytes behind the
-	// array cannot back is hostile; refusing it here bounds every loop and allocation driven by an
-	// array count (a zero index stride in fill_storage would otherwise repeat triangle 0 count times).
+
 	if (uint64_t(it->second) + uint64_t(count) > data.size()) {
 		return ResError::malformed("array count beyond data", p_field);
 	}
@@ -768,9 +744,6 @@ ResError Packfile::root_shapes(std::vector<uint32_t> &r_roots) const {
 	}
 	return ResError();
 }
-
-// ---------------------------------------------------------------------------------------------
-// HavokPhysicsData
 
 ResError HavokPhysicsData::parse(Bytes p_res, const ResMeta &p_res_meta, HavokPhysicsData &r_data) {
 	r_data = HavokPhysicsData();
@@ -901,7 +874,7 @@ ResError HavokPhysicsData::part_connections(std::vector<std::array<uint32_t, 2>>
 		return e;
 	}
 	Reader r(Bytes(packfile.data.data(), packfile.data.size()));
-	// IW4L `part`: Some(part) for a slot pointing at an hkdBreakableShape.
+
 	auto part = [&](uint32_t p_slot, bool &r_some, uint32_t &r_part) -> bool {
 		r_some = false;
 		uint32_t shape = 0;
@@ -938,13 +911,11 @@ ResError HavokPhysicsData::group_subparts(std::vector<SubpartTransform> &r_subpa
 	if (!e.ok()) {
 		return e;
 	}
-	// Breadth first through MoppBvTree / List children (the first extended mesh in that order is
-	// the group). Every visit remembers its parent: a child equal to one of its ancestors is a
-	// cycle, and the visits of a DAG with heavy sharing are capped (see kGroupVisitsFloor).
+
 	constexpr uint32_t kNoParent = UINT32_MAX;
 	struct Visit {
 		uint32_t offset = 0;
-		uint32_t parent = kNoParent; // index into visits
+		uint32_t parent = kNoParent;
 	};
 	const uint64_t max_visits = kGroupVisitsFloor + uint64_t(packfile.data.size()) / 4;
 	if (roots.size() > max_visits) {
@@ -1024,4 +995,4 @@ ResError HavokPhysicsData::group_subparts(std::vector<SubpartTransform> &r_subpa
 	return ResError();
 }
 
-} // namespace bf3::core::res
+}

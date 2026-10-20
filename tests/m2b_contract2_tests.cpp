@@ -1,24 +1,5 @@
-// m2b.contract2 (docs/design/m2b.md §11, §2.6 #16-#18; written in W2.0 by the integrator, docs/design/m2b-w2.md):
-// compiles every wave-2 interface header together and pins
-//   * the HUD model's new size and the layouts of its four new structs (HudKillCard, HudEndOfRound, HudSpawnScreen,
-//     HudPreRound), with the M2a part of HudModel unchanged in front of them (the new members follow `team`);
-//   * the shapes the tracks share: HudKillCardSource, HudTdmFeedState, TdmHudRecords, the death camera's structs, all
-//     trivially copyable; kHudMaxPlayers == net::kMaxPlayerRows (the M2b feed fills HudModel::players by slot);
-//   * the W2.0 constants (kKillFeedSeconds, kKillCardSeconds, kHudSpawnSlots, kCrowdCorpseSeconds,
-//     kCrowdReviveBlendSeconds, kCrowdDeathHideSeconds unchanged, kM2bPlayableDefaultBots, kM2bSpawnRequestRetryTicks),
-//     the M2bCase / M2bTrack values and the check's case parser;
-//   * the defaults of every field W2.0 added (an M2a frame, crowd and HUD stay M2a).
-// No install, no session thread, no wall-clock row, no Godot (every header here is Godot-free).
-//
-// Pending rows (the W1.0 pattern, m2b_contract_tests.cpp): a row whose subject is a track's body runs only when its
-// owner sets the switch below in the commit that lands the body; until then it prints "PENDING (<key>)" and checks
-// what the contract alone defines. Calls of declared-only functions sit in `if constexpr` branches, so the test links
-// before their bodies exist. cam's death_camera.cpp is Godot-free and lives in src/bf3_godot/src: the tests CMake
-// block compiles it into this test when the file exists.
-
 #include <doctest/doctest.h>
 
-// Every wave-2 interface header, compiled together.
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/host/hud_feed.h"
@@ -49,9 +30,8 @@ namespace gs = bf3::godot_side;
 
 namespace {
 
-// ---- the tracks' switches (each set to true by its owner, in the commit that lands the body) ------------------
-constexpr bool kUiLanded = true; // ui: fill_hud_tdm (src/bf3_host/src/hud_feed_tdm.cpp)
-constexpr bool kCamLanded = true; // cam: Bf3DeathCamera (src/bf3_godot/src/death_camera.cpp)
+constexpr bool kUiLanded = true;
+constexpr bool kCamLanded = true;
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2b.contract2: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);
@@ -59,10 +39,8 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	MESSAGE(text);
 }
 
-// ---- shapes: the HUD model (§2.6 #16) -------------------------------------------------------------------------
-// The sizes are MSVC x64's (the only toolchain openBF3 builds with, docs/testing.md); recorded at W2.0.
-constexpr size_t kM2aHudModelSize = 8864; // sizeof(HudModel) on main 545640c: `team` ends at 8,860, alignment 8
-constexpr size_t kM2bHudModelSize = 9024; // with the four M2b members (8,860 + 32 + 24 + 96 + 12)
+constexpr size_t kM2aHudModelSize = 8864;
+constexpr size_t kM2bHudModelSize = 9024;
 
 static_assert(sizeof(ui::HudKillCard) == 32);
 static_assert(offsetof(ui::HudKillCard, killer) == 5 && offsetof(ui::HudKillCard, item_id) == 12 &&
@@ -75,7 +53,7 @@ static_assert(offsetof(ui::HudSpawnScreen, can_deploy) == 3 && offsetof(ui::HudS
 		offsetof(ui::HudSpawnScreen, seconds_revive_left) == 12 && offsetof(ui::HudSpawnScreen, kit_items) == 16);
 static_assert(sizeof(ui::HudPreRound) == 12);
 static_assert(offsetof(ui::HudPreRound, seconds_left) == 4 && offsetof(ui::HudPreRound, input_restricted) == 8);
-// The M2a part of HudModel is unchanged: the new members follow `team`, in this order.
+
 static_assert(offsetof(ui::HudModel, kill_card) == offsetof(ui::HudModel, team) + sizeof(ui::HudTeam));
 static_assert(offsetof(ui::HudModel, kill_card) == 8860 && (offsetof(ui::HudModel, kill_card) + 7) / 8 * 8 == kM2aHudModelSize);
 static_assert(offsetof(ui::HudModel, end_of_round) == offsetof(ui::HudModel, kill_card) + sizeof(ui::HudKillCard));
@@ -85,11 +63,9 @@ static_assert(sizeof(ui::HudModel) == kM2bHudModelSize && alignof(ui::HudModel) 
 static_assert(std::is_trivially_copyable_v<ui::HudModel>);
 static_assert(std::is_trivially_copyable_v<ui::HudKillCard> && std::is_trivially_copyable_v<ui::HudEndOfRound> &&
 		std::is_trivially_copyable_v<ui::HudSpawnScreen> && std::is_trivially_copyable_v<ui::HudPreRound>);
-static_assert(ui::kHudModelVersion == 1); // not bumped: the M2a fields keep their offsets (m2b-w2.md §3)
-static_assert(ui::kHudMaxPlayers == net::kMaxPlayerRows); // HudModel::players[slot]
+static_assert(ui::kHudModelVersion == 1);
+static_assert(ui::kHudMaxPlayers == net::kMaxPlayerRows);
 static_assert(ui::kHudKitCount == host::kKitCount && ui::kHudTopPlayers == 3 && ui::kHudSpawnKitItems == 5);
-
-// ---- shapes: the feed, the screens, the camera, the M2b game ----------------------------------------------------
 
 static_assert(std::is_trivially_copyable_v<host::HudKillCardSource>);
 static_assert(std::is_trivially_copyable_v<host::HudTdmFeedState>);
@@ -105,13 +81,11 @@ static_assert(std::is_same_v<decltype(&host::fill_hud_tdm),
 static_assert(std::is_same_v<decltype(&gs::Bf3DeathCamera::step),
 		gs::DeathCameraView (gs::Bf3DeathCamera::*)(double, const fx::Vec3 *, const sim::CollisionWorld *)>);
 
-// ---- constants and enum values ------------------------------------------------------------------------------------
-
 static_assert(host::kKillFeedSeconds == 5.0 && host::kKillCardSeconds == 4.0);
 static_assert(host::kHudSpawnSlots == std::array<uint8_t, 5>{ 0, 1, 2, 6, 7 });
 static_assert(host::kHudSpawnSlots[2] == host::kKitGadgetSlot && host::kHudSpawnSlots[0] == host::kKitSlots[0] &&
 		host::kHudSpawnSlots[1] == host::kKitSlots[1] && host::kHudSpawnSlots[3] == host::kKitSlots[2] && host::kHudSpawnSlots[4] == host::kKitSlots[3]);
-static_assert(anim::kCrowdDeathHideSeconds == 3.0f); // M2a's stays
+static_assert(anim::kCrowdDeathHideSeconds == 3.0f);
 static_assert(anim::kCrowdCorpseSeconds == 15.0f && anim::kCrowdReviveBlendSeconds == 0.5f);
 static_assert(gs::kM2bPlayableDefaultBots == 31 && gs::kM2bSpawnRequestRetryTicks == 30);
 static_assert(uint8_t(gs::M2bCase::Play) == 0 && gs::kM2bCaseCount == 1);
@@ -122,7 +96,7 @@ static_assert(uint8_t(gs::M2bTrack::Gx) == 0 && uint8_t(gs::M2bTrack::Ui) == 1 &
 static_assert(uint8_t(host::PresentKind::Death) == 6 && uint8_t(host::PresentKind::Spawn) == 8 && uint8_t(host::PresentKind::Revive) == 9);
 static_assert(host::present_flags::kOwnVictim == 8 && host::present_flags::kOwnShooter == 16 && host::present_flags::kRevived == 32);
 
-} // namespace
+}
 
 TEST_SUITE("m2b-contract2") {
 	TEST_CASE("m2b.contract2: the defaults of every W2.0 field keep M2a") {
@@ -209,7 +183,7 @@ TEST_SUITE("m2b-contract2") {
 		REQUIRE(ok.ok());
 		REQUIRE(ok->size() == 1);
 		CHECK((*ok)[0] == gs::M2bCase::Play);
-		const std::string long_arg(4096, 'p'); // named: a temporary in the range-init would die before the loop body (C++20)
+		const std::string long_arg(4096, 'p');
 		for (const char *bad : { "", "Play", "play,play", "play,", ",play", "all", "play,fx", long_arg.c_str() }) {
 			CHECK_MESSAGE(!gs::parse_m2b_cases(bad).ok(), bad);
 		}
@@ -220,7 +194,7 @@ TEST_SUITE("m2b-contract2") {
 			pending("ui", "fill_hud_tdm: the kill feed, kill card and spawn screen from a recorded death",
 					"src/bf3_host/src/hud_feed_tdm.cpp is ui's");
 		} else {
-			// One own death by slot 5 (team 2) while the own soldier (slot 3, team 1) has a life; the match InRound.
+
 			std::array<net::PlayerRow, 2> rows{};
 			rows[0].slot = 3;
 			rows[0].team = 1;
@@ -270,12 +244,12 @@ TEST_SUITE("m2b-contract2") {
 			CHECK(m.kill_card.headshot);
 			CHECK(m.kill_card.killer_health == doctest::Approx(64.0f));
 			CHECK(m.kill_card.distance_m == doctest::Approx(12.5f));
-			CHECK(!m.spawn_screen.visible); // the kill card is up
+			CHECK(!m.spawn_screen.visible);
 			CHECK(m.players[5].team == 2);
 			CHECK(m.local_player == 3);
 			CHECK(m.kill_counter.team2_kills == 1);
 			CHECK(m.kill_counter.team1_max_kills == 100);
-			// After the kill card: the spawn screen, not yet deployable, revive possible.
+
 			in.now_s = 10.0 + host::kKillCardSeconds + 0.1;
 			in.server_tick = 1250;
 			host::fill_hud_tdm(in, {}, st, state, m);
@@ -289,7 +263,7 @@ TEST_SUITE("m2b-contract2") {
 			in.server_tick = 1300;
 			host::fill_hud_tdm(in, {}, st, state, m);
 			CHECK(m.spawn_screen.can_deploy);
-			// RoundOver: the round end instead of the spawn screen.
+
 			in.match.phase = net::MatchPhase::RoundOver;
 			in.match.winner = 2;
 			host::fill_hud_tdm(in, {}, st, state, m);
@@ -297,7 +271,7 @@ TEST_SUITE("m2b-contract2") {
 			CHECK(m.end_of_round.winner == 2);
 			CHECK(!m.end_of_round.local_won);
 			CHECK(!m.spawn_screen.visible);
-			// m2b off: every M2b screen hidden.
+
 			in.m2b = false;
 			host::fill_hud_tdm(in, {}, st, state, m);
 			CHECK(!m.end_of_round.visible);
@@ -331,12 +305,12 @@ TEST_SUITE("m2b-contract2") {
 			const fx::Vec3 to{ killer.x - turned.camera.trans.x, killer.y - turned.camera.trans.y, killer.z - turned.camera.trans.z };
 			const float len = std::sqrt(to.x * to.x + to.y * to.y + to.z * to.z);
 			REQUIRE(len > 0.0f);
-			CHECK((f.x * to.x + f.y * to.y + f.z * to.z) / len > 0.9f); // looks at the killer
+			CHECK((f.x * to.x + f.y * to.y + f.z * to.z) / len > 0.9f);
 			const gs::DeathCameraView done = cam.step(100.0 + 4.1, &killer, nullptr);
 			CHECK(done.finished);
 			cam.end();
 			CHECK(!cam.active());
-			// A non-finite corpse ends the view and is counted, never a NaN transform.
+
 			start.corpse.x = std::nanf("");
 			cam.begin(start, 200.0);
 			const gs::DeathCameraView bad = cam.step(200.1, nullptr, nullptr);

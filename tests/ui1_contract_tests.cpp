@@ -1,6 +1,3 @@
-// UI groundwork 1 interface contract (docs/design/ui-swf-fonts.md §12): every ui1 header compiles on its own set of
-// includes, the plain types keep the properties later waves rely on, and the inline helpers behave as the design
-// says. No data, no Godot; nothing here calls a function the implementation has yet to write.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/cache_key.h"
@@ -19,23 +16,20 @@
 
 namespace ui = bf3::core::ui;
 
-// ---- compile-time contract ---------------------------------------------------------------------------------
-
 static_assert(ui::kSwfMaxBodyBytes == 16u << 20);
 static_assert(ui::kSwfMaxDisplayEvents == 1u << 18);
-// Budgets of docs §9.1: the default parse budget at the body cap stays below 2^26 units, and one font conversion
-// cannot finish a 4,096-contour x 16,384-point winding pass (67M units) on its budget.
+
 static_assert(ui::swf_default_budget_units(ui::kSwfMaxBodyBytes) < (size_t(1) << 26));
 static_assert(size_t(ui::kSwfFontMaxContoursPerGlyph) * ui::kSwfFontMaxPointsPerGlyph > ui::kUiFontConvertBudgetUnits);
 static_assert(ui::kSwfAtlasBudgetUnits == size_t(1) << 24 && ui::kSwfLayoutBudgetUnits == size_t(1) << 22);
 static_assert(ui::kTrueTypeReadBudgetUnits == size_t(1) << 22);
-// G6's counting key drops one trailing '*'.
+
 static_assert(ui::font_name_count_key("$FONT_TITLE*") == "$FONT_TITLE");
 static_assert(ui::font_name_count_key("$FONT_TITLE") == "$FONT_TITLE");
 static_assert(ui::font_name_count_key("") == "");
 static_assert(ui::swf_default_budget_units(0) == size_t(1) << 20);
 static_assert(ui::swf_default_budget_units(1000) == (size_t(1) << 20) + 2000);
-// 1024 em-square x 20 twips; the TrueType writer divides by exactly 10.
+
 static_assert(ui::kSwfFontUnitsPerEm == 20480);
 static_assert(ui::kSwfFontUnitsPerEm == int32_t(ui::kTrueTypeUnitsPerEm) * 10);
 static_assert(ui::swf_tag::kGfxDefineSubImage == 1008 && ui::swf_tag::kGfxDefineExternalImage2 == 1009);
@@ -47,7 +41,6 @@ static_assert(std::is_trivially_copyable_v<ui::KerningPair>);
 static_assert(std::is_move_constructible_v<ui::SwfLibrary>);
 static_assert(!std::is_copy_constructible_v<ui::SwfLibrary>);
 
-// swf_concat is constexpr: the identity is neutral and translations add up in the parent's space.
 constexpr ui::SwfMatrix kTranslate{ 1, 0, 0, 1, 10, 20 };
 constexpr ui::SwfMatrix kScale2{ 2, 0, 0, 2, 0, 0 };
 static_assert(ui::swf_concat(ui::SwfMatrix{}, kTranslate) == kTranslate);
@@ -77,7 +70,7 @@ TEST_SUITE("ui1-contract") {
 	TEST_CASE("rotation composes like the SWF matrix (x' = a x + c y + tx)") {
 		const float s = std::sqrt(0.5f);
 		const ui::SwfMatrix rot45{ s, s, -s, s, 0, 0 };
-		const ui::SwfMatrix m = ui::swf_concat(rot45, rot45); // 90 degrees
+		const ui::SwfMatrix m = ui::swf_concat(rot45, rot45);
 		CHECK(std::fabs(m.a) < 1e-6f);
 		CHECK(std::fabs(m.b - 1.0f) < 1e-6f);
 		CHECK(std::fabs(m.c + 1.0f) < 1e-6f);

@@ -1,11 +1,3 @@
-// The CPU particle simulator (simulator.h; docs/design/m2a-vfx1.md §6.3-§6.8). One FxWorld holds every live effect
-// instance; the owner steps it through begin_frame / begin_step / run_items / end_step.
-//
-// Storage (all sized at construction from FxWorldConfig, never grown): effect slots, emitter-instance slots, the
-// particle state as structure-of-arrays in two buffers (run_items reads an item's particles from the current buffer
-// and writes them, with the admitted spawns, into its own range of the other), the vertex and light buffers, the
-// output records and the event list. An item's state stays where run_items left it (its range of the buffer); only
-// the vertex and light outputs are packed together in end_step (one memmove per item).
 #include "bf3/fx/simulator.h"
 
 #include "bf3/core/thread_pool.h"
@@ -23,12 +15,12 @@ namespace bf3::fx {
 namespace {
 
 constexpr uint32_t kNone = UINT32_MAX;
-constexpr size_t kChunk = 256; // particles per update chunk (stack arrays)
+constexpr size_t kChunk = 256;
 constexpr float kPi = std::numbers::pi_v<float>;
 constexpr float kTurbulenceKnotsPerSecond = 30.0f;
 
 inline float clampf(float p_v, float p_lo, float p_hi) {
-	// min/max in this order: p_lo > p_hi yields p_hi, as evaluate_polynomial (fx_types.h).
+
 	p_v = p_v < p_lo ? p_lo : p_v;
 	return p_v > p_hi ? p_hi : p_v;
 }
@@ -52,7 +44,7 @@ inline Vec3 normalize_or_zero(const Vec3 &p_v) {
 	const float l = length(p_v);
 	return l > 1e-20f ? mul(p_v, 1.0f / l) : Vec3{};
 }
-// Rotation part of a LinearTransform: R * v = v.x * right + v.y * up + v.z * forward.
+
 inline Vec3 rotate(const Transform &p_t, const Vec3 &p_v) {
 	return { p_v.x * p_t.right.x + p_v.y * p_t.up.x + p_v.z * p_t.forward.x, p_v.x * p_t.right.y + p_v.y * p_t.up.y + p_v.z * p_t.forward.y,
 		p_v.x * p_t.right.z + p_v.y * p_t.up.z + p_v.z * p_t.forward.z };
@@ -63,7 +55,7 @@ inline Vec3 unrotate(const Transform &p_t, const Vec3 &p_v) {
 inline Vec3 apply(const Transform &p_t, const Vec3 &p_p) {
 	return add(p_t.trans, rotate(p_t, p_p));
 }
-// p_outer( p_inner(p) ): the inner transform is applied first.
+
 Transform compose(const Transform &p_outer, const Transform &p_inner) {
 	Transform t;
 	t.right = rotate(p_outer, p_inner.right);
@@ -72,7 +64,7 @@ Transform compose(const Transform &p_outer, const Transform &p_inner) {
 	t.trans = apply(p_outer, p_inner.trans);
 	return t;
 }
-// An orthonormal frame whose up axis is p_up (unit).
+
 Transform frame_from_up(const Vec3 &p_up, const Vec3 &p_trans) {
 	Transform t;
 	t.up = p_up;
@@ -91,8 +83,6 @@ inline float draw(uint64_t p_seed, uint32_t p_serial, uint32_t p_slot, uint32_t 
 	return fx_unit(fx_key(p_seed, p_serial, p_slot, p_lane));
 }
 
-// One evaluator value for one particle (docs §6.6). p_input is the slot's EvaluatorInput value; p_axis the slot's
-// DefaultValues.xyz (the RotateVector cone axis).
 Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, float p_input, uint64_t p_seed, uint32_t p_serial,
 		const Vec4 &p_defaults) {
 	switch (p_ev.type) {
@@ -119,8 +109,7 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 				fx_uniform(p_ev.random_xyz.min.y, p_ev.random_xyz.max.y, draw(p_seed, p_serial, p_slot, 1)),
 				fx_uniform(p_ev.random_xyz.min.z, p_ev.random_xyz.max.z, draw(p_seed, p_serial, p_slot, 2)), 1.0f };
 		case EvaluatorType::Box: {
-			// M2a fx3 named replacement: Pivot is in half-extent units, so the box is centred on Pivot * Dimensions / 2
-			// (the 1p flash's pivot y 2, dimensions y 0.25 put it 0.25 m along the barrel, not 2 m) [inferred].
+
 			const BoxDef &b = p_ev.box;
 			return { (0.5f * b.pivot.x + draw(p_seed, p_serial, p_slot, 0) - 0.5f) * b.dimensions.x,
 				(0.5f * b.pivot.y + draw(p_seed, p_serial, p_slot, 1) - 0.5f) * b.dimensions.y,
@@ -136,7 +125,7 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 				s.pivot.z + s.scale.z * r * sin_theta * std::sin(phi), 1.0f };
 		}
 		case EvaluatorType::RotateVector: {
-			// Uniform in solid angle inside a cone of Angle degrees around the slot's DefaultValues.xyz.
+
 			const Vec3 axis_raw{ p_defaults.x, p_defaults.y, p_defaults.z };
 			Vec3 axis = normalize_or_zero(axis_raw);
 			if (axis.x == 0 && axis.y == 0 && axis.z == 0) {
@@ -152,7 +141,7 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 			return { d.x * len, d.y * len, d.z * len, 1.0f };
 		}
 		case EvaluatorType::CameraProximity:
-			return p_defaults; // VFX7 (docs §6.6)
+			return p_defaults;
 		case EvaluatorType::SampleTexture: {
 			const SampleTextureDef &st = p_ev.sample_texture;
 			Vec4 s{ 1, 1, 1, 1 };
@@ -172,10 +161,9 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 	return p_defaults;
 }
 
-// The particle SoA.
 struct Soa {
 	static constexpr size_t kFloats = 19;
-	// px py pz vx vy vz sx sy sz rot rspd frame frate age life ax ay az light
+
 	std::array<std::vector<float>, kFloats> f;
 	std::vector<uint32_t> serial;
 
@@ -203,20 +191,20 @@ struct Soa {
 };
 enum SoaField : size_t { kPx, kPy, kPz, kVx, kVy, kVz, kSx, kSy, kSz, kRot, kRspd, kFrame, kFrate, kAge, kLife, kAx, kAy, kAz, kLight };
 
-} // namespace
+}
 
 struct FxWorld::Impl {
 	struct EffectSlot {
 		uint32_t generation = 0;
 		bool active = false;
-		bool killed = false; // stop(Kill), stolen: retired at the next begin_step
+		bool killed = false;
 		bool stopping = false;
 		std::shared_ptr<const EffectDef> def;
 		EffectStart start;
-		Transform base; // start.transform * def.transform
+		Transform base;
 		float age = 0;
 		uint64_t sequence = 0;
-		std::array<uint64_t, 4> selected{}; // kMaxEffectComponents bits
+		std::array<uint64_t, 4> selected{};
 		std::array<uint64_t, 4> started{};
 		uint32_t live_emitters = 0;
 	};
@@ -226,10 +214,10 @@ struct FxWorld::Impl {
 		uint32_t effect = 0;
 		uint32_t emitter = 0;
 		uint32_t component = 0;
-		uint32_t parent = kNone; // emitter instance of the parent particle (children)
+		uint32_t parent = kNone;
 		uint32_t parent_generation = 0;
 		uint32_t parent_serial = 0;
-		uint32_t parent_child_slot = 0; // index into the parent's EmitterDef::children
+		uint32_t parent_child_slot = 0;
 		uint64_t seed = 0;
 		float e_age = 0;
 		float acc = 1;
@@ -252,14 +240,14 @@ struct FxWorld::Impl {
 		uint32_t light_first = 0;
 		uint32_t spawn = 0;
 		uint32_t first_serial = 0;
-		float a0 = 0; // accumulator before this step (rate mode spawn timing)
-		float rate_dt = 0; // rate * dt_e (0: the spawns sit at the step start)
+		float a0 = 0;
+		float rate_dt = 0;
 		float dt_e = 0;
-		float te_spawn = 0; // EmitterNormTime when the spawns happen
-		float te = 0; // EmitterNormTime after the step
+		float te_spawn = 0;
+		float te = 0;
 		bool kill_all = false;
 		bool window_over = false;
-		// results
+
 		uint32_t alive = 0;
 		uint32_t lights = 0;
 		uint32_t nonfinite = 0;
@@ -283,7 +271,7 @@ struct FxWorld::Impl {
 	std::vector<uint32_t> emitter_list;
 	std::vector<Item> items;
 	uint64_t sequence = 0;
-	uint32_t live_particles = 0; // after the last compaction
+	uint32_t live_particles = 0;
 
 	uint32_t substeps = 0, substep = 0;
 	float sub_dt = 0;
@@ -318,7 +306,7 @@ struct FxWorld::Impl {
 	void reset_free_lists() {
 		free_effects.clear();
 		for (uint32_t i = cfg.max_effects; i-- > 0;) {
-			free_effects.push_back(i); // pop_back yields slot 0 first
+			free_effects.push_back(i);
 		}
 		free_emitters.clear();
 		for (uint32_t i = cfg.max_emitter_instances; i-- > 0;) {
@@ -331,7 +319,7 @@ struct FxWorld::Impl {
 
 	void event(FxEvent::Kind p_kind, uint32_t p_effect, uint32_t p_component) {
 		if (events.size() >= events.capacity()) {
-			++stats.events_dropped; // bounded (never grows), but counted
+			++stats.events_dropped;
 			return;
 		}
 		const EffectSlot &s = effects[p_effect];
@@ -343,8 +331,6 @@ struct FxWorld::Impl {
 		e.transform = compose(s.base, s.def->components[p_component].transform);
 		events.push_back(e);
 	}
-
-	// ---- instances ---------------------------------------------------------------------------------------
 
 	uint32_t new_emitter(uint32_t p_effect, uint32_t p_emitter, uint32_t p_component, uint64_t p_seed) {
 		if (free_emitters.empty()) {
@@ -402,7 +388,6 @@ struct FxWorld::Impl {
 		free_effects.push_back(p_slot);
 	}
 
-	// Removes retired emitter instances from the list (stable) and the effects that are over.
 	void sweep() {
 		size_t w = 0;
 		for (size_t i = 0; i < emitter_list.size(); ++i) {
@@ -439,7 +424,6 @@ struct FxWorld::Impl {
 		return true;
 	}
 
-	// Kill flags: retire killed effects and their emitter instances at once (begin_step).
 	void retire_killed() {
 		bool any = false;
 		for (const uint32_t slot : effect_list) {
@@ -476,8 +460,6 @@ struct FxWorld::Impl {
 		effect_list.resize(w);
 	}
 
-	// ---- begin_step ----------------------------------------------------------------------------------------
-
 	void start_components(uint32_t p_slot, float p_dt) {
 		EffectSlot &s = effects[p_slot];
 		const EffectDef &d = *s.def;
@@ -501,13 +483,13 @@ struct FxWorld::Impl {
 					continue;
 				}
 				const EmitterDef &e = d.emitters[comp.emitter];
-				// Late join (EffectStart::start_age): the clocks only (docs §6.5).
+
 				float e_age = 0;
 				if (s.start.start_age > delay) {
 					e_age = (s.start.start_age - delay) * e.tmpl.time_scale;
 					const bool repeat = (e.tmpl.flags & kEmitterRepeatParticleSpawning) != 0;
 					if (e.tmpl.lifetime > 0 && !repeat && e_age >= e.tmpl.lifetime) {
-						continue; // its window ended before the start age
+						continue;
 					}
 					if (repeat && e.tmpl.lifetime > 0) {
 						e_age = std::fmod(e_age, e.tmpl.lifetime);
@@ -550,7 +532,6 @@ struct FxWorld::Impl {
 		return p_t;
 	}
 
-	// The Emitter stage and admission of one instance; appends its item.
 	void plan(uint32_t p_id, float p_dt, uint32_t &r_budget, uint32_t &r_offset, uint32_t &r_light_offset) {
 		EmitterInstance &inst = emitters[p_id];
 		EffectSlot &fx = effects[inst.effect];
@@ -561,7 +542,7 @@ struct FxWorld::Impl {
 		if (fx.stopping) {
 			inst.stopped = true;
 		}
-		// Transforms: a root emitter from the effect; a child from its parent particle as of the last end_step.
+
 		if (inst.parent == kNone) {
 			inst.transform = compose(fx.base, d.components[inst.component].transform);
 			inst.source_velocity = fx.start.velocity;
@@ -594,7 +575,7 @@ struct FxWorld::Impl {
 				}
 			}
 			if (!found) {
-				inst.stopped = true; // the parent particle died (docs §6.5, Q4)
+				inst.stopped = true;
 			}
 		}
 		const float dt_e = p_dt * t.time_scale;
@@ -606,7 +587,7 @@ struct FxWorld::Impl {
 		const float te_before = t.lifetime > 0 ? std::fmin(inst.e_age / t.lifetime, 1.0f) : 0.0f;
 		it.te_spawn = te_before;
 		it.kill_all = inst.kill || (inst.stopped && (t.flags & kEmitterKillParticlesWithEmitter) != 0);
-		// Emitter stage: how many spawns are due this sub-step (docs §6.5).
+
 		double due = 0;
 		const bool window_open = !inst.stopped && (t.lifetime <= 0 || inst.e_age < t.lifetime);
 		if (window_open && e.has(ProcessorType::SpawnRate)) {
@@ -637,7 +618,7 @@ struct FxWorld::Impl {
 		}
 		inst.prev_trans = inst.transform.trans;
 		inst.has_prev = true;
-		// Admission (simulator.h header).
+
 		const uint32_t due_n = due >= double(UINT32_MAX) ? UINT32_MAX : uint32_t(due);
 		const uint32_t room = t.max_count > inst.state_count ? t.max_count - inst.state_count : 0;
 		const uint32_t capped = std::min(due_n, room);
@@ -657,7 +638,7 @@ struct FxWorld::Impl {
 		} else {
 			it.light_first = kNone;
 		}
-		// Clocks.
+
 		inst.e_age += dt_e;
 		if (repeat && t.lifetime > 0 && inst.e_age >= t.lifetime) {
 			inst.e_age = std::fmod(inst.e_age, t.lifetime);
@@ -688,8 +669,6 @@ struct FxWorld::Impl {
 		return items.size();
 	}
 
-	// ---- run_items -----------------------------------------------------------------------------------------
-
 	void run_item(Item &r_it) {
 		const EmitterInstance &inst = emitters[r_it.instance];
 		const EffectSlot &fx = effects[inst.effect];
@@ -701,16 +680,16 @@ struct FxWorld::Impl {
 		const bool local = (t.flags & kEmitterLocalSpace) != 0;
 		const uint32_t base = r_it.first;
 		dst.copy(src, r_it.old_first, base, r_it.old_count);
-		// Spawn stage (docs §6.4), in the canonical order.
+
 		for (uint32_t k = 0; k < r_it.spawn; ++k) {
 			spawn_one(e, inst, r_it, k, dst, base + r_it.old_count + k, local);
 		}
 		const uint32_t total = r_it.old_count + r_it.spawn;
 		uint32_t write = 0;
 		uint32_t light_write = 0;
-		std::array<float, kChunk> dt; // written before read (no zero fill per item)
+		std::array<float, kChunk> dt;
 		std::array<uint8_t, kChunk> dead;
-		std::array<float, kChunk> tn; // normalised age of each particle of the chunk (update_chunk)
+		std::array<float, kChunk> tn;
 		OutputValues ov;
 		for (uint32_t c0 = 0; c0 < total; c0 += uint32_t(kChunk)) {
 			const uint32_t n = std::min<uint32_t>(uint32_t(kChunk), total - c0);
@@ -729,7 +708,7 @@ struct FxWorld::Impl {
 				dead[i] = 0;
 			}
 			update_chunk(e, inst, r_it, dst, base + c0, n, dt.data(), dead.data(), tn.data(), local);
-			// The Update stage's output values of the whole chunk (vectorised per slot), then compaction and output.
+
 			output_values(e, inst, r_it, dst, base + c0, n, tn.data(), ov);
 			for (uint32_t i = 0; i < n; ++i) {
 				const uint32_t from = base + c0 + i;
@@ -742,7 +721,7 @@ struct FxWorld::Impl {
 				}
 				if (!emit(e, inst, r_it, dst, to, i, tn[i], ov, local, light_write)) {
 					++r_it.nonfinite;
-					continue; // non-finite output: killed, the slot is overwritten by the next survivor
+					continue;
 				}
 				++write;
 			}
@@ -835,8 +814,6 @@ struct FxWorld::Impl {
 		r_s.serial[p_at] = serial;
 	}
 
-	// Per-chunk values of one slot's .x (or .xyz): constant when the slot has no evaluator or its input is the
-	// same for every particle (EfOne, EfEmitterNormTime) and the evaluator draws no random numbers.
 	struct Values {
 		bool constant = true;
 		Vec4 c;
@@ -916,7 +893,7 @@ struct FxWorld::Impl {
 		const float *life = r_s.f[kLife].data() + p_at;
 		float *t = r_t;
 		Values v;
-		// UpdateAge: age, normalised t, death (docs §6.5).
+
 		const bool has_age = p_e.has(ProcessorType::UpdateAge);
 		for (uint32_t i = 0; i < p_n; ++i) {
 			const float before = age[i];
@@ -936,7 +913,7 @@ struct FxWorld::Impl {
 			}
 			return;
 		}
-		// AirResistance: v *= exp(-k * v.x * dt).
+
 		if (p_e.has(ProcessorType::AirResistance)) {
 			values(p_e, ProcessorType::AirResistance, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			const float f_full = v.constant ? std::exp(-(pp.drag * v.c.x) * p_it.dt_e) : 0.0f;
@@ -948,7 +925,7 @@ struct FxWorld::Impl {
 				vz[i] *= f;
 			}
 		}
-		// Gravity: positive pulls down along world Y.
+
 		if (p_e.has(ProcessorType::Gravity)) {
 			values(p_e, ProcessorType::Gravity, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			const Vec3 down = p_local ? unrotate(p_inst.transform, Vec3{ 0, -1, 0 }) : Vec3{ 0, -1, 0 };
@@ -959,7 +936,7 @@ struct FxWorld::Impl {
 				vz[i] += down.z * a;
 			}
 		}
-		// LocalForce: in the emitter's frame.
+
 		if (p_e.has(ProcessorType::LocalForce)) {
 			values(p_e, ProcessorType::LocalForce, p_it, p_inst, r_s, p_at, p_n, t, true, v);
 			const Vec3 &f = pp.local_force;
@@ -971,7 +948,7 @@ struct FxWorld::Impl {
 				vz[i] += a.z * p_dt[i];
 			}
 		}
-		// Turbulance: value noise keyed by the particle and its age (docs §6.4).
+
 		if (p_e.has(ProcessorType::Turbulance) && pp.turbulence != 0) {
 			values(p_e, ProcessorType::Turbulance, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			const uint32_t *serial = r_s.serial.data() + p_at;
@@ -994,7 +971,7 @@ struct FxWorld::Impl {
 				vz[i] += nv.z * s;
 			}
 		}
-		// UpdateLinearVelocity: semi-implicit Euler after every force.
+
 		if (p_e.has(ProcessorType::UpdateLinearVelocity)) {
 			for (uint32_t i = 0; i < p_n; ++i) {
 				px[i] += vx[i] * p_dt[i];
@@ -1014,8 +991,7 @@ struct FxWorld::Impl {
 			values(p_e, ProcessorType::UpdateTextureCoords, p_it, p_inst, r_s, p_at, p_n, t, false, v);
 			float *frame = r_s.f[kFrame].data() + p_at;
 			const float *frate = r_s.f[kFrate].data() + p_at;
-			// The state stays within [0, frame_count) (one subtraction per wrap; the output wrap of emit() then only
-			// sees spawn frames out of range), so no fmod per particle and step.
+
 			const float count = float(p_e.texture.frame_count);
 			for (uint32_t i = 0; i < p_n; ++i) {
 				float f = frame[i] + frate[i] * (v.constant ? v.c.x : v.x[i]) * p_dt[i];
@@ -1037,8 +1013,6 @@ struct FxWorld::Impl {
 		return 0.0f;
 	}
 
-	// The output slots' values for one chunk (docs §6.4 Update stage): size, the size axes, colour, transparency and
-	// the alpha levels, each constant or per particle (values()).
 	struct OutputValues {
 		Values size, size_x, size_y, size_z, color, alpha, alpha_min, alpha_max, alpha_scale;
 		bool has_size = false, has_size_x = false, has_size_y = false, has_size_z = false, has_color = false, color_eval = false, has_alpha = false,
@@ -1071,8 +1045,6 @@ struct FxWorld::Impl {
 	static float vx_of(const Values &p_v, uint32_t p_i) { return p_v.constant ? p_v.c.x : p_v.x[p_i]; }
 	static Vec3 v3_of(const Values &p_v, uint32_t p_i) { return p_v.constant ? Vec3{ p_v.c.x, p_v.c.y, p_v.c.z } : Vec3{ p_v.x[p_i], p_v.y[p_i], p_v.z[p_i] }; }
 
-	// Writes particle p_at's vertex (and light) record from chunk index p_i's output values; false when a value is not
-	// finite (the particle is killed).
 	bool emit(const EmitterDef &p_e, const EmitterInstance &p_inst, const Item &p_it, const Soa &p_s, uint32_t p_at, uint32_t p_i, float p_t,
 			const OutputValues &p_o, bool p_local, uint32_t &r_light) {
 		const float t = p_t;
@@ -1088,7 +1060,7 @@ struct FxWorld::Impl {
 		}
 		out.position = pos;
 		out.rotation = p_s.f[kRot][p_at];
-		// Size: spawn size x UpdateSize x the axis processors (docs §6.4).
+
 		Vec3 size{ p_s.f[kSx][p_at], p_s.f[kSy][p_at], p_s.f[kSz][p_at] };
 		if (p_o.has_size) {
 			const Vec3 v = v3_of(p_o.size, p_i);
@@ -1104,7 +1076,7 @@ struct FxWorld::Impl {
 			size.z *= vx_of(p_o.size_z, p_i);
 		}
 		out.size = size;
-		// Flipbook frame, wrapped into [0, frame_count).
+
 		float frame = p_s.f[kFrame][p_at];
 		const float count = float(p_e.texture.frame_count);
 		if (count > 0 && (frame < 0 || frame >= count)) {
@@ -1137,9 +1109,7 @@ struct FxWorld::Impl {
 		out.alpha_max = p_o.has_alpha_max ? pp.alpha_max_level * vx_of(p_o.alpha_max, p_i) : 1.0f;
 		out.alpha_scale = p_o.has_alpha_scale ? vx_of(p_o.alpha_scale, p_i) : 1.0f;
 		out.serial = serial;
-		// NaN guard (docs §6.8): position, velocity, size, colour, frame and every other output field. x * 0 is 0 for
-		// a finite x and NaN for an infinite or NaN one, so one sum tests them all.
-		// Summed as a balanced tree (short dependency chains).
+
 		const float p0 = (out.position.x + out.position.y) + (out.position.z + vel.x);
 		const float p1 = (vel.y + vel.z) + (out.size.x + out.size.y);
 		const float p2 = (out.size.z + out.color.x) + (out.color.y + out.color.z);
@@ -1162,7 +1132,7 @@ struct FxWorld::Impl {
 				return false;
 			}
 		}
-		// The item's own ranges: vertices [first, first + capacity), lights [light_first, light_first + capacity).
+
 		vertices[p_at] = out;
 		if (p_it.light_first != kNone) {
 			lights[p_it.light_first + r_light] = light;
@@ -1170,8 +1140,6 @@ struct FxWorld::Impl {
 		}
 		return true;
 	}
-
-	// ---- end_step ------------------------------------------------------------------------------------------
 
 	void end_step() {
 		if (substep >= substeps) {
@@ -1191,7 +1159,7 @@ struct FxWorld::Impl {
 		}
 		live_particles = live;
 		cur = next;
-		// Child emitters: one instance per surviving particle spawned this sub-step and child emitter (docs §6.5).
+
 		const size_t planned = items.size();
 		for (size_t i = 0; i < planned; ++i) {
 			const Item &it = items[i];
@@ -1232,7 +1200,7 @@ struct FxWorld::Impl {
 				}
 			}
 		}
-		// Retirement: an instance is done when its window is over (or it was stopped) and its particles are dead.
+
 		for (size_t i = 0; i < planned; ++i) {
 			const uint32_t id = items[i].instance;
 			EmitterInstance &inst = emitters[id];
@@ -1246,7 +1214,7 @@ struct FxWorld::Impl {
 				retire_emitter(id);
 			}
 		}
-		// Pack the outputs of the surviving instances (planned items only; children start next sub-step).
+
 		outputs.clear();
 		uint32_t vout = 0;
 		uint32_t lout = 0;
@@ -1290,8 +1258,6 @@ struct FxWorld::Impl {
 	}
 };
 
-// ---- public ------------------------------------------------------------------------------------------------
-
 FxWorld::FxWorld(const FxWorldConfig &p_config) :
 		impl_(std::make_unique<Impl>(p_config)) {}
 
@@ -1308,7 +1274,7 @@ core::Result<EffectHandle> FxWorld::start(std::shared_ptr<const EffectDef> p_def
 		return core::make_error("start: " + p_def->name + " needs " + std::to_string(p_def->max_particles) + " particles, the world holds " +
 				std::to_string(w.cfg.max_particles));
 	}
-	// The MaxInstanceCount pool of this def (global per def, docs §6.7).
+
 	uint32_t live = 0;
 	uint32_t oldest = kNone;
 	for (const uint32_t slot : w.effect_list) {
@@ -1419,7 +1385,7 @@ bool FxWorld::alive(EffectHandle p_effect) const {
 }
 
 uint32_t FxWorld::begin_frame(float p_dt, const FxView &p_view) {
-	(void)p_view; // camera proximity is VFX7
+	(void)p_view;
 	Impl &w = *impl_;
 	w.events.clear();
 	w.substep = 0;
@@ -1486,4 +1452,4 @@ const FxWorldConfig &FxWorld::config() const {
 	return impl_->cfg;
 }
 
-} // namespace bf3::fx
+}

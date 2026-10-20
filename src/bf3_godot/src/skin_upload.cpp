@@ -1,4 +1,3 @@
-// Skin palette upload backends for the 3p crowd (S3; docs/design/s3.md §7). See skin_upload.h.
 #include "skin_upload.h"
 
 #include "godot_util.h"
@@ -38,18 +37,12 @@ const char *skin_backend_name(SkinBackend p_backend) {
 
 namespace {
 
-// One team's drawable: every part's surfaces merged into one mesh (bones = the team's bind indices), its bind-pose
-// bounds grown by 1 m (a skinned instance's bounds are not recomputed, s3.md §7.1), and the team's Skin (backend A).
 struct TeamMesh {
 	Ref<ArrayMesh> mesh;
 	AABB aabb;
 	Ref<Skin> skin;
 };
 
-// PT1 iff [kits] (replaces build_team_meshes; docs/design/pt1-iff.md §2.1): one mesh per (team, kit) over the parts
-// whose SoldierPart::kit_mask names the kit; a kit wearing the same parts as an earlier kit of its team shares that
-// mesh (S3's assets, every mask 0x0F: one mesh per team, as before). Textures and materials are made once for all.
-// r_teams = kit 0's meshes; r_kits (when given) every kit's.
 bool build_team_meshes(const bf3::render::SoldierAssets &p_assets, std::array<TeamMesh, 2> &r_teams, std::string *r_error,
 		std::array<std::array<TeamMesh, 2>, 4> *r_kits = nullptr) {
 	std::map<std::string, Ref<Texture2D>> textures;
@@ -141,7 +134,6 @@ bool build_team_meshes(const bf3::render::SoldierAssets &p_assets, std::array<Te
 	return true;
 }
 
-// PT1 iff [kits]: distinct meshes of a [kit][team] table.
 uint32_t count_kit_meshes(const std::array<std::array<TeamMesh, 2>, 4> &p_kits) {
 	std::vector<const ArrayMesh *> seen;
 	for (const auto &kit : p_kits) {
@@ -154,8 +146,6 @@ uint32_t count_kit_meshes(const std::array<std::array<TeamMesh, 2>, 4> &p_kits) 
 	return uint32_t(seen.size());
 }
 
-// ---- A: Skeleton3D ----------------------------------------------------------------------------------------------
-
 class Skeleton3DUploader final : public SkinUploader {
 public:
 	explicit Skeleton3DUploader(Node *p_parent) :
@@ -166,14 +156,14 @@ public:
 
 	bool build(const bf3::render::SoldierAssets &p_assets, const bf3::anim::CrowdEvaluator &p_eval, std::span<const uint8_t> p_team_of, RID p_scenario,
 			std::string *r_error) override {
-		(void)p_scenario; // the nodes join the parent's world
+		(void)p_scenario;
 		if (parent_ == nullptr) {
 			if (r_error != nullptr) {
 				*r_error = "skeleton3d backend without a parent node";
 			}
 			return false;
 		}
-		if (!build_team_meshes(p_assets, teams_, r_error, &kits_)) { // PT1 iff [kits]
+		if (!build_team_meshes(p_assets, teams_, r_error, &kits_)) {
 			return false;
 		}
 		const bf3::anim::Skeleton &rig = p_assets.clips.rig;
@@ -181,7 +171,7 @@ public:
 		for (const bf3::anim::Bone &b : rig.bones()) {
 			parents_.push_back(b.parent);
 		}
-		// The bones any layer can move: every clip's channels, both reloads and the weapon layout.
+
 		std::vector<bool> driven(rig.size(), false);
 		auto add = [&](const bf3::anim::BoneMask &p_mask) {
 			for (size_t j = 0; j < std::min(p_mask.size(), driven.size()); ++j) {
@@ -216,13 +206,12 @@ public:
 			mi->set_skeleton_path(NodePath(".."));
 			nodes_.push_back(sk->get_instance_id());
 			skeletons_.push_back(sk);
-			meshes_.push_back(mi); // PT1 iff [kits]
-			kit_of_.push_back(uint16_t(team << 8)); // PT1 iff [kits]: team << 8 | kit
+			meshes_.push_back(mi);
+			kit_of_.push_back(uint16_t(team << 8));
 		}
 		return true;
 	}
 
-	// PT1 iff [kits]
 	void set_soldier_kit(uint32_t p_soldier, uint8_t p_kit) override {
 		if (p_soldier >= meshes_.size()) {
 			return;
@@ -239,7 +228,7 @@ public:
 			meshes_[p_soldier]->set_custom_aabb(m.aabb);
 		}
 	}
-	uint32_t kit_meshes() const override { return count_kit_meshes(kits_); } // PT1 iff [kits]
+	uint32_t kit_meshes() const override { return count_kit_meshes(kits_); }
 
 	void upload(const bf3::anim::CrowdEvaluator &p_eval, std::span<const Transform3D> p_roots, SkinUploadStats &r_stats) override {
 		r_stats = SkinUploadStats{};
@@ -288,25 +277,23 @@ public:
 		}
 		nodes_.clear();
 		skeletons_.clear();
-		meshes_.clear(); // PT1 iff [kits]
-		kit_of_.clear(); // PT1 iff [kits]
-		kits_ = {}; // PT1 iff [kits]
+		meshes_.clear();
+		kit_of_.clear();
+		kits_ = {};
 		teams_ = {};
 	}
 
 private:
 	Node *parent_ = nullptr;
 	std::array<TeamMesh, 2> teams_;
-	std::array<std::array<TeamMesh, 2>, 4> kits_; // PT1 iff [kits]: [kit][team]
-	std::vector<MeshInstance3D *> meshes_; // PT1 iff [kits]
-	std::vector<uint16_t> kit_of_; // PT1 iff [kits]
+	std::array<std::array<TeamMesh, 2>, 4> kits_;
+	std::vector<MeshInstance3D *> meshes_;
+	std::vector<uint16_t> kit_of_;
 	std::vector<int32_t> parents_;
 	std::vector<int32_t> driven_;
 	std::vector<uint64_t> nodes_;
 	std::vector<Skeleton3D *> skeletons_;
 };
-
-// ---- B: RenderingServer skeletons -------------------------------------------------------------------------------
 
 class RsSkeletonUploader final : public SkinUploader {
 public:
@@ -316,7 +303,7 @@ public:
 
 	bool build(const bf3::render::SoldierAssets &p_assets, const bf3::anim::CrowdEvaluator &p_eval, std::span<const uint8_t> p_team_of, RID p_scenario,
 			std::string *r_error) override {
-		if (!build_team_meshes(p_assets, teams_, r_error, &kits_)) { // PT1 iff [kits]
+		if (!build_team_meshes(p_assets, teams_, r_error, &kits_)) {
 			return false;
 		}
 		RenderingServer *rs = RenderingServer::get_singleton();
@@ -341,7 +328,7 @@ public:
 			rs->instance_attach_skeleton(s.instance, s.skeleton);
 			rs->instance_set_custom_aabb(s.instance, teams_[team].aabb);
 			s.binds = binds;
-			s.team = uint8_t(team); // PT1 iff [kits]
+			s.team = uint8_t(team);
 			soldiers_.push_back(s);
 		}
 		return true;
@@ -396,11 +383,10 @@ public:
 			}
 		}
 		soldiers_.clear();
-		kits_ = {}; // PT1 iff [kits]
+		kits_ = {};
 		teams_ = {};
 	}
 
-	// PT1 iff [kits]: the instance's base becomes the kit's mesh (the skeleton stays attached; the bounds are set again).
 	void set_soldier_kit(uint32_t p_soldier, uint8_t p_kit) override {
 		if (p_soldier >= soldiers_.size() || !soldiers_[p_soldier].instance.is_valid()) {
 			return;
@@ -420,22 +406,22 @@ public:
 		rs->instance_set_base(s.instance, to.mesh->get_rid());
 		rs->instance_set_custom_aabb(s.instance, to.aabb);
 	}
-	uint32_t kit_meshes() const override { return count_kit_meshes(kits_); } // PT1 iff [kits]
+	uint32_t kit_meshes() const override { return count_kit_meshes(kits_); }
 
 private:
 	struct Soldier {
 		RID instance;
 		RID skeleton;
 		int32_t binds = 0;
-		uint8_t team = 0; // PT1 iff [kits]
-		uint8_t kit = 0; // PT1 iff [kits]: the mesh drawn (kit 0 from build)
+		uint8_t team = 0;
+		uint8_t kit = 0;
 	};
 	std::array<TeamMesh, 2> teams_;
-	std::array<std::array<TeamMesh, 2>, 4> kits_; // PT1 iff [kits]: [kit][team]
+	std::array<std::array<TeamMesh, 2>, 4> kits_;
 	std::vector<Soldier> soldiers_;
 };
 
-} // namespace
+}
 
 std::unique_ptr<SkinUploader> make_skin_uploader(SkinBackend p_backend, Node *p_parent) {
 	switch (p_backend) {
@@ -444,9 +430,9 @@ std::unique_ptr<SkinUploader> make_skin_uploader(SkinBackend p_backend, Node *p_
 		case SkinBackend::RsSkeleton:
 			return std::make_unique<RsSkeletonUploader>();
 		case SkinBackend::BoneTexture:
-			return nullptr; // not built: s3.md §7.3 (needs the L track's material path and the user's approval)
+			return nullptr;
 	}
 	return nullptr;
 }
 
-} // namespace bf3::godot_side
+}

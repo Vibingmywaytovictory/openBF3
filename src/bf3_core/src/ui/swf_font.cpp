@@ -1,5 +1,3 @@
-// DefineFont2/3 outlines and winding (bf3/core/ui/swf_font.h; docs/design/ui-swf-fonts.md §7.1, §9). Clean-room from
-// the public SWF file format specification (v19) and the retail font libraries.
 #include "bf3/core/ui/swf_font.h"
 
 #include "swf_bits.h"
@@ -27,7 +25,6 @@ Status charge(WorkBudget &r_budget, size_t p_units, size_t p_at) {
 	return Status::success();
 }
 
-// One glyph SHAPE in [p_begin, p_end) of the tag.
 Status read_glyph(std::span<const uint8_t> p_tag, size_t p_begin, size_t p_end, WorkBudget &r_budget, GlyphOutline &r_glyph) {
 	SwfReader r(p_tag.subspan(p_begin, p_end - p_begin), p_begin);
 	const uint8_t nb = r.u8();
@@ -35,7 +32,7 @@ Status read_glyph(std::span<const uint8_t> p_tag, size_t p_begin, size_t p_end, 
 	unsigned line_bits = nb & 0x0f;
 	int32_t x = 0;
 	int32_t y = 0;
-	bool open = false; // a contour has been started
+	bool open = false;
 	size_t contour_start = 0;
 	auto close_contour = [&]() {
 		if (!open) {
@@ -44,10 +41,10 @@ Status read_glyph(std::span<const uint8_t> p_tag, size_t p_begin, size_t p_end, 
 		open = false;
 		std::vector<GlyphPoint> &pts = r_glyph.points;
 		if (pts.size() - contour_start < 2) {
-			pts.resize(contour_start); // a lone move-to: no contour
+			pts.resize(contour_start);
 			return;
 		}
-		// Implicitly closed: drop a repeated start point.
+
 		if (pts.back() == pts[contour_start] && pts.back().on_curve) {
 			pts.pop_back();
 		}
@@ -149,12 +146,11 @@ Status read_glyph(std::span<const uint8_t> p_tag, size_t p_begin, size_t p_end, 
 	return Status::success();
 }
 
-// Polygon of one contour with each quadratic flattened at 4 steps (doubles, SWF units).
 void flatten(const std::vector<GlyphPoint> &p_points, size_t p_first, size_t p_last, std::vector<std::pair<double, double>> &r_poly) {
 	r_poly.clear();
 	const size_t n = p_last - p_first + 1;
 	auto pt = [&](size_t i) -> const GlyphPoint & { return p_points[p_first + (i % n)]; };
-	// Start at an on-curve point (an all-off contour starts at the midpoint of its first two points).
+
 	size_t s = 0;
 	while (s < n && !pt(s).on_curve) {
 		++s;
@@ -225,7 +221,7 @@ bool inside(const std::vector<std::pair<double, double>> &p_poly, double p_x, do
 	return in;
 }
 
-} // namespace
+}
 
 namespace detail {
 
@@ -259,7 +255,7 @@ Status read_font_tag(std::span<const uint8_t> p_tag, uint16_t p_tag_code, bool p
 	if (count == 0) {
 		r_font.kind = SwfFontKind::NoGlyphs;
 		if (r.left() >= off_size) {
-			(void)read_off(); // CodeTableOffset
+			(void)read_off();
 		}
 		codes_at = r.pos();
 	} else {
@@ -269,7 +265,7 @@ Status read_font_tag(std::span<const uint8_t> p_tag, uint16_t p_tag_code, bool p
 		BF3_TRY(charge(r_budget, count + 1, r.pos()));
 		const uint32_t first = read_off();
 		if (first == 0) {
-			// GFx stripped form: OffsetTable[0] = 0, CodeTableOffset, the codes; no shapes.
+
 			r_font.kind = SwfFontKind::CodesOnly;
 			const uint32_t code_off = read_off();
 			if (code_off < 2 * off_size || code_off > p_tag.size() - base) {
@@ -281,7 +277,7 @@ Status read_font_tag(std::span<const uint8_t> p_tag, uint16_t p_tag_code, bool p
 			std::vector<uint32_t> offsets(count + 1);
 			offsets[0] = first;
 			for (size_t i = 1; i <= count; ++i) {
-				offsets[i] = read_off(); // offsets[count] = CodeTableOffset
+				offsets[i] = read_off();
 			}
 			if (first < (count + 1) * off_size) {
 				return font_error("first glyph offset " + std::to_string(first) + " inside the offset table", base);
@@ -300,7 +296,7 @@ Status read_font_tag(std::span<const uint8_t> p_tag, uint16_t p_tag_code, bool p
 					const size_t gb = base + offsets[i];
 					const size_t ge = base + offsets[i + 1];
 					if (ge <= gb) {
-						continue; // an empty slot: no shape
+						continue;
 					}
 					BF3_TRY(read_glyph(p_tag, gb, ge, r_budget, r_font.glyphs[i]));
 				}
@@ -386,7 +382,7 @@ Status read_font_tag(std::span<const uint8_t> p_tag, uint16_t p_tag_code, bool p
 	return Status::success();
 }
 
-} // namespace detail
+}
 
 Result<SwfFontOutlines> parse_font_outlines(std::span<const uint8_t> p_tag, uint16_t p_tag_code, WorkBudget &r_budget) {
 	SwfFontOutlines f;
@@ -411,7 +407,7 @@ Status normalise_winding(GlyphOutline &r_glyph, WorkBudget &r_budget, WindingSta
 	if (contours == 0) {
 		return Status::success();
 	}
-	// The polygons, curves flattened at 4 steps (<= 4 polygon points per stored point).
+
 	std::vector<std::vector<std::pair<double, double>>> polys(contours);
 	size_t total = 0;
 	size_t first = 0;
@@ -425,7 +421,7 @@ Status normalise_winding(GlyphOutline &r_glyph, WorkBudget &r_budget, WindingSta
 		total += polys[c].size();
 		first = last + 1;
 	}
-	// Point-in-polygon of one point per contour against every other contour: c x total edge tests, charged first.
+
 	BF3_TRY(r_budget.charge(contours * total));
 	first = 0;
 	for (size_t c = 0; c < contours; ++c) {
@@ -449,7 +445,7 @@ Status normalise_winding(GlyphOutline &r_glyph, WorkBudget &r_budget, WindingSta
 			s.holes = hole ? 1 : 0;
 			const bool want_positive = !hole;
 			if ((area > 0.0) != want_positive) {
-				// Reverse, keeping the first point first: p0, pn-1, ..., p1.
+
 				std::reverse(r_glyph.points.begin() + first + 1, r_glyph.points.begin() + last + 1);
 				s.reversed = 1;
 			}
@@ -466,4 +462,4 @@ Status normalise_winding(GlyphOutline &r_glyph, WorkBudget &r_budget, WindingSta
 	return Status::success();
 }
 
-} // namespace bf3::core::ui
+}

@@ -19,7 +19,6 @@ constexpr const char *kDepsMagic = "OBF3WDEP";
 constexpr size_t kMaxString = 64 * 1024;
 constexpr size_t kMaxDeps = 1u << 16;
 
-// One field list for both directions: Writer and Reader expose v() for every leaf type.
 struct Writer {
 	BlobWriter w;
 	void v(float &p_v) { w.f32(p_v); }
@@ -35,7 +34,7 @@ struct Writer {
 	void v(E &p_v) {
 		w.u8(static_cast<uint8_t>(p_v));
 	}
-	// u64 count, then each element through p_each.
+
 	template <class T, class F>
 	void vec(std::vector<T> &p_v, size_t, F &&p_each) {
 		w.u64(p_v.size());
@@ -67,7 +66,7 @@ struct Reader {
 	void v(E &p_v) {
 		p_v = static_cast<E>(r.u8());
 	}
-	// p_min_bytes: the least an element takes in the blob, so a hostile count cannot allocate.
+
 	template <class T, class F>
 	void vec(std::vector<T> &p_v, size_t p_min_bytes, F &&p_each) {
 		const size_t n = r.count(p_min_bytes);
@@ -164,7 +163,7 @@ void io_sway(IO &io, GunSway &s) {
 	io.v(s.camera_spring_constant);
 	io.v(s.camera_spring_damping);
 	io.v(s.camera_spring_min_threshold_angle);
-	constexpr size_t kGatedMinBytes = 4 + 16 + 2 + 6 * 8 * 4; // empty unlock string
+	constexpr size_t kGatedMinBytes = 4 + 16 + 2 + 6 * 8 * 4;
 	io.vec(s.applied, kGatedMinBytes, [](IO &p_io, SwayGatedModifier &p_g) { io_gated(p_io, p_g); });
 	io.vec(s.conditional, kGatedMinBytes, [](IO &p_io, SwayGatedModifier &p_g) { io_gated(p_io, p_g); });
 	uint64_t total = s.modifiers_total, unresolved = s.modifiers_unresolved;
@@ -234,7 +233,7 @@ void io_fire(IO &io, FireFunction &f) {
 	io.v(dispersions);
 	f.firing_dispersions = static_cast<size_t>(dispersions);
 	io.v(f.fire_logic_recoil_nonzero);
-	// v2 (M2a weapons).
+
 	io.v(f.hold_off_reload_until_fire_release);
 	io.v(f.force_reload_action_on_fire_trigger);
 }
@@ -255,7 +254,7 @@ void io_explosion(IO &io, Explosion &e) {
 	io.v(e.disable_occlusion);
 	io.v(e.disable_static_entity_occlusion);
 	io.v(e.is_causing_suppression);
-	// v2 (M2a weapons): the explosion's pair.
+
 	io.v(e.material.present);
 	io.v(e.material.resolved);
 	io.v(e.material.partition);
@@ -346,8 +345,6 @@ void io_def(IO &io, WeaponDef &d) {
 	io_sway(io, d.sway);
 }
 
-// Forwards to an inner resolver and records every partition looked up: found ones by name, absent names too
-// (an absent partition that later appears changes the output).
 class RecordingResolver final : public EbxResolver {
 public:
 	RecordingResolver(const EbxResolver &p_inner, uint8_t p_tag, std::set<WeaponDependency> &r_deps) :
@@ -369,7 +366,7 @@ public:
 	std::optional<std::string_view> name_of(const Guid &p_guid) const override {
 		const std::optional<std::string_view> name = inner_.name_of(p_guid);
 		if (name) {
-			deps_.insert(WeaponDependency{ tag_, to_lower_ascii(*name) }); // a printed name depends on that partition
+			deps_.insert(WeaponDependency{ tag_, to_lower_ascii(*name) });
 		}
 		return name;
 	}
@@ -384,12 +381,12 @@ std::string variant_key_name(std::string_view p_variant) {
 	return to_lower_ascii(p_variant);
 }
 
-} // namespace
+}
 
 std::vector<uint8_t> encode_weapon_def(const WeaponDef &p_def) {
 	Writer io;
 	io.w.magic(kWeaponMagic, kWeaponBlobFormatVersion);
-	io_def(io, const_cast<WeaponDef &>(p_def)); // Writer only reads the fields
+	io_def(io, const_cast<WeaponDef &>(p_def));
 	return io.w.take();
 }
 
@@ -515,7 +512,7 @@ std::optional<CacheKey> weapon_def_key(const WeaponCacheSources &p_sources, std:
 			return std::nullopt;
 		}
 		const std::optional<Sha1> sha1 = digest(d.name);
-		in.sources.push_back(sha1 ? source_digest(*sha1) : Sha1Digest{}); // zero: looked up and absent
+		in.sources.push_back(sha1 ? source_digest(*sha1) : Sha1Digest{});
 	}
 	in.converter_version = kWeaponConverterVersion;
 	in.engine = std::string(cache_engine_id());
@@ -565,7 +562,7 @@ Result<CachedWeapon> resolve_weapon_cached(Cache *p_cache, const WeaponCacheSour
 			}
 		}
 	}
-	// Resolve, then store the dependency list (replacing a stale one) and the blob.
+
 	std::vector<WeaponDependency> deps;
 	Result<WeaponDef> def = resolve_weapon_recorded(p_sources, p_variant, deps);
 	if (!def) {
@@ -617,4 +614,4 @@ std::vector<std::string> weapon_variants_of(const EbxDb &p_db) {
 	return out;
 }
 
-} // namespace bf3::core::gameplay
+}

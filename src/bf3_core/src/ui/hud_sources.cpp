@@ -1,10 +1,3 @@
-// UI ui2: the HUD DataSources table read from the install (include/bf3/core/ui/hud_sources.h; docs/design/
-// ui-minimap-icons.md §4.6, §7). Built at run time for bf3dump hud-sources and ctest ui.hud.sources; never stored in
-// the repo or cached (design D4, D5).
-//
-// Cost model (gameplay::WorkBudget): each partition and primary instance 1 (charge_type), each DataSources and
-// UIComponents array its raw length, each copied name its bytes. Caps: kMaxHudComponentTypes partitions,
-// kMaxHudSourcesPerType sources per type, kMaxHudStateComponents state components.
 #include "bf3/core/ui/hud_sources.h"
 
 #include "bf3/core/superbundle_mount.h"
@@ -28,7 +21,6 @@ std::string_view text_of(const std::optional<EbxValue> &p_value) {
 	return p_value->as_str().value_or(std::string_view());
 }
 
-// The manifest SHA-1 of a partition when the resolver is a library (the table says which data it came from).
 Sha1 partition_sha1(const EbxResolver &p_ui, std::string_view p_name) {
 	const EbxLibrary *lib = dynamic_cast<const EbxLibrary *>(&p_ui);
 	if (lib == nullptr) {
@@ -46,7 +38,7 @@ Sha1 partition_sha1(const EbxResolver &p_ui, std::string_view p_name) {
 	return {};
 }
 
-} // namespace
+}
 
 const HudComponentType *HudSourceTable::find(std::string_view p_type) const {
 	const auto it = std::lower_bound(types.begin(), types.end(), p_type, [](const HudComponentType &a, std::string_view b) { return a.type < b; });
@@ -90,7 +82,7 @@ Result<HudSourceTable> read_hud_source_table(const EbxResolver &p_ui, std::span<
 	HudSourceTable out;
 	out.version = kHudSourceTableVersion;
 	out.state_partition = to_lower_ascii(p_state_partition);
-	std::map<std::string, size_t> by_partition; // partition -> index into out.types before sorting
+	std::map<std::string, size_t> by_partition;
 	for (const std::string &name : p_component_partitions) {
 		BF3_TRY(budget.charge_bytes(name.size()));
 		const EbxPartition *partition = p_ui.partition_by_name(name);
@@ -125,7 +117,7 @@ Result<HudSourceTable> read_hud_source_table(const EbxResolver &p_ui, std::span<
 		by_partition.emplace(t.partition, out.types.size());
 		out.types.push_back(std::move(t));
 	}
-	// One partition per primary type.
+
 	std::sort(out.types.begin(), out.types.end(), [](const HudComponentType &a, const HudComponentType &b) { return a.type < b.type; });
 	for (size_t i = 1; i < out.types.size(); ++i) {
 		if (out.types[i].type == out.types[i - 1].type) {
@@ -196,4 +188,4 @@ std::string format_hud_source_table(const HudSourceTable &p_table) {
 	return out;
 }
 
-} // namespace bf3::core::ui
+}

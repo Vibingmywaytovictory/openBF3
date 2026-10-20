@@ -1,4 +1,3 @@
-// M2b ui: Bf3TdmHudDemo (hud_tdm_demo.h).
 #include "hud_tdm_demo.h"
 
 #include "bf3_localisation.h"
@@ -35,7 +34,7 @@ namespace {
 constexpr int kStages = 7;
 const char *const kStageNames[kStages] = { "pre_round", "spawn_join", "kill_feed", "kill_card", "spawn_dead", "scoreboard", "round_end" };
 constexpr uint8_t kLocal = 0;
-constexpr uint8_t kPlayers = 24; // 12 v 12, the even slots team 1
+constexpr uint8_t kPlayers = 24;
 constexpr uint8_t kKiller = 5;
 const char *const kPreferred[] = { "m16a4", "ak74m", "m249", "pkp", "m40a5", "sv98", "870", "m4a1", "aek971", "g17", "mp443", "rpg7" };
 
@@ -62,7 +61,7 @@ void fill_list(ui::HudPlayerList &r_list, const ui::HudModel &p_model, int p_tea
 	}
 }
 
-} // namespace
+}
 
 Bf3TdmHudDemo::Bf3TdmHudDemo() = default;
 Bf3TdmHudDemo::~Bf3TdmHudDemo() = default;
@@ -84,7 +83,7 @@ void Bf3TdmHudDemo::_ready() {
 	back->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	back->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	add_child(back);
-	Bf3Hud *m2a = memnew(Bf3Hud); // the weapon icons' source; its own widgets stay hidden
+	Bf3Hud *m2a = memnew(Bf3Hud);
 	m2a->set_name("M2aHud");
 	m2a->set_visible(false);
 	add_child(m2a);
@@ -183,7 +182,7 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 	kc.player_team = 1;
 	kc.player_team_kills = kc.team1_kills;
 	kc.enemy_team_kills = kc.team2_kills;
-	// The kill feed: six kills, the local player's third, two headshots.
+
 	if (p_stage >= 2 && p_stage <= 5) {
 		ui::HudKillFeed &f = m.messages.kill_message;
 		const uint8_t killers[6] = { 3, 8, kLocal, 11, 2, kKiller };
@@ -217,7 +216,7 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 		sp.seconds_revive_left = p_stage == 4 ? 6.8f : 0.0f;
 		for (size_t k = 0; k < ui::kHudKitCount; ++k) {
 			for (size_t i = 0; i < ui::kHudSpawnKitItems; ++i) {
-				sp.kit_items[k][i] = i == 4 ? 0u : item(k * 4 + i); // slot 7 empty, like most TDM kits
+				sp.kit_items[k][i] = i == 4 ? 0u : item(k * 4 + i);
 			}
 		}
 	}
@@ -327,7 +326,7 @@ void Bf3TdmHudDemo::check_stage(int p_stage) {
 		case 4: {
 			BaseButton *deploy = Object::cast_to<BaseButton>(get_node_or_null("Bf3TdmHud/SpawnScreen/Deploy"));
 			if (deploy != nullptr) {
-				deploy->emit_signal("pressed"); // can_deploy is false: not taken
+				deploy->emit_signal("pressed");
 			}
 			const bool taken = hud_->take_deploy_click();
 			row(name, r.spawn_screen_visible && !r.deploy_enabled && r.selected_kit == 1 && r.spawn_screen_shown == 2 && !taken,
@@ -393,4 +392,4 @@ void Bf3TdmHudDemo::finish() {
 	get_tree()->quit(failed_ == 0 ? 0 : 1);
 }
 
-} // namespace bf3::godot_side
+}

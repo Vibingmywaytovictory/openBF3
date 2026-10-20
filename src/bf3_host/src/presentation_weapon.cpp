@@ -1,11 +1,3 @@
-// present_weapon: the own weapon of one display frame from the wire views of the two latest predicted ticks
-// (presentation_weapon.h; docs/design/m2a.md §8.3, §11; owner cl; as built: docs/design/m2a-cl.md). Pure.
-//
-// The views are weapons_wire_view(state, tick) of the predicted states after ticks p_curr_tick - 1 (p_prev) and
-// p_curr_tick (p_curr), so every time in them is an offset from its own tick's start (weapons_wire.h). The presented
-// time is the end of the previous tick plus p_fraction of a tick: the moment between the two states that the own
-// camera shows (present_own_fraction). Continuous fields (spread, recoil) lerp while the same item stays in hand; a
-// switch between the two ticks shows the newer item's values (no lerp across items). Discrete fields come from p_curr.
 #include "bf3/host/presentation_weapon.h"
 
 #include <algorithm>
@@ -28,7 +20,7 @@ double seconds_at(int32_t p_offset, sim::Tick p_tick) {
 	return sw::units_to_seconds(sw::tick_start(p_tick) + sw::SimTime(p_offset));
 }
 
-} // namespace
+}
 
 PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick, double p_fraction,
 		const sw::WeaponTable &p_table) {
@@ -76,4 +68,4 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 	return p;
 }
 
-} // namespace bf3::host
+}

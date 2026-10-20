@@ -1,22 +1,3 @@
-# ctest godot.l1_look (README "L1 look"): the frame-time A/B of the L1 look against the M1 look, and the before /
-# after screenshots. Runs the windowed M1 scene fullscreen (the monitor's mode; a run whose viewport is not 2560x1440 fails) with vsync off,
-# alternating --look=m1 and --look=l1 for ROUNDS rounds (default 5), each run taking the same four free-camera
-# views (street at TDM spawn 13, station at TDM spawn 22, park, overview) after a 3 s settle, timing 300 frames at
-# each view (frame interval and the viewport's GPU render time) before its screenshot:
-#   <godot> --fullscreen --disable-vsync --path bf3-opensource res://scenes/m1_metro.tscn -- --look=<m1|l1>
-#       --shot-settle=3 --shot-measure=300 --shots=<dir>/<look>_<view>.png@x,y,z,yaw,pitch;... --quit-after=1
-# Gate (integration decision, README "L1 look"): the median over the rounds of L1's frame interval <= 1.25 x M1's,
-# where a run's frame interval is the mean over its views of the per-view median frame interval, AND the median over
-# the rounds of L1's p99 frame interval (over every timed frame of the run, all views) <= 16.7 ms at 2560x1440 with
-# vsync off. (The first gate, 1.10 x M1, penalised drawing glass, fog and the LUT that M1 skipped.) The GPU times
-# (same statistic), M1's p99 and the plain means are reported. Timing is noisy (other processes, the display compositor): per-frame medians and the median of
-# alternating rounds keep a single spike or a busy round from deciding.
-# Screenshots go to $OPENBF3_LOOK_SHOTS when set (e.g. openBF3\b\shots\l1, gitignored; never commit them), else to
-# the system temp directory, removed at the end. Skips (exit 77) like godot.m1_load: no Godot executable or no window opt-in (godot_common.cmake), no BF3
-# install, or no window / rendering device (probe run).
-# With the default 5 rounds the row stops after round 3 when rounds 4-5 can no longer change the decision (below;
-# README "L1 look"). Script mode: cmake -DPROJECT_DIR=<bf3-opensource> [-DROUNDS=n] [-DEARLY_STOP=OFF]
-# -P godot_l1_look.cmake (CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
@@ -47,7 +28,6 @@ else()
 endif()
 file(MAKE_DIRECTORY "${shots}")
 
-# "<ms>.<frac>" -> integer microseconds.
 function(to_us value out)
     string(REGEX MATCH "^([0-9]+)\\.([0-9]+)$" ok "${value}")
     if(NOT ok)
@@ -98,7 +78,6 @@ foreach(round RANGE 1 ${ROUNDS})
         endif()
         set(mean_ms "${CMAKE_MATCH_1}")
         set(gpu_ms "${CMAKE_MATCH_2}")
-        # The gate is defined at 1440p: --fullscreen takes the monitor's mode, so check it rather than assume it.
         string(REGEX MATCH "mean of the per-view medians at [0-9]+ views, viewport ([0-9]+)x([0-9]+)" vp "${out}")
         if(NOT vp OR NOT CMAKE_MATCH_1 STREQUAL "2560" OR NOT CMAKE_MATCH_2 STREQUAL "1440")
             message("godot.l1_look: round ${round} ${look} rendered at '${CMAKE_MATCH_1}x${CMAKE_MATCH_2}', not 2560x1440 (the gate's resolution)")
@@ -109,7 +88,6 @@ foreach(round RANGE 1 ${ROUNDS})
         to_us("${gpu_ms}" gpu)
         list(APPEND ${look}_us ${us})
         list(APPEND ${look}_gpu ${gpu})
-        # Integration: the run's p99 frame interval over every timed frame (m1_check.cpp "[look] frame time p99").
         string(REGEX MATCH "frame time p99: ([0-9]+\\.[0-9]+) ms per frame" p99_line "${out}")
         if(NOT p99_line)
             message("godot.l1_look: round ${round} ${look} printed no p99 frame time")
@@ -125,11 +103,6 @@ foreach(round RANGE 1 ${ROUNDS})
             endforeach()
         endif()
     endforeach()
-    # Exact early stop (docs/testing.md): with 3 of the 5 values known, median5 <= max(known 3) and
-    # median5 >= min(known 3). When max(L1, rounds 1-3) <= 1.25 x min(M1, rounds 1-3) (the same integer limit as the
-    # gate below) and max(L1 p99, rounds 1-3) <= 16.7 ms, every outcome of rounds 4-5 passes the gate, so they are
-    # skipped. Only with the default 5 rounds, no failed run and all six lists full; -DEARLY_STOP=OFF or -DROUNDS=n
-    # runs every round.
     if(round EQUAL 3 AND ROUNDS EQUAL 5 AND NOT failed AND NOT EARLY_STOP STREQUAL "OFF")
         set(full TRUE)
         foreach(l m1_us l1_us m1_gpu l1_gpu m1_p99 l1_p99)

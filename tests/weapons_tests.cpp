@@ -1,8 +1,3 @@
-// M2a weapons without data (ctest sim.weapons.unit; docs/design/m2a-weapons.md §1, §10). Synthetic WeaponDefs carry
-// the §7.1 numbers of the gate weapons (weapons_support.h), so the oracle rows (weapon_checks.h: W1, W2, W3, W5, W6,
-// W9) run here exactly as `bf3dump weapon-sim --check` runs them on the install's defs; the rest are the unit rows:
-// fire modes and sub-tick origins (W1), spread and recoil (D7), reloads across switches (W6), determinism (W7),
-// hostile bounds and random-command invariants (W8), capsule geometry, damage and explosives (W5, W9).
 #include "test_support.h"
 #include "weapons_support.h"
 
@@ -55,7 +50,6 @@ const Synthetic &synthetic(const std::string &p_variant) {
 	return all[0];
 }
 
-// A table of one or more synthetic defs after a change (ids in order).
 std::shared_ptr<const WeaponTable> table_of(std::vector<Synthetic> p_defs, bool p_infinite = false, const Mechanics &p_mechanics = {}) {
 	auto materials = std::make_shared<const SurfaceMaterialTable>();
 	auto t = std::make_shared<WeaponTable>();
@@ -69,7 +63,6 @@ std::shared_ptr<const WeaponTable> table_of(std::vector<Synthetic> p_defs, bool 
 	return t;
 }
 
-// Drives step_soldier_weapons tick by tick.
 struct Driver {
 	std::shared_ptr<const WeaponTable> table;
 	SoldierWeaponsState st;
@@ -168,7 +161,7 @@ double angle_between(const Vec3 &p_a, const Vec3 &p_b) {
 	return std::acos(std::clamp(c, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
 }
 
-} // namespace
+}
 
 TEST_SUITE("weapons-unit") {
 	TEST_CASE("sim.weapons.unit: the oracle rows on synthetic defs with the 7.1 numbers") {
@@ -188,7 +181,7 @@ TEST_SUITE("weapons-unit") {
 		}
 		CHECK(gated >= 30);
 		CHECK(gates == std::set<std::string>{ "W1", "W2", "W3", "W5", "W6", "W9" });
-		// Every variant the rows name is in the synthetic table.
+
 		for (const std::string_view v : weapon_check_variants()) {
 			bool found = false;
 			for (const WeaponSimDef &d : table->defs) {
@@ -223,21 +216,20 @@ TEST_SUITE("weapons-unit") {
 		CHECK(s870.reload_delay == 69'000'000);
 		CHECK(s870.reload_empty == 40'200'000);
 		const WeaponSimDef &m67 = t->defs[id_of(*t, kM67)];
-		CHECK(m67.hold_max_time == kMaxDefTime); // 9999 s saturates (no limit)
+		CHECK(m67.hold_max_time == kMaxDefTime);
 		CHECK(m67.spawn_delay == 10'200'000);
 		CHECK(m67.projectile.detonate_on_timeout);
-		CHECK_FALSE(m67.switch_cancels_reload); // rlReloadUnaffectedByWeaponSwitch
+		CHECK_FALSE(m67.switch_cancels_reload);
 		const WeaponSimDef &knife = t->defs[id_of(*t, kKnife)];
 		CHECK(knife.unlimited_ammo);
 		CHECK(knife.trace_frequency == 0);
 		CHECK(knife.projectile.instant_hit);
 		const WeaponSimDef &he = t->defs[id_of(*t, "weapons/gadgets/m320/u_m320_he")];
-		CHECK(he.projectile.time_to_live == kMaxFlightTime); // TimeToLive 0
+		CHECK(he.projectile.time_to_live == kMaxFlightTime);
 		CHECK(he.projectile.time_to_arm == 30'000'000);
 		CHECK(sim_shot_interval_seconds(a3) == doctest::Approx(0.075));
 		CHECK(sim_effective_rpm(t->defs[id_of(*t, kM98B)]) == doctest::Approx(60.0 / 1.3));
 
-		// The hash: equal builds agree, every choice and override changes it.
 		CHECK(weapon_table_hash(*synthetic_table()) == t->hash);
 		CHECK(synthetic_table(true)->hash != t->hash);
 		Mechanics m;
@@ -253,7 +245,6 @@ TEST_SUITE("weapons-unit") {
 		changed->defs[0].reload_commit_tactical += 1;
 		CHECK(weapon_table_hash(*changed) != t->hash);
 
-		// make_weapon_table refuses nothing valid and agrees with the hand-built table on the defs.
 		std::vector<core::gameplay::WeaponDef> defs;
 		for (const Synthetic &s : synthetic_gate_weapons()) {
 			defs.push_back(s.def);
@@ -276,7 +267,7 @@ TEST_SUITE("weapons-unit") {
 			{ "RateOfFire", [&](auto &w) { w.fire.rate_of_fire = nan; } },
 			{ "RateOfFire", [](auto &w) { w.fire.rate_of_fire = 0; } },
 			{ "RateOfFire", [](auto &w) { w.fire.rate_of_fire = -800; } },
-			{ "RateOfFire", [](auto &w) { w.fire.rate_of_fire = 28'801; } }, // interval below tick / 8
+			{ "RateOfFire", [](auto &w) { w.fire.rate_of_fire = 28'801; } },
 			{ "RateOfFireForBurst", [](auto &w) {
 				 w.fire.logic = core::gameplay::FireLogic::Burst;
 				 w.fire.rate_of_fire_for_burst = 1e6f;
@@ -292,7 +283,7 @@ TEST_SUITE("weapons-unit") {
 			{ "NumberOfBulletsPerShell", [](auto &w) { w.fire.bullets_per_shell = 65; } },
 			{ "NumberOfBulletsPerShell", [](auto &w) { w.fire.bullets_per_shell = 0; } },
 			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = 10'001; } },
-			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = -2; } }, // M2b ru R12: -1 is a gadget without a magazine (R11)
+			{ "MagazineCapacity", [](auto &w) { w.fire.magazine_capacity = -2; } },
 			{ "NumberOfMagazines", [](auto &w) { w.fire.number_of_magazines = 1'001; } },
 			{ "TraceFrequency", [](auto &w) { w.fire.trace_frequency = 1'001; } },
 			{ "ShotConfigData.InitialSpeed", [](auto &w) { w.fire.initial_speed = { 0, 0, 5'001 }; } },
@@ -361,7 +352,7 @@ TEST_SUITE("weapons-unit") {
 			refused += d.ok() ? 0 : 1;
 		}
 		std::printf("W8 bounds: %zu of %zu hostile defs refused with the variant and field named\n", refused, cases.size());
-		// The limits themselves are accepted: tick / 8 exactly, 32 per burst, 64 pellets, 60 s, the 870's -1 tactical.
+
 		core::gameplay::WeaponDef w = base.def;
 		w.fire.rate_of_fire = 28'800;
 		w.fire.bullets_per_shell = 64;
@@ -375,8 +366,7 @@ TEST_SUITE("weapons-unit") {
 		w.fire.bullets_per_burst = 32;
 		CHECK(make_weapon_sim_def(w, *materials).ok());
 		CHECK(make_weapon_sim_def(synthetic(k870).def, *materials).ok());
-		// A signed sway modifier as in data (the XP2 LMGs' suppression DecreasePerSecondModifier -10) is accepted; the
-		// spread then grows toward the maximum while suppressed and the cone's angles stay >= 0.
+
 		w = base.def;
 		w.sway.suppression[0].decrease_per_second = -10;
 		w.sway.suppression[0].min_angle = -2;
@@ -393,7 +383,7 @@ TEST_SUITE("weapons-unit") {
 	}
 
 	TEST_CASE("sim.weapons.unit: W1 modes: cycling, sub-tick origins, the per-tick cap, sprint and death") {
-		// Fire-mode counter: auto -> single (one shot per press however long it is held), then two steps at once.
+
 		{
 			Driver d(synthetic_table(), { id_of(*synthetic_table(), kM16A3) });
 			d.idle_until_ready();
@@ -408,16 +398,16 @@ TEST_SUITE("weapons-unit") {
 			}
 			CHECK(d.shots.size() == 1);
 			in.fire = false;
-			in.fire_mode_counter = 3; // (3 - 1) mod 4 = 2 steps over 2 modes: back to single
+			in.fire_mode_counter = 3;
 			d.step(in);
 			CHECK(d.st.current().mode == 1);
-			in.fire_mode_counter = 0; // 1 step: automatic
+			in.fire_mode_counter = 0;
 			d.step(in);
 			CHECK(d.st.current().mode == 0);
-			d.step(in); // a repeated counter is no change
+			d.step(in);
 			CHECK((d.out.events & weapon_events::kFireModeChanged) == 0);
 		}
-		// Sub-tick shots: the origin is the eye lerped at the shot's fraction of its tick.
+
 		{
 			const std::shared_ptr<const WeaponTable> t = synthetic_table(true);
 			Driver d(t, { id_of(*t, kM16A3) });
@@ -439,7 +429,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(worst <= 1e-6);
 			MESSAGE("sub-tick shots: " << off_tick << " of " << d.shots.size() << " between ticks, origin error " << worst << " m");
 		}
-		// The cap: an interval of exactly tick / 8 fires 8 shots in every tick and never more.
+
 		{
 			Synthetic fast = synthetic(kM16A3);
 			fast.def.fire.rate_of_fire = 28'800;
@@ -457,7 +447,7 @@ TEST_SUITE("weapons-unit") {
 				REQUIRE(d.shots[i].time - d.shots[i - 1].time == 125'000);
 			}
 		}
-		// Sprint refuses fire, and for RecoverTime after it; dead soldiers do not fire.
+
 		{
 			const std::shared_ptr<const WeaponTable> t = synthetic_table();
 			Driver d(t, { id_of(*t, kM16A3) });
@@ -483,7 +473,7 @@ TEST_SUITE("weapons-unit") {
 			}
 			CHECK(d.shots.size() == before);
 		}
-		// Dry fire: no rounds anywhere.
+
 		{
 			Synthetic empty = synthetic(kM16A3);
 			empty.def.fire.magazine_capacity = 2;
@@ -494,13 +484,13 @@ TEST_SUITE("weapons-unit") {
 				d.step(fire(true));
 			}
 			CHECK(d.shots.size() == 2);
-			CHECK((d.all_events & weapon_events::kDryFire) == 0); // held: no new pull
+			CHECK((d.all_events & weapon_events::kDryFire) == 0);
 			d.step(fire(false));
-			d.step(fire(true)); // a pull on the empty weapon clicks
+			d.step(fire(true));
 			CHECK((d.out.events & weapon_events::kDryFire) != 0);
 			CHECK(d.count(weapon_events::kReloadStarted) == 0);
 		}
-		// Tracers: every shot at trace frequency 1, none at 0 (the knife).
+
 		{
 			const std::shared_ptr<const WeaponTable> t = synthetic_table();
 			Driver d(t, { id_of(*t, kKnife) });
@@ -527,7 +517,7 @@ TEST_SUITE("weapons-unit") {
 			in.reload = true;
 			return in;
 		};
-		// Before the commit: the switch cancels, the rounds stay where they were.
+
 		{
 			Driver d(t, { a3, m9 });
 			d.idle_until_ready();
@@ -551,7 +541,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(d.st.slots[0].phase == WeaponPhase::Ready);
 			CHECK(d.st.slots[1].phase == WeaponPhase::Deploying);
 		}
-		// After the commit: the switch keeps the rounds.
+
 		{
 			Driver d(t, { a3, m9 });
 			d.idle_until_ready();
@@ -562,7 +552,7 @@ TEST_SUITE("weapons-unit") {
 			const int32_t reserve = d.st.slots[0].reserve;
 			const int32_t mag = d.st.slots[0].magazine;
 			d.step(reload());
-			for (int i = 0; i < 95; ++i) { // the commit is 91.8 ticks in
+			for (int i = 0; i < 95; ++i) {
 				d.step(fire(false));
 			}
 			CHECK(d.count(weapon_events::kReloadCommitted) == 1);
@@ -571,7 +561,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(d.st.slots[0].magazine == 31);
 			CHECK(d.st.slots[0].reserve == reserve - (31 - mag));
 		}
-		// A slot with no weapon refuses the switch.
+
 		{
 			Driver d(t, { a3, m9 });
 			d.idle_until_ready();
@@ -580,7 +570,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(d.st.active == 0);
 			CHECK(d.st.pending == 0xFF);
 		}
-		// rlReloadUnaffectedByWeaponSwitch (M67): a switch during the reload commits it at once.
+
 		{
 			Driver d(t, { m67, a3 });
 			d.idle_until_ready();
@@ -596,7 +586,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(d.count(weapon_events::kReloadCancelled) == 0);
 			CHECK(d.st.slots[0].magazine == 1);
 		}
-		// 870: fire between shells interrupts the reload; the next shot follows.
+
 		{
 			Driver d(t, { s870 });
 			d.idle_until_ready();
@@ -630,9 +620,9 @@ TEST_SUITE("weapons-unit") {
 	TEST_CASE("sim.weapons.unit: spread and recoil arithmetic, the disc variants' moments") {
 		const Dispersion disp{ 0.5f, 3.0f, 0.2f, 10.0f };
 		CHECK(decay_spread(2.0f, disp, kTimeUnitsPerSecond / 10) == doctest::Approx(1.0f));
-		CHECK(decay_spread(2.0f, disp, kTimeUnitsPerSecond) == 0.5f); // never below the minimum
-		CHECK(decay_spread(0.2f, disp, kTimeUnitsPerSecond) == 0.2f); // never raises
-		CHECK(decay_spread(5.0f, disp, 0) == 3.0f); // never above the maximum
+		CHECK(decay_spread(2.0f, disp, kTimeUnitsPerSecond) == 0.5f);
+		CHECK(decay_spread(0.2f, disp, kTimeUnitsPerSecond) == 0.2f);
+		CHECK(decay_spread(5.0f, disp, 0) == 3.0f);
 		CHECK(spread_after_shot(2.9f, disp) == 3.0f);
 		CHECK(spread_after_shot(1.0f, disp) == doctest::Approx(1.2f));
 		Mechanics m;
@@ -640,7 +630,6 @@ TEST_SUITE("weapons-unit") {
 		m.min_spread_rise = MinSpreadRise::AtDecreaseRate;
 		CHECK(enter_spread(0.1f, disp, m) == 0.1f);
 
-		// Cone draws stay within the half-angle; the disc variants have the moments their names say (100,000 draws).
 		const Vec3 aim{ 0.3f, 0.1f, 0.95f };
 		for (const DiscDistribution disc : { DiscDistribution::UniformArea, DiscDistribution::UniformRadius }) {
 			double sum_r = 0, sum_r2 = 0, worst = 0, len_err = 0;
@@ -668,11 +657,10 @@ TEST_SUITE("weapons-unit") {
 		}
 		CHECK(sample_cone(aim, 0.0f, 0.5f, 0.5f, DiscDistribution::UniformArea)[2] == doctest::Approx(aim[2] / len3(aim)));
 
-		// Recoil: caps on both axes, first-shot multiplier, horizontal draw in [min, max].
 		const Recoil rec{ 0.4f, 1.0f, -0.3f, 0.2f, 0.5f, 6.0f };
 		RecoilOffset o{};
 		o = recoil_after_shot(o, rec, true, 2.5f, 0.0f);
-		CHECK(o.pitch == doctest::Approx(1.0f)); // 0.4 x 2.5, at the cap
+		CHECK(o.pitch == doctest::Approx(1.0f));
 		CHECK(o.yaw == doctest::Approx(-0.3f));
 		for (int i = 0; i < 10; ++i) {
 			o = recoil_after_shot(o, rec, false, 2.5f, 0.0f);
@@ -682,8 +670,6 @@ TEST_SUITE("weapons-unit") {
 		o = recoil_after_shot({}, rec, false, 2.5f, 1.0f);
 		CHECK(o.yaw == doctest::Approx(0.2f));
 
-		// Recovery: linear by factor / 60 per tick (x ShootingRecoilDecreaseScale while firing), exponential by the
-		// precomputed factor.
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
 		const WeaponSimDef &a3 = t->defs[id_of(*t, kM16A3)];
 		SwayContext ctx;
@@ -693,13 +679,12 @@ TEST_SUITE("weapons-unit") {
 		CHECK(lr.yaw == doctest::Approx(-1.0f + 18.0f / 60.0f));
 		const RecoilOffset lf = recover_recoil_tick({ 1.0f, 0.0f }, a3, ctx, true, lin);
 		CHECK(lf.pitch == doctest::Approx(1.0f - 1.8f / 60.0f));
-		CHECK(recover_recoil_tick({ 0.1f, 0.0f }, a3, ctx, false, lin).pitch == 0.0f); // stops at 0
+		CHECK(recover_recoil_tick({ 0.1f, 0.0f }, a3, ctx, false, lin).pitch == 0.0f);
 		Mechanics ex;
 		ex.recovery = RecoveryShape::Exponential;
 		CHECK(recover_recoil_tick({ 1.0f, 0.0f }, a3, ctx, false, ex).pitch == doctest::Approx(std::exp(-18.0 / 60.0)));
 		CHECK(recover_recoil_tick({ 1.0f, 0.0f }, a3, ctx, true, ex).pitch == doctest::Approx(std::exp(-1.8 / 60.0)));
 
-		// The effective tables: missing move -> Base; suppression multiplies min (and max only when set).
 		SwayContext crouch_sprint;
 		crouch_sprint.stance = Stance::Crouch;
 		crouch_sprint.move = SwayMove::Sprinting;
@@ -710,7 +695,6 @@ TEST_SUITE("weapons-unit") {
 		CHECK(effective_dispersion(a3, supp).max_angle == a3.sway[0][0].move[0].max_angle);
 		CHECK(effective_recoil(a3, supp).horizontal_max == doctest::Approx(a3.sway[0][0].recoil.horizontal_max * 1.5f));
 
-		// Aim: level north is +Z; the pitch limit holds with recoil on top.
 		const Vec3 n = aim_direction(0, 0, {});
 		CHECK(n[2] == doctest::Approx(1.0f));
 		CHECK(std::fabs(n[0]) < 1e-6f);
@@ -721,7 +705,7 @@ TEST_SUITE("weapons-unit") {
 	TEST_CASE("sim.weapons.unit: W7 determinism: replays, a mid-burst restore, seeds, two worlds") {
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
 		const uint16_t burst = id_of(*t, kM16A4), a3 = id_of(*t, kM16A3);
-		// A scripted mixed run (bursts, mode changes, a reload, a switch) twice: per-tick state hashes equal.
+
 		auto script = [](uint32_t p_i) {
 			WeaponInput in;
 			in.zoom = (p_i / 50) % 2 == 0;
@@ -750,7 +734,7 @@ TEST_SUITE("weapons-unit") {
 		CHECK(h1 == h2);
 		CHECK(shot_list_hash(s1) == shot_list_hash(s2));
 		REQUIRE(s1.size() >= 40);
-		// Restore mid-burst and replay the rest: every later tick hashes the same.
+
 		size_t restore = 0;
 		for (size_t i = 100; i < states.size(); ++i) {
 			if (states[i].current().burst_left > 0) {
@@ -777,7 +761,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(shot_list_hash(d.shots) == shot_list_hash(tail));
 			MESSAGE("restored at tick " << restore + 1 << " (burst_left " << int(states[restore].current().burst_left) << "), " << d.shots.size() << " shots replayed");
 		}
-		// The seed: a different match seed changes the hip-fire directions of (almost) every shot; times are equal.
+
 		{
 			const std::shared_ptr<const WeaponTable> o = synthetic_table(true);
 			auto hip = [&](uint64_t p_seed) {
@@ -802,7 +786,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(share >= 0.99);
 			CHECK(times);
 		}
-		// Two collision worlds over one StaticWorldShapes: the same shots give the same impacts.
+
 		{
 			const float walls[3] = { 30.0f, 120.0f, 400.0f };
 			const std::vector<StaticTriangle> tris = range_wall_triangles(walls, 1.6f);
@@ -841,27 +825,26 @@ TEST_SUITE("weapons-unit") {
 		REQUIRE(segment_capsule({ 0, 0.5f, 0 }, { 0, 0.5f, 20 }, c, f, n));
 		CHECK(f == doctest::Approx((10.0 - 0.25) / 20.0));
 		CHECK(n[2] == doctest::Approx(-1.0f));
-		// The end spheres: straight down onto the top cap.
+
 		REQUIRE(segment_capsule({ 0, 3, 10 }, { 0, -3, 10 }, c, f, n));
 		CHECK(f == doctest::Approx((3.0 - 1.25) / 6.0));
 		CHECK(n[1] == doctest::Approx(1.0f));
-		// Grazing: a line at exactly the radius touches, a hair further misses.
+
 		CHECK_FALSE(segment_capsule({ 0.2501f, 0.5f, 0 }, { 0.2501f, 0.5f, 20 }, c, f, n));
 		CHECK(segment_capsule({ 0.2499f, 0.5f, 0 }, { 0.2499f, 0.5f, 20 }, c, f, n));
-		// Too short, or pointing away.
+
 		CHECK_FALSE(segment_capsule({ 0, 0.5f, 0 }, { 0, 0.5f, 9.7f }, c, f, n));
 		CHECK_FALSE(segment_capsule({ 0, 0.5f, 9 }, { 0, 0.5f, 0 }, c, f, n));
-		// A start inside hits at 0 with the normal against the segment.
+
 		REQUIRE(segment_capsule({ 0, 0.5f, 10 }, { 0, 0.5f, 20 }, c, f, n));
 		CHECK(f == 0.0f);
 		CHECK(n[2] == doctest::Approx(-1.0f));
-		// A sphere (a == b).
+
 		ZoneCapsule s = c;
 		s.b = s.a;
 		REQUIRE(segment_capsule({ 0, 0, 0 }, { 0, 0, 20 }, s, f, n));
 		CHECK(f == doctest::Approx(9.75 / 20.0));
 
-		// segment_target: the nearest capsule wins, ties go to the lower index; the bound sphere is only a filter.
 		HitTarget t = capsule_target(3, { 0, 0, 10 }, { 0, 1, 10 }, 0.25f, HitZone::Body);
 		t.capsule_count = 3;
 		t.capsules[1] = t.capsules[0];
@@ -882,7 +865,7 @@ TEST_SUITE("weapons-unit") {
 		t.capsules[2].a = { 0, 5, 9 };
 		t.capsules[2].b = { 0, 6, 9 };
 		REQUIRE(segment_target({ 0, 0.5f, 0 }, { 0, 0.5f, 20 }, t, hit));
-		CHECK(hit.zone == HitZone::Body); // a tie between 0 and 1: the lower index
+		CHECK(hit.zone == HitZone::Body);
 		CHECK(hit.capsule == 0);
 		CHECK_FALSE(segment_target({ 3, 0.5f, 0 }, { 3, 0.5f, 20 }, t, hit));
 		Vec3 p{};
@@ -914,7 +897,7 @@ TEST_SUITE("weapons-unit") {
 		CHECK(blast_damage(x, 4.25, BlastFalloff::Linear) == doctest::Approx(56.0));
 		CHECK(blast_damage(x, 7.0, BlastFalloff::Linear) == 0.0);
 		CHECK(blast_damage(x, 70.0, BlastFalloff::Linear) == 0.0);
-		x.radius = 1.0f; // outer <= inner: full damage out to BlastRadius, nothing beyond
+		x.radius = 1.0f;
 		CHECK(blast_damage(x, 0.9, BlastFalloff::Linear) == 112.0);
 		CHECK(blast_damage(x, 1.0, BlastFalloff::Linear) == 112.0);
 		CHECK(blast_damage(x, 1.4, BlastFalloff::Linear) == 0.0);
@@ -927,10 +910,10 @@ TEST_SUITE("weapons-unit") {
 		CHECK((s.events & soldier_events::kDamaged) != 0);
 		CHECK_FALSE(apply_damage(s, 0.0f, m));
 		CHECK_FALSE(apply_damage(s, std::numeric_limits<float>::quiet_NaN(), m));
-		CHECK(apply_damage(s, 75.0f, m)); // exactly to 0 kills
+		CHECK(apply_damage(s, 75.0f, m));
 		CHECK(s.mode == MoveMode::Dead);
 		CHECK((s.events & soldier_events::kDied) != 0);
-		CHECK_FALSE(apply_damage(s, 10.0f, m)); // dead
+		CHECK_FALSE(apply_damage(s, 10.0f, m));
 		SoldierState p;
 		p.flags = uint16_t(soldier_flags::kAlive | soldier_flags::kSpawnProtected);
 		CHECK_FALSE(apply_damage(p, 10.0f, m));
@@ -938,9 +921,8 @@ TEST_SUITE("weapons-unit") {
 		open.spawn_protection_blocks = false;
 		CHECK(apply_damage(p, 10.0f, open));
 
-		// Shots to kill: the 870's 12 pellets count per shot; a zero multiplier never kills.
 		const std::array<int32_t, 4> s870 = shots_to_kill(t->defs[id_of(*t, k870)], 5, 100, m);
-		CHECK(s870[size_t(HitZone::Chest)] == 1); // 12 x 18
+		CHECK(s870[size_t(HitZone::Chest)] == 1);
 		const std::array<int32_t, 4> nade = shots_to_kill(t->defs[id_of(*t, kM67)], 5, 100, m);
 		CHECK(nade == std::array<int32_t, 4>{ 0, 0, 0, 0 });
 		CHECK(one_shot_range(a3, HitZone::Head, 100, m) == -1.0);
@@ -951,7 +933,7 @@ TEST_SUITE("weapons-unit") {
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
 		const Mechanics &m = t->mechanics;
 		const uint16_t a3 = id_of(*t, kM16A3), m67 = id_of(*t, kM67), rpg = id_of(*t, kRpg), knife = id_of(*t, kKnife);
-		// A bullet on a capsule at 29 m: the falloff at the hit distance x the zone cell.
+
 		{
 			const std::unique_ptr<CollisionWorld> w = wall_world({ 200.0f });
 			const StaticTargets targets({ capsule_target(9, { 0, 1.3f, 29.0f }, { 0, 1.9f, 29.0f }, 0.2f, HitZone::Head) });
@@ -969,7 +951,7 @@ TEST_SUITE("weapons-unit") {
 			CHECK(f.impacts[0].kind == ImpactKind::Target);
 			CHECK(pw.live().empty());
 		}
-		// The knife: one instant segment of speed x TTL (1.8 m) at the spawn time.
+
 		{
 			const std::unique_ptr<CollisionWorld> w = wall_world({ 200.0f });
 			const StaticTargets near({ capsule_target(1, { 0, 1.3f, 1.2f }, { 0, 1.9f, 1.2f }, 0.2f, HitZone::Chest) });
@@ -979,11 +961,11 @@ TEST_SUITE("weapons-unit") {
 			REQUIRE(b.spawn(level_shot(knife, { 0, 1.6f, 0 }, 0, 18'000'000)).ok());
 			const Flown fa = fly(a, *w, near, 1, 30), fb = fly(b, *w, far, 1, 30);
 			REQUIRE(fa.damage.size() == 1);
-			CHECK(fa.damage[0].amount == doctest::Approx(50.0f)); // 100 x 0.5
+			CHECK(fa.damage[0].amount == doctest::Approx(50.0f));
 			CHECK(fa.damage[0].time == 18'000'000);
 			CHECK(fb.damage.empty());
 		}
-		// M67 into a wall at 5 m: it bounces back at 0.3 x the speed and still goes off at 3.6 s.
+
 		{
 			const std::unique_ptr<CollisionWorld> w = wall_world({ 5.0f });
 			const StaticTargets none({});
@@ -1002,12 +984,11 @@ TEST_SUITE("weapons-unit") {
 			REQUIRE(f.detonations.size() == 1);
 			CHECK(f.detonations[0].timeout);
 			CHECK(f.detonations[0].time - s.spawn_time == 216'000'000);
-			CHECK(f.detonations[0].position[2] < 5.0f); // came back off the wall
+			CHECK(f.detonations[0].position[2] < 5.0f);
 			MESSAGE("M67 off a 5 m wall: detonated at (" << f.detonations[0].position[0] << ", " << f.detonations[0].position[1] << ", " << f.detonations[0].position[2]
 														 << "), " << f.impacts.size() << " impacts");
 		}
-		// RPG at a 60 m wall: armed, explodes; a capsule 1.5 m in front takes the blast, one 1 m behind the wall does not;
-		// a capsule in the flight path takes the direct hit.
+
 		{
 			const std::unique_ptr<CollisionWorld> w = wall_world({ 60.0f });
 			const StaticTargets targets({ capsule_target(1, { 2.0f, 1.3f, 58.5f }, { 2.0f, 1.9f, 58.5f }, 0.2f, HitZone::Chest),
@@ -1068,15 +1049,10 @@ TEST_SUITE("weapons-unit") {
 		CHECK(all.violations == 0);
 		CHECK(all.worst_shots <= kMaxShotsPerTick);
 		CHECK(all.worst_timed <= kMaxTimedEventsPerTick);
-		CHECK(all.shots >= 200); // a floor: the run must fire (bolt rifles fire ~6 in 600 random ticks, automatics ~40)
+		CHECK(all.shots >= 200);
 	}
 }
 
-// M2b ru (docs/design/m2b.md §2.6 #22, §3.6; docs/design/m2b-ru.md §4): the defibrillator as a weapon. A synthetic
-// u_defib with the data's numbers (bf3dump weapon weapons/gadgets/defibrillator/u_defib: fltAutomaticFire 60 rpm, ammo
-// "-1 x 1", rtMagazine 3.6 s, instant hit, v0 1.75 m/s, ttl 1 s, damage 0) builds (R11: capacity -1 is a gadget
-// without a magazine); held 3 s it fires 3 shots, never reloads and never empties; each shot is one 1.75 m segment
-// with 0 damage (TdmRules tests the segment against the corpses, §3.6).
 TEST_SUITE("weapons-unit") {
 	TEST_CASE("sim.weapons.unit: M2b ru the defibrillator: capacity -1 builds, 3 shots in 3 s, no reload, 0 damage") {
 		Synthetic s;

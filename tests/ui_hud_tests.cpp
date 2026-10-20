@@ -1,8 +1,3 @@
-// UI ui2 HUD icon and HUD source helpers on synthetic data (suite "ui-hud-unit", ctest ui.hud.unit; docs/design/
-// ui-minimap-icons.md §13): icon state names, decode_rgba8_texture / decode_item_icon refusals on synthetic DxTexture
-// headers, check_hud_bindings on synthetic tables (missing and extra sources, unbound components),
-// format_hud_source_table. ItemIconIndex's order, lookup and duplicate count are checked on the install (ui.hud.icons):
-// it is built from EBX descriptions only. No data.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ids.h"
@@ -34,7 +29,6 @@ res::DxTexture header(res::TextureFormat p_format, uint16_t p_w, uint16_t p_h) {
 	return t;
 }
 
-// The install's 11 bound types with exactly the rows' sources, plus one unbound in-game type.
 ui::HudSourceTable table_from_rows() {
 	ui::HudSourceTable t;
 	t.version = ui::kHudSourceTableVersion;
@@ -62,7 +56,7 @@ ui::HudSourceTable table_from_rows() {
 	return t;
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-hud-unit") {
 	TEST_CASE("icon state names round-trip; unknown names are Unknown") {
@@ -73,7 +67,7 @@ TEST_SUITE("ui-hud-unit") {
 		CHECK(ui::hud_icon_state_name(ui::HudIconState::Friendly) == "UIIconState_Friendly");
 		CHECK(ui::parse_hud_icon_state("UIIconState_Sparkly") == ui::HudIconState::Unknown);
 		CHECK(ui::parse_hud_icon_state("") == ui::HudIconState::Unknown);
-		CHECK(ui::parse_hud_icon_state("uiiconstate_friendly") == ui::HudIconState::Unknown); // enum names are exact
+		CHECK(ui::parse_hud_icon_state("uiiconstate_friendly") == ui::HudIconState::Unknown);
 	}
 
 	TEST_CASE("hud_icon_rect: whole texels, mirrored frames keep a positive size") {
@@ -84,7 +78,7 @@ TEST_SUITE("ui-hud-unit") {
 		CHECK(r.height == 19);
 		CHECK_FALSE(r.flip_x);
 		CHECK_FALSE(r.flip_y);
-		// The retail Blink frame of the flag icons: MinUv right of and below MaxUv.
+
 		const ui::HudIconRect b = ui::hud_icon_rect({ 0.64453125f, 0.10253906f, 0.63671875f, 0.10058594f }, 256, 1024);
 		CHECK(b.x == 163);
 		CHECK(b.y == 103);
@@ -131,7 +125,7 @@ TEST_SUITE("ui-hud-unit") {
 		arr.slice_count = 3;
 		CHECK_FALSE(ui::decode_rgba8_texture(arr, chunk, "synthetic").ok());
 
-		res::DxTexture dxt5 = header(res::TextureFormat::Dxt5, 64, 16); // the retail _small icon shape
+		res::DxTexture dxt5 = header(res::TextureFormat::Dxt5, 64, 16);
 		CHECK(dxt5.mip_chain_size == 64 * 16);
 		std::vector<uint8_t> blocks(dxt5.mip_chain_size, 0xAB);
 		bf3::core::Result<ui::ItemIconImage> icon = ui::decode_item_icon(dxt5, blocks, "synthetic");

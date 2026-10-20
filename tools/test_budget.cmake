@@ -1,12 +1,3 @@
-# Test budget report (docs/testing.md): the slowest rows of one ctest phase, the skipped rows and every budget or
-# label violation of the policy. build.cmd runs it after each ctest phase.
-#   cmake -DJUNIT=<ctest --output-junit file> -DTESTDIR=<build dir> [-DSTRICT=1] [-DASAN=1] [-DPHASE=<name>]
-#         -P tools/test_budget.cmake
-# JUNIT gives each row's wall time and result; `ctest --test-dir <TESTDIR> --show-only=json-v1` gives the LABELS,
-# RUN_SERIAL, PROCESSORS, COST and RESOURCE_LOCK properties (a scheduling reason is a label because the JSON carries
-# no CMake comments). Prints only; with STRICT=1 a violation makes it exit 1. Junit times are wall times, so a row
-# measured in a parallel phase reads slower than alone (the budgets are for a row alone on a quiet machine); CPU
-# seconds need a Job Object harness (docs/testing.md "Measuring").
 cmake_minimum_required(VERSION 3.29)
 if(NOT DEFINED JUNIT OR NOT EXISTS "${JUNIT}")
 	message(FATAL_ERROR "test_budget: -DJUNIT=<file> is required (got '${JUNIT}')")
@@ -23,15 +14,12 @@ if(NOT _ctest)
 	find_program(_ctest NAMES ctest)
 endif()
 
-# Rows whose length the gate defines (docs/testing.md budget 4): exempt from the 120 s timing / realtime / window cap.
 set(gate_length_rows godot.m1 godot.m1.e1 godot.m1.e2_gate godot.m1.e2_stress host.session host.session.gate
 	host.session.stress godot.s3_crowd godot.l1_look host.scale.paced host.gunplay.client host.gunplay.server godot.fx_ref godot.m2a.play)
-# The one dev row allowed past 60 s (docs/testing.md budget 4).
 set(long_dev_rows sim.terrain)
 set(serial_reasons timing realtime window bigmem serial_wallclock)
 set(scheduling_labels timing realtime window)
 
-# Seconds text ("12.345") to integer milliseconds.
 function(seconds_to_ms p_text r_ms)
 	if(p_text MATCHES "^([0-9]+)(\\.([0-9]*))?")
 		set(whole "${CMAKE_MATCH_1}")
@@ -51,7 +39,6 @@ function(ms_to_text p_ms r_text)
 	set(${r_text} "${whole}.${tenth}" PARENT_SCOPE)
 endfunction()
 
-# Properties of every registered row.
 execute_process(COMMAND "${_ctest}" --test-dir "${TESTDIR}" --show-only=json-v1
 	OUTPUT_VARIABLE json RESULT_VARIABLE json_rc ERROR_QUIET)
 if(NOT json_rc EQUAL 0)
@@ -89,7 +76,6 @@ foreach(i RANGE 0 ${last})
 	set(P_${name}_KNOWN TRUE)
 endforeach()
 
-# Rows of this phase.
 file(READ "${JUNIT}" xml)
 set(suite_ms 0)
 if(xml MATCHES "<testsuite[^>]*[ \t\r\n]time=\"([0-9.]+)\"")
@@ -158,8 +144,6 @@ foreach(c IN LISTS cases)
 	if(name MATCHES "\\.split_cover$" AND status STREQUAL "fail")
 		list(APPEND violations "${name}: split rows do not cover the suite")
 	endif()
-	# Time budgets (docs/testing.md 4). The 60 s dev cap is a violation in a serial phase (a parallel phase inflates
-	# row walls, so there it warns); the others warn.
 	if(ASAN)
 		if(ms GREATER 600000 AND NOT "asan_sweep" IN_LIST labels)
 			list(APPEND warnings "${name}: ${t} s under asan without the asan_sweep label")
@@ -182,7 +166,6 @@ foreach(c IN LISTS cases)
 	endif()
 endforeach()
 
-# A phase whose row walls sum to more than 1.1 x its wall ran rows in parallel.
 math(EXPR parallel_test "${sum_ms} * 10 - ${suite_ms} * 11")
 foreach(o IN LISTS cap_overs)
 	if(parallel_test GREATER 0)

@@ -1,5 +1,3 @@
-// The effect compiler (effect_compiler.h; docs/design/m2a-vfx1.md §6.1-§6.2, §10): EffectBlueprint / EmitterDocument
-// EBX into flat EffectDefs, the census, effect_extent, find_partition and the canonical text.
 #include "bf3/fx/effect_compiler.h"
 
 #include "bf3/core/thread_pool.h"
@@ -37,7 +35,6 @@ bool is_identity(const Transform &p_t) {
 
 namespace {
 
-// Upper bound of a slot's value .x (the life multiplier of UpdateAge, docs §6.5 / effect_extent).
 float value_bound(const EmitterDef &p_e, const ProcessorSlot &p_slot) {
 	if (p_slot.evaluator == kNoEvaluator || size_t(p_slot.evaluator) >= p_e.evaluators.size()) {
 		return p_slot.default_values.x;
@@ -61,7 +58,7 @@ bool finite_bounded(float p_v) {
 	return std::isfinite(p_v) && std::fabs(p_v) <= kMaxAbsParameter;
 }
 
-} // namespace
+}
 
 float emitter_life_bound(const EmitterDef &p_e) {
 	const ProcessorSlot &age = p_e.slot(ProcessorType::UpdateAge);
@@ -73,7 +70,7 @@ float emitter_life_bound(const EmitterDef &p_e) {
 
 uint64_t effect_particle_bound(const EffectDef &p_def) {
 	const uint64_t cap = uint64_t(kMaxEffectParticles) + 1;
-	// particles(e) memoised bottom-up; the graph is acyclic and at most kMaxChildDepth deep (validated first).
+
 	std::vector<uint64_t> memo(p_def.emitters.size(), UINT64_MAX);
 	std::function<uint64_t(uint32_t, uint32_t)> particles = [&](uint32_t p_e, uint32_t p_depth) -> uint64_t {
 		if (p_e >= p_def.emitters.size() || p_depth > kMaxChildDepth + 1) {
@@ -138,8 +135,8 @@ core::Status validate_effect_def(const EffectDef &p_def) {
 			return bad("component fields");
 		}
 	}
-	// Children: indices, an acyclic graph, depth <= kMaxChildDepth from any root.
-	std::vector<uint8_t> state(p_def.emitters.size(), 0); // 0 new, 1 on the stack, 2 done
+
+	std::vector<uint8_t> state(p_def.emitters.size(), 0);
 	std::function<bool(uint32_t, uint32_t)> dfs = [&](uint32_t p_e, uint32_t p_depth) -> bool {
 		if (p_depth > kMaxChildDepth) {
 			return false;
@@ -153,7 +150,7 @@ core::Status validate_effect_def(const EffectDef &p_def) {
 				return false;
 			}
 		}
-		state[p_e] = 0; // a diamond may revisit at another depth; the depth bound keeps this finite
+		state[p_e] = 0;
 		return true;
 	};
 	for (uint32_t e = 0; e < p_def.emitters.size(); ++e) {
@@ -235,11 +232,9 @@ core::Status validate_effect_def(const EffectDef &p_def) {
 	return core::Status::success();
 }
 
-} // namespace detail
+}
 
 namespace {
-
-// ---- one compile ---------------------------------------------------------------------------------------------
 
 struct Compile {
 	Reader &r;
@@ -279,7 +274,6 @@ struct Compile {
 		return p;
 	}
 
-	// A Pre evaluator into r_e.evaluators; returns its index.
 	int16_t evaluator(const EbxInstance &p_inst, EmitterDef &r_e) {
 		if (!r.charge()) {
 			return kNoEvaluator;
@@ -420,12 +414,11 @@ struct Compile {
 		}
 	}
 
-	// One processor's slot and parameters.
 	void processor(const EbxInstance &p_inst, ProcessorType p_type, EmitterDef &r_e) {
 		const EbxStruct s = p_inst.data();
 		ProcessorParams &pp = r_e.params;
 		if (p_type == ProcessorType::BaseEmitter) {
-			// Always read for its asset (provenance), enabled or not (docs §6.2).
+
 			(void)r.flag(s, "Enable");
 			r_e.base = r.external_name(s, "EmitterAsset");
 			return;
@@ -544,7 +537,7 @@ struct Compile {
 				break;
 			}
 			default:
-				break; // UpdateLinearVelocity, UpdateRotation, UpdateSizeX/Y/Z, UpdateOrientation, SpawnPosition, SpawnOrientation
+				break;
 		}
 		if (r.ok()) {
 			r_e.slots[size_t(p_type)] = slot;
@@ -552,7 +545,6 @@ struct Compile {
 		}
 	}
 
-	// The EmitterDocument instance of a partition.
 	std::optional<EbxInstance> document(std::string_view p_name) {
 		if (!r.charge()) {
 			return std::nullopt;
@@ -573,11 +565,10 @@ struct Compile {
 		return docs.front();
 	}
 
-	// Reads the processors of one document's chain into r_e (the BaseEmitterData rule of docs §6.2).
 	void chain(const EbxInstance &p_doc, std::string_view p_doc_name, EmitterDef &r_e, uint32_t p_base_depth) {
 		std::vector<std::pair<EbxInstance, ProcessorType>> links;
 		std::set<uint32_t> visited;
-		uint32_t seen = 0; // processor types, one bit each
+		uint32_t seen = 0;
 		std::optional<EbxInstance> at = r.follow_internal(p_doc.data(), "RootProcessor");
 		while (at && r.ok()) {
 			if (!r.charge()) {
@@ -710,9 +701,8 @@ struct Compile {
 		}
 	}
 
-	std::vector<std::string> pending_children; // filled by processor() while one emitter is read
+	std::vector<std::string> pending_children;
 
-	// One EmitterDocument: template + processors (its child document names into r_children).
 	std::optional<EmitterDef> emitter(const std::string &p_doc, std::vector<std::string> &r_children) {
 		const std::optional<EbxInstance> doc = document(p_doc);
 		if (!doc) {
@@ -743,7 +733,6 @@ struct Compile {
 		return e;
 	}
 
-	// Emitters of one def: roots first (in r_roots order), then children breadth-first, deduplicated by (name, role).
 	struct Builder {
 		Compile &c;
 		std::vector<EmitterDef> emitters;
@@ -969,7 +958,7 @@ core::Result<std::vector<EmitterDef>> compile_emitters(std::string_view p_docume
 	return std::move(b.emitters);
 }
 
-} // namespace
+}
 
 core::Result<std::vector<EmitterDef>> compile_emitter(std::string_view p_document, CompileContext &r_ctx) {
 	return compile_emitters(p_document, r_ctx);
@@ -1080,8 +1069,6 @@ EffectExtent effect_extent(const EffectDef &p_def) {
 	return out;
 }
 
-// ---- census ------------------------------------------------------------------------------------------------
-
 core::Result<CensusReport> run_census(const core::EbxLibrary &p_library, unsigned p_threads) {
 	const auto start = std::chrono::steady_clock::now();
 	CensusReport rep;
@@ -1103,12 +1090,12 @@ core::Result<CensusReport> run_census(const core::EbxLibrary &p_library, unsigne
 		std::vector<std::string> unknown_types;
 		std::vector<std::string> unknown_enumerators;
 		size_t work = 0;
-		// effects
+
 		size_t emitter_entities = 0;
 		size_t dual_role = 0;
 		bool transform = false;
 		size_t component_pools = 0;
-		// documents
+
 		uint32_t processor_bits = 0;
 		uint32_t evaluator_bits = 0;
 		size_t flipbooks_normalised = 0;
@@ -1204,8 +1191,6 @@ core::Result<CensusReport> run_census(const core::EbxLibrary &p_library, unsigne
 	return rep;
 }
 
-// ---- canonical text ----------------------------------------------------------------------------------------
-
 namespace {
 
 void appendf(std::string &r_out, const char *p_fmt, ...) {
@@ -1273,7 +1258,7 @@ std::string evaluator_text(const EvaluatorDef &p_e) {
 	return s;
 }
 
-} // namespace
+}
 
 std::string format_emitter_def(const EmitterDef &p_e) {
 	std::string o;
@@ -1355,4 +1340,4 @@ std::string format_effect_def(const EffectDef &p_def) {
 	return o;
 }
 
-} // namespace bf3::fx
+}

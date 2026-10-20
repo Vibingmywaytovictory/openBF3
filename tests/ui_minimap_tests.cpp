@@ -1,6 +1,3 @@
-// UI ui2 minimap readers on synthetic data (suite "ui-minimap-unit", ctest ui.minimap.unit; docs/design/
-// ui-minimap-icons.md §13): l8_mip_chain sizes and box filter, combat_area_union / combat_area_min_field, the mask IoUs
-// (identity 1, mirrored 0, refused past the caps), decode_l8_texture's refusals on synthetic DxTexture headers. No data.
 #include <doctest/doctest.h>
 
 #include "bf3/core/res/dx_texture.h"
@@ -40,7 +37,6 @@ res::DxTexture l8_header(uint16_t p_w, uint16_t p_h, uint8_t p_mips = 1) {
 	return t;
 }
 
-// A side x side mask whose texel (i, j) is inside when p_inside(world x, world z) of its centre under variant 0.
 std::vector<bool> raster(uint32_t p_side, const ui::MinimapMapping &p_m, bool (*p_inside)(float, float)) {
 	std::vector<bool> out(size_t(p_side) * p_side);
 	for (uint32_t j = 0; j < p_side; ++j) {
@@ -59,7 +55,7 @@ bool in_corner_box(float p_x, float p_z) {
 	return p_x >= 10.0f && p_x <= 40.0f && p_z >= -60.0f && p_z <= -50.0f;
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-minimap-unit") {
 	TEST_CASE("l8_mip_chain: sizes down to 1x1 and a 2x2 box filter") {
@@ -69,8 +65,8 @@ TEST_SUITE("ui-minimap-unit") {
 		REQUIRE(chain.size() == 3);
 		CHECK(chain[1].width == 2);
 		CHECK(chain[1].height == 1);
-		CHECK(chain[1].texels[0] == 25); // (0 + 10 + 40 + 50) / 4
-		CHECK(chain[1].texels[1] == 45); // (20 + 30 + 60 + 70) / 4
+		CHECK(chain[1].texels[0] == 25);
+		CHECK(chain[1].texels[1] == 45);
 		CHECK(chain[2].width == 1);
 		CHECK(chain[2].height == 1);
 		CHECK(chain[2].texels[0] == 35);
@@ -81,7 +77,7 @@ TEST_SUITE("ui-minimap-unit") {
 			bytes += m.texels.size();
 			CHECK(m.texels.front() == 7);
 		}
-		CHECK(bytes == 5592405); // 4^12 - 1 over 3: the 5.6 MB of design §5.6
+		CHECK(bytes == 5592405);
 		CHECK(ui::l8_mip_chain(ui::L8Image{}).empty());
 		ui::L8Image short_buffer = make_image(4, 4, 1);
 		short_buffer.texels.resize(3);
@@ -91,9 +87,9 @@ TEST_SUITE("ui-minimap-unit") {
 	TEST_CASE("combat_area_union and combat_area_min_field") {
 		ui::L8Image a = make_image(2, 2, 255);
 		ui::L8Image b = make_image(2, 2, 255);
-		a.texels[0] = 10; // inside a
-		b.texels[3] = 100; // inside b (100 / 255 < 0.496)
-		b.texels[2] = 127; // 127 / 255 = 0.498: outside
+		a.texels[0] = 10;
+		b.texels[3] = 100;
+		b.texels[2] = 127;
 		const std::vector<ui::L8Image> masks = { a, ui::L8Image{}, b };
 		bf3::core::Result<std::vector<bool>> u = ui::combat_area_union(masks, 0.496f);
 		REQUIRE(u.ok());
@@ -117,12 +113,11 @@ TEST_SUITE("ui-minimap-unit") {
 		const std::vector<std::array<float, 2>> poly = { { 10.0f, -60.0f }, { 40.0f, -60.0f }, { 40.0f, -50.0f }, { 10.0f, -50.0f } };
 		CHECK(ui::mask_polygon_iou(mask, side, kMap, 0, poly) == doctest::Approx(1.0));
 		for (uint8_t v = 1; v < ui::kMinimapMappingVariants; ++v) {
-			// The box is off both diagonals and its x and z ranges are disjoint, so every sign flip or transpose moves it off
-			// itself.
+
 			CHECK(ui::mask_box_iou(mask, side, kMap, v, box) == doctest::Approx(0.0));
 			CHECK(ui::mask_polygon_iou(mask, side, kMap, v, poly) == doctest::Approx(0.0));
 		}
-		CHECK(std::isnan(ui::mask_box_iou(mask, side + 1, kMap, 0, box))); // size mismatch
+		CHECK(std::isnan(ui::mask_box_iou(mask, side + 1, kMap, 0, box)));
 		const std::vector<bool> huge(size_t(ui::kMaxIouSide + 1) * (ui::kMaxIouSide + 1), false);
 		CHECK(std::isnan(ui::mask_box_iou(huge, ui::kMaxIouSide + 1, kMap, 0, box)));
 		std::vector<std::array<float, 2>> many(ui::kMaxAreaPolygonPoints + 1, { 0.0f, 0.0f });
@@ -166,7 +161,7 @@ TEST_SUITE("ui-minimap-unit") {
 		ui::L8Image img = make_image(2, 2, 200);
 		img.texels[1] = 3;
 		CHECK(img.at_uv({ 0.75f, 0.25f }) == 3);
-		CHECK(img.at_uv({ 5.0f, -1.0f }) == 3); // clamped to the top-right texel
+		CHECK(img.at_uv({ 5.0f, -1.0f }) == 3);
 		CHECK(img.at_uv({ std::nanf(""), 0.0f }) == 255);
 		CHECK(ui::sdf_inside(img.at_uv({ 0.75f, 0.25f }), 0.496f));
 		CHECK_FALSE(ui::sdf_inside(img.at_uv({ 0.25f, 0.25f }), 0.496f));

@@ -1,5 +1,3 @@
-// MeshSet decoder: port of IW4L crates/resource_bf3/src/mesh.rs. Reads happen in the same order as
-// there, so the first error reported for a damaged payload is the same one.
 #include "bf3/core/res/mesh_set.h"
 
 #include "res_reader.h"
@@ -18,9 +16,8 @@ namespace {
 constexpr uint32_t kLodSlots = 5;
 constexpr uint64_t kSubsetBytes = 148;
 constexpr uint64_t kPartMaskBytes = 24;
-constexpr uint64_t kSubsetOverlap = 8; // MeshLod::decode: decoded ranges per region byte
+constexpr uint64_t kSubsetOverlap = 8;
 
-// Rust `f as u16` / `f as u8`: saturating, NaN to 0.
 template <typename T>
 T saturate_cast(float p_value) {
 	if (!(p_value > 0.0f)) {
@@ -194,9 +191,6 @@ ResError parse_lod(Reader &p_r, uint64_t p_at, MeshKind p_kind, uint64_t &r_inli
 	return ResError();
 }
 
-// Channel reader over one subset's vertices. All per-vertex checks of IW4L's element_bytes are
-// vertex-independent once the subset's byte range is known to be inside the vertex region, so they
-// run once per channel (and only when there is a vertex, as there).
 struct VertexReader {
 	Bytes region;
 	uint64_t base = 0;
@@ -211,9 +205,7 @@ struct VertexReader {
 		if (r_size < 0) {
 			return ResError::unsupported("vertex format", uint32_t(p_e.format));
 		}
-		// stride == 0 (only reached with count > 0) makes decode_vertices' range check vacuous and
-		// would leave the u32 count unbounded; IW4L fails here for every sized element too, and for
-		// a 0-byte element it would spin through billions of vertices, so reject it with the same text.
+
 		if (stride == 0 || uint64_t(p_e.offset) + uint64_t(r_size) > stride) {
 			return ResError::malformed("vertex element outside its stride", p_e.offset);
 		}
@@ -234,8 +226,7 @@ struct VertexReader {
 				return e;
 			}
 		}
-		// Reserve only after check(): count is then bounded by region size / stride (stride > 0),
-		// never by the raw u32 header field alone.
+
 		std::vector<std::array<float, N>> out;
 		out.reserve(size_t(count));
 		for (uint64_t v = 0; v < count; v++) {
@@ -352,8 +343,7 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 			if (!e.ok()) {
 				return e;
 			}
-			// The part index is the element's first byte; a 0-byte element (VertexFormat::None) has
-			// none (IW4L panics indexing the empty slice). Reject it before reading.
+
 			if (size < 1) {
 				return ResError::unsupported("part index vertex format", uint32_t(bone_indices->format));
 			}
@@ -380,7 +370,7 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 	if (!e.ok()) {
 		return e;
 	}
-	// Bone channels (not decoded by IW4L; checked after everything it decodes).
+
 	const VertexUsage index_usages[2] = { VertexUsage::BoneIndices, VertexUsage::BoneIndices2 };
 	std::optional<std::vector<std::array<uint16_t, 4>>> *index_outs[2] = { &r_out.bone_indices, &r_out.bone_indices2 };
 	for (int k = 0; k < 2; k++) {
@@ -424,7 +414,7 @@ ResError decode_indices(const MeshSubset &p_subset, Bytes p_region, IndexFormat 
 					r_indices.push_back(read(element));
 				}
 			} else {
-				// Short region: find the element IW4L stops at.
+
 				Reader probe(p_region);
 				for (uint64_t element = start; element < end; element++) {
 					if (!probe.has(element * width, width)) {
@@ -467,7 +457,7 @@ ResError decode_indices(const MeshSubset &p_subset, Bytes p_region, IndexFormat 
 	return ResError();
 }
 
-} // namespace
+}
 
 int vertex_format_bytes(VertexFormat p_format) {
 	switch (p_format) {
@@ -679,10 +669,7 @@ ResError MeshLod::inline_geometry(Bytes p_res, Bytes &r_geometry) const {
 
 ResError MeshLod::decode(Bytes p_geometry, SubsetFilter p_filter, std::vector<DecodedSubset> &r_out) const {
 	r_out.clear();
-	// Subsets may share vertex and index ranges, and each decoded subset owns copies, so a hostile
-	// LOD whose subsets all name its whole regions would multiply them by the subset count. Retail
-	// ranges sum to at most 2x the regions (31,984 MeshSets of all 29 levels; double-sided foliage
-	// such as xp4_leaves_01_mesh); refuse more than kSubsetOverlap times.
+
 	uint64_t vertex_bytes = 0, index_bytes = 0;
 	for (size_t index = 0; index < subsets.size(); index++) {
 		const MeshSubset &subset = subsets[index];
@@ -695,7 +682,7 @@ ResError MeshLod::decode(Bytes p_geometry, SubsetFilter p_filter, std::vector<De
 			r_out.clear();
 			return e;
 		}
-		// decode_subset checked both ranges against the regions, so these sums cannot overflow.
+
 		const uint64_t elements = subset.primitive_type == PrimitiveType::TriangleStrip ? uint64_t(subset.primitive_count) + 2
 																						 : uint64_t(subset.primitive_count) * 3;
 		vertex_bytes += uint64_t(subset.vertex_count) * subset.vertex_stride;
@@ -747,4 +734,4 @@ const SkeletonBone *MeshLod::find_bone(uint32_t p_skeleton_index) const {
 	return nullptr;
 }
 
-} // namespace bf3::core::res
+}

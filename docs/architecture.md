@@ -2,8 +2,10 @@
 
 This page describes the system in the tree today: what the libraries are, how they depend on each other, which
 threads run what, and how data flows from a retail Battlefield 3 install to the screen and over the wire. It is the
-page to read before any design document. The per-track designs with their as-built notes are in
-[design/](design/); the milestone record with its measurements is [history/dev-log.md](history/dev-log.md).
+page to read before any design document, and the only place where the code is explained in words: the code has
+no comments, by rule ([CLAUDE.md](../CLAUDE.md), enforced by the ctest row `hygiene.rules`). The per-track
+designs with their as-built notes are in [design/](design/); the milestone record with its measurements is
+[history/dev-log.md](history/dev-log.md).
 
 ## Shape
 
@@ -76,7 +78,14 @@ is bit-stable per toolchain, not across them.
    ahead of time; the game fills it lazily otherwise.
 4. **Simulation.** `GameServer` holds the slots, steps `SoldierMotor` (a pure `step(state, command)` with a full reset
    each tick), runs `Gunplay`, `TdmRules` and the bot brains, and encodes `Snapshot`s. `ClientSession` predicts its own
-   soldier with the same motor and interpolates the others.
+   soldier with the same motor and interpolates the others. The server tick, in order: commands (one per slot from
+   its jitter buffer by `Command::tick`; a missing one is the last command repeated with edges cleared; a newer
+   sequence for an already buffered tick replaces it, older copies are dropped), command sources (bots and scripted
+   walkers write theirs), motor steps for every live soldier in slot order, rules (projectiles, damage, deaths,
+   `TdmRules::step`, spawns settled and stamped at this tick with full protection, dev Teleport and SpawnAt applied
+   here so the motor's tick precondition holds), lag-compensation history, then every `snapshot_divisor` ticks one
+   `Snapshot` per client with the nearest others first and the rest in a `SnapshotOthers` of the same seq. A slot
+   is the ghost id of its soldier; `SoldierState::events` is ORed per receiving client until its next snapshot.
 5. **Presentation.** The client publishes a `PresentationFrame` and `PresentEvent`s; `bf3_godot` turns them into
    transforms, viewmodel poses, HUD text, effect triggers (`bf3_fx::Triggers`) and audio commands (`bf3_audio`).
    Level geometry goes straight to `RenderingServer` (`level_upload.cpp`); soldiers through skeleton uploads
@@ -98,7 +107,7 @@ with ranges checked at load (`motor_tuning.cpp`, `vehicle_tuning.cpp`, `mechanic
 | the player's movement | `src/bf3_sim/src/soldier_motor.cpp`, `prediction.cpp` |
 | shooting, damage, hit registration | `src/bf3_sim/src/weapons/`, `src/bf3_host/src/gunplay.cpp`, `lag_comp.cpp` |
 | the wire format | `src/bf3_net/src/protocol.cpp` (read/write pairs are adjacent) |
-| the server tick order | `src/bf3_host/include/bf3/host/game_server.h` header comment, `game_server.cpp` `run_tick` |
+| the server tick order | "Data flow" step 4 above, then `game_server.cpp` `run_tick` |
 | TDM rules and the round flow | `src/bf3_host/src/tdm_rules.cpp`, the logic runtime in `src/bf3_sim/src/logic/` |
 | bots | `src/bf3_sim/src/bots/` (perception, walking), `src/bf3_host/src/tdm_brain.cpp`, `firefight_brain.cpp` |
 | what the player sees each frame | `src/bf3_godot/src/level_session*.cpp`, `render_bridge.cpp`, `viewmodel.cpp`, `hud_*.cpp` |
@@ -122,3 +131,11 @@ These are structural, known, and listed so nobody mistakes them for design inten
   reader) are defined in many translation units instead of once in `bf3_core`.
 * `bf3_core` is several libraries in one directory (containers, assets, gameplay tables, level, UI).
 * The build is Windows and MSVC only by policy; Win32 use is confined to about twenty files.
+* The HUD screens (`src/bf3_godot/src/hud_*.cpp`, `spawn_screen.cpp`, `round_end.cpp`, `kill_card.cpp`) are
+  hand-built Godot controls that only borrow the retail fonts and atlas regions. The rule is the retail SWF movies
+  rendered as they are (CLAUDE.md "Native Battlefield 3 UI only"); the SWF decoders in `bf3_core/ui/` stop at
+  symbol tables, atlases, fonts and layout positions, so the renderer and the screen logic are the open work.
+* The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
+  earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
+  (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install
+  measurements, with the existing install tests as the gate that nothing changes.

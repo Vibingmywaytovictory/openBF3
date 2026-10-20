@@ -1,6 +1,3 @@
-// Impact selection from the level's material grid (impact_table.h; docs/design/m2a-vfx1.md §6.10, §5.3): every cell's
-// PhysicsMaterialProperties (effect, decal and sound relations), the MaterialIndexMap, the MaterialPairs and the
-// container's names.
 #include "bf3/fx/impact_table.h"
 
 #include "fx_ebx.h"
@@ -21,9 +18,6 @@ constexpr size_t kMaxImpactEffects = 64;
 constexpr size_t kMaxPairs = 1u << 20;
 constexpr size_t kMaxRelationsPerCell = 64;
 
-// A strict weak order over every ImpactCell field: the content key that deduplicates cells in O(log U) comparisons
-// each (U = distinct cells so far), so a hostile grid of distinct cells costs O(n^2 log n) for its n^2 cells, never
-// a scan of every earlier cell per cell. max_spread_degrees is finite (Reader::number), so < is a total order on it.
 struct CellLess {
 	bool operator()(const ImpactCell &p_a, const ImpactCell &p_b) const {
 		return std::tie(p_a.effects, p_a.debris, p_a.max_spread_degrees, p_a.mirror_impact_direction, p_a.has_effect_relation, p_a.decal, p_a.impact_sound) <
@@ -31,7 +25,6 @@ struct CellLess {
 	}
 };
 
-// The work units one key comparison of p_cell pays for: one plus one per kBytesPerUnit bytes of its strings.
 size_t cell_key_units(const ImpactCell &p_cell) {
 	size_t bytes = p_cell.decal.size() + p_cell.impact_sound.size();
 	for (const std::string &e : p_cell.effects) {
@@ -43,7 +36,6 @@ size_t cell_key_units(const ImpactCell &p_cell) {
 	return 1 + bytes / core::gameplay::WorkBudget::kBytesPerUnit;
 }
 
-// MaterialContainerPair instances of a container partition: instance GUID -> PhysicsMaterialIndex.
 void add_pairs(detail::Reader &r_r, const core::EbxPartition &p_container, std::unordered_map<core::Guid, uint8_t, core::GuidHash> &r_pairs) {
 	for (const core::EbxInstance &inst : p_container.instances_of("MaterialContainerPair")) {
 		if (!r_r.charge()) {
@@ -62,7 +54,7 @@ void add_pairs(detail::Reader &r_r, const core::EbxPartition &p_container, std::
 	}
 }
 
-} // namespace
+}
 
 core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::string_view p_grid, core::gameplay::WorkBudget &r_budget,
 		std::span<const core::EbxResolver *const> p_fallbacks) {
@@ -110,12 +102,12 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 	}
 	out.rows_ = n;
 	out.cells_.assign(n * n, 0);
-	out.unique_.emplace_back(); // [0]: the empty cell
+	out.unique_.emplace_back();
 	std::set<uint32_t> effect_relations;
 	std::set<uint32_t> decal_relations;
-	// Relation instances are shared between cells: read each once.
+
 	std::map<std::vector<uint32_t>, uint32_t> by_relations;
-	// Distinct cells by content (different relation instances can hold the same content): cell -> index in unique_.
+
 	std::map<ImpactCell, uint32_t, CellLess> by_content;
 	for (size_t row = 0; row < n; ++row) {
 		for (size_t col = 0; col < n; ++col) {
@@ -141,7 +133,7 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 				}
 				rel.push_back(ref->index);
 			}
-			if (!r.charge(1 + rel.size())) { // the by_relations lookup compares relation lists
+			if (!r.charge(1 + rel.size())) {
 				return r.error();
 			}
 			const auto known = by_relations.find(rel);
@@ -224,7 +216,6 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 	out.effect_relations_ = effect_relations.size();
 	out.decal_relations_ = decal_relations.size();
 
-	// The container (names, pairs) through DefaultMaterial; the delta levels' fallback rule of MaterialGrid::load.
 	const std::optional<core::EbxRef> def = r.ref(g, "DefaultMaterial");
 	const core::OptionalEbxArray grid_pairs = r.array(g, "MaterialPairs", kMaxPairs);
 	if (!r.ok()) {
@@ -303,4 +294,4 @@ std::string_view ImpactTable::material_name(uint8_t p_index) const {
 	return p_index < names_.size() ? std::string_view(names_[p_index]) : std::string_view();
 }
 
-} // namespace bf3::fx
+}

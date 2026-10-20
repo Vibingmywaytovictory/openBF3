@@ -1,5 +1,3 @@
-// The ui1 Godot check (bf3_godot ui_font_check.h; docs/design/ui-swf-fonts.md §1 G4/G5, §11): rows for BF3's fonts as
-// Godot FontFiles, the iconsingame atlas, the HUD table and the install; the three screenshot pages.
 #include "ui_font_check.h"
 
 #include "bf3_localisation.h"
@@ -56,7 +54,6 @@ constexpr int kSize = 64;
 constexpr double kSwfToPx = double(kSize) / double(ui::kSwfFontUnitsPerEm);
 constexpr const char *kShotFiles[3] = { "ui1_fonts.png", "ui1_coverage.png", "ui1_icons.png" };
 
-// Decodes UTF-8 (the text database's strings) into code points; invalid bytes are skipped.
 void utf8_codes(std::string_view p_text, std::vector<uint32_t> &r_out) {
 	r_out.clear();
 	for (size_t i = 0; i < p_text.size();) {
@@ -104,13 +101,13 @@ struct FontSource {
 	std::string name;
 	std::string error;
 	ui::SwfFontOutlines outlines;
-	std::map<uint16_t, uint32_t> first_glyph; // code -> source glyph
-	std::map<uint32_t, int32_t> kerning; // left << 16 | right (codes) -> adjust
+	std::map<uint16_t, uint32_t> first_glyph;
+	std::map<uint32_t, int32_t> kerning;
 	ui::TrueTypeFont ttf;
 	std::string ttf_error;
 };
 
-} // namespace
+}
 
 struct Bf3UiFontCheck::Work {
 	std::vector<FontSource> fonts;
@@ -120,7 +117,7 @@ struct Bf3UiFontCheck::Work {
 	size_t library_names = 0;
 	size_t library_exact = 0;
 	size_t strings = 0;
-	std::map<uint32_t, size_t> missing; // code point -> occurrences, characters Purista EA Medium lacks
+	std::map<uint32_t, size_t> missing;
 	std::string text_error;
 };
 
@@ -144,7 +141,7 @@ void Bf3UiFontCheck::_ready() {
 	page_ = page.empty() ? 0 : std::clamp(std::atoi(page.c_str()), 0, 2);
 	set_anchors_and_offsets_preset(PRESET_FULL_RECT);
 	if (!shot_dir_.empty()) {
-		// 1280 x 720 at 1:1 pixels, so the shots show the fonts at their nominal sizes.
+
 		Window *w = get_window();
 		w->set_content_scale_mode(Window::CONTENT_SCALE_MODE_DISABLED);
 		w->set_size(Vector2i(1280, 720));
@@ -163,7 +160,7 @@ void Bf3UiFontCheck::start_work(Bf3UiAssets &p_assets) {
 		db = loc->database();
 	}
 	worker_ = std::thread([this, w, movies, fonts, db]() {
-		// Source outlines of each converted font, and its TrueType read back.
+
 		const std::string &lib_name = fonts->mapping().font_library;
 		bf3::core::Result<std::shared_ptr<const ui::SwfMovie>> lib = movies->load(lib_name);
 		for (const ui::ConvertedFont &f : fonts->fonts()) {
@@ -205,7 +202,7 @@ void Bf3UiFontCheck::start_work(Bf3UiAssets &p_assets) {
 			}
 			w->fonts.push_back(std::move(s));
 		}
-		// The font names of every movie (G6's census; atlases and textures are G1's business).
+
 		ui::SwfCensusOptions co;
 		co.check_atlas_textures = false;
 		co.build_atlas_maps = false;
@@ -217,7 +214,7 @@ void Bf3UiFontCheck::start_work(Bf3UiAssets &p_assets) {
 			w->rules = census->totals.font_names_by_rule;
 			w->family = census->totals.family_names;
 		}
-		// Coverage of the text database by Purista EA Medium.
+
 		const ui::ConvertedFont *purista = fonts->find("Purista EA Medium");
 		if (db && purista != nullptr) {
 			std::set<uint32_t> have(purista->codes.begin(), purista->codes.end());
@@ -293,7 +290,7 @@ void Bf3UiFontCheck::_process(double p_delta) {
 	if (shot_dir_.empty()) {
 		return;
 	}
-	// One page per few frames, captured after it has been drawn.
+
 	queue_redraw();
 	if (++frames_on_page_ < 8) {
 		return;
@@ -346,11 +343,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 	auto add = [&](const std::string &p_name, bool p_pass, const std::string &p_detail) { rows_.push_back({ p_name, p_pass, p_detail }); };
 	Ref<TextServer> ts = TextServerManager::get_singleton()->get_primary_interface();
 	const ui::UiFontLibrary &lib = *p_assets.fonts();
-	// The width of one shaped line, unrounded: the sum of its shaped glyph advances (HarfBuzz's 26.6 values with the
-	// kerning applied; measured fractional, e.g. 39.8125 px for Purista's "0" at 64 px). Font.get_string_size() and
-	// TextServer.shaped_text_get_width() both return the line width ceil()ed to whole pixels on Godot 4.8 dev7
-	// (measured: 367.000 px for a 366.519 px line, 404.000 px for Venice's 10 x 40.3125 px), so they cannot carry a
-	// 0.5 px or 0.25 px tolerance.
+
 	auto shaped_width = [&](const Ref<FontFile> &p_font, const String &p_text) {
 		const RID sh = ts->create_shaped_text();
 		ts->shaped_text_add_string(sh, p_text, p_font->get_rids(), kSize);
@@ -371,7 +364,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 		const std::string &name = src.name;
 		const ui::ConvertedFont *cf = lib.find(name);
 		Ref<FontFile> ff = p_assets.get_font_file(to_godot(name));
-		// fonts.set_data
+
 		add("fonts.set_data " + name, ff.is_valid() && cf != nullptr,
 				ff.is_valid() ? fmt("FontFile.set_data(%zu bytes) accepted, get_font_name() '%s'", cf ? cf->ttf.size() : 0, to_std(ff->get_font_name()).c_str())
 							  : std::string("FontFile refused"));
@@ -383,7 +376,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 		const RID rid = rids.size() > 0 ? RID(rids[0]) : RID();
 		const ui::SwfFontOutlines &o = src.outlines;
 		const ui::TrueTypeFont &tt = src.ttf;
-		// fonts.glyphs
+
 		{
 			const String supported = ff->get_supported_chars();
 			size_t missing = 0;
@@ -398,12 +391,12 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 							tt.glyphs.size(), o.glyphs.size(), static_cast<long long>(supported.length()), cf->codes.size(), missing,
 							static_cast<long long>(ts_glyphs)));
 		}
-		// fonts.contours: count and orientation of every glyph's contours as FreeType reads them.
+
 		{
 			size_t glyphs_bad = 0;
 			size_t contours = 0;
 			size_t orientation_bad = 0;
-			int sign = 0; // +1 / -1: Godot's y axis relative to TrueType's, fixed by the first non-degenerate contour
+			int sign = 0;
 			for (size_t g = 0; g < tt.glyphs.size(); ++g) {
 				const ui::TrueTypeGlyph &tg = tt.glyphs[g];
 				const Dictionary d = ts->font_get_glyph_contours(rid, kSize, int64_t(g));
@@ -441,7 +434,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 						"with another orientation than the writer's (Godot y %s)",
 							tt.glyphs.size(), contours, kSize, glyphs_bad, orientation_bad, sign < 0 ? "down" : "up"));
 		}
-		// fonts.metrics
+
 		{
 			const double ascent = ff->get_ascent(kSize);
 			const double want_ascent = double(tt.ascender) * kSize / double(tt.units_per_em);
@@ -489,7 +482,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 			}
 			add("fonts.metrics " + name, pass, detail);
 		}
-		// fonts.kerning (Purista)
+
 		if (name.rfind("Purista", 0) == 0) {
 			const double a = shaped_width(ff, "A");
 			const double v = shaped_width(ff, "V");
@@ -502,7 +495,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 							k == src.kerning.end() ? 0 : k->second, want));
 		}
 	}
-	// fonts.metro
+
 	{
 		const String text = tr(StringName("ID_M_LEVELNAME_MP_SUBWAY"));
 		Ref<FontFile> ff = p_assets.get_font_file("Purista EA Medium");
@@ -518,7 +511,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 				fmt("tr(ID_M_LEVELNAME_MP_SUBWAY) = \"%s\"%s; %zu characters without a Purista EA Medium glyph", to_std(text).c_str(),
 						same ? "" : " (expected OPERATION MÉTRO)", zero));
 	}
-	// fonts.mapping
+
 	{
 		std::string fam;
 		for (const std::string &n : w.family) {
@@ -529,7 +522,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 												 p_assets.movies()->movies().size(), w.rules[0], w.rules[1], w.rules[2], w.rules[3], w.rules[4], fam.c_str())
 									   : w.census_error);
 	}
-	// fonts.coverage (reported)
+
 	{
 		size_t occurrences = 0;
 		std::string first;
@@ -545,7 +538,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 											   w.strings, w.missing.size(), occurrences, first.c_str())
 									 : "(reported) " + w.text_error);
 	}
-	// atlas.iconsingame
+
 	const ui::SwfAtlasMap *map = p_assets.atlas_map("ui/assets/iconsingame");
 	{
 		Ref<Texture2D> tex = map != nullptr && !map->images.empty() ? p_assets.atlas_texture(map->movie, map->images[0].image_id) : Ref<Texture2D>();
@@ -564,7 +557,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 							s.sub_images_from_frames));
 		}
 	}
-	// atlas.regions
+
 	{
 		struct Spot {
 			const char *region;
@@ -595,7 +588,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 					"mc_iconsIngameSmall/FriendlyPlayer %s",
 						std::size(spots), bad, static_cast<long long>(two.size()), empty_ok ? "empty" : "not empty"));
 	}
-	// hud.table
+
 	{
 		size_t total = 0;
 		size_t screens = 0;
@@ -622,7 +615,7 @@ void Bf3UiFontCheck::run_checks(Bf3UiAssets &p_assets) {
 				fmt("%zu placements on %zu screens; Ammo_01, Health_01, LatencyIndicator_01, Minimap_01, SquadList_00, HudMessage_02 %s", total, screens,
 						spots ? "at their §8.2 positions" : "NOT at their §8.2 positions"));
 	}
-	// install.unchanged
+
 	{
 		Bf3Localisation *loc = Bf3Localisation::current();
 		if (loc == nullptr || !loc->install_snapshot_at_start().valid) {
@@ -755,7 +748,7 @@ void Bf3UiFontCheck::draw_icons_page(Bf3UiAssets &p_assets) {
 		const float y = 6.0f + float(n / columns) * cell_h;
 		++n;
 		draw_rect(Rect2(x, y, cell_w - 2, cell_h - 2), Color(0.22f, 0.22f, 0.24f));
-		// Bounds of the pieces in the symbol's space, then fit into the cell (at most 1.5x).
+
 		float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
 		for (const ui::SwfAtlasPiece &p : r.pieces) {
 			const float w = float(p.x2 - p.x1);
@@ -790,4 +783,4 @@ void Bf3UiFontCheck::draw_icons_page(Bf3UiAssets &p_assets) {
 	}
 }
 
-} // namespace bf3::godot_side
+}

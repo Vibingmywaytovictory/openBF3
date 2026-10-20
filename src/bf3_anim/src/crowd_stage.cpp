@@ -1,4 +1,3 @@
-// The S3 staged crowd: schedule, inputs and blend coverage (docs/design/s3.md §5.8). See crowd_stage.h.
 #include "bf3/anim/crowd_stage.h"
 
 #include <algorithm>
@@ -8,23 +7,22 @@ namespace bf3::anim {
 
 namespace {
 
-constexpr double kOffsetSeconds = 0.731; // soldier i starts its schedule i * 0.731 s in
-constexpr float kFacingStepDeg = 37.0f; // soldier i faces heading + 180 deg + i * 37 deg
+constexpr double kOffsetSeconds = 0.731;
+constexpr float kFacingStepDeg = 37.0f;
 constexpr float kDeg = 0.0174532925f;
 constexpr float kPi = 3.14159265f;
 
 struct Target {
-	Vec3 local{}; // +z forward, +x the soldier's left (Y up, right-handed; see the header)
-	float pitch = 0.0f; // radians
-	float facing_turn = 0.0f; // radians the facing has turned since the phase start (RunCircle)
+	Vec3 local{};
+	float pitch = 0.0f;
+	float facing_turn = 0.0f;
 };
 
 Vec3 dir_local(float p_deg, float p_speed) {
-	// p_deg measured from forward (+z) towards the left (+x).
+
 	return Vec3{ std::sin(p_deg * kDeg) * p_speed, 0.0f, std::cos(p_deg * kDeg) * p_speed };
 }
 
-// The unramped target of phase p_phase at p_u seconds into it.
 Target target_of(const CrowdStageSpec &p_spec, StagePhase p_phase, float p_u) {
 	Target t;
 	const float side = p_spec.side_factor * p_spec.run_speed;
@@ -47,7 +45,7 @@ Target target_of(const CrowdStageSpec &p_spec, StagePhase p_phase, float p_u) {
 			t.local = p_u < p_spec.phase_seconds * 0.5f ? dir_local(45.0f, p_spec.circle_speed) : dir_local(-135.0f, p_spec.circle_speed);
 			break;
 		case StagePhase::RunCircle: {
-			// The world velocity holds while the facing turns: in the soldier's frame the direction turns the other way.
+
 			t.facing_turn = p_spec.circle_turn_deg_s * kDeg * p_u;
 			t.local = dir_local(-p_spec.circle_turn_deg_s * p_u, p_spec.circle_speed);
 			break;
@@ -74,8 +72,8 @@ Vec3 lerp3(const Vec3 &p_a, const Vec3 &p_b, float p_t) {
 
 struct Schedule {
 	StagePhase phase = StagePhase::Idle;
-	float u = 0.0f; // seconds into the phase
-	double soldier_t = 0.0; // the soldier's own schedule time
+	float u = 0.0f;
+	double soldier_t = 0.0;
 };
 
 Schedule schedule_of(const CrowdStageSpec &p_spec, uint32_t p_i, double p_t) {
@@ -94,7 +92,6 @@ Schedule schedule_of(const CrowdStageSpec &p_spec, uint32_t p_i, double p_t) {
 	return s;
 }
 
-// The ramped local velocity, pitch and facing turn of a schedule point.
 Target ramped(const CrowdStageSpec &p_spec, const Schedule &p_s) {
 	const float ramp = p_spec.ramp_seconds > 0.0f ? p_spec.ramp_seconds : 0.0f;
 	Target t = target_of(p_spec, p_s.phase, p_s.u);
@@ -113,7 +110,7 @@ Target ramped(const CrowdStageSpec &p_spec, const Schedule &p_s) {
 	return t;
 }
 
-} // namespace
+}
 
 StagePhase stage_phase(const CrowdStageSpec &p_spec, uint32_t p_i, double p_t) {
 	return schedule_of(p_spec, p_i, p_t).phase;
@@ -129,7 +126,7 @@ CrowdSoldierInput stage_input(const CrowdStageSpec &p_spec, uint32_t p_i, double
 	const Target t = ramped(p_spec, s);
 	const float base_yaw = p_spec.heading + kPi + float(p_i) * kFacingStepDeg * kDeg;
 	in.yaw = std::remainder(base_yaw + t.facing_turn, 2.0f * kPi);
-	// World velocity = rotate_y(yaw) * local (sim yaw: forward = (sin yaw, 0, cos yaw)).
+
 	const float cy = std::cos(in.yaw), sy = std::sin(in.yaw);
 	in.velocity = Vec3{ t.local.x * cy + t.local.z * sy, 0.0f, -t.local.x * sy + t.local.z * cy };
 	in.pitch = t.pitch;
@@ -139,7 +136,7 @@ CrowdSoldierInput stage_input(const CrowdStageSpec &p_spec, uint32_t p_i, double
 		const float dx = in.position.x - p_camera.x, dy = in.position.y + 1.0f - p_camera.y, dz = in.position.z - p_camera.z;
 		in.camera_distance = std::sqrt(dx * dx + dy * dy + dz * dz);
 	}
-	// kReloadStart on the first frame at or after a Reload phase start: prev < start <= t (soldier time).
+
 	if (std::isfinite(p_prev_t) && std::isfinite(p_t) && p_prev_t < p_t) {
 		const double phase_s = p_spec.phase_seconds > 0.0f ? double(p_spec.phase_seconds) : 4.0;
 		const double period = phase_s * double(kStagePhases);
@@ -190,4 +187,4 @@ StageCoverage stage_coverage(const CrowdStageSpec &p_spec, const std::array<Loco
 	return c;
 }
 
-} // namespace bf3::anim
+}

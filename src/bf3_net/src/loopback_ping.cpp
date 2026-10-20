@@ -60,7 +60,6 @@ PingStats loopback_ping(int p_count, size_t p_payload_bytes, uint32_t p_timeout_
 	}
 	st.port = server->bound_port();
 
-	// Both hosts live on this thread, so service them alternately with zero timeouts.
 	auto pump = [&](Host &h, auto &&on_event) {
 		Host::Event ev;
 		while (h.service(0, ev) > 0) {
@@ -134,4 +133,4 @@ PingStats loopback_ping(int p_count, size_t p_payload_bytes, uint32_t p_timeout_
 	return st;
 }
 
-} // namespace bf3::net
+}

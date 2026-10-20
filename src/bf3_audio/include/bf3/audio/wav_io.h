@@ -1,10 +1,4 @@
 #pragma once
-// WAV files for recordings and analysis (M2a audio; docs/design/m2a-audio.md §9). Derived audio is never committed
-// (plan §2.4): recordings go to b/shots/audio/ (gitignored) or the scratch directory, and every write goes through
-// bf3::core::PathGuard (a path inside the install, or not allowed, fails before anything is opened).
-//
-// Writes RIFF/WAVE, format 3 (IEEE float 32) or 1 (PCM 16), any channel count <= 8. The reader accepts exactly
-// what the writer produces (it is for our own files; bounded by the file size, it still never trusts a chunk size).
 
 #include "bf3/audio/mixer_core.h"
 #include "bf3/core/path_guard.h"
@@ -27,12 +21,10 @@ core::Status write_wav(const core::PathGuard &p_guard, const std::filesystem::pa
 struct WavData {
 	uint32_t channels = 0;
 	uint32_t rate = 0;
-	std::vector<float> samples; // interleaved
+	std::vector<float> samples;
 };
 core::Result<WavData> read_wav(const std::filesystem::path &p_path, uint64_t p_max_bytes = uint64_t(1) << 30);
 
-// A MixTap that copies blocks into a preallocated buffer of p_max_seconds (audio thread: memcpy only; past the end
-// it counts dropped frames), written out by save() on the game thread after the audio thread stopped using it.
 class WavRecorder final : public MixTap {
 public:
 	WavRecorder(uint32_t p_rate, double p_max_seconds);
@@ -48,4 +40,4 @@ private:
 	std::atomic<uint64_t> dropped_{ 0 };
 };
 
-} // namespace bf3::audio
+}

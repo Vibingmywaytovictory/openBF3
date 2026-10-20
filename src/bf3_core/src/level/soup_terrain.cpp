@@ -1,10 +1,3 @@
-// The soup's terrain record (TC, docs/design/terrain-collision.md §5.1, §6): one terrain cell's two triangles, a tile's
-// terrain triangles and the whole grid's hash, made on demand from SoupTerrain::grid and frame. The cell rule is the one
-// build_collision_soup applied to the cells around the Havok tiles before TC (ported from IW4L level_bf3
-// collision/terrain.rs, Apache-2.0; research/probes/tools/level-oracle `terrain` is its parity oracle), now over every
-// cell: corners a = (x, z), b = (x + 1, z), c = (x, z + 1), d = (x + 1, z + 1) give (a, d, b) and (a, c, d) at the
-// object's frame, each wound to face +Y; a cell with a hole corner is open; rows along +Z, cells along +X. Float
-// operations keep the order of the code before TC, so the triangles and hashes are bit for bit the same.
 #include "soup_terrain_internal.h"
 
 #include "bf3/core/level/collision_soup.h"
@@ -22,8 +15,6 @@ namespace {
 
 using res::Transform;
 
-// Tile index of a cell centre (grid coordinates, f64); false when it is not a sane coordinate (the cell is skipped,
-// as before TC and in the oracle).
 bool centre_tile(float p_origin, float p_spacing, size_t p_index, int32_t &r_tile) {
 	const double centre = double(p_origin) + (double(p_index) + 0.5) * double(p_spacing);
 	const double tile = std::floor(centre / 64.0);
@@ -34,7 +25,6 @@ bool centre_tile(float p_origin, float p_spacing, size_t p_index, int32_t &r_til
 	return true;
 }
 
-// Winds a terrain triangle to face +Y (Havok's counter-clockwise front).
 std::array<res::Vec3, 3> face_up(const std::array<res::Vec3, 3> &p_t) {
 	const res::Vec3 &a = p_t[0];
 	const res::Vec3 &b = p_t[1];
@@ -59,13 +49,11 @@ bool hole_cell(const res::HeightGrid &p_grid, size_t p_x, size_t p_z) {
 	return p_grid.hole(p_x, p_z) || p_grid.hole(p_x + 1, p_z) || p_grid.hole(p_x, p_z + 1) || p_grid.hole(p_x + 1, p_z + 1);
 }
 
-// One cell with the quantised corners of its kept triangles (the hash and the tile need them).
 struct CellQ {
 	SoupTerrainCell cell;
 	std::array<std::array<int64_t, 9>, 2> q{};
 };
 
-// The cell of a valid grid (0 <= x < width - 1, 0 <= z < height - 1): the code before TC, line for line.
 void make_cell(const res::HeightGrid &p_grid, const Transform &p_frame, uint32_t p_placement, size_t p_x, size_t p_z, CellQ &r_out) {
 	r_out.cell = SoupTerrainCell();
 	if (hole_cell(p_grid, p_x, p_z)) {
@@ -111,7 +99,6 @@ uint64_t triangle_hash(const std::array<int64_t, 9> &p_q, const SoupTriangle &p_
 	return h;
 }
 
-// Per column: its centre tile, or none (the cell is skipped).
 void column_tiles(const res::HeightGrid &p_grid, std::vector<int32_t> &r_tiles, std::vector<uint8_t> &r_ok) {
 	const size_t cells = p_grid.width - 1;
 	r_tiles.assign(cells, 0);
@@ -121,9 +108,6 @@ void column_tiles(const res::HeightGrid &p_grid, std::vector<int32_t> &r_tiles, 
 	}
 }
 
-// The cell rows and columns that can hold a triangle whose soup tile is p_tile: for a frame that keeps Y vertical (any
-// rotation about Y, any scale; every retail terrain: the identity) the tile square mapped back into grid coordinates,
-// one cell of margin; for any other frame the whole grid. Half-open ranges.
 void tile_cell_range(const res::HeightGrid &p_grid, const Transform &p_frame, const std::array<int32_t, 2> &p_tile, size_t &r_x0, size_t &r_x1,
 		size_t &r_z0, size_t &r_z1) {
 	const size_t cw = p_grid.width - 1;
@@ -138,7 +122,7 @@ void tile_cell_range(const res::HeightGrid &p_grid, const Transform &p_frame, co
 	if (ax[1] != 0.0f || az[1] != 0.0f || ay[0] != 0.0f || ay[2] != 0.0f) {
 		return;
 	}
-	// World (wx, wz) = origin + lx * ax + lz * az over X / Z; local = inverse of that 2 x 2 map.
+
 	const double a = ax[0], b = az[0], c = ax[2], d = az[2];
 	const double det = a * d - b * c;
 	const double ox = p_grid.origin_xz[0], oz = p_grid.origin_xz[1];
@@ -183,10 +167,10 @@ struct RowSums {
 	size_t triangles = 0;
 	size_t degenerate = 0;
 	size_t nonfinite = 0;
-	std::vector<SoupTerrainTileSum> tiles; // first-appearance order within the row
+	std::vector<SoupTerrainTileSum> tiles;
 };
 
-} // namespace
+}
 
 void soup_terrain_census(const res::HeightGrid &p_grid, unsigned p_threads, size_t &r_cells, size_t &r_open) {
 	r_cells = 0;
@@ -289,7 +273,7 @@ Result<SoupTerrainHash> hash_soup_terrain(const SoupTerrain &p_terrain, uint32_t
 	if (g.width < 2 || g.height < 2) {
 		return out;
 	}
-	// Every cell is visited twice (the tile sums on the lanes, then the serial hash): paid before anything runs.
+
 	BF3_TRY(r_budget.charge(2 * (g.width - 1) * (g.height - 1)));
 	std::vector<int32_t> tiles;
 	std::vector<uint8_t> ok;
@@ -354,7 +338,7 @@ Result<SoupTerrainHash> hash_soup_terrain(const SoupTerrain &p_terrain, uint32_t
 	for (const auto &[tile, m] : merged) {
 		out.tiles.push_back({ tile, m.first, m.second });
 	}
-	// The running hash: one serial pass in emit order.
+
 	CellQ c;
 	for (size_t z = 0; z + 1 < g.height; ++z) {
 		int32_t tz = 0;
@@ -375,4 +359,4 @@ Result<SoupTerrainHash> hash_soup_terrain(const SoupTerrain &p_terrain, uint32_t
 	return out;
 }
 
-} // namespace bf3::core::level
+}

@@ -1,4 +1,3 @@
-// Bf3TpCrowdCheck: tp's check of Bf3GameCrowd in the level (M2a tp; docs/design/m2a-tp.md). See tp_crowd_check.h.
 #include "tp_crowd_check.h"
 
 #include "godot_cache.h"
@@ -30,11 +29,11 @@ using namespace godot;
 
 namespace {
 
-constexpr double kStep = 1.0 / 60.0; // the scripted clock advances one fixed step per display frame
-constexpr double kEnd = 9.0; // seconds of script
-constexpr double kDeathAt = 2.0; // soldier 9 dies (Death event), its snapshots stop 0.1 s later
-constexpr double kRespawnAt = 7.0; // soldier 9 back with a new generation
-constexpr double kSwitchAt = 6.0; // soldier 0 switches M16A4 -> M9
+constexpr double kStep = 1.0 / 60.0;
+constexpr double kEnd = 9.0;
+constexpr double kDeathAt = 2.0;
+constexpr double kRespawnAt = 7.0;
+constexpr double kSwitchAt = 6.0;
 
 void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[tp] " + p_line));
@@ -62,13 +61,12 @@ sim::weapons::SimTime sim_time(double p_seconds) {
 	return sim::weapons::SimTime(std::llround(p_seconds * double(sim::weapons::kTimeUnitsPerSecond)));
 }
 
-} // namespace
+}
 
-// The twelve scripted soldiers.
 struct Bf3TpCrowdCheck::Script {
 	struct Soldier {
 		uint8_t slot = 0;
-		uint8_t team = 1; // wire team
+		uint8_t team = 1;
 		const char *variant = "";
 		uint16_t def = sim::weapons::kNoWeapon;
 		sim::Pose pose = sim::Pose::Stand;
@@ -140,8 +138,7 @@ void Bf3TpCrowdCheck::start_loader() {
 		}
 		db_ = std::make_unique<host::LevelDatabase>();
 		db_->install = *opened;
-		// The session's SharedLevel carries the gunplay tables once gx turns SharedLoadOptions::gunplay on; until then the
-		// check loads them itself (the kits name the crowd's items).
+
 		std::shared_ptr<const host::SharedLevel> shared = shared_;
 		if (shared && !shared->gunplay) {
 			core::Result<std::shared_ptr<const host::GunplayLevel>> g = host::load_gunplay_level(*opened, shared->level, shared->mode);
@@ -171,10 +168,9 @@ void Bf3TpCrowdCheck::start_loader() {
 	});
 }
 
-// PT1 run [shots]: --pt1-run moves soldiers 1, 2, 10 and 11 (in place) and takes a shot every 0.05 s over 3.0 .. 3.6 s.
-bool pt1_run_mode(); // PT1 run [shots]
-void pt1_run_soldier(size_t p_k, host::PresentedSoldier &r_o); // PT1 run [shots]
-bool pt1_run_shot_at(double p_t, double p_step); // PT1 run [shots]
+bool pt1_run_mode();
+void pt1_run_soldier(size_t p_k, host::PresentedSoldier &r_o);
+bool pt1_run_shot_at(double p_t, double p_step);
 
 void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSoldier> &r_others, std::vector<host::PresentedOtherWeapon> &r_weapons,
 		std::vector<host::PresentEvent> &r_events) {
@@ -197,7 +193,7 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 		const Script::Soldier &d = s.soldiers[k];
 		const bool victim = k == 9;
 		if (victim && p_t > kDeathAt + 0.1 && p_t < kRespawnAt) {
-			continue; // the server no longer sends a dead soldier
+			continue;
 		}
 		host::PresentedSoldier o;
 		o.slot = d.slot;
@@ -215,21 +211,21 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 		w.team = d.team;
 		w.sample_tick = uint32_t(p_t * 60.0);
 		switch (k) {
-			case 0: // stand idle; switches to the M9 at kSwitchAt
+			case 0:
 				if (p_t >= kSwitchAt && s.m9 != sim::weapons::kNoWeapon) {
 					w.def = s.m9;
 				}
 				break;
-			case 4: // reloads at 1 s and 5 s
+			case 4:
 				w.reload_seq = uint8_t((p_t >= 1.0 ? 1 : 0) + (p_t >= 5.0 ? 1 : 0));
 				break;
-			case 5: // crouch, moving forward at 1.5 m/s (in place: the animation only)
+			case 5:
 				o.velocity = sim::Vec3{ std::sin(d.yaw) * 1.5f, 0.0f, std::cos(d.yaw) * 1.5f };
 				break;
-			case 6: // aims up 30 degrees
+			case 6:
 				o.pitch = 0.52f;
 				break;
-			case 8: { // stand -> prone over 1 s, prone 2 s, prone -> stand over 1 s, stand 2 s (a 6 s cycle)
+			case 8: {
 				const double c = std::fmod(p_t, 6.0);
 				if (c < 2.0) {
 					o.pose = o.target_pose = sim::Pose::Stand;
@@ -249,12 +245,12 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 			default:
 				break;
 		}
-		if (pt1_run_mode()) { // PT1 run [shots]
-			pt1_run_soldier(k, o); // PT1 run [shots]
-		} // PT1 run [shots]
+		if (pt1_run_mode()) {
+			pt1_run_soldier(k, o);
+		}
 		r_others.push_back(o);
 		r_weapons.push_back(w);
-		// Fire: soldier 3 every 0.3 s, soldier 7 every 0.2 s (RemoteShot, sent up to 0.1 s ahead of its render time).
+
 		for (const auto [who, every] : { std::pair{ size_t(3), 0.3 }, std::pair{ size_t(7), 0.2 } }) {
 			if (k != who) {
 				continue;
@@ -267,7 +263,7 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 		}
 	}
 	if (crossed(kDeathAt - 0.05)) {
-		event(host::PresentKind::Death, s.soldiers[3].slot, s.soldiers[9].slot, kDeathAt); // killed by soldier 3
+		event(host::PresentKind::Death, s.soldiers[3].slot, s.soldiers[9].slot, kDeathAt);
 	}
 }
 
@@ -285,7 +281,7 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 		row("t 1.5 s: 12 weapon instances", st.weapon_instances == 12, fmt("%u", st.weapon_instances));
 		row("t 1.5 s: 10 muzzles (no knife, no M67)", st.muzzles == 10, fmt("%u", st.muzzles));
 		row("t 1.5 s: unknown weapons 0", st.unknown_weapons == 0 && script_->unknown_defs == 0, fmt("%u (script defs missing %u)", st.unknown_weapons, script_->unknown_defs));
-		// Soldier 0 (stand, pitch 0): the muzzle sits ahead of the soldier at chest height, its effect +Y along the view.
+
 		bool found = false;
 		for (const fx::MuzzleSample &m : crowd_.muzzles()) {
 			if (m.slot != soldiers[0].slot || m.first_person) {
@@ -350,7 +346,7 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 			return;
 		}
 		built_ = true;
-		// The script on S3's validated stage (s3.md §5.8): two rows of six cells, the soldiers turned toward the camera.
+
 		script_ = std::make_unique<Script>();
 		Script &s = *script_;
 		s.stage.rows = 2;
@@ -409,7 +405,7 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 		camera_->make_current();
 		return;
 	}
-	// One scripted step.
+
 	t_ += kStep;
 	++frame_;
 	std::vector<host::PresentedSoldier> others;
@@ -435,18 +431,18 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 	check_at(t_);
 	if (shots_) {
 		for (const double at : { 1.5, 2.25, 2.6, 6.5 }) {
-			if (pt1_run_mode()) { // PT1 run [shots]: its own sequence instead
-				break; // PT1 run [shots]
-			} // PT1 run [shots]
+			if (pt1_run_mode()) {
+				break;
+			}
 			if (std::fabs(t_ - at) < kStep * 0.5) {
 				const std::string path = path_text(utf8_path(shot_dir_) / ("tp_crowd_" + std::to_string(shot_index_++) + ".png"));
 				log(std::string("shot ") + path + (session_->save_screenshot(path) ? "" : " FAILED"));
 			}
 		}
-		if (pt1_run_mode() && pt1_run_shot_at(t_, kStep)) { // PT1 run [shots]
-			const std::string path = path_text(utf8_path(shot_dir_) / ("pt1_run_" + std::to_string(shot_index_++) + ".png")); // PT1 run [shots]
-			log(std::string("shot ") + path + (session_->save_screenshot(path) ? "" : " FAILED")); // PT1 run [shots]
-		} // PT1 run [shots]
+		if (pt1_run_mode() && pt1_run_shot_at(t_, kStep)) {
+			const std::string path = path_text(utf8_path(shot_dir_) / ("pt1_run_" + std::to_string(shot_index_++) + ".png"));
+			log(std::string("shot ") + path + (session_->save_screenshot(path) ? "" : " FAILED"));
+		}
 	}
 	if (t_ >= kEnd) {
 		const GameCrowdStats end = crowd_.stats();
@@ -494,14 +490,11 @@ void Bf3TpCrowdCheck::shutdown() {
 	cache_.reset();
 }
 
-} // namespace bf3::godot_side
+}
 
-// Called from register_types.cpp (M2a tp named insertion), as hud_controls.cpp registers the M2a hud classes.
 void openbf3_register_m2a_tp() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TpCrowdCheck);
 }
-
-// ---- PT1 run (docs/design/pt1-run.md): --pt1-run, the run captures -------------------------------------------------
 
 #include "bf3/sim/soldier_state.h"
 
@@ -512,8 +505,6 @@ bool pt1_run_mode() {
 	return on;
 }
 
-// In place (the animation only, as soldier 5): 1 runs forward at 4.0 m/s (the motor's stand speed), 2 sprints at 6.5 m/s,
-// 10 strafes left at 3.0 m/s (4.0 * 0.75), 11 crouch-walks forward at 2.0 m/s.
 void pt1_run_soldier(size_t p_k, host::PresentedSoldier &r_o) {
 	const float s = std::sin(r_o.yaw), c = std::cos(r_o.yaw);
 	switch (p_k) {
@@ -545,4 +536,4 @@ bool pt1_run_shot_at(double p_t, double p_step) {
 	return false;
 }
 
-} // namespace bf3::godot_side
+}

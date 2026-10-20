@@ -1,10 +1,3 @@
-// Persistent worker lanes (S3 crowd; docs/design/s3.md §3). See worker_group.h.
-//
-// Items are pulled from one 64-bit counter tagged with the job's generation (high 32 bits) and the next index (low
-// 32 bits). A lane that wakes late, after its job already ended and the next one was kicked, therefore can never
-// take an item of the wrong job: its compare-exchange sees a different generation and it goes back to sleep. Each
-// lane holds its own reference to the job's work function, so a new kick never replaces a function a lane is
-// still calling.
 #include "bf3/core/worker_group.h"
 
 #include "win32_text.h"
@@ -37,16 +30,16 @@ struct WorkerGroup::Impl {
 
 	std::vector<std::thread> threads;
 	mutable std::mutex mutex;
-	std::condition_variable wake; // lanes wait for a job (or stop)
-	std::condition_variable done; // the owner waits for the job's end
-	// Guarded by mutex.
+	std::condition_variable wake;
+	std::condition_variable done;
+
 	std::shared_ptr<const Work> work;
 	size_t count = 0;
-	uint32_t generation = 0; // bumped per kick
+	uint32_t generation = 0;
 	bool stop = false;
-	bool kicked = false; // a job was kicked and wait() has not returned yet
-	// Lock-free.
-	std::atomic<uint64_t> next{ 0 }; // generation << 32 | next item
+	bool kicked = false;
+
+	std::atomic<uint64_t> next{ 0 };
 	std::atomic<size_t> finished{ 0 };
 
 	void lane_main(unsigned p_index, const std::string &p_name) {
@@ -127,7 +120,7 @@ bool WorkerGroup::kick(size_t p_count, std::function<void(size_t)> p_work) {
 		return true;
 	}
 	if (p_count > size_t(UINT32_MAX)) {
-		return false; // the tagged counter holds 32-bit item indices
+		return false;
 	}
 	impl_->work = std::make_shared<const Impl::Work>(std::move(p_work));
 	impl_->count = p_count;
@@ -152,7 +145,7 @@ double WorkerGroup::wait() {
 		blocked = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 	}
 	impl_->kicked = false;
-	impl_->work.reset(); // lanes still holding the job keep their own reference
+	impl_->work.reset();
 	return blocked;
 }
 
@@ -161,4 +154,4 @@ bool WorkerGroup::busy() const {
 	return impl_->kicked;
 }
 
-} // namespace bf3::core
+}

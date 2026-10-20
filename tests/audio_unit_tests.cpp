@@ -1,10 +1,3 @@
-// M2a audio unit tests without data (docs/design/m2a-audio.md §10.1):
-//   audio-xas     hand-built EA-XAS / PCM16 streams: frames against a reference decoder written from the format
-//                 definition, header fields, multi-block walks, StreamDecoder reads and skip_to, hostile streams
-//   audio-patch   synthetic SoundPrograms through PatchInstance: node semantics at edge values, the Sampler model,
-//                 the M16A3 fire-mode network, event pulses and sub-block splits, the program blob and its validator
-//   audio-dsp     biquads, one-pole, gain ramp, pan law, the resampler, and the analysis functions
-//   audio-mixer   MixerCore: grid, rings, frame placement, late commands, ownership, taps, call-size independence
 #include "test_support.h"
 
 #include "bf3/audio/audio_analysis.h"
@@ -36,8 +29,6 @@ using ba::SamplerTraceKind;
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-
-// ---- stream builders ---------------------------------------------------------------------------------------------
 
 void put_be24(std::vector<uint8_t> &r, uint32_t v) {
 	r.push_back(uint8_t(v >> 16));
@@ -75,10 +66,6 @@ std::vector<uint8_t> pcm_stream(const std::vector<int16_t> &p_samples, uint32_t 
 	return r;
 }
 
-// Reference XAS frame decoder, written from the format definition (design §4.2): four groups of 32 samples; group g's
-// 32-bit little-endian header at bytes 4g holds the coefficient pair index (bits 0-1), the first sample in bits 4-15
-// (as a signed 16-bit value with the low nibble cleared), the second in bits 20-31 and the shift (20 - bits 16-19);
-// then 15 rows of 4 bytes, byte g of row r holding samples 2r+2 (high nibble) and 2r+3 (low nibble) of group g.
 std::array<int16_t, 128> reference_xas(const uint8_t *f) {
 	static const int k[4][2] = { { 0, 0 }, { 240, 0 }, { 460, -208 }, { 392, -220 } };
 	std::array<int16_t, 128> out{};
@@ -115,12 +102,11 @@ std::vector<uint8_t> random_xas_frame(std::mt19937 &r_rng, uint32_t p_coef) {
 	}
 	for (int g = 0; g < 4; ++g) {
 		f[4 * g] = uint8_t((f[4 * g] & 0xf0) | p_coef);
-		f[4 * g + 2] = uint8_t((f[4 * g + 2] & 0xf0) | (8 + (r_rng() % 8))); // shift 4..12 keeps the values sane
+		f[4 * g + 2] = uint8_t((f[4 * g + 2] & 0xf0) | (8 + (r_rng() % 8)));
 	}
 	return f;
 }
 
-// An XAS stream: p_blocks data blocks of p_groups frame groups each, p_channels channels, total = all frames.
 std::vector<uint8_t> xas_stream(std::mt19937 &r_rng, uint32_t p_channels, uint32_t p_blocks, uint32_t p_groups, std::vector<std::vector<int16_t>> &r_lanes,
 		uint32_t p_total = 0, bool p_end_block = true) {
 	std::vector<uint8_t> r;
@@ -146,8 +132,6 @@ std::vector<uint8_t> xas_stream(std::mt19937 &r_rng, uint32_t p_channels, uint32
 	}
 	return r;
 }
-
-// ---- program builder ---------------------------------------------------------------------------------------------
 
 struct Builder {
 	SoundProgram p;
@@ -206,7 +190,7 @@ struct Builder {
 	void csetf(uint32_t p_child, uint32_t p_index, float p_value) {
 		p.floats[p.child_nodes[p_child].floats_begin + p_index] = p_value;
 	}
-	// A sampler voice: SnP1 Rsp0 Pau0 Gai0 Sen0 -> GameMixMain. Returns the voice index.
+
 	uint16_t sampler_voice() {
 		SoundVoice v;
 		v.stage = 0;
@@ -226,7 +210,7 @@ struct Builder {
 		p.voice_order.push_back(uint16_t(p.voices.size() - 1));
 		return uint16_t(p.voices.size() - 1);
 	}
-	// A Sampler on p_slots new voices playing program wave p_wave.
+
 	uint32_t sampler(uint32_t p_slots, uint16_t p_wave, SamplerLoop p_loop, uint8_t p_flags = 0) {
 		SoundNode n = make(SoundNodeType::Sampler, uint8_t(p_loop), p_flags);
 		n.waves_begin = uint32_t(p.wave_refs.size());
@@ -259,7 +243,6 @@ std::unique_ptr<ba::PatchInstance> instance(std::shared_ptr<const SoundProgram> 
 	return std::move(*r);
 }
 
-// Bus storage for process_block.
 struct Buses {
 	std::vector<float> storage = std::vector<float>(size_t(MasterBus::Unknown) * 2 * 512, 0.0f);
 	ba::BusBuffers b;
@@ -280,8 +263,6 @@ struct Buses {
 	}
 };
 
-// A wave of p_segments PCM segments of p_frames frames each: segment s holds an impulse of height 1000 * (s + 1) at
-// frame 0 and zeros after, so a segment start is visible in the trace and in the output.
 struct TestWave {
 	std::shared_ptr<const WaveBank> bank;
 	Guid partition;
@@ -326,9 +307,7 @@ std::vector<SamplerTraceEntry> entries(const ba::SamplerTrace &p_trace) {
 	return std::vector<SamplerTraceEntry>(p_trace.entries.begin(), p_trace.entries.begin() + p_trace.count);
 }
 
-} // namespace
-
-// =====================================================================================================================
+}
 
 TEST_SUITE("audio-xas") {
 	TEST_CASE("frames match the reference decoder for every coefficient pair") {
@@ -345,7 +324,7 @@ TEST_SUITE("audio-xas") {
 	TEST_CASE("header fields") {
 		std::vector<uint8_t> s;
 		header_block(s, 4, 6, 44100, 1000);
-		s.resize(s.size() + 76 * 6 * 8 + 8, 0); // room for the frames
+		s.resize(s.size() + 76 * 6 * 8 + 8, 0);
 		Result<SoundStreamHeader> h = parse_stream_header(s, 0);
 		REQUIRE(h.ok());
 		CHECK(h->codec == SoundCodec::EaXas);
@@ -354,7 +333,7 @@ TEST_SUITE("audio-xas") {
 		CHECK(h->total_frames == 1000);
 		CHECK(h->header_bytes == 12);
 		std::vector<uint8_t> hi;
-		header_block(hi, 4, 1, 96000 + 65536, 10); // 18-bit rate
+		header_block(hi, 4, 1, 96000 + 65536, 10);
 		hi.resize(hi.size() + 200, 0);
 		REQUIRE(parse_stream_header(hi, 0).ok());
 		CHECK(parse_stream_header(hi, 0)->sample_rate == 96000 + 65536);
@@ -380,7 +359,7 @@ TEST_SUITE("audio-xas") {
 			CHECK(scan->data_blocks == 3);
 			CHECK(scan->ended_by_end_block);
 			CHECK(scan->stream_bytes == s.size());
-			// Incremental reads in odd sizes.
+
 			StreamDecoder dec;
 			REQUIRE(dec.open(s, 0).ok());
 			std::vector<float> got;
@@ -400,7 +379,7 @@ TEST_SUITE("audio-xas") {
 			}
 			CHECK(exact);
 			CHECK(dec.finished());
-			// skip_to equals decode-and-drop.
+
 			for (uint32_t at : { 0u, 1u, 127u, 128u, 300u, 767u }) {
 				StreamDecoder sk;
 				REQUIRE(sk.open(s, 0).ok());
@@ -431,27 +410,27 @@ TEST_SUITE("audio-xas") {
 			Result<StreamScan> sc = scan_stream(s, 0, true);
 			return !d.ok() && !sc.ok();
 		};
-		// truncated in the middle of a data block
+
 		CHECK(fails(std::vector<uint8_t>(good.begin(), good.begin() + 12 + 8 + 100)));
-		// a block of size 0 / size 3
+
 		{
 			std::vector<uint8_t> s = good;
 			s[12 + 1] = s[12 + 2] = s[12 + 3] = 0;
 			CHECK(fails(s));
 		}
-		// a block size past the end
+
 		{
 			std::vector<uint8_t> s = good;
 			s[12 + 1] = 0x7f;
 			CHECK(fails(s));
 		}
-		// channels out of range: (h[1] >> 2) + 1 = 9
+
 		{
 			std::vector<uint8_t> s = good;
 			s[5] = uint8_t((8 << 2) | (s[5] & 3));
 			CHECK(!parse_stream_header(s, 0).ok());
 		}
-		// rate out of range
+
 		{
 			std::vector<uint8_t> s = good;
 			s[5] &= 0xfc;
@@ -459,31 +438,31 @@ TEST_SUITE("audio-xas") {
 			s[7] = 10;
 			CHECK(!parse_stream_header(s, 0).ok());
 		}
-		// unknown codec
+
 		{
 			std::vector<uint8_t> s = good;
 			s[4] = 7;
 			CHECK(!parse_stream_header(s, 0).ok());
 		}
-		// total frames the bytes cannot hold
+
 		{
 			std::vector<uint8_t> s = good;
 			s[8] = 0x0f;
 			CHECK(!parse_stream_header(s, 0).ok());
 		}
-		// a data block declaring more frames than its body holds
+
 		{
 			std::vector<uint8_t> s = good;
-			s[12 + 4 + 2] = 0x40; // frames field of the first data block
+			s[12 + 4 + 2] = 0x40;
 			CHECK(fails(s));
 		}
-		// another block kind in the middle
+
 		{
 			std::vector<uint8_t> s = good;
 			s[12] = 0x50;
 			CHECK(fails(s));
 		}
-		// data past the header's frames: decoding stops at the header total
+
 		{
 			std::vector<std::vector<int16_t>> l2;
 			const std::vector<uint8_t> s = xas_stream(rng, 1, 2, 2, l2, 300);
@@ -491,7 +470,7 @@ TEST_SUITE("audio-xas") {
 			REQUIRE(d.ok());
 			CHECK(d->frames() == 300);
 		}
-		// no end block: still decodes, reported
+
 		{
 			std::vector<std::vector<int16_t>> l3;
 			const std::vector<uint8_t> s = xas_stream(rng, 1, 1, 1, l3, 0, false);
@@ -500,12 +479,12 @@ TEST_SUITE("audio-xas") {
 			CHECK_FALSE(sc->ended_by_end_block);
 			CHECK(sc->decoded_frames == 128);
 		}
-		// a StreamDecoder on a truncated stream fails mid-read instead of reading past the end
+
 		{
 			std::vector<uint8_t> s(good.begin(), good.begin() + 12 + 8 + 76 * 2 + 8 + 76);
 			s[12 + 8 + 76 * 2 + 1] = 0;
 			s[12 + 8 + 76 * 2 + 2] = 0;
-			s[12 + 8 + 76 * 2 + 3] = 8 + 76 * 2; // claims two frames, holds one
+			s[12 + 8 + 76 * 2 + 3] = 8 + 76 * 2;
 			StreamDecoder dec;
 			if (dec.open(s, 0).ok()) {
 				std::vector<float> buf(1024);
@@ -522,8 +501,6 @@ TEST_SUITE("audio-xas") {
 		}
 	}
 }
-
-// =====================================================================================================================
 
 TEST_SUITE("audio-patch") {
 	TEST_CASE("ScaleClamp, SimpleTransform, Crossfader2 at edge values") {
@@ -575,7 +552,7 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->value(sc) == 310.0f);
 		CHECK(inst->value(step) == 1.0f);
 		CHECK(inst->value(cf1) == 1.0f);
-		// SimpleTransform: X=2, Y=3 for the arithmetic, then the domain errors.
+
 		eval(2, 3);
 		const auto z = [&](SimpleTransformOp op) { return inst->value(ops[size_t(op)]); };
 		CHECK(z(SimpleTransformOp::Add) == 5.0f);
@@ -587,19 +564,19 @@ TEST_SUITE("audio-patch") {
 		CHECK(z(SimpleTransformOp::Sine) == doctest::Approx(std::sin(2.0)));
 		CHECK(z(SimpleTransformOp::SquareRoot) == doctest::Approx(std::sqrt(2.0)));
 		eval(-4, 0);
-		CHECK(z(SimpleTransformOp::Divide) == 0.0f); // by zero
+		CHECK(z(SimpleTransformOp::Divide) == 0.0f);
 		CHECK(z(SimpleTransformOp::Modulus) == 0.0f);
-		CHECK(z(SimpleTransformOp::SquareRoot) == 0.0f); // negative
+		CHECK(z(SimpleTransformOp::SquareRoot) == 0.0f);
 		CHECK(z(SimpleTransformOp::Log) == 0.0f);
 		CHECK(z(SimpleTransformOp::Log10) == 0.0f);
-		CHECK(z(SimpleTransformOp::ArcSine) == 0.0f); // |X| > 1
+		CHECK(z(SimpleTransformOp::ArcSine) == 0.0f);
 		CHECK(z(SimpleTransformOp::ArcCosine) == 0.0f);
 		CHECK(z(SimpleTransformOp::Absolute) == 4.0f);
 		CHECK(z(SimpleTransformOp::Floor) == -4.0f);
 		eval(-2, 0.5f);
-		CHECK(z(SimpleTransformOp::Power) == 0.0f); // negative base, fractional exponent
+		CHECK(z(SimpleTransformOp::Power) == 0.0f);
 		eval(1000, 1);
-		CHECK(z(SimpleTransformOp::Exp) == 0.0f); // overflow -> 0
+		CHECK(z(SimpleTransformOp::Exp) == 0.0f);
 	}
 
 	TEST_CASE("Condition, LogicalExpression, DeMux, Switcher, ValueSelector, SimpleValueSelector") {
@@ -692,7 +669,7 @@ TEST_SUITE("audio-patch") {
 			}
 			inst->evaluate(0.0);
 		};
-		// Condition truth tables (And Or XOr Equal Less Greater LessOrEqual GreaterOrEqual).
+
 		const float xs[] = { 0, 1, 0, 1 }, ys[] = { 0, 0, 1, 1 };
 		const bool expect_and[] = { 0, 0, 0, 1 }, expect_or[] = { 0, 1, 1, 1 }, expect_xor[] = { 0, 1, 1, 0 };
 		for (int i = 0; i < 4; ++i) {
@@ -712,33 +689,33 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->value(cond_out[6]) == 1.0f);
 		CHECK(inst->value(cond_out[7]) == 0.0f);
 		eval(3.0005f, 3, false);
-		CHECK(inst->value(cond_out[3]) == 1.0f); // Equal within 0.001
-		// DeMux floor / clamp / wrap, only on the event.
+		CHECK(inst->value(cond_out[3]) == 1.0f);
+
 		eval(1.7f, 0, true);
 		CHECK(inst->value(demux_clamp[1]) == 1.0f);
 		CHECK(inst->value(demux_clamp[0]) + inst->value(demux_clamp[2]) == 0.0f);
 		eval(1.7f, 0, false);
-		CHECK(inst->value(demux_clamp[1]) == 0.0f); // the pulse lasted one evaluation
+		CHECK(inst->value(demux_clamp[1]) == 0.0f);
 		eval(7.2f, 0, true);
-		CHECK(inst->value(demux_clamp[2]) == 1.0f); // clamped to the last
-		CHECK(inst->value(demux_wrap[1]) == 1.0f); // 7 mod 3
+		CHECK(inst->value(demux_clamp[2]) == 1.0f);
+		CHECK(inst->value(demux_wrap[1]) == 1.0f);
 		eval(-1.5f, 0, true);
 		CHECK(inst->value(demux_clamp[0]) == 1.0f);
-		CHECK(inst->value(demux_wrap[1]) == 1.0f); // floor -2 mod 3 = 1
-		// Switcher: exact case, default case, no event -> nothing.
+		CHECK(inst->value(demux_wrap[1]) == 1.0f);
+
 		eval(1, 0, true);
 		CHECK(inst->value(sw_out[1]) == 1.0f);
 		CHECK(inst->value(sw_out[0]) + inst->value(sw_out[2]) == 0.0f);
 		eval(5, 0, true);
-		CHECK(inst->value(sw_out[2]) == 1.0f); // DefaultCaseValue -1
+		CHECK(inst->value(sw_out[2]) == 1.0f);
 		eval(0, 0, false);
 		CHECK(inst->value(sw_out[0]) == 0.0f);
-		// ValueSelector: case, default (1 -> 20).
+
 		eval(0, 0, false);
 		CHECK(inst->value(vs_out) == 10.0f);
 		eval(9, 0, false);
 		CHECK(inst->value(vs_out) == 20.0f);
-		// SimpleValueSelector: floor and clamp.
+
 		eval(1.99f, 0, false);
 		CHECK(inst->value(svs_out) == doctest::Approx(1.9));
 		eval(-3, 0, false);
@@ -790,7 +767,7 @@ TEST_SUITE("audio-patch") {
 		const std::shared_ptr<const SoundProgram> prog = b.build();
 		auto inst = instance(prog, nullptr, 5);
 		const double dt = 0.001;
-		inst->evaluate(dt); // first evaluation: PFL starts at In (0), NumberGenerator at Min
+		inst->evaluate(dt);
 		CHECK(inst->value(num) == doctest::Approx(1.21f));
 		CHECK(inst->value(adsr) == 0.0f);
 		inst->post_event(1, 0);
@@ -803,7 +780,7 @@ TEST_SUITE("audio-patch") {
 		float lfo_min = 10, lfo_max = -10;
 		uint32_t ticks = 0;
 		bool reached_one = false;
-		for (int i = 0; i < 400; ++i) { // 0.4 s: attack 0.1, decay 0.1, sustain
+		for (int i = 0; i < 400; ++i) {
 			inst->evaluate(dt);
 			t += dt;
 			reached_one = reached_one || inst->value(adsr) >= 0.999f;
@@ -811,7 +788,7 @@ TEST_SUITE("audio-patch") {
 			lfo_max = std::max(lfo_max, inst->value(lfo));
 			ticks += inst->value(tick) == 1.0f ? 1 : 0;
 			if (i == 50) {
-				inst->post_event(1, 0); // a second Fire inside the cool-down is gated
+				inst->post_event(1, 0);
 			}
 			if (i == 51) {
 				CHECK(inst->value(gated) == 0.0f);
@@ -821,8 +798,8 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->value(adsr) == doctest::Approx(0.5f));
 		CHECK(lfo_min == doctest::Approx(0.96f).epsilon(1e-3));
 		CHECK(lfo_max == doctest::Approx(1.0f).epsilon(1e-3));
-		CHECK(ticks == 1); // 0.25 s period over 0.4 s; restarted by the second trigger at 0.05 s
-		// Release: linear to 0 over R x (value / 1), then the Finished pulse.
+		CHECK(ticks == 1);
+
 		inst->post_event(2, 0);
 		inst->evaluate(dt);
 		bool finished = false;
@@ -832,7 +809,7 @@ TEST_SUITE("audio-patch") {
 		}
 		CHECK(finished);
 		CHECK(inst->value(adsr) == 0.0f);
-		// ParameterFilterLinear: up at 10/s, down at 0.5/s.
+
 		inst->set_parameter(3, 1.0f);
 		inst->evaluate(0.05);
 		inst->evaluate(0.0);
@@ -844,7 +821,7 @@ TEST_SUITE("audio-patch") {
 		inst->evaluate(1.0);
 		inst->evaluate(0.0);
 		CHECK(inst->value(pfl) == doctest::Approx(0.5f));
-		// NumberGenerator determinism: same seed, same draw; other seed, other draw.
+
 		auto same = instance(prog, nullptr, 5), other = instance(prog, nullptr, 6);
 		for (auto *p : { same.get(), other.get() }) {
 			p->evaluate(dt);
@@ -882,7 +859,7 @@ TEST_SUITE("audio-patch") {
 		b.set(mcf, cp::McfControl, Builder::R(d));
 		b.set(mcf, cp::McfStart, Builder::R(start));
 		b.set(mcf, cp::McfStop, Builder::R(stop));
-		// The gate: one group 300-301, linear, locked.
+
 		const uint32_t gc = b.child(SoundNodeType::MultiCrossfaderGroup, uint8_t(FaderType::Linear));
 		const uint16_t gate_start = b.reg(), gate_stop = b.reg();
 		b.csetf(gc, cp::GroupFadeAmplitude, 1.0f);
@@ -918,7 +895,7 @@ TEST_SUITE("audio-patch") {
 		at(310);
 		CHECK(inst->value(gs[2].amp) == 0.0f);
 		CHECK(inst->crossfader_group_amplitude(mcf, 2) == 0.0f);
-		// Start passes only to groups with amplitude > 0; the gate blocks it beyond 301 m.
+
 		inst->set_parameter(1, 302);
 		inst->post_event(2, 0);
 		inst->evaluate(0.0);
@@ -929,14 +906,14 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->value(gate_start) == 1.0f);
 		CHECK(inst->value(gs[2].s) == 1.0f);
 		CHECK(inst->value(gs[0].s) == 0.0f);
-		// Lock: the gate keeps the Start-time control (299 m) when the emitter moves to 400 m; its Stop still passes.
+
 		inst->set_parameter(1, 400);
 		inst->evaluate(0.0);
 		CHECK(inst->crossfader_group_amplitude(gate, 0) == 1.0f);
 		inst->post_event(3, 0);
 		inst->evaluate(0.0);
 		CHECK(inst->value(gate_stop) == 1.0f);
-		CHECK(inst->value(gs[2].e) == 1.0f); // started-not-stopped gets the Stop although its amplitude is 0 now
+		CHECK(inst->value(gs[2].e) == 1.0f);
 	}
 
 	TEST_CASE("Sampler: stepped steps on their frames on alternating slots, Delay latched, Release plays the tail") {
@@ -949,7 +926,7 @@ TEST_SUITE("audio-patch") {
 		b.set(s, cp::SmpStep, Builder::R(step));
 		b.set(s, cp::SmpRelease, Builder::R(rel));
 		b.set(s, cp::SmpEnableStep, Builder::R(es));
-		b.set(s, cp::SmpDelay, Builder::C(0.01f)); // 480 frames
+		b.set(s, cp::SmpDelay, Builder::C(0.01f));
 		auto inst = instance(b.build(), w.bank);
 		ba::SamplerTrace trace;
 		trace.entries.resize(64);
@@ -957,12 +934,12 @@ TEST_SUITE("audio-patch") {
 		Buses buses;
 		inst->post_event(1, 100);
 		buses.block(*inst, 0);
-		inst->post_event(2, 300); // Step at 812
+		inst->post_event(2, 300);
 		buses.block(*inst, 512);
 		buses.block(*inst, 1024);
-		inst->post_event(2, 7); // Step at 1543
+		inst->post_event(2, 7);
 		buses.block(*inst, 1536);
-		inst->post_event(3, 0); // Release at 2048
+		inst->post_event(3, 0);
 		for (uint64_t f = 2048; f < 8192; f += 512) {
 			buses.block(*inst, f);
 		}
@@ -975,7 +952,7 @@ TEST_SUITE("audio-patch") {
 		CHECK(e[1].frame == 812 + 480);
 		CHECK(e[1].slot != e[0].slot);
 		CHECK(e[1].segment == 1);
-		// slot 0 ends after its 1000-frame segment (stepped: idle, no advance)
+
 		bool slot0_end = false, tail = false;
 		uint64_t step2 = 0;
 		uint8_t step2_slot = 0;
@@ -988,7 +965,7 @@ TEST_SUITE("audio-patch") {
 			if (x.kind == SamplerTraceKind::Tail) {
 				tail = true;
 				CHECK(x.segment == 4);
-				CHECK(x.slot == step2_slot); // the tail follows the latest segment on its slot
+				CHECK(x.slot == step2_slot);
 				CHECK(x.prev_end == x.frame);
 			}
 		}
@@ -997,7 +974,7 @@ TEST_SUITE("audio-patch") {
 		CHECK(tail);
 		CHECK(e.back().kind == SamplerTraceKind::End);
 		CHECK(inst->finished());
-		// The output carries the impulses on the trace frames (segment 1's impulse is 2000 / 32768).
+
 		Buses again;
 		auto second = instance(std::make_shared<SoundProgram>(inst->program()), w.bank);
 		second->post_event(1, 100);
@@ -1027,7 +1004,7 @@ TEST_SUITE("audio-patch") {
 			for (; f < 6000; f += 512) {
 				buses.block(*inst, f);
 			}
-			inst->post_event(3, 0); // release at 6144: inside a loop segment
+			inst->post_event(3, 0);
 			for (; f < 12000; f += 512) {
 				buses.block(*inst, f);
 			}
@@ -1036,21 +1013,21 @@ TEST_SUITE("audio-patch") {
 			CHECK(e[0].kind == SamplerTraceKind::Trigger);
 			for (size_t i = 1; i + 1 < e.size(); ++i) {
 				CHECK(e[i].slot == e[0].slot);
-				CHECK(e[i].frame == e[i - 1].frame + 1000); // back to back at pitch 1
+				CHECK(e[i].frame == e[i - 1].frame + 1000);
 				CHECK(e[i].prev_end == e[i].frame);
 			}
-			// segments 0, 1, 2, 3, 1, 2, 3 (in order), then the tail 4 once the release came
+
 			CHECK(e[1].segment == 1);
 			CHECK(e[3].segment == 3);
 			CHECK(e[4].segment == 1);
 			const SamplerTraceEntry &tail = e[e.size() - 2];
 			CHECK(tail.kind == SamplerTraceKind::Tail);
 			CHECK(tail.segment == 4);
-			CHECK(tail.frame == 7000); // the segment playing at 6144 (6000-7000) finished first
+			CHECK(tail.frame == 7000);
 			CHECK(e.back().kind == SamplerTraceKind::End);
 		}
 		{
-			// single shot: Trigger and Release in the same evaluation
+
 			auto inst = instance(prog, w.bank);
 			ba::SamplerTrace trace;
 			trace.entries.resize(16);
@@ -1097,15 +1074,14 @@ TEST_SUITE("audio-patch") {
 				}
 				CHECK(exact);
 			} else {
-				// THD+N: energy outside the fundamental's bins vs inside, over 8192 frames from frame 4096, under a
-				// 4-term Blackman-Harris window (-92 dB sidelobes; a Hann window's leakage alone reads -52 dB here).
+
 				std::vector<std::complex<double>> x(8192);
 				for (size_t i = 0; i < x.size(); ++i) {
 					const double a = 2.0 * kPi * double(i) / 8192.0;
 					const double win = 0.35875 - 0.48829 * std::cos(a) + 0.14128 * std::cos(2 * a) - 0.01168 * std::cos(3 * a);
 					x[i] = out[4096 + i] * win;
 				}
-				// plain DFT at the bins (slow but small): fundamental at 1000 x pitch Hz
+
 				double fund = 0.0, rest = 0.0;
 				const double f0 = 1000.0 * pitch;
 				for (int k = 1; k < 4096; k += 1) {
@@ -1176,7 +1152,7 @@ TEST_SUITE("audio-patch") {
 			single->evaluate(0.01);
 			single->post_event(10, 0);
 			single->evaluate(0.01);
-			CHECK(single->value(v100) == 1.0f); // the gated Fire releases in the same evaluation
+			CHECK(single->value(v100) == 1.0f);
 		}
 		{
 			auto automatic = instance(prog);
@@ -1193,7 +1169,7 @@ TEST_SUITE("audio-patch") {
 			auto inst = instance(prog);
 			inst->set_parameter(12, 1.0f);
 			inst->evaluate(0.0);
-			inst->set_parameter(12, 0.0f); // EnableStep falls
+			inst->set_parameter(12, 0.0f);
 			inst->evaluate(after);
 			inst->post_event(11, 0);
 			inst->evaluate(0.0);
@@ -1216,8 +1192,8 @@ TEST_SUITE("audio-patch") {
 		inst->post_event(1, 37);
 		inst->post_event(1, 411);
 		buses.block(*inst, 1024);
-		CHECK(inst->stats().evaluations == 3); // splits at 0, 37, 411
-		CHECK(inst->value(trig) == 1.0f); // the last split's pulse
+		CHECK(inst->stats().evaluations == 3);
+		CHECK(inst->value(trig) == 1.0f);
 		buses.block(*inst, 1536);
 		CHECK(inst->value(trig) == 0.0f);
 		const std::vector<SamplerTraceEntry> e = entries(trace);
@@ -1228,7 +1204,7 @@ TEST_SUITE("audio-patch") {
 	}
 
 	TEST_CASE("Sampler: Release without a tail ends with the playing segment; LtNone stops after its segment") {
-		const TestWave w = make_wave(3, 1000, 1, 2); // intro 0, loop [1, 2], no tail
+		const TestWave w = make_wave(3, 1000, 1, 2);
 		for (SamplerLoop loop : { SamplerLoop::Release, SamplerLoop::None }) {
 			Builder b;
 			const uint16_t trig = b.input(1, true), rel = b.input(3, true);
@@ -1244,7 +1220,7 @@ TEST_SUITE("audio-patch") {
 			inst->post_event(1, 0);
 			buses.block(*inst, 0);
 			buses.block(*inst, 512);
-			inst->post_event(3, 100); // Release at 1124, inside segment 1 (1000-2000)
+			inst->post_event(3, 100);
 			for (uint64_t f = 1024; f < 8192; f += 512) {
 				buses.block(*inst, f);
 			}
@@ -1266,37 +1242,36 @@ TEST_SUITE("audio-patch") {
 			return order_by_register_dependencies(p_reads, p_writes, p_regs, budget, r_feedback);
 		};
 		size_t fb = 0;
-		// a chain written backwards: node 2 writes v3, node 1 reads v3 and writes v2, node 0 reads v2 and writes v1
+
 		Result<std::vector<uint32_t>> r = order({ { 2 }, { 3 }, {} }, { { 1 }, { 2 }, { 3 } }, 4, fb);
 		REQUIRE(r.ok());
 		CHECK(*r == std::vector<uint32_t>{ 2, 1, 0 });
 		CHECK(fb == 0);
-		// independent nodes keep their index order; a node reading its own output adds no edge
+
 		fb = 0;
 		r = order({ { 1 }, {}, { 5 } }, { { 1 }, { 4 }, { 5 } }, 6, fb);
 		REQUIRE(r.ok());
 		CHECK(*r == std::vector<uint32_t>{ 0, 1, 2 });
 		CHECK(fb == 0);
-		// a two-node cycle (0 reads v1 written by 1, 1 reads v2 written by 0) plus a reader of both: the cycle is broken
-		// at node 0 with one feedback edge, then 1, then 2
+
 		fb = 0;
 		r = order({ { 1 }, { 2 }, { 1, 2 } }, { { 2 }, { 1 }, {} }, 3, fb);
 		REQUIRE(r.ok());
 		CHECK(*r == std::vector<uint32_t>{ 0, 1, 2 });
 		CHECK(fb == 1);
-		// a three-node ring 0 -> 1 -> 2 -> 0: one feedback edge
+
 		fb = 0;
 		r = order({ { 3 }, { 1 }, { 2 } }, { { 1 }, { 2 }, { 3 } }, 4, fb);
 		REQUIRE(r.ok());
 		CHECK(*r == std::vector<uint32_t>{ 0, 1, 2 });
 		CHECK(fb == 1);
-		// hostile: a register out of range, mismatched lengths, and a fan-in larger than the budget
+
 		fb = 0;
 		CHECK_FALSE(order({ { 9 } }, { {} }, 4, fb).ok());
 		CHECK_FALSE(order({ {} }, { { 9 } }, 4, fb).ok());
 		CHECK_FALSE(order({ {}, {} }, { {} }, 4, fb).ok());
 		Regs reads(200, std::vector<uint16_t>{ 1 }), writes(200, std::vector<uint16_t>{ 1 });
-		CHECK_FALSE(order(reads, writes, 2, fb, 1000).ok()); // 200 x 199 edges > 1,000
+		CHECK_FALSE(order(reads, writes, 2, fb, 1000).ok());
 	}
 	TEST_CASE("program blob: round trip, corrupted bytes, connection misreads") {
 		const TestWave w = make_wave(5, 1000, 1, 3);
@@ -1313,7 +1288,7 @@ TEST_SUITE("audio-patch") {
 		Result<SoundProgram> back = decode_sound_program(blob);
 		REQUIRE(back.ok());
 		CHECK(encode_sound_program(*back) == blob);
-		// Every single-byte corruption is refused or decodes to a program that validates and runs.
+
 		std::mt19937 rng(9);
 		size_t refused = 0, accepted = 0;
 		for (size_t i = 0; i < blob.size(); ++i) {
@@ -1343,7 +1318,7 @@ TEST_SUITE("audio-patch") {
 		std::vector<uint8_t> trailing = blob;
 		trailing.push_back(0);
 		CHECK_FALSE(decode_sound_program(trailing).ok());
-		// ConnectionIndex misreads: N (one past, as a 0-based read of 1-based data), a duplicate, a gap.
+
 		SoundProgram p = *prog;
 		const auto sen0 = [&](size_t k) -> SoundVoicePlugin & {
 			size_t seen = 0;
@@ -1360,19 +1335,17 @@ TEST_SUITE("audio-patch") {
 		sen0(1).connection = sen0(0).connection;
 		CHECK_FALSE(validate_sound_program(p).ok());
 		p = *prog;
-		p.connections.push_back(SoundConnection{ true, 0, MasterBus::GameMixMain }); // named by nobody
+		p.connections.push_back(SoundConnection{ true, 0, MasterBus::GameMixMain });
 		CHECK_FALSE(validate_sound_program(p).ok());
 		p = *prog;
-		p.ports[0].reg = uint16_t(p.registers); // a register past the file
+		p.ports[0].reg = uint16_t(p.registers);
 		CHECK_FALSE(validate_sound_program(p).ok());
 		CHECK_FALSE(ba::PatchInstance::create(std::make_shared<SoundProgram>(p), w.bank, ba::AudioTuning{}, 1, 48000).ok());
 	}
 }
 
-// =====================================================================================================================
-
 TEST_SUITE("audio-dsp") {
-	// |H(e^jw)| of a biquad, from its coefficients.
+
 	double magnitude_db(const ba::BiquadCoefficients &c, double p_hz, double p_rate) {
 		const double w = 2.0 * kPi * p_hz / p_rate;
 		const std::complex<double> z1 = std::polar(1.0, -w), z2 = std::polar(1.0, -2.0 * w);
@@ -1404,7 +1377,7 @@ TEST_SUITE("audio-dsp") {
 				CHECK(std::fabs(measured_db(shape, fc, hz, q, gain) - magnitude_db(c, hz, 48000.0)) < 0.1);
 			}
 		}
-		// Butterworth reference points: -3.01 dB at fc for LP/HP; +6 dB at fc for the peaking EQ; 0 dB at fc for BP.
+
 		CHECK(magnitude_db(ba::BiquadCoefficients::design(ba::BiquadShape::LowPass, 48000, 1000, 0.70710678f, 0), 1000, 48000) == doctest::Approx(-3.0103).epsilon(0.003));
 		CHECK(magnitude_db(ba::BiquadCoefficients::design(ba::BiquadShape::HighPass, 48000, 1000, 0.70710678f, 0), 1000, 48000) == doctest::Approx(-3.0103).epsilon(0.003));
 		CHECK(magnitude_db(ba::BiquadCoefficients::design(ba::BiquadShape::Peaking, 48000, 1000, 1.0f, 6), 1000, 48000) == doctest::Approx(6.0).epsilon(0.003));
@@ -1425,8 +1398,8 @@ TEST_SUITE("audio-dsp") {
 			bq.process(y.data() + i, 512, zero);
 		}
 		CHECK(std::memcmp(x.data(), y.data(), x.size() * sizeof(float)) == 0);
-		// Ramp from 100 Hz to 2000 Hz across blocks on a DC-free sine: no step larger than the signal's own slope bound.
-		std::vector<float> s(512 * 94); // whole blocks
+
+		std::vector<float> s(512 * 94);
 		for (size_t i = 0; i < s.size(); ++i) {
 			s[i] = float(std::sin(2.0 * kPi * 3000.0 * double(i) / 48000.0));
 		}
@@ -1440,7 +1413,7 @@ TEST_SUITE("audio-dsp") {
 		for (size_t i = 1; i < s.size(); ++i) {
 			worst = std::max(worst, std::fabs(s[i] - s[i - 1]));
 		}
-		CHECK(worst < 0.45f); // a 3 kHz unit sine moves at most 2 sin(pi 3000/48000) = 0.39 per frame
+		CHECK(worst < 0.45f);
 	}
 	TEST_CASE("one-pole cutoff, gain ramp, pan law") {
 		ba::OnePoleLowPass lp;
@@ -1454,7 +1427,7 @@ TEST_SUITE("audio-dsp") {
 		for (size_t i = 24000; i < x.size(); ++i) {
 			peak = std::max(peak, std::fabs(x[i]));
 		}
-		CHECK(20.0 * std::log10(peak) == doctest::Approx(-3.0).epsilon(0.1)); // the one-pole's -3 dB point, within 0.3 dB
+		CHECK(20.0 * std::log10(peak) == doctest::Approx(-3.0).epsilon(0.1));
 		std::vector<float> g(4, 1.0f);
 		ba::apply_gain_ramp(g.data(), 4, 0.0f, 1.0f);
 		CHECK(g[0] == doctest::Approx(0.25));
@@ -1524,8 +1497,6 @@ TEST_SUITE("audio-dsp") {
 	}
 }
 
-// =====================================================================================================================
-
 TEST_SUITE("audio-mixer") {
 	struct CountingTap final : ba::MixTap {
 		uint64_t frames = 0, next = 0;
@@ -1540,7 +1511,7 @@ TEST_SUITE("audio-mixer") {
 	std::shared_ptr<const SoundProgram> one_shot_program(const TestWave &w, uint32_t p_slots = 2) {
 		Builder b;
 		const uint16_t trig = b.input(1, true);
-		b.input(2, true); // stop event
+		b.input(2, true);
 		b.p.start_event = 1;
 		b.p.stop_event = 2;
 		b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
@@ -1557,7 +1528,7 @@ TEST_SUITE("audio-mixer") {
 		std::vector<float> buf(2 * 1000, 1.0f);
 		CHECK(mixer.mix(buf.data(), 1000) == 1000);
 		CHECK(std::all_of(buf.begin(), buf.end(), [](float v) { return v == 0.0f; }));
-		CHECK(mixer.clock() == 1024); // two grid blocks rendered
+		CHECK(mixer.clock() == 1024);
 		CHECK(mixer.earliest_frame() == 1024 + 2 * 512);
 		CHECK(tap.contiguous);
 		CHECK(tap.frames == 1024);
@@ -1570,7 +1541,7 @@ TEST_SUITE("audio-mixer") {
 		cfg.command_capacity = 4;
 		ba::MixerCore mixer(cfg);
 		std::vector<float> buf(2 * 512);
-		mixer.mix(buf.data(), 512); // clock 512
+		mixer.mix(buf.data(), 512);
 		auto inst = instance(prog, w.bank);
 		ba::SamplerTrace trace;
 		trace.entries.resize(16);
@@ -1584,7 +1555,7 @@ TEST_SUITE("audio-mixer") {
 		ev.type = ba::MixerCommandType::PostEvent;
 		ev.handle = start.handle;
 		ev.name_hash = 1;
-		ev.at_frame = 1300; // lands at offset 1300 mod 512 = 276 of block [1024, 1536)
+		ev.at_frame = 1300;
 		REQUIRE(mixer.push(start));
 		(void)inst.release();
 		REQUIRE(mixer.push(ev));
@@ -1593,25 +1564,25 @@ TEST_SUITE("audio-mixer") {
 		bank.epoch = 7;
 		REQUIRE(mixer.push(bank));
 		ba::MixerCommand late = ev;
-		late.at_frame = 100; // already mixed: lands at offset 0 of the next block, counted
+		late.at_frame = 100;
 		REQUIRE(mixer.push(late));
-		// The ring holds 4: a fifth push is refused, and a refused Start leaves the instance with the caller.
+
 		auto spare = instance(prog, w.bank);
 		ba::MixerCommand refused = start;
 		refused.instance = spare.get();
 		CHECK_FALSE(mixer.push(refused));
 		CHECK(mixer.stats().ring_overflows.load() == 1);
-		spare.reset(); // still ours: destroying it is fine
-		// block [512, 1024): the Start is not due yet, so the late event for its handle waits for it (counted late once)
+		spare.reset();
+
 		mixer.mix(buf.data(), 512);
 		CHECK(mixer.stats().late_commands.load() == 1);
-		mixer.mix(buf.data(), 512); // block [1024, 1536): Start at 1100, the held late event at 1100, the event at 1300
+		mixer.mix(buf.data(), 512);
 		CHECK(mixer.stats().acked_epoch.load() == 7);
 		CHECK(mixer.stats().late_commands.load() == 1);
 		REQUIRE(trace.count >= 2);
 		CHECK(trace.entries[0].frame == 1100);
 		CHECK(trace.entries[1].frame == 1300);
-		// Stop: posts the stop event; the instance returns once silent and reclaim() destroys it.
+
 		ba::MixerCommand stop;
 		stop.type = ba::MixerCommandType::Stop;
 		stop.handle = start.handle;
@@ -1641,7 +1612,7 @@ TEST_SUITE("audio-mixer") {
 		start.type = ba::MixerCommandType::Start;
 		start.handle = mixer.next_handle();
 		start.instance = inst.get();
-		start.at_frame = 1700; // block [1536, 2048), offset 164
+		start.at_frame = 1700;
 		REQUIRE(mixer.push(start));
 		(void)inst.release();
 		ba::MixerCommand param;
@@ -1649,18 +1620,18 @@ TEST_SUITE("audio-mixer") {
 		param.handle = start.handle;
 		param.name_hash = 0x1234;
 		param.value = 1.0f;
-		REQUIRE(mixer.push(param)); // at_frame 0: as soon as possible, i.e. with the Start
+		REQUIRE(mixer.push(param));
 		ba::MixerCommand ev;
 		ev.type = ba::MixerCommandType::PostEvent;
 		ev.handle = start.handle;
 		ev.name_hash = 1;
-		REQUIRE(mixer.push(ev)); // at_frame 0
+		REQUIRE(mixer.push(ev));
 		for (int i = 0; i < 3; ++i) {
-			mixer.mix(buf.data(), 512); // [0, 1536): nothing started, nothing dropped
+			mixer.mix(buf.data(), 512);
 			CHECK(trace.count == 0);
 			CHECK(mixer.stats().active_instances.load() == 0);
 		}
-		mixer.mix(buf.data(), 512); // [1536, 2048)
+		mixer.mix(buf.data(), 512);
 		REQUIRE(trace.count >= 1);
 		CHECK(trace.entries[0].frame == 1700);
 		CHECK(mixer.stats().late_commands.load() == 0);

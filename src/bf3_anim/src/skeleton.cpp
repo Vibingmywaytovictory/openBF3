@@ -16,7 +16,7 @@ core::Result<Skeleton> Skeleton::make(std::vector<Bone> p_bones) {
 					", not an earlier bone");
 		}
 		p_bones[i].rest.q = quat_normalized(p_bones[i].rest.q);
-		s.index_.emplace(p_bones[i].name, int32_t(i)); // first bone of a name wins
+		s.index_.emplace(p_bones[i].name, int32_t(i));
 	}
 	s.bones_ = std::move(p_bones);
 	return s;
@@ -72,7 +72,7 @@ bool read_transforms(const core::EbxInstance &p_instance, const char *p_field, s
 	return true;
 }
 
-} // namespace
+}
 
 core::Result<EbxSkeleton> read_ebx_skeleton(const core::EbxPartition &p_partition, std::string p_name) {
 	const core::EbxInstance prim = p_partition.primary();
@@ -129,4 +129,4 @@ std::vector<int32_t> map_names(const std::vector<std::string> &p_names, const Sk
 	return out;
 }
 
-} // namespace bf3::anim
+}

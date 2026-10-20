@@ -1,4 +1,3 @@
-// JSON number text matching the ebx-dump probe; see json_number.h for the rules.
 #include "json_number.h"
 
 #include <charconv>
@@ -11,7 +10,6 @@ namespace bf3dump {
 
 namespace {
 
-// Scientific text split into sign, significant digits (no '.') and decimal exponent of the first digit.
 struct SciParts {
 	bool negative = false;
 	std::string digits;
@@ -51,26 +49,24 @@ std::string join_scientific(const SciParts &p_parts) {
 	return out;
 }
 
-} // namespace
+}
 
 std::string rust_f32_digits(float p_value) {
-	// MSVC's shortest to_chars picks the nearest candidate and, on an exact tie, the even last digit.
-	// Rust's Display (Grisu with Dragon4 fallback, `>= scale` round-up) takes the larger magnitude.
+
 	char buf[64];
 	const auto res = std::to_chars(buf, buf + sizeof(buf), p_value, std::chars_format::scientific);
 	const std::string shortest(buf, res.ptr);
 	const SciParts parts = split_scientific(shortest);
-	// The exact decimal expansion of the f32 (at most 112 significant digits; to_chars with a
-	// precision is exact).
+
 	char exact_buf[192];
 	const auto exact_res = std::to_chars(exact_buf, exact_buf + sizeof(exact_buf), static_cast<double>(p_value), std::chars_format::scientific, 150);
 	const SciParts exact = split_scientific(std::string_view(exact_buf, static_cast<size_t>(exact_res.ptr - exact_buf)));
 	const size_t n = parts.digits.size();
 	if (exact.exp10 != parts.exp10 || exact.digits.size() <= n || exact.digits[n] != '5' ||
 			exact.digits.find_first_not_of('0', n + 1) != std::string::npos) {
-		return shortest; // not an exact tie at the shortest length
+		return shortest;
 	}
-	// Round the exact digits half up (away from zero) to n digits.
+
 	SciParts up = exact;
 	up.digits.resize(n);
 	size_t k = n;
@@ -91,7 +87,7 @@ std::string rust_f32_digits(float p_value) {
 	float back = 0;
 	const auto back_res = std::from_chars(candidate.data(), candidate.data() + candidate.size(), back);
 	if (back_res.ec != std::errc() || std::memcmp(&back, &p_value, sizeof(float)) != 0) {
-		return shortest; // the larger candidate is outside the rounding interval
+		return shortest;
 	}
 	return candidate;
 }
@@ -106,8 +102,8 @@ std::string json_f64_text(double p_value) {
 	const std::string &digits = parts.digits;
 	std::string out = parts.negative ? "-" : "";
 	const int length = static_cast<int>(digits.size());
-	const int k = parts.exp10 - (length - 1); // value = digits * 10^k
-	const int kk = length + k; // 10^(kk-1) <= value < 10^kk
+	const int k = parts.exp10 - (length - 1);
+	const int kk = length + k;
 	if (0 <= k && kk <= 16) {
 		out += digits;
 		out.append(static_cast<size_t>(kk - length), '0');
@@ -144,7 +140,7 @@ int json_number_selfcheck() {
 		double value;
 		const char *text;
 	};
-	// zmij 1.0.23 / serde_json 1.0.151 output for these values.
+
 	static const F64Case kF64[] = {
 		{ 0.0, "0.0" },
 		{ -0.0, "-0.0" },
@@ -171,7 +167,7 @@ int json_number_selfcheck() {
 		float value;
 		const char *text;
 	};
-	// Rust Display digits read back as f64; the first two are exact ties (Rust rounds them up).
+
 	static const F32Case kF32[] = {
 		{ 1.58203125f, "1.5820313" },
 		{ -3353.03125f, "-3353.0313" },
@@ -204,4 +200,4 @@ int json_number_selfcheck() {
 	return failed;
 }
 
-} // namespace bf3dump
+}

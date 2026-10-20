@@ -1,5 +1,3 @@
-// Headless walker bots on the GameServer (bot_fill.h; docs/design/s1.md §5.5, §8): load_bot_level on the loader
-// thread, and the BotDirector (bot_director.h) that runs the brains on the server thread.
 #include "bf3/host/bot_fill.h"
 
 #include "bot_director.h"
@@ -56,7 +54,7 @@ private:
 	uint32_t index_ = 0;
 };
 
-} // namespace
+}
 
 float bot_point_radius(BotPointRow::Kind p_kind) {
 	switch (p_kind) {
@@ -134,7 +132,6 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 		params.max_slope_degrees = soldier.max_slope_degrees;
 	}
 
-	// The region: the combat-area tiles of every MP mode (+ margin); the static world must have that cover.
 	Clock::time_point clock = Clock::now();
 	std::optional<core::level::LevelCombatTiles> own_combat;
 	const core::level::LevelCombatTiles *combat = p_options.combat;
@@ -160,7 +157,7 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	nav_options.bake.layer_mask = p_options.layer_mask;
 	nav_options.world.build.threads = p_options.threads;
 	nav_options.world.soup_threads = p_options.threads;
-	nav_options.bake.water = combat->water; // TC: the water rule is the nav bake's
+	nav_options.bake.water = combat->water;
 	nav_options.region = out->region;
 	core::Result<std::shared_ptr<const sim::NavWorld>> nav =
 			sim::load_nav_world_cached(p_options.cache, *p_db.level, *p_db.world, nullptr, *p_shared.static_world, nav_options);
@@ -176,7 +173,7 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 		return core::error_at("load_bot_level: mode areas", areas.error());
 	}
 	out->components = sim::nav_components(*out->nav);
-	out->main_component = mode_main_component(*out->nav, out->components, areas->combat_areas); // refined from the rows below
+	out->main_component = mode_main_component(*out->nav, out->components, areas->combat_areas);
 	out->seconds_components = seconds_since(clock);
 	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(p_shared.static_world);
 	if (!world) {
@@ -189,7 +186,6 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	out->points = std::move(rows.points);
 	out->objectives = std::move(rows.objectives);
 
-	// Where bot slots spawn (docs §8 "Bot spawns").
 	core::Result<std::unique_ptr<sim::NavQuery>> query = sim::NavQuery::create(out->nav);
 	if (!query) {
 		return core::error_at("load_bot_level: query", query.error());
@@ -236,7 +232,7 @@ BotRowsResult bot_point_rows(const sim::NavWorld &p_nav, const sim::NavComponent
 				++held[row.check.component];
 			}
 		}
-		// The most rows; among equals p_main, then the larger area. No row on the mesh: p_main stays.
+
 		const auto better = [&](uint32_t a, uint32_t b) {
 			if (held[a] != held[b]) {
 				return held[a] > held[b];
@@ -279,7 +275,7 @@ BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const s
 		uint32_t p_main, sim::NavQuery &p_query, const sim::SoldierMotor &p_motor, const sim::CollisionWorld &p_world, uint32_t p_synthetic, uint64_t p_seed) {
 	BotSpawns out;
 	out.level_points = uint32_t(p_spawns.size());
-	// 1. the level's points whose settled feet are in main.
+
 	for (const BotPointRow &row : p_rows) {
 		if (row.kind == BotPointRow::Kind::Spawn && row.in_main && row.index < p_spawns.size()) {
 			out.points.push_back(p_spawns[row.index]);
@@ -287,7 +283,7 @@ BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const s
 	}
 	out.in_main = uint32_t(out.points.size());
 	out.excluded = out.level_points - out.in_main;
-	// 2. a team without a point of its own (or a neutral one): every point becomes neutral.
+
 	const auto has_team = [&](int p_team) {
 		for (const sim::SpawnPoint &p : out.points) {
 			if (p.team == p_team || p.team == 0) {
@@ -302,7 +298,7 @@ BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const s
 			p.team = 0;
 		}
 	}
-	// 3. none at all: seeded settled points of the main component.
+
 	if (out.points.empty()) {
 		uint64_t rng = p_seed ^ 0x5DEECE66Dull;
 		uint32_t made = 0;
@@ -328,8 +324,6 @@ BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const s
 	}
 	return out;
 }
-
-// ---- BotDirector --------------------------------------------------------------------------------------------------
 
 core::Result<std::unique_ptr<BotDirector>> BotDirector::create(std::shared_ptr<const BotFillConfig> p_config, uint64_t p_seed) {
 	if (p_config == nullptr || p_config->level == nullptr || p_config->level->nav == nullptr) {
@@ -416,9 +410,8 @@ const sim::bots::WalkerBrain &BotDirector::brain(uint32_t p_index) const {
 	return brains_[p_index];
 }
 
-} // namespace bf3::host
+}
 
-// M2a bt (bot_fill.h's M2a bt block; docs/design/m2a-bt.md): the firefight brains' nav hook.
 namespace bf3::host {
 
 void BotNav::run_once(sim::Tick p_tick) {
@@ -464,4 +457,4 @@ core::Result<std::unique_ptr<BotNav>> make_bot_nav(std::shared_ptr<const BotLeve
 	return out;
 }
 
-} // namespace bf3::host
+}

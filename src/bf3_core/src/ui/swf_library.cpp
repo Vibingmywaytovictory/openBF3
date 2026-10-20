@@ -1,4 +1,3 @@
-// Every SwfMovie res of the install (bf3/core/ui/swf_library.h; docs/design/ui-swf-fonts.md §4.1, §5.2).
 #include "bf3/core/ui/swf_library.h"
 
 #include "bf3/core/install.h"
@@ -33,7 +32,7 @@ std::string_view strip_extension(std::string_view p_file) {
 	return dot == std::string_view::npos ? p_file : p_file.substr(0, dot);
 }
 
-} // namespace
+}
 
 std::vector<std::string> swf_superbundle_order(const Install &p_install) {
 	std::vector<std::string> ui, frontend, levels, rest;
@@ -83,8 +82,8 @@ std::string swf_atlas_texture_name(std::string_view p_movie_name, std::string_vi
 struct SwfLibrary::Impl {
 	struct Holder {
 		std::string superbundle;
-		std::optional<LevelMount> mount; // from open(); bundles indexed on first use
-		std::vector<std::string> bundles; // the bundles holding first-holder movies
+		std::optional<LevelMount> mount;
+		std::vector<std::string> bundles;
 		std::mutex mutex;
 		bool created = false;
 		Status status;
@@ -98,14 +97,13 @@ struct SwfLibrary::Impl {
 	std::vector<SwfMovieSource> movies;
 	std::unordered_map<std::string, size_t> by_name;
 	std::vector<std::unique_ptr<Holder>> holders;
-	std::unordered_map<std::string, size_t> holder_of; // superbundle -> holders index
-	std::unordered_map<std::string, std::vector<uint8_t>> memory; // from_memory payloads by name
+	std::unordered_map<std::string, size_t> holder_of;
+	std::unordered_map<std::string, std::vector<uint8_t>> memory;
 	mutable std::mutex parsed_mutex;
 	mutable std::unordered_map<std::string, std::shared_ptr<Parsed>> parsed;
 	double open_seconds = 0.0;
 	size_t superbundles_listed = 0;
 
-	// The holder mount with its bundles indexed (created once; a failure is memoised).
 	Result<const LevelMount *> holder_mount(const SwfMovieSource &p_source) const {
 		const auto it = holder_of.find(p_source.superbundle);
 		if (it == holder_of.end()) {
@@ -191,7 +189,7 @@ Result<SwfLibrary> SwfLibrary::open(std::shared_ptr<const Install> p_install, co
 		std::set<std::string> sha1s;
 	};
 	std::map<std::string, Acc> acc;
-	std::map<size_t, std::set<std::string>> holder_bundles; // sb index -> bundles
+	std::map<size_t, std::set<std::string>> holder_bundles;
 	for (size_t j = 0; j < jobs.size(); ++j) {
 		if (!found[j].error.empty()) {
 			return make_error("swf library: " + found[j].error);
@@ -364,4 +362,4 @@ size_t SwfLibrary::superbundles_listed() const {
 	return impl_->superbundles_listed;
 }
 
-} // namespace bf3::core::ui
+}

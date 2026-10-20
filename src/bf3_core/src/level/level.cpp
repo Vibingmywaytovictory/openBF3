@@ -1,5 +1,3 @@
-// Level loading: port of IW4L level_bf3 level.rs, mode.rs and info.rs (Apache-2.0). The install is
-// only read, through LevelMount.
 #include "bf3/core/level/level.h"
 
 #include "bf3/core/thread_pool.h"
@@ -13,13 +11,10 @@ namespace bf3::core::level {
 
 namespace {
 
-// Game modes a level description may list (retail levels list at most 15).
 constexpr size_t kMaxModes = 4096;
-// Layers searched for sub-world references (WorldPartReferenceObjectData nesting).
+
 constexpr uint32_t kLayerDepth = 8;
-// Containers one search may visit: the depth limit bounds nesting, not fan-out (a hostile layer
-// listing itself many times); retail levels visit at most a few dozen. The work budget bounds the
-// slots they list.
+
 constexpr size_t kLayerBudget = size_t(1) << 16;
 
 struct DisplayName {
@@ -92,7 +87,6 @@ std::string join_names(const std::vector<std::string> &p_names) {
 	return out + "]";
 }
 
-// Loads bundles into the mount and parses every ebx they add, in the mount's name order.
 class Loader {
 public:
 	Loader(const LevelMount &p_mount, EbxDb &p_db, PartitionStats &p_stats, unsigned p_threads) :
@@ -174,9 +168,6 @@ std::optional<std::string> find_bundle(const std::vector<std::string> &p_names, 
 	return std::nullopt;
 }
 
-// The mount's bundle names by bundle_key, keeping the first name of each key (the one find_bundle
-// picks). Built once per load, so a sub-world key costs a lookup of its (charged) length instead
-// of a pass over every bundle name.
 class BundleIndex {
 public:
 	explicit BundleIndex(const std::vector<std::string> &p_names) {
@@ -223,7 +214,7 @@ std::optional<Minimap> read_minimap(const EbxInstance &p_component) {
 	return m;
 }
 
-} // namespace
+}
 
 bool mode_matches(std::string_view p_mode, std::string_view p_option) {
 	return iequals_ascii(p_mode, p_option);
@@ -244,7 +235,7 @@ std::string zone_name(std::string_view p_level_id) {
 }
 
 EbxInstance LoadedLevel::root() const {
-	return db_.partition_by_name(root_name)->primary(); // load_level checked it
+	return db_.partition_by_name(root_name)->primary();
 }
 
 Status subworld_references(const EbxResolver &p_db, const EbxInstance &p_container, WorkBudget &r_budget, std::vector<EbxInstance> &r_out) {
@@ -346,9 +337,9 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 				if (!mode_array) {
 					continue;
 				}
-				BF3_TRY(r_budget.charge(mode_array->size())); // categories may share one array
+				BF3_TRY(r_budget.charge(mode_array->size()));
 				for (const EbxValue mode : *mode_array) {
-					// Each copy is charged its length: N elements may name one long string.
+
 					const Result<std::optional<std::string_view>> m = charged_str(mode, r_budget);
 					if (!m) {
 						return m.error();
@@ -449,8 +440,7 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 		}
 		std::vector<EbxInstance> references;
 		BF3_TRY(subworld_references(loaded->db_, partition->primary(), budget, references));
-		// Keyed one reference at a time: many references naming one long BundleName cost its
-		// length each (charged), but only a new key is kept.
+
 		std::vector<std::string> batch;
 		for (const EbxInstance &reference : references) {
 			Result<bool> included = includes(loaded->db_, reference, p_mode, budget);
@@ -532,4 +522,4 @@ Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_
 	return read_level_info(db, root->primary(), root_name, p_level_id, budget);
 }
 
-} // namespace bf3::core::level
+}

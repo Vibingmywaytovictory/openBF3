@@ -20,7 +20,7 @@ Result<std::unique_ptr<EbxLibrary>> open_spec(const std::shared_ptr<const Instal
 	return lib;
 }
 
-} // namespace
+}
 
 Result<WeaponSources> open_weapon_sources(std::shared_ptr<const Install> p_install, std::string_view p_level) {
 	if (!p_install) {
@@ -113,7 +113,7 @@ Result<WeaponCatalog> WeaponCatalog::open(std::shared_ptr<const Install> p_insta
 }
 
 std::string WeaponCatalog::target_of(std::string_view p_partition) const {
-	// The library is bulk-loaded, so this only reads (base_variant_of walks the loaded entries).
+
 	const std::string partition = to_lower_ascii(p_partition);
 	const EbxPartition *root = sources_.level->partition_by_name(partition);
 	if (root != nullptr && root->primary().is_a("SoldierWeaponBlueprint")) {
@@ -140,4 +140,4 @@ std::string WeaponCatalog::display_name(const WeaponDef &p_weapon) const {
 	return weapon_display_name(p_weapon, text_.get());
 }
 
-} // namespace bf3::core::gameplay
+}

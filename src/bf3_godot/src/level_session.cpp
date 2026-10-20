@@ -12,7 +12,7 @@
 #include "bf3/host/game_server.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/netsim.h"
-// S1
+
 #include "bf3/core/level/mode_areas.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/sim/nav.h"
@@ -55,7 +55,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-// psapi after windows.h
+
 #include <psapi.h>
 
 namespace bf3::godot_side {
@@ -72,8 +72,6 @@ uint64_t now_us() {
 	return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-// Seconds since this process was created (GetProcessTimes), the start of E4 / E5 (orchestrator decision on docs §16
-// question 4: process start -> first controllable frame).
 double seconds_since_process_creation() {
 	FILETIME creation{}, exit_time{}, kernel{}, user{};
 	if (!GetProcessTimes(GetCurrentProcess(), &creation, &exit_time, &kernel, &user)) {
@@ -104,7 +102,7 @@ Color to_color(const std::array<float, 3> &p_c) {
 	return Color(p_c[0], p_c[1], p_c[2]);
 }
 
-} // namespace
+}
 
 Bf3LevelSession::Bf3LevelSession() :
 		frame_(std::make_unique<host::PresentationFrame>()) {}
@@ -130,7 +128,7 @@ void Bf3LevelSession::shutdown() {
 	shut_down_ = true;
 	stop_.store(true, std::memory_order_release);
 	if (lanes_ != nullptr) {
-		lanes_->cancel(); // a lane waiting for in-flight bytes wakes up; items not started are skipped
+		lanes_->cancel();
 	}
 	if (loader_.joinable()) {
 		loader_.join();
@@ -138,14 +136,14 @@ void Bf3LevelSession::shutdown() {
 	if (WorkerThreadPool::get_singleton() != nullptr) {
 		upload_.wait_tasks();
 	}
-	m2a_shutdown(); // M2a w3 [G7]
+	m2a_shutdown();
 	if (client_ != nullptr) {
 		client_->stop();
 	}
 	if (server_ != nullptr) {
 		server_->stop();
 	}
-	upload_.set_lanes(nullptr); // the upload never sees a freed SceneLanes
+	upload_.set_lanes(nullptr);
 	lanes_.reset();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs != nullptr) {
@@ -154,7 +152,7 @@ void Bf3LevelSession::shutdown() {
 		}
 		other_instances_.clear();
 		upload_.free_all();
-		nav_draw_.free_all(); // S1
+		nav_draw_.free_all();
 	}
 	if (loading_display_) {
 		set_loading_display(false);
@@ -195,14 +193,14 @@ void Bf3LevelSession::parse_args() {
 	if (user_arg_value("look") == "m1") {
 		look_mode_ = render::SceneLook::M1;
 	}
-	// S1 (docs/design/s1.md §12).
+
 	if (has_user_arg("bots")) {
 		bots_ = uint32_t(std::clamp(std::atoi(user_arg_value("bots").c_str()), 0, 120));
 	}
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
 	const std::string shot_delay = user_arg_value("shot-delay");
 	shot_delay_ = shot_delay.empty() ? 0.0 : std::clamp(std::atof(shot_delay.c_str()), 0.0, 600.0);
-	m2a_parse_args(); // M2a w3 [G7]: gx's args (level_session_m2a.cpp)
+	m2a_parse_args();
 }
 
 void Bf3LevelSession::_ready() {
@@ -213,7 +211,7 @@ void Bf3LevelSession::_ready() {
 	timings_.process_start_to_ready_s = seconds_since_process_creation();
 	parse_args();
 	headless_ = DisplayServer::get_singleton()->get_name() == String("headless");
-	// The headless skip (docs §11.1): no scene work under the dummy renderer or for --m1-check.
+
 	scene_ = !headless_ && !m1_check_;
 
 	bf3::core::InstallLocateOptions opts;
@@ -233,7 +231,6 @@ void Bf3LevelSession::_ready() {
 	UtilityFunctions::print(to_godot(std::string("[m1] ") + level_ + " " + mode_ + (scene_ ? ", scene on" : ", scene off (headless skip, docs 11.1)") +
 			", netsim " + netsim_ + ", walkers " + std::to_string(walkers_) + ", cache " + (no_cache_ ? std::string("off") : std::string(root8.begin(), root8.end()))));
 
-	// The motor tuning (docs §6.11): res://config/motor_tuning.cfg, read here (FileAccess is main-thread work).
 	motor_tuning_source_ = "res://config/motor_tuning.cfg";
 	if (FileAccess::file_exists(to_godot(motor_tuning_source_))) {
 		motor_tuning_text_ = to_std(FileAccess::get_file_as_string(to_godot(motor_tuning_source_)));
@@ -241,7 +238,7 @@ void Bf3LevelSession::_ready() {
 		motor_tuning_source_ = "(missing: built-in defaults)";
 	}
 	UtilityFunctions::print(to_godot("[m1] motor tuning " + motor_tuning_source_));
-	if (bots_ > 0) { // S1
+	if (bots_ > 0) {
 		UtilityFunctions::print(to_godot("[s1] bots " + std::to_string(bots_) + (nav_overlay_ ? ", nav overlay on (F7)" : "")));
 	}
 
@@ -258,7 +255,7 @@ void Bf3LevelSession::_ready() {
 		set_loading_display(true);
 	}
 	if (m1_check_) {
-		Engine::get_singleton()->set_max_fps(144); // headless frames at a 144 Hz display's rate (E2 records per frame)
+		Engine::get_singleton()->set_max_fps(144);
 	}
 	{
 		std::vector<ShotRunner::FreeShot> free_shots;
@@ -268,14 +265,14 @@ void Bf3LevelSession::_ready() {
 			UtilityFunctions::push_error(to_godot("[m1] " + error));
 			failed_ = true;
 		}
-		std::vector<ShotRunner::TeleportShot> teleport_shots; // TC: --shot-teleports (m1_check.h)
+		std::vector<ShotRunner::TeleportShot> teleport_shots;
 		if (!ShotRunner::parse_teleports(user_arg_value("shot-teleports"), teleport_shots, error)) {
 			UtilityFunctions::push_error(to_godot("[m1] " + error));
 			failed_ = true;
 		}
 		shots_ = std::make_unique<ShotRunner>(*this, std::move(free_shots), std::move(spawn_shots), user_arg_value("shot-dir"));
 		shots_->set_teleports(std::move(teleport_shots));
-		// L1 look: --shot-settle=<s> (free shots wait for auto exposure), --shot-measure=<frames> (frame time per view).
+
 		const double settle = std::clamp(std::atof(user_arg_value("shot-settle").c_str()), 0.0, 60.0);
 		const long measure = std::clamp(std::atol(user_arg_value("shot-measure").c_str()), 0L, 100000L);
 		shots_->set_timing(settle, uint32_t(measure));
@@ -293,8 +290,6 @@ void Bf3LevelSession::_ready() {
 	set_process(true);
 	set_process_unhandled_input(true);
 }
-
-// ---- loader thread: no Godot API ------------------------------------------------------------------------------
 
 void Bf3LevelSession::run_loader() {
 	const auto fail = [&](const std::string &p_error) {
@@ -332,7 +327,7 @@ void Bf3LevelSession::run_loader() {
 		return;
 	}
 	const unsigned cores = std::max(2u, std::thread::hardware_concurrency());
-	// docs §12.2: 16 cores = 8 scene lanes + 8 shape threads; on fewer cores half each.
+
 	const unsigned half = std::max(1u, cores / 2);
 	bf3::core::Result<host::LevelDatabase> db = host::open_level_database(*install, level_, mode_, 0, &progress_);
 	if (!db) {
@@ -387,8 +382,7 @@ void Bf3LevelSession::run_loader() {
 		}
 		shared_options.tuning = *tuning;
 	}
-	// S1 (docs/design/s1.md §12): with --bots the navmesh is baked over the level's combat-area tiles (every MP mode)
-	// with their water rule (TC: the static world has terrain everywhere, no cover option).
+
 	std::optional<lvl::LevelCombatTiles> s1_combat;
 	if (bots_ > 0) {
 		bf3::core::Result<lvl::LevelCombatTiles> combat = lvl::level_combat_tiles(*install, level_, sim::NavParams().region_margin);
@@ -398,7 +392,7 @@ void Bf3LevelSession::run_loader() {
 		}
 		s1_combat = std::move(*combat);
 	}
-	m2a_load_options(shared_options); // M2a w3 [G7]: gunplay on (gx)
+	m2a_load_options(shared_options);
 	bf3::core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, shared_options, &progress_);
 	if (!shared) {
 		fail(shared.error().message);
@@ -413,7 +407,7 @@ void Bf3LevelSession::run_loader() {
 	if (stop_.load(std::memory_order_acquire)) {
 		return;
 	}
-	// S1: the bot level (navmesh through the cache, components, goals, bot spawns) and the overlay's arrays.
+
 	if (bots_ > 0) {
 		host::BotLoadOptions bot_options;
 		bot_options.cache = cache.get();
@@ -439,12 +433,12 @@ void Bf3LevelSession::run_loader() {
 			nav_ready_.store(true, std::memory_order_release);
 		}
 	}
-	// M2a w3 [G7]: the wave-3 load steps (gx: viewmodel sets, effects, wave bank, crowd assets).
+
 	if (std::string m2a_error; !m2a_load_assets(*db, cache.get(), scene_ ? std::min(8u, half) : 0u, &m2a_error)) {
 		fail(m2a_error);
 		return;
 	}
-	// Phase D: the server and the client, while the lanes still run (docs §12.1).
+
 	std::string error;
 	if (!start_session(&error)) {
 		fail(error);
@@ -454,9 +448,7 @@ void Bf3LevelSession::run_loader() {
 	session_ready_.store(true, std::memory_order_release);
 	if (scene_) {
 		bf3::core::Result<render::SceneLaneStats> stats = lanes_->wait();
-		// Every timing the loader writes (cache open, census, plan, lanes) is written before lanes_finished()
-		// publishes lanes_done_ (release); the main thread reads them only after LevelUpload::finished() saw it
-		// (acquire).
+
 		timings_.lanes_us = now_us();
 		upload_.lanes_finished();
 		if (!stats) {
@@ -466,9 +458,9 @@ void Bf3LevelSession::run_loader() {
 		std::lock_guard lock(loader_mutex_);
 		lane_stats_ = *stats;
 	}
-	// Phase B is over: the lanes no longer read the mount, so the level database goes (docs §12.1).
+
 	db = host::LevelDatabase();
-	cache.reset(); // the last holder closes the cache here, on the loader thread
+	cache.reset();
 	loader_done_.store(true, std::memory_order_release);
 }
 
@@ -482,7 +474,7 @@ host::ClientSessionConfig Bf3LevelSession::client_config(const std::string &p_ne
 	}
 	cc.netsim.seed = p_seed * 7919u + 1u;
 	cc.request_dev_commands = true;
-	m2a_client_config(cc); // M2a w3 [G7]: gunplay inputs, kit select (gx)
+	m2a_client_config(cc);
 	cc.debug_hash_compare = m1_check_;
 	return cc;
 }
@@ -496,11 +488,11 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 	}
 	auto game = std::make_shared<host::GameServerConfig>();
 	game->level = shared_;
-	game->max_slots = m1_check_ ? uint32_t(bf3::net::kMaxSlots) : 64u; // one SpawnSweep batch covers Metro's 102 points (docs §7.7)
+	game->max_slots = m1_check_ ? uint32_t(bf3::net::kMaxSlots) : 64u;
 	game->walkers = walkers_;
-	game->dev_commands = true; // M1 is a local listen session: the checks and the shot harness use SpawnAt / Teleport / Trace
+	game->dev_commands = true;
 	game->seed = seed_;
-	if (bot_level_ != nullptr) { // S1 (docs/design/s1.md §12): the walkers, every slot spawning in the main component
+	if (bot_level_ != nullptr) {
 		auto fill = std::make_shared<host::BotFillConfig>();
 		fill->level = bot_level_;
 		fill->count = bots_;
@@ -508,7 +500,7 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 		game->bots = fill;
 		game->max_slots = uint32_t(bf3::net::kMaxSlots);
 	}
-	m2a_server_config(*game); // M2a w3 [G7]: gunplay, firefight, respawn (gx)
+	m2a_server_config(*game);
 	host::ServerConfig sc;
 	sc.tick_hz = int(sim::kSimHz);
 	sc.game = game;
@@ -557,8 +549,6 @@ bool Bf3LevelSession::restart_client(const std::string &p_netsim, uint64_t p_see
 void Bf3LevelSession::_upload_task() {
 	upload_.run_task();
 }
-
-// ---- main thread -----------------------------------------------------------------------------------------------
 
 std::shared_ptr<const host::SharedLevel> Bf3LevelSession::shared_level() const {
 	std::lock_guard lock(loader_mutex_);
@@ -632,8 +622,7 @@ void Bf3LevelSession::on_plan_ready() {
 }
 
 void Bf3LevelSession::build_environment(const render::SceneEnvironment &p_env) {
-	// docs §11.4: one DirectionalLight3D with shadows and one WorldEnvironment (ProceduralSky from the sky and ground
-	// colours, ambient from the sky, depth fog when given, ACES).
+
 	sun_ = memnew(DirectionalLight3D);
 	sun_->set_name("Sun");
 	Vector3 d(p_env.sun_direction[0], p_env.sun_direction[1], p_env.sun_direction[2]);
@@ -665,8 +654,7 @@ void Bf3LevelSession::build_environment(const render::SceneEnvironment &p_env) {
 	env->set_ambient_source(Environment::AMBIENT_SOURCE_SKY);
 	env->set_ambient_light_energy(p_env.ambient_energy);
 	env->set_tonemapper(Environment::TONE_MAPPER_ACES);
-	// Fog is opt-in (--fog) [inferred]: the park's FogColor as level_scene reads it is a saturated blue (0.05, 0.38, 1.0)
-	// that floods Godot's depth fog over the whole frame; reading BF3's fog properly is the look track's work.
+
 	if (p_env.fog_end > p_env.fog_start && p_env.fog_end > 0.0f && has_user_arg("fog")) {
 		env->set_fog_enabled(true);
 		env->set_fog_mode(Environment::FOG_MODE_DEPTH);
@@ -725,7 +713,7 @@ void Bf3LevelSession::update_hud(double p_delta) {
 	if (done_ && hud_timer_ >= 0.1) {
 		hud_timer_ = 0.0;
 		hud_->set_text(get_status_text());
-		if (bots_ > 0) { // S1: the snapshot carries the nearest others; the rest are not drawn
+		if (bots_ > 0) {
 			const uint32_t total = bots_ + walkers_;
 			const uint32_t shown = std::min(frame_->other_count, total);
 			hud_->set_text(get_status_text() + to_godot(" | S1 bots " + std::to_string(bots_) + ", others in the snapshot " + std::to_string(shown) + " of " +
@@ -760,7 +748,7 @@ void Bf3LevelSession::draw_others(uint64_t p_now_ns) {
 			continue;
 		}
 		const host::PresentedSoldier &p = out[i];
-		// A capsule from the feet to the eye + 0.15 m (scaled to the presented eye height).
+
 		const float height = std::max(0.6f, p.eye_height + 0.15f);
 		const Basis basis = Basis(Vector3(0, 1, 0), p.yaw).scaled(Vector3(1.0f, height / 1.8f, 1.0f));
 		rs->instance_set_transform(other_instances_[i], Transform3D(basis, Vector3(p.position[0], p.position[1] + height * 0.5f, p.position[2])));
@@ -773,7 +761,7 @@ void Bf3LevelSession::try_done() {
 		return;
 	}
 	const host::PresentationFrame &f = *frame_;
-	const bool spawned = (f.valid && f.stats.spawned && f.own_curr.life > 0 && mapper_.adopted_life() == f.own_curr.life) || m2b_join_ready(); // M2b gx [done]
+	const bool spawned = (f.valid && f.stats.spawned && f.own_curr.life > 0 && mapper_.adopted_life() == f.own_curr.life) || m2b_join_ready();
 	if (spawned && progress_.end_us[size_t(host::LoadStage::Spawn)].load(std::memory_order_relaxed) == 0) {
 		progress_.advance(host::LoadStage::Spawn);
 		progress_.end(host::LoadStage::Spawn);
@@ -812,7 +800,7 @@ void Bf3LevelSession::try_done() {
 			cache_warmth_name(host::CacheWarmth(progress_.warmth.load())), mib(peak_working_set_bytes()));
 	UtilityFunctions::print(line);
 	UtilityFunctions::print(to_godot("[m1] " + cache_summary()));
-	if (!bots_line_.empty()) { // S1
+	if (!bots_line_.empty()) {
 		UtilityFunctions::print(to_godot(bots_line_));
 	}
 	if (m1_check_) {
@@ -831,8 +819,8 @@ void Bf3LevelSession::_unhandled_input(const Ref<InputEvent> &p_event) {
 		return;
 	}
 	mapper_.handle_event(p_event);
-	m2a_input(p_event); // M2a w3 [G7]
-	// S1: F7 toggles the nav overlay.
+	m2a_input(p_event);
+
 	if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (k->is_pressed() && !k->is_echo() && k->get_keycode() == KEY_F7 && nav_draw_.uploaded()) {
 			nav_draw_.set_visible(!nav_draw_.visible());
@@ -876,7 +864,7 @@ void Bf3LevelSession::_process(double p_delta) {
 		upload_.pump(upload_task_, done_ ? 2.0 : 12.0);
 	}
 	if (look_.built()) {
-		// L1: the environment blended at the camera of the frame drawn last (one frame behind the camera update below).
+
 		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;
 		look_.update(upload_, camera != nullptr ? camera->get_global_position() : Vector3());
 	}
@@ -884,9 +872,9 @@ void Bf3LevelSession::_process(double p_delta) {
 		client_->read_presentation(*frame_);
 		mapper_.adopt(*frame_);
 		mapper_.poll_devices();
-		mapper_.m2a_frame(*frame_, now_ns); // M2a gx [view]: the drawn frame for the view sample, the weapon levels
+		mapper_.m2a_frame(*frame_, now_ns);
 		client_->set_input(mapper_.sample());
-		m2a_presented(p_delta, now_ns); // M2a w3 [G7]
+		m2a_presented(p_delta, now_ns);
 	}
 	try_done();
 	if (!done_) {
@@ -926,9 +914,9 @@ void Bf3LevelSession::_process(double p_delta) {
 	}
 	draw_others(now_ns);
 	update_hud(p_delta);
-	s1_upload_overlay(); // S1
-	s1_report_others(now_ns); // S1
-	if (m2a_frame(p_delta, now_ns)) { // M2a w3 [G7]
+	s1_upload_overlay();
+	s1_report_others(now_ns);
+	if (m2a_frame(p_delta, now_ns)) {
 		return;
 	}
 
@@ -944,7 +932,7 @@ void Bf3LevelSession::_process(double p_delta) {
 		}
 		return;
 	}
-	// S1: --shot-delay holds the shots (and the quit after them) until the bots have spread out.
+
 	if (shot_delay_ > 0.0 && since_done_ < shot_delay_ && shots_ != nullptr && !shots_->empty()) {
 		return;
 	}
@@ -973,7 +961,7 @@ bool Bf3LevelSession::save_screenshot(const std::string &p_path) {
 	}
 	if (target.has_parent_path()) {
 		std::error_code ec;
-		std::filesystem::create_directories(target.parent_path(), ec); // under the same guard verdict as the file
+		std::filesystem::create_directories(target.parent_path(), ec);
 	}
 	Ref<Image> img = get_viewport()->get_texture()->get_image();
 	if (img.is_null() || img->save_png(to_godot(p_path)) != OK) {
@@ -1000,9 +988,7 @@ void Bf3LevelSession::finish(int p_code) {
 	get_tree()->quit(p_code);
 }
 
-} // namespace bf3::godot_side
-
-// ---- S1 (docs/design/s1.md §12) ---------------------------------------------------------------------------------
+}
 
 namespace bf3::godot_side {
 
@@ -1016,11 +1002,9 @@ void Bf3LevelSession::s1_upload_overlay() {
 				nav_arrays_.triangles_other, nav_arrays_.links);
 		UtilityFunctions::print(line);
 	}
-	nav_arrays_ = NavOverlayArrays(); // the RenderingServer holds the copy
+	nav_arrays_ = NavOverlayArrays();
 }
 
-// Once, when the shots start (or 10 s after Done): how many others are presented, how far they walked from their
-// spawns is not known here, so their positions' spread and a few positions (evidence for the shots, docs §12).
 void Bf3LevelSession::s1_report_others(uint64_t p_now_ns) {
 	if (bots_ == 0 || s1_reported_ || since_done_ < std::max(shot_delay_, 10.0) || !frame_->valid) {
 		return;
@@ -1046,4 +1030,4 @@ void Bf3LevelSession::s1_report_others(uint64_t p_now_ns) {
 	UtilityFunctions::print(line);
 }
 
-} // namespace bf3::godot_side
+}

@@ -1,12 +1,4 @@
 #pragma once
-// bf3_fx internal: bounded EBX field reads for the effect compiler, the atlas and the impact table
-// (docs/design/m2a-vfx1.md §6.2, §10). Every instance examined, array element scanned and reference followed is
-// charged to the item's WorkBudget before the work; every float is checked finite and within kMaxAbsParameter; a
-// missing field or a value of the wrong kind fails the item. Errors are sticky: the first one is kept and every later
-// read returns a zero value, so a reader can read a whole record and test ok() once.
-//
-// RecordingResolver wraps a resolver and records every partition looked up, found or absent, lowercase (the cache's
-// dependency list, effect_cache.h; the weapon_blob.cpp RecordingResolver pattern).
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -23,7 +15,6 @@
 
 namespace bf3::fx::detail {
 
-// Lowercase, '\' as '/': how names are compared and stored (partition names, texture names).
 inline std::string canonical_name(std::string_view p_name) {
 	std::string out = core::to_lower_ascii(p_name);
 	for (char &c : out) {
@@ -72,7 +63,7 @@ public:
 	bool ok() const { return error_.empty(); }
 	const std::string &message() const { return error_; }
 	core::Error error() const { return core::make_error(error_); }
-	// The partition (or other context) error messages start with.
+
 	void set_where(std::string p_where) { where_ = std::move(p_where); }
 	const std::string &where() const { return where_; }
 
@@ -103,7 +94,7 @@ public:
 		}
 		return v;
 	}
-	// Optional fields (absent in some layouts): nullopt without an error.
+
 	std::optional<core::EbxValue> maybe(const core::EbxStruct &p_s, std::string_view p_name) {
 		if (!ok()) {
 			return std::nullopt;
@@ -162,7 +153,7 @@ public:
 		}
 		return integer(p_s, p_name, p_min, p_max);
 	}
-	// The enumerator's name ("" after a failure).
+
 	std::string enum_name(const core::EbxStruct &p_s, std::string_view p_name) {
 		const std::optional<core::EbxValue> v = field(p_s, p_name);
 		if (!v) {
@@ -242,7 +233,7 @@ public:
 		}
 		return r;
 	}
-	// A reference that must stay inside the partition (null allowed: nullopt, no error).
+
 	std::optional<core::EbxInstance> follow_internal(const core::EbxStruct &p_s, std::string_view p_name) {
 		const std::optional<core::EbxRef> r = ref(p_s, p_name);
 		if (!r || r->is_null()) {
@@ -261,7 +252,7 @@ public:
 		}
 		return i;
 	}
-	// The partition name an external reference points into (lowercase), "" for null; fails on an internal one.
+
 	std::string external_name(const core::EbxStruct &p_s, std::string_view p_name) {
 		const std::optional<core::EbxRef> r = ref(p_s, p_name);
 		if (!r || r->is_null()) {
@@ -329,4 +320,4 @@ private:
 	std::string error_;
 };
 
-} // namespace bf3::fx::detail
+}

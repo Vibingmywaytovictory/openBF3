@@ -1,7 +1,3 @@
-// S4 logic type table (docs/design/s4.md §6.1). One row per EBX type that takes part in a connection of any of the
-// 230 instantiated level x mode rows (130 types, 108 of them on a server-side connection; census 2026-10-15), plus
-// the structural reference and descriptor types. The rows are in LogicTypeId order; a name-sorted index serves
-// logic_type_of. Both are constant data.
 #include "bf3/core/gameplay/logic_types.h"
 
 #include <array>
@@ -16,7 +12,7 @@ using T = LogicTypeId;
 
 constexpr LogicTypeInfo kRows[] = {
 	{ T::Unknown, "", C::Unknown, false },
-	// Primitive, S4.
+
 	{ T::Delay, "DelayEntityData", C::Primitive, true },
 	{ T::EventGate, "EventGateEntityData", C::Primitive, true },
 	{ T::Sequence, "SequenceEntityData", C::Primitive, true },
@@ -51,7 +47,7 @@ constexpr LogicTypeInfo kRows[] = {
 	{ T::PropertyGate, "PropertyGateEntityData", C::Primitive, true },
 	{ T::Setting, "SettingEntityData", C::Primitive, true },
 	{ T::Locator, "LocatorEntityData", C::Primitive, true },
-	// Primitive, later.
+
 	{ T::BoolHub, "BoolHubEntityData", C::Primitive, false },
 	{ T::EventAndGate, "EventAndGateEntityData", C::Primitive, false },
 	{ T::PlatformSplitter, "PlatformSplitterEntityData", C::Primitive, false },
@@ -72,7 +68,7 @@ constexpr LogicTypeInfo kRows[] = {
 	{ T::EulerTransform, "EulerTransformEntityData", C::Primitive, false },
 	{ T::EulerTransformSplitter, "EulerTransformSplitterEntityData", C::Primitive, false },
 	{ T::CountDown, "CountDownEntityData", C::Primitive, false },
-	// Native, S4.
+
 	{ T::CharacterSpawn, "CharacterSpawnReferenceObjectData", C::Native, true },
 	{ T::VehicleSpawn, "VehicleSpawnReferenceObjectData", C::Native, true },
 	{ T::AlternateSpawn, "AlternateSpawnEntityData", C::Native, true },
@@ -98,7 +94,7 @@ constexpr LogicTypeInfo kRows[] = {
 	{ T::Predestruction, "PredestructionEntityData", C::Native, true },
 	{ T::LevelControl, "LevelControlEntityData", C::Native, true },
 	{ T::InputRestriction, "InputRestrictionEntityData", C::Native, true },
-	// Native, later.
+
 	{ T::WeaponUnlockPickup, "WeaponUnlockPickupEntityData", C::Native, false },
 	{ T::VehicleSpawnState, "VehicleSpawnStateEntityData", C::Native, false },
 	{ T::GunMasterKillCounter, "GunMasterKillCounterEntityData", C::Native, false },
@@ -110,7 +106,7 @@ constexpr LogicTypeInfo kRows[] = {
 	{ T::Explosion, "ExplosionEntityData", C::Native, false },
 	{ T::VehicleEntity, "VehicleEntityData", C::Native, false },
 	{ T::AmmoCrate, "AmmoCrateEntityData", C::Native, false },
-	// Passive.
+
 	{ T::Mixer, "MixerEntityData", C::Passive, false },
 	{ T::SoundArea, "SoundAreaEntityData", C::Passive, false },
 	{ T::IrReverb, "IrReverbEntityData", C::Passive, false },
@@ -146,13 +142,13 @@ constexpr LogicTypeInfo kRows[] = {
 	{ T::MeshProxy, "MeshProxyEntityData", C::Passive, false },
 	{ T::UISetValue, "UISetValueData", C::Passive, false },
 	{ T::EmitterExclusionVolume, "EmitterExclusionVolumeData", C::Passive, false },
-	// Data.
+
 	{ T::VolumeVectorShape, "VolumeVectorShapeData", C::Data, false },
 	{ T::Obb, "OBBData", C::Data, false },
 	{ T::Sphere, "SphereData", C::Data, false },
 	{ T::TestPoint, "TestPointEntityData", C::Data, false },
 	{ T::UICombatArea, "UICombatAreaEntityData", C::Data, false },
-	// Structural.
+
 	{ T::InterfaceDescriptor, "InterfaceDescriptorData", C::Structural, false },
 	{ T::ReferenceObject, "ReferenceObjectData", C::Structural, false },
 	{ T::SubWorldReference, "SubWorldReferenceObjectData", C::Structural, false },
@@ -172,7 +168,6 @@ constexpr bool rows_in_id_order() {
 }
 static_assert(rows_in_id_order(), "rows must be in LogicTypeId order");
 
-// Row indices sorted by ebx_type (row 0, the empty Unknown name, sorts first and never matches a lookup).
 constexpr std::array<uint16_t, kRowCount> make_name_index() {
 	std::array<uint16_t, kRowCount> index{};
 	for (size_t i = 0; i < kRowCount; ++i) {
@@ -223,7 +218,7 @@ constexpr EnumName kTargetNames[] = {
 	{ "EventConnectionTargetType_NetworkedClientAndServer", 5 },
 };
 
-} // namespace
+}
 
 std::span<const LogicTypeInfo> logic_type_table() {
 	return std::span<const LogicTypeInfo>(kRows, kRowCount);
@@ -273,4 +268,4 @@ std::optional<LogicEventTarget> logic_event_target_from_name(std::string_view p_
 	return std::nullopt;
 }
 
-} // namespace bf3::core::gameplay
+}

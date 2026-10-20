@@ -1,5 +1,3 @@
-// SurfaceMaterialTable: the level grid's pairs by index, the zone properties of the soldier capsules and the
-// damage cells (docs/design/m2a-weapons.md §4.3, §5.8, §5.9).
 #include "bf3/sim/weapons/surface_materials.h"
 
 #include <string>
@@ -22,7 +20,7 @@ SurfacePair surface_pair(const core::gameplay::MaterialPairRef &p_ref) {
 	return s;
 }
 
-} // namespace
+}
 
 const char *hit_zone_name(HitZone p_zone) {
 	switch (p_zone) {
@@ -54,7 +52,7 @@ core::Result<SurfaceMaterialTable> SurfaceMaterialTable::make(std::shared_ptr<co
 		t.grid_->complete(c);
 		t.pairs_.push_back(surface_pair(c));
 	}
-	// Zone properties from the hi-LOD capsules' pairs by their property names (gameplay::body_multipliers' rule).
+
 	constexpr const char *kZoneNames[kHitZoneCount] = { "Head", "Body", "Chest", "Foot" };
 	std::array<bool, kHitZoneCount> found{};
 	for (const core::gameplay::HitCapsule &cap : p_capsules) {
@@ -98,4 +96,4 @@ core::gameplay::DamageRelation SurfaceMaterialTable::relation(uint8_t p_projecti
 	return grid_ != nullptr ? grid_->damage(p_projectile_property, p_target_property) : core::gameplay::DamageRelation{};
 }
 
-} // namespace bf3::sim::weapons
+}

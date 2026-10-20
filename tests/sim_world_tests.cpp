@@ -1,8 +1,3 @@
-// Static world and collision queries (bf3_sim static_world.h, collision_world.h; docs/design/m1.md §5, §14).
-// Suite sim-world-unit: synthetic triangles only (no install): tiling by the soup's rule, layers and masks, tags,
-// ray / sweep / overlap / ground answers on known geometry (back faces collide, normals face the query), two worlds
-// answering identically, hostile input failing cleanly, and the CollisionWorld::Impl seam the motor builds its
-// CharacterVirtual on (collision_world_internal.h).
 #include <doctest/doctest.h>
 
 #include "bf3/core/level/collision_soup.h"
@@ -12,7 +7,6 @@
 #include "sim_world_support.h"
 #include "test_support.h"
 
-// The T1 -> T2 seam (internal to bf3_sim; this test links Jolt for it).
 #include "collision_world_internal.h"
 #include "static_world_internal.h"
 
@@ -59,12 +53,10 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(hit.tag == tag_of(0x123456, 5, 0, level::kSoupInvisible));
 		CHECK(shapes->tile(hit.tile).x <= 0);
 
-		// Back faces collide (Havok collision is two-sided); the normal still faces the ray.
 		REQUIRE(world->ray({ 1.0f, -5.0f, 2.0f }, { 0.0f, 10.0f, 0.0f }, query_mask::kAll, &hit));
 		CHECK(hit.fraction == doctest::Approx(0.5f).epsilon(1e-5));
 		CHECK(hit.normal[1] == doctest::Approx(-1.0f));
 
-		// Too short, outside, zero length, non-finite, empty mask: no hit.
 		CHECK_FALSE(world->ray({ 1.0f, 5.0f, 2.0f }, { 0.0f, -4.0f, 0.0f }, query_mask::kAll));
 		CHECK_FALSE(world->ray({ 30.0f, 5.0f, 2.0f }, { 0.0f, -10.0f, 0.0f }, query_mask::kAll));
 		CHECK_FALSE(world->ray({ 1.0f, 5.0f, 2.0f }, { 0.0f, 0.0f, 0.0f }, query_mask::kAll));
@@ -80,9 +72,9 @@ TEST_SUITE("sim-world-unit") {
 		REQUIRE(s.tiles.size() == 1);
 		const JPH::Shape *mesh = s.tiles[0].shapes[0].GetPtr();
 		REQUIRE(mesh != nullptr);
-		// A ray that ignores back faces still hits from above: the front face is up.
+
 		const auto world = world_of(shapes);
-		const JPH::RayCastSettings front_only; // IgnoreBackFaces
+		const JPH::RayCastSettings front_only;
 		JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> down;
 		world->impl().system->GetNarrowPhaseQueryNoLock().CastRay(JPH::RRayCast(JPH::RVec3(5.0f, 10.0f, 5.0f), JPH::Vec3(0.0f, -20.0f, 0.0f)), front_only, down);
 		CHECK(down.HadHit());
@@ -93,11 +85,11 @@ TEST_SUITE("sim-world-unit") {
 
 	TEST_CASE("sim.world: tiles follow the soup's rule and carry counts, tags, bounds and content digests") {
 		std::vector<StaticTriangle> tris;
-		add_floor(tris, 1.0f, 1.0f, 9.0f, 9.0f, 0.0f, tag_of(1, 1)); // tile (0, 0)
-		add_floor(tris, 70.0f, 1.0f, 80.0f, 9.0f, 0.0f, tag_of(2, 2)); // tile (1, 0)
-		add_floor(tris, -150.0f, -10.0f, -140.0f, -2.0f, 1.0f, tag_of(3, 3)); // tile (-3, -1)
-		add_wall_x(tris, 5.0f, 2.0f, 8.0f, 0.0f, 3.0f, tag_of(4, 4, 1), StaticLayer::Raycast); // tile (0, 0)
-		add_wall_x(tris, 6.0f, 2.0f, 8.0f, 0.0f, 3.0f, tag_of(1, 1, 2), StaticLayer::Character); // tile (0, 0)
+		add_floor(tris, 1.0f, 1.0f, 9.0f, 9.0f, 0.0f, tag_of(1, 1));
+		add_floor(tris, 70.0f, 1.0f, 80.0f, 9.0f, 0.0f, tag_of(2, 2));
+		add_floor(tris, -150.0f, -10.0f, -140.0f, -2.0f, 1.0f, tag_of(3, 3));
+		add_wall_x(tris, 5.0f, 2.0f, 8.0f, 0.0f, 3.0f, tag_of(4, 4, 1), StaticLayer::Raycast);
+		add_wall_x(tris, 6.0f, 2.0f, 8.0f, 0.0f, 3.0f, tag_of(1, 1, 2), StaticLayer::Character);
 		std::atomic<size_t> done{ 0 };
 		StaticWorldBuildOptions options;
 		options.tiles_done = &done;
@@ -115,11 +107,11 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(t0.triangles[0] == 2);
 		CHECK(t0.triangles[1] == 2);
 		CHECK(t0.triangles[2] == 2);
-		CHECK(t0.tags == 3); // (1,1,body 0), (4,4,body 1), (1,1,body 2)
+		CHECK(t0.tags == 3);
 		CHECK(shapes->tag(1, 0) == tag_of(1, 1));
 		CHECK(shapes->tag(1, 1) == tag_of(4, 4, 1));
 		CHECK(shapes->tag(1, 2) == tag_of(1, 1, 2));
-		CHECK(shapes->tag(1, 3) == SurfaceTag()); // out of range: the empty tag, no crash
+		CHECK(shapes->tag(1, 3) == SurfaceTag());
 		CHECK(shapes->tag(99, 0) == SurfaceTag());
 		CHECK(shapes->tile(99).triangles[0] == 0);
 		CHECK(t0.min[0] == 1.0f);
@@ -141,7 +133,6 @@ TEST_SUITE("sim-world-unit") {
 		CHECK_FALSE(st.world_hit);
 		CHECK(st.shape_bytes > 0);
 
-		// The same input builds the same digests; any change of a bit, a tag or a layer changes the tile's.
 		const auto again = build(tris);
 		for (size_t i = 0; i < 3; ++i) {
 			CHECK(again->tile(i).content == shapes->tile(i).content);
@@ -157,7 +148,6 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(build(relayered)->tile(1).content != shapes->tile(1).content);
 		CHECK(build(relayered)->tile(0).content == shapes->tile(0).content);
 
-		// Without the Raycast layer: no shape and a zero count for it; the digest still covers the input.
 		StaticWorldBuildOptions no_ray;
 		no_ray.include_raycast = false;
 		const auto lean = build(tris, no_ray);
@@ -189,11 +179,10 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(hit.layer == StaticLayer::Collision);
 		CHECK(hit.tag.material == 30);
 		CHECK(hit.position[0] == doctest::Approx(6.0f));
-		// The mask is read modulo the three layers.
+
 		REQUIRE(world->ray(from, along, query_mask::kCollision | 0xF0u, &hit));
 		CHECK(hit.layer == StaticLayer::Collision);
 
-		// Capsule queries see the same layers.
 		CHECK(world->overlap_capsule({ 4.0f, 0.5f, 0.0f }, 0.3f, 1.8f, query_mask::kMovement));
 		CHECK_FALSE(world->overlap_capsule({ 4.0f, 0.5f, 0.0f }, 0.3f, 1.8f, query_mask::kProjectile));
 		CHECK(world->overlap_capsule({ 2.0f, 0.5f, 0.0f }, 0.3f, 1.8f, query_mask::kProjectile));
@@ -208,28 +197,28 @@ TEST_SUITE("sim-world-unit") {
 		const float r = 0.4f;
 		const float h = 1.8f;
 		StaticHit hit;
-		// Down from feet at y = 2 by 4 m: contact after 2 m.
+
 		REQUIRE(world->sweep_capsule({ 0.0f, 2.0f, 0.0f }, r, h, { 0.0f, -4.0f, 0.0f }, query_mask::kMovement, &hit));
 		CHECK(hit.fraction == doctest::Approx(0.5f).epsilon(1e-3));
 		CHECK(hit.position[1] == doctest::Approx(0.0f).epsilon(1e-3));
 		CHECK(hit.normal[1] == doctest::Approx(1.0f));
 		CHECK(hit.tag == tag_of(7, 7));
-		// Sideways into the wall from x = 0 (surface at x = 0.4): contact after 4.6 m of 9.2.
+
 		REQUIRE(world->sweep_capsule({ 0.0f, 1.0f, 0.0f }, r, h, { 9.2f, 0.0f, 0.0f }, query_mask::kMovement, &hit));
 		CHECK(hit.fraction == doctest::Approx(0.5f).epsilon(1e-3));
 		CHECK(hit.position[0] == doctest::Approx(5.0f).epsilon(1e-3));
 		CHECK(hit.normal[0] == doctest::Approx(-1.0f));
 		CHECK(hit.tag == tag_of(8, 8));
-		// Away from everything: no hit.
+
 		CHECK_FALSE(world->sweep_capsule({ 0.0f, 1.0f, 0.0f }, r, h, { -3.0f, 1.0f, 0.0f }, query_mask::kMovement));
-		// Starting sunk 5 cm into the floor: fraction 0.
+
 		REQUIRE(world->sweep_capsule({ 0.0f, -0.05f, 0.0f }, r, h, { 1.0f, 0.0f, 0.0f }, query_mask::kMovement, &hit));
 		CHECK(hit.fraction == 0.0f);
-		// Zero motion while sunk: fraction 0; while clear: no hit.
+
 		CHECK(world->sweep_capsule({ 0.0f, -0.05f, 0.0f }, r, h, { 0.0f, 0.0f, 0.0f }, query_mask::kMovement, &hit));
 		CHECK(hit.fraction == 0.0f);
 		CHECK_FALSE(world->sweep_capsule({ 0.0f, 1.0f, 0.0f }, r, h, { 0.0f, 0.0f, 0.0f }, query_mask::kMovement));
-		// A sphere-shaped capsule (height = diameter) works; invalid shapes answer false.
+
 		CHECK(world->sweep_capsule({ 0.0f, 1.0f, 0.0f }, r, 2.0f * r, { 0.0f, -2.0f, 0.0f }, query_mask::kMovement));
 		CHECK_FALSE(world->sweep_capsule({ 0.0f, 1.0f, 0.0f }, 0.0f, h, { 0.0f, -2.0f, 0.0f }, query_mask::kMovement));
 		CHECK_FALSE(world->sweep_capsule({ 0.0f, 1.0f, 0.0f }, r, r, { 0.0f, -2.0f, 0.0f }, query_mask::kMovement));
@@ -248,8 +237,6 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(world->overlap_capsule({ 4.7f, 1.0f, 0.0f }, 0.4f, 1.8f, query_mask::kMovement));
 		CHECK_FALSE(world->overlap_capsule({ 0.0f, 1.0f, 0.0f }, -1.0f, 1.8f, query_mask::kMovement));
 
-		// A 2 x 0.4 x 0.2 m (half extents 1, 0.2, 0.1) box 0.5 m in front of the wall: clear along Z, touching it
-		// when turned 90 degrees so its long side points at the wall.
 		const Vec3 half{ 0.1f, 0.2f, 1.0f };
 		const Vec3 centre{ 4.5f, 1.0f, 0.0f };
 		CHECK_FALSE(world->overlap_box(centre, half, 0.0f, query_mask::kMovement));
@@ -258,7 +245,7 @@ TEST_SUITE("sim-world-unit") {
 		CHECK_FALSE(world->overlap_box(centre, half, 0.7853982f, query_mask::kMovement, 0.3f));
 		CHECK_FALSE(world->overlap_box(centre, { 0.0f, 0.2f, 1.0f }, 0.0f, query_mask::kMovement));
 		CHECK_FALSE(world->overlap_box(centre, half, std::numeric_limits<float>::quiet_NaN(), query_mask::kMovement));
-		// Resting on the floor (bottom at y = 0) is not deeper than 0; sunk 2 cm is.
+
 		CHECK_FALSE(world->overlap_box({ 0.0f, 0.2001f, 0.0f }, half, 0.3f, query_mask::kMovement));
 		CHECK(world->overlap_box({ 0.0f, 0.18f, 0.0f }, half, 0.3f, query_mask::kMovement));
 	}
@@ -266,14 +253,14 @@ TEST_SUITE("sim-world-unit") {
 	TEST_CASE("sim.world: ground_below finds the highest surface under a point within the drop") {
 		std::vector<StaticTriangle> tris;
 		add_floor(tris, -20.0f, -20.0f, 20.0f, 20.0f, 0.0f, tag_of(1, 1));
-		add_floor(tris, 2.0f, 2.0f, 4.0f, 4.0f, 1.5f, tag_of(2, 2)); // a ledge above the floor
+		add_floor(tris, 2.0f, 2.0f, 4.0f, 4.0f, 1.5f, tag_of(2, 2));
 		const auto world = world_of(build(tris));
 		StaticHit hit;
 		REQUIRE(world->ground_below({ 3.0f, 5.0f, 3.0f }, 10.0f, query_mask::kMovement, &hit));
 		CHECK(hit.position[1] == doctest::Approx(1.5f));
 		CHECK(hit.tag == tag_of(2, 2));
 		CHECK(hit.normal[1] == doctest::Approx(1.0f));
-		REQUIRE(world->ground_below({ 3.0f, 1.0f, 3.0f }, 10.0f, query_mask::kMovement, &hit)); // under the ledge
+		REQUIRE(world->ground_below({ 3.0f, 1.0f, 3.0f }, 10.0f, query_mask::kMovement, &hit));
 		CHECK(hit.position[1] == doctest::Approx(0.0f));
 		CHECK(hit.tag == tag_of(1, 1));
 		CHECK_FALSE(world->ground_below({ 0.0f, 5.0f, 0.0f }, 4.0f, query_mask::kMovement, &hit));
@@ -283,7 +270,7 @@ TEST_SUITE("sim-world-unit") {
 	}
 
 	TEST_CASE("sim.world: two worlds over one build and two builds of one input answer bit-identically") {
-		const std::vector<StaticTriangle> field = bumpy_field(100.0f); // 100 x 100 cells over 4 x 4 tiles
+		const std::vector<StaticTriangle> field = bumpy_field(100.0f);
 		const auto shapes = build(field);
 		CHECK(shapes->tile_count() == 16);
 		const auto shapes_again = build(field, StaticWorldBuildOptions{ 1 });
@@ -308,7 +295,7 @@ TEST_SUITE("sim-world-unit") {
 				++hits;
 				CHECK(bits_equal(ha, hb));
 				CHECK(bits_equal(ha, hc));
-				CHECK(ha.tag.material < 7); // the field's tags resolve through the tile's table
+				CHECK(ha.tag.material < 7);
 				CHECK(ha.tag.surface < 3);
 			}
 			const bool sa = a->sweep_capsule(origin, 0.4f, 1.8f, delta, query_mask::kMovement, &ha);
@@ -374,7 +361,7 @@ TEST_SUITE("sim-world-unit") {
 			CHECK((*from_soup)->tile(i).content == from_span->tile(i).content);
 			CHECK((*from_soup)->tile(i).triangles == from_span->tile(i).triangles);
 		}
-		// A soup body without a layer fails cleanly.
+
 		soup.tiles[0].triangles[0].body = 9;
 		CHECK_FALSE(build_static_world(soup).ok());
 	}
@@ -401,7 +388,6 @@ TEST_SUITE("sim-world-unit") {
 		tiny.temp_allocator_bytes = 16;
 		CHECK_FALSE(CollisionWorld::create(build(tris), tiny).ok());
 
-		// Two equal corners: Jolt drops the triangle, the tile stays with no shape and a zero count.
 		std::vector<StaticTriangle> degenerate(1);
 		degenerate[0].v = { Vec3{ 1.0f, 0.0f, 1.0f }, Vec3{ 1.0f, 0.0f, 1.0f }, Vec3{ 2.0f, 0.0f, 1.0f } };
 		const auto empty_tile = build(degenerate);
@@ -411,7 +397,6 @@ TEST_SUITE("sim-world-unit") {
 		const auto w = world_of(empty_tile);
 		CHECK_FALSE(w->ray({ 1.5f, 1.0f, 1.0f }, { 0.0f, -2.0f, 0.0f }, query_mask::kAll));
 
-		// No triangles: an empty world that answers nothing.
 		const auto none = build({});
 		CHECK(none->tile_count() == 0);
 		const auto empty = world_of(none);
@@ -428,14 +413,14 @@ TEST_SUITE("sim-world-unit") {
 			REQUIRE(physics.init(WorldConfig{}));
 			auto world = world_of(shapes);
 			REQUIRE(physics.step());
-			physics.shutdown(); // PhysicsWorld's reference goes first
+			physics.shutdown();
 			CHECK(world->ray({ 2.0f, 1.0f, 2.0f }, { 0.0f, -2.0f, 0.0f }, query_mask::kAll));
 		}
 		auto world = world_of(shapes);
-		shapes.reset(); // the world keeps the shapes and the runtime
+		shapes.reset();
 		CHECK(world->ray({ 2.0f, 1.0f, 2.0f }, { 0.0f, -2.0f, 0.0f }, query_mask::kAll));
 		world.reset();
-		PhysicsWorld physics; // a fresh runtime after the last release
+		PhysicsWorld physics;
 		REQUIRE(physics.init(WorldConfig{}));
 		CHECK(physics.step());
 	}
@@ -449,7 +434,7 @@ TEST_SUITE("sim-world-unit") {
 		CollisionWorld::Impl &w = world->impl();
 		REQUIRE(w.system != nullptr);
 		REQUIRE(w.temp != nullptr);
-		CHECK(w.bodies.size() == 6); // the floor and both walls each span two of the four tiles around the origin
+		CHECK(w.bodies.size() == 6);
 		CHECK(w.broadphase_filters.size() == 8);
 		CHECK(w.object_filters.size() == 8);
 		CHECK(w.object_filter(query_mask::kMovement).ShouldCollide(JPH::ObjectLayer(StaticLayer::Collision)));
@@ -460,7 +445,7 @@ TEST_SUITE("sim-world-unit") {
 		CHECK_FALSE(w.object_pairs->ShouldCollide(0, 2));
 
 		JPH::CharacterVirtualSettings settings;
-		settings.mShape = new JPH::CapsuleShape(0.5f, 0.4f); // 1.8 m tall
+		settings.mShape = new JPH::CapsuleShape(0.5f, 0.4f);
 		settings.mShapeOffset = JPH::Vec3(0.0f, 0.9f, 0.0f);
 		settings.mMaxSlopeAngle = JPH::DegreesToRadians(50.0f);
 		settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
@@ -474,7 +459,6 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(ground.layer == StaticLayer::Collision);
 		CHECK(ground.tag == tag_of(77, 3));
 
-		// Walk +X into the Character-layer wall: stopped before x = 3 - 0.4; walking -X passes the Raycast wall.
 		JPH::CharacterVirtual::ExtendedUpdateSettings update;
 		for (int i = 0; i < 120; ++i) {
 			character->SetLinearVelocity(JPH::Vec3(4.0f, 0.0f, 0.0f));

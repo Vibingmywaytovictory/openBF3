@@ -1,17 +1,3 @@
-// The own soldier's weapons on the wire (weapons_wire.h; docs/design/m2a.md §7.3, §8.2; owner nt).
-//
-// Wire body (inside the Snapshot's own block, after the own state):
-//   u32 next_shot_index | u8 active | u8 pending | u16 events | time sprint_recover_until
-//   per slot 0..7: 1 bit non-empty;
-//     empty:     u2 mode_counter
-//     non-empty: varint def | u2 mode | u2 mode_counter | zigzag varint magazine | zigzag varint reserve
-//                | u3 phase | u6 burst_left | u7 flags | time phase_start | time phase_end | time next_shot_time
-//                | f32 spread | time spread_time | recoil | time hold_start
-//   time   = 1 bit "absolute 0", else i32 offset from tick_start(server tick), |offset| <= kWeaponsWireMaxOffset
-//   recoil = 1 bit "both +0.0f", else f32 pitch, f32 yaw
-// A typical M2a kit (4 non-empty slots, the active one firing) is about 95 bytes. Every float travels as its bit
-// pattern; the reader refuses a non-finite one, an offset out of range, a varint beyond int32 and an index out of
-// range, so a hostile datagram fails instead of building a state the sim was never in.
 #include "bf3/net/weapons_wire.h"
 
 #include <algorithm>
@@ -25,13 +11,12 @@ namespace sw = sim::weapons;
 
 namespace {
 
-// Field widths on the wire; the view masks to them so read(write(view)) == view.
-constexpr unsigned kModeBits = 2; // WeaponSimDef::modes has 4 entries
-constexpr unsigned kCounterBits = 2; // the fire-mode toggle counter (weapon_input.h)
-constexpr unsigned kBurstBits = 6; // burst_left <= kMaxBulletsPerBurst (32)
-constexpr unsigned kFlagBits = 7; // slot_flags:: bits 0..6
-constexpr unsigned kEventBits = 16; // weapon_events:: bits 0..15
-constexpr unsigned kPhaseBits = 3; // WeaponPhase 0..7
+constexpr unsigned kModeBits = 2;
+constexpr unsigned kCounterBits = 2;
+constexpr unsigned kBurstBits = 6;
+constexpr unsigned kFlagBits = 7;
+constexpr unsigned kEventBits = 16;
+constexpr unsigned kPhaseBits = 3;
 static_assert(sw::kMaxBulletsPerBurst < (1 << kBurstBits));
 static_assert(sw::slot_flags::kReleasePending == (1u << (kFlagBits - 1)), "a new slot flag needs a wider wire field");
 static_assert(sw::weapon_events::kFireBlocked == (1u << (kEventBits - 1)), "a new weapon event needs a wider wire field");
@@ -104,7 +89,6 @@ bool positive_zero(float p_v) {
 	return std::bit_cast<uint32_t>(p_v) == 0;
 }
 
-// The timed state the view holds for slot p_slot (timers[0], timers[1] or idle), or nullptr.
 const WeaponTimersWire *timed_of(const WeaponsWire &p_wire, uint8_t p_slot) {
 	for (const WeaponTimersWire &t : p_wire.timers) {
 		if (t.slot == p_slot) {
@@ -114,8 +98,6 @@ const WeaponTimersWire *timed_of(const WeaponsWire &p_wire, uint8_t p_slot) {
 	return p_wire.idle[p_slot].slot == p_slot ? &p_wire.idle[p_slot] : nullptr;
 }
 
-// Where the view puts slot p_slot's timed state: timers[0] for the active slot, timers[1] for the pending one,
-// idle[p_slot] otherwise (the same rule in weapons_wire_view and read_weapons_wire).
 WeaponTimersWire &timed_place(WeaponsWire &r_wire, uint8_t p_slot) {
 	if (p_slot == r_wire.active) {
 		return r_wire.timers[0];
@@ -126,7 +108,7 @@ WeaponTimersWire &timed_place(WeaponsWire &r_wire, uint8_t p_slot) {
 	return r_wire.idle[p_slot];
 }
 
-} // namespace
+}
 
 WeaponsWire weapons_wire_view(const sw::SoldierWeaponsState &p_state, sim::Tick p_server_tick) {
 	const sw::SimTime base = sw::tick_start(p_server_tick);
@@ -275,7 +257,7 @@ core::Status read_weapons_wire(BitReader &r_reader, WeaponsWire &r_wire) {
 		ok = unzigzag(r_reader.read_varint(), o.magazine) && ok;
 		ok = unzigzag(r_reader.read_varint(), o.reserve) && ok;
 		if (def >= sw::kNoWeapon) {
-			ok = false; // kNoWeapon is the empty bit's job; a larger id does not fit the state
+			ok = false;
 			break;
 		}
 		o.def = uint16_t(def);
@@ -305,4 +287,4 @@ core::Status read_weapons_wire(BitReader &r_reader, WeaponsWire &r_wire) {
 	return core::Status::success();
 }
 
-} // namespace bf3::net
+}

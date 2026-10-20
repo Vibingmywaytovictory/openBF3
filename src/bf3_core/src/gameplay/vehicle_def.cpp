@@ -1,8 +1,3 @@
-// VehicleDef reader. The component walk and the seat/turret association rules are ported from
-// IW4L level_bf3 (vehicles/layout.rs, vehicles/mod.rs describe()), Apache-2.0, without meshes,
-// transforms, wheels and sounds. Every array scan and name copy is charged to the read's WorkBudget
-// first; the association rules run on child tables built once, O(depth) per component (cost
-// model: logic_world.cpp).
 #include "bf3/core/gameplay/vehicle_def.h"
 
 #include "bf3/core/ids.h"
@@ -19,7 +14,7 @@ namespace {
 
 constexpr size_t kMaxDepth = 32;
 constexpr size_t kMaxComponents = 8192;
-constexpr size_t kNodePasses = 8; // full passes over the nodes after the walk, rounded up
+constexpr size_t kNodePasses = 8;
 
 enum class Role : uint8_t { Other, Chassis, Seat, Turret, Weapon, Camera };
 
@@ -29,8 +24,6 @@ struct Node {
 	Role role = Role::Other;
 };
 
-// Whether a component is there by default: not Excluded, and not added by an unlock the player
-// would need.
 bool active(const EbxInstance &p_component) {
 	if (boolean(p_component.data(), "Excluded").value_or(false)) {
 		return false;
@@ -64,7 +57,6 @@ class Layout {
 public:
 	std::vector<Node> nodes;
 
-	// Each visit charges its whole Components array (a component listed K times is scanned K times).
 	void walk(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_parent, size_t p_depth) {
 		if (p_depth > kMaxDepth) {
 			return;
@@ -82,9 +74,6 @@ public:
 		}
 	}
 
-	// The first seat and the first turret among each node's children (index parent + 1, so the
-	// top-level components are at 0), in one pass: the rules below then take O(depth) per node
-	// instead of a scan of every node per step.
 	void index_children() {
 		first_seat_.assign(nodes.size() + 1, -1);
 		first_turret_.assign(nodes.size() + 1, -1);
@@ -98,8 +87,6 @@ public:
 		}
 	}
 
-	// The nearest enclosing node of a role, p_at itself excluded (a parent chain is at most
-	// kMaxDepth + 1 long: each node's parent is one walk level up).
 	int enclosing(int p_at, Role p_role) const {
 		for (int up = nodes[p_at].parent; up >= 0; up = nodes[up].parent) {
 			if (nodes[up].role == p_role) {
@@ -109,7 +96,6 @@ public:
 		return -1;
 	}
 
-	// The deepest turret down the first-turret chain below p_at (each step goes one level down).
 	int innermost(int p_at) const {
 		int current = p_at;
 		for (size_t guard = 0; guard <= kMaxDepth + 1; ++guard) {
@@ -122,8 +108,6 @@ public:
 		return current;
 	}
 
-	// The turret that aims the weapon at p_at: the nearest enclosing one, else the innermost turret
-	// beside it (port guns sit beside the turret that aims them, not inside it).
 	int aiming(int p_at) const {
 		const int up = enclosing(p_at, Role::Turret);
 		if (up >= 0) {
@@ -133,8 +117,6 @@ public:
 		return beside >= 0 ? innermost(beside) : -1;
 	}
 
-	// The seat that works the component at p_at: the component itself, a seat beside it, else the
-	// nearest seat beside one of its parents.
 	int seat_of(int p_at) const {
 		int current = p_at;
 		for (size_t guard = 0; current >= 0 && guard <= kMaxDepth + 1; ++guard) {
@@ -194,7 +176,7 @@ VehicleCameraDef read_camera(WorkBudget &r_budget, const EbxResolver &p_db, cons
 	return out;
 }
 
-} // namespace
+}
 
 float VehicleDef::max_zone_health() const {
 	return std::max({ front.max_health, rear.max_health, left.max_health, right.max_health });
@@ -256,9 +238,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	Layout layout;
 	layout.walk(budget, p_db, *entity, -1, 0);
 	out.components = layout.nodes.size();
-	// Each pass below looks at every node at most once, with O(kMaxDepth) association steps per node
-	// (the nodes were charged by the walk); charge the passes: index_children, the chassis, seat,
-	// seat-key, turret and weapon/camera passes (the seat sort is n log n of these).
+
 	BF3_TRY(budget.charge(kNodePasses * layout.nodes.size()));
 	layout.index_children();
 
@@ -276,8 +256,6 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		}
 	}
 
-	// Seats sorted by EntryOrderNumber (stable: depth-first order breaks ties). The keys are read
-	// once, not per comparison.
 	std::vector<int> seat_nodes;
 	std::vector<double> order(layout.nodes.size(), 0);
 	for (size_t i = 0; i < layout.nodes.size(); ++i) {
@@ -288,7 +266,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		}
 	}
 	std::stable_sort(seat_nodes.begin(), seat_nodes.end(), [&](int a, int b) { return order[static_cast<size_t>(a)] < order[static_cast<size_t>(b)]; });
-	std::vector<int> seat_at(layout.nodes.size(), -1); // node -> seat index
+	std::vector<int> seat_at(layout.nodes.size(), -1);
 	for (size_t i = 0; i < seat_nodes.size(); ++i) {
 		seat_at[static_cast<size_t>(seat_nodes[i])] = static_cast<int>(i);
 	}
@@ -306,7 +284,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	}
 
 	std::vector<int> turret_nodes;
-	std::vector<int> turret_at(layout.nodes.size(), -1); // node -> turret index
+	std::vector<int> turret_at(layout.nodes.size(), -1);
 	for (size_t i = 0; i < layout.nodes.size(); ++i) {
 		if (layout.nodes[i].role == Role::Turret) {
 			turret_at[i] = static_cast<int>(turret_nodes.size());
@@ -365,4 +343,4 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	return out;
 }
 
-} // namespace bf3::core::gameplay
+}

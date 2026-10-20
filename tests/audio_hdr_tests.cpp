@@ -1,12 +1,3 @@
-// M2b au: audio A3 (docs/design/m2b.md §6, E10; docs/design/m2b-au.md).
-//   audio-hdr          (audio.hdr.unit, data-free, < 2 s) E10: the HDR window's numbers (HdrWindow alone and through
-//                      MixerCore with synthetic HDR sources: a 71 dB footstep, a 110 dB shot, a 63 dB source), the
-//                      gain the window gives (R5), pre-cull, suspension, the release on the retail curve; the scope
-//                      rules (cull_voices: DuplicateSpawn, closest N, latest N, max N; Bullet_Impact keeps the closest
-//                      5 within 1 m / 0.4 s, Death_Scream at most 4) and the 128-voice cap, also through MixerCore;
-//                      the profiler; the non-HDR path unchanged; hostile settings and spans.
-//   audio-hdr-install  (audio.hdr.install, exit 77 without an install, install.unchanged) the retail HdrSetting and
-//                      the 33 scopes read from MP_Subway, the patch -> scope map of a few Metro patches; prints both.
 #include "test_support.h"
 
 #include "bf3/audio/audio_load.h"
@@ -51,8 +42,6 @@ constexpr uint32_t kStartHash = 1;
 constexpr uint32_t kStopHash = 2;
 constexpr double kBlockSeconds = double(ba::kBlockFrames) / double(ba::kMixRate);
 
-// ---- a PCM16 stream and a one-segment wave (the audio_unit_tests.cpp format builders) ------------------------------
-
 void put_be24(std::vector<uint8_t> &r, uint32_t v) {
 	r.push_back(uint8_t(v >> 16));
 	r.push_back(uint8_t(v >> 8));
@@ -84,7 +73,6 @@ std::vector<uint8_t> pcm_stream(const std::vector<int16_t> &p_samples, uint32_t 
 	return r;
 }
 
-// A 1 kHz sine of 4,800 frames (100 periods: it loops without a seam), one segment that is its own loop.
 struct ToneWave {
 	std::shared_ptr<const WaveBank> bank;
 	Guid partition;
@@ -117,18 +105,14 @@ ToneWave tone_wave() {
 	return ToneWave{ *bank, w.partition };
 }
 
-// ---- synthetic sources ----------------------------------------------------------------------------------------------
-
 struct Source {
 	float loudness_db = 71.0f;
 	bool enable_hdr = true;
-	bool looping = true; // LtForward on the tone: plays until killed; false: the tone once (a 0.1 s one-shot)
-	uint8_t id = 1; // the patch partition's last byte (scope maps)
-	float slope_db_per_m = 0.0f; // the output's attenuation: slope x distance (a straight Hermite line)
+	bool looping = true;
+	uint8_t id = 1;
+	float slope_db_per_m = 0.0f;
 };
 
-// Start event -> Sampler (one slot: SnP1 Rsp0 Pau0 Gai0 Sen0 -> GameMixMain) -> a FlatOutput whose main send is the
-// slot voice's Sen0, Gain 0 dB, EnableHdr as given.
 std::shared_ptr<const SoundProgram> source_program(const ToneWave &p_wave, const Source &p_src) {
 	SoundProgram p;
 	p.name = "a3_source";
@@ -156,7 +140,7 @@ std::shared_ptr<const SoundProgram> source_program(const ToneWave &p_wave, const
 		p.floats.resize(p.floats.size() + n.floats_count, 0.0f);
 		return n;
 	};
-	// The slot voice.
+
 	SoundVoice v;
 	v.plugins_begin = uint32_t(p.plugins.size());
 	for (const char *id : { "SnP1", "Rsp0", "Pau0", "Gai0", "Sen0" }) {
@@ -172,7 +156,7 @@ std::shared_ptr<const SoundProgram> source_program(const ToneWave &p_wave, const
 	v.plugins_count = 5;
 	p.voices.push_back(v);
 	p.voice_order.push_back(0);
-	// The sampler.
+
 	SoundNode s = make(SoundNodeType::Sampler, uint8_t(p_src.looping ? SamplerLoop::Forward : SamplerLoop::None));
 	s.waves_begin = uint32_t(p.wave_refs.size());
 	s.waves_count = 1;
@@ -187,7 +171,7 @@ std::shared_ptr<const SoundProgram> source_program(const ToneWave &p_wave, const
 	p.ports[s.ports_begin + cp::SmpPitch] = SoundPort{ kNoRegister, 1.0f };
 	p.ports[s.ports_begin + cp::SmpTrigger] = SoundPort{ trig, 0.0f };
 	p.nodes.push_back(s);
-	// The output.
+
 	SoundNode o = make(SoundNodeType::FlatOutput, 0);
 	o.output = 0;
 	o.plugins_begin = uint32_t(p.plugin_refs.size());
@@ -210,7 +194,6 @@ std::shared_ptr<const SoundProgram> source_program(const ToneWave &p_wave, const
 	return std::make_shared<const SoundProgram>(std::move(p));
 }
 
-// Records the left channel of every block.
 struct Recorder final : ba::MixTap {
 	std::vector<float> left;
 	void on_block(const float *p, uint32_t n, uint64_t) override {
@@ -228,7 +211,6 @@ struct Recorder final : ba::MixTap {
 	}
 };
 
-// A mixer with the sources the case starts; one block per step().
 struct Rig {
 	ToneWave wave = tone_wave();
 	std::unique_ptr<ba::MixerCore> mixer;
@@ -241,7 +223,7 @@ struct Rig {
 		mixer->set_tap(&rec);
 	}
 	~Rig() { mixer.reset(); }
-	// Starts p_src at p_distance metres in front of the listener, now (its first block is the next step()).
+
 	ba::InstanceHandle start(const Source &p_src, float p_distance = 1.0f, float p_x = 0.0f) {
 		Result<std::unique_ptr<ba::PatchInstance>> inst = ba::PatchInstance::create(source_program(wave, p_src), wave.bank, ba::AudioTuning{}, 7, ba::kMixRate);
 		REQUIRE_MESSAGE(inst.ok(), (inst.ok() ? std::string() : inst.error().message));
@@ -306,7 +288,6 @@ ba::CullVoice voice(float p_loudness, float p_distance = 1.0f, bool p_starting =
 	return v;
 }
 
-// The two retail scopes E10 names (the install row checks the data has them so).
 ScopeTable e10_scopes() {
 	ScopeTable t;
 	SoundScope impact;
@@ -331,9 +312,7 @@ size_t count(const std::vector<ba::CullVerdict> &p_v, ba::CullVerdict p_what) {
 	return size_t(std::count(p_v.begin(), p_v.end(), p_what));
 }
 
-} // namespace
-
-// =====================================================================================================================
+}
 
 TEST_SUITE("audio-hdr") {
 	TEST_CASE("E10: the HDR window alone: 71 dB -> 80 / 35, 110 dB -> 110 within 0.05 s, 65, 63 dB suspended, the release") {
@@ -342,20 +321,20 @@ TEST_SUITE("audio-hdr") {
 		CHECK(w.top_db() == 80.0f);
 		CHECK(w.bottom_db() == 35.0f);
 		for (int i = 0; i < 50; ++i) {
-			w.step(71.0f, ba::kBlockFrames); // a 71 dB footstep alone
+			w.step(71.0f, ba::kBlockFrames);
 		}
 		CHECK(w.top_db() == doctest::Approx(80.0f).epsilon(1e-6));
 		CHECK(w.bottom_db() == doctest::Approx(35.0f).epsilon(1e-6));
 		CHECK(w.gain_db(71.0f) == doctest::Approx(71.0f - 80.0f - 5.0f));
 		CHECK_FALSE(w.suspended(71.0f));
-		// A 110 dB shot: the top reaches 110 within 0.05 s +- one block.
+
 		int blocks = 0;
 		float prev = w.top_db();
 		while (w.top_db() < 110.0f - 1e-3f && blocks < 100) {
 			w.step(110.0f, ba::kBlockFrames);
 			++blocks;
-			CHECK(w.top_db() >= prev); // the attack only rises
-			CHECK(w.gain_db(110.0f) <= -2.0f + 1e-4f); // overshoot: at most AllowedOvershoot above the top, minus the headroom
+			CHECK(w.top_db() >= prev);
+			CHECK(w.gain_db(110.0f) <= -2.0f + 1e-4f);
 			prev = w.top_db();
 		}
 		const double attack_s = double(blocks) * kBlockSeconds;
@@ -364,11 +343,11 @@ TEST_SUITE("audio-hdr") {
 		CHECK(attack_s >= 0.05 - kBlockSeconds);
 		CHECK(w.top_db() == doctest::Approx(110.0f));
 		CHECK(w.bottom_db() == doctest::Approx(65.0f));
-		CHECK(w.suspended(63.0f)); // a 63 dB source is suspended
+		CHECK(w.suspended(63.0f));
 		CHECK_FALSE(w.suspended(71.0f));
 		CHECK(w.gain_db(110.0f) == doctest::Approx(-5.0f));
 		CHECK(w.precull_db() == doctest::Approx(62.0f));
-		// After the shot: the top releases to 80 over release_seconds(30) on the curve (monotone, never below 80).
+
 		const float duration = w.release_seconds(30.0f);
 		CHECK(duration == doctest::Approx(0.035f + (0.85f - 0.035f) * (30.0f / 45.0f)));
 		int rel = 0;
@@ -402,14 +381,14 @@ TEST_SUITE("audio-hdr") {
 			CHECK(y <= 1.0f);
 			prev = y;
 		}
-		CHECK(w.release_shape(std::nanf("")) == doctest::Approx(0.0f)); // hostile x: the end
+		CHECK(w.release_shape(std::nanf("")) == doctest::Approx(0.0f));
 		ba::HdrWindow lin;
-		lin.configure(HdrSetting{}, ba::kMixRate); // no curve
+		lin.configure(HdrSetting{}, ba::kMixRate);
 		CHECK(lin.release_shape(0.25f) == doctest::Approx(0.75f));
 		CHECK(w.release_seconds(0.0f) == doctest::Approx(0.035f));
 		CHECK(w.release_seconds(45.0f) == doctest::Approx(0.85f));
 		CHECK(w.release_seconds(1000.0f) == doctest::Approx(0.85f));
-		// A NaN loudest is no voice: the top stays at WindowMinTop.
+
 		for (int i = 0; i < 10; ++i) {
 			w.step(std::nanf(""), ba::kBlockFrames);
 		}
@@ -421,14 +400,14 @@ TEST_SUITE("audio-hdr") {
 
 	TEST_CASE("E10 through MixerCore: the window's numbers, the gain (R5), suspension, pre-cull, pending, the release") {
 		Rig rig(hdr_config());
-		// A 71 dB footstep alone: top 80, bottom 35.
+
 		const ba::InstanceHandle foot = rig.start(Source{ 71.0f, true, true, 1 });
 		rig.step(20);
 		CHECK(rig.top() == doctest::Approx(80.0f));
 		CHECK(rig.bottom() == doctest::Approx(35.0f));
 		CHECK(rig.mixer->stats().suspended.load() == 0);
 		const double foot_hdr_db = rig.rec.rms_db(rig.frames() - 10 * ba::kBlockFrames, rig.frames());
-		// The same footstep on the fixed window (no HdrSetting): R5 makes it 121 - 85 = 36 dB louder.
+
 		{
 			Rig fixed{ ba::MixerConfig{} };
 			fixed.start(Source{ 71.0f, true, true, 1 });
@@ -437,7 +416,7 @@ TEST_SUITE("audio-hdr") {
 			MESSAGE("71 dB footstep: " << foot_hdr_db << " dBFS on the HDR window, " << foot_fixed_db << " dBFS on the fixed 115 / 6 window");
 			CHECK(foot_hdr_db - foot_fixed_db == doctest::Approx((115.0 + 6.0) - (80.0 + 5.0)).epsilon(0.003));
 		}
-		// A 110 dB shot starts: the top reaches 110 within 0.05 s (+- one block), the bottom 65.
+
 		const ba::InstanceHandle shot = rig.start(Source{ 110.0f, true, true, 2 });
 		int blocks = 0;
 		while (rig.top() < 110.0f - 1e-3f && blocks < 50) {
@@ -450,32 +429,31 @@ TEST_SUITE("audio-hdr") {
 		rig.step(4);
 		CHECK(rig.top() == doctest::Approx(110.0f));
 		CHECK(rig.bottom() == doctest::Approx(65.0f));
-		CHECK(rig.mixer->stats().suspended.load() == 0); // the footstep at 71 is above 65
-		// A 63 dB source starts: above the pre-cull edge (62), below the bottom (65): suspended, silent.
+		CHECK(rig.mixer->stats().suspended.load() == 0);
+
 		const ba::InstanceHandle quiet = rig.start(Source{ 63.0f, true, true, 3 });
 		rig.step(3);
 		CHECK(rig.mixer->stats().suspended.load() == 1);
 		CHECK_FALSE(rig.was_finished(quiet));
-		CHECK(rig.mixer->stats().active_instances.load() == 3); // still advancing
-		// A 60 dB one-shot is pre-culled (60 < 65 - 3), a 60 dB loop becomes pending (kept, not rendered).
+		CHECK(rig.mixer->stats().active_instances.load() == 3);
+
 		const uint64_t pre0 = rig.mixer->stats().culled_precull.load();
 		const ba::InstanceHandle drop = rig.start(Source{ 60.0f, true, false, 4 });
 		const ba::InstanceHandle park = rig.start(Source{ 60.0f, true, true, 5 });
 		rig.step(2);
 		CHECK(rig.mixer->stats().culled_precull.load() == pre0 + 1);
-		CHECK(rig.was_finished(drop)); // the game thread hears of it (the pool / router free it)
+		CHECK(rig.was_finished(drop));
 		CHECK_FALSE(rig.was_finished(park));
-		CHECK(rig.mixer->stats().active_instances.load() == 3); // the pending loop is not rendered
-		// A non-HDR source is never pre-culled or suspended (today's path).
+		CHECK(rig.mixer->stats().active_instances.load() == 3);
+
 		const ba::InstanceHandle direct = rig.start(Source{ 40.0f, false, false, 6 });
 		rig.step(1);
 		CHECK_FALSE(rig.was_finished(direct));
 		CHECK(rig.mixer->stats().suspended.load() == 1);
-		// The shot ends: the top releases on the curve to 80 (the footstep holds 71 < 80); the pending loop resumes
-		// once the edge falls below 60 (bottom 35 -> edge 32), the 63 dB source is no longer suspended.
+
 		rig.kill(shot);
 		rig.kill(direct);
-		const float duration = ba::HdrWindow().release_seconds(30.0f); // the default setting's release (the retail one)
+		const float duration = ba::HdrWindow().release_seconds(30.0f);
 		int rel = 0;
 		float prev = rig.top();
 		while (rig.top() > 80.0f + 1e-3f && rel < 200) {
@@ -490,7 +468,7 @@ TEST_SUITE("audio-hdr") {
 		CHECK(rig.top() == doctest::Approx(80.0f));
 		CHECK(rig.bottom() == doctest::Approx(35.0f));
 		CHECK(rig.mixer->stats().suspended.load() == 0);
-		CHECK(rig.mixer->stats().active_instances.load() == 3); // footstep, the 63 dB source, the resumed loop
+		CHECK(rig.mixer->stats().active_instances.load() == 3);
 		CHECK(rig.mixer->stats().live_voices_max.load() >= 3);
 		rig.kill(foot);
 		rig.kill(quiet);
@@ -500,7 +478,7 @@ TEST_SUITE("audio-hdr") {
 	}
 
 	TEST_CASE("R5: a suspended source is silent; the shot's gain is loudness - top - headroom; the attack is clamped by the overshoot") {
-		// The shot alone, and the shot with a 63 dB source: after the suspension ramp the output is the same.
+
 		Rig alone(hdr_config());
 		alone.start(Source{ 110.0f, true, true, 2 });
 		alone.step(10);
@@ -515,8 +493,7 @@ TEST_SUITE("audio-hdr") {
 			diff = std::max(diff, double(std::fabs(alone.rec.left[i] - both.rec.left[i])));
 		}
 		CHECK(diff == 0.0);
-		// The shot at top 110: -5 dB against a 71 dB footstep at top 80 (-14 dB): 9 dB louder. The windows hold 480
-		// frames (ten tone periods), so the RMS does not depend on the phase.
+
 		Rig foot(hdr_config());
 		foot.start(Source{ 71.0f, true, true, 1 });
 		foot.step(10);
@@ -524,8 +501,7 @@ TEST_SUITE("audio-hdr") {
 		const double shot_db = alone.rec.rms_db(last, last + 480);
 		const double foot_db = foot.rec.rms_db(last, last + 480);
 		CHECK(shot_db - foot_db == doctest::Approx(9.0).epsilon(0.002));
-		// The first block of the shot (top 86.4 after one attack block): the overshoot clamp gives
-		// min(110, 86.4 + 3) - 86.4 - 5 = -2 dB, 3 dB above the steady -5 dB (not 110 - 86.4 - 5 = +18.6 dB).
+
 		const double first_db = alone.rec.rms_db(32, 32 + 480);
 		MESSAGE("shot: first block " << first_db << " dBFS, steady " << shot_db << " dBFS; footstep " << foot_db << " dBFS");
 		CHECK(first_db - shot_db == doctest::Approx(3.0).epsilon(0.01));
@@ -542,14 +518,14 @@ TEST_SUITE("audio-hdr") {
 		REQUIRE(fixed.frames() == hdr.frames());
 		CHECK(std::equal(fixed.rec.left.begin(), fixed.rec.left.end(), hdr.rec.left.begin()));
 		CHECK(hdr.mixer->stats().culled_precull.load() == 0);
-		CHECK(hdr.top() == doctest::Approx(80.0f)); // no HDR voice: the window sits at WindowMinTop
+		CHECK(hdr.top() == doctest::Approx(80.0f));
 	}
 
 	TEST_CASE("scopes: DuplicateSpawn 1 m / 0.4 s, Bullet_Impact keeps the closest 5, Death_Scream at most 4, loops pending") {
 		const ScopeTable t = e10_scopes();
 		const uint32_t rate = ba::kMixRate;
 		{
-			// Two impacts in one block 0.5 m apart: the second is a duplicate; 1.5 m apart: both stay.
+
 			std::vector<ba::CullVoice> v = { voice(88.0f, 5.0f, true, 0, 100), voice(88.0f, 5.5f, true, 0, 120), voice(88.0f, 7.0f, true, 0, 130) };
 			ba::CullCounts c;
 			const auto out = cull(v, &t, -1000.0f, 128, c);
@@ -559,7 +535,7 @@ TEST_SUITE("audio-hdr") {
 			CHECK(c.scope == 1);
 		}
 		{
-			// Near an impact that started 0.3 s ago: a duplicate; 0.5 s ago: not.
+
 			std::vector<ba::CullVoice> v = { voice(88.0f, 5.0f, false, 0, 0), voice(88.0f, 5.2f, true, 0, uint64_t(0.3 * rate)) };
 			ba::CullCounts c;
 			CHECK(cull(v, &t, -1000.0f, 128, c)[1] == ba::CullVerdict::Scope);
@@ -568,7 +544,7 @@ TEST_SUITE("audio-hdr") {
 			CHECK(cull(v, &t, -1000.0f, 128, c2)[1] == ba::CullVerdict::Keep);
 		}
 		{
-			// Eight impacts 2 m apart: the closest 5 stay.
+
 			std::vector<ba::CullVoice> v;
 			for (int i = 0; i < 8; ++i) {
 				ba::CullVoice x = voice(88.0f, 2.0f + 2.0f * float((i * 5) % 8), true, 0, uint64_t(i));
@@ -583,7 +559,7 @@ TEST_SUITE("audio-hdr") {
 			}
 		}
 		{
-			// Six death screams: the newest 4 stay (Max_Instaces_4, KeepOldest false).
+
 			std::vector<ba::CullVoice> v;
 			for (int i = 0; i < 6; ++i) {
 				v.push_back(voice(95.0f, 10.0f, i >= 4, 1, uint64_t(100 * i)));
@@ -593,7 +569,7 @@ TEST_SUITE("audio-hdr") {
 			CHECK(count(out, ba::CullVerdict::Keep) == 4);
 			CHECK(out[0] == ba::CullVerdict::Scope);
 			CHECK(out[1] == ba::CullVerdict::Scope);
-			// KeepOldest true (max_instances): the oldest 4 stay, the new ones are refused.
+
 			ScopeTable oldest = t;
 			oldest.scopes[1].latest = 0;
 			oldest.scopes[1].max_instances = 4;
@@ -604,7 +580,7 @@ TEST_SUITE("audio-hdr") {
 			CHECK(count(out2, ba::CullVerdict::Keep) == 4);
 		}
 		{
-			// A loop over a scope limit is pending, not dropped; a scope index outside the table is ignored.
+
 			std::vector<ba::CullVoice> v;
 			for (int i = 0; i < 6; ++i) {
 				v.push_back(voice(95.0f, 10.0f, false, 1, uint64_t(100 * i), true));
@@ -626,11 +602,11 @@ TEST_SUITE("audio-hdr") {
 			v.back().hdr = false;
 			ba::CullCounts c;
 			const auto out = cull(v, nullptr, 62.0f, 128, c);
-			CHECK(out[0] == ba::CullVerdict::Precull); // a starting one-shot below the edge
-			CHECK(out[1] == ba::CullVerdict::Keep); // playing: the window suspends it instead
-			CHECK(out[2] == ba::CullVerdict::Pending); // a starting loop
+			CHECK(out[0] == ba::CullVerdict::Precull);
+			CHECK(out[1] == ba::CullVerdict::Keep);
+			CHECK(out[2] == ba::CullVerdict::Pending);
 			CHECK(out[3] == ba::CullVerdict::Keep);
-			CHECK(out[4] == ba::CullVerdict::Keep); // not an HDR voice
+			CHECK(out[4] == ba::CullVerdict::Keep);
 			CHECK(c.precull == 1);
 			CHECK(c.pending == 1);
 		}
@@ -639,16 +615,16 @@ TEST_SUITE("audio-hdr") {
 			for (int i = 0; i < 130; ++i) {
 				v.push_back(voice(100.0f - 0.1f * float(i), 1.0f, false, kNoScope, uint64_t(i), i == 129));
 			}
-			v.push_back(voice(10.0f)); // starting, HDR
-			v.back().loudness_db = std::nanf(""); // hostile: below any edge, scored lowest, never a crash
+			v.push_back(voice(10.0f));
+			v.back().loudness_db = std::nanf("");
 			ba::CullCounts c;
 			const auto out = cull(v, nullptr, -1000.0f, 128, c);
 			CHECK(count(out, ba::CullVerdict::Keep) == 128);
-			CHECK(out[129] == ba::CullVerdict::Pending); // the quietest-but-one is a loop
+			CHECK(out[129] == ba::CullVerdict::Pending);
 			CHECK(out[128] == ba::CullVerdict::Cap);
-			CHECK(out[130] == ba::CullVerdict::Precull); // NaN is below any edge: a starting HDR one-shot goes at step 1
+			CHECK(out[130] == ba::CullVerdict::Precull);
 			CHECK(c.cap == 1);
-			// Equal loudness: the newer goes.
+
 			std::vector<ba::CullVoice> eq = { voice(80.0f, 1.0f, false, kNoScope, 5), voice(80.0f, 1.0f, false, kNoScope, 1), voice(80.0f, 1.0f, false, kNoScope, 9) };
 			ba::CullCounts c2;
 			const auto out2 = cull(eq, nullptr, -1000.0f, 2, c2);
@@ -656,9 +632,7 @@ TEST_SUITE("audio-hdr") {
 			CHECK(out2[0] == ba::CullVerdict::Keep);
 		}
 		{
-			// The cap counts sampler voices: three instances of 50 voices and a 20-voice one, in loudness order. The two
-			// loudest fit (100), the third does not (150 > 128), so it and every voice ranked below it go, the 20-voice
-			// one too although it alone would fit. 0 voices count as 1; a hostile count is clamped to kMaxCullVoices.
+
 			std::vector<ba::CullVoice> w = { voice(100.0f, 1.0f, false, kNoScope, 1), voice(95.0f, 1.0f, false, kNoScope, 2),
 				voice(90.0f, 1.0f, false, kNoScope, 3, true), voice(85.0f, 1.0f, false, kNoScope, 4) };
 			w[0].voices = 50;
@@ -669,11 +643,11 @@ TEST_SUITE("audio-hdr") {
 			const auto out = cull(w, nullptr, -1000.0f, 128, c);
 			CHECK(out[0] == ba::CullVerdict::Keep);
 			CHECK(out[1] == ba::CullVerdict::Keep);
-			CHECK(out[2] == ba::CullVerdict::Pending); // a loop
+			CHECK(out[2] == ba::CullVerdict::Pending);
 			CHECK(out[3] == ba::CullVerdict::Cap);
 			CHECK(c.cap == 1);
 			CHECK(c.pending == 1);
-			// Exactly at the cap: nothing goes.
+
 			w[2].voices = 8;
 			ba::CullCounts c2;
 			CHECK(count(cull(w, nullptr, -1000.0f, 128, c2), ba::CullVerdict::Keep) == 4);
@@ -685,14 +659,14 @@ TEST_SUITE("audio-hdr") {
 				z.voices = 0;
 			}
 			zero[0].voices = 0xFFFFFFFFu;
-			zero[0].loudness_db = 10.0f; // the quietest: clamped to 1024, culled first
+			zero[0].loudness_db = 10.0f;
 			ba::CullCounts c4;
 			const auto out4 = cull(zero, nullptr, -1000.0f, 128, c4);
 			CHECK(out4[0] == ba::CullVerdict::Cap);
 			CHECK(count(out4, ba::CullVerdict::Keep) == 128);
 		}
 		{
-			// A span above kMaxCullVoices, or a verdict span of another size, is not culled.
+
 			std::vector<ba::CullVoice> big(ba::kMaxCullVoices + 1, voice(10.0f));
 			ba::CullCounts c;
 			const auto out = cull(big, nullptr, 62.0f, 4, c);
@@ -710,7 +684,7 @@ TEST_SUITE("audio-hdr") {
 		{
 			ba::MixerConfig cfg = hdr_config();
 			auto scopes = std::make_shared<ScopeTable>(e10_scopes());
-			// The impact patches (ids 10..17) map to Bullet_Impact_Scope.
+
 			for (uint8_t id = 10; id < 18; ++id) {
 				uint8_t g[16] = { 0xA3, 0xA3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, id };
 				scopes->patch_scopes.emplace_back(Guid::from_bytes(g), uint16_t(0));
@@ -737,23 +711,23 @@ TEST_SUITE("audio-hdr") {
 			std::vector<ba::InstanceHandle> loops;
 			for (int i = 0; i < 6; ++i) {
 				Source s{ 90.0f, false, true, uint8_t(20 + i), 1.0f };
-				loops.push_back(rig.start(s, 1.0f + 5.0f * float(i))); // farther = quieter at the listener
+				loops.push_back(rig.start(s, 1.0f + 5.0f * float(i)));
 			}
 			rig.step(2);
 			CHECK(rig.mixer->stats().active_instances.load() == 4);
 			CHECK(rig.mixer->stats().live_voices_max.load() == 4);
-			CHECK(rig.mixer->stats().culled_cap.load() == 0); // loops pend, they are not dropped
+			CHECK(rig.mixer->stats().culled_cap.load() == 0);
 			CHECK(rig.finished.empty());
 			rig.kill(loops[0]);
-			rig.step(2); // PT1 snd [fade]: was step(1); the killed loop fades out over one block, its voice held in the cap
-			CHECK(rig.mixer->stats().active_instances.load() == 4); // the loudest pending one resumed
-			// A one-shot over the cap is dropped (Cap) and comes back finished.
+			rig.step(2);
+			CHECK(rig.mixer->stats().active_instances.load() == 4);
+
 			Source quiet{ 90.0f, false, false, 30, 1.0f };
 			const ba::InstanceHandle q = rig.start(quiet, 200.0f);
 			rig.step(1);
 			CHECK(rig.mixer->stats().culled_cap.load() == 1);
 			CHECK(rig.was_finished(q));
-			// Stopping a pending loop drops it.
+
 			ba::MixerCommand stop;
 			stop.type = ba::MixerCommandType::Stop;
 			stop.handle = loops[5];
@@ -768,12 +742,12 @@ TEST_SUITE("audio-hdr") {
 		CHECK(ba::mix_share_quantile(s, 0.99) == 0.0);
 		const uint64_t block_ns = uint64_t(ba::kBlockFrames) * 1000000000ull / ba::kMixRate;
 		for (int i = 0; i < 98; ++i) {
-			ba::record_mix_ns(s, block_ns / 200, block_ns); // 0.5 %
+			ba::record_mix_ns(s, block_ns / 200, block_ns);
 		}
-		ba::record_mix_ns(s, block_ns / 11, block_ns); // 9.1 %
-		ba::record_mix_ns(s, block_ns * 2, block_ns); // late
+		ba::record_mix_ns(s, block_ns / 11, block_ns);
+		ba::record_mix_ns(s, block_ns * 2, block_ns);
 		CHECK(s.mix_ns_hist[0].load() == 98);
-		CHECK(s.mix_ns_hist[7].load() == 1); // [0.08, 0.10)
+		CHECK(s.mix_ns_hist[7].load() == 1);
 		CHECK(s.mix_ns_hist[15].load() == 1);
 		CHECK(ba::mix_share_quantile(s, 0.50) == doctest::Approx(0.01));
 		CHECK(ba::mix_share_quantile(s, 0.99) == doctest::Approx(0.10));
@@ -823,7 +797,7 @@ TEST_SUITE("audio-hdr") {
 		h = retail_hdr_setting();
 		h.top_release_curve.points[2].k = std::numeric_limits<float>::infinity();
 		CHECK_FALSE(validate_hdr_setting(h).ok());
-		// A window over a zero-time attack and release still steps (instant moves).
+
 		HdrSetting instant = retail_hdr_setting();
 		instant.top_attack_s = 0.0f;
 		instant.top_min_release_s = instant.top_max_release_s = 0.0f;
@@ -838,8 +812,6 @@ TEST_SUITE("audio-hdr") {
 		CHECK(w.bottom_db() == 35.0f);
 	}
 }
-
-// =====================================================================================================================
 
 namespace {
 
@@ -890,7 +862,7 @@ const SoundScope *scope_named(const ScopeTable &p_t, std::string_view p_name) {
 	return nullptr;
 }
 
-} // namespace
+}
 
 TEST_SUITE("audio-hdr-install") {
 	TEST_CASE("the retail HdrSetting (sound/soundstates on MP_Subway)") {
@@ -929,7 +901,7 @@ TEST_SUITE("audio-hdr-install") {
 			CHECK(h->top_release_curve.points[i].y == d.top_release_curve.points[i].y);
 			CHECK(h->top_release_curve.points[i].k == d.top_release_curve.points[i].k);
 		}
-		// A budget that cannot pay for the read fails, never a partial setting.
+
 		gameplay::WorkBudget tiny(3);
 		CHECK_FALSE(read_hdr_setting(*f->subway, &tiny).ok());
 		const SnapshotDiff diff = diff_snapshots(*f->before, f->reader.snapshot());
@@ -969,7 +941,7 @@ TEST_SUITE("audio-hdr-install") {
 		const SoundScope *ui = scope_named(*t, "UI_Scope");
 		REQUIRE(ui != nullptr);
 		CHECK(ui->latest == 1);
-		// The map: an impact patch names Bullet_Impact_Scope, the M16A3 names none.
+
 		const char *kImpact = "sound/bullet_craft/bullet_impacts/bullet_impact_concrete";
 		const char *kM16 = "sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02";
 		std::vector<Guid> patches;
@@ -978,7 +950,7 @@ TEST_SUITE("audio-hdr-install") {
 			REQUIRE_MESSAGE(p != nullptr, name);
 			patches.push_back(p->guid());
 		}
-		patches.push_back(Guid{}); // absent: skipped, counted
+		patches.push_back(Guid{});
 		size_t skipped = 0;
 		REQUIRE(map_patch_scopes(*f->subway, patches, *t, nullptr, &skipped).ok());
 		CHECK(skipped == 1);
@@ -987,7 +959,7 @@ TEST_SUITE("audio-hdr-install") {
 		REQUIRE(s != kNoScope);
 		CHECK(t->scopes[s].name == "Bullet_Impact_Scope");
 		CHECK(t->scope_of(patches[1]) == kNoScope);
-		// load_mixer_a3 over the compiled programs: both parts read, one program scoped.
+
 		std::vector<std::shared_ptr<const SoundProgram>> programs;
 		for (const char *name : { kImpact, kM16 }) {
 			Result<std::shared_ptr<const SoundProgram>> p = ba::compile_patch(*f->subway, name);
@@ -1002,7 +974,7 @@ TEST_SUITE("audio-hdr-install") {
 		MESSAGE("M16A3 loudness " << programs[1]->loudness_db << " dB, impact " << programs[0]->loudness_db << " dB; HDR outputs "
 								  << std::count_if(programs[1]->outputs.begin(), programs[1]->outputs.end(), [](const SoundOutput &o) { return o.enable_hdr; }) << " of "
 								  << programs[1]->outputs.size() << " (M16A3), is_looping " << programs[1]->is_looping);
-		// The M16A3's outputs: what the cull's loudness reads at distance (VoiceCullInfo: Loudness + curve + Gain).
+
 		std::string outs = "M16A3 outputs (kind, EnableHdr, Gain, MinDistance; curve + Gain at 10 / 100 / 300 / 900 m):\n";
 		for (const SoundOutput &o : programs[1]->outputs) {
 			char line[200];
@@ -1022,13 +994,6 @@ TEST_SUITE("audio-hdr-install") {
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
 }
-
-// =====================================================================================================================
-// PT1 snd (docs/design/pt1-snd.md): audio-cuts (audio.cuts.unit, data-free, < 2 s). The playtest's "sound glitching":
-// the mixer stopped a sounding voice between two samples (a Kill, a cap drop of a playing one-shot, a loop parked as
-// pending and resumed), a step of up to the voice's level. Each case runs with the cut fade off (pt1_cut_fade_frames
-// = 0, the A3 mixer as merged: the detector must see the step) and on (the default: no step above the tone's own
-// slope). The 1 kHz tone's largest sample-to-sample step is 2 pi 1000 / 48000 = 0.131 of its peak.
 
 namespace {
 
@@ -1050,7 +1015,6 @@ double peak_of(const std::vector<float> &p_x, size_t p_from, size_t p_to) {
 	return m;
 }
 
-// p_hold false: the cap without the [hold] hysteresis, for the cases that test the fades alone (1 dB apart).
 ba::MixerConfig cut_config(uint32_t p_fade, uint32_t p_voices, bool p_hold = true) {
 	ba::MixerConfig c;
 	c.max_voices = p_voices;
@@ -1064,7 +1028,7 @@ ba::MixerConfig cut_config(uint32_t p_fade, uint32_t p_voices, bool p_hold = tru
 	return c;
 }
 
-} // namespace
+}
 
 TEST_SUITE("audio-cuts") {
 	TEST_CASE("PT1 snd: a Kill fades the voice out over one block instead of a step") {
@@ -1084,14 +1048,14 @@ TEST_SUITE("audio-cuts") {
 			CHECK(rig.mixer->stats().active_instances.load() == 0);
 			CHECK(cs.events[kill].load() == 1);
 			if (fade == 0) {
-				CHECK(ratio > 0.5); // the cut: the tone's level at the block's end, |sin(10.67 x 2 pi)| = 0.87
+				CHECK(ratio > 0.5);
 				CHECK(cs.audible[kill].load() == 1);
 				CHECK(cs.events[fd].load() == 0);
 			} else {
 				CHECK(ratio < kToneSlope * 1.05);
-				CHECK(cs.step_max[kill].load() < 1.0e-4f); // the cut lands on silence
+				CHECK(cs.step_max[kill].load() < 1.0e-4f);
 				CHECK(cs.events[fd].load() == 1);
-				CHECK(cs.step_max[fd].load() > 0.01f); // what it faded from
+				CHECK(cs.step_max[fd].load() > 0.01f);
 			}
 		}
 	}
@@ -1099,19 +1063,19 @@ TEST_SUITE("audio-cuts") {
 	TEST_CASE("PT1 snd: the cap parks a sounding loop with a fade out and resumes it with a fade in") {
 		for (const uint32_t fade : { 0u, 512u }) {
 			Rig rig(cut_config(fade, 1, false));
-			rig.start(Source{ 90.0f, false, true, 1, 1.0f }, 1.0f); // 89 dB at the listener
+			rig.start(Source{ 90.0f, false, true, 1, 1.0f }, 1.0f);
 			rig.step(4);
 			const double pa = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
-			const ba::InstanceHandle b = rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f); // 90 dB: A goes over the cap
+			const ba::InstanceHandle b = rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f);
 			rig.step(4);
 			const double pb = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
 			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
 			rig.kill(b);
-			rig.step(6); // b fades, then A resumes
-			CHECK(rig.mixer->stats().live_voices_max.load() <= 1); // the fading voice counts against the cap
+			rig.step(6);
+			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
 			CHECK(rig.mixer->stats().active_instances.load() == 1);
 			const double pa2 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
-			CHECK(pa2 == doctest::Approx(pa).epsilon(0.02)); // A plays again
+			CHECK(pa2 == doctest::Approx(pa).epsilon(0.02));
 			const double ratio = max_step(rig.rec.left) / (pa + pb);
 			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
 			MESSAGE("fade " << fade << ": peaks " << pa << " / " << pb << ", largest step / (sum of peaks) " << ratio << ", pend "
@@ -1124,7 +1088,7 @@ TEST_SUITE("audio-cuts") {
 			} else {
 				CHECK(ratio < kToneSlope * 1.05);
 				CHECK(cs.step_max[size_t(ba::MixerCutKind::Pend)].load() < 1.0e-4f);
-				CHECK(cs.step_max[size_t(ba::MixerCutKind::Resume)].load() < 0.01f * float(pa)); // the first frame of the fade in
+				CHECK(cs.step_max[size_t(ba::MixerCutKind::Resume)].load() < 0.01f * float(pa));
 			}
 		}
 	}
@@ -1132,12 +1096,12 @@ TEST_SUITE("audio-cuts") {
 	TEST_CASE("PT1 snd: a playing one-shot dropped by the cap comes back finished at once and fades out") {
 		for (const uint32_t fade : { 0u, 512u }) {
 			Rig rig(cut_config(fade, 1, false));
-			const ba::InstanceHandle a = rig.start(Source{ 90.0f, false, false, 1, 1.0f }, 1.0f); // a 0.1 s one-shot, 89 dB
-			rig.step(2); // its last frame before the drop is near the tone's crest
+			const ba::InstanceHandle a = rig.start(Source{ 90.0f, false, false, 1, 1.0f }, 1.0f);
+			rig.step(2);
 			const double pa = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
 			rig.start(Source{ 91.0f, false, false, 2, 1.0f }, 1.0f);
 			rig.step(1);
-			CHECK(rig.was_finished(a)); // the game frees it in the block of the drop, fade or not
+			CHECK(rig.was_finished(a));
 			CHECK(rig.mixer->stats().culled_cap.load() == 1);
 			rig.step(3);
 			const double pb = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
@@ -1156,14 +1120,13 @@ TEST_SUITE("audio-cuts") {
 	}
 
 	TEST_CASE("PT1 snd: the cap's hold keeps a sounding loop against a newcomer less than pt1_cap_hold_db louder") {
-		// 64 shooters (audio.game.underruns): without the hold, loops of equal loudness at the cap's edge parked and
-		// resumed every 10-200 ms (1931 re-parks within 1 s of a resume on 161 loops in 66 s).
+
 		for (const bool hold : { false, true }) {
 			Rig rig(cut_config(512, 1, hold));
-			rig.start(Source{ 90.0f, false, true, 1, 1.0f }, 1.0f); // A: 89 dB
+			rig.start(Source{ 90.0f, false, true, 1, 1.0f }, 1.0f);
 			rig.step(4);
 			const double pa = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
-			rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f); // B: 90 dB, 1 dB louder
+			rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f);
 			rig.step(4);
 			const double p1 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
 			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
@@ -1171,23 +1134,22 @@ TEST_SUITE("audio-cuts") {
 			MESSAGE("hold " << hold << ": A " << pa << ", after B started " << p1 << ", parks " << parks);
 			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
 			if (hold) {
-				CHECK(p1 == doctest::Approx(pa).epsilon(0.02)); // A keeps the voice, B waits
+				CHECK(p1 == doctest::Approx(pa).epsilon(0.02));
 				CHECK(parks == 0);
-				rig.start(Source{ 95.0f, false, true, 3, 1.0f }, 1.0f); // C: 94 dB, more than the hold louder
+				rig.start(Source{ 95.0f, false, true, 3, 1.0f }, 1.0f);
 				rig.step(4);
-				CHECK(cs.events[size_t(ba::MixerCutKind::Pend)].load() == 1); // A parks for C
+				CHECK(cs.events[size_t(ba::MixerCutKind::Pend)].load() == 1);
 				const double p2 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
-				CHECK(p2 > pa * 1.4); // C sounds (+5 dB)
+				CHECK(p2 > pa * 1.4);
 			} else {
-				CHECK(p1 > pa * 1.05); // B takes the voice (+1 dB)
+				CHECK(p1 > pa * 1.05);
 				CHECK(parks == 1);
 			}
 		}
 	}
 
 	TEST_CASE("PT1 snd: a parked voice resumes only with its resume margin free") {
-		// 64 shooters: with the hold alone, 618 of 1688 parks lasted < 0.25 s (the loop came back in the gap a finished
-		// one-shot left and was parked again by the next start); with an 8-voice margin 12 of 958.
+
 		std::vector<ba::CullVoice> v(4);
 		for (size_t i = 0; i < v.size(); ++i) {
 			v[i].handle = ba::InstanceHandle(i + 1);
@@ -1197,23 +1159,23 @@ TEST_SUITE("audio-cuts") {
 			v[i].start_frame = i;
 		}
 		ba::CullCounts c;
-		CHECK(count(cull(v, nullptr, 0.0f, 4, c), ba::CullVerdict::Keep) == 4); // fits
-		v[3].resume_margin = 1; // the quietest was parked: it needs one more voice free
+		CHECK(count(cull(v, nullptr, 0.0f, 4, c), ba::CullVerdict::Keep) == 4);
+		v[3].resume_margin = 1;
 		std::vector<ba::CullVerdict> r = cull(v, nullptr, 0.0f, 4, c);
 		CHECK(count(r, ba::CullVerdict::Keep) == 3);
 		CHECK(r[3] != ba::CullVerdict::Keep);
-		CHECK(count(cull(v, nullptr, 0.0f, 5, c), ba::CullVerdict::Keep) == 4); // one spare voice: it resumes
-		v[0].resume_margin = 4000000000u; // hostile: clamped to kMaxCullVoices, the others unaffected
+		CHECK(count(cull(v, nullptr, 0.0f, 5, c), ba::CullVerdict::Keep) == 4);
+		v[0].resume_margin = 4000000000u;
 		r = cull(v, nullptr, 0.0f, 5, c);
 		CHECK(r[0] != ba::CullVerdict::Keep);
 		CHECK(count(r, ba::CullVerdict::Keep) == 3);
 	}
 
 	TEST_CASE("PT1 snd: the output limiter keeps the mix under its ceiling and leaves a quiet mix untouched") {
-		// Windowed rounds: the mix reached 2.4 (+7.6 dBFS) in 43 to 176 episodes a round (docs/design/pt1-snd.md §3.4).
+
 		for (const float ceiling : { 0.0f, 0.966f }) {
 			ba::MixerConfig c = cut_config(512, 128);
-			c.output_gain_db = 45.0f; // the 90 dB tone peaks at about 2.4
+			c.output_gain_db = 45.0f;
 			c.pt1_limit_ceiling = ceiling;
 			Rig rig(c);
 			const ba::InstanceHandle h = rig.start(Source{ 90.0f, false, true, 1 });
@@ -1231,15 +1193,15 @@ TEST_SUITE("audio-cuts") {
 				CHECK(peak <= 0.966 + 1e-6);
 				CHECK(cs.overs_out.load() == 0);
 				CHECK(cs.limit_blocks.load() > 0);
-				CHECK(step < 2.45 * kToneSlope); // never steeper than the unlimited tone (its attack starts on the tone's first rise)
+				CHECK(step < 2.45 * kToneSlope);
 				const std::vector<float> held(rig.rec.left.begin() + 2 * ba::kBlockFrames, rig.rec.left.end());
-				CHECK(max_step(held) < 0.966 * kToneSlope * 1.05); // held down: the limited tone's own slope, no gain steps
-				CHECK(cs.limit_edge_steps.load() <= 1); // only the tone's first block can start on its peak
+				CHECK(max_step(held) < 0.966 * kToneSlope * 1.05);
+				CHECK(cs.limit_edge_steps.load() <= 1);
 			}
 			rig.kill(h);
-			rig.step(60); // 0.64 s of release after the Kill
+			rig.step(60);
 		}
-		// A mix under the ceiling: the same samples with the limiter on and off.
+
 		std::vector<float> on, off;
 		for (const float ceiling : { 0.0f, 0.966f }) {
 			ba::MixerConfig c = cut_config(512, 128);
@@ -1251,7 +1213,7 @@ TEST_SUITE("audio-cuts") {
 			CHECK(rig.mixer->pt1_cut_stats().limit_blocks.load() == 0);
 		}
 		CHECK(on == off);
-		// Hostile settings: NaN ceiling (off), zero attack and release (clamped).
+
 		ba::MixerConfig c = cut_config(512, 128);
 		c.output_gain_db = 45.0f;
 		c.pt1_limit_ceiling = std::numeric_limits<float>::quiet_NaN();
@@ -1274,21 +1236,21 @@ TEST_SUITE("audio-cuts") {
 		const ba::InstanceHandle h = rig.start(Source{ 90.0f, false, true, 1 });
 		rig.step(2);
 		rig.kill(h);
-		rig.kill(h); // a second Kill of a fading voice changes nothing
+		rig.kill(h);
 		rig.step(2);
 		std::array<ba::MixerCutEvent, 16> ev{};
 		const size_t n = rig.mixer->pt1_poll_cuts(ev);
-		REQUIRE(n == 3); // start, fade, kill
+		REQUIRE(n == 3);
 		CHECK(ev[0].kind == ba::MixerCutKind::Start);
 		CHECK(ev[1].kind == ba::MixerCutKind::Fade);
 		CHECK(ev[2].kind == ba::MixerCutKind::Kill);
-		CHECK(ev[2].frame == ev[1].frame); // the fade starts at the block's first frame and ends with it
+		CHECK(ev[2].frame == ev[1].frame);
 		CHECK(std::string(ev[1].program) == "a3_source");
 		const std::string line = ba::format_mixer_cuts(rig.mixer->pt1_cut_stats());
 		MESSAGE(line);
 		CHECK(line.find("kill 1/0/0/") != std::string::npos);
 		CHECK(line.find("fade 1/1/1/") != std::string::npos);
-		// Hostile fade targets and lengths are clamped; a zero-length fade jumps.
+
 		Result<std::unique_ptr<ba::PatchInstance>> inst =
 				ba::PatchInstance::create(source_program(rig.wave, Source{}), rig.wave.bank, ba::AudioTuning{}, 7, ba::kMixRate);
 		REQUIRE(inst.ok());

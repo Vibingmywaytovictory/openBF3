@@ -1,6 +1,3 @@
-// Spread and recoil from GunSwayData (docs/design/m2a-weapons.md §5.6; spread_recoil.h). Pure, float in and out, no
-// libm on the replicated path: the cone's angles go through the polynomial sin/cos of weapons_internal.h, sqrt is
-// correctly rounded by IEEE 754, and the exponential recovery factors come precomputed from the def.
 #include "bf3/sim/weapons/spread_recoil.h"
 
 #include "weapons_internal.h"
@@ -12,8 +9,6 @@ namespace bf3::sim::weapons {
 
 namespace {
 
-// gameplay::apply_sway_modifier's rule for one dispersion: min / +shot / -second always, max unless its
-// modifier is 0 ("unset", topics/01 extra-7).
 void apply(Dispersion &r_d, const SwayModifier &p_m) {
 	r_d.min_angle *= p_m.min_angle;
 	if (p_m.max_angle != 0) {
@@ -56,15 +51,14 @@ float approach_zero(float p_value, float p_step) {
 	return std::min(0.0f, p_value + p_step);
 }
 
-} // namespace
+}
 
 Dispersion effective_dispersion(const WeaponSimDef &p_def, const SwayContext &p_context) {
 	const SwayState &st = state_of(p_def, p_context);
 	const size_t m = std::min<size_t>(size_t(p_context.move), size_t(SwayMove::Count) - 1);
 	Dispersion d = st.has_move[m] ? st.move[m] : st.move[size_t(SwayMove::Base)];
 	apply_gated(d, p_def, p_context);
-	// Modifiers are signed in data (weapon_sim_def.cpp): the cone's angles and its growth never go below 0; the
-	// decrease keeps its sign (negative: the spread grows toward MaxAngle while the modifier holds [unmeasured]).
+
 	d.min_angle = std::max(0.0f, d.min_angle);
 	d.max_angle = std::max(0.0f, d.max_angle);
 	d.increase_per_shot = std::max(0.0f, d.increase_per_shot);
@@ -81,7 +75,7 @@ float decay_spread(float p_spread, const Dispersion &p_dispersion, SimTime p_ela
 	float s = p_spread;
 	const float top = std::max(p_dispersion.max_angle, p_dispersion.min_angle);
 	if (p_elapsed > 0 && p_dispersion.decrease_per_second < 0) {
-		// A negative decrease (a signed modifier in data) grows the spread toward the maximum.
+
 		s = std::min(top, s - p_dispersion.decrease_per_second * float(units_to_seconds(p_elapsed)));
 	} else if (p_elapsed > 0 && s > p_dispersion.min_angle) {
 		s = std::max(p_dispersion.min_angle, s - p_dispersion.decrease_per_second * float(units_to_seconds(p_elapsed)));
@@ -93,7 +87,7 @@ float enter_spread(float p_spread, const Dispersion &p_new, const Mechanics &p_m
 	if (p_mechanics.min_spread_rise == MinSpreadRise::Immediate) {
 		return std::max(p_spread, p_new.min_angle);
 	}
-	return p_spread; // AtDecreaseRate: the step raises it toward the minimum over time (weapon_sim.cpp)
+	return p_spread;
 }
 
 float spread_after_shot(float p_spread, const Dispersion &p_dispersion) {
@@ -156,4 +150,4 @@ Vec3 aim_direction(uint16_t p_yaw, int16_t p_pitch, const RecoilOffset &p_offset
 	return to_f(normalize(DVec3{ sy * cp, sp, cy * cp }));
 }
 
-} // namespace bf3::sim::weapons
+}

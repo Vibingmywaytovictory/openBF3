@@ -165,4 +165,4 @@ Error BlobReader::error(std::string_view p_what) const {
 	return make_error(std::string(p_what) + ": " + (ok_ ? std::string("ok") : why_) + " at byte " + std::to_string(fail_at_));
 }
 
-} // namespace bf3::core
+}

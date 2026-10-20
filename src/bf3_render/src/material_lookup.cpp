@@ -26,8 +26,6 @@ std::string partition_name(const EbxResolver &p_db, const EbxInstance &p_instanc
 	return n ? std::string(*n) : std::string();
 }
 
-// TextureParameters [{ParameterName, Value -> TextureAsset}] of a struct (MeshVariationDatabaseMaterial or a
-// SurfaceShaderInstanceDataStruct); at most kMaxTextureParameters entries are read.
 std::vector<std::pair<std::string, std::string>> texture_parameters(const EbxResolver &p_db, const EbxStruct &p_owner) {
 	std::vector<std::pair<std::string, std::string>> out;
 	const std::optional<EbxValue> params = p_owner.get("TextureParameters");
@@ -56,7 +54,6 @@ std::vector<std::pair<std::string, std::string>> texture_parameters(const EbxRes
 	return out;
 }
 
-// The MeshAsset's own slots (shader, vectors, its TextureParameters), then the entry's textures over them.
 core::Result<MeshMaterials> materials_of(const EbxResolver &p_db, const EbxInstance &p_asset, const std::optional<EbxInstance> &p_entry,
 		const std::string &p_where) {
 	if (!p_asset.is_a("MeshAsset")) {
@@ -124,7 +121,7 @@ core::Result<MeshMaterials> materials_of(const EbxResolver &p_db, const EbxInsta
 			}
 		}
 	}
-	// The variation material that names the slot's MeshMaterial (the first one), else the one at the same index.
+
 	std::vector<std::optional<EbxInstance>> named(variations.size());
 	for (size_t v = 0; v < variations.size(); ++v) {
 		named[v] = p_db.follow(variations[v], "Material");
@@ -141,7 +138,7 @@ core::Result<MeshMaterials> materials_of(const EbxResolver &p_db, const EbxInsta
 			chosen = &variations[i];
 		}
 		if (chosen != nullptr) {
-			// L1 look: the variation's own shader graph and vector parameters (its values before the material's).
+
 			if (const std::optional<EbxInstance> variation = p_db.follow(*chosen, "MaterialVariation")) {
 				const std::optional<EbxValue> vshader_value = variation->get("Shader");
 				if (const std::optional<EbxStruct> vshader = vshader_value ? vshader_value->as_struct() : std::nullopt) {
@@ -160,7 +157,7 @@ core::Result<MeshMaterials> materials_of(const EbxResolver &p_db, const EbxInsta
 	return out;
 }
 
-} // namespace
+}
 
 std::string MaterialSlot::texture(std::string_view p_parameter) const {
 	for (const auto &[name, texture] : textures) {
@@ -205,7 +202,7 @@ core::Result<MeshMaterials> mesh_materials(const EbxLibrary &p_library, std::str
 		return core::make_error(where + ": no such partition");
 	}
 	const EbxInstance asset = mesh->primary();
-	// The MeshVariationDatabase entry: exact variation first, then the default (hash 0).
+
 	std::optional<EbxInstance> entry;
 	for (int pass = 0; pass < 2 && !entry; ++pass) {
 		const uint32_t want = pass == 0 ? p_variation_hash : 0u;
@@ -242,4 +239,4 @@ core::Result<MeshMaterials> mesh_materials(const EbxResolver &p_db, const EbxIns
 	return materials_of(p_db, p_asset, p_entry, "materials of " + partition_name(p_db, p_asset));
 }
 
-} // namespace bf3::render
+}

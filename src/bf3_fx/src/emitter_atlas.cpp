@@ -1,5 +1,3 @@
-// The per-level emitter texture atlas (emitter_atlas.h; docs/design/m2a-vfx1.md §6.9): EmitterSystemAsset.TextureInfos
-// and the two atlas DxTexture headers (the res only, never a pixel chunk).
 #include "bf3/fx/emitter_atlas.h"
 
 #include "bf3/core/res/res_loader.h"
@@ -21,7 +19,6 @@ bool ends_with(std::string_view p_s, std::string_view p_suffix) {
 	return p_s.size() >= p_suffix.size() && p_s.compare(p_s.size() - p_suffix.size(), p_suffix.size(), p_suffix) == 0;
 }
 
-// A UV coordinate in pixels: rounded, clamped into [0, size], and whether it lies within 0.01 px of a whole pixel.
 uint32_t to_pixel(float p_uv, uint32_t p_size, bool &r_exact) {
 	const double px = double(p_uv) * double(p_size);
 	const double rounded = std::round(px);
@@ -31,7 +28,7 @@ uint32_t to_pixel(float p_uv, uint32_t p_size, bool &r_exact) {
 	return uint32_t(std::clamp(rounded, 0.0, double(p_size)));
 }
 
-} // namespace
+}
 
 core::Result<AtlasTextureInfo> EmitterAtlas::texture_info(const std::string &p_partition, std::span<const uint8_t> p_res) {
 	core::res::DxTexture tex;
@@ -151,7 +148,7 @@ core::Result<EmitterAtlas> EmitterAtlas::load(const core::EbxResolver &p_db, con
 	for (uint32_t i = 0; i < out.by_name_.size(); ++i) {
 		out.by_name_[i] = i;
 	}
-	// The sort's O(m log m) comparisons of names already charged by Reader::text; m <= kMaxTextureInfos.
+
 	if (!r.charge(1 + out.by_name_.size() * size_t(std::bit_width(out.by_name_.size())))) {
 		return r.error();
 	}
@@ -165,7 +162,7 @@ const AtlasEntry *EmitterAtlas::resolve(std::string_view p_name) const {
 	if (it == by_name_.end() || entries_[*it].name != n) {
 		return nullptr;
 	}
-	return &entries_[*it]; // stable sort: the first entry of that name in data order
+	return &entries_[*it];
 }
 
 void EmitterAtlas::frame_rect(const AtlasEntry &p_entry, uint32_t p_frame, uint32_t p_frame_count, uint32_t p_frame_columns, Vec2 &r_min, Vec2 &r_max) {
@@ -181,4 +178,4 @@ void EmitterAtlas::frame_rect(const AtlasEntry &p_entry, uint32_t p_frame, uint3
 	r_max = Vec2{ r_min.x + w, r_min.y + h };
 }
 
-} // namespace bf3::fx
+}

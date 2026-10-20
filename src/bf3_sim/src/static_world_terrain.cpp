@@ -1,14 +1,3 @@
-// TC (docs/design/terrain-collision.md §5): the static world's terrain. One JPH::HeightFieldShape per soup terrain
-// over its whole grid, plus a patch MeshShape that makes the field's hole rule the soup's: the view of a soup record,
-// its content digest, the cook, the "jolt-terrain" loop, the static body order every world shares and the face
-// normal of a terrain hit. The "OBF3JTER" blob and the keys are in static_world_cache.cpp, beside the tile blobs.
-//
-// Hole rule: Jolt drops a triangle when one of its three samples is cNoCollisionValue (HeightFieldShape.cpp
-// WalkHeightField); the soup opens a cell when one of its four samples is a hole (soup_terrain.cpp). Jolt's triangle
-// 0 of cell (x, y) is (x, y), (x, y + 1), (x + 1, y + 1) = the soup's (a, c, d); triangle 1 is (x, y), (x + 1, y + 1),
-// (x + 1, y) = the soup's (a, d, b). Where Jolt would keep a triangle the soup does not (a cell whose only hole is b or
-// c), the cook marks the cell's sample a as no-collision (both of that cell's triangles hold a); marking only removes
-// triangles, so the soup triangles the field then lacks (those of the cells around a marked sample) go to the patch.
 #include "static_world_internal.h"
 
 #include "jolt_runtime.h"
@@ -38,11 +27,9 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// Height span and coordinate bounds of a view the cook accepts (terrain-collision.md §11).
 constexpr double kMaxHeightSpan = 1e6;
 constexpr double kMaxCoordinate = 1e6;
-// Below this sample step (metres, after the frame's scale) two corners of a cell triangle could quantise to the same
-// millimetre, so the cook checks every cell against the soup's quantise rule instead of only the open ones.
+
 constexpr double kFastStep = 0.01;
 
 std::string where_of(const StaticTerrainView &p_view) {
@@ -71,7 +58,6 @@ double dot3(const Vec3 &p_a, const Vec3 &p_b) {
 	return double(p_a[0]) * p_b[0] + double(p_a[1]) * p_b[1] + double(p_a[2]) * p_b[2];
 }
 
-// Winds a terrain triangle to face +Y (the soup's face_up, soup_terrain.cpp).
 std::array<Vec3, 3> face_up(const std::array<Vec3, 3> &p_t) {
 	const Vec3 &a = p_t[0];
 	const Vec3 &b = p_t[1];
@@ -84,9 +70,8 @@ std::array<Vec3, 3> face_up(const std::array<Vec3, 3> &p_t) {
 	return p_t;
 }
 
-// The frame of a view, checked: a rotation times a positive uniform scale.
 struct Frame {
-	core::res::Transform transform; // the soup's frame (axes with their scale, translation)
+	core::res::Transform transform;
 	double scale = 1.0;
 	JPH::Quat rotation = JPH::Quat::sIdentity();
 };
@@ -149,7 +134,7 @@ core::Result<Frame> check_view(const StaticTerrainView &p_view) {
 		return core::make_error(where + ": the frame mirrors (determinant " + std::to_string(det) + ")");
 	}
 	f.scale = s;
-	// World = translation + sum(local[row] * axis[row]): the rotation's columns are the axes over the scale.
+
 	const float inv = float(1.0 / s);
 	const JPH::Mat44 m(JPH::Vec4(a[0] * inv, a[1] * inv, a[2] * inv, 0.0f), JPH::Vec4(b[0] * inv, b[1] * inv, b[2] * inv, 0.0f),
 			JPH::Vec4(c[0] * inv, c[1] * inv, c[2] * inv, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
@@ -158,8 +143,6 @@ core::Result<Frame> check_view(const StaticTerrainView &p_view) {
 	return f;
 }
 
-// A cell's two soup triangles exactly as soup_terrain_cell makes them, pair 0 = (a, d, b), pair 1 = (a, c, d), with
-// whether each is kept (not open, finite, in range, not degenerate).
 struct CellPair {
 	std::array<std::array<Vec3, 3>, 2> v{};
 	std::array<bool, 2> kept{};
@@ -193,7 +176,6 @@ void soup_cell(const StaticTerrainView &p_view, const core::res::Transform &p_fr
 	}
 }
 
-// Jolt's triangle t (0 = a c d, 1 = a d b) of cell (x, z) under a no-collision mask.
 bool jolt_keeps(const std::vector<uint8_t> &p_mask, size_t p_w, size_t p_x, size_t p_z, int p_t) {
 	const size_t a = p_x + p_z * p_w;
 	const size_t b = a + 1;
@@ -213,9 +195,7 @@ void grow(Vec3 &r_min, Vec3 &r_max, const Vec3 &p_v, bool &r_any) {
 	r_any = true;
 }
 
-} // namespace
-
-// ---- views and digests ---------------------------------------------------------------------------------------
+}
 
 core::Result<StaticTerrainView> static_terrain_view(const core::level::SoupTerrain &p_terrain) {
 	if (p_terrain.state != core::level::SoupTerrain::State::Built) {
@@ -258,7 +238,7 @@ core::Sha256Digest static_terrain_content(const StaticTerrainView &p_view) {
 		put_f32(head, c);
 	}
 	hasher.update(head);
-	// The heights' f32 bits as the host (little endian) stores them, then one normalised byte per sample.
+
 	hasher.update(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(p_view.heights.data()), p_view.heights.size() * sizeof(float)));
 	std::vector<uint8_t> chunk;
 	chunk.reserve(1 << 16);
@@ -275,8 +255,6 @@ core::Sha256Digest static_terrain_content(const StaticTerrainView &p_view) {
 	return out;
 }
 
-// ---- the cook ---------------------------------------------------------------------------------------------------
-
 core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticTerrainView &p_view, const StaticWorldBuildOptions &p_options,
 		const core::Sha256Digest *p_content) {
 	const std::string where = where_of(p_view);
@@ -289,8 +267,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 	const size_t h = p_view.height;
 	const size_t cells_x = w - 1;
 	const size_t cells_z = h - 1;
-	// The cook's own budget: kMaxGridSide^2 x 3 units per terrain (§11: the samples, the cells, the field read-back), every
-	// sample and cell charged before its pass.
+
 	core::level::WorkBudget budget(core::res::kMaxGridSide * core::res::kMaxGridSide * 3);
 	BF3_TRY(budget.charge(w * h));
 
@@ -301,7 +278,6 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 	info.height = uint32_t(h);
 	info.content = p_content != nullptr ? *p_content : static_terrain_content(p_view);
 
-	// No-collision mask (a hole or a non-finite height) and the height range of the rest.
 	std::vector<uint8_t> mask(w * h, 0);
 	double lo = std::numeric_limits<double>::infinity();
 	double hi = -lo;
@@ -329,7 +305,6 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 		return core::make_error(where + ": the grid reaches past 1e6 m");
 	}
 
-	// The marks: every cell where Jolt keeps a triangle the soup does not gets its sample a marked.
 	BF3_TRY(budget.charge(cells_x * cells_z));
 	const bool fast = std::min(sx, sz) * frame.scale >= kFastStep;
 	std::vector<std::array<uint32_t, 2>> marked;
@@ -338,8 +313,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 		for (size_t x = 0; x < cells_x; ++x) {
 			const size_t a = x + z * w;
 			if (fast) {
-				// Fine steps cannot quantise two corners together and the coordinates are in range, so the soup keeps
-				// a triangle of a closed cell exactly when its corners are finite, which is Jolt's rule there.
+
 				const bool open = p_view.holes[a] != 0 || p_view.holes[a + 1] != 0 || p_view.holes[a + w] != 0 || p_view.holes[a + w + 1] != 0;
 				if (!open) {
 					continue;
@@ -351,7 +325,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 				continue;
 			}
 			soup_cell(p_view, frame.transform, x, z, pair);
-			// Pair 0 (a, d, b) is Jolt's triangle 1, pair 1 (a, c, d) its triangle 0.
+
 			if ((jolt_keeps(mask, w, x, z, 1) && !pair.kept[0]) || (jolt_keeps(mask, w, x, z, 0) && !pair.kept[1])) {
 				mask[a] = 1;
 				marked.push_back({ uint32_t(x), uint32_t(z) });
@@ -360,8 +334,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 	}
 	info.holed = uint32_t(marked.size());
 
-	// The patch: the soup triangles of the cells around a marked sample that the field no longer has.
-	std::vector<std::array<uint32_t, 2>> patch_cells; // (z, x)
+	std::vector<std::array<uint32_t, 2>> patch_cells;
 	for (const std::array<uint32_t, 2> &m : marked) {
 		for (uint32_t dz = 0; dz < 2; ++dz) {
 			for (uint32_t dx = 0; dx < 2; ++dx) {
@@ -415,7 +388,6 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 		}
 	}
 
-	// Does the field keep a triangle? (An all-hole grid, or one whose only kept cells sit in the patch, does not.)
 	bool field_has_triangle = false;
 	for (size_t z = 0; z < cells_z && !field_has_triangle; ++z) {
 		for (size_t x = 0; x < cells_x; ++x) {
@@ -426,7 +398,6 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 		}
 	}
 
-	// The field over the whole grid, square, padded with no-collision samples to whole blocks (at least 2 a side).
 	const size_t block = kStaticTerrainBlock;
 	size_t n = std::max({ w, h, 2 * block });
 	n = (n + block - 1) / block * block;
@@ -457,7 +428,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 			return core::make_error(where + " field: Jolt: " + std::string(result.GetError().c_str()));
 		}
 		out.field = result.Get();
-		// The largest |field height - grid height| over the collision samples, read back in block rows.
+
 		const JPH::HeightFieldShape &field = static_cast<const JPH::HeightFieldShape &>(*out.field);
 		if (field.GetSampleCount() != n) {
 			return core::make_error(where + " field: Jolt made " + std::to_string(field.GetSampleCount()) + " samples a side, expected " + std::to_string(n));
@@ -478,7 +449,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 			}
 		}
 		info.max_error = float(worst);
-		// World bounds: the grid's extent over the collision heights, through the frame.
+
 		for (int k = 0; k < 8; ++k) {
 			const float gx = p_view.origin_xz[0] + ((k & 1) != 0 ? float(cells_x) * p_view.spacing[0] : 0.0f);
 			const float gy = float((k & 2) != 0 ? hi : lo);
@@ -543,7 +514,7 @@ core::Result<std::vector<StaticWorldShapes::Impl::Terrain>> cook_static_terrains
 		if (!terrain) {
 			return core::make_error(where_of(view) + ": the cache gave no terrain");
 		}
-		terrain->info.object = view.object; // content keyed: another mode's entry may name another object index
+		terrain->info.object = view.object;
 		bytes += item->payload_bytes;
 		hits += item->outcome == core::CacheOutcome::Hit ? 1 : 0;
 		stored = stored && item->outcome != core::CacheOutcome::Uncached;
@@ -560,8 +531,6 @@ core::Result<std::vector<StaticWorldShapes::Impl::Terrain>> cook_static_terrains
 	}
 	return out;
 }
-
-// ---- bodies and normals ------------------------------------------------------------------------------------------
 
 std::vector<StaticBodySpec> static_body_specs(const StaticWorldShapes::Impl &p_world) {
 	std::vector<StaticBodySpec> out;
@@ -613,4 +582,4 @@ JPH::Vec3 static_face_normal(const StaticWorldShapes::Impl &p_world, uint64_t p_
 	return JPH::Vec3::sAxisY();
 }
 
-} // namespace bf3::sim
+}

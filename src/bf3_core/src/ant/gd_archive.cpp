@@ -1,5 +1,3 @@
-// EA GenericData archive reader. Clean-room implementation from research/probes/ant-animation-probe.md
-// (§3.2) and research/topics/03-animation.md (§1.3); see gd_archive.h for the format summary.
 #include "bf3/core/ant/gd_archive.h"
 
 #include <cstring>
@@ -8,7 +6,7 @@ namespace bf3::core::ant {
 
 namespace {
 
-constexpr uint32_t kBlobHeader = 16; // id[7], endian, u32 size, u32 relocation table offset
+constexpr uint32_t kBlobHeader = 16;
 constexpr uint32_t kLayoutHeader = 32;
 constexpr uint32_t kEntryHeader = 32;
 constexpr uint32_t kDataHeader = 32;
@@ -24,12 +22,10 @@ uint64_t le64(const uint8_t *p_at) {
 	return uint64_t(le32(p_at)) | (uint64_t(le32(p_at + 4)) << 32);
 }
 
-// [p_at, p_at + p_bytes) inside [p_begin, p_end), without overflow.
 bool in_range(uint64_t p_at, uint64_t p_bytes, uint64_t p_begin, uint64_t p_end) {
 	return p_at >= p_begin && p_at <= p_end && p_bytes <= p_end - p_at;
 }
 
-// A NUL-terminated string starting at p_at and ending before p_end.
 bool c_string(std::span<const uint8_t> p_bytes, uint64_t p_at, uint64_t p_end, std::string_view &r_out) {
 	if (p_end > p_bytes.size() || p_at >= p_end) {
 		return false;
@@ -122,7 +118,7 @@ bool decode_number(uint32_t p_hash, const uint8_t *p_at, float &r_value) {
 	return false;
 }
 
-} // namespace
+}
 
 bool GdGuid::is_null() const {
 	for (uint8_t b : bytes) {
@@ -146,9 +142,6 @@ const GdField *GdLayout::find(std::string_view p_name) const {
 	}
 	return nullptr;
 }
-
-// ---------------------------------------------------------------------------------------------
-// GdArchive
 
 const GdLayout *GdArchive::layout_by_hash(uint32_t p_hash) const {
 	const auto it = by_hash_.find(p_hash);
@@ -228,7 +221,7 @@ bool GdArchive::parse_reflection(uint32_t p_begin, uint32_t p_end, std::string &
 			r_error = "GD.REFL: string table out of range";
 			return false;
 		}
-		// The table starts with an empty string; the type name follows it.
+
 		if (!c_string(bytes_, table + 1, table + table_size, l.name)) {
 			r_error = "GD.REFL: bad type name";
 			return false;
@@ -259,7 +252,7 @@ bool GdArchive::parse_reflection(uint32_t p_begin, uint32_t p_end, std::string &
 		by_offset.emplace(rel, i);
 		by_hash_.emplace(l.hash, i);
 	}
-	// Resolve element layouts (vector storage is final now, so pointers stay valid).
+
 	for (size_t i = 0; i < layouts_.size(); ++i) {
 		for (size_t s = 0; s < layouts_[i].fields.size(); ++s) {
 			GdField &f = layouts_[i].fields[s];
@@ -354,9 +347,6 @@ bool GdArchive::parse(std::span<const uint8_t> p_bytes, std::string &r_error) {
 	return true;
 }
 
-// ---------------------------------------------------------------------------------------------
-// GdStruct
-
 std::string_view GdStruct::type_name() const {
 	return layout_ ? layout_->name : std::string_view();
 }
@@ -375,7 +365,7 @@ bool GdStruct::find(std::string_view p_name, GdStruct &r_owner, const GdField *&
 }
 
 GdStruct GdStruct::base() const {
-	// Only this layout's own "__base" slot (no name lookup through the chain, which would recurse).
+
 	const GdField *f = valid() ? layout_->find("__base") : nullptr;
 	uint32_t at;
 	if (f == nullptr || f->is_array() || f->layout_hash != uint32_t(GdPrimitive::DataRef) || !field_at(*f, 0, 8, at)) {
@@ -527,7 +517,7 @@ GdArray GdStruct::array(std::string_view p_name) const {
 	if (a.element_ == nullptr) {
 		return {};
 	}
-	// Element stride = align(dataSize, alignment) of the element layout (Guid 16, String 16, DataRef 8, ...).
+
 	a.stride_ = a.element_->stride();
 	if (f->is_primitive() && a.stride_ < primitive_size(f->layout_hash)) {
 		return {};
@@ -584,9 +574,6 @@ GdGuid GdStruct::guid() const {
 	read_guid("__guid", g);
 	return g;
 }
-
-// ---------------------------------------------------------------------------------------------
-// GdArray
 
 std::span<const uint8_t> GdArray::raw() const {
 	if (count_ == 0) {
@@ -665,11 +652,11 @@ bool copy_primitive(const GdArray &p_array, uint32_t p_hash_a, uint32_t p_hash_b
 	const std::span<const uint8_t> raw = p_array.raw();
 	r_out.resize(p_array.size());
 	if (!raw.empty()) {
-		std::memcpy(r_out.data(), raw.data(), raw.size()); // little-endian host (x64)
+		std::memcpy(r_out.data(), raw.data(), raw.size());
 	}
 	return true;
 }
-} // namespace
+}
 
 bool GdArray::copy_u8(std::vector<uint8_t> &r_out) const {
 	return copy_primitive(*this, uint32_t(GdPrimitive::UInt8), uint32_t(GdPrimitive::Int8), r_out);
@@ -695,4 +682,4 @@ bool gd_is_a(const GdStruct &p_struct, std::string_view p_type_name) {
 	return false;
 }
 
-} // namespace bf3::core::ant
+}

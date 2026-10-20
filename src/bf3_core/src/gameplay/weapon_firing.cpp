@@ -1,6 +1,3 @@
-// FiringFunctionData reader (topics/01 §1.2): FireLogic (modes, rate of fire, bolt, hold-and-release,
-// reload), Shot (muzzle velocity, pellets, burst), Ammo, OverHeat and the SoldierWeaponDispersion
-// that shotguns use as the pellet cone.
 #include "weapon_readers.h"
 
 #include <cmath>
@@ -31,7 +28,7 @@ Dispersion read_firing_dispersion(Fields &r_f, const EbxStruct &p_s) {
 	return d;
 }
 
-} // namespace
+}
 
 void read_fire_function(Fields &r_f, const EbxInstance &p_ffd, FireFunction &r_fire) {
 	const EbxStruct ffd = p_ffd.data();
@@ -86,7 +83,7 @@ void read_fire_function(Fields &r_f, const EbxInstance &p_ffd, FireFunction &r_f
 		r_fire.reload_threshold = r_f.f32(*fl, "ReloadThreshold");
 		r_fire.always_auto_reload = r_f.flag_or(*fl, "AlwaysAutoReload", false);
 		r_fire.reload_logic = r_f.enum_text(*fl, "ReloadLogic");
-		// M2a weapons (blob v2; docs/design/m2a-weapons.md §4.5).
+
 		r_fire.hold_off_reload_until_fire_release = r_f.flag_or(*fl, "HoldOffReloadUntilFireRelease", false);
 		r_fire.force_reload_action_on_fire_trigger = r_f.flag_or(*fl, "ForceReloadActionOnFireTrigger", false);
 	}
@@ -131,4 +128,4 @@ void read_fire_function(Fields &r_f, const EbxInstance &p_ffd, FireFunction &r_f
 	}
 }
 
-} // namespace bf3::core::gameplay::detail
+}

@@ -1,6 +1,3 @@
-// HdrWindow (hdr_window.h; docs/design/m2b.md §6.1, docs/design/m2b-au.md "HDR window"). Audio thread, no
-// allocation after configure().
-
 #include "bf3/audio/hdr_window.h"
 
 #include <algorithm>
@@ -11,13 +8,13 @@ namespace bf3::audio {
 namespace {
 
 constexpr float kEpsilonDb = 1.0e-3f;
-constexpr float kPrecullMarginDb = 3.0f; // GDC 2009: "Subtract 3dB" for the peak / RMS relationship
+constexpr float kPrecullMarginDb = 3.0f;
 
 float finite_or(float p_v, float p_fallback) {
 	return std::isfinite(p_v) ? p_v : p_fallback;
 }
 
-} // namespace
+}
 
 void HdrWindow::configure(const core::audio::HdrSetting &p_setting, uint32_t p_mix_rate) {
 	setting_ = p_setting;
@@ -49,7 +46,7 @@ float HdrWindow::release_shape(float p_x) const {
 	const float x = std::clamp(finite_or(p_x, 1.0f), 0.0f, 1.0f);
 	const float span = curve_y0_ - curve_y1_;
 	if (setting_.top_release_curve.points.empty() || !(span > 1.0e-4f) || !std::isfinite(span)) {
-		return 1.0f - x; // linear
+		return 1.0f - x;
 	}
 	const float y = setting_.top_release_curve.evaluate(x);
 	return std::clamp(finite_or((y - curve_y1_) / span, 1.0f - x), 0.0f, 1.0f);
@@ -59,7 +56,7 @@ void HdrWindow::step(float p_loudest_db, uint32_t p_frames) {
 	const float dt = float(p_frames) / float(mix_rate_);
 	const float target = std::max(setting_.window_min_top_db, finite_or(p_loudest_db, setting_.window_min_top_db));
 	if (target > top_db_ + kEpsilonDb) {
-		// Attack: a linear ramp that reaches the target top_attack_s after it started.
+
 		if (setting_.top_attack_s <= 0.0f) {
 			top_db_ = target;
 			phase_ = Phase::Hold;
@@ -69,7 +66,7 @@ void HdrWindow::step(float p_loudest_db, uint32_t p_frames) {
 				ramp_from_db_ = top_db_;
 				ramp_to_db_ = target;
 			} else {
-				ramp_to_db_ = target; // a lower target above the top: the same slope ends there
+				ramp_to_db_ = target;
 			}
 			const float slope = (ramp_to_db_ - ramp_from_db_) / setting_.top_attack_s;
 			top_db_ = std::min(target, top_db_ + slope * dt);
@@ -79,7 +76,7 @@ void HdrWindow::step(float p_loudest_db, uint32_t p_frames) {
 			}
 		}
 	} else if (target < top_db_ - kEpsilonDb) {
-		// Release: from where it started to the target over release_seconds(drop), on the curve.
+
 		if (phase_ != Phase::Release || std::fabs(target - ramp_to_db_) > kEpsilonDb) {
 			phase_ = Phase::Release;
 			ramp_from_db_ = top_db_;
@@ -99,7 +96,7 @@ void HdrWindow::step(float p_loudest_db, uint32_t p_frames) {
 		top_db_ = std::max(top_db_, target);
 		phase_ = Phase::Hold;
 	}
-	// The bottom follows the top a window below, never under WindowMinBottom.
+
 	const float bottom_target = std::max(setting_.window_min_bottom_db, top_db_ - setting_.window_size_db);
 	const float size = std::max(setting_.window_size_db, 1.0e-3f);
 	if (bottom_target > bottom_db_) {
@@ -122,4 +119,4 @@ float HdrWindow::precull_db() const {
 	return bottom_db_ - kPrecullMarginDb;
 }
 
-} // namespace bf3::audio
+}

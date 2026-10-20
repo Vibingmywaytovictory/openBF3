@@ -1,7 +1,3 @@
-// Terrain heightfield (bf3_core res/terrain.h), suite collision_unit: a synthetic streaming tree
-// (embedded, streamed, data-less and disabled quadtree nodes, a raster record to step over) through
-// parse and height_grid, then truncated and bit-flipped copies of it, which must fail with an error
-// or decode, never crash or allocate past the grid bound.
 #include <doctest/doctest.h>
 
 #include "bf3/core/res/terrain.h"
@@ -37,7 +33,7 @@ struct Writer {
 	void raw(const std::vector<uint8_t> &p_b) { bytes.insert(bytes.end(), p_b.begin(), p_b.end()); }
 };
 
-constexpr uint32_t kSide = 5; // border 1: 2 interior cells a side
+constexpr uint32_t kSide = 5;
 constexpr uint16_t kRoot = 1000;
 constexpr uint16_t kStreamed = 2000;
 constexpr uint16_t kEmbedded = 3000;
@@ -52,10 +48,10 @@ void embedded_tile(Writer &w, uint16_t p_value) {
 	for (uint32_t i = 0; i < kSide * kSide; ++i) {
 		w.u16(p_value);
 	}
-	for (int i = 0; i < 2; ++i) { // min-max stack, depth 1
+	for (int i = 0; i < 2; ++i) {
 		w.u16(0);
 	}
-	for (int i = 0; i < 4; ++i) { // occluder grid, depth 1
+	for (int i = 0; i < 4; ++i) {
 		w.u16(0);
 	}
 }
@@ -66,18 +62,18 @@ std::vector<uint8_t> heightfield() {
 	w.u32(0);
 	w.u32(0);
 	w.u32(0);
-	w.f32(65535.0f); // world size y: height = sample metres
+	w.f32(65535.0f);
 	w.f32(1.0f);
 	w.u32(0);
 	w.u8(0);
 	w.f32(0.0f);
-	w.u32(1); // min-max stack depth
-	w.u32(1); // occluder grid stack depth
+	w.u32(1);
+	w.u32(1);
 	w.u32(5);
 	w.u32(2);
 	w.u32(0);
-	w.u32(1); // border
-	// Root: embedded tile, four children.
+	w.u32(1);
+
 	bounds(w);
 	w.u8(0);
 	w.u8(0);
@@ -85,22 +81,22 @@ std::vector<uint8_t> heightfield() {
 	w.u8(1);
 	embedded_tile(w, kRoot);
 	w.u8(1);
-	// (0,0) disabled.
+
 	bounds(w);
 	w.u8(1);
-	// (1,0) streamed.
+
 	bounds(w);
 	w.u8(0);
 	w.u8(0);
 	w.u8(1);
 	w.u8(0);
 	w.u8(0);
-	// (1,1) no data.
+
 	bounds(w);
 	w.u8(0);
 	w.u8(0);
 	w.u8(0);
-	// (0,1) embedded.
+
 	bounds(w);
 	w.u8(0);
 	w.u8(0);
@@ -116,7 +112,7 @@ void streaming_node(Writer &w, uint8_t p_chunk, bool p_children) {
 	for (int i = 0; i < 16; ++i) {
 		w.u8(i == 0 ? p_chunk : 0);
 	}
-	w.u8(0); // no lod1
+	w.u8(0);
 	w.u8(0);
 	w.u8(p_children ? 1 : 0);
 }
@@ -130,7 +126,7 @@ std::vector<uint8_t> streaming_tree() {
 	w.u32(0);
 	w.u32(5);
 	w.u8(0);
-	w.u8(1); // a mask raster: stepped over
+	w.u8(1);
 	w.u32(3);
 	w.raw({ 9, 9, 9 });
 	const std::vector<uint8_t> h = heightfield();
@@ -140,7 +136,7 @@ std::vector<uint8_t> streaming_tree() {
 	w.u8(0xFF);
 	streaming_node(w, 0x10, true);
 	streaming_node(w, 0x20, false);
-	streaming_node(w, 0x21, false); // (1,0)
+	streaming_node(w, 0x21, false);
 	streaming_node(w, 0x22, false);
 	streaming_node(w, 0x23, false);
 	return w.bytes;
@@ -154,11 +150,11 @@ std::optional<std::vector<uint8_t>> fetch(const ChunkId &p_id) {
 	for (uint32_t i = 0; i < kSide * kSide; ++i) {
 		w.u16(kStreamed);
 	}
-	w.raw({ 1, 2, 3, 4 }); // the rest of the chunk (min-max, occluders, masks)
+	w.raw({ 1, 2, 3, 4 });
 	return w.bytes;
 }
 
-} // namespace
+}
 
 TEST_SUITE("collision_unit") {
 	TEST_CASE("terrain: streaming tree heightfield, nodes painted by level, holes and shared edges") {
@@ -201,13 +197,12 @@ TEST_SUITE("collision_unit") {
 			for (size_t x = 0; x < 5; ++x) {
 				CAPTURE(x);
 				CAPTURE(z);
-				// (0,0) is disabled except for the edges its painted neighbours share.
+
 				CHECK(grid.hole(x, z) == (x < 2 && z < 2));
 				if (grid.hole(x, z)) {
 					continue;
 				}
-				// (0,1) is painted after (1,0), so it owns their shared corner; (1,1) has no data
-				// and keeps the root's heights.
+
 				const float want = (x <= 2 && z >= 2) ? float(kEmbedded) : (x >= 2 && z <= 2) ? float(kStreamed) : float(kRoot);
 				CHECK(std::fabs(grid.at(x, z) - want) < 1e-3f);
 			}
@@ -226,7 +221,7 @@ TEST_SUITE("collision_unit") {
 			TerrainStreamingTree tree;
 			refused += TerrainStreamingTree::parse(Bytes(bytes.data(), len), tree).ok() ? 0 : 1;
 		}
-		CHECK(refused == bytes.size()); // every prefix is short somewhere
+		CHECK(refused == bytes.size());
 		std::mt19937 rng(20261015u);
 		size_t parsed = 0, grids = 0;
 		for (int mutant = 0; mutant < 3000; ++mutant) {

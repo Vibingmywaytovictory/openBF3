@@ -50,7 +50,7 @@ void GameSession::_bind_methods() {
 }
 
 void GameSession::_notification(int p_what) {
-	// The server thread must be joined before this node (and later Godot's singletons) go away.
+
 	if (p_what == NOTIFICATION_PREDELETE) {
 		stop_server();
 	}
@@ -60,7 +60,7 @@ void GameSession::_ready() {
 	if (Engine::get_singleton()->is_editor_hint()) {
 		return;
 	}
-	// Install: located once per session, read-only; the snapshot is the "before" of the self-test.
+
 	bf3::core::InstallLocateOptions opts;
 	opts.cmdline_path = user_arg_value("bf3-install");
 	ProjectSettings *ps = ProjectSettings::get_singleton();
@@ -249,12 +249,12 @@ void GameSession::_process(double p_delta) {
 	if (selftest_ && selftest_->process(p_delta)) {
 		quitting_ = true;
 		const int code = selftest_->exit_code();
-		stop_server(); // join before quitting so the table reflects a clean shutdown
+		stop_server();
 		get_tree()->quit(code);
 		return;
 	}
 	if (quit_after_ > 0.0 && !mid_screenshot_done_ && !screenshot_path_.empty() && elapsed_ >= 0.5 * quit_after_) {
-		// A second capture halfway through shows the server ticks advancing between the two.
+
 		mid_screenshot_done_ = true;
 		std::string mid = screenshot_path_;
 		const size_t dot = mid.rfind('.');
@@ -271,7 +271,7 @@ void GameSession::save_screenshot(const std::string &p_path) {
 	update_overlay();
 	const std::filesystem::path target = std::filesystem::path(std::u8string(p_path.begin(), p_path.end()));
 	const bf3::core::PathGuard guard = install_.write_guard();
-	// Never write under the install, even when asked to (the guard always protects the default location).
+
 	if (!guard.allows_write(target)) {
 		UtilityFunctions::push_error(to_godot("[openbf3] screenshot refused (" +
 				std::string(bf3::core::PathGuard::verdict_name(guard.check_write_target(target))) + "): " + p_path));
@@ -297,4 +297,4 @@ void GameSession::save_screenshot_and_quit() {
 	get_tree()->quit(0);
 }
 
-} // namespace bf3::godot_side
+}

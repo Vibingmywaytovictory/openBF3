@@ -1,4 +1,3 @@
-// Cache key derivation and the entry header codec (portable).
 #include "bf3/core/cache/cache_key.h"
 #include "bf3/core/cache/entry_format.h"
 
@@ -9,7 +8,6 @@ namespace bf3::core {
 
 namespace {
 
-// Field tags of the canonical key encoding. Never renumber: keys must stay stable across builds.
 enum KeyTag : uint8_t {
 	kTagKind = 1,
 	kTagSource = 2,
@@ -28,7 +26,6 @@ void put_u32(Hasher &r_h, uint32_t p_v) {
 	r_h.update(b);
 }
 
-// tag | u32 length (LE) | bytes
 void put_field(Hasher &r_h, uint8_t p_tag, const void *p_data, size_t p_size) {
 	r_h.update(std::span<const uint8_t>(&p_tag, 1));
 	put_u32(r_h, static_cast<uint32_t>(p_size));
@@ -82,7 +79,7 @@ constexpr std::array<uint32_t, 256> make_crc_table() {
 
 constexpr std::array<uint32_t, 256> kCrcTable = make_crc_table();
 
-} // namespace
+}
 
 uint32_t crc32(std::span<const uint8_t> p_bytes, uint32_t p_seed) {
 	uint32_t c = ~p_seed;
@@ -117,7 +114,7 @@ std::optional<CacheKey> make_cache_key(const CacheKeyInputs &p_inputs) {
 		return std::nullopt;
 	}
 	Hasher h(HashAlgorithm::Sha256);
-	h.update(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(kKeyDomain), sizeof kKeyDomain)); // includes the NUL
+	h.update(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(kKeyDomain), sizeof kKeyDomain));
 	put_field(h, kTagKind, p_inputs.kind.data(), p_inputs.kind.size());
 	put_u32(h, static_cast<uint32_t>(p_inputs.sources.size()));
 	for (const Sha1Digest &s : p_inputs.sources) {
@@ -126,7 +123,7 @@ std::optional<CacheKey> make_cache_key(const CacheKeyInputs &p_inputs) {
 	put_u32_field(h, kTagConverter, p_inputs.converter_version);
 	put_field(h, kTagEngine, p_inputs.engine.data(), p_inputs.engine.size());
 	put_u32_field(h, kTagFormat, p_inputs.format_version);
-	// Optional fields are absent (not empty) when unused, so adding one later keeps old keys.
+
 	if (!p_inputs.jolt_version.empty()) {
 		put_field(h, kTagJolt, p_inputs.jolt_version.data(), p_inputs.jolt_version.size());
 	}
@@ -185,7 +182,7 @@ EntryHeaderCheck decode_entry_head(std::span<const uint8_t> p_head, uint64_t p_f
 	if (!is_valid_cache_kind(r_header.kind)) {
 		return EntryHeaderCheck::BadKind;
 	}
-	// Overflow-safe: payload_size is untrusted.
+
 	if (r_header.payload_size > kCacheMaxPayload || r_header.payload_size != p_file_size - kCacheEntryHeaderSize) {
 		return EntryHeaderCheck::SizeMismatch;
 	}
@@ -214,4 +211,4 @@ const char *entry_header_check_name(EntryHeaderCheck p_check) {
 	return "?";
 }
 
-} // namespace bf3::core
+}

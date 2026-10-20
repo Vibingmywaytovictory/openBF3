@@ -1,5 +1,3 @@
-// AntExportDirSource and read_whole_file; see ant_export_source.h. Clean-room implementation from
-// research/probes/ant-animation-probe.md (§2). Reads only the export directory it is given (never the install).
 #include "ant_export_source.h"
 
 #include "bf3/core/ids.h"
@@ -29,8 +27,6 @@ std::vector<std::string_view> split(std::string_view p_line, char p_sep) {
 	return out;
 }
 
-// A file name from res.tsv / packages.tsv must stay inside the export directory: relative, no root,
-// no ".." component (the tsv files are data, so they are checked like any other input).
 bool is_contained_relative(std::string_view p_name) {
 	if (p_name.empty() || p_name.find(':') != std::string_view::npos) {
 		return false;
@@ -68,10 +64,10 @@ bool read_lines(const std::filesystem::path &p_path, std::vector<std::string> &r
 	return true;
 }
 
-} // namespace
+}
 
 bool read_whole_file(const std::filesystem::path &p_path, std::vector<uint8_t> &r_bytes, std::string &r_error) {
-	// Long names (the export keeps res names as file names) need the extended-length form past MAX_PATH.
+
 	std::error_code ec;
 	std::filesystem::path full = std::filesystem::absolute(p_path, ec);
 	std::wstring name = (ec ? p_path : full).lexically_normal().make_preferred().wstring();
@@ -166,7 +162,7 @@ bool AntExportDirSource::open(const std::filesystem::path &p_dir, std::string &r
 			r_error = "packages.tsv: file name escapes the export directory in row " + std::to_string(i);
 			return false;
 		}
-		// Res-backed packages report the res's site (as AntInstallSource does); chunk packages their partition's.
+
 		if (info.packaging != AntPackagingType::Chunk) {
 			const std::string key = to_lower_ascii(info.name);
 			for (const ResEntry &e : res_) {
@@ -213,7 +209,7 @@ bool AntExportDirSource::read(const AntPackageInfo &p_info, std::vector<uint8_t>
 		r_error = p_info.partition + ": unknown package";
 		return false;
 	}
-	// Static / Bundle / animation sets: the res named lowercase(Name).
+
 	const std::string key = to_lower_ascii(p_info.name);
 	for (const ResEntry &e : res_) {
 		if (e.name == key) {
@@ -224,4 +220,4 @@ bool AntExportDirSource::read(const AntPackageInfo &p_info, std::vector<uint8_t>
 	return false;
 }
 
-} // namespace bf3::tools::antdump
+}

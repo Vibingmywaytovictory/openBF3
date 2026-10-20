@@ -1,8 +1,3 @@
-// read_vehicle_spawners (S2, include/bf3/core/level/vehicle_spawns.h; docs/design/s2.md §4.3): every
-// VehicleSpawnReferenceObjectData placement of a traversed level x mode with its world transform and its fields.
-// Every field is the effective value: a PropertyConnection of the object's scope that feeds it wins over the
-// object's own field (Scopes::property), as spawn_points.cpp reads the soldier spawns. Charges the World's
-// WorkBudget: one unit per examined object, the blueprint name by its length.
 #include "bf3/core/level/vehicle_spawns.h"
 
 #include "bf3/core/level/budget.h"
@@ -16,7 +11,6 @@ namespace bf3::core::level {
 
 namespace {
 
-// The fed value of p_field (a PropertyConnection into it), else the object's own field.
 struct SpawnerFields {
 	const World &world;
 	const PlacedObject &object;
@@ -46,7 +40,6 @@ struct SpawnerFields {
 		return b.value_or(p_fallback);
 	}
 
-	// A finite number (fed or own); p_fallback otherwise.
 	Result<float> number(std::string_view p_field, float p_fallback) const {
 		Result<std::optional<Property>> f = fed(p_field);
 		BF3_TRY(f);
@@ -73,7 +66,6 @@ struct SpawnerFields {
 		return float(*v);
 	}
 
-	// TeamId: an enum field (TeamNeutral 0, Team1 1, ...) or a fed `TeamId TeamN` constant.
 	Result<int> team(std::string_view p_field) const {
 		Result<std::optional<Property>> f = fed(p_field);
 		BF3_TRY(f);
@@ -98,7 +90,7 @@ struct SpawnerFields {
 	}
 };
 
-} // namespace
+}
 
 Result<std::vector<VehicleSpawnerDef>> read_vehicle_spawners(const World &p_world) {
 	WorkBudget &budget = *p_world.budget;
@@ -106,7 +98,7 @@ Result<std::vector<VehicleSpawnerDef>> read_vehicle_spawners(const World &p_worl
 	const EbxResolver &db = p_world.scopes.db();
 	std::vector<VehicleSpawnerDef> out;
 	for (uint32_t i = 0; i < p_world.objects.size(); ++i) {
-		BF3_TRY(budget.charge(1)); // every object iterated (WorkBudget rule), not only the spawners
+		BF3_TRY(budget.charge(1));
 		const PlacedObject &object = p_world.objects[i];
 		if (object.kind != ObjectKind::VehicleSpawnReference) {
 			continue;
@@ -150,4 +142,4 @@ Result<std::vector<VehicleSpawnerDef>> read_vehicle_spawners(const World &p_worl
 	return out;
 }
 
-} // namespace bf3::core::level
+}

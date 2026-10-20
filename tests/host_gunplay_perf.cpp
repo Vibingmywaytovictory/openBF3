@@ -1,14 +1,3 @@
-// M2a bt (docs/design/m2a.md §1 E13, E15, §10.2, §14.1; docs/design/m2a-bt.md): the firefight bots on the real
-// GameServer, headless, on Metro TDM (MP_Subway / TeamDeathMatch0; read-only on the install, a per-process scratch
-// cache root under the temp directory, the shipped motor tuning). Three suites, one ctest row each:
-//   host-gunplay-firefight  host.gunplay.firefight (functional, untimed): 64 Free bots for 60 s: both teams kill, every
-//                           bot fires and walks, none is stuck, none inside geometry or below the ground, no NaN, no
-//                           precondition failure, no team kill; then 32 bots and one idle peer (a human slot): engaged.
-//   host-gunplay-replay     host.gunplay.replay (E15, functional): two 3,600-tick firefights with one seed give equal
-//                           per-tick world hashes, a third with another seed differs.
-//   host-gunplay-perf       host.gunplay.perf (E13, timing, RUN_SERIAL): 64 Pairs bots and one observer peer, 10 s
-//                           warm-up, 120 s window, server tick p99 <= 8.0 ms (report only under asan).
-// Every suite ends with its install-unchanged case.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
@@ -43,7 +32,7 @@ namespace {
 
 using namespace bf3;
 
-inline constexpr double kGateP99Ms = 8.0; // E13 (S1's G1 gate)
+inline constexpr double kGateP99Ms = 8.0;
 inline constexpr uint64_t kSeed = 0xB07B07ull;
 
 std::string read_text(const std::filesystem::path &p_path) {
@@ -61,7 +50,6 @@ struct Fixture {
 	host::FirefightLevel level;
 };
 
-// Metro with gunplay and S1's bot level, once per process (the three rows are three processes).
 Fixture *fixture() {
 	static std::unique_ptr<Fixture> s_fixture;
 	static bool s_tried = false;
@@ -137,7 +125,7 @@ std::optional<host::FirefightReport> run(const host::FirefightRunOptions &p_opti
 		return std::nullopt;
 	}
 	host::FirefightRunOptions o = p_options;
-	o.mechanics_cfg = OPENBF3_MECHANICS_CFG; // the tests do not run in the project directory
+	o.mechanics_cfg = OPENBF3_MECHANICS_CFG;
 	core::Result<host::FirefightReport> r = host::run_firefight(f->level.shared, f->level.bots, o);
 	CHECK_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
 	if (!r) {
@@ -148,7 +136,6 @@ std::optional<host::FirefightReport> run(const host::FirefightRunOptions &p_opti
 	return std::move(*r);
 }
 
-// The checks every firefight run must pass (a broken world, a broken brain or a broken server).
 void check_sane(const host::FirefightReport &p_r) {
 	CHECK(p_r.checks > 0);
 	CHECK_MESSAGE(p_r.inside_geometry == 0, "soldier capsules inside the static world: ", p_r.inside_geometry);
@@ -160,7 +147,7 @@ void check_sane(const host::FirefightReport &p_r) {
 	CHECK(p_r.kills[0] == 0);
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-gunplay-firefight") {
 	TEST_CASE("64 bots fight for 60 s") {
@@ -186,19 +173,17 @@ TEST_SUITE("host-gunplay-firefight") {
 			CHECK_MESSAGE(b.shots > 0, "slot ", int(b.slot), " never fired");
 			CHECK_MESSAGE(b.stuck_windows == 0, "slot ", int(b.slot), " stuck in ", b.stuck_windows, " of ", b.windows, " 20 s windows (min ",
 					b.min_window_metres, " m)");
-			// A bot that dies before any full window still has to have moved (the windows only see lives of 20 s).
+
 			CHECK_MESSAGE(b.metres >= 10.0, "slot ", int(b.slot), " walked only ", b.metres, " m in 60 s");
 		}
 		CHECK(r->windows > 0);
 		CHECK(r->bots_stuck == 0);
-		// Most bots should have hit someone (not only blind fire); gated loosely.
+
 		CHECK_MESSAGE(r->bots_hit_enemy * 2 >= r->bots.size(), "only ", r->bots_hit_enemy, " bots hit an enemy");
 	}
 
 	TEST_CASE("a human slot is an enemy like any other") {
-		// gx's playable scene (<= 32 bots): one remote peer that sends no command (the server holds it at its spawn,
-		// M1's repeated hold command) on team 1. The 64-bot case has no room for it: the RewindProvider answers hit
-		// targets for slots 0 .. 63 only (lag_comp.cpp kMaxLagSlots), so a peer in slot 64 is never hit.
+
 		host::FirefightRunOptions o;
 		o.mode = host::FirefightMode::Free;
 		o.count = 32;
@@ -231,7 +216,7 @@ TEST_SUITE("host-gunplay-replay") {
 		if (fixture() == nullptr) {
 			return;
 		}
-		// Three independent servers (own GameServer, CollisionWorld, brains) on three threads over the shared const level.
+
 		host::FirefightRunOptions o;
 		o.mode = host::FirefightMode::Free;
 		o.count = 64;
@@ -292,7 +277,7 @@ TEST_SUITE("host-gunplay-replay") {
 		CHECK(a.match_seed != c.match_seed);
 		CHECK(differ_ac > 0);
 		CHECK(a.run_hash != c.run_hash);
-		// The replayed run is a real fight, not a frozen one.
+
 		CHECK(a.kills[1] + a.kills[2] > 0);
 		CHECK(a.bots_fired > 0);
 		check_sane(a);
@@ -311,12 +296,12 @@ TEST_SUITE("host-gunplay-perf") {
 		o.count = 64;
 		o.walk = false;
 		o.seed = kSeed;
-		o.observers = 1; // receives the snapshots (encode runs as in a match); slot 64, never hit (see the firefight suite)
+		o.observers = 1;
 		o.max_slots = 65;
 		o.warmup_ticks = 10 * sim::kSimHz;
 		o.ticks = 120 * sim::kSimHz;
 		o.hashes = false;
-		o.check_every = 0; // measured ticks only (the firefight row checks the world)
+		o.check_every = 0;
 		std::optional<host::FirefightReport> r = run(o, "host.gunplay.perf (E13): Pairs, 64 bots, 1 observer, 10 s warm-up, 120 s");
 		if (!r) {
 			return;
@@ -325,7 +310,7 @@ TEST_SUITE("host-gunplay-perf") {
 		CHECK(r->ticks == 7200);
 		CHECK(r->step_precondition_failures == 0);
 		CHECK(r->weapon_precondition_failures == 0);
-		// The bots really fire through the window (E13 measures firing bots).
+
 		CHECK_MESSAGE(r->bots_fired == r->bots.size(), (r->bots.size() - r->bots_fired), " bots never fired");
 		const double gun = r->weapons_ms.mean + r->projectiles_ms.mean + r->rewind_ms.mean;
 		std::printf("E13: tick p99 %.3f ms (gate %.1f ms); weapons + projectiles + rewind mean %.3f ms = %.1f %% of the mean tick %.3f ms\n",

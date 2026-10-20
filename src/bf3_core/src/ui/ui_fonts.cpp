@@ -1,5 +1,3 @@
-// BF3's UI fonts: UIFontMappingCollection, font name resolution and the cached TrueType conversion
-// (bf3/core/ui/ui_fonts.h; docs/design/ui-swf-fonts.md §4.5, §7.3-§7.5, §13).
 #include "bf3/core/ui/ui_fonts.h"
 
 #include "bf3/core/cache/cache_key.h"
@@ -17,7 +15,7 @@ namespace {
 constexpr std::string_view kMappingType = "UIFontMappingCollection";
 constexpr std::string_view kMapSuffix = "_fontmapcollection";
 constexpr std::string_view kLibSuffix = "_fontlib";
-// Languages of the retail font libraries (used only when the resolver cannot list its partitions).
+
 constexpr std::string_view kLanguages[] = { "cs", "de", "en", "es", "fr", "it", "ja", "ko", "pl", "ru", "zh" };
 
 std::optional<EbxInstance> mapping_instance(const EbxPartition &p_partition) {
@@ -39,7 +37,7 @@ bool starts_with(std::string_view p_text, std::string_view p_prefix) {
 	return p_text.substr(0, p_prefix.size()) == p_prefix;
 }
 
-} // namespace
+}
 
 const char *font_resolution_name(FontResolution p_how) {
 	switch (p_how) {
@@ -67,7 +65,7 @@ Result<FontMappingCollection> read_font_mapping(const EbxResolver &p_ebx, std::s
 	if (const std::optional<EbxValue> name = inst->get("Name"); name && name->as_str()) {
 		c.name = std::string(*name->as_str());
 	}
-	// TextDatabase: a reference, or (retail) an array of one reference.
+
 	if (const std::optional<EbxValue> db = inst->get("TextDatabase"); db) {
 		std::optional<EbxRef> ref = db->as_ref();
 		if (!ref && db->as_array() && !(*db->as_array()).empty()) {
@@ -185,7 +183,7 @@ Result<FontMappingCollection> font_mapping_for_text_database(const EbxResolver &
 
 ResolvedFont resolve_font_name(const FontMappingCollection &p_collection, std::string_view p_used_name) {
 	ResolvedFont r;
-	// Exact.
+
 	for (const FontMapping &m : p_collection.fonts) {
 		for (const std::string &s : m.scaleform_names) {
 			if (s == p_used_name) {
@@ -196,7 +194,7 @@ ResolvedFont resolve_font_name(const FontMappingCollection &p_collection, std::s
 			return { FontResolution::Exact, m.font_long_name, m.scaleform_names.empty() ? m.font_long_name : m.scaleform_names.front() };
 		}
 	}
-	// ASCII case and one trailing '*'.
+
 	const std::string folded = fold(p_used_name);
 	for (const FontMapping &m : p_collection.fonts) {
 		for (const std::string &s : m.scaleform_names) {
@@ -212,7 +210,7 @@ ResolvedFont resolve_font_name(const FontMappingCollection &p_collection, std::s
 		r.how = FontResolution::Device;
 		return r;
 	}
-	// [inferred] Family: $HUD* -> $HUD_medium, $MENU* -> $MENU_medium, $FONT_TITLE -> $MENU_bold.
+
 	std::string target;
 	if (starts_with(folded, "$hud")) {
 		target = "$hud_medium";
@@ -358,4 +356,4 @@ const ConvertedFont *UiFontLibrary::find(std::string_view p_name) const {
 	return nullptr;
 }
 
-} // namespace bf3::core::ui
+}

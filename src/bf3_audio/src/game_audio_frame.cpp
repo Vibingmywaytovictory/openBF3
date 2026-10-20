@@ -1,5 +1,3 @@
-// One display frame of the game's audio (game_audio_frame.h).
-
 #include "bf3/audio/game_audio_frame.h"
 
 #include "bf3/audio/audio_load.h"
@@ -34,7 +32,7 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 		r_router.set_others_newest(std::span<const host::PresentedOtherWeapon>(newest_.data(), n),
 				sw::SimTime(p_in.frame->newest_tick + 1) * sw::kTimeUnitsPerTick);
 	}
-	r_router.set_own_weapons(p_in.frame); // PT1 rld [own weapons]: the reload's magazine, the zoom, dry fire
+	r_router.set_own_weapons(p_in.frame);
 	r_router.on_events(p_in.events, r_clock);
 	r_router.on_others(p_in.others, p_in.other_weapons, p_in.muzzles, r_clock);
 	if (r_impacts != nullptr) {
@@ -60,8 +58,6 @@ core::Result<std::shared_ptr<const ca::SoundProgram>> compile_patch_lenient(cons
 
 namespace {
 
-// E7 item 4 from GameAudioLoadOptions::audition_superbundles: the program (compiled from a lazily mounted library of
-// those superbundles) and a bank over its waves from the mount of the superbundle that holds the patch.
 core::Result<GameAuditionAsset> load_library_audition(const core::Install &p_install, const core::EbxLibrary &p_lib, std::string_view p_patch,
 		unsigned p_threads, size_t *r_missing) {
 	core::Result<std::shared_ptr<const ca::SoundProgram>> p = compile_patch_lenient(p_lib, p_patch);
@@ -99,7 +95,7 @@ core::Result<GameAuditionAsset> load_library_audition(const core::Install &p_ins
 	return a;
 }
 
-} // namespace
+}
 
 core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const core::Install> &p_install, const core::level::LoadedLevel &p_level,
 		const host::GunplayLevel &p_gunplay, std::span<const std::string> p_impact_sounds, unsigned p_threads, const std::atomic<bool> *p_stop,
@@ -110,7 +106,7 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	const core::EbxDb &db = p_level.db();
 	const auto stopped = [&]() { return p_stop != nullptr && p_stop->load(std::memory_order_relaxed); };
 	GameAudioAssets a;
-	// E7 item 1: the kit items' patches, strict, and their binding.
+
 	a.kits = kit_audio_sources(p_gunplay);
 	core::Result<WeaponAudioTable> table = load_weapon_audio(db, a.kits.sources, kMixRate);
 	if (!table) {
@@ -124,7 +120,7 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	if (stopped()) {
 		return core::make_error("load_game_audio_assets: stopped");
 	}
-	// Impact and effect sounds (fx3's names).
+
 	core::Result<std::shared_ptr<const ImpactSoundCache>> cache = ImpactSoundCache::build(db, p_impact_sounds);
 	if (!cache) {
 		return cache.error();
@@ -135,7 +131,7 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	for (const std::string &e : (*cache)->errors()) {
 		a.report.push_back("impact " + e);
 	}
-	// E7 item 4: the audition patches from the level's mount, else from the audition superbundles (their own banks).
+
 	std::vector<std::string> from_library;
 	for (const GameAuditionItem &item : game_audition_items()) {
 		core::Result<std::shared_ptr<const ca::SoundProgram>> p = compile_patch_lenient(db, item.patch);
@@ -178,7 +174,7 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	if (stopped()) {
 		return core::make_error("load_game_audio_assets: stopped");
 	}
-	// One bank over every program's waves.
+
 	std::vector<std::shared_ptr<const ca::SoundProgram>> all;
 	for (const WeaponAudioDef &d : a.table->defs) {
 		if (d.program) {
@@ -193,7 +189,7 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	}
 	for (const auto &[name, au] : a.auditions) {
 		if (!au.bank) {
-			all.push_back(au.program); // from the level: its waves go in the level bank
+			all.push_back(au.program);
 		}
 	}
 	core::Result<std::vector<ca::SoundWaveInfo>> waves = read_program_waves(db, all, &a.waves_missing);
@@ -229,7 +225,7 @@ bool start_audition(OneShotPool &r_pool, MixerCore &r_mixer, std::shared_ptr<con
 	const Vec3 d{ p_listener.position.x - em.position.x, p_listener.position.y - em.position.y, p_listener.position.z - em.position.z };
 	const float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
 	if (len > 0.0f && std::isfinite(len)) {
-		em.forward = { d.x / len, d.y / len, d.z / len }; // facing the listener (on the cone axis)
+		em.forward = { d.x / len, d.y / len, d.z / len };
 	}
 	OneShotOptions o;
 	o.set_first_person = true;
@@ -241,4 +237,4 @@ bool start_audition(OneShotPool &r_pool, MixerCore &r_mixer, std::shared_ptr<con
 	return r_pool.start(r_mixer, std::move(p_program), std::move(p_bank), p_tuning, p_seed, em, p_listener, p_frame, o);
 }
 
-} // namespace bf3::audio
+}

@@ -1,7 +1,3 @@
-// UI ui2: the minimap's pixels (include/bf3/core/ui/minimap.h "images", "census"; docs/design/ui-minimap-icons.md §4.3,
-// §5.6). Textures are decoded from the install at every load and never cached (design D5). Hostile headers are refused
-// before any allocation: the format must be L8, the texture 2D with one face, each side at most kMaxMinimapImageSide,
-// and the stored mip must hold width x height bytes (row pitch included).
 #include "bf3/core/ui/minimap.h"
 
 #include "bf3/core/install.h"
@@ -37,7 +33,7 @@ Result<L8Image> decode_l8_texture(const res::DxTexture &p_texture, std::span<con
 	if (mips.empty()) {
 		return make_error(where + ": no mip");
 	}
-	const res::MipSlice &m = mips.front(); // mip 0 (the whole chunk: load_texture completes a ranged one)
+	const res::MipSlice &m = mips.front();
 	if (m.width == 0 || m.height == 0 || m.width > kMaxMinimapImageSide || m.height > kMaxMinimapImageSide || m.depth != 1) {
 		return make_error(where + ": mip size out of range");
 	}
@@ -100,7 +96,7 @@ Result<MinimapImages> load_minimap_images(const LevelMount &p_mount, const Minim
 		out.vegetation = std::move(*v);
 	}
 	for (const CombatAreaMask &m : p_level.combat_areas) {
-		if (m.texture.empty()) { // a null DistanceField (read_combat_area)
+		if (m.texture.empty()) {
 			out.combat_areas.emplace_back();
 			out.surroundings.emplace_back();
 			continue;
@@ -153,7 +149,6 @@ std::vector<L8Image> l8_mip_chain(const L8Image &p_image) {
 
 namespace {
 
-// The mount of the superbundle a partition (or its res, which ships beside it) came from.
 const LevelMount *mount_of(const EbxLibrary &p_library, std::string_view p_name) {
 	const std::optional<EbxLibrary::Origin> origin = p_library.origin(p_name);
 	if (!origin) {
@@ -167,12 +162,11 @@ const LevelMount *mount_of(const EbxLibrary &p_library, std::string_view p_name)
 	return nullptr;
 }
 
-// "levels/<l>/..../ui/...": the level-UI partitions the census scans.
 bool level_ui_name(std::string_view p_name) {
 	return p_name.starts_with("levels/") && p_name.find("/ui/") != std::string_view::npos;
 }
 
-} // namespace
+}
 
 Result<MinimapCensus> minimap_census(const EbxLibrary &p_library) {
 	MinimapCensus out;
@@ -186,13 +180,13 @@ Result<MinimapCensus> minimap_census(const EbxLibrary &p_library) {
 		}
 	}
 	std::set<std::string> levels;
-	std::map<std::string, std::string> referenced; // texture -> the combat-area asset that references it first
-	std::vector<std::pair<std::string, std::string>> field_textures; // (texture, UIDistanceFieldAsset), one per asset
+	std::map<std::string, std::string> referenced;
+	std::vector<std::pair<std::string, std::string>> field_textures;
 	for (const std::string &name : names) {
 		const EbxPartition *p = p_library.partition_by_name(name);
 		++out.partitions_scanned;
 		if (p == nullptr) {
-			continue; // a level-UI name that is no partition the census needs; the ones it needs fail below
+			continue;
 		}
 		const EbxInstance primary = p->primary();
 		if (primary.is_a("UIDistanceFieldAsset")) {
@@ -233,7 +227,7 @@ Result<MinimapCensus> minimap_census(const EbxLibrary &p_library) {
 	}
 	out.levels_with_areas = levels.size();
 	out.referenced_fields = referenced.size();
-	// Each texture is decoded once; both counts read the result.
+
 	std::map<std::string, bool> decoded;
 	const auto decode = [&](const std::string &p_texture, const std::string &p_owner) -> bool {
 		if (const auto it = decoded.find(p_texture); it != decoded.end()) {
@@ -260,4 +254,4 @@ Result<MinimapCensus> minimap_census(const EbxLibrary &p_library) {
 	return out;
 }
 
-} // namespace bf3::core::ui
+}

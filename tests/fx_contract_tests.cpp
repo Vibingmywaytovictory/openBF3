@@ -1,9 +1,3 @@
-// M2a VFX1 interface contract (docs/design/m2a-vfx1.md §11): every bf3_fx header compiles on its own set of
-// includes, the plain types keep the properties the later waves rely on (sizes of the renderer's records, the 32 / 10
-// type vocabularies, the canonical stage order), the name tables round-trip, and the inline helpers that are already
-// final (polynomial evaluation, colour interpolation, counter-based random numbers) match the goldens of plan §7.10
-// item 2 on synthetic values and on coefficients copied from the install's 1p muzzle flash (numbers only). No data,
-// no Godot; nothing here calls a function the VFX1 implementation has yet to write.
 #include <doctest/doctest.h>
 
 #include "bf3/fx/effect_cache.h"
@@ -23,8 +17,6 @@
 
 namespace fx = bf3::fx;
 
-// ---- compile-time contract ---------------------------------------------------------------------------------
-
 static_assert(fx::kProcessorTypeCount == 32);
 static_assert(fx::kEvaluatorTypeCount == 10);
 static_assert(sizeof(fx::ParticleVertex) == 80);
@@ -41,13 +33,13 @@ static_assert(fx::processor_stage(fx::ProcessorType::SpawnPosition) == fx::Proce
 static_assert(fx::processor_stage(fx::ProcessorType::SpawnAnimation) == fx::ProcessorStage::Spawn);
 static_assert(fx::processor_stage(fx::ProcessorType::UpdateAge) == fx::ProcessorStage::Update);
 static_assert(fx::processor_stage(fx::ProcessorType::UpdateClipScale) == fx::ProcessorStage::Update);
-// The canonical update order of docs §6.3: drag, then the forces, then the integration.
+
 static_assert(fx::ProcessorType::AirResistance < fx::ProcessorType::Gravity);
 static_assert(fx::ProcessorType::Gravity < fx::ProcessorType::UpdateLinearVelocity);
 static_assert(fx::ProcessorType::LocalForce < fx::ProcessorType::UpdateLinearVelocity);
 static_assert(fx::ProcessorType::Turbulance < fx::ProcessorType::UpdateLinearVelocity);
 static_assert(fx::ProcessorType::SpawnDirection < fx::ProcessorType::SpawnSpeed);
-// Cache kinds fit the cache's kind rule ([a-z0-9_-]{1,32}).
+
 static_assert(std::char_traits<char>::length(fx::kFxEffectCacheKind) <= bf3::core::kCacheKindMaxLength);
 static_assert(std::char_traits<char>::length(fx::kFxDepsCacheKind) <= bf3::core::kCacheKindMaxLength);
 
@@ -75,7 +67,7 @@ TEST_SUITE("fx-contract") {
 		}
 		CHECK(names.size() == 42);
 		CHECK(!fx::processor_type_from_name("UpdateCollisionData").has_value());
-		CHECK(!fx::processor_type_from_name("spawnratedata").has_value()); // EBX type names are case-sensitive
+		CHECK(!fx::processor_type_from_name("spawnratedata").has_value());
 		CHECK(!fx::evaluator_type_from_name("").has_value());
 		CHECK(fx::processor_type_name(fx::ProcessorType(200)).empty());
 	}
@@ -100,7 +92,7 @@ TEST_SUITE("fx-contract") {
 	}
 
 	TEST_CASE("fx.contract: G2 polynomial goldens (f(0) = w, f(1) = x+y+z+w, clamp then scale)") {
-		// Synthetic: every coefficient distinct, no clamp in the way.
+
 		fx::PolynomialDef p;
 		p.coefficients = { 0.25f, -0.5f, 0.125f, 2.0f };
 		p.min_clamp = -100;
@@ -108,35 +100,29 @@ TEST_SUITE("fx-contract") {
 		CHECK(fx::evaluate_polynomial(p, 0.0f) == 2.0f);
 		CHECK(fx::evaluate_polynomial(p, 1.0f) == 0.25f - 0.5f + 0.125f + 2.0f);
 		CHECK(fx::evaluate_polynomial(p, 0.5f) == doctest::Approx(((0.25 * 0.5 - 0.5) * 0.5 + 0.125) * 0.5 + 2.0));
-		// x is the cubic coefficient: a pure x curve is t^3.
+
 		fx::PolynomialDef cubic;
 		cubic.coefficients = { 1, 0, 0, 0 };
 		CHECK(fx::evaluate_polynomial(cubic, 0.5f) == 0.125f);
 
-		// The 1p flash's UpdateTransparency curve (em_muzz_generic_rifle_1p_flash, PolynomialData d5fa09e0):
-		// {w 1, x 0, y 0.95294344, z -1.9477582}, clamp [0, 1], scale 1: 1 at spawn, ~0 at death (plan §7.10 item 2).
 		fx::PolynomialDef alpha;
 		alpha.coefficients = { 0.0f, 0.95294344f, -1.9477582f, 1.0f };
 		CHECK(fx::evaluate_polynomial(alpha, 0.0f) == 1.0f);
 		CHECK(fx::evaluate_polynomial(alpha, 1.0f) == doctest::Approx(0.0051852).epsilon(1e-4));
 		CHECK(fx::evaluate_polynomial(alpha, 0.5f) == doctest::Approx(0.264435).epsilon(1e-4));
 
-		// Clamp before scale: rapidsmoke's UpdateTransparency {w 1.1179048, z -1.117318}, clamp [0, 1], scale 0.1
-		// gives 0.1 at t = 0 (scale-then-clamp would give 0.11179).
 		fx::PolynomialDef smoke;
 		smoke.coefficients = { 0.0f, 0.0f, -1.117318f, 1.1179048f };
 		smoke.scale = 0.1f;
 		CHECK(fx::evaluate_polynomial(smoke, 0.0f) == doctest::Approx(0.1f));
 		CHECK(fx::evaluate_polynomial(smoke, 1.0f) == doctest::Approx(0.1f * 0.0005868f).epsilon(1e-2));
 
-		// An active lower clamp: the flash's UpdateAlphaLevelScale {w 0.0050001144, z 0.9804876}, clamp [0.9, 1].
 		fx::PolynomialDef level;
 		level.coefficients = { 0.0f, 0.0f, 0.9804876f, 0.0050001144f };
 		level.min_clamp = 0.9f;
 		CHECK(fx::evaluate_polynomial(level, 0.0f) == 0.9f);
 		CHECK(fx::evaluate_polynomial(level, 1.0f) == doctest::Approx(0.98548772f));
 
-		// MinClamp == MaxClamp (137 retail instances) is a constant.
 		fx::PolynomialDef constant;
 		constant.coefficients = { 0.0f, 0.0f, 0.25f, 0.75f };
 		constant.min_clamp = 1;
@@ -145,8 +131,7 @@ TEST_SUITE("fx-contract") {
 	}
 
 	TEST_CASE("fx.contract: colour interpolation runs from Color1 (f = 0) to Color0 (f = 1)") {
-		// The 1p flash's PolynomialColorInterpData 0f16cfbc: {w 0.794, z -41.20004}, Color0 (125, 42.417, 8.716),
-		// Color1 (48.719, 12.026, 0.739).
+
 		const fx::Vec4 c{ 0.0f, 0.0f, -41.20004f, 0.794f };
 		const fx::Vec3 c0{ 125.0f, 42.417f, 8.716f };
 		const fx::Vec3 c1{ 48.719f, 12.026f, 0.739f };
@@ -179,7 +164,7 @@ TEST_SUITE("fx-contract") {
 		CHECK(sum / n == doctest::Approx(0.5).epsilon(0.01));
 		CHECK(lo < 0.001f);
 		CHECK(hi > 0.999f);
-		CHECK(fx::fx_uniform(1.0f, -1.0f, 0.25f) == 0.5f); // Min > Max is legal data
+		CHECK(fx::fx_uniform(1.0f, -1.0f, 0.25f) == 0.5f);
 		CHECK(fx::fx_uniform(0.8f, 1.0f, 0.0f) == 0.8f);
 	}
 
@@ -187,19 +172,18 @@ TEST_SUITE("fx-contract") {
 		const uint64_t start = fx::fx_harness_seed(1, 0);
 		CHECK(start != fx::fx_harness_seed(1, 1));
 		CHECK(start != fx::fx_harness_seed(2, 0));
-		// Two emitters of one component, and one emitter index in two components, get different instance seeds.
+
 		const uint64_t root0 = fx::fx_emitter_seed(start, 0, 0);
 		CHECK(root0 != fx::fx_emitter_seed(start, 0, 1));
 		CHECK(root0 != fx::fx_emitter_seed(start, 1, 0));
-		// Children of one parent: different per parent particle serial and per child emitter, and never the parent's.
+
 		const uint64_t child_a = fx::fx_child_seed(root0, 3, 0);
 		const uint64_t child_b = fx::fx_child_seed(root0, 3, 1);
 		const uint64_t child_c = fx::fx_child_seed(root0, 4, 0);
 		CHECK(child_a != child_b);
 		CHECK(child_a != child_c);
 		CHECK(child_a != root0);
-		// So the first spawn's draws (serial 0, SpawnPosition slot) differ between two children of one parent and
-		// between a parent and its child.
+
 		const uint32_t slot = uint32_t(fx::ProcessorType::SpawnPosition);
 		CHECK(fx::fx_key(child_a, 0, slot, 0) != fx::fx_key(child_b, 0, slot, 0));
 		CHECK(fx::fx_key(child_a, 0, slot, 0) != fx::fx_key(root0, 0, slot, 0));

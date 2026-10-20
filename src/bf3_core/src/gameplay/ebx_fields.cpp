@@ -1,4 +1,3 @@
-// Typed EBX field reads for the gameplay readers (see ebx_fields.h).
 #include "ebx_fields.h"
 
 namespace bf3::core::gameplay::detail {
@@ -251,7 +250,7 @@ MaterialPairRef Fields::material_pair(const EbxStruct &p_s, std::string_view p_f
 		out.partition = p_s.partition().guid();
 		out.instance = target_guid(p_s.partition(), *r).value_or(Guid{});
 	}
-	// A pair the level's container copy lacks is not an error here (MaterialGrid::complete fills it).
+
 	const std::optional<EbxInstance> pair = db_.resolve(p_s.partition(), *r);
 	if (!pair) {
 		return out;
@@ -268,4 +267,4 @@ MaterialPairRef Fields::material_pair(const EbxStruct &p_s, std::string_view p_f
 	return out;
 }
 
-} // namespace bf3::core::gameplay::detail
+}

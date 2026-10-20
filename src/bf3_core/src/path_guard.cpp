@@ -23,7 +23,6 @@ std::wstring full_path_name(const std::wstring &p_in) {
 	return out;
 }
 
-// Strips the "\\?\" / "\\?\UNC\" prefixes GetFinalPathNameByHandleW returns.
 std::wstring strip_verbatim(std::wstring p_path) {
 	if (p_path.rfind(L"\\\\?\\UNC\\", 0) == 0) {
 		return L"\\\\" + p_path.substr(8);
@@ -34,7 +33,7 @@ std::wstring strip_verbatim(std::wstring p_path) {
 	return p_path;
 }
 
-} // namespace
+}
 
 std::filesystem::path to_extended_length(const std::filesystem::path &p_path) {
 	const std::wstring &raw = p_path.native();
@@ -57,13 +56,12 @@ bool exists_no_follow_fail(const std::wstring &p_path) {
 	return GetFileAttributesW(p_path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
-// Resolves an existing path through the file system (links, junctions, 8.3 names, casing).
 std::wstring final_path(const std::wstring &p_existing) {
-	// FILE_READ_ATTRIBUTES only: no data access, never a write handle.
+
 	HANDLE h = CreateFileW(p_existing.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 			nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
 	if (h == INVALID_HANDLE_VALUE) {
-		// Fall back to long names without resolving links.
+
 		DWORD need = GetLongPathNameW(p_existing.c_str(), nullptr, 0);
 		if (need == 0) {
 			return p_existing;
@@ -92,7 +90,6 @@ bool component_equal(const std::wstring &p_a, const std::wstring &p_b) {
 			CSTR_EQUAL;
 }
 
-// A ':' anywhere but "X:" at the start names an alternate data stream (or is invalid).
 bool has_stream_syntax(const std::wstring &p_full) {
 	size_t start = 0;
 	if (p_full.rfind(L"\\\\?\\", 0) == 0 || p_full.rfind(L"\\\\.\\", 0) == 0) {
@@ -104,7 +101,7 @@ bool has_stream_syntax(const std::wstring &p_full) {
 	return p_full.find(L':', start) != std::wstring::npos;
 }
 
-} // namespace
+}
 
 std::optional<std::filesystem::path> canonicalize_path(const std::filesystem::path &p_path) {
 	if (p_path.empty()) {
@@ -115,13 +112,13 @@ std::optional<std::filesystem::path> canonicalize_path(const std::filesystem::pa
 		return std::nullopt;
 	}
 	full = strip_verbatim(full);
-	// Walk up to the deepest existing ancestor; remember the components below it.
+
 	std::filesystem::path existing(full);
 	std::deque<std::filesystem::path> rest;
 	while (!exists_no_follow_fail(existing.native())) {
 		const std::filesystem::path parent = existing.parent_path();
 		if (parent == existing || parent.empty()) {
-			break; // nothing exists (e.g. an unmapped drive): keep it lexical
+			break;
 		}
 		rest.push_front(existing.filename());
 		existing = parent;
@@ -130,7 +127,7 @@ std::optional<std::filesystem::path> canonicalize_path(const std::filesystem::pa
 	for (const std::filesystem::path &c : rest) {
 		out /= c;
 	}
-	// No trailing separator except for a drive root ("C:\").
+
 	std::wstring s = out.native();
 	while (s.size() > 3 && (s.back() == L'\\' || s.back() == L'/')) {
 		s.pop_back();
@@ -142,12 +139,12 @@ bool path_is_within(const std::filesystem::path &p_child, const std::filesystem:
 	auto c = p_child.begin();
 	for (auto r = p_root.begin(); r != p_root.end(); ++r) {
 		if (r->empty()) {
-			continue; // trailing separator yields an empty element
+			continue;
 		}
 		if (c == p_child.end()) {
 			return false;
 		}
-		// The root-directory element is "\" on both sides; names compare case-insensitively.
+
 		if (!component_equal(r->native(), c->native())) {
 			return false;
 		}
@@ -188,8 +185,7 @@ PathGuard::Verdict PathGuard::check_write_target(const std::filesystem::path &p_
 			return Verdict::UnderProtectedRoot;
 		}
 	}
-	// Replacing an existing file that has several names could write through a hard link whose
-	// other name lies inside the install. Directory listings cannot see that, so refuse it.
+
 	HANDLE h = CreateFileW(canonical->c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
 			OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
 	if (h != INVALID_HANDLE_VALUE) {
@@ -221,4 +217,4 @@ const char *PathGuard::verdict_name(Verdict p_verdict) {
 	return "?";
 }
 
-} // namespace bf3::core
+}

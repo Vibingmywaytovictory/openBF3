@@ -1,5 +1,3 @@
-// The emitter atlases' pixels prepared for upload (docs/design/m2a.md §12.1; docs/design/m2a-fx2.md). See
-// atlas_pixels.h.
 #include "bf3/fx/atlas_pixels.h"
 
 #include "bf3/core/cache/blob_io.h"
@@ -23,9 +21,8 @@ namespace {
 
 constexpr const char *kBlobMagic = "FXATLASP";
 constexpr uint64_t kBlockBytes = 16;
-constexpr uint32_t kMaxSide = 16384; // EmitterAtlas::texture_info bounds the atlases far below this
+constexpr uint32_t kMaxSide = 16384;
 
-// Red of a BC1-style colour block (BC3 always decodes it with four colours), as BC4 input values.
 std::array<uint8_t, 16> colour_block_red(const uint8_t *p_block) {
 	const uint16_t c0 = uint16_t(p_block[0] | (p_block[1] << 8));
 	const uint16_t c1 = uint16_t(p_block[2] | (p_block[3] << 8));
@@ -40,7 +37,6 @@ std::array<uint8_t, 16> colour_block_red(const uint8_t *p_block) {
 	return out;
 }
 
-// A BC4 block for 16 values: endpoints max / min, 8-value mode, nearest index.
 std::array<uint8_t, 8> bc4_encode_values(const std::array<uint8_t, 16> &p_values) {
 	const uint8_t lo = *std::min_element(p_values.begin(), p_values.end());
 	const uint8_t hi = *std::max_element(p_values.begin(), p_values.end());
@@ -147,7 +143,7 @@ std::optional<core::CacheKey> atlas_pixels_key(const EmitterAtlas &p_atlas, cons
 			return std::nullopt;
 		}
 		in.sources.push_back(core::source_digest(*res));
-		// The chunk id is in the res header; read the 128 bytes once more (cheap) for the chunk's own SHA1s.
+
 		core::Result<core::res::RawRes> raw = core::res::read_raw_res(p_mount, info->partition);
 		if (!raw) {
 			return std::nullopt;
@@ -171,7 +167,7 @@ std::optional<core::CacheKey> atlas_pixels_key(const EmitterAtlas &p_atlas, cons
 	return core::make_cache_key(in);
 }
 
-} // namespace
+}
 
 uint64_t atlas_level_bytes(uint32_t p_width, uint32_t p_height) {
 	return uint64_t((std::max(p_width, 1u) + 3) / 4) * ((std::max(p_height, 1u) + 3) / 4) * kBlockBytes;
@@ -198,8 +194,7 @@ core::Status convert_normal_dxt5rga_to_bc5(const uint8_t *p_blocks, uint64_t p_s
 		for (uint64_t x = 0; x < bw; ++x) {
 			const uint64_t at = (y * bw + x) * kBlockBytes;
 			const uint8_t *in = p_blocks + at;
-			// NormalDXT5RGA [inferred]: tangent x in the colour block's red, y in the alpha block. BC5: red block = x,
-			// green block = y (the alpha block is a BC4 block as stored).
+
 			const std::array<uint8_t, 8> red = bc4_encode_values(colour_block_red(in + 8));
 			std::memcpy(out + at, red.data(), 8);
 			std::memcpy(out + at + 8, in, 8);
@@ -360,4 +355,4 @@ core::Result<AtlasPixels> prepare_atlas_pixels(const EmitterAtlas &p_atlas, cons
 	return pixels;
 }
 
-} // namespace bf3::fx
+}

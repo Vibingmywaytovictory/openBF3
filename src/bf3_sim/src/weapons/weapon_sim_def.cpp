@@ -1,6 +1,3 @@
-// WeaponSimDef from a resolved WeaponDef, the WeaponTable and its hash (docs/design/m2a-weapons.md §5.3, §5.5, §9).
-// Every number the simulation runs on is checked here once, so the step functions never see NaN, a zero interval,
-// an endless burst or an absurd count: a bad value fails with an error naming the variant and the field.
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
 #include "bf3/sim/weapons/surface_materials.h"
@@ -20,18 +17,11 @@ using core::gameplay::FireFunction;
 using core::gameplay::ProjectileDef;
 using core::gameplay::WeaponDef;
 
-// The smallest interval a def may have: kMaxShotsPerTick shots per tick (28,800 RPM at 60 Hz).
 constexpr SimTime kMinInterval = kTimeUnitsPerTick / kMaxShotsPerTick;
-constexpr float kMaxDistance = 100'000.0f; // m: falloff distances
-constexpr float kMaxFactor = 10'000.0f; // dimensionless multipliers (sway modifiers, recoil scales)
-constexpr float kMaxOffset = kMaxRadius; // m: ShotConfigData.InitialPosition components
+constexpr float kMaxDistance = 100'000.0f;
+constexpr float kMaxFactor = 10'000.0f;
+constexpr float kMaxOffset = kMaxRadius;
 
-// The decimal the data's author wrote for a float: the shortest decimal that reads back as the same float
-// (std::to_chars, an exactly specified algorithm, so every machine gets the same digits), read back as a double.
-// The data's 1.8 s is the float 1.79999995..., 107,999,997 units when converted as it stands; its shortest decimal is
-// "1.8", exactly 108,000,000 units, the number the plan's oracles quote (1.3 s bolt = 78,000,000, 0.48 s pump =
-// 28,800,000, 3.6 s fuse = 216,000,000). Every data time, rate and fraction goes through this once, in the def
-// build; the resulting integers are what the simulation adds and hashes.
 double data_decimal(float p_value) {
 	if (!std::isfinite(p_value)) {
 		return double(p_value);
@@ -46,7 +36,6 @@ double data_decimal(float p_value) {
 	return r.ec == std::errc() && r.ptr == w.ptr ? out : double(p_value);
 }
 
-// Collects the first violated bound as "<variant>: <field> <what>".
 class Checker {
 public:
 	explicit Checker(std::string p_variant) :
@@ -59,7 +48,7 @@ public:
 			error_ = (variant_.empty() ? std::string("(no variant)") : variant_) + ": " + p_field + " " + p_what;
 		}
 	}
-	// A finite value in [p_lo, p_hi].
+
 	float range(float p_value, float p_lo, float p_hi, const std::string &p_field) {
 		if (!std::isfinite(p_value)) {
 			fail(p_field, "is not finite");
@@ -78,12 +67,11 @@ public:
 		}
 		return p_value;
 	}
-	// Seconds of data in [0, 60] -> units.
+
 	SimTime time(float p_seconds, const std::string &p_field) {
 		return seconds_to_units(data_decimal(range(p_seconds, 0.0f, float(units_to_seconds(kMaxDefTime)), p_field)));
 	}
-	// A time that saturates at 60 s instead of being refused (HoldAndReleaseData.MaxHoldTime: the M67's 9999 means
-	// "no limit").
+
 	SimTime time_saturating(float p_seconds, const std::string &p_field) {
 		if (!std::isfinite(p_seconds) || p_seconds < 0) {
 			fail(p_field, std::isfinite(p_seconds) ? "is negative" : "is not finite");
@@ -101,10 +89,7 @@ public:
 		angle(p_d.increase_per_shot, p_field + ".IncreasePerShot");
 		rate(p_d.decrease_per_second, p_field + ".DecreasePerSecond");
 	}
-	// Sway modifiers are signed in data: the suppression DecreasePerSecondModifier of xp2_hk417, xp2_l86 and xp2_lsat
-	// is -10 [verified, sim.weapons W4 2026-10-15]. So the bound is |m| <= 10,000;
-	// spread_recoil.h clamps the effective MinAngle, MaxAngle and IncreasePerShot at 0, and a negative decrease makes
-	// the spread grow toward MaxAngle while the modifier holds [unmeasured].
+
 	void modifier(const SwayModifier &p_m, const std::string &p_field) {
 		range(p_m.min_angle, -kMaxFactor, kMaxFactor, p_field + ".MinAngleModifier");
 		range(p_m.max_angle, -kMaxFactor, kMaxFactor, p_field + ".MaxAngleModifier");
@@ -199,8 +184,7 @@ ProjectileSimDef make_projectile(Checker &r_c, const WeaponDef &p_def, const Sur
 			r_c.range(out.zone[z].penetration_multiplier, 0.0f, kMaxFactor, "zone cell DamagePenetrationMultiplier");
 		}
 	}
-	// Whether every penetration cell of the projectile's row says NeverPenetrate (a fast path for buckshot,
-	// melee and explosives; false when the row has no penetration data at all).
+
 	if (pair.resolved && p_materials.has_grid()) {
 		bool any = false;
 		bool all_never = true;
@@ -225,7 +209,7 @@ ProjectileSimDef make_projectile(Checker &r_c, const WeaponDef &p_def, const Sur
 }
 
 float exp_factor(float p_rate_per_second) {
-	// exp(-rate / kSimHz): computed once here with libm and stored in the def (hashed), never per tick (plan R4).
+
 	return float(std::exp(-double(p_rate_per_second) / double(kSimHz)));
 }
 
@@ -410,7 +394,7 @@ void hash_mechanics(detail::Fnv64 &r_h, const Mechanics &p_m) {
 	r_h.add(p_m.measured);
 }
 
-} // namespace
+}
 
 core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &p_def, const SurfaceMaterialTable &p_materials) {
 	Checker c(p_def.variant);
@@ -420,7 +404,6 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	d.unlock_identifier = p_def.unlock_identifier;
 	d.weapon_class = p_def.weapon_class;
 
-	// Fire modes: FireLogicType first, then FireLogicTypeArray in data order.
 	std::vector<FireLogic> logics;
 	logics.push_back(f.logic);
 	for (const FireLogic l : f.extra_modes) {
@@ -483,19 +466,15 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	}
 	d.hold_power_per_second = c.rate(f.hold_power_per_second, "HoldAndReleaseData.PowerIncreasePerSecond");
 
-	// Ammunition.
-	// M2b ru R11 (docs/design/m2b.md §2.6 #22, §3.6): MagazineCapacity -1 is a gadget without a magazine (the
-	// defibrillator, ammo "-1 x 1"): unlimited, one round that a shot never takes, no reload. Any other negative
-	// capacity still fails.
-	const bool gadget_without_magazine = f.magazine_capacity == -1; // M2b ru R11
-	if ((f.magazine_capacity < 0 && !gadget_without_magazine) || f.magazine_capacity > kMaxMagazine) { // M2b ru R11
+	const bool gadget_without_magazine = f.magazine_capacity == -1;
+	if ((f.magazine_capacity < 0 && !gadget_without_magazine) || f.magazine_capacity > kMaxMagazine) {
 		c.fail("MagazineCapacity", "= " + std::to_string(f.magazine_capacity) + " is outside [0, " + std::to_string(kMaxMagazine) + "]");
 	}
-	d.magazine_capacity = gadget_without_magazine ? 1 : std::clamp(f.magazine_capacity, 0, kMaxMagazine); // M2b ru R11
+	d.magazine_capacity = gadget_without_magazine ? 1 : std::clamp(f.magazine_capacity, 0, kMaxMagazine);
 	if (f.number_of_magazines > kMaxMagazines) {
 		c.fail("NumberOfMagazines", "= " + std::to_string(f.number_of_magazines) + " is above " + std::to_string(kMaxMagazines));
 	}
-	d.unlimited_ammo = f.number_of_magazines < 0 || gadget_without_magazine; // M2b ru R11
+	d.unlimited_ammo = f.number_of_magazines < 0 || gadget_without_magazine;
 	d.magazines = std::clamp(f.number_of_magazines, 0, kMaxMagazines);
 	if (f.bullets_per_shell < 1 || f.bullets_per_shell > kMaxPellets) {
 		c.fail("NumberOfBulletsPerShell", "= " + std::to_string(f.bullets_per_shell) + " is outside [1, " + std::to_string(kMaxPellets) + "]");
@@ -506,7 +485,6 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	}
 	d.trace_frequency = f.trace_frequency > 0 ? std::min(f.trace_frequency, kMaxTraceFrequency) : 0;
 
-	// Reload: only the fields the reload type uses are read (the 870's unused ReloadTimeBulletsLeft is -1).
 	d.reload_type = f.reload_type;
 	d.reload_threshold = c.range(f.reload_threshold, 0.0f, 1.0f, "ReloadThreshold");
 	switch (f.reload_type) {
@@ -541,7 +519,6 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	d.deploy_time = c.time(p_def.deploy_time, "DeployTime");
 	d.zoom_blocked_after_deploy = c.time(p_def.disable_zoom_on_deploy_time, "DisableZoomOnDeployTime");
 
-	// Spread and recoil.
 	d.sway = p_def.sway.state;
 	for (size_t s = 0; s < 3; ++s) {
 		for (size_t z = 0; z < 2; ++z) {
@@ -627,7 +604,7 @@ core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<con
 	table->materials = std::move(p_materials);
 	table->mechanics = p_options.mechanics;
 	table->infinite_magazine = p_options.infinite_magazine;
-	table->exact_aim = p_options.exact_aim; // M2a sv, R3
+	table->exact_aim = p_options.exact_aim;
 	table->sprint_recover_time = seconds_to_units(data_decimal(p_options.sprint_recover_seconds));
 	table->hash = weapon_table_hash(*table);
 	return std::shared_ptr<const WeaponTable>(std::move(table));
@@ -647,7 +624,7 @@ uint64_t weapon_table_hash(const WeaponTable &p_table) {
 	hash_mechanics(h, p_table.mechanics);
 	h.add(p_table.infinite_magazine);
 	if (p_table.exact_aim) {
-		h.add(p_table.exact_aim); // M2a sv, R3: only when set, so every table without the option hashes as before (W1-W11, weapon-sim output)
+		h.add(p_table.exact_aim);
 	}
 	h.add(p_table.sprint_recover_time);
 	return h.value();
@@ -670,4 +647,4 @@ double sim_effective_rpm(const WeaponSimDef &p_def, uint8_t p_mode) {
 	return t > 0 ? 60.0 / t : 0.0;
 }
 
-} // namespace bf3::sim::weapons
+}

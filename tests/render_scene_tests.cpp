@@ -1,12 +1,3 @@
-// The M1 level scene (bf3_render level_scene.h; docs/design/m1.md §11.2-§11.4, §12.2, §14).
-//
-// Suite "render-scene-unit": scene_mesh_requests against the M0 prepare rule on a synthetic census; the variant step
-// (undrawn slots, hidden parts, bake with a mirror) on synthetic meshes; texture role precedence; shader flags; the
-// terrain surface on a synthetic heightfield (holes dropped, winding, normals up); hostile arrays. No data.
-// Suite "render-scene": Metro TDM from the install (read-only; exits 77 = skipped without one): the plan's counts as
-// rules over the census, then SceneLanes cold and warm on a scratch cache root with a counting sink (wall and work
-// times per kind, texture count and bytes, peak in-flight bytes), a held-sink run against a small cap, the peak
-// working set, and install.unchanged. Prints numbers only (no BF3 content beyond names and counts).
 #include <doctest/doctest.h>
 
 #include "level_scene_internal.h"
@@ -46,8 +37,6 @@ namespace si = bf3::render::scene_internal;
 
 namespace {
 
-// The M0 `bf3dump prepare` rule before scene_mesh_requests existed (level_prepare.cpp at 15c12f7): per MeshSet res
-// of a kept variant, LODs 0..max(decoded LODs) - 1 when any variant is model kind, else LOD 0.
 std::map<std::string, std::vector<uint32_t>> m0_prepare_rule(const level::MeshCensus &p_census) {
 	struct Item {
 		size_t lods = 0;
@@ -108,7 +97,6 @@ level::SceneMesh census_mesh(const char *p_name, bool p_kept, size_t p_lods, boo
 	return m;
 }
 
-// A quad (two triangles) per part along +X, parts 0..p_parts-1, clockwise for Godot as mesh_prep emits them.
 PreparedSurface strip_surface(uint32_t p_material, uint16_t p_parts, bool p_with_parts) {
 	PreparedSurface s;
 	s.material_index = p_material;
@@ -158,7 +146,6 @@ struct ScratchRoot {
 	}
 };
 
-// Counts every item and releases its bytes at once.
 class CountingSink final : public SceneSink {
 public:
 	SceneLanes *lanes = nullptr;
@@ -218,8 +205,6 @@ public:
 	}
 };
 
-// Holds the items and releases all of them only once the lanes have stalled (no item for 20 ms), so the lanes
-// must stop at the cap: a consumer that lags the lanes, like the Godot side's C1 tasks behind a slow upload.
 class HeldSink final : public SceneSink {
 public:
 	SceneLanes *lanes = nullptr;
@@ -238,7 +223,7 @@ public:
 				const uint64_t seen = pushes;
 				wake.wait_for(lock, std::chrono::milliseconds(20), [&] { return stop || pushes != seen; });
 				if (pushes != seen && !stop) {
-					continue; // still arriving
+					continue;
 				}
 				std::vector<uint64_t> release;
 				release.swap(held);
@@ -296,18 +281,18 @@ void print_stats(const char *p_label, const SceneLaneStats &p_s) {
 			mib(p_s.peak_inflight_bytes), (unsigned long long)p_s.cache_hits, (unsigned long long)p_s.cache_converted, (unsigned long long)p_s.failures);
 }
 
-} // namespace
+}
 
 TEST_SUITE("render-scene-unit") {
 	TEST_CASE("render.scene.unit: scene_mesh_requests is the M0 prepare rule, in first-placement order") {
 		level::MeshCensus census;
-		census.meshes.push_back(census_mesh("b/rock", true, 3, false)); // model, 3 LODs
-		census.meshes.push_back(census_mesh("a/bridge", true, 4, true)); // world kind only -> LOD 0
-		census.meshes.push_back(census_mesh("b/rock", true, 2, false)); // second variant, fewer LODs
-		census.meshes.push_back(census_mesh("c/hidden", false, 4, false)); // not kept
-		census.meshes.push_back(census_mesh("d/mixed", true, 1, true)); // world variant ...
-		census.meshes.push_back(census_mesh("d/mixed", true, 4, false)); // ... and a model one -> 4 LODs
-		census.meshes.push_back(census_mesh("e/nolod", true, 0, false)); // model without decoded LODs -> LOD 0
+		census.meshes.push_back(census_mesh("b/rock", true, 3, false));
+		census.meshes.push_back(census_mesh("a/bridge", true, 4, true));
+		census.meshes.push_back(census_mesh("b/rock", true, 2, false));
+		census.meshes.push_back(census_mesh("c/hidden", false, 4, false));
+		census.meshes.push_back(census_mesh("d/mixed", true, 1, true));
+		census.meshes.push_back(census_mesh("d/mixed", true, 4, false));
+		census.meshes.push_back(census_mesh("e/nolod", true, 0, false));
 		const std::vector<SceneMeshRequest> r = scene_mesh_requests(census);
 		check_requests_match_m0(census, r);
 		REQUIRE(r.size() == 4);
@@ -325,11 +310,11 @@ TEST_SUITE("render-scene-unit") {
 	TEST_CASE("render.scene.unit: undrawn slots, hidden parts and a mirroring bake") {
 		PreparedMesh m;
 		m.name = "synthetic";
-		m.surfaces.push_back(strip_surface(0, 3, true)); // parts 0, 1, 2
-		m.surfaces.push_back(strip_surface(1, 1, false)); // undrawn slot
-		m.surfaces.push_back(strip_surface(5, 1, false)); // index past the slot list
+		m.surfaces.push_back(strip_surface(0, 3, true));
+		m.surfaces.push_back(strip_surface(1, 1, false));
+		m.surfaces.push_back(strip_surface(5, 1, false));
 		const std::vector<uint32_t> slots = { 7, kSceneUndrawnMaterial };
-		const si::Mat3 bake = { { { -1.0f, 0.0f, 0.0f }, { 0.0f, 2.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } }; // det -2
+		const si::Mat3 bake = { { { -1.0f, 0.0f, 0.0f }, { 0.0f, 2.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } };
 		PreparedMesh plain = m;
 		REQUIRE(si::apply_scene_variant(plain, {}, std::nullopt, slots).ok());
 		REQUIRE(plain.surfaces.size() == 1);
@@ -340,7 +325,7 @@ TEST_SUITE("render-scene-unit") {
 		REQUIRE(si::apply_scene_variant(m, { 1 }, bake, slots).ok());
 		REQUIRE(m.surfaces.size() == 1);
 		const PreparedSurface &s = m.surfaces[0];
-		CHECK(s.vertex_count() == 8); // part 1's four vertices compacted away
+		CHECK(s.vertex_count() == 8);
 		CHECK(s.indices.size() == 12);
 		CHECK(m.vertices == 8);
 		CHECK(m.triangles == 4);
@@ -351,15 +336,15 @@ TEST_SUITE("render-scene-unit") {
 			CHECK(i >= 0);
 			CHECK(i < 8);
 		}
-		// Positions x -> -x; the normal (1,0,0) maps through L^-T to (-1,0,0); the tangent keeps (0,0,1), sign flips.
+
 		CHECK(s.positions[0] == doctest::Approx(-0.0f));
 		CHECK(s.positions[3] == doctest::Approx(-1.0f));
-		CHECK(s.positions[4 * 3] == doctest::Approx(-2.0f)); // part 2's first corner (x = 2)
+		CHECK(s.positions[4 * 3] == doctest::Approx(-2.0f));
 		CHECK(s.normals[0] == doctest::Approx(-1.0f));
 		CHECK(s.normals[1] == doctest::Approx(0.0f));
 		CHECK(s.tangents[2] == doctest::Approx(1.0f));
 		CHECK(s.tangents[3] == doctest::Approx(-1.0f));
-		// Winding swapped: (0, 1, 2) -> (0, 2, 1), so the face keeps its Godot front side after the mirror.
+
 		CHECK(s.indices[0] == 0);
 		CHECK(s.indices[1] == 2);
 		CHECK(s.indices[2] == 1);
@@ -367,12 +352,11 @@ TEST_SUITE("render-scene-unit") {
 				sub3(&s.positions[size_t(s.indices[2]) * 3], &s.positions[size_t(s.indices[0]) * 3]));
 		const auto t0 = cross3(sub3(&plain.surfaces[0].positions[3], &plain.surfaces[0].positions[0]),
 				sub3(&plain.surfaces[0].positions[6], &plain.surfaces[0].positions[0]));
-		CHECK(t[1] * t0[1] > 0.0f); // same side up as before the bake
+		CHECK(t[1] * t0[1] > 0.0f);
 		CHECK(s.aabb_min[0] == doctest::Approx(-3.0f));
 		CHECK(s.aabb_max[0] == doctest::Approx(0.0f));
 		CHECK(s.aabb_max[2] == doctest::Approx(1.0f));
 
-		// Hiding every part leaves nothing to draw.
 		PreparedMesh all = plain;
 		REQUIRE(si::apply_scene_variant(all, { 0, 1, 2 }, std::nullopt, slots).ok());
 		CHECK_FALSE(si::has_triangles(all));
@@ -413,7 +397,7 @@ TEST_SUITE("render-scene-unit") {
 		CHECK(si::parameter_use("TileNormal").drawn());
 		CHECK_FALSE(si::parameter_use("MaskDiffuse").drawn());
 		{
-			// The plain parameter wins over a fallback wherever it is listed; empty names are skipped.
+
 			MaterialSlot slot;
 			slot.textures = { { "TileDiffuse", "t/tile" }, { "MaskNormal", "t/mask_n" }, { "Diffuse", "t/main" }, { "MainNormal", "t/main_n" },
 				{ "Normal", "" } };
@@ -455,25 +439,25 @@ TEST_SUITE("render-scene-unit") {
 		g.heights.resize(12);
 		for (size_t z = 0; z < 3; ++z) {
 			for (size_t x = 0; x < 4; ++x) {
-				g.heights[x + z * 4] = 0.5f * float(x) + 0.25f * float(z); // dh/dx = 0.25, dh/dz = 0.0625
+				g.heights[x + z * 4] = 0.5f * float(x) + 0.25f * float(z);
 			}
 		}
 		g.holes.assign(12, 0);
-		g.holes[3 + 2 * 4] = 1; // corner sample (3, 2): only cell (2, 1) touches it
+		g.holes[3 + 2 * 4] = 1;
 		Result<PreparedMesh> m = si::terrain_mesh(g, level::LevelTransform::identity(), "synthetic");
 		REQUIRE(m.ok());
 		REQUIRE(m->surfaces.size() == 1);
 		const PreparedSurface &s = m->surfaces[0];
-		CHECK(m->triangles == 10); // 6 cells, one with a hole corner
+		CHECK(m->triangles == 10);
 		CHECK(s.indices.size() == 30);
-		CHECK(s.vertex_count() == 11); // the hole sample is never used
+		CHECK(s.vertex_count() == 11);
 		CHECK(s.normals.size() == s.positions.size());
 		CHECK(s.uv0.empty());
 		for (size_t t = 0; t < s.indices.size(); t += 3) {
 			const float *a = &s.positions[size_t(s.indices[t]) * 3];
 			const float *b = &s.positions[size_t(s.indices[t + 1]) * 3];
 			const float *c = &s.positions[size_t(s.indices[t + 2]) * 3];
-			// Godot's front faces are clockwise seen from the front: the right-hand normal points down.
+
 			CHECK(cross3(sub3(b, a), sub3(c, a))[1] < 0.0f);
 		}
 		const float expected_y = 1.0f / std::sqrt(1.0f + 0.25f * 0.25f + 0.0625f * 0.0625f);
@@ -487,7 +471,6 @@ TEST_SUITE("render-scene-unit") {
 		CHECK(s.aabb_min[2] == doctest::Approx(-5.0f));
 		CHECK(s.aabb_max[2] == doctest::Approx(3.0f));
 
-		// A placed terrain: positions through the transform, normals rotated.
 		level::LevelTransform t;
 		t.trans = { 100.0f, 7.0f, 0.0f };
 		Result<PreparedMesh> moved = si::terrain_mesh(g, t, "moved");
@@ -495,17 +478,15 @@ TEST_SUITE("render-scene-unit") {
 		CHECK(moved->surfaces[0].positions[0] == doctest::Approx(110.0f));
 		CHECK(moved->surfaces[0].positions[1] == doctest::Approx(7.0f));
 
-		// A crop to x <= 12, z <= -5..-1: 1 x 1 cells.
 		Result<PreparedMesh> cropped = si::terrain_mesh(g, level::LevelTransform::identity(), "crop", std::array<float, 4>{ 10.0f, -5.0f, 12.0f, -1.0f });
 		REQUIRE(cropped.ok());
 		CHECK(cropped->triangles == 2);
 		CHECK(cropped->vertices == 4);
-		// A crop outside the grid draws nothing.
+
 		Result<PreparedMesh> outside = si::terrain_mesh(g, level::LevelTransform::identity(), "out", std::array<float, 4>{ 500.0f, 500.0f, 600.0f, 600.0f });
 		REQUIRE(outside.ok());
 		CHECK(outside->surfaces.empty());
 
-		// Hostile grids.
 		res::HeightGrid bad = g;
 		bad.heights.pop_back();
 		CHECK_FALSE(si::terrain_mesh(bad, level::LevelTransform::identity(), "bad").ok());
@@ -525,19 +506,19 @@ TEST_SUITE("render-scene-unit") {
 
 	TEST_CASE("render.scene.unit: terrain depth follows the soup's spacing rule") {
 		res::HeightfieldTree tree;
-		tree.samples_per_side = 65; // 64 interior cells with border 0
+		tree.samples_per_side = 65;
 		tree.border_width = 0;
 		res::HeightfieldNode root;
 		root.bounds_min = { 0.0f, 0.0f, 0.0f };
 		root.bounds_max = { 1024.0f, 100.0f, 1024.0f };
 		tree.nodes.push_back(root);
-		// max_level() reads the node ids; one level-3 node allows depths 0..3.
+
 		res::HeightfieldNode deep;
 		deep.id.level = 3;
 		tree.nodes.push_back(deep);
-		CHECK(si::terrain_depth(tree, 16.0f) == 0); // 1024 / 64 = 16 m
-		CHECK(si::terrain_depth(tree, 4.0f) == 2); // 1024 / 256 = 4 m
-		CHECK(si::terrain_depth(tree, 1.0f) == 3); // capped by the tree's depth
+		CHECK(si::terrain_depth(tree, 16.0f) == 0);
+		CHECK(si::terrain_depth(tree, 4.0f) == 2);
+		CHECK(si::terrain_depth(tree, 1.0f) == 3);
 		res::HeightfieldTree empty;
 		CHECK(si::terrain_depth(empty, 4.0f) == 0);
 	}
@@ -576,12 +557,9 @@ TEST_SUITE("render-scene") {
 		const LevelScenePlan &p = *plan;
 		std::printf("render.scene plan: load + traverse %.3f s, census %.3f s, plan %.3f s\n", seconds_load, seconds_census, p.seconds);
 
-		// Requests: the prepare rule (619 MeshSets on Metro TDM, README "prepare").
 		check_requests_match_m0(*census, p.requests);
 		CHECK(p.requests.size() == 619);
 
-		// Meshes and instances as rules over the census: instances = census instances - start-hidden placements;
-		// meshes = kept variants with at least one shown placement.
 		size_t kept = 0, start_hidden = 0;
 		std::vector<size_t> shown(census->meshes.size(), 0);
 		for (const level::SceneMesh &m : census->meshes) {
@@ -606,7 +584,7 @@ TEST_SUITE("render-scene") {
 				p.textures.size(), p.terrains.size(), p.failures.size());
 		CHECK(kept == 840);
 		CHECK(census->instances.size() == 10569);
-		CHECK(start_hidden == 64); // bf3dump level: 64 start-hidden mesh placements, all skyline
+		CHECK(start_hidden == 64);
 		CHECK(p.meshes.size() == expected_meshes);
 		CHECK(p.meshes.size() <= 840);
 		CHECK(p.instances.size() == census->instances.size() - start_hidden);
@@ -615,7 +593,7 @@ TEST_SUITE("render-scene") {
 			std::printf("render.scene plan failure: %s: %s\n", item.c_str(), error.c_str());
 		}
 		CHECK(p.failures.empty());
-		// Every instance names a plan mesh, every plan mesh's instance count adds up, every slot a material.
+
 		std::vector<uint32_t> counted(p.meshes.size(), 0);
 		for (const SceneInstancePlan &inst : p.instances) {
 			REQUIRE(inst.mesh < p.meshes.size());
@@ -658,9 +636,7 @@ TEST_SUITE("render-scene") {
 				++with_albedo;
 				REQUIRE(size_t(m.albedo) < p.textures.size());
 				CHECK(p.textures[size_t(m.albedo)].role != TextureRole::Data);
-				// M1 picked the albedo among the slot's own textures; the L1 resolver (README "L1 look") may take it
-				// from the shader graph in the level shader database (textures the slot does not name), so the check
-				// is: a slot texture, or a texture the L1 resolver chose (m.look set with a colour).
+
 				CHECK((std::find(m.textures.begin(), m.textures.end(), m.albedo) != m.textures.end() ||
 						(m.look.has_value() && m.look->color.has_value())));
 			}
@@ -671,7 +647,7 @@ TEST_SUITE("render-scene") {
 			}
 		}
 		size_t no_textures = 0;
-		std::map<std::string, size_t> unlit_sets; // parameter lists of the textured materials without an albedo
+		std::map<std::string, size_t> unlit_sets;
 		for (const SceneMaterialPlan &m : p.materials) {
 			if (m.slot.textures.empty()) {
 				++no_textures;
@@ -702,8 +678,7 @@ TEST_SUITE("render-scene") {
 					untextured_without_entry += entry ? 0 : 1;
 				}
 			}
-			// Metro: every variant has an entry, but many entries list materials with empty TextureParameters (their
-			// textures are not in the EBX the census reads; docs §11.3), so those slots draw untextured in M1.
+
 			std::printf("render.scene plan: %zu meshes without a variation entry; %zu meshes (%zu instances) have a slot that names no texture, %zu of "
 						"them without an entry; %zu distinct shaders on such slots\n",
 					meshes_without_entry, untextured_meshes, untextured_instances, untextured_without_entry, untextured_shaders.size());
@@ -749,7 +724,6 @@ TEST_SUITE("render-scene") {
 		std::printf("render.scene estimate_scene_bytes: %.1f MiB in %.3f s\n", mib(estimate), since(t0));
 		CHECK(estimate > 0);
 
-		// Lanes cold then warm on a scratch root.
 		ScratchRoot scratch;
 		Cache cache;
 		CacheOptions options;
@@ -796,7 +770,7 @@ TEST_SUITE("render-scene") {
 					p.textures.size());
 			CHECK(sink.empty_meshes == 0);
 			CHECK(stats->terrain_items == 1);
-			CHECK(stats->mesh_items == p.meshes.size()); // every plan mesh prepared
+			CHECK(stats->mesh_items == p.meshes.size());
 			CHECK(stats->peak_inflight_bytes <= std::max(lane_options.max_inflight_bytes, sink.largest.load()));
 			CHECK(stats->texture_bytes > 0);
 			CHECK(*std::max_element(sink.mesh_seen.begin(), sink.mesh_seen.end()) == 1);
@@ -805,7 +779,7 @@ TEST_SUITE("render-scene") {
 				CHECK(stats->cache_hits == 0);
 				cold_stats = *stats;
 			} else {
-				CHECK(stats->cache_hits == requests_used); // warm: only mesh hits
+				CHECK(stats->cache_hits == requests_used);
 				CHECK(stats->cache_converted == 0);
 				warm_stats = *stats;
 			}
@@ -814,8 +788,6 @@ TEST_SUITE("render-scene") {
 		CHECK(warm_stats.texture_bytes == cold_stats.texture_bytes);
 		CHECK(warm_stats.mesh_bytes == cold_stats.mesh_bytes);
 
-		// A consumer that releases only when the lanes stall, and a 64 MiB cap: in-flight bytes stay under the cap (one
-		// larger item may pass alone) and the lanes resume after each release.
 		{
 			SceneLanes lanes;
 			HeldSink sink;
@@ -833,11 +805,11 @@ TEST_SUITE("render-scene") {
 					(unsigned long long)sink.items.load(), since(t0), (unsigned long long)sink.stalls.load(), mib(stats->peak_inflight_bytes),
 					mib(sink.largest));
 			CHECK(stats->peak_inflight_bytes <= std::max(small.max_inflight_bytes, sink.largest.load()));
-			CHECK(stats->peak_inflight_bytes > small.max_inflight_bytes / 2); // the lanes really ran into the cap
-			CHECK(sink.stalls >= 3); // ~370 MiB through a 64 MiB window
+			CHECK(stats->peak_inflight_bytes > small.max_inflight_bytes / 2);
+			CHECK(sink.stalls >= 3);
 			CHECK(sink.items == stats->mesh_items + stats->texture_items + stats->terrain_items);
 		}
-		// Cancel: a started run that is cancelled at once ends and joins.
+
 		{
 			SceneLanes lanes;
 			CountingSink sink;
@@ -845,14 +817,13 @@ TEST_SUITE("render-scene") {
 			sink.mesh_seen.assign(p.meshes.size(), 0);
 			sink.texture_seen.assign(p.textures.size(), 0);
 			REQUIRE(lanes.start(p, lvl.mount(), &cache, lane_options, sink).ok());
-			CHECK_FALSE(lanes.start(p, lvl.mount(), &cache, lane_options, sink).ok()); // only once
+			CHECK_FALSE(lanes.start(p, lvl.mount(), &cache, lane_options, sink).ok());
 			lanes.cancel();
 			Result<SceneLaneStats> stats = lanes.wait();
 			REQUIRE(stats.ok());
 			CHECK(stats->mesh_items < p.meshes.size());
 		}
 
-		// The whole terrain, for comparison with the cropped one the lanes drew.
 		{
 			LevelScenePlan whole = p;
 			whole.instances.clear();

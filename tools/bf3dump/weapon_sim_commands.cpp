@@ -1,5 +1,3 @@
-// bf3dump weapon-sim / range (M2a weapons; docs/design/m2a-weapons.md §10): the weapon simulation on defs resolved
-// from the install (bf3_sim weapons/weapon_install.h), printed. Read-only; nothing is written but stdout / stderr.
 #include "weapon_sim_commands.h"
 
 #include "bf3/core/install_reader.h"
@@ -43,7 +41,6 @@ double ms(SimTime p_t) {
 	return units_to_seconds(p_t) * 1000.0;
 }
 
-// The install.unchanged row; false when the install changed.
 bool install_unchanged(const EbxContext &p_ctx, const InstallSnapshot &p_before) {
 	if (p_ctx.reader == nullptr) {
 		std::printf("install.unchanged unknown (no reader)\n");
@@ -159,7 +156,7 @@ int weapon_sim_one(const EbxContext &p_ctx, const InstallWeapons &p_w, const std
 	for (uint8_t i = 0; i < d.mode_count; ++i) {
 		bolt_mode = bolt_mode || d.modes[i].logic == FireLogic::SingleWithBoltAction;
 	}
-	if (bolt_mode) { // BoltActionData is present (inert) on every weapon; it times only SingleWithBoltAction
+	if (bolt_mode) {
 		std::printf("bolt\tcycle %" PRId64 " (%.4f s)\thold until fire release %d\n", d.bolt_cycle, units_to_seconds(d.bolt_cycle),
 				d.bolt_hold_until_fire_release ? 1 : 0);
 	}
@@ -187,7 +184,6 @@ int weapon_sim_one(const EbxContext &p_ctx, const InstallWeapons &p_w, const std
 				double(p.max_speed));
 	}
 
-	// Fire timing.
 	const float eye = p_w.stand_eye_height;
 	const uint32_t ticks = uint32_t(std::clamp(p_seconds, 0.1f, 600.0f) * float(kSimHz));
 	const FireScript script = script_for(d);
@@ -223,7 +219,7 @@ int weapon_sim_one(const EbxContext &p_ctx, const InstallWeapons &p_w, const std
 			}
 		}
 	}
-	// Reload timing: tactical (a request at script tick 10) and empty (the script until the magazine runs dry).
+
 	if (d.magazine_capacity > 1) {
 		if (const std::optional<FireTimingResult> r = timing(t, FireScript::ReloadAt, 600, p_seed, eye, 10)) {
 			print_reload("tactical", *r);
@@ -233,7 +229,6 @@ int weapon_sim_one(const EbxContext &p_ctx, const InstallWeapons &p_w, const std
 		print_reload("empty", *r);
 	}
 
-	// Drop table: the flight (fly_free) to each distance, level launch along +Z from the eye.
 	Projectile start;
 	start.base_position = { 0, double(eye), 0 };
 	start.position = start.base_position;
@@ -249,7 +244,7 @@ int weapon_sim_one(const EbxContext &p_ctx, const InstallWeapons &p_w, const std
 		}
 		const Projectile end = fly_free(d, start, ttl);
 		if (end.position[2] < dist) {
-			break; // beyond the range
+			break;
 		}
 		SimTime lo = 0, hi = ttl;
 		for (int b = 0; b < 64 && hi - lo > 1; ++b) {
@@ -261,7 +256,7 @@ int weapon_sim_one(const EbxContext &p_ctx, const InstallWeapons &p_w, const std
 		std::printf("drop\t%g\t%.5f\t%.4f\t%.2f\t%.3f\n", dist, units_to_seconds(hi), double(eye) - at.position[1], speed, falloff_damage(p, dist));
 	}
 	std::printf("max-range\t%.3f m (v0 x TTL)\n", double(p.muzzle_speed) * units_to_seconds(ttl));
-	// Shots to kill and one-shot ranges.
+
 	static const char *const kZones[kHitZoneCount] = { "head", "body", "chest", "legs" };
 	std::printf("# stk\tdistance_m\thead\tbody\tchest\tlegs%s\n", unm);
 	for (const double dist : kW4Distances) {
@@ -345,7 +340,7 @@ std::optional<HitZone> zone_from(const std::string &p_s) {
 	return std::nullopt;
 }
 
-} // namespace
+}
 
 const char *weapon_sim_usage() {
 	return "  weapon-sim <partition> [--unlock <u>]... [--level <sb>] [--seed N] [--seconds S]\n"
@@ -569,4 +564,4 @@ int cmd_range(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 	return install_unchanged(p_ctx, before) ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

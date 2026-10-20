@@ -1,12 +1,3 @@
-// The navmesh through the derived-data cache (nav.h, docs/design/s1.md §5.4): the "nav-tile" and "nav-world" blobs,
-// their keys and load_nav_world_cached (warm: source digest -> world index -> tile restores; cold: soup -> tile
-// inputs -> content-keyed tile bakes -> world index).
-//
-// "OBF3NTIL" v1 (one tile), little endian: magic, version; i32 x, i32 z; u32 input triangles, polys, vertices, detail
-// triangles, drop links; the input digest (32 bytes); u32 data bytes, the Detour tile data (dtCreateNavMeshData's
-// output, pristine; 0 bytes for a tile without a walkable poly).
-// "OBF3NWLD" v1 (one level x mode): u32 tile count; per tile: i32 x, i32 z, the input digest, u32 polys, u32 data
-// bytes; strictly increasing (x, z).
 #include "nav_internal.h"
 
 #include "static_world_internal.h"
@@ -62,7 +53,7 @@ struct WorldEntry {
 std::vector<uint8_t> encode_world_index(const std::vector<WorldEntry> &p_tiles) {
 	core::BlobWriter w;
 	w.magic(kWorldMagic, kNavFormatVersion);
-	w.u64(uint64_t(p_tiles.size())); // BlobReader::count reads a u64
+	w.u64(uint64_t(p_tiles.size()));
 	for (const WorldEntry &e : p_tiles) {
 		w.i32(e.tile[0]);
 		w.i32(e.tile[1]);
@@ -104,7 +95,7 @@ core::Result<std::vector<WorldEntry>> decode_world_index(std::span<const uint8_t
 	return out;
 }
 
-} // namespace
+}
 
 std::vector<uint8_t> encode_nav_tile(const NavTileInfo &p_info, std::span<const uint8_t> p_data) {
 	core::BlobWriter w;
@@ -222,7 +213,7 @@ core::CacheKeyInputs nav_world_key_inputs(const core::Sha256Digest &p_source_dig
 	in.jolt_version = link_checked ? jolt_build_id() : std::string();
 	in.params = "source=" + p_source_digest.hex() + ";level=" + core::to_lower_ascii(p_level) + ";mode=" + core::to_lower_ascii(p_mode) +
 			";soup=" + std::to_string(core::level::kCollisionSoupVersion) + ";terrain_spacing=" + bits_hex(p_options.world.terrain_spacing) +
-			// TC (docs/design/terrain-collision.md §10): the water planes of the bake's rule; no cover.
+
 			(p_options.bake.water.empty() ? std::string() : ";water=" + water_planes_digest(p_options.bake.water).hex()) +
 			";region=" + tile_list_digest(p_options.region).hex() + ";" +
 			nav_params_text(p_options.bake.params) + ";" + recast_build_id() + layer_text(p_options.bake.layer_mask) +
@@ -232,7 +223,7 @@ core::CacheKeyInputs nav_world_key_inputs(const core::Sha256Digest &p_source_dig
 
 core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache *p_cache, const core::level::LoadedLevel &p_level,
 		const core::level::World &p_world, const core::level::CollisionSoup *p_soup, const StaticWorldShapes &p_shapes, const NavLoadOptions &p_options) {
-	(void)p_shapes; // the link checks use p_options.bake.link_shapes (the same world, shared ownership for the lanes)
+	(void)p_shapes;
 	const Clock::time_point start = Clock::now();
 	const NavBakeOptions &bake = p_options.bake;
 	BF3_TRY(check_nav_params(bake.params));
@@ -249,7 +240,7 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 			world_key = core::make_cache_key(nav_world_key_inputs(*digest->digest, p_level.info.id, p_level.mode, p_options));
 		}
 	}
-	// Warm: the index names every tile's input digest.
+
 	if (world_key) {
 		core::GetResult got = cache->get(*world_key);
 		if (got.status == core::CacheStatus::Ok) {
@@ -312,7 +303,6 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 		}
 	}
 
-	// Cold: the soup (the caller's, else built here), the inputs, the content-keyed tiles, then the index.
 	std::optional<core::level::CollisionSoup> own_soup;
 	const core::level::CollisionSoup *soup = p_soup;
 	NavStats stats;
@@ -355,4 +345,4 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 	return world;
 }
 
-} // namespace bf3::sim
+}

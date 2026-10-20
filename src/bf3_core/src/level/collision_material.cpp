@@ -1,6 +1,3 @@
-// Surface classes of the collision soup: port of IW4L level_bf3 collision/material.rs (Materials,
-// classify, the surface table and word list), Apache-2.0. Tie-breaking follows the Rust code: a
-// vote tie goes to the earlier word of kWords.
 #include "bf3/core/level/collision_soup.h"
 
 #include <algorithm>
@@ -17,8 +14,6 @@ struct Word {
 	uint8_t surface;
 };
 
-// Words in asset names that name a material, the more specific first and concrete, the default,
-// before all (material.rs WORDS).
 constexpr Word kWords[] = {
 	{ "concrete", surface::kConcrete },
 	{ "cement", surface::kConcrete },
@@ -78,13 +73,12 @@ constexpr std::string_view kSurfaceNames[kSurfaceCount] = { "none", "bark", "bri
 	"grass", "gravel", "ice", "metal", "mud", "paper", "plaster", "rock", "sand", "snow", "water", "wood", "asphalt", "ceramic", "plastic", "rubber", "cushion",
 	"fruit", "paintedmetal", "none", "slush", "none" };
 
-constexpr int kMaxNameDepth = 4; // material.rs collect_names
+constexpr int kMaxNameDepth = 4;
 
 bool is_alpha(char p_c) {
 	return (p_c >= 'a' && p_c <= 'z') || (p_c >= 'A' && p_c <= 'Z');
 }
 
-// How much a referenced asset says about the material (material.rs weight).
 size_t weight(std::string_view p_name) {
 	if (p_name.find("impacts/") != std::string_view::npos) {
 		return 3;
@@ -95,7 +89,6 @@ size_t weight(std::string_view p_name) {
 	return 1;
 }
 
-// Names of the partitions a value references (external references only), material.rs collect_names.
 Status collect_names(const EbxResolver &p_db, const EbxValue &p_value, int p_depth, WorkBudget &r_budget, std::vector<std::string_view> &r_out) {
 	if (p_depth > kMaxNameDepth) {
 		return Status::success();
@@ -106,7 +99,7 @@ Status collect_names(const EbxResolver &p_db, const EbxValue &p_value, int p_dep
 			const std::optional<EbxRef> ref = p_value.as_ref();
 			if (ref && ref->kind == EbxRef::Kind::External) {
 				if (const std::optional<std::string_view> name = p_db.name_of(ref->partition)) {
-					BF3_TRY(charge_text(r_budget, *name)); // classified and weighed
+					BF3_TRY(charge_text(r_budget, *name));
 					r_out.push_back(*name);
 				}
 			}
@@ -137,7 +130,7 @@ Status collect_names(const EbxResolver &p_db, const EbxValue &p_value, int p_dep
 	return Status::success();
 }
 
-} // namespace
+}
 
 std::string_view surface_name(uint8_t p_surface) {
 	return p_surface < kSurfaceCount ? kSurfaceNames[p_surface] : "none";
@@ -233,7 +226,7 @@ Result<SurfaceMaterials> SurfaceMaterials::read(const EbxResolver &p_db, const E
 						const std::optional<EbxValue> index = pair->get("PhysicsMaterialIndex");
 						const std::optional<int64_t> i = index ? index->as_i64() : std::nullopt;
 						if (i) {
-							material = uint8_t(uint64_t(*i)); // Rust `as u8`
+							material = uint8_t(uint64_t(*i));
 						}
 					}
 				}
@@ -259,7 +252,7 @@ Result<SurfaceMaterials> SurfaceMaterials::read(const EbxResolver &p_db, const E
 		return out;
 	}
 	BF3_TRY(r_budget.charge(row_array->size()));
-	// Each relation's votes, cast once whatever the number of items naming it.
+
 	std::map<std::pair<const EbxPartition *, uint32_t>, std::vector<std::pair<uint8_t, size_t>>> voters;
 	std::vector<std::string_view> names;
 	uint32_t at = 0;
@@ -328,4 +321,4 @@ Result<SurfaceMaterials> SurfaceMaterials::read(const EbxResolver &p_db, const E
 	return out;
 }
 
-} // namespace bf3::core::level
+}

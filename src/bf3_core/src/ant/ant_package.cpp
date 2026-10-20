@@ -1,5 +1,3 @@
-// Ant AssetBank package header. Clean-room implementation from research/probes/ant-animation-probe.md
-// (§2, §3.1); see ant_package.h.
 #include "bf3/core/ant/ant_package.h"
 
 #include <algorithm>
@@ -10,7 +8,7 @@ namespace {
 uint32_t be32(const uint8_t *p_at) {
 	return (uint32_t(p_at[0]) << 24) | (uint32_t(p_at[1]) << 16) | (uint32_t(p_at[2]) << 8) | uint32_t(p_at[3]);
 }
-} // namespace
+}
 
 const char *packaging_name(AntPackagingType p_type) {
 	switch (p_type) {
@@ -61,7 +59,7 @@ bool AntPackage::parse(std::string p_name, std::vector<uint8_t> p_bytes, std::st
 			r_error = name_ + ": PackageMeta size out of range";
 			return false;
 		}
-		// Static extras: u32 BE fields inside the meta (diagnostics only).
+
 		const uint64_t extra_end = std::min<uint64_t>(4ull + meta_.meta_bytes, 28ull + meta_.extra_bytes + 4);
 		for (uint64_t at = 28; meta_.extra_bytes != 0 && at + 4 <= extra_end && meta_.extras.size() < 8; at += 4) {
 			meta_.extras.push_back(be32(d + at));
@@ -99,4 +97,4 @@ GdStruct AntPackage::controller_for(uint32_t p_anim_index) const {
 	return it == controller_by_anim_.end() ? GdStruct() : archive_.object(it->second);
 }
 
-} // namespace bf3::core::ant
+}

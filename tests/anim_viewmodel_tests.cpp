@@ -1,25 +1,3 @@
-// anim.viewmodel.unit (docs/design/m2a-vm.md; m2a.md §11.1, §11.2, E19, E5): the 1p viewmodel animator, its springs,
-// viewmodel_tuning.cfg and the ADS camera, without an install and without Godot. The weapon timeline is the real
-// bf3_sim weapon simulation on the synthetic gate weapons (tests/weapons_support.h) at 60 Hz, presented at
-// 30 / 60 / 144 / 240 display frames per second the way cl's present_weapon will (m2a_fake::present below: the
-// state lerp between the two ticks around the display time; timed events delivered on the first display frame at or
-// after their exact time). The rig and clips are synthetic (three bones, two-key clips).
-//
-// Rows:
-//   * tuning: parse(format(t)) == t, the shipped viewmodel_tuning.cfg parses, hostile text fails with the line number
-//     (and a byte fuzz never crashes).
-//   * springs: every spring of the shipped tuning comes to rest within its settle_seconds once its input stops (an
-//     impulse of the configured peak, a burst of 10 shots at 800 RPM, a step back from the clamp), at each frame
-//     rate; extreme parameters stay finite at 0.25 s frames.
-//   * ADS (E19): world FOV 55 -> 40 within the transition time +- 1 display frame of the press and back after the
-//     release, viewmodel FOV RenderFov 55 at hip, at each frame rate and for both FOV-time modes.
-//   * recoil (E19): the camera's recoil offset equals the interpolated predicted recoil within 1e-4 deg every frame.
-//   * reload (E5): the reload clip starts within 1 display frame of kReloadStarted; the first shot after
-//     kReloadFinished is within 1 display frame of it; that shot cuts the (longer) clip with the 0.1 s crossfade.
-//   * zoom refused (E19, §5.2): the presented ADS stays at hip while deploying or sprinting with zoom held; the
-//     step_weapons_m2a sim rows print PENDING (sv) while weapon_rules.cpp is the W2.0 forwarding stub.
-//   * animator: deploy cuts in, ReloadCancelled fades out, the knife stand-in on a shot, a real zoom clip drives
-//     the transition and a reversal falls back to the blend.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/layers.h"
@@ -53,8 +31,6 @@ using anim::VmClip;
 
 namespace m2a_fake {
 
-// cl's present_weapon (wave 3) stand-in: the weapon state lerped between the two predicted ticks around the display
-// time (the recoil and the phase times; the discrete fields from the later tick).
 struct Presented {
 	double time_s = 0;
 	uint8_t phase = 0;
@@ -82,11 +58,11 @@ inline Presented present(const sw::SoldierWeaponsState &p_prev, const sw::Soldie
 	return p;
 }
 
-} // namespace m2a_fake
+}
 
 namespace {
 
-constexpr uint64_t kSeed = 0x766d2d756e6974ull; // "vm-unit"
+constexpr uint64_t kSeed = 0x766d2d756e6974ull;
 constexpr float kFrameRates[] = { 30.0f, 60.0f, 144.0f, 240.0f };
 
 std::string read_file(const char *p_path) {
@@ -103,8 +79,6 @@ anim::ViewmodelTuning shipped_tuning() {
 	REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
 	return t.ok() ? *t : anim::ViewmodelTuning{};
 }
-
-// ---- synthetic rig and clips ----
 
 struct Rig {
 	anim::Skeleton skeleton;
@@ -127,7 +101,6 @@ anim::Skeleton three_bones() {
 	return s.ok() ? std::move(*s) : anim::Skeleton{};
 }
 
-// A two-key clip on bone 1: rotation about Y from p_deg0 to p_deg1 over p_frames frames at 30 fps.
 void add_clip(Rig &r_rig, VmClip p_role, float p_deg0, float p_deg1, uint16_t p_frames, bool p_stand_in = false) {
 	core::ant::DecodedClip c;
 	c.codec = core::ant::ClipCodec::Raw;
@@ -158,7 +131,6 @@ void add_clip(Rig &r_rig, VmClip p_role, float p_deg0, float p_deg1, uint16_t p_
 	ref.stand_in = p_stand_in;
 }
 
-// Pointers into the vectors once they stop growing.
 void finish_rig(Rig &r_rig, const std::vector<VmClip> &p_roles) {
 	for (size_t i = 0; i < p_roles.size(); ++i) {
 		anim::VmClipRef &ref = r_rig.refs[size_t(p_roles[i])];
@@ -167,7 +139,6 @@ void finish_rig(Rig &r_rig, const std::vector<VmClip> &p_roles) {
 	}
 }
 
-// Idle 0 deg, ZoomPose 40 deg, Reload clip p_reload_frames long (0..90 deg), Deploy 20 frames, ZoomIn 0..40 deg.
 Rig rifle_rig(uint16_t p_reload_frames, bool p_fire_clip) {
 	Rig r;
 	r.skeleton = three_bones();
@@ -195,8 +166,6 @@ float bone1_yaw_deg(const anim::LocalPose &p_pose) {
 	return float(2.0 * std::atan2(double(q.y), double(q.w)) * 180.0 / 3.14159265358979);
 }
 
-// ---- the sim timeline ----
-
 sim::Command command(sim::Tick p_tick, const sw::WeaponInput &p_in) {
 	sim::Command c;
 	c.tick = p_tick;
@@ -207,8 +176,8 @@ sim::Command command(sim::Tick p_tick, const sw::WeaponInput &p_in) {
 
 struct SimRun {
 	sim::Tick spawn = 0;
-	std::vector<sw::SoldierWeaponsState> states; // [i] = after tick spawn + i ([0] = the spawn state)
-	std::vector<bool> sprinting; // per state
+	std::vector<sw::SoldierWeaponsState> states;
+	std::vector<bool> sprinting;
 	std::vector<sw::TimedWeaponEvent> timed;
 	std::vector<sw::ShotEvent> shots;
 };
@@ -251,8 +220,6 @@ SimRun run_sim(const sw::WeaponTable &p_table, const std::string &p_variant, uin
 	return run;
 }
 
-// The presented state at display time p_t (seconds on the sim's clock): between the states after ticks T-1 and T
-// where tick_end(T-1) <= t < tick_end(T).
 m2a_fake::Presented present_at(const SimRun &p_run, double p_t, bool *r_sprinting = nullptr) {
 	const double tick = 1.0 / double(sim::kSimHz);
 	const double t0 = sw::units_to_seconds(sw::tick_end(p_run.spawn));
@@ -266,7 +233,6 @@ m2a_fake::Presented present_at(const SimRun &p_run, double p_t, bool *r_sprintin
 	return m2a_fake::present(p_run.states[i], p_run.states[j], rel - double(i), p_t);
 }
 
-// Cues with time in (p_from, p_to].
 std::vector<anim::VmCue> cues_between(const SimRun &p_run, double p_from, double p_to) {
 	std::vector<anim::VmCue> out;
 	struct Timed {
@@ -340,7 +306,6 @@ double first_event(const SimRun &p_run, uint32_t p_event, double p_after = -1.0)
 	return -1.0;
 }
 
-// Time from the input stopping until the spring stays at rest for the rest of a 3 s run.
 double settle_time(const anim::SpringParams &p_p, anim::SpringState p_state, float p_target, float p_dt) {
 	const int frames = int(std::ceil(3.0 / p_dt));
 	double last_moving = 0.0;
@@ -350,10 +315,10 @@ double settle_time(const anim::SpringParams &p_p, anim::SpringState p_state, flo
 			last_moving = double(i) * p_dt;
 		}
 	}
-	return last_moving + p_dt; // the first frame from which it stays at rest
+	return last_moving + p_dt;
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim-viewmodel-unit") {
 	TEST_CASE("anim.viewmodel: tuning file round-trips; the shipped viewmodel_tuning.cfg parses") {
@@ -400,17 +365,17 @@ TEST_SUITE("anim-viewmodel-unit") {
 				CHECK_MESSAGE(r.error().message.find(b.needle) != std::string::npos, r.error().message);
 			}
 		}
-		// Comments, blank lines, CRLF and a missing final newline are fine.
+
 		core::Result<anim::ViewmodelTuning> ok = anim::parse_viewmodel_tuning("# c\r\n\r\nkick_back = 0.03 # trailing\r\nsway_max=0.04");
 		REQUIRE(ok.ok());
 		CHECK(ok->kick_back == 0.03f);
 		CHECK(ok->sway_max == 0.04f);
-		// A long line of control bytes reports at most 40 of them.
+
 		std::string junk(100000, '\x01');
 		core::Result<anim::ViewmodelTuning> j = anim::parse_viewmodel_tuning(junk);
 		REQUIRE(!j.ok());
 		CHECK(j.error().message.size() < 200);
-		// Byte fuzz: mutated copies of the shipped file parse or fail, never crash, and a success is in range.
+
 		const std::string base = read_file(OPENBF3_VIEWMODEL_TUNING_CFG);
 		std::mt19937_64 rng(kSeed);
 		uint32_t failed = 0, parsed = 0;
@@ -449,8 +414,8 @@ TEST_SUITE("anim-viewmodel-unit") {
 		struct Case {
 			const char *name;
 			const anim::SpringParams *p;
-			float impulse_peak; // the configured per-event peak
-			float step_from; // a step back from the clamp / full amplitude
+			float impulse_peak;
+			float step_from;
 		};
 		const Case cases[] = {
 			{ "sway", &t.sway, 0.0f, t.sway_max },
@@ -464,11 +429,11 @@ TEST_SUITE("anim-viewmodel-unit") {
 				const float dt = 1.0f / fps;
 				double settle = 0;
 				if (c.impulse_peak > 0.0f) {
-					// One shot.
+
 					anim::SpringState s;
 					s.v = anim::spring_impulse_for_peak(*c.p, c.impulse_peak);
 					settle = std::max(settle, settle_time(*c.p, s, 0.0f, dt));
-					// The peak lands where it is configured (critically damped: within 5 %).
+
 					anim::SpringState q;
 					q.v = s.v;
 					float peak = 0;
@@ -477,7 +442,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 						peak = std::max(peak, q.x);
 					}
 					CHECK_MESSAGE(std::fabs(peak - c.impulse_peak) <= 0.05f * c.impulse_peak + 1e-4f, c.name << " peak " << peak << " at " << fps);
-					// A burst of 10 shots at 800 RPM, then the trigger lets go.
+
 					anim::SpringState b;
 					double next = 0, now = 0;
 					int fired = 0;
@@ -504,7 +469,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 			std::printf("anim.viewmodel: E19 spring %-13s at rest after %.3f s (worst of 30/60/144/240 fps), configured %.2f s\n", c.name, worst,
 					double(c.p->settle_seconds));
 		}
-		// Extreme parameters within the cfg ranges stay finite at a 0.25 s frame.
+
 		for (const anim::SpringParams p : { anim::SpringParams{ 10000, 0, 1e-3f, 1 }, anim::SpringParams{ 0.1f, 1000, 1e-3f, 1 },
 					 anim::SpringParams{ 10000, 1000, 1e-3f, 1 } }) {
 			anim::SpringState s;
@@ -516,7 +481,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 			CHECK(std::isfinite(s.v));
 			CHECK(std::fabs(s.x) < 1e3f);
 		}
-		// NaN input recovers.
+
 		anim::SpringState n{ std::nanf(""), 0 };
 		anim::step_spring(t.kick, 0.0f, 0.016f, n);
 		CHECK(std::isfinite(n.x));
@@ -527,16 +492,16 @@ TEST_SUITE("anim-viewmodel-unit") {
 			anim::AdsParams p;
 			p.hip_fov = 55;
 			p.zoom_fov = 40;
-			p.fov_in_seconds = specific ? 0.12f : 0.15f; // aim_default_ironsight [verified data]
+			p.fov_in_seconds = specific ? 0.12f : 0.15f;
 			p.fov_out_seconds = 0.15f;
 			p.zoom_in_seconds = 0.09f;
 			p.zoom_out_seconds = 0.15f;
 			p.render_fov = 55;
-			p.zoom_render_fov = 15; // M16A3 ZoomRenderFov
+			p.zoom_render_fov = 15;
 			for (const float fps : kFrameRates) {
 				const float dt = 1.0f / fps;
 				anim::AdsCamera cam;
-				const double press = 0.5 + 0.37 * dt; // mid-frame
+				const double press = 0.5 + 0.37 * dt;
 				const double release = 2.0 + 0.61 * dt;
 				double reached_in = -1, reached_out = -1;
 				bool hip_ok = true;
@@ -575,7 +540,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 						specific ? "specific" : "generic ", double(fps), reached_in, tin, double(dt), reached_out, tout);
 			}
 		}
-		// can_zoom false (knife, M67): stays at hip.
+
 		anim::AdsParams none;
 		none.can_zoom = false;
 		anim::AdsCamera cam;
@@ -627,14 +592,14 @@ TEST_SUITE("anim-viewmodel-unit") {
 			std::printf("anim.viewmodel: E19 recoil %5.0f fps: %u frames, max predicted pitch %.3f deg, worst |camera - predicted| %.2e deg\n",
 					double(fps), frames, max_recoil, worst);
 		}
-		// The pitch clamp of aim_direction.
+
 		const anim::ViewAngles c = anim::camera_view_angles(0, 1.57, 5.0f, 0, 0, 0);
 		CHECK(c.pitch == doctest::Approx(89.99 * 3.14159265358979323846 / 180.0));
 	}
 
 	TEST_CASE("anim.viewmodel: E5 the reload clip starts within 1 frame of kReloadStarted; fire again within 1 frame of the finish") {
 		const std::shared_ptr<const sw::WeaponTable> table = tw::synthetic_table();
-		// Fire 8 shots, press reload, hold the trigger from the middle of the reload on (refused until it ends).
+
 		const sim::Tick fire_from = 160, reload_at = 200;
 		auto input = [&](sim::Tick p_t) {
 			sw::WeaponInput in;
@@ -658,7 +623,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 		REQUIRE(first_shot_after > 0);
 		const double reload_time = finished - started;
 		for (const bool fire_clip : { false, true }) {
-			// A clip 0.5 s longer than ReloadTime: the shot after the finish has to cut it.
+
 			const uint16_t frames = uint16_t(std::lround((reload_time + 0.5) * 30.0));
 			Rig rig = rifle_rig(frames, fire_clip);
 			anim::ViewmodelAnimator animator(rig.skeleton, rig.refs, shipped_tuning());
@@ -724,7 +689,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 			const SimRun run = run_sim(*table, "weapons/m16a4/u_m16a4", 400, zoom, sprinting, m2a_rules);
 			const double deployed = first_event(run, sw::weapon_events::kDeployFinished);
 			REQUIRE(deployed > 0);
-			// The sim's own rule (step_weapons_m2a): kZoomWasDown clear while deploying or sprinting.
+
 			bool sim_refuses = true;
 			for (size_t i = 1; i < run.states.size(); ++i) {
 				const sw::WeaponSlotState &s = run.states[i].current();
@@ -732,7 +697,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 					sim_refuses = sim_refuses && (s.flags & sw::slot_flags::kZoomWasDown) == 0;
 				}
 			}
-			// The presentation: never zoomed (world FOV 55) on a refused frame; aimed again after.
+
 			anim::AdsParams p;
 			p.fov_in_seconds = 0.12f;
 			anim::AdsCamera cam;
@@ -794,11 +759,11 @@ TEST_SUITE("anim-viewmodel-unit") {
 			in.ads = p_ads;
 			a.step(in, p_cues, pose, out);
 		};
-		// Idle: bone 1 at 0 deg.
+
 		frame(0);
 		CHECK(std::fabs(bone1_yaw_deg(pose)) < 1e-3f);
 		CHECK(out.base_clip == uint32_t(VmClip::Idle));
-		// Deploy cuts in: full weight on the cue frame, the clip at its start (-60 deg).
+
 		anim::VmCue deploy;
 		deploy.kind = anim::VmCue::Kind::DeployStarted;
 		deploy.time_s = now + dt;
@@ -810,7 +775,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 			frame(0);
 		}
 		CHECK(out.action_clip == uint32_t(VmClip::Idle));
-		// A reload crossfades in over 0.1 s and a cancel fades it out over 0.1 s.
+
 		anim::VmCue reload;
 		reload.kind = anim::VmCue::Kind::ReloadStarted;
 		reload.time_s = now + 0.5 * dt;
@@ -835,7 +800,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 			frame(0);
 		}
 		CHECK(out.action_clip == uint32_t(VmClip::Idle));
-		// ADS: a full transition from hip follows the ZoomIn clip; at 1 the ZoomPose; out follows ZoomOut.
+
 		frame(0.5f);
 		CHECK(out.base_clip == uint32_t(VmClip::ZoomIn));
 		CHECK(bone1_yaw_deg(pose) == doctest::Approx(20.0f).epsilon(0.02));
@@ -844,12 +809,12 @@ TEST_SUITE("anim-viewmodel-unit") {
 		CHECK(bone1_yaw_deg(pose) == doctest::Approx(40.0f).epsilon(0.01));
 		frame(0.75f);
 		CHECK(out.base_clip == uint32_t(VmClip::ZoomOut));
-		// A reversal mid-way: the IdlePose -> ZoomPose blend (the clip only drives a transition from its end).
+
 		frame(0.8f);
 		CHECK(out.base_clip == uint32_t(VmClip::ZoomIn));
 		CHECK(bone1_yaw_deg(pose) == doctest::Approx(32.0f).epsilon(0.03));
 		frame(0.0f);
-		// Sprint: no Sprint clip in this rig -> the procedural lowered offset.
+
 		for (int i = 0; i < 30; ++i) {
 			now += dt;
 			anim::ViewmodelFrameInput in;
@@ -862,7 +827,6 @@ TEST_SUITE("anim-viewmodel-unit") {
 		CHECK(out.base_clip == uint32_t(VmClip::Sprint));
 		CHECK(out.weapon_offset.t.y < -0.04f);
 
-		// The knife: a stand-in Knife role plays its procedural stab on a shot.
 		Rig knife;
 		knife.skeleton = three_bones();
 		add_clip(knife, VmClip::Idle, 0, 0, 0);
@@ -894,7 +858,7 @@ TEST_SUITE("anim-viewmodel-unit") {
 			min_z = std::min(min_z, out.weapon_offset.t.z);
 		}
 		CHECK(min_z < -0.1f);
-		// The procedural deploy starts below the eye and ends at the hip pose.
+
 		anim::VmCue d2;
 		d2.kind = anim::VmCue::Kind::DeployStarted;
 		d2.time_s = now + dt;

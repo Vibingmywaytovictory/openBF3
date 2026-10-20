@@ -1,5 +1,3 @@
-// bf3dump spawns <LEVEL> <MODE> (M1 T2; docs/design/m1.md §10.1): the spawn points (sim::to_spawn_points, so the
-// yaw is the one the server spawns with) and the character spawners of a level x mode, as TSV.
 #include "spawns_commands.h"
 
 #include "bf3/core/level/level.h"
@@ -26,7 +24,7 @@ std::string partition_of(const EbxResolver &p_db, const EbxInstance &p_entity) {
 	return std::string(p_db.name_of(p_entity.partition().guid()).value_or("?")) + "#" + std::to_string(p_entity.index());
 }
 
-} // namespace
+}
 
 int cmd_spawns(const std::shared_ptr<Install> &p_install, const std::string &p_level, const std::string &p_mode) {
 	const auto start = std::chrono::steady_clock::now();
@@ -68,4 +66,4 @@ int cmd_spawns(const std::shared_ptr<Install> &p_install, const std::string &p_l
 	return 0;
 }
 
-} // namespace bf3dump
+}

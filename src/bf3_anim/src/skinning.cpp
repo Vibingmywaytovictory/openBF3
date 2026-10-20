@@ -56,4 +56,4 @@ void skin_matrices(const std::vector<Xform> &p_model, const std::vector<SkinBind
 	}
 }
 
-} // namespace bf3::anim
+}

@@ -1,4 +1,3 @@
-// PT1 rld: the weapon foley of a kit patch, read from its sound graph (weapon_foley.h; docs/design/pt1-rld.md).
 #include "bf3/audio/weapon_foley.h"
 
 #include "bf3/audio/weapon_sound.h"
@@ -16,12 +15,10 @@ namespace cp = core::audio::port;
 
 namespace {
 
-// One unit of the dataflow: a Receive / MixerReceive entry on its own (each copies one input), every other node
-// together with its child records (a MultiCrossfader's groups write the Start pulses its own Start port fires).
 struct Unit {
-	const ca::SoundNode *node = nullptr; // the parent (nullptr for a Receive entry: `entry` alone)
-	uint32_t node_index = 0; // index into SoundProgram::nodes (the parent's)
-	const ca::SoundNode *entry = nullptr; // Receive / MixerReceive entry
+	const ca::SoundNode *node = nullptr;
+	uint32_t node_index = 0;
+	const ca::SoundNode *entry = nullptr;
 };
 
 bool port_ok(const ca::SoundProgram &p_p, const ca::SoundNode &p_n, uint16_t p_i) {
@@ -51,7 +48,6 @@ const ca::SoundNode *child_of(const ca::SoundProgram &p_p, const ca::SoundNode &
 	return &p_p.child_nodes[p_p.children[at]];
 }
 
-// The registers a record reads and writes (audio ports excluded: register 0 carries no value).
 void record_regs(const ca::SoundProgram &p_p, const ca::SoundNode &p_n, std::vector<uint16_t> &r_reads, std::vector<uint16_t> &r_writes) {
 	const uint32_t outs = ca::port::output_ports(p_n.type);
 	const uint32_t audio = ca::port::audio_ports(p_n.type);
@@ -69,9 +65,9 @@ void record_regs(const ca::SoundProgram &p_p, const ca::SoundNode &p_n, std::vec
 
 struct Graph {
 	std::vector<Unit> units;
-	std::vector<std::vector<uint16_t>> reads, writes; // per unit
-	std::vector<std::vector<uint32_t>> readers; // per register: the units that read it
-	uint16_t distance_reg = ca::kNoRegister; // the Physics node's Distance output
+	std::vector<std::vector<uint16_t>> reads, writes;
+	std::vector<std::vector<uint32_t>> readers;
+	uint16_t distance_reg = ca::kNoRegister;
 };
 
 Graph build_graph(const ca::SoundProgram &p_p) {
@@ -131,7 +127,6 @@ const ca::SoundInput *input_of(const ca::SoundProgram &p_p, uint32_t p_hash, boo
 	return nullptr;
 }
 
-// The register a Receive entry copies p_reg into (kNoRegister: none).
 std::vector<uint16_t> receive_outs(const ca::SoundProgram &p_p, const Graph &p_g, uint16_t p_reg) {
 	std::vector<uint16_t> out;
 	for (uint32_t u = 0; u < p_g.units.size(); ++u) {
@@ -158,8 +153,6 @@ std::string wave_name(const ca::SoundProgram &p_p, uint16_t p_ref) {
 	return slash == std::string::npos ? n : n.substr(slash + 1);
 }
 
-// The waves of the WaveSwitcher that writes p_wave_reg and whose Index reads a register copied from the parameter
-// p_param (empty when there is none).
 std::vector<std::string> switcher_waves(const ca::SoundProgram &p_p, const Graph &p_g, uint32_t p_param) {
 	const ca::SoundInput *in = input_of(p_p, p_param, false);
 	if (in == nullptr) {
@@ -183,7 +176,6 @@ std::vector<std::string> switcher_waves(const ca::SoundProgram &p_p, const Graph
 	return {};
 }
 
-// An output's OutputName from its hash (the names the weapon patches use), else "#hash".
 std::string output_name(uint32_t p_hash) {
 	for (const char *n : { "Cone", "Flat", "Handling", "LFE", "Direct", "Interior" }) {
 		if (core::ebx_name_hash(n) == p_hash) {
@@ -193,7 +185,7 @@ std::string output_name(uint32_t p_hash) {
 	return "#" + std::to_string(p_hash);
 }
 
-} // namespace
+}
 
 const char *foley_action_name(FoleyAction p_action) {
 	switch (p_action) {
@@ -220,7 +212,7 @@ std::vector<uint16_t> voice_outputs(const ca::SoundProgram &p_p, uint16_t p_voic
 	if (p_voice >= p_p.voices.size()) {
 		return out;
 	}
-	// Every voice reachable from p_voice through its sends (each voice visited once).
+
 	std::vector<uint8_t> seen(p_p.voices.size(), 0);
 	std::vector<uint16_t> stack{ p_voice };
 	seen[p_voice] = 1;
@@ -260,8 +252,7 @@ FoleyEvent trace_foley_event(const ca::SoundProgram &p_p, uint32_t p_hash) {
 	ev.present = true;
 	ev.reg = in->reg;
 	const Graph g = build_graph(p_p);
-	// Forward over the registers from the event's own register: a unit that reads a reached register writes its
-	// outputs (a Sampler only through its Trigger: its Finished pulse is the sampler's, not the event's).
+
 	std::vector<uint8_t> reached(p_p.registers, 0), fired(g.units.size(), 0);
 	std::vector<uint16_t> work{ in->reg };
 	reached[in->reg] = 1;
@@ -306,7 +297,7 @@ FoleyEvent trace_foley_event(const ca::SoundProgram &p_p, uint32_t p_hash) {
 	}
 	std::sort(ev.samplers.begin(), ev.samplers.end());
 	ev.reach_m = gated ? reach : kFoleyUngated;
-	// The release: an input event copied straight into a reached sampler's Release port.
+
 	for (uint32_t s : ev.samplers) {
 		const ca::SoundNode &n = p_p.nodes[s];
 		const uint16_t rel = port_reg(p_p, n, cp::SmpRelease);
@@ -324,10 +315,10 @@ FoleyEvent trace_foley_event(const ca::SoundProgram &p_p, uint32_t p_hash) {
 			}
 		}
 	}
-	// The outputs the samplers' voices feed (SndPlayer of every slot: 4 plugin refs per slot).
+
 	for (uint32_t s : ev.samplers) {
 		const ca::SoundNode &n = p_p.nodes[s];
-		for (uint32_t k = 0; k < n.plugins_count; k += ca::port::kSamplerSlotPlugins) { // uint32_t: no wrap at 65535
+		for (uint32_t k = 0; k < n.plugins_count; k += ca::port::kSamplerSlotPlugins) {
 			if (size_t(n.plugins_begin) + k >= p_p.plugin_refs.size()) {
 				break;
 			}
@@ -398,4 +389,4 @@ std::string describe_weapon_foley(const ca::SoundProgram &p_p, const WeaponFoley
 	return s;
 }
 
-} // namespace bf3::audio
+}

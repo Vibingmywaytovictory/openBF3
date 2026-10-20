@@ -1,9 +1,3 @@
-# tools.fx_bench (M2a VFX1 gate G9, docs/design/m2a-vfx1.md §9): runs `bf3dump fx bench --seed 1` (the oilfire /
-# 1p muzzle / impact mix on one lane, 5 runs) and passes when the bench exits 0: the median ns per admitted particle
-# per sub-step is at most 50 and the run is valid (mean live in [12,000, 20,000], spawns_dropped 0, refused_starts 0).
-# The figure is wall clock on a shared machine: noisy. Exits 77 (skipped) when bf3dump finds no install.
-# REPORT_ONLY (the asan preset) prints the rows without failing.
-# Usage: cmake -DBF3DUMP=<bf3dump.exe> [-DREPORT_ONLY=ON] -P fx_bench.cmake
 cmake_minimum_required(VERSION 3.29)
 
 if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")

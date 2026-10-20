@@ -1,13 +1,3 @@
-// PT1 run (docs/design/pt1-run.md): BF3's move groups for the 3p run, sprint and sneak, and the 1p run deltas.
-//
-// Suite "pt1-run-unit" (ctest anim.pt1_run.unit, no data): move_group_weights on a synthetic group of MP_Run's shape
-// (the clip choice per direction and speed, the playback rate per speed, the stride / speed identity, X wrapping and
-// hostile input) and the crowd evaluator with a synthetic CrowdMoveGroupSet (stand run, sprint selection and its ramp,
-// crouch sneak, prone unchanged, idle below MinSpeed).
-// Suite "pt1-run" (ctest anim.pt1_run): the retail install, read-only (Ant banks through AntInstallSource); exits 77
-// without one. The three move groups as read (directions, chosen controllers, Velocity, ItemSpeed, the measured X sign
-// and root directions), the cycle rate per speed before (S3's run blend) and after, the stride against the ground
-// distance per cycle measured on the evaluated feet before and after, and install.unchanged.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/clip_asset.h"
@@ -42,8 +32,6 @@ namespace {
 
 constexpr float kPi = std::numbers::pi_v<float>;
 
-// MP_RunMoveGroup_PC's shape with its data values [verified 2026-10-19]: clip 0 the zero-speed pose, 1 fwd, 2 bwd,
-// 3 left, 4 right.
 MoveGroupDef synth_run_group() {
 	MoveGroupDef d;
 	d.name = "synthetic run";
@@ -69,7 +57,6 @@ MoveGroupDef synth_run_group() {
 	return d;
 }
 
-// Lengths and root speeds (m/tick) of the retail clips [measured 2026-10-19, this file's install case].
 std::vector<MoveGroupClipTiming> synth_run_timing() {
 	return { { 0.0f, 0.0f }, { 0.6f, 4.64f / 60.0f }, { 0.5667f, 2.975f / 60.0f }, { 0.5667f, 2.598f / 60.0f }, { 0.5333f, 3.206f / 60.0f } };
 }
@@ -92,8 +79,6 @@ float rate_of(const MoveGroupWeights &p_w, uint32_t p_clip) {
 	return 0.0f;
 }
 
-// The ground speed the terms' strides give: sum of weight * rate * root speed over the moving terms (a moving clip
-// blended with the zero-speed pose at weight w strides w of its root motion per cycle).
 float stride_speed(const MoveGroupWeights &p_w, std::span<const MoveGroupClipTiming> p_timing) {
 	float s = 0.0f;
 	for (uint32_t k = 0; k < p_w.count; ++k) {
@@ -109,7 +94,6 @@ Quat axis_angle(float x, float y, float z, float p_deg) {
 	return Quat{ x * s, y * s, z * s, std::cos(h) };
 }
 
-// anim_s3_tests.cpp's synthetic rig: AITrajectory, Hips, Arm, Wep.
 Skeleton synth_rig() {
 	std::vector<Bone> bones(4);
 	bones[0].name = "AITrajectory";
@@ -125,7 +109,6 @@ Skeleton synth_rig() {
 	return *Skeleton::make(std::move(bones));
 }
 
-// A Raw clip holding p_q on p_bones over p_end_frame frames (a pose when p_end_frame is 1).
 CrowdClipData const_clip(const Skeleton &p_rig, uint32_t p_end_frame, std::vector<int32_t> p_bones, const Quat &p_q) {
 	CrowdClipData d;
 	bf3::core::ant::DecodedClip &c = d.clip;
@@ -147,7 +130,6 @@ CrowdClipData const_clip(const Skeleton &p_rig, uint32_t p_end_frame, std::vecto
 	return d;
 }
 
-// One group of a single direction (X 0, range +-pi): the zero pose (clip 0) at velocity 0 and a moving clip (1).
 CrowdMoveGroup synth_group(const Skeleton &p_rig, float p_velocity, float p_item_speed, const Quat &p_zero, const Quat &p_move, float p_min_speed) {
 	CrowdMoveGroup g;
 	g.ok = true;
@@ -180,7 +162,7 @@ struct SynthPt1 {
 		const Skeleton &r = set.rig;
 		set.clips[size_t(CrowdClip::Idle)] = const_clip(r, 1, { 1, 2 }, axis_angle(0, 1, 0, 5));
 		for (CrowdClip c : { CrowdClip::RunFwd, CrowdClip::RunBwd, CrowdClip::RunLeft, CrowdClip::RunRight }) {
-			set.clips[size_t(c)] = const_clip(r, 18, { 2 }, axis_angle(0, 1, 0, 70)); // S3's cycles: Arm 70 deg about Y
+			set.clips[size_t(c)] = const_clip(r, 18, { 2 }, axis_angle(0, 1, 0, 70));
 		}
 		set.clips[size_t(CrowdClip::AimUp)] = const_clip(r, 1, { 2 }, Quat{});
 		set.clips[size_t(CrowdClip::AimDown)] = const_clip(r, 1, { 2 }, Quat{});
@@ -208,36 +190,34 @@ struct SynthPt1 {
 		groups.groups[size_t(CrowdMoveGroupRole::Run)] = synth_group(r, 0.0705f, 1.0f, zero_q, run_q, 0.01f);
 		groups.groups[size_t(CrowdMoveGroupRole::Sprint)] = synth_group(r, 0.096f, 1.11f, zero_q, sprint_q, 0.0f);
 		groups.groups[size_t(CrowdMoveGroupRole::Sneak)] = synth_group(r, 0.033f, 1.909f, zero_q, sneak_q, 0.01f);
-		groups.options.velocity_from_root = true; // the synthetic timings carry no root speed: the data's velocity
+		groups.options.velocity_from_root = true;
 	}
 };
 
-// The Arm's local rotation of the evaluated pose: model(Hips)^-1 * model(Arm).
 Quat arm_local(const CrowdEvaluator &p_e) {
 	const std::span<const Xform> m = p_e.model(0);
 	REQUIRE(m.size() == 4);
 	return quat_mul(quat_conj(m[1].q), m[2].q);
 }
 
-} // namespace
+}
 
 TEST_SUITE("pt1-run-unit") {
 	TEST_CASE("move group weights: clip choice per direction and speed") {
 		const MoveGroupDef d = synth_run_group();
 		const std::vector<MoveGroupClipTiming> tm = synth_run_timing();
 		const MoveGroupOptions data{ false }, root{ true };
-		// Forward at 4.0 m/s (0.0667 m/tick): fwd and the zero pose only; with the data's velocity 0.946 fwd, with the root
-		// speed 4.0 / 4.64 = 0.862.
+
 		MoveGroupWeights w = move_group_weights(d, tm, 0.0f, 4.0f, data);
 		CHECK(w.count == 2);
 		CHECK(weight_of(w, 1) == doctest::Approx(4.0 / 60.0 / 0.0705144).epsilon(1e-4));
 		CHECK(weight_of(w, 0) == doctest::Approx(1.0 - 4.0 / 60.0 / 0.0705144).epsilon(1e-3));
 		CHECK(rate_of(w, 1) == doctest::Approx(1.0));
-		CHECK(w.cycles_per_second == doctest::Approx(1.0 / 0.6).epsilon(1e-4)); // the cycle at rate 1: 0.6 s
+		CHECK(w.cycles_per_second == doctest::Approx(1.0 / 0.6).epsilon(1e-4));
 		w = move_group_weights(d, tm, 0.0f, 4.0f, root);
 		CHECK(weight_of(w, 1) == doctest::Approx(4.0 / 4.64).epsilon(1e-4));
 		CHECK(w.cycles_per_second == doctest::Approx(1.0 / 0.6).epsilon(1e-4));
-		// The four cardinal directions pick their clip (X = -heading: the left run sits at X -pi/2).
+
 		struct Case {
 			float x;
 			uint32_t clip;
@@ -249,13 +229,13 @@ TEST_SUITE("pt1-run-unit") {
 			CHECK(weight_of(w, c.clip) + weight_of(w, 0) == doctest::Approx(1.0));
 			CHECK(w.moving == 1);
 		}
-		// A diagonal blends the two neighbours 50/50 (and their zero poses into one term).
+
 		w = move_group_weights(d, tm, -0.25f * kPi, 2.0f, root);
 		CHECK(w.count == 3);
 		CHECK(weight_of(w, 1) + weight_of(w, 3) + weight_of(w, 0) == doctest::Approx(1.0));
 		CHECK(weight_of(w, 1) == doctest::Approx(0.5 * 2.0 / 4.64).epsilon(1e-3));
 		CHECK(weight_of(w, 3) == doctest::Approx(0.5 * 2.0 / 2.598).epsilon(1e-3));
-		// Wrapping into [Min, Min + 2 pi): X 4.0 is -2.28 (bwd and left), X -4.0 is 2.28 (right and bwd).
+
 		w = move_group_weights(d, tm, 4.0f, 2.0f, root);
 		CHECK(weight_of(w, 2) > 0.0f);
 		CHECK(weight_of(w, 3) > 0.0f);
@@ -264,7 +244,7 @@ TEST_SUITE("pt1-run-unit") {
 		CHECK(w.x == doctest::Approx(-4.0 + 2.0 * kPi).epsilon(1e-5));
 		CHECK(weight_of(w, 4) > 0.0f);
 		CHECK(weight_of(w, 2) > 0.0f);
-		// Standing: the zero pose alone, below MinSpeed, the phase holds.
+
 		w = move_group_weights(d, tm, 0.0f, 0.0f, root);
 		CHECK(w.count == 1);
 		CHECK(weight_of(w, 0) == doctest::Approx(1.0));
@@ -278,7 +258,7 @@ TEST_SUITE("pt1-run-unit") {
 		const MoveGroupDef d = synth_run_group();
 		const std::vector<MoveGroupClipTiming> tm = synth_run_timing();
 		const MoveGroupOptions root{ true };
-		// Within the range the moving clip plays at ItemSpeed (the cadence is the authored one), above it one to one.
+
 		for (float speed : { 1.0f, 2.0f, 3.0f, 4.0f, 4.64f }) {
 			const MoveGroupWeights w = move_group_weights(d, tm, 0.0f, speed, root);
 			CHECK(rate_of(w, 1) == doctest::Approx(1.0));
@@ -290,7 +270,7 @@ TEST_SUITE("pt1-run-unit") {
 			CHECK(rate_of(w, 1) == doctest::Approx(speed / 4.64).epsilon(1e-4));
 			CHECK(w.cycles_per_second == doctest::Approx(speed / 4.64 / 0.6).epsilon(1e-4));
 		}
-		// The right run's ItemSpeed 0.911911 scales its cadence.
+
 		const MoveGroupWeights r = move_group_weights(d, tm, 0.5f * kPi, 2.0f, root);
 		CHECK(rate_of(r, 4) == doctest::Approx(0.911911));
 		CHECK(r.cycles_per_second == doctest::Approx(0.911911 / 0.5333).epsilon(1e-3));
@@ -311,7 +291,7 @@ TEST_SUITE("pt1-run-unit") {
 		}
 		MESSAGE("worst |stride / ground - 1|: root velocities " << worst << ", the data's Velocity " << worst_data);
 		CHECK(worst < 1e-4f);
-		CHECK(worst_data > 0.05f); // the data's RunFwd / RunRight Velocity is below their root speed (pt1-run.md §2)
+		CHECK(worst_data > 0.05f);
 	}
 
 	TEST_CASE("move group weights: hostile input") {
@@ -334,7 +314,7 @@ TEST_SUITE("pt1-run-unit") {
 			}
 		}
 		CHECK(move_group_weights(MoveGroupDef{}, tm, 0.0f, 4.0f).count == 0);
-		CHECK(move_group_weights(d, {}, 0.0f, 4.0f).cycles_per_second == 0.0f); // no timing: every clip a pose
+		CHECK(move_group_weights(d, {}, 0.0f, 4.0f).cycles_per_second == 0.0f);
 		CHECK(move_group_x(Vec3{ nan, 0, 1 }, -1.0f) == 0.0f);
 		CHECK(move_group_x(Vec3{}, -1.0f) == 0.0f);
 		CHECK(move_group_x(Vec3{ 1, 0, 0 }, -1.0f) == doctest::Approx(-0.5 * kPi));
@@ -344,7 +324,7 @@ TEST_SUITE("pt1-run-unit") {
 	TEST_CASE("move group weights: hostile def (huge or non-finite Min / Max, root order against the data's)") {
 		const std::vector<MoveGroupClipTiming> tm = synth_run_timing();
 		const float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
-		// The verifier's case: Min 1e9 stalled the old X wrap loop at x = 1.342e8 (adding 2 pi no longer changed the float).
+
 		const std::pair<float, float> ranges[] = { { 1.0e9f, 1.0e9f + 1.0f }, { -1.0e9f, -1.0e9f + 64.0f }, { 1.0e6f, 1.0e6f + 3.0f },
 			{ -3.0e38f, 3.0e38f }, { nan, 1.0f }, { 0.0f, inf }, { 2.0f, 1.0f } };
 		for (const auto &[lo, hi] : ranges) {
@@ -362,12 +342,11 @@ TEST_SUITE("pt1-run-unit") {
 				CHECK(sum == doctest::Approx(1.0));
 			}
 		}
-		// The X wrap: one turn below Min comes back into [Min, Min + 2 pi).
+
 		const MoveGroupDef d = synth_run_group();
 		CHECK(move_group_weights(d, tm, -kPi + 0.5f - 2.0f * kPi, 4.0f).x == doctest::Approx(-kPi + 0.5f).epsilon(1e-4));
 		CHECK(move_group_weights(d, tm, 0.25f + 6.0f * kPi, 4.0f).x == doctest::Approx(0.25).epsilon(1e-4));
-		// Entries sorted by the data's Velocity whose root * ItemSpeed order disagrees (6, 2, 4 m/s): still one term set
-		// whose weights sum to 1 at every speed.
+
 		MoveGroupDef r = synth_run_group();
 		for (MoveGroupDirection &dir : r.directions) {
 			dir.entries = { MoveGroupEntry{ 0.02f, 1.0f, 0.0f, 0.0f, 1 }, MoveGroupEntry{ 0.04f, 1.0f, 0.0f, 0.0f, 2 },
@@ -397,13 +376,13 @@ TEST_SUITE("pt1-run-unit") {
 		REQUIRE(e.ok());
 		CrowdEvaluator &ev = **e;
 		CrowdSoldierInput in;
-		in.velocity = Vec3{ 0, 0, 4.0f }; // yaw 0: forward
+		in.velocity = Vec3{ 0, 0, 4.0f };
 		auto step = [&](double p_dt) {
 			ev.set_inputs(std::span<const CrowdSoldierInput>(&in, 1), p_dt);
 			ev.evaluate_all_here();
 			return arm_local(ev);
 		};
-		// Running at 4.0 m/s: 0.946 run + 0.054 zero pose (one direction, the data's velocity).
+
 		Quat q = step(1.0 / 60.0);
 		Quat want{};
 		{
@@ -415,7 +394,7 @@ TEST_SUITE("pt1-run-unit") {
 		}
 		CHECK(quat_angle_deg(q, want) < 0.05);
 		CHECK(ev.m2a_stats().stand == 1);
-		// Sprinting from steady running: the sprint weight ramps over kCrowdSprintBlendSeconds.
+
 		in.velocity = Vec3{ 0, 0, 6.5f };
 		in.sprinting = true;
 		q = step(0.5 * kCrowdSprintBlendSeconds);
@@ -424,37 +403,37 @@ TEST_SUITE("pt1-run-unit") {
 		MESSAGE("halfway into the sprint ramp: " << from_sprint << " deg from the sprint pose of " << total);
 		CHECK(from_sprint == doctest::Approx(0.5 * total).epsilon(0.05));
 		q = step(0.5 * kCrowdSprintBlendSeconds + 1e-3);
-		CHECK(quat_angle_deg(q, s.sprint_q) < 0.05); // 6.5 m/s is above the sprint's velocity: the sprint clip alone
-		// Sprint released: back to the run pose over the ramp.
+		CHECK(quat_angle_deg(q, s.sprint_q) < 0.05);
+
 		in.sprinting = false;
-		in.velocity = Vec3{ 0, 0, 4.23f }; // at the run's velocity: the run clip alone
+		in.velocity = Vec3{ 0, 0, 4.23f };
 		step(kCrowdSprintBlendSeconds + 1e-3);
 		q = step(1.0 / 60.0);
 		CHECK(quat_angle_deg(q, s.run_q) < 0.05);
-		// Standing still: below MinSpeed the group fades to the stand idle over kCrowdMoveBlendSeconds.
+
 		in.velocity = Vec3{};
 		step(kCrowdMoveBlendSeconds + 1e-3);
 		q = step(1.0 / 60.0);
 		CHECK(quat_angle_deg(q, axis_angle(0, 1, 0, 5)) < 0.05);
 		CHECK_FALSE(ev.m2a_stats().moving_crouch);
-		// Crouched at 2.0 m/s: the sneak group (above its velocity: the sneak clip alone).
+
 		in.pose = in.target_pose = 1;
 		in.velocity = Vec3{ 0, 0, 2.0f };
 		q = step(1.0 / 60.0);
 		CHECK(quat_angle_deg(q, s.sneak_q) < 0.05);
 		CHECK(ev.m2a_stats().moving_crouch == 1);
-		// The sprint flag does nothing crouched.
+
 		in.sprinting = true;
 		q = step(1.0 / 60.0);
 		CHECK(quat_angle_deg(q, s.sneak_q) < 0.05);
-		// Prone has no BF3 move group: S3's cycles move it (Arm 70 deg about Y).
+
 		in.pose = in.target_pose = 2;
 		in.sprinting = false;
 		in.velocity = Vec3{ 0, 0, 0.9f };
 		q = step(1.0 / 60.0);
 		CHECK(quat_angle_deg(q, s.sneak_q) > 10.0);
 		CHECK(quat_angle_deg(q, s.run_q) > 10.0);
-		// Hostile: non-finite inputs keep the last finite values; a group that is not ok keeps S3's cycles.
+
 		in.pose = in.target_pose = 0;
 		in.velocity = Vec3{ std::numeric_limits<float>::quiet_NaN(), 0, 0 };
 		q = step(1.0 / 60.0);
@@ -462,11 +441,9 @@ TEST_SUITE("pt1-run-unit") {
 		s.groups.groups[size_t(CrowdMoveGroupRole::Run)].ok = false;
 		in.velocity = Vec3{ 0, 0, 4.0f };
 		q = step(1.0 / 60.0);
-		CHECK(quat_angle_deg(q, axis_angle(0, 1, 0, 70)) < 0.5); // S3's run blend (its Fwd cycle)
+		CHECK(quat_angle_deg(q, axis_angle(0, 1, 0, 70)) < 0.5);
 	}
 }
-
-// ---- install --------------------------------------------------------------------------------------------------------
 
 namespace {
 
@@ -532,7 +509,6 @@ Pt1Data *pt1_or_skip() {
 	return d;
 }
 
-// The controller the entry of direction p_x with a nonzero velocity routes to ("" when none).
 std::string moving_controller(const MoveGroupDef &p_def, float p_x) {
 	for (const MoveGroupDirection &d : p_def.directions) {
 		if (std::fabs(d.x - p_x) < 1e-3f) {
@@ -559,30 +535,27 @@ const MoveGroupEntry *moving_entry(const MoveGroupDef &p_def, float p_x) {
 	return nullptr;
 }
 
-// One locomotion case of the feet measurement.
 struct Gait {
 	const char *what;
-	uint8_t stance; // 0 stand, 1 crouch
-	Vec3 velocity; // world = rig model space at yaw 0 (+Z forward, +X left)
+	uint8_t stance;
+	Vec3 velocity;
 	bool sprinting;
-	CrowdMoveGroupRole group; // the group and X of the gait's moving clip (its authored baseline)
+	CrowdMoveGroupRole group;
 	float x;
 };
 
-using FeetTrack = std::vector<std::array<Vec3, 2>>; // model-space feet per 60 Hz frame
+using FeetTrack = std::vector<std::array<Vec3, 2>>;
 
 struct GaitResult {
-	double cycle_seconds = 0; // between successive plants of the first foot
-	double stride_ratio = 0; // planted feet's backward model-space speed against the body's ground speed (1 = no sliding)
-	double slide_mps = 0; // planted feet's world speed, m/s
+	double cycle_seconds = 0;
+	double stride_ratio = 0;
+	double slide_mps = 0;
 	uint32_t plants = 0;
 };
 
 constexpr double kFrameSeconds = 1.0 / 60.0;
-constexpr int kGaitFrames = 300, kGaitSkip = 60; // 5 s, the first second dropped
+constexpr int kGaitFrames = 300, kGaitSkip = 60;
 
-// A foot is planted while its model height is within p_band of its lowest over the window; its world position is the
-// soldier's position (p_velocity * t) plus its model position (yaw 0).
 GaitResult feet_metrics(const FeetTrack &p_local, const Vec3 &p_velocity, float p_band) {
 	const double dt = kFrameSeconds;
 	const float speed = std::sqrt(p_velocity.x * p_velocity.x + p_velocity.z * p_velocity.z);
@@ -642,7 +615,6 @@ SkinBinds rig_binds(const Skeleton &p_rig) {
 	return binds;
 }
 
-// One soldier evaluated at p_gait (the crowd evaluator's M2a path with tp's moves, with or without the move groups).
 FeetTrack evaluated_feet(const Pt1Data &p_d, const CrowdMoveGroupSet *p_groups, const Gait &p_gait, const int32_t p_feet[2]) {
 	const Skeleton &rig = p_d.clips.rig;
 	const SkinBinds binds = rig_binds(rig);
@@ -677,7 +649,6 @@ FeetTrack evaluated_feet(const Pt1Data &p_d, const CrowdMoveGroupSet *p_groups, 
 	return out;
 }
 
-// The clip as authored: rate 1, its root translation removed, the body moving at its measured root velocity.
 FeetTrack authored_feet(const Pt1Data &p_d, const CrowdMoveGroup &p_group, uint32_t p_clip, const int32_t p_feet[2], Vec3 &r_velocity) {
 	const Skeleton &rig = p_d.clips.rig;
 	const CrowdClipData &c = p_group.clips[p_clip];
@@ -706,7 +677,7 @@ uint32_t moving_clip(const MoveGroupDef &p_def, float p_x) {
 	return e != nullptr ? e->clip : 0;
 }
 
-} // namespace
+}
 
 TEST_SUITE("pt1-run") {
 	TEST_CASE("pt1 move groups: directions, chosen controllers, Velocity, ItemSpeed, measured directions") {
@@ -727,13 +698,13 @@ TEST_SUITE("pt1-run") {
 		if (!run.ok || !sprint.ok || !sneak.ok) {
 			return;
 		}
-		// MP_RunMoveGroup_PC [verified 2026-10-19, antdump objects]: six directions, the four Rifle cycles.
+
 		CHECK(run.def.directions.size() == 6);
 		CHECK(run.def.one_to_one_speed == doctest::Approx(1.0));
 		CHECK(run.def.min_speed == doctest::Approx(0.01));
 		CHECK(moving_controller(run.def, 0.0f) == "Rifle_RunFwd");
 		CHECK(moving_controller(run.def, -0.5f * kPi) == "Rifle_RunLeft1");
-		CHECK(moving_controller(run.def, 0.5f * kPi) == "Rifle_RunRight2"); // SwitchLoco_SIG false: Left1, Right2
+		CHECK(moving_controller(run.def, 0.5f * kPi) == "Rifle_RunRight2");
 		CHECK(moving_controller(run.def, kPi) == "Rifle_RunBwd");
 		CHECK(moving_controller(run.def, -kPi) == "Rifle_RunBwd");
 		REQUIRE(moving_entry(run.def, 0.0f) != nullptr);
@@ -747,20 +718,20 @@ TEST_SUITE("pt1-run") {
 		CHECK(moving_entry(run.def, 0.0f)->velocity == doctest::Approx(0.0705144));
 		CHECK(moving_entry(run.def, 0.5f * kPi)->item_speed == doctest::Approx(0.911911));
 		CHECK(run.def.clips[run.def.directions[0].entries[0].clip].controller == "Rifle_RunFwdToIdlePose");
-		// MP_SprintMoveGroup: forward and the two 45 degree sprints.
+
 		CHECK(moving_controller(sprint.def, 0.0f) == "Rifle_Sprint");
 		CHECK(moving_controller(sprint.def, -0.25f * kPi) == "Rifle_SprintLeft45");
 		CHECK(moving_controller(sprint.def, 0.25f * kPi) == "Rifle_SprintRight45");
 		CHECK(moving_entry(sprint.def, 0.0f)->velocity == doctest::Approx(0.0960196));
 		CHECK(moving_entry(sprint.def, 0.0f)->item_speed == doctest::Approx(1.11005));
 		CHECK(sprint.def.min_speed == 0.0f);
-		// MP_SneakMoveGroup_PC: the crouched cycles (Rifle_SneakBwd resolved by its controller, not its name).
+
 		CHECK(moving_controller(sneak.def, 0.0f) == "Rifle_SneakFwd");
 		CHECK(moving_entry(sneak.def, 0.0f)->item_speed == doctest::Approx(1.90921));
 		CHECK(moving_controller(sneak.def, kPi) == "Rifle_SneakBwd");
 		CHECK(moving_controller(sneak.def, -0.5f * kPi) == "Rifle_SneakLeft2");
 		CHECK(moving_controller(sneak.def, 0.5f * kPi) == "Rifle_SneakRight2");
-		// The outer X is minus the heading of the measured root motion, within 15 degrees for every moving clip.
+
 		for (const CrowdMoveGroup *g : { &run, &sprint, &sneak }) {
 			CHECK(g->x_sign == -1.0f);
 			CHECK(g->worst_direction_deg < 15.0f);
@@ -768,7 +739,7 @@ TEST_SUITE("pt1-run") {
 				CHECK(c.fps / c.fps_scale == doctest::Approx(kAntTicksPerSecond));
 			}
 		}
-		// The data's Velocity against the measured root speed times ItemSpeed (pt1-run.md §2).
+
 		for (const CrowdMoveGroup *g : { &run, &sprint, &sneak }) {
 			for (const MoveGroupDirection &dir : g->def.directions) {
 				for (const MoveGroupEntry &e : dir.entries) {
@@ -791,8 +762,7 @@ TEST_SUITE("pt1-run") {
 		if (d == nullptr) {
 			return;
 		}
-		// The motor's speeds (motor_tuning.cfg = PhysicsMotion: stand 4.0, non-forward 0.75, sprint 6.5, crouch 2.0 with
-		// non-forward 0.7).
+
 		const Gait gaits[] = {
 			{ "run fwd 4.0", 0, Vec3{ 0, 0, 4.0f }, false, CrowdMoveGroupRole::Run, 0.0f },
 			{ "run left 3.0", 0, Vec3{ 3.0f, 0, 0 }, false, CrowdMoveGroupRole::Run, -0.5f * kPi },
@@ -802,8 +772,7 @@ TEST_SUITE("pt1-run") {
 			{ "crouch fwd 2.0", 1, Vec3{ 0, 0, 2.0f }, false, CrowdMoveGroupRole::Sneak, 0.0f },
 			{ "crouch left 1.4", 1, Vec3{ 1.4f, 0, 0 }, false, CrowdMoveGroupRole::Sneak, -0.5f * kPi },
 		};
-		// The toes: planted while within 1 cm of their lowest (the measure's floor is the clip as authored: 0.93 .. 1.02
-		// on these clips, its own root motion being the ground speed).
+
 		const Skeleton &rig = d->clips.rig;
 		const int32_t feet[2] = { rig.find("LeftToeBase"), rig.find("RightToeBase") };
 		REQUIRE(feet[0] >= 0);
@@ -830,13 +799,12 @@ TEST_SUITE("pt1-run") {
 					w.cycles_per_second > 0 ? 1.0 / w.cycles_per_second : 0.0, rf.stride_ratio, rf.slide_mps);
 			MESSAGE(line);
 			CHECK(rf.plants >= 3);
-			// The stride on the ground as authored (no sliding beyond the clip's own), and the cadence the data gives.
+
 			CHECK(rf.stride_ratio == doctest::Approx(ra.stride_ratio).epsilon(0.03));
 			REQUIRE(w.cycles_per_second > 0.0f);
 			CHECK(rf.cycle_seconds == doctest::Approx(1.0 / w.cycles_per_second).epsilon(0.04));
 		}
-		// The cadence BF3's data gives: the run at rate 1 below its range (Rifle_RunFwd 18 frames, 0.6 s), the sprint one to
-		// one above its range.
+
 		const CrowdMoveGroup &run = d->groups.get(CrowdMoveGroupRole::Run);
 		const MoveGroupWeights w4 = move_group_weights(run.def, run.timing, 0.0f, 4.0f, d->groups.options);
 		CHECK(1.0 / w4.cycles_per_second == doctest::Approx(0.6).epsilon(0.01));
@@ -870,8 +838,7 @@ TEST_SUITE("pt1-run") {
 		if (!rig.ok()) {
 			return;
 		}
-		// The weapons' AntRefs: s_basicassets' WeaponAsset by name (EBX WeaponStates[0].Weapon.AssetId is 0x1548 << 16 | its
-		// guid index's low 16 bits).
+
 		auto ant_ref = [&](std::string_view p_name) {
 			const bf3::core::ant::AntPackage &sp = *lib.static_package();
 			for (size_t i = 0; i < sp.object_count(); ++i) {
@@ -919,9 +886,6 @@ TEST_SUITE("pt1-run") {
 		CHECK(m16.sprint_start_frame == doctest::Approx(0.0f));
 		CHECK(m16.sprint_end_frame == doctest::Approx(72.0f));
 
-		// Cadence and amplitude of the weapon against the camera: before (the procedural bob, weapon_offset in camera
-		// space) and after (BF3's deltas: Wep_Root in CameraJoint's frame). Per axis: the mean-crossing frequency and the
-		// peak-to-peak, over 10 s after 1 s.
 		const int32_t cam = rig->find("CameraJoint"), wep = rig->find("Wep_Root");
 		REQUIRE(cam >= 0);
 		REQUIRE(wep >= 0);
@@ -952,7 +916,7 @@ TEST_SUITE("pt1-run") {
 			}
 			return out;
 		};
-		const ViewmodelTuning tuning; // the defaults: bob_frequency 1.8 Hz as shipped (viewmodel_tuning.cfg's bob_amplitude is 0.008, not 0.01)
+		const ViewmodelTuning tuning;
 		const std::array<VmClipRef, kVmClips> no_clips{};
 		struct Case {
 			const char *what;
@@ -1000,13 +964,12 @@ TEST_SUITE("pt1-run") {
 					b[0].hz, b[0].p2p_mm, b[1].hz, b[1].p2p_mm, af[0].hz, af[0].p2p_mm, af[1].hz, af[1].p2p_mm, af[2].hz, af[2].p2p_mm);
 			MESSAGE(line);
 			if (c.sprinting) {
-				// BF3's sprint delta: the weapon sways once per 18 frames sideways and twice up and down at rate 1
-				// (Rifle_SprintDelta, 72 frames), where the bob ran at 1.8 * 1.5 Hz and twice that.
+
 				CHECK(af[0].hz == doctest::Approx(30.0 / 18.0).epsilon(0.08));
 				CHECK(af[1].hz == doctest::Approx(30.0 / 9.0).epsilon(0.08));
 				CHECK(b[0].hz > 1.5 * af[0].hz);
 			} else {
-				// The run delta at speed / 3.6: once per stride pair sideways, as the 3p run at 4 m/s (Rifle_RunFwd 0.6 s).
+
 				CHECK(af[0].hz == doctest::Approx(1.0 / 0.6).epsilon(0.08));
 			}
 		}
@@ -1022,11 +985,8 @@ TEST_SUITE("pt1-run") {
 	}
 }
 
-// ---- 1p run / sprint deltas (viewmodel_anim.h's PT1 run block) ------------------------------------------------------
-
 namespace {
 
-// Root, CameraJoint, Wep_Root; the deltas turn Wep_Root about Y.
 Skeleton vm_rig() {
 	std::vector<Bone> bones(3);
 	bones[0].name = "Root";
@@ -1039,7 +999,6 @@ Skeleton vm_rig() {
 	return *Skeleton::make(std::move(bones));
 }
 
-// An additive ramp on Wep_Root: Y rotation 0 .. p_deg over p_frames frames (30 fps).
 void vm_ramp(bf3::core::ant::DecodedClip &r_clip, ClipTracks &r_tracks, uint16_t p_frames, float p_deg) {
 	r_clip = {};
 	r_clip.codec = bf3::core::ant::ClipCodec::Raw;
@@ -1068,8 +1027,8 @@ struct VmSynth {
 	VmLocomotion loco;
 
 	VmSynth() {
-		vm_ramp(run_clip, run_tracks, 60, 30.0f); // 0.5 deg per frame
-		vm_ramp(sprint_clip, sprint_tracks, 40, -40.0f); // -1 deg per frame
+		vm_ramp(run_clip, run_tracks, 60, 30.0f);
+		vm_ramp(sprint_clip, sprint_tracks, 40, -40.0f);
 		loco.run.clip.clip = &run_clip;
 		loco.run.clip.tracks = &run_tracks;
 		loco.run.start_frame = 14.0f;
@@ -1096,42 +1055,42 @@ VmRun vm_steps(ViewmodelAnimator &r_a, ViewmodelFrameInput &r_in, int p_steps) {
 	return r;
 }
 
-} // namespace
+}
 
 TEST_SUITE("pt1-run-unit") {
 	TEST_CASE("1p deltas: run rate per speed, sprint at rate 1, weights, the bob replaced") {
 		VmSynth s;
-		const ViewmodelTuning tuning; // sprint_blend_seconds 0.2
+		const ViewmodelTuning tuning;
 		ViewmodelAnimator a(s.rig, s.refs, tuning);
 		a.set_locomotion(s.loco);
 		ViewmodelFrameInput in;
-		in.speed = kVmRunSpeedUnit; // rate 1: 30 frames per second
-		// 0.5 s: frame 14 + 15 = 29, the run delta at full weight (ramp 0.2 s), Wep_Root turned 29 * 0.5 deg.
+		in.speed = kVmRunSpeedUnit;
+
 		VmRun r = vm_steps(a, in, 30);
 		CHECK(r.out.pt1_run_frame == doctest::Approx(29.0f).epsilon(0.002));
 		CHECK(r.out.pt1_run_weight == doctest::Approx(1.0f));
 		CHECK(r.out.pt1_sprint_weight == 0.0f);
 		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(14.5f).epsilon(0.01));
-		CHECK(std::fabs(r.out.weapon_offset.t.x) < 1e-6f); // no bob
+		CHECK(std::fabs(r.out.weapon_offset.t.x) < 1e-6f);
 		CHECK(std::fabs(r.out.weapon_offset.t.y) < 1e-6f);
-		// Twice the speed, twice the rate: 0.5 s = 30 frames, wrapped in the 30-frame window: frame 29 again.
+
 		in.speed = 2.0f * kVmRunSpeedUnit;
 		r = vm_steps(a, in, 30);
 		CHECK(r.out.pt1_run_frame == doctest::Approx(29.0f).epsilon(0.002));
-		// 4 m/s: 33.3 frames per second.
+
 		in.speed = 4.0f;
 		const float f0 = r.out.pt1_run_frame;
 		r = vm_steps(a, in, 6);
 		CHECK(r.out.pt1_run_frame - f0 == doctest::Approx(0.1f * 30.0f * 4.0f / kVmRunSpeedUnit).epsilon(0.002));
-		// ADS takes the run delta out.
+
 		in.ads = 1.0f;
 		r = vm_steps(a, in, 1);
 		CHECK(r.out.pt1_run_weight == 0.0f);
 		in.ads = 0.0f;
-		// Sprint: the sprint delta at rate 1 whatever the speed, the run delta out with the sprint weight.
+
 		in.sprinting = true;
 		in.speed = 6.5f;
-		r = vm_steps(a, in, 6); // 0.1 s: half way
+		r = vm_steps(a, in, 6);
 		CHECK(r.out.pt1_sprint_weight == doctest::Approx(0.5f).epsilon(0.01));
 		CHECK(r.out.pt1_run_weight == doctest::Approx(0.5f).epsilon(0.01));
 		const float s0 = r.out.pt1_sprint_frame;
@@ -1140,7 +1099,7 @@ TEST_SUITE("pt1-run-unit") {
 		CHECK(r.out.pt1_run_weight == 0.0f);
 		CHECK(r.out.pt1_sprint_frame - s0 == doctest::Approx(9.0f).epsilon(0.002));
 		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(-r.out.pt1_sprint_frame).epsilon(0.01));
-		// Stopping (below 0.09 m/s): the run weight ramps out over 0.2 s; in the air it is out too.
+
 		in.sprinting = false;
 		in.speed = 0.05f;
 		r = vm_steps(a, in, 13);
@@ -1151,7 +1110,7 @@ TEST_SUITE("pt1-run-unit") {
 		in.grounded = false;
 		r = vm_steps(a, in, 12);
 		CHECK(r.out.pt1_run_weight == 0.0f);
-		// reset(): back to the window's start.
+
 		a.reset();
 		in.grounded = true;
 		in.time_s = 0;
@@ -1168,10 +1127,10 @@ TEST_SUITE("pt1-run-unit") {
 			in.speed = 4.0f;
 			const VmRun r = vm_steps(a, in, 40);
 			CHECK(r.out.pt1_run_weight == 0.0f);
-			CHECK(std::fabs(r.out.weapon_offset.t.x) + std::fabs(r.out.weapon_offset.t.y) > 1e-4f); // the bob
+			CHECK(std::fabs(r.out.weapon_offset.t.x) + std::fabs(r.out.weapon_offset.t.y) > 1e-4f);
 		}
 		{
-			// An empty set (or unusable clips) restores the bob.
+
 			ViewmodelAnimator a(s.rig, s.refs, tuning);
 			a.set_locomotion(s.loco);
 			a.set_locomotion(VmLocomotion{});
@@ -1188,7 +1147,7 @@ TEST_SUITE("pt1-run-unit") {
 			CHECK(std::fabs(r.out.weapon_offset.t.x) + std::fabs(r.out.weapon_offset.t.y) > 1e-4f);
 		}
 		{
-			// Windows outside the clip clamp to it; an empty or NaN window is the whole clip; NaN speed and dt stay finite.
+
 			ViewmodelAnimator a(s.rig, s.refs, tuning);
 			VmLocomotion odd = s.loco;
 			odd.run.start_frame = std::numeric_limits<float>::quiet_NaN();

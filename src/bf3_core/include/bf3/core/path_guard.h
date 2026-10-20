@@ -1,9 +1,4 @@
 #pragma once
-// Write-target guard (plan §2.1): every path the cache writer (and anything else that writes)
-// is about to create or replace is canonicalised and refused when it lies under a protected root
-// (the BF3 install). Canonical form: absolute, long names, ".." folded, links and junctions of
-// the existing part resolved, so aliases such as 8.3 names, other casing, forward slashes or a
-// junction pointing into the install all compare equal to the install root.
 
 #include <filesystem>
 #include <optional>
@@ -12,28 +7,21 @@
 
 namespace bf3::core {
 
-// Canonical absolute form of p_path, or nullopt if it cannot be formed (empty path, API failure).
-// The deepest existing ancestor is resolved by the file system; the remaining (not yet existing)
-// components are appended lexically.
 std::optional<std::filesystem::path> canonicalize_path(const std::filesystem::path &p_path);
 
-// The "\\?\" (or "\\?\UNC\") form of p_path made absolute, so file APIs accept names longer than
-// MAX_PATH. Check targets with PathGuard first; this only changes how an allowed path is opened.
 std::filesystem::path to_extended_length(const std::filesystem::path &p_path);
 
-// True when p_child equals p_root or lies below it. Both must be canonical. Component-wise and
-// case-insensitive (so "Battlefield 3x" is not inside "Battlefield 3").
 bool path_is_within(const std::filesystem::path &p_child, const std::filesystem::path &p_root);
 
 class PathGuard {
 public:
 	enum class Verdict {
 		Allowed,
-		UnderProtectedRoot, // the target is the install or lies inside it
-		HardLinkedFile, // the target exists with more than one name; could alias an install file
-		InvalidName, // stream syntax (':' after the drive), device or empty path
-		Unresolvable, // the path could not be canonicalised
-		NoRoots, // the guard protects nothing: refuse rather than allow by accident
+		UnderProtectedRoot,
+		HardLinkedFile,
+		InvalidName,
+		Unresolvable,
+		NoRoots,
 	};
 
 	PathGuard() = default;
@@ -48,4 +36,4 @@ private:
 	std::vector<std::filesystem::path> roots_;
 };
 
-} // namespace bf3::core
+}

@@ -1,10 +1,3 @@
-// The M2b in-game check (m2b_check.h; docs/design/m2b.md §1 E9; as built: docs/design/m2b-gx.md §4). One case, play:
-// the scripted player joins on the spawn screen, deploys with a kit (cycling through the four), stands in the open so
-// the TDM bots find it, holds Tab now and then, and deploys again after each death until the round ends (the
-// --kill-limit makes that short). The tally (m2b_game.h M2bPlayTally) is gathered here every frame; the rows and their
-// rules are m2b_play_rows (m2b_game.cpp), so m2b.gx.unit tests the verdicts without Godot. ui's and cam's rows are
-// counted only when their part is built (OPENBF3_M2B_HAVE_UI / _CAM) and skipped "waiting for <track>" otherwise.
-
 #include "m2b_check.h"
 
 #include "level_session_m2a.h"
@@ -49,24 +42,20 @@ std::string m2b_fmt(const char *p_format, ...) {
 	return line;
 }
 
-// The play script's named defaults [inferred: none of them is a BF3 value; they shape the scripted run only].
-constexpr double kM2bJoinShotDelayS = 1.5; // the join spawn screen's screenshot after the check starts
-constexpr double kM2bChooseDelayS = 0.6; // a kit key, then Deploy, this long after the spawn screen came up
-constexpr double kM2bTabEveryS = 9.0; // Tab held for kM2bTabHoldS this often while alive
+constexpr double kM2bJoinShotDelayS = 1.5;
+constexpr double kM2bChooseDelayS = 0.6;
+constexpr double kM2bTabEveryS = 9.0;
 constexpr double kM2bTabHoldS = 0.6;
-// E9 needs an own death by a soldier (the kill card, the death view) and a second deploy well before a 15-kill round
-// ends (about 40 s): until the first own death the script puts the player in front of the nearest enemy, again every
-// kM2bSeekEveryS with another enemy if one is there, and drops it as the last resort (no killer: the kill card row
-// still fails then, honestly).
-constexpr double kM2bSeekEnemyAfterS = 6.0; // alive this long without an own death yet: the first Teleport to an enemy
-constexpr double kM2bSeekEveryS = 4.0; // still alive: the next enemy
-constexpr float kM2bSeekFrontMetres = 6.0f; // in front of the enemy along its view, facing it (inside its near detection)
-constexpr double kM2bFallAfterS = 26.0; // still alive: a Teleport 60 m up (M1's fall damage)
-constexpr double kM2bScreenGraceS = 4.0; // a death counts for the after-death row when this much time follows its kill card
-constexpr double kM2bRoundOverHoldS = 3.0; // the run ends this long after RoundOver (the round-end screen's shot)
-constexpr double kM2bHardEndAfterS = 45.0; // past play_seconds without a RoundOver: the run ends (round_over fails)
 
-} // namespace
+constexpr double kM2bSeekEnemyAfterS = 6.0;
+constexpr double kM2bSeekEveryS = 4.0;
+constexpr float kM2bSeekFrontMetres = 6.0f;
+constexpr double kM2bFallAfterS = 26.0;
+constexpr double kM2bScreenGraceS = 4.0;
+constexpr double kM2bRoundOverHoldS = 3.0;
+constexpr double kM2bHardEndAfterS = 45.0;
+
+}
 
 struct M2bCheck::State {
 	Bf3LevelSession &s;
@@ -80,22 +69,22 @@ struct M2bCheck::State {
 	bool case_running = false;
 	double case_t0 = -1.0;
 	M2bPlayTally tally;
-	// The script.
+
 	bool join_counted = false;
-	double screen_up_t = -1.0; // the spawn screen came up then (this showing)
+	double screen_up_t = -1.0;
 	bool screen_was_up = false;
 	bool kit_pressed = false, deploy_pressed = false;
-	uint32_t deploy_index = 0; // the kit cycles with each deploy
+	uint32_t deploy_index = 0;
 	uint32_t lives_seen = 0;
 	uint32_t life_seen = 0;
 	bool was_alive = false;
 	double life_t0 = -1.0;
-	double next_seek = -1.0; // the next Teleport to an enemy (run clock); < 0: none this life
-	uint8_t last_sought = 0xFF; // the enemy slot of the last Teleport
+	double next_seek = -1.0;
+	uint8_t last_sought = 0xFF;
 	bool dropped = false;
 	double tab_until = -1.0, next_tab = 0.0;
 	bool tab_shot = false;
-	// The own deaths.
+
 	uint32_t deaths_seen = 0;
 	bool death_pending = false;
 	double death_t = 0.0;
@@ -104,7 +93,7 @@ struct M2bCheck::State {
 	bool killcard_checked = false;
 	bool killcard_shot = false, spawn_shot = false, join_shot = false, round_end_shot = false;
 	double round_over_t = -1.0;
-	// ui: the model's edges.
+
 	bool model_spawn_visible = false;
 	uint32_t shots_saved = 0;
 
@@ -141,8 +130,6 @@ struct M2bCheck::State {
 		c->send_debug(q);
 	}
 
-	// An own death resolved (the next life, or the end of the run): it counts for the after-death row when the spawn
-	// screen had time to show and it was not a revive that came first.
 	void resolve_death(bool p_revived, double p_t) {
 		if (!death_pending) {
 			return;
@@ -153,7 +140,7 @@ struct M2bCheck::State {
 			++tally.deaths_checked;
 			++tally.screens_after_death;
 		} else if (!p_revived && had_time) {
-			++tally.deaths_checked; // the screen never came: the row fails
+			++tally.deaths_checked;
 			note(m2b_fmt("own death at %.1f s: no spawn screen after it", death_t));
 		}
 	}
@@ -162,7 +149,7 @@ struct M2bCheck::State {
 		const host::PresentationFrame &fr = f();
 		InputMapper &mp = mapper();
 		const double now_s = double(p_now_ns) * 1e-9;
-		// The match.
+
 		if (fr.match_valid) {
 			tally.match_seen = true;
 			tally.in_round_seen = tally.in_round_seen || fr.match.phase == net::MatchPhase::InRound;
@@ -172,7 +159,7 @@ struct M2bCheck::State {
 				note(m2b_fmt("round over at %.1f s: US %d - RU %d (winner %d)", p_t, fr.match.kills[0], fr.match.kills[1], int(fr.match.winner)));
 			}
 		}
-		// The join screen: up before the first own life of the round.
+
 		if (m.spawn_screen && !m.spawned_this_round && lives_seen == 0) {
 			if (!join_counted) {
 				join_counted = true;
@@ -183,7 +170,7 @@ struct M2bCheck::State {
 				join_shot = save_shot("gx_m2b_join") || !tally.windowed;
 			}
 		}
-		// A new own life (deploy or revive).
+
 		if (g.alive && (fr.own_curr.life != life_seen || !was_alive)) {
 			const bool revived = m.life_revived;
 			life_seen = fr.own_curr.life;
@@ -201,10 +188,10 @@ struct M2bCheck::State {
 			next_tab = p_t + 2.0;
 		}
 		was_alive = g.alive;
-		// An own death (the session's count from the drained Death events).
+
 		if (m.own_deaths > deaths_seen) {
 			deaths_seen = m.own_deaths;
-			resolve_death(false, p_t); // two deaths without a life between (cannot happen; keeps the tally honest)
+			resolve_death(false, p_t);
 			death_pending = true;
 			death_t = p_t;
 			death_screen_seen = false;
@@ -218,7 +205,7 @@ struct M2bCheck::State {
 		if (death_pending && m.spawn_screen) {
 			death_screen_seen = true;
 		}
-		// The spawn screen: a kit key, then Deploy, once Deploy is enabled.
+
 		if (m.spawn_screen && !screen_was_up) {
 			screen_up_t = p_t;
 			kit_pressed = deploy_pressed = false;
@@ -241,12 +228,12 @@ struct M2bCheck::State {
 				++deploy_index;
 			}
 		}
-		// RoundOver: Tab is let go (the round-end screen shows; a scoreboard held then would stay up).
+
 		if (round_over && tab_until >= 0.0) {
 			mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
 			tab_until = -1.0;
 		}
-		// Alive: stand in the open, hold Tab now and then; until the first own death, seek enemies, then fall.
+
 		if (g.alive && !round_over) {
 			if (tab_until < 0.0 && p_t >= next_tab) {
 				tab_until = p_t + kM2bTabHoldS;
@@ -264,14 +251,13 @@ struct M2bCheck::State {
 				}
 			}
 			const bool in_round = fr.match_valid && fr.match.phase == net::MatchPhase::InRound;
-			// integ/m2b-w2 [revived seek]: a bot's revive gives a life without a deploy, so the script keeps seeking until
-			// a death was followed by a deploy (the merge pass's play check: revived at 14.9 s, then alive to RoundOver).
+
 			const bool need_death = m.own_deaths == 0 || m.deploys < 2;
 			if (in_round && need_death && next_seek >= 0.0 && p_t >= next_seek) {
 				next_seek = p_t + kM2bSeekEveryS;
 				seek_enemy(p_now_ns, p_t);
 			}
-			if (in_round && m.own_deaths == 0 && !dropped && p_t - life_t0 >= kM2bFallAfterS) { // integ/m2b-w2 [revived seek]: the drop stays the first death's last resort
+			if (in_round && m.own_deaths == 0 && !dropped && p_t - life_t0 >= kM2bFallAfterS) {
 				dropped = true;
 				sim::Vec3 up = fr.own_curr.position;
 				up[1] += 60.0f;
@@ -279,9 +265,9 @@ struct M2bCheck::State {
 				note(m2b_fmt("still alive after %.0f s: a 60 m drop", p_t - life_t0));
 			}
 		}
-		// ui: the model (and the records in a window).
+
 		ui_tally(now_s, p_t);
-		// The round end's shot.
+
 		if (round_over_t >= 0.0 && !round_end_shot && p_t - round_over_t >= 1.0) {
 			round_end_shot = save_shot("gx_m2b_round_end") || !tally.windowed;
 		}
@@ -292,7 +278,7 @@ struct M2bCheck::State {
 		std::array<host::PresentedSoldier, net::kMaxSlots> others{};
 		const size_t n = fr.valid ? host::present_others(fr, p_now_ns, others) : 0;
 		const sim::Vec3 &me = fr.own_curr.position;
-		// The nearest enemy, another than the last one sought when there is one (that one did not shoot).
+
 		int best = -1, best_other = -1;
 		float best_d = 1e30f, best_other_d = 1e30f;
 		for (size_t i = 0; i < n; ++i) {
@@ -318,7 +304,7 @@ struct M2bCheck::State {
 			note(m2b_fmt("%.1f s: no enemy in view to walk to", p_t));
 			return;
 		}
-		// In front of the enemy, facing it (the player never fires: the bot sees it and shoots).
+
 		const host::PresentedSoldier &e = others[size_t(best)];
 		const M2bSeekSpot spot = m2b_seek_spot(e.position, e.yaw, kM2bSeekFrontMetres);
 		last_sought = e.slot;
@@ -341,7 +327,7 @@ struct M2bCheck::State {
 			k2 = r.scoreboard_team_kills[1];
 		}
 		++tally.scoreboard_samples;
-		// The drawn frame is one behind the model at most: a kill in between is not a mismatch.
+
 		const bool ok = shown && std::abs(k1 - fr.match.kills[0]) + std::abs(k2 - fr.match.kills[1]) <= 1;
 		if (!ok) {
 			++tally.scoreboard_mismatch;
@@ -352,7 +338,7 @@ struct M2bCheck::State {
 
 	void ui_tally(double p_now_s, double p_t) {
 		(void)p_now_s;
-		// The kill card: once, a frame after the own death by another soldier (the frame that drained it fed it).
+
 		if (death_pending && !killcard_checked && p_t - death_t >= 0.2) {
 			killcard_checked = true;
 #if OPENBF3_M2B_HAVE_UI
@@ -406,7 +392,7 @@ struct M2bCheck::State {
 			tally.round_end_shown = tally.round_end_shown && r.round_end_shown > 0;
 			tally.missing_lookups = r.missing_fonts + r.missing_icons + r.missing_strings;
 		} else if (tally.windowed) {
-			tally.missing_lookups = 1; // the screens were never built (the ERROR line says why)
+			tally.missing_lookups = 1;
 		}
 #endif
 #if OPENBF3_M2B_HAVE_CAM
@@ -532,4 +518,4 @@ std::string M2bCheck::report() const {
 	return out;
 }
 
-} // namespace bf3::godot_side
+}

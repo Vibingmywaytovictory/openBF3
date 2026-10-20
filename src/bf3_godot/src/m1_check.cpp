@@ -41,7 +41,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-// psapi after windows.h
+
 #include <psapi.h>
 
 namespace bf3::godot_side {
@@ -75,7 +75,6 @@ float distance3(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-// sim.motor's heading_distance: the distance travelled along the course heading.
 float heading_distance(const sim::Vec3 &p_from, const sim::Vec3 &p_to, uint16_t p_yaw) {
 	const float a = sim::yaw_radians(p_yaw);
 	return (p_to[0] - p_from[0]) * std::sin(a) + (p_to[2] - p_from[2]) * std::cos(a);
@@ -109,7 +108,7 @@ struct ChainStep {
 	sim::Pose from;
 	uint32_t ticks;
 };
-// S->C, C->P, P->S, S->P, P->C, C->S: every transition of docs §6.5 once, by the mapper's toggles.
+
 constexpr ChainStep kChain[6] = {
 	{ InputAction::Crouch, sim::Pose::Crouch, sim::Pose::Stand, 18 },
 	{ InputAction::Prone, sim::Pose::Prone, sim::Pose::Crouch, 30 },
@@ -131,7 +130,7 @@ struct Profile {
 	uint64_t seed;
 	bool gate;
 };
-// Orchestrator decision on docs §16 question 2: 150 ms RTT / 2 % is the gate; 150 ms one way a reported stress row.
+
 constexpr Profile kProfiles[2] = { { "150/2", 11, true }, { "lat=150-165,loss=2", 12, false } };
 
 constexpr double kE2IdleS = 30.0;
@@ -143,7 +142,7 @@ bool same_bytes(const PackedByteArray &p_a, const PackedByteArray &p_b) {
 	return p_a.size() == p_b.size() && (p_a.size() == 0 || std::memcmp(p_a.ptr(), p_b.ptr(), size_t(p_a.size())) == 0);
 }
 
-} // namespace
+}
 
 int print_check_table(const char *p_title, const std::vector<CheckRow> &p_rows) {
 	size_t checks = 0, passed = 0;
@@ -184,7 +183,7 @@ CheckRow check_surface_format() {
 			const float a = float(i) * 0.7f;
 			s.positions.insert(s.positions.end(), { 100.0f + std::sin(a) * 3.0f, 60.0f + float(i % 7) * 0.25f, -500.0f + std::cos(a * 1.3f) * 2.0f });
 			if (c.normals) {
-				// Mixed signs, a few exact axes and negative Z (the octahedron's lower half).
+
 				float n[3] = { std::sin(a * 2.1f), std::cos(a * 0.9f), std::sin(a * 0.37f) - 0.4f };
 				if (i % 5 == 0) {
 					n[0] = 0.0f;
@@ -210,7 +209,7 @@ CheckRow check_surface_format() {
 			s.indices.insert(s.indices.end(), { int32_t(i), int32_t(i + 2), int32_t(i + 1) });
 		}
 		const Dictionary mine = encode_rs_surface(s, RID());
-		// Godot's own conversion of the same arrays.
+
 		Array arrays;
 		arrays.resize(RenderingServer::ARRAY_MAX);
 		PackedVector3Array pos;
@@ -266,7 +265,7 @@ CheckRow check_surface_format() {
 				same_bytes(bytes(mine, "attribute_data"), bytes(godot_surface, "attribute_data")) &&
 				same_bytes(bytes(mine, "index_data"), bytes(godot_surface, "index_data")) && aabb_mine.is_equal_approx(aabb_godot);
 		equal += same ? 1 : 0;
-		// The creation path the upload uses (mesh_create_from_surfaces) gives the same surface back.
+
 		TypedArray<Dictionary> list;
 		list.push_back(mine);
 		const RID created = rs->mesh_create_from_surfaces(list, 0);
@@ -359,8 +358,6 @@ CheckRow check_input_keys() {
 			detail;
 	return row;
 }
-
-// ---- ShotRunner -------------------------------------------------------------------------------------------------
 
 bool ShotRunner::parse(const std::string &p_shots, const std::string &p_spawns, std::vector<FreeShot> &r_free, std::vector<SpawnShot> &r_spawn,
 		std::string &r_error) {
@@ -491,9 +488,7 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 			}
 			case 1:
 				if (mapper.adopted_life() > life_) {
-					// SpawnAt respawns a live soldier: the commands already sent for ticks after the spawn (the previous
-					// shot's pose) reach the new life (docs §8.2 assumption 2), so the adopted target pose can be that
-					// pose. Each shot starts from Stand; the toggles below then act from Stand.
+
 					mapper.set_requested_pose(sim::Pose::Stand);
 					if (shot.mode == "crouch") {
 						mapper.script_press(InputAction::Crouch);
@@ -512,7 +507,7 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 				}
 				return false;
 			case 2: {
-				// Long enough for the slowest transition from the previous shot's pose (P->C 63 ticks, 1.05 s) plus settling.
+
 				const double wait = 1.6;
 				if (seconds_between(state_ns_, p_now_ns) >= wait) {
 					state_ = 3;
@@ -522,7 +517,7 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 			}
 			default:
 				if (frames_ < 30) {
-					return false; // drawn a few times before the capture (docs §11.8)
+					return false;
 				}
 				{
 					const std::string path = (dir_.empty() ? std::string(".") : dir_) + "/spawn_" + std::to_string(shot.index) + "_" + shot.mode + ".png";
@@ -546,7 +541,7 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		}
 	}
 	if (next_ < spawn_.size() + teleport_.size()) {
-		// TC: a teleport shot (m1_check.h).
+
 		const size_t index = next_ - spawn_.size();
 		const TeleportShot &shot = teleport_[index];
 		const float rad = 3.14159265358979323846f / 180.0f;
@@ -575,7 +570,7 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 				return false;
 			}
 			case 1:
-				if (seconds_between(state_ns_, p_now_ns) >= 2.0) { // the fall from a few metres plus settling
+				if (seconds_between(state_ns_, p_now_ns) >= 2.0) {
 					state_ = 2;
 					frames_ = 0;
 				}
@@ -614,15 +609,14 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		session_.cameras().place_free(Vector3(shot.view[0], shot.view[1], shot.view[2]), mapper.free_view().yaw, mapper.free_view().pitch);
 		frames_ = 0;
 		state_ = 1;
-		state_ns_ = p_now_ns; // L1 look: the settle time runs from here
+		state_ns_ = p_now_ns;
 		return false;
 	}
 	if (frames_ < 30 || seconds_between(state_ns_, p_now_ns) < settle_s_) {
 		last_ns_ = p_now_ns;
 		return false;
 	}
-	// L1 look: --shot-measure=<n> frames timed at each view before its screenshot (frame interval and the viewport's
-	// GPU render time; README "L1 look", ctest godot.l1_look).
+
 	if (measure_frames_ > 0 && measured_ < measure_frames_) {
 		RenderingServer *rs = RenderingServer::get_singleton();
 		const RID viewport = session_.get_viewport()->get_viewport_rid();
@@ -689,8 +683,7 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 					total_cpu_ms_ / double(total_frames_), total_gpu_ms_ / double(total_frames_), (unsigned long long)total_frames_, free_.size())));
 		}
 		if (median_views_ > 0) {
-			// The size the screenshots have (the rendered image, read back once after timing): with stretch mode
-			// canvas_items the visible rect is the 1152x648 base size, and the texture's reported size is scaled again.
+
 			const Ref<ViewportTexture> target = session_.get_viewport()->get_texture();
 			const Ref<Image> image = target.is_valid() ? target->get_image() : Ref<Image>();
 			const Vector2 size = image.is_valid() ? Vector2(float(image->get_width()), float(image->get_height())) : Vector2();
@@ -698,15 +691,13 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_, int(size.x), int(size.y))));
 		}
 		if (!run_cpu_samples_.empty()) {
-			// Integration (README "L1 look"): godot.l1_look gates the p99 frame interval over every timed frame of the run.
+
 			UtilityFunctions::print(to_godot(fmt("[look] frame time p99: %.3f ms per frame (interval), over %zu frames at %zu views",
 					double(percentile(run_cpu_samples_, 0.99)), run_cpu_samples_.size(), median_views_)));
 		}
 	}
 	return next_ >= total;
 }
-
-// ---- M1Check ----------------------------------------------------------------------------------------------------
 
 M1Check::M1Check(Bf3LevelSession &p_session, uint32_t p_courses, const std::string &p_phase) :
 		session_(p_session), want_courses_(p_courses) {
@@ -784,8 +775,7 @@ void M1Check::prepare() {
 		phase_ = Phase::Finish;
 		return;
 	}
-	// The check's own CollisionWorld and motor over the same shapes and params (docs §10.3: each test computes its
-	// rows in-process, so no test reads another's output).
+
 	bf3::core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(level->static_world);
 	if (!world) {
 		fail_phase("prepare", "CollisionWorld: " + world.error().message);
@@ -799,8 +789,7 @@ void M1Check::prepare() {
 		phase_ = Phase::Finish;
 		return;
 	}
-	// E3's headless rows and the E1 courses: settle_spawn on every point; the first points whose settled feet have a
-	// 20 m find_clear_heading course (the defaults sim.motor uses, so the same courses: points 7, 20, 22, 23, 36, 70).
+
 	for (const sim::SpawnPoint &p : level->spawns) {
 		headless_rows_.push_back(sim::settle_spawn(motor_, *world_, p, 1, 0));
 	}
@@ -917,7 +906,7 @@ void M1Check::analyse_segment(const std::vector<sim::SoldierState> &p_trace) {
 		}
 		const float mean = heading_distance(p_trace[start + 59].position, p_trace[start + 119].position, c.heading) / (60.0f * sim::kTickSeconds);
 		const bool pose_ok = p_trace[start].pose == kSpeedPose[segment_] && p_trace[start].target_pose == kSpeedPose[segment_] && p_trace[start].transition_ticks == 0;
-		// docs §1 E1a on Metro (sim.motor's reading): the window's mean +-1 %, no tick above +1 %, every tick >= 95 %.
+
 		const bool ok = pose_ok && lo >= 0.95f * expected && hi <= 1.01f * expected && std::fabs(mean - expected) <= 0.01f * expected;
 		r.lo = std::min(r.lo, lo);
 		r.hi = std::max(r.hi, hi);
@@ -1174,8 +1163,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 					phase_ns_ = p_now_ns;
 				}
 			} else {
-				// The chain: press, wait for the predicted transition to end, 6 ticks, next. Odd steps wait for transition
-				// step_ / 2; even steps (> 0) follow transition step_ / 2 - 1 and press transition step_ / 2.
+
 				const int chain = step_ % 2 == 1 ? step_ / 2 : step_ / 2 - 1;
 				if (step_ == 0) {
 					send_trace(380);
@@ -1238,7 +1226,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 		case Phase::E1dTeleport: {
 			const DropCase &d = kDrops[drop_index_];
 			if (step_ == 0) {
-				// Alive, the life adopted, at rest.
+
 				if (f.valid && f.own_curr.mode != sim::MoveMode::Dead && mapper.adopted_life() == f.own_curr.life && horizontal(f.own_curr.velocity) < 1e-3f) {
 					mapper.release_all();
 					mapper.set_requested_pose(sim::Pose::Stand);
@@ -1274,7 +1262,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 		}
 
 		case Phase::E1dRespawn: {
-			// After a death the server respawns the slot (respawn_ticks); the mapper adopts the new life.
+
 			const bool dead_case = kDrops[drop_index_].dies;
 			const bool ready = dead_case ? (mapper.adopted_life() > drop_life_ && seconds_between(phase_ns_, p_now_ns) > 1.5) : seconds_between(phase_ns_, p_now_ns) > 0.5;
 			if (ready || timed_out(p_now_ns, 15.0)) {
@@ -1292,7 +1280,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 				q.kind = net::DebugKind::SpawnSweep;
 				q.id = ++request_id_;
 				q.ticks = 60;
-				trace_id_ = q.id; // the report id to wait for
+				trace_id_ = q.id;
 				client->send_debug(q);
 				step_ = 1;
 				phase_ns_ = p_now_ns;
@@ -1357,7 +1345,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 		}
 
 		case Phase::E2Spawn: {
-			// The new client's first life, then SpawnAt the first course's point (a known 20 m course).
+
 			if (step_ == 0) {
 				if (f.valid && f.own_curr.life > 0 && mapper.adopted_life() == f.own_curr.life) {
 					e2_life_ = f.own_curr.life;
@@ -1404,7 +1392,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 				phase_ = Phase::E2Start;
 				return false;
 			}
-			// docs §1 E2: 30 s idle after the spawn, then walk 2 s / rest 13 s, forward and back along the course.
+
 			int forward = 0;
 			if (t >= kE2IdleS) {
 				const int k = int((t - kE2IdleS) / (kE2WalkS + kE2RestS));
@@ -1421,7 +1409,7 @@ bool M1Check::frame(uint64_t p_now_ns) {
 				r.tick = f.tick;
 				r.input_idle = f.own_command.move_forward == 0 && f.own_command.move_right == 0 && f.own_command.buttons == 0;
 				r.horizontal_speed = horizontal(f.own_curr.velocity);
-				// The presented eye, read back from the first-person camera this frame placed.
+
 				const Vector3 eye = session_.cameras().first_person()->get_global_transform().origin;
 				r.eye = { eye.x, eye.y, eye.z };
 				r.visual_offset_m = std::sqrt(f.visual_offset[0] * f.visual_offset[0] + f.visual_offset[1] * f.visual_offset[1] + f.visual_offset[2] * f.visual_offset[2]);
@@ -1443,15 +1431,13 @@ bool M1Check::frame(uint64_t p_now_ns) {
 	return false;
 }
 
-// ---- M1LoadCheck ------------------------------------------------------------------------------------------------
-
 M1LoadCheck::M1LoadCheck(Bf3LevelSession &p_session, bool p_warm, ShotRunner *p_shots) :
 		session_(p_session), warm_(p_warm), shots_(p_shots) {}
 
 bool M1LoadCheck::frame(uint64_t p_now_ns, double p_delta) {
 	if (start_ns_ == 0) {
 		start_ns_ = p_now_ns;
-		session_.mapper().set_scripted(true); // the first-person view at the spawn, no input
+		session_.mapper().set_scripted(true);
 		return false;
 	}
 	if (phase_ == 0) {
@@ -1576,4 +1562,4 @@ void M1LoadCheck::report() {
 	exit_code_ = print_check_table("M1 LOAD CHECK", rows);
 }
 
-} // namespace bf3::godot_side
+}

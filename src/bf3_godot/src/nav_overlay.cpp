@@ -17,7 +17,6 @@ using namespace godot;
 
 namespace {
 
-// Unshaded vertex colour, both faces, depth tested; a little transparent so the floor shows through.
 const char *kNavShader = R"(shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_opaque, shadows_disabled;
 void fragment() {
@@ -48,7 +47,7 @@ std::array<float, 4> hue_color(float p_hue, float p_s, float p_v, float p_a) {
 	return { r + m, g + m, b + m, p_a };
 }
 
-} // namespace
+}
 
 NavOverlayArrays prepare_nav_overlay(const sim::NavDebugMesh &p_mesh, uint32_t p_main) {
 	NavOverlayArrays out;
@@ -63,7 +62,7 @@ NavOverlayArrays prepare_nav_overlay(const sim::NavDebugMesh &p_mesh, uint32_t p
 			c = p_mesh.triangle_area[t] == sim::kNavAreaCrouch ? std::array<float, 4>{ 0.15f, 0.35f, 1.0f, 0.6f } : std::array<float, 4>{ 0.1f, 0.85f, 0.2f, 0.55f };
 			++out.triangles_main;
 		} else {
-			// Red to magenta, a hue per component id (golden-ratio steps over a 0.12-wide band around red).
+
 			const float f = float(std::fmod(double(comp) * 0.61803398875, 1.0));
 			c = hue_color(0.94f + 0.12f * f, 0.9f, 0.95f, 0.6f);
 			++out.triangles_other;
@@ -151,4 +150,4 @@ void NavOverlay::free_all() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

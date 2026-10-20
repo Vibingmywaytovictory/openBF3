@@ -1,9 +1,3 @@
-// S4 level logic: the logic ghost layout and its encoding (docs/design/s4.md §7, plan §3.5). Not networked in S4.
-//
-// Encoding (little-endian): tick u32, bool count u16, transform count u16, sequence count u16, then the bools as
-// ceil(n / 8) bytes (bit i of byte i / 8 = bools[i]), 12 float32 per transform, one u32 start tick per sequence.
-// Decode accepts exactly the layout's counts and the exact byte length, so hostile bytes fail and never allocate
-// beyond the layout.
 #include "bf3/sim/logic/logic_runtime.h"
 
 #include "bf3/core/gameplay/logic_types.h"
@@ -78,7 +72,7 @@ bool bit(const std::vector<uint64_t> &p_bits, size_t p_i) {
 	return p_i / 64 < p_bits.size() && ((p_bits[p_i / 64] >> (p_i % 64)) & 1u) != 0;
 }
 
-} // namespace
+}
 
 std::vector<uint8_t> LogicGhost::encode() const {
 	const size_t n = std::min(bool_count, kMaxGhostEntries);
@@ -131,7 +125,7 @@ core::Result<LogicGhost> LogicGhost::decode(std::span<const uint8_t> p_bytes, co
 			g.bool_bits[i / 64] |= uint64_t(1) << (i % 64);
 		}
 	}
-	// Bits past the count in the last byte must be zero (one encoding per state).
+
 	if (bools % 8 != 0 && (p_bytes[at + bools / 8] >> (bools % 8)) != 0) {
 		return core::make_error("logic ghost: padding bits set");
 	}
@@ -164,4 +158,4 @@ std::vector<LogicGhost::BoolDelta> LogicGhost::bool_delta(const LogicGhost &p_ba
 	return out;
 }
 
-} // namespace bf3::sim::logic
+}

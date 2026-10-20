@@ -1,13 +1,3 @@
-// S2 vehicle replay (docs/design/s2.md §1, §11; bf3_sim vehicle_*.h, bf3_core vehicle_drive.h / vehicle_spawns.h).
-//
-// Suite sim-vehicle-unit (no install): the tuning file, the ghost codec, the state hash, the command log, the model
-// on a Humvee fixture (the §4.2 numbers as constants, the §4.5 chassis boxes), VehicleWorld on the synthetic ground
-// (BodyIDs, Jolt stream sizes, the bit-exact POD restore, the wake rule, the steering sign, hostile states and
-// snapshots), gates D / G1 / G1r / G2x (G2 reported) on the 7 synthetic courses, G1m (three touching Humvees), two worlds on two
-// threads, and the fixture's handling numbers.
-// Suite sim-vehicle (install, exits 77 without one): MP_007 RushLarge0: the Humvee def and spawners as read, the
-// real model, the spawn settle (report S), the course search (gate C), D / G1 / G1r / G2x (G2 reported) on every found course, the
-// handling numbers of the real model, 200 mutations of the Humvee partition through the reader, install unchanged.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -69,8 +59,6 @@ constexpr bool kAsan = true;
 #else
 constexpr bool kAsan = false;
 #endif
-
-// ---- the Humvee fixture (s2.md §4.2 numbers, §4.5 chassis pieces) -------------------------------------------------
 
 gp::VehicleDriveDef humvee_def() {
 	gp::VehicleDriveDef d;
@@ -159,7 +147,7 @@ std::vector<std::vector<Vec3>> humvee_pieces() {
 		}
 		out.push_back(p);
 	}
-	// the roof ring: a 12-gon prism over the cylinder's bounds
+
 	std::vector<Vec3> ring;
 	const float cx = -0.021f, cz = 0.7025f, r = 0.46f;
 	for (int k = 0; k < 12; ++k) {
@@ -261,10 +249,6 @@ void print_handling(const char *p_what, const VehicleHandling &p_h) {
 			double(p_h.turning_circle_m), double(p_h.turning_circle_com_m), double(p_h.top_speed_kmh));
 }
 
-// The pod ablations (s2.md §7.3) restore the OwnHistory client's diverged history, never a copy of the server's:
-// on an undiverged base they would equal Full by construction and measure nothing. Full restores the server.
-// Lanes for the course loops: each course is its own VehicleWorld (Jolt, CROSS_PLATFORM_DETERMINISTIC), so the
-// reports do not depend on the lane a course runs on ("two worlds stepped on two threads at once" proves it).
 constexpr unsigned kCourseLanes = 4;
 
 void check_pod_bases(const VehicleCourseReport &p_report) {
@@ -277,7 +261,7 @@ void check_pod_bases(const VehicleCourseReport &p_report) {
 	}
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-vehicle-unit") {
 	TEST_CASE("sim.vehicle: the shipped vehicle_tuning.cfg parses to the defaults; format / parse round trip; hostile text fails with the line") {
@@ -367,7 +351,7 @@ TEST_SUITE("sim-vehicle-unit") {
 			CHECK(back.driver.stand_still_ticks == s.driver.stand_still_ticks);
 			CHECK(std::fabs(back.wheels[2].suspension_length - s.wheels[2].suspension_length) <= 0.4f / 65535.0f);
 		}
-		// hostile codes: each refused, the state untouched
+
 		VehicleState good;
 		good.wheel_count = 4;
 		good.controller.gear = 1;
@@ -381,7 +365,7 @@ TEST_SUITE("sim-vehicle-unit") {
 		hostile.push_back({ "largest index", h });
 		h = base;
 		h.orientation_largest = 3;
-		h.orientation[0] = h.orientation[1] = h.orientation[2] = 2047; // each 1/sqrt2: squared sum 1.5
+		h.orientation[0] = h.orientation[1] = h.orientation[2] = 2047;
 		hostile.push_back({ "smallest-three radicand", h });
 		h = base;
 		h.active = 2;
@@ -455,7 +439,7 @@ TEST_SUITE("sim-vehicle-unit") {
 		b.wheels[0].steer_angle = 0.3f;
 		b.wheels[0].in_contact = 1;
 		b.tick = 77;
-		b.wheels[5].angle = 1.0f; // past wheel_count
+		b.wheels[5].angle = 1.0f;
 		CHECK(vehicle_state_hash(b) == h);
 		CHECK(vehicle_state_first_difference(a, b).empty());
 		b = a;
@@ -510,14 +494,14 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(fl.attachment[1] == doctest::Approx(0.48876f + 0.225f).epsilon(1e-6));
 		CHECK(fl.suspension_max == 0.4f);
 		CHECK(fl.suspension_min == doctest::Approx(0.04f));
-		CHECK(fl.spring_stiffness == doctest::Approx(38890.0f).epsilon(0.001)); // 1500 x 18.15 / (4 x 0.175)
+		CHECK(fl.spring_stiffness == doctest::Approx(38890.0f).epsilon(0.001));
 		CHECK(fl.spring_damping == doctest::Approx(3437.0f).epsilon(0.001));
 		CHECK(fl.max_brake_torque == doctest::Approx(1840.0f));
 		CHECK(fl.max_hand_brake_torque == 0.0f);
 		CHECK(m->wheels[2].max_hand_brake_torque == 4000.0f);
 		CHECK(fl.max_steer_angle == doctest::Approx(32.0f * 3.14159265f / 180.0f));
 		CHECK(m->wheels[2].max_steer_angle == 0.0f);
-		CHECK(fl.side == 0); // x > 0: Jolt's left
+		CHECK(fl.side == 0);
 		CHECK(m->wheels[1].side == 1);
 		CHECK(fl.axle == 0);
 		CHECK(m->wheels[3].axle == 1);
@@ -535,12 +519,12 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(m->stand_still_ticks == 120);
 		CHECK(vehicle_max_steer_angle(*m, 0.0f) == doctest::Approx(32.0f * 3.14159265f / 180.0f));
 		CHECK(vehicle_max_steer_angle(*m, 40.0f / 3.6f) < vehicle_max_steer_angle(*m, 10.0f / 3.6f));
-		// equal inputs, equal digest; another tuning, another digest
+
 		CHECK(fixture_model()->model_digest == m->model_digest);
 		VehicleTuning t;
 		t.lateral_grip = 1.1f;
 		CHECK(fixture_model(t)->model_digest != m->model_digest);
-		// bounds
+
 		const std::vector<std::vector<Vec3>> pieces = humvee_pieces();
 		std::vector<ChassisPieceSource> sources;
 		for (const auto &p : pieces) {
@@ -613,9 +597,7 @@ TEST_SUITE("sim-vehicle-unit") {
 		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes();
 		const std::shared_ptr<const VehicleModel> m = fixture_model();
 		const std::array<VehicleCourse, kVehicleCourseKindCount> courses = synthetic_vehicle_courses();
-		// The bumps line driven at full throttle (the Straight script on it: ~65 km/h at the kicker, where the bumps
-		// script's 55 km/h unloads no more than two wheels) to the first airborne tick (awake case at tick 200, mid-air
-		// off the kicker), the asleep case from a stopped vehicle deactivated through the Impl seam.
+
 		VehicleCourse bumps = courses[size_t(VehicleCourseKind::Bumps)];
 		bumps.kind = VehicleCourseKind::Straight;
 		std::unique_ptr<VehicleWorld> w = world_at(shapes, m, bumps.start);
@@ -683,7 +665,7 @@ TEST_SUITE("sim-vehicle-unit") {
 			step1(*a, drive_vehicle_course(straight, *m, a->state(0), t, memory));
 		}
 		std::unique_ptr<VehicleWorld> b = world_at(shapes, m, straight.start);
-		REQUIRE(b->restore(early).ok()); // its own (older) history
+		REQUIRE(b->restore(early).ok());
 		const core::Status s = b->restore_vehicle_state(0, a->state(0), vehicle_restore::kAll, ContactCachePolicy::Keep);
 		REQUIRE_MESSAGE(s.ok(), (s.ok() ? std::string() : s.error().message));
 		CHECK(vehicle_state_hash(b->state(0)) == vehicle_state_hash(a->state(0)));
@@ -707,7 +689,7 @@ TEST_SUITE("sim-vehicle-unit") {
 			step1(*w, wakers[i]);
 			CHECK_MESSAGE(w->state(0).body.active == 1, "waker " << i);
 		}
-		// woken by throttle, it drives
+
 		std::unique_ptr<VehicleWorld> w = world_at(shapes, m, placed(0, 0, 0));
 		settle(*w);
 		w->impl().system->GetBodyInterface().DeactivateBody(w->impl().vehicles[0].body);
@@ -777,12 +759,12 @@ TEST_SUITE("sim-vehicle-unit") {
 			CHECK_MESSAGE(w->state_hash() == before, what);
 		}
 		CHECK(!w->restore_vehicle_state(1, good, vehicle_restore::kAll, ContactCachePolicy::Keep).ok());
-		// a NaN outside the selected groups is not read
+
 		s = good;
 		s.wheels[0].lambda_lateral = std::nanf("");
 		CHECK(w->restore_vehicle_state(0, s, vehicle_restore::kGhost, ContactCachePolicy::Keep).ok());
 		CHECK(w->state_hash() == before);
-		// snapshots: another world's slot list, a truncated stream, a damaged stream
+
 		const VehiclePlacement two[2] = { placed(0, 0, 0), placed(10, 0, 0) };
 		std::unique_ptr<VehicleWorld> other = world_with(shapes, m, two);
 		VehicleWorldSnapshot foreign;
@@ -809,14 +791,12 @@ TEST_SUITE("sim-vehicle-unit") {
 		std::vector<VehicleCourseReport> reports;
 		VehicleReplayOptions o;
 		if (kAsan) {
-			// asan runs Jolt ~27x slower (1,242 s with all six modes, s2.md §15.1): OwnHistory (G2, reported, and the
-			// diverged history ExactPod restores onto), ExactPod (the G2x gate mode, s2.md §15.2) and the Full self-check
+
 			o.modes = (1u << uint32_t(VehicleRestoreMode::OwnHistory)) | (1u << uint32_t(VehicleRestoreMode::ExactPod)) |
 					(1u << uint32_t(VehicleRestoreMode::Full));
 		}
 		const auto start = std::chrono::steady_clock::now();
-		// Each course runs in its own VehicleWorld over the shared const shapes and model, on lanes; the reports are
-		// printed and gated here in course order.
+
 		const auto synthetic = synthetic_vehicle_courses();
 		std::vector<core::Result<VehicleCourseReport>> runs = core::parallel_map<core::Result<VehicleCourseReport>>(
 				synthetic.size(), [&](size_t i) { return run_vehicle_course(shapes, m, synthetic[i], o); }, kCourseLanes);
@@ -841,7 +821,7 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK_MESSAGE(vehicle_gate_courses(reports, &why), why);
 		CHECK_MESSAGE(vehicle_gate_drove(reports, &why), why);
 		CHECK_MESSAGE(vehicle_gate_g1(reports, &why), why);
-		// G2 (the quantised ghost, OwnHistory) is report-only since the integration (s2.md §15.2); G2x is the gate.
+
 		why.clear();
 		const bool g2 = vehicle_gate_g2(reports, &why);
 		std::printf("G2 (report only, quantised ghost): %s%s%s\n", g2 ? "pass" : "over 2 cm", why.empty() ? "" : ": ", why.c_str());
@@ -861,9 +841,7 @@ TEST_SUITE("sim-vehicle-unit") {
 	}
 
 	TEST_CASE("sim.vehicle: G1t: three Humvees over a terrain HeightFieldShape, its patch and a Havok ramp tile, bit-identical, G1 and G1r") {
-		// TC (docs/design/terrain-collision.md §12.1): a 65 x 65 field at 2 m (x, z in -64..64) with a 4 degree slope
-		// along +X and bumps, one interior hole (sample (32, 40), world (0, 16)): the cells around it put triangles in
-		// the patch; beside it on +X one Havok MeshShape tile, a ramp continuing the slope from the x = 64 border.
+
 		const float slope = std::tan(4.0f * 3.14159265f / 180.0f);
 		const auto ground_y = [&](float x, float z) { return 30.0f + slope * x + 0.15f * std::sin(x / 5.0f) * std::cos(z / 7.0f); };
 		std::vector<float> heights(65 * 65);
@@ -907,21 +885,21 @@ TEST_SUITE("sim-vehicle-unit") {
 			return p;
 		};
 		std::array<VehicleCourse, 3> group;
-		// slot 0 idles next to the hole (its wheels over the patch triangles)
+
 		group[0].kind = VehicleCourseKind::SlopeIdle;
 		group[0].found = true;
 		group[0].a = { 2.5f, ground_y(2.5f, 13.0f), 13.0f };
 		group[0].b = group[0].a;
 		group[0].start = at(2.5f, 13.0f, true);
 		group[0].slope_degrees = 4.0f;
-		// slot 1 rams slot 0's side, backs off, again
+
 		group[1].kind = VehicleCourseKind::Collision;
 		group[1].found = true;
 		group[1].a = { 2.5f, ground_y(2.5f, -15.0f), -15.0f };
 		group[1].b = { 2.5f, ground_y(2.5f, 11.8f), 11.8f };
 		group[1].start = at(2.5f, -15.0f, false);
 		group[1].feature = 1.5f;
-		// slot 2 slaloms across the field, past the hole and slot 0, over the field-to-tile border onto the ramp
+
 		group[2].kind = VehicleCourseKind::Slalom;
 		group[2].found = true;
 		group[2].a = { -50.0f, ground_y(-50.0f, 17.0f), 17.0f };
@@ -972,13 +950,10 @@ TEST_SUITE("sim-vehicle-unit") {
 	}
 }
 
-// ---- sim-vehicle: MP_007 RushLarge0 (install; exits 77 without one) ----------------------------------------------
-
 namespace {
 
 constexpr const char *kHumvee = "vehicles/humveearmored/humveearmored";
 
-// MP_007 RushLarge0 loaded once per process. The snapshot is taken before the first install read.
 struct Caspian {
 	std::unique_ptr<core::InstallReader> reader;
 	std::shared_ptr<core::Install> install;
@@ -986,7 +961,7 @@ struct Caspian {
 	core::level::LevelCollision collision;
 	std::shared_ptr<const StaticWorldShapes> shapes;
 	std::unique_ptr<CollisionWorld> world;
-	std::vector<core::level::VehicleSpawnerDef> spawners; // the Humvee spawners
+	std::vector<core::level::VehicleSpawnerDef> spawners;
 	std::shared_ptr<const VehicleModel> model;
 	VehicleTuning tuning;
 	double seconds_soup = 0, seconds_shapes = 0;
@@ -1002,8 +977,6 @@ VehicleTuning shipped_vehicle_tuning() {
 #endif
 }
 
-// A yaw-only placement from a level transform (the spawner's forward projected on the ground plane); the test's own
-// arithmetic, never part of the determinism contract (every world gets the same placement).
 VehiclePlacement placement_of(const core::level::LevelTransform &p_t, float p_lift) {
 	VehiclePlacement p;
 	p.position = { p_t.trans[0], p_t.trans[1] + p_lift, p_t.trans[2] };
@@ -1065,7 +1038,6 @@ Caspian *caspian() {
 	return s_caspian.get();
 }
 
-// The level's resolver with one partition replaced (the mutation target); every other lookup goes to the level.
 class OverlayResolver final : public core::EbxResolver {
 public:
 	OverlayResolver(const core::EbxResolver &p_base, std::string_view p_name, const core::EbxPartition &p_partition) :
@@ -1086,7 +1058,7 @@ private:
 	const core::EbxPartition &partition_;
 };
 
-} // namespace
+}
 
 TEST_SUITE("sim-vehicle") {
 	TEST_CASE("sim.vehicle: the Humvee drive def as s2.md 4.2 lists it; the 6 Humvee spawners of 4.3; the model's 5 chassis pieces of 4.5") {
@@ -1133,7 +1105,7 @@ TEST_SUITE("sim-vehicle") {
 		CHECK(d.rigid_bodies[0].body_type == "RBTypeCollision");
 		CHECK(d.rigid_bodies[0].friction == doctest::Approx(0.5f));
 		CHECK(d.physics_asset == "Vehicles/HumveeArmored/HumveeArmored_Physics_0_Win32");
-		// spawners
+
 		CHECK(m->spawners.size() == 6);
 		const float expected[6][3] = { { 1.02f, 141.00f, 765.79f }, { -35.04f, 141.49f, 727.20f }, { 60.75f, 132.00f, 268.41f }, { 90.13f, 132.00f, 249.63f },
 			{ -158.91f, 140.11f, -91.97f }, { -137.93f, 140.42f, -92.79f } };
@@ -1152,7 +1124,7 @@ TEST_SUITE("sim-vehicle") {
 					double(s.transform.trans[1]), double(s.transform.trans[2]), s.team, int(s.enabled), int(s.auto_spawn), double(s.spawn_delay),
 					double(s.spawn_area_radius));
 		}
-		// the model
+
 		const VehicleModel &v = *m->model;
 		CHECK(v.chassis.size() == 5);
 		CHECK(v.wheel_count == 4);
@@ -1222,14 +1194,13 @@ TEST_SUITE("sim-vehicle") {
 		}
 		VehicleReplayOptions o;
 		if (kAsan) {
-			// OwnHistory (G2, reported, and the diverged base) and ExactPod (the G2x gate mode, s2.md §15.2)
+
 			o.modes = (1u << uint32_t(VehicleRestoreMode::OwnHistory)) | (1u << uint32_t(VehicleRestoreMode::ExactPod));
 		}
 		start = std::chrono::steady_clock::now();
 		uint64_t steps = 0;
 		std::vector<VehicleCourseReport> reports;
-		// The found courses run on lanes (one VehicleWorld each over the shared const shapes and model); printed and
-		// gated here in course order.
+
 		std::vector<std::optional<core::Result<VehicleCourseReport>>> runs = core::parallel_map<std::optional<core::Result<VehicleCourseReport>>>(
 				courses->size(),
 				[&](size_t i) -> std::optional<core::Result<VehicleCourseReport>> {
@@ -1260,7 +1231,7 @@ TEST_SUITE("sim-vehicle") {
 		CHECK_MESSAGE(vehicle_gate_drove(reports, &why), "D: " << why);
 		why.clear();
 		CHECK_MESSAGE(vehicle_gate_g1(reports, &why), "G1: " << why);
-		// G2 (the quantised ghost, OwnHistory) is report-only since the integration (s2.md §15.2); G2x is the gate.
+
 		why.clear();
 		const bool g2 = vehicle_gate_g2(reports, &why);
 		std::printf("G2 (report only, quantised ghost): %s%s%s\n", g2 ? "pass" : "over 2 cm", why.empty() ? "" : ": ", why.c_str());
@@ -1302,7 +1273,7 @@ TEST_SUITE("sim-vehicle") {
 		const auto attempt = [&](std::vector<uint8_t> p_bytes) {
 			core::Result<core::EbxPartition> mutated = core::EbxPartition::parse(std::move(p_bytes));
 			if (!mutated.ok()) {
-				return; // the EBX validator refused it
+				return;
 			}
 			++parsed;
 			const OverlayResolver overlay(db, kHumvee, *mutated);
@@ -1330,10 +1301,8 @@ TEST_SUITE("sim-vehicle") {
 		}
 		std::printf("Humvee partition fuzz: %zu of 200 mutations parsed, %zu read, %zu built a model, %zu refused with an error\n", parsed, read, built, refused);
 		CHECK(parsed > 0);
-		// Word mutations aimed at floats and counts: an aligned 4-byte field of an instance overwritten with NaN,
-		// infinity, a huge or negative value, zero or an all-ones count, so the reader's and builder's refusal paths
-		// run (bit flips mostly land in values that stay plausible).
-		const uint32_t words[] = { 0x7FC00000u, 0x7F800000u, 0xFF800000u, 0x7149F2CAu /* 1e30 */, 0xF149F2CAu, 0xBF800000u /* -1 */, 0u, 0xFFFFFFFFu,
+
+		const uint32_t words[] = { 0x7FC00000u, 0x7F800000u, 0xFF800000u, 0x7149F2CAu  , 0xF149F2CAu, 0xBF800000u  , 0u, 0xFFFFFFFFu,
 			0x00010000u };
 		const size_t parsed_flips = parsed, refused_flips = refused, built_flips = built;
 		for (int iter = 0; iter < 400; ++iter) {

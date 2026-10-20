@@ -1,8 +1,3 @@
-// PresentationEvents: the single-producer single-consumer ring from the client thread to the main thread
-// (docs/design/m2a.md §8.3; owner cl; as built: docs/design/m2a-cl.md). Lock-free: the producer owns head_, the
-// consumer owns tail_; each publishes its index with release and reads the other's with acquire, so an entry is
-// fully written before the consumer can see it and fully read before the producer can reuse its slot. A full ring
-// refuses the push and counts it (E14 gates 0 overflows); nothing blocks either thread.
 #include "bf3/host/presentation_events.h"
 
 #include <algorithm>
@@ -36,4 +31,4 @@ uint64_t PresentationEvents::overflows() const {
 	return overflows_.load(std::memory_order_relaxed);
 }
 
-} // namespace bf3::host
+}

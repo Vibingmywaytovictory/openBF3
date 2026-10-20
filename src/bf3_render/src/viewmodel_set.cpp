@@ -1,7 +1,3 @@
-// A kit's first-person viewmodels (docs/design/m2a.md §11.1; docs/design/m2a-vm.md). See viewmodel_set.h.
-// M9's load_viewmodel (viewmodel_assets.cpp) generalised to every item of a team's default kits: the shared Ant
-// library and level superbundle (ViewmodelSources), the team's 1p arms, each item's 1p mesh, its Ant package's role
-// clips (by name), the aiming controller's zoom data, the stand-ins, and the textures of every drawn surface.
 #include "bf3/render/viewmodel_set.h"
 
 #include "bf3/core/ant/ant_install_source.h"
@@ -80,7 +76,6 @@ std::optional<std::string> name_of(const core::EbxLibrary &p_lib, const core::Eb
 	return std::string(*n);
 }
 
-// The 1p arms pair of an appearance unlock (as viewmodel_assets.cpp): (mesh partition, variation partition).
 bool arms_of_appearance(const core::EbxLibrary &p_library, const std::string &p_appearance, std::string &r_mesh, std::string &r_variation) {
 	const core::EbxPartition *part = p_library.partition_by_name(p_appearance);
 	if (part == nullptr) {
@@ -146,7 +141,6 @@ std::optional<double> number(const std::optional<core::EbxValue> &p_v) {
 	return std::nullopt;
 }
 
-// A finite, plausible float of the data or p_fallback (hostile data: a counted clamp, never NaN downstream).
 float sane(std::optional<double> p_v, float p_fallback, float p_min, float p_max, uint32_t &r_clamped) {
 	if (!p_v || !std::isfinite(*p_v)) {
 		return p_fallback;
@@ -194,7 +188,7 @@ ViewmodelAdsData read_ads(const core::EbxLibrary &p_lib, const std::string &p_co
 			size_t n = 0;
 			for (const core::EbxValue e : *items) {
 				if (++n > 64) {
-					break; // hostile bound
+					break;
 				}
 				const std::optional<double> from = number(e.get("FromZoomLevel"));
 				const std::optional<double> to = number(e.get("ToZoomLevel"));
@@ -218,7 +212,7 @@ ViewmodelAdsData read_ads(const core::EbxLibrary &p_lib, const std::string &p_co
 
 struct RoleRule {
 	Role role;
-	std::array<const char *, 3> names; // "__name" candidates, first match wins
+	std::array<const char *, 3> names;
 };
 const RoleRule kRoleRules[] = {
 	{ Role::Deploy, { "Deploy Anim", nullptr, nullptr } },
@@ -245,7 +239,6 @@ std::string codec_of(const core::ant::GdStruct &p_clip) {
 	return t;
 }
 
-// Decodes and binds one clip of p_package onto the rig. Unsupported (VBR, Curve) is reported through r_unsupported.
 core::Status load_role_clip(const core::ant::AntLibrary &p_library, const core::ant::AntPackage &p_package, const core::ant::GdStruct &p_clip,
 		const anim::Skeleton &p_rig, ViewmodelClip &r_clip, bool &r_unsupported) {
 	r_unsupported = false;
@@ -274,7 +267,6 @@ core::Status load_role_clip(const core::ant::AntLibrary &p_library, const core::
 	return core::Status::success();
 }
 
-// The model-space pose of a clip frame over the base pose (the clip's undriven bones keep the base).
 void clip_model(const anim::Skeleton &p_rig, const anim::LocalPose &p_base, const ViewmodelClip &p_clip, float p_frame, std::vector<anim::Xform> &r_model) {
 	anim::LocalPose pose = p_base;
 	core::ant::ClipPose sample;
@@ -284,7 +276,6 @@ void clip_model(const anim::Skeleton &p_rig, const anim::LocalPose &p_base, cons
 	anim::model_pose(p_rig, pose, r_model);
 }
 
-// Worst rotation (degrees) between two model poses over the bones a clip drives.
 double driven_diff(const std::vector<anim::Xform> &p_a, const std::vector<anim::Xform> &p_b, const anim::ClipTracks &p_tracks) {
 	std::vector<bool> mask(p_a.size(), false);
 	for (const int32_t b : p_tracks.rotation_bone) {
@@ -295,8 +286,6 @@ double driven_diff(const std::vector<anim::Xform> &p_a, const std::vector<anim::
 	return anim::pose_diff(p_a, p_b, mask).max_deg;
 }
 
-// The controller name of the static package's idle clip for items without an Ant package [verified: antdump list
-// s_basicassets: "IdlePose Anim" under these controllers, on Venice1pAntSke01].
 const char *static_idle_controller(ViewmodelItemKind p_kind) {
 	switch (p_kind) {
 		case ViewmodelItemKind::Knife:
@@ -313,8 +302,6 @@ std::string last_component(const std::string &p_path) {
 	return slash == std::string::npos ? p_path : p_path.substr(slash + 1);
 }
 
-// The default customization's rigid accessories of a SoldierWeaponData (ViewmodelAttachment). Hostile data: at
-// most kMaxAttachments per item, unknown bones and non-rigid objects are skipped with a note.
 constexpr size_t kMaxAttachments = 16;
 
 void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInstance &p_swd, const anim::Skeleton &p_rig, const std::string &p_unlock,
@@ -330,7 +317,7 @@ void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInst
 		const std::optional<core::EbxInstance> unlock = p_lib.follow(socket.data(), "UnlockAsset");
 		const std::string unlock_name = unlock ? name_of(p_lib, *unlock).value_or("") : std::string();
 		if (unlock_name.rfind(kDefaultSocketUnlockPrefix, 0) != 0) {
-			continue; // not part of the default customization
+			continue;
 		}
 		const std::optional<core::EbxValue> bone_v = socket.get("BoneName");
 		const std::string bone(bone_v && bone_v->as_str() ? *bone_v->as_str() : std::string_view());
@@ -353,7 +340,7 @@ void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInst
 			for (int which = 0; which < 2; ++which) {
 				const std::string &mesh = which == 0 ? hip_name : zoom_name;
 				if (mesh.empty() || (which == 1 && mesh == hip_name)) {
-					continue; // one entry draws both states when Asset1p == Asset1pzoom
+					continue;
 				}
 				if (r_out.size() >= kMaxAttachments) {
 					r_notes.push_back(p_unlock + ": more than " + std::to_string(kMaxAttachments) + " accessories (rest skipped)");
@@ -373,7 +360,6 @@ void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInst
 	}
 }
 
-// An unskinned part (a rigid accessory): LOD 0, drawn subsets.
 core::Status prepare_rigid_part(const core::LevelMount &p_mount, ViewmodelPart &r_part, core::Cache *p_cache, std::vector<std::string> &r_notes) {
 	const Clock::time_point tm = Clock::now();
 	core::Result<MeshHead> head = read_mesh_head(p_mount, r_part.mesh);
@@ -436,7 +422,7 @@ core::Status prepare_part(const core::LevelMount &p_mount, ViewmodelPart &r_part
 	return core::Status::success();
 }
 
-} // namespace
+}
 
 const char *viewmodel_clip_role_name(ViewmodelClipRole p_role) {
 	return anim::vm_clip_name(anim::VmClip(uint8_t(p_role)));
@@ -574,7 +560,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	auto set = std::make_unique<ViewmodelSet>();
 	set->library = p_sources.library;
 
-	// The rig: Venice1pAntSke01 of the static package.
 	const core::ant::AntRig *rig = nullptr;
 	for (const core::ant::AntRig &r : ant.rigs()) {
 		if (r.name == kRigName) {
@@ -592,7 +577,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	set->rig = std::move(*rig_skeleton);
 	const anim::LocalPose rest = anim::rest_pose(set->rig);
 
-	// Arms and skeletons.
 	set->arms.mesh = p_spec.arms_mesh;
 	set->arms.variation = p_spec.arms_variation;
 	if (!p_spec.appearance.empty() && arms_of_appearance(lib, p_spec.appearance, set->arms.mesh, set->arms.variation)) {
@@ -614,7 +598,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		set->weapon_skeleton = std::move(*weapon_skeleton);
 	}
 
-	// Items: the WeaponDef, the SoldierWeaponData's mesh and package, the role clips, the aiming controller.
 	int item_no = 0;
 	for (const ViewmodelItemSpec &spec : p_spec.items) {
 		++item_no;
@@ -636,16 +619,16 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		item.kind = def->fire.logic == core::gameplay::FireLogic::HoldAndRelease ? ViewmodelItemKind::Grenade
 				: spec.unlock.find("knife") != std::string::npos				   ? ViewmodelItemKind::Knife
 																				   : ViewmodelItemKind::Gun;
-		// SoldierWeaponData: WeaponStates[0].Mesh1p, AnimationData, ZoomRenderFov.
+
 		std::string mesh = spec.mesh;
 		std::string package = spec.ant_package;
-		std::optional<int64_t> pt1_ant_ref; // PT1 run [load]: WeaponStates[0].Weapon.AssetId
+		std::optional<int64_t> pt1_ant_ref;
 		if (const core::EbxPartition *bp = lib.partition_by_name(def->blueprint)) {
 			if (const std::optional<core::EbxInstance> swd = lib.follow(bp->primary().data(), "Object")) {
 				uint32_t clamped = 0;
-				if (const std::optional<core::EbxValue> id = swd->get_path("WeaponStates[0].Weapon.AssetId")) { // PT1 run [load]
-					pt1_ant_ref = id->as_i64(); // PT1 run [load]
-				} // PT1 run [load]
+				if (const std::optional<core::EbxValue> id = swd->get_path("WeaponStates[0].Weapon.AssetId")) {
+					pt1_ant_ref = id->as_i64();
+				}
 				read_default_attachments(lib, *swd, set->rig, spec.unlock, item.attachments, set->notes);
 				item.zoom_render_fov_data = sane(number(swd->get("ZoomRenderFov")), 0.0f, 0.0f, 170.0f, clamped);
 				if (mesh.empty()) {
@@ -679,7 +662,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		item.ant_package = package;
 		item.ads = read_ads(lib, def->aiming_controller, set->notes);
 
-		// Role clips from the item's package (by the role's names, or the spec's override).
 		const core::ant::AntPackage *pkg = nullptr;
 		if (!package.empty()) {
 			core::Result<std::unique_ptr<core::ant::AntPackage>> p = anim::load_ant_package(*p_sources.ant, package);
@@ -723,7 +705,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				break;
 			}
 		}
-		// Knife and M67: the static package's idle under the item's controller.
+
 		if (item.clips[size_t(Role::Idle)].source == Source::Missing) {
 			if (const char *controller = static_idle_controller(item.kind); controller && ant.static_package()) {
 				const core::ant::AntPackage &sp = *ant.static_package();
@@ -747,12 +729,12 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				}
 			}
 		}
-		if (pt1_ant_ref && *pt1_ant_ref >= 0 && *pt1_ant_ref <= int64_t(UINT32_MAX)) { // PT1 run [load]
-			load_viewmodel_locomotion(ant, set->rig, uint32_t(*pt1_ant_ref), item, set->notes); // PT1 run [load]
-		} else { // PT1 run [load]
-			set->notes.push_back(spec.unlock + " 1p locomotion: no WeaponStates[0].Weapon.AssetId (the procedural bob)"); // PT1 run [load]
-		} // PT1 run [load]
-		// A zoom clip drives the transition only when its ends land on the poses it joins.
+		if (pt1_ant_ref && *pt1_ant_ref >= 0 && *pt1_ant_ref <= int64_t(UINT32_MAX)) {
+			load_viewmodel_locomotion(ant, set->rig, uint32_t(*pt1_ant_ref), item, set->notes);
+		} else {
+			set->notes.push_back(spec.unlock + " 1p locomotion: no WeaponStates[0].Weapon.AssetId (the procedural bob)");
+		}
+
 		const ViewmodelClip &idle = item.clips[size_t(Role::Idle)];
 		const ViewmodelClip &zoom = item.clips[size_t(Role::ZoomIdle)];
 		if (idle.source == Source::Clip && zoom.source == Source::Clip) {
@@ -765,7 +747,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				if (z.source != Source::Clip) {
 					continue;
 				}
-				// Sampled over the pose it starts from (undriven bones), as the animator does.
+
 				anim::LocalPose from = rest;
 				{
 					core::ant::ClipPose s;
@@ -788,7 +770,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			}
 			(void)zoom_base;
 		}
-		// Stand-ins for what the data does not have.
+
 		auto stand_in = [&](Role p_role, Source p_source, const char *p_what, float p_seconds) {
 			ViewmodelClip &c = item.clips[size_t(p_role)];
 			if (c.source != Source::Missing) {
@@ -815,7 +797,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			}
 			stand_in(Role::Reload, Source::ProceduralStandIn, "procedural lower and raise over ReloadTime", std::max(0.05f, item.reload_time_bullets_left));
 			if (item.clips[size_t(Role::ReloadEmpty)].source == Source::Missing && item.clips[size_t(Role::Reload)].source == Source::Clip) {
-				// The tactical clip plays for an empty reload too (counted).
+
 				item.clips[size_t(Role::ReloadEmpty)] = ViewmodelClip{};
 				ViewmodelClip &e = item.clips[size_t(Role::ReloadEmpty)];
 				e.source = Source::ProceduralStandIn;
@@ -854,8 +836,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		return set;
 	}
 
-	// Materials and meshes: the arms once, each item's weapon with its own binds (arms first, so every item's binds
-	// begin with the same arms binds and the arms mesh's lanes are valid for every item's skin).
 	progress("finding materials", 5);
 	const std::vector<std::string> databases = variation_database_names(lib);
 	auto materials = [&](ViewmodelPart &r_part) -> core::Status {
@@ -892,7 +872,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			return core::error_at(item.unlock, st.error());
 		}
 		if (item.kind == ViewmodelItemKind::Knife && !p_spec.knife_dog_tags) {
-			// The dog tags and their chain (kDogTagTexture): left out, counted.
+
 			std::vector<PreparedSurface> &surfaces = item.weapon.prepared.surfaces;
 			for (size_t i = surfaces.size(); i-- > 0;) {
 				const PreparedSurface &sf = surfaces[i];
@@ -919,7 +899,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		}
 	}
 
-	// How each material slot is drawn (alpha test), from the level shader database (L1's LookResolver).
 	{
 		std::unique_ptr<LookResolver> look = LookResolver::open(mount);
 		auto looks_of = [&](const ViewmodelPart &p_part) {
@@ -947,7 +926,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		}
 	}
 
-	// Textures: Diffuse and Normal of every material a drawn surface uses, decoded on all cores.
 	progress("decoding textures", 7);
 	std::vector<std::pair<std::string, TextureRole>> wanted;
 	std::set<std::string> seen;
@@ -989,7 +967,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	});
 	for (size_t i = 0; i < wanted.size(); ++i) {
 		if (!errors[i].empty()) {
-			set->notes.push_back("texture skipped: " + errors[i]); // drawn untextured rather than failing the load
+			set->notes.push_back("texture skipped: " + errors[i]);
 			continue;
 		}
 		const PreparedTexture &t = textures[i];
@@ -1067,8 +1045,6 @@ ViewmodelCoverage viewmodel_coverage(const ViewmodelItem &p_item) {
 	}
 	return c;
 }
-
-// ---- skinned-geometry sanity ---------------------------------------------------------------------------------
 
 bool ViewmodelSurfaceSkin::stretched() const {
 	return bad_weights > 0 || (posed_edge > kSkinStretchFloor && posed_edge > kSkinStretchFactor * bind_edge);
@@ -1165,8 +1141,6 @@ std::vector<ViewmodelSurfaceSkin> viewmodel_surface_skin(const PreparedMesh &p_m
 	return out;
 }
 
-// ---- the default kits ---------------------------------------------------------------------------------------
-
 namespace {
 
 constexpr std::array<core::gameplay::WeaponSlot, 4> kKitSlots{ core::gameplay::WeaponSlot::Primary, core::gameplay::WeaponSlot::Sidearm,
@@ -1177,7 +1151,6 @@ constexpr const char *kMp443 = "weapons/mp443/u_mp443";
 constexpr const char *kM67 = "weapons/m67/u_m67";
 constexpr const char *kKnife = "weapons/knife/u_knife";
 
-// The cross-check of documented_viewmodel_kits (m2a.md §5.6, kits.h) [verified: bf3dump kits MP_Subway TeamDeathMatch0].
 const ViewmodelKit kDocumentedKits[] = {
 	{ "US", "gameplay/kits/usassault", { "weapons/m16a4/u_m16a4", kM9, kM67, kKnife } },
 	{ "US", "gameplay/kits/usengineer", { "weapons/m4a1/u_m4a1", kM9, kM67, kKnife } },
@@ -1197,10 +1170,10 @@ std::string kit_line(const ViewmodelKit &p_kit) {
 	return l;
 }
 
-} // namespace
+}
 
 core::Result<std::vector<ViewmodelKit>> read_viewmodel_kits(const core::EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode) {
-	// One budget for the mode, the progression tables and the kits (as bf3dump kits).
+
 	core::gameplay::WorkBudget budget;
 	core::Result<core::gameplay::ModeDef> mode = core::gameplay::read_mode_def(p_db, p_level_id, p_mode, &budget);
 	if (!mode) {
@@ -1277,7 +1250,7 @@ ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_
 	ViewmodelSetSpec spec;
 	const char *team = p_team == 2 ? "RU" : "US";
 	if (p_team == 2) {
-		// RU arms from the RU appearance [inferred]; the fallback is the RU arms mesh [verified: bf3dump on MP_Subway].
+
 		spec.appearance = "persistence/unlocks/soldiers/visual/mp/ru/upperbody/mp_ru_assault_upperbody01";
 		spec.arms_mesh = "characters/arms/arms1p_ru/arms1p_rus_mesh";
 		spec.arms_variation = "characters/arms/arms1p_ru/arms1p_rus_default";
@@ -1294,18 +1267,17 @@ ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_
 				spec.items.push_back(item);
 			}
 		}
-		if (!k.gadget.empty() && seen.insert(k.gadget).second) { // M2b cam [defib]: the kit's slot 2 after its four
-			ViewmodelItemSpec item; // M2b cam [defib]
-			item.unlock = k.gadget; // M2b cam [defib]
-			spec.items.push_back(item); // M2b cam [defib]
-		} // M2b cam [defib]
+		if (!k.gadget.empty() && seen.insert(k.gadget).second) {
+			ViewmodelItemSpec item;
+			item.unlock = k.gadget;
+			spec.items.push_back(item);
+		}
 	}
 	return spec;
 }
 
-} // namespace bf3::render
+}
 
-// ---- M2b cam (docs/design/m2b.md §4; as built: docs/design/m2b-cam.md): see viewmodel_set.h ---------------------------
 namespace bf3::render {
 
 size_t add_assault_gadget(std::span<ViewmodelKit> r_kits, std::string_view p_unlock) {
@@ -1324,9 +1296,7 @@ size_t add_assault_gadget(std::span<ViewmodelKit> r_kits, std::string_view p_unl
 	return n;
 }
 
-} // namespace bf3::render
-
-// ---- PT1 run (docs/design/pt1-run.md; viewmodel_set.h's PT1 run block) ------------------------------------------------
+}
 
 namespace bf3::render {
 
@@ -1340,7 +1310,6 @@ std::string pt1_route_path(const anim::AntClipRoute &p_route) {
 	return out;
 }
 
-// One chooser routed to its additive clip on the rig; r_clip stays Missing (and a note says why) otherwise.
 void pt1_load_delta(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser, const anim::ChooserIndices &p_indices,
 		const std::string &p_where, ViewmodelClip &r_clip, float &r_start, float &r_end, std::string &r_path, std::vector<std::string> &r_notes) {
 	core::Result<anim::AntClipRoute> route = anim::route_ant_controller(p_library, "IndexChooserControllerAsset", p_chooser, p_indices);
@@ -1370,7 +1339,7 @@ void pt1_load_delta(const core::ant::AntLibrary &p_library, const anim::Skeleton
 		r_notes.push_back(p_where + " " + std::string(p_chooser) + ": " + clip.name + " is not an additive cycle (no delta)");
 		return;
 	}
-	// The sequence's tick window in clip frames (ticks = frames / FPSScale), clamped to the clip.
+
 	const float scale = std::isfinite(route->fps_scale) && route->fps_scale > 0.0f ? route->fps_scale : 0.5f;
 	const float end = float(clip.tracks.end_frame);
 	r_start = std::clamp(route->start_in_tick * scale, 0.0f, end);
@@ -1398,7 +1367,7 @@ anim::VmDeltaClip pt1_delta_ref(const ViewmodelClip &p_clip, float p_start, floa
 	return d;
 }
 
-} // namespace
+}
 
 void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref, ViewmodelItem &r_item,
 		std::vector<std::string> &r_notes) {
@@ -1430,4 +1399,4 @@ anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item) {
 	return out;
 }
 
-} // namespace bf3::render
+}

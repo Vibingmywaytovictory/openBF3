@@ -1,5 +1,4 @@
 #pragma once
-// Typed field access on a DbObject object. Ported from IW4L superbundle_bf3 (record.rs).
 
 #include "bf3/core/db_object.h"
 #include "format_errors.h"
@@ -99,7 +98,6 @@ public:
 		return std::optional<uint32_t>(static_cast<uint32_t>(x));
 	}
 
-	// A u32 hash stored either as i32 bits or as a non-negative value up to u32::MAX.
 	Result<std::optional<uint32_t>> hash32(const char *p_field) const {
 		Result<std::optional<int64_t>> v = opt_i64(p_field);
 		if (!v) {
@@ -178,7 +176,6 @@ public:
 		return b;
 	}
 
-	// The list node (iterate with first_child/next), or an empty ref when the field is absent.
 	Result<DbRef> list(const char *p_field) const {
 		const DbRef f = field(p_field);
 		if (!f.valid()) {
@@ -205,4 +202,4 @@ private:
 	DbRef value_;
 };
 
-} // namespace bf3::core::detail
+}

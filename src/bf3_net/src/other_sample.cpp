@@ -1,9 +1,3 @@
-// The Hermite sampler of one other soldier, the time rule and the client's track rules (docs/design/m2a.md §6.1,
-// §6.3, §6.4; as built: docs/design/m2a-lc.md). See other_sample.h.
-//
-// sample_other is ClientSession's present_others body (client_session.cpp, M1) moved here unchanged, expression for
-// expression, so the R1 replacement (cl) draws exactly what M1 drew: the same float operations in the same order. Only
-// the selection is factored out (select_sample), because the server's pose cache keys on it.
 #include "bf3/net/other_sample.h"
 
 #include <algorithm>
@@ -21,7 +15,6 @@ float lerp(float p_a, float p_b, float p_t) {
 	return p_a + (p_b - p_a) * p_t;
 }
 
-// Cubic Hermite between p0 (tangent m0) and p1 (tangent m1), u in [0, 1] (client_session.cpp, M1).
 float hermite(float p_p0, float p_m0, float p_p1, float p_m1, float p_u) {
 	const float u2 = p_u * p_u, u3 = u2 * p_u;
 	return (2 * u3 - 3 * u2 + 1) * p_p0 + (u3 - 2 * u2 + p_u) * p_m0 + (-2 * u3 + 3 * u2) * p_p1 + (u3 - u2) * p_m1;
@@ -43,7 +36,6 @@ void set_discrete(OtherPose &r_out, const OtherSoldier &p_o) {
 	r_out.flags = p_o.flags;
 }
 
-// present_sample (client_session.cpp, M1): one record as drawn.
 OtherPose present_sample(std::span<const float, sim::kPoseCount> p_eyes, const OtherSoldier &p_o) {
 	OtherPose s;
 	set_discrete(s, p_o);
@@ -71,7 +63,7 @@ bool same_other(const OtherSoldier &p_a, const OtherSoldier &p_b) {
 			p_a.ads == p_b.ads && p_a.reload_seq == p_b.reload_seq && p_a.burst_seq == p_b.burst_seq;
 }
 
-} // namespace
+}
 
 SampleSelection select_sample(std::span<const TimedOther> p_samples, double p_render_ticks, double p_max_extrapolate_ticks) {
 	SampleSelection s;
@@ -80,7 +72,7 @@ SampleSelection select_sample(std::span<const TimedOther> p_samples, double p_re
 		return s;
 	}
 	s.valid = true;
-	// The bracketing pair: the newest sample at or before the render time and the next one.
+
 	uint32_t a = 0;
 	while (a + 1 < used && double(p_samples[a + 1].server_tick) <= p_render_ticks) {
 		++a;
@@ -89,14 +81,14 @@ SampleSelection select_sample(std::span<const TimedOther> p_samples, double p_re
 	s.index_a = s.index_b = a;
 	s.tick_a = s.tick_b = sa.server_tick;
 	if (p_render_ticks <= double(sa.server_tick)) {
-		s.kind = SampleKind::Hold; // before the oldest sample (held), or exactly at a sample
+		s.kind = SampleKind::Hold;
 		s.held = p_render_ticks < double(sa.server_tick);
 	} else if (a + 1 < used) {
 		s.index_b = a + 1;
 		s.tick_b = p_samples[a + 1].server_tick;
 		s.kind = SampleKind::Interpolate;
 	} else {
-		// Past the newest sample: extrapolate along its velocity for at most the limit, then hold.
+
 		const double max_extra = std::max(0.0, p_max_extrapolate_ticks);
 		s.extrapolated = true;
 		s.held = p_render_ticks - double(sa.server_tick) > max_extra;
@@ -119,7 +111,7 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 	const TimedOther &sa = p_samples[sel.index_a];
 	OtherPose out;
 	if (render <= double(sa.server_tick)) {
-		out = present_sample(p_pose_eye_heights, sa.soldier); // before the oldest sample: hold it
+		out = present_sample(p_pose_eye_heights, sa.soldier);
 	} else if (sel.kind == SampleKind::Interpolate) {
 		const TimedOther &sb = p_samples[sel.index_b];
 		const double span = double(sb.server_tick - sa.server_tick);
@@ -130,15 +122,14 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 			out.position[k] = hermite(sa.soldier.position[k], sa.soldier.velocity[k] * dt, sb.soldier.position[k], sb.soldier.velocity[k] * dt, u);
 			out.velocity[k] = lerp(sa.soldier.velocity[k], sb.soldier.velocity[k], u);
 		}
-		const int16_t dyaw = int16_t(uint16_t(sb.soldier.yaw - sa.soldier.yaw)); // shortest arc
+		const int16_t dyaw = int16_t(uint16_t(sb.soldier.yaw - sa.soldier.yaw));
 		out.yaw = sim::yaw_radians(uint16_t(sa.soldier.yaw + int32_t(std::lround(float(dyaw) * u))));
 		out.pitch = lerp(sim::pitch_radians(sa.soldier.pitch), sim::pitch_radians(sb.soldier.pitch), u);
-		// The discrete fields switch together at the newer sample (pose, target_pose, transition, mode, flags,
-		// generation; m2a.md §6.1).
+
 		set_discrete(out, u >= 1.0f ? sb.soldier : sa.soldier);
 		out.eye_height = lerp(eye_of(p_pose_eye_heights, sa.soldier), eye_of(p_pose_eye_heights, sb.soldier), u);
 	} else {
-		// Past the newest sample: extrapolate along its velocity for at most the limit, then hold.
+
 		const double ahead = std::min(render - double(sa.server_tick), max_extra_ticks);
 		const float secs = float(ahead) * sim::kTickSeconds;
 		out = present_sample(p_pose_eye_heights, sa.soldier);
@@ -155,10 +146,10 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 }
 
 int64_t sim_time_q8(sim::weapons::SimTime p_time) {
-	// round(p_time x 256 / U) half up, exact in int64 for any time the sim can reach (|t| < 2^54 units).
+
 	const int64_t num = p_time * 256 + sim::weapons::kTimeUnitsPerTick / 2;
 	const int64_t q = num / sim::weapons::kTimeUnitsPerTick;
-	return (num % sim::weapons::kTimeUnitsPerTick != 0 && num < 0) ? q - 1 : q; // floor division
+	return (num % sim::weapons::kTimeUnitsPerTick != 0 && num < 0) ? q - 1 : q;
 }
 
 int64_t rewind_time_q8(sim::weapons::SimTime p_segment_start, int32_t p_view_back_q8, uint32_t p_max_rewind_ticks) {
@@ -171,8 +162,7 @@ size_t rebuild_track(std::span<const TimedOther> p_candidates, uint32_t p_view_t
 	if (p_candidates.empty()) {
 		return 0;
 	}
-	// The generation of the newest record in the set (add_others resets the track on a generation change). Ties at
-	// the newest tick keep the first (a duplicate tick is one sample).
+
 	size_t newest = 0;
 	for (size_t i = 1; i < p_candidates.size(); ++i) {
 		if (p_candidates[i].server_tick > p_candidates[newest].server_tick) {
@@ -181,13 +171,11 @@ size_t rebuild_track(std::span<const TimedOther> p_candidates, uint32_t p_view_t
 	}
 	const uint32_t newest_tick = p_candidates[newest].server_tick;
 	const uint8_t generation = p_candidates[newest].soldier.generation;
-	// The track timeout: a newest record more than kTrackTimeoutTicks older than the view's tick means the client had
-	// dropped the track (kTrackTimeoutNs without a sample).
+
 	if (p_view_tick > newest_tick && p_view_tick - newest_tick > kTrackTimeoutTicks) {
 		return 0;
 	}
-	// The kTrackSamples newest distinct ticks of that generation, oldest first: an insertion into a bounded sorted list
-	// (add_others inserts in tick order, skips a duplicate tick and pops the oldest beyond kTrackSamples).
+
 	size_t n = 0;
 	for (const TimedOther &c : p_candidates) {
 		if (c.soldier.generation != generation) {
@@ -198,13 +186,13 @@ size_t rebuild_track(std::span<const TimedOther> p_candidates, uint32_t p_view_t
 			++at;
 		}
 		if (at < n && r_list[at].server_tick == c.server_tick) {
-			continue; // a duplicate tick
+			continue;
 		}
 		if (n == kTrackSamples) {
 			if (at == 0) {
-				continue; // older than all of a full list: it would be popped at once
+				continue;
 			}
-			// Drop the oldest, shift the ones below the insertion point down.
+
 			for (size_t k = 0; k + 1 < at; ++k) {
 				r_list[k] = r_list[k + 1];
 			}
@@ -231,4 +219,4 @@ bool same_bits(const TimedOther &p_a, const TimedOther &p_b) {
 	return p_a.server_tick == p_b.server_tick && same_other(p_a.soldier, p_b.soldier);
 }
 
-} // namespace bf3::net
+}

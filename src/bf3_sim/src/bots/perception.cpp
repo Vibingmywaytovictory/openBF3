@@ -1,20 +1,3 @@
-// Bot perception (perception.h; docs/design/m2b.md §5.1; as built: docs/design/m2b-bb.md). Pure: positions it could
-// see (a clear ray this update) or hear (a shot within the radius), never hidden state.
-//
-// One update (the caller checks perception_tick):
-//   candidates  every live enemy (team != 0 and != ours) in the FOV (fov_h x fov_v around the view) within
-//               max_range_m, nearest first, the enemies already detected first among equals; the first
-//               max_candidates get rays (eye -> chest; eye -> head only when the chest ray is blocked; the clear
-//               one is recorded, so the brain aims at a point it can see);
-//   seen        a clear ray: detection += dt (1 + moving + firing) / detection_time(distance), detected at 1,
-//               last_visible = the tick; the feet and velocity recorded;
-//   unseen      a detected enemy is forgotten forget_s after its last sight (or heard shot); a partly detected one
-//               loses its detection after forget_s / 3 unseen;
-//   hearing     an enemy shot within hearing_radius_m of the bot's eye in the update window: the shooter becomes
-//               known (heard) at the shot origin + a seeded error of at most hearing_error_m; no rays.
-// Hostile input: non-finite positions are skipped; every span is read with its own bound; the known list is at most
-// one entry per slot.
-
 #include "bf3/sim/bots/perception.h"
 
 #include "bf3/sim/collision_world.h"
@@ -31,8 +14,8 @@ namespace bf3::sim::bots {
 namespace {
 
 constexpr float kDeg = kPi / 180.0f;
-constexpr float kMovingSpeed = 0.5f; // m/s horizontal: "moving" for the detection boost
-constexpr size_t kMaxSlots = 256; // uint8_t slots
+constexpr float kMovingSpeed = 0.5f;
+constexpr size_t kMaxSlots = 256;
 
 bool finite3(const Vec3 &p_v) {
 	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
@@ -65,7 +48,7 @@ bool alive_state(const SoldierState &p_state) {
 	return (p_state.flags & soldier_flags::kAlive) != 0 && p_state.mode != MoveMode::Dead;
 }
 
-} // namespace
+}
 
 bool perception_tick(uint8_t p_slot, Tick p_tick, uint32_t p_update_ticks) {
 	const uint32_t u = std::max<uint32_t>(p_update_ticks, 1u);
@@ -152,7 +135,7 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 	for (PerceivedEnemy &e : enemies_) {
 		e.visible = false;
 	}
-	// Candidates in the FOV and range, nearest first (detected ones first at equal distance; slot breaks ties).
+
 	struct Cand {
 		float d;
 		uint8_t detected;
@@ -206,15 +189,15 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 		if (p_in.world != nullptr) {
 			const Vec3 chest = perception_chest(params_, st, p_in.eye_heights);
 			++rays;
-			clear = !p_in.world->ray_any(p_in.eye, { chest[0] - p_in.eye[0], chest[1] - p_in.eye[1], chest[2] - p_in.eye[2] }, mask); // integ/m2b-w1 [ray any]
+			clear = !p_in.world->ray_any(p_in.eye, { chest[0] - p_in.eye[0], chest[1] - p_in.eye[1], chest[2] - p_in.eye[2] }, mask);
 			if (!clear) {
 				chest_clear = false;
 				const Vec3 head = perception_head(params_, st, p_in.eye_heights);
 				++rays;
-				clear = !p_in.world->ray_any(p_in.eye, { head[0] - p_in.eye[0], head[1] - p_in.eye[1], head[2] - p_in.eye[2] }, mask); // integ/m2b-w1 [ray any]
+				clear = !p_in.world->ray_any(p_in.eye, { head[0] - p_in.eye[0], head[1] - p_in.eye[1], head[2] - p_in.eye[2] }, mask);
 			}
 		} else {
-			clear = true; // units without a world: the FOV and range decide
+			clear = true;
 		}
 		if (!clear) {
 			continue;
@@ -240,8 +223,8 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 		e.last_position = st.position;
 		e.last_velocity = finite3(st.velocity) ? st.velocity : Vec3{};
 	}
-	// Hearing: enemy shots of the update window within the radius.
-	uint64_t rng = weapons::splitmix64(p_in.seed ^ (uint64_t(p_in.tick) << 20) ^ 0x48454152ull); // "HEAR"
+
+	uint64_t rng = weapons::splitmix64(p_in.seed ^ (uint64_t(p_in.tick) << 20) ^ 0x48454152ull);
 	for (const HeardShot &shot : p_in.shots) {
 		if (!is_enemy(shot.shooter) || !finite3(shot.origin) || !eye_ok) {
 			continue;
@@ -256,7 +239,7 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 		PerceivedEnemy &e = entry(shot.shooter);
 		++heard_;
 		if (e.visible) {
-			continue; // seen this update: the sight is better than the sound
+			continue;
 		}
 		rng = weapons::splitmix64(rng);
 		const float a = float(rng >> 40) / float(1ull << 24) * kTwoPi;
@@ -266,8 +249,7 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 		e.last_seen = std::max(e.last_seen, shot.tick);
 		e.last_position = { shot.origin[0] + r * std::sin(a), shot.origin[1], shot.origin[2] + r * std::cos(a) };
 	}
-	// Forget: detected ones forget_s after the last sight or sound; partial detections after a third of it; the dead
-	// and the slots that left are dropped at once.
+
 	const uint32_t forget = seconds_to_ticks(std::max(params_.forget_s, 0.0f));
 	const uint32_t partial = std::max<uint32_t>(forget / 3u, update_ticks);
 	enemies_.erase(std::remove_if(enemies_.begin(), enemies_.end(),
@@ -285,4 +267,4 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 	return rays;
 }
 
-} // namespace bf3::sim::bots
+}

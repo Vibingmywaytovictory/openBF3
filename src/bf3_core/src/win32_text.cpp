@@ -28,4 +28,4 @@ std::string narrow(std::wstring_view p_wide) {
 	return out;
 }
 
-} // namespace bf3::core::detail
+}

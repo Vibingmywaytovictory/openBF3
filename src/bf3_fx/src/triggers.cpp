@@ -1,4 +1,3 @@
-// VFX3: gameplay events -> FxWorld::start (triggers.h; docs/design/m2a-fx3.md).
 #include "bf3/fx/triggers.h"
 
 #include "fx_ebx.h"
@@ -21,9 +20,9 @@ namespace hk = host;
 namespace gp = core::gameplay;
 
 constexpr float kPi = 3.14159265358979f;
-constexpr size_t kMaxFireEffects = 32; // FireEffects1p / 3p entries per def (retail 3)
-constexpr size_t kFireEffectsWork = 4096; // WorkBudget units per def
-constexpr uint32_t kMaxShotMemory = 4096; // (slot, shot) -> direction / def, for mirror and Hit defs
+constexpr size_t kMaxFireEffects = 32;
+constexpr size_t kFireEffectsWork = 4096;
+constexpr uint32_t kMaxShotMemory = 4096;
 
 Vec3 add(const Vec3 &a, const Vec3 &b) { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
 Vec3 sub(const Vec3 &a, const Vec3 &b) { return { a.x - b.x, a.y - b.y, a.z - b.z }; }
@@ -41,10 +40,9 @@ Vec3 normalize_or(const Vec3 &a, const Vec3 &p_fallback) {
 }
 Vec3 from(const float (&p)[3]) { return { p[0], p[1], p[2] }; }
 
-// A point / direction of p_t's local frame in the world.
 Vec3 rotate(const Transform &t, const Vec3 &p) { return add(add(mul(t.right, p.x), mul(t.up, p.y)), mul(t.forward, p.z)); }
 Vec3 apply(const Transform &t, const Vec3 &p) { return add(t.trans, rotate(t, p)); }
-// a ∘ b: b given in a's frame.
+
 Transform compose(const Transform &a, const Transform &b) {
 	Transform c;
 	c.right = rotate(a, b.right);
@@ -53,7 +51,7 @@ Transform compose(const Transform &a, const Transform &b) {
 	c.trans = apply(a, b.trans);
 	return c;
 }
-// The inverse of a rigid transform (orthonormal rows).
+
 Transform inverse(const Transform &t) {
 	Transform i;
 	i.right = { t.right.x, t.up.x, t.forward.x };
@@ -67,7 +65,6 @@ float seconds_of(int64_t p_units) {
 	return float(double(p_units) / double(sim::weapons::kTimeUnitsPerSecond));
 }
 
-// A direction inside a cone of p_degrees around p_axis, uniform in solid angle, from two draws.
 Vec3 spread_direction(const Vec3 &p_axis, float p_degrees, uint64_t p_seed) {
 	if (!(p_degrees > 0.0f)) {
 		return p_axis;
@@ -85,11 +82,11 @@ Vec3 spread_direction(const Vec3 &p_axis, float p_degrees, uint64_t p_seed) {
 uint8_t zone_material(uint32_t p_zone) {
 	switch (p_zone) {
 		case 0:
-			return kSoldierHeadMaterial; // HitZone::Head
+			return kSoldierHeadMaterial;
 		case 2:
-			return kSoldierChestMaterial; // HitZone::Chest
+			return kSoldierChestMaterial;
 		default:
-			return kSoldierBodyMaterial; // Body, Legs (Legs -> Body [inferred]: the grid has no leg cell of its own)
+			return kSoldierBodyMaterial;
 	}
 }
 
@@ -97,8 +94,6 @@ std::string_view short_name(std::string_view p_name) {
 	const size_t s = p_name.rfind('/');
 	return s == std::string_view::npos ? p_name : p_name.substr(s + 1);
 }
-
-// ---- load_fire_effects -----------------------------------------------------------------------------------
 
 void read_fire_list(detail::Reader &r, const core::EbxStruct &p_ffd, std::string_view p_field, std::vector<FireEffect> &r_out) {
 	const std::optional<core::EbxValue> v = r.maybe(p_ffd, p_field);
@@ -139,7 +134,6 @@ void read_fire_list(detail::Reader &r, const core::EbxStruct &p_ffd, std::string
 	}
 }
 
-// The projectile entity of a FiringFunctionData: Shot.ProjectileData.
 std::optional<core::EbxInstance> projectile_of(detail::Reader &r, const core::EbxStruct &p_ffd) {
 	const std::optional<core::EbxValue> shot = r.maybe(p_ffd, "Shot");
 	const std::optional<core::EbxStruct> ss = shot ? shot->as_struct() : std::nullopt;
@@ -205,13 +199,10 @@ void read_def(const core::EbxResolver &p_db, const gp::WeaponDef &p_def, size_t 
 		r_w.tracer.clear();
 		r_w.detonation.clear();
 	}
-	// A firearm: a bullet def with a muzzle effect (the knife is a BulletEntityData without one; grenades throw).
+
 	r_w.firearm = p_def.projectile.kind == gp::ProjectileKind::Bullet && !(r_w.first_person.empty() && r_w.third_person.empty());
 }
 
-// ---- triggers --------------------------------------------------------------------------------------------
-
-// The start key families (with the event kind, slot, id, pellet and ordinal).
 enum class KeyKind : uint8_t { Shot = 1, Impact = 2, Soldier = 3, SoldierHit = 4, Detonation = 5 };
 
 uint64_t start_key(KeyKind p_kind, uint8_t p_slot, uint32_t p_id, uint8_t p_pellet, uint32_t p_ordinal) {
@@ -227,9 +218,7 @@ uint64_t pack(EffectHandle p_h) {
 	return (uint64_t(p_h.slot) << 32) | uint64_t(p_h.generation);
 }
 
-} // namespace
-
-// ---- free functions -----------------------------------------------------------------------------------------
+}
 
 Transform effect_frame(const Vec3 &p_origin, const Vec3 &p_axis, const Vec3 &p_forward_hint) {
 	const Vec3 u = normalize_or(p_axis, { 0, 1, 0 });
@@ -257,7 +246,7 @@ Transform weapon_of_effect_frame(const Transform &p_effect) {
 	Transform w;
 	w.forward = p_effect.up;
 	w.up = p_effect.forward;
-	w.right = cross(w.up, w.forward); // x = y x z
+	w.right = cross(w.up, w.forward);
 	w.trans = p_effect.trans;
 	return w;
 }
@@ -409,7 +398,7 @@ std::string pick_decal_texture(std::string_view p_decal, std::span<const std::st
 			best = t;
 		}
 	}
-	return best_prefix >= 6 ? best : std::string(); // at least "decal_"
+	return best_prefix >= 6 ? best : std::string();
 }
 
 core::Result<DecalTemplate> load_decal_template(const core::EbxResolver &p_db, std::string_view p_name, std::span<const std::string> p_textures) {
@@ -473,8 +462,6 @@ DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed)
 
 namespace {
 
-// BC1 / BC3 level decode: p_stride bytes per block, the colour block at p_stride - 8, the BC4-style alpha block at 0
-// (BC3); BC3's colour block is always 4-colour.
 core::Result<std::vector<uint8_t>> decode_bc_level(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height, bool p_bc3, const char *p_what) {
 	if (p_width == 0 || p_height == 0 || p_width > 4096 || p_height > 4096) {
 		return core::Error{ std::string(p_what) + ": size out of range" };
@@ -552,7 +539,7 @@ core::Result<std::vector<uint8_t>> decode_bc_level(std::span<const uint8_t> p_bl
 	return out;
 }
 
-} // namespace
+}
 
 core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height) {
 	return decode_bc_level(p_blocks, p_width, p_height, false, "decode_bc1");
@@ -742,8 +729,6 @@ void effect_sound_cues(std::span<const FxEvent> p_events, std::vector<EffectSoun
 	}
 }
 
-// ---- FxTriggers -----------------------------------------------------------------------------------------------
-
 struct FxTriggers::Impl {
 	FxWorld &world;
 	EffectLibrary &library;
@@ -752,8 +737,8 @@ struct FxTriggers::Impl {
 	FxTriggerStats stats;
 
 	std::vector<MuzzleSample> muzzles;
-	std::array<int32_t, 256> own_1p{}; // slot -> index of its 1p muzzle (-1 none)
-	std::array<int32_t, 256> third{}; // slot -> index of its 3p muzzle
+	std::array<int32_t, 256> own_1p{};
+	std::array<int32_t, 256> third{};
 
 	std::vector<DecalCue> decals;
 	std::vector<ImpactSoundCue> sounds;
@@ -784,8 +769,8 @@ struct FxTriggers::Impl {
 		EffectHandle handle;
 		hk::PresentTimeline timeline = hk::PresentTimeline::Predicted;
 		int64_t t0 = 0;
-		Vec3 muzzle; // where it leaves the barrel
-		Vec3 origin; // the aim ray
+		Vec3 muzzle;
+		Vec3 origin;
 		Vec3 direction;
 		float speed = 0;
 		float max_distance = 0;
@@ -805,7 +790,6 @@ struct FxTriggers::Impl {
 		return fire && p_def < fire->defs.size() ? &fire->defs[p_def] : nullptr;
 	}
 
-	// True the first time; false (counted) for a key that already ran.
 	bool first_time(uint64_t p_key, bool p_count_double = true) {
 		if (seen.contains(p_key)) {
 			if (p_count_double) {
@@ -847,7 +831,6 @@ struct FxTriggers::Impl {
 		return *d;
 	}
 
-	// One FxWorld start; logs it. Returns the handle (invalid when culled or refused).
 	EffectHandle start(const std::shared_ptr<const EffectDef> &p_def, const hk::PresentEvent &p_e, TriggerPurpose p_purpose, uint32_t p_index, uint64_t p_seed,
 			const Transform &p_frame, const Vec3 &p_velocity, float p_age, bool p_first_person, bool *r_culled = nullptr) {
 		TriggerStart s;
@@ -897,8 +880,6 @@ struct FxTriggers::Impl {
 
 	FxView view;
 
-	// ---- the timelines ----
-	// The start age of p_e now; false while it waits (invalid clock or ahead of the drawn time).
 	bool age_of(const hk::PresentEvent &p_e, const hk::PresentClock &p_now, float &r_age) const {
 		if (p_e.timeline == hk::PresentTimeline::Immediate) {
 			r_age = 0.0f;
@@ -915,13 +896,11 @@ struct FxTriggers::Impl {
 		return true;
 	}
 
-	// ---- shots ----
 	const MuzzleSample *muzzle_for(uint8_t p_slot, bool p_first_person) const {
 		const int32_t i = p_first_person ? own_1p[p_slot] : third[p_slot];
 		return i >= 0 ? &muzzles[size_t(i)] : nullptr;
 	}
 
-	// The frame of entry p_i of p_list given the person's muzzle sample at entry 0.
 	static Transform entry_frame(const std::vector<FireEffect> &p_list, size_t p_i, const MuzzleSample &p_m) {
 		if (p_i == 0) {
 			return p_m.transform;
@@ -952,13 +931,12 @@ struct FxTriggers::Impl {
 		if (const MuzzleSample *s = muzzle_for(p_e.slot, own)) {
 			m = *s;
 		} else if (const MuzzleSample *s3 = own ? muzzle_for(p_e.slot, false) : nullptr) {
-			m = *s3; // the own soldier drawn in 3p (no viewmodel): its crowd muzzle
+			m = *s3;
 		} else {
 			m = aim_muzzle(p_e.slot, origin, dir, {});
 			++stats.muzzle_fallbacks;
 		}
-		// The 1p list in the 1p pass only at the viewmodel's muzzle; otherwise (free camera, no viewmodel, others)
-		// the 3p list where the world draws it.
+
 		const bool first_person = own && m.first_person;
 		const std::vector<FireEffect> &list = first_person ? w->first_person : w->third_person;
 		for (size_t i = 0; i < list.size(); ++i) {
@@ -1024,7 +1002,6 @@ struct FxTriggers::Impl {
 		tracers.push_back(t);
 	}
 
-	// The tracer after p_s metres: on the aim ray, plus the muzzle's offset fading out over the converge distance.
 	static Transform tracer_frame(const Tracer &p_t, float p_s) {
 		const float k = std::clamp(p_s / std::max(p_t.converge, 0.01f), 0.0f, 1.0f);
 		const Vec3 pos = add(add(p_t.origin, mul(p_t.direction, p_s)), mul(sub(p_t.muzzle, p_t.origin), 1.0f - k));
@@ -1064,8 +1041,6 @@ struct FxTriggers::Impl {
 		tracers.resize(keep);
 	}
 
-	// ---- impacts ----
-	// Starts p_cell at the event; p_axis_seed: the event seed of the choice, spread and decal.
 	void play_cell(const ImpactCell &p_cell, const hk::PresentEvent &p_e, uint64_t p_seed, const Vec3 &p_pos, const Vec3 &p_normal, float p_age, bool p_decal,
 			bool p_sound) {
 		bool culled = false;
@@ -1157,7 +1132,7 @@ struct FxTriggers::Impl {
 		if (contact) {
 			end_tracer_at(p_e.slot, p_e.id, pos);
 		}
-		// Duplicate deliveries of the same event kind are double starts; a Hit after the contact is the confirmation.
+
 		const uint64_t own_key = start_key(contact ? KeyKind::Soldier : KeyKind::SoldierHit, p_e.slot, p_e.id, p_e.pellet, contact ? p_e.aux : 0u);
 		if (!first_time(own_key)) {
 			return;
@@ -1166,7 +1141,7 @@ struct FxTriggers::Impl {
 			return;
 		}
 		if (contact && p_e.slot != config.own_slot) {
-			return; // a remote shot's predicted contact: its Hit plays the cell (§12.2: SoldierContact (own))
+			return;
 		}
 		const uint64_t cell_key = start_key(KeyKind::Soldier, p_e.slot, p_e.id, p_e.pellet, kSoldierOrdinal);
 		if (!first_time(cell_key, false)) {
@@ -1233,7 +1208,7 @@ struct FxTriggers::Impl {
 				return false;
 			}
 		}
-		return uint8_t(p_e.kind) <= uint8_t(hk::PresentKind::Revive) && uint8_t(p_e.timeline) <= uint8_t(hk::PresentTimeline::Immediate); // M2b cam [revive kind]
+		return uint8_t(p_e.kind) <= uint8_t(hk::PresentKind::Revive) && uint8_t(p_e.timeline) <= uint8_t(hk::PresentTimeline::Immediate);
 	}
 
 	void dispatch(const hk::PresentEvent &p_e, float p_age) {
@@ -1253,7 +1228,7 @@ struct FxTriggers::Impl {
 				on_detonation(p_e, p_age);
 				break;
 			default:
-				break; // OwnTimed, Death, Spawn: no effect in M2a
+				break;
 		}
 	}
 
@@ -1315,7 +1290,7 @@ void FxTriggers::on_events(std::span<const host::PresentEvent> p_events, const h
 	if (!finite3(m.view.camera_position)) {
 		m.view.camera_position = {};
 	}
-	// The held events first (they are older), then this frame's.
+
 	const size_t held = m.pending.size();
 	for (size_t i = 0; i < held; ++i) {
 		const host::PresentEvent e = m.pending.front();
@@ -1372,4 +1347,4 @@ size_t FxTriggers::live_tracers() const {
 	return impl_->tracers.size();
 }
 
-} // namespace bf3::fx
+}

@@ -1,17 +1,3 @@
-// The M1 session: GameServer inside ServerHost, ClientSession, the rest judge and the presentation helpers
-// (bf3_host game_server.h, client_session.h, rest_check.h, level_load.h; docs/design/m1.md §1 E2/E3, §7.4-§9, §14).
-//
-// Suite host-session-unit (no install): judge_rest on synthetic recordings; present_others / present_own_fraction
-// on synthetic frames; GameServer driven without sockets (jitter buffer, buffer report, hold command, Teleport /
-// SpawnAt stamped at the rules tick, Trace, SpawnSweep, refused dev commands, hostile datagrams); then a real
-// ServerHost and ClientSession over ENet loopback on a synthetic world: spawn, walk, stop, the clock, the RTT bound,
-// forced clock resets, a stall, a start behind the server, the spawn view, a teleport's smoothing, events of odd
-// ticks, Trace against the snapshots, the walkers' interpolation against the server's own track, and E2 under
-// "150/2" through judge_rest.
-// Suite host-session (install; exits 77 without one): the same session on Metro's real static world through
-// load_shared_level with the shipped motor tuning: E2 under "150/2" (the gate) and "lat=150-165,loss=2" (a reported
-// stress row), SpawnSweep with 128 slots against rows computed in-process, install unchanged.
-// Timings are wall-clock: other work on the machine (parallel builds) makes the RTT and frame numbers noisy.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
@@ -66,8 +52,6 @@ using namespace std::chrono_literals;
 
 namespace {
 
-// ---- synthetic world and soldier ----------------------------------------------------------------------------
-
 void add_quad(std::vector<StaticTriangle> &r_out, const Vec3 &p_a, const Vec3 &p_b, const Vec3 &p_c, const Vec3 &p_d) {
 	StaticTriangle t;
 	t.v = { p_a, p_b, p_c };
@@ -112,7 +96,6 @@ gameplay::StatePoseSpeed speed(gameplay::SoldierPose p_pose, float p_v, float p_
 	return s;
 }
 
-// Metro's soldier numbers (bf3dump soldier, as sim_motor_tests.cpp's synthetic soldier).
 gameplay::SoldierDef synthetic_soldier() {
 	using gameplay::SoldierPose;
 	gameplay::SoldierDef d;
@@ -192,7 +175,6 @@ std::string read_text(const char *p_path) {
 	return s.str();
 }
 
-// The shipped tuning file (docs §6.11: host.session checks the game's numbers).
 MotorTuning shipped_tuning() {
 	const std::string text = read_text(OPENBF3_MOTOR_TUNING_CFG);
 	REQUIRE_MESSAGE(!text.empty(), OPENBF3_MOTOR_TUNING_CFG);
@@ -207,8 +189,6 @@ MotorParams synthetic_params() {
 	return *p;
 }
 
-// A 240 m x 240 m floor at y = 0 with a few boxes; spawn points on the floor (some a little above or below it), one
-// next to a box face on either side (the settle shifts them).
 std::shared_ptr<const SharedLevel> synthetic_level() {
 	static std::shared_ptr<const SharedLevel> s_level;
 	if (s_level) {
@@ -234,8 +214,6 @@ std::shared_ptr<const SharedLevel> synthetic_level() {
 	s_level = synthetic_shared_level(*shapes, points, synthetic_params());
 	return s_level;
 }
-
-// ---- helpers ------------------------------------------------------------------------------------------------
 
 float horizontal(const Vec3 &p_v) {
 	return std::sqrt(p_v[0] * p_v[0] + p_v[2] * p_v[2]);
@@ -268,8 +246,6 @@ RestSample rest_sample(const PresentationFrame &p_f) {
 	return r;
 }
 
-// ---- a live server + client ---------------------------------------------------------------------------------
-
 struct LiveOptions {
 	uint32_t walkers = 0;
 	std::string netsim = "off";
@@ -285,8 +261,8 @@ struct Live {
 	ClientSession client;
 	InputSample input;
 	std::unique_ptr<PresentationFrame> frame = std::make_unique<PresentationFrame>();
-	bool adopt = true; // take each new life's spawn view at once (the mapper's rule, docs §11.6)
-	float adopt_yaw = NAN; // a heading to turn to on adoption (radians), else the spawn yaw
+	bool adopt = true;
+	float adopt_yaw = NAN;
 };
 
 std::unique_ptr<Live> start_live(std::shared_ptr<const SharedLevel> p_level, const LiveOptions &p_options) {
@@ -316,7 +292,6 @@ std::unique_ptr<Live> start_live(std::shared_ptr<const SharedLevel> p_level, con
 	return live;
 }
 
-// One poll of the main-thread side: copy the newest frame, adopt a new life's spawn view, hand over the input.
 bool poll(Live &r_live) {
 	const bool fresh = r_live.client.read_presentation(*r_live.frame);
 	const PresentationFrame &f = *r_live.frame;
@@ -329,7 +304,6 @@ bool poll(Live &r_live) {
 	return fresh;
 }
 
-// Polls every ~p_sleep_ms for p_seconds; p_each(fresh, now_ns, t) runs after every poll.
 void run_for(Live &r_live, double p_seconds, const std::function<void(bool, uint64_t, double)> &p_each = {}, int p_sleep_ms = 4) {
 	const auto start = std::chrono::steady_clock::now();
 	for (;;) {
@@ -381,7 +355,6 @@ const SlotStats *own_slot(const GameServerStats &p_stats) {
 	return nullptr;
 }
 
-// The walkers' quantised positions per server tick, from the server's published stats (polled faster than 60 Hz).
 struct WalkerTrack {
 	std::map<uint8_t, std::map<Tick, net::OtherSoldier>> per_slot;
 	void sample(const GameServerStats &p_stats) {
@@ -392,7 +365,7 @@ struct WalkerTrack {
 			}
 		}
 	}
-	// The server's position at fractional server tick p_tick, when both neighbouring ticks were seen.
+
 	std::optional<Vec3> at(uint8_t p_slot, double p_tick) const {
 		auto s = per_slot.find(p_slot);
 		if (s == per_slot.end() || p_tick < 0) {
@@ -456,8 +429,6 @@ struct InterpCheck {
 	}
 };
 
-// ---- E2: idle after the spawn, then walk-stop cycles, one RestSample per publish, judged by judge_rest -----------
-
 struct E2Run {
 	std::vector<RestSample> samples;
 	std::vector<RestCycleResult> cycles;
@@ -480,7 +451,7 @@ E2Run run_e2(Live &r_live, double p_idle_s, int p_cycles, double p_walk_s, doubl
 	r_live.input.move_forward = 0;
 	r_live.input.yaw = p_heading;
 	run_for(r_live, total, [&](bool p_fresh, uint64_t p_now, double p_t) {
-		// The input for the next ticks.
+
 		float forward = 0;
 		if (p_t >= p_idle_s) {
 			const double in_cycle = std::fmod(p_t - p_idle_s, p_walk_s + p_rest_s);
@@ -551,8 +522,6 @@ void print_e2(const char *p_name, const E2Run &p_run) {
 	}
 }
 
-// ---- GameServer without sockets -----------------------------------------------------------------------------
-
 struct Direct {
 	GameServer server;
 	std::vector<OutDatagram> out;
@@ -608,11 +577,11 @@ Command walk(Tick p_tick, uint32_t p_sequence, int8_t p_forward = kAxisMax) {
 	return c;
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-session-unit") {
 	TEST_CASE("host.session: judge_rest on synthetic recordings (edge push, late correction, window fit, creep, eye wobble)") {
-		// 60 Hz samples: walk 2 s, then idle for p_rest_s; the speed falls to 0 over p_decel_s.
+
 		auto recording = [](double p_rest_s, double p_decel_s) {
 			std::vector<RestSample> s;
 			const uint64_t step = 16'666'667ull;
@@ -647,7 +616,7 @@ TEST_SUITE("host-session-unit") {
 			return p_s;
 		};
 		{
-			// An input-edge correction (snapshot tick stop + 3) seen 0.3 s after the stop moves the window and passes.
+
 			const std::vector<RestSample> s = with_reconciliation(recording(13.0, 0.27), 120 + 18, 1120 + 3);
 			const std::vector<RestCycleResult> r = judge_rest(s, o);
 			REQUIRE(r.size() == 1);
@@ -657,7 +626,7 @@ TEST_SUITE("host-session-unit") {
 			CHECK(r[0].window_start_ns == s[138].time_ns + 500'000'000ull);
 		}
 		{
-			// A correction at snapshot tick stop + 11 (beyond 4 + 6) is a correction at rest: fails.
+
 			const std::vector<RestSample> s = with_reconciliation(recording(13.0, 0.27), 120 + 30, 1120 + 11);
 			const std::vector<RestCycleResult> r = judge_rest(s, o);
 			REQUIRE(r.size() == 1);
@@ -665,12 +634,12 @@ TEST_SUITE("host-session-unit") {
 			CHECK(std::string(r[0].failure.data()).find("at rest") != std::string::npos);
 		}
 		{
-			// stop + 10 is still the edge.
+
 			const std::vector<RestSample> s = with_reconciliation(recording(13.0, 0.27), 120 + 30, 1120 + 10);
 			CHECK(judge_rest(s, o)[0].ok);
 		}
 		{
-			// An edge correction late enough that the moved window no longer fits the 11 s period: fails.
+
 			const std::vector<RestSample> s = with_reconciliation(recording(11.0, 0.27), 120 + 60, 1120 + 2);
 			const std::vector<RestCycleResult> r = judge_rest(s, o);
 			REQUIRE(r.size() == 1);
@@ -678,14 +647,14 @@ TEST_SUITE("host-session-unit") {
 			CHECK(std::string(r[0].failure.data()).find("does not fit") != std::string::npos);
 		}
 		{
-			// A deceleration that takes 1.2 s fails as creep.
+
 			const std::vector<RestCycleResult> r = judge_rest(recording(13.0, 1.2), o);
 			REQUIRE(r.size() == 1);
 			CHECK_FALSE(r[0].ok);
 			CHECK(std::string(r[0].failure.data()).find("creep") != std::string::npos);
 		}
 		{
-			// A 0.2 mm eye wobble inside the window fails; 0.05 mm passes.
+
 			for (const float wobble : { 2e-4f, 5e-5f }) {
 				std::vector<RestSample> s = recording(13.0, 0.27);
 				s[120 + 300].eye[0] += wobble;
@@ -696,7 +665,7 @@ TEST_SUITE("host-session-unit") {
 			}
 		}
 		{
-			// A reconciliation inside the window, a visual offset in the window, two periods and an empty recording.
+
 			std::vector<RestSample> s = recording(13.0, 0.27);
 			s[120 + 400].visual_offset_m = 1e-6f;
 			CHECK_FALSE(judge_rest(s, o)[0].ok);
@@ -728,9 +697,9 @@ TEST_SUITE("host-session-unit") {
 		for (uint32_t i = 0; i < 3; ++i) {
 			net::OtherSoldier o;
 			o.slot = 5;
-			o.position = { 4.0f * float(i) * (2.0f / 60.0f), 0.0f, 0.0f }; // 4 m/s along x, samples 2 ticks apart
+			o.position = { 4.0f * float(i) * (2.0f / 60.0f), 0.0f, 0.0f };
 			o.velocity = { 4.0f, 0.0f, 0.0f };
-			o.yaw = uint16_t(65000 + i * 300); // crosses the wrap: shortest arc
+			o.yaw = uint16_t(65000 + i * 300);
 			o.pose = i == 2 ? Pose::Crouch : Pose::Stand;
 			o.target_pose = o.pose;
 			t.samples[i].server_tick = 100 + 2 * i;
@@ -738,7 +707,7 @@ TEST_SUITE("host-session-unit") {
 		}
 		std::array<PresentedSoldier, 4> out{};
 		uint64_t extra = 0;
-		// Render tick 101: halfway between samples 0 and 1 -> x = 4 m/s * (1/60 s).
+
 		REQUIRE(present_others(f, f.publish_ns, out, &extra) == 1);
 		CHECK(out[0].slot == 5);
 		CHECK(out[0].position[0] == doctest::Approx(4.0f / 60.0f).epsilon(1e-4));
@@ -747,12 +716,12 @@ TEST_SUITE("host-session-unit") {
 		const float yaw_mid = yaw_radians(uint16_t(65000 + 150));
 		CHECK(out[0].yaw == doctest::Approx(yaw_mid).epsilon(1e-4));
 		CHECK(out[0].pose == Pose::Stand);
-		// 50 ms later: render tick 104 -> exactly sample 2 (pose switches at the newer sample).
+
 		REQUIRE(present_others(f, f.publish_ns + 50'000'000ull, out, &extra) == 1);
 		CHECK(out[0].position[0] == doctest::Approx(4.0f * 4.0f / 60.0f).epsilon(1e-4));
 		CHECK(out[0].pose == Pose::Crouch);
-		// Past the newest sample: extrapolated along the velocity for at most 250 ms, then held.
-		const uint64_t at_200ms = f.publish_ns + uint64_t((3.0 + 12.0) / 60.0 * 1e9); // render 101 + 15 = tick 116: 12 ticks past
+
+		const uint64_t at_200ms = f.publish_ns + uint64_t((3.0 + 12.0) / 60.0 * 1e9);
 		REQUIRE(present_others(f, at_200ms, out, &extra) == 1);
 		CHECK(out[0].extrapolated);
 		CHECK(extra == 1);
@@ -761,10 +730,10 @@ TEST_SUITE("host-session-unit") {
 		REQUIRE(present_others(f, at_2s, out, &extra) == 1);
 		CHECK(out[0].position[0] == doctest::Approx(4.0f * 4.0f / 60.0f + 4.0f * 0.25f).epsilon(1e-3));
 		CHECK(extra == 2);
-		// Before the oldest sample: held at it.
+
 		REQUIRE(present_others(f, f.publish_ns - 100'000'000ull, out, nullptr) == 1);
 		CHECK(out[0].position[0] == 0.0f);
-		// r_out smaller than the tracks: writes what fits.
+
 		CHECK(present_others(f, f.publish_ns, std::span<PresentedSoldier>(out.data(), 0), nullptr) == 0);
 
 		PresentationFrame g;
@@ -795,7 +764,7 @@ TEST_SUITE("host-session-unit") {
 		CHECK(d.match->server_tick == 0);
 		CHECK(d.match->motor_hash == motor_params_hash(level->motor));
 		d.receive(net::encode_ready({}));
-		d.tick(); // tick 2: the spawn in the rules step, stamped 2
+		d.tick();
 		REQUIRE(d.spawned.size() == 1);
 		const SoldierState spawn = d.spawned[0].state;
 		CHECK(spawn.tick == 2);
@@ -804,7 +773,7 @@ TEST_SUITE("host-session-unit") {
 		CHECK(spawn.protect_ticks == level->motor.immortal_ticks);
 		CHECK(d.snapshots.back().server_tick == 2);
 		CHECK(d.snapshots.back().own->tick == 2);
-		// The hold command until the first real command: ticks 3..6 are repeats of hold_command(spawn).
+
 		for (int i = 0; i < 4; ++i) {
 			d.tick();
 		}
@@ -815,7 +784,7 @@ TEST_SUITE("host-session-unit") {
 		CHECK(horizontal(s->velocity) == 0.0f);
 		CHECK(d.snapshots.back().applied_repeated);
 		CHECK(d.snapshots.back().applied_sequence == 0);
-		// The client's catch-up stepping the same repeats gives the same state bit for bit.
+
 		{
 			auto world = CollisionWorld::create(level->static_world);
 			REQUIRE(world.ok());
@@ -828,53 +797,52 @@ TEST_SUITE("host-session-unit") {
 		}
 		GameServerStats g = d.server.stats();
 		CHECK(g.slots[0].commands_repeated == 4);
-		// Commands for ticks 9 and 10 (buffer 3 and 4 ticks ahead of tick 6), then the redundant copy again.
+
 		d.commands({ walk(10, 2), walk(9, 1) });
 		d.commands({ walk(10, 2), walk(9, 1) });
 		g = d.server.stats();
 		CHECK(g.slots[0].buffer_ticks == 10 - 6);
 		CHECK(g.slots[0].commands_replaced == 0);
-		// Replace rule: a newer sequence for tick 10 replaces it, an equal one does not, an older one does not.
+
 		d.commands({ walk(10, 5, 64) });
 		d.commands({ walk(10, 5, 64) });
 		d.commands({ walk(10, 3, 32) });
 		g = d.server.stats();
 		CHECK(g.slots[0].commands_replaced == 1);
-		// Buffer report from the highest sequence, not the highest tick: seq 6 names tick 8 while tick 10 is buffered.
+
 		d.commands({ walk(8, 6) });
 		g = d.server.stats();
 		CHECK(g.slots[0].buffer_ticks == 8 - 6);
-		d.tick(); // 7: repeat
-		d.tick(); // 8: seq 6
+		d.tick();
+		d.tick();
 		CHECK(d.server.soldier(0)->tick == 8);
 		CHECK(d.snapshots.back().applied_sequence == 6);
 		CHECK_FALSE(d.snapshots.back().applied_repeated);
 		CHECK(d.snapshots.back().command_buffer_ticks == 0);
-		d.tick(); // 9: seq 1
-		d.tick(); // 10: seq 5 (the replacement)
+		d.tick();
+		d.tick();
 		g = d.server.stats();
 		CHECK(g.slots[0].commands_applied == 3);
 		CHECK(d.snapshots.back().applied_sequence == 5);
 		CHECK(d.snapshots.back().sequence_echo == 6);
-		// Late: a new command for a tick that already ran; its redundant copy is not counted again; a redundant copy of
-		// a command that ran is not late.
+
 		d.commands({ walk(9, 7) });
 		d.commands({ walk(9, 7) });
 		d.commands({ walk(10, 5, 64) });
 		g = d.server.stats();
 		CHECK(g.slots[0].commands_late == 1);
-		// Beyond the jitter buffer: dropped.
+
 		d.commands({ walk(10 + 33, 8) });
 		g = d.server.stats();
-		CHECK(g.slots[0].buffer_ticks == 43 - 10); // the report still follows the highest sequence
-		// Teleport and SpawnAt in the rules step, stamped at the tick (the motor's precondition holds next tick).
+		CHECK(g.slots[0].buffer_ticks == 43 - 10);
+
 		net::DebugRequest tp;
 		tp.kind = net::DebugKind::Teleport;
 		tp.id = 11;
 		tp.position = { 5.0f, 3.0f, -5.0f };
 		tp.yaw = 1234;
 		d.receive(net::encode_debug(tp));
-		d.tick(); // 11
+		d.tick();
 		s = d.server.soldier(0);
 		CHECK(s->tick == 11);
 		CHECK(s->position == Vec3{ 5.0f, 3.0f, -5.0f });
@@ -888,7 +856,7 @@ TEST_SUITE("host-session-unit") {
 		at.id = 12;
 		at.index = 3;
 		d.receive(net::encode_debug(at));
-		d.tick(); // 12
+		d.tick();
 		REQUIRE(d.spawned.size() == 2);
 		CHECK(d.spawned[1].state.tick == 12);
 		CHECK(d.spawned[1].state.life == 2);
@@ -898,7 +866,7 @@ TEST_SUITE("host-session-unit") {
 		d.receive(net::encode_debug(at));
 		d.tick();
 		CHECK_FALSE(d.reports.back().ok);
-		// Trace: the next 10 ticks' states, consecutive, equal to the server's states after each tick.
+
 		net::DebugRequest tr;
 		tr.kind = net::DebugKind::Trace;
 		tr.id = 14;
@@ -916,12 +884,11 @@ TEST_SUITE("host-session-unit") {
 			CHECK(d.reports.back().trace[i] == seen[i]);
 		}
 		tr.ticks = net::kMaxTraceTicks + 1;
-		d.receive(net::encode_debug(tr)); // the decoder refuses it already: a bad datagram
+		d.receive(net::encode_debug(tr));
 		g = d.server.stats();
 		CHECK(g.bad_datagrams == 1);
 		CHECK(g.step_precondition_failures == 0);
 
-		// A server without dev commands refuses them.
 		Direct off;
 		GameServerConfig ocfg = cfg;
 		ocfg.dev_commands = false;
@@ -936,7 +903,6 @@ TEST_SUITE("host-session-unit") {
 		CHECK_FALSE(off.reports[0].ok);
 		CHECK(off.server.soldier(0)->position != tp.position);
 
-		// Hostile bytes: random and mutated datagrams of every kind never crash; counted when they do not decode.
 		std::mt19937 rng(7);
 		std::vector<std::vector<uint8_t>> seeds = { net::encode_hello(hello), net::encode_ready({}), net::encode_debug(tp), net::encode_debug(tr),
 			net::encode_bye(), net::encode_loading({}) };
@@ -988,7 +954,7 @@ TEST_SUITE("host-session-unit") {
 		Direct d;
 		GameServerConfig cfg;
 		cfg.level = level;
-		cfg.max_slots = 5; // the client + 4 dummies per batch: 12 points take 3 batches
+		cfg.max_slots = 5;
 		cfg.dev_commands = true;
 		REQUIRE(d.server.init(cfg).ok());
 		d.server.on_connect(0);
@@ -1033,7 +999,7 @@ TEST_SUITE("host-session-unit") {
 		}
 		std::printf("synthetic SpawnSweep: %zu / %zu ok (%s)\n", ok, r.sweep.size(), r.text.c_str());
 		CHECK(ok == r.sweep.size());
-		// The dummies are gone again.
+
 		const GameServerStats g = d.server.stats();
 		size_t used = 0;
 		for (const SlotStats &s : g.slots) {
@@ -1044,7 +1010,7 @@ TEST_SUITE("host-session-unit") {
 
 	TEST_CASE("host.session: loopback: spawn without reconciliation, walk, stop; the clock target 2; RTT bound; Trace; events; the spawn view; walkers") {
 		auto live = start_live(synthetic_level(), { .walkers = 2 });
-		// The spawn view: the mapper has not adopted the life yet; its input looks elsewhere.
+
 		live->adopt = false;
 		live->input.yaw = 1.0f;
 		run_for(*live, 1.0);
@@ -1059,7 +1025,7 @@ TEST_SUITE("host-session-unit") {
 		run_for(*live, 1.0);
 		CHECK(live->frame->own_curr.yaw == quantize_yaw(yaw_radians(spawn_yaw) + 0.5f));
 		CHECK(live->frame->stats.reconciliations == 0);
-		// Walk 1 s with a jump and a crouch, traced on the server (240 ticks), then stop and stand.
+
 		WalkerTrack track;
 		InterpCheck interp;
 		net::DebugRequest tr;
@@ -1114,7 +1080,7 @@ TEST_SUITE("host-session-unit") {
 			}
 			if (auto it = server_own.find(e.tick); it != server_own.end()) {
 				++compared;
-				CHECK(it->second == e); // every snapshot's own state is the trace entry of its tick, bit for bit
+				CHECK(it->second == e);
 			}
 			if (auto it = predicted.find(e.tick); it != predicted.end()) {
 				++predicted_compared;
@@ -1134,23 +1100,23 @@ TEST_SUITE("host-session-unit") {
 				(unsigned long long)interp.extrapolated, double(interp.max_error), double(interp.p99()));
 		CHECK(compared > 60);
 		CHECK(predicted_compared > 100);
-		CHECK(predicted_equal == predicted_compared); // loopback, no loss: the prediction is the server's state
+		CHECK(predicted_equal == predicted_compared);
 		CHECK((trace_events & soldier_events::kJumped) != 0);
 		CHECK((trace_events & soldier_events::kPoseStarted) != 0);
 		CHECK((trace_events & soldier_events::kPoseFinished) != 0);
 		CHECK(odd_events != 0);
 		std::printf("loopback: %llu frames missed by the 1 ms poll\n", (unsigned long long)missed_frames);
 		if (missed_frames == 0) {
-			CHECK((seen_events & odd_events) == odd_events); // odd-tick events reach server_events
+			CHECK((seen_events & odd_events) == odd_events);
 		} else {
-			WARN((seen_events & odd_events) == odd_events); // a missed frame loses its events (HUD only, docs §9.1)
+			WARN((seen_events & odd_events) == odd_events);
 		}
 		CHECK(s.reconciliations == 0);
 		CHECK(s.step_precondition_failures == 0);
 		CHECK(s.hash_mismatches == 0);
 		CHECK(s.target_buffer_ticks == 2);
 		CHECK(rtt_n > 0);
-		// RTT between the netsim's round trip (0 here) and that + 1 tick + 2 ms: the server flushes after its sends.
+
 		CHECK(rtt_sum / double(rtt_n) >= 0.0);
 		CHECK(rtt_sum / double(rtt_n) <= 1000.0 / 60.0 + 2.0);
 		CHECK(g.step_precondition_failures == 0);
@@ -1161,8 +1127,7 @@ TEST_SUITE("host-session-unit") {
 		CHECK(interp.compared > 300);
 		CHECK(interp.max_error < 0.15f);
 		CHECK(interp.p99() < 0.05f);
-		// The superseded-snapshot case: a transition that finishes while the client thread stalls; after the stall many
-		// snapshots arrive in one client tick and the finish's events come from one that is not the newest.
+
 		net::DebugRequest tr2 = tr;
 		tr2.id = 32;
 		tr2.ticks = 120;
@@ -1170,12 +1135,7 @@ TEST_SUITE("host-session-unit") {
 		Tick newest_after = 0;
 		live->client.send_debug(tr2);
 		run_for(*live, 0.1);
-		// The stall starts as soon as a frame shows the predicted state heading for crouch (the transition started in a
-		// client tick that sent the crouch command), so the server's finish 18 ticks later always falls inside the
-		// 800 ms stall. It reads the predicted state, not the frame's events (a publish the poll misses loses its
-		// events). A fixed wait between the command and the stall let a descheduled main thread move the finish before
-		// the stall (lane runs, 2026-10-17). The 0.75 s window opens at the stall request: the client thread starts its
-		// stall at or after it, so the first fresh frame after 0.75 s is always one after the stall.
+
 		live->input.pose = Pose::Crouch;
 		bool started = false;
 		const auto pose_sent = std::chrono::steady_clock::now();
@@ -1210,23 +1170,20 @@ TEST_SUITE("host-session-unit") {
 				after_stall, newest_after);
 		REQUIRE(finished != 0);
 		CHECK((after_stall & soldier_events::kPoseFinished) != 0);
-		CHECK(newest_after > finished + 2); // not the snapshot that carried the finish
+		CHECK(newest_after > finished + 2);
 		live->client.stop();
 		live->server.stop();
 	}
 
 	TEST_CASE("host.session: forced clock resets forward and backward, a 3 s stall, and a start behind the server keep the prediction base") {
-		// 40 ms each way (no loss), so a forward reset lands past the ring's newest entry (a real gap to fill), and the
-		// stale reports of the hold-off take a round trip to drain.
+
 		auto live = start_live(synthetic_level(), { .netsim = "lat=40" });
 		REQUIRE(wait_spawned(*live));
 		run_for(*live, 3.0);
 		const ClientStats s0 = live->client.stats();
 		CHECK(s0.reconciliations == 0);
 		CHECK(s0.step_precondition_failures == 0);
-		// The clock 20 ticks (333 ms > clock_reset_ms) behind: the next snapshot names a tick >= C, so the clock is
-		// forced forward (or, when the shifted commands' report comes first, reset by it); the hold-off keeps the old
-		// reports from resetting it again.
+
 		live->client.debug_shift_clock(-20);
 		run_for(*live, 2.0);
 		const ClientStats s1 = live->client.stats();
@@ -1235,12 +1192,10 @@ TEST_SUITE("host-session-unit") {
 				(unsigned long long)(s1.base_fills - s0.base_fills), (unsigned long long)(s1.reconciliations - s0.reconciliations),
 				(unsigned long long)(s1.ring_misses - s0.ring_misses), (unsigned long long)s1.step_precondition_failures);
 		CHECK(s1.clock_resets - s0.clock_resets == 1);
-		// The forward reset lands about where the clock was before the shift, so the ring usually still holds C - 1
-		// (no fill needed); a fill happens only when it lands past the ring's newest entry (docs §9.2 "As built in T4").
+
 		CHECK(s1.reconciliations - s0.reconciliations <= 1);
 		CHECK(s1.step_precondition_failures == 0);
-		// The clock 20 ticks ahead: the reports say +22, one backward reset; the server takes the re-sent ticks' newer
-		// sequences (the shifted commands are inside its 32-tick buffer).
+
 		const uint64_t replaced0 = own_slot(live->server.game_stats())->commands_replaced;
 		live->client.debug_shift_clock(20);
 		run_for(*live, 2.0);
@@ -1252,13 +1207,12 @@ TEST_SUITE("host-session-unit") {
 				(unsigned long long)s2.step_precondition_failures);
 		CHECK(s2.clock_resets - s1.clock_resets == 1);
 		CHECK(replaced1 > replaced0);
-		// The +20 jump itself is a forward jump past the ring's newest entry: filled by the base rule in the same tick,
-		// not one RTT later when a snapshot reaches the gap.
+
 		CHECK(s2.base_fills > s1.base_fills);
 
 		CHECK(s2.reconciliations - s1.reconciliations <= 1);
 		CHECK(s2.step_precondition_failures == 0);
-		// A 3 s stall of the client thread (longer than the 2.1 s ring): a ring miss, recovered by the catch-up.
+
 		live->client.debug_stall(3000);
 		run_for(*live, 4.5);
 		const ClientStats s3 = live->client.stats();
@@ -1270,14 +1224,13 @@ TEST_SUITE("host-session-unit") {
 		CHECK(s3.step_precondition_failures == 0);
 		run_for(*live, 2.0);
 		const ClientStats s4 = live->client.stats();
-		CHECK(s4.reconciliations == s3.reconciliations); // settled again
+		CHECK(s4.reconciliations == s3.reconciliations);
 		CHECK(s4.clock_resets == s3.clock_resets);
 		CHECK(s4.hash_mismatches == 0);
 		CHECK(live->server.game_stats().step_precondition_failures == 0);
 		live->client.stop();
 		live->server.stop();
 
-		// A start with the clock 30 ticks behind the server: Spawned names T >= C, forced forward.
 		auto behind = start_live(synthetic_level(), { .clock_offset = -30 });
 		REQUIRE(wait_spawned(*behind));
 		run_for(*behind, 2.0);
@@ -1389,8 +1342,6 @@ TEST_SUITE("host-session-unit") {
 	}
 }
 
-// ---- host-session: Metro (install; exits 77 without one) -----------------------------------------------------
-
 namespace {
 
 struct Metro {
@@ -1422,7 +1373,7 @@ Metro *metro() {
 	core::Result<std::shared_ptr<core::Install>> opened = core::Install::open(*m->reader);
 	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
 	m->install = *opened;
-	// A fresh scratch cache root (never the repo, never the install): cold, then the same root again (warm).
+
 	m->cache_root = std::filesystem::temp_directory_path() / ("openbf3-host-session-" + std::to_string(GetCurrentProcessId()));
 	std::error_code ec;
 	std::filesystem::remove_all(m->cache_root, ec);
@@ -1461,8 +1412,6 @@ Metro *metro() {
 	return s_metro.get();
 }
 
-// A walking heading from the soldier's spawn: find_clear_heading on the test's own world, else respawn at the course
-// points sim.motor found (7, 20, 22, 23, 36, 70) until one has a heading.
 std::optional<float> metro_heading(Live &r_live, const Metro &p_metro) {
 	auto world = CollisionWorld::create(p_metro.level->static_world);
 	REQUIRE(world.ok());
@@ -1485,7 +1434,7 @@ std::optional<float> metro_heading(Live &r_live, const Metro &p_metro) {
 			poll(r_live);
 			std::this_thread::sleep_for(4ms);
 		}
-		run_for(r_live, 1.2); // settled
+		run_for(r_live, 1.2);
 		const std::optional<uint16_t> g = find_clear_heading(m, **world, r_live.frame->own_curr.position, 10.0f);
 		if (g) {
 			std::printf("Metro E2 course: spawn point %u, heading %u\n", point, unsigned(*g));
@@ -1501,14 +1450,14 @@ E2Run metro_e2(Metro &r_metro, const char *p_profile, uint64_t p_seed) {
 	run_for(*live, 1.2);
 	const std::optional<float> heading = metro_heading(*live, r_metro);
 	REQUIRE(heading.has_value());
-	// docs §1 E2: 30 s idle after the spawn, then 4 walk-stop cycles (walk 2 s, rest 13 s).
+
 	E2Run run = run_e2(*live, 30.0, 4, 2.0, 13.0, *heading, true);
 	live->client.stop();
 	live->server.stop();
 	return run;
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-session") {
 	TEST_CASE("host.session: Metro: load_shared_level cold then warm on a scratch cache, with the shipped tuning") {
@@ -1518,7 +1467,7 @@ TEST_SUITE("host-session") {
 		}
 		CHECK(m->level->level == "MP_Subway");
 		CHECK(m->level->mode == "TeamDeathMatch0");
-		// TC (docs/design/terrain-collision.md): 149 Havok tiles and the terrain as one height field (170 tiles before).
+
 		CHECK(m->level->static_world->tile_count() == 149);
 		CHECK(m->level->static_world->terrain_count() == 1);
 		CHECK(m->level->spawn_protection_radius == 10.0f);
@@ -1562,7 +1511,7 @@ TEST_SUITE("host-session") {
 			ok += c.ok ? 1 : 0;
 		}
 		std::printf("E2 stress row: %zu / %zu rest periods ok (reported, not gated: orchestrator decision on docs §16 question 2)\n", ok, run.cycles.size());
-		// The rules that hold under any latency are still checked.
+
 		CHECK(run.stats.step_precondition_failures == 0);
 		CHECK(run.server_precondition_failures == 0);
 		CHECK(run.stats.hash_mismatches == 0);
@@ -1575,7 +1524,7 @@ TEST_SUITE("host-session") {
 		}
 		auto live = start_live(m->level, { .walkers = 2 });
 		REQUIRE(wait_spawned(*live));
-		// The headless rows on this test's own CollisionWorld and motor over the same shapes and params.
+
 		auto world = CollisionWorld::create(m->level->static_world);
 		REQUIRE(world.ok());
 		SoldierMotor motor;
@@ -1632,10 +1581,6 @@ TEST_SUITE("host-session") {
 	}
 }
 
-// M2a cl (docs/design/m2a.md §6.1, §15 R1; docs/design/m2a-cl.md): present_others' Hermite body became the call to
-// net::sample_other. This block keeps M1's body as it was (copied from client_session.cpp before R1) and checks the
-// new present_others draws the same soldiers, bit for bit in every M1 field, on 200,000 random tracks and render times
-// (bracketed, before the oldest sample, extrapolated, held past 250 ms; yaw across the wrap; pose switches).
 namespace m1_present_ref {
 
 float lerp(float p_a, float p_b, float p_t) {
@@ -1732,7 +1677,7 @@ bool same_m1_fields(const PresentedSoldier &p_a, const PresentedSoldier &p_b) {
 			p_a.flags == p_b.flags && p_a.extrapolated == p_b.extrapolated;
 }
 
-} // namespace m1_present_ref
+}
 
 TEST_SUITE("host-session-unit") {
 	TEST_CASE("host.session: M2a cl R1: present_others through net::sample_other draws what M1's body drew (bit for bit, 200,000 cases)") {

@@ -1,5 +1,3 @@
-// Bf3GameAudio (game_audio.h; as built: docs/design/m2a-au3.md "Bf3GameAudio").
-
 #include "game_audio.h"
 
 #include "audio_stream.h"
@@ -8,7 +6,7 @@
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/game_audio_frame.h"
 #include "bf3/audio/kit_audio.h"
-#include "bf3/audio/voice_cull.h" // M2b au [a3]
+#include "bf3/audio/voice_cull.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/level/level.h"
 #include "bf3/host/client_wiring.h"
@@ -29,12 +27,12 @@
 #include <cstdio>
 #include <map>
 #include <mutex>
-#include <chrono> // PT1 snd [capture]
-#include "bf3/audio/wav_io.h" // PT1 snd [capture]
-#include "bf3/core/install.h" // PT1 snd [capture]
-#include <godot_cpp/variant/utility_functions.hpp> // PT1 snd [capture]
-#include <filesystem> // PT1 snd [capture]
-#include <fstream> // PT1 snd [capture]
+#include <chrono>
+#include "bf3/audio/wav_io.h"
+#include "bf3/core/install.h"
+#include <godot_cpp/variant/utility_functions.hpp>
+#include <filesystem>
+#include <fstream>
 
 using namespace godot;
 namespace ba = bf3::audio;
@@ -45,66 +43,62 @@ namespace bf3::godot_side {
 
 namespace {
 
-// The mapped frame of an event at "now" is the mixer clock + this (plus the measured output latency, which the heard
-// frame takes off again): schedule_lead_blocks blocks (the mixer's earliest frame), 2 blocks for Godot's mix chunks
-// running ahead between two display frames, and one 60 Hz display frame of 800 frames (an event a frame old).
 constexpr int64_t kBiasMarginFrames = 2 * int64_t(ba::kBlockFrames) + 800;
 constexpr uint32_t kCommandCapacity = 8192;
 
-// The game mixer's single tap: forwards to the check while one is attached (swapped under the AudioServer lock).
 class TapForwarder final : public ba::MixTap {
 public:
 	void on_block(const float *p_interleaved_stereo, uint32_t p_frames, uint64_t p_first_frame) override {
 		if (ba::MixTap *t = target_.load(std::memory_order_acquire)) {
 			t->on_block(p_interleaved_stereo, p_frames, p_first_frame);
 		}
-		if (ba::MixTap *t = pt1_capture_.load(std::memory_order_acquire)) { // PT1 snd [capture]
-			t->on_block(p_interleaved_stereo, p_frames, p_first_frame); // PT1 snd [capture]
-		} // PT1 snd [capture]
+		if (ba::MixTap *t = pt1_capture_.load(std::memory_order_acquire)) {
+			t->on_block(p_interleaved_stereo, p_frames, p_first_frame);
+		}
 	}
 	void set(ba::MixTap *p_tap) {
 		target_.store(p_tap, std::memory_order_release);
 	}
-	void pt1_set_capture(ba::MixTap *p_tap) { // PT1 snd [capture]
-		pt1_capture_.store(p_tap, std::memory_order_release); // PT1 snd [capture]
-	} // PT1 snd [capture]
+	void pt1_set_capture(ba::MixTap *p_tap) {
+		pt1_capture_.store(p_tap, std::memory_order_release);
+	}
 
 private:
 	std::atomic<ba::MixTap *> target_{ nullptr };
-	std::atomic<ba::MixTap *> pt1_capture_{ nullptr }; // PT1 snd [capture]: --audio-capture's recorder
+	std::atomic<ba::MixTap *> pt1_capture_{ nullptr };
 };
 
 ba::Vec3 vec(const fx::Vec3 &p_v) {
 	return { p_v.x, p_v.y, p_v.z };
 }
 
-} // namespace
+}
 
 template <class Impl>
-ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m); // M2b au [a3] (defined in the M2b au block below)
-struct Pt1Capture; // PT1 snd [capture] (the PT1 snd block below)
-void pt1_delete_capture(Pt1Capture *p_capture); // PT1 snd [capture]
+ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m);
+struct Pt1Capture;
+void pt1_delete_capture(Pt1Capture *p_capture);
 template <class Impl>
-void pt1_capture_begin(Impl &r_m); // PT1 snd [capture]: build(), before the player starts
+void pt1_capture_begin(Impl &r_m);
 template <class Impl>
-void pt1_capture_step(Impl &r_m); // PT1 snd [capture]: step()
+void pt1_capture_step(Impl &r_m);
 template <class Impl>
-void pt1_capture_end(Impl &r_m); // PT1 snd [capture]: shutdown(), after the audio thread left the mixer
+void pt1_capture_end(Impl &r_m);
 
 struct Bf3GameAudio::Impl {
-	// Load (loader thread), read-only afterwards.
+
 	const host::LevelDatabase *db = nullptr;
 	std::shared_ptr<const ba::WeaponAudioTable> table;
 	ba::KitAudioSources kits;
 	std::shared_ptr<const ba::ImpactSoundCache> impacts_cache;
-	std::map<std::string, ba::GameAuditionAsset, std::less<>> auditions; // compiled patches and their banks by name
+	std::map<std::string, ba::GameAuditionAsset, std::less<>> auditions;
 	ba::GameAudioLoadOptions load_options;
 	std::shared_ptr<const ca::WaveBank> bank;
 	std::vector<std::string> report;
 	uint32_t programs = 0, program_failures = 0;
-	ba::MixerA3Assets a3; // M2b au [a3]: the HdrSetting and scopes, read at load (docs/design/m2b-au.md)
+	ba::MixerA3Assets a3;
 	std::atomic<bool> loaded{ false };
-	// Build (main thread).
+
 	ba::AudioTuning tuning;
 	std::shared_ptr<ba::MixerCore> mixer;
 	std::unique_ptr<ba::OneShotPool> pool;
@@ -116,15 +110,15 @@ struct Bf3GameAudio::Impl {
 	AudioStreamPlayer *player = nullptr;
 	bool built = false;
 	ba::GameAudioCheck *check = nullptr;
-	// Per frame.
+
 	std::vector<ba::MuzzlePoint> muzzles;
 	std::vector<ba::ImpactSoundRequest> impact_requests;
 	ba::GameAudioDriver driver;
 	ba::ListenerState listener;
 	uint64_t auditions_started = 0;
 	int64_t lead_frames = 2 * int64_t(ba::kBlockFrames);
-	std::unique_ptr<Pt1Capture, void (*)(Pt1Capture *)> pt1{ nullptr, &pt1_delete_capture }; // PT1 snd [capture]
-	core::PathGuard pt1_guard; // PT1 snd [capture]: the install's, taken in load()
+	std::unique_ptr<Pt1Capture, void (*)(Pt1Capture *)> pt1{ nullptr, &pt1_delete_capture };
+	core::PathGuard pt1_guard;
 };
 
 Bf3GameAudio::Bf3GameAudio() :
@@ -143,7 +137,7 @@ core::Status Bf3GameAudio::load(const M2aLoadInputs &p_in, std::span<const std::
 		return core::make_error("Bf3GameAudio::load: the shared level has no gunplay tables (SharedLoadOptions::gunplay)");
 	}
 	m.db = p_in.db;
-	m.pt1_guard = p_in.db->install->reader().write_guard(); // PT1 snd [capture]: the loader frees the database after load
+	m.pt1_guard = p_in.db->install->reader().write_guard();
 	core::Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(p_in.db->install, *p_in.db->level, *p_in.shared->gunplay, p_impact_sounds, p_in.threads, p_in.stop,
 			m.load_options);
 	if (!a) {
@@ -157,7 +151,7 @@ core::Status Bf3GameAudio::load(const M2aLoadInputs &p_in, std::span<const std::
 	m.report = std::move(a->report);
 	m.programs = a->programs;
 	m.program_failures = a->program_failures;
-	m.a3 = load_a3(p_in.db->level->db(), m); // M2b au [a3]
+	m.a3 = load_a3(p_in.db->level->db(), m);
 	m.loaded.store(true, std::memory_order_release);
 	return core::Status::success();
 }
@@ -194,22 +188,22 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	mc.max_instances = ba::kGameMixerInstances;
 	mc.command_capacity = kCommandCapacity;
 	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, m.tuning.schedule_lead_blocks));
-	mc.max_voices = ba::kGameMixerVoices; // M2b au [a3]
-	ba::apply_mixer_a3(m.a3, mc); // M2b au [a3]
-	if (const std::string fade = user_arg_value("audio-cut-fade"); !fade.empty()) { // PT1 snd [fade]: frames; 0 = the old cuts (A/B)
-		mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800)); // PT1 snd [fade]
-	} // PT1 snd [fade]
-	if (user_arg_value("audio-cap-hold") == "0") { // PT1 snd [hold]: au's cap without hysteresis (A/B)
-		mc.pt1_cap_hold_db = 0.0f; // PT1 snd [hold]
-		mc.pt1_voice_hold_blocks = 0; // PT1 snd [hold]
-		mc.pt1_resume_margin = 0; // PT1 snd [hold]
-	} // PT1 snd [hold]
-	if (user_arg_value("audio-limit") == "0") { // PT1 snd [limit]: no output limiter (A/B)
-		mc.pt1_limit_ceiling = 0.0f; // PT1 snd [limit]
-	} // PT1 snd [limit]
+	mc.max_voices = ba::kGameMixerVoices;
+	ba::apply_mixer_a3(m.a3, mc);
+	if (const std::string fade = user_arg_value("audio-cut-fade"); !fade.empty()) {
+		mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
+	}
+	if (user_arg_value("audio-cap-hold") == "0") {
+		mc.pt1_cap_hold_db = 0.0f;
+		mc.pt1_voice_hold_blocks = 0;
+		mc.pt1_resume_margin = 0;
+	}
+	if (user_arg_value("audio-limit") == "0") {
+		mc.pt1_limit_ceiling = 0.0f;
+	}
 	m.lead_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames);
 	m.mixer = std::make_shared<ba::MixerCore>(mc);
-	m.mixer->set_tap(&m.tap); // before the audio thread sees the mixer
+	m.mixer->set_tap(&m.tap);
 	m.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
 	ba::SimMixerClockConfig cc;
 	cc.bias_frames = m.lead_frames + kBiasMarginFrames;
@@ -223,7 +217,7 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	m.player->set_bus("Master");
 	m.player->set_stream(m.stream);
 	p_parent->add_child(m.player);
-	pt1_capture_begin(m); // PT1 snd [capture]
+	pt1_capture_begin(m);
 	m.player->play();
 	m.built = true;
 	return true;
@@ -242,13 +236,13 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 	if (!m.built) {
 		return;
 	}
-	// The clock: the measured output latency, the bias over it, the frame's two presentation times.
+
 	const double latency_s = AudioServer::get_singleton()->get_output_latency();
 	const uint64_t latency = std::isfinite(latency_s) && latency_s > 0.0 && latency_s < 2.0 ? uint64_t(latency_s * double(ba::kMixRate)) : 0;
 	m.clock->set_output_latency_frames(latency);
 	m.clock->set_bias_frames(int64_t(latency) + m.lead_frames + kBiasMarginFrames);
 	m.clock->set_now(p_frame.clock);
-	// The listener is the active camera.
+
 	ba::GameAudioInputs in;
 	in.frame = p_frame.frame;
 	in.now_ns = p_frame.now_ns;
@@ -262,7 +256,7 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 	in.own_slot = p_frame.own_slot;
 	in.own_first_person = p_frame.own_alive && !p_frame.free_camera;
 	m.listener = in.listener;
-	// Each other's 3p muzzle when the crowd has one (fx's MuzzleSample: +Y of the effect frame is the barrel).
+
 	m.muzzles.assign(p_frame.others.size(), ba::MuzzlePoint{});
 	for (size_t i = 0; i < p_frame.others.size(); ++i) {
 		for (const fx::MuzzleSample &s : p_frame.muzzles) {
@@ -287,7 +281,7 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 		m.impact_requests.push_back(r);
 	}
 	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds);
-	pt1_capture_step(m); // PT1 snd [capture]
+	pt1_capture_step(m);
 }
 
 bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error) {
@@ -296,7 +290,7 @@ bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position
 		if (r_error != nullptr) {
 			*r_error = p_why;
 		}
-		// The check's audition step cannot run: it fails (skip_step), and the driver's step_done poll moves on.
+
 		if (m.check != nullptr && m.check->current_step() >= 0) {
 			m.check->skip_step(uint32_t(m.check->current_step()), p_why);
 		}
@@ -321,8 +315,7 @@ bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position
 			return fail(std::string(p_patch) + ": " + p.error().message);
 		}
 		program = *p;
-		// Its waves are not in the bank unless loaded: starved, counted. The E7 items are loaded at load (from the
-		// level or GameAudioLoadOptions::audition_superbundles), never here.
+
 		m.auditions.emplace(std::string(p_patch), ba::GameAuditionAsset{ program, m.bank, "level (lazy)" });
 	}
 	const uint64_t seed = ba::sound_seed(0xA0D1u, uint32_t(m.auditions_started));
@@ -339,7 +332,7 @@ void Bf3GameAudio::set_check(audio::GameAudioCheck *p_check) {
 	if (m.router) {
 		m.router->set_observer(p_check);
 	}
-	// Under the AudioServer lock the audio thread is outside _mix: the tap target swaps between two blocks.
+
 	if (m.built) {
 		AudioServer::get_singleton()->lock();
 		m.tap.set(p_check);
@@ -393,16 +386,15 @@ void Bf3GameAudio::shutdown() {
 	if (m.player != nullptr) {
 		Ref<AudioStreamPlayback> playback = m.player->get_stream_playback();
 		m.player->stop();
-		// Under the AudioServer lock Godot's audio thread is outside _mix: the playback drops its mixer reference, so
-		// the mixer (and the instances it owns) goes on the main thread, and the tap is ours again.
+
 		AudioServer::get_singleton()->lock();
 		if (Bf3AudioPlayback *ours = Object::cast_to<Bf3AudioPlayback>(playback.ptr())) {
 			ours->set_mixer(nullptr);
 		}
 		m.tap.set(nullptr);
-		m.tap.pt1_set_capture(nullptr); // PT1 snd [capture]
+		m.tap.pt1_set_capture(nullptr);
 		AudioServer::get_singleton()->unlock();
-		pt1_capture_end(m); // PT1 snd [capture]
+		pt1_capture_end(m);
 		if (Node *parent = m.player->get_parent()) {
 			parent->remove_child(m.player);
 		}
@@ -413,7 +405,7 @@ void Bf3GameAudio::shutdown() {
 		m.stream->set_mixer(nullptr);
 		m.stream.unref();
 	}
-	m.router.reset(); // Kill commands for the live drivers (the mixer still exists)
+	m.router.reset();
 	m.impacts.reset();
 	m.clock.reset();
 	m.mixer.reset();
@@ -422,11 +414,6 @@ void Bf3GameAudio::shutdown() {
 	m.built = false;
 }
 
-// M2b au (docs/design/m2b.md §6, docs/design/m2b-au.md): the A3 inputs read at load and the profiler readout.
-
-// Loader thread: the HdrSetting and the scopes of every program the game plays (the kit items, the M67 explosions,
-// the impact and effect sounds, the auditions). A part that does not read is noted in the load report; the mixer
-// then runs without it.
 template <class Impl>
 ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 	std::vector<std::shared_ptr<const ca::SoundProgram>> programs;
@@ -463,21 +450,12 @@ std::string game_audio_profile_text(const Bf3GameAudio &p_audio) {
 	return p_audio.mixer() != nullptr ? audio::format_mixer_profile(game_audio_profile(p_audio)) : std::string("audio A3: not built");
 }
 
-// PT1 snd (docs/design/pt1-snd.md): the audio health line and --audio-capture.
-//   Every game mixer prints one "[pt1] audio health:" line at shutdown: the voice cuts and their steps
-//   (mixer_core.h MixerCutStats), the abrupt gain ramps, the mix() call gaps of Godot's audio thread, the late blocks,
-//   the main thread's frame hitches (> 50 ms between two step() calls) and the audio thread's priority, so a
-//   playtest's godot.log says whether and why the sound glitched.
-//   --audio-capture=<dir> (user arg) also records the mix into <dir>/mix.wav (float, 48 kHz stereo, the first
-//   --audio-capture-seconds=S, default 150), every cut into <dir>/cuts.csv and every hitch into <dir>/hitches.csv.
-//   They are derived data (b\shots\pt1-snd\, never committed), written through the install's PathGuard.
-
 struct Pt1Capture {
-	std::filesystem::path dir; // empty: no capture, the health line only
-	core::PathGuard guard; // Impl::pt1_guard: m.db is not used here, the loader frees the database after load
+	std::filesystem::path dir;
+	core::PathGuard guard;
 	std::unique_ptr<ba::WavRecorder> wav;
 	std::vector<ba::MixerCutEvent> events;
-	std::vector<std::pair<uint64_t, double>> hitches; // (mixer clock, ms since the previous step)
+	std::vector<std::pair<uint64_t, double>> hitches;
 	std::chrono::steady_clock::time_point last_step{};
 	bool have_step = false;
 	uint64_t hitch_count = 0, events_lost = 0;
@@ -491,7 +469,7 @@ void pt1_delete_capture(Pt1Capture *p_capture) {
 namespace {
 
 constexpr double kPt1HitchMs = 50.0;
-constexpr int kPt1AudioThreadPriority = 2; // THREAD_PRIORITY_HIGHEST
+constexpr int kPt1AudioThreadPriority = 2;
 constexpr size_t kPt1MaxEvents = size_t(1) << 20;
 
 void pt1_drain(ba::MixerCore &r_mixer, Pt1Capture &r_c) {
@@ -511,13 +489,12 @@ void pt1_drain(ba::MixerCore &r_mixer, Pt1Capture &r_c) {
 	}
 }
 
-} // namespace
+}
 
 template <class Impl>
 void pt1_capture_begin(Impl &r_m) {
 	r_m.pt1.reset(new Pt1Capture());
-	// [prio]: Godot's audio thread runs at normal priority (0); --audio-thread-priority=<-2..2|15|keep>, default 2
-	// (THREAD_PRIORITY_HIGHEST) [inferred], measured = false. Set at the next _mix, on that thread.
+
 	const std::string prio = user_arg_value("audio-thread-priority");
 	if (prio != "keep") {
 		pt1_request_audio_thread_priority(prio.empty() ? kPt1AudioThreadPriority : std::atoi(prio.c_str()));
@@ -536,7 +513,7 @@ void pt1_capture_begin(Impl &r_m) {
 	r_m.pt1->wav = std::make_unique<ba::WavRecorder>(ba::kMixRate, seconds);
 	r_m.pt1->events.reserve(size_t(1) << 16);
 	r_m.mixer->pt1_record_cuts(true);
-	r_m.tap.pt1_set_capture(r_m.pt1->wav.get()); // before the player starts
+	r_m.tap.pt1_set_capture(r_m.pt1->wav.get());
 }
 
 template <class Impl>
@@ -582,16 +559,16 @@ void pt1_capture_end(Impl &r_m) {
 			prio == kPt1NoPriority ? "unknown " : "", prio == kPt1NoPriority ? 0 : prio, prio_set == kPt1NoPriority ? "unchanged " : "",
 			prio_set == kPt1NoPriority ? 0 : prio_set, kPt1HitchMs, (unsigned long long)c->hitch_count, c->hitch_max_ms);
 	UtilityFunctions::print(String::utf8(("[pt1] audio health: " + ba::format_mixer_cuts(r_m.mixer->pt1_cut_stats()) + line).c_str()));
-	if (r_m.router) { // PT1 integ [foley stats]: the play check's reload / foley evidence (docs/design/pt1-rld.md)
-		const ba::WeaponAudioStats &rs = r_m.router->stats(); // PT1 integ [foley stats]
-		UtilityFunctions::print(String::utf8(("[pt1] weapon foley: " + std::to_string(rs.reloads) + " reloads, " + std::to_string(rs.foley) + " foley one-shots, " + // PT1 integ [foley stats]
-				std::to_string(rs.foley_releases) + " releases, " + std::to_string(rs.foley_out_of_reach) + " out of reach, " + std::to_string(rs.one_shots) + " pool one-shots").c_str())); // PT1 integ [foley stats]
-	} // PT1 integ [foley stats]
+	if (r_m.router) {
+		const ba::WeaponAudioStats &rs = r_m.router->stats();
+		UtilityFunctions::print(String::utf8(("[pt1] weapon foley: " + std::to_string(rs.reloads) + " reloads, " + std::to_string(rs.foley) + " foley one-shots, " +
+				std::to_string(rs.foley_releases) + " releases, " + std::to_string(rs.foley_out_of_reach) + " out of reach, " + std::to_string(rs.one_shots) + " pool one-shots").c_str()));
+	}
 	if (c->dir.empty()) {
 		return;
 	}
 	pt1_drain(*r_m.mixer, *c);
-	const core::PathGuard &guard = c->guard; // NoRoots (every write refused) without an install
+	const core::PathGuard &guard = c->guard;
 	std::error_code ec;
 	std::filesystem::create_directories(c->dir, ec);
 	std::string result = "[pt1] audio capture " + c->dir.string() + ":";
@@ -636,4 +613,4 @@ void pt1_capture_end(Impl &r_m) {
 	UtilityFunctions::print(String::utf8(result.c_str()));
 }
 
-} // namespace bf3::godot_side
+}

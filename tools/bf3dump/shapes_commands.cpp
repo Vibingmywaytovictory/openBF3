@@ -1,4 +1,3 @@
-// bf3dump shapes (M1 T1; docs/design/m1.md §5.5): the static world of one level x mode through the cache.
 #include "shapes_commands.h"
 
 #include "prepare_commands.h"
@@ -12,7 +11,7 @@
 #include "bf3/sim/static_world.h"
 
 #include <windows.h>
-// psapi after windows.h
+
 #include <psapi.h>
 
 #include <charconv>
@@ -43,7 +42,7 @@ std::string path_utf8(const std::filesystem::path &p_path) {
 	return std::string(s.begin(), s.end());
 }
 
-} // namespace
+}
 
 Result<ShapesPass> run_shapes_pass(const std::shared_ptr<Install> &p_install, std::string_view p_level, std::string_view p_mode, Cache *p_cache,
 		unsigned p_threads, bool p_raycast) {
@@ -78,7 +77,7 @@ Result<ShapesPass> run_shapes_pass(const std::shared_ptr<Install> &p_install, st
 		return shapes.error();
 	}
 	out.shapes = std::move(*shapes);
-	return out; // the World goes before the level it points into (reverse declaration order)
+	return out;
 }
 
 void print_shapes_pass(const ShapesPass &p_pass) {
@@ -91,7 +90,7 @@ void print_shapes_pass(const ShapesPass &p_pass) {
 			s.world_hit ? "world hit (no soup)" : "world miss", s.tiles_hit, s.tiles, s.tiles_cooked, mib(s.shape_bytes), mib(s.cache_bytes));
 	std::printf("shapes   load + traverse %.3f s; soup %.3f s, cook %.3f s, restore %.3f s, shapes total %.3f s\n", p_pass.seconds_load, s.seconds_soup, s.seconds_cook,
 			s.seconds_restore, s.seconds_total);
-	// TC (docs/design/terrain-collision.md §5.2): the terrain fields (cooked on a lane beside the tiles).
+
 	std::printf("shapes   terrain %zu fields (%zu hit, %zu cooked), %.1f MiB resident, %.3f s\n", s.terrains, s.terrains_hit, s.terrains_cooked,
 			mib(s.terrain_bytes), s.seconds_terrain);
 	for (size_t i = 0; i < p_pass.shapes->terrain_count(); ++i) {
@@ -153,7 +152,7 @@ int cmd_shapes(const InstallReader &p_reader, const std::shared_ptr<Install> &p_
 		}
 		CacheOptions cache_options;
 		cache_options.root = root;
-		cache_options.guard = p_reader.write_guard(); // refuses the install (and anything below it)
+		cache_options.guard = p_reader.write_guard();
 		std::string detail;
 		const CacheStatus opened = cache.open(std::move(cache_options), &detail);
 		if (opened != CacheStatus::Ok) {
@@ -191,4 +190,4 @@ int cmd_shapes(const InstallReader &p_reader, const std::shared_ptr<Install> &p_
 	return before.valid && diff.clean() ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

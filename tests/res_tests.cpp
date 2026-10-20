@@ -1,7 +1,3 @@
-// bf3::core::res decoders. Suite "res_unit": synthetic payloads, always run. Suite "res": the
-// MeshSet / DxTexture / Havok sample exported from the user's install by the parity oracle
-// (README "Resource decoders"), found through OPENBF3_RES_DATA; skipped (exit 77) without it.
-// Asserts numbers and hashes only; no BF3 data lives in the repo.
 #include <doctest/doctest.h>
 
 #include "bf3/core/res/dx_texture.h"
@@ -52,34 +48,32 @@ void put16(std::vector<uint8_t> &r_b, size_t p_at, uint16_t p_v) {
 	r_b[p_at + 1] = uint8_t(p_v >> 8);
 }
 
-// A rigid MeshSet: one LOD, one opaque subset of 3 Half4-position vertices (stride 8) and one
-// u16 triangle, geometry inline at 0x200.
 std::vector<uint8_t> synthetic_mesh(ResMeta &r_meta) {
 	std::vector<uint8_t> b(0x220, 0);
-	put32(b, 0x08, 1); // lodCount
+	put32(b, 0x08, 1);
 	put32(b, 0x0C, 1);
-	put32(b, 0x30, 0x70); // lods[0]
-	put32(b, 0x58, 0x1B0); // name
+	put32(b, 0x30, 0x70);
+	put32(b, 0x58, 0x1B0);
 	put32(b, 0x68, hash_quick("test/mesh"));
 	std::memcpy(&b[0x1B0], "test/Mesh", 10);
 	const size_t lod = 0x70;
-	put32(b, lod + 0x04, 1); // subsets
+	put32(b, lod + 0x04, 1);
 	put32(b, lod + 0x08, 0x110);
-	put32(b, lod + 0x10, 1); // Opaque: [0]
+	put32(b, lod + 0x10, 1);
 	put32(b, lod + 0x14, 0x1A4);
 	put32(b, lod + 0x40, 1);
-	put32(b, lod + 0x48, 6); // index bytes
-	put32(b, lod + 0x4C, 24); // vertex bytes
+	put32(b, lod + 0x48, 6);
+	put32(b, lod + 0x4C, 24);
 	const size_t sub = 0x110;
-	put32(b, sub + 0x14, 1); // one triangle
+	put32(b, sub + 0x14, 1);
 	put32(b, sub + 0x20, 3);
-	b[sub + 0x24] = 8; // stride
-	b[sub + 0x25] = 3; // triangle list
+	b[sub + 0x24] = 8;
+	b[sub + 0x25] = 3;
 	for (int e = 0; e < 16; e++) {
 		b[sub + 0x30 + 4 * e + 2] = 0xFF;
 	}
-	b[sub + 0x30] = 1; // Position
-	b[sub + 0x31] = 8; // Half4
+	b[sub + 0x30] = 1;
+	b[sub + 0x31] = 8;
 	b[sub + 0x32] = 0;
 	b[sub + 0x30 + 0x40] = 8;
 	b[sub + 0x30 + 0x48] = 1;
@@ -97,9 +91,6 @@ std::vector<uint8_t> synthetic_mesh(ResMeta &r_meta) {
 	std::memcpy(r_meta.data(), meta, 16);
 	return b;
 }
-
-// ---------------------------------------------------------------------------------------------
-// Sample data (exported by the oracle; see README)
 
 struct Sample {
 	std::string name;
@@ -159,7 +150,6 @@ bool load_sample(const std::string &p_path, Sample &r_s) {
 	return true;
 }
 
-// Res file paths of one exported level, by res name.
 std::map<std::string, std::string> load_index(const std::string &p_data, const std::string &p_tag) {
 	std::map<std::string, std::string> out;
 	std::vector<uint8_t> index;
@@ -213,15 +203,11 @@ uint32_t xorshift(uint32_t &r_state) {
 	return r_state;
 }
 
-// A minimal HavokPhysicsData res around a hand-built 32-bit packfile: no part tables, the packfile
-// at 0x40, the external fixups in the tail. Objects live in `data`; arrays and pointers become the
-// fixup entries Packfile::parse reads. The contents root holds one variant, the
-// HavokPhysicsContainer, whose shape array lists `roots`.
 struct SyntheticHavok {
 	std::vector<uint8_t> data;
-	std::vector<std::pair<uint32_t, uint32_t>> arrays; // field -> element data
-	std::vector<std::pair<uint32_t, uint32_t>> pointers; // slot -> object
-	std::vector<std::pair<uint32_t, std::string>> objects; // offset, class
+	std::vector<std::pair<uint32_t, uint32_t>> arrays;
+	std::vector<std::pair<uint32_t, uint32_t>> pointers;
+	std::vector<std::pair<uint32_t, std::string>> objects;
 	std::vector<uint32_t> roots;
 
 	uint32_t alloc(size_t p_bytes) {
@@ -239,7 +225,7 @@ struct SyntheticHavok {
 		arrays.emplace_back(p_field, p_elements);
 	}
 	void pointer(uint32_t p_slot, uint32_t p_object) { pointers.emplace_back(p_slot, p_object); }
-	// An hkpListShape whose children are p_children (16-byte child entries).
+
 	uint32_t list(const std::vector<uint32_t> &p_children) {
 		const uint32_t at = object("hkpListShape", 48);
 		const uint32_t entries = alloc(16 * p_children.size());
@@ -258,7 +244,7 @@ struct SyntheticHavok {
 	}
 
 	std::vector<uint8_t> res(ResMeta &r_meta) {
-		// Contents: variant array -> container -> root shape array.
+
 		const uint32_t contents = alloc(16);
 		const uint32_t variants = alloc(12);
 		const uint32_t container = object("HavokPhysicsContainer", 32);
@@ -269,18 +255,18 @@ struct SyntheticHavok {
 		for (size_t i = 0; i < roots.size(); i++) {
 			pointer(shapes + uint32_t(4 * i), roots[i]);
 		}
-		alloc(16); // data ends after the last object
+		alloc(16);
 
 		std::vector<uint8_t> pack(160, 0);
 		const uint8_t magic[8] = { 0x57, 0xE0, 0xE0, 0x57, 0x10, 0xC0, 0xC0, 0x10 };
 		std::memcpy(pack.data(), magic, 8);
 		pack[16] = 4;
 		pack[17] = 1;
-		put32(pack, 20, 2); // sections
-		put32(pack, 24, 1); // contents section: __data__
+		put32(pack, 20, 2);
+		put32(pack, 24, 1);
 		put32(pack, 28, contents);
 		std::memcpy(&pack[40], "hk_2010.2.0-r1", 14);
-		// Class names: u32 signature, 0x09, name, NUL; keys are the name offsets.
+
 		const uint32_t names_at = uint32_t(pack.size());
 		std::map<std::string, uint32_t> keys;
 		for (const auto &[offset, cls] : objects) {
@@ -325,7 +311,7 @@ struct SyntheticHavok {
 									   uint32_t(data.size()) + table_len, 0, 0 });
 
 		std::vector<uint8_t> res(0x40, 0);
-		put32(res, 0x08, 0x40); // part translations at 0x40 (none): the 0x40-byte header
+		put32(res, 0x08, 0x40);
 		res.insert(res.end(), pack.begin(), pack.end());
 		const size_t tail = res.size();
 		res.resize(tail + 8, 0);
@@ -341,16 +327,16 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-} // namespace
+}
 
 TEST_SUITE("res_unit") {
 	TEST_CASE("res: halves, hashes, error texts") {
 		CHECK(half_to_f32(0x3C00) == 1.0f);
 		CHECK(half_to_f32(0xC000) == -2.0f);
-		CHECK(half_to_f32(0x0001) == 5.9604645e-08f); // smallest subnormal
+		CHECK(half_to_f32(0x0001) == 5.9604645e-08f);
 		CHECK(half_to_f32(0x7C00) > 1e30f);
 		CHECK(hash_quick("") == 5381u);
-		CHECK(hash_quick("wep_root") == 0xF7A6EE7Eu); // Wep_Root in the M9 skeleton
+		CHECK(hash_quick("wep_root") == 0xF7A6EE7Eu);
 		CHECK(ResError::truncated(4, 8, 10).message() == "needed 8 bytes at 4 of a 10-byte payload");
 		CHECK(ResError::malformed("packfile magic", 0).message() == "malformed packfile magic at 0");
 		CHECK(ResError::unsupported("mesh type", 0).message() == "unsupported mesh type 0x0");
@@ -382,7 +368,6 @@ TEST_SUITE("res_unit") {
 		CHECK(!d.normals);
 		CHECK(!d.uv0);
 
-		// Damaged inputs: errors, never reads outside the spans.
 		MeshSet cut;
 		const ResError e = MeshSet::parse(Bytes(b.data(), 0x100), meta, cut);
 		CHECK(e.kind == ResError::Kind::Truncated);
@@ -394,12 +379,9 @@ TEST_SUITE("res_unit") {
 		put32(bad, 0x08, 6);
 		CHECK(MeshSet::parse(bad, meta, cut).message() == "unsupported lod count 0x6");
 		ResMeta bad_meta = meta;
-		bad_meta[4] = 48; // inline size disagrees with the LOD
+		bad_meta[4] = 48;
 		CHECK(MeshSet::parse(b, bad_meta, cut).message() == "malformed inline geometry size at 512");
 
-		// Hostile counts: stride 0 makes the vertex range check vacuous; a u32 count of 0xFFFFFFFF
-		// must be rejected before anything is reserved (it used to commit ~48 GB), also for a
-		// 0-byte (None) element that would otherwise loop over every "vertex".
 		for (const uint8_t format : { uint8_t(8), uint8_t(0) }) {
 			std::vector<uint8_t> hostile = b;
 			put32(hostile, 0x110 + 0x20, 0xFFFFFFFFu);
@@ -411,9 +393,6 @@ TEST_SUITE("res_unit") {
 			CHECK(huge.lods[0].decode_subset(geometry, 0, d).message() == "malformed vertex element outside its stride at 0");
 		}
 
-		// Composite part channel: the part index is the BoneIndices element's first byte, so a
-		// 0-byte (None) element at offset == stride, ending exactly at the buffer end, must be
-		// rejected instead of reading one byte past it (ASan heap-buffer-overflow before the fix).
 		{
 			MeshLod parts_lod;
 			parts_lod.vertex_data_size = 4;
@@ -429,7 +408,7 @@ TEST_SUITE("res_unit") {
 			const std::vector<uint8_t> one = { 0x00, 0x00, 0x80, 0x3F };
 			DecodedSubset pd;
 			CHECK(parts_lod.decode_subset(one, 0, pd).message() == "unsupported part index vertex format 0x0");
-			// The same subset with a 1-byte-or-more element at offset 0 still yields its part.
+
 			parts_lod.subsets[0].declaration.elements[1] = { VertexUsage::BoneIndices, VertexFormat::UByte4, 0, 0 };
 			const std::vector<uint8_t> two = { 0x05, 0x00, 0x00, 0x00 };
 			REQUIRE(parts_lod.decode_subset(two, 0, pd).ok());
@@ -441,7 +420,7 @@ TEST_SUITE("res_unit") {
 	TEST_CASE("res: synthetic DxTexture, mips and ranged views") {
 		std::vector<uint8_t> h(128, 0);
 		put32(h, 0x00, 10);
-		put32(h, 0x08, 0); // DXT1
+		put32(h, 0x08, 0);
 		put32(h, 0x0C, DxTexture::kFlagSrgb);
 		put16(h, 0x10, 8);
 		put16(h, 0x12, 8);
@@ -459,7 +438,7 @@ TEST_SUITE("res_unit") {
 		CHECK(t.texture_group == "World");
 		CHECK(t.logical_offset(1) == 32);
 		std::vector<uint8_t> chunk(40, 0);
-		// Mip 0 block 0: colour0 red (0xF800) > colour1 blue, every index 0 -> opaque red.
+
 		put16(chunk, 0, 0xF800);
 		put16(chunk, 2, 0x001F);
 		std::vector<MipSlice> mips;
@@ -471,7 +450,7 @@ TEST_SUITE("res_unit") {
 		REQUIRE(mips[0].texels(t.format, texels));
 		REQUIRE(texels.size() == 64);
 		CHECK(texels[0] == std::array<float, 4>{ 1.0f, 0.0f, 0.0f, 1.0f });
-		// A ranged view that starts at mip 1 (logicalOffset 32), and one between mips.
+
 		REQUIRE(t.split_mips(Bytes(chunk).subspan(32), 32, mips).ok());
 		REQUIRE(mips.size() == 1);
 		CHECK(mips[0].mip == 1);
@@ -480,8 +459,6 @@ TEST_SUITE("res_unit") {
 		put32(h, 0x00, 9);
 		CHECK(DxTexture::parse(h, t).message() == "unsupported texture version 0x9");
 
-		// Hostile dimensions (u16 header fields) over a short span: rejected before the texel
-		// buffer is allocated (65535 x 65535 used to zero-fill ~68 GB first).
 		const std::vector<uint8_t> tiny(16, 0x80);
 		for (const TextureFormat format : { TextureFormat::L8, TextureFormat::Argb8888, TextureFormat::Dxt1, TextureFormat::Dxt5 }) {
 			MipSlice slice;
@@ -491,8 +468,7 @@ TEST_SUITE("res_unit") {
 			CHECK(!slice.texels(format, texels));
 			CHECK(texels.empty());
 		}
-		// The exact minimum (last row without its pitch padding) still decodes: 3 x 2 L8 has a
-		// 4-byte pitch, so 4 + 3 bytes are enough.
+
 		MipSlice small;
 		small.width = 3;
 		small.height = 2;
@@ -514,7 +490,7 @@ TEST_SUITE("res_unit") {
 		for (const Tri &t : tris) {
 			volume += vec::dot(t.v[0], vec::cross(t.v[1], t.v[2])) / 6.0;
 		}
-		CHECK(volume == doctest::Approx(48.0)); // closed, outward (counter-clockwise) faces
+		CHECK(volume == doctest::Approx(48.0));
 		const std::vector<ConvexPiece> pieces = havok_convex_pieces(box, Transform::from_translation({ 10.0f, 0.0f, 0.0f }));
 		REQUIRE(pieces.size() == 1);
 		CHECK(pieces[0].points.size() == 8);
@@ -533,7 +509,7 @@ TEST_SUITE("res_unit") {
 		for (const Tri &t : round) {
 			volume += vec::dot(t.v[0], vec::cross(t.v[1], t.v[2])) / 6.0;
 		}
-		CHECK(volume > 0.9); // low-poly capsule, inside the exact 1.309 m^3
+		CHECK(volume > 0.9);
 		CHECK(volume < 1.309);
 
 		HavokPhysicsData hk;
@@ -542,8 +518,7 @@ TEST_SUITE("res_unit") {
 	}
 
 	TEST_CASE("res: synthetic havok packfile, shared shapes") {
-		// The builder itself: a list sharing one box twice decodes (sharing is legal) and the
-		// group walk finds no extended mesh.
+
 		SyntheticHavok b;
 		const uint32_t box = b.box(0.5f);
 		b.roots = { b.list({ box, box }) };
@@ -565,9 +540,7 @@ TEST_SUITE("res_unit") {
 	}
 
 	TEST_CASE("res: hostile havok shape graphs fail fast") {
-		// Review repro: a ListShape listing itself made group_subparts' pending list double per
-		// level (2^64 entries); the shape walk's depth limit alone let a wide DAG run exponentially.
-		// Each case must end in an error, quickly, without large allocations.
+
 		auto run = [](SyntheticHavok &p_b, std::string &r_shapes_error, std::string &r_group_error) {
 			ResMeta meta;
 			const std::vector<uint8_t> res = p_b.res(meta);
@@ -582,7 +555,6 @@ TEST_SUITE("res_unit") {
 		};
 		std::string se, ge;
 
-		// A list whose two children are the list itself, and a two-list cycle under a MOPP root.
 		{
 			const auto t0 = std::chrono::steady_clock::now();
 			SyntheticHavok b;
@@ -612,7 +584,6 @@ TEST_SUITE("res_unit") {
 			CHECK(ge == "malformed shape cycle at " + std::to_string(a));
 		}
 
-		// A chain of MOPP shapes: 64 levels below the root are fine, 65 are not.
 		for (const uint32_t length : { 65u, 66u, 1000u }) {
 			SyntheticHavok b;
 			uint32_t next = b.box(1.0f);
@@ -640,8 +611,6 @@ TEST_SUITE("res_unit") {
 			}
 		}
 
-		// A wide DAG without cycles: 12 lists in a row, each listing the next one 16 times, over a
-		// box: 16^12 paths. Both walks stop at their budgets.
 		{
 			const auto t0 = std::chrono::steady_clock::now();
 			SyntheticHavok b;
@@ -657,8 +626,6 @@ TEST_SUITE("res_unit") {
 			CHECK(seconds_since(t0) < 20.0);
 		}
 
-		// One heavy convex leaf (1,024 points) listed 4,096 times: the hull work budget refuses it
-		// long before havok_triangles would hull it 4,096 times.
 		{
 			const auto t0 = std::chrono::steady_clock::now();
 			SyntheticHavok b;
@@ -669,14 +636,13 @@ TEST_SUITE("res_unit") {
 			b.roots = { b.list(std::vector<uint32_t>(4096, convex)) };
 			run(b, se, ge);
 			CHECK(se.rfind("malformed convex hull work at ", 0) == 0);
-			CHECK(ge.empty()); // no extended mesh, no cycle: the group walk is cheap and finds nothing
+			CHECK(ge.empty());
 			CHECK(seconds_since(t0) < 5.0);
 		}
 	}
 
 	TEST_CASE("res: overlapping subsets and empty mips") {
-		// Subsets that all name the LOD's whole vertex and index regions: up to 8x is accepted
-		// (retail reaches 2x), more is refused instead of copying the regions once per subset.
+
 		MeshLod lod;
 		lod.vertex_data_size = 12;
 		lod.index_data_size = 6;
@@ -698,9 +664,8 @@ TEST_SUITE("res_unit") {
 		CHECK(lod.decode(geometry, SubsetFilter::All, out).message() == "malformed subset ranges overlap at 8");
 		CHECK(out.empty());
 		DecodedSubset one;
-		CHECK(lod.decode_subset(geometry, 8, one).ok()); // a single subset is still fine
+		CHECK(lod.decode_subset(geometry, 8, one).ok());
 
-		// A texture whose second mip is empty: refused (each slice must take chunk bytes).
 		std::vector<uint8_t> h(128, 0);
 		put32(h, 0x00, 10);
 		put16(h, 0x10, 8);
@@ -766,7 +731,7 @@ TEST_SUITE("res") {
 					REQUIRE(chunk(data, tex.chunk_id, bytes));
 					REQUIRE_MESSAGE(tex.split_mips(bytes, 0, slices).ok(), name);
 					mips += slices.size();
-					if (s.view != 0 && s.view != UINT32_MAX) { // ranged bundle view: logicalOffset = mips before firstMip
+					if (s.view != 0 && s.view != UINT32_MAX) {
 						CHECK(tex.first_mip_at(s.view) >= 0);
 						CHECK(tex.split_mips(Bytes(bytes).subspan(s.view), s.view, slices).ok());
 					}
@@ -782,7 +747,7 @@ TEST_SUITE("res") {
 			CHECK(counts[kResTypeDxTexture] == x.tex);
 			CHECK(counts[kResTypeHavokPhysicsData] == x.havok);
 			CHECK(counts[kResTypeHavokDestructionPhysicsData] == x.destruction);
-			CHECK(name_hash_ok == x.mesh); // MeshSet.nameHash == hashQuick(lowercase(name))
+			CHECK(name_hash_ok == x.mesh);
 			MESSAGE(std::string(x.tag) << ": " << subsets << " subsets, " << triangles << " triangles, " << mips << " mip images, " << roots << " havok roots");
 		}
 	}
@@ -831,7 +796,7 @@ TEST_SUITE("res") {
 		}
 		CHECK(pos.h == 0x77b4970e13982fe5ull);
 		CHECK(bi.h == 0xcd7f6e35d791a4c5ull);
-		// Every weighted lane resolves through the subset's slots to a bone of the table.
+
 		size_t resolved = 0;
 		for (size_t v = 0; v < d.positions.size(); v++) {
 			const int64_t skeleton = lod.skeleton_bone(0, (*d.bone_indices)[v][0]);
@@ -864,7 +829,7 @@ TEST_SUITE("res") {
 		CHECK(tex.mip_count == 12);
 		CHECK(tex.mip_base == 2);
 		CHECK(tex.texture_group == "Weapon");
-		CHECK(s.view == 2621440); // ranged in the level bundle: mips 2.. (logicalOffset = mip0 + mip1)
+		CHECK(s.view == 2621440);
 		CHECK(tex.first_mip_at(s.view) == 2);
 		std::vector<uint8_t> bytes;
 		REQUIRE(chunk(data, tex.chunk_id, bytes));
@@ -909,10 +874,7 @@ TEST_SUITE("res") {
 		if (!data_or_skip(data)) {
 			return;
 		}
-		// Verifier repro: index striding 0 repeats triangle 0, so raw i32 counts of 0x7FFFFFFF used
-		// to push ~2^31 triangles from a small packfile. Array counts are now bounded by the bytes
-		// behind them, and a zero stride needs its whole index array inside the data section.
-		// Host: the first sample res with a storage extended mesh whose subpart 0 has storage.
+
 		HavokPhysicsData good;
 		uint32_t subpart = 0, mesh = 0;
 		bool found = false;
@@ -951,14 +913,13 @@ TEST_SUITE("res") {
 		REQUIRE(good.packfile.array(field, indices_at, index_count).ok());
 		REQUIRE(index_count >= 3);
 		HavokPhysicsData bad = good;
-		put32(bad.packfile.data, subpart + 20, 0x7FFFFFFFu); // triangle count
-		put16(bad.packfile.data, subpart + 44, 0); // index striding
-		put32(bad.packfile.data, field + 4, 0x7FFFFFFFu); // index count
+		put32(bad.packfile.data, subpart + 20, 0x7FFFFFFFu);
+		put16(bad.packfile.data, subpart + 44, 0);
+		put32(bad.packfile.data, field + 4, 0x7FFFFFFFu);
 		CHECK(bad.packfile.array(field, indices_at, index_count).message() == "malformed array count beyond data at " + std::to_string(field));
 		CHECK(bad.shapes(shapes).message() == "malformed array count beyond data at " + std::to_string(field));
 		CHECK(shapes.empty());
-		// The largest count the one-byte bound lets through: refused when width > 1 (the indices
-		// would run past the data); with width 1 the triangle count cannot exceed it.
+
 		REQUIRE(good.packfile.array(field, indices_at, index_count).ok());
 		const uint32_t backed = uint32_t(bad.packfile.data.size() - indices_at);
 		put32(bad.packfile.data, field + 4, backed);
@@ -968,7 +929,7 @@ TEST_SUITE("res") {
 		} else {
 			CHECK(got == "malformed triangle index beyond storage at " + std::to_string(backed));
 		}
-		// Every array field of the packfile with a hostile count: refused, never allocated.
+
 		size_t arrays = 0;
 		for (uint32_t f = 0; f + 8 <= good.packfile.data.size(); f += 4) {
 			uint32_t at = 0, count = 0;
@@ -990,8 +951,7 @@ TEST_SUITE("res") {
 		if (!data_or_skip(data)) {
 			return;
 		}
-		// Random byte damage on real payloads: every call must return (ok or an error) without
-		// reading outside its spans. 40 res of each kind x 64 mutations.
+
 		const auto index = load_index(data, "subway");
 		uint32_t seed = 0x9E3779B9u;
 		std::map<uint32_t, size_t> taken;

@@ -1,29 +1,10 @@
-# ctest godot.m1_load (docs/design/m1.md §1 E4/E5, §12, §14): the windowed M1 load check of the Godot project, cold
-# then warm on one fresh scratch cache root:
-#   <godot> --path bf3-opensource res://scenes/m1_metro.tscn -- --m1-load-check=cold --bf3-cache=<root> --shot-spawns=...
-#   ... the same with --m1-load-check=warm
-# E4 (cold <= 15 s) and E5 (warm <= 5 s) from process start to the first controllable frame, the per-phase work and
-# wall times, the frame time after Done, the game's peak working set (reported), install unchanged, and one
-# first-person shot at 8 sampled spawn points (written to <build dir>/shots/m1_load-<random> (the build tree is
-# gitignored; the system temp directory in script mode without -DBUILD_DIR), a fresh directory per run, so two runs
-# never delete each other's shots; removed at the end unless OPENBF3_KEEP_SHOTS is set, so BF3 imagery does not pile up). Passes when both runs print
-# "M1 LOAD CHECK: PASS" and exit 0.
-# Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no BF3 install is found, or no window / rendering device can be
-# created: on Windows, Godot's failure to create a rendering device raises a blocking OS alert, so a probe run
-# ("--path <project> --quit", windowed, killed after 60 s) decides first; only a clean probe starts the real runs
-# (docs §14: an environment variable such as SESSIONNAME cannot tell a desktop session from a service).
-# Acceptance needs this test to report Passed, not Skipped, in a desktop session.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_m1_load.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
-# M2a gx [E16] (named replacement, docs/design/m2a-gx.md §5): -DSCENE picks the scene (default M1's), -DUSER_ARGS adds
-# user args; godot.m2a_load runs this script on res://scenes/m2a_metro.tscn (m2a.md E16).
 if(NOT DEFINED SCENE OR SCENE STREQUAL "")
     set(SCENE "res://scenes/m1_metro.tscn")
 endif()
 separate_arguments(user_args NATIVE_COMMAND "${USER_ARGS}")
-# The probe: a windowed start that quits at once.
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
     TIMEOUT 60

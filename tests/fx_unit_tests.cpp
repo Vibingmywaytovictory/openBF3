@@ -1,6 +1,3 @@
-// M2a VFX1 fx.unit (docs/design/m2a-vfx1.md §11): the compiler on synthetic EBX (fx_test_support.h), the blob and the
-// two cache rules of §8 through a temp Cache root and an in-memory resolver, and the simulator's spawn / age / pool /
-// child / transform / determinism rules on hand-built defs. No install, no Godot.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
@@ -36,7 +33,6 @@ namespace {
 
 constexpr uint32_t kNormTime = 1, kEmitterNormTime = 2, kOne = 3;
 
-// A document with the usual chain: SpawnRate, UpdateAge, UpdateLinearVelocity, UpdateTransparency (poly Pre).
 DocBuilder simple_doc(uint32_t p_seed, uint32_t p_max_count = 8, float p_rate = 10, float p_life = 1, float p_window = 0) {
 	DocBuilder d(p_seed, p_max_count, p_window);
 	d.proc("SpawnRateData", { { "SpawnRate", f32(p_rate) }, { "DistributeOverTime", flag(true) } }, kOne);
@@ -59,7 +55,6 @@ EffectStart start_with(uint64_t p_seed) {
 	return s;
 }
 
-// A temp Cache root removed at the end of the case.
 struct TempCache {
 	std::filesystem::path root;
 	std::filesystem::path fence;
@@ -75,7 +70,7 @@ struct TempCache {
 		fence = base / "fence";
 		bf3::core::CacheOptions o;
 		o.root = root;
-		o.guard.add_protected_root(fence); // stands in for the install
+		o.guard.add_protected_root(fence);
 		std::string detail;
 		open = cache.open(std::move(o), &detail) == bf3::core::CacheStatus::Ok;
 	}
@@ -93,11 +88,9 @@ FxSources sources_of(const fxt::MemResolver &p_db) {
 	return s;
 }
 
-} // namespace
+}
 
 TEST_SUITE("fx-unit") {
-
-// ---- compiler ----------------------------------------------------------------------------------------------------
 
 TEST_CASE("compile: a synthetic blueprint with an emitter, a child and a sound") {
 	fxt::MemResolver db;
@@ -151,16 +144,16 @@ TEST_CASE("compile: a synthetic blueprint with an emitter, a child and a sound")
 	REQUIRE(tr.evaluator != kNoEvaluator);
 	const EvaluatorDef &ev = p.evaluators[size_t(tr.evaluator)];
 	CHECK(ev.type == EvaluatorType::Polynomial);
-	// G2 on the compiled evaluator: f(0) = w and f(1) = x + y + z + w exactly; the 1p flash alpha 1 -> 0.0051852.
+
 	CHECK(evaluate_polynomial(ev.polynomial, 0.0f) == 1.0f);
 	CHECK(evaluate_polynomial(ev.polynomial, 1.0f) == doctest::Approx(0.00518524).epsilon(1e-4));
-	// Every partition looked up is a dependency.
+
 	const std::set<std::string> deps(ctx.sources.begin(), ctx.sources.end());
 	CHECK(deps.contains("fx/test/effect"));
 	CHECK(deps.contains("fx/test/parent"));
 	CHECK(deps.contains("fx/test/child"));
 	CHECK(deps.contains("sound/test/patch"));
-	// Blob round trip: the canonical text and the bytes.
+
 	const std::vector<uint8_t> blob = encode_effect_def(*d);
 	const bf3::core::Result<EffectDef> back = decode_effect_def(blob);
 	REQUIRE(back.ok());
@@ -169,7 +162,7 @@ TEST_CASE("compile: a synthetic blueprint with an emitter, a child and a sound")
 	std::vector<uint8_t> longer = blob;
 	longer.push_back(0);
 	CHECK_FALSE(decode_effect_def(longer).ok());
-	// The lone document wrapped (MaxInstanceCount 1, one component).
+
 	CompileContext c2;
 	c2.db = &db;
 	const bf3::core::Result<EffectDef> w = compile_emitter_effect("fx/test/parent", c2);
@@ -194,12 +187,12 @@ TEST_CASE("compile: G2 clamp then scale, colour interpolation endpoints") {
 	REQUIRE(e.ok());
 	const EmitterDef &em = e->front();
 	const EvaluatorDef &a = em.evaluators[size_t(em.slot(ProcessorType::UpdateTransparency).evaluator)];
-	CHECK(evaluate_polynomial(a.polynomial, 0.0f) == doctest::Approx(0.1f).epsilon(1e-6)); // clamp to 1, then x 0.1
+	CHECK(evaluate_polynomial(a.polynomial, 0.0f) == doctest::Approx(0.1f).epsilon(1e-6));
 	const EvaluatorDef &c = em.evaluators[size_t(em.slot(ProcessorType::UpdateColor).evaluator)];
 	const Vec3 at0 = evaluate_color_interp(c.color_interp.coefficients, c.color_interp.color0, c.color_interp.color1, 0.0f);
 	const Vec3 at1 = evaluate_color_interp(c.color_interp.coefficients, c.color_interp.color0, c.color_interp.color1, 1.0f);
-	CHECK(at0.x == 1.0f); // f = 0: Color1
-	CHECK(at1.z == 30.0f); // f = 1: Color0
+	CHECK(at0.x == 1.0f);
+	CHECK(at1.z == 30.0f);
 }
 
 TEST_CASE("compile: unknown types, unknown enumerators, cycles, base emitters, flipbooks") {
@@ -215,7 +208,7 @@ TEST_CASE("compile: unknown types, unknown enumerators, cycles, base emitters, f
 	}
 	{
 		DocBuilder d = simple_doc(2);
-		fxt::set(d.tmpl(), "EmittableType", raw(7)); // "Ribbon"
+		fxt::set(d.tmpl(), "EmittableType", raw(7));
 		REQUIRE(db.set("fx/test/ribbon", d.p));
 		CompileContext ctx;
 		ctx.db = &db;
@@ -225,7 +218,7 @@ TEST_CASE("compile: unknown types, unknown enumerators, cycles, base emitters, f
 	}
 	{
 		DocBuilder d = simple_doc(3);
-		fxt::set(d.p.instances[d.last].values, "NextProcessor", d.p.ref(2)); // back to the first processor
+		fxt::set(d.p.instances[d.last].values, "NextProcessor", d.p.ref(2));
 		REQUIRE(db.set("fx/test/cycle", d.p));
 		CompileContext ctx;
 		ctx.db = &db;
@@ -234,7 +227,7 @@ TEST_CASE("compile: unknown types, unknown enumerators, cycles, base emitters, f
 		CHECK(r.error().message.find("cycle") != std::string::npos);
 	}
 	{
-		// A document whose chain is only BaseEmitterData takes its base's processors (docs §6.2).
+
 		REQUIRE(db.set("fx/test/base", simple_doc(4, 5, 7, 2).p));
 		DocBuilder d(5, 9);
 		d.proc("BaseEmitterData", { { "EmitterAsset", d.p.ext(4, 1) } });
@@ -245,11 +238,11 @@ TEST_CASE("compile: unknown types, unknown enumerators, cycles, base emitters, f
 		REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
 		CHECK(r->front().base == "fx/test/base");
 		CHECK((r->front().tmpl.flags & kEmitterDerived) != 0);
-		CHECK(r->front().tmpl.max_count == 9); // the template is the document's own
+		CHECK(r->front().tmpl.max_count == 9);
 		CHECK(r->front().params.spawn_rate == 7.0f);
 	}
 	{
-		// Flipbook counts: 0 is stored as 1 and counted; a fraction is an error.
+
 		for (const float frames : { 0.0f, 2.5f }) {
 			DocBuilder d = simple_doc(6);
 			d.proc("UpdateTextureCoordsData",
@@ -283,7 +276,7 @@ TEST_CASE("library: one def per name, failures remembered, bindings per emitter"
 	REQUIRE(a.ok());
 	const auto b = lib.get("fx/test/effect");
 	REQUIRE(b.ok());
-	CHECK(a->get() == b->get()); // shared, compiled once
+	CHECK(a->get() == b->get());
 	CHECK(lib.bindings(**a).size() == (*a)->emitters.size());
 	CHECK_FALSE(lib.get("fx/test/nothing").ok());
 	CHECK_FALSE(lib.get("fx/test/nothing").ok());
@@ -300,8 +293,6 @@ TEST_CASE("find_partition: unique suffix, none, ambiguous") {
 	REQUIRE_FALSE(amb.ok());
 	CHECK(amb.error().message.find("fx/b/fx_two") != std::string::npos);
 }
-
-// ---- cache -------------------------------------------------------------------------------------------------------
 
 TEST_CASE("cache: cold, warm, a patched document, a patched blueprint") {
 	TempCache tc("unit_cache");
@@ -322,15 +313,12 @@ TEST_CASE("cache: cold, warm, a patched document, a patched blueprint") {
 	CHECK(warm->item.outcome == bf3::core::CacheOutcome::Hit);
 	CHECK(format_effect_def(warm->def) == format_effect_def(cold->def));
 
-	// A patched emitter document changes the effect key (its digest is in the list).
 	REQUIRE(db.set("fx/test/a", simple_doc(1, 8, 12).p));
 	const auto patched = compile_effect_cached(&tc.cache, src, "fx/test/effect");
 	REQUIRE(patched.ok());
 	CHECK(patched->item.outcome == bf3::core::CacheOutcome::Converted);
 	CHECK(patched->def.emitters[0].params.spawn_rate == 12.0f);
 
-	// A patched blueprint that adds a component: the dependency list changes and is rewritten (rule 2), so the
-	// next lookup is warm and holds the new document.
 	EffectBuilder fx2(9);
 	fx2.emitter(1);
 	fx2.emitter(2);
@@ -342,7 +330,7 @@ TEST_CASE("cache: cold, warm, a patched document, a patched blueprint") {
 	REQUIRE(grown_warm.ok());
 	CHECK(grown_warm->item.outcome == bf3::core::CacheOutcome::Hit);
 	CHECK(grown_warm->def.components.size() == 2);
-	// And a patch of the newly listed document reaches the effect.
+
 	REQUIRE(db.set("fx/test/b", simple_doc(2, 3, 6).p));
 	const auto b_patched = compile_effect_cached(&tc.cache, src, "fx/test/effect");
 	REQUIRE(b_patched.ok());
@@ -361,7 +349,7 @@ TEST_CASE("cache: an absent dependency is in the key (rule 1)") {
 	const auto present = effect_def_key(src, "fx/test/effect", deps);
 	REQUIRE(present.has_value());
 	CHECK_FALSE(*absent == *present);
-	// The deps entry is keyed by the blueprint only.
+
 	CHECK(effect_deps_key(src, "fx/test/effect").has_value());
 	CHECK_FALSE(effect_deps_key(src, "fx/test/nothing").has_value());
 }
@@ -391,12 +379,10 @@ TEST_CASE("cache: an undecodable entry is dropped and recompiled") {
 	CHECK(compile_effect_cached(&tc.cache, src, "fx/test/effect")->item.outcome == bf3::core::CacheOutcome::Hit);
 }
 
-// ---- simulator: spawning and ageing -----------------------------------------------------------------------------
-
 TEST_CASE("sim: the accumulator starts at 1, rate mode, window, repeat") {
 	FxWorld w;
 	{
-		// rate x dt = 1 exactly: 1 at the first step, then 1 per step.
+
 		const auto d = fxt::effect_def("rate", { fxt::emitter_def("e", 100, 6, 100) });
 		REQUIRE(w.start(d, start_with(1)).ok());
 		run_frames(w, 1.0f / 6.0f, 6);
@@ -405,7 +391,7 @@ TEST_CASE("sim: the accumulator starts at 1, rate mode, window, repeat") {
 	}
 	w.clear();
 	{
-		// Window 0.5 s, rate 4, dt 0.25: steps at e_age 0 and 0.25 spawn 2 and 1, then the window is over.
+
 		const auto d = fxt::effect_def("window", { fxt::emitter_def("e", 100, 4, 100, 0.5f) });
 		REQUIRE(w.start(d, start_with(1)).ok());
 		run_frames(w, 0.25f, 8);
@@ -413,7 +399,7 @@ TEST_CASE("sim: the accumulator starts at 1, rate mode, window, repeat") {
 	}
 	w.clear();
 	{
-		// Repeat: the window wraps and re-arms the accumulator: 3 per window.
+
 		EmitterDef e = fxt::emitter_def("e", 100, 4, 100, 0.5f);
 		e.tmpl.flags |= kEmitterRepeatParticleSpawning;
 		const auto d = fxt::effect_def("repeat", { e });
@@ -425,7 +411,7 @@ TEST_CASE("sim: the accumulator starts at 1, rate mode, window, repeat") {
 	}
 	w.clear();
 	{
-		// Burst: floor(1 + rate x window) at the window start.
+
 		EmitterDef e = fxt::emitter_def("e", 100, 10, 100, 0.5f);
 		e.params.distribute_over_time = false;
 		const auto d = fxt::effect_def("burst", { e });
@@ -457,7 +443,7 @@ TEST_CASE("sim: MaxCount cap across sub-steps, TimeScale, life") {
 	}
 	w.clear();
 	{
-		// TimeScale 0.5: a 1 s particle lives 2 s of real time.
+
 		EmitterDef e = fxt::emitter_def("e", 1, 1, 1.0f, 0.01f);
 		e.params.distribute_over_time = false;
 		e.tmpl.time_scale = 0.5f;
@@ -493,13 +479,13 @@ TEST_CASE("sim: gravity sign, drag, size and colour products, frames") {
 	run_frames(w, 0.1f, 10);
 	REQUIRE(w.particles().size() == 1);
 	const ParticleVertex &v = w.particles()[0];
-	CHECK(v.position.y < 0.0f); // positive Gravity pulls down
-	CHECK(v.size.x == doctest::Approx(3.0f)); // 2 x 0.5 x 3
+	CHECK(v.position.y < 0.0f);
+	CHECK(v.size.x == doctest::Approx(3.0f));
 	CHECK(v.size.y == doctest::Approx(1.0f));
 	CHECK(v.color.x == 2.0f);
 	CHECK(v.color.z == 4.0f);
-	CHECK(v.frame == 1.0f); // 5 wrapped into [0, 4)
-	// Drag slows: the same with AirResistance falls less far.
+	CHECK(v.frame == 1.0f);
+
 	FxWorld w2;
 	EmitterDef e2 = e;
 	e2.slots[size_t(ProcessorType::AirResistance)].present = true;
@@ -524,7 +510,7 @@ TEST_CASE("sim: effect x component transform order, start_age") {
 	CHECK(w.particles()[0].position.y == doctest::Approx(5.0f));
 	CHECK(w.particles()[0].position.z == doctest::Approx(2.0f));
 	w.clear();
-	// A windowed emitter whose window ended before start_age does not start.
+
 	const auto windowed = fxt::effect_def("late", { fxt::emitter_def("e", 4, 10, 10, 1.0f) });
 	EffectStart late = start_with(1);
 	late.start_age = 2.0f;
@@ -532,7 +518,7 @@ TEST_CASE("sim: effect x component transform order, start_age") {
 	run_frames(w, 1.0f / 60.0f, 30);
 	CHECK(w.stats().spawned == 0);
 	w.clear();
-	// A continuous one starts with its clock at start_age: no first-step particle from the initial accumulator.
+
 	const auto cont = fxt::effect_def("cont", { fxt::emitter_def("e", 100, 6, 100) });
 	EffectStart late2 = start_with(1);
 	late2.start_age = 5.0f;
@@ -545,7 +531,7 @@ TEST_CASE("sim: children start per parent particle, follow it and stop with it")
 	FxWorld w;
 	EmitterDef parent = fxt::emitter_def("parent", 2, 2, 0.5f, 0.01f);
 	parent.params.distribute_over_time = false;
-	parent.params.spawn_rate = 150; // burst: floor(1 + 150 x 0.01) = 2
+	parent.params.spawn_rate = 150;
 	parent.slots[size_t(ProcessorType::SpawnPosition)].present = true;
 	parent.slots[size_t(ProcessorType::SpawnPosition)].evaluator = 0;
 	EvaluatorDef box;
@@ -560,7 +546,7 @@ TEST_CASE("sim: children start per parent particle, follow it and stop with it")
 	const auto h = w.start(d, start_with(7));
 	REQUIRE(h.ok());
 	run_frames(w, 1.0f / 60.0f, 6);
-	// Two parents, two child instances, each spawning at its own parent.
+
 	std::vector<Vec3> child_pos;
 	std::vector<Vec3> parent_pos;
 	for (const EmitterOutput &o : w.outputs()) {
@@ -576,7 +562,7 @@ TEST_CASE("sim: children start per parent particle, follow it and stop with it")
 		CHECK((close_to(c, parent_pos[0]) || close_to(c, parent_pos[1])));
 	}
 	CHECK_FALSE(close_to(parent_pos[0], parent_pos[1]));
-	// The parents die at 0.5 s; their children stop and finish; the effect ends.
+
 	run_frames(w, 1.0f / 60.0f, 60);
 	CHECK(w.stats().live_particles == 0);
 	CHECK_FALSE(w.alive(*h));
@@ -598,7 +584,7 @@ TEST_CASE("sim: pools steal with reset and refuse without") {
 	REQUIRE(w.start(refuse, start_with(4)).ok());
 	CHECK_FALSE(w.start(refuse, start_with(5)).ok());
 	CHECK(w.stats().refused_starts == 1);
-	// A def larger than the world's budget is refused.
+
 	FxWorldConfig small;
 	small.max_particles = 10;
 	FxWorld tiny(small);
@@ -606,7 +592,7 @@ TEST_CASE("sim: pools steal with reset and refuse without") {
 }
 
 TEST_CASE("sim: events past the frame's buffer are counted, not lost silently") {
-	// The event buffer holds max_effects x 4 events a frame: one effect with six sound components overflows it by 2.
+
 	auto d = std::make_shared<EffectDef>(*fxt::effect_def("sounds", { fxt::emitter_def("e", 4, 10, 1) }));
 	for (int i = 0; i < 6; ++i) {
 		EffectComponentDef c;
@@ -644,7 +630,7 @@ TEST_CASE("sim: component selection fractions match fx_component_selected") {
 	for (const std::string &l : rep.lines) {
 		if (l.rfind("component\t0\t", 0) == 0) {
 			found = true;
-			// selected and observed are printed with the same format: equal fractions print equal text.
+
 			const size_t s = l.find("selected\t");
 			const size_t o = l.find("\tobserved\t");
 			REQUIRE(s != std::string::npos);
@@ -668,7 +654,7 @@ TEST_CASE("sim: effect_extent") {
 TEST_CASE("sim: G8 determinism on 1, 2 and 8 lanes and two partitions, with a saturated world") {
 	FxWorldConfig cfg;
 	cfg.max_particles = 1000;
-	// One def for every run: EmitterOutput::def (in the digest) is the same pointer in all of them.
+
 	const auto def = [] {
 		EmitterDef e = fxt::emitter_def("e", 100, 1000, 0.5f);
 		e.slots[size_t(ProcessorType::SpawnPosition)].present = true;
@@ -724,4 +710,4 @@ TEST_CASE("sim: G8 determinism on 1, 2 and 8 lanes and two partitions, with a sa
 	CHECK(one.stats.live_particles <= cfg.max_particles);
 }
 
-} // TEST_SUITE
+}

@@ -1,7 +1,4 @@
 #pragma once
-// Shared by the weapons sources (docs/design/m2a-weapons.md §5): the FNV-1a field hasher, double vector helpers,
-// the aim frame, and the polynomial sin/cos of the replicated path (plan R4: no libm call where the server and a
-// predicting client must agree to the bit; only +, -, *, / and sqrt, which IEEE 754 rounds identically everywhere).
 
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/weapons/ballistics.h"
@@ -86,8 +83,6 @@ inline bool finite3f(const Vec3 &p_a) {
 	return std::isfinite(p_a[0]) && std::isfinite(p_a[1]) && std::isfinite(p_a[2]);
 }
 
-// sin and cos of p_x (any finite value) from a reduction to [-pi/4, pi/4] and Taylor polynomials to x^17 / x^16
-// (|error| < 2e-16 there): deterministic on every IEEE machine, unlike libm.
 inline void poly_sincos(double p_x, double &r_sin, double &r_cos) {
 	if (!std::isfinite(p_x)) {
 		r_sin = 0;
@@ -98,23 +93,23 @@ inline void poly_sincos(double p_x, double &r_sin, double &r_cos) {
 	constexpr double kInvHalfPi = 2.0 / kPiD;
 	const double q = p_x * kInvHalfPi;
 	const double qr = q >= 0 ? double(int64_t(q + 0.5)) : -double(int64_t(-q + 0.5));
-	const double r = p_x - qr * kHalfPi; // [-pi/4, pi/4] (up to rounding)
+	const double r = p_x - qr * kHalfPi;
 	const int64_t quadrant = int64_t(qr) & 3;
 	const double r2 = r * r;
-	// sin r = r - r^3/3! + ... ; cos r = 1 - r^2/2! + ...
-	double s = 1.0 / 355687428096000.0; // 1/17!
-	s = s * r2 - 1.0 / 1307674368000.0; // 1/15!
-	s = s * r2 + 1.0 / 6227020800.0; // 1/13!
-	s = s * r2 - 1.0 / 39916800.0; // 1/11!
-	s = s * r2 + 1.0 / 362880.0; // 1/9!
+
+	double s = 1.0 / 355687428096000.0;
+	s = s * r2 - 1.0 / 1307674368000.0;
+	s = s * r2 + 1.0 / 6227020800.0;
+	s = s * r2 - 1.0 / 39916800.0;
+	s = s * r2 + 1.0 / 362880.0;
 	s = s * r2 - 1.0 / 5040.0;
 	s = s * r2 + 1.0 / 120.0;
 	s = s * r2 - 1.0 / 6.0;
 	s = r + r * r2 * s;
-	double c = 1.0 / 20922789888000.0; // 1/16!
-	c = c * r2 - 1.0 / 87178291200.0; // 1/14!
-	c = c * r2 + 1.0 / 479001600.0; // 1/12!
-	c = c * r2 - 1.0 / 3628800.0; // 1/10!
+	double c = 1.0 / 20922789888000.0;
+	c = c * r2 - 1.0 / 87178291200.0;
+	c = c * r2 + 1.0 / 479001600.0;
+	c = c * r2 - 1.0 / 3628800.0;
 	c = c * r2 + 1.0 / 40320.0;
 	c = c * r2 - 1.0 / 720.0;
 	c = c * r2 + 1.0 / 24.0;
@@ -140,8 +135,6 @@ inline void poly_sincos(double p_x, double &r_sin, double &r_cos) {
 	}
 }
 
-// The aim frame of a unit direction (x left, y up, z forward; ShotConfigData's weapon space): left = up x forward,
-// up' = forward x left. Straight up or down (no horizontal part) takes left = +X.
 struct Frame {
 	DVec3 left{};
 	DVec3 up{};
@@ -159,4 +152,4 @@ inline DVec3 frame_apply(const Frame &p_f, const Vec3 &p_local) {
 	return add(add(scale(p_f.left, double(p_local[0])), scale(p_f.up, double(p_local[1]))), scale(p_f.forward, double(p_local[2])));
 }
 
-} // namespace bf3::sim::weapons::detail
+}

@@ -1,6 +1,3 @@
-// core.res.install: the resource decoders fed straight from the retail install through
-// bf3/core/res/res_loader.h (read-only: InstallReader / Install / LevelMount). Every case skips
-// (exit 77) when no install is found. Asserts counts only; nothing from the install is stored.
 #include <doctest/doctest.h>
 
 #include "bf3/core/install.h"
@@ -22,7 +19,6 @@ namespace {
 
 constexpr const char *kSubway = "Win32/Levels/MP_Subway/MP_Subway";
 
-// The MP_Subway superbundle with every bundle indexed, or nullptr after skipping the case.
 std::unique_ptr<LevelMount> mount_subway_or_skip() {
 	InstallReader reader;
 	if (!reader.locate({})) {
@@ -38,15 +34,14 @@ std::unique_ptr<LevelMount> mount_subway_or_skip() {
 	return std::make_unique<LevelMount>(std::move(*mount));
 }
 
-// What decoding one res yielded; error is empty on success.
 struct Outcome {
 	uint32_t res_type = 0;
 	std::string error;
 	size_t subsets = 0;
 	size_t vertices = 0;
-	size_t triangles = 0; // mesh index triangles, or Havok triangles of every root
+	size_t triangles = 0;
 	size_t mips = 0;
-	size_t views = 0; // ranged texture views split at their logicalOffset
+	size_t views = 0;
 	size_t roots = 0;
 	size_t convex = 0;
 };
@@ -89,7 +84,7 @@ Outcome decode_one(const LevelMount &p_mount, const std::string &p_name) {
 		o.mips = mips.size();
 		const uint32_t view = tex->chunk.view_offset;
 		if (e.ok() && view != 0) {
-			// The level's ranged entry starts at a mip boundary (the mips before mip_base).
+
 			o.views = 1;
 			e = tex->texture.split_mips(tex->chunk.whole().subspan(view), view, mips);
 			if (e.ok() && tex->texture.first_mip_at(view) != tex->texture.mip_base) {
@@ -123,7 +118,7 @@ Outcome decode_one(const LevelMount &p_mount, const std::string &p_name) {
 	return o;
 }
 
-} // namespace
+}
 
 TEST_SUITE("res_install") {
 	TEST_CASE("res install: every MeshSet, DxTexture and Havok res of MP_Subway") {
@@ -133,7 +128,7 @@ TEST_SUITE("res_install") {
 			return;
 		}
 		const std::vector<std::string> names = decodable_res_names(*mount);
-		// LevelMount reads are thread-safe; decode on every core.
+
 		const std::vector<Outcome> outcomes = parallel_map<Outcome>(names.size(), [&](size_t i) { return decode_one(*mount, names[i]); });
 		std::map<uint32_t, size_t> counts;
 		Outcome total;
@@ -159,7 +154,7 @@ TEST_SUITE("res_install") {
 		CHECK(counts[kResTypeDxTexture] == 1717);
 		CHECK(counts[kResTypeHavokPhysicsData] == 730);
 		CHECK(counts[kResTypeHavokDestructionPhysicsData] == 9);
-		// The same totals core.res reports for the oracle's export of this superbundle.
+
 		CHECK(total.subsets == 9263);
 		CHECK(total.triangles == 5366947);
 		CHECK(total.mips == 17545);
@@ -199,12 +194,11 @@ TEST_SUITE("res_install") {
 		REQUIRE(m9->decode(0, SubsetFilter::Drawn, subsets).ok());
 		CHECK(subsets.size() == 1);
 
-		// Wrong type and missing names are errors, not crashes.
 		CHECK(!load_texture(*mount, "weapons/m9/m9_1p_mesh").ok());
 		CHECK(!load_mesh_set(*mount, "weapons/m9/no_such_mesh").ok());
 		Result<LoadedTexture> m9_d = load_texture(*mount, "weapons/m9/m9_d");
 		REQUIRE_MESSAGE(m9_d.ok(), (m9_d.ok() ? "" : m9_d.error().message));
-		CHECK(m9_d->chunk.view_offset == 2621440); // ranged in the level bundle: mips 2..
+		CHECK(m9_d->chunk.view_offset == 2621440);
 		CHECK(m9_d->texture.first_mip_at(m9_d->chunk.view_offset) == 2);
 	}
 }

@@ -49,4 +49,4 @@ std::string engine_summary() {
 	return to_std(String(v["string"])) + " " + hash.substr(0, 9) + (single ? " single" : " double");
 }
 
-} // namespace bf3::godot_side
+}

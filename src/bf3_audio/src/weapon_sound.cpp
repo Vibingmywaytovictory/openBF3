@@ -1,6 +1,3 @@
-// The weapon seam (weapon_sound.h, design §6.7): binding a compiled weapon patch's inputs and turning trigger state
-// into frame-stamped mixer commands.
-
 #include "bf3/audio/weapon_sound.h"
 
 #include "bf3/core/audio/sound_ports.h"
@@ -14,8 +11,6 @@ namespace cp = core::audio::port;
 
 namespace {
 
-// The game input that feeds register p_reg: the input itself, or the AudioGraphParameter/Event a ReceiveEntry copies
-// into it.
 const ca::SoundInput *input_behind(const ca::SoundProgram &p, uint16_t p_reg, bool p_event) {
 	if (p_reg == ca::kNoRegister) {
 		return nullptr;
@@ -44,7 +39,7 @@ const ca::SoundInput *input_behind(const ca::SoundProgram &p, uint16_t p_reg, bo
 	return nullptr;
 }
 
-} // namespace
+}
 
 core::Result<WeaponSoundBinding> bind_weapon_sound(std::shared_ptr<const ca::SoundProgram> p_program, double p_shot_interval_seconds, uint32_t p_mix_rate) {
 	if (!p_program) {
@@ -106,7 +101,7 @@ MixerCommand event_command(InstanceHandle p_handle, uint32_t p_hash, uint64_t p_
 	return c;
 }
 
-} // namespace
+}
 
 bool WeaponSoundDriver::trigger_down(MixerCore &r_mixer, uint64_t p_first_frame) {
 	first_frame_ = p_first_frame;
@@ -130,4 +125,4 @@ bool WeaponSoundDriver::trigger_up(MixerCore &r_mixer, uint64_t p_frame) {
 	return r_mixer.push(event_command(instance_, binding_.stop_event, p_frame));
 }
 
-} // namespace bf3::audio
+}

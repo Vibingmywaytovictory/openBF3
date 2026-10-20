@@ -1,5 +1,3 @@
-// Weapon resolver: variant -> blueprint -> SoldierWeaponData -> modifiers -> WeaponDef (see
-// weapon_resolver.h for the rule).
 #include "bf3/core/gameplay/weapon_resolver.h"
 
 #include "weapon_readers.h"
@@ -15,7 +13,6 @@ using detail::Fields;
 
 namespace {
 
-// Longest Extra chain followed (retail: one link, u_m16_burst -> u_m16a4_burst).
 constexpr int kMaxExtraDepth = 8;
 
 std::string folder_of(std::string_view p_partition) {
@@ -23,7 +20,6 @@ std::string folder_of(std::string_view p_partition) {
 	return slash == std::string_view::npos ? std::string() : std::string(p_partition.substr(0, slash));
 }
 
-// Activates an unlock asset and, for a SoldierWeaponUnlockAsset, its Extra chain.
 void activate(Fields &r_f, const EbxInstance &p_unlock, ActiveUnlocks &r_active) {
 	EbxInstance at = p_unlock;
 	r_active.add(at.guid(), r_f.partition_name(at.partition()));
@@ -38,11 +34,11 @@ void activate(Fields &r_f, const EbxInstance &p_unlock, ActiveUnlocks &r_active)
 		}
 		const std::optional<Guid> id = r_f.target_guid(at.partition(), *extra);
 		if (!id || !r_active.add(*id, r_f.target_partition(at.partition(), *extra))) {
-			return; // unknown or already active (a cycle)
+			return;
 		}
 		const std::optional<EbxInstance> next = r_f.db().resolve(at.partition(), *extra);
 		if (!next) {
-			return; // the unlock is not mounted; its GUID still activates its modifiers
+			return;
 		}
 		at = *next;
 	}
@@ -58,7 +54,6 @@ struct ModifierEntry {
 	std::vector<EbxInstance> modifiers;
 };
 
-// The WeaponModifierData entries whose unlock is active, in array order.
 std::vector<ModifierEntry> active_modifiers(Fields &r_f, const EbxStruct &p_swd, const ActiveUnlocks &p_active) {
 	std::vector<ModifierEntry> out;
 	const OptionalEbxArray entries = r_f.array(p_swd, "WeaponModifierData");
@@ -116,7 +111,6 @@ void read_firing_data(Fields &r_f, const EbxInstance &p_wfd, WeaponDef &r_w) {
 	r_w.reload_whole_mags = r_f.flag_or(w, "ReloadWholeMags", false);
 }
 
-// Applies one non-firing-data modifier; returns false for a type that only affects presentation.
 bool apply_modifier(Fields &r_f, const EbxInstance &p_mod, WeaponDef &r_w, std::optional<EbxInstance> &r_projectile) {
 	const EbxStruct m = p_mod.data();
 	if (p_mod.is_a("WeaponShotModifier")) {
@@ -154,8 +148,7 @@ bool apply_modifier(Fields &r_f, const EbxInstance &p_mod, WeaponDef &r_w, std::
 	} else if (p_mod.is_a("WeaponZoomModifier")) {
 		r_w.zoom_render_fov = r_f.f32(m, "ZoomRenderFov");
 	} else if (p_mod.is_a("WeaponMiscModifier")) {
-		// Every misc modifier carries all five flags; a suppressor and a bipod together must stay
-		// silenced, so a flag set by any active modifier stays set [inferred].
+
 		r_w.enable_breath_control |= r_f.flag(m, "EnableBreathControl");
 		r_w.can_be_in_supported_shooting |= r_f.flag(m, "CanBeInSupportedShooting");
 		r_w.silenced |= r_f.flag(m, "IsSilenced");
@@ -170,12 +163,12 @@ bool apply_modifier(Fields &r_f, const EbxInstance &p_mod, WeaponDef &r_w, std::
 	} else if (p_mod.is_a("WeaponAnimTypeModifier")) {
 		r_w.weapon_anim_type = r_f.enum_text(m, "WeaponAnimType");
 	} else {
-		return false; // effects, animation configuration, animated fire type
+		return false;
 	}
 	return true;
 }
 
-} // namespace
+}
 
 Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_partition, const WeaponResolveOptions &p_options) {
 	Fields f(p_db);
@@ -204,7 +197,6 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 	w.blueprint = f.partition_name(blueprint->partition());
 	w.blueprint_name = f.text(blueprint->data(), "Name");
 
-	// Requested unlocks, by name or relative to the weapon's folder.
 	const std::string folder = folder_of(w.blueprint);
 	for (const std::string &u : p_options.unlocks) {
 		const std::string name = (u.find('/') == std::string::npos && !folder.empty()) ? folder + "/" + u : u;
@@ -233,7 +225,6 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 	w.can_be_in_supported_shooting = f.flag_or(s, "CanBeInSupportedShooting", false);
 	w.aiming_controller = ref_partition(f, s, "AimingController");
 
-	// Pass 1: the effective WeaponFiringData (a WeaponFiringDataModifier replaces the whole record).
 	const std::vector<ModifierEntry> mods = active_modifiers(f, s, active);
 	std::optional<EbxInstance> wfd = f.follow(s, "WeaponFiring", "WeaponFiringData", true);
 	for (const ModifierEntry &e : mods) {
@@ -262,7 +253,6 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 		return f.error();
 	}
 
-	// Pass 2: field modifiers, in array order.
 	for (const ModifierEntry &e : mods) {
 		for (const EbxInstance &m : e.modifiers) {
 			if (m.is_a("WeaponFiringDataModifier")) {
@@ -354,4 +344,4 @@ std::string weapon_name_sid(const EbxResolver &p_ui, uint32_t p_unlock_identifie
 	return {};
 }
 
-} // namespace bf3::core::gameplay
+}

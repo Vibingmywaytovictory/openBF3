@@ -1,4 +1,3 @@
-// L1 look: the level shader database reader (shader_database.h; port of IW4L resource_bf3 shader.rs).
 #include "bf3/render/shader_database.h"
 
 #include "bf3/core/ebx.h"
@@ -28,7 +27,7 @@ constexpr size_t kTexturesAt = 0x10;
 constexpr size_t kValuesAt = 0x18;
 constexpr size_t kTextureCountAt = 0x35;
 constexpr size_t kValueCountAt = 0x36;
-// Smallest stored shader record: hash, type, flags, 35 bytes, three counts.
+
 constexpr size_t kMinShaderBytes = 4 + 4 + 1 + 35 + 4 + 4 + 4;
 
 bool iequals(std::string_view p_a, std::string_view p_b) {
@@ -55,7 +54,6 @@ float rdf(const uint8_t *p) {
 	return v;
 }
 
-// A bounds-checked reader over one span; every failure names the offset.
 class Cursor {
 public:
 	explicit Cursor(std::span<const uint8_t> p_data) :
@@ -98,7 +96,7 @@ public:
 		at_ += length + 1;
 		return out;
 	}
-	// u32 count of p_min_bytes-sized items: refused when the bytes left cannot hold them.
+
 	core::Result<uint32_t> count(size_t p_min_bytes, const char *p_what) {
 		core::Result<uint32_t> n = u32(p_what);
 		if (!n) {
@@ -133,7 +131,6 @@ struct ConstantBlock {
 	std::vector<ShaderValue> values;
 };
 
-// One constant block (starting with its own size).
 core::Result<ConstantBlock> parse_block(std::span<const uint8_t> p_block, size_t p_at) {
 	const auto bad = [&](const char *p_what) { return core::make_error(std::string(p_what) + " in constant block at " + std::to_string(p_at)); };
 	if (p_block.size() < kValueCountAt + 1) {
@@ -295,7 +292,7 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 			s.texture_parameters.push_back(std::move(p));
 		}
 		SDB_TRY_ASSIGN(used, r.count(2, "shader solution list"));
-		std::set<std::string> seen_textures, seen_values; // ordered: no data-keyed hashing
+		std::set<std::string> seen_textures, seen_values;
 		s.solutions.reserve(used);
 		for (uint32_t u = 0; u < used; ++u) {
 			SDB_TRY_ASSIGN(b, r.take(2, "shader solution index"));
@@ -329,7 +326,7 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 	return out;
 }
 
-} // namespace
+}
 
 SurfaceShaderType surface_shader_type(uint32_t p_value) {
 	return p_value <= 4 ? SurfaceShaderType(p_value) : SurfaceShaderType::Other;
@@ -412,4 +409,4 @@ const SurfaceShader *ShaderLookup::by_name(std::string_view p_partition) const {
 	return found == by_hash_.end() || found->first != hash ? nullptr : &database_.shaders[found->second];
 }
 
-} // namespace bf3::render
+}

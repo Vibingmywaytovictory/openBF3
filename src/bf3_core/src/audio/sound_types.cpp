@@ -1,7 +1,3 @@
-// The sound-graph node type table (sound_types.h). Ports and floats of the A2 types are the AudioGraphNodePort and
-// float fields every instance of the type carries in the 164 handheld weapon patches [verified 2026-10-15, scratch
-// census, design §4.4]; the other types list none until their wave (A5-A7) implements them.
-
 #include "bf3/core/audio/sound_types.h"
 
 #include <array>
@@ -192,7 +188,7 @@ constexpr EnumName kTransformOps[] = {
 };
 static_assert(std::size(kTransformOps) == size_t(SimpleTransformOp::Unknown));
 
-} // namespace
+}
 
 std::span<const SoundNodeTypeInfo> sound_node_types() {
 	return kTypes;
@@ -226,4 +222,4 @@ SimpleTransformOp simple_transform_op(std::string_view p_enumerator) {
 	return SimpleTransformOp::Unknown;
 }
 
-} // namespace bf3::core::audio
+}

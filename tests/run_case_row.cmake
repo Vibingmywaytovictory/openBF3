@@ -1,23 +1,8 @@
-# Runner of the split ctest rows (docs/testing.md "Splits"; openbf3_case_row / openbf3_split_cover in
-# tests/CMakeLists.txt).
-# Row mode: one doctest suite filtered to a set of cases.
-#   cmake -DEXE=<test exe> -DSUITE=<suite> -DCOUNT=<n> [-DCASES=<p1,p2,...>] [-DEXCLUDE=<p1,...>] -P run_case_row.cmake
-#   Runs EXE --test-suite=SUITE [--test-case=CASES] [--test-case-exclude=EXCLUDE] (CASES already holds the suite's
-#   install-unchanged case when it has one). Exit 77 of the executable (no install) passes through. Otherwise the row
-#   passes only on exit 0 and the summary 'test cases: n | n passed', so a mistyped pattern that selects nothing but
-#   the install check fails instead of passing quietly.
-# Cover mode: every case of the suite is selected by exactly one split row.
-#   cmake -DMODE=cover -DEXE=<test exe> -DSUITE=<suite> -DROWS_FILE=<cmake file> [-DINSTALL_CASE=<pattern>]
-#         -P run_case_row.cmake
-#   ROWS_FILE sets ROWS (the row names) and ROW_<name>_CASES / ROW_<name>_EXCLUDE as the rows pass them. The suite's
-#   --list-test-cases is compared with each row's: a case in no row or in two rows fails; the case matching
-#   INSTALL_CASE must be in every row. Data-free (listing runs no case), well under a second.
 cmake_minimum_required(VERSION 3.29)
 if(NOT EXISTS "${EXE}")
 	message(FATAL_ERROR "run_case_row: EXE '${EXE}' does not exist")
 endif()
 
-# The case names doctest lists for the given filter arguments, as a CMake list (';' in a name becomes ',').
 function(list_cases r_names)
 	execute_process(COMMAND "${EXE}" "--test-suite=${SUITE}" ${ARGN} --list-test-cases
 		RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
@@ -27,7 +12,6 @@ function(list_cases r_names)
 	string(REPLACE ";" "," out "${out}")
 	string(REPLACE "\r" "" out "${out}")
 	string(REPLACE "\n" ";" lines "${out}")
-	# "[doctest] listing all test case names", a ==== line, one name per line, a closing ==== line.
 	set(names "")
 	set(state 0)
 	foreach(line IN LISTS lines)

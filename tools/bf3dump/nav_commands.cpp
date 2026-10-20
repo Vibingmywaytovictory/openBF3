@@ -1,5 +1,3 @@
-// bf3dump nav (nav_commands.h; spike S1, docs/design/s1.md §5): bake, stats, components (+ G2 rows, seams), path,
-// probe.
 #include "nav_commands.h"
 
 #include "prepare_commands.h"
@@ -58,9 +56,9 @@ struct Args {
 	std::vector<std::string> positional;
 	unsigned threads = 0;
 	uint32_t layers = sim::query_mask::kMovement;
-	bool radius_round_up = true; // NavParams default
-	float cell_size = 0.0f; // 0: NavParams default
-	int partition = -1; // NavPartition, -1: NavParams default
+	bool radius_round_up = true;
+	float cell_size = 0.0f;
+	int partition = -1;
 	bool links = true;
 	bool tiles = false;
 	bool points = false;
@@ -125,7 +123,6 @@ int finish(const core::InstallReader &p_reader, const core::InstallSnapshot &p_b
 	return p_before.valid && diff.clean() ? p_rc : 1;
 }
 
-// The level x mode as the bots load it, with an optional cache.
 struct Loaded {
 	std::optional<host::LevelDatabase> db;
 	core::level::LevelCombatTiles combat;
@@ -223,7 +220,7 @@ void print_components(const host::BotLevel &p_bots) {
 		}
 	}
 	std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return c.area[a] > c.area[b]; });
-	// Bounds per component from the debug mesh.
+
 	const sim::NavDebugMesh dm = sim::nav_debug_mesh(*p_bots.nav, &c);
 	std::unordered_map<uint32_t, std::pair<sim::Vec3, sim::Vec3>> bounds;
 	for (size_t t = 0; t < dm.triangle_component.size(); ++t) {
@@ -249,8 +246,6 @@ void print_components(const host::BotLevel &p_bots) {
 	}
 }
 
-// Where the largest component meets the next ones (docs §5.7): triangle corners of different components within
-// 1 m horizontally and 0.5 m vertically, clustered on a 4 m grid.
 void print_seams(const host::BotLevel &p_bots) {
 	const sim::NavDebugMesh dm = sim::nav_debug_mesh(*p_bots.nav, &p_bots.components);
 	const sim::NavComponents &c = p_bots.components;
@@ -372,8 +367,7 @@ int cmd_nav_components(const core::InstallReader &p_reader, const std::shared_pt
 		print_seams(*l->bots);
 	}
 	if (!p_args.dump.empty()) {
-		// The debug mesh as text (derived data: scratch only, never the install): "T x y z x y z x y z component area"
-		// and "L x y z x y z" per drop link.
+
 		std::error_code ec;
 		const std::filesystem::path target = std::filesystem::absolute(p_args.dump, ec);
 		if (ec || p_reader.write_guard().check_write_target(target) != core::PathGuard::Verdict::Allowed) {
@@ -412,7 +406,7 @@ int cmd_nav_path(const core::InstallReader &p_reader, const std::shared_ptr<core
 		return 1;
 	}
 	sim::NavQueryOptions qo;
-	qo.max_nodes = 65535; // full-map queries (topics/06 §2.4's harness)
+	qo.max_nodes = 65535;
 	core::Result<std::unique_ptr<sim::NavQuery>> q = sim::NavQuery::create(l->bots->nav, qo);
 	if (!q) {
 		std::fprintf(stderr, "nav path: %s\n", q.error().message.c_str());
@@ -477,14 +471,14 @@ int cmd_nav_probe(const core::InstallReader &p_reader, const std::shared_ptr<cor
 		std::fprintf(stderr, "nav probe: %s\n", world.error().message.c_str());
 		return 1;
 	}
-	// TC: the soup tiles hold the Havok triangles; the probe lists those (the terrain is the soup's terrain records).
+
 	core::level::SoupOptions so;
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(**level, **world, so);
 	if (!soup) {
 		std::fprintf(stderr, "nav probe: %s\n", soup.error().message.c_str());
 		return 1;
 	}
-	// Distance from the point to a triangle, approximated by its closest corner or centroid or edge midpoint.
+
 	const auto near = [&](const core::level::SoupTriangle &t) {
 		const auto d2 = [&](float a, float b, float c) { return (a - x) * (a - x) + (b - y) * (b - y) + (c - z) * (c - z); };
 		float best = 1e30f;
@@ -508,8 +502,7 @@ int cmd_nav_probe(const core::InstallReader &p_reader, const std::shared_ptr<cor
 		float ymin = 1e30f, ymax = -1e30f;
 	};
 	std::map<uint32_t, Hit> hits;
-	// --dump=<file>: the triangles as text, "S x y z x y z x y z placement body surface flags" (derived data: scratch
-	// only, never the install).
+
 	std::FILE *dump = nullptr;
 	if (!p_args.dump.empty()) {
 		std::error_code ec;
@@ -578,7 +571,7 @@ int cmd_nav_probe(const core::InstallReader &p_reader, const std::shared_ptr<cor
 	return finish(p_reader, before, 0);
 }
 
-} // namespace
+}
 
 const char *nav_usage() {
 	return "  nav bake|stats <LEVEL> <MODE> [--threads=N] [--layers=movement|all] [--radius=ceil|nearest] [--cs=M] [--no-links] [--tiles]\n"
@@ -690,7 +683,7 @@ int cmd_bots(const core::InstallReader &p_reader, const std::shared_ptr<core::In
 	o.level = positional[0];
 	o.mode = positional[1];
 	if (o.tuning_text.empty()) {
-		// The shipped tuning file next to the project, when run from the repository root.
+
 		std::ifstream in("bf3-opensource/config/motor_tuning.cfg", std::ios::binary);
 		std::ostringstream text;
 		text << in.rdbuf();
@@ -721,4 +714,4 @@ int cmd_bots(const core::InstallReader &p_reader, const std::shared_ptr<core::In
 	return finish(p_reader, before, 0);
 }
 
-} // namespace bf3dump
+}

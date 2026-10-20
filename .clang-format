@@ -1,5 +1,3 @@
-# openBF3 code style, as the tree is written (Godot's conventions: tabs, 120 columns, p_/r_ parameter prefixes).
-# Not yet applied tree-wide: run it on the files you touch, and review the diff before committing a reformat.
 BasedOnStyle: LLVM
 Standard: c++20
 UseTab: Always

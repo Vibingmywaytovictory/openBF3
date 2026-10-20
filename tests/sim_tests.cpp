@@ -1,4 +1,3 @@
-// Our own Jolt world: fixed-step, deterministic, settles on the ground. Recast/Detour link.
 #include <doctest/doctest.h>
 
 #include "bf3/sim/nav_link.h"
@@ -25,7 +24,7 @@ std::vector<uint64_t> run_hashes(const WorldConfig &p_config, int p_steps, int p
 	return hashes;
 }
 
-} // namespace
+}
 
 TEST_CASE("sim: Jolt world steps deterministically twice with identical results") {
 	WorldConfig cfg;
@@ -35,14 +34,14 @@ TEST_CASE("sim: Jolt world steps deterministically twice with identical results"
 	const std::vector<uint64_t> b = run_hashes(cfg, 600, 30);
 	REQUIRE(a.size() == b.size());
 	CHECK(a == b);
-	CHECK(a.front() != a[1]); // bodies moved
+	CHECK(a.front() != a[1]);
 	MESSAGE("Jolt ", std::string(PhysicsWorld::jolt_version()), ", 600 steps, final hash ", a.back());
 	CHECK(std::string(PhysicsWorld::jolt_version()) == "5.6.0");
 }
 
 TEST_CASE("sim: result does not depend on the job thread count") {
 	WorldConfig one;
-	one.job_threads = 0; // single-threaded job system
+	one.job_threads = 0;
 	WorldConfig four;
 	four.job_threads = 4;
 	CHECK(run_hashes(one, 300, 50) == run_hashes(four, 300, 50));
@@ -58,7 +57,7 @@ TEST_CASE("sim: bodies fall and come to rest on the ground") {
 		REQUIRE(w.step());
 	}
 	CHECK(w.tick() == 600);
-	CHECK(w.lowest_dynamic_y() > 0.3f); // resting on the ground (top at y = 0), radius/half size 0.5
+	CHECK(w.lowest_dynamic_y() > 0.3f);
 	CHECK(w.lowest_dynamic_y() < 0.7f);
 	MESSAGE("active bodies after 10 s: ", w.active_body_count());
 	std::vector<bf3::sim::BodyTransform> xf;

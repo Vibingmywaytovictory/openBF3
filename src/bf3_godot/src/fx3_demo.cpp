@@ -1,4 +1,3 @@
-// Bf3Fx3Demo: VFX3's demo and capture check (docs/design/m2a-fx3.md §6). See fx3_demo.h.
 #include "fx3_demo.h"
 
 #include "fx_renderer.h"
@@ -46,17 +45,17 @@ namespace {
 constexpr uint8_t kOwnSlot = 0;
 constexpr uint8_t kRemoteSlot = 5;
 constexpr uint8_t kVictimSlot = 9;
-constexpr uint32_t kChestZone = 2; // HitZone::Chest (the Hit event's material)
+constexpr uint32_t kChestZone = 2;
 constexpr uint64_t kMatchSeed = 0xF3F3F3F3ull;
-constexpr const char *kRifle = "weapons/m16a4/u_m16a4"; // the M16A3's variant (m2a-fx3.md §2)
-constexpr double kShotPeriod = 0.075; // 800 rpm
+constexpr const char *kRifle = "weapons/m16a4/u_m16a4";
+constexpr double kShotPeriod = 0.075;
 constexpr double kRunSeconds = 15.0;
 constexpr int kSettleFrames = 4;
-constexpr int kFlashRetries = 24; // the 1p flash component spawns with p 0.75 (fx_muzz_generic_rifle_1p)
-constexpr int kImpactsPerShot = 6; // impacts per surface capture (the decals accumulate)
-constexpr float kImpactSpread = 0.18f; // metres around the surface point
+constexpr int kFlashRetries = 24;
+constexpr int kImpactsPerShot = 6;
+constexpr float kImpactSpread = 0.18f;
 constexpr float kSurfaceRay = 20.0f, kSurfaceMin = 1.5f, kSurfaceMax = 12.0f, kSurfaceBest = 4.0f;
-constexpr float kViewDistance = 1.5f; // the capture camera's distance from an impact point
+constexpr float kViewDistance = 1.5f;
 constexpr uint64_t kMinShotBytes = 50 * 1024;
 
 void log(const std::string &p_line) {
@@ -131,14 +130,14 @@ int category_of(std::string_view p_material) {
 	return -1;
 }
 
-} // namespace
+}
 
 struct Bf3Fx3Demo::Loaded {
 	struct Candidate {
 		Vector3 point, normal;
 		uint8_t material = 0;
 	};
-	std::vector<Candidate> dirt; // up-facing Sand / Grass / Forest / Gravel collision triangles (sampled)
+	std::vector<Candidate> dirt;
 	std::shared_ptr<bf3::core::Cache> cache;
 	std::shared_ptr<bf3::core::Install> install;
 	std::shared_ptr<const hk::GunplayLevel> gunplay;
@@ -146,7 +145,7 @@ struct Bf3Fx3Demo::Loaded {
 	std::string error;
 	std::vector<std::string> notes;
 	double seconds = 0;
-	std::atomic<bool> done{ false }; // set last by the loader thread
+	std::atomic<bool> done{ false };
 };
 
 Bf3Fx3Demo::Bf3Fx3Demo() = default;
@@ -225,7 +224,7 @@ void Bf3Fx3Demo::start_loader() {
 				return;
 			}
 			out->install = *install;
-			// The gunplay tables beside the session's level (gx loads the level with SharedLoadOptions::gunplay).
+
 			const auto tg = std::chrono::steady_clock::now();
 			bf3::core::Result<std::shared_ptr<const hk::GunplayLevel>> gl = hk::load_gunplay_level(out->install, level->level, level->mode);
 			if (!gl) {
@@ -235,8 +234,7 @@ void Bf3Fx3Demo::start_loader() {
 			out->gunplay = *gl;
 			out->notes.push_back(fmt("gunplay level %s / %s: %zu defs in %.2f s", level->level.c_str(), level->mode.c_str(), out->gunplay->defs.size(),
 					std::chrono::duration<double>(std::chrono::steady_clock::now() - tg).count()));
-			// Dirt candidates: the level's up-facing collision triangles of a dirt material, through the sim's pair table
-			// (as the Impact event's material is), at most kDirtPerMaterial per material.
+
 			{
 				constexpr size_t kDirtPerMaterial = 64;
 				bf3::core::Result<bf3::core::level::LevelCollision> col = bf3::core::level::load_level_collision(out->install, level->level, level->mode);
@@ -282,7 +280,7 @@ void Bf3Fx3Demo::start_loader() {
 			in.cache = out->cache.get();
 			in.stop = stop;
 			const bf3::core::Status st = out->fx.load(in);
-			out->cache.reset(); // M2aLoadInputs: the cache is the load's only
+			out->cache.reset();
 			if (!st) {
 				out->error = st.error().message;
 				return;
@@ -303,7 +301,7 @@ void Bf3Fx3Demo::find_surfaces() {
 	const fx::ImpactTable &table = *loaded_->fx.impacts();
 	const bf3::sim::weapons::SurfaceMaterialTable &materials = *loaded_->gunplay->materials;
 	const uint32_t mask = bf3::sim::query_mask::kProjectile;
-	// Eyes: the stage camera and every spawn point at eye height.
+
 	std::vector<Vector3> eyes{ main_position_ };
 	for (const bf3::sim::SpawnPoint &s : session_->shared_level()->spawns) {
 		eyes.push_back(Vector3(s.position[0], s.position[1] + 1.7f, s.position[2]));
@@ -338,7 +336,7 @@ void Bf3Fx3Demo::find_surfaces() {
 				if (cell == nullptr || cell->effects.empty()) {
 					continue;
 				}
-				// The capture camera kViewDistance off the surface must see the point.
+
 				const Vector3 p(hit.position[0], hit.position[1], hit.position[2]);
 				const Vector3 cam = p + n * kViewDistance + Vector3(0, 0.25f, 0);
 				if (collision_->ray(sv(p + n * 0.05f), sv(cam - (p + n * 0.05f)), bf3::sim::query_mask::kAll, nullptr)) {
@@ -354,7 +352,7 @@ void Bf3Fx3Demo::find_surfaces() {
 			}
 		}
 	}
-	// Dirt from the collision triangles (Sand, then Grass, Forest, Gravel): the first with 3 m clear along its normal.
+
 	for (const uint8_t want : { uint8_t(12), uint8_t(16), uint8_t(136), uint8_t(11) }) {
 		if (dirt_.found && dirt_.name.find("(triangle)") != std::string::npos) {
 			break;
@@ -383,9 +381,7 @@ void Bf3Fx3Demo::find_surfaces() {
 			break;
 		}
 	}
-	// Dirt lies outdoors, away from the spawns' views: rays straight down over the spawns' extent (+ 60 m, a 3 m grid)
-	// find open ground (nothing above it collides); Sand before Grass before the rest (Metro's Gravel sits in planters
-	// under hedges).
+
 	{
 		Vector3 lo(1e9f, 1e9f, 1e9f), hi(-1e9f, -1e9f, -1e9f);
 		for (const Vector3 &e : eyes) {
@@ -396,7 +392,7 @@ void Bf3Fx3Demo::find_surfaces() {
 			const std::string n = lower(p_name);
 			return n.find("sand") != std::string::npos ? 3 : (n.find("grass") != std::string::npos ? 2 : 1);
 		};
-		int best_rank = dirt_.found ? (dirt_.name.find("(triangle)") != std::string::npos ? 9 : 0) : -1; // a triangle wins
+		int best_rank = dirt_.found ? (dirt_.name.find("(triangle)") != std::string::npos ? 9 : 0) : -1;
 		for (float x = lo.x - 60.0f; x <= hi.x + 60.0f; x += 3.0f) {
 			for (float z = lo.z - 60.0f; z <= hi.z + 60.0f; z += 3.0f) {
 				const Vector3 top(x, hi.y + 60.0f, z);
@@ -435,7 +431,7 @@ void Bf3Fx3Demo::find_surfaces() {
 }
 
 void Bf3Fx3Demo::place_soldier() {
-	// A capsule 4 m in front of the main pose, on the ground: the Hit's target.
+
 	const Vector3 fwd = ((main_target_ - main_position_) * Vector3(1, 0, 1)).normalized();
 	bf3::sim::StaticHit hit;
 	if (!collision_->ground_below(sv(main_position_ + fwd * 4.0f), 4.0f, bf3::sim::query_mask::kCollision, &hit)) {
@@ -459,7 +455,7 @@ void Bf3Fx3Demo::place_soldier() {
 	mi->set_global_position(feet + Vector3(0, 0.9f, 0));
 	soldier_ = mi;
 	soldier_normal_ = facing;
-	soldier_point_ = feet + Vector3(0, 1.35f, 0) + soldier_normal_ * 0.3f; // the chest, on the capsule's camera side
+	soldier_point_ = feet + Vector3(0, 1.35f, 0) + soldier_normal_ * 0.3f;
 	soldier_found_ = true;
 }
 
@@ -505,8 +501,7 @@ bool Bf3Fx3Demo::build(std::string *r_error) {
 	const bf3::anim::StageCamera sc = bf3::anim::stage_camera(stage);
 	main_position_ = gv(sc.position);
 	main_target_ = gv(sc.target);
-	// The main pose: the first spawn point (eye height, its facing) with 12 m clear ahead and ground 4 m out; the
-	// crowd stage camera otherwise.
+
 	for (const bf3::sim::SpawnPoint &sp : level->spawns) {
 		const Vector3 eye(sp.position[0], sp.position[1] + 1.7f, sp.position[2]);
 		const float yaw = float(sp.yaw) * (2.0f * 3.14159265f / 65536.0f);
@@ -536,7 +531,7 @@ bool Bf3Fx3Demo::build(std::string *r_error) {
 	add_child(camera_);
 	set_pose(main_position_, main_target_);
 	camera_->make_current();
-	// --fx3-dump-decals=<dir>: the decal textures as PNGs (diagnostics; refused inside the install).
+
 	std::string dump = user_arg_value("fx3-dump-decals");
 	if (!dump.empty() && !session_->install().write_guard().allows_write(utf8_path(dump) / "probe.png")) {
 		log("--fx3-dump-decals refused (inside the install)");
@@ -586,7 +581,7 @@ void Bf3Fx3Demo::own_shot(bool p_tracer) {
 }
 
 void Bf3Fx3Demo::impact(const Surface &p_surface, int p_index) {
-	// Points around the surface point, in its plane.
+
 	const Vector3 n = p_surface.normal;
 	Vector3 a = n.cross(Vector3(0, 1, 0));
 	if (a.length() < 1e-3f) {
@@ -626,7 +621,7 @@ void Bf3Fx3Demo::soldier_hit() {
 }
 
 void Bf3Fx3Demo::remote_burst() {
-	// A remote soldier 6 m to the right of the stage camera fires across the view (no crowd muzzle: the aim fallback).
+
 	const Vector3 fwd = ((main_target_ - main_position_) * Vector3(1, 0, 1)).normalized();
 	const Vector3 right = fwd.cross(Vector3(0, 1, 0)).normalized();
 	const Vector3 eye = main_position_ + right * 6.0f + fwd * 3.0f;
@@ -669,7 +664,7 @@ void Bf3Fx3Demo::step_fx(double p_dt) {
 	f.clock.predicted = f.clock.render = now;
 	f.dt = p_dt;
 	f.events = events_;
-	// G6's camera stand-in (no viewmodel here).
+
 	ViewmodelMuzzle vm;
 	vm.valid = true;
 	vm.source = ViewmodelMuzzleSource::CameraStandIn;
@@ -678,7 +673,7 @@ void Bf3Fx3Demo::step_fx(double p_dt) {
 	const fx::MuzzleSample own = muzzle_sample(vm, kOwnSlot, fx::Vec3{});
 	f.muzzles = std::span<const fx::MuzzleSample>(&own, 1);
 	f.camera = to_fx_transform(t);
-	f.camera.forward = fv(-t.basis.get_column(2)); // Frostbite: forward = the view direction
+	f.camera.forward = fv(-t.basis.get_column(2));
 	f.camera.right = fv(-t.basis.get_column(0));
 	f.own_alive = true;
 	f.own_slot = kOwnSlot;
@@ -728,7 +723,7 @@ void Bf3Fx3Demo::_process(double p_delta) {
 		return;
 	}
 	if (frozen_) {
-		// The capture settles: the world is redrawn unchanged (dt 0, no events).
+
 		step_fx(0.0);
 		if (--settle_ > 0) {
 			return;
@@ -771,7 +766,7 @@ void Bf3Fx3Demo::_process(double p_delta) {
 					}
 				}
 				break;
-			case 6: // the concrete decals once the dust has gone (no new impacts)
+			case 6:
 				if (concrete_.found) {
 					set_pose(concrete_.point + concrete_.normal * kViewDistance + Vector3(0, 0.25f, 0), concrete_.point);
 				}
@@ -788,7 +783,7 @@ void Bf3Fx3Demo::_process(double p_delta) {
 				break;
 		}
 	}
-	// Automatic fire from the stage camera between the captures (every third round a tracer).
+
 	if (!shot_active_ && t_ >= next_shot_) {
 		own_shot(shot_id_ % 3 == 0);
 		next_shot_ = t_ + kShotPeriod;
@@ -826,8 +821,7 @@ void Bf3Fx3Demo::report_and_finish() {
 	all &= row("draw", mismatch_frames_ == 0 && frames_ > 0,
 			fmt("drawn instances == FxWorld::particles() in %llu of %llu frames; %llu frames with 1p instances", (unsigned long long)(frames_ - mismatch_frames_),
 					(unsigned long long)frames_, (unsigned long long)fp_frames_));
-	// One shell per own shot (the M16A3's FireEffects1p ejects one); a remote shot's 3p shell may be culled (the shell's
-	// CullDistance from the camera).
+
 	bool shell_3p = false;
 	for (const fx::FireEffect &e : loaded_->fx.fire_effects()->defs[rifle_].third_person) {
 		shell_3p |= e.shell;
@@ -889,9 +883,8 @@ void Bf3Fx3Demo::shutdown() {
 	collision_.reset();
 }
 
-} // namespace bf3::godot_side
+}
 
-// The "// M2a fx3" block of register_types.cpp calls this at MODULE_INITIALIZATION_LEVEL_SCENE.
 void openbf3_register_m2a_fx3() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Fx3Demo);
 }

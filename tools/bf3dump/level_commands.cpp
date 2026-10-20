@@ -1,13 +1,3 @@
-// bf3dump level commands. The listing is the canonical form of research/probes/tools/level-oracle
-// (src/main.rs): same lines, same sorting, floats as their f32 bit patterns, so the two diff
-// byte-identical when the C++ traversal matches IW4L's level_bf3.
-//
-// Listing: level / bundle / settings / subworld-bundle / absent / partitions / world lines, then
-// sorted sections: skipped and absent sub-worlds, `S` sub-worlds, `G` static model groups, `P`
-// placements (every placed object: kind, entity, reference, sub-world, variation, group slot, mesh
-// asset with entity type, physics data and hidden composite parts, start-hidden flag, transform as
-// right/up/forward/trans rows + scale), `V` mesh variants and `F` undecodable MeshSets of the mesh
-// census, the census totals, `C` collision placements and their totals.
 #include "level_commands.h"
 
 #include "bf3/core/level/census.h"
@@ -69,8 +59,6 @@ std::string opt_id(const EbxResolver &p_db, const std::optional<EbxInstance> &p_
 	return p_instance ? id(p_db, *p_instance) : "-";
 }
 
-// The partition names id() prints come from the bundle manifests, and any number of lines may print
-// one long name: charged like the other printed text before a line uses them.
 Status charge_ids(const EbxResolver &p_db, WorkBudget &r_budget, std::initializer_list<std::optional<EbxInstance>> p_instances) {
 	for (const std::optional<EbxInstance> &instance : p_instances) {
 		if (instance) {
@@ -114,8 +102,7 @@ Result<std::string> hidden_label(const EbxResolver &p_db, const World &p_world, 
 }
 
 Result<std::string> placement_line(const EbxResolver &p_db, const World &p_world, const PlacedObject &p_object) {
-	// The type name comes from the partition's name table (data-controlled length) and is printed
-	// once or twice per line: charged like any other text the traversal copies.
+
 	BF3_TRY(charge_text(*p_world.budget, p_object.entity.type_name()));
 	BF3_TRY(charge_text(*p_world.budget, p_object.label()));
 	BF3_TRY(charge_ids(p_db, *p_world.budget, { p_object.entity, p_object.reference }));
@@ -270,7 +257,7 @@ Result<std::string> listing(const LoadedLevel &p_level, const World &p_world, co
 	return out;
 }
 
-} // namespace
+}
 
 int cmd_level(const std::shared_ptr<Install> &p_install, const std::string &p_level, const std::string &p_mode, bool p_legacy_mvdb) {
 	auto start = std::chrono::steady_clock::now();
@@ -329,4 +316,4 @@ int cmd_level_modes(const std::shared_ptr<Install> &p_install, const std::string
 	return 0;
 }
 
-} // namespace bf3dump
+}

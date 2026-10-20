@@ -1,4 +1,3 @@
-// M2b ui: the pre-round (pre_round.h).
 #include "pre_round.h"
 
 #include <algorithm>
@@ -12,7 +11,7 @@ namespace ui = bf3::core::ui;
 
 void Bf3TdmPreRound::update_screen() {
 	const ui::HudPreRound &p = ctx_->model.pre_round;
-	// The round end and the scoreboard cover the top centre; the pre-round never shows under them.
+
 	const bool v = p.visible && !ctx_->model.end_of_round.visible;
 	ctx_->records.pre_round_visible = v;
 	show_if(v);
@@ -35,4 +34,4 @@ void Bf3TdmPreRound::draw_screen() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

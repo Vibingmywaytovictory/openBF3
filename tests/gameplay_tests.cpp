@@ -1,9 +1,3 @@
-// Weapon tables (bf3_core/gameplay): the WeaponDef resolver and the material grid against the plan's
-// §7.1 oracles (research/PORTING-RESEARCH.md), read from the retail install.
-//   gameplay-unit  derived arithmetic and modifier math on synthetic values (no install)
-//   gameplay       §7.1 rows on MP_Subway, body multipliers on Metro / MP_001 / Caspian / XP2_Palace,
-//                  every weapon variant of every MP level (skips with 77 without an install)
-//   gameplay-fuzz  seeded mutations of the M16A4 partitions through the resolver (no crash, no hang)
 #include "test_support.h"
 
 #include "bf3/core/ebx_db.h"
@@ -67,7 +61,6 @@ const SwayState &stand(const WeaponDef &p_w, Zoom p_zoom) {
 	return p_w.sway.state[size_t(Stance::Stand)][size_t(p_zoom)];
 }
 
-// Distance up to which p_multiplier x damage still reaches 100 (one shot kills).
 double ohk_range(const ProjectileDef &p_p, double p_multiplier) {
 	double lo = 0, hi = 1000;
 	if (damage_at(p_p, 0) * p_multiplier < 100.0 - 1e-6) {
@@ -89,7 +82,7 @@ std::string level_partition(const std::string &p_superbundle) {
 	return p.rfind("win32/", 0) == 0 ? p.substr(6) : p;
 }
 
-} // namespace
+}
 
 TEST_SUITE("gameplay-unit") {
 	TEST_CASE("derived arithmetic") {
@@ -104,7 +97,7 @@ TEST_SUITE("gameplay-unit") {
 		f.bolt_action_delay = 0;
 		f.bolt_action_time = 1.3f;
 		CHECK(near(effective_rpm(f), 46.1538, 1e-3));
-		f.bolt_action_time = 0.05f; // shorter than 60 / RateOfFire: the rate of fire caps
+		f.bolt_action_time = 0.05f;
 		CHECK(near(shot_interval(f), 60.0 / 360.0));
 
 		ProjectileDef p;
@@ -117,7 +110,7 @@ TEST_SUITE("gameplay-unit") {
 		CHECK(near(damage_at(p, 29), 21.7, 1e-5));
 		CHECK(near(damage_at(p, 50), 18.4, 1e-5));
 		CHECK(near(damage_at(p, 500), 18.4, 1e-5));
-		p.damage_falloff_end = p.damage_falloff_start; // degenerate falloff: a step
+		p.damage_falloff_end = p.damage_falloff_start;
 		CHECK(near(damage_at(p, 9), 18.4, 1e-5));
 
 		CHECK(near(drop_at(650, -15, 100), 0.1775, 1e-4));
@@ -125,7 +118,6 @@ TEST_SUITE("gameplay-unit") {
 		CHECK(near(drop_at(650, -9.81, 1000), 11.609, 1e-3));
 		CHECK(drop_at(0, -15, 100) == 0);
 
-		// gap UI §4: ID_P_WNAME_M16A4 -> 0fd83dfa.
 		CHECK(loc_sid_hash("ID_P_WNAME_M16A4") == 0x0fd83dfau);
 		CHECK(loc_sid_hash("") == 0xFFFFFFFFu);
 		CHECK(fire_logic_from(3) == FireLogic::Burst);
@@ -144,13 +136,13 @@ TEST_SUITE("gameplay-unit") {
 		SwayGatedModifier m;
 		for (auto &stance : m.mod) {
 			stance[1].min_angle = 0.5f;
-			stance[1].max_angle = 0.0f; // unset
+			stance[1].max_angle = 0.0f;
 			stance[1].recoil_angle = 0.75f;
 			stance[0].recoil_magnitude = 1.15f;
 		}
 		apply_sway_modifier(s, m);
 		CHECK(near(s[0][1].move[0].min_angle, 0.1));
-		CHECK(near(s[0][1].move[0].max_angle, 3.0)); // 0 = unset: unchanged
+		CHECK(near(s[0][1].move[0].max_angle, 3.0));
 		CHECK(near(s[0][1].recoil.horizontal_min, -0.3));
 		CHECK(near(s[0][1].recoil.horizontal_max, 0.075));
 		CHECK(near(s[0][1].recoil.up_per_shot, 0.26));
@@ -168,7 +160,6 @@ TEST_SUITE("gameplay") {
 		std::unique_ptr<EbxLibrary> lib = open_library(m, kMetro);
 		std::unique_ptr<EbxLibrary> ui = open_library(m, "Win32/UI");
 
-		// M16A3 = weapons/m16a4/m16a4 through its base variant u_m16a4.
 		const WeaponDef a3 = resolve(*lib, "weapons/m16a4/u_m16a4", ui.get());
 		CHECK(a3.blueprint == "weapons/m16a4/m16a4");
 		CHECK(a3.unlock_identifier == 2580429694u);
@@ -179,7 +170,7 @@ TEST_SUITE("gameplay") {
 		REQUIRE(a3.fire.extra_modes.size() == 1);
 		CHECK(a3.fire.extra_modes[0] == FireLogic::Single);
 		CHECK(a3.fire.rate_of_fire == 800.0f);
-		CHECK(near(shot_interval(a3.fire), 0.075)); // 75 ms
+		CHECK(near(shot_interval(a3.fire), 0.075));
 		CHECK(a3.fire.magazine_capacity == 31);
 		CHECK(a3.fire.number_of_magazines == 5);
 		CHECK(a3.fire.reload_time_bullets_left == 1.8f);
@@ -195,7 +186,7 @@ TEST_SUITE("gameplay") {
 		CHECK(a3.projectile.damage_falloff_start == 8.0f);
 		CHECK(a3.projectile.damage_falloff_end == 50.0f);
 		CHECK(a3.projectile.gravity == -15.0f);
-		CHECK(a3.projectile.record_initial_speed == 350.0f); // overridden by the shot speed
+		CHECK(a3.projectile.record_initial_speed == 350.0f);
 		CHECK(a3.projectile.suppression.max_multiplier == 7.0f);
 		CHECK(near(max_range(a3), 975.0));
 		CHECK(near(drop_at(muzzle_speed(a3), a3.projectile.gravity, 300), 1.60, 0.005));
@@ -220,13 +211,12 @@ TEST_SUITE("gameplay") {
 		CHECK(a3.sway.modifiers_total == 7);
 		CHECK(a3.fire.firing_dispersions == 0);
 		CHECK_FALSE(a3.fire.fire_logic_recoil_nonzero);
-		// Shots to kill (100 hp): 4 body / 2 head up to 8 m, 6 body / 3 head from 50 m.
+
 		CHECK(shots_to_kill(damage_at(a3.projectile, 8)) == 4);
 		CHECK(shots_to_kill(2.0 * damage_at(a3.projectile, 8)) == 2);
 		CHECK(shots_to_kill(damage_at(a3.projectile, 50)) == 6);
 		CHECK(shots_to_kill(2.0 * damage_at(a3.projectile, 50)) == 3);
 
-		// M16A4 burst: u_m16_burst -> Extra u_m16a4_burst on the same blueprint.
 		const WeaponDef a4 = resolve(*lib, "weapons/m16a4/u_m16_burst", ui.get());
 		CHECK(a4.blueprint == a3.blueprint);
 		REQUIRE(a4.active_unlocks.size() == 2);
@@ -240,17 +230,16 @@ TEST_SUITE("gameplay") {
 		CHECK(a4.fire.rate_of_fire_for_burst == 800.0f);
 		REQUIRE(a4.sway.applied.size() == 1);
 		CHECK(a4.sway.applied[0].unlock == "weapons/m16a4/u_m16a4_burst");
-		CHECK(near(stand(a4, Zoom::Zoom).move[0].min_angle, 0.1)); // 0.2 x 0.5 (Symthic "M16A4" ADS 0.1)
-		CHECK(near(stand(a4, Zoom::Zoom).move[1].min_angle, 0.5)); // moving 1.0 x 0.5
-		CHECK(near(stand(a4, Zoom::Zoom).recoil.horizontal_max, 0.075)); // left
-		CHECK(near(-stand(a4, Zoom::Zoom).recoil.horizontal_min, 0.3)); // right
+		CHECK(near(stand(a4, Zoom::Zoom).move[0].min_angle, 0.1));
+		CHECK(near(stand(a4, Zoom::Zoom).move[1].min_angle, 0.5));
+		CHECK(near(stand(a4, Zoom::Zoom).recoil.horizontal_max, 0.075));
+		CHECK(near(-stand(a4, Zoom::Zoom).recoil.horizontal_min, 0.3));
 		CHECK(stand(a4, Zoom::NoZoom).move[0].min_angle == 2.5f);
 		CHECK(stand(a4, Zoom::Zoom).recoil.up_per_shot == 0.26f);
 		CHECK(a4.fire.reload_time == a3.fire.reload_time);
 		CHECK(a4.projectile.partition == a3.projectile.partition);
 		CHECK(muzzle_speed(a4) == 650.0);
 
-		// Attachments: suppressor + bipod + foregrip (topics/01 §1.5).
 		const WeaponDef att = resolve(*lib, "weapons/m16a4/u_m16a4", nullptr, { "u_m16a4_sound_suppressor", "u_m16a4_bipod", "u_m16a4_foregrip" });
 		CHECK(att.projectile.partition == "weapons/common/bullets/556x45mmnato_cold");
 		CHECK(muzzle_speed(att) == 380.0);
@@ -262,7 +251,6 @@ TEST_SUITE("gameplay") {
 		CHECK(near(stand(att, Zoom::Zoom).move[0].min_angle, 0.2 * 1.5 * 0.75));
 		CHECK(near(stand(att, Zoom::Zoom).recoil.up_per_shot, 0.26 * 0.9));
 
-		// AK-74M (Symthic "left" = data Max, "right" = -Min).
 		const WeaponDef ak = resolve(*lib, "weapons/ak74m/u_ak74m");
 		CHECK(ak.fire.rate_of_fire == 650.0f);
 		CHECK(muzzle_speed(ak) == 600.0);
@@ -274,7 +262,6 @@ TEST_SUITE("gameplay") {
 		CHECK(stand(ak, Zoom::Zoom).recoil.decrease_factor == 18.0f);
 		CHECK(ak.sway.first_shot_recoil_multiplier == 1.5f);
 
-		// M249.
 		const WeaponDef saw = resolve(*lib, "weapons/m249/u_m249");
 		CHECK(saw.fire.logic == FireLogic::Automatic);
 		CHECK(saw.fire.rate_of_fire == 800.0f);
@@ -291,7 +278,6 @@ TEST_SUITE("gameplay") {
 		CHECK(stand(saw, Zoom::Zoom).recoil.decrease_factor == 12.0f);
 		CHECK(saw.sway.first_shot_recoil_multiplier == 2.2f);
 
-		// AN-94: 2-round bursts at 1200 RPM, RateOfFire 600.
 		const WeaponDef an = resolve(*lib, "weapons/an94/u_an94");
 		CHECK(an.fire.logic == FireLogic::Burst);
 		CHECK(an.fire.bullets_per_burst == 2);
@@ -299,7 +285,6 @@ TEST_SUITE("gameplay") {
 		CHECK(an.fire.rate_of_fire == 600.0f);
 		CHECK(near(burst_interval(an.fire), 0.05));
 
-		// M9.
 		const WeaponDef m9 = resolve(*lib, "weapons/m9/u_m9");
 		CHECK(m9.fire.rate_of_fire == 400.0f);
 		CHECK(m9.projectile.start_damage == 25.0f);
@@ -320,7 +305,6 @@ TEST_SUITE("gameplay") {
 		}
 		std::unique_ptr<EbxLibrary> lib = open_library(m, kMetro);
 
-		// M98B: RateOfFire 360, bolt 1.3 s -> 46.2 RPM; .338 95 -> 59 over 15-150 m.
 		const WeaponDef m98 = resolve(*lib, "weapons/model98b/u_m98b");
 		CHECK(m98.fire.logic == FireLogic::SingleWithBoltAction);
 		CHECK(m98.fire.rate_of_fire == 360.0f);
@@ -334,12 +318,11 @@ TEST_SUITE("gameplay") {
 		CHECK(m98.fire.magazine_capacity == 6);
 		CHECK(m98.fire.number_of_magazines == 7);
 		CHECK(near(max_range(m98), 3250.0));
-		// §7.1 quotes 1.05 m; the arithmetic gives 1.0447 m (0.5 x 9.81 x (300 / 650)^2): the oracle rounds up.
+
 		CHECK(near(drop_at(650, m98.projectile.gravity, 300), 1.0447, 0.0005));
 		CHECK(near(drop_at(650, m98.projectile.gravity, 1000), 11.6, 0.01));
 		CHECK(m98.projectile.suppression.max_multiplier == 35.0f);
 
-		// The other bolt actions: JNG-90 1.3, L96 1.38, M40A5 1.1, SV98 1.25 s -> 46.2/43.5/54.5/48 RPM.
 		const struct {
 			const char *variant;
 			float cycle;
@@ -360,7 +343,6 @@ TEST_SUITE("gameplay") {
 			CHECK(near(effective_rpm(w.fire), b.rpm, 0.05));
 		}
 
-		// 870MCS: 12 pellets 18 -> 6 over 8-25 m, pump 0.48 s (125 RPM), cone 3 deg, 1.15 + 0.67/shell.
 		const WeaponDef s870 = resolve(*lib, "weapons/remington870/u_870");
 		CHECK(s870.fire.bullets_per_shell == 12);
 		CHECK(s870.projectile.start_damage == 18.0f);
@@ -376,7 +358,6 @@ TEST_SUITE("gameplay") {
 		CHECK(s870.fire.reload_delay == 1.15f);
 		CHECK(s870.fire.reload_time == 0.67f);
 
-		// RPG-7 and SMAW.
 		for (const char *v : { "weapons/rpg7/u_rpg7", "weapons/smaw/u_smaw" }) {
 			CAPTURE(v);
 			const WeaponDef w = resolve(*lib, v);
@@ -395,7 +376,6 @@ TEST_SUITE("gameplay") {
 			CHECK(w.projectile.suppression.max_multiplier == 50.0f);
 		}
 
-		// M320 HE and M67.
 		const WeaponDef he = resolve(*lib, "weapons/gadgets/m320/u_m320_he");
 		CHECK(he.fire.initial_speed == Vec3{ 0, 1.5f, 45 });
 		CHECK(he.projectile.gravity == -7.2f);
@@ -417,8 +397,6 @@ TEST_SUITE("gameplay") {
 		CHECK(m67.projectile.explosion.blast_radius == 7.0f);
 		CHECK(m67.fire.hold_delay == 0.5f);
 
-		// The blueprint resolves through its base variant; the UGL variant of a rifle replaces the
-		// whole firing data and the weapon class.
 		CHECK(base_variant_of(*lib, "weapons/m16a4/m16a4") == "weapons/m16a4/u_m16a4");
 		const WeaponDef ugl = resolve(*lib, "weapons/m16a4/u_m16a4_m320_he");
 		CHECK(ugl.weapon_class == "wcUgl");
@@ -458,7 +436,7 @@ TEST_SUITE("gameplay") {
 			CHECK(rep.grid_pairs == 32400);
 			CHECK(rep.unresolved == 0);
 			if (std::string(level).find("XP2_") != std::string::npos) {
-				// Handoff 01 XP2/3/4 caveat: the level's own container copy lacks pairs (3,842 there).
+
 				CHECK(rep.unresolved_in_level == 3839);
 			} else {
 				CHECK(rep.unresolved_in_level == 0);
@@ -485,12 +463,12 @@ TEST_SUITE("gameplay") {
 			};
 			const BodyMultipliers bullet = zones(a3);
 			check(bullet, 2.0f, 1.0f, 1.0f, 0.91f);
-			check(zones(m40), 2.35f, 1.0f, 1.25f, 0.91f); // Sniper
-			check(zones(m98), 2.35f, 1.0f, 1.06f, 0.91f); // .338 Magnum
-			check(zones(s870), 1.0f, 1.0f, 1.0f, 0.91f); // buckshot
-			check(zones(rpg), 2.5f, 2.5f, 2.5f, 2.5f); // missile impact
-			check(zones(he), 2.5f, 2.5f, 2.5f, 2.5f); // 40 mm impact
-			check(zones(m67), 0.0f, 0.0f, 0.0f, 0.0f); // grenade body
+			check(zones(m40), 2.35f, 1.0f, 1.25f, 0.91f);
+			check(zones(m98), 2.35f, 1.0f, 1.06f, 0.91f);
+			check(zones(s870), 1.0f, 1.0f, 1.0f, 0.91f);
+			check(zones(rpg), 2.5f, 2.5f, 2.5f, 2.5f);
+			check(zones(he), 2.5f, 2.5f, 2.5f, 2.5f);
+			check(zones(m67), 0.0f, 0.0f, 0.0f, 0.0f);
 			const BodyMultipliers melee = zones(knife);
 			CHECK(melee.head == doctest::Approx(0.67f));
 			CHECK(melee.body == doctest::Approx(0.5f));
@@ -500,8 +478,7 @@ TEST_SUITE("gameplay") {
 			CHECK(grid->material_name(m40.projectile.material.property()) == "Sniper");
 			CHECK(grid->material_name(m98.projectile.material.property()) == "Magnum");
 
-			// Shots to kill / one-shot ranges (§7.1, topics/01 §2.4 + extra-1).
-			CHECK(m98.projectile.end_damage * 2.35f > 100.0f); // .338 head OHK at any range (59 x 2.35)
+			CHECK(m98.projectile.end_damage * 2.35f > 100.0f);
 			CHECK(m98.projectile.start_damage * 2.35f == doctest::Approx(223.25f));
 			CHECK(ohk_range(m98.projectile, zones(m98).chest) == doctest::Approx(17.5).epsilon(0.01));
 			CHECK(ohk_range(m40.projectile, zones(m40).chest) == doctest::Approx(15.0).epsilon(0.01));
@@ -565,7 +542,7 @@ TEST_SUITE("gameplay-fuzz") {
 		};
 		struct Source {
 			std::vector<uint8_t> bytes;
-			std::vector<std::pair<uint32_t, uint32_t>> instances; // (data offset, size): where flips land
+			std::vector<std::pair<uint32_t, uint32_t>> instances;
 		};
 		std::vector<Source> sources;
 		for (const char *n : names) {
@@ -593,8 +570,7 @@ TEST_SUITE("gameplay-fuzz") {
 			REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
 			CHECK(w->fire.logic == FireLogic::Burst);
 		}
-		// Flips inside instance data (values, references, array indices) mostly survive the EBX
-		// validator and reach the resolver: wrong types, dangling references, absurd counts.
+
 		std::mt19937 rng(0xB3F3u);
 		size_t parsed = 0;
 		size_t resolved = 0;
@@ -613,7 +589,7 @@ TEST_SUITE("gameplay-fuzz") {
 			}
 			EbxDb db;
 			if (!build(target, &bytes, db)) {
-				continue; // the EBX validator refused the mutation
+				continue;
 			}
 			++parsed;
 			Result<WeaponDef> w = resolve_weapon(db, names[0]);
@@ -647,7 +623,7 @@ TEST_SUITE("gameplay-fuzz") {
 			std::vector<uint8_t> bytes = grid_bytes;
 			const int flips = 1 + int(rng() % 6);
 			for (int k = 0; k < flips; ++k) {
-				// Half the flips anywhere (array section: row/item counts, indices), half in instances.
+
 				if (rng() % 2 == 0) {
 					bytes[rng() % bytes.size()] ^= uint8_t(1u << (rng() % 8));
 					continue;

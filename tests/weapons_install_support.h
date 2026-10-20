@@ -1,8 +1,4 @@
 #pragma once
-// Shared by the M2a weapons data tests (weapons_install_tests.cpp: sim.weapons, sim.weapons.fuzz, sim.weapons.perf;
-// weapons_range_tests.cpp: sim.weapons.range). The install is opened once per process and read as it is
-// (read-only, through the repo's readers); every case ends with the install.unchanged row. Without an install the
-// cases call skip_install_case and the executable exits 77.
 
 #include "test_support.h"
 #include "weapons_support.h"
@@ -38,7 +34,6 @@ inline double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// The install and MP_Subway's weapons, or null (the case is skipped) without an install.
 inline WeaponsInstall *weapons_install() {
 	static std::unique_ptr<WeaponsInstall> s_install;
 	static bool s_tried = false;
@@ -68,8 +63,6 @@ inline WeaponsInstall *weapons_install() {
 	return s_install.get();
 }
 
-// The install.unchanged row (W10): sizes and modification times of the install's index files before the first case
-// and now.
 inline void check_install_unchanged(const WeaponsInstall &p_w) {
 	const bf3::core::SnapshotDiff diff = bf3::core::diff_snapshots(p_w.before, p_w.reader.snapshot());
 	const bool clean = p_w.before.valid && diff.clean();
@@ -79,7 +72,6 @@ inline void check_install_unchanged(const WeaponsInstall &p_w) {
 	CHECK_MESSAGE(diff.clean(), diff.summary());
 }
 
-// Metro TDM's static world and spawn points (load_level_collision + build_static_world, as sim.motor loads it).
 struct MetroWorld {
 	bf3::core::level::LevelCollision collision;
 	std::shared_ptr<const bf3::sim::StaticWorldShapes> shapes;
@@ -115,4 +107,4 @@ inline MetroWorld *metro_world(WeaponsInstall &p_w, const char *p_mode = "TeamDe
 	return s_metro.get();
 }
 
-} // namespace bf3::test::weapons
+}

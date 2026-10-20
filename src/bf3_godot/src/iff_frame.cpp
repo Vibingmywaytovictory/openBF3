@@ -1,4 +1,3 @@
-// PT1 iff: the other soldiers for the friend-or-foe parts (iff_frame.h; docs/design/pt1-iff.md §4).
 #include "iff_frame.h"
 
 #include "bf3/host/client_wiring.h"
@@ -32,7 +31,7 @@ size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, s
 			s.firing = weapons[i].firing;
 			s.sample_tick = weapons[i].sample_tick;
 		}
-		// The player row (ascending slot): kit, name, bot; the team when the sample has none.
+
 		const auto row = std::lower_bound(p_frame.players.begin(), p_frame.players.begin() + std::ptrdiff_t(rows), p.slot,
 				[](const net::PlayerRow &p_row, uint8_t p_slot) { return p_row.slot < p_slot; });
 		if (row != p_frame.players.begin() + std::ptrdiff_t(rows) && row->slot == p.slot) {
@@ -63,7 +62,7 @@ void IffReveal::update(std::span<const IffSoldier> p_soldiers, double p_now_s, f
 			last_tick_[s.slot] = s.sample_tick;
 		}
 		if (!s.alive) {
-			until_[s.slot] = 0.0; // a new life starts unrevealed
+			until_[s.slot] = 0.0;
 		}
 	}
 }
@@ -103,4 +102,4 @@ size_t iff_minimap(std::span<const IffSoldier> p_soldiers, const core::ui::Namet
 	return out;
 }
 
-} // namespace bf3::godot_side
+}

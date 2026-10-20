@@ -1,18 +1,4 @@
 #pragma once
-// One mounted superbundle (a level or any other layout superbundle): its bundles after the
-// base+patch merge, the toc-level chunks of the chunk superbundles, and an index of the loaded
-// bundles' ebx/res/chunk entries. Ported from IW4L asset_transport::bf3 (mount.rs).
-//
-// Merge (superbundle_bundles):
-//   no patch toc             -> base toc bundles in the base .sb
-//   patch toc, layout !delta -> patch toc bundles only (full replacement)
-//   patch toc, layout delta  -> per patch entry: base -> base .sb at the base entry; delta ->
-//                               DeltaBundle over (patch .sb, base .sb); else patch .sb;
-//                               then the base bundles the patch toc does not name
-// Chunk lookup (read_chunk): whole copy in a loaded bundle (replaces an earlier tail-only one) ->
-//   tail-only entry: whole payload by sha1 in the merged CAS, else the same GUID in the chunk
-//   superbundle tocs (its size must equal rangeEnd) -> toc chunk only.
-// Names: ebx/res by lowercase name with '\' -> '/'; bundles additionally without "win32/".
 
 #include "bf3/core/bundle_manifest.h"
 #include "bf3/core/ids.h"
@@ -54,8 +40,8 @@ struct BundleSummary {
 struct EntryRef {
 	enum class Kind { Ebx, Res, Chunk };
 	Kind kind = Kind::Ebx;
-	std::string_view name; // Ebx, Res
-	Guid id; // Chunk
+	std::string_view name;
+	Guid id;
 	static EntryRef ebx(std::string_view p_name) { return { Kind::Ebx, p_name, {} }; }
 	static EntryRef res(std::string_view p_name) { return { Kind::Res, p_name, {} }; }
 	static EntryRef chunk(const Guid &p_id) { return { Kind::Chunk, {}, p_id }; }
@@ -73,18 +59,16 @@ public:
 	const std::shared_ptr<const Install> &install() const;
 
 	size_t bundle_count() const;
-	const std::string &bundle_name(size_t p_bundle) const; // toc id
+	const std::string &bundle_name(size_t p_bundle) const;
 	std::vector<std::string> bundle_names() const;
 	const std::vector<std::string> &chunk_superbundles() const;
 	size_t toc_chunk_count() const;
 	bool has_chunk(const Guid &p_id) const;
 
-	// Reads and parses one bundle's manifest (no index change). Thread-safe.
 	Result<BundleManifest> read_manifest(size_t p_bundle) const;
-	// Every bundle's own manifest, in bundle order (parallel).
+
 	std::vector<std::pair<std::string, Result<BundleManifest>>> bundle_manifests() const;
 
-	// Index bundles (parallel manifest reads; first loaded bundle wins on a name).
 	Status load_all_bundles() const;
 	Status load_bundles(const std::vector<std::string> &p_names) const;
 	std::vector<BundleSummary> loaded_bundles() const;
@@ -94,28 +78,24 @@ public:
 	std::vector<Guid> chunk_ids() const;
 	bool has_ebx(std::string_view p_name) const;
 	std::optional<ResInfo> res_info(std::string_view p_name) const;
-	// CAS bundles pair a chunk with its meta; for binary bundles use asset_chunk_meta(owner).
+
 	std::optional<ChunkMeta> chunk_meta(const Guid &p_id) const;
 	std::optional<ChunkMeta> asset_chunk_meta(std::string_view p_owner) const;
 	std::optional<ChunkInfo> chunk_info(const Guid &p_id) const;
 
-	// Decoded payloads.
 	Result<std::vector<uint8_t>> read_ebx(std::string_view p_name) const;
 	Result<std::pair<ResInfo, std::vector<uint8_t>>> read_res(std::string_view p_name) const;
 	Result<std::vector<uint8_t>> read_chunk(const Guid &p_id) const;
-	// Partition GUID -> ebx name over the loaded ebx (80-byte header reads, parallel).
+
 	Result<std::unordered_map<Guid, std::string, GuidHash>> ebx_partition_index() const;
-	// The partition GUID of one loaded ebx (reads only its 80-byte header when stored uncompressed).
+
 	Result<Guid> ebx_partition_guid(std::string_view p_name) const;
-	// Toc id of the bundle a loaded ebx is indexed from (the first loaded bundle that lists it).
+
 	std::optional<std::string> ebx_bundle(std::string_view p_name) const;
 
-	// Stored (not decoded) bytes and their SHA1 (the manifest sha1 is of these bytes).
 	std::optional<Sha1> entry_sha1(const EntryRef &p_entry) const;
 	Result<std::vector<uint8_t>> read_stored(const EntryRef &p_entry) const;
-	// The manifest SHA1s of the stored bytes read_chunk(p_id) decodes, without reading them (derived-data
-	// cache keys): the bundle entry's, or for a tail-only entry completed from the chunk tocs that entry's and
-	// the toc copy's; the toc copy's for a toc-only chunk. Empty when the chunk is in no bundle or toc.
+
 	std::vector<Sha1> chunk_source_sha1s(const Guid &p_id) const;
 
 	struct Impl;
@@ -125,8 +105,7 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
-// Index keys: lowercase, '\' -> '/'; bundle keys also drop a leading '/' and "win32/".
 std::string asset_key(std::string_view p_name);
 std::string bundle_key(std::string_view p_name);
 
-} // namespace bf3::core
+}

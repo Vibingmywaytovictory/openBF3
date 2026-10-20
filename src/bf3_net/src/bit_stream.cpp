@@ -1,4 +1,3 @@
-// Bit packing for the M1 datagrams (bit_stream.h; docs/design/m1.md §7.3). LSB first into little-endian bytes.
 #include "bf3/net/bit_stream.h"
 
 #include <bit>
@@ -10,9 +9,7 @@ namespace {
 constexpr uint64_t low_mask(unsigned p_bits) {
 	return p_bits >= 64 ? ~uint64_t(0) : ((uint64_t(1) << p_bits) - 1);
 }
-} // namespace
-
-// ---- BitWriter -------------------------------------------------------------------------------------------------
+}
 
 BitWriter::BitWriter(size_t p_max_bytes) :
 		max_bytes_(p_max_bytes) {
@@ -21,7 +18,7 @@ BitWriter::BitWriter(size_t p_max_bytes) :
 
 void BitWriter::write_bits(uint64_t p_value, unsigned p_bits) {
 	if (overflowed_) {
-		return; // once past the cap every later write is dropped too, so the result is never half valid
+		return;
 	}
 	if (p_bits > 64) {
 		overflowed_ = true;
@@ -72,7 +69,7 @@ void BitWriter::write_f32(float p_value) {
 }
 
 void BitWriter::align_byte() {
-	// The pad bits of the current byte are already zero and inside byte_count(), so this never overflows.
+
 	if (!overflowed_ && bits_ % 8 != 0) {
 		bits_ += 8 - bits_ % 8;
 	}
@@ -85,8 +82,6 @@ std::vector<uint8_t> BitWriter::take() {
 	overflowed_ = false;
 	return out;
 }
-
-// ---- BitReader -------------------------------------------------------------------------------------------------
 
 BitReader::BitReader(std::span<const uint8_t> p_bytes) :
 		bytes_(p_bytes) {}
@@ -124,7 +119,7 @@ int64_t BitReader::read_signed(unsigned p_bits) {
 		return int64_t(raw);
 	}
 	const uint64_t sign = uint64_t(1) << (p_bits - 1);
-	return int64_t((raw ^ sign) - sign); // sign extension
+	return int64_t((raw ^ sign) - sign);
 }
 
 uint64_t BitReader::read_varint() {
@@ -136,7 +131,7 @@ uint64_t BitReader::read_varint() {
 			return 0;
 		}
 		if (group == 9 && (more || bits > 1)) {
-			failed_ = true; // a tenth group carries only bit 63; anything more does not fit 64 bits
+			failed_ = true;
 			return 0;
 		}
 		value |= bits << (7 * group);
@@ -168,4 +163,4 @@ bool BitReader::at_end() const {
 	return !failed_ && (pos_ + 7) / 8 == bytes_.size();
 }
 
-} // namespace bf3::net
+}

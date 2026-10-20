@@ -46,8 +46,6 @@ namespace {
 
 static_assert(sizeof(Vector3) == 12 && sizeof(Vector2) == 8 && sizeof(Color) == 16, "single-precision Godot types");
 
-// Unshaded and double-sided: vertex colour (surface class, shaded at prepare time), back faces darker, and a
-// wireframe from the barycentric UVs (prepare_collision_meshes puts (1,0), (0,1), (0,0) at the corners).
 constexpr const char *kShader = R"(shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_opaque;
 uniform int mode = 0; // 0 solid, 1 solid + wireframe, 2 wireframe
@@ -105,7 +103,7 @@ std::string with_commas(size_t p_value) {
 	return digits;
 }
 
-} // namespace
+}
 
 Bf3CollisionOverlay::Bf3CollisionOverlay() = default;
 
@@ -120,7 +118,7 @@ void Bf3CollisionOverlay::_bind_methods() {
 
 void Bf3CollisionOverlay::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
-		join_loader(); // the loader writes into this node
+		join_loader();
 		join_window();
 		free_render_objects();
 	}
@@ -160,7 +158,7 @@ void Bf3CollisionOverlay::update_window() {
 		}
 		join_window();
 		window_running_ = false;
-		// Swap: drop the old layer-4 meshes (the Havok slots stay), append and upload the new ones at once.
+
 		for (TileMesh &m : meshes_) {
 			if (m.layer == bf3::render::kTerrainLayer) {
 				free_mesh(m);
@@ -196,7 +194,7 @@ void Bf3CollisionOverlay::update_window() {
 	window_running_ = true;
 	window_done_ = false;
 	++window_jobs_;
-	// Off the main thread: no Godot API is called on this thread; collision_ outlives it (joined before it goes).
+
 	window_thread_ = std::thread([this]() {
 		const auto t0 = std::chrono::steady_clock::now();
 		window_loaded_ = bf3::render::prepare_terrain_window(collision_->soup, window_job_options_, &window_loaded_stats_);
@@ -294,7 +292,7 @@ void Bf3CollisionOverlay::_ready() {
 		load_done_ = true;
 	} else {
 		load_start_usec_ = Time::get_singleton()->get_ticks_usec();
-		// Heavy work off the main thread (plan §2.3): no Godot API is called on this thread.
+
 		loader_ = std::thread([this]() {
 			bf3::core::Result<std::shared_ptr<bf3::core::Install>> install = bf3::core::Install::open(install_);
 			if (!install) {
@@ -314,7 +312,7 @@ void Bf3CollisionOverlay::_ready() {
 			loaded_ = std::make_unique<lvl::LevelCollision>(std::move(*r));
 			preparing_ = true;
 			const auto t0 = std::chrono::steady_clock::now();
-			loaded_meshes_ = bf3::render::prepare_collision_meshes(loaded_->soup); // Havok slots; the terrain window follows the camera
+			loaded_meshes_ = bf3::render::prepare_collision_meshes(loaded_->soup);
 			loader_prepare_seconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 			load_done_ = true;
 		});
@@ -428,7 +426,7 @@ void Bf3CollisionOverlay::upload_some(bool p_all) {
 		meshes_.push_back(tm);
 		++next_upload_;
 		if (!p_all && Time::get_singleton()->get_ticks_usec() - start > 12000) {
-			break; // keep the frame (and the label) moving
+			break;
 		}
 	}
 	upload_seconds_ += double(Time::get_singleton()->get_ticks_usec() - start) / 1e6;
@@ -462,8 +460,7 @@ void Bf3CollisionOverlay::spawn_camera(size_t p_index) {
 	}
 	spawn_index_ = p_index % spawns.size();
 	const lvl::LevelTransform &t = spawns[spawn_index_];
-	// Eye height above the spawn point, looking along its forward (Frostbite +Z forward; the Godot camera looks
-	// down its -Z: yaw = atan2(-f.x, -f.z)).
+
 	position_ = Vector3(t.trans[0], t.trans[1] + 1.7f, t.trans[2]);
 	yaw_ = std::atan2(-t.forward[0], -t.forward[2]);
 	pitch_ = -0.12f;
@@ -471,7 +468,7 @@ void Bf3CollisionOverlay::spawn_camera(size_t p_index) {
 }
 
 void Bf3CollisionOverlay::top_camera() {
-	// Frame the tiles that hold 98 % of the triangles (a few stray pieces lie a kilometre out), seen from above.
+
 	const lvl::CollisionSoup &s = collision_->soup;
 	const auto quantiles = [&](int p_axis, float &r_lo, float &r_hi) {
 		std::vector<std::pair<int32_t, size_t>> keys;
@@ -712,8 +709,8 @@ void Bf3CollisionOverlay::_process(double p_delta) {
 		if (hold_frames_ == 0 && next_shot_ < shots_.size()) {
 			set_camera(shots_[next_shot_].camera);
 			update_label();
-			hold_frames_ = 6; // drawn a few times before the capture
-		} else if (hold_frames_ > 0 && window_ready() && --hold_frames_ == 0) { // TC: the window follows the shot first
+			hold_frames_ = 6;
+		} else if (hold_frames_ > 0 && window_ready() && --hold_frames_ == 0) {
 			if (!save_screenshot(shots_[next_shot_].path)) {
 				failed_ = true;
 			}
@@ -760,7 +757,7 @@ bool Bf3CollisionOverlay::save_screenshot(const std::string &p_path) {
 void Bf3CollisionOverlay::finish(int p_code) {
 	quitting_ = true;
 	if (frames_ > 0) {
-		std::vector<float> ms(frame_ms_.begin() + std::min<size_t>(frame_ms_.size(), 30), frame_ms_.end()); // skip warm-up frames
+		std::vector<float> ms(frame_ms_.begin() + std::min<size_t>(frame_ms_.size(), 30), frame_ms_.end());
 		if (ms.empty()) {
 			ms = frame_ms_;
 		}
@@ -793,4 +790,4 @@ void Bf3CollisionOverlay::finish(int p_code) {
 	get_tree()->quit(p_code);
 }
 
-} // namespace bf3::godot_side
+}

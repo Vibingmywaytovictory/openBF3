@@ -1,6 +1,3 @@
-// ModeDef reader: a LogicWorld over the level's included sub-worlds, then the gameplay entities in
-// it with their effective values (research/topics/02-soldier-kits-modes.md §3.1-§3.12). The walk,
-// every query and every loop here draw from one WorkBudget (cost model: logic_world.cpp).
 #include "bf3/core/gameplay/mode_def.h"
 
 #include "bf3/core/gameplay/logic_world.h"
@@ -45,11 +42,8 @@ constexpr ModeAlias kModeAliases[] = {
 	{ "AS", "AirSuperiority0" },
 };
 
-// Interface constants a mode may list in all (retail modes list under 100). Every Fields entry
-// read becomes one, so the cap also bounds the scan when sub-world scopes repeat a large array.
 constexpr size_t kMaxInterfaceConstants = 65536;
 
-// Interface field names worth printing by name (their ids are ebx_name_hash of the name).
 constexpr const char *kKnownInterfaceNames[] = {
 	"InitialTicketCount",
 	"AreaValue",
@@ -94,7 +88,7 @@ int64_t eff_int(const LogicWorld &p_world, const LogicObject &p_object, std::str
 	if (const std::optional<int64_t> i = v->as_i64()) {
 		return *i;
 	}
-	// A float field or constant: rounded, when it fits.
+
 	if (const std::optional<double> f = v->as_f64(); f && std::isfinite(*f) && std::fabs(*f) < 9.0e18) {
 		return static_cast<int64_t>(std::llround(*f));
 	}
@@ -127,12 +121,10 @@ std::string eff_enum(const LogicWorld &p_world, const LogicObject &p_object, std
 	return {};
 }
 
-// A usable string id: designer placeholders such as "TEAM 1 Untitled" are not ids.
 bool usable_sid(std::string_view p_text) {
 	return !p_text.empty() && p_text.find(' ') == std::string_view::npos;
 }
 
-// LocationTextSid from the nearest enclosing interface that sets one.
 std::string location_sid(const LogicWorld &p_world, uint32_t p_scope) {
 	std::optional<uint32_t> at = p_scope;
 	for (size_t guard = 0; at && guard < 64; ++guard) {
@@ -150,19 +142,17 @@ std::string scope_prefab(const LogicWorld &p_world, uint32_t p_scope) {
 	return copy_text(p_world.budget(), p_world.scope_name(p_scope));
 }
 
-// The fuse of a Rush crate prefab scope (see the header). Every crate scope of one prefab shares
-// its connection set, so each pass over it is charged again.
 Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 	WorkBudget &budget = p_world.budget();
 	const LogicScope &scope = p_world.scopes()[p_scope];
-	BF3_TRY(budget.charge_type(scope.blueprint.data())); // crate scopes may share one blueprint
+	BF3_TRY(budget.charge_type(scope.blueprint.data()));
 	const std::optional<EbxInstance> descriptor = p_world.db().follow(scope.blueprint.data(), "Descriptor");
 	if (!descriptor) {
 		return Status::success();
 	}
 	BF3_TRY(budget.charge_type(descriptor->data()));
 	const LogicConnections &set = p_world.connections(p_scope);
-	// Event connections by source, so each step below only looks at one entity's outputs.
+
 	BF3_TRY(budget.charge(set.event.size()));
 	std::unordered_map<InstanceKey, std::vector<uint32_t>, InstanceKeyHash> events_from;
 	for (uint32_t i = 0; i < set.event.size(); ++i) {
@@ -173,7 +163,7 @@ Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 		const auto it = events_from.find(InstanceKey::of(p_source));
 		return it == events_from.end() ? none : it->second;
 	};
-	std::array<std::unordered_map<InstanceKey, std::optional<double>, InstanceKeyHash>, 2> fuse_after; // by SyncedBool value
+	std::array<std::unordered_map<InstanceKey, std::optional<double>, InstanceKeyHash>, 2> fuse_after;
 	const int32_t in = field_id("In");
 	BF3_TRY(budget.charge(set.property.size()));
 	for (const LogicConnection &feed : set.property) {
@@ -185,12 +175,12 @@ Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 		if (const std::optional<PropertyValue> v = p_world.interface_value(p_scope, feed.source_field); v && v->as_bool()) {
 			value = *v->as_bool();
 		} else {
-			BF3_TRY(budget.charge_type(synced.data())); // many feeds may name one SyncedBool
+			BF3_TRY(budget.charge_type(synced.data()));
 			if (const std::optional<EbxValue> stored = synced.get("In")) {
 				value = stored->as_bool().value_or(false);
 			}
 		}
-		// Several feeds may drive the same SyncedBool: each (SyncedBool, value) is followed once.
+
 		const auto [memo, added] = fuse_after[value ? 1 : 0].emplace(InstanceKey::of(synced), std::nullopt);
 		if (!added) {
 			if (memo->second) {
@@ -201,8 +191,7 @@ Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 			continue;
 		}
 		const int32_t fired = value ? field_id("OnTrue") : field_id("OnFalse");
-		// The gates the SyncedBool drives, in first-seen order, with their state after it fires:
-		// Default, then its Open/Close inputs from the fired output in connection order.
+
 		std::vector<EbxInstance> gates;
 		std::unordered_map<InstanceKey, bool, InstanceKeyHash> gate_open;
 		BF3_TRY(budget.charge(from(synced).size()));
@@ -256,7 +245,6 @@ Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 	return Status::success();
 }
 
-// Every array is charged before its scan; nullopt once the budget is spent (the caller checks it).
 std::optional<GameModeSizeDef> read_size(const EbxResolver &p_db, const std::string &p_level, std::string_view p_mode, WorkBudget &r_budget) {
 	const EbxPartition *partition = p_db.partition_by_name("levels/" + p_level + "/" + p_level + "/settings_win32");
 	if (!partition || !r_budget.take(partition->instance_count())) {
@@ -312,7 +300,7 @@ std::optional<GameModeSizeDef> read_size(const EbxResolver &p_db, const std::str
 	return std::nullopt;
 }
 
-} // namespace
+}
 
 int64_t GameModeSizeDef::squad_size() const {
 	for (const GameModeTeamSizeDef &t : teams) {
@@ -426,7 +414,7 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	}
 	for (const std::string &listed : *listed_modes) {
 		if (iequals_ascii(listed, mode)) {
-			mode = listed; // the spelling the data uses
+			mode = listed;
 		}
 	}
 	const std::string root_name = "levels/" + id + "/" + id;
@@ -467,14 +455,13 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		out.unresolved_connections += world.connections(s).unresolved;
 	}
 
-	// The sub-worlds' own interface constants.
 	for (uint32_t s = 1; s < world.scopes().size(); ++s) {
 		BF3_TRY(budget.charge(1));
 		const LogicScope &scope = world.scopes()[s];
 		if (!scope.reference || !scope.reference->is_a("SubWorldReferenceObjectData")) {
 			continue;
 		}
-		BF3_TRY(budget.charge_type(scope.blueprint.data())); // scopes may share one blueprint
+		BF3_TRY(budget.charge_type(scope.blueprint.data()));
 		const std::optional<EbxInstance> descriptor = p_db.follow(scope.blueprint.data(), "Descriptor");
 		if (!descriptor) {
 			continue;
@@ -506,8 +493,6 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		}
 	}
 
-	// MCOM crates: the scopes that hold IET_RushCrate* interactions, in first-seen order, with the
-	// interactions of each (collected here so the crates need no second pass over every object).
 	std::vector<std::pair<uint32_t, std::vector<const LogicObject *>>> crates;
 	std::unordered_map<uint32_t, size_t> crate_at;
 	for (const LogicObject &object : world.objects()) {
@@ -621,14 +606,14 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 		out.mcoms.push_back(std::move(m));
 	}
 	out.query_steps = world.query_steps();
-	// A query or copy that ran out of budget answered nullopt / empty: fail instead.
+
 	if (const Status spent = budget.status(); !spent) {
 		return error_at("mode " + id + " " + mode, spent.error());
 	}
 	if (world.query_budget_spent()) {
 		return make_error("mode " + id + " " + mode + ": property queries exceed " + std::to_string(options.max_query_steps) + " resolver steps");
 	}
-	// Data order follows the blueprint walk; present per-team lists by team number (stable).
+
 	const auto by_team = [](const auto &p_a, const auto &p_b) { return p_a.team < p_b.team; };
 	std::stable_sort(out.teams.begin(), out.teams.end(), by_team);
 	std::stable_sort(out.ticket_counters.begin(), out.ticket_counters.end(), by_team);
@@ -676,4 +661,4 @@ Result<ScoringTable> read_scoring(const EbxResolver &p_db, std::string_view p_pa
 	return out;
 }
 
-} // namespace bf3::core::gameplay
+}

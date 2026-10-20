@@ -1,4 +1,3 @@
-// ENet wrapper: loopback ping between two hosts in this process.
 #include <doctest/doctest.h>
 
 #include "bf3/net/enet_host.h"

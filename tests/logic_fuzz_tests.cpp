@@ -1,10 +1,3 @@
-// logic.fuzz (docs/design/s4.md §12; meant for the asan preset): hostile graphs must end in an error or a bounded
-// run, never a crash, a hang or unbounded work.
-//   * random Builder graphs (Delay 0 cycles, self-loops, fan-out of 10^4, every S4 primitive, random params and
-//     constant inputs, natives) run 600 ticks with random forced events;
-//   * random synthetic partitions (interface cycles, diamond chains with 2^k paths, fan-out through interfaces)
-//     through build_logic_graph: success or an error, within the work budget and fast;
-//   * random bytes and mutated encodings into LogicGhost::decode.
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/logic_graph.h"
@@ -37,7 +30,6 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// Generous for the ASan build on a shared machine.
 constexpr double kFastSeconds = 30.0;
 
 Guid guid_n(uint32_t p_n) {
@@ -47,7 +39,6 @@ Guid guid_n(uint32_t p_n) {
 	return g;
 }
 
-// The S4 primitives plus a few natives and an unknown type.
 constexpr LogicTypeId kTypes[] = { LogicTypeId::Delay, LogicTypeId::EventGate, LogicTypeId::Sequence, LogicTypeId::TeamFilter, LogicTypeId::SyncedBool,
 	LogicTypeId::EventSplitter, LogicTypeId::Bool, LogicTypeId::MultipleTrigger, LogicTypeId::PlayerFilter, LogicTypeId::Float, LogicTypeId::DelayTrigger,
 	LogicTypeId::BoolToEvent, LogicTypeId::Compare, LogicTypeId::And, LogicTypeId::Or, LogicTypeId::RandomDelay, LogicTypeId::CompareInt,
@@ -56,7 +47,6 @@ constexpr LogicTypeId kTypes[] = { LogicTypeId::Delay, LogicTypeId::EventGate, L
 	LogicTypeId::RandomMultiEvent, LogicTypeId::Or4, LogicTypeId::IntHub, LogicTypeId::PropertyGate, LogicTypeId::Setting, LogicTypeId::Locator,
 	LogicTypeId::CharacterSpawn, LogicTypeId::CapturePoint, LogicTypeId::HumanPlayer, LogicTypeId::Unknown };
 
-// Ports drawn from: the named ones every handler reads, plus raw values.
 constexpr const char *kPortNames[] = { "In", "Out", "In1", "In2", "In3", "In4", "Value", "SetTrue", "SetFalse", "Toggle", "OnTrue", "OnFalse", "Open",
 	"Close", "Enable", "Disable", "Trigger", "OnTrigger", "Reset", "Start", "Stop", "Pause", "Delay", "Restart", "TriggerAmount", "SubtractCount",
 	"ResetCount", "OnReachedZero", "A", "B", "Bool", "Out0", "Out1", "Out2", "NextOut", "PreviousOut", "Increment", "Decrement", "BoolIn", "BoolOut",
@@ -126,9 +116,9 @@ std::shared_ptr<const LogicGraph> random_graph(std::mt19937_64 &r_rng, uint32_t 
 		for (uint32_t k = 0; k < params; ++k) {
 			LogicValue v = random_value(r_rng);
 			if (v.kind == K::Text) {
-				v.kind = K::Int; // texts need an interned index; the Builder has none
+				v.kind = K::Int;
 			}
-			// Delays are mostly short so timers fire inside the run.
+
 			const char *name = kParamNames[r_rng() % std::size(kParamNames)];
 			if (std::string(name) == "Delay" && (r_rng() & 1)) {
 				v.kind = K::Float;
@@ -146,7 +136,7 @@ std::shared_ptr<const LogicGraph> random_graph(std::mt19937_64 &r_rng, uint32_t 
 	}
 	for (uint32_t e = 0; e < p_edges; ++e) {
 		const uint32_t s = static_cast<uint32_t>(r_rng() % p_nodes);
-		const uint32_t t = (r_rng() % 8 == 0) ? s : static_cast<uint32_t>(r_rng() % p_nodes); // self-loops
+		const uint32_t t = (r_rng() % 8 == 0) ? s : static_cast<uint32_t>(r_rng() % p_nodes);
 		switch (r_rng() % 3) {
 			case 0:
 				b.add_property(s, random_port(r_rng), t, random_port(r_rng));
@@ -161,7 +151,6 @@ std::shared_ptr<const LogicGraph> random_graph(std::mt19937_64 &r_rng, uint32_t 
 	return std::make_shared<const LogicGraph>(std::move(*g));
 }
 
-// Runs p_ticks with random forced events and the native stubs; checks the per-tick bounds.
 void run_bounded(const std::shared_ptr<const LogicGraph> &p_graph, std::mt19937_64 &r_rng, uint32_t p_ticks, const LogicRuntimeOptions &p_options) {
 	Result<LogicRuntime> created = LogicRuntime::create(p_graph, p_options);
 	REQUIRE(created.ok());
@@ -202,14 +191,12 @@ void run_bounded(const std::shared_ptr<const LogicGraph> &p_graph, std::mt19937_
 		effects.assign(rt.effects().begin(), rt.effects().end());
 	}
 	CHECK_FALSE(rt.force_event(n + 5, port::kIn).ok());
-	// The ghost of whatever state the run reached round-trips.
+
 	const LogicGhost ghost = rt.ghost();
 	Result<LogicGhost> back = LogicGhost::decode(ghost.encode(), rt.ghost_layout());
 	REQUIRE(back.ok());
 	CHECK(*back == ghost);
 }
-
-// --- synthetic partitions ------------------------------------------------------------------------------------------
 
 constexpr const char *kTargets[] = { "EventConnectionTargetType_Invalid", "EventConnectionTargetType_ClientAndServer",
 	"EventConnectionTargetType_Client", "EventConnectionTargetType_Server", "EventConnectionTargetType_NetworkedClient",
@@ -250,8 +237,6 @@ SynValues event_of(uint32_t p_source, int32_t p_sp, uint32_t p_target, int32_t p
 		{ "TargetEvent", static_cast<uint32_t>(p_tp) }, { "TargetType", p_tt } };
 }
 
-// Random prefabs: each holds a descriptor, a few entities and references to random prefabs (cycles allowed: the
-// walk's depth cap and cycle skip end them), and random connections among its own ends.
 SynPartition random_partition(std::mt19937_64 &r_rng, uint32_t p_prefabs, uint32_t p_connections) {
 	SynPartition s;
 	s.types = syn_types();
@@ -268,7 +253,7 @@ SynPartition random_partition(std::mt19937_64 &r_rng, uint32_t p_prefabs, uint32
 		}
 		const uint32_t refs = static_cast<uint32_t>(r_rng() % 3);
 		for (uint32_t k = 0; k < refs; ++k) {
-			const uint32_t child = static_cast<uint32_t>(1 + r_rng() % (p_prefabs - 1)); // never the root
+			const uint32_t child = static_cast<uint32_t>(1 + r_rng() % (p_prefabs - 1));
 			p.objects.push_back(s.add({ "ReferenceObjectData", { { "Blueprint", SynPartition::ref(prefabs[child].instance) } } }));
 		}
 	}
@@ -299,9 +284,6 @@ SynPartition random_partition(std::mt19937_64 &r_rng, uint32_t p_prefabs, uint32
 	return s;
 }
 
-// A chain of k prefabs, each referencing the next p_refs times and wiring X -> each child's X and each child's Y -> Y,
-// every connection p_parallel times: (p_refs * p_parallel^2)^k paths from the root's source to its sink. Scopes grow
-// as p_refs^k (the LogicWorld walk pays for them), paths through parallel connections do not add scopes.
 SynPartition diamond_chain(uint32_t p_k, uint32_t p_refs = 2, uint32_t p_parallel = 1) {
 	SynPartition s;
 	s.types = syn_types();
@@ -321,7 +303,7 @@ SynPartition diamond_chain(uint32_t p_k, uint32_t p_refs = 2, uint32_t p_paralle
 			p.objects = { source, sink };
 		}
 		if (i == p_k) {
-			p.events.push_back(event_of(in, in_port, out, out_port, 4)); // pass-through, Server
+			p.events.push_back(event_of(in, in_port, out, out_port, 4));
 			continue;
 		}
 		for (uint32_t c = 0; c < p_refs; ++c) {
@@ -344,7 +326,7 @@ SynPartition diamond_chain(uint32_t p_k, uint32_t p_refs = 2, uint32_t p_paralle
 	return s;
 }
 
-} // namespace
+}
 
 TEST_SUITE("logic-fuzz") {
 	TEST_CASE("logic fuzz: random Builder graphs run 600 ticks bounded") {
@@ -372,8 +354,8 @@ TEST_SUITE("logic-fuzz") {
 		const uint32_t d = b.add_node(LogicTypeId::Delay, LogicRealm::Server, root, guid_n(2));
 		const uint32_t gate = b.add_node(LogicTypeId::EventGate, LogicRealm::Server, root, guid_n(3));
 		b.add_event(s, port::kSplitterOut, d, port::kIn);
-		b.add_event(d, port::kOut, s, port::kSplitterIn); // Delay 0 cycle: endless within a tick
-		b.add_event(gate, port::kOut, gate, port::kIn); // self-loop
+		b.add_event(d, port::kOut, s, port::kSplitterIn);
+		b.add_event(gate, port::kOut, gate, port::kIn);
 		b.add_event(s, port::kSplitterOut, gate, port::kIn);
 		for (int k = 0; k < 10000; ++k) {
 			b.add_event(s, port::kSplitterOut, gate, port::kClose);
@@ -388,8 +370,7 @@ TEST_SUITE("logic-fuzz") {
 		LogicRuntime rt = std::move(*created);
 		REQUIRE(rt.start().ok());
 		REQUIRE(rt.force_event(s, port::kSplitterOut).ok());
-		// The Delay 0 cycle never settles: every tick delivers the cap and carries the rest over (or, once the queue
-		// reaches its cap, the runtime faults); either way each tick is bounded.
+
 		bool faulted = false;
 		size_t carried_ticks = 0;
 		for (int t = 1; t <= 600 && !faulted; ++t) {
@@ -441,7 +422,7 @@ TEST_SUITE("logic-fuzz") {
 	TEST_CASE("logic fuzz: diamond chains with 2^k paths stop at the fan-out cap or the budget") {
 		const auto start = std::chrono::steady_clock::now();
 		{
-			SynPartition s = diamond_chain(4); // 16 paths: builds
+			SynPartition s = diamond_chain(4);
 			EbxDb db;
 			const EbxPartition *p = logic_test::insert_syn(db, "levels/synthetic/diamond4", s);
 			REQUIRE(p != nullptr);
@@ -451,7 +432,7 @@ TEST_SUITE("logic-fuzz") {
 			CHECK(g->stats().duplicate_paths == 15);
 		}
 		{
-			SynPartition s = diamond_chain(20); // 2^20 scopes: the walk's budget ends it
+			SynPartition s = diamond_chain(20);
 			EbxDb db;
 			const EbxPartition *p = logic_test::insert_syn(db, "levels/synthetic/diamond20", s);
 			REQUIRE(p != nullptr);
@@ -460,7 +441,7 @@ TEST_SUITE("logic-fuzz") {
 			MESSAGE("diamond 20 (2 refs per level): " << g.error().message);
 		}
 		{
-			SynPartition s = diamond_chain(10, 1, 2); // 11 scopes, 4^10 = 2^20 paths: over max_fanout (2^16)
+			SynPartition s = diamond_chain(10, 1, 2);
 			EbxDb db;
 			const EbxPartition *p = logic_test::insert_syn(db, "levels/synthetic/parallel10", s);
 			REQUIRE(p != nullptr);
@@ -471,7 +452,7 @@ TEST_SUITE("logic-fuzz") {
 			LogicGraphOptions wide;
 			wide.max_fanout = SIZE_MAX;
 			Result<LogicGraph> h = build_logic_graph(db, p->primary(), wide);
-			REQUIRE_FALSE(h.ok()); // the work budget ends it
+			REQUIRE_FALSE(h.ok());
 			CHECK(h.error().message.find("work budget") != std::string::npos);
 			MESSAGE("parallel 10, no fan-out cap: " << h.error().message);
 		}
@@ -517,7 +498,7 @@ TEST_SUITE("logic-fuzz") {
 			Result<LogicGhost> d = LogicGhost::decode(bytes, *layout);
 			if (d) {
 				++accepted;
-				CHECK(d->encode() == bytes); // one encoding per state
+				CHECK(d->encode() == bytes);
 			}
 		}
 		MESSAGE("ghost decode accepted " << accepted << " of 20000");

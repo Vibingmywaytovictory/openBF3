@@ -1,4 +1,3 @@
-// Level transforms: port of IW4L level_bf3 transform.rs (Apache-2.0), operation for operation.
 #include "bf3/core/level/level_transform.h"
 
 #include <cmath>
@@ -11,7 +10,7 @@ float length3(const Vec3 &p_v) {
 	return std::sqrt(p_v[0] * p_v[0] + p_v[1] * p_v[1] + p_v[2] * p_v[2]);
 }
 
-} // namespace
+}
 
 LevelTransform LevelTransform::from_rows(const Rows &p_rows) {
 	LevelTransform t;
@@ -34,8 +33,7 @@ LevelTransform LevelTransform::from_res(const res::Transform &p_transform) {
 }
 
 Vec3 LevelTransform::rotate(const Vec3 &p_v) const {
-	// out starts at 0 and accumulates row by row, as the Rust loop does (0 + x keeps the sign of
-	// zero out of the result exactly like it).
+
 	Vec3 out{ 0.0f, 0.0f, 0.0f };
 	const Vec3 *rows[3] = { &right, &up, &forward };
 	for (int r = 0; r < 3; ++r) {
@@ -82,7 +80,7 @@ Vec3 LevelTransform::axis_scales() const {
 
 bool LevelTransform::is_uniform(float p_tolerance) const {
 	const Vec3 s = axis_scales();
-	// fmax/fmin: Rust's f32::max/min ignore a NaN operand the same way.
+
 	const float largest = std::fmax(std::fmax(s[0], s[1]), s[2]);
 	return largest - std::fmin(std::fmin(s[0], s[1]), s[2]) <= p_tolerance * largest;
 }
@@ -104,4 +102,4 @@ LevelTransform LevelTransform::normalized() const {
 	return t;
 }
 
-} // namespace bf3::core::level
+}

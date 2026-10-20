@@ -37,7 +37,6 @@ using bf3::core::gameplay::WeaponDef;
 
 namespace {
 
-// Every "--<name>=<value>" among the user args, in order (godot_util has the single-value form).
 std::vector<std::string> user_arg_values(const char *p_name) {
 	std::vector<std::string> out;
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
@@ -62,13 +61,12 @@ std::string strip_trailing_newline(std::string p_text) {
 	return p_text;
 }
 
-// The level's display name from its superbundle ("Win32/Levels/MP_Subway/MP_Subway" -> "MP_Subway").
 std::string level_label(const std::string &p_spec) {
 	const size_t slash = p_spec.rfind('/');
 	return slash == std::string::npos ? p_spec : p_spec.substr(slash + 1);
 }
 
-} // namespace
+}
 
 Bf3WeaponInspector::Bf3WeaponInspector() = default;
 
@@ -83,7 +81,7 @@ void Bf3WeaponInspector::_bind_methods() {
 }
 
 void Bf3WeaponInspector::_notification(int p_what) {
-	// The worker must be joined before this node (and Godot's singletons) go away.
+
 	if (p_what == NOTIFICATION_PREDELETE) {
 		join_job();
 	}
@@ -110,8 +108,7 @@ void Bf3WeaponInspector::_ready() {
 		timeout_ = std::atof(timeout.c_str());
 	}
 	set_layer(10);
-	// Weapon and partition names are data, not UI text: nothing here is auto-translated; names go
-	// through tr() explicitly.
+
 	set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
 	build_ui();
 	set_visible(show_at_start_);
@@ -127,7 +124,7 @@ void Bf3WeaponInspector::build_ui() {
 	panel->set_name("Panel");
 	panel->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	panel->set_offset(SIDE_LEFT, 16);
-	panel->set_offset(SIDE_TOP, 128); // below GameSession's debug overlay
+	panel->set_offset(SIDE_TOP, 128);
 	panel->set_offset(SIDE_RIGHT, -16);
 	panel->set_offset(SIDE_BOTTOM, -16);
 	Ref<StyleBoxFlat> bg;
@@ -206,7 +203,7 @@ Bf3Localisation *Bf3WeaponInspector::localisation() {
 		return l;
 	}
 	if (own_localisation_ == nullptr) {
-		// No Bf3Localisation in the scene: run our own.
+
 		own_localisation_ = memnew(Bf3Localisation);
 		own_localisation_->set_name("Localisation");
 		add_child(own_localisation_);
@@ -238,7 +235,7 @@ void Bf3WeaponInspector::start_job() {
 	const std::shared_ptr<const bf3::core::ui::TextDatabase> text = loc->database();
 	const bool inspect = mode_ == Mode::InspectWeapon;
 	job_ = std::thread([this, install, text, inspect]() {
-		// Worker: bf3_core only, no Godot API.
+
 		JobResult &r = result_;
 		WeaponCatalog::Options options;
 		options.level = level_;
@@ -345,8 +342,7 @@ void Bf3WeaponInspector::populate_list() {
 	for (size_t i = 0; i < result_.entries.size(); ++i) {
 		const Entry &e = result_.entries[i];
 		failed += e.ok ? 0 : 1;
-		// The localised name through Godot's TranslationServer (Bf3Translation); a SID without text
-		// shows as the SID.
+
 		const String name = e.name_sid.empty() ? String("(no name)") : tr(StringName(to_godot(e.name_sid)));
 		String text = name + String::utf8("  \xc2\xb7  ") + to_godot(short_name(e.partition));
 		if (e.featured) {
@@ -364,7 +360,7 @@ void Bf3WeaponInspector::populate_list() {
 	std::snprintf(line, sizeof(line), "Weapon inspector (F2)  \xc2\xb7  %s  \xc2\xb7  %zu variants, %zu failed  \xc2\xb7  text database %lld strings  \xc2\xb7  resolved in %.2f s",
 			level_label(result_.level).c_str(), result_.entries.size() - 2, failed, static_cast<long long>(loc->get_entry_count()), result_.seconds);
 	header_->set_text(String::utf8(line));
-	// Initial selection: --inspector-select=<partition>, else the M16A3.
+
 	const std::string want = user_arg_value("inspector-select");
 	int select = 0;
 	for (size_t i = 0; i < result_.entries.size() && !want.empty(); ++i) {
@@ -418,15 +414,15 @@ void Bf3WeaponInspector::run_check_and_quit() {
 	} else {
 		UtilityFunctions::print(to_godot("--- " + a3.partition + " ---\n" + strip_trailing_newline(a3.block)));
 		UtilityFunctions::print(to_godot("--- " + a4.partition + " ---\n" + strip_trailing_newline(a4.block)));
-		// The names as the panel shows them: tr() through the TranslationServer.
+
 		const std::string a3_name = to_std(tr(StringName(to_godot(a3.name_sid))));
 		const std::string a4_name = to_std(tr(StringName(to_godot(a4.name_sid))));
 		rows = check_m0_weapons(*a3.def, a3_name, *a4.def, a4_name);
-		// The block carries the same name (bf3_core's TextDatabase, the "name" line).
+
 		rows.push_back({ "m16a3.block_name_line", a3.block.find("\nname         M16A3\n") != std::string::npos, a3.name, "M16A3" });
 		rows.push_back({ "m16a4_burst.block_name_line", a4.block.find("\nname         M16A4\n") != std::string::npos, a4.name, "M16A4" });
 	}
-	// Localisation through Godot.
+
 	TranslationServer *ts = TranslationServer::get_singleton();
 	rows.push_back(m0_text_row("translation.registered_en", ts->has_translation_for_locale("en", true) ? "yes" : "no", "yes"));
 	rows.push_back(m0_text_row("translation.tr_m16a4_sid", to_std(tr("ID_P_WNAME_M16A4")), "M16A3"));
@@ -434,7 +430,7 @@ void Bf3WeaponInspector::run_check_and_quit() {
 	rows.push_back(m0_text_row("translation.missing_sid", to_std(tr("ID_OPENBF3_NO_SUCH_SID")), "ID_OPENBF3_NO_SUCH_SID"));
 	Bf3Localisation *loc = localisation();
 	rows.push_back(m0_text_row("text.entries", std::to_string(loc->get_entry_count()), "15515"));
-	// Every variant of the level resolved (the list after the featured two).
+
 	size_t variants = 0;
 	size_t resolved = 0;
 	for (size_t i = 2; i < result_.entries.size(); ++i) {
@@ -443,7 +439,7 @@ void Bf3WeaponInspector::run_check_and_quit() {
 	}
 	rows.push_back({ "catalog.resolved", variants > 0 && resolved == variants, std::to_string(resolved) + " of " + std::to_string(variants) + " variants",
 			"all" });
-	// The install is read as is: sizes and mtimes of layout.toc, cas.cat and every toc/sb unchanged.
+
 	const bf3::core::SnapshotDiff diff = bf3::core::diff_snapshots(loc->install_snapshot_at_start(), loc->reader().snapshot());
 	rows.push_back({ "install.unchanged", loc->install_snapshot_at_start().valid && diff.clean(),
 			std::to_string(loc->install_snapshot_at_start().files.size()) + " files, " + (diff.clean() ? std::string("no change") : diff.summary()),
@@ -496,4 +492,4 @@ void Bf3WeaponInspector::join_job() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

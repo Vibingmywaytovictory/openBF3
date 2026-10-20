@@ -1,5 +1,3 @@
-// The atlas cutter (bf3/core/ui/swf_atlas.h; docs/design/ui-swf-fonts.md §6, §9): labelled frames, exported symbols
-// and every drawing frame of every sprite resolved to the GFx sub-images they show.
 #include "bf3/core/ui/swf_atlas.h"
 
 #include "bf3/core/ui/swf_library.h"
@@ -29,18 +27,17 @@ public:
 			im.height = e.height;
 			r_map.images.push_back(std::move(im));
 		}
-		// Every sprite's display lists: each frame, plus each label's frame (which may equal the frame count).
+
 		for (const SwfSprite &s : m_.sprites) {
 			BF3_TRY(lists_of(s.id, s.timeline));
 		}
 		BF3_TRY(lists_of(kRootKey, m_.root));
 
-		// Labels: the root's, then every sprite's (by id).
 		BF3_TRY(labels_of(kRootKey, m_.root, r_map));
 		for (const SwfSprite &s : m_.sprites) {
 			BF3_TRY(labels_of(s.id, s.timeline, r_map));
 		}
-		// Exported symbols (sprites and shapes).
+
 		for (const SwfExport &e : m_.exports) {
 			if (m_.find_sprite(e.id) == nullptr && m_.find_shape(e.id) == nullptr) {
 				continue;
@@ -52,7 +49,7 @@ public:
 			BF3_TRY(count_region(r));
 			r_map.symbols.push_back(std::move(r));
 		}
-		// Every frame of every sprite that draws something.
+
 		for (const SwfSprite &s : m_.sprites) {
 			const std::vector<std::vector<SwfDisplayEntry>> &lists = lists_[s.id];
 			for (uint32_t f = 0; f < s.timeline.frames; ++f) {
@@ -68,7 +65,7 @@ public:
 				r_map.frames.push_back(std::move(r));
 			}
 		}
-		// Bare sub-images.
+
 		for (const SwfSubImage &si : m_.sub_images) {
 			SwfAtlasRegion r;
 			r.name = "#" + std::to_string(si.id);
@@ -81,11 +78,11 @@ public:
 	}
 
 private:
-	static constexpr uint32_t kRootKey = 0x10000; // the root timeline's key in lists_ (a sprite may have id 0)
+	static constexpr uint32_t kRootKey = 0x10000;
 	enum class MemoState : uint8_t { None, Building, Done };
 	struct Memo {
 		MemoState state = MemoState::None;
-		std::vector<SwfAtlasPiece> pieces; // the sprite's frame 0 in its own space
+		std::vector<SwfAtlasPiece> pieces;
 	};
 
 	Status charge(size_t p_units) {
@@ -107,7 +104,7 @@ private:
 			frames.push_back(f);
 		}
 		if (p_tl.frames == 0) {
-			frames.push_back(0); // frame 0 of an empty timeline: the state after every event
+			frames.push_back(0);
 		}
 		for (const SwfFrameLabel &l : p_tl.labels) {
 			if (l.frame >= p_tl.frames) {
@@ -121,7 +118,7 @@ private:
 		if (!st) {
 			return error_at("swf atlas " + std::string(name_) + " sprite " + std::to_string(p_id), st.error());
 		}
-		// Index by frame number (frames is 0..n-1 then at most the value n).
+
 		std::vector<std::vector<SwfDisplayEntry>> by_frame(size_t(p_tl.frames) + 1);
 		for (size_t i = 0; i < frames.size(); ++i) {
 			by_frame[frames[i]] = std::move(lists[i]);
@@ -179,7 +176,7 @@ private:
 			return Status::success();
 		}
 		if (m_.find_sprite(p_id) == nullptr) {
-			return Status::success(); // edit text, import, static text, ...: no atlas art
+			return Status::success();
 		}
 		const std::vector<SwfAtlasPiece> *frame0 = nullptr;
 		BF3_TRY(sprite_frame0(p_id, p_depth, frame0));
@@ -209,7 +206,7 @@ private:
 		if (it != lists_.end() && !it->second.empty()) {
 			BF3_TRY(append_entries(it->second[0], SwfMatrix{}, p_depth + 1, pieces));
 		}
-		Memo &done = memo_[p_id]; // memo_ is a std::map: references stay valid
+		Memo &done = memo_[p_id];
 		done.pieces = std::move(pieces);
 		done.state = MemoState::Done;
 		r_pieces = &done.pieces;
@@ -282,7 +279,7 @@ private:
 	size_t total_pieces_ = 0;
 };
 
-} // namespace
+}
 
 const SwfAtlasRegion *SwfAtlasMap::find(std::string_view p_name) const {
 	for (const std::vector<SwfAtlasRegion> *set : { &labels, &symbols, &frames, &bare }) {
@@ -310,4 +307,4 @@ Result<SwfAtlasMap> build_atlas_map(const SwfMovie &p_movie, std::string_view p_
 	return map;
 }
 
-} // namespace bf3::core::ui
+}

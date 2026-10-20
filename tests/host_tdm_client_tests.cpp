@@ -1,20 +1,3 @@
-// host.tdm.client (docs/design/m2b.md §11 E13; docs/design/m2b-ru.md §6; owner ru, label timing): the real client path
-// on Metro TDM: ServerHost + ClientSession over ENet loopback (tests/gunplay_fixture.h start_session), rules on with the
-// deploy screen, 31 TDM bots (m2b.md: 7; changed at integ/m2b-w1, see below), kill limit 5, pre-round 3 s. It waits on real time and sockets, so it is a timing row (the
-// merge pass, serially, docs/testing.md §1) and is never run on a branch.
-//   * no Spawned (no own life) before the first send_spawn_request; Spawned after it
-//   * the pre-round freeze predicted by the client: 0 corrections above teleport_above_m and 0 predicted shots while
-//     MatchState restricts the input (move and fire held through the freeze)
-//   * after a scripted death (a dev Teleport high up) the frame's own_respawn_tick / own_revive_until are set as the
-//     server's rules stamped them (respawn = death + 300, revive_until > death)
-//   * MatchState reaches RoundOver (kill limit 5) within 30 s
-// It needs nt's v3 codecs and client (kProtocolVersion 3, send_spawn_request, the frame's match fields) and bb's
-// brains (add_tdm_bots); before both it exits 77 (skipped) with PENDING (nt is in since the w1 merge; the bb probe
-// below inits a GameServer with one TDM bot and skips while the W1.0 stub refuses it). The revive half of E13 (a scripted assault bot
-// revives the client) is not in this row yet (docs/design/m2b-ru.md §8): host.tdm.server's revive case covers the
-// server side and the peer's Spawned.
-// Exits 77 (skipped) without an install.
-
 #include <doctest/doctest.h>
 
 #include "gunplay_fixture.h"
@@ -47,7 +30,7 @@ TEST_SUITE("host-tdm-client") {
 			if (level == nullptr) {
 				return;
 			}
-			{ // bb's add_tdm_bots: until bb lands, the W1.0 stub refuses a config with TDM bots (skipped, PENDING)
+			{
 				host::GameServer probe;
 				host::GameServerConfig c;
 				c.level = level->shared;
@@ -68,9 +51,7 @@ TEST_SUITE("host-tdm-client") {
 					return;
 				}
 			}
-			// integ/m2b-w1: the scripted death needs a floor with open sky above it. 60 m above the spawn point put the
-			// soldier inside Metro's ceiling or onto a nearby roof (no death). M1's E1d spot (sim::find_drop_spot: a flat
-			// floor with 50 m of clearance) and its 46 m drop, which the sim.motor E1d case shows is lethal on Metro.
+
 			std::optional<sim::Vec3> drop;
 			{
 				core::Result<std::unique_ptr<sim::CollisionWorld>> w = sim::CollisionWorld::create(level->shared->static_world);
@@ -95,8 +76,7 @@ TEST_SUITE("host-tdm-client") {
 				fill->level = level->bots;
 				r_cfg.bots = fill;
 				auto bots = std::make_shared<host::TdmBotConfig>();
-				// integ/m2b-w1: 31 bots (the playable default, 16 v 16 with the client), not m2b.md's 7: the TDM bots make
-				// about 0.02 kills per bot per second (E1: 0.68 kills/s for 32), and 7 bots reached 3 / 1 of 5 in 30 s.
+
 				bots->count = 31;
 				r_cfg.tdm_bots = bots;
 			};
@@ -105,12 +85,12 @@ TEST_SUITE("host-tdm-client") {
 			if (s == nullptr) {
 				return;
 			}
-			// No life before the request (R10).
+
 			tg::run_for(*s, 1.0);
 			CHECK(s->frame->own_curr.life == 0u);
 			CHECK(s->frame->match_valid);
 			const host::ClientStats before = s->client.stats();
-			// The freeze: move and fire held from the first own state on.
+
 			s->client.send_spawn_request(1);
 			REQUIRE(tg::wait_spawned(*s, 5.0));
 			s->input.move_forward = 1.0f;
@@ -134,7 +114,7 @@ TEST_SUITE("host-tdm-client") {
 					(unsigned long long)(after.teleports - before.teleports));
 			CHECK(restricted_shots == 0u);
 			CHECK(after.teleports == before.teleports);
-			// A scripted death: up and down.
+
 			const std::optional<net::DebugReport> moved = tg::teleport(*s, { (*drop)[0], (*drop)[1] + 46.0f, (*drop)[2] }, s->frame->own_curr.yaw);
 			REQUIRE(moved.has_value());
 			CHECK(moved->ok);
@@ -146,7 +126,7 @@ TEST_SUITE("host-tdm-client") {
 					unsigned(s->frame->own_revive_until), unsigned(s->frame->match.round_start_tick));
 			CHECK(s->frame->own_respawn_tick != 0u);
 			CHECK(s->frame->own_revive_until != 0u);
-			// The round ends at the kill limit.
+
 			const auto round_start = std::chrono::steady_clock::now();
 			while (tg::seconds_since(round_start) < 30.0 && s->frame->match.phase != net::MatchPhase::RoundOver) {
 				tg::run_for(*s, 0.25);

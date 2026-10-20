@@ -1,5 +1,3 @@
-// bf3dump audio census (G4), bank (G6), check (G7) and render (audio_commands.h).
-
 #include "audio_commands.h"
 
 #include "bf3/core/audio/sound_program.h"
@@ -43,7 +41,7 @@ bool unchanged_line(const InstallReader &p_reader, const InstallSnapshot &p_befo
 	return clean;
 }
 
-} // namespace
+}
 
 int cmd_audio_census(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
 	if (p_args.size() != 1) {
@@ -112,7 +110,7 @@ int cmd_audio_census(const InstallReader &p_reader, std::shared_ptr<Install> p_i
 		if (mixer) {
 			continue;
 		}
-		// Compile every graph (allow_unimplemented), and the weapons strictly too.
+
 		++graphs;
 		au::CompileOptions options;
 		options.allow_unimplemented = true;
@@ -129,7 +127,7 @@ int cmd_audio_census(const InstallReader &p_reader, std::shared_ptr<Install> p_i
 		}
 		++compiled;
 		{
-			// The blob round trip and the validator run on every compiled program.
+
 			const std::vector<uint8_t> blob = au::encode_sound_program(*prog);
 			blob_bytes += blob.size();
 			Result<au::SoundProgram> back = au::decode_sound_program(blob);
@@ -167,7 +165,7 @@ int cmd_audio_census(const InstallReader &p_reader, std::shared_ptr<Install> p_i
 			}
 		}
 	}
-	// The handheld type set must be exactly the A2 set.
+
 	std::set<std::string> a2;
 	for (const au::SoundNodeTypeInfo &info : au::sound_node_types()) {
 		if (info.a2 && info.role == au::SoundNodeRole::Patch) {
@@ -207,7 +205,6 @@ struct LevelAudio {
 	std::shared_ptr<const au::WaveBank> bank;
 };
 
-// Loads the level, compiles p_patch strictly and loads a bank of exactly the waves it names.
 Result<LevelAudio> load_patch_audio(std::shared_ptr<Install> p_install, const std::string &p_level, const std::string &p_mode, std::string_view p_patch) {
 	LevelAudio out;
 	Result<std::unique_ptr<level::LoadedLevel>> lvl = level::load_level(p_install, p_level, p_mode);
@@ -254,7 +251,7 @@ float max_abs_diff(std::span<const float> a, std::span<const float> b) {
 	return m;
 }
 
-} // namespace
+}
 
 int cmd_audio_render(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
 	if (p_args.size() < 3) {
@@ -399,7 +396,7 @@ int cmd_audio_check(const InstallReader &p_reader, std::shared_ptr<Install> p_in
 	bf3::audio::CheckReport report = run->report;
 	if (g7) {
 		bf3::audio::add_model_trace_rows(report, *run, script, *la->program, *la->bank, bf3::audio::kMixRate);
-		// (f) a 0 Hz high-pass is the identity: a 17 m burst with v46 from the data (0 Hz there) and pinned to 0.
+
 		bf3::audio::CheckScript bypass = script;
 		bypass.segments = { { "bypass17", 17.0f, false, 1, script.segments[0].seed + 50, false, false } };
 		bf3::audio::CheckScript pinned = bypass;
@@ -425,7 +422,7 @@ int cmd_audio_check(const InstallReader &p_reader, std::shared_ptr<Install> p_in
 		char rule[160];
 		std::snprintf(rule, sizeof(rule), "== 0 (max |difference|; v46 at 17 m = %.3f Hz, rms %.1f dBFS)", v46, bf3::audio::rms_db(fa->mix, 2, 0, fa->total_frames));
 		report.rows.push_back({ "bypass.0hz_17m", double(fdiff), rule, fdiff == 0.0f && v46 == 0.0f && fa->mix.size() == fb->mix.size() });
-		// (g) determinism: the same seed with varying mix() call sizes is bit-identical; another seed differs.
+
 		bf3::audio::OfflineCheckOptions varied;
 		varied.call_frames = { 37, 512, 1000, 480, 4096, 1, 129 };
 		Result<bf3::audio::OfflineCheck> again = bf3::audio::run_check_offline(script, la->program, la->bank, tuning, varied);
@@ -442,7 +439,7 @@ int cmd_audio_check(const InstallReader &p_reader, std::shared_ptr<Install> p_in
 		const float diff = max_abs_diff(run->mix, moved->mix);
 		report.rows.push_back({ "determinism.same_seed_varied_calls", double(same), "== 0 (max |difference|)", same == 0.0f });
 		report.rows.push_back({ "determinism.other_seed", double(diff), "> 0 (max |difference|)", diff > 0.0f && std::isfinite(diff) });
-		// (h) counters.
+
 		const auto counter = [&](const char *p_name, uint64_t p_value) { report.rows.push_back({ p_name, double(p_value), "== 0", p_value == 0 }); };
 		counter("counters.starved_voices", run->starved_voices);
 		counter("counters.decode_errors", run->decode_errors);
@@ -557,7 +554,7 @@ int cmd_audio_wave(const InstallReader &p_reader, std::shared_ptr<Install> p_ins
 				std::printf("     head 8-frame peaks:%s\n", head.c_str());
 				std::string env;
 				char cell[16];
-				const uint32_t step = d->header.sample_rate / 200; // 5 ms
+				const uint32_t step = d->header.sample_rate / 200;
 				for (uint32_t f = 0; f + step <= mono.size(); f += step) {
 					std::snprintf(cell, sizeof(cell), " %.0f", bf3::audio::rms_db(mono, 1, f, step));
 					env += cell;
@@ -613,7 +610,7 @@ int cmd_audio_bank(const InstallReader &p_reader, std::shared_ptr<Install> p_ins
 		}
 		warm_ms = ms;
 	}
-	// Handheld weapon patches of the mount: compiled strictly; every wave they name resident.
+
 	size_t patches = 0, compiled = 0, starved = 0;
 	std::set<Guid> named;
 	std::vector<std::string> failures;
@@ -656,4 +653,4 @@ int cmd_audio_bank(const InstallReader &p_reader, std::shared_ptr<Install> p_ins
 	return (compiled == patches && starved == 0 && unchanged) ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

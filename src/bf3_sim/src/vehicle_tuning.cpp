@@ -1,9 +1,3 @@
-// VehicleTuning file format (docs/design/s2.md §5.3; vehicle_model.h): "key = value" lines like motor_tuning.cfg
-// (motor_tuning.cpp, docs/design/m1.md §6.11). '#' starts a comment (whole line or after the value), blank lines are
-// skipped, enums by name, numbers as C locale decimals. An unknown key, a repeated key, a bad or non-finite value, a
-// value out of range, a line over 256 bytes or more than 512 lines fails with the line number. Keys left out keep
-// the defaults. format_vehicle_tuning writes every key with the shortest round-trip number text, so
-// parse(format(t)) == t bit for bit.
 #include "bf3/sim/vehicle_model.h"
 
 #include <algorithm>
@@ -28,8 +22,6 @@ struct KeyDef {
 
 #define BF3_VEHICLE_FIELD(f) [](VehicleTuning &t) -> void * { return &t.f; }
 
-// Declaration order of VehicleTuning. Ranges keep a hostile or mistyped file from making the model divide by zero
-// or the step loop for long; every default and every plausible measured value lies well inside them.
 const KeyDef kKeys[] = {
 	{ "gravity", KeyType::Float, 0.01f, 100.0f, BF3_VEHICLE_FIELD(gravity) },
 	{ "ground_friction", KeyType::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(ground_friction) },
@@ -63,7 +55,7 @@ const KeyDef kKeys[] = {
 	{ "position_steps", KeyType::U32, 0, 128, BF3_VEHICLE_FIELD(position_steps) },
 };
 constexpr size_t kKeyCount = sizeof(kKeys) / sizeof(kKeys[0]);
-static_assert(kKeyCount == 30); // s2.contract checks the shipped file against the same 30 names
+static_assert(kKeyCount == 30);
 
 #undef BF3_VEHICLE_FIELD
 
@@ -120,7 +112,7 @@ std::string number_text(float p_value) {
 	return std::string(buffer, r.ptr);
 }
 
-} // namespace
+}
 
 core::Result<VehicleTuning> parse_vehicle_tuning(std::string_view p_text) {
 	VehicleTuning t;
@@ -268,4 +260,4 @@ uint64_t vehicle_tuning_hash(const VehicleTuning &p_tuning) {
 	return h;
 }
 
-} // namespace bf3::sim
+}

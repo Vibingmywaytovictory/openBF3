@@ -1,19 +1,5 @@
-// The level session's wave-3 hooks (G7, W3.0 contract, docs/design/m2a-w3.md; owner gx; as built:
-// docs/design/m2a-gx.md). See level_session_m2a.h.
-//
-// An M2a session (the scene's "openbf3_m2a" metadata, --m2a-check, --m2a-firefight) turns gunplay on in the load,
-// gives the client the level's gunplay inputs and the first spawn's kit, loads the two teams' viewmodel sets on a
-// thread of their own, and then, every display frame after Done: the own weapon through present_weapon, the
-// viewmodel of the own team, the HUD (fill_hud), the kill counter and the death screen from the drained Death events,
-// the others' capsules tinted friend / foe from W3.0's team field, K / T as KitSelects once spawned, the mapper's
-// weapon gate (alive and spawned). Every other session returns from each hook at once (m2a_ is null).
-//
-// The wave-3 parts (Bf3GameFx fx3, Bf3GameAudio au3, Bf3GameCrowd tp) are built only when their track's .cpp is in the
-// tree: the CMake "# M2a gx" block defines OPENBF3_M2A_HAVE_FX / _AUDIO / _CROWD from the files' presence, so this
-// branch links before they land and picks them up after the merge without an edit (docs/design/m2a-gx.md §3).
-
 #include "level_session_m2a.h"
-#include "level_session_m2b.h" // M2b gx [include]
+#include "level_session_m2b.h"
 
 #include "bf3_localisation.h"
 #include "game_audio.h"
@@ -71,7 +57,6 @@ namespace render = bf3::render;
 namespace sim = bf3::sim;
 namespace sw = bf3::sim::weapons;
 
-// M2b bb [tdm]: the --tdm preview (the // M2b bb block at the end of this file).
 void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::string &p_preround);
 void m2b_bb_tdm_load(host::SharedLoadOptions &r_options);
 void m2b_bb_tdm_server(host::GameServerConfig &r_game, uint32_t p_bots, std::vector<std::string> &r_notes);
@@ -79,10 +64,10 @@ void m2b_bb_tdm_frame(const host::PresentationFrame &p_frame);
 
 namespace {
 
-constexpr uint32_t kMaxPlayableBots = 32; // m2a-w3.md §4: sv's kMaxLagSlots rule keeps the player rewindable
+constexpr uint32_t kMaxPlayableBots = 32;
 constexpr uint32_t kPlayableDefaultBots = 24;
 constexpr uint32_t kPlayCaseBots = 16;
-constexpr uint32_t kFirefightBots = 64; // E9 / E14: 64 firefight bots in pairs in front of the observer (m2a.md §10.2)
+constexpr uint32_t kFirefightBots = 64;
 constexpr size_t kMaxPredictedKept = 1u << 16;
 
 double steady_s() {
@@ -134,7 +119,6 @@ fx::Vec3 m2a_fv(const Vector3 &p_v) {
 	return fx::Vec3{ p_v.x, p_v.y, p_v.z };
 }
 
-// An effect frame whose local +Y is p_axis (fx2's convention: a muzzle's +Y is the barrel), as fx_demo.cpp's.
 fx::Transform m2a_frame_y(const Vector3 &p_origin, const Vector3 &p_axis, const Vector3 &p_forward_hint) {
 	const Vector3 u = p_axis.normalized();
 	Vector3 f = p_forward_hint - u * p_forward_hint.dot(u);
@@ -150,7 +134,6 @@ fx::Transform m2a_frame_y(const Vector3 &p_origin, const Vector3 &p_axis, const 
 	return t;
 }
 
-// A frame with forward = p_forward, up as close to p_up_hint as possible (the camera for culling and the listener).
 fx::Transform m2a_frame_of(const Vector3 &p_origin, const Vector3 &p_forward, const Vector3 &p_up_hint) {
 	const Vector3 f = p_forward.normalized();
 	Vector3 r = p_up_hint.cross(f);
@@ -167,9 +150,7 @@ fx::Transform m2a_frame_of(const Vector3 &p_origin, const Vector3 &p_forward, co
 }
 #endif
 
-} // namespace
-
-// ---- M2aServerRecorder (server thread -> main thread) ---------------------------------------------------------
+}
 
 void M2aServerRecorder::weapon_tick(uint8_t p_slot, const sim::Command &p_command, const sw::SoldierWeaponsState &p_after, const sw::WeaponTickOutput &p_out) {
 	(void)p_after;
@@ -237,8 +218,6 @@ void M2aServerRecorder::take(std::vector<Shot> &r_shots, std::vector<Timed> &r_t
 	damage_.clear();
 }
 
-// ---- M2aGame -----------------------------------------------------------------------------------------------------
-
 bool M2aGame::wants_case(M2aCase p_case) const {
 	return std::find(cases.begin(), cases.end(), p_case) != cases.end();
 }
@@ -255,13 +234,11 @@ void Bf3LevelSession::M2aSessionDeleter::operator()(M2aSession *p_session) const
 	delete p_session;
 }
 
-// ---- main thread: args -------------------------------------------------------------------------------------------
-
 void Bf3LevelSession::m2a_parse_args() {
 	const bool scene_m2a = has_meta("openbf3_m2a") && bool(get_meta("openbf3_m2a"));
 	const bool check = has_user_arg("m2a-check") || has_user_arg("m2a-firefight");
 	if (!scene_m2a && !check) {
-		return; // M1 / S1 / S3: every hook does nothing
+		return;
 	}
 	m2a_.reset(new M2aSession());
 	M2aSession &g = *m2a_;
@@ -308,10 +285,7 @@ void Bf3LevelSession::m2a_parse_args() {
 	if (has_user_arg("m2a-play-seconds")) {
 		g.check_options.play_seconds = std::clamp(std::atof(user_arg_value("m2a-play-seconds").c_str()), 5.0, 3600.0);
 	}
-	// Bots: bt's firefight bots (Free: they walk S1's nav mesh, hunt the nearest enemy and fight; the player is an
-	// enemy like any other) fill the playable scene unless --bots says otherwise; the checks run without (the play
-	// case with a few, the firefight case with kFirefightBots in pairs). At most 32 outside the firefight case
-	// (m2a-w3.md §4: the player must stay inside sv's 64 lag-compensation slots).
+
 	const bool firefight_case = g.wants_case(M2aCase::Firefight);
 	if (!has_user_arg("bots")) {
 		bots_ = g.playable ? kPlayableDefaultBots : (firefight_case ? kFirefightBots : (g.wants_case(M2aCase::Play) ? kPlayCaseBots : 0u));
@@ -325,17 +299,17 @@ void Bf3LevelSession::m2a_parse_args() {
 		bots_ = kMaxPlayableBots;
 	}
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
-	m2b_bb_tdm_args(has_user_arg("tdm"), user_arg_value("kill-limit"), user_arg_value("preround")); // M2b bb [tdm]
-	m2b_gx_args(g, has_meta("openbf3_m2b") && bool(get_meta("openbf3_m2b")), mapper_, bots_, quit_after_, error); // M2b gx [args]
+	m2b_bb_tdm_args(has_user_arg("tdm"), user_arg_value("kill-limit"), user_arg_value("preround"));
+	m2b_gx_args(g, has_meta("openbf3_m2b") && bool(get_meta("openbf3_m2b")), mapper_, bots_, quit_after_, error);
 	if (!has_user_arg("walkers")) {
-		walkers_ = 0; // M1's scripted walkers are not soldiers with weapons
+		walkers_ = 0;
 	}
 	if (g.checks() && quit_after_ <= 0.0) {
-		// A load failure quits a check run with 1 (_process: quit_after_ > 0); the check itself ends the run.
+
 		quit_after_ = 1.0e9;
 	}
 	mapper_.m2a_enable(true);
-	// The viewmodel tuning (FileAccess: main thread), as the vm demo reads it.
+
 	g.vm_tuning_source = "res://config/viewmodel_tuning.cfg";
 	if (FileAccess::file_exists(to_godot(g.vm_tuning_source))) {
 		bf3::core::Result<bf3::anim::ViewmodelTuning> t = bf3::anim::parse_viewmodel_tuning(to_std(FileAccess::get_file_as_string(to_godot(g.vm_tuning_source))));
@@ -347,7 +321,7 @@ void Bf3LevelSession::m2a_parse_args() {
 	} else {
 		g.vm_tuning_source = "(missing: built-in defaults)";
 	}
-	// The HUD's sources: localisation and the UI assets (their loaders start now and run beside the level load).
+
 	const bool windowed = DisplayServer::get_singleton()->get_name() != String("headless");
 	if (windowed) {
 		if (Bf3Localisation::current() == nullptr) {
@@ -379,24 +353,20 @@ void Bf3LevelSession::m2a_parse_args() {
 	}
 }
 
-// ---- loader thread: no Godot API ---------------------------------------------------------------------------------
-
 void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 	if (!m2a_) {
 		return;
 	}
-	r_options.gunplay = true; // the weapons, kits and capsule pose table (sv)
-	m2b_bb_tdm_load(r_options); // M2b bb [tdm]
-	m2b_gx_load(*m2a_, r_options); // M2b gx [load]
+	r_options.gunplay = true;
+	m2b_bb_tdm_load(r_options);
+	m2b_gx_load(*m2a_, r_options);
 	if (!scene_) {
-		return; // headless: no viewmodel (nothing draws it)
+		return;
 	}
-	// The viewmodel sets on their own thread (level_session_m2a.h): its own cache handle (shared with the loader's
-	// when open), the level superbundle's Ant banks and EBX, the mode's 8 loadouts, then the US and RU sets.
+
 	M2aSession *g = m2a_.get();
 #if OPENBF3_M2A_HAVE_CROWD
-	// M2a w3 integration (E16): the crowd's SharedLevel-free half on its own thread, with its own cache handle (shared
-	// with the loader's when open), as the viewmodel thread below.
+
 	g->crowd = std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)>(new Bf3GameCrowd(), &delete_part<Bf3GameCrowd>);
 	g->crowd_loader = std::thread([this, g]() {
 		const double t0 = steady_s();
@@ -410,7 +380,7 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 		if (const bf3::core::Status s = g->crowd->load_body(install_, cache.get(), &stop_); !s.ok()) {
 			g->crowd_body_error = s.error().message;
 		}
-		cache.reset(); // the last holder closes the cache on this thread
+		cache.reset();
 		g->crowd_body_seconds = steady_s() - t0;
 	});
 #endif
@@ -444,9 +414,9 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 			return;
 		}
 		g->vm_kits = std::move(*kits);
-		if (g->m2b) { // M2b gx [defib]: the TDM assault kits carry the defibrillator in slot 2 (cam's add_assault_gadget)
-			render::add_assault_gadget(g->vm_kits, host::kTdmAssaultGadget); // M2b gx [defib]
-		} // M2b gx [defib]
+		if (g->m2b) {
+			render::add_assault_gadget(g->vm_kits, host::kTdmAssaultGadget);
+		}
 		for (const int team : { 1, 2 }) {
 			if (stop_.load(std::memory_order_acquire)) {
 				fail("stopped");
@@ -462,7 +432,7 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 			g->vm_sets[size_t(team - 1)] = std::move(*set);
 		}
 		g->vm_seconds = steady_s() - t0;
-		cache.reset(); // the last holder closes the cache on this thread
+		cache.reset();
 		g->vm_done.store(true, std::memory_order_release);
 	});
 }
@@ -473,7 +443,7 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 	}
 	M2aSession &g = *m2a_;
 	if (g.vm_loader.joinable()) {
-		g.vm_loader.join(); // the kit viewmodels are part of the load (E16); started in m2a_load_options
+		g.vm_loader.join();
 	}
 	const std::shared_ptr<const host::SharedLevel> shared = shared_level();
 	if (shared == nullptr || shared->gunplay == nullptr) {
@@ -493,14 +463,14 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 		g.hud_static_error = hud_static.error().message;
 	}
 	if (g.checks()) {
-		// The range lane's world (E3 at 60 m) and the server-side recorder.
+
 		bf3::core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(shared->static_world);
 		if (world) {
 			g.world = std::move(*world);
 		}
 		g.recorder = std::make_shared<M2aServerRecorder>();
 	}
-	// The wave-3 parts' loads, in m2a_game.h's order (FX, audio with FX's impact sound names, crowd).
+
 	M2aLoadInputs li;
 	li.db = &p_db;
 	li.shared = shared;
@@ -537,7 +507,7 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 			const double t0 = steady_s();
 			g.audio = std::unique_ptr<Bf3GameAudio, void (*)(Bf3GameAudio *)>(new Bf3GameAudio(), &delete_part<Bf3GameAudio>);
 			if (!g.wants_case(M2aCase::Audio)) {
-				// E7's audition library (the M1A2 from MP_001: 0.1-0.4 s and 5 MiB) only for the audio case (m2a-au3.md §10).
+
 				audio::GameAudioLoadOptions ao;
 				ao.audition_superbundles.clear();
 				g.audio->set_load_options(ao);
@@ -558,7 +528,7 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 #if OPENBF3_M2A_HAVE_CROWD
 		{
 			const double t0 = steady_s();
-			// M2a w3 integration (E16): the body half ran on crowd_loader (m2a_load_options); join it, then the items.
+
 			if (g.crowd_loader.joinable()) {
 				g.crowd_loader.join();
 			}
@@ -594,18 +564,14 @@ void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
 	r_game.gunplay.player_team = g.team;
 	if (g.checks()) {
 		r_game.gunplay.observer = g.recorder;
-		if (g.wants_case(M2aCase::Range) || g.wants_case(M2aCase::Kits) || g.wants_case(M2aCase::Fx)) { // fx: E8 (5)'s soldier hit
-			// E3's range rule (exact aim) and one stationary target bot in slot 0 for the range and the knife.
+		if (g.wants_case(M2aCase::Range) || g.wants_case(M2aCase::Kits) || g.wants_case(M2aCase::Fx)) {
+
 			r_game.gunplay.exact_aim = true;
 			r_game.gunplay.target_bots = 1;
 			r_game.gunplay.target_team = g.team == 1 ? 2 : 1;
 		}
 	}
-	// The bots are bt's firefight bots (G3): S1's bot level stays for walking (BotFillConfig count 0, as
-	// firefight_run.cpp), and init adds bots_ FirefightBrains after the target bots. Kits are sv's (slot % 4), teams
-	// alternate, so the player (team --team) has enemies and teammates. Slots: the bots first, then the player: with
-	// <= 32 bots the player is rewindable (kMaxLagSlots 64); the firefight case's 64 bots put the observer in slot 64,
-	// which is never hit (m2a-bt.md §5: the observer watches).
+
 	if (bots_ > 0 && r_game.bots != nullptr) {
 		auto fill = std::make_shared<host::BotFillConfig>(*r_game.bots);
 		fill->count = 0;
@@ -621,10 +587,10 @@ void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
 		r_game.max_slots = std::max<uint32_t>(64u, bots_ + 1u + r_game.walkers + r_game.gunplay.target_bots);
 		char line[256];
 		std::snprintf(line, sizeof(line), "[m2a] firefight bots: %u (%s), max slots %u", bots_, g.firefight_pairs ? "pairs" : "free", r_game.max_slots);
-		g.part_notes.push_back(line); // loader thread: printed on the first frame
+		g.part_notes.push_back(line);
 	}
-	m2b_bb_tdm_server(r_game, bots_, g.part_notes); // M2b bb [tdm]
-	m2b_gx_server(g, r_game, bots_); // M2b gx [server]
+	m2b_bb_tdm_server(r_game, bots_, g.part_notes);
+	m2b_gx_server(g, r_game, bots_);
 }
 
 void Bf3LevelSession::m2a_client_config(host::ClientSessionConfig &r_config) const {
@@ -633,12 +599,10 @@ void Bf3LevelSession::m2a_client_config(host::ClientSessionConfig &r_config) con
 	}
 	const M2aSession &g = *m2a_;
 	r_config.gunplay = g.gunplay;
-	r_config.send_kit_select = true; // the first spawn's kit and team go with Ready
+	r_config.send_kit_select = true;
 	r_config.kit_select = bf3::net::KitSelect{ g.kit, g.team };
 	r_config.record_predicted = g.record_predicted;
 }
-
-// ---- main thread: every frame -----------------------------------------------------------------------------------
 
 void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 	(void)p_delta;
@@ -646,7 +610,7 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 		return;
 	}
 	M2aSession &g = *m2a_;
-	// 1. Drain the events ring once (every frame from the session start: E14 gates its overflows at 0).
+
 	g.events.clear();
 	{
 		std::array<host::PresentEvent, 256> chunk{};
@@ -662,13 +626,13 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 	if (g.record_predicted) {
 		client_->take_predicted(g.predicted_shots, g.predicted_timed);
 		if (g.predicted_shots.size() > kMaxPredictedKept || g.predicted_timed.size() > kMaxPredictedKept) {
-			g.predicted_shots.clear(); // a check that stopped reading: keep the memory bounded
+			g.predicted_shots.clear();
 			g.predicted_timed.clear();
 		}
 	} else if (g.checks()) {
 		std::vector<host::PredictedShot> s;
 		std::vector<host::PredictedTimed> t;
-		client_->take_predicted(s, t); // recorded but not wanted right now: dropped
+		client_->take_predicted(s, t);
 	}
 	if (g.recorder != nullptr) {
 		g.recorder->take(g.server_shots, g.server_timed, g.server_damage);
@@ -684,7 +648,7 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 			}
 		}
 	}
-	// 2. The own soldier and weapon of this frame.
+
 	const host::PresentationFrame &f = *frame_;
 	g.spawned = f.valid && f.stats.spawned;
 	g.own_slot = g.spawned ? f.stats.slot : uint8_t(0xFF);
@@ -698,8 +662,7 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 	if (g.alive && f.own_weapons_valid && g.gunplay != nullptr && g.gunplay->table != nullptr) {
 		g.weapon = host::present_weapon(f.own_weapons_prev, f.own_weapons_curr, f.tick, host::present_own_fraction(f, p_now_ns), *g.gunplay->table);
 	}
-	// 3. Score and death screen from the events (Death: slot = killer, aux = victim; a fall death names the victim
-	// as its own killer, both flags set).
+
 	for (const host::PresentEvent &e : g.events) {
 		switch (e.kind) {
 			case host::PresentKind::Spawn:
@@ -743,21 +706,21 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 		}
 	}
 	if (state_dead && !g.dead) {
-		g.dead = true; // the predicted state died before the Death event arrived (it names the killer then)
+		g.dead = true;
 		g.killed_by = 0xFF;
 		g.killed_by_self = false;
 		g.death_ns = p_now_ns;
 	}
 	if (g.alive && f.own_curr.life != g.own_life) {
 		if (g.own_life != 0) {
-			++g.respawns; // every life after the first (a death's respawn, or a check's SpawnAt)
+			++g.respawns;
 		}
 		g.own_life = f.own_curr.life;
 		g.dead = false;
 		g.death_ns = 0;
 		g.killed_by = 0xFF;
 	}
-	// 4. The mapper: the slots for the wheel and the satisfied wanted slot; weapon input only while alive and spawned.
+
 	uint16_t filled = 0;
 	if (f.own_weapons_valid) {
 		for (size_t s = 0; s < sw::kMaxWeaponSlots; ++s) {
@@ -768,8 +731,8 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 	}
 	mapper_.m2a_set_slots(g.weapon.valid ? g.weapon.active_slot : uint8_t(0), g.weapon.valid ? g.weapon.pending_slot : uint8_t(0xFF), filled);
 	mapper_.m2a_set_weapons_allowed(done_ && g.alive && g.weapon.valid);
-	m2b_gx_presented(g, *client_, f, mapper_, p_now_ns); // M2b gx [presented]: the spawn screen takes K / T first
-	// 5. K / T: the next spawn's kit and team, sent as a KitSelect only once spawned (m2a-w3.md §4.1 G4 timing).
+	m2b_gx_presented(g, *client_, f, mapper_, p_now_ns);
+
 	if (const uint32_t k = mapper_.m2a_take_kit_presses(); k > 0) {
 		g.next_kit = uint8_t((g.next_kit + k) % host::kKitCount);
 		g.kit_pending = true;
@@ -790,7 +753,6 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 
 namespace {
 
-// The Godot side of the M2a scene: the UI layer, the HUD, the labels and the capsule tints (once, after Done).
 void m2a_build_ui(Node *p_parent, M2aGame &r_game, bool p_windowed) {
 	r_game.layer = memnew(CanvasLayer);
 	r_game.layer->set_name("M2aUi");
@@ -811,13 +773,12 @@ void m2a_build_ui(Node *p_parent, M2aGame &r_game, bool p_windowed) {
 	r_game.death_label->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
 	r_game.death_label->set_visible(false);
 	r_game.layer->add_child(r_game.death_label);
-	r_game.tints[0] = tint_material(Color(0.62f, 0.62f, 0.62f)); // team unknown
-	r_game.tints[1] = tint_material(Color(0.25f, 0.55f, 1.0f)); // friend
-	r_game.tints[2] = tint_material(Color(1.0f, 0.28f, 0.2f)); // enemy
+	r_game.tints[0] = tint_material(Color(0.62f, 0.62f, 0.62f));
+	r_game.tints[1] = tint_material(Color(0.25f, 0.55f, 1.0f));
+	r_game.tints[2] = tint_material(Color(1.0f, 0.28f, 0.2f));
 	r_game.built = true;
 }
 
-// The def -> viewmodel item map of both teams, from the kit table's unlocks (PresentedWeapon::def -> the item).
 void m2a_map_items(M2aGame &r_game) {
 	if (r_game.gunplay == nullptr) {
 		return;
@@ -846,8 +807,6 @@ void m2a_map_items(M2aGame &r_game) {
 	}
 }
 
-// The wave-3 parts (m2a_game.h's per-frame order), once their tracks have landed: built on the first frame after
-// Done, then stepped with one M2aFrame. Without any of them this does nothing. Times each part (E14).
 void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationFrame &p_frame, uint64_t p_now_ns, double p_delta, Camera3D *p_camera,
 		Bf3Viewmodel *p_own_vm, bool p_free_camera, const std::array<host::PresentedOtherWeapon, bf3::net::kMaxSlots> &p_others, size_t p_other_count) {
 	r_game.ms_crowd = r_game.ms_fx = r_game.ms_audio = 0;
@@ -899,14 +858,14 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 	mf.own_alive = r_game.alive;
 	mf.own_slot = r_game.own_slot;
 	mf.own_team = r_game.own_team;
-	// The active camera (1p or F6's free camera): the FX view and the listener.
+
 	Camera3D *active = p_camera;
 	if (Viewport *vp = r_parent.get_viewport()) {
 		active = vp->get_camera_3d() != nullptr ? vp->get_camera_3d() : p_camera;
 	}
 	if (r_game.listener_override) {
 		mf.camera = m2a_frame_of(r_game.listener_position, r_game.listener_forward, Vector3(0, 1, 0));
-		mf.free_camera = true; // the own soldier in 3p (E7's shooter)
+		mf.free_camera = true;
 		r_game.camera_valid = false;
 	} else if (active != nullptr) {
 		const Transform3D t = active->get_global_transform();
@@ -914,12 +873,12 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 		const double dt = std::clamp(p_delta, 1e-4, 0.25);
 		if (r_game.camera_valid) {
 			const Vector3 v = (t.origin - r_game.camera_prev) / float(dt);
-			mf.camera_velocity = v.length() < 200.0f ? m2a_fv(v) : fx::Vec3{}; // a teleport is not a velocity
+			mf.camera_velocity = v.length() < 200.0f ? m2a_fv(v) : fx::Vec3{};
 		}
 		r_game.camera_prev = t.origin;
 		r_game.camera_valid = true;
 	}
-	// 3. crowd, then the own 1p muzzle first and the crowd's after it.
+
 	const auto ms_since = [](std::chrono::steady_clock::time_point p_t0) {
 		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
 	};
@@ -933,12 +892,12 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 		const fx::Vec3 vel{ p_frame.own_curr.velocity[0], p_frame.own_curr.velocity[1], p_frame.own_curr.velocity[2] };
 		fx::MuzzleSample s;
 		if (r_game.fx != nullptr) {
-			s = r_game.fx->own_muzzle(*p_own_vm, r_game.weapon.def, r_game.own_slot, vel); // fx3 (G6): the def's FireEffects1p offset
+			s = r_game.fx->own_muzzle(*p_own_vm, r_game.weapon.def, r_game.own_slot, vel);
 		}
 		if (s.valid) {
 			++r_game.own_muzzles_fx;
 		} else {
-			s = muzzle_sample(viewmodel_muzzle_transform(*p_own_vm), r_game.own_slot, vel); // G6: the muzzle joint or the camera stand-in
+			s = muzzle_sample(viewmodel_muzzle_transform(*p_own_vm), r_game.own_slot, vel);
 			r_game.own_muzzles_standin += s.valid ? 1 : 0;
 		}
 		if (s.valid) {
@@ -950,7 +909,7 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 		muzzles.insert(muzzles.end(), crowd.begin(), crowd.end());
 	}
 	mf.muzzles = muzzles;
-	// 4. FX, its sound cues; 5. audio (with the effects' sound starts and stops).
+
 	t0 = std::chrono::steady_clock::now();
 	std::span<const fx::ImpactSoundCue> cues;
 	std::vector<audio::EffectSoundRequest> effect_sounds;
@@ -958,7 +917,7 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 		if (p_own_vm != nullptr) {
 			const float fov = p_own_vm->applied_weapon_fov();
 			if (fov > 0.0f && fov != r_game.fp_fov_applied) {
-				r_game.fx->set_first_person_projection(fov, 1.0f); // the 1p effects share the viewmodel's projection
+				r_game.fx->set_first_person_projection(fov, 1.0f);
 				r_game.fp_fov_applied = fov;
 			}
 		}
@@ -975,7 +934,7 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 				effect_sounds.push_back(r);
 			}
 		} else if (Bf3FxRenderer *renderer = Object::cast_to<Bf3FxRenderer>(r_parent.get_node_or_null(NodePath("GameFx")))) {
-			renderer->hide_all(); // E9's FX-off window
+			renderer->hide_all();
 		}
 	}
 	r_game.ms_fx = ms_since(t0);
@@ -990,7 +949,7 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 #endif
 }
 
-} // namespace
+}
 
 bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 	if (!m2a_) {
@@ -1003,7 +962,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
 	};
 	const host::PresentationFrame &f = *frame_;
-	m2b_bb_tdm_frame(f); // M2b bb [tdm]
+	m2b_bb_tdm_frame(f);
 	if (!g.built) {
 		for (const std::string &n : g.part_notes) {
 			UtilityFunctions::print(to_godot(n));
@@ -1015,7 +974,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(to_godot("[m2a] HUD feed without weapon rows: " + g.hud_static_error));
 		}
 	}
-	// The viewmodel sets: built when their thread is done.
+
 	if (!g.vm_built && g.vm_done.load(std::memory_order_acquire)) {
 		g.vm_built = true;
 		if (g.vm_loader.joinable()) {
@@ -1043,8 +1002,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(line);
 		}
 	}
-	// E16 prints the VRAM next to the peak working set: the first frame after Done (everything loaded) and 60 frames on,
-	// once the viewmodel and UI nodes built on the first frame have been drawn.
+
 	if (g.frames == 1 || g.frames == 60) {
 		RenderingServer *rs_info = RenderingServer::get_singleton();
 		if (rs_info != nullptr) {
@@ -1065,7 +1023,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 				std::to_string(g.hud->icon_count()) + " icons"));
 	}
 	const bool free_camera = mapper_.free_camera();
-	// The own viewmodel (hidden when dead, in the free camera, or without a weapon item).
+
 	Camera3D *camera = cameras_.first_person();
 	Bf3Viewmodel *own_vm = g.own_viewmodel();
 	if (g.shown_team != g.own_team) {
@@ -1114,7 +1072,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 	}
 	g.ms_vm = ms_since(part_t0);
 	part_t0 = std::chrono::steady_clock::now();
-	// The HUD (Bf3Hud reads only the model; fill_hud clears the weapon fields without a live soldier).
+
 	if (g.hud != nullptr) {
 		host::HudFeedInput in;
 		in.weapon = g.weapon;
@@ -1130,10 +1088,10 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		g.hud->set_visible(!free_camera);
 	}
 	g.ms_hud = ms_since(part_t0);
-	if (m2b_gx_frame(*this, g, f, p_now_ns, p_delta, camera, free_camera, headless_)) { // M2b gx [frame]
-		return true; // M2b gx [frame]: the M2b check finished the run
-	} // M2b gx [frame]
-	// The others: friend / foe tint (W3.0's team field, in present_others' order), hidden once tp's crowd draws them.
+	if (m2b_gx_frame(*this, g, f, p_now_ns, p_delta, camera, free_camera, headless_)) {
+		return true;
+	}
+
 	const double render_ticks = host::present_render_ticks(f, p_now_ns);
 	std::array<host::PresentedOtherWeapon, bf3::net::kMaxSlots> others{};
 	const size_t n_others = f.valid ? host::present_other_weapons(f, render_ticks, others) : 0;
@@ -1157,15 +1115,14 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		}
 	}
 	m2a_step_parts(*this, g, f, p_now_ns, p_delta, camera, own_vm, free_camera, others, n_others);
-	g.ms_total = ms_since(frame_t0); // E14's M2a main-thread additions (the labels and the check below are not counted)
-	// M1's status line names S1's bots (update_hud, just refreshed when its timer is 0): with bt's firefight bots the
-	// M2a scene says so instead.
+	g.ms_total = ms_since(frame_t0);
+
 	if (hud_ != nullptr && done_ && hud_timer_ == 0.0 && g.firefight_bots > 0) {
 		const uint32_t shown = std::min<uint32_t>(f.other_count, g.firefight_bots + uint32_t(walkers_));
 		hud_->set_text(get_status_text() + to_godot(" | firefight bots " + std::to_string(g.firefight_bots) + (g.firefight_pairs ? " (bt, pairs)" : " (bt, free)") +
 				", others in the snapshot " + std::to_string(shown)));
 	}
-	// The labels: kill counter, next spawn, death screen with the respawn countdown.
+
 	const Vector2 vp = get_viewport() != nullptr ? get_viewport()->get_visible_rect().size : Vector2(1280, 720);
 	if (g.score_label != nullptr) {
 		char line[256];
@@ -1202,7 +1159,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 			g.death_label->set_size(Vector2(vp.x, 90.0f));
 		}
 	}
-	// The check (once the viewmodel thread is done and the HUD is loaded, or failed).
+
 	if (g.checks() && g.check == nullptr && !g.finished && (g.vm_built || !scene_) && (g.hud == nullptr || g.hud->is_loaded())) {
 		g.check = std::make_unique<M2aCheck>(*this, g, g.cases, g.check_options);
 	}
@@ -1218,7 +1175,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 }
 
 void Bf3LevelSession::m2a_input(const Ref<InputEvent> &p_event) {
-	(void)p_event; // the weapon keys are the mapper's (input_mapper.h M2a gx block); K / T are read in m2a_presented
+	(void)p_event;
 }
 
 void Bf3LevelSession::m2a_shutdown() {
@@ -1227,13 +1184,13 @@ void Bf3LevelSession::m2a_shutdown() {
 	}
 	M2aSession &g = *m2a_;
 	if (g.vm_loader.joinable()) {
-		g.vm_loader.join(); // open_viewmodel_sources cannot be cancelled: a quit during it waits for it
+		g.vm_loader.join();
 	}
 	if (g.crowd_loader.joinable()) {
-		g.crowd_loader.join(); // M2a w3 integration (E16): a loader that failed before m2a_load_assets
+		g.crowd_loader.join();
 	}
 	g.check.reset();
-	m2b_gx_shutdown(g); // M2b gx [shutdown]
+	m2b_gx_shutdown(g);
 #if OPENBF3_M2A_HAVE_CROWD
 	if (g.crowd != nullptr) {
 		g.crowd->shutdown();
@@ -1254,16 +1211,8 @@ void Bf3LevelSession::m2a_shutdown() {
 	}
 }
 
-} // namespace bf3::godot_side
+}
 
-// M2b bb (docs/design/m2b.md §11 "bb's --tdm preview"; docs/design/m2b-bb.md): `tools\play.cmd --tdm` on the M2a scene,
-// a preview between the waves, compiled and not a row (nothing gates on it; the wave-2 scene is the real path). It
-// turns the TDM rules on without the deploy screen (the M2a automatic respawn and the KitSelect kit), sets
-// SharedLoadOptions::tdm for the one load the server and the client share (else the client's rules_flags check
-// refuses it), and replaces the firefight bots with GameServerConfig::tdm_bots (config/bot_tuning.cfg). The M2a scene
-// has no TDM HUD, so every MatchState change prints one console line (phase, the two counts, the kill limit, the
-// winner). --kill-limit=N and --preround=S pass to the rules (dev options, Q12). The state is file-static: set on the
-// main thread in m2a_parse_args before the loader thread starts, read by that thread afterwards.
 #include "bf3/host/tdm_brain.h"
 
 #include <godot_cpp/classes/project_settings.hpp>
@@ -1300,7 +1249,7 @@ const char *m2b_phase_name(bf3::net::MatchPhase p_phase) {
 	return "?";
 }
 
-} // namespace
+}
 
 void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::string &p_preround) {
 	s_m2b_tdm = M2bTdmPreview();
@@ -1327,7 +1276,7 @@ void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::str
 
 void m2b_bb_tdm_load(host::SharedLoadOptions &r_options) {
 	if (s_m2b_tdm.on) {
-		r_options.tdm = true; // the logic graph, the TDM kits and the immunity abort (ru's load)
+		r_options.tdm = true;
 	}
 }
 
@@ -1341,10 +1290,10 @@ void m2b_bb_tdm_server(host::GameServerConfig &r_game, uint32_t p_bots, std::vec
 	r_game.rules.kill_limit_override = s_m2b_tdm.kill_limit;
 	r_game.rules.preround_override_s = s_m2b_tdm.preround_s;
 	r_game.rules.max_players = 32;
-	r_game.firefight = nullptr; // the TDM bots replace the firefight bots
+	r_game.firefight = nullptr;
 	if (p_bots > 0) {
 		auto bots = std::make_shared<host::TdmBotConfig>();
-		bots->count = std::min<uint32_t>(p_bots, 31u); // 16 v 16 with the player
+		bots->count = std::min<uint32_t>(p_bots, 31u);
 		bots->tuning_cfg = s_m2b_tdm.tuning_cfg;
 		r_game.tdm_bots = bots;
 	}
@@ -1369,4 +1318,4 @@ void m2b_bb_tdm_frame(const host::PresentationFrame &p_frame) {
 	UtilityFunctions::print(line);
 }
 
-} // namespace bf3::godot_side
+}

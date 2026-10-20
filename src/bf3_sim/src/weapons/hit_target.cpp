@@ -1,4 +1,3 @@
-// Hit targets: exact segment-vs-capsule tests and the stationary stand-in layout (docs/design/m2a-weapons.md §5.7).
 #include "bf3/sim/weapons/hit_target.h"
 
 #include "bf3/sim/weapons/surface_materials.h"
@@ -19,7 +18,6 @@ using detail::dot;
 using detail::scale;
 using detail::sub;
 
-// The earliest t in [0, 1] where A + t D enters the sphere (p_center, r); A outside it.
 std::optional<double> segment_sphere(const DVec3 &p_a, const DVec3 &p_d, const DVec3 &p_center, double p_r) {
 	const DVec3 m = sub(p_a, p_center);
 	const double a = dot(p_d, p_d);
@@ -39,7 +37,6 @@ std::optional<double> segment_sphere(const DVec3 &p_a, const DVec3 &p_d, const D
 	return t;
 }
 
-// Squared distance from p_p to the segment p_a..p_b and the closest point.
 double point_segment_sq(const DVec3 &p_p, const DVec3 &p_a, const DVec3 &p_b, DVec3 *r_closest = nullptr) {
 	const DVec3 ab = sub(p_b, p_a);
 	const double l2 = dot(ab, ab);
@@ -53,7 +50,6 @@ double point_segment_sq(const DVec3 &p_p, const DVec3 &p_a, const DVec3 &p_b, DV
 	return dot(d, d);
 }
 
-// Squared distance between the segments p..q and a..b (closest points, Ericson 5.1.9), used by the bound test.
 double segment_segment_sq(const DVec3 &p_p, const DVec3 &p_q, const DVec3 &p_a, const DVec3 &p_b) {
 	const DVec3 d1 = sub(p_q, p_p);
 	const DVec3 d2 = sub(p_b, p_a);
@@ -98,8 +94,6 @@ struct Placed {
 	Vec3 b{};
 };
 
-// The [inferred] stand-in layout (docs §5.7 table), metres in the soldier frame (x left, y up, z forward) for the
-// data's poses (stand eye 1.6, crouch eye 1.0, prone 0.3); p_side is +1 left, -1 right.
 Placed layout(Pose p_pose, Role p_role, float p_side) {
 	switch (p_pose) {
 		case Pose::Stand:
@@ -164,7 +158,7 @@ std::string lower(std::string_view p_s) {
 	return o;
 }
 
-} // namespace
+}
 
 bool segment_capsule(const Vec3 &p_from, const Vec3 &p_to, const ZoneCapsule &p_capsule, float &r_fraction, Vec3 &r_normal) {
 	using namespace detail;
@@ -176,7 +170,7 @@ bool segment_capsule(const Vec3 &p_from, const Vec3 &p_to, const ZoneCapsule &p_
 	if (!(r > 0) || !finite3(a) || !finite3(d) || !finite3(c0) || !finite3(c1)) {
 		return false;
 	}
-	// A start inside the capsule hits at 0, the normal opposite the segment.
+
 	if (point_segment_sq(a, c0, c1) <= r * r) {
 		r_fraction = 0.0f;
 		r_normal = to_f(normalize(scale(d, -1.0), { 0, 1, 0 }));
@@ -238,7 +232,7 @@ bool segment_target(const Vec3 &p_from, const Vec3 &p_to, const HitTarget &p_tar
 		const ZoneCapsule &cap = p_target.capsules[i];
 		float f = 0;
 		Vec3 n{};
-		if (segment_capsule(p_from, p_to, cap, f, n) && f < best) { // strict: ties keep the lower index
+		if (segment_capsule(p_from, p_to, cap, f, n) && f < best) {
 			best = f;
 			hit = true;
 			r_hit.fraction = f;
@@ -375,4 +369,4 @@ bool zone_aim_point(const HitTarget &p_target, HitZone p_zone, Vec3 &r_point) {
 	return false;
 }
 
-} // namespace bf3::sim::weapons
+}

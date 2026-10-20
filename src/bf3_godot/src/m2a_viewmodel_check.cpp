@@ -1,37 +1,3 @@
-// The vm track's headless check (docs/design/m2a-vm.md; m2a.md E19, the E5 viewmodel row, E11's viewmodel report).
-// Scene: res://scenes/m2a_viewmodel.tscn -- --vm-check (ctest godot.m2a_viewmodel).
-//
-// Every scripted kit (vm_script.h) is presented display frame by display frame at 60 and 144 frames per second, in
-// both FOV-time modes (the aiming controller's per-transition times, the shipped default, and its generic
-// fovTransitionTime), through the real Bf3Viewmodel and Camera3D; each frame is read back:
-//   e19.fov.hip / e19.fov.ads   Camera3D vertical FOV 55 at the hip marks, 40 at the aimed marks
-//   e19.vmfov.hip               the weapon's and the arms' fov_override == the item's RenderFov at hip (55 on the
-//                               kits' guns)
-//   e19.fov.in / e19.fov.out    the FOV reaches the aimed / hip value the transition's FOV time after the press /
-//                               release, +- 1 display frame (the press = the display time the presented zoom flag
-//                               turns on: the tick_end of the state before the tick that set it)
-//   e19.fov.generic_0.15        the generic mode: the FOV times in use are 0.15 s (m2a.md E19's number, asserted)
-//                               and every transition lands within +- 1 frame of it
-//   e19.recoil                  the camera's recoil offset (camera angles - local view - presentation kick) ==
-//                               the interpolated predicted recoil within 1e-4 deg, every frame
-//   e19.springs                 every frame whose springs are not at rest is within the largest settle_seconds of
-//                               the last spring input (view rate, motion, sprint, ADS blend change, shot)
-//   e19.springs.<s>             per spring (sway, bob, kick, camera): not at rest at most its own settle_seconds
-//                               + 1 frame after its own last input (view rate; motion or sprint; shot; shot)
-//   e19.zoom_refused            zoom held while deploying or sprinting presents no ADS (anim::ads_allowed, §16
-//                               Q21); the sim's own refusal is sv's (printed PENDING while the stub sets the flag)
-//   e5.clip_start               the reload clip is the action on screen within 1 display frame of kReloadStarted
-//   e5.fire_after_finish        the first shot after kReloadFinished is on screen within 1 display frame of it
-//   e5.clip_cut                 that shot takes the reload clip off (authored rate, §16 Q4) within the crossfade
-//   e11.coverage                deploy, fire and reload of every item of the 8 loadouts (read from the data:
-//                               render::read_viewmodel_kits): a clip or a counted stand-in
-//   e11.kits_match_data         the data's loadouts equal the documented table (m2a.md §5.6)
-//   vm.alpha_test               every drawn slot the level shader database calls alpha-tested is drawn with an
-//                               alpha scissor (the knife's dog-tag chain strip with --vm-dogtags)
-//   vm.knife_dog_tags           the knife's dog tags and chain are left out (stand-in, render::kDogTagTexture), or
-//                               drawn with --vm-dogtags
-// Info lines: the E5 length table (authored clip length next to ReloadTime), the look scale and the vignette at full
-// ADS, the present cost.
 #include "m2a_viewmodel_demo.h"
 
 #include "fp_camera.h"
@@ -62,9 +28,9 @@ namespace sw = bf3::sim::weapons;
 namespace {
 
 constexpr double kDeg = 180.0 / 3.14159265358979323846;
-constexpr double kRecoilToleranceDeg = 1e-4; // E19
+constexpr double kRecoilToleranceDeg = 1e-4;
 constexpr float kFovTolerance = 1e-3f;
-constexpr float kE19GenericFovSeconds = 0.15f; // m2a.md E19: fovTransitionTime
+constexpr float kE19GenericFovSeconds = 0.15f;
 
 struct Row {
 	std::string id;
@@ -104,41 +70,39 @@ bool is_reload_clip(uint32_t p_clip) {
 	return p_clip == uint32_t(bf3::anim::VmClip::Reload) || p_clip == uint32_t(bf3::anim::VmClip::ReloadEmpty);
 }
 
-// The measured results of one pass (kit x fps x FOV mode).
 struct Accum {
-	// e19.fov.hip / ads
+
 	uint32_t hip_marks = 0, hip_bad = 0;
 	uint32_t ads_marks = 0, ads_bad = 0;
 	float ads_fov_seen = 0;
 	std::string fov_bad;
-	// e19.vmfov.hip
+
 	uint32_t vm_hip_bad = 0;
 	std::set<float> render_fovs;
-	// e19.fov.in / out: worst |measured - expected| / dt, and the measured values
+
 	double worst_in_frames = 0, worst_out_frames = 0;
 	uint32_t transitions = 0, transitions_bad = 0;
 	std::string transition_lines;
-	// e19.recoil
+
 	double worst_recoil_deg = 0;
 	double max_recoil_deg = 0;
 	uint64_t frames = 0;
-	// e19.springs
+
 	double worst_unsettled_s = 0;
 	uint32_t settle_marks = 0, settle_bad = 0;
-	// e19.springs.<spring>: per spring (sway, bob, kick, camera) the worst time not at rest after its own last input,
-	// and that time past the spring's settle_seconds in display frames of the pass
+
 	std::array<double, 4> spring_worst_s{};
 	std::array<double, 4> spring_excess_frames{ -1e9, -1e9, -1e9, -1e9 };
 	std::array<uint64_t, 4> spring_inputs{};
-	// e19.fov.generic_0.15: the FOV times the camera ran with on the zoomable items
+
 	float fov_seconds_min = 1e9f, fov_seconds_max = -1e9f;
-	// e19.zoom_refused
+
 	uint64_t refused_frames = 0, refused_bad = 0, sim_flag_frames = 0;
-	// e5
+
 	uint32_t reloads = 0, clip_start_bad = 0, fire_bad = 0, cut_bad = 0;
 	double worst_clip_start_s = 0, worst_fire_after_s = 0, worst_cut_s = 0;
 	std::string e5_lines;
-	// info
+
 	double present_us_sum = 0, present_us_max = 0;
 	uint64_t present_frames = 0;
 	std::map<std::string, std::string> ads_info;
@@ -162,7 +126,6 @@ const sw::ShotEvent *find_shot(const vm_script::KitRun &p_run, uint8_t p_slot, d
 	return nullptr;
 }
 
-// Presents one kit from its start to its end at p_fps and folds every frame's read-back into r_acc.
 void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_acc) {
 	const Bf3M2aViewmodelDemo::Kit &kit = p_demo.kits()[p_kit];
 	const vm_script::KitRun &run = kit.run;
@@ -175,7 +138,6 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 	const double t0 = run.start_s();
 	const double t_end = run.end_s();
 
-	// Mark times per slot.
 	struct Pending {
 		double at;
 		uint8_t slot;
@@ -186,7 +148,7 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 	for (const vm_script::Mark &m : run.marks) {
 		marks.push_back({ m.time_s, m.slot, m.label });
 	}
-	// The transitions to time: (slot, press, release).
+
 	struct Transition {
 		uint8_t slot;
 		double press, release;
@@ -202,7 +164,7 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			transitions.push_back({ slot, press->time_s, release->time_s });
 		}
 	}
-	// The reloads to check: (slot, started, finished, first shot after the finish).
+
 	struct Reload {
 		uint8_t slot;
 		std::string label;
@@ -265,7 +227,6 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			r_acc.fov_seconds_max = std::max({ r_acc.fov_seconds_max, params.fov_in_seconds, params.fov_out_seconds });
 		}
 
-		// Recoil: the camera read back.
 		{
 			double cam_yaw = 0, cam_pitch = 0;
 			camera_view_angles_of(camera, cam_yaw, cam_pitch);
@@ -276,7 +237,6 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			r_acc.max_recoil_deg = std::max(r_acc.max_recoil_deg, double(std::fabs(view.weapon.recoil.pitch)));
 		}
 
-		// Spring inputs and the unsettled frames.
 		bool input = view.yaw_rate != 0.0f || view.pitch_rate != 0.0f || view.speed > 0.0f || view.sprinting != last_sprint ||
 				view.sprinting || std::fabs(ads.blend - last_blend) > 1e-7f;
 		for (const bf3::host::PresentEvent &e : events) {
@@ -291,8 +251,7 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 		} else if (!out.springs_at_rest) {
 			r_acc.worst_unsettled_s = std::max(r_acc.worst_unsettled_s, t - last_input);
 		}
-		// Per spring, against its own settle_seconds: the input that moves its target (or kicks it) this frame, and
-		// whether it is at rest at target 0 (every target is 0 without its input).
+
 		if (const bf3::anim::ViewmodelAnimator *animator = vm->animator()) {
 			const std::array<bf3::anim::SpringState, 7> st = animator->springs();
 			bool shot = false;
@@ -321,7 +280,6 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			}
 		}
 
-		// Refusal.
 		if (view.zoom_held && (view.weapon.phase == sw::WeaponPhase::Deploying || view.sprinting)) {
 			++r_acc.refused_frames;
 			if (ads.zoomed || std::fabs(cam_fov - params.hip_fov) > kFovTolerance) {
@@ -332,7 +290,6 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			}
 		}
 
-		// Marks.
 		std::vector<Pending> later;
 		for (Pending &m : marks) {
 			if (m.done || t + 1e-9 < m.at || m.slot != slot) {
@@ -363,7 +320,7 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 						double(vm->look_scale()), double(params.look_speed_zoom), double(vm->applied_weapon_fov()), double(params.render_fov),
 						double(params.zoom_render_fov), double(vm->vignette_strength()));
 			} else if (m.label == "settle") {
-				// Checked at the mark + the sway / bob settle time (below, as a pending row).
+
 				later.push_back({ m.at + double(std::max(tuning.sway.settle_seconds, tuning.bob.settle_seconds)) + dt, m.slot, "settled" });
 			} else if (m.label == "settled") {
 				++r_acc.settle_marks;
@@ -375,7 +332,6 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 
 		marks.insert(marks.end(), later.begin(), later.end());
 
-		// FOV transitions.
 		for (Transition &tr : transitions) {
 			if (tr.slot != slot) {
 				continue;
@@ -390,7 +346,6 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			}
 		}
 
-		// Reloads.
 		for (Reload &r : reloads) {
 			if (r.slot != slot || r.started < 0) {
 				continue;
@@ -460,14 +415,14 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 	}
 }
 
-} // namespace
+}
 
 int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 	std::vector<Row> rows;
 	const bf3::anim::ViewmodelTuning base = p_demo.tuning();
 	print("[vm] tuning " + p_demo.tuning_source() + fmt(" (fov_transition_specific %s)", base.fov_transition_specific ? "true" : "false"));
 	const double fps_list[] = { 60.0, 144.0 };
-	const bool modes[] = { true, false }; // specific (default), generic fovTransitionTime
+	const bool modes[] = { true, false };
 	Accum all;
 	Accum per_mode[2];
 	for (int mi = 0; mi < 2; ++mi) {
@@ -548,8 +503,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 						a.worst_out_frames));
 	}
 	{
-		// The generic mode's FOV time is the aiming controller's fovTransitionTime: E19's literal 0.15 s, asserted on
-		// the parameters the camera ran with (every frame of a zoomable item), and the transitions land on it.
+
 		const Accum &g = per_mode[1];
 		const bool literal = g.fov_seconds_min <= g.fov_seconds_max && std::fabs(g.fov_seconds_min - kE19GenericFovSeconds) <= 1e-6f &&
 				std::fabs(g.fov_seconds_max - kE19GenericFovSeconds) <= 1e-6f;
@@ -567,7 +521,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 				"(mark + sway / bob settle_seconds)",
 					all.worst_unsettled_s, settle_max, all.settle_marks - all.settle_bad, all.settle_marks));
 	{
-		// Each spring against its own settle_seconds (+ 1 display frame of the pass), after its own last input.
+
 		const char *names[4] = { "sway", "bob", "kick", "camera" };
 		const bf3::anim::SpringParams *ps[4] = { &tu.sway, &tu.bob, &tu.kick, &tu.camera_recoil };
 		for (size_t k = 0; k < 4; ++k) {
@@ -590,11 +544,10 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 			fmt("%u reloads: the shot takes the reload clip off within %.3f s (<= crossfade %.2f + 1 frame; authored rate, §16 Q4)", all.reloads, all.worst_cut_s,
 					double(bf3::anim::kViewmodelCrossfadeSeconds)));
 
-	// E11: the coverage of every item of the 8 loadouts.
 	{
 		uint32_t items = 0, covered = 0, clips = 0, stand_ins = 0, na = 0;
 		std::string lines;
-		// The item set is the data's (read_viewmodel_kits: the mode's kits, KitDef::default_unlock of slots 0, 1, 6, 7).
+
 		const std::vector<bf3::render::ViewmodelKit> &kits = p_demo.kit_defs();
 		for (size_t k = 0; k < kits.size(); ++k) {
 			const int team = kits[k].team == "RU" ? 2 : 1;
@@ -636,8 +589,6 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 													 : "the data differs from the documented table: " + p_demo.kit_defs_difference());
 	}
 
-	// The shader database's alpha-tested slots (the knife's dog-tag chain strip) are alpha-scissored on the GPU side:
-	// the knife capture's stray bars were that strip drawn opaque.
 	{
 		uint32_t data_slots = 0, gpu = 0, items = 0, knives = 0, knives_hidden = 0, dogtag_drawn = 0;
 		std::string lines;
@@ -645,7 +596,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 			const bf3::render::ViewmodelSet &set = p_demo.set(team);
 			for (size_t i = 0; i < set.items.size(); ++i) {
 				const bf3::render::ViewmodelItem &it = set.items[i];
-				std::set<uint32_t> used; // slots a drawn surface uses (weapon), plus every accessory slot
+				std::set<uint32_t> used;
 				for (const bf3::render::PreparedSurface &sf : it.weapon.prepared.surfaces) {
 					if (sf.material_index < it.weapon_looks.size() && it.weapon_looks[sf.material_index].alpha_test) {
 						used.insert(sf.material_index);
@@ -690,7 +641,6 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 						p_demo.knife_dog_tags() ? "drawn (--vm-dogtags)" : "hidden", knives_hidden, dogtag_drawn));
 	}
 
-	// E5 table: the authored clip length next to ReloadTime.
 	{
 		std::string lines;
 		std::set<std::string> seen;
@@ -735,4 +685,4 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 	return ok ? 0 : 1;
 }
 
-} // namespace bf3::godot_side
+}

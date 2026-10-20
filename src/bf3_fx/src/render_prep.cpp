@@ -1,4 +1,3 @@
-// VFX2 render preparation (docs/design/m2a.md §12.1; docs/design/m2a-fx2.md). See render_prep.h.
 #include "bf3/fx/render_prep.h"
 
 #include <algorithm>
@@ -40,7 +39,6 @@ inline Vec3 normalized(const Vec3 &a, const Vec3 &p_fallback) {
 	return scale(a, 1.0f / std::sqrt(l2));
 }
 
-// Writes the 3x4 row-major [X Y Z | O] of Godot's MultiMesh transform.
 inline void put_transform(float *r_t, const Vec3 &x, const Vec3 &y, const Vec3 &z, const Vec3 &o) {
 	r_t[0] = x.x;
 	r_t[1] = y.x;
@@ -57,12 +55,12 @@ inline void put_transform(float *r_t, const Vec3 &x, const Vec3 &y, const Vec3 &
 }
 
 struct Resolved {
-	std::string texture; // the emitter's names this entry was resolved for (content check, so a reused pointer is safe)
+	std::string texture;
 	std::string normal_map;
 	const AtlasEntry *base = nullptr;
 	const AtlasEntry *normal = nullptr;
-	bool fallback = false; // base came from kFxDefaultTexture (or nothing resolved)
-	bool untextured = false; // a ParticleMesh emitter without a texture name (drawn white, not a fallback)
+	bool fallback = false;
+	bool untextured = false;
 };
 
 constexpr size_t kMaxResolved = 1u << 16;
@@ -72,7 +70,7 @@ struct OutputRef {
 	float depth = 0;
 };
 
-} // namespace
+}
 
 FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person) {
 	FxBatchKey k;
@@ -131,8 +129,6 @@ FxBatchKey fx_batch_key_at(size_t p_index) {
 	return k;
 }
 
-// Draw order inside a pass: alpha and premultiplied (sorted) first, additive last. fx_batch_index orders blends
-// Alpha, Additive, Premultiplied, so the draw order is its own table.
 namespace {
 constexpr std::array<FxBlend, kFxBlendCount> kBlendDrawOrder{ FxBlend::Alpha, FxBlend::Premultiplied, FxBlend::Additive };
 }
@@ -151,7 +147,7 @@ struct RenderPrep::Impl {
 
 	const Resolved &resolve(const EmitterDef &p_e, const EmitterAtlas &p_atlas) {
 		if (resolved.size() >= kMaxResolved) {
-			resolved.clear(); // bounded: defs come and go in a long session; a re-resolve is cheap
+			resolved.clear();
 		}
 		Resolved &r = resolved[&p_e];
 		if (r.base != nullptr || r.fallback || r.untextured) {
@@ -164,17 +160,16 @@ struct RenderPrep::Impl {
 		r.untextured = r.texture.empty() && p_e.tmpl.emittable == EmittableType::ParticleMesh;
 		r.base = r.texture.empty() ? nullptr : p_atlas.resolve(r.texture);
 		if (r.base != nullptr && r.base->kind != AtlasKind::Base) {
-			r.base = nullptr; // a normal-atlas entry named as a diffuse texture: not drawable from the base atlas
+			r.base = nullptr;
 		}
-		// A mesh particle naming no texture draws with its mesh's own material in BF3 (the stand-in: white); every
-		// other emitter without a resolved texture draws the default entry and is counted.
+
 		r.fallback = r.base == nullptr && !r.untextured;
 		if (r.fallback) {
 			r.base = default_entry;
 		}
 		r.normal = r.normal_map.empty() ? nullptr : p_atlas.resolve(r.normal_map);
 		if (r.normal != nullptr && (r.normal->kind != AtlasKind::Normal || r.normal->degenerate)) {
-			r.normal = nullptr; // the defaultnormalmap aliases are degenerate: a flat normal, same as none
+			r.normal = nullptr;
 		}
 		return r;
 	}
@@ -216,7 +211,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 		FxEmitterParams &row = m.params[i];
 		std::memset(&row, 0, sizeof(row));
 		if (o.def == nullptr || o.emitter >= o.def->emitters.size()) {
-			continue; // never from FxWorld; a hostile caller's record draws nothing
+			continue;
 		}
 		const EmitterDef &e = o.def->emitters[o.emitter];
 		const Resolved &r = m.resolve(e, p_atlas);
@@ -251,7 +246,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 		if (o.particle_count > 0 && size_t(o.first_particle) + o.particle_count <= particles.size()) {
 			m.per_batch[fx_batch_index(fx_batch_key(e, o.first_person))].push_back(OutputRef{ uint32_t(i), std::isfinite(depth) ? depth : 0.0f });
 		}
-		// Lights: one merged light per output (m2a.md §12.1).
+
 		if (o.light_count > 0 && size_t(o.first_light) + o.light_count <= plights.size()) {
 			FxLight l;
 			double sum = 0, px = 0, py = 0, pz = 0, cr = 0, cg = 0, cb = 0;
@@ -271,7 +266,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 			if (sum > 0.0 && radius > 0.0f) {
 				l.position = Vec3{ float(px / sum), float(py / sum), float(pz / sum) };
 				l.intensity = float(sum);
-				// ParticleLight::color is PointLightColor x intensity: the intensity-weighted mean colour is sum / sum(I).
+
 				l.color = Vec3{ float(cr / sum), float(cg / sum), float(cb / sum) };
 				l.radius = radius;
 				const Vec3 d = sub(l.position, cam);
@@ -284,7 +279,6 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 		}
 	}
 
-	// Batches in draw order; transparent ones back-to-front by emitter depth (stable: equal depths keep list order).
 	m.batches.clear();
 	m.instances.resize(particles.size());
 	uint32_t written = 0, standins = 0, first_person = 0;
@@ -317,7 +311,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 					for (uint32_t k = 0; k < o.particle_count; ++k) {
 						const ParticleVertex &p = particles[o.first_particle + k];
 						if (written >= m.instances.size()) {
-							break; // outputs overlapping in particles (never from FxWorld): stop at the particle count
+							break;
 						}
 						FxInstance &in = m.instances[written++];
 						const float c = std::cos(p.rotation), s = std::sin(p.rotation);
@@ -329,7 +323,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 								put_transform(in.transform, Vec3{ p.size.x, 0, 0 }, Vec3{ 0, p.size.y, 0 }, normalized(p.axis, Vec3{ 0, 1, 0 }), p.position);
 								break;
 							case FxShaderClass::Waq: {
-								// WorldAlignedQuad: the world XZ plane, normal +Y; Quad: the emitter's right / up plane, normal forward.
+
 								const Vec3 bx = world_aligned ? Vec3{ 1, 0, 0 } : ex;
 								const Vec3 by = world_aligned ? Vec3{ 0, 0, -1 } : ey;
 								const Vec3 bn = world_aligned ? Vec3{ 0, 1, 0 } : ez;
@@ -340,10 +334,10 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 							}
 							case FxShaderClass::Mesh:
 							default: {
-								// Euler degrees (SpawnOrientation), applied Y (yaw), X (pitch), Z (roll) [inferred].
+
 								const float yx = p.axis.y * kDegToRad, xx = p.axis.x * kDegToRad, zx = p.axis.z * kDegToRad;
 								const float cy = std::cos(yx), sy = std::sin(yx), cx = std::cos(xx), sx = std::sin(xx), cz = std::cos(zx), sz = std::sin(zx);
-								// R = Ry * Rx * Rz, columns.
+
 								const Vec3 c0{ cy * cz + sy * sx * sz, cx * sz, -sy * cz + cy * sx * sz };
 								const Vec3 c1{ -cy * sz + sy * sx * cz, cx * cz, sy * sz + cy * sx * cz };
 								const Vec3 c2{ sy * cx, -sx, cy * cx };
@@ -382,7 +376,6 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 	}
 	m.instances.resize(written);
 
-	// The light pool: highest priority first, at most kMaxFxLights; the rest dropped and counted.
 	const size_t keep = std::min(m.candidates.size(), kMaxFxLights);
 	auto by_priority = [](const FxLight &a, const FxLight &b) { return a.priority > b.priority; };
 	if (m.candidates.size() > keep) {
@@ -425,4 +418,4 @@ const RenderPrepStats &RenderPrep::stats() const {
 	return impl_->stats;
 }
 
-} // namespace bf3::fx
+}

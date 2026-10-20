@@ -1,5 +1,3 @@
-// Ported from IW4L superbundle_bf3 (obfuscation.rs, layout.rs, toc.rs, package.rs, catalog.rs,
-// ebx.rs), Apache-2.0.
 #include "bf3/core/sb_formats.h"
 
 #include "bf3/core/db_object.h"
@@ -27,9 +25,7 @@ uint32_t le32(const uint8_t *p) {
 	return v;
 }
 
-} // namespace
-
-// --- obfuscation --------------------------------------------------------------------------------
+}
 
 Result<Obfuscation> obfuscation_of(std::span<const uint8_t> p_raw) {
 	if (p_raw.size() < 4 || p_raw[0] != 0x00 || p_raw[1] != 0xD1 || p_raw[2] != 0xCE) {
@@ -77,8 +73,6 @@ Status deobfuscate(std::vector<uint8_t> &r_bytes) {
 	}
 	return {};
 }
-
-// --- layout.toc ---------------------------------------------------------------------------------
 
 Result<Layout> parse_layout(std::span<const uint8_t> p_plain) {
 	Result<DbDocument> doc = DbDocument::parse(p_plain);
@@ -132,8 +126,6 @@ Result<Layout> parse_layout(std::span<const uint8_t> p_plain) {
 	out.base = *base;
 	return out;
 }
-
-// --- superbundle .toc ---------------------------------------------------------------------------
 
 Result<Toc> parse_toc(std::span<const uint8_t> p_plain) {
 	Result<DbDocument> doc = DbDocument::parse(p_plain);
@@ -240,8 +232,6 @@ Result<Toc> parse_toc(std::span<const uint8_t> p_plain) {
 	return out;
 }
 
-// --- package.mft --------------------------------------------------------------------------------
-
 namespace {
 
 bool is_space(char p_c) {
@@ -268,7 +258,7 @@ std::optional<int64_t> parse_i64(std::optional<std::string_view> p_value) {
 		negative = s.front() == '-';
 		s.remove_prefix(1);
 	}
-	if (s.empty() || s.size() > 18) { // (no overflow; manifests hold small numbers)
+	if (s.empty() || s.size() > 18) {
 		return std::nullopt;
 	}
 	int64_t v = 0;
@@ -281,7 +271,7 @@ std::optional<int64_t> parse_i64(std::optional<std::string_view> p_value) {
 	return negative ? -v : v;
 }
 
-} // namespace
+}
 
 PackageManifest parse_package_manifest(std::string_view p_text) {
 	PackageManifest m;
@@ -327,8 +317,6 @@ PackageManifest parse_package_manifest(std::string_view p_text) {
 	return m;
 }
 
-// --- cas.cat ------------------------------------------------------------------------------------
-
 Result<std::vector<CatalogEntry>> parse_catalog(std::span<const uint8_t> p_plain) {
 	static constexpr char kMagic[] = "NyanNyanNyanNyan";
 	BF3_TRY(detail::need("CAS catalog", p_plain.size(), 16));
@@ -369,8 +357,6 @@ Status check_cas_entry_header(std::span<const uint8_t> p_header, const CatalogEn
 	return {};
 }
 
-// --- EBX header ---------------------------------------------------------------------------------
-
 namespace {
 
 constexpr size_t kPartitionAt = 0x30;
@@ -383,7 +369,7 @@ Status check_ebx_magic(std::span<const uint8_t> p_head) {
 	return {};
 }
 
-} // namespace
+}
 
 Result<Guid> ebx_partition(std::span<const uint8_t> p_head) {
 	BF3_TRY(detail::need("EBX header", p_head.size(), kPartitionAt + 16));
@@ -402,4 +388,4 @@ Result<EbxHead> parse_ebx_head(std::span<const uint8_t> p_head) {
 	return h;
 }
 
-} // namespace bf3::core
+}

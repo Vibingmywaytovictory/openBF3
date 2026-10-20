@@ -1,5 +1,3 @@
-// Ant clip codecs. Clean-room implementation from research/probes/ant-animation-probe.md (§3.3, §4, §6);
-// see ant_clip.h.
 #include "bf3/core/ant/ant_clip.h"
 
 #include <algorithm>
@@ -11,17 +9,14 @@ namespace bf3::core::ant {
 namespace {
 
 constexpr uint32_t kDctBlock = 8;
-constexpr uint32_t kMaxKeys = 1u << 20; // sanity bound for allocations driven by data
-// Bound on keys * channels of one decoded or baked clip (16 Mi channel-keys, <= 256 MiB of quaternions).
-// The largest retail clip is far below it; it stops a small crafted bank from requesting gigabytes.
+constexpr uint32_t kMaxKeys = 1u << 20;
+
 constexpr uint64_t kMaxChannelKeys = uint64_t(1) << 24;
 
-// MSB-first bit reader over a byte array (no word swapping, §4.1). Widths 0..32.
 class BitReader {
 public:
 	explicit BitReader(std::span<const uint8_t> p_data) : data_(p_data), size_bits_(uint64_t(p_data.size()) * 8) {}
 
-	// Reads a two's-complement value of p_width bits. Width 0 reads nothing and yields 0.
 	int32_t read_signed(uint32_t p_width) {
 		if (p_width == 0) {
 			return 0;
@@ -36,7 +31,7 @@ public:
 		for (uint64_t i = 0; i < 5; ++i) {
 			window = (window << 8) | (byte + i < data_.size() ? data_[size_t(byte + i)] : 0u);
 		}
-		// window holds 40 bits starting at bit (byte * 8); drop the (pos & 7) bits already consumed.
+
 		const uint32_t skip = uint32_t(pos_ & 7);
 		const uint64_t raw = (window >> (40 - skip - p_width)) & ((uint64_t(1) << p_width) - 1);
 		pos_ += p_width;
@@ -53,7 +48,6 @@ private:
 	bool overrun_ = false;
 };
 
-// The 8-point basis of §4.1: c_i * cos((2n+1) * i * pi / 16), c_0 = 1/4, c_i = 1/2.
 struct DctBasis {
 	double m[kDctBlock][kDctBlock];
 	DctBasis() {
@@ -90,7 +84,7 @@ bool read_count(const GdStruct &p_clip, std::string_view p_name, uint32_t &r_val
 	return p_clip.read_u32(p_name, r_value);
 }
 
-} // namespace
+}
 
 const char *codec_name(ClipCodec p_codec) {
 	switch (p_codec) {
@@ -170,9 +164,6 @@ bool clip_channel_counts(const GdStruct &p_clip, uint32_t &r_quats, uint32_t &r_
 	}
 }
 
-// ---------------------------------------------------------------------------------------------
-// DCT (§4.1)
-
 AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_stats) {
 	const uint32_t nq = p_in.num_quats;
 	const uint32_t nv = p_in.num_vec3s;
@@ -210,7 +201,7 @@ AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_st
 	if (p_in.catch_all_bit_count > 32) {
 		return AntResult::fail(AntStatus::Malformed, "DCT: CatchAllBitCount > 32");
 	}
-	// Per-DOF sub-block count (high nibble) and its first entry in BitsPerSubblock.
+
 	std::vector<uint32_t> first_width(size_t(dofs) + 1, 0);
 	for (uint64_t d = 0; d < dofs; ++d) {
 		const uint32_t sub = p_in.dof_table_desc[size_t(d)] >> 4;
@@ -235,7 +226,6 @@ AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_st
 	r_out.vec3s.resize(size_t(keys) * nv);
 	r_out.floats.resize(size_t(keys) * nf);
 
-	// m[n][i] = basis * (1 + 0.1 * QuantizeMultSubblock * i) / QuantizeMultBlock
 	double m[kDctBlock][kDctBlock];
 	const DctBasis &basis = dct_basis();
 	for (uint32_t i = 0; i < kDctBlock; ++i) {
@@ -252,9 +242,9 @@ AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_st
 		const uint32_t block_keys = std::min(kDctBlock, keys - first_key);
 		for (uint64_t d = 0; d < dofs; ++d) {
 			const uint32_t sub = p_in.dof_table_desc[size_t(d)] >> 4;
-			// 64-bit: a CatchAllBitCount-wide (up to 32-bit) coefficient plus DeltaBase must not overflow.
+
 			int64_t c[kDctBlock][4] = {};
-			// Block 0 does not store the DC coefficient (j = 0).
+
 			for (uint32_t j = (b == 0 ? 1u : 0u); j < sub; ++j) {
 				const uint16_t widths = p_in.bits_per_subblock[first_width[size_t(d)] + j];
 				for (uint32_t comp = 0; comp < 4; ++comp) {
@@ -265,7 +255,7 @@ AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_st
 					c[j][comp] = bits.read_signed(w);
 				}
 			}
-			// The DC term is relative to the constant per-DOF base, in every block.
+
 			for (uint32_t comp = 0; comp < 4; ++comp) {
 				c[0][comp] += p_in.delta_base[comp][size_t(d)];
 			}
@@ -351,8 +341,6 @@ AntResult decode_dct_object(const GdStruct &p_clip, DecodedClip &r_out, DecodeSt
 	return r;
 }
 
-// Raw and Frame: per key 4 floats per quaternion, 4 per vec3 (w unused), then the floats (§3.3). Some
-// non-MP Raw clips pad each key's float block to a multiple of 4.
 AntResult decode_float_object(const GdStruct &p_clip, ClipCodec p_codec, DecodedClip &r_out, DecodeStats *r_stats) {
 	uint32_t nq = 0, nv = 0, nf = 0, keys = 1;
 	if (!read_count(p_clip, "QuatCount", nq) || !read_count(p_clip, "Vec3Count", nv) || !read_count(p_clip, "FloatCount", nf)) {
@@ -432,7 +420,7 @@ AntResult decode_float_object(const GdStruct &p_clip, ClipCodec p_codec, Decoded
 	return {};
 }
 
-} // namespace
+}
 
 AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r_stats) {
 	if (r_stats) {
@@ -463,7 +451,7 @@ AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r
 	}
 	if (r.ok()) {
 		if (!r_out.key_times.empty() && header.end_frame < r_out.key_times.back()) {
-			// Keys past EndFrame would make the dense frame table shorter than the keyed range.
+
 			return AntResult::fail(AntStatus::Malformed, "EndFrame " + std::to_string(header.end_frame) + " before the last key time");
 		}
 		r_out.end_frame = header.end_frame;
@@ -472,14 +460,11 @@ AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r
 	return r;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Sampling
-
 Quat quat_slerp(const Quat &p_a, const Quat &p_b, float p_t) {
 	double ax = p_a.x, ay = p_a.y, az = p_a.z, aw = p_a.w;
 	double bx = p_b.x, by = p_b.y, bz = p_b.z, bw = p_b.w;
 	double dot = ax * bx + ay * by + az * bz + aw * bw;
-	if (dot < 0.0) { // shortest arc
+	if (dot < 0.0) {
 		bx = -bx;
 		by = -by;
 		bz = -bz;
@@ -487,7 +472,7 @@ Quat quat_slerp(const Quat &p_a, const Quat &p_b, float p_t) {
 		dot = -dot;
 	}
 	double wa, wb;
-	if (dot > 0.9995) { // nearly parallel: normalised lerp
+	if (dot > 0.9995) {
 		wa = 1.0 - p_t;
 		wb = p_t;
 	} else {
@@ -520,7 +505,7 @@ bool sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose) {
 		std::fill(r_pose.floats.begin(), r_pose.floats.end(), 0.0f);
 		return consistent;
 	}
-	// Surrounding keys by key time (frames).
+
 	uint32_t k0 = 0, k1 = 0;
 	float t = 0.0f;
 	const auto &kt = p_clip.key_times;
@@ -552,7 +537,7 @@ bool sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose) {
 
 AntResult bake_frames(const DecodedClip &p_clip, DecodedClip &r_out) {
 	r_out = {};
-	// The clip may come from anywhere (not only decode_clip): validate before allocating or indexing.
+
 	if (!p_clip.consistent() || p_clip.num_keys == 0) {
 		return AntResult::fail(AntStatus::Malformed, "bake: clip has no keys or inconsistent array sizes");
 	}
@@ -564,7 +549,7 @@ AntResult bake_frames(const DecodedClip &p_clip, DecodedClip &r_out) {
 	if (p_clip.end_frame > kMaxFrame) {
 		return AntResult::fail(AntStatus::Malformed, "bake: EndFrame " + std::to_string(p_clip.end_frame) + " exceeds the 16-bit frame range");
 	}
-	// Both bounds are <= kMaxFrame, so frames <= 65536 and frame numbers fit in uint16_t.
+
 	const uint32_t last = std::max<uint32_t>(p_clip.end_frame, p_clip.key_times.back());
 	const uint64_t frames = uint64_t(last) + 1;
 	if (frames * p_clip.channel_count() > kMaxChannelKeys) {
@@ -593,4 +578,4 @@ AntResult bake_frames(const DecodedClip &p_clip, DecodedClip &r_out) {
 	return {};
 }
 
-} // namespace bf3::core::ant
+}

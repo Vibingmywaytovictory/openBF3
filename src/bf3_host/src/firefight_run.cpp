@@ -1,4 +1,3 @@
-// The headless firefight (firefight_run.h; docs/design/m2a.md §10.2, E13, E15; docs/design/m2a-bt.md).
 #include "bf3/host/firefight_run.h"
 
 #include "bf3/net/protocol.h"
@@ -41,7 +40,6 @@ float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return std::sqrt(dx * dx + dz * dz);
 }
 
-// FNV-1a 64, field by field (never a struct's bytes: padding).
 struct Fnv {
 	uint64_t h = 0xcbf29ce484222325ull;
 	void bytes(const void *p_data, size_t p_size) {
@@ -64,22 +62,21 @@ struct Fnv {
 	}
 };
 
-// The run's GunplayObserver: kills, hits and shots, plus the tick's projectile / damage digest.
 class Recorder final : public GunplayObserver {
 public:
-	std::vector<uint8_t> teams; // slot -> team, refreshed by the run before each tick
-	std::vector<uint8_t> remote; // slot -> 1 for an observer peer
+	std::vector<uint8_t> teams;
+	std::vector<uint8_t> remote;
 	uint64_t peer_hits = 0;
 	uint32_t peer_deaths = 0;
-	std::vector<uint64_t> shots; // per slot
-	std::vector<uint32_t> kills; // per slot (enemies)
-	std::vector<uint64_t> hits; // per slot (applied, enemy victims)
+	std::vector<uint64_t> shots;
+	std::vector<uint32_t> kills;
+	std::vector<uint64_t> hits;
 	uint64_t applied = 0;
 	uint32_t team_kills = 0;
 	std::array<uint32_t, 3> team_kill_count{};
 	uint32_t live_peak = 0;
 	bool hashing = false;
-	Fnv tick; // this tick's digest
+	Fnv tick;
 
 	explicit Recorder(size_t p_slots) :
 			shots(p_slots, 0), kills(p_slots, 0), hits(p_slots, 0) {}
@@ -162,7 +159,7 @@ struct BotTrack {
 	float window_max = 0.0f;
 };
 
-} // namespace
+}
 
 FirefightPercentiles firefight_percentiles(std::vector<double> p_samples) {
 	FirefightPercentiles p;
@@ -281,7 +278,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 	config.max_slots = p_options.max_slots;
 	config.seed = p_options.seed;
 	config.respawn_ticks = p_options.respawn_ticks;
-	config.dev_commands = true; // GunplayConfig::observer is a dev option
+	config.dev_commands = true;
 	config.gunplay.observer = recorder;
 	if (!p_options.mechanics_cfg.empty()) {
 		config.gunplay.mechanics_cfg = p_options.mechanics_cfg;
@@ -289,7 +286,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 	if (p_bots != nullptr) {
 		auto fill = std::make_shared<BotFillConfig>();
 		fill->level = p_bots;
-		fill->count = 0; // the BotLevel only: the firefight walks through its own BotNav
+		fill->count = 0;
 		config.bots = fill;
 	}
 	config.firefight = ff;
@@ -322,7 +319,6 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 	const sim::CollisionWorld &world = view.world();
 	const sim::MotorParams &motor = p_level->motor;
 
-	// The firefight bots: the server-side slots init added (no walkers or S1 bots in this config).
 	std::vector<BotTrack> tracks;
 	{
 		const GameServerStats s = server.stats();
@@ -362,7 +358,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 	}
 
 	std::vector<OutDatagram> out;
-	// ---- warm-up ----------------------------------------------------------------------------------------------------
+
 	clock = Clock::now();
 	for (uint32_t t = 0; t < p_options.warmup_ticks; ++t) {
 		refresh_teams();
@@ -388,7 +384,6 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 		}
 	}
 
-	// ---- the window -------------------------------------------------------------------------------------------------
 	std::vector<double> v_tick, v_sources, v_step, v_rules, v_encode, v_weapons, v_projectiles, v_rewind;
 	v_tick.reserve(p_options.ticks);
 	if (p_options.hashes) {
@@ -518,8 +513,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 								st->position[1], st->position[2], int(st->mode));
 					}
 				}
-				// Below the ground: no surface under the capsule at all (the centre and four points on its rim: a soldier
-				// standing across a gap narrower than the capsule has nothing under its centre).
+
 				bool ground = false;
 				const float rim = 0.9f * motor.radius;
 				const float offsets[5][2] = { { 0.0f, 0.0f }, { rim, 0.0f }, { -rim, 0.0f }, { 0.0f, rim }, { 0.0f, -rim } };
@@ -645,4 +639,4 @@ std::string firefight_report_text(const FirefightReport &p_report) {
 	return s;
 }
 
-} // namespace bf3::host
+}

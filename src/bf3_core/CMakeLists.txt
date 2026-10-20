@@ -1,6 +1,3 @@
-# bf3_core: install mount and readers. Godot-free.
-# S0: InstallReader, PathGuard, install snapshot.
-# M0.1: containers (layout/toc/sb/cas.cat/bundles/delta/chunks) and EBX, ported from IW4L.
 add_library(bf3_core STATIC
     src/bundle_manifest.cpp
     src/db_object.cpp
@@ -47,7 +44,6 @@ target_include_directories(bf3_core PUBLIC include)
 target_link_libraries(bf3_core PRIVATE libdeflate::libdeflate_static)
 openbf3_module(bf3_core)
 
-# Derived-data cache (plan §2.1/§2.4, gap load §6.4): digest-keyed entries under an absolute root.
 target_sources(bf3_core PRIVATE
     src/cache/cache_fs.h
     src/cache/cache_fs_win32.cpp
@@ -63,7 +59,6 @@ target_sources(bf3_core PRIVATE
 )
 target_link_libraries(bf3_core PRIVATE bcrypt)
 
-# Ant animation banks (EA GenericData + clip codecs), clean-room from research/probes/ant-animation-probe.md
 target_sources(bf3_core PRIVATE
     src/ant/gd_archive.cpp
     src/ant/ant_package.cpp
@@ -77,14 +72,11 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ant/ant_source.h
 )
 
-# Ant banks read from the install (res by name, chunk by GUID) with the research export's selection rules.
 target_sources(bf3_core PRIVATE
     src/ant/ant_install_source.cpp
     include/bf3/core/ant/ant_install_source.h
 )
 
-# Resource decoders (MeshSet, DxTexture, Havok physics) over caller-supplied bytes; see
-# include/bf3/core/res/res_types.h. Port of IW4L resource_bf3.
 target_sources(bf3_core PRIVATE
     src/res/res_common.cpp
     src/res/res_reader.h
@@ -99,15 +91,11 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/res/havok.h
 )
 
-# Resource loading from a LevelMount (res payload + resMeta + chunks -> decoded MeshSet / DxTexture /
-# Havok); see include/bf3/core/res/res_loader.h. The API the Godot bridge calls.
 target_sources(bf3_core PRIVATE
     src/res/res_loader.cpp
     include/bf3/core/res/res_loader.h
 )
 
-# Gameplay table readers: WeaponDef resolver (variants, modifiers, gun sway, projectiles) and the
-# level material grid / soldier hit capsules (plan §3.2, topics/01). Reads through EbxResolver.
 target_sources(bf3_core PRIVATE
     src/gameplay/ebx_fields.h
     src/gameplay/ebx_fields.cpp
@@ -123,8 +111,6 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/material_grid.h
 )
 
-# UI readers (plan §2.2, §3.8): the UITextDatabase string table and the EBX SID census, clean-room from
-# research/topics/gap-r1-ui-hud-minimap-localisation.md §4.
 target_sources(bf3_core PRIVATE
     src/ui/text_db.cpp
     src/ui/text_census.cpp
@@ -132,8 +118,6 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/text_census.h
 )
 
-# The WeaponDef text block and the weapon sources/catalog shared by bf3dump and the in-game inspector
-# (plan §6 M0 exit: the inspector prints the resolved M16A3/M16A4-burst WeaponDef and its localised name).
 target_sources(bf3_core PRIVATE
     src/gameplay/weapon_format.cpp
     src/gameplay/weapon_catalog.cpp
@@ -141,8 +125,6 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/weapon_catalog.h
 )
 
-# Level traversal (plan §2.2): one level x mode's bundles, the placed objects in Frostbite space, the
-# mesh census and the collision placements. Port of IW4L level_bf3; see include/bf3/core/level/.
 target_sources(bf3_core PRIVATE
     src/level/level_transform.cpp
     src/level/budget.cpp
@@ -158,8 +140,6 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/level/census.h
 )
 
-# Gameplay tables (plan §3.1, §3.4, §3.7): soldier, kits, mode constants resolved through the level's
-# interfaces (logic_world, ported from IW4L level_bf3), minimal vehicle defs.
 target_sources(bf3_core PRIVATE
     src/gameplay/gameplay_read.h
     src/gameplay/logic_world.cpp
@@ -175,10 +155,6 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/work_budget.h
 )
 
-# Collision soup (M0 exit "Metro collision drawn as a debug overlay"): the level's Havok collision as
-# world-space triangles with material, surface class and body kind, in 64 m tiles; see
-# include/bf3/core/level/collision_soup.h; the terrain heightfield (res/terrain.h). Parts ported from IW4L
-# level_bf3 collision/ and resource_bf3 terrain.rs.
 target_sources(bf3_core PRIVATE
     src/level/collision_material.cpp
     src/level/collision_soup.cpp
@@ -189,9 +165,6 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/res/terrain.h
 )
 
-# Converters through the derived-data cache (plan §2.4 step 3, M0 "per-item streaming converters"): the blob
-# reader/writer, cached_convert, and the WeaponDef blob with its dependency-list keys. Keys carry the pinned
-# engine API (the engine-api/<version>.<hash> folder name), so the game and bf3dump agree on them.
 get_filename_component(OPENBF3_ENGINE_ID "${OPENBF3_ENGINE_API}" NAME)
 target_sources(bf3_core PRIVATE
     src/cache/blob_io.cpp
@@ -203,25 +176,19 @@ target_sources(bf3_core PRIVATE
 )
 set_source_files_properties(src/cache/cached_convert.cpp PROPERTIES COMPILE_DEFINITIONS "OPENBF3_ENGINE_ID=\"${OPENBF3_ENGINE_ID}\"")
 
-# M1 level inputs (docs/design/m1.md §10, §12): the mode's spawn points and the level source digest.
 target_sources(bf3_core PRIVATE
     include/bf3/core/level/spawn_points.h
     include/bf3/core/level/source_digest.h
 )
 
-# M1 T1 (world; docs/design/m1.md §5.5, §15): the level source digest (the "jolt-world" cache key). The
-# collision_soup.{h,cpp} edit (kCollisionSoupVersion, CollisionSoup::sources) is in place in the soup block.
 target_sources(bf3_core PRIVATE
     src/level/source_digest.cpp
 )
 
-# M1 T2 (motor; docs/design/m1.md §10.1): the AlternateSpawn points and CharacterSpawnReference spawners of a level.
 target_sources(bf3_core PRIVATE
     src/level/spawn_points.cpp
 )
 
-# S4 logic (docs/design/s4.md §5, §6): the level-logic type table and the instantiated logic graph a level x mode
-# builds from its LogicWorld.
 target_sources(bf3_core PRIVATE
     src/gameplay/logic_types.cpp
     src/gameplay/logic_graph.cpp
@@ -229,20 +196,16 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/logic_graph.h
 )
 
-# S3 crowd (docs/design/s3.md §3, §15): persistent worker lanes for the per-frame pose job.
 target_sources(bf3_core PRIVATE
     include/bf3/core/worker_group.h
     src/worker_group.cpp
 )
 
-# S1 nav (spike S1; docs/design/s1.md §4, §11): the combat areas and objectives of a level x mode.
 target_sources(bf3_core PRIVATE
     include/bf3/core/level/mode_areas.h
     src/level/mode_areas.cpp
 )
 
-# S2 vehicle (docs/design/s2.md §4, §12): the wheeled drive def of a VehicleBlueprint (component walk with composed
-# transforms) and the vehicle spawners of a level.
 target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/vehicle_drive.h
     include/bf3/core/level/vehicle_spawns.h
@@ -250,9 +213,6 @@ target_sources(bf3_core PRIVATE
     src/level/vehicle_spawns.cpp
 )
 
-# UI ui1 (SWF, atlases and fonts; docs/design/ui-swf-fonts.md §12): the SwfMovie symbol-table reader, the install
-# library and census, the atlas cutter, DefineFont3 outlines, the TrueType writer, the UI font library and the HUD
-# layout facts. Interface headers now; the sources are added by the implementation.
 target_sources(bf3_core PRIVATE
     include/bf3/core/ui/swf_movie.h
     include/bf3/core/ui/swf_library.h
@@ -263,7 +223,6 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/ui_fonts.h
     include/bf3/core/ui/swf_layout.h
 )
-# UI ui1 implementation (docs/design/ui-swf-fonts.md §17).
 target_sources(bf3_core PRIVATE
     src/ui/swf_bits.h
     src/ui/swf_font_detail.h
@@ -279,7 +238,6 @@ target_sources(bf3_core PRIVATE
     src/ui/swf_layout.cpp
 )
 
-# UI ui2 (docs/design/ui-minimap-icons.md §12): the minimap, HUD icon and HUD data-model readers.
 target_sources(bf3_core PRIVATE
     include/bf3/core/ui/minimap.h
     include/bf3/core/ui/hud_icons.h
@@ -294,25 +252,19 @@ target_sources(bf3_core PRIVATE
     src/ui/hud_model.cpp
 )
 
-# M2a weapons (docs/design/m2a-weapons.md §4.3, §13): the level grid's MaterialPairs in order, so a static hit's
-# pair index reaches its property (damage) and physics-material (impact effects) rows.
 target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/grid_pairs.h
     src/gameplay/grid_pairs.cpp
 )
 
-# M2a w2 (W2.0 contract, docs/design/m2a.md §6.5, §15; owner of the bodies: lc): the capsule pose table.
 target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/capsule_pose_table.h
 )
 
-# M2a lc (docs/design/m2a.md §6.5, §13.1; docs/design/m2a-lc.md): the capsule pose table's hash, checks and cache blob.
 target_sources(bf3_core PRIVATE
     src/gameplay/capsule_pose_table.cpp
 )
 
-# M2a audio (docs/design/m2a-audio.md §5, §6): sound stream codecs (EA-XAS v1), SoundWaveAsset reader, the resident
-# wave bank, the sound-graph node type table and the SoundPatchAsset compiler.
 target_sources(bf3_core PRIVATE
     src/audio/sound_program.cpp
     src/audio/sound_program_blob.cpp
@@ -328,21 +280,16 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/audio/wave_bank.h
 )
 
-# M2b W1.0 (docs/design/m2b.md §2.6 #14, §6; docs/design/m2b-w1.md): the A3 readers' headers (owner au, who adds the
-# bodies in a block of its own).
 target_sources(bf3_core PRIVATE
     include/bf3/core/audio/hdr_setting.h
     include/bf3/core/audio/sound_scope.h
 )
 
-# M2b au (docs/design/m2b.md §2.6 #14, §6; docs/design/m2b-au.md): the HdrSetting and scope readers.
 target_sources(bf3_core PRIVATE
     src/audio/hdr_setting.cpp
     src/audio/sound_scope.cpp
 )
 
-# PT1 iff (docs/design/pt1-iff.md): the nametag / minimap rules and their readers (UINametagCompData, the soldier's
-# SpottingTargetComponentData) and the kit's default 3p appearance.
 target_sources(bf3_core PRIVATE
     src/ui/nametags.cpp
     include/bf3/core/ui/nametags.h

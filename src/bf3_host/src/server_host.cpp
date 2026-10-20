@@ -12,7 +12,6 @@
 
 namespace bf3::host {
 
-// ENet endpoint of the server (kept out of the public header).
 class NetEndpoint {
 public:
 	std::unique_ptr<net::Host> host;
@@ -20,7 +19,6 @@ public:
 
 namespace {
 
-// H hygiene: pins instances against their destructor while stop_all is inside them (instance_registry.h).
 detail::InstanceRegistry<ServerHost> g_registry;
 
 void registry_add(ServerHost *p_host) {
@@ -35,12 +33,12 @@ int64_t now_ns() {
 	return static_cast<int64_t>(net::monotonic_ns());
 }
 
-} // namespace
+}
 
 ServerHost::ServerHost() = default;
 
 ServerHost::~ServerHost() {
-	g_registry.retire(this); // first: a concurrent stop_all is done with this instance once it returns
+	g_registry.retire(this);
 	stop();
 }
 
@@ -55,7 +53,6 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 	config_ = p_config;
 	config_.tick_hz = std::clamp(config_.tick_hz, 1, 1000);
 
-	// M1 T4 (docs/design/m1.md §8): a game config runs the GameServer at kSimHz instead of the S0 world.
 	if (config_.game) {
 		config_.tick_hz = int(sim::kSimHz);
 		game_ = std::make_unique<GameServer>();
@@ -99,8 +96,6 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 		return true;
 	}
 
-	// Build the world and bind the socket on the caller's thread so errors surface here; both
-	// are handed to the server thread and touched only there afterwards.
 	world_ = std::make_unique<sim::PhysicsWorld>();
 	if (!world_->init(config_.world)) {
 		world_.reset();
@@ -205,7 +200,7 @@ void ServerHost::run() {
 	using clock = std::chrono::steady_clock;
 	const auto period = std::chrono::nanoseconds(1'000'000'000LL / config_.tick_hz);
 	detail::TickTimer timer;
-	std::vector<uint32_t> window(600, 0); // step times (us) of the last 600 ticks
+	std::vector<uint32_t> window(600, 0);
 	std::vector<uint32_t> sorted;
 	size_t window_fill = 0;
 	uint32_t max_us = 0;
@@ -215,8 +210,6 @@ void ServerHost::run() {
 	while (!stop_requested_.load(std::memory_order_acquire)) {
 		const auto tick_start = clock::now();
 
-		// M1 T4: the game tick (docs §8.1): ENet service -> GameServer::on_* -> tick -> send its datagrams -> flush,
-		// so a snapshot leaves in the tick that made it (the RTT bound of docs §7.5).
 		if (game_) {
 			if (net_ && net_->host) {
 				net::Host::Event ev;
@@ -281,7 +274,6 @@ void ServerHost::run() {
 			continue;
 		}
 
-		// 1. network: drain events; echo pings (S0's only message).
 		if (net_ && net_->host) {
 			net::Host::Event ev;
 			while (net_->host->service(0, ev) > 0) {
@@ -294,7 +286,6 @@ void ServerHost::run() {
 			peers_.store(static_cast<uint32_t>(net_->host->connected_peers()), std::memory_order_relaxed);
 		}
 
-		// 2. simulation: one fixed step of our own Jolt world.
 		const auto step_start = clock::now();
 		if (!world_->step()) {
 			step_errors_.fetch_add(1, std::memory_order_relaxed);
@@ -302,7 +293,6 @@ void ServerHost::run() {
 		const uint32_t step_us =
 				static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - step_start).count());
 
-		// 3. publish.
 		state_hash_.store(world_->state_hash(), std::memory_order_relaxed);
 		active_bodies_.store(world_->active_body_count(), std::memory_order_relaxed);
 		lowest_body_y_.store(world_->lowest_dynamic_y(), std::memory_order_relaxed);
@@ -328,7 +318,6 @@ void ServerHost::run() {
 				std::memory_order_relaxed);
 		ticks_.fetch_add(1, std::memory_order_release);
 
-		// 4. fixed schedule: absolute deadlines, so jitter does not accumulate into drift.
 		next += period;
 		const auto now = clock::now();
 		if (now > next + 5 * period) {
@@ -339,4 +328,4 @@ void ServerHost::run() {
 	}
 }
 
-} // namespace bf3::host
+}

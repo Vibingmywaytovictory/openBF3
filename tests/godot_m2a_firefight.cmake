@@ -1,10 +1,3 @@
-# M2a gx ctest godot.m2a_firefight (docs/design/m2a.md §1 E13 / E14, §10.2; docs/design/m2a-gx.md §5): the windowed
-# firefight case with bt's bots,
-#   <godot> --path bf3-opensource res://scenes/m2a_metro.tscn -- --m2a-firefight --bf3-cache=<BUILD_DIR>/godot-cache/godot.m2a
-# A timing row (frame time and the event / effect / voice counts under 64 firing bots): the integrator's, on main
-# after the merges (timing rows run on main only). Until bt lands the case prints "SKIP firefight waiting for bt"
-# and the row exits 77. Skips (77) also like godot.m2a.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> [-DBUILD_DIR=<b/dev>] -P godot_m2a_firefight.cmake
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)

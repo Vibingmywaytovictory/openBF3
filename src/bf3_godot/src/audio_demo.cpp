@@ -1,5 +1,3 @@
-// Bf3AudioDemo (audio_demo.h).
-
 #include "audio_demo.h"
 
 #include "godot_util.h"
@@ -47,7 +45,7 @@ ba::CheckRow row(const std::string &p_name, double p_value, const std::string &p
 	return ba::CheckRow{ p_name, p_value, p_rule, p_pass };
 }
 
-} // namespace
+}
 
 Bf3AudioDemo::Bf3AudioDemo() = default;
 
@@ -70,8 +68,7 @@ void Bf3AudioDemo::stop_player() {
 		Ref<AudioStreamPlayback> playback = player_->get_stream_playback();
 		player_->stop();
 		player_ = nullptr;
-		// Under the AudioServer lock Godot's audio thread is outside _mix: the playback drops its mixer reference here,
-		// so the mixer (and the instances it owns) is released on the main thread, and the tap is ours again.
+
 		AudioServer::get_singleton()->lock();
 		if (Bf3AudioPlayback *ours = Object::cast_to<Bf3AudioPlayback>(playback.ptr())) {
 			ours->set_mixer(nullptr);
@@ -106,7 +103,6 @@ void Bf3AudioDemo::_ready() {
 	label_->set_position(Vector2(12, 8));
 	add_child(label_);
 
-	// The tuning file of the project (16 keys, audio.contract checks it); a missing or bad file fails the run.
 	const String cfg = FileAccess::get_file_as_string("res://config/audio_tuning.cfg");
 	bf3::core::Result<ba::AudioTuning> tuning = ba::parse_audio_tuning(to_std(cfg));
 	if (!tuning) {
@@ -122,7 +118,7 @@ void Bf3AudioDemo::_ready() {
 		loaded_ = true;
 	}
 	if (!loaded_) {
-		// Heavy work off the main thread (plan §2.3); no Godot API on this thread.
+
 		loader_ = std::thread([this]() {
 			const auto t0 = std::chrono::steady_clock::now();
 			bf3::core::Result<std::shared_ptr<bf3::core::Install>> install = bf3::core::Install::open(install_);
@@ -173,7 +169,7 @@ void Bf3AudioDemo::start_audio() {
 	config.schedule_lead_blocks = uint32_t(tuning_.schedule_lead_blocks);
 	mixer_ = std::make_shared<ba::MixerCore>(config);
 	recorder_ = std::make_unique<ba::WavRecorder>(config.mix_rate, kRecordSeconds + 60.0);
-	mixer_->set_tap(recorder_.get()); // before the audio thread sees the mixer
+	mixer_->set_tap(recorder_.get());
 	stream_.instantiate();
 	stream_->set_mixer(mixer_);
 	player_ = memnew(AudioStreamPlayer);
@@ -305,7 +301,7 @@ void Bf3AudioDemo::start_analysis() {
 	if (label_ != nullptr) {
 		label_->set_text("openBF3 audio: analysing the recording...");
 	}
-	// The audio thread is out of _mix (stop_player): the recorder, the driver's taps and the mixer stats are stable.
+
 	analyser_ = std::thread([this]() {
 		const ba::MixerStats &st = mixer_->stats();
 		const std::span<const float> rec = recorder_->samples();
@@ -338,7 +334,6 @@ void Bf3AudioDemo::start_analysis() {
 		notes_.push_back(rule);
 		report_.rows.push_back(row("timing.max_block_ms", double(st.max_block_ns.load()) / 1e6, rule, true));
 
-		// The offline replay of the same script from the same start frame.
 		ba::OfflineCheckOptions options;
 		options.start_frame = start_frame_;
 		const auto t0 = std::chrono::steady_clock::now();
@@ -360,7 +355,6 @@ void Bf3AudioDemo::start_analysis() {
 			report_.rows.push_back(row("replay.max_abs_diff", double(worst), rule, worst == 0.0f && differing == 0 && replay->mix.size() == mix.size()));
 		}
 
-		// The recording and the taps, when asked for.
 		if (!record_path_.empty()) {
 			const std::filesystem::path path(std::u8string(record_path_.begin(), record_path_.end()));
 			const bf3::core::PathGuard guard = install_.write_guard();
@@ -393,4 +387,4 @@ void Bf3AudioDemo::finish(int p_code) {
 	get_tree()->quit(p_code);
 }
 
-} // namespace bf3::godot_side
+}

@@ -1,4 +1,3 @@
-// EBX SID census against the text database; see text_census.h.
 #include "bf3/core/ui/text_census.h"
 
 #include "bf3/core/ebx.h"
@@ -10,8 +9,6 @@ namespace bf3::core::ui {
 
 namespace {
 
-// The partitions of the research census that hold any SID (28 of the 170 it dumped; the other 142 hold
-// none), with the superbundles the research read them from.
 constexpr std::string_view kCensusPartitions[] = {
 	"characters/soldiers/mpsoldier",
 	"gameplay/kits/ruassault",
@@ -75,7 +72,7 @@ void visit(const EbxValue &p_value, std::vector<std::string> &r_sids) {
 	}
 }
 
-} // namespace
+}
 
 bool is_sid(std::string_view p_text) {
 	if (p_text.size() < 3 || p_text.substr(0, 3) != "ID_") {
@@ -126,4 +123,4 @@ SidCensus sid_census(const EbxResolver &p_ebx, std::span<const std::string_view>
 	return census;
 }
 
-} // namespace bf3::core::ui
+}

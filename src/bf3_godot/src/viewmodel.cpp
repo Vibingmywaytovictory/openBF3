@@ -1,4 +1,3 @@
-// Bf3Viewmodel (docs/design/m2a.md §11.1, §11.2; docs/design/m2a-vm.md). See viewmodel.h.
 #include "viewmodel.h"
 
 #include "fp_camera.h"
@@ -34,7 +33,6 @@ static_assert(bf3::anim::kVmPhaseDeploying == uint8_t(sw::WeaponPhase::Deploying
 
 namespace {
 
-// The procedural optic vignette (§16 Q6): black towards the corners, 0 = invisible.
 const char *kVignetteShader = R"(shader_type canvas_item;
 uniform float strength = 0.0;
 void fragment() {
@@ -48,7 +46,7 @@ Transform3D xform_to_godot(const bf3::anim::Xform &p_x) {
 	return to_godot(p_x);
 }
 
-} // namespace
+}
 
 ViewmodelFrame viewmodel_frame_from(const bf3::host::PresentedWeapon &p_weapon, const Vector3 &p_eye, double p_yaw, double p_pitch, float p_dt, bool p_sprinting,
 		float p_speed, float p_view_yaw_rate, float p_view_pitch_rate) {
@@ -168,7 +166,7 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 			if (m.is_null()) {
 				m = make_standard_material(p_part.materials.slots[p_s.material_index], !p_s.tangents.empty(), find_texture, options);
 				if (p_s.material_index < p_looks.size()) {
-					// The shader database's alpha test (the knife's dog-tag chain strip): cut out by the Diffuse alpha.
+
 					const bf3::render::ViewmodelSlotLook &look = p_looks[p_s.material_index];
 					if (look.alpha_test) {
 						m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
@@ -185,7 +183,7 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 		MeshInstance3D *mi = memnew(MeshInstance3D);
 		mi->set_name(to_godot(p_part.mesh.substr(p_part.mesh.rfind('/') + 1)));
 		mi->set_mesh(mesh);
-		// The bind-pose AABB says little about the animated, FOV-overridden mesh (M9 demo): a box around the camera.
+
 		mi->set_custom_aabb(AABB(Vector3(-3, -1, -3), Vector3(6, 4, 6)));
 		mi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 		skeleton_->add_child(mi);
@@ -204,7 +202,7 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 		n.refs = bf3::render::viewmodel_clip_refs(it);
 		for (const bf3::render::ViewmodelAttachment &a : it.attachments) {
 			ItemNodes::Attachment na;
-			na.mesh = make_mesh(a.part, a.looks, n.materials); // unskinned: placed on its bone every frame
+			na.mesh = make_mesh(a.part, a.looks, n.materials);
 			na.mesh->set_visible(false);
 			na.bone = a.rig_bone;
 			na.xform = to_godot(a.transform);
@@ -217,7 +215,7 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 
 	vignette_layer_ = memnew(CanvasLayer);
 	vignette_layer_->set_name("OpticVignette");
-	vignette_layer_->set_layer(-1); // under the HUD
+	vignette_layer_->set_layer(-1);
 	vignette_ = memnew(ColorRect);
 	vignette_->set_anchors_preset(Control::PRESET_FULL_RECT);
 	vignette_->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
@@ -255,12 +253,12 @@ void Bf3Viewmodel::select_item(int p_index) {
 	}
 	ItemNodes &n = items_[size_t(item_)];
 	n.weapon->set_visible(true);
-	arms_->set_skin(n.skin); // every item's binds begin with the arms' binds
+	arms_->set_skin(n.skin);
 	arms_->set_visible(true);
 	animator_ = std::make_unique<bf3::anim::ViewmodelAnimator>(set_->rig, n.refs, tuning_);
-	if (!has_user_arg("pt1-off")) { // PT1 run [ab]: --pt1-off keeps the procedural bob (the before captures)
-		animator_->set_locomotion(bf3::render::viewmodel_locomotion(set_->items[size_t(item_)])); // PT1 run [loco]: BF3's 1p run / sprint deltas
-	} // PT1 run [ab]
+	if (!has_user_arg("pt1-off")) {
+		animator_->set_locomotion(bf3::render::viewmodel_locomotion(set_->items[size_t(item_)]));
+	}
 	ads_params_ = bf3::render::viewmodel_ads_params(set_->items[size_t(item_)], tuning_);
 	viewmodel_fov_ = -1;
 	set_viewmodel_fov(ads_params_.render_fov);
@@ -313,11 +311,10 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 		return;
 	}
 	const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
-	// ADS (refused for the whole tick while deploying or sprinting).
+
 	ads_allowed_ = bf3::anim::ads_allowed(p_frame.phase, p_frame.sprinting);
 	ads_frame_ = ads_.step(ads_params_, p_frame.zoomed && ads_allowed_, p_frame.dt);
 
-	// The animator.
 	bf3::anim::ViewmodelFrameInput in;
 	in.time_s = p_frame.time_s;
 	in.dt = p_frame.dt;
@@ -333,7 +330,6 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	animator_->step(in, p_cues, pose_, output_);
 	bf3::anim::model_pose(set_->rig, pose_, model_);
 
-	// The camera: eye, view + predicted recoil + presentation kick, world FOV.
 	ViewEffects fx;
 	fx.world_fov_deg = ads_frame_.world_fov;
 	fx.recoil_pitch_deg = p_frame.recoil_pitch_deg;
@@ -342,7 +338,6 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	fx.kick_yaw_deg = output_.camera_recoil_yaw_deg;
 	apply_view_effects(p_camera, p_frame.eye, p_frame.yaw, p_frame.pitch, fx);
 
-	// The rig: the camera on CameraJoint (turned 180 deg about Y), the springs' offset between them.
 	const Transform3D cam = p_camera ? p_camera->get_global_transform() : Transform3D();
 	const Transform3D joint = xform_to_godot(model_[size_t(camera_joint_)]);
 	const Transform3D turn(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3());
@@ -351,7 +346,7 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 		skeleton_->set_bone_pose_rotation(int32_t(b), to_godot(pose_.joints[b].q));
 		skeleton_->set_bone_pose_position(int32_t(b), to_godot(pose_.joints[b].t));
 	}
-	// Rigid accessories on their bones: Asset1p while the ADS blend is under half, Asset1pzoom from there.
+
 	const bool aimed = ads_frame_.blend >= 0.5f;
 	for (const ItemNodes::Attachment &a : items_[size_t(item_)].attachments) {
 		const bool on = (aimed ? a.zoom : a.hip) && a.bone >= 0 && size_t(a.bone) < model_.size();
@@ -362,7 +357,6 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	}
 	set_viewmodel_fov(ads_frame_.viewmodel_fov);
 
-	// The optic vignette stand-in.
 	const bool optic = ads_params_.can_zoom && ads_params_.zoom_fov <= bf3::render::kOpticVignetteMaxFov;
 	vignette_strength_ = optic ? bf3::anim::smoothstep01(ads_frame_.fov_progress) : 0.0f;
 	vignette_->set_visible(vignette_strength_ > 0.0f);
@@ -372,4 +366,4 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	last_present_us_ = double(Time::get_singleton()->get_ticks_usec() - t0);
 }
 
-} // namespace bf3::godot_side
+}

@@ -1,35 +1,3 @@
-// The firefight stub bots (firefight_brain.h; docs/design/m2a.md §10.2, §14.1, E13, E15; as built:
-// docs/design/m2a-bt.md). Server thread only, serial like S1's brains.
-//
-// One FirefightShared per GameServer holds what every brain of that server reads: the server (view(), gunplay(),
-// place_soldier), the config, the soldier's eye heights and capsule, the nav hook (bot_fill.h BotNav: the S1
-// NavQuery / PathService the walkers move through) and the Pairs lanes. A brain is a small state machine per life:
-//   life     a new SoldierState::life starts the life's random stream (splitmix64 of the brain seed and the life),
-//            resets the target, the fire and the strafe state; Pairs places the soldier at its lane end (a live
-//            soldier: life and weapons kept, protection cleared) once the RespawnPolicy has respawned it;
-//   perceive every retarget_ticks (staggered by slot) or at once when hit without a target: the nearest enemy (team
-//            1 / 2, not ours, alive; peers included, so a human is a target like any bot) with a clear eye-to-chest
-//            ray (query_mask::kProjectile), at most kMaxRaysPerThink rays nearest first; the current target is
-//            re-checked every kTargetCheckTicks and dropped after kLoseTicks unseen;
-//   aim      the direction to the target's chest plus a seeded error (sigma from aim_sigma_start_deg to
-//            aim_sigma_end_deg over aim_sigma_decay_s on target), the view turned at most kTurnRateDegS; the
-//            weapon's own spread and recoil are the sim's (the command carries only the view);
-//   fire     automatic weapons in bursts (burst_min_rounds .. burst_max_rounds, burst_pause_* between), switched
-//            to their automatic mode first through the fire-mode counter; others tapped at semi_rate_hz; fire only
-//            when the view is within kFireConeDeg of the aim, the target was seen at its last check and its life is
-//            at least kFreshTargetTicks old (FirefightShared::scan_lives); reload at an empty magazine, or without a
-//            target below reload_fraction; the sidearm when the primary has no round left at all;
-//   move     Free with walk: S1's WalkerBrain (bot_fill.h BotNav) with the nearest enemy as its goal set (hunting),
-//            its move re-expressed in the brain's own view yaw, no sprint while engaged; engaged within
-//            kEngageStopMetres, and Pairs while engaged: strafe legs of kStrafeHalfMetres either side of where
-//            the leg started, reversed at a missing floor;
-//   blind    without a target for no_target_s: one burst along the longest clear of 8 headings (Free) or down the
-//            lane toward the partner's end (Pairs).
-// Pairs lanes: firefight_layout; with fewer lanes than pairs a pair reuses a lane moved along its normal where both
-// ends re-foot and still see each other (offset_lane), else the lane as it is.
-// Everything random comes from the brain's seed (firefight_seed(match_seed, slot)) and the life, and the server runs
-// the brains in slot order, so a firefight reproduces bit for bit (E15).
-
 #include "bf3/host/firefight_brain.h"
 
 #include "bf3/host/bot_fill.h"
@@ -56,45 +24,42 @@ namespace {
 
 namespace sw = sim::weapons;
 
-// bt's named constants (docs/design/m2a-bt.md "Constants"); the §10.2 numbers are FirefightConfig's.
-constexpr float kTurnRateDegS = 540.0f; // view turn limit (S1's WalkerParams::yaw_rate_deg_s)
+constexpr float kTurnRateDegS = 540.0f;
 constexpr float kPitchTurnRateDegS = 360.0f;
 constexpr float kMaxPitchDeg = 80.0f;
-constexpr float kFireConeDeg = 4.0f; // fire only when the view is this close to the aim (error included)
-constexpr uint32_t kTargetCheckTicks = 10; // the current target's ray
-constexpr uint32_t kLoseTicks = 60; // unseen this long: the target is dropped
-constexpr uint32_t kMaxRaysPerThink = 6; // perception rays per think, nearest first
+constexpr float kFireConeDeg = 4.0f;
+constexpr uint32_t kTargetCheckTicks = 10;
+constexpr uint32_t kLoseTicks = 60;
+constexpr uint32_t kMaxRaysPerThink = 6;
 constexpr float kMaxEngageMetres = 150.0f;
-constexpr float kKeepTargetRatio = 1.25f; // a visible current target is kept unless another is this much nearer
-constexpr uint32_t kErrorTicks = 6; // a new aim error draw
-constexpr float kErrorPitchShare = 0.6f; // the pitch error's sigma against the yaw error's
-constexpr float kChestShare = 0.8f; // chest = feet + this x the pose's eye height
-constexpr uint32_t kModeDelayTicks = 3; // after a spawn, before the fire-mode counter moves (§5.2's spawn rule)
+constexpr float kKeepTargetRatio = 1.25f;
+constexpr uint32_t kErrorTicks = 6;
+constexpr float kErrorPitchShare = 0.6f;
+constexpr float kChestShare = 0.8f;
+constexpr uint32_t kModeDelayTicks = 3;
 constexpr uint32_t kModeWaitTicks = 10;
-constexpr float kEngageStopMetres = 25.0f; // Free: closer than this the bot stops walking and strafes
+constexpr float kEngageStopMetres = 25.0f;
 constexpr float kStrafeHalfMetres = 2.0f;
-constexpr float kStrafeAxis = 0.8f; // stick share of a strafe leg
+constexpr float kStrafeAxis = 0.8f;
 constexpr uint32_t kStrafeMinTicks = 60, kStrafeMaxTicks = 150;
-constexpr uint32_t kStrafeGroundTicks = 6; // the floor-ahead ray
+constexpr uint32_t kStrafeGroundTicks = 6;
 constexpr float kBlindRayMetres = 60.0f;
-constexpr uint32_t kBlindTicks = 60; // one blind burst
-constexpr float kHuntShare = 0.8f; // Free: walker goals that are the hunt goal (else S1's random nav points)
+constexpr uint32_t kBlindTicks = 60;
+constexpr float kHuntShare = 0.8f;
 constexpr float kHuntArriveMetres = 3.0f;
 constexpr float kSprintConeDeg = 20.0f;
-// An enemy whose life began less than this ago is tracked but not fired at (place_soldier clears the spawn protection
-// a Pairs bot would otherwise have; measured before: a recon bot on a lane died 78 times in 120 s without one shot).
+
 constexpr uint32_t kFreshTargetTicks = 60;
 
-// Layout (firefight_layout).
-constexpr float kLayoutProbeUp = 1.5f; // rays down start this far above the observer's floor
+constexpr float kLayoutProbeUp = 1.5f;
 constexpr float kLayoutProbeDrop = 4.5f;
-constexpr float kLayoutFloorTolerance = 3.0f; // an end's floor within this of the observer's
-constexpr float kLayoutMinNormalY = 0.64f; // cos 50 deg (MaxAscendAngle)
+constexpr float kLayoutFloorTolerance = 3.0f;
+constexpr float kLayoutMinNormalY = 0.64f;
 constexpr float kLayoutCapsuleTolerance = 0.02f;
 constexpr float kLayoutNavExtent = 1.0f;
-constexpr float kRangeLaneMinMetres = 20.0f; // the default observer: Metro's range lane (find_range_lane)
-constexpr float kSharedLaneOffset = 1.2f; // pairs on a reused lane move this far along its normal per reuse
-constexpr uint32_t kSharedLaneTries = 6; // offsets tried per reuse (+-1, +-2, +-3 steps); none holds: the lane as is
+constexpr float kRangeLaneMinMetres = 20.0f;
+constexpr float kSharedLaneOffset = 1.2f;
+constexpr uint32_t kSharedLaneTries = 6;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
@@ -122,7 +87,6 @@ uint32_t uniform_u(uint64_t &r_state, uint32_t p_min, uint32_t p_max) {
 	return p_min + uint32_t(next(r_state) % uint64_t(p_max - p_min + 1));
 }
 
-// Box-Muller on two of the stream's draws (deterministic on one build).
 float gauss(uint64_t &r_state) {
 	const float u1 = std::max(unit(r_state), 1e-7f);
 	const float u2 = unit(r_state);
@@ -140,7 +104,7 @@ float wrap(float p_radians) {
 }
 
 float yaw_of(float p_dx, float p_dz) {
-	return std::atan2(p_dx, p_dz); // yaw 0 looks down +Z, a quarter turn down +X (command.h)
+	return std::atan2(p_dx, p_dz);
 }
 
 float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
@@ -169,20 +133,20 @@ bool clear_ray(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, cons
 	return !p_world.ray(p_from, sub(p_to, p_from), sim::query_mask::kProjectile);
 }
 
-} // namespace
+}
 
 struct FirefightShared {
 	GameServer *server = nullptr;
 	std::shared_ptr<const FirefightConfig> config;
-	std::array<float, sim::kPoseCount> eye{ 1.6f, 1.0f, 0.3f }; // MotorParams::poses[].eye_height when a level is given
+	std::array<float, sim::kPoseCount> eye{ 1.6f, 1.0f, 0.3f };
 	std::array<float, sim::kPoseCount> height{ 1.8f, 1.15f, 0.3f };
 	float radius = 0.35f;
-	std::unique_ptr<BotNav> nav; // null: no walking
+	std::unique_ptr<BotNav> nav;
 	sim::bots::WalkerParams walker;
 	std::vector<FirefightLane> lanes;
 	uint64_t match_seed = 0;
 	FirefightStats *stats = nullptr;
-	// Every slot's life and the tick it was first seen (scan_lives, once per tick by the first brain).
+
 	std::vector<uint32_t> lives;
 	std::vector<sim::Tick> life_since;
 	sim::Tick scan_tick = UINT32_MAX;
@@ -229,14 +193,10 @@ struct FirefightShared {
 	}
 };
 
-// ---- the layout -------------------------------------------------------------------------------------------------
-
 namespace {
 
-constexpr float kLayoutEye = 1.6f, kLayoutRadius = 0.35f, kLayoutHeight = 1.8f; // the layout's stand soldier
+constexpr float kLayoutEye = 1.6f, kLayoutRadius = 0.35f, kLayoutHeight = 1.8f;
 
-// A lane end's foothold at (x, z): a walkable floor within the tolerance of p_floor_y, room for the stand capsule and
-// (with a nav) a polygon of the main component within kLayoutNavExtent.
 bool lane_foot(const sim::CollisionWorld &p_world, BotNav *p_nav, float p_floor_y, float p_x, float p_z, sim::Vec3 &r_feet) {
 	sim::StaticHit hit;
 	if (!p_world.ground_below({ p_x, p_floor_y + kLayoutProbeUp, p_z }, kLayoutProbeDrop, sim::query_mask::kMovement, &hit)) {
@@ -262,14 +222,12 @@ bool lane_foot(const sim::CollisionWorld &p_world, BotNav *p_nav, float p_floor_
 	return true;
 }
 
-// Both ends see each other's chest (eye to chest, both ways).
 bool lane_clear(const sim::CollisionWorld &p_world, const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float chest = kChestShare * kLayoutEye;
 	return clear_ray(p_world, add(p_a, 0.0f, kLayoutEye, 0.0f), add(p_b, 0.0f, chest, 0.0f)) &&
 			clear_ray(p_world, add(p_b, 0.0f, kLayoutEye, 0.0f), add(p_a, 0.0f, chest, 0.0f));
 }
 
-// p_lane moved p_offset along its normal, both ends re-footed and the pair ray checked; false when it does not hold.
 bool offset_lane(const sim::CollisionWorld &p_world, BotNav *p_nav, const FirefightLane &p_lane, float p_offset, FirefightLane &r_out) {
 	const float nx = std::cos(p_lane.yaw_a), nz = -std::sin(p_lane.yaw_a);
 	FirefightLane l = p_lane;
@@ -283,7 +241,7 @@ bool offset_lane(const sim::CollisionWorld &p_world, BotNav *p_nav, const Firefi
 	return true;
 }
 
-} // namespace
+}
 
 core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWorld &p_world, const FirefightConfig &p_config, uint64_t p_seed) {
 	return firefight_layout(p_world, p_config, p_seed, nullptr, nullptr);
@@ -305,11 +263,11 @@ core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWo
 	const float pair_max = std::max(p_config.pair_max_m, pair_min);
 	const uint32_t tries = std::clamp<uint32_t>(p_config.lane_retries, 1u, 64u);
 	const uint32_t wanted = std::min<uint32_t>(p_config.count / 2u, 128u);
-	// The observer's floor.
+
 	sim::StaticHit floor_hit;
 	const float floor_y = p_world.ground_below(o, 4.0f, sim::query_mask::kMovement, &floor_hit) ? floor_hit.position[1] : o[1] - 1.6f;
 	const float chest = kChestShare * kLayoutEye;
-	uint64_t rng = mix(p_seed ^ 0x4C414E45ull); // "LANE"
+	uint64_t rng = mix(p_seed ^ 0x4C414E45ull);
 	uint32_t rejected = 0;
 	std::vector<FirefightLane> out;
 	const auto foot = [&](float p_x, float p_z, sim::Vec3 &r_feet) { return lane_foot(p_world, p_nav, floor_y, p_x, p_z, r_feet); };
@@ -324,7 +282,7 @@ core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWo
 			const float length = uniform(rng, pair_min, pair_max);
 			const float ray_yaw = p_config.observer.yaw + angle;
 			const float cx = o[0] + dist * std::sin(ray_yaw), cz = o[2] + dist * std::cos(ray_yaw);
-			// Even tries: across the view ray; odd tries: along it.
+
 			const float axis_yaw = (t % 2u == 0) ? ray_yaw + 0.5f * sim::kPi : ray_yaw;
 			const float ax = std::sin(axis_yaw), az = std::cos(axis_yaw);
 			sim::Vec3 a{}, b{};
@@ -338,7 +296,7 @@ core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWo
 				continue;
 			}
 			if (t < (tries + 1u) / 2u && (!clear_ray(p_world, o, a_chest) || !clear_ray(p_world, o, b_chest))) {
-				++rejected; // the observer must see both ends on the first half of the tries
+				++rejected;
 				continue;
 			}
 			FirefightLane lane;
@@ -360,8 +318,6 @@ core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWo
 	return out;
 }
 
-// ---- the brain ----------------------------------------------------------------------------------------------------
-
 struct FirefightBrain::Impl {
 	std::shared_ptr<FirefightShared> shared;
 	uint32_t index = 0;
@@ -377,18 +333,18 @@ struct FirefightBrain::Impl {
 	uint32_t life = UINT32_MAX;
 	sim::Tick life_tick = 0;
 	float view_yaw = 0.0f, view_pitch = 0.0f;
-	// The target (a slot) and when it was acquired and last seen.
+
 	int target = -1;
 	uint32_t target_life = 0;
 	sim::Tick target_since = 0, target_seen = 0;
 	float err_yaw = 0.0f, err_pitch = 0.0f;
 	sim::Tick err_next = 0;
-	// Blind fire (no target for FirefightConfig::no_target_s).
+
 	sim::Tick no_target_since = 0;
 	bool blind = false;
 	float blind_yaw = 0.0f;
 	sim::Tick blind_until = 0;
-	// Fire.
+
 	bool bursting = false;
 	uint32_t burst_rounds = 0, burst_start = 0;
 	sim::Tick pause_until = 0, next_tap = 0;
@@ -397,7 +353,7 @@ struct FirefightBrain::Impl {
 	sim::Tick mode_wait = 0;
 	uint8_t want_slot = 0xFF;
 	bool reload_held = false;
-	// Strafe.
+
 	bool strafing = false;
 	float strafe_dir = 1.0f;
 	sim::Vec3 strafe_anchor{};
@@ -426,8 +382,7 @@ struct FirefightBrain::Impl {
 		reload_held = false;
 		strafing = false;
 		if (cfg.mode == FirefightMode::Pairs && have_place) {
-			// The RespawnPolicy has (re)spawned the slot at choose_spawn; it is alive, so the placement keeps its life
-			// and weapons and clears the spawn protection (sv's place handling).
+
 			const core::Status st = shared->server->place_soldier(slot, place_feet, sim::quantize_yaw(place_yaw), sim::Pose::Stand);
 			if (st.ok()) {
 				shared->count(&FirefightStats::placements, uint64_t(1));
@@ -436,7 +391,6 @@ struct FirefightBrain::Impl {
 		}
 	}
 
-	// The nearest visible enemy (or the current target when it is still the best), -1 for none.
 	int acquire(const ServerView &p_view, const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states) {
 		const sim::CollisionWorld &world = p_view.world();
 		const uint8_t team = p_view.team(slot);
@@ -465,10 +419,10 @@ struct FirefightBrain::Impl {
 		for (size_t k = 0; k < n && rays < kMaxRaysPerThink; ++k) {
 			const uint8_t s = order[k].second;
 			if (int(s) == target && current_d >= 0.0f) {
-				return target; // the current target is the nearest of the rest (it is re-checked on its own cadence)
+				return target;
 			}
 			if (target >= 0 && current_d >= 0.0f && order[k].first * kKeepTargetRatio > current_d) {
-				return target; // nobody visible is enough nearer than the current target
+				return target;
 			}
 			++rays;
 			shared->count(&FirefightStats::los_rays, uint64_t(1));
@@ -479,7 +433,6 @@ struct FirefightBrain::Impl {
 		return target;
 	}
 
-	// Free with walk: the hunt goal (the nearest live enemy, on the main component).
 	void hunt(const ServerView &p_view, const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states) {
 		BotNav &nav = *shared->nav;
 		const uint8_t team = p_view.team(slot);
@@ -521,7 +474,6 @@ struct FirefightBrain::Impl {
 		shared->count(&FirefightStats::hunts, uint64_t(1));
 	}
 
-	// The longest clear of 8 headings around the view (blind fire).
 	float longest_heading(const sim::CollisionWorld &p_world, const sim::SoldierState &p_self) {
 		const sim::Vec3 eye = shared->eye_point(p_self);
 		float best_len = -1.0f, best_yaw = view_yaw;
@@ -539,13 +491,12 @@ struct FirefightBrain::Impl {
 		return wrap(best_yaw);
 	}
 
-	// One strafe tick: the world-space move direction (x, z) of the leg.
 	void strafe(sim::Tick p_tick, const sim::CollisionWorld &p_world, const sim::SoldierState &p_self, float &r_dx, float &r_dz) {
 		const FirefightShared &sh = *shared;
 		if (!strafing) {
 			strafing = true;
 			strafe_anchor = p_self.position;
-			strafe_ax = -std::cos(view_yaw); // the view's right (command.h motor axes: right = (-cos, sin))
+			strafe_ax = -std::cos(view_yaw);
 			strafe_az = std::sin(view_yaw);
 			strafe_dir = unit(rng) < 0.5f ? -1.0f : 1.0f;
 			strafe_until = p_tick + uniform_u(rng, kStrafeMinTicks, kStrafeMaxTicks);
@@ -563,7 +514,7 @@ struct FirefightBrain::Impl {
 			const sim::Vec3 ahead = add(p_self.position, strafe_dir * strafe_ax * 0.8f, 0.5f, strafe_dir * strafe_az * 0.8f);
 			sim::StaticHit hit;
 			if (!p_world.ground_below(ahead, 1.2f, sim::query_mask::kMovement, &hit)) {
-				strafe_dir = -strafe_dir; // no floor there
+				strafe_dir = -strafe_dir;
 			}
 		}
 		(void)sh;
@@ -575,18 +526,18 @@ struct FirefightBrain::Impl {
 		FirefightShared &sh = *shared;
 		const FirefightConfig &cfg = *sh.config;
 		if (sh.nav != nullptr) {
-			sh.nav->run_once(p_tick); // the first brain of the tick runs the path searches
+			sh.nav->run_once(p_tick);
 		}
 		sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
 		c.flags = 0;
 		if (slot == 0xFF || !is_alive(p_state)) {
 			target = -1;
-			return c; // a dead soldier's command is never stepped; the RespawnPolicy respawns it
+			return c;
 		}
 		if (p_state.life != life) {
 			new_life(p_tick, p_state);
 			c.yaw = sim::quantize_yaw(view_yaw);
-			return c; // a Pairs placement lands in this tick's rules step
+			return c;
 		}
 		const ServerView &view = sh.server->view();
 		const std::span<const sim::SoldierState> states = view.states();
@@ -595,7 +546,6 @@ struct FirefightBrain::Impl {
 		const sim::Vec3 eye = sh.eye_point(p_state);
 		const bool walking = cfg.mode == FirefightMode::Free && cfg.walk && sh.nav != nullptr && walker.has_value();
 
-		// ---- perceive -----------------------------------------------------------------------------------------------
 		if (target >= 0) {
 			const size_t t = size_t(target);
 			const bool gone = t >= states.size() || !view.alive(uint8_t(t)) || states[t].life != target_life || view.team(uint8_t(t)) == view.team(slot);
@@ -631,7 +581,6 @@ struct FirefightBrain::Impl {
 		const bool engaged = target >= 0;
 		float target_distance = 0.0f;
 
-		// ---- aim ------------------------------------------------------------------------------------------------------
 		float want_yaw = view_yaw, want_pitch = 0.0f;
 		bool have_aim = false;
 		if (engaged) {
@@ -654,7 +603,7 @@ struct FirefightBrain::Impl {
 			no_target_since = p_tick;
 			blind = false;
 		} else {
-			// Free: along the longest clear heading; Pairs: down the lane, where the partner reappears.
+
 			const uint32_t blind_after = sim::seconds_to_ticks(std::max(cfg.no_target_s, 0.0f));
 			if (!blind && p_tick - no_target_since >= blind_after && blind_after > 0) {
 				blind = true;
@@ -672,7 +621,6 @@ struct FirefightBrain::Impl {
 			}
 		}
 
-		// ---- move ---------------------------------------------------------------------------------------------------
 		float move_dx = 0.0f, move_dz = 0.0f;
 		bool sprint = false;
 		sim::Pose pose = sim::Pose::Stand;
@@ -699,11 +647,10 @@ struct FirefightBrain::Impl {
 		} else {
 			strafing = false;
 			if (cfg.mode == FirefightMode::Pairs && have_place) {
-				want_yaw = place_yaw; // face the partner's end
+				want_yaw = place_yaw;
 			}
 		}
 
-		// ---- turn ---------------------------------------------------------------------------------------------------
 		const float yaw_step = kTurnRateDegS * kDeg * sim::kTickSeconds;
 		const float pitch_step = kPitchTurnRateDegS * kDeg * sim::kTickSeconds;
 		view_yaw = wrap(view_yaw + std::clamp(wrap(want_yaw - view_yaw), -yaw_step, yaw_step));
@@ -711,12 +658,11 @@ struct FirefightBrain::Impl {
 		view_pitch += std::clamp(want_pitch - view_pitch, -pitch_step, pitch_step);
 		const bool aligned = have_aim && std::fabs(wrap(want_yaw - view_yaw)) <= kFireConeDeg * kDeg && std::fabs(want_pitch - view_pitch) <= kFireConeDeg * kDeg;
 		if (sprint) {
-			// Only straight ahead: the walker's sprint cone, in the brain's own view.
+
 			const float len = std::sqrt(move_dx * move_dx + move_dz * move_dz);
 			sprint = len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * kDeg;
 		}
 
-		// ---- weapon -------------------------------------------------------------------------------------------------
 		sw::WeaponInput in;
 		in.fire_mode_counter = mode_counter;
 		const Gunplay *g = sh.server->gunplay();
@@ -749,7 +695,7 @@ struct FirefightBrain::Impl {
 				const bool automatic = fm.logic == core::gameplay::FireLogic::Automatic;
 				const bool busy = phase == sw::WeaponPhase::Deploying || phase == sw::WeaponPhase::Reloading || phase == sw::WeaponPhase::ReloadShell ||
 						phase == sw::WeaponPhase::Holding || phase == sw::WeaponPhase::Releasing || phase == sw::WeaponPhase::None;
-				// The sidearm when the primary has no round left at all.
+
 				if (ws.active == 0 && ss.magazine <= 0 && ss.reserve <= 0 && !d.unlimited_ammo && want_slot != 1) {
 					const sw::WeaponSlotState &side = ws.slots[1];
 					if (side.def != sw::kNoWeapon && side.magazine + side.reserve > 0) {
@@ -768,7 +714,7 @@ struct FirefightBrain::Impl {
 				}
 				reload_held = reload;
 				in.reload = reload;
-				// A target is fired at only while it was seen at its last check (the aim follows it for kLoseTicks).
+
 				const bool seen = !engaged || p_tick - target_seen <= kTargetCheckTicks;
 				const bool fresh = engaged && sh.fresh(size_t(target), p_tick);
 				const bool want_fire = aligned && seen && !fresh && !busy && !reload && ss.magazine > 0 && !sprint;
@@ -790,7 +736,7 @@ struct FirefightBrain::Impl {
 						sh.count(&FirefightStats::bursts, uint64_t(1));
 					}
 				} else if (tapped) {
-					tapped = false; // the release tick: single fire reads the trigger transition
+					tapped = false;
 				} else if (want_fire && p_tick >= next_tap) {
 					fire = true;
 					tapped = true;
@@ -801,7 +747,6 @@ struct FirefightBrain::Impl {
 			}
 		}
 
-		// ---- the command --------------------------------------------------------------------------------------------
 		c.yaw = sim::quantize_yaw(view_yaw);
 		c.pitch = sim::quantize_pitch(view_pitch);
 		c.pose = pose;
@@ -848,7 +793,7 @@ FirefightBrain::FirefightBrain(std::shared_ptr<FirefightShared> p_shared, uint32
 		m.place_feet = p_end == 0 ? p_lane->a : p_lane->b;
 		m.place_yaw = p_end == 0 ? p_lane->yaw_a : p_lane->yaw_b;
 		if (p_offset != 0.0f) {
-			// Along the lane's normal (both ends of a pair move the same way, so they still face each other).
+
 			const float nx = std::cos(p_lane->yaw_a), nz = -std::sin(p_lane->yaw_a);
 			m.place_feet[0] += p_offset * nx;
 			m.place_feet[2] += p_offset * nz;
@@ -871,8 +816,6 @@ void FirefightBrain::set_slot(uint8_t p_slot) {
 		m.walker.emplace(p_slot, m.seed, m.shared->walker);
 	}
 }
-
-// ---- the hook ------------------------------------------------------------------------------------------------------
 
 core::Status add_firefight_bots(GameServer &r_server, const GameServerConfig &p_config) {
 	if (p_config.firefight == nullptr || p_config.firefight->count == 0) {
@@ -897,17 +840,17 @@ core::Status add_firefight_bots(GameServer &r_server, const GameServerConfig &p_
 			shared->nav = std::move(*nav);
 			shared->walker = p_config.bots->walker;
 		} else if (shared->stats != nullptr && cfg.mode == FirefightMode::Free) {
-			shared->stats->walk_unavailable.store(1, std::memory_order_relaxed); // Pairs strafes on its lanes, it never walks
+			shared->stats->walk_unavailable.store(1, std::memory_order_relaxed);
 		}
 	}
 	shared->walker.objective_share = kHuntShare;
 
 	uint32_t count = cfg.count;
 	if (cfg.mode == FirefightMode::Pairs) {
-		count -= count % 2u; // an odd count leaves the last bot out
+		count -= count % 2u;
 		FirefightConfig layout = cfg;
 		if (!layout.observer.valid) {
-			// Headless runs: the start of the level's range lane (Metro: spawn 87, m2a.md §1).
+
 			const std::optional<sim::weapons::RangeLane> lane = sim::weapons::find_range_lane(r_server.view().world(), p_config.level->spawns,
 					shared->eye_of(sim::Pose::Stand), kRangeLaneMinMetres);
 			if (!lane) {
@@ -928,7 +871,7 @@ core::Status add_firefight_bots(GameServer &r_server, const GameServerConfig &p_
 			shared->stats->lanes_rejected.store(rejected, std::memory_order_relaxed);
 		}
 	}
-	FirefightLane moved; // the current pair's lane on a reuse
+	FirefightLane moved;
 	for (uint32_t i = 0; i < count; ++i) {
 		const FirefightLane *lane = nullptr;
 		if (cfg.mode == FirefightMode::Pairs && !shared->lanes.empty()) {
@@ -936,8 +879,7 @@ core::Status add_firefight_bots(GameServer &r_server, const GameServerConfig &p_
 			lane = &shared->lanes[pair % shared->lanes.size()];
 			const size_t reuse = pair / shared->lanes.size();
 			if (reuse > 0) {
-				// A reused lane moves along its normal: the k-th reuse tries +-k, +-(k + 1), ... steps of 1.2 m, each with
-				// both ends re-footed and the pair ray checked; when none holds the pair shares the lane as it is.
+
 				if (i % 2u == 0) {
 					moved = *lane;
 					bool held = false;
@@ -957,8 +899,7 @@ core::Status add_firefight_bots(GameServer &r_server, const GameServerConfig &p_
 		}
 		auto brain = std::make_unique<FirefightBrain>(shared, i, lane, uint8_t(i % 2u), 0.0f);
 		FirefightBrain *raw = brain.get();
-		// Teams alternate within a pair and flip every four bots, so each team gets every kit of kit = slot % 4 (with
-		// 1 + i % 2 alone team 1 held kits 0 and 2 and team 2 kits 1 and 3: measured 5,367 vs 3,164 shots in 60 s).
+
 		const int slot = r_server.add_local_soldier(std::move(brain), 1 + int((i + i / 4u) % 2u));
 		if (slot < 0) {
 			return core::make_error("firefight bots: no slot for bot " + std::to_string(i) + " of " + std::to_string(count));
@@ -971,4 +912,4 @@ core::Status add_firefight_bots(GameServer &r_server, const GameServerConfig &p_
 	return core::Status::success();
 }
 
-} // namespace bf3::host
+}

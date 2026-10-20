@@ -17,7 +17,7 @@ void skip_install_case(const char *p_why) {
 bool any_case_skipped() {
 	return g_skipped;
 }
-} // namespace bf3::test
+}
 
 int main(int argc, char **argv) {
 	doctest::Context ctx(argc, argv);

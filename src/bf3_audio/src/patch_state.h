@@ -1,7 +1,4 @@
 #pragma once
-// Internal state of a PatchInstance (patch_instance.h), shared by patch_instance.cpp (creation, API, audio plan),
-// patch_nodes.cpp (the control program) and patch_sampler.cpp (the Sampler model). Everything is sized in create();
-// the audio-thread paths only index into it.
 
 #include "bf3/audio/dsp.h"
 #include "bf3/audio/patch_instance.h"
@@ -22,43 +19,41 @@ namespace bf3::audio::detail {
 namespace ca = core::audio;
 namespace cp = core::audio::port;
 
-inline constexpr uint32_t kSlotInputFrames = 64; // decoded frames a slot buffers from its StreamDecoder
+inline constexpr uint32_t kSlotInputFrames = 64;
 inline constexpr uint32_t kMaxSubBlock = 512;
 inline constexpr uint16_t kNoSegment = 0xffff;
 
-// Counter-based randomness (patch_instance.h): splitmix64 over (seed, node, draw).
 uint64_t splitmix64(uint64_t p_x);
 double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw);
 
 enum class AdsrPhase : uint8_t { Idle, Attack, Decay, Sustain, Release };
 
 struct NodeState {
-	float value = 0.0f; // Adsr value; NumberGenerator Y; ParameterFilterLinear value; Timer elapsed; EventGate cool-down left
-	double phase = 0.0; // Lfo phase in cycles
-	float release_rate = 0.0f; // Adsr: units per second while releasing
-	float latched = 0.0f; // MultiCrossfader latched control
-	uint32_t draws = 0; // random draws so far
-	uint32_t index = 0; // WaveSwitcher index; Sampler: index into samplers
-	uint8_t mode = 0; // AdsrPhase; Timer running; ParameterFilterLinear initialised; MultiCrossfader latched
-	uint8_t pulse = 0; // Adsr Finished / Timer Tick due at the next evaluation
+	float value = 0.0f;
+	double phase = 0.0;
+	float release_rate = 0.0f;
+	float latched = 0.0f;
+	uint32_t draws = 0;
+	uint32_t index = 0;
+	uint8_t mode = 0;
+	uint8_t pulse = 0;
 };
 
-struct GroupState { // per MultiCrossfaderGroup child record
+struct GroupState {
 	float amplitude = 0.0f;
 	bool started = false;
 };
 
-// Where a segment's playback stands on a slot.
 struct SlotPlay {
-	bool active = false; // decoding (or flushing the resampler) a segment
+	bool active = false;
 	ca::WaveId wave = ca::kNoWave;
 	uint32_t variation = 0;
 	uint16_t segment = 0;
 	uint8_t channels = 1;
 	uint32_t rate = 48000;
-	bool source_done = false; // the segment's stream is exhausted and nothing continues it
-	uint8_t flush = 0; // zero frames fed since source_done
-	uint32_t frames_out = 0; // output frames since the segment started
+	bool source_done = false;
+	uint8_t flush = 0;
+	uint32_t frames_out = 0;
 	ca::StreamDecoder decoder;
 	std::array<float, kSlotInputFrames * ca::kMaxStreamChannels> input{};
 	uint32_t input_count = 0, input_pos = 0;
@@ -68,85 +63,85 @@ struct SlotPlay {
 
 struct PendingStart {
 	bool armed = false;
-	uint64_t frame = 0; // absolute MixerClock frame
+	uint64_t frame = 0;
 	uint16_t segment = 0;
 	SamplerTraceKind kind = SamplerTraceKind::Trigger;
-	float offset_seconds = 0.0f; // Sampler Offset (Trigger only)
+	float offset_seconds = 0.0f;
 };
 
 struct SlotState {
 	SlotPlay play;
 	PendingStart pending;
-	float fade = 1.0f; // takeover / instant-release fade
-	float fade_step = 0.0f; // per frame (negative: fading out)
-	bool fade_kill = false; // ends the slot when the fade reaches 0
-	uint16_t voice = 0xffff; // the slot's voice (SndPlayer ref)
-	uint32_t gain_plugin = UINT32_MAX; // global plugin index of the slot's Gai0
-	uint64_t outputs_mask = ~uint64_t(0); // PT1 rld [live outputs]: bit o = the slot's voice feeds output o (all: unknown)
+	float fade = 1.0f;
+	float fade_step = 0.0f;
+	bool fade_kill = false;
+	uint16_t voice = 0xffff;
+	uint32_t gain_plugin = UINT32_MAX;
+	uint64_t outputs_mask = ~uint64_t(0);
 };
 
 struct SamplerState {
 	uint32_t node = 0;
-	uint32_t slots_begin = 0, slots_count = 0; // into State::slots
+	uint32_t slots_begin = 0, slots_count = 0;
 	ca::SamplerLoop loop = ca::SamplerLoop::Release;
 	bool shuffle = false;
 	bool step_connected = false;
-	bool active = false; // triggered and not yet ended
+	bool active = false;
 	bool released = false;
-	bool stepped = false; // latched at Trigger
-	float delay_seconds = 0.0f; // latched at Trigger
+	bool stepped = false;
+	float delay_seconds = 0.0f;
 	ca::WaveId wave = ca::kNoWave;
 	uint32_t variation = 0;
-	int32_t first_loop = -1, last_loop = -1; // clamped to the variation; -1: no loop
+	int32_t first_loop = -1, last_loop = -1;
 	uint16_t segments = 0;
 	uint8_t last_slot = 0;
 	uint16_t last_segment = kNoSegment;
 	uint32_t draws = 0;
 	bool finished_pulse = false;
-	float amplitude = 0.0f, amplitude_prev = 0.0f; // Gai0 of every slot
-	float pitch = 1.0f; // BasePitch x Pitch x MasterPitch
+	float amplitude = 0.0f, amplitude_prev = 0.0f;
+	float pitch = 1.0f;
 	bool instant_release = false;
 };
 
 enum class PluginRole : uint8_t {
-	Pass, // Rsp0, Pau0, Sub0, VuM0 and unknown FourCCs
-	Slot, // SnP1 of a sampler slot (index = slot)
-	SlotGain, // Gai0 of a sampler slot (index = slot)
-	Gain, // Gai0 driven by a Gain node / link (attribute 0, linear)
+	Pass,
+	Slot,
+	SlotGain,
+	Gain,
 	HighPass,
 	LowPass,
 	BandPass,
 	Peaking,
 	Delay,
-	Damping, // LPB0
-	Pan, // Pn21 (index = output, or UINT32_MAX)
-	Send, // Sen0 / Rou0 (index = connection)
+	Damping,
+	Pan,
+	Send,
 };
 
 struct PluginState {
 	PluginRole role = PluginRole::Pass;
 	uint32_t index = UINT32_MAX;
-	uint32_t output = UINT32_MAX; // Send: the output whose main send this is; Damping/Pan: their output
-	bool reverb_send = false; // dropped until A4
+	uint32_t output = UINT32_MAX;
+	bool reverb_send = false;
 	std::array<float, cp::kMaxPluginAttributes> attributes{};
 	uint32_t override_mask = 0;
 	std::array<float, cp::kMaxPluginAttributes> overrides{};
 	Biquad biquad[2];
 	OnePoleLowPass damping[2];
-	float gain_prev = 0.0f; // Gain / Send ramps
+	float gain_prev = 0.0f;
 	bool gain_started = false;
-	uint32_t delay_begin = 0, delay_frames = 0, delay_write = 0; // into State::delay_pool (stereo interleaved)
+	uint32_t delay_begin = 0, delay_frames = 0, delay_write = 0;
 	float attribute(uint8_t p_attribute) const {
 		return (override_mask >> p_attribute) & 1u ? overrides[p_attribute] : attributes[p_attribute];
 	}
 };
 
 struct OutputState {
-	float curve_gain_db = 0.0f; // curve + Gain (output_gain_db)
+	float curve_gain_db = 0.0f;
 	float cone_db = 0.0f;
-	float send_gain = 0.0f; // linear, the main send of the output voice
+	float send_gain = 0.0f;
 	uint16_t voice = 0xffff;
-	bool bypass_headroom = false; // PT1 rld [bypass headroom]: the output node's BypassHeadroom port, read each evaluation
+	bool bypass_headroom = false;
 };
 
 struct PendingEvent {
@@ -155,8 +150,6 @@ struct PendingEvent {
 	bool stop = false;
 };
 
-// A plugin attribute driven by a port: the audio node's own attribute ports, then LinkedPluginAttributes (later
-// drives of the same attribute win).
 struct AttributeDrive {
 	uint32_t plugin = 0;
 	uint8_t attribute = 0;
@@ -165,14 +158,14 @@ struct AttributeDrive {
 
 struct Geometry {
 	float distance = 0.0f;
-	float azimuth = 0.0f; // radians, positive right
-	float elevation = 0.0f; // radians
+	float azimuth = 0.0f;
+	float elevation = 0.0f;
 	float velocity = 0.0f;
-	float relative_velocity = 0.0f; // positive: separating
-	float cone_angle_deg = 0.0f; // angle between the emitter's forward and the listener
+	float relative_velocity = 0.0f;
+	float cone_angle_deg = 0.0f;
 };
 
-} // namespace bf3::audio::detail
+}
 
 namespace bf3::audio {
 
@@ -182,71 +175,62 @@ struct PatchInstance::State {
 	AudioTuning tuning;
 	uint64_t seed = 0;
 	uint32_t mix_rate = 48000;
-	uint64_t clock = 0; // MixerClock frame of the next evaluation (control clock)
-	bool clock_set = false; // process_block takes the clock from the first BusBuffers::first_frame
+	uint64_t clock = 0;
+	bool clock_set = false;
 
-	// Control program
 	std::vector<float> registers;
-	std::vector<uint16_t> event_registers; // registers of AudioGraphEvents (pulses)
+	std::vector<uint16_t> event_registers;
 	std::vector<detail::NodeState> nodes;
-	std::vector<detail::GroupState> groups; // by child_nodes index
+	std::vector<detail::GroupState> groups;
 	std::vector<detail::SamplerState> samplers;
 	std::vector<detail::SlotState> slots;
-	std::vector<core::audio::WaveId> wave_ids; // program wave index -> bank wave (kNoWave: not in the bank)
-	std::vector<std::pair<uint32_t, uint32_t>> wave_variations; // program wave index -> playable variation range (English)
-	std::vector<float> mixer_values; // by program mixer_inputs index
+	std::vector<core::audio::WaveId> wave_ids;
+	std::vector<std::pair<uint32_t, uint32_t>> wave_variations;
+	std::vector<float> mixer_values;
 	detail::Geometry geometry;
 	PatchHaptics haptics;
 	uint16_t stop_register = core::audio::kNoRegister;
 	bool stop_seen = false;
 	bool any_event = false;
 
-	// Events of the block being processed, and those deferred to the next one
 	std::array<detail::PendingEvent, kMaxEventsPerBlock> events{};
 	uint32_t event_count = 0;
 	std::array<detail::PendingEvent, kMaxEventsPerBlock> deferred{};
 	uint32_t deferred_count = 0;
 
-	// Audio plan
-	std::vector<detail::PluginState> plugins; // by global plugin index (voice.plugins_begin + plugin)
+	std::vector<detail::PluginState> plugins;
 	std::vector<detail::OutputState> outputs;
 	std::vector<detail::AttributeDrive> drives;
-	std::vector<float> voice_buffers; // per voice: 2 planar channels of kMaxSubBlock
+	std::vector<float> voice_buffers;
 	std::vector<float> delay_pool;
-	std::vector<uint8_t> voice_tapped; // per voice: bit t = tap t takes it
-	std::vector<uint8_t> voice_live; // integ/m2b-w1 [lazy zero]: per voice, 1 once render() zeroed its sub-block range
+	std::vector<uint8_t> voice_tapped;
+	std::vector<uint8_t> voice_live;
 	std::array<std::array<float, detail::kMaxSubBlock>, kMaxVoiceTaps> tap_buffers{};
 	std::array<VoiceTap *, kMaxVoiceTaps> taps{};
 	uint32_t tap_count = 0;
 	SamplerTrace *trace = nullptr;
 
 	PatchInstanceStats stats;
-	HdrVoiceWindow hdr; // M2b au [a3]: set by the mixer per block (patch_instance.h)
-	Vec3 emitter_position; // M2b au [a3]: the last set_geometry's emitter (the cull's DuplicateSpawn distance)
-	uint64_t loudness_hint = 0; // PT1 rld [live outputs]: set_loudness_outputs (0: none)
-	float hdr_send_gain(const detail::OutputState &p_o, float p_hdr_window_db) const; // PT1 rld [bypass headroom]: an EnableHdr output's send gain
-	// M2b au [quiet] (patch_instance.cpp, docs/design/m2b-au.md "Quiet voices"): a voice whose buffer is silent and whose
-	// remaining plugins are at rest skips their per-sample work; quiet_plugin keeps their ramp and coefficient state
-	// exactly where the full path would leave it, so the render is unchanged.
-	bool voice_quiet(const core::audio::SoundVoice &p_voice, uint16_t p_from, const float *p_left, const float *p_right, uint32_t p_frames) const; // M2b au [quiet]
-	void quiet_plugin(detail::PluginState &r_ps, float p_rate, float p_window_db, float p_hdr_window_db); // M2b au [quiet]
-	// PT1 snd [edge] (docs/design/pt1-snd.md): what the instance's sends wrote to the buses at the first and the last
-	// frame of the last rendered sub-block (per channel, summed over the sends): a cut after it leaves a step of |edge|
-	// in the mix, a start a step of |head|. pt1_abrupt counts gain ramps of a send that moved more than 3 dB within a
-	// sub-block shorter than 64 frames with signal on it, pt1_abrupt_max their largest per-sample step (signal x gain).
-	float pt1_edge[2] = { 0.0f, 0.0f }; // PT1 snd [edge]
-	float pt1_head[2] = { 0.0f, 0.0f }; // PT1 snd [edge]
-	uint64_t pt1_abrupt = 0; // PT1 snd [edge]
-	float pt1_abrupt_max = 0.0f; // PT1 snd [edge]
-	// PT1 snd [fade]: the output fade the mixer runs over a cut (PatchInstance::pt1_fade_to): the sends to the buses are
-	// scaled by it; it moves linearly by pt1_fade_step per frame for pt1_fade_left frames, then holds pt1_fade_target.
-	float pt1_fade = 1.0f; // PT1 snd [fade]
-	float pt1_fade_step = 0.0f; // PT1 snd [fade]
-	float pt1_fade_target = 1.0f; // PT1 snd [fade]
-	uint32_t pt1_fade_left = 0; // PT1 snd [fade]
-	float pt1_fade_at(uint32_t p_i) const { // PT1 snd [fade]: the fade at frame p_i of the sub-block
-		return p_i < pt1_fade_left ? pt1_fade + pt1_fade_step * float(p_i + 1) : pt1_fade_target; // PT1 snd [fade]
-	} // PT1 snd [fade]
+	HdrVoiceWindow hdr;
+	Vec3 emitter_position;
+	uint64_t loudness_hint = 0;
+	float hdr_send_gain(const detail::OutputState &p_o, float p_hdr_window_db) const;
+
+	bool voice_quiet(const core::audio::SoundVoice &p_voice, uint16_t p_from, const float *p_left, const float *p_right, uint32_t p_frames) const;
+	void quiet_plugin(detail::PluginState &r_ps, float p_rate, float p_window_db, float p_hdr_window_db);
+
+	float pt1_edge[2] = { 0.0f, 0.0f };
+	float pt1_head[2] = { 0.0f, 0.0f };
+	uint64_t pt1_abrupt = 0;
+	float pt1_abrupt_max = 0.0f;
+
+	float pt1_fade = 1.0f;
+	float pt1_fade_step = 0.0f;
+	float pt1_fade_target = 1.0f;
+	uint32_t pt1_fade_left = 0;
+	float pt1_fade_at(uint32_t p_i) const {
+		return p_i < pt1_fade_left ? pt1_fade + pt1_fade_step * float(p_i + 1) : pt1_fade_target;
+	}
 
 	float *voice(uint16_t p_voice, uint32_t p_channel) { return voice_buffers.data() + (size_t(p_voice) * 2 + p_channel) * detail::kMaxSubBlock; }
 	float read(const core::audio::SoundPort &p_port) const { return p_port.reg == core::audio::kNoRegister ? p_port.constant : registers[p_port.reg]; }
@@ -266,14 +250,13 @@ struct PatchInstance::State {
 	}
 	void trace_entry(uint64_t p_frame, uint32_t p_node, uint8_t p_slot, uint16_t p_segment, SamplerTraceKind p_kind, float p_pitch, uint64_t p_prev_end);
 
-	// patch_nodes.cpp: one evaluation of the control program at absolute frame p_frame; then the plugin attributes.
 	void evaluate_program(uint64_t p_frame);
-	// Advances the time-based nodes by p_seconds after an evaluation.
+
 	void advance(double p_seconds);
-	// patch_sampler.cpp
+
 	void sampler_events(uint32_t p_node_index, const core::audio::SoundNode &p_node, uint64_t p_frame);
 	void render_slot(detail::SamplerState &r_sampler, uint32_t p_slot, float *r_left, float *r_right, uint64_t p_first_frame, uint32_t p_frames);
 	bool sampler_busy(const detail::SamplerState &p_sampler) const;
 };
 
-} // namespace bf3::audio
+}

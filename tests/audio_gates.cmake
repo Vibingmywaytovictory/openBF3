@@ -1,13 +1,3 @@
-# M2a audio install gates driven by bf3dump (docs/design/m2a-audio.md §1, §10.2): each runs one `bf3dump audio ...`
-# command, parses its summary line (key=value pairs) and checks the gate's thresholds; every one also requires the
-# command's `install.unchanged yes` line and exit 0. Exits 77 (skipped) when bf3dump finds no install.
-#   GATE=waves         G1 audio.waves         bf3dump audio waves MP_Subway TeamDeathMatch0 --decode
-#   GATE=loc           G2 audio.loc           bf3dump audio loc en --decode
-#   GATE=decode_perf   G3 audio.decode.perf   bf3dump audio waves MP_Subway TeamDeathMatch0 --bench 3
-#   GATE=census        G4 audio.census        bf3dump audio census @all-mp
-#   GATE=bank          G6 audio.bank          bf3dump audio bank MP_Subway TeamDeathMatch0 --loads 2
-#   GATE=m16_offline   G7 audio.m16.offline   bf3dump audio check --g7 --out-dir <SHOTS>
-# Usage: cmake -DBF3DUMP=<bf3dump.exe> -DGATE=<gate> [-DSHOTS=<dir>] [-DREPORT_ONLY=ON] -P audio_gates.cmake
 cmake_minimum_required(VERSION 3.29)
 
 if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")
@@ -15,11 +5,8 @@ if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")
 endif()
 
 set(_failed 0)
-# _fatal: the command itself failed (a non-zero exit such as an ASan abort, or no `install.unchanged yes`).
-# REPORT_ONLY (the asan preset, whose counts and timings are reported, not gated) never hides it.
 set(_fatal 0)
 
-# Runs bf3dump with the given arguments; sets _out (stdout) in the caller.
 macro(run_bf3dump)
     execute_process(COMMAND "${BF3DUMP}" ${ARGN} RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err TIMEOUT 1500)
     if(_rc EQUAL 77 OR _err MATCHES "install not usable")
@@ -41,7 +28,6 @@ macro(run_bf3dump)
     endif()
 endmacro()
 
-# The line of _out that starts with _prefix.
 macro(summary_line _prefix)
     string(REGEX MATCH "${_prefix}[^\n]*" _line "${_out}")
     if(_line STREQUAL "")
@@ -52,7 +38,6 @@ macro(summary_line _prefix)
     endif()
 endmacro()
 
-# key=value of the summary line compared with _op (EQUAL, LESS_EQUAL, GREATER_EQUAL) against _want.
 function(expect _key _op _want)
     string(REGEX MATCH "[ :]${_key}=([-0-9.]+)" _m "${_line}")
     set(_v "${CMAKE_MATCH_1}")
@@ -73,9 +58,6 @@ function(expect _key _op _want)
         set(_failed 1 PARENT_SCOPE)
     endif()
 endfunction()
-
-# Floats: CMake's if() compares integers and floats alike for these magnitudes (math(EXPR) is integer only, so the
-# thresholds are written as plain numbers and compared with LESS/GREATER, which accept decimals).
 
 if(GATE STREQUAL "waves")
     run_bf3dump(audio waves MP_Subway TeamDeathMatch0 --decode)

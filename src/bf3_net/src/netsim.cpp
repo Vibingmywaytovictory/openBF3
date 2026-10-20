@@ -1,6 +1,3 @@
-// Network-conditions simulator (netsim.h; docs/design/m1.md §7.6; topics/05 §1.1 Game.cfg knobs). Deterministic:
-// one splitmix64 stream per instance, seeded from the config, drawn in a fixed order per submit, so the same seed
-// and the same submit/poll times give the same deliveries.
 #include "bf3/net/netsim.h"
 
 #include <algorithm>
@@ -12,11 +9,8 @@ namespace bf3::net {
 
 namespace {
 
-// Pending::order's top bit marks a datagram held back by the reorder knob until the next unreliable datagram to
-// the same peer that is not held itself is scheduled (the held ones are then released 1 ns after it, in their own
-// order), or until its hold time runs out.
 constexpr uint64_t kHeldBit = uint64_t(1) << 63;
-constexpr double kHoldTimeoutMs = 100.0; // plus the jitter span: a held datagram never waits forever
+constexpr double kHoldTimeoutMs = 100.0;
 constexpr double kMaxLatencyMs = 10'000.0;
 constexpr double kMaxSpikeMs = 60'000.0;
 constexpr double kMaxRttMs = 2 * kMaxLatencyMs;
@@ -29,7 +23,7 @@ uint64_t splitmix64(uint64_t &r_state) {
 }
 
 double uniform01(uint64_t &r_state) {
-	return double(splitmix64(r_state) >> 11) * (1.0 / 9007199254740992.0); // [0, 1), 53 bits
+	return double(splitmix64(r_state) >> 11) * (1.0 / 9007199254740992.0);
 }
 
 uint64_t ms_to_ns(double p_ms) {
@@ -56,7 +50,6 @@ bool parse_number(std::string_view p_s, double &r_value) {
 	return r.ec == std::errc() && r.ptr == end && std::isfinite(r_value) && r_value >= 0.0;
 }
 
-// "a" or "a-b" (no negative values, so the first '-' separates).
 bool parse_range(std::string_view p_s, double &r_min, double &r_max) {
 	const size_t dash = p_s.find('-');
 	if (dash == std::string_view::npos) {
@@ -75,11 +68,11 @@ core::Error bad(std::string_view p_profile, const char *p_why) {
 
 void append_number(std::string &r_out, double p_value) {
 	char buf[64];
-	const std::to_chars_result r = std::to_chars(buf, buf + sizeof(buf), float(p_value)); // shortest round trip
+	const std::to_chars_result r = std::to_chars(buf, buf + sizeof(buf), float(p_value));
 	r_out.append(buf, r.ptr);
 }
 
-} // namespace
+}
 
 core::Result<NetSimConfig> parse_netsim(std::string_view p_profile) {
 	const std::string_view profile = trim(p_profile);
@@ -104,9 +97,7 @@ core::Result<NetSimConfig> parse_netsim(std::string_view p_profile) {
 			if (token == "off") {
 				c = NetSimConfig{};
 			} else if (token == "bf3") {
-				// Game.cfg's IsInternetSimulation values (topics/05 §1.1): MinLatency 0.1, MaxLatency 0.2,
-				// PacketDrops 0.01, DropSpikeChance 0.03, Min/MaxDropDuration 0.3/1.0, ReorderingChance 0.01,
-				// DuplicationChance 0.02 (CorruptionChance is not modelled: ENet checks its own framing).
+
 				c.latency_min_ms = 100;
 				c.latency_max_ms = 200;
 				c.loss = 0.01f;
@@ -125,8 +116,7 @@ core::Result<NetSimConfig> parse_netsim(std::string_view p_profile) {
 				if (rtt > kMaxRttMs || loss > 100.0) {
 					return bad(p_profile, "round trip above 20,000 ms or loss above 100 %");
 				}
-				// The M1 reading of "150 ms / 2 %" (docs §7.6): half the round trip each way, +-10 % jitter, the loss
-				// in each direction.
+
 				const double one_way = rtt * 0.5;
 				c.latency_min_ms = float(one_way * 0.9);
 				c.latency_max_ms = float(one_way * 1.1);
@@ -214,7 +204,6 @@ void NetSim::submit(Datagram p_datagram, uint64_t p_now_ns) {
 	}
 	const bool unreliable = !p_datagram.reliable;
 
-	// Drop spikes: a Poisson-like start chance per second of elapsed time, checked on every submit.
 	if (config_.spike_chance > 0.0f) {
 		if (stats_.submitted > 1 && p_now_ns > last_spike_check_ns_ && p_now_ns >= spike_until_ns_) {
 			const double dt = double(p_now_ns - last_spike_check_ns_) * 1.0e-9;
@@ -243,11 +232,11 @@ void NetSim::submit(Datagram p_datagram, uint64_t p_now_ns) {
 	for (int copy = 0; copy < copies; ++copy) {
 		const double delay_ms = double(config_.latency_min_ms) + (span_ms > 0.0 ? span_ms * uniform01(rng_) : 0.0);
 		uint64_t release = p_now_ns + ms_to_ns(delay_ms);
-		const uint64_t scheduled = stats_.delivered + queue_.size(); // copies scheduled before this one
+		const uint64_t scheduled = stats_.delivered + queue_.size();
 		stats_.mean_delay_ms += (delay_ms - stats_.mean_delay_ms) / double(scheduled + 1);
 		bool held = false;
 		if (!unreliable) {
-			// In order per peer and channel, as ENet delivers reliable data: never before an earlier one.
+
 			for (const Pending &p : queue_) {
 				if (p.datagram.reliable && p.datagram.peer == p_datagram.peer && p.datagram.channel == p_datagram.channel) {
 					release = std::max(release, p.release_ns);
@@ -256,7 +245,7 @@ void NetSim::submit(Datagram p_datagram, uint64_t p_now_ns) {
 		} else {
 			held = config_.reorder > 0.0f && uniform01(rng_) < double(config_.reorder);
 			if (!held) {
-				// The datagrams held back for this peer go right behind this one (in their own order).
+
 				bool moved = false;
 				for (Pending &p : queue_) {
 					if ((p.order & kHeldBit) != 0 && p.datagram.peer == p_datagram.peer) {
@@ -299,4 +288,4 @@ size_t NetSim::pending() const {
 	return queue_.size();
 }
 
-} // namespace bf3::net
+}

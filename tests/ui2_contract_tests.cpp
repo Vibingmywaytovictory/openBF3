@@ -1,7 +1,3 @@
-// UI ui2 interface contract (docs/design/ui-minimap-icons.md §13): the minimap / HUD icon / HUD data-model headers
-// compile together, the binding rows keep the counts the install had on 2026-10-15 (design §7.2), and the inline
-// helpers both the readers and the Godot side use (the minimap mapping, the view, the icon rects) behave as the
-// design says. No data, no Godot; nothing here calls a function the implementation wave has yet to write.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ui/hud_icons.h"
@@ -21,7 +17,6 @@ namespace {
 
 constexpr float kPi = 3.14159265358979f;
 
-// The binding table is constexpr: the counts are compile-time facts of the header.
 static_assert(std::size(ui::kHudBindings) == 235);
 static_assert(ui::hud_binding_count(ui::HudBindKind::Model) == 150);
 static_assert(ui::hud_binding_count(ui::HudBindKind::Client) == 35);
@@ -40,14 +35,13 @@ static_assert(ui::hud_binding_count("UITeamCompData") == 35);
 static_assert(std::is_trivially_copyable_v<ui::HudModel>);
 static_assert(std::is_standard_layout_v<ui::HudModel>);
 
-// The research mapping on Metro's UIMinimapData (design §4.1).
 constexpr ui::MinimapMapping kMetro{ 0.0f, -162.0f, 1024.0f };
 
 bool near(float p_a, float p_b, float p_eps) {
 	return std::fabs(p_a - p_b) <= p_eps;
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui2-contract") {
 	TEST_CASE("binding rows: every bound component, no duplicate, Model fields are snake_case of the source") {
@@ -84,11 +78,11 @@ TEST_SUITE("ui2-contract") {
 		CHECK(snake("AATracking") == "aa_tracking");
 		CHECK(snake("Squad1Name") == "squad1_name");
 		CHECK(snake("X") == "x");
-		CHECK(ui::hud_snake_case("ActiveWeaponAmmo", buf, 4) == 0); // does not fit
+		CHECK(ui::hud_snake_case("ActiveWeaponAmmo", buf, 4) == 0);
 	}
 
 	TEST_CASE("minimap mapping: research formula, inverse, variants") {
-		// The centre lands on the image centre; +x goes left, +z goes up (both axes mirrored).
+
 		const ui::MinimapUv c = ui::world_to_minimap_uv(kMetro, 0.0f, -162.0f);
 		CHECK(near(c.u, 0.5f, 1e-6f));
 		CHECK(near(c.v, 0.5f, 1e-6f));
@@ -96,14 +90,14 @@ TEST_SUITE("ui2-contract") {
 		CHECK(px.u < 0.5f);
 		const ui::MinimapUv pz = ui::world_to_minimap_uv(kMetro, 0.0f, -62.0f);
 		CHECK(pz.v < 0.5f);
-		// Metro's US HQ (bf3dump level MP_Subway ConquestSmall0): u = 0.5 + 108.03/1024, v = 0.5 - (-147.5 + 162)/1024.
+
 		const ui::MinimapUv hq = ui::world_to_minimap_uv(kMetro, -108.03f, -147.5f);
 		CHECK(near(hq.u, 0.605498f, 1e-5f));
 		CHECK(near(hq.v, 0.485840f, 1e-5f));
 		const std::array<float, 2> back = ui::minimap_uv_to_world(kMetro, hq);
 		CHECK(near(back[0], -108.03f, 1e-3f));
 		CHECK(near(back[1], -147.5f, 1e-3f));
-		// Variant 0 is the research mapping; the 8 variants are distinct off the diagonal.
+
 		std::set<std::pair<float, float>> distinct;
 		for (uint8_t v = 0; v < ui::kMinimapMappingVariants; ++v) {
 			const ui::MinimapUv a = ui::world_to_minimap_uv_variant(kMetro, -108.03f, -500.0f, v);
@@ -125,9 +119,8 @@ TEST_SUITE("ui2-contract") {
 		view.player_x = 10.0f;
 		view.player_z = 20.0f;
 
-		// North-up: +Z is up, +X is left (the mirrored image); the marker turns by -heading.
 		view.rotate = false;
-		view.heading = kPi / 2.0f; // looking down +X
+		view.heading = kPi / 2.0f;
 		const ui::ScreenPoint north = ui::minimap_project(view, 10.0f, 30.0f);
 		CHECK(near(north.x, 128.0f, 1e-4f));
 		CHECK(near(north.y, 108.0f, 1e-4f));
@@ -136,7 +129,6 @@ TEST_SUITE("ui2-contract") {
 		CHECK(near(plus_x.y, 128.0f, 1e-4f));
 		CHECK(near(ui::minimap_marker_angle(view), -kPi / 2.0f, 1e-6f));
 
-		// Rotating: whatever the heading, the point straight ahead is straight up and the marker does not turn.
 		view.rotate = true;
 		for (float heading : { 0.0f, kPi / 2.0f, kPi, -kPi / 3.0f, 2.5f }) {
 			view.heading = heading;
@@ -145,8 +137,7 @@ TEST_SUITE("ui2-contract") {
 			const ui::ScreenPoint p = ui::minimap_project(view, ahead_x, ahead_z);
 			CHECK(near(p.x, 128.0f, 1e-3f));
 			CHECK(near(p.y, 108.0f, 1e-3f));
-			// A higher yaw is a turn to the left (input_mapper.h: the mouse to the right lowers the yaw), so the point at
-			// heading + 90 degrees is to the left of the marker.
+
 			const float left_x = view.player_x + 10.0f * std::sin(heading + kPi / 2.0f);
 			const float left_z = view.player_z + 10.0f * std::cos(heading + kPi / 2.0f);
 			const ui::ScreenPoint l = ui::minimap_project(view, left_x, left_z);
@@ -160,13 +151,13 @@ TEST_SUITE("ui2-contract") {
 	}
 
 	TEST_CASE("view agrees with the image mapping in north-up") {
-		// A world point's screen offset from the player equals its image offset from the player's texel, scaled.
+
 		ui::MinimapView view;
 		view.rotate = false;
 		view.pixels_per_metre = 0.25f;
 		view.player_x = -108.03f;
 		view.player_z = -147.5f;
-		const float image_px = kMetro.size * view.pixels_per_metre; // image side on screen
+		const float image_px = kMetro.size * view.pixels_per_metre;
 		const ui::MinimapUv a = ui::world_to_minimap_uv(kMetro, view.player_x, view.player_z);
 		const ui::MinimapUv b = ui::world_to_minimap_uv(kMetro, -193.69f, -610.25f);
 		const ui::ScreenPoint s = ui::minimap_project(view, -193.69f, -610.25f);
@@ -176,8 +167,8 @@ TEST_SUITE("ui2-contract") {
 
 	TEST_CASE("sdf_inside and L8Image::at_uv") {
 		CHECK(ui::sdf_inside(0, ui::kResearchCombatAreaThreshold));
-		CHECK(ui::sdf_inside(126, ui::kResearchCombatAreaThreshold)); // 0.494
-		CHECK_FALSE(ui::sdf_inside(127, ui::kResearchCombatAreaThreshold)); // 0.498
+		CHECK(ui::sdf_inside(126, ui::kResearchCombatAreaThreshold));
+		CHECK_FALSE(ui::sdf_inside(127, ui::kResearchCombatAreaThreshold));
 		CHECK_FALSE(ui::sdf_inside(255, ui::kResearchCombatAreaThreshold));
 		ui::L8Image img;
 		img.width = 2;
@@ -186,10 +177,10 @@ TEST_SUITE("ui2-contract") {
 		CHECK(img.at_uv({ 0.0f, 0.0f }) == 1);
 		CHECK(img.at_uv({ 0.99f, 0.0f }) == 2);
 		CHECK(img.at_uv({ 0.0f, 0.99f }) == 3);
-		CHECK(img.at_uv({ 2.0f, 2.0f }) == 4); // clamped
+		CHECK(img.at_uv({ 2.0f, 2.0f }) == 4);
 		CHECK(img.at_uv({ -1.0f, -1.0f }) == 1);
-		CHECK(ui::L8Image{}.at_uv({ 0.5f, 0.5f }) == 255); // empty: outside
-		CHECK(img.at_uv({ std::nanf(""), 0.5f }) == 255); // non-finite: outside, no float -> integer conversion
+		CHECK(ui::L8Image{}.at_uv({ 0.5f, 0.5f }) == 255);
+		CHECK(img.at_uv({ std::nanf(""), 0.5f }) == 255);
 		CHECK(img.at_uv({ 0.5f, INFINITY }) == 255);
 	}
 
@@ -199,7 +190,7 @@ TEST_SUITE("ui2-contract") {
 				const ui::MinimapUv d = ui::decode_minimap_debug_uv(ui::encode_minimap_debug_uv({ u, v }));
 				CHECK(near(d.u, u, 0.5f / ui::kMinimapDebugUvSteps + 1e-6f));
 				CHECK(near(d.v, v, 0.5f / ui::kMinimapDebugUvSteps + 1e-6f));
-				// At most a quarter texel of Metro's 2048² satellite, well inside the gate's 1 texel.
+
 				CHECK(ui::minimap_uv_error_texels(d, { u, v }, 2048) <= 0.26f);
 			}
 		}
@@ -218,7 +209,7 @@ TEST_SUITE("ui2-contract") {
 		view.center_x = 128.0f;
 		view.center_y = 128.0f;
 		view.pixels_per_metre = 0.85f;
-		view.player_x = -108.03f; // Metro's US HQ as a stand-in spawn
+		view.player_x = -108.03f;
 		view.player_z = -147.5f;
 		for (bool rotate : { false, true }) {
 			view.rotate = rotate;
@@ -226,8 +217,7 @@ TEST_SUITE("ui2-contract") {
 			const ui::MinimapUv c = ui::minimap_expected_uv(view, kMetro, { 128.0f, 128.0f });
 			const ui::MinimapUv own = ui::world_to_minimap_uv(kMetro, view.player_x, view.player_z);
 			CHECK(ui::minimap_uv_error_texels(c, own, 2048) < 1e-2f);
-			// A ring of 16 samples 100 units from the centre (the gate's rule): for every other variant the largest miss
-			// over the ring exceeds the 10-texel control bound.
+
 			for (uint8_t v = 1; v < ui::kMinimapMappingVariants; ++v) {
 				INFO(int(v));
 				float worst = 0.0f;
@@ -241,9 +231,9 @@ TEST_SUITE("ui2-contract") {
 				CHECK(worst > ui::kMinimapUvMirrorTexels);
 			}
 		}
-		// Rotating: the sample straight above the centre is ahead of the player.
+
 		view.rotate = true;
-		view.heading = kPi / 2.0f; // looking down +X
+		view.heading = kPi / 2.0f;
 		const std::array<float, 2> ahead = ui::minimap_unproject(view, { 128.0f, 128.0f - 85.0f });
 		CHECK(near(ahead[0], view.player_x + 100.0f, 1e-2f));
 		CHECK(near(ahead[1], view.player_z, 1e-2f));
@@ -268,7 +258,7 @@ TEST_SUITE("ui2-contract") {
 	}
 
 	TEST_CASE("hud icon rects and frames") {
-		// UIHudIcon_LocalPlayer Default on the 256 x 1024 atlas (design §6.1).
+
 		const ui::HudIconRect r = ui::hud_icon_rect({ 0.13671875f, 0.61816406f, 0.203125f, 0.63671875f }, 256, 1024);
 		CHECK(r.x == 35);
 		CHECK(r.y == 633);

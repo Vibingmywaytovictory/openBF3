@@ -1,5 +1,3 @@
-// The effects of one level session (effect_library.h; docs/design/m2a-vfx1.md §7.1): compile once per name (cache
-// first), share the def, remember failures; atlas bindings per emitter.
 #include "bf3/fx/effect_library.h"
 
 #include "bf3/core/thread_pool.h"
@@ -43,7 +41,7 @@ core::Result<std::shared_ptr<const EffectDef>> EffectLibrary::get(std::string_vi
 		}
 		entry = slot;
 	}
-	// Compiles outside the lock, once per name.
+
 	std::call_once(entry->once, [&]() {
 		core::Result<CachedEffect> c = compile_effect_cached(impl_->sources.cache, impl_->sources.fx, name, &impl_->totals);
 		if (!c) {
@@ -99,4 +97,4 @@ core::ConvertTotals &EffectLibrary::totals() {
 	return impl_->totals;
 }
 
-} // namespace bf3::fx
+}

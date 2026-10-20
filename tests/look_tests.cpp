@@ -1,13 +1,3 @@
-// L1 look (README "L1 look"): the shader database reader, the look resolver and the visual environment arithmetic.
-//
-// Suite "render-look-unit": parse_shader_database on a synthetic res (fields, the sampled textures and values of a
-// solution's pixel constants), every truncation and single-byte mutations of it (an error or a parse, never a crash
-// or an out-of-range read), the work budget against a res whose solutions all bind one large constant block; the
-// resolver's name roles, tiers, normal pairing and glass rule on a synthetic ShaderLookup; look_cubic, fog_fit,
-// look_area_weight (box and polygon, fade, hostile positions), look_frame (base and area blend) and look_grade. No data.
-// Suite "render-look": Metro TDM from the install (read-only; exits 77 = skipped without one): the level shader
-// database parsed with its work units against the budget, the resolver opened on the mount, the environment read
-// (base, areas, LUTs), and install.unchanged. Prints numbers and EBX names only.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -60,7 +50,6 @@ void set64(std::vector<uint8_t> &r_out, size_t p_at, uint64_t p_v) {
 
 constexpr const char *kShaderName = "levels/test/shaders/wallshader";
 
-// One constant block: p_textures texture entries named <name><i>, one value "Tint" = (0.25, 0.5, 0.75, 1).
 std::vector<uint8_t> constant_block(uint8_t p_textures, const char *p_texture_name) {
 	const size_t header = 0x40, textures_at = header, values_at = textures_at + size_t(p_textures) * 0x98;
 	std::vector<uint8_t> b(values_at + 0x3C, 0);
@@ -83,21 +72,19 @@ std::vector<uint8_t> constant_block(uint8_t p_textures, const char *p_texture_na
 	return b;
 }
 
-// A one-path shader database res (version 182) with one constant block, one solution and one shader using it
-// p_uses times.
 std::vector<uint8_t> synthetic_database(uint8_t p_block_textures = 1, uint32_t p_uses = 1, uint8_t p_solution_flags = 1, uint8_t p_surface = 0) {
 	std::vector<uint8_t> body;
 	put32(body, kShaderDatabaseVersion);
 	put32(body, 0);
-	put32(body, 1); // constant blocks
+	put32(body, 1);
 	const std::vector<uint8_t> block = constant_block(p_block_textures, "levels/test/textures/wall_grime_mask");
 	body.insert(body.end(), block.begin(), block.end());
-	put32(body, 0); // constant lists
-	put32(body, 0); // texture lists
-	put32(body, 0); // vertex shaders
-	put32(body, 0); // pixel shaders
-	put32(body, 0); // shader blobs
-	put32(body, 1); // solutions
+	put32(body, 0);
+	put32(body, 0);
+	put32(body, 0);
+	put32(body, 0);
+	put32(body, 0);
+	put32(body, 1);
 	{
 		std::vector<uint8_t> s(64, 0);
 		s[0] = 0x11;
@@ -105,23 +92,23 @@ std::vector<uint8_t> synthetic_database(uint8_t p_block_textures = 1, uint32_t p
 		s[9] = p_surface;
 		s[10] = 0;
 		set64(s, 32, 0);
-		set64(s, 56, 0); // pixel constant block 0
+		set64(s, 56, 0);
 		body.insert(body.end(), s.begin(), s.end());
 	}
-	put32(body, 1); // solution states
+	put32(body, 1);
 	body.insert(body.end(), 32, 0);
-	put32(body, 0); // declarations
-	put32(body, 1); // shaders
+	put32(body, 0);
+	put32(body, 1);
 	put32(body, ebx_name_hash(kShaderName));
 	put32(body, p_surface);
 	body.push_back(0);
 	body.insert(body.end(), 35, 0);
-	put32(body, 1); // graph textures
+	put32(body, 1);
 	put_cstr(body, "levels/test/textures/wall_d");
 	put32(body, 1);
 	put32(body, kUsageTexCoord0);
 	putf(body, 0.5f);
-	put32(body, 1); // texture parameters
+	put32(body, 1);
 	put_cstr(body, "Normal");
 	put32(body, 7);
 	put32(body, 1);
@@ -133,7 +120,7 @@ std::vector<uint8_t> synthetic_database(uint8_t p_block_textures = 1, uint32_t p
 	}
 	std::vector<uint8_t> res;
 	put32(res, 1);
-	put32(res, 3); // render path id
+	put32(res, 3);
 	put32(res, uint32_t(body.size()));
 	res.insert(res.end(), body.begin(), body.end());
 	return res;
@@ -152,7 +139,7 @@ SurfaceShader graph_shader(const char *p_name, SurfaceShaderType p_type, std::ve
 	return s;
 }
 
-} // namespace
+}
 
 TEST_SUITE("render-look-unit") {
 	TEST_CASE("render.look.unit: shader database fields, sampled textures and values") {
@@ -188,14 +175,14 @@ TEST_SUITE("render-look-unit") {
 	TEST_CASE("render.look.unit: shader database truncations and mutations fail cleanly") {
 		const std::vector<uint8_t> res = synthetic_database(3, 4);
 		REQUIRE(parse_shader_database(res).ok());
-		// Every proper prefix cuts the one render path short (its size field promises more): always an error.
+
 		size_t truncation_errors = 0;
 		for (size_t n = 0; n < res.size(); ++n) {
 			std::vector<uint8_t> cut(res.begin(), res.begin() + std::ptrdiff_t(n));
 			truncation_errors += parse_shader_database(cut).ok() ? 0 : 1;
 		}
 		CHECK(truncation_errors == res.size());
-		// Single-byte mutations: each byte set to 0x00, 0x7F, 0x80 and 0xFF; a parse or an error, never a crash.
+
 		size_t parsed = 0, failed = 0;
 		for (size_t at = 0; at < res.size(); ++at) {
 			for (uint8_t v : { uint8_t(0x00), uint8_t(0x7F), uint8_t(0x80), uint8_t(0xFF) }) {
@@ -209,7 +196,7 @@ TEST_SUITE("render-look-unit") {
 		}
 		std::printf("render.look.unit shader database mutations: %zu bytes x 4 values, %zu parsed, %zu errors\n", res.size(), parsed, failed);
 		CHECK(failed > 0);
-		// Huge counts: every count field at 0xFFFFFFFF fails without reserving (would be > 100 GiB otherwise).
+
 		std::vector<uint8_t> huge = res;
 		std::memset(huge.data(), 0xFF, 4);
 		CHECK(!parse_shader_database(huge).ok());
@@ -217,15 +204,14 @@ TEST_SUITE("render-look-unit") {
 	}
 
 	TEST_CASE("render.look.unit: shader database work budget") {
-		// 20,000 uses of one solution whose constant block binds 255 textures: 20,000 x 257 units against a budget of
-		// 2^20 + 4 x ~80 KB; the parse must stop with the budget error, not collect.
+
 		const std::vector<uint8_t> res = synthetic_database(255, 20000);
 		uint64_t work = 0;
 		Result<std::vector<ShaderDatabase>> r = parse_shader_database(res, &work);
 		REQUIRE(!r.ok());
 		CHECK(r.error().message.find("work budget") != std::string::npos);
 		CHECK(work <= kShaderWorkBase + kShaderWorkPerByte * res.size() + 512);
-		// The same block used a few times is fine.
+
 		CHECK(parse_shader_database(synthetic_database(255, 3)).ok());
 	}
 
@@ -267,7 +253,6 @@ TEST_SUITE("render-look-unit") {
 		headers["levels/t/param_d"] = { res::TextureKind::Texture2D, F::Dxt1 };
 		LookResolver resolver(ShaderLookup(std::move(db)), headers);
 
-		// No texture parameters: the graph constants give colour and the paired normal (same UV1 and tiling).
 		MaterialSlot slot;
 		slot.shader = "Levels/T/Facade";
 		LookMaterial m = resolver.resolve(slot, "levels/t/mesh");
@@ -281,14 +266,12 @@ TEST_SUITE("render-look-unit") {
 		CHECK(m.normal->name == "levels/t/facade_n");
 		CHECK(m.blend == LookBlend::Opaque);
 
-		// A slot parameter outranks the graph.
 		slot.textures = { { "Diffuse", "levels/t/param_d" } };
 		m = resolver.resolve(slot, "levels/t/mesh");
 		REQUIRE(m.color);
 		CHECK(m.color->name == "levels/t/param_d");
 		CHECK(m.color->tier == LookTier::Parameter);
 
-		// No normal on the colour's UV set: the best on a mesh UV set (tile normal on UV0, its own tiling).
 		MaterialSlot split;
 		split.shader = "levels/t/uvsplit";
 		m = resolver.resolve(split, "levels/t/mesh");
@@ -299,7 +282,6 @@ TEST_SUITE("render-look-unit") {
 		CHECK(m.normal->channel == kLookUv0);
 		CHECK(near(m.normal->scale, 4.0f));
 
-		// Glass: transparent, colour without alpha -> kept as the tint, drawn blended.
 		MaterialSlot glass;
 		glass.shader = "levels/t/window_glass";
 		m = resolver.resolve(glass, "levels/t/mesh");
@@ -308,19 +290,16 @@ TEST_SUITE("render-look-unit") {
 		REQUIRE(m.color);
 		CHECK(m.color->name == "levels/t/window_d");
 
-		// Alpha test from the database's surface type.
 		MaterialSlot cut;
 		cut.shader = "levels/t/cutout";
 		m = resolver.resolve(cut, "levels/t/mesh");
 		CHECK(m.blend == LookBlend::AlphaTest);
 		CHECK(!m.glass);
 
-		// Undrawn shader words.
 		MaterialSlot hidden;
 		hidden.shader = "levels/t/invisible_collision";
 		CHECK(!resolver.resolve(hidden, "levels/t/mesh").drawn);
 
-		// A shader the database lacks, with no parameters and no mount: nothing to draw from, no crash.
 		MaterialSlot unknown;
 		unknown.shader = "levels/t/unknown";
 		m = resolver.resolve(unknown, "levels/t/mesh");
@@ -328,9 +307,6 @@ TEST_SUITE("render-look-unit") {
 		CHECK(!m.color);
 	}
 
-	// Hostile shape: one hash repeated across databases, and a graph naming tens of thousands of textures used by
-	// thousands of slots. Before the fix these were a linear scan per shader (O(n^2) in the shader count) and a scan
-	// of the streamed names per sampled name per slot (O(T x S x slots)); both would take minutes here.
 	TEST_CASE("render.look.unit: duplicate shaders and wide graphs stay near-linear") {
 		using F = res::TextureFormat;
 		std::vector<std::vector<SurfaceShader>> lists(2);
@@ -363,7 +339,7 @@ TEST_SUITE("render-look-unit") {
 			const std::string n = name("t", i, normal ? "_n" : "_d");
 			wide.textures.push_back(ShaderTexture{ n, 1, kUsageTexCoord0, 1.0f });
 			headers[n] = { res::TextureKind::Texture2D, normal ? F::NormalDxn : F::Dxt1 };
-			// Half the sampled names repeat a streamed one (skipped), half are resident constants.
+
 			wide.sampled_textures.push_back((i % 2) == 0 ? n : name("r", i, "_d"));
 			headers[name("r", i, "_d")] = { res::TextureKind::Texture2D, F::Dxt1 };
 		}
@@ -374,7 +350,7 @@ TEST_SUITE("render-look-unit") {
 		MaterialSlot slot;
 		slot.shader = "levels/w/wide";
 		for (size_t i = 0; i < kSlots; ++i) {
-			slot.textures = { { "Diffuse", name("p", i, "_x") } }; // a distinct slot each time; its texture has no header
+			slot.textures = { { "Diffuse", name("p", i, "_x") } };
 			const LookMaterial m = resolver.resolve(slot, "levels/w/mesh");
 			REQUIRE(m.color);
 			CHECK(m.color->name == "levels/w/t00000_d");
@@ -384,7 +360,7 @@ TEST_SUITE("render-look-unit") {
 		const LookStats st = resolver.stats();
 		CHECK(st.graph_candidates_max == kWide + kWide / 2);
 		CHECK(st.graph_candidates_dropped == st.graph_candidates_max - kLookMaxGraphCandidates);
-		// Built once (parameters + textures + sampled), then per slot its parameter and the capped candidates.
+
 		CHECK(st.resolve_work <= 3 * kWide + kSlots * (1 + kLookMaxGraphCandidates));
 		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		std::printf("render.look.unit: %u duplicate-hash shaders merged and %zu slots of a %zu-texture graph resolved in %.3f s\n", kDistinct * 2, kSlots,
@@ -413,16 +389,16 @@ TEST_SUITE("render-look-unit") {
 		CHECK(m.color->name == "levels/n/crate_02_d");
 		m = resolver.resolve(slot, "levels/n/crate_09");
 		REQUIRE(m.color);
-		CHECK(m.color->name == "levels/n/crate_01_d"); // "crate_0" shared by both: the first by name
+		CHECK(m.color->name == "levels/n/crate_01_d");
 		m = resolver.resolve(slot, "levels/n/zzz");
 		REQUIRE(m.color);
-		CHECK(m.color->name == "levels/n/barrel_d"); // nothing shared: the first by name
+		CHECK(m.color->name == "levels/n/barrel_d");
 	}
 
 	TEST_CASE("render.look.unit: look_cubic and fog_fit") {
 		CHECK(near(look_cubic({ 1.0f, 2.0f, 3.0f, 4.0f }, 0.5f), 0.125f + 0.5f + 1.5f + 4.0f));
 		float density = -1.0f, curve = -1.0f, end = -1.0f;
-		// A linear fog ramp: the fit's mean error over the samples stays small.
+
 		const LookCubic linear{ 0.0f, 0.0f, 1.0f, 0.0f };
 		fog_fit(linear, 1.0f, density, curve, end);
 		CHECK(density > 0.5f);
@@ -440,9 +416,9 @@ TEST_SUITE("render-look-unit") {
 		}
 		error /= 65.0;
 		std::printf("render.look.unit fog_fit linear: density %.3f curve %.3f end %.3f, mean error %.4f\n", double(density), double(curve), double(end), error);
-		// Least squares of density x smoothstep^curve can not follow a straight ramp at both ends (measured 0.054).
+
 		CHECK(error < 0.06);
-		// No fog, or a hostile curve: density 0, defaults kept.
+
 		fog_fit(LookCubic{ 0.0f, 0.0f, 0.0f, 0.0f }, 1.0f, density, curve, end);
 		CHECK(density == 0.0f);
 		const float nan = std::numeric_limits<float>::quiet_NaN();
@@ -518,7 +494,7 @@ TEST_SUITE("render-look-unit") {
 		CHECK(near(out.sun_color[0], 1.0f));
 		CHECK(near(out.sun_color[1], 0.75f));
 		CHECK(near(out.sun_direction[1], -1.0f));
-		// Bounce: SunColor x sin(90) x kBounceAlbedo x BounceScale; up gets a quarter of it over the sky colour.
+
 		CHECK(near(out.ambient_up[0], 0.1f + 0.25f * 4.0f * kBounceAlbedo));
 		CHECK(near(out.ambient_down[2], 0.1f + 2.0f * kBounceAlbedo));
 		CHECK(out.exposure >= 0.5f);
@@ -529,10 +505,9 @@ TEST_SUITE("render-look-unit") {
 		CHECK(in.lut == 0);
 		const LookFrame half = look_frame(env, { 2, 0, 0 });
 		CHECK(near(half.sun_energy, 6.0f));
-		CHECK(half.lut == 0); // the dominant state's LUT from weight 0.5
+		CHECK(half.lut == 0);
 		CHECK(!out.fog);
 
-		// A dark sun and hostile numbers stay finite.
 		LookEnvState dark;
 		dark.sun_color = { 0, 0, 0 };
 		const LookFrame d = look_frame_of(dark);
@@ -546,7 +521,7 @@ TEST_SUITE("render-look-unit") {
 		const LookVec3 plain = look_grade(identity, {}, c);
 		CHECK(near(plain[0], 0.2f));
 		CHECK(near(plain[2], 0.9f));
-		// An identity cube (red fastest, corner-aligned) returns the input to within its 8-bit steps.
+
 		const size_t n = kGradeLutSide;
 		std::vector<uint8_t> cube(n * n * n * 4);
 		for (size_t b = 0; b < n; ++b) {
@@ -564,7 +539,7 @@ TEST_SUITE("render-look-unit") {
 		for (size_t k = 0; k < 3; ++k) {
 			CHECK(near(graded[k], c[k], 1.0f / 255.0f));
 		}
-		// Contrast 0 -> mid grey; saturation 0 -> Rec.601 luma.
+
 		LookEnvState flat;
 		flat.contrast = { 0, 0, 0 };
 		CHECK(near(look_grade(flat, {}, c)[1], 0.5f));
@@ -572,7 +547,7 @@ TEST_SUITE("render-look-unit") {
 		grey.saturation = { 0, 0, 0 };
 		const float luma = 0.2f * 0.299f + 0.5f * 0.587f + 0.9f * 0.114f;
 		CHECK(near(look_grade(grey, {}, c)[0], luma));
-		// A cube of the wrong size is ignored.
+
 		CHECK(near(look_grade(identity, std::vector<uint8_t>(17, 0), c)[1], 0.5f));
 	}
 }

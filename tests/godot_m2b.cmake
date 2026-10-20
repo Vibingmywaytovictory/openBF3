@@ -1,17 +1,3 @@
-# M2b gx ctest row godot.m2b.play (docs/design/m2b.md §1 E9; docs/design/m2b-gx.md §4, §5): the windowed in-game check
-# of the M2b scene, a scripted Metro TDM round against the TDM bots,
-#   <godot> --path bf3-opensource res://scenes/m2b_metro.tscn -- --m2b-check=play --m2b-shots=<dir>
-#           --bf3-cache=<BUILD_DIR>/godot-cache/godot.m2b [ARGS...]
-# -DARGS   more user args (the row passes "--kill-limit=15 --preround=0", so the round ends in about a minute)
-# Rows: "PASS|FAIL|SKIP play.<row> <value> <rule>[ (<skip reason>)]"; passes when the run prints "M2B CHECK: PASS",
-# exits 0 and prints no ERROR line. A row whose track has not landed is skipped "(waiting for ui)" / "(waiting for
-# cam)"; with OPENBF3_TIMING_REQUIRE_RUN=1 (the merge pass) such a skip fails the row, since every track is merged by
-# then. Screenshots: $ENV{OPENBF3_GX_SHOTS}, default <build dir>/shots/gx (gitignored,
-# outside the worktree: the shots show BF3's art). The cache root is the row's own and warm after the first run (E9
-# does not measure a load: E12 is godot.m2b_load's).
-# Skips (exit 77) like godot.m2a: no Godot console executable or no window opt-in (godot_common.cmake), no BF3 install,
-# or a probe run without a window / rendering device.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> [-DBUILD_DIR=<b/dev>] [-DARGS=...] -P godot_m2b.cmake
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)

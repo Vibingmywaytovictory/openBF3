@@ -1,5 +1,3 @@
-// TrueType writer (bf3/core/ui/font_ttf.h; docs/design/ui-swf-fonts.md §7.2, §9). Written from Apple's TrueType
-// Reference Manual and the OpenType 1.9 specification (table layouts only); no third-party font code.
 #include "bf3/core/ui/font_ttf.h"
 
 #include <algorithm>
@@ -16,7 +14,6 @@ constexpr uint32_t tag4(const char *p_tag) {
 	return (uint32_t(uint8_t(p_tag[0])) << 24) | (uint32_t(uint8_t(p_tag[1])) << 16) | (uint32_t(uint8_t(p_tag[2])) << 8) | uint32_t(uint8_t(p_tag[3]));
 }
 
-// Big-endian byte buffer.
 struct Be {
 	std::vector<uint8_t> b;
 	void u8(uint32_t v) { b.push_back(uint8_t(v)); }
@@ -122,7 +119,6 @@ std::string postscript_name(const std::string &p_family) {
 	return out.empty() ? std::string("openBF3Font") : out;
 }
 
-// UTF-8 -> UTF-16 code units (invalid bytes become U+FFFD).
 std::vector<uint16_t> utf16(const std::string &p_text) {
 	std::vector<uint16_t> out;
 	size_t i = 0;
@@ -148,7 +144,7 @@ std::vector<uint16_t> utf16(const std::string &p_text) {
 	return out;
 }
 
-} // namespace
+}
 
 Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const TrueTypeOptions &p_options, WorkBudget &r_budget, TrueTypeStats *r_stats) {
 	if (p_font.kind != SwfFontKind::Outlines || p_font.glyphs.size() != p_font.codes.size() || p_font.glyphs.empty()) {
@@ -168,7 +164,6 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	TrueTypeStats stats;
 	stats.glyphs = uint32_t(n_glyphs);
 
-	// Outlines (winding normalised on a copy), scaled and flipped.
 	std::vector<TtGlyph> glyphs(n_glyphs);
 	{
 		TtGlyph &g = glyphs[0];
@@ -178,8 +173,8 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		const int32_t m = upem / 40;
 		g.advance = uint16_t(w + 2 * m);
 		if (p_options.notdef_box) {
-			const int32_t outer[4][2] = { { m, 0 }, { m, h }, { m + w, h }, { m + w, 0 } }; // clockwise (y up)
-			const int32_t inner[4][2] = { { m + t, t }, { m + w - t, t }, { m + w - t, h - t }, { m + t, h - t } }; // counter-clockwise
+			const int32_t outer[4][2] = { { m, 0 }, { m, h }, { m + w, h }, { m + w, 0 } };
+			const int32_t inner[4][2] = { { m + t, t }, { m + w - t, t }, { m + w - t, h - t }, { m + t, h - t } };
 			for (const auto &p : outer) {
 				g.xs.push_back(p[0]);
 				g.ys.push_back(p[1]);
@@ -237,7 +232,7 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		const int32_t adv = i < p_font.advances.size() ? scaled(p_font.advances[i], div) : 0;
 		g.advance = uint16_t(std::clamp(adv, 0, 65535));
 	}
-	// Bounding boxes from the points.
+
 	int32_t hx_min = 32767, hy_min = 32767, hx_max = -32768, hy_max = -32768;
 	bool any_points = false;
 	uint32_t max_points = 0;
@@ -273,7 +268,6 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	stats.max_points = max_points;
 	stats.max_contours = max_contours;
 
-	// cmap: code -> first glyph with that code.
 	std::vector<std::pair<uint16_t, uint16_t>> cmap;
 	{
 		std::vector<int32_t> first(65536, -1);
@@ -298,8 +292,7 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		return (it != cmap.end() && it->first == p_code) ? int32_t(it->second) : -1;
 	};
 
-	// Kerning pairs by glyph, sorted, first of a duplicate kept.
-	std::vector<std::pair<uint32_t, int32_t>> kern; // (left << 16 | right, value)
+	std::vector<std::pair<uint32_t, int32_t>> kern;
 	if (p_options.kerning) {
 		BF3_TRY(r_budget.charge(p_font.kerning.size()));
 		for (const KerningPair &k : p_font.kerning) {
@@ -334,7 +327,6 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	};
 	std::vector<Table> tables;
 
-	// glyf + loca
 	Be glyf;
 	Be loca;
 	for (const TtGlyph &g : glyphs) {
@@ -350,7 +342,7 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		for (const uint32_t e : g.ends) {
 			glyf.u16(e);
 		}
-		glyf.u16(0); // no instructions
+		glyf.u16(0);
 		std::vector<uint8_t> flags;
 		Be xb;
 		Be yb;
@@ -409,26 +401,24 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	loca.u32(uint32_t(glyf.b.size()));
 	BF3_TRY(r_budget.charge(glyf.b.size() / 16 + 1));
 
-	// head
 	Be head;
 	head.u32(0x00010000);
-	head.u32(0x00010000); // fontRevision 1.0
-	head.u32(0); // checkSumAdjustment, set below
+	head.u32(0x00010000);
+	head.u32(0);
 	head.u32(0x5F0F3CF5);
-	head.u16(0x0003); // baseline at y = 0, lsb at x = 0
+	head.u16(0x0003);
 	head.u16(uint32_t(upem));
-	head.zeros(16); // created, modified: 0 (deterministic)
+	head.zeros(16);
 	head.s16(hx_min);
 	head.s16(hy_min);
 	head.s16(hx_max);
 	head.s16(hy_max);
 	head.u16((p_font.bold ? 0x01 : 0) | (p_font.italic ? 0x02 : 0));
-	head.u16(8); // lowestRecPPEM
-	head.s16(2); // fontDirectionHint
-	head.s16(1); // indexToLocFormat: long
+	head.u16(8);
+	head.s16(2);
+	head.s16(1);
 	head.s16(0);
 
-	// hhea
 	Be hhea;
 	hhea.u32(0x00010000);
 	hhea.s16(ascender);
@@ -438,21 +428,19 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	hhea.s16(min_lsb);
 	hhea.s16(min_rsb);
 	hhea.s16(max_extent);
-	hhea.s16(1); // caretSlopeRise
+	hhea.s16(1);
 	hhea.s16(0);
 	hhea.s16(0);
 	hhea.zeros(8);
-	hhea.s16(0); // metricDataFormat
+	hhea.s16(0);
 	hhea.u16(uint32_t(n_glyphs));
 
-	// hmtx
 	Be hmtx;
 	for (const TtGlyph &g : glyphs) {
 		hmtx.u16(g.advance);
 		hmtx.s16(g.xs.empty() ? 0 : g.x_min);
 	}
 
-	// maxp 1.0
 	Be maxp;
 	maxp.u32(0x00010000);
 	maxp.u16(uint32_t(n_glyphs));
@@ -460,10 +448,9 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	maxp.u16(max_contours);
 	maxp.u16(0);
 	maxp.u16(0);
-	maxp.u16(2); // maxZones
+	maxp.u16(2);
 	maxp.zeros(16);
 
-	// OS/2 v4
 	Be os2;
 	{
 		std::array<uint32_t, 4> ranges{};
@@ -475,13 +462,13 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 				}
 			}
 			if (code >= 0x00C0 && code <= 0x00FF) {
-				code_pages |= 1u << 0; // Latin 1
+				code_pages |= 1u << 0;
 			}
 			if (code >= 0x0100 && code <= 0x017F) {
-				code_pages |= 1u << 1; // Latin 2
+				code_pages |= 1u << 1;
 			}
 			if (code >= 0x0410 && code <= 0x044F) {
-				code_pages |= 1u << 2; // Cyrillic
+				code_pages |= 1u << 2;
 			}
 		}
 		if (code_pages == 0) {
@@ -501,7 +488,7 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		};
 		const uint16_t first_char = cmap.empty() ? 0 : cmap.front().first;
 		const uint16_t last_char = cmap.empty() ? 0 : cmap.back().first;
-		uint32_t selection = 0x80; // USE_TYPO_METRICS
+		uint32_t selection = 0x80;
 		selection |= p_font.bold ? 0x20 : 0x40;
 		if (p_font.italic) {
 			selection |= 0x01;
@@ -510,8 +497,8 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		os2.u16(4);
 		os2.s16(adv_n ? int32_t(adv_sum / adv_n) : 0);
 		os2.u16(weight_class(family, p_font.bold));
-		os2.u16(5); // usWidthClass: medium
-		os2.u16(0); // fsType: installable
+		os2.u16(5);
+		os2.u16(0);
 		os2.s16(upem * 65 / 100);
 		os2.s16(upem * 60 / 100);
 		os2.s16(0);
@@ -522,8 +509,8 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		os2.s16(upem * 35 / 100);
 		os2.s16(upem * 5 / 100);
 		os2.s16(upem * 25 / 100);
-		os2.s16(0); // sFamilyClass
-		os2.zeros(10); // panose
+		os2.s16(0);
+		os2.zeros(10);
 		for (const uint32_t r : ranges) {
 			os2.u32(r);
 		}
@@ -543,12 +530,11 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		os2.u32(0);
 		os2.s16(glyph_top('x'));
 		os2.s16(glyph_top('H'));
-		os2.u16(0); // usDefaultChar
-		os2.u16(0x20); // usBreakChar
-		os2.u16(kern.empty() ? 1 : 2); // usMaxContext
+		os2.u16(0);
+		os2.u16(0x20);
+		os2.u16(kern.empty() ? 1 : 2);
 	}
 
-	// cmap: format 4, one segment per run of consecutive codes with a constant glyph delta, then 0xFFFF.
 	Be cmap_t;
 	{
 		struct Seg {
@@ -577,8 +563,8 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		}
 		Be sub;
 		sub.u16(4);
-		sub.u16(0); // length, set below
-		sub.u16(0); // language
+		sub.u16(0);
+		sub.u16(0);
 		sub.u16(seg_count * 2);
 		sub.u16(search * 2);
 		sub.u16(selector);
@@ -586,7 +572,7 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		for (const Seg &s : segs) {
 			sub.u16(s.end);
 		}
-		sub.u16(0); // reservedPad
+		sub.u16(0);
 		for (const Seg &s : segs) {
 			sub.u16(s.start);
 		}
@@ -594,21 +580,20 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 			sub.u16(uint32_t(s.delta) & 0xFFFF);
 		}
 		for (size_t i = 0; i < segs.size(); ++i) {
-			sub.u16(0); // idRangeOffset
+			sub.u16(0);
 		}
 		sub.put16(2, uint32_t(sub.b.size()));
 		cmap_t.u16(0);
 		cmap_t.u16(2);
-		cmap_t.u16(0); // Unicode
-		cmap_t.u16(3); // BMP
+		cmap_t.u16(0);
+		cmap_t.u16(3);
 		cmap_t.u32(20);
-		cmap_t.u16(3); // Windows
-		cmap_t.u16(1); // Unicode BMP
+		cmap_t.u16(3);
+		cmap_t.u16(1);
 		cmap_t.u32(20);
 		cmap_t.b.insert(cmap_t.b.end(), sub.b.begin(), sub.b.end());
 	}
 
-	// kern v0, one format-0 subtable
 	Be kern_t;
 	if (!kern.empty()) {
 		const uint32_t n = uint32_t(kern.size());
@@ -620,9 +605,9 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		}
 		kern_t.u16(0);
 		kern_t.u16(1);
-		kern_t.u16(0); // subtable version
+		kern_t.u16(0);
 		kern_t.u16(14 + 6 * n);
-		kern_t.u16(0x0001); // horizontal, format 0
+		kern_t.u16(0x0001);
 		kern_t.u16(n);
 		kern_t.u16(search * 6);
 		kern_t.u16(selector);
@@ -634,7 +619,6 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		}
 	}
 
-	// name: IDs 1, 2, 3, 4, 6 on platform 1 (Roman, ASCII only) and platform 3 (UTF-16BE), sorted.
 	Be name;
 	{
 		const std::string full = subfamily == "Regular" ? family : family + " " + subfamily;
@@ -678,10 +662,9 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		name.b.insert(name.b.end(), strings.b.begin(), strings.b.end());
 	}
 
-	// post 3.0
 	Be post;
 	post.u32(0x00030000);
-	post.u32(0); // italicAngle
+	post.u32(0);
 	post.s16(-upem / 10);
 	post.s16(upem / 20);
 	post.u32(0);
@@ -701,7 +684,6 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	tables.push_back({ tag4("name"), std::move(name) });
 	tables.push_back({ tag4("post"), std::move(post) });
 
-	// Directory, tables 4-byte aligned, checksums, checkSumAdjustment.
 	const uint32_t num = uint32_t(tables.size());
 	uint32_t search = 1;
 	uint32_t selector = 0;
@@ -741,4 +723,4 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	return std::move(out.b);
 }
 
-} // namespace bf3::core::ui
+}

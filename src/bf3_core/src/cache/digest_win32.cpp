@@ -1,5 +1,3 @@
-// SHA-1 / SHA-256 through Windows CNG (BCrypt). The algorithm pseudo-handles (Windows 10+) need
-// no provider setup and are safe to use from any thread; CNG allocates the hash object itself.
 #include "bf3/core/cache/digest.h"
 
 #include <windows.h>
@@ -16,7 +14,7 @@ BCRYPT_ALG_HANDLE algorithm_handle(HashAlgorithm p_algorithm) {
 	return p_algorithm == HashAlgorithm::Sha1 ? BCRYPT_SHA1_ALG_HANDLE : BCRYPT_SHA256_ALG_HANDLE;
 }
 
-} // namespace
+}
 
 Hasher::Hasher(HashAlgorithm p_algorithm) :
 		algorithm_(p_algorithm) {
@@ -54,7 +52,7 @@ void Hasher::update(std::span<const uint8_t> p_bytes) {
 	if (!ok()) {
 		return;
 	}
-	// BCryptHashData takes a ULONG length: feed large spans in 1 GiB pieces.
+
 	constexpr size_t kPiece = size_t(1) << 30;
 	size_t done = 0;
 	while (done < p_bytes.size()) {
@@ -98,4 +96,4 @@ Sha256Digest sha256_of(std::span<const uint8_t> p_bytes) {
 	return out;
 }
 
-} // namespace bf3::core
+}

@@ -1,4 +1,3 @@
-// The install side of the weapon simulation for the tools and data tests (weapon_install.h).
 #include "bf3/sim/weapons/weapon_install.h"
 
 #include "bf3/core/gameplay/grid_pairs.h"
@@ -19,7 +18,7 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-} // namespace
+}
 
 core::Result<InstallWeapons> open_install_weapons(std::shared_ptr<const core::Install> p_install, std::string_view p_level) {
 	const auto start = std::chrono::steady_clock::now();
@@ -137,8 +136,7 @@ W4Table build_w4_table(const InstallWeapons &p_weapons, const Mechanics &p_mecha
 				s.row.variant = variants[i];
 				core::Result<core::gameplay::WeaponDef> d = p_weapons.catalog->resolve(variants[i]);
 				if (!d) {
-					// A variant that does not resolve is counted as an error only if it would qualify; it cannot be
-					// judged, so it qualifies (a resolve failure is a reader bug the gate must see).
+
 					s.qualifies = true;
 					s.row.error = d.error().message;
 					return s;
@@ -224,4 +222,4 @@ std::string format_w4_tsv(const W4Table &p_table) {
 	return out;
 }
 
-} // namespace bf3::sim::weapons
+}

@@ -1,9 +1,4 @@
 #pragma once
-// M2a VFX1 test support (docs/design/m2a-vfx1.md §11): a synthetic EBX writer with the field layouts the bf3_fx
-// compiler reads (floats, inline Vec / LinearTransform structs, enums by name, internal and external references,
-// primitive and struct arrays), builders for EmitterDocument / EffectBlueprint partitions, an in-memory resolver whose
-// partitions can change between lookups, and hand-built EffectDefs for the simulator cases. The writer follows the
-// layout of gameplay_tables_tests.cpp's SynPartition (repository code), with variable field sizes and real imports.
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -27,11 +22,9 @@ namespace fxt {
 
 using bf3::core::Guid;
 
-// ---- values --------------------------------------------------------------------------------------------------
-
 struct Val {
 	uint32_t word = 0;
-	std::vector<std::pair<std::string, Val>> fields; // an inline struct's fields
+	std::vector<std::pair<std::string, Val>> fields;
 };
 using Vals = std::vector<std::pair<std::string, Val>>;
 
@@ -72,11 +65,6 @@ inline void set(Vals &r_vals, const std::string &p_name, Val p_v) {
 	r_vals.emplace_back(p_name, std::move(p_v));
 }
 
-// ---- types ---------------------------------------------------------------------------------------------------
-
-// Field kinds: 'b' Boolean, 'i' Int32, 'f' Float32, 'r' class reference, 's' CString, 'e' Enum (elem = the enum
-// type), 'S' inline struct (elem = a value type), 'a' reference array, 'v' struct array (elem = a value type),
-// 'F' Float32 array, 'I' Int32 array.
 struct Field {
 	std::string name;
 	char kind = 'i';
@@ -86,11 +74,10 @@ struct Type {
 	std::string name;
 	std::vector<Field> fields;
 	bool value_type = false;
-	std::string base; // a class listed earlier; empty: DataContainer
-	bool enum_type = false; // fields are the enumerators, valued 1, 2, 3, ...
+	std::string base;
+	bool enum_type = false;
 };
 
-// Every type the compiler, the atlas and the impact table read, in the field layout of the retail data.
 inline const std::vector<Type> &type_lib() {
 	static const std::vector<Type> lib = [] {
 		std::vector<Type> t;
@@ -113,7 +100,7 @@ inline const std::vector<Type> &type_lib() {
 						{ "AnimationFrameColumnCount", 'f' } },
 				true });
 		t.push_back({ "EmitterTextureAtlasInfo", { { "TextureName", 's' }, { "MinUv", 'S', "Vec2" }, { "MaxUv", 'S', "Vec2" } }, true });
-		// Emitters.
+
 		t.push_back({ "EmitterTemplateData",
 				{ { "EmittableType", 'e', "EmittableTypeEnum" }, { "Lifetime", 'f' }, { "LifetimeFrameCount", 'i' }, { "MaxCount", 'i' },
 						{ "TimeScale", 'f' }, { "LocalSpace", 'b' }, { "FollowSpawnSource", 'b' }, { "ActAsPointLight", 'b' }, { "Emissive", 'b' },
@@ -163,8 +150,8 @@ inline const std::vector<Type> &type_lib() {
 		proc("UpdateTextureCoordsData", { { "TextureBlendValue", 'f' }, { "TextureInfo1", 'S', "EmitterTextureInfo" } });
 		proc("UpdateOrientationData", {});
 		proc("UpdateClipScaleData", { { "Lookup", 'I' } });
-		proc("MysteryProcessorData", {}); // not in the vocabulary: an unknown type
-		// Evaluators.
+		proc("MysteryProcessorData", {});
+
 		t.push_back({ "EvaluatorData", { { "EmitterParameter", 'e', "EmitterParameterEnum" } } });
 		const auto eval = [&](const char *p_name, std::vector<Field> p_fields) { t.push_back({ p_name, std::move(p_fields), false, "EvaluatorData" }); };
 		eval("PolynomialData", { { "Coefficients", 'S', "Vec4" }, { "MinClamp", 'f' }, { "MaxClamp", 'f' }, { "ScaleValue", 'f' } });
@@ -183,7 +170,7 @@ inline const std::vector<Type> &type_lib() {
 		eval("SampleTextureData",
 				{ { "ColorIntensityMin", 'S', "Vec3" }, { "ColorIntensityMax", 'S', "Vec3" }, { "TextureDimensions", 'S', "Vec2" },
 						{ "TextureOriginU", 'f' }, { "TextureOriginV", 'f' }, { "GradientData", 'v', "Vec4" } });
-		// Effects.
+
 		t.push_back({ "EffectBlueprint", { { "Object", 'r' } } });
 		t.push_back({ "EffectEntityData",
 				{ { "Transform", 'S', "LinearTransform" }, { "CullDistance", 'f' }, { "StartDelay", 'f' }, { "LowEndPc", 'b' }, { "MediumPc", 'b' },
@@ -196,8 +183,8 @@ inline const std::vector<Type> &type_lib() {
 				"EffectComponentData" });
 		t.push_back({ "SoundEffectEntityData", { { "Sound", 'r' } }, false, "EffectComponentData" });
 		t.push_back({ "VisualEnvironmentEffectEntityData", { { "VisualEnvironment", 'r' } }, false, "EffectComponentData" });
-		t.push_back({ "TargetAsset", {} }); // an external target of no particular type (sounds, meshes)
-		// The emitter atlas (EmitterAtlas::load) and the impact table (ImpactTable::load).
+		t.push_back({ "TargetAsset", {} });
+
 		t.push_back({ "EmitterSystemAsset", { { "BaseAtlasTexture", 'r' }, { "NormalAtlasTexture", 'r' }, { "TextureInfos", 'v', "EmitterTextureAtlasInfo" } } });
 		t.push_back({ "MaterialRelationPropertyPair", { { "PhysicsMaterialProperties", 'a' } }, true });
 		t.push_back({ "MaterialInteractionGridRow", { { "Items", 'v', "MaterialRelationPropertyPair" } }, true });
@@ -213,10 +200,8 @@ inline const std::vector<Type> &type_lib() {
 	return lib;
 }
 
-// ---- partitions ----------------------------------------------------------------------------------------------
-
 struct Array {
-	std::string elem; // "" references, "*f" floats, "*i" ints, else a value type
+	std::string elem;
 	std::vector<uint32_t> words;
 	std::vector<Vals> structs;
 };
@@ -238,11 +223,11 @@ inline Guid partition_guid(uint32_t p_seed) {
 }
 
 struct Partition {
-	uint32_t seed = 1; // partitions of one db need distinct seeds
-	std::vector<Instance> instances; // instance 0 is the primary
+	uint32_t seed = 1;
+	std::vector<Instance> instances;
 	std::vector<Array> arrays;
 	std::vector<std::string> strings;
-	std::vector<std::pair<uint32_t, uint32_t>> imports; // (partition seed, instance index)
+	std::vector<std::pair<uint32_t, uint32_t>> imports;
 
 	uint32_t add(Instance p_instance) {
 		instances.push_back(std::move(p_instance));
@@ -275,7 +260,7 @@ inline void put32(std::vector<uint8_t> &r_out, size_t p_at, uint32_t p_value) {
 	std::memcpy(r_out.data() + p_at, &p_value, 4);
 }
 
-} // namespace detail
+}
 
 inline std::vector<uint8_t> Partition::build() const {
 	namespace code = bf3::core::ebx_code;
@@ -289,7 +274,7 @@ inline std::vector<uint8_t> Partition::build() const {
 		}
 		return UINT32_MAX;
 	};
-	// Array element kinds: references, CStrings (unused), floats, ints, then each value type used by a 'v' field.
+
 	std::vector<std::string> elems{ "", "*f", "*i" };
 	std::vector<std::string> names{ "DataContainer", "$", "array", "member" };
 	const auto add_name = [&](const std::string &p_name) {
@@ -311,7 +296,7 @@ inline std::vector<uint8_t> Partition::build() const {
 		name_table += n;
 		name_table += '\0';
 	}
-	// Sizes and field offsets (bases first in the library).
+
 	std::vector<uint32_t> sizes(types.size(), 0);
 	std::vector<std::vector<uint32_t>> offsets(types.size());
 	const auto field_size = [&](const Field &p_f) -> uint32_t { return p_f.kind == 'S' ? sizes[type_at(p_f.elem)] : 4u; };
@@ -413,7 +398,7 @@ inline std::vector<uint8_t> Partition::build() const {
 		fields.push_back({ "member", c, uint16_t(c == code::kValueType ? 1 + type_at(e) : 0), 0 });
 		complexes.push_back({ "array", start, 1, code::kArray, 4 });
 	}
-	// Arrays: the listed ones, then one empty array per element kind for unset fields.
+
 	std::vector<Array> all = arrays;
 	const size_t empty_at = all.size();
 	for (const std::string &e : elems) {
@@ -561,12 +546,9 @@ inline std::vector<uint8_t> Partition::build() const {
 	return b;
 }
 
-// ---- builders ------------------------------------------------------------------------------------------------
-
-// An EmitterDocument partition: instance 0 EmitterTemplateData, 1 EmitterDocument, then the chain and evaluators.
 struct DocBuilder {
 	Partition p;
-	uint32_t last = UINT32_MAX; // the chain's last processor
+	uint32_t last = UINT32_MAX;
 
 	explicit DocBuilder(uint32_t p_seed, uint32_t p_max_count = 16, float p_lifetime = 0, float p_time_scale = 1) {
 		p.seed = p_seed;
@@ -577,7 +559,7 @@ struct DocBuilder {
 		p.add({ "EmitterDocument", { { "TemplateData", p.ref(0) } } });
 	}
 	Vals &tmpl() { return p.instances[0].values; }
-	// Appends a processor to the chain; p_input 1 = EfNormTime, 2 EfEmitterNormTime, 3 EfOne, 4 EfVelocity.
+
 	uint32_t proc(const std::string &p_type, Vals p_values = {}, uint32_t p_input = 1, Val p_defaults = v4(1, 1, 1, 1), bool p_enable = true) {
 		set(p_values, "Enable", flag(p_enable));
 		set(p_values, "EvaluatorInput", raw(p_input));
@@ -591,7 +573,7 @@ struct DocBuilder {
 		last = i;
 		return i;
 	}
-	// An evaluator as p_proc's Pre; p_parameter 1 = EmitterParameterNone.
+
 	uint32_t pre(uint32_t p_proc, const std::string &p_type, Vals p_values, uint32_t p_parameter = 1) {
 		set(p_values, "EmitterParameter", raw(p_parameter));
 		const uint32_t e = p.add({ p_type, std::move(p_values) });
@@ -603,7 +585,6 @@ struct DocBuilder {
 	}
 };
 
-// An EffectBlueprint partition: instance 0 EffectBlueprint, 1 EffectEntityData, then the components.
 struct EffectBuilder {
 	Partition p;
 	std::vector<uint32_t> components;
@@ -619,7 +600,7 @@ struct EffectBuilder {
 	static Vals component_base() {
 		return { { "Transform", transform() }, { "LowEndPc", flag(true) }, { "MediumPc", flag(true) }, { "HighEndPc", flag(true) } };
 	}
-	// An EmitterEntityData whose Emitter is the EmitterDocument (instance 1) of the partition with seed p_doc_seed.
+
 	uint32_t emitter(uint32_t p_doc_seed, float p_probability = 1, Vals p_extra = {}) {
 		Vals v = component_base();
 		set(v, "Emitter", p.ext(p_doc_seed, 1));
@@ -641,7 +622,7 @@ struct EffectBuilder {
 		components.push_back(i);
 		return i;
 	}
-	// Writes the Components array (call once, after the components).
+
 	Partition &done() {
 		Array a;
 		for (const uint32_t c : components) {
@@ -652,7 +633,6 @@ struct EffectBuilder {
 	}
 };
 
-// An external target partition (sound patch, mesh): instance 0 TargetAsset.
 inline Partition target(uint32_t p_seed) {
 	Partition p;
 	p.seed = p_seed;
@@ -660,10 +640,6 @@ inline Partition target(uint32_t p_seed) {
 	return p;
 }
 
-// ---- in-memory resolver ----------------------------------------------------------------------------------------
-
-// Partitions by name; set() replaces one (the next lookup sees the new bytes), so a cache test can patch data
-// between compiles. Digests are a counter per name bumped by every set().
 class MemResolver final : public bf3::core::EbxResolver {
 public:
 	bool set(const std::string &p_name, const Partition &p_partition) { return set_bytes(p_name, p_partition.build()); }
@@ -701,7 +677,7 @@ public:
 		}
 		return std::nullopt;
 	}
-	// A manifest-SHA1 stand-in: the name's set() count in the first bytes (nullopt when absent).
+
 	std::optional<bf3::core::Sha1> digest(std::string_view p_name) const {
 		if (!dbs_.contains(std::string(p_name))) {
 			return std::nullopt;
@@ -719,8 +695,6 @@ private:
 	std::map<std::string, std::unique_ptr<bf3::core::EbxDb>> dbs_;
 	std::map<std::string, uint64_t> versions_;
 };
-
-// ---- hand-built defs (simulator cases) ----------------------------------------------------------------------
 
 inline bf3::fx::EmitterDef emitter_def(const std::string &p_name, uint32_t p_max_count, float p_rate, float p_life, float p_window = 0) {
 	using namespace bf3::fx;
@@ -748,7 +722,6 @@ inline uint64_t particles_bound(const bf3::fx::EffectDef &p_def, uint32_t p_emit
 	return uint64_t(e.tmpl.max_count) * (1 + children);
 }
 
-// One component per root emitter (indices p_roots), max_particles set to the bound.
 inline std::shared_ptr<const bf3::fx::EffectDef> effect_def(const std::string &p_name, std::vector<bf3::fx::EmitterDef> p_emitters,
 		std::vector<uint32_t> p_roots = { 0 }, uint16_t p_max_instances = 1, bool p_reset = true) {
 	using namespace bf3::fx;
@@ -771,4 +744,4 @@ inline std::shared_ptr<const bf3::fx::EffectDef> effect_def(const std::string &p
 	return d;
 }
 
-} // namespace fxt
+}

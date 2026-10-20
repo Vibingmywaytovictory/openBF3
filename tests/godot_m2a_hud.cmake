@@ -1,13 +1,3 @@
-# M2a hud ctest godot.m2a_hud (docs/design/m2a.md §1 E10; docs/design/m2a-hud.md §5): the windowed minimal-HUD check:
-#   <godot> --path bf3-opensource res://scenes/m2a_hud.tscn -- --hud-check --hud-shots=<OPENBF3_HUD_SHOTS>
-# Rows (hud_check.h): load.hud, load.fonts, load.hit_art, load.static, then per resolution (1280x720, 1920x1080,
-# 2560x1440) e10.<size>.frames / .ammo / .crosshair / .hit / .name / .icon / .health / .pixels / .shots, and
-# install.unchanged. Passes when the run prints "M2A HUD CHECK: PASS" and exits 0.
-# OPENBF3_HUD_SHOTS: the directory for the PNGs (default <build dir>/shots/hud,
-# gitignored; never a path in the repo: the shots show BF3's fonts and icons).
-# Skips (exit 77) like godot.ui2: no Godot console executable or no window opt-in (godot_common.cmake), no BF3
-# install, or a probe run without a window / rendering device.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_m2a_hud.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)

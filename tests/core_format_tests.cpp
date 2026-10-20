@@ -1,5 +1,3 @@
-// Container format readers on synthetic bytes (no install needed): ids and hashes, DbObject,
-// obfuscation, package.mft, block framing, delta bundles, binary bundle manifests.
 #include <doctest/doctest.h>
 
 #include "bf3/core/bundle_manifest.h"
@@ -36,7 +34,6 @@ Bytes from_hex(std::string_view p_hex) {
 	return out;
 }
 
-// --- DbObject writer for the tests -----------------------------------------------------------
 void uleb(Bytes &r_out, uint64_t p_value) {
 	do {
 		uint8_t b = p_value & 0x7F;
@@ -117,7 +114,7 @@ private:
 	Bytes bytes_;
 };
 
-} // namespace
+}
 
 TEST_SUITE("containers") {
 	TEST_CASE("ids: guid text, big-endian fields, name hash") {
@@ -257,7 +254,7 @@ TEST_SUITE("containers") {
 		be32(stored, kMaxBlockLen);
 		be32(stored, kMaxBlockLen);
 		stored.insert(stored.end(), verbatim.begin(), verbatim.end());
-		be32(stored, 4); // equal sizes and not zlib: taken as stored (IW4L fallback)
+		be32(stored, 4);
 		be32(stored, 4);
 		stored.insert(stored.end(), { 'a', 'b', 'c', 'd' });
 		Result<std::vector<Block>> blocks = payload_blocks(stored);
@@ -274,7 +271,7 @@ TEST_SUITE("containers") {
 		CHECK(decoded_len(stored).value() == decoded->size());
 
 		Bytes wrong_len;
-		be32(wrong_len, 6); // "hello" inflates to 5
+		be32(wrong_len, 6);
 		be32(wrong_len, static_cast<uint32_t>(hello.size()));
 		wrong_len.insert(wrong_len.end(), hello.begin(), hello.end());
 		CHECK(!decode_blocks(wrong_len).ok());
@@ -284,8 +281,7 @@ TEST_SUITE("containers") {
 		CHECK(!payload_blocks(too_large).ok());
 		Bytes cut(stored.begin(), stored.begin() + 10);
 		CHECK(!payload_blocks(cut).ok());
-		// 16385 empty block headers claiming 64 KiB each: just over the 1 GiB metadata-sized cap, so
-		// an error result instead of an allocation (which would terminate without exceptions).
+
 		Bytes inflated;
 		for (int i = 0; i < 16385; ++i) {
 			be32(inflated, kMaxBlockLen);
@@ -294,7 +290,6 @@ TEST_SUITE("containers") {
 		CHECK(decoded_len(inflated).value() == uint64_t(16385) * kMaxBlockLen);
 		CHECK(!decode_blocks(inflated).ok());
 
-		// A ranged chunk starts on a block boundary whose preceding blocks decode to logicalOffset.
 		const Guid framed = *Guid::parse("00000000-0000-0000-0000-000000000001");
 		const uint32_t second = static_cast<uint32_t>(8 + hello.size());
 		Result<std::vector<uint8_t>> tail = decode_chunk_range(framed, stored, ChunkRange{ second, static_cast<uint32_t>(stored.size()), 5 });
@@ -307,18 +302,18 @@ TEST_SUITE("containers") {
 	}
 
 	TEST_CASE("delta bundle: patch and base runs, absolute offsets") {
-		// Patch .sb: 5 junk bytes, then the delta at offset 5: header, 3 runs, patch data "PQR" "ST".
+
 		Bytes table;
 		be32(table, 3 * 16);
 		be32(table, kDeltaMagic);
 		be64(table, 0);
-		be32(table, 3); // patch run
+		be32(table, 3);
 		be32(table, 0);
 		be64(table, 0);
-		be32(table, 4); // base run: base[2..6]
+		be32(table, 4);
 		be32(table, 1);
 		be64(table, 2);
-		be32(table, 2); // patch run
+		be32(table, 2);
 		be32(table, 0);
 		be64(table, 0);
 		Bytes patch_sb(5, 0xEE);
@@ -341,36 +336,36 @@ TEST_SUITE("containers") {
 		CHECK(std::string(mid.begin(), mid.end()) == "Rcde");
 		Bytes past(2);
 		CHECK(!delta->read_at(patch, base, 8, past).ok());
-		CHECK(!DeltaBundle::parse(table, 5, entry_size - 1).ok()); // patch data cut
+		CHECK(!DeltaBundle::parse(table, 5, entry_size - 1).ok());
 		Bytes bad_magic = table;
 		bad_magic[4] = 0;
 		CHECK(!delta_table_len(bad_magic).ok());
 	}
 
 	TEST_CASE("binary manifest: tables, names, 16-aligned payloads, swapped chunk ids") {
-		// 1 ebx, 1 res, 1 ranged chunk; no chunkMeta.
+
 		const uint32_t ebx = 1, res = 1, chunks = 1, total = 3;
 		Bytes tables;
 		for (uint8_t i = 0; i < total; ++i) {
-			tables.insert(tables.end(), 20, static_cast<uint8_t>(0x10 + i)); // sha1s
+			tables.insert(tables.end(), 20, static_cast<uint8_t>(0x10 + i));
 		}
-		be32(tables, 0); // ebx: name offset, stored, original
+		be32(tables, 0);
 		be32(tables, 100);
 		be32(tables, 100);
-		be32(tables, 4); // res
+		be32(tables, 4);
 		be32(tables, 30);
 		be32(tables, 64);
-		be32(tables, 0x5C4954A6u); // res type
-		tables.insert(tables.end(), 16, 0x77); // res meta
+		be32(tables, 0x5C4954A6u);
+		tables.insert(tables.end(), 16, 0x77);
 		const Bytes id_be = from_hex("dcef81646ff8420a0d6efd006ded4591");
 		tables.insert(tables.end(), id_be.begin(), id_be.end());
-		be32(tables, 16); // range start, end, logical offset
+		be32(tables, 16);
 		be32(tables, 48);
 		be32(tables, 4096);
 		const char names[] = "e/a\0r/b\0";
 		const uint32_t strings_rel = 0x24 - 4 + static_cast<uint32_t>(tables.size());
 		Bytes head;
-		be32(head, 0); // metaSize, patched below
+		be32(head, 0);
 		be32(head, kBinaryManifestMagic);
 		be32(head, total);
 		be32(head, ebx);
@@ -412,7 +407,7 @@ TEST_SUITE("containers") {
 		CHECK(m->chunks[0].range->logical_offset == 4096);
 		CHECK(m->chunks[0].payload.offset == chunk_at);
 		CHECK(m->chunks[0].sha1.bytes[0] == 0x12);
-		CHECK(!parse_binary_manifest(head, bundle_len - 1).ok()); // payloads run past the bundle
+		CHECK(!parse_binary_manifest(head, bundle_len - 1).ok());
 	}
 
 	TEST_CASE("cas manifest: entries, idata, ranges, chunkMeta") {
@@ -471,7 +466,7 @@ TEST_SUITE("containers") {
 		CHECK(m->res[0].original_size == 128);
 		REQUIRE(m->chunks.size() == 1);
 		CHECK(m->chunks[0].range->start == 1000);
-		CHECK(m->chunks[0].range->end == 5000); // rangeEnd defaults to the stored size
+		CHECK(m->chunks[0].range->end == 5000);
 		CHECK(m->chunks[0].range->logical_offset == 65536);
 		CHECK(!m->chunks[0].tail_only);
 		REQUIRE(m->chunks[0].meta.has_value());
@@ -482,7 +477,7 @@ TEST_SUITE("containers") {
 		Bytes bad_entry;
 		str(bad_entry, "name", "r");
 		raw(bad_entry, 0x10, "sha1", sha);
-		i32(bad_entry, "size", 4); // idata is 3 bytes
+		i32(bad_entry, "size", 4);
 		blob(bad_entry, "idata", Bytes{ 1, 2, 3 });
 		Bytes bad_list;
 		container(bad_list, 0x02, nullptr, bad_entry);

@@ -1,5 +1,3 @@
-// Godot side of the UI groundwork (bf3_godot ui_assets.h; docs/design/ui-swf-fonts.md §3, §10): BF3's UI fonts as
-// FontFiles and its SWF atlases as AtlasTextures, loaded on a loader thread from the install Bf3Localisation opened.
 #include "ui_assets.h"
 
 #include "bf3_localisation.h"
@@ -33,7 +31,7 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-Bf3UiAssets *g_current = nullptr; // main thread only
+Bf3UiAssets *g_current = nullptr;
 
 std::string movie_key(const std::string &p_name) {
 	std::string k = bf3::core::to_lower_ascii(p_name);
@@ -76,10 +74,10 @@ Dictionary layout_dict(const ui::SwfLayoutNode &p_node) {
 	return d;
 }
 
-} // namespace
+}
 
 struct Bf3UiAssets::Loaded {
-	// Loader thread (Godot-free).
+
 	std::string error;
 	std::shared_ptr<const bf3::core::Install> install;
 	std::optional<ui::SwfLibrary> movies;
@@ -91,10 +89,10 @@ struct Bf3UiAssets::Loaded {
 	std::vector<std::string> warnings;
 	std::string cache_note;
 	double seconds = 0.0;
-	// Main thread, after the loader.
-	std::map<std::string, Ref<FontFile>> font_files; // by long name
+
+	std::map<std::string, Ref<FontFile>> font_files;
 	std::map<std::string, std::map<uint16_t, Ref<ImageTexture>>> atlases;
-	mutable std::set<std::string> logged; // missing items logged once
+	mutable std::set<std::string> logged;
 	mutable std::map<std::string, Ref<SystemFont>> system_fonts;
 	mutable std::mutex layout_mutex;
 	mutable std::map<std::string, Dictionary> layouts;
@@ -186,7 +184,7 @@ void Bf3UiAssets::_process(double p_delta) {
 		return;
 	}
 	if (!loader_.joinable() && !loaded_) {
-		// Wait for Bf3Localisation: it locates and opens the install.
+
 		Bf3Localisation *loc = Bf3Localisation::current();
 		if (loc == nullptr) {
 			loaded_ = std::make_unique<Loaded>();
@@ -201,8 +199,7 @@ void Bf3UiAssets::_process(double p_delta) {
 		} else {
 			loaded_ = std::make_unique<Loaded>();
 			loaded_->install = loc->install();
-			// --bf3-cache=<dir> as in level_session.cpp (the per-build root of the headless godot.ui_fonts row), else
-			// user://bf3cache. ProjectSettings and the user args: main thread.
+
 			const std::string cache_arg = user_arg_value("bf3-cache");
 			const std::filesystem::path cache_root = cache_arg.empty() ? default_cache_root()
 																	   : std::filesystem::path(std::u8string(cache_arg.begin(), cache_arg.end()));
@@ -405,7 +402,7 @@ Ref<Font> Bf3UiAssets::get_font(const String &p_name) const {
 	if (!loaded_) {
 		return Ref<Font>();
 	}
-	// Device and unresolved names: a system font of that name (Godot falls back further on its own).
+
 	const std::string name = to_std(p_name);
 	if (loaded_->logged.insert("font:" + name).second) {
 		const ui::UiFontLibrary *lib = fonts();
@@ -501,4 +498,4 @@ Dictionary Bf3UiAssets::get_layout(const String &p_movie) const {
 	return d;
 }
 
-} // namespace bf3::godot_side
+}

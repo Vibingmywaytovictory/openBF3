@@ -1,6 +1,3 @@
-// SoundWaveAsset reader (sound_wave.h). Fields by the partitions' own descriptor names; every array element and
-// reference is charged to the WorkBudget before it is read.
-
 #include "bf3/core/audio/sound_wave.h"
 
 #include <algorithm>
@@ -32,7 +29,7 @@ float float_field(const EbxStruct &p_s, std::string_view p_field) {
 	return v ? v->as_f32().value_or(0.0f) : 0.0f;
 }
 
-} // namespace
+}
 
 Result<SoundWaveInfo> read_sound_wave(const EbxResolver &p_db, const EbxInstance &p_wave, gameplay::WorkBudget &r_budget) {
 	SoundWaveInfo out;
@@ -66,7 +63,6 @@ Result<SoundWaveInfo> read_sound_wave(const EbxResolver &p_db, const EbxInstance
 		}
 	}
 
-	// Chunks[] {ChunkId, ChunkSize}
 	const std::optional<EbxValue> chunks = data.get("Chunks");
 	if (!chunks || !chunks->as_array()) {
 		return wave_error(out, "no Chunks array");
@@ -94,8 +90,6 @@ Result<SoundWaveInfo> read_sound_wave(const EbxResolver &p_db, const EbxInstance
 		out.chunks.push_back(ref);
 	}
 
-	// Variations[] -> SoundWaveVariation (indices matter: Localization ranges index this array, so an unresolved
-	// entry is an error, never skipped).
 	const std::optional<EbxValue> variations = data.get("Variations");
 	if (!variations || !variations->as_array()) {
 		return wave_error(out, "no Variations array");
@@ -152,7 +146,6 @@ Result<SoundWaveInfo> read_sound_wave(const EbxResolver &p_db, const EbxInstance
 		out.variations.push_back(std::move(wv));
 	}
 
-	// Localization[] {Language -> AudioLanguage, FirstVariationIndex, VariationCount}
 	if (std::optional<EbxValue> loc = data.get("Localization"); loc && loc->as_array()) {
 		if (loc->as_array()->size() > 64) {
 			return wave_error(out, std::to_string(loc->as_array()->size()) + " localisation entries");
@@ -201,4 +194,4 @@ std::optional<std::pair<uint32_t, uint32_t>> playable_variations(const SoundWave
 	return std::nullopt;
 }
 
-} // namespace bf3::core::audio
+}

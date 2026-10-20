@@ -1,9 +1,3 @@
-// VehicleDriveDef reader (S2, docs/design/s2.md §4.2). The component walk and its exclusion rules follow
-// vehicle_def.cpp (ported from IW4L level_bf3 vehicles/layout.rs, Apache-2.0, the user's own); this walk also
-// composes each component's Transform into the chassis frame (layout.rs `local.in_parent(frame)`, through
-// level::LevelTransform::in_parent, itself a port of IW4L transform.rs). Every array scan, followed reference and
-// examined object is charged to the read's WorkBudget first; every count is capped (more is an error, never a
-// truncation) and every float read must be finite.
 #include "bf3/core/gameplay/vehicle_drive.h"
 
 #include "bf3/core/ids.h"
@@ -43,7 +37,6 @@ DriveTransform drive_transform(const level::LevelTransform &p_t) {
 	return out;
 }
 
-// Reads numbers and remembers the first non-finite one (the read then fails with its name).
 class Numbers {
 public:
 	explicit Numbers(std::string p_where) :
@@ -104,7 +97,6 @@ private:
 	std::optional<Error> error_;
 };
 
-// A float array field (charged), capped at p_max entries.
 std::vector<float> float_array(WorkBudget &r_budget, Numbers &r_numbers, const EbxStruct &p_object, std::string_view p_field, size_t p_max) {
 	std::vector<float> out;
 	const OptionalEbxArray a = array_of(r_budget, p_object, p_field);
@@ -288,7 +280,7 @@ private:
 
 	void read_chassis(const EbxStruct &p_chassis) {
 		if (chassis_read_) {
-			return; // the first chassis wins (vehicle_def.cpp's rule)
+			return;
 		}
 		chassis_read_ = true;
 		ChassisConfigDef &ch = out.chassis;
@@ -368,7 +360,6 @@ private:
 		}
 	}
 
-	// The index of a WheelConfigData in out.wheel_configs (read on first use).
 	uint32_t wheel_config(const EbxInstance &p_config) {
 		for (size_t i = 0; i < config_instances_.size(); ++i) {
 			if (config_instances_[i] == p_config) {
@@ -389,7 +380,7 @@ private:
 		w.spring_max_force = numbers_.f(c, "Spring.MaxSpringForce", 0);
 		w.spring_progressive_exponent = numbers_.f(c, "Spring.ProgressiveExponent", 0);
 		w.spring_progressive_start_ratio = numbers_.f(c, "Spring.ProgressiveStartRatio", 0);
-		w.spring_disabled_strength_modifier = numbers_.f(c, "Spring.DisabledStrenghModifier", 0); // [sic], the field's name
+		w.spring_disabled_strength_modifier = numbers_.f(c, "Spring.DisabledStrenghModifier", 0);
 		w.brake_force = numbers_.f(c, "BrakeForce", 0);
 		w.brake_factor = numbers_.f(c, "BrakeFactor", 0);
 		w.hand_brake_force = numbers_.f(c, "HandBrakeForce", 0);
@@ -417,7 +408,7 @@ private:
 				numbers_.fail_message("SteeringSensitivity has " + std::to_string(s->size()) + " points (at most " + std::to_string(kMaxDriveCurvePoints) + ")");
 			} else {
 				for (const EbxValue e : *s) {
-					// Inline structs (SensitivityAtVelocity) or references to them.
+
 					std::optional<EbxStruct> point = e.as_struct();
 					std::optional<EbxInstance> resolved;
 					if (!point) {
@@ -463,7 +454,7 @@ private:
 	std::vector<EbxInstance> config_instances_;
 };
 
-} // namespace
+}
 
 Result<VehicleDriveDef> read_vehicle_drive_def(const EbxResolver &p_db, std::string_view p_blueprint, WorkBudget *p_budget) {
 	WorkBudget own;
@@ -494,4 +485,4 @@ Result<VehicleDriveDef> read_vehicle_drive_def(const EbxResolver &p_db, std::str
 	return std::move(reader.out);
 }
 
-} // namespace bf3::core::gameplay
+}

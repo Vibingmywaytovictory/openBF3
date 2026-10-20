@@ -1,51 +1,4 @@
 #pragma once
-// The M2a in-game check (docs/design/m2a.md §15 gx row, E1, E3-E5, E7-E11, E14, E19; owner gx; W3.0 contract,
-// docs/design/m2a-w3.md). Godot-free header (the m2a.contract3 test compiles it): the case list, its parser and the
-// driver the level session runs once per display frame after Done (gx's m2a_frame hook). The case bodies are gx's
-// (m2a_check.cpp); a case whose track has not landed is skipped with a reason, never passed.
-//
-// Command line (the level session's args):
-//   --m2a-check=<case>[,<case>...]   cases in order; "all" = range, reload, kits, hud, ads, audio, fx
-//   --m2a-firefight                  the firefight case alone (FirefightConfig mode Pairs with the observer; E13 / E14
-//                                    windowed; godot.m2a_firefight is a timing row: the integrator's)
-// Cases (gx as built: docs/design/m2a-gx.md §4; the E numbers are m2a.md §1's):
-//   range      E1 / E3 / E4: the M16A3 held from a full magazine through the input mapper (fire level and press
-//              counter), the first predictions against the server's shots field for field, the 75 ms gaps, the first
-//              shot at its tick's start, one OwnShot event, one viewmodel Shot cue and one fx3 1p muzzle start per
-//              shot; the M9 one shot per tap; E3 through the game: chest / head / legs at 5 m, chest / head at 60 m on
-//              a range lane (hits to kill, the damage per hit, the HUD's hit indicator per server hit, the kill
-//              counter from the Death event); E4 the MK11 (recon): head at 5 m kills in 1, at 60 m in 2; one shot per
-//              tap and one per held trigger
-//   reload     E5: M16A3 and M9 tactical and empty reload durations and commit points against the def, server and
-//              prediction equal; per display frame: the viewmodel's reload clip start, the HUD ammo change and the
-//              ready frame against the predicted kReloadStarted / kAmmoCommitted / kReloadFinished (late <= 1 frame,
-//              early <= 1 tick), the M16A3's fire-again at the finish; the clip lengths per kit weapon; a switch cancels
-//   kits       E11 / E1: the 8 loadouts through KitSelect (send_kit_select) + SpawnAt: the presented kit, team and
-//              slot defs; every item deploys (its Deploy clip or stand-in, the vm clip / stand-in list), fires and
-//              (firearms) reloads with server events == predicted events; E1's gaps for every kit firearm; the
-//              knife hits the target bot (applied when it is an enemy); the M67's fuse from the server's
-//              DetonationEvent == 3.6 s == TimeToLive exactly
-//   hud        E10: per frame, the HUD model against the presented weapon (magazine, reserve, crosshair, reload);
-//              what the widgets drew: the crosshair gap against the presented spread and camera FOV (+- 0.5 px) and
-//              the ammo at hudmpscreen's Ammo_01 slot (x 1194 +- 2 stage px, $HUD_medium); the localised name and
-//              icon of every kit item (12 / 12); hud_hip / hud_reload / hud_ads screenshots
-//   ads        E19: viewmodel FOV = RenderFov 55 at hip; ADS world FOV 55 -> 40 and back within the aiming FOV
-//              times +- 1 display frame of the presented ADS level change (the press latency gated <= 0.1 s); the
-//              look scale; the camera's recoil == the presented recoil every frame (+- 1e-4 deg); the springs settle;
-//              ADS refused while deploying and while sprinting
-//   audio      E7 (au3): au3's G7 script in the game on a new life; the own soldier fires aimed 60 degrees up and is
-//              heard in 3p through a listener on the aim axis (M2aGame::listener_override); au3's GameAudioCheck
-//              records the mix and analyse_game_check's rows are the case's (gx_e7.wav in the shots directory)
-//   fx         E8 (fx3): 500 M16A3 shots each at Metro concrete and brick (the 1p flash fraction, drawn ==
-//              particles, the named cells' effects and decals), water searched in Metro's collision tags (shot at
-//              when one is reachable), the client-local oilfire after 15 s, a soldier hit,
-//              the cue counts (tracers, shells, impact sounds, 0 double starts)
-//   play       the scripted 5-minute play run: the input mapper drives move / look / fire / reload / switch / die
-//              (fall damage) / respawn among the bots; every subsystem built, events flowing, deaths and respawns
-//              seen; the ctest script fails it on any ERROR line in the log
-//   firefight  E9 / E13 / E14 with bt's bots (--m2a-firefight): 64 bots in pairs, 2560 x 1440 borderless (skipped on
-//              another primary screen), 10 s warm-up, 12 windows of 5 s FX on / off (M2aGame::fx_off); a timing case
-//   A case is skipped with "waiting for <track>" only in a build without that track (OPENBF3_M2A_HAVE_* = 0).
 
 #include "bf3/core/result.h"
 
@@ -61,16 +14,15 @@
 namespace bf3::godot_side {
 
 class Bf3LevelSession;
-struct M2aGame; // level_session_m2a.h (the Godot side; this header stays Godot-free)
+struct M2aGame;
 
 enum class M2aCase : uint8_t { Range = 0, Reload = 1, Kits = 2, Hud = 3, Ads = 4, Audio = 5, Fx = 6, Play = 7, Firefight = 8 };
 inline constexpr uint32_t kM2aCaseCount = 9;
 inline constexpr std::array<std::string_view, kM2aCaseCount> kM2aCaseNames{ "range", "reload", "kits", "hud", "ads", "audio", "fx", "play", "firefight" };
-// "all": the functional cases of godot.m2a (play and firefight are run on their own).
+
 inline constexpr std::array<M2aCase, 7> kM2aAllCases{ M2aCase::Range, M2aCase::Reload, M2aCase::Kits, M2aCase::Hud, M2aCase::Ads, M2aCase::Audio,
 	M2aCase::Fx };
 
-// The track a case waits for; until it is merged the case is skipped with "waiting for <track>".
 enum class M2aTrack : uint8_t { Wave2 = 0, Bt = 1, Tp = 2, Au3 = 3, Fx3 = 4 };
 
 constexpr std::string_view m2a_case_name(M2aCase p_case) {
@@ -99,8 +51,6 @@ constexpr M2aTrack m2a_case_track(M2aCase p_case) {
 	}
 }
 
-// "range,reload" -> cases in order; "all" -> kM2aAllCases (alone only). Refuses an empty list, an empty item, an
-// unknown name and a repeated case (hostile command lines fail with an error, never a partial list).
 inline core::Result<std::vector<M2aCase>> parse_m2a_cases(std::string_view p_arg) {
 	if (p_arg == "all") {
 		return std::vector<M2aCase>(kM2aAllCases.begin(), kM2aAllCases.end());
@@ -143,18 +93,17 @@ struct M2aRow {
 struct M2aCaseResult {
 	M2aCase which = M2aCase::Range;
 	M2aOutcome outcome = M2aOutcome::Skip;
-	std::string reason; // Skip: "waiting for <track>" or what is missing; Fail: the first failing row
+	std::string reason;
 	std::vector<M2aRow> rows;
 };
 
 struct M2aCheckOptions {
-	double play_seconds = 300.0; // the play case
-	double case_timeout_s = 180.0; // per case
-	std::filesystem::path record_wav; // --audio-record (scratch or the user cache, never the install)
-	std::filesystem::path shots_dir; // screenshots (b\shots\gx or scratch)
+	double play_seconds = 300.0;
+	double case_timeout_s = 180.0;
+	std::filesystem::path record_wav;
+	std::filesystem::path shots_dir;
 };
 
-// Runs the cases in order on the session. Main thread.
 class M2aCheck {
 public:
 	M2aCheck(Bf3LevelSession &r_session, M2aGame &r_game, std::vector<M2aCase> p_cases, const M2aCheckOptions &p_options);
@@ -162,15 +111,14 @@ public:
 	M2aCheck(const M2aCheck &) = delete;
 	M2aCheck &operator=(const M2aCheck &) = delete;
 
-	// One display frame; true when every case is finished (then exit_code and report are final).
 	bool frame(uint64_t p_now_ns, double p_dt);
-	int exit_code() const; // 0: no case failed (skips are not failures; the report lists them)
+	int exit_code() const;
 	std::vector<M2aCaseResult> results() const;
-	std::string report() const; // "PASS|FAIL|SKIP <case>.<row> value rule" lines, the format the ctest scripts parse
+	std::string report() const;
 
 private:
 	struct State;
 	std::unique_ptr<State> state_;
 };
 
-} // namespace bf3::godot_side
+}

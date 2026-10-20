@@ -1,10 +1,3 @@
-// M2a weapons on the retail install (read-only; docs/design/m2a-weapons.md §1, §14). Each suite exits 77 = skipped
-// without an install, and every case prints the install.unchanged row.
-//   weapons        (ctest sim.weapons)       grid pairs and materials, every Metro soup material, the oracle rows on
-//                                            defs resolved from MP_Subway (W1, W2, W3, W5, W6, W9), W4's table
-//   weapons-fuzz   (ctest sim.weapons.fuzz)  2,000 mutated retail WeaponDef blobs (and synthetic ones) through
-//                                            decode_weapon_def, make_weapon_sim_def and 600 random ticks (W8; asan)
-//   weapons-perf   (ctest sim.weapons.perf)  W11: 64 shooters on Metro, run_range_perf (wall clock, noisy)
 #include "weapons_install_support.h"
 
 #include "bf3/core/gameplay/weapon_blob.h"
@@ -32,7 +25,6 @@ namespace {
 
 constexpr std::string_view kFuzzVariants[] = { "weapons/m16a4/u_m16a4", "weapons/remington870/u_870", "weapons/m67/u_m67", "weapons/rpg7/u_rpg7" };
 
-// Seeded mutations of one blob: bit flips, byte overwrites, truncation, and a copied span.
 std::vector<uint8_t> mutate(const std::vector<uint8_t> &p_blob, std::mt19937 &r_rng) {
 	std::vector<uint8_t> b = p_blob;
 	if (b.empty()) {
@@ -52,7 +44,7 @@ std::vector<uint8_t> mutate(const std::vector<uint8_t> &p_blob, std::mt19937 &r_
 				b[at] = uint8_t(r_rng());
 				break;
 			case 4:
-				b[at] = (r_rng() & 1) ? 0xFF : 0x7F; // the high bytes of floats and counts
+				b[at] = (r_rng() & 1) ? 0xFF : 0x7F;
 				break;
 			case 5: {
 				const size_t from = r_rng() % b.size();
@@ -109,7 +101,7 @@ void fuzz_blob(const core::gameplay::WeaponDef &p_def, const SurfaceMaterialTabl
 	}
 }
 
-} // namespace
+}
 
 TEST_SUITE("weapons") {
 	TEST_CASE("sim.weapons: MP_Subway grid pairs, surface materials, zone properties") {
@@ -129,7 +121,7 @@ TEST_SUITE("weapons") {
 		std::printf("grid pairs: %zu, resolved %zu, index = low 24 bits %zu, penetrable %zu\n", iw.grid_pairs.size(), resolved, index_ok, penetrable);
 		CHECK(resolved == iw.grid_pairs.size());
 		CHECK(index_ok == iw.grid_pairs.size());
-		CHECK(penetrable == 1'800); // topics/01 §1.7, C9
+		CHECK(penetrable == 1'800);
 		const SurfaceMaterialTable &mt = *iw.materials;
 		CHECK(mt.has_grid());
 		CHECK(mt.grid_pair_count() == 32'400);
@@ -141,8 +133,7 @@ TEST_SUITE("weapons") {
 		CHECK(iw.max_health == 100.0f);
 		CHECK(iw.stand_eye_height == doctest::Approx(1.6f));
 		CHECK(iw.sprint_recover_seconds == doctest::Approx(0.12f));
-		// The gate weapons' own pairs and their zone cells (the core.gameplay.weapons body-multiplier rows, now as the
-		// sim def carries them).
+
 		const core::Result<WeaponCheckInputs> in = install_weapon_check_inputs(iw);
 		REQUIRE_MESSAGE(in.ok(), (in.ok() ? std::string() : in.error().message));
 		for (const WeaponSimDef &d : in->table->defs) {
@@ -285,7 +276,7 @@ TEST_SUITE("weapons-fuzz") {
 TEST_SUITE("weapons-perf") {
 	TEST_CASE("sim.weapons.perf: W11 64 shooters full auto on Metro (wall clock, noisy)") {
 #if defined(__SANITIZE_ADDRESS__)
-		// W11 is a dev-preset measurement; an instrumented build is 100x slower and says nothing about the budget.
+
 		std::printf("W11: not measured under AddressSanitizer (the gate is the dev preset)\n");
 		bf3::test::skip_install_case("asan build");
 		return;

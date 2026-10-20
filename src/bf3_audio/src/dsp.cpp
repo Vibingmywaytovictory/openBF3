@@ -1,6 +1,3 @@
-// DSP primitives of the A1/A2 mixer (dsp.h). Our own code from the textbook forms: the biquads are the RBJ Audio EQ
-// Cookbook forms in transposed direct form II; the pan is the equal-power (sin/cos) law.
-
 #include "bf3/audio/dsp.h"
 
 #include <algorithm>
@@ -16,7 +13,7 @@ bool identity(const BiquadCoefficients &c) {
 	return c.b0 == 1.0f && c.b1 == 0.0f && c.b2 == 0.0f && c.a1 == 0.0f && c.a2 == 0.0f;
 }
 
-} // namespace
+}
 
 float db_to_gain(float p_db) {
 	if (!(p_db > -144.0f)) {
@@ -39,7 +36,7 @@ BiquadCoefficients BiquadCoefficients::design(BiquadShape p_shape, float p_rate,
 		return c;
 	}
 	if (p_shape == BiquadShape::HighPass && !(p_frequency > 0.0f)) {
-		return c; // the identity: a 0 Hz high-pass passes everything unchanged (bit exact, see Biquad::process)
+		return c;
 	}
 	if (p_shape == BiquadShape::Peaking && p_gain_db == 0.0f) {
 		return c;
@@ -102,7 +99,7 @@ void Biquad::process(float *r_samples, uint32_t p_frames, const BiquadCoefficien
 	}
 	if (identity(c) && identity(p_target)) {
 		z1 = z2 = 0.0f;
-		return; // bit exact pass-through
+		return;
 	}
 	const bool ramp = c.b0 != p_target.b0 || c.b1 != p_target.b1 || c.b2 != p_target.b2 || c.a1 != p_target.a1 || c.a2 != p_target.a2;
 	float b0 = c.b0, b1 = c.b1, b2 = c.b2, a1 = c.a1, a2 = c.a2;
@@ -133,7 +130,7 @@ void Biquad::process(float *r_samples, uint32_t p_frames, const BiquadCoefficien
 		}
 	}
 	if (!std::isfinite(s1) || !std::isfinite(s2)) {
-		s1 = s2 = 0.0f; // never let a blown-up state persist
+		s1 = s2 = 0.0f;
 	}
 	z1 = s1;
 	z2 = s2;
@@ -181,9 +178,9 @@ void apply_gain_ramp(float *r_samples, uint32_t p_frames, float p_from, float p_
 StereoGains equal_power_pan(float p_azimuth, float p_spread) {
 	const float az = std::isfinite(p_azimuth) ? p_azimuth : 0.0f;
 	const float spread = std::clamp(std::isfinite(p_spread) ? p_spread : 0.0f, 0.0f, 1.0f);
-	const float position = std::sin(az) * (1.0f - spread); // -1 left .. 1 right; front and back fold together
+	const float position = std::sin(az) * (1.0f - spread);
 	const float theta = (position + 1.0f) * 0.25f * kPi;
 	return StereoGains{ std::cos(theta), std::sin(theta) };
 }
 
-} // namespace bf3::audio
+}

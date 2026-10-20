@@ -1,18 +1,3 @@
-// M2a lc: the server pose of the hit capsules (docs/design/m2a.md §6.5, E18 (a); as built: docs/design/m2a-lc.md).
-//
-// Suite "anim-server-pose" (ctest anim.server_pose): the retail install, read-only (the level's capsules, SoldierDef and
-// material table through bf3_sim's weapon_install.h; the clips through AntInstallSource); exits 77 without one.
-//   * the table: 9 capsules mapped to rig joints, every row tagged (0 stand-in rows expected), the aim per stance, the
-//     structural checks, the hash, the capsules/ blob round trip, a second build bit-equal, plausible stand-idle heights;
-//   * E18 (a): posed_target from the table against the reference evaluation (bf3/anim/server_pose_reference.h: per
-//     query sample_pose -> apply_additive at the exact pitch weight -> model_pose, capsules placed in double; no
-//     buckets, no fraction steps) at the 32 mid-pitches (steady rows, 3 stances) and 15 mid-fractions x 32 mid-pitches
-//     (6 transition rows): head and chest capsule centres within 3 cm (steady) and 5 cm (transitions); body and legs
-//     reported;
-//   * E18 (a): the stand rows against S3's CrowdEvaluator (its own clip set, loco blend and layers) within 3 cm; a run
-//     soldier against the stand table reported (locomotion is not modelled);
-//   * install.unchanged.
-// Asserts numbers only; nothing from BF3 is stored in the repo.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/clip_asset.h"
@@ -47,7 +32,7 @@ namespace ref = bf3::anim::server_pose_reference;
 namespace {
 
 constexpr double kDeg = 3.14159265358979323846 / 180.0;
-constexpr double kSteadyGateCm = 3.0; // E18 [inferred threshold, m2a.md §16 Q14]
+constexpr double kSteadyGateCm = 3.0;
 constexpr double kTransitionGateCm = 5.0;
 const char *kStance[3] = { "stand", "crouch", "prone" };
 const char *kTransition[6] = { "stand->crouch", "stand->prone", "crouch->stand", "crouch->prone", "prone->stand", "prone->crouch" };
@@ -136,9 +121,9 @@ sw::HitTarget posed_local(const gp::CapsulePoseTable &p_table, uint8_t p_from, u
 }
 
 struct Dev {
-	double head = 0, chest = 0, body = 0, legs = 0; // cm, max over the queries
+	double head = 0, chest = 0, body = 0, legs = 0;
 	size_t queries = 0;
-	size_t failed = 0; // queries the reference could not evaluate
+	size_t failed = 0;
 };
 
 void accumulate(Dev &r_dev, const sw::HitTarget &p_posed, const std::vector<ref::RefCapsule> &p_ref) {
@@ -162,7 +147,7 @@ const char *tag(uint8_t p_source) {
 	return p_source == gp::capsule_row_source::kClipDerived ? "clip-derived" : "stand-in";
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim-server-pose") {
 	TEST_CASE("server pose: the table from the install (capsules, joints, tags, aim, hash, blob, determinism)") {
@@ -183,7 +168,7 @@ TEST_SUITE("anim-server-pose") {
 		CHECK(t.capsule_count == 9);
 		CHECK(gp::capsule_pose_table_valid(t));
 		CHECK(t.hash == gp::capsule_pose_table_hash(t));
-		// Every role's clip is present (verified with antdump list: exactly once each), every capsule maps to a joint.
+
 		for (size_t k = 0; k < an::kServerPoseClips; ++k) {
 			CHECK_MESSAGE(d->clips.present[k], an::ServerPoseClipNames{}.controllers[k]);
 		}
@@ -194,14 +179,14 @@ TEST_SUITE("anim-server-pose") {
 			MESSAGE("capsule " << c << " " << hc.bone << " -> joint " << r.joint[c] << " zone " << std::string(sw::hit_zone_name(sw::HitZone(t.steady[c].zone))) << " r "
 							   << hc.radius << " len " << hc.length << " axis " << hc.bone_axis << " sign " << an::capsule_axis_sign(d->clips.rig, r.joint[c], hc.bone_axis));
 		}
-		// Row tags: printed for E18, 0 stand-in rows expected on the retail install.
+
 		size_t standins = 0;
 		for (size_t row = 0; row < gp::kCapsuleRows; ++row) {
 			MESSAGE("row " << std::string(row < 3 ? kStance[row] : kTransition[row - 3]) << ": " << std::string(tag(t.row_source[row])));
 			standins += t.row_source[row] == gp::capsule_row_source::kClipDerived ? 0 : 1;
 		}
 		CHECK(standins == 0);
-		// Aim per stance: stand takes S3's measured values; crouch and prone are measured (a fallback is reported).
+
 		const an::CrowdConfig aim;
 		CHECK(r.aim[0].up_full_deg == aim.aim_up_full_pitch_deg);
 		CHECK(r.aim[0].down_full_deg == aim.aim_down_full_pitch_deg);
@@ -213,12 +198,11 @@ TEST_SUITE("anim-server-pose") {
 				MESSAGE("aim " << std::string(kStance[s]) << ": not measured, the stand values are used (reported, docs/design/m2a-lc.md)");
 			}
 		}
-		// Pitch buckets: 0 is a bucket, the ends are the stand's full-aim pitches.
+
 		CHECK(t.pitch_deg[an::kCapsuleDownBuckets] == 0.0f);
 		CHECK(t.pitch_deg.front() == doctest::Approx(-aim.aim_down_full_pitch_deg));
 		CHECK(t.pitch_deg.back() == doctest::Approx(aim.aim_up_full_pitch_deg));
-		// Plausible stand idle at pitch 0 (frame check of the [inferred] placement: head ~1.5-1.8 m, chest above the
-		// hips, legs lowest, the body inside a 1 m column about the feet).
+
 		const size_t zero = an::kCapsuleDownBuckets;
 		double head_y = 0, chest_y = 0, legs_min = 10, max_r = 0;
 		for (size_t c = 0; c < t.capsule_count; ++c) {
@@ -242,7 +226,7 @@ TEST_SUITE("anim-server-pose") {
 		CHECK(chest_y < head_y);
 		CHECK(legs_min < 0.6);
 		CHECK(max_r < 1.0);
-		// The capsules/ blob round trip, and a second build from the same inputs gives the same bits.
+
 		const std::vector<uint8_t> blob = gp::encode_capsule_pose_table(t);
 		gp::CapsulePoseTable back;
 		std::string err;
@@ -310,8 +294,7 @@ TEST_SUITE("anim-server-pose") {
 			CHECK_MESSAGE(dev.head <= kTransitionGateCm, std::string(kTransition[tr]) << " head " << dev.head << " cm");
 			CHECK_MESSAGE(dev.chest <= kTransitionGateCm, std::string(kTransition[tr]) << " chest " << dev.chest << " cm");
 		}
-		// The on-grid points reproduce the reference to float rounding (the builder and the reference agree where the
-		// table has an entry): a check on the shared rules, not a gate row.
+
 		Dev grid;
 		for (uint8_t s = 0; s < 3; ++s) {
 			for (const float p : t.pitch_deg) {
@@ -359,7 +342,7 @@ TEST_SUITE("anim-server-pose") {
 		const uint32_t n = uint32_t(pitches.size()) + 1;
 		auto ev = an::CrowdEvaluator::make(*crowd, std::span<const an::CrowdTeam>(&team, 1), n, config);
 		REQUIRE_MESSAGE(ev.ok(), (ev.ok() ? "" : ev.error().message));
-		// The same rig: the crowd's joints are the server pose's (both VeniceAntSke01 through skeleton_from_rig).
+
 		REQUIRE(crowd->rig.size() == d->clips.rig.size());
 		std::vector<an::CrowdSoldierInput> in(n);
 		for (size_t i = 0; i < pitches.size(); ++i) {

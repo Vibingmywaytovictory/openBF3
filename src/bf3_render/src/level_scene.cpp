@@ -1,5 +1,3 @@
-// The level scene plan and its per-item preparation (docs/design/m1.md §11.2-§11.4; level_scene.h). The lanes that
-// run the items are in scene_lanes.cpp.
 #include "bf3/render/level_scene.h"
 
 #include "level_scene_internal.h"
@@ -42,24 +40,18 @@ using Clock = std::chrono::steady_clock;
 using scene_internal::Mat3;
 using Vec3 = std::array<float, 3>;
 
-// Undrawn shader words (bf3_core census.cpp kUndrawnShaders, IW4L materials.rs resolve).
 constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
-// Alpha-tested and double-sided shader families, by ShaderGraph partition name [inferred, docs §11.3: by name in
-// M1]. Matched as substrings of the lowercase name.
+
 constexpr std::string_view kAlphaTestWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
 	"tree", "bush", "ivy", "hair", "cutout", "masked" };
-// The drawn albedo and normal parameters in preference order (SceneMaterialPlan::albedo / normal). The fallbacks
-// are the primary layers of Metro's facade, tile and vegetation shaders [verified: render.scene prints every
-// parameter name with its count]; masks, dirt and detail layers are not drawn in M1.
+
 constexpr std::string_view kAlbedoParameters[] = { "Diffuse", "MainDiffuse", "TileDiffuse", "DiffuseLeaves", "DiffuseBark", "Diffuse2" };
 constexpr std::string_view kNormalParameters[] = { "Normal", "MainNormal", "TileNormal" };
 constexpr std::string_view kDoubleSidedWords[] = { "foliage", "vegetation", "grass", "leaf", "leaves", "tree", "bush", "ivy", "twosided", "two_sided",
 	"doublesided" };
-// Terrain cells further than this outside the plan's instances are not drawn [inferred: the level's far terrain
-// is outside every view the M1 soldier can reach].
+
 constexpr float kTerrainMargin = 256.0f;
-// The sun's DirectionalLight energy per unit of OutdoorLight SunColor's largest component [inferred: Metro's park
-// SunColor peaks at 4.0, which gives energy 1.0].
+
 constexpr float kSunEnergyPerColor = 0.25f;
 constexpr size_t kMaxTerrainChunks = 1u << 16;
 
@@ -112,12 +104,10 @@ float det3(const Mat3 &p_m) {
 	return dot(p_m[0], cross(p_m[1], p_m[2]));
 }
 
-// The inverse transpose up to a positive factor: the cofactor matrix (rows: cross products of the other rows),
-// times the sign of the determinant, so normals keep their side.
 Mat3 normal_matrix(const Mat3 &p_m) {
 	const float sign = det3(p_m) < 0.0f ? -1.0f : 1.0f;
 	Mat3 c = { cross(p_m[1], p_m[2]), cross(p_m[2], p_m[0]), cross(p_m[0], p_m[1]) };
-	// cof(M) has rows cross(m1, m2), ...; M^-1 = cof(M)^T / det, so M^-T = cof(M) / det.
+
 	for (Vec3 &row : c) {
 		for (float &v : row) {
 			v *= sign;
@@ -143,7 +133,6 @@ void recompute_aabb(PreparedSurface &r_surface) {
 	}
 }
 
-// Every array either empty or n * its width; the indices whole triangles below n.
 core::Status check_surface(const PreparedSurface &p_s, const std::string &p_mesh) {
 	const size_t n = p_s.vertex_count();
 	const auto bad = [&](const char *p_what) { return core::make_error("mesh " + p_mesh + " subset " + std::to_string(p_s.subset) + ": " + p_what); };
@@ -166,7 +155,6 @@ core::Status check_surface(const PreparedSurface &p_s, const std::string &p_mesh
 	return core::Status::success();
 }
 
-// Keeps the vertices p_keep marks, in order, and renumbers the indices.
 void compact_vertices(PreparedSurface &r_s, const std::vector<uint8_t> &p_keep) {
 	const size_t n = r_s.vertex_count();
 	std::vector<int32_t> remap(n, -1);
@@ -244,7 +232,6 @@ float max_component(const Vec3 &p_v) {
 	return std::fmax(std::fmax(p_v[0], p_v[1]), p_v[2]);
 }
 
-// The colour's hue with its largest component at p_peak (black stays black).
 Vec3 with_peak(const Vec3 &p_v, float p_peak) {
 	const float m = max_component(p_v);
 	if (!(m > 1e-6f)) {
@@ -253,8 +240,6 @@ Vec3 with_peak(const Vec3 &p_v, float p_peak) {
 	return { std::fmax(p_v[0], 0.0f) * p_peak / m, std::fmax(p_v[1], 0.0f) * p_peak / m, std::fmax(p_v[2], 0.0f) * p_peak / m };
 }
 
-// The mode's sun, sky and fog (docs §11.4): among the placed VisualEnvironmentEntityData that are not disabled and
-// have an enabled OutdoorLightComponentData, the one with the highest Priority, the first in world order on a tie.
 SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world) {
 	SceneEnvironment env;
 	struct Candidate {
@@ -305,7 +290,7 @@ SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world)
 		return env;
 	}
 	env.from_data = true;
-	// OutdoorLight: SunRotationX is the azimuth and SunRotationY the elevation, in degrees [inferred convention].
+
 	const float azimuth = float_field(best->outdoor, "SunRotationX").value_or(200.0f) * 3.14159265358979f / 180.0f;
 	const float elevation = float_field(best->outdoor, "SunRotationY").value_or(35.0f) * 3.14159265358979f / 180.0f;
 	const Vec3 to_sun = { std::sin(azimuth) * std::cos(elevation), std::sin(elevation), std::cos(azimuth) * std::cos(elevation) };
@@ -314,8 +299,7 @@ SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world)
 		env.sun_color = with_peak(*sun, 1.0f);
 		env.sun_energy = std::clamp(max_component(*sun) * kSunEnergyPerColor, 0.0f, 16.0f);
 	}
-	// Sky and ground: the Enlighten sky box colours (the park's OutdoorLight SkyColor is black, Enlighten lights
-	// it), else the OutdoorLight's; radiance values, so only the hue is kept [inferred].
+
 	std::optional<Vec3> sky, ground;
 	if (best->enlighten) {
 		sky = vec3_field(*best->enlighten, "SkyBoxSkyColor");
@@ -347,11 +331,10 @@ SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world)
 	return env;
 }
 
-// The material's dedupe key: shader, then every texture and vector parameter as given.
 std::string material_key(const MaterialSlot &p_slot) {
 	std::string key = p_slot.shader;
 	key += '\x01';
-	key += p_slot.variation_shader; // L1: the variation's own graph (empty on M1-era slots)
+	key += p_slot.variation_shader;
 	key += '\x01';
 	for (const auto &[name, texture] : p_slot.textures) {
 		key += lower(name);
@@ -370,7 +353,6 @@ std::string material_key(const MaterialSlot &p_slot) {
 	return key;
 }
 
-// The L1 resolver's answer as part of a material's dedupe key (the neighbour tier depends on the mesh name).
 std::string look_key(const LookMaterial &p_look) {
 	std::string key;
 	for (const std::optional<LookTexture> *t : { &p_look.color, &p_look.normal }) {
@@ -393,9 +375,8 @@ struct PlanBuilder {
 	LevelScenePlan &plan;
 	std::unordered_map<std::string, uint32_t> material_by_key;
 	std::unordered_map<std::string, uint32_t> texture_by_name;
-	LookResolver *resolver = nullptr; // L1
+	LookResolver *resolver = nullptr;
 
-	// L1: the material of a slot as the look resolver draws it, or kSceneUndrawnMaterial.
 	uint32_t look_material(const MaterialSlot &p_slot, std::string_view p_mesh) {
 		LookMaterial look = resolver->resolve(p_slot, p_mesh);
 		if (!look.drawn) {
@@ -483,9 +464,7 @@ struct ChunkKey {
 	bool operator<(const ChunkKey &p_other) const { return bytes < p_other.bytes; }
 };
 
-} // namespace
-
-// ---- scene_internal ---------------------------------------------------------------------------------------------
+}
 
 namespace scene_internal {
 
@@ -734,7 +713,7 @@ core::Result<PreparedMesh> terrain_mesh(const core::res::HeightGrid &p_grid, con
 			const int32_t b = sample(x + 1, z);
 			const int32_t c = sample(x, z + 1);
 			const int32_t d = sample(x + 1, z + 1);
-			// Clockwise seen from above (+Y) is Godot's front face (render_bridge.h): (a, b, c) and (b, d, c).
+
 			if (mirror) {
 				s.indices.insert(s.indices.end(), { a, c, b, b, c, d });
 			} else {
@@ -752,15 +731,13 @@ core::Result<PreparedMesh> terrain_mesh(const core::res::HeightGrid &p_grid, con
 	return out;
 }
 
-} // namespace scene_internal
-
-// ---- plan ---------------------------------------------------------------------------------------------------------
+}
 
 std::vector<SceneMeshRequest> scene_mesh_requests(const MeshCensus &p_census) {
 	std::vector<SceneMeshRequest> out;
 	struct Shape {
-		size_t lods = 0; // census-decoded LOD count (at most 4)
-		bool model = false; // some kept variant is model kind
+		size_t lods = 0;
+		bool model = false;
 	};
 	std::vector<Shape> shapes;
 	std::unordered_map<std::string, size_t> by_name;
@@ -817,7 +794,6 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 		}
 	}
 
-	// Instances: the census's, minus the start-hidden placements.
 	std::vector<uint32_t> shown(p_census.meshes.size(), 0);
 	std::vector<uint8_t> instance_shown(p_census.instances.size(), 1);
 	for (size_t i = 0; i < p_census.instances.size(); ++i) {
@@ -838,7 +814,6 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 		++shown[inst.mesh];
 	}
 
-	// Meshes: the kept variants with a shown placement, in census order; their materials.
 	std::vector<uint32_t> plan_mesh_of(p_census.meshes.size(), UINT32_MAX);
 	std::unordered_map<std::string, uint32_t> neutral_material;
 	for (uint32_t v = 0; v < p_census.meshes.size(); ++v) {
@@ -865,7 +840,7 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 				}
 			}
 		} else {
-			// Drawn untextured rather than dropped: one neutral material for every slot the asset lists.
+
 			plan.failures.emplace_back(m.name, materials.error().message);
 			const size_t slots = std::min(p_resolver.follow_all(m.asset.data(), "Materials").size(), kMaxMaterialSlots);
 			const uint32_t neutral = builder.material(MaterialSlot{});
@@ -883,7 +858,6 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 		plan.instances.push_back(SceneInstancePlan{ plan_mesh_of[inst.mesh], inst.transform });
 	}
 
-	// Terrain (docs §11.2).
 	if (p_options.include_terrain) {
 		for (uint32_t at = 0; at < p_world.objects.size(); ++at) {
 			const PlacedObject &object = p_world.objects[at];
@@ -935,8 +909,6 @@ core::Result<LevelScenePlan> plan_level_scene(const core::level::LoadedLevel &p_
 	return plan_level_scene(p_level.db(), p_world, p_census, options);
 }
 
-// ---- items --------------------------------------------------------------------------------------------------------
-
 core::Result<CachedMesh> load_scene_request(core::Cache *p_cache, const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_request) {
 	if (p_request >= p_plan.requests.size()) {
 		return core::make_error("scene request " + std::to_string(p_request) + " out of range");
@@ -960,7 +932,7 @@ core::Result<PreparedSceneMesh> prepare_scene_mesh(core::Cache *p_cache, const c
 	if (p_blob.meshes.size() != p_blob.lods.size()) {
 		return core::make_error("scene mesh " + p_blob.name + ": blob LOD list and meshes differ");
 	}
-	// The blob's LODs in index order; the first that still draws after the variant's filters.
+
 	std::vector<size_t> order(p_blob.meshes.size());
 	for (size_t i = 0; i < order.size(); ++i) {
 		order[i] = i;
@@ -1045,7 +1017,7 @@ core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount
 		return core::make_error("res " + tree_name + ": " + e.message());
 	}
 	chunks.clear();
-	// Crop to the plan's instances (in the terrain's frame when it is axis-aligned, as every retail terrain is).
+
 	std::optional<std::array<float, 4>> crop;
 	const LevelTransform &t = plan.transform;
 	const bool axis_aligned = t.right == Vec3{ 1.0f, 0.0f, 0.0f } && t.up == Vec3{ 0.0f, 1.0f, 0.0f } && t.forward == Vec3{ 0.0f, 0.0f, 1.0f } && t.scale > 0.0f;
@@ -1078,7 +1050,7 @@ uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::LevelMou
 			++variants[m.request];
 		}
 	}
-	// PreparedMesh layout per vertex: position 12, normal 12, tangent 16, uv0 8, uv1 8, colour 4 (no bones).
+
 	constexpr uint64_t kVertexBytes = 60;
 	for (size_t r = 0; r < p_plan.requests.size(); ++r) {
 		if (variants[r] == 0) {
@@ -1105,10 +1077,10 @@ uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::LevelMou
 		}
 		const int64_t level0 = core::res::texture_image_bytes(texture.format, texture.width, texture.height);
 		if (level0 > 0) {
-			bytes += uint64_t(level0) + uint64_t(level0) / 3; // the full chain is about 4/3 of level 0
+			bytes += uint64_t(level0) + uint64_t(level0) / 3;
 		}
 	}
 	return bytes;
 }
 
-} // namespace bf3::render
+}

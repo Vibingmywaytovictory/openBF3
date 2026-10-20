@@ -1,17 +1,3 @@
-// GunSwayData reader: BF3's spread (deviation) and recoil model per stance x zoom (topics/01 §1.3).
-//
-// GunSwayData
-//   Stand  GunSwayStandData       {NoZoom, Zoom : GunSwayBaseMoveJumpData}
-//   Crouch GunSwayCrouchProneData {NoZoom, Zoom : GunSwayBaseMoveData}
-//   Prone  GunSwayCrouchProneData
-//     GunSwayBaseMoveJumpData = {BaseValue, Moving, Jumping, Sprinting, VaultingSmallObject,
-//                                VaultingMediumObject : GunSwayDispersionData, Recoil, GunSwayLag}
-//     GunSwayBaseMoveData     = {BaseValue, Moving, Recoil, GunSwayLag}
-//   ProneToCrouch .. StandToProne : GunSwayStanceTransition {MaxPenaltyValue, CoolDown}
-//   SuppressionModifierUnzoomed / Zoomed : GunSwayStanceZoomModifierData
-//   Modifiers[] -> GunSwayModifierData {UnlockAsset, <Stance><Zoom|NoZoom>Modifier, gates}
-//   FirstShotRecoilMultiplier, ShootingRecoilDecreaseScale, (Gameplay)DeviationScaleFactor(No)Zoom,
-//   CameraRecoil -> CameraRecoilData
 #include "weapon_readers.h"
 
 #include <algorithm>
@@ -70,7 +56,7 @@ SwayModifier read_modifier(Fields &r_f, const EbxStruct &p_s) {
 SwayState read_state(Fields &r_f, const EbxStruct &p_s) {
 	SwayState s;
 	for (size_t m = 0; m < size_t(SwayMove::Count); ++m) {
-		// Base and Moving exist on every stance; the others only on stand.
+
 		const bool required = m < 2;
 		if (!required && !p_s.get(kMoveFields[m])) {
 			continue;
@@ -86,7 +72,7 @@ SwayState read_state(Fields &r_f, const EbxStruct &p_s) {
 	return s;
 }
 
-} // namespace
+}
 
 bool ActiveUnlocks::contains(const Guid &p_guid) const {
 	return std::find(guids.begin(), guids.end(), p_guid) != guids.end();
@@ -140,7 +126,6 @@ void read_gun_sway(Fields &r_f, const EbxInstance &p_sway, const ActiveUnlocks &
 		r_sway.camera_spring_min_threshold_angle = r_f.f32_or(c, "SpringMinThresholdAngle", 0);
 	}
 
-	// Modifiers, in array order. An entry whose unlock is not active is skipped without resolving it.
 	const OptionalEbxArray mods = r_f.array(g, "Modifiers");
 	if (!mods) {
 		return;
@@ -155,8 +140,7 @@ void read_gun_sway(Fields &r_f, const EbxInstance &p_sway, const ActiveUnlocks &
 		if (r->is_null()) {
 			continue;
 		}
-		// A modifier partition the resolver does not hold cannot say which unlock it serves: counted,
-		// not fatal (a partial library still resolves the base weapon).
+
 		if (!r_f.db().resolve(p_sway.partition(), *r)) {
 			++r_sway.modifiers_unresolved;
 			continue;
@@ -168,7 +152,7 @@ void read_gun_sway(Fields &r_f, const EbxInstance &p_sway, const ActiveUnlocks &
 		const EbxStruct md = mod->data();
 		const std::optional<EbxRef> unlock = r_f.ref(md, "UnlockAsset");
 		if (!unlock || unlock->is_null()) {
-			continue; // ungated by unlock: never seen in the data; not applied
+			continue;
 		}
 		const std::optional<Guid> id = r_f.target_guid(mod->partition(), *unlock);
 		if (!id || !p_active.contains(*id)) {
@@ -198,4 +182,4 @@ void read_gun_sway(Fields &r_f, const EbxInstance &p_sway, const ActiveUnlocks &
 	}
 }
 
-} // namespace bf3::core::gameplay::detail
+}

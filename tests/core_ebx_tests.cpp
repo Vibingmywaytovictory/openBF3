@@ -1,7 +1,3 @@
-// EBX reader: a synthetic partition built here (suite "containers", no install needed) and the
-// retail install (suite "install", read-only, skipped without an install). The install cases
-// assert counts and numbers only; the reference values are the ebx-dump probe's (IW4L Rust
-// readers) output on the same install, patch v7 + Xpack1-5.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -58,12 +54,6 @@ struct SynthLayout {
 	size_t fields_at, complexes_at, instances_at, strings_at, arrays_at, array_repeaters_at;
 };
 
-// A small partition read through its own descriptors:
-//   DataContainer (class, size 8)
-//   Thing : DataContainer (class, size 48): Name CString@8, Value Float32@12, Kind Color@16,
-//           Items array-of-Float32@20, Other Class@24, Flag Boolean@28, Pos Vec3@32
-//   array (member Float32), Color enum { Red = 0, Green = 1 }, Vec3 { x, y, z } (value type, 16)
-// Two Thing instances; one import; strings "hello"; array 0 = [1.5, 2.5, -0.0], array 1 = [].
 Bytes build_partition(const Guid &p_partition, const Guid &p_i0, const Guid &p_i1, SynthLayout *r_layout = nullptr) {
 	const char *names[] = { "DataContainer", "$", "Thing", "Name", "Value", "Kind", "Items", "Other", "Flag", "Pos", "array", "member", "Color", "Red",
 		"Green", "Vec3", "x", "y", "z" };
@@ -79,7 +69,7 @@ Bytes build_partition(const Guid &p_partition, const Guid &p_i0, const Guid &p_i
 		int32_t offset;
 	};
 	const F fields[] = {
-		{ "$", ebx_code::kVoid, 0, 0 }, // Thing (0..8)
+		{ "$", ebx_code::kVoid, 0, 0 },
 		{ "Name", ebx_code::kCString, 0, 8 },
 		{ "Value", ebx_code::kFloat32, 0, 12 },
 		{ "Kind", ebx_code::kEnum, 3, 16 },
@@ -87,10 +77,10 @@ Bytes build_partition(const Guid &p_partition, const Guid &p_i0, const Guid &p_i
 		{ "Other", ebx_code::kClass, 0, 24 },
 		{ "Flag", ebx_code::kBoolean, 0, 28 },
 		{ "Pos", ebx_code::kValueType, 4, 32 },
-		{ "member", ebx_code::kFloat32, 0, 0 }, // array (8)
-		{ "Red", ebx_code::kVoid, 0, 0 }, // Color (9, 10)
+		{ "member", ebx_code::kFloat32, 0, 0 },
+		{ "Red", ebx_code::kVoid, 0, 0 },
 		{ "Green", ebx_code::kVoid, 0, 1 },
-		{ "x", ebx_code::kFloat32, 0, 0 }, // Vec3 (11..13)
+		{ "x", ebx_code::kFloat32, 0, 0 },
 		{ "y", ebx_code::kFloat32, 0, 4 },
 		{ "z", ebx_code::kFloat32, 0, 8 },
 	};
@@ -157,36 +147,36 @@ Bytes build_partition(const Guid &p_partition, const Guid &p_i0, const Guid &p_i
 	put32(b, instance_repeaters_at, 0);
 	put32(b, instance_repeaters_at + 4, 2);
 	put32(b, instance_repeaters_at + 8, 1);
-	put32(b, array_repeaters_at, 4); // array 0: count at section+0, elements at section+4
+	put32(b, array_repeaters_at, 4);
 	put32(b, array_repeaters_at + 4, 3);
 	put32(b, array_repeaters_at + 8, 2);
-	put32(b, array_repeaters_at + 12, 0); // array 1: empty
+	put32(b, array_repeaters_at + 12, 0);
 	put32(b, array_repeaters_at + 16, 0);
 	put32(b, array_repeaters_at + 20, 2);
 	std::memcpy(b.data() + strings_at, strings.data(), strings.size());
-	// Instance 0.
+
 	size_t at = instances_at;
 	put_guid(b, at, p_i0);
 	size_t d = at + 16;
-	put32(b, d + 8, 0); // "hello"
+	put32(b, d + 8, 0);
 	putf(b, d + 12, 0.1f);
-	put32(b, d + 16, 1); // Green
-	put32(b, d + 20, 0); // array 0
-	put32(b, d + 24, 0x80000000u); // import 0
+	put32(b, d + 16, 1);
+	put32(b, d + 20, 0);
+	put32(b, d + 24, 0x80000000u);
 	b[d + 28] = 1;
 	putf(b, d + 32, 1.0f);
 	putf(b, d + 36, 2.0f);
 	putf(b, d + 40, 3.0f);
-	// Instance 1.
+
 	at = d + 48;
 	put_guid(b, at, p_i1);
 	d = at + 16;
-	put32(b, d + 8, 0xFFFFFFFFu); // null string
+	put32(b, d + 8, 0xFFFFFFFFu);
 	putf(b, d + 12, -2.0f);
-	put32(b, d + 16, 7); // no enumerator
-	put32(b, d + 20, 1); // array 1 (empty)
-	put32(b, d + 24, 1); // internal: instance 0
-	// Arrays.
+	put32(b, d + 16, 7);
+	put32(b, d + 20, 1);
+	put32(b, d + 24, 1);
+
 	put32(b, arrays_at, 3);
 	putf(b, arrays_at + 4, 1.5f);
 	putf(b, arrays_at + 8, 2.5f);
@@ -235,7 +225,7 @@ float f32_at(const EbxInstance &p_inst, const char *p_path) {
 	return *v->as_f32();
 }
 
-} // namespace
+}
 
 TEST_SUITE("containers") {
 	TEST_CASE("ebx: name hash is case-sensitive djb2-xor") {
@@ -281,8 +271,7 @@ TEST_SUITE("containers") {
 		CHECK(std::signbit(*items.get(2)->as_f32()));
 		CHECK_FALSE(items.get(3).has_value());
 		CHECK_FALSE(t0.get_path("Items[3]").has_value());
-		// Range-for over a temporary array view (C++20 ends the optional's life after range-init),
-		// and iterators that outlive the EbxArray they came from: both must stay valid.
+
 		std::vector<float> seen;
 		for (const EbxValue e : *t0.get("Items")->as_array()) {
 			seen.push_back(*e.as_f32());
@@ -301,9 +290,9 @@ TEST_SUITE("containers") {
 		CHECK(walked == 3);
 		CHECK(t0.get("Items")->as_array() != std::nullopt);
 		CHECK_FALSE(t0.get("Name")->as_array().has_value());
-		CHECK((*t0.get("Name")->as_array()).empty()); // empty dereferences to an empty array
+		CHECK((*t0.get("Name")->as_array()).empty());
 		CHECK_FALSE(t0.get("Missing").has_value());
-		CHECK_FALSE(t0.get("name").has_value()); // field names are case-sensitive
+		CHECK_FALSE(t0.get("name").has_value());
 		const EbxRef other = *t0.get("Other")->as_ref();
 		CHECK(other.kind == EbxRef::Kind::External);
 		CHECK(other.partition == kOtherPartition);
@@ -321,7 +310,6 @@ TEST_SUITE("containers") {
 		CHECK(internal == EbxRef::internal(0));
 		CHECK(p.resolve(internal) == t0);
 
-		// Every field, base types first, declaration order, '$' skipped.
 		std::vector<std::string_view> names;
 		for (const EbxField &f : t0.fields()) {
 			names.push_back(f.name);
@@ -337,7 +325,7 @@ TEST_SUITE("containers") {
 	TEST_CASE("ebx: database lookup, first wins, cross-partition references") {
 		EbxDb db;
 		CHECK(db.parse_insert("Things/A", build_partition(kPartition, kThing0, kThing1)).value());
-		// Same name (any case) or same GUID: dropped.
+
 		CHECK_FALSE(db.parse_insert("things/a", build_partition(kOtherPartition, kOtherInstance, kThing1)).value());
 		CHECK_FALSE(db.parse_insert("things/b", build_partition(kPartition, kThing0, kThing1)).value());
 		CHECK(db.parse_insert("things/b", build_partition(kOtherPartition, kOtherInstance, kThing1)).value());
@@ -368,46 +356,45 @@ TEST_SUITE("containers") {
 		CHECK(contains(parse_error(b), "do not add up to the partition length"));
 		CHECK(parse_error(Bytes(good.begin(), good.begin() + 40)) == "Header runs past the end of the partition");
 		b = good;
-		put32(b, l.arrays_at, 4); // stored count differs from the repeater
+		put32(b, l.arrays_at, 4);
 		CHECK(parse_error(b) == "array 0 has 3 elements but 4 is stored before its data");
 		b = good;
-		put32(b, l.instances_at + 16 + 24, 3); // internal reference past the 2 instances
+		put32(b, l.instances_at + 16 + 24, 3);
 		CHECK(parse_error(b) == "reference 0x00000003 names no instance or import");
 		b = good;
-		put32(b, l.instances_at + 16 + 24, 0x80000001u); // import 1 of 1
+		put32(b, l.instances_at + 16 + 24, 0x80000001u);
 		CHECK(parse_error(b) == "reference 0x80000001 names no instance or import");
 		b = good;
-		put32(b, l.instances_at + 16 + 8, 6); // string offset at the end of the table
+		put32(b, l.instances_at + 16 + 8, 6);
 		CHECK(parse_error(b) == "string offset 0x6 is outside the string table");
 		b = good;
-		put32(b, l.instances_at + 16 + 20, 2); // array index out of range
+		put32(b, l.instances_at + 16 + 20, 2);
 		CHECK(parse_error(b) == "array 2 is out of range");
 		b = good;
-		put16(b, l.fields_at + 2 * 16 + 4, static_cast<uint16_t>(23 << 4)); // Value: type code 23
+		put16(b, l.fields_at + 2 * 16 + 4, static_cast<uint16_t>(23 << 4));
 		CHECK(parse_error(b) == "field `Thing.Value` has unsupported type code 23");
 		b = good;
-		put32(b, l.fields_at + 7 * 16 + 8, 40); // Pos at 40 + 16 > 48
+		put32(b, l.fields_at + 7 * 16 + 8, 40);
 		CHECK(parse_error(b) == "field `Thing.Pos` lies outside its type");
 		b = good;
 		put32(b, l.fields_at + 1 * 16, ebx_name_hash("Nope"));
 		CHECK(contains(parse_error(b), "is not in the name table"));
 		b = good;
-		put32(b, 0x40, 0xFFFFFFFFu); // primary GUID not an instance
+		put32(b, 0x40, 0xFFFFFFFFu);
 		CHECK(contains(parse_error(b), "is not in the partition"));
 		b = good;
-		put32(b, l.instances_at + 16 + 8, 1); // offset 1 inside "hello" is a valid string
+		put32(b, l.instances_at + 16 + 8, 1);
 		Result<EbxPartition> p = EbxPartition::parse(b);
 		REQUIRE(p.ok());
 		CHECK(p->primary().get("Name")->as_str() == std::optional<std::string_view>("ello"));
 	}
 
-	// H hygiene: the type tables are interned by the descriptor bytes.
 	TEST_CASE("ebx: partitions of one layout share their type tables; the last one frees them") {
 		const size_t live_before = ebx_live_type_layouts();
 		SynthLayout l{};
 		const Bytes good = build_partition(kPartition, kThing0, kThing1, &l);
 		Bytes moved = good;
-		put32(moved, l.fields_at + 2 * 16 + 8, 44); // Thing.Value at 44 (inside the type, over Pos.z): another layout
+		put32(moved, l.fields_at + 2 * 16 + 8, 44);
 		{
 			Result<EbxPartition> a = EbxPartition::parse(good);
 			Result<EbxPartition> b = EbxPartition::parse(build_partition(kOtherPartition, kOtherInstance, kThing1));
@@ -421,13 +408,13 @@ TEST_SUITE("containers") {
 			CHECK(a->memory_use().types_id != c->memory_use().types_id);
 			CHECK(ebx_live_type_layouts() == live_before + 2);
 			CHECK(a->primary().get("Value")->as_f32() == b->primary().get("Value")->as_f32());
-			CHECK(c->primary().get("Value").has_value()); // read at 44 now
-			// A layout error is still found while an equal-looking good layout is alive.
+			CHECK(c->primary().get("Value").has_value());
+
 			Bytes bad = good;
 			put16(bad, l.fields_at + 2 * 16 + 4, static_cast<uint16_t>(23 << 4));
 			CHECK(parse_error(bad) == "field `Thing.Value` has unsupported type code 23");
 			CHECK(ebx_live_type_layouts() == live_before + 2);
-			// Moving a partition keeps its views of the shared tables.
+
 			EbxPartition kept = std::move(*a);
 			CHECK(kept.primary().get("Name")->as_str() == std::optional<std::string_view>("hello"));
 			CHECK(kept.imports().size() == 1);
@@ -454,7 +441,7 @@ TEST_SUITE("containers") {
 						continue;
 					}
 					if (i % 4 == 0) {
-						kept[t].push_back(std::move(*p)); // some live on, the rest go at once
+						kept[t].push_back(std::move(*p));
 					}
 				}
 			});
@@ -485,7 +472,6 @@ TEST_SUITE("install") {
 		std::unique_ptr<EbxLibrary> lib = open_library(m, "Win32/Levels/MP_Subway/MP_Subway");
 		CHECK(lib->catalog_size() == 12524);
 
-		// Lazy: parse on first use, GUID lookups through the 80-byte headers.
 		const EbxPartition *weapon = lib->partition_by_name("Weapons/M16A4/M16A4");
 		REQUIRE(weapon != nullptr);
 		CHECK(weapon->guid() == guid_of("ea96401d-f166-11df-a2f6-9139d3229269"));
@@ -514,7 +500,6 @@ TEST_SUITE("install") {
 		CHECK(f32_at(*bullet, "StartDamage") == 25.0f);
 		CHECK(f32_at(*bullet, "EndDamage") == 18.4f);
 
-		// Bulk: every partition parses; the probe loads the same 12,524.
 		const EbxLibrary::LoadReport report = lib->load_all();
 		CHECK(report.partitions == 12524);
 		CHECK(report.failed == 0);
@@ -573,7 +558,7 @@ TEST_SUITE("install") {
 		REQUIRE(report.superbundles.size() == 33);
 		CHECK(report.superbundles[0].superbundle == "Win32/default_settings_Win32");
 		CHECK(report.superbundles[0].fresh == 720);
-		CHECK(report.superbundles[1].fresh == 105); // Win32/Globals
+		CHECK(report.superbundles[1].fresh == 105);
 		size_t instances = 0, dup_instances = 0;
 		for (const EbxLibrary::Entry &e : lib->entries()) {
 			instances += e.partition->instance_count();

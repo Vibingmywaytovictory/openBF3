@@ -1,6 +1,3 @@
-// S4 level logic: scripted runs and the gate judges (docs/design/s4.md §9). See logic_harness.h. Selections are made
-// from the collapsed graph's structure; GUIDs appear only as test data (the conquest flags and expectation rows) and
-// as printed cross-checks.
 #include "bf3/sim/logic/logic_harness.h"
 
 #include "bf3/core/gameplay/logic_types.h"
@@ -67,7 +64,6 @@ double param_float(const LogicGraph &p_graph, uint32_t p_node, std::string_view 
 	return v->kind == LogicValue::Kind::Float ? v->f : static_cast<double>(v->i);
 }
 
-// Incoming edges per node (scripts and judges only; never on the tick path).
 struct Incoming {
 	std::vector<std::vector<uint32_t>> events, properties;
 	explicit Incoming(const LogicGraph &p_graph) :
@@ -82,24 +78,22 @@ struct Incoming {
 };
 
 struct Mcom {
-	uint32_t model = 0; // StaticModel
-	uint32_t activation = 0; // the first DelayTrigger on the path (its Enable input is the activation)
-	uint32_t base = 0; // MultipleTrigger, TriggerAmount 2
+	uint32_t model = 0;
+	uint32_t activation = 0;
+	uint32_t base = 0;
 };
 
 struct RushSelection {
-	std::vector<Mcom> mcoms; // in StaticModel node order
-	std::vector<uint32_t> bases; // distinct, in node order
-	std::vector<uint32_t> spawners; // CharacterSpawn nodes fed by a SyncedBool, in node order
-	std::vector<std::pair<uint32_t, uint32_t>> park; // (base, park SyncedBool) candidates, in base then node order
+	std::vector<Mcom> mcoms;
+	std::vector<uint32_t> bases;
+	std::vector<uint32_t> spawners;
+	std::vector<std::pair<uint32_t, uint32_t>> park;
 };
 
-// MCOMs (s4.md §9.1): StaticModel OnDestroyed -> ... -> MultipleTrigger(TriggerAmount 2) within kMcomSearchHops event
-// hops, breadth first in edge order; the first DelayTrigger on the found path is the activation.
 std::optional<Mcom> find_mcom(const LogicGraph &p_graph, uint32_t p_model) {
 	struct Visit {
 		uint32_t node;
-		uint32_t parent; // index into visits, or none
+		uint32_t parent;
 		uint32_t depth;
 	};
 	std::vector<Visit> visits;
@@ -113,7 +107,7 @@ std::optional<Mcom> find_mcom(const LogicGraph &p_graph, uint32_t p_model) {
 		const Visit v = visits[at];
 		const gp::LogicNode &node = p_graph.nodes()[v.node];
 		if (node.type == T::MultipleTrigger && param_int(p_graph, v.node, "TriggerAmount", 0) == 2) {
-			// Walk back for the first DelayTrigger after the model.
+
 			std::vector<uint32_t> path;
 			for (uint32_t k = static_cast<uint32_t>(at); k != kNoLogicIndex; k = visits[k].parent) {
 				path.push_back(visits[k].node);
@@ -138,12 +132,10 @@ std::optional<Mcom> find_mcom(const LogicGraph &p_graph, uint32_t p_model) {
 	return std::nullopt;
 }
 
-// Park candidates of one base: SyncedBools reached from the base's OnTrigger within kParkSearchHops event hops by a
-// SetTrue, through exactly one Delay, whose Delay is 10 s (s4.md §9.1). Depth first over paths, distinct targets.
 void find_park(const LogicGraph &p_graph, uint32_t p_base, std::vector<uint32_t> &r_out) {
 	struct Frame {
 		uint32_t node;
-		int32_t port; // the port the walk leaves through (OnTrigger at the base; any later)
+		int32_t port;
 		uint32_t depth;
 		uint32_t delays;
 		bool ten_seconds;
@@ -212,7 +204,6 @@ RushSelection select_rush(const LogicGraph &p_graph) {
 	return out;
 }
 
-// The state of a native node's Enabled after the timeline entries up to and including tick p_tick.
 bool enabled_at(const std::vector<NativeTimelineEntry> &p_timeline, uint32_t p_node, bool p_initial, Tick p_tick) {
 	bool on = p_initial;
 	for (const NativeTimelineEntry &e : p_timeline) {
@@ -232,7 +223,7 @@ uint64_t percentile(std::vector<uint64_t> p_values, double p_q) {
 		return 0;
 	}
 	std::sort(p_values.begin(), p_values.end());
-	// Nearest rank: the smallest value with at least p_q of the values at or below it.
+
 	size_t at = static_cast<size_t>(std::ceil(p_q * static_cast<double>(p_values.size())));
 	at = at > 0 ? at - 1 : 0;
 	return p_values[std::min(at, p_values.size() - 1)];
@@ -248,7 +239,7 @@ void line(std::string &r_out, const char *p_format, ...) {
 	r_out += '\n';
 }
 
-} // namespace
+}
 
 LogicScriptOptions rush_mcoms_script() {
 	LogicScriptOptions o;
@@ -350,7 +341,7 @@ core::Result<LogicRunReport> run_logic_script(std::shared_ptr<const LogicGraph> 
 		absorb(*tick0);
 	}
 	std::vector<LogicEffect> effects(rt.effects().begin(), rt.effects().end());
-	// Destroy schedule: MCOM index -> tick (once per MCOM, from its first watched activation).
+
 	std::vector<Tick> destroy_at(rush.mcoms.size(), 0);
 	std::vector<bool> scheduled(rush.mcoms.size(), false);
 	const auto schedule_from_hits = [&](std::span<const LogicWatchHit> p_hits) {
@@ -455,7 +446,7 @@ LogicGateVerdict judge_rush_spawner_order(const LogicGraph &p_graph, const Logic
 	}
 	line(d, "mcoms %zu, bases %zu, rush spawners %zu (expected 8)", rush.mcoms.size(), rush.bases.size(), rush.spawners.size());
 	ok = ok && rush.spawners.size() == 8;
-	// Base falls in the order they fire (first OnTrigger of each base).
+
 	std::vector<std::pair<Tick, uint32_t>> falls;
 	for (const LogicWatchHit &h : p_report.watch_hits) {
 		if (h.kind == LogicWatchKind::EventOut && h.port == gp::logic_port::kOnTrigger &&
@@ -528,7 +519,7 @@ LogicGateVerdict judge_rush_spawner_order(const LogicGraph &p_graph, const Logic
 				}
 				closed = closed && !enabled_at(p_report.timeline, o->node, false, limit + 1);
 				if (p_report.ticks < limit + 1) {
-					closed = false; // the run is too short to show the close
+					closed = false;
 				}
 			}
 			line(d, "group %zu: %s team %lld opens %u, %s team %lld opens %u; window (%u, %u]; closed by %u: %s%s%s", g + 1,
@@ -592,8 +583,7 @@ ConquestSelection select_conquest_spawners(const LogicGraph &p_graph) {
 	ConquestSelection out;
 	const Incoming in(p_graph);
 	std::set<uint32_t> flags;
-	// The gate of a Bool / SyncedBool: SetTrue or SetFalse from a TeamFilter whose In is fed by a CapturePoint's
-	// OnCaptured; returns the CapturePoints.
+
 	const auto gate_flags = [&](uint32_t p_node, std::set<uint32_t> &r_flags) {
 		bool gated = false;
 		for (const uint32_t ei : in.events[p_node]) {
@@ -724,7 +714,7 @@ LogicGateVerdict judge_conquest_timeline(const LogicGraph &p_graph, const LogicR
 			got += on ? "1" : "0";
 			row_ok = row_ok && on == p_expected[r].enabled[k];
 		}
-		// No Enabled change in ticks 2..3,000 other than at the check ticks where the expectation changes.
+
 		size_t stray = 0;
 		for (const NativeTimelineEntry &e : p_report.timeline) {
 			if (e.node != n || e.what != NativeTimelineEntry::What::Enabled || e.tick < 2 || e.tick > 3000) {
@@ -817,4 +807,4 @@ std::string logic_census_line(const LogicCensusRow &p_row) {
 	return out;
 }
 
-} // namespace bf3::sim::logic
+}

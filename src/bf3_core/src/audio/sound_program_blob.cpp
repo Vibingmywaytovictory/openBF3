@@ -1,7 +1,3 @@
-// SoundProgram blob ("OBF3SNDP"), its validation and the cached compile (sound_program.h, design §6.2, §8).
-// validate_sound_program is the contract between the compiler and the interpreter: every index the evaluator
-// follows without a check is checked here, so a decoded (or hand-built) program that passes is safe to run.
-
 #include "bf3/core/audio/sound_program.h"
 
 #include "bf3/core/audio/sound_ports.h"
@@ -51,7 +47,6 @@ bool option_ok(SoundNodeType p_type, uint8_t p_option) {
 	}
 }
 
-// Ports/floats/plugins a node of p_type must carry (a2 types; others carry none).
 Status check_shape(const SoundProgram &p, const SoundNode &n, bool p_child, size_t p_index) {
 	const std::string where = std::string(p_child ? "child " : "node ") + std::to_string(p_index);
 	if (size_t(n.type) >= size_t(SoundNodeType::Count)) {
@@ -115,8 +110,6 @@ Status check_shape(const SoundProgram &p, const SoundNode &n, bool p_child, size
 	}
 	return Status::success();
 }
-
-// ---- writer / reader of every field ---------------------------------------------------------------------------
 
 void put_port(BlobWriter &w, const SoundPort &p) {
 	w.u16(p.reg);
@@ -211,7 +204,7 @@ bool get_vec(BlobReader &r, size_t p_min_bytes, size_t p_max, std::vector<T> &r_
 	return r.ok();
 }
 
-} // namespace
+}
 
 Status validate_sound_program(const SoundProgram &p) {
 	if (p.registers > kMaxProgramValues) {
@@ -556,8 +549,6 @@ Result<SoundProgram> decode_sound_program(std::span<const uint8_t> p_blob) {
 	return p;
 }
 
-// ---- cache (the WeaponDef two-entry scheme) -------------------------------------------------------------------
-
 namespace {
 
 std::vector<uint8_t> encode_deps(const std::vector<std::string> &p_deps) {
@@ -634,7 +625,7 @@ std::optional<CacheKey> program_key(const SoundProgramSources &p_sources, std::s
 	return make_cache_key(in);
 }
 
-} // namespace
+}
 
 Result<CachedSoundProgram> compile_sound_patch_cached(Cache *p_cache, const SoundProgramSources &p_sources, std::string_view p_patch,
 		const CompileOptions &p_options) {
@@ -722,4 +713,4 @@ Result<CachedSoundProgram> compile_sound_patch_cached(Cache *p_cache, const Soun
 	return out;
 }
 
-} // namespace bf3::core::audio
+}

@@ -1,17 +1,3 @@
-// PT1 iff: telling friend from foe (docs/design/pt1-iff.md; bf3/core/ui/nametags.h, bf3/core/gameplay/kit_appearance.h,
-// src/bf3_godot/src/iff_frame.h).
-//   suite "pt1-iff-unit"    (ctest pt1.iff.unit, data-free): the relation of a soldier to the viewer; the look-at radius;
-//                           the nametag decision for teammates and enemies at the retail style (near, far, looked at,
-//                           dead, behind, no line of sight, unknown team, hostile numbers); the minimap's relation with
-//                           the fire-reveal window; the kit-to-appearance naming rule; and iff_soldiers, IffReveal and
-//                           iff_minimap on recorded display frames (two teams of four, a shot, a death, a respawn).
-//   suite "pt1-iff-install" (ctest pt1.iff.install, 77 without an install): UINametagCompData and the soldier's
-//                           SpottingTargetComponentData read to their retail values with nothing clamped; the 8 kits of
-//                           Metro resolve to 8 distinct appearances (4 per team) through their default camo, which no
-//                           progression table gates, each linking 3p parts, assault equal to the S3 crowd's appearance;
-//                           the three partitions under seeded mutation (an error or a value, never a crash); and
-//                           install.unchanged.
-// Rows print as "IFF ROW <name> <PASS|FAIL> <detail>".
 #include <doctest/doctest.h>
 
 #include "test_support.h"
@@ -55,7 +41,6 @@ using bf3::core::Result;
 
 namespace {
 
-// A unit row passes when every check of its case held (RC / RCF record into the case's `ok`).
 #define RC(p_expr) CHECK(rc_(bool(p_expr)))
 #define RCF(p_expr) CHECK(rc_(!bool(p_expr)))
 
@@ -82,11 +67,8 @@ ui::NametagSubject subject(uint8_t p_team, float p_distance, float p_crosshair =
 	return s;
 }
 
-// ---- recorded display frames ----------------------------------------------------------------------------------------
-
 constexpr uint64_t kNs0 = 1'000'000'000ull;
 
-// A soldier as the server sends it at one tick.
 net::TimedOther sample(uint32_t p_tick, uint8_t p_slot, uint8_t p_team, float p_x, bool p_alive, bool p_firing, uint8_t p_generation = 1) {
 	net::TimedOther t;
 	t.server_tick = p_tick;
@@ -105,8 +87,6 @@ struct Recorded {
 	uint64_t now_ns = kNs0;
 };
 
-// Own slot 0 on team 1; slots 1..3 team 1, 4..7 team 2 (rows: kit = slot % 4, bots, names "bot<slot>"). The frame cl
-// publishes when tick p_tick's snapshot is the newest, rendering one tick behind it.
 void publish(Recorded &r_rec, uint32_t p_tick, const std::function<net::TimedOther(uint8_t, uint32_t)> &p_state) {
 	host::PresentationFrame &f = r_rec.frame;
 	f.valid = true;
@@ -139,7 +119,7 @@ void publish(Recorded &r_rec, uint32_t p_tick, const std::function<net::TimedOth
 	}
 }
 
-} // namespace
+}
 
 TEST_SUITE("pt1-iff-unit") {
 
@@ -149,9 +129,9 @@ TEST_CASE("the relation of a soldier to the viewer") {
 	const ui::NametagViewer us{ 1, 0 };
 	RC(ui::tag_relation(us, 1, 0) == ui::TagRelation::Friendly);
 	RC(ui::tag_relation(us, 2, 0) == ui::TagRelation::Enemy);
-	RC(ui::tag_relation(us, 0, 0) == ui::TagRelation::None); // no team yet: no tag at all
-	RC(ui::tag_relation(ui::NametagViewer{ 0, 0 }, 1, 0) == ui::TagRelation::None); // the viewer has no team
-	// Squads (none in M2b): only a shared non-zero squad is Squad.
+	RC(ui::tag_relation(us, 0, 0) == ui::TagRelation::None);
+	RC(ui::tag_relation(ui::NametagViewer{ 0, 0 }, 1, 0) == ui::TagRelation::None);
+
 	RC(ui::tag_relation(ui::NametagViewer{ 1, 3 }, 1, 3) == ui::TagRelation::Squad);
 	RC(ui::tag_relation(ui::NametagViewer{ 1, 3 }, 1, 2) == ui::TagRelation::Friendly);
 	RC(ui::tag_relation(ui::NametagViewer{ 1, 0 }, 1, 0) == ui::TagRelation::Friendly);
@@ -175,7 +155,7 @@ TEST_CASE("the look-at radius runs from MaxLookAtThreshold at 0 m to MinLookAtTh
 	RC(ui::look_at_threshold(st, -3.0f) == doctest::Approx(240.0f));
 	RC(ui::look_at_threshold(st, std::numeric_limits<float>::quiet_NaN()) == doctest::Approx(40.0f));
 	ui::NametagStyle zero = st;
-	zero.min_look_at_threshold_distance = 0.0f; // no span: the far value everywhere
+	zero.min_look_at_threshold_distance = 0.0f;
 	RC(ui::look_at_threshold(zero, 1.0f) == doctest::Approx(40.0f));
 	row("look_at_threshold", ok, fmt("%.0f / %.0f / %.0f / %.0f stage units at 0 / 25 / 50 / 500 m", ui::look_at_threshold(st, 0), ui::look_at_threshold(st, 25),
 										   ui::look_at_threshold(st, 50), ui::look_at_threshold(st, 500)));
@@ -186,28 +166,28 @@ TEST_CASE("nametags: a teammate's icon always, the name within ShowLabelRange or
 	auto rc_ = [&](bool p_c) { ok = ok && p_c; return p_c; };
 	const ui::NametagStyle st;
 	const ui::NametagViewer us{ 1, 0 };
-	// Near: icon and name.
+
 	ui::NametagDecision d = ui::decide_nametag(st, us, subject(1, 6.0f));
 	RC(d.relation == ui::TagRelation::Friendly);
 	RC(d.icon);
 	RC(d.name);
 	RCF(d.needs_line_of_sight);
-	RC(d.alpha == doctest::Approx(1.0f - 6.0f / 10000.0f)); // FadeDistance 0 .. FadeEndDistance 10000 to MaxFarFade 0: 0.9994
-	RC(d.scale == doctest::Approx(1.0f)); // MaxScaleMod 0
-	// At ShowLabelRange exactly: still named; past it, only the icon.
+	RC(d.alpha == doctest::Approx(1.0f - 6.0f / 10000.0f));
+	RC(d.scale == doctest::Approx(1.0f));
+
 	RC(ui::decide_nametag(st, us, subject(1, 15.0f)).name);
 	d = ui::decide_nametag(st, us, subject(1, 35.0f));
 	RC(d.icon);
 	RCF(d.name);
-	// Far but looked at (35 m: radius 240 - 200 x 0.7 = 100 stage units): named.
+
 	RC(ui::decide_nametag(st, us, subject(1, 35.0f, 99.0f)).name);
 	RCF(ui::decide_nametag(st, us, subject(1, 35.0f, 101.0f)).name);
-	// Through walls: a teammate never needs a ray.
+
 	RCF(ui::decide_nametag(st, us, subject(1, 35.0f, 0.0f, false)).needs_line_of_sight);
 	RC(ui::decide_nametag(st, us, subject(1, 35.0f, 0.0f, false)).name);
-	// Far away (DrawDistance 10000): still the icon.
+
 	RC(ui::decide_nametag(st, us, subject(1, 900.0f)).icon);
-	// Dead, behind the camera, past DrawDistance: nothing.
+
 	ui::NametagSubject dead = subject(1, 6.0f);
 	dead.alive = false;
 	RCF(ui::decide_nametag(st, us, dead).icon);
@@ -232,14 +212,14 @@ TEST_CASE("nametags: an enemy shows nothing but its name while looked at in plai
 		const ui::NametagDecision hidden = ui::decide_nametag(st, us, subject(2, dist, 0.0f, false));
 		RCF(hidden.icon);
 		RCF(hidden.name);
-		RC(hidden.needs_line_of_sight); // the caller casts a ray then
+		RC(hidden.needs_line_of_sight);
 		const ui::NametagDecision seen = ui::decide_nametag(st, us, subject(2, dist, 0.0f, true));
 		RCF(seen.icon);
 		RC(seen.name);
 	}
-	// A clear ray alone is not enough: the crosshair must be on it.
+
 	RCF(ui::decide_nametag(st, us, subject(2, 35.0f, 150.0f, true)).name);
-	// Team 0 (no team yet): never tagged, never a ray.
+
 	const ui::NametagDecision unknown = ui::decide_nametag(st, us, subject(0, 6.0f, 0.0f, true));
 	RC(unknown.relation == ui::TagRelation::None);
 	RCF(unknown.icon);
@@ -260,9 +240,9 @@ TEST_CASE("nametags: hostile numbers never tag and never trap") {
 		RCF(d.icon);
 		RCF(d.name);
 	}
-	// A NaN crosshair distance is "not looked at".
+
 	RCF(ui::decide_nametag(st, us, subject(2, 6.0f, nan, true)).name);
-	// Degenerate styles: alpha and scale stay inside [0, 1].
+
 	st.fade_distance = 10.0f;
 	st.fade_end_distance = 10.0f;
 	st.max_far_fade = 0.25f;
@@ -308,7 +288,7 @@ TEST_CASE("the kit's appearance by name") {
 		{ "gameplay/kits/ruengineer", "persistence/unlocks/soldiers/visual/mp/ru/mp_ru_engi_appearance01", true },
 		{ "gameplay/kits/rusupport", "persistence/unlocks/soldiers/visual/mp/ru/mp_ru_support_appearance01", true },
 		{ "Gameplay/Kits/RURecon", "Persistence/Unlocks/Soldiers/Visual/MP/RU/MP_RU_Recon_Appearance02", true },
-		// Another faction, another role, malformed names.
+
 		{ "gameplay/kits/usassault", "persistence/unlocks/soldiers/visual/mp/ru/mp_ru_assault_appearance01", false },
 		{ "gameplay/kits/usassault", "persistence/unlocks/soldiers/visual/mp/us/mp_us_engi_appearance01", false },
 		{ "gameplay/kits/usengineer", "persistence/unlocks/soldiers/visual/mp/us/mp_us_assault_appearance01", false },
@@ -332,8 +312,7 @@ TEST_CASE("recorded frames: teams, kits and names per soldier; the fire reveal; 
 	bool ok = true;
 	auto rc_ = [&](bool p_c) { ok = ok && p_c; return p_c; };
 	Recorded rec;
-	// Ticks 100..: slot 5 (team 2) fires at tick 110 (one sample), slot 6 dies at tick 120 and respawns at 130 with a
-	// new generation; slot 7's samples carry no team (an older server), so the player row gives it.
+
 	auto state = [](uint8_t p_slot, uint32_t p_tick) {
 		const uint8_t team = p_slot == 7 ? uint8_t(0) : (p_slot < 4 ? uint8_t(1) : uint8_t(2));
 		const bool firing = p_slot == 5 && p_tick == 110;
@@ -355,7 +334,7 @@ TEST_CASE("recorded frames: teams, kits and names per soldier; the fire reveal; 
 	for (uint32_t tick = 100; tick <= 140; ++tick) {
 		rec.now_ns = kNs0 + uint64_t(tick - 100) * 33'333'333ull;
 		publish(rec, tick, state);
-		const uint64_t draw_ns = rec.now_ns + 4'166'667ull; // a quarter tick after the publish: render time = tick - 0.75
+		const uint64_t draw_ns = rec.now_ns + 4'166'667ull;
 		const size_t n = gs::iff_soldiers(rec.frame, draw_ns, soldiers);
 		REQUIRE(rc_(n == 7));
 		const double now_s = double(draw_ns) * 1e-9;
@@ -366,29 +345,29 @@ TEST_CASE("recorded frames: teams, kits and names per soldier; the fire reveal; 
 		RC(m == c.friendly + c.enemy + c.squad);
 		for (size_t i = 0; i < n; ++i) {
 			const gs::IffSoldier &s = soldiers[i];
-			RC(s.team == (s.slot < 4 ? 1 : 2)); // slot 7: from the row
+			RC(s.team == (s.slot < 4 ? 1 : 2));
 			RC(s.kit == s.slot % 4);
 			RC(s.bot);
 			RC(s.name == "bot" + std::to_string(s.slot));
 			RC(s.squad == 0);
 		}
-		// Every drawn entry is a teammate or a revealed enemy; a team-1 soldier is never drawn as an enemy.
+
 		for (size_t i = 0; i < m; ++i) {
 			RC((mm[i].slot < 4) == (mm[i].relation == ui::TagRelation::Friendly));
 		}
 		log.push_back({ tick, c.friendly, c.enemy, c.hidden_enemies, reveal.revealed_until(5) });
-		// The M1 loop (minimap_hud.cpp before PT1) drew every other soldier as an enemy.
+
 		m1_red += n;
 		for (size_t i = 0; i < n; ++i) {
 			m1_red_teammates += soldiers[i].team == viewer.team ? 1 : 0;
 		}
 		drawn_total += m;
 	}
-	// Teammates: slots 1..3 every frame.
+
 	for (const Seen &s : log) {
 		RC(s.friendly == 3);
 	}
-	// The enemy fired at tick 110 (drawn from render time 110 on): revealed for 3.15 s = ~94 ticks, so through tick 140.
+
 	size_t revealed_frames = 0;
 	for (const Seen &s : log) {
 		if (s.tick < 111) {
@@ -397,8 +376,8 @@ TEST_CASE("recorded frames: teams, kits and names per soldier; the fire reveal; 
 		revealed_frames += s.enemy;
 	}
 	RC(reveal.reveals() == 1);
-	RC(revealed_frames == 30); // ticks 111..140 render tick 110 on
-	// Slot 6 dead (ticks 120..129 at render time): not hidden, not drawn; hidden enemies drop from 3 to 2 then.
+	RC(revealed_frames == 30);
+
 	size_t dead_frames = 0;
 	for (const Seen &s : log) {
 		dead_frames += (s.hidden + s.enemy) == 3 ? 1 : 0;
@@ -408,7 +387,6 @@ TEST_CASE("recorded frames: teams, kits and names per soldier; the fire reveal; 
 	row("frames.reveal", ok,
 			"1 shot -> " + std::to_string(revealed_frames) + " frames revealed (3.15 s at 30 Hz, clipped by the run); teammates 3 every frame; dead slot 6 drawn in no frame");
 
-	// The M1 rule drew every other soldier as an enemy: 7 per frame, 3 of them teammates.
 	RC(m1_red == 41 * 7);
 	RC(m1_red_teammates == 41 * 3);
 	RC(drawn_total == 41 * 3 + revealed_frames);
@@ -416,7 +394,6 @@ TEST_CASE("recorded frames: teams, kits and names per soldier; the fire reveal; 
 			"41 frames: the M1 loop drew " + std::to_string(m1_red) + " enemy arrows (" + std::to_string(m1_red_teammates) + " of them teammates); now " +
 					std::to_string(drawn_total - revealed_frames) + " friendly + " + std::to_string(revealed_frames) + " revealed-enemy arrows, 0 teammates as enemies");
 
-	// Hostile frames: invalid, counts past the arrays, teams 3, kits 9, a name length past the buffer.
 	host::PresentationFrame bad = rec.frame;
 	bad.player_count = 255;
 	bad.players[2].team = 3;
@@ -438,9 +415,7 @@ TEST_CASE("recorded frames: teams, kits and names per soldier; the fire reveal; 
 	row("frames.hostile", ok, "player_count 255, team 3, kit 9, name_bytes 255: clamped; invalid frame and empty output: 0 soldiers; NaN reveal: 0 s");
 }
 
-} // TEST_SUITE
-
-// ---- install ---------------------------------------------------------------------------------------------------------
+}
 
 namespace {
 
@@ -472,7 +447,6 @@ const EbxLibrary *metro() {
 
 using Bytes = std::vector<uint8_t>;
 
-// The same mutation mix as ui_fuzz_tests.cpp (headers, payload values, NaN floats, truncation).
 void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng) {
 	if (r_bytes.empty()) {
 		return;
@@ -555,7 +529,7 @@ std::string tally_text(const std::string &p_what, const Tally &p_t) {
 	return p_what + " " + std::to_string(p_t.mutants) + " mutants, " + std::to_string(p_t.parsed) + " parsed, " + std::to_string(p_t.read_ok) + " read";
 }
 
-} // namespace
+}
 
 TEST_SUITE("pt1-iff-install") {
 
@@ -605,7 +579,7 @@ TEST_CASE("UINametagCompData and the soldier's spotting rules read to their reta
 	row("data.spotting", sp->from_data && sp->clamped == 0,
 			fmt("ActiveSpottedTime %.2f, PassiveSpottedTime %.2f, SpotOnFireMultiplier %.2f -> fire reveal %.2f s", sp->active_spotted_time, sp->passive_spotted_time,
 					sp->spot_on_fire_multiplier, sp->fire_reveal_seconds()));
-	// A partition of another type fails with an error.
+
 	CHECK_FALSE(ui::read_nametag_style(*lib, nullptr, ui::kSoldierBlueprintPartition).ok());
 	CHECK_FALSE(ui::read_spotting_rules(*lib, nullptr, "gameplay/teams/us").ok());
 	CHECK_FALSE(ui::read_nametag_style(*lib, nullptr, "no/such/partition").ok());
@@ -637,7 +611,7 @@ TEST_CASE("the 8 kits wear 8 distinct appearances through their default camo") {
 			const gp::UnlockGate gate = prog->gate(ka->visual_unlock_guid);
 			ungated += gate == gp::UnlockGate::Free ? 1 : 0;
 			CHECK_MESSAGE(gate == gp::UnlockGate::Free, ka->visual_unlock, " gated by ", gp::unlock_gate_name(gate));
-			// The appearance links part unlocks, each linking something.
+
 			const EbxPartition *app = lib->partition_by_name(ka->appearance);
 			REQUIRE(app != nullptr);
 			const auto parts = lib->follow_all(app->primary().data(), "LinkedTo");
@@ -663,7 +637,7 @@ TEST_CASE("the 8 kits wear 8 distinct appearances through their default camo") {
 	CHECK(assault[1] == spec.teams[1].appearance);
 	row("data.kit_appearances", appearances.size() == 8 && ungated == 8 && with_parts == 8,
 			std::to_string(appearances.size()) + " distinct, camo ungated " + std::to_string(ungated) + "/8, assault = S3 default:" + list);
-	// Not a kit: an error.
+
 	CHECK_FALSE(gp::read_kit_appearance(*lib, "gameplay/teams/us").ok());
 	CHECK_FALSE(gp::read_kit_appearance(*lib, "no/such/kit").ok());
 }
@@ -674,7 +648,7 @@ TEST_CASE("the crowd's soldier assets: every kit wears its own parts, team by te
 		return;
 	}
 	bf3::render::SoldierSpec spec;
-	spec.teams[0].team_data = "gameplay/teams/us"; // as game_crowd.cpp [kits] sets it
+	spec.teams[0].team_data = "gameplay/teams/us";
 	spec.teams[1].team_data = "gameplay/teams/ru";
 	const auto t0 = std::chrono::steady_clock::now();
 	Result<std::unique_ptr<bf3::render::SoldierAssets>> assets = bf3::render::load_soldier_assets(f->reader, spec, nullptr, nullptr);
@@ -741,4 +715,4 @@ TEST_CASE("install.unchanged") {
 	t2::check_install_unchanged();
 }
 
-} // TEST_SUITE
+}

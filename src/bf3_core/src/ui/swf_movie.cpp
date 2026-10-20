@@ -1,6 +1,3 @@
-// SwfMovie symbol-table reader (bf3/core/ui/swf_movie.h; docs/design/ui-swf-fonts.md §5.1, §9). Clean-room from the
-// public SWF file format specification (v19) and the GFx tag layouts measured on the retail install. Inflate:
-// libdeflate (MIT), as payload.cpp.
 #include "bf3/core/ui/swf_movie.h"
 
 #include "swf_bits.h"
@@ -37,7 +34,7 @@ size_t vec_bytes(const std::vector<T> &p_v) {
 	return p_v.capacity() * sizeof(T);
 }
 size_t str_bytes(const std::string &p_s) {
-	return p_s.capacity() > 15 ? p_s.capacity() + 1 : 0; // beyond the small-string buffer
+	return p_s.capacity() > 15 ? p_s.capacity() + 1 : 0;
 }
 
 class Parser {
@@ -351,47 +348,44 @@ private:
 						e.blend_mode = r.u8();
 					}
 				}
-				// Bitmap cache, visibility and clip actions follow inside the tag's length: skipped.
+
 				break;
 			}
 		}
 		if (r.failed()) {
-			return Status::success(); // reported by tag() as a truncated tag
+			return Status::success();
 		}
 		r_tl.events.push_back(std::move(e));
 		return Status::success();
 	}
 
-	// PlaceObject3 FILTERLIST: fixed-size filters, the gradient ones by their colour count, convolution by its
-	// matrix. An unknown filter id leaves the reader where it is (failed), so the blend mode is not read.
 	void skip_filters(SwfReader &r) {
 		const uint8_t n = r.u8();
 		for (unsigned i = 0; i < n && !r.failed(); ++i) {
 			const uint8_t id = r.u8();
 			switch (id) {
-				case 0: r.skip(23); break; // drop shadow
-				case 1: r.skip(9); break; // blur
-				case 2: r.skip(15); break; // glow
-				case 3: r.skip(27); break; // bevel
+				case 0: r.skip(23); break;
+				case 1: r.skip(9); break;
+				case 2: r.skip(15); break;
+				case 3: r.skip(27); break;
 				case 4:
-				case 7: { // gradient glow / bevel
+				case 7: {
 					const uint8_t colours = r.u8();
 					r.skip(size_t(colours) * 5 + 19);
 					break;
 				}
-				case 5: { // convolution
+				case 5: {
 					const uint8_t mx = r.u8();
 					const uint8_t my = r.u8();
 					r.skip(8 + size_t(mx) * my * 4 + 5);
 					break;
 				}
-				case 6: r.skip(80); break; // colour matrix
+				case 6: r.skip(80); break;
 				default: r.fail(); break;
 			}
 		}
 	}
 
-	// FILLSTYLEARRAY / LINESTYLEARRAY: count x minimum record size checked against the bytes left first.
 	Status fill_styles(SwfReader &r, int p_version, SwfShape &r_shape) {
 		size_t n = r.u8();
 		if (n == 0xff && p_version >= 2) {
@@ -444,14 +438,14 @@ private:
 		BF3_TRY(charge(n, r.abs_pos()));
 		r_shape.line_styles += uint32_t(n);
 		for (size_t i = 0; i < n && !r.failed(); ++i) {
-			r.skip(2); // width
+			r.skip(2);
 			if (p_version == 4) {
-				r.ub(2); // start cap
+				r.ub(2);
 				const uint32_t join = r.ub(2);
 				const uint32_t has_fill = r.ub(1);
-				r.ub(11); // no h/v scale, pixel hinting, reserved, no close, end cap
+				r.ub(11);
 				if (join == 2) {
-					r.skip(2); // miter limit
+					r.skip(2);
 				}
 				if (has_fill != 0) {
 					fill_style(r, p_version, r_shape);
@@ -471,8 +465,8 @@ private:
 		s.id = r.u16();
 		s.bounds = r.rect();
 		if (p_version == 4) {
-			(void)r.rect(); // edge bounds
-			r.skip(1); // flags
+			(void)r.rect();
+			r.skip(1);
 		}
 		BF3_TRY(fill_styles(r, p_version, s));
 		BF3_TRY(line_styles(r, p_version, s));
@@ -604,7 +598,7 @@ private:
 		info.id = outlines.id;
 		info.tag_code = p_code;
 		info.name = std::move(outlines.name);
-		info.flags = data[2]; // read_font_tag succeeded, so the header is there
+		info.flags = data[2];
 		info.language = outlines.language;
 		info.glyph_count = uint16_t(outlines.codes.size());
 		info.kind = outlines.kind;
@@ -641,7 +635,7 @@ private:
 		BF3_TRY(charge_text(url, r.abs_pos()));
 		im.url = std::string(url);
 		if (im.tag_version == 2) {
-			r.skip(2); // reserved: 1, 0
+			r.skip(2);
 		}
 		const size_t n = r.u16();
 		if (r.failed() || n * 3 > r.left()) {
@@ -784,7 +778,7 @@ auto find_by_id(const V &p_v, uint16_t p_id) -> decltype(&p_v.front()) {
 	return (it != p_v.end() && it->id == p_id) ? &*it : nullptr;
 }
 
-} // namespace
+}
 
 const char *swf_tag_name(uint16_t p_code) {
 	switch (p_code) {
@@ -1003,4 +997,4 @@ uint32_t SwfMovie::tag_count(uint16_t p_code) const {
 	return (it != tag_counts.end() && it->code == p_code) ? it->count : 0;
 }
 
-} // namespace bf3::core::ui
+}

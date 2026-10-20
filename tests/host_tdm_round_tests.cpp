@@ -1,23 +1,3 @@
-// M2b bb (docs/design/m2b.md §1 E1, E2, E6, E8, §5, §11; docs/design/m2b-bb.md): the TDM bots' rows in test_host_tdm
-// (one executable with ru's host_tdm_server_tests.cpp, so every row loads the shared level once per process). Suites,
-// one ctest row each:
-//   host-tdm-bots-unit  host.tdm.bots.unit (functional, data-free, < 2 s): perception (FOV, range, walls, detection
-//                       time, forgetting, hearing, the stagger), the aim model (the cone, lead, drop, hostile inputs),
-//                       config/bot_tuning.cfg (the shipped file is the defaults; hostile files fail), one brain against a
-//                       fake ServerView (m2b_fake: the pre-round idle, detection through the open and not through a wall,
-//                       turning onto a target) and add_tdm_bots on the synthetic floor without rules.
-//   host-tdm-round      host.tdm.round (E1): one scripted peer + 31 bots, Metro TDM through the interpreter to 100 kills,
-//                       the peer's MatchState agrees, the 60 s round end, the restart in place with both counts 0.
-//   host-tdm-bots       host.tdm.bots (E2): 32 bots, seeds 1-3 to 50 kills in parallel_map: every round ends, the pooled
-//                       team K/D in [0.75, 1.33], no detection without a clear ray, no aimed shot at a stale target, no
-//                       stuck bot, no scored spawn with an enemy within 10 m, at least one revive.
-//   host-tdm-replay     host.tdm.replay (E6): two runs of one seed (32 bots + the peer, kill limit 20, RoundOver + 600
-//                       ticks) are equal tick for tick (world hash, logic trace, MatchState / PlayerList bytes); a third
-//                       seed differs.
-//   host-tdm-perf       host.tdm.perf (E8, timing, the wave-1 merge pass only): 64 bots, 120 s: perception <= 0.2 ms,
-//                       brains <= 1.5 ms, server tick <= 4 ms at p99 (report only under asan).
-// The install rows need ru's run_tdm and nt's codecs (kRuNtLanded below, true since the w1 merge); they skip (exit 77)
-// only without an install. Every install suite ends with the install-unchanged check.
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/logic_graph.h"
@@ -53,8 +33,6 @@ namespace sb = bf3::sim::bots;
 
 namespace {
 
-// ru's run_tdm / load_tdm_level_once bodies and nt's v3 codecs (the peer decodes MatchState): true since m2b/w1 (nt,
-// ru) was merged into this branch.
 constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
@@ -64,8 +42,6 @@ void pending_skip(const char *p_row) {
 	bf3::test::skip_install_case("PENDING (ru, nt)");
 }
 
-// ---- a small world ----------------------------------------------------------------------------------------------
-
 void quad(std::vector<sim::StaticTriangle> &r_out, const sim::Vec3 &p_a, const sim::Vec3 &p_b, const sim::Vec3 &p_c, const sim::Vec3 &p_d) {
 	sim::StaticTriangle t;
 	t.v = { p_a, p_b, p_c };
@@ -74,7 +50,6 @@ void quad(std::vector<sim::StaticTriangle> &r_out, const sim::Vec3 &p_a, const s
 	r_out.push_back(t);
 }
 
-// A 200 m floor at y = 0 and a wall 4 m high across x = -5 .. 5 at z = 10 (both faces).
 std::unique_ptr<sim::CollisionWorld> wall_world() {
 	std::vector<sim::StaticTriangle> t;
 	for (float x = -100.0f; x < 100.0f; x += 10.0f) {
@@ -91,8 +66,6 @@ std::unique_ptr<sim::CollisionWorld> wall_world() {
 	return std::move(*world);
 }
 
-// The floor and a low wall 1.45 m high across x = -5 .. 5 at z = 18: an eye at 1.6 m at the origin sees the head
-// (1.6 m) of a soldier at (0, 0, 20) over it, not the chest (1.3 m).
 std::unique_ptr<sim::CollisionWorld> low_wall_world() {
 	std::vector<sim::StaticTriangle> t;
 	quad(t, { -100, 0, -100 }, { -100, 0, 100 }, { 100, 0, 100 }, { 100, 0, -100 });
@@ -116,9 +89,7 @@ sim::SoldierState soldier_at(const sim::Vec3 &p_feet, float p_yaw = 0.0f) {
 	return s;
 }
 
-} // namespace
-
-// ---- m2b_fake: a ServerView with the rules' parts as plain fields (the brains read only the ServerView) ----------
+}
 
 namespace m2b_fake {
 
@@ -156,18 +127,18 @@ struct Recorder final : host::TdmBotObserver {
 	void activity(sim::Tick, uint8_t, host::TdmBotActivity p_activity) override { activities.push_back(p_activity); }
 };
 
-} // namespace m2b_fake
+}
 
 TEST_SUITE("host-tdm-bots-unit") {
 	TEST_CASE("perception: FOV, range, walls, detection time, forgetting, the stagger") {
 		const std::unique_ptr<sim::CollisionWorld> world = wall_world();
-		sb::PerceptionParams params; // §5.1 defaults
+		sb::PerceptionParams params;
 		CHECK(sb::detection_time(params, 10.0f) == doctest::Approx(0.2f));
 		CHECK(sb::detection_time(params, 100.0f) == doctest::Approx(1.5f));
 		CHECK(sb::detection_time(params, 55.0f) == doctest::Approx(0.85f));
 		CHECK(sb::detection_time(params, 1.0f) == doctest::Approx(0.2f));
 		CHECK(sb::detection_time(params, 500.0f) == doctest::Approx(1.5f));
-		// The stagger: each slot once per update_ticks, 1/6 of the slots per tick.
+
 		uint32_t hits = 0;
 		for (sim::Tick t = 0; t < 60; ++t) {
 			for (uint8_t s = 0; s < 12; ++s) {
@@ -178,9 +149,6 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(sb::perception_tick(5, 1, 6));
 		CHECK_FALSE(sb::perception_tick(5, 2, 6));
 
-		// Self at the origin looking down +Z. Enemies: 1 in the open at (20, 0, 20) (45 deg off the view: in the 160 deg
-		// FOV), 2 behind the wall at (0, 0, 20), 3 behind the bot at (0, 0, -20), 4 out of range at (8, 0, 130); 5 is a
-		// teammate in the open.
 		std::vector<sim::SoldierState> states(6);
 		std::vector<uint8_t> teams{ 1, 2, 2, 2, 2, 1 };
 		std::vector<uint8_t> alive(6, 1);
@@ -202,8 +170,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		in.alive = alive;
 		in.firing = firing;
 		in.world = world.get();
-		// Distance to 1's chest is about 28.3 m: detection time 0.2 + 1.3 (18.3 / 90) = 0.464 s; each update adds
-		// 0.1 / 0.464 = 0.215 (standing still, not firing), so it detects on the 5th update.
+
 		int detected_at = -1;
 		uint32_t rays = 0;
 		for (int u = 0; u < 8; ++u) {
@@ -219,12 +186,12 @@ TEST_SUITE("host-tdm-bots-unit") {
 			}
 		}
 		CHECK(detected_at == 4);
-		CHECK(p.find(2) == nullptr); // behind the wall: never visible
-		CHECK(p.find(3) == nullptr); // behind the bot: outside the FOV
-		CHECK(p.find(4) == nullptr); // out of range
-		CHECK(p.find(5) == nullptr); // a teammate
+		CHECK(p.find(2) == nullptr);
+		CHECK(p.find(3) == nullptr);
+		CHECK(p.find(4) == nullptr);
+		CHECK(p.find(5) == nullptr);
 		CHECK(rays <= 8u * 2u * params.max_candidates);
-		// Moving and firing triple the rate: a fresh perception detects 1 on the 2nd update.
+
 		states[1].velocity = { 3.0f, 0.0f, 0.0f };
 		firing[1] = 1;
 		sb::Perception fast(params);
@@ -234,7 +201,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		in.tick = 12;
 		fast.update(in);
 		CHECK(fast.find(1)->detected);
-		// Forgetting: 1 hides behind the wall; it stays known (not visible) for forget_s, then it is gone.
+
 		states[1].position = { 0, 0, 25 };
 		const sim::Tick seen = p.find(1)->last_visible;
 		in.tick = seen + 6;
@@ -248,7 +215,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		in.tick = seen + 186;
 		p.update(in);
 		CHECK(p.find(1) == nullptr);
-		// A dead enemy is dropped at once.
+
 		states[1].position = { 20, 0, 20 };
 		in.tick += 6;
 		p.update(in);
@@ -257,13 +224,13 @@ TEST_SUITE("host-tdm-bots-unit") {
 		in.tick += 6;
 		p.update(in);
 		CHECK(p.find(1) == nullptr);
-		// A max_candidates cap: 10 enemies in the open, at most 2 x 4 rays per update.
+
 		std::vector<sim::SoldierState> many(11);
 		std::vector<uint8_t> many_teams(11, 2);
 		many_teams[0] = 1;
 		many[0] = soldier_at({ 0, 0, 0 });
 		for (int i = 1; i <= 10; ++i) {
-			many[size_t(i)] = soldier_at({ 24.0f + 4.0f * float(i), 0, 40 }); // right of the wall's shadow
+			many[size_t(i)] = soldier_at({ 24.0f + 4.0f * float(i), 0, 40 });
 		}
 		sb::PerceptionInput m = in;
 		m.states = many;
@@ -272,7 +239,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		m.firing = {};
 		sb::Perception pm(params);
 		m.tick = 6;
-		CHECK(pm.update(m) == 4u); // the chest rays are clear: one ray each for the 4 nearest
+		CHECK(pm.update(m) == 4u);
 		CHECK(pm.find(1)->chest_visible);
 		CHECK(pm.enemies().size() == 4u);
 		CHECK(pm.find(1) != nullptr);
@@ -286,8 +253,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		std::vector<sim::SoldierState> states(3);
 		const std::vector<uint8_t> teams{ 1, 2, 2 };
 		states[0] = soldier_at({ 0, 0, 0 });
-		states[1] = soldier_at({ 0, 0, 20 }); // behind the low wall: the head shows
-		states[2] = soldier_at({ 15, 0, 20 }); // in the open
+		states[1] = soldier_at({ 0, 0, 20 });
+		states[2] = soldier_at({ 15, 0, 20 });
 		sb::Perception p(params);
 		sb::PerceptionInput in;
 		in.self = 0;
@@ -298,7 +265,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		in.teams = teams;
 		in.world = world.get();
 		in.tick = 6;
-		CHECK(p.update(in) == 3u); // 2 is clear on the chest ray; 1 needs the head ray too
+		CHECK(p.update(in) == 3u);
 		const sb::PerceivedEnemy *e1 = p.find(1);
 		const sb::PerceivedEnemy *e2 = p.find(2);
 		REQUIRE(e1 != nullptr);
@@ -314,8 +281,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		std::vector<sim::SoldierState> states(3);
 		std::vector<uint8_t> teams{ 1, 2, 2 };
 		states[0] = soldier_at({ 0, 0, 0 });
-		states[1] = soldier_at({ 0, 0, -40 }); // behind: outside the FOV, inside the hearing radius
-		states[2] = soldier_at({ 0, 0, -90 }); // behind and too far to hear
+		states[1] = soldier_at({ 0, 0, -40 });
+		states[2] = soldier_at({ 0, 0, -90 });
 		std::vector<sb::HeardShot> shots{ { 1, { 0, 1.5f, -40 }, 10 }, { 2, { 0, 1.5f, -90 }, 10 }, { 1, { 0, 1.5f, -40 }, 1 } };
 		sb::Perception p(params);
 		sb::PerceptionInput in;
@@ -327,7 +294,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		in.teams = teams;
 		in.shots = shots;
 		in.seed = 7;
-		CHECK(p.update(in) == 0u); // no world: no rays; nothing in the FOV
+		CHECK(p.update(in) == 0u);
 		const sb::PerceivedEnemy *e = p.find(1);
 		REQUIRE(e != nullptr);
 		CHECK(e->heard);
@@ -338,11 +305,11 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(err <= params.hearing_error_m + 1e-3f);
 		CHECK(p.find(2) == nullptr);
 		CHECK(p.heard_last() == 1u);
-		// The same input gives the same estimate (seeded).
+
 		sb::Perception q(params);
 		q.update(in);
 		CHECK(q.find(1)->last_position == e->last_position);
-		// Hostile: NaN positions and out-of-range slots are skipped, the self slot too.
+
 		states[1].position = { NAN, 0, 0 };
 		std::vector<sb::HeardShot> bad{ { 1, { NAN, 0, 0 }, 12 }, { 200, { 0, 0, 1 }, 12 }, { 0, { 0, 0, 1 }, 12 } };
 		in.shots = bad;
@@ -352,17 +319,17 @@ TEST_SUITE("host-tdm-bots-unit") {
 	}
 
 	TEST_CASE("aim model: the error cone, lead and drop, hostile inputs") {
-		const sb::AimParams a; // §5.3 at skill 0.5
+		const sb::AimParams a;
 		CHECK(sb::aim_error(a, 0.5f, 0.0f, false, 0.0f) == doctest::Approx(3.0f));
 		CHECK(sb::aim_error(a, 0.5f, 100.0f, false, 0.0f) == doctest::Approx(0.5f));
 		CHECK(sb::aim_error(a, 0.5f, 0.6f, false, 0.0f) == doctest::Approx(0.5f + 2.5f * std::exp(-1.0f)));
 		CHECK(sb::aim_error(a, 0.5f, 100.0f, true, 0.0f) == doctest::Approx(2.0f));
 		CHECK(sb::aim_error(a, 0.5f, 100.0f, false, 4.0f) == doctest::Approx(2.5f));
-		CHECK(sb::aim_error(a, 0.3f, 0.0f, false, 0.0f) == doctest::Approx(4.2f)); // k = 1.4
-		CHECK(sb::aim_error(a, 0.8f, 0.0f, false, 0.0f) == doctest::Approx(1.2f)); // k = 0.4
+		CHECK(sb::aim_error(a, 0.3f, 0.0f, false, 0.0f) == doctest::Approx(4.2f));
+		CHECK(sb::aim_error(a, 0.8f, 0.0f, false, 0.0f) == doctest::Approx(1.2f));
 		CHECK(sb::aim_error(a, 0.3f, 1.0f, false, 0.0f) > sb::aim_error(a, 0.8f, 1.0f, false, 0.0f));
 		CHECK(sb::aim_error(a, 0.5f, 0.2f, false, 0.0f) > sb::aim_error(a, 0.5f, 0.8f, false, 0.0f));
-		// Hostile: NaN / negative inputs read as 0 or the default, the cone stays in [0, 45].
+
 		CHECK(sb::aim_error(a, NAN, NAN, false, NAN) == doctest::Approx(3.0f));
 		CHECK(sb::aim_error(a, 0.5f, -5.0f, false, -2.0f) == doctest::Approx(4.0f));
 		CHECK(sb::aim_error(a, 0.5f, 0.0f, true, 1e30f) == doctest::Approx(45.0f));
@@ -373,21 +340,20 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(std::isfinite(s));
 		CHECK(s >= 0.0f);
 
-		// Lead: a target 100 m ahead crossing at 5 m/s with a 500 m/s bullet: 0.2 s of flight, 1 m of lead.
 		const sim::Vec3 o{ 0, 1.6f, 0 }, t{ 0, 1.6f, 100 }, v{ 5, 0, 0 };
 		const sim::Vec3 l = sb::lead_point(o, t, v, 500.0f, 0.0f);
 		CHECK(l[0] == doctest::Approx(1.0f).epsilon(0.01));
 		CHECK(l[2] == doctest::Approx(100.0f));
-		// Drop: -9.81 m/s^2 over 0.2 s raises the aim by 0.196 m.
+
 		const sim::Vec3 d = sb::lead_point(o, t, {}, 500.0f, -9.81f);
 		CHECK(d[1] - t[1] == doctest::Approx(0.5f * 9.81f * 0.04f).epsilon(0.01));
-		// Instant hit and hostile inputs: the target itself.
+
 		CHECK(sb::lead_point(o, t, v, 0.0f, -9.81f) == t);
 		CHECK(sb::lead_point(o, t, v, NAN, -9.81f) == t);
 		CHECK(sb::lead_point({ NAN, 0, 0 }, t, v, 500.0f, 0.0f) == t);
 		const sim::Vec3 nv = sb::lead_point(o, t, { NAN, 0, 0 }, 500.0f, 0.0f);
 		CHECK(nv == t);
-		const sim::Vec3 far = sb::lead_point(o, { 0, 0, 1e6f }, v, 1.0f, -9.81f); // flight capped at 5 s
+		const sim::Vec3 far = sb::lead_point(o, { 0, 0, 1e6f }, v, 1.0f, -9.81f);
 		CHECK(std::isfinite(far[1]));
 		CHECK(far[0] == doctest::Approx(25.0f));
 	}
@@ -402,7 +368,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		const core::Status st = host::parse_bot_tuning(ss.str(), parsed);
 		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 		const host::TdmBotConfig def;
-		CHECK(parsed.count == 7); // not in the file: kept
+		CHECK(parsed.count == 7);
 		CHECK(parsed.skill_min == def.skill_min);
 		CHECK(parsed.skill_max == def.skill_max);
 		CHECK(parsed.reaction_min_s == def.reaction_min_s);
@@ -418,13 +384,13 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(parsed.aim.skill_scale == def.aim.skill_scale);
 		CHECK(parsed.revive_radius_m == def.revive_radius_m);
 		CHECK(parsed.regen_until_hp == def.regen_until_hp);
-		// A value changes only its field.
+
 		host::TdmBotConfig one;
 		REQUIRE(host::parse_bot_tuning("# c\n  aim.e0_deg = 2.5 # trailing\n\nperception.update_ticks=3\n", one).ok());
 		CHECK(one.aim.e0_deg == doctest::Approx(2.5f));
 		CHECK(one.perception.update_ticks == 3);
 		CHECK(one.aim.e_inf_deg == def.aim.e_inf_deg);
-		// Hostile files fail and leave the config as it was.
+
 		for (const char *bad : { "nope = 1\n", "skill_min = nan\n", "skill_min = 2\n", "skill_min\n", "skill_min = 1x\n", "perception.update_ticks = 0\n",
 					 "aim.tau_s = 1e40\n", "count = 65\n", "= 3\n" }) {
 			host::TdmBotConfig c;
@@ -446,8 +412,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		view.teams = { 1, 2, 2, 1 };
 		view.kits = { 0, 1, 2, 3 };
 		view.slots[0] = soldier_at({ 0, 0, 0 }, 0.0f);
-		view.slots[1] = soldier_at({ 0, 0, 25 }); // behind the wall
-		view.slots[2] = soldier_at({ 30, 0, 30 }); // in the open, 45 deg to the right of the view
+		view.slots[1] = soldier_at({ 0, 0, 25 });
+		view.slots[2] = soldier_at({ 30, 0, 30 });
 		view.slots[3] = soldier_at({ -3, 0, -3 });
 		auto rec = std::make_shared<m2b_fake::Recorder>();
 		auto cfg = std::make_shared<host::TdmBotConfig>();
@@ -459,10 +425,10 @@ TEST_SUITE("host-tdm-bots-unit") {
 		h.rules = true;
 		core::Result<std::shared_ptr<host::TdmShared>> shared = host::make_tdm_shared(h, cfg);
 		REQUIRE(shared.ok());
-		CHECK(cfg->stats->walk_unavailable.load() == 1u); // no BotLevel: no walking
+		CHECK(cfg->stats->walk_unavailable.load() == 1u);
 		host::TdmBrain brain(*shared, 0);
 		brain.set_slot(0);
-		// Pre-round: idle commands only.
+
 		view.restricted = true;
 		view.phase_ = net::MatchPhase::PreRound;
 		for (sim::Tick t = 1; t <= 30; ++t) {
@@ -475,7 +441,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		}
 		CHECK(rec->activities.back() == host::TdmBotActivity::Restricted);
 		CHECK(rec->detected_pairs.empty());
-		// In round: the bot detects 2 (open), never 1 (wall), and turns its view onto 2.
+
 		view.restricted = false;
 		view.phase_ = net::MatchPhase::InRound;
 		float yaw = 0.0f;
@@ -483,7 +449,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 			view.now = t - 1;
 			const sim::Command c = brain.command(t, view.slots[0]);
 			yaw = sim::yaw_radians(c.yaw);
-			view.slots[0].yaw = c.yaw; // the motor would apply the view
+			view.slots[0].yaw = c.yaw;
 			view.slots[0].pitch = c.pitch;
 		}
 		REQUIRE(rec->detected_pairs.size() == 1u);
@@ -493,11 +459,11 @@ TEST_SUITE("host-tdm-bots-unit") {
 		const float want = std::atan2(30.0f, 30.0f);
 		float diff = std::fmod(std::fabs(yaw - want), sim::kTwoPi);
 		diff = std::min(diff, sim::kTwoPi - diff);
-		CHECK(diff < 6.0f * kDeg); // on target within the aim error (sigma <= 4.2 deg at skill 0.3)
+		CHECK(diff < 6.0f * kDeg);
 		CHECK(cfg->stats->perception_updates.load() >= 19u);
 		CHECK(cfg->stats->detections.load() == 1u);
 		CHECK(cfg->stats->last_brains_ns.load() > 0u);
-		// Determinism: a second brain with the same seed gives the same commands.
+
 		auto cfg2 = std::make_shared<host::TdmBotConfig>();
 		core::Result<std::shared_ptr<host::TdmShared>> shared2 = host::make_tdm_shared(h, cfg2);
 		REQUIRE(shared2.ok());
@@ -514,7 +480,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 			hb = (hb ^ (uint64_t(cb.yaw) << 32 | uint64_t(uint16_t(cb.pitch)) << 16 | cb.buttons)) * 1099511628211ull;
 		}
 		CHECK(ha == hb);
-		// A dead bot sends idle commands.
+
 		sim::SoldierState dead = view.slots[0];
 		dead.flags = 0;
 		dead.mode = sim::MoveMode::Dead;
@@ -551,11 +517,11 @@ TEST_SUITE("host-tdm-bots-unit") {
 			server.tick(out);
 		}
 		for (uint8_t s = 0; s < 8; ++s) {
-			CHECK(view.alive(s)); // no gunplay on the synthetic floor: nobody is hurt
+			CHECK(view.alive(s));
 		}
 		CHECK(bots->stats->perception_updates.load() >= 8u * 39u);
-		CHECK(bots->stats->detections.load() > 0u); // the floor is open: the teams see each other
-		// More bots than slots below the cap: capped, not refused.
+		CHECK(bots->stats->detections.load() > 0u);
+
 		host::GameServer full;
 		host::GameServerConfig fc = cfg;
 		auto many = std::make_shared<host::TdmBotConfig>();
@@ -565,7 +531,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		fc.max_slots = 20;
 		REQUIRE(full.init(fc).ok());
 		CHECK(many->stats->bots.load() == 20u);
-		// A tuning file that does not parse fails init.
+
 		host::GameServer bad;
 		host::GameServerConfig bc = cfg;
 		auto tuned = std::make_shared<host::TdmBotConfig>();
@@ -575,8 +541,6 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK_FALSE(bad.init(bc).ok());
 	}
 }
-
-// ---- the install rows (E1, E2, E6, E8) -----------------------------------------------------------------------------
 
 namespace {
 
@@ -589,7 +553,7 @@ namespace {
 	c.rules.deploy_screen = false;
 	c.rules.revive = true;
 	c.rules.kill_limit_override = p_kill_limit;
-	c.rules.preround_override_s = 0.0f; // --preround=0
+	c.rules.preround_override_s = 0.0f;
 	c.rules.max_players = 32;
 	c.configure_bots = [](host::TdmBotConfig &r_bots) { r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG; };
 	return c;
@@ -603,8 +567,6 @@ namespace {
 			p_r.spawns_enemy_within_10m, p_r.seconds_init, p_r.seconds_run);
 }
 
-// The brains' own breakdown beside the E rows' numbers (what the bots spent their ticks on, how much they fired).
-// p_slots: the per-slot scoreboard (E2; after E1's restart in place it is the new round's, so E1 leaves it out).
 [[maybe_unused]] void print_checks(const char *p_row, const tt::BotChecks &p_checks, bool p_slots = true) {
 	uint64_t total = 0;
 	for (const uint64_t n : p_checks.activity_ticks) {
@@ -670,7 +632,7 @@ namespace {
 	return p_values[i];
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-tdm-round") {
 	TEST_CASE("E1: a TDM round to 100 kills through the interpreter, 1 peer + 31 bots, then the restart in place") {
@@ -682,13 +644,12 @@ TEST_SUITE("host-tdm-round") {
 				return;
 			}
 			tt::TdmRunConfig c = base_config(1, 31, true, 0);
-			c.max_ticks = 21600 + 3600 + 300; // the 6-minute hard stop on the round, then the round end and the restart
-			c.after_round_ticks = 3600 + 240; // the 60 s round end + the restart's first ticks
-			// What the run's server and peer hold, captured after every tick (both are gone when run_tdm returns): the
-			// natives' coverage (RoundNatives::coverage(), m2b.md §3.1) and every MatchState the peer decoded.
+			c.max_ticks = 21600 + 3600 + 300;
+			c.after_round_ticks = 3600 + 240;
+
 			std::vector<sim::logic::RoundNatives::NativeCoverage> coverage;
 			std::vector<net::MatchState> peer_states;
-			std::optional<net::MatchState> server_over; // the rules' MatchState on the first RoundOver tick
+			std::optional<net::MatchState> server_over;
 			uint64_t peer_decode_errors = 0;
 			const core::gameplay::LogicGraph *graph = level->shared->logic.get();
 			size_t timeline_seen = 0;
@@ -700,7 +661,7 @@ TEST_SUITE("host-tdm-round") {
 					if (!server_over && rules->phase() == net::MatchPhase::RoundOver) {
 						server_over = rules->match_state();
 					}
-					// The unhandled inputs to the TDM types (RoundNatives notes them as Input entries), for the report.
+
 					const std::span<const sim::logic::NativeTimelineEntry> tl = rules->natives().timeline();
 					for (; timeline_seen < tl.size(); ++timeline_seen) {
 						const sim::logic::NativeTimelineEntry &e = tl[timeline_seen];
@@ -721,7 +682,7 @@ TEST_SUITE("host-tdm-round") {
 			core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
 			REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
 			if (!r.ok()) {
-				return; // doctest here has no exceptions: a failed REQUIRE does not leave the case
+				return;
 			}
 			tt::apply_bot_checks(*checks, *r);
 			print_result("host.tdm.round", *r);
@@ -729,8 +690,7 @@ TEST_SUITE("host-tdm-round") {
 			CHECK(r->failure.empty());
 			CHECK_FALSE(r->runtime_faulted);
 			CHECK(r->rules.runtime_faults == 0u);
-			// Every native delivery to a TDM type of §3.1 handled by RoundNatives, 0 Recorded (CharacterSpawnReference
-			// is LogicTypeId::CharacterSpawn).
+
 			using LT = core::gameplay::LogicTypeId;
 			const LT tdm_types[] = { LT::KillCounter, LT::PreRound, LT::RoundOver, LT::HumanPlayer, LT::AutoTeam, LT::InputRestriction, LT::LevelControl,
 				LT::CharacterSpawn, LT::AlternateSpawn };
@@ -759,9 +719,9 @@ TEST_SUITE("host-tdm-round") {
 				return;
 			}
 			CHECK(r->round_over_tick <= 21600u);
-			CHECK(r->rules.rounds == 1u); // RoundOver fired once
+			CHECK(r->rules.rounds == 1u);
 			CHECK(r->rules.restarts >= 1u);
-			// The rules' counts on the RoundOver tick (run_tdm's kills are the end of the run, after the restart).
+
 			REQUIRE(server_over.has_value());
 			if (!server_over) {
 				return;
@@ -770,8 +730,7 @@ TEST_SUITE("host-tdm-round") {
 			CHECK(server_over->winner == r->winner);
 			CHECK(server_over->kills[size_t(w)] >= 100);
 			CHECK(server_over->kills[size_t(1 - w)] < 100);
-			// The peer's MatchState: RoundOver with the same winner and the same two counts; the first one after the
-			// restart in place has both counts 0.
+
 			const auto over = std::find_if(peer_states.begin(), peer_states.end(), [](const net::MatchState &p_s) { return p_s.phase == net::MatchPhase::RoundOver; });
 			REQUIRE(over != peer_states.end());
 			if (over == peer_states.end()) {
@@ -949,9 +908,9 @@ TEST_SUITE("host-tdm-perf") {
 			if (level == nullptr) {
 				return;
 			}
-			tt::TdmRunConfig c = base_config(5, 64, false, 100000); // no round end inside the window
-			c.rules.max_players = 64; // AutoTeam's TamFullTeams would leave half of 64 out at the default 32
-			c.max_ticks = 600 + 7200; // 10 s warm-up + 120 s
+			tt::TdmRunConfig c = base_config(5, 64, false, 100000);
+			c.rules.max_players = 64;
+			c.max_ticks = 600 + 7200;
 			c.after_round_ticks = 0;
 			c.hashes = false;
 			const std::shared_ptr<tt::BotChecks> checks = tt::attach_bot_checks(c, level);

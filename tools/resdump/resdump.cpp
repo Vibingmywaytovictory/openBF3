@@ -1,21 +1,3 @@
-// resdump: canonical text summary of BF3 resources (MeshSet, DxTexture, Havok) through the
-// bf3::core::res decoders. The same summary is printed by the Rust oracle (IW4L resource_bf3) over
-// the files it exported, so `diff` of the two outputs is the parity check (README "Resource decoders").
-//
-//   resdump [--time | --trunc | --skin] <data_dir> <tag>...
-//   resdump [--time | --trunc | --skin] --install <superbundle> <tag> [<superbundle> <tag>]...
-//
-// Exported input (written by the oracle's `export` from the user's install; never part of the repo):
-//   <data_dir>/<tag>/index.tsv          "<file>\t<name>\t<res type hex>" per res
-//   <data_dir>/<tag>/res/<file>         "BF3R" u32 1, u32 resType, u8[16] resMeta, u32 viewLogicalOffset,
-//                                       u32 nameLen, name, u64 payloadLen, payload
-//   <data_dir>/chunks/<32 hex>.chunk    decompressed full chunk named by its raw GUID bytes
-// --install reads the same res and chunks straight from the install (read-only; located like bf3dump:
-// OPENBF3_INSTALL or the default path) through bf3/core/res/res_loader.h, in the export's order (one
-// name per lowercase spelling, sorted), so its output equals the oracle's summary of an export of
-// that superbundle; <tag> only names the "## <tag>" heading.
-// Output: the summary on stdout; per-type timings on stderr (--time adds a decode-only pass).
-
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/res/dx_texture.h"
@@ -113,7 +95,7 @@ std::string fb(float v) {
 std::string f3s(const Vec3 &v) {
 	return fb(v[0]) + "," + fb(v[1]) + "," + fb(v[2]);
 }
-std::string hexflag(uint32_t v) { // Rust {:#x}
+std::string hexflag(uint32_t v) {
 	return fmt("0x%x", v);
 }
 
@@ -164,12 +146,9 @@ bool load_res(const std::string &p_path, Res &r_res) {
 	return true;
 }
 
-// Where res and chunks come from: an exported directory, or a superbundle mounted from the install.
 std::string g_data;
 const bf3::core::LevelMount *g_mount = nullptr;
 
-// The whole decompressed chunk; r_view (when given) receives the level bundle's ranged-view
-// logicalOffset in install mode and is left alone for an export (the res file carries it).
 bool load_chunk(const ChunkId &p_id, std::vector<uint8_t> &r_out, uint32_t *r_view = nullptr) {
 	if (g_mount != nullptr) {
 		bf3::core::Result<RawChunk> chunk = read_raw_chunk(*g_mount, p_id);
@@ -187,7 +166,6 @@ bool load_chunk(const ChunkId &p_id, std::vector<uint8_t> &r_out, uint32_t *r_vi
 	return read_file(g_data + "/chunks/" + p_id.to_hex() + ".chunk", r_out);
 }
 
-// One res of the mounted superbundle, as the oracle's export would have written it.
 bool load_install_res(const std::string &p_name, Res &r_res) {
 	bf3::core::Result<RawRes> raw = read_raw_res(*g_mount, p_name);
 	if (!raw) {
@@ -197,7 +175,7 @@ bool load_install_res(const std::string &p_name, Res &r_res) {
 	r_res.name = raw->name;
 	r_res.res_type = raw->res_type;
 	r_res.meta = raw->res_meta;
-	r_res.view = UINT32_MAX; // texture_summary takes it from the chunk
+	r_res.view = UINT32_MAX;
 	r_res.file = std::move(raw->payload);
 	r_res.payload = Bytes(r_res.file.data(), r_res.file.size());
 	return true;
@@ -214,8 +192,6 @@ std::string opt_h(const std::optional<std::vector<T>> &p_v, F p_f) {
 	}
 	return h.hex();
 }
-
-// ---------------------------------------------------------------------------------------------
 
 void mesh_summary(std::string &o, const Res &r) {
 	MeshSet mesh;
@@ -716,8 +692,6 @@ void havok_summary(std::string &o, const Res &r) {
 	}
 }
 
-// Decode only (no hashing, no text), what a loader pays: parse + every subset / mip split /
-// shape tree + triangles. Chunk files are read before the clock starts. Returns seconds.
 double decode_only(const Res &r) {
 	using Clock = std::chrono::steady_clock;
 	std::vector<std::vector<uint8_t>> chunks;
@@ -770,8 +744,6 @@ double decode_only(const Res &r) {
 	return std::chrono::duration<double>(Clock::now() - t0).count();
 }
 
-// Damaged-input parity (--trunc): payloads cut at 1/4, 1/2, 3/4 and len-1, geometry and texture
-// chunks cut short; prints each decoder's error text or ok. Same lines as the oracle's `trunc`.
 void trunc_report(std::string &o, const Res &r) {
 	o += fmt("== %s %08x\n", r.name.c_str(), r.res_type);
 	const size_t len = r.payload.size();
@@ -848,9 +820,6 @@ void trunc_report(std::string &o, const Res &r) {
 	}
 }
 
-// Skinned-mesh facts for the M9 integration (--skin): per skinned MeshSet and LOD the bone table
-// size, the slot range the vertices use, bones per vertex, weight sums and which candidate bone
-// names hash to the table's name hashes (hash_quick, also over the lowercased name).
 const char *kBoneNames[] = { "Reference", "Hips", "Spine", "Spine1", "Spine2", "Spine3", "Neck", "Neck1", "Head", "HeadEnd",
 	"LeftShoulder", "LeftArm", "LeftArmRoll", "LeftForeArm", "LeftForeArmRoll", "LeftHand", "LeftHandThumb1", "LeftHandThumb2",
 	"LeftHandThumb3", "LeftHandIndex1", "LeftHandIndex2", "LeftHandIndex3", "LeftHandMiddle1", "LeftHandRing1", "LeftHandPinky1",
@@ -956,11 +925,10 @@ const char *type_label(uint32_t p_type) {
 	}
 }
 
-// One "## <tag>" section: the res of an export's index.tsv, or of a mounted superbundle.
 struct Section {
 	std::string tag;
-	std::unique_ptr<bf3::core::LevelMount> mount; // install mode
-	std::vector<std::string> keys; // res file paths (export) or res names (install)
+	std::unique_ptr<bf3::core::LevelMount> mount;
+	std::vector<std::string> keys;
 };
 
 bool load_item(const Section &p_section, const std::string &p_key, Res &r_res) {
@@ -968,7 +936,7 @@ bool load_item(const Section &p_section, const std::string &p_key, Res &r_res) {
 	return g_mount != nullptr ? load_install_res(p_key, r_res) : load_res(p_key, r_res);
 }
 
-} // namespace
+}
 
 int main(int argc, char **argv) {
 	int arg = 1;
@@ -994,7 +962,7 @@ int main(int argc, char **argv) {
 							 "       resdump [--time | --trunc | --skin] --install <superbundle> <tag> [<superbundle> <tag>]...\n");
 		return 2;
 	}
-	_setmode(_fileno(stdout), _O_BINARY); // LF line ends, like the Rust oracle
+	_setmode(_fileno(stdout), _O_BINARY);
 	std::vector<Section> sections;
 	std::shared_ptr<bf3::core::Install> install;
 	if (install_mode) {
@@ -1062,7 +1030,7 @@ int main(int argc, char **argv) {
 					std::fprintf(stderr, "bad res file %s\n", key.c_str());
 					return 1;
 				}
-				unreadable++; // the oracle's export skips it too
+				unreadable++;
 				continue;
 			}
 			if (trunc || skin) {

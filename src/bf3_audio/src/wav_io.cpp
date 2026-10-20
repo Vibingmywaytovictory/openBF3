@@ -1,6 +1,3 @@
-// WAV files for recordings and analysis (wav_io.h). RIFF/WAVE, format 3 (float32) or 1 (PCM16), written through a
-// PathGuard; the reader accepts what the writer produces and checks every chunk size against the file.
-
 #include "bf3/audio/wav_io.h"
 
 #include <algorithm>
@@ -29,7 +26,7 @@ uint32_t get_u32(const uint8_t *p) {
 	return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
 
-} // namespace
+}
 
 core::Status write_wav(const core::PathGuard &p_guard, const std::filesystem::path &p_path, std::span<const float> p_interleaved, uint32_t p_channels,
 		uint32_t p_rate, WavSampleFormat p_format) {
@@ -171,4 +168,4 @@ uint64_t WavRecorder::dropped_frames() const {
 	return dropped_.load(std::memory_order_relaxed);
 }
 
-} // namespace bf3::audio
+}

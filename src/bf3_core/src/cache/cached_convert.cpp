@@ -37,8 +37,8 @@ Result<CachedItem> cached_convert(Cache *p_cache, const CacheKey &p_key, const s
 				item.payload_bytes = got.entry.payload().size();
 				return item;
 			}
-			// Passed the cache's own checks but the decoder refuses it: drop it and convert again.
-			got.entry.reset(); // a live view pins the entry against removal
+
+			got.entry.reset();
 			p_cache->remove(p_key);
 			item.dropped_corrupt = true;
 		} else if (got.status == CacheStatus::Miss) {
@@ -90,4 +90,4 @@ void ConvertTotals::add(const CachedItem &p_item) {
 	}
 }
 
-} // namespace bf3::core
+}

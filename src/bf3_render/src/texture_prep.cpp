@@ -65,8 +65,7 @@ int gpu_format_pixel_bytes(GpuFormat p_format) {
 }
 
 uint32_t godot_mip_levels(GpuFormat p_format, uint32_t p_width, uint32_t p_height) {
-	// Godot's Image::_get_dst_image_size with p_mipmaps = -1: halve down to 1x1 (block formats too: a 2x2 or 1x1
-	// level is one whole block), measured on dev7 (2048x2048 DXT1 = 12 levels, 2,796,216 bytes).
+
 	(void)p_format;
 	const uint32_t min_side = 1u;
 	uint32_t w = std::max(p_width, 1u), h = std::max(p_height, 1u), levels = 1;
@@ -131,11 +130,11 @@ std::array<uint8_t, 8> bc4_encode(const std::array<uint8_t, 16> &p_values) {
 	out[0] = hi;
 	out[1] = lo;
 	if (hi == lo) {
-		return out; // e0 == e1: every index 0 reads e0
+		return out;
 	}
 	uint64_t bits = 0;
 	for (int i = 0; i < 16; ++i) {
-		// Step 0 = hi (index 0) ... 7 = lo (index 1); steps 1..6 are indices 2..7.
+
 		const int step = std::clamp(int((float(hi - p_values[size_t(i)]) * 7.0f / float(hi - lo)) + 0.5f), 0, 7);
 		const uint64_t index = step == 0 ? 0u : (step == 7 ? 1u : uint64_t(step + 1));
 		bits |= index << (3 * i);
@@ -148,8 +147,8 @@ std::array<uint8_t, 8> bc4_encode(const std::array<uint8_t, 16> &p_values) {
 
 std::array<uint8_t, 16> bc3_normal_to_bc5(const uint8_t *p_bc3_block) {
 	std::array<uint8_t, 16> out{};
-	std::memcpy(out.data(), p_bc3_block, 8); // BC3 alpha block == BC4 block: tangent X -> R
-	const std::array<uint8_t, 8> g = bc4_encode(bc_color_green(p_bc3_block + 8)); // tangent Y -> G
+	std::memcpy(out.data(), p_bc3_block, 8);
+	const std::array<uint8_t, 8> g = bc4_encode(bc_color_green(p_bc3_block + 8));
 	std::memcpy(out.data() + 8, g.data(), 8);
 	return out;
 }
@@ -184,7 +183,6 @@ bool source_gpu_format(TextureFormat p_format, GpuFormat &r_format) {
 	}
 }
 
-// One stored level as tightly packed bytes of p_format (rows of uncompressed formats repacked).
 bool level_data(const MipSlice &p_mip, GpuFormat p_format, std::vector<uint8_t> &r_out) {
 	const uint64_t need = level_bytes(p_format, p_mip.width, p_mip.height);
 	if (gpu_format_is_block(p_format)) {
@@ -206,8 +204,6 @@ bool level_data(const MipSlice &p_mip, GpuFormat p_format, std::vector<uint8_t> 
 	return true;
 }
 
-// The next smaller level made from p_level: block formats repeat the first block, others take every
-// other texel (the stored chain only stops early on tiny levels).
 std::vector<uint8_t> shrink_level(const std::vector<uint8_t> &p_level, GpuFormat p_format, uint32_t p_w, uint32_t p_h, uint32_t p_nw, uint32_t p_nh) {
 	std::vector<uint8_t> out(size_t(level_bytes(p_format, p_nw, p_nh)));
 	if (gpu_format_is_block(p_format)) {
@@ -227,7 +223,7 @@ std::vector<uint8_t> shrink_level(const std::vector<uint8_t> &p_level, GpuFormat
 	return out;
 }
 
-} // namespace
+}
 
 core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, TextureRole p_role) {
 	const core::res::DxTexture &tex = p_texture.texture;
@@ -245,8 +241,7 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	if (!source_gpu_format(tex.format, stored)) {
 		return core::make_error(where + ": format " + std::to_string(int(tex.format)) + " is not uploaded");
 	}
-	// NormalDxt5Rga and plain DXT5 used as a normal map keep their blocks: their channel layout is not known
-	// (see the header), so they are not reinterpreted.
+
 	const bool transcode = p_role == TextureRole::Normal && tex.format == TextureFormat::NormalDxt5;
 	out.format = transcode ? GpuFormat::Bc5 : stored;
 
@@ -285,7 +280,7 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	}
 	out.stored_levels = uint32_t(levels.size());
 	out.levels = godot_mip_levels(out.format, out.width, out.height);
-	// Complete a chain that stops early (only the smallest levels are synthesised).
+
 	uint32_t lw = std::max(w, 1u), lh = std::max(h, 1u);
 	while (levels.size() < out.levels) {
 		const uint32_t nw = std::max(1u, lw >> 1), nh = std::max(1u, lh >> 1);
@@ -301,7 +296,7 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	for (uint32_t i = 0; i < out.levels; ++i) {
 		out.data.insert(out.data.end(), levels[i].begin(), levels[i].end());
 	}
-	// Godot's expected size for the whole chain (its level sizes follow its own halving, see godot_mip_levels).
+
 	uint64_t expect = 0;
 	uint32_t gw = std::max(out.width, 1u), gh = std::max(out.height, 1u);
 	for (uint32_t i = 0; i < out.levels; ++i) {
@@ -315,4 +310,4 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	return out;
 }
 
-} // namespace bf3::render
+}

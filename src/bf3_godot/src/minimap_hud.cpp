@@ -1,4 +1,3 @@
-// UI ui2: Bf3MinimapHud (minimap_hud.h; docs/design/ui-minimap-icons.md §10.1).
 #include "minimap_hud.h"
 
 #include "fp_camera.h"
@@ -7,7 +6,7 @@
 #include "level_session.h"
 #include "minimap_check.h"
 #include "minimap_control.h"
-#include "pt1_iff.h" // PT1 iff [hud]
+#include "pt1_iff.h"
 #include "world_icons.h"
 
 #include "bf3/core/ebx_db.h"
@@ -39,7 +38,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-// windows.h first
+
 #include <psapi.h>
 
 using namespace godot;
@@ -50,9 +49,9 @@ namespace bf3::godot_side {
 
 namespace {
 
-constexpr float kDefaultSidePer1080 = 256.0f; // design §10.2
-constexpr float kRangeMetres = 150.0f; // disc radius in metres (design §5.5)
-constexpr float kMarginUnits = 14.0f; // from the left and bottom edges
+constexpr float kDefaultSidePer1080 = 256.0f;
+constexpr float kRangeMetres = 150.0f;
+constexpr float kMarginUnits = 14.0f;
 
 uint64_t peak_ws() {
 	PROCESS_MEMORY_COUNTERS pmc{};
@@ -95,10 +94,10 @@ Color vec4_colour(const std::array<float, 4> &p_v) {
 	return Color(p_v[0], p_v[1], p_v[2], p_v[3]);
 }
 
-} // namespace
+}
 
 Bf3MinimapHud::Bf3MinimapHud() {
-	set_layer(2); // above the session's HUD label layer (1)
+	set_layer(2);
 }
 
 Bf3MinimapHud::~Bf3MinimapHud() {
@@ -117,7 +116,7 @@ void Bf3MinimapHud::_bind_methods() {
 void Bf3MinimapHud::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		stop_.store(true);
-		pt1_iff_.reset(); // PT1 iff [hud]: joins its loader (it reads the session's install reader) before the session goes
+		pt1_iff_.reset();
 		if (loader_.joinable()) {
 			loader_.join();
 		}
@@ -285,7 +284,7 @@ void Bf3MinimapHud::run_loader() {
 	}
 	out->atlas_width = atlas_img->width;
 	out->atlas_height = atlas_img->height;
-	// The marker frame's visible pixels (marker.pixels, minimap_check.h).
+
 	if (const ui::HudIcon *me = atlas->find(ui::soldier_icon(true, 0, 0).icon)) {
 		if (const ui::HudIconStateFrames *st = me->state(ui::HudIconState::Default); st != nullptr && !st->frames.empty()) {
 			const ui::HudIconRect r = ui::hud_icon_rect(st->frames.front(), atlas_img->width, atlas_img->height);
@@ -306,7 +305,7 @@ void Bf3MinimapHud::run_loader() {
 				}
 			}
 			if (x1 >= x0 && y1 >= y0) {
-				// Texel centres: the box spans x0 .. x1 + 1; the frame's centre is width / 2.
+
 				const float dx = 0.5f * float(x0 + x1 + 1) - 0.5f * float(r.width);
 				const float dy = 0.5f * float(y0 + y1 + 1) - 0.5f * float(r.height);
 				out->marker_alpha_dx = r.flip_x ? -dx : dx;
@@ -342,7 +341,7 @@ void Bf3MinimapHud::build_godot_side() {
 	}
 	UtilityFunctions::print(to_godot("[ui2] minimap " + a->level.data.level_id + " " + a->level.mode + ": " + std::to_string(a->level.objectives.size()) +
 			" objectives, " + std::to_string(a->level.combat_areas.size()) + " combat areas; loader " + std::to_string(a->seconds) + " s (" + a->steps + ")"));
-	// The satellite with its box-filtered chain.
+
 	if (px->satellite_mips.empty()) {
 		UtilityFunctions::push_error("[ui2] minimap not drawn: empty satellite");
 		return;
@@ -376,7 +375,7 @@ void Bf3MinimapHud::build_godot_side() {
 		return;
 	}
 	atlas_ = ImageTexture::create_from_image(atlas_img);
-	px.reset(); // the CPU pixels go (design §10.1)
+	px.reset();
 
 	Ref<Shader> shader;
 	shader.instantiate();
@@ -415,9 +414,7 @@ void Bf3MinimapHud::layout_controls() {
 	const Rect2 vis = get_viewport()->get_visible_rect();
 	const float scale = std::max(1e-3f, std::fabs(get_viewport()->get_final_transform().get_scale().y));
 	const float side = size_px_ > 0 ? float(size_px_) / scale : kDefaultSidePer1080 / 1080.0f * vis.size.y;
-	// Whole canvas units: with gui/common/snap_controls_to_pixels (Godot's default) a Control's drawn origin is rounded,
-	// while get_global_transform_with_canvas keeps the fraction; a fractional origin put the map 0.4 px off what
-	// canvas_to_viewport says (measured by map.uv.*: 1.55 texels on Metro).
+
 	control_->set_position(Vector2(std::round(vis.position.x + kMarginUnits), std::round(vis.position.y + vis.size.y - side - kMarginUnits)));
 	control_->set_size(Vector2(side, side));
 	icons_->set_position(vis.position);
@@ -459,19 +456,18 @@ void Bf3MinimapHud::update_view() {
 	}
 	std::vector<MinimapIconDraw> all = objectives;
 	const bf3::host::PresentationFrame &f = session_->frame();
-	// PT1 iff [hud]: in an M2b match (MatchState received) the other soldiers come from pt1_iff.h by the local team, and
-	// the nametags are drawn; M1's loop below (every other soldier as an enemy) stays for the M1 and M2a scenes.
-	if (pt1_iff_ == nullptr && f.match_valid) { // PT1 iff [hud]
-		pt1_iff_ = std::make_unique<Pt1Iff>(session_, this, atlas_, &a->atlas); // PT1 iff [hud]
-	} // PT1 iff [hud]
-	if (pt1_iff_ != nullptr) { // PT1 iff [minimap]
-		const bool pt1_fp = !session_->cameras().free(); // PT1 iff [minimap]
-		pt1_iff_->frame(pt1_fp ? session_->cameras().first_person() : nullptr, pt1_fp, all); // PT1 iff [minimap]
-	} // PT1 iff [minimap]
-	if (pt1_iff_ == nullptr && f.valid && f.other_count > 0) { // PT1 iff [minimap]
+
+	if (pt1_iff_ == nullptr && f.match_valid) {
+		pt1_iff_ = std::make_unique<Pt1Iff>(session_, this, atlas_, &a->atlas);
+	}
+	if (pt1_iff_ != nullptr) {
+		const bool pt1_fp = !session_->cameras().free();
+		pt1_iff_->frame(pt1_fp ? session_->cameras().first_person() : nullptr, pt1_fp, all);
+	}
+	if (pt1_iff_ == nullptr && f.valid && f.other_count > 0) {
 		std::array<bf3::host::PresentedSoldier, bf3::net::kMaxSlots> out{};
 		const size_t n = bf3::host::present_others(f, bf3::net::monotonic_ns(), out);
-		const ui::HudIconChoice c = ui::soldier_icon(false, 2, kM1LocalTeam); // M1's walkers are team 2 (m1.md §8.3)
+		const ui::HudIconChoice c = ui::soldier_icon(false, 2, kM1LocalTeam);
 		for (size_t i = 0; i < n; ++i) {
 			MinimapIconDraw ic;
 			ic.icon = a->atlas.find(c.icon);
@@ -512,7 +508,7 @@ void Bf3MinimapHud::_process(double p_delta) {
 			build_godot_side();
 			if (!drawn_) {
 				if (check_) {
-					// Report the failure through the check's minimap.loaded row.
+
 					check_runner_ = std::make_unique<MinimapCheck>(*this, shots_dir_, true);
 				} else {
 					enabled_ = false;
@@ -537,4 +533,4 @@ void Bf3MinimapHud::_process(double p_delta) {
 	}
 }
 
-} // namespace bf3::godot_side
+}

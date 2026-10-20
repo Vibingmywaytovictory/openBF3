@@ -1,93 +1,3 @@
-// Level traversal: port of IW4L level_bf3 world.rs and variations.rs (Apache-2.0).
-//
-// Cost model. One WorkBudget (budget.h, 2^22 units by default) pays for a level's load, its walk,
-// the property resolver and every helper run on the World. Each unit is charged BEFORE its work,
-// at the place the work happens; an exhausted budget fails every later charge (sticky), so the
-// walk and each helper end with the budget error, and World::traverse checks it once more after
-// the walk returns.
-// Text: a data string or name costs its length to copy, key, hash, compare with other data, parse
-// or print, and any number of slots may name one long string. Decoding one is O(log n) whatever
-// its length (EbxPartition::string looks the NUL up in an index built at parse; names are spans),
-// and the level code takes every data-controlled text through charged_str / charged_enum_name /
-// charge_text (budget.h), which charge text_units = 1 + length/16 before handing it out; no other
-// code in src/level reads EbxValue::as_str or enum_name (Property::as_str, a view for callers that
-// charge it themselves, is not called by the walk). So text work and every kept copy are at most
-// 16 bytes per unit, and long names that are then skipped (over 1,024 bytes) are paid first.
-// Partition names come from the bundle manifests, not the EBX bytes, but are text all the same:
-// read_subworld charges the sub-world's name before copying it, the census each mesh name it copies
-// and keys and each shader name it searches, and bf3dump level each partition name it prints.
-// Every loop reachable from the public entry points, and what bounds it:
-//   load_level, level_info (level.cpp)
-//     subworld_references: 1 per container visited, then the raw length of its Objects before the
-//       slots are resolved; also at most 2^16 containers per search, layers 8 deep.
-//     includes: the raw length of InclusionSettings.Settings, then of each setting's
-//       EnabledOptions, each before it is scanned (shared arrays are charged per scan).
-//     includes also charges the text of every criterion Name and EnabledOptions entry it reads.
-//     each BundleName a reference wants: its text before it is keyed or copied, then one hash
-//       lookup in the mount's bundle index (built once per load from the install's names). A
-//       sub-world bundle loads once per key, so bundle reads and partition parsing are bounded by
-//       the superbundle (each bundle at most once), not by the graph.
-//     read_level_info: the raw lengths of Categories, of each category's Mode array and of both
-//       Components arrays, each before it is scanned; the text of every Category and Mode name
-//       read (each mode kept is a charged copy, at most 4,096 of them) and of Name / Description;
-//       count_imports: once over every import.
-//   Walker (this file)
-//     visit: 1 per call, then the raw length of Objects before it is scanned; recursion depth is at
-//       most 48. Every object slot then does a constant amount of EBX work (is_a against two fixed
-//       tables, get, follow), plus what the branch below charges.
-//     excluded, blueprint_transform, entity_transform: Scopes::property (below).
-//     enter_subworld: the BundleName's text, includes() as above, referenced_blueprint (its text
-//       again, then one lookup); then the sub-world's MeshVariationDatabase raw Entries +
-//       RedirectEntries before they are read (re-read and re-charged on every entry).
-//     place_reference: its slot and the resolver; a prefab recurses into visit.
-//     expand_group: the PhysicsData asset name's text on every visit (it is hashed into the res
-//       cache each time; names over 1,024 bytes fail once charged); 1 per Havok res read (each
-//       distinct res name is read and parsed once per traversal); the raw length of
-//       MemberDatas before the members are copied; 1 per instance slot before it is placed (a
-//       hostile InstanceCount past the Havok subparts is counted, not walked).
-//     emit / classify: constant.
-//   Scopes (connections.cpp)
-//     property / interface: 1 per connection candidate examined, before it is followed (hop()),
-//       also capped at 2^16 per resolution and depth 32. Between two hops a resolution does a
-//       constant amount of work: hash lookups, the Descriptor follow, data_field (one search in
-//       the source type's lookup table, by stored hash); a hop whose source is a sub-world
-//       reference charges its BundleName's text before the name is copied and looked up.
-//     Connections::of: the raw lengths of a blueprint's three connection lists, once per blueprint
-//       per traversal (cached by scope push and by connections_of).
-//     descriptor_field: the raw length of a descriptor's Fields, once per descriptor (cached).
-//     an interface constant: its text before Property::parse reads it.
-//   Helpers run on the World (census.cpp), the World's budget:
-//     starts_hidden: the number of connections into (reference, Visible) before they are checked.
-//     hidden_parts: the raw length of each Components and HealthStates array before it is
-//       scanned; at most 4,096 components per call.
-//     drawn_slots: the shader's partition name text per drawn material slot.
-//     mesh_census: legacy variation databases as above; per mesh object 1 for the variation
-//       lookup (a parent chain of at most 49 sub-worlds) plus hidden_parts; per variant the raw
-//       lengths of the asset's Materials and the entry's Materials, 1 per LOD subset examined
-//       (before it is examined), and 1 per triangle examined,
-//       paid in doubling blocks before each block (at most twice what is examined). Each distinct
-//       MeshSet is read and decoded once (install-bound).
-//     collision_placements: per group its res name's text; per non-group mesh object the raw
-//       RigidBodies and ScaledAssets lengths, each body's enumerator name, and each asset name's
-//       text twice (read, then looked up and copied; names over 1,024 bytes are skipped, charged).
-//   bf3dump level (tools/bf3dump/level_commands.cpp) charges the type and partition names it prints.
-// Constant factors, which bound the EBX work one unit pays for whatever the type layouts (each
-// object slot, hop or text charge does a fixed number of these accesses; LevelTransform reads are
-// 16 gets): EbxStruct::get / follow / data_field / as_vec3 / as_transform are one binary search
-// per get in the type's lookup table, which EbxPartition::parse flattens along the base chain
-// (O(log n), n at most 1,024: no walk over base types or descriptors); is_a walks at most 32 base
-// types by stored hash; an enumerator name is one binary search; a string decodes in O(log n);
-// compares against fixed names stop at the fixed name's length; no data is hashed. The parser
-// rejects types with more than 1,024 descriptors along their base chain and type tables of more
-// than 4 lookups per descriptor (retail: 96 and 1.96), and its validation pays for each type's
-// descriptors before scanning them (at most 16 steps per partition byte), so a partition's parse
-// is linear in its size; each bundle is parsed once per load. Before the lookup tables, a hostile
-// type 30 deep and 254 wide made each unit cost about 130k descriptor steps (197 s for a 360 KB
-// partition); now deep, wide and shallow layouts run at the same rate (1.3-1.4 s at the full budget).
-// Structural caps beside the budget: objects 2^18, scopes 2^18, static model groups 2^16, kept
-// sub-world names 4,096 of at most 1,024 bytes, BundleName and res lookups 1,024 bytes, level
-// description modes 4,096.
-// Retail use (all 230 level x mode runs of the 29 MP levels): see README "Level traversal".
 #include "bf3/core/level/world.h"
 
 namespace bf3::core::level {
@@ -95,18 +5,14 @@ namespace bf3::core::level {
 namespace {
 
 constexpr uint32_t kMaxDepth = 48;
-// Placed objects, scopes and static model groups one traversal may create. The depth limit bounds
-// nesting, not fan-out: a hostile prefab listing itself many times would otherwise grow without
-// bound. Retail levels place at most 15,178 objects in 773 scopes and 3 groups (all 230 level x
-// mode runs); 2^18 objects keep a hostile World under about 80 MB (2^20 reached 300 MB).
+
 constexpr size_t kMaxObjects = size_t(1) << 18;
 constexpr size_t kMaxScopes = size_t(1) << 18;
 constexpr size_t kMaxGroups = size_t(1) << 16;
-// Skipped and absent sub-world names kept in WorldStats (retail levels list about a dozen), and
-// the bytes kept of each (retail names are under 100).
+
 constexpr size_t kMaxNamedSubworlds = 4096;
 constexpr size_t kMaxSubworldName = 1024;
-// Longest HavokPhysicsData res name a static model group may name (retail names are under 100).
+
 constexpr size_t kMaxResName = 1024;
 
 struct KindName {
@@ -114,7 +20,6 @@ struct KindName {
 	ObjectKind kind;
 };
 
-// Checked in order, by is_a.
 constexpr KindName kKinds[15] = {
 	{ "TerrainEntityData", ObjectKind::Terrain },
 	{ "WaterEntityData", ObjectKind::Water },
@@ -180,7 +85,7 @@ void classify(const EbxResolver &p_db, const EbxInstance &p_entity, PlacedObject
 Result<SubWorld> read_subworld(const EbxResolver &p_db, const EbxInstance &p_data, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent,
 		uint32_t p_scope, WorkBudget &r_budget) {
 	SubWorld sw;
-	// The partition name comes from the bundle manifest: charged before it is copied and extended.
+
 	const std::string_view name = p_db.name_of(p_data.partition().guid()).value_or("");
 	BF3_TRY(charge_text(r_budget, name));
 	sw.name = std::string(name);
@@ -198,7 +103,7 @@ Result<SubWorld> read_subworld(const EbxResolver &p_db, const EbxInstance &p_dat
 	return sw;
 }
 
-} // namespace
+}
 
 std::string_view mesh_entity_type_name(MeshEntityType p_type) {
 	switch (p_type) {
@@ -260,12 +165,10 @@ std::string_view PlacedObject::label() const {
 		case ObjectKind::VisualEnvironment:
 			return "VisualEnvironment";
 		default:
-			// A group member without a mesh is placed as Other with the member type's name.
+
 			return entity.type_name();
 	}
 }
-
-// --- MeshVariationDb ---------------------------------------------------------------------------
 
 Result<MeshVariationDb> MeshVariationDb::read(const EbxResolver &p_db, const EbxInstance &p_database, WorkBudget &r_budget, bool p_keep_empty) {
 	MeshVariationDb out;
@@ -287,7 +190,7 @@ Result<MeshVariationDb> MeshVariationDb::read(const EbxResolver &p_db, const Ebx
 				}
 			}
 			const uint32_t hash = u32_of(entry.get("VariationAssetNameHash")).value_or(0);
-			out.entries_.emplace(Key{ mesh->partition().guid(), mesh->guid(), hash }, entry); // first one wins
+			out.entries_.emplace(Key{ mesh->partition().guid(), mesh->guid(), hash }, entry);
 		}
 	}
 	return out;
@@ -306,8 +209,6 @@ std::optional<EbxInstance> MeshVariationDb::entry(const EbxInstance &p_mesh, uin
 	return found == entries_.end() ? std::nullopt : std::optional<EbxInstance>(found->second);
 }
 
-// --- World -------------------------------------------------------------------------------------
-
 const PlacedObject *World::placed(uint32_t p_scope, const EbxInstance &p_object) const {
 	const auto found = placed_.find(PlacedKey{ p_scope, InstanceKey::of(p_object) });
 	return found == placed_.end() ? nullptr : &objects[found->second];
@@ -316,7 +217,7 @@ const PlacedObject *World::placed(uint32_t p_scope, const EbxInstance &p_object)
 std::optional<EbxInstance> World::mesh_variation(uint32_t p_subworld, const EbxInstance &p_mesh, uint32_t p_variation) const {
 	const auto lookup = [&](uint32_t p_hash) -> std::optional<EbxInstance> {
 		std::optional<uint32_t> at = p_subworld;
-		// Parents always precede their children, so the chain ends; the bound guards anyway.
+
 		for (size_t hops = 0; at && *at < subworlds.size() && hops <= subworlds.size(); ++hops) {
 			if (std::optional<EbxInstance> e = subworlds[*at].variations.entry(p_mesh, p_hash)) {
 				return e;
@@ -383,7 +284,7 @@ public:
 	}
 
 private:
-	// Pays for p_steps of walker work about to be done, and checks the structural caps.
+
 	Status charge(size_t p_steps) {
 		world_.stats.steps += p_steps;
 		BF3_TRY(world_.budget->charge(p_steps));
@@ -394,7 +295,6 @@ private:
 		return Status::success();
 	}
 
-	// The resolved Objects of p_container; each slot costs a step, null or unresolved ones too.
 	Status objects(const EbxInstance &p_container, std::vector<EbxInstance> &r_out) {
 		const std::optional<EbxValue> list = p_container.get("Objects");
 		const OptionalEbxArray array = list ? list->as_array() : OptionalEbxArray();
@@ -466,9 +366,6 @@ private:
 		return visit(*data, *child_scope, frame, child, 0, p_depth + 1);
 	}
 
-	// Records a skipped or absent sub-world's BundleName. A hostile graph can reach the same
-	// reference millions of times, so the lists keep the first kMaxNamedSubworlds names, each cut
-	// to kMaxSubworldName bytes.
 	void note_subworld(std::vector<std::string> &r_names, std::string_view p_name) {
 		if (r_names.size() < kMaxNamedSubworlds) {
 			r_names.emplace_back(p_name.substr(0, kMaxSubworldName));
@@ -544,7 +441,7 @@ private:
 				}
 				if (const std::optional<std::string_view> name = *asset_name) {
 					if (name->size() > kMaxResName) {
-						// No res has such a name; do not copy it on every visit.
+
 						return make_error("static model group " + p_group.guid().to_string() + ": PhysicsData asset name of " + std::to_string(name->size()) +
 								" bytes");
 					}
@@ -555,7 +452,7 @@ private:
 		const std::string group_name = group.physics_asset.value_or(p_group.guid().to_string());
 		const std::vector<res::SubpartTransform> *subparts_of = &kNoSubparts;
 		if (group.physics_asset) {
-			// Each res is read and parsed once per traversal, however often the group is visited.
+
 			auto cached = havok_.find(*group.physics_asset);
 			if (cached == havok_.end()) {
 				BF3_TRY(charge(1));
@@ -585,7 +482,7 @@ private:
 		const std::optional<EbxValue> member_list = p_group.get("MemberDatas");
 		const OptionalEbxArray member_array = member_list ? member_list->as_array() : OptionalEbxArray();
 		if (member_array) {
-			// Each member slot costs a step: members that place nothing still cost their lookups.
+
 			BF3_TRY(charge(member_array->size()));
 			for (const EbxValue m : *member_array) {
 				if (const std::optional<EbxStruct> s = m.as_struct()) {
@@ -623,7 +520,7 @@ private:
 			const size_t transform_count = transforms ? transforms->size() : 0;
 
 			for (uint32_t instance = 0; instance < count; ++instance) {
-				BF3_TRY(charge(1)); // every instance slot, placed or not
+				BF3_TRY(charge(1));
 				const std::optional<EbxValue> explicit_value = instance < transform_count ? transforms->get(instance) : std::nullopt;
 				const auto explicit_rows = explicit_value ? explicit_value->as_transform() : std::nullopt;
 				LevelTransform local;
@@ -634,8 +531,7 @@ private:
 				} else {
 					++needed;
 					if (cursor >= subparts.size()) {
-						// Out of subparts: the group fails below. Count the rest without walking a
-						// hostile InstanceCount one by one.
+
 						if (instance >= transform_count) {
 							needed += size_t(count - instance - 1);
 							break;
@@ -648,7 +544,7 @@ private:
 				}
 				std::optional<uint32_t> physics_part;
 				if (first_part) {
-					physics_part = *first_part + instance * parts_per_instance; // wrapping, as u32 in Rust release
+					physics_part = *first_part + instance * parts_per_instance;
 				}
 				if (havok_subpart && physics_part && subparts[*havok_subpart].user_data != *physics_part) {
 					++part_mismatches;
@@ -762,7 +658,7 @@ private:
 	const LevelMount &mount_;
 	std::string_view mode_;
 	World &world_;
-	std::unordered_map<std::string, ParsedHavok> havok_; // by res name
+	std::unordered_map<std::string, ParsedHavok> havok_;
 };
 
 Result<std::unique_ptr<World>> World::traverse(const LoadedLevel &p_level) {
@@ -788,8 +684,7 @@ Result<std::unique_ptr<World>> World::traverse(const EbxResolver &p_db, const Eb
 	world->subworlds.push_back(std::move(*level));
 	Walker walker(db, p_mount, p_mode, *world);
 	BF3_TRY(walker.visit(root, *scope, LevelTransform::identity(), 0, 0, 0));
-	// Every charge that failed also failed the walk; this only makes sure nothing ends ok on an
-	// exhausted budget.
+
 	BF3_TRY(budget->status());
 	world->stats.resolve_hops = world->scopes.hops();
 	world->stats.capped_resolutions = world->scopes.capped_resolutions();
@@ -804,4 +699,4 @@ Result<std::unique_ptr<World>> World::traverse(const EbxResolver &p_db, const Eb
 	return world;
 }
 
-} // namespace bf3::core::level
+}

@@ -1,4 +1,3 @@
-// bf3dump prepare (plan §3.12 "Prepare levels": CLI `bf3dump prepare`; M0 "per-item streaming converters").
 #include "prepare_commands.h"
 
 #include "shapes_commands.h"
@@ -9,7 +8,7 @@
 #include "bf3/render/level_prepare.h"
 
 #include <windows.h>
-// psapi after windows.h
+
 #include <psapi.h>
 
 #include <charconv>
@@ -41,10 +40,8 @@ double mib(uint64_t p_bytes) {
 
 void print_totals(const char *p_what, const bf3::render::PrepareTotals &p_t);
 
-} // namespace
+}
 
-// Godot's OS_Windows::get_user_data_dir for a project without a custom user dir:
-// %APPDATA%/Godot/app_userdata/<project name>; the project is named "bf3-opensource" (project.godot).
 std::filesystem::path default_cache_root() {
 	wchar_t buf[32768];
 	const DWORD n = GetEnvironmentVariableW(L"APPDATA", buf, DWORD(std::size(buf)));
@@ -66,13 +63,13 @@ void print_totals(const char *p_what, const bf3::render::PrepareTotals &p_t) {
 			p_t.seconds);
 }
 
-} // namespace
+}
 
 int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
 	std::vector<std::string> positional;
 	std::filesystem::path root;
 	bf3::render::PrepareOptions options;
-	bool shapes = false; // M1 T1: --shapes
+	bool shapes = false;
 	for (const std::string &a : p_args) {
 		if (a.rfind("--cache=", 0) == 0) {
 			root = utf8_path(std::string_view(a).substr(8));
@@ -120,7 +117,7 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 	Cache cache;
 	CacheOptions cache_options;
 	cache_options.root = root;
-	cache_options.guard = p_reader.write_guard(); // refuses the install (and anything below it)
+	cache_options.guard = p_reader.write_guard();
 	std::string detail;
 	const CacheStatus opened = cache.open(std::move(cache_options), &detail);
 	if (opened != CacheStatus::Ok) {
@@ -149,7 +146,7 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 	for (const auto &[item, error] : r.failures) {
 		std::printf("issue    %s: %s\n", item.c_str(), error.c_str());
 	}
-	// M1 T1: the static world in a second, sequential pass (prepare_level keeps neither the level nor the World).
+
 	bool shapes_failed = false;
 	double seconds_shapes = 0.0;
 	if (shapes) {
@@ -186,4 +183,4 @@ int cmd_prepare(const InstallReader &p_reader, const std::shared_ptr<Install> &p
 	return failed ? 1 : 0;
 }
 
-} // namespace bf3dump
+}

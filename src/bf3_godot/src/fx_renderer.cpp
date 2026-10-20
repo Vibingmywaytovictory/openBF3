@@ -1,4 +1,3 @@
-// Bf3FxRenderer: VFX2's Godot side (docs/design/m2a-fx2.md). See fx_renderer.h.
 #include "fx_renderer.h"
 
 #include "godot_util.h"
@@ -32,7 +31,6 @@ double ms_since(std::chrono::steady_clock::time_point p_t0) {
 	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
 }
 
-// The batch's position in RenderPrep's draw order (pass, then alpha / premultiplied / additive, then class).
 int draw_position(const fx::FxBatchKey &p_key) {
 	int blend = 0;
 	switch (p_key.blend) {
@@ -86,7 +84,7 @@ uint32_t grow(uint32_t p_needed) {
 	return c;
 }
 
-} // namespace
+}
 
 Bf3FxRenderer::Bf3FxRenderer() = default;
 
@@ -107,7 +105,7 @@ bool Bf3FxRenderer::upload_atlas(const fx::AtlasPixels &p_pixels, std::string *r
 		*r_error = "atlas pixels: unexpected formats";
 		return false;
 	}
-	// Godot's DXT5 is sampled as sRGB through the shader's source_color hint; BC5 = RGTC_RG (linear).
+
 	Ref<ImageTexture> base = make_atlas_texture(p_pixels.base, Image::FORMAT_DXT5, r_error);
 	if (base.is_null()) {
 		return false;
@@ -176,7 +174,7 @@ bool Bf3FxRenderer::ensure_resources() {
 	scenario_ = get_world_3d()->get_scenario();
 	Ref<QuadMesh> quad;
 	quad.instantiate();
-	quad->set_size(Vector2(1, 1)); // -0.5 .. 0.5, normal +Z
+	quad->set_size(Vector2(1, 1));
 	quad_mesh_ = quad;
 	Ref<BoxMesh> box;
 	box.instantiate();
@@ -309,7 +307,7 @@ void Bf3FxRenderer::upload_params() {
 	const size_t floats = size_t(cap_lines) * kFxParamsRowsPerLine * 16;
 	params_staging_.assign(floats, 0.0f);
 	if (!rows.empty()) {
-		std::memcpy(params_staging_.data(), rows.data(), rows.size_bytes()); // rows are contiguous: 4 texels each
+		std::memcpy(params_staging_.data(), rows.data(), rows.size_bytes());
 	}
 	if (cap_lines == params_lines_ && params_staging_ == params_uploaded_) {
 		return;
@@ -433,4 +431,4 @@ void Bf3FxRenderer::hide_all() {
 	stats_.lights = 0;
 }
 
-} // namespace bf3::godot_side
+}

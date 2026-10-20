@@ -1,4 +1,3 @@
-// Bf3GameFx: the game's effects (docs/design/m2a-fx3.md §4). See game_fx.h.
 #include "game_fx.h"
 
 #include "fx_decals.h"
@@ -33,7 +32,7 @@ using namespace godot;
 
 namespace {
 
-constexpr size_t kMaxStartEffectDefs = 256; // start_effect's compiled defs kept (beyond: the call compiles again)
+constexpr size_t kMaxStartEffectDefs = 256;
 constexpr size_t kMaxNotesErrors = 8;
 
 std::string fmt(const char *p_format, ...) {
@@ -53,13 +52,13 @@ bool stopping(const M2aLoadInputs &p_in) {
 	return p_in.stop != nullptr && p_in.stop->load(std::memory_order_relaxed);
 }
 
-} // namespace
+}
 
 struct Bf3GameFx::Impl {
 	std::shared_ptr<const core::Install> install;
 	std::unique_ptr<core::gameplay::WeaponSources> sources;
 	std::optional<fx::EmitterAtlas> atlas;
-	fx::AtlasPixels pixels; // released after the upload
+	fx::AtlasPixels pixels;
 	std::optional<fx::ImpactTable> impacts;
 	std::unique_ptr<fx::EffectLibrary> library;
 	std::shared_ptr<const fx::FireEffectTable> fire;
@@ -70,10 +69,10 @@ struct Bf3GameFx::Impl {
 	FxDecalPool decals;
 	Bf3FxRenderer *renderer = nullptr;
 	uint64_t renderer_id = 0;
-	std::vector<std::string> catalogue; // the level's EffectBlueprint and EmitterDocument names (sorted)
-	std::unique_ptr<core::EbxLibrary> wide; // @all-mp, opened by the first start_effect of a name outside the level
+	std::vector<std::string> catalogue;
+	std::unique_ptr<core::EbxLibrary> wide;
 	bool wide_tried = false;
-	std::map<std::string, std::shared_ptr<const fx::EffectDef>, std::less<>> local_defs; // start_effect's compiles
+	std::map<std::string, std::shared_ptr<const fx::EffectDef>, std::less<>> local_defs;
 	std::vector<fx::MuzzleSample> muzzles;
 	std::vector<fx::EffectSoundCue> effect_cues;
 	std::vector<std::string> notes;
@@ -95,8 +94,6 @@ struct Bf3GameFx::Impl {
 		}
 	}
 
-	// A def for start_effect: the level's blueprint through the library, an EmitterDocument wrapped, or the @all-mp
-	// library's.
 	core::Result<std::shared_ptr<const fx::EffectDef>> resolve(std::string_view p_name) {
 		if (const auto it = local_defs.find(p_name); it != local_defs.end()) {
 			return it->second;
@@ -132,8 +129,7 @@ struct Bf3GameFx::Impl {
 		if (part == nullptr) {
 			return core::Error{ "start_effect: " + full + " does not parse" };
 		}
-		// An emitter partition's primary instance is its EmitterTemplateData; the EmitterDocument sits beside it (MP_012's
-		// oilfire, E8 (4)), so the partition counts as an EmitterDocument when it holds one.
+
 		const std::string_view type = part->primary().type_name() == "EffectBlueprint" || part->instances_of("EmitterDocument").empty()
 				? part->primary().type_name()
 				: std::string_view("EmitterDocument");
@@ -175,8 +171,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 	if (m.loaded) {
 		return core::Error{ "Bf3GameFx::load: loaded already" };
 	}
-	// A load after a shutdown (or after a failed load) starts from nothing: no catalogue, notes or tables carried over.
-	// (Loader thread: no Godot node is touched; shutdown cleared the decal pool and the renderer on the main thread.)
+
 	m.triggers.reset();
 	m.world.reset();
 	m.local_defs.clear();
@@ -203,7 +198,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 	if (!info) {
 		return core::Error{ "Bf3GameFx::load: unknown level " + level_id };
 	}
-	// The level's sources (its own EbxLibrary: the database's world is Phase B's and goes away after the load).
+
 	core::Result<core::gameplay::WeaponSources> src = core::gameplay::open_weapon_sources(m.install, info->superbundle);
 	if (!src) {
 		return core::Error{ "Bf3GameFx::load: " + level_id + ": " + src.error().message };
@@ -225,7 +220,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		}
 	}
 	std::sort(m.catalogue.begin(), m.catalogue.end());
-	// The emitter atlas and its pixels (the cache is valid here only).
+
 	{
 		const auto ta = std::chrono::steady_clock::now();
 		core::gameplay::WorkBudget budget{ fx::kDefaultCompileWorkLimit };
@@ -247,7 +242,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 	if (stopping(p_in)) {
 		return core::Error{ "Bf3GameFx::load: stopped" };
 	}
-	// The impact table of the level's material grid.
+
 	{
 		const std::optional<std::string> grid = core::gameplay::MaterialGrid::grid_of_level(lib, m.sources->level_partition);
 		if (!grid) {
@@ -260,7 +255,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		}
 		m.impacts.emplace(std::move(*impacts));
 	}
-	// The library: uncached (the cache pointer dies with the load; the preload below compiles in milliseconds).
+
 	fx::EffectLibrary::Sources s;
 	s.fx.db = &lib;
 	s.fx.digest = core::gameplay::library_partition_digest(lib);
@@ -268,7 +263,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 	s.atlas = &*m.atlas;
 	s.impacts = &*m.impacts;
 	m.library = std::make_unique<fx::EffectLibrary>(s);
-	// The fire effect table over the match's defs.
+
 	if (p_in.shared->gunplay) {
 		core::Result<fx::FireEffectTable> fire = fx::load_fire_effects(lib, p_in.shared->gunplay->defs);
 		if (!fire) {
@@ -279,7 +274,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		m.fire = std::make_shared<const fx::FireEffectTable>();
 		m.notes.push_back("no gunplay level: no fire effects (impacts and start_effect only)");
 	}
-	// E8 (1): every blueprint the kits and the impact table name.
+
 	{
 		const auto tp = std::chrono::steady_clock::now();
 		std::vector<std::string> names = m.fire->blueprints();
@@ -297,7 +292,7 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 	if (stopping(p_in)) {
 		return core::Error{ "Bf3GameFx::load: stopped" };
 	}
-	// The decal templates and textures.
+
 	{
 		const auto td = std::chrono::steady_clock::now();
 		const std::vector<std::string> names = fx::impact_decal_names(*m.impacts);
@@ -351,7 +346,7 @@ bool Bf3GameFx::build(Node3D *p_parent, std::string *r_error) {
 	if (!m.renderer->upload_atlas(m.pixels, &err)) {
 		return fail("Bf3GameFx::build: atlas: " + err);
 	}
-	// E8 (6): every entry's rect inside its uploaded atlas texture.
+
 	uint32_t uploaded = 0;
 	for (const fx::AtlasEntry &e : m.atlas->entries()) {
 		const bool inside = std::min(e.min_uv.x, e.max_uv.x) >= 0.0f && std::max(e.min_uv.x, e.max_uv.x) <= 1.0f && std::min(e.min_uv.y, e.max_uv.y) >= 0.0f &&
@@ -360,7 +355,7 @@ bool Bf3GameFx::build(Node3D *p_parent, std::string *r_error) {
 	}
 	m.stats.atlas_entries = uint32_t(m.atlas->entries().size());
 	m.stats.atlas_fallbacks = m.stats.atlas_entries - uploaded;
-	m.pixels = fx::AtlasPixels{}; // the GPU has them now
+	m.pixels = fx::AtlasPixels{};
 	if (!m.decals.build(m.renderer, m.decal_assets, &err)) {
 		return fail("Bf3GameFx::build: " + err);
 	}
@@ -380,7 +375,7 @@ void Bf3GameFx::step(const M2aFrame &p_frame) {
 	}
 	Bf3FxRenderer *renderer = m.live_renderer();
 	if (renderer == nullptr) {
-		return; // the parent freed it
+		return;
 	}
 	++m.stats.frames;
 	fx::FxTriggerConfig cfg = m.config;
@@ -390,7 +385,7 @@ void Bf3GameFx::step(const M2aFrame &p_frame) {
 		m.config = cfg;
 		m.triggers->set_config(cfg);
 	}
-	// The 1p muzzle is hidden with the viewmodel (free camera, own death): the own shots then play their 3p list.
+
 	m.muzzles.clear();
 	for (const fx::MuzzleSample &s : p_frame.muzzles) {
 		if (s.first_person && (p_frame.free_camera || !p_frame.own_alive)) {
@@ -413,7 +408,7 @@ void Bf3GameFx::step(const M2aFrame &p_frame) {
 	m.effect_cues.clear();
 	fx::effect_sound_cues(m.world->events(), m.effect_cues);
 	m.stats.effect_sounds += m.effect_cues.size();
-	// The frame's numbers.
+
 	m.stats.triggers = m.triggers->stats();
 	m.stats.effects_live = m.world->stats().live_effects;
 	m.stats.particles = uint32_t(m.world->particles().size());
@@ -532,4 +527,4 @@ void Bf3GameFx::shutdown() {
 	m.loaded = false;
 }
 
-} // namespace bf3::godot_side
+}

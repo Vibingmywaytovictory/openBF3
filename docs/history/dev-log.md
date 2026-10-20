@@ -3,8 +3,8 @@
 The milestone-by-milestone record that used to be the second half of README.md: what each step (M1, the S1-S4 and L1
 spikes, ui1/ui2, M2a and its waves, M2b, Playtest 1) built, how it was measured and what was merged, in the order it
 happened. It is history, kept for the numbers and the decisions it records; the system as it stands is described in
-[docs/architecture.md](../architecture.md), and the per-track designs are in [docs/design/](../design/). Code
-comments and `tools/play.cmd` that cite a README section by one of the headings below mean this file.
+[docs/architecture.md](../architecture.md), and the per-track designs are in [docs/design/](../design/).
+`tools/play.cmd` and the design documents that cite a README section by one of the headings below mean this file.
 
 ## M1 static world (T1)
 

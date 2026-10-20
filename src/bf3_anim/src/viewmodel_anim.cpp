@@ -1,5 +1,3 @@
-// The 1p viewmodel animator, its springs, the tuning file and the ADS camera (docs/design/m2a.md §11.1, §11.2;
-// docs/design/m2a-vm.md). See viewmodel_anim.h. Godot-free.
 #include "bf3/anim/viewmodel_anim.h"
 
 #include "bf3/anim/layers.h"
@@ -16,9 +14,8 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr float kDegToRad = float(kPi / 180.0);
-constexpr float kMaxFrameSeconds = 0.25f; // a longer display frame is clamped (a hitch must not explode a spring)
+constexpr float kMaxFrameSeconds = 0.25f;
 
-// Weights in [0, 1]; NaN counts as 0.
 float clamp01(float p_w) {
 	return p_w > 0.0f ? (p_w < 1.0f ? p_w : 1.0f) : 0.0f;
 }
@@ -32,13 +29,11 @@ Quat quat_axis_angle(float p_x, float p_y, float p_z, float p_radians) {
 	return Quat{ p_x * s, p_y * s, p_z * s, std::cos(p_radians * 0.5f) };
 }
 
-// Pitch about x (+ = muzzle up), then yaw about y (+ = left), then roll about z, in Godot's camera frame.
 Quat camera_rotation(float p_pitch_rad, float p_yaw_rad, float p_roll_rad) {
 	return quat_normalized(
 			quat_mul(quat_axis_angle(0, 1, 0, p_yaw_rad), quat_mul(quat_axis_angle(1, 0, 0, p_pitch_rad), quat_axis_angle(0, 0, 1, p_roll_rad))));
 }
 
-// 0 -> 1 -> 0 over u in [0, 1] (the procedural stand-ins' hump), 0 outside.
 float hump(float p_u) {
 	if (!(p_u > 0.0f) || p_u >= 1.0f) {
 		return 0.0f;
@@ -46,7 +41,7 @@ float hump(float p_u) {
 	return std::sin(float(kPi) * p_u);
 }
 
-} // namespace
+}
 
 const char *vm_clip_name(VmClip p_clip) {
 	switch (p_clip) {
@@ -106,11 +101,8 @@ const char *vm_cue_name(VmCue::Kind p_kind) {
 	return "?";
 }
 
-// ---- springs ----------------------------------------------------------------------------------------------
-
 void step_spring(const SpringParams &p_params, float p_target, float p_dt, SpringState &r_state) {
-	// The closed-form solution of x'' = -k (x - target) - c x' over p_dt with the target held: exact at any frame
-	// rate (a display frame of 1/30 s and eight of 1/240 s end in the same state), stable for every k, c >= 0.
+
 	const double dt = std::clamp(double(finite_or(p_dt, 0.0f)), 0.0, double(kMaxFrameSeconds));
 	const double target = double(finite_or(p_target, 0.0f));
 	if (!std::isfinite(r_state.x) || !std::isfinite(r_state.v)) {
@@ -149,7 +141,7 @@ void step_spring(const SpringParams &p_params, float p_target, float p_dt, Sprin
 			v = e * (v0 * cs - (a * v0 + k * y0) / wd * sn);
 		} else {
 			const double r = w * std::sqrt(zeta * zeta - 1.0);
-			const double r1 = -zeta * w + r; // the slow root
+			const double r1 = -zeta * w + r;
 			const double r2 = -zeta * w - r;
 			const double c2 = (v0 - r1 * y0) / (r2 - r1);
 			const double c1 = y0 - c2;
@@ -175,8 +167,6 @@ float spring_impulse_for_peak(const SpringParams &p_params, float p_peak) {
 	return p_peak * omega * float(std::exp(1.0));
 }
 
-// ---- tuning file ------------------------------------------------------------------------------------------
-
 namespace {
 
 enum class KeyType : uint8_t { Float, Bool };
@@ -195,7 +185,6 @@ struct KeyDef {
 			{ #s ".settle_epsilon", KeyType::Float, 1e-6f, 1.0f, BF3_VM_FIELD(s.settle_epsilon) }, \
 			{ #s ".settle_seconds", KeyType::Float, 0.01f, 10.0f, BF3_VM_FIELD(s.settle_seconds) }
 
-// Ranges keep a hostile or mistyped file from making a spring diverge or a transition divide by zero.
 const KeyDef kKeys[] = {
 	BF3_VM_SPRING(sway),
 	{ "sway_scale", KeyType::Float, 0.0f, 1.0f, BF3_VM_FIELD(sway_scale) },
@@ -233,7 +222,7 @@ std::string_view trim(std::string_view p_text) {
 }
 
 std::string shown(std::string_view p_text) {
-	// At most 40 bytes of a bad value in a message, non-printable bytes as '?'.
+
 	std::string out;
 	for (size_t i = 0; i < p_text.size() && i < 40; ++i) {
 		const char c = p_text[i];
@@ -251,7 +240,7 @@ std::string number_text(float p_value) {
 	return std::string(buffer, r.ptr);
 }
 
-} // namespace
+}
 
 core::Result<ViewmodelTuning> parse_viewmodel_tuning(std::string_view p_text) {
 	ViewmodelTuning t;
@@ -347,8 +336,6 @@ std::string format_viewmodel_tuning(const ViewmodelTuning &p_tuning) {
 	return out;
 }
 
-// ---- ADS camera -------------------------------------------------------------------------------------------
-
 float smoothstep01(float p_x) {
 	const float x = clamp01(p_x);
 	return x * x * (3.0f - 2.0f * x);
@@ -366,8 +353,6 @@ void AdsCamera::reset() {
 
 namespace {
 
-// Moves p_progress linearly towards p_target (0 or 1) at 1 / seconds per second; a value within 1e-5 of the target
-// snaps to it (k frames of T / k seconds must land on 1, not 0.99999).
 float advance_progress(float p_progress, bool p_target, float p_in_seconds, float p_out_seconds, float p_dt) {
 	const float seconds = p_target ? p_in_seconds : p_out_seconds;
 	const float rate = seconds > 1e-4f ? 1.0f / seconds : 1e4f;
@@ -381,7 +366,7 @@ float advance_progress(float p_progress, bool p_target, float p_in_seconds, floa
 	return p;
 }
 
-} // namespace
+}
 
 AdsFrame AdsCamera::step(const AdsParams &p_params, bool p_zoomed, float p_dt) {
 	const float dt = std::clamp(finite_or(p_dt, 0.0f), 0.0f, kMaxFrameSeconds);
@@ -410,32 +395,29 @@ ViewAngles camera_view_angles(double p_view_yaw, double p_view_pitch, float p_re
 	return a;
 }
 
-// ---- animator ---------------------------------------------------------------------------------------------
-
 namespace {
 
 struct Action {
 	bool active = false;
 	VmClip role = VmClip::Idle;
-	double start = 0; // predicted time of its cue
-	float seconds = 0; // clip length, or the procedural stand-in's duration
+	double start = 0;
+	float seconds = 0;
 	bool procedural = false;
-	bool cut_in = false; // full weight from the start (deploy)
-	double fade_out_start = -1; // >= 0: fading out from then (cancelled, cut by a shot)
-	float fade_from = 1; // weight when the fade-out began
+	bool cut_in = false;
+	double fade_out_start = -1;
+	float fade_from = 1;
 };
 
-} // namespace
+}
 
-// PT1 run [loco]: the 1p run / sprint delta layer (defined in the PT1 run block at the end of this file).
-struct VmPt1Loco; // PT1 run [loco]
-struct VmPt1LocoDeleter { // PT1 run [loco]
-	void operator()(VmPt1Loco *p_loco) const; // PT1 run [loco]
-}; // PT1 run [loco]
-// PT1 run [loco]: applies the deltas over r_pose; false when the item has none (the bob stays on).
-bool vm_pt1_apply(VmPt1Loco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose, // PT1 run [loco]
-		ViewmodelOutput &r_out); // PT1 run [loco]
-void vm_pt1_reset(VmPt1Loco &r_loco); // PT1 run [loco]
+struct VmPt1Loco;
+struct VmPt1LocoDeleter {
+	void operator()(VmPt1Loco *p_loco) const;
+};
+
+bool vm_pt1_apply(VmPt1Loco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose,
+		ViewmodelOutput &r_out);
+void vm_pt1_reset(VmPt1Loco &r_loco);
 
 struct ViewmodelAnimator::Impl {
 	const Skeleton &rig;
@@ -449,9 +431,8 @@ struct ViewmodelAnimator::Impl {
 	double time = 0;
 	bool have_time = false;
 
-	// ADS base layer: the direction of the current transition and whether the zoom clip may drive it.
 	float last_ads = 0;
-	int ads_dir = 0; // +1 going in, -1 going out, 0 at rest
+	int ads_dir = 0;
 	bool ads_clip_ok = false;
 
 	float sprint_w = 0;
@@ -460,7 +441,7 @@ struct ViewmodelAnimator::Impl {
 
 	SpringState sway_x, sway_y, bob_amp, kick_back, kick_pitch, cam_pitch, cam_yaw;
 	float sway_tx = 0, sway_ty = 0, bob_target = 0;
-	std::unique_ptr<VmPt1Loco, VmPt1LocoDeleter> pt1; // PT1 run [loco]: set_locomotion (null: none)
+	std::unique_ptr<VmPt1Loco, VmPt1LocoDeleter> pt1;
 
 	Impl(const Skeleton &p_rig, std::span<const VmClipRef, kVmClips> p_clips, const ViewmodelTuning &p_tuning) :
 			rig(p_rig), tuning(p_tuning) {
@@ -495,7 +476,6 @@ struct ViewmodelAnimator::Impl {
 		return r.tracks ? r.tracks->duration_seconds() : 0.0f;
 	}
 
-	// The clip of p_role at p_seconds (clamped to the clip) applied over r_pose (bones it does not drive stay).
 	void apply_clip_at(VmClip p_role, float p_seconds, LocalPose &r_pose) {
 		const VmClipRef &r = ref(p_role);
 		if (r.clip == nullptr || r.tracks == nullptr) {
@@ -547,8 +527,6 @@ struct ViewmodelAnimator::Impl {
 		}
 	}
 
-	// The action's weight over the base layer at p_t: ramps in over the crossfade (unless cut in), out over its
-	// last crossfade or from a fade-out.
 	float weight_of(const Action &p_a, double p_t) const {
 		if (!p_a.active) {
 			return 0.0f;
@@ -581,15 +559,12 @@ struct ViewmodelAnimator::Impl {
 		return t >= double(p_a.seconds);
 	}
 
-	// The action pose of p_a over r_pose (which holds the base); procedural roles leave the pose alone (their motion
-	// is the camera-space offset).
 	void action_pose(const Action &p_a, double p_t, LocalPose &r_pose) {
 		if (!p_a.procedural) {
 			apply_clip_at(p_a.role, float(p_t - p_a.start), r_pose);
 		}
 	}
 
-	// The camera-space motion of a procedural action at weight p_w.
 	void procedural_offset(const Action &p_a, double p_t, float p_w, float &r_dy, float &r_dz, float &r_pitch, float &r_roll) {
 		if (!p_a.active || !p_a.procedural || p_a.seconds <= 0.0f || p_w <= 0.0f) {
 			return;
@@ -640,7 +615,7 @@ struct ViewmodelAnimator::Impl {
 					break;
 				}
 				if (ref(VmClip::Throw).seconds > 0.0f || has_clip(VmClip::Throw)) {
-					// A grenade's shot is its throw (the sim also sends kThrown at the same time: one action).
+
 					if (!(cur.active && cur.role == VmClip::Throw && std::fabs(cur.start - t) < 1e-6)) {
 						start_action(VmClip::Throw, t, false);
 					}
@@ -651,13 +626,13 @@ struct ViewmodelAnimator::Impl {
 				kick_back.v += spring_impulse_for_peak(tuning.kick, tuning.kick_back * kick_scale);
 				kick_pitch.v += spring_impulse_for_peak(tuning.kick, tuning.kick_pitch_deg * kick_scale);
 				cam_pitch.v += spring_impulse_for_peak(tuning.camera_recoil, tuning.camera_kick_pitch_deg);
-				// A small alternating yaw (deterministic; the predicted recoil carries the real horizontal kick).
+
 				const float yaw_sign = ((shots * 2654435761u) >> 31) ? 1.0f : -1.0f;
 				cam_yaw.v += spring_impulse_for_peak(tuning.camera_recoil, 0.25f * tuning.camera_kick_pitch_deg * yaw_sign);
 				if (fire_clip) {
 					start_action(has_clip(VmClip::FireSingle) ? VmClip::FireSingle : VmClip::Fire, t, false);
 				} else if (cur.active && cur.role != VmClip::Fire) {
-					// No fire clip: a shot cuts a running action (a reload past ReloadTime) with the crossfade.
+
 					fade_out(t);
 				}
 				break;
@@ -686,7 +661,7 @@ struct ViewmodelAnimator::Impl {
 			case VmCue::Kind::DeployFinished:
 			case VmCue::Kind::ReloadCommitted:
 			case VmCue::Kind::ReloadFinished:
-				break; // the clip plays on at its authored rate (§16 Q4)
+				break;
 		}
 	}
 
@@ -705,11 +680,10 @@ struct ViewmodelAnimator::Impl {
 			cur = Action{};
 		}
 
-		// ---- base layer: idle / zoom / sprint ----
 		const float ads = clamp01(p_input.ads);
 		int dir = ads > last_ads + 1e-6f ? 1 : (ads < last_ads - 1e-6f ? -1 : 0);
 		if (dir != 0 && dir != ads_dir) {
-			// A transition starts: the zoom clip may drive it only from the end it starts at.
+
 			ads_clip_ok = (dir > 0 && last_ads <= 1e-6f) || (dir < 0 && last_ads >= 1.0f - 1e-6f);
 		}
 		if (dir == 0 && (ads <= 0.0f || ads >= 1.0f)) {
@@ -725,7 +699,7 @@ struct ViewmodelAnimator::Impl {
 		if (ads_dir != 0 && ads > 0.0f && ads < 1.0f) {
 			base_clip = uint32_t(zoom_role);
 			if (ads_clip_ok && has_clip(zoom_role) && !zr.stand_in) {
-				// The authored path at the blend's progress (ZoomOut runs from aimed to hip).
+
 				const float progress = ads_dir > 0 ? ads : 1.0f - ads;
 				apply_clip_frame(zoom_role, progress * float(zr.tracks->end_frame), base);
 			} else {
@@ -749,7 +723,6 @@ struct ViewmodelAnimator::Impl {
 			base_clip = uint32_t(VmClip::Sprint);
 		}
 
-		// ---- action layer ----
 		r_pose = base;
 		float dy = 0, dz = 0, pitch = 0, roll = 0, yaw = 0;
 		for (Action *a : { &prev, &cur }) {
@@ -778,16 +751,15 @@ struct ViewmodelAnimator::Impl {
 			pitch -= 10.0f * kDegToRad * s;
 		}
 
-		const bool pt1_deltas = pt1 && vm_pt1_apply(*pt1, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out); // PT1 run [loco]
+		const bool pt1_deltas = pt1 && vm_pt1_apply(*pt1, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
 
-		// ---- springs ----
 		const float speed = std::max(0.0f, finite_or(p_input.speed, 0.0f));
 		sway_tx = std::clamp(finite_or(p_input.view_yaw_rate, 0.0f) * tuning.sway_scale, -tuning.sway_max, tuning.sway_max);
 		sway_ty = std::clamp(-finite_or(p_input.view_pitch_rate, 0.0f) * tuning.sway_scale, -tuning.sway_max, tuning.sway_max);
 		step_spring(tuning.sway, sway_tx, dt, sway_x);
 		step_spring(tuning.sway, sway_ty, dt, sway_y);
 		const float move = p_input.grounded ? std::min(speed / 4.0f, 1.5f) : 0.0f;
-		bob_target = pt1_deltas ? 0.0f : tuning.bob_amplitude * move * (1.0f + (tuning.bob_ads_scale - 1.0f) * ads); // PT1 run [loco]: the deltas replace the bob
+		bob_target = pt1_deltas ? 0.0f : tuning.bob_amplitude * move * (1.0f + (tuning.bob_ads_scale - 1.0f) * ads);
 		step_spring(tuning.bob, bob_target, dt, bob_amp);
 		bob_phase += 2.0 * kPi * double(tuning.bob_frequency) * double(std::max(move, 0.0f)) * double(dt);
 		bob_phase = std::fmod(bob_phase, 2.0 * kPi);
@@ -839,9 +811,9 @@ struct ViewmodelAnimator::Impl {
 		shots = 0;
 		sway_x = sway_y = bob_amp = kick_back = kick_pitch = cam_pitch = cam_yaw = SpringState{};
 		sway_tx = sway_ty = bob_target = 0;
-		if (pt1) { // PT1 run [loco]
-			vm_pt1_reset(*pt1); // PT1 run [loco]
-		} // PT1 run [loco]
+		if (pt1) {
+			vm_pt1_reset(*pt1);
+		}
 	}
 };
 
@@ -866,9 +838,7 @@ std::array<SpringState, 7> ViewmodelAnimator::springs() const {
 	return { impl_->sway_x, impl_->sway_y, impl_->bob_amp, impl_->kick_back, impl_->kick_pitch, impl_->cam_pitch, impl_->cam_yaw };
 }
 
-} // namespace bf3::anim
-
-// ---- PT1 run (docs/design/pt1-run.md; viewmodel_anim.h's PT1 run block) -----------------------------------------------
+}
 
 namespace bf3::anim {
 
@@ -909,7 +879,6 @@ bool vm_pt1_usable(const Skeleton &p_rig, VmDeltaClip &r_d, BoneMask &r_mask) {
 	return r_mask.size() == p_rig.size();
 }
 
-// p_frame advanced by p_frames, wrapped into the window [start, end).
 float vm_pt1_advance(float p_frame, float p_frames, const VmDeltaClip &p_d) {
 	const float len = p_d.end_frame - p_d.start_frame;
 	if (!(len > 0.0f) || !std::isfinite(p_frames)) {
@@ -923,7 +892,7 @@ float vm_pt1_advance(float p_frame, float p_frames, const VmDeltaClip &p_d) {
 	return p_d.start_frame + f;
 }
 
-} // namespace
+}
 
 bool vm_pt1_apply(VmPt1Loco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose,
 		ViewmodelOutput &r_out) {
@@ -983,4 +952,4 @@ void ViewmodelAnimator::set_locomotion(const VmLocomotion &p_locomotion) {
 	m.pt1 = l->run_ok || l->sprint_ok ? std::move(l) : nullptr;
 }
 
-} // namespace bf3::anim
+}

@@ -32,7 +32,6 @@ bool same_bytes(const std::vector<T> &p_a, const std::vector<T> &p_b) {
 	return p_a.size() == p_b.size() && (p_a.empty() || std::memcmp(p_a.data(), p_b.data(), p_a.size() * sizeof(T)) == 0);
 }
 
-// Reads one per-vertex array of p_per_vertex x n elements when its bit is set.
 template <class T>
 void read_array(core::BlobReader &r_r, uint32_t p_mask, uint32_t p_bit, size_t p_per_vertex, size_t p_n, std::vector<T> &r_out) {
 	if ((p_mask & p_bit) == 0) {
@@ -43,7 +42,6 @@ void read_array(core::BlobReader &r_r, uint32_t p_mask, uint32_t p_bit, size_t p
 	r_r.array<T>(p_per_vertex * p_n, r_out);
 }
 
-// Positions and indices are always written (p_always); the optional arrays when present, as their mask bit says.
 template <class T>
 void write_array(core::BlobWriter &r_w, const std::vector<T> &p_values, bool p_always = false) {
 	if (p_values.empty() && !p_always) {
@@ -53,7 +51,7 @@ void write_array(core::BlobWriter &r_w, const std::vector<T> &p_values, bool p_a
 	r_w.array(p_values);
 }
 
-} // namespace
+}
 
 uint64_t PreparedMeshSet::vertices() const {
 	uint64_t n = 0;
@@ -128,7 +126,7 @@ core::Result<PreparedMeshSet> decode_mesh_blob(std::span<const uint8_t> p_blob) 
 	PreparedMeshSet out;
 	out.name = r.str(kMaxName);
 	const bool skinned = r.boolean();
-	// A LOD takes at least 12 bytes, a surface at least 8 + 4 + 4 + 1 + 12 + 24 bytes.
+
 	const size_t lods = r.count(12, kMaxLodIndex);
 	out.lods.reserve(lods);
 	out.meshes.reserve(lods);
@@ -273,7 +271,7 @@ std::optional<core::CacheKey> mesh_cache_key(const core::LevelMount &p_mount, co
 		}
 		const core::res::GeometrySource &g = p_head.mesh.lods[l].geometry;
 		if (g.is_inline) {
-			continue; // inside the res payload, covered by its SHA1
+			continue;
 		}
 		const core::Guid id = core::Guid::from_bytes(g.chunk.bytes.data());
 		if (std::find(chunks.begin(), chunks.end(), id) != chunks.end()) {
@@ -384,7 +382,7 @@ core::Result<CachedMesh> load_mesh_cached(core::Cache *p_cache, const core::Leve
 		return item.error();
 	}
 	out.item = std::move(*item);
-	// Keys are by content: the blob may come from another res with the same bytes.
+
 	out.mesh.name = p_head.name;
 	for (PreparedMesh &m : out.mesh.meshes) {
 		m.name = p_head.name;
@@ -417,4 +415,4 @@ bool same_prepared(const PreparedMesh &p_a, const PreparedMesh &p_b) {
 	return true;
 }
 
-} // namespace bf3::render
+}

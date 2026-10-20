@@ -1,26 +1,5 @@
-// m2b.contract (docs/design/m2b.md §11, §2.6; written in W1.0 by the integrator, docs/design/m2b-w1.md): compiles every
-// wave-1 interface header together with tests/tdm_fixture.h and pins
-//   * the shapes the tracks share: PresentEvent 64 B, net::PlayerRow 32 B without padding, the trivially copyable
-//     MatchState / PlayerRow / ReviveEvent / SpawnRequest / DownedSoldier / RulesStats / PresentationFrame;
-//   * the enum values of §2.6 #5 (NativePortMeaning 16 .. 29) and #11 (MessageType 25 .. 27), PresentKind::Revive 9,
-//     RoundPhase, SpawnRefusal, RulesOrder::Kind, rules_flags, restrict_bits, the W1.0 constants (kKitGadgetSlot,
-//     kKeepKit, kMaxPlayerRows, kMaxPlayerNameBytes, kKitSlots unchanged);
-//   * the defaults of every field W1.0 added (an M2a config, load and server stay M2a: §11.1 "Without rules");
-//   * net::restrict_command, the one pure function both ends apply to the pre-round freeze (§3.7);
-//   * the hashes that must not move without rules: motor_params_hash of a default MotorParams and kit_table_hash of a
-//     default KitTable, recorded at W1.0 (motor_tuning.cpp and kits.cpp are main's 36eb5af there);
-//   * the W1.0 stubs: the v3 codecs (empty / "v3 codec: nt") and add_tdm_bots ("W1.0 stub"), and GameServer::init
-//     with the W1.0 hooks on the synthetic floor (no rules, no TDM bots: unchanged; ServerView's defaults).
-// No install, no session thread, no wall-clock row.
-//
-// Pending rows (the M2a pattern, m2a_contract_tests.cpp): a row whose subject is a track's body runs only when its
-// owner sets the switch below in the commit that lands the body; until then it prints "PENDING (<key>)" and checks
-// what the contract alone defines. Calls of declared-only functions sit in `if constexpr` branches (a discarded
-// statement does not odr-use them), so the test links before their bodies exist.
-
 #include <doctest/doctest.h>
 
-// Every wave-1 interface header, compiled together.
 #include "bf3/audio/hdr_window.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/voice_cull.h"
@@ -60,11 +39,10 @@ namespace sl = bf3::sim::logic;
 
 namespace {
 
-// ---- the tracks' switches (each set to true by its owner, in the commit that lands the body) ------------------
-constexpr bool kNtLanded = true; // nt: the v3 codecs (R9), kProtocolVersion 3
-constexpr bool kRuLanded = true; // ru: [abort hash], the KitTable defib hash, the rules in GameServer::init ([init])
-constexpr bool kBbLanded = true; // bb: add_tdm_bots
-constexpr bool kAuLanded = true; // au: HdrWindow (E10's window numbers)
+constexpr bool kNtLanded = true;
+constexpr bool kRuLanded = true;
+constexpr bool kBbLanded = true;
+constexpr bool kAuLanded = true;
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2b.contract: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);
@@ -72,11 +50,8 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	MESSAGE(text);
 }
 
-// The hashes recorded at W1.0 (see the file comment).
-constexpr uint64_t kDefaultMotorParamsHash = 0x346282435cd97947ull; // motor_tuning.cpp as on main 36eb5af
-constexpr uint64_t kDefaultKitTableHash = 0xa23fb7a00909ad6dull; // kits.cpp as on main 36eb5af
-
-// ---- shapes ----------------------------------------------------------------------------------------------------
+constexpr uint64_t kDefaultMotorParamsHash = 0x346282435cd97947ull;
+constexpr uint64_t kDefaultKitTableHash = 0xa23fb7a00909ad6dull;
 
 static_assert(sizeof(host::PresentEvent) == 64);
 static_assert(sizeof(net::PlayerRow) == 32);
@@ -96,10 +71,8 @@ static_assert(std::is_base_of_v<host::RespawnPolicy, host::TdmRules> && std::is_
 static_assert(std::is_base_of_v<host::CommandSource, host::TdmBrain>);
 static_assert(std::tuple_size_v<decltype(host::PresentationFrame::players)> == net::kMaxPlayerRows);
 
-// ---- enum values and constants (§2.6 #5, #11, #12) --------------------------------------------------------------
-
 using M = sl::NativePortMeaning;
-static_assert(uint8_t(M::Activate) == 15); // the last S4 value: the M2b ones follow it
+static_assert(uint8_t(M::Activate) == 15);
 static_assert(uint8_t(M::Kills) == 16 && uint8_t(M::KillLimit) == 17 && uint8_t(M::TeamWins) == 18 && uint8_t(M::StopTime) == 19);
 static_assert(uint8_t(M::UnSpawnAllSoldiers) == 20 && uint8_t(M::OnPlayerSpawned) == 21 && uint8_t(M::OnPlayerDied) == 22);
 static_assert(uint8_t(M::OnSpectatorEnter) == 23 && uint8_t(M::PlayerEnter) == 24 && uint8_t(M::DisableAllowedToSpawnOn) == 25);
@@ -108,7 +81,7 @@ static_assert(uint8_t(M::EnablePlayerMovement) == 29);
 
 static_assert(uint8_t(net::MessageType::MatchState) == 25 && uint8_t(net::MessageType::PlayerList) == 26 &&
 		uint8_t(net::MessageType::SpawnRequest) == 27);
-static_assert(uint8_t(net::MessageType::KitSelect) == 24 && uint8_t(net::MessageType::Debug) == 30); // the neighbours stay
+static_assert(uint8_t(net::MessageType::KitSelect) == 24 && uint8_t(net::MessageType::Debug) == 30);
 static_assert(uint8_t(host::PresentKind::Spawn) == 8 && uint8_t(host::PresentKind::Revive) == 9);
 
 static_assert(uint8_t(sl::RoundPhase::PreRound) == 0 && uint8_t(sl::RoundPhase::InRound) == 1 && uint8_t(sl::RoundPhase::RoundOver) == 2 &&
@@ -126,12 +99,9 @@ static_assert(net::rules_flags::kTdm == 1 && net::rules_flags::kDeployScreen == 
 static_assert(net::restrict_bits::kThrottle == 1u && net::restrict_bits::kThrowGrenade == (1u << 12) && net::restrict_bits::kAll == 0x1FFFu);
 static_assert(net::kMaxPlayerRows == 64 && net::kMaxPlayerNameBytes == 16 && net::kPlayerListIntervalTicks == 15);
 static_assert(host::kKitGadgetSlot == 2 && host::kKeepKit == 0xFF && host::kKitCount == 4);
-static_assert(host::kKitSlots == std::array<uint8_t, 4>{ 0, 1, 6, 7 }); // §2.6 #9: not changed
+static_assert(host::kKitSlots == std::array<uint8_t, 4>{ 0, 1, 6, 7 });
 static_assert(core::audio::kNoScope == 0xFFFF);
 
-// ---- net::restrict_command (§3.7: the same function on both ends) ------------------------------------------------
-
-// Metro TDM's InputRestriction (m2b.md §3.1): Yaw, Pitch, Jump, Prone, Zoom, Reload allowed.
 constexpr uint32_t kMetroAllowed = net::restrict_bits::kYaw | net::restrict_bits::kPitch | net::restrict_bits::kJump | net::restrict_bits::kProne |
 		net::restrict_bits::kZoom | net::restrict_bits::kReload;
 
@@ -149,21 +119,21 @@ constexpr sim::Command busy_command(sim::Tick p_tick) {
 	c.view_back_q8 = 99;
 	return c;
 }
-// Restricted: the axes 0, Fire and Sprint released, everything else as it was.
+
 constexpr sim::Command kRestricted = net::restrict_command(busy_command(100), 101, kMetroAllowed);
 static_assert(kRestricted.move_forward == 0 && kRestricted.move_right == 0);
 static_assert(kRestricted.buttons ==
 		(sim::buttons::kJump | sim::buttons::kZoom | sim::buttons::kReload | (3u << sim::weapons::weapon_buttons::kSlotShift)));
 static_assert(kRestricted.yaw == 1234 && kRestricted.pitch == -56 && kRestricted.pose == sim::Pose::Crouch && kRestricted.sequence == 7 &&
 		kRestricted.view_back_q8 == 99);
-// Not restricted: until 0, the command at or after until, or everything allowed.
+
 static_assert(net::restrict_command(busy_command(100), 0, kMetroAllowed) == busy_command(100));
 static_assert(net::restrict_command(busy_command(101), 101, kMetroAllowed) == busy_command(101));
 static_assert(net::restrict_command(busy_command(100), 101, net::restrict_bits::kAll) == busy_command(100));
-// No known end.
+
 static_assert(net::restrict_command(busy_command(5000000), UINT32_MAX, kMetroAllowed).move_forward == 0);
 
-} // namespace
+}
 
 TEST_SUITE("m2b-contract") {
 	TEST_CASE("m2b.contract: the defaults of every W1.0 field keep M2a (§11.1 'Without rules')") {
@@ -177,7 +147,7 @@ TEST_SUITE("m2b-contract") {
 		const host::GameServerConfig server;
 		CHECK(server.rules.mode == host::MatchRulesConfig::Mode::None);
 		CHECK(server.tdm_bots == nullptr);
-		CHECK(server.respawn_ticks == 60); // M2a's fallback stays
+		CHECK(server.respawn_ticks == 60);
 		const host::SharedLoadOptions load;
 		CHECK_FALSE(load.tdm);
 		const host::SharedLevel level;
@@ -224,7 +194,7 @@ TEST_SUITE("m2b-contract") {
 		CHECK(natives.max_players == 32);
 		CHECK(natives.kill_limit_override == 0);
 		CHECK(natives.preround_override_s == doctest::Approx(-1.0f));
-		const sim::SpawnQuery query; // §3.5's data and named defaults
+		const sim::SpawnQuery query;
 		CHECK(query.protection_radius == doctest::Approx(10.0f));
 		CHECK(query.friendly_block_radius == doctest::Approx(30.0f));
 		CHECK(query.friendly_block_count == 3);
@@ -232,7 +202,7 @@ TEST_SUITE("m2b-contract") {
 		CHECK(query.max_los_rays == 16);
 		CHECK(query.world == nullptr);
 
-		const sim::bots::PerceptionParams perception; // §5.1
+		const sim::bots::PerceptionParams perception;
 		CHECK(perception.fov_h_deg == doctest::Approx(160.0f));
 		CHECK(perception.fov_v_deg == doctest::Approx(90.0f));
 		CHECK(perception.max_range_m == doctest::Approx(120.0f));
@@ -240,11 +210,11 @@ TEST_SUITE("m2b-contract") {
 		CHECK(perception.max_candidates == 4);
 		CHECK(perception.forget_s == doctest::Approx(3.0f));
 		CHECK(perception.hearing_radius_m == doctest::Approx(60.0f));
-		const sim::bots::AimParams aim; // §5.3
+		const sim::bots::AimParams aim;
 		CHECK(aim.e0_deg == doctest::Approx(3.0f));
 		CHECK(aim.e_inf_deg == doctest::Approx(0.5f));
 		CHECK(aim.tau_s == doctest::Approx(0.6f));
-		const host::TdmBotConfig bots; // §5.3, §5.6, J5, J6
+		const host::TdmBotConfig bots;
 		CHECK(bots.count == 31);
 		CHECK(bots.skill_min == doctest::Approx(0.3f));
 		CHECK(bots.skill_max == doctest::Approx(0.8f));
@@ -252,7 +222,7 @@ TEST_SUITE("m2b-contract") {
 		CHECK(bots.reaction_max_s == doctest::Approx(0.6f));
 		CHECK(bots.revive_radius_m == doctest::Approx(30.0f));
 
-		const core::audio::HdrSetting hdr; // §6.1: the data's values
+		const core::audio::HdrSetting hdr;
 		CHECK(hdr.window_size_db == doctest::Approx(45.0f));
 		CHECK(hdr.window_min_top_db == doctest::Approx(80.0f));
 		CHECK(hdr.window_min_bottom_db == doctest::Approx(35.0f));
@@ -271,7 +241,7 @@ TEST_SUITE("m2b-contract") {
 		if constexpr (kRuLanded) {
 			sim::MotorParams aborting;
 			aborting.protect_abort_buttons = sim::buttons::kFire;
-			CHECK(sim::motor_params_hash(aborting) != motor); // [abort hash]: set fields are hashed
+			CHECK(sim::motor_params_hash(aborting) != motor);
 			aborting.protect_abort_buttons = 0;
 			aborting.protect_abort_move = true;
 			CHECK(sim::motor_params_hash(aborting) != motor);
@@ -344,7 +314,7 @@ TEST_SUITE("m2b-contract") {
 			return;
 		}
 		{
-			host::GameServer server; // no rules, no TDM bots: M2a's init
+			host::GameServer server;
 			host::GameServerConfig cfg;
 			cfg.level = level;
 			cfg.max_slots = 8;
@@ -356,7 +326,7 @@ TEST_SUITE("m2b-contract") {
 			CHECK(view.kit(0) == 0);
 		}
 		{
-			host::GameServer server; // a config with no bots adds nothing
+			host::GameServer server;
 			host::GameServerConfig cfg;
 			cfg.level = level;
 			cfg.max_slots = 8;
@@ -374,7 +344,7 @@ TEST_SUITE("m2b-contract") {
 		cfg.tdm_bots = bots;
 		const core::Status st = server.init(cfg);
 		if constexpr (kBbLanded) {
-			// bb's add_tdm_bots: TDM bots need the rules; without them bb refuses or adds them (bb states which).
+
 			MESSAGE("add_tdm_bots without rules: " << (st.ok() ? std::string("ok") : st.error().message));
 		} else {
 			REQUIRE_FALSE(st.ok());
@@ -382,7 +352,7 @@ TEST_SUITE("m2b-contract") {
 			pending("bb", "add_tdm_bots adds the brains", "the W1.0 stub refuses a config with bots");
 		}
 		if constexpr (kRuLanded) {
-			host::GameServer tdm; // rules on a level without a logic graph: [init] refuses
+			host::GameServer tdm;
 			host::GameServerConfig c;
 			c.level = level;
 			c.max_slots = 8;
@@ -399,12 +369,12 @@ TEST_SUITE("m2b-contract") {
 			window.configure(core::audio::HdrSetting{}, audio::kMixRate);
 			window.reset();
 			for (int i = 0; i < 100; ++i) {
-				window.step(71.0f, audio::kBlockFrames); // a 71 dB footstep alone
+				window.step(71.0f, audio::kBlockFrames);
 			}
 			CHECK(window.top_db() == doctest::Approx(80.0f).epsilon(0.006));
 			CHECK(window.bottom_db() == doctest::Approx(35.0f).epsilon(0.015));
 			for (int i = 0; i < 100; ++i) {
-				window.step(110.0f, audio::kBlockFrames); // a 110 dB shot
+				window.step(110.0f, audio::kBlockFrames);
 			}
 			CHECK(window.top_db() == doctest::Approx(110.0f).epsilon(0.005));
 			CHECK(window.bottom_db() == doctest::Approx(65.0f).epsilon(0.008));

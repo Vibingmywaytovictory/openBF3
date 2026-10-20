@@ -1,11 +1,3 @@
-// Spawn points, settle, the spawn choice and the deterministic test-course searches (docs/design/m1.md §10, §14;
-// the header spawn.h is the contract).
-//
-// Settle (§10.2): place_spawn finds the floor under the point (a kMovement ray from 1 m above to 2 m below),
-// puts the feet on it plus the character padding, lifts in 0.1 m steps up to 0.6 m when the stand shape does not
-// fit, then searches rings of 0.1 m up to 0.5 m (8 samples each, closest ring first, each sample on its own floor);
-// the caller runs the idle ticks; judge_settle accepts a grounded, non-overlapping soldier whose feet are within
-// padding + 1 cm of the floor under it, lifted and shifted within the limits.
 #include "bf3/sim/spawn.h"
 
 #include "bf3/core/level/spawn_points.h"
@@ -25,7 +17,7 @@ namespace bf3::sim {
 namespace {
 
 constexpr float kLiftStep = 0.1f;
-// Floor normals within this of up count as level for the test courses (docs §14: "normals within 2 degrees").
+
 const float kLevelCos = std::cos(2.0f * kPi / 180.0f);
 
 bool finite3(const Vec3 &p_v) {
@@ -38,7 +30,6 @@ float horizontal_distance(const Vec3 &p_a, const Vec3 &p_b) {
 	return std::sqrt(dx * dx + dz * dz);
 }
 
-// The floor under (p_x, p_z), searched from p_top down to p_bottom: the first kMovement surface a ray meets.
 bool floor_at(const CollisionWorld &p_world, float p_x, float p_z, float p_top, float p_bottom, StaticHit &r_hit) {
 	if (!(p_top > p_bottom)) {
 		return false;
@@ -46,10 +37,6 @@ bool floor_at(const CollisionWorld &p_world, float p_x, float p_z, float p_top, 
 	return p_world.ray({ p_x, p_top, p_z }, { 0.0f, p_bottom - p_top, 0.0f }, query_mask::kMovement, &r_hit);
 }
 
-// How far the bottom sphere of a soldier standing at p_feet (radius p_radius) can drop straight down before it
-// touches kMovement geometry, at most p_depth: a hover gap that bridges floor seams, stands on an edge the centre
-// misses, and is ~0 on a slope (where the feet rest r / cos - r above the surface under the centre). The sphere
-// starts p_lift above the feet (inside the settled stand shape, so it is free); a start in contact gives -p_lift.
 bool drop_below(const CollisionWorld &p_world, const Vec3 &p_feet, float p_radius, float p_lift, float p_depth, float &r_drop) {
 	const Vec3 start = { p_feet[0], p_feet[1] + p_lift, p_feet[2] };
 	StaticHit h;
@@ -60,15 +47,12 @@ bool drop_below(const CollisionWorld &p_world, const Vec3 &p_feet, float p_radiu
 	return true;
 }
 
-// Course lips (find_clear_heading): a stand capsule this far above the feet, swept along the course, meets any
-// step, curb, mat or seam higher than this under its whole footprint (a 4 mm mat on Metro bumps a walker 1 cm up and
-// costs 3 % of its speed for a tick: sim.motor).
 constexpr float kCourseLip = 0.002f;
-// Floor samples along a course: spacing and probe sphere (the motor's hug probe size).
+
 constexpr float kCourseProbeRadius = 0.05f;
 constexpr float kCourseRayStep = 0.1f;
 
-} // namespace
+}
 
 std::vector<SpawnPoint> to_spawn_points(const core::level::LevelSpawns &p_spawns) {
 	std::vector<SpawnPoint> out;
@@ -79,8 +63,7 @@ std::vector<SpawnPoint> to_spawn_points(const core::level::LevelSpawns &p_spawns
 		p.position = { d.transform.trans[0], d.transform.trans[1], d.transform.trans[2] };
 		const float fx = d.transform.forward[0];
 		const float fz = d.transform.forward[2];
-		// Yaw 0 looks down +Z, a quarter turn down +X (command.h): yaw = atan2(forward.x, forward.z). Not replicated
-		// arithmetic (the result is quantised once, here, and sent as the point's yaw).
+
 		p.yaw = (fx * fx + fz * fz) > 1e-12f ? quantize_yaw(std::atan2(fx, fz)) : uint16_t(0);
 		p.team = d.team;
 		p.priority = std::isfinite(d.priority) ? d.priority : 0.0f;
@@ -102,11 +85,10 @@ SettleResult place_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_wo
 		r.failure = "the point is not finite";
 		return r;
 	}
-	// The floor under the point; without one (a crack or seam in the floor right under it) the rings look nearby.
+
 	StaticHit floor;
 	const bool has_floor = floor_at(p_world, at[0], at[2], at[1] + p_options.probe_up, at[1] - p_options.probe_down, floor);
-	// Straight up from the floor first, then the rings (each sample with the same lifts: a point on a slope next to
-	// a wall needs both).
+
 	const uint32_t lifts = uint32_t(std::floor(std::max(p_options.max_lift, 0.0f) / kLiftStep + 1e-3f));
 	const auto try_lifts = [&](float p_x, float p_z, float p_floor) {
 		for (uint32_t k = 0; k <= lifts; ++k) {
@@ -164,12 +146,11 @@ void judge_settle(const SoldierMotor &p_motor, const CollisionWorld &p_world, co
 	const SoldierState &s = r_result.state;
 	r_result.shift = horizontal_distance(s.position, p_point.position);
 	r_result.lift = r_result.placed[1] - p_point.position[1];
-	// Sinking: the stand shape where the solver keeps it (padding above the feet) overlaps geometry.
+
 	const Vec3 bottom = { s.position[0], s.position[1] + pad, s.position[2] };
 	r_result.overlapping = p_world.overlap_capsule(bottom, params.radius, params.poses[size_t(Pose::Stand)].height, query_mask::kMovement,
 			params.tuning.pose_change_max_penetration);
-	// The gap: how far the soldier could still drop (drop_below; on a slope or an edge a resting soldier's feet are
-	// above the surface under its centre, which is not hovering).
+
 	float drop = 0.0f;
 	const bool has_floor = drop_below(p_world, s.position, params.radius, 0.01f, p_options.probe_down, drop);
 	r_result.gap = has_floor ? drop : 1e9f;
@@ -228,7 +209,7 @@ size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const s
 	const float r2 = std::isfinite(p_protection_radius) ? p_protection_radius * p_protection_radius : 0.0f;
 	float best = -INFINITY;
 	size_t count = 0;
-	// First pass: the highest priority among the eligible points; second: the seeded pick among those.
+
 	auto eligible = [&](const SpawnPoint &p_point) {
 		if (p_point.team != 0 && p_point.team != p_team) {
 			return false;
@@ -257,7 +238,7 @@ size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const s
 	if (count == 0) {
 		return SIZE_MAX;
 	}
-	// splitmix64 of the seed picks one of the `count` best points.
+
 	uint64_t z = p_seed + 0x9E3779B97F4A7C15ull;
 	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
 	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
@@ -286,8 +267,7 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 	const float crouch = params.poses[size_t(Pose::Crouch)].height;
 	const float tolerance = params.tuning.pose_change_max_penetration;
 	const Vec3 bottom = { p_feet[0], p_feet[1] + pad, p_feet[2] };
-	// The poses that do not depend on the heading, and the room for the E1b jump (the stand shape swept up by the
-	// jump height and 5 cm).
+
 	if (p_world.overlap_capsule(bottom, r, crouch, query_mask::kMovement, tolerance) ||
 			p_world.overlap_capsule(bottom, r, 2.0f * r, query_mask::kMovement, tolerance) ||
 			p_world.sweep_capsule(bottom, r, stand, { 0.0f, params.jump_height + 0.05f, 0.0f }, query_mask::kMovement)) {
@@ -301,14 +281,14 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 		const float a = yaw_radians(yaw);
 		const float dx = JPH::Sin(a);
 		const float dz = JPH::Cos(a);
-		// The prone footprint at this heading: CollisionBoxMin/MaxExpand, from the feet (as the motor checks it).
+
 		if (params.tuning.prone_footprint_check) {
 			const float half_x = 0.5f * (prone.box_min_expand[0] + prone.box_max_expand[0]);
 			const float half_z = 0.5f * (prone.box_min_expand[2] + prone.box_max_expand[2]);
 			const float cx = 0.5f * (prone.box_max_expand[0] - prone.box_min_expand[0]);
 			const float cz = 0.5f * (prone.box_max_expand[2] - prone.box_min_expand[2]);
 			const float top = params.tuning.prone_footprint_height;
-			const float base = 0.1f; // the motor's footprint floor clearance
+			const float base = 0.1f;
 			if (half_x > 0.0f && half_z > 0.0f && top > base) {
 				const Vec3 center = { p_feet[0] + cx * dz + cz * dx, p_feet[1] + 0.5f * (top + base), p_feet[2] - cx * dx + cz * dz };
 				if (p_world.overlap_box(center, { half_x, 0.5f * (top - base), half_z }, a, query_mask::kMovement, tolerance)) {
@@ -316,15 +296,12 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 				}
 			}
 		}
-		// The stand capsule kCourseLip above the feet: walls, and every step, curb or seam higher than that under
-		// its footprint.
+
 		const Vec3 start = { p_feet[0], p_feet[1] + kCourseLip, p_feet[2] };
 		if (p_world.sweep_capsule(start, r, stand - kCourseLip, { dx * p_length, 0.0f, dz * p_length }, query_mask::kMovement)) {
 			continue;
 		}
-		// Floor samples on the centre line (a kCourseProbeRadius sphere lowered from half a metre up, so the
-		// millimetre cracks between floor meshes, which the motor's hug bridges, do not count as holes): no hole, no
-		// drop beyond p_max_rise, level normals.
+
 		bool level = true;
 		for (uint32_t k = 1; k <= samples && level; ++k) {
 			StaticHit h;
@@ -332,8 +309,7 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 			const float z = p_feet[2] + dz * (float(k) * kCourseRayStep);
 			const float top = p_feet[1] + 0.5f;
 			const float depth = 1.5f;
-			// The normal from a ray at the same spot (the sphere may touch a crack's side); a ray that falls through
-			// the crack judges nothing.
+
 			StaticHit n;
 			const bool ray_hit = floor_at(p_world, x, z, top, top - depth, n);
 			if (!p_world.sweep_capsule({ x, top, z }, kCourseProbeRadius, 2.0f * kCourseProbeRadius, { 0.0f, -depth, 0.0f }, query_mask::kMovement, &h) ||
@@ -366,7 +342,7 @@ std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionW
 	const float stand = params.poses[size_t(Pose::Stand)].height;
 	const float top = hi[1] + 1.0f;
 	const float bottom = lo[1] - 1.0f;
-	// At most 2^20 grid points (a 5 m grid covers 5 km x 5 km).
+
 	const double cells_x = std::floor(double(hi[0] - lo[0]) / p_grid) + 1.0;
 	const double cells_z = std::floor(double(hi[2] - lo[2]) / p_grid) + 1.0;
 	if (cells_x * cells_z > double(1u << 20)) {
@@ -380,7 +356,7 @@ std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionW
 			if (!floor_at(p_world, x, z, top, bottom, h) || h.normal[1] < kLevelCos) {
 				continue;
 			}
-			// A level 1 m patch: four rays half a metre out land within 1 cm of the centre's height, normals level.
+
 			bool patch = true;
 			const float offsets[4][2] = { { 0.5f, 0.0f }, { -0.5f, 0.0f }, { 0.0f, 0.5f }, { 0.0f, -0.5f } };
 			for (const auto &o : offsets) {
@@ -406,8 +382,6 @@ std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionW
 	return std::nullopt;
 }
 
-// ---- M2b ru (docs/design/m2b.md §3.5): the scored TDM spawn choice ---------------------------------------------------
-
 namespace {
 
 uint64_t spawn_mix(uint64_t p_x) {
@@ -426,12 +400,12 @@ bool spawn_finite(const Vec3 &p_v) {
 	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
 }
 
-} // namespace
+}
 
 size_t choose_spawn_scored(const SpawnQuery &p_query) {
 	struct Candidate {
 		size_t index = 0;
-		float score = 0; // the nearest enemy's distance, capped at safe_distance
+		float score = 0;
 		uint64_t draw = 0;
 	};
 	const float r = std::isfinite(p_query.protection_radius) ? std::max(0.0f, p_query.protection_radius) : 0.0f;
@@ -443,14 +417,14 @@ size_t choose_spawn_scored(const SpawnQuery &p_query) {
 	candidates.reserve(p_query.points.size());
 	for (size_t i = 0; i < p_query.points.size(); ++i) {
 		const SpawnPoint &p = p_query.points[i];
-		// (1) the slot's team or neutral.
+
 		if (p.team != 0 && p.team != int(p_query.team)) {
 			continue;
 		}
 		if (!spawn_finite(p.position)) {
 			continue;
 		}
-		// (2) no enemy within the protection radius; the nearest enemy's distance for (4).
+
 		float nearest2 = INFINITY;
 		for (const Vec3 &e : p_query.enemies) {
 			if (spawn_finite(e)) {
@@ -460,7 +434,7 @@ size_t choose_spawn_scored(const SpawnQuery &p_query) {
 		if (nearest2 < r2) {
 			continue;
 		}
-		// (3) not where friendly_block_count teammates died recently.
+
 		if (p_query.friendly_block_count > 0) {
 			int deaths = 0;
 			for (const FriendlyDeath &d : p_query.recent_deaths) {
@@ -482,7 +456,7 @@ size_t choose_spawn_scored(const SpawnQuery &p_query) {
 	if (candidates.empty()) {
 		return SIZE_MAX;
 	}
-	// (4) rank by the (capped) nearest-enemy distance, ties by the seeded draw (5).
+
 	std::sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {
 		if (a.score != b.score) {
 			return a.score > b.score;
@@ -492,8 +466,7 @@ size_t choose_spawn_scored(const SpawnQuery &p_query) {
 	if (p_query.world == nullptr || p_query.enemies.empty() || p_query.max_los_rays <= 0) {
 		return candidates.front().index;
 	}
-	// TryToSpawnOutOfSight: the best 4, eye-to-chest rays from the 4 nearest enemies of each (<= max_los_rays in all);
-	// the first one no enemy sees wins, else the best.
+
 	constexpr size_t kBest = 4;
 	constexpr size_t kEnemies = 4;
 	int rays = 0;
@@ -520,7 +493,7 @@ size_t choose_spawn_scored(const SpawnQuery &p_query) {
 		bool seen = false;
 		for (size_t n = 0; n < near_count && !seen; ++n) {
 			if (rays >= p_query.max_los_rays) {
-				return candidates.front().index; // the ray budget ran out: the best ranked
+				return candidates.front().index;
 			}
 			++rays;
 			const Vec3 &eye = p_query.enemy_eyes[near[n].second];
@@ -534,4 +507,4 @@ size_t choose_spawn_scored(const SpawnQuery &p_query) {
 	return candidates.front().index;
 }
 
-} // namespace bf3::sim
+}

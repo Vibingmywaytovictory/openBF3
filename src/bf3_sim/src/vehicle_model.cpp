@@ -1,11 +1,3 @@
-// VehicleModel from bf3_core's VehicleDriveDef, the chassis convex pieces and VehicleTuning (docs/design/s2.md §5;
-// vehicle_model.h). Every mapping from data to a Jolt number is listed in s2.md §5.2 / §5.3 and tagged there; the
-// suspension mapping (static sag 7/16 of the travel, damper 0.9 sqrt(k M / 4)) and the 32 degree steering lock are
-// IW4L's tuned jeep (crates/vehicle_iw4/src/def.rs:295-349, Apache-2.0, the user's own), ported as numbers.
-//
-// Pure: the model is a function of (def, pieces, tuning) and model_digest hashes every field's bits, so two worlds
-// that add vehicles from equal digests build the same Jolt bodies and constraints (s2.md §5.5). Arithmetic here is
-// + - x / and sqrt only (no libm trig: degrees become radians by a constant factor).
 #include "bf3/sim/vehicle_model.h"
 
 #include "bf3/core/gameplay/vehicle_drive.h"
@@ -57,7 +49,6 @@ private:
 	uint64_t hash_ = 0xCBF29CE484222325ull;
 };
 
-// Every field of the model but model_digest (structs field by field, never their padding).
 uint64_t digest_of(const VehicleModel &p_m) {
 	Digest d;
 	d.add_text(p_m.blueprint);
@@ -141,7 +132,6 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	return d.value();
 }
 
-// The piecewise linear sensitivity curve at p_kmh (clamped at both ends); 1 without points.
 float sensitivity_at(const VehicleModel &p_model, float p_kmh) {
 	if (p_model.steer_points == 0) {
 		return 1.0f;
@@ -160,7 +150,7 @@ float sensitivity_at(const VehicleModel &p_model, float p_kmh) {
 	return c[p_model.steer_points - 1][1];
 }
 
-} // namespace
+}
 
 float vehicle_max_steer_angle(const VehicleModel &p_model, float p_speed) {
 	const float kmh = std::fabs(p_speed) * 3.6f;
@@ -183,7 +173,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	m->blueprint = p_def.blueprint;
 	m->tuning = p_tuning;
 
-	// ---- chassis body
 	const core::gameplay::ChassisConfigDef &ch = p_def.chassis;
 	const core::gameplay::DriveRigidBodyDef *collision = nullptr;
 	for (const core::gameplay::DriveRigidBodyDef &b : p_def.rigid_bodies) {
@@ -243,7 +232,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		m->chassis.push_back(std::move(piece));
 	}
 
-	// ---- wheels (wptNormal only)
 	std::vector<size_t> physics_wheels;
 	for (size_t i = 0; i < p_def.wheels.size(); ++i) {
 		if (p_def.wheels[i].physics_type == "wptNormal") {
@@ -278,8 +266,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		w.width = c.width;
 		w.suspension_max = c.spring_length;
 		w.suspension_min = c.spring_length * p_tuning.suspension_min_fraction;
-		// IW4L jeep: static sag 7/16 of the travel; the attachment sits so the wheel is at its data centre under
-		// static load (s2.md §5.2).
+
 		const float sag = c.spring_length * p_tuning.static_sag_fraction;
 		w.attachment = { w.data_centre[0], w.data_centre[1] + (c.spring_length - sag), w.data_centre[2] };
 		w.spring_stiffness = m->mass * g_eff / (wheels_f * sag);
@@ -291,19 +278,19 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		w.angular_damping = p_tuning.wheel_angular_damping;
 		w.steers = c.steering_type != 0 ? 1 : 0;
 		w.driven = c.driving_type != 0 ? 1 : 0;
-		w.max_steer_angle = 0.0f; // set below, once the steering curve is known
+		w.max_steer_angle = 0.0f;
 		if (!finite(c.brake_force) || c.brake_force < 0.0f || c.brake_force > 1e6f) {
 			return fail("wheel " + std::to_string(k) + " brake force out of range");
 		}
 		w.max_brake_torque = c.brake_force * c.radius * p_tuning.brake_torque_per_force;
 		w.max_hand_brake_torque = w.steers != 0 ? 0.0f : p_tuning.hand_brake_torque;
-		// Jolt's left is +X (forward x up = -X is its right; s2.md §5.4).
+
 		w.side = w.data_centre[0] > 0.0f ? 0 : 1;
 		if (w.steers != 0 && steering_config == nullptr) {
 			steering_config = &c;
 		}
 	}
-	// Axles: wheels grouped by z (within 5 cm), front (largest z) first.
+
 	{
 		std::vector<float> axle_z;
 		for (size_t k = 0; k < m->wheel_count; ++k) {
@@ -324,7 +311,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 				}
 			}
 		}
-		// One differential per axle with driven wheels (left, right), torque split evenly between the axles.
+
 		const core::gameplay::WheelConfigDef *any_driven = nullptr;
 		for (size_t a = 0; a < axle_z.size() && m->differentials < 4; ++a) {
 			int8_t left = -1, right = -1;
@@ -359,7 +346,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 			m->differential_torque_ratio[i] = 1.0f / float(m->differentials);
 		}
 		m->differential_limited_slip = p_tuning.differential_limited_slip;
-		// Anti-roll bars: the front axle and the rear axle (AntiRollBars.Front / Rear x anti_roll_scale).
+
 		const float stiffness[2] = { ch.anti_roll_front * p_tuning.anti_roll_scale, ch.anti_roll_rear * p_tuning.anti_roll_scale };
 		const size_t axles[2] = { 0, axle_z.size() - 1 };
 		for (size_t b = 0; b < 2; ++b) {
@@ -386,7 +373,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		}
 	}
 
-	// ---- steering and input filters
 	if (steering_config != nullptr) {
 		std::vector<std::array<float, 2>> points;
 		for (const core::gameplay::SteeringSensitivityPoint &p : steering_config->steering_sensitivity) {
@@ -427,7 +413,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	m->yaw_inertia_min_ratio = finite(ch.yaw.inertia_min_ratio) ? ch.yaw.inertia_min_ratio : 0.0f;
 	m->allow_negative_throttle = ch.allow_negative_throttle;
 
-	// ---- engine and gearbox
 	const core::gameplay::EngineDef *engine = nullptr;
 	for (const core::gameplay::EngineDef &e : p_def.engines) {
 		if (!e.rpm_points.empty()) {
@@ -495,7 +480,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	m->switch_latency = p_tuning.switch_latency;
 	m->clutch_strength = p_tuning.clutch_strength;
 
-	// ---- resistance, driver aids, world
 	const float drag = 0.5f * ch.air_density * ch.coefficient_of_air_friction * ch.air_drag_area * p_tuning.drag_scale;
 	if (!finite(drag) || drag < 0.0f || drag > 1e4f) {
 		return fail("air drag out of range");
@@ -530,7 +514,7 @@ core::Result<std::shared_ptr<const VehicleModel>> load_vehicle_model(const core:
 	if (havok->shapes.empty()) {
 		return core::make_error("vehicle model " + def->blueprint + ": " + def->physics_asset + " has no rigid body shape");
 	}
-	// Root 0 is the RBTypeCollision body (PhysicsEntityData.RigidBodies order = Havok root order).
+
 	const std::vector<core::res::ConvexPiece> pieces = core::res::havok_convex_pieces(havok->shapes[0], core::res::Transform::identity());
 	if (pieces.size() > kMaxChassisPieces) {
 		return core::make_error("vehicle model " + def->blueprint + ": " + std::to_string(pieces.size()) + " chassis pieces (at most " +
@@ -547,4 +531,4 @@ core::Result<std::shared_ptr<const VehicleModel>> load_vehicle_model(const core:
 	return build_vehicle_model(*def, sources, p_tuning);
 }
 
-} // namespace bf3::sim
+}

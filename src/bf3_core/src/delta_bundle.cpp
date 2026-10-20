@@ -1,4 +1,3 @@
-// Ported from IW4L superbundle_bf3 (delta.rs), Apache-2.0.
 #include "bf3/core/delta_bundle.h"
 
 #include "format_errors.h"
@@ -19,7 +18,7 @@ uint64_t be64(const uint8_t *p) {
 	return (uint64_t(be32(p)) << 32) | be32(p + 4);
 }
 
-} // namespace
+}
 
 Result<uint64_t> delta_table_len(std::span<const uint8_t> p_header) {
 	BF3_TRY(detail::need("delta bundle header", p_header.size(), kDeltaHeaderLen));
@@ -103,4 +102,4 @@ Status DeltaBundle::read_at(const ByteSource &p_patch, const ByteSource &p_base,
 	return {};
 }
 
-} // namespace bf3::core
+}

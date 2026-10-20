@@ -1,8 +1,3 @@
-// weapon_mechanics.cfg: the unmeasured weapon mechanics as a tuning file (docs/design/m2a.md §5.5; owner sv;
-// mechanics_tuning.h has the format). The motor_tuning.cfg format (motor_tuning.cpp): "key = value" lines, '#'
-// comments, every key a Mechanics field name, enums by snake_case name, booleans true / false, floats finite and in
-// range. format_mechanics_tuning writes every key with the shortest round-trip number text, so
-// parse(format(m)) == m field for field.
 #include "bf3/sim/weapons/mechanics_tuning.h"
 
 #include <algorithm>
@@ -21,7 +16,7 @@ enum class KeyType : uint8_t { Enum, Bool, Float };
 struct KeyDef {
 	const char *name;
 	KeyType type;
-	// Enum: the names of the values 0..n-1 (nullptr-terminated, at most 4).
+
 	std::array<const char *, 5> names;
 	float min;
 	float max;
@@ -30,8 +25,6 @@ struct KeyDef {
 
 #define BF3_MECH_FIELD(f) [](Mechanics &m) -> void * { return &m.f; }
 
-// Ranges keep a hostile or mistyped file from making the damage arithmetic meaningless; every default and every
-// plausible measured value lies well inside them. The enum names follow mechanics.h's enumerators in order.
 const KeyDef kKeys[] = {
 	{ "disc", KeyType::Enum, { "uniform_area", "uniform_radius", nullptr }, 0, 0, BF3_MECH_FIELD(disc) },
 	{ "recovery", KeyType::Enum, { "linear", "exponential", nullptr }, 0, 0, BF3_MECH_FIELD(recovery) },
@@ -55,7 +48,6 @@ constexpr size_t kKeyCount = sizeof(kKeys) / sizeof(kKeys[0]);
 
 #undef BF3_MECH_FIELD
 
-// Every enum of Mechanics is a uint8_t enumeration, so the field is written as its byte.
 static_assert(sizeof(DiscDistribution) == 1 && sizeof(RecoveryShape) == 1 && sizeof(FirstShotRearm) == 1 && sizeof(MinSpreadRise) == 1 &&
 		sizeof(FalloffShape) == 1 && sizeof(FalloffBasis) == 1 && sizeof(BlastFalloff) == 1);
 
@@ -95,7 +87,7 @@ size_t enum_count(const KeyDef &p_key) {
 	return n;
 }
 
-} // namespace
+}
 
 core::Result<Mechanics> parse_mechanics_tuning(std::string_view p_text) {
 	if (p_text.size() > kMaxMechanicsTuningBytes) {
@@ -225,4 +217,4 @@ std::string format_mechanics_tuning(const Mechanics &p_mechanics) {
 	return out;
 }
 
-} // namespace bf3::sim::weapons
+}

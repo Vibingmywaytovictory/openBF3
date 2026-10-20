@@ -1,8 +1,3 @@
-// The quantised vehicle ghost (docs/design/s2.md §7; vehicle_ghost.h). Encoding clamps every value into its code
-// range; decoding refuses any code outside its width, a largest component index above 3, a one-bit field above 1, a
-// gear outside the model's range, a wheel count other than the model's and a smallest-three triple whose squared sum
-// exceeds 1 beyond rounding (hostile network input, s2.md §9). Arithmetic is + - x / and a correctly rounded sqrt
-// in double (no libm trig), so a decode is the same on every IEEE platform.
 #include "bf3/sim/vehicle_ghost.h"
 
 #include "bf3/sim/vehicle_model.h"
@@ -16,7 +11,7 @@ namespace {
 
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kInvSqrt2 = 0.70710678118654752440084436210485;
-constexpr unsigned kMaxOrientationBits = 16; // VehicleGhostCodes::orientation is uint16_t
+constexpr unsigned kMaxOrientationBits = 16;
 
 uint32_t max_code(unsigned p_bits) {
 	return p_bits >= 32 ? 0xFFFFFFFFu : ((1u << p_bits) - 1u);
@@ -26,7 +21,6 @@ unsigned orientation_bits(const VehicleGhostQuantisation &p_q) {
 	return p_q.orientation_bits < 2 ? 2 : (p_q.orientation_bits > kMaxOrientationBits ? kMaxOrientationBits : p_q.orientation_bits);
 }
 
-// The suspension length over [0, p_max] in p_bits.
 GhostQuantizer suspension_quantizer(float p_max, unsigned p_bits) {
 	GhostQuantizer q;
 	q.min = 0.0f;
@@ -41,7 +35,7 @@ uint32_t encode_angle(float p_angle, unsigned p_bits) {
 	}
 	const double turns = double(p_angle) / kTwoPi;
 	const double whole = std::floor(turns);
-	const double fraction = turns - whole; // [0, 1)
+	const double fraction = turns - whole;
 	const double scale = double(uint64_t(1) << p_bits);
 	uint64_t code = uint64_t(fraction * scale + 0.5);
 	if (code >= uint64_t(1) << p_bits) {
@@ -61,13 +55,13 @@ uint32_t gear_offset(const VehicleGhostQuantisation &p_q) {
 	return p_q.gear_bits == 0 ? 0u : (1u << (p_q.gear_bits - 1));
 }
 
-} // namespace
+}
 
 size_t vehicle_ghost_bits(const VehicleGhostQuantisation &p_q, size_t p_wheels) {
 	size_t bits = 2 * size_t(p_q.position_xz.bits) + p_q.position_y.bits;
 	bits += 2 + 3 * size_t(orientation_bits(p_q));
 	bits += 3 * size_t(p_q.linear_velocity.bits) + 3 * size_t(p_q.angular_velocity.bits);
-	bits += 1; // active
+	bits += 1;
 	const size_t per_wheel = (p_q.send_suspension ? p_q.suspension_bits : 0u) + p_q.wheel_spin.bits + p_q.wheel_angle_bits;
 	bits += p_wheels * per_wheel;
 	bits += p_q.engine_rpm.bits + p_q.gear_bits + p_q.clutch.bits + 3 * size_t(p_q.gearbox_timer.bits);
@@ -95,7 +89,7 @@ void encode_quat_smallest_three(const std::array<float, 4> &p_q, unsigned p_bits
 	double largest_abs = -1.0;
 	for (uint8_t i = 0; i < 4; ++i) {
 		const double a = std::fabs(double(p_q[i]));
-		if (a > largest_abs) { // NaN never wins; ties keep the first
+		if (a > largest_abs) {
 			largest_abs = a;
 			largest = i;
 		}
@@ -110,7 +104,7 @@ void encode_quat_smallest_three(const std::array<float, 4> &p_q, unsigned p_bits
 		const double c = sign * double(p_q[i]);
 		const double t = (c + kInvSqrt2) / step + 0.5;
 		uint32_t code = 0;
-		if (t > 0.0) { // NaN -> 0
+		if (t > 0.0) {
 			code = t >= double(max_code(bits)) ? max_code(bits) : uint32_t(t);
 		}
 		r_codes[k++] = uint16_t(code);
@@ -262,7 +256,6 @@ core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const Vehicl
 		return core::error_at("vehicle ghost", rotation.error());
 	}
 
-	// Every check passed: write.
 	VehicleBodyState &b = r_state.body;
 	b.com_position = { p_q.position_xz.decode(p_codes.position[0]), p_q.position_y.decode(p_codes.position[1]), p_q.position_xz.decode(p_codes.position[2]) };
 	b.rotation = *rotation;
@@ -301,4 +294,4 @@ core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const Vehicl
 	return core::Status::success();
 }
 
-} // namespace bf3::sim
+}

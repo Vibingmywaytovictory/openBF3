@@ -1,4 +1,3 @@
-// The oracle rows (docs/design/m2a-weapons.md §1; weapon_checks.h).
 #include "bf3/sim/weapons/weapon_checks.h"
 
 #include "bf3/sim/collision_world.h"
@@ -130,7 +129,6 @@ const SoldierWeaponsState *state_at(const FireTimingResult &p_r, SimTime p_time)
 	return nullptr;
 }
 
-// A synthetic range world with walls at p_walls (none: only the slab, 150 m below the eye).
 std::unique_ptr<CollisionWorld> wall_world(std::span<const float> p_walls, float p_eye) {
 	const std::vector<StaticTriangle> tris = range_wall_triangles(p_walls, p_eye);
 	core::Result<std::shared_ptr<const StaticWorldShapes>> shapes = build_static_world(std::span<const StaticTriangle>(tris));
@@ -141,12 +139,11 @@ std::unique_ptr<CollisionWorld> wall_world(std::span<const float> p_walls, float
 	return world ? std::move(*world) : nullptr;
 }
 
-// A level shot of def p_id from (0, eye, 0) along +Z at time 0, flown until it is gone (at most p_max_ticks).
 struct Flight {
 	std::vector<ImpactEvent> impacts;
 	std::vector<DetonationEvent> detonations;
 	std::vector<DamageEvent> damage;
-	std::optional<Projectile> first_state; // after spawn
+	std::optional<Projectile> first_state;
 };
 Flight fly_shot(const std::shared_ptr<const WeaponTable> &p_table, uint16_t p_id, const CollisionWorld &p_world, float p_eye, uint32_t p_max_ticks,
 		const HitTargetProvider *p_targets = nullptr, uint64_t p_seed = 1) {
@@ -191,8 +188,6 @@ double angle_deg(const Vec3 &p_a, const Vec3 &p_b) {
 	const double c = std::clamp(dot(normalize(to_d(p_a)), normalize(to_d(p_b))), -1.0, 1.0);
 	return std::acos(c) * 180.0 / kPiD;
 }
-
-// ---- W1 -------------------------------------------------------------------------------------------------------
 
 void check_m16a3(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	const std::optional<uint16_t> id = find(*p_in.table, kM16A3);
@@ -272,7 +267,6 @@ void check_bolts(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	r_rows.add("W1", "JNG-90 / L96 / M40A5 / SV98 bolt cycles", ok, measured, "1.3 / 1.38 / 1.1 / 1.25 s = 78000000 / 82800000 / 66000000 / 75000000");
 }
 
-// Shots grouped by the press that fired them (a press's burst ends before the next press).
 std::vector<std::vector<const ShotEvent *>> by_press(const FireTimingResult &p_t) {
 	std::vector<std::vector<const ShotEvent *>> groups;
 	for (size_t p = 0; p < p_t.presses.size(); ++p) {
@@ -303,7 +297,7 @@ void check_bursts(Rows &r_rows, const WeaponCheckInputs &p_in) {
 			r_rows.add("W1", c.name, false, "variant missing", "");
 			continue;
 		}
-		// 30 settle ticks: a burst pressed in the script's last ticks completes after it (the burst runs without fire).
+
 		const std::optional<FireTimingResult> t = timing(*p_in.table, *id, FireScript::Tap, 120, 30, p_in.eye_height, p_in.match_seed);
 		if (!t) {
 			continue;
@@ -315,7 +309,7 @@ void check_bursts(Rows &r_rows, const WeaponCheckInputs &p_in) {
 		for (size_t g = 0; g < groups.size(); ++g) {
 			const auto &shots = groups[g];
 			if (shots.empty()) {
-				continue; // a press after the magazine ran dry
+				continue;
 			}
 			ok = ok && shots.size() == c.count;
 			for (size_t i = 1; i < shots.size(); ++i) {
@@ -346,7 +340,7 @@ void check_870(Rows &r_rows, const WeaponCheckInputs &p_in) {
 		return;
 	}
 	const WeaponSimDef &d = p_in.table->defs[*id];
-	// The first magazine (5 shells): consecutive shots.
+
 	const auto reloads = events_of(*t, weapon_events::kReloadStarted);
 	std::vector<SimTime> times;
 	for (const ShotEvent &s : t->shots) {
@@ -361,7 +355,7 @@ void check_870(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	r_rows.add("W1", "870MCS pump: Tap pinned to the tick containing the ready time", pump,
 			fmt("%zu shots in the first magazine, gaps %s", times.size(), times.size() >= 2 ? units(times[1] - times[0]).c_str() : "-"),
 			"shots exactly 28800000 apart (0.48 s, 125 RPM)");
-	// Pellets: 12 projectiles per shot, 12 distinct directions inside the pellet cone of the shot direction.
+
 	bool pellets = !t->shots.empty();
 	double widest = 0;
 	size_t distinct_min = 64;
@@ -403,8 +397,6 @@ void check_m9(Rows &r_rows, const WeaponCheckInputs &p_in) {
 		r_rows.add("W1", "M9 single fire, tapping", n >= 5 && lo >= 9'000'000, fmt("%zu gaps, smallest %s", n, units(lo).c_str()), "every gap >= 9000000 (400 RPM)");
 	}
 }
-
-// ---- W2 -------------------------------------------------------------------------------------------------------
 
 void check_drop(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	const struct {
@@ -468,8 +460,6 @@ void check_range(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	}
 }
 
-// ---- W3, W5 ---------------------------------------------------------------------------------------------------
-
 void check_damage(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	const Mechanics &m = p_in.table->mechanics;
 	if (const std::optional<uint16_t> id = find(*p_in.table, kM16A3)) {
@@ -513,7 +503,7 @@ void check_damage(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	const struct {
 		std::string_view variant;
 		HitZone zone;
-		double oracle; // +inf: every range
+		double oracle;
 		const char *name;
 	} ohk[] = { { kM98B, HitZone::Head, INFINITY, ".338 (M98B) head" }, { kM98B, HitZone::Chest, 17.476, ".338 (M98B) chest" },
 		{ kM40A5, HitZone::Chest, 15.000, "M40A5 chest" }, { kSv98, HitZone::Chest, 20.000, "SV98 chest" }, { kM39, HitZone::Head, 50.745, "M39 EBR head" },
@@ -530,8 +520,6 @@ void check_damage(Rows &r_rows, const WeaponCheckInputs &p_in) {
 				std::isinf(o.oracle) ? std::string("every range") : fmt("%.3f m within 0.01", o.oracle), true);
 	}
 }
-
-// ---- W6 -------------------------------------------------------------------------------------------------------
 
 struct ReloadSeen {
 	SimTime started = -1, committed = -1, finished = -1;
@@ -574,8 +562,8 @@ void check_reloads(Rows &r_rows, const WeaponCheckInputs &p_in) {
 		const char *name;
 		bool tactical;
 		SimTime duration;
-		SimTime commit; // -1: not checked
-		int32_t magazine; // -1: not checked
+		SimTime commit;
+		int32_t magazine;
 	} cases[] = {
 		{ kM16A3, "M16A3 tactical reload", true, 108'000'000, 91'800'000, 31 },
 		{ kM16A3, "M16A3 empty reload", false, 142'200'000, 120'870'000, 30 },
@@ -626,14 +614,12 @@ void check_reloads(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	}
 }
 
-// ---- W9 -------------------------------------------------------------------------------------------------------
-
 void check_explosives(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	const Mechanics &m = p_in.table->mechanics;
 	const std::unique_ptr<CollisionWorld> open = wall_world({}, p_in.eye_height);
 	if (const std::optional<uint16_t> id = find(*p_in.table, kM67); id && open != nullptr) {
 		const WeaponSimDef &d = p_in.table->defs[*id];
-		// The throw through the state machine: hold 40 ticks (past HoldDelay 0.5 s), release.
+
 		const std::optional<FireTimingResult> t = timing(*p_in.table, *id, FireScript::Throw, 60, 0, p_in.eye_height, p_in.match_seed, 0, 40);
 		bool thrown = false;
 		if (t && !t->shots.empty()) {
@@ -707,7 +693,7 @@ void check_explosives(Rows &r_rows, const WeaponCheckInputs &p_in) {
 		const WeaponSimDef &d = p_in.table->defs[*id];
 		const ExplosionSimDef &x = d.projectile.explosion;
 		const bool numbers = d.projectile.time_to_arm == 30'000'000 && x.blast_damage == 112.0f && x.inner_radius == 0.35f && x.radius == 4.0f;
-		// The trajectory: thrust from 40 m/s to the 100 m/s cap (6.0 s at 10 m/s^2 [inferred]).
+
 		Projectile start;
 		start.spawn_time = 0;
 		start.base_velocity = { 0, 0, 40 };
@@ -733,7 +719,7 @@ void check_explosives(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	}
 }
 
-} // namespace
+}
 
 std::span<const std::string_view> weapon_check_variants() {
 	return kVariants;
@@ -773,4 +759,4 @@ std::string format_weapon_checks(std::span<const WeaponCheckRow> p_rows) {
 	return out;
 }
 
-} // namespace bf3::sim::weapons
+}

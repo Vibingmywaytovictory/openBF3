@@ -1,5 +1,3 @@
-// Ant package bytes from the install (Install + LevelMount), with the research export's selection rules;
-// see ant_install_source.h. Clean-room implementation from research/probes/ant-animation-probe.md (§2).
 #include "bf3/core/ant/ant_install_source.h"
 
 #include "bf3/core/ebx.h"
@@ -16,14 +14,11 @@ namespace bf3::core::ant {
 
 namespace {
 
-// The export skips the chunk superbundles (their chunks are reached through the mounts' toc-chunk lookup)
-// and the localisation superbundles.
 bool is_scanned_superbundle(std::string_view p_name) {
 	const std::string l = to_lower_ascii(p_name);
 	return l.find("chunks") == std::string::npos && l.rfind("win32/loc/", 0) != 0;
 }
 
-// Fills the AntPackageAsset fields the export writes (Name, PackagingType, StreamingGuid, ChunkSize).
 void read_package_fields(const EbxInstance &p_asset, AntPackageInfo &r_info) {
 	if (const std::optional<EbxValue> v = p_asset.get("Name")) {
 		if (const std::optional<std::string_view> s = v->as_str()) {
@@ -44,7 +39,7 @@ void read_package_fields(const EbxInstance &p_asset, AntPackageInfo &r_info) {
 	}
 }
 
-} // namespace
+}
 
 Result<std::unique_ptr<AntInstallSource>> AntInstallSource::open(std::shared_ptr<const Install> p_install) {
 	const auto start = std::chrono::steady_clock::now();
@@ -53,7 +48,7 @@ Result<std::unique_ptr<AntInstallSource>> AntInstallSource::open(std::shared_ptr
 	}
 	std::unique_ptr<AntInstallSource> s(new AntInstallSource());
 	s->install_ = p_install;
-	std::unordered_set<std::string> taken_partitions; // any primary type, as the export's partition rows
+	std::unordered_set<std::string> taken_partitions;
 	for (const std::string &sb : p_install->superbundle_names()) {
 		if (!is_scanned_superbundle(sb)) {
 			continue;
@@ -64,10 +59,10 @@ Result<std::unique_ptr<AntInstallSource>> AntInstallSource::open(std::shared_ptr
 			continue;
 		}
 		++s->report_.superbundles_scanned;
-		// What this superbundle would supply: names not taken by an earlier one, first bundle wins.
-		std::vector<std::pair<std::string, std::string>> want_res, want_ebx; // (lowercase name, bundle)
+
+		std::vector<std::pair<std::string, std::string>> want_res, want_ebx;
 		std::unordered_set<std::string> want_res_keys, want_ebx_keys;
-		std::set<std::string> want_bundles; // sorted, as the export loads them
+		std::set<std::string> want_bundles;
 		for (auto &[bundle, manifest] : m->bundle_manifests()) {
 			if (!manifest) {
 				s->report_.warnings.push_back(sb + " bundle " + bundle + ": " + manifest.error().message);
@@ -101,7 +96,7 @@ Result<std::unique_ptr<AntInstallSource>> AntInstallSource::open(std::shared_ptr
 		for (auto &[key, bundle] : want_res) {
 			s->res_.emplace(key, ResSite{ mount_index, sb, bundle });
 		}
-		// Partitions: taken where they read and parse (one database per superbundle, as the export).
+
 		EbxDb db;
 		for (auto &[key, bundle] : want_ebx) {
 			Result<std::vector<uint8_t>> bytes = m->read_ebx(key);
@@ -116,7 +111,7 @@ Result<std::unique_ptr<AntInstallSource>> AntInstallSource::open(std::shared_ptr
 			}
 			const EbxPartition *part = db.partition_by_name(key);
 			if (part == nullptr) {
-				continue; // a duplicate GUID within this superbundle: not taken here
+				continue;
 			}
 			taken_partitions.insert(key);
 			++s->report_.partitions;
@@ -140,7 +135,7 @@ Result<std::unique_ptr<AntInstallSource>> AntInstallSource::open(std::shared_ptr
 		}
 	}
 	std::sort(s->packages_.begin(), s->packages_.end(), [](const AntPackageInfo &a, const AntPackageInfo &b) { return a.partition < b.partition; });
-	// Res-backed packages report the res's site; chunk packages keep their partition's.
+
 	for (AntPackageInfo &p : s->packages_) {
 		if (p.packaging == AntPackagingType::Chunk) {
 			continue;
@@ -213,7 +208,7 @@ bool AntInstallSource::read(const AntPackageInfo &p_info, std::vector<uint8_t> &
 		}
 		Result<std::vector<uint8_t>> bytes = mounts_[it->second]->read_chunk(*guid);
 		if (!bytes) {
-			// The export's fallback: the chunk through Win32/Weapons with every bundle loaded.
+
 			const std::string first = bytes.error().message;
 			std::string error;
 			const LevelMount *weapons = weapons_mount(error);
@@ -230,7 +225,7 @@ bool AntInstallSource::read(const AntPackageInfo &p_info, std::vector<uint8_t> &
 		r_bytes = std::move(*bytes);
 		return true;
 	}
-	// Static / Bundle / animation sets: the res named lowercase(Name).
+
 	const std::string key = to_lower_ascii(p_info.name);
 	const auto it = res_.find(key);
 	if (it == res_.end()) {
@@ -246,4 +241,4 @@ bool AntInstallSource::read(const AntPackageInfo &p_info, std::vector<uint8_t> &
 	return true;
 }
 
-} // namespace bf3::core::ant
+}

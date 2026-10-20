@@ -1,8 +1,4 @@
 #pragma once
-// A small SWF / GFx writer for the ui1 unit tests (docs/design/ui-swf-fonts.md §14): synthetic movies with every tag
-// the reader keeps, written from the public SWF specification (v19) and the GFx layouts of swf_movie.h. Nothing here
-// is BF3 data. Also a zlib stream writer (stored blocks, and a fixed-Huffman "bomb" of long matches) so CFX bodies
-// can be built without a compressor.
 
 #include <algorithm>
 #include <cmath>
@@ -19,10 +15,9 @@ namespace ui1test {
 
 using Bytes = std::vector<uint8_t>;
 
-// MSB-first bit writer (SWF bit fields).
 struct BitWriter {
 	Bytes b;
-	int bit = 0; // bits used in the last byte
+	int bit = 0;
 	void ub(uint32_t p_v, int p_n) {
 		for (int i = p_n - 1; i >= 0; --i) {
 			if (bit == 0) {
@@ -38,7 +33,6 @@ struct BitWriter {
 	void align() { bit = 0; }
 };
 
-// Bits a signed value needs (at least 1).
 inline int sbits(int32_t p_v) {
 	int n = 1;
 	while (n < 32 && !(p_v >= -(int64_t(1) << (n - 1)) && p_v < (int64_t(1) << (n - 1)))) {
@@ -78,7 +72,6 @@ struct Writer {
 	void bits(const BitWriter &w) { raw(w.b); }
 };
 
-// RECT in pixels.
 inline Bytes rect(float x0, float x1, float y0, float y1) {
 	const int32_t v[4] = { int32_t(std::lround(x0 * 20)), int32_t(std::lround(x1 * 20)), int32_t(std::lround(y0 * 20)), int32_t(std::lround(y1 * 20)) };
 	const int n = sbits_max({ v[0], v[1], v[2], v[3] });
@@ -91,9 +84,9 @@ inline Bytes rect(float x0, float x1, float y0, float y1) {
 }
 
 struct Mat {
-	float a = 1, b = 0, c = 0, d = 1, tx = 0, ty = 0; // tx / ty in pixels
+	float a = 1, b = 0, c = 0, d = 1, tx = 0, ty = 0;
 };
-// MATRIX; p_twips_translation false: tx / ty given in pixels (x 20).
+
 inline Bytes matrix(const Mat &p_m) {
 	BitWriter w;
 	const bool scale = p_m.a != 1.0f || p_m.d != 1.0f;
@@ -127,7 +120,6 @@ inline Bytes matrix(const Mat &p_m) {
 	return w.b;
 }
 
-// CXFORMWITHALPHA with both term sets.
 inline Bytes cxform_alpha(const int16_t p_mul[4], const int16_t p_add[4]) {
 	BitWriter w;
 	w.ub(1, 1);
@@ -151,7 +143,6 @@ inline Bytes cat(std::initializer_list<Bytes> p_parts) {
 	return out;
 }
 
-// One tag record (long form when asked or when the body needs it).
 inline void tag(Bytes &r_out, uint16_t p_code, const Bytes &p_body, bool p_long = false) {
 	if (p_long || p_body.size() >= 0x3f) {
 		const uint16_t cl = uint16_t((p_code << 6) | 0x3f);
@@ -189,11 +180,11 @@ struct Place {
 	std::optional<std::string> name;
 	std::optional<uint16_t> clip_depth;
 	bool move = false;
-	// PlaceObject3 only
+
 	std::optional<std::string> class_name;
-	bool filters = false; // one blur filter
+	bool filters = false;
 	std::optional<uint8_t> blend;
-	bool clip_actions = false; // PlaceObject2/3: a minimal clip-action record (skipped by the reader)
+	bool clip_actions = false;
 };
 
 inline Bytes place_object2(const Place &p, bool p_v3 = false) {
@@ -240,8 +231,8 @@ inline Bytes place_object2(const Place &p, bool p_v3 = false) {
 		w.u16(*p.clip_depth);
 	}
 	if (p_v3 && p.filters) {
-		w.u8(1); // one filter
-		w.u8(1); // blur
+		w.u8(1);
+		w.u8(1);
 		w.u32(0x10000);
 		w.u32(0x10000);
 		w.u8(1 << 3);
@@ -250,9 +241,9 @@ inline Bytes place_object2(const Place &p, bool p_v3 = false) {
 		w.u8(*p.blend);
 	}
 	if (p.clip_actions) {
-		w.u16(0); // reserved
-		w.u32(1); // all events
-		w.u32(0); // end
+		w.u16(0);
+		w.u32(1);
+		w.u32(0);
 	}
 	Bytes t;
 	tag(t, p_v3 ? 70 : 26, w.b);
@@ -379,11 +370,10 @@ inline Bytes sub_image(uint16_t p_id, uint16_t p_image, uint16_t x1, uint16_t y1
 
 struct BitmapFill {
 	uint16_t bitmap = 0;
-	Mat m{ 20, 0, 0, 20, 0, 0 }; // a..d twips per bitmap pixel
+	Mat m{ 20, 0, 0, 20, 0, 0 };
 	uint8_t type = 0x41;
 };
-// DefineShape 1..4: a rectangle outline with the given bitmap fills in the initial array; p_new_style_fill (version
-// >= 2) adds one more bitmap fill through a StyleChangeRecord's new styles; one solid fill and one line style.
+
 inline Bytes define_shape(int p_version, uint16_t p_id, float p_w, float p_h, const std::vector<BitmapFill> &p_fills,
 		std::optional<BitmapFill> p_new_style_fill = std::nullopt) {
 	static const uint16_t codes[] = { 0, 2, 22, 32, 83 };
@@ -415,7 +405,7 @@ inline Bytes define_shape(int p_version, uint16_t p_id, float p_w, float p_h, co
 		w.u8(1);
 		w.u16(20);
 		if (p_version == 4) {
-			w.u8(0); // start cap 0, join 0, no fill
+			w.u8(0);
 			w.u8(0);
 			w.u8(1);
 			w.u8(2);
@@ -436,7 +426,7 @@ inline Bytes define_shape(int p_version, uint16_t p_id, float p_w, float p_h, co
 	const int line_bits = 1;
 	w.u8((fill_bits << 4) | line_bits);
 	BitWriter r;
-	// Style change: move to (0, 0), fill 1.
+
 	r.ub(0, 1);
 	r.ub(0x01 | 0x04, 5);
 	r.ub(1, 5);
@@ -457,14 +447,13 @@ inline Bytes define_shape(int p_version, uint16_t p_id, float p_w, float p_h, co
 	line(wx, 0);
 	line(0, hy);
 	if (p_new_style_fill && p_version >= 2) {
-		// A style change with new styles: its 6 header bits continue the record stream, then the arrays start on
-		// the next byte (the reader's byte reads align), then the new bit counts and a fresh bit stream.
+
 		r.ub(0, 1);
 		r.ub(0x10, 5);
 		w.bits(r);
 		r = BitWriter{};
 		fills({ *p_new_style_fill }, false);
-		w.u8(0); // no line styles
+		w.u8(0);
 		w.u8((1 << 4) | 0);
 		r.ub(0, 1);
 		r.ub(0x04, 5);
@@ -491,7 +480,7 @@ struct EditText {
 	uint8_t align = 1;
 	std::string variable = "v";
 	std::optional<std::string> text = "000";
-	uint16_t extra_flags = 0x0001 | 0x0002; // UseOutlines, HTML
+	uint16_t extra_flags = 0x0001 | 0x0002;
 };
 inline Bytes define_edit_text(const EditText &p) {
 	Writer w;
@@ -596,22 +585,21 @@ inline Bytes font_name(uint16_t p_font, std::string_view p_name, std::string_vie
 	return t;
 }
 
-// Glyph outline in SWF font units (y down): contours of segments; a segment with a control point is quadratic.
 struct Seg {
-	int32_t x, y; // end point (absolute)
+	int32_t x, y;
 	bool curve = false;
-	int32_t cx = 0, cy = 0; // control point (absolute)
+	int32_t cx = 0, cy = 0;
 };
 struct Contour {
-	int32_t x0, y0; // start (absolute)
-	std::vector<Seg> segs; // the last one should return to the start (closed)
+	int32_t x0, y0;
+	std::vector<Seg> segs;
 };
 using Glyph = std::vector<Contour>;
 
 inline Bytes glyph_shape(const Glyph &p_glyph) {
 	BitWriter r;
-	r.ub(1, 4); // fill bits
-	r.ub(0, 4); // line bits
+	r.ub(1, 4);
+	r.ub(0, 4);
 	int32_t x = 0;
 	int32_t y = 0;
 	bool first = true;
@@ -676,7 +664,6 @@ struct Font3 {
 	int16_t leading = 0;
 };
 
-// DefineFont3 with outlines (flags 0x8C: layout, wide offsets, wide codes).
 inline Bytes define_font3(const Font3 &p) {
 	Writer w;
 	w.u16(p.id);
@@ -694,7 +681,7 @@ inline Bytes define_font3(const Font3 &p) {
 		w.u32(off);
 		off += uint32_t(shapes[i].size());
 	}
-	w.u32(off); // CodeTableOffset
+	w.u32(off);
 	for (const Bytes &s : shapes) {
 		w.raw(s);
 	}
@@ -722,7 +709,7 @@ inline Bytes define_font3(const Font3 &p) {
 	tag(t, 75, w.b, true);
 	return t;
 }
-// The glyphless form (NumGlyphs 0, then a code table offset and p_trailing bytes).
+
 inline Bytes define_font3_no_glyphs(uint16_t p_id, std::string_view p_name, size_t p_trailing) {
 	Writer w;
 	w.u16(p_id);
@@ -736,7 +723,7 @@ inline Bytes define_font3_no_glyphs(uint16_t p_id, std::string_view p_name, size
 	tag(t, 75, w.b, true);
 	return t;
 }
-// GFx's stripped form: OffsetTable[0] = 0, CodeTableOffset 4, the codes.
+
 inline Bytes define_font3_codes_only(uint16_t p_id, std::string_view p_name, const std::vector<uint16_t> &p_codes) {
 	Writer w;
 	w.u16(p_id);
@@ -754,7 +741,6 @@ inline Bytes define_font3_codes_only(uint16_t p_id, std::string_view p_name, con
 	return t;
 }
 
-// The payload: 8-byte header + body (stage, rate, frame count, tags). p_cfx: zlib stored blocks.
 inline Bytes zlib_stored(const Bytes &p_data);
 inline Bytes movie(const Bytes &p_tags, uint16_t p_frames = 1, bool p_cfx = false, float p_w = 1280, float p_h = 720) {
 	Bytes body = rect(0, p_w, 0, p_h);
@@ -800,13 +786,12 @@ inline Bytes zlib_stored(const Bytes &p_data) {
 	}
 	return out;
 }
-// A zlib stream that inflates to about p_out_bytes zero bytes (fixed Huffman: a literal 0, then length-258
-// distance-1 matches), at about 158:1; the adler32 is not valid (an inflater stops at its output cap first).
+
 inline Bytes zlib_bomb(size_t p_out_bytes) {
 	Bytes out = { 0x78, 0x01 };
 	uint32_t acc = 0;
 	int nbits = 0;
-	auto put = [&](uint32_t p_bits, int p_n) { // LSB first
+	auto put = [&](uint32_t p_bits, int p_n) {
 		acc |= p_bits << nbits;
 		nbits += p_n;
 		while (nbits >= 8) {
@@ -815,28 +800,28 @@ inline Bytes zlib_bomb(size_t p_out_bytes) {
 			nbits -= 8;
 		}
 	};
-	auto huff = [&](uint32_t p_code, int p_n) { // Huffman codes go MSB first
+	auto huff = [&](uint32_t p_code, int p_n) {
 		uint32_t rev = 0;
 		for (int i = 0; i < p_n; ++i) {
 			rev |= ((p_code >> i) & 1u) << (p_n - 1 - i);
 		}
 		put(rev, p_n);
 	};
-	put(1, 1); // BFINAL
-	put(1, 2); // fixed Huffman
-	huff(0x30 + 0, 8); // literal 0
+	put(1, 1);
+	put(1, 2);
+	huff(0x30 + 0, 8);
 	for (size_t made = 1; made < p_out_bytes; made += 258) {
-		huff(0xC0 + (285 - 280), 8); // length 258
-		huff(0, 5); // distance 1
+		huff(0xC0 + (285 - 280), 8);
+		huff(0, 5);
 	}
-	huff(0, 7); // end of block
+	huff(0, 7);
 	put(0, 7);
 	for (int i = 0; i < 4; ++i) {
 		out.push_back(0);
 	}
 	return out;
 }
-// The body of a movie (after the 8-byte header), inflated by the caller or taken from a GFX payload.
+
 inline Bytes gfx_from_body(const Bytes &p_body, uint8_t p_version = 8) {
 	Bytes out = { 'G', 'F', 'X', p_version };
 	const uint32_t len = uint32_t(p_body.size() + 8);
@@ -853,7 +838,6 @@ inline constexpr bool kAsan = true;
 inline constexpr bool kAsan = false;
 #endif
 
-// OPENBF3_FUZZ_ITERS overrides the iteration counts (as the other fuzz suites).
 inline size_t fuzz_iters(size_t p_default) {
 	char buf[32] = {};
 	size_t len = 0;
@@ -866,8 +850,6 @@ inline size_t fuzz_iters(size_t p_default) {
 	return p_default;
 }
 
-// The mutation mix of core_fuzz_tests.cpp / text_tests.cpp: truncation, bit flips, random bytes, u32 words (often
-// 0xFFFFFFFF), zeroes; a third of the hits land in the first 512 bytes (headers, the first tags).
 template <class Rng>
 void mutate(Bytes &r_bytes, Rng &r_rng) {
 	if (r_bytes.empty()) {
@@ -894,7 +876,6 @@ void mutate(Bytes &r_bytes, Rng &r_rng) {
 	}
 }
 
-// A movie whose header declares p_declared bytes and whose CFX stream is p_stream.
 inline Bytes cfx_with_stream(uint32_t p_declared, const Bytes &p_stream) {
 	Bytes out = { 'C', 'F', 'X', 8 };
 	for (int i = 0; i < 4; ++i) {
@@ -904,4 +885,4 @@ inline Bytes cfx_with_stream(uint32_t p_declared, const Bytes &p_stream) {
 	return out;
 }
 
-} // namespace ui1test
+}

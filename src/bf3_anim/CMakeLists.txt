@@ -1,5 +1,3 @@
-# bf3_anim: skeletons, clip sampling to poses, model space, skinning binds (plan §2.2, §3.3). Godot-free.
-# Inputs come from bf3_core (Ant rig and clips, EBX SkeletonAssets, skinned MeshSets).
 add_library(bf3_anim STATIC
     src/pose_math.cpp
     src/skeleton.cpp
@@ -16,8 +14,6 @@ target_include_directories(bf3_anim PUBLIC include)
 target_link_libraries(bf3_anim PUBLIC bf3_core)
 openbf3_module(bf3_anim)
 
-# S3 crowd (docs/design/s3.md §5, §11, §15): the 3p crowd clip set, run blend, layers and masks, temporal LOD, the
-# pose evaluator and the staged crowd.
 target_sources(bf3_anim PRIVATE
     src/crowd_clips.cpp
     src/crowd_eval.cpp
@@ -33,26 +29,20 @@ target_sources(bf3_anim PRIVATE
     include/bf3/anim/temporal_lod.h
 )
 
-# M2a w2 (W2.0 contract, docs/design/m2a.md §6.5, §11.1, §15): the server pose of the hit capsules (lc) and the 1p
-# viewmodel animator (vm).
 target_sources(bf3_anim PRIVATE
     include/bf3/anim/server_pose.h
     include/bf3/anim/viewmodel_anim.h
 )
 
-# M2a lc (docs/design/m2a.md §6.5; docs/design/m2a-lc.md): the server-pose clips and the capsule pose table builder.
 target_sources(bf3_anim PRIVATE
     src/server_pose.cpp
     include/bf3/anim/server_pose_reference.h
 )
 
-# M2a vm (docs/design/m2a-vm.md): the 1p viewmodel animator, springs, tuning file and ADS camera.
 target_sources(bf3_anim PRIVATE
     src/viewmodel_anim.cpp
 )
 
-# PT1 run (docs/design/pt1-run.md): BF3's move groups and controller routes (the 3p run / sprint / sneak and the 1p
-# run and sprint deltas).
 target_sources(bf3_anim PRIVATE
     src/move_group.cpp
     include/bf3/anim/move_group.h

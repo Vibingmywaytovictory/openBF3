@@ -1,4 +1,3 @@
-// UI ui2: MinimapCheck, the in-game minimap gates G9-G11 (minimap_check.h; docs/design/ui-minimap-icons.md §10.4).
 #include "minimap_check.h"
 
 #include "fp_camera.h"
@@ -36,13 +35,13 @@ namespace bf3::godot_side {
 
 namespace {
 
-constexpr int kSettleFrames = 3; // frames between a change and its read-back (design §10.4: at least two)
+constexpr int kSettleFrames = 3;
 constexpr float kPi = 3.14159265358979323846f;
-constexpr int kDiffThreshold = 6; // per-channel byte difference that counts as "changed"
-constexpr float kMarkerTolerance = 1.0f; // canvas units
-constexpr float kRimTolerance = 1.0f; // canvas units
+constexpr int kDiffThreshold = 6;
+constexpr float kMarkerTolerance = 1.0f;
+constexpr float kRimTolerance = 1.0f;
 constexpr float kDirectionToleranceDeg = 2.0f;
-constexpr float kWorldIconTolerance = 0.5f; // canvas units
+constexpr float kWorldIconTolerance = 0.5f;
 
 enum Phase : int {
 	kStart,
@@ -91,7 +90,6 @@ bool differs(const Ref<Image> &p_a, const Ref<Image> &p_b, int p_x, int p_y) {
 	return false;
 }
 
-// Viewport pixel bounds of a control-local rect through a canvas -> viewport transform.
 void pixel_bounds(const Transform2D &p_to_vp, const Rect2 &p_rect, int &r_x0, int &r_y0, int &r_x1, int &r_y1) {
 	const Vector2 corners[4] = { p_rect.position, p_rect.position + Vector2(p_rect.size.x, 0), p_rect.position + Vector2(0, p_rect.size.y), p_rect.get_end() };
 	float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
@@ -132,7 +130,7 @@ bool uv_in_unit(const ui::MinimapUv &p_uv) {
 	return p_uv.u >= 0.0f && p_uv.u <= 1.0f && p_uv.v >= 0.0f && p_uv.v <= 1.0f;
 }
 
-} // namespace
+}
 
 MinimapCheck::MinimapCheck(Bf3MinimapHud &p_hud, std::string p_shots_dir, bool p_rows) :
 		hud_(p_hud), shots_dir_(std::move(p_shots_dir)), rows_enabled_(p_rows) {}
@@ -234,7 +232,7 @@ void MinimapCheck::row_map_uv(const char *p_name, const ViewFrames &p_frames) {
 			max_variant[v] = std::max(max_variant[v], ui::minimap_uv_error_texels(decoded, ui::minimap_expected_uv(view, mapping, sp, v), side));
 		}
 		if (view.rotate && samples[si].up) {
-			// Forward is up: the world point under a sample straight above the centre lies in the view direction.
+
 			const std::array<float, 2> w = ui::minimap_uv_to_world(mapping, decoded);
 			const float dev = angle_between_deg(w[0] - view.player_x, w[1] - view.player_z, std::sin(view.heading), std::cos(view.heading));
 			worst_forward = std::max(worst_forward, dev);
@@ -258,7 +256,7 @@ void MinimapCheck::row_map_uv(const char *p_name, const ViewFrames &p_frames) {
 		detail += fmt("; mean signed error (%.3f, %.3f) texels", sum_du / float(used), sum_dv / float(used));
 	}
 	if (view.rotate) {
-		// Every up sample inside the image counts (one ring's can fall outside it near the map's edge).
+
 		pass = pass && forward_checked >= 1 && worst_forward <= kDirectionToleranceDeg;
 		detail += fmt("; forward is up: %zu / %d up samples inside the image, worst %.2f deg (limit %.1f)", forward_checked, kMinimapCheckRings, worst_forward, kDirectionToleranceDeg);
 	}
@@ -275,7 +273,7 @@ void MinimapCheck::row_marker_pixels(const ViewFrames &p_north, const ViewFrames
 	std::string detail;
 	for (const ViewFrames *f : { &p_north, &p_rotating }) {
 		const Vector2 centre(f->view.center_x, f->view.center_y);
-		const float half = 20.0f * k + 4.0f; // the marker frame is 17 x 19 texels
+		const float half = 20.0f * k + 4.0f;
 		int x0, y0, x1, y1;
 		pixel_bounds(to_vp, Rect2(centre - Vector2(half, half), Vector2(2 * half, 2 * half)), x0, y0, x1, y1);
 		int bx0 = 1 << 30, by0 = 1 << 30, bx1 = -1, by1 = -1;
@@ -358,7 +356,7 @@ void MinimapCheck::evaluate_icons(const ViewFrames &p_frames, std::string &r_det
 			const int ix = int(std::floor(q.x));
 			const int iy = int(std::floor(q.y));
 			const Vector2 pc = to_local.xform(Vector2(float(ix) + 0.5f, float(iy) + 0.5f));
-			// The objective's texel, moved by the map's own gradient from the icon point to the pixel centre read.
+
 			const ui::MinimapUv at_obj = ui::world_to_minimap_uv(mapping, o.position[0], o.position[2]);
 			const ui::MinimapUv e_pc = ui::minimap_expected_uv(view, mapping, { pc.x, pc.y });
 			const ui::MinimapUv e_at = ui::minimap_expected_uv(view, mapping, { at.x, at.y });
@@ -493,7 +491,7 @@ void MinimapCheck::finish_rows() {
 	done_ = true;
 }
 
-bool MinimapCheck::step(double /*p_delta*/) {
+bool MinimapCheck::step(double  ) {
 	if (done_) {
 		return true;
 	}
@@ -521,7 +519,7 @@ bool MinimapCheck::step(double /*p_delta*/) {
 								a->level.data.level_id.c_str(), a->level.mode.c_str(), a->satellite_side, a->combat_area_side, a->level.combat_areas.size(), a->atlas_width,
 								a->atlas_height, a->level.objectives.size(), a->seconds, a->steps.c_str(), double(a->peak_working_set_delta) / (1024.0 * 1024.0),
 								double(a->working_set_delta) / (1024.0 * 1024.0)));
-				// marker.spawn: the first drawn frame, no input yet.
+
 				const ui::MinimapView &v = hud_.view();
 				std::shared_ptr<const bf3::host::SharedLevel> shared = s->shared_level();
 				float best = std::numeric_limits<float>::infinity();
@@ -543,17 +541,15 @@ bool MinimapCheck::step(double /*p_delta*/) {
 				phase_ = kShots;
 				return false;
 			}
-			// Freeze the view: the minimap stays on the own position, the view turns only when scripted.
+
 			const ui::MinimapView &v = hud_.view();
 			hud_.set_center_override(v.player_x, v.player_z);
 			InputMapper &m = s->mapper();
 			m.set_scripted(true);
-			yaw0_ = std::round(m.view().yaw / (0.5f * kPi)) * (0.5f * kPi); // a multiple of 90 degrees (marker.pixels)
+			yaw0_ = std::round(m.view().yaw / (0.5f * kPi)) * (0.5f * kPi);
 			pitch0_ = m.view().pitch;
-			m.script_view(yaw0_ + 0.5f * kPi, pitch0_); // north-up at a turned heading (the marker turns by -heading)
-			// The calibration patch near the bottom-right corner: a ColorRect at a whole canvas-unit origin (Controls
-			// snap their origin to whole units, gui/common/snap_controls_to_pixels) covering at least 8 x 8 viewport
-			// pixels; the 4 x 4 pixels around its centre are read.
+			m.script_view(yaw0_ + 0.5f * kPi, pitch0_);
+
 			Viewport *vp = hud_.get_viewport();
 			const Transform2D fin = vp->get_final_transform();
 			const Rect2 vis = vp->get_visible_rect();
@@ -615,7 +611,7 @@ bool MinimapCheck::step(double /*p_delta*/) {
 			north_rects_ = c->last_icon_rects();
 			north_clamped_ = c->last_clamped();
 			hud_.set_north_up(false);
-			s->mapper().script_view(yaw0_ + kPi, pitch0_); // a scripted 90-degree turn from the north-up frames
+			s->mapper().script_view(yaw0_ + kPi, pitch0_);
 			c->set_icons_visible(false);
 			c->set_debug_uv(true);
 			phase_ = kRotUv;
@@ -639,8 +635,7 @@ bool MinimapCheck::step(double /*p_delta*/) {
 			row_marker_pixels(north_, rotating_);
 			row_icons_minimap(north_, rotating_);
 			{
-				// icons.world looks towards the objectives' centroid (Metro's spawns face along the corridor, where a
-				// 90-degree turn can leave every objective behind), level.
+
 				std::shared_ptr<const MinimapAssets> a = hud_.assets();
 				float sx = 0.0f, sz = 0.0f;
 				for (const ui::MinimapObjective &o : a->level.objectives) {
@@ -666,7 +661,7 @@ bool MinimapCheck::step(double /*p_delta*/) {
 		}
 		case kWorldVisible: {
 			row_icons_world(world_hidden_, grab());
-			// The debug frames are not kept.
+
 			north_ = ViewFrames{};
 			rotating_ = ViewFrames{};
 			world_hidden_.unref();
@@ -753,4 +748,4 @@ bool MinimapCheck::step(double /*p_delta*/) {
 	}
 }
 
-} // namespace bf3::godot_side
+}

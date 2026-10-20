@@ -1,12 +1,3 @@
-// bf3dump gameplay commands: print the soldier, mode, kit, vehicle and scoring tables that
-// bf3_core's gameplay readers resolve (include/bf3/core/gameplay/*). The output is BF3 data: keep it
-// out of the repo. Each command runs on one WorkBudget and reports the units it used on stderr.
-//
-//   soldier [<sb>]                 SoldierDef of characters/soldiers/mpsoldier (default sb: MP_001)
-//   mode <level> [<mode>]          without a mode: the level's GameMode options; else the ModeDef
-//   kits <level> <mode> [--all]    the mode's teams and kits; --all lists every selectable unlock
-//   vehicle <partition> [<sb>]     VehicleDef of a VehicleBlueprint (default sb: @all-mp, lazy)
-//   scoring [<sb>]                 persistence/scoring/scoring (default sb: MP_001)
 #include "gameplay_commands.h"
 
 #include "bf3/core/ebx_db.h"
@@ -240,7 +231,7 @@ int cmd_kits(const EbxContext &p_ctx, const std::string &p_level, const std::str
 	if (!lib) {
 		return 1;
 	}
-	// One budget for the mode, the progression tables and every kit the teams list.
+
 	WorkBudget budget;
 	Result<ModeDef> mode = read_mode_def(*lib, p_level, p_mode, &budget);
 	if (!mode) {
@@ -364,7 +355,7 @@ int cmd_scoring(const EbxContext &p_ctx, const std::string &p_spec) {
 	return 0;
 }
 
-} // namespace
+}
 
 const char *gameplay_usage() {
 	return "  soldier [<sb>]\n"
@@ -393,4 +384,4 @@ int dispatch_gameplay(const EbxContext &p_ctx, const std::string &p_cmd, const s
 	return -1;
 }
 
-} // namespace bf3dump
+}

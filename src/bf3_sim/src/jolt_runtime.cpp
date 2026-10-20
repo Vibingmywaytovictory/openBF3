@@ -1,6 +1,5 @@
 #include "jolt_runtime.h"
 
-// Jolt.h must come first.
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Core/Factory.h>
@@ -16,7 +15,7 @@ namespace {
 
 std::mutex g_jolt_mutex;
 int g_jolt_users = 0;
-int g_jolt_token = 0; // the handles point here (never dereferenced)
+int g_jolt_token = 0;
 
 void jolt_trace(const char *p_fmt, ...) {
 	va_list args;
@@ -46,11 +45,11 @@ void jolt_release() {
 	}
 }
 
-} // namespace
+}
 
 std::shared_ptr<void> jolt_runtime_acquire() {
 	jolt_acquire();
 	return std::shared_ptr<void>(&g_jolt_token, [](void *) { jolt_release(); });
 }
 
-} // namespace bf3::sim
+}

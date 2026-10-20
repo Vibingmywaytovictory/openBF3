@@ -1,6 +1,3 @@
-// Terrain heightfield: port of the heightfield parts of IW4L resource_bf3 terrain.rs (Apache-2.0).
-// Error texts match it; the extra bounds (tile side, occluder stack depth, grid side) only refuse
-// layouts no retail terrain has.
 #include "bf3/core/res/terrain.h"
 
 #include "bf3/core/thread_pool.h"
@@ -17,7 +14,7 @@ namespace {
 
 constexpr uint8_t kMaxLevel = 16;
 constexpr uint32_t kMaxSamplesPerSide = 4096;
-constexpr size_t kParallelRows = 512; // paint rows on all cores from this node size on
+constexpr size_t kParallelRows = 512;
 constexpr uint32_t kChildX[4] = { 0, 1, 1, 0 };
 constexpr uint32_t kChildY[4] = { 0, 0, 1, 1 };
 
@@ -25,7 +22,6 @@ TerrainNodeId child_of(const TerrainNodeId &p_id, int p_index) {
 	return TerrainNodeId{ uint8_t(p_id.level + 1), 2 * p_id.x + kChildX[p_index], 2 * p_id.y + kChildY[p_index] };
 }
 
-// A forward cursor over detail::Reader (IW4L bytes.rs Cursor).
 struct Cursor {
 	detail::Reader &r;
 	uint64_t at = 0;
@@ -163,19 +159,19 @@ ResError parse_heightfield(Bytes p_payload, HeightfieldTree &r_tree, uint64_t &r
 	Cursor c{ reader };
 	HeightfieldTree tree;
 	tree.samples_per_side = c.u32();
-	c.u32(); // atlas samples x
-	c.u32(); // atlas samples y
-	c.i32(); // blurriness log2
+	c.u32();
+	c.u32();
+	c.i32();
 	tree.world_size_y = c.f32();
 	tree.physics_meters_per_sample = c.f32();
-	c.i32(); // physics crop width
+	c.i32();
 	c.flag();
 	c.f32();
 	tree.min_max_stack_depth = c.u32();
 	tree.occluder_grid_stack_depth = c.u32();
-	c.u32(); // node count
-	c.u32(); // persistent node count
-	c.u32(); // persistent dedicated server node count
+	c.u32();
+	c.u32();
+	c.u32();
 	tree.border_width = c.u32();
 	if (!reader.ok()) {
 		return reader.error();
@@ -210,7 +206,7 @@ bool read_streaming_node(Cursor &c, const TerrainNodeId &p_id, std::vector<Terra
 		c.u32();
 		c.chunk_id();
 	}
-	c.flag(); // persistent on dedicated servers
+	c.flag();
 	const bool has_children = c.flag();
 	if (!c.r.ok()) {
 		return false;
@@ -231,8 +227,6 @@ struct Range {
 	size_t end = 0;
 };
 
-// Grid samples along one axis that a node at p_level, p_index along that axis, covers on the grid of
-// level p_depth (terrain.rs covered_samples).
 Range covered_samples(const HeightfieldTree &p_tree, uint32_t p_index, uint8_t p_level, uint8_t p_depth, size_t p_len) {
 	const size_t cells = p_tree.interior_cells();
 	Range r;
@@ -304,7 +298,7 @@ void paint(const HeightfieldTree &p_tree, HeightGrid &r_grid, const HeightfieldN
 			r_grid.holes[cell] = 0;
 		}
 	};
-	// Rows are independent; a large node (an upsampled ancestor) paints them on all cores.
+
 	if (region >= kParallelRows) {
 		parallel_for(region + 1, row);
 	} else {
@@ -314,7 +308,7 @@ void paint(const HeightfieldTree &p_tree, HeightGrid &r_grid, const HeightfieldN
 	}
 }
 
-} // namespace
+}
 
 ResError terrain_streaming_tree_name(Bytes p_terrain_res, std::string &r_name) {
 	const auto end = std::find(p_terrain_res.begin(), p_terrain_res.end(), uint8_t(0));
@@ -345,13 +339,13 @@ ResError TerrainStreamingTree::parse(Bytes p_res, TerrainStreamingTree &r_tree) 
 	detail::Reader reader(p_res);
 	Cursor c{ reader };
 	TerrainStreamingTree tree;
-	c.u32(); // unblurred samples per node side (log2)
+	c.u32();
 	c.flag();
 	c.f32();
 	c.f32();
-	c.u32(); // resource blurriness
-	c.u32(); // node count
-	c.flag(); // free streaming
+	c.u32();
+	c.u32();
+	c.flag();
 	for (;;) {
 		const uint8_t kind = c.u8();
 		if (!reader.ok()) {
@@ -366,7 +360,7 @@ ResError TerrainStreamingTree::parse(Bytes p_res, TerrainStreamingTree &r_tree) 
 		if (!reader.ok()) {
 			return reader.error();
 		}
-		if (kind == 0) { // heightfield; mask, colour and other rasters are stepped over
+		if (kind == 0) {
 			HeightfieldTree heightfield;
 			uint64_t used = 0;
 			const ResError e = parse_heightfield(payload, heightfield, used);
@@ -413,7 +407,6 @@ ResError TerrainStreamingTree::height_grid(uint8_t p_depth, const std::function<
 	grid.heights.assign(size_t(side * side), 0.0f);
 	grid.holes.assign(size_t(side * side), uint8_t(1));
 
-	// The last streaming node of an id wins (a HashMap collect).
 	std::map<std::tuple<uint8_t, uint32_t, uint32_t>, const TerrainStreamingNode *> streamed;
 	for (const TerrainStreamingNode &node : streaming_nodes) {
 		streamed[{ node.id.level, node.id.x, node.id.y }] = &node;
@@ -425,7 +418,7 @@ ResError TerrainStreamingTree::height_grid(uint8_t p_depth, const std::function<
 		}
 	}
 	std::stable_sort(order.begin(), order.end(), [](const HeightfieldNode *p_a, const HeightfieldNode *p_b) {
-		// sort_by_key((level, !disabled)): by level, disabled nodes first.
+
 		if (p_a->id.level != p_b->id.level) {
 			return p_a->id.level < p_b->id.level;
 		}
@@ -465,4 +458,4 @@ ResError TerrainStreamingTree::height_grid(uint8_t p_depth, const std::function<
 	return {};
 }
 
-} // namespace bf3::core::res
+}

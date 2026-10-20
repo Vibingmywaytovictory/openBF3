@@ -1,7 +1,3 @@
-// The control program of a PatchInstance (patch_instance.h, design §6.3): one evaluation of every node in the
-// program's topological order over the register file, and the time advance of the stateful nodes. Audio thread:
-// no allocation, every index was checked by validate_sound_program.
-
 #include "patch_state.h"
 
 #include <algorithm>
@@ -27,7 +23,7 @@ double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw) {
 	return double(h >> 11) * (1.0 / 9007199254740992.0);
 }
 
-} // namespace detail
+}
 
 namespace {
 
@@ -103,13 +99,12 @@ float simple_transform(uint8_t p_option, float x, float y) {
 
 float scale_clamp(float p_in, float p_in_min, float p_in_max, float p_out_min, float p_out_max) {
 	if (p_in_min == p_in_max) {
-		return p_in < p_in_min ? p_out_min : p_out_max; // a step
+		return p_in < p_in_min ? p_out_min : p_out_max;
 	}
 	const double t = std::clamp((double(p_in) - p_in_min) / (double(p_in_max) - p_in_min), 0.0, 1.0);
 	return finite_or_zero(p_out_min + t * (double(p_out_max) - p_out_min));
 }
 
-// Fade shape over a band: t in [0, 1] -> the fading-out group's level.
 float fade_out(ca::FaderType p_type, float p_t) {
 	const float t = std::clamp(p_t, 0.0f, 1.0f);
 	if (p_type == ca::FaderType::Cosine) {
@@ -149,7 +144,7 @@ bool condition(ca::ConditionOp p_op, float x, float y) {
 	return false;
 }
 
-} // namespace
+}
 
 void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 	const ca::SoundProgram &p = *program;
@@ -190,7 +185,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 					s.mode = 1;
 				}
 				const float control = (lock && s.mode) ? s.latched : live;
-				// Reading R (design §6.3): group i fades in over band i-1 and out over band i.
+
 				for (uint16_t g = 0; g < n.children_count; ++g) {
 					const SoundNode &e = child(n, g);
 					const ca::FaderType type = ca::FaderType(e.option);
@@ -447,13 +442,13 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				sampler_events(ni, n, p_frame);
 				break;
 			default:
-				break; // audio-rate nodes act through their plugins; unimplemented types are no-ops
+				break;
 		}
 	}
 	for (const AttributeDrive &d : drives) {
 		plugins[d.plugin].attributes[d.attribute] = read(d.port);
 	}
-	// Output attenuation: curve(distance) + Gain, and the cone (design §6.3).
+
 	for (size_t o = 0; o < p.outputs.size(); ++o) {
 		const ca::SoundOutput &out = p.outputs[o];
 		const float metres = geometry.distance;
@@ -473,10 +468,10 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 			}
 		}
 		outputs[o].cone_db = cone;
-		// PT1 rld [bypass headroom]: port 0 of the Cone, Flat and Direct outputs (the weapons' Handling: IsFirstPerson).
-		static_assert(cp::ConeBypassHeadroom == 0); // PT1 rld [bypass headroom]
-		outputs[o].bypass_headroom = out.node < p.nodes.size() && p.nodes[out.node].ports_count > 0 && p.nodes[out.node].ports_begin < p.ports.size() && // PT1 rld [bypass headroom]
-				read(port(p.nodes[out.node], 0)) > 0.5f; // PT1 rld [bypass headroom]
+
+		static_assert(cp::ConeBypassHeadroom == 0);
+		outputs[o].bypass_headroom = out.node < p.nodes.size() && p.nodes[out.node].ports_count > 0 && p.nodes[out.node].ports_begin < p.ports.size() &&
+				read(port(p.nodes[out.node], 0)) > 0.5f;
 	}
 }
 
@@ -565,4 +560,4 @@ void PatchInstance::State::advance(double p_seconds) {
 	}
 }
 
-} // namespace bf3::audio
+}

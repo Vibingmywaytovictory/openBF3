@@ -1,9 +1,3 @@
-// M2a nt (docs/design/m2a.md §7, §13 E17 wire side; docs/design/m2a-nt.md): net.proto.fuzz. Every message type of
-// protocol v2 is fed seeded mutations of valid datagrams (bit flips, byte overwrites, truncations, insertions, splices)
-// and random bytes behind every type byte. A decoder either refuses (counted per type) or returns a message that
-// re-encodes to bytes that decode to the same message (decode -> encode -> decode -> encode gives equal bytes). The
-// structured malformed cases (every truncation, one trailing byte, another type's decoder) must all be refused. No
-// data; meant for the asan preset too, where an out-of-bounds read or an unbounded allocation fails the run.
 #include <doctest/doctest.h>
 
 #include "bf3/net/bit_stream.h"
@@ -22,10 +16,9 @@ namespace sw = bf3::sim::weapons;
 
 namespace {
 
-constexpr size_t kMutations = 600000; // seeded; a few seconds in dev, longer under asan
+constexpr size_t kMutations = 600000;
 constexpr size_t kRandoms = 300000;
 
-// splitmix64 (the tests' own stream).
 struct Rng {
 	uint64_t s;
 	explicit Rng(uint64_t p_seed) :
@@ -42,7 +35,7 @@ struct Rng {
 
 const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } };
 
-constexpr std::array<net::MessageType, 18> kTypes = { // M2b nt: 15 -> 18 (v3)
+constexpr std::array<net::MessageType, 18> kTypes = {
 	net::MessageType::Snapshot,
 	net::MessageType::CommandPacket,
 	net::MessageType::SnapshotOthers,
@@ -58,9 +51,9 @@ constexpr std::array<net::MessageType, 18> kTypes = { // M2b nt: 15 -> 18 (v3)
 	net::MessageType::KitSelect,
 	net::MessageType::Debug,
 	net::MessageType::DebugReport,
-	net::MessageType::MatchState, // M2b nt: v3
-	net::MessageType::PlayerList, // M2b nt
-	net::MessageType::SpawnRequest, // M2b nt
+	net::MessageType::MatchState,
+	net::MessageType::PlayerList,
+	net::MessageType::SpawnRequest,
 };
 
 const char *type_name(net::MessageType p_type) {
@@ -95,11 +88,11 @@ const char *type_name(net::MessageType p_type) {
 			return "Debug";
 		case net::MessageType::DebugReport:
 			return "DebugReport";
-		case net::MessageType::MatchState: // M2b nt: v3
+		case net::MessageType::MatchState:
 			return "MatchState";
-		case net::MessageType::PlayerList: // M2b nt
+		case net::MessageType::PlayerList:
 			return "PlayerList";
-		case net::MessageType::SpawnRequest: // M2b nt
+		case net::MessageType::SpawnRequest:
 			return "SpawnRequest";
 	}
 	return "?";
@@ -116,7 +109,6 @@ size_t type_index(net::MessageType p_type) {
 
 enum class Verdict { Refused, Stable, Unstable };
 
-// Decode with p_type's decoder (whatever the type byte says), re-encode, decode, re-encode: equal bytes = stable.
 template <class Decode, class Encode>
 Verdict check(std::span<const uint8_t> p_bytes, Decode &&p_decode, Encode &&p_encode) {
 	auto a = p_decode(p_bytes);
@@ -141,8 +133,7 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 					[&](const net::Snapshot &p_m, bool &r_lossless) {
 						size_t dropped = 0;
 						std::vector<uint8_t> e = net::encode_snapshot(p_m, &dropped);
-						// A snapshot that came in one datagram goes out whole (a longer one may lose others: the
-						// decoder does not bound the input length, M1).
+
 						r_lossless = dropped == 0 || p_bytes.size() > net::kMaxDatagramBytes;
 						return e;
 					});
@@ -184,7 +175,7 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_kick(p); },
 					[](const net::Kick &p_m, bool &) { return net::encode_kick(p_m); });
 		case net::MessageType::Bye:
-			// No body: exactly the type byte.
+
 			return p_bytes.size() == 1 && p_bytes[0] == uint8_t(net::MessageType::Bye) ? Verdict::Stable : Verdict::Refused;
 		case net::MessageType::CombatEvents:
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_combat_events(p, kFrame); },
@@ -203,10 +194,10 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 		case net::MessageType::DebugReport:
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_debug_report(p); },
 					[](const net::DebugReport &p_m, bool &) { return net::encode_debug_report(p_m); });
-		case net::MessageType::MatchState: // M2b nt: v3
+		case net::MessageType::MatchState:
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_match_state(p); },
 					[](const net::MatchState &p_m, bool &) { return net::encode_match_state(p_m); });
-		case net::MessageType::PlayerList: // M2b nt
+		case net::MessageType::PlayerList:
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_player_list(p); },
 					[](const net::PlayerList &p_m, bool &r_lossless) {
 						size_t clamped = 0;
@@ -214,14 +205,12 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 						r_lossless = clamped == 0;
 						return e;
 					});
-		case net::MessageType::SpawnRequest: // M2b nt
+		case net::MessageType::SpawnRequest:
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_spawn_request(p); },
 					[](const net::SpawnRequest &p_m, bool &) { return net::encode_spawn_request(p_m); });
 	}
 	return Verdict::Refused;
 }
-
-// ---- valid samples of every type -------------------------------------------------------------------------------
 
 sim::Vec3 unit_vector(Rng &r_rng) {
 	for (;;) {
@@ -382,9 +371,9 @@ std::vector<Sample> samples() {
 		mi.kit_hash = rng.next();
 		mi.max_rewind_ticks = 21;
 		out.push_back({ net::MessageType::MatchInfo, "MatchInfo", net::encode_match_info(mi) });
-		mi.logic_digest = rng.next(); // M2b nt: v3
-		mi.rules_flags = net::rules_flags::kTdm | net::rules_flags::kDeployScreen | net::rules_flags::kRevive; // M2b nt
-		out.push_back({ net::MessageType::MatchInfo, "MatchInfo (v3 rules)", net::encode_match_info(mi) }); // M2b nt
+		mi.logic_digest = rng.next();
+		mi.rules_flags = net::rules_flags::kTdm | net::rules_flags::kDeployScreen | net::rules_flags::kRevive;
+		out.push_back({ net::MessageType::MatchInfo, "MatchInfo (v3 rules)", net::encode_match_info(mi) });
 		out.push_back({ net::MessageType::Ready, "Ready", net::encode_ready({ mi.source_digest }) });
 	}
 	{
@@ -392,8 +381,8 @@ std::vector<Sample> samples() {
 		sp.kit = 3;
 		sp.team = 2;
 		out.push_back({ net::MessageType::Spawned, "Spawned", net::encode_spawned(sp) });
-		sp.revived = true; // M2b nt: v3
-		out.push_back({ net::MessageType::Spawned, "Spawned (revived)", net::encode_spawned(sp) }); // M2b nt
+		sp.revived = true;
+		out.push_back({ net::MessageType::Spawned, "Spawned (revived)", net::encode_spawned(sp) });
 	}
 	out.push_back({ net::MessageType::Loading, "Loading", net::encode_loading({ 4, 500 }) });
 	out.push_back({ net::MessageType::Kick, "Kick", net::encode_kick({ "weapon table mismatch" }) });
@@ -419,7 +408,7 @@ std::vector<Sample> samples() {
 		d.victim = 3;
 		d.killer = 3;
 		d.time = sw::tick_start(tick);
-		c.deaths.push_back(d); // fall damage: def kNoWeapon
+		c.deaths.push_back(d);
 		d.def = 7;
 		d.killer = 9;
 		d.headshot = true;
@@ -433,12 +422,12 @@ std::vector<Sample> samples() {
 		det.normal = { 0, 1, 0 };
 		c.detonations.push_back(det);
 		out.push_back({ net::MessageType::CombatEvents, "CombatEvents", net::encode_combat_events(c, kFrame) });
-		c.deaths[1].respawn_tick = tick + 600; // M2b nt: v3, a stamped death and two revives
-		c.deaths[1].revive_until = tick + 300; // M2b nt
-		c.deaths[1].killer_health = 42.5f; // M2b nt
-		c.revives.push_back({ 9, 3, tick }); // M2b nt
-		c.revives.push_back({ 11, 12, tick - 2 }); // M2b nt
-		out.push_back({ net::MessageType::CombatEvents, "CombatEvents (v3)", net::encode_combat_events(c, kFrame) }); // M2b nt
+		c.deaths[1].respawn_tick = tick + 600;
+		c.deaths[1].revive_until = tick + 300;
+		c.deaths[1].killer_health = 42.5f;
+		c.revives.push_back({ 9, 3, tick });
+		c.revives.push_back({ 11, 12, tick - 2 });
+		out.push_back({ net::MessageType::CombatEvents, "CombatEvents (v3)", net::encode_combat_events(c, kFrame) });
 	}
 	out.push_back({ net::MessageType::KitSelect, "KitSelect", net::encode_kit_select({ 2, 1 }) });
 	{
@@ -484,7 +473,7 @@ std::vector<Sample> samples() {
 		rep.trace_dropped = 3;
 		out.push_back({ net::MessageType::DebugReport, "DebugReport", net::encode_debug_report(rep) });
 	}
-	// M2b nt: protocol v3 (MatchState, PlayerList full and delta, SpawnRequest).
+
 	{
 		net::MatchState m;
 		m.phase = net::MatchPhase::InRound;
@@ -527,7 +516,7 @@ struct Tally {
 	size_t unstable = 0;
 };
 
-} // namespace
+}
 
 TEST_SUITE("net-proto-fuzz") {
 	TEST_CASE("net.proto.fuzz: every sample of every type decodes and is stable") {
@@ -553,19 +542,19 @@ TEST_SUITE("net-proto-fuzz") {
 		for (const Sample &s : all) {
 			INFO(s.name);
 			size_t here = 0, here_refused = 0;
-			// Every truncation.
+
 			for (size_t n = 0; n < s.bytes.size(); ++n) {
 				++here;
 				here_refused += decode_as(s.type, std::span<const uint8_t>(s.bytes.data(), n)) == Verdict::Refused ? 1 : 0;
 			}
-			// One trailing byte.
+
 			for (const uint8_t extra : { uint8_t(0), uint8_t(0x5A), uint8_t(0xFF) }) {
 				std::vector<uint8_t> longer = s.bytes;
 				longer.push_back(extra);
 				++here;
 				here_refused += decode_as(s.type, longer) == Verdict::Refused ? 1 : 0;
 			}
-			// Every other type's decoder.
+
 			for (const net::MessageType other : kTypes) {
 				if (other != s.type) {
 					++here;
@@ -588,7 +577,7 @@ TEST_SUITE("net-proto-fuzz") {
 		const auto run = [&](const std::vector<uint8_t> &p_bytes) {
 			const std::optional<net::MessageType> type = net::peek_type(p_bytes);
 			if (!type) {
-				return; // unknown type byte: the session layer drops it (counted there)
+				return;
 			}
 			Tally &t = tally[type_index(*type)];
 			switch (decode_as(*type, p_bytes)) {
@@ -632,7 +621,7 @@ TEST_SUITE("net-proto-fuzz") {
 						b.insert(b.begin() + rng.below(uint32_t(b.size()) + 1), uint8_t(rng.next()));
 						break;
 					default: {
-						// Splice another sample's tail after this one's head (keeps the type byte).
+
 						const Sample &o = all[rng.below(uint32_t(all.size()))];
 						const size_t head = rng.below(uint32_t(b.size()) + 1);
 						const size_t from = rng.below(uint32_t(o.bytes.size()) + 1);
@@ -653,7 +642,7 @@ TEST_SUITE("net-proto-fuzz") {
 			}
 			b[0] = uint8_t(type);
 			run(b);
-			if (rng.below(4) == 0) { // and a few unknown type bytes
+			if (rng.below(4) == 0) {
 				b[0] = uint8_t(rng.next());
 				run(b);
 			}
@@ -667,7 +656,7 @@ TEST_SUITE("net-proto-fuzz") {
 			unstable += tally[i].unstable;
 			INFO(type_name(kTypes[i]));
 			CHECK(tally[i].unstable == 0);
-			CHECK(tally[i].refused > 0); // every decoder saw hostile bytes and refused some
+			CHECK(tally[i].refused > 0);
 		}
 		std::printf("net.proto.fuzz: total %zu decoded+stable, %zu refused, %zu unstable\n", stable, refused, unstable);
 		CHECK(unstable == 0);

@@ -1,7 +1,3 @@
-// Gameplay tables (bf3_core/gameplay): SoldierDef, KitDef, ModeDef, VehicleDef against the retail
-// install (plan §7.2-§7.4, research/topics/02-soldier-kits-modes.md), plus install-free unit cases.
-// The install is read through InstallReader / Install / EbxLibrary only (read-only); without one the
-// "tables" suite skips (exit 77).
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -51,7 +47,6 @@ bool open_or_skip(Mounted &r_m) {
 	return true;
 }
 
-// The level's own superbundle (self-contained: gameplay/*, characters/*, settings, scoring).
 std::unique_ptr<EbxLibrary> open_level(const Mounted &p_m, const char *p_level_id) {
 	const std::optional<Level> level = p_m.install->level(p_level_id);
 	REQUIRE_MESSAGE(level.has_value(), p_level_id);
@@ -80,7 +75,6 @@ size_t hq_count(const ModeDef &p_mode) {
 	return n;
 }
 
-// The first turret of a seat that turns about an axis (1 yaw, 0 pitch) at the given nesting.
 const VehicleTurretDef *turret(const VehicleDef &p_v, int p_seat, int p_axis, bool p_root) {
 	for (const VehicleTurretDef &t : p_v.turrets) {
 		if (t.seat == p_seat && t.rotation_axis == p_axis && (t.parent < 0) == p_root) {
@@ -113,15 +107,10 @@ void check_mbt_health(const VehicleDef &p_v) {
 	CHECK(p_v.seats[1].seat_type == "EST_Gunner");
 }
 
-// A synthetic world-part graph as an EBX partition (no install needed), for hostile LogicWorld
-// inputs. Node i is instance i: a WorldPartData whose Objects are the listed instances, or a
-// WorldPartReferenceObjectData whose Blueprint is instance `target`. Instance 0 is the primary.
-//   DataContainer (class, 8); WorldPartData : DataContainer (16): Objects array@8;
-//   WorldPartReferenceObjectData : DataContainer (16): Blueprint Class@8; array (member Class)
 struct SynthNode {
 	bool part = true;
-	std::vector<uint32_t> objects; // part: instance indices
-	uint32_t target = 0; // reference: instance index
+	std::vector<uint32_t> objects;
+	uint32_t target = 0;
 };
 
 void put32(std::vector<uint8_t> &r_out, size_t p_at, uint32_t p_value) {
@@ -149,11 +138,11 @@ std::vector<uint8_t> build_world_graph(const std::vector<SynthNode> &p_nodes) {
 		uint32_t offset;
 	};
 	const F fields[] = {
-		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartData (0, 1)
+		{ "$", ebx_code::kVoid, 0, 0 },
 		{ "Objects", ebx_code::kArray, 3, 8 },
-		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartReferenceObjectData (2, 3)
+		{ "$", ebx_code::kVoid, 0, 0 },
 		{ "Blueprint", ebx_code::kClass, 0, 8 },
-		{ "member", ebx_code::kClass, 0, 0 }, // array (4)
+		{ "member", ebx_code::kClass, 0, 0 },
 	};
 	struct C {
 		const char *name;
@@ -182,7 +171,7 @@ std::vector<uint8_t> build_world_graph(const std::vector<SynthNode> &p_nodes) {
 	const size_t instance_repeaters_at = complexes_at + std::size(complexes) * 16;
 	const size_t array_repeaters_at = align16(instance_repeaters_at + p_nodes.size() * 12);
 	const size_t meta_size = align16(array_repeaters_at + part_count * 12);
-	const size_t instances_at = meta_size; // no strings
+	const size_t instances_at = meta_size;
 	const size_t instance_payload = p_nodes.size() * (16 + 16);
 	const size_t arrays_at = instances_at + instance_payload;
 	const size_t total = arrays_at + array_bytes;
@@ -223,7 +212,7 @@ std::vector<uint8_t> build_world_graph(const std::vector<SynthNode> &p_nodes) {
 	size_t array_index = 0, array_at = 0;
 	for (size_t i = 0; i < p_nodes.size(); ++i) {
 		const SynthNode &n = p_nodes[i];
-		// One repeater per instance: {internal 0, count 1, complex}.
+
 		put32(b, instance_repeaters_at + i * 12 + 4, 1);
 		put32(b, instance_repeaters_at + i * 12 + 8, n.part ? 1 : 2);
 		const size_t at = instances_at + i * 32;
@@ -231,12 +220,12 @@ std::vector<uint8_t> build_world_graph(const std::vector<SynthNode> &p_nodes) {
 		std::memcpy(b.data() + at, g.bytes.data(), 16);
 		const size_t data = at + 16;
 		if (!n.part) {
-			put32(b, data + 8, n.target + 1); // internal reference
+			put32(b, data + 8, n.target + 1);
 			continue;
 		}
 		put32(b, data + 8, static_cast<uint32_t>(array_index));
 		const size_t rep = array_repeaters_at + array_index * 12;
-		put32(b, rep, static_cast<uint32_t>(array_at + 4)); // elements after the stored count
+		put32(b, rep, static_cast<uint32_t>(array_at + 4));
 		put32(b, rep + 4, static_cast<uint32_t>(n.objects.size()));
 		put32(b, rep + 8, 3);
 		put32(b, arrays_at + array_at, static_cast<uint32_t>(n.objects.size()));
@@ -249,7 +238,6 @@ std::vector<uint8_t> build_world_graph(const std::vector<SynthNode> &p_nodes) {
 	return b;
 }
 
-// A chain of p_parts world parts, each holding p_fan references to the next one.
 std::vector<SynthNode> fan_chain(uint32_t p_parts, uint32_t p_fan) {
 	std::vector<SynthNode> nodes(p_parts);
 	for (uint32_t i = 0; i + 1 < p_parts; ++i) {
@@ -272,18 +260,6 @@ const EbxPartition &insert_graph(EbxDb &r_db, const std::vector<SynthNode> &p_no
 	return *p;
 }
 
-// A general synthetic EBX partition for the hostile-input cases of every gameplay reader. Each class
-// derives from DataContainer (size 8) or from a class listed before it (`base`) and has one 4-byte
-// slot per field after its base; a value type has its slots from offset 0. Field kinds: 'b' Boolean, 'i' Int32, 'r' class reference, 's'
-// CString, 'a' array of references, 'v' array of the value type `elem`, 'g' Guid (its 16 bytes are
-// this slot's word and the next three slots, which must be 'i' fields holding the rest), 'S' an
-// inline struct of the value type `elem` (written as zeros; it must fit the slot, see `overlap`),
-// 'e' an Enum of the enum type `elem`, 'w' array of CStrings. A field value is the raw word, except
-// 's' (an index into `strings`) and 'a' / 'v' / 'w' (an index into `arrays`; arrays may be shared by
-// any number of fields, as EBX allows). Unset strings are null, unset arrays empty. An `overlap`
-// type is 4 bytes with every field (and its base) at offset 0, as EBX allows; a value type may then
-// have a base. An `enum_type` lists its enumerators as fields, valued 1, 2, 3, ... (a zero field
-// names none, so decoding it scans them all).
 struct SynField {
 	std::string name;
 	char kind = 'i';
@@ -294,7 +270,7 @@ struct SynType {
 	std::string name;
 	std::vector<SynField> fields;
 	bool value_type = false;
-	std::string base; // a class listed earlier; empty: DataContainer
+	std::string base;
 	bool overlap = false;
 	bool enum_type = false;
 };
@@ -302,8 +278,8 @@ struct SynType {
 using SynValues = std::vector<std::pair<std::string, uint32_t>>;
 
 struct SynArray {
-	std::string elem; // the value type of a struct array, empty for references, kStrings for CStrings
-	std::vector<uint32_t> refs; // references, or for kStrings indices into `strings`
+	std::string elem;
+	std::vector<uint32_t> refs;
 	std::vector<SynValues> structs;
 
 	static constexpr const char *kStrings = "*CString";
@@ -316,11 +292,11 @@ struct SynInstance {
 
 struct SynPartition {
 	std::vector<SynType> types;
-	std::vector<SynInstance> instances; // instance 0 is the primary
+	std::vector<SynInstance> instances;
 	std::vector<SynArray> arrays;
 	std::vector<std::string> strings;
-	uint32_t imports = 0; // imports of a partition no db holds: references to them never resolve
-	uint32_t seed = 1; // partitions of one db need distinct seeds (GUIDs)
+	uint32_t imports = 0;
+	uint32_t seed = 1;
 
 	static uint32_t ref(uint32_t p_instance) { return p_instance + 1; }
 	static uint32_t import_ref(uint32_t p_import) { return 0x80000000u | p_import; }
@@ -336,7 +312,7 @@ struct SynPartition {
 		strings.push_back(std::move(p_text));
 		return static_cast<uint32_t>(strings.size() - 1);
 	}
-	// A reference array of p_count copies of p_word (null refs when 0).
+
 	uint32_t add_refs(size_t p_count, uint32_t p_word) { return add_array(SynArray{ {}, std::vector<uint32_t>(p_count, p_word), {} }); }
 
 	Guid guid(uint32_t p_index) const {
@@ -357,7 +333,7 @@ std::vector<uint8_t> SynPartition::build() const {
 			names.push_back(p_name);
 		}
 	};
-	// Element kinds of the array complexes: "" (references), then each value type used.
+
 	std::vector<std::string> elems{ "" };
 	for (const SynType &t : types) {
 		add_name(t.name);
@@ -400,7 +376,7 @@ std::vector<uint8_t> SynPartition::build() const {
 	};
 	std::vector<F> fields;
 	std::vector<C> complexes{ { "DataContainer", 0, 0, ebx_code::kClass, 8 } };
-	// Byte size of each type (bases come first in `types`), and where its own fields start.
+
 	std::vector<uint32_t> sizes;
 	for (const SynType &t : types) {
 		const uint32_t base = t.value_type ? 0 : (t.base.empty() ? 8 : sizes[type_at(t.base)]);
@@ -467,7 +443,6 @@ std::vector<uint8_t> SynPartition::build() const {
 		complexes.push_back({ "array", start, 1, ebx_code::kArray, 4 });
 	}
 
-	// Arrays: the listed ones, then one empty array per element kind for unset fields.
 	std::vector<SynArray> all = arrays;
 	const size_t empty_at = all.size();
 	for (const std::string &e : elems) {
@@ -521,7 +496,7 @@ std::vector<uint8_t> SynPartition::build() const {
 	std::memcpy(b.data() + 0x40, primary.bytes.data(), 16);
 	for (uint32_t i = 0; i < imports; ++i) {
 		Guid missing = guid(i);
-		missing.bytes[14] = 0x77; // a partition no db holds
+		missing.bytes[14] = 0x77;
 		std::memcpy(b.data() + 80 + i * 32, missing.bytes.data(), 16);
 		std::memcpy(b.data() + 80 + i * 32 + 16, missing.bytes.data(), 16);
 	}
@@ -545,10 +520,10 @@ std::vector<uint8_t> SynPartition::build() const {
 		std::memcpy(b.data() + at + 12, &complexes[i].size, 2);
 	}
 	std::memcpy(b.data() + strings_at, string_table.data(), string_table.size());
-	// The fields of one object (instance data or array element) at p_at, base types first.
+
 	std::function<void(const SynType &, const SynValues &, size_t)> write = [&](const SynType &p_type, const SynValues &p_values, size_t p_at) {
 		if (p_type.overlap) {
-			return; // all zero
+			return;
 		}
 		if (!p_type.value_type && !p_type.base.empty()) {
 			write(types[type_at(p_type.base)], p_values, p_at);
@@ -608,7 +583,6 @@ std::vector<uint8_t> SynPartition::build() const {
 	return b;
 }
 
-// Parses and inserts a synthetic partition; null (and a failed check) when it does not parse.
 const EbxPartition *insert_syn(EbxDb &r_db, const char *p_name, const SynPartition &p_syn) {
 	Result<bool> inserted = r_db.parse_insert(p_name, p_syn.build());
 	CHECK_MESSAGE(inserted.ok(), (inserted.ok() ? std::string() : inserted.error().message));
@@ -621,15 +595,12 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// A hostile case must end with an error well inside this (unbudgeted, each would run for minutes to
-// hours); generous for the ASan build on a busy machine.
 constexpr double kFastSeconds = 20.0;
 
 bool budget_error(const Error &p_error) {
 	return p_error.message.find("work budget of") != std::string::npos;
 }
 
-// The world-walk types every LogicWorld case below uses.
 std::vector<SynType> world_types() {
 	return {
 		{ "WorldPartData", { { "Objects", 'a' } } },
@@ -646,9 +617,6 @@ std::vector<SynType> world_types() {
 	};
 }
 
-// Adds p_levels value types (W0 <- W1 <- ...; 255 descriptors each, the base link included), 4 bytes
-// with every field at offset 0, and returns the most derived. 4 levels (1020 descriptors) is the
-// widest chain the parser accepts (EbxPartition::kChainFields), 5 is rejected.
 std::string add_wide_value_type(SynPartition &r_syn, int p_levels) {
 	std::string base;
 	for (int level = 0; level < p_levels; ++level) {
@@ -662,8 +630,6 @@ std::string add_wide_value_type(SynPartition &r_syn, int p_levels) {
 	return base;
 }
 
-// One world part whose Objects hold p_k references to one WorldPartReferenceObjectData, whose part
-// holds p_n entries that never yield an object (null, or imports no db holds).
 SynPartition repeated_part(size_t p_k, size_t p_n, bool p_unresolvable) {
 	SynPartition s;
 	s.types = world_types();
@@ -676,11 +642,11 @@ SynPartition repeated_part(size_t p_k, size_t p_n, bool p_unresolvable) {
 	return s;
 }
 
-} // namespace
+}
 
 TEST_SUITE("tables-unit") {
 	TEST_CASE("gameplay: LogicWorld skips world parts that contain themselves") {
-		// Part 0 holds two references back to itself; part 1 <-> part 2 reference each other.
+
 		std::vector<SynthNode> nodes(3);
 		for (const uint32_t target : { 0u, 0u, 2u }) {
 			SynthNode r;
@@ -705,13 +671,13 @@ TEST_SUITE("tables-unit") {
 		const EbxPartition &p = insert_graph(db, nodes);
 		Result<LogicWorld> world = LogicWorld::build(db, p.primary(), {});
 		REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
-		CHECK(world->stats().cycles == 3); // 0 -> 0 twice, 0 -> 1 -> 2 -> 1 once
+		CHECK(world->stats().cycles == 3);
 		CHECK(world->stats().depth_limited == 0);
 		CHECK(world->stats().walk_steps < 100);
 	}
 
 	TEST_CASE("gameplay: LogicWorld walk budget stops a nested world-part fan-out") {
-		// 40 distinct parts, each referencing the next twice: 2^39 visits without a budget.
+
 		EbxDb db;
 		const EbxPartition &p = insert_graph(db, fan_chain(40, 2));
 		LogicWorldOptions options;
@@ -719,10 +685,10 @@ TEST_SUITE("tables-unit") {
 		Result<LogicWorld> world = LogicWorld::build(db, p.primary(), options);
 		REQUIRE_FALSE(world.ok());
 		CHECK(world.error().message.find("walk exceeds 100000 steps") != std::string::npos);
-		// The default budget also ends it with an error (in about two million steps).
+
 		Result<LogicWorld> by_default = LogicWorld::build(db, p.primary(), {});
 		CHECK_FALSE(by_default.ok());
-		// A short fan-out stays inside the budget and completes.
+
 		EbxDb small_db;
 		const EbxPartition &small = insert_graph(small_db, fan_chain(6, 2));
 		Result<LogicWorld> fine = LogicWorld::build(small_db, small.primary(), {});
@@ -731,12 +697,10 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: LogicWorld walk budget counts null Objects entries") {
-		// One part whose Objects hold 120000 null refs: they yield no object but are scanned, so they
-		// must be charged to the budget. (The EBX parser already rejects internal refs to no
-		// instance, so unresolvable entries only come from imports and take the same path.)
+
 		std::vector<SynthNode> nodes(1);
 		for (uint32_t k = 0; k < 120000; ++k) {
-			nodes[0].objects.push_back(0xFFFFFFFFu); // written as 0: a null ref
+			nodes[0].objects.push_back(0xFFFFFFFFu);
 		}
 		EbxDb db;
 		const EbxPartition &p = insert_graph(db, nodes);
@@ -749,10 +713,6 @@ TEST_SUITE("tables-unit") {
 		REQUIRE_FALSE(world.ok());
 		CHECK(world.error().message.find("walk exceeds 100000 steps") != std::string::npos);
 
-		// The same leaf at the end of a fan-out (2^21 leaf visits) ends after a few leaf scans
-		// instead of re-scanning the array on every visit. Every walk step is also charged to the
-		// total work budget, whose default (1M units) is below the default walk cap (2M steps), so
-		// the budget is what ends it.
 		std::vector<SynthNode> fan = fan_chain(22, 2);
 		for (uint32_t k = 0; k < 100000; ++k) {
 			fan[21].objects.push_back(0xFFFFFFFFu);
@@ -765,8 +725,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: LogicWorld walk fails when the query budget runs out") {
-		// Every reference is an Excluded query of at least one resolver step; with a query budget of
-		// 1 the walk must fail rather than fall back to the stored Excluded field.
+
 		EbxDb db;
 		const EbxPartition &p = insert_graph(db, fan_chain(4, 2));
 		LogicWorldOptions options;
@@ -792,7 +751,7 @@ TEST_SUITE("tables-unit") {
 		const Status over = budget.charge(1);
 		REQUIRE_FALSE(over.ok());
 		CHECK(budget_error(over.error()));
-		// Every later charge fails, even one of zero units, and nothing more is added.
+
 		CHECK_FALSE(budget.charge(0).ok());
 		CHECK_FALSE(budget.take(0));
 		CHECK_FALSE(budget.status().ok());
@@ -802,8 +761,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 1 repro - world-part fan-out ends on the total budget") {
-		// 40 parts referencing the next twice (2^39 visits unbounded), with the walk cap lifted so the
-		// total budget alone must end it.
+
 		EbxDb db;
 		const EbxPartition &p = insert_graph(db, fan_chain(40, 2));
 		LogicWorldOptions options;
@@ -819,8 +777,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 2 repro - null Objects entries under a fan-out") {
-		// 22 parts with fan-out 2, 100000 nulls in the leaf: 2^21 leaf scans unbounded (the round 2
-		// probe took 95.6 s for 10000 nulls).
+
 		std::vector<SynthNode> fan = fan_chain(22, 2);
 		for (uint32_t k = 0; k < 100000; ++k) {
 			fan[21].objects.push_back(0xFFFFFFFFu);
@@ -837,9 +794,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 3 repro - K references to one sub-world with N null inclusion settings") {
-		// One part whose Objects hold K refs to one SubWorldReferenceObjectData (AutoLoad) whose
-		// InclusionSettings.Settings hold N nulls: K * N = 1e10 scans unbounded (the round 3 probe
-		// was killed after 120 s at K = N = 100000, about 2 walk steps per reference).
+
 		constexpr size_t kRefs = 100000, kNulls = 100000;
 		SynPartition s;
 		s.types = world_types();
@@ -871,8 +826,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: K references to one world part whose Objects never resolve") {
-		// The generic pattern on the walk: K entries -> one reference -> one part of N entries that
-		// yield nothing (null refs, or imports of a partition no db holds).
+
 		for (const bool unresolvable : { false, true }) {
 			CAPTURE(unresolvable);
 			EbxDb db;
@@ -888,7 +842,7 @@ TEST_SUITE("tables-unit") {
 			CHECK(budget_error(world.error()));
 			CHECK(seconds_since(start) < kFastSeconds);
 		}
-		// A small one completes and reports what it charged.
+
 		EbxDb db;
 		const EbxPartition *p = insert_syn(db, "levels/synthetic/parts", repeated_part(3, 5, true));
 		if (p == nullptr) {
@@ -901,8 +855,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: K prefabs sharing one connection array of N entries") {
-		// Distinct blueprints that share one PropertyConnections array (EBX lets any number of
-		// instances name the same array): each connection set costs N, K times.
+
 		constexpr size_t kPrefabs = 2000, kConnections = 100000;
 		SynPartition s;
 		s.types = world_types();
@@ -929,9 +882,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: self-referencing connection loops end on the total budget") {
-		// Every reference's Excluded is fed from a part's Excluded, which the part feeds into itself
-		// twice (and does not have as a field): each Excluded query branches 2^16 deep and stops at
-		// kResolveDepth or kQuerySteps; with the per-walk caps lifted, K of them must end on the budget.
+
 		constexpr uint32_t kRefs = 40;
 		SynPartition s;
 		s.types = world_types();
@@ -961,13 +912,10 @@ TEST_SUITE("tables-unit") {
 		REQUIRE_FALSE(world.ok());
 		CHECK(budget_error(world.error()));
 		CHECK(seconds_since(start) < kFastSeconds);
-		// With the default caps the query cap or the budget ends it, also fast.
+
 		Result<LogicWorld> by_default = LogicWorld::build(db, p->primary(), {});
 		CHECK_FALSE(by_default.ok());
 
-		// Queries on a world that builds: a loop on an object the walk never asks about. Each query
-		// stops at kQuerySteps; the shared budget runs out after a few and every later query returns
-		// at once (nullopt), with the budget reported exhausted.
 		SynPartition q;
 		q.types = world_types();
 		const uint32_t q_root = q.add({ "PrefabBlueprint", {} });
@@ -998,8 +946,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: K team entities naming one TeamData with N null kits (read_mode_def)") {
-		// A level whose one sub-world holds K TeamEntityData of one TeamData whose
-		// SoldierCustomization lists N entries that never resolve: K * N = 1e9 unbounded.
+
 		constexpr size_t kTeams = 10000, kKits = 100000;
 		for (const bool unresolvable : { false, true }) {
 			CAPTURE(unresolvable);
@@ -1029,8 +976,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: K components naming one component with N null children (soldier, vehicle)") {
-		// collect_components (4096 components) and the vehicle Layout walk (8192) visit a component
-		// once per listing, and each visit scans its Components array.
+
 		constexpr size_t kListed = 8192, kNulls = 200000;
 		for (const bool vehicle : { false, true }) {
 			CAPTURE(vehicle);
@@ -1087,7 +1033,7 @@ TEST_SUITE("tables-unit") {
 		REQUIRE_FALSE(read.ok());
 		CHECK(budget_error(read.error()));
 		CHECK(seconds_since(start) < kFastSeconds);
-		// One budget shared by several reads ends them all: the next read fails at once.
+
 		WorkBudget shared(1000);
 		CHECK_FALSE(read_kit_def(db, "gameplay/kits/syn", &none, &shared).ok());
 		CHECK(shared.exhausted());
@@ -1096,11 +1042,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: wide type chains - rejected past the parser's cap, O(log n) lookups at it") {
-		// A lookup of a field a type lacks used to scan every field of the chain (up to 255 fields x
-		// 32 base types), so references of such a type were charged their width. The EBX parser now
-		// rejects chains of more than kChainFields (1024) descriptors and looks every field up in a
-		// per-type table (a binary search): a reference of the widest accepted type costs what a
-		// narrow one does, and the budget ends a long list of them as fast.
+
 		const auto build = [](int p_levels, size_t p_references) {
 			SynPartition s;
 			s.types = world_types();
@@ -1113,9 +1055,9 @@ TEST_SUITE("tables-unit") {
 				s.types.push_back(wide);
 				base = wide.name;
 			}
-			// Most derived: the reference type itself, without an Excluded field.
+
 			s.types.push_back({ "WorldPartReferenceObjectData", { { "Blueprint", 'r' } }, false, base });
-			s.types.erase(s.types.begin() + 1); // drop the plain WorldPartReferenceObjectData
+			s.types.erase(s.types.begin() + 1);
 			const uint32_t root = s.add({ "WorldPartData", {} });
 			const uint32_t part = s.add({ "WorldPartData", {} });
 			const uint32_t reference = s.add({ "WorldPartReferenceObjectData", { { "Blueprint", SynPartition::ref(part) } } });
@@ -1123,13 +1065,13 @@ TEST_SUITE("tables-unit") {
 			return s;
 		};
 		{
-			// 30 bases of 255 descriptors: the parser refuses the partition.
+
 			EbxDb db;
 			const Result<bool> inserted = db.parse_insert("levels/synthetic/wide", build(30, 10).build());
 			REQUIRE_FALSE(inserted.ok());
 			CHECK(inserted.error().message.find("field descriptors along its base chain") != std::string::npos);
 		}
-		// 4 bases of 255 descriptors plus the reference type's own 2: 1022, the widest accepted.
+
 		EbxDb db;
 		const EbxPartition *p = insert_syn(db, "levels/synthetic/wide", build(4, 10));
 		if (p == nullptr) {
@@ -1142,9 +1084,8 @@ TEST_SUITE("tables-unit") {
 		CHECK(wide->get("Pad253").has_value());
 		Result<LogicWorld> small = LogicWorld::build(db, p->primary(), {});
 		REQUIRE(small.ok());
-		CHECK(small->budget().used() < 200); // ~11 units per reference, whatever the width
+		CHECK(small->budget().used() < 200);
 
-		// 400000 of them: the default budget ends the walk after ~90k, fast.
 		EbxDb many_db;
 		const EbxPartition *many = insert_syn(many_db, "levels/synthetic/wide", build(4, 400000));
 		if (many == nullptr) {
@@ -1160,9 +1101,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: inline value types and enum fields read by lookup, nested cycles included") {
-		// Inline value types may nest in a cycle (sizes are declared, not derived; the validator only
-		// rejects one an instance holds). Each path segment is one lookup; an enum decode is a binary
-		// search over its enumerators, and a value that names none decodes without a name.
+
 		SynPartition s;
 		s.types = {
 			{ "Choice", { { "One", 'i' }, { "Two", 'i' }, { "Three", 'i' } }, false, {}, false, true },
@@ -1177,20 +1116,20 @@ TEST_SUITE("tables-unit") {
 		if (p == nullptr) {
 			return;
 		}
-		CHECK(WorkBudget::chain_descriptors(EbxStruct(p, 2, 0)) == 2); // complex 0 is DataContainer, 1 Choice
+		CHECK(WorkBudget::chain_descriptors(EbxStruct(p, 2, 0)) == 2);
 		const std::optional<EbxInstance> h = p->instance(holder);
 		REQUIRE(h.has_value());
-		CHECK(WorkBudget::chain_descriptors(h->data()) == 3); // '$' + Inline + Pick
+		CHECK(WorkBudget::chain_descriptors(h->data()) == 3);
 		const std::optional<EbxValue> inline_value = h->get("Inline");
 		REQUIRE(inline_value.has_value());
 		REQUIRE(inline_value->as_struct().has_value());
-		// Pick is 0, which names no enumerator (they are 1, 2, 3).
+
 		const std::optional<EbxValue> pick = h->get("Pick");
 		REQUIRE(pick.has_value());
 		CHECK_FALSE(pick->enum_name().has_value());
 		CHECK(h->get_path("Inline.w").has_value());
 		CHECK_FALSE(h->get_path("Inline.missing").has_value());
-		// One unit per examination, a fields() pass 1 + descriptors / 8.
+
 		WorkBudget budget(2);
 		CHECK(budget.charge_type(h->data()).ok());
 		CHECK(budget.charge_fields(h->data()).ok());
@@ -1198,12 +1137,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 5 repro - wide inline structs in a narrow pose (read_soldier_def)") {
-		// Poses: N references to one narrow CharacterPoseData whose inline EyePosition,
-		// CollisionBoxMin/MaxExpand and LookConstraints had the widest value type (31 x 255
-		// descriptors): read_pose's 11 lookups into them scanned ~87k descriptors per pose, and N =
-		// 450k (2 MB) ran 28 s inside the budget. Such a type no longer parses, and at the widest
-		// accepted one (4 x 255) each lookup is a binary search: 250k poses read in well under a
-		// second, inside the budget (3 units each), and 600k end on the budget error.
+
 		const auto build = [](size_t p_poses) {
 			SynPartition s;
 			const std::string wide = add_wide_value_type(s, 4);
@@ -1223,7 +1157,7 @@ TEST_SUITE("tables-unit") {
 		};
 		const char *name = "characters/soldiers/syn";
 		{
-			// The widest value type the parser accepts, and nothing wider.
+
 			SynPartition too_wide;
 			add_wide_value_type(too_wide, 5);
 			too_wide.types.push_back({ "Holder", { { "Pad", 'i' } } });
@@ -1250,7 +1184,7 @@ TEST_SUITE("tables-unit") {
 			Result<SoldierDef> soldier = read_soldier_def(db, name, &budget);
 			REQUIRE_MESSAGE(soldier.ok(), (soldier.ok() ? std::string() : soldier.error().message));
 			CHECK(soldier->poses.size() == kPoses);
-			CHECK(budget.used() >= 3 * kPoses); // the Poses entry, the pose's examination, its CollisionType
+			CHECK(budget.used() >= 3 * kPoses);
 			CHECK(seconds_since(start) < kFastSeconds);
 		}
 		EbxDb db;
@@ -1265,12 +1199,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 5 repro - K prefabs sharing one EventConnections array with wide inline events") {
-		// get_path("SourceEvent.Id") and ("TargetEvent.Id") look into inline structs. With the widest
-		// value type (31 x 255) K = 100 prefabs sharing N = 9000 entries (354 KB) ran 9.8 s inside
-		// the budget. Such a type no longer parses; the widest accepted one (4 x 255) inline in N =
-		// 9000 entries makes the parser's own check bail out (it pays for the descriptors it checks,
-		// <= 16 steps per byte). With a narrow event type each segment is one lookup and an entry one
-		// unit: the same K x N reads fast, and twice the prefabs end on the budget error.
+
 		const auto run = [](EbxDb &r_db, size_t p_prefabs, size_t p_connections, WorkBudget &r_budget, bool p_wide) -> Result<LogicWorld> {
 			SynPartition root;
 			root.seed = 1;
@@ -1352,11 +1281,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: enum fields decode by binary search (soldier states)") {
-		// Decoding an enum used to scan its enum's (<= 255) enumerators, so a fields() pass over 31 x
-		// 254 enum fields whose values name none scanned 2M enumerators per state: K = 3000 states
-		// naming one fitted the budget (6G compares). Now the chain is at most 1024 descriptors, a
-		// decode is a binary search, and the pass costs 1 + descriptors / 8 units: 3000 such states
-		// read fast inside the budget (~130 units each), 60000 end on the budget error.
+
 		const auto build = [](size_t p_states) {
 			SynPartition s;
 			SynType choice{ "WideEnum", {}, false, {}, false, true };
@@ -1365,7 +1290,7 @@ TEST_SUITE("tables-unit") {
 			}
 			s.types.push_back(choice);
 			std::string base;
-			for (int level = 0; level < 4; ++level) { // 4 x 255 descriptors along the chain
+			for (int level = 0; level < 4; ++level) {
 				SynType t{ "EnumState" + std::to_string(level), {}, false, base };
 				for (int k = 0; k < 254; ++k) {
 					t.fields.push_back({ "E" + std::to_string(k), 'e', "WideEnum" });
@@ -1419,10 +1344,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: one long string named by many fields decodes without a rescan") {
-		// A string decode used to scan for its NUL, so N EnabledOptions naming one long string cost N
-		// times its length when the partition was parsed (the validator decodes each) and again per
-		// inclusion test: 100k of 1 MiB took 15 s, the 200k of 2 MiB here ~1.2 TB of scanning. The
-		// parser now records the NULs once; a decode is a binary search.
+
 		constexpr size_t kOptions = 200000;
 		constexpr size_t kLength = size_t(2) << 20;
 		SynPartition s;
@@ -1456,7 +1378,7 @@ TEST_SUITE("tables-unit") {
 		REQUIRE(other.ok());
 		CHECK_FALSE(*other);
 		CHECK(seconds_since(start) < kFastSeconds);
-		// Both ends of the table decode to the right lengths.
+
 		const std::optional<EbxValue> list = p->instance(setting)->get("EnabledOptions");
 		REQUIRE(list.has_value());
 		const OptionalEbxArray array = list->as_array();
@@ -1467,11 +1389,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: K references to one wide blueprint pay for its lookups (place_reference)") {
-		// Every placed ReferenceObjectData looks into the ObjectBlueprint it names, and any number may
-		// name one: with Object at the root of the widest class chain each Object lookup scanned 7905
-		// descriptors while the reference itself cost ~2 units, so 400k references fitted the budget.
-		// The chain is now at most 1024 descriptors and the lookup a binary search; place_reference
-		// still charges the blueprint per reference, and 400k references end on the budget, fast.
+
 		constexpr size_t kReferences = 400000;
 		SynPartition s;
 		s.types = world_types();
@@ -1520,14 +1438,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 7 repro - feeds of a depth-1 leaf are charged (property_in, source_value)") {
-		// A binary chain of kLevels nodes in the root prefab (two PropertyConnections from node i + 1
-		// into node i) whose last node is fed by a ReferenceObjectData of a prefab with M feeds into
-		// its descriptor. One query reaches that leaf 2^16 times at depth 1, in ~196k charged steps
-		// (under kQuerySteps). Its source_value then looped over the M feeds calling
-		// source_value(..., 0), which returned before charging: 65536 x M free iterations per query
-		// (M = 100k: 23.8 s per query, the walk 117 s, all inside the budget). Now no call is made at
-		// depth 0 and every feed iteration is charged, so the leaf costs O(1) and the work is bounded
-		// by the budget alone.
+
 		constexpr size_t kLevels = 16, kFeeds = 100000;
 		const auto build = [&](bool p_walk, size_t p_heads) {
 			SynPartition s;
@@ -1535,14 +1446,14 @@ TEST_SUITE("tables-unit") {
 			s.types = world_types();
 			for (SynType &t : s.types) {
 				if (t.name == "ReferenceObjectData") {
-					t.fields = { { "Blueprint", 'r' } }; // no Excluded: the leaf's data_field finds nothing
+					t.fields = { { "Blueprint", 'r' } };
 				}
 			}
 			s.types.push_back({ "Node", { { "Pad", 'i' } } });
 			s.types.push_back({ "Desc", { { "Pad", 'i' } } });
 			const uint32_t root = s.add({ "PrefabBlueprint", {} });
 			const uint32_t field = p_walk ? static_cast<uint32_t>(field_id("Excluded")) : 0x13572468u;
-			// The chain head: a WorldPartReferenceObjectData in the walk (whose Excluded it asks).
+
 			std::vector<uint32_t> node;
 			node.push_back(s.add({ p_walk ? "WorldPartReferenceObjectData" : "Node", {} }));
 			for (size_t i = 1; i < kLevels; ++i) {
@@ -1571,8 +1482,7 @@ TEST_SUITE("tables-unit") {
 			return std::make_pair(s, field);
 		};
 		{
-			// Direct queries on a world that builds: each is ~196k steps, so the default budget ends
-			// the third; every later one returns at once.
+
 			auto [s, field] = build(false, 0);
 			EbxDb db;
 			const EbxPartition *p = insert_syn(db, "levels/synthetic/depth", s);
@@ -1589,7 +1499,7 @@ TEST_SUITE("tables-unit") {
 			const size_t before = world->budget().used();
 			CHECK_FALSE(world->property(0, *head, static_cast<int32_t>(field)).has_value());
 			const size_t one = world->budget().used() - before;
-			CHECK(one > 65536); // the 2^16 leaf visits are all charged
+			CHECK(one > 65536);
 			CHECK(one < 600000);
 			for (int i = 0; i < 6; ++i) {
 				CHECK_FALSE(world->property(0, *head, static_cast<int32_t>(field)).has_value());
@@ -1597,7 +1507,7 @@ TEST_SUITE("tables-unit") {
 			CHECK(world->budget().exhausted());
 			CHECK(seconds_since(start) < kFastSeconds);
 		}
-		// Through the walk: the chain head listed 10 times in Objects, each an Excluded query.
+
 		auto [s, field] = build(true, 10);
 		(void)field;
 		EbxDb db;
@@ -1616,10 +1526,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: K specialization pairs copying one long target name (read_soldier_def)") {
-		// Every pair of an unlock's UnlockValues copies the names of the target field it feeds. With
-		// one target there is no name compare to charge, so K pairs each copied an L-byte type name
-		// for one unit: K = 100k pairs of a 1 MiB name was 100 GB of copies (and of memory) inside the
-		// budget. Each copy is now charged by its length.
+
 		const auto build = [](size_t p_pairs, size_t p_name_length) {
 			SynPartition s;
 			s.types = world_types();
@@ -1661,8 +1568,7 @@ TEST_SUITE("tables-unit") {
 			CHECK(soldier->specializations[2].value == Approx(2));
 		}
 		EbxDb db;
-		// Not exactly 2^20: a run of 2^k equal bytes can leave ebx_name_hash where it started, and the
-		// name would then resolve to "Target".
+
 		if (insert_syn(db, name, build(100000, (size_t(1) << 20) + 7)) == nullptr) {
 			return;
 		}
@@ -1674,10 +1580,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 4 repro - crafted target field ids do not flood the connection index") {
-		// TargetFieldId = (t * G) >> 1 cancelled bits 1-32 of the former by-target hash
-		// (InstanceKeyHash(t) ^ field << 1), so every key shared one bucket and each insert scanned it
-		// all, within one budget unit per entry: N = 100k took ~30 s, 1M (inside the budget) hours.
-		// The index is now a sorted vector: n log n whatever the keys.
+
 		constexpr size_t kConnections = 100000;
 		constexpr uint64_t kGolden = 0x9E3779B97F4A7C15ull;
 		SynPartition s;
@@ -1693,7 +1596,7 @@ TEST_SUITE("tables-unit") {
 			connections.push_back({ { "Source", SynPartition::ref(t) }, { "Target", SynPartition::ref(t) }, { "SourceFieldId", 1 },
 					{ "TargetFieldId", static_cast<uint32_t>(fields.back()) } });
 		}
-		// Two more feeds of the first (target, field): property_into keeps connection order.
+
 		for (uint32_t k = 0; k < 2; ++k) {
 			connections.push_back({ { "Source", SynPartition::ref(targets[1 + k]) }, { "Target", SynPartition::ref(targets[0]) }, { "SourceFieldId", 2 + k },
 					{ "TargetFieldId", static_cast<uint32_t>(fields[0]) } });
@@ -1728,9 +1631,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: round 4 repro - crafted unlock GUIDs do not flood the progression gates") {
-		// GUIDs with a = b * G (a, b: bytes 0-7, 8-15) all hashed to 0 under the former GuidHash
-		// (a ^ b * G): N = 100k gates took ~21 s within one unit each, 250k over 2 min. gates is now a
-		// std::map, and GuidHash is keyed with the process seed.
+
 		constexpr size_t kUnlocks = 250000;
 		constexpr uint64_t kGolden = 0x9E3779B97F4A7C15ull;
 		SynPartition s;
@@ -1766,9 +1667,7 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: keyed hashes spread keys crafted against a fixed mixer") {
-		// Hash containers of data-controlled keys (core GUID / SHA1 maps, the InstanceKey sets) hash
-		// with the per-process seed of ids.h: keys lined up for the former mixers spread evenly (under
-		// those, all of them shared one bucket).
+
 		constexpr size_t kKeys = 20000;
 		constexpr uint64_t kGolden = 0x9E3779B97F4A7C15ull;
 		const auto max_bucket = [](const auto &p_map) {
@@ -1787,7 +1686,7 @@ TEST_SUITE("tables-unit") {
 			std::memcpy(g.bytes.data(), &a, 8);
 			std::memcpy(g.bytes.data() + 8, &b, 8);
 			guids.emplace(g, i);
-			Sha1 h; // differs only in bytes 16-19; the former Sha1Hash read bytes 0-7 alone
+			Sha1 h;
 			std::memcpy(h.bytes.data() + 16, &i, 4);
 			sha1s.emplace(h, i);
 			instances.emplace(InstanceKey{ nullptr, i }, i);
@@ -1797,7 +1696,7 @@ TEST_SUITE("tables-unit") {
 		CHECK(max_bucket(guids) < 32);
 		CHECK(max_bucket(sha1s) < 32);
 		CHECK(max_bucket(instances) < 32);
-		CHECK(GuidHash()(guids.begin()->first) == GuidHash()(guids.begin()->first)); // stable within a run
+		CHECK(GuidHash()(guids.begin()->first) == GuidHash()(guids.begin()->first));
 	}
 
 	TEST_CASE("gameplay: kit default skips gated and variant unlocks") {
@@ -1812,7 +1711,7 @@ TEST_SUITE("tables-unit") {
 		KitUnlock he{ "weapons/gadgets/m320/u_m320_he", "SoldierWeaponUnlockAsset", "weapons/gadgets/m320/m320", UnlockGate::ScoringBucket, false };
 		KitUnlock shg{ "weapons/gadgets/m320/u_m320_shg", "SoldierWeaponUnlockAsset", "weapons/gadgets/m320/m320", UnlockGate::Free, true };
 		launcher.unlocks = { he, shg };
-		// Without the progression tables nothing is a known default.
+
 		CHECK(kit.default_unlock(WeaponSlot::Knife) == nullptr);
 		kit.progression_known = true;
 		REQUIRE(kit.default_unlock(WeaponSlot::Knife) != nullptr);
@@ -1844,7 +1743,7 @@ TEST_SUITE("tables-unit") {
 		REQUIRE(v.has_value());
 		REQUIRE(v->as_vec3().has_value());
 		CHECK((*v->as_vec3())[2] == Approx(3));
-		// Malformed or unknown: kept as an untyped constant, never a number.
+
 		v = PropertyValue::parse("Int32 12abc");
 		REQUIRE(v.has_value());
 		CHECK(v->kind == PropertyValue::Kind::Constant);
@@ -2028,7 +1927,7 @@ TEST_SUITE("tables") {
 		REQUIRE(defenders != nullptr);
 		CHECK(attackers->starting_lives == 75);
 		CHECK(defenders->base_count == 4);
-		// 10 crates are placed (a 5th base included); which ones run is decided by logic at runtime.
+
 		REQUIRE(rush.mcoms.size() >= 8);
 		for (const McomDef &c : rush.mcoms) {
 			CHECK(c.arm_time.value_or(-1) == Approx(2.5));
@@ -2137,9 +2036,7 @@ TEST_SUITE("tables") {
 		const UnlockProgression &progression = *read_progression;
 		CHECK(progression.tables == 4);
 		CHECK(progression.gates.size() > 500);
-		// Starting loadouts (research/topics/02-soldier-kits-modes.md §2.2, the bold column entries):
-		// per slot the weapon partition, "" for an unlock without a weapon (nogadget), nullptr for no
-		// default (every entry gated, or an empty slot).
+
 		struct Expect {
 			int team;
 			const char *kit;
@@ -2191,7 +2088,7 @@ TEST_SUITE("tables") {
 			check_slot(*kit, WeaponSlot::KitItem, e.kit_item);
 			check_slot(*kit, WeaponSlot::Gadget2, e.gadget2);
 			check_slot(*kit, WeaponSlot::Grenade, "weapons/m67/m67");
-			// The razor knife is listed first but is a licence unlock (mpstaticunlocks).
+
 			check_slot(*kit, WeaponSlot::Knife, "weapons/knife/knife");
 			const KitSlot *knives = kit->slot(WeaponSlot::Knife);
 			REQUIRE(knives != nullptr);
@@ -2199,13 +2096,12 @@ TEST_SUITE("tables") {
 			CHECK(knives->unlocks[0].unlock == "weapons/xp2_knife_razorblade/u_knife_razor");
 			CHECK(knives->unlocks[0].gate == UnlockGate::Licence);
 		}
-		// Without a progression table read here, read_kit_def reads one itself.
+
 		Result<KitDef> own = read_kit_def(*lib, "gameplay/kits/usassault");
 		REQUIRE(own.ok());
 		REQUIRE(own->default_unlock(WeaponSlot::Knife) != nullptr);
 		CHECK(own->default_unlock(WeaponSlot::Knife)->weapon == "weapons/knife/knife");
-		// Underslung ammo variants carry an Extra unlock, are in no progression table and are never a
-		// default; the two scoped crossbows are variants too (award-gated).
+
 		const KitSlot *launchers = own->slot(WeaponSlot::Gadget1);
 		REQUIRE(launchers != nullptr);
 		size_t variants = 0, free_variants = 0;
@@ -2214,7 +2110,7 @@ TEST_SUITE("tables") {
 			free_variants += (u.variant && u.gate == UnlockGate::Free) ? 1 : 0;
 		}
 		CHECK(variants == 8);
-		CHECK(free_variants == 6); // M320 SHG/SMK/LVG, M26 flechette/frag/slug
+		CHECK(free_variants == 6);
 	}
 
 	TEST_CASE("gameplay: VehicleDef (plan §7.4)") {

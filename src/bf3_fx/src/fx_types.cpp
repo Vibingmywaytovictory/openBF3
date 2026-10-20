@@ -1,5 +1,3 @@
-// bf3_fx name tables (fx_types.h): the EBX type and enumerator names of the emitter graphs, both ways. These tables
-// are the vocabulary the census gate measures: a name outside them is "unknown" (docs/design/m2a-vfx1.md §6.1).
 #include "bf3/fx/fx_types.h"
 
 #include <array>
@@ -98,7 +96,7 @@ std::string_view name_at(const std::array<std::string_view, N> &p_table, size_t 
 	return p_index < N ? p_table[p_index] : std::string_view();
 }
 
-} // namespace
+}
 
 std::string_view processor_type_name(ProcessorType p_type) {
 	return name_at(kProcessorNames, size_t(p_type));
@@ -145,4 +143,4 @@ std::optional<EmittableType> emittable_type_from_name(std::string_view p_name) {
 	return find_name<EmittableType>(kEmittableNames, p_name);
 }
 
-} // namespace bf3::fx
+}

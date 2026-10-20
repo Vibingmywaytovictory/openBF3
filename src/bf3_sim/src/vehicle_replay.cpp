@@ -1,7 +1,3 @@
-// The S2 replay harness and its judges (docs/design/s2.md §1, §7, §8; vehicle_replay.h). One engine records a
-// server run of n slots (n = 1 for a course, 3 for G1m), then checks G1 (a prediction world restored from the tick-0
-// snapshot), G1r (restores at chosen ticks, into the prediction world and in place) and, for one slot, G2 (the
-// quantised-ghost client loop per restore mode).
 #include "bf3/sim/vehicle_replay.h"
 
 #include <algorithm>
@@ -40,10 +36,6 @@ uint64_t splitmix(uint64_t &r_state) {
 	return z ^ (z >> 31);
 }
 
-// The angle (degrees) between two rotations from the chord between them (sign aligned): for unit quaternions
-// |q - q'| = 2 sin(theta / 4), so theta = 4 asin(|q - q'| / 2) = 2 c (1 + c^2 / 24 + ...) with c = |q - q'|. Unlike
-// 2 acos |q . q'| it is exactly 0 for equal quaternions whose float norm is not exactly 1 (reported only; the series
-// is exact to 1e-7 rad below 1 degree).
 float rotation_error_degrees(const std::array<float, 4> &p_a, const std::array<float, 4> &p_b) {
 	const double dot = double(p_a[0]) * p_b[0] + double(p_a[1]) * p_b[1] + double(p_a[2]) * p_b[2] + double(p_a[3]) * p_b[3];
 	const double sign = dot < 0.0 ? -1.0 : 1.0;
@@ -79,22 +71,20 @@ VehicleErrorStats stats_of(std::vector<std::pair<float, Tick>> p_samples) {
 	return s;
 }
 
-// ---- the engine -----------------------------------------------------------------------------------------------------
-
 struct Recording {
 	size_t slots = 0;
 	uint32_t ticks = 0;
-	std::vector<VehicleWorldSnapshot> snapshots; // ticks 0..ticks
-	std::vector<std::vector<VehicleState>> states; // [tick][slot]
-	std::vector<std::vector<VehicleContacts>> contacts; // [tick][slot]; tick 0 = the settle's last step
-	std::vector<std::vector<uint64_t>> state_hashes; // [tick][slot]
-	std::vector<std::vector<VehicleCommand>> commands; // [tick - 1][slot]
+	std::vector<VehicleWorldSnapshot> snapshots;
+	std::vector<std::vector<VehicleState>> states;
+	std::vector<std::vector<VehicleContacts>> contacts;
+	std::vector<std::vector<uint64_t>> state_hashes;
+	std::vector<std::vector<VehicleCommand>> commands;
 };
 
 struct Harness {
 	std::shared_ptr<const StaticWorldShapes> shapes;
 	std::shared_ptr<const VehicleModel> model;
-	std::vector<VehicleCourse> courses; // slot i drives courses[i]
+	std::vector<VehicleCourse> courses;
 	std::vector<VehicleSlot> slot_ids;
 	uint64_t steps = 0;
 
@@ -115,7 +105,6 @@ struct Harness {
 		return r_world.step(slot_ids, p_commands);
 	}
 
-	// Settle, then record ticks 1..p_ticks with each slot's scripted driver (closed loop on the server's state).
 	core::Status record(VehicleWorld &r_server, uint32_t p_ticks, Recording &r_rec) {
 		const size_t n = courses.size();
 		r_rec.slots = n;
@@ -150,8 +139,6 @@ struct Harness {
 		return core::Status::success();
 	}
 
-	// "slot<i>.<field>" or "jolt:<section>+<offset>" for the first difference of p_world against the recording at
-	// p_tick (the server's sections come from a scratch world restored from its snapshot).
 	std::string divergence(const VehicleWorld &p_world, const Recording &p_rec, uint32_t p_tick) const {
 		for (size_t s = 0; s < p_rec.slots; ++s) {
 			const std::string field = vehicle_state_first_difference(p_rec.states[p_tick][s], p_world.state(VehicleSlot(s)));
@@ -190,7 +177,6 @@ struct Harness {
 		return true;
 	}
 
-	// Steps p_world through ticks p_from + 1 .. p_to with the logged commands, comparing every tick.
 	core::Status replay(VehicleWorld &r_world, const Recording &p_rec, uint32_t p_from, uint32_t p_to, uint32_t &r_ticks, uint32_t &r_mismatches,
 			VehicleDivergence &r_first) {
 		for (uint32_t t = p_from + 1; t <= p_to; ++t) {
@@ -207,7 +193,6 @@ struct Harness {
 		return core::Status::success();
 	}
 
-	// G1 then G1r (prediction world and in-place rollback of p_server).
 	core::Status check_g1(VehicleWorld &r_server, const Recording &p_rec, const VehicleReplayOptions &p_options, uint64_t p_salt, uint32_t &r_g1_ticks,
 			uint32_t &r_g1_mismatches, VehicleDivergence &r_g1_first, uint32_t &r_runs, uint32_t &r_replay_ticks, uint32_t &r_replay_mismatches,
 			VehicleDivergence &r_replay_first, std::unique_ptr<VehicleWorld> &r_prediction) {
@@ -239,7 +224,6 @@ struct Harness {
 	}
 };
 
-// The server run's facts (gate D) for slot 0.
 void course_facts(const Recording &p_rec, const VehicleModel &p_model, VehicleCourseReport &r_report) {
 	float last_sign = 0.0f;
 	double heading_sum = 0.0;
@@ -291,20 +275,11 @@ void course_facts(const Recording &p_rec, const VehicleModel &p_model, VehicleCo
 
 const char *kModeNames[kVehicleRestoreModeCount] = { "own", "invalidate", "lambdas", "pod", "pod-own-lambdas", "full" };
 
-// The OwnHistory client's history of one replay length: its world snapshot at every N it restored from.
 struct ClientHistory {
-	std::vector<VehicleWorldSnapshot> snapshots; // [tick], set where have[tick] != 0
+	std::vector<VehicleWorldSnapshot> snapshots;
 	std::vector<uint8_t> have;
 };
 
-// The G2 client loop for one mode and replay length (s2.md §8.4 step 5). OwnHistory, Invalidate and GhostLambdas
-// keep their own history (each replay's world at N + interval is the base of the next sample). ExactPod and
-// PodOwnLambdas restore the OwnHistory run's history (p_base) instead: a pod mode that kept its own history would
-// replay bit-identically after its exact restore (G1), so by induction from history[0] = the server's tick-0
-// snapshot its contact cache and lambdas would always equal the server's and the mode would equal Full by
-// construction. On the diverged OwnHistory base the only state that is not the server's is the client's Jolt state
-// outside the restored VehicleState groups (the contact cache; with PodOwnLambdas also the lambdas), which is what
-// s2.md §7.3 asks of them. r_history (OwnHistory only) receives the history.
 core::Status client_loop(Harness &r_h, VehicleWorld &r_client, const Recording &p_rec, VehicleRestoreMode p_mode, uint32_t p_replay,
 		const VehicleReplayOptions &p_options, const ClientHistory *p_base, ClientHistory *r_history, VehicleCorrectionReport &r_report) {
 	r_report.mode = p_mode;
@@ -402,7 +377,7 @@ core::Status client_loop(Harness &r_h, VehicleWorld &r_client, const Recording &
 	return core::Status::success();
 }
 
-} // namespace
+}
 
 const char *vehicle_restore_mode_name(VehicleRestoreMode p_mode) {
 	return size_t(p_mode) < kVehicleRestoreModeCount ? kModeNames[size_t(p_mode)] : "?";
@@ -455,8 +430,7 @@ core::Result<VehicleCourseReport> run_vehicle_course(std::shared_ptr<const Stati
 			BF3_TRY(made);
 			prediction = std::move(*made);
 		}
-		// The primary mode always runs, and first: its history per replay length is the diverged base of the pod
-		// modes (client_loop).
+
 		const uint32_t modes = p_options.modes | 1u;
 		const uint32_t pod_bits = (1u << uint32_t(VehicleRestoreMode::ExactPod)) | (1u << uint32_t(VehicleRestoreMode::PodOwnLambdas));
 		std::vector<ClientHistory> own(p_options.replay_ticks.size());
@@ -489,7 +463,7 @@ bool vehicle_course_drove(const VehicleCourseReport &p_report, std::string *r_wh
 		if (r_why != nullptr) {
 			r_why->clear();
 		}
-		return true; // gate C judges it
+		return true;
 	}
 	const size_t kind = size_t(p_report.course.kind);
 	if (kind >= kVehicleCourseKindCount) {
@@ -643,8 +617,6 @@ bool vehicle_gate_g2(const std::vector<VehicleCourseReport> &p_reports, std::str
 	return why.empty();
 }
 
-// G2x (integration decision, s2.md §15.2): the ExactPod mode, the full-precision owner VehicleState M3 sends the
-// driving client (plan R4), restored onto the client's own diverged OwnHistory history. Max only: p99 is printed.
 bool vehicle_gate_g2x(const std::vector<VehicleCourseReport> &p_reports, std::string *r_why) {
 	std::string why;
 	size_t found = 0;
@@ -823,8 +795,6 @@ std::string format_vehicle_group_report(const VehicleGroupReport &p_report) {
 	return out;
 }
 
-// ---- handling numbers and the spawn settle ----------------------------------------------------------------------------
-
 namespace {
 
 struct Bench {
@@ -849,7 +819,6 @@ core::Result<Bench> bench(std::shared_ptr<const StaticWorldShapes> p_shapes, std
 	return b;
 }
 
-// Throttle p_throttle (or a held speed when p_hold > 0), steering towards +Z far ahead (or p_steer when set).
 VehicleCommand bench_command(const VehicleState &p_state, int8_t p_throttle, float p_hold, int8_t p_steer, bool p_free_steer) {
 	VehicleCommand c;
 	const Vec3 f = forward_of(p_state.body.rotation);
@@ -869,7 +838,7 @@ VehicleCommand bench_command(const VehicleState &p_state, int8_t p_throttle, flo
 	if (p_free_steer) {
 		c.steer = p_steer;
 	} else {
-		// along x = 0 towards +Z: steer at a point 30 m ahead on that line (the project's right = (-f.z, 0, f.x))
+
 		const float dx = 0.0f - p_state.body.origin[0];
 		const float dz = 30.0f;
 		const float lateral = dx * -f[2] + dz * f[0];
@@ -879,7 +848,7 @@ VehicleCommand bench_command(const VehicleState &p_state, int8_t p_throttle, flo
 	return c;
 }
 
-} // namespace
+}
 
 core::Result<VehicleHandling> measure_vehicle_handling(std::shared_ptr<const VehicleModel> p_model) {
 	if (p_model == nullptr) {
@@ -894,7 +863,7 @@ core::Result<VehicleHandling> measure_vehicle_handling(std::shared_ptr<const Veh
 	const VehicleSlot slot = 0;
 	VehiclePlacement start;
 	start.position = { 0.0f, 0.05f, -1950.0f };
-	// Full throttle for 60 s: 0-60 km/h, the speed at 6 s, the top speed.
+
 	{
 		core::Result<Bench> b = bench(*shapes, p_model, start);
 		BF3_TRY(b);
@@ -916,8 +885,7 @@ core::Result<VehicleHandling> measure_vehicle_handling(std::shared_ptr<const Veh
 			}
 		}
 	}
-	// Full brake from 60 km/h (reached under full throttle) to rest. A held cruise at 60 km/h needs most of the
-	// placeholder engine's torque (top speed ~75 km/h), so the stop starts at the first tick at or above 60 km/h.
+
 	{
 		core::Result<Bench> b = bench(*shapes, p_model, start);
 		BF3_TRY(b);
@@ -946,12 +914,12 @@ core::Result<VehicleHandling> measure_vehicle_handling(std::shared_ptr<const Veh
 			s = b->world->state(0);
 		}
 	}
-	// Full lock left at a held 15 km/h: the paths of the centre of mass and of the outer front wheel's contact.
+
 	{
 		core::Result<Bench> b = bench(*shapes, p_model, start);
 		BF3_TRY(b);
 		VehicleState s = b->state;
-		size_t outer = 0; // the right front wheel (side 1, axle 0) is outside a left turn
+		size_t outer = 0;
 		for (size_t i = 0; i < p_model->wheel_count; ++i) {
 			if (p_model->wheels[i].axle == 0 && p_model->wheels[i].side == 1) {
 				outer = i;
@@ -1015,4 +983,4 @@ core::Result<std::vector<VehicleSettleReport>> measure_vehicle_settle(std::share
 	return out;
 }
 
-} // namespace bf3::sim
+}

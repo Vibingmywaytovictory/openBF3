@@ -1,9 +1,3 @@
-// Mutation robustness of the container/EBX readers (suite "fuzz", ctest core.fuzz): real retail
-// bytes are read from the install (read-only, skipped without an install), mutated in memory with a
-// fixed seed (bit flips, random bytes, 0xFFFFFFFF words, zeroes, truncation) and fed back to the
-// parsers. Every mutant must either fail with an error result or parse and walk fully; nothing is
-// written anywhere. Most useful in the `asan` preset (/fsanitize=address). OPENBF3_FUZZ_ITERS
-// overrides the per-input mutant count.
 #include <doctest/doctest.h>
 
 #include "bf3/core/bundle_manifest.h"
@@ -55,7 +49,7 @@ void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng) {
 	}
 	const unsigned count = 1 + unsigned(r_rng() % 8);
 	for (unsigned i = 0; i < count; ++i) {
-		// A third of the hits land in the first 512 bytes, where the headers and tables are.
+
 		const size_t at = (r_rng() % 3 == 0) ? size_t(r_rng() % std::min<size_t>(r_bytes.size(), 0x200)) : size_t(r_rng() % r_bytes.size());
 		if (mode == 1) {
 			r_bytes[at] ^= uint8_t(1u << (r_rng() % 8));
@@ -70,7 +64,6 @@ void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng) {
 	}
 }
 
-// Visits every value; arrays are iterated straight from the temporary as_array() result.
 size_t walk(const EbxValue &p_value) {
 	size_t n = 1;
 	if (p_value.kind() == EbxValue::Kind::Struct) {
@@ -95,7 +88,7 @@ size_t walk(const EbxPartition &p_partition) {
 	return n;
 }
 
-} // namespace
+}
 
 TEST_SUITE("fuzz") {
 	TEST_CASE("fuzz: mutated ebx partitions, stored payloads and toc/manifest bytes") {

@@ -1,7 +1,5 @@
 #pragma once
-// S4 level logic tests (logic.unit, logic.fuzz): a synthetic EBX partition writer. A copy of the SynPartition helper
-// of gameplay_tables_tests.cpp (private to that file), plus 'f' Float32 fields. An 'S' inline struct field takes a
-// value word too: it is written into the struct's first 4 bytes (EventConnection.SourceEvent.Id, a 4-byte struct).
+
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -31,19 +29,6 @@ inline uint32_t fbits(float p_value) {
 	return b;
 }
 
-// A general synthetic EBX partition for the hostile-input cases of every gameplay reader. Each class
-// derives from DataContainer (size 8) or from a class listed before it (`base`) and has one 4-byte
-// slot per field after its base; a value type has its slots from offset 0. Field kinds: 'b' Boolean, 'i' Int32, 'f' Float32 (the value is
-// the float's bit pattern, see fbits), 'r' class reference, 's'
-// CString, 'a' array of references, 'v' array of the value type `elem`, 'g' Guid (its 16 bytes are
-// this slot's word and the next three slots, which must be 'i' fields holding the rest), 'S' an
-// inline struct of the value type `elem` (written as zeros; it must fit the slot, see `overlap`),
-// 'e' an Enum of the enum type `elem`, 'w' array of CStrings. A field value is the raw word, except
-// 's' (an index into `strings`) and 'a' / 'v' / 'w' (an index into `arrays`; arrays may be shared by
-// any number of fields, as EBX allows). Unset strings are null, unset arrays empty. An `overlap`
-// type is 4 bytes with every field (and its base) at offset 0, as EBX allows; a value type may then
-// have a base. An `enum_type` lists its enumerators as fields, valued 1, 2, 3, ... (a zero field
-// names none, so decoding it scans them all).
 struct SynField {
 	std::string name;
 	char kind = 'i';
@@ -54,7 +39,7 @@ struct SynType {
 	std::string name;
 	std::vector<SynField> fields;
 	bool value_type = false;
-	std::string base; // a class listed earlier; empty: DataContainer
+	std::string base;
 	bool overlap = false;
 	bool enum_type = false;
 };
@@ -62,8 +47,8 @@ struct SynType {
 using SynValues = std::vector<std::pair<std::string, uint32_t>>;
 
 struct SynArray {
-	std::string elem; // the value type of a struct array, empty for references, kStrings for CStrings
-	std::vector<uint32_t> refs; // references, or for kStrings indices into `strings`
+	std::string elem;
+	std::vector<uint32_t> refs;
 	std::vector<SynValues> structs;
 
 	static constexpr const char *kStrings = "*CString";
@@ -76,11 +61,11 @@ struct SynInstance {
 
 struct SynPartition {
 	std::vector<SynType> types;
-	std::vector<SynInstance> instances; // instance 0 is the primary
+	std::vector<SynInstance> instances;
 	std::vector<SynArray> arrays;
 	std::vector<std::string> strings;
-	uint32_t imports = 0; // imports of a partition no db holds: references to them never resolve
-	uint32_t seed = 1; // partitions of one db need distinct seeds (GUIDs)
+	uint32_t imports = 0;
+	uint32_t seed = 1;
 
 	static uint32_t ref(uint32_t p_instance) { return p_instance + 1; }
 	static uint32_t import_ref(uint32_t p_import) { return 0x80000000u | p_import; }
@@ -96,7 +81,7 @@ struct SynPartition {
 		strings.push_back(std::move(p_text));
 		return static_cast<uint32_t>(strings.size() - 1);
 	}
-	// A reference array of p_count copies of p_word (null refs when 0).
+
 	uint32_t add_refs(size_t p_count, uint32_t p_word) { return add_array(SynArray{ {}, std::vector<uint32_t>(p_count, p_word), {} }); }
 
 	Guid guid(uint32_t p_index) const {
@@ -117,7 +102,7 @@ inline std::vector<uint8_t> SynPartition::build() const {
 			names.push_back(p_name);
 		}
 	};
-	// Element kinds of the array complexes: "" (references), then each value type used.
+
 	std::vector<std::string> elems{ "" };
 	for (const SynType &t : types) {
 		add_name(t.name);
@@ -160,7 +145,7 @@ inline std::vector<uint8_t> SynPartition::build() const {
 	};
 	std::vector<F> fields;
 	std::vector<C> complexes{ { "DataContainer", 0, 0, ebx_code::kClass, 8 } };
-	// Byte size of each type (bases come first in `types`), and where its own fields start.
+
 	std::vector<uint32_t> sizes;
 	for (const SynType &t : types) {
 		const uint32_t base = t.value_type ? 0 : (t.base.empty() ? 8 : sizes[type_at(t.base)]);
@@ -230,7 +215,6 @@ inline std::vector<uint8_t> SynPartition::build() const {
 		complexes.push_back({ "array", start, 1, ebx_code::kArray, 4 });
 	}
 
-	// Arrays: the listed ones, then one empty array per element kind for unset fields.
 	std::vector<SynArray> all = arrays;
 	const size_t empty_at = all.size();
 	for (const std::string &e : elems) {
@@ -284,7 +268,7 @@ inline std::vector<uint8_t> SynPartition::build() const {
 	std::memcpy(b.data() + 0x40, primary.bytes.data(), 16);
 	for (uint32_t i = 0; i < imports; ++i) {
 		Guid missing = guid(i);
-		missing.bytes[14] = 0x77; // a partition no db holds
+		missing.bytes[14] = 0x77;
 		std::memcpy(b.data() + 80 + i * 32, missing.bytes.data(), 16);
 		std::memcpy(b.data() + 80 + i * 32 + 16, missing.bytes.data(), 16);
 	}
@@ -308,10 +292,10 @@ inline std::vector<uint8_t> SynPartition::build() const {
 		std::memcpy(b.data() + at + 12, &complexes[i].size, 2);
 	}
 	std::memcpy(b.data() + strings_at, string_table.data(), string_table.size());
-	// The fields of one object (instance data or array element) at p_at, base types first.
+
 	std::function<void(const SynType &, const SynValues &, size_t)> write = [&](const SynType &p_type, const SynValues &p_values, size_t p_at) {
 		if (p_type.overlap) {
-			return; // all zero
+			return;
 		}
 		if (!p_type.value_type && !p_type.base.empty()) {
 			write(types[type_at(p_type.base)], p_values, p_at);
@@ -371,8 +355,6 @@ inline std::vector<uint8_t> SynPartition::build() const {
 	return b;
 }
 
-
-// Parses and inserts a synthetic partition; null (and a failed check) when it does not parse.
 inline const EbxPartition *insert_syn(EbxDb &r_db, const char *p_name, const SynPartition &p_syn) {
 	Result<bool> inserted = r_db.parse_insert(p_name, p_syn.build());
 	CHECK_MESSAGE(inserted.ok(), (inserted.ok() ? std::string() : inserted.error().message));
@@ -381,4 +363,4 @@ inline const EbxPartition *insert_syn(EbxDb &r_db, const char *p_name, const Syn
 	return p;
 }
 
-} // namespace logic_test
+}

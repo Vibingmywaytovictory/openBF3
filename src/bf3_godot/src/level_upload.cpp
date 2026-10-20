@@ -27,7 +27,7 @@ using bf3::host::LoadStage;
 namespace {
 
 uint64_t now_us() {
-	// The clock of LoadProgress (level_load.cpp): steady_clock microseconds.
+
 	return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
@@ -53,7 +53,6 @@ Image::Format image_format(render::GpuFormat p_format) {
 	return Image::FORMAT_RGBA8;
 }
 
-// Godot's Vector3::octahedron_encode / octahedron_tangent_encode (core/math/vector3.cpp), in float like real_t.
 void octahedron_encode(float p_x, float p_y, float p_z, float &r_u, float &r_v) {
 	const float sum = std::fabs(p_x) + std::fabs(p_y) + std::fabs(p_z);
 	float nx = p_x / sum, ny = p_y / sum;
@@ -79,7 +78,7 @@ void octahedron_tangent_encode(float p_x, float p_y, float p_z, float p_sign, fl
 }
 
 uint16_t unorm16(float p_value) {
-	// (uint16_t)CLAMP(v * 65535, 0, 65535): truncation, as Godot writes it.
+
 	const float v = p_value * 65535.0f;
 	return uint16_t(v < 0.0f ? 0.0f : (v > 65535.0f ? 65535.0f : v));
 }
@@ -89,7 +88,6 @@ void put16(uint8_t *p_dst, uint16_t p_a, uint16_t p_b) {
 	std::memcpy(p_dst + 2, &p_b, 2);
 }
 
-// One spatial shader per (alpha scissor, double-sided). Uniforms per material (docs §11.3).
 std::string shader_code(bool p_alpha, bool p_double_sided) {
 	std::string code = "shader_type spatial;\n";
 	code += std::string("render_mode blend_mix, depth_draw_opaque, diffuse_burley, specular_schlick_ggx, ") + (p_double_sided ? "cull_disabled" : "cull_back") +
@@ -117,10 +115,6 @@ void fragment() {
 	return code;
 }
 
-// L1 look (README "L1 look"): one spatial shader per (opaque, alpha scissor, alpha blend) x (culled, double-sided).
-// Each texture is sampled with its own UV set and tiling (look_materials.h: UV0, UV1, or world-projected on the
-// dominant axis of the world normal as IW4L's planar(), times the graph's 1 / factor); a blend material draws its
-// colour alpha, or glass_opacity when it is glass without colour alpha.
 std::string shader_code_l1(int p_alpha_mode, bool p_double_sided) {
 	std::string code = "shader_type spatial;\n";
 	code += std::string("render_mode blend_mix, ") + (p_alpha_mode == 2 ? "depth_draw_never" : "depth_draw_opaque") +
@@ -172,27 +166,25 @@ void fragment() {
 	return code;
 }
 
-// Opacity of glass without colour alpha [inferred: BF3 computes it in the compiled shader (OpacityMul, Fresnel)].
 constexpr float kGlassOpacity = 0.3f;
-// The tint of glass without a colour map [inferred].
+
 constexpr float kGlassTint = 0.25f;
 
 Transform3D instance_transform(const bf3::core::level::LevelTransform &p_t) {
-	// Frostbite rows right, up, forward, trans: a local point p maps to p.x right + p.y up + p.z forward + trans (scaled),
-	// so Godot's basis columns are the three axes (render_bridge.h: transforms map 1:1).
+
 	const float s = p_t.scale;
 	return Transform3D(Basis(p_t.right[0] * s, p_t.up[0] * s, p_t.forward[0] * s, p_t.right[1] * s, p_t.up[1] * s, p_t.forward[1] * s, p_t.right[2] * s,
 							   p_t.up[2] * s, p_t.forward[2] * s),
 			Vector3(p_t.trans[0], p_t.trans[1], p_t.trans[2]));
 }
 
-} // namespace
+}
 
 Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID &p_material) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const int64_t vc = int64_t(p_surface.vertex_count());
 	if (vc > (int64_t(1) << 28) || p_surface.indices.size() > (size_t(1) << 30)) {
-		return Dictionary(); // beyond anything a prepared BF3 surface holds; the caller skips an empty dictionary
+		return Dictionary();
 	}
 	const int32_t vc32 = int32_t(vc);
 	const bool normals = p_surface.normals.size() == size_t(vc) * 3 && vc > 0;
@@ -201,7 +193,7 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	const bool uv1 = uv0 && p_surface.uv1.size() == size_t(vc) * 2;
 	uint64_t format = RenderingServer::ARRAY_FORMAT_VERTEX | RenderingServer::ARRAY_FORMAT_INDEX | RenderingServer::ARRAY_FLAG_FORMAT_CURRENT_VERSION;
 	if (normals) {
-		format |= RenderingServer::ARRAY_FORMAT_NORMAL | RenderingServer::ARRAY_FORMAT_TANGENT; // Godot always stores a tangent with a normal
+		format |= RenderingServer::ARRAY_FORMAT_NORMAL | RenderingServer::ARRAY_FORMAT_TANGENT;
 	}
 	if (uv0) {
 		format |= RenderingServer::ARRAY_FORMAT_TEX_UV;
@@ -244,14 +236,14 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 			const float *t = &p_surface.tangents[size_t(i) * 4];
 			octahedron_tangent_encode(t[0], t[1], t[2], t[3], u, w);
 		} else {
-			// Godot's tangent for a surface without one: (n.z, -n.x, n.y) x normalize(n), normalised, sign +1.
+
 			const Vector3 nn = Vector3(n[0], n[1], n[2]);
 			const Vector3 t = Vector3(nn.z, -nn.x, nn.y).cross(nn.normalized()).normalized();
 			octahedron_tangent_encode(t.x, t.y, t.z, 1.0f, u, w);
 		}
 		uint16_t tu = unorm16(u), tv = unorm16(w);
 		if (tu == 0 && tv == 65535) {
-			tu = 65535; // Godot sanitises (0, 1), which decodes like (1, 1)
+			tu = 65535;
 		}
 		put16(vw + off_tangent + i * nstride, tu, tv);
 	}
@@ -334,7 +326,7 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (plan.look == render::SceneLook::L1) {
-		for (int v = 0; v < 6; ++v) { // L1: (opaque, scissor, blend) x (culled, double-sided), index 2 * mode + sides
+		for (int v = 0; v < 6; ++v) {
 			const RID shader = rs->shader_create();
 			rs->shader_set_code(shader, to_godot(shader_code_l1(v / 2, (v & 1) != 0)));
 			shaders_.push_back(shader);
@@ -432,7 +424,7 @@ void LevelUpload::run_task() {
 			const int32_t width = int32_t(t.width), height = int32_t(t.height);
 			const bool mipmaps = t.levels > 1;
 			const Image::Format format = image_format(t.format);
-			item.texture.reset(); // the prepared copy goes before the GPU copy is made
+			item.texture.reset();
 			const Ref<Image> image = Image::create_from_data(width, height, mipmaps, format, bytes);
 			if (image.is_valid() && !image->is_empty()) {
 				done.rid = rs->texture_2d_create(image);
@@ -512,7 +504,7 @@ void LevelUpload::create_materials(double p_deadline_us) {
 		if (next_material_ < plan.materials.size()) {
 			const render::SceneMaterialPlan &mp = plan.materials[next_material_];
 			if (plan.look == render::SceneLook::L1) {
-				// --look-off=blend (diagnosis): blend materials draw opaque, to measure what the transparent pass costs.
+
 				static const bool blend_off = ("," + user_arg_value("look-off") + ",").find(",blend,") != std::string::npos;
 				const int mode = mp.blend && !blend_off ? 2 : (mp.alpha_test ? 1 : 0);
 				rs->material_set_shader(m, shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
@@ -521,12 +513,12 @@ void LevelUpload::create_materials(double p_deadline_us) {
 				rs->material_set_param(m, "normal_uv", int64_t(mp.normal_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.normal_uv));
 				rs->material_set_param(m, "normal_scale", mp.normal_scale);
 				if (mp.glass) {
-					rs->material_set_param(m, "glass_opacity", kGlassOpacity); // glass has no colour alpha (look_materials.cpp)
+					rs->material_set_param(m, "glass_opacity", kGlassOpacity);
 				}
 			} else {
 				rs->material_set_shader(m, shaders_[(mp.alpha_test ? 2 : 0) + (mp.double_sided ? 1 : 0)]);
 			}
-			// make_standard_material's reading (render_bridge.cpp): DiffuseDarkening tints, SmoothnessRegular -> roughness.
+
 			Color tint = mp.albedo >= 0 ? Color(1, 1, 1) : Color(0.55f, 0.55f, 0.55f);
 			if (const std::array<float, 4> *dark = mp.slot.vector("DiffuseDarkening")) {
 				tint = Color(tint.r * (*dark)[0], tint.g * (*dark)[1], tint.b * (*dark)[2]);
@@ -630,7 +622,7 @@ void LevelUpload::create_instances(double p_deadline_us) {
 	while (!pending_instances_.empty() && double(now_us()) < p_deadline_us) {
 		auto &[mesh, next] = pending_instances_.front();
 		const std::vector<uint32_t> &list = instances_by_mesh_[mesh];
-		// A few at a time between clock reads (~1 us each, probe §6.1).
+
 		for (int k = 0; k < 32 && next < list.size(); ++k, ++next) {
 			const RID inst = rs->instance_create2(meshes_[mesh], scenario_);
 			rs->instance_set_transform(inst, instance_transform(plan.instances[list[next]].transform));
@@ -660,7 +652,7 @@ double LevelUpload::pump(const Callable &p_task, double p_budget_ms) {
 	const uint64_t start = now_us();
 	const double deadline = double(start) + p_budget_ms * 1000.0;
 	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
-	// Reap finished tasks (every task must be waited for once, WorkerThreadPool's rule).
+
 	for (size_t i = 0; i < task_ids_.size();) {
 		if (pool->is_task_completed(task_ids_[i])) {
 			pool->wait_for_task_completion(task_ids_[i]);
@@ -673,7 +665,7 @@ double LevelUpload::pump(const Callable &p_task, double p_budget_ms) {
 	if (!materials_ready_.load(std::memory_order_acquire)) {
 		create_materials(deadline);
 	}
-	// C1: short tasks while fewer than max_tasks run and items wait.
+
 	if (materials_ready_.load(std::memory_order_acquire)) {
 		size_t queued = 0;
 		{
@@ -726,8 +718,7 @@ bool LevelUpload::finished() const {
 void LevelUpload::wait_tasks() {
 	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
 	{
-		// Nothing new is taken once the queue is empty. The dropped items' bytes go back to the lanes, so the
-		// in-flight count stays right whatever the shutdown order.
+
 		std::lock_guard lock(queue_mutex_);
 		if (lanes_ != nullptr) {
 			for (const Item &item : queue_) {
@@ -800,4 +791,4 @@ RID LevelUpload::texture_rid(uint32_t p_texture) const {
 	return p_texture < textures_.size() ? textures_[p_texture] : RID();
 }
 
-} // namespace bf3::godot_side
+}

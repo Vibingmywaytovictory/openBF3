@@ -1,6 +1,3 @@
-// bf3dump vehicledrive / vehicle-replay (S2; docs/design/s2.md §1, §7.3, §8). Read-only on the install: the level
-// is loaded through bf3_core, the static world built in memory (no cache), logs and hash files go where the caller
-// says (scratch), never into the install.
 #include "vehicle_commands.h"
 
 #include "bf3/core/gameplay/vehicle_drive.h"
@@ -112,9 +109,6 @@ struct SweepRow {
 	VehicleGhostQuantisation q;
 };
 
-// s2.md §7.3: position step 1/1024, 1/256, 1/64 m; orientation 9, 11, 13 bits; velocity steps x1/4, x1, x4; no
-// suspension. Beyond the design's rows (report only, for the G2 diagnosis): the gearbox timers and driver filters
-// finer, and the controller inputs sent.
 std::vector<SweepRow> sweep_rows() {
 	std::vector<SweepRow> rows;
 	rows.push_back({ "default", kDefaultVehicleGhost });
@@ -162,7 +156,6 @@ std::vector<SweepRow> sweep_rows() {
 	return rows;
 }
 
-// Replays p_log open loop from the course start (settled as the harness does); the server hashes per tick 0..n.
 Result<std::vector<uint64_t>> replay_log(std::shared_ptr<const StaticWorldShapes> p_shapes, std::shared_ptr<const VehicleModel> p_model,
 		const VehicleCourse &p_course, const VehicleCommandLog &p_log) {
 	VehicleWorldOptions o;
@@ -183,7 +176,7 @@ Result<std::vector<uint64_t>> replay_log(std::shared_ptr<const StaticWorldShapes
 	return hashes;
 }
 
-} // namespace
+}
 
 const char *vehicle_usage() {
 	return "  vehicledrive <LEVEL> <MODE> [<blueprint>] [--tuning=<cfg>]\n"
@@ -443,7 +436,7 @@ int cmd_vehicle_replay(const std::shared_ptr<Install> &p_install, const std::vec
 			}
 		}
 	} else if (trace > 0) {
-		// The server run of each selected course, closed loop as the harness records it, one row every --trace ticks.
+
 		for (const VehicleCourse &c : courses) {
 			if (!c.found || !kinds[size_t(c.kind)]) {
 				continue;
@@ -558,7 +551,7 @@ int cmd_vehicle_replay(const std::shared_ptr<Install> &p_install, const std::vec
 			gate("G1", pass, why);
 		}
 		if (o.g2) {
-			// G2 (the quantised ghost) is report-only since the integration (s2.md §15.2): printed, never the exit code.
+
 			why.clear();
 			pass = vehicle_gate_g2(reports, &why);
 			std::printf("report G2 %s%s%s\n", pass ? "PASS" : "FAIL", why.empty() ? "" : ": ", why.c_str());
@@ -567,7 +560,7 @@ int cmd_vehicle_replay(const std::shared_ptr<Install> &p_install, const std::vec
 				pass = vehicle_gate_g2x(reports, &why);
 				gate("G2x", pass, why);
 			} else {
-				// Integration (integ/m2a1): say so instead of skipping G2x silently.
+
 				std::printf("gate G2x not judged: --modes=%x leaves out the ExactPod bit (%x)\n", unsigned(o.modes),
 						1u << uint32_t(VehicleRestoreMode::ExactPod));
 			}
@@ -576,4 +569,4 @@ int cmd_vehicle_replay(const std::shared_ptr<Install> &p_install, const std::vec
 	return rc;
 }
 
-} // namespace bf3dump
+}

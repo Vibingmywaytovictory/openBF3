@@ -1,5 +1,3 @@
-// Loading helpers (audio_load.h).
-
 #include "bf3/audio/audio_load.h"
 
 #include "bf3/core/gameplay/work_budget.h"
@@ -73,4 +71,4 @@ core::Result<std::vector<ca::SoundWaveInfo>> read_program_waves(const core::EbxR
 	return out;
 }
 
-} // namespace bf3::audio
+}

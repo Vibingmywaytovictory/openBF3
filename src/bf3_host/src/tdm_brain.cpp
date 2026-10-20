@@ -1,40 +1,3 @@
-// The TDM bots (tdm_brain.h; docs/design/m2b.md §5; as built: docs/design/m2b-bb.md). Server thread only, serial in
-// slot order. The fighting core started from M2a bt's FirefightBrain Free mode (firefight_brain.cpp: the turn limits,
-// the fire-mode switch, bursts, taps, the sidearm, the strafe legs, WalkerBrain movement re-expressed in the brain's
-// own view yaw); TDM adds perception (perception.h), target scores with a reaction delay, the aim model
-// (aim_model.h), hunting the last known enemy, the contact heat grid, retreat and regen waits, the M67, the knife,
-// the defibrillator revive and the pre-round idle.
-//
-// One TdmShared per GameServer holds what every brain reads: the view (ServerView: states, teams, the rules' downed
-// list, phase, restriction and kits), the gunplay (weapons, the tick's shots), the nav (bot_fill.h BotNav), the
-// config, and a per-tick scan made by the first brain of each tick: teams, alive flags, firing flags, a ring of the
-// last kRingTicks ticks' shots (each shot once, by a per-slot shot_index cursor) and the contact heat (shots and
-// deaths in heat_cell_m cells, decayed over heat_decay_s).
-//
-// A brain per tick (alive):
-//   restricted  ServerView::input_restricted() or a phase other than InRound: an idle command (the server drops the
-//               inputs anyway, [cmd]);
-//   perceive    on its perception tick (every update_ticks, staggered by slot): Perception::update; a shot passing
-//               within kShotAtMetres of its chest marks "shot at" (and the shooter), a health drop "damaged";
-//   target      among the detected enemies with a clear ray in the last kVisibleFireTicks: the best score
-//               (w_distance / d + w_aim + w_damage + w_current), switched only at a switch_margin better score; a new
-//               target starts the reaction delay and the aim error's clock;
-//   activity    Revive (assault, not engaged for revive_idle_s, a downed teammate in reach of its window) > Retreat /
-//               RegenWait (below retreat_below_hp) > Fight (a visible target) > Grenade (a lost target behind cover
-//               15-35 m away) > Hunt (a known enemy: the last seen or heard position) > Roam (a heat cell or S1's random
-//               nav point; without a walker the bot stands and looks around: a new heading every 1.5-3 s, held
-//               while an enemy in sight is being detected);
-//   aim         the target's chest (perception_chest) led by the weapon's muzzle speed and gravity, plus a seeded
-//               error of sigma = aim_error(skill, time on target, moving, crossing speed), redrawn every kErrorTicks;
-//               the view turns at most kTurnRateDegS; the command subtracts skill x the weapon's recoil offset;
-//   fire        within kFireConeDeg of the aim, the target's last clear ray at most kVisibleFireTicks old (E2 allows
-//               30), the reaction elapsed: bursts by range (burst_min .. burst_max rounds within 60 m, single shots
-//               beyond), taps for other fire modes; reload at an empty magazine or below 30 % with nothing in sight;
-//               the sidearm when the primary is empty; one blind burst at a lost target's last-known position
-//               (blind_fire_share, counted apart); the knife within knife_within_m from behind.
-// Determinism: the bot seed is match_seed ^ slot; each life draws its skill and streams from splitmix64(seed ^ life);
-// no wall clock reaches a decision (the per-tick nanoseconds are only measured), no unordered container.
-
 #include "bf3/host/tdm_brain.h"
 
 #include "bf3/host/bot_fill.h"
@@ -70,72 +33,66 @@ namespace {
 
 namespace sw = sim::weapons;
 
-// Named constants ([inferred] unless m2b.md §5 gives them; docs/design/m2b-bb.md "Constants").
-constexpr float kTurnRateDegS = 540.0f; // S1's WalkerParams::yaw_rate_deg_s
+constexpr float kTurnRateDegS = 540.0f;
 constexpr float kPitchTurnRateDegS = 360.0f;
 constexpr float kMaxPitchDeg = 80.0f;
-constexpr float kFireConeDeg = 4.0f; // fire only when the view is this close to the aim (error included)
-constexpr uint32_t kVisibleFireTicks = 12; // aimed fire needs a clear ray this recent (two perception updates)
-constexpr uint32_t kLoseTicks = 90; // a target unseen this long is dropped (then hunted at its last position)
-constexpr uint32_t kErrorTicks = 6; // a new aim error draw
+constexpr float kFireConeDeg = 4.0f;
+constexpr uint32_t kVisibleFireTicks = 12;
+constexpr uint32_t kLoseTicks = 90;
+constexpr uint32_t kErrorTicks = 6;
 constexpr float kErrorPitchShare = 0.6f;
 constexpr uint32_t kModeDelayTicks = 3;
 constexpr uint32_t kModeWaitTicks = 10;
 constexpr float kStrafeAxis = 0.8f;
 constexpr uint32_t kStrafeMinTicks = 60, kStrafeMaxTicks = 150;
 constexpr uint32_t kStrafeGroundTicks = 6;
-// Without a walker (no nav on the level) an idle bot looks around: a new heading 60-150 degrees to either side every
-// 1.5-3 s [inferred] (the spawn heading first, held while an enemy in sight is being detected), so it still sees what
-// its spawn faces away from.
+
 constexpr uint32_t kLookMinTicks = 90, kLookMaxTicks = 180;
 constexpr float kLookMinDeg = 60.0f, kLookMaxDeg = 150.0f;
 constexpr float kSprintConeDeg = 20.0f;
-constexpr float kSingleShotBeyondMetres = 60.0f; // §5.5: single shots beyond 60 m
-constexpr float kShotAtMetres = 1.5f; // an enemy shot passing this close to the chest "shoots at" the bot
+constexpr float kSingleShotBeyondMetres = 60.0f;
+constexpr float kShotAtMetres = 1.5f;
 constexpr float kShotRayMetres = 150.0f;
-constexpr uint32_t kRingTicks = 30; // shots kept for hearing and "shot at"
+constexpr uint32_t kRingTicks = 30;
 constexpr size_t kMaxRing = 1024;
-constexpr uint32_t kFiringTicks = 30; // a slot that shot within this many ticks is "firing" (detection boost)
-constexpr uint32_t kGoalResetTicks = 90; // a new walker goal at most this often (unless forced)
-constexpr float kGoalMoveMetres = 8.0f; // a goal this far from the walker's current one replaces it
+constexpr uint32_t kFiringTicks = 30;
+constexpr uint32_t kGoalResetTicks = 90;
+constexpr float kGoalMoveMetres = 8.0f;
 constexpr float kHuntArriveMetres = 3.0f;
-constexpr uint32_t kRoamGoalTicks = 600; // a roam goal from the heat grid at most every 10 s
+constexpr uint32_t kRoamGoalTicks = 600;
 constexpr float kHeatShot = 0.05f, kHeatDeath = 1.0f, kHeatMin = 0.2f;
 constexpr int kHeatCells = 64;
-constexpr float kHeatRadiusMetres = 160.0f; // heat goals within this of the bot
-constexpr uint32_t kShotAtTicks = 120; // "shot at" counts this long (give up a revive, retreat trigger)
+constexpr float kHeatRadiusMetres = 160.0f;
+constexpr uint32_t kShotAtTicks = 120;
 constexpr float kRetreatMetres = 14.0f;
 constexpr uint32_t kRetreatMaxTicks = 360;
-constexpr uint32_t kRetreatClearTicks = 60; // out of sight this long: wait for regen
-constexpr float kRunSpeed = 4.5f; // m/s for the revive travel estimate
-constexpr float kPathFactor = 1.3f; // path length over straight distance
-constexpr float kReviveDirectMetres = 2.5f; // closer: steer straight at the corpse
+constexpr uint32_t kRetreatClearTicks = 60;
+constexpr float kRunSpeed = 4.5f;
+constexpr float kPathFactor = 1.3f;
+constexpr float kReviveDirectMetres = 2.5f;
 constexpr float kReviveStandMetres = 0.8f;
 constexpr float kReviveCrouchMetres = 2.0f;
-constexpr float kReviveCentreUp = 0.3f; // the rules' corpse sphere centre above the feet (§3.6)
-constexpr float kDefibReach = 1.7f; // eye to the corpse centre (the defib reaches 1.8 m)
+constexpr float kReviveCentreUp = 0.3f;
+constexpr float kDefibReach = 1.7f;
 constexpr float kDefibConeDeg = 6.0f;
-constexpr uint32_t kDefibRetryTicks = 66; // 60 rpm + margin
+constexpr uint32_t kDefibRetryTicks = 66;
 constexpr uint32_t kReviveTimeoutTicks = 900;
 constexpr uint32_t kGrenadeLostMinTicks = 30, kGrenadeLostMaxTicks = 240;
 constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeHoldExtraTicks = 4;
 constexpr float kKnifeBehindDeg = 100.0f;
 constexpr uint32_t kKnifeTicks = 45;
 constexpr uint32_t kBlindTicks = 40;
-constexpr float kTacticalReload = 0.3f; // §5.5: reload below 30 % with no target
+constexpr float kTacticalReload = 0.3f;
 constexpr uint8_t kSlotPrimary = 0, kSlotSidearm = 1, kSlotGrenade = 6, kSlotKnife = 7;
-// After the w1 merge (the first runs on Metro TDM, docs/design/m2b-bb.md §2): aim at the point the last clear ray saw
-// (the chest, else just below the head point), hold fire while a teammate stands in the line of fire, aim down the
-// sights in a fight, and hold a crouched long-range position only so long before pushing in or strafing.
-constexpr float kHeadAimDrop = 0.1f; // only the head ray clear: aim this far below the head point
-constexpr float kFriendlyLineMetres = 0.8f; // a teammate's chest this close to the shot line holds the fire
-constexpr float kZoomBeyondMetres = 6.0f; // aim down the sights at targets beyond this
-constexpr uint32_t kHoldTicks = 240; // a crouched hold at most 4 s per target, then push in (or strafe)
-constexpr float kBurstPauseMinS = 0.15f, kBurstPauseMaxS = 0.35f; // between bursts (was 0.3-0.6 s before the merge)
-constexpr uint32_t kHuntGiveUpTicks = 1200; // a hunt without a fight this long (20 s) is given up ...
-constexpr uint32_t kHuntBlockTicks = 600; // ... and the bot roams 10 s before it hunts again
-// A bot whose feet are off the nav's main component (a level spawn on a nav island: the walker has no path out) walks
-// straight at the nearest main-component spawn of the BotLevel, jumping when it stops making progress.
+
+constexpr float kHeadAimDrop = 0.1f;
+constexpr float kFriendlyLineMetres = 0.8f;
+constexpr float kZoomBeyondMetres = 6.0f;
+constexpr uint32_t kHoldTicks = 240;
+constexpr float kBurstPauseMinS = 0.15f, kBurstPauseMaxS = 0.35f;
+constexpr uint32_t kHuntGiveUpTicks = 1200;
+constexpr uint32_t kHuntBlockTicks = 600;
+
 constexpr uint32_t kIslandCheckTicks = 30;
 constexpr uint32_t kIslandJumpTicks = 45;
 constexpr float kIslandProgressMetres = 0.5f;
@@ -178,7 +135,7 @@ float wrap(float p_radians) {
 	return a;
 }
 float yaw_of(float p_dx, float p_dz) {
-	return std::atan2(p_dx, p_dz); // yaw 0 looks down +Z (command.h)
+	return std::atan2(p_dx, p_dz);
 }
 float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float dx = p_b[0] - p_a[0], dz = p_b[2] - p_a[2];
@@ -204,7 +161,7 @@ sim::Vec3 view_dir(float p_yaw, float p_pitch) {
 	const float cp = std::cos(p_pitch);
 	return { std::sin(p_yaw) * cp, std::sin(p_pitch), std::cos(p_yaw) * cp };
 }
-// The distance from p_point to the segment p_origin + t p_dir, t in [0, p_length] (p_dir unit).
+
 float ray_point_distance(const sim::Vec3 &p_origin, const sim::Vec3 &p_dir, float p_length, const sim::Vec3 &p_point) {
 	const sim::Vec3 d = sub(p_point, p_origin);
 	const float t = std::clamp(d[0] * p_dir[0] + d[1] * p_dir[1] + d[2] * p_dir[2], 0.0f, p_length);
@@ -221,7 +178,7 @@ struct RecentShot {
 	sim::Vec3 direction{};
 };
 
-} // namespace
+}
 
 const char *tdm_bot_activity_name(TdmBotActivity p_activity) {
 	switch (p_activity) {
@@ -247,26 +204,24 @@ const char *tdm_bot_activity_name(TdmBotActivity p_activity) {
 	return "?";
 }
 
-// ---- the shared part -----------------------------------------------------------------------------------------------
-
 struct TdmShared {
 	TdmBrainHost host;
 	std::shared_ptr<const TdmBotConfig> config;
 	TdmBotStats *stats = nullptr;
 	TdmBotObserver *observer = nullptr;
-	std::unique_ptr<BotNav> nav; // null: no walking
+	std::unique_ptr<BotNav> nav;
 	sim::bots::WalkerParams walker;
-	// The per-tick scan (the first brain of each tick).
+
 	sim::Tick scan_tick = UINT32_MAX;
 	std::vector<uint8_t> teams, alive, was_alive, firing;
 	std::vector<sim::Tick> fired_tick;
 	std::vector<uint32_t> shot_cursor;
 	std::vector<RecentShot> ring;
-	std::vector<sim::bots::HeardShot> heard; // the ring as Perception reads it
-	// Contact heat.
+	std::vector<sim::bots::HeardShot> heard;
+
 	std::array<float, kHeatCells * kHeatCells> heat{};
 	std::array<sim::Tick, kHeatCells * kHeatCells> heat_tick{};
-	// Timing of the current tick (wall nanoseconds; measured only).
+
 	sim::Tick time_tick = UINT32_MAX;
 	uint64_t perception_ns = 0, brains_ns = 0;
 
@@ -317,7 +272,7 @@ struct TdmShared {
 			perception_ns = brains_ns = 0;
 		}
 		if (nav != nullptr) {
-			nav->run_once(p_tick); // the first brain of the tick runs the path searches
+			nav->run_once(p_tick);
 		}
 		if (scan_tick == p_tick) {
 			return;
@@ -342,7 +297,7 @@ struct TdmShared {
 			}
 			was_alive[s] = alive[s];
 		}
-		// The shots since the last scan (each once: the slot's shot_index never resets, weapon_sim.h).
+
 		if (host.gunplay != nullptr) {
 			for (const sw::ShotEvent &shot : host.gunplay->interval_shots()) {
 				const size_t s = shot.player_slot;
@@ -392,8 +347,6 @@ core::Result<std::shared_ptr<TdmShared>> make_tdm_shared(const TdmBrainHost &p_h
 	return sh;
 }
 
-// ---- the brain -------------------------------------------------------------------------------------------------------
-
 struct TdmBrain::Impl {
 	std::shared_ptr<TdmShared> shared;
 	uint32_t index = 0;
@@ -409,7 +362,6 @@ struct TdmBrain::Impl {
 	sim::Tick goal_tick = 0;
 	sim::Tick roam_tick = 0;
 
-	// The life.
 	uint32_t life = UINT32_MAX;
 	sim::Tick life_tick = 0;
 	uint8_t kit = 0;
@@ -422,23 +374,23 @@ struct TdmBrain::Impl {
 	int shot_by = -1;
 	sim::Vec3 shot_from{};
 	sim::Tick shots_checked = 0;
-	// The target.
+
 	int target = -1;
 	sim::Tick target_since = 0, react_at = 0, last_engaged = 0;
 	float err_yaw = 0.0f, err_pitch = 0.0f;
 	sim::Tick err_next = 0;
-	int lost_target = -1; // the target of the last loss (blind fire, grenade decided once)
+	int lost_target = -1;
 	bool loss_handled = false;
 	sim::Tick blind_until = 0;
 	sim::Vec3 blind_at{};
-	sim::Tick searched_tick = 0; // known enemies last seen before this were searched
-	sim::Tick hunt_since = 0, hunt_block_until = 0; // the current hunt's start; no hunting before the block's end
-	// Off the main component (kIslandCheckTicks).
+	sim::Tick searched_tick = 0;
+	sim::Tick hunt_since = 0, hunt_block_until = 0;
+
 	bool off_main = false;
 	sim::Vec3 exit_at{};
 	sim::Vec3 exit_from{};
 	sim::Tick exit_progress_tick = 0;
-	// Fire.
+
 	bool bursting = false;
 	uint32_t burst_rounds = 0, burst_start = 0;
 	sim::Tick pause_until = 0, next_tap = 0;
@@ -447,27 +399,27 @@ struct TdmBrain::Impl {
 	sim::Tick mode_wait = 0;
 	bool reload_held = false;
 	bool sidearm = false;
-	// Strafe.
+
 	bool strafing = false;
 	float strafe_dir = 1.0f, strafe_half = 1.0f;
 	sim::Vec3 strafe_anchor{};
 	float strafe_ax = 1.0f, strafe_az = 0.0f;
 	sim::Tick strafe_until = 0;
-	// Look around (no walker).
+
 	float look_yaw = 0.0f;
 	sim::Tick look_until = 0;
-	// Retreat / regen.
+
 	sim::Tick retreat_since = 0, regen_since = 0, clear_since = 0;
 	sim::Vec3 threat{};
-	// Revive.
+
 	int revive_slot = -1;
 	sim::Tick revive_since = 0, defib_next = 0;
-	// Grenade.
-	int grenade_phase = 0; // 0 none, 1 switch, 2 hold, 3 after
+
+	int grenade_phase = 0;
 	sim::Tick grenade_phase_tick = 0, grenade_next = 0;
 	uint32_t grenade_hold = 0;
 	sim::Vec3 grenade_at{};
-	// Knife.
+
 	sim::Tick knife_until = 0;
 
 	const TdmBotConfig &cfg() const { return *shared->config; }
@@ -519,9 +471,6 @@ struct TdmBrain::Impl {
 		activity = TdmBotActivity::Roam;
 	}
 
-	// ---- movement goals ----------------------------------------------------------------------------------------------
-
-	// Hands the walker a goal near p_at (snapped onto the main component). Returns false without a nav or a foothold.
 	bool set_goal(sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force) {
 		TdmShared &sh = *shared;
 		if (sh.nav == nullptr || !finite3(p_at)) {
@@ -537,10 +486,10 @@ struct TdmBrain::Impl {
 			return false;
 		}
 		if (have_goal && walker.has_value() && horizontal(at, goal_pos) < kGoalMoveMetres) {
-			return true; // the walker already walks there
+			return true;
 		}
 		if (!p_force && have_goal && p_tick - goal_tick < kGoalResetTicks) {
-			return true; // keep the old goal a little longer (no churn)
+			return true;
 		}
 		sim::bots::BotGoal g;
 		g.kind = sim::bots::BotGoal::Kind::NavPoint;
@@ -562,7 +511,6 @@ struct TdmBrain::Impl {
 		goals.clear();
 	}
 
-	// Whether the feet are on the main component; off it, the nearest main-component spawn of the BotLevel is the exit.
 	void check_island(sim::Tick p_tick, const sim::SoldierState &p_state) {
 		TdmShared &sh = *shared;
 		BotNav &nav = *sh.nav;
@@ -577,8 +525,7 @@ struct TdmBrain::Impl {
 			return;
 		}
 		if (!off_main) {
-			// The exit: the nearest main-component nav point on rings around the feet (kIslandRings x 16 directions x
-			// 3 heights, the first ring that has one), else the nearest main-component spawn of the BotLevel.
+
 			float best = 1e30f;
 			for (const float r : kIslandRings) {
 				for (int k = 0; k < 16; ++k) {
@@ -617,8 +564,6 @@ struct TdmBrain::Impl {
 		off_main = true;
 	}
 
-	// The walker's move this tick in world (x, z), its yaw and sprint / pose / jump wishes; false without a walker. Off
-	// the main component: straight at the island exit instead.
 	bool walk(sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint, sim::Pose &r_pose, bool &r_jump) {
 		r_jump = false;
 		TdmShared &sh = *shared;
@@ -626,7 +571,7 @@ struct TdmBrain::Impl {
 			return false;
 		}
 		if (!walker.has_value()) {
-			walker.emplace(slot, mix(seed ^ 0x57414C4Bull), sh.walker); // "WALK"
+			walker.emplace(slot, mix(seed ^ 0x57414C4Bull), sh.walker);
 		}
 		if ((p_tick + slot) % kIslandCheckTicks == 0) {
 			check_island(p_tick, p_state);
@@ -664,7 +609,7 @@ struct TdmBrain::Impl {
 		if (!strafing) {
 			strafing = true;
 			strafe_anchor = p_self.position;
-			strafe_ax = -std::cos(view_yaw); // the view's right (command.h motor axes)
+			strafe_ax = -std::cos(view_yaw);
 			strafe_az = std::sin(view_yaw);
 			strafe_dir = unit(rng) < 0.5f ? -1.0f : 1.0f;
 			strafe_half = 0.5f * uniform(rng, std::max(c.strafe_min_m, 0.5f), std::max(c.strafe_max_m, std::max(c.strafe_min_m, 0.5f)));
@@ -680,14 +625,13 @@ struct TdmBrain::Impl {
 		} else if ((p_tick + slot) % kStrafeGroundTicks == 0) {
 			const sim::Vec3 ahead = add(p_self.position, strafe_dir * strafe_ax * 0.8f, 0.5f, strafe_dir * strafe_az * 0.8f);
 			if (!p_world.ground_below(ahead, 1.2f, sim::query_mask::kMovement, nullptr)) {
-				strafe_dir = -strafe_dir; // no floor there
+				strafe_dir = -strafe_dir;
 			}
 		}
 		r_dx = strafe_dir * strafe_ax * kStrafeAxis;
 		r_dz = strafe_dir * strafe_az * kStrafeAxis;
 	}
 
-	// A heat cell near the bot drawn by weight (or none).
 	std::optional<sim::Vec3> heat_goal(sim::Tick p_tick, const sim::Vec3 &p_at) {
 		TdmShared &sh = *shared;
 		float total = 0.0f;
@@ -695,7 +639,7 @@ struct TdmBrain::Impl {
 		size_t n = 0;
 		for (int c = 0; c < kHeatCells * kHeatCells; ++c) {
 			if (sh.heat[size_t(c)] < kHeatMin) {
-				continue; // cheap reject on the undecayed value
+				continue;
 			}
 			const float h = sh.heat_at(c, p_tick);
 			if (h < kHeatMin) {
@@ -726,8 +670,6 @@ struct TdmBrain::Impl {
 		return std::nullopt;
 	}
 
-	// ---- perception and targets --------------------------------------------------------------------------------------
-
 	bool aims_at_me(const sim::SoldierState &p_other, const sim::SoldierState &p_self) const {
 		const TdmShared &sh = *shared;
 		const sim::Vec3 from = sh.eye_point(p_other);
@@ -741,7 +683,6 @@ struct TdmBrain::Impl {
 		return cosang >= std::cos(std::clamp(cfg().aims_at_me_deg, 0.0f, 90.0f) * kDeg);
 	}
 
-	// The enemy shots of the ring since the last check that passed near the chest: shot at (and by whom).
 	void check_shots(sim::Tick p_tick, const sim::SoldierState &p_self) {
 		TdmShared &sh = *shared;
 		const sim::Vec3 chest = sh.chest_point(p_self);
@@ -839,23 +780,21 @@ struct TdmBrain::Impl {
 			return;
 		}
 		if (target >= 0 && cur_score >= 0.0f && best_score <= cur_score * (1.0f + std::max(c.switch_margin, 0.0f))) {
-			return; // not enough better
+			return;
 		}
 		const bool had = target >= 0 && cur_score >= 0.0f;
 		target = best;
 		target_since = p_tick;
 		err_next = p_tick;
 		const float lo = std::min(c.reaction_min_s, c.reaction_max_s), hi = std::max(c.reaction_min_s, c.reaction_max_s);
-		// Uniform by skill: the faster end for the better bots, +-15 % of the range drawn from the life's stream.
+
 		const float base = hi - (hi - lo) * skill01 + (unit(rng) - 0.5f) * 0.3f * (hi - lo);
-		const float reaction = std::clamp(base, lo, hi) * (had ? 0.5f : 1.0f); // a switch mid-fight reacts faster
+		const float reaction = std::clamp(base, lo, hi) * (had ? 0.5f : 1.0f);
 		react_at = p_tick + sim::seconds_to_ticks(reaction);
 		loss_handled = false;
 		lost_target = -1;
 		sh.count(&TdmBotStats::retargets, uint64_t(1));
 	}
-
-	// ---- the command ------------------------------------------------------------------------------------------------
 
 	void set_activity(sim::Tick p_tick, TdmBotActivity p_activity) {
 		activity = p_activity;
@@ -889,14 +828,14 @@ struct TdmBrain::Impl {
 		if (slot == 0xFF || !is_alive(p_state)) {
 			target = -1;
 			set_activity(p_tick, TdmBotActivity::Dead);
-			return cmd; // a dead soldier's command is never stepped; the policy respawns it
+			return cmd;
 		}
 		if (p_state.life != life) {
 			new_life(p_tick, p_state);
 		}
 		const ServerView &view = *sh.host.view;
 		if (view.input_restricted() || view.phase() != net::MatchPhase::InRound) {
-			// Pre-round freeze and round end: idle (the server drops the inputs anyway, [cmd]).
+
 			set_activity(p_tick, TdmBotActivity::Restricted);
 			cmd.yaw = sim::quantize_yaw(view_yaw);
 			cmd.pitch = sim::quantize_pitch(view_pitch);
@@ -911,7 +850,7 @@ struct TdmBrain::Impl {
 			perceive(p_tick, p_state, states);
 			choose_target(p_tick, p_state, states);
 		}
-		// The target's state.
+
 		const sim::bots::PerceivedEnemy *te = target >= 0 ? perception.find(uint8_t(target)) : nullptr;
 		if (target >= 0 && (te == nullptr || size_t(target) >= states.size() || !view.alive(uint8_t(target)) || p_tick - te->last_visible > kLoseTicks)) {
 			target = -1;
@@ -921,7 +860,7 @@ struct TdmBrain::Impl {
 		if (visible) {
 			last_engaged = p_tick;
 		} else if (target >= 0 && !loss_handled) {
-			// Just lost: one blind burst at the last-known position (drawn once), or a grenade if behind cover.
+
 			loss_handled = true;
 			lost_target = target;
 			blind_at = sh.chest_point(states[size_t(target)]);
@@ -953,9 +892,8 @@ struct TdmBrain::Impl {
 			return d->unlimited_ammo ? 1000 : ws->slots[p_slot].magazine + ws->slots[p_slot].reserve;
 		};
 
-		// ---- activity -----------------------------------------------------------------------------------------------
 		TdmBotActivity act = TdmBotActivity::Roam;
-		// Revive (§5.6): continue, or start one.
+
 		if (revive_slot >= 0) {
 			const DownedSoldier *d = nullptr;
 			for (const DownedSoldier &x : view.downed()) {
@@ -1006,10 +944,10 @@ struct TdmBrain::Impl {
 				}
 			}
 		}
-		// Retreat and regen (§5.4).
+
 		if (activity == TdmBotActivity::Retreat || activity == TdmBotActivity::RegenWait) {
 			if (p_state.health >= c.regen_until_hp || (activity == TdmBotActivity::RegenWait && p_tick - regen_since > sim::seconds_to_ticks(c.regen_wait_s))) {
-				activity = TdmBotActivity::Roam; // healed or waited long enough
+				activity = TdmBotActivity::Roam;
 			}
 		}
 		const bool low = p_state.health < c.retreat_below_hp;
@@ -1044,13 +982,12 @@ struct TdmBrain::Impl {
 		}
 		set_activity(p_tick, act);
 
-		// ---- movement and aim ---------------------------------------------------------------------------------------
 		float move_dx = 0.0f, move_dz = 0.0f;
 		bool sprint = false;
 		sim::Pose pose = sim::Pose::Stand;
 		float want_yaw = view_yaw, want_pitch = 0.0f;
-		bool have_aim = false; // aimed at a point (aligned check)
-		bool zoom = false; // aim down the sights (kZoom)
+		bool have_aim = false;
+		bool zoom = false;
 		float target_distance = 0.0f;
 		uint8_t want_slot = sidearm ? kSlotSidearm : kSlotPrimary;
 		Trigger trigger = Trigger::None;
@@ -1064,7 +1001,7 @@ struct TdmBrain::Impl {
 		};
 		float walk_dx = 0.0f, walk_dz = 0.0f, walk_yaw = view_yaw;
 		bool walk_sprint = false;
-		bool walk_jump = false; // the island exit's jump (walk)
+		bool walk_jump = false;
 		sim::Pose walk_pose = sim::Pose::Stand;
 		const auto do_walk = [&]() {
 			if (walk(p_tick, p_state, walk_dx, walk_dz, walk_yaw, walk_sprint, walk_pose, walk_jump)) {
@@ -1073,12 +1010,12 @@ struct TdmBrain::Impl {
 				pose = walk_pose;
 				return true;
 			}
-			bool noticing = false; // an enemy in sight but not yet detected: hold the heading
+			bool noticing = false;
 			for (const sim::bots::PerceivedEnemy &e : perception.enemies()) {
 				noticing = noticing || (e.visible && !e.detected);
 			}
 			if (look_until == 0) {
-				look_yaw = view_yaw; // the spawn's heading first
+				look_yaw = view_yaw;
 				look_until = p_tick + uniform_u(rng, kLookMinTicks, kLookMaxTicks);
 			} else if (noticing) {
 				look_yaw = view_yaw;
@@ -1109,7 +1046,7 @@ struct TdmBrain::Impl {
 						point = sim::bots::lead_point(eye, mark, ts.velocity, d->projectile.muzzle_speed, d->projectile.gravity);
 					}
 					target_distance = aim_at(point);
-					// The error cone (§5.3).
+
 					const sim::Vec3 los = sub(chest, eye);
 					const float l = std::max(distance(eye, chest), 1e-3f);
 					const float along = (ts.velocity[0] * los[0] + ts.velocity[1] * los[1] + ts.velocity[2] * los[2]) / l;
@@ -1126,7 +1063,7 @@ struct TdmBrain::Impl {
 					want_yaw = wrap(want_yaw + err_yaw);
 					want_pitch += err_pitch;
 					trigger = Trigger::Aimed;
-					// Knife (§5.5): within reach from behind.
+
 					const float hd = horizontal(p_state.position, ts.position);
 					if (hd <= c.knife_within_m && slot_def(kSlotKnife) != nullptr) {
 						const float behind = std::fabs(wrap(yaw_of(p_state.position[0] - ts.position[0], p_state.position[2] - ts.position[2]) - sim::yaw_radians(ts.yaw)));
@@ -1141,8 +1078,7 @@ struct TdmBrain::Impl {
 						aim_at(chest);
 					}
 					zoom = target_distance > kZoomBeyondMetres && trigger == Trigger::Aimed;
-					// Movement while engaged: strafe close, push in from range, hold and crouch far away (skilled) for
-					// at most kHoldTicks, then push in; strafe when there is no path.
+
 					if (target_distance < c.engage_strafe_m) {
 						strafe(p_tick, world, p_state, move_dx, move_dz);
 					} else if (target_distance > c.crouch_beyond_m && skill > 0.5f && p_tick - target_since < kHoldTicks) {
@@ -1155,7 +1091,7 @@ struct TdmBrain::Impl {
 						strafe(p_tick, world, p_state, move_dx, move_dz);
 					}
 				} else {
-					// Blind fire at the lost target's last-known chest.
+
 					target_distance = aim_at(blind_at);
 					trigger = Trigger::Blind;
 				}
@@ -1197,8 +1133,7 @@ struct TdmBrain::Impl {
 				break;
 			case TdmBotActivity::Hunt: {
 				if (p_tick - hunt_since > kHuntGiveUpTicks) {
-					// A hunt that never found anyone (the place unreachable, or the heard shots keep coming from where
-					// the walker cannot go): forget it and roam for a while.
+
 					searched_tick = p_tick;
 					hunt_block_until = p_tick + kHuntBlockTicks;
 					clear_goal();
@@ -1209,7 +1144,7 @@ struct TdmBrain::Impl {
 					const sim::bots::PerceivedEnemy *e = perception.find(uint8_t(k));
 					if (e != nullptr) {
 						if (horizontal(p_state.position, e->last_position) <= kHuntArriveMetres) {
-							searched_tick = p_tick; // nobody here: forget what was known before now
+							searched_tick = p_tick;
 						} else {
 							set_goal(p_tick, e->last_position, kHuntArriveMetres, false);
 						}
@@ -1229,7 +1164,7 @@ struct TdmBrain::Impl {
 							sh.count(&TdmBotStats::heat_goals, uint64_t(1));
 						}
 					} else {
-						clear_goal(); // S1's random nav points
+						clear_goal();
 					}
 				}
 				do_walk();
@@ -1238,13 +1173,12 @@ struct TdmBrain::Impl {
 				break;
 			}
 		}
-		// Turn towards gunfire that came from out of sight (so the next perception sees the shooter).
+
 		if (!have_aim && shot_recent && act != TdmBotActivity::Retreat && act != TdmBotActivity::Revive) {
 			want_yaw = yaw_of(shot_from[0] - p_state.position[0], shot_from[2] - p_state.position[2]);
 			sprint = false;
 		}
 
-		// ---- turn ---------------------------------------------------------------------------------------------------
 		const float yaw_step = kTurnRateDegS * kDeg * sim::kTickSeconds;
 		const float pitch_step = kPitchTurnRateDegS * kDeg * sim::kTickSeconds;
 		view_yaw = wrap(view_yaw + std::clamp(wrap(want_yaw - view_yaw), -yaw_step, yaw_step));
@@ -1261,12 +1195,11 @@ struct TdmBrain::Impl {
 			sprint = !have_aim && len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * kDeg;
 		}
 
-		// ---- weapon -------------------------------------------------------------------------------------------------
 		sw::WeaponInput in;
 		in.fire_mode_counter = mode_counter;
 		float comp_yaw = 0.0f, comp_pitch = 0.0f;
 		if (ws != nullptr) {
-			// The sidearm when the primary is empty for good; back to the primary never (one life).
+
 			if (!sidearm && slot_def(kSlotPrimary) != nullptr && slot_rounds(kSlotPrimary) <= 0 && slot_rounds(kSlotSidearm) > 0) {
 				sidearm = true;
 				sh.count(&TdmBotStats::sidearm_switches, uint64_t(1));
@@ -1321,7 +1254,7 @@ struct TdmBrain::Impl {
 				in.reload = reload;
 				bool fire = false;
 				if (trigger == Trigger::Grenade) {
-					fire = grenade_phase == 2 && in_hand; // held through the hold phase, released after
+					fire = grenade_phase == 2 && in_hand;
 				} else if (trigger == Trigger::Defib) {
 					if (in_hand && aligned && phase == sw::WeaponPhase::Ready && p_tick >= defib_next && !tapped) {
 						fire = true;
@@ -1353,7 +1286,7 @@ struct TdmBrain::Impl {
 								fire = true;
 							}
 						} else if (want_fire && p_tick >= pause_until) {
-							// Bursts by range: burst_max rounds close, burst_min at 60 m.
+
 							const float share = std::clamp(target_distance / kSingleShotBeyondMetres, 0.0f, 1.0f);
 							const uint32_t lo = std::max(c.burst_min_rounds, 1u), hi = std::max(c.burst_max_rounds, lo);
 							const uint32_t top = std::max(lo, uint32_t(std::lround(float(hi) - share * float(hi - lo))));
@@ -1364,7 +1297,7 @@ struct TdmBrain::Impl {
 							sh.count(&TdmBotStats::bursts, uint64_t(1));
 						}
 					} else if (tapped) {
-						tapped = false; // the release tick
+						tapped = false;
 					} else if (want_fire && p_tick >= next_tap) {
 						fire = true;
 						tapped = true;
@@ -1378,7 +1311,7 @@ struct TdmBrain::Impl {
 				}
 				in.fire = fire;
 				in.zoom = zoom && gun && in_hand && !busy;
-				// Recoil compensation (§5.3): skill x the kick, on the command only (the view keeps its own aim).
+
 				if (gun) {
 					comp_yaw = skill * ss.recoil.yaw * kDeg;
 					comp_pitch = skill * ss.recoil.pitch * kDeg;
@@ -1386,7 +1319,6 @@ struct TdmBrain::Impl {
 			}
 		}
 
-		// ---- the command --------------------------------------------------------------------------------------------
 		cmd.yaw = sim::quantize_yaw(wrap(view_yaw - comp_yaw));
 		cmd.pitch = sim::quantize_pitch(std::clamp(view_pitch - comp_pitch, -kMaxPitchDeg * kDeg, kMaxPitchDeg * kDeg));
 		cmd.pose = pose;
@@ -1406,7 +1338,6 @@ struct TdmBrain::Impl {
 
 	bool state_health_ok(const sim::SoldierState &p_state) const { return p_state.health >= cfg().retreat_below_hp; }
 
-	// A living teammate whose chest is within kFriendlyLineMetres of the view's shot line, nearer than the target.
 	bool friend_in_line(const sim::SoldierState &p_self, const sim::Vec3 &p_eye, float p_length) const {
 		const TdmShared &sh = *shared;
 		const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
@@ -1427,7 +1358,6 @@ struct TdmBrain::Impl {
 		return false;
 	}
 
-	// The nearest known enemy (seen or heard) not searched since; -1 for none.
 	int known_enemy(sim::Tick p_tick, const sim::SoldierState &p_self) const {
 		(void)p_tick;
 		float best = 1e30f;
@@ -1470,7 +1400,6 @@ struct TdmBrain::Impl {
 		return true;
 	}
 
-	// §5.5: an M67 at a lost target behind cover 15-35 m away, at most once per grenade_every_s.
 	bool start_grenade(sim::Tick p_tick, const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, bool p_have) {
 		const TdmBotConfig &c = cfg();
 		if (!p_have || lost_target < 0 || p_tick < grenade_next || size_t(lost_target) >= p_states.size()) {
@@ -1509,7 +1438,7 @@ struct TdmBrain::Impl {
 			grenade_phase = 0;
 			return;
 		}
-		// The throw angle for the distance (the low solution of the drag-free arc, 10..45 degrees).
+
 		const float dx = grenade_at[0] - p_eye[0], dz = grenade_at[2] - p_eye[2];
 		const float h = std::sqrt(dx * dx + dz * dz);
 		const float v = std::max(d->projectile.muzzle_speed * std::max(d->hold_min_power, 0.1f), 1.0f);
@@ -1528,11 +1457,11 @@ struct TdmBrain::Impl {
 				grenade_phase_tick = p_tick;
 				grenade_hold = uint32_t(std::max<sw::SimTime>(d->hold_delay, 0) * sim::kSimHz / sw::kTimeUnitsPerSecond) + kGrenadeHoldExtraTicks;
 			} else if (p_tick - grenade_phase_tick > kGrenadeSwitchTicks) {
-				grenade_phase = 0; // never came up: back to the gun
+				grenade_phase = 0;
 			}
 		} else if (grenade_phase == 2) {
 			if (p_tick - grenade_phase_tick >= grenade_hold) {
-				grenade_phase = 3; // release: the throw
+				grenade_phase = 3;
 				grenade_phase_tick = p_tick;
 			}
 		} else if (grenade_phase == 3 && p_tick - grenade_phase_tick >= kGrenadeAfterTicks) {
@@ -1562,12 +1491,10 @@ sim::Command TdmBrain::command(sim::Tick p_tick, const sim::SoldierState &p_stat
 void TdmBrain::set_slot(uint8_t p_slot) {
 	Impl &m = *impl_;
 	m.slot = p_slot;
-	m.seed = (m.shared != nullptr ? m.shared->host.match_seed : 0) ^ uint64_t(p_slot); // §5.7: bot seed = match_seed ^ slot
+	m.seed = (m.shared != nullptr ? m.shared->host.match_seed : 0) ^ uint64_t(p_slot);
 	m.walker.reset();
 	m.life = UINT32_MAX;
 }
-
-// ---- config/bot_tuning.cfg -------------------------------------------------------------------------------------------
 
 namespace {
 
@@ -1578,7 +1505,7 @@ struct FloatKey {
 };
 struct NestedFloatKey {
 	const char *name;
-	bool aim; // aim.* (else perception.*)
+	bool aim;
 	float sim::bots::PerceptionParams::*pfield;
 	float sim::bots::AimParams::*afield;
 	float lo, hi;
@@ -1665,7 +1592,7 @@ bool parse_number(std::string_view p_text, double &r_value) {
 	return true;
 }
 
-} // namespace
+}
 
 core::Status parse_bot_tuning(std::string_view p_text, TdmBotConfig &r_config) {
 	if (p_text.size() > kMaxBotTuningBytes) {
@@ -1766,8 +1693,6 @@ core::Status load_bot_tuning(const std::string &p_path, TdmBotConfig &r_config) 
 	return core::Status::success();
 }
 
-// ---- the hook --------------------------------------------------------------------------------------------------------
-
 core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config) {
 	if (p_config.tdm_bots == nullptr || p_config.tdm_bots->count == 0) {
 		return core::Status::success();
@@ -1779,7 +1704,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 	if (!config->tuning_cfg.empty()) {
 		auto tuned = std::make_shared<TdmBotConfig>(*config);
 		BF3_TRY(load_bot_tuning(config->tuning_cfg, *tuned));
-		tuned->count = config->count; // the caller's count wins over the file's
+		tuned->count = config->count;
 		config = tuned;
 	}
 	TdmBrainHost host;
@@ -1796,7 +1721,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 		host.nav = p_config.bots->level;
 		host.walker = p_config.bots->walker;
 	}
-	// The heat grid centred on the level's spawn points.
+
 	if (!p_config.level->spawns.empty()) {
 		double sx = 0.0, sz = 0.0;
 		for (const sim::SpawnPoint &p : p_config.level->spawns) {
@@ -1814,7 +1739,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 		return made.error();
 	}
 	std::shared_ptr<TdmShared> shared = std::move(*made);
-	// Slots below 64 only (spectators above with rules on, §3.2).
+
 	const GameServerStats st = r_server.stats();
 	const size_t limit = std::min<size_t>({ st.slots.size(), size_t(p_config.max_slots), size_t(net::kMaxPlayerRows) });
 	uint32_t free_below = 0;
@@ -1828,9 +1753,9 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 	for (uint32_t i = 0; i < count; ++i) {
 		auto brain = std::make_unique<TdmBrain>(shared, i);
 		TdmBrain *raw = brain.get();
-		// Rules: team 0 = AutoTeam's choice ([add]). Without rules M2a's firefight teams (every team gets every kit).
+
 		const int team = host.rules ? 0 : 1 + int((i + i / 4u) % 2u);
-		const int slot = r_server.add_local_bot(std::move(brain), team); // the main-component spawns (S1's bot list)
+		const int slot = r_server.add_local_bot(std::move(brain), team);
 		if (slot < 0) {
 			return core::make_error("tdm bots: no slot for bot " + std::to_string(i) + " of " + std::to_string(count));
 		}
@@ -1842,4 +1767,4 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 	return core::Status::success();
 }
 
-} // namespace bf3::host
+}

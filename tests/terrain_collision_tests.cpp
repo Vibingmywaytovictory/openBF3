@@ -1,13 +1,3 @@
-// Terrain collision everywhere (docs/design/terrain-collision.md §12.1).
-// Suite sim-terrain-unit (no data): the soup's cell rule against the static world's HeightFieldShape + patch on every
-// hole pattern of a 3 x 3 sample block and on random grids (one to one, rays), frames (accepted and refused),
-// append_soup_terrain_tile against hash_soup_terrain, the hash on 1 and N lanes, the OBF3JTER blob round trip and
-// hostile blobs, nav_terrain_wet, describe_hit on terrain, the all-hole and patch-only grids, null and out-of-range
-// cells, an exhausted budget.
-// Suite sim-terrain (the retail install, read-only; exits 77 without one): G1 over every level x mode (the record and
-// its content digest per run, the exhaustive check, lattice / mismatch / open-cell rays per digest, every run's
-// combat-area tile centres; Caspian CQL, Kharg CQL and Metro TDM through the full cached world, cold and warm) and G6
-// (the Caspian RushLarge0 spawns under the terrain), then the install unchanged.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
@@ -58,7 +48,6 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// The terrain-only static world of one record (build_static_world_terrain over its view).
 std::shared_ptr<const StaticWorldShapes> terrain_world(const level::SoupTerrain &p_record, std::string *r_error = nullptr) {
 	bf3::core::Result<sim::StaticTerrainView> view = sim::static_terrain_view(p_record);
 	if (!view) {
@@ -83,7 +72,6 @@ std::unique_ptr<CollisionWorld> collision_world(std::shared_ptr<const StaticWorl
 	return std::move(*w);
 }
 
-// Rays into both triangles of every cell (small grids), or of every p_step-th cell plus the mismatch cells (large).
 RayCheck cast_cells(const CollisionWorld &p_world, const level::SoupTerrain &p_record, uint32_t p_placement, size_t p_step, double p_tol) {
 	RayCheck r;
 	const res::HeightGrid &g = *p_record.grid;
@@ -99,7 +87,7 @@ RayCheck cast_cells(const CollisionWorld &p_world, const level::SoupTerrain &p_r
 			first = false;
 		}
 	}
-	// The open-cell rays span the record's world height range (the frame may scale it).
+
 	const sim::StaticWorldShapes &s = *p_world.shapes();
 	const double lo_y = double(std::min(lo, s.min()[1])) - 5.0, hi_y = double(std::max(hi, s.max()[1])) + 5.0;
 	const size_t cw = g.width - 1, ch = g.height - 1;
@@ -126,7 +114,7 @@ level::CollisionSoup soup_of(level::SoupTerrain p_record) {
 	return s;
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-terrain-unit") {
 	TEST_CASE("sim.terrain.unit: every hole pattern of a 3 x 3 block: field + patch = the soup's cells, one to one, and rays agree") {
@@ -141,7 +129,7 @@ TEST_SUITE("sim-terrain-unit") {
 			std::string error;
 			std::shared_ptr<const StaticWorldShapes> shapes = terrain_world(record, &error);
 			REQUIRE_MESSAGE(shapes != nullptr, "pattern ", pattern, ": ", error);
-			REQUIRE(shapes->terrain_count() == 1); // the info entry stays even without bodies
+			REQUIRE(shapes->terrain_count() == 1);
 			const FieldCheck fc = exhaustive_check(*shapes, 0, record, 0);
 			CHECK_MESSAGE(fc.ok(), "pattern ", pattern, ": missing ", fc.missing, ", extra ", fc.extra, ", duplicate ", fc.duplicate);
 			CHECK(fc.field_triangles + fc.patch_triangles == fc.soup_triangles);
@@ -187,7 +175,7 @@ TEST_SUITE("sim-terrain-unit") {
 			const RayCheck rc = cast_cells(*world, record, 0, 1, double(shapes->terrain(0).max_error) + 0.01);
 			CHECK_MESSAGE(rc.missed == 0, "round ", round);
 			CHECK_MESSAGE(rc.open_hits == 0, "round ", round);
-			// sim.terrain's banded checks (bands of 4 rows on 3 lanes here) give the serial counters ("resumed" aside).
+
 			const FieldCheck fb = exhaustive_check_banded(*shapes, 0, record, 0, 3, 4);
 			CHECK_MESSAGE((fb.cells == fc.cells && fb.soup_triangles == fc.soup_triangles && fb.field_triangles == fc.field_triangles &&
 								  fb.patch_triangles == fc.patch_triangles && fb.missing == fc.missing && fb.extra == fc.extra && fb.duplicate == fc.duplicate &&
@@ -285,7 +273,7 @@ TEST_SUITE("sim-terrain-unit") {
 				total += tris.size();
 			}
 			CHECK(total == one->triangles);
-			// A tile far away gives nothing.
+
 			std::vector<level::SoupTriangle> none;
 			level::WorkBudget budget(size_t(1) << 20);
 			bf3::core::Result<size_t> distant = level::append_soup_terrain_tile(record, 7, { 900, -900 }, none, budget);
@@ -296,7 +284,7 @@ TEST_SUITE("sim-terrain-unit") {
 
 	TEST_CASE("sim.terrain.unit: the OBF3JTER blob round trips; hostile blobs fail without a crash") {
 		res::HeightGrid g = make_grid(33, 21, { 0.0f, 0.0f }, { 2.0f, 2.0f }, [](size_t x, size_t z) { return float(x) * 0.3f + float(z) * 0.2f; });
-		g.holes[4 + 3 * 33] = 1; // a patch
+		g.holes[4 + 3 * 33] = 1;
 		g.holes[10 + 10 * 33] = 1;
 		const level::SoupTerrain record = make_record(std::move(g));
 		std::shared_ptr<const StaticWorldShapes> shapes = terrain_world(record);
@@ -316,7 +304,7 @@ TEST_SUITE("sim-terrain-unit") {
 		CHECK(sim::encode_static_terrain_blob(**back, 0) == blob);
 		const FieldCheck fc = exhaustive_check(**back, 0, record, 0);
 		CHECK(fc.ok());
-		// Truncations: every length short of the blob fails.
+
 		size_t truncated_ok = 0;
 		for (size_t n = 0; n < blob.size(); n += (n < 256 ? 1 : 97)) {
 			truncated_ok += sim::decode_static_terrain_blob(std::span<const uint8_t>(blob.data(), n)).ok() ? 1 : 0;
@@ -325,7 +313,7 @@ TEST_SUITE("sim-terrain-unit") {
 		std::vector<uint8_t> longer = blob;
 		longer.push_back(0);
 		CHECK_FALSE(sim::decode_static_terrain_blob(longer).ok());
-		// Byte mutations over the header region and seeded ones over the body: errors or a sane world, never a crash.
+
 		std::mt19937 rng(77u);
 		size_t refused = 0, accepted = 0;
 		for (size_t i = 0; i < std::min<size_t>(blob.size(), 400); ++i) {
@@ -335,7 +323,7 @@ TEST_SUITE("sim-terrain-unit") {
 				bf3::core::Result<std::shared_ptr<const StaticWorldShapes>> r = sim::decode_static_terrain_blob(m);
 				(r.ok() ? accepted : refused) += 1;
 				if (r.ok()) {
-					// A world from a mutated blob must still answer queries.
+
 					std::unique_ptr<CollisionWorld> w = collision_world(*r);
 					sim::StaticHit hit;
 					(void)w->ray({ 10.0f, 100.0f, 10.0f }, { 0.0f, -200.0f, 0.0f }, sim::query_mask::kAll, &hit);
@@ -365,11 +353,11 @@ TEST_SUITE("sim-terrain-unit") {
 		};
 		CHECK(sim::nav_terrain_wet(tri(40.0f), water));
 		CHECK(sim::nav_terrain_wet(tri(48.1f), water));
-		CHECK_FALSE(sim::nav_terrain_wet(tri(48.3f), water)); // within 1.8 m of the surface
+		CHECK_FALSE(sim::nav_terrain_wet(tri(48.3f), water));
 		CHECK_FALSE(sim::nav_terrain_wet(tri(60.0f), water));
-		CHECK_FALSE(sim::nav_terrain_wet(tri(40.0f, 200.0f), water)); // outside the polygon
+		CHECK_FALSE(sim::nav_terrain_wet(tri(40.0f, 200.0f), water));
 		CHECK_FALSE(sim::nav_terrain_wet(tri(40.0f), {}));
-		// The highest corner decides.
+
 		std::array<sim::Vec3, 3> steep = tri(40.0f);
 		steep[2][1] = 49.0f;
 		CHECK_FALSE(sim::nav_terrain_wet(steep, water));
@@ -377,13 +365,13 @@ TEST_SUITE("sim-terrain-unit") {
 
 	TEST_CASE("sim.terrain.unit: a terrain hit: kNoStaticTile, the terrain index, the terrain tag, the Collision layer, an upward normal") {
 		res::HeightGrid g = make_grid(9, 9, { 0.0f, 0.0f }, { 2.0f, 2.0f }, [](size_t, size_t) { return 7.0f; });
-		g.holes[2] = 1; // cell (1, 0)'s only hole is b: cell (0, 0)'s (a, d, b) goes to the patch
+		g.holes[2] = 1;
 		const level::SoupTerrain record = make_record(std::move(g));
 		std::shared_ptr<const StaticWorldShapes> shapes = terrain_world(record);
 		REQUIRE(shapes != nullptr);
 		std::unique_ptr<CollisionWorld> world = collision_world(shapes);
 		REQUIRE(shapes->terrain(0).patch_triangles > 0);
-		for (const sim::Vec3 at : { sim::Vec3{ 9.1f, 20.0f, 9.3f }, sim::Vec3{ 1.2f, 20.0f, 0.6f } }) { // the field, the patch
+		for (const sim::Vec3 at : { sim::Vec3{ 9.1f, 20.0f, 9.3f }, sim::Vec3{ 1.2f, 20.0f, 0.6f } }) {
 			sim::StaticHit hit;
 			REQUIRE(world->ray(at, { 0.0f, -30.0f, 0.0f }, sim::query_mask::kAll, &hit));
 			CHECK(hit.tile == sim::kNoStaticTile);
@@ -412,8 +400,7 @@ TEST_SUITE("sim-terrain-unit") {
 			CHECK_FALSE(world->ray({ 4.0f, 10.0f, 4.0f }, { 0.0f, -20.0f, 0.0f }, sim::query_mask::kAll, nullptr));
 		}
 		{
-			// Holes at (2, 0), (0, 2) and (2, 2): only cell (0, 0) is kept, and both its triangles touch a sample the cook
-			// marks (cells (1, 0) and (0, 1) have their only hole at b / c), so they live in the patch.
+
 			res::HeightGrid g = make_grid(3, 3, { 0.0f, 0.0f }, { 2.0f, 2.0f }, [](size_t x, size_t z) { return 3.0f + 0.1f * float(x + z); });
 			g.holes[2] = 1;
 			g.holes[6] = 1;
@@ -454,7 +441,7 @@ TEST_SUITE("sim-terrain-unit") {
 		level::WorkBudget empty(0);
 		CHECK_FALSE(level::append_soup_terrain_tile(record, 0, { 0, 0 }, out, empty).ok());
 		CHECK_FALSE(level::append_soup_terrain_tile(none, 0, { 0, 0 }, out, empty).ok());
-		// A record whose arrays do not match its size never indexes them.
+
 		res::HeightGrid broken = make_grid(4, 4, { 0.0f, 0.0f }, { 1.0f, 1.0f }, [](size_t, size_t) { return 1.0f; });
 		broken.heights.resize(3);
 		const level::SoupTerrain bad = make_record(std::move(broken));
@@ -499,15 +486,12 @@ TEST_SUITE("sim-terrain-unit") {
 	}
 }
 
-// ---- the retail install ----------------------------------------------------------------------------------------
-
 namespace {
 
 const char *kLevels[] = { "MP_001", "MP_003", "MP_007", "MP_011", "MP_012", "MP_013", "MP_017", "MP_018", "MP_Subway", "XP1_001", "XP1_002", "XP1_003",
 	"XP1_004", "XP2_Factory", "XP2_Office", "XP2_Palace", "XP2_Skybar", "XP3_Alborz", "XP3_Desert", "XP3_Shield", "XP3_Valley", "XP4_FD", "XP4_Parl",
 	"XP4_Quake", "XP4_Rubble", "XP5_001", "XP5_002", "XP5_003", "XP5_004" };
 
-// §4.1's mismatch column: the samples the cook holes for Jolt's rule.
 uint32_t expected_holed(const std::string &p_level) {
 	if (p_level == "MP_001" || p_level == "XP4_Parl") {
 		return 1;
@@ -555,8 +539,6 @@ unsigned env_unsigned(const char *p_name, unsigned p_default) {
 	return out;
 }
 
-// G1's run lanes: free physical memory / 650 MB (one run holds its level and soup), clamped to 2..8, 4 at most under
-// asan (several times the memory per run). OPENBF3_TERRAIN_LANES overrides it (the lane-count check of the split).
 unsigned g1_lanes() {
 	const unsigned forced = env_unsigned("OPENBF3_TERRAIN_LANES", 0);
 	if (forced != 0) {
@@ -575,7 +557,6 @@ unsigned g1_lanes() {
 	return lanes;
 }
 
-// A short scratch root under %TEMP% (removed at the end).
 struct Scratch {
 	fs::path root;
 	Scratch() {
@@ -593,11 +574,11 @@ struct RunResult {
 	std::string mode;
 	bool ok = false;
 	std::string error;
-	std::vector<std::string> digests; // per Built terrain
+	std::vector<std::string> digests;
 	size_t terrains = 0;
-	std::optional<level::SoupTerrain> record; // the first terrain's record (kept for the level's first run only)
+	std::optional<level::SoupTerrain> record;
 	uint32_t placement = 0;
-	std::vector<std::array<int32_t, 2>> tiles; // the mode's combat-area tiles (margin as the nav region)
+	std::vector<std::array<int32_t, 2>> tiles;
 	double seconds = 0.0;
 };
 
@@ -634,7 +615,7 @@ RunResult run_one(const std::shared_ptr<bf3::core::Install> &p_install, const st
 		}
 		r.digests.push_back(sim::static_terrain_content(*view).hex());
 		if (r.terrains == 0 && p_keep) {
-			r.record = t; // shares the grid
+			r.record = t;
 			r.placement = uint32_t(soup->placements.size() + i);
 		}
 		++r.terrains;
@@ -652,7 +633,6 @@ RunResult run_one(const std::shared_ptr<bf3::core::Install> &p_install, const st
 	return r;
 }
 
-// The cell under a world point (inverse frame); false outside the grid.
 bool cell_under(const level::SoupTerrain &p_record, double p_x, double p_z, size_t &r_x, size_t &r_z) {
 	double u = 0, v = 0;
 	to_grid(p_record, { p_x, 0.0, p_z }, u, v);
@@ -689,13 +669,10 @@ TileCentres cast_tile_centres(const CollisionWorld &p_world, const level::SoupTe
 	return out;
 }
 
-// The per-level checks of G1 (cook, the exhaustive field check, the lattice and tile-centre rays) as values: they run
-// on the run lane that finishes the level's last run (no doctest assert off the main thread), and the main thread
-// checks and prints them in level order.
 struct LevelCheck {
-	bool kept = false; // a run kept a record (the level's first mode did not fail)
+	bool kept = false;
 	bool cooked = false;
-	std::string error; // the cook's
+	std::string error;
 	sim::StaticTerrainInfo ti;
 	FieldCheck fc;
 	RayCheck rc;
@@ -732,12 +709,12 @@ LevelCheck check_level(std::span<RunResult> p_results, unsigned p_lanes) {
 	out.fc = exhaustive_check_banded(*shapes, 0, record, placement, p_lanes);
 	out.ex = seconds_since(ex_start);
 	std::unique_ptr<CollisionWorld> world = collision_world(shapes);
-	// A 16 m lattice (every 8th cell at 2 m) plus the mismatch cells and their neighbours.
+
 	const res::HeightGrid &g = *record.grid;
 	const size_t step = std::max<size_t>(1, size_t(std::lround(16.0 / std::max(0.01f, g.sample_spacing[0]))));
 	const auto ray_start = std::chrono::steady_clock::now();
 	out.rc = cast_cells_banded(shapes, record, placement, step, 0.05, p_lanes);
-	// Every run's own combat-area tile centres.
+
 	for (const RunResult &r : p_results) {
 		const TileCentres tc = cast_tile_centres(*world, record, placement, r.tiles, 0.05);
 		out.centres += tc.tiles;
@@ -750,11 +727,11 @@ LevelCheck check_level(std::span<RunResult> p_results, unsigned p_lanes) {
 	out.rays = seconds_since(ray_start);
 	world.reset();
 	shapes.reset();
-	kept->record.reset(); // the level's grid is not needed any more
+	kept->record.reset();
 	return out;
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-terrain") {
 	TEST_CASE("sim.terrain: G1 every level x mode: one record digest per level, the exhaustive field check, lattice and tile-centre rays") {
@@ -765,11 +742,7 @@ TEST_SUITE("sim-terrain") {
 		}
 		const auto start = std::chrono::steady_clock::now();
 		const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-		// One flat queue over every (level, mode) run. The lane that finishes a level's last run runs the level's checks
-		// (check_level: cook, exhaustive check and lattice in bands on hw / 2 inner lanes) and frees its record, so the
-		// checks overlap the other levels' runs; this thread then checks and prints every level in level order. The lane
-		// count follows the free memory (a run holds its level and soup, about 650 MB); the soup is the same on any
-		// thread count, so it changes scheduling only.
+
 		const unsigned lanes = g1_lanes();
 		const unsigned soup_threads = 2;
 		const unsigned check_lanes = env_unsigned("OPENBF3_TERRAIN_CHECK_LANES", std::max(1u, hw / 2));
@@ -778,7 +751,7 @@ TEST_SUITE("sim-terrain") {
 		struct Job {
 			size_t level;
 			std::string mode;
-			bool keep; // the level's first mode keeps its record
+			bool keep;
 		};
 		std::vector<Job> jobs;
 		std::vector<size_t> first_job;
@@ -803,7 +776,7 @@ TEST_SUITE("sim-terrain") {
 				[&](size_t i) {
 					const size_t li = jobs[i].level;
 					all[i] = run_one(s->install, kLevels[li], jobs[i].mode, jobs[i].keep, soup_threads);
-					// acq_rel: the last run of the level sees every other run's result.
+
 					if (remaining[li].fetch_sub(1, std::memory_order_acq_rel) == 1) {
 						checks[li] = check_level(std::span<RunResult>(all.data() + first_job[li], first_job[li + 1] - first_job[li]), check_lanes);
 					}
@@ -817,7 +790,7 @@ TEST_SUITE("sim-terrain") {
 			const char *level_id = kLevels[li];
 			const std::string level_name = level_id;
 			const std::span<const RunResult> results(all.data() + first_job[li], first_job[li + 1] - first_job[li]);
-			double level_seconds = 0.0; // the level's runs, summed over their lanes
+			double level_seconds = 0.0;
 			for (const RunResult &r : results) {
 				level_seconds += r.seconds;
 			}
@@ -834,7 +807,7 @@ TEST_SUITE("sim-terrain") {
 				}
 				CHECK_MESSAGE(r.terrains <= 1, level_name, " ", r.mode);
 			}
-			// Every run of a level gives the same terrain (or none at all).
+
 			CHECK_MESSAGE((with == 0 || with == results.size()), level_name, ": ", with, " of ", results.size(), " runs have a terrain");
 			CHECK_MESSAGE(level_digests.size() <= 1, level_name, ": ", level_digests.size(), " digests");
 			const LevelCheck &lc = checks[li];
@@ -902,7 +875,7 @@ TEST_SUITE("sim-terrain") {
 		struct Run {
 			const char *level;
 			const char *mode;
-			bool ground_gate; // 0 combat-area tiles without ground
+			bool ground_gate;
 		};
 		for (const Run run : { Run{ "MP_007", "ConquestLarge0", true }, Run{ "MP_018", "ConquestLarge0", true }, Run{ "MP_Subway", "TeamDeathMatch0", false } }) {
 			Scratch scratch;
@@ -944,9 +917,9 @@ TEST_SUITE("sim-terrain") {
 			const RayCheck rc = cast_cells(*cw, record, placement, step, 0.05);
 			CHECK_MESSAGE(rc.missed == 0, run.level, ": first miss cell (", rc.miss_x, ", ", rc.miss_z, ") half ", rc.miss_half, ", expected y ", rc.miss_expected,
 					", last hit y ", rc.miss_hit_y, ", ", rc.miss_occluders, " occluders");
-			// Open cells may hold Havok ground; only terrain hits count, and the full world's non-terrain hits are passed.
+
 			CHECK(rc.open_hits == 0);
-			// Tile centres: something under every combat-area tile (the gate's "ground"), from far above.
+
 			bf3::core::Result<level::LevelCombatTiles> combat = level::level_combat_tiles(s->install, run.level, sim::NavParams().region_margin);
 			REQUIRE(combat.ok());
 			size_t without_ground = 0;
@@ -955,8 +928,7 @@ TEST_SUITE("sim-terrain") {
 				without_ground += cw->ray(top, { 0.0f, -6000.0f, 0.0f }, sim::query_mask::kMovement, nullptr) ? 0 : 1;
 			}
 			const TileCentres tc = cast_tile_centres(*cw, record, placement, combat->tiles, 0.05);
-			// The combat tiles that had no soup triangle before TC (no Havok tile in their 3 x 3, the IW4L near-object
-			// rule), and the one nearest their mean: where the G7 capture stands.
+
 			std::set<std::pair<int32_t, int32_t>> havok;
 			for (const level::SoupTile &t : soup->tiles) {
 				havok.insert({ t.x, t.z });
@@ -996,7 +968,7 @@ TEST_SUITE("sim-terrain") {
 						run.level, run.mode, bare.size(), combat->tiles.size(), (*pick)[0], (*pick)[1], double(top[0]), ground ? double(hit.position[1]) : 0.0,
 						double(top[2]), ground && hit.terrain != sim::kNoStaticTerrain ? 1 : 0);
 			}
-			// 10,000 seeded rays: cold and warm answer bit for bit.
+
 			std::mt19937 rng(4242u);
 			const sim::Vec3 lo = cold->min(), hi = cold->max();
 			std::uniform_real_distribution<float> ux(lo[0], hi[0]), uz(lo[2], hi[2]);
@@ -1044,9 +1016,7 @@ TEST_SUITE("sim-terrain") {
 		const auto partition = [&](const level::PlacedObject &p_object) {
 			return std::string(db.name_of(p_object.entity.partition().guid()).value_or("?"));
 		};
-		// Fact 1: 24 AlternateSpawn points of layer0_rush_logic in the footprint, at y 104.13..104.44 (how many have no
-		// enclosing reference is printed; the identity BlueprintTransforms of the 24 references were verified with the EBX
-		// dumps, docs §9, and are not re-read here).
+
 		size_t points = 0, in_logic = 0, direct = 0;
 		float y_lo = 1e9f, y_hi = -1e9f, depth_lo = 1e9f, depth_hi = -1e9f;
 		size_t open = 0, outside = 0;
@@ -1061,7 +1031,7 @@ TEST_SUITE("sim-terrain") {
 			const level::PlacedObject &object = (*world)->objects[p.object];
 			in_logic += partition(object) == "levels/mp_007/rush/layer0_rush_logic" ? 1 : 0;
 			direct += !object.reference.has_value() ? 1 : 0;
-			// Fact 2: the terrain over the point, from the record, has no hole: 28-33 m above.
+
 			size_t cx = 0, cz = 0;
 			if (!cell_under(record, x, z, cx, cz)) {
 				++outside;
@@ -1076,7 +1046,7 @@ TEST_SUITE("sim-terrain") {
 			depth_lo = std::min(depth_lo, h - y);
 			depth_hi = std::max(depth_hi, h - y);
 		}
-		// Fact 3: their spawners (Team1, Team2) in the same partition, disabled, at y ~ 109.
+
 		size_t disabled_spawners = 0;
 		std::set<int> teams;
 		for (const level::CharacterSpawnerDef &sp : spawns->spawners) {
@@ -1087,7 +1057,7 @@ TEST_SUITE("sim-terrain") {
 				teams.insert(sp.team);
 			}
 		}
-		// Fact 6: no Havok triangle with a corner in the footprint box over y 60..140.
+
 		size_t havok = 0;
 		for (const level::SoupTile &t : soup->tiles) {
 			for (const level::SoupTriangle &tri : t.triangles) {

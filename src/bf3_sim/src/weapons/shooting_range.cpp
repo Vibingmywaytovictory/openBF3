@@ -1,5 +1,3 @@
-// The headless shooting range (docs/design/m2a-weapons.md §10; shooting_range.h): a scripted shooter, stationary
-// stand-in targets, the same step_soldier_weapons -> ProjectileWorld -> damage path the server will run.
 #include "bf3/sim/weapons/shooting_range.h"
 
 #include "bf3/sim/weapons/surface_materials.h"
@@ -16,8 +14,8 @@ namespace {
 
 using namespace detail;
 
-constexpr float kLaneMaxLength = 500.0f; // m: the longest lane looked for
-constexpr float kLaneLowRay = 0.3f; // m above the floor
+constexpr float kLaneMaxLength = 500.0f;
+constexpr float kLaneLowRay = 0.3f;
 constexpr float kLaneFloorTolerance = 0.5f;
 
 DVec3 heading(uint16_t p_yaw) {
@@ -38,7 +36,6 @@ float clear_length(const CollisionWorld &p_world, const Vec3 &p_from, const DVec
 	return p_world.ray(p_from, delta, query_mask::kProjectile, &h) ? h.fraction * p_max : p_max;
 }
 
-// The lane of one point along one heading (0 when the floor at its far end is not level with the start).
 float lane_length(const CollisionWorld &p_world, const Vec3 &p_feet, uint16_t p_yaw, float p_eye_height) {
 	const DVec3 dir = heading(p_yaw);
 	const float eye = clear_length(p_world, { p_feet[0], p_feet[1] + p_eye_height, p_feet[2] }, dir, kLaneMaxLength);
@@ -81,7 +78,6 @@ const core::gameplay::PoseDef *pose_def(const core::gameplay::SoldierDef &p_sold
 	return p_soldier.pose(core::gameplay::SoldierPose(std::min<size_t>(size_t(p_pose), kPoseCount - 1)));
 }
 
-// The command's weapon fields for script tick p_index of p_scenario (p_script false: an idle command).
 WeaponInput script_input(const WeaponTable &p_table, const RangeScenario &p_scenario, const SoldierWeaponsState &p_state, Tick p_tick, bool p_script,
 		uint32_t p_index, bool p_prev_fire) {
 	WeaponInput in;
@@ -95,8 +91,7 @@ WeaponInput script_input(const WeaponTable &p_table, const RangeScenario &p_scen
 			in.fire = true;
 			break;
 		case FireScript::Tap: {
-			// Pinned to the tick that contains the ready time (docs §10): press in command T when the weapon is ready
-			// before tick_end(T), release in command T + 1.
+
 			if (p_prev_fire) {
 				break;
 			}
@@ -131,7 +126,7 @@ WeaponInput script_input(const WeaponTable &p_table, const RangeScenario &p_scen
 	return in;
 }
 
-} // namespace
+}
 
 std::optional<RangeLane> find_range_lane(const CollisionWorld &p_world, std::span<const SpawnPoint> p_spawns, float p_eye_height, float p_min_length,
 		uint32_t p_headings) {
@@ -164,7 +159,7 @@ std::vector<StaticTriangle> range_wall_triangles(std::span<const float> p_wall_d
 		float p_wall_half_width, uint32_t p_material_value) {
 	std::vector<StaticTriangle> out;
 	const float slab_y = p_eye_height - p_depth;
-	// The slab in 500 m quads (a few dozen triangles rather than two spanning kilometres).
+
 	constexpr float kCell = 500.0f;
 	const float lo = -100.0f;
 	const int cells = int(std::ceil((p_extent - lo) / kCell));
@@ -206,7 +201,6 @@ core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionW
 	const float shooter_eye = pose_def(p_soldier, p_scenario.shooter_pose)->eye_height;
 	const Vec3 eye{ p_lane.feet[0], p_lane.feet[1] + shooter_eye, p_lane.feet[2] };
 
-	// Targets facing the shooter along the lane.
 	std::vector<HitTarget> targets;
 	std::vector<RangeTargetSpec> specs = p_scenario.targets;
 	for (size_t i = 0; i < specs.size(); ++i) {
@@ -235,7 +229,7 @@ core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionW
 	StaticTargets provider({});
 	std::vector<uint32_t> shots_at(targets.size(), 0);
 
-	const std::shared_ptr<const WeaponTable> table(std::shared_ptr<const WeaponTable>(), &p_table); // non-owning
+	const std::shared_ptr<const WeaponTable> table(std::shared_ptr<const WeaponTable>(), &p_table);
 	ProjectileWorld projectiles(table);
 	SoldierWeaponsState st;
 	st.player_slot = p_scenario.player_slot;
@@ -294,7 +288,7 @@ core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionW
 			if (aim_index >= 0) {
 				++shots_at[size_t(aim_index)];
 			}
-			(void)projectiles.spawn(shot); // a refusal is counted by the world
+			(void)projectiles.spawn(shot);
 		}
 		provider.targets().clear();
 		for (size_t i = 0; i < targets.size(); ++i) {
@@ -334,7 +328,7 @@ core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionW
 		result.collision_before_raycast += pout.collision_before_raycast;
 		result.peak_live_projectiles = std::max(result.peak_live_projectiles, projectiles.live().size());
 	};
-	// The deploy runs first (idle commands), so the script's first command finds the weapon ready.
+
 	for (uint32_t i = 0; i < 60 * kSimHz && st.current().phase != WeaponPhase::Ready; ++i) {
 		run_tick(false, 0);
 	}
@@ -389,7 +383,7 @@ core::Result<RangePerfResult> run_range_perf(const WeaponTable &p_table, const C
 		if (core::Status st = spawn_soldier_weapons(s.state, p_table, loadout, 0, 0); !st.ok()) {
 			return st.error();
 		}
-		// Past the deploy: the load is firing from the first measured tick.
+
 		s.state.slots[0].phase = WeaponPhase::Ready;
 		s.state.slots[0].phase_start = 0;
 		s.state.slots[0].phase_end = 0;
@@ -540,4 +534,4 @@ uint64_t impact_list_hash(std::span<const ImpactEvent> p_impacts) {
 	return h.value();
 }
 
-} // namespace bf3::sim::weapons
+}

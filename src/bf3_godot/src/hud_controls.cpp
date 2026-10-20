@@ -1,4 +1,3 @@
-// The minimal HUD's Controls (hud_controls.h; docs/design/m2a-hud.md): Bf3Hud and its five widgets.
 #include "hud_controls.h"
 
 #include "bf3_localisation.h"
@@ -43,7 +42,6 @@ PackedByteArray byte_array(const std::vector<uint8_t> &p_data) {
 	return out;
 }
 
-// Godot's Image format for an item icon's stored format; false for a format the HUD does not upload.
 bool image_format(bf3::core::res::TextureFormat p_format, Image::Format &r_format) {
 	using bf3::core::res::TextureFormat;
 	switch (p_format) {
@@ -68,8 +66,6 @@ Color swf_colour(const ui::SwfColor &p_c) {
 	return Color(float(p_c.r) / 255.0f, float(p_c.g) / 255.0f, float(p_c.b) / 255.0f, float(p_c.a) / 255.0f);
 }
 
-// A text slot the layout did not give (ui-swf-fonts.md §8's retail values, rounded; drawn only when the hudmpscreen
-// tree could not be read, logged).
 host::HudTextSlot fallback_slot(const char *p_path, float p_x, float p_y, float p_w, float p_h, float p_size, uint8_t p_align, const char *p_text) {
 	host::HudTextSlot s;
 	s.path = p_path;
@@ -100,7 +96,6 @@ host::HudScreenLayout make_fallback_layout() {
 	return l;
 }
 
-// Draws one line of a slot's text, aligned like the slot, and returns its size and alignment point.
 void draw_slot_text(CanvasItem &p_item, const Ref<Font> &p_font, const host::HudTextSlot &p_slot, ui::HudAnchor p_anchor, float p_ascent,
 		const std::string &p_text, const Color &p_colour, float p_width, float p_height, int32_t &r_size, Vector2 &r_at) {
 	const float s = host::hud_scale(p_width, p_height);
@@ -128,9 +123,7 @@ Color slot_colour(const host::HudTextSlot &p_slot) {
 	return p_slot.found && p_slot.color.a > 0 ? swf_colour(p_slot.color) : kHudTextColor;
 }
 
-} // namespace
-
-// ---- loading -------------------------------------------------------------------------------------------------------------
+}
 
 struct Bf3Hud::Loaded {
 	bool layout_ok = false;
@@ -413,8 +406,6 @@ Ref<Texture2D> Bf3Hud::icon(uint32_t p_item_id) const {
 	return it != icons_.end() ? it->second : Ref<Texture2D>();
 }
 
-// ---- model, inputs ---------------------------------------------------------------------------------------------------------
-
 void Bf3Hud::set_model(const ui::HudModel &p_model) {
 	model_ = p_model;
 	redraw_all();
@@ -449,7 +440,7 @@ double Bf3Hud::vfov_deg() const {
 	if (cam->get_keep_aspect_mode() == Camera3D::KEEP_HEIGHT) {
 		return fov;
 	}
-	// KEEP_WIDTH: fov is horizontal.
+
 	const Vector2 size = get_size();
 	if (!(size.x > 0.0f) || !(size.y > 0.0f)) {
 		return fov;
@@ -469,7 +460,7 @@ const std::string &Bf3Hud::localised(uint32_t p_sid_hash) {
 	Bf3Localisation *loc = Bf3Localisation::current();
 	const std::shared_ptr<const ui::TextDatabase> db = loc != nullptr ? loc->database() : nullptr;
 	if (db == nullptr) {
-		return kEmpty; // not cached: the database may still arrive
+		return kEmpty;
 	}
 	const std::optional<std::string_view> text = db->find(p_sid_hash);
 	return names_.emplace(p_sid_hash, text ? std::string(*text) : std::string()).first->second;
@@ -523,8 +514,6 @@ host::HudPoint Bf3Hud::hit_centre_stage() const {
 	const host::HudWidgetSlot &s = layout_ok_ && layout_.hit_indicator.found ? layout_.hit_indicator : fallback_.hit_indicator;
 	return { s.x, s.y };
 }
-
-// ---- widgets ------------------------------------------------------------------------------------------------------------------
 
 void Bf3HudWidget::_notification(int p_what) {
 	if (p_what == NOTIFICATION_DRAW) {
@@ -595,10 +584,10 @@ void Bf3HudCrosshair::draw_widget() {
 	const float t = std::max(1.0f, std::round(kCrosshairTickWidth * s));
 	const Color shadow(0.0f, 0.0f, 0.0f, 0.35f);
 	const Rect2 ticks[4] = {
-		Rect2(cx + g, cy - 0.5f * t, len, t), // right
-		Rect2(cx - g - len, cy - 0.5f * t, len, t), // left
-		Rect2(cx - 0.5f * t, cy - g - len, t, len), // up
-		Rect2(cx - 0.5f * t, cy + g, t, len), // down
+		Rect2(cx + g, cy - 0.5f * t, len, t),
+		Rect2(cx - g - len, cy - 0.5f * t, len, t),
+		Rect2(cx - 0.5f * t, cy - g - len, t, len),
+		Rect2(cx - 0.5f * t, cy + g, t, len),
 	};
 	for (const Rect2 &r : ticks) {
 		draw_rect(r.grow(1.0f), shadow, true);
@@ -638,7 +627,7 @@ void Bf3HudHitIndicator::draw_widget() {
 		record_.art = true;
 		return;
 	}
-	// Fallback: four diagonal strokes where the art's pieces sit (+-18 stage px).
+
 	const float in = 12.0f * s;
 	const float out = 24.0f * s;
 	const float width = std::max(1.0f, 2.0f * s);
@@ -672,8 +661,8 @@ void Bf3HudWeaponName::draw_widget() {
 	slot.size = kHudNameSize;
 	slot.align = 1;
 	slot.bounds.x_min = -2.0f;
-	slot.bounds.x_max = 2.0f; // the alignment point is the slot origin
-	slot.bounds.y_min = -2.0f; // the baseline is y + ascent x size: subtract it below
+	slot.bounds.x_max = 2.0f;
+	slot.bounds.y_min = -2.0f;
 	const float asc = hud_->text_ascent_per_px();
 	slot.y -= asc * kHudNameSize;
 	draw_slot_text(*this, hud_->text_font(), slot, anchor, asc, record_.text_a, kHudTextColor, size.x, size.y, record_.size_a, record_.at_a);
@@ -711,9 +700,8 @@ void Bf3HudHealth::draw_widget() {
 			record_.size_b, record_.at_b);
 }
 
-} // namespace bf3::godot_side
+}
 
-// M2a hud: the registration register_types.cpp's "// M2a hud" block calls (Bf3Hud, its widgets, the check).
 #include "hud_check.h"
 
 void openbf3_register_m2a_hud() {

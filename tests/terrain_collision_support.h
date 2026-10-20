@@ -1,16 +1,12 @@
 #pragma once
-// Terrain collision checks shared by sim.terrain.unit and sim.terrain (tests/terrain_collision_tests.cpp,
-// docs/design/terrain-collision.md §12.1): a soup terrain record from a grid, the exhaustive field + patch check
-// (every Jolt triangle of the terrain's bodies against soup_terrain_cell, one to one) and the vertical-ray checks
-// (lattice, mismatch cells, points of open cells); the exhaustive check and the lattice also in bands on worker lanes
-// (exhaustive_check_banded, cast_cells_banded: the same counters, sim.terrain.unit compares them).
+
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 
-#include "static_world_internal.h" // the terrain's Jolt shapes (StaticWorldShapes::Impl::Terrain)
+#include "static_world_internal.h"
 
 #include <Jolt/Geometry/AABox.h>
 
@@ -28,7 +24,6 @@ using namespace bf3;
 namespace level = bf3::core::level;
 namespace res = bf3::core::res;
 
-// A Built soup terrain record over p_grid at p_frame (what build_collision_soup keeps).
 inline level::SoupTerrain make_record(res::HeightGrid p_grid, const res::Transform &p_frame = res::Transform::identity(), uint32_t p_object = 0) {
 	level::SoupTerrain t;
 	t.object = p_object;
@@ -42,7 +37,6 @@ inline level::SoupTerrain make_record(res::HeightGrid p_grid, const res::Transfo
 	return t;
 }
 
-// A flat-ish grid: heights from p_height(x, z), no holes.
 template <class F>
 res::HeightGrid make_grid(size_t p_width, size_t p_height, std::array<float, 2> p_origin, std::array<float, 2> p_spacing, F &&p_heights) {
 	res::HeightGrid g;
@@ -70,8 +64,6 @@ inline double dist(D3 a, D3 b) {
 	return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
 }
 
-// World point -> grid coordinates (u along X samples, v along Z samples) through the inverse of the record's frame
-// (a rotation times a uniform scale: the axes are orthogonal).
 inline void to_grid(const level::SoupTerrain &p_t, D3 p_w, double &r_u, double &r_v) {
 	const res::Transform &f = p_t.frame;
 	const D3 d{ p_w.x - f.origin[0], p_w.y - f.origin[1], p_w.z - f.origin[2] };
@@ -85,7 +77,6 @@ inline void to_grid(const level::SoupTerrain &p_t, D3 p_w, double &r_u, double &
 	r_v = (local(2) - g.origin_xz[1]) / g.sample_spacing[1];
 }
 
-// Which half of its cell a triangle is, from its centroid: 1 = (a, d, b) (below the diagonal in grid space), 0 = (a, c, d).
 inline bool cell_of(const level::SoupTerrain &p_t, const std::array<D3, 3> &p_v, size_t &r_x, size_t &r_z, int &r_half) {
 	const D3 c{ (p_v[0].x + p_v[1].x + p_v[2].x) / 3.0, (p_v[0].y + p_v[1].y + p_v[2].y) / 3.0, (p_v[0].z + p_v[1].z + p_v[2].z) / 3.0 };
 	double u = 0, v = 0;
@@ -103,19 +94,17 @@ inline bool cell_of(const level::SoupTerrain &p_t, const std::array<D3, 3> &p_v,
 
 struct FieldCheck {
 	size_t cells = 0;
-	size_t soup_triangles = 0; // soup_terrain_cell over every cell
-	size_t field_triangles = 0; // Jolt's, read back from the field body
+	size_t soup_triangles = 0;
+	size_t field_triangles = 0;
 	size_t patch_triangles = 0;
-	size_t missing = 0; // soup triangles with no Jolt triangle
-	size_t extra = 0; // Jolt triangles with no soup triangle (or outside the grid)
-	size_t duplicate = 0; // two Jolt triangles on one soup triangle
-	size_t resumed = 0; // field triangles Jolt returned again after a full buffer (ignored)
-	double worst = 0.0; // largest corner distance of a pair (metres)
+	size_t missing = 0;
+	size_t extra = 0;
+	size_t duplicate = 0;
+	size_t resumed = 0;
+	double worst = 0.0;
 	bool ok() const { return missing == 0 && extra == 0 && duplicate == 0; }
 };
 
-// Every triangle of terrain p_index's field (at its body transform) and patch, against soup_terrain_cell of every cell
-// of p_record, one to one by (cell, half), with the corners compared.
 inline FieldCheck exhaustive_check(const sim::StaticWorldShapes &p_world, size_t p_index, const level::SoupTerrain &p_record, uint32_t p_placement) {
 	FieldCheck r;
 	const sim::StaticWorldShapes::Impl::Terrain &terrain = p_world.impl().terrains[p_index];
@@ -157,9 +146,7 @@ inline FieldCheck exhaustive_check(const sim::StaticWorldShapes &p_world, size_t
 				const uint8_t from_patch = uint8_t(8u << half);
 				const bool patch = p_shape == terrain.patch.GetPtr();
 				if ((s & bit) != 0) {
-					// Jolt's HeightFieldShape resumes a walk that filled the buffer at the start of the block it stopped in,
-					// so a field triangle comes again after a full buffer: not a duplicate. Field + patch, or the patch
-					// twice, is one.
+
 					if (!patch && (s & from_patch) == 0) {
 						--r_count;
 						++r.resumed;
@@ -190,7 +177,7 @@ inline FieldCheck exhaustive_check(const sim::StaticWorldShapes &p_world, size_t
 					}
 				}
 				if (!found) {
-					s |= 4; // counted here, not again as missing
+					s |= 4;
 					++r.extra;
 				}
 			}
@@ -219,12 +206,6 @@ inline FieldCheck exhaustive_check(const sim::StaticWorldShapes &p_world, size_t
 	return r;
 }
 
-// exhaustive_check on worker lanes, in bands of p_band_rows cell rows (sim.terrain G1; docs/testing.md). Each band
-// walks the field and the patch inside a box over its rows (padded by one sample; the first and last bands reach
-// +/-1e7 in Z, every band +/-1e7 in X and Y) and owns the triangles whose centroid row falls in it (clamped), so every
-// triangle is counted exactly once and the bands write disjoint rows of seen[]. The counters are summed and worst is
-// the maximum: equal to exhaustive_check apart from `resumed`, which depends on where Jolt's buffer fills. Needs an
-// axis-aligned frame with +Z kept (every retail frame is the identity); other frames take the serial check.
 inline FieldCheck exhaustive_check_banded(const sim::StaticWorldShapes &p_world, size_t p_index, const level::SoupTerrain &p_record, uint32_t p_placement,
 		unsigned p_lanes, size_t p_band_rows = 64) {
 	const res::Transform &f = p_record.frame;
@@ -277,7 +258,7 @@ inline FieldCheck exhaustive_check_banded(const sim::StaticWorldShapes &p_world,
 								v[size_t(k)] = { fl.x, fl.y, fl.z };
 							}
 							if (owner(v) != p_band) {
-								continue; // another band's triangle (the padded box overlaps its neighbours)
+								continue;
 							}
 							++r_count;
 							size_t x = 0, z = 0;
@@ -342,7 +323,7 @@ inline FieldCheck exhaustive_check_banded(const sim::StaticWorldShapes &p_world,
 		r.resumed += part.resumed;
 		r.worst = std::max(r.worst, part.worst);
 	}
-	// The missing pass over the soup's cells, banded the same way (seen[] is complete after the join).
+
 	std::vector<std::array<size_t, 2>> missing(bands);
 	bf3::core::parallel_for(
 			bands,
@@ -374,11 +355,9 @@ inline FieldCheck exhaustive_check_banded(const sim::StaticWorldShapes &p_world,
 	return r;
 }
 
-// One vertical ray into a cell triangle: the point at in-cell fractions (0.6, 0.3) for (a, d, b) or (0.3, 0.6) for
-// (a, c, d), the expected height from the soup triangle's plane (doubles).
 struct CellRay {
-	D3 at; // world x, expected y, z
-	bool ground = false; // a soup triangle is there
+	D3 at;
+	bool ground = false;
 };
 inline CellRay cell_ray(const level::SoupTerrain &p_record, uint32_t p_placement, size_t p_x, size_t p_z, int p_half) {
 	CellRay out;
@@ -398,7 +377,7 @@ inline CellRay cell_ray(const level::SoupTerrain &p_record, uint32_t p_placement
 		if (!cell_of(p_record, v, sx, sz, sh) || sh != p_half) {
 			continue;
 		}
-		// The plane's height at (x, z).
+
 		const D3 e1{ v[1].x - v[0].x, v[1].y - v[0].y, v[1].z - v[0].z }, e2{ v[2].x - v[0].x, v[2].y - v[0].y, v[2].z - v[0].z };
 		const D3 n{ e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x };
 		if (std::fabs(n.y) < 1e-12) {
@@ -412,27 +391,24 @@ inline CellRay cell_ray(const level::SoupTerrain &p_record, uint32_t p_placement
 
 struct RayCheck {
 	size_t rays = 0;
-	size_t missed = 0; // ground expected, no terrain hit within the tolerance
+	size_t missed = 0;
 	size_t open_rays = 0;
-	size_t open_hits = 0; // a terrain hit in an open cell
-	size_t occluded = 0; // a non-terrain hit first (full worlds): re-cast past it
-	size_t coincident = 0; // a non-terrain hit within the tolerance of the terrain (Havok ground on the terrain plane)
-	double worst = 0.0; // largest |hit y - expected y| of the hits
-	// The first miss, for the message: cell, triangle, expected y, the last hit's y (NaN: none) and its occluders.
+	size_t open_hits = 0;
+	size_t occluded = 0;
+	size_t coincident = 0;
+	double worst = 0.0;
+
 	size_t miss_x = 0, miss_z = 0;
 	int miss_half = -1, miss_occluders = 0;
 	double miss_expected = 0.0, miss_hit_y = 0.0;
 };
 
-// A ray into a cell triangle against p_world: ground expected -> a terrain hit within p_tol of the plane (a ray from
-// 0.25 m above to 0.25 m below; non-terrain hits are passed and counted as occluded); an open cell -> no terrain hit
-// over [p_lo_y, p_hi_y].
 inline void cast_cell(const sim::CollisionWorld &p_world, const level::SoupTerrain &p_record, uint32_t p_placement, size_t p_x, size_t p_z, int p_half,
 		double p_lo_y, double p_hi_y, double p_tol, RayCheck &r_check) {
 	const CellRay ray = cell_ray(p_record, p_placement, p_x, p_z, p_half);
 	const bool open = level::soup_terrain_cell(p_record, p_placement, p_x, p_z).open;
 	if (!ray.ground && !open) {
-		return; // a degenerate triangle dropped by the quantise rule: nothing to expect
+		return;
 	}
 	double top = ray.ground ? ray.at.y + 0.25 : p_hi_y;
 	const double bottom = ray.ground ? ray.at.y - 0.25 : p_lo_y;
@@ -457,8 +433,7 @@ inline void cast_cell(const sim::CollisionWorld &p_world, const level::SoupTerra
 		}
 		if (hit.terrain == sim::kNoStaticTerrain) {
 			if (ray.ground && std::fabs(double(hit.position[1]) - ray.at.y) <= p_tol) {
-				// Havok ground lies on the terrain plane: the ray cannot tell the two apart and re-casting 1 mm below
-				// would step past the terrain. Ground is there; the terrain-only world proves the field (G1).
+
 				++r_check.coincident;
 				return;
 			}
@@ -484,8 +459,6 @@ inline void cast_cell(const sim::CollisionWorld &p_world, const level::SoupTerra
 	}
 }
 
-// The cells whose soup and Jolt hole rules differ before the cook marks them (the only hole is b or c), with their 8
-// neighbours: where the patch lives.
 inline std::vector<std::array<size_t, 2>> mismatch_cells(const res::HeightGrid &p_g) {
 	std::vector<std::array<size_t, 2>> out;
 	if (p_g.width < 2 || p_g.height < 2) {
@@ -515,10 +488,6 @@ inline std::vector<std::array<size_t, 2>> mismatch_cells(const res::HeightGrid &
 	return out;
 }
 
-// The lattice of cast_cells on worker lanes: the p_step rows are split into p_lanes contiguous parts, each cast
-// against its own CollisionWorld over p_shapes (two worlds over the same shapes may be queried at once), plus one part
-// for the mismatch cells; the parts are merged in order, so the counters and the first reported miss equal the serial
-// cast_cells. p_lanes 1: the serial order on this thread.
 inline RayCheck cast_cells_banded(std::shared_ptr<const sim::StaticWorldShapes> p_shapes, const level::SoupTerrain &p_record, uint32_t p_placement,
 		size_t p_step, double p_tol, unsigned p_lanes) {
 	const res::HeightGrid &g = *p_record.grid;
@@ -574,7 +543,7 @@ inline RayCheck cast_cells_banded(std::shared_ptr<const sim::StaticWorldShapes> 
 	for (size_t i = 0; i < parts.size(); ++i) {
 		const RayCheck &r = parts[i];
 		if (!errors[i].empty()) {
-			out.missed += 1; // no world: counted as a miss (the caller's missed == 0 check fails)
+			out.missed += 1;
 			continue;
 		}
 		if (out.missed == 0 && r.missed != 0) {
@@ -596,4 +565,4 @@ inline RayCheck cast_cells_banded(std::shared_ptr<const sim::StaticWorldShapes> 
 	return out;
 }
 
-} // namespace terrain_test
+}

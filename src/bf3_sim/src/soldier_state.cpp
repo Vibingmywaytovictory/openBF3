@@ -1,5 +1,3 @@
-// soldier_state_hash: FNV-1a 64 over every SoldierState field in declaration order (docs/design/m1.md §6.2, §6.10).
-// Fields are hashed one by one, never the struct's bytes, so padding cannot make two equal states differ.
 #include "bf3/sim/soldier_state.h"
 
 #include <cstring>
@@ -31,7 +29,7 @@ private:
 	uint64_t hash_ = 0xCBF29CE484222325ull;
 };
 
-} // namespace
+}
 
 uint64_t soldier_state_hash(const SoldierState &p_state) {
 	Fnv64 h;
@@ -60,4 +58,4 @@ uint64_t soldier_state_hash(const SoldierState &p_state) {
 	return h.value();
 }
 
-} // namespace bf3::sim
+}

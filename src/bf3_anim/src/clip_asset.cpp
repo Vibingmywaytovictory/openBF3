@@ -74,4 +74,4 @@ core::Result<LoadedClip> load_clip(const AntPackageSource &p_source, const AntLi
 	return load_clip(std::move(*p), p_library, p_clip);
 }
 
-} // namespace bf3::anim
+}

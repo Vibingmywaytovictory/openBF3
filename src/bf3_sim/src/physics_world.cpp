@@ -2,7 +2,6 @@
 
 #include "jolt_runtime.h"
 
-// Jolt.h must come first.
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Core/JobSystemSingleThreaded.h>
@@ -21,18 +20,17 @@ namespace bf3::sim {
 
 namespace {
 
-// ---- layers: static world vs moving bodies -----------------------------------------------------
 namespace Layers {
 constexpr JPH::ObjectLayer kNonMoving = 0;
 constexpr JPH::ObjectLayer kMoving = 1;
 constexpr JPH::ObjectLayer kCount = 2;
-} // namespace Layers
+}
 
 namespace BroadPhaseLayers {
 constexpr JPH::BroadPhaseLayer kNonMoving(0);
 constexpr JPH::BroadPhaseLayer kMoving(1);
 constexpr JPH::uint kCount = 2;
-} // namespace BroadPhaseLayers
+}
 
 class BPLayerInterface final : public JPH::BroadPhaseLayerInterface {
 public:
@@ -73,7 +71,7 @@ void fnv_float(uint64_t &r_h, float p_v) {
 	}
 }
 
-} // namespace
+}
 
 struct PhysicsWorld::Impl {
 	BPLayerInterface bp_layers;
@@ -83,10 +81,10 @@ struct PhysicsWorld::Impl {
 	std::unique_ptr<JPH::JobSystem> jobs;
 	std::unique_ptr<JPH::PhysicsSystem> system;
 	std::vector<JPH::BodyID> dynamic_ids;
-	std::vector<BodyTransform> dynamic_shapes; // shape kind + size per dynamic body
+	std::vector<BodyTransform> dynamic_shapes;
 	JPH::BodyID ground;
 	uint64_t tick = 0;
-	// The Jolt runtime (jolt_runtime.h), held while the system exists; shutdown() releases it after the system.
+
 	std::shared_ptr<void> runtime;
 };
 
@@ -117,12 +115,10 @@ bool PhysicsWorld::init(const WorldConfig &p_config) {
 
 	JPH::BodyInterface &bi = w.system->GetBodyInterface();
 
-	// Ground: 60 x 1 x 60 m box whose top face is at y = 0.
 	JPH::BodyCreationSettings ground(new JPH::BoxShape(JPH::Vec3(30.0f, 0.5f, 30.0f)), JPH::RVec3(0.0f, -0.5f, 0.0f), JPH::Quat::sIdentity(),
 			JPH::EMotionType::Static, Layers::kNonMoving);
 	w.ground = bi.CreateAndAddBody(ground, JPH::EActivation::DontActivate);
 
-	// Dynamic bodies: a loose column of boxes and spheres that topple onto each other.
 	for (int i = 0; i < p_config.dynamic_bodies; ++i) {
 		BodyTransform meta;
 		meta.shape = static_cast<uint8_t>(i % 2);
@@ -136,7 +132,7 @@ bool PhysicsWorld::init(const WorldConfig &p_config) {
 		JPH::BodyCreationSettings s(shape, JPH::RVec3(x, y, z), rot, JPH::EMotionType::Dynamic, Layers::kMoving);
 		s.mRestitution = 0.2f;
 		s.mFriction = 0.6f;
-		s.mAngularDamping = meta.shape == 1 ? 0.8f : 0.05f; // spheres have no rolling friction; let them stop
+		s.mAngularDamping = meta.shape == 1 ? 0.8f : 0.05f;
 		w.dynamic_ids.push_back(bi.CreateAndAddBody(s, JPH::EActivation::Activate));
 		w.dynamic_shapes.push_back(meta);
 	}
@@ -254,4 +250,4 @@ const char *PhysicsWorld::jolt_version() {
 #undef BF3_STR2
 }
 
-} // namespace bf3::sim
+}

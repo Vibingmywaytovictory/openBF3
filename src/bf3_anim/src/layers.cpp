@@ -1,4 +1,3 @@
-// Pose layering for the 3p crowd (S3; docs/design/s3.md §5.3-§5.5). See layers.h.
 #include "bf3/anim/layers.h"
 
 #include "bf3/core/ant/ant_clip.h"
@@ -15,7 +14,7 @@ float quat_dot(const Quat &p_a, const Quat &p_b) {
 }
 
 Quat nlerp(const Quat &p_a, const Quat &p_b, float p_t) {
-	const float s = quat_dot(p_a, p_b) < 0.0f ? -1.0f : 1.0f; // shortest arc
+	const float s = quat_dot(p_a, p_b) < 0.0f ? -1.0f : 1.0f;
 	return quat_normalized(Quat{ p_a.x + (s * p_b.x - p_a.x) * p_t, p_a.y + (s * p_b.y - p_a.y) * p_t, p_a.z + (s * p_b.z - p_a.z) * p_t,
 			p_a.w + (s * p_b.w - p_a.w) * p_t });
 }
@@ -24,12 +23,11 @@ Vec3 lerp(const Vec3 &p_a, const Vec3 &p_b, float p_t) {
 	return Vec3{ p_a.x + (p_b.x - p_a.x) * p_t, p_a.y + (p_b.y - p_a.y) * p_t, p_a.z + (p_b.z - p_a.z) * p_t };
 }
 
-// Weights in [0, 1]; NaN counts as 0.
 float clamp01(float p_w) {
 	return p_w > 0.0f ? (p_w < 1.0f ? p_w : 1.0f) : 0.0f;
 }
 
-} // namespace
+}
 
 BoneMask mask_from_tracks(const Skeleton &p_skeleton, const ClipTracks &p_tracks) {
 	BoneMask m;
@@ -95,8 +93,7 @@ void blend_poses(const LocalPose *const *p_poses, const float *p_weights, size_t
 		}
 		return;
 	}
-	// r_out may alias an input: joint j of every input is read before joint j is written, and resizing to the
-	// smallest input never grows (so never moves) an aliased vector.
+
 	const float inv = 1.0f / total;
 	r_out.joints.resize(n);
 	for (size_t j = 0; j < n; ++j) {
@@ -131,7 +128,7 @@ void override_masked(LocalPose &r_base, const LocalPose &p_layer, const BoneMask
 	for (size_t j = 0; j < n; ++j) {
 		const float m = clamp01(p_mask.weight[j]) * w;
 		if (m <= 0.0f) {
-			continue; // unmasked joints stay bit-equal
+			continue;
 		}
 		if (m >= 1.0f) {
 			r_base.joints[j] = p_layer.joints[j];
@@ -163,4 +160,4 @@ void apply_additive(LocalPose &r_base, const LocalPose &p_delta, const BoneMask 
 	}
 }
 
-} // namespace bf3::anim
+}

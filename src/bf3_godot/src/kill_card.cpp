@@ -1,4 +1,3 @@
-// M2b ui: the kill card (kill_card.h).
 #include "kill_card.h"
 
 #include <algorithm>
@@ -44,7 +43,7 @@ void Bf3TdmKillCard::draw_screen() {
 	const std::string killer = tdm_player_name(m, k.killer);
 	tdm_draw_text(*this, title, at(x0, kKillCardTop + 50.0f), killer, tdm_px(26.0f, s), tdm_player_colour(m, k.killer));
 	std::memcpy(rec.kill_card_killer.data(), killer.data(), std::min(killer.size(), rec.kill_card_killer.size() - 1));
-	// The killer's kit.
+
 	if (k.killer_kit >= 0 && size_t(k.killer_kit) < kTdmKitNames.size()) {
 		const Ref<Texture2D> kit = c.kit_icon(k.killer_kit);
 		float kx = x1;
@@ -56,7 +55,7 @@ void Bf3TdmKillCard::draw_screen() {
 			draw_texture_rect(kit, Rect2(p, Vector2(isz, isz)), false);
 		}
 	}
-	// The weapon: the _small icon at twice its size, its name below.
+
 	const Ref<Texture2D> icon = c.weapon_icon(k.item_id);
 	if (icon.is_valid()) {
 		draw_texture_rect(icon, Rect2(at(x0, kKillCardTop + 64.0f), Vector2(128.0f * s, 32.0f * s)), false);
@@ -70,7 +69,7 @@ void Bf3TdmKillCard::draw_screen() {
 	if (k.headshot) {
 		tdm_draw_text(*this, title, at(x0, kKillCardTop + 138.0f), c.text(TdmText::Headshot), tdm_px(12.0f, s), kTdmLocalColour);
 	}
-	// The killer's health and the distance, right-aligned.
+
 	tdm_draw_text(*this, text, at(x1, kKillCardTop + 74.0f), c.text(TdmText::Health), tdm_px(11.0f, s), kTdmDimColour, 1);
 	tdm_draw_text(*this, num, at(x1, kKillCardTop + 104.0f), std::to_string(int(std::lround(k.killer_health))), tdm_px(28.0f, s), kTdmTextColour, 1);
 	if (k.distance_m >= 0.0f) {
@@ -79,4 +78,4 @@ void Bf3TdmKillCard::draw_screen() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

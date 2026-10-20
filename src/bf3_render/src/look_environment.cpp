@@ -1,4 +1,3 @@
-// L1 look: the level's visual environment and its per-camera blend (look_environment.h).
 #include "bf3/render/look_environment.h"
 
 #include "bf3/core/ebx.h"
@@ -29,8 +28,8 @@ constexpr float kPi = 3.14159265358979f;
 constexpr size_t kMaxComponents = 256;
 constexpr uint32_t kFogFitSamples = 48;
 constexpr uint32_t kFogFitSteps = 128;
-constexpr float kFogFitReach = 1500.0f; // metres past Start the fog fit weighs (the views of a level lie within)
-constexpr float kHorizonRows = 0.15f; // share of the panorama's rows, from its bottom (the horizon), averaged
+constexpr float kFogFitReach = 1500.0f;
+constexpr float kHorizonRows = 0.15f;
 
 std::string lower(std::string_view p_s) {
 	std::string out(p_s);
@@ -110,7 +109,6 @@ std::string texture_name(const EbxResolver &p_db, const EbxInstance &p_c, std::s
 	return t ? partition_name(p_db, *t) : std::string();
 }
 
-// One component into the state; false when the component is not one the look reads or is disabled.
 bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::string &p_source, LookEnvState &r_state) {
 	if (!flag(p_c, "Enable", true)) {
 		return false;
@@ -201,14 +199,13 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 	return true;
 }
 
-// The placed VE: its reference, priority, blueprint name and, for an area, the proximity entity.
 struct Ve {
 	const PlacedObject *object = nullptr;
 	EbxInstance reference;
 	int64_t priority = 0;
 	std::string name;
 	std::optional<EbxInstance> proximity;
-	bool switched = false; // another connection drives its visibility or enable (not an area)
+	bool switched = false;
 };
 
 std::optional<LookArea> area_shape(const World &p_world, uint32_t p_scope, const EbxInstance &p_proximity) {
@@ -286,7 +283,6 @@ double srgb_to_linear(double p_c) {
 	return p_c <= 0.04045 ? p_c / 12.92 : std::pow((p_c + 0.055) / 1.055, 2.4);
 }
 
-// The panorama's bottom rows (its horizon) averaged, linear; nullopt when it does not decode.
 std::optional<LookVec3> horizon_of(const core::LevelMount &p_mount, const std::string &p_name, std::string &r_note) {
 	core::Result<core::res::LoadedTexture> t = core::res::load_texture(p_mount, p_name);
 	if (!t) {
@@ -325,7 +321,6 @@ std::optional<LookVec3> horizon_of(const core::LevelMount &p_mount, const std::s
 	return LookVec3{ float(sum[0] / double(n)), float(sum[1] / double(n)), float(sum[2] / double(n)) };
 }
 
-// The grading cube as kGradeLutSide^3 RGBA8 bytes (red fastest), or empty with a note.
 std::vector<uint8_t> grade_cube_of(const core::LevelMount &p_mount, const std::string &p_name, std::string &r_note) {
 	core::Result<core::res::LoadedTexture> t = core::res::load_texture(p_mount, p_name);
 	if (!t) {
@@ -381,7 +376,6 @@ float segment_distance(const std::array<float, 2> &p_a, const std::array<float, 
 	return std::sqrt(ex * ex + ez * ez);
 }
 
-// p_a's components blended over r_state by p_w.
 void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 	const bool take = p_w >= 0.5f;
 	if (p_a.light) {
@@ -414,7 +408,7 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 	}
 	if (p_a.fog) {
 		if (!r_state.fog) {
-			// Fog appears with the area: its own distances and shape, its density faded in from 0.
+
 			r_state.fog_start = p_a.fog_start;
 			r_state.fog_end = p_a.fog_end;
 			r_state.fog_multiplier = p_a.fog_multiplier;
@@ -455,7 +449,7 @@ std::string lut_key(const LookEnvState &p_s) {
 	return std::string(buf) + p_s.grade_cube;
 }
 
-} // namespace
+}
 
 float look_cubic(const LookCubic &p_c, float p_t) {
 	return ((p_c[0] * p_t + p_c[1]) * p_t + p_c[2]) * p_t + p_c[3];
@@ -479,7 +473,7 @@ void fog_fit(const LookCubic &p_curve, float p_reach, float &r_density, float &r
 	}
 	double best = INFINITY;
 	for (uint32_t e = 0; e < kFogFitSteps / 2; ++e) {
-		// Godot's end distance as a fraction of BF3's span, 1/64 .. 1; its density BF3's value there.
+
 		const float end = 1.0f / 64.0f + (1.0f - 1.0f / 64.0f) * float(e) / float(kFogFitSteps / 2 - 1);
 		const float at_end = look_cubic(p_curve, end);
 		const float density = std::isfinite(at_end) ? std::clamp(at_end, 0.0f, 1.0f) : 0.0f;
@@ -487,11 +481,11 @@ void fog_fit(const LookCubic &p_curve, float p_reach, float &r_density, float &r
 			continue;
 		}
 		for (uint32_t s = 0; s <= kFogFitSteps / 2; ++s) {
-			const float k = 0.05f * std::pow(320.0f, float(s) / float(kFogFitSteps / 2)); // exponents 0.05 .. 16, log-spaced
+			const float k = 0.05f * std::pow(320.0f, float(s) / float(kFogFitSteps / 2));
 			double error = 0.0;
 			for (uint32_t i = 0; i <= kFogFitSamples; ++i) {
 				const float t = std::clamp(reach * float(i) / float(kFogFitSamples) / end, 0.0f, 1.0f);
-				const double ease = double(t) * t * (3.0 - 2.0 * t); // Godot's smoothstep(begin, end, distance)
+				const double ease = double(t) * t * (3.0 - 2.0 * t);
 				const double got = double(density) * std::pow(ease, double(k));
 				error += (got - want[i]) * (got - want[i]);
 			}
@@ -578,8 +572,7 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 		env.notes.push_back("no placed visual environment");
 		return env;
 	}
-	// The base: per component, the always-on VE (no area, not switched) with the highest priority; when every VE
-	// holding the component is switched, the lowest-priority switched one (IW4L component()).
+
 	const char *kinds[] = { "OutdoorLightComponentData", "EnlightenComponentData", "SkyComponentData", "FogComponentData", "TonemapComponentData",
 		"ColorCorrectionComponentData" };
 	for (const char *kind : kinds) {
@@ -620,7 +613,7 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 			}
 		}
 		if (best != nullptr && best_component) {
-			LookEnvState probe; // read into a scratch state, then copy the component's fields over
+			LookEnvState probe;
 			if (read_component(p_db, *best_component, best->name, probe)) {
 				blend_state(env.base, probe, 1.0f);
 				env.base.source += (env.base.source.empty() ? "" : " ") + probe.source;
@@ -647,7 +640,7 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 			}
 		}
 	}
-	// Areas, ascending priority.
+
 	for (const Ve &ve : ves) {
 		if (!ve.proximity) {
 			continue;
@@ -717,7 +710,7 @@ void decode_look_textures(const core::LevelMount &p_mount, LookEnvironment &r_en
 		for (size_t b = 0; b < n; ++b) {
 			for (size_t g = 0; g < n; ++g) {
 				for (size_t r = 0; r < n; ++r) {
-					// Godot samples the LUT at texel centres: texel i answers the display value (i + 0.5) / n.
+
 					const LookVec3 in = { (float(r) + 0.5f) / float(n), (float(g) + 0.5f) / float(n), (float(b) + 0.5f) / float(n) };
 					const LookVec3 out = look_grade(r_state, cube->second, in);
 					const size_t at = ((b * n + g) * n + r) * 4;
@@ -740,7 +733,7 @@ void decode_look_textures(const core::LevelMount &p_mount, LookEnvironment &r_en
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position) {
 	if (!finite3(p_position)) {
-		return 0.0f; // fmax would drop a NaN offset and put the position inside
+		return 0.0f;
 	}
 	float distance = 0.0f;
 	if (p_area.box) {
@@ -784,7 +777,7 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	const float peak = max3(p_s.sun_color);
 	if (peak > 1e-6f) {
 		f.sun_color = scaled(p_s.sun_color, 1.0f / peak);
-		f.sun_energy = peak; // Godot draws albedo x energy x N.L, as BF3's Lambert without 1 / pi [inferred, README "L1 look"]
+		f.sun_energy = peak;
 	} else {
 		f.sun_color = { 1.0f, 1.0f, 1.0f };
 		f.sun_energy = 0.0f;
@@ -817,8 +810,7 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	f.min_exposure = p_s.min_exposure;
 	f.max_exposure = p_s.max_exposure;
 	f.exposure_speed = 1.0f / std::fmax(p_s.exposure_time, 0.01f);
-	// BF3 exposes each frame to MiddleGray / its average luminance, clamped to Min..MaxExposure. Static estimate of
-	// that average: a kReferenceAlbedo surface under the ambient, with kSunlitShare of the view in the sun [inferred].
+
 	const auto luma = [](const LookVec3 &p_c) { return 0.2126f * p_c[0] + 0.7152f * p_c[1] + 0.0722f * p_c[2]; };
 	const float ambient = 0.5f * (luma(f.ambient_up) + luma(f.ambient_horizon));
 	const float average = kReferenceAlbedo * (ambient + kSunlitShare * f.sun_energy * luma(f.sun_color) * std::fmax(std::sin(el), 0.0f));
@@ -839,4 +831,4 @@ LookFrame look_frame(const LookEnvironment &p_env, const LookVec3 &p_position) {
 	return look_frame_of(s);
 }
 
-} // namespace bf3::render
+}

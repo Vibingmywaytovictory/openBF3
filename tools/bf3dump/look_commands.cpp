@@ -1,4 +1,3 @@
-// bf3dump looks <LEVEL> <MODE> (L1 look; README "L1 look"): the drawn-material census, M1 against L1.
 #include "look_commands.h"
 
 #include "bf3/core/level/census.h"
@@ -45,17 +44,17 @@ const char *uv_name(uint8_t p_uv) {
 
 struct ShaderRow {
 	std::set<uint32_t> materials_l1;
-	uint64_t slots = 0; // drawn instance slots (instances x drawn LOD0 slots)
+	uint64_t slots = 0;
 	uint64_t m1_albedo = 0, l1_albedo = 0, l1_glass = 0;
 	uint64_t normal_available = 0, m1_normal = 0, l1_normal = 0;
 	uint64_t l1_undrawn = 0;
 	bool in_db = false;
 	size_t graph_textures = 0;
-	std::map<std::string, uint64_t> parameters; // parameter name -> drawn instance slots naming it
-	std::map<std::string, uint64_t> tiers; // "graph uv1 x4" -> instance slots
+	std::map<std::string, uint64_t> parameters;
+	std::map<std::string, uint64_t> tiers;
 };
 
-} // namespace
+}
 
 int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
 	if (p_args.size() < 2) {
@@ -64,7 +63,7 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 	}
 	const std::string level_name = p_args[0], mode = p_args[1];
 	const bool list_materials = std::find(p_args.begin(), p_args.end(), "--materials") != p_args.end();
-	std::vector<std::string> shader_dumps; // --shader NAME (repeatable): the graph's constants, parameters and values
+	std::vector<std::string> shader_dumps;
 	for (size_t i = 2; i + 1 < p_args.size(); ++i) {
 		if (p_args[i] == "--shader") {
 			shader_dumps.push_back(p_args[i + 1]);
@@ -100,7 +99,7 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 		std::fprintf(stderr, "looks: M1 and L1 plans differ in meshes (%zu, %zu)\n", m1->meshes.size(), l1->meshes.size());
 		return 1;
 	}
-	// The slots each request's LOD 0 draws (subsets that are not z-only), from the res header alone.
+
 	std::vector<std::optional<std::set<uint32_t>>> drawn_slots(l1->requests.size());
 	size_t heads_failed = 0;
 	for (size_t r = 0; r < l1->requests.size(); ++r) {
@@ -138,7 +137,7 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 		bool all_m1 = true, all_l1 = true, any = false;
 		for (uint32_t s : slots) {
 			if (s >= lm.surface_materials.size() || s >= mm.surface_materials.size() || mm.surface_materials[s] == render::kSceneUndrawnMaterial) {
-				continue; // a slot past the asset's list, or one M1 never drew (undrawn shader words)
+				continue;
 			}
 			any = true;
 			const render::SceneMaterialPlan &mmat = m1->materials[mm.surface_materials[s]];
@@ -295,7 +294,7 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 		for (const std::string &n : env.notes) {
 			std::printf("  note: %s\n", n.c_str());
 		}
-		// The look at the L1 viewpoints (README "L1 look").
+
 		const std::pair<const char *, render::LookVec3> points[] = { { "spawn (street)", { -196.14f, 61.47f, -568.25f } },
 			{ "station", { -167.76f, 66.2f, -475.19f } }, { "park", { -12.0f, 80.0f, 51.0f } }, { "overview", { -150.0f, 260.0f, -800.0f } } };
 		for (const auto &[label, at] : points) {
@@ -353,4 +352,4 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 	return pass ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

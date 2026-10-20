@@ -1,7 +1,3 @@
-// read_level_spawns: the AlternateSpawn points and the CharacterSpawnReference spawners of a traversed level x mode
-// (include/bf3/core/level/spawn_points.h; docs/design/m1.md §10.1). Every field is the effective value: a
-// PropertyConnection of the object's scope that feeds it wins over the object's own field (Scopes::property),
-// as the traversal does for Excluded and the transforms.
 #include "bf3/core/level/spawn_points.h"
 
 #include <cmath>
@@ -12,7 +8,6 @@ namespace bf3::core::level {
 
 namespace {
 
-// The fed value of p_field (a PropertyConnection into it), else the object's own field.
 struct FieldReader {
 	const World &world;
 	const PlacedObject &object;
@@ -26,7 +21,7 @@ struct FieldReader {
 		if (*r || !object.reference) {
 			return r;
 		}
-		// A field of the entity inside the reference's blueprint can be fed too.
+
 		return world.scopes.property(object.scope, object.entity, field_id(p_field));
 	}
 
@@ -66,7 +61,6 @@ struct FieldReader {
 		return std::optional<double>();
 	}
 
-	// TeamId: an enum field (TeamNeutral 0, Team1 1, ...) or a fed `TeamId TeamN` constant.
 	Result<std::optional<int>> team(std::string_view p_field) const {
 		Result<std::optional<Property>> f = fed(p_field);
 		BF3_TRY(f);
@@ -92,7 +86,7 @@ struct FieldReader {
 	}
 };
 
-} // namespace
+}
 
 Result<LevelSpawns> read_level_spawns(const World &p_world) {
 	WorkBudget &budget = *p_world.budget;
@@ -154,4 +148,4 @@ Result<LevelSpawns> read_level_spawns(const World &p_world) {
 	return out;
 }
 
-} // namespace bf3::core::level
+}

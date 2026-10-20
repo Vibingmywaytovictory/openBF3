@@ -1,4 +1,3 @@
-// bf3dump swf commands (UI ui1; swf_commands.h, docs/design/ui-swf-fonts.md §12.4).
 #include "swf_commands.h"
 
 #include "prepare_commands.h"
@@ -400,7 +399,7 @@ int cmd_fonts(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 		root = std::filesystem::absolute(root, ec);
 		CacheOptions co;
 		co.root = root;
-		co.guard = p_reader.write_guard(); // the install is refused
+		co.guard = p_reader.write_guard();
 		std::string detail;
 		const CacheStatus st = cache.open(std::move(co), &detail);
 		if (st != CacheStatus::Ok) {
@@ -438,7 +437,7 @@ int cmd_fonts(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 				f.codes.empty() ? 0 : f.codes.front(), f.codes.empty() ? 0 : f.codes.back());
 	}
 	std::printf("load %.3f s\n", fonts->load_seconds());
-	// The name-resolution table over every movie (G6).
+
 	SwfCensusOptions co;
 	co.check_atlas_textures = false;
 	co.build_atlas_maps = false;
@@ -467,7 +466,7 @@ int cmd_fonts(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 	return t.font_names_by_rule[size_t(FontResolution::Unresolved)] == 0 ? 0 : 1;
 }
 
-} // namespace
+}
 
 const char *swf_usage() {
 	return "  swf census [--tsv <out.tsv>] [--threads=N]\n"
@@ -505,4 +504,4 @@ int cmd_swf(const InstallReader &p_reader, const std::shared_ptr<Install> &p_ins
 	return 2;
 }
 
-} // namespace bf3dump
+}

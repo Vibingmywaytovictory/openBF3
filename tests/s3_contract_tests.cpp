@@ -1,8 +1,3 @@
-// S3 interface contract (docs/design/s3.md §11, §14): every Godot-free S3 header compiles on its own set of
-// includes, the plain types keep the properties the crowd relies on (inputs copied per frame), and the inline
-// helpers behave as the design says: temporal LOD intervals from the retail GameAnimationSettings values,
-// phase advance on hostile numbers, and the gate constants. No data, no Godot. Nothing here calls a function the
-// track has yet to implement.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/crowd_clips.h"
@@ -32,7 +27,7 @@ static_assert(anim::kCrowdClips == 8);
 static_assert(anim::kStagePhases == 10);
 static_assert(uint8_t(anim::LocoClip::Idle) == 0 && uint8_t(anim::CrowdClip::Idle) == 0);
 static_assert(anim::TemporalLodTable::kTiers == 6);
-static_assert(anim::kMaxPaletteBinds >= 113); // the US team's measured binds (s3.md §4.3)
+static_assert(anim::kMaxPaletteBinds >= 113);
 static_assert(anim::s3_gate::kSoldiers == 64 && anim::s3_gate::kSoldiers <= anim::kMaxCrowdSoldiers);
 static_assert(anim::CrowdStageSpec{}.soldiers() == anim::s3_gate::kSoldiers);
 static_assert(anim::s3_gate::kWidth == 2560 && anim::s3_gate::kHeight == 1440);
@@ -71,7 +66,7 @@ TEST_CASE("s3 contract: temporal LOD interval and tier by distance") {
 	CHECK(anim::temporal_lod_tier(t, 2.0f) == 0);
 	CHECK(anim::temporal_lod_tier(t, 61.0f) == 2);
 	CHECK(anim::temporal_lod_tier(t, 300.0f) == 6);
-	// Hostile or odd numbers never freeze a soldier by accident.
+
 	CHECK(anim::temporal_lod_interval(t, std::numeric_limits<float>::quiet_NaN()) == 0.0f);
 	CHECK(anim::temporal_lod_interval(t, -5.0f) == 0.0f);
 	t.far_policy = anim::FarPolicy::LastTier;
@@ -117,27 +112,27 @@ TEST_CASE("s3 contract: default clip and asset names are the verified ones") {
 TEST_CASE("s3 contract: the fixed stage frames all 64 soldiers at 16:9") {
 	const anim::CrowdStageSpec spec;
 	const anim::StageCamera cam = anim::stage_camera(spec);
-	// Camera 9.5 m behind the front row, 3 m up, on the grid's centre line (heading +X).
+
 	CHECK(cam.position.x == doctest::Approx(spec.origin.x - 9.5f).epsilon(1e-5));
 	CHECK(cam.position.y == doctest::Approx(spec.origin.y + 3.0f).epsilon(1e-5));
 	CHECK(cam.position.z == doctest::Approx(spec.origin.z).epsilon(1e-5));
 	const float margin = anim::stage_frustum_margin(spec, cam, 16.0f / 9.0f);
 	MESSAGE("stage frustum margin at 16:9: " << margin);
 	CHECK(margin >= anim::s3_gate::kMinFrustumMargin);
-	// The revision-1 framing (3 m behind, 1.7 m up, Godot's default 75 deg) left soldiers outside: kept as a guard.
+
 	anim::CrowdStageSpec old = spec;
 	old.camera_back = 3.0f;
 	old.camera_up = 1.7f;
 	old.camera_fov_deg = 75.0f;
 	CHECK(anim::stage_frustum_margin(old, anim::stage_camera(old), 16.0f / 9.0f) < 0.0f);
-	// Grid corners: columns +-7 m across the heading, rows 0..14 m along it.
+
 	const anim::Vec3 c0 = anim::stage_cell(spec, 0);
 	const anim::Vec3 c63 = anim::stage_cell(spec, 63);
 	CHECK(std::fabs(c0.z - spec.origin.z) == doctest::Approx(7.0f).epsilon(1e-4));
 	CHECK(c0.x == doctest::Approx(spec.origin.x).epsilon(1e-4));
 	CHECK(c63.x == doctest::Approx(spec.origin.x + 14.0f).epsilon(1e-4));
 	CHECK(std::fabs(c63.z - spec.origin.z) == doctest::Approx(7.0f).epsilon(1e-4));
-	// Degenerate cameras never report "in view".
+
 	anim::StageCamera bad = cam;
 	bad.target = bad.position;
 	CHECK(anim::stage_frustum_margin(spec, bad, 16.0f / 9.0f) < 0.0f);
@@ -148,5 +143,5 @@ TEST_CASE("s3 contract: the R3 row distances cover every temporal LOD tier once"
 	for (size_t r = 0; r < anim::kLodRowDistance.size(); ++r) {
 		CHECK(anim::temporal_lod_tier(t, anim::kLodRowDistance[r]) == int(r) - 1);
 	}
-	CHECK(anim::temporal_lod_interval(t, anim::kLodRowDistance[7]) < 0.0f); // beyond far: FarPolicy::Freeze
+	CHECK(anim::temporal_lod_interval(t, anim::kLodRowDistance[7]) < 0.0f);
 }

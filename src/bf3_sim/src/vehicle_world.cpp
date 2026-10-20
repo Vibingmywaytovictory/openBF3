@@ -1,7 +1,3 @@
-// VehicleWorld: one owner's Jolt world with driven vehicles over the shared static world (docs/design/s2.md §6;
-// vehicle_world.h). The static bodies are created exactly as CollisionWorld::create does (collision_world.cpp), the
-// vehicles are JPH::VehicleConstraint + WheeledVehicleController built from a VehicleModel in a fixed order, and
-// every save / restore goes through Jolt's own state streams (s2.md §6.4).
 #include "vehicle_world_internal.h"
 
 #include "jolt_runtime.h"
@@ -41,15 +37,11 @@ public:
 #endif
 };
 
-// Static layers never look for pairs; a vehicle sees both broadphase layers (the static tree for the Collision layer,
-// the moving tree for other vehicles); the query layer sees everything.
 class VehicleObjectVsBroadPhase final : public JPH::ObjectVsBroadPhaseLayerFilter {
 public:
 	bool ShouldCollide(JPH::ObjectLayer p_layer, JPH::BroadPhaseLayer) const override { return p_layer >= kStaticLayerCount && p_layer < kObjectLayers; }
 };
 
-// A vehicle collides with StaticLayer::Collision and other vehicles only (not the Raycast shells or the
-// character-only geometry, static_world.h); the query layer as in CollisionWorld.
 class VehicleObjectPairs final : public JPH::ObjectLayerPairFilter {
 public:
 	bool ShouldCollide(JPH::ObjectLayer p_a, JPH::ObjectLayer p_b) const override {
@@ -61,8 +53,6 @@ public:
 	}
 };
 
-// Chassis contacts (s2.md §6.1): against a static body the dynamic body's own friction (the chassis' RigidBodyData
-// 0.5), so the statics can keep CollisionWorld's settings; between two dynamic bodies Jolt's geometric mean.
 float combine_contact_friction(const JPH::Body &p_body1, const JPH::SubShapeID &, const JPH::Body &p_body2, const JPH::SubShapeID &) {
 	if (p_body1.IsStatic()) {
 		return p_body2.GetFriction();
@@ -95,24 +85,19 @@ bool finite_array(const std::array<float, N> &p_values) {
 	return finite_floats(p_values.data(), N);
 }
 
-// ---- Jolt stream layouts (single precision; s2.md §6.4) ----------------------------------------------------------
-// Body (PhysicsSystem::SaveBodyState): active 1, position 12, rotation 16, linear 12, angular 12, force 12, torque 12,
-// sleep spheres 48, sleep timer 4, allow sleeping 1.
 namespace body_at {
 constexpr size_t kActive = 0, kPosition = 1, kRotation = 13, kLinear = 29, kAngular = 41, kForce = 53, kTorque = 65, kSpheres = 77, kTimer = 125,
 				 kAllowSleeping = 129;
-} // namespace body_at
+}
 static_assert(body_at::kAllowSleeping + 1 == kJoltBodyStreamBytes);
-// VehicleConstraint: mEnabled 1; controller 44 (forward, right, brake, hand brake, previous dt, rpm, gear, clutch,
-// three gearbox timers); per wheel 68 (angular velocity, angle, contact body, contact position, normal, lateral,
-// suspension length, four lambdas); tail: pitch-roll axis 12, lambda 4, mCurrentStep 4.
+
 namespace constraint_at {
 constexpr size_t kEnabled = 0, kController = 1, kWheels = 45, kWheelBytes = 68;
 constexpr size_t kForward = 0, kRight = 4, kBrake = 8, kHandBrake = 12, kPreviousDt = 16, kRpm = 20, kGear = 24, kClutch = 28, kSwitch = 32, kRelease = 36,
-				 kLatency = 40; // within the controller
+				 kLatency = 40;
 constexpr size_t kSpin = 0, kAngle = 4, kContactBody = 8, kContactPosition = 12, kContactNormal = 24, kContactLateral = 36, kSuspension = 48,
-				 kLambdaSuspension = 52, kLambdaMaxUp = 56, kLambdaLongitudinal = 60, kLambdaLateral = 64; // within a wheel
-} // namespace constraint_at
+				 kLambdaSuspension = 52, kLambdaMaxUp = 56, kLambdaLongitudinal = 60, kLambdaLateral = 64;
+}
 static_assert(constraint_at::kWheels + constraint_at::kWheelBytes * 4 + 20 == jolt_vehicle_constraint_stream_bytes(4));
 
 template <typename T>
@@ -135,14 +120,11 @@ void get_bytes(const std::vector<uint8_t> &p_bytes, size_t p_at, void *r_data, s
 	std::memcpy(r_data, p_bytes.data() + p_at, p_size);
 }
 
-// The tuning keys that belong to the world, not the vehicle (vehicle_world.h VehicleWorldOptions::tuning).
 bool same_world_keys(const VehicleTuning &p_a, const VehicleTuning &p_b) {
 	return std::memcmp(&p_a.gravity, &p_b.gravity, sizeof(float)) == 0 && std::memcmp(&p_a.ground_friction, &p_b.ground_friction, sizeof(float)) == 0 &&
 			p_a.collision_steps == p_b.collision_steps && p_a.velocity_steps == p_b.velocity_steps && p_a.position_steps == p_b.position_steps;
 }
 
-// The input filter of s2.md §5.4 step 2: towards p_target at 1 / p_in per second while |target| grows in the same
-// sign, else 1 / p_out; a duration of 0 is no filter.
 float filter_axis(float p_current, float p_target, float p_in, float p_out) {
 	const bool growing = (p_target > 0.0f && p_current >= 0.0f && p_target > p_current) || (p_target < 0.0f && p_current <= 0.0f && p_target < p_current);
 	const float duration = growing ? p_in : p_out;
@@ -191,9 +173,7 @@ JPH::EStateRecorderState jolt_section(VehicleSnapshotSection p_section) {
 	return JPH::EStateRecorderState::None;
 }
 
-} // namespace
-
-// ---- helpers of the internal header ------------------------------------------------------------------------------
+}
 
 void ByteStateRecorder::WriteBytes(const void *p_data, size_t p_size) {
 	if (out_ == nullptr) {
@@ -272,12 +252,12 @@ void VehicleWorld::Impl::drive(VehicleSlot p_slot, const VehicleCommand &p_comma
 	Vehicle &v = vehicles[p_slot];
 	const VehicleModel &m = *v.model;
 	VehicleDriverState &d = v.driver;
-	// 1. inputs (-128 is never produced; read as -127)
+
 	const float t = float(std::max<int>(p_command.throttle, -127)) / 127.0f;
 	const float b = float(p_command.brake) / 255.0f;
 	const float s = float(std::max<int>(p_command.steer, -127)) / 127.0f;
 	const bool hand_brake = (p_command.buttons & vehicle_buttons::kHandbrake) != 0;
-	// 2. input filters
+
 	d.steer_filter = filter_axis(d.steer_filter, s, m.yaw_inertia_in, m.yaw_inertia_out);
 	d.throttle_filter = filter_axis(d.throttle_filter, t, m.throttle_inertia_in, m.throttle_inertia_out);
 	d.brake_filter = filter_axis(d.brake_filter, b, m.brake_inertia_in, m.brake_inertia_out);
@@ -286,7 +266,7 @@ void VehicleWorld::Impl::drive(VehicleSlot p_slot, const VehicleCommand &p_comma
 	const JPH::Vec3 forward_axis = bi.GetRotation(v.body) * JPH::Vec3::sAxisZ();
 	const float forward_speed = velocity.Dot(forward_axis);
 	const float speed = velocity.Length();
-	// 4. reverse: a throttle against the motion brakes; below reverse_switch_speed a negative throttle reverses
+
 	float forward = d.throttle_filter;
 	float brake = d.brake_filter;
 	if (forward < 0.0f && !m.allow_negative_throttle) {
@@ -308,7 +288,7 @@ void VehicleWorld::Impl::drive(VehicleSlot p_slot, const VehicleCommand &p_comma
 			forward = 0.0f;
 		}
 	}
-	// 5. stand-still brake: the timer saturates at the limit, so the state stays within the ghost's 10 bits
+
 	if (m.stand_still_brake && m.stand_still_ticks > 0) {
 		if (p_command.throttle == 0 && speed < m.stand_still_speed) {
 			if (d.stand_still_ticks < m.stand_still_ticks) {
@@ -321,22 +301,20 @@ void VehicleWorld::Impl::drive(VehicleSlot p_slot, const VehicleCommand &p_comma
 			brake = 1.0f;
 		}
 	}
-	// 3. steering: Jolt's right input = steer filter x the speed falloff (no sign flip, s2.md §5.4)
+
 	const float lock = vehicle_max_steer_angle(m, 0.0f);
 	const float falloff = lock > 0.0f ? vehicle_max_steer_angle(m, forward_speed) / lock : 0.0f;
 	const float right = d.steer_filter * falloff;
-	// 6. the wake rule reads the command, not the derived inputs
+
 	if (p_command.throttle != 0 || p_command.brake != 0 || p_command.steer != 0 || hand_brake) {
 		bi.ActivateBody(v.body);
 	}
-	// 7. inputs, then the drag (never wakes a sleeping body)
+
 	static_cast<JPH::WheeledVehicleController *>(v.constraint->GetController())->SetDriverInput(forward, right, brake, hand_brake ? 1.0f : 0.0f);
 	if (m.drag_coefficient > 0.0f && speed > 0.0f) {
 		bi.AddForce(v.body, velocity * (-m.drag_coefficient * speed), JPH::EActivation::DontActivate);
 	}
 }
-
-// ---- VehicleWorld --------------------------------------------------------------------------------------------------
 
 const char *vehicle_snapshot_section_name(VehicleSnapshotSection p_section) {
 	switch (p_section) {
@@ -391,7 +369,7 @@ core::Result<std::unique_ptr<VehicleWorld>> VehicleWorld::create(std::shared_ptr
 	if (p_options.temp_allocator_bytes < (64u << 10) || p_options.max_body_pairs < 64 || p_options.max_contact_constraints < 64) {
 		return core::make_error("vehicle world: allocator or pair limits too small");
 	}
-	const std::vector<StaticBodySpec> specs = static_body_specs(p_shapes->impl()); // TC: tiles, then terrain bodies
+	const std::vector<StaticBodySpec> specs = static_body_specs(p_shapes->impl());
 	const size_t static_bodies = specs.size();
 	const uint64_t max_bodies = uint64_t(static_bodies) + p_options.max_vehicles;
 	if (max_bodies > (1u << 22)) {
@@ -424,10 +402,6 @@ core::Result<std::unique_ptr<VehicleWorld>> VehicleWorld::create(std::shared_ptr
 	w.system->SetCombineFriction(combine_contact_friction);
 	w.system->SetContactListener(w.listener.get());
 
-	// The static bodies exactly as CollisionWorld::create makes them (collision_world.cpp, static_body_specs): one per
-	// present (tile, layer) in tile then layer order, user data tile * 4 + layer, then (TC) per terrain its field and
-	// patch, user data terrain * 4 + 3; default friction and restitution, added in one batch without activation, then
-	// OptimizeBroadPhase.
 	JPH::BodyInterface &bi = w.system->GetBodyInterfaceNoLock();
 	w.statics.reserve(static_bodies);
 	for (const StaticBodySpec &spec : specs) {
@@ -484,8 +458,6 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	}
 	const JPH::Quat rotation = JPH::Quat(p_placement.rotation[0], p_placement.rotation[1], p_placement.rotation[2], p_placement.rotation[3]).Normalized();
 
-	// Chassis shape: one convex hull per Havok piece (points as given, the piece's convex radius), compounded, with
-	// the centre of mass moved to VehicleConfigData.CenterOfMass.
 	JPH::Array<JPH::RefConst<JPH::Shape>> hulls;
 	for (size_t i = 0; i < m.chassis.size(); ++i) {
 		JPH::Array<JPH::Vec3> points;
@@ -519,8 +491,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	if (chassis.HasError()) {
 		return core::make_error(where + ": chassis centre of mass: " + std::string(chassis.GetError().c_str()));
 	}
-	// Mass properties: the shape's inertia scaled to the mass, then I' = S I S with S = diag(sqrt(InertiaModifier))
-	// (the modifier multiplies the diagonal when the tensor is diagonal in the body axes) [inferred, s2.md §5.1].
+
 	JPH::MassProperties mass = chassis.Get()->GetMassProperties();
 	mass.ScaleToMass(m.mass);
 	const JPH::Mat44 scale = JPH::Mat44::sScale(
@@ -541,7 +512,6 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		return core::make_error(where + ": Jolt refused the chassis body");
 	}
 
-	// The constraint: wheels in model order, the controller, the anti-roll bars.
 	JPH::VehicleConstraintSettings vehicle;
 	vehicle.mUp = JPH::Vec3::sAxisY();
 	vehicle.mForward = JPH::Vec3::sAxisZ();
@@ -632,7 +602,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 			break;
 	}
 	v.constraint->SetVehicleCollisionTester(v.tester);
-	// Wheel friction (s2.md §6.1): tyre x ground_friction against a static body, Jolt's sqrt(tyre x body) otherwise.
+
 	const float ground = w.options.tuning.ground_friction;
 	v.constraint->SetCombineFriction([ground](JPH::uint, float &r_longitudinal, float &r_lateral, const JPH::Body &p_body, const JPH::SubShapeID &) {
 		if (p_body.IsStatic()) {
@@ -652,10 +622,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	v.body = created->GetID();
 	v.driver = VehicleDriverState();
 	w.contacts[p_slot] = VehicleContacts();
-	// Jolt's Wheel constructor leaves mContactPosition / mContactNormal / mContactLateral uninitialised (Wheel.h:125-130)
-	// and VehicleConstraint::SaveState writes them, so two fresh worlds would save different bytes until the first
-	// collision test overwrites them. Zero them through the same stream patch as restore_vehicle_state: equal inputs,
-	// equal bytes from the moment the vehicle exists.
+
 	VehicleState clean = state(p_slot);
 	for (size_t i = 0; i < clean.wheel_count; ++i) {
 		clean.wheels[i].contact_body = kNoContactBody;
@@ -691,7 +658,7 @@ core::Status VehicleWorld::step(std::span<const VehicleSlot> p_slots, std::span<
 	for (VehicleContacts &c : w.contacts) {
 		c = VehicleContacts();
 	}
-	// The driver pass, slot order (s2.md §5.4), then one Jolt update.
+
 	for (VehicleSlot s = 0; s < w.vehicles.size(); ++s) {
 		if (w.vehicles[s].used) {
 			w.drive(s, commands[s]);
@@ -734,7 +701,7 @@ VehicleState VehicleWorld::state(VehicleSlot p_slot) const {
 	w.save_constraint_stream(p_slot, constraint);
 	const size_t wheels = v.constraint->GetWheels().size();
 	if (body.size() != kJoltBodyStreamBytes || constraint.size() != jolt_vehicle_constraint_stream_bytes(wheels) || wheels > kMaxVehicleWheels) {
-		return out; // cannot happen with this Jolt build (sim.vehicle.unit checks the sizes)
+		return out;
 	}
 	VehicleBodyState &b = out.body;
 	b.active = get<uint8_t>(body, body_at::kActive) != 0 ? 1 : 0;
@@ -827,8 +794,7 @@ core::Status VehicleWorld::restore(const VehicleWorldSnapshot &p_snapshot) {
 		return core::make_error("vehicle world restore: the snapshot has " + std::to_string(p_snapshot.drivers.size()) + " vehicles, the world " +
 				std::to_string(slots.size()));
 	}
-	// The stream head: state All, global (previous dt 4, gravity 12), then the body count and every body's ID in
-	// index order (BodyManager::SaveState), 4 + 1 + 129 bytes each: they must be this world's vehicles.
+
 	const std::vector<uint8_t> &j = p_snapshot.jolt;
 	constexpr size_t kHead = 1 + 4 + 12;
 	constexpr size_t kBodyRecord = 4 + kJoltBodyStreamBytes;
@@ -849,7 +815,7 @@ core::Status VehicleWorld::restore(const VehicleWorldSnapshot &p_snapshot) {
 					"'s vehicle (the slot lists differ)");
 		}
 	}
-	// Jolt's non-validating restore applies the bodies before a later part can fail: keep a backup to put back.
+
 	std::vector<uint8_t> backup;
 	{
 		ByteStateRecorder out(backup);
@@ -884,7 +850,7 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 	if ((p_groups & ~g::kAll) != 0) {
 		return core::make_error(where + ": unknown restore groups");
 	}
-	// ---- checks before any write (a decoded network ghost must never put a NaN into Jolt)
+
 	const VehicleBodyState &b = p_state.body;
 	if ((p_groups & g::kBody) != 0) {
 		if (!finite_array(b.com_position) || !finite_array(b.rotation) || !finite_array(b.linear_velocity) || !finite_array(b.angular_velocity) || b.active > 1) {
@@ -965,7 +931,6 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 		return core::make_error(where + ": non-finite driver state");
 	}
 
-	// ---- the vehicle's own streams, patched with the selected groups, read back through Jolt
 	std::vector<uint8_t> body;
 	w.save_body_stream(p_slot, body);
 	std::vector<uint8_t> constraint;
@@ -1062,12 +1027,8 @@ uint64_t VehicleWorld::state_hash() const {
 	return s.hash;
 }
 
-// ---- synthetic ground --------------------------------------------------------------------------------------------
-
 namespace {
 
-// A quad (p0, p1, p2, p3) as two triangles whose front face is (p1 - p0) x (p2 - p0) (Jolt's simulation ignores back
-// faces, PhysicsSystem.cpp:1795).
 void add_quad(std::vector<StaticTriangle> &r_out, const Vec3 &p_0, const Vec3 &p_1, const Vec3 &p_2, const Vec3 &p_3) {
 	StaticTriangle a;
 	a.v = { p_0, p_1, p_2 };
@@ -1077,18 +1038,15 @@ void add_quad(std::vector<StaticTriangle> &r_out, const Vec3 &p_0, const Vec3 &p
 	r_out.push_back(b);
 }
 
-// An axis-aligned box's top and four sides (no bottom), faces outwards.
 void add_box(std::vector<StaticTriangle> &r_out, const Vec3 &p_min, const Vec3 &p_max) {
 	const float x0 = p_min[0], y0 = p_min[1], z0 = p_min[2], x1 = p_max[0], y1 = p_max[1], z1 = p_max[2];
-	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 }); // top (+Y)
-	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 }); // -Z
-	add_quad(r_out, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, { x0, y0, z1 }); // +Z
-	add_quad(r_out, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, { x0, y0, z0 }); // -X
-	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 }); // +X
+	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 });
+	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 });
+	add_quad(r_out, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, { x0, y0, z1 });
+	add_quad(r_out, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, { x0, y0, z0 });
+	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 });
 }
 
-// A ridge across x in [p_x0, p_x1] along z: up from (p_z0, p_y) to the crest (p_z1 .. p_z2, p_y + p_h), down to
-// (p_z3, p_y); faces up.
 void add_ridge(std::vector<StaticTriangle> &r_out, float p_x0, float p_x1, float p_z0, float p_z1, float p_z2, float p_z3, float p_y, float p_h) {
 	const float top = p_y + p_h;
 	add_quad(r_out, { p_x0, p_y, p_z0 }, { p_x0, top, p_z1 }, { p_x1, top, p_z1 }, { p_x1, p_y, p_z0 });
@@ -1098,7 +1056,7 @@ void add_ridge(std::vector<StaticTriangle> &r_out, float p_x0, float p_x1, float
 	add_quad(r_out, { p_x0, top, p_z2 }, { p_x0, p_y, p_z3 }, { p_x1, p_y, p_z3 }, { p_x1, top, p_z2 });
 }
 
-} // namespace
+}
 
 core::Result<std::shared_ptr<const StaticWorldShapes>> build_synthetic_vehicle_ground(const SyntheticVehicleGround &p_ground) {
 	if (!std::isfinite(p_ground.half_size) || !std::isfinite(p_ground.y) || p_ground.half_size < 64.0f || p_ground.half_size > 8192.0f) {
@@ -1115,9 +1073,9 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_synthetic_vehicle_g
 	}
 	if (p_ground.features && h >= 450.0f) {
 		namespace sg = synthetic_ground;
-		// the wall of the collision course
+
 		add_box(t, { sg::kWallX0, y, sg::kWallZ }, { sg::kWallX1, y + sg::kWallHeight, sg::kWallZ + sg::kWallThickness });
-		// the bumps: a row of 0.15 m ridges, then a 0.6 m crest (the kicker), across the bump line
+
 		for (size_t i = 0; i < sg::kBumpCount; ++i) {
 			const float z0 = sg::kBumpZ0 + float(i) * sg::kBumpSpacing;
 			add_ridge(t, sg::kBumpLineX - sg::kBumpHalfWidth, sg::kBumpLineX + sg::kBumpHalfWidth, z0, z0 + 0.5f * sg::kBumpLength, z0 + 0.5f * sg::kBumpLength,
@@ -1125,7 +1083,7 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_synthetic_vehicle_g
 		}
 		add_ridge(t, sg::kBumpLineX - sg::kBumpHalfWidth, sg::kBumpLineX + sg::kBumpHalfWidth, sg::kKickerZ0, sg::kKickerZ0 + sg::kKickerRamp,
 				sg::kKickerZ0 + sg::kKickerRamp + sg::kKickerTop, sg::kKickerZ0 + 2.0f * sg::kKickerRamp + sg::kKickerTop, y, sg::kKickerHeight);
-		// the 12 degree slope rising along +x
+
 		const float rise = (sg::kSlopeX1 - sg::kSlopeX0) * sg::kSlopeTan;
 		add_quad(t, { sg::kSlopeX0, y, sg::kSlopeZ0 }, { sg::kSlopeX0, y, sg::kSlopeZ1 }, { sg::kSlopeX1, y + rise, sg::kSlopeZ1 },
 				{ sg::kSlopeX1, y + rise, sg::kSlopeZ0 });
@@ -1133,4 +1091,4 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_synthetic_vehicle_g
 	return build_static_world(std::span<const StaticTriangle>(t));
 }
 
-} // namespace bf3::sim
+}

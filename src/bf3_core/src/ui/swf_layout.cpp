@@ -1,4 +1,3 @@
-// HUD layout facts from the movies' timelines (bf3/core/ui/swf_layout.h; docs/design/ui-swf-fonts.md §8, §9).
 #include "bf3/core/ui/swf_layout.h"
 
 #include <algorithm>
@@ -79,7 +78,6 @@ public:
 		return Status::success();
 	}
 
-	// Fills r_node (instance, depth, matrices already set) for character p_id of p_movie.
 	Status node(const std::shared_ptr<const SwfMovie> &p_movie, const std::string &p_name, uint16_t p_id, uint32_t p_depth, SwfLayoutNode &r_node) {
 		if (++nodes_ > kSwfLayoutMaxNodes) {
 			return make_error("swf layout: more than " + std::to_string(kSwfLayoutMaxNodes) + " nodes");
@@ -141,13 +139,13 @@ public:
 			}
 			Result<std::shared_ptr<const SwfMovie>> other = movies_.load(target);
 			if (!other) {
-				return Status::success(); // a movie that does not parse stays an Import node
+				return Status::success();
 			}
 			const std::optional<uint16_t> id = (*other)->export_id(sym->name);
 			if (!id) {
 				return Status::success();
 			}
-			--nodes_; // the followed definition replaces this node
+			--nodes_;
 			return node(*other, target, *id, p_depth + 1, r_node);
 		}
 		r_node.kind = SwfLayoutKind::Other;
@@ -161,7 +159,7 @@ private:
 	size_t nodes_ = 0;
 };
 
-} // namespace
+}
 
 const char *hud_anchor_name(HudAnchor p_anchor) {
 	switch (p_anchor) {
@@ -221,7 +219,7 @@ Result<std::vector<HudPlacement>> read_hud_placements(const SwfLibrary &p_movies
 	const uint32_t frame = 0;
 	std::vector<std::vector<SwfDisplayEntry>> lists;
 	BF3_TRY(display_lists_at(m.root, std::span<const uint32_t>(&frame, 1), r_budget, lists));
-	// The screen sprite: the root's "instance1", else its first sprite.
+
 	const SwfDisplayEntry *screen = nullptr;
 	for (const SwfDisplayEntry &e : lists[0]) {
 		if (m.find_sprite(e.character) != nullptr && (screen == nullptr || e.name == "instance1")) {
@@ -265,4 +263,4 @@ Result<std::vector<HudPlacement>> read_hud_placements(const SwfLibrary &p_movies
 	return out;
 }
 
-} // namespace bf3::core::ui
+}

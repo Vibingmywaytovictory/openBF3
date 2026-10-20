@@ -1,4 +1,3 @@
-// The M2a minimal HUD check (hud_check.h; docs/design/m2a-hud.md §5): E10 per frame of a scripted model.
 #include "hud_check.h"
 
 #include "bf3_localisation.h"
@@ -50,10 +49,10 @@ std::string fmt(const char *p_fmt, ...) {
 
 struct KitItem {
 	const char *variant;
-	const char *name; // the localised name (verified 2026-10-16, ui.hud.feed.install)
+	const char *name;
 	const char *label;
 };
-// The M2a loadouts' 12 kit items (docs/design/m2a.md §5; the same list as ui.hud.feed.install).
+
 constexpr KitItem kKitItems[] = {
 	{ "weapons/m16a4/u_m16a4", "M16A3", "m16a3" },
 	{ "weapons/m4a1/u_m4a1", "M4A1", "m4a1" },
@@ -76,18 +75,17 @@ struct Resolution {
 };
 constexpr Resolution kResolutions[] = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1440 } };
 constexpr size_t kResolutionCount = std::size(kResolutions);
-constexpr size_t kItemShotResolution = 1; // 1920 x 1080
+constexpr size_t kItemShotResolution = 1;
 
-constexpr double kModelHz = 64.0; // the script's model clock (0.3 s = 19.2 frames: no boundary ties)
+constexpr double kModelHz = 64.0;
 constexpr int kItemFrames = 96;
-constexpr int kSettleFrames = 4; // after a resize
-constexpr int kHoldFrames = 2; // a shot frame's state is held this long before the read-back
-constexpr double kGapTolerancePx = 0.5; // E10
-constexpr double kEdgeTolerancePx = 1.0; // the pixel check of the crosshair's inner edge
-constexpr float kAmmoStageX = 1194.0f; // hudmpscreen Ammo_01 (E10)
+constexpr int kSettleFrames = 4;
+constexpr int kHoldFrames = 2;
+constexpr double kGapTolerancePx = 0.5;
+constexpr double kEdgeTolerancePx = 1.0;
+constexpr float kAmmoStageX = 1194.0f;
 const Color kBackground(0.10f, 0.12f, 0.14f, 1.0f);
 
-// Script segments (frame within an item).
 constexpr int kDeployEnd = 8;
 constexpr int kFireEnd = 40;
 constexpr int kAdsEnd = 56;
@@ -108,7 +106,7 @@ bool ink(const Color &p_c) {
 	return std::max({ std::fabs(p_c.r - kBackground.r), std::fabs(p_c.g - kBackground.g), std::fabs(p_c.b - kBackground.b) }) > 0.25f;
 }
 
-} // namespace
+}
 
 struct Bf3HudCheck::Work {
 	std::shared_ptr<const bf3::core::Install> install;
@@ -116,7 +114,7 @@ struct Bf3HudCheck::Work {
 	std::shared_ptr<const sw::WeaponTable> table;
 	host::HudStatic hud_static;
 	double seconds = 0;
-	// The feed's state and the model the script publishes (main thread).
+
 	host::HudFeedState feed;
 	ui::HudModel model{};
 };
@@ -129,8 +127,8 @@ struct Bf3HudCheck::Frame {
 	host::HudFeedInput input;
 	std::vector<host::PresentEvent> events;
 	double vfov = 55.0;
-	uint64_t serial = 0; // the model serial published
-	// Expectations (from the script, not from the model).
+	uint64_t serial = 0;
+
 	int32_t magazine = 0;
 	int32_t reserve = 0;
 	float spread = 0;
@@ -143,7 +141,7 @@ struct Bf3HudCheck::Frame {
 	bool own_hit = false;
 	bool other_hit = false;
 	bool zoomed = false;
-	std::string label; // shot file label; empty = no shot
+	std::string label;
 };
 
 struct Bf3HudCheck::Tally {
@@ -180,7 +178,7 @@ struct Bf3HudCheck::Tally {
 	size_t pixel_bad = 0;
 	double max_edge_err = 0;
 	size_t edge_checks = 0;
-	std::vector<std::string> errors; // the first few
+	std::vector<std::string> errors;
 	void note(const std::string &p_error) {
 		if (errors.size() < 6) {
 			errors.push_back(p_error);
@@ -391,8 +389,7 @@ void Bf3HudCheck::build_script() {
 				fr.zoomed = alive && zoomed;
 				fr.ammo_visible = alive && row.show_ammo;
 				fr.crosshair_visible = alive && !zoomed;
-				// Shown while less than kHitIndicatorSeconds of model time passed since the last own hit: frame counts
-				// of the 1/64 s clock, so the expectation does not reuse fill_hud's arithmetic.
+
 				fr.hit_visible = double(int64_t(n) - last_own_hit) < host::kHitIndicatorSeconds * kModelHz;
 				fr.name_visible = alive;
 				fr.health_visible = alive;
@@ -525,7 +522,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 			break;
 		}
 	}
-	// Ammo.
+
 	bool ammo_ok = a.visible == p_frame.ammo_visible;
 	if (ammo_ok && a.visible) {
 		ammo_ok = a.text_a == std::to_string(p_frame.magazine) && a.text_b == std::to_string(p_frame.reserve);
@@ -537,7 +534,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 		if (a.size_a != std::max(1, int32_t(std::lround(clip.size * clip.scale_y * s))) || a.size_b != std::max(1, int32_t(std::lround(res.size * res.scale_y * s)))) {
 			++t.ammo_size_bad;
 		}
-		// The clip's right end back in stage pixels (BottomRight anchor): at the Ammo_01 slot's x.
+
 		const double stage_x = 1280.0 + (double(a.at_a.x) - double(w)) / double(s);
 		t.ammo_stage_x_min = std::min(t.ammo_stage_x_min, stage_x);
 		t.ammo_stage_x_max = std::max(t.ammo_stage_x_max, stage_x);
@@ -550,7 +547,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 		t.note(where + "ammo drew '" + a.text_a + " / " + a.text_b + (a.visible ? "'" : "' hidden") + fmt(", want %d / %d", p_frame.magazine, p_frame.reserve) +
 				(p_frame.ammo_visible ? "" : " hidden"));
 	}
-	// Crosshair.
+
 	bool cross_ok = c.visible == p_frame.crosshair_visible;
 	if (p_frame.zoomed) {
 		++t.ads_frames;
@@ -570,7 +567,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 		t.note(where + fmt("crosshair %s gap %.3f (want %s, spread %.3f vfov %.1f)", c.visible ? "shown" : "hidden", c.gap_px, p_frame.crosshair_visible ? "shown" : "hidden",
 							   p_frame.spread, p_frame.vfov));
 	}
-	// Hit indicator.
+
 	if (hi.visible != p_frame.hit_visible) {
 		++t.hit_bad;
 		t.note(where + std::string("hit indicator ") + (hi.visible ? "shown" : "hidden") + (p_frame.hit_visible ? ", want shown" : ", want hidden"));
@@ -590,7 +587,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 		}
 	}
 	t.other_hits += p_frame.other_hit ? 1 : 0;
-	// Weapon name and icon.
+
 	if (p_frame.name_visible) {
 		t.names_seen.insert(p_frame.item);
 		const bool name_ok = nm.visible && nm.text_a == kKitItems[p_frame.item].name;
@@ -611,7 +608,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 		++t.name_bad;
 		t.note(where + "name shown while dead");
 	}
-	// Health.
+
 	const bool health_ok = he.visible == p_frame.health_visible && (!he.visible || he.text_a == std::to_string(std::lround(p_frame.health)));
 	if (!health_ok) {
 		++t.health_bad;
@@ -640,7 +637,7 @@ void Bf3HudCheck::check_shot(const Frame &p_frame) {
 	const HudDrawRecord &nm = hud_->name_widget()->record();
 	const int row = int(std::floor(cy));
 	const int reach = int(std::ceil(160.0f * s));
-	// Crosshair: the right tick's first lit pixel on the centre row.
+
 	if (p_frame.crosshair_visible && c.visible && work_->hud_static.rows[p_frame.item].crosshair != host::HudCrosshairKind::Knife) {
 		++t.pixel_checks;
 		int first = -1;
@@ -650,7 +647,7 @@ void Bf3HudCheck::check_shot(const Frame &p_frame) {
 				break;
 			}
 		}
-		// Pixel x is covered when its centre x + 0.5 lies inside the tick (cx + gap ..).
+
 		const double edge = first < 0 ? 1e9 : double(first) + 0.5 - (double(cx) + c.gap_px);
 		const double err = std::fabs(edge) <= 0.5 ? 0.0 : std::fabs(edge) - 0.5;
 		++t.edge_checks;
@@ -672,7 +669,7 @@ void Bf3HudCheck::check_shot(const Frame &p_frame) {
 			t.note(p_frame.label + fmt(": %zu crosshair pixels in ADS", lit));
 		}
 	}
-	// Hit indicator: ink in the four diagonal squares around the centre (the crosshair ticks are on the axes).
+
 	{
 		++t.pixel_checks;
 		size_t inked = 0;
@@ -695,7 +692,7 @@ void Bf3HudCheck::check_shot(const Frame &p_frame) {
 			t.note(p_frame.label + fmt(": %zu hit indicator pixels, want %s", inked, p_frame.hit_visible ? "some" : "none"));
 		}
 	}
-	// Ammo digits: ink left of the clip's right end, above its baseline.
+
 	if (p_frame.ammo_visible && a.visible) {
 		++t.pixel_checks;
 		size_t inked = 0;
@@ -798,4 +795,4 @@ void Bf3HudCheck::finish() {
 	get_tree()->quit(exit_code_);
 }
 
-} // namespace bf3::godot_side
+}

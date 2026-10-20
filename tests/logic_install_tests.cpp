@@ -1,12 +1,3 @@
-// S4 level logic on the retail install (read-only; docs/design/s4.md §1, §12). Every suite exits 77 (skipped)
-// without an install.
-//   logic-metro   (logic.metro)   G1 instantiate, G2 rush spawners, G3 park, G4 determinism (2 in-process runs plus
-//                                 `bf3dump logic trace` in a child process), info rows, install.unchanged;
-//   logic-types   (logic.types)   G5: 0 unknown / unimplemented connected types on the 14 MP_Subway and MP_007 rows;
-//   logic-caspian (logic.caspian) G6: Caspian ConquestLarge0 spawner and vehicle Enabled timeline;
-//   logic-perf    (logic.perf)    G7: interpreter cost per tick (wall clock, noisy on a shared machine);
-//   logic-census  (logic.census)  I1: the census TSV over every level x mode (info).
-// The gates' judges live in bf3_sim (logic_harness.h) so `bf3dump logic run|trace|census` prints the same verdicts.
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/logic_graph.h"
@@ -47,7 +38,6 @@ struct Mounted {
 	InstallSnapshot before;
 };
 
-// One install for the whole process; the snapshot is taken before anything is read.
 Mounted *mounted() {
 	static Mounted m;
 	static bool tried = false;
@@ -67,7 +57,6 @@ Mounted *mounted() {
 	return &m;
 }
 
-// Lanes of the census and logic.types loops: about 160 MiB per (level, mode) row in flight.
 constexpr unsigned kCensusLanes = 6;
 
 struct Built {
@@ -94,7 +83,6 @@ Built build(Mounted &p_m, const std::string &p_level, const std::string &p_mode,
 	return b;
 }
 
-// The Metro graph and the G2 run, shared by the logic-metro cases.
 struct Metro {
 	Built built;
 	LogicRunReport rush;
@@ -140,7 +128,7 @@ std::optional<std::string> line_value(const std::string &p_text, const std::stri
 	return std::nullopt;
 }
 
-} // namespace
+}
 
 TEST_SUITE("logic-metro") {
 	TEST_CASE("logic.metro G1: MP_Subway RushLarge0 instantiates its full graph headless") {
@@ -168,7 +156,6 @@ TEST_SUITE("logic-metro") {
 		CHECK(st.dropped_unbound_events == 0);
 		CHECK(st.work <= 1000000);
 
-		// Independent counts over a LogicWorld built here.
 		LogicWorldOptions wo;
 		wo.mode = "RushLarge0";
 		wo.expand_root_objects = true;
@@ -182,7 +169,6 @@ TEST_SUITE("logic-metro") {
 		CHECK(world->objects().size() == 7299);
 		CHECK(synced == 145);
 
-		// Params of every node of the 10 most frequent types equal LogicWorld::effective (scalar fields).
 		std::map<LogicTypeId, size_t> per_type;
 		for (const LogicNode &n : g.nodes()) {
 			if (!logic_param_fields(n.type).empty()) {
@@ -207,7 +193,7 @@ TEST_SUITE("logic-metro") {
 			}
 			const auto it = node_by_key.find(std::make_pair(o.scope, o.entity.guid()));
 			if (it == node_by_key.end()) {
-				continue; // not on the server side
+				continue;
 			}
 			for (const LogicParamField &f : logic_param_fields(type)) {
 				if (f.shape != LogicParamField::Shape::Scalar) {
@@ -237,7 +223,7 @@ TEST_SUITE("logic-metro") {
 		std::printf("G1 params: %zu scalar params compared over the %zu most frequent types, %zu mismatched\n", compared, ranked.size(), mismatched);
 		CHECK(compared > 1000);
 		CHECK(mismatched == 0);
-		// Info: the ghost layout.
+
 		Result<LogicGhostLayout> layout = LogicGhostLayout::of(g);
 		REQUIRE(layout.ok());
 		std::printf("info ghost layout: bools %zu transforms %zu sequences %zu\n", layout->bools.size(), layout->transforms.size(), layout->sequences.size());
@@ -256,7 +242,7 @@ TEST_SUITE("logic-metro") {
 		CHECK_MESSAGE(g2.pass, g2.detail);
 		CHECK_MESSAGE(g3.pass, g3.detail);
 		CHECK_FALSE(m->rush.faulted);
-		// Info: the ghost at the end of the run round-trips; the trace size against the cap.
+
 		Result<LogicGhostLayout> layout = LogicGhostLayout::of(g);
 		REQUIRE(layout.ok());
 		const std::vector<uint8_t> bytes = m->rush.ghost.encode();
@@ -306,7 +292,6 @@ TEST_SUITE("logic-metro") {
 		CHECK(*hash == std::string(expect));
 		CHECK(std::strtoull(records->c_str(), nullptr, 10) == m->rush.trace_records);
 
-		// Info: a different root seed reaches RandomDelay / RandomMultiEvent.
 		LogicScriptOptions seeded = rush_mcoms_script();
 		seeded.runtime.root_seed += 1;
 		seeded.runtime.keep_trace_records = true;
@@ -355,7 +340,7 @@ TEST_SUITE("logic-types") {
 		if (mount == nullptr) {
 			return;
 		}
-		// The 14 (level, mode) graphs are built on lanes over the shared read-only install; printed and checked here in order.
+
 		struct Job {
 			const char *level;
 			std::string mode;
@@ -495,11 +480,10 @@ TEST_SUITE("logic-census") {
 		const auto start = std::chrono::steady_clock::now();
 		std::printf("%s\n", logic_census_header().c_str());
 		size_t expected = 0, listed = 0, ok = 0, unknown_rows = 0;
-		// The (level, mode) list first, then load + build + the census row on lanes over the shared read-only install
-		// (each row is independent); the lines are printed in list order. The build ms column is taken on a lane (info).
+
 		struct Job {
 			std::string level;
-			std::string mode; // empty: the level's info failed (error)
+			std::string mode;
 			std::string error;
 		};
 		std::vector<Job> jobs;

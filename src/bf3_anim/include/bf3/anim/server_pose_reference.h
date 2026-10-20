@@ -1,17 +1,4 @@
 #pragma once
-// E18 (a)'s reference evaluation of the server pose (docs/design/m2a.md E18, §6.5; as built: docs/design/m2a-lc.md;
-// owner lc). Header-only and used only by the checks (ctest anim.server_pose and `bf3dump lagcomp --deviation`); the
-// table builder (server_pose.cpp) does not include it.
-//
-// Per query, with no pitch buckets, no fraction steps, no LOD and no RS skeleton: bf3_anim's sample_pose of the
-// stance idle at frame 0 (or of the transition clip at exactly fraction x its end frame), the root joint's translation
-// back to rest, apply_additive of the stance's AimUp / AimDown delta at the exact weight min(1, |pitch| / full), then
-// model_pose, and the hi-LOD capsules placed from their bones' model transforms in double. The placement rule
-// (server_pose.h: start = bone position + bone rotation x inverse bind rotation applied to the offset, a model-space
-// vector of the bind pose; end = start + length along the signed bone-local BoneAxis, the sign toward the bone's main
-// child; a sphere at length <= 0.01) is written out again here rather than shared, so a slip in either copy shows up
-// as a deviation. The same placement also turns S3's CrowdEvaluator model pose into capsules (the stand
-// rows' independent code path).
 
 #include "bf3/anim/crowd_clips.h"
 #include "bf3/anim/layers.h"
@@ -35,21 +22,20 @@ struct RefCapsule {
 	double a[3]{};
 	double b[3]{};
 	double centre[3]{};
-	size_t list_index = 0; // BoneCollisionData index
+	size_t list_index = 0;
 	int32_t joint = -1;
 };
 
 struct Query {
 	bool transition = false;
-	size_t row = 0; // stance 0..2, or transition 0..5 (core::gameplay::CapsuleTransition order)
+	size_t row = 0;
 	double pitch_deg = 0;
-	double fraction = 0; // transition rows: 0..1 of the clip's own length
+	double fraction = 0;
 };
 
 class Reference {
 public:
-	// p_capsules: the whole BoneCollisionData list (the hi-LOD ones are placed, in list order); p_aim: the full-aim
-	// pitch per stance (the builder's report, checked separately against measure_aim).
+
 	static core::Result<Reference> make(const ServerPoseClips &p_clips, std::span<const core::gameplay::HitCapsule> p_capsules,
 			const std::array<StanceAim, core::gameplay::kCapsuleStances> &p_aim, AdditiveOrder p_order) {
 		Reference r;
@@ -57,8 +43,8 @@ public:
 		r.aim_ = p_aim;
 		r.order_ = p_order;
 		const Skeleton &rig = p_clips.rig;
-		// The bind pose's model rotations, accumulated here in double from the rest (local) rotations.
-		std::vector<std::array<double, 4>> bind(rig.size()); // w, x, y, z
+
+		std::vector<std::array<double, 4>> bind(rig.size());
 		for (size_t j = 0; j < rig.size(); ++j) {
 			const Quat &l = rig.bone(j).rest.q;
 			std::array<double, 4> q{ double(l.w), double(l.x), double(l.y), double(l.z) };
@@ -83,7 +69,7 @@ public:
 			}
 			p.length = double(c.length);
 			const int axis = c.bone_axis >= 0 && c.bone_axis <= 2 ? c.bone_axis : 0;
-			// The main child: the child joint with the longest rest translation; its component on the axis gives the sign.
+
 			double best = -1, sign = 1;
 			for (size_t j = 0; j < rig.size(); ++j) {
 				if (p.joint < 0 || rig.bone(j).parent != p.joint) {
@@ -115,7 +101,7 @@ public:
 					continue;
 				}
 				const CrowdClipData &clip = p_clips.get(role);
-				// The additive delta: the aim clip sampled onto identity at its last frame (S3's rule, crowd_eval.cpp).
+
 				if (core::ant::sample_clip(clip.clip, float(clip.tracks.end_frame), scratch)) {
 					apply_clip_pose(clip.tracks, scratch, d);
 				}
@@ -126,7 +112,6 @@ public:
 
 	size_t capsule_count() const { return placed_.size(); }
 
-	// The capsules of p_query (false: the clip is absent or does not sample).
 	bool evaluate(const Query &p_query, std::vector<RefCapsule> &r_out) const {
 		static constexpr ServerPoseClip kIdle[3] = { ServerPoseClip::StandIdle, ServerPoseClip::CrouchIdle, ServerPoseClip::ProneIdle };
 		static constexpr ServerPoseClip kUp[3] = { ServerPoseClip::StandAimUp, ServerPoseClip::CrouchAimUp, ServerPoseClip::ProneAimUp };
@@ -180,8 +165,6 @@ public:
 		return true;
 	}
 
-	// The capsules placed from a rig model pose (the reference's own pose, or CrowdEvaluator::model). Unmapped
-	// capsules (joint -1) come out at the origin.
 	void place(std::span<const Xform> p_model, std::vector<RefCapsule> &r_out) const {
 		r_out.assign(placed_.size(), RefCapsule());
 		for (size_t c = 0; c < placed_.size(); ++c) {
@@ -217,16 +200,14 @@ private:
 		std::array<double, 3> offset{};
 		std::array<double, 3> dir{};
 		double length = 0;
-		std::array<double, 4> bind_inverse{ 1, 0, 0, 0 }; // w, x, y, z
+		std::array<double, 4> bind_inverse{ 1, 0, 0, 0 };
 	};
 
-	// Hamilton product a * b (w, x, y, z).
 	static std::array<double, 4> mul(const std::array<double, 4> &p_a, const std::array<double, 4> &p_b) {
 		return { p_a[0] * p_b[0] - p_a[1] * p_b[1] - p_a[2] * p_b[2] - p_a[3] * p_b[3], p_a[0] * p_b[1] + p_a[1] * p_b[0] + p_a[2] * p_b[3] - p_a[3] * p_b[2],
 			p_a[0] * p_b[2] - p_a[1] * p_b[3] + p_a[2] * p_b[0] + p_a[3] * p_b[1], p_a[0] * p_b[3] + p_a[1] * p_b[2] - p_a[2] * p_b[1] + p_a[3] * p_b[0] };
 	}
 
-	// v' = q v q* in double (the quaternion normalised first).
 	static void rotate(const Quat &p_q, const std::array<double, 3> &p_v, double (&r_out)[3]) {
 		double w = p_q.w, x = p_q.x, y = p_q.y, z = p_q.z;
 		const double n = std::sqrt(w * w + x * x + y * y + z * z);
@@ -239,7 +220,7 @@ private:
 			w = 1;
 			x = y = z = 0;
 		}
-		// t = 2 (q.xyz x v); v' = v + w t + q.xyz x t
+
 		const double tx = 2 * (y * p_v[2] - z * p_v[1]);
 		const double ty = 2 * (z * p_v[0] - x * p_v[2]);
 		const double tz = 2 * (x * p_v[1] - y * p_v[0]);
@@ -255,4 +236,4 @@ private:
 	std::array<LocalPose, core::gameplay::kCapsuleStances> up_{}, down_{};
 };
 
-} // namespace bf3::anim::server_pose_reference
+}

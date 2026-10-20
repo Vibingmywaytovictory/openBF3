@@ -1,17 +1,3 @@
-// host.gunplay.server (docs/design/m2a.md §1 E1-E6, E17 server side; docs/design/m2a-sv.md; owner sv): the M2a gunplay
-// criteria on the server, headless, through the real ServerHost and ClientSession over ENet loopback on Metro
-// (MP_Subway / TeamDeathMatch0 with SharedLoadOptions::gunplay; tests/gunplay_fixture.h). The server's facts come
-// from the dev Trace (shots, the traced shooter's projectile positions) and from a GunplayObserver (every weapon
-// tick's output with the timed phase events, the projectile steps' impacts, every damage decision). The M1
-// ClientSession carries the weapon buttons (InputSample::held_buttons, 24 wire bits) but sends no view sample, no
-// KitSelect and predicts no weapon: the client halves of the rows (predicted shots, cosmetic flights, the mismatch
-// disconnect, the HUD) are cl's host.gunplay.client. The hostile row and the shot-offset sample of the variants row
-// drive the GameServer directly (network-free, the same code ServerHost runs) because they need commands no
-// ClientSession makes (view_back 65,535, 4x the command rate) or more shooters than one client.
-//
-// Cases (doctest --test-case): timing (E1), drop (E2), stk (E3, E4), reload (E5), variants (E6), hostile (E17),
-// install (E17 install unchanged; last). Wall-clock pacing: the client runs at 60 Hz in real time, so every case
-// takes seconds; nothing here is a timing gate (the hostile row prints tick times, noisy on a shared machine).
 #include <doctest/doctest.h>
 
 #include "gunplay_fixture.h"
@@ -64,7 +50,6 @@ std::string mechanics_cfg_path() {
 	return OPENBF3_MECHANICS_CFG;
 }
 
-// The match table a client builds from the level and a cfg (make_match_table, gunplay.h): the defs the server runs.
 std::shared_ptr<const sw::WeaponTable> local_table(const host::SharedLevel &p_level, const std::string &p_cfg, bool p_exact_aim = false,
 		bool p_infinite = false) {
 	core::Result<sw::Mechanics> m = host::load_mechanics_cfg(p_cfg);
@@ -77,22 +62,18 @@ std::shared_ptr<const sw::WeaponTable> local_table(const host::SharedLevel &p_le
 	return t.ok() ? *t : nullptr;
 }
 
-// ---- a gunplay session ----------------------------------------------------------------------------------------
-
 struct Run {
 	std::unique_ptr<Session> s;
 	std::shared_ptr<GunplayRecorder> rec;
 	uint8_t slot = 0;
 };
 
-// A ServerHost on p_level with p_gunplay (its observer = the run's recorder), one ClientSession, spawned and with the
-// active weapon deployed.
 Run start_run(std::shared_ptr<const host::SharedLevel> p_level, host::GunplayConfig p_gunplay, SessionOptions p_options = {}) {
 	Run r;
 	r.rec = std::make_shared<GunplayRecorder>();
 	p_gunplay.observer = r.rec;
 	if (p_gunplay.mechanics_cfg == std::string(sw::kMechanicsTuningPath)) {
-		p_gunplay.mechanics_cfg = mechanics_cfg_path(); // the tests do not run in the project directory
+		p_gunplay.mechanics_cfg = mechanics_cfg_path();
 	}
 	p_options.configure_server = [p_gunplay](host::GameServerConfig &r_game) { r_game.gunplay = p_gunplay; };
 	if (p_options.client_mechanics_cfg.empty()) {
@@ -120,7 +101,6 @@ void set_buttons(Run &r_run, uint32_t p_buttons) {
 	poll(*r_run.s);
 }
 
-// Holds fire (with p_extra fields) until p_count more shots are recorded or p_timeout_s, then releases.
 size_t hold_fire(Run &r_run, size_t p_count, double p_timeout_s, uint32_t p_extra = 0, const std::function<bool()> &p_stop = {}) {
 	const size_t before = r_run.rec->shot_count(r_run.slot);
 	set_buttons(r_run, p_extra | sw::weapon_buttons::kFire);
@@ -130,7 +110,6 @@ size_t hold_fire(Run &r_run, size_t p_count, double p_timeout_s, uint32_t p_extr
 	return r_run.rec->shot_count(r_run.slot) - before;
 }
 
-// One tap of p_hold_ms (fire held, then released), p_after_ms more polling; the shots it made.
 size_t tap_fixed(Run &r_run, int p_hold_ms, int p_after_ms, uint32_t p_extra = 0) {
 	const size_t before = r_run.rec->shot_count(r_run.slot);
 	set_buttons(r_run, p_extra | sw::weapon_buttons::kFire);
@@ -140,7 +119,6 @@ size_t tap_fixed(Run &r_run, int p_hold_ms, int p_after_ms, uint32_t p_extra = 0
 	return r_run.rec->shot_count(r_run.slot) - before;
 }
 
-// The server tick of the first recorded command with fire held (the press as the server applied it).
 std::optional<sim::Tick> press_tick(const std::vector<WeaponTickRecord> &p_ticks, uint8_t p_slot) {
 	for (const WeaponTickRecord &r : p_ticks) {
 		if (r.slot == p_slot && (r.command.buttons & sw::weapon_buttons::kFire) != 0) {
@@ -188,10 +166,6 @@ std::string fmt(const char *p_format, ...) {
 	return buf;
 }
 
-// ---- E1 ---------------------------------------------------------------------------------------------------------
-
-// One kit firearm's fire timing through the session: automatic held for p_auto_shots, single tapped 5 times. Prints
-// one row; for the M16A3 row the caller does the full-magazine check instead.
 void check_fire_timing(Run &r_run, const sw::WeaponTable &p_table, uint8_t p_weapon_slot) {
 	const std::optional<WeaponTickRecord> last = r_run.rec->last(r_run.slot);
 	REQUIRE(last.has_value());
@@ -224,8 +198,7 @@ void check_fire_timing(Run &r_run, const sw::WeaponTable &p_table, uint8_t p_wea
 				fmt("every gap %" PRId64 ", first at tick_start(press)", mode.interval));
 		return;
 	}
-	// Single (and anything else): taps of ~3 ticks (the M1 client samples the held button per client tick; cl's fire
-	// press counter makes a one-frame tap reliable), spaced well past the interval.
+
 	const int gap_ms = int(std::max<double>(300.0, sw::units_to_seconds(mode.interval) * 1000.0 + 150.0));
 	size_t one_each = 0;
 	for (int i = 0; i < 5; ++i) {
@@ -241,20 +214,16 @@ void check_fire_timing(Run &r_run, const sw::WeaponTable &p_table, uint8_t p_wea
 			fmt("5 / 5, every gap >= %" PRId64, mode.interval));
 }
 
-// ---- E2 ---------------------------------------------------------------------------------------------------------
-
 struct Flight {
 	bool ok = false;
 	sw::ShotEvent shot;
-	std::vector<std::pair<sim::Tick, sim::Vec3>> path; // the traced positions at the ticks' ends
+	std::vector<std::pair<sim::Tick, sim::Vec3>> path;
 	std::optional<sim::Vec3> expired;
 	int ticks_after_teleport = -1;
-	float below_teleport = 0; // the teleport eye's y minus the shot origin's y
+	float below_teleport = 0;
 	size_t report_bytes = 0;
 };
 
-// The drop from the launch line where the horizontal distance from the origin crosses p_distance (linear between
-// tick positions); nullopt when the path does not reach it.
 std::optional<double> drop_at(const Flight &p_f, double p_distance) {
 	const sim::Vec3 &o = p_f.shot.origin;
 	const sim::Vec3 &d = p_f.shot.direction;
@@ -281,8 +250,6 @@ std::optional<double> drop_at(const Flight &p_f, double p_distance) {
 	return std::nullopt;
 }
 
-// ---- E6 ---------------------------------------------------------------------------------------------------------
-
 std::string variant_cfg(const std::string &p_base, const char *p_disc, const char *p_recovery) {
 	std::string out;
 	size_t at = 0;
@@ -303,8 +270,6 @@ std::string variant_cfg(const std::string &p_base, const char *p_disc, const cha
 	return out;
 }
 
-// A server-side shooter for the shot-offset sample: fire 6 ticks on, 6 off (so single-fire weapons fire too), the
-// view 20 degrees up at its spawn yaw.
 class FireSource final : public host::CommandSource {
 public:
 	explicit FireSource(uint32_t p_phase) :
@@ -327,7 +292,6 @@ double angle_between_deg(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return std::atan2(std::sqrt(cx * cx + cy * cy + cz * cz), ax * bx + ay * by + az * bz) * 57.29577951308232;
 }
 
-// Kolmogorov-Smirnov D of p_u (sorted in place) against the CDF p_cdf on [0, 1].
 double ks_d(std::vector<double> &r_u, const std::function<double(double)> &p_cdf) {
 	std::sort(r_u.begin(), r_u.end());
 	const double n = double(r_u.size());
@@ -339,9 +303,6 @@ double ks_d(std::vector<double> &r_u, const std::function<double(double)> &p_cdf
 	return d;
 }
 
-// ---- E17 --------------------------------------------------------------------------------------------------------
-
-// The GameServer without sockets and one network-free peer (peer 1), as ServerHost would drive it.
 struct DirectServer {
 	host::GameServer server;
 	std::vector<host::OutDatagram> out;
@@ -376,11 +337,10 @@ double percentile(std::vector<double> p_v, double p_q) {
 	return p_v[std::min(p_v.size() - 1, size_t(p_q * double(p_v.size() - 1) + 0.5))];
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-gunplay-server") {
-	// E1: M16A3 fire held from a full magazine (31 shots, first at the press tick's start, 30 gaps of 4,500,000, the
-	// server trace equal to the recorded shots field for field), then every other kit firearm of both teams.
+
 	TEST_CASE("timing") {
 		Metro *m = metro_gunplay();
 		if (m == nullptr) {
@@ -413,7 +373,7 @@ TEST_SUITE("host-gunplay-server") {
 				std::printf("E1 team %u kit %s: slot %u, primary %s\n", unsigned(team), host::kit_role_name(host::KitRole(kit)), unsigned(r.slot),
 						short_name(variant).c_str());
 				if (team == 1 && kit == 0) {
-					// The M16A3 row: a trace around the whole magazine.
+
 					CHECK(ends_with(variant, "u_m16a4"));
 					net::DebugRequest q;
 					q.kind = net::DebugKind::Trace;
@@ -454,12 +414,12 @@ TEST_SUITE("host-gunplay-server") {
 										rep->trace_gunplay.size(), traced.size(), bytes, rep->trace_dropped),
 								"every shot (time, index, seed, origin, aim, direction bits)");
 					}
-					run_for(*r.s, 2.8); // the empty reload
+					run_for(*r.s, 2.8);
 				} else {
 					check_fire_timing(r, *table, 0);
 				}
 				if (kit == 0) {
-					// The pistol (slot 1): hold the select field, deploy, tap.
+
 					r.s->input.held_buttons = select_slot_field(1);
 					const bool switched = poll_until(
 							*r.s,
@@ -471,7 +431,7 @@ TEST_SUITE("host-gunplay-server") {
 					CHECK_MESSAGE(switched, "no switch to the pistol");
 					if (switched) {
 						const uint32_t keep = select_slot_field(1);
-						// check_fire_timing taps with buttons = fire only; the select field must stay held, so tap here.
+
 						const std::optional<WeaponTickRecord> l = r.rec->last(r.slot);
 						const sw::WeaponSimDef &d = table->defs[l->after.slots[1].def];
 						const sw::FireModeDef &mode = d.modes[0];
@@ -499,8 +459,6 @@ TEST_SUITE("host-gunplay-server") {
 		}
 	}
 
-	// E2: the sky lane, three single M16A3 shots: drop at 100 / 300 m from the traced positions, expiry (Expired) at
-	// v0 x TTL along the launch line.
 	TEST_CASE("drop") {
 		Metro *m = metro_gunplay();
 		if (m == nullptr) {
@@ -533,7 +491,7 @@ TEST_SUITE("host-gunplay-server") {
 				double(lane->eye[1]), double(lane->eye[2]), unsigned(lane->yaw), double(lane->clear_length), double(lane->in_bounds_length), flight);
 		std::vector<Flight> flights;
 		for (int k = 0; k < 3; ++k) {
-			// Alive and deployed (the previous fall may have killed it), view along the lane.
+
 			const bool ready = poll_until(
 					*r.s,
 					[&] {
@@ -615,8 +573,6 @@ TEST_SUITE("host-gunplay-server") {
 		}
 	}
 
-	// E3 / E4: the range lane, exact_aim, a target bot standing at 5 m and 60 m, single shots at the zone's aim point
-	// until the server's death.
 	TEST_CASE("stk") {
 		Metro *m = metro_gunplay();
 		if (m == nullptr) {
@@ -637,8 +593,8 @@ TEST_SUITE("host-gunplay-server") {
 		struct Row {
 			float distance;
 			sw::HitZone zone;
-			int kills_in; // -1: report only
-			double per_hit; // < 0: report only
+			int kills_in;
+			double per_hit;
 			const char *gate;
 		};
 		struct Weapon {
@@ -674,7 +630,7 @@ TEST_SUITE("host-gunplay-server") {
 			r.s->input.yaw = sim::yaw_radians(lane->yaw);
 			r.s->input.pitch = 0;
 			run_for(*r.s, 0.3);
-			// The shooter's shot origin: from the last shot (the first one: the presented eye).
+
 			sim::Vec3 origin = own_eye(*r.s->frame);
 			const float s = std::sin(sim::yaw_radians(lane->yaw)), c = std::cos(sim::yaw_radians(lane->yaw));
 			for (const Row &rw : w.rows) {
@@ -700,8 +656,7 @@ TEST_SUITE("host-gunplay-server") {
 				bool killed = false;
 				double first_damage = -1;
 				for (int shot = 0; shot < 12 && !killed; ++shot) {
-					// The aim point raised by the bullet's drop over the distance (exact_aim takes the view without recoil
-					// and spread, not without gravity): 6.4 cm at 60 m for the M16A3, else the chest shots land in the body.
+
 					const sw::WeaponSimDef &wd = table->defs[l0->after.slots[0].def];
 					const double t_flight = hdist(point, origin) / std::max(double(wd.projectile.muzzle_speed), 1.0);
 					const sim::Vec3 aim_point = { point[0], point[1] + float(0.5 * std::fabs(double(wd.projectile.gravity)) * t_flight * t_flight), point[2] };
@@ -757,7 +712,6 @@ TEST_SUITE("host-gunplay-server") {
 		}
 	}
 
-	// E5: M16A3 tactical / empty reloads and M9 tactical / empty, from the server's timed phase events.
 	TEST_CASE("reload") {
 		Metro *m = metro_gunplay();
 		if (m == nullptr) {
@@ -768,7 +722,7 @@ TEST_SUITE("host-gunplay-server") {
 		if (table == nullptr) {
 			return;
 		}
-		// The kit weapons' authored reload times (the viewmodel clip lengths next to them are vm's / cl's row).
+
 		for (uint8_t team = 1; team <= 2; ++team) {
 			for (uint8_t kit = 0; kit < host::kKitCount; ++kit) {
 				const host::KitLoadout &l = m->level->gunplay->kits.loadout(team, kit);
@@ -794,7 +748,7 @@ TEST_SUITE("host-gunplay-server") {
 			uint8_t weapon_slot;
 			bool empty;
 			sw::SimTime duration;
-			sw::SimTime commit; // 0: the table's
+			sw::SimTime commit;
 			int32_t magazine_after;
 		};
 		const Case cases[] = {
@@ -832,7 +786,7 @@ TEST_SUITE("host-gunplay-server") {
 				run_for(*r.s, 0.1);
 				set_buttons(r, keep);
 			} else {
-				// Fire the magazine dry; the reload starts on its own (AlwaysAutoReload) or on the reload button.
+
 				const auto is_empty = [&] {
 					const std::optional<WeaponTickRecord> l = r.rec->last(r.slot);
 					return l && (l->after.current().magazine == 0 || l->after.current().phase == sw::WeaponPhase::Reloading);
@@ -881,9 +835,6 @@ TEST_SUITE("host-gunplay-server") {
 		CHECK(r.s->server.game_stats().gunplay.weapon_precondition_failures == 0);
 	}
 
-	// E6: the four disc x recovery variants: distinct weapon_hash values, the client-built table's hash equal to the
-	// server's MatchInfo hash, mixed fire with 0 weapon precondition failures, a 10-round burst's recoil against the
-	// variant's recurrence, 2,000 server shot offsets against the variant's radial CDF; and a mismatched cfg's hash.
 	TEST_CASE("variants") {
 		Metro *m = metro_gunplay();
 		if (m == nullptr) {
@@ -921,7 +872,7 @@ TEST_SUITE("host-gunplay-server") {
 			CHECK(table->mechanics.disc == v.d);
 			CHECK(table->mechanics.recovery == v.r);
 			CHECK_FALSE(table->mechanics.measured);
-			// (a) through the session.
+
 			host::GunplayConfig g;
 			g.mechanics_cfg = cfg.string();
 			g.player_team = 1;
@@ -938,7 +889,7 @@ TEST_SUITE("host-gunplay-server") {
 			}
 			row("E6", name + ": the client-built table's hash = the server's", server_hash == client_hash,
 					fmt("server %016" PRIx64 ", client %016" PRIx64, server_hash, client_hash), "equal");
-			// The 10-round burst from rest (recoil 0, first-shot multiplier armed).
+
 			run_for(*r.s, 1.5);
 			r.rec->clear();
 			hold_fire(r, 10, 3.0);
@@ -985,7 +936,7 @@ TEST_SUITE("host-gunplay-server") {
 				row("E6", name + ": recoil pitch after a 10-round burst = the variant's recurrence", shots == 10 && std::fabs(double(measured) - pitch) <= 1e-4,
 						fmt("%.6f deg (recurrence %.6f, diff %.2e)", double(measured), pitch, double(measured) - pitch), "within 1e-4 deg");
 			}
-			// 600 ticks of mixed fire: hold, release, reload.
+
 			const uint64_t shots_before = r.s->server.game_stats().gunplay.shots;
 			run_for(*r.s, 10.0, [&](bool, uint64_t, double p_t) {
 				const double phase = std::fmod(p_t, 3.0);
@@ -1006,7 +957,7 @@ TEST_SUITE("host-gunplay-server") {
 							gs.gunplay.shots - shots_before, gs.gunplay.weapon_precondition_failures, gs.step_precondition_failures, cs.reconciliations),
 					"0 precondition failures");
 			r.s.reset();
-			// (b) 2,000 server shot offsets: a GameServer without sockets, 32 server-side shooters (infinite magazine).
+
 			auto rec = std::make_shared<GunplayRecorder>();
 			host::GameServer server;
 			host::GameServerConfig cfg2;
@@ -1055,8 +1006,7 @@ TEST_SUITE("host-gunplay-server") {
 			CHECK(server.stats().gunplay.weapon_precondition_failures == 0);
 		}
 		row("E6", "four distinct weapon_hash values", hashes.size() == 4, fmt("%zu distinct", hashes.size()), "4");
-		// The mismatch: a client parsing a different cfg builds a table whose hash differs from the shipped server's
-		// MatchInfo hash, which is what makes cl's client disconnect ("weapon table mismatch") before Ready.
+
 		{
 			const std::filesystem::path other = dir / "mismatch.cfg";
 			{
@@ -1071,9 +1021,6 @@ TEST_SUITE("host-gunplay-server") {
 		std::filesystem::remove_all(dir, ec);
 	}
 
-	// E17 (server side): a client sending wanted slot 15, view_back 65,535 with a view_seq outside the history, a
-	// fire-mode counter that changes every command, KitSelect team 7 (and malformed), 4x the command rate, and dev
-	// requests for slots it may not touch changes no other soldier; every clamp is counted; the tick runs on.
 	TEST_CASE("hostile") {
 		Metro *m = metro_gunplay();
 		if (m == nullptr) {
@@ -1115,7 +1062,7 @@ TEST_SUITE("host-gunplay-server") {
 			sim::Command c;
 			c.tick = p_tick;
 			c.sequence = p_seq;
-			c.pitch = sim::quantize_pitch(1.0f); // 57 degrees up: the shots never meet a soldier
+			c.pitch = sim::quantize_pitch(1.0f);
 			c.buttons = ((p_tick / 10u) % 2u) == 0 ? sw::weapon_buttons::kFire : 0u;
 			return c;
 		};
@@ -1127,7 +1074,7 @@ TEST_SUITE("host-gunplay-server") {
 				p.commands[0] = base_command(next, seq_c++);
 				control.receive(net::encode_command_packet(p), net::kChannelUnreliable);
 			}
-			// Four packets per tick: the tick's command, four consecutive ones, one past the jitter buffer, one late.
+
 			for (int k = 0; k < 4; ++k) {
 				net::CommandPacket p;
 				const sim::Tick base_tick = k == 2 ? next + 40u : (k == 3 ? (next > 5 ? next - 5u : 1u) : next + uint32_t(k));
@@ -1166,7 +1113,7 @@ TEST_SUITE("host-gunplay-server") {
 				kit_selects += 3;
 				net::DebugRequest q;
 				q.kind = net::DebugKind::SpawnTarget;
-				q.slot = client; // its own (a client's) slot
+				q.slot = client;
 				q.position = { 0, 1e30f, 0 };
 				hostile.receive(net::encode_debug(q), net::kChannelReliable);
 				q.slot = 120;
@@ -1211,8 +1158,7 @@ TEST_SUITE("host-gunplay-server") {
 		row("E17", "hostile client changes no other soldier (state + weapon hashes per tick)", mismatched_ticks == 0 && compared > 0,
 				fmt("%zu / 900 ticks differ (%zu soldier-ticks compared)", mismatched_ticks, compared), "0 ticks differ");
 		row("E17", "wanted slot 15 clamped and counted", hb.slot_field_clamped > 0, fmt("%" PRIu64, hb.slot_field_clamped), "> 0");
-		// A random ack field can name a seq that was sent: that view sample is valid but 65,535 / 256 ticks back, so the
-		// provider clamps it to max_rewind_ticks (counted as clamped); every other one is refused.
+
 		row("E17", "view_back 65535 / view_seq outside the history: refused or clamped, counted",
 				hb.shots > 0 && hb.view_refused + hb.no_ack_state + hb.lag.clamped >= hb.shots && a.gunplay.view_refused == 0 && a.gunplay.no_ack_state == 0,
 				fmt("%" PRIu64 " refused + %" PRIu64 " without an ack state + %" PRIu64 " clamped of %" PRIu64 " shots (provider: present %" PRIu64 ", rewound %" PRIu64

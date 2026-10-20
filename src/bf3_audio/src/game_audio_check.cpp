@@ -1,8 +1,3 @@
-// The in-game audio check (game_audio_check.h; docs/design/m2a.md E7; as built: docs/design/m2a-au3.md "E7").
-// Records the game mixer's run and judges it with au's public analyse_check plus the in-game rows; no au file is
-// edited. The probes evaluate a fresh PatchInstance of the window's program at the step's distance (au's G5
-// method), so the rows say what the in-game geometry made the patch do.
-
 #include "bf3/audio/game_audio_check.h"
 
 #include "bf3/audio/audio_analysis.h"
@@ -22,17 +17,13 @@ namespace cp = core::audio::port;
 
 namespace {
 
-constexpr double kAuditionWindowSeconds = 1.0; // the RMS window of an audition one-shot
-constexpr double kSilenceDb = -100.0; // the 320 m bursts' core tap must stay below (the 300-301 m Fire gate)
-// An in-band audition window's loudest 20 ms (full mix, unity master) must rise above this: present in the mix, not
-// gated. The patches' own distance laws set the level (the M98B at 325 m peaks near -83 dBFS, its loudest 20 ms
-// near -93 dBFS); a gated or silent window reads the -144 dB floor or below.
+constexpr double kAuditionWindowSeconds = 1.0;
+constexpr double kSilenceDb = -100.0;
+
 constexpr double kAudibleDb = -110.0;
 constexpr double kAudibleWindowSeconds = 0.02;
 constexpr float kDistanceTolerance = 0.25f;
 
-// The M16A3's far bands (au G5.2): the close group 0-20 m, the far groups 250-300 m; the distant HPF 17..200 m ->
-// 0..310 Hz (v46 ScaleClamp).
 constexpr float kCloseBegin = 0.0f, kCloseEnd = 20.0f, kFarBegin = 250.0f, kFarEnd = 300.0f;
 
 float cosine_fade(float p_d, float p_begin, float p_end) {
@@ -77,7 +68,6 @@ std::vector<BandRef> crossfader_bands(const ca::SoundProgram &p_prog) {
 	return out;
 }
 
-// A non-owning shared_ptr to a program the caller keeps alive for the call (the instance being started holds it).
 std::shared_ptr<const ca::SoundProgram> borrow(const ca::SoundProgram &p_program) {
 	return std::shared_ptr<const ca::SoundProgram>(std::shared_ptr<const ca::SoundProgram>(), &p_program);
 }
@@ -101,12 +91,10 @@ std::string fmt(const char *p_format, double p_a, double p_b = 0.0, double p_c =
 	return buf;
 }
 
-} // namespace
-
-// ---- the script ---------------------------------------------------------------------------------------------------
+}
 
 std::vector<GameAuditionItem> game_audition_items() {
-	// au §10.2 / G5.4: the bands each item is judged by, and distances before, inside and past them.
+
 	return {
 		{ "m98b", "sound/weapons/handheld/m98_b/weapon_sniper_m98_b_02", { 280.0f, 325.0f, 400.0f }, { { 300.0f, 350.0f } } },
 		{ "rpg7", "sound/weapons/handheld/rpg-7/weapon_at_rpg7", { 30.0f, 67.5f, 120.0f }, { { 45.0f, 90.0f } } },
@@ -123,7 +111,7 @@ GameCheckScript game_check_script() {
 		st.bursts = 2;
 		s.steps.push_back(st);
 	}
-	// au's far_pinned segment: one 150 m burst with both distance HPFs pinned to 0 Hz (the hpf rows' reference).
+
 	GameCheckStep pinned;
 	pinned.name = "far_pinned";
 	pinned.distance_m = 150.0f;
@@ -148,14 +136,12 @@ GameCheckScript game_check_script() {
 	return s;
 }
 
-// ---- GameAudioCheck -----------------------------------------------------------------------------------------------
-
 struct GameAudioCheck::State {
 	GameCheckScript script;
 	uint32_t rate = kMixRate;
 	uint64_t start = 0;
 	uint64_t total = 0;
-	std::vector<float> mix; // stereo, preallocated
+	std::vector<float> mix;
 	std::atomic<uint64_t> recorded_until{ 0 };
 	std::atomic<uint64_t> dropped{ 0 };
 	std::unique_ptr<TapRecorder> core_tap, noise_tap;
@@ -164,8 +150,8 @@ struct GameAudioCheck::State {
 	uint64_t step_begin = 0;
 	float step_distance = 0.0f;
 	std::vector<GameCheckWindow> windows;
-	std::vector<uint32_t> per_step; // windows taken per step
-	std::vector<uint8_t> skipped_step; // per step: skip_step was called
+	std::vector<uint32_t> per_step;
+	std::vector<uint8_t> skipped_step;
 	std::vector<Skip> skips;
 	core::PathGuard guard;
 	AudioTuning tuning;
@@ -177,7 +163,7 @@ GameAudioCheck::GameAudioCheck(const GameCheckScript &p_script, uint32_t p_rate,
 	st.script = p_script;
 	st.rate = p_rate != 0 ? p_rate : kMixRate;
 	st.start = p_start_frame;
-	const double seconds = std::clamp(p_script.timeout_s, 1.0, 600.0); // bounded: 600 s of stereo is 230 MB
+	const double seconds = std::clamp(p_script.timeout_s, 1.0, 600.0);
 	st.total = uint64_t(seconds * double(st.rate));
 	st.mix.assign(size_t(st.total) * 2, 0.0f);
 	st.core_tap = std::make_unique<TapRecorder>(st.start, st.total);
@@ -239,7 +225,7 @@ void GameAudioCheck::on_driver_instance(uint8_t p_slot, uint64_t p_seed, uint64_
 	}
 	const uint64_t settle = uint64_t(std::max(0.0, st.script.settle_s) * double(st.rate));
 	if (p_first_round_frame < st.step_begin + settle || p_first_round_frame < st.start) {
-		return; // the camera was still moving (or before the recording)
+		return;
 	}
 	r_instance.set_voice_tap(kM16CoreTapVoices, st.core_tap.get());
 	r_instance.add_voice_tap(kM16NoiseTapVoices, st.noise_tap.get());
@@ -252,7 +238,7 @@ void GameAudioCheck::on_driver_instance(uint8_t p_slot, uint64_t p_seed, uint64_
 	w.seed = p_seed;
 	w.first_frame = p_first_round_frame;
 	w.listener_distance_m = st.step_distance;
-	// The probes: a fresh instance of the same program and seed at the step's distance.
+
 	const ca::SoundProgram &prog = r_instance.program();
 	if (std::unique_ptr<PatchInstance> probe = probe_at(prog, p_seed, st.step_distance, st.tuning, st.rate)) {
 		w.probe_hpf_hz = probe->plugin_attribute(kM16NoiseHpf, 0);
@@ -347,7 +333,7 @@ bool GameAudioCheck::step_done(uint32_t p_step) const {
 void GameAudioCheck::skip_step(uint32_t p_step, std::string p_reason) {
 	State &st = *state_;
 	if (p_step >= st.script.steps.size() || st.skipped_step[p_step] != 0) {
-		return; // out of range or already skipped: bounded (one entry per step)
+		return;
 	}
 	st.skipped_step[p_step] = 1;
 	st.skips.push_back(Skip{ p_step, std::move(p_reason) });
@@ -416,8 +402,6 @@ uint64_t GameAudioCheck::dropped_frames() const {
 	return state_->dropped.load(std::memory_order_relaxed);
 }
 
-// ---- analysis -----------------------------------------------------------------------------------------------------
-
 CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioCheck &p_check, const GameCheckCounters &p_counters,
 		const AudioTuning &p_tuning, uint32_t p_rate) {
 	CheckReport report;
@@ -428,7 +412,7 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 	const uint64_t total = p_check.total_frames();
 	const std::span<const GameCheckWindow> windows = p_check.windows();
 	const auto step_name = [&](uint32_t p_step) -> const std::string & { return p_script.steps[p_step].name; };
-	// au's segment names for the steps analyse_check's level and hpf rows read.
+
 	const auto segment_name = [&](const GameCheckStep &p_step) -> std::string {
 		if (p_step.pin_distance_hpfs) {
 			return "far_pinned";
@@ -445,13 +429,12 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 		return p_step.name;
 	};
 
-	// A skipped step fails (E7: a skipped audition item is not met).
 	for (const GameAudioCheck::Skip &k : p_check.skipped()) {
 		if (k.step < p_script.steps.size()) {
 			row("skipped." + p_script.steps[k.step].name, 1.0, "never skipped (" + k.reason + ")", false);
 		}
 	}
-	// Coverage: every step recorded its bursts.
+
 	for (uint32_t s = 0; s < p_script.steps.size(); ++s) {
 		const GameCheckStep &step = p_script.steps[s];
 		uint32_t n = 0;
@@ -461,7 +444,6 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 		row("windows." + step.name, double(n), "== " + std::to_string(step.bursts), n == step.bursts);
 	}
 
-	// au's analyse_check over the burst steps below the Fire gate: one segment per step.
 	CheckScript cs = p_script.analysis;
 	cs.rounds = p_script.rounds;
 	cs.segments.clear();
@@ -506,7 +488,6 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 		report.rows.push_back(std::move(r));
 	}
 
-	// The Fire gate: the 320 m bursts start no sampler (silent core tap over their windows).
 	for (const GameCheckWindow &w : windows) {
 		const GameCheckStep &step = p_script.steps[w.step];
 		if (w.audition || !w.stopped || step.distance_m <= 301.0f || w.first_frame < start || w.stop_frame - start > total) {
@@ -516,8 +497,6 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 		row("gate." + step.name, db, fmt("<= %.0f dB (core tap, the 300-301 m Fire gate)", kSilenceDb), db <= kSilenceDb);
 	}
 
-	// The listener distance of every window within 0.25 m of its step's, and the probes (au G5 laws at the in-game
-	// distance).
 	std::vector<uint32_t> seen(p_script.steps.size(), 0);
 	for (const GameCheckWindow &w : windows) {
 		const GameCheckStep &step = p_script.steps[w.step];
@@ -543,8 +522,7 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 			}
 			continue;
 		}
-		// Auditions: each band's group amplitude partial inside its band or the band it fades in over (the previous
-		// group's), exactly 0 or 1 outside both (au G5.4 reading R), and the in-band windows audible in the mix.
+
 		if (w.bands_found != std::min<size_t>(step.bands.size(), w.band_amplitude.size())) {
 			row("audition.bands." + tag, double(w.bands_found), "every item band is a crossfader group of the patch", false);
 			continue;
@@ -567,7 +545,7 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 			}
 		}
 		if (inside_any && w.first_frame >= start && w.stop_frame - start <= total) {
-			// The loudest 20 ms of the window.
+
 			const uint64_t len = uint64_t(kAudibleWindowSeconds * double(p_rate));
 			double best = -300.0;
 			for (uint64_t at = w.first_frame - start; len > 0 && at + len <= w.stop_frame - start; at += len / 2) {
@@ -578,7 +556,6 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 		}
 	}
 
-	// In-game counters.
 	row("mixer.short_blocks", double(p_counters.short_blocks), "== 0", p_counters.short_blocks == 0);
 	row("mixer.late_blocks", double(p_counters.late_blocks), "== 0", p_counters.late_blocks == 0);
 	row("mixer.late_commands", double(p_counters.late_commands), "== 0", p_counters.late_commands == 0);
@@ -587,4 +564,4 @@ CheckReport analyse_game_check(const GameCheckScript &p_script, const GameAudioC
 	return report;
 }
 
-} // namespace bf3::audio
+}

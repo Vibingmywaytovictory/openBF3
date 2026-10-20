@@ -1,13 +1,3 @@
-// The bot aim model (aim_model.h; docs/design/m2b.md §5.3; as built: docs/design/m2b-bb.md). Pure arithmetic.
-//
-// aim_error: the cone sigma(t) = k(skill) (e_inf + (e0 - e_inf) exp(-t / tau)) + moving_penalty_deg (bot moving)
-// + crossing_deg_per_mps x the target's crossing speed. k(skill) = max(0.25, 1 + 2 skill_scale (0.5 - skill)): 1 at
-// skill 0.5 (the stated e0 / e_inf), 1.4 at 0.3, 0.4 at 0.8 [inferred, J5]. Non-finite or negative inputs read as 0;
-// the result is clamped to [0, 45] degrees.
-// lead_point: three fixed-point iterations of t = |aim - origin| / speed with aim = target + velocity t (t <= 5 s),
-// then the drop: aim.y += -0.5 gravity t^2 (gravity negative = down, so the aim rises). Instant hit, a speed <= 0 or a
-// non-finite input: the target itself.
-
 #include "bf3/sim/bots/aim_model.h"
 
 #include <algorithm>
@@ -29,7 +19,7 @@ bool finite3(const Vec3 &p_v) {
 	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
 }
 
-} // namespace
+}
 
 float aim_error(const AimParams &p_params, float p_skill, float p_seconds_on_target, bool p_moving, float p_crossing_speed_mps) {
 	const float skill = std::clamp(finite_or(p_skill, 0.5f), 0.0f, 1.0f);
@@ -63,4 +53,4 @@ Vec3 lead_point(const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target
 	return finite3(aim) ? aim : p_target;
 }
 
-} // namespace bf3::sim::bots
+}

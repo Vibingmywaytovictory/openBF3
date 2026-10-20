@@ -1,5 +1,3 @@
-// bf3dump audio commands (audio_commands.h). Read-only on the install; WAVs only to guarded paths.
-
 #include "audio_commands.h"
 
 #include "bf3/core/audio/sound_stream.h"
@@ -51,7 +49,6 @@ bool print_install_unchanged(const InstallReader &p_reader, const InstallSnapsho
 	return clean;
 }
 
-// One stream to decode in the bench: the chunk it lives in and its offset.
 struct StreamRef {
 	const std::vector<uint8_t> *chunk = nullptr;
 	uint32_t offset = 0;
@@ -89,10 +86,10 @@ int cmd_audio_waves(const InstallReader &p_reader, std::shared_ptr<Install> p_in
 	size_t waves = 0, localised = 0, pooled = 0, read_errors = 0, variations = 0, segments = 0, scanned = 0, mismatches = 0, length_mismatches = 0;
 	size_t stream_errors = 0, chunk_errors = 0, from_loc = 0, no_language = 0;
 	double channel_seconds = 0.0;
-	std::map<std::pair<int, uint32_t>, size_t> formats; // (channels, rate) -> segments
+	std::map<std::pair<int, uint32_t>, size_t> formats;
 	std::map<int, size_t> codecs;
 	std::vector<std::string> first_errors;
-	// Chunks kept for the bench (only when benching).
+
 	std::vector<std::unique_ptr<std::vector<uint8_t>>> kept;
 	std::vector<StreamRef> streams;
 	auto note = [&](const std::string &p_line) {
@@ -252,7 +249,7 @@ int cmd_audio_loc(const InstallReader &p_reader, std::shared_ptr<Install> p_inst
 		std::fprintf(stderr, "%s: %s\n", sb.c_str(), map.error().message.c_str());
 		return 1;
 	}
-	// Sorted by GUID so the output is stable.
+
 	std::vector<Guid> ids;
 	for (const auto &[id, s] : **map) {
 		ids.push_back(id);
@@ -321,7 +318,7 @@ int cmd_audio_loc(const InstallReader &p_reader, std::shared_ptr<Install> p_inst
 	return (errors == 0 && mismatches == 0 && unchanged) ? 0 : 1;
 }
 
-} // namespace
+}
 
 const char *audio_usage() {
 	return "  audio waves <LEVEL> <MODE> [--decode] [--bench N]\n"
@@ -364,4 +361,4 @@ int cmd_audio(const InstallReader &p_reader, std::shared_ptr<Install> p_install,
 	return 2;
 }
 
-} // namespace bf3dump
+}

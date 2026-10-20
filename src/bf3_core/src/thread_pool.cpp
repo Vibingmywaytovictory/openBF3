@@ -1,4 +1,3 @@
-// Ported from IW4L asset_transport::bf3 (mount.rs parallel_map), Apache-2.0.
 #include "bf3/core/thread_pool.h"
 
 #include <algorithm>
@@ -44,4 +43,4 @@ void parallel_for(size_t p_count, const std::function<void(size_t)> &p_work, uns
 	}
 }
 
-} // namespace bf3::core
+}

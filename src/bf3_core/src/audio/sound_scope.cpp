@@ -1,6 +1,3 @@
-// Scope reader (sound_scope.h; docs/design/m2b.md §6.2, docs/design/m2b-au.md). Fields by the data's own descriptor
-// names; every instance examined is charged before it is read.
-
 #include "bf3/core/audio/sound_scope.h"
 
 #include <algorithm>
@@ -40,7 +37,7 @@ Result<float> read_positive(const EbxStruct &p_s, std::string_view p_field, cons
 	return f;
 }
 
-} // namespace
+}
 
 uint16_t ScopeTable::scope_of(const Guid &p_patch) const {
 	const auto it = std::lower_bound(patch_scopes.begin(), patch_scopes.end(), p_patch, [](const std::pair<Guid, uint16_t> &e, const Guid &g) { return e.first < g; });
@@ -188,7 +185,7 @@ Status map_patch_scopes(const EbxResolver &p_db, std::span<const Guid> p_patches
 		const std::optional<EbxValue> v = primary.get("Scope");
 		const std::optional<EbxRef> ref = v ? v->as_ref() : std::nullopt;
 		if (!ref || ref->is_null()) {
-			continue; // no scope (811 of 1,295 patches)
+			continue;
 		}
 		const Guid scope_guid = ref->kind == EbxRef::Kind::External ? ref->instance : Guid{};
 		uint16_t index = kNoScope;
@@ -198,7 +195,7 @@ Status map_patch_scopes(const EbxResolver &p_db, std::span<const Guid> p_patches
 			index = r_table.scope_index(si->guid());
 		}
 		if (index == kNoScope) {
-			++skipped; // names a scope the table does not hold
+			++skipped;
 			continue;
 		}
 		r_table.patch_scopes.emplace_back(part->guid(), index);
@@ -213,4 +210,4 @@ Status map_patch_scopes(const EbxResolver &p_db, std::span<const Guid> p_patches
 	return budget.status();
 }
 
-} // namespace bf3::core::audio
+}

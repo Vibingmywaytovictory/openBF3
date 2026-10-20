@@ -1,5 +1,3 @@
-// Compiled EffectDefs through the derived-data cache (effect_cache.h; docs/design/m2a-vfx1.md §8): the OBF3FXEF blob,
-// the fx-deps list and the two-entry lookup of resolve_weapon_cached (bf3_core gameplay/weapon_blob.cpp).
 #include "bf3/fx/effect_cache.h"
 
 #include "bf3/core/cache/blob_io.h"
@@ -21,7 +19,6 @@ constexpr const char *kDepsMagic = "OBF3FXDP";
 constexpr size_t kMaxDeps = 1u << 16;
 constexpr uint32_t kKnownEmitterFlags = 0x7FFu | kEmitterDerived | kEmitterChild | kEmitterHasParameterisedEvaluator;
 
-// The writer and the reader share one field walk (io_effect below), so the two cannot drift apart.
 class Out {
 public:
 	static constexpr bool kReading = false;
@@ -134,7 +131,7 @@ void io_evaluator(IO &io, EvaluatorDef &e) {
 	io.enumeration(e.type, kEvaluatorTypeCount);
 	io.enumeration(e.parameter, kEmitterParameterCount);
 	if constexpr (IO::kReading) {
-		// Activate the member the type names before reading it.
+
 		switch (e.type) {
 			case EvaluatorType::Polynomial:
 				e.polynomial = PolynomialDef{};
@@ -337,12 +334,12 @@ std::string effect_key_name(std::string_view p_blueprint) {
 	return detail::canonical_name(p_blueprint);
 }
 
-} // namespace
+}
 
 std::vector<uint8_t> encode_effect_def(const EffectDef &p_def) {
 	Out o;
 	o.w.magic(kEffectMagic, kFxBlobFormatVersion);
-	io_effect(o, const_cast<EffectDef &>(p_def)); // Out only reads the fields
+	io_effect(o, const_cast<EffectDef &>(p_def));
 	return o.w.take();
 }
 
@@ -444,7 +441,7 @@ std::optional<core::CacheKey> effect_def_key(const FxSources &p_sources, std::st
 	in.kind = kFxEffectCacheKind;
 	for (const std::string &d : p_deps) {
 		const std::optional<core::Sha1> sha1 = p_sources.digest(d);
-		in.sources.push_back(sha1 ? core::source_digest(*sha1) : core::Sha1Digest{}); // zero: looked up and absent
+		in.sources.push_back(sha1 ? core::source_digest(*sha1) : core::Sha1Digest{});
 	}
 	in.converter_version = kFxConverterVersion;
 	in.engine = std::string(core::cache_engine_id());
@@ -510,7 +507,7 @@ core::Result<CachedEffect> compile_effect_cached(core::Cache *p_cache, const FxS
 			}
 		}
 	}
-	// Compile, then store the dependency list (replacing a stale one) and the blob.
+
 	CompileContext ctx;
 	ctx.db = p_sources.db;
 	core::Result<EffectDef> def = compile_effect(p_blueprint, ctx);
@@ -551,4 +548,4 @@ core::Result<CachedEffect> compile_effect_cached(core::Cache *p_cache, const FxS
 	return done();
 }
 
-} // namespace bf3::fx
+}

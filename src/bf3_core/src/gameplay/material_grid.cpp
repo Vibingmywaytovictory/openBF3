@@ -1,4 +1,3 @@
-// MaterialGridData + MaterialContainerAsset reader and the soldier hit capsules (see material_grid.h).
 #include "bf3/core/gameplay/material_grid.h"
 
 #include "ebx_fields.h"
@@ -12,10 +11,8 @@ using detail::Fields;
 
 namespace {
 
-// Retail grids have 102 rows; a hostile row count must not make rows^2 cells explode.
 constexpr size_t kMaxGridRows = 1024;
 
-// Adds the MaterialContainerPair instances of a container partition that are not known yet.
 size_t add_container_pairs(const EbxPartition &p_container, std::unordered_map<Guid, MaterialPairRef, GuidHash> &r_pairs) {
 	size_t added = 0;
 	for (const EbxInstance &inst : p_container.instances_of("MaterialContainerPair")) {
@@ -27,7 +24,7 @@ size_t add_container_pairs(const EbxPartition &p_container, std::unordered_map<G
 		const std::optional<EbxValue> material = inst.get("PhysicsMaterialIndex");
 		const std::optional<EbxValue> property = inst.get("PhysicsPropertyIndex");
 		if (!flags || !material || !property || !flags->as_u32() || !material->as_i32() || !property->as_i32()) {
-			continue; // not a usable pair; stays unresolved
+			continue;
 		}
 		MaterialPairRef p;
 		p.present = true;
@@ -91,7 +88,7 @@ DamageRelation read_cell(Fields &r_f, const EbxStruct &p_item) {
 	return d;
 }
 
-} // namespace
+}
 
 std::optional<std::string> MaterialGrid::grid_of_level(const EbxResolver &p_db, std::string_view p_level) {
 	const EbxPartition *level = p_db.partition_by_name(p_level);
@@ -139,7 +136,7 @@ Result<MaterialGrid> MaterialGrid::load(const EbxResolver &p_db, std::string_vie
 	if (n > kMaxGridRows) {
 		return make_error(out.report_.grid + ": InteractionGrid has " + std::to_string(n) + " rows (limit " + std::to_string(kMaxGridRows) + ")");
 	}
-	// Check every row's width before allocating rows^2 cells.
+
 	std::vector<EbxArray> items;
 	items.reserve(n);
 	for (size_t r = 0; r < n; ++r) {
@@ -172,7 +169,6 @@ Result<MaterialGrid> MaterialGrid::load(const EbxResolver &p_db, std::string_vie
 		}
 	}
 
-	// The container: the partition the grid's pairs point into.
 	const std::optional<EbxRef> def = f.ref(g, "DefaultMaterial");
 	const OptionalEbxArray grid_pairs = f.array(g, "MaterialPairs");
 	if (!f.ok()) {
@@ -338,4 +334,4 @@ BodyMultipliers body_multipliers(const MaterialGrid &p_grid, std::span<const Hit
 	return out;
 }
 
-} // namespace bf3::core::gameplay
+}

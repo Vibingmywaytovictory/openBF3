@@ -1,4 +1,3 @@
-// Damage arithmetic (docs/design/m2a-weapons.md §5.9; damage.h).
 #include "bf3/sim/weapons/damage.h"
 
 #include <algorithm>
@@ -8,8 +7,7 @@
 namespace bf3::sim::weapons {
 
 double falloff_damage(const ProjectileSimDef &p_projectile, double p_distance) {
-	// gameplay::damage_at's rule (Mechanics::falloff Linear is the only shape): flat to the start, linear to the end,
-	// flat beyond.
+
 	const double a = p_projectile.falloff_start;
 	const double b = p_projectile.falloff_end;
 	if (p_distance <= a || b <= a) {
@@ -24,17 +22,17 @@ double falloff_damage(const ProjectileSimDef &p_projectile, double p_distance) {
 
 double zone_damage(const ProjectileSimDef &p_projectile, HitZone p_zone, double p_distance, const Mechanics &p_mechanics) {
 	const size_t z = std::min<size_t>(size_t(p_zone), kHitZoneCount - 1);
-	// An absent cell (no MaterialRelationDamageData) multiplies by its default 1.
+
 	const double mult = double(p_projectile.zone[z].protection_multiplier) * double(p_mechanics.bullet_damage_modifier);
 	return falloff_damage(p_projectile, p_distance) * mult;
 }
 
 double blast_damage(const ExplosionSimDef &p_explosion, double p_distance, BlastFalloff p_falloff) {
-	(void)p_falloff; // Linear is the only shape (W-C, [unmeasured])
+	(void)p_falloff;
 	if (!p_explosion.present) {
 		return 0.0;
 	}
-	const double d = p_distance > 0 ? p_distance : 0.0; // NaN and negative: at the centre
+	const double d = p_distance > 0 ? p_distance : 0.0;
 	const double inner = p_explosion.inner_radius;
 	const double outer = p_explosion.radius;
 	if (outer <= inner) {
@@ -71,7 +69,7 @@ bool apply_damage(SoldierState &r_soldier, float p_amount, const Mechanics &p_me
 std::array<int32_t, kHitZoneCount> shots_to_kill(const WeaponSimDef &p_def, double p_distance, float p_health, const Mechanics &p_mechanics) {
 	std::array<int32_t, kHitZoneCount> out{};
 	for (size_t z = 0; z < kHitZoneCount; ++z) {
-		// The health is taken down in float, hit by hit, as apply_damage does (an exact 100 kills: 4 x 25).
+
 		const float per = float(zone_damage(p_def.projectile, HitZone(z), p_distance, p_mechanics)) * float(p_def.pellets);
 		if (!(per > 0) || !(p_health > 0)) {
 			out[z] = 0;
@@ -110,4 +108,4 @@ double one_shot_range(const WeaponSimDef &p_def, HitZone p_zone, float p_health,
 	return lo;
 }
 
-} // namespace bf3::sim::weapons
+}

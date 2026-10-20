@@ -1,16 +1,3 @@
-# ctest godot.audio (gate G8, docs/design/m2a-audio.md §1, §10.3, §10.4): the windowed M2a audio check of the Godot
-# project:
-#   <godot> --path bf3-opensource res://scenes/audio_m16.tscn -- --audio-check --audio-record=<SHOTS>/godot_m16.wav
-#       --quit-after=90
-# The M16A3 check script plays through Bf3AudioPlayback on Godot's audio thread (the real driver path: windowed, not
-# the headless Dummy driver); the demo then checks rows (a)-(d) on its recording, the recording length, the mixer
-# counters, the server mix rate and an in-process offline replay equal to the recording sample for sample, prints
-# the table and "AUDIO CHECK: PASS|FAIL", and exits 0/1. This script additionally needs the three WAVs
-# (godot_m16.wav, godot_m16_core.wav, godot_m16_noise.wav) in SHOTS (b/shots/audio, gitignored).
-# Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no BF3 install is found, or no window / rendering device can be
-# created: a probe run ("--path <project> --quit", windowed, killed after 60 s) decides first, as in
-# godot_m1_load.cmake.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -DSHOTS=<dir> -P godot_audio.cmake (cmake_language(EXIT) needs 3.29).
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)

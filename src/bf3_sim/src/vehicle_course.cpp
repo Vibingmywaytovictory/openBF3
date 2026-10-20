@@ -1,15 +1,3 @@
-// S2 driving courses: the course finder, the synthetic courses, the scripted drivers and the command log
-// (docs/design/s2.md §8; vehicle_course.h).
-//
-// The finder samples the static world on a fixed 4 m grid (cell (i, j) at (i x grid, j x grid)) around the seeds, in a
-// fixed order: seeds in order, candidate cells by distance from the seed's cell, then 8 directions. Every sample is a
-// CollisionWorld query charged to the kind being searched (ground rays, clearance boxes, wall rays), cached per cell
-// so a later kind reuses an earlier kind's samples for free; each kind stops at its own budget. The ground and wall
-// rays ignore back faces, like Jolt's simulation (PhysicsSystem.cpp:1795) and the wheel casts do: a surface the
-// vehicle would pass through is never a course.
-//
-// The scripted drivers run on the server only (vehicle_course.h): they read the server's state and may use any
-// arithmetic (atan2 included), because only their quantised commands are replayed.
 #include "bf3/sim/vehicle_course.h"
 
 #include "bf3/core/level/collision_soup.h"
@@ -36,9 +24,7 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kDegrees = kPi / 180.0f;
-constexpr float kPlaceLift = 0.05f; // m above the ground (the Humvee's wheels touch at frame y 0.029)
-
-// ---- small vector helpers (finder and scripts; server side only) -------------------------------------------------
+constexpr float kPlaceLift = 0.05f;
 
 Vec3 add(const Vec3 &p_a, const Vec3 &p_b) {
 	return { p_a[0] + p_b[0], p_a[1] + p_b[1], p_a[2] + p_b[2] };
@@ -66,7 +52,6 @@ Vec3 horizontal(const Vec3 &p_a) {
 	return normalized({ p_a[0], 0.0f, p_a[2] });
 }
 
-// A quaternion (x, y, z, w) from an orthonormal basis given as the images of local X, Y, Z.
 std::array<float, 4> quat_from_basis(const Vec3 &p_x, const Vec3 &p_y, const Vec3 &p_z) {
 	const float m00 = p_x[0], m11 = p_y[1], m22 = p_z[2];
 	const float trace = m00 + m11 + m22;
@@ -91,7 +76,6 @@ std::array<float, 4> quat_from_basis(const Vec3 &p_x, const Vec3 &p_y, const Vec
 	return q;
 }
 
-// The vehicle placed on the ground at p_point with up = p_normal and forward = p_heading projected onto the ground.
 VehiclePlacement place_on(const Vec3 &p_point, const Vec3 &p_normal, const Vec3 &p_heading) {
 	const Vec3 up = normalized(p_normal);
 	Vec3 forward = sub(p_heading, mul(up, dot(p_heading, up)));
@@ -103,20 +87,17 @@ VehiclePlacement place_on(const Vec3 &p_point, const Vec3 &p_normal, const Vec3 
 	return p;
 }
 
-// Rotates (0, 0, 1) by a quaternion (x, y, z, w).
 Vec3 forward_of(const std::array<float, 4> &p_q) {
 	const float x = p_q[0], y = p_q[1], z = p_q[2], w = p_q[3];
 	return { 2.0f * (x * z + w * y), 2.0f * (y * z - w * x), 1.0f - 2.0f * (x * x + y * y) };
 }
-
-// ---- the finder ---------------------------------------------------------------------------------------------------
 
 struct Cell {
 	bool sampled = false;
 	bool hit = false;
 	float y = 0;
 	Vec3 normal{};
-	int8_t clear = -1; // -1 unknown
+	int8_t clear = -1;
 };
 
 class Sampler {
@@ -137,8 +118,6 @@ public:
 	bool exhausted() const { return exhausted_; }
 	float grid() const { return grid_; }
 
-	// The cell's ground (front faces only, every static Collision surface; the highest one); null when the budget
-	// is spent.
 	const Cell *ground(int32_t p_i, int32_t p_j) {
 		Cell &c = cells_[key(p_i, p_j)];
 		if (!c.sampled) {
@@ -156,8 +135,6 @@ public:
 		return &c;
 	}
 
-	// Whether a 2.8 x 1.8 x 2.8 m box from 0.5 m above the cell's ground is free of Collision geometry (the chassis
-	// passing over it). False when the budget is spent or the cell has no ground.
 	bool clear(int32_t p_i, int32_t p_j) {
 		const Cell *g = ground(p_i, p_j);
 		if (g == nullptr || !g->hit) {
@@ -182,7 +159,6 @@ public:
 		return world_.overlap_box(p_center, p_half, 0.0f, query_mask::kCollision, 0.01f);
 	}
 
-	// A ray that ignores back faces (what the vehicle collides with); the hit normal is the triangle's front face.
 	bool ray(const Vec3 &p_origin, const Vec3 &p_delta, StaticHit *r_hit) {
 		if (!charge()) {
 			return false;
@@ -222,8 +198,7 @@ private:
 			r_hit->fraction = hit.mFraction;
 			const JPH::Vec3 p = origin + delta * hit.mFraction;
 			r_hit->position = { p.GetX(), p.GetY(), p.GetZ() };
-			// The front face's normal (tile bodies have the identity rotation: local = world; TC: terrain bodies through
-			// static_face_normal, turned by the field's rotation).
+
 			const JPH::BodyInterface &bi = w.system->GetBodyInterfaceNoLock();
 			const uint64_t user = bi.GetUserData(hit.mBodyID);
 			const uint64_t tile = user >> 2;
@@ -246,7 +221,7 @@ private:
 	float top_ = 0, drop_ = 0;
 	size_t budget_ = 0, queries_ = 0;
 	bool exhausted_ = false;
-	std::unordered_map<uint64_t, Cell> cells_; // looked up only, never iterated: its order cannot reach a result
+	std::unordered_map<uint64_t, Cell> cells_;
 };
 
 struct Dir {
@@ -266,7 +241,6 @@ Vec3 cell_point(const Sampler &p_s, int32_t p_i, int32_t p_j, float p_y) {
 	return { float(p_i) * p_s.grid(), p_y, float(p_j) * p_s.grid() };
 }
 
-// Every cell offset within p_radius of a cell, nearest first (fixed order).
 std::vector<Dir> ring_order(float p_radius, float p_grid) {
 	const int32_t r = int32_t(std::ceil(p_radius / p_grid));
 	std::vector<Dir> out;
@@ -288,15 +262,12 @@ std::vector<Dir> ring_order(float p_radius, float p_grid) {
 }
 
 struct Leg {
-	int32_t i = 0, j = 0; // start cell
+	int32_t i = 0, j = 0;
 	Dir d{};
-	int32_t cells = 0; // cells along the leg after the start
-	float feature = 0; // crest curvature (bumps)
+	int32_t cells = 0;
+	float feature = 0;
 };
 
-// A drivable straight leg of p_length m from cell (p_i, p_j) along p_d: every cell has ground no steeper than
-// p_max_degrees, clear above, with height steps that fit the slope, and (p_width) the cells beside it too.
-// r_feature gets the strongest crest curvature (1/m) along it. False when not drivable (or the budget ran out).
 bool check_leg(Sampler &r_s, int32_t p_i, int32_t p_j, const Dir &p_d, float p_length, float p_max_degrees, bool p_width, Leg &r_leg) {
 	const float step = dir_step(p_d, r_s.grid());
 	const int32_t n = int32_t(std::ceil(p_length / step));
@@ -316,7 +287,7 @@ bool check_leg(Sampler &r_s, int32_t p_i, int32_t p_j, const Dir &p_d, float p_l
 			crest = std::max(crest, -(c->y - 2.0f * prev_y + prev2_y) / (step * step));
 		}
 		if (p_width) {
-			// the cells beside the line (the slalom weaves about +-3 m)
+
 			for (const int32_t side : { -1, 1 }) {
 				const int32_t si = ci - side * p_d.dj, sj = cj + side * p_d.di;
 				const Cell *s = r_s.ground(si, sj);
@@ -336,8 +307,6 @@ bool check_leg(Sampler &r_s, int32_t p_i, int32_t p_j, const Dir &p_d, float p_l
 	return true;
 }
 
-// The disc of p_radius m beyond (p_i, p_j) along p_d (centre p_radius past the cell): ground within p_max_degrees and
-// clear everywhere (the vehicle turns around there).
 bool check_turnaround(Sampler &r_s, int32_t p_i, int32_t p_j, const Dir &p_d, float p_radius, float p_max_degrees) {
 	const Vec3 dv = dir_vec(p_d);
 	const float ci = float(p_i) + dv[0] * p_radius / r_s.grid();
@@ -360,7 +329,6 @@ bool check_turnaround(Sampler &r_s, int32_t p_i, int32_t p_j, const Dir &p_d, fl
 	return true;
 }
 
-// The leg's cells were sampled by check_leg, so these lookups are cache hits (no query).
 void fill_leg_course(Sampler &r_s, const Leg &p_leg, VehicleCourse &r_course) {
 	const Cell *start = r_s.ground(p_leg.i, p_leg.j);
 	const Cell *end = r_s.ground(p_leg.i + p_leg.cells * p_leg.d.di, p_leg.j + p_leg.cells * p_leg.d.dj);
@@ -368,8 +336,7 @@ void fill_leg_course(Sampler &r_s, const Leg &p_leg, VehicleCourse &r_course) {
 	r_course.b = cell_point(r_s, p_leg.i + p_leg.cells * p_leg.d.di, p_leg.j + p_leg.cells * p_leg.d.dj, end->y);
 	Vec3 normal = start->normal, heading = dir_vec(p_leg.d);
 	if (r_course.b[1] > r_course.a[1] + 0.5f) {
-		// The forward pass runs downhill (the reverse pass climbs): on MP_007's rough 5 degree bumps leg the Humvee
-		// cannot reach its bumps speed uphill (s2.md §15).
+
 		std::swap(r_course.a, r_course.b);
 		normal = end->normal;
 		heading = { -heading[0], 0.0f, -heading[2] };
@@ -378,7 +345,7 @@ void fill_leg_course(Sampler &r_s, const Leg &p_leg, VehicleCourse &r_course) {
 	r_course.feature = p_leg.feature;
 }
 
-} // namespace
+}
 
 const char *vehicle_course_name(VehicleCourseKind p_kind) {
 	switch (p_kind) {
@@ -447,10 +414,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 					case VehicleCourseKind::Slalom:
 					case VehicleCourseKind::Bumps: {
 						const bool bumps = kind == VehicleCourseKind::Bumps;
-						// Bumps: ground up to 8 degrees with the cells beside the line checked too, and instead of the
-						// turnaround discs the line itself extended by kBumpsRoom at both ends (the shuttle's overshoot room;
-						// the course is the inner 150 m). s2.md §15: a 12 degree line without side cells rolled the Humvee
-						// over on MP_007 at 55 km/h, and no 8 degree line there has the flat discs.
+
 						const float max_deg = bumps ? 8.0f : p_search.max_flat_degrees;
 						constexpr float kBumpsRoom = 16.0f;
 						for (const Dir &d : kDirs) {
@@ -478,7 +442,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 								best = leg;
 								have_best = true;
 								best_seed = seed;
-								continue; // keep looking for a stronger crest within this kind's budget
+								continue;
 							}
 							fill_leg_course(s, leg, course);
 							course.found = true;
@@ -488,7 +452,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 						break;
 					}
 					case VehicleCourseKind::Circle: {
-						// A flat disc of 25 m radius around the cell; the vehicle circles at full lock from its centre.
+
 						const float min_up = std::cos(p_search.max_flat_degrees * kDegrees);
 						if (c->normal[1] < min_up) {
 							break;
@@ -520,9 +484,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 						break;
 					}
 					case VehicleCourseKind::Collision: {
-						// ~30 km/h square into a wall: a front-facing, near vertical Collision surface 18..35 m ahead at chassis
-						// height, also 1.6 m up and 1 m to either side (>= 1.5 m tall, >= 2 m wide), a flat clear approach
-						// to 4 m before it and 15 m of room behind the start to back up into.
+
 						const float min_up = std::cos(6.0f * kDegrees);
 						if (c->normal[1] < min_up || !s.clear(ci, cj)) {
 							break;
@@ -559,7 +521,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 							if (s.ray(add(base, { 0.0f, 2.4f, 0.0f }), mul(dv, 40.0f), &top) && std::fabs(top.fraction * 40.0f - dist) <= 1.5f) {
 								height = 2.4f;
 							}
-							// approach and back-up room
+
 							const float step = dir_step(d, grid);
 							const int32_t ahead = int32_t((dist - 4.0f) / step);
 							const int32_t behind = int32_t(std::ceil(15.0f / step));
@@ -587,7 +549,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 						break;
 					}
 					case VehicleCourseKind::SlopeIdle: {
-						// 8..20 degree ground, planar over the 4-neighbours (within 5 degrees and 0.15 m), clear above.
+
 						const float ny = c->normal[1];
 						if (ny > std::cos(8.0f * kDegrees) || ny < std::cos(20.0f * kDegrees)) {
 							break;
@@ -599,7 +561,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 								ok = false;
 								break;
 							}
-							// the plane through the cell predicts the neighbour's height
+
 							const float dx = float(d.di) * grid, dz = float(d.dj) * grid;
 							const float predicted = c->y - (c->normal[0] * dx + c->normal[2] * dz) / ny;
 							if (std::fabs(n->y - predicted) > 0.15f) {
@@ -614,7 +576,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 						if (s.overlap(add(p, { 0.0f, 1.4f + 0.6f, 0.0f }), { 1.0f, 0.6f, 1.0f })) {
 							break;
 						}
-						// face uphill (the normal's horizontal part points downhill)
+
 						const Vec3 uphill = horizontal({ -c->normal[0], 0.0f, -c->normal[2] });
 						course.a = p;
 						course.b = add(p, mul(uphill, 10.0f));
@@ -692,14 +654,14 @@ std::array<VehicleCourse, 3> synthetic_vehicle_group(const SyntheticVehicleGroun
 	const float y = p_ground.y;
 	const Vec3 up{ 0.0f, 1.0f, 0.0f };
 	std::array<VehicleCourse, 3> out;
-	// slot 0 idles across the z = 384 tile seam, its length along x
+
 	VehicleCourse &idle = out[0];
 	idle.kind = VehicleCourseKind::SlopeIdle;
 	idle.found = true;
 	idle.a = { 10.0f, y, 384.0f };
 	idle.b = idle.a;
 	idle.start = place_on(idle.a, up, { 1.0f, 0.0f, 0.0f });
-	// slot 1 rams slot 0's side at ~30 km/h, backs off 15 m, again
+
 	VehicleCourse &ram = out[1];
 	ram.kind = VehicleCourseKind::Collision;
 	ram.found = true;
@@ -707,7 +669,7 @@ std::array<VehicleCourse, 3> synthetic_vehicle_group(const SyntheticVehicleGroun
 	ram.b = { 10.0f, y, 382.8f };
 	ram.start = place_on(ram.a, up, { 0.0f, 0.0f, 1.0f });
 	ram.feature = 1.5f;
-	// slot 2 slaloms along z = 387.5 across the x = 0 and x = 64 seams, passing slot 0's far side
+
 	VehicleCourse &weave = out[2];
 	weave.kind = VehicleCourseKind::Slalom;
 	weave.found = true;
@@ -717,8 +679,6 @@ std::array<VehicleCourse, 3> synthetic_vehicle_group(const SyntheticVehicleGroun
 	return out;
 }
 
-// ---- the scripted drivers ---------------------------------------------------------------------------------------
-
 namespace {
 
 namespace phase {
@@ -726,11 +686,11 @@ constexpr uint8_t kDrive = 0, kStop = 1, kTurn = 2, kBrakeTest = 3, kUnstick = 4
 }
 
 struct Pilot {
-	Vec3 position{}; // frame origin
-	Vec3 forward{}; // horizontal, unit
-	Vec3 right{}; // horizontal, unit: (-forward.z, 0, forward.x), the project's right (-X at yaw 0)
-	float forward_speed = 0; // m/s along forward
-	float speed = 0; // m/s
+	Vec3 position{};
+	Vec3 forward{};
+	Vec3 right{};
+	float forward_speed = 0;
+	float speed = 0;
 
 	explicit Pilot(const VehicleState &p_state) {
 		position = p_state.body.origin;
@@ -740,7 +700,6 @@ struct Pilot {
 		speed = length(p_state.body.linear_velocity);
 	}
 
-	// Heading error to p_target (radians, > 0 = the target is to the right).
 	float angle_to(const Vec3 &p_target) const {
 		const Vec3 d = sub(p_target, position);
 		return std::atan2(d[0] * right[0] + d[2] * right[2], d[0] * forward[0] + d[2] * forward[2]);
@@ -752,7 +711,6 @@ int8_t steer_code(float p_value) {
 	return int8_t(std::lround(v));
 }
 
-// Throttle / brake towards a forward speed (m/s).
 void hold_speed(const Pilot &p_pilot, float p_target, VehicleCommand &r_command) {
 	const float err = p_target - p_pilot.forward_speed;
 	if (err > 0.0f) {
@@ -762,7 +720,6 @@ void hold_speed(const Pilot &p_pilot, float p_target, VehicleCommand &r_command)
 	}
 }
 
-// A point p_ahead m past the vehicle's projection on the line p_from -> p_to (not past p_to).
 Vec3 lookahead(const Pilot &p_pilot, const Vec3 &p_from, const Vec3 &p_to, float p_ahead) {
 	const Vec3 line = sub(p_to, p_from);
 	const float len = length({ line[0], 0.0f, line[2] });
@@ -776,8 +733,6 @@ void set_phase(VehicleScriptMemory &r_memory, uint8_t p_phase) {
 	r_memory.phase_ticks = 0;
 }
 
-// A point p_back m behind the vehicle's projection on the line p_from -> p_to (not before p_from): the reverse
-// target.
 Vec3 lookback(const Pilot &p_pilot, const Vec3 &p_from, const Vec3 &p_to, float p_back) {
 	const Vec3 line = sub(p_to, p_from);
 	const float len = length({ line[0], 0.0f, line[2] });
@@ -786,34 +741,25 @@ Vec3 lookback(const Pilot &p_pilot, const Vec3 &p_from, const Vec3 &p_to, float 
 	return add(p_from, mul(dir, std::max(along - p_back, 0.0f)));
 }
 
-// Steering while reversing towards p_target: the rear follows the steer side (the turning centre is on the steer
-// side whichever way the vehicle moves), so a target to the vehicle's right needs a right steer.
 float reverse_steer(const Pilot &p_pilot, const Vec3 &p_target, float p_gain) {
 	const Vec3 d = sub(p_target, p_pilot.position);
-	const float back_lateral = -(d[0] * p_pilot.right[0] + d[2] * p_pilot.right[2]); // > 0: target to the vehicle's left
+	const float back_lateral = -(d[0] * p_pilot.right[0] + d[2] * p_pilot.right[2]);
 	const float back_along = -(d[0] * p_pilot.forward[0] + d[2] * p_pilot.forward[2]);
 	return -p_gain * std::atan2(back_lateral, back_along);
 }
 
-// Straight, Brake, Slalom and Bumps: a shuttle on the leg. Forward a -> b (the kind's way: full throttle; full throttle
-// with one full-brake test from 60 km/h; +-full steer at 0.5 Hz at 40 km/h; 55 km/h over the bumps), stop a few metres
-// past b, reverse back to a few metres past a at 30 km/h, stop, again. The vehicle never leaves the corridor the finder
-// checked (the leg's cells, and for the slalom the cells beside it) plus the turnaround discs at both ends, which give
-// the overshoot room; a U-turn at full lock swings ~15 m sideways, onto ground nobody checked (s2.md §15: on MP_007
-// the U-turns hit trees beside the leg ends).
 VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, VehicleScriptMemory &r_m) {
 	VehicleCommand c;
 	const Vec3 dir = horizontal(sub(p_course.b, p_course.a));
-	const float along = dot(sub(p_p.position, p_course.a), dir); // from a towards b
+	const float along = dot(sub(p_p.position, p_course.a), dir);
 	const float remaining = dot(sub(p_course.b, p_p.position), dir);
 	const VehicleCourseKind kind = p_course.kind;
 	constexpr float kReverseSpeed = 30.0f / 3.6f;
-	// Braking distances with 8 m/s^2 assumed (the placeholder brakes at ~9): the stops land a few metres past the ends.
+
 	constexpr float kDecel = 8.0f, kOvershoot = 6.0f;
 	switch (r_m.phase) {
 		case phase::kDrive: {
-			// bumps at 55 km/h (s2.md §8.2 "crossed at >= 50 km/h"): at 60 the chassis grounds on MP_007's crests, at 50 the
-			// synthetic kicker unloads no wheel
+
 			const float cruise = kind == VehicleCourseKind::Slalom ? 40.0f / 3.6f : (kind == VehicleCourseKind::Bumps ? 55.0f / 3.6f : 200.0f);
 			if (kind == VehicleCourseKind::Straight || kind == VehicleCourseKind::Brake) {
 				c.throttle = 127;
@@ -822,13 +768,13 @@ VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, Vehicl
 			}
 			float steer = 2.5f * p_p.angle_to(lookahead(p_p, p_course.a, p_course.b, 12.0f));
 			if (kind == VehicleCourseKind::Slalom && p_p.speed > 15.0f / 3.6f && remaining > 15.0f) {
-				// +-full steer at 0.5 Hz about the line, the line correction on top
+
 				const float weave = ((r_m.phase_ticks / 60u) % 2u) == 0 ? 1.0f : -1.0f;
 				steer = weave + 0.6f * steer;
 			}
 			c.steer = steer_code(steer);
 			const float stop = p_p.forward_speed * p_p.forward_speed / (2.0f * kDecel) - kOvershoot;
-			// One brake test per forward pass (measured[1] = done); afterwards full throttle on to the end of the leg.
+
 			if (kind == VehicleCourseKind::Brake && r_m.measured[1] == 0.0f && p_p.forward_speed >= 60.0f / 3.6f) {
 				r_m.measured[0] = p_p.forward_speed;
 				r_m.measured[1] = 1.0f;
@@ -836,7 +782,7 @@ VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, Vehicl
 			} else if (remaining < stop) {
 				set_phase(r_m, phase::kStop);
 			} else if (r_m.phase_ticks > 240 && p_p.speed < 0.5f) {
-				set_phase(r_m, phase::kBack); // stuck: reverse out
+				set_phase(r_m, phase::kBack);
 			}
 			break;
 		}
@@ -849,10 +795,10 @@ VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, Vehicl
 		case phase::kHold:
 			c.brake = 255;
 			if (r_m.phase_ticks >= 30) {
-				set_phase(r_m, phase::kDrive); // on to the end of the leg
+				set_phase(r_m, phase::kDrive);
 			}
 			break;
-		case phase::kStop: // past b: stop, then reverse
+		case phase::kStop:
 			c.brake = 255;
 			if (p_p.speed < 0.5f && r_m.phase_ticks >= 10) {
 				set_phase(r_m, phase::kBack);
@@ -868,20 +814,20 @@ VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, Vehicl
 			}
 			float steer = reverse_steer(p_p, lookback(p_p, p_course.a, p_course.b, 8.0f), 1.5f);
 			if (kind == VehicleCourseKind::Slalom && p_p.speed > 15.0f / 3.6f && along > 15.0f) {
-				// the slalom weaves in reverse too (+-full steer at 0.5 Hz, the line correction on top)
+
 				const float weave = ((r_m.phase_ticks / 60u) % 2u) == 0 ? 1.0f : -1.0f;
 				steer = weave + 0.6f * steer;
 			}
 			c.steer = steer_code(steer);
 			const float stop = back_speed * back_speed / (2.0f * kDecel) - kOvershoot;
 			if (along < stop) {
-				set_phase(r_m, phase::kTurn); // past a: stop, then forward
+				set_phase(r_m, phase::kTurn);
 			} else if (r_m.phase_ticks > 240 && p_p.speed < 0.5f) {
-				set_phase(r_m, phase::kDrive); // stuck: drive out
+				set_phase(r_m, phase::kDrive);
 			}
 			break;
 		}
-		case phase::kTurn: // past a (the reverse end): stop, then forward again
+		case phase::kTurn:
 		default:
 			c.brake = 255;
 			if (p_p.speed < 0.5f && r_m.phase_ticks >= 10) {
@@ -893,7 +839,7 @@ VehicleCommand drive_leg(const VehicleCourse &p_course, const Pilot &p_p, Vehicl
 	return c;
 }
 
-} // namespace
+}
 
 VehicleCommand drive_vehicle_course(const VehicleCourse &p_course, const VehicleModel &, const VehicleState &p_state, Tick p_tick,
 		VehicleScriptMemory &r_memory) {
@@ -908,7 +854,7 @@ VehicleCommand drive_vehicle_course(const VehicleCourse &p_course, const Vehicle
 			break;
 		case VehicleCourseKind::Circle:
 			hold_speed(p, 15.0f / 3.6f, c);
-			c.steer = -127; // full lock left
+			c.steer = -127;
 			break;
 		case VehicleCourseKind::Collision: {
 			const Vec3 dir = horizontal(sub(p_course.b, p_course.a));
@@ -920,17 +866,14 @@ VehicleCommand drive_vehicle_course(const VehicleCourse &p_course, const Vehicle
 					r_memory.measured[0] = std::max(r_memory.measured[0], p.forward_speed);
 					r_memory.measured[2] = r_memory.phase_ticks == 0 ? along : std::max(r_memory.measured[2], along);
 					if (r_memory.measured[0] > 5.0f && p.speed < 1.5f && r_memory.phase_ticks > 30) {
-						set_phase(r_memory, phase::kPress); // stopped by the wall
+						set_phase(r_memory, phase::kPress);
 					} else if (r_memory.phase_ticks > 900 || along > length(sub(p_course.b, p_course.a)) + 3.0f) {
 						r_memory.measured[1] = along;
 						set_phase(r_memory, phase::kBack);
 					}
 					break;
 				case phase::kPress:
-					// The impact bounces the chassis back (restitution 0.4 above Jolt's 1 m/s restitution threshold).
-					// Creep back in at 1 m/s (no bounce below that) and push against the wall for 40 ticks (a
-					// sustained chassis-static contact: gate D's static-contact ticks, G2's static-collision samples),
-					// then back off. measured[2] is the furthest point reached, i.e. where the wall stopped it.
+
 					hold_speed(p, 1.0f, c);
 					c.steer = steer_code(2.5f * p.angle_to(lookahead(p, p_course.a, p_course.b, 10.0f)));
 					if (along > r_memory.measured[2] - 0.1f && p.speed < 0.3f) {
@@ -960,23 +903,20 @@ VehicleCommand drive_vehicle_course(const VehicleCourse &p_course, const Vehicle
 			break;
 		}
 		case VehicleCourseKind::SlopeIdle:
-			// full brake while the stand-still timer runs up, then nothing (the stand-still brake holds it)
+
 			if (p_tick <= 240) {
 				c.brake = 255;
 			}
 			break;
 	}
 	++r_memory.phase_ticks;
-	// Only slope_idle ever sends the all-zero command (s2.md §8.2): a driving script that would coast sends the
-	// smallest throttle instead, so the wake rule keeps the chassis awake.
+
 	if (p_course.kind != VehicleCourseKind::SlopeIdle && c.throttle == 0 && c.brake == 0 && c.steer == 0 && c.buttons == 0) {
 		c.throttle = 1;
 	}
 	c.tick = p_tick;
 	return c;
 }
-
-// ---- command logs ------------------------------------------------------------------------------------------------
 
 namespace {
 
@@ -991,7 +931,7 @@ bool parse_int(std::string_view p_text, int64_t &r_value) {
 	return r.ec == std::errc() && r.ptr == p_text.data() + p_text.size();
 }
 
-} // namespace
+}
 
 std::string format_vehicle_command_log(const VehicleCommandLog &p_log) {
 	std::string out(kLogHeader);
@@ -1071,4 +1011,4 @@ core::Result<VehicleCommandLog> parse_vehicle_command_log(std::string_view p_tex
 	return log;
 }
 
-} // namespace bf3::sim
+}

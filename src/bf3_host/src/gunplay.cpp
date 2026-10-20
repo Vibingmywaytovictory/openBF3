@@ -1,5 +1,3 @@
-// Gunplay inside the GameServer (docs/design/m2a.md §4, §5, §6 server side; owner sv; gunplay.h has the tick order and
-// the rules as built). Server thread only. The level side (load_gunplay_level) runs on the loader thread.
 #include "bf3/host/gunplay.h"
 
 #include "bf3/anim/clip_asset.h"
@@ -53,14 +51,11 @@ bool alive(const sim::SoldierState &p_state) {
 	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead && p_state.life != 0;
 }
 
-// The capsule table's transition rows: (from, to) per core::gameplay::CapsuleTransition.
 constexpr std::array<std::array<uint8_t, 2>, gp::kCapsuleTransitions> kTransitionPoses{ { { 0, 1 }, { 0, 2 }, { 1, 0 }, { 1, 2 }, { 2, 0 }, { 2, 1 } } };
 
-constexpr size_t kAckRing = 64; // per slot, by command tick (the jitter buffer holds <= 32 ticks ahead)
+constexpr size_t kAckRing = 64;
 
-} // namespace
-
-// ---- level side ----------------------------------------------------------------------------------------------------
+}
 
 uint64_t gunplay_level_hash(std::string_view p_level, std::string_view p_mode) {
 	uint64_t h = 0xCBF29CE484222325ull;
@@ -140,7 +135,6 @@ core::Result<gp::CapsulePoseTable> standin_capsule_table(const gp::SoldierDef &p
 
 namespace {
 
-// The capsule pose table from the retail clips (lc's builder), else the whole-table stand-in with the reason.
 gp::CapsulePoseTable build_capsules(std::shared_ptr<const core::Install> p_install, GunplayLevel &r_level, const sw::CapsuleTableData &p_data,
 		bool &r_ok) {
 	r_ok = false;
@@ -192,15 +186,15 @@ gp::CapsulePoseTable build_capsules(std::shared_ptr<const core::Install> p_insta
 	return std::move(*table);
 }
 
-} // namespace
+}
 
 core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id,
-		std::string_view p_mode) { // M2b ru [kits]: the 3-argument form passes default options (M2a unchanged)
-	return load_gunplay_level(std::move(p_install), p_level_id, p_mode, GunplayLoadOptions{}); // M2b ru [kits]
-} // M2b ru [kits]
+		std::string_view p_mode) {
+	return load_gunplay_level(std::move(p_install), p_level_id, p_mode, GunplayLoadOptions{});
+}
 
-core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id, // M2b ru [kits]
-		std::string_view p_mode, const GunplayLoadOptions &p_options) { // M2b ru [kits]
+core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id,
+		std::string_view p_mode, const GunplayLoadOptions &p_options) {
 	const std::string where = "load_gunplay_level " + std::string(p_level_id) + " " + std::string(p_mode);
 	if (p_install == nullptr) {
 		return core::make_error(where + ": no install");
@@ -223,8 +217,6 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 	level->max_health = w->max_health;
 	level->seconds_weapons = seconds_since(clock);
 
-	// Kits: the mode's teams, the progression tables, each kit's default unlocks; the defs are the unlocks of the slots
-	// M2a resolves, sorted by variant (so the def ids do not depend on the order of the data's lists).
 	clock = std::chrono::steady_clock::now();
 	const core::EbxResolver &db = *w->catalog->sources().level;
 	gp::WorkBudget budget;
@@ -257,9 +249,9 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 			kits.push_back(std::move(*kit));
 		}
 	}
-	if (p_options.tdm_kits) { // M2b ru [kits]: the assault gadget (#9), resolved with the kit slots' defs
-		variants.insert(std::string(kTdmAssaultGadget)); // M2b ru [kits]
-	} // M2b ru [kits]
+	if (p_options.tdm_kits) {
+		variants.insert(std::string(kTdmAssaultGadget));
+	}
 	for (const std::string &v : variants) {
 		core::Result<gp::WeaponDef> def = w->catalog->resolve(v);
 		if (!def) {
@@ -267,11 +259,11 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 		}
 		level->defs.push_back(std::move(*def));
 	}
-	KitTableOptions kit_options; // M2b ru [kits]
-	if (p_options.tdm_kits) { // M2b ru [kits]
-		kit_options.assault_gadget = std::string(kTdmAssaultGadget); // M2b ru [kits]
-	} // M2b ru [kits]
-	core::Result<KitTable> table = make_kit_table(mode->teams, kits, level->defs, kit_options); // M2b ru [kits]
+	KitTableOptions kit_options;
+	if (p_options.tdm_kits) {
+		kit_options.assault_gadget = std::string(kTdmAssaultGadget);
+	}
+	core::Result<KitTable> table = make_kit_table(mode->teams, kits, level->defs, kit_options);
 	if (!table) {
 		return core::error_at(where, table.error());
 	}
@@ -342,7 +334,6 @@ uint8_t match_weapon_flags(bool p_exact_aim, bool p_infinite_magazine) {
 	return uint8_t((p_exact_aim ? net::weapon_flags::kExactAim : 0u) | (p_infinite_magazine ? net::weapon_flags::kInfiniteMagazine : 0u));
 }
 
-// load_shared_gunplay (level_load.h, M2a sv block): defined here so level_load.cpp keeps its includes.
 core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level) {
 	if (p_db.install == nullptr || p_db.level == nullptr) {
 		return core::make_error("load_shared_gunplay: no level database");
@@ -358,8 +349,6 @@ core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level
 	return core::Status::success();
 }
 
-// ---- the server side -----------------------------------------------------------------------------------------------
-
 struct Gunplay::Impl {
 	struct AckEntry {
 		bool valid = false;
@@ -371,12 +360,12 @@ struct Gunplay::Impl {
 		uint8_t team = 0;
 		uint8_t kit = 0;
 		sim::Tick spawn_tick = 0;
-		bool fired = false; // this life (spawn protection ends for damage, gunplay.h)
+		bool fired = false;
 		sw::SoldierWeaponsState weapons;
-		sw::WeaponTickOutput out; // the last weapon step
+		sw::WeaponTickOutput out;
 		sim::Tick out_tick = 0;
 		bool shot_last_tick = false;
-		bool firing = false; // trigger down and a shot this snapshot interval
+		bool firing = false;
 		uint32_t reload_count = 0;
 		uint32_t burst_count = 0;
 		std::array<AckEntry, kAckRing> acks{};
@@ -400,7 +389,7 @@ struct Gunplay::Impl {
 	std::array<uint8_t, net::kMaxSlots> teams{};
 	sw::ProjectileStepOutput step_out;
 	sim::Tick step_tick = 0;
-	std::vector<sw::DamageEvent> tick_damage; // the last rules step, sorted
+	std::vector<sw::DamageEvent> tick_damage;
 	std::vector<net::DeathEvent> tick_deaths;
 	std::vector<sw::DetonationEvent> tick_detonations;
 	std::vector<uint8_t> pending_fall_deaths;
@@ -408,7 +397,7 @@ struct Gunplay::Impl {
 	GunplayStats stats;
 	double weapons_acc_ms = 0;
 	sw::SoldierWeaponsState empty_state;
-	std::vector<RewindTraceRow> rewind_rows; // M2a cl: GunplayObserver::wants_rewind_rows (dev / tests)
+	std::vector<RewindTraceRow> rewind_rows;
 
 	void clear(uint8_t p_slot) {
 		Slot &s = slots[p_slot];
@@ -416,7 +405,7 @@ struct Gunplay::Impl {
 		s.armed = false;
 		s.weapons = sw::SoldierWeaponsState();
 		s.weapons.player_slot = p_slot;
-		s.weapons.next_shot_index = old.next_shot_index; // shot indices are never reused over the match
+		s.weapons.next_shot_index = old.next_shot_index;
 		s.weapons.tick = old.tick;
 		s.shot_last_tick = false;
 	}
@@ -455,9 +444,9 @@ core::Result<std::unique_ptr<Gunplay>> Gunplay::create(const SharedLevel &p_leve
 	m.projectiles = std::make_unique<sw::ProjectileWorld>(m.table);
 	m.history = std::make_unique<LagHistory>(p_config.lag, uint32_t(net::kMaxSlots));
 	m.rewind = std::make_unique<RewindProvider>(*m.history, level.capsule_table, p_config.lag);
-	if (p_config.observer != nullptr && p_config.observer->wants_rewind_rows()) { // M2a cl
-		m.rewind->set_trace(&m.rewind_rows); // M2a cl
-	} // M2a cl
+	if (p_config.observer != nullptr && p_config.observer->wants_rewind_rows()) {
+		m.rewind->set_trace(&m.rewind_rows);
+	}
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		m.slots[i].weapons.player_slot = uint32_t(i);
 	}
@@ -483,7 +472,7 @@ void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p
 	s.team = p_team;
 	s.kit = p_kit < kKitCount ? p_kit : 0;
 	if (p_team < 1 || p_team > kKitTeams) {
-		return; // no kit for team 0 (spawn-sweep dummies)
+		return;
 	}
 	const KitLoadout &l = m.level->kits.loadout(p_team, s.kit);
 	if (!sw::spawn_soldier_weapons(s.weapons, *m.table, l.defs, l.active, p_tick).ok()) {
@@ -503,7 +492,7 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 	}
 	Impl::Slot &s = m.slots[p_slot];
 	if (alive(p_before) && !alive(p_after)) {
-		m.pending_fall_deaths.push_back(p_slot); // the motor killed it (fall damage): the rules step reports it
+		m.pending_fall_deaths.push_back(p_slot);
 	}
 	if (!s.armed) {
 		return;
@@ -534,7 +523,7 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 		}
 		s.firing = true;
 		s.fired = true;
-		// The command's view sample, stored for every shot of the command (§4.1 4a, §6.3).
+
 		bool have_view = false;
 		bool refused = false;
 		ShotView view;
@@ -594,10 +583,10 @@ void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierStat
 	m.stats.lag = m.rewind->stats();
 	if (m.config.observer) {
 		m.config.observer->projectiles(p_tick, m.step_out, m.projectiles->live());
-		if (!m.rewind_rows.empty()) { // M2a cl
-			m.config.observer->rewind_rows(p_tick, m.rewind_rows); // M2a cl
-			m.rewind_rows.clear(); // M2a cl
-		} // M2a cl
+		if (!m.rewind_rows.empty()) {
+			m.config.observer->rewind_rows(p_tick, m.rewind_rows);
+			m.rewind_rows.clear();
+		}
 	}
 }
 
@@ -623,7 +612,7 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 		if (a.pellet != b.pellet) {
 			return a.pellet < b.pellet;
 		}
-		return a.target < b.target; // a blast's victims
+		return a.target < b.target;
 	});
 	for (const sw::DamageEvent &e : m.tick_damage) {
 		const uint32_t victim = e.target;
@@ -642,7 +631,7 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 			sim::SoldierState &st = p_states[victim];
 			sw::Mechanics mech = m.table->mechanics;
 			if (m.slots[victim].fired) {
-				mech.spawn_protection_blocks = false; // protection ends when the soldier fires (§4.3)
+				mech.spawn_protection_blocks = false;
 			}
 			applied = sw::apply_damage(st, e.amount, mech);
 			health_after = st.health;
@@ -808,7 +797,7 @@ net::OtherSoldier Gunplay::other_record(uint8_t p_slot, const sim::SoldierState 
 		const sw::WeaponSlotState &w = s.weapons.current();
 		net::set_other_weapon(o, w.def, w.phase, s.firing, (w.flags & sw::slot_flags::kZoomWasDown) != 0, s.reload_count, s.burst_count);
 	}
-	net::set_other_team(o, p_slot < m.slots.size() ? m.slots[p_slot].team : uint8_t(0)); // M2a w3 [G1]: the life's team on the wire
+	net::set_other_team(o, p_slot < m.slots.size() ? m.slots[p_slot].team : uint8_t(0));
 	return o;
 }
 
@@ -931,4 +920,4 @@ net::ShotQuantization shot_frame(const sim::StaticWorldShapes &p_world) {
 	return q;
 }
 
-} // namespace bf3::host
+}

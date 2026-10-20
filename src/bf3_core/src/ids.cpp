@@ -1,4 +1,3 @@
-// Ported from IW4L superbundle_bf3 (ids.rs), Apache-2.0.
 #include "bf3/core/ids.h"
 
 #include <algorithm>
@@ -37,10 +36,10 @@ char lower(char p_c) {
 	return (p_c >= 'A' && p_c <= 'Z') ? static_cast<char>(p_c + ('a' - 'A')) : p_c;
 }
 
-} // namespace
+}
 
 uint64_t hash_seed() {
-	// Drawn once per process (thread-safe static init): the OS generator, the clock and an address.
+
 	static const uint64_t seed = [] {
 		std::random_device device;
 		uint64_t s = (static_cast<uint64_t>(device()) << 32) ^ static_cast<uint64_t>(device());
@@ -177,4 +176,4 @@ std::string hex_lower(const uint8_t *p_bytes, size_t p_count) {
 	return out;
 }
 
-} // namespace bf3::core
+}

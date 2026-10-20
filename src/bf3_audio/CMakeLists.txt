@@ -1,6 +1,3 @@
-# M2a audio (docs/design/m2a-audio.md): bf3_audio, the Godot-free client audio runtime: patch instances (the A2
-# interpreter), the mixer core the Godot AudioStreamPlayback pulls from, DSP, WAV recording and analysis, the
-# weapon seam. Reads compiled programs and wave banks from bf3_core's audio/ readers.
 add_library(bf3_audio STATIC
     src/audio_analysis.cpp
     src/audio_check.cpp
@@ -28,9 +25,6 @@ target_include_directories(bf3_audio PUBLIC include)
 target_link_libraries(bf3_audio PUBLIC bf3_core)
 openbf3_module(bf3_audio)
 
-# M2a w3 (W3.0 contract, docs/design/m2a-w3.md; owner au3): the weapon router, impact sounds and the in-game check.
-# bf3_audio reads the client's presentation types (PresentEvent, PresentedSoldier, PresentClock), so it links
-# bf3_host; bf3_host never links bf3_audio.
 target_sources(bf3_audio PRIVATE
     include/bf3/audio/weapon_audio.h
     include/bf3/audio/impact_audio.h
@@ -38,7 +32,6 @@ target_sources(bf3_audio PRIVATE
 )
 target_link_libraries(bf3_audio PUBLIC bf3_host)
 
-# M2a au3 (docs/design/m2a-au3.md): the bodies of the W3.0 headers above.
 target_sources(bf3_audio PRIVATE
     src/weapon_audio.cpp
     src/impact_audio.cpp
@@ -49,20 +42,16 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/game_audio_frame.h
 )
 
-# M2b W1.0 (docs/design/m2b.md §2.6 #15, §6; docs/design/m2b-w1.md): the A3 mixer headers (owner au, who adds
-# hdr_window.cpp and voice_cull.cpp in a block of its own).
 target_sources(bf3_audio PRIVATE
     include/bf3/audio/hdr_window.h
     include/bf3/audio/voice_cull.h
 )
 
-# M2b au (docs/design/m2b.md §2.6 #15, §6; docs/design/m2b-au.md): the HDR window and the voice cull.
 target_sources(bf3_audio PRIVATE
     src/hdr_window.cpp
     src/voice_cull.cpp
 )
 
-# PT1 rld (docs/design/pt1-rld.md): the weapon foley inputs of a kit patch, read from its sound graph.
 target_sources(bf3_audio PRIVATE
     src/weapon_foley.cpp
     include/bf3/audio/weapon_foley.h

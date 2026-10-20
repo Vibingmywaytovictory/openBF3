@@ -1,28 +1,4 @@
 #pragma once
-// The ui1 Godot check (docs/design/ui-swf-fonts.md §1 gates G4/G5, §11): res://scenes/ui_fonts.tscn, a Control
-// that shows BF3's fonts and atlases through Bf3UiAssets and checks them.
-//
-//   headless  -- --ui-check                 PASS/FAIL table, last line "UI1 CHECK: PASS (n/n)", exit 0 / 1
-//   windowed  -- --ui-check --shot-dir=<d>  the same, plus screenshots <d>/ui1_fonts.png, ui1_coverage.png,
-//                                           ui1_icons.png; ctest passes $ENV{OPENBF3_UI1_SHOTS}, default
-//                                           C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1 (absolute,
-//                                           gitignored, outside the worktree; never committed)
-//
-// Rows: per font (Purista EA Medium / Semibold, Venice-Medium / SemiBold) fonts.set_data (FontFile accepted, font
-// name read back), fonts.glyphs (the TrueType maxp count = source glyphs + 1; get_supported_chars() has exactly
-// the distinct codes; has_char for each), fonts.contours (TextServer.font_get_glyph_contours for every glyph:
-// the same contour count and orientation as the TrueType writer's, i.e. no inverted contour), fonts.metrics
-// (on make_font_file's settings at 64 px: ascent within 1 px; every glyph's TextServer advance within 0.05 px of
-// the source layout; "0123456789" and "OPERATION MÉTRO" widths within 0.5 px of the source advances + kerning),
-// fonts.kerning (Purista "AV" narrower than "A" + "V" by 3.84 +/- 0.25 px), fonts.metro (U+00C9 shapes
-// to a real glyph, not .notdef), fonts.mapping (every $-name of the census resolves), fonts.coverage (reported),
-// atlas.iconsingame (162 regions inside 4096 x 128, the label counts of swf_atlas.h), atlas.regions (AtlasTexture
-// rectangles of the design's spot checks; the uploaded ImageTexture sizes), hud.table (86 placements on the 14
-// screens), install.unchanged. The row list in docs/design/ui-swf-fonts.md §11.1 is authoritative.
-//
-// The screens drawn for the shots: sample strings in each font at 16 / 32 / 64 px on a dark background
-// ("OPERATION MÉTRO", the alphabet, "31 / 155", the Venice digits), the coverage table (every code of each font in
-// a grid with its hex value), and the iconsingame labels with their regions.
 
 #include <godot_cpp/classes/control.hpp>
 
@@ -58,8 +34,7 @@ private:
 	};
 	void run_checks(Bf3UiAssets &p_assets);
 	void finish();
-	// Added by the implementation: Godot-free inputs of the rows (source outlines, the font-name census, the text
-	// database coverage) computed on the check's own thread once the assets are loaded; the page drawing and shots.
+
 	struct Work;
 	void start_work(Bf3UiAssets &p_assets);
 	void draw_fonts_page(Bf3UiAssets &p_assets);
@@ -80,4 +55,4 @@ private:
 	int exit_code_ = 0;
 };
 
-} // namespace bf3::godot_side
+}

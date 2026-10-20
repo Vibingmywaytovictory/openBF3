@@ -1,6 +1,3 @@
-// Havok shape walk and convex tessellation: port of IW4L havok/geometry.rs and havok/hull.rs. The
-// hull runs in double precision on float inputs; iteration and tie-breaking order follow the Rust
-// code (Iterator::max_by keeps the last maximum, sort_by is stable) so outputs are bit-identical.
 #include "bf3/core/res/havok.h"
 
 #include <algorithm>
@@ -14,9 +11,6 @@ namespace bf3::core::res {
 namespace {
 
 constexpr size_t kRoundSegments = 12;
-
-// ---------------------------------------------------------------------------------------------
-// Convex hull (hull.rs)
 
 using V = std::array<double, 3>;
 
@@ -37,7 +31,6 @@ V dnormalize(const V &p_a) {
 	return len > 0.0 ? V{ p_a[0] / len, p_a[1] / len, p_a[2] / len } : p_a;
 }
 
-// Rust f64::total_cmp as a "less than".
 int64_t total_key(double p_value) {
 	int64_t bits;
 	std::memcpy(&bits, &p_value, 8);
@@ -46,7 +39,7 @@ int64_t total_key(double p_value) {
 bool total_less(double p_a, double p_b) {
 	return total_key(p_a) < total_key(p_b);
 }
-// Rust f64::min / max: a NaN operand yields the other one.
+
 double rmin(double p_a, double p_b) {
 	if (std::isnan(p_a)) {
 		return p_b;
@@ -68,8 +61,8 @@ double rmax(double p_a, double p_b) {
 
 struct Hull {
 	std::vector<Vec3> points;
-	std::vector<std::array<size_t, 3>> faces; // counter-clockwise seen from outside
-	std::vector<Vec4> planes; // n.p + w = 0, n out
+	std::vector<std::array<size_t, 3>> faces;
+	std::vector<Vec4> planes;
 };
 
 struct Face {
@@ -135,7 +128,7 @@ struct Builder {
 			double best = face.distance(points[apex]);
 			for (size_t k = 1; k < face.outside.size(); k++) {
 				const double d = face.distance(points[face.outside[k]]);
-				if (!total_less(d, best)) { // max_by keeps the last maximum
+				if (!total_less(d, best)) {
 					best = d;
 					apex = face.outside[k];
 				}
@@ -283,8 +276,6 @@ Hull flat_hull(const std::vector<V> &p_points, const V &p_normal, double p_toler
 	return hull;
 }
 
-// The convex hull of p_input, computed in double where float inputs are exact, so the tolerance
-// (1e-9 of the input's size) only absorbs rounding.
 Hull convex_hull(const std::vector<Vec3> &p_input) {
 	std::vector<V> raw;
 	raw.reserve(p_input.size());
@@ -381,9 +372,6 @@ Hull convex_hull(const std::vector<Vec3> &p_input) {
 	return finish(points, faces, tolerance);
 }
 
-// ---------------------------------------------------------------------------------------------
-// Shape walk (geometry.rs)
-
 struct Convex {
 	std::vector<Vec3> points;
 	bool has_planes = false;
@@ -399,7 +387,6 @@ void basis(const Vec3 &p_axis, Vec3 &r_u, Vec3 &r_v) {
 	r_v = vec::cross(axis, r_u);
 }
 
-// The libm calls stay scalar (no vectorised cos/sin variants), as in the Rust build.
 float scalar_cos(float p_x) {
 	volatile float x = p_x;
 	return std::cos(float(x));
@@ -626,7 +613,7 @@ void subpart_triangles(const TrianglesSubpart &p_subpart, const Transform &p_tra
 	}
 }
 
-} // namespace
+}
 
 std::vector<Tri> havok_triangles(const Shape &p_shape, const Transform &p_transform) {
 	std::vector<Tri> out;
@@ -672,4 +659,4 @@ std::vector<ConvexPiece> havok_convex_pieces(const Shape &p_shape, const Transfo
 	return out;
 }
 
-} // namespace bf3::core::res
+}

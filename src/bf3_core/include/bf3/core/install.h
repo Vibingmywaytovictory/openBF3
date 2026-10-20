@@ -1,15 +1,4 @@
 #pragma once
-// The mounted install: packages (Update/Patch, Update/Xpack*), the patched layout.toc, superbundle
-// sites (base and patch toc of every layout superbundle) and the merged CAS catalog.
-// Ported from IW4L asset_transport::bf3 (install.rs, cas.rs).
-//
-// Every file is opened through InstallReader (read-only, install-relative names). Layering:
-//   * exactly one authoritative package (the patch); Xpacks with RequireVersion <= patch Version,
-//     ordered by (MountOrder, Name);
-//   * layout = Update/Patch/Data/layout.toc when present (a superset of Data/layout.toc);
-//   * superbundle N: base toc = first of [Data, each Xpack Data] that has N.toc, patch toc =
-//     Update/Patch/Data/N.toc; the layout `delta` flag is carried;
-//   * CAS: patch cas.cat first, then Data/cas.cat (first entry of a sha1 wins).
 
 #include "bf3/core/ids.h"
 #include "bf3/core/install_file.h"
@@ -32,8 +21,8 @@ namespace bf3::core {
 class LevelMount;
 
 struct Package {
-	std::string name; // package.mft Name, else the folder name
-	std::string data_dir; // install-relative, e.g. "Update/Xpack1/Data"
+	std::string name;
+	std::string data_dir;
 	bool authoritative = false;
 	std::optional<int64_t> version;
 	std::optional<int64_t> require_version;
@@ -41,10 +30,10 @@ struct Package {
 };
 
 struct Level {
-	std::string id; // "MP_001", "XP1_001"
-	std::string superbundle; // "Win32/Levels/MP_001/MP_001"
-	std::optional<uint8_t> expansion; // XPn_ levels
-	std::optional<std::string> base_toc; // install-relative
+	std::string id;
+	std::string superbundle;
+	std::optional<uint8_t> expansion;
+	std::optional<std::string> base_toc;
 	std::optional<std::string> patch_toc;
 };
 
@@ -56,7 +45,7 @@ struct SuperbundleSite {
 };
 
 struct CasLocation {
-	uint8_t catalog = 0; // index into CasStore::catalog_dir
+	uint8_t catalog = 0;
 	uint32_t archive = 0;
 	uint32_t offset = 0;
 	uint32_t size = 0;
@@ -73,7 +62,7 @@ public:
 
 	Result<std::vector<uint8_t>> read(const Sha1 &p_sha1) const;
 	Result<std::vector<uint8_t>> read_prefix(const Sha1 &p_sha1, uint64_t p_len) const;
-	// The 32-byte header before the payload in cas_NN.cas matches the catalog entry.
+
 	Status check_entry_header(const Sha1 &p_sha1) const;
 
 private:
@@ -88,7 +77,6 @@ private:
 	mutable std::map<uint64_t, std::shared_ptr<InstallFile>> archives_;
 };
 
-// Where a toc-level chunk's payload is: CAS (sha1) or a range of the .sb next to the toc.
 struct TocChunkSite {
 	bool in_cas = false;
 	Sha1 sha1;
@@ -100,7 +88,7 @@ using TocChunkMap = std::unordered_map<Guid, TocChunkSite, GuidHash>;
 
 class Install : public std::enable_shared_from_this<Install> {
 public:
-	// p_reader must be mounted (InstallReader::locate / mount). It is copied.
+
 	static Result<std::shared_ptr<Install>> open(const InstallReader &p_reader);
 
 	Install(const Install &) = delete;
@@ -108,30 +96,27 @@ public:
 
 	const InstallReader &reader() const { return reader_; }
 	const std::string &data_dir() const { return data_dir_; }
-	// Xpacks in mount order, then the patch (as in IW4L).
+
 	const std::vector<Package> &packages() const { return packages_; }
 	const std::string &layout_path() const { return layout_path_; }
 	const Layout &layout() const { return layout_; }
 	const CasStore &cas() const { return cas_; }
 	const std::vector<SuperbundleSite> &sites() const { return sites_; }
 	std::vector<std::string> superbundle_names() const;
-	const SuperbundleSite *site(std::string_view p_name) const; // case-insensitive
+	const SuperbundleSite *site(std::string_view p_name) const;
 
-	// Multiplayer levels: Win32/Levels/<X>/<X> with X starting mp_ or xp<digit>_.
 	std::vector<Level> levels() const;
 	std::optional<Level> level(std::string_view p_level_id) const;
 	Result<LevelMount> mount_level(std::string_view p_level_id) const;
-	// Any superbundle of the layout (levels, Globals, UI, ...), same machinery.
+
 	Result<LevelMount> mount_superbundle(std::string_view p_name) const;
 
-	// Shared handle of an install file (cached by lowercase name).
 	Result<std::shared_ptr<InstallFile>> file(std::string_view p_relative) const;
 	Result<std::vector<uint8_t>> read_whole(std::string_view p_relative) const;
-	Result<Toc> read_toc(std::string_view p_relative) const; // deobfuscated + parsed
-	// The .sb next to a .toc (same stem).
+	Result<Toc> read_toc(std::string_view p_relative) const;
+
 	static std::string superbundle_file(std::string_view p_toc_relative);
-	// Toc-level chunks of a chunk superbundle: base toc, then patch toc (patch wins on a GUID).
-	// Parsed once per install and shared by every mount.
+
 	Result<std::shared_ptr<const TocChunkMap>> chunk_toc(const SuperbundleSite &p_site) const;
 
 private:
@@ -151,8 +136,7 @@ private:
 	mutable std::unordered_map<std::string, std::shared_ptr<const TocChunkMap>> chunk_tocs_;
 };
 
-// Level id helpers (exposed for tests).
 std::optional<std::string> multiplayer_level_id(std::string_view p_superbundle);
 std::optional<uint8_t> expansion_of(std::string_view p_level_id);
 
-} // namespace bf3::core
+}

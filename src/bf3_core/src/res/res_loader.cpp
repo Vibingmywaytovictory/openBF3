@@ -1,6 +1,3 @@
-// Resource loading from a LevelMount (see res_loader.h). Mirrors the parity oracle's export
-// (research/probes/tools/res-oracle `export`): the same res list, payloads, whole chunks and
-// ranged-view offsets, so tools/resdump --install prints the oracle's summary byte for byte.
 #include "bf3/core/res/res_loader.h"
 
 #include "bf3/core/res_types.h"
@@ -32,7 +29,6 @@ Error res_error(const std::string &p_name, const ResError &p_error) {
 	return make_error("res " + p_name + ": " + p_error.message());
 }
 
-// The res p_name, which must be of one of the two types given.
 Result<RawRes> read_typed(const LevelMount &p_mount, std::string_view p_name, uint32_t p_type, uint32_t p_alt_type, const char *p_what) {
 	Result<RawRes> raw = read_raw_res(p_mount, p_name);
 	if (!raw) {
@@ -44,10 +40,10 @@ Result<RawRes> read_typed(const LevelMount &p_mount, std::string_view p_name, ui
 	return raw;
 }
 
-} // namespace
+}
 
 std::vector<std::string> decodable_res_names(const LevelMount &p_mount) {
-	std::map<std::string, std::string> names; // lowercase -> first spelling
+	std::map<std::string, std::string> names;
 	for (std::string &name : p_mount.res_names()) {
 		const std::optional<ResInfo> info = p_mount.res_info(name);
 		if (info && decodable(info->res_type)) {
@@ -90,9 +86,6 @@ Result<RawChunk> read_raw_chunk(const LevelMount &p_mount, const ChunkId &p_id) 
 	}
 	return chunk;
 }
-
-// ---------------------------------------------------------------------------------------------
-// MeshSet
 
 ResError LoadedMeshSet::geometry(size_t p_lod, Bytes &r_geometry) const {
 	r_geometry = Bytes();
@@ -148,9 +141,6 @@ Result<LoadedMeshSet> load_mesh_set(const LevelMount &p_mount, std::string_view 
 	return out;
 }
 
-// ---------------------------------------------------------------------------------------------
-// DxTexture
-
 ResError LoadedTexture::mips(std::vector<MipSlice> &r_mips) const {
 	return texture.split_mips(chunk.whole(), 0, r_mips);
 }
@@ -176,9 +166,6 @@ Result<LoadedTexture> load_texture(const LevelMount &p_mount, std::string_view p
 	return out;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Havok
-
 Result<LoadedHavok> load_havok(const LevelMount &p_mount, std::string_view p_name) {
 	Result<RawRes> raw = read_typed(p_mount, p_name, kResTypeHavokPhysicsData, kResTypeHavokDestructionPhysicsData, "Havok physics res");
 	if (!raw) {
@@ -196,4 +183,4 @@ Result<LoadedHavok> load_havok(const LevelMount &p_mount, std::string_view p_nam
 	return out;
 }
 
-} // namespace bf3::core::res
+}

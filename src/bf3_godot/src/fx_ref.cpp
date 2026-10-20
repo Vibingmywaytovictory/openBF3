@@ -1,4 +1,3 @@
-// Bf3FxRef: the Godot reference workloads and VFX2's 16k row (docs/design/m2a-fx2.md §7). See fx_ref.h.
 #include "fx_ref.h"
 
 #include "godot_util.h"
@@ -76,7 +75,6 @@ float unit(uint64_t &r_state) {
 	return float(splitmix(r_state) >> 40) / float(1ull << 24);
 }
 
-// The 16,384 seeded positions (both the reference rows and VFX2 draw these).
 std::vector<Vector3> positions() {
 	std::vector<Vector3> p(kFxRefParticles);
 	uint64_t s = 0xF2F2;
@@ -86,7 +84,6 @@ std::vector<Vector3> positions() {
 	return p;
 }
 
-// A soft smoke puff, 256 x 256 RGBA8 with mipmaps: white, alpha = a radial falloff with seeded value noise.
 Ref<ImageTexture> puff_texture() {
 	const int n = 256;
 	PackedByteArray b;
@@ -148,9 +145,6 @@ Ref<StandardMaterial3D> ref_material(const Ref<Texture2D> &p_tex, bool p_lit, bo
 	return m;
 }
 
-// The VFX2 row's emitter: a burst of 1,024 SAQ particles uniform in a 10 x 7.5 x 7.5 m box (BoxEvaluatorData on
-// SpawnPosition), lit, soft fade 1 m (|multiplier| 1 x the 1 m extent), living 10^6 s; 16 effects tile the
-// reference box, so VFX2 draws 16 emitter outputs (sorted back to front) of 1,024 particles, like the GPUParticles row.
 constexpr uint32_t kFxRefEffects = 16;
 constexpr uint32_t kFxRefPerEffect = kFxRefParticles / kFxRefEffects;
 std::shared_ptr<const fx::EffectDef> vfx2_def() {
@@ -162,7 +156,7 @@ std::shared_ptr<const fx::EffectDef> vfx2_def() {
 	e.tmpl.light_multiplier = 1.0f;
 	e.tmpl.light_wrap_around = 0.0f;
 	e.slots[size_t(fx::ProcessorType::SpawnRate)].present = true;
-	e.params.spawn_rate = float(kFxRefPerEffect - 1) * 100.0f + 1.0f; // floor(1 + rate x 0.01) = 1,024 at the start
+	e.params.spawn_rate = float(kFxRefPerEffect - 1) * 100.0f + 1.0f;
 	e.params.distribute_over_time = false;
 	fx::EvaluatorDef box;
 	box.type = fx::EvaluatorType::Box;
@@ -172,7 +166,7 @@ std::shared_ptr<const fx::EffectDef> vfx2_def() {
 	e.slots[size_t(fx::ProcessorType::SpawnPosition)].present = true;
 	e.slots[size_t(fx::ProcessorType::SpawnPosition)].evaluator = 0;
 	e.slots[size_t(fx::ProcessorType::UpdateAge)].present = true;
-	e.params.particle_lifetime = 1.0e6f; // lives through the bench
+	e.params.particle_lifetime = 1.0e6f;
 	e.slots[size_t(fx::ProcessorType::UpdateLinearVelocity)].present = true;
 	e.texture.texture = "fx2/synthetic/puff";
 	auto d = std::make_shared<fx::EffectDef>();
@@ -193,7 +187,7 @@ const char *row_name(int p_row) {
 	return names[p_row];
 }
 
-} // namespace
+}
 
 Bf3FxRef::Bf3FxRef() = default;
 
@@ -211,9 +205,9 @@ void Bf3FxRef::_ready() {
 	}
 	check_ = has_user_arg("fx-ref-check");
 	shot_dir_ = user_arg_value("fx-ref-shot-dir");
-	static_ = has_user_arg("fx-ref-static"); // diagnostics: upload VFX2's buffers once per on window
-	no_soft_ = has_user_arg("fx-ref-nosoft"); // diagnostics: VFX2 without the soft fade
-	busy_ms_ = has_user_arg("fx-ref-busy") ? std::atof(user_arg_value("fx-ref-busy").c_str()) : 0.0; // diagnostics: main-thread busy wait in VFX2 rows
+	static_ = has_user_arg("fx-ref-static");
+	no_soft_ = has_user_arg("fx-ref-nosoft");
+	busy_ms_ = has_user_arg("fx-ref-busy") ? std::atof(user_arg_value("fx-ref-busy").c_str()) : 0.0;
 	if (has_user_arg("fx-ref-pairs")) {
 		pairs_ = uint32_t(std::clamp(std::atoi(user_arg_value("fx-ref-pairs").c_str()), 1, 20));
 	}
@@ -234,7 +228,7 @@ void Bf3FxRef::_ready() {
 
 void Bf3FxRef::build() {
 	const Ref<ImageTexture> puff = puff_texture();
-	// Environment: grey background, ambient light, one directional light (no shadows), a floor.
+
 	{
 		Ref<Environment> env;
 		env.instantiate();
@@ -341,7 +335,7 @@ void Bf3FxRef::build() {
 		world_ = std::make_unique<fx::FxWorld>(cfg);
 		const std::shared_ptr<const fx::EffectDef> def = vfx2_def();
 		for (uint32_t k = 0; k < kFxRefEffects; ++k) {
-			// The 16 sub-boxes of the reference box (x -20..20 in 4, z -20..10 in 4, y 0.5..8).
+
 			fx::EffectStart s;
 			s.transform.trans = fx::Vec3{ -15.0f + 10.0f * float(k % 4), 4.25f, -16.25f + 7.5f * float(k / 4) };
 			s.seed = k + 1;
@@ -423,7 +417,7 @@ void Bf3FxRef::_process(double p_delta) {
 		(on ? r.on_frame : r.off_frame).push_back(p_delta * 1000.0);
 	}
 	if (!shot_dir_.empty() && on && window_index_ == 0 && !r.shot && window_t_ >= 1.5) {
-		// Synthetic content only (no BF3 data): one picture per row for the look.
+
 		r.shot = true;
 		Ref<Image> img = get_viewport()->get_texture()->get_image();
 		const std::string path = shot_dir_ + "/fx2_ref_" + r.name + ".png";
@@ -477,4 +471,4 @@ void Bf3FxRef::report_and_finish() {
 	get_tree()->quit(check_ ? (pass ? 0 : 1) : 0);
 }
 
-} // namespace bf3::godot_side
+}

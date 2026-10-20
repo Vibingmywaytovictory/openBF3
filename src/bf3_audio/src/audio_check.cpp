@@ -1,5 +1,3 @@
-// The M16A3 check shared by G7 (offline) and G8 (Godot) (audio_check.h, design §10.4).
-
 #include "bf3/audio/audio_check.h"
 
 #include "bf3/audio/wav_io.h"
@@ -17,12 +15,12 @@ namespace ca = core::audio;
 namespace {
 
 constexpr uint64_t kSeedBase = 0x5eed0016a3ull;
-constexpr double kScheduleHorizonSeconds = 0.5; // a burst's commands are pushed this long before its first round
-constexpr uint32_t kStartLeadFrames = 4 * kBlockFrames; // the Start lands this many frames before round 0
-constexpr uint32_t kStopAfterFrames = 2 * kBlockFrames; // the Stop command, after the stop event
+constexpr double kScheduleHorizonSeconds = 0.5;
+constexpr uint32_t kStartLeadFrames = 4 * kBlockFrames;
+constexpr uint32_t kStopAfterFrames = 2 * kBlockFrames;
 constexpr size_t kTraceEntries = 4096;
 
-} // namespace
+}
 
 CheckScript m16_check_script() {
 	CheckScript s;
@@ -53,8 +51,6 @@ std::vector<ScheduledBurst> schedule_check(const CheckScript &p_script, uint32_t
 	return out;
 }
 
-// ---- TapRecorder --------------------------------------------------------------------------------------------------
-
 TapRecorder::TapRecorder(uint64_t p_start_frame, uint64_t p_frames) :
 		start_(p_start_frame), buffer_(size_t(p_frames), 0.0f) {}
 
@@ -77,8 +73,6 @@ uint64_t TapRecorder::dropped_frames() const {
 	return dropped_;
 }
 
-// ---- CheckDriver --------------------------------------------------------------------------------------------------
-
 struct CheckDriver::State {
 	CheckScript script;
 	std::shared_ptr<const ca::SoundProgram> program;
@@ -92,7 +86,7 @@ struct CheckDriver::State {
 	std::vector<SamplerTrace> traces;
 	float far_noise_hpf = 0.0f;
 	uint64_t total = 0;
-	// Per burst: the commands still to push (Start first), and the instance until the Start is accepted.
+
 	struct Pending {
 		bool built = false;
 		std::vector<MixerCommand> commands;
@@ -119,7 +113,7 @@ bool has_hpf_link(const ca::SoundProgram &p, ca::SoundPluginRef p_plugin) {
 	return false;
 }
 
-} // namespace
+}
 
 CheckDriver::~CheckDriver() = default;
 
@@ -161,7 +155,7 @@ core::Result<std::unique_ptr<CheckDriver>> CheckDriver::create(const CheckScript
 		t.entries.resize(kTraceEntries);
 	}
 	st.pending.resize(st.bursts.size());
-	// The far segment's evaluated voice-14 HPF, for the prediction of row (d).
+
 	{
 		core::Result<std::unique_ptr<PatchInstance>> probe = PatchInstance::create(p_program, p_bank, p_tuning, 1, p_rate);
 		if (!probe) {
@@ -192,7 +186,7 @@ core::Status CheckDriver::pump(MixerCore &r_mixer) {
 		const uint64_t first = st.start + burst.first_round_frame;
 		if (!pend.built) {
 			if (r_mixer.clock() + horizon < first) {
-				break; // later bursts are later still
+				break;
 			}
 			const CheckSegment &seg = st.script.segments[burst.segment];
 			if (first < r_mixer.earliest_frame() + kStartLeadFrames) {
@@ -220,7 +214,7 @@ core::Status CheckDriver::pump(MixerCore &r_mixer) {
 			pi.add_voice_tap(kM16NoiseTapVoices, st.noise_tap.get());
 			pi.set_sampler_trace(&st.traces[b]);
 			pend.instance = std::move(*inst);
-			// The command list: Start, Fire, Steps, the stop event, Stop.
+
 			MixerCommand start;
 			start.type = MixerCommandType::Start;
 			start.handle = handle;
@@ -257,10 +251,10 @@ core::Status CheckDriver::pump(MixerCore &r_mixer) {
 				return core::make_error("CheckDriver: a command of burst " + std::to_string(b) + " would land late");
 			}
 			if (!r_mixer.push(c)) {
-				return core::Status::success(); // ring full: retry next pump
+				return core::Status::success();
 			}
 			if (c.type == MixerCommandType::Start) {
-				(void)pend.instance.release(); // the mixer owns it now
+				(void)pend.instance.release();
 			}
 			++pend.cursor;
 		}
@@ -306,8 +300,6 @@ float CheckDriver::far_noise_hpf_hz() const {
 	return state_->far_noise_hpf;
 }
 
-// ---- analysis -----------------------------------------------------------------------------------------------------
-
 bool CheckReport::pass() const {
 	if (rows.empty()) {
 		return false;
@@ -337,7 +329,7 @@ CheckReport analyse_check(const CheckScript &p_script, std::span<const Scheduled
 		report.rows.push_back(CheckRow{ std::move(p_name), p_value, std::move(p_rule), p_pass });
 	};
 	char rule[160];
-	// (a) onsets on the core tap, per burst window.
+
 	const std::vector<uint64_t> onsets = detect_onsets(p_core_tap, 1, p_rate, OnsetOptions{});
 	const uint64_t lead = uint64_t(0.010 * double(p_rate));
 	for (const ScheduledBurst &b : p_bursts) {
@@ -349,7 +341,7 @@ CheckReport analyse_check(const CheckScript &p_script, std::span<const Scheduled
 		std::snprintf(rule, sizeof(rule), "<= %.0f (mean gap %.1f, expected %.0f)", p_script.spacing_tolerance_frames, sp.mean_frames, p_script.expected_spacing_frames);
 		row("spacing." + tag, sp.max_deviation_frames, rule, sp.count == p_script.rounds && sp.max_deviation_frames <= p_script.spacing_tolerance_frames);
 	}
-	// (b) full-mix levels: mean burst-window RMS per segment.
+
 	const auto segment_level = [&](std::string_view p_name) {
 		double sum = 0.0;
 		int n = 0;
@@ -366,7 +358,7 @@ CheckReport analyse_check(const CheckScript &p_script, std::span<const Scheduled
 	row("level.near_minus_mid", near - mid, rule, near - mid >= 3.0);
 	std::snprintf(rule, sizeof(rule), ">= 3 dB (mid %.1f, far %.1f dBFS)", mid, far);
 	row("level.mid_minus_far", mid - far, rule, mid - far >= 3.0);
-	// (c), (d): far's first burst against far_pinned, 20-100 Hz.
+
 	const ScheduledBurst *far0 = nullptr, *pinned = nullptr;
 	for (const ScheduledBurst &b : p_bursts) {
 		const CheckSegment &s = p_script.segments[b.segment];
@@ -396,8 +388,6 @@ CheckReport analyse_check(const CheckScript &p_script, std::span<const Scheduled
 	row("hpf.noise_prediction", std::fabs(double(tap_far - predicted)), rule, std::fabs(tap_far - predicted) <= 1.5f);
 	return report;
 }
-
-// ---- offline render --------------------------------------------------------------------------------------------
 
 core::Result<OfflineCheck> run_check_offline(const CheckScript &p_script, std::shared_ptr<const ca::SoundProgram> p_program,
 		std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning, const OfflineCheckOptions &p_options) {
@@ -454,15 +444,12 @@ core::Result<OfflineCheck> run_check_offline(const CheckScript &p_script, std::s
 	}
 	out.record_dropped = recorder.dropped_frames();
 	out.report = analyse_check(p_script, out.bursts, out.mix, out.core_tap, out.noise_tap, out.far_noise_hpf_hz, rate, p_tuning);
-	mixer.reset(); // destroys any instance still owned (none once the script is done)
+	mixer.reset();
 	return out;
 }
 
-// ---- row (e): the sampler model --------------------------------------------------------------------------------
-
 namespace {
 
-// The Sampler node whose first slot plays on p_voice.
 std::optional<uint32_t> sampler_on_voice(const ca::SoundProgram &p, uint16_t p_voice) {
 	for (uint32_t i = 0; i < p.nodes.size(); ++i) {
 		const ca::SoundNode &n = p.nodes[i];
@@ -474,7 +461,7 @@ std::optional<uint32_t> sampler_on_voice(const ca::SoundProgram &p, uint16_t p_v
 	return std::nullopt;
 }
 
-} // namespace
+}
 
 void add_model_trace_rows(CheckReport &r_report, const OfflineCheck &p_check, const CheckScript &p_script, const ca::SoundProgram &p_program,
 		const ca::WaveBank &p_bank, uint32_t p_rate) {
@@ -489,13 +476,13 @@ void add_model_trace_rows(CheckReport &r_report, const OfflineCheck &p_check, co
 		const ScheduledBurst &burst = p_check.bursts[b];
 		const CheckSegment &seg = p_script.segments[burst.segment];
 		if (seg.distance_m < 50.0f) {
-			continue; // noise_far and corebassdistant play from 50 m
+			continue;
 		}
 		const std::string tag = seg.name + "." + std::to_string(burst.index);
 		const SamplerTrace &trace = p_check.traces[b];
 		const uint64_t first = p_check.start_frame + burst.first_round_frame;
 		const uint64_t stop = p_check.start_frame + burst.stop_frame;
-		// noise_far
+
 		{
 			std::vector<SamplerTraceEntry> e;
 			for (uint32_t i = 0; i < trace.count; ++i) {
@@ -543,14 +530,13 @@ void add_model_trace_rows(CheckReport &r_report, const OfflineCheck &p_check, co
 					why = "tail segment or frame";
 				}
 			}
-			// Contiguity is exact (prev_end == frame on one slot); the duration of each segment is its length at the pitch
-			// of its first frame, within 3 % (the Lfo moves the pitch by up to 2 % inside a segment).
+
 			ok = ok && tails == 1 && worst <= 0.03;
 			std::snprintf(rule, sizeof(rule), "contiguous, duration error <= 0.03; %zu entries, %zu tail%s%s", e.size(), tails, why.empty() ? "" : "; ",
 					why.c_str());
 			r_report.rows.push_back(CheckRow{ "trace.noise_far." + tag, worst, rule, ok });
 		}
-		// corebassdistant
+
 		{
 			std::vector<SamplerTraceEntry> e;
 			for (uint32_t i = 0; i < trace.count; ++i) {
@@ -575,4 +561,4 @@ void add_model_trace_rows(CheckReport &r_report, const OfflineCheck &p_check, co
 	}
 }
 
-} // namespace bf3::audio
+}

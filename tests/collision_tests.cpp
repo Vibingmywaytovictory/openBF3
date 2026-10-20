@@ -1,10 +1,3 @@
-// Collision soup (bf3_core level/collision_soup.h). Suite collision_unit: synthetic shapes through
-// the per-placement build (leaves, materials, surfaces, flags, quantisation, hashes, tiles), the
-// word classifier and the hash bytes (the terrain heightfield's cases are in terrain_tests.cpp). Suite collision: the retail install (read-only; exits 77 =
-// skipped without one): MP_Subway TeamDeathMatch0 and XP3_Alborz ConquestLarge0 against the
-// numbers research/probes/tools/level-oracle `collision` prints through IW4L's crates (README
-// "Collision overlay"), seeded mutations of Metro's static model group res through the soup, and
-// the install's index files unchanged. Nothing from the install is stored.
 #include <doctest/doctest.h>
 
 #include "bf3/core/install.h"
@@ -52,22 +45,22 @@ std::string hex64(uint64_t p_value) {
 	return text;
 }
 
-} // namespace
+}
 
 TEST_SUITE("collision_unit") {
 	TEST_CASE("collision_unit: surface words follow IW4L's table and token rules") {
 		CHECK(classify_surface("levels/mp_subway/props/concrete_barrier_01") == surface::kConcrete);
-		CHECK(classify_surface("Glass_Window") == surface::kGlass); // case-insensitive
+		CHECK(classify_surface("Glass_Window") == surface::kGlass);
 		CHECK(classify_surface("fx/impacts/metal/impact_metal_m") == surface::kMetal);
-		CHECK(classify_surface("paintedmetal_door") == surface::kPaintedMetal); // the more specific word first
-		CHECK(classify_surface("treeline") == surface::kFoliage); // "tree" starts the token
-		CHECK(classify_surface("streetlamp") == std::nullopt); // a short word must start the token
-		CHECK(classify_surface("woodenfence") == surface::kWood); // "wood" starts the token
-		CHECK(classify_surface("rebar_reinforcedconcrete") == surface::kConcrete); // a long word anywhere in it
+		CHECK(classify_surface("paintedmetal_door") == surface::kPaintedMetal);
+		CHECK(classify_surface("treeline") == surface::kFoliage);
+		CHECK(classify_surface("streetlamp") == std::nullopt);
+		CHECK(classify_surface("woodenfence") == surface::kWood);
+		CHECK(classify_surface("rebar_reinforcedconcrete") == surface::kConcrete);
 		CHECK(classify_surface("tiles_floor") == surface::kCeramic);
 		CHECK(classify_surface("x9_ice") == surface::kIce);
 		CHECK(classify_surface("") == std::nullopt);
-		CHECK(classify_surface("\xc3\xa9glass") == surface::kGlass); // non-ASCII bytes separate tokens
+		CHECK(classify_surface("\xc3\xa9glass") == surface::kGlass);
 		CHECK(surface_name(surface::kConcrete) == "concrete");
 		CHECK(surface_name(99) == "none");
 		CHECK(collision_body_name(1) == "raycast");
@@ -76,7 +69,7 @@ TEST_SUITE("collision_unit") {
 	TEST_CASE("collision_unit: quantisation, degenerate, tiles and hash bytes") {
 		std::array<int64_t, 9> q{};
 		REQUIRE(soup_quantise({ { { 0.0005f, -0.0005f, 1.25f }, { -64.0f, 0.0f, 63.9f }, { 1e6f, 2.0f, -3.0f } } }, q));
-		// round half away from zero (Rust f64::round): 0.0005 is just above or below in f32
+
 		CHECK(q[0] == int64_t(std::round(double(0.0005f) * 1000.0)));
 		CHECK(q[2] == 1250);
 		CHECK(q[3] == -64000);
@@ -88,12 +81,12 @@ TEST_SUITE("collision_unit") {
 		CHECK(soup_degenerate(d));
 		d[3] = 2;
 		CHECK_FALSE(soup_degenerate(d));
-		// Centroid tiles: floor division, negative coordinates included.
+
 		CHECK(soup_tile_of({ 0, 0, 0, 0, 0, 0, 0, 0, 0 }) == std::array<int32_t, 2>{ 0, 0 });
 		CHECK(soup_tile_of({ -1, 0, 0, 0, 0, 0, 0, 0, 0 }) == std::array<int32_t, 2>{ -1, 0 });
 		CHECK(soup_tile_of({ 64000, 0, 0, 64000, 0, 0, 64000, 0, -192001 }) == std::array<int32_t, 2>{ 1, -2 });
 		CHECK(soup_tile_of({ 63999, 0, 0, 64000, 0, 0, 64000, 0, -192000 }) == std::array<int32_t, 2>{ 0, -1 });
-		// FNV-1a 64 over 72 + 4 + 3 bytes; zero input pins the byte order and the prime.
+
 		uint64_t h = kFnvOffset;
 		soup_hash_bytes(h, {}, 0, 0, 0, 0);
 		uint64_t ref = kFnvOffset;
@@ -105,13 +98,13 @@ TEST_SUITE("collision_unit") {
 		uint64_t a = kFnvOffset, b = kFnvOffset;
 		soup_hash_bytes(a, { 1, 0, 0, 0, 0, 0, 0, 0, 0 }, 0, 0, 0, 0);
 		soup_hash_bytes(b, { 256, 0, 0, 0, 0, 0, 0, 0, 0 }, 0, 0, 0, 0);
-		CHECK(a != b); // little endian, every byte counts
+		CHECK(a != b);
 	}
 
 	TEST_CASE("collision_unit: a box placed in a frame, with its material and flags") {
 		res::HavokPhysicsData havok;
 		havok.material_flags_and_indices = { 7, kMaterialSeeThrough | 3 };
-		const std::vector<res::Shape> roots = one(box({ 1.0f, 2.0f, 3.0f }, 0x0100)); // part 0, local material 1
+		const std::vector<res::Shape> roots = one(box({ 1.0f, 2.0f, 3.0f }, 0x0100));
 		const SurfaceMaterials no_grid;
 		const SoupShapeResult r = soup_shape_triangles(havok, roots, translation(100.0f, 5.0f, -100.0f), { uint8_t(CollisionBody::Raycast) }, no_grid,
 				"levels/x/props/glass_window_invisiblecollision");
@@ -121,7 +114,7 @@ TEST_SUITE("collision_unit") {
 		for (size_t i = 0; i < r.triangles.size(); ++i) {
 			const SoupTriangle &t = r.triangles[i];
 			CHECK(t.material == (kMaterialSeeThrough | 3));
-			CHECK(t.surface == surface::kGlass); // no grid: the owner name decides
+			CHECK(t.surface == surface::kGlass);
 			CHECK(t.body == uint8_t(CollisionBody::Raycast));
 			CHECK(t.flags == (kSoupSeeThrough | kSoupInvisible));
 			for (const res::Vec3 &p : t.v) {
@@ -129,10 +122,10 @@ TEST_SUITE("collision_unit") {
 				CHECK(std::fabs(std::fabs(p[1] - 5.0f) - 2.0f) < 1e-5f);
 				CHECK(std::fabs(std::fabs(p[2] + 100.0f) - 3.0f) < 1e-5f);
 			}
-			// centroid near (100, -100): tile (1, -2)
+
 			CHECK(r.tiles[i] == std::array<int32_t, 2>{ 1, -2 });
 		}
-		// A frame with a NaN drops every triangle as non-finite.
+
 		res::Transform bad = translation(0.0f, 0.0f, 0.0f);
 		bad.origin[1] = std::numeric_limits<float>::quiet_NaN();
 		const SoupShapeResult n = soup_shape_triangles(havok, roots, bad, {}, no_grid, "");
@@ -144,19 +137,19 @@ TEST_SUITE("collision_unit") {
 	TEST_CASE("collision_unit: group subparts, material indices and triangle subparts") {
 		res::HavokPhysicsData havok;
 		havok.material_flags_and_indices = { 11, 22, 33 };
-		havok.material_indices = { 0, 0, 0, 2 }; // first part 2 + part 1 -> index 2
+		havok.material_indices = { 0, 0, 0, 2 };
 		res::Shape mesh;
 		mesh.type = res::ShapeType::ExtendedMesh;
 		mesh.extended = std::make_unique<res::ExtendedMesh>();
 		res::ShapesSubpart instance;
 		instance.rotation = { 0.0f, 0.0f, 0.0f, 1.0f };
 		instance.translation = { 10.0f, 0.0f, 0.0f };
-		instance.user_data = 2; // first physics part of the instance
-		instance.children.push_back(box({ 0.5f, 0.5f, 0.5f }, 0xFF01)); // local material 255: out of range
+		instance.user_data = 2;
+		instance.children.push_back(box({ 0.5f, 0.5f, 0.5f }, 0xFF01));
 		mesh.extended->shape_subparts.push_back(std::move(instance));
 		res::TrianglesSubpart tris;
 		tris.vertices = { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 0, 1 }, { 0, 0, 0.0001f } };
-		tris.triangles = { { 0, 1, 2 }, { 0, 3, 1 }, { 0, 1, 9 } }; // a kept one, a degenerate one (1 mm), one past the vertices
+		tris.triangles = { { 0, 1, 2 }, { 0, 3, 1 }, { 0, 1, 9 } };
 		tris.materials = { 1, 0, 0 };
 		mesh.extended->triangle_subparts.push_back(std::move(tris));
 		std::vector<res::Shape> roots;
@@ -166,13 +159,13 @@ TEST_SUITE("collision_unit") {
 		REQUIRE(r.triangles.size() == 13);
 		CHECK(r.degenerate == 1);
 		for (size_t i = 0; i < 12; ++i) {
-			CHECK(r.triangles[i].material == 33); // MaterialIndices[first part + part]
-			CHECK(r.triangles[i].surface == surface::kConcrete); // nothing names a surface
+			CHECK(r.triangles[i].material == 33);
+			CHECK(r.triangles[i].surface == surface::kConcrete);
 			CHECK(r.triangles[i].body == uint8_t(CollisionBody::Collision));
 		}
-		CHECK(r.triangles[12].material == 22); // the stored index
+		CHECK(r.triangles[12].material == 22);
 		CHECK(r.triangles[12].flags == 0);
-		// The placement hash runs over the triangles in walk order; the sum does not depend on order.
+
 		uint64_t stream = kFnvOffset, sum = 0;
 		for (const SoupTriangle &t : r.triangles) {
 			std::array<int64_t, 9> q{};
@@ -197,9 +190,9 @@ TEST_SUITE("collision_unit") {
 		for (const SoupTriangle &t : r.triangles) {
 			const res::Vec3 n = res::vec::cross(res::vec::sub(t.v[1], t.v[0]), res::vec::sub(t.v[2], t.v[0]));
 			const res::Vec3 c = res::vec::scale(res::vec::add(res::vec::add(t.v[0], t.v[1]), t.v[2]), 1.0f / 3.0f);
-			CHECK(res::vec::dot(n, c) > 0.0f); // outward from the box centre at the origin
+			CHECK(res::vec::dot(n, c) > 0.0f);
 		}
-		// A list nested past the walk's depth limit (64) contributes nothing and returns.
+
 		res::Shape deep = box({ 1.0f, 1.0f, 1.0f }, 0);
 		for (int i = 0; i < 80; ++i) {
 			res::Shape list;
@@ -229,10 +222,10 @@ struct Expected {
 	const char *level;
 	const char *mode;
 	size_t placements;
-	size_t triangles; // terrain included (the listing's totals: soup Havok + hash_soup_terrain)
+	size_t triangles;
 	size_t terrain;
 	const char *terrain_hash;
-	size_t terrain_open; // cells left open (a hole corner); TC: of the whole grid
+	size_t terrain_open;
 	size_t destroyed;
 	size_t degenerate;
 	size_t tiles;
@@ -256,8 +249,7 @@ void check_level(const std::shared_ptr<Install> &p_install, const Expected &p_e)
 	CHECK(s.built == p_e.placements);
 	CHECK(s.missing == 0);
 	CHECK(s.hidden == 0);
-	// TC: the soup holds the Havok triangles and the terrain record; the oracle's totals are both together, the
-	// terrain's from hash_soup_terrain over the whole grid (as bf3dump collision prints them).
+
 	REQUIRE(s.terrains.size() == 1);
 	CHECK(s.terrains[0].state == SoupTerrain::State::Built);
 	REQUIRE(s.terrains[0].grid != nullptr);
@@ -289,7 +281,7 @@ void check_level(const std::shared_ptr<Install> &p_install, const Expected &p_e)
 	std::array<size_t, 3> bodies = s.bodies;
 	bodies[size_t(CollisionBody::Collision)] += th->triangles;
 	CHECK(bodies == p_e.bodies);
-	// Tiles: sorted, non-empty, every triangle's centroid inside its 64 m square, counts add up.
+
 	size_t total = 0, outside = 0;
 	std::set<std::pair<int32_t, int32_t>> seen;
 	for (const SoupTile &tile : s.tiles) {
@@ -309,12 +301,10 @@ void check_level(const std::shared_ptr<Install> &p_install, const Expected &p_e)
 	CHECK_FALSE(c->spawns.empty());
 }
 
-} // namespace
+}
 
 TEST_SUITE("collision") {
-	// level-oracle collision (TC, 2026-10-16, IW4L 49aca70 without its near-object rule: every terrain cell): placements,
-	// triangles, terrain triangles, hash and open cells, destroyed, degenerate, tiles, sum, bodies. Each case also
-	// checks that the install's index files are unchanged.
+
 	TEST_CASE("collision: MP_Subway TeamDeathMatch0 matches the IW4L oracle") {
 		InstallReader reader;
 		const std::shared_ptr<Install> install = open_or_skip(reader);
@@ -349,15 +339,14 @@ TEST_SUITE("collision") {
 		}
 		Result<LevelCollision> c = load_level_collision(install, "MP_Subway", "TeamDeathMatch0");
 		REQUIRE(c.ok());
-		// The mutants are drawn serially from one rng (the same bytes in the same order as a serial run), decoded and
-		// souped on worker lanes, and checked here in mutant order.
+
 		struct Mutant {
 			size_t raw = 0;
 			std::vector<uint8_t> bytes;
 		};
 		struct Outcome {
 			bool decoded = false;
-			size_t triangles = 0; // triangles + degenerate + nonfinite
+			size_t triangles = 0;
 		};
 		std::vector<res::RawRes> raws;
 		std::vector<Mutant> mutants;
@@ -380,7 +369,7 @@ TEST_SUITE("collision") {
 				mutants.push_back(std::move(m));
 			}
 		}
-		constexpr unsigned kLanes = 4; // each lane holds a decoded copy of a 6.5 MB group
+		constexpr unsigned kLanes = 4;
 		const std::vector<Outcome> outcomes = parallel_map<Outcome>(
 				mutants.size(),
 				[&](size_t i) {

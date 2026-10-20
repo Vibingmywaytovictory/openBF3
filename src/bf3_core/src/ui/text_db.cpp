@@ -1,5 +1,3 @@
-// UITextDatabase reader. Clean-room implementation from
-// research/topics/gap-r1-ui-hud-minimap-localisation.md (§4); see text_db.h for the format summary.
 #include "bf3/core/ui/text_db.h"
 
 #include "bf3/core/ebx.h"
@@ -16,14 +14,13 @@ namespace bf3::core::ui {
 
 namespace {
 
-constexpr size_t kBinaryHeader = 0x14; // magic, size, count, dataOff, strOff
-constexpr size_t kHistogramHeader = 12; // magic, size, count
-constexpr size_t kEntryLen = 8; // u32 hash, u32 offset
-constexpr size_t kOffsetBase = 8; // dataOff and strOff count from the end of (magic, size)
-// Retail: 599,272 B binary, 6,156 B histogram. Larger inputs are refused before anything is sized by them.
+constexpr size_t kBinaryHeader = 0x14;
+constexpr size_t kHistogramHeader = 12;
+constexpr size_t kEntryLen = 8;
+constexpr size_t kOffsetBase = 8;
+
 constexpr size_t kMaxChunkLen = size_t(256) << 20;
-// Encoded string bytes decoded in total, relative to the binary length. Retail strings do not overlap
-// (exactly 1x); entries pointing into each other's strings could otherwise decode quadratically.
+
 constexpr uint64_t kMaxDecodeFactor = 4;
 constexpr uint32_t kReplacement = 0xFFFD;
 
@@ -56,7 +53,6 @@ void append_utf8(std::string &r_out, uint32_t p_cp) {
 	}
 }
 
-// UTF-16 code units in, UTF-8 out; a lone surrogate becomes U+FFFD and counts as an error.
 class Utf16Sink {
 public:
 	Utf16Sink(std::string &r_out, size_t &r_errors) :
@@ -98,7 +94,6 @@ private:
 	uint16_t high_ = 0;
 };
 
-// Decodes one encoded string (without its NUL) through the histogram code units.
 void decode_string(std::span<const uint8_t> p_encoded, std::span<const uint8_t> p_units, size_t p_unit_count, std::string &r_out,
 		size_t &r_errors) {
 	auto unit = [&](size_t p_index) { return le16(p_units.data() + 2 * p_index); };
@@ -109,12 +104,12 @@ void decode_string(std::span<const uint8_t> p_encoded, std::span<const uint8_t> 
 			sink.push(b);
 			continue;
 		}
-		const uint16_t t = unit(b); // b < 256 <= p_unit_count (checked by parse)
+		const uint16_t t = unit(b);
 		if (t >= 0x80) {
 			sink.push(t);
 			continue;
 		}
-		// A page byte: the next byte (>= 0x80) indexes page t.
+
 		if (i + 1 >= p_encoded.size()) {
 			++r_errors;
 			break;
@@ -134,7 +129,7 @@ void decode_string(std::span<const uint8_t> p_encoded, std::span<const uint8_t> 
 	sink.finish();
 }
 
-} // namespace
+}
 
 uint32_t text_hash(std::string_view p_sid) {
 	uint32_t h = 0xFFFFFFFFu;
@@ -148,7 +143,6 @@ Result<TextDatabase> TextDatabase::parse(std::span<const uint8_t> p_binary, std:
 	static const char *const kBin = "text database binary chunk";
 	static const char *const kHist = "text database histogram chunk";
 
-	// Histogram.
 	const size_t hlen = p_histogram.size();
 	if (hlen > kMaxChunkLen) {
 		return format_error(kHist, "is larger than " + std::to_string(kMaxChunkLen) + " bytes");
@@ -171,7 +165,6 @@ Result<TextDatabase> TextDatabase::parse(std::span<const uint8_t> p_binary, std:
 	}
 	const std::span<const uint8_t> unit_bytes = p_histogram.subspan(kHistogramHeader);
 
-	// Binary header.
 	const size_t len = p_binary.size();
 	if (len > kMaxChunkLen) {
 		return format_error(kBin, "is larger than " + std::to_string(kMaxChunkLen) + " bytes");
@@ -196,7 +189,7 @@ Result<TextDatabase> TextDatabase::parse(std::span<const uint8_t> p_binary, std:
 	if (strings_at != table_end) {
 		return format_error(kBin, "string table offset " + std::to_string(strings_at) + " does not follow the entry table end " + std::to_string(table_end));
 	}
-	// The tag sits between the header and the entry table.
+
 	const void *tag_nul = std::memchr(b + kBinaryHeader, 0, size_t(table_at) - kBinaryHeader);
 	if (tag_nul == nullptr) {
 		return format_error(kBin, "tag is not NUL-terminated before the entry table");
@@ -206,7 +199,7 @@ Result<TextDatabase> TextDatabase::parse(std::span<const uint8_t> p_binary, std:
 	db.tag_.assign(reinterpret_cast<const char *>(b + kBinaryHeader), static_cast<const uint8_t *>(tag_nul) - (b + kBinaryHeader));
 	db.histogram_count_ = le32(p_histogram.data() + 8);
 	db.histogram_units_ = units;
-	db.entries_.reserve(count); // count * 8 <= len, checked above
+	db.entries_.reserve(count);
 	uint64_t decoded_budget = uint64_t(len) * kMaxDecodeFactor;
 	for (uint32_t i = 0; i < count; ++i) {
 		const uint8_t *e = b + table_at + uint64_t(i) * kEntryLen;
@@ -228,7 +221,7 @@ Result<TextDatabase> TextDatabase::parse(std::span<const uint8_t> p_binary, std:
 		decode_string(std::span<const uint8_t>(b + at, encoded_len), unit_bytes, units, db.text_, db.decode_errors_);
 		db.entries_.push_back(Entry{ hash, uint32_t(text_at), uint32_t(db.text_.size() - text_at) });
 	}
-	// Hash order (retail is sorted already); the first entry in file order wins a repeated hash.
+
 	std::stable_sort(db.entries_.begin(), db.entries_.end(), [](const Entry &p_a, const Entry &p_b) { return p_a.hash < p_b.hash; });
 	const auto last = std::unique(db.entries_.begin(), db.entries_.end(), [](const Entry &p_a, const Entry &p_b) { return p_a.hash == p_b.hash; });
 	db.duplicate_hashes_ = size_t(db.entries_.end() - last);
@@ -259,14 +252,11 @@ std::string_view TextDatabase::translate(std::string_view p_sid) const {
 	return (text && *text != kTextMissingMarker) ? *text : p_sid;
 }
 
-// --- install side ---------------------------------------------------------------------------------
-
 namespace {
 
 constexpr std::string_view kLocalizationPartition = "localization/localization";
 constexpr std::string_view kLocPrefix = "win32/loc/";
 
-// Win32/Loc/<code> for a LanguageFormat enumerator ("" when unknown: every Loc superbundle is tried).
 std::string loc_code(std::string_view p_language) {
 	static const struct {
 		const char *word;
@@ -347,7 +337,7 @@ Result<std::optional<TextDatabase>> load_if_installed(const Install &p_install, 
 	return std::optional<TextDatabase>();
 }
 
-} // namespace
+}
 
 Result<TextDatabaseRef> text_database_ref(const EbxResolver &p_ebx, std::string_view p_partition) {
 	const std::string key = to_lower_ascii(p_partition);
@@ -480,4 +470,4 @@ Result<TextDatabase> open_text_database(std::shared_ptr<const Install> p_install
 	return load_text_database(install, **globals, p_partition, r_source);
 }
 
-} // namespace bf3::core::ui
+}

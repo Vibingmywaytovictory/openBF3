@@ -1,29 +1,3 @@
-// The M2a client: prediction of the own weapons, reconciliation by wire view, the events, the presented weapon, the
-// cosmetic projectiles and the refusal on MatchInfo (docs/design/m2a.md §6.1-§6.3, §7.2-§7.4, §8, §13.3; owner cl;
-// as built: docs/design/m2a-cl.md).
-//
-// The end-to-end cases run against the real server: host::ServerHost with the GameServer and sv's gunplay
-// (GunplayConfig: weapons, projectiles, damage, kits, lag compensation). The gates (m2a.md §1: the headless gunplay
-// binaries run the real ServerHost and ClientSession on Metro) play on Metro with the gunplay tables
-// (tg::metro_gunplay: the install's weapons and kits, the capsule pose table from the retail clips, Metro's static
-// world), read-only on the install; without an install they are skipped (exit 77). The same runs, shorter, play on
-// the synthetic floor of gunplay_fixture.h as install-free variants in the unit suite: gunplay_floor() below gives it
-// gunplay tables (SharedLevel::gunplay: the synthetic gate weapons, lc's synthetic capsule pose table, a kit table of
-// the rifle and the pistol). The server's facts come from a GunplayObserver (every weapon tick's shots and timed phase
-// events, the projectile steps' impacts, the damage decisions and the rewound queries' trace rows,
-// GunplayObserver::rewind_rows) and from ServerHost::game_stats(). The other soldiers are real clients too (Bot: a
-// ClientSession on its own thread with a scripted input), placed on a team with KitSelect; the clients build their
-// weapon tables from the same SharedLevel (client_gunplay_inputs) and the server's cfg. The hostile case puts a relay
-// between the client and the server that adds mutated copies and decodable hostile values to the server's datagrams.
-//
-// Suite host-gunplay-client-unit (row host.gunplay.client.unit; no install): the events ring, present_weapon, the
-// weapon lane under catch_up, ClientProjectiles, the view sample and window_extrapolated, E6's refusal, R2's health
-// rebase, the SnapshotOthers merge with its acks, the hostile datagrams, and the synthetic floor variants of E1 + E5,
-// E12's gate run (60 shots), E15's loopback (24 s) and two clients (5 s + 10 s).
-// Suite host-gunplay-client (row host.gunplay.client; Metro; wall clock, minutes; runs only with OPENBF3_CL_TIMING=1,
-// else the row reports skipped): E1 + E5 (fire and reload), E12 lagcomp (b) + control + stress, E15 loopback (10 min
-// by default, OPENBF3_CL_LOOPBACK_S) and two clients, then install unchanged. Timings are wall-clock and noisy on a
-// shared machine.
 #define OPENBF3_GUNPLAY_CLIENT_TESTS 1
 #include "gunplay_fixture.h"
 #include "weapons_support.h"
@@ -78,10 +52,6 @@ namespace tg = bf3::test::gunplay;
 
 namespace {
 
-// ---- the synthetic floor with gunplay tables ----------------------------------------------------------------------
-
-// lc's synthetic capsule pose table (sim_lagcomp_tests.cpp synth_table), copied: per stance a head, a chest and a leg
-// capsule, the head leaning with the pitch bucket, the transitions blended with a bump.
 gp::CapsuleLocal cap(float p_ax, float p_ay, float p_az, float p_bx, float p_by, float p_bz, float p_r, sw::HitZone p_zone, uint8_t p_index) {
 	gp::CapsuleLocal c{};
 	c.a[0] = p_ax;
@@ -160,10 +130,6 @@ gp::CapsulePoseTable capsule_table() {
 constexpr const char *kRifle = "weapons/m16a4/u_m16a4";
 constexpr const char *kPistol = "weapons/m9/u_m9";
 
-// The synthetic floor (tg::synthetic_floor) with gunplay tables (SharedLevel::gunplay, sv's GunplayLevel): the
-// synthetic gate weapons (weapons_support.h) with an empty material table (every zone multiplier 1), the synthetic
-// soldier, lc's synthetic capsule pose table and a kit table giving every kit of both teams the M16A3 and the M9. The
-// server's Gunplay and every client build their tables from this one object.
 std::shared_ptr<const host::SharedLevel> gunplay_floor() {
 	static std::shared_ptr<const host::SharedLevel> s_level;
 	if (s_level != nullptr) {
@@ -206,8 +172,6 @@ std::shared_ptr<const host::SharedLevel> gunplay_floor() {
 	return s_level;
 }
 
-// The tables a client builds from gunplay_floor() (client_gunplay_inputs) with wp's default mechanics, for the unit
-// cases that step the weapons themselves.
 struct Tables {
 	std::shared_ptr<const sw::WeaponTable> table;
 	std::shared_ptr<const gp::CapsulePoseTable> capsules;
@@ -233,10 +197,8 @@ const Tables &tables() {
 	return s;
 }
 
-// ---- mechanics cfg files --------------------------------------------------------------------------------------------
-
 std::string mechanics_cfg_path() {
-	return OPENBF3_MECHANICS_CFG; // the tests do not run in the project directory
+	return OPENBF3_MECHANICS_CFG;
 }
 
 std::filesystem::path scratch_dir() {
@@ -249,8 +211,6 @@ std::filesystem::path scratch_dir() {
 	return s_dir;
 }
 
-// The shipped cfg with one key's value replaced, written to the scratch directory (E6's mismatch, E12's match without
-// damage). Returns its path.
 std::string cfg_with(const char *p_file, const std::string &p_key, const std::string &p_value) {
 	const std::string base = tg::read_text(mechanics_cfg_path());
 	REQUIRE_MESSAGE(!base.empty(), mechanics_cfg_path());
@@ -278,14 +238,10 @@ std::string cfg_with(const char *p_file, const std::string &p_key, const std::st
 	return path.string();
 }
 
-// E12: the shipped cfg with bullet_damage_modifier 0, so the strafing target never dies (both ends parse it; the
-// impacts and the rewound tests are unchanged, only the damage is 0).
 std::string no_damage_cfg() {
 	static const std::string s_path = cfg_with("no_damage.cfg", "bullet_damage_modifier", "0");
 	return s_path;
 }
-
-// ---- the server ---------------------------------------------------------------------------------------------------
 
 struct ServerShot {
 	sim::Tick tick = 0;
@@ -299,15 +255,13 @@ struct ServerTimed {
 struct ServerMagazine {
 	sim::Tick tick = 0;
 	uint8_t slot = 0;
-	int32_t magazine = 0; // the active weapon's, at a change
+	int32_t magazine = 0;
 };
 struct ServerImpact {
 	sim::Tick tick = 0;
 	sw::ImpactEvent impact;
 };
 
-// Everything the server's gunplay did (GunplayConfig::observer; the callbacks run on the server thread, every reader
-// takes the lock). Bounded: beyond kMaxRecords per kind the excess is counted in dropped().
 class ServerLog final : public host::GunplayObserver {
 public:
 	static constexpr size_t kMaxRecords = size_t(1) << 20;
@@ -407,19 +361,17 @@ private:
 };
 
 struct ServerOptions {
-	std::shared_ptr<const host::SharedLevel> level; // null: gunplay_floor()
-	std::string mechanics_cfg; // empty: the shipped file
+	std::shared_ptr<const host::SharedLevel> level;
+	std::string mechanics_cfg;
 	bool exact_aim = false;
 	bool infinite_magazine = false;
 	uint32_t max_rewind_ticks = host::kDefaultMaxRewindTicks;
 	uint64_t match_seed = 0x5EED0000C1u;
-	uint32_t target_bots = 0; // sv's stationary targets, team 2, slots 0 .. target_bots - 1
+	uint32_t target_bots = 0;
 	uint64_t seed = 1;
-	bool rewind_rows = false; // the observer keeps the rewound queries' trace rows (E12 (b))
+	bool rewind_rows = false;
 };
 
-// The real server: ServerHost running the GameServer with sv's gunplay, dev commands on, 64 slots (LagHistory's
-// 64-bit masks), the observer above.
 class Server {
 public:
 	~Server() { stop(); }
@@ -457,7 +409,7 @@ public:
 		const host::GameServerStats s = stats();
 		return p_slot < s.slots.size() ? s.slots[p_slot].state : sim::SoldierState();
 	}
-	// Client slots whose soldier has spawned (the client's Ready reached the server).
+
 	size_t spawned_clients() const {
 		const host::GameServerStats s = stats();
 		return size_t(std::count_if(s.slots.begin(), s.slots.end(), [](const host::SlotStats &p_s) { return p_s.used && p_s.remote && p_s.life > 0; }));
@@ -470,8 +422,6 @@ private:
 	std::shared_ptr<const host::SharedLevel> level_;
 };
 
-// ---- helpers ------------------------------------------------------------------------------------------------------
-
 bool same_bits(const void *p_a, const void *p_b, size_t p_n) {
 	return std::memcmp(p_a, p_b, p_n) == 0;
 }
@@ -481,7 +431,6 @@ bool same_value(const T &p_a, const T &p_b) {
 	return same_bits(&p_a, &p_b, sizeof(T));
 }
 
-// Field for field (floats by their bits; ShotEvent has padding, so never a memcmp of the struct).
 bool same_shot(const sw::ShotEvent &p_a, const sw::ShotEvent &p_b, std::string *r_why = nullptr) {
 	auto fail = [&](const char *p_field) {
 		if (r_why != nullptr) {
@@ -549,8 +498,6 @@ double env_seconds(const char *p_name, double p_default) {
 	return e.has_value() ? std::max(1.0, std::atof(e->c_str())) : p_default;
 }
 
-// One client and its main-thread side: the newest frame, the spawn view adopted, the drawn frame's view sample, the
-// events drained.
 struct Player {
 	host::ClientSession client;
 	host::InputSample input;
@@ -562,8 +509,6 @@ struct Player {
 
 	~Player() { client.stop(); }
 
-	// Connects to p_port with the level's own gunplay tables (client_gunplay_inputs) and the shipped cfg (the
-	// server's default), on team p_team (KitSelect with Ready, kit 0), then p_configure.
 	bool start(uint16_t p_port, const std::string &p_netsim, uint64_t p_seed, const std::function<void(host::ClientSessionConfig &)> &p_configure = {},
 			uint8_t p_team = 1, std::shared_ptr<const host::SharedLevel> p_level = nullptr) {
 		host::ClientSessionConfig cc;
@@ -659,8 +604,6 @@ struct Player {
 	}
 };
 
-// The other soldiers: real clients with a scripted input, each polled on its own thread (its "main thread"). The
-// script runs once a life has been adopted, before every poll; it must not use doctest macros.
 using Script = std::function<void(Player &, double)>;
 
 class Bot {
@@ -696,7 +639,7 @@ public:
 		player_.client.stop();
 	}
 	host::ClientStats stats() { return player_.client.stats(); }
-	// The bot's slot once spawned, else -1.
+
 	int slot() {
 		const host::ClientStats s = stats();
 		return s.spawned ? int(s.slot) : -1;
@@ -711,8 +654,7 @@ public:
 		}
 		return false;
 	}
-	// The bot's own soldier to p_position / p_yaw (M1's Teleport), sent from the bot's thread; the report or nullopt on
-	// timeout.
+
 	std::optional<net::DebugReport> teleport(const sim::Vec3 &p_position, uint16_t p_yaw, double p_timeout_s = 10.0) {
 		uint32_t id = 0;
 		{
@@ -774,8 +716,6 @@ private:
 	uint32_t next_debug_id_ = 900;
 };
 
-// Stands and fires bursts (10 ticks of every 60) turning slowly, the view 0.3 rad down, so it shoots the floor
-// around it.
 Script firing_script(uint32_t p_phase) {
 	return [p_phase](Player &r_p, double p_t) {
 		r_p.input.yaw = float(std::fmod(p_t * 1.7, 6.283185307179586));
@@ -785,8 +725,6 @@ Script firing_script(uint32_t p_phase) {
 	};
 }
 
-// Where a strafing target runs: its centre and facing (the strafe goes across it, a quarter turn either side). The
-// test sets it before it teleports the bot there; generation 0 = the bot's own spawn point and heading.
 struct StrafeSpec {
 	std::mutex mutex;
 	uint64_t generation = 0;
@@ -801,9 +739,6 @@ struct StrafeSpec {
 	}
 };
 
-// A target that strafes across its heading (the spawn's, or StrafeSpec's): it faces left or right of it and runs
-// forward at the stand speed (4 m/s), turning back at +-4 m from the centre (an 8 m leg) or after 3 s on one leg (a
-// wall in the way: Metro).
 Script strafing_script(std::shared_ptr<StrafeSpec> p_spec = nullptr) {
 	struct State {
 		bool init = false;
@@ -875,25 +810,17 @@ void print_server(const char *p_label, const host::GameServerStats &p_s) {
 			g.no_ack_state, g.others_dropped, g.lag.present, g.lag.rewound, g.lag.clamped, g.lag.refused, g.lag.acks_ignored, p_s.weapon_hash);
 }
 
-// ---- the hostile relay --------------------------------------------------------------------------------------------
-
-// A remote shot that decodes but names a def outside the table (the client refuses it and counts it).
 net::RemoteShot hostile_shot(sim::Tick p_tick, const sim::Vec3 &p_eye) {
 	net::RemoteShot r;
 	r.slot = 63;
 	r.shot_index = 1000u + p_tick;
-	r.def = uint16_t(net::kMaxWireDefs - 1); // the largest def the wire carries; the synthetic table is far smaller
+	r.def = uint16_t(net::kMaxWireDefs - 1);
 	r.time = sw::tick_start(p_tick);
 	r.origin = p_eye;
 	r.direction = { 0.0f, 0.0f, 1.0f };
 	return r;
 }
 
-// Between one client and the real server (two ENet hosts on one thread): everything is forwarded both ways; on the way
-// to the client every SnapshotOthers, ShotEvents and CombatEvents gets two mutated copies (bit flips, truncation,
-// trailing bytes), and every 20th Snapshot carries decodable hostile values: its own weapons block names def 0xFFF0,
-// and a ShotEvents with a shot of an unknown def and a CombatEvents with a hit of huge damage naming slot 250 (which
-// the 7-bit wire slot carries as 122) follow it.
 class HostileRelay {
 public:
 	~HostileRelay() { stop(); }
@@ -950,7 +877,7 @@ private:
 				case 0: {
 					const int flips = 1 + int(rng_() % 8);
 					for (int f = 0; f < flips; ++f) {
-						const size_t at = 1 + size_t(rng_() % (b.size() - 1)); // byte 0 stays the type
+						const size_t at = 1 + size_t(rng_() % (b.size() - 1));
 						b[at] ^= uint8_t(1u << (rng_() % 8));
 					}
 					break;
@@ -1010,7 +937,7 @@ private:
 		}
 	}
 	void run() {
-		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> pending; // client datagrams before the server connection is up
+		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> pending;
 		while (!stop_.load()) {
 			net::Host::Event ev;
 			while (front_->service(0, ev) > 0) {
@@ -1073,10 +1000,6 @@ private:
 	std::atomic<uint64_t> hostile_sent_{ 0 }, forwarded_{ 0 };
 };
 
-// ---- unit helpers -------------------------------------------------------------------------------------------------
-
-// A synthetic own-world record source (host::ReceivedRecordSource): per seq a tick and the records of the main
-// Snapshot.
 struct SyntheticRecords final : host::ReceivedRecordSource {
 	std::map<uint16_t, std::pair<uint32_t, std::vector<net::OtherSoldier>>> seqs;
 	size_t candidates(const host::ShotView &p_view, uint8_t p_target, std::span<net::TimedOther> r_out) const override {
@@ -1150,9 +1073,7 @@ std::shared_ptr<const host::SharedLevel> floor_level() {
 	return gunplay_floor();
 }
 
-} // namespace
-
-// ---- unit ---------------------------------------------------------------------------------------------------------
+}
 
 TEST_SUITE("host-gunplay-client-unit") {
 	TEST_CASE("host.gunplay.client: PresentationEvents keeps order across threads and counts a full ring") {
@@ -1168,7 +1089,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(ring->drain(out) == host::kPresentationEventCapacity);
 		CHECK(out[0].id == 0);
 		CHECK(out[host::kPresentationEventCapacity - 1].id == host::kPresentationEventCapacity - 1);
-		// One producer, one consumer, 1,000,000 events: every id once, in order.
+
 		constexpr uint32_t kCount = 1'000'000;
 		std::atomic<bool> done{ false };
 		std::thread producer([&] {
@@ -1228,7 +1149,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 			states.push_back(w);
 		}
 		auto view = [&](sim::Tick p_tick) { return net::weapons_wire_view(states[p_tick - 100], p_tick); };
-		// Deploying right after the spawn: phase progress runs 0..1 over the deploy.
+
 		const host::PresentedWeapon d = host::present_weapon(view(110), view(111), 111, 0.5, *t.table);
 		REQUIRE(d.valid);
 		CHECK(d.def == t.rifle);
@@ -1237,7 +1158,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(d.phase_progress > 0.0f);
 		CHECK(d.phase_progress < 1.0f);
 		CHECK(std::fabs(d.time_s - (sw::units_to_seconds(sw::tick_end(110)) + 0.5 / 60.0)) < 1e-9);
-		// Firing: the magazine goes down, the spread lerps between the two ticks.
+
 		const host::PresentedWeapon f0 = host::present_weapon(view(164), view(165), 165, 0.0, *t.table);
 		const host::PresentedWeapon f1 = host::present_weapon(view(164), view(165), 165, 1.0, *t.table);
 		const host::PresentedWeapon fh = host::present_weapon(view(164), view(165), 165, 0.5, *t.table);
@@ -1246,15 +1167,15 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(f1.spread_deg == doctest::Approx(view(165).timers[0].spread));
 		CHECK(fh.spread_deg == doctest::Approx(0.5f * (f0.spread_deg + f1.spread_deg)));
 		CHECK(fh.recoil.pitch == doctest::Approx(0.5f * (f0.recoil.pitch + f1.recoil.pitch)));
-		// Zoom held: kZoomWasDown.
+
 		const host::PresentedWeapon z = host::present_weapon(view(190), view(191), 191, 0.3, *t.table);
 		CHECK(z.zoomed);
-		// A different item in the previous tick: the newer item's values, no lerp.
+
 		net::WeaponsWire other = view(164);
 		other.slots[other.active].def = t.pistol;
 		const host::PresentedWeapon s = host::present_weapon(other, view(165), 165, 0.5, *t.table);
 		CHECK(s.spread_deg == doctest::Approx(view(165).timers[0].spread));
-		// Hostile: a def outside the table, an active slot out of range.
+
 		net::WeaponsWire bad = view(165);
 		bad.slots[bad.active].def = uint16_t(t.table->defs.size() + 3);
 		CHECK(!host::present_weapon(view(164), bad, 165, 0.5, *t.table).valid);
@@ -1317,7 +1238,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		const size_t shots = sink.shots.size();
 		CHECK(shots >= 6);
 		CHECK(sink.ticks == 120);
-		// Replay from tick 90 (a reconciliation): every weapon state equal, nothing emitted again.
+
 		const sim::SoldierState base = ring.find(90)->state;
 		const sim::CatchUpStats c = sim::catch_up(motor, base, ring, 171);
 		CHECK(c.steps == 80);
@@ -1330,13 +1251,13 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(sink.shots.size() == shots);
 		CHECK(lane.stats().replayed_ticks == 80);
 		CHECK(lane.stats().gaps == 0);
-		// A changed base weapon state at 95 (a wire rebase): the replay recomputes from it.
+
 		sim::WeaponPredictionEntry rebased = *lane.find(95);
 		rebased.state.slots[0].magazine = 3;
 		lane.put(rebased);
 		(void)sim::catch_up(motor, ring.find(95)->state, ring, 171);
 		CHECK(lane.find(170)->state.slots[0].magazine <= 3);
-		// Dead before the tick: carried, no events.
+
 		sim::SoldierState dead = state;
 		dead.mode = sim::MoveMode::Dead;
 		sim::Command c2;
@@ -1362,8 +1283,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		host::ClientProjectiles &p = **made;
 		CHECK(!host::ClientProjectiles::create(nullptr, t.capsules, 1).ok());
 		auto ring = std::make_unique<host::PresentationEvents>();
-		// The target (slot 5) stood at x = 0 at seq 9 / 10 (ticks 98, 100) and moved to x = 3 afterwards: the
-		// rewound test must hit it where those records put it.
+
 		SyntheticRecords records;
 		records.seqs[9] = { 98, { record_at(5, { 0.0f, 0.0f, 20.0f }, { 0, 0, 0 }) } };
 		records.seqs[10] = { 100, { record_at(5, { 0.0f, 0.0f, 20.0f }, { 0, 0, 0 }) } };
@@ -1372,7 +1292,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		view.view_seq = 10;
 		view.main_bits = 0b11;
 		const sim::Tick tick = 110;
-		view.view_back_q8 = int32_t((tick << 8) - (100u << 8)); // drawn at render time 100
+		view.view_back_q8 = int32_t((tick << 8) - (100u << 8));
 		const sim::Vec3 origin{ 0.0f, 1.3f, 0.0f };
 		const sw::ShotEvent shot = own_shot(*t.table, t.rifle, 2, 7, tick, origin, { 0.0f, 0.0f, 1.0f });
 		p.spawn_own(shot, view);
@@ -1400,10 +1320,10 @@ TEST_SUITE("host-gunplay-client-unit") {
 			CHECK(samples[0].shot_index == 7);
 			CHECK(samples[0].time_q8 == net::rewind_time_q8(sw::tick_start(tick), view.view_back_q8, host::kDefaultMaxRewindTicks));
 		}
-		// Without a stored view (a repeat): tested against nothing on the own world (counted), no contact.
+
 		const sw::ShotEvent stray = own_shot(*t.table, t.rifle, 2, 8, tick + 20, origin, { 0.0f, 0.0f, 1.0f });
 		host::ShotView none;
-		none.view_seq = 99; // not held
+		none.view_seq = 99;
 		none.quality = uint8_t(sim::ViewQuality::Interpolated);
 		p.spawn_own(stray, none);
 		for (sim::Tick k = tick + 20; k < tick + 30; ++k) {
@@ -1412,7 +1332,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		n = ring->drain(ev);
 		CHECK(std::none_of(ev.begin(), ev.begin() + std::ptrdiff_t(n), [](const host::PresentEvent &e) { return e.kind == host::PresentKind::SoldierContact; }));
 		CHECK(p.stats().own_no_view > 0);
-		// Remote: a shot of slot 9 down into the floor, spawned when the render time reaches it.
+
 		net::RemoteShot r;
 		r.slot = 9;
 		r.shot_index = 41;
@@ -1439,11 +1359,11 @@ TEST_SUITE("host-gunplay-client-unit") {
 				++impacts;
 				CHECK(ev[i].timeline == host::PresentTimeline::Render);
 				CHECK(ev[i].seed == host::impact_seed(host::effect_seed(1, 9, 41), 0, ev[i].extra));
-				CHECK(std::fabs(ev[i].pos[1]) < 0.01f); // the floor at y = 0
+				CHECK(std::fabs(ev[i].pos[1]) < 0.01f);
 			}
 		}
 		CHECK(impacts == 1);
-		// The seed rules of §4.4.
+
 		CHECK(host::effect_seed(1, 9, 41) == sw::splitmix64(1 ^ (uint64_t(9) << 32 | 41u)));
 		sw::ShotEvent derived;
 		REQUIRE(host::shot_event_of(r, *t.table, 1, derived));
@@ -1473,7 +1393,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(host::present_view_quality(*f, 101.0) == sim::ViewQuality::Extrapolated);
 		CHECK(host::present_view_quality(*f, 100.0 + 15.5) == sim::ViewQuality::Held);
 		host::InputSample in;
-		host::set_view_sample(in, *f, f->publish_ns + 8'333'333ull); // half a tick later
+		host::set_view_sample(in, *f, f->publish_ns + 8'333'333ull);
 		CHECK(in.view_valid);
 		CHECK(in.view_render_ticks == doctest::Approx(100.5));
 		CHECK(in.view_quality == uint8_t(sim::ViewQuality::Extrapolated));
@@ -1483,11 +1403,11 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(host::present_others(*f, f->publish_ns + 16'666'667ull, out, counts) == 1);
 		CHECK(counts.extrapolated == 1);
 		CHECK(counts.window_extrapolated == 0);
-		t.track_newest_tick = 102; // the client's track held a newer sample the window did not
+		t.track_newest_tick = 102;
 		host::PresentOthersCounts counts2;
 		host::present_others(*f, f->publish_ns + 16'666'667ull, out, counts2);
 		CHECK(counts2.window_extrapolated == 1);
-		// The M1 signature adds the extrapolated ones and draws the same.
+
 		uint64_t extra = 0;
 		std::array<host::PresentedSoldier, 4> out1;
 		CHECK(host::present_others(*f, f->publish_ns + 16'666'667ull, out1, &extra) == 1);
@@ -1544,8 +1464,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 			std::printf("E6 %s: refused \"%s\", weapon_hash_mismatch %" PRIu64 ", kit_hash_mismatch %" PRIu64 ", spawned on the server %zu, commands %" PRIu64 "\n",
 					row.label, error.c_str(), s.weapon_hash_mismatch, s.kit_hash_mismatch, spawned, s.commands_sent);
 		}
-		// The matched client (the level's own tables and the server's cfg): Ready once, spawned, predicting; an M1
-		// server (a level without gunplay tables: no weapon_hash): Ready, no gunplay.
+
 		for (const bool gunplay : { true, false }) {
 			Server server;
 			std::string err;
@@ -1570,8 +1489,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 	}
 
 	TEST_CASE("host.gunplay.client: R2: a server hit (health, the tick's damage, kDamaged) is a health rebase, not a reconciliation") {
-		// The victim (this client, team 1) stands at the floor's centre; an enemy client (team 2) 5 m away aims at its
-		// presented chest and taps three single shots (exact_aim: no spread), 25 damage each: health 25, no death.
+
 		Server server;
 		std::string err;
 		ServerOptions so;
@@ -1586,7 +1504,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		REQUIRE(p.teleport({ 0.0f, 0.05f, 0.0f }, face).has_value());
 		const uint8_t victim = p.client.stats().slot;
 		struct Shooter {
-			std::atomic<int> placed{ 0 }; // 0 not yet, 1 placed, -1 the teleport failed
+			std::atomic<int> placed{ 0 };
 			std::atomic<uint32_t> wanted{ 0 }, fired{ 0 };
 			double last = -10.0;
 		};
@@ -1594,7 +1512,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		Bot shooter;
 		REQUIRE(shooter.start(server.port(), 2, 6, [sh, victim](Player &r_p, double p_t) {
 			if (sh->placed.load() == 0) {
-				// 5 m in front of the victim (it faces +Z), facing it.
+
 				sh->placed = r_p.teleport({ 0.0f, 0.05f, 5.0f }, sim::quantize_yaw(3.14159265f)).has_value() ? 1 : -1;
 				r_p.input.yaw = 3.14159265f;
 				return;
@@ -1618,10 +1536,10 @@ TEST_SUITE("host-gunplay-client-unit") {
 			}
 		}));
 		REQUIRE(shooter.wait_spawned());
-		// Past the victim's spawn protection (2 s) and the shooter's placement, then one tap a second.
+
 		p.run_for(3.0);
 		REQUIRE(sh->placed.load() == 1);
-		// The Teleport is a server-side state change (one motor reconciliation, as in M1): count from here on.
+
 		const uint64_t reconciliations_before = p.client.stats().reconciliations;
 		for (uint32_t k = 1; k <= 3; ++k) {
 			sh->wanted = k;
@@ -1703,7 +1621,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		Server server;
 		std::string err;
 		ServerOptions so;
-		so.target_bots = 60; // the SnapshotOthers the relay mutates
+		so.target_bots = 60;
 		REQUIRE_MESSAGE(server.start(so, err), err);
 		Bot b1, b2;
 		REQUIRE(b1.start(server.port(), 1, 10, firing_script(5)));
@@ -1726,8 +1644,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(p.frame->valid);
 		CHECK(relay.hostile_sent() > 100);
 		CHECK(s.bad_gunplay_datagrams > 0);
-		// The unknown-def shot and the hit on slot 250 decode (the wire carries any def and slot byte) and are dropped
-		// by the client's range checks before any event.
+
 		net::ShotEvents probe;
 		probe.server_tick = 600;
 		probe.shots.push_back(hostile_shot(600, { 0.0f, 1.6f, 0.0f }));
@@ -1753,15 +1670,8 @@ TEST_SUITE("host-gunplay-client-unit") {
 	}
 }
 
-// ---- the end-to-end runs: Metro (the gates, host.gunplay.client) and the synthetic floor (install-free variants) ----
-
 namespace {
 
-// The level an end-to-end run plays on. The gates (m2a.md §1: the headless gunplay binaries run the real ServerHost
-// and ClientSession on Metro) use Metro with the gunplay tables: the install's weapons and kits, the capsule pose
-// table from the retail clips and Metro's static world, which the motor, the server's bullets and the client's
-// cosmetic tests all collide with. The synthetic floor (gunplay_floor) runs the same code as short install-free
-// variants in the unit suite.
 struct Arena {
 	const char *name = "";
 	std::shared_ptr<const host::SharedLevel> level;
@@ -1771,8 +1681,6 @@ Arena floor_arena() {
 	return { "synthetic floor", gunplay_floor() };
 }
 
-// Metro (tg::metro_gunplay, loaded once per process, read-only on the install); nullopt and the case skipped (the
-// executable exits 77) without an install.
 std::optional<Arena> metro_arena() {
 	tg::Metro *m = tg::metro_gunplay();
 	if (m == nullptr) {
@@ -1788,11 +1696,6 @@ std::string lower(std::string p_s) {
 	return p_s;
 }
 
-// ---- E1 + E5 --------------------------------------------------------------------------------------------------------
-
-// Team 1 kit 0 (the M16A3 on Metro and on the floor): fire held from a full magazine until it is empty (E1: the first
-// 31 predicted shots equal the server's field for field), then the empty and a tactical reload (E5: the server's timed
-// phase events equal the predicted ones, the reload durations and the magazine after each).
 void run_fire_reload(const Arena &p_arena) {
 	Server server;
 	std::string err;
@@ -1802,13 +1705,13 @@ void run_fire_reload(const Arena &p_arena) {
 	Player p;
 	REQUIRE(p.start(server.port(), "off", 21, {}, 1, p_arena.level));
 	REQUIRE(p.wait_spawned());
-	p.run_for(1.5); // the deploy (0.67 s) is over
-	// Fire held from a full magazine until it is empty, then released.
+	p.run_for(1.5);
+
 	p.input.held_buttons = sim::buttons::kFire;
 	p.run_for(3.0);
 	p.input.held_buttons = 0;
 	p.run_for(0.5);
-	// Empty reload (2.37 s), then a tactical one after 5 shots (1.8 s, commit at 0.85).
+
 	p.input.held_buttons = sim::buttons::kReload;
 	p.run_for(0.1);
 	p.input.held_buttons = 0;
@@ -1837,7 +1740,7 @@ void run_fire_reload(const Arena &p_arena) {
 			server_shots.push_back(x);
 		}
 	}
-	// E1: the first 31 shots (the full magazine).
+
 	REQUIRE(shots.size() >= 31);
 	REQUIRE(server_shots.size() >= 31);
 	core::Result<std::shared_ptr<const host::ClientGunplayInputs>> in = host::client_gunplay_inputs(*p_arena.level);
@@ -1861,14 +1764,14 @@ void run_fire_reload(const Arena &p_arena) {
 		gaps += shots[i].shot.time - shots[i - 1].shot.time == 4'500'000 ? 1u : 0u;
 	}
 	CHECK(gaps == 30);
-	CHECK(shots[0].shot.time == sw::tick_start(shots[0].tick)); // the press tick's start
+	CHECK(shots[0].shot.time == sw::tick_start(shots[0].tick));
 	const size_t muzzle = p.count(host::PresentKind::OwnShot);
 	CHECK(muzzle == shots.size());
 	CHECK(shots.size() == server_shots.size());
 	std::printf("E1 %s (%s): predicted %zu / server %zu shots; the first 31 equal field for field: %zu / 31; gaps of 4,500,000: %zu / 30; first at the press "
 				"tick's start: %d; OwnShot events %zu\n",
 			p_arena.name, variant.c_str(), shots.size(), server_shots.size(), equal, gaps, int(shots[0].shot.time == sw::tick_start(shots[0].tick)), muzzle);
-	// E5: server = predicted timed events (all of them), and the reload durations.
+
 	std::vector<ServerTimed> server_timed;
 	for (const ServerTimed &x : server.log().timed()) {
 		if (x.slot == s.slot) {
@@ -1895,11 +1798,10 @@ void run_fire_reload(const Arena &p_arena) {
 	REQUIRE(starts.size() >= 2);
 	REQUIRE(finishes.size() >= 2);
 	REQUIRE(commits.size() >= 2);
-	CHECK(finishes[0] - starts[0] == 142'200'000); // empty: 2.37 s
-	CHECK(finishes[1] - starts[1] == 108'000'000); // tactical: 1.8 s
+	CHECK(finishes[0] - starts[0] == 142'200'000);
+	CHECK(finishes[1] - starts[1] == 108'000'000);
 	CHECK(commits[1] - starts[1] == 91'800'000);
-	// The ammo when the two reloads finish, from the server's weapon states (the magazine changes at the commit):
-	// 30 after the empty one (unchambered), 31 after the tactical one.
+
 	int32_t after_empty = -1, after_tactical = -1;
 	for (const ServerMagazine &m : server.log().magazines()) {
 		if (m.slot != s.slot) {
@@ -1920,21 +1822,14 @@ void run_fire_reload(const Arena &p_arena) {
 			int64_t(commits[1] - starts[1]), after_tactical);
 }
 
-// ---- E12 --------------------------------------------------------------------------------------------------------
-
-// Where E12 plays: a shooter standing on a spawn point facing along a clear line, and a strafe line across that line
-// p_distance ahead (the target's centre, facing the shooter), level within 0.1 m over +-p_half, a standing capsule
-// free to run the whole of it, and every point of it in clear view of the shooter's eye (rays to 0.3, 1.0 and 1.6 m
-// above the floor, the projectile layers). The first match in the level's spawn order and 64 headings
-// (deterministic); nullopt when none.
 struct LagcompSite {
-	sim::Vec3 shooter{}; // feet
+	sim::Vec3 shooter{};
 	uint16_t shooter_yaw = 0;
-	sim::Vec3 target{}; // the strafe line's centre (feet)
-	uint16_t target_yaw = 0; // facing the shooter; the strafe runs a quarter turn either side
+	sim::Vec3 target{};
+	uint16_t target_yaw = 0;
 	uint32_t spawn_index = 0;
 	float distance = 0;
-	uint32_t candidates = 0; // (spawn, heading) pairs tried
+	uint32_t candidates = 0;
 };
 
 std::optional<LagcompSite> find_lagcomp_site(const host::SharedLevel &p_level, float p_distance, float p_half) {
@@ -2001,8 +1896,6 @@ std::optional<LagcompSite> find_lagcomp_site(const host::SharedLevel &p_level, f
 	return std::nullopt;
 }
 
-// The site E12 uses on p_arena's level: 20 m (the distance the design's numbers assume), else 16 or 12 m; nullopt
-// (and the case failed) when the level has none.
 std::optional<LagcompSite> lagcomp_site(const Arena &p_arena) {
 	for (float d : { 20.0f, 16.0f, 12.0f }) {
 		const std::optional<LagcompSite> s = find_lagcomp_site(*p_arena.level, d, 5.0f);
@@ -2024,8 +1917,8 @@ struct LagcompResult {
 	size_t both = 0;
 	size_t same_zone = 0;
 	size_t compared = 0, equal = 0, mismatched = 0, client_only = 0;
-	size_t server_rows = 0, server_only = 0; // the server's trace rows of the shooter; those no client sample matched
-	size_t server_hits = 0, server_hits_uncompared = 0; // shots the server hit on the target; of them, no sample compared
+	size_t server_rows = 0, server_only = 0;
+	size_t server_hits = 0, server_hits_uncompared = 0;
 	host::ClientStats stats;
 	host::LagCompStats lag;
 	uint64_t refused_views = 0;
@@ -2047,9 +1940,7 @@ LagcompResult run_lagcomp(const Arena &p_arena, const LagcompSite &p_site, const
 	so.max_rewind_ticks = p_server_rewind;
 	so.rewind_rows = true;
 	REQUIRE_MESSAGE(server.start(so, err), err);
-	// The target (team 2) strafes across the site's line, the shooter (team 1) stands p_site.distance away facing it:
-	// the target crosses the view at 4 m/s, so the ~250 ms the client draws it behind is about 1 m sideways (the
-	// control run's miss).
+
 	auto strafe = std::make_shared<StrafeSpec>();
 	Bot target;
 	REQUIRE(target.start(server.port(), 2, 12, strafing_script(strafe), cfg, p_arena.level));
@@ -2083,11 +1974,11 @@ LagcompResult run_lagcomp(const Arena &p_arena, const LagcompSite &p_site, const
 	REQUIRE(vl > 1.0f);
 	p.run_for(1.5);
 	std::set<uint32_t> fired;
-	std::map<uint32_t, uint8_t> client_hit; // shot index -> zone
+	std::map<uint32_t, uint8_t> client_hit;
 	sim::Tick last_press = 0;
 	double speed_sum = 0;
 	size_t speed_n = 0;
-	p.input.held_buttons = sim::buttons::kZoom; // aimed down the sights
+	p.input.held_buttons = sim::buttons::kZoom;
 	const auto start = std::chrono::steady_clock::now();
 	while (fired.size() < p_shots && tg::seconds_since(start) < double(p_shots) / 4.0 + 60.0) {
 		p.poll();
@@ -2157,9 +2048,7 @@ LagcompResult run_lagcomp(const Arena &p_arena, const LagcompSite &p_site, const
 			r.same_zone += it->second == zone ? 1u : 0u;
 		}
 	}
-	// (b): the server's posed OtherPose (its rewound queries' trace rows) against the client's cosmetic-test sample,
-	// keyed by shot, target, time. A sample whose time differs between the ends lands in client_only and its server
-	// row in server_only; every shot the server hit must have at least one compared sample (unless clamped).
+
 	std::map<std::tuple<uint32_t, uint8_t, int64_t>, net::OtherPose> server_rows;
 	for (const host::RewindTraceRow &row : server.log().trace()) {
 		if (row.shooter == own) {
@@ -2213,7 +2102,6 @@ LagcompResult run_lagcomp(const Arena &p_arena, const LagcompSite &p_site, const
 	return r;
 }
 
-// The E12 gate's checks on one run (the gate run of 500 shots on Metro, the install-free variant's shorter one).
 void check_lagcomp_gate(const LagcompResult &p_gate, size_t p_shots, size_t p_min_hits) {
 	CHECK(p_gate.shots >= p_shots);
 	CHECK(p_gate.client_hits >= p_min_hits);
@@ -2224,11 +2112,6 @@ void check_lagcomp_gate(const LagcompResult &p_gate, size_t p_shots, size_t p_mi
 	CHECK(p_gate.server_hits_uncompared <= p_gate.lag.clamped);
 }
 
-// ---- E15 --------------------------------------------------------------------------------------------------------
-
-// Scripted play without netsim for p_seconds: a strafing and a firing bot on the player's team (friendly fire is
-// off: remote shots and impacts, no deaths), the player walking, turning, firing, zooming, reloading, switching to the
-// pistol and back, crouching, jumping and sprinting (a 12 s script, repeated). 0 weapon and 0 motor reconciliations.
 void run_loopback(const Arena &p_arena, double p_seconds) {
 	Server server;
 	std::string err;
@@ -2262,13 +2145,13 @@ void run_loopback(const Arena &p_arena, double p_seconds) {
 			b |= sim::buttons::kReload;
 		}
 		if (t > 7.0 && t < 7.05) {
-			b |= uint32_t(2) << sw::weapon_buttons::kSlotShift; // the pistol (slot 1)
+			b |= uint32_t(2) << sw::weapon_buttons::kSlotShift;
 		}
 		if (t > 8.0 && t < 8.6) {
 			b |= sim::buttons::kFire;
 		}
 		if (t > 9.5 && t < 9.55) {
-			b |= uint32_t(1) << sw::weapon_buttons::kSlotShift; // back to the rifle
+			b |= uint32_t(1) << sw::weapon_buttons::kSlotShift;
 		}
 		if (t > 10.0 && t < 10.05) {
 			++p.input.jump_presses;
@@ -2313,8 +2196,6 @@ void run_loopback(const Arena &p_arena, double p_seconds) {
 			s.lane.steps, s.lane.replayed_ticks, double(lo[0]), double(hi[0]), double(lo[1]), double(hi[1]), double(lo[2]), double(hi[2]));
 }
 
-// Two firing bots and client A play p_before_s, then client B joins and both play p_after_s: every remote shot B saw
-// A saw too (as remote, or fired it itself) with the same effect seed.
 void run_two_clients(const Arena &p_arena, double p_before_s, double p_after_s, size_t p_min_remote) {
 	Server server;
 	std::string err;
@@ -2359,7 +2240,7 @@ void run_two_clients(const Arena &p_arena, double p_before_s, double p_after_s, 
 		b.poll();
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
 	}
-	// Every shooter stops firing and both keep draining together until the last shots have arrived.
+
 	a.input.held_buttons = 0;
 	b.input.held_buttons = 0;
 	b1.stop();
@@ -2376,7 +2257,7 @@ void run_two_clients(const Arena &p_arena, double p_before_s, double p_after_s, 
 	const std::string la = std::string("E15 client A ") + p_arena.name, lb = std::string("E15 client B ") + p_arena.name;
 	print_client(la.c_str(), sa);
 	print_client(lb.c_str(), sb);
-	// A's whole stream: B's first ShotEvents also carry shots of the ticks just before its join.
+
 	std::map<std::pair<uint8_t, uint32_t>, const host::PresentEvent *> at_a;
 	for (const host::PresentEvent &e : a.events) {
 		if (e.kind == host::PresentKind::RemoteShot || e.kind == host::PresentKind::OwnShot) {
@@ -2406,9 +2287,8 @@ void run_two_clients(const Arena &p_arena, double p_before_s, double p_after_s, 
 			p_arena.name, remote_b, matched, same_seed, near, fired_before.size(), bot_slots.size());
 }
 
-} // namespace
+}
 
-// The install-free variants: the same runs on the synthetic floor, shorter (they are not the gates; m2a-cl.md).
 TEST_SUITE("host-gunplay-client-unit") {
 	TEST_CASE("host.gunplay.client: synthetic floor variant: E1 + E5 (31 predicted shots = the server's; reload phase events server = predicted)") {
 		run_fire_reload(floor_arena());
@@ -2429,8 +2309,6 @@ TEST_SUITE("host-gunplay-client-unit") {
 		run_two_clients(floor_arena(), 5.0, 10.0, 20);
 	}
 }
-
-// ---- the gates on Metro (OPENBF3_CL_TIMING=1, under the quiet lock; exit 77 without an install) ----------------------
 
 TEST_SUITE("host-gunplay-client") {
 	TEST_CASE("host.gunplay.client: E1 + E5 on Metro: 31 predicted shots equal the server's field for field; reload phase events server = predicted") {
@@ -2492,7 +2370,6 @@ TEST_SUITE("host-gunplay-client") {
 		run_two_clients(*metro, 30.0, 30.0, 100);
 	}
 
-	// Last: the install is unchanged by the run (layout.toc, cas.cat, the .sb / .toc files); removes the scratch cache.
 	TEST_CASE("host.gunplay.client: install unchanged") {
 		if (!timing_enabled("install unchanged")) {
 			return;
@@ -2505,15 +2382,6 @@ TEST_SUITE("host-gunplay-client") {
 	}
 }
 
-// M2a gate
-// E2's client half, added at the M2a gate pass (docs/design/m2a-gate.md): m2a.md §1 E2 asks for "the client's
-// cosmetic flight of the same shot within 1 mm of the server's at 300 m". sv measured the server half (the drop and
-// the expiry, host.gunplay.server case "drop") and left the client half to this suite (m2a-sv.md, measurement notes),
-// whose case list had no E2 row. ClientProjectiles keeps its in-flight positions inside, so the two flights are
-// compared where they end: on sv's sky lane (find_sky_lane, 40 m above Metro's static world) the shooter looks down at
-// the world about 300 m out (a ray search over the pitch along the lane), fires single M16A3 rounds, and the client's
-// own-world Impact event (Predicted timeline, slot = the own slot, id = the shot index) is compared with the server's
-// ImpactEvent of the same shot (a GunplayObserver): the first static impact of each shot, positions within 1 mm.
 #include "bf3/host/target_bots.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/weapons/spread_recoil.h"
@@ -2559,7 +2427,7 @@ void run_e2_client_flight(const Arena &p_arena) {
 	REQUIRE(world.ok());
 	core::Result<host::SkyLane> lane = host::find_sky_lane(**world, 975.0f, sw::BallisticsLimits{}.world_margin);
 	REQUIRE_MESSAGE(lane.ok(), (lane.ok() ? std::string() : lane.error().message));
-	// The pitch whose ray from the lane's eye meets the world closest to 300 m out (horizontally).
+
 	int16_t best_pitch = 0;
 	float best_distance = -1.0f;
 	for (int k = 4; k <= 240; ++k) {
@@ -2584,9 +2452,9 @@ void run_e2_client_flight(const Arena &p_arena) {
 	REQUIRE(p.start(server.port(), "off", 41, {}, 1, p_arena.level));
 	REQUIRE(p.wait_spawned());
 	const uint8_t own = uint8_t(p.client.stats().slot);
-	constexpr int kShots = 8; // in-air hip spread scatters them: the rounds whose impact is 300 m or more out count
+	constexpr int kShots = 8;
 	for (int k = 0; k < kShots; ++k) {
-		// Alive (the previous fall may have killed it; a new life is adopted by poll) and deployed.
+
 		const auto start = std::chrono::steady_clock::now();
 		while (tg::seconds_since(start) < 15.0 && !(p.frame->valid && p.frame->own_curr.mode != sim::MoveMode::Dead && p.input.life == p.frame->own_curr.life)) {
 			p.poll();
@@ -2596,11 +2464,11 @@ void run_e2_client_flight(const Arena &p_arena) {
 		REQUIRE(p.teleport(lane->feet, lane->yaw).has_value());
 		p.input.yaw = sim::yaw_radians(lane->yaw);
 		p.input.pitch = sim::pitch_radians(best_pitch);
-		p.run_for(0.05); // the view reaches the command
+		p.run_for(0.05);
 		p.input.held_buttons = sim::buttons::kFire;
-		p.run_for(0.04); // one tick held: one round (75 ms interval)
+		p.run_for(0.04);
 		p.input.held_buttons = 0;
-		p.run_for(2.0); // the flight (about 0.5 s) and the fall
+		p.run_for(2.0);
 	}
 	std::vector<host::PredictedShot> shots;
 	std::vector<host::PredictedTimed> timed;
@@ -2648,7 +2516,7 @@ void run_e2_client_flight(const Arena &p_arena) {
 	CHECK(within == compared);
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-gunplay-client") {
 	TEST_CASE("host.gunplay.client: E2 client flight on Metro: the cosmetic flight of an own shot ends within 1 mm of the server's about 300 m out") {

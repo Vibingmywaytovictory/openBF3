@@ -32,7 +32,7 @@ void TickTimer::sleep_until(std::chrono::steady_clock::time_point p_deadline) {
 	}
 	const int64_t ticks_100ns = duration_cast<nanoseconds>(p_deadline - now).count() / 100;
 	LARGE_INTEGER due;
-	due.QuadPart = -ticks_100ns; // negative = relative
+	due.QuadPart = -ticks_100ns;
 	if (SetWaitableTimerEx(static_cast<HANDLE>(timer_), &due, 0, nullptr, nullptr, nullptr, 0)) {
 		WaitForSingleObject(static_cast<HANDLE>(timer_), INFINITE);
 	} else {
@@ -40,4 +40,4 @@ void TickTimer::sleep_until(std::chrono::steady_clock::time_point p_deadline) {
 	}
 }
 
-} // namespace bf3::host::detail
+}

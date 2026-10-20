@@ -1,11 +1,3 @@
-// MotorTuning file format, MotorParams from the SoldierDef, the curve evaluation and motor_params_hash
-// (docs/design/m1.md §6.4, §6.10, §6.11). Godot-free, Jolt-free.
-//
-// The tuning file is "key = value" lines: '#' starts a comment (whole line or after the value), blank lines are
-// skipped, every key is a MotorTuning field name, enums by name, booleans true/false, numbers as C locale
-// decimals. An unknown key, a repeated key, a bad value or a value out of range fails with the line number. Keys
-// left out keep the defaults. format_motor_tuning writes every key with the shortest round-trip number text, so
-// parse(format(t)) == t bit for bit.
 #include "bf3/sim/soldier_motor.h"
 
 #include "bf3/core/gameplay/soldier_def.h"
@@ -26,8 +18,6 @@ static_assert(core::gameplay::kSoldierPoseCount == kPoseCount);
 
 namespace {
 
-// ---- tuning keys ------------------------------------------------------------------------------------------
-
 enum class KeyType : uint8_t { Float, Bool, Model, U32 };
 
 struct KeyDef {
@@ -40,8 +30,6 @@ struct KeyDef {
 
 #define BF3_TUNING_FIELD(f) [](MotorTuning &t) -> void * { return &t.f; }
 
-// Ranges keep a hostile or mistyped file from making the motor divide by zero or loop for long; every default and
-// every plausible measured value lies well inside them.
 const KeyDef kKeys[] = {
 	{ "gravity", KeyType::Float, 0.01f, 100.0f, BF3_TUNING_FIELD(gravity) },
 	{ "reference_hz", KeyType::Float, 1.0f, 1000.0f, BF3_TUNING_FIELD(reference_hz) },
@@ -90,7 +78,7 @@ std::string_view trim(std::string_view p_text) {
 }
 
 std::string shown(std::string_view p_text) {
-	// At most 40 bytes of a bad value in a message, non-printable bytes as '?'.
+
 	std::string out;
 	for (size_t i = 0; i < p_text.size() && i < 40; ++i) {
 		const char c = p_text[i];
@@ -187,9 +175,6 @@ core::Status validate_tuning(const MotorTuning &p_tuning) {
 	return core::Status::success();
 }
 
-// The per-tick factor of one gain under p_model (docs §6.4): FractionPerReferenceTick: the fraction of the gap
-// closed per tick, 1 - (1 - g)^(reference_hz * dt) with g clamped to 0..1; Linear: the speed change per tick,
-// |g| * dt; Instant: 1. Computed here with std::pow (once per params); the motor only multiplies.
 float gain_factor(GainModel p_model, float p_gain, float p_reference_hz) {
 	switch (p_model) {
 		case GainModel::FractionPerReferenceTick: {
@@ -259,9 +244,7 @@ std::optional<float> scalar_of(const core::gameplay::SoldierDef &p_def, std::str
 	return float(*v);
 }
 
-} // namespace
-
-// ---- tuning file ------------------------------------------------------------------------------------------
+}
 
 core::Result<MotorTuning> parse_motor_tuning(std::string_view p_text) {
 	MotorTuning t;
@@ -392,8 +375,6 @@ std::string format_motor_tuning(const MotorTuning &p_tuning) {
 	return out;
 }
 
-// ---- params ---------------------------------------------------------------------------------------------
-
 float eval(const Curve &p_curve, float p_x) {
 	const size_t n = std::min<size_t>(p_curve.count, kMaxCurvePoints);
 	if (n == 0) {
@@ -519,8 +500,7 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 		}
 		const core::gameplay::StatePoseSpeed *ground = on_ground->pose(pose);
 		pp.on_ground = to_speed(ground != nullptr ? *ground : *stand_ground);
-		// States the data does not list for a pose take the Stand entry, then the OnGround one with no gains (the
-		// soldier keeps its momentum).
+
 		auto state_speed = [&](const core::gameplay::MovementStateDef *p_state) {
 			const core::gameplay::StatePoseSpeed *s = p_state ? p_state->pose(pose) : nullptr;
 			if (s == nullptr && p_state != nullptr) {
@@ -593,13 +573,12 @@ uint64_t motor_params_hash(const MotorParams &p_params) {
 		hash_speed(h, pp.jumping);
 	}
 	hash_tuning(h, p_params.tuning);
-	// M2b ru [abort hash] (docs/design/m2b.md §2.6 #19): the immunity abort only when it is set, so M2a's hash (the
-	// default fields) is unchanged.
-	if (p_params.protect_abort_buttons != 0 || p_params.protect_abort_move) { // M2b ru [abort hash]
-		hash_value(h, p_params.protect_abort_buttons); // M2b ru [abort hash]
-		hash_value(h, uint8_t(p_params.protect_abort_move ? 1 : 0)); // M2b ru [abort hash]
-	} // M2b ru [abort hash]
+
+	if (p_params.protect_abort_buttons != 0 || p_params.protect_abort_move) {
+		hash_value(h, p_params.protect_abort_buttons);
+		hash_value(h, uint8_t(p_params.protect_abort_move ? 1 : 0));
+	}
 	return h;
 }
 
-} // namespace bf3::sim
+}

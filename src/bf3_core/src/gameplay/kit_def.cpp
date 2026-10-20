@@ -1,5 +1,3 @@
-// KitDef / TeamDef readers (research/topics/02-soldier-kits-modes.md §2). Every array scan and
-// name copy is charged to the read's WorkBudget first (cost model: logic_world.cpp).
 #include "bf3/core/gameplay/kit_def.h"
 
 #include "bf3/core/ids.h"
@@ -11,8 +9,6 @@ using namespace detail;
 
 namespace {
 
-// The progression tables, in the order a gate is attributed (an unlock granted by several keeps the
-// first). Each holds BasicUnlockInfo structs {UnlockGuid = the unlock asset's instance GUID}.
 struct ProgressionTable {
 	const char *partition;
 	UnlockGate gate;
@@ -31,8 +27,6 @@ void add_unlock_info(UnlockProgression &r_progression, const EbxValue &p_info, U
 	}
 }
 
-// UnlockInfos[] (RankLevelData, StaticUnlockList, AwardData) and Unlocks[].UnlockInfo
-// (ScoringBucketData) of one instance.
 void add_instance(WorkBudget &r_budget, UnlockProgression &r_progression, const EbxInstance &p_instance, UnlockGate p_gate) {
 	if (const OptionalEbxArray array = array_of(r_budget, p_instance.get("UnlockInfos"))) {
 		for (const EbxValue info : *array) {
@@ -62,7 +56,6 @@ KitUnlock read_unlock(WorkBudget &r_budget, const EbxResolver &p_db, const EbxIn
 	return out;
 }
 
-// The parts of a CustomizationTable. A part listed K times is read (and charged) K times.
 std::vector<KitSlot> read_table(WorkBudget &r_budget, const EbxResolver &p_db, const EbxStruct &p_kit, std::string_view p_field,
 		const UnlockProgression &p_progression) {
 	std::vector<KitSlot> out;
@@ -81,7 +74,7 @@ std::vector<KitSlot> read_table(WorkBudget &r_budget, const EbxResolver &p_db, c
 	return out;
 }
 
-} // namespace
+}
 
 const char *weapon_slot_name(WeaponSlot p_slot) {
 	switch (p_slot) {
@@ -232,4 +225,4 @@ Result<TeamDef> read_team_data(const EbxResolver &p_db, const EbxInstance &p_tea
 	return out;
 }
 
-} // namespace bf3::core::gameplay
+}

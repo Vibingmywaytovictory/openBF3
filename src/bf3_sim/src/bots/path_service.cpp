@@ -1,5 +1,3 @@
-// PathService (bots/walker_brain.h; docs/design/s1.md §6.1, §7): every bot's sliced A* on the server thread's one
-// NavQuery, first come first served, at most iterations_per_tick A* iterations per tick across all requests.
 #include "bf3/sim/bots/walker_brain.h"
 
 #include <algorithm>
@@ -18,7 +16,7 @@ double ms_since(Clock::time_point p_start) {
 	return std::chrono::duration<double, std::milli>(Clock::now() - p_start).count();
 }
 
-} // namespace
+}
 
 void WalkerStats::add(const WalkerStats &p_other) {
 	ticks += p_other.ticks;
@@ -102,8 +100,7 @@ void PathService::run() {
 	++m.stats.runs;
 	uint32_t budget = m.options.iterations_per_tick;
 	uint32_t spent = 0;
-	// Each request costs at least its begin (no iterations when Detour refuses it at once); the queue holds at most
-	// one request per slot, so a run is bounded by the slots plus the iteration budget.
+
 	size_t begins = 0;
 	while (budget > 0) {
 		if (!m.active) {
@@ -126,7 +123,7 @@ void PathService::run() {
 		spent += done;
 		if (st == NavPathStatus::InProgress) {
 			if (done == 0) {
-				break; // no progress possible this tick
+				break;
 			}
 			continue;
 		}
@@ -167,4 +164,4 @@ const PathServiceStats &PathService::stats() const {
 	return impl_->stats;
 }
 
-} // namespace bf3::sim::bots
+}

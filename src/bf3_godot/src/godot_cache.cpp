@@ -14,7 +14,7 @@ namespace bf3::godot_side {
 namespace {
 
 std::mutex g_mutex;
-std::map<std::wstring, std::weak_ptr<bf3::core::Cache>> g_open; // by lowercase absolute root
+std::map<std::wstring, std::weak_ptr<bf3::core::Cache>> g_open;
 
 std::wstring root_key(const std::filesystem::path &p_root) {
 	std::wstring k = std::filesystem::absolute(p_root).lexically_normal().native();
@@ -27,7 +27,7 @@ std::wstring root_key(const std::filesystem::path &p_root) {
 	return k;
 }
 
-} // namespace
+}
 
 std::filesystem::path default_cache_root() {
 	const std::string root = to_std(godot::ProjectSettings::get_singleton()->globalize_path("user://bf3cache"));
@@ -42,7 +42,7 @@ AcquiredCache acquire_cache(const std::filesystem::path &p_root, const bf3::core
 		return out;
 	}
 	const std::wstring key = root_key(p_root);
-	// Held across the open, so two loaders asking for one root at once share one Cache.
+
 	std::lock_guard<std::mutex> lock(g_mutex);
 	if (std::shared_ptr<bf3::core::Cache> live = g_open[key].lock()) {
 		out.cache = std::move(live);
@@ -64,4 +64,4 @@ AcquiredCache acquire_cache(const std::filesystem::path &p_root, const bf3::core
 	return out;
 }
 
-} // namespace bf3::godot_side
+}

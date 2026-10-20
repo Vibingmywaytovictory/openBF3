@@ -1,4 +1,3 @@
-// FxDecalPool: VFX3's impact decals (docs/design/m2a-fx3.md §5). See fx_decals.h.
 #include "fx_decals.h"
 
 #include "godot_util.h"
@@ -50,8 +49,7 @@ FxDecalAssets FxDecalAssets::load(const core::EbxLibrary &p_level, const core::L
 					t->texture.clear();
 					++out.without_texture;
 				} else {
-					// The decal-texture rule (fx::prepare_decal_texture): a real alpha is kept, a magenta-keyed texture
-					// becomes RGBA8 with the key as alpha, anything else (decal_brick_s_01_d's channel mask) is refused.
+
 					fx::DecalPixelFormat pf = fx::DecalPixelFormat::Other;
 					switch (prepared->format) {
 						case render::GpuFormat::Bc1:
@@ -155,7 +153,7 @@ void FxDecalPool::place(const fx::DecalCue &p_cue) {
 		slot = &slots_.back();
 	} else {
 		slot = &*std::min_element(slots_.begin(), slots_.end(), [](const Slot &a, const Slot &b) {
-			// A free node first, then the oldest live one.
+
 			return a.live != b.live ? !a.live : a.order < b.order;
 		});
 		stats_.replaced += slot->live ? 1 : 0;
@@ -252,11 +250,11 @@ std::vector<std::string> FxDecalPool::texture_report(const std::string &p_dump_d
 }
 
 void FxDecalPool::clear() {
-	// The parent may have freed the node already (its children go with it): look it up by id.
+
 	if (root_ != nullptr) {
 		if (Node3D *root = Object::cast_to<Node3D>(ObjectDB::get_instance(root_id_))) {
 			if (root->is_inside_tree()) {
-				root->queue_free(); // the Decal children go with it
+				root->queue_free();
 			} else {
 				memdelete(root);
 			}
@@ -269,4 +267,4 @@ void FxDecalPool::clear() {
 	stats_.live = 0;
 }
 
-} // namespace bf3::godot_side
+}

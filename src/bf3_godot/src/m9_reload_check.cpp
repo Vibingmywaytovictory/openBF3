@@ -61,7 +61,7 @@ std::string env_var(const char *p_name) {
 
 struct Row {
 	std::string check;
-	int result; // 0 pass, 1 fail, 2 info, 3 not run
+	int result;
 	std::string detail;
 };
 
@@ -70,7 +70,6 @@ Xform from_godot(const Transform3D &p_t) {
 	return Xform{ bf3::anim::Quat{ float(q.x), float(q.y), float(q.z), float(q.w) }, bf3::anim::Vec3{ float(p_t.origin.x), float(p_t.origin.y), float(p_t.origin.z) } };
 }
 
-// The Skeleton3D's global (skeleton-space) pose of every bone.
 std::vector<Xform> godot_pose(Skeleton3D *p_skeleton) {
 	p_skeleton->force_update_all_bone_transforms();
 	std::vector<Xform> out(size_t(p_skeleton->get_bone_count()));
@@ -88,11 +87,10 @@ double transform_diff(const Transform3D &p_a, const Transform3D &p_b) {
 	return std::max(d, double((p_a.origin - p_b.origin).length()));
 }
 
-// Model-space poses rebuilt from the Ant probe's clip JSON (its own joints and per-key local tracks).
 struct ProbeClip {
 	bf3::anim::Skeleton skeleton;
 	std::vector<double> key_times;
-	std::vector<std::vector<Xform>> model; // per key
+	std::vector<std::vector<Xform>> model;
 	std::string error;
 };
 
@@ -151,7 +149,7 @@ bool load_probe(const std::string &p_file, ProbeClip &r_probe) {
 	return true;
 }
 
-} // namespace
+}
 
 int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 	std::vector<Row> rows;
@@ -173,7 +171,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 	add("skeleton", (sk->get_bone_count() == int32_t(rig.size()) && rig.size() == 181) ? 0 : 1,
 			fmt("Skeleton3D %d bones from rig %s", sk->get_bone_count(), std::string(a.clip.binding.rig->name).c_str()));
 
-	// Meshes and skin.
 	size_t surfaces = 0, bound_vertices = 0, vertices = 0;
 	for (const bf3::render::ViewmodelPart *part : { &a.arms, &a.weapon }) {
 		for (const bf3::render::PreparedSurface &s : part->prepared.surfaces) {
@@ -186,8 +183,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 			fmt("arms %s: %zu v / %zu t; M9: %zu v / %zu t; %zu drawn surfaces, every vertex skinned", a.arms.mesh.substr(a.arms.mesh.rfind('/') + 1).c_str(),
 					a.arms.prepared.vertices, a.arms.prepared.triangles, a.weapon.prepared.vertices, a.weapon.prepared.triangles, surfaces));
 
-	// Derived-data cache: the meshes the bridge built came from the cache (hit) or were converted and put; either
-	// way they must equal a conversion straight from the install, array for array.
 	{
 		const bool used = p_demo.cache_used();
 		const bool stored = a.arms.cache.outcome != bf3::core::CacheOutcome::Uncached && a.weapon.cache.outcome != bf3::core::CacheOutcome::Uncached;
@@ -200,7 +195,7 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 		if (install) {
 			bf3::core::Result<bf3::core::LevelMount> mount = (*install)->mount_superbundle(p_demo.spec().superbundle);
 			if (mount && mount->load_all_bundles().ok()) {
-				bf3::anim::SkinBinds binds; // bound in the loader's order, so the bind indices agree
+				bf3::anim::SkinBinds binds;
 				same = true;
 				for (auto [part, skeleton] : { std::pair{ &a.arms, &a.arms_skeleton }, std::pair{ &a.weapon, &a.weapon_skeleton } }) {
 					bf3::core::Result<bf3::render::MeshHead> head = bf3::render::read_mesh_head(*mount, part->mesh);
@@ -233,7 +228,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 		add("cache.equal_fresh", same ? 0 : 1, detail);
 	}
 
-	// Materials: 1P FOV from the weapon data, z clip scale, textures bound.
 	{
 		int with_fov = 0, total = 0, albedo = 0, normal = 0;
 		float fov = 0.0f;
@@ -260,7 +254,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 																		normal, a.textures.size()));
 	}
 
-	// Poses: the Skeleton3D's global poses against bf3_anim's model space.
 	const float frames[] = { 0.0f, 8.0f, 16.0f, 24.0f, 32.5f, 40.0f, 48.0f, 56.0f, 65.0f };
 	double worst_deg = 0.0, worst_m = 0.0;
 	std::string per_frame;
@@ -275,7 +268,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 	add("pose.skeleton3d_vs_bf3_anim", (worst_deg < 0.05 && worst_m < 5e-5) ? 0 : 1,
 			fmt("9 frames x 181 bones: max %.4f deg, %.4f mm (frame:deg/mm%s)", worst_deg, worst_m * 1000.0, per_frame.c_str()));
 
-	// Poses against the probe's clip JSON (an independent decode).
 	const std::string oracle_dir = env_var("OPENBF3_ANT_ORACLE");
 	const std::string oracle = oracle_dir.empty() ? std::string() : oracle_dir + "/m9_ReloadEmpty_Anim.json";
 	if (oracle.empty() || !std::filesystem::is_regular_file(std::filesystem::path(std::u8string(oracle.begin(), oracle.end())))) {
@@ -298,7 +290,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 		}
 	}
 
-	// Skin: Godot's skinning transform (bone global pose * bind pose) against bf3_anim's skin matrices.
 	{
 		const Ref<Skin> skin = Object::cast_to<MeshInstance3D>(sk->get_child(0)) ? Object::cast_to<MeshInstance3D>(sk->get_child(0))->get_skin() : Ref<Skin>();
 		std::vector<Xform> model;
@@ -317,7 +308,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 						a.binds.size(), worst));
 	}
 
-	// Motion: hands on the gun, magazine out and back, slide released, weapon in front of the camera.
 	const int32_t root = rig.find("Wep_Root"), mag = rig.find("Wep_Mag"), slide = rig.find("Wep_Slide"), rhand = rig.find("RightHand");
 	const int32_t lsh = rig.find("LeftForeArm"), rsh = rig.find("RightForeArm");
 	{
@@ -335,7 +325,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 		add("camera.handedness", rsh_cam.x > lsh_cam.x ? 0 : 1,
 				fmt("RightForeArm (elbow) at camera x %.3f, LeftForeArm %.3f (right arm on the right: not mirrored)", rsh_cam.x, lsh_cam.x));
 
-		// CPU-skinned M9 vertices (bf3_anim skin matrices) in camera space: the whole pistol is in front of the eye.
 		std::vector<bf3::anim::Mat34> skin;
 		bf3::anim::skin_matrices(m, a.binds.binds(), skin);
 		Vector3 lo(1e9f, 1e9f, 1e9f), hi(-1e9f, -1e9f, -1e9f);
@@ -372,7 +361,7 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 				mag_frame = f;
 			}
 		}
-		// The new magazine ends where the empty one started (both seated in the grip).
+
 		const double rest_mag = bf3::anim::vec_dist(bf3::anim::xform_mul(bf3::anim::xform_inverse(last[size_t(root)]), last[size_t(mag)]).t,
 				bf3::anim::xform_mul(bf3::anim::xform_inverse(first[size_t(root)]), first[size_t(mag)]).t);
 		const double slide_travel = bf3::anim::vec_dist(bf3::anim::xform_mul(bf3::anim::xform_inverse(first[size_t(root)]), first[size_t(slide)]).t,
@@ -388,7 +377,6 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 		}
 	}
 
-	// Install unchanged.
 	const bf3::core::InstallSnapshot &before = p_demo.install_snapshot_at_start();
 	if (before.valid) {
 		const bf3::core::SnapshotDiff d = bf3::core::diff_snapshots(before, p_demo.install().snapshot());
@@ -408,4 +396,4 @@ int run_m9_reload_check(Bf3ViewmodelDemo &p_demo) {
 	return failed ? 1 : 0;
 }
 
-} // namespace bf3::godot_side
+}

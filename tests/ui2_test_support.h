@@ -1,8 +1,4 @@
 #pragma once
-// UI ui2 tests (docs/design/ui-minimap-icons.md §13): the install shared by the install and fuzz suites of test_ui2,
-// opened once per process (read-only) with the install snapshot taken first, so each suite's last case
-// (install.unchanged, gate G13) compares the 256 index files' sizes and mtimes against the start. Rows print as
-// "UI2 ROW <name> <PASS|FAIL> <detail>" so the ctest log carries the measured values.
 
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
@@ -25,7 +21,6 @@ struct InstallFixture {
 	std::string error;
 };
 
-// Null (and the case reported skipped) without an install.
 inline InstallFixture *install() {
 	static InstallFixture *fixture = [] {
 		InstallFixture *f = new InstallFixture();
@@ -54,7 +49,6 @@ inline void row(const std::string &p_name, bool p_pass, const std::string &p_det
 	std::fflush(stdout);
 }
 
-// Gate G13: the index files equal at start and end.
 inline void check_install_unchanged() {
 	InstallFixture *f = install();
 	if (f == nullptr) {
@@ -81,4 +75,4 @@ inline size_t fuzz_iters(size_t p_default) {
 	return p_default;
 }
 
-} // namespace bf3::test::ui2
+}

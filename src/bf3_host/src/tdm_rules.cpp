@@ -1,6 +1,3 @@
-// The TDM rules on the server thread (docs/design/m2b.md §3.2-§3.6; as built: docs/design/m2b-ru.md §4). See
-// tdm_rules.h. Single-threaded and deterministic: slots in index order, no wall clock, no hash container; the logic
-// runtime draws from the match seed.
 #include "bf3/host/tdm_rules.h"
 
 #include "bf3/core/gameplay/logic_graph.h"
@@ -24,8 +21,8 @@ namespace lg = sim::logic;
 
 namespace {
 
-constexpr size_t kMaxRuleSlots = 256; // RoundNatives' slot range (net::kMaxSlots is 128)
-constexpr size_t kMaxDeathRing = 256; // the spawn chooser's recent deaths (§3.5), oldest dropped
+constexpr size_t kMaxRuleSlots = 256;
+constexpr size_t kMaxDeathRing = 256;
 constexpr uint32_t kNoTick = 0;
 
 uint32_t ticks_of(float p_seconds) {
@@ -45,7 +42,6 @@ bool finite3(const sim::Vec3 &p_v) {
 	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
 }
 
-// Whether the segment p_origin + t p_dir (t in [0, p_length], p_dir unit) enters the sphere; r_t = the closest t.
 bool segment_hits_sphere(const sim::Vec3 &p_origin, const sim::Vec3 &p_dir, float p_length, const sim::Vec3 &p_centre, float p_radius, float &r_t) {
 	const float cx = p_centre[0] - p_origin[0], cy = p_centre[1] - p_origin[1], cz = p_centre[2] - p_origin[2];
 	const float t = std::clamp(cx * p_dir[0] + cy * p_dir[1] + cz * p_dir[2], 0.0f, p_length);
@@ -54,8 +50,6 @@ bool segment_hits_sphere(const sim::Vec3 &p_origin, const sim::Vec3 &p_dir, floa
 	return px * px + py * py + pz * pz <= p_radius * p_radius;
 }
 
-// At most net::kMaxPlayerNameBytes bytes of valid UTF-8 (a hostile Hello name, §9.3): stops at the first invalid
-// sequence or at the first sequence that would not fit.
 size_t cut_name(std::string_view p_name, std::array<char, net::kMaxPlayerNameBytes> &r_out) {
 	size_t used = 0;
 	size_t i = 0;
@@ -109,10 +103,8 @@ bool same_state(const net::MatchState &p_a, const net::MatchState &p_b) {
 }
 
 bool same_row(const net::PlayerRow &p_a, const net::PlayerRow &p_b) {
-	return std::memcmp(&p_a, &p_b, sizeof(net::PlayerRow)) == 0; // 32 bytes, no padding (m2b.contract)
+	return std::memcmp(&p_a, &p_b, sizeof(net::PlayerRow)) == 0;
 }
-
-// ---- tdm_tuning.cfg -------------------------------------------------------------------------------------------------
 
 std::string_view trim(std::string_view p_text) {
 	while (!p_text.empty() && (p_text.front() == ' ' || p_text.front() == '\t' || p_text.front() == '\r')) {
@@ -156,7 +148,7 @@ bool parse_bool(std::string_view p_text, bool &r_value) {
 	return false;
 }
 
-} // namespace
+}
 
 core::Result<TdmTuning> parse_tdm_tuning(std::string_view p_text) {
 	if (p_text.size() > kMaxTdmTuningBytes) {
@@ -326,30 +318,28 @@ core::Result<TdmTuning> load_tdm_tuning(const std::string &p_path) {
 	return t;
 }
 
-// ---- TdmRules -------------------------------------------------------------------------------------------------------
-
 struct TdmRules::Impl {
 	struct Slot {
 		bool connected = false;
 		bool bot = false;
-		bool deploy = false; // a human with the deploy screen: spawns only on an accepted SpawnRequest
+		bool deploy = false;
 		bool alive = false;
 		uint32_t life = 0;
-		uint8_t kit = 0; // a bot's draw, a deploy human's requested kit
-		uint8_t row_kit = 0; // the kit of the current or last life (the player row)
+		uint8_t kit = 0;
+		uint8_t row_kit = 0;
 		uint8_t team_at_death = 0;
-		int16_t last_killer = -1; // the enemy that killed the last life (a revive takes its team's kill back)
+		int16_t last_killer = -1;
 		uint8_t last_killer_team = 0;
 		uint32_t death_tick = kNoTick;
-		uint32_t earliest = 0; // DeathEvent::respawn_tick, and the earliest tick a SpawnRequest is accepted
+		uint32_t earliest = 0;
 		uint32_t revive_until = 0;
 		uint32_t last_damage = 0;
 		bool damaged = false;
-		bool pending_spawn = false; // an accepted SpawnRequest, ordered at the next step
+		bool pending_spawn = false;
 		uint32_t last_request = UINT32_MAX;
-		int64_t shot_cursor = -1; // the newest defib shot_index tested
-		bool corpse_valid = false; // a dead soldier's corpse (any window): defib shots at it are refused when not revivable
-		bool corpse_fresh = false; // its position is taken from the states at the next step
+		int64_t shot_cursor = -1;
+		bool corpse_valid = false;
+		bool corpse_fresh = false;
 		sim::Vec3 corpse{};
 		uint16_t corpse_yaw = 0;
 		uint16_t kills = 0, deaths = 0;
@@ -370,30 +360,30 @@ struct TdmRules::Impl {
 	lg::RoundNativeConfig native_config;
 	std::optional<lg::LogicRuntime> runtime;
 	std::optional<lg::RoundNatives> natives;
-	uint32_t base = 0; // server tick of the runtime's tick 0
+	uint32_t base = 0;
 	bool based = false;
-	uint32_t tick = 0; // the last step's server tick
+	uint32_t tick = 0;
 	bool faulted = false;
 	std::vector<Slot> slots;
-	std::vector<DownedSoldier> downed; // ascending slot
+	std::vector<DownedSoldier> downed;
 	std::vector<sim::FriendlyDeath> death_ring;
-	std::vector<sim::SoldierState> last_states; // the states after the previous step (the policy's positions)
+	std::vector<sim::SoldierState> last_states;
 	net::MatchState state;
 	net::MatchState sent_state;
 	bool state_sent = false;
-	std::vector<net::PlayerRow> rows; // ascending slot
+	std::vector<net::PlayerRow> rows;
 	std::vector<net::PlayerRow> sent_rows;
 	lg::RoundPhase last_phase = lg::RoundPhase::PreRound;
 	bool was_restricted = false;
 	mutable RulesStats stats;
-	uint32_t delay_ticks = 300; // PlayerKilledDelay
-	uint32_t man_down_ticks = 780; // SoldierDef man_down_time
+	uint32_t delay_ticks = 300;
+	uint32_t man_down_ticks = 780;
 	uint32_t regen_delay_ticks = 600;
 	float regen_per_tick = 5.0f / 60.0f;
 	float max_health = 100.0f;
 	float post_revive_health = 20.0f;
 
-	uint32_t hint_tick() const { return tick + 1u; } // the tick apply_rules is building (deaths, hits)
+	uint32_t hint_tick() const { return tick + 1u; }
 
 	void fault(const core::Error &p_error) {
 		if (!faulted) {
@@ -468,8 +458,6 @@ struct TdmRules::Impl {
 		std::erase_if(downed, [&](const DownedSoldier &d) { return d.slot == p_slot; });
 	}
 
-	// The restart in place (§3.4 step 5): a fresh runtime and natives (LevelControl reloads the level's logic), the
-	// teams rotated, the counts and scores 0, bots and humans without the deploy screen ordered to spawn.
 	void restart_round(uint32_t p_tick, std::vector<RulesOrder> &r_orders) {
 		std::vector<uint8_t> teams(slots.size(), 0);
 		const bool rotate = tuning->rotate_teams && natives && natives->params().rotate_team_on_new_round;
@@ -581,7 +569,7 @@ std::optional<uint32_t> TdmRules::respawn_tick(uint8_t p_slot, uint32_t p_death_
 	s.death_tick = p_death_tick;
 	s.earliest = p_death_tick + m.delay_ticks;
 	const lg::RoundPhase phase = m.natives ? m.natives->phase() : lg::RoundPhase::Restarting;
-	// A victim AutoTeam's balance moves at this death is not revivable: its old team's medic would raise it on the new team.
+
 	const bool moving = m.natives && m.natives->moves_at_death(p_slot);
 	const bool revive = m.config.revive && m.gunplay->kits.defib_def != sim::weapons::kNoWeapon && !moving;
 	if (phase == lg::RoundPhase::RoundOver || phase == lg::RoundPhase::Restarting || p_slot >= net::kMaxPlayerRows) {
@@ -594,7 +582,7 @@ std::optional<uint32_t> TdmRules::respawn_tick(uint8_t p_slot, uint32_t p_death_
 	}
 	uint32_t at = s.earliest;
 	if (s.bot && revive && m.near_assault_teammate(p_slot, m.team_of(p_slot))) {
-		at = p_death_tick + std::min(ticks_of(m.tuning->revive_wait_s), m.man_down_ticks); // §3.4: wait for a revive
+		at = p_death_tick + std::min(ticks_of(m.tuning->revive_wait_s), m.man_down_ticks);
 	}
 	s.earliest = at;
 	s.revive_until = revive ? std::min(p_death_tick + m.man_down_ticks, at) : 0;
@@ -628,7 +616,7 @@ void TdmRules::death(const net::DeathEvent &p_event) {
 	Impl::Slot &s = m.slots[v];
 	const uint32_t now = m.hint_tick();
 	if (s.death_tick != now) {
-		(void)respawn_tick(v, now); // a death the policy was not asked for (the GameServer asks it first, R3 / R8)
+		(void)respawn_tick(v, now);
 	}
 	const uint8_t vteam = m.team_of(v);
 	const bool fall = p_event.killer == v || p_event.killer >= m.slots.size() || !m.slots[p_event.killer].connected;
@@ -654,7 +642,7 @@ void TdmRules::death(const net::DeathEvent &p_event) {
 		s.deaths = uint16_t(std::min<uint32_t>(s.deaths + 1u, 0xFFFFu));
 	}
 	if (m.team_of(v) != vteam) {
-		s.revive_until = 0; // moved by AutoTeam's balance at this death (normally foreseen by respawn_tick): no man-down
+		s.revive_until = 0;
 	}
 	s.alive = false;
 	s.team_at_death = vteam;
@@ -666,7 +654,7 @@ void TdmRules::death(const net::DeathEvent &p_event) {
 		s.corpse_yaw = m.last_states[v].yaw;
 	}
 	if (s.bot) {
-		s.kit = m.draw_kit(v, s.life + 1u); // the next life's kit (§3.2); a revive restores row_kit (§3.6)
+		s.kit = m.draw_kit(v, s.life + 1u);
 	}
 	m.remove_downed(v);
 	if (s.revive_until > now && v < net::kMaxPlayerRows) {
@@ -702,7 +690,7 @@ void TdmRules::revive(const net::ReviveEvent &p_event) {
 		r.score += m.tuning->score_revive;
 	}
 	if (d.deaths > 0) {
-		--d.deaths; // the revived player's death is taken back (§3.6)
+		--d.deaths;
 	}
 	if (m.tuning->revive_takes_kill && d.last_killer_team != 0 && m.natives && m.runtime && !m.faulted) {
 		const core::Status st = m.natives->kill_undone(d.last_killer_team, *m.runtime);
@@ -729,7 +717,7 @@ uint8_t TdmRules::on_connect(uint8_t p_slot, bool p_bot, std::string_view p_name
 		s.kit = m.draw_kit(p_slot, 1);
 	}
 	if (p_slot >= net::kMaxPlayerRows || !m.natives || !m.runtime) {
-		return 0; // a spectator (§3.2: slots >= 64 with rules on)
+		return 0;
 	}
 	if (!m.faulted) {
 		const core::Status st = m.natives->player_enter(p_slot, p_bot, *m.runtime);
@@ -767,7 +755,7 @@ void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick) {
 	s.corpse_valid = false;
 	s.corpse_fresh = false;
 	s.revive_until = 0;
-	s.last_damage = p_tick; // a revive's 20 hp regenerate after the delay; a fresh spawn is full anyway
+	s.last_damage = p_tick;
 	s.damaged = false;
 	s.row_kit = kit_of(p_slot) != kKeepKit ? kit_of(p_slot) : s.row_kit;
 	m.remove_downed(p_slot);
@@ -807,7 +795,7 @@ SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_sp
 	}
 	s->pending_spawn = true;
 	s->kit = p_kit;
-	s->revive_until = 0; // deploying forfeits the revive (§3.4 step 3)
+	s->revive_until = 0;
 	m.remove_downed(p_slot);
 	++m.stats.spawns_accepted;
 	return SpawnRefusal::None;
@@ -818,7 +806,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 	Impl &m = *impl_;
 	m.tick = p_tick;
 	const size_t n = std::min(m.slots.size(), r_states.size());
-	// Corpses: the dead state's feet at the tick of the death.
+
 	for (size_t i = 0; i < n; ++i) {
 		Impl::Slot &s = m.slots[i];
 		if (s.corpse_fresh) {
@@ -836,7 +824,6 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
-	// 1. The logic: the natives' share of the last step's effects, the round clock, one runtime step.
 	if (!m.faulted && m.runtime && m.natives) {
 		if (!m.based) {
 			m.base = p_tick - 1u - m.runtime->tick();
@@ -844,7 +831,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 		const sim::Tick next = m.runtime->tick() + 1u;
 		if (p_tick - m.base != next) {
-			m.base = p_tick - next; // a skipped or repeated server tick: one runtime step per server tick regardless
+			m.base = p_tick - next;
 		}
 		core::Status st = m.natives->apply(next, m.runtime->effects(), *m.runtime);
 		if (st.ok()) {
@@ -861,11 +848,10 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		if (!st.ok()) {
 			m.fault(st.error());
 		} else {
-			m.stats.networked_dropped += m.runtime->networked().size(); // M3 sends them (§3.8)
+			m.stats.networked_dropped += m.runtime->networked().size();
 		}
 	}
 
-	// 2. The round flow.
 	if (m.natives) {
 		const lg::RoundPhase phase = m.natives->phase();
 		if (phase != m.last_phase) {
@@ -897,7 +883,6 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
-	// 3. Regen (§3.3): after the delay since the last damage, rate / 60 hp per tick up to max_health.
 	for (size_t i = 0; i < n; ++i) {
 		Impl::Slot &s = m.slots[i];
 		sim::SoldierState &st = r_states[i];
@@ -905,7 +890,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 			continue;
 		}
 		if (st.damage > 0.0f) {
-			s.last_damage = p_tick; // fall damage this tick
+			s.last_damage = p_tick;
 			s.damaged = true;
 		}
 		if (st.health < m.max_health && p_tick >= s.last_damage + m.regen_delay_ticks) {
@@ -914,10 +899,8 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
-	// 4. Man-down expiry.
 	std::erase_if(m.downed, [&](const DownedSoldier &d) { return p_tick > d.until_tick; });
 
-	// 5. The defibrillator (§3.6): each defib shot once (per-shooter shot_index cursor), from a living shooter.
 	const uint16_t defib = m.gunplay->kits.defib_def;
 	if (m.config.revive && defib != sim::weapons::kNoWeapon) {
 		for (const sim::weapons::ShotEvent &e : p_gunplay.interval_shots()) {
@@ -937,8 +920,8 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 			}
 			const float range = m.tuning->defib_range_m;
 			float best_t = range + 1.0f;
-			int best = -1; // a revivable teammate
-			bool refused = false; // an enemy corpse, an expired one, or a living soldier on the segment
+			int best = -1;
+			bool refused = false;
 			for (size_t i = 0; i < n; ++i) {
 				if (i == e.player_slot) {
 					continue;
@@ -961,7 +944,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				}
 				const sim::Vec3 delta{ c[0] - e.origin[0], c[1] - e.origin[1], c[2] - e.origin[2] };
 				if (p_view.world().ray(e.origin, delta, sim::query_mask::kProjectile)) {
-					continue; // a wall between the paddles and the corpse
+					continue;
 				}
 				bool revivable = false;
 				for (const DownedSoldier &d : m.downed) {
@@ -981,9 +964,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				continue;
 			}
 			Impl::Slot &target = m.slots[size_t(best)];
-			// §3.6: a revive is a new life with the same kit. A bot's next-life draw (made at its death) is replaced by the
-			// dead life's kit, which the GameServer's R7 reads (kit_of) when it carries the order out; the team is the
-			// victim's at death (checked above: d.team == team_of).
+
 			if (target.bot || target.deploy) {
 				target.kit = target.row_kit;
 			}
@@ -1000,7 +981,6 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
-	// 6. Accepted SpawnRequests.
 	const lg::RoundPhase phase = m.natives ? m.natives->phase() : lg::RoundPhase::Restarting;
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		Impl::Slot &s = m.slots[i];
@@ -1012,7 +992,6 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
-	// 7. MatchState and the player rows.
 	if (m.natives) {
 		const lg::RoundNatives &nat = *m.natives;
 		net::MatchState &ms = m.state;
@@ -1027,8 +1006,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		ms.killer_camera = nat.killer_camera();
 		ms.restrict_mask = nat.restriction_mask();
 		if (nat.input_restricted()) {
-			// The first unrestricted command tick: StartRound fires in the runtime step of the countdown's end, its
-			// Deactivate applies in the next step, and the server's motor runs before the rules (§3.7).
+
 			ms.restrict_until_tick = phase == lg::RoundPhase::PreRound && end != 0 ? m.base + end + 2u : UINT32_MAX;
 			m.was_restricted = true;
 		} else if (m.was_restricted) {
@@ -1221,7 +1199,7 @@ uint8_t TdmRules::kit_of(uint8_t p_slot) const {
 	if (s.bot || s.deploy) {
 		return s.kit;
 	}
-	return kKeepKit; // a remote slot without the deploy screen keeps its KitSelect kit (R7)
+	return kKeepKit;
 }
 
 const sim::logic::LogicTrace &TdmRules::trace() const {
@@ -1243,4 +1221,4 @@ const sim::logic::RoundNatives &TdmRules::natives() const {
 	return *impl_->natives;
 }
 
-} // namespace bf3::host
+}

@@ -1,15 +1,7 @@
 #pragma once
-// M2b ui: every string, font, icon and placement the TDM HUD screens look up (hud_tdm.h; docs/design/m2b.md §4; as
-// built: docs/design/m2b-ui.md §3). Godot-free, so ui.hud.tdm.install resolves the very same lists against the install
-// (the text database, the en font mapping, the iconsingame atlas, the screens' placements) that the screens use.
-//
-// Strings are SIDs of the install's text database, found in the screens' SWF layouts (killscreen, spawnscreenpc,
-// matchpreroundinformation) or by their English text, every one [verified 2026-10-19: bf3dump text, swf layout]; the
-// English column is what the install row compares the database's text with. Three short texts have no SID that this
-// track found and are openBF3's own (kTdmOwnTexts, [inferred]); they are not lookups and never count as missing.
 
 #include "bf3/core/ui/hud_model.h"
-#include "bf3/core/ui/swf_layout.h" // HudAnchor
+#include "bf3/core/ui/swf_layout.h"
 
 #include <array>
 #include <cstddef>
@@ -23,22 +15,22 @@ enum class TdmText : uint8_t {
 	KitEngineer,
 	KitSupport,
 	KitRecon,
-	DeployAs, // the kit bar's header
-	Deploy, // the Deploy button
-	TimeToDeploy, // the button's text while it waits
-	KilledBy, // the kill card
+	DeployAs,
+	Deploy,
+	TimeToDeploy,
+	KilledBy,
 	Suicide,
 	Health,
-	Headshot, // "HEADSHOT {0:s}": the score message's text, drawn without its argument
-	RoundWillStartIn, // the pre-round countdown
+	Headshot,
+	RoundWillStartIn,
 	WaitingForPlayers,
-	TeamWon, // the round end
+	TeamWon,
 	TeamLost,
 	Winner,
 	NextRoundIn,
-	TeamUs, // HudTeam::team1_name / team2_name (the feed puts the same hashes there)
+	TeamUs,
 	TeamRu,
-	Name, // the scoreboard's columns
+	Name,
 	Kills,
 	Deaths,
 	Score,
@@ -50,7 +42,7 @@ inline constexpr size_t kTdmTextCount = size_t(TdmText::Count);
 struct TdmTextEntry {
 	TdmText key;
 	std::string_view sid;
-	std::string_view english; // the en database's text [verified 2026-10-19]
+	std::string_view english;
 };
 
 inline constexpr std::array<TdmTextEntry, kTdmTextCount> kTdmTexts{ {
@@ -58,12 +50,12 @@ inline constexpr std::array<TdmTextEntry, kTdmTextCount> kTdmTexts{ {
 	{ TdmText::KitEngineer, "ID_M_ENGINEER", "ENGINEER" },
 	{ TdmText::KitSupport, "ID_M_SUPPORT", "SUPPORT" },
 	{ TdmText::KitRecon, "ID_M_RECON", "RECON" },
-	{ TdmText::DeployAs, "ID_M_SPAWN_DEPLOY_AS", "DEPLOY AS" }, // spawnscreenpc / kitbar layout
+	{ TdmText::DeployAs, "ID_M_SPAWN_DEPLOY_AS", "DEPLOY AS" },
 	{ TdmText::Deploy, "ID_M_SPAWN_DEPLOY", "DEPLOY" },
 	{ TdmText::TimeToDeploy, "ID_M_SPAWN_TIME_TO_DEPLOY", "TIME TO DEPLOY" },
-	{ TdmText::KilledBy, "ID_H_KILLEDBY", "KILLED BY" }, // killscreen layout
-	{ TdmText::Suicide, "ID_H_KILLCAMSUICIDE", "YOU COMMITTED SUICIDE" }, // killscreen layout
-	{ TdmText::Health, "ID_H_HEALTH", "HEALTH" }, // killscreen layout
+	{ TdmText::KilledBy, "ID_H_KILLEDBY", "KILLED BY" },
+	{ TdmText::Suicide, "ID_H_KILLCAMSUICIDE", "YOU COMMITTED SUICIDE" },
+	{ TdmText::Health, "ID_H_HEALTH", "HEALTH" },
 	{ TdmText::Headshot, "ID_SCORE_HEADSHOT", "HEADSHOT {0:s}" },
 	{ TdmText::RoundWillStartIn, "ID_H_PREROUND_COUNTDOWN", "ROUND WILL START IN" },
 	{ TdmText::WaitingForPlayers, "ID_H_PREROUND_WAITING_FOR_PLAYERS_TITLE", "WAITING FOR PLAYERS" },
@@ -83,11 +75,10 @@ inline constexpr std::array<TdmTextEntry, kTdmTextCount> kTdmTexts{ {
 constexpr std::string_view tdm_text_sid(TdmText p_key) {
 	return size_t(p_key) < kTdmTextCount ? kTdmTexts[size_t(p_key)].sid : std::string_view();
 }
-// The kit names by HudPlayer::kit (assault, engineer, support, recon).
+
 inline constexpr std::array<TdmText, core::ui::kHudKitCount> kTdmKitNames{ TdmText::KitAssault, TdmText::KitEngineer, TdmText::KitSupport,
 	TdmText::KitRecon };
 
-// openBF3's own texts (no SID found for them) [inferred].
 struct TdmOwnTexts {
 	std::string_view revive_possible = "REVIVE POSSIBLE";
 	std::string_view bot = "BOT";
@@ -95,27 +86,21 @@ struct TdmOwnTexts {
 };
 inline constexpr TdmOwnTexts kTdmOwnTexts{};
 
-// Fonts (Bf3UiAssets::get_font; each must resolve to a converted font, not Device / Unresolved).
-inline constexpr std::string_view kTdmNumberFont = "$HUD_medium"; // digits: counts, timers
-inline constexpr std::string_view kTdmTextFont = "$Menu_medium"; // names, labels
-inline constexpr std::string_view kTdmTitleFont = "$Menu_bold"; // headers: DEPLOY, the winner, the killer
+inline constexpr std::string_view kTdmNumberFont = "$HUD_medium";
+inline constexpr std::string_view kTdmTextFont = "$Menu_medium";
+inline constexpr std::string_view kTdmTitleFont = "$Menu_bold";
 inline constexpr std::array<std::string_view, 3> kTdmFonts{ kTdmNumberFont, kTdmTextFont, kTdmTitleFont };
 
-// Atlas icons (Bf3UiAssets::get_region; the movie is in Bf3UiAssets' default atlas set) [verified 2026-10-19: bf3dump
-// swf labels ui/assets/iconsingame]. The kill feed's and the kill card's weapon icons are the items' _small icons
-// (ItemIconIndex, through the M2a HUD's loaded icons); the install row resolves those of the TDM kits.
 inline constexpr std::string_view kTdmIconMovie = "ui/assets/iconsingame";
 inline constexpr std::array<std::string_view, core::ui::kHudKitCount> kTdmKitIcons{ "mc_iconsIngameSmall/KitAssault", "mc_iconsIngameSmall/KitEngineer",
 	"mc_iconsIngameSmall/KitSupport", "mc_iconsIngameSmall/KitRecon" };
-inline constexpr std::string_view kTdmDeadIcon = "mc_iconsIngameSmall/dead"; // the scoreboard's dead players
+inline constexpr std::string_view kTdmDeadIcon = "mc_iconsIngameSmall/dead";
 inline constexpr size_t kTdmIconCount = core::ui::kHudKitCount + 1;
 
-// Placements read from the screens' SWF trees (Bf3UiAssets::hud_placements), with the retail values as the fallback
-// [verified 2026-10-19: bf3dump swf hud]. The kill feed sits at hudmpscreen's top-right message widget.
 struct TdmPlacement {
 	std::string_view movie;
 	std::string_view instance;
-	float x = 0; // the retail stage position (the fallback)
+	float x = 0;
 	float y = 0;
 	core::ui::HudAnchor anchor = core::ui::HudAnchor::Centre;
 };
@@ -124,4 +109,4 @@ inline constexpr TdmPlacement kTdmKitBarPlacement{ "ui/assets/spawnscreenpc", "K
 inline constexpr TdmPlacement kTdmSpawnCounterPlacement{ "ui/assets/spawnscreenpc", "TicketCounterSpawnScreen_01", 769.0f, 97.0f, core::ui::HudAnchor::Top };
 inline constexpr std::array<TdmPlacement, 3> kTdmPlacements{ kTdmKillFeedPlacement, kTdmKitBarPlacement, kTdmSpawnCounterPlacement };
 
-} // namespace bf3::godot_side
+}

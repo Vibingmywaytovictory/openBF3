@@ -1,4 +1,3 @@
-// PathGuard logic against a scratch tree in %TEMP% (no BF3 install needed).
 #include <doctest/doctest.h>
 
 #include "bf3/core/path_guard.h"
@@ -17,10 +16,10 @@ using Verdict = bf3::core::PathGuard::Verdict;
 namespace {
 
 struct ScratchTree {
-	fs::path base; // %TEMP%\openbf3-guard-<pid>-<tick>
-	fs::path root; // base\root          (the protected "install")
-	fs::path file; // base\root\sub\file.bin
-	fs::path outside; // base\out
+	fs::path base;
+	fs::path root;
+	fs::path file;
+	fs::path outside;
 
 	ScratchTree() {
 		wchar_t tmp[MAX_PATH];
@@ -39,7 +38,7 @@ struct ScratchTree {
 		CloseHandle(h);
 	}
 	~ScratchTree() {
-		// Remove links first (RemoveDirectoryW on a junction removes only the link).
+
 		RemoveDirectoryW((base / L"junction").c_str());
 		DeleteFileW((outside / L"hardlink.bin").c_str());
 		std::error_code ec;
@@ -47,7 +46,6 @@ struct ScratchTree {
 	}
 };
 
-// Creates a directory junction p_link -> p_target (no admin rights needed, unlike symlinks).
 bool make_junction(const fs::path &p_link, const fs::path &p_target) {
 	if (!CreateDirectoryW(p_link.c_str(), nullptr)) {
 		return false;
@@ -60,7 +58,7 @@ bool make_junction(const fs::path &p_link, const fs::path &p_target) {
 	const std::wstring print = fs::absolute(p_target).native();
 	const size_t sub_bytes = substitute.size() * sizeof(wchar_t);
 	const size_t print_bytes = print.size() * sizeof(wchar_t);
-	// REPARSE_DATA_BUFFER (MountPointReparseBuffer) laid out by hand; the struct lives in ntifs.h.
+
 	const size_t path_buffer = sub_bytes + 2 + print_bytes + 2;
 	const size_t data_len = 8 + path_buffer;
 	std::string buf(8 + data_len, '\0');
@@ -68,9 +66,9 @@ bool make_junction(const fs::path &p_link, const fs::path &p_target) {
 	const uint32_t tag = IO_REPARSE_TAG_MOUNT_POINT;
 	std::memcpy(&buf[0], &tag, 4);
 	put16(4, static_cast<uint16_t>(data_len));
-	put16(8, 0); // SubstituteNameOffset
+	put16(8, 0);
 	put16(10, static_cast<uint16_t>(sub_bytes));
-	put16(12, static_cast<uint16_t>(sub_bytes + 2)); // PrintNameOffset
+	put16(12, static_cast<uint16_t>(sub_bytes + 2));
 	put16(14, static_cast<uint16_t>(print_bytes));
 	std::memcpy(&buf[16], substitute.data(), sub_bytes);
 	std::memcpy(&buf[16 + sub_bytes + 2], print.data(), print_bytes);
@@ -94,7 +92,7 @@ std::wstring forward_slashes(std::wstring p_s) {
 	return p_s;
 }
 
-} // namespace
+}
 
 TEST_CASE("guard: a guard without roots refuses everything") {
 	PathGuard g;
@@ -125,14 +123,13 @@ TEST_CASE("guard: refuses every alias of a target inside the protected root") {
 	CHECK(g.check_write_target(t.outside / L".." / L"root" / L"x.bin") == Verdict::UnderProtectedRoot);
 	CHECK(g.check_write_target(t.root.native() + L"\\\\sub\\\\x.bin") == Verdict::UnderProtectedRoot);
 	CHECK(g.check_write_target(L"\\\\?\\" + (t.root / L"x.bin").native()) == Verdict::UnderProtectedRoot);
-	// Win32 drops a trailing dot or space from a path component: "root." is "root".
+
 	CHECK(g.check_write_target(t.root.native() + L".\\x.bin") == Verdict::UnderProtectedRoot);
 	CHECK(g.check_write_target(t.root.native() + L" \\x.bin") == Verdict::UnderProtectedRoot);
-	// Alternate data streams.
+
 	CHECK(g.check_write_target(t.file.native() + L":evil") == Verdict::InvalidName);
 	CHECK(g.check_write_target(t.base.native() + L"\\out\\x.bin:evil") == Verdict::InvalidName);
 
-	// Relative to the current directory.
 	wchar_t cwd[MAX_PATH];
 	GetCurrentDirectoryW(MAX_PATH, cwd);
 	SetCurrentDirectoryW(t.base.c_str());
@@ -140,7 +137,6 @@ TEST_CASE("guard: refuses every alias of a target inside the protected root") {
 	CHECK(g.check_write_target(L"out\\x.bin") == Verdict::Allowed);
 	SetCurrentDirectoryW(cwd);
 
-	// 8.3 short name, where the volume generates them.
 	wchar_t shortp[MAX_PATH];
 	const DWORD n = GetShortPathNameW(t.root.c_str(), shortp, MAX_PATH);
 	if (n > 0 && n < MAX_PATH && std::wstring(shortp) != t.root.native()) {
@@ -155,9 +151,9 @@ TEST_CASE("guard: allows targets outside, including look-alike prefixes") {
 	PathGuard g;
 	REQUIRE(g.add_protected_root(t.root));
 	CHECK(g.check_write_target(t.outside / L"cache.bin") == Verdict::Allowed);
-	CHECK(g.check_write_target(t.base / L"root2" / L"x.bin") == Verdict::Allowed); // "root2" is not inside "root"
+	CHECK(g.check_write_target(t.base / L"root2" / L"x.bin") == Verdict::Allowed);
 	CHECK(g.check_write_target(t.base / L"rootx.bin") == Verdict::Allowed);
-	CHECK(g.check_write_target(t.base) == Verdict::Allowed); // the parent of the root
+	CHECK(g.check_write_target(t.base) == Verdict::Allowed);
 }
 
 TEST_CASE("guard: resolves junctions and refuses hard links") {

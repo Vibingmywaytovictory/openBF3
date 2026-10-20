@@ -1,4 +1,3 @@
-// PT1 iff: the minimap's soldiers, the nametags and the --iff-shots capture (pt1_iff.h; docs/design/pt1-iff.md).
 #include "pt1_iff.h"
 
 #include "godot_util.h"
@@ -45,8 +44,7 @@ namespace bf3::godot_side {
 namespace {
 
 constexpr const char *kPlayerIcon = "UIHudIcon_Player";
-// The hud3dicons kit icons by host::KitRole when the kit data was not read (gameplay/kits/us* UIHudIcon, verified:
-// bf3dump kits MP_Subway TDM).
+
 constexpr std::array<const char *, 4> kKitIconDefaults{ "UIHudIcon_KitAssault", "UIHudIcon_KitEngineer", "UIHudIcon_KitSupport", "UIHudIcon_KitRecon" };
 constexpr double kSummaryEveryS = 30.0;
 
@@ -85,9 +83,7 @@ Vector3 vec(const sim::Vec3 &p_v) {
 	return Vector3(p_v[0], p_v[1], p_v[2]);
 }
 
-} // namespace
-
-// ---- Bf3Nametags ----------------------------------------------------------------------------------------------------
+}
 
 void Bf3Nametags::_bind_methods() {}
 
@@ -130,7 +126,7 @@ void Bf3Nametags::draw_frame(const ui::HudIcon *p_icon, ui::HudIconState p_state
 	if (r.width <= 0 || r.height <= 0) {
 		return;
 	}
-	// One atlas texel per stage unit, capped by IconSize (the larger side) [inferred]; then the stage -> canvas scale.
+
 	const float texel = std::min(1.0f, p_size / float(std::max(r.width, r.height))) * canvas_scale_;
 	const float w = float(r.width) * texel, h = float(r.height) * texel;
 	draw_texture_rect_region(atlas_, Rect2(r.flip_x ? p_centre.x + w * 0.5f : p_centre.x - w * 0.5f, r.flip_y ? p_centre.y + h * 0.5f : p_centre.y - h * 0.5f, r.flip_x ? -w : w, r.flip_y ? -h : h),
@@ -144,7 +140,7 @@ void Bf3Nametags::_draw() {
 	const ui::HudIcon *player = icons_->find(kPlayerIcon);
 	Ref<Font> font = font_.is_valid() ? font_ : ThemeDB::get_singleton()->get_fallback_font();
 	const int font_size = std::max(6, int(std::lround(style_.name_font_size * canvas_scale_)));
-	const int glow = std::max(1, int(std::lround(style_.name_glow_size * 0.5f * canvas_scale_))); // NameGlowSize as an outline [inferred]
+	const int glow = std::max(1, int(std::lround(style_.name_glow_size * 0.5f * canvas_scale_)));
 	for (const NametagDraw &d : draws_) {
 		const float icon_size = style_.icon_size * d.scale;
 		float top = d.anchor.y;
@@ -157,7 +153,7 @@ void Bf3Nametags::_draw() {
 		}
 		const Color tint = colour(ui::tag_tint(style_, d.relation), d.alpha);
 		const Vector2 ts = font->get_string_size(d.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size);
-		// The kit icon left of the name for teammates (hud3dicons UIHudIcon_Kit*, Default / Squad state).
+
 		float kit_w = 0.0f;
 		const ui::HudIcon *kit = d.relation != ui::TagRelation::Enemy && d.kit < kit_icons_.size() ? icons_->find(kit_icons_[d.kit]) : nullptr;
 		if (kit != nullptr) {
@@ -167,7 +163,7 @@ void Bf3Nametags::_draw() {
 		const float x0 = d.anchor.x - total * 0.5f;
 		const float baseline = top - 2.0f * canvas_scale_;
 		if (kit != nullptr) {
-			// The Default frame is white: drawn in the relation's tint like the name [inferred]; Squad is green already.
+
 			const bool squad = d.relation == ui::TagRelation::Squad;
 			draw_frame(kit, squad ? ui::HudIconState::Squad : ui::HudIconState::Default, Vector2(x0 + kit_w * 0.5f - 1.0f * canvas_scale_, baseline - ts.y * 0.35f), 16.0f,
 					d.alpha, squad ? Color(1, 1, 1, 1) : tint);
@@ -176,8 +172,6 @@ void Bf3Nametags::_draw() {
 		draw_string(font, Vector2(x0 + kit_w, baseline), d.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, tint);
 	}
 }
-
-// ---- Pt1Iff ---------------------------------------------------------------------------------------------------------
 
 struct Pt1Iff::Loaded {
 	ui::NametagStyle style;
@@ -189,9 +183,9 @@ struct Pt1Iff::Loaded {
 
 struct Pt1Iff::Shots {
 	std::string dir;
-	int phase = 0; // 0 wait for the spawn, 1 views, 2 done
+	int phase = 0;
 	double alive_since = -1.0;
-	double first_s = -1.0; // the first step: the whole capture gives up after kShotsTimeoutSeconds
+	double first_s = -1.0;
 	struct View {
 		bool enemy = false;
 		float metres = 0.0f;
@@ -202,8 +196,8 @@ struct Pt1Iff::Shots {
 	};
 	std::vector<View> views;
 	size_t at = 0;
-	double t0 = 0.0; // phase start of the current view
-	int step = 0; // 0 teleport, 1 look, 2 shoot
+	double t0 = 0.0;
+	int step = 0;
 	int failures = 0;
 	int saved = 0;
 };
@@ -215,7 +209,7 @@ Pt1Iff::Pt1Iff(Bf3LevelSession *p_session, CanvasLayer *p_layer, Ref<ImageTextur
 	tags_->setup(p_atlas, p_icons);
 	if (p_layer != nullptr) {
 		p_layer->add_child(tags_);
-		p_layer->move_child(tags_, 0); // under the minimap and the world icons
+		p_layer->move_child(tags_, 0);
 	}
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int64_t i = 0; i < args.size(); ++i) {
@@ -230,7 +224,7 @@ Pt1Iff::Pt1Iff(Bf3LevelSession *p_session, CanvasLayer *p_layer, Ref<ImageTextur
 		}
 	}
 	if (live_seconds_ > 0.0 && shots_ != nullptr) {
-		live_dir_ = shots_->dir; // --iff-live: no teleports, one screenshot at the end into the --iff-shots folder
+		live_dir_ = shots_->dir;
 		shots_.reset();
 	}
 	loader_ = std::thread([this]() { run_loader(); });
@@ -266,8 +260,7 @@ void Pt1Iff::run_loader() {
 			} else {
 				notes += " spotting: " + s.error().message + " (retail defaults);";
 			}
-			// The kit icons by KitRole (the role from the kit's name, as host/kits.cpp maps it): team 1's kits (the
-			// same UIHudIcon names for team 2).
+
 			if (const core::EbxPartition *team = (*lib)->partition_by_name("gameplay/teams/us")) {
 				if (core::Result<core::gameplay::TeamDef> td = core::gameplay::read_team_data(**lib, team->primary(), &budget)) {
 					for (const std::string &kit_name : td->kits) {
@@ -373,7 +366,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 	for (const IffSoldier &s : all) {
 		stats_.unknown_team += s.team == 0 ? 1u : 0u;
 	}
-	// The minimap.
+
 	std::array<IffMinimapEntry, net::kMaxSlots> entries{};
 	IffMinimapCounts counts;
 	const size_t m = iff_minimap(all, viewer, reveal_, now_s, entries, &counts);
@@ -392,7 +385,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 		ic.objective = false;
 		r_icons.push_back(ic);
 	}
-	// The nametags.
+
 	std::vector<NametagDraw> draws;
 	const bool show = p_camera != nullptr && p_first_person && p_camera->is_inside_tree() && viewer.team != 0;
 	if (show) {
@@ -423,7 +416,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 			}
 			ui::NametagDecision dec = ui::decide_nametag(style_, viewer, sub);
 			if (dec.needs_line_of_sight && world != nullptr && rays < kMaxLosRaysPerFrame) {
-				// A clear static-world ray to the chest or the head (Collision + Raycast, the bullets' set).
+
 				const sim::Vec3 from{ eye.x, eye.y, eye.z };
 				bool clear = false;
 				for (const float h : { 0.75f, 1.0f }) {
@@ -476,7 +469,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 		step_shots(p_camera, now_s);
 	}
 	if (live_seconds_ > 0.0) {
-		// --iff-live=<s>: a live round as it plays, from the own spawn; the summary and one screenshot, then quit.
+
 		const bool alive = f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0;
 		if (live_start_s_ < 0.0 && alive && applied_) {
 			live_start_s_ = now_s;
@@ -499,8 +492,6 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 		}
 	}
 }
-
-// ---- --iff-shots ----------------------------------------------------------------------------------------------------
 
 void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 	Shots &sh = *shots_;
@@ -537,7 +528,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		if (p_now_s - sh.alive_since < 3.0) {
 			return;
 		}
-		// The nearest living teammate and enemy, from where the own soldier stands.
+
 		const sim::Vec3 &me = f.own_curr.position;
 		int best[2] = { -1, -1 };
 		float best_d[2] = { 1e30f, 1e30f };
@@ -576,7 +567,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		sh.t0 = p_now_s;
 	}
 	if (sh.at >= sh.views.size()) {
-		// The atlas frames this track draws, for the user (derived data under b\shots).
+
 		if (atlas_.is_valid() && icons_ != nullptr) {
 			Ref<Image> img = atlas_->get_image();
 			const char *names[] = { "UIHudIcon_Player", "UIHudIcon_KitAssault", "UIHudIcon_KitEngineer", "UIHudIcon_KitSupport", "UIHudIcon_KitRecon",
@@ -618,8 +609,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		return;
 	}
 	Shots::View &v = sh.views[sh.at];
-	// A spot about p_metres from p_target, on the ground, with room to stand and a clear eye-to-chest ray: 24
-	// directions from the target's facing, each at 1, 0.85 and 1.2 x the distance.
+
 	struct SpotTally {
 		uint32_t no_ground = 0, blocked = 0, no_sight = 0;
 	};
@@ -655,7 +645,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		return false;
 	};
 	if (sh.step == 0) {
-		// The chosen soldier first, then the others of its relation nearest the own soldier first, until one has a spot.
+
 		const uint8_t want_team = [&] {
 			for (size_t i = 0; i < n; ++i) {
 				if (soldiers[i].slot == v.slot) {
@@ -724,7 +714,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 	const sim::Vec3 chest{ target->feet[0], target->feet[1] + target->eye_height * 0.75f, target->feet[2] };
 	const double waited = p_now_s - sh.t0;
 	if (sh.step == 1) {
-		// Look at the chest from the presented eye (the teleport has landed by now).
+
 		const Vector3 eye = p_camera != nullptr ? p_camera->get_global_transform().origin : vec(f.own_curr.position) + Vector3(0, 1.6f, 0);
 		const float dx = chest[0] - eye.x, dy = chest[1] - eye.y, dz = chest[2] - eye.z;
 		session_->mapper().script_view(std::atan2(dx, dz), std::atan2(dy, std::sqrt(dx * dx + dz * dz)));
@@ -762,8 +752,6 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 	sh.t0 = p_now_s;
 }
 
-// ---- Bf3LevelSession: PT1 iff [context] ------------------------------------------------------------------------------
-
 const sim::CollisionWorld *Bf3LevelSession::pt1_iff_world() const {
 	return m2a_ ? m2a_->world.get() : nullptr;
 }
@@ -772,9 +760,8 @@ Bf3UiAssets *Bf3LevelSession::pt1_iff_ui_assets() const {
 	return m2a_ ? m2a_->ui_assets : nullptr;
 }
 
-} // namespace bf3::godot_side
+}
 
-// PT1 iff [register] (register_types.cpp).
 void openbf3_register_pt1_iff() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Nametags);
 }

@@ -1,12 +1,3 @@
-// The per-tile Recast bake (docs/design/s1.md §5.3), the drop-down links with their sweep checks on per-lane
-// CollisionWorlds (§3), and bake_nav_world (tile inputs -> lanes -> assembly). The pipeline is Recast's
-// Sample_TileMesh with three S1 rules:
-//   * walkable triangles are judged two-sided (|normal.y| >= cos slope): the motor collides with back faces (m1.md
-//     §5.1), so a floor whose triangles face down is walkable for both;
-//   * the walkable height is the crouch height; spans with less than the stand height of room become
-//     kNavAreaCrouch (after rcBuildCompactHeightfield, before the erosion), so crouch-only passages stay in the mesh;
-//   * before rasterising, the cells each triangle's box covers inside the heightfield are summed and charged against
-//     kMaxNavTileRasterCells (hostile input fails the tile instead of allocating without end).
 #include "nav_internal.h"
 
 #include "bf3/core/cache/cached_convert.h"
@@ -51,7 +42,7 @@ struct DetailDeleter {
 };
 
 constexpr int kMaxOffMeshPerTile = 1 << 14;
-constexpr float kSweepLift = 0.05f; // feet above the surface for the link sweeps
+constexpr float kSweepLift = 0.05f;
 
 std::string tile_name(const NavTileKey &p_tile) {
 	return "nav tile (" + std::to_string(p_tile[0]) + ", " + std::to_string(p_tile[1]) + ")";
@@ -62,8 +53,6 @@ struct DropLink {
 	float end[3];
 };
 
-// The ground of one heightfield column below p_max_y (the highest span top at most p_max_y): found, its height, and
-// whether it was walkable before the erosion. inside = the column lies in the compact heightfield.
 struct Column {
 	bool inside = false;
 	bool found = false;
@@ -90,12 +79,6 @@ Column ground_below(const rcCompactHeightfield &p_chf, const std::vector<uint8_t
 	return out;
 }
 
-// The drop-down links of one tile (docs §5.3 "Drop links"): every border edge of the poly mesh without a neighbour
-// (not a tile portal), sampled every drop_sample_spacing; outward from each sample, the ledge (the first column whose
-// ground lies more than a climb lower, cell by cell) and the landing a capsule radius and a cell beyond it, within
-// drop_reach, found in the compact heightfield's columns (areas as they were before the erosion), more than the climb
-// and at most drop_max lower; with p_world, a stand-capsule sweep out to the landing and one down to it must both be
-// clear.
 void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas, const NavParams &p_params,
 		const NavCells &p_cells, const CollisionWorld *p_world, NavTileBake &r_bake, std::vector<DropLink> &r_links) {
 	const int nvp = p_mesh.nvp;
@@ -121,7 +104,7 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 		for (int j = 0; j < nv; ++j) {
 			const unsigned short nei = p[nvp + j];
 			if (nei != RC_MESH_NULL_IDX) {
-				continue; // a neighbour, or a portal to the next tile (0x8000 | side)
+				continue;
 			}
 			const unsigned short *va = &p_mesh.verts[size_t(p[j]) * 3];
 			const unsigned short *vb = &p_mesh.verts[size_t(p[(j + 1) % nv]) * 3];
@@ -145,10 +128,7 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 				}
 				const float t = (float(k) + 0.5f) / float(samples);
 				const float sx = ax + ex * t, sy = ay + (by - ay) * t, sz = az + ez * t;
-				// Walk outward one cell at a time to the ledge: the first column whose ground (the highest surface at
-				// most a climb above the start) is more than a climb below the start, or has none. The poly edge lies
-				// the erosion (walkable radius) plus up to the contour error inside the real ledge, so a fixed reach
-				// would put the landing capsule over the ledge's lip (found by sim.nav.unit's 3 m ledge).
+
 				float ledge = -1.0f;
 				for (float d = 0.5f * cs; d <= p_params.drop_reach; d += cs) {
 					const Column c = ground_below(p_chf, p_areas, sx + nx * d, sz + nz * d, sy + climb);
@@ -163,7 +143,7 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 				if (ledge < 0.0f) {
 					continue;
 				}
-				// The landing: a capsule radius and a cell beyond the ledge, so the fall clears the lip.
+
 				const float reach = ledge + p_params.agent_radius + cs;
 				if (reach > p_params.drop_reach) {
 					continue;
@@ -207,7 +187,7 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 	}
 }
 
-} // namespace
+}
 
 core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavParams &p_params, const CollisionWorld *p_links, rcContext &r_context) {
 	const Clock::time_point start = Clock::now();
@@ -223,7 +203,7 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	if (!p_input.unwalkable.empty() && p_input.unwalkable.size() != ntris) {
 		return core::make_error(where + ": unwalkable marks and triangles differ");
 	}
-	// TC water rule: a tile whose whole input is unwalkable bakes to no tile without running Recast.
+
 	const bool all_wet = !p_input.unwalkable.empty() && std::all_of(p_input.unwalkable.begin(), p_input.unwalkable.end(), [](uint8_t p_u) { return p_u != 0; });
 	if (ntris == 0 || all_wet) {
 		out.info.seconds = seconds_since(start);
@@ -235,7 +215,7 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	const float border = float(c.border) * cs;
 	float bmin[3] = { float(p_input.tile[0]) * kNavTileSize - border, 0.0f, float(p_input.tile[1]) * kNavTileSize - border };
 	float bmax[3] = { float(p_input.tile[0] + 1) * kNavTileSize + border, 0.0f, float(p_input.tile[1] + 1) * kNavTileSize + border };
-	// The y range of the triangles that reach into the heightfield's columns, and the raster charge (docs §9).
+
 	float ymin = 1e30f, ymax = -1e30f;
 	uint64_t cells = 0;
 	const float *v = p_input.vertices.data();
@@ -255,7 +235,7 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	}
 	if (ymin > ymax) {
 		out.info.seconds = seconds_since(start);
-		return out; // nothing reaches the heightfield
+		return out;
 	}
 	bmin[1] = ymin - ch;
 	bmax[1] = std::min(ymax + ch, bmin[1] + kMaxNavTileHeight);
@@ -265,7 +245,7 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	if (hf == nullptr || !rcCreateHeightfield(&r_context, *hf, size, size, bmin, bmax, cs, ch)) {
 		return core::make_error(where + ": rcCreateHeightfield failed");
 	}
-	// Two-sided walkable rule (header comment).
+
 	std::vector<unsigned char> areas(ntris, RC_NULL_AREA);
 	const float cos_slope = std::cos(p_params.max_slope_degrees * (3.14159265358979323846f / 180.0f));
 	for (size_t t = 0; t < ntris; ++t) {
@@ -275,7 +255,7 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 		const float n[3] = { e0[1] * e1[2] - e0[2] * e1[1], e0[2] * e1[0] - e0[0] * e1[2], e0[0] * e1[1] - e0[1] * e1[0] };
 		const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
 		if (len > 0.0f && std::fabs(n[1]) / len > cos_slope && (p_input.unwalkable.empty() || p_input.unwalkable[t] == 0)) {
-			areas[t] = RC_WALKABLE_AREA; // TC: a wet terrain triangle stays RC_NULL_AREA (it still blocks)
+			areas[t] = RC_WALKABLE_AREA;
 		}
 	}
 	if (!rcRasterizeTriangles(&r_context, v, areas.data(), int(ntris), *hf, c.walkable_climb)) {
@@ -291,14 +271,14 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 		return core::make_error(where + ": rcBuildCompactHeightfield failed");
 	}
 	hf.reset();
-	// Walk and crouch areas by the room above each span.
+
 	for (int s = 0; s < chf->spanCount; ++s) {
 		if (chf->areas[s] == RC_NULL_AREA) {
 			continue;
 		}
 		chf->areas[s] = int(chf->spans[s].h) < c.stand_height ? kNavAreaCrouch : kNavAreaWalk;
 	}
-	std::vector<uint8_t> areas_before(chf->areas, chf->areas + chf->spanCount); // the drop landings' rule
+	std::vector<uint8_t> areas_before(chf->areas, chf->areas + chf->spanCount);
 	if (!rcErodeWalkableArea(&r_context, c.walkable_radius, *chf)) {
 		return core::make_error(where + ": rcErodeWalkableArea failed");
 	}
@@ -359,7 +339,7 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	chf.reset();
 	std::vector<float> con_verts(links.size() * 6);
 	std::vector<float> con_rad(links.size(), std::max(p_params.agent_radius, 2.0f * cs));
-	std::vector<unsigned char> con_dir(links.size(), 0); // one way
+	std::vector<unsigned char> con_dir(links.size(), 0);
 	std::vector<unsigned char> con_area(links.size(), kNavAreaDrop);
 	std::vector<unsigned short> con_flags(links.size(), nav_flags::kDrop);
 	std::vector<unsigned int> con_id(links.size());
@@ -416,8 +396,6 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	return out;
 }
 
-// ---- the link-check world pool ----------------------------------------------------------------------------------
-
 NavLinkWorldPool::NavLinkWorldPool(std::shared_ptr<const StaticWorldShapes> p_shapes) :
 		shapes_(std::move(p_shapes)) {}
 
@@ -438,7 +416,7 @@ core::Result<CollisionWorld *> NavLinkWorldPool::checkout(bool *r_created, doubl
 			return w;
 		}
 	}
-	// Created outside the lock: another lane may create its own meanwhile (at most one per lane in flight).
+
 	const Clock::time_point start = Clock::now();
 	core::Result<std::unique_ptr<CollisionWorld>> made = CollisionWorld::create(shapes_);
 	if (!made) {
@@ -471,14 +449,12 @@ size_t NavLinkWorldPool::created() const {
 	return all_.size();
 }
 
-// ---- bake ---------------------------------------------------------------------------------------------------------
-
 core::Result<std::shared_ptr<const NavWorld>> bake_nav_inputs(std::vector<NavTileInput> p_inputs, const NavBakeOptions &p_options, NavStats p_stats,
 		core::Cache *p_cache, bool *r_stored) {
 	BF3_TRY(check_nav_params(p_options.params));
 	core::Cache *cache = (p_cache != nullptr && p_cache->is_open()) ? p_cache : nullptr;
 	const bool link_checked = p_options.link_shapes != nullptr && p_options.params.drop_links;
-	// TC water rule counters (before the inputs are freed on the lanes).
+
 	for (const NavTileInput &in : p_inputs) {
 		size_t wet = 0;
 		for (uint8_t u : in.unwalkable) {
@@ -554,7 +530,7 @@ core::Result<std::shared_ptr<const NavWorld>> bake_nav_inputs(std::vector<NavTil
 					}
 					baked[p_i].emplace(std::move(*got));
 				}
-				// The input is no longer needed (its digest went into the tile info).
+
 				p_inputs[p_i].vertices = std::vector<float>();
 				p_inputs[p_i].layers = std::vector<uint8_t>();
 				p_inputs[p_i].unwalkable = std::vector<uint8_t>();
@@ -631,4 +607,4 @@ core::Result<std::shared_ptr<const NavWorld>> bake_nav_world(std::span<const Sta
 	return bake_nav_inputs(std::move(*inputs), p_options, stats);
 }
 
-} // namespace bf3::sim
+}

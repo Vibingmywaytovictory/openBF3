@@ -1,5 +1,3 @@
-// The WeaponDef text block shared by bf3dump and the in-game inspector (moved from
-// tools/bf3dump/weapon_commands.cpp; the output is unchanged byte for byte).
 #include "bf3/core/gameplay/weapon_format.h"
 
 #include "bf3/core/ui/text_db.h"
@@ -60,7 +58,6 @@ std::string sway_modifier(const SwayModifier &p_m) {
 			num(p_m.recoil_angle);
 }
 
-
 void print_state(std::string &r_out, const char *p_label, const SwayState &p_s) {
 	static const char *kMoves[] = { "base", "moving", "jumping", "sprinting", "vault small", "vault medium" };
 	r_out += "  ";
@@ -87,7 +84,7 @@ std::string explosion(const Explosion &p_e) {
 								 : std::string());
 }
 
-} // namespace
+}
 
 std::string format_number(double p_value) {
 	return num(p_value);
@@ -122,7 +119,7 @@ std::string format_weapon(const WeaponDef &p_w, const MaterialGrid *p_grid, cons
 	line("blueprint", p_w.blueprint + "  \"" + p_w.blueprint_name + "\"  damage giver \"" + p_w.damage_giver_name + "\"");
 	line("name sid", p_w.name_sid.empty() ? std::string("-") : p_w.name_sid + "  (hash " + hex32(p_w.name_sid_hash) + ")");
 	if (p_text != nullptr) {
-		// The localised name; a SID without a usable entry shows as itself (plan §2.1).
+
 		line("name", p_w.name_sid.empty() ? std::string("-")
 				: p_text->resolves(p_w.name_sid) ? weapon_display_name(p_w, p_text)
 												  : p_w.name_sid + "  (not in the text database)");
@@ -235,4 +232,4 @@ std::string format_weapon(const WeaponDef &p_w, const MaterialGrid *p_grid, cons
 	return o;
 }
 
-} // namespace bf3::core::gameplay
+}

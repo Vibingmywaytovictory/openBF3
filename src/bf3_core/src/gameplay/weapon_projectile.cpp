@@ -1,6 +1,3 @@
-// Projectile reader (topics/01 §1.6): ProjectileEntityData -> MeshProjectileEntityData ->
-// BulletEntityData | MissileEntityData | GrenadeEntityData, their (dud) explosions, suppression and
-// material pair. BulletEntityData has no drag field; only MissileEntityData.Drag exists.
 #include "weapon_readers.h"
 
 namespace bf3::core::gameplay::detail {
@@ -23,13 +20,13 @@ void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out) {
 	r_out.disable_occlusion = r_f.flag_or(e, "DisableOcclusion", false);
 	r_out.disable_static_entity_occlusion = r_f.flag_or(e, "DisableStaticEntityOcclusion", false);
 	r_out.is_causing_suppression = r_f.flag_or(e, "IsCausingSuppression", false);
-	// M2a weapons (blob v2): the explosion's own pair, read when the type has the field.
+
 	if (p_e.get("MaterialPair")) {
 		r_out.material = r_f.material_pair(e, "MaterialPair");
 	}
 }
 
-} // namespace
+}
 
 void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef &r_projectile) {
 	const EbxStruct p = p_projectile.data();
@@ -45,7 +42,6 @@ void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef
 		r_projectile.kind = ProjectileKind::Other;
 	}
 
-	// ProjectileEntityData.
 	r_projectile.time_to_live = r_f.f32(p, "TimeToLive");
 	r_projectile.record_initial_speed = r_f.f32(p, "InitialSpeed");
 	r_projectile.visual_converge_distance = r_f.f32_or(p, "VisualConvergeDistance", 0);
@@ -103,11 +99,10 @@ void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef
 			r_projectile.grenade_type = r_f.enum_text(p, "GrenadeType");
 			break;
 		default:
-			// Explosion packs, vehicle projectiles, supply spheres: only the base fields, and gravity
-			// where the type has it.
+
 			r_projectile.gravity = r_f.f32_or(p, "Gravity", 0);
 			break;
 	}
 }
 
-} // namespace bf3::core::gameplay::detail
+}

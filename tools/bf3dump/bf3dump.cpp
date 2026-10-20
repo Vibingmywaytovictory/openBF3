@@ -1,77 +1,3 @@
-// bf3dump: read-only inspection of the BF3 install through bf3_core.
-// Origin: the commands and output formats follow the ebx-dump probe
-// (research/probes/tools/ebx-dump/src/main.rs), which drives IW4L's Rust readers.
-//
-// The install is located like the game does (--install=<dir>, OPENBF3_INSTALL, default path) and
-// is only read; output goes to the paths given on the command line (refused inside the install).
-//
-// Commands
-//   list <out.tsv>             every ebx/res entry (and the chunk count) of every bundle of every
-//                              non-chunk, non-Loc superbundle, columns
-//                              superbundle bundle kind name res_type original_size
-//                              (same rows, order and bytes as the ebx-dump probe's `list`)
-//   chunk <sb> <guid>...       chunk presence, decoded size, first 48 bytes (probe `chunk` format)
-//   reshead <sb> <res>...      res type, meta, decoded size, first 64 bytes (probe `reshead` format)
-//   chunks <sb>                the bundle chunk index of a superbundle: id, sha1, size, tail, range
-//   verify <sb[,sb..]|@all>    load every bundle; check stored SHA1s and decode every ebx/res/chunk
-//   info                       packages, layout, catalogs, superbundle sites
-// EBX (same semantics, output and JSON as the probe's commands; <sb> may be "a,b,.." or @all-mp,
-// the first superbundle that holds a partition wins):
-//   find <sb> <needle>...      partitions whose lowercase name contains a needle:
-//                              name, primary type, superbundle, bundle (sorted by name)
-//   types <sb> <Type>...       every instance of the exact types: type, partition, instance GUID
-//   dump <sb> <out_dir> <depth> <follow> <root>...
-//                              one JSON per root: the root partition and the breadth-first closure of
-//                              referenced partitions whose name contains one of the comma-separated
-//                              <follow> substrings ("*" = all, "-" = none) up to <depth>; fx/ and
-//                              sound/ are never followed unless "*"; mesh/texture/shader/sound asset
-//                              partitions are listed but not expanded
-//   ebxload <sb> [--walk]      bulk-parse every partition (timing, failures, bytes); --walk also
-//                              decodes every value of every instance
-//   ebxload <sb> --lookups     (H hygiene) then get() by name of every field of every instance, 3 passes
-//   numcheck                   self-check of the probe's JSON number text (no install needed)
-// Weapons (bf3_core gameplay readers; README "Weapon tables"):
-//   weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]
-//                              one resolved WeaponDef (a variant or a blueprint) with the level's
-//                              body multipliers for its projectile; --name adds the localised name
-//   weapons [--level <sb>]     one TSV row per SoldierWeaponUnlockAsset under weapons/
-// Text database (text_commands.cpp): text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>
-//   level <LEVEL> <MODE> [--legacy-mvdb]  canonical placement listing of one level x mode
-//                              (level_commands.cpp; parity with research/probes/tools/level-oracle)
-//   levelmodes <LEVEL>         the modes a level offers
-//   collision <LEVEL> <MODE>   the collision soup: placements, tiles, hashes (collision_commands.cpp;
-//                              parity with research/probes/tools/level-oracle collision)
-//   prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N]
-//                              placed meshes + weapon variants into the derived-data cache (prepare_commands.cpp)
-// M1 T1 (world):
-//   shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]
-//                              the static world's Jolt shapes through the cache (shapes_commands.cpp); `prepare
-//                              ... --shapes` adds them to a prepare run
-//   spawns <LEVEL> <MODE>      M1 T2: spawn points and character spawners, TSV (spawns_commands.cpp)
-// L1 look:
-//   looks <LEVEL> <MODE> [--materials] [--shader NAME]  the drawn-material census, M1 mapping against L1 (look_commands.cpp)
-// S1 (server scale): nav bake|stats|components|path|probe and bots (nav_commands.h)
-// S2 vehicle:
-//   vehicledrive <LEVEL> <MODE> [<blueprint>]   the drive def and the vehicle model (vehicle_commands.cpp)
-//   vehicle-replay <LEVEL> <MODE> [options]     courses and gates C / D / G1 / G1r / G2x (G2 reported), --handling, --sweep,
-//                                               --hash-out (gate X), --log-out / --log-in (vehicle_commands.cpp)
-// UI ui1 (docs/design/ui-swf-fonts.md §12.4; swf_commands.cpp):
-//   swf census | movie <name> | labels <name> | layout <name> | hud | fonts
-//                              SwfMovie symbol tables, atlas label maps, HUD positions, UI fonts
-// UI ui2 (ui_commands.cpp; docs/design/ui-minimap-icons.md §15):
-//   minimap <LEVEL> [MODE] | minimap --census   UIMinimapData, combat areas, objectives / the all-level census
-//   hud-icons | item-icons [LEVEL] | hud-sources [--unbound]   the hud3dicons atlas, _small item icons, DataSources
-// M2a weapons (docs/design/m2a-weapons.md §10; weapon_sim_commands.cpp):
-//   weapon-sim <partition> | --all | --check   the weapon simulation on resolved defs (timing, drop, shots to kill)
-//   range <partition> [...]    the shooting range on a level's static world (--perf: W11's load)
-// M2a VFX1:
-//   fx census | compile | simulate | check | bench | atlas | impacts   effects (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7)
-// M2a vm:
-//   vm clips [<unlock>...] [--team us|ru|all]   1p viewmodel clip roles, E5 reload rows, E11 coverage (vm_commands.cpp)
-// M2a audio (audio_commands.h): audio waves|loc|census|render, the drivers of gates G1-G4 and the offline render
-//
-// Command semantics and output formats follow the ebx-dump probe
-// (research/probes/tools/ebx-dump), which is built on the IW4L readers that bf3_core ports.
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/payload.h"
@@ -88,31 +14,31 @@
 #include "level_commands.h"
 #include "collision_commands.h"
 #include "prepare_commands.h"
-#include "shapes_commands.h" // M1 T1
-// M1 T2: spawn points and spawners of a level x mode.
+#include "shapes_commands.h"
+
 #include "spawns_commands.h"
-#include "logic_commands.h" // S4 logic
-// L1 look: the drawn-material census.
+#include "logic_commands.h"
+
 #include "look_commands.h"
-// S1: the navmesh and the scale bench.
+
 #include "nav_commands.h"
-// S2 vehicle: vehicledrive, vehicle-replay.
+
 #include "vehicle_commands.h"
-// UI ui1: the SwfMovie, atlas, layout and UI font commands.
+
 #include "swf_commands.h"
-// UI ui2: minimap, HUD icon and HUD source commands.
+
 #include "ui_commands.h"
-// M2a weapons: weapon-sim and range.
+
 #include "weapon_sim_commands.h"
-// M2a VFX1: bf3dump fx (effect compiler, simulator, atlas, impacts).
+
 #include "fx_commands.h"
-// M2a lc: lagcomp (the capsule pose table, E18 (a) deviation, E13 rewind rows).
+
 #include "lagcomp_commands.h"
-// M2a vm: bf3dump vm clips (1p viewmodel clip roles, E5, E11).
+
 #include "vm_commands.h"
-// M2a audio: XAS waves, Loc/en streams, the sound-patch census, offline renders.
+
 #include "audio_commands.h"
-// M2a bt: firefight (the headless firefight bots, E13 --perf).
+
 #include "firefight_commands.h"
 
 #include <fcntl.h>
@@ -192,7 +118,6 @@ bool open_install(const std::string &p_install_dir, Context &r_ctx) {
 	return true;
 }
 
-// Opens an output file after the write guard has cleared it (never inside the install).
 FILE *open_output(const Context &p_ctx, const std::string &p_path) {
 	const std::filesystem::path path(widen(p_path));
 	const PathGuard guard = p_ctx.reader.write_guard();
@@ -208,8 +133,6 @@ FILE *open_output(const Context &p_ctx, const std::string &p_path) {
 	return f;
 }
 
-// --- list ---------------------------------------------------------------------------------------
-
 int cmd_list(Context &p_ctx, const std::string &p_out) {
 	const auto start = std::chrono::steady_clock::now();
 	FILE *out = open_output(p_ctx, p_out);
@@ -224,7 +147,7 @@ int cmd_list(Context &p_ctx, const std::string &p_out) {
 		}
 		names.push_back(sb);
 	}
-	// Mount every superbundle, then read every bundle manifest, both in parallel; write in order.
+
 	std::vector<Result<LevelMount>> mounts =
 			parallel_map<Result<LevelMount>>(names.size(), [&](size_t i) { return p_ctx.install->mount_superbundle(names[i]); });
 	struct Job {
@@ -312,8 +235,6 @@ int cmd_list(Context &p_ctx, const std::string &p_out) {
 	return (errors == 0 && write_ok) ? 0 : 1;
 }
 
-// --- chunk / reshead ----------------------------------------------------------------------------
-
 Result<LevelMount> mount_loaded(Context &p_ctx, const std::string &p_sb) {
 	Result<LevelMount> m = p_ctx.install->mount_superbundle(p_sb);
 	if (!m) {
@@ -389,8 +310,6 @@ int cmd_chunks(Context &p_ctx, const std::string &p_sb) {
 			m->toc_chunk_count(), m->chunk_superbundles().size());
 	return 0;
 }
-
-// --- verify -------------------------------------------------------------------------------------
 
 int cmd_verify(Context &p_ctx, const std::string &p_spec) {
 	std::vector<std::string> sbs;
@@ -498,8 +417,6 @@ int cmd_verify(Context &p_ctx, const std::string &p_spec) {
 	return failed_sbs == 0 ? 0 : 1;
 }
 
-// --- info ---------------------------------------------------------------------------------------
-
 int cmd_info(Context &p_ctx) {
 	const Install &in = *p_ctx.install;
 	std::printf("root\t%s\n", p_ctx.reader.status().root_utf8.c_str());
@@ -532,7 +449,7 @@ void usage() {
 			"  types <sb[,sb..]|@all-mp> <Type>...\n"
 			"  dump <sb[,sb..]|@all-mp> <out_dir> <depth> <follow> <root>...\n"
 			"  ebxload <sb[,sb..]|@all-mp> [--walk]\n"
-			"  ebxload <sb[,sb..]|@all-mp> --lookups\n" // H hygiene
+			"  ebxload <sb[,sb..]|@all-mp> --lookups\n"
 			"  numcheck\n"
 			"  weapon <partition> [--unlock <u_..>]... [--level <sb>] [--name]\n"
 			"  weapons [--level <sb>]\n"
@@ -543,19 +460,19 @@ void usage() {
 			"  prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes] [--shapes]\n"
 			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
-	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n"); // M1 T2
-	std::fprintf(stderr, "%s", bf3dump::logic_usage()); // S4 logic
-	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n"); // L1 look
-	std::fprintf(stderr, "%s", bf3dump::vehicle_usage()); // S2 vehicle
-	std::fprintf(stderr, "%s", bf3dump::swf_usage()); // UI ui1
-	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage()); // M2a weapons
-	std::fprintf(stderr, "%s", bf3dump::fx_usage()); // M2a VFX1
-	std::fprintf(stderr, "%s", bf3dump::lagcomp_usage()); // M2a lc
-	std::fprintf(stderr, "%s", bf3dump::vm_usage()); // M2a vm
-	std::fprintf(stderr, "%s", bf3dump::firefight_usage()); // M2a bt
+	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n");
+	std::fprintf(stderr, "%s", bf3dump::logic_usage());
+	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n");
+	std::fprintf(stderr, "%s", bf3dump::vehicle_usage());
+	std::fprintf(stderr, "%s", bf3dump::swf_usage());
+	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage());
+	std::fprintf(stderr, "%s", bf3dump::fx_usage());
+	std::fprintf(stderr, "%s", bf3dump::lagcomp_usage());
+	std::fprintf(stderr, "%s", bf3dump::vm_usage());
+	std::fprintf(stderr, "%s", bf3dump::firefight_usage());
 }
 
-} // namespace
+}
 
 int wmain(int argc, wchar_t **argv) {
 	std::vector<std::string> args;
@@ -572,10 +489,10 @@ int wmain(int argc, wchar_t **argv) {
 		usage();
 		return 2;
 	}
-	// Plain LF line ends on stdout, as the probe (Rust) writes them.
+
 	_setmode(_fileno(stdout), _O_BINARY);
 	if (args[0] == "numcheck" && args.size() == 1) {
-		// The probe's JSON number text rules on synthetic values; needs no install.
+
 		const int failed = bf3dump::json_number_selfcheck();
 		std::fprintf(stderr, "numcheck: %s\n", failed == 0 ? "PASS" : "FAIL");
 		return failed == 0 ? 0 : 1;
@@ -583,7 +500,7 @@ int wmain(int argc, wchar_t **argv) {
 	const auto start = std::chrono::steady_clock::now();
 	Context ctx;
 	if (!open_install(install_dir, ctx)) {
-		return 77; // no install: the same "skipped" code as the doctest suites
+		return 77;
 	}
 	std::fprintf(stderr, "install opened in %.3f s (%zu superbundles, %zu CAS entries)\n", seconds_since(start), ctx.install->sites().size(),
 			ctx.install->cas().size());
@@ -626,7 +543,7 @@ int wmain(int argc, wchar_t **argv) {
 	if (cmd == "ebxload" && (rest.size() == 1 || (rest.size() == 2 && rest[1] == "--walk"))) {
 		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], rest.size() == 2);
 	}
-	// H hygiene: times get() by name of every field of every instance (the EBX lookup tables).
+
 	if (cmd == "ebxload" && rest.size() == 2 && rest[1] == "--lookups") {
 		return bf3dump::cmd_ebxload(ebx_ctx, rest[0], false, true);
 	}
@@ -660,70 +577,70 @@ int wmain(int argc, wchar_t **argv) {
 	if (cmd == "collision" && rest.size() == 2) {
 		return bf3dump::cmd_collision(ctx.install, rest[0], rest[1]);
 	}
-	// M1 T1 (world): the static world's shapes.
+
 	if (cmd == "shapes") {
 		return bf3dump::cmd_shapes(ctx.reader, ctx.install, rest);
 	}
-	// M1 T2: spawns <LEVEL> <MODE> (spawns_commands.cpp; docs/design/m1.md §10.1).
+
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
 	}
-	// S4 logic: logic <sub> ... (logic_commands.cpp; docs/design/s4.md §9.4).
+
 	if (cmd == "logic") {
 		return bf3dump::cmd_logic(ctx.reader, ctx.install, rest);
 	}
-	// L1 look: looks <LEVEL> <MODE> [--materials] [--shader NAME] (look_commands.cpp).
+
 	if (cmd == "looks") {
 		return bf3dump::cmd_looks(ctx.install, rest);
 	}
-	// S1: nav ... and bots ... (nav_commands.cpp; docs/design/s1.md §12).
+
 	if (cmd == "nav") {
 		return bf3dump::cmd_nav(ctx.reader, ctx.install, rest);
 	}
 	if (cmd == "bots") {
 		return bf3dump::cmd_bots(ctx.reader, ctx.install, rest);
 	}
-	// S2 vehicle: vehicledrive / vehicle-replay (vehicle_commands.cpp; docs/design/s2.md §1, §8).
+
 	if (cmd == "vehicledrive") {
 		return bf3dump::cmd_vehicledrive(ctx.install, rest);
 	}
 	if (cmd == "vehicle-replay") {
 		return bf3dump::cmd_vehicle_replay(ctx.install, rest);
 	}
-	// UI ui1: swf <census|movie|labels|layout|hud|fonts> (swf_commands.cpp); 2 = usage.
+
 	if (cmd == "swf") {
 		if (const int rc = bf3dump::cmd_swf(ctx.reader, ctx.install, rest); rc != 2) {
 			return rc;
 		}
 	}
-	// UI ui2: minimap, hud-icons, item-icons, hud-sources (ui_commands.cpp).
+
 	if (const int rc = bf3dump::dispatch_ui2(ebx_ctx, cmd, rest); rc >= 0) {
 		return rc;
 	}
-	// M2a weapons: weapon-sim and range (weapon_sim_commands.cpp; docs/design/m2a-weapons.md §10).
+
 	if (cmd == "weapon-sim") {
 		return bf3dump::cmd_weapon_sim(ebx_ctx, rest);
 	}
 	if (cmd == "range") {
 		return bf3dump::cmd_range(ebx_ctx, rest);
 	}
-	// M2a VFX1: fx <subcommand> (fx_commands.cpp; docs/design/m2a-vfx1.md §7.7).
+
 	if (cmd == "fx") {
 		return bf3dump::cmd_fx(ebx_ctx, rest);
 	}
-	// M2a lc: lagcomp <LEVEL> <MODE> (lagcomp_commands.cpp; docs/design/m2a-lc.md).
+
 	if (cmd == "lagcomp") {
 		return bf3dump::cmd_lagcomp(ebx_ctx, rest);
 	}
-	// M2a vm: vm clips (vm_commands.cpp; docs/design/m2a-vm.md).
+
 	if (cmd == "vm") {
 		return bf3dump::cmd_vm(ebx_ctx, rest);
 	}
-	// M2a audio: audio waves|loc|census|render (audio_commands.cpp; docs/design/m2a-audio.md §1).
+
 	if (cmd == "audio") {
 		return bf3dump::cmd_audio(ctx.reader, ctx.install, rest);
 	}
-	// M2a bt: firefight <LEVEL> <MODE> (firefight_commands.cpp; docs/design/m2a-bt.md).
+
 	if (cmd == "firefight") {
 		return bf3dump::cmd_firefight(ctx.reader, ctx.install, rest);
 	}

@@ -1,13 +1,3 @@
-# tools.m1_prepare (M1 T1; docs/design/m1.md §1 E6, §12.4, §14): `bf3dump prepare MP_Subway TeamDeathMatch0 --shapes`
-# on a fresh scratch cache root, then the same root again.
-#   E6: the first (cold) run's peak working set <= 512 MiB (bf3dump reads it from GetProcessMemoryInfo);
-#   the cold run converts every item and cooks every tile; the second run is all hits (meshes, weapons, the
-#   "jolt-world" entry and every tile) and puts nothing; both print install.unchanged yes.
-# Exits 77 (skipped) when bf3dump finds no install.
-# Also printed (info, never gated; docs/testing.md): the cold run's peak commit (PeakPagefileUsage, bf3dump's "peak
-# private bytes"), which working-set trimming does not lower, and a warning when peak ws / peak commit falls below
-# 0.8 x the serial ratio (943 / 1000: 295.4 / 313.1 MiB alone, 2026-10-17); the serial merge-pass run decides.
-# Usage: cmake -DBF3DUMP=<bf3dump.exe> [-DE6_REPORT_ONLY=ON] -P m1_prepare.cmake (report-only: the asan preset)
 cmake_minimum_required(VERSION 3.29)
 
 if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")
@@ -15,7 +5,6 @@ if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")
 endif()
 set(E6_LIMIT_MIB 512)
 
-# A short root (entry paths stay well under MAX_PATH): %TEMP%\o3p-<random>.
 string(RANDOM LENGTH 8 ALPHABET "0123456789abcdef" _tag)
 file(TO_CMAKE_PATH "$ENV{TEMP}" _temp)
 set(ROOT "${_temp}/o3p-${_tag}")
@@ -23,7 +12,6 @@ file(REMOVE_RECURSE "${ROOT}")
 file(TO_NATIVE_PATH "${ROOT}" ROOT_NATIVE)
 
 set(_failed 0)
-# report(<ok> <what>): one PASS/FAIL row; <ok> is a boolean evaluated by the caller's if().
 macro(report _ok _what)
     if(${_ok})
         message(STATUS "  ok    ${_what}")
@@ -54,7 +42,6 @@ run_prepare("warm (same root)" WARM)
 file(REMOVE_RECURSE "${ROOT}")
 
 message(STATUS "tools.m1_prepare checks:")
-# Cold.
 if(COLD_RC EQUAL 0)
     set(_ok TRUE)
 else()
@@ -69,7 +56,6 @@ if(NOT _m)
     set(_peak "unknown")
 endif()
 if(E6_REPORT_ONLY)
-    # ASan builds inflate the working set several times over; E6 is a dev-build measurement.
     message(STATUS "  info  E6 (report only under ASan): cold peak working set ${_peak} MiB, gate ${E6_LIMIT_MIB} MiB")
 else()
     if(_peak_int LESS ${E6_LIMIT_MIB})
@@ -117,7 +103,6 @@ else()
     set(_ok FALSE)
 endif()
 report(_ok "cold: install.unchanged")
-# Warm.
 if(WARM_RC EQUAL 0)
     set(_ok TRUE)
 else()

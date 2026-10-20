@@ -1,4 +1,3 @@
-// The 3p crowd's asset set (S3; docs/design/s3.md §4, §6, §9). See soldier_assets.h.
 #include "bf3/render/soldier_assets.h"
 
 #include "bf3/anim/crowd_eval.h"
@@ -6,8 +5,8 @@
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
-#include "bf3/core/gameplay/kit_appearance.h" // PT1 iff [kits]
-#include "bf3/core/gameplay/kit_def.h" // PT1 iff [kits]
+#include "bf3/core/gameplay/kit_appearance.h"
+#include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
@@ -46,8 +45,6 @@ uint32_t variation_hash_of(const core::EbxLibrary &p_library, const std::string 
 	return h ? h->as_u32().value_or(0) : 0;
 }
 
-// The 3p meshes an appearance links: appearance UnlockAsset.LinkedTo -> part UnlockAssets, whose LinkedTo name a
-// BlueprintAndVariationPair (BaseAsset + Variation) or a mesh directly. 1P arms pairs are skipped.
 core::Result<std::vector<SoldierPart>> appearance_parts(const core::EbxLibrary &p_library, const std::string &p_appearance, std::vector<std::string> &r_notes) {
 	const core::EbxPartition *part = p_library.partition_by_name(p_appearance);
 	if (part == nullptr) {
@@ -58,7 +55,7 @@ core::Result<std::vector<SoldierPart>> appearance_parts(const core::EbxLibrary &
 	auto add_mesh = [&](const core::EbxInstance &p_mesh, const std::optional<core::EbxInstance> &p_variation) {
 		const std::string mesh = name_of_instance(p_library, p_mesh);
 		if (mesh.empty() || mesh.find("arms1p") != std::string::npos || !seen.insert(mesh).second) {
-			return; // 1P arms (arms1p_*) belong to the viewmodel
+			return;
 		}
 		SoldierPart sp;
 		sp.mesh = mesh;
@@ -67,7 +64,7 @@ core::Result<std::vector<SoldierPart>> appearance_parts(const core::EbxLibrary &
 		}
 		out.push_back(std::move(sp));
 	};
-	size_t budget = 4096; // two levels of LinkedTo with a few entries each in retail data
+	size_t budget = 4096;
 	for (const core::EbxInstance &unlock : p_library.follow_all(part->primary().data(), "LinkedTo")) {
 		if (budget-- == 0) {
 			return core::make_error("appearance " + p_appearance + ": too many linked parts");
@@ -109,7 +106,6 @@ anim::Xform xform_of(const anim::Mat34 &p_m) {
 	return anim::Xform{ anim::quat_from_mat(p_m), p_m.origin() };
 }
 
-// SoldierWeaponData.WeaponStates[0].Weapon.AssetId of a weapon blueprint partition.
 core::Result<uint32_t> weapon_ant_ref(const core::EbxLibrary &p_library, const std::string &p_partition) {
 	const core::EbxPartition *part = p_library.partition_by_name(p_partition);
 	if (part == nullptr) {
@@ -130,10 +126,9 @@ core::Result<uint32_t> weapon_ant_ref(const core::EbxLibrary &p_library, const s
 	return uint32_t(*v);
 }
 
-// PT1 iff [kits]: the kits' own parts joined to the team's (defined in the PT1 iff block at the end of this file).
-void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes); // PT1 iff [kits]
+void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes);
 
-} // namespace
+}
 
 const PreparedTexture *SoldierAssets::texture(const std::string &p_name) const {
 	for (const PreparedTexture &t : textures) {
@@ -159,7 +154,6 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 		return core::error_at("install", install.error());
 	}
 
-	// Animation: the Ant banks, the static library and the crowd's clip set.
 	progress("reading the Ant animation banks", 2);
 	Clock::time_point t0 = Clock::now();
 	core::Result<std::unique_ptr<core::ant::AntInstallSource>> source = core::ant::AntInstallSource::open(*install);
@@ -178,7 +172,6 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 	a->clips = std::move(*clips);
 	a->seconds_ant = since(t0);
 
-	// EBX: the level superbundle (appearances, meshes, skeletons, weapons, variation databases).
 	progress("mounting the level superbundle", 3);
 	t0 = Clock::now();
 	core::Result<std::unique_ptr<core::EbxLibrary>> ebx = core::EbxLibrary::open(*install, { p_spec.superbundle });
@@ -198,8 +191,6 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 	a->weapon_skeleton = std::move(*weapon_skeleton);
 	const anim::Skeleton &rig = a->clips.rig;
 
-	// The weapon layout of the undriven Wep_* joints (crowd_eval.h step 3; s3.md §5.6): rig joints that are
-	// weaponske01 bones below Wep_Root, whose parents agree by name, and that no locomotion or aim clip drives.
 	anim::BoneMask driven;
 	for (const anim::CrowdClip c : { anim::CrowdClip::Idle, anim::CrowdClip::RunFwd, anim::CrowdClip::RunBwd, anim::CrowdClip::RunLeft,
 				 anim::CrowdClip::RunRight, anim::CrowdClip::AimUp, anim::CrowdClip::AimDown }) {
@@ -248,7 +239,6 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 		a->notes.push_back(line + mismatched + ")");
 	}
 
-	// Per team: the appearance's parts plus the weapon, materials, binds, reload clip and reload time.
 	progress("finding parts and materials", 4);
 	const std::vector<std::string> databases = variation_database_names(lib);
 	for (size_t t = 0; t < a->teams.size(); ++t) {
@@ -260,7 +250,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 			return parts.error();
 		}
 		team.parts = std::move(*parts);
-		pt1_join_kit_parts(lib, ts, team, a->notes); // PT1 iff [kits]
+		pt1_join_kit_parts(lib, ts, team, a->notes);
 		SoldierPart weapon;
 		weapon.mesh = ts.weapon_mesh;
 		weapon.weapon = true;
@@ -278,7 +268,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 		}
 		team.weapon_joints = weapon_joints;
 		team.weapon_local = weapon_local;
-		// Reload: weapon AntRef -> chooser index -> the chosen clip.
+
 		core::Result<uint32_t> ref = weapon_ant_ref(lib, ts.weapon_unlock);
 		if (!ref) {
 			return ref.error();
@@ -309,7 +299,6 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 	}
 	a->seconds_ebx = since(t0);
 
-	// Temporal LOD from GameAnimationSettings (defaults and a note when unreadable).
 	{
 		core::Result<std::unique_ptr<core::EbxLibrary>> settings = core::EbxLibrary::open(*install, { p_spec.settings_superbundle });
 		const core::EbxPartition *part = settings ? (*settings)->partition_by_name(p_spec.settings_partition) : nullptr;
@@ -328,7 +317,6 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 		}
 	}
 
-	// Meshes: LOD spec.lod (drawn subsets), bone slots bound by name into the rig through one SkinBinds per team.
 	progress("decoding meshes", 5);
 	t0 = Clock::now();
 	const core::LevelMount &mount = lib.mount(0);
@@ -381,7 +369,6 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 	}
 	a->seconds_meshes = since(t0);
 
-	// Textures: Diffuse and Normal of every material a drawn surface uses, decoded on all cores.
 	progress("decoding textures", 6);
 	t0 = Clock::now();
 	std::vector<std::pair<std::string, TextureRole>> wanted;
@@ -421,7 +408,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 	for (size_t i = 0; i < wanted.size(); ++i) {
 		if (!errors[i].empty()) {
 			++skipped;
-			a->notes.push_back("texture skipped: " + errors[i]); // drawn untextured rather than failing the load
+			a->notes.push_back("texture skipped: " + errors[i]);
 			continue;
 		}
 		a->textures.push_back(std::move(textures[i]));
@@ -467,7 +454,7 @@ PinchReport measure_pinch(const SoldierTeam &p_team, const anim::Skeleton &p_rig
 	if (hand >= 0 && ik >= 0) {
 		r.hand_ik_m = float(anim::vec_dist(p_model[size_t(hand)].t, p_model[size_t(ik)].t));
 	}
-	// Distance of p from the line through a and b.
+
 	auto radial = [](const anim::Vec3 &p_p, const anim::Vec3 &p_a, const anim::Vec3 &p_b) -> float {
 		const anim::Vec3 ab = anim::vec_sub(p_b, p_a), ap = anim::vec_sub(p_p, p_a);
 		const float len2 = ab.x * ab.x + ab.y * ab.y + ab.z * ab.z;
@@ -488,7 +475,7 @@ PinchReport measure_pinch(const SoldierTeam &p_team, const anim::Skeleton &p_rig
 				continue;
 			}
 			for (size_t v = 0; v < nv; ++v) {
-				// The vertex's main influence.
+
 				size_t best = 0;
 				for (size_t k = 1; k < 4; ++k) {
 					if (surface.weights[v * 4 + k] > surface.weights[v * 4 + best]) {
@@ -539,13 +526,11 @@ PinchReport measure_pinch(const SoldierTeam &p_team, const anim::Skeleton &p_rig
 	return r;
 }
 
-} // namespace bf3::render
+}
 
-// PT1 iff (docs/design/pt1-iff.md §2.1) -------------------------------------------------------------------------------
 namespace bf3::render {
 namespace {
 
-// The KitRole of a kit partition by its name (gameplay/kits/usengineer -> 1), as host/kits.cpp does; -1 when none.
 int pt1_kit_role(std::string_view p_kit) {
 	const std::string k = core::to_lower_ascii(p_kit);
 	const char *words[4] = { "assault", "engineer", "support", "recon" };
@@ -561,7 +546,7 @@ int pt1_kit_role(std::string_view p_kit) {
 
 void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes) {
 	if (p_spec.team_data.empty()) {
-		return; // S3: one appearance, every part on every kit
+		return;
 	}
 	const core::EbxPartition *team = p_library.partition_by_name(p_spec.team_data);
 	if (team == nullptr) {
@@ -587,7 +572,7 @@ void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec
 		}
 		r_team.kit_appearances[size_t(role)] = ka->appearance;
 	}
-	// The base parts belong to the kits without an appearance of their own (or whose appearance is the base one).
+
 	uint8_t base_mask = 0;
 	for (size_t k = 0; k < 4; ++k) {
 		if (r_team.kit_appearances[k].empty() || core::iequals_ascii(r_team.kit_appearances[k], p_spec.appearance)) {
@@ -637,12 +622,12 @@ void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec
 	for (SoldierPart &p : joined) {
 		r_team.parts.push_back(std::move(p));
 	}
-	// A base part no kit wears any more is dropped (no draw, no binds).
+
 	r_team.parts.erase(std::remove_if(r_team.parts.begin(), r_team.parts.end(), [](const SoldierPart &p_part) { return p_part.kit_mask == 0; }),
 			r_team.parts.end());
 	line += "; " + std::to_string(r_team.parts.size()) + " body parts in all";
 	r_notes.push_back(line);
 }
 
-} // namespace
-} // namespace bf3::render
+}
+}

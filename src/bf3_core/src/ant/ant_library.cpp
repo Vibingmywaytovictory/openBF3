@@ -1,5 +1,3 @@
-// Ant library: references, controllers, DOF sets, rigs. Clean-room implementation from
-// research/probes/ant-animation-probe.md (§3.2, §5); see ant_library.h.
 #include "bf3/core/ant/ant_library.h"
 
 #include <algorithm>
@@ -11,8 +9,7 @@ namespace {
 constexpr uint32_t kSlotQuat = 14;
 constexpr uint32_t kSlotFloat = 10;
 constexpr uint32_t kSlotInt = 6;
-// LayoutEntry.Type values as stored (2049856663 and 2049856454; research/topics/03-animation.md §1.4).
-// The probe report's hex spelling (0x7A2E5A97 / 0x7A2E59C6) is a typo; the data uses these.
+
 constexpr uint32_t kSlotTranslation = 0x7A2E5497;
 constexpr uint32_t kSlotScale = 0x7A2E53C6;
 constexpr uint32_t kDeltaTrajDofs = 8;
@@ -28,13 +25,12 @@ std::string_view joint_of_slot(std::string_view p_slot) {
 	return {};
 }
 
-// "<Layout>.<Joint>.q" -> "<Joint>.q"
 std::string_view strip_layout(std::string_view p_dof_name) {
 	const size_t dot = p_dof_name.find('.');
 	return dot == std::string_view::npos ? std::string_view() : p_dof_name.substr(dot + 1);
 }
 
-} // namespace
+}
 
 const char *dof_kind_name(DofKind p_kind) {
 	switch (p_kind) {
@@ -75,7 +71,7 @@ DofKind dof_kind_from_slot_type(uint32_t p_type) {
 
 int32_t AntRig::find_joint(std::string_view p_name) const {
 	if (p_name.empty()) {
-		return -1; // unnamed joints are never indexed
+		return -1;
 	}
 	const auto it = joint_index.find(p_name);
 	return it == joint_index.end() ? -1 : it->second;
@@ -148,7 +144,7 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 				}
 				r.joints.push_back(joint);
 			}
-			// ParentIndex comes from the data: anything outside [-1, joint count) becomes -1 (root) and is counted.
+
 			for (AntJoint &joint : r.joints) {
 				if (joint.parent < -1 || joint.parent >= int32_t(r.joints.size())) {
 					joint.parent = -1;
@@ -156,7 +152,7 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 				}
 			}
 		}
-		// Rest pose from the rig's DOF defaults ("<Layout>.<Joint>.q/.t"); the first entry per joint wins.
+
 		std::unordered_map<std::string_view, uint32_t> seen;
 		for (const char *list : { "DefaultVector4Values", "DefaultVector3Values" }) {
 			const GdArray values = rig.array(list);
@@ -170,7 +166,7 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 				const std::string_view slot = strip_layout(dof_name);
 				const std::string_view joint = joint_of_slot(slot);
 				if (joint.empty()) {
-					continue; // no "<Joint>.q|t|s" slot (joint_of_slot guarantees slot.size() > 2 otherwise)
+					continue;
 				}
 				const int32_t ji = r.find_joint(joint);
 				if (ji < 0 || !seen.emplace(slot, 1).second) {
@@ -183,7 +179,7 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 				}
 			}
 		}
-		// Every hierarchy reachable from DofSetLists through Children, and the layouts they use.
+
 		const GdArray lists = rig.array("DofSetLists");
 		std::vector<std::pair<GdGuid, int>> stack;
 		for (uint32_t k = 0; k < lists.size(); ++k) {
@@ -266,7 +262,7 @@ AntResult AntLibrary::bind(const AntPackage &p_package, const GdStruct &p_clip, 
 	r_binding = {};
 	r_binding.clip = p_clip;
 	const GdGuid clip_guid = p_clip.guid();
-	// Package-local controller first, then the static package's.
+
 	GdStruct controller = p_package.controller_for(clip_guid.index());
 	const AntPackage *controller_package = &p_package;
 	if (!controller.valid() && static_ && static_.get() != &p_package) {
@@ -296,7 +292,6 @@ AntResult AntLibrary::bind(const AntPackage &p_package, const GdStruct &p_clip, 
 		return r;
 	}
 
-	// Channel -> DOF.
 	ClipHeader header;
 	if (!read_clip_header(p_clip, header)) {
 		return AntResult::fail(AntStatus::Malformed, "clip without AnimationAsset header");
@@ -321,8 +316,6 @@ AntResult AntLibrary::bind(const AntPackage &p_package, const GdStruct &p_clip, 
 				std::to_string(size_t(nq) + nv + nf));
 	}
 
-	// Rig: the one whose DofSetLists hierarchies use most of the target's layouts (the targets themselves
-	// are not in those trees); ties go to the most joints found by name, then to the first rig.
 	{
 		std::vector<uint32_t> target_layouts;
 		const GdArray layouts = r_binding.target.array("LayoutAssets");
@@ -386,4 +379,4 @@ AntResult AntLibrary::bind(const AntPackage &p_package, const GdStruct &p_clip, 
 	return {};
 }
 
-} // namespace bf3::core::ant
+}

@@ -1,11 +1,3 @@
-// Ant animation reader and codecs (bf3::core::ant). Clean-room implementation from
-// research/probes/ant-animation-probe.md; these tests use only the probe's numeric outputs as oracles.
-//
-// Suite "ant-unit": synthetic inputs, always runs.
-// Suite "ant": reads the Ant banks from the install (AntInstallSource; located like the game: OPENBF3_INSTALL,
-// else the default path) or, when OPENBF3_ANT_DATA names one, from an export directory of Ant payloads
-// (tools/antdump/README.md), and for the value-by-value check the probe's clip JSONs (OPENBF3_ANT_ORACLE).
-// Without either input every case skips (exit 77). Asserts numbers only; nothing from BF3 is stored in the repo.
 #include <doctest/doctest.h>
 
 #include "antdump_lib.h"
@@ -37,9 +29,6 @@ using namespace bf3::core::ant;
 namespace antdump = bf3::tools::antdump;
 
 namespace {
-
-// ---------------------------------------------------------------------------------------------
-// Synthetic builders
 
 class BitWriter {
 public:
@@ -80,7 +69,7 @@ struct FieldSpec {
 	uint32_t element_size;
 	uint32_t offset;
 	uint16_t flags;
-	int layout; // index into the layout list (for layoutOffset)
+	int layout;
 };
 
 struct LayoutSpec {
@@ -88,15 +77,14 @@ struct LayoutSpec {
 	uint32_t hash;
 	uint32_t size;
 	uint32_t align;
-	std::vector<FieldSpec> fields; // slot order
+	std::vector<FieldSpec> fields;
 };
 
-// GD.REFL payload for the given layouts (per the format in gd_archive.h).
 std::vector<uint8_t> build_reflection(const std::vector<LayoutSpec> &p_layouts) {
 	std::vector<uint8_t> out(8 + 8 * p_layouts.size(), 0);
 	put64(out, 0, p_layouts.size());
 	std::vector<size_t> at(p_layouts.size());
-	// First pass: sizes, so layoutOffset values are known.
+
 	size_t cursor = out.size();
 	std::vector<std::vector<uint8_t>> blobs;
 	for (size_t i = 0; i < p_layouts.size(); ++i) {
@@ -159,13 +147,12 @@ void append_blob(std::vector<uint8_t> &r_out, const char *p_id, const std::vecto
 	std::memcpy(r_out.data() + at, p_id, 7);
 	r_out[at + 7] = 'l';
 	put32(r_out, at + 8, uint32_t(16 + p_payload.size()));
-	put32(r_out, at + 12, uint32_t(p_payload.size())); // relocation table offset (unused by the reader)
+	put32(r_out, at + 12, uint32_t(p_payload.size()));
 	r_out.insert(r_out.end(), p_payload.begin(), p_payload.end());
 }
 
 constexpr uint32_t kThingHash = 0x12345678;
 
-// A Chunk package with one object: Thing { __guid, __name "Hello", Count u32 = 7, Values f32[] = {1.5, -2, 3} }.
 std::vector<uint8_t> build_package() {
 	const std::vector<LayoutSpec> layouts = {
 		{ "UInt32", 7, 4, 4, {} },
@@ -173,23 +160,23 @@ std::vector<uint8_t> build_package() {
 		{ "Guid", 16, 16, 4, {} },
 		{ "String", 17, 16, 8, {} },
 		{ "Thing", kThingHash, 52, 8,
-				// One entry per slot from minSlot to maxSlot (no __base slot here, so slots start at -2).
+
 				{ { "__guid", -2, 16, 16, 32, 0, 2 }, { "__name", -1, 17, 16, 0, 0, 3 }, { "Count", 0, 7, 4, 48, 0, 0 }, { "Values", 1, 10, 16, 16, 1, 1 } } },
 	};
-	std::vector<uint8_t> data(32 + 56 + 16 + 8, 0); // header, instance (52 -> 56), floats, string
+	std::vector<uint8_t> data(32 + 56 + 16 + 8, 0);
 	put32(data, 0, GdArchive::kDataMagic);
 	put32(data, 16, kThingHash);
 	put16(data, 28, 32);
 	const size_t inst = 32;
 	const size_t floats = inst + 56;
 	const size_t text = floats + 16;
-	put32(data, inst + 0, 6); // __name {cap, count, ptr}
+	put32(data, inst + 0, 6);
 	put32(data, inst + 4, 6);
 	put64(data, inst + 8, text);
-	put32(data, inst + 16, 3); // Values {cap, count, ptr}
+	put32(data, inst + 16, 3);
 	put32(data, inst + 20, 3);
 	put64(data, inst + 24, floats);
-	data[inst + 32] = 0x00; // __guid: index 0x00000042
+	data[inst + 32] = 0x00;
 	data[inst + 35] = 0x42;
 	put32(data, inst + 48, 7);
 	const float v[3] = { 1.5f, -2.0f, 3.0f };
@@ -210,7 +197,6 @@ std::vector<uint8_t> build_package() {
 	return pkg;
 }
 
-// Rotation angle between two unit quaternions, accurate near 0 (4 * asin(|a - b| / 2) after sign alignment).
 double quat_angle_deg(const Quat &p_a, const Quat &p_b) {
 	const double dot = double(p_a.x) * p_b.x + double(p_a.y) * p_b.y + double(p_a.z) * p_b.z + double(p_a.w) * p_b.w;
 	const double s = dot < 0.0 ? -1.0 : 1.0;
@@ -219,7 +205,6 @@ double quat_angle_deg(const Quat &p_a, const Quat &p_b) {
 	return 4.0 * std::asin(std::min(1.0, chord / 2.0)) * 180.0 / std::numbers::pi;
 }
 
-// Reference evaluation of the DCT formula of §4.1, written independently of the decoder.
 double dct_reference(const int32_t p_c[8], uint32_t p_n, uint32_t p_qms, uint32_t p_qmb) {
 	double v = 0.0;
 	for (uint32_t i = 0; i < 8; ++i) {
@@ -228,9 +213,6 @@ double dct_reference(const int32_t p_c[8], uint32_t p_n, uint32_t p_qms, uint32_
 	}
 	return v;
 }
-
-// ---------------------------------------------------------------------------------------------
-// Data-dependent fixtures
 
 std::string env_var(const char *p_name) {
 	char *value = nullptr;
@@ -247,12 +229,10 @@ struct AntData {
 	antdump::OpenedSource opened;
 	AntLibrary library;
 	bool ok = false;
-	std::string why; // when !ok
+	std::string why;
 	const AntPackageSource &source() const { return *opened.source; }
 };
 
-// OPENBF3_ANT_DATA names an export directory: that; else (unset, or no export there) the install. With neither
-// the cases skip; an input that exists but does not open fails.
 AntData *ant_data() {
 	static AntData *data = [] {
 		auto *d = new AntData();
@@ -289,8 +269,6 @@ AntData *ant_data() {
 	return data;
 }
 
-// An optional input of one case is missing (the oracle JSONs, or the export next to the install): the case does
-// not run, but the suite still counts as run (exit 77 is only for "no Ant input at all").
 void optional_input_missing(const char *p_why) {
 	std::printf("NOT RUN: %s\n", p_why);
 }
@@ -304,9 +282,6 @@ AntData *data_or_skip() {
 	return d;
 }
 
-// Packages parsed once per process: the bank case parses every bank and chunk package, and both censuses reuse the
-// ones listed in packages() instead of reading and parsing them again. Keyed by packaging, lowercase name and chunk
-// guid; a package the bank case did not parse is loaded on first use (each case still runs alone).
 struct PackageCache {
 	std::map<std::string, std::unique_ptr<AntPackage>> parsed;
 	std::map<std::string, std::string> errors;
@@ -324,7 +299,6 @@ std::string package_key(const AntPackageInfo &p_info) {
 	return std::to_string(int(p_info.packaging)) + "|" + name + "|" + p_info.streaming_guid;
 }
 
-// The parsed package (null with r_error on failure), parsed on first use.
 const AntPackage *cached_package(const AntData &p_data, const AntPackageInfo &p_info, std::string &r_error) {
 	PackageCache &c = package_cache();
 	const std::string key = package_key(p_info);
@@ -344,8 +318,6 @@ const AntPackage *cached_package(const AntData &p_data, const AntPackageInfo &p_
 	return (c.parsed[key] = std::move(p)).get();
 }
 
-// Both censuses of the source in one pass (antdump::run_censuses: every clip decoded and bound once), shared by the
-// MP and the all-packages census cases.
 struct Censuses {
 	bool ok = false;
 	std::string error;
@@ -364,9 +336,8 @@ const Censuses &censuses(const AntData &p_data) {
 	return s_censuses;
 }
 
-} // namespace
+}
 
-// =============================================================================================
 TEST_SUITE("ant-unit") {
 	TEST_CASE("ant: GenericData archive, fields by name") {
 		const std::vector<uint8_t> bytes = build_package();
@@ -391,7 +362,7 @@ TEST_SUITE("ant-unit") {
 		float f = 0.0f;
 		CHECK_FALSE(o.read_float("Missing", f));
 		std::string_view s;
-		CHECK_FALSE(o.read_string("Count", s)); // wrong type
+		CHECK_FALSE(o.read_string("Count", s));
 	}
 
 	TEST_CASE("ant: malformed packages fail cleanly (truncation and byte flips)") {
@@ -401,7 +372,7 @@ TEST_SUITE("ant-unit") {
 			AntPackage p;
 			CHECK_FALSE(p.parse("t", std::vector<uint8_t>(good.begin(), good.begin() + std::ptrdiff_t(n)), error));
 		}
-		// Every single-byte corruption either fails to parse or yields accessors that stay in bounds.
+
 		for (size_t i = 0; i < good.size(); ++i) {
 			for (uint8_t x : { uint8_t(0xFF), uint8_t(0x80), uint8_t(0x01) }) {
 				std::vector<uint8_t> bad = good;
@@ -418,24 +389,23 @@ TEST_SUITE("ant-unit") {
 			}
 		}
 		AntPackage p;
-		CHECK_FALSE(p.parse("t", { 0, 0, 0, 9 }, error)); // unknown packaging type
-		CHECK_FALSE(p.parse("t", { 0, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, error)); // meta size
+		CHECK_FALSE(p.parse("t", { 0, 0, 0, 9 }, error));
+		CHECK_FALSE(p.parse("t", { 0, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, error));
 	}
 
 	TEST_CASE("ant: DCT codec on synthetic input") {
-		// DOF 0: quaternion with no sub-blocks (constant = DeltaBase / 4096 * 1/4 -> 16384 gives 1.0).
-		// DOF 1: vec3 with 2 sub-blocks; block 0 stores only j=1, block 1 stores j=0 and j=1.
+
 		const uint16_t key_times[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 		const uint8_t desc[2] = { 0x00, 0x20 };
 		const int16_t dx[2] = { 0, 1000 }, dy[2] = { 0, -500 }, dz[2] = { 0, 0 }, dw[2] = { 16384, 0 };
-		// widths: j=0 -> X 6, Y 5, Z 0, W 0 ; j=1 -> X 15 (catch-all = 9), Y 3, Z 2, W 0
+
 		const uint16_t widths[2] = { 0x6500, 0xF320 };
 		BitWriter w;
-		// block 0, dof 1, j=1
+
 		w.put(-200, 9);
 		w.put(3, 3);
 		w.put(-1, 2);
-		// block 1, dof 1, j=0 then j=1
+
 		w.put(-20, 6);
 		w.put(9, 5);
 		w.put(255, 9);
@@ -475,7 +445,7 @@ TEST_SUITE("ant-unit") {
 			CHECK(out.vec3(k, 0).y == doctest::Approx(dct_reference(first ? b0y : b1y, n, 3, 4096)).epsilon(1e-6));
 			CHECK(out.vec3(k, 0).z == doctest::Approx(dct_reference(first ? b0z : b1z, n, 3, 4096)).epsilon(1e-6));
 		}
-		// One byte short: the decoder reports an overrun instead of reading past the data.
+
 		std::vector<uint8_t> shorter(w.bytes.begin(), w.bytes.end() - 1);
 		in.data = shorter;
 		CHECK(decode_dct(in, out).status == AntStatus::Malformed);
@@ -494,7 +464,7 @@ TEST_SUITE("ant-unit") {
 		c.num_floats = 1;
 		c.key_times = { 0, 4 };
 		const float h = float(std::sqrt(0.5));
-		c.quats = { Quat{ 0, 0, 0, 1 }, Quat{ 0, 0, h, h } }; // 0 and 90 degrees about Z
+		c.quats = { Quat{ 0, 0, 0, 1 }, Quat{ 0, 0, h, h } };
 		c.vec3s = { Vec3{ 0, 0, 0 }, Vec3{ 4, 8, -4 } };
 		c.floats = { 1.0f, 3.0f };
 		c.end_frame = 4;
@@ -508,7 +478,7 @@ TEST_SUITE("ant-unit") {
 		CHECK(pose.vec3s[0].x == 0.0f);
 		sample_clip(c, 99.0f, pose);
 		CHECK(pose.vec3s[0].x == 4.0f);
-		sample_clip_seconds(c, 1.0f / 30.0f, 30.0f, pose); // frame 1
+		sample_clip_seconds(c, 1.0f / 30.0f, 30.0f, pose);
 		CHECK(pose.vec3s[0].x == doctest::Approx(1.0));
 		DecodedClip dense;
 		REQUIRE(bake_frames(c, dense).ok());
@@ -525,12 +495,12 @@ TEST_SUITE("ant-unit") {
 		c.quats = { Quat{} };
 		DecodedClip dense;
 		for (uint32_t end : { 0xFFFFFFFFu, 0x7FFFFFFFu, 0x10000u }) {
-			c.end_frame = end; // used to wrap num_keys to 0 and write past key_times (verifier PoC)
+			c.end_frame = end;
 			CHECK(bake_frames(c, dense).status == AntStatus::Malformed);
 			CHECK(dense.num_keys == 0);
 			CHECK(dense.key_times.empty());
 		}
-		c.end_frame = kMaxFrame; // the largest legal range: 65536 frames
+		c.end_frame = kMaxFrame;
 		REQUIRE(bake_frames(c, dense).ok());
 		CHECK(dense.num_keys == 65536);
 		CHECK(dense.key_times.back() == 65535);
@@ -539,8 +509,8 @@ TEST_SUITE("ant-unit") {
 		c.key_times = { 3, 1 };
 		c.num_keys = 2;
 		c.quats = { Quat{}, Quat{} };
-		CHECK(bake_frames(c, dense).status == AntStatus::Malformed); // unsorted key times
-		c.quats = { Quat{} }; // arrays shorter than num_keys * channels
+		CHECK(bake_frames(c, dense).status == AntStatus::Malformed);
+		c.quats = { Quat{} };
 		CHECK_FALSE(c.consistent());
 		CHECK(bake_frames(c, dense).status == AntStatus::Malformed);
 		ClipPose pose;
@@ -552,15 +522,14 @@ TEST_SUITE("ant-unit") {
 	}
 
 	TEST_CASE("ant: DCT 32-bit catch-all coefficient plus DeltaBase does not overflow") {
-		// One vec3 DOF with one sub-block; 9 keys = 2 blocks, so block 1 stores a DC term. X uses the
-		// catch-all width (32 bits) and holds INT32_MAX; DeltaBaseX = 32767 pushes the sum past INT32_MAX.
+
 		const uint16_t key_times[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
 		const uint8_t desc[1] = { 0x10 };
 		const int16_t dx[1] = { 32767 }, dy[1] = { -32768 }, dz[1] = { 0 }, dw[1] = { 0 };
 		const uint16_t widths[1] = { 0xFF00 };
 		BitWriter w;
-		w.put(INT32_MAX, 32); // block 1, X
-		w.put(INT32_MIN, 32); // block 1, Y (catch-all as well)
+		w.put(INT32_MAX, 32);
+		w.put(INT32_MIN, 32);
 		DctInput in;
 		in.num_keys = 9;
 		in.num_vec3s = 1;
@@ -581,11 +550,10 @@ TEST_SUITE("ant-unit") {
 		CHECK(out.vec3(8, 0).x == doctest::Approx((double(INT32_MAX) + 32767.0) * 0.25).epsilon(1e-7));
 		CHECK(out.vec3(8, 0).y == doctest::Approx((double(INT32_MIN) - 32768.0) * 0.25).epsilon(1e-7));
 
-		// KeyTimes must ascend.
 		const uint16_t unsorted[9] = { 0, 1, 2, 3, 5, 4, 6, 7, 8 };
 		in.key_times = unsorted;
 		CHECK(decode_dct(in, out).status == AntStatus::Malformed);
-		// keys * channels is bounded before anything is allocated (2^20 keys * 17 vec3 channels).
+
 		std::vector<uint16_t> many(size_t(1) << 20, 0);
 		in.key_times = many;
 		in.num_keys = uint32_t(many.size());
@@ -596,7 +564,6 @@ TEST_SUITE("ant-unit") {
 	}
 }
 
-// =============================================================================================
 TEST_SUITE("ant") {
 	TEST_CASE("ant: every bank of the export parses") {
 		AntData *d = data_or_skip();
@@ -612,7 +579,7 @@ TEST_SUITE("ant") {
 		const auto t0 = std::chrono::steady_clock::now();
 		for (const AntPackageInfo &info : d->source().all_banks()) {
 			std::string error;
-			// AntPackageAssets go through the cache the censuses reuse; animation-set banks are parsed and dropped.
+
 			std::unique_ptr<AntPackage> own;
 			const AntPackage *p = nullptr;
 			if (info.is_asset_package) {
@@ -648,7 +615,7 @@ TEST_SUITE("ant") {
 		MESSAGE("banks parsed " << parsed << " (" << sets << " animation sets) + " << chunks << " chunks in "
 								<< std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() << " s");
 		CHECK(failed == 0);
-		CHECK(parsed == 397); // 1 static + 233 bundle + 163 animation-set banks
+		CHECK(parsed == 397);
 		CHECK(chunks == 88);
 		CHECK(chunk_ok == 88);
 		CHECK(d->source().packages().size() == 322);
@@ -661,7 +628,7 @@ TEST_SUITE("ant") {
 		}
 		const Censuses &both = censuses(*d);
 		REQUIRE_MESSAGE(both.ok, both.error);
-		antdump::Census c = both.mp; // a copy: the checks below index its maps
+		antdump::Census c = both.mp;
 		MESSAGE(antdump::format_census(c));
 		CHECK(c.packages == 125);
 		CHECK(c.packages_failed == 0);
@@ -685,7 +652,7 @@ TEST_SUITE("ant") {
 		CHECK(c.dct_bitstream_bytes / 1024 == 22863);
 		CHECK(c.raw_exact == 1490);
 		CHECK(c.frame_exact == 659);
-		// §5: every channel of every MP clip with a controller lands on a DOF of its kind.
+
 		CHECK(c.clips_with_controller == 5592);
 		CHECK(c.clips_without_controller == 1);
 		CHECK(c.clips_kind_consistent == 5592);
@@ -697,14 +664,14 @@ TEST_SUITE("ant") {
 		CHECK(c.codecs["RawAnimationAsset"].mapped_perfect == 1490);
 		CHECK(c.codecs["FrameAnimationAsset"].mapped_perfect == 659);
 		CHECK(c.codecs["VbrAnimationAsset"].mapped_perfect == 146);
-		// VBR and Curve report Unsupported explicitly; nothing else fails.
+
 		CHECK(c.codecs["VbrAnimationAsset"].unsupported == 146);
 		CHECK(c.codecs["CurveAnimationAsset"].unsupported == 35);
 		for (const auto &[name, cc] : c.codecs) {
 			CAPTURE(name);
 			CHECK(cc.errors == 0);
-			CHECK(cc.key_count_mismatch == 0); // decoded frames == header key count for every clip
-			CHECK(cc.non_unit_quats == 0); // every rotation unit length within 1e-4
+			CHECK(cc.key_count_mismatch == 0);
+			CHECK(cc.non_unit_quats == 0);
 		}
 	}
 
@@ -715,7 +682,7 @@ TEST_SUITE("ant") {
 		}
 		const Censuses &both = censuses(*d);
 		REQUIRE_MESSAGE(both.ok, both.error);
-		antdump::Census c = both.all; // a copy: the checks below index its maps
+		antdump::Census c = both.all;
 		MESSAGE(antdump::format_census(c));
 		CHECK(c.packages == 321);
 		CHECK(c.packages_failed == 0);
@@ -731,7 +698,7 @@ TEST_SUITE("ant") {
 		CHECK(c.dct_datasize_residual[1] == 3596);
 		CHECK(c.dct_bitstream_bytes / 1024 == 37467);
 		CHECK(c.raw_exact == 1522);
-		CHECK(c.raw_padded == 12); // the probe's "other 12": float block padded to 4 per key
+		CHECK(c.raw_padded == 12);
 		CHECK(c.frame_exact == 660);
 		CHECK(c.bind_errors == 0);
 		CHECK(c.channels_ok == c.channels_total);
@@ -756,7 +723,7 @@ TEST_SUITE("ant") {
 		DecodedClip idle, undeploy;
 		REQUIRE(decode_clip(AntLibrary::find_clip(*m9, "IdlePose Anim"), idle).ok());
 		REQUIRE(decode_clip(AntLibrary::find_clip(*m9, "Undeploy Anim"), undeploy).ok());
-		CHECK(undeploy.key_times == std::vector<uint16_t>{ 0, 2, 3, 4, 5, 6, 7, 9, 10 }); // sparse keys (§4.1)
+		CHECK(undeploy.key_times == std::vector<uint16_t>{ 0, 2, 3, 4, 5, 6, 7, 9, 10 });
 		REQUIRE(idle.num_quats == undeploy.num_quats);
 		double max_deg = 0.0, max_mm = 0.0;
 		for (uint32_t q = 0; q < idle.num_quats; ++q) {
@@ -769,7 +736,7 @@ TEST_SUITE("ant") {
 		MESSAGE("Undeploy frame 0 vs IdlePose: max " << max_deg << " deg, " << max_mm << " mm (probe: 0.07 deg, 0.4 mm)");
 		CHECK(max_deg < 0.1);
 		CHECK(max_mm < 0.5);
-		// Sampling at a key time returns the key; frame 1 lies halfway between keys 0 (frame 0) and 1 (frame 2).
+
 		ClipPose pose;
 		sample_clip(undeploy, 2.0f, pose);
 		CHECK(quat_angle_deg(pose.quats[5], undeploy.quat(1, 5)) < 1e-3);
@@ -874,7 +841,6 @@ TEST_SUITE("ant") {
 		CHECK(true);
 	}
 
-	// M0 exit: the next wave plays this clip on a Skeleton3D (tools/antdump/README.md "M9 1P empty reload").
 	TEST_CASE("ant: M9 1P ReloadEmpty decodes and binds to the 1P rig") {
 		AntData *d = data_or_skip();
 		if (!d) {
@@ -914,7 +880,7 @@ TEST_SUITE("ant") {
 		CHECK(b.rig->name == "Venice1pAntSke01");
 		CHECK(b.rig->joints.size() == 181);
 		REQUIRE(b.tracks.size() == 135);
-		// Every channel lands on a joint of the 1P rig, on a DOF of its own kind; no joint is driven twice per kind.
+
 		std::set<std::pair<int32_t, char>> driven;
 		uint32_t on_joint = 0;
 		for (const ChannelTrack &t : b.tracks) {
@@ -925,14 +891,14 @@ TEST_SUITE("ant") {
 		CHECK(driven.size() == 135);
 		CHECK(b.kind_mismatches == 0);
 		CHECK(b.delta_traj_channels == 0);
-		// The weapon parts that move in the reload are joints of the 1P rig (the m9 mesh skins to them by name).
+
 		for (std::string_view joint : { "Wep_Root", "Wep_Slide", "Wep_Mag", "LeftHand", "RightHand", "CameraJoint" }) {
 			CAPTURE(joint);
 			const int32_t j = b.rig->find_joint(joint);
 			CHECK(j >= 0);
 			CHECK(driven.contains({ j, 'q' }));
 		}
-		// The clip ends where it starts: last key vs first key, every rotation (the reload returns to idle).
+
 		double max_deg = 0.0;
 		for (uint32_t q = 0; q < c.num_quats; ++q) {
 			max_deg = std::max(max_deg, quat_angle_deg(c.quat(0, q), c.quat(c.num_keys - 1, q)));
@@ -941,7 +907,6 @@ TEST_SUITE("ant") {
 		CHECK(max_deg < 1.0);
 	}
 
-	// The install source selects exactly what the research export holds (runs when both are present).
 	TEST_CASE("ant: the install source equals the export directory") {
 		const std::string dir = env_var("OPENBF3_ANT_DATA");
 		antdump::OpenedSource exported, install;
@@ -960,7 +925,7 @@ TEST_SUITE("ant") {
 		CHECK(r.packages_a == 322);
 		CHECK(r.banks_a == 397);
 		CHECK(r.ok());
-		// Payload bytes of the packages the M0 tests lean on (the antdump parity command compares all of them).
+
 		for (const char *name : { "s_basicassets", "b_basicassetsmp", "m9" }) {
 			CAPTURE(name);
 			const AntPackageInfo *a = install.source->find(name), *b = exported.source->find(name);

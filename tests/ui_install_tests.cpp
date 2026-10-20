@@ -1,10 +1,3 @@
-// UI ui2 readers on the retail install (read-only; docs/design/ui-minimap-icons.md §1, §13). Each suite skips (exit 77)
-// without an install and ends with install.unchanged (gate G13).
-//   suite "ui-minimap"     (ctest ui.minimap):      G1 minimap.reference, G2 minimap.all_levels, G3 minimap.masks,
-//                                                   G4 minimap.objectives, G5 minimap.orientation
-//   suite "ui-hud-icons"   (ctest ui.hud.icons):    G6 icons.atlas, G7 icons.weapons
-//   suite "ui-hud-sources" (ctest ui.hud.sources):  G8 hud.sources, hud.bindings
-// Only counts, sizes and names are asserted; no install bytes are stored.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx_db.h"
@@ -50,7 +43,6 @@ struct LevelMinimap {
 	std::string error;
 };
 
-// UIMinimapData of levels/<l>/<l> through a lazy library over the level superbundle, and its satellite decoded.
 LevelMinimap read_level_minimap(const std::shared_ptr<Install> &p_install, const Level &p_level) {
 	LevelMinimap out;
 	Result<std::unique_ptr<EbxLibrary>> lib = EbxLibrary::open(p_install, { p_level.superbundle });
@@ -84,7 +76,7 @@ LevelMinimap read_level_minimap(const std::shared_ptr<Install> &p_install, const
 struct ModeMinimap {
 	MinimapLevel level;
 	MinimapImages images;
-	std::vector<bool> inside; // union of the masks
+	std::vector<bool> inside;
 	uint32_t side = 0;
 };
 
@@ -110,7 +102,6 @@ ModeMinimap load_mode(const std::shared_ptr<Install> &p_install, std::string_vie
 	return out;
 }
 
-// Objectives inside the union through mapping variant p_variant.
 size_t objectives_inside(const ModeMinimap &p_m, uint8_t p_variant) {
 	const MinimapMapping mapping = minimap_mapping(p_m.level.data);
 	size_t n = 0;
@@ -131,7 +122,7 @@ std::shared_ptr<Install> install_or_skip() {
 	return f != nullptr ? f->install : nullptr;
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-minimap") {
 	TEST_CASE("G1 minimap.reference: Metro, Caspian, Bazaar") {
@@ -217,7 +208,7 @@ TEST_SUITE("ui-minimap") {
 		if (!install) {
 			return;
 		}
-		// Caspian ConquestSmall0 places 4 flags and 2 HQs; its 5-flag layout (gap UI's "7 / 7") is ConquestLarge0 (C7).
+
 		const ModeMinimap metro = load_mode(install, "MP_Subway", "ConquestSmall0");
 		const ModeMinimap caspian = load_mode(install, "MP_007", "ConquestSmall0");
 		const ModeMinimap caspian_large = load_mode(install, "MP_007", "ConquestLarge0");
@@ -338,7 +329,7 @@ TEST_SUITE("ui-hud-icons") {
 		if (local_default != nullptr && !local_default->frames.empty()) {
 			lr = hud_icon_rect(local_default->frames[0], img->width, img->height);
 		}
-		// Every icon the minimap and world icons draw (design §10.2) resolves with its state.
+
 		bool drawn = true;
 		for (const auto &[name, state] : { std::pair{ "UIHudIcon_LocalPlayer", HudIconState::Default }, std::pair{ "UIHudIcon_Player", HudIconState::Enemy },
 					 std::pair{ "UIHudIcon_NeutralFlag", HudIconState::Neutral }, std::pair{ "UIHudIcon_FriendlyFlag", HudIconState::Friendly },
@@ -375,7 +366,7 @@ TEST_SUITE("ui-hud-icons") {
 		const std::vector<std::string> variants = gameplay::list_weapon_variants(**lvl);
 		Result<ItemIconIndex> index = ItemIconIndex::read(**ui);
 		REQUIRE_MESSAGE(index.ok(), (index.ok() ? std::string() : index.error().message));
-		// The index is sorted by id and find() agrees with a linear search.
+
 		bool sorted = std::is_sorted(index->icons().begin(), index->icons().end(), [](const ItemIcon &a, const ItemIcon &b) { return a.item_id < b.item_id; });
 		size_t weapon = 0, kit = 0, name_matches = 0;
 		std::map<std::string, size_t> formats;

@@ -1,10 +1,3 @@
-// Suite sim-nav-unit (no data; spike S1, docs/design/s1.md §5, §9, §10): the navmesh on synthetic worlds. A floor
-// is one component across tile seams; a 0.9 m door closes with Recast's ceil radius and opens with round-to-nearest;
-// a 1.5 m ceiling gives crouch area; a 0.29 m step joins and a 0.45 m one does not; a 3 m ledge gets drop links and
-// the components are one way; a 200 m slab filed under one tile walks in every tile it covers and the input equals
-// the cooked world's triangles; the border rule; the link-check pool on 16 lanes; Raycast never enters; determinism;
-// blob round trips, truncations and 2,000 mutated tile blobs; hostile inputs; cache keys; cold / warm on a scratch
-// root; nav_components against a brute-force SCC; NavQuery and NavCorridor.
 #include <doctest/doctest.h>
 
 #include "nav_internal.h"
@@ -48,34 +41,29 @@ void add_quad(std::vector<StaticTriangle> &r_out, const Vec3 &p_a, const Vec3 &p
 	r_out.push_back(t);
 }
 
-// A floor at p_y over [x0, x1] x [z0, z1] (front face up).
 void add_floor(std::vector<StaticTriangle> &r_out, float p_x0, float p_z0, float p_x1, float p_z1, float p_y, StaticLayer p_layer = StaticLayer::Collision) {
 	add_quad(r_out, { p_x0, p_y, p_z0 }, { p_x0, p_y, p_z1 }, { p_x1, p_y, p_z1 }, { p_x1, p_y, p_z0 }, p_layer);
 }
 
-// A closed box (6 faces, outward).
 void add_box(std::vector<StaticTriangle> &r_out, const Vec3 &p_min, const Vec3 &p_max, StaticLayer p_layer = StaticLayer::Collision) {
 	const float x0 = p_min[0], y0 = p_min[1], z0 = p_min[2], x1 = p_max[0], y1 = p_max[1], z1 = p_max[2];
-	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 }, p_layer); // top
-	add_quad(r_out, { x0, y0, z0 }, { x1, y0, z0 }, { x1, y0, z1 }, { x0, y0, z1 }, p_layer); // bottom
-	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 }, p_layer); // -z
-	add_quad(r_out, { x0, y0, z1 }, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, p_layer); // +z
-	add_quad(r_out, { x0, y0, z0 }, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, p_layer); // -x
-	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 }, p_layer); // +x
+	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x1, y0, z0 }, { x1, y0, z1 }, { x0, y0, z1 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 }, p_layer);
+	add_quad(r_out, { x0, y0, z1 }, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, p_layer);
+	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 }, p_layer);
 }
 
-// A block standing on the ground: top and four sides, no bottom (a closed box would rasterise its inside as a
-// floor with room above it: Recast sees surfaces, not volumes).
 void add_block(std::vector<StaticTriangle> &r_out, const Vec3 &p_min, const Vec3 &p_max, StaticLayer p_layer = StaticLayer::Collision) {
 	const float x0 = p_min[0], y0 = p_min[1], z0 = p_min[2], x1 = p_max[0], y1 = p_max[1], z1 = p_max[2];
-	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 }, p_layer); // top
-	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 }, p_layer); // -z
-	add_quad(r_out, { x0, y0, z1 }, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, p_layer); // +z
-	add_quad(r_out, { x0, y0, z0 }, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, p_layer); // -x
-	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 }, p_layer); // +x
+	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 }, p_layer);
+	add_quad(r_out, { x0, y0, z1 }, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, p_layer);
+	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 }, p_layer);
 }
 
-// Ground at p_y over [x0, x1] x [z0, z1] with rectangular holes (where blocks stand), as grid quads.
 struct Rect {
 	float x0, z0, x1, z1;
 };
@@ -123,7 +111,6 @@ std::shared_ptr<const NavWorld> bake(const std::vector<StaticTriangle> &p_tris, 
 	return *w;
 }
 
-// Strongly connected components with walkable area (an off-mesh link poly is an SCC of its own with no area).
 size_t ground_sccs(const NavComponents &p_c) {
 	size_t n = 0;
 	for (double a : p_c.area) {
@@ -132,7 +119,6 @@ size_t ground_sccs(const NavComponents &p_c) {
 	return n;
 }
 
-// The component of the poly under (x, z) near height y (UINT32_MAX when none within 0.5 m horizontally).
 NavPointCheck at(const NavWorld &p_world, const NavComponents &p_c, float p_x, float p_y, float p_z) {
 	return nav_check_point(p_world, p_c, { p_x, p_y, p_z }, { 0.5f, 1.0f, 0.5f });
 }
@@ -177,8 +163,6 @@ struct Scratch {
 	}
 };
 
-// The brute-force SCC of the same directed graph nav_components reads (every Detour link of every poly): u and v
-// share a component when each reaches the other (BFS from every poly).
 std::vector<uint32_t> brute_scc(const NavWorld &p_world) {
 	const NavWorld::Impl &w = p_world.impl();
 	const size_t n = w.polys;
@@ -228,7 +212,6 @@ std::vector<uint32_t> brute_scc(const NavWorld &p_world) {
 	return comp;
 }
 
-// Same partition (component ids may differ).
 bool same_partition(const std::vector<uint32_t> &p_a, const std::vector<uint32_t> &p_b) {
 	if (p_a.size() != p_b.size()) {
 		return false;
@@ -244,19 +227,18 @@ bool same_partition(const std::vector<uint32_t> &p_a, const std::vector<uint32_t
 	return true;
 }
 
-// A world of platforms at several heights on one floor: steps, ledges (drop links), a raised island with no way up.
 std::vector<StaticTriangle> terraces() {
 	std::vector<StaticTriangle> t;
 	const std::vector<Rect> blocks{ { 8, 8, 24, 24 }, { 40, 8, 56, 24 }, { 72, 8, 88, 56 }, { 100, 30, 120, 50 } };
 	add_ground(t, 0, 0, 128, 64, 0.0f, blocks);
-	add_block(t, { 8, 0, 8 }, { 24, 3.0f, 24 }); // a 3 m block: drop links down, no way up
-	add_block(t, { 40, 0, 8 }, { 56, 0.25f, 24 }); // a step: joined both ways
-	add_block(t, { 72, 0, 8 }, { 88, 2.0f, 56 }); // a 2 m block
-	add_block(t, { 100, 0, 30 }, { 120, 4.5f, 50 }); // 4.5 m: drops still within drop_max
+	add_block(t, { 8, 0, 8 }, { 24, 3.0f, 24 });
+	add_block(t, { 40, 0, 8 }, { 56, 0.25f, 24 });
+	add_block(t, { 72, 0, 8 }, { 88, 2.0f, 56 });
+	add_block(t, { 100, 0, 30 }, { 120, 4.5f, 50 });
 	return t;
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-nav-unit") {
 	TEST_CASE("sim.nav.unit: a floor over four tiles is one component; the seams join; the debug mesh covers it") {
@@ -269,7 +251,7 @@ TEST_SUITE("sim-nav-unit") {
 		const NavComponents c = nav_components(*w);
 		CHECK(ground_sccs(c) == 1);
 		CHECK(c.weak_count == 1);
-		// Area: 128^2 minus the 0.5 m erosion along the outer edge, roughly.
+
 		CHECK(c.area[c.largest] > 0.95 * 127.0 * 127.0);
 		CHECK(c.area[c.largest] < 128.0 * 128.0);
 		const NavPointCheck p = at(*w, c, 63.9f, 0.0f, 64.1f);
@@ -279,7 +261,7 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(!dm.triangles.empty());
 		CHECK(dm.triangles.size() == dm.triangle_component.size() * 3);
 		CHECK(dm.links.empty());
-		// Each tile's input holds both slab triangles that reach it (the bbox gather).
+
 		for (size_t i = 0; i < w->tile_count(); ++i) {
 			CHECK(w->tile(i).input_triangles >= 2);
 			CHECK(w->tile(i).polys > 0);
@@ -289,13 +271,13 @@ TEST_SUITE("sim-nav-unit") {
 	TEST_CASE("sim.nav.unit: a 0.9 m door is closed with Recast's ceil radius (0.5 m) and open with round to nearest (0.25 m)") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, 0, 0, 64, 64, 0.0f);
-		// A 0.2 m wall at x = 32 across the tile, with a door z in [29.95, 30.85] (0.9 m).
+
 		add_box(t, { 31.9f, 0.0f, -1.0f }, { 32.1f, 3.0f, 29.95f });
 		add_box(t, { 31.9f, 0.0f, 30.85f }, { 32.1f, 3.0f, 65.0f });
 		const auto tiles = tiles_range(0, 0, 0, 0);
 		NavBakeOptions o;
 		o.params.drop_links = false;
-		o.params.cell_size = 0.25f; // the rounding case: 1.4 cells (the default 0.2 m gives 2 cells either way)
+		o.params.cell_size = 0.25f;
 		o.params.radius_round_up = true;
 		const auto closed = bake(t, tiles, o);
 		const NavComponents cc = nav_components(*closed);
@@ -316,7 +298,7 @@ TEST_SUITE("sim-nav-unit") {
 	TEST_CASE("sim.nav.unit: a 1.5 m ceiling gives crouch area; the slab top is walk area") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, 0, 0, 64, 64, 0.0f);
-		add_box(t, { 10, 1.5f, 10 }, { 30, 1.7f, 50 }); // room under it: 1.5 m (crouch 1.15 <= room < stand 1.8)
+		add_box(t, { 10, 1.5f, 10 }, { 30, 1.7f, 50 });
 		const auto w = bake(t, tiles_range(0, 0, 0, 0));
 		CHECK(polys_with_area(*w, kNavAreaCrouch) > 0);
 		CHECK(polys_with_area(*w, kNavAreaWalk) > 0);
@@ -332,7 +314,7 @@ TEST_SUITE("sim-nav-unit") {
 		REQUIRE(top.poly != 0);
 		nav_poly_area_flags(*w, top.poly, &area, &flags);
 		CHECK(area == kNavAreaWalk);
-		// The crouch passage joins the open floor (one weak and one strong component, apart from the slab top).
+
 		const NavPointCheck open = at(*w, c, 50, 0, 30);
 		CHECK(open.component == under.component);
 	}
@@ -354,7 +336,7 @@ TEST_SUITE("sim-nav-unit") {
 				CHECK(w->stats().drop_links == 0);
 			} else {
 				CHECK(lo.component != hi.component);
-				CHECK(lo.weak_component == hi.weak_component); // the drop links join them one way
+				CHECK(lo.weak_component == hi.weak_component);
 				CHECK(w->stats().drop_links > 0);
 			}
 		}
@@ -367,7 +349,7 @@ TEST_SUITE("sim-nav-unit") {
 		const auto tiles = tiles_range(0, 0, 0, 0);
 		const auto w = bake(t, tiles);
 		CHECK(w->stats().drop_links >= 1);
-		CHECK(w->stats().link_sweeps == 0); // no link_shapes: every candidate kept (synthetic only)
+		CHECK(w->stats().link_sweeps == 0);
 		const NavComponents c = nav_components(*w);
 		CHECK(ground_sccs(c) == 2);
 		CHECK(c.weak_count == 1);
@@ -376,7 +358,6 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(top.weak_component == ground.weak_component);
 		CHECK(c.largest == ground.component);
 
-		// With the link checks on a static world built from the same triangles: the same links survive...
 		core::Result<std::shared_ptr<const StaticWorldShapes>> shapes = build_static_world(std::span<const StaticTriangle>(t));
 		REQUIRE(shapes.ok());
 		NavBakeOptions o;
@@ -387,7 +368,7 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(checked->stats().link_sweeps == 2 * checked->stats().link_candidates);
 		CHECK(checked->stats().links_rejected == 0);
 		CHECK(checked->stats().link_worlds == 1);
-		// ...and a Collision bar 1 m high hanging just beyond the -x edge blocks that side's links (the out sweep hits it).
+
 		std::vector<StaticTriangle> railed = t;
 		add_box(railed, { 19.6f, 3.0f, 20.0f }, { 19.7f, 4.0f, 40.0f });
 		core::Result<std::shared_ptr<const StaticWorldShapes>> rail_shapes = build_static_world(std::span<const StaticTriangle>(railed));
@@ -398,12 +379,11 @@ TEST_SUITE("sim-nav-unit") {
 		const auto rail_checked = bake(railed, tiles, o);
 		CHECK(rail_checked->stats().links_rejected > 0);
 		CHECK(rail_checked->stats().drop_links < rail_unchecked->stats().drop_links);
-		CHECK(rail_checked->stats().drop_links > 0); // the other three sides keep theirs
+		CHECK(rail_checked->stats().drop_links > 0);
 	}
 
 	TEST_CASE("sim.nav.unit: a 200 m slab filed under one tile walks in every tile it covers; the input equals the cooked world (no world_only)") {
-		// Two triangles over x, z in [-100, 100]: the soup files each under its centroid's tile ((-1, -1) and (0, 0)),
-		// so tile (1, -2) sees them only through the bbox gather (revision 1's 3 x 3 gather would leave it empty).
+
 		std::vector<StaticTriangle> t;
 		add_floor(t, -100, -100, 100, 100, 0.0f);
 		const auto tiles = tiles_range(-2, -2, 1, 1);
@@ -413,7 +393,7 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(w->stats().far_triangles > 0);
 		const NavComponents c = nav_components(*w);
 		CHECK(ground_sccs(c) == 1);
-		const NavPointCheck far_point = at(*w, c, 90.0f, 0.0f, -90.0f); // tile (1, -2)
+		const NavPointCheck far_point = at(*w, c, 90.0f, 0.0f, -90.0f);
 		CHECK(far_point.poly != 0);
 		core::Result<std::shared_ptr<const StaticWorldShapes>> shapes = build_static_world(std::span<const StaticTriangle>(t));
 		REQUIRE(shapes.ok());
@@ -440,14 +420,14 @@ TEST_SUITE("sim-nav-unit") {
 			return (*in)[0].digest;
 		};
 		CHECK(nav_input_border(NavParams()) == doctest::Approx(2.05f));
-		CHECK(nav_input_border(NavParams()) > float(nav_recast_border_cells(NavParams())) * NavParams().cell_size); // the sweep term is the larger one
+		CHECK(nav_input_border(NavParams()) > float(nav_recast_border_cells(NavParams())) * NavParams().cell_size);
 		const core::Sha256Digest d0 = digest_of(base);
 		std::vector<StaticTriangle> near_wall = base, far_wall = base;
-		add_box(near_wall, { 66.0f, -3.0f, 10.0f }, { 66.1f, 1.0f, 50.0f }); // its box starts 2.0 m past the edge
+		add_box(near_wall, { 66.0f, -3.0f, 10.0f }, { 66.1f, 1.0f, 50.0f });
 		add_box(far_wall, { 66.2f, -3.0f, 10.0f }, { 66.3f, 1.0f, 50.0f });
 		CHECK(!(digest_of(near_wall) == d0));
 		CHECK(digest_of(far_wall) == d0);
-		// The tile key is part of the digest: one slab is the whole input of two tiles, the digests differ.
+
 		std::vector<StaticTriangle> slab;
 		add_floor(slab, -10, -10, 138, 74, 0.0f);
 		core::Result<std::vector<NavTileInput>> two =
@@ -460,8 +440,8 @@ TEST_SUITE("sim-nav-unit") {
 	TEST_CASE("sim.nav.unit: the input set is the motor's: a Raycast box never enters the nav (kMovement), it blocks only with kAll") {
 		std::vector<StaticTriangle> t;
 		add_ground(t, 0, 0, 64, 64, 0.0f, { { 40.1f, 40.1f, 43.9f, 43.9f } });
-		add_block(t, { 20.1f, 0, -2 }, { 21.9f, 3, 66 }, StaticLayer::Raycast); // a see-through wall across the tile
-		add_block(t, { 40.1f, 0, 40.1f }, { 43.9f, 2, 43.9f }, StaticLayer::Character); // a PLAYERCLIP block
+		add_block(t, { 20.1f, 0, -2 }, { 21.9f, 3, 66 }, StaticLayer::Raycast);
+		add_block(t, { 40.1f, 0, 40.1f }, { 43.9f, 2, 43.9f }, StaticLayer::Character);
 		core::Result<std::vector<NavTileInput>> in = nav_tile_inputs_triangles(t, std::vector<NavTileKey>{ { 0, 0 } }, NavParams(), query_mask::kMovement, 1);
 		REQUIRE(in.ok());
 		size_t raycast = 0, character = 0;
@@ -476,8 +456,7 @@ TEST_SUITE("sim-nav-unit") {
 		const NavComponents mc = nav_components(*movement);
 		CHECK(at(*movement, mc, 10, 0, 32).component == at(*movement, mc, 32, 0, 32).component);
 		{
-			// Under the PLAYERCLIP block: nothing. Detour may return a ground poly around the hole whose bounds
-			// overlap the box; its closest point is then outside the block (1-cell radius, docs §5.7).
+
 			const NavPointCheck u = at(*movement, mc, 42, 0, 42);
 			INFO("nearest ", u.nearest[0], " ", u.nearest[1], " ", u.nearest[2]);
 			CHECK((u.poly == 0 || u.horizontal > 1.5f));
@@ -486,10 +465,9 @@ TEST_SUITE("sim-nav-unit") {
 		all.layer_mask = query_mask::kAll;
 		const auto with_raycast = bake(t, tiles, all);
 		const NavComponents ac = nav_components(*with_raycast);
-		// With Raycast in the input the wall splits the floor: its top (3 m) drops to both sides, so the two halves
-		// are one weak component but two SCCs.
+
 		CHECK(at(*with_raycast, ac, 10, 0, 32).component != at(*with_raycast, ac, 32, 0, 32).component);
-		// The movement input matches the cooked world on the movement layers, and the Raycast shape is not in it.
+
 		core::Result<std::shared_ptr<const StaticWorldShapes>> shapes = build_static_world(std::span<const StaticTriangle>(t));
 		REQUIRE(shapes.ok());
 		core::Result<NavInputCheck> chk = nav_check_input_against_world(**shapes, (*in)[0], NavParams());
@@ -541,7 +519,7 @@ TEST_SUITE("sim-nav-unit") {
 		std::set<uint32_t> weak(c.weak_component.begin(), c.weak_component.end());
 		CHECK(weak.size() == c.weak_count);
 		CHECK(*weak.rbegin() == c.weak_count - 1);
-		// The 3 m, 2 m and 4.5 m blocks are separate SCCs (drops only); the 0.25 m step is part of the floor.
+
 		CHECK(ground_sccs(c) == 4);
 		const NavPointCheck ground = at(*w, c, 64, 0, 60), step = at(*w, c, 48, 0.25f, 16);
 		CHECK(ground.component == step.component);
@@ -584,8 +562,8 @@ TEST_SUITE("sim-nav-unit") {
 		const uint32_t n = corridor.corners(query, corners, kMaxNavCorners);
 		CHECK(n >= 1);
 		CHECK(corridor.move_position(query, { pa[0] + 0.5f, pa[1], pa[2] - 0.5f }));
-		CHECK(!corridor.move_position(query, { 64, 0, 200 })); // far off the corridor: left it
-		// The 3 m block's top is another SCC: a path from the floor up to it is partial.
+		CHECK(!corridor.move_position(query, { 64, 0, 200 }));
+
 		NavPolyRef top = 0;
 		Vec3 ptop{};
 		REQUIRE(query.nearest({ 16, 3, 16 }, { 1, 1, 1 }, &top, &ptop));
@@ -596,7 +574,7 @@ TEST_SUITE("sim-nav-unit") {
 			st = query.continue_path(64, nullptr);
 		}
 		CHECK(query.finish_path(polys) == NavPathStatus::Partial);
-		// From the top down is possible (drop links), and the corners show the drop.
+
 		CHECK(query.begin_path(top, ptop, a, pa) == NavPathStatus::InProgress);
 		st = NavPathStatus::InProgress;
 		for (int i = 0; i < 1000 && st == NavPathStatus::InProgress; ++i) {
@@ -610,7 +588,7 @@ TEST_SUITE("sim-nav-unit") {
 			has_drop = has_drop || (corners[i].flags & nav_flags::kDrop) != 0;
 		}
 		CHECK(has_drop);
-		// Random points stay in their component and are deterministic per seed.
+
 		uint64_t rng = 7, rng2 = 7;
 		for (int i = 0; i < 200; ++i) {
 			NavPolyRef p = 0, p2 = 0;
@@ -658,7 +636,7 @@ TEST_SUITE("sim-nav-unit") {
 			std::vector<uint8_t> data;
 			CHECK(!decode_nav_tile(longer, w->params(), info, data).ok());
 		}
-		// Mutations: random bytes anywhere; whatever loads must query cleanly (also under asan).
+
 		std::mt19937_64 rng(12345);
 		size_t loaded = 0, rejected = 0;
 		for (int round = 0; round < 2000; ++round) {
@@ -738,23 +716,23 @@ TEST_SUITE("sim-nav-unit") {
 		}
 		std::vector<StaticTriangle> t;
 		add_floor(t, 0, 0, 64, 64, 0.0f);
-		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), std::vector<NavTileKey>{ { 1, 0 }, { 0, 0 } }).ok()); // unsorted
-		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), std::vector<NavTileKey>{ { 1 << 22, 0 } }).ok()); // out of range
+		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), std::vector<NavTileKey>{ { 1, 0 }, { 0, 0 } }).ok());
+		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), std::vector<NavTileKey>{ { 1 << 22, 0 } }).ok());
 		NavBakeOptions bad;
-		bad.params.agent_climb = 0.3004f; // 3.004 cells: not whole
+		bad.params.agent_climb = 0.3004f;
 		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), tiles_range(0, 0, 0, 0), bad).ok());
 		bad.params = NavParams();
-		bad.params.cell_size = 0.3f; // does not divide 64 m
+		bad.params.cell_size = 0.3f;
 		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), tiles_range(0, 0, 0, 0), bad).ok());
 		CHECK(nav_cells(NavParams()).walkable_climb == 3);
-		CHECK(nav_cells(NavParams()).walkable_radius == 2); // ceil(0.35 / 0.2): 0.4 m (docs §5.7 as built)
+		CHECK(nav_cells(NavParams()).walkable_radius == 2);
 		NavParams q;
 		q.radius_round_up = false;
-		CHECK(nav_cells(q).walkable_radius == 2); // 1.75 rounds to 2 as well
+		CHECK(nav_cells(q).walkable_radius == 2);
 		q.cell_size = 0.25f;
-		CHECK(nav_cells(q).walkable_radius == 1); // 1.4 -> 1
+		CHECK(nav_cells(q).walkable_radius == 1);
 		q.radius_round_up = true;
-		CHECK(nav_cells(q).walkable_radius == 2); // 1.4 -> 2: 0.5 m
+		CHECK(nav_cells(q).walkable_radius == 2);
 	}
 
 	TEST_CASE("sim.nav.unit: cache keys change with the input, the params and the link check; cold then warm tiles on a scratch root") {

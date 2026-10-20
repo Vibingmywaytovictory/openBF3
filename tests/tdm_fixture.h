@@ -1,27 +1,4 @@
 #pragma once
-// The M2b TDM test fixture (docs/design/m2b.md §1, §2.6 #21, §11; declared in W1.0, docs/design/m2b-w1.md). ru writes
-// the bodies (its host.tdm.server cases need them first); bb adds counters to TdmRunResult and its run in a block
-// headed "// M2b bb" at the end of this file. m2b.contract compiles it and calls nothing in it.
-//
-// The headless host.tdm.* rows step the real GameServer back to back on the test thread, as M2a's run_firefight does
-// (bf3/host/firefight_run.h: no ServerHost, no sockets, no wall-clock wait), with a datagram-level scripted peer:
-//   load_tdm_level_once  the shared Metro TDM level, once per process: load_shared_level with SharedLoadOptions::gunplay
-//                        and ::tdm (the logic graph, the TDM kits, the immunity abort) and S1's BotLevel (nav through the
-//                        cache). Read-only on the install (InstallReader / Install, the install.unchanged check below);
-//                        skips the case (exit 77) without an install. Needs OPENBF3_MOTOR_TUNING_CFG like
-//                        gunplay_fixture.h.
-//   ScriptedPeer         one peer on GameServer::on_connect / on_receive: Hello, Ready, SpawnRequest, KitSelect, Debug
-//                        and CommandPackets stamped for the tick about to run (delivered before the tick, so the jitter
-//                        buffer and the simulation never depend on the wall clock, m2b.md §9.2); it decodes MatchInfo,
-//                        MatchState, PlayerList, Spawned, CombatEvents and its snapshots from the tick's OutDatagrams.
-//   run_tdm              GameServer::init with GameServerConfig::rules (Tdm), tdm_bots and bots (count 0: the BotLevel
-//                        for walking), the optional peer, then tick() back to back on the caller's thread until
-//                        RoundOver + after_round_ticks or max_ticks (a hard stop: the row fails as a bot behaviour bug).
-// Until a part lands (the v3 codecs: nt; the rules: ru; the brains: bb), a case that needs it uses a test-local fake in
-// namespace m2b_fake, never a real symbol (m2b.md §11).
-//
-// Everything here is declared only in W1.0. ru defines it, inline in this header (several executables may include it)
-// or in a tests/tdm_fixture.cpp listed with test_host_tdm.
 
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
@@ -48,49 +25,46 @@
 
 namespace bf3::test::tdm {
 
-// The shared level of one process (load_tdm_level_once).
 struct TdmLevel {
 	std::unique_ptr<core::InstallReader> reader;
 	std::shared_ptr<core::Install> install;
-	core::InstallSnapshot before; // the install.unchanged check
-	std::shared_ptr<const host::SharedLevel> shared; // gunplay + logic + TDM kits + immunity abort
-	std::shared_ptr<const host::BotLevel> bots; // S1's nav, main-component spawn list
+	core::InstallSnapshot before;
+	std::shared_ptr<const host::SharedLevel> shared;
+	std::shared_ptr<const host::BotLevel> bots;
 	std::filesystem::path cache_root;
 	double seconds_load = 0;
 };
-// Null (and the case marked skipped, exit 77) without an install. Loaded on the first call, then shared.
+
 TdmLevel *load_tdm_level_once();
-// The install-unchanged check (call it in the last install case of an executable).
+
 void check_install_unchanged(TdmLevel &r_level);
 
-// A datagram-level peer (no ENet): what a ClientSession would send and receive, scripted.
 class ScriptedPeer {
 public:
 	ScriptedPeer(host::GameServer &r_server, uint32_t p_peer, std::string p_name = "peer");
-	// Requests (each goes through GameServer::on_receive at once, channel 1).
-	void hello(); // Hello {kProtocolVersion, name}: the server answers MatchInfo
+
+	void hello();
 	void ready();
 	void spawn_request(uint8_t p_kit, uint8_t p_spawn_choice = 0);
 	void kit_select(const net::KitSelect &p_select);
 	void debug(const net::DebugRequest &p_request);
-	// One command for the tick about to run (GameServer::current_tick() + 1), channel 0.
+
 	void command(sim::Command p_command);
-	// Decodes the OutDatagrams of one tick addressed to this peer (others are ignored).
+
 	void receive(std::span<const host::OutDatagram> p_out);
 
 	uint32_t peer() const { return peer_; }
-	int slot() const; // from MatchInfo; -1 before it
+	int slot() const;
 
-	// What arrived (newest last; bounded by the run's length).
 	std::optional<net::MatchInfo> match_info;
-	std::optional<net::MatchState> match_state; // the latest
-	std::vector<net::MatchState> match_states; // every one, in order (E6 hashes their bytes)
-	std::vector<net::PlayerRow> players; // the applied PlayerList (full replaces, changed rows update), ascending slot
+	std::optional<net::MatchState> match_state;
+	std::vector<net::MatchState> match_states;
+	std::vector<net::PlayerRow> players;
 	std::vector<net::Spawned> spawned;
 	std::vector<net::CombatEvents> combat;
 	std::optional<net::Snapshot> last_snapshot;
 	std::optional<net::Kick> kick;
-	uint64_t decode_errors = 0; // datagrams addressed to this peer that failed to decode
+	uint64_t decode_errors = 0;
 
 private:
 	host::GameServer *server_ = nullptr;
@@ -100,61 +74,54 @@ private:
 };
 
 struct TdmRunConfig {
-	uint64_t seed = 1; // GameServerConfig::seed (the match seed derives from it)
-	uint32_t bots = 31; // TdmBotConfig::count
-	bool peer = true; // one ScriptedPeer (Hello, Ready, SpawnRequest when deploy_screen)
+	uint64_t seed = 1;
+	uint32_t bots = 31;
+	bool peer = true;
 	uint8_t peer_kit = 0;
-	host::MatchRulesConfig rules{ host::MatchRulesConfig::Mode::Tdm, false, true, 0, 0.0f, 32 }; // --preround=0
-	uint32_t max_ticks = 21600; // the hard stop (6 simulated minutes, E1)
-	uint32_t after_round_ticks = 600; // ticks run after RoundOver (E6: + 600; E1: the 60 s round end + restart)
-	bool hashes = true; // per-tick world hash (firefight_run.h's: soldier_state_hash, soldier_weapons_hash, projectiles,
-	                    // the tick's damage and detonations)
+	host::MatchRulesConfig rules{ host::MatchRulesConfig::Mode::Tdm, false, true, 0, 0.0f, 32 };
+	uint32_t max_ticks = 21600;
+	uint32_t after_round_ticks = 600;
+	bool hashes = true;
+
 	bool keep_trace_records = false;
-	uint32_t stuck_window_ticks = 1200; // 20 s (M2a's stuck metric)
+	uint32_t stuck_window_ticks = 1200;
 	float stuck_metres = 1.0f;
-	std::string mechanics_cfg; // GunplayConfig::mechanics_cfg (empty: the shipped file in bf3-opensource/config)
-	std::function<void(host::GameServerConfig &)> configure_server; // after the defaults
+	std::string mechanics_cfg;
+	std::function<void(host::GameServerConfig &)> configure_server;
 	std::function<void(host::TdmBotConfig &)> configure_bots;
-	// Called after every tick with the server and the peer (null without one): scripted damage, deaths, requests.
+
 	std::function<void(sim::Tick, host::GameServer &, ScriptedPeer *)> on_tick;
 };
 
 struct TdmRunResult {
-	uint32_t ticks = 0; // ticks run
+	uint32_t ticks = 0;
 	bool round_over = false;
 	sim::Tick round_over_tick = 0;
 	uint8_t winner = 0;
-	std::array<int32_t, 3> kills{}; // KillCounter.Kills of team 1 / 2 ([0] unused)
-	std::array<uint32_t, 3> deaths{}; // by the victim's team
-	double team_kd = 0; // kills[1] / kills[2]
+	std::array<int32_t, 3> kills{};
+	std::array<uint32_t, 3> deaths{};
+	double team_kd = 0;
 	uint32_t revives = 0;
 	uint32_t stuck_bots = 0;
 	uint32_t spawns_scored = 0, spawns_fallback = 0;
-	uint32_t spawns_enemy_within_10m = 0; // scored spawns with an enemy within 10 m (E2: 0)
-	uint32_t sight_violations = 0; // E2: detections without a clear eye-to-head / chest ray at that tick
-	uint32_t stale_aim_shots = 0; // E2: aimed shots at a target whose last clear ray is > 30 ticks old
-	uint32_t blind_fire = 0; // counted apart (E2)
+	uint32_t spawns_enemy_within_10m = 0;
+	uint32_t sight_violations = 0;
+	uint32_t stale_aim_shots = 0;
+	uint32_t blind_fire = 0;
 	bool runtime_faulted = false;
-	std::vector<uint64_t> world_hashes; // per tick (E6)
-	uint64_t trace_hash = 0; // TdmRules::trace().hash (E6)
-	uint64_t match_bytes_hash = 0; // the peer's decoded MatchState / PlayerList bytes (E6)
+	std::vector<uint64_t> world_hashes;
+	uint64_t trace_hash = 0;
+	uint64_t match_bytes_hash = 0;
 	host::RulesStats rules;
-	std::vector<double> tick_ms; // GameServerTickTimes::tick_ms per tick (reported, never waited on)
-	std::vector<double> perception_ms, brains_ms; // per tick, from TdmBotStats (E8)
+	std::vector<double> tick_ms;
+	std::vector<double> perception_ms, brains_ms;
 	double seconds_init = 0, seconds_run = 0;
-	std::string failure; // set when init or a tick step failed
+	std::string failure;
 };
 
-// init, then tick() back to back on the caller's thread. Fails for a level without logic or gunplay.
 core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunConfig &p_config);
 
-} // namespace bf3::test::tdm
-
-// ---- M2b ru: the bodies (docs/design/m2b-ru.md §6) ------------------------------------------------------------------
-// Inline, so every executable that includes this header gets them (m2b.contract compiles them and calls none). They
-// use doctest's REQUIRE / CHECK and gunplay_fixture.h's shipped motor tuning, so the including target defines
-// OPENBF3_MOTOR_TUNING_CFG for load_tdm_level_once; OPENBF3_MECHANICS_CFG and OPENBF3_TDM_TUNING_CFG are optional
-// (else GunplayConfig's relative default / TdmTuning{}, whose values equal the shipped file's).
+}
 
 #include <doctest/doctest.h>
 
@@ -178,7 +145,6 @@ inline double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// The quantisation frame of the loaded level's shot origins (CombatEvents decode with it); zero before a load.
 inline net::ShotQuantization &frame() {
 	static net::ShotQuantization s_frame;
 	return s_frame;
@@ -211,11 +177,11 @@ inline std::string default_tdm_tuning_cfg() {
 #ifdef OPENBF3_TDM_TUNING_CFG
 	return OPENBF3_TDM_TUNING_CFG;
 #else
-	return std::string(); // TdmTuning{} (the shipped file's values)
+	return std::string();
 #endif
 }
 
-} // namespace detail
+}
 
 #ifdef OPENBF3_MOTOR_TUNING_CFG
 inline TdmLevel *load_tdm_level_once() {
@@ -241,7 +207,7 @@ inline TdmLevel *load_tdm_level_once() {
 		return nullptr;
 	}
 	l->install = *opened;
-	// A fresh scratch cache root per process (parallel-safe; never the repo, never the install).
+
 	l->cache_root = std::filesystem::temp_directory_path() /
 			("openbf3-tdm-" + std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
 	std::error_code ec;
@@ -309,8 +275,6 @@ inline void check_install_unchanged(TdmLevel &r_level) {
 	std::filesystem::remove_all(r_level.cache_root, ec);
 }
 
-// ---- ScriptedPeer -----------------------------------------------------------------------------------------------
-
 inline ScriptedPeer::ScriptedPeer(host::GameServer &r_server, uint32_t p_peer, std::string p_name) :
 		server_(&r_server), peer_(p_peer), name_(std::move(p_name)) {
 	server_->on_connect(peer_);
@@ -332,7 +296,7 @@ inline void ScriptedPeer::spawn_request(uint8_t p_kit, uint8_t p_spawn_choice) {
 	q.spawn_choice = p_spawn_choice;
 	const std::vector<uint8_t> bytes = net::encode_spawn_request(q);
 	if (bytes.empty()) {
-		return; // the W1.0 codec stub (nt): nothing to send
+		return;
 	}
 	server_->on_receive(peer_, net::kChannelReliable, bytes);
 }
@@ -447,15 +411,13 @@ inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
 				break;
 			}
 			default:
-				break; // DebugReport, SnapshotOthers, ShotEvents: not scripted
+				break;
 		}
 		if (!ok) {
 			++decode_errors;
 		}
 	}
 }
-
-// ---- run_tdm ----------------------------------------------------------------------------------------------------
 
 inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunConfig &p_config) {
 	if (p_level.shared == nullptr || p_level.shared->logic == nullptr || p_level.shared->gunplay == nullptr) {
@@ -474,7 +436,7 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 	if (p_level.bots != nullptr) {
 		auto fill = std::make_shared<host::BotFillConfig>();
 		fill->level = p_level.bots;
-		fill->count = 0; // the BotLevel for walking; the TDM brains are add_tdm_bots'
+		fill->count = 0;
 		cfg.bots = fill;
 	}
 	std::shared_ptr<host::TdmBotStats> bot_stats;
@@ -528,7 +490,7 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 	}
 	r.seconds_init = detail::seconds_since(start);
 	const auto run_start = std::chrono::steady_clock::now();
-	// The stuck metric (M2a's): a bot alive for a whole window that moved less than stuck_metres horizontally.
+
 	struct Track {
 		uint32_t life = 0;
 		sim::Tick since = 0;
@@ -649,21 +611,8 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 	return r;
 }
 
-} // namespace bf3::test::tdm
+}
 
-// M2b bb (docs/design/m2b.md §1 E2, E8, §5; docs/design/m2b-bb.md): additive counters for the bots' rows. A BotChecks
-// is the TDM brains' observer (tdm_brain.h TdmBotObserver) plus an after-tick hook, attached to a TdmRunConfig by
-// attach_bot_checks (it chains any configure_bots / on_tick already set) and read back with apply_bot_checks after
-// run_tdm. Everything it counts it checks itself, independently of the brains:
-//   sight     every detection re-casts the eye -> head and eye -> chest rays (query_mask::kProjectile) on the
-//             server's world at that tick from the target's state; neither clear = a sight violation (E2: 0);
-//   aim       every aimed fire tick whose target's last clear ray is more than kStaleAimTicks old = stale (E2: 0);
-//             blind fire at a last-known position is counted apart;
-//   stuck     per bot, windows of TdmRunConfig::stuck_window_ticks on one life; a window whose farthest horizontal
-//             distance from its start stays under stuck_metres is stuck (M2a's firefight metric). The bot's
-//             Restricted (freeze, round end), RegenWait and Revive ticks restart its window (E2 leaves them out);
-//   timing    TdmBotStats::last_perception_ns / last_brains_ns after every tick (E8).
-// Server thread only (the observer runs inside GameServer::tick, the after-tick hook right after it).
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 
@@ -672,7 +621,7 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 
 namespace bf3::test::tdm {
 
-inline constexpr uint32_t kStaleAimTicks = 30; // E2
+inline constexpr uint32_t kStaleAimTicks = 30;
 
 struct BotChecks final : host::TdmBotObserver {
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
@@ -694,10 +643,10 @@ struct BotChecks final : host::TdmBotObserver {
 		sim::Tick start = 0;
 		sim::Vec3 anchor{};
 		float farthest = 0.0f;
-		std::array<uint32_t, host::kTdmBotActivityCount> acts{}; // the window's ticks per activity
+		std::array<uint32_t, host::kTdmBotActivityCount> acts{};
 	};
 	std::array<Window, 256> win{};
-	// The first stuck windows (bounded), for the report: where, when and what the bot was doing.
+
 	struct StuckReport {
 		uint8_t slot = 0;
 		sim::Tick tick = 0;
@@ -707,10 +656,10 @@ struct BotChecks final : host::TdmBotObserver {
 	};
 	static constexpr size_t kMaxStuckReports = 16;
 	std::vector<StuckReport> stuck_reports;
-	std::array<uint32_t, 3> team_slots{}; // the bots per team at the last tick ([0]: none)
-	host::GunplayStats gunplay{}; // the server's gunplay counters at the last tick (shots, hits, refusals)
-	std::vector<net::PlayerRow> players; // the rules' rows at the last tick (the per-slot report)
-	// Where the bots of each team spawned and died (sums for the centroids; [team]).
+	std::array<uint32_t, 3> team_slots{};
+	host::GunplayStats gunplay{};
+	std::vector<net::PlayerRow> players;
+
 	std::array<double, 3> spawn_x{}, spawn_z{}, death_x{}, death_z{};
 	std::array<uint32_t, 3> spawn_n{}, death_n{};
 	std::array<uint32_t, 256> seen_life{};
@@ -751,7 +700,7 @@ struct BotChecks final : host::TdmBotObserver {
 		is_bot[p_bot] = 1;
 		++activity_ticks[size_t(p_activity)];
 	}
-	// After every tick: the stuck windows and the timing.
+
 	void after_tick(sim::Tick p_tick, host::GameServer &r_server) {
 		const std::span<const sim::SoldierState> states = r_server.view().states();
 		team_slots = {};
@@ -826,7 +775,6 @@ struct BotChecks final : host::TdmBotObserver {
 	}
 };
 
-// Chains the checks into p_config (configure_bots sets the observer and the stats; on_tick runs after_tick).
 inline std::shared_ptr<BotChecks> attach_bot_checks(TdmRunConfig &r_config, const TdmLevel *p_level) {
 	auto checks = std::make_shared<BotChecks>();
 	if (p_level != nullptr && p_level->shared != nullptr) {
@@ -858,8 +806,6 @@ inline std::shared_ptr<BotChecks> attach_bot_checks(TdmRunConfig &r_config, cons
 	return checks;
 }
 
-// The checks' counts into the result's E2 / E8 fields (the brains' own view of stuck bots replaces run_tdm's, which
-// cannot tell a regen wait from a stuck bot; run_tdm's value is kept in r_result_stuck_m2a when given).
 inline void apply_bot_checks(const BotChecks &p_checks, TdmRunResult &r_result, uint32_t *r_result_stuck_m2a = nullptr) {
 	if (r_result_stuck_m2a != nullptr) {
 		*r_result_stuck_m2a = r_result.stuck_bots;
@@ -874,4 +820,4 @@ inline void apply_bot_checks(const BotChecks &p_checks, TdmRunResult &r_result, 
 	}
 }
 
-} // namespace bf3::test::tdm
+}

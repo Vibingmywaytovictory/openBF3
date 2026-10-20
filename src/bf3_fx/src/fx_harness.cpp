@@ -1,4 +1,3 @@
-// The bf3_fx measurement harness (fx_harness.h; docs/design/m2a-vfx1.md §7.7, §9).
 #include "bf3/fx/fx_harness.h"
 
 #include "bf3/fx/effect_compiler.h"
@@ -15,7 +14,6 @@
 #include <thread>
 
 namespace bf3::fx {
-
 
 namespace {
 
@@ -64,7 +62,6 @@ void add_stats(FxStats &r_sum, const FxStats &p_s) {
 	r_sum.events_dropped += p_s.events_dropped;
 }
 
-// The live_* fields of a report are maxima over every frame (the end-of-run values are usually 0).
 void note_peak(FxStats &r_sum, const FxStats &p_s) {
 	r_sum.live_effects = std::max(r_sum.live_effects, p_s.live_effects);
 	r_sum.live_emitters = std::max(r_sum.live_emitters, p_s.live_emitters);
@@ -93,7 +90,7 @@ uint64_t frames_of(const HarnessRun &p_run) {
 
 bool vertex_finite(const ParticleVertex &p_v) {
 	const float *f = reinterpret_cast<const float *>(&p_v);
-	for (size_t i = 0; i < 19; ++i) { // every float field (the last 4 bytes are the serial)
+	for (size_t i = 0; i < 19; ++i) {
 		if (!std::isfinite(f[i])) {
 			return false;
 		}
@@ -112,7 +109,6 @@ bool light_finite(const ParticleLight &p_l) {
 static_assert(sizeof(ParticleVertex) == 19 * 4 + 4);
 static_assert(sizeof(ParticleLight) == 8 * 4);
 
-// Lanes for item-parallel work: a worker per lane pulling item indices.
 void for_lanes(size_t p_items, unsigned p_lanes, const std::function<void(unsigned, size_t)> &p_work) {
 	const unsigned lanes = std::max(1u, std::min<unsigned>(p_lanes == 0 ? std::max(1u, std::thread::hardware_concurrency()) : p_lanes,
 										 unsigned(std::max<size_t>(1, p_items))));
@@ -136,20 +132,13 @@ void for_lanes(size_t p_items, unsigned p_lanes, const std::function<void(unsign
 	}
 }
 
-} // namespace
+}
 
 float fx_variable_dt(uint64_t p_seed, uint64_t p_frame) {
 	const float u = fx_unit(fx_key(fx_mix64(p_seed ^ 0xD7D7D7D7ull), uint32_t(p_frame), uint32_t(p_frame >> 32), 0xD7u));
 	return kVariableDtMin + (kVariableDtMax - kVariableDtMin) * u;
 }
 
-// ---- lane pool ---------------------------------------------------------------------------------------------
-
-// The hand-off is two atomics: run() publishes the job (world, items, chunk) and bumps the generation `job` with
-// release order; a lane that acquires the new generation sees the job, works, and decrements `busy` (acq_rel); run()
-// returns once it acquires busy == 0, so every lane's writes to the world happen before the caller's next step. Both
-// waits spin a bounded number of polls (a step is often shorter than a thread wake-up) and then block in
-// std::atomic::wait, so idle lanes cost nothing under an oversubscribed ctest -j.
 struct LanePool::Impl {
 	static constexpr int kSpinPolls = 2000;
 	unsigned lanes = 1;
@@ -162,7 +151,6 @@ struct LanePool::Impl {
 	std::atomic<size_t> next{ 0 };
 	std::atomic<unsigned> busy{ 0 };
 
-	// Waits until p_value no longer holds p_old; returns the new value.
 	template <class T>
 	static T wait_change(const std::atomic<T> &p_value, T p_old) {
 		T v = p_value.load(std::memory_order_acquire);
@@ -230,13 +218,13 @@ void LanePool::run(FxWorld &r_world, size_t p_items, size_t p_chunk) {
 	if (p_items == 0) {
 		return;
 	}
-	// The lanes are all parked on `job` here (the previous run returned at busy == 0), so the plain fields are free.
+
 	p.world = &r_world;
 	p.items = p_items;
 	p.chunk = std::max<size_t>(1, p_chunk);
 	p.next.store(0, std::memory_order_relaxed);
 	if (p.threads.empty()) {
-		p.work(); // one lane: the same chunks on this thread, no hand-off
+		p.work();
 		return;
 	}
 	p.busy.store(unsigned(p.threads.size()), std::memory_order_relaxed);
@@ -271,7 +259,7 @@ uint64_t fx_frame_digest(const FxWorld &p_world) {
 	h = fnv_value(h, l.size());
 	h = fnv(h, l.data(), l.size_bytes());
 	for (const EmitterOutput &o : p_world.outputs()) {
-		// Not the handle generation: it keeps counting across clear(), so it tells only how many starts the world saw.
+
 		h = fnv_value(h, o.effect.slot);
 		h = fnv_value(h, reinterpret_cast<uintptr_t>(o.def));
 		h = fnv_value(h, o.emitter);
@@ -315,8 +303,6 @@ core::Result<EffectHandle> fx_run_start(FxWorld &r_world, const std::shared_ptr<
 	return h;
 }
 
-// ---- simulate ----------------------------------------------------------------------------------------------
-
 namespace {
 
 const char *kind_name(ComponentKind p_kind) {
@@ -336,7 +322,7 @@ std::string component_label(const EffectDef &p_def, uint32_t p_c) {
 	return c.kind == ComponentKind::Emitter ? p_def.emitters[c.emitter].name : c.asset;
 }
 
-} // namespace
+}
 
 HarnessReport fx_simulate_starts(const std::shared_ptr<const EffectDef> &p_def, uint32_t p_starts, const HarnessRun &p_run) {
 	HarnessReport rep;
@@ -344,7 +330,7 @@ HarnessReport fx_simulate_starts(const std::shared_ptr<const EffectDef> &p_def, 
 	const size_t nc = p_def->components.size();
 	std::vector<uint32_t> selected(nc, 0), observed(nc, 0);
 	uint32_t still_alive = 0;
-	std::vector<uint32_t> live_series; // start 0
+	std::vector<uint32_t> live_series;
 	for (uint32_t i = 0; i < p_starts; ++i) {
 		const uint64_t seed = fx_harness_seed(p_run.seed, i);
 		std::vector<uint8_t> seen(nc, 0);
@@ -388,8 +374,6 @@ HarnessReport fx_simulate_starts(const std::shared_ptr<const EffectDef> &p_def, 
 	return rep;
 }
 
-// ---- G3: the 1p muzzle golden --------------------------------------------------------------------------------
-
 HarnessReport fx_golden_muzzle1p(const std::shared_ptr<const EffectDef> &p_def, uint32_t p_starts, const HarnessRun &p_run) {
 	HarnessReport rep;
 	const auto fail = [&](const std::string &p_why) {
@@ -397,7 +381,7 @@ HarnessReport fx_golden_muzzle1p(const std::shared_ptr<const EffectDef> &p_def, 
 			rep.failures.push_back(p_why);
 		}
 	};
-	// Golden data (docs §5.1), compared against the def first so a changed install shows as a data difference.
+
 	const PolynomialDef size_poly{ { 0.44260055f, -0.88148373f, 0.6358111f, 0.7980724f }, 0.0f, 1.0f, 1.0f };
 	struct LightGolden {
 		const char *suffix;
@@ -464,7 +448,7 @@ HarnessReport fx_golden_muzzle1p(const std::shared_ptr<const EffectDef> &p_def, 
 			float t = 0, base = 0;
 			bool have = false;
 		};
-		std::map<uint32_t, Obs> last; // flash serial -> previous observation
+		std::map<uint32_t, Obs> last;
 		const core::Result<EffectHandle> h = fx_run_start(world, p_def, i, p_run, [&](const FxWorld &p_w, EffectHandle, uint64_t, double, float p_dt) {
 			note_peak(rep.stats, p_w.stats());
 			const std::span<const ParticleVertex> parts = p_w.particles();
@@ -567,7 +551,7 @@ HarnessReport fx_golden_muzzle1p(const std::shared_ptr<const EffectDef> &p_def, 
 	rep.lines.push_back("rapidsmoke\tmax_live\t" + std::to_string(rapid_max));
 	rep.lines.push_back("alive_at_end\t" + std::to_string(still_alive));
 	stats_lines(rep.stats, rep.lines);
-	// The thresholds of gate G3.
+
 	if (rep.stats.stolen_instances != 0 || rep.stats.refused_starts != 0) {
 		fail("stolen_instances / refused_starts not 0");
 	}
@@ -610,8 +594,6 @@ HarnessReport fx_golden_muzzle1p(const std::shared_ptr<const EffectDef> &p_def, 
 	return rep;
 }
 
-// ---- G4: the oilfire steady state ------------------------------------------------------------------------------
-
 HarnessReport fx_golden_oilfire(const std::shared_ptr<const EffectDef> &p_def, const HarnessRun &p_run) {
 	HarnessReport rep;
 	FxWorld world;
@@ -652,8 +634,6 @@ HarnessReport fx_golden_oilfire(const std::shared_ptr<const EffectDef> &p_def, c
 	return rep;
 }
 
-// ---- G5: impacts -----------------------------------------------------------------------------------------------
-
 namespace {
 
 std::string leaf(std::string_view p_name) {
@@ -679,7 +659,7 @@ std::string lower(std::string_view p_s) {
 	return out;
 }
 
-} // namespace
+}
 
 ImpactCounts fx_impact_counts(const ImpactTable &p_table, uint8_t p_projectile) {
 	ImpactCounts c;
@@ -742,8 +722,8 @@ HarnessReport fx_golden_impacts(const ImpactTable &p_table, std::string_view p_l
 		const char *name;
 		uint8_t index;
 		const char *effect;
-		const char *decal; // "" none
-		float spread; // < 0: not gated
+		const char *decal;
+		float spread;
 	};
 	const bool metro = level == "mp_subway";
 	const bool caspian = level == "mp_007";
@@ -810,8 +790,6 @@ HarnessReport fx_golden_impacts(const ImpactTable &p_table, std::string_view p_l
 	return rep;
 }
 
-// ---- G6: atlas -------------------------------------------------------------------------------------------------
-
 HarnessReport fx_golden_atlas(const EmitterAtlas &p_atlas, std::string_view p_level, const std::set<std::string> &p_used_names, size_t p_documents) {
 	HarnessReport rep;
 	const std::string level = lower(p_level);
@@ -873,8 +851,6 @@ HarnessReport fx_golden_atlas(const EmitterAtlas &p_atlas, std::string_view p_le
 	return rep;
 }
 
-// ---- G7 / G8: every effect ---------------------------------------------------------------------------------------
-
 CheckReport fx_check_effects(const std::vector<std::shared_ptr<const EffectDef>> &p_defs, const CheckOptions &p_options) {
 	const auto start_clock = std::chrono::steady_clock::now();
 	CheckReport rep;
@@ -930,9 +906,7 @@ CheckReport fx_check_effects(const std::vector<std::shared_ptr<const EffectDef>>
 					fail("start " + std::to_string(s) + ": live " + std::to_string(live) + " > max_particles " + std::to_string(def->max_particles));
 				}
 				if (extent.finite) {
-					// Spawning can lag spawn_end by a sub-step per level (a delayed component starts at the first step
-					// whose start time reaches its delay; a child starts at the end of its parent particle's step), so
-					// the non-increasing rule starts three frames after spawn_end (docs §2 G7 (d)).
+
 					const double slack = 3.0 * double(max_dt);
 					if (p_time - double(p_dt) >= double(extent.spawn_end) + slack && live > prev_live) {
 						fail("start " + std::to_string(s) + " t " + num(p_time) + ": live rose " + std::to_string(prev_live) + " -> " + std::to_string(live) +
@@ -1014,12 +988,10 @@ CheckReport fx_check_effects(const std::vector<std::shared_ptr<const EffectDef>>
 	return rep;
 }
 
-// ---- G9: the bench ---------------------------------------------------------------------------------------------
-
 BenchReport fx_bench(const EffectDef &p_oilfire, const EffectDef &p_muzzle, const EffectDef &p_impact, uint64_t p_seed, uint32_t p_runs,
 		uint32_t p_warmup_frames, uint32_t p_timed_frames) {
 	BenchReport rep;
-	// Private copies with the pools raised so they never steal: the bench measures particle cost (docs §9).
+
 	const auto raised = [](const EffectDef &p_def) {
 		auto d = std::make_shared<EffectDef>(p_def);
 		d->max_instance_count = uint16_t(kMaxInstanceCount);
@@ -1047,12 +1019,12 @@ BenchReport fx_bench(const EffectDef &p_oilfire, const EffectDef &p_muzzle, cons
 		double emitter_sum = 0;
 		std::chrono::steady_clock::duration timed{};
 		for (uint32_t f = 0; f < p_warmup_frames + p_timed_frames; ++f) {
-			if (f % 6 == 0) { // 8 muzzles every 0.1 s
+			if (f % 6 == 0) {
 				for (uint32_t m = 0; m < 8; ++m) {
 					start_at(muzzle, Vec3{ float(m) * 3.0f, 1.5f, -10.0f });
 				}
 			}
-			if (f % 2 == 0) { // 30 impacts per second at seeded positions
+			if (f % 2 == 0) {
 				const uint64_t k = fx_mix64(p_seed ^ (uint64_t(f) << 20));
 				start_at(impact, Vec3{ fx_unit(k) * 280.0f, 0.0f, fx_unit(fx_mix64(k)) * 220.0f });
 			}
@@ -1104,4 +1076,4 @@ BenchReport fx_bench(const EffectDef &p_oilfire, const EffectDef &p_muzzle, cons
 	return rep;
 }
 
-} // namespace bf3::fx
+}

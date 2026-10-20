@@ -1,9 +1,3 @@
-// SoundPatchAsset -> SoundProgram (sound_program.h): the control program (nodes in topological order over one
-// register file) and the audio plan (voices, plugins, connections, linked attributes, outputs). Fields by the
-// partitions' own descriptor names (design §4.4). Every array element, reference and node is charged to the
-// WorkBudget before it is read; every index is range-checked; the sort is Kahn's algorithm, O((nodes + edges) log
-// nodes) with every edge charged, so a hostile graph ends in the budget error, never in quadratic work.
-
 #include "bf3/core/audio/sound_program.h"
 
 #include "bf3/core/audio/sound_ports.h"
@@ -20,7 +14,6 @@ namespace {
 
 using gameplay::WorkBudget;
 
-// A 32-bit field stored signed or unsigned (NameHash is an Int32 in some descriptors): its bit pattern.
 uint32_t u32_field(const EbxStruct &p_s, std::string_view p_field) {
 	const std::optional<EbxValue> v = p_s.get(p_field);
 	if (!v) {
@@ -43,7 +36,7 @@ struct Compiler {
 	CompileStats &stats;
 	SoundProgram prog;
 	bool master = false;
-	std::vector<int32_t> node_of_instance; // partition instance index -> index into source-order nodes (-1 none)
+	std::vector<int32_t> node_of_instance;
 	std::unordered_map<Guid, uint16_t, GuidHash> wave_index;
 	std::vector<std::string> deps;
 	uint32_t max_register = 0;
@@ -119,7 +112,6 @@ struct Compiler {
 		return SoundPluginRef{ uint16_t(voice), uint16_t(plugin) };
 	}
 
-	// An internal reference of this partition, charged.
 	Result<std::optional<EbxInstance>> internal(const EbxValue &p_value) {
 		BF3_TRY(budget.charge(1));
 		const std::optional<EbxRef> ref = p_value.as_ref();
@@ -233,7 +225,6 @@ struct Compiler {
 		return f;
 	}
 
-	// Ports, floats, option and flags of one node or child record into r_node.
 	Status read_body(SoundNodeType p_type, const EbxStruct &p_s, SoundNode &r_node) {
 		const SoundNodeTypeInfo &info = sound_node_type_info(p_type);
 		r_node.type = p_type;
@@ -246,7 +237,7 @@ struct Compiler {
 				return p.error();
 			}
 			if ((audio >> i) & 1u) {
-				*p = SoundPort{}; // the audio path (register 0) is not a value
+				*p = SoundPort{};
 			}
 			prog.ports.push_back(*p);
 		}
@@ -325,7 +316,7 @@ struct Compiler {
 			}
 			return MasterBus::Unknown;
 		}
-		// sound/master not loaded: the bus instance GUIDs of sound/master [verified, design §4.4].
+
 		static constexpr std::pair<std::string_view, MasterBus> kGuids[] = {
 			{ "b735bfcd-0afb-4210-8ca2-6f9c61989002", MasterBus::GameMixMain },
 			{ "d72517d3-3816-421a-aca1-f75078942be9", MasterBus::Reverb },
@@ -384,7 +375,7 @@ struct Compiler {
 			return reverb.error();
 		}
 		out.reverb_send = *reverb;
-		// AttenuationCurve {CurveType, Points[] {X, Y, K}}
+
 		if (std::optional<EbxValue> c = p_s.get("AttenuationCurve"); c && c->as_struct()) {
 			const std::optional<EbxValue> pts = c->as_struct()->get("Points");
 			if (pts && pts->as_array()) {
@@ -448,7 +439,7 @@ struct Compiler {
 				return ci.error();
 			}
 			if (!*ci) {
-				continue; // a null record: nothing to evaluate
+				continue;
 			}
 			BF3_TRY(budget.charge_type((*ci)->data()));
 			const std::optional<SoundNodeType> ct = sound_node_type((*ci)->type_name());
@@ -460,7 +451,7 @@ struct Compiler {
 			BF3_TRY(read_body(child, (*ci)->data(), rec));
 			const EbxStruct cd = (*ci)->data();
 			if (child == SoundNodeType::ReceiveEntry) {
-				// Extra port: the source parameter/event's register.
+
 				SoundPort source;
 				if (std::optional<EbxValue> src = cd.get("Source")) {
 					Result<std::optional<EbxInstance>> si = internal(*src);
@@ -541,7 +532,7 @@ struct Compiler {
 						r_node.plugins_count = uint16_t(r_node.plugins_count + port::kSamplerSlotPlugins);
 					}
 				}
-				r_node.floats_count = uint16_t(r_node.floats_count); // BasePitch read by read_body
+				r_node.floats_count = uint16_t(r_node.floats_count);
 				break;
 			}
 			case SoundNodeType::WaveSwitcher: {
@@ -607,7 +598,7 @@ struct Compiler {
 		if (!info) {
 			return error("SoundGraphData has no Info");
 		}
-		// Connections first (plugins name them).
+
 		const std::optional<EbxValue> conns = info->get("Connections");
 		if (conns && conns->as_array()) {
 			if (conns->as_array()->size() > kMaxProgramConnections) {
@@ -713,14 +704,14 @@ struct Compiler {
 			return error("connections without voices");
 		}
 		stats.connections += prog.connections.size();
-		// Render order: ascending stage, then index.
+
 		prog.voice_order.resize(prog.voices.size());
 		for (size_t i = 0; i < prog.voices.size(); ++i) {
 			prog.voice_order[i] = uint16_t(i);
 		}
 		std::stable_sort(prog.voice_order.begin(), prog.voice_order.end(),
 				[&](uint16_t a, uint16_t b) { return prog.voices[a].stage < prog.voices[b].stage; });
-		// LinkedPluginAttributes {Node, Plugin, AttributeIndex, Port, AllowExtremeValues}
+
 		const std::optional<EbxValue> links = info->get("LinkedPluginAttributes");
 		if (links && links->as_array()) {
 			if (links->as_array()->size() > kMaxProgramVoices * kMaxVoicePlugins) {
@@ -768,11 +759,10 @@ struct Compiler {
 		return Status::success();
 	}
 
-	// Topological order (Kahn, stable by source index). Returns the new order (indices into the source-order nodes).
 	Result<std::vector<uint32_t>> sort_nodes() {
 		const size_t n = prog.nodes.size();
 		const uint32_t regs = prog.registers;
-		// Reads and writes of each node, children included.
+
 		std::vector<std::vector<uint16_t>> reads(n), writes(n);
 		auto collect = [&](const SoundNode &p_node, size_t p_owner) {
 			const uint32_t out = port::output_ports(p_node.type);
@@ -842,7 +832,7 @@ struct Compiler {
 		if (value_count < 0 || value_count > int64_t(kMaxProgramValues)) {
 			return error("ValueCount " + std::to_string(value_count));
 		}
-		// Inputs: parameters then events.
+
 		for (auto [field, is_event] : { std::pair{ "InputParameters", false }, std::pair{ "InputEvents", true } }) {
 			const std::optional<EbxValue> arr = graph.get(field);
 			if (!arr || !arr->as_array()) {
@@ -875,7 +865,7 @@ struct Compiler {
 				prog.inputs.push_back(in);
 			}
 		}
-		// Nodes.
+
 		const std::optional<EbxValue> nodes = graph.get("Nodes");
 		if (!nodes || !nodes->as_array()) {
 			return error("SoundGraphData has no Nodes");
@@ -919,7 +909,7 @@ struct Compiler {
 				if (!options.allow_unimplemented) {
 					return error("node type " + std::string(info.ebx_name) + " is not implemented in A2");
 				}
-				node.type = *type; // kept as a no-op: no ports, nothing written
+				node.type = *type;
 			} else {
 				BF3_TRY(read_body(*type, inst.data(), node));
 				BF3_TRY(read_children(*type, inst.data(), node));
@@ -932,12 +922,12 @@ struct Compiler {
 		}
 		prog.nodes = std::move(source_nodes);
 		BF3_TRY(read_graph_info(graph));
-		// Register file: ValueCount, or more when linked attributes name registers past it (M16A3: 131-134 of 130).
+
 		prog.registers = std::max<uint32_t>(uint32_t(value_count), max_register + 1);
 		if (prog.registers > kMaxProgramValues) {
 			return error(std::to_string(prog.registers) + " registers");
 		}
-		// Every plugin reference must name a plugin of a voice.
+
 		auto valid_plugin = [&](const SoundPluginRef &p_ref) {
 			return !p_ref.valid() || (p_ref.voice < prog.voices.size() && p_ref.plugin < prog.voices[p_ref.voice].plugins_count);
 		};
@@ -956,7 +946,7 @@ struct Compiler {
 				return error("connection to voice " + std::to_string(c.voice) + " of " + std::to_string(prog.voices.size()));
 			}
 		}
-		// Sort and remap.
+
 		Result<std::vector<uint32_t>> order = sort_nodes();
 		if (!order) {
 			return order.error();
@@ -989,7 +979,7 @@ struct Compiler {
 	}
 };
 
-} // namespace
+}
 
 float AudioCurve::evaluate(float p_x) const {
 	if (points.empty()) {
@@ -1060,7 +1050,7 @@ Result<std::vector<uint32_t>> order_by_register_dependencies(std::span<const std
 				return make_error("sound program: node order: register out of range");
 			}
 			for (uint32_t w : writers[r]) {
-				BF3_TRY(r_budget.charge(1)); // every edge is paid for: a hostile fan-in ends in the budget error
+				BF3_TRY(r_budget.charge(1));
 				if (w == i) {
 					continue;
 				}
@@ -1070,7 +1060,7 @@ Result<std::vector<uint32_t>> order_by_register_dependencies(std::span<const std
 		}
 	}
 	std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
-	std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> remaining; // for cycle breaking
+	std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> remaining;
 	std::vector<uint8_t> done(n, 0);
 	for (size_t i = 0; i < n; ++i) {
 		if (indegree[i] == 0) {
@@ -1082,7 +1072,7 @@ Result<std::vector<uint32_t>> order_by_register_dependencies(std::span<const std
 	order.reserve(n);
 	while (order.size() < n) {
 		if (ready.empty()) {
-			// A cycle: break it at the lowest remaining node; its open reads see the previous step's value.
+
 			while (!remaining.empty() && done[remaining.top()]) {
 				remaining.pop();
 			}
@@ -1118,4 +1108,4 @@ Result<SoundProgram> compile_sound_patch(const EbxResolver &p_db, const EbxParti
 	return c.run();
 }
 
-} // namespace bf3::core::audio
+}

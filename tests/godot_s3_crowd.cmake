@@ -1,17 +1,3 @@
-# ctest godot.s3_crowd (docs/design/s3.md §1, §12): the windowed S3 crowd check of the Godot project on one fresh
-# scratch cache root:
-#   <godot> --path bf3-opensource res://scenes/s3_crowd.tscn --
-#       --s3-check --walkers=0 --no-hud --bf3-cache=<fresh scratch root> --s3-shot-dir=<shots> --quit-after=600
-# G0 validity rows (stage, view, config, blend), G1a / G1b (main-thread animation cost), G2 (frame time, vsync off and
-# on), G3 (16 shoulder shots + overview with pinch and hand-IK metrics) and install unchanged. Passes when the run
-# prints "S3 CHECK: PASS" and exits 0.
-# Noise policy (s3.md §1, fixed in advance): when only timing gates fail (the check prints "S3 TIMING: FAIL"), the whole
-# check runs once more and decides; both runs are printed and the repeat is named. A G0 failure is not repeated.
-# Shots go to $ENV{OPENBF3_S3_SHOT_DIR} when set, else <checkout>/b/shots/s3 (gitignored /b/; BF3 imagery is never
-# committed). Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no window / rendering device can be created (the windowed
-# --quit probe of godot_m1_load.cmake, killed after 60 s), no BF3 install is found ("no usable install"), or the check
-# exits 77 because the primary screen is not 2560x1440.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_s3_crowd.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)

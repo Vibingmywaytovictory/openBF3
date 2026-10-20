@@ -1,17 +1,4 @@
 #pragma once
-// Port and float positions of the compiled sound-graph nodes (M2a audio A2; docs/design/m2a-audio.md §6.2). The
-// compiler stores a node's AudioGraphNodePorts in the order sound_node_type_info(type).ports lists them (the
-// census order, alphabetical) and its plain floats in the order .floats lists them; the interpreter reads them by
-// the positions below. audio.contract checks every enumerator against the type table by name, so a reordered table
-// cannot silently shift a port.
-//
-// Compiled extras (not EBX fields of their own):
-//   ReceiveEntry   one extra port after Out: `Source`, the register of the AudioGraphParameter/Event the entry
-//                  copies (its ValueIndex), always connected.
-//   SimpleValueSelector  OutValues[] follow the (zero) plain floats.
-//   SimpleTransform      SoundNode::option = SimpleTransformOp in bits 0-6, bit 7 set for AngleUnit_Degrees.
-//
-// Which ports a node writes (the rest it reads) drives the topological sort: output_ports() below.
 
 #include "bf3/core/audio/sound_types.h"
 
@@ -28,7 +15,7 @@ enum DeMux : uint8_t { DeMuxTrigger, DeMuxValue };
 enum Delay : uint8_t { DelayTime, DelayFeedback, DelayIn, DelayOut };
 enum EventGate : uint8_t { GateCoolDown, GateEnable, GateIn, GateOut };
 enum Gain : uint8_t { GainAmplitude, GainIn, GainOut };
-enum Iir2 : uint8_t { Iir2Frequency, Iir2In, Iir2Out }; // HighPassIir2, LowPassIir2
+enum Iir2 : uint8_t { Iir2Frequency, Iir2In, Iir2Out };
 enum Lfo : uint8_t { LfoAmplitude, LfoHz, LfoOut };
 enum LogicalExpression : uint8_t { LogicTrigger };
 enum MultiCrossfader : uint8_t { McfControl, McfStart, McfStop };
@@ -61,17 +48,16 @@ enum Switcher : uint8_t { SwTrigger, SwValue };
 enum Timer : uint8_t { TimerPeriod, TimerProgress, TimerStart, TimerStop, TimerTick };
 enum ValueSelector : uint8_t { VsOut, VsValue };
 enum WaveSwitcher : uint8_t { WsAdvance, WsIndex, WsIndexChanged, WsWave };
-// Child records.
+
 enum ConditionGroup : uint8_t { CondTrue, CondX, CondY };
 enum DeMuxOutput : uint8_t { DeMuxOutTrigger };
 enum LogicalExpressionEntry : uint8_t { LogicEntryTrigger };
 enum MixerReceiveEntry : uint8_t { MixerEntryOut };
 enum MultiCrossfaderGroup : uint8_t { GroupAmplitude, GroupStart, GroupStop };
-enum ReceiveEntry : uint8_t { ReceiveOut, ReceiveSource /* compiled extra */ };
+enum ReceiveEntry : uint8_t { ReceiveOut, ReceiveSource   };
 enum SwitcherEntry : uint8_t { SwitchCaseTrigger };
 enum ValueSelectorEntry : uint8_t { VsEntryInput };
 
-// Plain floats.
 enum ConeFloat : uint8_t { ConeGain, ConeHfAngle, ConeHfDistance, ConeHfObstruction, ConeHfOcclusion, ConeMinDistance, ConeOutsideGain, ConePanSize, ConeReverbGain };
 enum DelayFloat : uint8_t { DelayMax };
 enum DirectFloat : uint8_t { DirectGain, DirectHfDistance, DirectHfObstruction, DirectHfOcclusion, DirectMinDistance };
@@ -84,17 +70,14 @@ enum ValueSelectorFloat : uint8_t { VsDefault };
 enum WaveSwitcherFloat : uint8_t { WsDefaultIndex };
 enum GroupFloat : uint8_t { GroupFadeAmplitude, GroupFadeBegin, GroupFadeEnd };
 enum ReceiveFloat : uint8_t { ReceiveParameter, ReceiveSavedValue };
-enum CaseFloat : uint8_t { CaseValue }; // SwitcherEntry, ValueSelectorEntry
+enum CaseFloat : uint8_t { CaseValue };
 
-inline constexpr uint8_t kSimpleTransformDegrees = 0x80; // SoundNode::option bit of SimpleTransform
+inline constexpr uint8_t kSimpleTransformDegrees = 0x80;
 
-// Extra compiled ports after the type's own (ReceiveEntry: Source).
 constexpr uint16_t extra_ports(SoundNodeType p_type) {
 	return p_type == SoundNodeType::ReceiveEntry ? 1 : 0;
 }
 
-// Bit i set: port i is written by the node (an output); the others are read. Audio In/Out/Output ports (register 0)
-// are neither: the compiler stores them unconnected.
 constexpr uint32_t output_ports(SoundNodeType p_type) {
 	switch (p_type) {
 		case SoundNodeType::Adsr:
@@ -144,7 +127,6 @@ constexpr uint32_t output_ports(SoundNodeType p_type) {
 	}
 }
 
-// Audio-path ports (register 0, "v0"): never part of the control program.
 constexpr uint32_t audio_ports(SoundNodeType p_type) {
 	switch (p_type) {
 		case SoundNodeType::BandPassIir2:
@@ -154,9 +136,9 @@ constexpr uint32_t audio_ports(SoundNodeType p_type) {
 		case SoundNodeType::Delay:
 			return (1u << DelayIn) | (1u << DelayOut);
 		case SoundNodeType::DirectOutput:
-			return 1u << 1; // In
+			return 1u << 1;
 		case SoundNodeType::FlatOutput:
-			return 1u << 2; // In
+			return 1u << 2;
 		case SoundNodeType::Gain:
 			return (1u << GainIn) | (1u << GainOut);
 		case SoundNodeType::HighPassIir2:
@@ -171,7 +153,6 @@ constexpr uint32_t audio_ports(SoundNodeType p_type) {
 	}
 }
 
-// The child record type a node's children array holds (Count = none).
 constexpr SoundNodeType child_type(SoundNodeType p_type) {
 	switch (p_type) {
 		case SoundNodeType::Condition:
@@ -195,18 +176,13 @@ constexpr SoundNodeType child_type(SoundNodeType p_type) {
 	}
 }
 
-// Plugin references a node carries (SoundNode::plugins_count): Sampler 4 per slot (SndPlayer, Resample, Pause,
-// Gain), the audio-rate nodes 1 (Plugin), the outputs 5 (LowPass, Pan, MainSend, ReverbSend, Vu).
 inline constexpr uint16_t kSamplerSlotPlugins = 4;
 enum SamplerPlugin : uint8_t { SlotSndPlayer, SlotResample, SlotPause, SlotGain };
 enum OutputPlugin : uint8_t { OutLowPass, OutPan, OutMainSend, OutReverbSend, OutVu };
 inline constexpr uint16_t kOutputPlugins = 5;
 
-// Plugin attributes an audio-rate node drives, by AttributeIndex [verified on the M16A3's LinkedPluginAttributes:
-// HighPassIir2 Frequency 0; PeakingIir2 Frequency 0, Amplitude 1, Q 2; Gain Amplitude 0]. BandPassIir2 and Delay
-// follow the same field order [inferred]. kNoPort = the node has no such attribute.
 inline constexpr uint8_t kNoPort = 0xff;
-inline constexpr size_t kMaxPluginAttributes = 16; // sound/master links attribute 4+ of its MasterUnit plugins
+inline constexpr size_t kMaxPluginAttributes = 16;
 constexpr uint8_t attribute_port(SoundNodeType p_type, uint8_t p_attribute) {
 	switch (p_type) {
 		case SoundNodeType::HighPassIir2:
@@ -225,4 +201,4 @@ constexpr uint8_t attribute_port(SoundNodeType p_type, uint8_t p_attribute) {
 	}
 }
 
-} // namespace bf3::core::audio::port
+}

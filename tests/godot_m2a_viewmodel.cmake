@@ -1,10 +1,3 @@
-# ctest godot.m2a_viewmodel (M2a vm, docs/design/m2a-vm.md): runs the headless viewmodel check of the Godot project
-# ("<godot> --headless --path bf3-opensource res://scenes/m2a_viewmodel.tscn -- --vm-check") and passes when it prints
-# "M2A VIEWMODEL CHECK: PASS" and exits 0: E19 (FOV, FOV times, recoil, springs, zoom refusal), the E5 viewmodel row
-# and E11's viewmodel coverage on the 8 default loadouts, every display frame at 60 and 144 fps. Exits 77 (skipped)
-# when no Godot console executable is found (godot_common.cmake) or no BF3 install is found. A ctest run passes the
-# per-build cache root of godot_common.cmake (warm across runs); a direct cmake -P run uses user://bf3cache.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_m2a_viewmodel.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 set(cache_args "")

@@ -30,12 +30,8 @@ namespace render = bf3::render;
 
 namespace {
 
-// Scene luminance per ISO of the luminance clamp of Godot's auto exposure (CameraAttributesPractical min / max
-// sensitivity) [measured: with both sensitivities at 24 ISO the park view (-40, 110, -230) drew like a fixed tonemap
-// exposure of about 9.6 at scale 0.3, i.e. 0.3 / (24 x 0.00125), and the city clamp 34..240 ISO bounded the street
-// and station views between the fixed exposures 7 and 1; the 12.5 / 100 the API docs suggest overexposed all views].
 constexpr float kLuminancePerIso = 0.00125f;
-// Godot's filmic white point for BF3's FilmicNeutral [inferred].
+
 constexpr float kFilmicWhite = 4.0f;
 constexpr float kSunShadowDistance = 250.0f;
 
@@ -81,7 +77,6 @@ float peak3(const render::LookVec3 &p_c) {
 	return std::fmax(std::fmax(p_c[0], p_c[1]), std::fmax(p_c[2], 0.0f));
 }
 
-// --look-off=<part>[,<part>...]: leaves out exposure, fog, bloom or lut (diagnosis of the look, never the default).
 bool debug_off(const char *p_part) {
 	static const std::string off = "," + user_arg_value("look-off") + ",";
 	return off.find("," + std::string(p_part) + ",") != std::string::npos;
@@ -95,7 +90,7 @@ bool moved3(const render::LookVec3 &p_a, const render::LookVec3 &p_b) {
 	return moved(p_a[0], p_b[0]) || moved(p_a[1], p_b[1]) || moved(p_a[2], p_b[2]);
 }
 
-} // namespace
+}
 
 LookBridge::LookBridge() = default;
 LookBridge::~LookBridge() = default;
@@ -131,16 +126,13 @@ void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelSceneP
 	environment_->set_glow_blend_mode(Environment::GLOW_BLEND_MODE_ADDITIVE);
 	environment_->set_glow_hdr_bleed_threshold(0.0f);
 	environment_->set_glow_bloom(0.0f);
-	// Linear glow upscale (--look-bloom): the bicubic default cost 0.2-0.35 ms of GPU time at 2560x1440 for a bloom of about 0.07
-	// (godot.l1_look). Process-wide, which only the L1 look uses.
+
 	RenderingServer::get_singleton()->environment_glow_set_use_bicubic_upscale(false);
 	environment_->set_fog_mode(Environment::FOG_MODE_DEPTH);
 	environment_->set_fog_sky_affect(0.0f);
 	environment_->set_fog_aerial_perspective(0.0f);
 	environment_->set_fog_sun_scatter(0.0f);
 
-
-	// The LUTs: one Image per depth slice (RGBA8, red fastest), as ImageTexture3D wants.
 	const render::LookEnvironment &env = plan_->look_environment;
 	const int32_t n = int32_t(render::kGradeLutSide);
 	for (const std::vector<uint8_t> &lut : env.luts) {
@@ -195,12 +187,10 @@ void LookBridge::update(const LevelUpload &p_upload, const Vector3 &p_camera) {
 }
 
 void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
-	// Every setter below reaches the RenderingServer, so each group is re-sent only when its values move by more than
-	// 1 % (moved()) from what that group last sent, or on p_force: a camera standing in one state sends nothing, and a
-	// slow drift still crosses 1 % and is sent. sent_ holds, per group, the values last sent.
+
 	const bool first = p_force || !sent_;
 	render::LookFrame &s = sent_ ? *sent_ : sent_.emplace(p_f);
-	// Sun.
+
 	if (first || moved3(s.sun_direction, p_f.sun_direction) || moved3(s.sun_color, p_f.sun_color) || moved(s.sun_energy, p_f.sun_energy)) {
 		Vector3 d(p_f.sun_direction[0], p_f.sun_direction[1], p_f.sun_direction[2]);
 		d = d.length_squared() > 1e-8f ? d.normalized() : Vector3(0, -1, 0);
@@ -213,7 +203,7 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.sun_color = p_f.sun_color;
 		s.sun_energy = p_f.sun_energy;
 	}
-	// Sky material (each change re-renders the radiance map).
+
 	if (first || moved3(s.ambient_up, p_f.ambient_up) || moved3(s.ambient_horizon, p_f.ambient_horizon) || moved3(s.ambient_down, p_f.ambient_down) ||
 			moved(s.sky_brightness, p_f.sky_brightness) || moved3(s.horizon, p_f.horizon) || s.sky_rotation != p_f.sky_rotation ||
 			s.uv_min_y != p_f.uv_min_y || s.uv_max_y != p_f.uv_max_y) {
@@ -234,7 +224,7 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.uv_max_y = p_f.uv_max_y;
 		s.horizon = p_f.horizon;
 	}
-	// Fog.
+
 	if (first || s.fog != p_f.fog || moved(s.fog_begin, p_f.fog_begin) || moved(s.fog_end, p_f.fog_end) || moved(s.fog_density, p_f.fog_density) ||
 			moved(s.fog_curve, p_f.fog_curve) || moved3(s.fog_color, p_f.fog_color)) {
 		environment_->set_fog_enabled(p_f.fog && !debug_off("fog"));
@@ -254,10 +244,7 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.fog_curve = p_f.fog_curve;
 		s.fog_color = p_f.fog_color;
 	}
-	// Exposure: BF3 exposes each frame to MiddleGray / average luminance within Min..MaxExposure, i.e. it clamps the
-	// average luminance to MiddleGray / MaxExposure .. MiddleGray / MinExposure. Godot's auto exposure does the same
-	// with scale = MiddleGray and its luminance clamp in sensitivity units (kLuminancePerIso). --look-off=exposure
-	// draws the static estimate (LookFrame::exposure) instead; --look-exposure=<e> a fixed exposure (diagnosis).
+
 	if (first || moved(s.middle_gray, p_f.middle_gray) || moved(s.min_exposure, p_f.min_exposure) || moved(s.max_exposure, p_f.max_exposure) ||
 			moved(s.exposure_speed, p_f.exposure_speed) || moved(s.exposure, p_f.exposure)) {
 		static const std::string fixed = user_arg_value("look-exposure");
@@ -278,16 +265,14 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.exposure_speed = p_f.exposure_speed;
 		s.exposure = p_f.exposure;
 	}
-	// Bloom: off unless --look-bloom. Godot's glow cost 0.31 ms of GPU time per frame at 2560x1440 (2.08 -> 1.76 ms
-	// over the four godot.l1_look views, RX 9070 XT) and changed the frames by under 0.5 / 255 on average: Metro's
-	// BloomScale is about 0.07 and auto exposure takes the rest back.
+
 	if (first || moved(s.bloom, p_f.bloom)) {
 		static const bool bloom_on = has_user_arg("look-bloom");
 		environment_->set_glow_enabled(bloom_on && p_f.bloom > 0.0f && !debug_off("bloom"));
 		environment_->set_glow_intensity(p_f.bloom);
 		s.bloom = p_f.bloom;
 	}
-	// Colour correction: the dominant state's LUT.
+
 	if (first || p_f.lut != s.lut) {
 		const bool have = !debug_off("lut") && p_f.lut >= 0 && size_t(p_f.lut) < luts_.size() && luts_[size_t(p_f.lut)].is_valid();
 		environment_->set_adjustment_enabled(have);
@@ -314,4 +299,4 @@ std::string LookBridge::describe() const {
 	return line;
 }
 
-} // namespace bf3::godot_side
+}

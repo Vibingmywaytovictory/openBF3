@@ -1,6 +1,4 @@
 #pragma once
-// A minimal JSON reader (objects, arrays, strings without \u escapes beyond ASCII, numbers, literals) for
-// comparing clip dumps. No exceptions: parse() returns false on malformed text.
 
 #include <cctype>
 #include <cstdlib>
@@ -137,7 +135,7 @@ private:
 			i_ += 4;
 			return true;
 		}
-		// number
+
 		const size_t start = i_;
 		while (i_ < t_.size() && (std::isdigit(static_cast<unsigned char>(t_[i_])) || t_[i_] == '-' || t_[i_] == '+' || t_[i_] == '.' || t_[i_] == 'e' || t_[i_] == 'E')) {
 			++i_;
@@ -163,7 +161,7 @@ private:
 				}
 				const char e = t_[i_];
 				r_out.push_back(e == 'n' ? '\n' : e == 't' ? '\t' : e == 'r' ? '\r' : e);
-				if (e == 'u') { // keep \uXXXX verbatim (not used by the dumps)
+				if (e == 'u') {
 					r_out.pop_back();
 					r_out += "\\u";
 				}
@@ -188,4 +186,4 @@ inline bool parse(std::string_view p_text, Value &r_out) {
 	return p.parse(r_out);
 }
 
-} // namespace bf3::tools::json
+}

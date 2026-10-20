@@ -1,9 +1,3 @@
-// bf3dump EBX commands, ported from the ebx-dump probe (research/probes/tools/ebx-dump/src/main.rs,
-// built on IW4L's ebx_bf3/superbundle_bf3 crates). The JSON matches the probe byte for byte:
-// serde_json's pretty printer, object keys sorted byte-wise (serde_json without preserve_order
-// keeps a BTreeMap, so a later duplicate key replaces the earlier one), floats as Rust's f32
-// Display text read back as f64 and printed by zmij (json_number.h), references as
-// {"$ref", "instance", "type"}.
 #include "ebx_commands.h"
 #include "json_number.h"
 
@@ -40,7 +34,6 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// H hygiene: the process's working set and private bytes now and at their peak, MiB.
 struct MemorySample {
 	double working_set = 0, peak_working_set = 0, private_bytes = 0, peak_private_bytes = 0;
 };
@@ -102,7 +95,6 @@ std::string rust_nonfinite(double p_value) {
 	return std::isnan(p_value) ? "NaN" : (p_value < 0 ? "-inf" : "inf");
 }
 
-// serde_json PrettyFormatter: 2-space indent, "key": value, [] and {} when empty, no final newline.
 class JsonOut {
 public:
 	std::string text;
@@ -151,7 +143,7 @@ public:
 		text += p_bracket;
 		first_.push_back(true);
 	}
-	// Before each array element.
+
 	void item() {
 		text += first_.back() ? "\n" : ",\n";
 		first_.back() = false;
@@ -367,7 +359,7 @@ private:
 		r_out.open('{');
 		for (size_t i = 0; i < r_items.size(); ++i) {
 			if (i + 1 < r_items.size() && r_items[i + 1].key == r_items[i].key) {
-				continue; // the later insert wins
+				continue;
 			}
 			const Item &it = r_items[i];
 			r_out.key(it.key);
@@ -421,7 +413,6 @@ void collect_refs(const EbxValue &p_value, std::vector<Guid> &r_out) {
 	}
 }
 
-// Partition types never worth following for gameplay data (renderable or audio payloads).
 bool skip_type(std::string_view p_type) {
 	static constexpr std::string_view kSkip[] = { "RigidMeshAsset", "SkinnedMeshAsset", "CompositeMeshAsset", "TextureAsset", "SoundWaveAsset",
 		"SoundPatchAsset", "ShaderGraph", "SurfaceShaderBaseAsset", "MeshVariationDatabase" };
@@ -492,7 +483,7 @@ size_t walk_value(const EbxValue &p_value) {
 	}
 }
 
-} // namespace
+}
 
 int cmd_find(const EbxContext &p_ctx, const std::string &p_spec, const std::vector<std::string> &p_needles) {
 	std::unique_ptr<EbxLibrary> lib = load_library(p_ctx, p_spec);
@@ -569,7 +560,7 @@ int cmd_dump(const EbxContext &p_ctx, const std::string &p_spec, const std::stri
 			std::fprintf(stderr, "missing root %s\n", root.c_str());
 			continue;
 		}
-		// Breadth-first closure over external partition references.
+
 		std::unordered_set<Guid, GuidHash> seen;
 		std::vector<std::pair<size_t, Guid>> order;
 		std::deque<std::pair<size_t, Guid>> queue{ { size_t(0), part->guid() } };
@@ -702,8 +693,7 @@ int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk,
 	std::printf("instances\t%zu\timports\t%zu\tduplicate_instance_guids\t%zu\tbytes\t%llu\n", instances, imports, dup_instance_guids,
 			static_cast<unsigned long long>(report.bytes));
 	std::printf("time\tmount+catalog %.3f s\tparse %.3f s\tinsert %.3f s\n", mount_s, report.parse_seconds, report.insert_seconds);
-	// H hygiene: where the memory goes (EbxPartition::memory_use: vector capacities, MiB) and the process's working
-	// set after the mount + catalog, after load_all and at its peak.
+
 	EbxPartition::MemoryUse use;
 	std::set<const void *> layouts;
 	for (const EbxLibrary::Entry &e : entries) {
@@ -714,7 +704,7 @@ int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk,
 		use.slack += m.slack;
 		use.blocks += m.blocks;
 		if (layouts.insert(m.types_id).second) {
-			use.types += m.types; // shared: once per layout
+			use.types += m.types;
 		}
 	}
 	const double mib = 1024.0 * 1024.0;
@@ -740,8 +730,7 @@ int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk,
 		std::printf("walk\tvalues\t%zu\t%.3f s\n", values.load(), seconds_since(walk_start));
 	}
 	if (p_lookups) {
-		// H hygiene: every field of every instance looked up again by its name (EbxStruct::get: name hash + one
-		// binary search in the type's lookup table) on one thread; three passes, the fastest is the figure.
+
 		for (int pass = 0; pass < 3; ++pass) {
 			const auto lookup_start = std::chrono::steady_clock::now();
 			size_t found = 0, asked = 0;
@@ -762,4 +751,4 @@ int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk,
 	return report.failed == 0 ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

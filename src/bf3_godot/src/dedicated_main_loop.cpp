@@ -85,4 +85,4 @@ void DedicatedMainLoop::_finalize() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

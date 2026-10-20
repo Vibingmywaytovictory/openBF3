@@ -1,4 +1,3 @@
-// Ported from IW4L superbundle_bf3 (payload.rs), Apache-2.0. Inflate: libdeflate (MIT).
 #include "bf3/core/payload.h"
 
 #include "format_errors.h"
@@ -60,13 +59,12 @@ struct DecompressorDeleter {
 	void operator()(libdeflate_decompressor *p) const { libdeflate_free_decompressor(p); }
 };
 
-// One decompressor per thread (libdeflate decompressors are not thread-safe, and cheap to keep).
 libdeflate_decompressor *thread_decompressor() {
 	thread_local std::unique_ptr<libdeflate_decompressor, DecompressorDeleter> d(libdeflate_alloc_decompressor());
 	return d.get();
 }
 
-} // namespace
+}
 
 Result<std::vector<Block>> payload_blocks(std::span<const uint8_t> p_stored, uint64_t p_base) {
 	std::vector<Block> out;
@@ -107,8 +105,7 @@ Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t
 	}
 	const uint64_t total = layout->empty() ? 0 : layout->back().decoded_at + layout->back().decoded_len;
 	const size_t base = r_out.size();
-	// No exceptions: resize() on failure would terminate, so check the size first (a block decodes
-	// to at most 64 KiB, so a corrupt layout could otherwise ask for 8192x the stored size).
+
 	if (total > detail::kMaxMetadataSizedAlloc || total > r_out.max_size() - base) {
 		return detail::out_of_memory(total);
 	}
@@ -133,8 +130,7 @@ Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t
 			}
 			continue;
 		}
-		// Not a complete zlib stream that fits (flate2 would not reach StreamEnd): the IW4L
-		// reader then takes the block as stored when the sizes are equal (never needed on retail).
+
 		if (block.stored_len == block.decoded_len) {
 			std::memcpy(dst, data, block.stored_len);
 			continue;
@@ -180,8 +176,8 @@ Result<std::vector<uint8_t>> decode_chunk_range(const Guid &p_id, std::span<cons
 	if (decoded != p_range.logical_offset) {
 		return block_error(start, BlockProblem::RangeLogicalOffset);
 	}
-	// Block offsets are reported in the whole payload: the range's start is the decoder's base.
+
 	return decode_blocks(p_stored.subspan(start, end - start), start);
 }
 
-} // namespace bf3::core
+}

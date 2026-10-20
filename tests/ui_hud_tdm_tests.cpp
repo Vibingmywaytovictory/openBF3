@@ -1,17 +1,3 @@
-// M2b ui: the TDM HUD's feed and lookups (bf3/host/hud_feed.h fill_hud_tdm, src/bf3_godot/src/hud_tdm_text.h;
-// docs/design/m2b.md §4, §2.6 #16; as built: docs/design/m2b-ui.md §4).
-//   suite "ui-hud-tdm-unit"    (ctest ui.hud.tdm.unit, data-free): fill_hud_tdm over a recorded round of display
-//                              frames (join in the pre-round, deploy, kills, the own kill, the own death with its
-//                              kill card, the spawn screen's timer and revive window, the round end, the restart),
-//                              checked frame by frame against what the frames say; the players by slot and the
-//                              sorted team lists; the kill-feed ring; the kit bar from a kit table; hostile inputs
-//                              clamped and counted; m2b off leaves every M2a byte as it was; the lookup lists' shape.
-//   suite "ui-hud-tdm-install" (ctest ui.hud.tdm.install, 77 without an install): every string the screens look up
-//                              resolves on the en text database to the English recorded in hud_tdm_text.h, every font
-//                              to a BF3 font of the en mapping, every atlas icon to a region with art, every placement
-//                              to its retail stage position, and the 13 TDM kit items (the 12 of M2a and the
-//                              defibrillator) to a name and a decodable _small icon; install.unchanged.
-// Rows print as "TDM ROW <name> <PASS|FAIL> <detail>".
 #include <doctest/doctest.h>
 
 #include "test_support.h"
@@ -80,7 +66,6 @@ std::string name_of(const ui::HudPlayerName &p_name) {
 	return std::string(p_name.data(), size_t(std::find(p_name.begin(), p_name.end(), '\0') - p_name.begin()));
 }
 
-// Defs 0..5 with item ids 1000 + def and name hashes 2000 + def; def 6 has no row (an unknown def).
 host::HudStatic make_static() {
 	host::HudStatic st;
 	for (uint32_t d = 0; d < 6; ++d) {
@@ -112,11 +97,10 @@ host::PresentEvent spawn_event(uint8_t p_slot) {
 	return e;
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-hud-tdm-unit") {
 
-// One recorded round, frame by frame: the own player is slot 3 on team 1 among 6 players.
 TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spawn screen, round end, restart") {
 	const host::HudStatic st = make_static();
 	std::vector<net::PlayerRow> rows{ player(1, 2, "Bot RU 1", 300, 3), player(2, 1, "Bot US 1", 200, 2), player(3, 1, "Me", 0, 0, false),
@@ -150,8 +134,8 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 		for (const host::PresentEvent &e : p_events) {
 			deaths_sent += e.kind == host::PresentKind::Death ? 1 : 0;
 		}
-		// The invariants every frame of this round holds.
-		bool ok = m.serial == serial; // the serial is fill_hud's
+
+		bool ok = m.serial == serial;
 		ok = ok && m.kill_counter.team1_kills == in.match.kills[0] && m.kill_counter.team2_kills == in.match.kills[1];
 		ok = ok && m.kill_counter.team1_max_kills == in.match.kill_limit;
 		ok = ok && m.messages.kill_message.newest_serial == deaths_sent && state.deaths_fed == deaths_sent;
@@ -164,7 +148,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 			++mismatches;
 		}
 	};
-	// Join in the pre-round: the spawn screen at once, without the timer or the revive line.
+
 	frame(100, {});
 	CHECK(m.pre_round.visible);
 	CHECK(m.pre_round.counting_down);
@@ -172,27 +156,27 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(m.pre_round.input_restricted);
 	CHECK(m.spawn_screen.visible);
 	CHECK(m.spawn_screen.at_join);
-	CHECK(m.spawn_screen.can_deploy); // own_respawn_tick 0
+	CHECK(m.spawn_screen.can_deploy);
 	CHECK(m.spawn_screen.seconds_to_deploy == 0.0f);
 	CHECK(!m.spawn_screen.revive_possible);
 	CHECK(m.spawn_screen.selected_kit == 2);
 	CHECK(!m.kill_card.visible);
 	CHECK(m.team.friendly_team == 1);
 	CHECK(m.team.enemy_team1 == 2);
-	// Deployed during the freeze.
+
 	in.alive = true;
 	in.spawned_this_round = true;
 	const host::PresentEvent own_spawn = spawn_event(3);
 	frame(200, std::span<const host::PresentEvent>(&own_spawn, 1));
 	CHECK(!m.spawn_screen.visible);
 	CHECK(m.pre_round.input_restricted);
-	// The round starts: the freeze lifts.
+
 	in.match.phase = net::MatchPhase::InRound;
 	in.match.countdown_end_tick = 0;
 	frame(600, {});
 	CHECK(!m.pre_round.visible);
 	CHECK(!m.pre_round.input_restricted);
-	// Kills between others, a headshot, a team kill and a fall.
+
 	const std::array<host::PresentEvent, 4> kills{ death(1, 2, 0, host::present_flags::kHeadshot, 700), death(9, 4, 1, 0, 701), death(4, 6, 2, 0, 702),
 		death(6, 6, sw::kNoWeapon, 0, 703) };
 	in.match.kills = { 1, 1 };
@@ -205,13 +189,13 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(hs.item_id == 1000);
 	CHECK(hs.headshot);
 	CHECK(!hs.team_kill);
-	CHECK(m.messages.kill_message.lines[3].team_kill); // 4 kills 6, both team 2
+	CHECK(m.messages.kill_message.lines[3].team_kill);
 	const ui::HudKill &fall = m.messages.kill_message.lines[4];
 	CHECK(fall.suicide);
 	CHECK(fall.item_id == 0);
 	CHECK(m.messages.local_kill_message.newest_serial == 0);
 	CHECK(state.unknown_defs == 0);
-	// The own kill: a local kill line too.
+
 	const host::PresentEvent own_kill = death(3, 1, 3, host::present_flags::kOwnShooter, 900);
 	in.match.kills = { 2, 1 };
 	frame(901, std::span<const host::PresentEvent>(&own_kill, 1));
@@ -221,7 +205,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(m.kill_counter.enemy_team_kills == 1);
 	CHECK(m.kill_counter.leading_by_kills == 1);
 	CHECK(m.kill_counter.player_team_position == 1);
-	// The own death by slot 6 (team 2, support kit) with a headshot at tick 1000: respawn at 1300, revivable to 1780.
+
 	rows[4].kit = 2;
 	host::PresentEvent own_death = death(6, 3, 4, host::present_flags::kOwnVictim | host::present_flags::kHeadshot, 1000);
 	own_death.value = 37.5f;
@@ -248,7 +232,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(!m.spawn_screen.visible);
 	CHECK(m.soldier.show_medic_revive);
 	CHECK(m.spawn_logic.start_time_to_respawn == doctest::Approx(5.0f));
-	// The card for kKillCardSeconds of the presentation clock (frames at 60 Hz), then the spawn screen.
+
 	in.kill_card_source = {};
 	uint32_t card_frames = 0;
 	bf3::sim::Tick t = 1003;
@@ -256,7 +240,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 		frame(t, {});
 		card_frames += m.kill_card.visible ? 1 : 0;
 	}
-	CHECK(card_frames == 4 * 60 - 1); // shown on the drain frame and until now_s reaches the card's end
+	CHECK(card_frames == 4 * 60 - 1);
 	CHECK(!m.kill_card.visible);
 	CHECK(m.spawn_screen.visible);
 	CHECK(!m.spawn_screen.at_join);
@@ -265,21 +249,21 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(m.spawn_screen.revive_possible);
 	CHECK(m.spawn_screen.seconds_revive_left == doctest::Approx(float(1780 - (t - 1)) / 60.0f));
 	CHECK(m.spawn_logic.time_to_respawn == m.spawn_screen.seconds_to_deploy);
-	// Deployable at the respawn tick, not one tick before.
+
 	frame(1299, {});
 	CHECK(!m.spawn_screen.can_deploy);
 	frame(1300, {});
 	CHECK(m.spawn_screen.can_deploy);
 	CHECK(m.spawn_screen.seconds_to_deploy == 0.0f);
-	// The revive window closes.
+
 	frame(1780, {});
 	CHECK(!m.spawn_screen.revive_possible);
 	CHECK(!m.soldier.show_medic_revive);
-	// Deploy again.
+
 	in.alive = true;
 	frame(1790, std::span<const host::PresentEvent>(&own_spawn, 1));
 	CHECK(!m.spawn_screen.visible);
-	// A second own death, then a revive inside the card: the own Spawn ends the card.
+
 	host::PresentEvent own_death2 = death(1, 3, 0, host::present_flags::kOwnVictim, 2000);
 	own_death2.extra = 2300;
 	own_death2.seed = 2780;
@@ -289,12 +273,12 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	frame(2001, std::span<const host::PresentEvent>(&own_death2, 1));
 	CHECK(m.kill_card.visible);
 	CHECK(m.kill_card.serial == 2);
-	CHECK(m.kill_card.distance_m < 0.0f); // the killer was not seen
+	CHECK(m.kill_card.distance_m < 0.0f);
 	in.alive = true;
 	frame(2100, std::span<const host::PresentEvent>(&own_spawn, 1));
 	CHECK(!m.kill_card.visible);
 	CHECK(!m.spawn_screen.visible);
-	// The round ends: team 2 reaches the limit; the restart is scheduled 60 s later.
+
 	in.match.phase = net::MatchPhase::RoundOver;
 	in.match.kills = { 97, 100 };
 	in.match.winner = 2;
@@ -308,12 +292,12 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(m.end_of_round.team_kills == std::array<int32_t, 2>{ 97, 100 });
 	CHECK(m.end_of_round.kill_limit == 100);
 	CHECK(m.end_of_round.seconds_to_next_round == doctest::Approx(3599.0f / 60.0f));
-	CHECK(m.end_of_round.top_players == std::array<uint8_t, 3>{ 9, 1, 6 }); // 500, then 300 / 300 by kills, then slot
+	CHECK(m.end_of_round.top_players == std::array<uint8_t, 3>{ 9, 1, 6 });
 	CHECK(m.team.enemy_team1_is_winner);
 	CHECK(!m.team.friendly_team_is_winner);
 	CHECK(!m.spawn_screen.visible);
 	CHECK(!m.pre_round.visible);
-	// The restart in place: the pre-round again, the counts 0, the spawn screen at join.
+
 	in.match = {};
 	in.match.phase = net::MatchPhase::PreRound;
 	in.match.kill_limit = 100;
@@ -339,7 +323,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 
 TEST_CASE("players by slot and the sorted team lists") {
 	const host::HudStatic st;
-	// Rows out of order, ties on score broken by kills then slot; the own player on team 2.
+
 	std::vector<net::PlayerRow> rows{ player(40, 2, "Forty", 100, 1), player(5, 1, "Five", 200, 2), player(7, 2, "Seven", 200, 2),
 		player(2, 1, "Two", 200, 3), player(63, 0, "Spectator", 900, 9), player(11, 2, "Me", 50, 0, false) };
 	rows[1].kit = 3;
@@ -369,13 +353,13 @@ TEST_CASE("players by slot and the sorted team lists") {
 	CHECK(m.players[5].bot);
 	CHECK(!m.players[11].bot);
 	CHECK(m.players[11].local);
-	CHECK(m.players[12].name[0] == '\0'); // no row: cleared
+	CHECK(m.players[12].name[0] == '\0');
 	CHECK(m.local_team == 2);
 	CHECK(m.team.scoreboard_enabled);
 	CHECK(m.team.friendly_team == 2);
 	CHECK(m.team.enemy_team1 == 1);
 	REQUIRE(m.team.team1_players.count == 2);
-	CHECK(m.team.team1_players.index[0] == 2); // 200 / 3 kills before 200 / 2
+	CHECK(m.team.team1_players.index[0] == 2);
 	CHECK(m.team.team1_players.index[1] == 5);
 	REQUIRE(m.team.team2_players.count == 3);
 	CHECK(m.team.team2_players.index[0] == 7);
@@ -384,7 +368,7 @@ TEST_CASE("players by slot and the sorted team lists") {
 	CHECK(m.team.friendly_team_players.count == 3);
 	CHECK(m.team.friendly_team_players.index[0] == 7);
 	CHECK(m.team.enemy_team1_players.index[0] == 2);
-	REQUIRE(m.team.sorted_players.count == 6); // the spectator row is listed, in no team
+	REQUIRE(m.team.sorted_players.count == 6);
 	CHECK(m.team.sorted_players.index[0] == 63);
 	CHECK(name_of(m.team.top_player1_name) == "Spectator");
 	CHECK(name_of(m.team.top_player2_name) == "Two");
@@ -397,8 +381,8 @@ TEST_CASE("players by slot and the sorted team lists") {
 	CHECK(m.kill_counter.leading_team_kills == 20);
 	CHECK(m.kill_counter.team_kills_list.count == 2);
 	CHECK(state.bad_inputs == 0);
-	// The next frame with fewer rows clears the slots that left.
-	rows = std::vector<net::PlayerRow>{ rows[1] }; // slot 5 only
+
+	rows = std::vector<net::PlayerRow>{ rows[1] };
 	in.players = rows;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(m.player_count == 6);
@@ -432,8 +416,8 @@ TEST_CASE("the kill-feed ring keeps the newest 8; unknown defs are counted") {
 		const uint16_t def = uint16_t((serial - 1) % 7);
 		CHECK(l.item_id == (def < 6 ? 1000u + def : 0u));
 	}
-	CHECK(state.unknown_defs == 2); // def 6 twice (i = 6, 13)
-	CHECK(m.messages.local_kill_message.newest_serial == 4); // i = 0, 5, 10, 15
+	CHECK(state.unknown_defs == 2);
+	CHECK(m.messages.local_kill_message.newest_serial == 4);
 	CHECK(state.deaths_fed == 20);
 	CHECK(state.own_deaths == 0);
 	CHECK(!m.kill_card.visible);
@@ -453,9 +437,9 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 			l.defs[6] = 3;
 			l.defs[7] = 4;
 		}
-		kits.loadouts[team][0].defs[host::kKitGadgetSlot] = 5; // the defibrillator
+		kits.loadouts[team][0].defs[host::kKitGadgetSlot] = 5;
 	}
-	kits.loadouts[1][3].defs[1] = 6; // a def without a row
+	kits.loadouts[1][3].defs[1] = 6;
 	host::HudFeedInput in;
 	in.m2b = true;
 	in.match_valid = true;
@@ -471,7 +455,7 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 	CHECK(m.spawn_screen.kit_items[0] == std::array<uint32_t, 5>{ 1001, 1002, 1005, 1003, 1004 });
 	CHECK(m.spawn_screen.kit_items[1] == std::array<uint32_t, 5>{ 1001, 1002, 0, 1003, 1004 });
 	CHECK(m.spawn_screen.kit_items[3] == std::array<uint32_t, 5>{ 1001, 0, 0, 1003, 1004 });
-	in.own_team = 0; // unknown: team 1's loadouts
+	in.own_team = 0;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(m.spawn_screen.kit_items[0][0] == 1000);
 	CHECK(state.bad_inputs == 0);
@@ -481,7 +465,7 @@ TEST_CASE("hostile inputs are skipped or clamped and counted") {
 	const host::HudStatic st = make_static();
 	std::vector<net::PlayerRow> rows{ player(200, 1, "Spectator slot"), player(3, 9, "Bad team"), player(4, 1, "Bad kit") };
 	rows[2].kit = 77;
-	rows[0].name_bytes = 200; // past the row's 16 bytes
+	rows[0].name_bytes = 200;
 	net::PlayerRow long_name = player(5, 1, "SixteenCharsName");
 	long_name.name_bytes = 250;
 	rows.push_back(long_name);
@@ -509,7 +493,7 @@ TEST_CASE("hostile inputs are skipped or clamped and counted") {
 	ui::HudModel m;
 	host::fill_hud_tdm(in, events, st, state, m);
 	CHECK(state.bad_inputs >= 10);
-	CHECK(m.player_count == 6); // slot 5 is the highest kept row
+	CHECK(m.player_count == 6);
 	CHECK(m.players[3].team == 0);
 	CHECK(m.players[4].kit == 0);
 	CHECK(name_of(m.players[5].name) == "SixteenCharsName");
@@ -517,13 +501,13 @@ TEST_CASE("hostile inputs are skipped or clamped and counted") {
 	CHECK(m.local_team == 0);
 	CHECK(m.kill_counter.team1_kills == 0);
 	CHECK(m.kill_counter.team1_max_kills == 0);
-	CHECK(m.messages.kill_message.newest_serial == 2); // the event with victim 99 is skipped
+	CHECK(m.messages.kill_message.newest_serial == 2);
 	CHECK(state.unknown_defs == 1);
 	CHECK(m.kill_card.serial == 1);
-	CHECK(m.kill_card.killer == ui::kHudNoPlayer); // killer 250: no player
+	CHECK(m.kill_card.killer == ui::kHudNoPlayer);
 	CHECK(m.kill_card.killer_health == 0.0f);
 	CHECK(m.kill_card.distance_m < 0.0f);
-	CHECK(!m.end_of_round.visible); // phase 7 is treated as Loading
+	CHECK(!m.end_of_round.visible);
 	CHECK(!m.pre_round.visible);
 	CHECK(m.end_of_round.winner == 0);
 	CHECK(m.spawn_screen.selected_kit == 0);
@@ -532,7 +516,7 @@ TEST_CASE("hostile inputs are skipped or clamped and counted") {
 	CHECK(m.spawn_screen.seconds_to_deploy <= 3600.0f);
 	CHECK(m.spawn_screen.seconds_revive_left <= 3600.0f);
 	CHECK(std::isfinite(m.kill_card.seconds_left));
-	// A Spawn event of an out-of-range slot changes nothing; an empty frame stays sane.
+
 	const host::PresentEvent odd = spawn_event(255);
 	host::fill_hud_tdm(in, std::span<const host::PresentEvent>(&odd, 1), st, state, m);
 	CHECK(state.frames == 2);
@@ -550,7 +534,7 @@ TEST_CASE("m2b off: every M2b screen hidden and the M2a part of the model untouc
 	m.end_of_round.visible = true;
 	std::vector<uint8_t> before(offsetof(ui::HudModel, kill_card));
 	std::memcpy(before.data(), &m, before.size());
-	host::HudFeedInput in; // m2b false
+	host::HudFeedInput in;
 	in.match_valid = true;
 	in.match.phase = net::MatchPhase::RoundOver;
 	const host::PresentEvent d = death(1, 2, 0);
@@ -588,9 +572,7 @@ TEST_CASE("the lookup lists: SIDs, fonts, icons and placements are well formed")
 	}
 }
 
-} // TEST_SUITE
-
-// ---- install ----------------------------------------------------------------------------------------------------------
+}
 
 namespace {
 
@@ -620,7 +602,6 @@ TdmInstall *tdm_install() {
 	return s;
 }
 
-// The 13 TDM kit items (m2a.md §5.6's 12 and the assault gadget of m2b.md §2.6 #9) and their English names.
 struct KitItem {
 	std::string_view variant;
 	std::string_view name;
@@ -638,10 +619,10 @@ constexpr KitItem kTdmKitItems[] = {
 	{ "weapons/mp443/u_mp443", "MP443" },
 	{ "weapons/knife/u_knife", "KNIFE" },
 	{ "weapons/m67/u_m67", "M67 GRENADE" },
-	{ host::kTdmAssaultGadget, "DEFIBRILLATOR" }, // [verified 2026-10-19, this row]
+	{ host::kTdmAssaultGadget, "DEFIBRILLATOR" },
 };
 
-} // namespace
+}
 
 TEST_SUITE("ui-hud-tdm-install") {
 
@@ -738,7 +719,7 @@ TEST_CASE("the 13 TDM kit items: names and _small icons") {
 		bf3::core::Result<gp::WeaponDef> d = weapons->catalog->resolve(std::string(k.variant));
 		REQUIRE_MESSAGE(d.ok(), (std::string(k.variant) + ": " + (d.ok() ? std::string() : d.error().message)));
 		const ui::ItemIcon *icon = items->find(d->unlock_identifier);
-		// The kill card's name: the def's SID, else the item description's (apply_item_names).
+
 		uint32_t name_hash = d->name_sid_hash;
 		if (name_hash == 0 && icon != nullptr && !icon->name_sid.empty()) {
 			name_hash = ui::text_hash(icon->name_sid);
@@ -772,4 +753,4 @@ TEST_CASE("install.unchanged") {
 	CHECK(d.clean());
 }
 
-} // TEST_SUITE
+}

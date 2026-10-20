@@ -1,10 +1,3 @@
-// Phase B of the level load: the scene lanes (docs/design/m1.md §12.1, §12.2; level_scene.h SceneLanes). Godot-free.
-//
-// Scheduling: one queue per kind, taken under one mutex. A lane takes, in this order, the next terrain, a texture
-// while fewer than texture_lanes lanes decode textures, a mesh request (its blob once, then every plan mesh of it
-// on the same lane), and otherwise waits for a texture slot or ends. Before handing an item to the sink a lane
-// waits while the in-flight bytes plus the item's would cross max_inflight_bytes (an item is admitted alone when
-// nothing is in flight, so one item larger than the cap cannot stall the load); release_bytes and cancel wake it.
 #include "bf3/render/level_scene.h"
 
 #include "level_scene_internal.h"
@@ -28,7 +21,7 @@ double seconds(Clock::duration p_d) {
 	return std::chrono::duration<double>(p_d).count();
 }
 
-} // namespace
+}
 
 struct SceneLanes::Impl {
 	const LevelScenePlan *plan = nullptr;
@@ -37,15 +30,15 @@ struct SceneLanes::Impl {
 	SceneSink *sink = nullptr;
 	SceneLaneOptions options;
 
-	std::vector<uint32_t> requests; // requests with at least one plan mesh, in plan order
-	std::vector<std::vector<uint32_t>> request_meshes; // per request: its plan meshes
+	std::vector<uint32_t> requests;
+	std::vector<std::vector<uint32_t>> request_meshes;
 
 	mutable std::mutex mutex;
 	std::condition_variable wake;
 	size_t next_terrain = 0, next_texture = 0, next_request = 0;
 	unsigned textures_running = 0;
 	uint64_t inflight = 0;
-	SceneLaneStats stats; // under mutex
+	SceneLaneStats stats;
 	Clock::time_point start;
 	Clock::time_point last_handed;
 	bool any_handed = false;
@@ -79,14 +72,13 @@ struct SceneLanes::Impl {
 				return { Kind::Mesh, requests[next_request++] };
 			}
 			if (next_texture < plan->textures.size() && options.texture_lanes > 0) {
-				wake.wait(lock); // a texture lane ends, or cancel
+				wake.wait(lock);
 				continue;
 			}
 			return {};
 		}
 	}
 
-	// Waits until the item fits under the cap; false when cancelled.
 	bool admit(uint64_t p_bytes) {
 		std::unique_lock<std::mutex> lock(mutex);
 		wake.wait(lock, [&] { return cancelled || inflight == 0 || inflight + p_bytes <= options.max_inflight_bytes; });
@@ -332,4 +324,4 @@ core::Result<SceneLaneStats> SceneLanes::wait() {
 	return d.stats;
 }
 
-} // namespace bf3::render
+}

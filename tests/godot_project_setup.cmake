@@ -1,9 +1,3 @@
-# ctest godot.project_setup (FIXTURES_SETUP godot_project; docs/testing.md "Godot rows"): prepares the Godot project
-# once before any godot.* row of a ctest call. It writes .godot/extension_list.cfg (one line,
-# res://openbf3.gdextension) when that file is missing, write-then-rename so a concurrent reader never sees half a
-# file, and checks that the extension DLL exists. It never runs --import: the first --import of a project that was
-# never opened registers the extension and then exits 0xC0000005 (README "Run"); the one-line file has the same effect.
-#   cmake -DPROJECT_DIR=<bf3-opensource> -DDLL=<extension dll> -P godot_project_setup.cmake
 cmake_minimum_required(VERSION 3.29)
 set(cfg "${PROJECT_DIR}/.godot/extension_list.cfg")
 if(NOT EXISTS "${cfg}")

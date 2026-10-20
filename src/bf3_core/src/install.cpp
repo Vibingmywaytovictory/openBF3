@@ -1,4 +1,3 @@
-// Ported from IW4L asset_transport::bf3 (install.rs, cas.rs, file.rs), Apache-2.0.
 #include "bf3/core/install.h"
 
 #include "bf3/core/superbundle_mount.h"
@@ -7,8 +6,6 @@
 #include <algorithm>
 
 namespace bf3::core {
-
-// --- InstallFile --------------------------------------------------------------------------------
 
 Status InstallFile::read_into(uint64_t p_offset, std::span<uint8_t> p_dst) const {
 	const uint64_t len = p_dst.size();
@@ -48,8 +45,6 @@ std::string join(std::string_view p_dir, std::string_view p_relative) {
 	return out;
 }
 
-// IW4L file.rs `resolve`: the joined name when it exists (Windows paths are case-insensitive, so
-// this also covers other casings), else nothing.
 std::optional<std::string> resolve(const InstallReader &p_reader, std::string_view p_dir, std::string_view p_relative) {
 	std::string path = join(p_dir, p_relative);
 	if (p_reader.exists(path)) {
@@ -58,9 +53,7 @@ std::optional<std::string> resolve(const InstallReader &p_reader, std::string_vi
 	return std::nullopt;
 }
 
-} // namespace
-
-// --- CasStore -----------------------------------------------------------------------------------
+}
 
 Status CasStore::open(const InstallReader *p_reader, const std::vector<std::string> &p_dirs) {
 	reader_ = p_reader;
@@ -173,8 +166,6 @@ Status CasStore::check_entry_header(const Sha1 &p_sha1) const {
 	return {};
 }
 
-// --- Install ------------------------------------------------------------------------------------
-
 namespace {
 
 std::vector<Package> discover_packages(const InstallReader &p_reader) {
@@ -191,7 +182,7 @@ std::vector<Package> discover_packages(const InstallReader &p_reader) {
 		ReadOnlyFile f = p_reader.open(*mft);
 		std::vector<uint8_t> bytes;
 		if (!f.is_open() || !f.read_all(bytes) || !detail::valid_utf8(bytes)) {
-			continue; // IW4L: read_to_string failed -> not a package
+			continue;
 		}
 		const PackageManifest m = parse_package_manifest(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
 		Package p;
@@ -207,7 +198,7 @@ std::vector<Package> discover_packages(const InstallReader &p_reader) {
 	return packages;
 }
 
-} // namespace
+}
 
 std::optional<uint8_t> expansion_of(std::string_view p_level_id) {
 	if (p_level_id.size() >= 4 && (p_level_id[0] == 'x' || p_level_id[0] == 'X') && (p_level_id[1] == 'p' || p_level_id[1] == 'P') &&
@@ -262,8 +253,6 @@ Result<std::shared_ptr<Install>> Install::open(const InstallReader &p_reader) {
 	}
 	self->data_dir_ = *data_dir;
 
-	// mounted_packages: the authoritative package is the patch; keep packages whose
-	// RequireVersion the patch satisfies; order by (MountOrder, Name).
 	std::vector<Package> packages = discover_packages(reader);
 	std::optional<Package> patch;
 	const auto auth = std::find_if(packages.begin(), packages.end(), [](const Package &p) { return p.authoritative; });
@@ -496,11 +485,11 @@ Result<std::shared_ptr<const TocChunkMap>> Install::chunk_toc(const SuperbundleS
 				s.offset = c.offset;
 				s.size = c.size;
 			}
-			(*chunks)[c.id] = std::move(s); // patch toc wins
+			(*chunks)[c.id] = std::move(s);
 		}
 	}
 	std::lock_guard lock(chunk_tocs_mutex_);
 	return std::shared_ptr<const TocChunkMap>(chunk_tocs_.try_emplace(key, std::move(chunks)).first->second);
 }
 
-} // namespace bf3::core
+}

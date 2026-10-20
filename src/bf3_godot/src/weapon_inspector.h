@@ -1,21 +1,4 @@
 #pragma once
-// Bf3WeaponInspector: the in-game WeaponDef inspector (plan §6 M0 exit: "an in-game inspector prints
-// the resolved M16A3/M16A4-burst WeaponDef matching §7.1 and its localised name").
-//
-// A CanvasLayer panel, toggled with F2: a list of every weapon variant of the level (the M16A3 and
-// the M16A4 burst first) and, for the selected one, its localised name (tr() of the name SID through
-// Bf3Localisation) and bf3_core's WeaponDef block, the one `bf3dump weapon --name` prints.
-// Resolution runs on a worker thread through bf3_core's WeaponCatalog: an EbxLibrary over the level
-// superbundle (default MP_Subway) and Win32/UI, the level's material grid with its body multipliers.
-// The catalog is built on first use (panel shown or a command-line mode), not at game start.
-//
-// User args (after "--"):
-//   --inspector                         show the panel at start
-//   --inspector-level=<superbundle>     level superbundle (default Win32/Levels/MP_Subway/MP_Subway)
-//   --inspect-weapon=<partition> [--unlock=<u_..>]...
-//                                       print that weapon's block to stdout and quit (0, or 1 on error)
-//   --m0-inspector-check                resolve the M16A3 and M16A4 burst through the same path,
-//                                       compare with plan §7.1, print PASS/FAIL lines, quit 0/1
 
 #include "m0_inspector_check.h"
 
@@ -36,7 +19,7 @@ class Control;
 class ItemList;
 class Label;
 class TextEdit;
-} // namespace godot
+}
 
 namespace bf3::godot_side {
 
@@ -46,8 +29,8 @@ class Bf3WeaponInspector : public godot::CanvasLayer {
 	GDCLASS(Bf3WeaponInspector, godot::CanvasLayer)
 
 public:
-	// The two weapons of the M0 exit criterion.
-	static constexpr const char *kM16A3 = "weapons/m16a4/m16a4"; // blueprint, through its base variant u_m16a4
+
+	static constexpr const char *kM16A3 = "weapons/m16a4/m16a4";
 	static constexpr const char *kM16A4Burst = "weapons/m16a4/u_m16_burst";
 
 	Bf3WeaponInspector();
@@ -70,26 +53,25 @@ private:
 	enum class Mode { Interactive, InspectWeapon, Check };
 	enum class State { Idle, WaitingForText, Resolving, Ready, Failed };
 
-	// One list row, produced on the worker.
 	struct Entry {
-		std::string partition; // what was asked for (a variant, or the M16A3 blueprint)
-		std::string target; // what was resolved
+		std::string partition;
+		std::string target;
 		std::string name_sid;
-		std::string name; // from the text database ("" without a SID)
-		std::string block; // format_weapon text, or the error
+		std::string name;
+		std::string block;
 		bool ok = false;
 		bool featured = false;
-		std::optional<bf3::core::gameplay::WeaponDef> def; // kept for the featured two (the M0 check)
+		std::optional<bf3::core::gameplay::WeaponDef> def;
 	};
-	// Everything the worker hands back (read on the main thread after job_done_).
+
 	struct JobResult {
-		std::string error; // catalog failure
+		std::string error;
 		std::string level;
 		size_t partitions = 0;
 		double seconds = 0;
 		std::string grid_error;
-		std::vector<Entry> entries; // the featured two, then every variant
-		std::string inspect_block; // --inspect-weapon
+		std::vector<Entry> entries;
+		std::string inspect_block;
 		std::string inspect_error;
 	};
 
@@ -117,7 +99,7 @@ private:
 	bool quitting_ = false;
 	godot::String status_;
 
-	Bf3Localisation *own_localisation_ = nullptr; // created when the scene has none
+	Bf3Localisation *own_localisation_ = nullptr;
 
 	std::thread job_;
 	std::atomic<bool> job_done_{ false };
@@ -131,4 +113,4 @@ private:
 	godot::TextEdit *block_ = nullptr;
 };
 
-} // namespace bf3::godot_side
+}

@@ -1,5 +1,3 @@
-// WalkerBrain (bots/walker_brain.h; docs/design/s1.md §7): goals on the main component, a path through the shared
-// PathService, a NavCorridor, cheap per-tick steering and a staggered think. Writes Commands only.
 #include "bf3/sim/bots/walker_brain.h"
 
 #include "../nav_internal.h"
@@ -39,19 +37,18 @@ float wrap_angle(float p_radians) {
 	return a;
 }
 
-// Yaw 0 looks down +Z, a quarter turn down +X (command.h): the yaw of a horizontal direction.
 float yaw_of(float p_dx, float p_dz) {
 	return std::atan2(p_dx, p_dz);
 }
 
-constexpr float kDropReach = 0.6f; // metres from a drop's start corner at which the walker commits to the drop
-constexpr float kDropTimeout = 3.0f; // seconds to reach a drop's landing before repathing
+constexpr float kDropReach = 0.6f;
+constexpr float kDropTimeout = 3.0f;
 constexpr float kArriveVertical = 1.5f;
-constexpr float kBackRadius = 16.0f; // an off-mesh walker looks this far for the mesh
-constexpr float kSprintStraight = 6.0f; // sprint only when the next corner is at least this far ...
-constexpr float kSprintCone = 20.0f * kPi / 180.0f; // ... and within this angle of the view
+constexpr float kBackRadius = 16.0f;
+constexpr float kSprintStraight = 6.0f;
+constexpr float kSprintCone = 20.0f * kPi / 180.0f;
 
-} // namespace
+}
 
 struct WalkerBrain::Impl {
 	uint32_t slot = 0;
@@ -74,8 +71,8 @@ struct WalkerBrain::Impl {
 	bool next_objective = false;
 	bool sprint_leg = false;
 	bool crouch_leg = false;
-	uint32_t repaths_in_row = 0; // stuck repaths without progress since
-	uint32_t partial_in_row = 0; // partial / failed answers for this goal
+	uint32_t repaths_in_row = 0;
+	uint32_t partial_in_row = 0;
 
 	bool need_path = false;
 	bool pending = false;
@@ -91,15 +88,14 @@ struct WalkerBrain::Impl {
 	Tick drop_tick = 0;
 
 	bool off_mesh = false;
-	// The component goals are drawn from: the main one, or the bot's own when a path request found its start poly
-	// outside main (docs §7 "Goals"; review of revision 2). UINT32_MAX = main.
+
 	uint32_t home = UINT32_MAX;
 	bool back_target_valid = false;
 	Vec3 back_target{};
 
 	Vec3 anchor{};
 	Tick anchor_tick = 0;
-	uint32_t moving_ticks = 0; // ticks with commanded movement since the anchor
+	uint32_t moving_ticks = 0;
 
 	void forget_goal() {
 		have_goal = false;
@@ -177,7 +173,6 @@ struct WalkerBrain::Impl {
 		return true;
 	}
 
-	// Takes the path service's answer (every tick while one is pending: a hash lookup).
 	void take_answer(const WalkerView &p_view, const Vec3 &p_position) {
 		if (!pending || p_view.paths == nullptr) {
 			return;
@@ -207,7 +202,6 @@ struct WalkerBrain::Impl {
 		corner_index = 0;
 	}
 
-	// The staggered think: corridor, corners, arrival, progress, stuck, path requests.
 	void think(const WalkerView &p_view, const SoldierState &p_self) {
 		++stats.thinks;
 		NavQuery &query = *p_view.query;
@@ -232,7 +226,6 @@ struct WalkerBrain::Impl {
 			}
 		}
 
-		// Arrival (docs §7: within 1.5 m horizontally and vertically).
 		if (horizontal(pos, goal.position) <= goal.arrive_radius && std::fabs(pos[1] - goal.position[1]) <= kArriveVertical) {
 			++stats.goals_reached;
 			forget_goal();
@@ -241,7 +234,6 @@ struct WalkerBrain::Impl {
 			}
 		}
 
-		// Progress and stuck: commanded movement over stuck_seconds with less than stuck_progress metres.
 		if (p_view.tick - anchor_tick >= stuck_ticks) {
 			const bool moved_enough = horizontal(pos, anchor) >= params.stuck_progress;
 			if (moving_ticks * 2 >= stuck_ticks && !moved_enough) {
@@ -276,13 +268,13 @@ struct WalkerBrain::Impl {
 				off_mesh = false;
 				const bool at_end = corner_count == 1 && corners[0].end && horizontal(pos, corners[0].position) <= goal.arrive_radius;
 				if (at_end && !corridor_partial) {
-					// The corridor's end is the goal (its closest point on the goal's poly): arrived.
+
 					++stats.goals_reached;
 					forget_goal();
 					return;
 				}
 				if (corner_count == 0 || at_end) {
-					// The partial corridor's end is reached (or nothing is left): ask again from here.
+
 					if (++partial_in_row > params.max_repaths) {
 						abandon();
 						return;
@@ -307,8 +299,7 @@ struct WalkerBrain::Impl {
 				const uint32_t c = nav_poly_component(query.world(), *p_view.components, start);
 				const uint32_t want = home == UINT32_MAX ? p_view.main_component : home;
 				if (c != UINT32_MAX && c != want) {
-					// Outside the goals' component (a spawn the filter could not avoid, or a fall): goals from here on
-					// come from the bot's own component, so it keeps walking instead of abandoning goal after goal.
+
 					++stats.starts_outside_main;
 					home = c == p_view.main_component ? UINT32_MAX : c;
 					forget_goal();
@@ -322,7 +313,6 @@ struct WalkerBrain::Impl {
 		}
 	}
 
-	// Per-tick steering towards the current target (no nav query except committing to a drop).
 	Command steer(const WalkerView &p_view, const SoldierState &p_self) {
 		Command c;
 		c.tick = p_view.tick;
@@ -383,7 +373,7 @@ struct WalkerBrain::Impl {
 				const float want = yaw_of(dx, dz);
 				const float turn = std::clamp(wrap_angle(want - yaw), -turn_per_tick, turn_per_tick);
 				yaw = wrap_angle(yaw + turn);
-				// The remaining direction in the new yaw's frame: forward (sin, cos), right (-cos, sin) (motor axes).
+
 				const float len = std::sqrt(dx * dx + dz * dz);
 				const float ux = dx / len, uz = dz / len;
 				const float sy = std::sin(yaw), cy = std::cos(yaw);
@@ -452,7 +442,7 @@ Command WalkerBrain::command(const WalkerView &p_view) {
 	if (self->life != m.life) {
 		m.life = self->life;
 		m.forget_goal();
-		m.home = UINT32_MAX; // a new life spawns on the main component (bot spawn filter, docs §8)
+		m.home = UINT32_MAX;
 		m.have_last = false;
 		m.yaw_set = false;
 		m.off_mesh = false;
@@ -484,4 +474,4 @@ const BotGoal *WalkerBrain::goal() const {
 	return impl_->have_goal ? &impl_->goal : nullptr;
 }
 
-} // namespace bf3::sim::bots
+}

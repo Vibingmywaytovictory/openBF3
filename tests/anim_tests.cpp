@@ -1,10 +1,3 @@
-// bf3_anim: skeletons, clip sampling to poses, model space and skinning binds.
-//
-// Suite "anim-unit": synthetic skeletons and clips, no data.
-// Suite "anim": the retail install, read-only (Ant banks through AntInstallSource, the EBX skeletons and the
-// skinned meshes from Win32/Levels/MP_Subway/MP_Subway); exits 77 (skipped) without an install. With
-// OPENBF3_ANT_ORACLE = the Ant probe's output folder it also compares model-space poses built from the probe's
-// m9_ReloadEmpty_Anim.json. Asserts numbers only; nothing from BF3 is stored in the repo.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/clip_asset.h"
@@ -49,7 +42,6 @@ bool near_vec(const Vec3 &a, const Vec3 &b, double p_eps = 1e-5) {
 	return vec_dist(a, b) < p_eps;
 }
 
-// A 3-bone chain: root at origin, child 1 m up X rotated 90 deg about Z, grandchild 1 m along its X.
 Skeleton chain() {
 	std::vector<Bone> bones(3);
 	bones[0].name = "Root";
@@ -73,20 +65,20 @@ std::string env_var(const char *p_name) {
 	return s;
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim-unit") {
 	TEST_CASE("anim: quaternion and transform algebra") {
 		const Quat a = axis_angle(0, 1, 0, 90);
 		const Vec3 r = quat_rotate(a, Vec3{ 1, 0, 0 });
-		CHECK(near_vec(r, Vec3{ 0, 0, -1 })); // +X turns to -Z about +Y
+		CHECK(near_vec(r, Vec3{ 0, 0, -1 }));
 		CHECK(quat_angle_deg(a, Quat{}) == doctest::Approx(90.0).epsilon(1e-5));
-		CHECK(quat_angle_deg(a, Quat{ -a.x, -a.y, -a.z, -a.w }) < 1e-3); // q and -q
+		CHECK(quat_angle_deg(a, Quat{ -a.x, -a.y, -a.z, -a.w }) < 1e-3);
 		const Xform x{ quat_mul(axis_angle(1, 0, 0, 30), axis_angle(0, 0, 1, 50)), Vec3{ 0.3f, -2.0f, 5.0f } };
 		const Xform id = xform_mul(x, xform_inverse(x));
 		CHECK(quat_angle_deg(id.q, Quat{}) < 1e-3);
 		CHECK(near_vec(id.t, Vec3{}));
-		// Matrix and quaternion forms agree, and the affine inverse undoes them.
+
 		const Mat34 m = mat_from_xform(x);
 		const Vec3 p{ 0.25f, 1.5f, -0.75f };
 		CHECK(near_vec(mat_point(m, p), xform_point(x, p)));
@@ -97,7 +89,7 @@ TEST_SUITE("anim-unit") {
 		Mat34 singular;
 		singular.m[1] = { 0, 0, 0, 0 };
 		CHECK_FALSE(mat_inverse(singular, inv));
-		// A Frostbite LinearTransform's rows (right, up, forward, trans) become the matrix columns.
+
 		const Mat34 lt = mat_from_linear_transform({ { { 0, 0, -1 }, { 0, 1, 0 }, { 1, 0, 0 }, { 1, 2, 3 } } });
 		CHECK(near_vec(lt.column(0), Vec3{ 0, 0, -1 }));
 		CHECK(near_vec(lt.column(2), Vec3{ 1, 0, 0 }));
@@ -107,18 +99,18 @@ TEST_SUITE("anim-unit") {
 
 	TEST_CASE("anim: skeleton order, lookups and model pose") {
 		std::vector<Bone> bad(2);
-		bad[0].parent = 1; // parent after the bone
+		bad[0].parent = 1;
 		CHECK_FALSE(Skeleton::make(bad).ok());
 		const Skeleton s = chain();
 		CHECK(s.find("Mid") == 1);
-		CHECK(s.find("mid") == -1); // names are case-sensitive, like the data
+		CHECK(s.find("mid") == -1);
 		CHECK(map_names({ "Tip", "Nope", "Root" }, s) == std::vector<int32_t>{ 2, -1, 0 });
 		std::vector<Xform> model;
 		model_pose(s, rest_pose(s), model);
 		REQUIRE(model.size() == 3);
 		CHECK(near_vec(model[1].t, Vec3{ 1, 0, 0 }));
-		CHECK(near_vec(model[2].t, Vec3{ 1, 1, 0 })); // the Mid bone's +X points along +Y
-		// Rotating the root carries the children.
+		CHECK(near_vec(model[2].t, Vec3{ 1, 1, 0 }));
+
 		LocalPose p = rest_pose(s);
 		p.joints[0].q = axis_angle(0, 1, 0, 90);
 		model_pose(s, p, model);
@@ -129,7 +121,7 @@ TEST_SUITE("anim-unit") {
 	}
 
 	TEST_CASE("anim: clip channels drive bones by name") {
-		// A two-channel clip (one rotation, one translation) bound to the chain through a fake rig.
+
 		DecodedClip clip;
 		clip.num_keys = 2;
 		clip.num_quats = 1;
@@ -149,8 +141,8 @@ TEST_SUITE("anim-unit") {
 		b.dofs[0].kind = bf3::core::ant::DofKind::Rotation;
 		b.dofs[1].kind = bf3::core::ant::DofKind::Translation;
 		b.tracks.resize(2);
-		b.tracks[0] = { 0, 'q', 0, 1, true }; // rotation of rig joint 1 = "Mid"
-		b.tracks[1] = { 1, 'v', 1, 0, true }; // translation of rig joint 0 = "Tip"
+		b.tracks[0] = { 0, 'q', 0, 1, true };
+		b.tracks[1] = { 1, 'v', 1, 0, true };
 		const Skeleton s = chain();
 		bf3::core::Result<ClipTracks> t = bind_clip_tracks(b, clip, s);
 		REQUIRE(t.ok());
@@ -160,11 +152,11 @@ TEST_SUITE("anim-unit") {
 		CHECK(t->duration_seconds() == doctest::Approx(1.0f / 3.0f));
 		LocalPose pose;
 		ClipPose scratch;
-		REQUIRE(sample_pose(s, clip, *t, 5.0f, pose, scratch)); // halfway: Mid at 45 deg, Tip at 2 m
+		REQUIRE(sample_pose(s, clip, *t, 5.0f, pose, scratch));
 		CHECK(quat_angle_deg(pose.joints[1].q, axis_angle(0, 0, 1, 45)) < 1e-3);
 		CHECK(near_vec(pose.joints[2].t, Vec3{ 2, 0, 0 }));
-		CHECK(near_vec(pose.joints[0].t, Vec3{})); // undriven bones keep the rest pose
-		// A scale DOF is not applied; a track count mismatch is an error.
+		CHECK(near_vec(pose.joints[0].t, Vec3{}));
+
 		b.dofs[1].kind = bf3::core::ant::DofKind::Scale;
 		t = bind_clip_tracks(b, clip, s);
 		REQUIRE(t.ok());
@@ -179,7 +171,7 @@ TEST_SUITE("anim-unit") {
 		const Skeleton s = chain();
 		std::vector<Xform> model;
 		model_pose(s, rest_pose(s), model);
-		// The mesh skeleton lists the same bones in another order, with the chain's model pose as bind pose.
+
 		EbxSkeleton ebx;
 		ebx.partition = "test/skeleton";
 		ebx.bone_names = { "Tip", "Root", "Mid", "Extra" };
@@ -192,16 +184,16 @@ TEST_SUITE("anim-unit") {
 		CHECK(*b0 == 0);
 		CHECK(binds.binds()[0].bone == 2);
 		CHECK(*binds.bind(ebx, 2, s) == 1);
-		CHECK(*binds.bind(ebx, 0, s) == 0); // shared, not added twice
+		CHECK(*binds.bind(ebx, 0, s) == 0);
 		CHECK(binds.size() == 2);
-		CHECK_FALSE(binds.bind(ebx, 3, s).ok()); // no bone "Extra" in the posed skeleton
-		CHECK_FALSE(binds.bind(ebx, 9, s).ok()); // out of range
+		CHECK_FALSE(binds.bind(ebx, 3, s).ok());
+		CHECK_FALSE(binds.bind(ebx, 9, s).ok());
 		std::vector<Mat34> skin;
 		skin_matrices(model, binds.binds(), skin);
 		for (const Mat34 &m : skin) {
 			CHECK(mat_max_diff(m, Mat34{}) < 1e-5f);
 		}
-		// Bending Mid moves a vertex bound to Tip with the bone.
+
 		LocalPose p = rest_pose(s);
 		p.joints[1].q = Quat{};
 		model_pose(s, p, model);
@@ -210,7 +202,6 @@ TEST_SUITE("anim-unit") {
 	}
 }
 
-// =============================================================================================
 namespace {
 
 constexpr const char *kSubway = "Win32/Levels/MP_Subway/MP_Subway";
@@ -291,7 +282,7 @@ std::vector<Xform> clip_model(const AnimData &p_d, const LoadedClip &p_clip, flo
 	return model;
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim") {
 	TEST_CASE("anim: the 1P rig skeleton and the ReloadEmpty tracks") {
@@ -311,12 +302,11 @@ TEST_SUITE("anim") {
 		CHECK(d->venice1p.size() == 179);
 		CHECK(d->weapon.size() == 25);
 		CHECK(d->weapon.bone_names[1] == "Wep_Root");
-		// Every EBX bone of both mesh skeletons names a rig joint, except the two ankle effector aux joints
-		// the README lists the other way round (rig joints without an EBX bone).
+
 		const std::vector<int32_t> v = map_names(d->venice1p.bone_names, d->rig);
 		const std::vector<int32_t> w = map_names(d->weapon.bone_names, d->rig);
 		CHECK(std::count(v.begin(), v.end(), -1) == 0);
-		CHECK(std::count(w.begin(), w.end(), -1) == 1); // exportAnimation
+		CHECK(std::count(w.begin(), w.end(), -1) == 1);
 		CHECK(w[0] == -1);
 	}
 
@@ -378,7 +368,7 @@ TEST_SUITE("anim") {
 							   << m9->mesh.lods[0].bones.size() << ")");
 		CHECK(arm_binds == arms->mesh.lods[0].bones.size());
 		CHECK(binds.size() - arm_binds == m9->mesh.lods[0].bones.size());
-		// The M9's bone table names Wep_Root, Wep_Trigger, Wep_Slide, Wep_Mag and Wep_Physic1 (hash 0xa6d64831).
+
 		std::vector<std::string> m9_names;
 		for (size_t i = arm_binds; i < binds.size(); ++i) {
 			m9_names.push_back(binds.binds()[i].name);
@@ -387,8 +377,6 @@ TEST_SUITE("anim") {
 		CHECK(m9_names == std::vector<std::string>{ "Wep_Mag", "Wep_Physic1", "Wep_Root", "Wep_Slide", "Wep_Trigger" });
 		CHECK(bf3::core::res::hash_quick("wep_physic1") == 0xa6d64831u);
 
-		// At the rig's rest pose every skin matrix of a mesh is (nearly) the same rigid transform: the offset
-		// between the rig's model space and the mesh skeleton's (the rig's AITrajectory turns by 90 deg).
 		std::vector<Xform> model;
 		model_pose(d->rig, rest_pose(d->rig), model);
 		std::vector<Mat34> skin;
@@ -435,14 +423,14 @@ TEST_SUITE("anim") {
 				const double eye = vec_dist(m[size_t(cam)].t, m[size_t(root)].t);
 				MESSAGE("frame " << f << ": RightHand-Wep_Root " << hand * 100.0 << " cm, CameraJoint-Wep_Root " << eye * 100.0 << " cm, LeftHand-Wep_Root "
 								 << vec_dist(m[size_t(left)].t, m[size_t(root)].t) * 100.0 << " cm");
-				CHECK(hand < 0.15); // the right hand holds the grip
-				CHECK(eye > 0.15); // the gun is in front of the eye, not inside it
+				CHECK(hand < 0.15);
+				CHECK(eye > 0.15);
 				CHECK(eye < 0.8);
 			}
 		}
 		MESSAGE("Wep_Mag leaves Wep_Root by up to " << max_mag * 100.0 << " cm (frame " << mag_out_frame << "); Wep_Slide by up to " << max_slide * 100.0 << " cm");
 		CHECK(max_mag > 0.10);
-		// The empty reload starts with the slide locked back and ends with it released: everything else closes the loop.
+
 		const std::vector<Xform> first = clip_model(*d, d->reload, 0.0f), last = clip_model(*d, d->reload, 65.0f);
 		std::vector<bool> mask(d->rig.size(), true);
 		mask[size_t(slide)] = false;
@@ -475,7 +463,7 @@ TEST_SUITE("anim") {
 		const std::string text = ss.str();
 		bf3::tools::json::Value root;
 		REQUIRE(bf3::tools::json::Parser(text).parse(root));
-		// The probe's own skeleton (joints: parent, t, q) and per-key local tracks -> model space.
+
 		const bf3::tools::json::Value *joints = root.get("joints"), *tracks = root.get("tracks"), *keys = root.get("keyTimes");
 		REQUIRE(joints != nullptr);
 		REQUIRE(tracks != nullptr);

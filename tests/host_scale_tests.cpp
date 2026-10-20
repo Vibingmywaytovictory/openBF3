@@ -1,17 +1,3 @@
-// Suites host-scale-unit (no data) and host-scale (install; exits 77 without one): spike S1 server scale
-// (docs/design/s1.md §1 G1 / G3, §6, §7, §8, §10).
-//
-// host-scale-unit: walker bots on the real GameServer over synthetic worlds: 64 walkers for 60 s reach goals and walk,
-// the run reproduces (a hash of every state), the staggered thinks per tick, the per-tick parts sum to the whole
-// (encode 0 between snapshots), the PathService budget, the spawn filter (excluded points, teams merged, synthetic
-// points), a bot outside the main component walks goals of its own component, stuck detection on a door the motor
-// cannot pass (repath, then a new goal), the tail split names an injected slow part, the initial spawns run in init.
-// host-scale: run_scale_bench on MP_Subway and MP_007 ConquestLarge0 (G1 p99 <= 8 ms with the validity condition, G3
-// numbers; cold and uncached), the observers = 16 row on Metro (reported; its load comes from a scratch cache warmed by
-// an untimed load after both G1 windows), install unchanged. RUN_SERIAL; timings are noisy on a shared machine and the
-// acceptance step reruns this on a quiet one.
-// host-scale-paced: the paced 60 Hz rows (ticks started on 16.667 ms boundaries as ServerHost does; report only) on
-// both levels, as their own row in the merge pass's real-time lane (row host.scale.paced; loads on 2 threads).
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
@@ -54,8 +40,6 @@ using namespace bf3::sim;
 namespace gameplay = bf3::core::gameplay;
 
 namespace {
-
-// ---- synthetic soldier (Metro's numbers, as host_session_tests.cpp) ---------------------------------------------
 
 gameplay::StatePoseSpeed speed(gameplay::SoldierPose p_pose, float p_v, float p_f, float p_b, float p_side, float p_accel, float p_decel,
 		float p_sprint_gain, float p_sprint) {
@@ -166,8 +150,6 @@ MotorParams synthetic_params() {
 	return *p;
 }
 
-// ---- synthetic geometry ------------------------------------------------------------------------------------------
-
 void add_quad(std::vector<StaticTriangle> &r_out, const Vec3 &p_a, const Vec3 &p_b, const Vec3 &p_c, const Vec3 &p_d) {
 	StaticTriangle t;
 	t.v = { p_a, p_b, p_c };
@@ -185,7 +167,6 @@ void add_floor(std::vector<StaticTriangle> &r_out, float p_x0, float p_z0, float
 	}
 }
 
-// Top and sides, no bottom (a block standing on the ground).
 void add_block(std::vector<StaticTriangle> &r_out, const Vec3 &p_lo, const Vec3 &p_hi) {
 	const float x0 = p_lo[0], y0 = p_lo[1], z0 = p_lo[2], x1 = p_hi[0], y1 = p_hi[1], z1 = p_hi[2];
 	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 });
@@ -195,7 +176,6 @@ void add_block(std::vector<StaticTriangle> &r_out, const Vec3 &p_lo, const Vec3 
 	add_quad(r_out, { x0, y0, z1 }, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 });
 }
 
-// A wall along x = p_x (0.3 m thick, 3 m tall) over [z0, z1] with doors (z ranges).
 void add_wall_x(std::vector<StaticTriangle> &r_out, float p_x, float p_z0, float p_z1, const std::vector<std::array<float, 2>> &p_doors) {
 	float z = p_z0;
 	for (const std::array<float, 2> &d : p_doors) {
@@ -216,8 +196,6 @@ std::vector<NavTileKey> tiles_range(int32_t p_x0, int32_t p_z0, int32_t p_x1, in
 	return out;
 }
 
-// A synthetic level: the motor's world (p_motor_tris), the nav baked from p_nav_tris (normally the same), spawn
-// points and flags; the BotLevel built the way load_bot_level builds it.
 struct Synthetic {
 	std::shared_ptr<const SharedLevel> shared;
 	std::shared_ptr<BotLevel> bots;
@@ -263,11 +241,9 @@ Synthetic make_synthetic(const std::vector<StaticTriangle> &p_motor_tris, const 
 	return out;
 }
 
-// The arena: 256 m x 256 m, a wall at x = 128 with three 2 m doors, a 3 m high island [196, 236]^2 (its own SCC: it
-// drops to the floor, nothing leads up), 40 spawn points on the floor (teams 1 and 2) and 4 on the island (team 1).
 std::vector<StaticTriangle> arena() {
 	std::vector<StaticTriangle> t;
-	// Floor around the island's footprint (no floor under it: Recast sees surfaces, not volumes).
+
 	add_floor(t, 0, 0, 256, 196, 0.0f);
 	add_floor(t, 0, 196, 196, 256, 0.0f);
 	add_floor(t, 236, 196, 256, 256, 0.0f);
@@ -401,13 +377,13 @@ ArenaRun run_arena(const Synthetic &p_level, uint32_t p_bots, double p_seconds, 
 	return out;
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-scale-unit") {
 	TEST_CASE("host.scale.unit: 64 walkers on the GameServer for 60 s: goals reached, everyone walks, reproducible, staggered thinks, tick parts") {
 		const std::vector<StaticTriangle> t = arena();
 		const Synthetic level = make_synthetic(t, t, tiles_range(0, 0, 3, 3), arena_spawns(true, true), { { 60, 0, 60 }, { 190, 0, 60 }, { 60, 0, 190 } });
-		// The spawn filter: the island's 4 points are another component.
+
 		CHECK(level.bots->spawns.level_points == 44);
 		CHECK(level.bots->spawns.in_main == 40);
 		CHECK(level.bots->spawns.excluded == 4);
@@ -424,25 +400,25 @@ TEST_SUITE("host-scale-unit") {
 				(unsigned long long)w.goals_abandoned, (unsigned long long)w.path_requests, (unsigned long long)w.path_partial,
 				(unsigned long long)w.path_failed, (unsigned long long)w.stuck_events, (unsigned long long)w.sprint_ticks,
 				(unsigned long long)w.crouch_ticks, a.thinks_min, a.thinks_max, a.iterations_max);
-		CHECK(a.alive_after_init == 64); // the initial spawns ran inside init
+		CHECK(a.alive_after_init == 64);
 		CHECK(!a.any_on_island_at_spawn);
-		CHECK(a.ticks_with_spawns == 1); // the observer's own spawn after its Ready; no bot died
-		CHECK(m.front() >= 60.0); // every bot walked
+		CHECK(a.ticks_with_spawns == 1);
+		CHECK(m.front() >= 60.0);
 		CHECK(w.goals_reached >= 64);
 		CHECK(double(w.goals_abandoned) <= 0.1 * double(w.goals_started));
 		CHECK(w.starts_outside_main == 0);
 		CHECK(w.sprint_ticks > 0);
 		CHECK(w.crouch_ticks > 0);
 		CHECK(a.bots.bots == 64);
-		// Staggered thinks: 64 bots over a 6-tick period are 10 or 11 per tick.
+
 		CHECK(a.thinks_min >= 10);
 		CHECK(a.thinks_max <= 11);
 		CHECK(a.iterations_max <= 4096);
-		// Parts sum to the whole within 5 % (allowing 1 % of ticks preempted between two timers on a shared machine).
+
 		CHECK(double(a.parts_ok) >= 0.99 * double(a.parts_ticks));
 		CHECK(a.encode_between > 0);
 		CHECK(a.encode_nonzero_between == 0);
-		// Reproducible: the same seed walks the same way.
+
 		const ArenaRun b = run_arena(level, 64, 60.0, 11, true);
 		CHECK(a.hash == b.hash);
 		const ArenaRun c = run_arena(level, 64, 10.0, 12, true);
@@ -463,12 +439,12 @@ TEST_SUITE("host-scale-unit") {
 		CHECK(island_only.bots->spawns.synthetic == 64);
 		REQUIRE(island_only.bots->spawns.points.size() == 64);
 		for (const SpawnPoint &p : island_only.bots->spawns.points) {
-			CHECK(p.position[1] < 1.0f); // on the floor (the main component), not on the island
+			CHECK(p.position[1] < 1.0f);
 			CHECK(p.team == 0);
 			CHECK(p.index > 0xFFFF0000u);
 		}
-		// The bots then spawn at the synthetic points and walk.
-		const ArenaRun r = run_arena(island_only, 16, 60.0, 3, true); // 60 s: a goal across the 256 m arena is up to 250 m away
+
+		const ArenaRun r = run_arena(island_only, 16, 60.0, 3, true);
 		{
 			const auto &w = r.bots.walkers;
 			std::printf("host.scale.unit synthetic: goals started %llu reached %llu abandoned %llu, stuck %llu, repaths %llu, metres min %.0f max %.0f\n",
@@ -483,7 +459,7 @@ TEST_SUITE("host-scale-unit") {
 	TEST_CASE("host.scale.unit: a bot outside the main component draws goals from its own component (starts_outside_main) and keeps walking") {
 		const std::vector<StaticTriangle> t = arena();
 		const Synthetic level = make_synthetic(t, t, tiles_range(0, 0, 3, 3), arena_spawns(false, true), {});
-		// spawn_in_main = false: the bots spawn where humans would, here only on the island.
+
 		const ArenaRun r = run_arena(level, 4, 40.0, 5, false);
 		CHECK(r.any_on_island_at_spawn);
 		const sim::bots::WalkerStats &w = r.bots.walkers;
@@ -496,7 +472,7 @@ TEST_SUITE("host-scale-unit") {
 	}
 
 	TEST_CASE("host.scale.unit: stuck on a door the motor cannot pass (the nav has no blocker): repath, then a new goal") {
-		// Two rooms joined by one 3 m door; the motor's world blocks the door, the nav's does not.
+
 		std::vector<StaticTriangle> nav_tris;
 		add_floor(nav_tris, 0, 0, 128, 64, 0.0f);
 		add_wall_x(nav_tris, 63.9f, 0.1f, 63.9f, { { 30.0f, 33.0f } });
@@ -518,7 +494,7 @@ TEST_SUITE("host-scale-unit") {
 		CHECK(w.stuck_events >= 4);
 		CHECK(w.repaths >= 3);
 		CHECK(w.goals_abandoned >= 1);
-		CHECK(w.goals_started >= 3); // after an abandoned goal the bot picks the next one
+		CHECK(w.goals_started >= 3);
 	}
 
 	TEST_CASE("host.scale.unit: PathService never spends more than its budget; 64 requests at once count ticks at the budget") {
@@ -566,7 +542,7 @@ TEST_SUITE("host-scale-unit") {
 			t.step_ms = 1.0;
 			t.encode_ms = i % 2 == 0 ? 0.2 : 0.0;
 			if (i % 50 == 7) {
-				t.sources_ms = 6.0; // an injected slow brain tick, 2 % of the ticks (odd: no encode)
+				t.sources_ms = 6.0;
 			}
 			t.tick_ms = t.commands_ms + t.sources_ms + t.step_ms + t.encode_ms + 0.01;
 		}
@@ -588,8 +564,6 @@ TEST_SUITE("host-scale-unit") {
 		CHECK(q.mean == doctest::Approx(5.5));
 	}
 }
-
-// ---- host-scale: Metro and Caspian (install; exits 77 without one) -----------------------------------------------
 
 namespace {
 
@@ -623,7 +597,6 @@ Install *install() {
 	return s_install.get();
 }
 
-// nullopt (after a failed check) when the bench fails: doctest's REQUIRE does not stop the case without exceptions.
 std::optional<ScaleReport> bench(Install &r_install, const char *p_level, uint32_t p_observers, double p_seconds, double p_paced,
 		core::Cache *p_cache = nullptr, bool p_gated = true, unsigned p_load_threads = 0) {
 	ScaleBenchOptions o;
@@ -647,8 +620,6 @@ std::optional<ScaleReport> bench(Install &r_install, const char *p_level, uint32
 	return *r;
 }
 
-// A scratch cache root (removed with the object) warmed by one untimed load of p_level ConquestLarge0 as the bench
-// loads it: the database, the static world and the bot level (nav) through the cache.
 struct WarmCache {
 	std::filesystem::path root;
 	core::Cache cache;
@@ -673,8 +644,7 @@ void warm_cache(Install &r_install, const char *p_level, WarmCache &r_warm) {
 	if (st != core::CacheStatus::Ok) {
 		return;
 	}
-	// The bench's own load options (seed 1, 64 synthetic spawns, the default nav params), so its keys hit. On a failure
-	// the row runs uncached (CHECK, not REQUIRE: doctest's REQUIRE does not stop the case without exceptions).
+
 	const auto start = std::chrono::steady_clock::now();
 	core::Result<LevelDatabase> db = open_level_database(r_install.install, p_level, "ConquestLarge0", 0, nullptr);
 	CHECK_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
@@ -717,7 +687,7 @@ void gate(const ScaleReport &p_r) {
 #if !defined(OPENBF3_TIMING_REPORT_ONLY)
 	CHECK_MESSAGE(p_r.tick_ms.p99 <= kScaleGateP99Ms, "G1: p99 tick ", p_r.tick_ms.p99, " ms > ", kScaleGateP99Ms, " ms");
 #endif
-	// G3: the six numbers are measured.
+
 	CHECK(p_r.motor_steps > 0);
 	CHECK(p_r.queries_per_step > 0.0);
 	CHECK(p_r.queries_per_second > 0.0);
@@ -727,7 +697,7 @@ void gate(const ScaleReport &p_r) {
 	CHECK(p_r.respawns_in_window == 0);
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-scale") {
 	TEST_CASE("host.scale: G1 / G3 on MP_Subway ConquestLarge0 (64 walkers, 120 s of sim time)") {
@@ -755,8 +725,7 @@ TEST_SUITE("host-scale") {
 		if (m == nullptr) {
 			return;
 		}
-		// The row measures encode time in its window, not the load: the load restores the tiles of a scratch cache that
-		// an untimed load filled after both G1 windows (which stay cold and uncached).
+
 		WarmCache warm;
 		warm_cache(*m, "MP_Subway", warm);
 		const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 16, 30.0, 0.0, warm.ok ? &warm.cache : nullptr);
@@ -775,8 +744,7 @@ TEST_SUITE("host-scale") {
 }
 
 TEST_SUITE("host-scale-paced") {
-	// Report only (as before, when they followed the G1 windows): 10 s warm-up, a 1 s back-to-back window, then the paced
-	// 30 s window. In the real-time lane its neighbours use under a core, which can only raise the paced p99.
+
 	TEST_CASE("host.scale.paced: the paced 60 Hz row on MP_Subway ConquestLarge0 (report only)") {
 		Install *m = install();
 		if (m == nullptr) {

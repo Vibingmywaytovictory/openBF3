@@ -1,6 +1,3 @@
-// bf3dump lagcomp (M2a lc; docs/design/m2a.md §6, E13, E18; as built: docs/design/m2a-lc.md): the capsule pose table
-// from the install, E18 (a)'s deviation rows and E13's rewind bench rows. Read-only; nothing is written but stdout /
-// stderr.
 #include "lagcomp_commands.h"
 
 #include "bf3/anim/clip_asset.h"
@@ -52,10 +49,10 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDeg = kPi / 180.0;
-constexpr double kSteadyGateCm = 3.0; // E18: head and chest, steady rows and the stand rows against CrowdEvaluator
-constexpr double kTransitionGateCm = 5.0; // E18: transition rows
-constexpr double kRewindGateMs = 0.5; // E13: rewind provider p99 per tick
-constexpr std::string_view kM16A3 = "weapons/m16a4/u_m16a4"; // weapon_checks.cpp's kM16A3 (the u_m16a4 variant)
+constexpr double kSteadyGateCm = 3.0;
+constexpr double kTransitionGateCm = 5.0;
+constexpr double kRewindGateMs = 0.5;
+constexpr std::string_view kM16A3 = "weapons/m16a4/u_m16a4";
 const char *kStance[3] = { "stand", "crouch", "prone" };
 const char *kTransition[6] = { "stand->crouch", "stand->prone", "crouch->stand", "crouch->prone", "prone->stand", "prone->crouch" };
 constexpr uint8_t kFrom[6] = { 0, 0, 1, 1, 2, 2 };
@@ -90,11 +87,9 @@ uint64_t mix64(uint64_t p_x) {
 	p_x ^= p_x >> 33;
 	return p_x;
 }
-double unit_hash(uint64_t p_a, uint64_t p_b) { // [0, 1)
+double unit_hash(uint64_t p_a, uint64_t p_b) {
 	return double(mix64(p_a * 0x9E3779B97F4A7C15ull + p_b) >> 11) / double(uint64_t(1) << 53);
 }
-
-// ---- the table from the install -----------------------------------------------------------------------------------
 
 struct TableSet {
 	std::shared_ptr<core::Install> install;
@@ -180,7 +175,7 @@ void print_table(const TableSet &p_t) {
 	for (const std::string &n : rep.notes) {
 		std::printf("lagcomp.note build: %s\n", n.c_str());
 	}
-	// Capsule -> joint map and the stand idle at pitch 0 (bucket 14): centres in the local frame (x left, y up, z fwd).
+
 	const size_t zero = an::kCapsuleDownBuckets;
 	for (size_t c = 0; c < tab.capsule_count; ++c) {
 		const gp::CapsuleLocal &e = tab.steady[tab.steady_index(0, zero) + c];
@@ -193,8 +188,7 @@ void print_table(const TableSet &p_t) {
 				int(hc.bone_axis), double(an::capsule_axis_sign(p_t.clips.rig, joint, hc.bone_axis)), centre_of(e, 0), centre_of(e, 1), centre_of(e, 2),
 				double(e.a[0]), double(e.a[1]), double(e.a[2]), double(e.b[0]), double(e.b[1]), double(e.b[2]));
 	}
-	// The placement's frame check: per capsule joint, its model position and local axes in the stand idle (frame 0,
-	// root reset, no aim) and its children's rest translations.
+
 	const an::Skeleton &rig = p_t.clips.rig;
 	if (p_t.clips.present[size_t(an::ServerPoseClip::StandIdle)]) {
 		const an::CrowdClipData &idle = p_t.clips.get(an::ServerPoseClip::StandIdle);
@@ -208,8 +202,7 @@ void print_table(const TableSet &p_t) {
 			an::model_pose(rig, pose, model);
 			std::vector<an::Xform> rest;
 			an::model_pose(rig, an::rest_pose(rig), rest);
-			// The offset read three ways (the table uses the first, [inferred]): bone-local; a model-space vector of the
-			// bind (rest) pose carried by the bone; a model-space vector of the current pose.
+
 			for (size_t c = 0; c < rep.joint.size() && c < tab.capsule_count; ++c) {
 				const int32_t j = rep.joint[c];
 				if (j < 0) {
@@ -248,7 +241,7 @@ void print_table(const TableSet &p_t) {
 			}
 		}
 	}
-	// The EBX skeleton of the same rig (the render skeleton's bind pose): its ModelPose axes per capsule bone.
+
 	if (core::Result<std::unique_ptr<core::EbxLibrary>> lib = core::EbxLibrary::open(p_t.install, { p_t.level_sb }); lib) {
 		if (const core::EbxPartition *part = (*lib)->partition_by_name("animations/skeletons/veniceantske01")) {
 			if (core::Result<an::EbxSkeleton> ebx = an::read_ebx_skeleton(*part, "animations/skeletons/veniceantske01"); ebx) {
@@ -286,14 +279,12 @@ void print_table(const TableSet &p_t) {
 	}
 }
 
-// ---- E18 (a) ------------------------------------------------------------------------------------------------------
-
 struct DevRow {
 	std::string name;
-	std::string source; // "clip-derived" / "stand-in" / the independent path
+	std::string source;
 	size_t queries = 0;
 	double head_cm = 0, chest_cm = 0, body_cm = 0, legs_cm = 0;
-	double gate_cm = 0; // 0: reported only
+	double gate_cm = 0;
 	bool evaluated = true;
 	bool pass() const { return gate_cm <= 0 || (evaluated && head_cm <= gate_cm && chest_cm <= gate_cm); }
 };
@@ -382,7 +373,7 @@ int run_deviation(const TableSet &p_t) {
 		}
 		rows.push_back(r);
 	}
-	// The stand rows against S3's CrowdEvaluator (an independent code path: its own clip set, loco blend and layers).
+
 	{
 		DevRow r;
 		r.name = "crowd stand (CrowdEvaluator, backend B)";
@@ -423,7 +414,7 @@ int run_deviation(const TableSet &p_t) {
 					in[i].pitch = float(pitches[i] * kDeg);
 				}
 				in[n - 1].velocity = an::Vec3{ 0, 0, 5.0f };
-				// A few frames so the run blend settles (the stand soldiers have no motion: idle weight 1 throughout).
+
 				for (int f = 0; f < 30; ++f) {
 					(*ev)->set_inputs(in, 1.0 / 60.0);
 					(*ev)->evaluate_all_here();
@@ -458,20 +449,18 @@ int run_deviation(const TableSet &p_t) {
 	return ok ? 0 : 1;
 }
 
-// ---- E13 rewind rows ----------------------------------------------------------------------------------------------
-
 struct PerfResult {
 	std::string name;
 	uint32_t ticks = 0;
 	double p99_ms = 0, mean_ms = 0, max_ms = 0, world_ms_mean = 0;
-	double queries = 0, candidates = 0, cache_hits = 0, culled = 0, answered = 0; // per tick
+	double queries = 0, candidates = 0, cache_hits = 0, culled = 0, answered = 0;
 	uint64_t live_peak = 0, shots = 0, hits = 0;
 	host::LagCompStats stats;
 };
 
 constexpr uint32_t kShooters = 64;
-constexpr uint32_t kUpTicks = 8; // command one-way latency
-constexpr int64_t kShotInterval = 4'500'000; // 13.3 rounds/s (M16A3 full auto, 800 rpm)
+constexpr uint32_t kUpTicks = 8;
+constexpr int64_t kShotInterval = 4'500'000;
 
 struct ClientNet {
 	uint16_t next_seq = 0;
@@ -503,8 +492,7 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 	host::RewindProvider provider(history, p_capsules, cfg);
 	auto table = std::make_shared<sw::WeaponTable>(p_table);
 	sw::ProjectileWorld pw(table);
-	// Layout: pairs, 32 lanes 12 m apart, opponents 20..40 m apart along z, facing each other; long, one line along x,
-	// every shooter firing 2 deg up along +z (nothing in front).
+
 	std::array<double, kShooters> base_x{}, base_z{};
 	std::array<uint8_t, kShooters> team{};
 	std::array<uint16_t, kShooters> yaw{};
@@ -518,18 +506,18 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 	}
 	std::array<ClientNet, kShooters> net{};
 	for (uint32_t c = 0; c < kShooters; ++c) {
-		net[c].next_seq = uint16_t(65'000u + c * 997u); // different seqs per client, some wrap during the run
+		net[c].next_seq = uint16_t(65'000u + c * 997u);
 		net[c].down = 8 + c % 3;
 	}
 	std::array<sim::SoldierState, kShooters> st{};
 	std::array<sw::SimTime, kShooters> next_shot{};
 	std::array<uint32_t, kShooters> shot_index{};
 	const uint32_t total = p_warm + p_ticks;
-	const uint32_t first_tick = 100; // history from tick 100; shots once the history spans the rewind
+	const uint32_t first_tick = 100;
 	for (uint32_t c = 0; c < kShooters; ++c) {
 		next_shot[c] = sw::tick_start(first_tick + 60) + sw::SimTime(c) * 70'000;
 	}
-	const int32_t view_back_q8 = int32_t(cfg.max_rewind_ticks + 1) * 256; // lag exactly max_rewind_ticks (§6.4)
+	const int32_t view_back_q8 = int32_t(cfg.max_rewind_ticks + 1) * 256;
 	std::vector<double> times;
 	double world_s = 0;
 	host::LagCompStats at_warm{};
@@ -547,7 +535,7 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 			x.velocity = { float(a * w * std::cos(w * t + ph)), 0.0f, 0.0f };
 			x.yaw = yaw[s];
 		}
-		// 1. Commands arrive: acks and the shot views of this tick's command (§4.1 step 1, §6.3).
+
 		std::array<host::ShotView, kShooters> views{};
 		std::array<bool, kShooters> view_ok{};
 		for (uint32_t c = 0; c < kShooters; ++c) {
@@ -578,7 +566,7 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 			const host::AckState at = history.ack_state(uint8_t(c));
 			view_ok[c] = history.shot_view(uint8_t(c), at, uint8_t(at.newest & 0xFF), view_back_q8, uint8_t(sim::ViewQuality::Interpolated), views[c]);
 		}
-		// 2. The provider's present set, then the shots of this tick and the projectile step.
+
 		provider.begin_tick(T, st, team);
 		for (uint32_t c = 0; c < kShooters; ++c) {
 			while (next_shot[c] < sw::tick_end(T)) {
@@ -595,7 +583,7 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 				if (p_long) {
 					dir = { 0.0f, float(std::sin(2.0 * kDeg)), float(std::cos(2.0 * kDeg)) };
 				} else {
-					const uint32_t o = c ^ 1u; // the opponent, aimed at its chest with a seeded error
+					const uint32_t o = c ^ 1u;
 					const double ex = (unit_hash(c, shot_index[c]) - 0.5) * 0.8;
 					const double ey = (unit_hash(c + 1000, shot_index[c]) - 0.5) * 0.6;
 					const double dx = double(st[o].position[0]) + ex - e.origin[0];
@@ -624,7 +612,7 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 		const double ws = seconds_since(w0);
 		provider.end_tick();
 		res.live_peak = std::max<uint64_t>(res.live_peak, pw.live().size());
-		// 3. The snapshot of this tick (30 Hz): shared records, then each client's seq and split.
+
 		if (T % 2 == 0) {
 			records.clear();
 			for (uint32_t s = 0; s < kShooters; ++s) {
@@ -721,7 +709,7 @@ int run_perf_rows(const TableSet &p_t, const std::vector<std::string> &p_rows, u
 	return all ? 0 : 1;
 }
 
-} // namespace
+}
 
 const char *lagcomp_usage() {
 	return "  lagcomp <LEVEL> <MODE> [--deviation] [--perf] [--rows pairs,long] [--warm N] [--ticks N]\n"
@@ -796,4 +784,4 @@ int cmd_lagcomp(const EbxContext &p_ctx, const std::vector<std::string> &p_args)
 	return rc;
 }
 
-} // namespace bf3dump
+}

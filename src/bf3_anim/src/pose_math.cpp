@@ -28,7 +28,7 @@ Quat quat_normalized(const Quat &p_q) {
 }
 
 Vec3 quat_rotate(const Quat &q, const Vec3 &v) {
-	// v' = v + 2w (u x v) + 2 u x (u x v), u = (x, y, z)
+
 	const float tx = 2.0f * (q.y * v.z - q.z * v.y);
 	const float ty = 2.0f * (q.z * v.x - q.x * v.z);
 	const float tz = 2.0f * (q.x * v.y - q.y * v.x);
@@ -50,7 +50,7 @@ double quat_angle_deg(const Quat &p_a, const Quat &p_b) {
 }
 
 Quat quat_from_mat(const Mat34 &p_m) {
-	// Normalise the columns (a bind pose may carry a tiny scale), then the standard trace method.
+
 	double c[3][3];
 	for (int col = 0; col < 3; ++col) {
 		const double len = std::sqrt(double(p_m.m[0][col]) * p_m.m[0][col] + double(p_m.m[1][col]) * p_m.m[1][col] + double(p_m.m[2][col]) * p_m.m[2][col]);
@@ -199,4 +199,4 @@ float mat_max_diff(const Mat34 &p_a, const Mat34 &p_b) {
 	return d;
 }
 
-} // namespace bf3::anim
+}

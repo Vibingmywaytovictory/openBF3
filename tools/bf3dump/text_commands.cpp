@@ -1,4 +1,3 @@
-// bf3dump text commands over bf3_core's UITextDatabase reader; see text_commands.h.
 #include "text_commands.h"
 
 #include "bf3/core/ebx_db.h"
@@ -39,7 +38,6 @@ std::string hex8(uint32_t p_value) {
 	return text;
 }
 
-// One line per entry: backslash, tab, CR and LF escaped.
 std::string escaped(std::string_view p_text) {
 	std::string out;
 	out.reserve(p_text.size());
@@ -65,7 +63,6 @@ std::string escaped(std::string_view p_text) {
 	return out;
 }
 
-// "0x" + 1..8 hex digits, or exactly 8 hex digits: a hash; anything else is a SID.
 std::optional<uint32_t> parse_hash(std::string_view p_key) {
 	std::string_view digits = p_key;
 	const bool prefixed = digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X');
@@ -96,7 +93,7 @@ std::optional<TextDatabase> open_db(const EbxContext &p_ctx, TextDatabaseSource 
 	return std::move(*db);
 }
 
-} // namespace
+}
 
 int cmd_text_lookup(const EbxContext &p_ctx, const std::vector<std::string> &p_keys) {
 	const std::optional<TextDatabase> db = open_db(p_ctx, nullptr);
@@ -134,7 +131,6 @@ int cmd_text_census(const EbxContext &p_ctx, const std::string &p_spec) {
 			db->duplicate_hashes());
 	std::fflush(stdout);
 
-	// The SID census: the research partition set, or every partition of the given superbundles.
 	const auto start = std::chrono::steady_clock::now();
 	std::vector<std::string> sbs;
 	if (p_spec.empty()) {
@@ -207,4 +203,4 @@ int cmd_text_tsv(const EbxContext &p_ctx, const std::string &p_out) {
 	return ok ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

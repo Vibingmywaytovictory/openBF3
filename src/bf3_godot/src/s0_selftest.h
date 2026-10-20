@@ -1,8 +1,4 @@
 #pragma once
-// The S0 self-test inside the engine ("-- --s0-selftest"): install reader and read-only self-test,
-// ServerHost stepping our Jolt for N seconds while Godot's own Jolt runs a RigidBody3D of the
-// scene, ENet loopback ping, engine version and precision. Prints a PASS/FAIL table; the exit
-// code is non-zero when any check fails.
 
 #include <string>
 #include <vector>
@@ -20,7 +16,7 @@ public:
 	S0SelfTest(GameSession &p_session, double p_seconds);
 	void begin();
 	void physics_tick();
-	// Returns true when finished (table printed).
+
 	bool process(double p_delta);
 	int exit_code() const { return failed_ ? 1 : 0; }
 
@@ -52,4 +48,4 @@ private:
 	uint64_t window_start_ns_ = 0;
 };
 
-} // namespace bf3::godot_side
+}

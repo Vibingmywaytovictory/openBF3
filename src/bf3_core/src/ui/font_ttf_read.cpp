@@ -1,7 +1,3 @@
-// TrueType reader for the subset this project writes (bf3/core/ui/font_ttf.h; docs/design/ui-swf-fonts.md §7.2, §9):
-// the cache's accept step and the tests' round trip. Every offset, length and checksum is verified; composite
-// glyphs, hinting and other tables the writer does not emit are refused or ignored. Written from Apple's TrueType
-// Reference Manual and the OpenType 1.9 specification (table layouts only).
 #include "bf3/core/ui/font_ttf.h"
 
 #include <algorithm>
@@ -62,7 +58,7 @@ void append_utf8(std::string &r_out, uint32_t p_cp) {
 	}
 }
 
-} // namespace
+}
 
 Result<TrueTypeFont> read_truetype(std::span<const uint8_t> p_bytes, WorkBudget &r_budget) {
 	const Span f{ p_bytes.data(), p_bytes.size() };
@@ -113,7 +109,7 @@ Result<TrueTypeFont> read_truetype(std::span<const uint8_t> p_bytes, WorkBudget 
 		}
 		return nullptr;
 	};
-	// Checksums (head without its checkSumAdjustment), then the whole file.
+
 	const Rec *head = find("head");
 	if (head == nullptr || head->len < 54) {
 		return tt_error("no head table of 54 bytes");
@@ -277,7 +273,6 @@ Result<TrueTypeFont> read_truetype(std::span<const uint8_t> p_bytes, WorkBudget 
 		}
 	}
 
-	// cmap: platform 3 / encoding 1 (else 0 / 3), format 4.
 	const Rec *cmap = find("cmap");
 	if (cmap == nullptr || cmap->len < 4) {
 		return tt_error("no cmap table");
@@ -355,7 +350,6 @@ Result<TrueTypeFont> read_truetype(std::span<const uint8_t> p_bytes, WorkBudget 
 		}
 	}
 
-	// kern v0 format 0 (optional).
 	if (const Rec *kern = find("kern"); kern != nullptr) {
 		const Span k{ f.p + kern->at, kern->len };
 		if (!k.has(0, 4) || k.u16(0) != 0) {
@@ -392,7 +386,6 @@ Result<TrueTypeFont> read_truetype(std::span<const uint8_t> p_bytes, WorkBudget 
 		}
 	}
 
-	// name: family (1) and subfamily (2), platform 3 preferred.
 	const Rec *name = find("name");
 	if (name == nullptr || name->len < 6) {
 		return tt_error("no name table");
@@ -443,4 +436,4 @@ Result<TrueTypeFont> read_truetype(std::span<const uint8_t> p_bytes, WorkBudget 
 	return font;
 }
 
-} // namespace bf3::core::ui
+}

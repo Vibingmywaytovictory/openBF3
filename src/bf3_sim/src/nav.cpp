@@ -1,9 +1,3 @@
-// Navigation basics (nav.h; spike S1, docs/design/s1.md §5): the params and their key text, the tile input gather
-// (one pass over the soup, every triangle filed under every requested tile its box overlaps), the NavWorld and its
-// assembly into one dtNavMesh, the point check and the debug mesh. The per-tile Recast bake is nav_bake.cpp, the
-// cache nav_cache.cpp, the Detour data validation and the input = motor set check nav_validate.cpp, the components
-// nav_components.cpp. TC (docs/design/terrain-collision.md §7): the terrain cells come from the soup's terrain records
-// per requested tile (after the Havok triangles), and the water rule marks wet terrain triangles unwalkable.
 #include "nav_internal.h"
 
 #include "bf3/core/cache/digest.h"
@@ -57,9 +51,7 @@ const NavTileInfo &empty_info() {
 	return info;
 }
 
-} // namespace
-
-// ---- params ---------------------------------------------------------------------------------------------------
+}
 
 NavParams nav_params_from_motor(const MotorParams &p_motor) {
 	NavParams p;
@@ -71,7 +63,7 @@ NavParams nav_params_from_motor(const MotorParams &p_motor) {
 	}
 	const PoseParams &stand = p_motor.poses[size_t(Pose::Stand)];
 	const PoseParams &crouch = p_motor.poses[size_t(Pose::Crouch)];
-	// A default MotorParams has no pose numbers (they come from the SoldierDef): keep the NavParams defaults then.
+
 	if (finite_positive(stand.height)) {
 		p.agent_height = stand.height;
 	}
@@ -109,8 +101,7 @@ NavCells nav_cells(const NavParams &p_params) {
 	NavCells c;
 	c.walkable_height = int(std::ceil(p.crouch_height / p.cell_height - 1e-4f));
 	c.stand_height = int(std::ceil(p.agent_height / p.cell_height - 1e-4f));
-	// Rounded, not floored: check_nav_params refuses a climb that is not a whole number of cells, and 0.3f / 0.1f
-	// lands just above 3 while a tuning value like 0.29999 lands just below (review of revision 2).
+
 	c.walkable_climb = int(std::lround(p.agent_climb / p.cell_height));
 	const float r = p.agent_radius / p.cell_size;
 	c.walkable_radius = p.radius_round_up ? int(std::ceil(r - 1e-4f)) : int(std::floor(r + 0.5f));
@@ -188,11 +179,8 @@ float nav_input_border(const NavParams &p_params) {
 	return std::max(recast, p_params.drop_reach + p_params.agent_radius + p_params.cell_size);
 }
 
-// ---- tile inputs ----------------------------------------------------------------------------------------------
-
 namespace {
 
-// Requested tile lookup: a dense grid over their range when it is small, else a hash map.
 class TileIndex {
 public:
 	explicit TileIndex(std::span<const NavTileKey> p_tiles) {
@@ -257,27 +245,22 @@ core::Status check_tiles(std::span<const NavTileKey> p_tiles) {
 	return core::Status::success();
 }
 
-// TC: one soup terrain record as the gather takes it: its placement number and the soup-tile radius around a
-// requested tile that can hold a terrain triangle reaching the tile's input box.
 struct GatherTerrain {
 	const core::level::SoupTerrain *terrain = nullptr;
 	uint32_t placement = 0;
 	int32_t radius = 1;
 };
 
-// The work units the terrain part of a gather may spend (every visited cell and every water test is charged).
 constexpr size_t kNavTerrainBudget = size_t(1) << 28;
-// A terrain whose cells reach this many soup tiles past their own is refused (retail: radius 1, 2 m cells).
+
 constexpr int32_t kMaxNavTerrainRadius = 4;
 
-// One source triangle for the gather: corners, layer and the soup tile that files it.
 struct GatherTriangle {
 	const std::array<Vec3, 3> *v = nullptr;
 	uint8_t layer = 0;
-	int32_t tx = 0, tz = 0; // filing tile
+	int32_t tx = 0, tz = 0;
 };
 
-// The gather over a sequence of triangles (soup order). p_next fills the next triangle; false at the end.
 template <class Next>
 core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_tiles, const NavParams &p_params, uint32_t p_layer_mask, unsigned p_threads,
 		Next &&p_next, std::span<const GatherTerrain> p_terrains = {}, std::span<const core::level::WaterPlane> p_water = {}) {
@@ -312,9 +295,7 @@ core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_til
 				!std::isfinite(v[1][1]) || !std::isfinite(v[2][1])) {
 			return core::make_error("nav input: a non-finite triangle corner");
 		}
-		// Overlap with [64x - b, 64x + 64 + b): floor((min - b) / 64) <= x <= floor((max + b) / 64), clamped to the
-		// requested range before any tile is visited (a hostile 10 km triangle costs the requested range, never
-		// its own extent).
+
 		const double lx = std::floor((double(minx) - b) / size), hx = std::floor((double(maxx) + b) / size);
 		const double lz = std::floor((double(minz) - b) / size), hz = std::floor((double(maxz) + b) / size);
 		const int32_t x0 = int32_t(std::max<double>(lx, index.x0())), x1 = int32_t(std::min<double>(hx, index.x1()));
@@ -351,11 +332,7 @@ core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_til
 			}
 		}
 	}
-	// TC: per tile on the lanes, the terrain triangles (after the Havok ones; NavTileInput::terrain_triangles) whose
-	// XZ box overlaps the input box, from the soup tiles within each record's radius in soup tile order, then the water
-	// rule. Then the digest: the tile key, then every triangle's nine float bits and its layer, in order (TC: then the
-	// unwalkable bytes when any is set). The key is part of it: one triangle can be the whole input of two tiles (a
-	// slab across a seam), and the two bake different Detour tiles (docs §5.4 as built).
+
 	core::level::WorkBudget terrain_budget(kNavTerrainBudget);
 	std::vector<std::optional<core::Error>> errors(inputs.size());
 	const bool terrain_layer = ((p_layer_mask >> uint32_t(StaticLayer::Collision)) & 1u) != 0;
@@ -410,7 +387,7 @@ core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_til
 						for (size_t k = 0; k < 3; ++k) {
 							v[k] = { in.vertices[tri * 9 + k * 3], in.vertices[tri * 9 + k * 3 + 1], in.vertices[tri * 9 + k * 3 + 2] };
 						}
-						// The rule's work: one unit per triangle plus the points of every plane it is tested against.
+
 						size_t units = 1;
 						const float top = std::max({ v[0][1], v[1][1], v[2][1] });
 						for (const core::level::WaterPlane &w : p_water) {
@@ -425,7 +402,7 @@ core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_til
 						any = any || wet;
 					}
 					if (!any) {
-						in.unwalkable.clear(); // nothing wet: the same input (and digest) as without planes
+						in.unwalkable.clear();
 					}
 				}
 				core::Hasher h(core::HashAlgorithm::Sha256);
@@ -449,7 +426,7 @@ core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_til
 					chunk.push_back(in.layers[tri]);
 				}
 				if (!in.unwalkable.empty()) {
-					chunk.push_back('W'); // TC: the water rule's marks
+					chunk.push_back('W');
 					chunk.insert(chunk.end(), in.unwalkable.begin(), in.unwalkable.end());
 				}
 				h.update(chunk);
@@ -469,8 +446,6 @@ core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_til
 	return inputs;
 }
 
-// TC: the gather records of a soup's Built terrains with their radius (soup tiles around a requested tile whose
-// terrain triangles can reach its input box: 1 + the cells' XZ reach plus the border over 64 m).
 core::Result<std::vector<GatherTerrain>> gather_terrains(const core::level::CollisionSoup &p_soup, const NavParams &p_params) {
 	std::vector<GatherTerrain> out;
 	const double border = nav_input_border(p_params);
@@ -485,7 +460,7 @@ core::Result<std::vector<GatherTerrain>> gather_terrains(const core::level::Coll
 		const core::res::HeightGrid &g = *t.grid;
 		const auto length = [](const Vec3 &p_v) { return std::sqrt(double(p_v[0]) * p_v[0] + double(p_v[1]) * p_v[1] + double(p_v[2]) * p_v[2]); };
 		const std::array<Vec3, 3> &a = t.frame.axis;
-		// A cell's XZ reach: its two edge vectors; a frame that tilts Y adds the grid's height span along its Y axis.
+
 		double reach = length(a[0]) * std::fabs(double(g.sample_spacing[0])) + length(a[2]) * std::fabs(double(g.sample_spacing[1]));
 		if (a[1][0] != 0.0f || a[1][2] != 0.0f || a[0][1] != 0.0f || a[2][1] != 0.0f) {
 			double lo = std::numeric_limits<double>::infinity(), hi = -lo;
@@ -507,11 +482,10 @@ core::Result<std::vector<GatherTerrain>> gather_terrains(const core::level::Coll
 	return out;
 }
 
-} // namespace
+}
 
 bool nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water) {
-	// Wet when the highest covering plane lies more than kCoverWaterDepth above the triangle's highest corner, i.e.
-	// when some covering plane does (the highest one then does too).
+
 	const float top = std::max({ p_triangle[0][1], p_triangle[1][1], p_triangle[2][1] });
 	if (!std::isfinite(top)) {
 		return false;
@@ -560,8 +534,7 @@ core::Result<std::vector<NavTileInput>> nav_tile_inputs_threads(const core::leve
 
 core::Result<std::vector<NavTileInput>> nav_tile_inputs_triangles(std::span<const StaticTriangle> p_triangles, std::span<const NavTileKey> p_tiles,
 		const NavParams &p_params, uint32_t p_layer_mask, unsigned p_threads) {
-	// File every triangle under its soup tile (millimetre centroid), keep input order within a tile, soup tile order
-	// across tiles: the order a soup of the same triangles would give.
+
 	struct Keyed {
 		std::array<int32_t, 2> tile;
 		uint32_t index;
@@ -608,8 +581,6 @@ core::Result<std::vector<NavTileInput>> nav_tile_inputs(const core::level::Colli
 	return nav_tile_inputs_threads(p_soup, p_tiles, p_params, p_layer_mask, 0, p_water);
 }
 
-// ---- NavWorld ---------------------------------------------------------------------------------------------------
-
 uint32_t NavWorld::Impl::global(NavPolyRef p_ref) const {
 	if (mesh == nullptr || p_ref == 0) {
 		return UINT32_MAX;
@@ -626,7 +597,7 @@ NavPolyRef NavWorld::Impl::ref_of(uint32_t p_global) const {
 	if (mesh == nullptr || p_global >= polys) {
 		return 0;
 	}
-	// poly_base is increasing over the tiles that have polys (tiles were added in index order).
+
 	const auto it = std::upper_bound(poly_base.begin(), poly_base.end(), p_global);
 	size_t tile = size_t(it - poly_base.begin());
 	while (tile > 0) {
@@ -751,7 +722,7 @@ core::Result<std::shared_ptr<const NavWorld>> NavWorldBuilder::finish(const NavP
 		}
 		any = true;
 	}
-	// Tiles left unused at the end of the index range still need a base for the binary search.
+
 	for (size_t i = 0; i < w.poly_base.size(); ++i) {
 		if (w.tile_polys[i] == 0) {
 			w.poly_base[i] = i == 0 ? 0 : w.poly_base[i - 1] + w.tile_polys[i - 1];
@@ -767,8 +738,6 @@ core::Result<std::shared_ptr<const NavWorld>> NavWorldBuilder::finish(const NavP
 	w.stats = p_stats;
 	return std::shared_ptr<const NavWorld>(new NavWorld(std::move(impl)));
 }
-
-// ---- point check and debug mesh -----------------------------------------------------------------------------
 
 uint32_t nav_poly_component(const NavWorld &p_world, const NavComponents &p_components, NavPolyRef p_poly) {
 	if (p_poly == 0) {
@@ -851,8 +820,6 @@ NavDebugMesh nav_debug_mesh(const NavWorld &p_world, const NavComponents *p_comp
 	return out;
 }
 
-// ---- small helpers for the queries and the brain ----------------------------------------------------------------
-
 void nav_poly_area_flags(const NavWorld &p_world, NavPolyRef p_poly, uint8_t *r_area, uint16_t *r_flags) {
 	uint8_t area = 0;
 	uint16_t flags = 0;
@@ -889,4 +856,4 @@ bool nav_offmesh_end(const NavWorld &p_world, NavPolyRef p_poly, Vec3 *r_start, 
 	return true;
 }
 
-} // namespace bf3::sim
+}

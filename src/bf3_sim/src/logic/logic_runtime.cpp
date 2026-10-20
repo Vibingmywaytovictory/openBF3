@@ -1,15 +1,3 @@
-// S4 level logic: the deterministic interpreter (docs/design/s4.md §6.2, §7). See logic_runtime.h for the tick
-// contract. Behaviour per primitive type follows the design table (§6.2); every rule marked [inferred] there is
-// implemented as written and pinned by logic.unit.
-//
-// Determinism: one FIFO of event and property items (the value travels in the item), timers in (due tick, arm
-// sequence) order, fan-out in edge order, seeds from hash_mix chains of the root seed, the node key and a per-node
-// draw count. Nothing iterates a hash container. The trace hash covers every delivery, timer, forced input, effect,
-// carry-over and fault.
-//
-// Hostile graphs: the queue, the timer heap, the effects and the watch hits of a tick are capped (fault); deliveries
-// per tick are capped (carry-over); Delay and Sequence times are clamped by logic_delay_ticks; EventSwitch and
-// RandomMultiEvent use at most kMaxOutputs outputs; a looping Sequence of length 0 does not restart in the same tick.
 #include "bf3/sim/logic/logic_runtime.h"
 
 #include "bf3/core/gameplay/logic_types.h"
@@ -79,8 +67,7 @@ constexpr int32_t kVec3Out = gp::logic_port_id("Vec3Out");
 constexpr int32_t kStringOut = gp::logic_port_id("StringOut");
 constexpr int32_t kStringIn0 = gp::logic_port_id("StringIn0");
 constexpr int32_t kStringIn1 = gp::logic_port_id("StringIn1");
-// SwitchPropertyString's two select events (names not recovered; the hashes differ in the last bit like the
-// StringIn0 / StringIn1 pair, so the odd one selects 0) [inferred].
+
 constexpr int32_t kSelectString0 = 263676847;
 constexpr int32_t kSelectString1 = 263676846;
 constexpr int32_t kPrint = gp::logic_port_id("Print");
@@ -114,9 +101,8 @@ constexpr int32_t kBoolSettingName = gp::logic_port_id("BoolSettingName");
 constexpr int32_t kIntSettingName = gp::logic_port_id("IntSettingName");
 constexpr int32_t kFloatSettingName = gp::logic_port_id("FloatSettingName");
 constexpr int32_t kTransform = gp::logic_port_id("Transform");
-} // namespace port
+}
 
-// Out0..Out9 and In0..In9 (EventSwitch, RandomMultiEvent, IntHub, MathOp).
 constexpr size_t kMaxOutputs = 10;
 static_assert(kMaxOutputs < 64, "RandomMultiEvent keeps its fired outputs in a uint64_t mask");
 constexpr int32_t kOutN[kMaxOutputs] = { gp::logic_port_id("Out0"), gp::logic_port_id("Out1"), gp::logic_port_id("Out2"), gp::logic_port_id("Out3"),
@@ -212,7 +198,6 @@ double as_float(const LogicValue &p_v) {
 	}
 }
 
-// Wrapping arithmetic on hostile integers (no signed overflow).
 int64_t wrap_add(int64_t p_a, int64_t p_b) {
 	return static_cast<int64_t>(static_cast<uint64_t>(p_a) + static_cast<uint64_t>(p_b));
 }
@@ -260,29 +245,29 @@ struct Item {
 };
 
 struct NodeState {
-	LogicValue value; // Bool, SyncedBool, Int, Float, BoolToEvent: the current value
-	bool flag = false; // EventGate / PropertyGate open, DelayTrigger / MultipleTrigger enabled, Sequence playing
-	bool done = false; // RunOnce spent
-	uint32_t count = 0; // MultipleTrigger count, EventSwitch / SwitchPropertyString index
-	uint32_t pending = 0; // armed timers (Delay)
-	uint32_t gen = 0; // timer generation: cancel = ++gen
-	uint32_t draws = 0; // seeded draws taken
-	Tick start = 0; // Sequence start tick
-	uint64_t used = 0; // RandomMultiEvent outputs fired (DisableOutputOnTrigger)
+	LogicValue value;
+	bool flag = false;
+	bool done = false;
+	uint32_t count = 0;
+	uint32_t pending = 0;
+	uint32_t gen = 0;
+	uint32_t draws = 0;
+	Tick start = 0;
+	uint64_t used = 0;
 };
 
-} // namespace
+}
 
 struct LogicRuntime::State {
 	std::shared_ptr<const LogicGraph> graph;
 	LogicRuntimeOptions options;
 	LogicGhostLayout layout;
 	std::vector<NodeState> nodes;
-	std::vector<std::vector<PortValue>> inputs; // received property inputs per node
-	std::vector<std::vector<PortValue>> outputs; // published property outputs per node
+	std::vector<std::vector<PortValue>> inputs;
+	std::vector<std::vector<PortValue>> outputs;
 	std::vector<Item> queue;
 	size_t head = 0;
-	std::vector<Timer> timers; // heap
+	std::vector<Timer> timers;
 	uint64_t timer_seq = 0;
 	struct Forced {
 		uint32_t node = 0;
@@ -298,27 +283,23 @@ struct LogicRuntime::State {
 		LogicWatchKind kind = LogicWatchKind::EventIn;
 	};
 	std::vector<Watch> watches;
-	std::vector<uint8_t> watch_bits; // per node: bit 0 EventIn, bit 1 EventOut
+	std::vector<uint8_t> watch_bits;
 	std::vector<LogicEffect> effects;
 	std::vector<LogicNetworkedEvent> networked;
 	std::vector<LogicWatchHit> hits;
 	std::vector<LogicUnhandledPort> unhandled;
 	LogicTrace trace;
 	Tick tick = 0;
-	uint32_t seq = 0; // trace sequence within the tick
+	uint32_t seq = 0;
 	bool started = false;
-	// Tick 0's first drain (the init settle): values propagate, but value-change events (OnTrue / OnFalse of Bool,
-	// SyncedBool and BoolToEvent, Compare* TriggerOnPropertyChange) do not fire; the settled value is the initial
-	// one [inferred, s4.md §7].
+
 	bool settling = false;
 	std::optional<core::Error> fault;
-	LogicTickStats stats; // the tick being run
+	LogicTickStats stats;
 	size_t tick_deliveries = 0;
 
 	const LogicGraph &g() const { return *graph; }
 	const LogicNode &node(uint32_t p_node) const { return graph->nodes()[p_node]; }
-
-	// --- trace -----------------------------------------------------------------------------------------------------
 
 	uint32_t record(LogicTraceKind p_kind, uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port, uint64_t p_value_hash,
 			int32_t p_player) {
@@ -375,8 +356,6 @@ struct LogicRuntime::State {
 		record(LogicTraceKind::Fault, kNoLogicIndex, 0, kNoLogicIndex, 0, 0, -1);
 	}
 
-	// --- params and ports -----------------------------------------------------------------------------------------
-
 	std::optional<LogicValue> param(uint32_t p_node, int32_t p_field, uint16_t p_element = 0) const { return graph->param(p_node, p_field, p_element); }
 	bool param_bool(uint32_t p_node, int32_t p_field, bool p_default) const {
 		const std::optional<LogicValue> v = param(p_node, p_field);
@@ -399,7 +378,6 @@ struct LogicRuntime::State {
 		return nullptr;
 	}
 
-	// A property input: the last value delivered, else the node's param of that id, else None.
 	LogicValue in(uint32_t p_node, int32_t p_port) const {
 		for (const PortValue &pv : inputs[p_node]) {
 			if (pv.port == p_port) {
@@ -432,8 +410,6 @@ struct LogicRuntime::State {
 			unhandled.push_back({ type, p_port, p_event, 1 });
 		}
 	}
-
-	// --- queue, fan-out, effects ----------------------------------------------------------------------------------
 
 	bool enqueue(const Item &p_item) {
 		if (queue.size() - head >= options.max_queue) {
@@ -474,7 +450,6 @@ struct LogicRuntime::State {
 		}
 	}
 
-	// The edges of a node's list leaving port p_port (the list is sorted by source port, then order).
 	static std::span<const LogicEdge> port_range(std::span<const LogicEdge> p_edges, int32_t p_port) {
 		const auto lo = std::lower_bound(p_edges.begin(), p_edges.end(), p_port, [](const LogicEdge &e, int32_t p) { return e.source_port < p; });
 		auto hi = lo;
@@ -484,8 +459,6 @@ struct LogicRuntime::State {
 		return std::span<const LogicEdge>(lo, hi);
 	}
 
-	// Node p_node fires event p_port: every event edge of that port is queued in edge order; the networked-only
-	// edges are reported for clients.
 	void fire(uint32_t p_node, int32_t p_port, const LogicContext &p_context) {
 		if (fault) {
 			return;
@@ -525,7 +498,6 @@ struct LogicRuntime::State {
 		++stats.networked;
 	}
 
-	// A property output: queued along its edges only when the value changes (bitwise).
 	void publish(uint32_t p_node, int32_t p_port, const LogicValue &p_value) {
 		if (fault) {
 			return;
@@ -553,8 +525,6 @@ struct LogicRuntime::State {
 		}
 	}
 
-	// Publishes p_value on every port the node has property edges from (types whose output port name is not
-	// recovered: Locator, Setting).
 	void publish_all_ports(uint32_t p_node, const LogicValue &p_value) {
 		const std::span<const LogicEdge> edges = graph->properties_from(p_node);
 		for (size_t k = 0; k < edges.size(); ++k) {
@@ -582,9 +552,6 @@ struct LogicRuntime::State {
 				p_item.property ? gp::logic_value_hash(p_item.value) : 0, p_item.context.player);
 	}
 
-	// --- timers ---------------------------------------------------------------------------------------------------
-
-	// Arms a timer p_ticks from now; 0 runs it at once (same drain).
 	void arm(uint32_t p_node, uint32_t p_ticks, TimerWhat p_what, int32_t p_aux, const LogicContext &p_context) {
 		if (fault) {
 			return;
@@ -596,7 +563,7 @@ struct LogicRuntime::State {
 		Timer t;
 		t.due = tick + p_ticks;
 		if (t.due < tick) {
-			t.due = std::numeric_limits<Tick>::max(); // saturate
+			t.due = std::numeric_limits<Tick>::max();
 		}
 		t.seq = timer_seq++;
 		t.node = p_node;
@@ -625,7 +592,7 @@ struct LogicRuntime::State {
 	void run_timer(const Timer &p_timer) {
 		NodeState &st = nodes[p_timer.node];
 		if (p_timer.gen != st.gen) {
-			return; // cancelled
+			return;
 		}
 		++stats.timers_fired;
 		record(LogicTraceKind::TimerFired, p_timer.node, static_cast<int32_t>(p_timer.what), p_timer.node, p_timer.aux, 0, p_timer.context.player);
@@ -671,8 +638,6 @@ struct LogicRuntime::State {
 			run_timer(t);
 		}
 	}
-
-	// --- per-type behaviour ---------------------------------------------------------------------------------------
 
 	double delay_seconds(uint32_t p_node) {
 		const T type = node(p_node).type;
@@ -725,7 +690,7 @@ struct LogicRuntime::State {
 			arm(p_node, logic_delay_ticks(ms / 1000.0, options.hz), TimerWhat::SequenceEvent, static_cast<int32_t>(k), p_context);
 		}
 		const uint32_t length = logic_delay_ticks(as_float(in(p_node, port::kSequenceLength)) / 1000.0, options.hz);
-		// aux = the length in ticks (0: a looping sequence does not restart in the tick it ended).
+
 		arm(p_node, length, TimerWhat::SequenceEnd, static_cast<int32_t>(std::min<uint32_t>(length, 0x7fffffff)), p_context);
 	}
 
@@ -739,7 +704,6 @@ struct LogicRuntime::State {
 		}
 	}
 
-	// CompareInt / CompareFloat: every outcome that holds fires, in a fixed order.
 	void compare_fire(uint32_t p_node, const LogicContext &p_context) {
 		const bool is_int = node(p_node).type == T::CompareInt;
 		const LogicValue a = in(p_node, port::kA), b = in(p_node, port::kB);
@@ -749,7 +713,7 @@ struct LogicRuntime::State {
 			c = x < y ? -1 : (x > y ? 1 : 0);
 		} else {
 			const double x = as_float(a), y = as_float(b);
-			c = x < y ? -1 : (x > y ? 1 : (x == y ? 0 : 2)); // 2: unordered (NaN), nothing holds
+			c = x < y ? -1 : (x > y ? 1 : (x == y ? 0 : 2));
 		}
 		struct Outcome {
 			int32_t port;
@@ -806,8 +770,6 @@ struct LogicRuntime::State {
 		return false;
 	}
 
-	// MathOp: Out = In0 op0 In1 op1 In2 ... left to right; operators 0 add, 1 subtract, 2 multiply, 3 divide (0 on a
-	// zero divisor), 4 min, 5 max [inferred: the enumerator names are not in the data]. Integer inputs stay integer.
 	LogicValue math_out(uint32_t p_node) {
 		const size_t ops = std::min(param_count(p_node, port::kOperators), kMaxOutputs - 1);
 		LogicValue acc = in(p_node, kInN[0]);
@@ -1038,7 +1000,7 @@ struct LogicRuntime::State {
 					if (match) {
 						fire(p_node, port::kOnTriggeredByMatchingTeam, p_context);
 					}
-					// "Only for the specified team": fires whatever the cause, addressed to that team [inferred].
+
 					LogicContext addressed = p_context;
 					addressed.team = static_cast<uint8_t>(std::clamp<int64_t>(team, 0, 255));
 					fire(p_node, port::kOnTriggerOnlyForSpecifiedTeam, addressed);
@@ -1128,7 +1090,7 @@ struct LogicRuntime::State {
 				if (p_port != port::kPrint) {
 					unhandled_port(p_node, p_port, true);
 				}
-				return; // the trace record of the delivery is the print
+				return;
 			default:
 				unhandled_port(p_node, p_port, true);
 				return;
@@ -1166,7 +1128,6 @@ struct LogicRuntime::State {
 		}
 	}
 
-	// Recomputes and publishes a property node's outputs (on start and on every input).
 	void recompute(uint32_t p_node) {
 		NodeState &st = nodes[p_node];
 		switch (node(p_node).type) {
@@ -1213,7 +1174,7 @@ struct LogicRuntime::State {
 				if (p_port != port::kDelay && p_port != port::kTriggerAmount) {
 					unhandled_port(p_node, p_port, false);
 				}
-				return; // read when armed
+				return;
 			case T::SyncedBool:
 				if (p_port == port::kIn) {
 					set_bool(p_node, as_bool(p_value), port::kOut, LogicContext{});
@@ -1286,7 +1247,7 @@ struct LogicRuntime::State {
 			case T::PrintDebugText:
 				return;
 			case T::Locator:
-				// A driven Transform republishes like the constant one at start (XP3_Valley drives some) [inferred].
+
 				if (p_port == port::kTransform) {
 					publish_all_ports(p_node, p_value);
 				} else {
@@ -1315,7 +1276,7 @@ struct LogicRuntime::State {
 			return;
 		}
 		if (cls != LogicTypeClass::Primitive) {
-			return; // passive, data, structural, unknown: swallowed
+			return;
 		}
 		if (p_item.property) {
 			if (PortValue *pv = find_port(inputs[p_item.target], p_item.target_port)) {
@@ -1359,8 +1320,6 @@ struct LogicRuntime::State {
 		networked.clear();
 		hits.clear();
 	}
-
-	// --- tick 0 ---------------------------------------------------------------------------------------------------
 
 	void init_states() {
 		for (uint32_t i = 0; i < nodes.size(); ++i) {
@@ -1422,7 +1381,7 @@ struct LogicRuntime::State {
 				switch_string_publish(p_node);
 				return;
 			case T::Setting: {
-				// Server settings table: S4 has none, so every bool setting reads true (e.g. Server.VehicleSpawnAllowed).
+
 				const std::optional<LogicValue> name = param(p_node, port::kBoolSettingName);
 				if (name && !graph->text(static_cast<uint32_t>(name->i)).empty()) {
 					publish_all_ports(p_node, v_bool(true));
@@ -1460,7 +1419,7 @@ struct LogicRuntime::State {
 				}
 				return;
 			case T::BoolToEvent:
-				// InitalEvent: the event matching the settled value (false -> OnFalse) [inferred, s4.md §6.2].
+
 				if (param_bool(p_node, port::kInitalEvent, false)) {
 					fire(p_node, as_bool(st.value) ? port::kOnTrue : port::kOnFalse, LogicContext{});
 				}
@@ -1476,8 +1435,6 @@ struct LogicRuntime::State {
 		}
 	}
 };
-
-// --- LogicRuntime --------------------------------------------------------------------------------------------------
 
 LogicRuntime::LogicRuntime(std::unique_ptr<State> p_state) :
 		state_(std::move(p_state)) {}
@@ -1712,4 +1669,4 @@ const core::Error *LogicRuntime::fault() const {
 	return state_->fault ? &*state_->fault : nullptr;
 }
 
-} // namespace bf3::sim::logic
+}

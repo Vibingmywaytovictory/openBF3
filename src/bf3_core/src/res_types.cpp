@@ -1,4 +1,3 @@
-// Resource type names; table ported from the ebx-dump probe (research/probes/tools/ebx-dump, res_type_name).
 #include "bf3/core/res_types.h"
 
 #include <cstdio>
@@ -67,4 +66,4 @@ std::string res_type_name(uint32_t p_type) {
 	}
 }
 
-} // namespace bf3::core
+}

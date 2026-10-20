@@ -1,8 +1,3 @@
-// nav_components (nav.h; docs/design/s1.md §5.5): the strongly connected components of the directed poly graph that
-// Detour's links describe. Internal neighbours and tile portals are linked from both polys (both ways); an off-mesh
-// drop link is start <-> connection poly -> landing (Detour links the landing back only for bidirectional
-// connections), so a drop is one way. Iterative Tarjan over a CSR adjacency, O(polys + links); the weakly connected
-// count by union-find over the same edges.
 #include "nav_internal.h"
 
 #include <algorithm>
@@ -32,8 +27,6 @@ uint32_t find(std::vector<uint32_t> &r_parent, uint32_t p_x) {
 	return p_x;
 }
 
-// The directed poly graph as CSR (start[n + 1], edges) plus each poly's ground area; r_parent (if given) gets the
-// union-find forest of the same edges taken both ways.
 struct Graph {
 	size_t n = 0;
 	std::vector<uint32_t> start;
@@ -89,7 +82,7 @@ Graph poly_graph(const NavWorld::Impl &w, std::vector<uint32_t> *r_parent) {
 			uint32_t at = start[gi];
 			for (unsigned int l = tile->polys[pi].firstLink; l != DT_NULL_LINK; l = tile->links[l].next) {
 				const uint32_t h = w.global(NavPolyRef(tile->links[l].ref));
-				edges[at++] = h == UINT32_MAX ? gi : h; // a dangling ref becomes a self loop
+				edges[at++] = h == UINT32_MAX ? gi : h;
 				if (h != UINT32_MAX && r_parent != nullptr) {
 					const uint32_t a = find(*r_parent, gi), b = find(*r_parent, h);
 					if (a != b) {
@@ -102,7 +95,7 @@ Graph poly_graph(const NavWorld::Impl &w, std::vector<uint32_t> *r_parent) {
 	return g;
 }
 
-} // namespace
+}
 
 NavComponents nav_components(const NavWorld &p_world) {
 	NavComponents out;
@@ -116,7 +109,7 @@ NavComponents nav_components(const NavWorld &p_world) {
 	const std::vector<uint32_t> &start = graph.start;
 	const std::vector<uint32_t> &edges = graph.edges;
 	const std::vector<double> &area = graph.area;
-	// Weak ids, compact in poly order (a root's index is the smallest of its set, so roots come first).
+
 	out.weak_component.assign(n, 0);
 	for (uint32_t i = 0; i < n; ++i) {
 		const uint32_t r = find(parent, i);
@@ -127,7 +120,6 @@ NavComponents nav_components(const NavWorld &p_world) {
 		}
 	}
 
-	// Iterative Tarjan.
 	constexpr uint32_t kUnvisited = UINT32_MAX;
 	out.component.assign(n, kUnvisited);
 	std::vector<uint32_t> index(n, kUnvisited), low(n, 0), edge_at(n, 0);
@@ -202,7 +194,7 @@ std::vector<uint8_t> nav_components_reaching(const NavWorld &p_world, const NavC
 	}
 	const Graph g = poly_graph(w, nullptr);
 	const size_t n = g.n;
-	// Reverse CSR, then a walk back from the target's polys.
+
 	std::vector<uint32_t> rstart(n + 1, 0);
 	for (uint32_t v = 0; v < n; ++v) {
 		for (uint32_t e = g.start[v]; e < g.start[v + 1]; ++e) {
@@ -275,4 +267,4 @@ std::vector<double> nav_component_area_in(const NavWorld &p_world, const NavComp
 	return out;
 }
 
-} // namespace bf3::sim
+}

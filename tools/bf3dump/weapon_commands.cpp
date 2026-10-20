@@ -1,5 +1,3 @@
-// bf3dump weapon / weapons: the WeaponDef resolver and material grid of bf3_core, printed. The block
-// is bf3_core's format_weapon (gameplay/weapon_format.h), the same one the in-game inspector shows.
 #include "weapon_commands.h"
 
 #include "bf3/core/ebx_db.h"
@@ -82,7 +80,7 @@ bool parse_args(const std::vector<std::string> &p_args, bool p_need_partition, s
 	return true;
 }
 
-} // namespace
+}
 
 int cmd_weapon(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 	std::string partition;
@@ -97,7 +95,7 @@ int cmd_weapon(const EbxContext &p_ctx, const std::vector<std::string> &p_args) 
 		return 1;
 	}
 	partition = to_lower_ascii(partition);
-	// A blueprint resolves through its base variant (for the identifier and the name SID).
+
 	const std::string target = weapon_resolve_target(libs, partition);
 	if (target != partition) {
 		std::fprintf(stderr, "%s: base variant %s\n", partition.c_str(), target.c_str());
@@ -119,7 +117,7 @@ int cmd_weapon(const EbxContext &p_ctx, const std::vector<std::string> &p_args) 
 		std::fprintf(stderr, "grid %s: %zu rows, %zu pairs referenced, %zu missing from the level's container, %zu from fallback, %zu unresolved\n",
 				r.grid.c_str(), grid->row_count(), r.grid_pairs, r.unresolved_in_level, r.from_fallback, r.unresolved);
 	}
-	// --name: the localised name from the text database (an extra "name" line).
+
 	std::optional<ui::TextDatabase> text;
 	if (with_name) {
 		Result<ui::TextDatabase> db = ui::open_text_database(p_ctx.install);
@@ -202,4 +200,4 @@ int cmd_weapons(const EbxContext &p_ctx, const std::vector<std::string> &p_args)
 	return errors == 0 ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

@@ -1,6 +1,3 @@
-// Voice culling (voice_cull.h; docs/design/m2b.md §6.2, docs/design/m2b-au.md "Culling"). Audio thread: no
-// allocation (one stack array of kMaxCullVoices marks), every pass O(n^2) with n <= kMaxCullVoices.
-
 #include "bf3/audio/voice_cull.h"
 
 #include "bf3/core/audio/hdr_setting.h"
@@ -19,7 +16,6 @@ using core::audio::kNoScope;
 using core::audio::ScopeTable;
 using core::audio::SoundScope;
 
-// (start frame, index): the older first.
 bool older(const CullVoice &a, size_t ia, const CullVoice &b, size_t ib) {
 	return a.start_frame != b.start_frame ? a.start_frame < b.start_frame : ia < ib;
 }
@@ -37,7 +33,6 @@ struct Culler {
 
 	bool kept(size_t i) const { return out[i] == CullVerdict::Keep; }
 
-	// A loop becomes pending, a one-shot is dropped with p_drop.
 	void cull(size_t i, CullVerdict p_drop) {
 		if (v[i].looping) {
 			out[i] = CullVerdict::Pending;
@@ -60,8 +55,6 @@ struct Culler {
 		}
 	}
 
-	// Keeps the p_keep best of the kept voices that p_member selects, by p_better (a strict total order); the rest
-	// are culled with p_drop. Ranks are taken over the set before any of them is culled.
 	template <class Member, class Better>
 	void keep_best(size_t p_keep, Member p_member, Better p_better, CullVerdict p_drop) {
 		const size_t n = v.size();
@@ -88,8 +81,7 @@ struct Culler {
 	void duplicates(uint16_t p_scope, const SoundScope &p_s, uint32_t p_mix_rate) {
 		const size_t n = v.size();
 		const double window = double(p_s.duplicate_time_s) * double(p_mix_rate);
-		// The starting voices of the scope in (start frame, index) order: each is checked against the kept voices that
-		// are older (playing ones, and starting ones already accepted).
+
 		size_t last = SIZE_MAX;
 		for (size_t round = 0; round < n; ++round) {
 			size_t next = SIZE_MAX;
@@ -122,7 +114,7 @@ struct Culler {
 	}
 };
 
-} // namespace
+}
 
 void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes, float p_precull_db, uint32_t p_max_voices, uint64_t p_frame, uint32_t p_mix_rate,
 		std::span<CullVerdict> r_verdicts, CullCounts &r_counts) {
@@ -132,17 +124,17 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 		r_verdicts[i] = CullVerdict::Keep;
 	}
 	if (p_voices.size() != r_verdicts.size() || n > kMaxCullVoices) {
-		return; // refused: every voice kept, nothing counted
+		return;
 	}
 	Culler c{ p_voices, r_verdicts, r_counts };
-	// (1) Pre-cull: a starting HDR voice below the previous window's bottom - 3 dB.
+
 	for (size_t i = 0; i < n; ++i) {
 		const CullVoice &v = p_voices[i];
 		if (v.starting && v.hdr && !(v.loudness_db >= p_precull_db)) {
 			c.cull(i, CullVerdict::Precull);
 		}
 	}
-	// (2) Scopes, each once (at its first voice): duplicates, then the closest N, then the newest / oldest N.
+
 	if (p_scopes != nullptr) {
 		for (size_t i = 0; i < n; ++i) {
 			const uint16_t s = p_voices[i].scope;
@@ -178,18 +170,17 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 			}
 		}
 	}
-	// (3) The voice cap over sampler voices: the kept voices in score order (the highest loudness x priority first,
-	// the older first among equals) fill max_voices; the first that does not fit and every voice after it go.
+
 	const auto weight = [&](size_t k) { return uint64_t(std::clamp<uint32_t>(p_voices[k].voices, 1, kMaxCullVoices)); };
 	uint64_t total = 0;
-	uint64_t pt1_margin = 0; // PT1 snd [hold]: the largest resume margin of a kept voice
+	uint64_t pt1_margin = 0;
 	for (size_t i = 0; i < n; ++i) {
 		total += c.kept(i) ? weight(i) : 0;
-		pt1_margin = std::max<uint64_t>(pt1_margin, c.kept(i) ? std::min<uint32_t>(p_voices[i].resume_margin, kMaxCullVoices) : 0u); // PT1 snd [hold]
+		pt1_margin = std::max<uint64_t>(pt1_margin, c.kept(i) ? std::min<uint32_t>(p_voices[i].resume_margin, kMaxCullVoices) : 0u);
 	}
-	if (total + pt1_margin > p_max_voices) { // PT1 snd [hold]: was total > p_max_voices
+	if (total + pt1_margin > p_max_voices) {
 		const auto score = [&](size_t k) {
-			const float s = (p_voices[k].loudness_db + (std::isfinite(p_voices[k].hold_db) ? p_voices[k].hold_db : 0.0f)) * p_voices[k].priority; // PT1 snd [hold]: + hold_db
+			const float s = (p_voices[k].loudness_db + (std::isfinite(p_voices[k].hold_db) ? p_voices[k].hold_db : 0.0f)) * p_voices[k].priority;
 			return std::isfinite(s) ? s : -std::numeric_limits<float>::max();
 		};
 		const auto better = [&](size_t b, size_t a) {
@@ -201,7 +192,7 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 			if (!c.kept(a)) {
 				continue;
 			}
-			uint64_t before = weight(a) + std::min<uint32_t>(p_voices[a].resume_margin, kMaxCullVoices); // a and every kept voice ranked above it; PT1 snd [hold]: + its resume margin
+			uint64_t before = weight(a) + std::min<uint32_t>(p_voices[a].resume_margin, kMaxCullVoices);
 			for (size_t b = 0; b < n && before <= p_max_voices; ++b) {
 				if (b != a && c.kept(b) && better(b, a)) {
 					before += weight(b);
@@ -254,4 +245,4 @@ void apply_mixer_a3(const MixerA3Assets &p_assets, MixerConfig &r_config) {
 	r_config.scopes = p_assets.scopes;
 }
 
-} // namespace bf3::audio
+}

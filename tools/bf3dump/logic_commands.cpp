@@ -1,4 +1,3 @@
-// bf3dump logic commands (S4 level logic; docs/design/s4.md §9.4). See logic_commands.h.
 #include "logic_commands.h"
 
 #include "bf3/core/gameplay/logic_graph.h"
@@ -37,7 +36,6 @@ std::string guid8(const Guid &p_guid) {
 	return s.substr(0, 8);
 }
 
-// Port names the data uses (S4 design §5.3, §6.2, §8; research node table). Display only.
 const char *const kPortNames[] = { "In", "Out", "In0", "In1", "In2", "In3", "In4", "In5", "In6", "In7", "In8", "In9", "Value", "SetTrue", "SetFalse",
 	"Toggle", "OnTrue", "OnFalse", "Open", "Close", "Enable", "Disable", "Enabled", "Trigger", "OnTrigger", "Reset", "Start", "Stop", "Restart",
 	"OnFinished", "OnStopped", "OnStarted", "Pause", "PlayFirstFrame", "Destroy", "OnDestroyed", "Spawn", "Unspawn", "OnSpawned", "OnCaptured", "OnLost",
@@ -128,7 +126,6 @@ std::string field_name(LogicTypeId p_type, int32_t p_field) {
 	return "#" + std::to_string(p_field);
 }
 
-// The chain of instantiating references of a node's scope, innermost first.
 std::string scope_chain(const LogicGraph &p_graph, uint32_t p_scope) {
 	std::string out;
 	for (uint32_t s = p_scope, n = 0; s != kNoLogicIndex && s < p_graph.scopes().size() && n < 64; s = p_graph.scopes()[s].parent, ++n) {
@@ -235,7 +232,6 @@ int cmd_instantiate(const LogicGraph &p_graph, bool p_edges) {
 	return 0;
 }
 
-// Port usage per type (connected server nodes): which event/property ports each type receives and emits.
 int cmd_ports(const LogicGraph &p_graph) {
 	std::map<std::string, std::map<std::string, size_t>> usage;
 	const auto type_of = [&](uint32_t p_node) { return std::string(p_graph.text(p_graph.nodes()[p_node].type_name)); };
@@ -261,7 +257,6 @@ int cmd_ports(const LogicGraph &p_graph) {
 	return 0;
 }
 
-// Every field of the first object of each named type (raw EBX, through the level's LogicWorld).
 int cmd_fields(const level::LoadedLevel &p_level, const std::string &p_mode, const std::vector<std::string> &p_types) {
 	LogicWorldOptions o;
 	o.mode = p_mode;
@@ -350,7 +345,6 @@ bool parse_u64(const std::string &p_text, uint64_t &r_value) {
 	return res.ec == std::errc() && res.ptr == p_text.data() + p_text.size();
 }
 
-// --force <node>:<port>@<tick>: node index or GUID prefix (unique), port id or a port name of the display table.
 bool parse_force(const LogicGraph &p_graph, const std::string &p_spec, bf3::sim::logic::LogicScriptOptions::Force &r_force) {
 	const size_t colon = p_spec.find(':');
 	const size_t at = p_spec.rfind('@');
@@ -437,7 +431,7 @@ int cmd_run(const LogicGraph &p_graph_ref, const std::vector<std::string> &p_arg
 	}
 	options.forces = forces;
 	options.runtime.keep_trace_records = p_trace;
-	// The run shares the graph; a copy-free shared_ptr that does not own it.
+
 	const std::shared_ptr<const LogicGraph> graph(std::shared_ptr<const LogicGraph>(), &p_graph_ref);
 	const auto t0 = std::chrono::steady_clock::now();
 	Result<lg::LogicRunReport> report = lg::run_logic_script(graph, options);
@@ -500,7 +494,6 @@ int cmd_run(const LogicGraph &p_graph_ref, const std::vector<std::string> &p_arg
 	return rc;
 }
 
-// `logic census [LEVEL...] [--out FILE]`: the I1 TSV (bf3_sim logic_census_row), every mode of each level.
 int cmd_census(const InstallReader &p_reader, const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
 	namespace lg = bf3::sim::logic;
 	std::vector<std::string> levels;
@@ -562,7 +555,7 @@ int cmd_census(const InstallReader &p_reader, const std::shared_ptr<Install> &p_
 	return failed == 0 ? 0 : 1;
 }
 
-} // namespace
+}
 
 const char *logic_usage() {
 	return "  logic instantiate <LEVEL> <MODE> [--edges] [--client]\n"
@@ -621,7 +614,7 @@ int cmd_logic(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 		return cmd_ports(*loaded->graph);
 	}
 	if (sub == "guids") {
-		// Full GUIDs of the nodes and scope references whose GUID starts with one of the given prefixes.
+
 		const LogicGraph &g = *loaded->graph;
 		for (const std::string &prefix : rest) {
 			for (uint32_t i = 0; i < g.nodes().size(); ++i) {
@@ -645,4 +638,4 @@ int cmd_logic(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 	return 2;
 }
 
-} // namespace bf3dump
+}

@@ -1,4 +1,3 @@
-// Stationary target bots and the sky lane (docs/design/m2a.md §1 setup, §10.1; owner sv; target_bots.h).
 #include "bf3/host/target_bots.h"
 
 #include "bf3/sim/static_world.h"
@@ -15,7 +14,7 @@ TargetBotSource::TargetBotSource(const TargetBotConfig &p_config) :
 
 sim::Command TargetBotSource::command(sim::Tick p_tick, const sim::SoldierState &p_state) {
 	(void)p_state;
-	// Idle at the configured facing and pose (no weapon input): a bot fires at the present (quality None, D7).
+
 	return sim::idle_command(p_tick, config_.yaw, config_.pitch, config_.pose);
 }
 
@@ -37,7 +36,7 @@ core::Result<SkyLane> find_sky_lane(const sim::CollisionWorld &p_world, float p_
 			return core::make_error("find_sky_lane: the static world has no bounds");
 		}
 	}
-	// The longest horizontal axis (x = 0 or z = 2), the lane along it; the cross axis carries the lateral offsets.
+
 	const size_t axis = (hi[2] - lo[2]) >= (hi[0] - lo[0]) ? 2 : 0;
 	const size_t cross = axis == 2 ? 0 : 2;
 	const float start = lo[axis] + kSkyLaneStart;
@@ -50,7 +49,7 @@ core::Result<SkyLane> find_sky_lane(const sim::CollisionWorld &p_world, float p_
 	dir[axis] = kSkyLaneClearRay;
 	float best_clear = 0;
 	for (int i = 0;; ++i) {
-		// 0, +step, -step, +2 step, ... across the bounds.
+
 		const int k = (i + 1) / 2;
 		const float offset = float(k) * kSkyLaneStep * ((i % 2) == 1 ? 1.0f : -1.0f);
 		if (float(k) * kSkyLaneStep > half) {
@@ -71,7 +70,7 @@ core::Result<SkyLane> find_sky_lane(const sim::CollisionWorld &p_world, float p_
 		lane.eye = eye;
 		lane.feet = eye;
 		lane.feet[1] = height;
-		lane.yaw = axis == 2 ? uint16_t(0) : uint16_t(16384); // +Z: yaw 0; +X: a quarter turn (command.h)
+		lane.yaw = axis == 2 ? uint16_t(0) : uint16_t(16384);
 		lane.clear_length = clear;
 		lane.in_bounds_length = in_bounds;
 		if (in_bounds < need) {
@@ -88,4 +87,4 @@ core::Result<SkyLane> find_sky_lane(const sim::CollisionWorld &p_world, float p_
 	return core::make_error(text);
 }
 
-} // namespace bf3::host
+}

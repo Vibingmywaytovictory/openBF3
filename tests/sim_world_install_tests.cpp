@@ -1,16 +1,3 @@
-// sim.world (install): Metro TDM's static world from the retail install (read-only) through a scratch cache
-// (docs/design/m1.md §5, §14). Exits 77 (skipped) without an install.
-//   * cold then warm: the tile list and per-tile, per-layer triangle counts equal the soup's (TC: 794,951 Havok collision
-//     + 142,908 raycast + 2,232 character); the warm path builds no soup (its progress never leaves Mount) and
-//     restores every tile; cold and warm give byte-identical tile blobs and bit-identical answers to 1,000 seeded
-//     rays; a second mode of the level (ConquestLarge0) takes the tiles it shares from the cache;
-//   * coverage (§5.5): every EBX partition, res and chunk the soup read is an entry of a bundle whose manifest the
-//     source digest hashed;
-//   * parity: CollisionWorld ray / capsule overlap / box overlap / capsule sweep answers at sampled spots near the
-//     geometry equal a brute-force reference over the soup triangles (double precision, no tree), with the
-//     tolerances the Jolt build implies (vertex quantisation, the box's convex radius); ambiguous samples (within
-//     the tolerance of a contact) are counted and bounded, mismatches must be 0;
-//   * memory figures (§5.4) and the install snapshot (install.unchanged).
 #include <doctest/doctest.h>
 
 #include "bf3/core/bundle_manifest.h"
@@ -28,10 +15,10 @@
 #include "sim_world_support.h"
 #include "test_support.h"
 
-#include "collision_world_internal.h" // the body count of a CollisionWorld (memory figures)
+#include "collision_world_internal.h"
 
 #include <windows.h>
-// psapi after windows.h
+
 #include <psapi.h>
 
 #include <algorithm>
@@ -67,7 +54,6 @@ uint64_t peak_working_set() {
 	return pmc.PeakWorkingSetSize;
 }
 
-// A short scratch root: %TEMP%\o3w-<pid>-<tick> (entry paths stay well under MAX_PATH).
 struct Scratch {
 	fs::path root;
 	Scratch() {
@@ -80,8 +66,6 @@ struct Scratch {
 		fs::remove_all(root, ec);
 	}
 };
-
-// ---- the brute-force reference (double precision over the soup triangles) --------------------------------------
 
 struct D3 {
 	double x = 0, y = 0, z = 0;
@@ -110,7 +94,7 @@ double len(D3 a) {
 
 struct RefTriangle {
 	std::array<D3, 3> v;
-	D3 lo, hi; // bounds
+	D3 lo, hi;
 	SurfaceTag tag;
 	uint32_t layer = 0;
 	uint32_t tile = 0;
@@ -153,8 +137,7 @@ Reference make_reference(const level::CollisionSoup &p_soup) {
 		rt.count = r.triangles.size() - rt.first;
 		r.tiles.push_back(rt);
 	}
-	// TC (docs/design/terrain-collision.md §12.2): the terrain cells of every soup tile they fall in
-	// (append_soup_terrain_tile), tile = kNoStaticTile as CollisionWorld reports terrain hits.
+
 	for (size_t i = 0; i < p_soup.terrains.size(); ++i) {
 		const level::SoupTerrain &terrain = p_soup.terrains[i];
 		if (terrain.state != level::SoupTerrain::State::Built) {
@@ -203,7 +186,6 @@ bool boxes_touch(D3 a_lo, D3 a_hi, D3 b_lo, D3 b_hi, double p_pad) {
 			b_lo.z <= a_hi.z + p_pad;
 }
 
-// Calls p_visit for every triangle of p_mask whose bounds touch [lo, hi] padded.
 template <class F>
 void for_candidates(const Reference &p_ref, uint32_t p_mask, D3 p_lo, D3 p_hi, double p_pad, F &&p_visit) {
 	for (const Reference::Tile &tile : p_ref.tiles) {
@@ -220,7 +202,6 @@ void for_candidates(const Reference &p_ref, uint32_t p_mask, D3 p_lo, D3 p_hi, d
 	}
 }
 
-// Closest point on triangle abc to p (Ericson, Real-Time Collision Detection 5.1.5).
 D3 closest_on_triangle(D3 p, D3 a, D3 b, D3 c) {
 	const D3 ab = b - a, ac = c - a, ap = p - a;
 	const double d1 = dot(ab, ap), d2 = dot(ac, ap);
@@ -253,7 +234,6 @@ D3 closest_on_triangle(D3 p, D3 a, D3 b, D3 c) {
 	return a + ab * (vb * denom) + ac * (vc * denom);
 }
 
-// Squared distance between segments p1q1 and p2q2 (Ericson 5.1.9).
 double segment_segment_sq(D3 p1, D3 q1, D3 p2, D3 q2) {
 	const D3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
 	const double a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
@@ -284,7 +264,6 @@ double segment_segment_sq(D3 p1, D3 q1, D3 p2, D3 q2) {
 	return dot(c1 - c2, c1 - c2);
 }
 
-// Two-sided segment / triangle intersection parameter (Moller-Trumbore); nullopt when none.
 std::optional<double> segment_hits_triangle(D3 p_origin, D3 p_delta, const RefTriangle &p_t) {
 	const D3 e1 = p_t.v[1] - p_t.v[0], e2 = p_t.v[2] - p_t.v[0];
 	const D3 h = cross(p_delta, e2);
@@ -321,8 +300,6 @@ double segment_triangle_distance(D3 p, D3 q, const RefTriangle &t) {
 	return best;
 }
 
-// A ray candidate: the parameter, the in-plane margin (metres from the hit point to the nearest edge, negative
-// outside) and whether the ray grazes the plane.
 struct RayCandidate {
 	double t = 0;
 	double margin = 0;
@@ -346,7 +323,7 @@ std::optional<RayCandidate> ray_candidate(D3 p_origin, D3 p_delta, const RefTria
 	double margin = 1e30;
 	for (size_t k = 0; k < 3; ++k) {
 		const D3 a = p_t.v[k], b = p_t.v[(k + 1) % 3];
-		const D3 inward = cross(n, b - a); // points into the triangle for a counter-clockwise (a, b, c) about n
+		const D3 inward = cross(n, b - a);
 		const double il = len(inward);
 		if (il < 1e-15) {
 			return std::nullopt;
@@ -356,17 +333,15 @@ std::optional<RayCandidate> ray_candidate(D3 p_origin, D3 p_delta, const RefTria
 	RayCandidate c;
 	c.t = t;
 	c.margin = margin;
-	c.grazing = std::fabs(denom) / (nl * length) < 0.02; // within ~1.1 degrees of the plane
+	c.grazing = std::fabs(denom) / (nl * length) < 0.02;
 	c.tri = &p_t;
 	return c;
 }
 
-// Capsule axis (bottom and top sphere centres) of an upright capsule with its feet at p_feet.
 std::pair<D3, D3> capsule_axis(D3 p_feet, double p_radius, double p_height) {
 	return { p_feet + D3{ 0, p_radius, 0 }, p_feet + D3{ 0, p_height - p_radius, 0 } };
 }
 
-// Smallest distance from the capsule axis (moved by p_offset) to any candidate triangle.
 double capsule_distance(const std::vector<const RefTriangle *> &p_candidates, std::pair<D3, D3> p_axis, D3 p_offset) {
 	double best = 1e30;
 	for (const RefTriangle *t : p_candidates) {
@@ -375,9 +350,6 @@ double capsule_distance(const std::vector<const RefTriangle *> &p_candidates, st
 	return best;
 }
 
-// First sweep parameter in [0, 1] at which the capsule axis comes within p_radius of a candidate triangle
-// (conservative advancement per triangle: the distance changes by at most |delta| per unit of t, so no contact is
-// stepped over); nullopt when none.
 std::optional<double> first_contact(const std::vector<const RefTriangle *> &p_candidates, std::pair<D3, D3> p_axis, D3 p_delta, double p_radius) {
 	const double speed = len(p_delta);
 	std::optional<double> best;
@@ -400,11 +372,9 @@ std::optional<double> first_contact(const std::vector<const RefTriangle *> &p_ca
 	return best;
 }
 
-// Box (half extents, yaw about +Y) against a triangle: the largest separation over the 13 SAT axes (positive =
-// separated by at least that much, negative = overlapping on every axis by at least its magnitude).
 double box_triangle_separation(D3 p_center, D3 p_half, double p_yaw, const RefTriangle &p_t) {
 	const double c = std::cos(p_yaw), s = std::sin(p_yaw);
-	// Jolt's Quat::sRotation(+Y, yaw): x' = (c, 0, -s), z' = (s, 0, c).
+
 	const std::array<D3, 3> axes{ D3{ c, 0, -s }, D3{ 0, 1, 0 }, D3{ s, 0, c } };
 	const std::array<double, 3> h{ p_half.x, p_half.y, p_half.z };
 	const std::array<D3, 3> v{ p_t.v[0] - p_center, p_t.v[1] - p_center, p_t.v[2] - p_center };
@@ -431,14 +401,12 @@ double box_triangle_separation(D3 p_center, D3 p_half, double p_yaw, const RefTr
 	return worst;
 }
 
-// ---- the shared Metro data (loaded once per process) ----------------------------------------------------------
-
 struct Metro {
 	core::InstallReader reader;
 	core::InstallSnapshot before;
 	std::shared_ptr<core::Install> install;
 	std::unique_ptr<level::LoadedLevel> level;
-	std::unique_ptr<level::World> world; // after `level`: destroyed first
+	std::unique_ptr<level::World> world;
 	level::CollisionSoup soup;
 	std::shared_ptr<const StaticWorldShapes> cold;
 	std::shared_ptr<const StaticWorldShapes> warm;
@@ -467,7 +435,6 @@ bool load_metro(Metro &r_m) {
 	return true;
 }
 
-// Loaded by the first case that asks; destroyed at exit (the scratch root goes with it).
 Metro *metro() {
 	static Metro m;
 	static const bool loaded = load_metro(m);
@@ -482,7 +449,7 @@ core::CacheOptions cache_options(const Metro &p_m) {
 	return o;
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-world") {
 	TEST_CASE("sim.world: Metro cold then warm through a scratch cache: the soup's tiles, no soup when warm, identical shapes") {
@@ -492,8 +459,7 @@ TEST_SUITE("sim-world") {
 			return;
 		}
 		const level::CollisionSoup &soup = m->soup;
-		// TC: the soup's tiles hold the Havok triangles only (170 tiles and 969,031 collision triangles with the near-rule
-		// terrain before); the terrain is one record, one field.
+
 		REQUIRE(soup.tiles.size() == 149);
 		CHECK(soup.bodies[0] == 794951);
 		REQUIRE(soup.terrains.size() == 1);
@@ -527,7 +493,7 @@ TEST_SUITE("sim-world") {
 		CHECK(c.seconds_soup > 0.0);
 		CHECK(cold_progress.stage.load() == level::SoupProgress::Done);
 		CHECK(cold_done.load() == 149);
-		CHECK(cold_cache.entries == 151); // 149 tiles + the terrain + the world index
+		CHECK(cold_cache.entries == 151);
 
 		level::SoupProgress warm_progress;
 		std::atomic<size_t> warm_done{ 0 };
@@ -539,12 +505,11 @@ TEST_SUITE("sim-world") {
 		CHECK(w.terrains_cooked == 0);
 		CHECK(w.tiles_cooked == 0);
 		CHECK(w.seconds_soup == 0.0);
-		CHECK(warm_progress.stage.load() == level::SoupProgress::Mount); // build_collision_soup never ran
+		CHECK(warm_progress.stage.load() == level::SoupProgress::Mount);
 		CHECK(warm_done.load() == 149);
 		CHECK(warm_cache.puts == 0);
 		CHECK(warm_cache.hits == 151);
 
-		// The soup's tiles, counts and totals, in both.
 		for (const StaticWorldShapes *shapes : { m->cold.get(), m->warm.get() }) {
 			REQUIRE(shapes->tile_count() == soup.tiles.size());
 			size_t count_mismatch = 0;
@@ -561,7 +526,7 @@ TEST_SUITE("sim-world") {
 			CHECK(shapes->stats().triangles[1] == 142908);
 			CHECK(shapes->stats().triangles[2] == 2232);
 		}
-		// Cold and warm: the same blobs and the same answers.
+
 		size_t blob_mismatch = 0;
 		for (size_t i = 0; i < m->cold->tile_count(); ++i) {
 			blob_mismatch += encode_static_tile_blob(*m->cold, i) == encode_static_tile_blob(*m->warm, i) ? 0 : 1;
@@ -572,7 +537,7 @@ TEST_SUITE("sim-world") {
 		CHECK(encode_static_terrain_blob(*m->cold, 0) == encode_static_terrain_blob(*m->warm, 0));
 		const auto cold_world = world_of(m->cold);
 		const auto warm_world = world_of(m->warm);
-		// 1,000 seeded rays: from 1-20 m around a random soup triangle's centroid through it and 50 % past it.
+
 		std::mt19937 rng(1015);
 		std::uniform_real_distribution<float> dir(-1.0f, 1.0f), dist(1.0f, 20.0f);
 		size_t hits = 0, differ = 0;
@@ -596,7 +561,6 @@ TEST_SUITE("sim-world") {
 		CHECK(differ == 0);
 		CHECK(hits > 700);
 
-		// Memory figures (docs §5.4).
 		const auto bodies = cold_world->impl().bodies.size();
 		MESSAGE("Metro static world: ", c.tiles, " tiles, ", c.shapes, " MeshShapes (", bodies, " bodies per CollisionWorld), ", c.tags, " tags; resident ",
 				mib(c.shape_bytes), " MiB (Jolt GetStats) for ", soup.triangles, " triangles = ", double(c.shape_bytes) / double(soup.triangles),
@@ -605,7 +569,6 @@ TEST_SUITE("sim-world") {
 		MESSAGE("cold: soup ", c.seconds_soup, " s, cook ", c.seconds_cook, " s, total ", c.seconds_total, " s; warm: restore ", w.seconds_restore, " s, total ",
 				w.seconds_total, " s; peak working set so far ", mib(peak_working_set()), " MiB (timings noisy: other builds share the machine)");
 
-		// A second mode of the level: the tiles it shares with TDM come from the cache (content keys).
 		core::Result<std::unique_ptr<level::LoadedLevel>> cq = level::load_level(m->install, kLevel, "ConquestLarge0");
 		REQUIRE(cq.ok());
 		core::Result<std::unique_ptr<level::World>> cq_world = level::World::traverse(**cq);
@@ -619,7 +582,7 @@ TEST_SUITE("sim-world") {
 			MESSAGE("MP_Subway ConquestLarge0 after TDM: ", s.tiles, " tiles, ", s.tiles_hit, " from the cache, ", s.tiles_cooked, " cooked");
 			CHECK_FALSE(s.world_hit);
 			CHECK(s.tiles_hit > 0);
-			CHECK(s.terrains_hit == 1); // TC: content keyed, the modes of a level share the terrain entry
+			CHECK(s.terrains_hit == 1);
 			cache.close();
 		}
 		*cq_world = nullptr;
@@ -641,7 +604,6 @@ TEST_SUITE("sim-world") {
 		CHECK(again->digest == digest->digest);
 		MESSAGE("source digest ", digest->digest->hex(), ": ", digest->bundles, " bundles, ", digest->entries, " manifest entries, ", digest->seconds * 1000.0, " ms");
 
-		// The entries of the hashed bundles, as the digest reads them.
 		const core::LevelMount &mount = m->level->mount();
 		std::vector<std::string> names{ set.level };
 		names.insert(names.end(), set.settings.begin(), set.settings.end());
@@ -682,7 +644,7 @@ TEST_SUITE("sim-world") {
 		CHECK(sources[0] > 100);
 		CHECK(sources[1] > 100);
 		CHECK(sources[2] > 0);
-		CHECK_FALSE(mount.has_chunk(core::Guid{})); // the zero id the soup skips (a streaming node without data)
+		CHECK_FALSE(mount.has_chunk(core::Guid{}));
 		CHECK(missing == std::array<size_t, 3>{});
 	}
 
@@ -700,7 +662,7 @@ TEST_SUITE("sim-world") {
 		}
 		const auto world = world_of(shapes);
 		const Reference ref = make_reference(m->soup);
-		REQUIRE(ref.triangles.size() == 1136699); // TC: 940,091 Havok + 196,608 terrain (every cell)
+		REQUIRE(ref.triangles.size() == 1136699);
 		std::mt19937 rng(20261015);
 		std::uniform_real_distribution<double> unit(0.0, 1.0);
 		const auto random_spot = [&](uint32_t p_mask, D3 &r_point, D3 &r_normal) {
@@ -718,7 +680,7 @@ TEST_SUITE("sim-world") {
 				const D3 n = cross(t.v[1] - t.v[0], t.v[2] - t.v[0]);
 				r_normal = n * (1.0 / len(n));
 				if ((rng() & 1) != 0) {
-					r_normal = r_normal * -1.0; // either side: back faces collide
+					r_normal = r_normal * -1.0;
 				}
 				return;
 			}
@@ -734,8 +696,7 @@ TEST_SUITE("sim-world") {
 		};
 		const auto to_vec = [](D3 p_d) { return Vec3{ float(p_d.x), float(p_d.y), float(p_d.z) }; };
 
-		// Rays: aimed at a sampled triangle from 0.2-6 m off its plane, 1,000 for movement and 1,000 for everything.
-		constexpr double kRayTolerance = 0.002; // metres along the ray and in the plane
+		constexpr double kRayTolerance = 0.002;
 		size_t ray_hits = 0, ray_misses = 0, ray_ambiguous = 0, ray_bad = 0, tag_checked = 0, tag_bad = 0;
 		for (int i = 0; i < 2000; ++i) {
 			const uint32_t mask = i < 1000 ? query_mask::kMovement : query_mask::kAll;
@@ -745,7 +706,7 @@ TEST_SUITE("sim-world") {
 			D3 target = p + random_dir() * (3.0 * unit(rng));
 			D3 delta_d = (target - origin_d) * (1.0 + 2.0 * unit(rng));
 			const Vec3 origin = to_vec(origin_d), delta = to_vec(delta_d);
-			// The reference works on the float inputs the world saw.
+
 			const D3 o = d3(origin), dl = d3(delta);
 			const double length = len(dl);
 			std::vector<RayCandidate> candidates;
@@ -756,7 +717,7 @@ TEST_SUITE("sim-world") {
 							candidates.push_back(*c);
 						}
 					});
-			// sure: inside by the tolerance, not grazing, inside the segment; possible: within the tolerance.
+
 			std::optional<double> sure;
 			for (const RayCandidate &c : candidates) {
 				if (!c.grazing && c.margin >= kRayTolerance && c.t >= 0 && c.t <= 1 && (!sure || c.t < *sure)) {
@@ -790,8 +751,7 @@ TEST_SUITE("sim-world") {
 				}
 				continue;
 			}
-			// When one triangle alone explains the hit, its tag, layer and tile are the hit's, and the normal is its
-			// face normal turned to the ray.
+
 			const RayCandidate *only = nullptr;
 			size_t close_by = 0;
 			for (const RayCandidate &c : candidates) {
@@ -823,7 +783,6 @@ TEST_SUITE("sim-world") {
 		CHECK(ray_hits > 1500);
 		CHECK(tag_checked > 1000);
 
-		// Capsule overlaps (stand 0.35 x 1.8 m) with their feet 0.6 m around sampled surfaces.
 		constexpr double kOverlapTolerance = 0.002;
 		size_t overlap_yes = 0, overlap_no = 0, overlap_ambiguous = 0, overlap_bad = 0;
 		for (int i = 0; i < 1000; ++i) {
@@ -852,8 +811,6 @@ TEST_SUITE("sim-world") {
 		CHECK(overlap_no > 100);
 		CHECK(overlap_ambiguous < 20);
 
-		// Prone footprint boxes (0.3 x 0.175 x 1.2 m half extents, any yaw). Jolt's box has a 0.05 m convex radius, so
-		// its corners are rounded by up to 0.05 (sqrt 3 - 1) = 0.037 m: closer than 0.04 m is ambiguous.
 		constexpr double kBoxTolerance = 0.04;
 		size_t box_yes = 0, box_no = 0, box_ambiguous = 0, box_bad = 0;
 		for (int i = 0; i < 500; ++i) {
@@ -885,10 +842,6 @@ TEST_SUITE("sim-world") {
 		CHECK(box_yes > 50);
 		CHECK(box_no > 80);
 
-		// Capsule sweeps (stand 1.8 m and crouch 1.15 m, r 0.35) of 0.5-4 m, mostly towards a sampled surface, from
-		// a start the reference finds clear by 5 cm (starts in contact are the overlap rows above). Jolt's fraction
-		// must lie between the first contact of a capsule 3 mm thinner and of one 3 mm fatter (both by conservative
-		// advancement over the soup triangles).
 		constexpr double kSweepTolerance = 0.003;
 		size_t sweep_hits = 0, sweep_misses = 0, sweep_bad = 0, sweep_skipped = 0;
 		for (int i = 0; i < 400; ++i) {

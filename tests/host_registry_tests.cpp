@@ -1,12 +1,3 @@
-// H hygiene: the stop_all registries of ServerHost, LoopbackClient and ClientSession (bf3_host
-// src/instance_registry.h) against owners that start and destroy instances on other threads at the same time.
-//
-// Before the fix stop_all copied the pointer list under the registry mutex and called stop() through the copies
-// after releasing it, so an owner destroying its instance in between left stop_all with a dangling pointer (a
-// heap use after free under ASan, a crash or a hang on a freed mutex otherwise). The deterministic cases pin the
-// rule on InstanceRegistry itself (a destructor waits while a stop_all call is inside its instance; an instance
-// retired before stop_all reaches it is skipped); the stress cases churn the three real classes against a thread
-// that calls stop_all in a loop. No data needed; meant for the asan preset (ctest -R host.registry).
 #include <doctest/doctest.h>
 
 #include "instance_registry.h"
@@ -34,7 +25,6 @@ using bf3::host::detail::InstanceRegistry;
 
 namespace {
 
-// A registered object whose stop() runs a hook; `alive` catches a call into a destroyed object even without ASan.
 struct Probe {
 	explicit Probe(InstanceRegistry<Probe> &r_registry) :
 			registry(r_registry) {}
@@ -71,7 +61,6 @@ bool wait_for(const std::atomic<bool> &p_flag, std::chrono::milliseconds p_timeo
 	return true;
 }
 
-// Polls p_done (on state, not a fixed sleep) until it holds or p_timeout passes.
 bool wait_until(const std::function<bool()> &p_done, std::chrono::milliseconds p_timeout) {
 	const auto end = std::chrono::steady_clock::now() + p_timeout;
 	while (!p_done()) {
@@ -83,8 +72,6 @@ bool wait_until(const std::function<bool()> &p_done, std::chrono::milliseconds p
 	return true;
 }
 
-// p_owners threads run p_round(thread, iteration) p_iterations times each while one thread calls p_stop_all in a
-// loop; returns the sum of what p_stop_all returned (instances it stopped).
 size_t churn(int p_owners, int p_iterations, const std::function<void(int, int)> &p_round, const std::function<size_t()> &p_stop_all,
 		size_t *r_stop_all_calls) {
 	std::atomic<bool> done{ false };
@@ -116,18 +103,13 @@ size_t churn(int p_owners, int p_iterations, const std::function<void(int, int)>
 	return stopped.load();
 }
 
-// How jitter() spends a long pause (docs/testing.md "Waiting rules").
 enum class JitterMode {
-	// Every long pause spins on steady_clock with yield(): true 0-350 us lifetimes. A sleep_for that short is
-	// rounded up to the 15.6 ms Windows timer tick, which only made the probe case slow.
+
 	Spin,
-	// The instance-churn cases: 1 in 4 long pauses ((thread + iteration) % 4 == 0) keep the sleep_for, so those
-	// instances live at least one timer tick and the host thread reaches its 60 Hz tick loop (stop_all during a
-	// steady tick); the others spin (stop_all during start-up).
+
 	SpinSomeTicks,
 };
 
-// A small pause that varies by round, so destruction lands before, during and after a stop_all pass.
 void jitter(int p_thread, int p_iteration, JitterMode p_mode) {
 	const int us = int((uint32_t(p_thread) * 2654435761u + uint32_t(p_iteration) * 40503u) % 700u);
 	if (us > 350) {
@@ -145,7 +127,6 @@ void jitter(int p_thread, int p_iteration, JitterMode p_mode) {
 	}
 }
 
-// A flat 64 m floor and one spawn point; motor numbers from the defaults plus the three pose heights.
 std::shared_ptr<const bf3::host::SharedLevel> floor_level() {
 	std::vector<bf3::sim::StaticTriangle> t;
 	for (float x = -32; x < 32; x += 8) {
@@ -172,7 +153,7 @@ std::shared_ptr<const bf3::host::SharedLevel> floor_level() {
 	return bf3::host::synthetic_shared_level(*shapes, { p }, motor);
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-registry") {
 	TEST_CASE("host.registry: a destructor waits while stop_all is inside its instance, then the instance is gone") {
@@ -190,14 +171,13 @@ TEST_SUITE("host-registry") {
 		REQUIRE(wait_for(inside, 10s));
 		std::atomic<bool> deleted{ false };
 		std::thread owner([&] {
-			probe.reset(); // retire() must wait for the pin
+			probe.reset();
 			deleted.store(true, std::memory_order_release);
 		});
-		// retire() erases the instance from the live list before it waits on the pin: once the list is empty the
-		// owner is inside retire(). A short grace lets a destructor that does not wait run past it.
+
 		REQUIRE(wait_until([&] { return registry.size() == 0; }, 10s));
 		std::this_thread::sleep_for(20ms);
-		CHECK(!deleted.load()); // still inside stop(): the destructor has not run past retire()
+		CHECK(!deleted.load());
 		CHECK(!raw->destroyed.load());
 		release.store(true, std::memory_order_release);
 		stop_all.join();
@@ -226,11 +206,10 @@ TEST_SUITE("host-registry") {
 		REQUIRE(wait_for(inside, 10s));
 		std::atomic<bool> deleted{ false };
 		std::thread owner([&] {
-			second.reset(); // pinned by the pass, which is still in `first`: waits, and the pass must skip it
+			second.reset();
 			deleted.store(true, std::memory_order_release);
 		});
-		// `first` stays listed (its stop() has not reached remove()); `second` leaves the list when its owner is
-		// inside retire().
+
 		REQUIRE(wait_until([&] { return registry.size() == 1; }, 10s));
 		std::this_thread::sleep_for(20ms);
 		CHECK(!deleted.load());

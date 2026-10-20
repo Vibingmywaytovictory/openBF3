@@ -9,7 +9,7 @@ namespace bf3::net {
 namespace {
 std::mutex g_runtime_mutex;
 int g_runtime_users = 0;
-} // namespace
+}
 
 bool runtime_acquire() {
 	std::lock_guard lock(g_runtime_mutex);
@@ -61,7 +61,7 @@ std::unique_ptr<Host> Host::create_server(const char *p_bind_ip, uint16_t p_port
 	std::unique_ptr<Host> host(new Host());
 	host->host_ = h;
 	host->channels_ = p_channels;
-	host->port_ = h->address.port; // enet_host_create reads the bound address back
+	host->port_ = h->address.port;
 	return host;
 }
 
@@ -143,8 +143,7 @@ size_t Host::max_unfragmented_bytes(uint32_t p_peer) const {
 	if (p_peer >= h->peerCount || h->peers[p_peer].state != ENET_PEER_STATE_CONNECTED) {
 		return 0;
 	}
-	// enet_peer_send's fragment threshold (peer.c): the MTU minus the protocol and fragment headers, minus the
-	// checksum when the host uses one.
+
 	size_t n = h->peers[p_peer].mtu - sizeof(ENetProtocolHeader) - sizeof(ENetProtocolSendFragment);
 	if (h->checksum != nullptr) {
 		n -= sizeof(enet_uint32);
@@ -205,4 +204,4 @@ size_t Host::connected_peers() const {
 	return n;
 }
 
-} // namespace bf3::net
+}

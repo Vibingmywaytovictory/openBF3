@@ -13,11 +13,10 @@ namespace {
 
 using C = std::array<float, 3>;
 
-constexpr C kCharacterColour{ 1.00f, 0.62f, 0.10f }; // RBTypeCharacter bodies (player clip)
-constexpr C kInvisibleColour{ 0.85f, 0.20f, 0.85f }; // invisible blockers
-constexpr C kTerrainColour{ 0.46f, 0.54f, 0.34f }; // terrain heightfield cells
+constexpr C kCharacterColour{ 1.00f, 0.62f, 0.10f };
+constexpr C kInvisibleColour{ 0.85f, 0.20f, 0.85f };
+constexpr C kTerrainColour{ 0.46f, 0.54f, 0.34f };
 
-// A fixed light from above and to the side, in Frostbite space.
 constexpr float kLight[3] = { 0.3363f, 0.8408f, 0.4243f };
 
 float placement_jitter(uint32_t p_placement) {
@@ -26,7 +25,7 @@ float placement_jitter(uint32_t p_placement) {
 	return 0.94f + 0.12f * float(h & 0xFFFF) / 65535.0f;
 }
 
-} // namespace
+}
 
 std::array<float, 3> collision_surface_colour(uint8_t p_surface) {
 	switch (p_surface) {
@@ -95,7 +94,6 @@ std::array<float, 3> collision_surface_colour(uint8_t p_surface) {
 
 namespace {
 
-// Appends one soup triangle to a mesh as (v0, v2, v1) with its colour, UVs and bounds.
 void emit_triangle(PreparedCollisionMesh &r_m, const lvl::SoupTriangle &p_tri, bool &r_first) {
 	C base = collision_surface_colour(p_tri.surface);
 	if (p_tri.body == uint8_t(lvl::CollisionBody::Character)) {
@@ -115,7 +113,7 @@ void emit_triangle(PreparedCollisionMesh &r_m, const lvl::SoupTriangle &p_tri, b
 	const float facing = std::fabs(n[0] * kLight[0] + n[1] * kLight[1] + n[2] * kLight[2]);
 	const float shade = (0.45f + 0.55f * (std::isfinite(facing) ? facing : 0.0f)) * placement_jitter(p_tri.placement);
 	const float rgba[4] = { std::min(1.0f, base[0] * shade), std::min(1.0f, base[1] * shade), std::min(1.0f, base[2] * shade), 1.0f };
-	static constexpr int kOrder[3] = { 0, 2, 1 }; // Godot front faces are clockwise
+	static constexpr int kOrder[3] = { 0, 2, 1 };
 	static constexpr float kBary[3][2] = { { 1.0f, 0.0f }, { 0.0f, 1.0f }, { 0.0f, 0.0f } };
 	for (int k = 0; k < 3; ++k) {
 		const core::res::Vec3 &p = p_tri.v[kOrder[k]];
@@ -135,9 +133,8 @@ void emit_triangle(PreparedCollisionMesh &r_m, const lvl::SoupTriangle &p_tri, b
 	}
 }
 
-// The Havok (tile, layer) slots of the soup's tiles.
 std::vector<PreparedCollisionMesh> prepare_tile_meshes(const lvl::CollisionSoup &p_soup, unsigned p_threads) {
-	// Which (tile, layer) meshes exist and how many triangles each takes.
+
 	struct Slot {
 		size_t tile = 0;
 		uint8_t layer = 0;
@@ -180,7 +177,6 @@ std::vector<PreparedCollisionMesh> prepare_tile_meshes(const lvl::CollisionSoup 
 	return out;
 }
 
-// The 64 m tile's distance (XZ) from a point: 0 inside.
 float tile_distance(const std::array<int32_t, 2> &p_tile, const std::array<float, 2> &p_centre) {
 	float d2 = 0.0f;
 	for (int a = 0; a < 2; ++a) {
@@ -192,7 +188,7 @@ float tile_distance(const std::array<int32_t, 2> &p_tile, const std::array<float
 	return std::sqrt(d2);
 }
 
-} // namespace
+}
 
 std::vector<std::array<int32_t, 2>> terrain_window_candidates(const CollisionPrepOptions &p_options) {
 	std::vector<std::array<int32_t, 2>> out;
@@ -210,7 +206,7 @@ std::vector<std::array<int32_t, 2>> terrain_window_candidates(const CollisionPre
 			}
 		}
 	}
-	// Nearest first (ties in tile order), so the triangle cap keeps the tiles around the centre.
+
 	std::stable_sort(out.begin(), out.end(),
 			[&](const std::array<int32_t, 2> &a, const std::array<int32_t, 2> &b) { return tile_distance(a, c) < tile_distance(b, c); });
 	return out;
@@ -233,8 +229,7 @@ std::vector<PreparedCollisionMesh> prepare_terrain_window(const lvl::CollisionSo
 	}
 	const std::vector<std::array<int32_t, 2>> candidates = terrain_window_candidates(p_options);
 	stats.tiles_considered = candidates.size();
-	// Nearest first in chunks on the lanes; a chunk's tiles are kept in order while the cap allows, so the memory is the
-	// cap plus one chunk. Each tile's cells are charged to its own budget (a tile of a sane grid is a few thousand).
+
 	constexpr size_t kChunk = 32;
 	struct Gathered {
 		std::vector<lvl::SoupTriangle> triangles;
@@ -294,7 +289,7 @@ std::vector<PreparedCollisionMesh> prepare_terrain_window(const lvl::CollisionSo
 			std::vector<lvl::SoupTriangle>().swap(g.triangles);
 		}
 	}
-	// Tile order, as the Havok slots.
+
 	std::sort(out.begin(), out.end(), [](const PreparedCollisionMesh &a, const PreparedCollisionMesh &b) {
 		return std::make_pair(a.tile_x, a.tile_z) < std::make_pair(b.tile_x, b.tile_z);
 	});
@@ -322,4 +317,4 @@ std::vector<PreparedCollisionMesh> prepare_collision_meshes(const lvl::Collision
 	return out;
 }
 
-} // namespace bf3::render
+}

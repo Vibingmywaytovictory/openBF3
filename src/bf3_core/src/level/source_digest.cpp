@@ -1,12 +1,3 @@
-// The source digest of a loaded level x mode (level/source_digest.h; docs/design/m1.md §5.5): one SHA-256 over the
-// sorted (bundle key, bundle digest) of every bundle the mode mounts. A bundle digest is the SHA-256 of its
-// manifest entries in a canonical, length-prefixed form, each list sorted:
-//   ebx    (asset key, sha1)
-//   res    (asset key, resType, resMeta, sha1)
-//   chunk  (id, sha1, range start / end / logical offset or none, tail-only flag)
-// resMeta and the chunk range are manifest fields that change how the payload decodes without changing its SHA1,
-// so they are hashed too. An entry stored inline in a CAS manifest (`idata`) whose SHA1 is zero is hashed by its
-// inline bytes (part of the manifest, not a payload read); any other zero SHA1 makes the digest unavailable.
 #include "bf3/core/level/source_digest.h"
 
 #include "bf3/core/bundle_manifest.h"
@@ -33,7 +24,6 @@ bool is_zero(const Sha1 &p_sha1) {
 	return std::all_of(p_sha1.bytes.begin(), p_sha1.bytes.end(), [](uint8_t p_b) { return p_b == 0; });
 }
 
-// Little-endian, length-prefixed canonical bytes for the hasher.
 class Canon {
 public:
 	void u8(uint8_t p_v) { bytes_.push_back(p_v); }
@@ -55,7 +45,7 @@ public:
 	void raw(const std::array<uint8_t, N> &p_bytes) {
 		bytes_.insert(bytes_.end(), p_bytes.begin(), p_bytes.end());
 	}
-	// The payload's identity: its SHA1, or for a zero SHA1 on an inline entry the inline bytes. False when neither.
+
 	bool payload(const Sha1 &p_sha1, const Payload &p_payload) {
 		if (!is_zero(p_sha1)) {
 			u8(1);
@@ -71,7 +61,7 @@ public:
 		}
 		return false;
 	}
-	// Moves the bytes out (the next record starts empty).
+
 	std::vector<uint8_t> take() { return std::move(bytes_); }
 
 private:
@@ -144,7 +134,7 @@ Result<BundleDigest> digest_bundle(std::string p_key, const BundleManifest &p_ma
 	return out;
 }
 
-} // namespace
+}
 
 Result<SourceDigest> level_source_digest(const LoadedLevel &p_level) {
 	const auto start = std::chrono::steady_clock::now();
@@ -209,4 +199,4 @@ Result<SourceDigest> level_source_digest(const LoadedLevel &p_level) {
 	return out;
 }
 
-} // namespace bf3::core::level
+}

@@ -1,5 +1,3 @@
-// The kit items as weapon sound sources (kit_audio.h).
-
 #include "bf3/audio/kit_audio.h"
 
 #include "bf3/core/gameplay/weapon_def.h"
@@ -41,7 +39,7 @@ const char *mode_name(WeaponFireMode p_mode) {
 	}
 }
 
-} // namespace
+}
 
 KitAudioSources kit_audio_sources(const host::GunplayLevel &p_level) {
 	KitAudioSources out;
@@ -107,4 +105,4 @@ std::vector<std::string> kit_audio_report(const KitAudioSources &p_sources, cons
 	return out;
 }
 
-} // namespace bf3::audio
+}

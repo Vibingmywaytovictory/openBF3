@@ -17,11 +17,9 @@ using namespace godot;
 
 namespace {
 
-Bf3Localisation *g_current = nullptr; // main thread only
+Bf3Localisation *g_current = nullptr;
 
-} // namespace
-
-// --- Bf3Translation -------------------------------------------------------------------------------
+}
 
 bool Bf3Translation::looks_like_sid(const std::string &p_text) {
 	if (p_text.size() < 4 || p_text.compare(0, 3, "ID_") != 0) {
@@ -42,7 +40,7 @@ StringName Bf3Translation::_get_message(const StringName &p_src_message, const S
 	}
 	const std::string sid = to_std(String(p_src_message));
 	if (!looks_like_sid(sid) || !db_->resolves(sid)) {
-		return StringName(); // not ours: tr() falls through and returns the SID itself
+		return StringName();
 	}
 	const std::optional<std::string_view> text = db_->find_sid(sid);
 	return StringName(to_godot(std::string(*text)));
@@ -50,11 +48,9 @@ StringName Bf3Translation::_get_message(const StringName &p_src_message, const S
 
 StringName Bf3Translation::_get_plural_message(const StringName &p_src_message, const StringName &p_src_plural_message, int32_t p_n,
 		const StringName &p_context) const {
-	// BF3's database has no plural forms: the singular SID for one, the plural SID otherwise.
+
 	return _get_message(p_n == 1 ? p_src_message : p_src_plural_message, p_context);
 }
-
-// --- Bf3Localisation ------------------------------------------------------------------------------
 
 Bf3Localisation::Bf3Localisation() = default;
 
@@ -78,7 +74,7 @@ void Bf3Localisation::_bind_methods() {
 }
 
 void Bf3Localisation::_notification(int p_what) {
-	// The loader thread must be joined before this node (and later Godot's singletons) go away.
+
 	if (p_what == NOTIFICATION_PREDELETE) {
 		join_loader();
 		unregister();
@@ -86,7 +82,7 @@ void Bf3Localisation::_notification(int p_what) {
 }
 
 void Bf3Localisation::_enter_tree() {
-	// Before any _ready, so consumers find it whatever the sibling order.
+
 	if (!Engine::get_singleton()->is_editor_hint() && g_current == nullptr) {
 		g_current = this;
 	}
@@ -96,7 +92,7 @@ void Bf3Localisation::_ready() {
 	if (Engine::get_singleton()->is_editor_hint()) {
 		return;
 	}
-	// Install options are gathered here (Godot API, main thread); the loader only uses bf3_core.
+
 	bf3::core::InstallLocateOptions opts;
 	opts.cmdline_path = user_arg_value("bf3-install");
 	ProjectSettings *ps = ProjectSettings::get_singleton();
@@ -142,7 +138,7 @@ void Bf3Localisation::_process(double p_delta) {
 		return;
 	}
 	translation_.instantiate();
-	translation_->set_locale("en"); // the database is English (localization/us_loc)
+	translation_->set_locale("en");
 	translation_->set_database(db_);
 	TranslationServer::get_singleton()->add_translation(translation_);
 	registered_ = true;
@@ -183,4 +179,4 @@ void Bf3Localisation::unregister() {
 	translation_.unref();
 }
 
-} // namespace bf3::godot_side
+}

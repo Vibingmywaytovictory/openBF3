@@ -1,7 +1,3 @@
-// M2a VFX1 fx.install (docs/design/m2a-vfx1.md §2, §11): the retail gates through the same bf3_fx functions the
-// `bf3dump fx` commands call: G1 census, G3 1p muzzle, G4 oilfire (fixed and variable dt), G5 impacts (Metro,
-// Caspian), G6 Metro atlas, G7 / G8 check over every effect, cold vs warm cache equality, and G11 (the install is
-// unchanged, last case). Read-only; exits 77 without an install.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
@@ -38,13 +34,12 @@ namespace {
 constexpr const char *kMuzzle = "fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p";
 constexpr const char *kOilfire = "fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01";
 
-// The install snapshot of the first case that opens the install; the last case compares against it (G11).
 std::optional<InstallSnapshot> g_before;
 
 struct Session {
 	InstallReader reader;
 	std::shared_ptr<Install> install;
-	std::unique_ptr<EbxLibrary> all; // @all-mp, bulk-loaded
+	std::unique_ptr<EbxLibrary> all;
 };
 
 bool open_or_skip(Session &r_s, bool p_all = true) {
@@ -67,9 +62,6 @@ bool open_or_skip(Session &r_s, bool p_all = true) {
 	return true;
 }
 
-// The @all-mp library, opened and bulk-loaded once per process and shared (read only) by the cases that need it
-// (census, muzzle, oilfire, cache, check). Built lazily by the first of them, so each case still runs alone under a
-// doctest filter; null (the case skips) without an install.
 Session *all_mp() {
 	static std::unique_ptr<Session> s_session;
 	static bool s_tried = false;
@@ -103,7 +95,7 @@ std::vector<std::string> blueprints_of(const EbxLibrary &p_lib) {
 	return out;
 }
 
-} // namespace
+}
 
 TEST_SUITE("fx-install") {
 
@@ -243,7 +235,7 @@ TEST_CASE("atlas: G6, Metro's emitter atlas and every name its documents use") {
 	const HarnessReport rep = fx_golden_atlas(*atlas, "MP_Subway", used, docs.size());
 	print_failures(rep);
 	CHECK(rep.pass);
-	// Frame rects: a 16-frame, 4-column flipbook's frame 5 is row 1, column 1 of the entry.
+
 	const AtlasEntry *flash = atlas->resolve("fx/textures/muzzleflash/muzzleflash_01");
 	REQUIRE(flash != nullptr);
 	Vec2 mn, mx;
@@ -297,7 +289,7 @@ TEST_CASE("cache: cold and warm compiles give the same defs") {
 		CHECK(differ == 0);
 		CHECK(hits == names.size());
 		CHECK(cold_totals.failed.load() == 0);
-		// And the uncached compile prints the same text.
+
 		CompileContext ctx;
 		ctx.db = s.all.get();
 		const Result<EffectDef> direct = compile_effect(kMuzzle, ctx);
@@ -356,7 +348,6 @@ TEST_CASE("check: G7 and G8 over every effect, 10 s, seed 1") {
 	MESSAGE("check: " << rep.finite_effects << " finite, " << rep.unchecked_termination << " unchecked termination, " << rep.seconds << " s");
 }
 
-// Last case of the file (doctest runs file order): G11.
 TEST_CASE("install unchanged: G11") {
 	Session s;
 	if (!open_or_skip(s, false)) {
@@ -367,4 +358,4 @@ TEST_CASE("install unchanged: G11") {
 	CHECK_MESSAGE(diff.clean(), diff.summary());
 }
 
-} // TEST_SUITE
+}

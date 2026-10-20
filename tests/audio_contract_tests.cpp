@@ -1,7 +1,3 @@
-// M2a audio interface contract (docs/design/m2a-audio.md §6, §10): every audio header compiles together, the node
-// type table keeps the census sets the gates rely on, the hashes and FourCCs the seam names match the data's
-// encoding, and the tuning parser accepts its defaults and refuses bad input. No data, no Godot; nothing here calls
-// a function the implementation waves have yet to write.
 #include <doctest/doctest.h>
 
 #include "bf3/audio/audio_analysis.h"
@@ -28,23 +24,21 @@
 namespace au = bf3::core::audio;
 namespace ba = bf3::audio;
 
-// ---- compile-time contract ---------------------------------------------------------------------------------
-
 static_assert(au::kXasFrameBytes == 76 && au::kXasFrameSamples == 128);
 static_assert(ba::kBlockFrames == 512 && ba::kMixRate == 48000);
-// FourCCs as the plugins store them [verified: SnP1 = 1399738417, Sen0 = 1399156272, Sub0 = 1400201776].
+
 static_assert(au::fourcc("SnP1") == 1399738417u);
 static_assert(au::fourcc("Sen0") == 1399156272u);
 static_assert(au::fourcc("Sub0") == 1400201776u);
 static_assert(au::fourcc("LPB0") == 1280328240u);
 static_assert(au::fourcc("Pn21") == 1349399089u);
 static_assert(au::fourcc("HI20") == 1212756528u);
-// SoundGraphInfo ConnectionIndex is 1-based with 0 = none [verified over all 835 graphs of @all-mp].
+
 static_assert(au::kStoredConnectionNone == 0);
-// The M16A3 check taps fit the instance's tap.
+
 static_assert(ba::kM16CoreTapVoices.size() <= ba::kMaxTapVoices && ba::kM16NoiseTapVoices.size() <= ba::kMaxTapVoices);
 static_assert(ba::kM16NoiseHpf.voice == 14 && ba::kM16NoiseHpf.plugin == 2 && ba::kM16CoreHpf.voice == 6 && ba::kM16CoreHpf.plugin == 1);
-// Commands cross the ring by copy.
+
 static_assert(std::is_trivially_copyable_v<ba::MixerCommand>);
 static_assert(std::is_trivially_copyable_v<au::SoundPort>);
 static_assert(std::is_trivially_copyable_v<au::SoundNode>);
@@ -111,7 +105,7 @@ TEST_CASE("tuning: defaults parse, bad input fails with the line") {
 	CHECK(!ba::parse_audio_tuning("[output]\nlfe_fold_db = 99\n").ok());
 	CHECK(!ba::parse_audio_tuning("[output]\nlfe_fold_db = x\n").ok());
 	CHECK(!ba::parse_audio_tuning("[output\n").ok());
-	CHECK(!ba::parse_audio_tuning("lfe_fold_db = -3\n").ok()); // no section
+	CHECK(!ba::parse_audio_tuning("lfe_fold_db = -3\n").ok());
 }
 
 TEST_CASE("tuning: the project's audio_tuning.cfg parses and sets every key") {
@@ -127,4 +121,4 @@ TEST_CASE("tuning: the project's audio_tuning.cfg parses and sets every key") {
 	}
 }
 
-} // TEST_SUITE
+}

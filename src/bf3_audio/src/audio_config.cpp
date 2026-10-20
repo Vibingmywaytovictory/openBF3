@@ -1,5 +1,3 @@
-// Audio tuning table and its .cfg parser (audio_config.h).
-
 #include "bf3/audio/audio_config.h"
 
 #include <charconv>
@@ -39,7 +37,7 @@ std::string_view trim(std::string_view p_text) {
 	return p_text;
 }
 
-} // namespace
+}
 
 std::span<const AudioTuningKey> audio_tuning_keys() {
 	return kKeys;
@@ -100,4 +98,4 @@ core::Result<AudioTuning> parse_audio_tuning(std::string_view p_text) {
 	return tuning;
 }
 
-} // namespace bf3::audio
+}

@@ -1,4 +1,3 @@
-// Bf3FxDemo: VFX2's demo and --fx-check (docs/design/m2a-fx2.md §6). See fx_demo.h.
 #include "fx_demo.h"
 
 #include "godot_cache.h"
@@ -42,29 +41,27 @@ namespace fx = bf3::fx;
 
 namespace {
 
-// The demo's effects (data facts: docs/design/m2a-fx2.md §6.1).
-constexpr const char *kOilfire = "fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01"; // MP_012
-constexpr const char *kMuzzle1p = "fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p"; // M16A4 FireEffects1p
+constexpr const char *kOilfire = "fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01";
+constexpr const char *kMuzzle1p = "fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_1p";
 constexpr const char *kFillout1p = "fx/weapons/muzzleflashes/generic/fx_muzz_generic_rifle_fillout_1p";
 constexpr const char *kShell = "fx/weapons/shells/fx_shellejection_m";
 constexpr const char *kSmoke = "fx/ambient/generic/firesmoke/smoke/smokepillars/generic/fx_dark_smoke_01_m";
-// The nominal 1p muzzle in camera space (Godot: x right, y up, -z forward) [inferred: no viewmodel mesh in this
-// track; the M16A3's FireEffects1p offsets are relative to its weapon, which the vm track places].
+
 const Vector3 kMuzzleCamera(0.10f, -0.11f, -0.70f);
-// FireEffects1p: the shell ejection sits 0.55 m behind the muzzle at 0.99 m (0.99 - 0.44); scaled to kMuzzleCamera.
+
 constexpr float kShellBack = 0.55f * 0.70f / 0.99f;
-// The impact surfaces: rays from the stage camera, hits kept within [kSurfaceMin, kSurfaceMax] m (nearest 8 m wins).
+
 constexpr float kSurfaceRay = 60.0f, kSurfaceMin = 2.0f, kSurfaceMax = 45.0f;
-constexpr double kMuzzlePeriod = 0.1; // 10 Hz (the M16A3 fires 800 rpm; the demo's bursts are slower)
+constexpr double kMuzzlePeriod = 0.1;
 constexpr double kImpactPeriod = 0.6;
 constexpr double kStressAt = 16.0;
 constexpr double kRunSeconds = 21.0;
 constexpr double kOilGateAge = 15.0;
-constexpr int kOilTarget = 80, kOilTolerance = 1; // E8 (4)
+constexpr int kOilTarget = 80, kOilTolerance = 1;
 constexpr uint32_t kStressEffects = 96;
 constexpr int kSettleFrames = 4;
-constexpr int kFlashRetries = 16; // the muzzle shot re-fires until the _1p_flash component (p 0.75) is present
-constexpr double kSmokeStartAt = 7.5; // the smoke pillar starts after the impact shots (it would stand behind them)
+constexpr int kFlashRetries = 16;
+constexpr double kSmokeStartAt = 7.5;
 constexpr uint64_t kMinShotBytes = 50 * 1024;
 
 void log(const std::string &p_line) {
@@ -118,10 +115,6 @@ std::string lower(std::string_view p_text) {
 	return s;
 }
 
-// A frame with forward = p_forward, up as close to p_up_hint as possible.
-// An effect frame whose local +Y is p_axis: BF3 effects emit along +Y (SpawnDirection's default, m2a-vfx1.md §6), so a
-// muzzle's +Y is the barrel and an impact's +Y the surface normal [inferred from the data: the 1p flash's direction
-// and box offset are along +Y]. p_forward_hint picks the roll.
 fx::Transform frame_y(const Vector3 &p_origin, const Vector3 &p_axis, const Vector3 &p_forward_hint) {
 	const Vector3 u = p_axis.normalized();
 	Vector3 f = p_forward_hint - u * p_forward_hint.dot(u);
@@ -157,8 +150,6 @@ fx::Transform frame_of(const Vector3 &p_origin, const Vector3 &p_forward, const 
 	return t;
 }
 
-// The light stress emitter: an emissive SAQ burst of 4 particles (1 m, the simulator's default size) living 3 s,
-// ActAsPointLight (radius 6, warm).
 std::shared_ptr<const fx::EffectDef> light_stress_def() {
 	fx::EmitterDef e;
 	e.name = "fx2/synthetic/light_stress";
@@ -168,7 +159,7 @@ std::shared_ptr<const fx::EffectDef> light_stress_def() {
 	e.tmpl.light.radius = 6.0f;
 	e.tmpl.light.color = fx::Vec3{ 3.0f, 1.6f, 0.6f };
 	e.slots[size_t(fx::ProcessorType::SpawnRate)].present = true;
-	e.params.spawn_rate = 301.0f; // floor(1 + 301 x 0.01) = 4 at the window start
+	e.params.spawn_rate = 301.0f;
 	e.params.distribute_over_time = false;
 	e.slots[size_t(fx::ProcessorType::UpdateAge)].present = true;
 	e.params.particle_lifetime = 3.0f;
@@ -189,7 +180,7 @@ std::shared_ptr<const fx::EffectDef> light_stress_def() {
 	return d;
 }
 
-} // namespace
+}
 
 struct Bf3FxDemo::Loaded {
 	std::shared_ptr<bf3::core::Cache> cache;
@@ -204,7 +195,7 @@ struct Bf3FxDemo::Loaded {
 	std::string error;
 	std::vector<std::string> notes;
 	double seconds = 0;
-	std::atomic<bool> done{ false }; // set last by the loader thread
+	std::atomic<bool> done{ false };
 };
 
 Bf3FxDemo::Bf3FxDemo() = default;
@@ -226,7 +217,7 @@ void Bf3FxDemo::parse_args() {
 	no_cache_ = has_user_arg("no-cache");
 	shot_dir_ = user_arg_value("fx-shot-dir");
 	{
-		const std::string dv = user_arg_value("fx-debug-view"); // diagnostics: fx_common.gdshaderinc debug_view
+		const std::string dv = user_arg_value("fx-debug-view");
 		debug_view_ = dv.empty() ? 0 : std::clamp(std::atoi(dv.c_str()), 0, 3);
 	}
 	if (shot_dir_.empty()) {
@@ -340,7 +331,7 @@ void Bf3FxDemo::start_loader() {
 				}
 				*slot = *d;
 			}
-			// The oilfire emitter is MP_012's (Operation Firestorm); its texture is in Metro's atlas.
+
 			{
 				bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> mp12 = bf3::core::EbxLibrary::open(out->install, { "Win32/Levels/MP_012/MP_012" });
 				if (!mp12) {
@@ -398,7 +389,7 @@ void Bf3FxDemo::fire_muzzle() {
 	start_effect(loaded_->muzzle, m, true);
 	start_effect(loaded_->fillout, m, true);
 	fx::Transform shell = m;
-	shell.trans = fx::Vec3{ m.trans.x - m.up.x * kShellBack, m.trans.y - m.up.y * kShellBack + 0.02f, m.trans.z - m.up.z * kShellBack }; // +Y = barrel
+	shell.trans = fx::Vec3{ m.trans.x - m.up.x * kShellBack, m.trans.y - m.up.y * kShellBack + 0.02f, m.trans.z - m.up.z * kShellBack };
 	start_effect(loaded_->shell, shell, true);
 	++muzzle_starts_;
 }
@@ -414,7 +405,7 @@ void Bf3FxDemo::start_impact(int p_which) {
 	if (!def) {
 		return;
 	}
-	// The impact frame [inferred; VFX3 owns the trigger]: +Y = the surface normal.
+
 	start_effect(def, frame_y(p + n * 0.01f, n, Vector3(0, 1, 0)), false);
 	++impact_starts_;
 }
@@ -508,7 +499,7 @@ void Bf3FxDemo::find_surfaces() {
 	std::map<std::string, int> seen;
 	for (int ring = 0; ring < 2 && !(concrete.found && brick.found); ++ring) {
 		const int yaws = ring == 0 ? 49 : 145;
-		const float yaw_span = ring == 0 ? 1.2f : 3.14159265f; // radians either side
+		const float yaw_span = ring == 0 ? 1.2f : 3.14159265f;
 		for (int yi = 0; yi < yaws; ++yi) {
 			const float yaw = -yaw_span + 2.0f * yaw_span * float(yi) / float(yaws - 1);
 			for (const float pitch : { -0.35f, -0.2f, -0.08f, 0.0f, 0.1f, 0.25f, 0.4f, 0.55f }) {
@@ -530,7 +521,7 @@ void Bf3FxDemo::find_surfaces() {
 				}
 				Best *b = name.find("concrete") != std::string::npos ? &concrete : (name.find("brick") != std::string::npos ? &brick : nullptr);
 				if (b == nullptr || b->found && std::fabs(dist - 8.0f) >= std::fabs(b->dist - 8.0f)) {
-					continue; // prefer a hit near 8 m
+					continue;
 				}
 				const fx::ImpactCell *cell = loaded_->bullet ? table.select(*loaded_->bullet, *surface) : nullptr;
 				if (cell == nullptr || cell->effects.empty()) {
@@ -602,7 +593,7 @@ bool Bf3FxDemo::build(std::string *r_error) {
 		const bool inside = std::min(e.min_uv.x, e.max_uv.x) >= 0.0f && std::max(e.min_uv.x, e.max_uv.x) <= 1.0f && std::min(e.min_uv.y, e.max_uv.y) >= 0.0f &&
 				std::max(e.min_uv.y, e.max_uv.y) <= 1.0f;
 		if (inside && renderer_->stats().atlas_ok) {
-			++atlas_uploaded_; // its atlas texture uploaded with every mip and its rect inside it
+			++atlas_uploaded_;
 		}
 	}
 	atlas_line_ = fmt("base %s %u x %u (%u mips, BC3 sRGB), normal %s %u x %u (%u mips, BC5)", atlas.base().partition.c_str(), atlas.base().width,
@@ -647,7 +638,7 @@ bool Bf3FxDemo::build(std::string *r_error) {
 			smoke_point_ = Vector3(hit.position[0], hit.position[1], hit.position[2]);
 		}
 	}
-	// The oilfire is sized for MP_012's horizon (SpawnSize 75 x U[0.2, 1]): drawn 200 m out, seen from 120 m up.
+
 	oil_pose_.position = main_pose_.position + Vector3(0, 120.0f, 0);
 	oil_point_ = oil_pose_.position + fwd * 200.0f - Vector3(0, 30.0f, 0);
 	oil_pose_.target = oil_point_ + Vector3(0, 30.0f, 0);
@@ -732,7 +723,7 @@ void Bf3FxDemo::_process(double p_delta) {
 		return;
 	}
 	if (frozen_) {
-		// A capture settles: the world is not stepped, the frame is redrawn as it is.
+
 		renderer_->draw(*world_, view(), *loaded_->atlas);
 		frame_checks();
 		if (--settle_ > 0) {
@@ -758,7 +749,7 @@ void Bf3FxDemo::_process(double p_delta) {
 	const double dt = std::clamp(p_delta, 0.0, 0.1);
 	t_ += dt;
 	const bool shooting_other = shot_active_ && shots_[shot_index_].kind != 0;
-	// Shots: at their time, pose the camera and start their own effect, step `advance` seconds, then freeze.
+
 	if (check_ && !shot_active_ && shot_index_ < shots_.size() && t_ >= shots_[shot_index_].at) {
 		const Shot &s = shots_[shot_index_];
 		shot_active_ = true;
@@ -795,7 +786,7 @@ void Bf3FxDemo::_process(double p_delta) {
 				break;
 		}
 	}
-	// The demo's repeating starts (the 1p muzzle only from the main pose).
+
 	if (!shooting_other && t_ >= next_muzzle_) {
 		fire_muzzle();
 		next_muzzle_ = t_ + kMuzzlePeriod;
@@ -823,7 +814,7 @@ void Bf3FxDemo::_process(double p_delta) {
 	++frames_;
 	frame_checks();
 	if (oil_count_at_15_ < 0 && oil_age_ >= kOilGateAge) {
-		// The oilfire's output: the one whose def is the oilfire def (one start).
+
 		const auto outs = world_->outputs();
 		int count = 0, drawn = 0;
 		for (size_t i = 0; i < outs.size(); ++i) {
@@ -842,7 +833,7 @@ void Bf3FxDemo::_process(double p_delta) {
 		shot_advance_left_ -= dt;
 		const Shot &s = shots_[shot_index_];
 		if (s.kind == 4 && !oil_framed_) {
-			frame_oilfire(); // the plume rises far above its start: frame its live particles
+			frame_oilfire();
 		}
 		if (shot_advance_left_ <= 0.0 && s.kind == 0 && !flash_present() && shot_retries_ < kFlashRetries) {
 			++shot_retries_;
@@ -937,4 +928,4 @@ void Bf3FxDemo::shutdown() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

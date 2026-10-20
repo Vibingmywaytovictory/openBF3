@@ -1,11 +1,3 @@
-// The WeaponDef block and the weapon catalog shared by bf3dump and the in-game inspector
-// (bf3_core gameplay/weapon_format.h, gameplay/weapon_catalog.h; plan §6 M0 exit).
-//   suite "inspect-unit" (ctest core.gameplay.inspect.unit): the block's "name" line on a synthetic
-//     WeaponDef and a synthetic text database; no install needed.
-//   suite "inspect" (ctest core.gameplay.inspect): WeaponCatalog over MP_Subway with the retail text
-//     database: the M16A3 blueprint resolves through u_m16a4 and is named "M16A3", the M16A4 burst
-//     "M16A4", every variant resolves, and the block is format_weapon's (skips with 77 without an install).
-// Only numbers and short identifiers are asserted; no install bytes are stored.
 #include "test_support.h"
 
 #include "bf3/core/gameplay/weapon_catalog.h"
@@ -37,8 +29,6 @@ void put32(Bytes &r_bytes, size_t p_at, uint32_t p_value) {
 	}
 }
 
-// A text database of ASCII strings in the layout of ui/text_db.h (header, 16-byte tag, entry table
-// sorted by hash, strings), with an all-zero 256-unit histogram.
 ui::TextDatabase make_text_db(std::vector<std::pair<std::string, std::string>> p_entries) {
 	std::sort(p_entries.begin(), p_entries.end(), [](const auto &a, const auto &b) { return ui::text_hash(a.first) < ui::text_hash(b.first); });
 	const size_t table_at = 0x14 + 16;
@@ -66,7 +56,6 @@ ui::TextDatabase make_text_db(std::vector<std::pair<std::string, std::string>> p
 	return std::move(*db);
 }
 
-// The block without its "name" line (what format_weapon prints without a text database).
 std::string without_name_line(const std::string &p_block) {
 	const size_t at = p_block.find("\nname         ");
 	if (at == std::string::npos) {
@@ -76,7 +65,7 @@ std::string without_name_line(const std::string &p_block) {
 	return p_block.substr(0, at) + p_block.substr(end);
 }
 
-} // namespace
+}
 
 TEST_SUITE("inspect-unit") {
 	TEST_CASE("format_weapon adds the localised name only with a text database") {
@@ -97,11 +86,10 @@ TEST_SUITE("inspect-unit") {
 		CHECK(weapon_display_name(w, &db) == "Test Rifle");
 		CHECK(weapon_display_name(w, nullptr).empty());
 
-		// A SID the database lacks shows as itself (plan §2.1).
 		w.name_sid = "ID_P_WNAME_ABSENT";
 		CHECK(weapon_display_name(w, &db) == "ID_P_WNAME_ABSENT");
 		CHECK(format_weapon(w, nullptr, nullptr, &db).find("\nname         ID_P_WNAME_ABSENT  (not in the text database)\n") != std::string::npos);
-		// No SID: "-".
+
 		w.name_sid.clear();
 		CHECK(weapon_display_name(w, &db).empty());
 		CHECK(format_weapon(w, nullptr, nullptr, &db).find("\nname         -\n") != std::string::npos);
@@ -142,7 +130,6 @@ TEST_SUITE("inspect") {
 		REQUIRE(c.capsules() != nullptr);
 		CHECK(c.variants().size() == 172);
 
-		// M16A3 = the blueprint through its base variant.
 		CHECK(c.target_of("weapons/m16a4/m16a4") == "weapons/m16a4/u_m16a4");
 		CHECK(c.target_of("Weapons/M16A4/U_M16_Burst") == "weapons/m16a4/u_m16_burst");
 		Result<WeaponDef> a3 = c.resolve("weapons/m16a4/m16a4");
@@ -164,12 +151,10 @@ TEST_SUITE("inspect") {
 		CHECK(a4->fire.bullets_per_burst == 3);
 		CHECK(c.format(*a4).find("\nname         M16A4\n") != std::string::npos);
 
-		// Attachments go through the same path.
 		Result<WeaponDef> att = c.resolve("weapons/m16a4/u_m16a4", { "u_m16a4_sound_suppressor" });
 		REQUIRE(att.ok());
 		CHECK(att->silenced);
 
-		// Every variant resolves; unknown partitions fail with an error, not a crash.
 		size_t errors = 0;
 		for (const std::string &v : c.variants()) {
 			errors += c.resolve(v).ok() ? 0 : 1;
@@ -177,7 +162,6 @@ TEST_SUITE("inspect") {
 		CHECK(errors == 0);
 		CHECK_FALSE(c.resolve("weapons/nope/u_nope").ok());
 
-		// The lazy sources bf3dump uses agree with the catalog.
 		Result<WeaponSources> sources = open_weapon_sources(*install);
 		REQUIRE(sources.ok());
 		CHECK(sources->ui != nullptr);

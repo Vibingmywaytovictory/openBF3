@@ -1,4 +1,3 @@
-// Ported from IW4L superbundle_bf3 (manifest.rs), Apache-2.0.
 #include "bf3/core/bundle_manifest.h"
 
 #include "bf3/core/db_object.h"
@@ -21,7 +20,6 @@ uint32_t be32(const uint8_t *p_bytes, size_t p_at) {
 	return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
 }
 
-// `size`/`idata` of a CAS manifest entry -> (stored size, payload).
 Status cas_payload(const Record &p_entry, uint64_t &r_stored, Payload &r_payload) {
 	Result<std::optional<uint64_t>> size = p_entry.opt_u64("size");
 	if (!size) {
@@ -97,7 +95,7 @@ Result<std::vector<ChunkMeta>> chunk_metas(DbRef p_list, size_t p_chunk_count) {
 	return out;
 }
 
-} // namespace
+}
 
 Result<BundleManifest> parse_cas_manifest(std::span<const uint8_t> p_element) {
 	size_t end = 0;
@@ -280,7 +278,7 @@ Result<BundleManifest> parse_binary_manifest(std::span<const uint8_t> p_head, ui
 	const uint64_t strings_at = 4 + uint64_t(be32(h, 0x18));
 	const uint64_t chunk_meta_at = 4 + uint64_t(be32(h, 0x1C));
 	const uint64_t chunk_meta_len = be32(h, 0x20);
-	if (ebx_count + res_count + chunk_count != total) { // u32 counts: no u64 overflow
+	if (ebx_count + res_count + chunk_count != total) {
 		return detail::layout_error(what, "entry counts do not add up");
 	}
 	const uint64_t named = ebx_count + res_count;
@@ -340,7 +338,7 @@ Result<BundleManifest> parse_binary_manifest(std::span<const uint8_t> p_head, ui
 		const uint64_t name_offset = be32(h, record);
 		const uint64_t stored_size = be32(h, record + 4);
 		const uint64_t original_size = be32(h, record + 8);
-		// Name from the string block.
+
 		const uint64_t start = strings_at + name_offset;
 		if (start >= head.size()) {
 			return detail::layout_error(what, "name offset is past the string block");
@@ -410,4 +408,4 @@ Result<BundleManifest> parse_binary_manifest(std::span<const uint8_t> p_head, ui
 	return out;
 }
 
-} // namespace bf3::core
+}

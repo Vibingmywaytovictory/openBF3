@@ -1,19 +1,3 @@
-// Level traversal (bf3_core/level). Suite level_unit: transforms, interface constants and the bake
-// split on synthetic values. Suite level: the retail install (read-only; exits 77 = skipped without
-// one) against handoff §9 and sections/03 counts; nothing from the install is stored.
-//
-// Handoff §9 definitions (see README "Level traversal"): Metro TDM "10,873 placements -> 842
-// meshes (762 model, 80 world), 10,571 instances" and Bazaar CQL "620 meshes, 5,783 instances" are
-// the IW4L geometry builder's counts at bab7c1a, which mesh_census reproduces (Bazaar with
-// legacy_variations; the current MeshVariationDatabase rule gives 613). Caspian ConquestSmall0
-// "20,311 placements on 2,277 meshes, 12,725 placed hidden" is the IW engine's later world report
-// ("bf3 static models: ... 12725 placed hidden for destruction"), counted after IW4L's geometry
-// builder gave each destruction state's part an instance of its own, hidden until the state shows:
-// a renderer count, not a traversal count. The traversal places 6,847 mesh objects there; the
-// report's 20,311 - 12,725 = 7,586 shown instances exceed that by 739, which is not attributed here.
-// Metro: sections/03's "Metro 702" composite placements hiding parts is Metro ConquestSmall0
-// (8-RENDER-DESTRUCTION-PART probe geom_MP_Subway_ConquestSmall0.txt); TDM's is 710
-// (3-CONVERTER-PART/geometry.md and geom_MP_Subway_TeamDeathMatch0.txt).
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -92,7 +76,6 @@ size_t count_mesh_objects(const World &p_world) {
 	return n;
 }
 
-// Composite placements whose first health state hides parts (handoff sections/03 §2.5).
 size_t composite_hiding(const LoadedLevel &p_level, const World &p_world) {
 	size_t n = 0;
 	for (const PlacedObject &o : p_world.objects) {
@@ -127,7 +110,6 @@ std::vector<CollisionPlacement> collision_of(const LoadedLevel &p_level, const W
 	return std::move(*collision);
 }
 
-// A partition set with some partitions replaced: lookups try the overlay first, then the base.
 class OverlayDb final : public EbxResolver {
 public:
 	explicit OverlayDb(const EbxResolver &p_base) :
@@ -159,11 +141,6 @@ private:
 	std::unordered_map<std::string, uint32_t> by_name_;
 };
 
-// A hostile partition read through its own descriptors: a WorldPartData (the primary) whose
-// Objects list p_objects entries, each an internal reference to instance 1 (a
-// WorldPartReferenceObjectData whose Blueprint is the WorldPartData itself) or, for 2, to instance 2
-// (a StaticModelGroupEntityData whose MemberDatas holds p_members members that place nothing:
-// no InstanceCount, MemberType or MeshEntityType).
 std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects, uint32_t p_members = 0) {
 	using Bytes = std::vector<uint8_t>;
 	const auto put32 = [](Bytes &r_out, size_t p_at, uint32_t p_value) { std::memcpy(r_out.data() + p_at, &p_value, 4); };
@@ -183,15 +160,15 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects, u
 		uint32_t offset;
 	};
 	const F fields[] = {
-		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartData (0, 1)
+		{ "$", ebx_code::kVoid, 0, 0 },
 		{ "Objects", ebx_code::kArray, 2, 8 },
-		{ "member", ebx_code::kClass, 0, 0 }, // array (2)
-		{ "$", ebx_code::kVoid, 0, 0 }, // WorldPartReferenceObjectData (3, 4)
+		{ "member", ebx_code::kClass, 0, 0 },
+		{ "$", ebx_code::kVoid, 0, 0 },
 		{ "Blueprint", ebx_code::kClass, 0, 8 },
-		{ "$", ebx_code::kVoid, 0, 0 }, // StaticModelGroupEntityData (5, 6)
+		{ "$", ebx_code::kVoid, 0, 0 },
 		{ "MemberDatas", ebx_code::kArray, 5, 8 },
-		{ "member", ebx_code::kValueType, 6, 0 }, // array (7)
-		{ "Unused", ebx_code::kUInt32, 0, 0 }, // StaticModelGroupMemberData (8)
+		{ "member", ebx_code::kValueType, 6, 0 },
+		{ "Unused", ebx_code::kUInt32, 0, 0 },
 	};
 	struct C {
 		const char *name;
@@ -209,17 +186,17 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects, u
 		{ "array", 7, 1, ebx_code::kArray, 4 },
 		{ "StaticModelGroupMemberData", 8, 1, ebx_code::kValueType, 4 },
 	};
-	const uint32_t repeaters[3][3] = { { 0, 1, 1 }, { 0, 1, 3 }, { 0, 1, 4 } }; // internal, count, complex
+	const uint32_t repeaters[3][3] = { { 0, 1, 1 }, { 0, 1, 3 }, { 0, 1, 4 } };
 	const size_t names_at = 80;
 	const size_t fields_at = names_at + name_table.size();
 	const size_t complexes_at = align16(fields_at + std::size(fields) * 16);
 	const size_t instance_repeaters_at = complexes_at + std::size(complexes) * 16;
 	const size_t array_repeaters_at = align16(instance_repeaters_at + std::size(repeaters) * 12);
 	const size_t meta_size = align16(array_repeaters_at + 2 * 12);
-	const size_t instances_at = meta_size; // no strings
+	const size_t instances_at = meta_size;
 	const size_t instance_payload = 3 * (16 + 16);
 	const size_t arrays_at = instances_at + instance_payload;
-	const size_t members_at = align16(4 + 4 * p_objects.size() + 4); // array 1, after its count
+	const size_t members_at = align16(4 + 4 * p_objects.size() + 4);
 	const size_t total = arrays_at + members_at + 4 * size_t(p_members);
 	Bytes b(total, 0);
 	put32(b, 0x00, 0x0FB2D1CE);
@@ -258,8 +235,7 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects, u
 			put32(b, instance_repeaters_at + i * 12 + j * 4, repeaters[i][j]);
 		}
 	}
-	// Array 0 (Objects): count at section+0, elements at section+4. Array 1 (MemberDatas): count
-	// just before members_at, elements at members_at.
+
 	put32(b, array_repeaters_at, 4);
 	put32(b, array_repeaters_at + 4, uint32_t(p_objects.size()));
 	put32(b, array_repeaters_at + 8, 2);
@@ -269,30 +245,25 @@ std::vector<uint8_t> self_listing_part(const std::vector<uint32_t> &p_objects, u
 	for (size_t i = 0; i < 3; ++i) {
 		std::memcpy(b.data() + instances_at + i * 32, instance_guids[i].bytes.data(), 16);
 	}
-	put32(b, instances_at + 16 + 8, 0); // WorldPartData.Objects: array 0
-	put32(b, instances_at + 32 + 16 + 8, 1); // WorldPartReferenceObjectData.Blueprint: internal, instance 0
-	put32(b, instances_at + 64 + 16 + 8, 1); // StaticModelGroupEntityData.MemberDatas: array 1
+	put32(b, instances_at + 16 + 8, 0);
+	put32(b, instances_at + 32 + 16 + 8, 1);
+	put32(b, instances_at + 64 + 16 + 8, 1);
 	put32(b, arrays_at, uint32_t(p_objects.size()));
 	for (size_t i = 0; i < p_objects.size(); ++i) {
-		put32(b, arrays_at + 4 + 4 * i, p_objects[i] + 1); // internal references
+		put32(b, arrays_at + 4 + 4 * i, p_objects[i] + 1);
 	}
 	put32(b, arrays_at + members_at - 4, p_members);
 	return b;
 }
 
-// A synthetic partition written through its own type descriptors, the layout EbxPartition::parse
-// reads: classes derive from DataContainer (8 bytes), every field takes 4 bytes (references, array
-// indices, string offsets, Booleans, 32-bit numbers) except value types, one instance repeater per
-// instance (instance 0 is the primary). Any number of fields may name one array, which is how a
-// small hostile partition makes K lookups of one N-element list.
 class SynthPartition {
 public:
 	struct Field {
 		std::string name;
 		uint8_t code = ebx_code::kUInt32;
-		std::string type; // kValueType: its type; kArray of kValueType: the element type
-		uint8_t element = ebx_code::kClass; // kArray: the element code
-		bool overlap = false; // shares one slot with the type's other overlapping fields (same size)
+		std::string type;
+		uint8_t element = ebx_code::kClass;
+		bool overlap = false;
 	};
 
 	explicit SynthPartition(uint32_t p_seed) :
@@ -300,7 +271,6 @@ public:
 		declare("DataContainer", ebx_code::kClass, "", {});
 	}
 
-	// p_base: "" for a value type or the root class, else a class declared earlier.
 	void declare(const std::string &p_name, uint8_t p_code, const std::string &p_base, const std::vector<Field> &p_fields) {
 		Type t;
 		t.name = p_name;
@@ -350,7 +320,6 @@ public:
 		types_.push_back(t);
 	}
 
-	// A new instance, all zero except its arrays, which start as empty ones.
 	uint32_t add(const std::string &p_type) {
 		const Type &t = types_[find(p_type)];
 		instances_.push_back({ t.complex, std::vector<uint8_t>(t.size, 0) });
@@ -376,7 +345,7 @@ public:
 		const size_t at = offset_of(types_[instance_types_[p_instance]].name, p_field);
 		std::memcpy(instances_[p_instance].second.data() + at, &p_raw, 4);
 	}
-	// Field p_field as base type p_type declares it (a derived type may redeclare the name).
+
 	void set_as(uint32_t p_instance, const std::string &p_type, const std::string &p_field, uint32_t p_raw) {
 		const size_t at = offset_of(p_type, p_field);
 		std::memcpy(instances_[p_instance].second.data() + at, &p_raw, 4);
@@ -397,9 +366,6 @@ public:
 		return at;
 	}
 
-	// A new array for field p_field of p_type (any field naming it may then be set to it): p_count
-	// elements of the field's element type, each 32-bit word p_word(element, word index) (zero:
-	// null references).
 	uint32_t array(const std::string &p_type, const std::string &p_field, uint32_t p_count,
 			const std::function<uint32_t(uint32_t, uint32_t)> &p_word = {}) {
 		const Layout &l = layout_of(p_type, p_field);
@@ -517,9 +483,9 @@ private:
 	struct Layout {
 		std::string name;
 		uint8_t code = 0;
-		uint32_t ref = 0; // array complex, or the value type's complex
+		uint32_t ref = 0;
 		uint32_t offset = 0;
-		uint32_t stride = 4; // arrays
+		uint32_t stride = 4;
 		bool overlap = false;
 	};
 	struct Type {
@@ -591,12 +557,11 @@ private:
 	std::vector<std::pair<uint32_t, std::vector<uint8_t>>> instances_;
 	std::vector<size_t> instance_types_;
 	std::vector<Array> arrays_;
-	std::unordered_map<uint32_t, uint32_t> empty_arrays_; // by array complex
+	std::unordered_map<uint32_t, uint32_t> empty_arrays_;
 	std::string strings_;
 	std::unordered_map<std::string, uint32_t> strings_at_;
 };
 
-// The types the traversal and its helpers read, with only the fields they read.
 void hostile_types(SynthPartition &r_part) {
 	using F = SynthPartition::Field;
 	using namespace ebx_code;
@@ -631,7 +596,6 @@ const EbxPartition &insert(EbxDb &r_db, const std::string &p_name, const SynthPa
 	return *partition;
 }
 
-// A connection list entry: Source, Target, SourceFieldId, TargetFieldId.
 std::function<uint32_t(uint32_t, uint32_t)> connections(const std::vector<std::array<uint32_t, 4>> &p_rows) {
 	return [p_rows](uint32_t p_element, uint32_t p_word) { return p_rows[p_element % p_rows.size()][p_word]; };
 }
@@ -647,10 +611,8 @@ bool budget_error(const Error &p_error) {
 	return p_error.message.find("work steps") != std::string::npos;
 }
 
-// The string offset EBX uses for a null string.
 constexpr uint32_t kNullText = 0xFFFFFFFFu;
 
-// A level partition holding only a LevelData root, for read_level_info.
 SynthPartition level_root(uint32_t p_seed) {
 	SynthPartition part(p_seed);
 	hostile_types(part);
@@ -659,9 +621,6 @@ SynthPartition level_root(uint32_t p_seed) {
 	return part;
 }
 
-// p_depth types, each deriving from the previous (the first from p_base) and adding p_pads 4-byte
-// fields that overlap in one slot, named Pad0..Pad3 (so the lookup tables stay small while each
-// type's descriptors do not). Returns the last type's name (p_base when p_depth is 0).
 std::string padded_chain(SynthPartition &r_part, const std::string &p_prefix, const std::string &p_base, uint8_t p_code, int p_depth, int p_pads) {
 	std::string base = p_base;
 	for (int d = 1; d <= p_depth; ++d) {
@@ -676,8 +635,6 @@ std::string padded_chain(SynthPartition &r_part, const std::string &p_prefix, co
 	return base;
 }
 
-// A LinearTransform-shaped value type whose rows and their x/y/z sit p_depth types deep under
-// p_pads padding fields per type; returns its name.
 std::string padded_transform(SynthPartition &r_part, int p_depth, int p_pads) {
 	using F = SynthPartition::Field;
 	using namespace ebx_code;
@@ -687,15 +644,13 @@ std::string padded_transform(SynthPartition &r_part, int p_depth, int p_pads) {
 	return padded_chain(r_part, "LT", "LT0", kValueType, p_depth, p_pads);
 }
 
-// What every hostile case below must stay under: the uncharged walks they reproduce took minutes
-// to hours; the charged ones end in well under a second (dev) on the budget error.
 constexpr double kHostileSeconds = 60.0;
 
-} // namespace
+}
 
 TEST_SUITE("level_unit") {
 	TEST_CASE("level_unit: child in parent is the row-vector product") {
-		// Parent: 90 degrees about Y (right -> -Z, forward -> +X), scale 2, at (10, 0, 0).
+
 		LevelTransform parent;
 		parent.right = { 0.0f, 0.0f, -1.0f };
 		parent.up = { 0.0f, 1.0f, 0.0f };
@@ -705,11 +660,11 @@ TEST_SUITE("level_unit") {
 		LevelTransform child;
 		child.trans = { 1.0f, 2.0f, 3.0f };
 		const LevelTransform world = child.in_parent(parent);
-		// p' = trans + scale * (x*right + y*up + z*forward) = (10,0,0) + 2*((0,0,-1) + (0,2,0) + (3,0,0))
+
 		CHECK(world.trans == level::Vec3{ 16.0f, 4.0f, -2.0f });
 		CHECK(world.right == parent.right);
 		CHECK(world.scale == 2.0f);
-		// The +0 start of the accumulation turns a -0 product into +0, as IW4L's loop does.
+
 		LevelTransform negative_zero;
 		negative_zero.right = { -0.0f, 1.0f, 0.0f };
 		CHECK(bits(LevelTransform().rotate(negative_zero.right)[0]) == 0u);
@@ -745,7 +700,7 @@ TEST_SUITE("level_unit") {
 		CHECK(Property::parse("TeamId Team2")->as_team() == 2u);
 		CHECK(Property::parse("TeamId TeamNeutral")->as_team() == 0u);
 		CHECK(Property::parse("Vec3 (1, 2, 3)")->as_vec3() == level::Vec3{ 1.0f, 2.0f, 3.0f });
-		// Unparsed values stay constants as written; empty means no constant.
+
 		CHECK(Property::parse("LinearTransform ((1,0,0),(0,1,0),(0,0,1),(1,2))")->kind == Property::Kind::Constant);
 		CHECK(Property::parse("Boolean maybe")->kind == Property::Kind::Constant);
 		CHECK(Property::parse("Int32 12x")->kind == Property::Kind::Constant);
@@ -777,13 +732,13 @@ TEST_SUITE("level_unit") {
 
 		LevelTransform mirrored = uniform;
 		mirrored.right = { 0.0f, 0.0f, 3.0f };
-		CHECK(bake_split(mirrored).linear.has_value()); // negative determinant is baked
+		CHECK(bake_split(mirrored).linear.has_value());
 
 		LevelTransform degenerate;
 		degenerate.right = { 0.0f, 0.0f, 0.0f };
 		degenerate.up = { 0.0f, 0.0f, 0.0f };
 		degenerate.forward = { 0.0f, 0.0f, 0.0f };
-		CHECK_FALSE(bake_split(degenerate).linear.has_value()); // not invertible: placed as it is
+		CHECK_FALSE(bake_split(degenerate).linear.has_value());
 
 		std::array<std::array<float, 3>, 3> huge{};
 		huge[0][0] = 1e30f;
@@ -811,17 +766,16 @@ TEST_SUITE("level_unit") {
 		CHECK(budget.spent() == 100);
 		CHECK_FALSE(budget.charge(1).ok());
 		CHECK(budget.exhausted());
-		CHECK_FALSE(budget.charge(0).ok()); // sticky: nothing more passes
+		CHECK_FALSE(budget.charge(0).ok());
 		CHECK_FALSE(budget.status().ok());
 		CHECK(budget_error(budget.status().error()));
 		WorkBudget huge(100);
 		CHECK_FALSE(huge.charge(std::numeric_limits<size_t>::max()).ok());
-		CHECK(huge.spent() == 0); // a charge past the limit is refused whole, never added
+		CHECK(huge.spent() == 0);
 	}
 
 	TEST_CASE("level_unit: inclusion settings charge their lists before scanning them") {
-		// K references to one InclusionSettings whose Settings list holds N null slots: each check
-		// pays N first, so the budget ends the loop after about limit / N checks.
+
 		SynthPartition part(1);
 		hostile_types(part);
 		const uint32_t root = part.add("WorldPartData");
@@ -832,8 +786,7 @@ TEST_SUITE("level_unit") {
 		part.set_ref(reference, "InclusionSettings", settings);
 		constexpr uint32_t kNulls = 1u << 20;
 		part.set(settings, "Settings", part.array("SubWorldInclusionSettings", "Settings", kNulls));
-		// One setting listed K times, its EnabledOptions N names with the mode last (so every
-		// setting is scanned to the end).
+
 		const uint32_t shared_settings = part.add("SubWorldInclusionSettings");
 		const uint32_t setting = part.add("SubWorldInclusionSetting");
 		const uint32_t shared_reference = part.add("SubWorldReferenceObjectData");
@@ -852,7 +805,7 @@ TEST_SUITE("level_unit") {
 			WorkBudget budget;
 			const Result<bool> one = includes(db, r, "TeamDeathMatch0", budget);
 			REQUIRE(one.ok());
-			CHECK(*one); // null settings constrain nothing
+			CHECK(*one);
 			CHECK(budget.spent() == kNulls);
 		}
 		size_t checks = 0;
@@ -864,9 +817,9 @@ TEST_SUITE("level_unit") {
 				}
 			}
 		});
-		CHECK(checks == WorkBudget::kDefaultLimit / kNulls); // the first check the budget cannot pay fails
+		CHECK(checks == WorkBudget::kDefaultLimit / kNulls);
 		CHECK(budget.exhausted());
-		CHECK_FALSE(includes(db, r, "TeamDeathMatch0", budget).ok()); // and every one after it
+		CHECK_FALSE(includes(db, r, "TeamDeathMatch0", budget).ok());
 		WorkBudget shared_budget;
 		const Result<bool> fanned = includes(db, shared, "TeamDeathMatch0", shared_budget);
 		REQUIRE_FALSE(fanned.ok());
@@ -876,7 +829,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: the sub-world search charges each container's slots") {
-		// A layer listing one world part K times whose Objects are N null slots.
+
 		SynthPartition part(2);
 		hostile_types(part);
 		const uint32_t root = part.add("WorldPartData");
@@ -897,8 +850,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: hidden parts charge every component list") {
-		// An entity listing one PartComponentData 4,096 times (the walk's cap) whose HealthStates are
-		// N null slots: uncharged, one call scanned 4,096 x N slots.
+
 		SynthPartition part(3);
 		hostile_types(part);
 		const uint32_t entity = part.add("StaticModelEntityData");
@@ -916,9 +868,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: level info charges categories that share one mode list") {
-		// K GameMode categories sharing one N-slot Mode array (null names, read as empty ones):
-		// uncharged, K x N slots. Charged, the first category pays N, and its names end the read on
-		// the mode-count cap (or the budget, whichever comes first).
+
 		SynthPartition root_part(4);
 		hostile_types(root_part);
 		root_part.declare("LevelData", ebx_code::kClass, "DataContainer", {});
@@ -940,13 +890,12 @@ TEST_SUITE("level_unit") {
 		REQUIRE_FALSE(info.ok());
 		INFO(info.error().message);
 		CHECK((budget_error(info.error()) || info.error().message.find("game modes") != std::string::npos));
-		CHECK(budget.spent() < (size_t(1) << 18)); // the categories, one category's slots, the names kept
+		CHECK(budget.spent() < (size_t(1) << 18));
 		CHECK(seconds < kHostileSeconds);
 	}
 
 	TEST_CASE("level_unit: start-hidden checks pay for the connections into Visible") {
-		// M connections into X.Visible from a BoolEntityData that starts true, and K placements of
-		// X: uncharged, every check walked the scope's whole connection list.
+
 		SynthPartition part(6);
 		hostile_types(part);
 		const uint32_t blueprint = part.add("WorldPartData");
@@ -962,7 +911,7 @@ TEST_SUITE("level_unit") {
 		World world(db, std::make_shared<WorkBudget>());
 		const Result<uint32_t> scope = world.scopes.push(partition.primary(), std::nullopt, std::nullopt, LevelTransform::identity(), 0, 0);
 		REQUIRE(scope.ok());
-		CHECK(world.budget->spent() == kConnections); // the list read once, charged first
+		CHECK(world.budget->spent() == kConnections);
 		PlacedObject placed;
 		placed.entity = *partition.instance(reference);
 		placed.reference = *partition.instance(reference);
@@ -977,14 +926,13 @@ TEST_SUITE("level_unit") {
 				CHECK_FALSE(*hidden);
 			}
 		});
-		CHECK(checks == WorkBudget::kDefaultLimit / kConnections - 1); // the push paid for one list
+		CHECK(checks == WorkBudget::kDefaultLimit / kConnections - 1);
 		CHECK(budget_error(starts_hidden(world, placed).error()));
 		CHECK(seconds < kHostileSeconds);
 	}
 
 	TEST_CASE("level_unit: strings decode without scanning them") {
-		// N slots naming one L-byte string. A decode that scanned to the NUL cost N x L at parse
-		// (validation decodes every slot) and again on every read: 2^16 x 1 MB = 64 GB here.
+
 		SynthPartition part(20);
 		hostile_types(part);
 		const uint32_t asset = part.add("LevelDescriptionAsset");
@@ -1017,7 +965,7 @@ TEST_SUITE("level_unit") {
 		CHECK(total == size_t(kSlots) * kLength);
 		MESSAGE("2^16 slots of one 1 MB string: parse ", parse_seconds, " s, decode ", read_seconds, " s");
 		CHECK(parse_seconds + read_seconds < kHostileSeconds);
-		// Offsets that are not a string's start still decode as the rest of that string, or fail.
+
 		const std::optional<std::optional<std::string_view>> tail = parsed->string(text + 1);
 		REQUIRE(tail);
 		REQUIRE(*tail);
@@ -1029,8 +977,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: level info charges every mode name it copies") {
-		// One GameMode category whose Mode array names one 1 MB string N times: uncharged, N copies
-		// of 1 MB (N = 512 took 512 MB for 513 units).
+
 		SynthPartition root_part = level_root(21);
 		SynthPartition description(22);
 		hostile_types(description);
@@ -1050,7 +997,6 @@ TEST_SUITE("level_unit") {
 		CHECK(budget_error(info.error()));
 		CHECK(seconds < kHostileSeconds);
 
-		// A few long names are fine; more than kMaxModes names fail on the count.
 		SynthPartition counted(23);
 		hostile_types(counted);
 		const uint32_t counted_asset = counted.add("LevelDescriptionAsset");
@@ -1068,8 +1014,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: inclusion settings charge the names they read") {
-		// K settings listing one setting whose criterion name and only EnabledOptions entry are one
-		// 4 MB string: each check charges the text, so the budget ends the scan after a few.
+
 		SynthPartition part(24);
 		hostile_types(part);
 		part.declare("SubWorldInclusionCriterion", ebx_code::kClass, "DataContainer", { SynthPartition::Field{ "Name", ebx_code::kCString } });
@@ -1088,7 +1033,7 @@ TEST_SUITE("level_unit") {
 		EbxDb db;
 		const EbxPartition &partition = insert(db, "levels/hostile/part", part);
 		{
-			// A long criterion name that is not GameMode skips the setting: charged all the same.
+
 			WorkBudget budget;
 			Result<bool> included = false;
 			const double seconds = timed([&] { included = includes(db, *partition.instance(reference), "TeamDeathMatch0", budget); });
@@ -1099,9 +1044,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: resolver hops through a sub-world reference charge its BundleName") {
-		// R a SubWorldReferenceObjectData with a 1 MB BundleName; R.F <- R.F three times and
-		// R.Excluded <- R.F. Every hop looks R up as a sub-world by name: each one is charged the
-		// name, so the first resolution already ends on the budget.
+
 		SynthPartition part(25);
 		hostile_types(part);
 		const uint32_t blueprint = part.add("WorldPartData");
@@ -1120,7 +1063,7 @@ TEST_SUITE("level_unit") {
 		const double seconds = timed([&] { resolved = world.scopes.property(*scope, *partition.instance(r), field_id("Excluded")); });
 		REQUIRE_FALSE(resolved.ok());
 		CHECK(budget_error(resolved.error()));
-		CHECK(world.scopes.hops() < 128); // about limit / text_units(1 MB)
+		CHECK(world.scopes.hops() < 128);
 		CHECK(seconds < kHostileSeconds);
 		const Result<std::optional<EbxInstance>> after = world.scopes.referenced_blueprint(*partition.instance(r));
 		REQUIRE_FALSE(after.ok());
@@ -1128,9 +1071,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: field lookups take the most derived field, data_field the first") {
-		// One search in the type's flattened table (EbxPartition::lookup) must give what the walk
-		// over the base chain gave: get() the most derived declaration (the first within its type),
-		// data_field the first in fields() order (base types first).
+
 		using F = SynthPartition::Field;
 		using namespace ebx_code;
 		SynthPartition part(30);
@@ -1147,7 +1088,7 @@ TEST_SUITE("level_unit") {
 		part.set_as(top, "Base", "Excluded", 11);
 		part.set(top, "Excluded", 22);
 		part.set(top, "A", 33);
-		part.set(top, "B", 44); // the first B
+		part.set(top, "B", 44);
 		part.set(top, "C", 55);
 		const uint32_t bottom = part.add(deep);
 		part.set(bottom, "Deep", 77);
@@ -1167,7 +1108,7 @@ TEST_SUITE("level_unit") {
 		CHECK_FALSE(data_field(t, int32_t(ebx_name_hash("Missing"))));
 		for (const EbxField &field : t.fields()) {
 			if (field.name == "Excluded") {
-				CHECK(field.value.as_u32() == 11u); // fields() meets Base's first, as data_field does
+				CHECK(field.value.as_u32() == 11u);
 				break;
 			}
 		}
@@ -1181,8 +1122,7 @@ TEST_SUITE("level_unit") {
 	TEST_CASE("level_unit: type layouts past the parser's caps are rejected") {
 		using F = SynthPartition::Field;
 		const auto wide = [](uint32_t p_seed, int p_levels, int p_derived) {
-			// p_levels types of 250 fields each (251 descriptors per level with the base), then
-			// p_derived types each adding one field to the last.
+
 			SynthPartition part(p_seed);
 			std::string base = "DataContainer";
 			for (int l = 1; l <= p_levels; ++l) {
@@ -1200,15 +1140,15 @@ TEST_SUITE("level_unit") {
 			part.add(base);
 			return EbxPartition::parse(part.bytes());
 		};
-		const Result<EbxPartition> fits = wide(31, 4, 4); // 1,004 descriptors along the chain, about 6.5k lookups
+		const Result<EbxPartition> fits = wide(31, 4, 4);
 		CHECK_MESSAGE(fits.ok(), (fits.ok() ? std::string() : fits.error().message));
-		const Result<EbxPartition> long_chain = wide(32, 5, 0); // 1,255 descriptors
+		const Result<EbxPartition> long_chain = wide(32, 5, 0);
 		REQUIRE_FALSE(long_chain.ok());
 		CHECK(long_chain.error().message.find("along its base chain") != std::string::npos);
-		const Result<EbxPartition> many = wide(33, 4, 64); // 64 x 1,005 lookups from about 1,200 descriptors
+		const Result<EbxPartition> many = wide(33, 4, 64);
 		REQUIRE_FALSE(many.ok());
 		CHECK(many.error().message.find("field lookups") != std::string::npos);
-		// The verifier's deep form: value types 30 deep with 254 fields each (7,620 descriptors).
+
 		SynthPartition deep(34);
 		padded_transform(deep, 30, 254);
 		deep.add("DataContainer");
@@ -1218,10 +1158,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: partition checks pay for wide overlapping types") {
-		// B0 has 255 overlapping 4-byte fields, each Bk 255 overlapping Bk-1 (k = 1..6), and a Holder
-		// carries one B6 beside a 16 MB string that buys check budget. The check ends on its budget
-		// either way; when an object paid 1 whatever its width, each unit cost 255 field scans and
-		// this partition took 88 s to fail.
+
 		using F = SynthPartition::Field;
 		using namespace ebx_code;
 		SynthPartition part(35);
@@ -1253,8 +1190,7 @@ TEST_SUITE("level_unit") {
 	}
 
 	TEST_CASE("level_unit: self-referencing connection loops end on the budget") {
-		// R.F <- R.F three times and R.Excluded <- R.F: each resolution is a ternary tree 16 levels
-		// deep, cut at 2^16 hops, and the total budget ends a run of them.
+
 		SynthPartition part(7);
 		hostile_types(part);
 		const uint32_t blueprint = part.add("WorldPartData");
@@ -1273,7 +1209,7 @@ TEST_SUITE("level_unit") {
 		REQUIRE(first.ok());
 		CHECK(world.scopes.capped_resolutions() >= 1);
 		CHECK(world.scopes.hops() == (size_t(1) << 16));
-		CHECK(world.budget->spent() == 4 + (size_t(1) << 16)); // the connection list, then the hops
+		CHECK(world.budget->spent() == 4 + (size_t(1) << 16));
 		size_t resolutions = 1;
 		const double seconds = timed([&] {
 			for (; resolutions < 100000; ++resolutions) {
@@ -1302,7 +1238,7 @@ TEST_SUITE("level") {
 		const World &world = *t.world;
 		CHECK(level.info.id == "MP_Subway");
 		CHECK(level.info.display_name == "Operation Metro");
-		CHECK(level.stats.partitions == 12315); // sections/03 §1: level + mode sub-world
+		CHECK(level.stats.partitions == 12315);
 		CHECK(level.stats.unresolved_imports == 0);
 		CHECK(level.stats.failed.empty());
 		REQUIRE(level.bundles.subworlds.size() == 1);
@@ -1310,15 +1246,15 @@ TEST_SUITE("level") {
 		CHECK(world.objects.size() == 13280);
 		CHECK(world.subworlds.size() == 2);
 		CHECK(world.scopes.size() == 447);
-		CHECK(world.stats.excluded == 9); // 8 of them through interface constants (gate door variants)
+		CHECK(world.stats.excluded == 9);
 		CHECK(world.stats.excluded_overrides == 8);
 		CHECK(world.stats.unresolved_objects == 0);
 		CHECK(world.stats.depth_limited == 0);
 		CHECK(world.stats.steps < (size_t(1) << 15));
 		CHECK(world.stats.capped_resolutions == 0);
-		CHECK(world.stats.work < WorkBudget::kDefaultLimit / 64); // load + walk: far below the budget
+		CHECK(world.stats.work < WorkBudget::kDefaultLimit / 64);
 		CHECK(count_mesh_objects(world) == 10873);
-		// Static model groups (sections/03 §2.3): the level's and the TDM sub-world's.
+
 		REQUIRE(world.groups.size() == 2);
 		const StaticModelGroup &main = world.groups[1];
 		CHECK(main.members == 499);
@@ -1328,8 +1264,7 @@ TEST_SUITE("level") {
 		CHECK(main.subparts == 6992);
 		CHECK(main.part_mismatches == 0);
 		CHECK(world.groups[0].instances == 20);
-		// Composite placements that hide destroyed-state parts, and backdrops that start hidden
-		// (sections/03 §2.4: backdrop_park + backdrop_city 42 + 22).
+
 		CHECK(composite_hiding(level, world) == 710);
 		CHECK(count_start_hidden(world) == 64);
 
@@ -1352,8 +1287,7 @@ TEST_SUITE("level") {
 		CHECK(groups == 2);
 		CHECK(objects == 2120);
 		CHECK(present == groups + objects);
-		// Everything this level x mode did (load, walk, census, collision, the checks above) used a
-		// few percent of the one budget.
+
 		CHECK(level.budget->spent() < WorkBudget::kDefaultLimit / 8);
 		MESSAGE("Metro TDM work: load + walk ", world.stats.work, ", in all ", level.budget->spent(), " of ", level.budget->limit());
 	}
@@ -1372,7 +1306,7 @@ TEST_SUITE("level") {
 		CHECK(world.groups[0].havok_placed == 3292);
 		CHECK(world.groups[0].part_mismatches == 0);
 		CHECK(composite_hiding(*t.level, world) == 368);
-		// Vehicles of the mode (sections/04 / IW4L core report): 8 VehicleSpawnReferences.
+
 		size_t vehicles = 0;
 		for (const PlacedObject &o : world.objects) {
 			vehicles += o.kind == ObjectKind::VehicleSpawnReference ? 1 : 0;
@@ -1382,7 +1316,7 @@ TEST_SUITE("level") {
 		const MeshCensus current = census_of(t.level->db(), t.level->mount(), world);
 		CHECK(current.failures.empty());
 		CHECK(current.scene_instances == 5783);
-		CHECK(current.scene_meshes == 613); // empty-Materials entries fall back to the default
+		CHECK(current.scene_meshes == 613);
 		CensusOptions legacy;
 		legacy.legacy_variations = true;
 		const MeshCensus handoff = census_of(t.level->db(), t.level->mount(), world, legacy);
@@ -1402,22 +1336,20 @@ TEST_SUITE("level") {
 		CHECK(t.level->info.display_name == "Caspian Border");
 		CHECK(count_mesh_objects(world) == 6847);
 		REQUIRE(world.groups.size() == 1);
-		CHECK(world.groups[0].members == 170); // sections/03 §1 table
+		CHECK(world.groups[0].members == 170);
 		CHECK(world.groups[0].instances == 4444);
 		CHECK(world.groups[0].havok_placed == 4264);
-		CHECK(composite_hiding(*t.level, world) == 538); // sections/03 §2.5
+		CHECK(composite_hiding(*t.level, world) == 538);
 		const MeshCensus census = census_of(t.level->db(), t.level->mount(), world);
 		CHECK(census.failures.empty());
 		CHECK(census.placements == 6847);
 		CHECK(census.scene_meshes == 304);
 		CHECK(census.scene_instances == 6846);
-		// Handoff §9's 20,311 / 2,277 / 12,725 are IW-engine scene counts (see the file header).
+
 	}
 
 	TEST_CASE("level: mutated level partitions fail or traverse, never crash") {
-		// Seeded damage to the level's own partitions (LevelData, layers, sub-world, variation
-		// databases): values that still pass the EBX validator reach the traversal, the census and
-		// the collision placements (hostile counts, references, transforms, connection graphs).
+
 		const std::shared_ptr<Install> install = open_or_skip();
 		if (!install) {
 			return;
@@ -1473,7 +1405,7 @@ TEST_SUITE("level") {
 			if (collision.ok()) {
 				CHECK(collision->size() <= (*world)->objects.size() + (*world)->groups.size());
 			} else {
-				CHECK(collision.error().message.find("work steps") != std::string::npos); // only the budget fails it
+				CHECK(collision.error().message.find("work steps") != std::string::npos);
 			}
 			if (seed % 8 == 0) {
 				const Result<MeshCensus> census = mesh_census(overlay, level.mount(), **world);
@@ -1499,8 +1431,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: self-listing WorldPart fails on the step budget, never hangs") {
-		// A WorldPartData listing a reference to itself twice: 2^48 visits that place nothing, so
-		// only the step budget stops it. With one reference it is a chain cut at the depth limit.
+
 		const std::shared_ptr<Install> install = open_or_skip();
 		if (!install) {
 			return;
@@ -1528,7 +1459,7 @@ TEST_SUITE("level") {
 			CHECK(world.error().message.find("steps") != std::string::npos);
 		}
 		{
-			// With a group in the loop the 2^16 group cap is reached before the step budget.
+
 			Result<std::unique_ptr<World>> world = run({ 1, 2, 1 }, 0);
 			REQUIRE_FALSE(world.ok());
 			CHECK(world.error().message.find("static model groups") != std::string::npos);
@@ -1536,10 +1467,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: static model group members cost steps, placed or not") {
-		// Members that place nothing still cost their lookups, so each costs a step: one group with
-		// 1,000 empty members takes at least 1,000 steps, and [self, self, group of 200,000 empty
-		// members] fails on the step budget after about 20 group expansions instead of running for
-		// hours (uncharged, it allowed about 2^22 expansions of O(members) work each).
+
 		const std::shared_ptr<Install> install = open_or_skip();
 		if (!install) {
 			return;
@@ -1570,8 +1498,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: hostile partition graphs end on the work budget, never hang") {
-		// Each verifier repro and the generic shapes behind them, built as small synthetic partitions
-		// and walked over Metro's mount (only static model group res would be read from it).
+
 		const std::shared_ptr<Install> install = open_or_skip();
 		if (!install) {
 			return;
@@ -1590,9 +1517,7 @@ TEST_SUITE("level") {
 		const uint32_t f = 0x12345u, excluded = ebx_name_hash("Excluded");
 
 		{
-			// Round 3: Objects [R] x 10,000, R a WorldPartReferenceObjectData with no Blueprint whose
-			// Excluded is fed by R.F, itself fed twice by R.F. Each excluded() check is a capped 2^16-hop
-			// resolution; uncharged between them, N = 10,000 ran 84 s and succeeded with 655M hops.
+
 			SynthPartition part(10);
 			hostile_types(part);
 			const uint32_t root = part.add("WorldPartData");
@@ -1607,7 +1532,7 @@ TEST_SUITE("level") {
 			expect_budget_error("connection self-loops x 10,000", db);
 		}
 		{
-			// K references to one world part whose Objects are N null slots (K x N slots).
+
 			SynthPartition part(11);
 			hostile_types(part);
 			const uint32_t root = part.add("WorldPartData");
@@ -1621,8 +1546,7 @@ TEST_SUITE("level") {
 			expect_budget_error("4,096 references to 2^20 null objects", db);
 		}
 		{
-			// K entries into one sub-world whose MeshVariationDatabase lists N null entries: the
-			// database is read (and charged) on every entry.
+
 			SynthPartition part(12);
 			hostile_types(part);
 			const uint32_t root = part.add("WorldPartData");
@@ -1644,8 +1568,7 @@ TEST_SUITE("level") {
 			expect_budget_error("4,096 sub-world entries, 2^20 variation slots", db);
 		}
 		{
-			// A self-referencing loop through a prefab's interface: K references X to a prefab whose
-			// object Y has Excluded <- Descriptor.F, and the level feeds X.F from X.F twice.
+
 			SynthPartition part(15);
 			hostile_types(part);
 			const uint32_t root = part.add("WorldPartData");
@@ -1667,9 +1590,7 @@ TEST_SUITE("level") {
 			expect_budget_error("interface self-loop x 4,096 prefabs", db);
 		}
 		{
-			// K placements whose entity lists one PartComponentData 4,096 times (HealthStates: N null
-			// slots) and whose physics data lists N null rigid bodies: the walk is cheap, the census and
-			// the collision placements run out of budget instead of scanning K x 4,096 x N slots.
+
 			const auto build = [&](EbxDb &r_db) {
 				SynthPartition part(16);
 				hostile_types(part);
@@ -1698,7 +1619,7 @@ TEST_SUITE("level") {
 			REQUIRE_FALSE(census.ok());
 			CHECK(budget_error(census.error()));
 			CHECK(seconds < kHostileSeconds);
-			CHECK_FALSE(starts_hidden(**census_world, (*census_world)->objects[0]).ok()); // the World's budget stays spent
+			CHECK_FALSE(starts_hidden(**census_world, (*census_world)->objects[0]).ok());
 			Result<std::unique_ptr<World>> collision_world = walk(db);
 			REQUIRE(collision_world.ok());
 			Result<std::vector<CollisionPlacement>> collision = std::vector<CollisionPlacement>();
@@ -1708,9 +1629,7 @@ TEST_SUITE("level") {
 			CHECK(seconds < kHostileSeconds);
 		}
 		{
-			// Round 5, string length: Objects [S] x N, S a SubWorldReferenceObjectData with AutoLoad
-			// false and an L-byte BundleName. Each slot decoded (memchr) and used the name for 1 unit:
-			// N = 262,144, L = 4 MB ran 62.5 s and succeeded.
+
 			SynthPartition part(17);
 			hostile_types(part);
 			const uint32_t root = part.add("WorldPartData");
@@ -1722,8 +1641,7 @@ TEST_SUITE("level") {
 			expect_budget_error("2^18 slots naming one 4 MB BundleName", db);
 		}
 		{
-			// The fan-out form: Objects [R, R, S x 64] with R a world part reference back to the
-			// root (2^48 paths, cut by the budget) and S as above with a 1 MB name (202 s before).
+
 			SynthPartition part(18);
 			hostile_types(part);
 			const uint32_t root = part.add("WorldPartData");
@@ -1737,8 +1655,7 @@ TEST_SUITE("level") {
 			expect_budget_error("self-listing fan-out over a 1 MB BundleName", db);
 		}
 		{
-			// Collision: 64 placements whose physics lists one asset with a 4 MB Name 4,096 times.
-			// Names over 1,024 bytes are skipped, but only after they are charged.
+
 			SynthPartition part(19);
 			hostile_types(part);
 			const uint32_t root = part.add("WorldPartData");
@@ -1765,12 +1682,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: deep and wide type layouts cost what shallow ones do") {
-		// Round 7: Objects [R] x 8, R.Blueprint the root (a fan-out the budget cuts), R a world part
-		// reference 27 types deep whose BlueprintTransform is a LinearTransform 30 types deep with
-		// rows 30 types deep, every type 32 descriptors wide. Each R slot reads Excluded, Blueprint,
-		// BlueprintTransform and its 16 row fields; walking base chains, 254-wide types made one unit
-		// cost about 130k descriptor steps (197 s for 360 KB). Field lookups are one search in a
-		// table flattened at parse, so the deep form must run at the shallow form's rate.
+
 		const std::shared_ptr<Install> install = open_or_skip();
 		if (!install) {
 			return;
@@ -1804,9 +1716,6 @@ TEST_SUITE("level") {
 		CHECK(deep < 3 * shallow + 0.5);
 		CHECK(deep < kHostileSeconds);
 
-		// Objects [R, R, E x 64] with E a plain entity 29 types deep whose Transform is the deep
-		// LinearTransform: every E is emitted, so the walk ends on the placed-object cap (103 s and
-		// 302 MB at the old 2^20 cap with 254-wide types).
 		SynthPartition part(42);
 		hostile_types(part);
 		const std::string transform = padded_transform(part, 30, 32);
@@ -1837,7 +1746,7 @@ TEST_SUITE("level") {
 		CHECK(std::find(info->modes.begin(), info->modes.end(), "TeamDeathMatch0") != info->modes.end());
 		CHECK(std::find(info->modes.begin(), info->modes.end(), "ConquestLarge0") != info->modes.end());
 		CHECK_FALSE(load_level(install, "MP_999", "ConquestLarge0").ok());
-		// A mode the level does not offer still loads the level with no mode sub-world.
+
 		Result<std::unique_ptr<LoadedLevel>> none = load_level(install, "MP_Subway", "NoSuchMode0");
 		REQUIRE(none.ok());
 		CHECK((*none)->bundles.subworlds.empty());

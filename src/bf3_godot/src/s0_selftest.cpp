@@ -51,7 +51,7 @@ RigidBody3D *find_rigid_body(Node *p_node) {
 	return nullptr;
 }
 
-} // namespace
+}
 
 S0SelfTest::S0SelfTest(GameSession &p_session, double p_seconds) :
 		session_(p_session), seconds_(p_seconds > 0.5 ? p_seconds : 0.5) {}
@@ -64,7 +64,6 @@ void S0SelfTest::add(const std::string &p_check, Result p_result, const std::str
 void S0SelfTest::begin() {
 	UtilityFunctions::print(to_godot(fmt("[s0-selftest] start, running the server and Godot physics for %.1f s", seconds_)));
 
-	// Engine and build.
 	const Dictionary v = Engine::get_singleton()->get_version_info();
 	const int major = int(v["major"]);
 	const int minor = int(v["minor"]);
@@ -76,10 +75,9 @@ void S0SelfTest::begin() {
 	const String engine_name = ProjectSettings::get_singleton()->get_setting("physics/3d/physics_engine");
 	add("godot.physics_engine", to_std(engine_name) == "Jolt Physics" ? Result::Pass : Result::Fail, to_std(engine_name));
 
-	// Install: located, layout, read-only reads, write guard.
 	const bf3::core::InstallReader &install = session_.install();
 	if (!install.status().located) {
-		// No install at the default path: skip. An explicit override that points nowhere: fail.
+
 		const bool explicit_path = install.status().source != "default";
 		add("install.locate", explicit_path ? Result::Fail : Result::Skip, install.describe() + " (set OPENBF3_INSTALL or --bf3-install=)");
 	} else {
@@ -121,12 +119,10 @@ void S0SelfTest::begin() {
 						snap.cat_count, double(snap.total_bytes) / (1024.0 * 1024.0 * 1024.0), snap.scan_ms));
 	}
 
-	// Recast/Detour linked.
 	const bf3::sim::NavLinkResult nav = bf3::sim::nav_link_check();
 	add("recast.link", nav.ok ? Result::Pass : Result::Fail, fmt("heightfield %dx%d, %d spans, Detour alloc %s", nav.grid_w, nav.grid_h, nav.spans,
 																	 nav.detour_alloc ? "ok" : "failed"));
 
-	// Our Jolt, in the same process as Godot's Jolt: two worlds must agree bit for bit.
 	{
 		bf3::sim::WorldConfig cfg;
 		bf3::sim::PhysicsWorld a;
@@ -145,14 +141,12 @@ void S0SelfTest::begin() {
 						(unsigned long long)a.state_hash(), same ? "==" : "!=", (unsigned long long)b.state_hash()));
 	}
 
-	// ENet: two hosts of our upstream ENet in this process.
 	const bf3::net::PingStats ping = bf3::net::loopback_ping(200);
 	add("enet.loopback_ping", ping.ok ? Result::Pass : Result::Fail,
 			ping.ok ? fmt("ENet %s, 127.0.0.1:%u, %d/%d pongs, RTT mean %.1f us, p50 %.1f us, p99 %.1f us, max %.1f us", bf3::net::enet_version().c_str(),
 							  ping.port, ping.received, ping.sent, ping.mean_us, ping.p50_us, ping.p99_us, ping.max_us)
 					: ping.error);
 
-	// Godot's own physics: the scene's RigidBody3D.
 	if (SceneTree *tree = session_.get_tree()) {
 		Node *scene = tree->get_current_scene();
 		body_ = find_rigid_body(scene ? scene : static_cast<Node *>(tree->get_root()));
@@ -191,7 +185,7 @@ void S0SelfTest::finish() {
 	const bf3::host::ServerStats s = session_.server_stats();
 	const bf3::host::LoopbackClientStats c = session_.client_stats();
 	const uint64_t ticks = s.ticks - server_ticks_at_begin_;
-	const double window_s = double(bf3::net::monotonic_ns() - window_start_ns_) / 1e9; // wall clock, not frame deltas
+	const double window_s = double(bf3::net::monotonic_ns() - window_start_ns_) / 1e9;
 	const double expected = 60.0 * window_s;
 	const bool rate_ok = s.running && std::fabs(double(ticks) - expected) <= 0.05 * expected + 1.0 && s.step_errors == 0;
 	add("server.tick_rate", rate_ok ? Result::Pass : Result::Fail,
@@ -257,4 +251,4 @@ void S0SelfTest::print_table() {
 			fail ? 1 : 0)));
 }
 
-} // namespace bf3::godot_side
+}

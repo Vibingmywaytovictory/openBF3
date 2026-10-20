@@ -1,16 +1,4 @@
 #pragma once
-// Bf3Fx3Demo: VFX3's demo and capture check (docs/design/m2a-fx3.md §6; res://scenes/fx3_demo.tscn, beside a
-// Bf3LevelSession named Session). It drives the game path end to end: Bf3GameFx::load on a loader thread over the
-// session's level (with the gunplay defs loaded beside it, as gx's M2aLoadInputs carries them), Bf3GameFx::build, then
-// per display frame a synthetic M2aFrame whose PresentEvents are the ones cl publishes (OwnShot with the M16A3's
-// def, Impact on surfaces the collision world's rays find with the sim's SurfaceMaterialTable pair, Hit with a zone,
-// RemoteShot with tracers) and whose 1p muzzle is G6's camera stand-in (ViewmodelMuzzle CameraStandIn through
-// muzzle_sample: no viewmodel is loaded here, so the flash sits at fx2's nominal camera point, not on a weapon mesh).
-// The soldier is a grey capsule stand-in (no crowd here).
-// User args (after "--"):
-//   --fx3-check            the scripted run: captures, the report, quits 0 (PASS) or 1
-//   --fx3-shot-dir=<dir>   captures (default <checkout>/b/shots/fx3; refused inside the install)
-//   --bf3-cache=<dir> / --no-cache   the atlas pixels' cache root (load only)
 
 #include "game_fx.h"
 
@@ -51,15 +39,15 @@ private:
 	struct Surface {
 		bool found = false;
 		godot::Vector3 point, normal;
-		uint8_t material = 0; // PhysicsMaterialIndex
-		std::string name; // the material's name
-		std::string effect; // the cell's first effect (for the report)
+		uint8_t material = 0;
+		std::string name;
+		std::string effect;
 		float distance = 0;
 	};
 	struct Shot {
 		std::string name;
 		double at = 0;
-		int kind = 0; // 0 1p muzzle, 1 concrete, 2 metal, 3 dirt, 4 soldier hit, 5 tracers, 6 concrete decals
+		int kind = 0;
 		double advance = 0;
 	};
 
@@ -123,4 +111,4 @@ private:
 	std::vector<double> fx_ms_;
 };
 
-} // namespace bf3::godot_side
+}

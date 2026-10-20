@@ -1,13 +1,3 @@
-// M2b nt (docs/design/m2b.md §2.6 #12, §3.4, §3.7; as built: docs/design/m2b-nt.md §3, §4): host.client.m2b.unit, the
-// client half of protocol v3 without sockets.
-//   * The M2a gate's shot-id reuse (m2a-gate.md:108) reproduced on the client's own path: a sim::WeaponLane predicts
-//     shots after the server's death tick (first predictions, emitted), the replay from the Dead state drops them, and
-//     the next life starts at the server's index (cl_weapons_spawn carries the lane's index over), so its real shots
-//     reuse the emitted ids. OwnShotIds (the fix) presents them above every id before; the server's later events about
-//     the real shots map to the same presented ids.
-//   * present_own_shot_id per event kind, apply_player_list / player_rows, own_unspawned_at, rules_refusal.
-// The ClientSession wiring (the events through cl_push, the frame fields, SpawnRequest) runs in ru's host.tdm.client
-// (E13, a timing row of the merge pass) against the real rules.
 #include "gunplay_fixture.h"
 #include "weapons_support.h"
 
@@ -52,19 +42,19 @@ net::PlayerRow row(uint8_t p_slot, uint8_t p_team, const char *p_name) {
 	return r;
 }
 
-} // namespace
+}
 
 TEST_SUITE("host-client-m2b") {
 	TEST_CASE("host.client.m2b: OwnShotIds presents every own shot once; lookups follow the newest emission") {
 		host::OwnShotIds ids;
-		CHECK(ids.lookup(7) == 7); // nothing emitted: the index itself
+		CHECK(ids.lookup(7) == 7);
 		std::vector<uint32_t> presented;
 		for (uint32_t i = 100; i < 105; ++i) {
 			presented.push_back(ids.emit(i));
 		}
-		CHECK(presented == std::vector<uint32_t>{ 100, 101, 102, 103, 104 }); // no reuse: the real ids
+		CHECK(presented == std::vector<uint32_t>{ 100, 101, 102, 103, 104 });
 		CHECK(ids.resets() == 0);
-		// The next life starts at 101 (the server fired 100 only): a new segment above 104.
+
 		for (uint32_t i = 101; i < 104; ++i) {
 			presented.push_back(ids.emit(i));
 		}
@@ -72,18 +62,18 @@ TEST_SUITE("host-client-m2b") {
 		CHECK(presented[5] == 105);
 		CHECK(presented[7] == 107);
 		CHECK(duplicates(presented) == 0);
-		CHECK(ids.lookup(101) == 105); // the server's Hit of the real 101: the new life's shot
-		CHECK(ids.lookup(100) == 100); // the old life's real shot
-		CHECK(ids.lookup(110) == 114); // never emitted: the newest segment starting at or below it
-		CHECK(ids.lookup(50) == 50); // before every segment
-		// A within-life rebase that lowers the index opens a segment too; segments beyond kSegments drop the oldest.
+		CHECK(ids.lookup(101) == 105);
+		CHECK(ids.lookup(100) == 100);
+		CHECK(ids.lookup(110) == 114);
+		CHECK(ids.lookup(50) == 50);
+
 		for (uint32_t k = 0; k < host::OwnShotIds::kSegments + 4; ++k) {
 			presented.push_back(ids.emit(200 + k * 3));
-			presented.push_back(ids.emit(199 + k * 3)); // lower: a reset
+			presented.push_back(ids.emit(199 + k * 3));
 		}
 		CHECK(duplicates(presented) == 0);
 		CHECK(ids.segments() == host::OwnShotIds::kSegments);
-		// More emissions than kRecent: the lookups of the evicted ones fall back to their segment.
+
 		host::OwnShotIds many;
 		for (uint32_t i = 0; i < 1000; ++i) {
 			CHECK(many.emit(i) == i);
@@ -96,7 +86,7 @@ TEST_SUITE("host-client-m2b") {
 		for (uint32_t i = 10; i < 13; ++i) {
 			(void)ids.emit(i);
 		}
-		(void)ids.emit(10); // a reuse: presented 13
+		(void)ids.emit(10);
 		const auto ev = [](host::PresentKind p_kind, uint8_t p_slot, uint32_t p_id) {
 			host::PresentEvent e;
 			e.kind = p_kind;
@@ -112,13 +102,13 @@ TEST_SUITE("host-client-m2b") {
 		CHECK(host::present_own_shot_id(ids, kOwnSlot, impact));
 		CHECK(impact.id == 14);
 		host::PresentEvent remote_impact = ev(host::PresentKind::Impact, kOwnSlot, 11);
-		remote_impact.timeline = host::PresentTimeline::Render; // not the own world's
+		remote_impact.timeline = host::PresentTimeline::Render;
 		CHECK_FALSE(host::present_own_shot_id(ids, kOwnSlot, remote_impact));
 		host::PresentEvent hit = ev(host::PresentKind::Hit, kOwnSlot, 10);
 		hit.flags = host::present_flags::kOwnShooter;
 		CHECK(host::present_own_shot_id(ids, kOwnSlot, hit));
 		CHECK(hit.id == 13);
-		host::PresentEvent hit_on_me = ev(host::PresentKind::Hit, 5, 10); // another shooter's shot 10
+		host::PresentEvent hit_on_me = ev(host::PresentKind::Hit, 5, 10);
 		hit_on_me.flags = host::present_flags::kOwnVictim;
 		CHECK_FALSE(host::present_own_shot_id(ids, kOwnSlot, hit_on_me));
 		CHECK(hit_on_me.id == 10);
@@ -154,7 +144,7 @@ TEST_SUITE("host-client-m2b") {
 		REQUIRE(rifle != sw::kNoWeapon);
 		REQUIRE(pistol != sw::kNoWeapon);
 		struct Sink final : sim::WeaponEmitSink {
-			std::vector<uint32_t> shots; // the OwnShot ids ClEmit pushes (first predictions only)
+			std::vector<uint32_t> shots;
 			void emitted(const sim::Command &, const sw::WeaponTickOutput &p_o, const sim::WeaponPredictionEntry &) override {
 				for (size_t i = 0; i < p_o.shot_count && i < p_o.shots.size(); ++i) {
 					shots.push_back(p_o.shots[i].shot_index);
@@ -166,8 +156,7 @@ TEST_SUITE("host-client-m2b") {
 		lane.set_sink(&sink);
 		ring.attach_weapons(&lane);
 		const std::array<uint16_t, 2> loadout{ rifle, pistol };
-		// A life at p_tick the way ClientSession::Impl::authoritative + cl_weapons_spawn take it: the hold command at the
-		// spawn tick, the loadout spawned over the lane's newest state (the shot index carried over), emitted through.
+
 		const auto spawn = [&](uint32_t p_life, sim::Tick p_tick) {
 			const sim::SettleResult s = sim::settle_spawn(motor, **world, level->spawns[0], p_life, p_tick);
 			REQUIRE(s.ok);
@@ -183,7 +172,7 @@ TEST_SUITE("host-client-m2b") {
 			lane.put(w);
 			ring.put({ sim::hold_command(s.state), s.state, false });
 		};
-		// First predictions from p_from to p_to, firing.
+
 		const auto predict = [&](sim::Tick p_from, sim::Tick p_to) {
 			sim::SoldierState state = ring.find(p_from - 1u)->state;
 			for (sim::Tick t = p_from; t <= p_to; ++t) {
@@ -204,29 +193,28 @@ TEST_SUITE("host-client-m2b") {
 		predict(51, 140);
 		const size_t life1 = sink.shots.size();
 		REQUIRE(life1 >= 10);
-		// The server's soldier died at tick 100; the client learns it from the snapshot of tick 100 while it predicts
-		// tick 140, and replays from the Dead state: the shots of 101..140 were emitted, the server never fired them.
+
 		const uint32_t server_next = lane.find(100)->state.next_shot_index;
 		sim::SoldierState dead = ring.find(100)->state;
 		dead.mode = sim::MoveMode::Dead;
 		dead.health = 0;
 		(void)sim::catch_up(motor, dead, ring, 141);
-		CHECK(sink.shots.size() == life1); // a replay emits nothing
+		CHECK(sink.shots.size() == life1);
 		CHECK(lane.find(140)->state.next_shot_index == server_next);
 		size_t never_fired = 0;
 		for (const uint32_t id : sink.shots) {
 			never_fired += id >= server_next ? 1u : 0u;
 		}
 		REQUIRE(never_fired > 0);
-		// The next life (the server's index is server_next, as the lane's after the replay).
+
 		spawn(2, 200);
 		predict(201, 260);
 		const std::vector<uint32_t> real = sink.shots;
 		REQUIRE(real.size() > life1);
 		CHECK(real[life1] == server_next);
 		const size_t reused = duplicates(real);
-		CHECK(reused > 0); // the M2a gate's double starts: these OwnShots carry ids the triggers saw before
-		// The fix: presented ids, in emission order.
+		CHECK(reused > 0);
+
 		host::OwnShotIds ids;
 		std::vector<uint32_t> presented;
 		for (const uint32_t id : real) {
@@ -236,7 +224,7 @@ TEST_SUITE("host-client-m2b") {
 		CHECK(ids.resets() == 1);
 		const uint32_t first_new = presented[life1];
 		CHECK(first_new == *std::max_element(presented.begin(), presented.begin() + std::ptrdiff_t(life1)) + 1u);
-		// The server's Hits name real indices: the new life's map to their OwnShots, the old life's fired ones to theirs.
+
 		CHECK(ids.lookup(real[life1]) == first_new);
 		CHECK(ids.lookup(real.back()) == presented.back());
 		CHECK(ids.lookup(real[0]) == presented[0]);
@@ -273,11 +261,11 @@ TEST_SUITE("host-client-m2b") {
 		net::PlayerList again;
 		again.full = true;
 		again.rows = { row(4, 1, "e") };
-		again.removed = { 4 }; // ignored on a full list (the decoder refuses it anyway)
+		again.removed = { 4 };
 		host::apply_player_list(table, again);
 		REQUIRE(host::player_rows(table, rows) == 1);
 		CHECK(rows[0].slot == 4);
-		net::PlayerList hostile; // a caller's list (the decoder bounds the slots)
+		net::PlayerList hostile;
 		hostile.rows = { row(200, 1, "x") };
 		hostile.removed = { 250 };
 		host::apply_player_list(table, hostile);
@@ -286,22 +274,22 @@ TEST_SUITE("host-client-m2b") {
 
 	TEST_CASE("host.client.m2b: own_unspawned_at, rules_refusal and the restriction on predicted commands") {
 		net::MatchState m;
-		CHECK_FALSE(host::own_unspawned_at(true, m, 10, 500)); // no unspawn
+		CHECK_FALSE(host::own_unspawned_at(true, m, 10, 500));
 		m.unspawn_tick = 400;
-		CHECK_FALSE(host::own_unspawned_at(false, m, 10, 500)); // no MatchState yet
+		CHECK_FALSE(host::own_unspawned_at(false, m, 10, 500));
 		CHECK_FALSE(host::own_unspawned_at(true, m, 10, 399));
 		CHECK(host::own_unspawned_at(true, m, 10, 400));
 		CHECK(host::own_unspawned_at(true, m, 10, 900));
-		CHECK_FALSE(host::own_unspawned_at(true, m, 400, 900)); // a life spawned at or after the unspawn: the restart
+		CHECK_FALSE(host::own_unspawned_at(true, m, 400, 900));
 		net::MatchInfo mi;
-		CHECK(host::rules_refusal(mi, false, 0) == nullptr); // M2a rules: any load
+		CHECK(host::rules_refusal(mi, false, 0) == nullptr);
 		mi.rules_flags = net::rules_flags::kTdm | net::rules_flags::kDeployScreen;
-		CHECK(host::rules_refusal(mi, false, 0) != nullptr); // TDM on the server, no logic graph here
-		CHECK(host::rules_refusal(mi, true, 77) == nullptr); // the server sent no digest
+		CHECK(host::rules_refusal(mi, false, 0) != nullptr);
+		CHECK(host::rules_refusal(mi, true, 77) == nullptr);
 		mi.logic_digest = 77;
 		CHECK(host::rules_refusal(mi, true, 77) == nullptr);
 		CHECK(host::rules_refusal(mi, true, 78) != nullptr);
-		// What m2b_command applies: Metro's pre-round mask strips movement and fire below restrict_until_tick.
+
 		const uint32_t metro = net::restrict_bits::kYaw | net::restrict_bits::kPitch | net::restrict_bits::kJump | net::restrict_bits::kProne |
 				net::restrict_bits::kZoom | net::restrict_bits::kReload;
 		sim::Command c;

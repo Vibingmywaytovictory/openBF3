@@ -1,5 +1,3 @@
-// The derived-data cache. See disk_cache.h for the layout and the guarantees, cache_fs.h for the
-// handle-relative file operations that make the writes junction-proof.
 #include "bf3/core/cache/disk_cache.h"
 
 #include "bf3/core/cache/entry_format.h"
@@ -34,7 +32,6 @@ std::wstring widen_ascii(std::string_view p_s) {
 	return std::wstring(p_s.begin(), p_s.end());
 }
 
-// Names in the cache tree are ASCII; anything else is foreign.
 bool narrow_ascii(std::wstring_view p_w, std::string &r_out) {
 	r_out.clear();
 	for (wchar_t c : p_w) {
@@ -76,8 +73,6 @@ std::wstring temp_name(std::wstring_view p_base) {
 			std::to_wstring(g_temp_sequence.fetch_add(1, std::memory_order_relaxed)) + L".tmp";
 }
 
-// The guard check on a location the file system has already resolved (the final path of an open
-// handle). This is the authoritative check: it describes the directory object the write goes to.
 bool final_path_allowed(const PathGuard &p_guard, const cd::Handle &p_handle) {
 	const std::optional<fs::path> p = cd::final_path(p_handle);
 	if (!p || p_guard.protected_roots().empty()) {
@@ -92,10 +87,10 @@ bool final_path_allowed(const PathGuard &p_guard, const cd::Handle &p_handle) {
 }
 
 bool is_not_found(uint32_t p_err) {
-	return p_err == 2 || p_err == 3; // ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
+	return p_err == 2 || p_err == 3;
 }
 
-} // namespace
+}
 
 struct Cache::State {
 	struct Slot {
@@ -105,9 +100,9 @@ struct Cache::State {
 		uint64_t tick = 0;
 		uint64_t persisted_tick = 0;
 		uint64_t generation = 0;
-		uint32_t refs = 0; // live CacheEntry views
+		uint32_t refs = 0;
 		bool pinned = false;
-		bool verified = false; // payload hash checked in this process
+		bool verified = false;
 	};
 
 	CacheOptions options;
@@ -120,31 +115,28 @@ struct Cache::State {
 	mutable std::mutex mu;
 	std::condition_variable cv;
 	std::unordered_map<Sha256Digest, Slot, DigestHash> index;
-	std::unordered_set<Sha256Digest, DigestHash> busy; // a put, delete or eviction is in progress
+	std::unordered_set<Sha256Digest, DigestHash> busy;
 	uint64_t clock = 1;
 	uint64_t generation = 0;
 	uint64_t total = 0;
 	CacheStats stats;
 	bool open = false;
-	bool closing = false; // close() has started: no new operations
-	uint32_t inflight = 0; // reads using the directory handles outside mu (puts and deletes use busy)
+	bool closing = false;
+	uint32_t inflight = 0;
 
-	// New operations start only while open and not closing (caller holds mu).
 	bool accepting() const { return open && !closing; }
 
-	// Stops new operations, waits for the in-flight ones (busy keys, reads, producers), then writes
-	// the close record and closes the handles. Safe to call from several threads.
 	void shutdown() {
 		std::unique_lock lk(mu);
 		if (!open) {
 			return;
 		}
 		if (closing) {
-			cv.wait(lk, [&] { return !open; }); // another thread is closing: wait until it is done
+			cv.wait(lk, [&] { return !open; });
 			return;
 		}
 		closing = true;
-		cv.notify_all(); // wake waiters so they observe closing and return Closed
+		cv.notify_all();
 		cv.wait(lk, [&] { return busy.empty() && inflight == 0; });
 		flush_touches_locked();
 		std::vector<uint8_t> rec;
@@ -162,9 +154,6 @@ struct Cache::State {
 		cv.notify_all();
 	}
 
-	// ---- file operations (no lock needed: they touch only handles and the immutable options)
-
-	// Opens v1/<kind>/<fan> relative to the held v1 handle and checks its final path.
 	CacheStatus open_target_dir(std::string_view p_kind, const Sha256Digest &p_key, bool p_create, cd::Handle &r_dir, uint32_t &r_err) const {
 		cd::Handle kind_dir = cd::open_child_dir(vdir, widen_ascii(p_kind), p_create, r_err);
 		if (!kind_dir.valid()) {
@@ -181,8 +170,6 @@ struct Cache::State {
 		return CacheStatus::Ok;
 	}
 
-	// Deletes one name inside a verified directory: never a hard-linked file, never outside the
-	// guard (checked on the handle being deleted). A reparse point is deleted as the link itself.
 	CacheStatus delete_child(const cd::Handle &p_dir, std::wstring_view p_name, uint32_t &r_err) const {
 		cd::Handle h = cd::open_child_any(p_dir, p_name, r_err);
 		if (!h.valid()) {
@@ -214,7 +201,6 @@ struct Cache::State {
 		return delete_child(dir, entry_file_name(p_key), r_err);
 	}
 
-	// Writes p_parts to a fresh temp file in p_dir, flushes it and renames it over p_name.
 	CacheStatus atomic_replace(const cd::Handle &p_dir, std::wstring_view p_name, std::initializer_list<std::span<const uint8_t>> p_parts,
 			uint32_t &r_err) const {
 		cd::Handle tmp = cd::create_child_file(p_dir, temp_name(p_name.substr(0, p_name.size() < 64 ? p_name.size() : 64)), r_err);
@@ -228,8 +214,7 @@ struct Cache::State {
 		ok = ok && cd::flush(tmp, r_err);
 		CacheStatus st = ok ? CacheStatus::Ok : CacheStatus::Io;
 		if (ok) {
-			// Never replace a hard link (its other name could be an install file), a directory or a
-			// reparse point that someone put at the target name.
+
 			uint32_t probe_err = 0;
 			cd::Handle existing = cd::open_child_any(p_dir, p_name, probe_err);
 			if (existing.valid()) {
@@ -260,7 +245,7 @@ struct Cache::State {
 
 	PutResult write_entry(const CacheKey &p_key, std::span<const uint8_t> p_payload) const {
 		PutResult r;
-		// 1. Path-level check (aliases, 8.3 names, existing junctions, hard-linked target).
+
 		const fs::path target = root_final / p_key.relative_path();
 		if (options.guard.check_write_target(target) != PathGuard::Verdict::Allowed) {
 			r.status = CacheStatus::Refused;
@@ -269,8 +254,7 @@ struct Cache::State {
 		if (options.test_hook_before_write) {
 			options.test_hook_before_write(target);
 		}
-		// 2. Handle walk below the held v1 handle (no links followed) and a final-path check of the
-		//    directory the temp file is created in; nothing after this point resolves a path.
+
 		cd::Handle dir;
 		r.status = open_target_dir(p_key.kind, p_key.digest, true, dir, r.win32_error);
 		if (r.status != CacheStatus::Ok) {
@@ -289,12 +273,10 @@ struct Cache::State {
 		return r;
 	}
 
-	// ---- index operations (caller holds mu)
-
 	void append_locked(const std::vector<uint8_t> &p_record) {
 		uint32_t err = 0;
 		if (!journal.valid() || !cd::write_all(journal, p_record.data(), p_record.size(), err)) {
-			++stats.io_errors; // the open-time scan reconciles a journal that missed a record
+			++stats.io_errors;
 			return;
 		}
 		++stats.journal_records;
@@ -312,7 +294,7 @@ struct Cache::State {
 		slot.tick = clock++;
 		slot.persisted_tick = slot.tick;
 		slot.generation = ++generation;
-		slot.verified = true; // written from memory by this process
+		slot.verified = true;
 		total += slot.file_size;
 		++stats.puts;
 		std::vector<uint8_t> rec;
@@ -321,7 +303,6 @@ struct Cache::State {
 		append_locked(rec);
 	}
 
-	// Removes a slot from the index (and journals it). Returns its kind and file size.
 	void drop_locked(std::unordered_map<Sha256Digest, Slot, DigestHash>::iterator p_it, cd::RemoveReason p_reason) {
 		total -= p_it->second.file_size;
 		std::vector<uint8_t> rec;
@@ -346,7 +327,6 @@ struct Cache::State {
 		}
 	}
 
-	// Rewrites the journal from the index: header + one Put (+ Pin) per entry, atomically.
 	CacheStatus write_snapshot_locked(uint32_t &r_err) {
 		std::vector<std::pair<const Sha256Digest *, Slot *>> order;
 		order.reserve(index.size());
@@ -383,8 +363,6 @@ struct Cache::State {
 		stats.journal_compacted = true;
 		return CacheStatus::Ok;
 	}
-
-	// ---- open-time reconciliation (single-threaded, before the State is published)
 
 	void scan(cd::JournalReplay &r_replay, bool &r_changed) {
 		uint32_t err = 0;
@@ -431,7 +409,7 @@ struct Cache::State {
 				}
 			}
 		}
-		// Records whose file is gone.
+
 		stats.missing_dropped = r_replay.entries.size();
 		r_changed = r_changed || !r_replay.entries.empty();
 	}
@@ -487,9 +465,7 @@ struct Cache::State {
 			slot.pinned = j->second.pinned;
 			r_replay.entries.erase(j);
 		} else {
-			// Written but not journaled (crash between rename and append, or a lost journal): adopt
-			// as the oldest, but only a single-link file whose header names this key, kind and size.
-			// A hard link is neither adopted nor deleted (its other name may be an install file).
+
 			r_changed = true;
 			cd::Handle f = cd::open_child_file_read(p_fan_dir, p_file.name, err);
 			cd::FileInfo info;
@@ -516,9 +492,6 @@ struct Cache::State {
 		index.emplace(*key, std::move(slot));
 	}
 };
-
-// ------------------------------------------------------------------------------------------------
-// CacheEntry
 
 struct CacheEntry::Release {
 	std::shared_ptr<Cache::State> state;
@@ -555,9 +528,6 @@ void CacheEntry::reset() {
 	view_ = nullptr;
 	payload_ = {};
 }
-
-// ------------------------------------------------------------------------------------------------
-// Cache
 
 const char *cache_status_name(CacheStatus p_status) {
 	switch (p_status) {
@@ -628,8 +598,6 @@ CacheStatus Cache::open(CacheOptions p_options, std::string *r_detail) {
 	s->options = std::move(p_options);
 	uint32_t err = 0;
 
-	// Open the deepest existing ancestor (following links, then verified by its final path) and
-	// create the rest relative to handles.
 	fs::path existing = *canonical;
 	std::deque<std::wstring> rest;
 	std::error_code ec;
@@ -669,10 +637,9 @@ CacheStatus Cache::open(CacheOptions p_options, std::string *r_detail) {
 	}
 	s->lock = cd::open_child_lock(s->vdir, kLockName, err);
 	if (!s->lock.valid()) {
-		return fail(err == 32 /* ERROR_SHARING_VIOLATION */ ? CacheStatus::Busy : CacheStatus::Io, "cannot lock the cache", err);
+		return fail(err == 32   ? CacheStatus::Busy : CacheStatus::Io, "cannot lock the cache", err);
 	}
 
-	// Journal replay.
 	std::vector<uint8_t> bytes;
 	bool journal_exists = false;
 	{
@@ -680,7 +647,7 @@ CacheStatus Cache::open(CacheOptions p_options, std::string *r_detail) {
 		if (jf.valid()) {
 			journal_exists = true;
 			if (!cd::read_all(jf, bytes, kJournalMaxBytes, err)) {
-				bytes.clear(); // unreadable: rebuilt from the scan
+				bytes.clear();
 			}
 		} else if (!is_not_found(err)) {
 			return fail(CacheStatus::Io, "cannot read the journal", err);
@@ -692,7 +659,6 @@ CacheStatus Cache::open(CacheOptions p_options, std::string *r_detail) {
 	s->stats.recovered_unclean = journal_exists && !replay.clean_close;
 	s->clock = replay.max_tick + 1;
 
-	// Reconcile with the files on disk.
 	bool changed = false;
 	s->scan(replay, changed);
 
@@ -710,7 +676,7 @@ CacheStatus Cache::open(CacheOptions p_options, std::string *r_detail) {
 		s->stats.journal_records = replayed_records;
 	}
 	s->open = true;
-	// Publish. A Cache opened concurrently by another open() on this object is closed, not leaked.
+
 	const std::shared_ptr<State> old = state_.exchange(std::move(s));
 	if (old) {
 		old->shutdown();
@@ -728,8 +694,7 @@ bool Cache::is_open() const {
 }
 
 void Cache::close() {
-	// Unpublish first, so new calls see a closed Cache; calls that loaded the state already either
-	// finish before the handles close (shutdown waits for them) or observe closing.
+
 	const std::shared_ptr<State> s = state_.exchange(nullptr);
 	if (s) {
 		s->shutdown();
@@ -754,7 +719,7 @@ PutResult Cache::put(const CacheKey &p_key, std::span<const uint8_t> p_payload) 
 		}
 		const auto it = s->index.find(p_key.digest);
 		if (it != s->index.end() && it->second.kind != p_key.kind) {
-			r.status = CacheStatus::InvalidArgument; // a hand-built key: one digest, two kinds
+			r.status = CacheStatus::InvalidArgument;
 			return r;
 		}
 		if (it != s->index.end()) {
@@ -807,10 +772,9 @@ GetResult Cache::get_in(const std::shared_ptr<State> &p_state, const CacheKey &p
 	++slot.refs;
 	const uint64_t generation = slot.generation;
 	const bool hash = p_verify || s->options.verify == CacheVerify::Always || (s->options.verify == CacheVerify::FirstUse && !slot.verified);
-	++s->inflight; // close() waits for this before it closes the directory handles
+	++s->inflight;
 	lk.unlock();
 
-	// Map and validate outside the lock.
 	const void *view = nullptr;
 	uint64_t file_size = 0;
 	bool bad = false;
@@ -824,7 +788,7 @@ GetResult Cache::get_in(const std::shared_ptr<State> &p_state, const CacheKey &p
 		} else if (!cd::query_info(file, info, r.win32_error)) {
 			st = CacheStatus::Io;
 		} else if (info.links > 1) {
-			bad = true; // never serve a hard link (its other name could be anywhere); dropped below
+			bad = true;
 		} else if (info.size < kCacheEntryHeaderSize) {
 			bad = true;
 		} else {
@@ -834,7 +798,7 @@ GetResult Cache::get_in(const std::shared_ptr<State> &p_state, const CacheKey &p
 		}
 	}
 	if (st == CacheStatus::Miss) {
-		bad = true; // indexed but gone or replaced by a link: drop it
+		bad = true;
 	}
 	if (view != nullptr) {
 		const std::span<const uint8_t> file(static_cast<const uint8_t *>(view), static_cast<size_t>(file_size));
@@ -867,7 +831,7 @@ GetResult Cache::get_in(const std::shared_ptr<State> &p_state, const CacheKey &p
 		r.status = CacheStatus::Miss;
 		r.dropped_corrupt = true;
 		if (!same) {
-			return r; // another reader dropped it already
+			return r;
 		}
 		const std::string kind = again->second.kind;
 		s->drop_locked(again, cd::RemoveReason::Corrupt);
@@ -936,10 +900,10 @@ GetResult Cache::get_or_put(const CacheKey &p_key, const std::function<bool(std:
 		if (it != s->index.end()) {
 			if (it->second.kind != p_key.kind) {
 				GetResult r;
-				r.status = CacheStatus::InvalidArgument; // a hand-built key: one digest, two kinds
+				r.status = CacheStatus::InvalidArgument;
 				return r;
 			}
-			continue; // another thread just put it
+			continue;
 		}
 		if (s->busy.count(p_key.digest) != 0) {
 			++s->stats.dedup_waits;
@@ -1173,4 +1137,4 @@ fs::path Cache::root() const {
 	return s->root_final;
 }
 
-} // namespace bf3::core
+}

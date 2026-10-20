@@ -1,4 +1,3 @@
-// PT1 run (docs/design/pt1-run.md): BF3's move groups and controller routes. See move_group.h.
 #include "bf3/anim/move_group.h"
 
 #include "bf3/core/gameplay/work_budget.h"
@@ -20,7 +19,7 @@ namespace {
 constexpr float kTwoPi = 6.28318530718f;
 constexpr uint32_t kMaxChooserEntries = 64;
 constexpr uint32_t kMaxSignals = 16;
-// Ant AntRef AssetIds of s_basicassets objects: 0x15480000 | low 16 bits of the guid index (crowd_clips.h).
+
 constexpr uint32_t kAntRefHigh = 0x15480000u;
 
 std::string hex(uint32_t p_v) {
@@ -37,7 +36,6 @@ bool finite(float p_v) {
 	return std::isfinite(p_v);
 }
 
-// The unique object of p_type named p_name in the static package.
 core::Result<GdStruct> find_static(const AntLibrary &p_library, std::string_view p_type, std::string_view p_name, core::gameplay::WorkBudget &r_budget) {
 	const AntPackage *stat = p_library.static_package();
 	if (stat == nullptr) {
@@ -61,7 +59,6 @@ core::Result<GdStruct> find_static(const AntLibrary &p_library, std::string_view
 	return found;
 }
 
-// A BoolAsset signal's Default (the value a signal has before the runtime writes it).
 bool signal_default(const AntLibrary &p_library, const AntPackage &p_from, const GdGuid &p_signal, bool &r_value) {
 	const GdStruct s = p_library.resolve(p_from, p_signal);
 	if (!s.valid() || s.type_name() != "BoolAsset") {
@@ -104,7 +101,7 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			if (!cur.read_guid("Anim", anim) || anim.is_null()) {
 				return core::make_error(label(cur) + ": no Anim");
 			}
-			float ticks_f = 0.0f, fps = 0.0f, scale = 0.0f; // NumTicks is stored as a float or an integer
+			float ticks_f = 0.0f, fps = 0.0f, scale = 0.0f;
 			if (!cur.read_float("NumTicks", ticks_f) || !cur.read_float("FPS", fps) || !cur.read_float("FPSScale", scale) || !finite(ticks_f) || !finite(fps) ||
 					!finite(scale) || ticks_f < 0.0f || ticks_f > 1.0e7f || !(fps > 0.0f) || !(scale > 0.0f)) {
 				return core::make_error(label(cur) + ": no NumTicks / FPS / FPSScale");
@@ -265,12 +262,11 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 	}
 }
 
-// The heading of a direction about +Y from +Z towards +X, in (-pi, pi].
 float heading(float p_x, float p_z) {
 	return std::atan2(p_x, p_z);
 }
 
-} // namespace
+}
 
 core::Result<AntClipRoute> route_ant_controller(const AntLibrary &p_library, const AntPackage &p_from, const GdGuid &p_controller, const ChooserIndices &p_indices) {
 	core::gameplay::WorkBudget budget;
@@ -358,7 +354,7 @@ core::Result<MoveGroupDef> read_move_group(const AntLibrary &p_library, std::str
 			std::fabs(def.x_min) > kMaxMoveGroupAngle || std::fabs(def.x_max) > kMaxMoveGroupAngle) {
 		return core::make_error(where + ": the angle array has no finite Min <= Max within +-" + std::to_string(kMaxMoveGroupAngle) + " rad");
 	}
-	std::vector<uint32_t> item_guid; // per clip: the StreetMoveGroupItem it came from first (reports)
+	std::vector<uint32_t> item_guid;
 	for (uint32_t d = 0; d < items.size(); ++d) {
 		if (core::Status s = budget.charge(1); !s.ok()) {
 			return core::error_at(where, s.error());
@@ -441,12 +437,11 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 	const float v = speed / kAntTicksPerSecond;
 	out.velocity = v;
 	out.below_min_speed = v < p_def.min_speed;
-	// The outer X: wrapped into [Min, Min + 2 pi), clamped to [Min, Max].
+
 	if (std::fabs(x) > 1.0e4f) {
 		x = 0.0f;
 	}
-	// One floor-based step, no loop: a hand-built or hostile def with a huge Min (read_move_group bounds it) cannot stall
-	// the crowd workers. Rounding at the edge is caught by the clamp. A non-finite Min / Max gives the X 0.
+
 	const bool range_ok = std::isfinite(p_def.x_min) && std::isfinite(p_def.x_max) && p_def.x_max >= p_def.x_min;
 	if (range_ok && p_def.x_max > p_def.x_min) {
 		const float turns = std::floor((x - p_def.x_min) / kTwoPi);
@@ -496,7 +491,7 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 		if (!(p_w > 0.0f) || p_dir.entries.empty()) {
 			return;
 		}
-		// The entries' velocities on the ground (measured root * ItemSpeed with velocity_from_root).
+
 		std::array<float, kMaxMoveGroupEntries> vel{};
 		const size_t n = std::min<size_t>(p_dir.entries.size(), kMaxMoveGroupEntries);
 		for (size_t e = 0; e < n; ++e) {
@@ -539,8 +534,7 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 				return;
 			}
 		}
-		// No bracket: the entries are sorted by the data's Velocity, and root * ItemSpeed may not keep that order. The
-		// nearest entry takes the whole weight, so the weights still sum to 1.
+
 		size_t best = 0;
 		for (size_t e = 1; e < n; ++e) {
 			if (std::fabs(v - vel[e]) < std::fabs(v - vel[best])) {
@@ -553,7 +547,7 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 	if (hi != lo) {
 		inner(dirs[hi], t);
 	}
-	// The shared phase: the weighted mean of rate / seconds over the moving terms.
+
 	float wsum = 0.0f, cps = 0.0f;
 	for (uint32_t k = 0; k < out.count; ++k) {
 		const MoveGroupClipTiming tm = timing(out.terms[k].clip);
@@ -567,4 +561,4 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 	return out;
 }
 
-} // namespace bf3::anim
+}

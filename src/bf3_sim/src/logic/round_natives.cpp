@@ -1,16 +1,3 @@
-// The TDM native entities behind S4's bindings (docs/design/m2b.md §3.1; as built: docs/design/m2b-ru.md §2). See
-// round_natives.h. Single-threaded, deterministic (slots and nodes in index order, no wall clock, no hash container).
-//
-// What the graph does around them on Metro TDM [verified: bf3dump logic instantiate MP_Subway TeamDeathMatch0 --edges]:
-//   HumanPlayer.OnPlayerEnter -> PlayerFilter -> EventGate b7f13498 (open) -> InputRestriction.Activate: a player who
-//     enters during the pre-round is frozen; PreRound.StartRound / EnablePlayerMovement close the gate and
-//     Deactivate the restriction, so a late joiner is never frozen.
-//   KillCounter.Kills / KillLimit -> Compare -> BoolToEvent.OnTrue -> RoundOver(own team).TeamWins, RoundOver(other)
-//     .StopTime; RoundOver.OnRoundOver -> Delay 0.5 -> Delay (MathOp, 1.75 s) -> HumanPlayer.UnSpawnAllSoldiers and
-//     SyncedBool.SetTrue -> Delay 60 -> LevelControl (an unnamed input): the restart.
-// The natives themselves: KillCounter counts kills (EnemyWeight per enemy kill by its team), PreRound counts players
-// and runs the countdown, RoundOver keeps the winner, AutoTeam the teams, InputRestriction the freeze, LevelControl
-// the restart request. Every other native type is handed to the embedded LogicNativeStubs (Recorded there).
 #include "bf3/sim/logic/round_natives.h"
 
 #include <algorithm>
@@ -42,7 +29,6 @@ constexpr int32_t kTeamField = id("Team");
 
 constexpr size_t kSlots = 256;
 
-// The types this object implements (m2b.md §3.1's table); every other native type goes to the stubs.
 bool handled_type(T p_type) {
 	switch (p_type) {
 		case T::KillCounter:
@@ -82,7 +68,7 @@ LogicValue int_value(int64_t p_value) {
 	return v;
 }
 
-} // namespace
+}
 
 struct RoundNatives::State {
 	std::shared_ptr<const gp::LogicGraph> graph;
@@ -107,7 +93,7 @@ struct RoundNatives::State {
 	};
 	std::vector<Over> overs;
 	std::vector<uint32_t> pre_rounds, humans;
-	std::vector<bool> enabled; // per node (Native nodes of the handled types)
+	std::vector<bool> enabled;
 
 	RoundPhase phase = RoundPhase::PreRound;
 	uint8_t winner = 0;
@@ -174,7 +160,6 @@ struct RoundNatives::State {
 
 	uint32_t player_count() const { return team_count(1) + team_count(2); }
 
-	// AutoTeam's join rule: the smaller team, team 1 on a tie; TamFullTeams: none (0) once both hold max_players / 2.
 	uint8_t choose_team() const {
 		const uint32_t cap = std::max<uint32_t>(1u, uint32_t(config.max_players) / 2u);
 		const uint32_t a = team_count(1), b = team_count(2);
@@ -190,8 +175,6 @@ struct RoundNatives::State {
 		return b < a ? 2 : 1;
 	}
 
-	// AutoBalance: with >= PlayerCountNeededToAutoBalance players and a difference >= TeamDifferenceToAutoBalance,
-	// the most recently joined bot of the larger team moves at its next death (a human only when no bot can).
 	void pick_balance_candidate() {
 		balance_candidate = -1;
 		if (!params.auto_balance) {
@@ -294,7 +277,7 @@ core::Result<RoundNatives> RoundNatives::create(std::shared_ptr<const gp::LogicG
 		}
 	}
 	std::sort(state->coverage.begin(), state->coverage.end(), [](const NativeCoverage &a, const NativeCoverage &b) { return a.type < b.type; });
-	// Hostile params: clamp the counts and times (the loader read them from the install).
+
 	RoundNativeParams &p = state->params;
 	p.round_min_players = std::clamp(p.round_min_players, 0, 256);
 	p.round_max_players = std::clamp(p.round_max_players, 0, 256);
@@ -314,15 +297,15 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 	s.tick = p_tick;
 	const gp::LogicGraph &g = *s.graph;
 	if (!s.published) {
-		// KillLimit once, Kills 0 (the Compare nodes then read 0 >= limit = false).
+
 		s.published = true;
 		for (State::Counter &c : s.counters) {
 			BF3_TRY(r_runtime.force_property(c.node, kKillLimit, int_value(s.limit_of(c))));
 			BF3_TRY(s.publish_counter(c, r_runtime));
 		}
 	}
-	std::vector<LogicEffect> rest; // the stubs' share
-	int32_t wins_node = -1; // TeamWins in this apply: the lower node index wins a tie
+	std::vector<LogicEffect> rest;
+	int32_t wins_node = -1;
 	for (const LogicEffect &e : p_effects) {
 		if (e.apply_tick != p_tick) {
 			continue;
@@ -382,7 +365,7 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 				break;
 			case M::PlayerEnter:
 			case M::DisableAllowedToSpawnOn:
-				// AutoTeam already chose the team in player_enter (the server needs it before the spawn).
+
 				break;
 			case M::Activate:
 				if (type == T::InputRestriction && s.enabled[e.node]) {
@@ -400,14 +383,14 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 				s.note(e.node, NativeTimelineEntry::What::Input, e.port);
 				break;
 			default:
-				// LevelControl's other event input (#34800493, the post-round Delay 60): the restart as well.
+
 				if (type == T::LevelControl && dir == D::EventIn) {
 					s.restart_flag = true;
 					s.phase = RoundPhase::Restarting;
 					s.note(e.node, NativeTimelineEntry::What::Input, e.port);
-				} else if ((type == T::CharacterSpawn || type == T::AlternateSpawn) && dir == D::PropertyIn && // M2b bb [spawn transform]
-						e.port == id("BlueprintTransform")) { // M2b bb [spawn transform]: the reference's placement at tick 1
-					// M2b bb [spawn transform]: the points come from SharedLevel::spawns, placed at load; nothing to move.
+				} else if ((type == T::CharacterSpawn || type == T::AlternateSpawn) && dir == D::PropertyIn &&
+						e.port == id("BlueprintTransform")) {
+
 				} else {
 					handled = false;
 				}
@@ -485,7 +468,7 @@ core::Status RoundNatives::player_died(uint8_t p_slot, uint8_t p_team, int p_kil
 	for (const uint32_t h : s.humans) {
 		BF3_TRY(r_runtime.force_event(h, kOnPlayerDied, LogicContext{ int32_t(p_slot), p_team }));
 	}
-	// KillCounter: the killer's team counts an enemy kill; suicides, falls and team kills count team_kill_weight (0).
+
 	if (s.phase == RoundPhase::InRound && p_killer >= 0 && p_killer != int(p_slot) && (p_killer_team == 1 || p_killer_team == 2)) {
 		const bool enemy = p_killer_team != p_team;
 		const bool killer_bot = p_killer < int(kSlots) && s.bot[size_t(p_killer)];
@@ -498,7 +481,7 @@ core::Status RoundNatives::player_died(uint8_t p_slot, uint8_t p_team, int p_kil
 			BF3_TRY(s.publish_counter(c, r_runtime));
 		}
 	}
-	// AutoTeam's balance: the chosen player moves at its death.
+
 	if (s.balance_candidate == int(p_slot) && s.entered[p_slot]) {
 		s.team[p_slot] = s.team[p_slot] == 1 ? 2 : 1;
 		++s.moves;
@@ -635,4 +618,4 @@ std::span<const RoundNatives::NativeCoverage> RoundNatives::coverage() const {
 	return state_->coverage;
 }
 
-} // namespace bf3::sim::logic
+}

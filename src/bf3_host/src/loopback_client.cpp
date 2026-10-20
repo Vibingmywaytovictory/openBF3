@@ -11,12 +11,12 @@
 namespace bf3::host {
 
 namespace {
-// H hygiene: pins instances against their destructor while stop_all is inside them (instance_registry.h).
+
 detail::InstanceRegistry<LoopbackClient> g_clients;
-} // namespace
+}
 
 LoopbackClient::~LoopbackClient() {
-	g_clients.retire(this); // first: a concurrent stop_all is done with this instance once it returns
+	g_clients.retire(this);
 	stop();
 }
 
@@ -84,8 +84,7 @@ LoopbackClientStats LoopbackClient::stats() const {
 }
 
 void LoopbackClient::run(uint16_t p_port, int p_ping_hz) {
-	// The thread owns running_ from here: start() set it, and it is cleared on every exit path below, so stats()
-	// never reports a dead thread as running (stop() clears it again after the join, harmlessly).
+
 	const auto fail = [this](const char *p_what) {
 		{
 			std::lock_guard error_lock(error_mutex_);
@@ -109,7 +108,7 @@ void LoopbackClient::run(uint16_t p_port, int p_ping_hz) {
 	uint32_t seq = 0;
 	while (!stop_requested_.load(std::memory_order_acquire)) {
 		net::Host::Event ev;
-		// Short waits keep the thread responsive to stop() and timestamps precise.
+
 		while (host->service(1, ev) > 0) {
 			if (ev.type == net::Host::EventType::Connect) {
 				connected_ = true;
@@ -139,7 +138,7 @@ void LoopbackClient::run(uint16_t p_port, int p_ping_hz) {
 		}
 	}
 	host->disconnect_all();
-	running_ = false; // stop() asked, or the loop ended: the thread is gone either way
+	running_ = false;
 }
 
-} // namespace bf3::host
+}

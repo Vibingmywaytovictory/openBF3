@@ -1,11 +1,3 @@
-// S3 crowd animation (docs/design/s3.md §14): bf3_anim's crowd pieces and bf3_core's WorkerGroup.
-//
-// Suite "anim-s3-unit" (ctest anim.s3.unit): synthetic skeletons and clips, no data. Layers, the run blend, the worker
-// lanes, the evaluator's frame protocol on a 4-bone rig, and the stage schedule and its blend coverage.
-// Suite "anim-s3" (ctest anim.s3): the retail install, read-only (Ant banks through AntInstallSource); exits 77
-// without one. The clip set of §4.1, weapon -> chooser index, the reload clips and mask, the additive-order criterion
-// of §5.5, the 64-soldier bench (reported) and seeded hostile lookups. Asserts numbers only; nothing from BF3 is
-// stored in the repo.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/clip_asset.h"
@@ -57,7 +49,6 @@ bool bit_equal(const Xform &a, const Xform &b) {
 	return std::memcmp(&a, &b, sizeof(Xform)) == 0;
 }
 
-// AITrajectory (root) > Hips > Arm > Wep; Hips 1 m up.
 Skeleton synth_rig() {
 	std::vector<Bone> bones(4);
 	bones[0].name = "AITrajectory";
@@ -73,8 +64,6 @@ Skeleton synth_rig() {
 	return *Skeleton::make(std::move(bones));
 }
 
-// A two-key clip: quaternion channels on p_qbones (key 0 identity, key 1 p_q1), vec3 channels on p_vbones (key 0
-// p_t0, key 1 p_t1).
 CrowdClipData synth_clip(const Skeleton &p_rig, uint32_t p_end_frame, std::vector<int32_t> p_qbones, const Quat &p_q1, std::vector<int32_t> p_vbones,
 		const Vec3 &p_t0, const Vec3 &p_t1, bool p_additive = false) {
 	CrowdClipData d;
@@ -123,9 +112,9 @@ struct SynthCrowd {
 		} cycles[] = { { CrowdClip::RunFwd, { 0, 0, 2.8f }, 30 }, { CrowdClip::RunBwd, { 0, 0, -1.7f }, -30 }, { CrowdClip::RunLeft, { 1.5f, 0, 0 }, 20 },
 			{ CrowdClip::RunRight, { -1.7f, 0, 0 }, -20 } };
 		for (const auto &c : cycles) {
-			// Root motion on AITrajectory, a swing on Hips and Arm.
+
 			set.clips[size_t(c.clip)] = synth_clip(r, 18, { 1, 2 }, axis_angle(1, 0, 0, c.deg), { 0, 1 }, Vec3{}, c.to);
-			// The second vec3 channel drives Hips: keep it at its rest height.
+
 			auto &vs = set.clips[size_t(c.clip)].clip.vec3s;
 			vs[1] = Vec3{ 0, 1, 0 };
 			vs[3] = Vec3{ 0, 1, 0 };
@@ -137,7 +126,7 @@ struct SynthCrowd {
 		set.loco[size_t(LocoClip::Left)] = LocoClipInfo{ 0.567f, 2.6f, Vec3{ 1, 0, 0 } };
 		set.loco[size_t(LocoClip::Right)] = LocoClipInfo{ 0.533f, 3.2f, Vec3{ -1, 0, 0 } };
 		reload = synth_clip(r, 30, { 2, 3 }, axis_angle(0, 1, 0, 60), { 3 }, Vec3{ 0.3f, 0, 0 }, Vec3{ 0.3f, 0.2f, 0 });
-		// Binds: every bone, inverse bind = inverse(rest model).
+
 		EbxSkeleton ebx;
 		ebx.partition = "synthetic";
 		std::vector<Xform> model;
@@ -172,7 +161,7 @@ std::vector<CrowdSoldierInput> stage_inputs(const CrowdStageSpec &p_spec, double
 	return in;
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim-s3-unit") {
 	TEST_CASE("s3 layers: blends, masked override, additive orders") {
@@ -188,13 +177,13 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(vec_dist(out.joints[2].t, b.joints[2].t) < 1e-6);
 		blend_poses(a, b, 0.5f, out);
 		CHECK(quat_angle_deg(out.joints[2].q, axis_angle(0, 0, 1, 30)) < 0.01);
-		// Shortest arc: b negated gives the same blend.
+
 		LocalPose bn = b;
 		bn.joints[2].q = Quat{ -b.joints[2].q.x, -b.joints[2].q.y, -b.joints[2].q.z, -b.joints[2].q.w };
 		LocalPose out2;
 		blend_poses(a, bn, 0.5f, out2);
 		CHECK(quat_angle_deg(out2.joints[2].q, out.joints[2].q) < 1e-3);
-		// N-way: weights normalised, tiny weights skipped, aliasing the first input.
+
 		const LocalPose *poses[3] = { &a, &b, &bn };
 		const float weights[3] = { 2.0f, 2.0f, 0.0f };
 		LocalPose n3;
@@ -206,7 +195,6 @@ TEST_SUITE("anim-s3-unit") {
 		blend_poses(ap, aw, 2, alias);
 		CHECK(quat_angle_deg(alias.joints[2].q, axis_angle(0, 0, 1, 30)) < 0.01);
 
-		// Masked override: unmasked bones bit-equal, masked bones take the layer at w = 1.
 		BoneMask mask;
 		mask.weight = { 0, 0, 1, 0 };
 		LocalPose base = a;
@@ -225,7 +213,6 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(u.size() == 4);
 		CHECK(u.count_nonzero() == 2);
 
-		// Additive: post q * d, pre d * q, against hand-computed products.
 		LocalPose delta = identity_pose(rig);
 		delta.joints[2] = Xform{ axis_angle(1, 0, 0, 40), Vec3{ 0, 0.1f, 0 } };
 		const Quat q = a.joints[2].q;
@@ -235,12 +222,12 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(same_quat(post.joints[2].q, quat_mul(q, delta.joints[2].q)));
 		CHECK(same_quat(pre.joints[2].q, quat_mul(delta.joints[2].q, q)));
 		CHECK(vec_dist(post.joints[2].t, Vec3{ a.joints[2].t.x, a.joints[2].t.y + 0.1f, a.joints[2].t.z }) < 1e-6);
-		CHECK(quat_angle_deg(post.joints[2].q, pre.joints[2].q) > 1.0); // the orders differ for non-commuting axes
+		CHECK(quat_angle_deg(post.joints[2].q, pre.joints[2].q) > 1.0);
 		LocalPose half = a;
 		apply_additive(half, delta, mask, 0.5f, AdditiveOrder::LocalPost);
 		CHECK(quat_angle_deg(half.joints[2].q, quat_mul(q, axis_angle(1, 0, 0, 20))) < 0.01);
 		CHECK(bit_equal(half.joints[1], a.joints[1]));
-		// The identity pose is identity everywhere.
+
 		for (const Xform &x : identity_pose(rig).joints) {
 			CHECK(bit_equal(x, xform_identity()));
 		}
@@ -267,29 +254,29 @@ TEST_SUITE("anim-s3-unit") {
 			}
 			return s;
 		};
-		// Forward at the motor's 4 m/s: RunFwd only, 0.86x.
+
 		LocoWeights w = locomotion_weights(clips, Vec3{ 0, 0, 4.0f }, p);
 		CHECK(w.weight[size_t(LocoClip::Fwd)] == doctest::Approx(1.0f));
 		CHECK(nonzero(w) == 1);
 		CHECK(w.cycle_seconds == doctest::Approx(0.6f / (4.0f / 4.64f)).epsilon(1e-4));
-		// Back at 3 m/s: 1.01x.
+
 		w = locomotion_weights(clips, Vec3{ 0, 0, -3.0f }, p);
 		CHECK(w.weight[size_t(LocoClip::Bwd)] == doctest::Approx(1.0f));
 		CHECK(w.cycle_seconds == doctest::Approx(0.567f / (3.0f / 2.97f)).epsilon(1e-4));
-		// Diagonal forward-left: half and half.
+
 		w = locomotion_weights(clips, Vec3{ 2.0f, 0, 2.0f }, p);
 		CHECK(w.weight[size_t(LocoClip::Fwd)] == doctest::Approx(0.5f).epsilon(1e-4));
 		CHECK(w.weight[size_t(LocoClip::Left)] == doctest::Approx(0.5f).epsilon(1e-4));
 		CHECK(nonzero(w) == 2);
-		// Back-right diagonal.
+
 		w = locomotion_weights(clips, Vec3{ -1.0f, 0, -1.0f }, p);
 		CHECK(w.weight[size_t(LocoClip::Bwd)] > 0.4f);
 		CHECK(w.weight[size_t(LocoClip::Right)] > 0.4f);
-		// The bracket across the wrap (+Z is heading 0): slightly right of forward.
+
 		w = locomotion_weights(clips, Vec3{ -1.0f, 0, 3.0f }, p);
 		CHECK(w.weight[size_t(LocoClip::Fwd)] > 0.6f);
 		CHECK(w.weight[size_t(LocoClip::Right)] > 0.1f);
-		// Idle fade: idle only at <= 0.2 m/s, half at 0.6, none at >= 1.
+
 		w = locomotion_weights(clips, Vec3{ 0, 0, 0.1f }, p);
 		CHECK(w.weight[size_t(LocoClip::Idle)] == 1.0f);
 		CHECK(nonzero(w) == 1);
@@ -297,13 +284,13 @@ TEST_SUITE("anim-s3-unit") {
 		w = locomotion_weights(clips, Vec3{ 0, 0, 0.6f }, p);
 		CHECK(w.weight[size_t(LocoClip::Idle)] == doctest::Approx(0.5f));
 		CHECK(w.weight[size_t(LocoClip::Fwd)] == doctest::Approx(0.5f));
-		CHECK(w.cycle_seconds == doctest::Approx(0.6f / p.min_rate)); // clamped to the slowest rate
+		CHECK(w.cycle_seconds == doctest::Approx(0.6f / p.min_rate));
 		w = locomotion_weights(clips, Vec3{ 0, 0, 1.0f }, p);
 		CHECK(w.weight[size_t(LocoClip::Idle)] == 0.0f);
-		// Rate clamp at the top.
+
 		w = locomotion_weights(clips, Vec3{ 0, 0, 20.0f }, p);
 		CHECK(w.cycle_seconds == doctest::Approx(0.6f / p.max_rate));
-		// Weights sum to 1 everywhere on a circle of speeds.
+
 		for (int k = 0; k < 360; k += 7) {
 			for (float s : { 0.0f, 0.3f, 0.9f, 3.5f }) {
 				const LocoWeights x = locomotion_weights(clips, Vec3{ s * std::sin(k * kPi / 180.0f), 0, s * std::cos(k * kPi / 180.0f) }, p);
@@ -311,14 +298,14 @@ TEST_SUITE("anim-s3-unit") {
 				CHECK(nonzero(x) <= 3);
 			}
 		}
-		// Hostile numbers: idle.
+
 		const float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
 		for (const Vec3 v : { Vec3{ nan, 0, 0 }, Vec3{ 0, 0, inf }, Vec3{ -inf, nan, inf } }) {
 			w = locomotion_weights(clips, v, p);
 			CHECK(w.weight[size_t(LocoClip::Idle)] == 1.0f);
 			CHECK(w.cycle_seconds == 0.0f);
 		}
-		// No cycles at all: idle.
+
 		w = locomotion_weights(std::array<LocoClipInfo, kLocoClips>{}, Vec3{ 0, 0, 3 }, p);
 		CHECK(w.weight[size_t(LocoClip::Idle)] == 1.0f);
 	}
@@ -353,12 +340,12 @@ TEST_SUITE("anim-s3-unit") {
 				}
 			}));
 			CHECK(g.busy());
-			CHECK(!g.kick(1, [](size_t) {})); // refused while the job runs
+			CHECK(!g.kick(1, [](size_t) {}));
 			release = true;
 			const double blocked = g.wait();
 			CHECK(blocked >= 0.0);
 			CHECK(!g.busy());
-			CHECK(g.wait() == 0.0); // no job
+			CHECK(g.wait() == 0.0);
 		}
 		{
 			std::atomic<int> done{ 0 };
@@ -368,7 +355,7 @@ TEST_SUITE("anim-s3-unit") {
 					std::this_thread::sleep_for(std::chrono::milliseconds(1));
 					done.fetch_add(1);
 				}));
-			} // the destructor waits for the job
+			}
 			CHECK(done.load() == 30);
 		}
 		CHECK(WorkerGroup(0, "test").lanes() == 1);
@@ -394,7 +381,7 @@ TEST_SUITE("anim-s3-unit") {
 			(*a)->wait_and_publish(lanes);
 			(*a)->set_inputs(in, dt);
 			REQUIRE((*a)->kick(lanes));
-			CHECK(!(*a)->kick(lanes)); // one job at a time
+			CHECK(!(*a)->kick(lanes));
 			(*b)->set_inputs(in, dt);
 			(*b)->evaluate_all_here();
 			(*a)->wait_and_publish(lanes);
@@ -419,7 +406,6 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(aims > 0);
 		CHECK((*a)->bad_inputs() == 0);
 
-		// Weapon layout: the masked joint takes the weapon pose; with an idle soldier the root and Hips do not.
 		{
 			std::vector<CrowdSoldierInput> idle(1);
 			auto e = CrowdEvaluator::make(c.set, std::span<const CrowdTeam>(c.teams.data(), 1), 1, config);
@@ -431,10 +417,9 @@ TEST_SUITE("anim-s3-unit") {
 			const Xform expect = xform_mul(m[2], c.weapon_local[3]);
 			CHECK(vec_dist(m[3].t, expect.t) < 1e-5);
 			CHECK(quat_angle_deg(m[3].q, expect.q) < 1e-3);
-			CHECK(vec_dist(m[0].t, Vec3{}) < 1e-6); // the root stays at rest: the sim owns it
+			CHECK(vec_dist(m[0].t, Vec3{}) < 1e-6);
 		}
 
-		// Temporal LOD: tiers by distance, staggered, skipped soldiers keep palette and model.
 		{
 			CrowdConfig lod;
 			lod.temporal_lod = true;
@@ -443,14 +428,14 @@ TEST_SUITE("anim-s3-unit") {
 			std::vector<CrowdSoldierInput> in = stage_inputs(spec, 1.0, 1.0, true);
 			const double dt = 1.0 / 144.0;
 			(*e)->set_inputs(in, dt);
-			(*e)->evaluate_all_here(); // first evaluation of everyone
+			(*e)->evaluate_all_here();
 			CHECK((*e)->stats().evaluated == spec.soldiers());
 			std::array<uint64_t, TemporalLodTable::kTiers + 2> per_tier{};
 			uint64_t skipped = 0;
 			std::vector<std::vector<Mat34>> last(spec.soldiers());
 			std::vector<std::vector<Xform>> last_model(spec.soldiers());
 			uint32_t max_evaluated = 0;
-			const int frames = 1440; // 10 s at 144 Hz
+			const int frames = 1440;
 			double tt = 1.0;
 			for (int f = 0; f < frames; ++f) {
 				for (uint32_t i = 0; i < spec.soldiers(); ++i) {
@@ -476,22 +461,21 @@ TEST_SUITE("anim-s3-unit") {
 					}
 				}
 			}
-			// Rows: 1 m (every frame), 15 m (0.02 s), 45 (0.04), 75 (0.06), 105 (0.08), 135 (0.10), 175 (0.12), 215 (frozen).
+
 			const double seconds = frames * dt;
 			const double per_row = spec.cols;
-			CHECK(per_tier[0] == uint64_t(frames * per_row)); // nearer than First: every frame
+			CHECK(per_tier[0] == uint64_t(frames * per_row));
 			const double expect[6] = { 50, 25, 16.7, 12.5, 10, 8.33 };
 			for (int k = 0; k < 6; ++k) {
 				const double rate = double(per_tier[size_t(k) + 1]) / seconds / per_row;
 				CHECK(rate == doctest::Approx(expect[k]).epsilon(0.03));
 			}
-			CHECK(per_tier[7] == 0); // beyond far: frozen
+			CHECK(per_tier[7] == 0);
 			CHECK(skipped > 0);
-			// Staggered: the busiest frame evaluates far fewer than all soldiers.
+
 			CHECK(max_evaluated < spec.soldiers() - 16);
 		}
 
-		// Hostile inputs: non-finite values are replaced and counted; nothing becomes non-finite.
 		{
 			auto e = CrowdEvaluator::make(c.set, c.teams, 4, config);
 			REQUIRE(e.ok());
@@ -502,7 +486,7 @@ TEST_SUITE("anim-s3-unit") {
 			in[2].pitch = nan;
 			in[3].position = Vec3{ 0, -inf, 0 };
 			in[3].camera_distance = nan;
-			in[3].team = 200; // clamped to the last team
+			in[3].team = 200;
 			(*e)->set_inputs(in, std::numeric_limits<double>::quiet_NaN());
 			(*e)->evaluate_all_here();
 			CHECK((*e)->bad_inputs() == 6);
@@ -518,7 +502,7 @@ TEST_SUITE("anim-s3-unit") {
 			CHECK((*e)->palette(99).empty());
 			CHECK(!(*e)->changed(99));
 		}
-		// make() refuses bad configurations.
+
 		{
 			CHECK(!CrowdEvaluator::make(c.set, c.teams, kMaxCrowdSoldiers + 1, config).ok());
 			CHECK(!CrowdEvaluator::make(c.set, {}, 4, config).ok());
@@ -536,7 +520,7 @@ TEST_SUITE("anim-s3-unit") {
 	TEST_CASE("s3 stage: every phase at every time, continuous ramps, reload starts, coverage above the G0 floors") {
 		const CrowdStageSpec spec;
 		const double period = spec.phase_seconds * double(kStagePhases);
-		// Every phase is on screen at every sampled time.
+
 		for (double t = 0.0; t < period; t += 0.37) {
 			std::array<int, kStagePhases> seen{};
 			for (uint32_t i = 0; i < spec.soldiers(); ++i) {
@@ -546,7 +530,7 @@ TEST_SUITE("anim-s3-unit") {
 				CHECK(seen[k] > 0);
 			}
 		}
-		// Teams: columns 0-3 US, 4-7 RU.
+
 		uint32_t us = 0;
 		for (uint32_t i = 0; i < spec.soldiers(); ++i) {
 			const CrowdSoldierInput in = stage_input(spec, i, 0.0, 0.0, Vec3{}, false);
@@ -554,8 +538,7 @@ TEST_SUITE("anim-s3-unit") {
 			CHECK(in.team == ((i % spec.cols) < 4 ? 0 : 1));
 		}
 		CHECK(us == 32);
-		// Continuous: at 144 Hz the local velocity never jumps by more than the ramp allows (a full 4 -> -3 m/s swing
-		// over 1 s is 7 m/s^2), and the facing never jumps.
+
 		const double dt = 1.0 / 144.0;
 		for (uint32_t i : { 0u, 17u, 63u }) {
 			CrowdSoldierInput prev = stage_input(spec, i, 0.0, 0.0, Vec3{}, false);
@@ -563,28 +546,28 @@ TEST_SUITE("anim-s3-unit") {
 			for (double t = dt; t < period * 2.0; t += dt) {
 				const CrowdSoldierInput in = stage_input(spec, i, t, t - dt, Vec3{}, false);
 				const float dv = float(vec_dist(in.velocity, prev.velocity));
-				// A ramp swings up to 7 m/s over 1 s; at RunCircle's start the target itself turns (3.5 m/s at 90 deg/s).
+
 				CHECK(dv < 12.0f * float(dt) + 1e-3f);
 				const float dyaw = std::fabs(std::remainder(in.yaw - prev.yaw, 2.0f * kPi));
 				CHECK(dyaw < 0.03f);
-				CHECK(std::fabs(in.pitch - prev.pitch) < 1.6f * float(dt) + 1e-4f); // AimUp -> AimDown: 90 deg over the 1 s ramp
+				CHECK(std::fabs(in.pitch - prev.pitch) < 1.6f * float(dt) + 1e-4f);
 				reload_starts += (in.flags & crowd_flags::kReloadStart) != 0 ? 1 : 0;
 				prev = in;
 			}
-			CHECK(reload_starts == 2); // once per 40 s period
+			CHECK(reload_starts == 2);
 		}
-		// LOD rows.
+
 		for (uint32_t i = 0; i < spec.soldiers(); ++i) {
 			const CrowdSoldierInput in = stage_input(spec, i, 0.0, 0.0, Vec3{}, true);
 			CHECK(in.camera_distance == kLodRowDistance[i / spec.cols]);
 		}
-		// Real camera distances 10..25 m.
+
 		for (uint32_t i = 0; i < spec.soldiers(); ++i) {
 			const CrowdSoldierInput in = stage_input(spec, i, 0.0, 0.0, stage_camera(spec).position, false);
 			CHECK(in.camera_distance > 9.0f);
 			CHECK(in.camera_distance < 26.0f);
 		}
-		// Blend coverage with the retail-like cycle directions.
+
 		std::array<LocoClipInfo, kLocoClips> clips{};
 		clips[size_t(LocoClip::Fwd)] = LocoClipInfo{ 0.6f, 4.64f, Vec3{ 0, 0, 1 } };
 		clips[size_t(LocoClip::Bwd)] = LocoClipInfo{ 0.567f, 2.97f, Vec3{ 0, 0, -1 } };
@@ -595,17 +578,15 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(cov.two_cycle_fraction > s3_gate::kMinTwoCycleFraction);
 		CHECK(cov.idle_mix_fraction > s3_gate::kMinIdleMixFraction);
 		CHECK(cov.mean_loco_clips > s3_gate::kMinMeanLocoClips);
-		// Hostile step: nothing.
+
 		CHECK(stage_coverage(spec, clips, LocoParams{}, 0.0).mean_loco_clips == 0.0);
 		CHECK(stage_coverage(spec, clips, LocoParams{}, std::numeric_limits<double>::quiet_NaN()).mean_loco_clips == 0.0);
-		// Non-finite time: a valid input.
+
 		const CrowdSoldierInput in = stage_input(spec, 3, std::numeric_limits<double>::infinity(), 0.0, Vec3{}, false);
 		CHECK(std::isfinite(in.yaw));
 		CHECK(std::isfinite(in.velocity.x));
 	}
 }
-
-// ---- install ------------------------------------------------------------------------------------------------------
 
 namespace {
 
@@ -667,7 +648,7 @@ bool is_leg_or_hips(const std::string &p_name) {
 	return false;
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim-s3") {
 	TEST_CASE("s3 clips: the eight controllers, frames, channels, root motion") {
@@ -712,7 +693,7 @@ TEST_SUITE("anim-s3") {
 		CHECK(s.loco[size_t(LocoClip::Left)].root_dir.x > 0.99f);
 		CHECK(s.loco[size_t(LocoClip::Right)].root_dir.x < -0.99f);
 		CHECK(s.root_joint == s.rig.find("AITrajectory"));
-		// The Wep_* joints the idle, run and aim clips leave undriven.
+
 		BoneMask driven;
 		for (const CrowdClip k : { CrowdClip::Idle, CrowdClip::RunFwd, CrowdClip::RunBwd, CrowdClip::RunLeft, CrowdClip::RunRight, CrowdClip::AimUp, CrowdClip::AimDown }) {
 			driven = mask_union(driven, s.get(k).mask);
@@ -725,9 +706,9 @@ TEST_SUITE("anim-s3") {
 		}
 		CHECK(driven.weight[size_t(s.rig.find("Wep_Root"))] > 0.0f);
 		CHECK(undriven == 21);
-		// A name that does not occur once is refused.
+
 		CrowdClipNames bad;
-		bad.controllers[size_t(CrowdClip::RunFwd)] = "Reload_NoAddon_Stand"; // 76 copies
+		bad.controllers[size_t(CrowdClip::RunFwd)] = "Reload_NoAddon_Stand";
 		auto r = load_crowd_clips(*d->source, *d->library, bad);
 		REQUIRE(!r.ok());
 		CHECK(r.error().message.find("76 times") != std::string::npos);
@@ -768,7 +749,7 @@ TEST_SUITE("anim-s3") {
 				CHECK_MESSAGE(clip->mask.weight[size_t(d->clips.rig.find(n))] > 0.0f, n);
 			}
 		}
-		// Hostile lookups: errors, never a crash or a wrong success.
+
 		std::mt19937 rng(1234);
 		uint32_t errors = 0, ok = 0;
 		for (int k = 0; k < 200; ++k) {
@@ -818,8 +799,8 @@ TEST_SUITE("anim-s3") {
 		MESSAGE("additive order chosen: " << (chosen == AdditiveOrder::LocalPost ? std::string("LocalPost") : std::string("LocalPre")));
 		CHECK((qualifies[0] || qualifies[1]));
 		const CrowdConfig defaults;
-		CHECK(defaults.aim_order == chosen); // the default is the measured choice
-		// The default full-aim pitches are the measured barrel elevations (so the barrel follows the pitch).
+		CHECK(defaults.aim_order == chosen);
+
 		CHECK(defaults.aim_up_full_pitch_deg == doctest::Approx(post.up_deg).epsilon(0.01));
 		CHECK(defaults.aim_down_full_pitch_deg == doctest::Approx(-post.down_deg).epsilon(0.01));
 	}
@@ -829,7 +810,7 @@ TEST_SUITE("anim-s3") {
 		if (d == nullptr) {
 			return;
 		}
-		// Binds: every rig joint against its own rest (the cost is the same as the meshes' 108-113 binds).
+
 		EbxSkeleton ebx;
 		ebx.partition = "rig";
 		std::vector<Xform> rest;
@@ -891,17 +872,6 @@ TEST_SUITE("anim-s3") {
 	}
 }
 
-// ---- M2a tp (docs/design/m2a.md §9, R5, E18 (b); docs/design/m2a-tp.md) ----------------------------------------------
-// anim-s3-unit (synthetic, no data):
-//   * R5 with one weapon per team (the team's own binds, reload and layout as item 0) equals S3's evaluator bit for bit
-//     (palettes and models, on lanes and single-threaded, LOD off and on), and the weapon palette is the team's;
-//   * two weapons per team, teams with different bind counts: weapon_of, the weapon palette, the per-weapon layout and
-//     reload, a weapon change cancelling a reload, item 0 for an index past the end, muzzles, make()'s refusals;
-//   * the stance set: stand bit for bit, crouch / prone idles, a transition at its fraction and its stand-in lerp, the
-//     moves, fire (kick and crouch clip), death (Q13 blend, the clip style, hidden after 3 s, respawn), hostile values.
-// anim-s3 (the install): E18 (b), the crouch and prone rows of lc's capsule pose table against CrowdEvaluator with the
-// stance set (gate 3 cm, head and chest), the transitions reported; the move clips and the stance set on the retail rig.
-
 #include "bf3/anim/server_pose.h"
 
 namespace {
@@ -914,8 +884,6 @@ bool models_equal(std::span<const Xform> p_a, std::span<const Xform> p_b) {
 	return p_a.size() == p_b.size() && std::memcmp(p_a.data(), p_b.data(), p_a.size_bytes()) == 0;
 }
 
-// SynthCrowd plus R5's items: weapon 0 = the team's own data; weapon 1 binds only Arm and Wep, a shorter reload and
-// another layout; a second team whose body binds leave out Wep (3 binds instead of 4).
 struct SynthWeapons {
 	SynthCrowd c;
 	SkinBinds binds_w1, binds_body_b;
@@ -972,9 +940,6 @@ struct SynthWeapons {
 	}
 };
 
-// A synthetic stance set on SynthCrowd's rig: crouch idle Hips at 0.6 m, prone idle at 0.2 m, StandToCrouch moves the
-// Hips 1.0 -> 0.6 over 10 frames, the other transitions absent; the aims are the stand aims. Moves: crouch cycles =
-// the run cycles with a smaller swing, prone absent. Crouch fire additive on Arm; deaths Hips 1.0 -> 0.1 over 15 frames.
 struct SynthStance {
 	ServerPoseClips pose;
 	CrowdMoveClips moves;
@@ -1025,7 +990,7 @@ float hips_y(const CrowdEvaluator &p_e, uint32_t p_i) {
 	return p_e.model(p_i)[1].t.y;
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim-s3-unit") {
 	TEST_CASE("M2a tp R5: one weapon per team equals S3's evaluator bit for bit; the weapon palette is the team's") {
@@ -1062,7 +1027,7 @@ TEST_SUITE("anim-s3-unit") {
 					CHECK(models_equal((*s3)->model(i), (*r5)->model(i)));
 					CHECK(palettes_equal((*r5)->palette(i), (*r5_lanes)->palette(i)));
 					CHECK((*r5)->weapon_of(i) == 0);
-					CHECK(palettes_equal((*r5)->weapon_palette(i), (*r5)->palette(i))); // item 0 = the team's binds
+					CHECK(palettes_equal((*r5)->weapon_palette(i), (*r5)->palette(i)));
 					Xform mz;
 					REQUIRE((*r5)->muzzle_model(i, mz));
 					const Xform expect = xform_mul((*r5)->model(i)[3], w.muzzle_offset);
@@ -1093,7 +1058,7 @@ TEST_SUITE("anim-s3-unit") {
 		auto e = CrowdEvaluator::make(w.c.set, w.teams_two, 6, config);
 		REQUIRE_MESSAGE(e.ok(), (e.ok() ? "" : e.error().message));
 		CrowdEvaluator &ev = **e;
-		// Before any evaluation: empty palettes (R5's binds-init fix), no weapon.
+
 		for (uint32_t i = 0; i < 6; ++i) {
 			CHECK(ev.palette(i).empty());
 			CHECK(ev.weapon_of(i) == kNoCrowdWeapon);
@@ -1107,7 +1072,7 @@ TEST_SUITE("anim-s3-unit") {
 		in[2].team = 1;
 		in[2].weapon = 1;
 		in[3].team = 1;
-		in[3].weapon = 9; // past the end: item 0, counted
+		in[3].weapon = 9;
 		in[4].team = 0;
 		in[4].weapon = 0;
 		in[5].team = 1;
@@ -1116,7 +1081,7 @@ TEST_SUITE("anim-s3-unit") {
 		ev.evaluate_all_here();
 		CHECK(ev.palette(0).size() == 4);
 		CHECK(ev.palette(1).size() == 4);
-		CHECK(ev.palette(2).size() == 3); // team 1's body binds
+		CHECK(ev.palette(2).size() == 3);
 		CHECK(ev.palette(3).size() == 3);
 		CHECK(ev.weapon_of(0) == 0);
 		CHECK(ev.weapon_of(1) == 1);
@@ -1130,14 +1095,14 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(ev.weapon_palette(3).size() == 4);
 		CHECK(ev.m2a_stats().bad_weapon == 1);
 		CHECK(ev.m2a_stats().weapon_palettes == 5);
-		// The weapon palette of item 1 is the skin of Arm and Wep in the same model pose.
+
 		{
 			std::vector<Mat34> expect;
 			std::vector<Xform> model(ev.model(1).begin(), ev.model(1).end());
 			skin_matrices(model, w.binds_w1.binds(), expect);
 			CHECK(palettes_equal(ev.weapon_palette(1), expect));
 		}
-		// Per-weapon layout of step 3: Wep takes item 1's LocalPose.
+
 		{
 			const Xform expect1 = xform_mul(ev.model(1)[2], w.local_w1[3]);
 			CHECK(vec_dist(ev.model(1)[3].t, expect1.t) < 1e-5);
@@ -1145,25 +1110,25 @@ TEST_SUITE("anim-s3-unit") {
 			CHECK(vec_dist(ev.model(0)[3].t, expect0.t) < 1e-5);
 			CHECK(vec_dist(ev.model(0)[3].t, ev.model(1)[3].t) > 0.05);
 		}
-		// Muzzles: item 0 hangs on Wep, item 1 has none.
+
 		Xform mz;
 		CHECK(ev.muzzle_model(0, mz));
 		CHECK(!ev.muzzle_model(1, mz));
-		CHECK(ev.m2a_stats().muzzles == 3); // soldiers 0, 3, 4
-		// Reloads: item 1's clip is 10 frames at rate 2 (0.167 s), item 0's 30 frames (1.0 s).
+		CHECK(ev.m2a_stats().muzzles == 3);
+
 		in[0].flags = crowd_flags::kReloadStart;
 		in[1].flags = crowd_flags::kReloadStart;
 		in[4].flags = crowd_flags::kReloadStart;
 		ev.set_inputs(in, 1.0 / 60.0);
 		ev.evaluate_all_here();
 		in[0].flags = in[1].flags = in[4].flags = 0;
-		CHECK(ev.stats().reloading == 0); // the first reload frame has weight 0 (the ramp)
-		for (int f = 0; f < 18; ++f) { // 0.3 s
+		CHECK(ev.stats().reloading == 0);
+		for (int f = 0; f < 18; ++f) {
 			ev.set_inputs(in, 1.0 / 60.0);
 			ev.evaluate_all_here();
 		}
-		CHECK(ev.stats().reloading == 2); // soldiers 0 and 4; item 1's reload is over
-		// A weapon change during the reload cancels it.
+		CHECK(ev.stats().reloading == 2);
+
 		in[4].weapon = 1;
 		ev.set_inputs(in, 1.0 / 60.0);
 		ev.evaluate_all_here();
@@ -1171,7 +1136,7 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(ev.m2a_stats().reloads_cancelled == 1);
 		CHECK(ev.weapon_of(4) == 1);
 		CHECK(ev.weapon_palette(4).size() == 2);
-		// make() refuses bad items.
+
 		{
 			std::array<CrowdWeapon, kMaxCrowdWeapons + 1> many;
 			many.fill(w.weapons[0]);
@@ -1209,7 +1174,7 @@ TEST_SUITE("anim-s3-unit") {
 		CrowdConfig config;
 		config.temporal_lod = false;
 		const double dt = 1.0 / 60.0;
-		// Stand with the stance set equals S3 bit for bit over the stage schedule.
+
 		{
 			const CrowdStageSpec spec;
 			auto s3 = CrowdEvaluator::make(w.c.set, w.c.teams, spec.soldiers(), config);
@@ -1235,20 +1200,20 @@ TEST_SUITE("anim-s3-unit") {
 		REQUIRE(e.ok());
 		CrowdEvaluator &ev = **e;
 		std::vector<CrowdSoldierInput> in(8);
-		in[1].pose = in[1].target_pose = 1; // crouch
-		in[2].pose = in[2].target_pose = 2; // prone
-		in[3].pose = 0; // stand -> crouch at 0.5
+		in[1].pose = in[1].target_pose = 1;
+		in[2].pose = in[2].target_pose = 2;
+		in[3].pose = 0;
 		in[3].target_pose = 1;
 		in[3].transition = 0.5f;
-		in[4].pose = 1; // crouch -> prone: no clip, the lerp of the idles
+		in[4].pose = 1;
 		in[4].target_pose = 2;
 		in[4].transition = 0.25f;
-		in[5].pose = in[5].target_pose = 1; // crouch moving forward
+		in[5].pose = in[5].target_pose = 1;
 		in[5].velocity = Vec3{ 0, 0, 1.5f };
-		in[6].pose = 9; // hostile
+		in[6].pose = 9;
 		in[6].target_pose = 1;
 		in[6].transition = std::numeric_limits<float>::quiet_NaN();
-		in[7].pose = in[7].target_pose = 2; // prone moving: the stand cycles (no prone moves in the set), counted
+		in[7].pose = in[7].target_pose = 2;
 		in[7].velocity = Vec3{ 0, 0, 1.0f };
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
@@ -1256,16 +1221,16 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(hips_y(ev, 1) == doctest::Approx(0.6f).epsilon(1e-4));
 		CHECK(hips_y(ev, 2) == doctest::Approx(0.2f).epsilon(1e-4));
 		CHECK(hips_y(ev, 3) == doctest::Approx(0.8f).epsilon(1e-3));
-		CHECK(hips_y(ev, 4) == doctest::Approx(0.5f).epsilon(1e-3)); // 0.6 + (0.2 - 0.6) x 0.25
+		CHECK(hips_y(ev, 4) == doctest::Approx(0.5f).epsilon(1e-3));
 		CrowdM2aStats ms = ev.m2a_stats();
-		CHECK(ms.transitions == 3); // 3, 4 and the hostile 6 (2 -> 1 at fraction 0)
+		CHECK(ms.transitions == 3);
 		CHECK(ms.crouch == 2);
 		CHECK(ms.prone == 2);
 		CHECK(ms.stand == 1);
 		CHECK(ms.moving_crouch == 1);
 		CHECK(ms.moving_prone == 1);
 		CHECK(ms.bad_stance == 2);
-		CHECK(ms.stance_fallbacks == 3); // the crouch -> prone lerp, the hostile prone -> crouch lerp, prone moves
+		CHECK(ms.stance_fallbacks == 3);
 		for (uint32_t i = 0; i < 8; ++i) {
 			for (const Mat34 &m : ev.palette(i)) {
 				for (const auto &row : m.m) {
@@ -1275,7 +1240,7 @@ TEST_SUITE("anim-s3-unit") {
 				}
 			}
 		}
-		// Fire: a fire_seq change kicks the stand aim for 50 ms (the Arm turns further up); crouch plays the fire clip.
+
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
 		CHECK(ev.m2a_stats().firing == 0);
@@ -1284,22 +1249,22 @@ TEST_SUITE("anim-s3-unit") {
 		in[1].fire_seq = 1;
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
-		CHECK(ev.m2a_stats().firing == 2); // 0's kick, 1's crouch fire
+		CHECK(ev.m2a_stats().firing == 2);
 		const float kick_deg = quat_angle_deg(arm_rest, ev.model(0)[2].q);
-		CHECK(kick_deg > 0.5f); // 30 deg x 3 / 78.1
+		CHECK(kick_deg > 0.5f);
 		CHECK(kick_deg < 2.0f);
-		for (int f = 0; f < 4; ++f) { // 67 ms
+		for (int f = 0; f < 4; ++f) {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
 		}
-		CHECK(ev.m2a_stats().firing == 1); // the kick is over, the 0.7 s crouch fire is not
+		CHECK(ev.m2a_stats().firing == 1);
 		CHECK(same_quat(arm_rest, ev.model(0)[2].q));
-		for (int f = 0; f < 40; ++f) { // 0.73 s in all
+		for (int f = 0; f < 40; ++f) {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
 		}
 		CHECK(ev.m2a_stats().firing == 0);
-		// The fire_seq of a soldier's first evaluation is not a shot.
+
 		{
 			auto f = CrowdEvaluator::make(w.c.set, st.set, w.teams_one, 1, config);
 			REQUIRE(f.ok());
@@ -1311,7 +1276,7 @@ TEST_SUITE("anim-s3-unit") {
 				CHECK((*f)->m2a_stats().firing == 0);
 			}
 		}
-		// Death (Q13 default): the pose blends to the prone idle over 0.5 s, hidden after 3 s, a respawn restarts it.
+
 		in[0].dead = true;
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
@@ -1330,7 +1295,7 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
 		CHECK(ev.drawn(0));
 		CHECK(ev.weapon_of(0) == 0);
-		for (int f = 0; f < 150; ++f) { // to 3.0 s
+		for (int f = 0; f < 150; ++f) {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
 		}
@@ -1344,7 +1309,7 @@ TEST_SUITE("anim-s3-unit") {
 		ev.evaluate_all_here();
 		CHECK(ev.drawn(0));
 		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
-		// The clip style: the stance's death clip, its last frame held.
+
 		{
 			SynthStance clip_style(w.c, CrowdDeathStyle::Clip);
 			auto d = CrowdEvaluator::make(w.c.set, clip_style.set, w.teams_one, 1, config);
@@ -1358,7 +1323,7 @@ TEST_SUITE("anim-s3-unit") {
 			CHECK(hips_y(**d, 0) == doctest::Approx(0.1f).epsilon(1e-4));
 			CHECK((*d)->drawn(0));
 		}
-		// A dying soldier is due every frame under temporal LOD (far away, where a live one is skipped).
+
 		{
 			CrowdConfig lod;
 			lod.temporal_lod = true;
@@ -1377,7 +1342,7 @@ TEST_SUITE("anim-s3-unit") {
 			CHECK(dying == 60);
 			CHECK(live < 30);
 		}
-		// The stance clips must be on the crowd rig.
+
 		{
 			SynthStance other(w.c);
 			std::vector<Bone> bones(2);
@@ -1389,13 +1354,6 @@ TEST_SUITE("anim-s3-unit") {
 		}
 	}
 }
-
-// ---- M2a tp: E18 (b) (docs/design/m2a.md E18, §6.5; docs/design/m2a-tp.md) -------------------------------------------
-// Case "capsules": lc's capsule pose table (built from the install as anim.server_pose builds it) against CrowdEvaluator
-// with tp's stance set: the crouch and prone rows at the 32 mid-pitches within 3 cm (head and chest), the six transition
-// rows at the 15 mid-fractions x 32 mid-pitches reported (and checked against the reference evaluation), a moving
-// crouch / prone soldier reported (locomotion is not modelled). In the install suite (anim.s3): the case needs the retail
-// clips and capsules, so it cannot run in the data-free anim.s3.unit row m2a.md names (m2a-tp.md records the deviation).
 
 #include "bf3/anim/server_pose_reference.h"
 #include "bf3/core/gameplay/capsule_pose_table.h"
@@ -1409,7 +1367,7 @@ namespace tp_sw = bf3::sim::weapons;
 namespace tp_ref = bf3::anim::server_pose_reference;
 
 struct TpDev {
-	double head = 0, chest = 0, body = 0, legs = 0; // cm, max over the queries
+	double head = 0, chest = 0, body = 0, legs = 0;
 	size_t queries = 0;
 };
 
@@ -1432,7 +1390,6 @@ void tp_accumulate(TpDev &r_dev, const tp_sw::HitTarget &p_posed, const std::vec
 	++r_dev.queries;
 }
 
-// Two placements of the same capsules (the evaluator's against the reference's); the zones from p_zones.
 void tp_accumulate_ref(TpDev &r_dev, const std::vector<tp_ref::RefCapsule> &p_a, const std::vector<tp_ref::RefCapsule> &p_b, const tp_sw::HitTarget &p_zones) {
 	REQUIRE(p_a.size() == p_b.size());
 	REQUIRE(p_zones.capsule_count == p_a.size());
@@ -1456,7 +1413,7 @@ tp_sw::HitTarget tp_posed(const tp_gp::CapsulePoseTable &p_table, uint8_t p_from
 	return tp_sw::posed_target(p_table, q);
 }
 
-} // namespace
+}
 
 TEST_SUITE("anim-s3") {
 	TEST_CASE("capsules") {
@@ -1468,9 +1425,9 @@ TEST_SUITE("anim-s3") {
 		static const char *kTransitionName[6] = { "stand->crouch", "stand->prone", "crouch->stand", "crouch->prone", "prone->stand", "prone->crouch" };
 		static constexpr uint8_t kTrFrom[6] = { 0, 0, 1, 1, 2, 2 };
 		static constexpr uint8_t kTrTo[6] = { 1, 2, 0, 2, 0, 1 };
-		constexpr double kGateCm = 3.0; // E18 (b) [inferred, m2a.md §16 Q14]
-		constexpr double kTransitionGateCm = 5.0; // E18's transition rows (lc's table-vs-reference gate; reported here)
-		// lc's table, as anim.server_pose builds it.
+		constexpr double kGateCm = 3.0;
+		constexpr double kTransitionGateCm = 5.0;
+
 		auto weapons = tp_sw::open_install_weapons(d->install);
 		REQUIRE_MESSAGE(weapons.ok(), (weapons.ok() ? "" : weapons.error().message));
 		auto cd = tp_sw::capsule_table_data(weapons->soldier, weapons->capsules, *weapons->materials);
@@ -1488,7 +1445,7 @@ TEST_SUITE("anim-s3") {
 		const tp_gp::CapsulePoseTable &t = *table;
 		auto r = tp_ref::Reference::make(*pose, weapons->capsules, report.aim, CrowdConfig{}.aim_order);
 		REQUIRE_MESSAGE(r.ok(), (r.ok() ? "" : r.error().message));
-		// tp's moves and the evaluator with the stance set (one bind: the capsules come from the model pose).
+
 		auto moves = load_crowd_move_clips(d->clips, *d->library);
 		REQUIRE_MESSAGE(moves.ok(), (moves.ok() ? "" : moves.error().message));
 		for (const std::string &n : moves->notes) {
@@ -1520,7 +1477,7 @@ TEST_SUITE("anim-s3") {
 			pitches.push_back(0.5 * (double(t.pitch_deg[i]) + double(t.pitch_deg[i + 1])));
 		}
 		REQUIRE(pitches.size() == 32);
-		// Query batches of up to kMaxCrowdSoldiers soldiers, two frames each (the steady poses do not depend on time).
+
 		struct Q {
 			uint8_t from, to;
 			double fraction, pitch;
@@ -1552,7 +1509,7 @@ TEST_SUITE("anim-s3") {
 			fallbacks = (*ev)->m2a_stats().stance_fallbacks;
 		};
 		std::vector<tp_ref::RefCapsule> rc;
-		// The steady rows: stand (E18 (a) again, now through the stance path), crouch and prone (E18 (b), the gate).
+
 		for (uint8_t s = 0; s < 3; ++s) {
 			std::vector<Q> qs;
 			for (const double p : pitches) {
@@ -1571,8 +1528,7 @@ TEST_SUITE("anim-s3") {
 			CHECK_MESSAGE(dev.chest <= kGateCm, std::string(kStanceName[s]) << " chest " << dev.chest << " cm");
 		}
 		CHECK(fallbacks == 0);
-		// The transition rows: against the table (reported; E18's 5 cm is lc's table-vs-reference gate) and against the
-		// reference evaluation (the evaluator samples the clip at the exact fraction as the reference does).
+
 		for (uint8_t tr = 0; tr < 6; ++tr) {
 			std::vector<Q> qs;
 			for (size_t f = 0; f + 1 < tp_gp::kCapsuleTransitionFractions; ++f) {
@@ -1604,7 +1560,7 @@ TEST_SUITE("anim-s3") {
 			CHECK(vs_ref.chest <= kGateCm);
 		}
 		CHECK(fallbacks == 0);
-		// A moving crouch / prone soldier against its steady row (locomotion is not modelled; reported).
+
 		for (uint8_t s = 1; s < 3; ++s) {
 			std::vector<CrowdSoldierInput> in(1);
 			in[0].pose = in[0].target_pose = s;
@@ -1630,12 +1586,6 @@ TEST_SUITE("anim-s3") {
 	}
 }
 
-// ---- M2b cam (docs/design/m2b.md §4, §2.6 #17; as built: docs/design/m2b-cam.md) -------------------------------------
-// anim-s3-unit (synthetic, no data): the "revive" case. CrowdStanceSet::corpse_seconds keeps a corpse drawn for 15 s
-// instead of M2a's 3 s; a dead soldier that comes back with CrowdSoldierInput::revived stands up from its corpse pose
-// over kCrowdReviveBlendSeconds (crowd_eval.cpp [revive]), while a plain respawn is standing at once; the stand-up is
-// due every frame under temporal LOD; make() refuses a hostile corpse time.
-
 TEST_SUITE("anim-s3-unit") {
 	TEST_CASE("revive") {
 		SynthWeapons w;
@@ -1653,45 +1603,45 @@ TEST_SUITE("anim-s3-unit") {
 				ev.evaluate_all_here();
 			}
 		};
-		// 0 is revived, 1 respawns, 2 stays dead.
+
 		std::vector<CrowdSoldierInput> in(3);
 		run(in, 2);
 		for (CrowdSoldierInput &i : in) {
 			i.dead = true;
 		}
-		run(in, 120); // 2 s: prone (the Q13 blend is over)
+		run(in, 120);
 		for (uint32_t i = 0; i < 3; ++i) {
 			CHECK(hips_y(ev, i) == doctest::Approx(0.2f).epsilon(1e-4));
 		}
-		run(in, 180); // 5 s: M2a would have hidden them at 3 s
+		run(in, 180);
 		for (uint32_t i = 0; i < 3; ++i) {
 			CHECK(ev.drawn(i));
 		}
 		CHECK(ev.m2a_stats().death_hidden == 0);
 		CHECK(ev.m2a_stats().dying == 3);
-		// The revive and the respawn.
+
 		in[0].dead = false;
 		in[0].revived = true;
 		in[1].dead = false;
 		run(in, 1);
 		CHECK(ev.m2a_stats().revives == 1);
-		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4)); // the stand-up starts at the corpse pose
-		CHECK(hips_y(ev, 1) == doctest::Approx(1.0f).epsilon(1e-4)); // a respawn stands at once
+		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
+		CHECK(hips_y(ev, 1) == doctest::Approx(1.0f).epsilon(1e-4));
 		CHECK(ev.drawn(0));
-		run(in, 15); // half of the 0.5 s
+		run(in, 15);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.6f).epsilon(1e-3));
-		CHECK(ev.m2a_stats().dying == 1); // only 2 is still a corpse
+		CHECK(ev.m2a_stats().dying == 1);
 		run(in, 16);
-		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4)); // standing: the stand-up is over
+		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
 		run(in, 30);
-		CHECK(ev.m2a_stats().revives == 1); // revived stays set over the life: no second stand-up without a death
-		// 2 is hidden at 15 s after its death (about 5.8 s so far).
-		run(in, 538); // 899 frames dead: just below 15 s
+		CHECK(ev.m2a_stats().revives == 1);
+
+		run(in, 538);
 		CHECK(ev.drawn(2));
 		run(in, 3);
 		CHECK(!ev.drawn(2));
 		CHECK(ev.m2a_stats().death_hidden == 1);
-		// A revived life that dies again falls again, and a second revive stands it up again.
+
 		in[0].dead = true;
 		run(in, 60);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
@@ -1699,7 +1649,7 @@ TEST_SUITE("anim-s3-unit") {
 		run(in, 1);
 		CHECK(ev.m2a_stats().revives == 2);
 		CHECK(hips_y(ev, 0) < 0.25f);
-		// A stand-up is due every frame under temporal LOD (far away, where a living soldier is skipped).
+
 		{
 			CrowdConfig lod;
 			lod.temporal_lod = true;
@@ -1715,7 +1665,7 @@ TEST_SUITE("anim-s3-unit") {
 			two[0].dead = false;
 			two[0].revived = true;
 			uint32_t live = 0, rising = 0;
-			for (int f = 0; f < 60; ++f) { // 0.42 s of the 0.5 s stand-up
+			for (int f = 0; f < 60; ++f) {
 				(*d)->set_inputs(two, 1.0 / 144.0);
 				(*d)->evaluate_all_here();
 				live += (*d)->changed(1) ? 1 : 0;
@@ -1725,7 +1675,7 @@ TEST_SUITE("anim-s3-unit") {
 			CHECK(live < 30);
 			CHECK((*d)->m2a_stats().revives == 1);
 		}
-		// M2a's default corpse time is unchanged (3 s), and make() refuses a hostile one.
+
 		{
 			SynthStance m2a(w.c);
 			CHECK(m2a.set.corpse_seconds == kCrowdDeathHideSeconds);

@@ -1,20 +1,3 @@
-// Bf3DeathCamera: the own death's view (docs/design/m2b.md §4, §2.6 #17; owner cam; as built: docs/design/m2b-cam.md).
-// See death_camera.h. Godot-free: m2b.contract2 compiles this file into its test, and the GDExtension builds it beside
-// the M2b session (gx), which copies the view's transform onto its Camera3D.
-//
-// The view over the presentation clock t (seconds since begin):
-//   [0, orbit)        the camera leaves the 1p eye for a point behind the corpse (back_m against the death's view yaw,
-//                     up_m above the feet) while its look point moves from straight ahead to the corpse (eye_height_m
-//                     above the feet); smoothstep in both;
-//   [orbit, +turn)    with the killer camera on and the killer drawn (a position seen at least once): the camera swings
-//                     to the point behind the corpse on the killer's side (back_m from the corpse, away from the
-//                     killer), and the look point moves from the corpse to the killer (killer_height_m above its feet);
-//                     then it follows the killer's presented position (the last one seen when it is no longer drawn);
-//   >= seconds        finished (the game moves on to the spawn screen); the view holds until end().
-// Without a killer it stays on the corpse. With a CollisionWorld the camera is pulled in along the ray from the corpse
-// look point to the camera, camera_radius_m short of the first static hit (query_mask::kProjectile: what bullets and
-// sight see). Every input is checked: a non-finite start or clock ends the view, a non-finite killer position is ignored;
-// both are counted, and the transform is always finite and orthonormal.
 #include "death_camera.h"
 
 #include "bf3/sim/collision_world.h"
@@ -29,8 +12,8 @@ namespace {
 
 using fx::Vec3;
 
-constexpr float kAheadM = 5.0f; // the 1p look point at the start of the view (straight ahead of the eye)
-constexpr float kMinPivotM = 0.3f; // the pull-in never puts the camera closer than this to the corpse look point
+constexpr float kAheadM = 5.0f;
+constexpr float kMinPivotM = 0.3f;
 
 Vec3 add(const Vec3 &p_a, const Vec3 &p_b) {
 	return Vec3{ p_a.x + p_b.x, p_a.y + p_b.y, p_a.z + p_b.z };
@@ -60,7 +43,7 @@ Vec3 lerp(const Vec3 &p_a, const Vec3 &p_b, float p_t) {
 bool finite3(const Vec3 &p_a) {
 	return std::isfinite(p_a.x) && std::isfinite(p_a.y) && std::isfinite(p_a.z);
 }
-// 0..1 over [0, p_span] (p_span <= 0: already at 1), eased in and out.
+
 float ease(double p_t, float p_span) {
 	if (!(p_span > 0.0f)) {
 		return 1.0f;
@@ -72,7 +55,6 @@ float sane(float p_value, float p_default, float p_lo, float p_hi) {
 	return std::isfinite(p_value) && p_value >= p_lo && p_value <= p_hi ? p_value : p_default;
 }
 
-// The m2a_frame_of rule (level_session_m2a.cpp): right = up x forward, up = forward x right.
 fx::Transform look_from(const Vec3 &p_from, const Vec3 &p_forward) {
 	const Vec3 f = p_forward;
 	Vec3 r = cross(Vec3{ 0, 1, 0 }, f);
@@ -88,11 +70,11 @@ fx::Transform look_from(const Vec3 &p_from, const Vec3 &p_forward) {
 	return t;
 }
 
-} // namespace
+}
 
 Bf3DeathCamera::Bf3DeathCamera(const DeathCameraParams &p_params) :
 		params_(p_params) {
-	// Hostile or careless params fall back to the named defaults, one by one (never a NaN view).
+
 	const DeathCameraParams d{};
 	params_.seconds = sane(params_.seconds, d.seconds, 0.05f, 600.0f);
 	params_.orbit_seconds = sane(params_.orbit_seconds, d.orbit_seconds, 0.0f, 600.0f);
@@ -137,7 +119,7 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 	}
 	const double t = std::max(0.0, p_now_s - start_s_);
 	const DeathCameraParams &p = params_;
-	const Vec3 fwd{ std::sin(start_.yaw_rad), 0.0f, std::cos(start_.yaw_rad) }; // sim yaw: 0 looks down +Z
+	const Vec3 fwd{ std::sin(start_.yaw_rad), 0.0f, std::cos(start_.yaw_rad) };
 	const Vec3 up{ 0.0f, 1.0f, 0.0f };
 	const Vec3 pivot = add(start_.corpse, mul(up, p.eye_height_m));
 	const Vec3 orbit = add(sub(start_.corpse, mul(fwd, p.back_m)), mul(up, p.up_m));
@@ -147,14 +129,14 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 			last_killer_ = *p_killer;
 			killer_seen_ = true;
 		} else {
-			++stats_.bad_inputs; // ignored: the last good position (or the corpse) stays the target
+			++stats_.bad_inputs;
 		}
 	}
-	// 1. Out of the eye, behind the corpse, looking at it.
+
 	const float s = ease(t, p.orbit_seconds);
 	Vec3 pos = lerp(start_.eye, orbit, s);
 	Vec3 target = lerp(add(start_.eye, mul(fwd, kAheadM)), pivot, s);
-	// 2. The turn to the killer.
+
 	if (want_killer && killer_seen_ && t >= double(p.orbit_seconds)) {
 		v.on_killer = true;
 		if (!turned_counted_) {
@@ -170,7 +152,7 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 		pos = lerp(orbit, over, k);
 		target = lerp(pivot, killer, k);
 	}
-	// 3. Out of the walls: along the ray from the corpse look point.
+
 	if (p_world != nullptr) {
 		const Vec3 delta = sub(pos, pivot);
 		const float dist = length(delta);
@@ -186,7 +168,7 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 	}
 	const Vec3 forward = normalized(sub(target, pos), normalized(sub(pivot, pos), fwd));
 	if (!finite3(pos) || !finite3(forward)) {
-		++stats_.bad_inputs; // unreachable with finite inputs; never a NaN transform
+		++stats_.bad_inputs;
 		active_ = false;
 		return DeathCameraView{};
 	}
@@ -196,4 +178,4 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 	return v;
 }
 
-} // namespace bf3::godot_side
+}

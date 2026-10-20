@@ -1,4 +1,3 @@
-// DxTexture decoder: port of IW4L crates/resource_bf3/src/texture.rs.
 #include "bf3/core/res/dx_texture.h"
 
 #include "res_reader.h"
@@ -12,7 +11,6 @@ namespace {
 constexpr uint64_t kHeaderBytes = 128;
 constexpr uint8_t kMipSlots = 15;
 
-// Rust String::from_utf8_lossy: each maximal invalid prefix becomes one U+FFFD.
 std::string lossy_utf8(Bytes p_bytes) {
 	std::string out;
 	size_t i = 0;
@@ -37,7 +35,7 @@ std::string lossy_utf8(Bytes p_bytes) {
 			lo = c == 0xF0 ? 0x90 : 0x80;
 			hi = c == 0xF4 ? 0x8F : 0xBF;
 		}
-		size_t good = 1; // bytes of a valid prefix
+		size_t good = 1;
 		bool complete = need > 0;
 		if (need > 0) {
 			if (i + 1 < n && p_bytes[i + 1] >= lo && p_bytes[i + 1] <= hi) {
@@ -73,7 +71,6 @@ std::array<float, 3> rgb565(uint16_t p_value) {
 	return { float((p_value >> 11) & 31) / 31.0f, float((p_value >> 5) & 63) / 63.0f, float(p_value & 31) / 31.0f };
 }
 
-// A BC1 colour block; p_punch_through lets the three-colour mode make transparent black.
 void colour_block(const uint8_t *p_block, bool p_punch_through, std::array<std::array<float, 4>, 16> &r_texels) {
 	const uint16_t a = uint16_t(p_block[0] | (p_block[1] << 8));
 	const uint16_t b = uint16_t(p_block[2] | (p_block[3] << 8));
@@ -99,7 +96,6 @@ void colour_block(const uint8_t *p_block, bool p_punch_through, std::array<std::
 	}
 }
 
-// A BC4 block, or the alpha half of a BC3 one.
 void alpha_block(const uint8_t *p_block, std::array<float, 16> &r_alpha) {
 	const float a = float(p_block[0]) / 255.0f;
 	const float b = float(p_block[1]) / 255.0f;
@@ -128,7 +124,7 @@ void alpha_block(const uint8_t *p_block, std::array<float, 16> &r_alpha) {
 	}
 }
 
-} // namespace
+}
 
 PixelFormat texture_pixel_format(TextureFormat p_format) {
 	switch (p_format) {
@@ -332,14 +328,11 @@ ResError DxTexture::split_mips(Bytes p_chunk, uint64_t p_logical_offset, std::ve
 	for (uint32_t size : mip_sizes) {
 		chain += size;
 	}
-	// An all-empty chain carries no texels but would still yield faces * mips empty slices (about
-	// 1M for a hostile 65535-slice header); every retail texture has non-empty mips.
+
 	if (chain == 0 && mip_count > 0) {
 		return ResError::malformed("empty mip chain", 0);
 	}
-	// Likewise an empty mip: with every mip at least one byte, each slice takes a byte of the chunk,
-	// so the slice count is bounded by the chunk size (a hostile header with one byte-sized mip and
-	// 65535 slices would otherwise yield 15 slices per chunk byte). No retail mip is empty.
+
 	for (uint8_t mip = 0; mip < mip_count && mip < mip_sizes.size(); mip++) {
 		if (mip_sizes[mip] == 0) {
 			return ResError::malformed("empty mip", mip);
@@ -382,8 +375,7 @@ bool MipSlice::texels(TextureFormat p_format, std::vector<std::array<float, 4>> 
 		const size_t at = p_y * pitch;
 		return at <= data.size() && p_bytes <= data.size() - at ? data.data() + at : nullptr;
 	};
-	// Every row the decode reads must be backed by `data` before the output is allocated: the
-	// dimensions come from untrusted u16 header fields (65535 x 65535 would be ~68 GB of texels).
+
 	auto backed = [&](size_t p_rows, size_t p_row_bytes) {
 		return p_rows == 0 || row(p_rows - 1, p_row_bytes) != nullptr;
 	};
@@ -465,4 +457,4 @@ bool MipSlice::texels(TextureFormat p_format, std::vector<std::array<float, 4>> 
 	}
 }
 
-} // namespace bf3::core::res
+}

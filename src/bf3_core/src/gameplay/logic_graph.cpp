@@ -1,20 +1,3 @@
-// S4 level logic: the instantiated, flattened logic graph (docs/design/s4.md §5). See logic_graph.h for the rules.
-//
-// --- Cost model (hostile input; the rule of logic_world.cpp) -----------------------------------------------------
-// One WorkBudget covers the walk (LogicWorld's own charges) and this build. Every loop below charges before it runs:
-//   scopes                1 unit each, plus the scope name copied (by length) when it is first interned
-//   descriptors           1 unit per scope (the blueprint's Descriptor lookup)
-//   objects -> nodes      1 unit per object examined (type, Realm), the type name interned (by length, once per name)
-//   params                every effective() query charges its own steps (LogicWorld); every array element and
-//                         struct member read 1 unit; arrays above kMaxParamElements fail the build
-//   connection arrays     1 unit per blueprint, then the raw size of each of its three arrays before the scan
-//   index lookups         binary searches over sorted vectors keyed by (scope, partition address, instance index)
-//                         and std::map lookups (O(log n), never a hash of data-controlled keys)
-//   collapse              1 unit per hop taken; on-path marks make interface cycles stop; a start edge that yields
-//                         more than max_fanout edges, or a chain deeper than max_interface_depth, fails the build
-//   constants             1 unit per descriptor field scanned (once per scope), the constant's length to parse it
-//   emitted               1 unit per node, param, input and edge
-// finalize() sorts (n log n) what was charged and validates every index.
 #include "bf3/core/gameplay/logic_graph.h"
 
 #include "bf3/core/gameplay/logic_world.h"
@@ -35,7 +18,7 @@ using Shape = LogicParamField::Shape;
 
 constexpr uint64_t kFnvOffset = 0xcbf29ce484222325ull;
 constexpr uint64_t kFnvPrime = 0x100000001b3ull;
-constexpr uint64_t kRootPath = 0x53344c6f67696331ull; // "S4Logic1"
+constexpr uint64_t kRootPath = 0x53344c6f67696331ull;
 
 struct Fnv {
 	uint64_t h = kFnvOffset;
@@ -84,12 +67,9 @@ uint64_t guid_word(const Guid &p_guid) {
 	return hash_mix(le64(p_guid.bytes.data()) ^ hash_mix(le64(p_guid.bytes.data() + 8) ^ 0x9E3779B97F4A7C15ull));
 }
 
-// One step of a stable, unkeyed hash chain (never hash_keyed: its seed differs per process).
 uint64_t chain(uint64_t p_prev, uint64_t p_word) {
 	return hash_mix(hash_mix(p_prev ^ 0x9E3779B97F4A7C15ull) ^ p_word);
 }
-
-// --- param field table (docs/design/s4.md §6.2) -------------------------------------------------------------------
 
 constexpr LogicParamField kDelayF[] = { { "Delay", K::Float }, { "AutoStart", K::Bool }, { "RunOnce", K::Bool }, { "RemoveDuplicateEvents", K::Bool } };
 constexpr LogicParamField kRandomDelayF[] = { { "MinDelay", K::Float }, { "MaxDelay", K::Float }, { "AutoStart", K::Bool }, { "RunOnce", K::Bool } };
@@ -126,7 +106,7 @@ constexpr LogicParamField kSettingF[] = { { "BoolSettingName", K::Text }, { "Int
 constexpr LogicParamField kLocatorF[] = { { "Transform", K::Transform } };
 constexpr LogicParamField kConsoleCommandF[] = { { "CommandName", K::Text } };
 constexpr LogicParamField kPrintDebugTextF[] = { { "Text", K::Text }, { "Enabled", K::Bool } };
-// Natives: the state their stubs start from (logic_native.h).
+
 constexpr LogicParamField kSpawnerF[] = { { "Enabled", K::Bool }, { "Team", K::Team } };
 constexpr LogicParamField kCapturePointF[] = { { "Enabled", K::Bool }, { "InitialOwnerTeam", K::Team } };
 constexpr LogicParamField kTicketCounterF[] = { { "Enabled", K::Bool }, { "TeamId", K::Team }, { "InitialTicketCount", K::Int } };
@@ -140,7 +120,7 @@ std::span<const LogicParamField> fields(const LogicParamField (&p_table)[N]) {
 	return std::span<const LogicParamField>(p_table, N);
 }
 
-} // namespace
+}
 
 std::span<const LogicParamField> logic_param_fields(LogicTypeId p_type) {
 	using T = LogicTypeId;
@@ -232,8 +212,6 @@ std::span<const LogicParamField> logic_param_fields(LogicTypeId p_type) {
 	}
 	return {};
 }
-
-// --- LogicValue ----------------------------------------------------------------------------------------------------
 
 bool LogicValue::same_as(const LogicValue &p_other) const {
 	if (kind != p_other.kind) {
@@ -332,12 +310,11 @@ LogicValue make_vec3(const std::array<float, 3> &p_v) {
 	return v;
 }
 
-// An element or member value (no property connection reaches array contents).
 std::optional<LogicValue> value_of_field(const EbxValue &p_value, K p_kind, std::string *r_text) {
 	return logic_value_of(PropertyValue::of_field(p_value), p_kind, r_text);
 }
 
-} // namespace
+}
 
 std::optional<LogicValue> logic_value_of(const PropertyValue &p_value, LogicValue::Kind p_kind, std::string *r_text) {
 	switch (p_kind) {
@@ -401,8 +378,6 @@ std::optional<LogicValue> logic_value_of(const PropertyValue &p_value, LogicValu
 	return std::nullopt;
 }
 
-// --- parts and finalize --------------------------------------------------------------------------------------------
-
 namespace {
 
 struct GraphParts {
@@ -415,7 +390,7 @@ struct GraphParts {
 	std::vector<std::string> texts;
 	std::map<std::string, uint32_t, std::less<>> text_index;
 	LogicGraphStats stats;
-	std::string bad; // first invalid Builder call, if any
+	std::string bad;
 
 	uint32_t intern(std::string_view p_text) {
 		const auto it = text_index.find(p_text);
@@ -428,7 +403,6 @@ struct GraphParts {
 		return at;
 	}
 
-	// The cost of interning p_text: a lookup, plus its copy when new.
 	size_t intern_cost(std::string_view p_text) const { return 1 + p_text.size() / WorkBudget::kBytesPerUnit; }
 
 	uint32_t add_scope(uint32_t p_parent, const Guid &p_reference, std::string_view p_name) {
@@ -480,7 +454,7 @@ struct GraphParts {
 	}
 };
 
-} // namespace
+}
 
 class LogicGraphBuild {
 public:
@@ -554,7 +528,7 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 		node.property_out_begin = node.property_out_count = 0;
 		node.link_out_begin = node.link_out_count = 0;
 	}
-	// Params and inputs grouped by node, each node's in the order they were added.
+
 	std::stable_sort(r_parts.params.begin(), r_parts.params.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
 	std::stable_sort(r_parts.inputs.begin(), r_parts.inputs.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
 	g.params_.reserve(r_parts.params.size());
@@ -603,7 +577,7 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 			}
 		}
 	}
-	// Duplicate paths: equal (source, port, target, port) within a kind, counted after the first.
+
 	size_t duplicates = 0;
 	for (const std::vector<LogicEdge> *list : { &r_parts.events, &r_parts.properties, &r_parts.links }) {
 		std::vector<std::tuple<uint32_t, int32_t, uint32_t, int32_t>> keys;
@@ -681,8 +655,6 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 	return g;
 }
 
-// --- Builder -------------------------------------------------------------------------------------------------------
-
 struct LogicGraph::Builder::Parts : GraphParts {};
 
 LogicGraph::Builder::Builder(LogicSide p_side) :
@@ -750,8 +722,6 @@ Result<LogicGraph> LogicGraph::Builder::finish(const LogicGraphOptions &p_caps) 
 	parts->stats.objects = parts->nodes.size();
 	return LogicGraphBuild::finalize(std::move(*parts), p_caps);
 }
-
-// --- accessors -----------------------------------------------------------------------------------------------------
 
 std::span<const LogicParam> LogicGraph::params_of(uint32_t p_node) const {
 	if (p_node >= nodes_.size()) {
@@ -914,11 +884,8 @@ uint64_t LogicGraph::digest() const {
 	return h.h;
 }
 
-// --- build from a LogicWorld ---------------------------------------------------------------------------------------
-
 namespace {
 
-// (scope, instance) -> value, sorted for binary search (data-controlled keys never hashed).
 struct ScopedKey {
 	uint32_t scope = 0;
 	uintptr_t partition = 0;
@@ -948,14 +915,14 @@ private:
 	std::vector<ScopedKey> entries_;
 };
 
-constexpr uint32_t kAbsent = 0x80000000u; // object value flag: the object does not exist on this side
+constexpr uint32_t kAbsent = 0x80000000u;
 
 enum class EdgeKind : uint8_t { Event = 0, Property = 1, Link = 2 };
 enum class EndKind : uint8_t { Real, Absent, Virtual };
 
 struct End {
 	EndKind kind = EndKind::Real;
-	uint32_t index = 0; // node index (Real), virtual id (Virtual)
+	uint32_t index = 0;
 };
 
 struct Hop {
@@ -970,16 +937,16 @@ struct Hop {
 struct Virtual {
 	uint32_t scope = 0;
 	int32_t port = 0;
-	bool in = false; // IfaceIn (else IfaceOut)
+	bool in = false;
 	uint32_t incoming = 0;
-	uint32_t out_begin = 0, out_count = 0; // into the kind's hops sorted by source virtual
+	uint32_t out_begin = 0, out_count = 0;
 };
 
 struct KindGraph {
-	std::vector<Hop> hops; // record order
+	std::vector<Hop> hops;
 	std::vector<Virtual> virtuals;
-	std::map<std::tuple<uint32_t, int32_t, bool>, uint32_t> virtual_index; // (scope, port, in)
-	std::vector<uint32_t> out_hops; // hop indices grouped by source virtual, record order within one
+	std::map<std::tuple<uint32_t, int32_t, bool>, uint32_t> virtual_index;
+	std::vector<uint32_t> out_hops;
 	std::vector<uint8_t> on_path;
 
 	uint32_t virtual_of(uint32_t p_scope, int32_t p_port, bool p_in) {
@@ -1067,7 +1034,7 @@ private:
 		const std::vector<LogicScope> &list = world_.scopes();
 		descriptors_.resize(list.size());
 		for (uint32_t s = 0; s < list.size(); ++s) {
-			BF3_TRY(budget_.charge(2)); // the scope and its descriptor lookup
+			BF3_TRY(budget_.charge(2));
 			const LogicScope &scope = list[s];
 			const std::string_view name = world_.scope_name(s);
 			BF3_TRY(budget_.charge(parts_.intern_cost(name)));
@@ -1178,7 +1145,7 @@ private:
 					std::string text;
 					BF3_TRY(add_param(p_node, id, element, value_of_field(entry, f.kind, &text), text));
 				} else {
-					// A struct element (inline), or a reference to an instance holding the members.
+
 					std::optional<EbxStruct> data = entry.as_struct();
 					if (!data) {
 						if (const std::optional<EbxRef> r = entry.as_ref(); r && !r->is_null()) {
@@ -1207,14 +1174,13 @@ private:
 		return Status::success();
 	}
 
-	// One end of a connection of scope p_scope, as a hop end. nullopt: the end is unbound (counted by the caller).
 	std::optional<End> end_of(uint32_t p_scope, const EbxInstance &p_instance, int32_t p_port, bool p_source, KindGraph &r_kind) {
 		if (descriptors_[p_scope] && *descriptors_[p_scope] == p_instance) {
-			// The scope's own interface: its input as a source, its output as a target.
+
 			return End{ EndKind::Virtual, r_kind.virtual_of(p_scope, p_port, p_source) };
 		}
 		if (const std::optional<uint32_t> child = children_.find(p_scope, p_instance)) {
-			// A child prefab or sub-world: its output as a source, its input as a target.
+
 			return End{ EndKind::Virtual, r_kind.virtual_of(*child, p_port, !p_source) };
 		}
 		if (const std::optional<uint32_t> object = objects_.find(p_scope, p_instance)) {
@@ -1223,7 +1189,7 @@ private:
 			}
 			const LogicTypeClass cls = logic_type_info(parts_.nodes[*object].type).cls;
 			if (cls == LogicTypeClass::Structural) {
-				return std::nullopt; // a reference whose blueprint was not instantiated
+				return std::nullopt;
 			}
 			return End{ EndKind::Real, *object };
 		}
@@ -1298,7 +1264,7 @@ private:
 						continue;
 					}
 					if (from->kind == EndKind::Absent) {
-						++st.dropped_realm; // nothing on this side fires it
+						++st.dropped_realm;
 						continue;
 					}
 					hop.source = *from;
@@ -1336,8 +1302,7 @@ private:
 		} else {
 			delivered = tt == LogicEventTarget::Client || tt == LogicEventTarget::ClientAndServer;
 		}
-		// The networked edges the side fires without delivering: every NetworkedClient edge on the server, a
-		// NetworkedClientAndServer edge whose target is absent, and on a client every networked edge (delivered on receipt).
+
 		const bool fire_only = networked && (options_.side == LogicSide::Client || tt == LogicEventTarget::NetworkedClient || !present);
 		if (fire_only) {
 			parts_.add_edge(parts_.networked, source, p_first.source_port, target, p_last.target_port, tt, true, p_last.connection);
@@ -1355,7 +1320,6 @@ private:
 		return Status::success();
 	}
 
-	// Depth-first through virtual node p_virtual, emitting every real end reached (record order per hop).
 	Status walk(EdgeKind p_kind, KindGraph &r_kind, const Hop &p_first, uint32_t p_virtual, uint32_t p_depth, size_t &r_fanout,
 			const std::function<Status(const Hop &)> &p_sink) {
 		if (p_depth > options_.max_interface_depth) {
@@ -1409,7 +1373,6 @@ private:
 		return Status::success();
 	}
 
-	// The descriptor constants of scope p_scope by field id, read once (each field scanned charged).
 	Result<const std::vector<std::pair<int32_t, std::string_view>> *> constants_of(uint32_t p_scope) {
 		auto it = scope_constants_.find(p_scope);
 		if (it != scope_constants_.end()) {
@@ -1519,13 +1482,13 @@ private:
 	WorkBudget &budget_;
 	GraphParts parts_;
 	std::vector<std::optional<EbxInstance>> descriptors_;
-	ScopedIndex children_; // (parent scope, reference) -> child scope
-	ScopedIndex objects_; // (scope, entity or placing reference) -> node, or kAbsent | object
+	ScopedIndex children_;
+	ScopedIndex objects_;
 	KindGraph kinds_[3];
 	std::map<uint32_t, std::vector<std::pair<int32_t, std::string_view>>> scope_constants_;
 };
 
-} // namespace
+}
 
 Result<LogicGraph> LogicGraphBuild::from_world(const LogicWorld &p_world, const LogicGraphOptions &p_options) {
 	GraphBuilder builder(p_world, p_options);
@@ -1554,4 +1517,4 @@ Result<LogicGraph> build_logic_graph(const EbxResolver &p_db, const EbxInstance 
 	return build_logic_graph(*world, p_options);
 }
 
-} // namespace bf3::core::gameplay
+}

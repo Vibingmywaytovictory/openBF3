@@ -1,6 +1,3 @@
-// HdrSetting reader (hdr_setting.h; docs/design/m2b.md §6.1, docs/design/m2b-au.md). Fields by the data's own
-// descriptor names; every instance examined and every curve point is charged before it is read.
-
 #include "bf3/core/audio/hdr_setting.h"
 
 #include <algorithm>
@@ -17,7 +14,6 @@ Error hdr_error(const std::string &p_what) {
 	return make_error("HdrSetting: " + p_what);
 }
 
-// A float field: absent keeps the default; present but not a finite number is an error.
 Status read_field(const EbxStruct &p_s, std::string_view p_field, float &r_value) {
 	const std::optional<EbxValue> v = p_s.get(p_field);
 	if (!v) {
@@ -36,7 +32,7 @@ Status read_curve(const EbxStruct &p_s, std::string_view p_field, WorkBudget &r_
 	const std::optional<EbxValue> v = p_s.get(p_field);
 	const std::optional<EbxStruct> c = v ? v->as_struct() : std::nullopt;
 	if (!c) {
-		return Status::success(); // no curve: the release is linear (hdr_window.h)
+		return Status::success();
 	}
 	BF3_TRY(r_budget.charge_type(*c));
 	const std::optional<EbxValue> pts = c->get("Points");
@@ -67,10 +63,10 @@ bool in(float p_v, float p_lo, float p_hi) {
 	return std::isfinite(p_v) && p_v >= p_lo && p_v <= p_hi;
 }
 
-} // namespace
+}
 
 AudioCurve default_hdr_release_curve() {
-	// The retail WindowTopReleaseTimeCurve [verified 2026-10-19: bf3dump dump of sound/soundstates on MP_Subway].
+
 	AudioCurve c;
 	c.points = {
 		{ 0.0020000027f, 0.976f, -0.45407736f },
@@ -159,4 +155,4 @@ Result<HdrSetting> read_hdr_setting(const EbxResolver &p_db, gameplay::WorkBudge
 	return hdr_error(std::string(kSoundStatesPartition) + " holds no HdrSetting");
 }
 
-} // namespace bf3::core::audio
+}

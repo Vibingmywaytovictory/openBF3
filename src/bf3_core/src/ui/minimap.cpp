@@ -1,9 +1,3 @@
-// UI ui2: the minimap readers (include/bf3/core/ui/minimap.h; docs/design/ui-minimap-icons.md §4.1-§4.3, §5).
-//
-// Cost model: every reader runs on a level::WorkBudget. An instance or struct examined costs 1, an array its raw
-// length before it is scanned, text its level::text_units through charged_str; the property resolutions of the
-// objectives charge the traversal's budget themselves (Scopes::property). The gate helpers (mask IoUs) take no
-// budget: their inputs are capped (kMaxIouSide, kMaxAreaPolygonPoints), so they are O(side² x points) at most.
 #include "bf3/core/ui/minimap.h"
 
 #include "bf3/core/install.h"
@@ -22,7 +16,6 @@ namespace {
 using level::charged_str;
 using level::WorkBudget;
 
-// The UIDistanceFieldAsset a reference names and its DistanceFieldTexture's partition (= the res name).
 struct FieldRef {
 	std::string asset;
 	std::string texture;
@@ -79,7 +72,6 @@ Status read_field_params(const EbxResolver &p_db, const EbxPartition &p_from, co
 	return Status::success();
 }
 
-// A TextureAsset reference field as its partition name ("" when null).
 Result<std::string> texture_name(const EbxResolver &p_db, const EbxPartition &p_from, const EbxStruct &p_s, std::string_view p_field, WorkBudget &r_budget) {
 	const std::optional<EbxRef> r = detail::ref(p_s, p_field);
 	if (!r || r->is_null()) {
@@ -93,8 +85,6 @@ Result<std::string> texture_name(const EbxResolver &p_db, const EbxPartition &p_
 	return *name;
 }
 
-// The value of a field of a placed object as its scope feeds it (a PropertyConnection into the reference or the
-// entity), else the entity's own field (the spawn-point reader's rule, level/spawn_points.cpp).
 Result<std::optional<level::Property>> fed(const level::World &p_world, const level::PlacedObject &p_object, std::string_view p_field) {
 	const EbxInstance &target = p_object.reference ? *p_object.reference : p_object.entity;
 	Result<std::optional<level::Property>> r = p_world.scopes.property(p_object.scope, target, level::field_id(p_field));
@@ -124,7 +114,6 @@ Result<int32_t> read_team(const level::World &p_world, const level::PlacedObject
 	return 0;
 }
 
-// An enum field's name as the scope feeds it, else the entity's own (charged).
 Result<std::string> read_enum_name(const level::World &p_world, const level::PlacedObject &p_object, std::string_view p_field) {
 	WorkBudget &budget = *p_world.budget;
 	Result<std::optional<level::Property>> f = fed(p_world, p_object, p_field);
@@ -164,8 +153,6 @@ Result<std::string> read_text(const level::World &p_world, const level::PlacedOb
 	return std::string(own->value_or(""));
 }
 
-// The world point of mask texel centre (i, j) of a p_side image through mapping variant p_variant (the inverse of
-// world_to_minimap_uv_variant).
 std::array<float, 2> texel_world(const MinimapMapping &p_m, uint8_t p_variant, uint32_t p_side, uint32_t p_i, uint32_t p_j) {
 	float u = (float(p_i) + 0.5f) / float(p_side);
 	float v = (float(p_j) + 0.5f) / float(p_side);
@@ -208,7 +195,7 @@ double mask_iou(const std::vector<bool> &p_mask, uint32_t p_side, const MinimapM
 	return any == 0 ? 0.0 : double(both) / double(any);
 }
 
-} // namespace
+}
 
 Result<MinimapData> read_minimap_data(const EbxResolver &p_db, const EbxInstance &p_level_root, std::string_view p_level_id, WorkBudget &r_budget) {
 	BF3_TRY(r_budget.status());
@@ -309,8 +296,7 @@ Result<CombatAreaMask> read_combat_area(const EbxResolver &p_db, std::string_vie
 	m.prefix = std::string(prefix->value_or(""));
 	Result<FieldRef> field = read_field_ref(p_db, *partition, detail::ref(asset.data(), "DistanceField"), r_budget, m.asset + ".DistanceField");
 	BF3_TRY(field);
-	// A null DistanceField is valid data (Metro's unused Rush stage 5, a5 / d5): the mask then has no texture and
-	// draws nothing (load_minimap_images gives an empty image, combat_area_union skips it).
+
 	m.distance_field_asset = field->asset;
 	m.texture = field->texture;
 	Result<FieldRef> surr = read_field_ref(p_db, *partition, detail::ref(asset.data(), "SurroundingDistanceField"), r_budget, m.asset + ".SurroundingDistanceField");
@@ -338,7 +324,7 @@ Result<MinimapLevel> read_minimap_level(const level::LoadedLevel &p_level, const
 			}
 			const std::optional<EbxRef> asset = detail::ref(object.entity.data(), "Asset");
 			if (!asset || asset->is_null()) {
-				continue; // an entity without an asset draws nothing
+				continue;
 			}
 			const std::optional<std::string> name = detail::ref_partition(db, object.entity.partition(), *asset);
 			const std::string label = detail::instance_label(db, object.entity);
@@ -529,4 +515,4 @@ Result<std::vector<std::array<float, 2>>> read_area_polygon(const level::LoadedL
 	return out;
 }
 
-} // namespace bf3::core::ui
+}

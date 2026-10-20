@@ -1,8 +1,3 @@
-// M2a weapons: the shooting range on Metro's static world (ctest sim.weapons.range; docs/design/m2a-weapons.md §1, §10).
-// The install is read as it is (read-only); exits 77 = skipped without one; every case prints install.unchanged.
-// W3 end to end (5 m and 60 m, exact aim), W5 per-hit damage on stand-in capsules, W7 on two CollisionWorlds over one
-// StaticWorldShapes, W9 blasts on stand-ins, and the impact descriptor of every static hit; the lane and the
-// static-world diagnostics (invisible passes, penetrations, Collision-before-Raycast) are printed.
 #include "weapons_install_support.h"
 
 #include "bf3/sim/weapons/damage.h"
@@ -47,8 +42,6 @@ uint16_t id(std::string_view p_variant) {
 	return 0;
 }
 
-// The world W3's 60 m rows run on: Metro TDM's longest lane, else the other Metro modes' spawns, else the synthetic
-// wall world (docs §10), with the reason printed.
 struct LaneWorld {
 	const CollisionWorld *world = nullptr;
 	RangeLane lane;
@@ -102,7 +95,6 @@ RangeResult range(const WeaponTable &p_table, const CollisionWorld &p_world, con
 	return std::move(*r);
 }
 
-// Every static impact carries a resolved grid pair and its physics material (the impact descriptor, §5.8).
 struct ImpactAudit {
 	size_t statics = 0, unresolved = 0, wrong_material = 0;
 	void add(const SurfaceMaterialTable &p_mt, const RangeResult &p_r) {
@@ -125,7 +117,7 @@ void print_diagnostics(const char *p_name, const RangeResult &p_r) {
 			p_r.refused_projectiles, p_r.peak_live_projectiles, (unsigned long long)p_r.shot_list_hash, (unsigned long long)p_r.impact_list_hash);
 }
 
-} // namespace
+}
 
 TEST_SUITE("weapons-range") {
 	TEST_CASE("sim.weapons.range: the Metro lane, W3 end to end at 5 m and 60 m, W5 per-hit damage") {
@@ -141,7 +133,6 @@ TEST_SUITE("weapons-range") {
 				double(longest->feet[1]), double(longest->feet[2]), unsigned(longest->yaw), double(longest->length));
 		ImpactAudit audit;
 
-		// W3: M16A3 hits to kill with exact aim (chest 4 / head 2 at 5 m; 6 / 3 at 60 m).
 		struct Row {
 			float distance;
 			HitZone zone;
@@ -175,7 +166,6 @@ TEST_SUITE("weapons-range") {
 			CHECK(tr.hits[size_t(row.zone)] == row.hits);
 		}
 
-		// W5: the first hit on each zone at 5 m (exact aim), damage within 1e-3.
 		struct Hit {
 			std::string_view variant;
 			HitZone zone;
@@ -228,7 +218,7 @@ TEST_SUITE("weapons-range") {
 			s.weapon = id(kM16A3);
 			s.targets = { { std::min(20.0f, far), Pose::Stand, HitZone::Chest }, { far, Pose::Crouch, HitZone::Head } };
 			s.script = FireScript::Hold;
-			s.ticks = 600; // 10 s of auto fire (the real magazine: reloads included)
+			s.ticks = 600;
 			s.ads = false;
 			runs.push_back({ "M16A3 10 s hip fire", s });
 		}
@@ -289,8 +279,6 @@ TEST_SUITE("weapons-range") {
 		REQUIRE(lane.has_value());
 		const Mechanics &mech = t->mechanics;
 
-		// M67: throw along the lane with no targets, read where it goes off, then stand stand-ins beside that point and
-		// throw the same grenade again.
 		RangeScenario s;
 		s.weapon = id(kM67);
 		s.script = FireScript::Throw;
@@ -333,7 +321,7 @@ TEST_SUITE("weapons-range") {
 			dets.insert(dets.end(), out.detonations.begin(), out.detonations.end());
 		}
 		REQUIRE(dets.size() == 1);
-		CHECK(dets[0].position == det.position); // the stand-ins beside the rest point did not change the flight
+		CHECK(dets[0].position == det.position);
 		const ExplosionSimDef &x = t->defs[id(kM67)].projectile.explosion;
 		std::array<bool, 4> hit{};
 		for (const DamageEvent &d : blast) {
@@ -344,12 +332,9 @@ TEST_SUITE("weapons-range") {
 			CHECK(std::fabs(double(d.amount) - want) <= 0.01);
 			hit[d.target - 1] = true;
 		}
-		CHECK(hit[0]); // 1 m beside the blast
-		CHECK_FALSE(hit[3]); // 8 m: beyond BlastRadius 7
+		CHECK(hit[0]);
+		CHECK_FALSE(hit[3]);
 
-		// RPG-7 at a stand-in 30 m down the lane (past the 0.5 s arm time: 30 m take about 0.65 s): the direct hit
-		// (225 x 2.5, H:W7) and the armed blast. The shot leaves from the eye (no launch offset) aimed so the flight
-		// (fly_free: thrust and gravity) meets the chest capsule's centre.
 		const WeaponSimDef &rd = t->defs[id(kRpg)];
 		const float dist = std::min(30.0f, lane->length - 1.0f);
 		const Vec3 heading{ float(std::sin(yaw)), 0.0f, float(std::cos(yaw)) };

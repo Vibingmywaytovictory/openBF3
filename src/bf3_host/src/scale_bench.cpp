@@ -1,6 +1,3 @@
-// run_scale_bench and format_scale_report (scale_bench.h; spike S1, docs/design/s1.md §1, §6): 64 walker bots on the
-// real GameServer, ticked back to back for 120 s of sim time with every tick's parts timed, then a paced row and the
-// direct per-query costs replayed on the bench's own CollisionWorld.
 #include "bf3/host/scale_bench.h"
 
 #include "tick_timer.h"
@@ -20,7 +17,7 @@
 #include "bf3/sim/static_world.h"
 
 #include <windows.h>
-// windows.h first
+
 #include <psapi.h>
 
 #include <algorithm>
@@ -76,7 +73,7 @@ Percentiles percentiles_impl(std::vector<double> p_values) {
 	}
 	std::sort(p_values.begin(), p_values.end());
 	const auto rank = [&](double p_q) {
-		// Nearest rank: the smallest value with at least q of the samples at or below it.
+
 		const size_t n = p_values.size();
 		size_t k = size_t(std::ceil(p_q * double(n)));
 		k = std::clamp<size_t>(k, 1, n);
@@ -94,7 +91,6 @@ Percentiles percentiles_impl(std::vector<double> p_values) {
 	return p;
 }
 
-// Raises this thread's priority for the measured windows and restores it.
 class PriorityScope {
 public:
 	explicit PriorityScope(bool p_raise) {
@@ -132,7 +128,7 @@ std::string percentile_text(const Percentiles &p_p) {
 	return fmt("p50 %.3f p95 %.3f p99 %.3f max %.3f mean %.3f", p_p.p50, p_p.p95, p_p.p99, p_p.max, p_p.mean);
 }
 
-} // namespace
+}
 
 Percentiles percentiles_of(std::vector<double> p_values) {
 	return percentiles_impl(std::move(p_values));
@@ -187,7 +183,6 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	report.options = p_options;
 	const uint64_t ws_start = working_set();
 
-	// ---- load -----------------------------------------------------------------------------------------------------
 	sim::MotorTuning tuning;
 	if (!p_options.tuning_text.empty()) {
 		core::Result<sim::MotorTuning> t = sim::parse_motor_tuning(p_options.tuning_text);
@@ -249,9 +244,8 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	if ((*bots)->spawns.points.empty()) {
 		return core::make_error("scale bench: no bot spawn point (no main-component spawn and no synthetic point)");
 	}
-	db.reset(); // the World and the mounted partitions: not the server's
+	db.reset();
 
-	// ---- server ---------------------------------------------------------------------------------------------------
 	const uint64_t ws_before_server = working_set();
 	(void)ws_before_server;
 	GameServer server;
@@ -284,7 +278,6 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	const uint64_t ws_after_init = working_set();
 	report.server_working_set = ws_after_init > ws_start ? ws_after_init - ws_start : 0;
 
-	// Bot slots: the server-side soldiers (init adds them before any peer; no scripted walkers here).
 	std::vector<uint32_t> bot_slots;
 	{
 		const GameServerStats s = server.stats();
@@ -295,7 +288,6 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 		}
 	}
 
-	// ---- warm-up ----------------------------------------------------------------------------------------------------
 	const uint64_t warmup_ticks = uint64_t(std::llround(p_options.warmup_seconds * double(sim::kSimHz)));
 	std::vector<double> spawn_ticks;
 	for (uint64_t t = 0; t < warmup_ticks; ++t) {
@@ -308,7 +300,6 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	}
 	report.spawn_tick_ms = percentiles_impl(spawn_ticks);
 
-	// ---- the gate window ---------------------------------------------------------------------------------------------
 	const GameServerStats before = server.stats();
 	const uint64_t window_ticks = uint64_t(std::llround(p_options.seconds * double(sim::kSimHz)));
 	std::vector<double> v_tick, v_commands, v_sources, v_step, v_rules, v_encode;
@@ -397,8 +388,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 		}
 		report.window_wall_seconds = seconds_since(wall_start);
 		report.window_cpu_seconds = thread_cpu_seconds() - cpu_start;
-		// The bench's own bookkeeping between ticks runs on the same thread: both clocks include it, so the share
-		// compares like with like.
+
 		(void)bookkeeping;
 	}
 	report.cpu_share = report.window_wall_seconds > 0.0 ? report.window_cpu_seconds / report.window_wall_seconds : 0.0;
@@ -413,10 +403,8 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	report.bot_budget_ok = report.sources_ms.p99 <= kBotBudgetP99Ms;
 	report.respawns_in_window = respawns;
 
-	// Tail shares (docs §14): the ticks at or above the p99.
 	report.tail = tail_shares(window, report.tick_ms.p99);
 
-	// Motor (G3).
 	report.motor_steps = motor_steps;
 	report.collision_queries = queries;
 	report.queries_per_step = motor_steps > 0 ? double(queries) / double(motor_steps) : 0.0;
@@ -424,7 +412,6 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	report.us_per_step = motor_steps > 0 ? step_ms_sum * 1000.0 / double(motor_steps) : 0.0;
 	report.us_per_query_upper = report.queries_per_step > 0.0 ? report.us_per_step / report.queries_per_step : 0.0;
 
-	// Bots: the window's deltas.
 	report.walkers = after.bots.walkers;
 	{
 		const sim::bots::WalkerStats &a = after.bots.walkers, &b = before.bots.walkers;
@@ -482,7 +469,6 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	report.snapshot_bytes = after.snapshot_bytes - before.snapshot_bytes;
 	report.max_snapshot_bytes = after.max_snapshot_bytes;
 
-	// Validity (docs §1).
 	report.bot_metres = metres;
 	for (double m : metres) {
 		report.bots_walked += m >= kValidityMetres ? 1u : 0u;
@@ -491,7 +477,6 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	report.valid = !metres.empty() && double(report.bots_walked) >= kValidityWalkedShare * double(metres.size()) &&
 			report.abandoned_share <= kValidityAbandonedShare;
 
-	// ---- paced row (not gated) ----------------------------------------------------------------------------------------
 	const uint64_t paced_ticks = uint64_t(std::llround(p_options.paced_seconds * double(sim::kSimHz)));
 	if (paced_ticks > 0) {
 		PriorityScope priority(p_options.raise_priority);
@@ -508,14 +493,13 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 			next += period;
 			const Clock::time_point now = Clock::now();
 			if (now > next + period * 4) {
-				next = now + period; // fell behind (a preempted thread): restart the cadence
+				next = now + period;
 			}
 		}
 		report.paced_ticks = paced_ticks;
 		report.paced_tick_ms = percentiles_impl(std::move(v));
 	}
 
-	// ---- direct query costs (G3, docs §6.3) ---------------------------------------------------------------------------
 	{
 		core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create((*shared)->static_world);
 		if (!world) {
@@ -524,7 +508,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 		const sim::MotorParams &motor = (*shared)->motor;
 		const float radius = motor.radius;
 		const float height = motor.poses[size_t(sim::Pose::Stand)].height;
-		// The timer's own cost: empty pairs of clock reads.
+
 		double overhead = 0.0;
 		{
 			constexpr int kEmpty = 4096;
@@ -540,7 +524,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 		std::vector<double> us_sweep, us_overlap;
 		us_sweep.reserve(samples.size());
 		us_overlap.reserve(samples.size());
-		const float sprint = 7.0f; // m/s: about the soldier's sprint speed; 1/60 s of it along the velocity
+		const float sprint = 7.0f;
 		for (const SweepSample &s : samples) {
 			sim::Vec3 dir{ s.velocity[0], 0.0f, s.velocity[2] };
 			const float len = std::sqrt(dir[0] * dir[0] + dir[2] * dir[2]);
@@ -639,12 +623,8 @@ std::string format_scale_report(const ScaleReport &p_report) {
 	return s;
 }
 
-// ---- G4: the uncached bake ------------------------------------------------------------------------------------------
-
 namespace {
 
-// The untimed part of the G4 bench: the bake's input (soup, region, water) and the link checks' world, with the
-// bench's counters filled in r_out.
 struct NavBakeSetup {
 	core::level::CollisionSoup soup;
 	core::level::LevelCombatTiles combat;
@@ -721,8 +701,7 @@ core::Result<NavBakeSetup> nav_bake_setup(const std::shared_ptr<const core::Inst
 		out.water_y = out.water_planes == 1 ? w.y : std::max(out.water_y, w.y);
 	}
 	{
-		// Tiles by content: a requested tile whose own soup tile holds a movement triangle (TC: the soup tiles hold the
-		// Havok triangles only; the terrain is in the terrain records).
+
 		std::vector<std::array<int32_t, 2>> objects;
 		for (const core::level::SoupTile &t : soup->tiles) {
 			for (const core::level::SoupTriangle &tri : t.triangles) {
@@ -742,7 +721,7 @@ core::Result<NavBakeSetup> nav_bake_setup(const std::shared_ptr<const core::Inst
 		clock = Clock::now();
 		sim::StaticWorldBuildOptions bo;
 		bo.threads = threads;
-		bo.include_raycast = false; // the link sweeps are kMovement queries
+		bo.include_raycast = false;
 		core::Result<std::shared_ptr<const sim::StaticWorldShapes>> built = sim::build_static_world(*soup, bo);
 		if (!built) {
 			return core::error_at("nav bake bench: static world", built.error());
@@ -750,14 +729,13 @@ core::Result<NavBakeSetup> nav_bake_setup(const std::shared_ptr<const core::Inst
 		setup.shapes = std::move(*built);
 		out.seconds_cook = seconds_since(clock);
 	}
-	world->reset(); // the World and the level are not needed by the bake
+	world->reset();
 	level->reset();
 	setup.soup = std::move(*soup);
 	setup.combat = std::move(*combat);
 	return setup;
 }
 
-// The timed part: bake_nav_world over the region on p_threads lanes, then the result's counters.
 core::Status nav_bake_run(const NavBakeSetup &p_setup, const NavBakeBenchOptions &p_options, unsigned p_threads, NavBakeBench &r_out) {
 	NavBakeBench &out = r_out;
 	sim::NavBakeOptions bake;
@@ -765,7 +743,7 @@ core::Status nav_bake_run(const NavBakeSetup &p_setup, const NavBakeBenchOptions
 	bake.threads = bench_threads(p_threads);
 	bake.layer_mask = p_options.layer_mask;
 	bake.link_shapes = p_setup.shapes;
-	bake.water = p_setup.combat.water; // TC: the water rule is the bake's
+	bake.water = p_setup.combat.water;
 	core::Result<std::shared_ptr<const sim::NavWorld>> nav = sim::bake_nav_world(p_setup.soup, p_setup.combat.tiles, bake);
 	if (!nav) {
 		return core::error_at("nav bake bench: bake", nav.error());
@@ -789,7 +767,7 @@ core::Status nav_bake_run(const NavBakeSetup &p_setup, const NavBakeBenchOptions
 	return core::Status::success();
 }
 
-} // namespace
+}
 
 core::Result<NavBakeBench> run_nav_bake_bench(std::shared_ptr<const core::Install> p_install, const NavBakeBenchOptions &p_options) {
 	if (p_install == nullptr) {
@@ -821,7 +799,7 @@ core::Result<std::vector<NavBakeBench>> run_nav_bake_benches(std::shared_ptr<con
 	}
 	std::vector<NavBakeBench> out;
 	for (const unsigned t : p_threads) {
-		NavBakeBench b = first; // the setup's counters and seconds
+		NavBakeBench b = first;
 		b.options.threads = t;
 		b.nav = nullptr;
 		core::Status baked = nav_bake_run(*setup, p_options, t, b);
@@ -858,4 +836,4 @@ std::string format_nav_bake_bench(const NavBakeBench &p_b) {
 	return out;
 }
 
-} // namespace bf3::host
+}

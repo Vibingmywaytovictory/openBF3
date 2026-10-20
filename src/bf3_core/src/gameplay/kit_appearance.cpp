@@ -1,5 +1,3 @@
-// PT1 iff: the kit's default 3p appearance (kit_appearance.h; docs/design/pt1-iff.md §2.1). Every array scan and name
-// copy is charged to the read's WorkBudget first (cost model: logic_world.cpp).
 #include "bf3/core/gameplay/kit_appearance.h"
 
 #include "bf3/core/ids.h"
@@ -18,12 +16,12 @@ std::string_view tail_of(std::string_view p_path) {
 	return slash == std::string_view::npos ? p_path : p_path.substr(slash + 1);
 }
 
-} // namespace
+}
 
 bool appearance_matches_kit(std::string_view p_kit_asset, std::string_view p_appearance) {
 	const std::string kit = to_lower_ascii(tail_of(p_kit_asset));
 	const std::string app = to_lower_ascii(tail_of(p_appearance));
-	// mp_<faction>_<role>_appearance<n>
+
 	std::vector<std::string_view> tokens;
 	std::string_view rest = app;
 	for (size_t guard = 0; guard < 8 && !rest.empty(); ++guard) {
@@ -104,4 +102,4 @@ Result<KitAppearance> read_kit_appearance(const EbxResolver &p_db, std::string_v
 	return out;
 }
 
-} // namespace bf3::core::gameplay
+}

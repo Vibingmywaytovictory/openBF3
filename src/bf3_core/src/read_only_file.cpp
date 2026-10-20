@@ -33,8 +33,7 @@ void ReadOnlyFile::close() {
 
 ReadOnlyFile ReadOnlyFile::open_absolute(const std::filesystem::path &p_path) {
 	ReadOnlyFile file;
-	// The only CreateFileW on install files in the code base: read access, full sharing (the
-	// game, an updater or an antivirus may hold the file), open-existing (never create).
+
 	HANDLE h = CreateFileW(p_path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
 			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (h == INVALID_HANDLE_VALUE) {
@@ -83,4 +82,4 @@ bool ReadOnlyFile::read_all(std::vector<uint8_t> &r_out) const {
 	return got == static_cast<int64_t>(size_);
 }
 
-} // namespace bf3::core
+}

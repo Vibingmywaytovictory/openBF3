@@ -15,7 +15,6 @@ public:
 	explicit Rows(std::vector<M0CheckRow> &r_rows) :
 			rows_(r_rows) {}
 
-	// Data values are f32: compared with a tolerance far below the printed precision.
 	void num(const std::string &p_check, double p_actual, double p_expected, double p_eps = 1e-4) {
 		rows_.push_back({ p_check, std::fabs(p_actual - p_expected) <= p_eps, format_number(p_actual), format_number(p_expected) });
 	}
@@ -31,7 +30,7 @@ const SwayState &stand(const WeaponDef &p_w, Zoom p_zoom) {
 	return p_w.sway.state[size_t(Stance::Stand)][size_t(p_zoom)];
 }
 
-} // namespace
+}
 
 M0CheckRow m0_text_row(const std::string &p_check, const std::string &p_actual, const std::string &p_expected) {
 	return { p_check, p_actual == p_expected, p_actual.empty() ? std::string("\"\"") : p_actual, p_expected };
@@ -41,9 +40,6 @@ std::vector<M0CheckRow> check_m0_weapons(const WeaponDef &p_a3, const std::strin
 	std::vector<M0CheckRow> out;
 	Rows r(out);
 
-	// M16A3 (§7.1 row 1): auto + single, 800 RPM (75 ms), mag 31 x 5, reload 1.8/2.37 s, v0 650,
-	// 25 -> 18.4 over 8-50 m, g -15, hip 2.5-7 +0.1, ADS 0.2-3 +0.1, recoil 0.26 up, horizontal
-	// -0.4..0.1, dec 18, FSRM 2.5, deploy 0.67.
 	const FireFunction &f = p_a3.fire;
 	const ProjectileDef &p = p_a3.projectile;
 	r.text("m16a3.blueprint", p_a3.blueprint, "weapons/m16a4/m16a4");
@@ -78,8 +74,6 @@ std::vector<M0CheckRow> check_m0_weapons(const WeaponDef &p_a3, const std::strin
 	r.num("m16a3.first_shot_recoil_multiplier", p_a3.sway.first_shot_recoil_multiplier, 2.5);
 	r.num("m16a3.deploy", p_a3.deploy_time, 0.67);
 
-	// M16A4 burst (§7.1 row 2): 3 per burst at 800 RPM; = M16A3 x the burst modifier (ADS x0.5 -> 0.1,
-	// horizontal x0.75 -> 0.075 left / 0.3 right).
 	const FireFunction &b = p_a4.fire;
 	const SwayState &bads = stand(p_a4, Zoom::Zoom);
 	r.text("m16a4_burst.blueprint", p_a4.blueprint, "weapons/m16a4/m16a4");
@@ -101,4 +95,4 @@ std::vector<M0CheckRow> check_m0_weapons(const WeaponDef &p_a3, const std::strin
 	return out;
 }
 
-} // namespace bf3::godot_side
+}

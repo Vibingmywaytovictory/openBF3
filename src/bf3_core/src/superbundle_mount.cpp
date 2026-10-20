@@ -1,4 +1,3 @@
-// Ported from IW4L asset_transport::bf3 (mount.rs), Apache-2.0.
 #include "bf3/core/superbundle_mount.h"
 
 #include "bf3/core/delta_bundle.h"
@@ -46,11 +45,11 @@ enum class BundleFormat { Cas, Binary };
 
 struct BundleBytes {
 	bool is_delta = false;
-	// File
+
 	std::shared_ptr<InstallFile> file;
 	uint64_t offset = 0;
 	uint64_t len = 0;
-	// Delta
+
 	DeltaBundle delta;
 	std::shared_ptr<InstallFile> patch;
 	std::shared_ptr<InstallFile> base;
@@ -67,7 +66,7 @@ struct BundleBytes {
 			return file->read_vec(offset + p_offset, p_len);
 		}
 		if (p_len > detail::kMaxMetadataSizedAlloc) {
-			return error_at(patch->name(), detail::out_of_memory(p_len)); // run lengths are unchecked metadata
+			return error_at(patch->name(), detail::out_of_memory(p_len));
 		}
 		std::vector<uint8_t> buf(static_cast<size_t>(p_len));
 		Status st = delta.read_at(*patch, *base, p_offset, buf);
@@ -235,7 +234,7 @@ Result<std::vector<BundleSite>> superbundle_bundles(const Install &p_install, co
 	std::unordered_map<std::string, const TocBundle *> base_entries;
 	if (base) {
 		for (const TocBundle &e : base->toc.bundles) {
-			base_entries[bundle_key(e.id)] = &e; // collect(): the last of equal keys wins
+			base_entries[bundle_key(e.id)] = &e;
 		}
 	}
 	auto where = [&patch](const TocBundle &p_entry) { return patch->file->name() + " bundle " + p_entry.id; };
@@ -298,9 +297,7 @@ Result<std::vector<BundleSite>> superbundle_bundles(const Install &p_install, co
 	return out;
 }
 
-} // namespace
-
-// ---------------------------------------------------------------------------------------------
+}
 
 struct LevelMount::Impl {
 	std::shared_ptr<const Install> install;
@@ -308,7 +305,7 @@ struct LevelMount::Impl {
 	std::vector<BundleSite> bundles;
 	std::unordered_map<std::string, size_t> bundle_keys;
 	std::vector<std::string> chunk_superbundles;
-	// Chunk superbundle tocs in priority order (the first map that has a GUID wins).
+
 	std::vector<std::shared_ptr<const TocChunkMap>> toc_chunk_maps;
 	size_t toc_chunk_count = 0;
 	mutable std::shared_mutex mutex;
@@ -852,7 +849,7 @@ Result<std::vector<uint8_t>> LevelMount::read_stored(const EntryRef &p_entry) co
 }
 
 std::vector<Sha1> LevelMount::chunk_source_sha1s(const Guid &p_id) const {
-	// Mirrors read_chunk's choice of bytes.
+
 	std::optional<Sha1> record_sha1;
 	bool tail_only = false;
 	{
@@ -875,9 +872,9 @@ std::vector<Sha1> LevelMount::chunk_source_sha1s(const Guid &p_id) const {
 	if (site != nullptr) {
 		out.push_back(site->sha1);
 	} else {
-		out.clear(); // read_chunk fails too
+		out.clear();
 	}
 	return out;
 }
 
-} // namespace bf3::core
+}

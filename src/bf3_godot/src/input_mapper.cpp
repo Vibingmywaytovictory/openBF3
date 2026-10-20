@@ -21,7 +21,7 @@ struct ActionKey {
 	const char *name;
 	Key key;
 };
-// BF3 PC defaults (docs §11.6): crouch Left Ctrl, prone Z [inferred, docs §16 question 11].
+
 constexpr ActionKey kActions[] = {
 	{ InputAction::Forward, "bf3_forward", KEY_W },
 	{ InputAction::Back, "bf3_back", KEY_S },
@@ -38,7 +38,7 @@ constexpr ActionKey kActions[] = {
 static_assert(sizeof(kActions) / sizeof(kActions[0]) == kInputActionCount);
 
 float wrap_yaw(float p_yaw) {
-	// Keep the float small so the camera basis never loses precision over a long session.
+
 	while (p_yaw > sim::kPi) {
 		p_yaw -= sim::kTwoPi;
 	}
@@ -48,7 +48,7 @@ float wrap_yaw(float p_yaw) {
 	return p_yaw;
 }
 
-} // namespace
+}
 
 const char *input_action_name(InputAction p_action) {
 	const size_t i = size_t(p_action);
@@ -71,7 +71,7 @@ void InputMapper::install_actions() {
 	InputMap *map = InputMap::get_singleton();
 	for (const ActionKey &a : kActions) {
 		if (map->has_action(a.name)) {
-			continue; // a project-file action of the same name wins (rebinding)
+			continue;
 		}
 		map->add_action(a.name);
 		Ref<InputEventKey> key;
@@ -101,10 +101,10 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (scripted_ || p_event.is_null()) {
 		return;
 	}
-	if (m2b_handle_event(p_event)) { // M2b gx [mapper]: the spawn screen's keys and clicks, 3, Tab
-		return; // M2b gx [mapper]
-	} // M2b gx [mapper]
-	if (m2a_handle_event(p_event)) { // M2a gx [mapper]: the weapon actions; the capture click never fires
+	if (m2b_handle_event(p_event)) {
+		return;
+	}
+	if (m2a_handle_event(p_event)) {
 		return;
 	}
 	if (const InputEventMouseMotion *mm = Object::cast_to<InputEventMouseMotion>(p_event.ptr())) {
@@ -126,8 +126,7 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 			return;
 		}
 	}
-	// exact_match false: the actions carry no modifiers, and an exact match would also demand the event's modifier
-	// mask be empty, so Space / Ctrl / Z would do nothing while Shift (sprint) is held. Any modifier state matches.
+
 	for (const InputAction a : { InputAction::Jump, InputAction::Crouch, InputAction::Prone, InputAction::FreeCamera }) {
 		if (p_event->is_action_pressed(input_action_name(a), false, false)) {
 			press(a);
@@ -201,7 +200,7 @@ void InputMapper::press(InputAction p_action) {
 
 void InputMapper::set_free_camera(bool p_on) {
 	if (p_on && !free_camera_) {
-		free_view_ = view_; // the fly camera starts looking where the soldier looks
+		free_view_ = view_;
 	}
 	free_camera_ = p_on;
 }
@@ -235,7 +234,7 @@ bf3::host::InputSample InputMapper::sample() const {
 		s.move_right = float(int(held(InputAction::Right)) - int(held(InputAction::Left)));
 		s.held_buttons = held(InputAction::Sprint) ? sim::buttons::kSprint : 0u;
 	}
-	m2a_sample(s); // M2a gx [mapper]: weapon bits, fire_presses, the view sample (no-op unless m2a_enable)
+	m2a_sample(s);
 	return s;
 }
 
@@ -247,9 +246,7 @@ Vector3 InputMapper::free_move() const {
 			float(int(held(InputAction::Forward)) - int(held(InputAction::Back))));
 }
 
-} // namespace bf3::godot_side
-
-// ---- M2a gx (docs/design/m2a.md §5.1; docs/design/m2a-gx.md) -----------------------------------------------------
+}
 
 #include "bf3/sim/weapons/weapon_input.h"
 
@@ -260,11 +257,10 @@ namespace {
 struct M2aActionKey {
 	InputMapper::M2aAction action;
 	const char *name;
-	Key key; // KEY_NONE: a mouse button
+	Key key;
 	MouseButton button;
 };
-// m2a.md §5.1: fire left mouse, ADS right mouse (held), R reload, 1 primary, 2 sidearm, G grenade, F knife, B fire
-// mode, K / T kit and team for the next spawn (physical keys, as M1's).
+
 constexpr M2aActionKey kM2aActions[] = {
 	{ InputMapper::M2aAction::Fire, "bf3_fire", KEY_NONE, MOUSE_BUTTON_LEFT },
 	{ InputMapper::M2aAction::Ads, "bf3_ads", KEY_NONE, MOUSE_BUTTON_RIGHT },
@@ -279,10 +275,9 @@ constexpr M2aActionKey kM2aActions[] = {
 };
 static_assert(sizeof(kM2aActions) / sizeof(kM2aActions[0]) == InputMapper::kM2aActionCount);
 
-// The weapon slots the wheel visits, in order (m2a.md §5.6: primary, sidearm, grenade, knife).
-constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 2, 6, 7 }; // M2b gx [wheel]: slot 2 (the gadget; empty in M2a's kits, so the wheel skips it there)
+constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 2, 6, 7 };
 
-} // namespace
+}
 
 const char *InputMapper::m2a_action_name(M2aAction p_action) {
 	const size_t i = size_t(p_action);
@@ -297,7 +292,7 @@ void InputMapper::m2a_enable(bool p_on) {
 	InputMap *map = InputMap::get_singleton();
 	for (const M2aActionKey &a : kM2aActions) {
 		if (map->has_action(a.name)) {
-			continue; // a project-file action of the same name wins (rebinding)
+			continue;
 		}
 		map->add_action(a.name);
 		if (a.key != KEY_NONE) {
@@ -327,8 +322,7 @@ void InputMapper::m2a_set_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_
 	m2a_.active = p_active;
 	m2a_.pending = p_pending;
 	m2a_.filled = p_filled;
-	// The wanted slot is a level, but kept only until the sim takes it: a stale level would switch back to the grenade
-	// after a throw, or re-select a slot after the next spawn.
+
 	if (m2a_.wanted != 0xFF && (m2a_.wanted == p_active || m2a_.wanted == p_pending || (p_filled & (1u << m2a_.wanted)) == 0)) {
 		m2a_.wanted = 0xFF;
 	}
@@ -367,8 +361,7 @@ bool InputMapper::m2a_handle_event(const Ref<InputEvent> &p_event) {
 	if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
 		if (!captured_) {
 			if (mb->is_pressed() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
-				// The click that captures the mouse never fires (the review's playability rule): the fire level
-				// stays off until this button goes up.
+
 				set_capture(true);
 				m2a_.swallow_fire = true;
 				++m2a_.swallowed_clicks;
@@ -389,7 +382,7 @@ bool InputMapper::m2a_handle_event(const Ref<InputEvent> &p_event) {
 	}
 	if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (key->is_pressed() && !key->is_echo() && key->get_keycode() == KEY_ESCAPE) {
-			// Esc releases every held button (and M1's handler releases the mouse).
+
 			m2a_.held.fill(false);
 			m2a_.reload_until_ns = 0;
 			return false;
@@ -480,7 +473,7 @@ void InputMapper::m2a_frame(const bf3::host::PresentationFrame &p_frame, uint64_
 	m2a_.frame = &p_frame;
 	m2a_.now_ns = p_now_ns;
 	if (life_ != m2a_.life) {
-		// A new life: its weapons start on the primary (wp's spawn rule), so the wanted slot starts from scratch.
+
 		m2a_.life = life_;
 		m2a_.wanted = 0xFF;
 	}
@@ -512,7 +505,7 @@ void InputMapper::m2a_sample(bf3::host::InputSample &r_sample) const {
 		bf3::host::set_view_sample(r_sample, *m2a_.frame, m2a_.now_ns);
 	}
 	if (!scripted_ && !captured_ && DisplayServer::get_singleton()->get_name() != String("headless")) {
-		// The mouse is released (Esc, or not yet captured): no buttons and no movement.
+
 		r_sample.move_forward = 0.0f;
 		r_sample.move_right = 0.0f;
 		r_sample.held_buttons = 0;
@@ -531,9 +524,7 @@ void InputMapper::m2a_sample(bf3::host::InputSample &r_sample) const {
 	r_sample.held_buttons = sim::weapons::with_weapon_input(r_sample.held_buttons, w);
 }
 
-} // namespace bf3::godot_side
-
-// ---- M2b gx (docs/design/m2b.md §4, §11 gx row; docs/design/m2b-gx.md) ------------------------------------------
+}
 
 namespace bf3::godot_side {
 
@@ -543,10 +534,9 @@ struct M2bActionKey {
 	InputMapper::M2bAction action;
 	const char *name;
 	Key key;
-	Key key2; // KEY_NONE: none
+	Key key2;
 };
-// m2b.md §1.1: the defibrillator on 3 (weapon slot 2), Tab the scoreboard, Enter deploys, 1-4 the spawn screen's kits
-// (physical keys, as M1's and M2a's; 1 and 2 are the weapon keys while alive, the kit keys only on the spawn screen).
+
 constexpr M2bActionKey kM2bActions[] = {
 	{ InputMapper::M2bAction::Gadget, "bf3_gadget", KEY_3, KEY_NONE },
 	{ InputMapper::M2bAction::Scoreboard, "bf3_scoreboard", KEY_TAB, KEY_NONE },
@@ -558,7 +548,7 @@ constexpr M2bActionKey kM2bActions[] = {
 };
 static_assert(sizeof(kM2bActions) / sizeof(kM2bActions[0]) == InputMapper::kM2bActionCount);
 
-} // namespace
+}
 
 const char *InputMapper::m2b_action_name(M2bAction p_action) {
 	const size_t i = size_t(p_action);
@@ -573,7 +563,7 @@ void InputMapper::m2b_enable(bool p_on) {
 	InputMap *map = InputMap::get_singleton();
 	for (const M2bActionKey &a : kM2bActions) {
 		if (map->has_action(a.name)) {
-			continue; // a project-file action of the same name wins (rebinding)
+			continue;
 		}
 		map->add_action(a.name);
 		for (const Key k : { a.key, a.key2 }) {
@@ -591,7 +581,7 @@ void InputMapper::m2b_enable(bool p_on) {
 
 void InputMapper::m2b_set_spawn_screen(bool p_up) {
 	if (p_up && !m2b_.spawn_screen) {
-		m2b_.kit = -1; // presses from before the screen came up are not a choice
+		m2b_.kit = -1;
 		m2b_.deploy_presses = 0;
 	}
 	m2b_.spawn_screen = p_up;
@@ -640,7 +630,7 @@ void InputMapper::m2b_script_press(M2bAction p_action) {
 			if (m2b_.spawn_screen) {
 				m2b_.kit = int(p_action) - int(M2bAction::Kit1);
 			} else if (p_action == M2bAction::Kit3) {
-				m2a_select(2); // 3 while alive is the gadget slot
+				m2a_select(2);
 			}
 			break;
 		default:
@@ -660,20 +650,19 @@ bool InputMapper::m2b_handle_event(const Ref<InputEvent> &p_event) {
 	}
 	if (m2b_.spawn_screen) {
 		if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
-			// The spawn screen's buttons take their clicks before _unhandled_input; a click beside them must not capture
-			// the mouse (M1's and M2a's handlers would) while the screen is up.
+
 			if (mb->is_pressed()) {
 				++m2b_.consumed_clicks;
 			}
 			return true;
 		}
 		if (Object::cast_to<InputEventMouseMotion>(p_event.ptr()) != nullptr) {
-			return true; // no look while the screen is up (the mouse is free)
+			return true;
 		}
 		for (const M2bAction a : { M2bAction::Kit1, M2bAction::Kit2, M2bAction::Kit3, M2bAction::Kit4, M2bAction::Deploy }) {
 			if (p_event->is_action_pressed(m2b_action_name(a), false, false)) {
 				m2b_script_press(a);
-				return true; // 1 / 2 are not weapon selections here
+				return true;
 			}
 		}
 		return false;
@@ -684,4 +673,4 @@ bool InputMapper::m2b_handle_event(const Ref<InputEvent> &p_event) {
 	return false;
 }
 
-} // namespace bf3::godot_side
+}

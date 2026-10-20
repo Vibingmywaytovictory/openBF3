@@ -1,4 +1,3 @@
-// The work budget of a level load and traversal (see budget.h and the cost model in world.cpp).
 #include "bf3/core/level/budget.h"
 
 #include <string>
@@ -14,7 +13,7 @@ Status WorkBudget::charge(size_t p_units) {
 		return error();
 	}
 	if (p_units > limit_) {
-		// Not added, so spent_ cannot wrap whatever a caller asks for.
+
 		exhausted_.store(true, std::memory_order_relaxed);
 		return error();
 	}
@@ -69,4 +68,4 @@ Status charged_follow_all(const EbxResolver &p_db, const EbxStruct &p_object, st
 	return Status::success();
 }
 
-} // namespace bf3::core::level
+}

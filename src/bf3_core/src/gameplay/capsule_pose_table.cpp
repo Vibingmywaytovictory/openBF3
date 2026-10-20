@@ -1,5 +1,3 @@
-// The capsule pose table: hash, structural checks and the cache blob (docs/design/m2a.md §6.5, §13.1; as built:
-// docs/design/m2a-lc.md). See capsule_pose_table.h.
 #include "bf3/core/gameplay/capsule_pose_table.h"
 
 #include "bf3/core/cache/blob_io.h"
@@ -54,13 +52,13 @@ bool finite_capsule(const CapsuleLocal &p_c) {
 	return std::isfinite(p_c.radius) && p_c.radius > 0.0f && p_c.radius <= 2.0f && p_c.zone < 4;
 }
 
-} // namespace
+}
 
 bool capsule_transition_of(uint8_t p_from, uint8_t p_to, CapsuleTransition &r_transition) {
 	if (p_from == p_to || p_from >= kCapsuleStances || p_to >= kCapsuleStances) {
 		return false;
 	}
-	// Rows in m2a.md §6.5 order: StandToCrouch, StandToProne, CrouchToStand, CrouchToProne, ProneToStand, ProneToCrouch.
+
 	static constexpr uint8_t kRow[kCapsuleStances][kCapsuleStances] = { { 0xFF, 0, 1 }, { 2, 0xFF, 3 }, { 4, 5, 0xFF } };
 	r_transition = CapsuleTransition(kRow[p_from][p_to]);
 	return true;
@@ -194,4 +192,4 @@ bool decode_capsule_pose_table(std::span<const uint8_t> p_blob, CapsulePoseTable
 	return true;
 }
 
-} // namespace bf3::core::gameplay
+}

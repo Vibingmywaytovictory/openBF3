@@ -1,9 +1,3 @@
-// ClientSession: the M1 client on its own thread (docs/design/m1.md §7.5, §9; client_session.h has the per-tick
-// order). Godot-free: ENet client, netsim both ways, the command clock, prediction and reconciliation through
-// sim::catch_up, the others' interpolation buffer, and the double-buffered PresentationFrame.
-//
-// The visual error smoothing follows IW4L's predicted_error.rs (ERROR_DECAY_MS 100, snap below 0.1 IW units),
-// the user's own Apache-2.0 code; the clock reset idea follows IW4L's frame_clock.rs (docs §7.5, §9.3).
 #include "bf3/host/client_session.h"
 
 #include "instance_registry.h"
@@ -28,16 +22,14 @@ namespace bf3::host {
 
 namespace {
 
-// H hygiene: pins instances against their destructor while stop_all is inside them (instance_registry.h).
 detail::InstanceRegistry<ClientSession> g_registry;
 
 constexpr double kNsPerTick = 1e9 / double(sim::kSimHz);
 constexpr double kMsPerTick = 1000.0 / double(sim::kSimHz);
-// A client thread that fell more than this many ticks behind its clock (a stall) jumps to the clock instead of
-// predicting every missed tick; the base rule then fills the gap through catch_up (docs §9.2).
+
 constexpr uint32_t kMaxBurstTicks = 8;
-constexpr size_t kTrackSamples = 8; // snapshot samples kept per other soldier
-constexpr size_t kSentTimes = 1024; // send times kept for the RTT echo
+constexpr size_t kTrackSamples = 8;
+constexpr size_t kSentTimes = 1024;
 constexpr uint64_t kTrackTimeoutNs = 1'000'000'000ull;
 
 float length3(const sim::Vec3 &p_v) {
@@ -54,12 +46,6 @@ void set_error(ClientStats &r_stats, const std::string &p_text) {
 	r_stats.last_error[n] = '\0';
 }
 
-// Equal within the reconcile epsilons (docs §9.2): positions and velocities within epsilon, every discrete field
-// equal, the floats that are not positions within 1e-3. R2 (docs/design/m2a.md §8.2, §15; cl): what a server hit
-// writes (sim::weapons::apply_damage: the health, the tick's damage and the kDamaged event) is left out, since a hit
-// is not a motor mismatch; cl_after_match moves the ring's health instead (health_rebases). The motor's own fall
-// damage stays covered: it follows from kLanded, impact_speed and protect_ticks, which are compared. A death changes
-// the mode and the flags and reconciles as in M1.
 bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, float p_pos_eps, float p_vel_eps) {
 	const uint16_t events_a = uint16_t(p_a.events & ~sim::soldier_events::kDamaged);
 	const uint16_t events_b = uint16_t(p_b.events & ~sim::soldier_events::kDamaged);
@@ -75,11 +61,10 @@ bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, fl
 	return std::fabs(p_a.impact_speed - p_b.impact_speed) <= 1e-3f;
 }
 
-} // namespace
+}
 
 size_t present_others(const PresentationFrame &p_frame, uint64_t p_now_ns, std::span<PresentedSoldier> r_out, uint64_t *r_extrapolated) {
-	// R1 (docs/design/m2a.md §6.1, §15; cl): the Hermite body is lc's net::sample_other now, called per soldier by the
-	// counting overload (the M2a cl block at the end of this file), so the client draws what the server rewinds to.
+
 	PresentOthersCounts counts;
 	const size_t n = present_others(p_frame, p_now_ns, r_out, counts);
 	if (r_extrapolated != nullptr) {
@@ -98,7 +83,7 @@ struct ClientSession::Impl {
 		bool used = false;
 		uint8_t generation = 0;
 		uint64_t last_seen_ns = 0;
-		std::deque<OtherSample> samples; // by server tick, oldest first
+		std::deque<OtherSample> samples;
 	};
 	struct SentTime {
 		uint32_t sequence = 0;
@@ -122,23 +107,21 @@ struct ClientSession::Impl {
 
 	std::thread thread;
 	std::mutex lifecycle_mutex;
-	bool started = false; // one connection per ClientSession (the client-thread state below is not reset)
+	bool started = false;
 	std::atomic<bool> stop_requested{ false };
 	std::atomic<bool> running{ false };
 
-	// Handoffs with other threads.
 	mutable std::mutex input_mutex;
 	InputSample input;
 	mutable std::mutex frame_mutex;
 	std::unique_ptr<PresentationFrame> shared_frame = std::make_unique<PresentationFrame>();
 	std::mutex debug_mutex;
 	std::deque<net::DebugRequest> debug_out;
-	std::deque<net::KitSelect> kit_out; // M2a w3 [G4]: send_kit_select's queue (under debug_mutex)
+	std::deque<net::KitSelect> kit_out;
 	std::deque<net::DebugReport> reports;
 	std::atomic<int32_t> shift_request{ 0 };
 	std::atomic<uint32_t> stall_request_ms{ 0 };
 
-	// ---- client thread only ----
 	std::unique_ptr<PresentationFrame> build = std::make_unique<PresentationFrame>();
 	ClientStats stats;
 	uint64_t serial = 0;
@@ -148,12 +131,12 @@ struct ClientSession::Impl {
 	uint8_t divisor = 2;
 	uint64_t hello_ns = 0;
 	double hello_rtt_ms = 0;
-	// The command clock: the tick being commanded at time t is base_ticks + (t - base_ns) * rate.
+
 	bool clock_running = false;
 	double clock_base_ticks = 0;
 	uint64_t clock_base_ns = 0;
 	double rate_scale = 1.0;
-	sim::Tick next_tick = 0; // C: the tick about to be predicted
+	sim::Tick next_tick = 0;
 	bool holdoff = true;
 	uint32_t holdoff_sequence = 1;
 	std::deque<int32_t> reports64;
@@ -163,18 +146,18 @@ struct ClientSession::Impl {
 	uint64_t candidate_since_ns = 0;
 	std::deque<RttSample> rtt_window;
 	bool rtt_valid = false;
-	// The newest authoritative tick and when it arrived (the clock estimate).
+
 	sim::Tick anchor_tick = 0;
 	uint64_t anchor_ns = 0;
-	// Commands
+
 	uint32_t next_sequence = 1;
-	std::deque<sim::Command> history; // the last kCommandsPerPacket commands made and sent, newest last
+	std::deque<sim::Command> history;
 	std::array<SentTime, kSentTimes> sent_times{};
 	sim::Command last_made;
 	bool jump_seen = false;
 	uint32_t last_jump_presses = 0;
 	sim::Pose keep_pose = sim::Pose::Stand;
-	// Own soldier
+
 	bool have_own = false;
 	uint32_t own_life = 0;
 	sim::SoldierState spawn_state;
@@ -183,38 +166,32 @@ struct ClientSession::Impl {
 	sim::Vec3 visual_offset{};
 	uint32_t events_acc = 0;
 	uint16_t server_events_acc = 0;
-	// Snapshots
+
 	bool have_snapshot = false;
 	uint16_t newest_seq = 0;
 	uint32_t ack_bits = 0;
 	bool pending_snapshot_valid = false;
 	net::Snapshot pending_snapshot;
 	std::vector<sim::SoldierState> pending_spawned;
-	// Others: the received server time and the interpolation delay (docs §9.4)
+
 	std::array<Track, net::kMaxSlots> tracks;
 	bool recv_valid = false;
-	double recv_offset = 0; // received server ticks - local ticks (filtered)
-	double recv_rate = 0; // the filter's slew this tick (-0.05..0.05)
-	std::deque<std::pair<uint64_t, double>> offsets; // (arrival ns, server tick - local ticks) over the last second
+	double recv_offset = 0;
+	double recv_rate = 0;
+	std::deque<std::pair<uint64_t, double>> offsets;
 	uint64_t last_arrival_ns = 0;
 	double interval_mean_ms = 0;
 	double interval_mad_ms = 0;
 	uint64_t last_tick_ns = 0;
 
-	// ---- M2a cl (docs/design/m2a.md §6.2, §6.3, §7.2-§7.4, §8; as built: docs/design/m2a-cl.md) ---------------------
-	// Client thread unless noted. The hooks are defined in the M2a cl block at the end of this file; the calls sit at
-	// the named insertion points (handle_datagram, publish) and the ones m2a-cl.md lists.
-
-	// ReceivedRecords (§6.3): per seq of the last 64, the records exactly as they arrived, split by the datagram that
-	// carried them (the main Snapshot or its SnapshotOthers), with the arrival marks the acks and the shot views read.
 	struct ClSeq {
 		bool valid = false;
 		uint16_t seq = 0;
 		uint32_t tick = 0;
-		bool main = false; // the Snapshot of this seq arrived
-		bool others = false; // its SnapshotOthers arrived
+		bool main = false;
+		bool others = false;
 		std::vector<net::OtherSoldier> main_records, others_records;
-		std::array<uint8_t, net::kMaxSlots> main_at{}, others_at{}; // record index per slot, 0xFF absent
+		std::array<uint8_t, net::kMaxSlots> main_at{}, others_at{};
 		std::array<uint64_t, 2> main_slots{}, others_slots{};
 	};
 	struct ClRecords final : ReceivedRecordSource {
@@ -229,7 +206,7 @@ struct ClientSession::Impl {
 			const ClSeq *e = find(p_seq);
 			return e != nullptr && (p_main ? e->main : e->others);
 		}
-		// Bit i: the part of seq p_newest - i arrived (i < 32).
+
 		uint32_t mask(uint16_t p_newest, bool p_main) const;
 		size_t candidates(const ShotView &p_view, uint8_t p_target, std::span<net::TimedOther> r_out) const override;
 		bool view_tick(uint16_t p_seq, uint32_t &r_tick) const override;
@@ -239,7 +216,7 @@ struct ClientSession::Impl {
 		Impl *m = nullptr;
 		void emitted(const sim::Command &p_command, const sim::weapons::WeaponTickOutput &p_output, const sim::WeaponPredictionEntry &p_after) override;
 	};
-	// The received state of a command when it was first sent (§6.3), by tick.
+
 	struct ClCommandView {
 		bool valid = false;
 		sim::Tick tick = 0;
@@ -266,18 +243,18 @@ struct ClientSession::Impl {
 	std::array<ClLife, 8> cl_lives{};
 	uint8_t cl_kit = 0;
 	uint8_t cl_team = 0;
-	bool cl_wire_valid = false; // own_weapons of the newest Snapshot, at cl_wire_tick
+	bool cl_wire_valid = false;
 	net::WeaponsWire cl_wire;
 	sim::Tick cl_wire_tick = 0;
-	sim::Tick cl_newest_tick = 0; // the server tick of newest_seq's Snapshot
+	sim::Tick cl_newest_tick = 0;
 	std::array<ClCommandView, kClCommandViews> cl_views{};
 	bool cl_fire_seen = false;
 	uint32_t cl_last_fire_presses = 0;
-	bool cl_fired = false; // a firing command was sent within the last second (late_sample)
+	bool cl_fired = false;
 	uint16_t cl_fired_view_seq = 0;
 	uint64_t cl_fired_ns = 0;
-	PresentationEvents cl_events; // the main thread drains it
-	std::mutex cl_log_mutex; // the logs below are moved out by other threads
+	PresentationEvents cl_events;
+	std::mutex cl_log_mutex;
 	std::vector<PredictedShot> cl_shot_log;
 	std::vector<PredictedTimed> cl_timed_log;
 	std::vector<OwnTestSample> cl_sample_log;
@@ -286,7 +263,7 @@ struct ClientSession::Impl {
 	std::vector<net::OtherPose> cl_poses;
 
 	void cl_push(const PresentEvent &p_event);
-	bool cl_match_info(const net::MatchInfo &p_match, uint64_t p_now); // false: refused (or a repeat), stop handling
+	bool cl_match_info(const net::MatchInfo &p_match, uint64_t p_now);
 	void cl_refuse(const char *p_reason);
 	static bool cl_slot_ok(uint32_t p_slot);
 	bool cl_def_ok(uint32_t p_def) const;
@@ -328,7 +305,7 @@ struct ClientSession::Impl {
 		return ns <= 0.0 ? 0u : uint64_t(ns);
 	}
 	double rtt_for_estimate_ms() const { return rtt_valid ? stats.rtt_min_ms : hello_rtt_ms; }
-	// The clock estimate (docs §7.5): the newest server tick + the time since it arrived + RTT + the target buffer.
+
 	double estimate(uint64_t p_now) const {
 		const double since = p_now >= anchor_ns ? double(p_now - anchor_ns) / kNsPerTick : 0.0;
 		return double(anchor_tick) + since + rtt_for_estimate_ms() / kMsPerTick + double(target);
@@ -336,7 +313,7 @@ struct ClientSession::Impl {
 
 	void begin_holdoff() {
 		holdoff = true;
-		holdoff_sequence = next_sequence; // the first command sent after the reset
+		holdoff_sequence = next_sequence;
 		reports8.clear();
 		reports64.clear();
 	}
@@ -345,7 +322,7 @@ struct ClientSession::Impl {
 		const double e = estimate(p_now);
 		const sim::Tick c = sim::Tick(std::max(0.0, std::floor(e)));
 		if (c < next_tick) {
-			ring->discard_after(c - 1u); // a backward reset re-predicts the ticks it sends again
+			ring->discard_after(c - 1u);
 		}
 		rate_scale = 1.0;
 		set_clock(e, p_now);
@@ -353,8 +330,6 @@ struct ClientSession::Impl {
 		++stats.clock_resets;
 		begin_holdoff();
 	}
-
-	// ---- sending ------------------------------------------------------------------------------------------------
 
 	void submit(uint8_t p_channel, std::vector<uint8_t> p_bytes, uint64_t p_now) {
 		if (p_bytes.empty()) {
@@ -381,8 +356,6 @@ struct ClientSession::Impl {
 			host->flush();
 		}
 	}
-
-	// ---- receiving ----------------------------------------------------------------------------------------------
 
 	void rtt_sample(const net::Snapshot &p_snap, uint64_t p_now) {
 		if (next_sequence <= 1) {
@@ -454,7 +427,7 @@ struct ClientSession::Impl {
 			auto at = std::lower_bound(t.samples.begin(), t.samples.end(), s.server_tick,
 					[](const OtherSample &a, sim::Tick b) { return a.server_tick < b; });
 			if (at != t.samples.end() && at->server_tick == s.server_tick) {
-				continue; // a duplicate
+				continue;
 			}
 			t.samples.insert(at, s);
 			while (t.samples.size() > kTrackSamples) {
@@ -475,7 +448,7 @@ struct ClientSession::Impl {
 					return;
 				}
 				if (!cl_match_info(*m, p_now)) {
-					return; // M2a cl: refused (weapon or kit table mismatch), disconnected before Ready
+					return;
 				}
 				have_match = true;
 				slot = m->slot;
@@ -497,8 +470,8 @@ struct ClientSession::Impl {
 			case net::MessageType::Spawned: {
 				core::Result<net::Spawned> s = net::decode_spawned(p_d.bytes);
 				if (s && pending_spawned.size() < 16) {
-					cl_spawned(*s); // M2a cl: the life's kit and team
-					m2b_spawned(*s); // M2b nt: Spawned::revived
+					cl_spawned(*s);
+					m2b_spawned(*s);
 					if (s->state.tick > anchor_tick) {
 						anchor_tick = s->state.tick;
 						anchor_ns = p_now;
@@ -513,7 +486,7 @@ struct ClientSession::Impl {
 					return;
 				}
 				++stats.snapshots_received;
-				cl_snapshot(*s, p_now); // M2a cl: ReceivedRecords, own weapons, late_sample, generation_reorder
+				cl_snapshot(*s, p_now);
 				server_events_acc = uint16_t(server_events_acc | s->own_events);
 				rtt_sample(*s, p_now);
 				if (have_snapshot && !net::seq_newer(s->seq, newest_seq)) {
@@ -535,7 +508,7 @@ struct ClientSession::Impl {
 				have_snapshot = true;
 				newest_seq = s->seq;
 				if (s->server_tick >= anchor_tick) {
-					anchor_tick = s->server_tick; // the clock estimate's anchor: the newest server tick and its arrival
+					anchor_tick = s->server_tick;
 					anchor_ns = p_now;
 				}
 				received_time_sample(s->server_tick, p_now);
@@ -550,7 +523,7 @@ struct ClientSession::Impl {
 					std::lock_guard lock(debug_mutex);
 					reports.push_back(std::move(*r));
 					while (reports.size() > 64) {
-						reports.pop_front(); // nobody is taking them
+						reports.pop_front();
 					}
 				}
 				return;
@@ -566,20 +539,18 @@ struct ClientSession::Impl {
 				connected = false;
 				return;
 			default:
-				if (m2b_datagram(*type, p_d)) { // M2b nt: MatchState, PlayerList
-					return; // M2b nt
-				} // M2b nt
-				cl_datagram(*type, p_d, p_now); // M2a cl: SnapshotOthers, ShotEvents, CombatEvents
+				if (m2b_datagram(*type, p_d)) {
+					return;
+				}
+				cl_datagram(*type, p_d, p_now);
 				return;
 		}
 	}
 
-	// ---- the clock (docs §7.5) --------------------------------------------------------------------------------
-
 	void buffer_report(const net::Snapshot &p_snap, uint64_t p_now) {
 		stats.command_buffer_ticks = p_snap.command_buffer_ticks;
 		if (holdoff) {
-			// Reports for commands sent before the last reset still describe the old clock.
+
 			if (net::seq_newer(uint16_t(holdoff_sequence & 0xFFFFu), p_snap.sequence_echo) || next_sequence <= holdoff_sequence) {
 				return;
 			}
@@ -594,7 +565,7 @@ struct ClientSession::Impl {
 		while (reports8.size() > 8) {
 			reports8.pop_front();
 		}
-		// Target: target_buffer_ticks + max(0, ceil(2 MAD - 1)), adopted after target_hold_s.
+
 		double mean = 0;
 		for (int32_t r : reports64) {
 			mean += r;
@@ -613,12 +584,12 @@ struct ClientSession::Impl {
 		} else if (want != target && double(p_now - candidate_since_ns) >= double(config.target_hold_s) * 1e9) {
 			target = want;
 		}
-		// Reset beyond clock_reset_ms.
+
 		if (std::fabs(double(report) - double(target)) * kMsPerTick > double(config.clock_reset_ms)) {
 			reset_clock(p_now);
 			return;
 		}
-		// Proportional slew on the smoothed error, outside the deadband.
+
 		double err = 0;
 		for (int32_t r : reports8) {
 			err += r;
@@ -632,8 +603,6 @@ struct ClientSession::Impl {
 		set_rate(1.0 + adjust, p_now);
 	}
 
-	// ---- reconciliation (docs §9.2) -----------------------------------------------------------------------------
-
 	void run_catch_up(const sim::SoldierState &p_base) {
 		const sim::CatchUpStats c = sim::catch_up(motor, p_base, *ring, next_tick);
 		stats.replayed_ticks += c.steps;
@@ -641,13 +610,13 @@ struct ClientSession::Impl {
 
 	void authoritative(const sim::SoldierState &p_s, uint64_t p_now) {
 		if (have_own && p_s.life < own_life) {
-			return; // an older life
+			return;
 		}
 		const bool spawn = !have_own || p_s.life > own_life;
 		if (!spawn && have_auth && p_s.tick <= last_auth.tick) {
-			return; // not newer than what we have
+			return;
 		}
-		// The prediction never runs at or behind an authoritative tick (startup, a stall, Spawned early).
+
 		if (p_s.tick >= next_tick) {
 			const double e = estimate(p_now);
 			const sim::Tick c = std::max(sim::Tick(std::max(0.0, std::floor(e))), p_s.tick + 1u);
@@ -666,10 +635,9 @@ struct ClientSession::Impl {
 			have_own = true;
 			spawn_state = p_s;
 			keep_pose = p_s.target_pose;
-			// The server's last command at the spawn tick is the hold command (whatever the ring held for that
-			// tick belonged to the old life), so the catch-up repeats it for ticks the client never sent.
+
 			ring->put({ sim::hold_command(p_s), p_s, false });
-			cl_weapons_spawn(p_s); // M2a cl: the life's weapons at the spawn tick
+			cl_weapons_spawn(p_s);
 			run_catch_up(p_s);
 			++stats.spawns;
 			stats.spawned = true;
@@ -679,7 +647,7 @@ struct ClientSession::Impl {
 		const sim::PredictionEntry *e = ring->find(p_s.tick);
 		if (e == nullptr) {
 			++stats.ring_misses;
-			cl_weapons_ring_miss(p_s); // M2a cl
+			cl_weapons_ring_miss(p_s);
 			run_catch_up(p_s);
 			return;
 		}
@@ -687,7 +655,7 @@ struct ClientSession::Impl {
 			if (config.debug_hash_compare && sim::soldier_state_hash(e->state) != sim::soldier_state_hash(p_s)) {
 				++stats.hash_mismatches;
 			}
-			cl_after_match(p_s); // M2a cl: weapons by wire view, R2's health rebase
+			cl_after_match(p_s);
 			return;
 		}
 		++stats.reconciliations;
@@ -695,7 +663,7 @@ struct ClientSession::Impl {
 		stats.last_reconcile_ns = p_now;
 		const sim::PredictionEntry *before = next_tick > 0 ? ring->find(next_tick - 1u) : nullptr;
 		const sim::Vec3 old_pos = before != nullptr ? before->state.position : p_s.position;
-		cl_weapons_reconcile(p_s); // M2a cl
+		cl_weapons_reconcile(p_s);
 		run_catch_up(p_s);
 		const sim::PredictionEntry *after = next_tick > 0 ? ring->find(next_tick - 1u) : nullptr;
 		const sim::Vec3 new_pos = after != nullptr ? after->state.position : p_s.position;
@@ -715,8 +683,6 @@ struct ClientSession::Impl {
 		}
 	}
 
-	// ---- one client tick (client_session.h steps 2-9) -----------------------------------------------------------
-
 	sim::Command sample_command(sim::Tick p_tick) {
 		InputSample s;
 		{
@@ -730,7 +696,7 @@ struct ClientSession::Impl {
 		jump_seen = true;
 		last_jump_presses = s.jump_presses;
 		if (s.life < own_life) {
-			// The mapper has not adopted this life's spawn view: command the hold command's content (docs §8.2).
+
 			c.yaw = spawn_state.yaw;
 			c.pitch = spawn_state.pitch;
 			c.pose = spawn_state.target_pose;
@@ -759,7 +725,7 @@ struct ClientSession::Impl {
 	}
 
 	void client_tick(uint64_t p_now) {
-		// Visual offset decay (docs §9.3).
+
 		const double dt_ms = last_tick_ns != 0 && p_now > last_tick_ns ? double(p_now - last_tick_ns) / 1e6 : kMsPerTick;
 		last_tick_ns = p_now;
 		const float decay = float(std::exp(-std::min(dt_ms, 1000.0) / std::max(1e-3, double(config.error_decay_ms))));
@@ -769,7 +735,7 @@ struct ClientSession::Impl {
 		if (length3(visual_offset) < config.snap_below_m) {
 			visual_offset = {};
 		}
-		// 2-3. the newest snapshot: buffer report (slew / reset), then the own states in arrival order.
+
 		if (pending_snapshot_valid && pending_snapshot.own.has_value() && have_own) {
 			buffer_report(pending_snapshot, p_now);
 		}
@@ -786,8 +752,8 @@ struct ClientSession::Impl {
 		const sim::Tick c = next_tick;
 		const sim::PredictionEntry *made = nullptr;
 		sim::Command cmd;
-		if (have_own && c > 0 && !m2b_unspawned(c)) { // M2b nt: && !m2b_unspawned(c) (MatchState::unspawn_tick)
-			// 5. the base rule.
+		if (have_own && c > 0 && !m2b_unspawned(c)) {
+
 			if (ring->find(c - 1u) == nullptr) {
 				const sim::PredictionEntry *b = ring->newest_at_or_below(c - 1u);
 				const sim::SoldierState *base = (b != nullptr && b->state.life == own_life) ? &b->state : nullptr;
@@ -800,23 +766,23 @@ struct ClientSession::Impl {
 					++stats.base_fills;
 				}
 			}
-			// 6-7. sample and predict from ring[C - 1].
+
 			const sim::PredictionEntry *base = ring->find(c - 1u);
 			cmd = sample_command(c);
-			cl_command_made(cmd, p_now); // M2a cl: fire_presses, the view sample, the received state
-			m2b_command(cmd); // M2b nt: MatchState's restriction (net::restrict_command), as the server's [cmd]
+			cl_command_made(cmd, p_now);
+			m2b_command(cmd);
 			if (base == nullptr || cmd.tick != base->state.tick + 1u) {
 				++stats.step_precondition_failures;
 				assert(false && "ClientSession: prediction base missing");
 			} else {
 				sim::SoldierState state = base->state;
 				motor.step(state, cmd);
-				cl_predict_weapons(cmd, base->state, state); // M2a cl: the weapons after the motor step, first prediction
+				cl_predict_weapons(cmd, base->state, state);
 				events_acc |= state.events;
 				ring->put({ cmd, state, true });
 				made = ring->find(c);
 				last_made = cmd;
-				// 8. send the last kCommandsPerPacket commands of the send history.
+
 				history.push_back(cmd);
 				while (history.size() > net::kCommandsPerPacket) {
 					history.pop_front();
@@ -825,7 +791,7 @@ struct ClientSession::Impl {
 				net::CommandPacket p;
 				p.newest_snapshot = newest_seq;
 				p.snapshot_ack_bits = ack_bits;
-				p.others_ack_bits = cl_others_ack_bits(); // M2a cl
+				p.others_ack_bits = cl_others_ack_bits();
 				p.count = uint8_t(history.size());
 				for (size_t i = 0; i < history.size(); ++i) {
 					p.commands[i] = history[history.size() - 1 - i];
@@ -839,10 +805,8 @@ struct ClientSession::Impl {
 		publish(p_now, made, cmd);
 	}
 
-	// ---- presentation (docs §9.4, §9.5) -------------------------------------------------------------------------
-
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd) {
-		cl_publish_begin(p_now); // M2a cl: track_timeout
+		cl_publish_begin(p_now);
 		PresentationFrame &f = *build;
 		f.serial = ++serial;
 		f.publish_ns = p_now;
@@ -865,14 +829,14 @@ struct ClientSession::Impl {
 		server_events_acc = 0;
 		f.events = events_acc;
 		events_acc = 0;
-		// The others' clock: received server time (filtered arrival offsets) minus the interpolation delay.
+
 		recv_rate = 0;
 		if (recv_valid && !offsets.empty()) {
 			double lo = offsets.front().second;
 			for (const auto &o : offsets) {
 				lo = std::min(lo, o.second);
 			}
-			const double step = 0.05; // <= 5 % of a tick per tick
+			const double step = 0.05;
 			const double diff = lo - recv_offset;
 			const double moved = std::clamp(diff, -step, step);
 			recv_offset += moved;
@@ -910,8 +874,8 @@ struct ClientSession::Impl {
 			}
 		}
 		f.other_count = n;
-		cl_publish_end(f, p_now); // M2a cl: weapon views, newest seq, others_ahead, the remote world, stats
-		m2b_publish(f); // M2b nt: match, players, the own death stamp, own_unspawned
+		cl_publish_end(f, p_now);
+		m2b_publish(f);
 		stats.connected = connected;
 		stats.client_tick = next_tick;
 		stats.target_buffer_ticks = target;
@@ -924,7 +888,6 @@ struct ClientSession::Impl {
 		copy_frame(*shared_frame, f);
 	}
 
-	// Copies the used part of p_from (every field, the first other_count tracks).
 	static void copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from) {
 		constexpr size_t kOthersAt = offsetof(PresentationFrame, others);
 		constexpr size_t kOthersEnd = kOthersAt + sizeof(PresentationFrame::others);
@@ -937,21 +900,19 @@ struct ClientSession::Impl {
 		std::memcpy(to + kOthersEnd, from + kOthersEnd, sizeof(PresentationFrame) - kOthersEnd);
 	}
 
-	// ---- the thread ---------------------------------------------------------------------------------------------
-
 	void run() {
 		while (!stop_requested.load(std::memory_order_acquire)) {
 			if (const uint32_t stall = stall_request_ms.exchange(0); stall > 0) {
 				std::this_thread::sleep_for(std::chrono::milliseconds(stall));
 			}
 			if (const int32_t shift = shift_request.exchange(0); shift != 0 && clock_running) {
-				// A disturbance, not a reset: the clock rules must notice and reset once (host.session.unit).
+
 				const uint64_t now = net::monotonic_ns();
 				set_clock(clock_ticks(now) + double(shift), now);
 				next_tick = sim::Tick(int64_t(next_tick) + shift);
 			}
 			uint64_t now = net::monotonic_ns();
-			uint64_t deadline = now + 50'000'000ull; // at most 50 ms between loops
+			uint64_t deadline = now + 50'000'000ull;
 			if (clock_running && connected) {
 				deadline = std::min(deadline, tick_deadline_ns(next_tick));
 			}
@@ -962,7 +923,7 @@ struct ClientSession::Impl {
 				deadline = std::min(deadline, r);
 			}
 			const uint32_t wait_ms = deadline > now ? uint32_t(std::min<uint64_t>((deadline - now) / 1'000'000ull, 50)) : 0u;
-			// Service ENet: wait for the first event up to the deadline, then drain.
+
 			net::Host::Event ev;
 			int got = host->service(wait_ms, ev);
 			while (got > 0) {
@@ -999,23 +960,23 @@ struct ClientSession::Impl {
 					submit(net::kChannelReliable, net::encode_debug(q), now);
 				}
 			}
-			{ // M2a w3 [G4]: the KitSelects queued by send_kit_select, in order
-				std::deque<net::KitSelect> kits; // M2a w3 [G4]
-				{ // M2a w3 [G4]
-					std::lock_guard lock(debug_mutex); // M2a w3 [G4]
-					kits.swap(kit_out); // M2a w3 [G4]
-				} // M2a w3 [G4]
-				for (const net::KitSelect &k : kits) { // M2a w3 [G4]
-					submit(net::kChannelReliable, net::encode_kit_select(k), now); // M2a w3 [G4]
-				} // M2a w3 [G4]
-			} // M2a w3 [G4]
-			m2b_send(now); // M2b nt: send_spawn_request's queue
+			{
+				std::deque<net::KitSelect> kits;
+				{
+					std::lock_guard lock(debug_mutex);
+					kits.swap(kit_out);
+				}
+				for (const net::KitSelect &k : kits) {
+					submit(net::kChannelReliable, net::encode_kit_select(k), now);
+				}
+			}
+			m2b_send(now);
 			release_out(now);
 			if (clock_running && connected) {
 				const double clock = clock_ticks(now);
 				if (clock >= double(next_tick)) {
 					if (clock - double(next_tick) > double(kMaxBurstTicks)) {
-						next_tick = sim::Tick(std::floor(clock)); // a stall: jump, the base rule fills the gap
+						next_tick = sim::Tick(std::floor(clock));
 					}
 					client_tick(now);
 				}
@@ -1031,38 +992,35 @@ struct ClientSession::Impl {
 		}
 	}
 
-	// ---- M2b nt (docs/design/m2b.md §2.6 #12, §3.4, §3.6, §3.7; as built: docs/design/m2b-nt.md §3) ----------------
-	// Client thread unless noted. Defined in the M2b nt block at the end of this file; called at the named insertion
-	// points (handle_datagram, client_tick, publish, run, cl_push, cl_match_info, cl_datagram, cl_predict_weapons).
-	bool m2b_match_valid = false; // M2b nt
-	net::MatchState m2b_match; // M2b nt
-	PlayerTable m2b_players; // M2b nt
-	bool m2b_death_valid = false; // M2b nt: the own death's stamp holds for the life m2b_death_life
-	uint32_t m2b_death_life = 0; // M2b nt
-	sim::Tick m2b_respawn_tick = 0; // M2b nt
-	sim::Tick m2b_revive_until = 0; // M2b nt
-	bool m2b_unspawned_now = false; // M2b nt: the newest client tick did not predict (own_unspawned)
-	std::array<uint32_t, 8> m2b_revived_lives{}; // M2b nt: the lives Spawned::revived named, by life % 8 (0 = none)
-	OwnShotIds m2b_shot_ids; // M2b nt
-	PresentationEvents m2b_own_events; // M2b nt: step_own's events, drained through cl_push (the presented ids)
-	std::deque<uint8_t> m2b_spawn_out; // M2b nt: send_spawn_request's queue (under debug_mutex)
-	bool m2b_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d); // M2b nt: true = handled here
-	void m2b_spawned(const net::Spawned &p_spawned); // M2b nt
-	void m2b_combat(const net::CombatEvents &p_events); // M2b nt
-	bool m2b_rules(const net::MatchInfo &p_match); // M2b nt: false = refused (cl_refuse)
-	void m2b_command(sim::Command &r_command); // M2b nt
-	bool m2b_unspawned(sim::Tick p_tick); // M2b nt: once per client tick
-	void m2b_push(PresentEvent &r_event); // M2b nt
-	void m2b_drain_own(); // M2b nt
-	void m2b_send(uint64_t p_now); // M2b nt
-	void m2b_publish(PresentationFrame &r_frame); // M2b nt
+	bool m2b_match_valid = false;
+	net::MatchState m2b_match;
+	PlayerTable m2b_players;
+	bool m2b_death_valid = false;
+	uint32_t m2b_death_life = 0;
+	sim::Tick m2b_respawn_tick = 0;
+	sim::Tick m2b_revive_until = 0;
+	bool m2b_unspawned_now = false;
+	std::array<uint32_t, 8> m2b_revived_lives{};
+	OwnShotIds m2b_shot_ids;
+	PresentationEvents m2b_own_events;
+	std::deque<uint8_t> m2b_spawn_out;
+	bool m2b_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d);
+	void m2b_spawned(const net::Spawned &p_spawned);
+	void m2b_combat(const net::CombatEvents &p_events);
+	bool m2b_rules(const net::MatchInfo &p_match);
+	void m2b_command(sim::Command &r_command);
+	bool m2b_unspawned(sim::Tick p_tick);
+	void m2b_push(PresentEvent &r_event);
+	void m2b_drain_own();
+	void m2b_send(uint64_t p_now);
+	void m2b_publish(PresentationFrame &r_frame);
 };
 
 ClientSession::ClientSession() :
 		impl_(std::make_unique<Impl>()) {}
 
 ClientSession::~ClientSession() {
-	g_registry.retire(this); // first: a concurrent stop_all is done with this instance once it returns
+	g_registry.retire(this);
 	stop();
 }
 
@@ -1077,7 +1035,7 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 	if (p_config.port == 0) {
 		return core::make_error("ClientSession: no server port");
 	}
-	// A fresh state for this run (the handoff mutexes and the lifecycle mutex stay).
+
 	Impl &m = *impl_;
 	m.config = p_config;
 	m.level = p_level;
@@ -1093,7 +1051,7 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 	m.ring = std::make_unique<sim::PredictionRing>(m.config.prediction_ring);
 	m.out = net::NetSim(p_config.netsim);
 	net::NetSimConfig in_config = p_config.netsim;
-	in_config.seed = p_config.netsim.seed * 0x9E3779B97F4A7C15ull + 0x632BE59BD9B4E019ull; // an independent stream
+	in_config.seed = p_config.netsim.seed * 0x9E3779B97F4A7C15ull + 0x632BE59BD9B4E019ull;
 	m.in = net::NetSim(in_config);
 	std::string err;
 	m.host = net::Host::create_client(net::kChannelCount, &err);
@@ -1130,7 +1088,7 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 	hello.name = p_config.name;
 	m.hello_ns = now;
 	m.submit(net::kChannelReliable, net::encode_hello(hello), now);
-	// M2a cl: Ready goes out on MatchInfo, after the weapon table check (cl_match_info; E6).
+
 	m.release_out(now);
 	m.running = true;
 	m.started = true;
@@ -1201,13 +1159,8 @@ size_t ClientSession::stop_all() {
 	return g_registry.for_each_pinned([](ClientSession *p_session) { p_session->stop(); });
 }
 
-} // namespace bf3::host
+}
 
-// ---- M2a cl (docs/design/m2a.md §6.1-§6.3, §7.2-§7.4, §8; as built: docs/design/m2a-cl.md) -------------------------
-// The client's gunplay: the weapon table built and checked on MatchInfo (refused before Ready on a mismatch), the own
-// weapons predicted beside the motor (sim::WeaponLane; catch_up replays them) and reconciled against the Snapshot's
-// wire view, R2's health rebase, the view sample and the received state of every command, ReceivedRecords and the
-// SnapshotOthers merge with its ack bits, ShotEvents / CombatEvents into PresentationEvents and the cosmetic worlds.
 #include "bf3/host/gunplay.h"
 #include "bf3/net/other_sample.h"
 #include "bf3/sim/weapons/weapon_rng.h"
@@ -1255,7 +1208,7 @@ void copy3(float (&r_to)[3], const sim::Vec3 &p_from) {
 	}
 }
 
-} // namespace
+}
 
 double present_render_ticks(const PresentationFrame &p_frame, uint64_t p_now_ns) {
 	const double dt_ns = p_now_ns >= p_frame.publish_ns ? double(p_now_ns - p_frame.publish_ns) : -double(p_frame.publish_ns - p_now_ns);
@@ -1361,13 +1314,11 @@ core::Result<std::shared_ptr<const ClientGunplayInputs>> client_gunplay_inputs(c
 	return std::shared_ptr<const ClientGunplayInputs>(std::move(in));
 }
 
-// ---- ReceivedRecords ----------------------------------------------------------------------------------------------
-
 void ClientSession::Impl::ClRecords::add(uint16_t p_seq, uint32_t p_tick, bool p_main, std::span<const net::OtherSoldier> p_records) {
 	ClSeq &e = ring[p_seq % kSeqs];
 	if (e.valid && e.seq != p_seq) {
 		if (net::seq_newer(e.seq, p_seq)) {
-			return; // older than what its slot holds now (more than 64 seqs late)
+			return;
 		}
 		e.valid = false;
 	}
@@ -1385,7 +1336,7 @@ void ClientSession::Impl::ClRecords::add(uint16_t p_seq, uint32_t p_tick, bool p
 	}
 	bool &arrived = p_main ? e.main : e.others;
 	if (arrived) {
-		return; // a duplicate
+		return;
 	}
 	arrived = true;
 	std::vector<net::OtherSoldier> &records = p_main ? e.main_records : e.others_records;
@@ -1458,8 +1409,6 @@ void ClientSession::Impl::ClRecords::slots_in(const ShotView &p_view, std::array
 	}
 }
 
-// ---- emission -----------------------------------------------------------------------------------------------------
-
 void ClientSession::Impl::ClEmit::emitted(const sim::Command &p_command, const sim::weapons::WeaponTickOutput &p_output,
 		const sim::WeaponPredictionEntry &p_after) {
 	(void)p_after;
@@ -1522,20 +1471,18 @@ void ClientSession::Impl::ClEmit::emitted(const sim::Command &p_command, const s
 }
 
 void ClientSession::Impl::cl_push(const PresentEvent &p_event) {
-	PresentEvent e = p_event; // M2b nt: the own shots' presented ids, the revived spawn
-	m2b_push(e); // M2b nt
-	if (!cl_events.push(e)) { // M2b nt: e (was p_event)
+	PresentEvent e = p_event;
+	m2b_push(e);
+	if (!cl_events.push(e)) {
 		++stats.events_overflow;
 	}
 }
-
-// ---- MatchInfo: the table, its check, Ready ----------------------------------------------------------------------
 
 void ClientSession::Impl::cl_refuse(const char *p_reason) {
 	have_match = true;
 	stats.refused = true;
 	set_error(stats, p_reason);
-	// Disconnect at once (no Ready, nothing predicted): Bye straight on ENet, past the netsim, as run() does at exit.
+
 	if (host != nullptr && connected) {
 		const std::vector<uint8_t> bye = net::encode_bye();
 		host->send(peer, net::kChannelReliable, bye.data(), bye.size(), net::Host::SendMode::Reliable);
@@ -1543,7 +1490,7 @@ void ClientSession::Impl::cl_refuse(const char *p_reason) {
 		host->disconnect_all();
 	}
 	connected = false;
-	// No tick publishes after this (client_tick runs only while connected): hand the refusal to stats() here.
+
 	stats.connected = false;
 	std::lock_guard lock(frame_mutex);
 	shared_frame->stats = stats;
@@ -1551,12 +1498,12 @@ void ClientSession::Impl::cl_refuse(const char *p_reason) {
 
 bool ClientSession::Impl::cl_match_info(const net::MatchInfo &p_match, uint64_t p_now) {
 	stats.slot = p_match.slot;
-	if (!m2b_rules(p_match)) { // M2b nt: the rules_flags check (m2b.md §3.7)
-		return false; // M2b nt
-	} // M2b nt
+	if (!m2b_rules(p_match)) {
+		return false;
+	}
 	if (p_match.weapon_hash != 0) {
 		if (config.gunplay == nullptr && config.gunplay_from_level && level->gunplay != nullptr) {
-			// The level's own tables (sv's GunplayLevel): what the server's Gunplay builds its table from.
+
 			core::Result<std::shared_ptr<const ClientGunplayInputs>> own = client_gunplay_inputs(*level);
 			if (!own) {
 				++stats.weapon_hash_mismatch;
@@ -1619,8 +1566,6 @@ bool ClientSession::Impl::cl_match_info(const net::MatchInfo &p_match, uint64_t 
 	return true;
 }
 
-// ---- arrivals -----------------------------------------------------------------------------------------------------
-
 void ClientSession::Impl::cl_spawned(const net::Spawned &p_spawned) {
 	ClLife &l = cl_lives[p_spawned.state.life % cl_lives.size()];
 	l.valid = true;
@@ -1628,13 +1573,13 @@ void ClientSession::Impl::cl_spawned(const net::Spawned &p_spawned) {
 	l.kit = p_spawned.kit;
 	l.team = p_spawned.team;
 	if (have_own && p_spawned.state.life == own_life) {
-		cl_kit = p_spawned.kit; // the snapshot carried the life first
+		cl_kit = p_spawned.kit;
 		cl_team = p_spawned.team;
 	}
 }
 
 void ClientSession::Impl::cl_note_arrival(uint16_t p_seq, uint64_t p_now) {
-	// late_sample (§6.3): an arrival the server's view of an already sent firing command may or may not include.
+
 	if (cl_fired && p_now - cl_fired_ns < 1'000'000'000ull && !net::seq_newer(p_seq, cl_fired_view_seq)) {
 		++stats.late_sample;
 	}
@@ -1647,7 +1592,7 @@ void ClientSession::Impl::cl_track_reorder(sim::Tick p_tick, std::span<const net
 		}
 		const Track &t = tracks[o.slot];
 		if (t.used && t.generation != o.generation && !t.samples.empty() && p_tick < t.samples.back().server_tick) {
-			++stats.generation_reorder; // add_others resets the drawn track to an older life
+			++stats.generation_reorder;
 		}
 	}
 }
@@ -1669,7 +1614,6 @@ void ClientSession::Impl::cl_snapshot(const net::Snapshot &p_snapshot, uint64_t 
 	}
 }
 
-// Hostile values that decode: a slot the snapshot space cannot name, a def outside this client's table.
 bool ClientSession::Impl::cl_slot_ok(uint32_t p_slot) {
 	return p_slot < net::kMaxSlots;
 }
@@ -1690,7 +1634,7 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 			cl_note_arrival(o->seq, p_now);
 			cl_track_reorder(o->server_tick, o->others);
 			cl_records.add(o->seq, o->server_tick, false, o->others);
-			// Into the drawn tracks by M1's rules (add_others: tick order, duplicates once, 8 newest, generation).
+
 			net::Snapshot as_snapshot;
 			as_snapshot.seq = o->seq;
 			as_snapshot.server_tick = o->server_tick;
@@ -1706,7 +1650,7 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 			}
 			for (const net::RemoteShot &r : e->shots) {
 				if (r.slot == slot) {
-					continue; // the owner predicted it (the server never sends it)
+					continue;
 				}
 				if (!cl_slot_ok(r.slot) || !cl_def_ok(r.def)) {
 					++stats.bad_gunplay_events;
@@ -1778,9 +1722,9 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				ev.id = d.shot_index;
 				ev.material = uint32_t(d.zone);
 				ev.time = d.time;
-				ev.value = d.killer_health; // M2b nt: the v3 stamp (presentation_events.h)
-				ev.extra = d.respawn_tick; // M2b nt
-				ev.seed = d.revive_until; // M2b nt
+				ev.value = d.killer_health;
+				ev.extra = d.respawn_tick;
+				ev.seed = d.revive_until;
 				cl_push(ev);
 				++stats.combat_deaths;
 			}
@@ -1802,15 +1746,13 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				cl_push(ev);
 				++stats.combat_detonations;
 			}
-			m2b_combat(*e); // M2b nt: the own death stamp, the revives
+			m2b_combat(*e);
 			return;
 		}
 		default:
 			return;
 	}
 }
-
-// ---- reconciliation of the weapons (§8.2) -------------------------------------------------------------------------
 
 bool ClientSession::Impl::cl_put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick) {
 	core::Result<sim::weapons::SoldierWeaponsState> w = net::weapons_from_wire(cl_wire, p_s.tick, slot, cl_table->defs.size());
@@ -1832,7 +1774,7 @@ void ClientSession::Impl::cl_weapons_spawn(const sim::SoldierState &p_s) {
 	}
 	const ClLife &l = cl_lives[p_s.life % cl_lives.size()];
 	const sim::Tick t = p_s.tick;
-	cl_lane->set_emitted_through(t); // the new life's ticks after the spawn are first predictions
+	cl_lane->set_emitted_through(t);
 	PresentEvent spawn;
 	spawn.kind = PresentKind::Spawn;
 	spawn.timeline = PresentTimeline::Predicted;
@@ -1840,7 +1782,7 @@ void ClientSession::Impl::cl_weapons_spawn(const sim::SoldierState &p_s) {
 	spawn.id = p_s.life;
 	spawn.time = sim::weapons::tick_end(t);
 	if (l.valid && l.life == p_s.life && l.team >= 1 && l.team <= kKitTeams && l.kit < kKitCount) {
-		// Spawned: the life's loadout, the shot index carried over from the previous life (spawn_soldier_weapons).
+
 		const KitLoadout &k = config.gunplay->kits.loadouts[size_t(l.team - 1)][l.kit];
 		sim::WeaponPredictionEntry e;
 		const sim::WeaponPredictionEntry *prev = cl_lane->newest_at_or_below(t);
@@ -1856,7 +1798,7 @@ void ClientSession::Impl::cl_weapons_spawn(const sim::SoldierState &p_s) {
 		cl_kit = l.kit;
 		cl_team = l.team;
 	} else if (cl_wire_at(t)) {
-		cl_put_wire(p_s, t); // the life arrived in a Snapshot before its Spawned
+		cl_put_wire(p_s, t);
 	}
 	spawn.aux = cl_kit;
 	spawn.extra = cl_team;
@@ -1890,9 +1832,7 @@ void ClientSession::Impl::cl_weapons_reconcile(const sim::SoldierState &p_s) {
 }
 
 void ClientSession::Impl::cl_after_match(const sim::SoldierState &p_s) {
-	// The motor matched within the epsilons (states_match leaves the health out, R2). The weapons: compare the wire
-	// view and replay both from S on a difference. The health: a server hit (or regeneration) is not a motor
-	// mismatch, so the ring's health moves by the difference from T on, without a replay.
+
 	bool replay = false;
 	if (cl_wire_at(p_s.tick) && p_s.life != 0 && p_s.mode != sim::MoveMode::Dead) {
 		const uint64_t before = stats.weapon_reconciliations + stats.weapon_ring_misses;
@@ -1900,7 +1840,7 @@ void ClientSession::Impl::cl_after_match(const sim::SoldierState &p_s) {
 		replay = stats.weapon_reconciliations + stats.weapon_ring_misses != before;
 	}
 	if (replay) {
-		run_catch_up(p_s); // S's health comes with it
+		run_catch_up(p_s);
 		return;
 	}
 	const sim::PredictionEntry *at = ring->find(p_s.tick);
@@ -1915,7 +1855,7 @@ void ClientSession::Impl::cl_after_match(const sim::SoldierState &p_s) {
 		}
 		sim::PredictionEntry moved = *e;
 		moved.state.health = t == p_s.tick ? p_s.health : moved.state.health + delta;
-		if (t == p_s.tick) { // the hit's own tick: its damage and kDamaged as the server wrote them
+		if (t == p_s.tick) {
 			moved.state.damage = p_s.damage;
 			moved.state.events = uint16_t((moved.state.events & ~sim::soldier_events::kDamaged) | (p_s.events & sim::soldier_events::kDamaged));
 		}
@@ -1923,8 +1863,6 @@ void ClientSession::Impl::cl_after_match(const sim::SoldierState &p_s) {
 	}
 	++stats.health_rebases;
 }
-
-// ---- commands and prediction --------------------------------------------------------------------------------------
 
 void ClientSession::Impl::cl_command_made(sim::Command &r_command, uint64_t p_now) {
 	InputSample s;
@@ -1938,7 +1876,7 @@ void ClientSession::Impl::cl_command_made(sim::Command &r_command, uint64_t p_no
 	if (pressed && s.life >= own_life && !s.free_camera) {
 		r_command.buttons |= sim::buttons::kFire;
 	}
-	// The view sample (§6.2): the drawn frame's, or this client's newest frame at sampling.
+
 	double render = 0;
 	sim::ViewQuality quality = sim::ViewQuality::None;
 	uint16_t seq = 0;
@@ -1963,7 +1901,7 @@ void ClientSession::Impl::cl_command_made(sim::Command &r_command, uint64_t p_no
 		r_command.view_back_q8 = 0;
 		r_command.view_quality = 0;
 		r_command.view_seq8 = 0;
-		return; // the server tests at the present (D7): the stored view says so
+		return;
 	}
 	const double back = double(int64_t(r_command.tick) << 8) - std::round(render * 256.0);
 	r_command.view_back_q8 = uint16_t(std::clamp(back, 0.0, 65535.0));
@@ -1971,14 +1909,14 @@ void ClientSession::Impl::cl_command_made(sim::Command &r_command, uint64_t p_no
 	r_command.view_seq8 = uint8_t(seq & 0xFFu);
 	v.view.view_back_q8 = r_command.view_back_q8;
 	v.view.quality = r_command.view_quality;
-	// The server resolves view_seq8 against this packet's newest_snapshot (newest_seq now) within 32 seqs.
+
 	const uint16_t back_seqs = uint16_t(newest_seq - seq);
 	if (back_seqs < kViewSeqWindow) {
 		v.view.view_seq = seq;
 		v.view.main_bits = cl_records.mask(seq, true);
 		v.view.others_bits = cl_records.mask(seq, false);
 	} else {
-		v.valid = false; // the server refuses it (tests at the present)
+		v.valid = false;
 	}
 }
 
@@ -1995,8 +1933,8 @@ void ClientSession::Impl::cl_predict_weapons(const sim::Command &p_command, cons
 		cl_lane->put(cl_lane->step(from, p_command, p_before, p_after));
 	}
 	if (cl_projectiles != nullptr) {
-		cl_projectiles->step_own(p_command.tick, *world, cl_records, m2b_own_events); // M2b nt: was cl_events
-		m2b_drain_own(); // M2b nt: into cl_events through cl_push (the presented ids)
+		cl_projectiles->step_own(p_command.tick, *world, cl_records, m2b_own_events);
+		m2b_drain_own();
 	}
 }
 
@@ -2004,12 +1942,10 @@ uint32_t ClientSession::Impl::cl_others_ack_bits() const {
 	return have_snapshot ? cl_records.mask(newest_seq, false) : 0u;
 }
 
-// ---- publish -------------------------------------------------------------------------------------------------------
-
 void ClientSession::Impl::cl_publish_begin(uint64_t p_now) {
 	for (const Track &t : tracks) {
 		if (t.used && !t.samples.empty() && p_now > t.last_seen_ns + kTrackTimeoutNs) {
-			++stats.track_timeout; // publish drops it below
+			++stats.track_timeout;
 		}
 	}
 }
@@ -2088,29 +2024,21 @@ void ClientSession::take_own_test_samples(std::vector<OwnTestSample> &r_samples)
 	impl_->cl_sample_log.clear();
 }
 
-// ---- M2a w3 (G4, docs/design/m2a-w3.md) ---------------------------------------------------------------------------
-
 void ClientSession::send_kit_select(const net::KitSelect &p_select) {
 	std::lock_guard lock(impl_->debug_mutex);
 	if (impl_->kit_out.size() >= 16) {
-		impl_->kit_out.pop_front(); // the newest win: a key held down never grows the queue
+		impl_->kit_out.pop_front();
 	}
 	impl_->kit_out.push_back(p_select);
 }
 
-} // namespace bf3::host
-
-// ---- M2b nt (docs/design/m2b.md §2.6 #12, §3.4, §3.6, §3.7; as built: docs/design/m2b-nt.md §3) --------------------
-// The client half of protocol v3: MatchState and PlayerList into the frame, the death stamp and the revives of
-// CombatEvents, Spawned::revived, the client-side restriction, unspawn, the rules_flags check, SpawnRequest, and the
-// own shots' presented ids (OwnShotIds, the M2a gate's shot-id reuse). The calls sit at the named insertion points the
-// Impl declarations list.
+}
 
 namespace bf3::host {
 
 uint32_t OwnShotIds::emit(uint32_t p_shot_index) {
 	if (!any_ || p_shot_index <= last_real_) {
-		// The first shot, or a reused index: a segment whose ids start above every presented id so far.
+
 		if (any_) {
 			++resets_;
 		}
@@ -2171,7 +2099,7 @@ bool present_own_shot_id(OwnShotIds &r_ids, uint8_t p_own_slot, PresentEvent &r_
 			break;
 		case PresentKind::Death:
 			if ((r_event.flags & present_flags::kOwnShooter) == 0 || r_event.def == sim::weapons::kNoWeapon) {
-				return false; // a fall names no shot
+				return false;
 			}
 			id = r_ids.lookup(r_event.id);
 			break;
@@ -2191,7 +2119,7 @@ void apply_player_list(PlayerTable &r_table, const net::PlayerList &p_list) {
 		r_table.present.fill(false);
 	}
 	for (const net::PlayerRow &row : p_list.rows) {
-		if (row.slot < net::kMaxPlayerRows) { // decode_player_list bounds it; a caller's list may not
+		if (row.slot < net::kMaxPlayerRows) {
 			r_table.rows[row.slot] = row;
 			r_table.present[row.slot] = true;
 		}
@@ -2271,7 +2199,7 @@ void ClientSession::Impl::m2b_spawned(const net::Spawned &p_spawned) {
 void ClientSession::Impl::m2b_combat(const net::CombatEvents &p_events) {
 	for (const net::DeathEvent &d : p_events.deaths) {
 		if (d.victim == slot && have_own) {
-			// The own death (ch1 is ordered: it comes before the next life's Spawned, so it is the current life's).
+
 			m2b_death_valid = true;
 			m2b_death_life = own_life;
 			m2b_respawn_tick = d.respawn_tick;
@@ -2359,7 +2287,7 @@ void ClientSession::Impl::m2b_publish(PresentationFrame &r_frame) {
 	r_frame.match_valid = m2b_match_valid;
 	r_frame.match = m2b_match;
 	r_frame.player_count = player_rows(m2b_players, r_frame.players);
-	// The death stamp holds while the life that died is the current one (a new life, a revive included, clears it).
+
 	const bool dead_life = m2b_death_valid && have_own && own_life == m2b_death_life;
 	r_frame.own_respawn_tick = dead_life ? m2b_respawn_tick : 0u;
 	r_frame.own_revive_until = dead_life ? m2b_revive_until : 0u;
@@ -2370,9 +2298,9 @@ void ClientSession::Impl::m2b_publish(PresentationFrame &r_frame) {
 void ClientSession::send_spawn_request(uint8_t p_kit) {
 	std::lock_guard lock(impl_->debug_mutex);
 	if (impl_->m2b_spawn_out.size() >= 16) {
-		impl_->m2b_spawn_out.pop_front(); // the newest win, as send_kit_select
+		impl_->m2b_spawn_out.pop_front();
 	}
 	impl_->m2b_spawn_out.push_back(p_kit);
 }
 
-} // namespace bf3::host
+}

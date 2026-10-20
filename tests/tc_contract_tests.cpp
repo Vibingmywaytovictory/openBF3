@@ -1,7 +1,3 @@
-// Terrain collision interface contract (track "Terrain collision everywhere", docs/design/terrain-collision.md §13):
-// the TC additions to the soup, static world, collision world, nav and overlay headers compile together, and their
-// constants and defaults keep the properties the design relies on. No data, no Godot, and no call to a function the
-// TC implementation has yet to define (static_terrain_tag is inline).
 #include <doctest/doctest.h>
 
 #include "bf3/core/level/collision_soup.h"
@@ -17,24 +13,22 @@
 
 using namespace bf3;
 
-// Body user data: tile bodies use tile * 4 + layer with layer < kStaticLayerCount; the terrain bodies take the free
-// value 3, so describe_hit tells them apart from the low two bits alone.
 static_assert(sim::kStaticTerrainBodyLayer == 3);
 static_assert(sim::kStaticTerrainBodyLayer >= sim::kStaticLayerCount);
 static_assert(sim::kStaticTerrainBodyLayer < 4);
-// Jolt 5.6 HeightFieldShapeSettings limits (mBitsPerSample 1..16, mBlockSize 2..8).
+
 static_assert(sim::kStaticTerrainBits >= 1 && sim::kStaticTerrainBits <= 16);
 static_assert(sim::kStaticTerrainBlock >= 2 && sim::kStaticTerrainBlock <= 8);
-// The static world refuses exactly what the soup refuses.
+
 static_assert(sim::kMaxStaticTerrains == core::level::kMaxSoupTerrains);
-// A whole 4097 x 4097 terrain as triangles would reach the soup's triangle cap: why the terrain is a record.
+
 static_assert(2 * (core::res::kMaxGridSide - 1) * (core::res::kMaxGridSide - 1) >= core::level::kMaxSoupTriangles);
-// The sentinels are not valid indices of any world the caps allow.
+
 static_assert(sim::kNoStaticTile == UINT32_MAX);
 static_assert(sim::kNoStaticTerrain == UINT32_MAX);
 static_assert(std::is_aggregate_v<sim::StaticTerrainView>);
 static_assert(std::is_trivially_copyable_v<sim::StaticTerrainInfo>);
-// Revision 2: the whole-grid hash charges a caller-sized WorkBudget (decltype only: nothing odr-uses the declaration).
+
 static_assert(std::is_same_v<decltype(&core::level::hash_soup_terrain),
 		core::Result<core::level::SoupTerrainHash> (*)(const core::level::SoupTerrain &, uint32_t, core::level::WorkBudget &, unsigned)>);
 static_assert(std::is_same_v<decltype(&sim::static_terrain_content), core::Sha256Digest (*)(const sim::StaticTerrainView &)>);
@@ -81,7 +75,7 @@ TEST_CASE("tc contract: the additive fields default to the behaviour before TC")
 	CHECK(prep.terrain);
 	CHECK(prep.terrain_radius > 0.0f);
 	CHECK(prep.max_terrain_triangles > 0);
-	// TC bumped the soup version: the tiles hold the Havok triangles only, the terrain is the records.
+
 	CHECK(core::level::kCollisionSoupVersion == 2);
 	CHECK(input.terrain_triangles == 0);
 	CHECK(check.terrain_tolerance == 0.0f);

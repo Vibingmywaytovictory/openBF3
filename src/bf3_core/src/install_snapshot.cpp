@@ -36,7 +36,6 @@ struct Scanner {
 		snap->files.push_back(std::move(s));
 	}
 
-	// Lists one directory: files matching the filter, and recursion into sub-directories if asked.
 	template <typename Filter>
 	void scan(const std::wstring &p_rel_dir, bool p_recurse, Filter p_filter) {
 		const std::wstring pattern = (root / p_rel_dir / L"*").native();
@@ -62,9 +61,9 @@ struct Scanner {
 		FindClose(h);
 	}
 
-	void scan_package(const std::wstring &p_package) { // "" (base game) or "Update\\Patch"
+	void scan_package(const std::wstring &p_package) {
 		const std::wstring data = p_package.empty() ? std::wstring(L"Data") : p_package + L"\\Data";
-		scan(data, false, [](const std::wstring &n) { return ends_with_ci(n, L"cas.cat") || ends_with_ci(n, L".toc"); }); // cas.cat, layout.toc
+		scan(data, false, [](const std::wstring &n) { return ends_with_ci(n, L"cas.cat") || ends_with_ci(n, L".toc"); });
 		scan(data + L"\\Win32", true, [](const std::wstring &n) { return ends_with_ci(n, L".toc") || ends_with_ci(n, L".sb"); });
 		if (!p_package.empty()) {
 			scan(p_package, false, [](const std::wstring &n) { return ends_with_ci(n, L"package.mft"); });
@@ -72,7 +71,7 @@ struct Scanner {
 	}
 };
 
-} // namespace
+}
 
 std::string SnapshotDiff::summary() const {
 	if (clean()) {
@@ -94,7 +93,7 @@ InstallSnapshot take_install_snapshot(const std::filesystem::path &p_root) {
 	sc.root = p_root;
 	sc.snap = &snap;
 	sc.scan_package(L"");
-	// Update\Patch and Update\Xpack1..5 (whatever exists).
+
 	WIN32_FIND_DATAW fd{};
 	HANDLE h = FindFirstFileExW((p_root / L"Update" / L"*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
 	if (h != INVALID_HANDLE_VALUE) {
@@ -144,4 +143,4 @@ SnapshotDiff diff_snapshots(const InstallSnapshot &p_before, const InstallSnapsh
 	return d;
 }
 
-} // namespace bf3::core
+}

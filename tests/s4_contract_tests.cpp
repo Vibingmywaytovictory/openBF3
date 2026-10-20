@@ -1,7 +1,3 @@
-// S4 interface contract (docs/design/s4.md §5-§9, §12): the level-logic headers compile together, the port ids are
-// ebx_name_hash at compile time, the type table keeps the classification the design counts on (48 server-capable
-// primitives, 34 of them in the S4 slice, 25 S4 natives), lookups and enumerator parsing behave, and the plain types
-// stay plain. No data, no Godot; nothing here calls a function the S4 implementation has yet to write.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -20,18 +16,14 @@
 namespace gp = bf3::core::gameplay;
 namespace lg = bf3::sim::logic;
 
-// ---- compile-time contract ---------------------------------------------------------------------------------
-
-// Port ids verified on retail data (docs/design/s4.md §5.3, §13).
 static_assert(gp::logic_port::kOut == 193453899);
 static_assert(gp::logic_port::kOnTrigger == 1975570652);
 static_assert(gp::logic_port::kTrigger == -1688613187);
 static_assert(gp::logic_port::kOnDestroyed == -1452333337);
 static_assert(gp::logic_port::kOnPlayerEnter == 1577401599);
 static_assert(gp::logic_port::kEnabled == 2662400);
-// Revision 2: the ports the G6 chain and the Rush activation use, verified on MP_007 ConquestLarge0 and MP_Subway
-// RushLarge0 connections (docs/design/s4.md §6.2, §13.3, §13.4).
-static_assert(gp::logic_port::kValue == 225375086); // Bool's property output (SyncedBool uses Out)
+
+static_assert(gp::logic_port::kValue == 225375086);
 static_assert(gp::logic_port::kSetTrue == -1541066415);
 static_assert(gp::logic_port::kSetFalse == 668205626);
 static_assert(gp::logic_port::kIn == 5862146);
@@ -39,15 +31,14 @@ static_assert(gp::logic_port::kIn1 == 193450867);
 static_assert(gp::logic_port::kIn2 == 193450864);
 static_assert(gp::logic_port::kOnCaptured == 2099208964);
 static_assert(gp::logic_port::kOnLost == -1433788352);
-static_assert(gp::logic_port::kOnTriggeredByMatchingTeam == -699931768); // TeamFilter's output
-static_assert(gp::logic_port::kEnable == -1952177180); // the crate DelayTrigger's activation input
+static_assert(gp::logic_port::kOnTriggeredByMatchingTeam == -699931768);
+static_assert(gp::logic_port::kEnable == -1952177180);
 static_assert(gp::logic_port::kDisable == -117303631);
 static_assert(gp::logic_port::kOnTrue == -1433512622);
 static_assert(gp::logic_port::kOnFalse == -81881639);
 static_assert(gp::logic_port::kOpen == 2089008817);
 static_assert(gp::logic_port::kClose == 212633683);
 
-// Delay ticks: ceil with the float32 epsilon, deliberately not seconds_to_ticks (round to nearest).
 static_assert(lg::logic_delay_ticks(0.0) == 0);
 static_assert(lg::logic_delay_ticks(-1.0) == 0);
 static_assert(lg::logic_delay_ticks(double(0.1f)) == 6);
@@ -58,7 +49,7 @@ static_assert(lg::logic_delay_ticks(30.0) == 1800);
 static_assert(lg::logic_delay_ticks(0.105) == 7);
 static_assert(bf3::sim::seconds_to_ticks(0.105f) == 6);
 static_assert(lg::logic_delay_ticks(1e30) == lg::kMaxLogicDelayTicks);
-static_assert(lg::logic_delay_ticks(0.0001) == 1); // never early: any positive delay above the epsilon is >= 1 tick
+static_assert(lg::logic_delay_ticks(0.0001) == 1);
 static_assert(lg::logic_delay_ticks(0.00001) == 0);
 
 static_assert(std::is_trivially_copyable_v<gp::LogicValue>);
@@ -76,7 +67,7 @@ static_assert(std::is_trivially_copyable_v<lg::LogicWatchHit>);
 static_assert(std::is_trivially_copyable_v<lg::LogicTickStats>);
 static_assert(std::is_trivially_copyable_v<gp::LogicNodeRef>);
 static_assert(std::is_trivially_copyable_v<lg::ConquestExpectation>);
-static_assert(lg::kMaxGhostEntries <= 65535); // ghost counts and delta indices are u16
+static_assert(lg::kMaxGhostEntries <= 65535);
 static_assert(lg::kConquestCheckTicks[1] == 601 && lg::kConquestCheckTicks[4] == 2401);
 static_assert(std::is_move_constructible_v<gp::LogicGraph>);
 static_assert(!std::is_copy_constructible_v<lg::LogicRuntime>);
@@ -114,7 +105,7 @@ TEST_SUITE("s4-contract") {
 			CHECK(static_cast<size_t>(row.id) == i);
 			++by_class[static_cast<size_t>(row.cls)];
 			if (row.cls == gp::LogicTypeClass::Primitive) {
-				// The 48 server-capable primitives are the rows Delay..VecSplitter; the rest are Realm_Client everywhere.
+
 				if (row.id >= gp::LogicTypeId::Delay && row.id <= gp::LogicTypeId::VecSplitter) {
 					++server_primitive;
 				}

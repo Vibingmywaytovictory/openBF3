@@ -1,22 +1,3 @@
-// antdump: Godot-free CLI over bf3_core's Ant reader (clean-room implementation from
-// research/probes/ant-animation-probe.md). Every command reads <input>: the install (`--install`, located like
-// the game: OPENBF3_INSTALL, else the default path; `--install=<dir>` names it) through AntInstallSource, or an
-// export directory of Ant payloads (tools/antdump/README.md). The install is only read; the tool writes only
-// the --out file it is given, never under the install.
-//
-//   antdump census  <input> [--mp]                      codec census, DCT checks, channel mapping
-//   antdump list    <input> <package>                   clips of a package (codec, keys, controller)
-//   antdump clip    <input> <package> <clip name> [--digits N] [--out file.json]
-//   antdump compare <input> <oracle.json>...            dump the oracle's clip and compare value by value
-//   antdump bench   <input> [--mp] [--repeat N]         decode throughput (single thread)
-//   antdump sample  <input> <package> <clip name> <frame>   one interpolated pose (first channels)
-//   antdump rigmap  <input> <package> <clip name> [--skeleton <ebx partition>]...
-//                                                       channel -> DOF -> rig joint table, timing; with the
-//                                                       install, the joints by name in EBX SkeletonAssets
-//   antdump sources <input>                             packages and banks with their provenance (tsv)
-//   antdump parity  <export_dir> --install[=<dir>] [--rows-only]   the install source against an export
-//
-// <input> = <export_dir> | --install | --install=<dir>
 #include "antdump_lib.h"
 #include "mini_json.h"
 
@@ -39,8 +20,6 @@ using namespace bf3::tools::antdump;
 
 namespace {
 
-// PT1 run [controller]: a clip by "controller:<ClipControllerAsset name>" (clip names are not unique, s3.md §4.1), else
-// by __name (defined in the PT1 run block at the end of this file).
 GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name);
 
 int usage() {
@@ -55,16 +34,15 @@ int usage() {
 			"  antdump rigmap  <input> <package> <clip name> [--skeleton <ebx partition>]...\n"
 			"  antdump sources <input>\n"
 			"  antdump parity  <export_dir> --install[=<dir>] [--rows-only]\n"
-			"  antdump objects <input> <package> <type|-> [name substring|-] [--depth N] [--limit N]\n"); // PT1 run [objects]
+			"  antdump objects <input> <package> <type|-> [name substring|-] [--depth N] [--limit N]\n");
 	return 2;
 }
 
-// Command line: the command, positional arguments, flags (with their values) and the input.
 struct Args {
 	std::string cmd;
-	std::vector<std::string> pos; // after the command; the export directory first unless --install
+	std::vector<std::string> pos;
 	SourceOptions input;
-	std::vector<std::pair<std::string, std::string>> flags; // --name value (value "" for switches)
+	std::vector<std::pair<std::string, std::string>> flags;
 
 	bool has(const char *p_flag) const {
 		for (const auto &f : flags) {
@@ -105,7 +83,7 @@ bool parse_args(int argc, char **argv, Args &r_args) {
 		} else if (a.rfind("--install=", 0) == 0) {
 			r_args.input.install = true;
 			r_args.input.install_dir = a.substr(10);
-		} else if (a == "--digits" || a == "--out" || a == "--repeat" || a == "--skeleton" || a == "--depth" || a == "--limit") { // PT1 run [objects]
+		} else if (a == "--digits" || a == "--out" || a == "--repeat" || a == "--skeleton" || a == "--depth" || a == "--limit") {
 			if (i + 1 >= argc) {
 				return false;
 			}
@@ -116,7 +94,7 @@ bool parse_args(int argc, char **argv, Args &r_args) {
 			r_args.pos.push_back(a);
 		}
 	}
-	// Without --install the first positional argument is the export directory.
+
 	if (!r_args.input.install) {
 		if (r_args.pos.empty()) {
 			return false;
@@ -133,7 +111,6 @@ struct Session {
 	const AntPackageSource &source() const { return *opened.source; }
 };
 
-// 0 = open; else the exit code (77 when the input does not exist, like bf3dump without an install).
 int open_session(const Args &p_args, Session &r_session) {
 	std::string error;
 	bool unavailable = false;
@@ -151,7 +128,6 @@ int open_session(const Args &p_args, Session &r_session) {
 	return 0;
 }
 
-// The static package is owned by the library; other packages are loaded on demand.
 const AntPackage *get_package(Session &r_session, const std::string &p_name, std::unique_ptr<AntPackage> &r_holder) {
 	if (p_name == "s_basicassets") {
 		return r_session.library.static_package();
@@ -170,7 +146,7 @@ const AntPackage *get_package(Session &r_session, const std::string &p_name, std
 }
 
 bool write_text(const std::string &p_path, const std::string &p_text) {
-	// Never write into the install, whatever the caller passes (plan §2.1).
+
 	bf3::core::InstallReader install;
 	bf3::core::PathGuard guard = install.write_guard();
 	const auto verdict = guard.check_write_target(p_path);
@@ -241,7 +217,7 @@ int cmd_clip(const Args &p_args) {
 	if (!p) {
 		return 1;
 	}
-	const GdStruct clip = pt1_find_clip(s.library, *p, p_args.pos[1]); // PT1 run [controller]
+	const GdStruct clip = pt1_find_clip(s.library, *p, p_args.pos[1]);
 	if (!clip.valid()) {
 		std::fprintf(stderr, "antdump: no clip named \"%s\" in %s\n", p_args.pos[1].c_str(), p_args.pos[0].c_str());
 		return 1;
@@ -315,7 +291,7 @@ int cmd_bench(const Args &p_args) {
 	const char *rep = p_args.value("--repeat");
 	const int repeat = rep ? std::max(1, std::atoi(rep)) : 3;
 	using Clock = std::chrono::steady_clock;
-	// Load (and time) every package parse.
+
 	std::vector<std::unique_ptr<AntPackage>> packages;
 	uint64_t package_bytes = 0;
 	const Clock::time_point t0 = Clock::now();
@@ -331,7 +307,7 @@ int cmd_bench(const Args &p_args) {
 		}
 	}
 	const double load_s = std::chrono::duration<double>(Clock::now() - t0).count();
-	// Static package parse time (re-parse a copy).
+
 	std::vector<uint8_t> static_bytes;
 	std::string error;
 	for (const AntPackageInfo &info : s.source().packages()) {
@@ -390,7 +366,7 @@ int cmd_bench(const Args &p_args) {
 		}
 		std::printf("\n");
 	}
-	// Sampling throughput on the decoded DCT clips: one pose per call at fractional frames.
+
 	{
 		std::vector<DecodedClip> decoded;
 		for (const Item &it : items) {
@@ -426,7 +402,7 @@ int cmd_sample(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct(); // PT1 run [controller]
+	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct();
 	DecodedClip d;
 	ClipBinding b;
 	if (!clip.valid() || !decode_clip(clip, d).ok() || !s.library.bind(*p, clip, b).ok()) {
@@ -450,7 +426,6 @@ int cmd_sample(const Args &p_args) {
 	return 0;
 }
 
-// An EBX SkeletonAsset's bone names and parents (Hierarchy), for the rigmap cross-check.
 struct EbxSkeleton {
 	std::string partition;
 	std::vector<std::string> names;
@@ -514,7 +489,7 @@ int cmd_rigmap(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct(); // PT1 run [controller]
+	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct();
 	DecodedClip d;
 	ClipBinding b;
 	ClipHeader h;
@@ -587,7 +562,7 @@ int cmd_rigmap(const Args &p_args) {
 		if (!other_parent.empty()) {
 			std::printf("  other parent:%s\n", other_parent.c_str());
 		}
-		// Only worth listing when the skeleton covers the rig (the weapon skeleton names a small subset).
+
 		if (!rig_only.empty() && rig_named + 8 >= rig.joints.size()) {
 			std::printf("  rig joints without a bone there:%s\n", rig_only.c_str());
 		}
@@ -663,11 +638,6 @@ int cmd_parity(const Args &p_args) {
 	return r.ok() ? 0 : 1;
 }
 
-
-// PT1 run [objects]: `antdump objects <input> <package> <type|-> [name substring|-] [--depth N] [--limit N]` prints every
-// top-level object of that type (or any type, "-") whose __name contains the substring, field by field through the
-// __base chain, embedded structs and DataRefs (to --depth, default 3), with each Guid's target named
-// (docs/design/pt1-run.md: the Ant locomotion graph and the ClipControllerAsset Distance field).
 namespace pt1_objects {
 
 std::string guid_label(const AntLibrary &p_library, const AntPackage &p_from, const GdGuid &p_guid) {
@@ -800,7 +770,6 @@ void dump_struct(const AntLibrary &p_library, const AntPackage &p_from, const Gd
 	}
 }
 
-// True when p_s or a base of it has the type name p_type.
 bool is_type(const GdStruct &p_s, std::string_view p_type) {
 	GdStruct s = p_s;
 	for (int i = 0; i < 16 && s.valid(); ++i) {
@@ -812,7 +781,7 @@ bool is_type(const GdStruct &p_s, std::string_view p_type) {
 	return false;
 }
 
-} // namespace pt1_objects
+}
 
 int cmd_objects(const Args &p_args) {
 	Session s;
@@ -847,8 +816,6 @@ int cmd_objects(const Args &p_args) {
 	return 0;
 }
 
-// PT1 run [controller]: see the declaration at the top of this file. A controller name that binds 0 clips falls back to
-// nothing (invalid); 2+ clips: the first, with a warning on stderr.
 GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name) {
 	static constexpr std::string_view kPrefix = "controller:";
 	if (p_name.rfind(kPrefix, 0) != 0) {
@@ -872,7 +839,7 @@ GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package,
 	return found;
 }
 
-} // namespace
+}
 
 int main(int argc, char **argv) {
 	Args args;
@@ -908,7 +875,7 @@ int main(int argc, char **argv) {
 	if (cmd == "parity") {
 		return cmd_parity(args);
 	}
-	if (cmd == "objects" && n >= 2) { // PT1 run [objects]
+	if (cmd == "objects" && n >= 2) {
 		return cmd_objects(args);
 	}
 	return usage();

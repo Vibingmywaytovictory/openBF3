@@ -34,7 +34,7 @@ int to_int(const std::string &p_s) {
 	return (end != p_s.c_str()) ? static_cast<int>(v) : -1;
 }
 
-} // namespace
+}
 
 bool InstallReader::locate(const InstallLocateOptions &p_options) {
 	struct Candidate {
@@ -62,8 +62,7 @@ bool InstallReader::locate(const InstallLocateOptions &p_options) {
 		status_.problems.push_back("no install location given and the default is disabled");
 		return false;
 	}
-	// The first candidate wins: an explicit override that is wrong must be reported, not
-	// silently replaced by the default install.
+
 	return mount(std::filesystem::path(detail::widen(candidates.front().path)), candidates.front().source);
 }
 
@@ -90,7 +89,6 @@ bool InstallReader::mount(const std::filesystem::path &p_root, std::string p_sou
 		status_.problems.push_back("missing Data/cas.cat");
 	}
 
-	// Update\Patch: "Name patch / Authoritative / Version 7" on this install.
 	if (exists("Update/Patch/package.mft")) {
 		status_.has_patch = true;
 		std::vector<std::pair<std::string, std::string>> kv;
@@ -106,7 +104,6 @@ bool InstallReader::mount(const std::filesystem::path &p_root, std::string p_sou
 		status_.problems.push_back("no Update/Patch (unpatched install?)");
 	}
 
-	// Update\Xpack*: list what exists; the engine must work with any subset (plan §2.1).
 	WIN32_FIND_DATAW fd{};
 	HANDLE h = FindFirstFileExW((root_ / L"Update" / L"Xpack*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
 	if (h != INVALID_HANDLE_VALUE) {
@@ -252,7 +249,7 @@ PathGuard InstallReader::write_guard() const {
 	if (!root_.empty()) {
 		guard.add_protected_root(root_);
 	}
-	// The default location too, so a failed or overridden mount never leaves the retail install unguarded.
+
 	guard.add_protected_root(std::filesystem::path(kDefaultRoot));
 	return guard;
 }
@@ -261,4 +258,4 @@ InstallSnapshot InstallReader::snapshot() const {
 	return root_.empty() ? InstallSnapshot{} : take_install_snapshot(root_);
 }
 
-} // namespace bf3::core
+}

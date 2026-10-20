@@ -48,7 +48,7 @@ struct Failures {
 	}
 };
 
-} // namespace
+}
 
 core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level, std::string_view p_mode, core::Cache *p_cache,
 		const PrepareOptions &p_options) {
@@ -84,8 +84,7 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 		report.seconds_census = since(t0);
 		report.placements = census->placements;
 		report.census_failures = census->failures.size();
-		// One item per MeshSet res: the LODs any kept variant needs (scene_mesh_requests, the same requests the
-		// game's scene plan makes, so a prepared root gives the game only hits).
+
 		for (const core::level::SceneMesh &m : census->meshes) {
 			if (m.kept) {
 				++report.scene_meshes;
@@ -164,4 +163,4 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 	return report;
 }
 
-} // namespace bf3::render
+}

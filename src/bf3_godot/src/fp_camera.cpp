@@ -15,11 +15,11 @@ using namespace godot;
 namespace {
 
 Basis view_basis(float p_yaw, float p_pitch) {
-	// Godot cameras look down -Z; the sim's yaw 0 looks down +Z (sim_types.h): rotate_y(yaw + pi) * rotate_x(pitch).
+
 	return Basis(Vector3(0, 1, 0), float(double(p_yaw) + 3.14159265358979323846)) * Basis(Vector3(1, 0, 0), p_pitch);
 }
 
-} // namespace
+}
 
 Vector3 presented_eye(const bf3::host::PresentationFrame &p_frame, double p_fraction) {
 	const double t = std::clamp(p_fraction, 0.0, 1.0);
@@ -107,9 +107,8 @@ void FpCamera::scale_free_speed(float p_factor) {
 	free_speed_ = std::clamp(free_speed_ * p_factor, 1.0f, 400.0f);
 }
 
-} // namespace bf3::godot_side
+}
 
-// M2a vm (docs/design/m2a-vm.md): ADS FOV, recoil and kick on the first-person camera (fp_camera.h's M2a vm block).
 #include "bf3/anim/viewmodel_anim.h"
 
 namespace bf3::godot_side {
@@ -137,4 +136,4 @@ void camera_view_angles_of(const godot::Camera3D *p_camera, double &r_yaw, doubl
 	r_yaw = std::atan2(double(f.x), double(f.z));
 }
 
-} // namespace bf3::godot_side
+}

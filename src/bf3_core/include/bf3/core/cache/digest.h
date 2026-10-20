@@ -1,8 +1,4 @@
 #pragma once
-// Digests for the derived-data cache (plan §2.1): SHA-1 is the digest the BF3 manifests carry for
-// every stored payload (the "source digest"); SHA-256 names cache keys and checks entry payloads.
-// The interface is portable; the Windows implementation (digest_win32.cpp) uses BCrypt's
-// pseudo-handles, a Linux one can sit behind the same declarations later.
 
 #include <array>
 #include <cstddef>
@@ -23,7 +19,6 @@ struct Digest {
 	auto operator<=>(const Digest &) const = default;
 	bool operator==(const Digest &) const = default;
 
-	// Lower-case hex, 2*N characters.
 	std::string hex() const {
 		static constexpr char kDigits[] = "0123456789abcdef";
 		std::string out(N * 2, '0');
@@ -34,7 +29,6 @@ struct Digest {
 		return out;
 	}
 
-	// Accepts exactly 2*N hex digits (either case).
 	static std::optional<Digest> from_hex(std::string_view p_hex) {
 		if (p_hex.size() != N * 2) {
 			return std::nullopt;
@@ -62,7 +56,6 @@ struct Digest {
 using Sha1Digest = Digest<20>;
 using Sha256Digest = Digest<32>;
 
-// For unordered containers: the digests are uniformly distributed already.
 struct DigestHash {
 	template <size_t N>
 	size_t operator()(const Digest<N> &p_digest) const {
@@ -78,8 +71,6 @@ enum class HashAlgorithm {
 	Sha256,
 };
 
-// Incremental hasher. Move-only. A failure of the platform provider is sticky: finish() then
-// returns false (callers treat it like an I/O error).
 class Hasher {
 public:
 	explicit Hasher(HashAlgorithm p_algorithm);
@@ -92,23 +83,20 @@ public:
 	bool ok() const { return state_ != nullptr && !failed_; }
 	size_t digest_size() const { return algorithm_ == HashAlgorithm::Sha1 ? 20 : 32; }
 	void update(std::span<const uint8_t> p_bytes);
-	// Writes digest_size() bytes. The hasher is spent afterwards.
+
 	bool finish(std::span<uint8_t> r_out);
 
 private:
 	void release();
 
 	HashAlgorithm algorithm_;
-	void *state_ = nullptr; // BCRYPT_HASH_HANDLE on Windows
+	void *state_ = nullptr;
 	bool failed_ = false;
 };
 
-// One-shot helpers. An all-zero digest is returned only if the platform provider fails.
 Sha1Digest sha1_of(std::span<const uint8_t> p_bytes);
 Sha256Digest sha256_of(std::span<const uint8_t> p_bytes);
 
-// CRC-32 (IEEE 802.3, reflected, as zlib). Detects torn journal records and header damage; not a
-// security check (that is the SHA-256 of the payload).
 uint32_t crc32(std::span<const uint8_t> p_bytes, uint32_t p_seed = 0);
 
-} // namespace bf3::core
+}

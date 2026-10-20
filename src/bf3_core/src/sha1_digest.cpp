@@ -1,4 +1,3 @@
-// SHA-1 per FIPS 180-4 (written for openBF3).
 #include "bf3/core/sha1_digest.h"
 
 #include <cstring>
@@ -50,7 +49,7 @@ void compress(uint32_t (&r_h)[5], const uint8_t *p_block) {
 	r_h[4] += e;
 }
 
-} // namespace
+}
 
 Sha1 sha1_of(std::span<const uint8_t> p_bytes) {
 	uint32_t h[5] = { 0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u };
@@ -84,4 +83,4 @@ Sha1 sha1_of(std::span<const uint8_t> p_bytes) {
 	return out;
 }
 
-} // namespace bf3::core
+}

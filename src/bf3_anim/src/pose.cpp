@@ -46,11 +46,11 @@ core::Result<ClipTracks> bind_clip_tracks(const ClipBinding &p_binding, const De
 		} else if (c < size_t(p_clip.num_quats) + p_clip.num_vec3s) {
 			const bool translation = track.dof < p_binding.dofs.size() && p_binding.dofs[track.dof].kind == DofKind::Translation;
 			if (!translation) {
-				bone = -1; // scale DOFs are not applied
+				bone = -1;
 			}
 			t.translation_bone[c - p_clip.num_quats] = bone;
 		} else {
-			bone = -1; // float DOFs drive no joint transform
+			bone = -1;
 		}
 		if (bone >= 0) {
 			++t.channels_bound;
@@ -120,4 +120,4 @@ PoseDiff pose_diff(const std::vector<Xform> &p_a, const std::vector<Xform> &p_b,
 	return d;
 }
 
-} // namespace bf3::anim
+}

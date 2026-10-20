@@ -1,11 +1,3 @@
-// UI ui2: the UIHudIcon atlas and the vehicle HUD icons (include/bf3/core/ui/hud_icons.h; docs/design/
-// ui-minimap-icons.md §4.4, §6.1, §6.3).
-//
-// Cost model (gameplay::WorkBudget): the asset and every icon, state and frame struct cost 1 each (charge_type), every
-// array its raw length before it is scanned, every copied name its bytes (charge_bytes). Caps: kMaxHudIcons icons,
-// kMaxHudIconStates states per icon, kMaxHudIconFrames frames per state; a UV outside [0, 1] or not finite fails the
-// read (min > max is a mirrored frame, hud_icon_rect). The atlas pixels must be ARGB8888, 2D, one face, at most
-// kMaxHudIconImageSide a side.
 #include "bf3/core/ui/hud_icons.h"
 
 #include "bf3/core/res/res_loader.h"
@@ -56,7 +48,7 @@ Status read_uv(const EbxStruct &p_frame, HudIconUv &r_uv) {
 	return Status::success();
 }
 
-} // namespace
+}
 
 std::string_view hud_icon_state_name(HudIconState p_state) {
 	const size_t i = size_t(p_state);
@@ -270,4 +262,4 @@ Result<VehicleHudIcon> read_vehicle_hud_icon(const EbxResolver &p_db, const EbxI
 	return out;
 }
 
-} // namespace bf3::core::ui
+}

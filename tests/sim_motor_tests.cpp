@@ -1,14 +1,3 @@
-// Soldier motor, spawning and the prediction catch-up (bf3_sim soldier_motor.h, spawn.h, prediction.h;
-// docs/design/m1.md §6, §9.2, §10, §14).
-//
-// Suite sim-motor-unit (no install): synthetic static worlds (flat floors, ramps, steps, walls, ceilings, banks)
-// built with build_static_world(span). The E1 numbers (speeds, the jump apex, the six transition tick counts, the
-// fall-damage thresholds), the solver behaviour of §6.1/§6.7 (slopes, steps, walls, ceilings, drops, slides),
-// determinism (two worlds, interleaved soldiers, save/restore, a fresh motor), sim::catch_up against the server's
-// own stepping, settle and the course searches, the tuning file and the params.
-// Suite sim-motor (install, exits 77 without one): the same on Metro's real static world (the soup through T1's
-// build_static_world): make_motor_params from Metro's soldier with the shipped tuning, E1a-E1d along courses
-// find_clear_heading / find_drop_spot pick, settle_spawn on all 102 TDM points, install unchanged.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
@@ -56,8 +45,6 @@ namespace gameplay = bf3::core::gameplay;
 
 namespace {
 
-// ---- synthetic geometry -------------------------------------------------------------------------------------
-
 void add_tri(std::vector<StaticTriangle> &r_out, const Vec3 &p_a, const Vec3 &p_b, const Vec3 &p_c, StaticLayer p_layer = StaticLayer::Collision) {
 	StaticTriangle t;
 	t.v = { p_a, p_b, p_c };
@@ -65,14 +52,12 @@ void add_tri(std::vector<StaticTriangle> &r_out, const Vec3 &p_a, const Vec3 &p_
 	r_out.push_back(t);
 }
 
-// A quad a-b-c-d (in order around it); the world collides with both faces.
 void add_quad(std::vector<StaticTriangle> &r_out, const Vec3 &p_a, const Vec3 &p_b, const Vec3 &p_c, const Vec3 &p_d,
 		StaticLayer p_layer = StaticLayer::Collision) {
 	add_tri(r_out, p_a, p_b, p_c, p_layer);
 	add_tri(r_out, p_a, p_c, p_d, p_layer);
 }
 
-// Flat floor over [x0, x1] x [z0, z1] at height y, in 8 m squares (no huge triangles).
 void add_floor(std::vector<StaticTriangle> &r_out, float p_x0, float p_z0, float p_x1, float p_z1, float p_y) {
 	for (float x = p_x0; x < p_x1; x += 8.0f) {
 		for (float z = p_z0; z < p_z1; z += 8.0f) {
@@ -83,18 +68,16 @@ void add_floor(std::vector<StaticTriangle> &r_out, float p_x0, float p_z0, float
 	}
 }
 
-// An axis-aligned box [lo, hi] (all six faces).
 void add_box(std::vector<StaticTriangle> &r_out, const Vec3 &p_lo, const Vec3 &p_hi, StaticLayer p_layer = StaticLayer::Collision) {
 	const float x0 = p_lo[0], y0 = p_lo[1], z0 = p_lo[2], x1 = p_hi[0], y1 = p_hi[1], z1 = p_hi[2];
-	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 }, p_layer); // top
-	add_quad(r_out, { x0, y0, z0 }, { x1, y0, z0 }, { x1, y0, z1 }, { x0, y0, z1 }, p_layer); // bottom
-	add_quad(r_out, { x0, y0, z0 }, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, p_layer); // -x
-	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 }, p_layer); // +x
-	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 }, p_layer); // -z
-	add_quad(r_out, { x0, y0, z1 }, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, p_layer); // +z
+	add_quad(r_out, { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x1, y0, z0 }, { x1, y0, z1 }, { x0, y0, z1 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x0, y0, z1 }, { x0, y1, z1 }, { x0, y1, z0 }, p_layer);
+	add_quad(r_out, { x1, y0, z0 }, { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 }, p_layer);
+	add_quad(r_out, { x0, y0, z0 }, { x0, y1, z0 }, { x1, y1, z0 }, { x1, y0, z0 }, p_layer);
+	add_quad(r_out, { x0, y0, z1 }, { x1, y0, z1 }, { x1, y1, z1 }, { x0, y1, z1 }, p_layer);
 }
 
-// A ramp rising along +Z from (x0..x1, y0 at z0) at p_degrees, p_length metres long (horizontal), then a flat top.
 void add_ramp(std::vector<StaticTriangle> &r_out, float p_x0, float p_x1, float p_z0, float p_y0, float p_degrees, float p_length, float p_top_length) {
 	const float rise = p_length * std::tan(p_degrees * kPi / 180.0f);
 	const float z1 = p_z0 + p_length;
@@ -114,8 +97,6 @@ std::unique_ptr<CollisionWorld> world_of(std::shared_ptr<const StaticWorldShapes
 	REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
 	return std::move(*r);
 }
-
-// ---- the soldier: Metro's numbers (bf3dump soldier, 2026-10-15) as a synthetic SoldierDef --------------------
 
 gameplay::StatePoseSpeed speed(gameplay::SoldierPose p_pose, float p_v, float p_f, float p_b, float p_side, float p_accel, float p_decel,
 		float p_sprint_gain, float p_sprint) {
@@ -157,7 +138,7 @@ gameplay::SoldierDef synthetic_soldier() {
 	stand.max_look_pitch = 45;
 	stand.transition_to[1] = 0.3f;
 	stand.transition_to[2] = 0.7f;
-	stand.box_min_expand = { 0.2f, 0.0f, 0.1f }; // read, unused by the M1 motor (only prone's footprint is)
+	stand.box_min_expand = { 0.2f, 0.0f, 0.1f };
 	stand.box_max_expand = { 0.1f, 0.6f, 0.2f };
 	gameplay::PoseDef crouch = stand;
 	crouch.pose = SoldierPose::Crouch;
@@ -212,7 +193,6 @@ std::string read_text(const char *p_path) {
 	return s.str();
 }
 
-// The shipped tuning file (docs §6.11: the tests check the game's numbers).
 MotorTuning shipped_tuning() {
 	const std::string text = read_text(OPENBF3_MOTOR_TUNING_CFG);
 	REQUIRE_MESSAGE(!text.empty(), OPENBF3_MOTOR_TUNING_CFG);
@@ -267,7 +247,6 @@ Command move_command(Tick p_tick, int8_t p_forward, int8_t p_right, uint16_t p_y
 	return c;
 }
 
-// Steps p_ticks commands made by p_make(tick) and records every state.
 std::vector<SoldierState> run(const SoldierMotor &p_motor, SoldierState &r_state, uint32_t p_ticks, const std::function<Command(Tick)> &p_make) {
 	std::vector<SoldierState> out;
 	out.reserve(p_ticks);
@@ -279,7 +258,6 @@ std::vector<SoldierState> run(const SoldierMotor &p_motor, SoldierState &r_state
 	return out;
 }
 
-// A soldier settled at rest at p_feet (dropped from the padding, then 30 idle ticks).
 SoldierState at_rest(const SoldierMotor &p_motor, const Vec3 &p_feet, uint16_t p_yaw = 0, Tick p_tick = 1000) {
 	SoldierState s = p_motor.spawn_state({ p_feet[0], p_feet[1] + p_motor.params().tuning.character_padding, p_feet[2] }, p_yaw, 1, p_tick, false);
 	run(p_motor, s, 30, [&](Tick t) { return idle_command(t, p_yaw, 0, Pose::Stand); });
@@ -294,8 +272,6 @@ bool grounded(const SoldierState &p_s) {
 	return (p_s.flags & soldier_flags::kGrounded) != 0;
 }
 
-// A walled 60 m arena inside one 64 m tile (no tile border under it) with a ramp, steps, a ceiling, boxes and a
-// 55 degree bank: the busy course of the determinism, interleaving and catch-up tests.
 std::vector<StaticTriangle> course_world() {
 	std::vector<StaticTriangle> t;
 	add_floor(t, 1.0f, 1.0f, 61.0f, 61.0f, 0.0f);
@@ -307,7 +283,7 @@ std::vector<StaticTriangle> course_world() {
 	for (int i = 0; i < 4; ++i) {
 		add_box(t, { 10.0f, 0.0f, 40.0f + 0.3f * float(i) }, { 20.0f, 0.2f * float(i + 1), 50.0f });
 	}
-	add_box(t, { 22.0f, 1.5f, 10.0f }, { 32.0f, 1.7f, 18.0f }); // a low ceiling
+	add_box(t, { 22.0f, 1.5f, 10.0f }, { 32.0f, 1.7f, 18.0f });
 	add_box(t, { 45.0f, 0.0f, 45.0f }, { 47.0f, 1.0f, 47.0f });
 	add_box(t, { 30.0f, 0.0f, 50.0f }, { 31.0f, 3.0f, 58.0f });
 	const float tan55 = std::tan(55.0f * kPi / 180.0f);
@@ -315,14 +291,12 @@ std::vector<StaticTriangle> course_world() {
 	return t;
 }
 
-// Random but reproducible input: runs, strafes, turns, sprints, jumps and pose requests.
 Command busy_command(std::mt19937 &r_rng, Tick p_tick) {
 	Command c;
 	c.tick = p_tick;
 	c.sequence = p_tick;
 	const uint32_t r = r_rng();
-	// Mostly forward along a heading that changes every 2 s (so the soldier crosses the arena and meets its walls,
-	// ramps, steps and ceiling), with strafes and some jitter on top.
+
 	const int8_t forward[] = { 127, 127, 127, 127, 64, 0, -127, 127 };
 	const int8_t side[] = { 0, 0, 0, 0, 127, -127, 64, -40 };
 	c.move_forward = forward[r % 8];
@@ -337,7 +311,6 @@ Command busy_command(std::mt19937 &r_rng, Tick p_tick) {
 	return c;
 }
 
-// The hash chain of 10,000 busy steps on a fresh world and motor (the same in every process of this binary).
 uint64_t busy_course_chain() {
 	Rig r = rig_of(course_world(), params_with(shipped_tuning()));
 	SoldierState s = r.motor->spawn_state({ 30.0f, 0.02f, 30.0f }, 0, 1, 10, true);
@@ -350,7 +323,7 @@ uint64_t busy_course_chain() {
 	return chain;
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-motor-unit") {
 	TEST_CASE("sim.motor: a soldier comes to rest on a flat floor and stays there bit for bit") {
@@ -381,7 +354,7 @@ TEST_SUITE("sim-motor-unit") {
 			Rig r = rig_of(flat_world(400.0f), params);
 			for (const Course &c : courses) {
 				SoldierState s = at_rest(*r.motor, { 0.0f, 0.0f, -300.0f });
-				// Take the pose first (the longest transition is 63 ticks), then walk forward along +Z.
+
 				run(*r.motor, s, 80, [&](Tick t) { return idle_command(t, 0, 0, c.pose); });
 				REQUIRE(s.pose == c.pose);
 				const Vec3 start = s.position;
@@ -393,7 +366,7 @@ TEST_SUITE("sim-motor-unit") {
 					hi = std::max(hi, v);
 				}
 				const float mean = (trace[239].position[2] - trace[119].position[2]) / (120.0f * kTickSeconds);
-				// The tick at which the speed first reaches 99 % of the target.
+
 				size_t reach = 0;
 				while (reach < trace.size() && horizontal(trace[reach].velocity) < 0.99f * c.expected) {
 					++reach;
@@ -407,8 +380,7 @@ TEST_SUITE("sim-motor-unit") {
 				CHECK(grounded(s));
 				CHECK(((s.flags & soldier_flags::kSprinting) != 0) == (c.buttons != 0));
 				if (!instant) {
-					// The default gains reach 99 % by tick 22 (AccelerationGain 0.35) and 33 (SprintGain 0.25), well before
-					// the Metro window (ticks 60-120) and the synthetic one (120-240).
+
 					CHECK(reach + 1 <= (c.buttons != 0 ? 40u : 30u));
 				}
 			}
@@ -420,7 +392,7 @@ TEST_SUITE("sim-motor-unit") {
 		struct Dir {
 			int8_t f, rgt;
 			float expected;
-			float dx, dz; // expected direction at yaw 0 (right = -X)
+			float dx, dz;
 		};
 		const float d = 0.70710678f;
 		const Dir dirs[] = { { -127, 0, 3.0f, 0, -1 }, { 0, 127, 3.0f, -1, 0 }, { 0, -127, 3.0f, 1, 0 }, { 127, 127, 4.0f * 0.5f + 3.0f * 0.5f, -d, d } };
@@ -432,7 +404,7 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(s.velocity[0] / v == doctest::Approx(dir.dx).epsilon(1e-4));
 			CHECK(s.velocity[2] / v == doctest::Approx(dir.dz).epsilon(1e-4));
 		}
-		// Yaw a quarter turn: forward is +X.
+
 		SoldierState s = at_rest(*r.motor, { 0.0f, 0.0f, 0.0f }, 16384);
 		run(*r.motor, s, 60, [&](Tick t) { return move_command(t, kAxisMax, 0, 16384); });
 		CHECK(s.velocity[0] == doctest::Approx(4.0f).epsilon(1e-4));
@@ -449,7 +421,7 @@ TEST_SUITE("sim-motor-unit") {
 			++still;
 		}
 		std::printf("stop: 4 m/s -> 0 in %zu ticks\n", still + 1);
-		CHECK(still + 1 <= 18); // 4 / 15 s = 16 ticks
+		CHECK(still + 1 <= 18);
 		CHECK(stop.back().velocity == Vec3{ 0.0f, 0.0f, 0.0f });
 		CHECK(stop.back().position == stop[still].position);
 	}
@@ -489,7 +461,6 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(trace[landed_at].mode == MoveMode::OnGround);
 		CHECK(std::fabs(trace.back().position[1] - take_off) < 1e-6f);
 
-		// A second jump inside JumpPenaltyTime (1 s) reaches 0.3 x 0.6 m; one after it the full height again.
 		const auto apex_of = [&](uint32_t p_wait) {
 			SoldierState q = at_rest(*r.motor, { 0.0f, 0.0f, 0.0f });
 			run(*r.motor, q, 1, [&](Tick t) { return move_command(t, 0, 0, 0, Pose::Stand, buttons::kJump); });
@@ -542,7 +513,7 @@ TEST_SUITE("sim-motor-unit") {
 			REQUIRE(finished >= 0);
 			std::printf("E1c %d -> %d: %lld ticks\n", int(c.from), int(c.to), static_cast<long long>(finished - started + 1));
 			CHECK(finished - started + 1 == int64_t(c.ticks));
-			CHECK(started == int64_t(trace.front().tick)); // starts on the tick of the pose command
+			CHECK(started == int64_t(trace.front().tick));
 		}
 	}
 
@@ -565,8 +536,7 @@ TEST_SUITE("sim-motor-unit") {
 		};
 		const Drop drops[] = { { 9.8f, 0, 0, false }, { 10.1f, 20, 21, false }, { 46.0f, 100, 100, true } };
 		for (const Drop &d : drops) {
-			// A Teleport: at rest, feet h above the floor (the feet rest on the floor: Jolt keeps the padding between the
-			// shape and the floor, not under the feet), no spawn protection.
+
 			SoldierState s = r.motor->spawn_state({ 3.0f, d.h, 4.0f }, 0, 2, 5000, false);
 			const float start = s.position[1];
 			SoldierState landed;
@@ -591,9 +561,9 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(landed.damage <= d.max_damage);
 			CHECK(((landed.events & soldier_events::kDied) != 0) == d.dies);
 			CHECK((landed.mode == MoveMode::Dead) == d.dies);
-			CHECK(falling == (d.h > 13.0f)); // InAir -> Falling below -16 m/s (a 13 m fall)
+			CHECK(falling == (d.h > 13.0f));
 			if (d.dies) {
-				// A dead soldier only advances its tick.
+
 				SoldierState next = landed;
 				r.motor->step(next, move_command(landed.tick + 1, kAxisMax, 0, 0, Pose::Stand, buttons::kJump));
 				CHECK(next.tick == landed.tick + 1);
@@ -601,7 +571,7 @@ TEST_SUITE("sim-motor-unit") {
 				CHECK(next.events == 0);
 			}
 		}
-		// Spawn protection blocks the damage (the 10.1 m drop with protection running).
+
 		SoldierState s = r.motor->spawn_state({ 3.0f, 10.1f, 4.0f }, 0, 2, 5000, true);
 		run(*r.motor, s, 100, [&](Tick t) { return idle_command(t, 0, 0, Pose::Stand); });
 		CHECK(s.health == 100.0f);
@@ -624,10 +594,10 @@ TEST_SUITE("sim-motor-unit") {
 			}
 			std::printf("ramp %.0f deg: highest feet %.3f m, end z %.3f, steep seen %d\n", double(degrees), double(top), double(s.position[2]), steep_seen ? 1 : 0);
 			if (degrees < 50.0f) {
-				CHECK(top > 6.0f); // reached the top (rise 6.9 m)
+				CHECK(top > 6.0f);
 				CHECK(grounded(s));
 			} else {
-				CHECK(top < 0.7f); // walk-stairs may lift it onto the foot of the ramp, never up it
+				CHECK(top < 0.7f);
 				CHECK(s.position[2] < 3.0f);
 			}
 		}
@@ -700,15 +670,15 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(zhi - zlo < 0.001f);
 		CHECK(yhi < 0.001f);
 		CHECK(zhi < 2.0f - 0.35f + 0.001f);
-		CHECK(horizontal(s.velocity) < 0.01f); // the clip: the realised (zero) displacement, not 4 m/s into the wall
+		CHECK(horizontal(s.velocity) < 0.01f);
 	}
 
 	TEST_CASE("sim.motor: pushing diagonally into a wall keeps a velocity parallel to it") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, -40.0f, -40.0f, 40.0f, 40.0f, 0.0f);
-		add_box(t, { 2.0f, 0.0f, -40.0f }, { 4.0f, 3.0f, 40.0f }); // a wall face at x = 2
+		add_box(t, { 2.0f, 0.0f, -40.0f }, { 4.0f, 3.0f, 40.0f });
 		Rig r = rig_of(t, instant_params());
-		// Yaw -45 degrees looks between +Z and -X... use yaw +45 degrees: forward (0.707, 0, 0.707), towards the wall.
+
 		SoldierState s = at_rest(*r.motor, { 0.0f, 0.0f, -20.0f }, 8192);
 		const std::vector<SoldierState> trace = run(*r.motor, s, 120, [&](Tick tick) { return move_command(tick, kAxisMax, 0, 8192); });
 		const SoldierState &e = trace.back();
@@ -734,9 +704,7 @@ TEST_SUITE("sim-motor-unit") {
 			}
 			std::printf("walk off %.1f m: airborne seen %d, end y %.4f z %.4f\n", double(drop), air ? 1 : 0, double(s.position[1]), double(s.position[2]));
 			CHECK(air == (drop > 0.5f));
-			// On the lower floor at its height, but for single-tick lifts of 1-3 mm where the path crosses an active
-			// edge (here a quad's diagonal on a 64 m tile border, which the soup does not weld): the next tick sticks
-			// back down, and the horizontal speed is not affected.
+
 			size_t at_floor = 0;
 			for (size_t i = trace.size() - 20; i < trace.size(); ++i) {
 				CHECK(std::fabs(trace[i].position[1] + drop) < 0.005f);
@@ -749,8 +717,7 @@ TEST_SUITE("sim-motor-unit") {
 
 	TEST_CASE("sim.motor: a 1.5 s slide down a 55 degree bank lands without damage and never enters Falling") {
 		std::vector<StaticTriangle> t;
-		// The bank falls along +Z from y 10 at z 0 to y 0 at z 10 / tan 55 = 7.0; the soldier starts 1 m down it, so the
-		// frictionless slide (g sin 55 along the bank) takes about 1.6 s.
+
 		const float tan55 = std::tan(55.0f * kPi / 180.0f);
 		const float run_z = 10.0f / tan55;
 		add_floor(t, -20.0f, run_z, 20.0f, 40.0f, 0.0f);
@@ -804,7 +771,7 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(trace[top].position[1] < 0.2f + 0.001f);
 		CHECK(trace[top].velocity[1] <= 0.0f);
 		CHECK(trace[top].mode == MoveMode::InAir);
-		CHECK(landed < 25); // a free 0.6 m jump lands after 42 ticks
+		CHECK(landed < 25);
 	}
 
 	TEST_CASE("sim.motor: standing up under a low ceiling is refused (kStandBlocked) until there is room") {
@@ -815,20 +782,20 @@ TEST_SUITE("sim-motor-unit") {
 		SoldierState s = at_rest(*r.motor, { 0.0f, 0.0f, 0.0f });
 		run(*r.motor, s, 40, [&](Tick tick) { return idle_command(tick, 0, 0, Pose::Crouch); });
 		REQUIRE(s.pose == Pose::Crouch);
-		// Crouch-walk under the ceiling (z 5..15), stop at z 10.
+
 		for (int i = 0; i < 600 && s.position[2] < 10.0f; ++i) {
 			r.motor->step(s, move_command(s.tick + 1, kAxisMax, 0, 0, Pose::Crouch));
 		}
 		run(*r.motor, s, 20, [&](Tick tick) { return idle_command(tick, 0, 0, Pose::Crouch); });
 		const std::vector<SoldierState> refused = run(*r.motor, s, 30, [&](Tick tick) { return idle_command(tick, 0, 0, Pose::Stand); });
 		CHECK((refused[0].events & soldier_events::kPoseRefused) != 0);
-		CHECK((refused[1].events & soldier_events::kPoseRefused) == 0); // reported once
+		CHECK((refused[1].events & soldier_events::kPoseRefused) == 0);
 		for (const SoldierState &e : refused) {
 			CHECK((e.flags & soldier_flags::kStandBlocked) != 0);
 			CHECK(e.pose == Pose::Crouch);
 			CHECK(e.target_pose == Pose::Crouch);
 		}
-		// Still asking for Stand while walking out: the transition starts once the stand shape fits.
+
 		const std::vector<SoldierState> out = run(*r.motor, s, 240, [&](Tick tick) { return move_command(tick, kAxisMax, 0, 0, Pose::Stand); });
 		size_t started = 0;
 		while (started < out.size() && (out[started].events & soldier_events::kPoseStarted) == 0) {
@@ -844,14 +811,14 @@ TEST_SUITE("sim-motor-unit") {
 	TEST_CASE("sim.motor: prone needs the footprint free; a prone soldier cannot turn its body into a wall") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, -20.0f, -20.0f, 20.0f, 20.0f, 0.0f);
-		add_box(t, { -20.0f, 0.0f, 1.0f }, { 20.0f, 2.0f, 3.0f }); // a wall 1 m ahead (+Z)
+		add_box(t, { -20.0f, 0.0f, 1.0f }, { 20.0f, 2.0f, 3.0f });
 		Rig r = rig_of(t, instant_params());
-		// Facing the wall: the footprint reaches 1.1 m ahead, into it: refused.
+
 		SoldierState s = at_rest(*r.motor, { 0.0f, 0.0f, 0.0f }, 0);
 		std::vector<SoldierState> trace = run(*r.motor, s, 5, [&](Tick tick) { return idle_command(tick, 0, 0, Pose::Prone); });
 		CHECK((trace[0].events & soldier_events::kPoseRefused) != 0);
 		CHECK(s.pose == Pose::Stand);
-		// Facing away (the wall 1 m behind, the footprint 1.3 m): refused too; facing sideways (+X): free.
+
 		s = at_rest(*r.motor, { 0.0f, 0.0f, 0.0f }, 32768);
 		trace = run(*r.motor, s, 5, [&](Tick tick) { return idle_command(tick, 32768, 0, Pose::Prone); });
 		CHECK((trace[0].events & soldier_events::kPoseRefused) != 0);
@@ -859,21 +826,18 @@ TEST_SUITE("sim-motor-unit") {
 		trace = run(*r.motor, s, 60, [&](Tick tick) { return idle_command(tick, 16384, 0, Pose::Prone); });
 		CHECK((trace[0].events & soldier_events::kPoseStarted) != 0);
 		CHECK(s.pose == Pose::Prone);
-		// Turning to face the wall is refused (the yaw stays), turning away along the wall is allowed.
+
 		run(*r.motor, s, 5, [&](Tick tick) { return idle_command(tick, 0, 0, Pose::Prone); });
 		CHECK(s.yaw == 16384);
 		run(*r.motor, s, 5, [&](Tick tick) { return idle_command(tick, 49152, 0, Pose::Prone); });
 		CHECK(s.yaw == 49152);
 	}
 
-
-
-
 	TEST_CASE("sim.motor: the shipped motor_tuning.cfg parses and names every key; format / parse round trip; errors") {
 		const std::string text = read_text(OPENBF3_MOTOR_TUNING_CFG);
 		const MotorTuning shipped = shipped_tuning();
-		CHECK(shipped == MotorTuning()); // M1 closes on the research defaults (orchestrator decision on §16 Q3)
-		// Every key of format_motor_tuning appears as a key line of the shipped file.
+		CHECK(shipped == MotorTuning());
+
 		const std::string all = format_motor_tuning(MotorTuning());
 		size_t keys = 0;
 		for (size_t at = 0; at < all.size();) {
@@ -885,7 +849,7 @@ TEST_SUITE("sim-motor-unit") {
 			at = end + 1;
 		}
 		CHECK(keys == 19);
-		// Round trip with every field changed.
+
 		MotorTuning t;
 		t.gravity = 9.80665f;
 		t.reference_hz = 33.3f;
@@ -909,13 +873,13 @@ TEST_SUITE("sim-motor-unit") {
 		core::Result<MotorTuning> back = parse_motor_tuning(format_motor_tuning(t));
 		REQUIRE(back.ok());
 		CHECK(*back == t);
-		// Comments, blanks, CRLF and spacing.
+
 		core::Result<MotorTuning> spaced = parse_motor_tuning("# c\r\n\r\n  gravity=9.5   # trailing\r\n\tsprint_model =\tinstant\r\n");
 		REQUIRE(spaced.ok());
 		CHECK(spaced->gravity == 9.5f);
 		CHECK(spaced->sprint_model == GainModel::Instant);
 		CHECK(parse_motor_tuning("").ok());
-		// Errors name the line.
+
 		const char *bad[] = { "gravity = 9.81\nnope = 1\n", "gravity = abc\n", "gravity = 9.81 m\n", "gravity = 1e30\n", "gravity = nan\n", "gravity\n",
 			"gravity = 9\ngravity = 9\n", "acceleration_model = quadratic\n", "sprint_stands_up = yes\n", "max_collision_iterations = -1\n",
 			"max_collision_iterations = 0\n", "character_padding = 0\n", " = 3\n" };
@@ -926,7 +890,7 @@ TEST_SUITE("sim-motor-unit") {
 				CHECK(r.error().message.find("line") != std::string::npos);
 			}
 		}
-		// Hostile bytes never crash and never loop: random text and random mutations of the shipped file.
+
 		std::mt19937 rng(77u);
 		for (int i = 0; i < 2000; ++i) {
 			std::string m = text;
@@ -973,7 +937,7 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(stand.in_air.velocity == 6.0f);
 		CHECK(stand.in_air.deceleration_factor == 0.0f);
 		CHECK(prone.box_min_expand == std::array<float, 3>{ 0.3f, 0.0f, 1.3f });
-		// Every tuning key changes the hash.
+
 		const uint64_t base = motor_params_hash(p);
 		CHECK(base == motor_params_hash(params_with(MotorTuning())));
 		const std::string text = format_motor_tuning(MotorTuning());
@@ -1000,9 +964,9 @@ TEST_SUITE("sim-motor-unit") {
 			changed += motor_params_hash(params_with(*t)) != base ? 1 : 0;
 		}
 		CHECK(changed == keys);
-		// Missing data fails.
+
 		gameplay::SoldierDef d = synthetic_soldier();
-		d.states.erase(d.states.begin()); // OnGround
+		d.states.erase(d.states.begin());
 		CHECK_FALSE(make_motor_params(d).ok());
 		d = synthetic_soldier();
 		d.fall_damage_vertical.clear();
@@ -1021,7 +985,7 @@ TEST_SUITE("sim-motor-unit") {
 	TEST_CASE("sim.motor: a fresh motor's first step equals a used motor's; sequence and flags never change a state") {
 		const std::vector<StaticTriangle> t = flat_world();
 		Rig used = rig_of(t, params_with(shipped_tuning()));
-		// Use the first motor for a while (jumps, walls, poses).
+
 		SoldierState warm = at_rest(*used.motor, { 5.0f, 0.0f, 5.0f });
 		run(*used.motor, warm, 200, [&](Tick tick) { return move_command(tick, kAxisMax, 20, uint16_t(tick * 97), Pose::Stand, tick % 50 == 0 ? buttons::kJump : 0); });
 		SoldierState a = used.motor->spawn_state({ -3.0f, 0.02f, 1.0f }, 1234, 3, 77, false);
@@ -1051,7 +1015,7 @@ TEST_SUITE("sim-motor-unit") {
 		for (int i = 0; i < 600 && s.position[2] < 20.0f; ++i) {
 			a.motor->step(s, move_command(s.tick + 1, kAxisMax, 0, 0, Pose::Crouch));
 		}
-		// The refused stand on motor A, then the same next step on A and on the unused motor B.
+
 		a.motor->step(s, move_command(s.tick + 1, kAxisMax, 0, 0, Pose::Stand));
 		REQUIRE((s.events & soldier_events::kPoseRefused) != 0);
 		SoldierState sa = s, sb = s;
@@ -1104,7 +1068,7 @@ TEST_SUITE("sim-motor-unit") {
 		std::printf("determinism: 10,000 steps, chain %016llx, %.1f us per step (noisy: other builds run on this machine)\n",
 				static_cast<unsigned long long>(chain), us);
 		CHECK(chain == busy_course_chain());
-		// Save at tick 300, run 300, restore, rerun: equal.
+
 		SoldierState s = a.motor->spawn_state({ 30.0f, 0.02f, 30.0f }, 0, 1, 10, true);
 		for (int i = 0; i < 300; ++i) {
 			a.motor->step(s, log[size_t(i)]);
@@ -1117,7 +1081,7 @@ TEST_SUITE("sim-motor-unit") {
 		}
 		s = saved;
 		for (int i = 300; i < 600; ++i) {
-			b.motor->step(s, log[size_t(i)]); // the other world's motor, after its own 10,000 steps
+			b.motor->step(s, log[size_t(i)]);
 			REQUIRE(soldier_state_hash(s) == first[size_t(i - 300)]);
 		}
 	}
@@ -1157,7 +1121,7 @@ TEST_SUITE("sim-motor-unit") {
 		for (int i = 0; i < kSoldiers; ++i) {
 			own.push_back(std::make_unique<SoldierMotor>());
 			REQUIRE(own.back()->init(*shared.world, params).ok());
-			// Mixed starts: some in the air, some on the ramp, poses differ through the commands.
+
 			const Vec3 at = { 12.0f + 5.0f * float(i), i % 3 == 0 ? 3.0f : 0.02f, 8.0f + 3.0f * float(i % 4) };
 			together.push_back(shared.motor->spawn_state(at, uint16_t(i * 8000), uint32_t(i + 1), 50, false));
 			alone.push_back(together.back());
@@ -1169,7 +1133,7 @@ TEST_SUITE("sim-motor-unit") {
 				Command c = busy_command(rngs[size_t(i)], together[size_t(i)].tick + 1);
 				shared.motor->step(together[size_t(i)], c);
 				Command c2 = busy_command(rngs2[size_t(i)], alone[size_t(i)].tick + 1);
-				c2.sequence += 17; // a different sequence and flags (the server's repeats) must not matter
+				c2.sequence += 17;
 				c2.flags = command_flags::kRepeated;
 				own[size_t(i)]->step(alone[size_t(i)], c2);
 				REQUIRE_MESSAGE(soldier_state_hash(together[size_t(i)]) == soldier_state_hash(alone[size_t(i)]), "soldier " << i << " tick " << tick);
@@ -1213,7 +1177,7 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(h.tick == before.tick + 1);
 			CHECK(std::memcmp(h.position.data(), before.position.data(), sizeof(Vec3)) == 0);
 		}
-		// A command asking for an unknown pose keeps the pose; -128 on an axis reads as -127.
+
 		SoldierState q = s;
 		Command c = move_command(q.tick + 1, -128, -128, 0, Pose(3));
 		r.motor->step(q, c);
@@ -1236,7 +1200,7 @@ TEST_SUITE("sim-motor-unit") {
 			};
 			put(5);
 			CHECK(ring.find(5) != nullptr);
-			CHECK(ring.find(5 + capacity) == nullptr); // same slot, other tick: never returned
+			CHECK(ring.find(5 + capacity) == nullptr);
 			put(5 + capacity);
 			CHECK(ring.find(5) == nullptr);
 			CHECK(ring.find(5 + capacity) != nullptr);
@@ -1245,7 +1209,7 @@ TEST_SUITE("sim-motor-unit") {
 			if (capacity < 16) {
 				continue;
 			}
-			// Ticks capacity - 8 .. capacity + 7 wrap round the slot array.
+
 			const Tick lo = capacity - 8, hi = capacity + 7;
 			for (Tick t = lo; t <= hi; ++t) {
 				put(t);
@@ -1257,7 +1221,7 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(ring.newest_at_or_below(hi + 50)->state.tick == hi);
 			CHECK(ring.newest_at_or_below(lo)->state.tick == lo);
 			CHECK(ring.newest_at_or_below(lo - 1) == nullptr);
-			CHECK(ring.newest_at_or_below(hi + capacity) == nullptr); // more than capacity ticks back: not searched
+			CHECK(ring.newest_at_or_below(hi + capacity) == nullptr);
 			ring.discard_after(capacity + 2);
 			CHECK(ring.find(capacity + 2) != nullptr);
 			CHECK(ring.find(capacity + 3) == nullptr);
@@ -1266,7 +1230,7 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(ring.newest_at_or_below(hi)->state.tick == capacity + 2);
 			ring.discard_after(0);
 			CHECK(ring.newest_at_or_below(hi) == nullptr);
-			// Tick 0 and the ticks just above it.
+
 			put(0);
 			CHECK(ring.newest_at_or_below(3)->state.tick == 0);
 		}
@@ -1277,7 +1241,7 @@ TEST_SUITE("sim-motor-unit") {
 		Rig server = rig_of(t, params_with(shipped_tuning()));
 		Rig client = rig_of(t, params_with(shipped_tuning()));
 		std::mt19937 rng(4242u);
-		// The client's commands for every tick it predicted; the server receives all but a lost few.
+
 		const SoldierState spawn = server.motor->spawn_state({ 30.0f, 0.02f, 30.0f }, 0, 1, 100, true);
 		std::map<Tick, Command> sent;
 		for (Tick tick = spawn.tick + 1; tick < spawn.tick + 600; ++tick) {
@@ -1285,7 +1249,7 @@ TEST_SUITE("sim-motor-unit") {
 			c.sequence = tick * 3;
 			sent[tick] = c;
 		}
-		// The server: a client command when it arrived, else the last one repeated (hold_command before any).
+
 		const auto server_run = [&](const SoldierState &p_from, Tick p_to, const std::set<Tick> &p_lost, const std::set<Tick> &p_unsent) {
 			std::map<Tick, SoldierState> out;
 			SoldierState s = p_from;
@@ -1300,7 +1264,7 @@ TEST_SUITE("sim-motor-unit") {
 			}
 			return out;
 		};
-		// The client predicted ticks spawn+1 .. C-1 with its sent commands (from the spawn state, as after Spawned).
+
 		const auto client_ring = [&](Tick p_until, const std::set<Tick> &p_unsent) {
 			PredictionRing ring(128);
 			catch_up(*client.motor, spawn, ring, spawn.tick + 1);
@@ -1317,7 +1281,7 @@ TEST_SUITE("sim-motor-unit") {
 			for (Tick tick = p_from; tick < p_until; ++tick) {
 				const PredictionEntry *e = p_ring.find(tick);
 				REQUIRE_MESSAGE(e != nullptr, p_what << " tick " << tick);
-				CHECK(e->command.tick == tick); // the step precondition held for every stored entry
+				CHECK(e->command.tick == tick);
 				CHECK(e->state.tick == tick);
 				REQUIRE_MESSAGE(soldier_state_hash(e->state) == soldier_state_hash(p_server.at(tick)), p_what << " tick " << tick);
 			}
@@ -1363,7 +1327,7 @@ TEST_SUITE("sim-motor-unit") {
 			ring.discard_after(C_new - 1);
 			CHECK(ring.find(C_new) == nullptr);
 			REQUIRE(ring.find(C_new - 1) != nullptr);
-			// The client re-predicts C_new.. with new commands (the server takes the newer sequences, §7.4).
+
 			SoldierState s = ring.find(C_new - 1)->state;
 			for (Tick tick = C_new; tick < C_old; ++tick) {
 				Command c = busy_command(rng, tick);
@@ -1377,8 +1341,7 @@ TEST_SUITE("sim-motor-unit") {
 		}
 		SUBCASE("a 3 s stall: the ring holds nothing near C - 1; catch_up from the snapshots recovers") {
 			const Tick last_predicted = 199, C = 200 + 180;
-			// The client stalls after 199 and sends nothing for 200..379; the server repeats sent[199] for those ticks,
-			// then applies the client's commands again from 380.
+
 			const std::set<Tick> unsent = [&] {
 				std::set<Tick> u;
 				for (Tick tick = last_predicted + 1; tick < C; ++tick) {
@@ -1387,15 +1350,13 @@ TEST_SUITE("sim-motor-unit") {
 				return u;
 			}();
 			PredictionRing ring = client_ring(last_predicted + 1, {});
-			REQUIRE(ring.newest_at_or_below(C - 1) == nullptr); // 180 ticks back is past the ring
+			REQUIRE(ring.newest_at_or_below(C - 1) == nullptr);
 			const std::map<Tick, SoldierState> srv = server_run(spawn, C + 20, {}, unsent);
-			// First snapshot after the stall (T = 375, no ring entry): the catch-up assumes the hold command (prediction.h),
-			// so its synthesised ticks may differ from the server's repeats of sent[199] ...
+
 			const CatchUpStats first = catch_up(*client.motor, srv.at(375), ring, C);
 			CHECK(first.steps == 4);
 			CHECK(ring.find(375)->command == hold_command(srv.at(375)));
-			// ... the client predicts on with its real commands, and the next snapshot (T = 385, whose ring entry holds the
-			// command the server applied) corrects it: from there the ring equals the server.
+
 			SoldierState s = ring.find(C - 1)->state;
 			for (Tick tick = C; tick < C + 10; ++tick) {
 				client.motor->step(s, sent[tick]);
@@ -1403,8 +1364,7 @@ TEST_SUITE("sim-motor-unit") {
 			}
 			catch_up(*client.motor, srv.at(385), ring, C + 10);
 			check_ring(ring, 385, C + 10, srv, "stall, second snapshot");
-			// From a base inside the ring's range (older than its newest sent tick): the sent commands still held are
-			// used and the rest repeat sent[199], exactly the server's ticks.
+
 			PredictionRing ring2 = client_ring(last_predicted + 1, {});
 			catch_up(*client.motor, srv.at(150), ring2, C);
 			check_ring(ring2, C - 128, C, srv, "stall from an old base");
@@ -1412,8 +1372,7 @@ TEST_SUITE("sim-motor-unit") {
 		SUBCASE("spawn: an own state with a newer life at the spawn tick N; the ring had the dead soldier's entries") {
 			PredictionRing ring = client_ring(300, {});
 			const SoldierState respawn = server.motor->spawn_state({ 40.0f, 0.02f, 20.0f }, 4000, 2, 290, true);
-			// After a spawn the server runs the client's commands for ticks > N it already holds (the client kept
-			// sending while dead), else the hold command's repeats.
+
 			std::map<Tick, SoldierState> srv;
 			{
 				SoldierState s = respawn;
@@ -1434,7 +1393,7 @@ TEST_SUITE("sim-motor-unit") {
 			}
 			catch_up(*client.motor, respawn, ring, 306);
 			check_ring(ring, 290, 306, srv, "spawn");
-			// A spawn on a client that had sent nothing after N: the hold command's repeats.
+
 			PredictionRing empty(128);
 			std::map<Tick, SoldierState> hold;
 			{
@@ -1454,9 +1413,9 @@ TEST_SUITE("sim-motor-unit") {
 		}
 		SUBCASE("synthesised entries are re-derived from a changed prev") {
 			PredictionRing ring = client_ring(150, {});
-			catch_up(*client.motor, ring.find(149)->state, ring, 160); // 150..159 synthesised from sent[149]
+			catch_up(*client.motor, ring.find(149)->state, ring, 160);
 			CHECK(ring.find(155)->command == repeated_command(sent[149], 155));
-			// The client re-predicted 149 with another command (a backward reset); a catch-up from 148 re-derives the rest.
+
 			Command changed = sent[149];
 			changed.move_forward = int8_t(-changed.move_forward);
 			changed.yaw = uint16_t(changed.yaw + 5000);
@@ -1485,9 +1444,9 @@ TEST_SUITE("sim-motor-unit") {
 	TEST_CASE("sim.motor: settle_spawn on synthetic points; place_spawn + idle ticks + judge_settle equals settle_spawn; stamp_spawn") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, 1.0f, 1.0f, 61.0f, 61.0f, 0.0f);
-		add_box(t, { 20.0f, 0.0f, 10.0f }, { 21.0f, 3.0f, 30.0f }); // a wall face at x = 20
-		add_box(t, { 40.0f, 0.0f, 40.0f }, { 50.0f, 0.5f, 50.0f }); // a 0.5 m platform
-		add_box(t, { 5.0f, 1.2f, 50.0f }, { 15.0f, 1.4f, 58.0f }); // a crawl space: no room to stand
+		add_box(t, { 20.0f, 0.0f, 10.0f }, { 21.0f, 3.0f, 30.0f });
+		add_box(t, { 40.0f, 0.0f, 40.0f }, { 50.0f, 0.5f, 50.0f });
+		add_box(t, { 5.0f, 1.2f, 50.0f }, { 15.0f, 1.4f, 58.0f });
 		Rig r = rig_of(t, params_with(shipped_tuning()));
 		const float pad = r.motor->params().tuning.character_padding;
 		struct Case {
@@ -1513,7 +1472,7 @@ TEST_SUITE("sim-motor-unit") {
 			std::printf("settle %s: ok %d (%s) lift %.3f shift %.3f gap %.4f\n", c.what, full.ok ? 1 : 0, full.failure.c_str(), double(full.lift), double(full.shift),
 					double(full.gap));
 			CHECK_MESSAGE(full.ok == c.ok, c.what << ": " << full.failure);
-			// The three pieces give the same geometric fields, bit for bit, at any start tick and life.
+
 			SettleResult parts = place_spawn(*r.motor, *r.world, p, 9, 77777);
 			if (parts.failure.empty()) {
 				for (uint32_t i = 0; i < SettleOptions().settle_ticks; ++i) {
@@ -1536,7 +1495,7 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(full.gap >= -1e-4f);
 			CHECK(full.gap <= pad + 0.01f);
 			CHECK_FALSE(full.overlapping);
-			// stamp_spawn: the state of a soldier spawning at tick 500 with full protection.
+
 			const SoldierState &s = full.state;
 			CHECK(s.tick == 500);
 			CHECK(s.life == 3);
@@ -1549,7 +1508,7 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(s.impact_speed == 0.0f);
 			CHECK(s.health == 100.0f);
 			CHECK(hold_command(s).yaw == 12345);
-			// The server steps it from 501.
+
 			SoldierState next = s;
 			r.motor->step(next, repeated_command(hold_command(s), 501));
 			CHECK(next.tick == 501);
@@ -1568,7 +1527,7 @@ TEST_SUITE("sim-motor-unit") {
 			p.index = uint32_t(i);
 			points.push_back(p);
 		}
-		// Team 2 never gets point 0 (team 1); point 5 has the lower priority.
+
 		std::set<size_t> picks;
 		for (uint64_t seed = 0; seed < 200; ++seed) {
 			const size_t k = choose_spawn(points, 2, {}, 10.0f, seed);
@@ -1577,7 +1536,7 @@ TEST_SUITE("sim-motor-unit") {
 		}
 		CHECK(picks == std::set<size_t>{ 1, 2, 3, 4 });
 		CHECK(choose_spawn(points, 2, {}, 10.0f, 5) == choose_spawn(points, 2, {}, 10.0f, 5));
-		// Live soldiers within 10 m block points; with 1..4 blocked only the low-priority 5 is left.
+
 		const std::vector<Vec3> live = { { 20.0f, 0.0f, 3.0f }, { 40.0f, 0.0f, 0.0f }, { 60.0f, 1.0f, 0.0f }, { 85.0f, 0.0f, 0.0f } };
 		CHECK(choose_spawn(points, 2, live, 10.0f, 1) == 5);
 		CHECK(choose_spawn(points, 2, live, 1.0f, 1) != 5);
@@ -1589,37 +1548,35 @@ TEST_SUITE("sim-motor-unit") {
 	TEST_CASE("sim.motor: find_clear_heading and find_drop_spot on a synthetic world") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, 1.0f, 1.0f, 61.0f, 61.0f, 0.0f);
-		add_box(t, { 1.0f, 0.0f, 33.0f }, { 61.0f, 3.0f, 34.0f }); // a wall 3 m north (+Z) of the start
-		add_box(t, { 33.0f, 0.0f, 1.0f }, { 34.0f, 3.0f, 33.0f }); // and one 3 m east (+X)
-		add_ramp(t, 1.0f, 33.0f, 5.0f, 0.0f, 10.0f, 10.0f, 2.0f); // a ramp to the south (z 5..15)
-		add_box(t, { 40.0f, 6.0f, 40.0f }, { 61.0f, 6.2f, 61.0f }); // a roof over the north-east corner
+		add_box(t, { 1.0f, 0.0f, 33.0f }, { 61.0f, 3.0f, 34.0f });
+		add_box(t, { 33.0f, 0.0f, 1.0f }, { 34.0f, 3.0f, 33.0f });
+		add_ramp(t, 1.0f, 33.0f, 5.0f, 0.0f, 10.0f, 10.0f, 2.0f);
+		add_box(t, { 40.0f, 6.0f, 40.0f }, { 61.0f, 6.2f, 61.0f });
 		Rig r = rig_of(t, params_with(shipped_tuning()));
 		const Vec3 feet = { 30.0f, 0.0f, 30.0f };
 		const std::optional<uint16_t> yaw = find_clear_heading(*r.motor, *r.world, feet, 20.0f);
 		REQUIRE(yaw.has_value());
 		const float a = yaw_radians(*yaw);
 		std::printf("clear heading %.1f deg\n", double(a) * 180.0 / 3.14159265);
-		// It must avoid north (wall), east (wall) and south (the ramp at z 5..15 is 15+ m away... south-west runs onto it).
+
 		const Vec3 end = { feet[0] + 20.0f * std::sin(a), 0.0f, feet[2] + 20.0f * std::cos(a) };
 		CHECK(end[2] < 33.0f - 0.35f);
 		CHECK(end[0] < 33.0f - 0.35f);
 		CHECK(end[0] > 1.0f);
-		// Walk the course: 20 m of level, straight, unobstructed path.
+
 		SoldierState s = at_rest(*r.motor, feet, *yaw);
 		run(*r.motor, s, 300, [&](Tick tick) { return move_command(tick, kAxisMax, 0, *yaw); });
 		CHECK(horizontal(s.velocity) == doctest::Approx(4.0f).epsilon(0.01));
 		CHECK(std::fabs(s.position[1]) < 1e-3f);
-		// No 40 m course from the start: walls north and east, the ramp south, the floor ends west.
+
 		CHECK_FALSE(find_clear_heading(*r.motor, *r.world, feet, 40.0f).has_value());
-		// Under the low wall corner the crouch / prone start check fails too.
+
 		CHECK_FALSE(find_clear_heading(*r.motor, *r.world, { 33.2f, 0.0f, 20.0f }, 5.0f).has_value());
-		// The drop spot: level, 50 m clear above (not under the roof), x then z ascending from the bounds' corner.
+
 		const std::optional<Vec3> drop = find_drop_spot(*r.motor, *r.world);
 		REQUIRE(drop.has_value());
 		std::printf("drop spot (%.2f, %.2f, %.2f)\n", double((*drop)[0]), double((*drop)[1]), double((*drop)[2]));
-		// The scan runs x then z ascending on a 5 m grid from the bounds' corner (1, 1): x = 1 has no floor half a metre
-		// west, (6, 1) none half a metre south, (6, 6) and (6, 11) are on the 10 degree slope, so the first level 1 m
-		// patch is the ramp's 2 m top at (6, 16), y = 10 tan 10 deg.
+
 		CHECK((*drop)[0] == doctest::Approx(6.0f));
 		CHECK((*drop)[2] == doctest::Approx(16.0f));
 		CHECK((*drop)[1] == doctest::Approx(10.0f * std::tan(10.0f * kPi / 180.0f)).epsilon(1e-4));
@@ -1627,7 +1584,7 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK_FALSE(under_roof);
 		CHECK_FALSE(find_drop_spot(*r.motor, *r.world, 50.0f, 0.0f).has_value());
 		CHECK_FALSE(find_drop_spot(*r.motor, *r.world, std::nanf("")).has_value());
-		// The E1d drop there: the fall is exactly h.
+
 		SoldierState d = r.motor->spawn_state({ (*drop)[0], (*drop)[1] + 10.1f, (*drop)[2] }, 0, 1, 10, false);
 		run(*r.motor, d, 200, [&](Tick tick) { return idle_command(tick, 0, 0, Pose::Stand); });
 		CHECK(d.impact_speed == doctest::Approx(std::sqrt(2.0f * 9.81f * 10.1f)).epsilon(1e-4));
@@ -1640,7 +1597,7 @@ TEST_SUITE("sim-motor-unit") {
 			core::level::SpawnPointDef d;
 			d.object = uint32_t(100 + i);
 			d.transform.trans = { float(i), 60.0f, -float(i) };
-			const float a = float(i) * kPi * 0.5f; // 0, 90, 180, 270 degrees
+			const float a = float(i) * kPi * 0.5f;
 			d.transform.forward = { std::sin(a), 0.0f, std::cos(a) };
 			d.team = i == 3 ? 2 : 0;
 			d.priority = i == 2 ? 0.5f : 1.0f;
@@ -1659,8 +1616,7 @@ TEST_SUITE("sim-motor-unit") {
 	}
 	TEST_CASE("sim.motor: floor cracks, slopes by walls and edges (found on Metro): settle and the ground hug") {
 		std::vector<StaticTriangle> t;
-		// Two floors with a 1 cm crack at x = 30 (rays fall through it), a 27 degree ramp with a wall 0.35 m beside
-		// the spawn point on it, and a 10 cm slab whose edge a soldier stands on.
+
 		add_floor(t, 1.0f, 1.0f, 30.0f, 61.0f, 0.0f);
 		add_floor(t, 30.01f, 1.0f, 61.0f, 61.0f, 0.0f);
 		add_ramp(t, 40.0f, 50.0f, 30.0f, 0.0f, 27.0f, 10.0f, 2.0f);
@@ -1688,14 +1644,9 @@ TEST_SUITE("sim-motor-unit") {
 					double(s.shift), double(s.gap), double(s.state.position[0]), double(s.state.position[1]), double(s.state.position[2]));
 			CHECK_MESSAGE(s.ok, c.what << ": " << s.failure);
 			CHECK(std::fabs(s.gap) <= pad + tol);
-			CHECK((s.shift > 0.05f) == c.shifted); // the slab-edge soldier slides < 5 mm while settling
+			CHECK((s.shift > 0.05f) == c.shifted);
 		}
-		// Walking and sprinting across the crack: grounded on every tick, never InAir (the hug's probe is a sphere,
-		// so the crack is no ledge; with a ray probe a crack on Metro, at point 22, left a crouching soldier InAir with
-		// InAir speeds for a tick: this synthetic crack keeps Jolt OnGround either way). The far
-		// floor's boundary edge lies inside the solver's character padding, so CharacterVirtual lifts the soldier off
-		// it for a tick or two (5 mm walking, 11 mm sprinting: the Metro seam bumps, docs §6.1 "As built in T2", an
-		// open issue). Bounded here, and the speed is back within 1 % by the end.
+
 		for (const uint32_t b : { 0u, buttons::kSprint }) {
 			SoldierState s = at_rest(*r.motor, { 26.0f, 0.0f, 20.0f }, 16384);
 			const std::vector<SoldierState> trace = run(*r.motor, s, 90, [&](Tick tick) { return move_command(tick, kAxisMax, 0, 16384, Pose::Stand, b); });
@@ -1708,7 +1659,7 @@ TEST_SUITE("sim-motor-unit") {
 				airborne += grounded(e) && e.mode == MoveMode::OnGround ? 0 : 1;
 				lo_y = std::min(lo_y, e.position[1]);
 				hi_y = std::max(hi_y, e.position[1]);
-				lo_v = i >= 35 ? std::min(lo_v, horizontal(e.velocity)) : lo_v; // past the run-up
+				lo_v = i >= 35 ? std::min(lo_v, horizontal(e.velocity)) : lo_v;
 			}
 			std::printf("crossing the crack (%s): %zu ticks not grounded, y %.5f..%.5f, lowest speed %.5f, end speed %.5f\n", b != 0 ? "sprint" : "walk",
 					airborne, double(lo_y), double(hi_y), double(lo_v), double(horizontal(trace.back().velocity)));
@@ -1721,12 +1672,8 @@ TEST_SUITE("sim-motor-unit") {
 	}
 }
 
-// ---- sim-motor: Metro's real static world (install; exits 77 without one) -------------------------------------
-
 namespace {
 
-// MP_Subway TeamDeathMatch0 loaded once per process: the soup through T1's build_static_world, the soldier with the
-// shipped tuning, the spawn points. The snapshot is taken before the first install read.
 struct Metro {
 	std::unique_ptr<core::InstallReader> reader;
 	std::shared_ptr<core::Install> install;
@@ -1746,7 +1693,6 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// nullptr (and the case marked skipped) without an install.
 Metro *metro() {
 	static std::unique_ptr<Metro> s_metro;
 	static bool s_tried = false;
@@ -1804,7 +1750,7 @@ float heading_distance(const Vec3 &p_from, const Vec3 &p_to, uint16_t p_yaw) {
 	return (p_to[0] - p_from[0]) * std::sin(a) + (p_to[2] - p_from[2]) * std::cos(a);
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-motor") {
 	TEST_CASE("sim.motor: Metro: make_motor_params from the level's soldier with the shipped tuning equals docs 6.4") {
@@ -1873,7 +1819,7 @@ TEST_SUITE("sim-motor") {
 		CHECK(prone.on_ground.sprint_multiplier == 0.0f);
 		CHECK(prone.box_min_expand[2] == doctest::Approx(1.3f));
 		CHECK(prone.box_max_expand[2] == doctest::Approx(1.1f));
-		// The synthetic soldier of sim-motor-unit is these numbers: the hashes of the two params (every field) agree.
+
 		const uint64_t metro_hash = motor_params_hash(p);
 		const uint64_t synthetic_hash = motor_params_hash(params_with(shipped_tuning()));
 		std::printf("Metro params hash %016llx, synthetic %016llx\n", static_cast<unsigned long long>(metro_hash), static_cast<unsigned long long>(synthetic_hash));
@@ -1970,7 +1916,7 @@ TEST_SUITE("sim-motor") {
 			}
 			const SettleResult settled = settle_spawn(motor, *m->world, p, 1, 1000);
 			if (!settled.ok) {
-				++skipped; // E3 reports it
+				++skipped;
 				continue;
 			}
 			const Vec3 feet = settled.state.position;
@@ -1981,13 +1927,13 @@ TEST_SUITE("sim-motor") {
 			}
 			++used;
 			const uint16_t yaw = *heading;
-			// The settled state turned to the course heading (one idle tick at that yaw, still at rest).
+
 			SoldierState base = settled.state;
 			run(motor, base, 1, [&](Tick t) { return idle_command(t, yaw, 0, Pose::Stand); });
 			REQUIRE(grounded(base));
 			std::printf("Metro course %zu: point %u at (%.2f, %.3f, %.2f), heading %.1f deg\n", used, p.index, double(feet[0]), double(feet[1]),
 					double(feet[2]), double(yaw_radians(yaw)) * 180.0 / 3.14159265358979323846);
-			// E1a: take the pose at the start, then 120 ticks full forward; the steady window is ticks 60-120.
+
 			for (const Course &c : courses) {
 				SoldierState s = base;
 				run(motor, s, 80, [&](Tick t) { return idle_command(t, yaw, 0, c.pose); });
@@ -2003,22 +1949,18 @@ TEST_SUITE("sim-motor") {
 					slow += v < 0.99f * c.expected ? 1 : 0;
 				}
 				for (size_t i = 1; i < 120; ++i) {
-					bumps += std::fabs(trace[i].position[1] - trace[i - 1].position[1]) > 2e-4f ? 1 : 0; // a seam's ghost contact or crack (printed)
+					bumps += std::fabs(trace[i].position[1] - trace[i - 1].position[1]) > 2e-4f ? 1 : 0;
 				}
 				const float mean = heading_distance(trace[59].position, trace[119].position, yaw) / (60.0f * kTickSeconds);
 				std::printf("  E1a %s: speed %.5f..%.5f m/s, mean %.5f (expected %.2f), |dy| %.4f m, %zu ticks under 99 %%, %zu seam bumps\n", c.name,
 						double(lo), double(hi), double(mean), double(c.expected), double(rise), slow, bumps);
-				// The window's mean speed is held to +-1 % and no tick may exceed +1 %. Per tick the floor is 95 %, not
-				// 99 % as on the synthetic floor: Metro's floors have unwelded seams between meshes (flat, < 2 mm apart in
-				// height) or cracks where Jolt's CharacterVirtual takes a ghost contact for a tick (a 0.5-14 mm lift or dip, up to 3.5 %
-				// of the speed, regained by the acceleration gain within ~30 ticks); docs/design/m1.md §6.1 "As built in
-				// T2", an open issue. The synthetic E1a in sim-motor-unit keeps the per-tick +-1 %.
+
 				CHECK_MESSAGE(lo >= 0.95f * c.expected, "point " << p.index << " " << c.name);
 				CHECK_MESSAGE(hi <= 1.01f * c.expected, "point " << p.index << " " << c.name);
 				CHECK_MESSAGE(std::fabs(mean - c.expected) <= 0.01f * c.expected, "point " << p.index << " " << c.name);
 				CHECK(grounded(trace.back()));
 			}
-			// E1b: a jump from rest at the start.
+
 			{
 				SoldierState s = base;
 				const float take_off = s.position[1];
@@ -2036,7 +1978,7 @@ TEST_SUITE("sim-motor") {
 				CHECK(landed);
 				CHECK(grounded(trace.back()));
 			}
-			// E1c: the six transitions at the start.
+
 			std::string ticks;
 			for (const Change &c : changes) {
 				SoldierState s = base;
@@ -2078,7 +2020,7 @@ TEST_SUITE("sim-motor") {
 		};
 		const Drop drops[] = { { 9.8f, 0, 0, false }, { 10.1f, 20, 21, false }, { 46.0f, 100, 100, true } };
 		for (const Drop &d : drops) {
-			// A Teleport at rest with the feet h above the floor (the feet rest on the floor), no spawn protection.
+
 			SoldierState s = m->motor->spawn_state({ (*drop)[0], (*drop)[1] + d.h, (*drop)[2] }, 0, 1, 5000, false);
 			const float top = s.position[1];
 			SoldierState landed;
@@ -2109,10 +2051,7 @@ TEST_SUITE("sim-motor") {
 		if (m == nullptr) {
 			return;
 		}
-		// The game loads the static world through T1's cache (warm: Shape::sRestoreFromBinaryState, no soup). The
-		// cases above run on build_static_world over the soup; this one checks that the motor answers the same on
-		// a cold (cooked) and a warm (restored) world of a scratch cache: every settle, the course headings, the
-		// drop spot and a sprint trace along each course.
+
 		namespace fs = std::filesystem;
 		wchar_t tmp[MAX_PATH];
 		GetTempPathW(MAX_PATH, tmp);
@@ -2145,7 +2084,6 @@ TEST_SUITE("sim-motor") {
 		const std::shared_ptr<const StaticWorldShapes> cold = load(false);
 		const std::shared_ptr<const StaticWorldShapes> warm = load(true);
 
-		// The reference answers on the direct build.
 		const SoldierMotor &motor = *m->motor;
 		std::vector<SettleResult> settles;
 		for (const SpawnPoint &p : m->points) {

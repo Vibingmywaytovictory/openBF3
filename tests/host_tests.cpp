@@ -1,4 +1,3 @@
-// ServerHost on its own thread at 60 Hz, LoopbackClient pinging it, clean stop/join.
 #include <doctest/doctest.h>
 
 #include "bf3/host/loopback_client.h"
@@ -40,8 +39,8 @@ TEST_CASE("host: ServerHost ticks at 60 Hz and stops cleanly") {
 	CHECK(bf3::host::ServerHost::live_count() == 0);
 	const uint64_t ticks = server.stats().ticks;
 	std::this_thread::sleep_for(100ms);
-	CHECK(server.stats().ticks == ticks); // the thread is gone
-	server.stop(); // idempotent
+	CHECK(server.stats().ticks == ticks);
+	server.stop();
 }
 
 TEST_CASE("host: stop_all joins every running server") {

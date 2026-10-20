@@ -1,7 +1,3 @@
-// vehicle_state_hash and vehicle_state_first_difference (docs/design/s2.md §6.5): one field list, walked by both, so
-// the hash and the "first differing field" report can never disagree about what is compared. The list is every
-// restorable field of VehicleState in declaration order, the first wheel_count wheels only; never the padding
-// (reserved bytes), the reported-only fields (body.origin, steer_angle, in_contact) or the tick.
 #include "bf3/sim/vehicle_types.h"
 
 #include <cstddef>
@@ -23,7 +19,6 @@ void fnv(uint64_t &r_hash, const void *p_data, size_t p_size) {
 	}
 }
 
-// Calls p_visit(name, pointer into p_state, size) for every hashed field in order.
 template <typename State, typename Visit>
 bool visit_fields(State &p_state, const Visit &p_visit) {
 	auto &b = p_state.body;
@@ -79,7 +74,7 @@ bool visit_fields(State &p_state, const Visit &p_visit) {
 			p_visit(std::string("current_step"), &p_state.current_step, sizeof(p_state.current_step));
 }
 
-} // namespace
+}
 
 uint64_t vehicle_state_hash(const VehicleState &p_state) {
 	uint64_t h = kFnvOffset;
@@ -94,7 +89,7 @@ std::string vehicle_state_first_difference(const VehicleState &p_a, const Vehicl
 	if (p_a.wheel_count != p_b.wheel_count) {
 		return "wheel_count";
 	}
-	// Walk p_a's list and compare each field with the same offset in p_b.
+
 	const unsigned char *base_a = reinterpret_cast<const unsigned char *>(&p_a);
 	const unsigned char *base_b = reinterpret_cast<const unsigned char *>(&p_b);
 	std::string out;
@@ -109,4 +104,4 @@ std::string vehicle_state_first_difference(const VehicleState &p_a, const Vehicl
 	return out;
 }
 
-} // namespace bf3::sim
+}

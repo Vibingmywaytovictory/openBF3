@@ -1,13 +1,3 @@
-// M2a au3 (docs/design/m2a-au3.md): the game's weapon audio router, impact audio and in-game check.
-//   audio-router  (audio.router.unit, no data) synthetic SoundPrograms through WeaponAudioRouter, ImpactAudio and
-//                 SimMixerClock on an offline MixerCore: own shots on the Predicted timeline, others' bursts on the
-//                 Render timeline by distance, reloads and one-shots, impacts and effect sounds, the voice limit and
-//                 its stealing rules, the listener re-send, determinism, hostile input, the check's bookkeeping.
-//   audio-game    (install rows, exit 77 without an install; install.unchanged in each) the Metro kit items through
-//                 load_weapon_audio, the offline E7 rehearsal (a cl-faithful presentation stream of an M16A3 shooter
-//                 into the router, GameAudioCheck on the mixer, analyse_game_check), a scene for the ear (own fire
-//                 and reload, others by distance, impacts) and the 64-shooter 60 s render.
-// The program builder and the test wave are copies of audio_unit_tests.cpp's (au's file is not edited).
 #include "test_support.h"
 
 #include "bf3/audio/audio_analysis.h"
@@ -20,7 +10,7 @@
 #include "bf3/audio/kit_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
-#include "bf3/audio/voice_cull.h" // M2b au
+#include "bf3/audio/voice_cull.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/audio/weapon_sound.h"
@@ -57,7 +47,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
-#include <map> // PT1 snd [cuts]
+#include <map>
 #include <memory>
 #include <optional>
 #include <random>
@@ -77,8 +67,6 @@ using ba::SamplerTraceEntry;
 using ba::SamplerTraceKind;
 
 namespace {
-
-// ---- stream and program builders (copied from audio_unit_tests.cpp) ----------------------------------------------
 
 void put_be24(std::vector<uint8_t> &r, uint32_t v) {
 	r.push_back(uint8_t(v >> 16));
@@ -209,7 +197,7 @@ struct TestWave {
 	std::shared_ptr<const WaveBank> bank;
 	Guid partition;
 };
-// p_segments PCM segments of p_frames frames, segment s an impulse of 1000 (s + 1) at frame 0.
+
 TestWave make_wave(uint32_t p_segments, uint32_t p_frames, int16_t p_first_loop, int16_t p_last_loop) {
 	SoundWaveInfo w;
 	w.name = "test_wave";
@@ -240,21 +228,17 @@ TestWave make_wave(uint32_t p_segments, uint32_t p_frames, int16_t p_first_loop,
 	return TestWave{ *bank, w.partition };
 }
 
-// ---- the synthetic weapon ----------------------------------------------------------------------------------------
-
 constexpr uint32_t kStepHash = 0x51e90001u;
 constexpr uint32_t kStopHash = 0x57090001u;
 constexpr uint32_t kEnableStepHash = 0xe5ab1e01u;
 constexpr uint32_t kImpactStart = 0x1a9ac701u;
 constexpr uint32_t kRate = 48000;
-constexpr uint32_t kFramesPerTick = 800; // 48 kHz / 60 Hz: one display frame of the rig is one tick
+constexpr uint32_t kFramesPerTick = 800;
 constexpr sw::SimTime kTick = sw::kTimeUnitsPerTick;
-constexpr int64_t kBias = 2048; // the lead (2 blocks) + 2 blocks of margin
-constexpr uint32_t kIntervalFrames = 3600; // 0.075 s
-constexpr sw::SimTime kRenderDelay = 6 * kTick; // cl's interpolation delay in the rig: RemoteShots arrive this early
+constexpr int64_t kBias = 2048;
+constexpr uint32_t kIntervalFrames = 3600;
+constexpr sw::SimTime kRenderDelay = 6 * kTick;
 
-// Fire starts a 2-slot stepped Sampler (Step steps it, the stop event releases it into its tail); Reload starts a
-// second sampler; a Physics node writes the listener distance to dist.
 struct WeaponProgram {
 	std::shared_ptr<const SoundProgram> program;
 	uint16_t dist = 0, first_person = 0, enable_step = 0;
@@ -283,7 +267,6 @@ WeaponProgram weapon_program(const TestWave &w) {
 	return out;
 }
 
-// A one-shot: p_event starts one sampler (start_event = p_event when p_as_start).
 std::shared_ptr<const SoundProgram> one_shot_program(const TestWave &w, uint32_t p_event, bool p_as_start) {
 	Builder b;
 	const uint16_t trig = b.input(p_event, true);
@@ -310,7 +293,7 @@ std::shared_ptr<ba::WeaponAudioTable> make_table(const TestWave &w, const Weapon
 		d.fire_mode = p_mode;
 		d.shot_interval_s = p_interval;
 		d.has_reload = true;
-		d.foley = ba::read_weapon_foley(*p_weapon.program); // PT1 rld [foley]: as load_weapon_audio fills it
+		d.foley = ba::read_weapon_foley(*p_weapon.program);
 		Result<ba::WeaponSoundBinding> b = ba::bind_weapon_sound(p_weapon.program, p_interval, kRate);
 		REQUIRE(b.ok());
 		d.binding = *b;
@@ -333,8 +316,6 @@ std::shared_ptr<ba::WeaponAudioTable> make_table(const TestWave &w, const Weapon
 	return t;
 }
 
-// ---- the rig: router + pool + impacts on an offline mixer, one display frame = one tick = 800 frames ----------------
-
 struct Seen {
 	uint8_t slot = 0;
 	uint64_t seed = 0;
@@ -345,8 +326,6 @@ struct Seen {
 	ba::SamplerTrace trace;
 };
 
-// Sees every driver instance before its Start: a trace on it, and one control evaluation (no audio, no events) to read
-// the distance and the parameters the router set.
 struct Recorder final : ba::WeaponAudioObserver {
 	WeaponProgram weapon;
 	std::deque<Seen> seen;
@@ -398,7 +377,7 @@ std::vector<uint64_t> frames_of(const ba::SamplerTrace &p_trace, SamplerTraceKin
 }
 
 struct Rig {
-	TestWave wave = make_wave(5, 6000, 1, 3); // segments longer than a shot interval: a Step lands while one plays
+	TestWave wave = make_wave(5, 6000, 1, 3);
 	WeaponProgram weapon = weapon_program(wave);
 	std::shared_ptr<ba::WeaponAudioTable> table = make_table(wave, weapon);
 	Recorder recorder;
@@ -431,10 +410,10 @@ struct Rig {
 		impacts = std::make_unique<ba::ImpactAudio>(*mixer, ba::ImpactSoundCache::from_programs(ps), wave.bank, ba::AudioTuning{}, *pool);
 	}
 	~Rig() {
-		router.reset(); // Kill for the live drivers, then the mixer destroys what it owns
+		router.reset();
 		impacts.reset();
 	}
-	// The frame an event at p_time maps to in the current frame (before the events go in).
+
 	uint64_t expect(sw::SimTime p_time, host::PresentTimeline p_tl) const {
 		const sw::SimTime now = p_tl == host::PresentTimeline::Predicted ? predicted : render;
 		return uint64_t(int64_t(clock_at_events) + (p_time - now) / 1250 + kBias);
@@ -498,18 +477,15 @@ host::PresentEvent remote_shot(uint8_t p_slot, uint16_t p_def, uint32_t p_id, sw
 	return e;
 }
 
-// One other soldier firing on a server schedule, presented as cl does: RemoteShots about the render delay early,
-// records at render time from 30 Hz samples with sv's firing and burst_seq rules (gunplay.cpp: burst_count counts the
-// ticks with shots after a tick without; firing = a shot in the snapshot interval of 2 ticks up to the sample tick).
 struct Shooter {
 	uint8_t slot = 5;
 	uint8_t generation = 1;
 	uint16_t def = kAuto;
 	ba::Vec3 feet{ 0.0f, 0.0f, 50.0f };
-	float yaw = 3.14159265f; // facing the listener at the origin (forward -z)
+	float yaw = 3.14159265f;
 	std::vector<sw::SimTime> shots;
 	std::vector<uint32_t> ids;
-	std::vector<bool> delivered; // RemoteShot sent (false: the datagram is lost)
+	std::vector<bool> delivered;
 	std::vector<bool> sent;
 	uint8_t reload_seq = 0;
 	static uint32_t tick_of(sw::SimTime p_t) {
@@ -547,7 +523,7 @@ struct Shooter {
 	ba::Vec3 eye() const {
 		return { feet.x, feet.y + 1.6f, feet.z };
 	}
-	// The events cl hands over this frame: every shot of the ticks up to the newest snapshot's (render delay: 6 ticks).
+
 	void events(sw::SimTime p_render, std::vector<host::PresentEvent> &r_out) {
 		for (size_t i = 0; i < shots.size(); ++i) {
 			if (!sent[i] && tick_of(shots[i]) <= tick_of(p_render + kRenderDelay)) {
@@ -582,7 +558,6 @@ struct Shooter {
 	}
 };
 
-// Runs a rig over p_frames frames with the shooters presented (p_newest: also the records at the newest tick).
 void run(Rig &r, std::vector<Shooter> &p_shooters, int p_frames, std::span<const ba::MuzzlePoint> p_muzzles = {}, bool p_newest = true) {
 	for (int f = 0; f < p_frames; ++f) {
 		std::vector<host::PresentEvent> ev;
@@ -609,15 +584,13 @@ void check_grid(const Seen &p_seen, uint32_t p_rounds, uint32_t p_interval_frame
 	}
 }
 
-} // namespace
-
-// =====================================================================================================================
+}
 
 TEST_SUITE("audio-router") {
 	TEST_CASE("SimMixerClock: the two timelines, the latency, the bias, late clamps, hostile times") {
 		ba::MixerCore mixer(ba::MixerConfig{});
 		std::vector<float> buf(2 * 4096);
-		mixer.mix(buf.data(), 4096); // clock 4096
+		mixer.mix(buf.data(), 4096);
 		ba::SimMixerClock clock(mixer, ba::SimMixerClockConfig{ kRate, 0 });
 		host::PresentClock now;
 		now.predicted_valid = now.render_valid = true;
@@ -627,37 +600,37 @@ TEST_SUITE("audio-router") {
 		CHECK(clock.heard_frame() == 4096);
 		CHECK(clock.frame_of(0, host::PresentTimeline::Immediate) == mixer.earliest_frame());
 		CHECK(clock.late() == 0);
-		// 0.5 s ahead on either timeline: half a second of frames past the heard frame.
+
 		CHECK(clock.frame_of(now.render + sw::kTimeUnitsPerSecond / 2, host::PresentTimeline::Render) == 4096 + 24000);
 		CHECK(clock.frame_of(now.predicted + sw::kTimeUnitsPerSecond / 2, host::PresentTimeline::Predicted) == 4096 + 24000);
-		// The two timelines differ by their now: the same time is 10 ticks (8000 frames) later on Render.
+
 		CHECK(clock.frame_of(100 * kTick + sw::kTimeUnitsPerSecond, host::PresentTimeline::Render) -
 						clock.frame_of(100 * kTick + sw::kTimeUnitsPerSecond, host::PresentTimeline::Predicted) ==
 				8000);
-		// Latency: the heard frame is the clock minus it.
+
 		clock.set_output_latency_frames(1000);
 		CHECK(clock.heard_frame() == 3096);
 		CHECK(clock.frame_of(now.render + sw::kTimeUnitsPerSecond, host::PresentTimeline::Render) == 3096 + 48000);
 		clock.set_output_latency_frames(100000);
 		CHECK(clock.heard_frame() == 0);
 		clock.set_output_latency_frames(0);
-		// Bias: a constant offset.
+
 		clock.set_bias_frames(2048);
 		CHECK(clock.bias_frames() == 2048);
 		CHECK(clock.frame_of(now.predicted, host::PresentTimeline::Predicted) == 4096 + 2048);
 		clock.set_bias_frames(0);
-		// Past and late: clamped to earliest_frame and counted, the depth kept.
+
 		CHECK(clock.frame_of(now.predicted - sw::kTimeUnitsPerSecond, host::PresentTimeline::Predicted) == mixer.earliest_frame());
 		CHECK(clock.late() == 1);
-		CHECK(clock.max_late_frames() == mixer.earliest_frame() + 48000 - 4096); // earliest - (heard - 1 s)
-		// An invalid timeline maps to earliest_frame, counted late.
+		CHECK(clock.max_late_frames() == mixer.earliest_frame() + 48000 - 4096);
+
 		host::PresentClock half = now;
 		half.render_valid = false;
 		clock.set_now(half);
 		CHECK(clock.frame_of(now.render, host::PresentTimeline::Render) == mixer.earliest_frame());
 		CHECK(clock.late() == 2);
 		clock.set_now(now);
-		// Hostile times: far future and far past never wrap.
+
 		CHECK(clock.frame_of(std::numeric_limits<sw::SimTime>::max(), host::PresentTimeline::Render) > mixer.earliest_frame());
 		CHECK(clock.frame_of(std::numeric_limits<sw::SimTime>::min(), host::PresentTimeline::Render) == mixer.earliest_frame());
 		CHECK(clock.late() == 3);
@@ -667,8 +640,7 @@ TEST_SUITE("audio-router") {
 
 	TEST_CASE("own shots: one 1p burst per trigger hold on the shot-index grid; trigger up, a gap and a def change end it") {
 		Rig r;
-		// 10 rounds at 75 ms (4.5 ticks), the first at 0.3 ticks into the frame's tick; each OwnShot in the frame its time
-		// is reached on the predicted clock.
+
 		const sw::SimTime t0 = r.predicted + 3 * kTick / 10;
 		std::vector<sw::SimTime> times;
 		for (uint32_t k = 0; k < 10; ++k) {
@@ -703,7 +675,7 @@ TEST_SUITE("audio-router") {
 		check_grid(s, 10);
 		REQUIRE(s.up);
 		CHECK(s.stop == s.first + 9 * kIntervalFrames + kIntervalFrames / 2);
-		// The stop event released the sampler into its tail; the instance finished and came back.
+
 		CHECK(!frames_of(s.trace, SamplerTraceKind::Tail).empty());
 		const ba::WeaponAudioStats &st = r.router->stats();
 		CHECK(st.bursts == 1);
@@ -715,8 +687,6 @@ TEST_SUITE("audio-router") {
 		CHECK(r.clock->late() == 0);
 		CHECK(r.mixer->stats().late_commands.load() == 0);
 
-		// Without trigger state: the burst ends once the predicted clock passes the last round by 1.5 intervals. A
-		// second burst after a gap of 10 intervals, then a def change: three new bursts, seeds from the own counter.
 		Rig q;
 		const sw::SimTime a = q.predicted + kTick;
 		std::vector<host::PresentEvent> plan;
@@ -748,7 +718,7 @@ TEST_SUITE("audio-router") {
 		check_grid(q.recorder.seen[1], 3);
 		check_grid(q.recorder.seen[2], 2);
 		CHECK(q.router->stats().trigger_ups == 3);
-		// The free camera: IsFirstPerson 0.
+
 		Rig fc;
 		fc.router->set_own_first_person(false);
 		fc.frame(std::vector<host::PresentEvent>{ own_shot(kAuto, 1, fc.predicted) });
@@ -794,9 +764,9 @@ TEST_SUITE("audio-router") {
 		CHECK(s.slot == 5);
 		CHECK(s.first_person == 0.0f);
 		CHECK(s.enable_step == 1.0f);
-		// The stand-in muzzle: eye height, 0.5 m along the view (towards the listener).
+
 		CHECK(s.distance == doctest::Approx(std::sqrt(1.6 * 1.6 + 49.5 * 49.5)).epsilon(1e-4));
-		// sv's burst_seq for this burst: the records' value before it plus one.
+
 		CHECK(s.seed == ba::sound_seed(5, sh.burst_seq_at(Shooter::tick_of(t0))));
 		check_grid(s, 10);
 		REQUIRE(s.up);
@@ -807,7 +777,6 @@ TEST_SUITE("audio-router") {
 		CHECK(st.state_rounds == 0);
 		CHECK(r.clock->late() == 0);
 
-		// Lost RemoteShots inside the burst: the shot indices still place every round.
 		Rig q;
 		std::vector<Shooter> lossy(1);
 		lossy[0].burst(q.render + 20 * kTick, 50, 10);
@@ -816,10 +785,10 @@ TEST_SUITE("audio-router") {
 		}
 		run(q, lossy, 120);
 		REQUIRE(q.recorder.seen.size() == 1);
-		check_grid(q.recorder.seen[0], 10); // 2 and 6 from the index gaps, 9 from the newest records
+		check_grid(q.recorder.seen[0], 10);
 		CHECK(q.router->stats().state_rounds == 3);
 		CHECK(q.recorder.seen[0].up);
-		// Without the newest records: the render clock ends the burst, late (its stop clamped to earliest_frame).
+
 		Rig late;
 		std::vector<Shooter> plain(1);
 		plain[0].burst(late.render + 20 * kTick, 50, 10);
@@ -828,7 +797,6 @@ TEST_SUITE("audio-router") {
 		check_grid(late.recorder.seen[0], 10);
 		CHECK(late.recorder.seen[0].stop > late.recorder.seen[0].first + 9 * kIntervalFrames + kIntervalFrames / 2);
 
-		// Every RemoteShot lost: the records start the burst (late, at render time) and keep it to its last evidence.
 		Rig z;
 		std::vector<Shooter> silent(1);
 		silent[0].burst(z.render + 20 * kTick, 80, 10);
@@ -839,7 +807,6 @@ TEST_SUITE("audio-router") {
 		CHECK(z.router->stats().state_rounds >= 8);
 		CHECK(z.recorder.seen[0].seed == ba::sound_seed(5, silent[0].burst_seq_at(Shooter::tick_of(silent[0].shots[0]) + 1)));
 
-		// Two bursts with a pause: two instances; a death ends a burst at once.
 		Rig d;
 		std::vector<Shooter> two(1);
 		two[0].burst(d.render + 20 * kTick, 10, 5);
@@ -851,7 +818,7 @@ TEST_SUITE("audio-router") {
 			CHECK(x.up);
 			check_grid(x, 5);
 		}
-		// Single fire: one instance per RemoteShot; the firing records after each shot belong to it (no second start).
+
 		Rig sg;
 		std::vector<Shooter> single(1);
 		single[0].def = kSingle;
@@ -863,8 +830,7 @@ TEST_SUITE("audio-router") {
 		for (size_t i = 0; i < sg.recorder.seen.size(); ++i) {
 			CHECK(sg.recorder.seen[i].up);
 			if (i > 0) {
-				// 0.2 s apart, within the mixer clock's resolution (MixerCore::clock() moves in 512-frame blocks, so
-				// separate instances carry up to one block of the display frame's phase; a burst's rounds do not).
+
 				const int64_t gap = int64_t(sg.recorder.seen[i].first) - int64_t(sg.recorder.seen[i - 1].first);
 				CHECK(std::llabs(gap - 9600) <= int64_t(ba::kBlockFrames));
 			}
@@ -889,7 +855,7 @@ TEST_SUITE("audio-router") {
 		shooters[0].feet = { 0.0f, 0.0f, 100.0f };
 		shooters[0].burst(r.render + 20 * kTick, 1, 4);
 		shooters[1].slot = 4;
-		shooters[1].feet = { 0.0f, 0.0f, 1200.0f }; // past max_weapon_distance_m
+		shooters[1].feet = { 0.0f, 0.0f, 1200.0f };
 		shooters[1].burst(r.render + 20 * kTick, 1, 4);
 		std::vector<ba::MuzzlePoint> muzzles(2);
 		muzzles[0].valid = true;
@@ -899,7 +865,7 @@ TEST_SUITE("audio-router") {
 		CHECK(r.recorder.seen[0].slot == 3);
 		CHECK(r.recorder.seen[0].distance == doctest::Approx(std::sqrt(9.0 + 1.44 + 99.0 * 99.0)).epsilon(1e-4));
 		CHECK(r.router->stats().culled >= 1);
-		// The listener moves while the burst is held: one SetEmitter per live instance after the SetListener.
+
 		const uint32_t live = r.router->stats().weapon_voices;
 		REQUIRE(live == 1);
 		const uint64_t before = r.router->stats().emitter_updates;
@@ -937,15 +903,14 @@ TEST_SUITE("audio-router") {
 		const ba::WeaponAudioStats &st = r.router->stats();
 		CHECK(st.reloads == 2);
 		CHECK(st.detonations == 1);
-		CHECK(st.one_shots == 5); // own reload, own knife, other knife, explosion, other reload
+		CHECK(st.one_shots == 5);
 		CHECK(st.unbound_defs == 1);
 		CHECK(st.bursts == 0);
 		CHECK(r.pool->started() == 5);
 		CHECK(ba::one_shot_event_of(*r.table->defs[kKnife].program) == ba::kHashMelee);
 		CHECK(ba::one_shot_event_of(*r.table->defs[kGrenade].program) == ba::kHashFire);
 		CHECK(ba::one_shot_event_of(*r.table->defs[kGrenade].explosion) == kImpactStart);
-		// They sound and finish: the mix is not silent, and the pool drains (a one-shot gets its Stop after
-		// kOneShotStopAfterSeconds: these patches have a stop event, so they finish only once it is seen).
+
 		r.idle(int(ba::kOneShotStopAfterSeconds * 60.0) + 30);
 		CHECK(std::any_of(r.capture.samples.begin(), r.capture.samples.end(), [](float v) { return v != 0.0f; }));
 		CHECK(r.pool->live() == 0);
@@ -960,7 +925,7 @@ TEST_SUITE("audio-router") {
 			s[i].slot = uint8_t(10 + i);
 			s[i].feet = { 0.0f, 0.0f, 20.0f + 20.0f * float(i) };
 		}
-		// 10, 11, 12 hold long bursts; 13 starts while all three run: culled.
+
 		for (uint8_t i = 0; i < 3; ++i) {
 			s[i].burst(r.render + 10 * kTick, 1, i == 1 ? 3 : 40);
 		}
@@ -968,14 +933,14 @@ TEST_SUITE("audio-router") {
 		run(r, s, 30);
 		CHECK(r.recorder.of(13) == 0);
 		CHECK(r.router->stats().culled >= 1);
-		// 11's short burst has ended (a tail); a new shooter steals it rather than a running burst.
+
 		s[3].burst(r.render + 8 * kTick, 10, 3);
 		run(r, s, 20);
 		CHECK(r.router->stats().stolen == 1);
 		CHECK(r.recorder.of(13) == 1);
 		CHECK(r.router->stats().peak_weapon_voices == 3);
 		run(r, s, 120);
-		// One-shot pool of 2: the third steals the oldest.
+
 		std::vector<host::PresentEvent> knives;
 		for (uint32_t k = 0; k < 3; ++k) {
 			knives.push_back(own_shot(kKnife, 100 + k, r.predicted));
@@ -1018,7 +983,7 @@ TEST_SUITE("audio-router") {
 		ba::EffectSoundRequest stop = fx;
 		stop.start = false;
 		r.impacts->on_effect_sound(stop, *r.clock);
-		r.impacts->on_effect_sound(stop, *r.clock); // a second stop finds nothing
+		r.impacts->on_effect_sound(stop, *r.clock);
 		r.end();
 		r.idle(int(ba::kOneShotStopAfterSeconds * 60.0) + 30);
 		const ba::ImpactAudioStats &st = r.impacts->stats();
@@ -1029,7 +994,7 @@ TEST_SUITE("audio-router") {
 		CHECK(st.refused == 0);
 		CHECK(r.pool->live() == 0);
 		CHECK(std::any_of(r.capture.samples.begin(), r.capture.samples.end(), [](float v) { return v != 0.0f; }));
-		// The cache: names, programs, counts.
+
 		std::vector<std::pair<std::string, std::shared_ptr<const SoundProgram>>> ps{ { "b", r.weapon.program }, { "a", r.weapon.program }, { "", r.weapon.program },
 			{ "c", nullptr } };
 		std::shared_ptr<const ba::ImpactSoundCache> cache = ba::ImpactSoundCache::from_programs(ps);
@@ -1041,7 +1006,7 @@ TEST_SUITE("audio-router") {
 
 	TEST_CASE("one-shot pool aging: a one-shot that never finishes is stopped, then killed and forgotten") {
 		Rig r;
-		// A program whose sampler never triggers (no event reaches it): it stays live until the pool ages it.
+
 		Builder b;
 		b.input(kStopHash, true);
 		b.p.stop_event = 0;
@@ -1137,7 +1102,7 @@ TEST_SUITE("audio-router") {
 		CHECK(st.unbound_defs >= 3);
 		CHECK(st.mixer_refusals == 0);
 		CHECK(r.router->stats().weapon_voices <= 2);
-		// A mismatched span (more weapons than soldiers) and an empty frame are harmless.
+
 		std::vector<host::PresentedOtherWeapon> extra{ w, w, w };
 		r.frame({}, {}, extra);
 		r.idle(60);
@@ -1161,7 +1126,7 @@ TEST_SUITE("audio-router") {
 				CHECK(!s.bands.empty());
 			}
 		}
-		CHECK(auditions == 10); // m98b x 3, rpg7 x 3, m1a2 x 4
+		CHECK(auditions == 10);
 		ba::GameCheckScript small;
 		small.steps = { script.steps[0] };
 		small.timeout_s = 4.0;
@@ -1194,12 +1159,12 @@ TEST_SUITE("audio-router") {
 		check.set_shooter(5);
 		std::vector<Shooter> s(1);
 		s[0].feet = { 0.0f, 0.0f, 5.0f };
-		s[0].burst(r.render + 10 * kTick, 1, 10); // before begin_step + settle: not taken
+		s[0].burst(r.render + 10 * kTick, 1, 10);
 		run(r, s, 5);
 		check.begin_step(0, 5.0f);
 		s[0].burst(r.render + 80 * kTick, 20, 10);
 		s[0].burst(r.render + 140 * kTick, 40, 10);
-		s[0].burst(r.render + 200 * kTick, 60, 10); // a third burst: the step takes two
+		s[0].burst(r.render + 200 * kTick, 60, 10);
 		run(r, s, 260);
 		const std::span<const ba::GameCheckWindow> w = check.windows();
 		REQUIRE(w.size() == 2);
@@ -1207,25 +1172,25 @@ TEST_SUITE("audio-router") {
 		CHECK(w[1].stopped);
 		CHECK(w[0].stop_frame == w[0].first_frame + 9 * kIntervalFrames + kIntervalFrames / 2);
 		CHECK(w[0].listener_distance_m == 5.0f);
-		CHECK(w[0].probe_pitch >= 0.0f); // probed (the synthetic patch has no pitch register 28: a value, not a law)
+		CHECK(w[0].probe_pitch >= 0.0f);
 		CHECK(check.step_done(0) == (check.recorded_until() >= w[1].first_frame + uint64_t(4.0 * kRate)));
-		CHECK(check.step_done(5)); // out of range: done
+		CHECK(check.step_done(5));
 		CHECK(check.recorded_until() > 0);
 		CHECK(check.total_frames() == 4 * kRate);
-		CHECK(check.dropped_frames() > 0); // the run outlasted the 4 s span
-		// No guard: refused (NoRoots), nothing written.
+		CHECK(check.dropped_frames() > 0);
+
 		CHECK(!check.write_wav(std::filesystem::path("unused.wav")).ok());
 		const ba::CheckReport rep = ba::analyse_game_check(small, check, ba::GameCheckCounters{}, ba::AudioTuning{}, kRate);
 		CHECK(!rep.rows.empty());
 		CHECK(rep.table().find("windows.d5") != std::string::npos);
 		CHECK(rep.table().find("mixer.late_blocks") != std::string::npos);
-		// A skipped step is done and FAILS (E7: a skipped audition item is not met), never a silent pass.
+
 		{
 			ba::GameAudioCheck skipping(small, kRate, 0);
 			skipping.begin_step(0, 5.0f);
 			CHECK(!skipping.step_done(0));
 			skipping.skip_step(0, "no such patch");
-			skipping.skip_step(0, "twice"); // bounded: one entry per step
+			skipping.skip_step(0, "twice");
 			skipping.skip_step(9, "out of range");
 			CHECK(skipping.step_done(0));
 			REQUIRE(skipping.skipped().size() == 1);
@@ -1244,16 +1209,11 @@ TEST_SUITE("audio-router") {
 	}
 }
 
-// =====================================================================================================================
-// audio-game: the install rows (exit 77 without an install; install.unchanged in each case).
-
 namespace {
 
 constexpr const char *kM16Patch = "sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02";
 constexpr double kNsPerTick = 1e9 / 60.0;
 
-// One install, Metro TDM, its gunplay tables, fx's impact sound names and the game's audio assets
-// (load_game_audio_assets, exactly Bf3GameAudio::load) for every case of the process.
 struct GameFixture {
 	InstallReader reader;
 	InstallSnapshot before;
@@ -1290,7 +1250,7 @@ GameFixture *game_fixture() {
 	Result<std::shared_ptr<const host::GunplayLevel>> g = host::load_gunplay_level(made->install, id, "TeamDeathMatch0");
 	REQUIRE_MESSAGE(g.ok(), (g.ok() ? std::string() : g.error().message));
 	made->gunplay = *g;
-	// fx's impact sound names (Bf3GameFx::impact_sound_names: every ImpactCell::impact_sound of the level's table).
+
 	const std::optional<std::string> grid = gameplay::MaterialGrid::grid_of_level(made->metro->db(), made->metro->root_name);
 	if (grid) {
 		gameplay::WorkBudget budget{ bf3::fx::kDefaultCompileWorkLimit };
@@ -1342,7 +1302,6 @@ std::string env_value(const char *p_name) {
 	return out;
 }
 
-// <build>/shots/<row> (docs/testing.md §2), or OPENBF3_AU3_SHOTS as one flat directory (b/shots/au3 for the user).
 std::filesystem::path au3_shots_dir(const char *p_row) {
 	const std::string env = env_value("OPENBF3_AU3_SHOTS");
 	return env.empty() ? std::filesystem::path(OPENBF3_AU3_SHOTS) / p_row : std::filesystem::path(env);
@@ -1370,35 +1329,27 @@ uint16_t def_of_patch(const ba::WeaponAudioTable &p_table, std::string_view p_pa
 	return sw::kNoWeapon;
 }
 
-// ---- a cl-faithful presentation stream ------------------------------------------------------------------------------
-// The server side runs sv's rules per tick (gunplay.cpp: burst_count counts the ticks with shots after a tick without;
-// firing = a shot in the snapshot interval (s - 2, s]; a record at tick s holds the shots of tick s); a snapshot of
-// the even ticks reaches the client latency_ticks after its tick ended with its records and the RemoteShots of its
-// interval; the client publishes a real PresentationFrame per display frame (render = received - delay_ticks, the
-// newest sample at or before the render time plus up to two newer, newest_tick); present_clock, present_others and
-// present_other_weapons are host's own functions.
-
 struct NetShooter {
 	uint8_t slot = 1;
 	uint16_t def = sw::kNoWeapon;
 	sim::SoldierState state;
-	std::vector<sw::SimTime> shots; // ascending
+	std::vector<sw::SimTime> shots;
 	std::vector<uint32_t> ids;
-	size_t next_tick_scan = 0; // the first shot not yet past by the server
-	size_t next_sent = 0; // the first shot not yet in a snapshot's RemoteShots
+	size_t next_tick_scan = 0;
+	size_t next_sent = 0;
 	uint32_t burst_count = 0;
 	uint32_t reload_count = 0;
 	int64_t last_shot_tick = -100;
 	bool previous_tick_shots = false;
 	uint32_t next_id = 1;
-	std::deque<net::TimedOther> received; // ascending server ticks
+	std::deque<net::TimedOther> received;
 	void burst(sw::SimTime p_first, uint32_t p_rounds, sw::SimTime p_interval) {
 		for (uint32_t k = 0; k < p_rounds; ++k) {
 			shots.push_back(p_first + sw::SimTime(k) * p_interval);
 			ids.push_back(next_id++);
 		}
 	}
-	// sv, after tick p_tick ran.
+
 	void server_tick(uint32_t p_tick) {
 		bool any = false;
 		while (next_tick_scan < shots.size() && sim::Tick(sw::tick_containing(shots[next_tick_scan])) <= p_tick) {
@@ -1426,9 +1377,9 @@ struct NetShooter {
 };
 
 struct NetStream {
-	double latency_ticks = 2.5; // snapshot end of tick -> arrival
-	double delay_ticks = 4.0; // cl's interpolation delay (2 snapshot intervals)
-	uint32_t server_ran = 0; // the newest tick the server stepped
+	double latency_ticks = 2.5;
+	double delay_ticks = 4.0;
+	uint32_t server_ran = 0;
 	struct Pending {
 		double arrive = 0.0;
 		uint32_t tick = 0;
@@ -1437,7 +1388,6 @@ struct NetStream {
 	uint32_t newest_tick = 0;
 	std::unique_ptr<host::PresentationFrame> frame = std::make_unique<host::PresentationFrame>();
 
-	// Steps the server to floor(p_t) and delivers the snapshots that arrived by p_t; RemoteShots into r_events.
 	void advance(double p_t, std::vector<NetShooter> &r_shooters, std::vector<host::PresentEvent> &r_events) {
 		while (double(server_ran + 1) <= p_t) {
 			++server_ran;
@@ -1447,7 +1397,7 @@ struct NetStream {
 			if (server_ran % 2 == 0) {
 				in_flight.push_back(Pending{ double(server_ran) + latency_ticks, server_ran });
 				for (NetShooter &s : r_shooters) {
-					s.received.push_back(net::TimedOther{ server_ran, s.record(server_ran) }); // held back until arrival below
+					s.received.push_back(net::TimedOther{ server_ran, s.record(server_ran) });
 				}
 			}
 		}
@@ -1474,12 +1424,12 @@ struct NetStream {
 			}
 		}
 	}
-	// The frame cl publishes at p_t (server-tick units), p_now_ns.
+
 	void publish(double p_t, uint64_t p_now_ns, const std::vector<NetShooter> &p_shooters) {
 		host::PresentationFrame &f = *frame;
 		f.valid = true;
 		++f.serial;
-		f.tick = sim::Tick(std::floor(p_t)) + 3; // the own clock runs ahead
+		f.tick = sim::Tick(std::floor(p_t)) + 3;
 		f.tick_fraction = p_t - std::floor(p_t);
 		f.publish_ns = p_now_ns;
 		f.render_ticks_at_publish = p_t - latency_ticks - delay_ticks;
@@ -1492,7 +1442,7 @@ struct NetStream {
 			host::OtherTrack &t = f.others[f.other_count];
 			t.slot = s.slot;
 			t.count = 0;
-			// The arrived samples (received holds the in-flight ones too: only ticks <= newest_tick count).
+
 			size_t last = 0;
 			bool any = false;
 			for (size_t i = 0; i < s.received.size(); ++i) {
@@ -1526,8 +1476,6 @@ struct NetStream {
 	}
 };
 
-// The game's audio side of the offline runs: the mixer, pool, clock, router and impacts as Bf3GameAudio::build makes
-// them (latency 0: no device), and GameAudioDriver::step per display frame.
 struct GameRig {
 	const GameFixture &fx;
 	std::unique_ptr<ba::MixerCore> mixer;
@@ -1562,7 +1510,7 @@ struct GameRig {
 		router.reset();
 		impacts.reset();
 	}
-	// One display frame: the clock, the presentation, the driver, 800 frames mixed.
+
 	void frame(const host::PresentationFrame &p_frame, uint64_t p_now_ns, std::span<const host::PresentEvent> p_events, uint8_t p_own_slot,
 			std::span<const ba::ImpactSoundRequest> p_impacts = {}) {
 		now = host::present_clock(p_frame, p_now_ns);
@@ -1591,7 +1539,6 @@ struct GameRig {
 	}
 };
 
-// The router's stand-in muzzle of a presented soldier (weapon_audio.cpp other_emitter, standin_muzzle_forward_m).
 ba::Vec3 standin_muzzle(const host::PresentedSoldier &p_s) {
 	const float cp = std::cos(p_s.pitch), spi = std::sin(p_s.pitch), cy = std::cos(p_s.yaw), sy = std::sin(p_s.yaw);
 	const float f = ba::WeaponAudioConfig{}.standin_muzzle_forward_m;
@@ -1607,7 +1554,7 @@ bool gate_late_blocks() {
 	return env_value("OPENBF3_AU3_GATE_LATE") == "1";
 }
 
-} // namespace
+}
 
 TEST_SUITE("audio-game") {
 	TEST_CASE("kit items: Metro TDM's kit patches compile strict and bind (E7 item 1), impacts and auditions load") {
@@ -1648,7 +1595,7 @@ TEST_SUITE("audio-game") {
 		CHECK(a.impacts->compiled() > 0);
 		CHECK(a.bank);
 		CHECK(a.waves_missing == 0);
-		// E7 item 4: every audition item loads (the M1A2 from kAuditionSuperbundles, with a bank of its own).
+
 		for (const ba::GameAuditionItem &item : ba::game_audition_items()) {
 			const auto it = a.auditions.find(item.patch);
 			REQUIRE_MESSAGE(it != a.auditions.end(), item.name, " not loaded");
@@ -1674,7 +1621,7 @@ TEST_SUITE("audio-game") {
 		const ba::WeaponAudioTable &table = *f->assets.table;
 		const uint16_t m16 = def_of_patch(table, kM16Patch);
 		REQUIRE(m16 != sw::kNoWeapon);
-		// The script: the game's, every step (an audition the assets lack is skipped through skip_step and fails).
+
 		ba::GameCheckScript script = ba::game_check_script();
 		std::string skips;
 		script.analysis.shot_interval_s = table.defs[m16].shot_interval_s;
@@ -1693,9 +1640,9 @@ TEST_SUITE("audio-game") {
 		sh.def = m16;
 		sh.state.life = 1;
 		sh.state.position = { 0.0f, 0.0f, 0.0f };
-		sh.state.yaw = 0; // facing +z, the listener's axis
+		sh.state.yaw = 0;
 		NetStream net;
-		const double t_start = 600.25; // server ticks (10 s into the match, off the tick grid)
+		const double t_start = 600.25;
 		const uint32_t settle_frames = uint32_t(std::llround(script.settle_s * 60.0));
 		const uint32_t start_frames = uint32_t(std::llround(script.analysis.start_s * 60.0));
 		const uint32_t period_frames = uint32_t(std::llround(script.burst_period_s * 60.0));
@@ -1714,7 +1661,7 @@ TEST_SUITE("audio-game") {
 			events.clear();
 			net.advance(t, shooters, events);
 			net.publish(t, now_ns, shooters);
-			// The free camera: the next step once the current one is recorded (the first after 1 s of match).
+
 			if ((step < 0 && f_index >= 60) || (step >= 0 && check.step_done(uint32_t(step)))) {
 				++step;
 				if (size_t(step) >= script.steps.size()) {
@@ -1748,7 +1695,7 @@ TEST_SUITE("audio-game") {
 				const uint64_t seed = ba::sound_seed(0xA0D1u, auditions);
 				const auto it = f->assets.auditions.find(st.patch);
 				if (it == f->assets.auditions.end()) {
-					check.skip_step(uint32_t(step), "not loaded"); // Bf3GameAudio::audition's refusal does the same
+					check.skip_step(uint32_t(step), "not loaded");
 					skips += " " + st.name;
 				} else {
 					CHECK(ba::start_audition(*rig.pool, *rig.mixer, it->second.program, it->second.bank, f->tuning, rig.listener, standin_muzzle(*s), seed,
@@ -1761,7 +1708,7 @@ TEST_SUITE("audio-game") {
 		}
 		const double run_s = double(f_index) / 60.0;
 		CHECK(done);
-		// Tails: a few frames more so every stop reached the mixer.
+
 		const ba::MixerStats &ms = rig.mixer->stats();
 		ba::GameCheckCounters counters;
 		counters.short_blocks = ms.short_blocks.load();
@@ -1776,7 +1723,7 @@ TEST_SUITE("audio-game") {
 		size_t failed = 0;
 		for (const ba::CheckRow &r : rep.rows) {
 			if (r.name == "mixer.late_blocks" && !gate_late_blocks()) {
-				continue; // a wall-clock row (rule 7): gated on main only (OPENBF3_AU3_GATE_LATE=1)
+				continue;
 			}
 			if (!r.pass) {
 				++failed;
@@ -1792,7 +1739,7 @@ TEST_SUITE("audio-game") {
 		CHECK(rig.router->stats().mixer_refusals == 0);
 		CHECK(ms.ring_overflows.load() == 0);
 		CHECK(ms.starved_voices.load() == 0);
-		// The recording for the user (b/shots/au3, gitignored).
+
 		const std::filesystem::path dir = au3_shots_dir("audio.game");
 		std::error_code ec;
 		REQUIRE(guard.allows_write(dir));
@@ -1834,7 +1781,7 @@ TEST_SUITE("audio-game") {
 			}
 		} tap;
 		struct Starts final : ba::WeaponAudioObserver {
-			std::vector<std::pair<uint8_t, uint64_t>> first; // slot, first round frame
+			std::vector<std::pair<uint8_t, uint64_t>> first;
 			void on_driver_instance(uint8_t p_slot, uint64_t, uint64_t p_first, ba::PatchInstance &) override {
 				first.push_back({ p_slot, p_first });
 			}
@@ -1847,7 +1794,7 @@ TEST_SUITE("audio-game") {
 		const double t_start = 600.25;
 		const auto at = [&](double p_s) { return sw::SimTime(std::llround((t_start + p_s * 60.0) * double(sw::kTimeUnitsPerTick))); };
 		const sw::SimTime m16_iv = sw::SimTime(std::llround(table.defs[m16].shot_interval_s * double(sw::kTimeUnitsPerSecond)));
-		// The others: M16A3s at 15, 80 and 250 m on the listener's axis facing it, an SVD at 40 m to the side.
+
 		std::vector<NetShooter> shooters(4);
 		const float dist[3] = { 15.0f, 80.0f, 250.0f };
 		for (int i = 0; i < 3; ++i) {
@@ -1855,18 +1802,18 @@ TEST_SUITE("audio-game") {
 			shooters[i].def = m16;
 			shooters[i].state.life = 1;
 			shooters[i].state.position = { 0.0f, 0.0f, dist[i] + 0.5f };
-			shooters[i].state.yaw = 32768; // facing -z, the listener
+			shooters[i].state.yaw = 32768;
 			shooters[i].burst(at(4.0 + 3.0 * i), 10, m16_iv);
 		}
 		shooters[3].slot = 4;
 		shooters[3].def = svd;
 		shooters[3].state.life = 1;
 		shooters[3].state.position = { 40.0f, 0.0f, 0.0f };
-		shooters[3].state.yaw = 49152; // facing -x
+		shooters[3].state.yaw = 49152;
 		for (int k = 0; k < 3; ++k) {
 			shooters[3].burst(at(13.0 + 0.5 * k), 1, m16_iv);
 		}
-		// Own: an M16A3 burst at 1 s, the reload at 2.2 s, a second burst at 18 s.
+
 		std::vector<sw::SimTime> own;
 		for (int k = 0; k < 8; ++k) {
 			own.push_back(at(1.0) + sw::SimTime(k) * m16_iv);
@@ -1920,7 +1867,7 @@ TEST_SUITE("audio-game") {
 			const bool trigger = own_next > 0 && own_next < own.size() && own[own_next] - own[own_next - 1] <= m16_iv;
 			net.frame->own_weapons_valid = true;
 			net.frame->own_weapons_curr.timers[0].flags = trigger ? sw::slot_flags::kTriggerDown : 0;
-			// Impacts at 16 s: five hits 3-8 m in front, 0.3 s apart.
+
 			if (fi >= 16 * 60 && fi < 16 * 60 + 90 && (fi - 16 * 60) % 18 == 0) {
 				ba::ImpactSoundRequest r;
 				r.patch = impact_names[(fi / 18) % impact_names.size()];
@@ -1937,11 +1884,11 @@ TEST_SUITE("audio-game") {
 		const ba::WeaponAudioStats &ws = rig.router->stats();
 		CHECK(ws.own_bursts == 2);
 		CHECK(ws.reloads == 1);
-		CHECK(ws.bursts == 2 + 3 + 3); // own 2, the M16A3s 3, the SVD's 3 single shots
+		CHECK(ws.bursts == 2 + 3 + 3);
 		CHECK(ws.mixer_refusals == 0);
 		CHECK(ws.state_rounds == 0);
 		CHECK(rig.impacts->stats().impacts == 5);
-		// The loudest 20 ms of the first second of each sound (full mix, unity master).
+
 		const auto loudest = [&](uint64_t p_first, double p_seconds) {
 			const uint64_t len = uint64_t(0.02 * ba::kMixRate);
 			double best = -300.0;
@@ -1975,7 +1922,7 @@ TEST_SUITE("audio-game") {
 		for (double db : { own_db, at_db[0], at_db[1], at_db[2], at_db[3], impacts_db }) {
 			CHECK(db >= -110.0);
 		}
-		// The WAV for the user's ear (shots, gitignored).
+
 		const PathGuard guard = install_guard(*f);
 		const std::filesystem::path dir = au3_shots_dir("audio.game");
 		REQUIRE(guard.allows_write(dir));
@@ -2027,10 +1974,7 @@ TEST_SUITE("audio-game") {
 			}
 		} tap;
 		GameRig rig(*f, &tap);
-		// M2b au (E11, docs/design/m2b.md §6, docs/design/m2b-au.md): the same render through the A3 mixer, built as
-		// Bf3GameAudio builds it: the install's HdrSetting and scopes over the level's programs, MixerConfig::max_voices
-		// = kGameMixerVoices (128) over kGameMixerInstances slots. The rig's mixer, pool, clock, router and impacts are
-		// rebuilt over it before the first frame.
+
 		{
 			std::vector<std::shared_ptr<const SoundProgram>> programs;
 			for (const ba::WeaponAudioDef &d : table.defs) {
@@ -2043,7 +1987,7 @@ TEST_SUITE("audio-game") {
 			REQUIRE_MESSAGE(a3.hdr.has_value(), a3.notes);
 			REQUIRE_MESSAGE(a3.scopes != nullptr, a3.notes);
 			MESSAGE("A3: " << a3.scopes->scopes.size() << " scopes, " << a3.scoped_patches << " of " << programs.size() << " programs scoped");
-			rig.router.reset(); // everything that refers to the old mixer goes before it
+			rig.router.reset();
 			rig.impacts.reset();
 			rig.clock.reset();
 			rig.pool.reset();
@@ -2053,20 +1997,20 @@ TEST_SUITE("audio-game") {
 			mc.schedule_lead_blocks = uint32_t(std::max(1.0f, f->tuning.schedule_lead_blocks));
 			mc.max_voices = ba::kGameMixerVoices;
 			ba::apply_mixer_a3(a3, mc);
-			if (const std::string fade = env_value("OPENBF3_PT1_CUT_FADE"); !fade.empty()) { // PT1 snd [fade]: A/B measurement only
-				mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800)); // PT1 snd [fade]
-			} // PT1 snd [fade]
-			if (env_value("OPENBF3_PT1_CAP_HOLD") == "0") { // PT1 snd [hold]: A/B measurement only
-				mc.pt1_cap_hold_db = 0.0f; // PT1 snd [hold]
-				mc.pt1_voice_hold_blocks = 0; // PT1 snd [hold]
-				mc.pt1_resume_margin = 0; // PT1 snd [hold]
-			} // PT1 snd [hold]
-			if (env_value("OPENBF3_PT1_LIMIT") == "0") { // PT1 snd [limit]: A/B measurement only
-				mc.pt1_limit_ceiling = 0.0f; // PT1 snd [limit]
-			} // PT1 snd [limit]
-			if (const std::string m = env_value("OPENBF3_PT1_RESUME_MARGIN"); !m.empty()) { // PT1 snd [hold]: A/B measurement only
-				mc.pt1_resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128)); // PT1 snd [hold]
-			} // PT1 snd [hold]
+			if (const std::string fade = env_value("OPENBF3_PT1_CUT_FADE"); !fade.empty()) {
+				mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
+			}
+			if (env_value("OPENBF3_PT1_CAP_HOLD") == "0") {
+				mc.pt1_cap_hold_db = 0.0f;
+				mc.pt1_voice_hold_blocks = 0;
+				mc.pt1_resume_margin = 0;
+			}
+			if (env_value("OPENBF3_PT1_LIMIT") == "0") {
+				mc.pt1_limit_ceiling = 0.0f;
+			}
+			if (const std::string m = env_value("OPENBF3_PT1_RESUME_MARGIN"); !m.empty()) {
+				mc.pt1_resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128));
+			}
 			rig.mixer = std::make_unique<ba::MixerCore>(mc);
 			rig.mixer->set_tap(&tap);
 			rig.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
@@ -2081,32 +2025,32 @@ TEST_SUITE("audio-game") {
 		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
 		const double t_start = 600.25;
 		constexpr int kSeconds = 60;
-		constexpr uint32_t kShooters = 63; // + the own soldier = 64
+		constexpr uint32_t kShooters = 63;
 		std::vector<NetShooter> shooters(kShooters);
 		for (uint32_t i = 0; i < kShooters; ++i) {
 			NetShooter &s = shooters[i];
 			s.slot = uint8_t(1 + i);
 			s.state.life = 1;
-			// Half within 100 m, the rest out to 900 m (past the M16A3's 301 m Fire gate and the 1000 m cull).
+
 			const float r = i % 2 == 0 ? 3.0f + 97.0f * unit(rng) : 100.0f + 800.0f * unit(rng);
 			const float a = 6.2831853f * unit(rng);
 			s.state.position = { r * std::sin(a), 0.0f, r * std::cos(a) };
 			s.state.yaw = uint16_t(rng());
-			// Bursts with gaps, mostly the kit's drivers, some one-shot items (knife, grenade).
+
 			const bool one_shot = !one_shots.empty() && i % 9 == 4;
 			s.def = one_shot ? one_shots[i % one_shots.size()] : drivers[i % drivers.size()];
 			const double iv = one_shot ? 1.0 : std::max(0.06, table.defs[s.def].shot_interval_s);
 			const sw::SimTime interval = sw::SimTime(std::llround(iv * double(sw::kTimeUnitsPerSecond)));
 			double t = t_start + 30.0 + 120.0 * unit(rng);
 			while (t < t_start + kSeconds * 60.0 - 120.0) {
-				// Automatic weapons hold long bursts (5-55 rounds), so more than max_weapon_voices run at once at times.
+
 				const bool automatic = table.defs[s.def].fire_mode != ba::WeaponFireMode::Single;
 				const uint32_t rounds = one_shot ? 1u : (automatic ? 5u + uint32_t(unit(rng) * 50.0f) : 1u + uint32_t(unit(rng) * 20.0f));
 				s.burst(sw::SimTime(std::llround(t * double(sw::kTimeUnitsPerTick))), rounds, interval);
 				t += double(rounds) * iv * 60.0 + 12.0 + 50.0 * unit(rng);
 			}
 		}
-		// The own soldier: M16A3 bursts on the Predicted timeline.
+
 		std::vector<sw::SimTime> own_shots;
 		for (double t = t_start + 40.0; t < t_start + kSeconds * 60.0 - 120.0;) {
 			const uint32_t rounds = 3 + uint32_t(unit(rng) * 15.0f);
@@ -2115,15 +2059,15 @@ TEST_SUITE("audio-game") {
 			}
 			t += double(rounds) * 4.5 + 30.0 + 90.0 * unit(rng);
 		}
-		// PT1 snd [cuts]: every cut of the run (the event ring, drained after each frame) for the flap count below.
-		rig.mixer->pt1_record_cuts(true); // PT1 snd [cuts]
-		std::vector<ba::MixerCutEvent> pt1_cuts; // PT1 snd [cuts]
-		const auto pt1_drain = [&] { // PT1 snd [cuts]
-			std::array<ba::MixerCutEvent, 512> batch; // PT1 snd [cuts]
-			for (size_t n = rig.mixer->pt1_poll_cuts(batch); n > 0; n = rig.mixer->pt1_poll_cuts(batch)) { // PT1 snd [cuts]
-				pt1_cuts.insert(pt1_cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n)); // PT1 snd [cuts]
-			} // PT1 snd [cuts]
-		}; // PT1 snd [cuts]
+
+		rig.mixer->pt1_record_cuts(true);
+		std::vector<ba::MixerCutEvent> pt1_cuts;
+		const auto pt1_drain = [&] {
+			std::array<ba::MixerCutEvent, 512> batch;
+			for (size_t n = rig.mixer->pt1_poll_cuts(batch); n > 0; n = rig.mixer->pt1_poll_cuts(batch)) {
+				pt1_cuts.insert(pt1_cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n));
+			}
+		};
 		NetStream net;
 		std::vector<host::PresentEvent> events;
 		std::vector<ba::ImpactSoundRequest> impacts;
@@ -2137,7 +2081,7 @@ TEST_SUITE("audio-game") {
 			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
 			events.clear();
 			impacts.clear();
-			// Reloads now and then (reload_seq changes at the next record).
+
 			if (fi % 97 == 0) {
 				NetShooter &s = shooters[(fi / 97) % kShooters];
 				++s.reload_count;
@@ -2145,7 +2089,7 @@ TEST_SUITE("audio-game") {
 			}
 			net.advance(t, shooters, events);
 			net.publish(t, now_ns, shooters);
-			// Own fire: OwnShot events up to the predicted time, the trigger down while a burst runs.
+
 			const host::PresentClock c = host::present_clock(*net.frame, now_ns);
 			bool trigger = false;
 			while (own_next < own_shots.size() && own_shots[own_next] <= c.predicted) {
@@ -2164,7 +2108,7 @@ TEST_SUITE("audio-game") {
 			}
 			net.frame->own_weapons_valid = true;
 			net.frame->own_weapons_curr.timers[0].flags = trigger ? sw::slot_flags::kTriggerDown : 0;
-			// Impacts: the fire lands around the listener (fx's cue names, Render timeline).
+
 			if (!impact_names.empty() && fi % 3 == 0) {
 				ba::ImpactSoundRequest r;
 				r.patch = impact_names[size_t(rng() % impact_names.size())];
@@ -2175,10 +2119,10 @@ TEST_SUITE("audio-game") {
 				impacts.push_back(r);
 			}
 			rig.frame(*net.frame, now_ns, events, 0, impacts);
-			pt1_drain(); // PT1 snd [cuts]
+			pt1_drain();
 			net.trim(shooters);
 		}
-		// Let every tail end (the pool's 3 s stop, the drivers' release).
+
 		for (uint64_t fi = frames; fi < frames + 6 * 60; ++fi) {
 			const double t = t_start + double(fi);
 			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
@@ -2187,7 +2131,7 @@ TEST_SUITE("audio-game") {
 			net.publish(t, now_ns, shooters);
 			net.frame->own_weapons_curr.timers[0].flags = 0;
 			rig.frame(*net.frame, now_ns, events, 0);
-			pt1_drain(); // PT1 snd [cuts]
+			pt1_drain();
 		}
 		const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		const ba::MixerStats &ms = rig.mixer->stats();
@@ -2210,45 +2154,45 @@ TEST_SUITE("audio-game") {
 				unsigned(rig.pool->peak()), (unsigned long long)rig.pool->stolen(), (unsigned long long)rig.pool->failed(), (unsigned long long)is.impacts,
 				(unsigned long long)is.unknown_patches, (unsigned long long)reloads, rms_db, double(tap.peak), (unsigned long long)tap.non_finite);
 		MESSAGE(line);
-		MESSAGE(ba::format_mixer_cuts(rig.mixer->pt1_cut_stats())); // PT1 snd [cuts]
-		// PT1 snd [cuts]: flapping loops: parked by the cap, resumed, parked again
-		std::map<ba::InstanceHandle, std::vector<std::pair<uint64_t, bool>>> pt1_per; // PT1 snd [cuts]: (frame, parked)
-		for (const ba::MixerCutEvent &e : pt1_cuts) { // PT1 snd [cuts]
-			if (e.kind == ba::MixerCutKind::Pend || e.kind == ba::MixerCutKind::Resume) { // PT1 snd [cuts]
-				pt1_per[e.handle].emplace_back(e.frame, e.kind == ba::MixerCutKind::Pend); // PT1 snd [cuts]
-			} // PT1 snd [cuts]
-		} // PT1 snd [cuts]
-		uint64_t pt1_parks = 0, pt1_short_parks = 0, pt1_flaps = 0; // PT1 snd [cuts]
-		size_t pt1_flapping = 0; // PT1 snd [cuts]
-		for (const auto &[h, v] : pt1_per) { // PT1 snd [cuts]
-			uint64_t mine = 0; // PT1 snd [cuts]
-			for (size_t i = 0; i < v.size(); ++i) { // PT1 snd [cuts]
-				pt1_parks += v[i].second ? 1 : 0; // PT1 snd [cuts]
-				if (v[i].second && i + 1 < v.size() && !v[i + 1].second && v[i + 1].first - v[i].first < ba::kMixRate / 4) { // PT1 snd [cuts]
-					++pt1_short_parks; // PT1 snd [cuts]: silent for less than 0.25 s: a gap inside the sound
-				} // PT1 snd [cuts]
-				if (v[i].second && i >= 2 && !v[i - 1].second && v[i - 2].second && v[i].first - v[i - 2].first < ba::kMixRate) { // PT1 snd [cuts]
-					++mine; // PT1 snd [cuts]: parked again within 1 s of the park before
-				} // PT1 snd [cuts]
-			} // PT1 snd [cuts]
-			pt1_flaps += mine; // PT1 snd [cuts]
-			pt1_flapping += mine > 0 ? 1 : 0; // PT1 snd [cuts]
-		} // PT1 snd [cuts]
-		MESSAGE("PT1 snd: " << pt1_cuts.size() << " cuts recorded; " << pt1_parks << " parks of " << pt1_per.size() << " loops, " << pt1_short_parks // PT1 snd [cuts]
-							<< " parked for < 0.25 s, " << pt1_flaps << " re-parks within 1 s on " << pt1_flapping << " loops"); // PT1 snd [cuts]
-		if (env_value("OPENBF3_PT1_CUT_FADE").empty() && env_value("OPENBF3_PT1_CAP_HOLD").empty() && env_value("OPENBF3_PT1_RESUME_MARGIN").empty() && // PT1 snd [cuts]: the defaults
-				env_value("OPENBF3_PT1_LIMIT").empty()) { // PT1 snd [limit]
-			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats(); // PT1 snd [cuts]
-			for (const ba::MixerCutKind k : { ba::MixerCutKind::Drop, ba::MixerCutKind::Pend, ba::MixerCutKind::Kill, ba::MixerCutKind::Finish, ba::MixerCutKind::Resume }) { // PT1 snd [cuts]
-				INFO(ba::mixer_cut_kind_name(k)); // PT1 snd [cuts]
-				CHECK(cs.audible[size_t(k)].load() == 0); // PT1 snd [cuts]: [fade] (merged A3: 1833 audible parks, 1086 resumes, 36 drops in this run)
-			} // PT1 snd [cuts]
-			CHECK(pt1_parks > 0); // PT1 snd [cuts]: the cap is reached (the flap counts below mean something)
-			CHECK(pt1_short_parks * 20 <= pt1_parks); // PT1 snd [cuts]: [hold] (merged A3: 1843 of 3234)
-			CHECK(pt1_flaps * 20 <= pt1_parks); // PT1 snd [cuts]: [hold] (merged A3: 1931 of 3234)
-			CHECK(cs.event_drops.load() == 0); // PT1 snd [cuts]
-			CHECK(cs.overs_out.load() == 0); // PT1 snd [limit] (without it: the mix peaks at 2.6)
-		} // PT1 snd [cuts]
+		MESSAGE(ba::format_mixer_cuts(rig.mixer->pt1_cut_stats()));
+
+		std::map<ba::InstanceHandle, std::vector<std::pair<uint64_t, bool>>> pt1_per;
+		for (const ba::MixerCutEvent &e : pt1_cuts) {
+			if (e.kind == ba::MixerCutKind::Pend || e.kind == ba::MixerCutKind::Resume) {
+				pt1_per[e.handle].emplace_back(e.frame, e.kind == ba::MixerCutKind::Pend);
+			}
+		}
+		uint64_t pt1_parks = 0, pt1_short_parks = 0, pt1_flaps = 0;
+		size_t pt1_flapping = 0;
+		for (const auto &[h, v] : pt1_per) {
+			uint64_t mine = 0;
+			for (size_t i = 0; i < v.size(); ++i) {
+				pt1_parks += v[i].second ? 1 : 0;
+				if (v[i].second && i + 1 < v.size() && !v[i + 1].second && v[i + 1].first - v[i].first < ba::kMixRate / 4) {
+					++pt1_short_parks;
+				}
+				if (v[i].second && i >= 2 && !v[i - 1].second && v[i - 2].second && v[i].first - v[i - 2].first < ba::kMixRate) {
+					++mine;
+				}
+			}
+			pt1_flaps += mine;
+			pt1_flapping += mine > 0 ? 1 : 0;
+		}
+		MESSAGE("PT1 snd: " << pt1_cuts.size() << " cuts recorded; " << pt1_parks << " parks of " << pt1_per.size() << " loops, " << pt1_short_parks
+							<< " parked for < 0.25 s, " << pt1_flaps << " re-parks within 1 s on " << pt1_flapping << " loops");
+		if (env_value("OPENBF3_PT1_CUT_FADE").empty() && env_value("OPENBF3_PT1_CAP_HOLD").empty() && env_value("OPENBF3_PT1_RESUME_MARGIN").empty() &&
+				env_value("OPENBF3_PT1_LIMIT").empty()) {
+			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			for (const ba::MixerCutKind k : { ba::MixerCutKind::Drop, ba::MixerCutKind::Pend, ba::MixerCutKind::Kill, ba::MixerCutKind::Finish, ba::MixerCutKind::Resume }) {
+				INFO(ba::mixer_cut_kind_name(k));
+				CHECK(cs.audible[size_t(k)].load() == 0);
+			}
+			CHECK(pt1_parks > 0);
+			CHECK(pt1_short_parks * 20 <= pt1_parks);
+			CHECK(pt1_flaps * 20 <= pt1_parks);
+			CHECK(cs.event_drops.load() == 0);
+			CHECK(cs.overs_out.load() == 0);
+		}
 		CHECK(ms.short_blocks.load() == 0);
 		CHECK(ms.late_commands.load() == 0);
 		CHECK(ms.ring_overflows.load() == 0);
@@ -2258,8 +2202,8 @@ TEST_SUITE("audio-game") {
 		CHECK(ms.peak_instances.load() <= ba::kGameMixerInstances);
 		CHECK(ws.mixer_refusals == 0);
 		CHECK(ws.bursts > 100);
-		// M2b au R6: the mixer culls now (pre-cull, scopes, the 128 cap), the router only past max_weapon_distance_m.
-		CHECK(ws.culled + ms.culled_precull.load() + ms.culled_scope.load() + ms.culled_cap.load() > 0); // M2b au R6 (A2: ws.culled > 0)
+
+		CHECK(ws.culled + ms.culled_precull.load() + ms.culled_scope.load() + ms.culled_cap.load() > 0);
 		CHECK(ws.reloads > 0);
 		CHECK(is.impacts > 0);
 		CHECK(rig.pool->failed() == 0);
@@ -2267,11 +2211,9 @@ TEST_SUITE("audio-game") {
 		CHECK(tap.frames >= uint64_t(kSeconds) * ba::kMixRate);
 		CHECK(rms_db > -60.0);
 		if (gate_late_blocks()) {
-			CHECK(ms.late_blocks.load() == 0); // the underrun gate: main only (timing label)
+			CHECK(ms.late_blocks.load() == 0);
 		}
-		// M2b au (E11): the A3 checks. Live voices <= 128 in every block (deterministic, every run); the mix CPU share
-		// p99 <= 0.10 of the block (10 % of a core) is a wall-clock gate: main only (OPENBF3_AU3_GATE_LATE=1, the timing
-		// row audio.game.underruns), printed elsewhere as indicative only.
+
 		{
 			const ba::MixerProfile prof = ba::read_mixer_profile(ms);
 			uint64_t hist_blocks = 0;
@@ -2289,7 +2231,7 @@ TEST_SUITE("audio-game") {
 			CHECK(hist_blocks == prof.blocks);
 			CHECK(prof.live_voices_max <= ba::kGameMixerVoices);
 			CHECK(prof.live_voices_max > 0);
-			CHECK(prof.culled_precull > 0); // far shooters start below the window while the own M16A3 holds it up
+			CHECK(prof.culled_precull > 0);
 			if (gate_late_blocks()) {
 				CHECK(prof.share_p99 <= 0.10);
 			}

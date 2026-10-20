@@ -1,26 +1,4 @@
 #pragma once
-// Bf3AudioDemo: the M2a audio demo and gate G8 (docs/design/m2a-audio.md §1, §10.3, §10.4). Scene:
-// res://scenes/audio_m16.tscn.
-//
-// A loader thread reads the install (Metro TDM, the M16A3 patch compiled strictly, a WaveBank of exactly the waves it
-// names); the main thread then creates the MixerCore, a Bf3AudioStream on it and one AudioStreamPlayer (Master bus),
-// waits for Godot's audio thread to start mixing, and runs the M16A3 check script (audio_check.h, the script G7
-// renders offline) through a CheckDriver pumped once per frame, from MixerCore::earliest_frame(). A WavRecorder tap
-// on the mixer records its output from frame 0.
-//
-// User args (after "--"):
-//   --audio-check            gate G8: once the script is done and 31 s are recorded from its start, the player stops
-//                            and a worker thread runs analyse_check on the recording (rows (a)-(d)) plus the Godot
-//                            rows: recording >= 30.0 s; short_blocks = late_blocks = late_commands = ring_overflows =
-//                            starved_voices = 0; the server mix rate is 48000; an offline replay of the same script
-//                            (run_check_offline at the same start frame) equals the recording sample for sample.
-//                            max_block_ns and max_call_gap_ns are printed. Prints the PASS/FAIL table,
-//                            install.unchanged and "AUDIO CHECK: PASS|FAIL (n/m)", then quits 0/1
-//   --audio-record=<wav>     save the recording [start, start + 31 s) as float WAV, and the core and noise taps beside it
-//                            (<stem>_core.wav, <stem>_noise.wav); through the install's PathGuard
-//   --quit-after=<s>         quit (as a failure in check mode) when not done after s seconds
-//   --bf3-install=<dir>      install override, as for GameSession
-// Without --audio-check the script plays once and the demo stays open.
 
 #include "audio_stream.h"
 
@@ -45,7 +23,7 @@
 namespace godot {
 class AudioStreamPlayer;
 class Label;
-} // namespace godot
+}
 
 namespace bf3::godot_side {
 
@@ -81,7 +59,6 @@ private:
 	double elapsed_ = 0.0;
 	Phase phase_ = Phase::Loading;
 
-	// Loader thread results (read by the main thread once loaded_ is set).
 	std::thread loader_;
 	std::atomic<bool> loaded_{ false };
 	std::string load_error_;
@@ -90,7 +67,6 @@ private:
 	std::shared_ptr<const bf3::core::audio::SoundProgram> program_;
 	std::shared_ptr<const bf3::core::audio::WaveBank> bank_;
 
-	// Audio (main thread; the mixer is shared with the playback on Godot's audio thread).
 	std::shared_ptr<bf3::audio::MixerCore> mixer_;
 	std::unique_ptr<bf3::audio::WavRecorder> recorder_;
 	std::unique_ptr<bf3::audio::CheckDriver> driver_;
@@ -101,11 +77,10 @@ private:
 	uint64_t record_frames_ = 0;
 	double server_mix_rate_ = 0.0;
 
-	// Analysis thread results.
 	std::thread analyser_;
 	std::atomic<bool> analysed_{ false };
 	bf3::audio::CheckReport report_;
 	std::vector<std::string> notes_;
 };
 
-} // namespace bf3::godot_side
+}

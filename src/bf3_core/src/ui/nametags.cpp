@@ -1,4 +1,3 @@
-// PT1 iff: the nametag and minimap rules and their readers (nametags.h; docs/design/pt1-iff.md).
 #include "bf3/core/ui/nametags.h"
 
 #include "ui_ebx.h"
@@ -13,10 +12,9 @@ namespace {
 
 constexpr float kMaxField = 1e6f;
 
-// p_value replaced by p_default (and counted) unless finite and inside [p_lo, p_hi].
 float checked(std::optional<float> p_value, float p_default, float p_lo, float p_hi, uint32_t &r_clamped) {
 	if (!p_value) {
-		return p_default; // absent: the default, not a clamp (a field the type does not have)
+		return p_default;
 	}
 	if (!std::isfinite(*p_value) || *p_value < p_lo || *p_value > p_hi) {
 		++r_clamped;
@@ -38,7 +36,7 @@ std::array<float, 4> checked_tint(const EbxStruct &p_s, std::string_view p_field
 	return out;
 }
 
-} // namespace
+}
 
 Result<NametagStyle> read_nametag_style(const EbxResolver &p_level, gameplay::WorkBudget *p_budget, std::string_view p_partition) {
 	gameplay::WorkBudget local;
@@ -94,7 +92,7 @@ Result<SpottingRules> read_spotting_rules(const EbxResolver &p_level, gameplay::
 	if (partition == nullptr) {
 		return make_error(std::string(p_partition) + ": soldier partition does not resolve");
 	}
-	// instances_of scans every instance of the partition: charged as one unit each.
+
 	BF3_TRY(budget.charge(partition->instance_count()));
 	const std::vector<EbxInstance> found = partition->instances_of("SpottingTargetComponentData");
 	if (found.empty()) {
@@ -143,7 +141,7 @@ NametagDecision decide_nametag(const NametagStyle &p_style, const NametagViewer 
 	out.alpha = std::clamp(1.0f + (p_style.max_far_fade - 1.0f) * tf, 0.0f, 1.0f);
 	const bool looked_at = std::isfinite(p_subject.crosshair_stage) && p_subject.crosshair_stage <= look_at_threshold(p_style, d);
 	if (out.relation == TagRelation::Enemy) {
-		// No marker; the name only while looked at, seen.
+
 		out.needs_line_of_sight = looked_at;
 		out.name = looked_at && p_subject.line_of_sight;
 		return out;
@@ -178,4 +176,4 @@ TagRelation minimap_relation(const NametagViewer &p_viewer, uint8_t p_team, uint
 	return r;
 }
 
-} // namespace bf3::core::ui
+}

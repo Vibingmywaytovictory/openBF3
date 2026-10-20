@@ -1,21 +1,3 @@
-// M2a lc: lag compensation and hit capsules without data (docs/design/m2a.md §6, §13.3, E12 (a), R4; as built:
-// docs/design/m2a-lc.md). Suite "sim-lagcomp-unit" (ctest sim.lagcomp.unit; also under the asan preset).
-//
-//   * the sampler and its selection rule (net::sample_other / select_sample), the time rule (rewind_time_q8 with
-//     sim_time_q8 and view_lag_q8), the client's track rules (rebuild_track);
-//   * LagHistory's ack conventions (§7.2: snapshot bits newest - 1 - i, others bits newest - i, unknown seqs and others
-//     bits for seqs that sent no SnapshotOthers ignored and counted) and the shot view's refusal rules;
-//   * E12 (a) sample-equality rows: two clients with different seqs (one wraps) and different Snapshot /
-//     SnapshotOthers splits, both datagram kinds lost and reordered, a respawn; per fired command and target the server's
-//     rebuild from LagHistory equals the client's rebuild from its ReceivedRecords (namespace m2a_fake: nt's wire types
-//     are not merged, so the client's store holds the records as quantize_other gives them, which is what the decoder
-//     yields) bit for bit, the list and the OtherPose; the provider's rewound answers with the pose cache on equal the
-//     cache off; window (rebuild_track over the 32-seq received set) vs the client's incremental track (add_others'
-//     rules), every difference classified;
-//   * the capsule pose table: hash, structural checks, the capsules/ blob, hostile blobs (every truncation, byte
-//     mutations, oversized counts); posed_target's blend, yaw and clamps;
-//   * the provider's verdicts and the swept-bound broad phase (culling never removes a target the segment hits);
-//   * R4: ProjectileWorld fills TargetQuery::from / to / radius / has_segment at its query sites.
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/capsule_pose_table.h"
@@ -53,7 +35,7 @@ namespace {
 
 constexpr int64_t U = sw::kTimeUnitsPerTick;
 const std::array<float, sim::kPoseCount> kEyes{ 1.6f, 1.0f, 0.3f };
-constexpr double kMaxExtraTicks = 250.0 / (1000.0 / 60.0); // 15 ticks (ClientSessionConfig::extrapolate_max_ms)
+constexpr double kMaxExtraTicks = 250.0 / (1000.0 / 60.0);
 
 bool same_f(float p_a, float p_b) {
 	return std::memcmp(&p_a, &p_b, sizeof(float)) == 0;
@@ -83,8 +65,6 @@ bool same_target(const sw::HitTarget &p_a, const sw::HitTarget &p_b) {
 	return true;
 }
 
-// ---- a synthetic capsule pose table (3 capsules) -------------------------------------------------------------------
-
 gp::CapsuleLocal cap(float p_ax, float p_ay, float p_az, float p_bx, float p_by, float p_bz, float p_r, sw::HitZone p_zone, uint8_t p_index) {
 	gp::CapsuleLocal c{};
 	c.a[0] = p_ax;
@@ -103,7 +83,7 @@ gp::CapsuleLocal cap(float p_ax, float p_ay, float p_az, float p_bx, float p_by,
 
 void stance_entry(size_t p_stance, size_t p_pitch, double p_extra, gp::CapsuleLocal *r_out) {
 	const float s = float(p_stance);
-	const float lean = 0.004f * float(p_pitch); // the head moves forward with the pitch bucket
+	const float lean = 0.004f * float(p_pitch);
 	r_out[0] = cap(0.0f, 1.65f - 0.6f * s, 0.05f + lean, 0.0f, 1.65f - 0.6f * s, 0.05f + lean, 0.15f, sw::HitZone::Head, 0);
 	r_out[1] = cap(0.0f, 1.3f - 0.5f * s, 0.0f, 0.0f, 1.3f - 0.5f * s, 0.0f, 0.25f, sw::HitZone::Chest, 1);
 	r_out[2] = cap(0.1f, 0.1f, 0.0f, 0.1f, 0.8f - 0.3f * s, 0.01f * float(p_pitch), 0.1f, sw::HitZone::Legs, 2);
@@ -170,15 +150,10 @@ net::OtherSoldier rec(uint8_t p_slot, float p_x, float p_vx, uint16_t p_yaw = 0,
 	return o;
 }
 
-} // namespace
-
-// ---- m2a_fake: the client side of nt's v2 wire (not merged) ------------------------------------------------------
+}
 
 namespace m2a_fake {
 
-// One datagram of a snapshot seq to one client: the Snapshot (main part, the others of main_mask) or the
-// SnapshotOthers (others_mask). The records are quantize_other's, which is what nt's decoder yields (write_other
-// encodes exactly the quantised fields; protocol.cpp).
 struct Datagram {
 	uint8_t client = 0;
 	bool others = false;
@@ -188,7 +163,6 @@ struct Datagram {
 	std::vector<net::OtherSoldier> records;
 };
 
-// The client's received records by seq (a 64 ring per part), its newest Snapshot and the §7.2 ack fields.
 struct ReceivedRecords {
 	struct Part {
 		bool valid = false;
@@ -217,7 +191,7 @@ struct ReceivedRecords {
 		const Part &p = (p_others ? others : main)[p_seq % 64];
 		return p.valid && p.seq == p_seq ? &p : nullptr;
 	}
-	// CommandPacket's newest_snapshot / snapshot_ack_bits (bit i = newest - 1 - i) / others_ack_bits (bit i = newest - i).
+
 	void acks(uint16_t &r_newest, uint32_t &r_snap, uint32_t &r_others) const {
 		r_newest = newest;
 		r_snap = 0;
@@ -231,7 +205,7 @@ struct ReceivedRecords {
 			}
 		}
 	}
-	// The client's own rebuild: the target's records in the 32 seqs up to the view seq (both parts), rebuild_track.
+
 	size_t rebuild(uint8_t p_target, std::span<net::TimedOther, net::kTrackSamples> r_list) const {
 		std::vector<net::TimedOther> c;
 		for (uint32_t i = 0; i < 32; ++i) {
@@ -249,16 +223,13 @@ struct ReceivedRecords {
 	}
 };
 
-// The client's incremental track (client_session.cpp add_others and publish, M1): per other, reset on a generation
-// change of any arriving record, sorted insert, a duplicate tick skipped, the 8 newest kept, dropped 1 s (60 ticks)
-// after the last arrival.
 struct ClientTracks {
 	struct Track {
 		bool used = false;
 		uint8_t generation = 0;
-		uint32_t last_seen = 0; // arrival tick
+		uint32_t last_seen = 0;
 		std::deque<net::TimedOther> samples;
-		bool reset_by_older = false; // a reordered older record of another generation reset it
+		bool reset_by_older = false;
 	};
 	std::array<Track, 16> tracks{};
 	void receive(const Datagram &p_d, uint8_t p_self) {
@@ -287,11 +258,9 @@ struct ClientTracks {
 	}
 };
 
-} // namespace m2a_fake
+}
 
 namespace {
-
-// ---- the E12 scenario ---------------------------------------------------------------------------------------------
 
 constexpr uint32_t kPlayers = 6;
 constexpr uint32_t kRespawnSlot = 3;
@@ -309,9 +278,9 @@ sim::SoldierState state_of(uint32_t p_slot, uint32_t p_tick) {
 	const double w = 0.05 + 0.01 * p_slot;
 	s.position = { float(3.0 * p_slot + 2.0 * std::sin(w * t + p_slot)), float(0.1 * std::sin(0.02 * t)), float(10.0 + 1.5 * std::cos(0.07 * t + 2.0 * p_slot)) };
 	s.velocity = { float(2.0 * w * 60.0 * std::cos(w * t + p_slot)), float(0.002 * 60.0 * std::cos(0.02 * t)), float(-1.5 * 0.07 * 60.0 * std::sin(0.07 * t + 2.0 * p_slot)) };
-	s.yaw = uint16_t(uint32_t(p_tick * 700u + p_slot * 9000u) & 0xFFFFu); // turns through the wrap
+	s.yaw = uint16_t(uint32_t(p_tick * 700u + p_slot * 9000u) & 0xFFFFu);
 	s.pitch = int16_t(1500.0 * std::sin(0.03 * t + p_slot));
-	// Slot 2 crouches and stands up again every 90 ticks (20-tick transitions).
+
 	if (p_slot == 2) {
 		const uint32_t ph = p_tick % 90;
 		const bool down = (p_tick / 90) % 2 == 0;
@@ -346,7 +315,7 @@ uint64_t mix(uint64_t p_x) {
 struct ClientSetup {
 	uint8_t slot = 0;
 	uint16_t first_seq = 0;
-	uint64_t main_mask = 0, others_mask = 0; // the split (before the live filter)
+	uint64_t main_mask = 0, others_mask = 0;
 	uint32_t down = 3, up = 2, jitter = 3;
 	uint32_t loss_pct = 12;
 };
@@ -357,15 +326,15 @@ struct Fired {
 	uint32_t shot_index = 0;
 	int32_t view_back_q8 = 0;
 	int64_t render_q8 = 0;
-	uint32_t view_tick = 0; // the client's newest Snapshot tick (the view seq's)
+	uint32_t view_tick = 0;
 	uint8_t quality = 0;
 	bool view_ok = false;
 	host::ShotView view;
-	// The client's side at fire time, per target slot: its rebuild and its sample.
+
 	std::array<std::array<net::TimedOther, net::kTrackSamples>, kPlayers> list{};
 	std::array<size_t, kPlayers> list_n{};
 	std::array<net::OtherPose, kPlayers> pose{};
-	// Window vs track: the incremental track at fire time.
+
 	std::array<std::vector<net::TimedOther>, kPlayers> track{};
 	std::array<bool, kPlayers> track_live{};
 	std::array<bool, kPlayers> track_reset_by_older{};
@@ -378,8 +347,6 @@ struct E12Run {
 	std::array<std::vector<sim::SoldierState>, 1> unused;
 };
 
-// Runs the two-client scenario; p_on_command is called on the server at every command arrival (after the shot view),
-// with the present states of that tick.
 template <typename OnCommand>
 E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_clients, uint32_t p_ticks, OnCommand &&p_on_command) {
 	E12Run run;
@@ -402,7 +369,7 @@ E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_
 		for (uint32_t s = 0; s < kPlayers; ++s) {
 			states[s] = state_of(s, T);
 		}
-		// Server: the commands arriving now (in order; command loss is not part of E12).
+
 		for (Cmd &c : commands) {
 			if (c.arrive != T) {
 				continue;
@@ -415,7 +382,7 @@ E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_
 			p_on_command(c.f, states);
 			run.fired.push_back(c.f);
 		}
-		// Server: the snapshot of tick T (30 Hz) after the step.
+
 		if (T % 2 == 0) {
 			std::vector<net::OtherSoldier> recs;
 			for (uint32_t s = 0; s < kPlayers; ++s) {
@@ -448,7 +415,7 @@ E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_
 				d_o.others = true;
 				for (m2a_fake::Datagram *d : { &dm, &d_o }) {
 					if (d->others && others_mask == 0) {
-						continue; // no SnapshotOthers this seq
+						continue;
 					}
 					++run.datagrams;
 					const uint64_t h = mix(uint64_t(c) << 40 | uint64_t(seq) << 8 | (d->others ? 1u : 0u));
@@ -461,7 +428,7 @@ E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_
 				}
 			}
 		}
-		// Clients: deliver what arrives this tick (in arrival order; ties in send order).
+
 		for (uint8_t c = 0; c < 2; ++c) {
 			for (const m2a_fake::Datagram &d : in_flight) {
 				if (d.client == c && d.arrive == T) {
@@ -475,8 +442,7 @@ E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_
 			}
 		}
 		std::erase_if(in_flight, [&](const m2a_fake::Datagram &d) { return d.arrive <= T; });
-		// Clients: draw and fire every tick: render time a few ticks behind the newest Snapshot, fractional, sometimes
-		// past it (extrapolated); the command for tick T + up carries the view sample and the acks.
+
 		for (uint8_t c = 0; c < 2; ++c) {
 			const m2a_fake::ReceivedRecords &rr = received[c];
 			if (!rr.any_main) {
@@ -489,7 +455,7 @@ E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_
 			f.client = c;
 			f.cmd_tick = T + p_clients[c].up;
 			f.shot_index = shot_index[c]++;
-			const int64_t delay_q8 = int64_t(mix(uint64_t(T) * 7 + c) % (5 * 256)) - 256; // -1 .. +4 ticks
+			const int64_t delay_q8 = int64_t(mix(uint64_t(T) * 7 + c) % (5 * 256)) - 256;
 			f.view_tick = rr.newest_tick;
 			f.render_q8 = int64_t(rr.newest_tick) * 256 - delay_q8;
 			f.quality = uint8_t(f.render_q8 <= int64_t(rr.newest_tick) * 256 ? sim::ViewQuality::Interpolated : sim::ViewQuality::Extrapolated);
@@ -517,7 +483,7 @@ E12Run run_e12(host::LagHistory &r_history, const std::array<ClientSetup, 2> &p_
 std::array<ClientSetup, 2> two_clients() {
 	std::array<ClientSetup, 2> c{};
 	c[0].slot = 0;
-	c[0].first_seq = 65'500; // wraps during the run
+	c[0].first_seq = 65'500;
 	c[0].main_mask = (1u << 1) | (1u << 2) | (1u << 3);
 	c[0].others_mask = (1u << 4) | (1u << 5);
 	c[0].down = 3;
@@ -534,7 +500,7 @@ std::array<ClientSetup, 2> two_clients() {
 	return c;
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-lagcomp-unit") {
 	TEST_CASE("sample_other: the selection rule, hold, extrapolation limit, shortest-arc yaw, discrete switch") {
@@ -542,22 +508,22 @@ TEST_SUITE("sim-lagcomp-unit") {
 			net::TimedOther{ 14, rec(1, 0.4f, 6.0f, 1000) } };
 		l[2].soldier.pose = sim::Pose::Crouch;
 		const std::span<const net::TimedOther> s(l);
-		// Empty: Hold, held.
+
 		const net::OtherPose e = net::sample_other({}, 5.0, kEyes, kMaxExtraTicks);
 		CHECK(e.kind == uint8_t(net::SampleKind::Hold));
 		CHECK(e.held);
-		// Before the oldest: hold it.
+
 		net::OtherPose p = net::sample_other(s, 9.0, kEyes, kMaxExtraTicks);
 		CHECK(p.kind == uint8_t(net::SampleKind::Hold));
 		CHECK(p.held);
 		CHECK(p.tick_a == 10);
 		CHECK(p.position[0] == l[0].soldier.position[0]);
-		// Exactly at a sample: Hold at that sample, not held.
+
 		p = net::sample_other(s, 12.0, kEyes, kMaxExtraTicks);
 		CHECK(p.kind == uint8_t(net::SampleKind::Hold));
 		CHECK_FALSE(p.held);
 		CHECK(p.tick_a == 12);
-		// Between: Interpolate, tick_a / tick_b the bracketing pair; the yaw takes the shortest arc through the wrap.
+
 		p = net::sample_other(s, 11.0, kEyes, kMaxExtraTicks);
 		CHECK(p.kind == uint8_t(net::SampleKind::Interpolate));
 		CHECK(p.tick_a == 10);
@@ -566,12 +532,12 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK(p.position[0] < 0.2f);
 		const double y0 = sim::yaw_radians(65000), y1 = sim::yaw_radians(500) + 2 * sim::kPi;
 		CHECK(std::fabs(std::remainder(double(p.yaw) - 0.5 * (y0 + y1), 2 * sim::kPi)) < 1e-3);
-		// The discrete fields switch together at the newer sample only.
+
 		p = net::sample_other(s, 13.9, kEyes, kMaxExtraTicks);
 		CHECK(p.pose == uint8_t(sim::Pose::Stand));
 		p = net::sample_other(s, 14.0, kEyes, kMaxExtraTicks);
 		CHECK(p.pose == uint8_t(sim::Pose::Crouch));
-		// Past the newest: extrapolate along the velocity up to 15 ticks, then hold (held, at the limit).
+
 		p = net::sample_other(s, 20.0, kEyes, kMaxExtraTicks);
 		CHECK(p.kind == uint8_t(net::SampleKind::Extrapolate));
 		CHECK(p.extrapolated);
@@ -579,7 +545,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		const net::OtherPose limit = net::sample_other(s, 14.0 + kMaxExtraTicks + 3.0, kEyes, kMaxExtraTicks);
 		CHECK(limit.held);
 		CHECK(limit.position[0] == doctest::Approx(0.4 + 6.0 * 15.0 / 60.0).epsilon(1e-4));
-		// select_sample is the rule sample_other uses (random lists and times).
+
 		std::mt19937 rng(7);
 		for (int i = 0; i < 2000; ++i) {
 			std::vector<net::TimedOther> v;
@@ -600,18 +566,18 @@ TEST_SUITE("sim-lagcomp-unit") {
 				CHECK(q.held == sel.held);
 				CHECK(q.extrapolated == sel.extrapolated);
 			} else {
-				CHECK(q.held); // an empty list: a default pose, held
+				CHECK(q.held);
 			}
 		}
 	}
 
 	TEST_CASE("time rule: rewind_time_q8 = sim_time_q8(t) - clamp(view_back - 256, 0, max x 256)") {
-		// sim_time_q8: q8 ticks of the record scale, half up.
+
 		CHECK(net::sim_time_q8(0) == 0);
 		CHECK(net::sim_time_q8(sw::tick_start(5)) == 4 * 256);
 		CHECK(net::sim_time_q8(sw::tick_end(5)) == 5 * 256);
-		CHECK(net::sim_time_q8(1954) == 1); // 0.50002 q8 rounds up (U / 512 = 1953.125 units is half a q8 step)
-		CHECK(net::sim_time_q8(1953) == 0); // 0.49997
+		CHECK(net::sim_time_q8(1954) == 1);
+		CHECK(net::sim_time_q8(1953) == 0);
 		CHECK(net::sim_time_q8(U / 4) == 64);
 		CHECK(net::sim_time_q8(-U) == -256);
 		for (uint32_t T = 50; T < 60; ++T) {
@@ -620,16 +586,16 @@ TEST_SUITE("sim-lagcomp-unit") {
 				const int64_t lag = int64_t(net::view_lag_q8(vb));
 				const int64_t got = net::rewind_time_q8(sw::tick_start(T), vb, host::kDefaultMaxRewindTicks);
 				if (lag < 0) {
-					CHECK(got == int64_t(T - 1) * 256); // never in the future: the present
+					CHECK(got == int64_t(T - 1) * 256);
 				} else if (lag <= int64_t(host::kDefaultMaxRewindTicks) * 256) {
-					CHECK(got == R); // a shot at the start of command tick T tests at exactly the drawn render time
+					CHECK(got == R);
 				} else {
-					CHECK(got == int64_t(T - 1) * 256 - int64_t(host::kDefaultMaxRewindTicks) * 256); // clamped
+					CHECK(got == int64_t(T - 1) * 256 - int64_t(host::kDefaultMaxRewindTicks) * 256);
 				}
-				// A later segment of the same bullet (k ticks and a fraction later) tests as much later.
+
 				const sw::SimTime later = sw::tick_start(T) + 3 * U + U / 4;
 				CHECK(net::rewind_time_q8(later, vb, host::kDefaultMaxRewindTicks) == got + 3 * 256 + 64);
-				// max_rewind_ticks 0 (E12's control run): the present.
+
 				CHECK(net::rewind_time_q8(sw::tick_start(T), vb, 0) == int64_t(T - 1) * 256);
 			}
 		}
@@ -647,14 +613,14 @@ TEST_SUITE("sim-lagcomp-unit") {
 		for (size_t i = 0; i < 8; ++i) {
 			CHECK(out[i].server_tick == want[i]);
 		}
-		// Generation: the newest record's generation only.
+
 		c.push_back({ 32, rec(3, 32.0f, 0, 0, 2) });
 		c.push_back({ 31, rec(3, 31.0f, 0, 0, 2) });
 		n = net::rebuild_track(c, 40, out);
 		REQUIRE(n == 2);
 		CHECK(out[0].server_tick == 31);
 		CHECK(out[1].server_tick == 32);
-		// Timeout: the newest record more than 60 ticks before the view tick: empty.
+
 		CHECK(net::rebuild_track(c, 32 + net::kTrackTimeoutTicks, out) == 2);
 		CHECK(net::rebuild_track(c, 33 + net::kTrackTimeoutTicks, out) == 0);
 		CHECK(net::rebuild_track({}, 10, out) == 0);
@@ -665,20 +631,19 @@ TEST_SUITE("sim-lagcomp-unit") {
 		host::LagHistory h(cfg, 4);
 		for (uint32_t t = 2; t <= 40; t += 2) {
 			h.record_tick(t, std::vector<net::OtherSoldier>{ rec(1, float(t), 0), rec(2, -float(t), 0) });
-			const uint16_t seq = uint16_t(65'530u + t / 2); // wraps at t = 12
-			h.sent(0, seq, t, 1u << 1, (t / 2) % 2 == 0 ? (1u << 2) : 0u); // SnapshotOthers on even seqs only
+			const uint16_t seq = uint16_t(65'530u + t / 2);
+			h.sent(0, seq, t, 1u << 1, (t / 2) % 2 == 0 ? (1u << 2) : 0u);
 		}
-		// seq of tick t = 65530 + t / 2; newest acked = tick 30 -> seq 9 (wrapped).
+
 		const uint16_t newest = uint16_t((65'530u + 15u) & 0xFFFFu);
-		// snapshot_ack_bits: bit 0 = newest - 1, bit 2 = newest - 3; others_ack_bits: bit 0 = newest (odd seq 9: none
-		// sent, ignored), bit 1 = newest - 1 (seq 8, sent).
+
 		h.ack(0, newest, 0b101u, 0b11u);
 		CHECK(h.stats().acks_ignored == 1);
 		host::AckState a = h.ack_state(0);
 		CHECK(a.newest == newest);
 		CHECK(a.main_bits == (1u << 0 | 1u << 1 | 1u << 3));
 		CHECK(a.others_bits == (1u << 1));
-		// Unknown seqs (never sent) and an out-of-range slot are ignored and counted; acks are never cleared.
+
 		h.ack(0, uint16_t(newest + 40), 0, 0);
 		CHECK(h.stats().acks_ignored == 2);
 		h.ack(9, newest, 0, 0);
@@ -687,7 +652,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		a = h.ack_state(0);
 		CHECK(a.newest == newest);
 		CHECK(a.main_bits == (1u << 0 | 1u << 1 | 1u << 2 | 1u << 3));
-		// Shot views.
+
 		host::ShotView v;
 		const int32_t vb = 10 * 256;
 		CHECK(h.shot_view(0, a, uint8_t(newest & 0xFF), vb, uint8_t(sim::ViewQuality::Interpolated), v));
@@ -698,17 +663,17 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK(v.view_seq == uint16_t(newest - 1));
 		CHECK(v.main_bits == 0b111u);
 		CHECK(v.others_bits == 0b1u);
-		// None: tested at the present (true, no seq).
+
 		CHECK(h.shot_view(0, a, 0, 0, uint8_t(sim::ViewQuality::None), v));
 		CHECK(v.quality == uint8_t(sim::ViewQuality::None));
-		// Refused: Held, an unknown quality, a negative lag, beyond the 32-seq window, a seq not acked as a Snapshot.
+
 		CHECK_FALSE(h.shot_view(0, a, uint8_t(newest & 0xFF), vb, uint8_t(sim::ViewQuality::Held), v));
 		CHECK_FALSE(h.shot_view(0, a, uint8_t(newest & 0xFF), vb, 7, v));
 		CHECK_FALSE(h.shot_view(0, a, uint8_t(newest & 0xFF), 255, uint8_t(sim::ViewQuality::Interpolated), v));
 		CHECK_FALSE(h.shot_view(0, a, uint8_t((newest - 40) & 0xFF), vb, uint8_t(sim::ViewQuality::Interpolated), v));
-		CHECK_FALSE(h.shot_view(0, a, uint8_t((newest - 5) & 0xFF), vb, uint8_t(sim::ViewQuality::Interpolated), v)); // seq 4 not acked
-		CHECK_FALSE(h.shot_view(1, h.ack_state(1), 0, vb, uint8_t(sim::ViewQuality::Interpolated), v)); // nothing acked
-		// track under the view: target 1 (main part) from the acked seqs; target 2 (others) from seq 8 only.
+		CHECK_FALSE(h.shot_view(0, a, uint8_t((newest - 5) & 0xFF), vb, uint8_t(sim::ViewQuality::Interpolated), v));
+		CHECK_FALSE(h.shot_view(1, h.ack_state(1), 0, vb, uint8_t(sim::ViewQuality::Interpolated), v));
+
 		REQUIRE(h.shot_view(0, a, uint8_t(newest & 0xFF), vb, uint8_t(sim::ViewQuality::Interpolated), v));
 		std::array<net::TimedOther, net::kTrackSamples> l;
 		CHECK(h.track(0, v, 1, l) == 4);
@@ -717,10 +682,10 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK(l[0].server_tick == 28);
 		CHECK(h.track(0, v, 3, l) == 0);
 		CHECK(h.track(0, v, 200, l) == 0);
-		// client_reset forgets the slot's ring and acks.
+
 		h.client_reset(0);
 		CHECK(h.ack_state(0).main_bits == 0);
-		// Hostile records: a slot beyond the history's slots or a non-finite position is not stored.
+
 		net::OtherSoldier bad = rec(1, std::numeric_limits<float>::quiet_NaN(), 0);
 		h.record_tick(42, std::vector<net::OtherSoldier>{ bad, rec(77, 1.0f, 0) });
 		CHECK_FALSE(h.bounds(1).max_speed < 0.0f);
@@ -736,7 +701,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 			REQUIRE(f.view_ok);
 			const int64_t time_q8 = net::rewind_time_q8(sw::tick_start(f.cmd_tick), f.view.view_back_q8, cfg.max_rewind_ticks);
 			if (int64_t(net::view_lag_q8(f.view.view_back_q8)) > int64_t(cfg.max_rewind_ticks) * 256) {
-				++clamped; // a long Snapshot loss streak: tested at the clamped time, which the client never drew
+				++clamped;
 				return;
 			}
 			++rewound;
@@ -803,7 +768,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 			p_off.note_shot(f.client, f.shot_index, f.view);
 			trace_on.clear();
 			trace_off.clear();
-			// Two pellets and two segments of the shot: the second pellet's key repeats (cache hits with the cache on).
+
 			for (int seg = 0; seg < 2; ++seg) {
 				for (uint8_t pel = 0; pel < 2; ++pel) {
 					sw::TargetQuery q;
@@ -825,13 +790,12 @@ TEST_SUITE("sim-lagcomp-unit") {
 					++pellets;
 				}
 			}
-			// The trace rows of the first segment are the client's samples (the generation check may skip a target the
-			// client still draws at its old body right after the respawn).
-			CHECK(trace_on.size() == trace_off.size()); // the cache-on run traces its cached rows too
+
+			CHECK(trace_on.size() == trace_off.size());
 			for (const host::RewindTraceRow &r : trace_off) {
 				CHECK(r.pose.generation == uint8_t(p_states[r.target].life & 0xFF));
 				if (r.time_q8 != f.render_q8) {
-					continue; // the second segment, one tick later
+					continue;
 				}
 				CHECK(net::same_bits(r.pose, f.pose[r.target]));
 				++rows;
@@ -874,15 +838,13 @@ TEST_SUITE("sim-lagcomp-unit") {
 					++equal;
 					continue;
 				}
-				// Classify: a reordered older record of the other generation reset the track (add_others' rule, the
-				// window keeps the newest generation); a track sample older than the 32-seq window; the timeout
-				// measured from the arrival (client) vs the record tick (window).
+
 				const bool newer = std::any_of(tr.begin(), tr.end(), [&](const net::TimedOther &x) { return x.server_tick > f.view_tick; });
 				const bool older = std::any_of(tr.begin(), tr.end(), [&](const net::TimedOther &x) { return x.server_tick + 62 < f.view_tick; });
 				if (f.track_reset_by_older[s]) {
 					++reset_older;
 				} else if (newer) {
-					++newer_others; // a SnapshotOthers record newer than the newest Snapshot (m2a.md §16 Q22: left out)
+					++newer_others;
 				} else if (older) {
 					++outside_window;
 				} else if (f.track_live[s] != (n > 0)) {
@@ -913,7 +875,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		u = t;
 		u.row_source[4] = 1;
 		CHECK(gp::capsule_pose_table_hash(u) != h);
-		// Structural checks.
+
 		u = t;
 		u.steady[0].radius = 0.0f;
 		CHECK_FALSE(gp::capsule_pose_table_valid(u));
@@ -932,25 +894,25 @@ TEST_SUITE("sim-lagcomp-unit") {
 		u = t;
 		u.row_source[0] = 7;
 		CHECK_FALSE(gp::capsule_pose_table_valid(u));
-		// Blob.
+
 		const std::vector<uint8_t> blob = gp::encode_capsule_pose_table(t);
 		gp::CapsulePoseTable back;
 		std::string err;
 		REQUIRE_MESSAGE(gp::decode_capsule_pose_table(blob, back, &err), err);
 		CHECK(back.hash == h);
 		CHECK(gp::encode_capsule_pose_table(back) == blob);
-		// Every truncation fails.
+
 		size_t truncations = 0;
 		for (size_t n = 0; n < blob.size(); n += (n < 256 ? 1 : 97)) {
 			gp::CapsulePoseTable x;
 			CHECK_FALSE(gp::decode_capsule_pose_table(std::span<const uint8_t>(blob.data(), n), x));
 			++truncations;
 		}
-		// Trailing bytes fail.
+
 		std::vector<uint8_t> longer = blob;
 		longer.push_back(0);
 		CHECK_FALSE(gp::decode_capsule_pose_table(longer, back));
-		// Seeded byte mutations: a decode either fails or gives a valid table whose hash checks.
+
 		std::mt19937 rng(11);
 		size_t accepted = 0;
 		for (int i = 0; i < 3000; ++i) {
@@ -964,7 +926,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 				CHECK(x.hash == gp::capsule_pose_table_hash(x));
 			}
 		}
-		// A huge count is refused before any allocation of that size (the blob is short).
+
 		std::vector<uint8_t> big = blob;
 		for (size_t k = 8; k < 32 && k < big.size(); ++k) {
 			big[k] = 0xFF;
@@ -973,7 +935,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK_FALSE(gp::decode_capsule_pose_table(big, x));
 		std::printf("sim.lagcomp.unit capsule blob: %zu bytes, %zu truncations refused, %zu of 3000 mutations accepted (all valid with their hash)\n", blob.size(),
 				truncations, accepted);
-		CHECK(accepted == 0); // the stored hash covers every field
+		CHECK(accepted == 0);
 	}
 
 	TEST_CASE("posed_target: pitch and fraction blends, yaw, feet, clamps, the bound sphere") {
@@ -991,32 +953,32 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK(h.capsules[0].a[2] == doctest::Approx(0.05 + 0.004 * 14));
 		CHECK(h.capsules[0].zone == sw::HitZone::Head);
 		CHECK(h.capsules[2].flags == sw::zone_capsule_flags::kDeactivateIfBehindWall);
-		// Mid-pitch: the average of the two buckets.
+
 		const double mid = 0.5 * (double(t.pitch_deg[20]) + double(t.pitch_deg[21]));
 		p.pitch = float(mid * 3.14159265358979323846 / 180.0);
 		h = sw::posed_target(t, p);
 		CHECK(h.capsules[0].a[2] == doctest::Approx(0.05 + 0.004 * 20.5).epsilon(1e-4));
-		// Beyond the table: clamped; NaN: pitch 0.
+
 		p.pitch = 3.0f;
 		CHECK(sw::posed_target(t, p).capsules[0].a[2] == doctest::Approx(0.05 + 0.004 * 32));
 		p.pitch = std::numeric_limits<float>::quiet_NaN();
 		CHECK(sw::posed_target(t, p).capsules[0].a[2] == doctest::Approx(0.05 + 0.004 * 14));
 		p.pitch = 0;
-		// Yaw 90 deg: forward +Z turns to +X (sim convention), x-left turns to -Z; the feet translate.
+
 		p.yaw = float(sim::kPi / 2);
 		p.feet = { 10.0f, 2.0f, -3.0f };
 		h = sw::posed_target(t, p);
 		CHECK(h.capsules[0].a[0] == doctest::Approx(10.0 + 0.05 + 0.004 * 14).epsilon(1e-5));
 		CHECK(h.capsules[0].a[1] == doctest::Approx(3.65));
 		CHECK(h.capsules[2].a[2] == doctest::Approx(-3.1).epsilon(1e-5));
-		// The bound sphere holds every capsule.
+
 		for (size_t c = 0; c < h.capsule_count; ++c) {
 			for (const sim::Vec3 &e : { h.capsules[c].a, h.capsules[c].b }) {
 				const double d = std::sqrt(std::pow(e[0] - h.bound_center[0], 2) + std::pow(e[1] - h.bound_center[1], 2) + std::pow(e[2] - h.bound_center[2], 2));
 				CHECK(d + h.capsules[c].radius <= h.bound_radius);
 			}
 		}
-		// A transition: stand -> crouch at 0.5 lies between the rows (fraction steps 3 and 4 of 7).
+
 		p = sw::TargetPose();
 		p.pose = sim::Pose::Stand;
 		p.target_pose = sim::Pose::Crouch;
@@ -1029,10 +991,10 @@ TEST_SUITE("sim-lagcomp-unit") {
 		p.transition = 1.0f;
 		CHECK(sw::posed_target(t, p).capsules[1].a[1] == doctest::Approx(0.8));
 		p.transition = std::numeric_limits<float>::infinity();
-		CHECK(sw::posed_target(t, p).capsules[1].a[1] == doctest::Approx(1.3)); // non-finite: 0
-		// Same inputs, same bits.
+		CHECK(sw::posed_target(t, p).capsules[1].a[1] == doctest::Approx(1.3));
+
 		CHECK(same_target(sw::posed_target(t, p), sw::posed_target(t, p)));
-		// An empty table: no capsules.
+
 		CHECK(sw::posed_target(gp::CapsulePoseTable(), p).capsule_count == 0);
 	}
 
@@ -1042,7 +1004,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		cfg.pose_eye_heights = kEyes;
 		host::LagHistory history(cfg, kPlayers);
 		host::RewindProvider prov(history, table, cfg);
-		// History: 30 snapshots of six moving soldiers, client 0 acks everything.
+
 		uint16_t seq = 1000;
 		std::vector<sim::SoldierState> states(kPlayers);
 		for (uint32_t T = 2; T <= 60; T += 2) {
@@ -1077,7 +1039,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK(prov.shot_view_of(0, 1, back));
 		CHECK_FALSE(prov.shot_view_of(0, 4, back));
 		CHECK_FALSE(prov.shot_view_of(0, 9, back));
-		// The present path (None, refused, no view): the present set without the shooter.
+
 		sw::TargetQuery q;
 		q.time_start = sw::tick_start(61);
 		q.time_end = sw::tick_end(61);
@@ -1093,15 +1055,13 @@ TEST_SUITE("sim-lagcomp-unit") {
 			}
 		}
 		CHECK(prov.stats().no_view == 1);
-		// Broad phase: random segments near the soldiers; every target the uncull'd answer is hit by is in the
-		// culled answer, posed identically.
+
 		std::mt19937 rng(5);
 		size_t hits = 0, culled_hits_lost = 0, segments = 0;
 		for (int i = 0; i < 3000; ++i) {
 			sw::TargetQuery a = q;
-			a.shot_index = 1 + (rng() % 2); // rewound and clamped
-			// Aimed near a soldier (its recorded track, +-1.5 m), from up to 8 m away; the segment is 0..8 m long, so it
-			// may stop short, pass, or go through.
+			a.shot_index = 1 + (rng() % 2);
+
 			const uint32_t s = 1 + rng() % (kPlayers - 1);
 			const sim::SoldierState aim_at = state_of(s, 40 + rng() % 20);
 			const sim::Vec3 target{ aim_at.position[0] + float(int(rng() % 301) - 150) / 100.0f, float(rng() % 200) / 100.0f,
@@ -1137,7 +1097,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		CHECK(hits > 100);
 		CHECK(culled_hits_lost == 0);
 		CHECK(prov.stats().culled > 0);
-		// enabled false: every shot at the present.
+
 		host::LagCompConfig offc = cfg;
 		offc.enabled = false;
 		host::RewindProvider pres(history, table, offc);
@@ -1147,7 +1107,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 		q.shot_index = 1;
 		CHECK(pres.targets_for(q).size() == kPlayers - 1);
 		CHECK(pres.stats().rewound_queries == 0);
-		// A dead or never-spawned soldier is not a target; a respawned one is not hit at its old body.
+
 		std::vector<sim::SoldierState> st2 = states;
 		st2[2].mode = sim::MoveMode::Dead;
 		st2[3].life = 2;
@@ -1205,7 +1165,7 @@ TEST_SUITE("sim-lagcomp-unit") {
 					CHECK(q.radius == 0.0f);
 					if (q.shot_index == 0 && q.def == m16) {
 						if (++m16_segments > 1) {
-							chained = chained && q.from == last_to; // the segments of one bullet chain
+							chained = chained && q.from == last_to;
 						}
 						last_to = q.to;
 					}

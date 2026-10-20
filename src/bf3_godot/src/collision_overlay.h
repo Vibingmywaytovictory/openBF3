@@ -1,34 +1,4 @@
 #pragma once
-// Bf3CollisionOverlay: the M0 exit "Metro collision drawn as a debug overlay" (plan §6 M0). Scene:
-// res://scenes/metro_collision.tscn.
-//
-// A loader thread runs the Godot-free pipeline (bf3_core load_level_collision: mount, traverse, collision
-// placements, Havok res on all cores, world-space triangles in 64 m tiles; bf3_render prepare_collision_meshes:
-// vertex arrays per (tile, layer)) while a label shows its stage. The main thread then creates one
-// RenderingServer mesh + instance per prepared (tile, layer) array, a few per frame so the label stays live, all
-// sharing one unshaded, double-sided ShaderMaterial (vertex colour per surface class, back faces darker, a
-// barycentric wireframe that fades out with distance), and a free-fly camera at the first TDM spawn point (else
-// above the level's centre). TC (docs/design/terrain-collision.md §8.1): the terrain layer is a window, the
-// terrain cells of the 64 m tiles within --terrain-radius of the camera (bf3_render prepare_terrain_window, on a
-// worker thread), re-prepared when the camera leaves the window's inner half; only the layer-4 meshes swap.
-//
-// Controls: WASD move, Q/E (or Ctrl/Space) down/up, Shift fast, wheel = speed; hold the right mouse button (or
-// click to capture, Esc to release) to look. F3 cycles solid + wireframe / wireframe / solid; 1/2/3/4/5 toggle the
-// layers: collision bodies (and static model groups), raycast bodies, character bodies, invisible blockers, terrain; R
-// back to the spawn, T top view, N next spawn.
-//
-// User args (after "--"):
-//   --level=<id> --mode=<mode>   level x mode (default MP_Subway TeamDeathMatch0)
-//   --camera=x,y,z,yaw,pitch     start camera (Frostbite/Godot metres, degrees; yaw 0 looks down -Z)
-//   --view=spawn|top             start view (default spawn)
-//   --wire=0|1|2                 start draw mode (0 solid, 1 solid + wireframe, 2 wireframe; default 1)
-//   --layers=<digits>            visible layers (default 12345)
-//   --quit-after=<s>             quit s seconds after the upload finished
-//   --screenshot=<png>           save the viewport when quitting
-//   --shots=<png>@x,y,z,yaw,pitch[;...]  after the upload, place the camera at each, save, quit
-//   --collision-check            headless check (collision_check.h), quit 0/1
-//   --terrain-radius=<m>         terrain window radius (default CollisionPrepOptions::terrain_radius, 512 m)
-//   --bf3-install=<dir>          install override, as for GameSession
 
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
@@ -50,7 +20,7 @@ namespace godot {
 class Camera3D;
 class CanvasLayer;
 class Label;
-} // namespace godot
+}
 
 namespace bf3::godot_side {
 
@@ -63,7 +33,7 @@ public:
 		godot::RID instance;
 		int32_t tile_x = 0;
 		int32_t tile_z = 0;
-		uint8_t layer = 0; // bf3::render::collision_layer
+		uint8_t layer = 0;
 		size_t triangles = 0;
 	};
 
@@ -76,9 +46,8 @@ public:
 
 	godot::String get_status_text() const;
 
-	// Used by the check.
 	bool uploaded() const { return collision_ != nullptr && next_upload_ >= prepared_.size(); }
-	// TC: the terrain window is prepared, uploaded and current for the camera (no job running).
+
 	bool window_ready() const { return uploaded() && window_valid_ && !window_running_; }
 	const bf3::render::TerrainWindowStats &window() const { return window_; }
 	const bf3::render::CollisionPrepOptions &window_options() const { return window_options_; }
@@ -103,12 +72,12 @@ protected:
 private:
 	struct Shot {
 		std::string path;
-		std::array<float, 5> camera{}; // x, y, z, yaw, pitch (degrees)
+		std::array<float, 5> camera{};
 	};
 
 	void join_loader();
 	void join_window();
-	void update_window(); // TC: start a window job when the camera left the inner half; swap a finished one in
+	void update_window();
 	void free_mesh(TileMesh &r_mesh);
 	void free_render_objects();
 	void build_ui();
@@ -132,7 +101,6 @@ private:
 	std::string level_ = "MP_Subway";
 	std::string mode_ = "TeamDeathMatch0";
 
-	// Loader thread state (written by the loader before load_done_).
 	std::thread loader_;
 	std::atomic<bool> load_done_{ false };
 	bf3::core::level::SoupProgress progress_;
@@ -142,21 +110,19 @@ private:
 	std::string load_error_;
 	double loader_prepare_seconds_ = 0.0;
 
-	// TC terrain window (a worker thread writes window_loaded_* before window_done_).
 	std::thread window_thread_;
 	std::atomic<bool> window_done_{ false };
 	bool window_running_ = false;
 	bool window_valid_ = false;
-	bf3::render::CollisionPrepOptions window_options_; // the current window's (centre, radius, cap)
+	bf3::render::CollisionPrepOptions window_options_;
 	bf3::render::TerrainWindowStats window_;
 	std::vector<bf3::render::PreparedCollisionMesh> window_loaded_;
 	bf3::render::TerrainWindowStats window_loaded_stats_;
 	bf3::render::CollisionPrepOptions window_job_options_;
-	double window_seconds_ = 0.0; // the last window job's wall time
+	double window_seconds_ = 0.0;
 	size_t window_jobs_ = 0;
 	float terrain_radius_ = bf3::render::CollisionPrepOptions().terrain_radius;
 
-	// Built state.
 	std::unique_ptr<bf3::core::level::LevelCollision> collision_;
 	std::vector<bf3::render::PreparedCollisionMesh> prepared_;
 	std::vector<TileMesh> meshes_;
@@ -167,19 +133,17 @@ private:
 	godot::CanvasLayer *ui_layer_ = nullptr;
 	godot::Label *label_ = nullptr;
 
-	// Camera and view state.
 	godot::Vector3 position_;
-	float yaw_ = 0.0f; // radians; 0 looks down -Z
+	float yaw_ = 0.0f;
 	float pitch_ = 0.0f;
-	float speed_ = 12.0f; // m/s, Shift x6
+	float speed_ = 12.0f;
 	bool looking_ = false;
 	size_t spawn_index_ = 0;
-	int wire_mode_ = 1; // 0 solid, 1 solid + wire (fading out with distance), 2 wire
+	int wire_mode_ = 1;
 	std::array<bool, bf3::render::kCollisionLayers> layers_{ true, true, true, true, true };
 	std::string start_camera_;
 	std::string start_view_;
 
-	// Run control and statistics.
 	bool check_mode_ = false;
 	bool quitting_ = false;
 	bool failed_ = false;
@@ -191,7 +155,7 @@ private:
 	uint64_t load_start_usec_ = 0;
 	double load_seconds_ = 0.0;
 	double prepare_seconds_ = 0.0;
-	double upload_seconds_ = 0.0; // main-thread time spent creating meshes and instances
+	double upload_seconds_ = 0.0;
 	double upload_wall_seconds_ = 0.0;
 	uint64_t upload_start_usec_ = 0;
 	double since_upload_ = 0.0;
@@ -200,4 +164,4 @@ private:
 	double label_timer_ = 0.0;
 };
 
-} // namespace bf3::godot_side
+}

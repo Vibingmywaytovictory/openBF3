@@ -1,17 +1,4 @@
 #pragma once
-// The M2a gunplay test fixture (docs/design/m2a.md §15; created in W2.0, extended additively by sv, cl and bt with a
-// block headed "// M2a <key>" at the end of this file): a headless ServerHost (GameServer) and ClientSession over ENet
-// loopback, on Metro (MP_Subway / TeamDeathMatch0 through load_shared_level, read-only on the install, scratch cache
-// root) or on a synthetic floor, plus the dev request helpers (Teleport, SpawnAt, Trace, SpawnTarget, TargetInfo).
-// Used by host_gunplay_server_tests.cpp (sv), host_gunplay_client_tests.cpp (cl) and host_gunplay_perf.cpp (bt);
-// m2a.contract compiles it and runs one short loopback smoke case on the synthetic floor.
-//
-// Everything is inline (several test executables include it). The levels need the shipped motor tuning: a test target
-// that includes this defines OPENBF3_MOTOR_TUNING_CFG (bf3-opensource/config/motor_tuning.cfg, as host.session does);
-// without it synthetic_floor() and metro() are not declared.
-// Install-dependent helpers call bf3::test::skip_install_case when no install is found (the executable exits 77).
-// SpawnTarget and TargetInfo are answered once sv lands their handling (an M1 server drops a request of an unknown
-// kind, so the helpers time out and return nullopt until then). Timings are wall-clock and noisy on a shared machine.
 
 #include <doctest/doctest.h>
 
@@ -61,8 +48,6 @@ inline std::string read_text(const std::filesystem::path &p_path) {
 	return s.str();
 }
 
-// ---- levels -------------------------------------------------------------------------------------------------------
-
 inline void add_quad(std::vector<sim::StaticTriangle> &r_out, const sim::Vec3 &p_a, const sim::Vec3 &p_b, const sim::Vec3 &p_c, const sim::Vec3 &p_d) {
 	sim::StaticTriangle t;
 	t.v = { p_a, p_b, p_c };
@@ -72,7 +57,7 @@ inline void add_quad(std::vector<sim::StaticTriangle> &r_out, const sim::Vec3 &p
 }
 
 #ifdef OPENBF3_MOTOR_TUNING_CFG
-// The shipped motor tuning file (docs/design/m1.md §6.11).
+
 inline sim::MotorTuning shipped_motor_tuning() {
 	const std::string text = read_text(OPENBF3_MOTOR_TUNING_CFG);
 	REQUIRE_MESSAGE(!text.empty(), OPENBF3_MOTOR_TUNING_CFG);
@@ -97,7 +82,6 @@ inline core::gameplay::StatePoseSpeed motor_speed(core::gameplay::SoldierPose p_
 	return s;
 }
 
-// Metro's soldier numbers (bf3dump soldier; the synthetic soldier of host_session_tests.cpp and sim_motor_tests.cpp).
 inline core::gameplay::SoldierDef synthetic_soldier() {
 	using core::gameplay::SoldierPose;
 	core::gameplay::SoldierDef d;
@@ -170,8 +154,6 @@ inline core::gameplay::SoldierDef synthetic_soldier() {
 	return d;
 }
 
-// A 240 m x 240 m floor at y = 0 (8 m quads) with twelve spawn points on it, the synthetic soldier and the shipped
-// tuning. No install; the session smoke cases and the server-side unit cases use it.
 inline std::shared_ptr<const host::SharedLevel> synthetic_floor() {
 	static std::shared_ptr<const host::SharedLevel> s_level;
 	if (s_level) {
@@ -188,7 +170,7 @@ inline std::shared_ptr<const host::SharedLevel> synthetic_floor() {
 	std::vector<sim::SpawnPoint> points;
 	for (uint32_t i = 0; i < 12; ++i) {
 		sim::SpawnPoint p;
-		const float a = float(i) * 0.5235988f; // 30 degrees apart on a 40 m circle
+		const float a = float(i) * 0.5235988f;
 		p.position = { 40.0f * std::sin(a), 0.05f, 40.0f * std::cos(a) };
 		p.yaw = uint16_t(i * 5461u);
 		p.index = i;
@@ -203,9 +185,6 @@ inline std::shared_ptr<const host::SharedLevel> synthetic_floor() {
 	return s_level;
 }
 
-// Metro, loaded once per process: the install read through InstallReader / Install (read-only), a fresh scratch
-// cache root under the temp directory (never the repo, never the install), the shipped motor tuning. Null (and the
-// case marked skipped) without an install.
 struct Metro {
 	std::unique_ptr<core::InstallReader> reader;
 	std::shared_ptr<core::Install> install;
@@ -262,8 +241,6 @@ inline Metro *metro() {
 	return s_metro.get();
 }
 
-// The install-unchanged check (layout.toc, cas.cat, the .sb / .toc files); removes the scratch cache root. Call it in
-// the last install case of an executable.
 inline void check_install_unchanged(Metro &r_metro) {
 	const core::SnapshotDiff diff = core::diff_snapshots(r_metro.before, r_metro.reader->snapshot());
 	CHECK_MESSAGE(diff.clean(), diff.summary());
@@ -273,17 +250,15 @@ inline void check_install_unchanged(Metro &r_metro) {
 }
 #endif
 
-// ---- a live server + client -----------------------------------------------------------------------------------
-
 struct SessionOptions {
-	std::string netsim = "off"; // net::parse_netsim, e.g. "150/2"
+	std::string netsim = "off";
 	uint32_t max_slots = uint32_t(net::kMaxSlots);
 	uint32_t walkers = 0;
 	bool dev_commands = true;
 	uint64_t seed = 1;
 	int32_t clock_offset = 0;
-	std::string client_mechanics_cfg; // empty: ClientSessionConfig's default
-	// Track hooks (sv: GunplayConfig on the GameServerConfig; cl: client options), run after the defaults are set.
+	std::string client_mechanics_cfg;
+
 	std::function<void(host::GameServerConfig &)> configure_server;
 	std::function<void(host::ClientSessionConfig &)> configure_client;
 };
@@ -294,8 +269,8 @@ struct Session {
 	host::ClientSession client;
 	host::InputSample input;
 	std::unique_ptr<host::PresentationFrame> frame = std::make_unique<host::PresentationFrame>();
-	bool adopt = true; // take each new life's spawn view at once (the mapper's rule, docs/design/m1.md §11.6)
-	float adopt_yaw = NAN; // a heading to turn to on adoption (radians), else the spawn yaw
+	bool adopt = true;
+	float adopt_yaw = NAN;
 	uint32_t next_debug_id = 1;
 
 	~Session() {
@@ -322,7 +297,7 @@ inline std::unique_ptr<Session> start_session(std::shared_ptr<const host::Shared
 	const bool started = s->server.start(sc, &err);
 	REQUIRE_MESSAGE(started, err);
 	if (!started) {
-		return nullptr; // doctest may run without exceptions: callers check for null
+		return nullptr;
 	}
 	host::ClientSessionConfig cc;
 	cc.port = s->server.port();
@@ -350,7 +325,6 @@ inline std::unique_ptr<Session> start_session(std::shared_ptr<const host::Shared
 	return s;
 }
 
-// One poll of the main-thread side: copy the newest frame, adopt a new life's spawn view, hand over the input.
 inline bool poll(Session &r_session) {
 	const bool fresh = r_session.client.read_presentation(*r_session.frame);
 	const host::PresentationFrame &f = *r_session.frame;
@@ -363,7 +337,6 @@ inline bool poll(Session &r_session) {
 	return fresh;
 }
 
-// Polls every ~p_sleep_ms for p_seconds; p_each(fresh, now_ns, t) runs after every poll.
 inline void run_for(Session &r_session, double p_seconds, const std::function<void(bool, uint64_t, double)> &p_each = {}, int p_sleep_ms = 4) {
 	const auto start = std::chrono::steady_clock::now();
 	for (;;) {
@@ -406,15 +379,12 @@ inline std::optional<net::DebugReport> wait_report(Session &r_session, uint32_t 
 	return std::nullopt;
 }
 
-// ---- dev requests (dev_commands; the report or nullopt on timeout) --------------------------------------------
-
 inline std::optional<net::DebugReport> dev_request(Session &r_session, net::DebugRequest p_request, double p_timeout_s = 10.0) {
 	p_request.id = r_session.next_debug_id++;
 	r_session.client.send_debug(p_request);
 	return wait_report(r_session, p_request.id, p_timeout_s);
 }
 
-// The requesting client's soldier to p_position / p_yaw (standing, velocity 0, same life; M1's Teleport).
 inline std::optional<net::DebugReport> teleport(Session &r_session, const sim::Vec3 &p_position, uint16_t p_yaw, double p_timeout_s = 10.0) {
 	net::DebugRequest q;
 	q.kind = net::DebugKind::Teleport;
@@ -423,7 +393,6 @@ inline std::optional<net::DebugReport> teleport(Session &r_session, const sim::V
 	return dev_request(r_session, q, p_timeout_s);
 }
 
-// Respawn the requesting client's soldier at spawn point p_index (M1's SpawnAt, settle included).
 inline std::optional<net::DebugReport> spawn_at(Session &r_session, uint32_t p_index, double p_timeout_s = 10.0) {
 	net::DebugRequest q;
 	q.kind = net::DebugKind::SpawnAt;
@@ -431,8 +400,6 @@ inline std::optional<net::DebugReport> spawn_at(Session &r_session, uint32_t p_i
 	return dev_request(r_session, q, p_timeout_s);
 }
 
-// Record the requesting client's soldier for p_ticks server ticks (M1's Trace; M2a adds trace_gunplay per tick). The
-// timeout covers the traced ticks.
 inline std::optional<net::DebugReport> trace(Session &r_session, uint32_t p_ticks, double p_timeout_s = 0.0) {
 	net::DebugRequest q;
 	q.kind = net::DebugKind::Trace;
@@ -440,7 +407,6 @@ inline std::optional<net::DebugReport> trace(Session &r_session, uint32_t p_tick
 	return dev_request(r_session, q, p_timeout_s > 0.0 ? p_timeout_s : 10.0 + double(p_ticks) / double(sim::kSimHz));
 }
 
-// M2a (sv): put server-side target soldier p_slot (a TargetBotSource slot) at p_position / p_yaw in p_pose.
 inline std::optional<net::DebugReport> spawn_target(Session &r_session, uint8_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw,
 		sim::Pose p_pose = sim::Pose::Stand, double p_timeout_s = 10.0) {
 	net::DebugRequest q;
@@ -452,7 +418,6 @@ inline std::optional<net::DebugReport> spawn_target(Session &r_session, uint8_t 
 	return dev_request(r_session, q, p_timeout_s);
 }
 
-// M2a (sv): the server pose and the capsules the server tests for target p_slot (DebugReport::targets).
 inline std::optional<net::DebugReport> target_info(Session &r_session, uint8_t p_slot, double p_timeout_s = 10.0) {
 	net::DebugRequest q;
 	q.kind = net::DebugKind::TargetInfo;
@@ -460,7 +425,6 @@ inline std::optional<net::DebugReport> target_info(Session &r_session, uint8_t p
 	return dev_request(r_session, q, p_timeout_s);
 }
 
-// The own soldier's presented eye at the frame's fraction (feet + eye height, without the visual offset).
 inline sim::Vec3 own_eye(const host::PresentationFrame &p_frame) {
 	const float t = float(p_frame.tick_fraction);
 	sim::Vec3 e;
@@ -471,11 +435,8 @@ inline sim::Vec3 own_eye(const host::PresentationFrame &p_frame) {
 	return e;
 }
 
-} // namespace bf3::test::gunplay
+}
 
-// M2a sv (docs/design/m2a-sv.md): Metro with the gunplay tables, a server-side recorder (GunplayObserver), the weapon
-// button fields, aiming and a few server-reading helpers for host_gunplay_server_tests.cpp. The recorder's callbacks
-// run on the server thread; every reader takes its lock.
 #include "bf3/host/gunplay.h"
 #include "bf3/host/target_bots.h"
 #include "bf3/sim/collision_world.h"
@@ -488,9 +449,7 @@ inline sim::Vec3 own_eye(const host::PresentationFrame &p_frame) {
 namespace bf3::test::gunplay {
 
 #ifdef OPENBF3_MOTOR_TUNING_CFG
-// Metro (MP_Subway / TeamDeathMatch0) loaded once per process with SharedLoadOptions::gunplay set: the weapons, the
-// kits and the capsule pose table from the retail clips. Read-only on the install, a fresh scratch cache root under
-// the temp directory. Null (case skipped) without an install. Separate from metro() so M1's load stays as it was.
+
 inline Metro *metro_gunplay() {
 	static std::unique_ptr<Metro> s_metro;
 	static bool s_tried = false;
@@ -545,7 +504,6 @@ inline Metro *metro_gunplay() {
 }
 #endif
 
-// The weapon fields of InputSample::held_buttons / Command::buttons (weapon_input.h).
 inline uint32_t select_slot_field(uint8_t p_slot) {
 	return uint32_t(p_slot + 1u) << sim::weapons::weapon_buttons::kSlotShift;
 }
@@ -553,7 +511,6 @@ inline uint32_t fire_mode_field(uint8_t p_counter) {
 	return (uint32_t(p_counter) << sim::weapons::weapon_buttons::kFireModeShift) & sim::weapons::weapon_buttons::kFireModeMask;
 }
 
-// Yaw and pitch (radians, the sim convention: yaw 0 looks down +Z, a quarter turn down +X) from p_from to p_to.
 inline void aim_at(const sim::Vec3 &p_from, const sim::Vec3 &p_to, float &r_yaw, float &r_pitch) {
 	const double dx = double(p_to[0]) - double(p_from[0]), dy = double(p_to[1]) - double(p_from[1]), dz = double(p_to[2]) - double(p_from[2]);
 	r_yaw = float(std::atan2(dx, dz));
@@ -579,12 +536,10 @@ struct DamageRecord {
 	float health_after = 0;
 };
 
-// Everything the server's gunplay did (GunplayConfig::observer). Bounded: beyond kMaxRecords per kind the excess is
-// counted in `dropped` (a run that hits it says so).
 class GunplayRecorder final : public host::GunplayObserver {
 public:
 	static constexpr size_t kMaxRecords = size_t(1) << 20;
-	// Weapon ticks of this slot only (0xFF: every slot).
+
 	explicit GunplayRecorder(uint8_t p_watch = 0xFF) :
 			watch_(p_watch) {}
 
@@ -690,7 +645,6 @@ private:
 	uint64_t dropped_ = 0;
 };
 
-// Polls until p_done() or p_timeout_s; true when p_done() held.
 inline bool poll_until(Session &r_session, const std::function<bool()> &p_done, double p_timeout_s) {
 	const auto start = std::chrono::steady_clock::now();
 	while (seconds_since(start) < p_timeout_s) {
@@ -703,17 +657,15 @@ inline bool poll_until(Session &r_session, const std::function<bool()> &p_done, 
 	return p_done();
 }
 
-// Sends a dev request without waiting; the report comes with wait_report(id).
 inline uint32_t send_request(Session &r_session, net::DebugRequest p_request) {
 	p_request.id = r_session.next_debug_id++;
 	r_session.client.send_debug(p_request);
 	return p_request.id;
 }
 
-// The slot's active weapon is Ready (deployed) in the newest recorded tick.
 inline bool weapon_ready(const GunplayRecorder &p_recorder, uint8_t p_slot) {
 	const std::optional<WeaponTickRecord> r = p_recorder.last(p_slot);
 	return r && r->after.current().phase == sim::weapons::WeaponPhase::Ready;
 }
 
-} // namespace bf3::test::gunplay
+}

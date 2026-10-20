@@ -1,5 +1,3 @@
-// Package source helpers shared by every AntPackageSource. Clean-room implementation from
-// research/probes/ant-animation-probe.md (§2); see ant_source.h.
 #include "bf3/core/ant/ant_source.h"
 
 #include "bf3/core/ids.h"
@@ -43,4 +41,4 @@ bool is_mp_relevant(std::string_view p_short_name) {
 	return true;
 }
 
-} // namespace bf3::core::ant
+}

@@ -1,11 +1,3 @@
-// validate_detour_tile (docs/design/s1.md §9) and nav_check_input_against_world (§5.1 proof 1).
-//
-// Detour 1.6.0 lays a tile out (dtCreateNavMeshData; dtNavMesh::addTile reads it back the same way) as aligned
-// sections after the header: verts (vertCount x 3 floats), polys (polyCount dtPoly), links (maxLinkCount dtLink),
-// detail meshes (detailMeshCount dtPolyDetail), detail verts (detailVertCount x 3 floats), detail tris
-// (detailTriCount x 4 bytes), BV nodes (bvNodeCount dtBVNode), off-mesh connections (offMeshConCount). addTile checks
-// only the magic and the version and then trusts every index, so this mirrors the layout and checks every count,
-// index and coordinate first. A Recast/Detour bump changes recast_build_id() and with it every cache key.
 #include "nav_internal.h"
 
 #include "static_world_internal.h"
@@ -37,7 +29,7 @@ bool finite3(const float *p_v) {
 			std::fabs(p_v[2]) < 1e7f;
 }
 
-} // namespace
+}
 
 core::Status validate_detour_tile(std::span<const uint8_t> p_data, const NavParams &p_params, const NavTileKey &p_tile) {
 	const std::string where = "detour tile (" + std::to_string(p_tile[0]) + ", " + std::to_string(p_tile[1]) + ")";
@@ -93,7 +85,7 @@ core::Status validate_detour_tile(std::span<const uint8_t> p_data, const NavPara
 		at += p_size;
 		return p;
 	};
-	// Read through memcpy into aligned copies (the span may not be aligned).
+
 	std::vector<float> verts(size_t(h.vertCount) * 3);
 	std::memcpy(verts.data(), section(verts_size), verts.size() * sizeof(float));
 	std::vector<dtPoly> polys(size_t(h.polyCount));
@@ -110,7 +102,7 @@ core::Status validate_detour_tile(std::span<const uint8_t> p_data, const NavPara
 	std::vector<dtOffMeshConnection> cons(size_t(h.offMeshConCount));
 	std::memcpy(cons.data(), section(offmesh_size), cons.size() * sizeof(dtOffMeshConnection));
 
-	constexpr float kSlack = 1.0f; // detail heights may stand a little off the header's y range
+	constexpr float kSlack = 1.0f;
 	for (int i = 0; i < h.vertCount; ++i) {
 		if (!finite3(&verts[size_t(i) * 3])) {
 			return core::make_error(where + ": vertex " + std::to_string(i) + " is not finite");
@@ -155,9 +147,7 @@ core::Status validate_detour_tile(std::span<const uint8_t> p_data, const NavPara
 			if (uint64_t(d.vertBase) + d.vertCount > uint64_t(h.detailVertCount) || uint64_t(d.triBase) + d.triCount > uint64_t(h.detailTriCount)) {
 				return core::make_error(where + ": detail mesh " + std::to_string(i) + " is outside the detail arrays");
 			}
-			// Detour's closest-point search over the boundary edges of the detail triangles dereferences the edge it
-			// found, so a poly needs at least one triangle and one boundary edge (found by the sim.nav.unit fuzz:
-			// cleared edge flags crashed dtNavMesh::closestPointOnPoly inside addTile).
+
 			bool boundary = false;
 			if (d.triCount == 0) {
 				return core::make_error(where + ": poly " + std::to_string(i) + " has no detail triangle");
@@ -200,15 +190,13 @@ core::Status validate_detour_tile(std::span<const uint8_t> p_data, const NavPara
 		if (c.poly != ground + i || !finite3(c.pos) || !finite3(c.pos + 3) || !std::isfinite(c.rad) || c.rad < 0.0f || c.rad > 16.0f) {
 			return core::make_error(where + ": off-mesh connection " + std::to_string(i) + " is bad");
 		}
-		// The start must lie in the tile (dtCreateNavMeshData keeps only those).
+
 		if (c.pos[0] < h.bmin[0] || c.pos[0] > h.bmax[0] || c.pos[2] < h.bmin[2] || c.pos[2] > h.bmax[2]) {
 			return core::make_error(where + ": off-mesh connection " + std::to_string(i) + " starts outside the tile");
 		}
 	}
 	return core::Status::success();
 }
-
-// ---- input = motor set --------------------------------------------------------------------------------------------
 
 namespace {
 
@@ -230,7 +218,7 @@ Vec3 centroid(const Tri &p_t) {
 }
 
 float corner_error(const Tri &p_a, const Tri &p_b) {
-	// The best of the six corner correspondences (rotations and both windings).
+
 	static constexpr int kPerm[6][3] = { { 0, 1, 2 }, { 1, 2, 0 }, { 2, 0, 1 }, { 0, 2, 1 }, { 2, 1, 0 }, { 1, 0, 2 } };
 	float best = 1e30f;
 	for (const auto &perm : kPerm) {
@@ -245,7 +233,7 @@ float corner_error(const Tri &p_a, const Tri &p_b) {
 	return best;
 }
 
-} // namespace
+}
 
 core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShapes &p_world, const NavTileInput &p_input, const NavParams &p_params,
 		uint32_t p_layer_mask, float p_tolerance) {
@@ -261,14 +249,14 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		const float z0 = std::min({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] }), z1 = std::max({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] });
 		return x0 < bx1 && x1 >= bx0 && z0 < bz1 && z1 >= bz0;
 	};
-	// TC: the same with the box grown (p_slack > 0) or shrunk (< 0) by p_slack metres on every side.
+
 	constexpr float kTerrainEdge = 1e-3f;
 	const auto overlaps_by = [&](const Tri &p_t, float p_slack) {
 		const float x0 = std::min({ p_t.v[0][0], p_t.v[1][0], p_t.v[2][0] }), x1 = std::max({ p_t.v[0][0], p_t.v[1][0], p_t.v[2][0] });
 		const float z0 = std::min({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] }), z1 = std::max({ p_t.v[0][2], p_t.v[1][2], p_t.v[2][2] });
 		return x0 < bx1 + p_slack && x1 >= bx0 - p_slack && z0 < bz1 + p_slack && z1 >= bz0 - p_slack;
 	};
-	// The motor's triangles: read back from every cooked MeshShape whose tile bounds overlap the box.
+
 	std::vector<Tri> world;
 	const StaticWorldShapes::Impl &s = p_world.impl();
 	const JPH::AABox box(JPH::Vec3(bx0, -1e6f, bz0), JPH::Vec3(bx1, 1e6f, bz1));
@@ -303,9 +291,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 			}
 		}
 	}
-	// TC: the terrain's triangles, read back from every terrain field (at its body transform) and patch whose bounds
-	// overlap the box, when the Collision layer is in the mask; matched against the input's terrain triangles (the
-	// last NavTileInput::terrain_triangles) within the terrain tolerance.
+
 	std::vector<Tri> world_terrain;
 	float terrain_tolerance = p_tolerance;
 	if (((p_layer_mask >> uint32_t(StaticLayer::Collision)) & 1u) != 0) {
@@ -324,9 +310,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 				}
 				JPH::Shape::GetTrianglesContext context;
 				shape->GetTrianglesStart(context, box, at, rotation, JPH::Vec3::sOne());
-				// Jolt's HeightFieldShape resumes a walk that filled the buffer at the start of the block it stopped in, so
-				// the triangles of that block already returned come again (HeightFieldShape.cpp VisitTriangle): a field
-				// triangle equal bit for bit to one returned before is dropped.
+
 				std::unordered_set<uint64_t> field_seen;
 				const bool is_field = shape == terrain.field.GetPtr();
 				while (true) {
@@ -368,7 +352,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		return core::make_error("nav input check: more terrain triangles than triangles");
 	}
 	const size_t first_terrain = p_input.layers.size() - p_input.terrain_triangles;
-	// The nav triangles of the mask (Havok, then terrain).
+
 	std::vector<Tri> nav;
 	std::vector<uint8_t> nav_layer;
 	std::vector<Tri> nav_terrain;
@@ -390,7 +374,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		nav_layer.push_back(p_input.layers[t]);
 	}
 	out.nav_triangles = nav.size() + nav_terrain.size();
-	// Hash the world triangles by centroid cell (cells of 4 x the tolerance, so a match is in the 27 around).
+
 	const float cell = std::max(p_tolerance * 4.0f, 1e-4f);
 	std::unordered_multimap<uint64_t, uint32_t> grid;
 	grid.reserve(world.size());
@@ -399,9 +383,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		grid.emplace(cell_key(cell_of(c[0], cell), cell_of(c[1], cell), cell_of(c[2], cell)), i);
 	}
 	std::vector<uint8_t> used(world.size(), 0);
-	// Jolt's sanitize rule for an unmatched nav triangle: degenerate relative to its static tile's origin (the cook's
-	// frame; the tile is the soup's filing rule), degenerate after the 21-bit quantisation over the shape's bounds, or
-	// a duplicate (the same three corners) of an earlier triangle of the same tile and layer.
+
 	std::unordered_set<uint64_t> seen;
 	const auto dropped_by_jolt = [&](const Tri &p_t, uint8_t p_layer) {
 		std::array<int64_t, 9> q;
@@ -416,7 +398,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		if ((bb - a).Cross(cc - a).IsNearZero()) {
 			return true;
 		}
-		// Quantised degeneracy over the cooked shape's bounds (when that tile has the shape).
+
 		const auto found = std::lower_bound(s.tiles.begin(), s.tiles.end(), st,
 				[](const StaticWorldShapes::Impl::Tile &p_tile, const std::array<int32_t, 2> &p_key) { return std::array<int32_t, 2>{ p_tile.info.x, p_tile.info.z } < p_key; });
 		if (found != s.tiles.end() && found->info.x == st[0] && found->info.z == st[1] && found->shapes[p_layer] != nullptr) {
@@ -430,8 +412,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 				return true;
 			}
 		}
-		// Duplicate: the corners as a set (Jolt compares vertex index triples with the lowest first; the cook shares
-		// vertices by exact bits, so equal corners are equal indices).
+
 		std::array<std::array<int64_t, 3>, 3> corners{};
 		for (int k = 0; k < 3; ++k) {
 			corners[size_t(k)] = { q[size_t(k) * 3], q[size_t(k) * 3 + 1], q[size_t(k) * 3 + 2] };
@@ -471,7 +452,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 			used[size_t(best)] = 1;
 			++out.matched;
 			out.max_corner_error = std::max(out.max_corner_error, best_error);
-			// Register the matched triangle too, so a later duplicate of it counts as Jolt's.
+
 			dropped_by_jolt(nav[t], nav_layer[t]);
 			continue;
 		}
@@ -483,8 +464,7 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 	for (uint8_t u : used) {
 		out.world_only += u == 0 ? 1 : 0;
 	}
-	// TC: the terrain group, one to one within the terrain tolerance (a terrain triangle is never degenerate for Jolt
-	// on a sane grid, so an unmatched one counts as nav_only or world_only without the sanitise rule).
+
 	const float terrain_cell = std::max(terrain_tolerance * 4.0f, 1e-4f);
 	std::unordered_multimap<uint64_t, uint32_t> terrain_grid;
 	terrain_grid.reserve(world_terrain.size());
@@ -524,13 +504,11 @@ core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShape
 		}
 		++out.nav_only;
 	}
-	// An unmatched field triangle counts only when it overlaps the box by more than the edge slack: the field's corners
-	// (offset + scale x sample, in float) and the soup's (origin + sample x spacing) can differ by an ulp, which moves a
-	// triangle that only touches the box edge in or out of one side's set.
+
 	for (size_t i = 0; i < terrain_used.size(); ++i) {
 		out.world_only += terrain_used[i] == 0 && overlaps_by(world_terrain[i], -kTerrainEdge) ? 1 : 0;
 	}
 	return out;
 }
 
-} // namespace bf3::sim
+}

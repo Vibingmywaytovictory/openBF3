@@ -1,7 +1,3 @@
-// M2a VFX1: bf3dump fx (docs/design/m2a-vfx1.md §7.7). Every command opens the install read-only through the repo's
-// readers (EbxLibrary over a superbundle spec); --cache <root> compiles through the fx-deps / fx-effect cache entries
-// of a Cache root (never next to the install: the reader's write guard refuses it). The goldens and checks are the
-// bf3_fx harness (fx_harness.h), the same functions the fx.install test calls.
 #include "fx_commands.h"
 
 #include "bf3/core/cache/disk_cache.h"
@@ -44,7 +40,6 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// --name value, --name=value, or a bare --flag; everything else positional.
 struct Args {
 	std::vector<std::string> positional;
 	std::map<std::string, std::string> options;
@@ -113,7 +108,6 @@ std::unique_ptr<EbxLibrary> open_library(const EbxContext &p_ctx, const std::str
 	return std::move(*lib);
 }
 
-// Optional Cache root (--cache); the install refuses itself as a root through the reader's write guard.
 struct CacheHandle {
 	std::unique_ptr<Cache> cache;
 	bool ok = true;
@@ -154,8 +148,6 @@ Catalogue catalogue_of(const EbxLibrary &p_lib) {
 	return c;
 }
 
-// A full name that is in the library is used as is; otherwise the whole library is parsed and the name resolved as
-// a unique suffix among the blueprints (or documents).
 Result<std::string> resolve_name(EbxLibrary &r_lib, std::optional<Catalogue> &r_catalogue, const std::string &p_name, bool p_document) {
 	const std::string name = to_lower_ascii(p_name);
 	if (name.find('/') != std::string::npos && r_lib.partition_by_name(name) != nullptr) {
@@ -207,8 +199,6 @@ std::string level_sb(const std::string &p_level) {
 	return "Win32/Levels/" + p_level + "/" + p_level;
 }
 
-// ---- census ----------------------------------------------------------------------------------------------------
-
 int fx_census(const EbxContext &p_ctx, const Args &p_a) {
 	const std::string spec = p_a.positional.size() > 1 ? p_a.positional[1] : "@all-mp";
 	unsigned threads = 0;
@@ -257,15 +247,13 @@ int fx_census(const EbxContext &p_ctx, const Args &p_a) {
 	if (spec != "@all-mp") {
 		return 0;
 	}
-	// Gate G1.
+
 	const bool pass = c.blueprints == 1101 && c.blueprints_compiled == 1101 && c.emitter_documents == 3410 && c.emitter_documents_compiled == 3410 &&
 			c.unknown_types.empty() && c.unknown_enumerators.empty() && processors_seen == kProcessorTypeCount && evaluators_seen == kEvaluatorTypeCount &&
 			c.max_work_units <= kDefaultCompileWorkLimit / 16;
 	std::printf("G1\t%s\n", pass ? "PASS" : "FAIL");
 	return pass ? 0 : 1;
 }
-
-// ---- compile ---------------------------------------------------------------------------------------------------
 
 int fx_compile(const EbxContext &p_ctx, const Args &p_a) {
 	if (p_a.positional.size() < 2) {
@@ -285,7 +273,7 @@ int fx_compile(const EbxContext &p_ctx, const Args &p_a) {
 	int rc = 0;
 	for (size_t i = 1; i < p_a.positional.size(); ++i) {
 		const std::string &want = p_a.positional[i];
-		// A blueprint first, then a document.
+
 		Result<std::string> name = resolve_name(*lib, catalogue, want, false);
 		bool document = false;
 		if (name) {
@@ -330,8 +318,6 @@ int fx_compile(const EbxContext &p_ctx, const Args &p_a) {
 	}
 	return rc;
 }
-
-// ---- simulate --------------------------------------------------------------------------------------------------
 
 int fx_simulate(const EbxContext &p_ctx, const Args &p_a) {
 	const bool emitter = p_a.has("--emitter");
@@ -397,8 +383,6 @@ int fx_simulate(const EbxContext &p_ctx, const Args &p_a) {
 	}
 	return rep.pass ? 0 : 1;
 }
-
-// ---- check -----------------------------------------------------------------------------------------------------
 
 int fx_check(const EbxContext &p_ctx, const Args &p_a) {
 	const std::string spec = p_a.positional.size() > 1 ? p_a.positional[1] : "@all-mp";
@@ -469,8 +453,6 @@ int fx_check(const EbxContext &p_ctx, const Args &p_a) {
 	return pass ? 0 : 1;
 }
 
-// ---- bench -----------------------------------------------------------------------------------------------------
-
 int fx_bench_command(const EbxContext &p_ctx, const Args &p_a) {
 	uint64_t seed = 1;
 	uint32_t runs = 5;
@@ -518,8 +500,6 @@ int fx_bench_command(const EbxContext &p_ctx, const Args &p_a) {
 	std::printf("G9\t%s\n", pass ? "PASS" : "FAIL");
 	return pass ? 0 : 1;
 }
-
-// ---- atlas -----------------------------------------------------------------------------------------------------
 
 int fx_atlas(const EbxContext &p_ctx, const Args &p_a) {
 	if (p_a.positional.size() != 2) {
@@ -573,8 +553,6 @@ int fx_atlas(const EbxContext &p_ctx, const Args &p_a) {
 	return rep.pass ? 0 : 1;
 }
 
-// ---- impacts ---------------------------------------------------------------------------------------------------
-
 int fx_impacts(const EbxContext &p_ctx, const Args &p_a) {
 	if (p_a.positional.size() != 2) {
 		std::fprintf(stderr, "fx impacts <LEVEL> [--projectile=bullet|<material index>]\n");
@@ -623,7 +601,7 @@ int fx_impacts(const EbxContext &p_ctx, const Args &p_a) {
 	return rep.pass ? 0 : 1;
 }
 
-} // namespace
+}
 
 const char *fx_usage() {
 	return "  fx census [<sb>|@all-mp] [--threads N]\n"
@@ -669,4 +647,4 @@ int cmd_fx(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 	return 2;
 }
 
-} // namespace bf3dump
+}

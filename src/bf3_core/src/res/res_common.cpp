@@ -150,10 +150,7 @@ bool valid_utf8(const uint8_t *p_data, size_t p_len) {
 	return true;
 }
 
-} // namespace detail
-
-// ---------------------------------------------------------------------------------------------
-// Transform (IW4L math.rs; float literals and operation order kept for bit parity)
+}
 
 namespace vec {
 float dot(const Vec3 &p_a, const Vec3 &p_b) {
@@ -178,7 +175,7 @@ Vec3 normalize(const Vec3 &p_a) {
 	const float len = length(p_a);
 	return len > 0.0f ? scale(p_a, 1.0f / len) : p_a;
 }
-} // namespace vec
+}
 
 Transform Transform::from_translation(const Vec3 &p_origin) {
 	Transform t;
@@ -253,4 +250,4 @@ Vec4 Transform::transform_plane(const Vec4 &p_plane) const {
 	return { normal[0], normal[1], normal[2], -vec::dot(normal, point) };
 }
 
-} // namespace bf3::core::res
+}

@@ -1,5 +1,3 @@
-// Offline analysis for the gates (audio_analysis.h): onsets, levels, band energy. Our own radix-2 FFT.
-
 #include "bf3/audio/audio_analysis.h"
 
 #include <algorithm>
@@ -53,7 +51,6 @@ void fft(std::vector<std::complex<double>> &r_a) {
 	}
 }
 
-// |H(f)|^2 of the RBJ high-pass at p_cutoff / p_q (bilinear transform), the same design dsp.cpp uses.
 double highpass_power(double p_f, double p_rate, double p_cutoff, double p_q) {
 	if (!(p_cutoff > 0.0)) {
 		return 1.0;
@@ -70,7 +67,6 @@ double highpass_power(double p_f, double p_rate, double p_cutoff, double p_q) {
 	return std::norm(num) / std::max(1e-300, std::norm(den));
 }
 
-// Mean over FFT frames of sum_k |X_k|^2 x weight(k) for the bins of [p_low, p_high).
 template <class Weight>
 float band_db(std::span<const float> p_x, uint32_t p_channels, uint32_t p_rate, uint64_t p_first, uint64_t p_frames, float p_low, float p_high,
 		Weight &&p_weight) {
@@ -107,7 +103,7 @@ float band_db(std::span<const float> p_x, uint32_t p_channels, uint32_t p_rate, 
 	return mean > 0.0 ? float(10.0 * std::log10(mean)) : -144.0f;
 }
 
-} // namespace
+}
 
 std::vector<uint64_t> detect_onsets(std::span<const float> p_interleaved, uint32_t p_channels, uint32_t p_rate, const OnsetOptions &p_options) {
 	std::vector<uint64_t> onsets;
@@ -124,7 +120,7 @@ std::vector<uint64_t> detect_onsets(std::span<const float> p_interleaved, uint32
 	for (uint64_t i = 0; i < n; ++i) {
 		x[i] = mono_at(p_interleaved, p_channels, i);
 	}
-	// e[i]: mean of x^2 over (i - W, i].
+
 	std::vector<double> e(n, 0.0);
 	double run = 0.0;
 	for (uint64_t i = 0; i < n; ++i) {
@@ -134,7 +130,7 @@ std::vector<uint64_t> detect_onsets(std::span<const float> p_interleaved, uint32
 		}
 		e[i] = std::max(0.0, run) / double(W);
 	}
-	// floor[i] = mean of e over the F frames before the window, [i - W - F + 1, i - W] (a running sum).
+
 	std::vector<double> ce(n + 1, 0.0);
 	for (uint64_t i = 0; i < n; ++i) {
 		ce[i + 1] = ce[i] + e[i];
@@ -226,4 +222,4 @@ OnsetSpacing onset_spacing(std::span<const uint64_t> p_onsets, BurstWindow p_win
 	return out;
 }
 
-} // namespace bf3::audio
+}

@@ -1,4 +1,3 @@
-// Pose evaluation of the 3p crowd (S3; docs/design/s3.md §3, §5). See crowd_eval.h.
 #include "bf3/anim/crowd_eval.h"
 
 #include "bf3/core/worker_group.h"
@@ -17,53 +16,51 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-constexpr float kReloadRampSeconds = 0.15f; // s3.md §5.4
+constexpr float kReloadRampSeconds = 0.15f;
 constexpr float kDegToRad = 0.0174532925f;
 
 bool finite3(const Vec3 &p_v) {
 	return std::isfinite(p_v.x) && std::isfinite(p_v.y) && std::isfinite(p_v.z);
 }
 
-// Stagger offset of slot p_i in [0, 1) (golden-ratio sequence: neighbouring slots spread evenly).
 float stagger_of(uint32_t p_i) {
 	const double v = double(p_i) * 0.6180339887498949;
 	return float(v - std::floor(v));
 }
 
-} // namespace
+}
 
 struct CrowdEvaluator::Impl {
 	struct Team {
 		const SkinBinds *binds = nullptr;
 		const CrowdClipData *reload = nullptr;
 		float reload_rate = 1.0f;
-		float reload_seconds = 0.0f; // at the rate
+		float reload_seconds = 0.0f;
 		const BoneMask *weapon_joints = nullptr;
 		std::vector<Xform> weapon_local;
 	};
 
-	// Everything one soldier owns. Written by its lane between kick and wait, by the owner thread otherwise.
 	struct Soldier {
 		CrowdSoldierInput input;
-		bool reload_pending = false; // kReloadStart seen by set_inputs, consumed by the next evaluation
-		float reload_t = -1.0f; // seconds into the reload (< 0: none)
-		float phase = 0.0f; // shared normalized locomotion phase
-		double clock = 0.0; // seconds of input time seen
+		bool reload_pending = false;
+		float reload_t = -1.0f;
+		float phase = 0.0f;
+		double clock = 0.0;
 		double last_eval_clock = 0.0;
 		int64_t lod_bucket = INT64_MIN;
-		bool ever = false; // evaluated at least once
-		// Per-soldier double buffers.
+		bool ever = false;
+
 		std::array<std::vector<Mat34>, 2> palette;
 		std::array<std::vector<Xform>, 2> model;
-		std::array<uint32_t, 2> binds{}; // palette size of each slot (the team's binds at evaluation)
+		std::array<uint32_t, 2> binds{};
 		uint8_t front = 0;
-		bool evaluated = false; // by the current job
-		bool changed = false; // in the last publish
-		// Scratch (lane only).
-		std::array<LocalPose, 3> sample; // up to two cycles and the layer sample
+		bool evaluated = false;
+		bool changed = false;
+
+		std::array<LocalPose, 3> sample;
 		LocalPose pose;
 		core::ant::ClipPose scratch;
-		// The job's per-soldier counters (merged at publish).
+
 		bool skipped_lod = false;
 		bool hidden = false;
 		uint8_t loco_clips = 0;
@@ -76,21 +73,20 @@ struct CrowdEvaluator::Impl {
 	CrowdConfig config;
 	std::vector<Team> teams;
 	std::vector<Soldier> soldiers;
-	LocalPose idle; // Rifle_StandIdle_Pose sampled once (a pose)
-	LocalPose aim_up, aim_down; // the additive deltas sampled once onto identity (end frame)
+	LocalPose idle;
+	LocalPose aim_up, aim_down;
 	const BoneMask *aim_up_mask = nullptr;
 	const BoneMask *aim_down_mask = nullptr;
 	double dt = 0.0;
 	uint64_t bad_inputs = 0;
 	CrowdFrameStats stats;
-	bool job = false; // kicked and not yet published
+	bool job = false;
 	Clock::time_point kick_time{};
 
 	void evaluate(uint32_t p_i);
 	void publish(double p_blocked);
 	void prepare_job();
-	// M2a tp [impl] (named insertion, docs/design/m2a-tp.md): R5's per-team weapons and the stance set, per team and per
-	// soldier (the M2a tp block at the end of this file). Null: S3's evaluator exactly (no stance set, no team with weapons).
+
 	struct M2a;
 	struct M2aDeleter {
 		void operator()(M2a *p_m2a) const;
@@ -108,7 +104,7 @@ void CrowdEvaluator::Impl::prepare_job() {
 }
 
 void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
-	if (m2a) { // M2a tp [eval] (named insertion): the stance and per-soldier weapon path (the M2a tp block)
+	if (m2a) {
 		evaluate_m2a(p_i);
 		return;
 	}
@@ -123,12 +119,12 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 		finish();
 		return;
 	}
-	// Temporal LOD: due when the soldier's staggered bucket of its tier interval changes.
+
 	if (config.temporal_lod && s.ever) {
 		const float interval = temporal_lod_interval(config.lod, s.input.camera_distance);
 		bool due = true;
 		if (interval < 0.0f) {
-			due = false; // FarPolicy::Freeze
+			due = false;
 		} else if (interval > 0.0f) {
 			const int64_t bucket = int64_t(std::floor(s.clock / double(interval) + double(stagger_of(p_i))));
 			due = bucket != s.lod_bucket;
@@ -152,7 +148,6 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 	const Team &team = teams[team_index];
 	const Skeleton &rig = clips->rig;
 
-	// 1. Run blend at one phase.
 	const float yaw = s.input.yaw;
 	const float cy = std::cos(yaw), sy = std::sin(yaw);
 	const Vec3 v = s.input.velocity;
@@ -190,11 +185,11 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 	} else {
 		blend_poses(inputs.data(), weights.data(), n, s.pose);
 	}
-	// 2. The sim owns the root: its translation back to rest.
+
 	if (clips->root_joint >= 0 && size_t(clips->root_joint) < s.pose.joints.size()) {
 		s.pose.joints[size_t(clips->root_joint)].t = rig.bone(size_t(clips->root_joint)).rest.t;
 	}
-	// 3. Weapon layout of the joints the locomotion clips leave undriven.
+
 	if (team.weapon_joints != nullptr && !team.weapon_local.empty()) {
 		const size_t m = std::min(s.pose.joints.size(), team.weapon_joints->size());
 		for (size_t j = 0; j < m; ++j) {
@@ -203,7 +198,7 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 			}
 		}
 	}
-	// 4. Masked upper-body reload.
+
 	if (s.reload_pending) {
 		s.reload_pending = false;
 		if (s.reload_t < 0.0f && team.reload != nullptr) {
@@ -224,7 +219,7 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 			s.reloading = rw > 0.0f;
 		}
 	}
-	// 5. Additive aim.
+
 	const float pitch = s.input.pitch;
 	const bool up = pitch > 0.0f;
 	const float full_deg = up ? config.aim_up_full_pitch_deg : config.aim_down_full_pitch_deg;
@@ -236,7 +231,7 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 			s.aiming = true;
 		}
 	}
-	// 6. Model pose and skin palette into the back buffers.
+
 	const uint8_t back = uint8_t(s.front ^ 1);
 	model_pose(rig, s.pose, s.model[back]);
 	skin_matrices(s.model[back], team.binds->binds(), s.palette[back]);
@@ -280,8 +275,7 @@ CrowdEvaluator::~CrowdEvaluator() = default;
 
 core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdClipSet &p_clips, std::span<const CrowdTeam> p_teams, uint32_t p_soldiers,
 		const CrowdConfig &p_config) {
-	// R5 (tp, docs/design/m2a.md §15; docs/design/m2a-tp.md): S3's checks, CrowdTeam::weapons and the buffer sizes moved
-	// into the stance overload (the M2a tp block); with no stance set and no team with weapons it builds S3's evaluator.
+
 	return make(p_clips, CrowdStanceSet{}, p_teams, p_soldiers, p_config);
 }
 
@@ -292,12 +286,12 @@ uint32_t CrowdEvaluator::soldiers() const {
 void CrowdEvaluator::set_inputs(std::span<const CrowdSoldierInput> p_inputs, double p_dt) {
 	Impl &m = *impl_;
 	if (m.job) {
-		return; // owner-thread misuse: never touch soldiers while the job may run
+		return;
 	}
 	if (std::isfinite(p_dt) && p_dt >= 0.0 && p_dt < 1.0e6) {
 		m.dt = p_dt;
 	} else {
-		++m.bad_inputs; // keep the last finite dt
+		++m.bad_inputs;
 	}
 	const size_t n = std::min(p_inputs.size(), m.soldiers.size());
 	for (size_t i = 0; i < n; ++i) {
@@ -394,11 +388,7 @@ uint64_t CrowdEvaluator::bad_inputs() const {
 	return impl_->bad_inputs;
 }
 
-} // namespace bf3::anim
-
-// ---- M2a tp (docs/design/m2a.md §9, R5, E18 (b); docs/design/m2a-tp.md) ----------------------------------------------
-// R5's make() with CrowdTeam::weapons and the stance set, the M2a per-soldier path (crowd_eval.h's M2a tp block lists its
-// steps) and the accessors W3.0 declared for tp: muzzle_model, weapon_of, weapon_palette; plus drawn and m2a_stats.
+}
 
 #include "bf3/anim/server_pose.h"
 
@@ -406,7 +396,6 @@ namespace bf3::anim {
 
 namespace {
 
-// lc's transition rows in core::gameplay::CapsuleTransition order (StandToCrouch .. ProneToCrouch), -1 for from == to.
 int transition_row(uint8_t p_from, uint8_t p_to) {
 	static constexpr int kRow[3][3] = { { -1, 0, 1 }, { 2, -1, 3 }, { 4, 5, -1 } };
 	return p_from < 3 && p_to < 3 ? kRow[p_from][p_to] : -1;
@@ -424,7 +413,6 @@ bool same_rig(const Skeleton &p_a, const Skeleton &p_b) {
 	return true;
 }
 
-// An additive clip's delta at its last frame onto identity (S3's rule for the aim clips).
 bool additive_delta(const Skeleton &p_rig, const CrowdClipData &p_clip, LocalPose &r_delta, core::ant::ClipPose &r_scratch) {
 	r_delta = identity_pose(p_rig);
 	if (p_clip.mask.size() != p_rig.size()) {
@@ -441,20 +429,19 @@ bool finite_xform(const Xform &p_x) {
 	return std::isfinite(p_x.q.x) && std::isfinite(p_x.q.y) && std::isfinite(p_x.q.z) && std::isfinite(p_x.q.w) && finite3(p_x.t);
 }
 
-} // namespace
+}
 
-// PT1 run [decl]: BF3's move groups per soldier (defined in the PT1 run block at the end of this file).
-struct CrowdPt1Run; // PT1 run [decl]
-struct CrowdPt1RunDeleter { // PT1 run [decl]
-	void operator()(CrowdPt1Run *p_run) const; // PT1 run [decl]
-}; // PT1 run [decl]
-struct CrowdPt1Stats { // PT1 run [decl]
-	uint32_t sampled = 0, moving = 0; // PT1 run [decl]: clips sampled (the idle counts when weighted), moving clips weighted
-	bool idle_mix = false; // PT1 run [decl]
-}; // PT1 run [decl]
-std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers); // PT1 run [decl]
-bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle, // PT1 run [decl]
-		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdPt1Stats &r_stats); // PT1 run [decl]
+struct CrowdPt1Run;
+struct CrowdPt1RunDeleter {
+	void operator()(CrowdPt1Run *p_run) const;
+};
+struct CrowdPt1Stats {
+	uint32_t sampled = 0, moving = 0;
+	bool idle_mix = false;
+};
+std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers);
+bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
+		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdPt1Stats &r_stats);
 
 struct CrowdEvaluator::Impl::M2a {
 	struct Weapon {
@@ -468,21 +455,21 @@ struct CrowdEvaluator::Impl::M2a {
 		Xform muzzle_offset = xform_identity();
 	};
 	struct Team {
-		std::vector<Weapon> weapons; // empty: the team's own fields are the weapon (S3), no weapon palette
+		std::vector<Weapon> weapons;
 	};
-	// Per sim stance (0 stand, 1 crouch, 2 prone).
+
 	struct Stance {
-		const LocalPose *idle = nullptr; // stand: Impl::idle
+		const LocalPose *idle = nullptr;
 		LocalPose idle_own;
-		bool idle_fallback = false; // the stance idle is missing: the stand idle
+		bool idle_fallback = false;
 		const LocalPose *aim_up = nullptr, *aim_down = nullptr;
 		LocalPose aim_up_own, aim_down_own;
 		const BoneMask *up_mask = nullptr, *down_mask = nullptr;
 		float up_full_deg = 0.0f, down_full_deg = 0.0f;
 		std::array<LocoClipInfo, kLocoClips> loco{};
-		std::array<const CrowdClipData *, kLocoClips> cycle{}; // per LocoClip (Idle null)
-		const CrowdClipData *cycle_bwd2 = nullptr; // crouch: SneakBwdRight45, blended 50/50 with cycle[Bwd]
-		bool moves_fallback = false; // the stand cycles move this stance
+		std::array<const CrowdClipData *, kLocoClips> cycle{};
+		const CrowdClipData *cycle_bwd2 = nullptr;
+		bool moves_fallback = false;
 		const CrowdClipData *death = nullptr;
 	};
 	struct Soldier {
@@ -491,37 +478,37 @@ struct CrowdEvaluator::Impl::M2a {
 		std::array<uint8_t, 2> weapon{ kNoCrowdWeapon, kNoCrowdWeapon };
 		std::array<Xform, 2> muzzle{ xform_identity(), xform_identity() };
 		std::array<bool, 2> muzzle_ok{};
-		uint8_t held = kNoCrowdWeapon; // the weapon of the last evaluation (a change cancels the reload)
+		uint8_t held = kNoCrowdWeapon;
 		uint8_t fire_seq = 0;
 		bool fire_seen = false;
 		double fire_since = -1.0e9;
 		bool dead = false;
 		double dead_since = 0.0;
 		uint8_t death_stance = 0;
-		bool hidden = false; // hidden after the death timer
+		bool hidden = false;
 		bool hide_counted = false;
-		bool rising = false; // M2b cam [revive]: standing up from the corpse pose (kCrowdReviveBlendSeconds)
-		double rise_since = 0.0; // M2b cam [revive]
-		LocalPose corpse; // M2b cam [revive]: the corpse pose the stand-up starts from
-		uint64_t revives = 0; // M2b cam [revive]
-		LocalPose extra, extra2, alive; // lane scratch
-		// The job's flags (read by m2a_stats after publish).
+		bool rising = false;
+		double rise_since = 0.0;
+		LocalPose corpse;
+		uint64_t revives = 0;
+		LocalPose extra, extra2, alive;
+
 		uint8_t stance = 0;
 		bool transition = false, moving = false, firing = false, dying = false, wrote_weapon = false, wrote_muzzle = false;
-		// Since make().
+
 		uint64_t fallbacks = 0, bad_weapon = 0, bad_stance = 0, cancelled = 0, deaths = 0, hidden_count = 0;
 	};
 
 	std::vector<Team> teams;
 	std::array<Stance, 3> stances;
-	bool stance_set = false; // a ServerPoseClips was given
+	bool stance_set = false;
 	std::array<const CrowdClipData *, core::gameplay::kCapsuleTransitions> transitions{};
 	const CrowdClipData *crouch_fire = nullptr;
 	CrowdDeathStyle death = kCrowdDeathDefault;
-	float corpse_seconds = kCrowdDeathHideSeconds; // M2b cam [corpse]: CrowdStanceSet::corpse_seconds
-	LocalPose identity; // the additive base of the crouch fire
+	float corpse_seconds = kCrowdDeathHideSeconds;
+	LocalPose identity;
 	std::vector<Soldier> soldiers;
-	std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> pt1; // PT1 run [state]: CrowdStanceSet::move_groups (null: none)
+	std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> pt1;
 };
 
 void CrowdEvaluator::Impl::M2aDeleter::operator()(M2a *p_m2a) const {
@@ -530,7 +517,7 @@ void CrowdEvaluator::Impl::M2aDeleter::operator()(M2a *p_m2a) const {
 
 core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdClipSet &p_clips, const CrowdStanceSet &p_stance, std::span<const CrowdTeam> p_teams,
 		uint32_t p_soldiers, const CrowdConfig &p_config) {
-	// S3's checks and setup (moved here by R5; unchanged apart from the weapons and the buffer sizes).
+
 	if (p_soldiers > kMaxCrowdSoldiers) {
 		return core::make_error("crowd: " + std::to_string(p_soldiers) + " soldiers (cap " + std::to_string(kMaxCrowdSoldiers) + ")");
 	}
@@ -598,7 +585,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		}
 		max_binds = std::max(max_binds, uint32_t(in.binds->size()));
 		m.teams.push_back(std::move(team));
-		// R5: the team's items.
+
 		if (in.weapons.size() > kMaxCrowdWeapons) {
 			return core::make_error(where + ": " + std::to_string(in.weapons.size()) + " weapons (cap " + std::to_string(kMaxCrowdWeapons) + ")");
 		}
@@ -638,7 +625,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			any_weapons = true;
 		}
 	}
-	// Static poses sampled once: the idle pose, and the aim additives onto identity at their last frame.
+
 	{
 		core::ant::ClipPose scratch;
 		const CrowdClipData &idle = p_clips.get(CrowdClip::Idle);
@@ -649,7 +636,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			const CrowdClipData &c = p_clips.get(clip);
 			*pose = identity_pose(rig);
 			if (c.mask.size() != rig.size()) {
-				continue; // no aim clip: no aim layer
+				continue;
 			}
 			if (!core::ant::sample_clip(c.clip, float(c.tracks.end_frame), scratch)) {
 				return core::make_error("crowd: an aim clip does not sample");
@@ -669,22 +656,20 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			p = rest_pose(rig);
 		}
 		s.pose = rest_pose(rig);
-		// R5: the palette of a soldier that was never evaluated is empty (S3 sized it from team 0's binds, wrong for a
-		// team with another bind count); its evaluation sets its own team's count.
+
 		s.binds = { 0, 0 };
 	}
-	if (!any_weapons && p_stance.pose == nullptr && p_stance.moves == nullptr && p_stance.move_groups == nullptr) { // PT1 run [path]: move groups need the M2a path
-		return e; // S3's evaluator
+	if (!any_weapons && p_stance.pose == nullptr && p_stance.moves == nullptr && p_stance.move_groups == nullptr) {
+		return e;
 	}
 
-	// The M2a state.
 	std::unique_ptr<Impl::M2a, Impl::M2aDeleter> x(new Impl::M2a());
 	x->teams = std::move(m2a_teams);
 	x->death = p_stance.death;
-	if (!std::isfinite(p_stance.corpse_seconds) || p_stance.corpse_seconds < 0.0f || p_stance.corpse_seconds > kCrowdMaxCorpseSeconds) { // M2b cam [corpse]
-		return core::make_error("crowd: corpse_seconds " + std::to_string(p_stance.corpse_seconds) + " outside [0, 3600]"); // M2b cam [corpse]
-	} // M2b cam [corpse]
-	x->corpse_seconds = p_stance.corpse_seconds; // M2b cam [corpse]
+	if (!std::isfinite(p_stance.corpse_seconds) || p_stance.corpse_seconds < 0.0f || p_stance.corpse_seconds > kCrowdMaxCorpseSeconds) {
+		return core::make_error("crowd: corpse_seconds " + std::to_string(p_stance.corpse_seconds) + " outside [0, 3600]");
+	}
+	x->corpse_seconds = p_stance.corpse_seconds;
 	x->identity = identity_pose(rig);
 	core::ant::ClipPose scratch;
 	{
@@ -704,7 +689,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 	}
 	for (size_t st = 1; st < 3; ++st) {
 		Impl::M2a::Stance &d = x->stances[st];
-		d = x->stances[0]; // the stand clips until the stance's own are found
+		d = x->stances[0];
 		d.idle = &m.idle;
 		d.idle_fallback = true;
 		d.moves_fallback = true;
@@ -727,7 +712,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 					d.idle_fallback = false;
 				}
 			}
-			// The stance's aim: lc's clips and weights where present (the capsule table's), else the stand aim.
+
 			if (sp.present[size_t(kUp[st])] && additive_delta(rig, sp.get(kUp[st]), d.aim_up_own, scratch)) {
 				d.up_mask = &sp.get(kUp[st]).mask;
 			} else {
@@ -776,7 +761,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			x->crouch_fire = &fire;
 		}
 	}
-	// The pointers into the Stance entries are set last: the entries were copied above.
+
 	for (size_t st = 0; st < 3; ++st) {
 		Impl::M2a::Stance &d = x->stances[st];
 		if (st == 0) {
@@ -788,9 +773,9 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			d.aim_down = &d.aim_down_own;
 		}
 	}
-	if (p_stance.move_groups != nullptr) { // PT1 run [make]
-		x->pt1 = crowd_pt1_make(*p_stance.move_groups, rig, p_soldiers); // PT1 run [make]
-	} // PT1 run [make]
+	if (p_stance.move_groups != nullptr) {
+		x->pt1 = crowd_pt1_make(*p_stance.move_groups, rig, p_soldiers);
+	}
 	x->soldiers.resize(p_soldiers);
 	for (Impl::M2a::Soldier &xs : x->soldiers) {
 		for (int k = 0; k < 2; ++k) {
@@ -814,23 +799,23 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	s.tier = int8_t(temporal_lod_tier(config.lod, s.input.camera_distance));
 	s.clock += dt;
 	const auto finish = [&] { s.done_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(); };
-	// Events on the input clock, seen whether or not the soldier is due (temporal LOD must not lose a death or a shot).
+
 	if (s.input.dead && !xs.dead) {
 		xs.dead = true;
 		xs.dead_since = s.clock;
 		xs.death_stance = uint8_t(std::min<uint32_t>(s.input.target_pose, 2));
 		xs.hide_counted = false;
 		++xs.deaths;
-		xs.rising = false; // M2b cam [revive]
+		xs.rising = false;
 	} else if (!s.input.dead && xs.dead) {
-		xs.dead = false; // a respawn: alive again
-		// M2b cam [revive]: a revive stands the corpse up from its last pose, at the same place (m2b.md §4).
-		xs.rising = s.input.revived && s.pose.joints.size() == clips->rig.size(); // M2b cam [revive]
-		if (xs.rising) { // M2b cam [revive]
-			xs.rise_since = s.clock; // M2b cam [revive]
-			xs.corpse = s.pose; // M2b cam [revive]
-			++xs.revives; // M2b cam [revive]
-		} // M2b cam [revive]
+		xs.dead = false;
+
+		xs.rising = s.input.revived && s.pose.joints.size() == clips->rig.size();
+		if (xs.rising) {
+			xs.rise_since = s.clock;
+			xs.corpse = s.pose;
+			++xs.revives;
+		}
 	}
 	if (s.input.fire_seq != xs.fire_seq) {
 		if (xs.fire_seen) {
@@ -840,7 +825,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	}
 	xs.fire_seen = true;
 	const double dead_age = xs.dead ? s.clock - xs.dead_since : 0.0;
-	xs.hidden = xs.dead && dead_age >= double(x.corpse_seconds); // M2b cam [corpse]
+	xs.hidden = xs.dead && dead_age >= double(x.corpse_seconds);
 	if (xs.hidden && !xs.hide_counted) {
 		xs.hide_counted = true;
 		++xs.hidden_count;
@@ -850,12 +835,12 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 		finish();
 		return;
 	}
-	// Temporal LOD: as S3 (a dying soldier is always due, so the fall stays smooth).
-	if (config.temporal_lod && s.ever && !xs.dead && !xs.rising) { // M2b cam [revive]: a stand-up is always due
+
+	if (config.temporal_lod && s.ever && !xs.dead && !xs.rising) {
 		const float interval = temporal_lod_interval(config.lod, s.input.camera_distance);
 		bool due = true;
 		if (interval < 0.0f) {
-			due = false; // FarPolicy::Freeze
+			due = false;
 		} else if (interval > 0.0f) {
 			const int64_t bucket = int64_t(std::floor(s.clock / double(interval) + double(stagger_of(p_i))));
 			due = bucket != s.lod_bucket;
@@ -880,7 +865,6 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	const M2a::Team &xteam = x.teams[team_index];
 	const Skeleton &rig = clips->rig;
 
-	// The soldier's weapon (R5): CrowdTeam::weapons[weapon], item 0 past the end; the team's fields without items.
 	uint8_t widx = kNoCrowdWeapon;
 	const M2a::Weapon *weapon = nullptr;
 	if (!xteam.weapons.empty()) {
@@ -898,13 +882,12 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	const float reload_seconds = weapon != nullptr ? weapon->reload_seconds : team.reload_seconds;
 	if (widx != xs.held) {
 		if (xs.held != kNoCrowdWeapon && s.reload_t >= 0.0f) {
-			s.reload_t = -1.0f; // the reload belonged to the other weapon
+			s.reload_t = -1.0f;
 			++xs.cancelled;
 		}
 		xs.held = widx;
 	}
 
-	// The stance (hostile values clamped and counted).
 	uint8_t from = s.input.pose, to = s.input.target_pose;
 	if (from > 2 || to > 2) {
 		++xs.bad_stance;
@@ -918,22 +901,21 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	}
 	tr = std::clamp(tr, 0.0f, 1.0f);
 	const bool in_transition = from != to;
-	const uint8_t stance = in_transition ? from : to; // a transition aims with its source stance (the table's rule)
+	const uint8_t stance = in_transition ? from : to;
 	xs.stance = to;
 	const M2a::Stance &aim_stance = x.stances[stance];
 
-	// 1. Locomotion of a steady stance, or the transition clip.
 	auto loco_blend = [&](const M2a::Stance &p_st, LocalPose &r_out) {
-		if (x.pt1) { // PT1 run [movegroup]: BF3's move group for stand and crouch (the PT1 run block)
-			CrowdPt1Stats ps; // PT1 run [movegroup]
-			if (crowd_pt1_pose(*x.pt1, p_i, size_t(&p_st - x.stances.data()), s.input, step, *p_st.idle, rig, s.phase, s.scratch, r_out, ps)) { // PT1 run [movegroup]
-				s.loco_clips = uint8_t(std::min<uint32_t>(ps.sampled, 255)); // PT1 run [movegroup]
-				s.two_cycle = ps.moving >= 2; // PT1 run [movegroup]
-				s.idle_mix = ps.idle_mix; // PT1 run [movegroup]
-				xs.moving = ps.moving >= 1; // PT1 run [movegroup]
-				return; // PT1 run [movegroup]
-			} // PT1 run [movegroup]
-		} // PT1 run [movegroup]
+		if (x.pt1) {
+			CrowdPt1Stats ps;
+			if (crowd_pt1_pose(*x.pt1, p_i, size_t(&p_st - x.stances.data()), s.input, step, *p_st.idle, rig, s.phase, s.scratch, r_out, ps)) {
+				s.loco_clips = uint8_t(std::min<uint32_t>(ps.sampled, 255));
+				s.two_cycle = ps.moving >= 2;
+				s.idle_mix = ps.idle_mix;
+				xs.moving = ps.moving >= 1;
+				return;
+			}
+		}
 		const float yaw = s.input.yaw;
 		const float cy = std::cos(yaw), sy = std::sin(yaw);
 		const Vec3 v = s.input.velocity;
@@ -956,7 +938,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 				const CrowdClipData &clip = *p_st.cycle[c];
 				LocalPose &dst = s.sample[cycles];
 				if (c == size_t(LocoClip::Bwd) && p_st.cycle_bwd2 != nullptr) {
-					// Crouch backward: the two 45 degree cycles at one phase, 50/50.
+
 					const CrowdClipData &c2 = *p_st.cycle_bwd2;
 					sample_pose(rig, clip.clip, clip.tracks, s.phase * float(clip.tracks.end_frame), xs.extra, s.scratch);
 					sample_pose(rig, c2.clip, c2.tracks, s.phase * float(c2.tracks.end_frame), xs.extra2, s.scratch);
@@ -988,7 +970,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			if (clip != nullptr) {
 				sample_pose(rig, clip->clip, clip->tracks, tr * float(clip->tracks.end_frame), r_out, s.scratch);
 			} else {
-				// lc's stand-in rule for a missing transition row: the lerp of the two stance idles by the fraction.
+
 				++xs.fallbacks;
 				blend_poses(*x.stances[from].idle, *x.stances[to].idle, tr, r_out);
 			}
@@ -996,7 +978,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 		}
 		const M2a::Stance &st = x.stances[to];
 		loco_blend(st, r_out);
-		// A missing stance idle always, missing moves only while the stand cycles actually move the stance.
+
 		if (to != 0 && (st.idle_fallback || (st.moves_fallback && xs.moving))) {
 			++xs.fallbacks;
 		}
@@ -1008,23 +990,23 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			const float frame = std::min(float(dead_age) * ds.death->tracks.fps, float(ds.death->tracks.end_frame));
 			sample_pose(rig, ds.death->clip, ds.death->tracks, frame, s.pose, s.scratch);
 		} else {
-			// m2a.md §16 Q13: the alive pose to the prone idle over kCrowdDeathBlendSeconds.
+
 			stance_pose(xs.alive);
 			const float w = std::min(1.0f, float(dead_age) / kCrowdDeathBlendSeconds);
 			blend_poses(xs.alive, *x.stances[2].idle, w, s.pose);
 		}
-	} else if (xs.rising && s.clock - xs.rise_since < double(kCrowdReviveBlendSeconds)) { // M2b cam [revive]
-		stance_pose(xs.alive); // M2b cam [revive]
-		blend_poses(xs.corpse, xs.alive, float((s.clock - xs.rise_since) / double(kCrowdReviveBlendSeconds)), s.pose); // M2b cam [revive]
+	} else if (xs.rising && s.clock - xs.rise_since < double(kCrowdReviveBlendSeconds)) {
+		stance_pose(xs.alive);
+		blend_poses(xs.corpse, xs.alive, float((s.clock - xs.rise_since) / double(kCrowdReviveBlendSeconds)), s.pose);
 	} else {
-		xs.rising = false; // M2b cam [revive]
+		xs.rising = false;
 		stance_pose(s.pose);
 	}
-	// 2. The sim owns the root: its translation back to rest.
+
 	if (clips->root_joint >= 0 && size_t(clips->root_joint) < s.pose.joints.size()) {
 		s.pose.joints[size_t(clips->root_joint)].t = rig.bone(size_t(clips->root_joint)).rest.t;
 	}
-	// 3. Weapon layout of the joints the locomotion clips leave undriven (the soldier's weapon).
+
 	if (weapon_joints != nullptr && !weapon_local.empty()) {
 		const size_t m = std::min(s.pose.joints.size(), weapon_joints->size());
 		for (size_t j = 0; j < m; ++j) {
@@ -1033,7 +1015,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			}
 		}
 	}
-	// 4. Masked upper-body reload (the soldier's weapon's clip); none while dead.
+
 	if (xs.dead) {
 		s.reload_pending = false;
 		s.reload_t = -1.0f;
@@ -1058,7 +1040,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			s.reloading = rw > 0.0f;
 		}
 	}
-	// 4b. Fire: the crouch fire clip from its start, or a short aim kick (stand, prone, transitions).
+
 	float kick = 0.0f;
 	const double fire_age = s.clock - xs.fire_since;
 	if (!xs.dead && fire_age >= 0.0) {
@@ -1085,7 +1067,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			xs.firing = true;
 		}
 	}
-	// 5. Additive aim of the stance (none while dead).
+
 	if (!xs.dead) {
 		const float pitch = kick != 0.0f ? s.input.pitch + kick : s.input.pitch;
 		const bool up = pitch > 0.0f;
@@ -1099,7 +1081,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			}
 		}
 	}
-	// 6. Model pose, body palette, weapon palette and muzzle into the back buffers.
+
 	const uint8_t back = uint8_t(s.front ^ 1);
 	model_pose(rig, s.pose, s.model[back]);
 	skin_matrices(s.model[back], team.binds->binds(), s.palette[back]);
@@ -1180,7 +1162,7 @@ CrowdM2aStats CrowdEvaluator::m2a_stats() const {
 		r.reloads_cancelled += xs.cancelled;
 		r.deaths += xs.deaths;
 		r.death_hidden += xs.hidden_count;
-		r.revives += xs.revives; // M2b cam [revive]
+		r.revives += xs.revives;
 		if (!s.changed) {
 			continue;
 		}
@@ -1203,19 +1185,15 @@ CrowdM2aStats CrowdEvaluator::m2a_stats() const {
 	return r;
 }
 
-} // namespace bf3::anim
-
-// ---- PT1 run (docs/design/pt1-run.md; crowd_eval.h's PT1 run block) ---------------------------------------------------
-// BF3's move groups for the stand and crouch locomotion of the M2a path: per soldier the sprint and moving weights and
-// the term poses (lane scratch of that soldier).
+}
 
 namespace bf3::anim {
 
 struct CrowdPt1Run {
 	struct Soldier {
-		float sprint_w = 0.0f; // 0 run .. 1 sprint
-		float move_w = 0.0f; // 0 stance idle .. 1 the group
-		uint8_t stance = 0xFF; // the stance of the last evaluation (a change starts the weights at their targets)
+		float sprint_w = 0.0f;
+		float move_w = 0.0f;
+		uint8_t stance = 0xFF;
 		std::array<LocalPose, kMaxMoveGroupTerms> term;
 		LocalPose group_a, group_b;
 	};
@@ -1243,7 +1221,6 @@ std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveG
 
 namespace {
 
-// The group's terms sampled over p_idle at the shared phase and blended into r_out; the clips sampled.
 uint32_t pt1_group_pose(const CrowdMoveGroup &p_group, const MoveGroupWeights &p_w, float p_phase, const LocalPose &p_idle,
 		std::array<LocalPose, kMaxMoveGroupTerms> &r_term, core::ant::ClipPose &r_scratch, LocalPose &r_out) {
 	std::array<const LocalPose *, kMaxMoveGroupTerms> inputs{};
@@ -1285,14 +1262,14 @@ float pt1_ramp(float p_w, float p_target, float p_step, float p_seconds) {
 	return p_w < p_target ? std::min(p_target, p_w + d) : std::max(p_target, p_w - d);
 }
 
-} // namespace
+}
 
 bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
 		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdPt1Stats &r_stats) {
 	(void)p_rig;
 	r_stats = CrowdPt1Stats{};
 	if (r_run.set == nullptr || p_i >= r_run.soldiers.size() || p_stance > 1) {
-		return false; // prone (no BF3 move group) or out of range: the stance's cycles
+		return false;
 	}
 	const CrowdMoveGroup &main = r_run.set->get(p_stance == 0 ? CrowdMoveGroupRole::Run : CrowdMoveGroupRole::Sneak);
 	if (!main.ok) {
@@ -1302,7 +1279,7 @@ bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const Cro
 	const bool can_sprint = p_stance == 0 && sprint_group.ok;
 	CrowdPt1Run::Soldier &x = r_run.soldiers[p_i];
 	const float step = std::isfinite(p_step) ? std::clamp(p_step, 0.0f, 1.0f) : 0.0f;
-	// The local velocity, as S3's run blend computes it.
+
 	const float cy = std::cos(p_input.yaw), sy = std::sin(p_input.yaw);
 	const Vec3 v = p_input.velocity;
 	Vec3 local{ v.x * cy - v.z * sy, 0.0f, v.x * sy + v.z * cy };
@@ -1331,7 +1308,7 @@ bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const Cro
 	if (sw > 0.0f) {
 		ws = move_group_weights(sprint_group.def, sprint_group.timing, move_group_x(local, sprint_group.x_sign), speed, opt);
 	}
-	// The shared phase: the groups' rates blended by the sprint weight.
+
 	float cps = wa.cycles_per_second;
 	if (sw > 0.0f) {
 		const float b = ws.cycles_per_second;
@@ -1370,4 +1347,4 @@ bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const Cro
 	return true;
 }
 
-} // namespace bf3::anim
+}

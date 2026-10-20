@@ -1,13 +1,3 @@
-// M2a audio install suites (docs/design/m2a-audio.md §10.2). Each exits 77 (skipped) without an install, reads it
-// only through the repo readers and checks install.unchanged (Install::snapshot before and after).
-//   audio-oracles  gate G5 items 2-7: evaluated by the interpreter on compiled programs (item 1, the census, is
-//                  audio.census / G4). The M16A3's node, voice and register numbers are those of its compiled program
-//                  (design §4.5; registers are the data's ValueIndex values).
-//   audio-cache    the compiled-program cache (design §8): cold -> converted, warm -> hit, a patched partition
-//                  (an in-memory digest override) -> converted again, into a scratch cache root.
-//   audio-fuzz     seeded mutations of real XAS chunks, the M16A3 patch partition and its program blob (asan
-//                  preset): every mutant fails with an error or runs; no crash, hang or unbounded allocation.
-//                  OPENBF3_FUZZ_ITERS overrides the 250 mutants per input.
 #include "test_support.h"
 
 #include "bf3/audio/audio_load.h"
@@ -67,8 +57,6 @@ constexpr uint32_t kStep = 1968287961u;
 constexpr uint32_t kIsFirstPerson = 824639024u;
 constexpr uint32_t kEnableStep = 4198762218u;
 
-// One install, the Metro TDM level, the M16A3 program and a bank of exactly its waves, for every case of the
-// process (the snapshot is taken before anything is read).
 struct Fixture {
 	InstallReader reader;
 	InstallSnapshot before;
@@ -77,7 +65,7 @@ struct Fixture {
 	std::shared_ptr<const SoundProgram> m16;
 	std::vector<SoundWaveInfo> m16_waves;
 	std::shared_ptr<const WaveBank> m16_bank;
-	std::unique_ptr<EbxLibrary> all_mp; // lazy: the other oracle patches
+	std::unique_ptr<EbxLibrary> all_mp;
 };
 
 Fixture *fixture() {
@@ -117,7 +105,6 @@ Fixture *fixture() {
 	return f.get();
 }
 
-// The fixture, or a skip (77) when there is no install.
 Fixture *need_install() {
 	Fixture *f = fixture();
 	if (f == nullptr) {
@@ -165,7 +152,6 @@ struct Buses {
 	}
 };
 
-// The crossfader groups of a program: node, group, band.
 struct Band {
 	uint32_t node = 0, group = 0;
 	float begin = 0.0f, end = 0.0f;
@@ -188,10 +174,6 @@ bool has_band(const std::vector<Band> &p_bands, float p_begin, float p_end) {
 	return std::any_of(p_bands.begin(), p_bands.end(), [&](const Band &b) { return b.begin == p_begin && b.end == p_end; });
 }
 
-// Sweeps distance 0-400 m in 0.25 m steps and checks every crossfader group of p_prog under reading R: outside the
-// band it fades in over (the previous group's) and the band it fades out over, the amplitude is exactly 0 or 1;
-// inside each band it is monotonic; across each band it swings by the full 1; and the first and last non-0/1 values
-// lie within 0.25 m of the band edges. Returns the number of groups checked.
 size_t check_bands(const char *p_name, std::shared_ptr<const SoundProgram> p_prog) {
 	const std::vector<Band> bands = crossfader_bands(*p_prog);
 	auto inst = instance(p_prog, nullptr, 1);
@@ -208,7 +190,7 @@ size_t check_bands(const char *p_name, std::shared_ptr<const SoundProgram> p_pro
 		const Band &b = bands[k];
 		const std::vector<float> &a = amp[{ b.node, b.group }];
 		std::vector<std::pair<float, float>> fades;
-		std::vector<int> dirs; // +1 fades in, -1 fades out
+		std::vector<int> dirs;
 		if (b.group > 0) {
 			fades.push_back({ bands[k - 1].begin, bands[k - 1].end });
 			dirs.push_back(+1);
@@ -268,7 +250,6 @@ std::shared_ptr<const SoundProgram> compile_all_mp(const Fixture &p_f, const cha
 	return *r;
 }
 
-// The M16A3 samplers by their first slot's voice (design §4.5).
 const std::map<uint16_t, std::string> &m16_sampler_names() {
 	static const std::map<uint16_t, std::string> names{ { 28, "corebassclose" }, { 26, "corebassdistant" }, { 18, "hifi_lmg" }, { 15, "noise_close" },
 		{ 22, "noise_distant" }, { 20, "noise_far" }, { 24, "lfe" }, { 9, "rattle" }, { 7, "reflections_close" }, { 8, "reflections_far" },
@@ -286,8 +267,7 @@ struct StartedSets {
 	std::set<std::string> before_stop, at_stop;
 	uint64_t starved = 0;
 };
-// Fire at p_metres (EnableStep 1, 9 Steps 75 ms apart), render to 0.75 s, then the stop and 1.5 s more; the samplers
-// whose Trigger fired in each part.
+
 StartedSets started(const Fixture &p_f, float p_metres, bool p_first_person) {
 	auto inst = instance(p_f.m16, p_f.m16_bank, 0x5eed);
 	ba::SamplerTrace trace;
@@ -333,8 +313,6 @@ std::string join(const std::set<std::string> &p_set) {
 	return s;
 }
 
-// ---- fuzz helpers (the core.fuzz mutator) ---------------------------------------------------------------------
-
 using Bytes = std::vector<uint8_t>;
 
 size_t fuzz_iters(size_t p_default) {
@@ -374,7 +352,6 @@ void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng, size_t p_hot = 0x200) {
 	}
 }
 
-// A program that decoded or compiled: it must validate, instantiate and render a few blocks with events.
 void run_program(SoundProgram p_prog, std::shared_ptr<const WaveBank> p_bank) {
 	REQUIRE(validate_sound_program(p_prog).ok());
 	auto prog = std::make_shared<SoundProgram>(std::move(p_prog));
@@ -411,9 +388,7 @@ struct ScratchCache {
 	}
 };
 
-} // namespace
-
-// =====================================================================================================================
+}
 
 TEST_SUITE("audio-oracles") {
 	TEST_CASE("G5.2 M16A3 bands under reading R; the 301 m Fire gate") {
@@ -427,17 +402,17 @@ TEST_SUITE("audio-oracles") {
 		for (auto [b, e] : want) {
 			CHECK_MESSAGE(has_band(bands, b, e), "band ", b, "-", e);
 		}
-		CHECK(bands.size() == 12); // 1 + 1 + 2 + 3 + 2 + 1 + 1 + 1 over the 8 crossfaders
+		CHECK(bands.size() == 12);
 		CHECK(check_bands(kM16, f->m16) == 12);
 		auto inst = instance(f->m16, nullptr, 1);
 		const auto v = [&](uint16_t r) { return inst->value(r); };
 		at(*inst, 0.0f);
-		CHECK(v(68) == 1.0f); // hifi
+		CHECK(v(68) == 1.0f);
 		for (float d : { 20.0f, 25.0f, 100.0f }) {
 			at(*inst, d);
 			CHECK(v(68) == 0.0f);
 		}
-		// handling layers: 1-15 (node 74), 1-17 (node 61, shell casings), 1-19 (node 6, reload)
+
 		for (auto [node, edge] : { std::pair{ 74u, 15.0f }, std::pair{ 61u, 17.0f }, std::pair{ 6u, 19.0f } }) {
 			at(*inst, edge - 1.0f);
 			CHECK(inst->crossfader_group_amplitude(node, 0) > 0.0f);
@@ -446,11 +421,7 @@ TEST_SUITE("audio-oracles") {
 				CHECK_MESSAGE(inst->crossfader_group_amplitude(node, 0) == 0.0f, "node ", node, " at ", d);
 			}
 		}
-		// The fade shapes from the data (plan §7.7 item 1): the close layer's 0-20 m group falls with the cosine law
-		// 0.5 + 0.5 cos(pi t), which a linear fade (0.75 / 0.5 / 0.25 at 5 / 10 / 15 m) misses by >= 0.1. The far
-		// layers (the last group of the core bass, noise and reflections crossfaders, band 250-300 m, §4.5) fade with the
-		// same cosine law under reading R (design §6.3: the last group fades out over its band; open question 1 asks
-		// about the plan's "fades in" wording).
+
 		size_t close_groups = 0, far_groups = 0;
 		const auto cosine_band = [&](const Band &p_b, std::initializer_list<float> p_at) {
 			for (float d : p_at) {
@@ -473,14 +444,14 @@ TEST_SUITE("audio-oracles") {
 			}
 		}
 		CHECK(close_groups == 1);
-		CHECK(far_groups == 3); // core bass, noise, reflections
-		// the far noise group v87: rises over 20-50, falls over 250-300
+		CHECK(far_groups == 3);
+
 		const std::pair<float, float> v87[] = { { 20.0f, 0.0f }, { 35.0f, 0.5f }, { 50.0f, 1.0f }, { 250.0f, 1.0f }, { 275.0f, 0.5f }, { 300.0f, 0.0f } };
 		for (auto [d, want87] : v87) {
 			at(*inst, d);
 			CHECK_MESSAGE(std::fabs(v(87) - want87) <= 1e-5f, "v87 at ", d, " m: ", v(87));
 		}
-		// The Fire gate: nothing starts at 302 m; something does at 299 m.
+
 		for (auto [d, expect] : { std::pair{ 302.0f, false }, std::pair{ 299.0f, true } }) {
 			auto g = instance(f->m16, f->m16_bank, 2);
 			ba::SamplerTrace trace;
@@ -504,7 +475,7 @@ TEST_SUITE("audio-oracles") {
 		if (f == nullptr) {
 			return;
 		}
-		// 100 seeds x 100 bursts = 10,000 draws of v28; constant across the 9 Steps of each burst.
+
 		float lo = 10.0f, hi = -10.0f;
 		size_t bursts = 0, changed = 0;
 		for (uint64_t seed = 1; seed <= 100; ++seed) {
@@ -536,7 +507,6 @@ TEST_SUITE("audio-oracles") {
 		CHECK(hi >= 1.262f * 0.995f);
 		MESSAGE("v28 over 10,000 bursts: [", lo, ", ", hi, "]");
 
-		// Lfo v29 once the Adsr v75 is at full amplitude: range [0.96, 1.0], period 250 ms +- 1 ms; v30 = v28 x v29.
 		{
 			auto inst = instance(f->m16, nullptr, 9);
 			inst->set_parameter(kEnableStep, 1.0f);
@@ -575,7 +545,6 @@ TEST_SUITE("audio-oracles") {
 			}
 		}
 
-		// The voice-14 HPF (v46 -> plugin 14.2) and the voice-6 HPF (v49 -> plugin 6.1).
 		auto inst = instance(f->m16, nullptr, 1);
 		const SoundPluginRef hpf14{ 14, 2 }, hpf6{ 6, 1 };
 		const std::pair<float, float> v14[] = { { 0.0f, 0.0f }, { 17.0f, 0.0f }, { 108.5f, 155.0f }, { 150.0f, 225.30f }, { 200.0f, 310.0f }, { 300.0f, 310.0f } };
@@ -601,8 +570,7 @@ TEST_SUITE("audio-oracles") {
 		}
 		const std::shared_ptr<const SoundProgram> m98b = compile_all_mp(*f, kM98b, false);
 		const std::shared_ptr<const SoundProgram> rpg7 = compile_all_mp(*f, kRpg7, false);
-		// The M1A2 has non-weapon node types: allow_unimplemented. Its crossfaders read v81, which is its Physics
-		// node's Distance output (the weapons' v22/v23/v24), so distance drives them like the weapons'.
+
 		const std::shared_ptr<const SoundProgram> m1a2 = compile_all_mp(*f, kM1a2, true);
 		CHECK(has_band(crossfader_bands(*m98b), 300, 350));
 		CHECK(has_band(crossfader_bands(*m98b), 300, 351));
@@ -622,7 +590,7 @@ TEST_SUITE("audio-oracles") {
 		if (f == nullptr) {
 			return;
 		}
-		// Output 4 is the Cone "Cone" (Gain 0) on voice 0.
+
 		REQUIRE(f->m16->outputs.size() == 5);
 		const SoundOutput &cone = f->m16->outputs[4];
 		CHECK(cone.kind == OutputKind::Cone);
@@ -708,7 +676,7 @@ TEST_SUITE("audio-oracles") {
 			at(*inst, 10.0f);
 			inst->post_event(kFire, 0);
 			inst->evaluate(0.01);
-			CHECK(inst->value(97) == 1.0f); // the gated Fire
+			CHECK(inst->value(97) == 1.0f);
 			CHECK(inst->value(100) == (mode == 0.0f ? 1.0f : 0.0f));
 			inst->evaluate(0.01);
 			CHECK(inst->value(100) == 0.0f);
@@ -721,8 +689,6 @@ TEST_SUITE("audio-oracles") {
 		check_unchanged(*f);
 	}
 }
-
-// =====================================================================================================================
 
 TEST_SUITE("audio-cache") {
 	TEST_CASE("compiled programs: cold, warm, patched patch, patched dependency") {
@@ -780,8 +746,6 @@ TEST_SUITE("audio-cache") {
 	}
 }
 
-// =====================================================================================================================
-
 TEST_SUITE("audio-fuzz") {
 	TEST_CASE("mutated XAS chunks, the M16A3 patch partition and its program blob") {
 		Fixture *f = need_install();
@@ -791,8 +755,6 @@ TEST_SUITE("audio-fuzz") {
 		const size_t iters = fuzz_iters(250);
 		std::mt19937_64 rng(0xA0D10F22u);
 
-		// XAS: three real chunks (the first variation of three M16A3 waves); every segment stream of each mutant is
-		// scanned and read through a StreamDecoder to its end or its first error.
 		size_t chunks = 0, streams_ok = 0, streams_failed = 0;
 		uint64_t frames = 0;
 		for (size_t w = 0; w < f->m16_waves.size() && chunks < 3; ++w) {
@@ -819,7 +781,7 @@ TEST_SUITE("audio-fuzz") {
 					}
 					std::vector<float> buf(size_t(256) * dec.header().channels);
 					bool failed = false;
-					// At most total_frames frames come out; the call cap bounds the loop either way.
+
 					for (uint32_t calls = 0; calls < (dec.header().total_frames / 256) + 2; ++calls) {
 						Result<uint32_t> n = dec.read(buf.data(), 256);
 						if (!n.ok()) {
@@ -838,7 +800,6 @@ TEST_SUITE("audio-fuzz") {
 		CHECK(chunks == 3);
 		MESSAGE("xas: ", chunks, " chunks x ", iters, " mutants: ", streams_ok, " streams decoded, ", streams_failed, " refused, ", frames, " frames");
 
-		// The patch partition through EbxPartition::parse and compile_sound_patch (strict and allow_unimplemented).
 		Result<Bytes> plain = f->metro->mount().read_ebx(kM16);
 		REQUIRE(plain.ok());
 		size_t parsed = 0, compiled = 0, refused = 0;
@@ -866,7 +827,6 @@ TEST_SUITE("audio-fuzz") {
 		}
 		MESSAGE("patch: ", iters, " mutants: ", refused, " refused by the parser, ", parsed, " parsed, ", compiled, " compiles ran");
 
-		// The program blob.
 		const Bytes blob = encode_sound_program(*f->m16);
 		size_t decoded = 0;
 		for (size_t i = 0; i < iters * 4; ++i) {

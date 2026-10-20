@@ -1,5 +1,3 @@
-// M2b ui: Bf3TdmHud (hud_tdm.h), the context its six screens share and their base (hud_tdm_screen.h; docs/design/
-// m2b.md §4; as built: docs/design/m2b-ui.md §3).
 #include "hud_tdm.h"
 
 #include "hud_controls.h"
@@ -42,12 +40,9 @@ namespace host = bf3::host;
 
 namespace {
 
-// Frames between two searches of the tree for the M2a HUD (the weapon icons' source) while none was found.
 constexpr uint32_t kHudSearchFrames = 120;
 
-} // namespace
-
-// ---- the context -------------------------------------------------------------------------------------------------------
+}
 
 void TdmHudContext::resolve(Node *p_tree_node) {
 	if (!text_done_) {
@@ -97,7 +92,7 @@ void TdmHudContext::resolve_text() {
 			UtilityFunctions::push_warning(to_godot("Bf3TdmHud: string " + std::string(sid) + " is missing (drawn as the SID)"));
 		}
 	}
-	// "HEADSHOT {0:s}" is the score message's format: the HUD draws it without its argument.
+
 	std::string &hs = texts_[size_t(TdmText::Headshot)];
 	const size_t arg = hs.find("{0:s}");
 	if (arg != std::string::npos) {
@@ -201,7 +196,7 @@ Ref<Texture2D> TdmHudContext::weapon_icon(uint32_t p_item_id) {
 	Bf3Hud *hud = m2a_hud_ != 0 ? Object::cast_to<Bf3Hud>(ObjectDB::get_instance(m2a_hud_)) : nullptr;
 	if (hud == nullptr || !hud->is_loaded()) {
 		if (m2a_hud_ != 0 && hud == nullptr) {
-			m2a_hud_ = 0; // freed: search again
+			m2a_hud_ = 0;
 		}
 		return Ref<Texture2D>();
 	}
@@ -225,8 +220,6 @@ TdmPlacement TdmHudContext::placement(const TdmPlacement &p_fallback) const {
 double TdmHudContext::now_s() {
 	return double(Time::get_singleton()->get_ticks_usec()) * 1e-6;
 }
-
-// ---- helpers ---------------------------------------------------------------------------------------------------------------
 
 float tdm_scale(const Control &p_control) {
 	const Vector2 s = p_control.get_size();
@@ -301,8 +294,6 @@ Color tdm_player_colour(const ui::HudModel &p_model, uint8_t p_slot) {
 	return p_model.players[p_slot].team == friendly ? kTdmFriendlyColour : kTdmEnemyColour;
 }
 
-// ---- the screens' base ---------------------------------------------------------------------------------------------------
-
 void Bf3TdmScreen::_notification(int p_what) {
 	if (p_what == NOTIFICATION_DRAW && ctx_ != nullptr) {
 		draw_screen();
@@ -318,8 +309,6 @@ void Bf3TdmScreen::show_if(bool p_visible) {
 	}
 }
 
-// ---- Bf3TdmHud ------------------------------------------------------------------------------------------------------------
-
 struct Bf3TdmHud::Impl {
 	TdmHudContext ctx;
 	uint64_t root_id = 0;
@@ -334,7 +323,7 @@ struct Bf3TdmHud::Impl {
 	bool alive() const { return root != nullptr && ObjectDB::get_instance(root_id) != nullptr; }
 	template <typename F>
 	void each(F &&p_f) {
-		// Draw order: the kill feed and the pre-round under the full-window screens, the scoreboard on top.
+
 		Bf3TdmScreen *screens[] = { kill_feed, pre_round, spawn, kill_card, round_end, scoreboard };
 		for (Bf3TdmScreen *s : screens) {
 			if (s != nullptr) {
@@ -442,9 +431,8 @@ void Bf3TdmHud::shutdown() {
 	m.round_end = nullptr;
 }
 
-} // namespace bf3::godot_side
+}
 
-// M2b ui: the registration register_types.cpp's "// M2b ui" block calls (the six screens and their base).
 void openbf3_register_m2b_ui() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScreen);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmKillFeed);

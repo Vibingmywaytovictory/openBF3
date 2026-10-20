@@ -1,13 +1,5 @@
 #pragma once
-// The crowd's kit items (M2a tp; docs/design/m2a.md §9, R5; docs/design/m2a-tp.md): per crowd team, the
-// render::CrowdWeaponSpec list Bf3GameCrowd::load hands load_crowd_weapons, from the match's GunplayLevel. Godot-free,
-// so render.crowd_weapons builds the same lists headless.
-//   item 0      the team's SoldierSpec weapon (S3's M16A4 / AK-74M: index 0 keeps S3's meaning); its def is the match def
-//               whose variant is SoldierTeamSpec::weapon_def (kNoWeapon when the match has none)
-//   items 1..   every def of the team's kits (KitTable::loadouts[team - 1][kit], kits in order, kKitSlots in order),
-//               each once, up to anim::kMaxCrowdWeapons (more: a note); mesh "" (load_crowd_weapons reads
-//               WeaponStates[0].Mesh3p), weapon_unlock = WeaponDef::blueprint, weapon_def = WeaponDef::variant
-// Crowd team t is wire team t + 1 (anim::crowd_team_of_wire).
+
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -83,4 +75,4 @@ inline CrowdItemLists crowd_item_specs(const host::GunplayLevel *p_gunplay, cons
 	return out;
 }
 
-} // namespace bf3::godot_side
+}

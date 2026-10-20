@@ -59,7 +59,7 @@ std::string shot_path(const std::string &p_base, double p_time) {
 	return (dot == std::string::npos ? p_base : p_base.substr(0, dot)) + suffix;
 }
 
-} // namespace
+}
 
 Bf3ViewmodelDemo::Bf3ViewmodelDemo() = default;
 
@@ -72,7 +72,7 @@ void Bf3ViewmodelDemo::_bind_methods() {
 }
 
 void Bf3ViewmodelDemo::_notification(int p_what) {
-	// The loader thread must not outlive the node (it writes into it).
+
 	if (p_what == NOTIFICATION_PREDELETE) {
 		join_loader();
 	}
@@ -120,8 +120,7 @@ void Bf3ViewmodelDemo::_ready() {
 	} else {
 		cache_guard_ = install_.write_guard();
 		load_start_usec_ = Time::get_singleton()->get_ticks_usec();
-		// Heavy work off the main thread (plan §2.3): no Godot API is called on this thread. The cache is opened
-		// here too (journal replay, tree scan) and, when this was its last holder, closed here at the end.
+
 		loader_ = std::thread([this]() {
 			std::shared_ptr<bf3::core::Cache> cache;
 			std::string cache_line;
@@ -146,7 +145,7 @@ void Bf3ViewmodelDemo::_ready() {
 			}
 			bf3::core::Result<std::unique_ptr<bf3::render::ViewmodelAssets>> r = bf3::render::load_viewmodel(install_, spec_, &progress_, cache.get());
 			cache_used_ = cache != nullptr;
-			cache.reset(); // the last holder closes the cache here, on the loader thread
+			cache.reset();
 			cache_summary_ = cache_line;
 			if (r) {
 				loaded_ = std::move(*r);
@@ -212,7 +211,6 @@ void Bf3ViewmodelDemo::build_scene() {
 		UtilityFunctions::print(to_godot("[viewmodel] " + n));
 	}
 
-	// Textures (main thread: ImageTexture creation reaches the RenderingServer).
 	std::map<std::string, Ref<Texture2D>> textures;
 	for (const bf3::render::PreparedTexture &t : a.textures) {
 		const Ref<ImageTexture> tex = make_texture(t);
@@ -251,8 +249,7 @@ void Bf3ViewmodelDemo::build_scene() {
 		mi->set_name(to_godot(short_name));
 		mi->set_mesh(mesh);
 		mi->set_skin(skin_);
-		// The bind-pose AABB says little about the animated mesh, and fov_override changes what is visible:
-		// a generous box around the camera keeps the viewmodel from being culled (plan §3.3 caveat).
+
 		mi->set_custom_aabb(AABB(Vector3(-3, -1, -3), Vector3(6, 4, 6)));
 		mi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 		skeleton_->add_child(mi);
@@ -262,7 +259,7 @@ void Bf3ViewmodelDemo::build_scene() {
 
 	camera_ = memnew(Camera3D);
 	camera_->set_name("ViewCamera");
-	camera_->set_fov(75.0f); // world FOV; the viewmodel materials draw with their own (fov_override)
+	camera_->set_fov(75.0f);
 	camera_->set_near(0.05f);
 	camera_->set_far(500.0f);
 	add_child(camera_);
@@ -279,7 +276,7 @@ void Bf3ViewmodelDemo::build_scene() {
 }
 
 void Bf3ViewmodelDemo::place_reference_props() {
-	// A floor and a few boxes in front of the soldier, so the world FOV and the viewmodel FOV can be compared.
+
 	Ref<StandardMaterial3D> floor_mat;
 	floor_mat.instantiate();
 	floor_mat->set_albedo(Color(0.36f, 0.37f, 0.34f));
@@ -330,7 +327,7 @@ void Bf3ViewmodelDemo::pose_at_frame(float p_frame, std::vector<bf3::anim::Xform
 	}
 	bf3::anim::model_pose(a.rig, pose_, model_);
 	if (camera_ != nullptr && camera_joint_ >= 0) {
-		// Frostbite cameras look down +Z, Godot's down -Z: turn the CameraJoint frame 180 deg about its Y.
+
 		const Transform3D joint = skeleton_->get_global_transform() * to_godot(model_[size_t(camera_joint_)]);
 		camera_->set_global_transform(joint * Transform3D(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3()));
 	}
@@ -370,7 +367,6 @@ void Bf3ViewmodelDemo::_process(double p_delta) {
 		return;
 	}
 
-	// Playback.
 	if (hold_frames_ > 0) {
 		if (--hold_frames_ == 0) {
 			if (!screenshot_path_.empty()) {
@@ -382,12 +378,12 @@ void Bf3ViewmodelDemo::_process(double p_delta) {
 		clip_time_ += p_delta * clip_speed_;
 		if (next_shot_ < shot_times_.size() && clip_time_ >= shot_times_[next_shot_]) {
 			clip_time_ = shot_times_[next_shot_];
-			hold_frames_ = 4; // pose set this frame, captured after it has been drawn
+			hold_frames_ = 4;
 		}
 	}
 	const double duration = assets_->tracks.duration_seconds();
 	const double t = duration > 0.0 ? std::fmod(clip_time_, duration) : 0.0;
-	const uint64_t t0 = Time::get_singleton()->get_ticks_usec(); // sampling, pose, bone upload, camera (no capture)
+	const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
 	pose_at_frame(float(t * assets_->tracks.fps));
 	animate_us_total_ += double(Time::get_singleton()->get_ticks_usec() - t0);
 
@@ -436,7 +432,7 @@ void Bf3ViewmodelDemo::save_screenshot(const std::string &p_path) {
 void Bf3ViewmodelDemo::finish(int p_code) {
 	quitting_ = true;
 	if (frames_ > 0) {
-		std::vector<float> ms(frame_ms_.begin() + std::min<size_t>(frame_ms_.size(), 30), frame_ms_.end()); // skip warm-up frames
+		std::vector<float> ms(frame_ms_.begin() + std::min<size_t>(frame_ms_.size(), 30), frame_ms_.end());
 		if (ms.empty()) {
 			ms = frame_ms_;
 		}
@@ -466,4 +462,4 @@ void Bf3ViewmodelDemo::finish(int p_code) {
 	get_tree()->quit(p_code);
 }
 
-} // namespace bf3::godot_side
+}

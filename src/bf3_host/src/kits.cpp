@@ -1,5 +1,3 @@
-// The match's kits (docs/design/m2a.md §5.6; owner sv; kits.h): each team's four default TDM loadouts resolved to the
-// def ids of the match's WeaponTable, slots 0, 1, 6 and 7 only.
 #include "bf3/host/kits.h"
 
 #include <algorithm>
@@ -18,8 +16,6 @@ std::string lower(std::string_view p_text) {
 	return out;
 }
 
-// The role of a kit asset by its partition name (gameplay/kits/usassault, .../rusupport ...): the order of
-// TeamDef::kits is the data's, the role is what M2a's KitSelect names.
 bool role_of(std::string_view p_asset, KitRole &r_role) {
 	const std::string a = lower(p_asset);
 	const size_t slash = a.rfind('/');
@@ -50,7 +46,7 @@ void fnv_value(uint64_t &r_hash, const T &p_value) {
 	fnv(r_hash, bytes, sizeof(T));
 }
 
-} // namespace
+}
 
 const char *kit_role_name(KitRole p_role) {
 	switch (p_role) {
@@ -74,14 +70,13 @@ const KitLoadout &KitTable::loadout(uint8_t p_team, uint8_t p_kit) const {
 
 core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs) {
-	return make_kit_table(p_teams, p_kits, p_defs, KitTableOptions{}); // M2b ru (#9): M2a = empty options
+	return make_kit_table(p_teams, p_kits, p_defs, KitTableOptions{});
 }
 
-// M2b ru (#9): the M2a body, plus the assault gadget when p_options names one.
 core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs, const KitTableOptions &p_options) {
 	using core::gameplay::WeaponSlot;
-	size_t gadget = p_defs.size(); // M2b ru: the def id of p_options.assault_gadget
+	size_t gadget = p_defs.size();
 	if (!p_options.assault_gadget.empty()) {
 		const std::string want = lower(p_options.assault_gadget);
 		for (size_t d = 0; d < p_defs.size(); ++d) {
@@ -165,7 +160,7 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 					return core::make_error("kits: " + asset + " has no weapon in slot " + std::to_string(s));
 				}
 			}
-			if (gadget != p_defs.size() && role == KitRole::Assault) { // M2b ru (#9): the defibrillator in slot 2
+			if (gadget != p_defs.size() && role == KitRole::Assault) {
 				l.defs[kKitGadgetSlot] = uint16_t(gadget);
 				l.unlocks[kKitGadgetSlot] = lower(p_options.assault_gadget);
 				const std::string skipped = std::string(kit_role_name(role)) + "/" + std::to_string(team_id) + "/" + std::to_string(kKitGadgetSlot) + ": ";
@@ -179,7 +174,7 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 			}
 		}
 	}
-	if (gadget != p_defs.size()) { // M2b ru (#9)
+	if (gadget != p_defs.size()) {
 		table.defib_def = uint16_t(gadget);
 	}
 	table.hash = kit_table_hash(table);
@@ -198,10 +193,10 @@ uint64_t kit_table_hash(const KitTable &p_table) {
 			fnv_value(h, l.active);
 		}
 	}
-	if (p_table.defib_def != sim::weapons::kNoWeapon) { // M2b ru (#9): hashed only when set, so M2a's hash stays
+	if (p_table.defib_def != sim::weapons::kNoWeapon) {
 		fnv_value(h, p_table.defib_def);
 	}
 	return h;
 }
 
-} // namespace bf3::host
+}

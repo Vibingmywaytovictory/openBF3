@@ -1,5 +1,3 @@
-// antdump support (census, clip JSON, comparison). Clean-room implementation from
-// research/probes/ant-animation-probe.md; see antdump_lib.h.
 #include "antdump_lib.h"
 
 #include "mini_json.h"
@@ -21,7 +19,6 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// The probe reports clips whose mean |q|-1 before normalisation exceeds about 2e-3 (coarse quantisation, §4.3).
 constexpr double kQuatOffThreshold = 2e-3;
 
 double seconds_since(Clock::time_point p_start) {
@@ -34,7 +31,7 @@ void append_number(std::string &r_out, double p_value, int p_digits) {
 		const double scale = std::pow(10.0, p_digits);
 		double v = std::round(p_value * scale) / scale;
 		if (v == 0.0) {
-			v = 0.0; // print -0 as 0
+			v = 0.0;
 		}
 		std::snprintf(buf, sizeof(buf), "%.*g", p_digits + 3, v);
 	} else {
@@ -80,7 +77,7 @@ uint32_t header_key_count(const GdStruct &p_clip, ClipCodec p_codec) {
 	return keys;
 }
 
-} // namespace
+}
 
 bool load_library(const AntPackageSource &p_source, AntLibrary &r_library, std::string &r_error) {
 	for (const AntPackageInfo &info : p_source.packages()) {
@@ -135,7 +132,6 @@ bool run_censuses(const AntPackageSource &p_source, const AntLibrary &p_library,
 		}
 	}
 
-	// Every clip is decoded and bound once; the result is counted into each census the package belongs to.
 	auto census_package = [&](const AntPackage &p_package, bool p_static, bool p_mp) {
 		Census *const targets[2] = { p_mp ? r_mp : nullptr, r_all };
 		for (uint32_t index : AntLibrary::clips(p_package)) {
@@ -379,8 +375,7 @@ bool clip_to_json(const AntLibrary &p_library, const AntPackage &p_package, cons
 			o += "}";
 		}
 	}
-	// "tracks" holds the joint channels (q/t/s) like the probe's JSON; the other channels (named floats such as
-	// FOV) follow in "floatTracks" with the same fields.
+
 	for (int pass = 0; pass < 2; ++pass) {
 		o += pass == 0 ? "\n],\n\"tracks\":[" : "\n],\n\"floatTracks\":[";
 		bool first = true;
@@ -433,7 +428,6 @@ void diff(CompareResult &r_result, std::string p_text) {
 	}
 }
 
-// Numbers of two (possibly nested) arrays; structure must match.
 bool compare_numbers(const json::Value &p_a, const json::Value &p_b, double &r_max, uint64_t &r_count) {
 	if (p_a.type == json::Value::Type::Number && p_b.type == json::Value::Type::Number) {
 		r_max = std::max(r_max, std::fabs(p_a.num - p_b.num));
@@ -451,7 +445,7 @@ bool compare_numbers(const json::Value &p_a, const json::Value &p_b, double &r_m
 	return true;
 }
 
-} // namespace
+}
 
 bool compare_clip_json(const std::string &p_ours, const std::string &p_oracle, CompareResult &r, std::string &r_error) {
 	r = {};
@@ -469,7 +463,7 @@ bool compare_clip_json(const std::string &p_ours, const std::string &p_oracle, C
 	if (!sa || !sb) {
 		diff(r, "missing source");
 	} else {
-		// The oracle names a clip by its __name or by its controller's name.
+
 		const std::string oracle_clip = sb->string_or("clip", "!");
 		if (oracle_clip != sa->string_or("clip", "?") && oracle_clip != sa->string_or("controller", "?")) {
 			diff(r, "source.clip: " + sa->string_or("clip", "?") + " vs " + oracle_clip);
@@ -589,8 +583,6 @@ bool find_oracle_clip(const AntLibrary &p_library, const AntPackage &p_package, 
 	return false;
 }
 
-// --- sources ---------------------------------------------------------------------------------
-
 bool open_source(const SourceOptions &p_options, OpenedSource &r_opened, std::string &r_error, bool *r_unavailable) {
 	r_opened = {};
 	if (r_unavailable) {
@@ -666,7 +658,7 @@ void compare_rows(const char *p_what, const std::vector<AntPackageInfo> &p_a, co
 	}
 }
 
-} // namespace
+}
 
 bool ParityResult::ok() const {
 	return packages_a == packages_b && package_rows_equal == packages_a && banks_a == banks_b && bank_rows_equal == banks_a && payloads_equal == payloads &&
@@ -684,7 +676,7 @@ void compare_sources(const AntPackageSource &p_a, const AntPackageSource &p_b, b
 	if (!p_payloads) {
 		return;
 	}
-	// Every bank (res) and every Chunk package, matched by row (the rows were compared above).
+
 	std::vector<std::pair<const AntPackageInfo *, const AntPackageInfo *>> items;
 	for (size_t i = 0; i < std::min(p_a.all_banks().size(), p_b.all_banks().size()); ++i) {
 		items.emplace_back(&p_a.all_banks()[i], &p_b.all_banks()[i]);
@@ -741,4 +733,4 @@ std::string format_parity(const ParityResult &p_result) {
 	return out;
 }
 
-} // namespace bf3::tools::antdump
+}

@@ -1,7 +1,3 @@
-// SoldierDef reader. Field map from research/topics/02-soldier-kits-modes.md §1 and the EBX probe
-// §4; the specialization wiring follows the same PropertyConnections walk as logic_world.cpp. Every
-// array scan, hop and name copy is charged to the read's WorkBudget first (cost model:
-// logic_world.cpp).
 #include "bf3/core/gameplay/soldier_def.h"
 
 #include "bf3/core/gameplay/logic_world.h"
@@ -37,7 +33,6 @@ std::vector<CurvePoint> read_vec2_curve(WorkBudget &r_budget, const EbxStruct &p
 	return out;
 }
 
-// ValueAtX {X, Value} lists (CollisionData).
 std::vector<CurvePoint> read_value_at_x(WorkBudget &r_budget, const EbxStruct &p_object, std::string_view p_field) {
 	std::vector<CurvePoint> out;
 	const OptionalEbxArray array = array_of(r_budget, p_object.get(p_field));
@@ -103,8 +98,6 @@ StatePoseSpeed read_state_pose(const EbxInstance &p_info) {
 	return out;
 }
 
-// Every component under p_object.Components, depth first, bounded. Each visit charges its whole
-// Components array (a component listed K times is scanned K times).
 void collect_components(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_object, size_t p_depth, std::vector<EbxInstance> &r_out) {
 	if (p_depth > kComponentDepth) {
 		return;
@@ -130,10 +123,6 @@ std::optional<EbxInstance> first_of(WorkBudget &r_budget, const std::vector<EbxI
 	return std::nullopt;
 }
 
-// The name of the field of p_target whose name hashes to p_field: the first such field in fields()
-// order (base types first), found by the descriptors' stored hashes (no name is hashed again) in one
-// binary search of the type's lookup table (EbxPartition::lookup). An instance's fields all decode
-// (the parser validated each), so this is the field fields() would list.
 std::string_view field_name_of(const EbxInstance &p_target, int32_t p_field) {
 	const EbxPartition &partition = p_target.partition();
 	const EbxPartition::Lookup *found = partition.lookup(p_target.data().complex(), static_cast<uint32_t>(p_field));
@@ -145,8 +134,6 @@ struct UnlockTarget {
 	std::string field;
 };
 
-// Where an UnlockComponentData's values land: through *HubEntityData outputs to the first non-hub
-// targets of property connections, in connection order. Each hop charges the whole connection list.
 std::vector<UnlockTarget> unlock_targets(WorkBudget &r_budget, const LogicConnections &p_connections, const EbxInstance &p_unlock) {
 	std::vector<UnlockTarget> out;
 	std::unordered_set<InstanceKey, InstanceKeyHash> frontier{ InstanceKey::of(p_unlock) };
@@ -185,7 +172,7 @@ size_t common_prefix(std::string_view p_a, std::string_view p_b) {
 	return n;
 }
 
-} // namespace
+}
 
 std::optional<SoldierPose> soldier_pose_from_name(std::string_view p_name) {
 	if (p_name.ends_with("_Stand") || p_name == "Stand") {
@@ -310,7 +297,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 	if (!entity || !entity->is_a("SoldierEntityData")) {
 		return make_error("soldier: `" + name + "` has no SoldierEntityData (primary " + std::string(blueprint.type_name()) + ")");
 	}
-	// Each instance examined below is charged first (its inline structs are part of the examination).
+
 	BF3_TRY(budget.charge_type(entity->data()));
 	SoldierDef out;
 	out.blueprint = name;
@@ -438,7 +425,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 				size_t pick = std::min(i, targets.size() - 1);
 				size_t best = 0;
 				for (size_t t = 0; t < targets.size() && targets.size() > 1; ++t) {
-					// Every pair compares against every target: each compare is charged.
+
 					BF3_TRY(budget.charge_bytes(std::min(spec.id.size(), targets[t].field.size())));
 					const size_t n = common_prefix(spec.id, targets[t].field);
 					if (n > best) {
@@ -446,7 +433,7 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 						pick = t;
 					}
 				}
-				// Many pairs may pick one target: each copy of its names is charged.
+
 				BF3_TRY(budget.charge_bytes(targets[pick].type.size() + targets[pick].field.size()));
 				spec.target_type = targets[pick].type;
 				spec.target_field = targets[pick].field;
@@ -460,4 +447,4 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 	return out;
 }
 
-} // namespace bf3::core::gameplay
+}

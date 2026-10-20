@@ -1,18 +1,14 @@
-// The Sampler model of a PatchInstance (patch_instance.h "Sampler model", design §6.3; [inferred], open question 4):
-// Trigger / Step / Release handling at control rate, and the per-slot playback (StreamDecoder -> Catmull-Rom
-// resampler) at audio rate. Audio thread: no allocation; the decoders read the WaveBank's resident chunk bytes.
-
 #include "patch_state.h"
 
 #include <algorithm>
 #include <cmath>
 
-#if defined(_M_X64) || defined(__x86_64__) || defined(__SSE2__) // integ/m2b-w1 [slot fast]
-#include <emmintrin.h> // integ/m2b-w1 [slot fast]
-#define OPENBF3_SLOT_SSE2 1 // integ/m2b-w1 [slot fast]
-#else // integ/m2b-w1 [slot fast]
-#define OPENBF3_SLOT_SSE2 0 // integ/m2b-w1 [slot fast]
-#endif // integ/m2b-w1 [slot fast]
+#if defined(_M_X64) || defined(__x86_64__) || defined(__SSE2__)
+#include <emmintrin.h>
+#define OPENBF3_SLOT_SSE2 1
+#else
+#define OPENBF3_SLOT_SSE2 0
+#endif
 
 namespace bf3::audio {
 
@@ -29,103 +25,98 @@ float catmull_rom(float p0, float p1, float p2, float p3, float t) {
 	return p1 + 0.5f * t * (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
 }
 
-// integ/m2b-w1 [slot fast] (E11, docs/design/m2b.md "M2b integ-w1"): render_slot's resampler loop for a slot without a
-// fade whose next input frames are buffered (mono or stereo), with its history and phase in registers. The same
-// arithmetic as catmull_rom in the same order, per channel; the SSE2 path holds the two channels in two lanes of one
-// register, which rounds each lane exactly as the scalar code does. Returns true at frame r_i when its next input
-// frame is not buffered: the caller pulls it through pull(), at the same r_i and play.frac as the general loop.
-bool resample_buffered(SlotPlay &r_play, uint32_t p_count, double p_ratio, float *r_left, float *r_right, uint32_t &r_i, uint32_t p_limit) { // integ/m2b-w1 [slot fast]
-	double frac = r_play.frac; // integ/m2b-w1 [slot fast]
-	uint32_t pos = r_play.input_pos, out = r_play.frames_out, i = r_i; // integ/m2b-w1 [slot fast]
-	const float *in = r_play.input.data(); // integ/m2b-w1 [slot fast]
-	const bool mono = r_play.channels == 1; // integ/m2b-w1 [slot fast]
-	bool slow = false; // integ/m2b-w1 [slot fast]
-#if OPENBF3_SLOT_SSE2 // integ/m2b-w1 [slot fast]
-	__m128 h0 = _mm_setr_ps(r_play.history[0][0], r_play.history[0][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
-	__m128 h1 = _mm_setr_ps(r_play.history[1][0], r_play.history[1][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
-	__m128 h2 = _mm_setr_ps(r_play.history[2][0], r_play.history[2][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
-	__m128 h3 = _mm_setr_ps(r_play.history[3][0], r_play.history[3][1], 0.0f, 0.0f); // integ/m2b-w1 [slot fast]
-	const __m128 k05 = _mm_set1_ps(0.5f), k2 = _mm_set1_ps(2.0f), k3 = _mm_set1_ps(3.0f), k4 = _mm_set1_ps(4.0f), k5 = _mm_set1_ps(5.0f); // integ/m2b-w1 [slot fast]
-	for (; i < p_limit; ++i) { // integ/m2b-w1 [slot fast]
-		// catmull_rom: p1 + 0.5f * t * (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0))) // integ/m2b-w1 [slot fast]
-		const __m128 t = _mm_set1_ps(float(frac)); // integ/m2b-w1 [slot fast]
-		const __m128 inner = _mm_mul_ps(t, _mm_sub_ps(_mm_add_ps(_mm_mul_ps(k3, _mm_sub_ps(h1, h2)), h3), h0)); // integ/m2b-w1 [slot fast]
-		const __m128 mid = _mm_mul_ps(t, _mm_add_ps(_mm_sub_ps(_mm_add_ps(_mm_sub_ps(_mm_mul_ps(k2, h0), _mm_mul_ps(k5, h1)), _mm_mul_ps(k4, h2)), h3), inner)); // integ/m2b-w1 [slot fast]
-		const __m128 y = _mm_add_ps(h1, _mm_mul_ps(_mm_mul_ps(k05, t), _mm_add_ps(_mm_sub_ps(h2, h0), mid))); // integ/m2b-w1 [slot fast]
-		r_left[i] += _mm_cvtss_f32(y); // integ/m2b-w1 [slot fast]
-		r_right[i] += _mm_cvtss_f32(_mm_shuffle_ps(y, y, _MM_SHUFFLE(1, 1, 1, 1))); // integ/m2b-w1 [slot fast]
-		++out; // integ/m2b-w1 [slot fast]
-		frac += p_ratio; // integ/m2b-w1 [slot fast]
-		while (frac >= 1.0) { // integ/m2b-w1 [slot fast]
-			if (pos >= p_count) { // integ/m2b-w1 [slot fast]
-				slow = true; // integ/m2b-w1 [slot fast]
-				break; // integ/m2b-w1 [slot fast]
-			} // integ/m2b-w1 [slot fast]
-			frac -= 1.0; // integ/m2b-w1 [slot fast]
-			h0 = h1; // integ/m2b-w1 [slot fast]
-			h1 = h2; // integ/m2b-w1 [slot fast]
-			h2 = h3; // integ/m2b-w1 [slot fast]
-			h3 = mono ? _mm_set1_ps(in[pos]) : _mm_castpd_ps(_mm_load_sd(reinterpret_cast<const double *>(in + size_t(pos) * 2))); // integ/m2b-w1 [slot fast]
-			++pos; // integ/m2b-w1 [slot fast]
-		} // integ/m2b-w1 [slot fast]
-		if (slow) { // integ/m2b-w1 [slot fast]
-			break; // integ/m2b-w1 [slot fast]
-		} // integ/m2b-w1 [slot fast]
-	} // integ/m2b-w1 [slot fast]
-	float lanes[4][4]; // integ/m2b-w1 [slot fast]
-	_mm_storeu_ps(lanes[0], h0); // integ/m2b-w1 [slot fast]
-	_mm_storeu_ps(lanes[1], h1); // integ/m2b-w1 [slot fast]
-	_mm_storeu_ps(lanes[2], h2); // integ/m2b-w1 [slot fast]
-	_mm_storeu_ps(lanes[3], h3); // integ/m2b-w1 [slot fast]
-	for (int k = 0; k < 4; ++k) { // integ/m2b-w1 [slot fast]
-		r_play.history[k][0] = lanes[k][0]; // integ/m2b-w1 [slot fast]
-		r_play.history[k][1] = lanes[k][1]; // integ/m2b-w1 [slot fast]
-	} // integ/m2b-w1 [slot fast]
-#else // integ/m2b-w1 [slot fast]
-	float h0l = r_play.history[0][0], h0r = r_play.history[0][1], h1l = r_play.history[1][0], h1r = r_play.history[1][1]; // integ/m2b-w1 [slot fast]
-	float h2l = r_play.history[2][0], h2r = r_play.history[2][1], h3l = r_play.history[3][0], h3r = r_play.history[3][1]; // integ/m2b-w1 [slot fast]
-	for (; i < p_limit; ++i) { // integ/m2b-w1 [slot fast]
-		const float t = float(frac); // integ/m2b-w1 [slot fast]
-		r_left[i] += catmull_rom(h0l, h1l, h2l, h3l, t); // integ/m2b-w1 [slot fast]
-		r_right[i] += catmull_rom(h0r, h1r, h2r, h3r, t); // integ/m2b-w1 [slot fast]
-		++out; // integ/m2b-w1 [slot fast]
-		frac += p_ratio; // integ/m2b-w1 [slot fast]
-		while (frac >= 1.0) { // integ/m2b-w1 [slot fast]
-			if (pos >= p_count) { // integ/m2b-w1 [slot fast]
-				slow = true; // integ/m2b-w1 [slot fast]
-				break; // integ/m2b-w1 [slot fast]
-			} // integ/m2b-w1 [slot fast]
-			frac -= 1.0; // integ/m2b-w1 [slot fast]
-			const float *x = in + size_t(pos) * (mono ? 1u : 2u); // integ/m2b-w1 [slot fast]
-			++pos; // integ/m2b-w1 [slot fast]
-			h0l = h1l; // integ/m2b-w1 [slot fast]
-			h0r = h1r; // integ/m2b-w1 [slot fast]
-			h1l = h2l; // integ/m2b-w1 [slot fast]
-			h1r = h2r; // integ/m2b-w1 [slot fast]
-			h2l = h3l; // integ/m2b-w1 [slot fast]
-			h2r = h3r; // integ/m2b-w1 [slot fast]
-			h3l = x[0]; // integ/m2b-w1 [slot fast]
-			h3r = mono ? x[0] : x[1]; // integ/m2b-w1 [slot fast]
-		} // integ/m2b-w1 [slot fast]
-		if (slow) { // integ/m2b-w1 [slot fast]
-			break; // integ/m2b-w1 [slot fast]
-		} // integ/m2b-w1 [slot fast]
-	} // integ/m2b-w1 [slot fast]
-	r_play.history[0][0] = h0l; // integ/m2b-w1 [slot fast]
-	r_play.history[0][1] = h0r; // integ/m2b-w1 [slot fast]
-	r_play.history[1][0] = h1l; // integ/m2b-w1 [slot fast]
-	r_play.history[1][1] = h1r; // integ/m2b-w1 [slot fast]
-	r_play.history[2][0] = h2l; // integ/m2b-w1 [slot fast]
-	r_play.history[2][1] = h2r; // integ/m2b-w1 [slot fast]
-	r_play.history[3][0] = h3l; // integ/m2b-w1 [slot fast]
-	r_play.history[3][1] = h3r; // integ/m2b-w1 [slot fast]
-#endif // integ/m2b-w1 [slot fast]
-	r_play.frac = frac; // integ/m2b-w1 [slot fast]
-	r_play.input_pos = pos; // integ/m2b-w1 [slot fast]
-	r_play.frames_out = out; // integ/m2b-w1 [slot fast]
-	r_i = i; // integ/m2b-w1 [slot fast]
-	return slow; // integ/m2b-w1 [slot fast]
-} // integ/m2b-w1 [slot fast]
+bool resample_buffered(SlotPlay &r_play, uint32_t p_count, double p_ratio, float *r_left, float *r_right, uint32_t &r_i, uint32_t p_limit) {
+	double frac = r_play.frac;
+	uint32_t pos = r_play.input_pos, out = r_play.frames_out, i = r_i;
+	const float *in = r_play.input.data();
+	const bool mono = r_play.channels == 1;
+	bool slow = false;
+#if OPENBF3_SLOT_SSE2
+	__m128 h0 = _mm_setr_ps(r_play.history[0][0], r_play.history[0][1], 0.0f, 0.0f);
+	__m128 h1 = _mm_setr_ps(r_play.history[1][0], r_play.history[1][1], 0.0f, 0.0f);
+	__m128 h2 = _mm_setr_ps(r_play.history[2][0], r_play.history[2][1], 0.0f, 0.0f);
+	__m128 h3 = _mm_setr_ps(r_play.history[3][0], r_play.history[3][1], 0.0f, 0.0f);
+	const __m128 k05 = _mm_set1_ps(0.5f), k2 = _mm_set1_ps(2.0f), k3 = _mm_set1_ps(3.0f), k4 = _mm_set1_ps(4.0f), k5 = _mm_set1_ps(5.0f);
+	for (; i < p_limit; ++i) {
+
+		const __m128 t = _mm_set1_ps(float(frac));
+		const __m128 inner = _mm_mul_ps(t, _mm_sub_ps(_mm_add_ps(_mm_mul_ps(k3, _mm_sub_ps(h1, h2)), h3), h0));
+		const __m128 mid = _mm_mul_ps(t, _mm_add_ps(_mm_sub_ps(_mm_add_ps(_mm_sub_ps(_mm_mul_ps(k2, h0), _mm_mul_ps(k5, h1)), _mm_mul_ps(k4, h2)), h3), inner));
+		const __m128 y = _mm_add_ps(h1, _mm_mul_ps(_mm_mul_ps(k05, t), _mm_add_ps(_mm_sub_ps(h2, h0), mid)));
+		r_left[i] += _mm_cvtss_f32(y);
+		r_right[i] += _mm_cvtss_f32(_mm_shuffle_ps(y, y, _MM_SHUFFLE(1, 1, 1, 1)));
+		++out;
+		frac += p_ratio;
+		while (frac >= 1.0) {
+			if (pos >= p_count) {
+				slow = true;
+				break;
+			}
+			frac -= 1.0;
+			h0 = h1;
+			h1 = h2;
+			h2 = h3;
+			h3 = mono ? _mm_set1_ps(in[pos]) : _mm_castpd_ps(_mm_load_sd(reinterpret_cast<const double *>(in + size_t(pos) * 2)));
+			++pos;
+		}
+		if (slow) {
+			break;
+		}
+	}
+	float lanes[4][4];
+	_mm_storeu_ps(lanes[0], h0);
+	_mm_storeu_ps(lanes[1], h1);
+	_mm_storeu_ps(lanes[2], h2);
+	_mm_storeu_ps(lanes[3], h3);
+	for (int k = 0; k < 4; ++k) {
+		r_play.history[k][0] = lanes[k][0];
+		r_play.history[k][1] = lanes[k][1];
+	}
+#else
+	float h0l = r_play.history[0][0], h0r = r_play.history[0][1], h1l = r_play.history[1][0], h1r = r_play.history[1][1];
+	float h2l = r_play.history[2][0], h2r = r_play.history[2][1], h3l = r_play.history[3][0], h3r = r_play.history[3][1];
+	for (; i < p_limit; ++i) {
+		const float t = float(frac);
+		r_left[i] += catmull_rom(h0l, h1l, h2l, h3l, t);
+		r_right[i] += catmull_rom(h0r, h1r, h2r, h3r, t);
+		++out;
+		frac += p_ratio;
+		while (frac >= 1.0) {
+			if (pos >= p_count) {
+				slow = true;
+				break;
+			}
+			frac -= 1.0;
+			const float *x = in + size_t(pos) * (mono ? 1u : 2u);
+			++pos;
+			h0l = h1l;
+			h0r = h1r;
+			h1l = h2l;
+			h1r = h2r;
+			h2l = h3l;
+			h2r = h3r;
+			h3l = x[0];
+			h3r = mono ? x[0] : x[1];
+		}
+		if (slow) {
+			break;
+		}
+	}
+	r_play.history[0][0] = h0l;
+	r_play.history[0][1] = h0r;
+	r_play.history[1][0] = h1l;
+	r_play.history[1][1] = h1r;
+	r_play.history[2][0] = h2l;
+	r_play.history[2][1] = h2r;
+	r_play.history[3][0] = h3l;
+	r_play.history[3][1] = h3r;
+#endif
+	r_play.frac = frac;
+	r_play.input_pos = pos;
+	r_play.frames_out = out;
+	r_i = i;
+	return slow;
+}
 
 struct NextSegment {
 	bool play = false;
@@ -140,7 +131,7 @@ NextSegment tail_or_end(const SamplerState &s) {
 	return {};
 }
 
-} // namespace
+}
 
 void PatchInstance::State::trace_entry(uint64_t p_frame, uint32_t p_node, uint8_t p_slot, uint16_t p_segment, SamplerTraceKind p_kind, float p_pitch,
 		uint64_t p_prev_end) {
@@ -176,26 +167,25 @@ bool PatchInstance::State::sampler_busy(const SamplerState &p_sampler) const {
 
 namespace {
 
-// What follows segment p_segment on slot p_slot when it ends.
 NextSegment next_segment(const SamplerState &s, uint32_t p_slot, uint16_t p_segment) {
 	const int32_t seg = p_segment, fl = s.first_loop, ll = s.last_loop, count = s.segments;
 	if (s.loop == ca::SamplerLoop::None || fl < 0) {
 		if (s.released && s.loop == ca::SamplerLoop::None) {
-			return {}; // LtNone: a Release ends the sampler with its segment
+			return {};
 		}
 		if (seg + 1 < count) {
 			return { true, uint16_t(seg + 1), SamplerTraceKind::Advance };
 		}
 		return {};
 	}
-	if (seg > ll) { // in the tail
+	if (seg > ll) {
 		if (seg + 1 < count) {
 			return { true, uint16_t(seg + 1), SamplerTraceKind::Tail };
 		}
 		return {};
 	}
 	if (s.stepped) {
-		// Steps drive the rhythm: a slot whose segment ends goes idle; the tail follows the latest segment.
+
 		if (s.released && p_slot == s.last_slot) {
 			return tail_or_end(s);
 		}
@@ -203,14 +193,14 @@ NextSegment next_segment(const SamplerState &s, uint32_t p_slot, uint16_t p_segm
 	}
 	if (s.released) {
 		if (s.loop == ca::SamplerLoop::Forward && seg < ll) {
-			return { true, uint16_t(seg + 1), SamplerTraceKind::Advance }; // LtForward finishes its pass
+			return { true, uint16_t(seg + 1), SamplerTraceKind::Advance };
 		}
 		return tail_or_end(s);
 	}
 	if (seg < fl) {
-		return { true, uint16_t(seg + 1), SamplerTraceKind::Advance }; // the intro
+		return { true, uint16_t(seg + 1), SamplerTraceKind::Advance };
 	}
-	return { true, kNoSegment, SamplerTraceKind::Advance }; // the next loop segment (chosen by the caller)
+	return { true, kNoSegment, SamplerTraceKind::Advance };
 }
 
 uint16_t pick_loop_segment(PatchInstance::State &st, SamplerState &s) {
@@ -237,7 +227,7 @@ uint16_t pick_loop_segment(PatchInstance::State &st, SamplerState &s) {
 	return uint16_t(last + 1);
 }
 
-} // namespace
+}
 
 void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode &n, uint64_t p_frame) {
 	SamplerState &s = samplers[nodes[p_node_index].index];
@@ -367,8 +357,6 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 
 namespace {
 
-// Opens p_segment of the sampler's current variation on p_play; false (counted by the caller) when the chunk is not
-// resident or the stream does not open.
 bool open_segment(const PatchInstance::State &st, const SamplerState &s, SlotPlay &r_play, uint16_t p_segment) {
 	const ca::SoundWaveInfo &wave = st.bank->waves()[s.wave];
 	const ca::WaveVariation &var = wave.variations[s.variation];
@@ -394,14 +382,13 @@ bool open_segment(const PatchInstance::State &st, const SamplerState &s, SlotPla
 	return true;
 }
 
-} // namespace
+}
 
 void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *r_left, float *r_right, uint64_t p_first_frame, uint32_t p_frames) {
 	SlotState &slot = slots[s.slots_begin + p_slot];
 	SlotPlay &play = slot.play;
 	const uint32_t node = s.node;
 
-	// The slot ends: idle, and the sampler ends with its last busy slot.
 	const auto end_slot = [&](uint64_t p_frame) {
 		play.active = false;
 		trace_entry(p_frame, node, uint8_t(p_slot), play.segment, SamplerTraceKind::End, s.pitch, 0);
@@ -410,7 +397,7 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 			s.finished_pulse = true;
 		}
 	};
-	// One input frame into history[3]; handles segment ends (continuation on this slot, or the flush to idle).
+
 	const auto pull = [&](uint64_t p_frame) {
 		float l = 0.0f, r = 0.0f;
 		for (;;) {
@@ -443,15 +430,13 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 				play.input_pos = 0;
 				continue;
 			}
-			// The segment's stream is exhausted.
+
 			NextSegment next = next_segment(s, p_slot, play.segment);
 			if (next.play && next.segment == kNoSegment) {
 				next.segment = pick_loop_segment(*this, s);
 			}
 			if (next.play) {
-				// The new segment's first sample enters history[3], two input positions ahead of history[1] where
-				// the next output frame (p_frame) reads at play.frac: it is heard ceil((2 - frac) / ratio) output
-				// frames later (2 at ratio 1), the frame the trace reports as its start.
+
 				const double ratio_now = std::max(1e-9, double(play.rate) / double(mix_rate) * double(s.pitch));
 				const uint64_t heard = p_frame + uint64_t(std::max(0.0, std::ceil((2.0 - play.frac) / ratio_now - 1e-9)));
 				if (open_segment(*this, s, play, next.segment)) {
@@ -523,40 +508,38 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 			limit = uint32_t(slot.pending.frame - p_first_frame);
 		}
 		if (!play.active) {
-			i = limit; // silence until the pending start (buffers are zeroed per sub-block)
+			i = limit;
 			continue;
 		}
 		const double ratio = double(play.rate) / double(mix_rate) * double(s.pitch);
-		// integ/m2b-w1 [slot fast]: resample_buffered runs the loop below while no fade is on and the input is buffered
-		// (the stores to r_left / r_right may alias play's float members, so the general loop reloads them every frame);
-		// a frame whose input is not buffered pulls it through pull(), and the fast loop resumes with the same ratio.
-		bool general = true; // integ/m2b-w1 [slot fast]
-		if (slot.fade_step == 0.0f && slot.fade == 1.0f && (play.channels == 1 || play.channels == 2)) { // integ/m2b-w1 [slot fast]
-			general = false; // integ/m2b-w1 [slot fast]
-			for (;;) { // integ/m2b-w1 [slot fast]
-				const uint32_t count = play.source_done ? 0u : play.input_count; // integ/m2b-w1 [slot fast]: pull() feeds zeros then
-				const bool slow = resample_buffered(play, count, ratio, r_left, r_right, i, limit); // integ/m2b-w1 [slot fast]
-				if (!slow) { // integ/m2b-w1 [slot fast]
-					break; // integ/m2b-w1 [slot fast]: i == limit
-				} // integ/m2b-w1 [slot fast]
-				while (play.frac >= 1.0 && play.active) { // integ/m2b-w1 [slot fast]: the rest of frame i's pulls, as below
-					play.frac -= 1.0; // integ/m2b-w1 [slot fast]
-					pull(p_first_frame + i + 1); // integ/m2b-w1 [slot fast]
-					if (play.flush >= 3) { // integ/m2b-w1 [slot fast]
-						end_slot(p_first_frame + i + 1); // integ/m2b-w1 [slot fast]
-					} // integ/m2b-w1 [slot fast]
-				} // integ/m2b-w1 [slot fast]
-				++i; // integ/m2b-w1 [slot fast]
-				if (!play.active || i >= limit) { // integ/m2b-w1 [slot fast]
-					break; // integ/m2b-w1 [slot fast]
-				} // integ/m2b-w1 [slot fast]
-				if (play.channels != 1 && play.channels != 2) { // integ/m2b-w1 [slot fast]: a new segment with other channels
-					general = true; // integ/m2b-w1 [slot fast]
-					break; // integ/m2b-w1 [slot fast]
-				} // integ/m2b-w1 [slot fast]
-			} // integ/m2b-w1 [slot fast]
-		} // integ/m2b-w1 [slot fast]
-		for (; general && i < limit; ++i) { // integ/m2b-w1 [slot fast]: `general &&` added
+
+		bool general = true;
+		if (slot.fade_step == 0.0f && slot.fade == 1.0f && (play.channels == 1 || play.channels == 2)) {
+			general = false;
+			for (;;) {
+				const uint32_t count = play.source_done ? 0u : play.input_count;
+				const bool slow = resample_buffered(play, count, ratio, r_left, r_right, i, limit);
+				if (!slow) {
+					break;
+				}
+				while (play.frac >= 1.0 && play.active) {
+					play.frac -= 1.0;
+					pull(p_first_frame + i + 1);
+					if (play.flush >= 3) {
+						end_slot(p_first_frame + i + 1);
+					}
+				}
+				++i;
+				if (!play.active || i >= limit) {
+					break;
+				}
+				if (play.channels != 1 && play.channels != 2) {
+					general = true;
+					break;
+				}
+			}
+		}
+		for (; general && i < limit; ++i) {
 			const float t = float(play.frac);
 			float l = catmull_rom(play.history[0][0], play.history[1][0], play.history[2][0], play.history[3][0], t);
 			float r = catmull_rom(play.history[0][1], play.history[1][1], play.history[2][1], play.history[3][1], t);
@@ -599,4 +582,4 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 	}
 }
 
-} // namespace bf3::audio
+}

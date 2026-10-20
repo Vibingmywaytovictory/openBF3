@@ -103,7 +103,7 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 					sum += w;
 				}
 				if (sum <= 0.0f) {
-					// One-bone subsets store no usable weights (the M9: BoneWeights all 0): the single lane is the bone.
+
 					const uint16_t lane = (*d.bone_indices)[i][0];
 					if (lane >= lanes.size()) {
 						return core::make_error(where + ": subset " + std::to_string(d.subset) + " vertex " + std::to_string(i) + " lane " + std::to_string(lane) +
@@ -136,4 +136,4 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 	return out;
 }
 
-} // namespace bf3::render
+}

@@ -1,6 +1,4 @@
 #pragma once
-// Synthetic geometry and comparison helpers shared by the sim.world test files (sim_world_tests.cpp,
-// sim_world_cache_tests.cpp, sim_world_install_tests.cpp).
 
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/sim/collision_world.h"
@@ -30,8 +28,6 @@ inline SurfaceTag tag_of(uint32_t p_material, uint8_t p_surface, uint8_t p_body 
 	return t;
 }
 
-// An axis-aligned quad at height p_y over [x0, x1] x [z0, z1], wound so its front face points up (+Y), as two
-// triangles.
 inline void add_floor(std::vector<StaticTriangle> &r_out, float p_x0, float p_z0, float p_x1, float p_z1, float p_y, SurfaceTag p_tag = {},
 		StaticLayer p_layer = StaticLayer::Collision) {
 	StaticTriangle a;
@@ -46,7 +42,6 @@ inline void add_floor(std::vector<StaticTriangle> &r_out, float p_x0, float p_z0
 	r_out.push_back(b);
 }
 
-// A wall in the plane x = p_x over [z0, z1] x [y0, y1], front face towards -X.
 inline void add_wall_x(std::vector<StaticTriangle> &r_out, float p_x, float p_z0, float p_z1, float p_y0, float p_y1, SurfaceTag p_tag = {},
 		StaticLayer p_layer = StaticLayer::Collision) {
 	StaticTriangle a;
@@ -61,7 +56,6 @@ inline void add_wall_x(std::vector<StaticTriangle> &r_out, float p_x, float p_z0
 	r_out.push_back(b);
 }
 
-// A bumpy heightfield over [-p_half, p_half]^2 in 2 m cells (spans several 64 m tiles), tags by cell.
 inline std::vector<StaticTriangle> bumpy_field(float p_half) {
 	std::vector<StaticTriangle> out;
 	const auto h = [](float p_x, float p_z) { return 0.8f * std::sin(p_x * 0.21f) + 0.6f * std::cos(p_z * 0.17f) + 0.05f * p_x; };
@@ -102,4 +96,4 @@ inline bool bits_equal(const StaticHit &p_a, const StaticHit &p_b) {
 			std::memcmp(&p_a.fraction, &p_b.fraction, sizeof(float)) == 0 && p_a.layer == p_b.layer && p_a.tile == p_b.tile && p_a.tag == p_b.tag;
 }
 
-} // namespace sim_world_test
+}

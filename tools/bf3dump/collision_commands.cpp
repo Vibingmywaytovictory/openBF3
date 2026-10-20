@@ -1,10 +1,3 @@
-// bf3dump collision <LEVEL> <MODE>: the collision soup (bf3_core level/collision_soup.h) in the
-// canonical form research/probes/tools/level-oracle `collision` prints through IW4L's crates, so
-// the two diff byte-identical when the soups agree: sorted `T` placement lines (state, triangle
-// counts, FNV-1a hash), `K` tiles (count, hash sum), then the totals and the surface and body
-// histograms. Timings go to stderr. TC (docs/design/terrain-collision.md §6): the soup keeps the terrain as a record, so
-// the listing hashes every terrain's whole grid (hash_soup_terrain) and merges its tile sums into the Havok tiles; the
-// totals and histograms count the terrain triangles as before.
 #include "collision_commands.h"
 
 #include "bf3/core/level/collision_soup.h"
@@ -35,13 +28,13 @@ std::string counts(const SoupPlacement &p_p) {
 			" nonfinite " + std::to_string(p_p.nonfinite) + " hash " + hex64(p_p.hash);
 }
 
-} // namespace
+}
 
 Result<std::string> collision_listing(const LevelCollision &p_collision, unsigned p_threads) {
 	const EbxResolver &db = p_collision.level->db();
 	const World &world = *p_collision.world;
 	const CollisionSoup &soup = p_collision.soup;
-	// The tiles (Havok, then every terrain's), the totals and the histograms over both.
+
 	std::map<std::array<int32_t, 2>, std::pair<size_t, uint64_t>> tiles;
 	for (const SoupTile &tile : soup.tiles) {
 		tiles[{ tile.x, tile.z }] = { tile.triangles.size(), tile.sum };
@@ -52,7 +45,7 @@ Result<std::string> collision_listing(const LevelCollision &p_collision, unsigne
 	size_t nonfinite = soup.nonfinite;
 	std::array<size_t, kSurfaceCount> surfaces = soup.surfaces;
 	std::array<size_t, kCollisionBodyCount> bodies = soup.bodies;
-	// Each terrain charges 2 x its cells (kMaxSoupTerrains x a 4097^2 grid stays below this).
+
 	WorkBudget budget(size_t(1) << 28);
 	std::vector<std::string> lines;
 	lines.reserve(soup.placements.size() + soup.terrains.size());
@@ -179,4 +172,4 @@ int cmd_collision(const std::shared_ptr<Install> &p_install, const std::string &
 	return 0;
 }
 
-} // namespace bf3dump
+}

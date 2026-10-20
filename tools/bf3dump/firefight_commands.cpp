@@ -1,4 +1,3 @@
-// bf3dump firefight (firefight_commands.h; M2a bt).
 #include "firefight_commands.h"
 
 #include "bf3/core/cache/disk_cache.h"
@@ -21,7 +20,7 @@ namespace {
 
 using namespace bf3;
 
-constexpr double kPerfGateP99Ms = 8.0; // E13
+constexpr double kPerfGateP99Ms = 8.0;
 
 std::filesystem::path utf8_path(std::string_view p_text) {
 	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
@@ -57,7 +56,7 @@ std::string read_file(const std::filesystem::path &p_path) {
 	return text.str();
 }
 
-} // namespace
+}
 
 const char *firefight_usage() {
 	return "  firefight <LEVEL> <MODE> [--mode=pairs|free] [--count=N] [--seconds=S] [--warmup=S] [--seed=N] [--observers=N]\n"
@@ -73,7 +72,7 @@ int cmd_firefight(const core::InstallReader &p_reader, const std::shared_ptr<cor
 	std::filesystem::path cache_root;
 	std::string tuning_text;
 	bool perf = false, per_bot = false;
-	uint32_t slots = 0; // 0: max(64, bots + observers)
+	uint32_t slots = 0;
 	float seconds = 60.0f, warmup = 0.0f;
 	bool seconds_set = false, warmup_set = false, count_set = false, mode_set = false, observers_set = false;
 	for (const std::string &s : p_args) {
@@ -131,7 +130,7 @@ int cmd_firefight(const core::InstallReader &p_reader, const std::shared_ptr<cor
 		return 2;
 	}
 	if (perf) {
-		// E13's row; options given explicitly still win.
+
 		if (!mode_set) {
 			o.mode = host::FirefightMode::Pairs;
 		}
@@ -156,7 +155,7 @@ int cmd_firefight(const core::InstallReader &p_reader, const std::shared_ptr<cor
 	o.ticks = uint32_t(std::lround(double(seconds) * double(sim::kSimHz)));
 	o.warmup_ticks = uint32_t(std::lround(double(warmup) * double(sim::kSimHz)));
 	if (o.mechanics_cfg.empty()) {
-		// The shipped mechanics file next to the project, when run from the repository root.
+
 		std::error_code ec;
 		if (std::filesystem::exists("bf3-opensource/config/weapon_mechanics.cfg", ec)) {
 			o.mechanics_cfg = "bf3-opensource/config/weapon_mechanics.cfg";
@@ -164,7 +163,7 @@ int cmd_firefight(const core::InstallReader &p_reader, const std::shared_ptr<cor
 		std::printf("mechanics: %s\n", o.mechanics_cfg.empty() ? "config/weapon_mechanics.cfg (pass --mechanics=<weapon_mechanics.cfg>)" : o.mechanics_cfg.c_str());
 	}
 	if (tuning_text.empty()) {
-		// The shipped tuning file next to the project, when run from the repository root.
+
 		tuning_text = read_file("bf3-opensource/config/motor_tuning.cfg");
 		std::printf("tuning: %s\n", tuning_text.empty() ? "defaults (pass --tuning=<motor_tuning.cfg>)" : "bf3-opensource/config/motor_tuning.cfg");
 	}
@@ -220,4 +219,4 @@ int cmd_firefight(const core::InstallReader &p_reader, const std::shared_ptr<cor
 	return finish(p_reader, before, 0);
 }
 
-} // namespace bf3dump
+}

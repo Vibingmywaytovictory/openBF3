@@ -1,12 +1,3 @@
-# tools.ebx_memory (H hygiene): the EbxLibrary memory gate. Runs `bf3dump ebxload @all-mp` (50,486 partitions of 33
-# superbundles) and `bf3dump ebxload Win32/Levels/MP_Subway/MP_Subway` and reads the `memory ... peak ws` line
-# (GetProcessMemoryInfo): pass when every partition parses and the peak working set is at most 760 MiB for @all-mp
-# and 145 MiB for Metro (before the shared type tables: 903-908 and 166-168 MiB; after: 678-680 and 127-128).
-# Exits 77 (skipped) when bf3dump finds no install. REPORT_ONLY (the asan preset) prints the rows without failing.
-# Also printed (info, never gated; docs/testing.md): the peak commit (PeakPagefileUsage, bf3dump's "peak ... private"),
-# which working-set trimming does not lower, and a warning when peak ws / peak commit falls below 0.8 x the serial
-# ratio (the process was trimmed, e.g. by a parallel neighbour; the serial merge-pass run decides).
-# Usage: cmake -DBF3DUMP=<bf3dump.exe> [-DREPORT_ONLY=ON] -P ebx_memory.cmake
 cmake_minimum_required(VERSION 3.29)
 
 if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")
@@ -54,7 +45,6 @@ function(check_load _spec _limit_mib _serial_ratio_milli)
     endif()
 endfunction()
 
-# The third value: peak ws / peak commit x 1000 measured alone (2026-10-17: 678.1 / 699.5, 128.1 / 127.5 MiB).
 check_load("@all-mp" 760 969)
 check_load("Win32/Levels/MP_Subway/MP_Subway" 145 1004)
 

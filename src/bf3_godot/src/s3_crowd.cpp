@@ -1,4 +1,3 @@
-// Bf3Crowd: the S3 crowd node and its --s3-check (docs/design/s3.md §1, §3, §7, §9, §12). See s3_crowd.h.
 #include "s3_crowd.h"
 
 #include "godot_cache.h"
@@ -46,9 +45,9 @@ namespace gate = bf3::anim::s3_gate;
 
 namespace {
 
-constexpr double kShotDistance = 0.9; // s3.md §9
+constexpr double kShotDistance = 0.9;
 constexpr float kShotFov = 40.0f;
-constexpr int kShotSettleFrames = 4; // frames between posing and capturing (the pose must have been drawn)
+constexpr int kShotSettleFrames = 4;
 constexpr uint64_t kMinShotBytes = 100 * 1024;
 
 void log(const std::string &p_line) {
@@ -116,7 +115,7 @@ const char *pass_text(bool p_ok) {
 	return p_ok ? "PASS" : "FAIL";
 }
 
-} // namespace
+}
 
 Bf3Crowd::Bf3Crowd() = default;
 
@@ -139,7 +138,7 @@ void Bf3Crowd::parse_args() {
 	no_hud_ = has_user_arg("no-hud");
 	no_cache_ = has_user_arg("no-cache");
 	const std::string backend = user_arg_value("s3-backend");
-	backend_ = backend == "skeleton3d" ? SkinBackend::Skeleton3D : SkinBackend::RsSkeleton; // texture: not built (s3.md §7.3)
+	backend_ = backend == "skeleton3d" ? SkinBackend::Skeleton3D : SkinBackend::RsSkeleton;
 	lod_ = user_arg_value("s3-lod") != "off";
 	if (has_user_arg("s3-seconds")) {
 		run_seconds_ = std::atof(user_arg_value("s3-seconds").c_str());
@@ -149,7 +148,7 @@ void Bf3Crowd::parse_args() {
 	}
 	shot_dir_ = user_arg_value("s3-shot-dir");
 	if (shot_dir_.empty()) {
-		// <repo>/b/shots/s3: the project folder's parent is the checkout.
+
 		const std::filesystem::path project = utf8_path(to_std(ProjectSettings::get_singleton()->globalize_path("res://")));
 		shot_dir_ = path_text((project / "..").lexically_normal() / "b" / "shots" / "s3");
 	}
@@ -326,7 +325,7 @@ bool Bf3Crowd::build(std::string *r_error) {
 	log(fmt("assets loaded in %.2f s (ant %.2f, ebx %.2f, meshes %.2f, textures %.2f)", assets_->seconds_total, assets_->seconds_ant, assets_->seconds_ebx,
 			assets_->seconds_meshes, assets_->seconds_textures));
 	{
-		// The shot folder: never inside the install (PathGuard), created when missing.
+
 		const std::filesystem::path dir = utf8_path(shot_dir_);
 		std::error_code ec;
 		shot_dir_ok_ = session_->install().write_guard().allows_write(dir / "s3_overview.png");
@@ -354,8 +353,7 @@ bool Bf3Crowd::build(std::string *r_error) {
 	}
 	const unsigned hc = std::thread::hardware_concurrency();
 	unsigned lanes = std::clamp(hc == 0 ? 2u : (hc > 4 ? hc - 4 : 0u), 2u, 6u);
-	// M2a w3 integration (m2a.md §3, §16 Q11): --s3-lanes=<1..16> overrides S3's rule for the lane re-measure with the
-	// M2a rule's 4 lanes (crowd_lanes(hc, true)) next to the session's listen server.
+
 	if (has_user_arg("s3-lanes")) {
 		lanes = unsigned(std::clamp(std::atoi(user_arg_value("s3-lanes").c_str()), 1, 16));
 	}
@@ -367,8 +365,7 @@ bool Bf3Crowd::build(std::string *r_error) {
 	log(fmt("aim: weight 1 at %.1f deg up, %.1f deg down; additive order %s", config_.aim_up_full_pitch_deg, config_.aim_down_full_pitch_deg,
 			config_.aim_order == anim::AdditiveOrder::LocalPost ? "LocalPost" : "LocalPre"));
 	if (check_) {
-		// Reported row (s3.md §1): the whole 64-soldier pose job on the main thread (evaluate_all_here), 30 frames of
-		// the stage schedule, LOD off; p50.
+
 		std::vector<anim::CrowdSoldierInput> in(stage_.soldiers());
 		const anim::Vec3 cam = anim::stage_camera(stage_).position;
 		std::vector<double> ms;
@@ -450,8 +447,7 @@ void Bf3Crowd::calibrate_cycles() {
 	const uint64_t t1 = __rdtsc();
 	const double ms = double(b.QuadPart - a.QuadPart) * 1000.0 / double(f.QuadPart);
 	cycles_per_ms_ = double(t1 - t0) / ms;
-	// Self-test: thread cycles count at the TSC rate. Best of 20 busy windows of 5 ms (a preempted window reads fewer
-	// thread cycles than TSC cycles; the best window is the unpreempted one).
+
 	double best = 0.0;
 	for (int k = 0; k < 20; ++k) {
 		const uint64_t c0 = thread_cycles(), r0 = __rdtsc();
@@ -513,13 +509,13 @@ void Bf3Crowd::_process(double p_delta) {
 		}
 		if (check_) {
 			calibrate_cycles();
-			settle_frames_ = 30; // let the window settle at its size before the configuration row is read
+			settle_frames_ = 30;
 		}
 		last_entry_usec_ = Time::get_singleton()->get_ticks_usec();
 		last_entry_cpu_ms_ = thread_ms();
 		return;
 	}
-	// Per-frame timers (s3.md §1): the _process delta, the main-thread CPU since the previous entry.
+
 	const uint64_t entry = Time::get_singleton()->get_ticks_usec();
 	const double entry_cpu = thread_ms();
 	Sample s;
@@ -537,7 +533,7 @@ void Bf3Crowd::_process(double p_delta) {
 		animated = true;
 	}
 	if (check_ && shots_started_) {
-		animated = false; // the shots pose the soldiers themselves
+		animated = false;
 	}
 	if (animated) {
 		const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
@@ -559,10 +555,9 @@ void Bf3Crowd::_process(double p_delta) {
 	}
 	if (settle_frames_ > 0) {
 		if (--settle_frames_ == 0) {
-			// G0-config (s3.md §1).
+
 			DisplayServer *ds = DisplayServer::get_singleton();
-			// The root Window's size is the 3D render size (stretch mode canvas_items keeps the 2D visible rect at the
-			// project's 1152x648 base; 3D renders at the window's full resolution).
+
 			Window *window = get_window();
 			const Vector2i size = window != nullptr ? window->get_size() : Vector2i();
 			viewport_ok_ = size.x == int32_t(gate::kWidth) && size.y == int32_t(gate::kHeight) &&
@@ -574,7 +569,7 @@ void Bf3Crowd::_process(double p_delta) {
 					walkers_zero_ ? "yes" : "NO", no_hud_ ? "yes" : "NO", size.x, size.y, ds->window_get_current_screen(), ds->get_primary_screen(),
 					viewport_ok_ ? "ok" : "WRONG", thread_model, cycle_selftest_ratio_, cycles_ok ? "ok" : "OUT OF 1 +- 0.05");
 			log("G0-config: " + g0_config_detail_);
-			// The run plan (s3.md §12).
+
 			plan_.clear();
 			if (g0_stage_ && g0_config_) {
 				plan_.push_back(RunSpec{ "bench skeleton3d", SkinBackend::Skeleton3D, false, false, false, gate::kBenchWindows, false });
@@ -642,7 +637,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 	const double warm = gate::kWarmupSeconds;
 	const bool windowed = r.spec.windows > 0;
 	const double total = windowed ? warm + double(r.spec.windows) * gate::kWindowSeconds : warm + run_seconds_;
-	// The frame that ends: samples belong to the run once warm-up is over; window settle time is discarded.
+
 	if (r.t > warm) {
 		bool keep = true;
 		if (windowed) {
@@ -680,7 +675,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 			log(std::string("overview shot ") + path + (ok ? "" : " FAILED"));
 		}
 	}
-	// Window class of the next frame.
+
 	if (r.spec.crowd_hidden) {
 		frozen_ = true;
 	} else if (windowed && r.t > warm) {
@@ -694,7 +689,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 	}
 	frozen_ = false;
 	uploader_->set_visible(true);
-	// The run is over: summarize.
+
 	if (windowed) {
 		const HiddenCostStats h = hidden_cost(r);
 		log(fmt("%s: animated step p50 %.3f p99 %.3f ms (cpu p50 %.3f); hidden p50 %.3f ms (other cpu animated %.3f, frozen %.3f); fps %.0f / %.0f; render cpu "
@@ -725,7 +720,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 	done_runs_.push_back(std::move(r));
 	run_.reset();
 	if (was_bench_b) {
-		// s3.md §7.3: the lower metric wins; within 10 % B wins.
+
 		const double a = bench_metric_[0], b = bench_metric_[1];
 		winner_ = (a >= 0.0 && b >= 0.0 && a < b * 0.9) ? SkinBackend::Skeleton3D : SkinBackend::RsSkeleton;
 		log(fmt("backend selection: skeleton3d %.3f ms, rs %.3f ms -> %s", a, b, skin_backend_name(winner_)));
@@ -734,7 +729,7 @@ void Bf3Crowd::check_frame(double p_delta, const Sample &p_sample, bool p_animat
 		begin_run(plan_[plan_index_]);
 		return;
 	}
-	// Shots (G3).
+
 	DisplayServer::get_singleton()->window_set_vsync_mode(DisplayServer::VSYNC_DISABLED);
 	shots_.clear();
 	for (uint32_t team = 0; team < 2; ++team) {
@@ -830,14 +825,14 @@ bool Bf3Crowd::shot_frame() {
 	static const char *const kPose[4] = { "idle", "run", "reload", "aim" };
 	const std::string name = std::string("s3_") + (shot.team == 0 ? "us" : "ru") + "_" + kPose[shot.pose] + "_" + (shot.left_front ? "lf" : "rb");
 	if (shot_wait_ < 0) {
-		// Pose both soldiers on a fresh evaluator (only 3 and 4 evaluated), upload, aim the camera.
+
 		std::string error;
 		if (!make_evaluator(false, &error)) {
 			shot_lines_.push_back(name + ": evaluator failed: " + error);
 			++shot_index_;
 			return false;
 		}
-		const float heading = stage_.heading + 3.14159265f; // facing the stage camera
+		const float heading = stage_.heading + 3.14159265f;
 		std::vector<anim::CrowdSoldierInput> in(stage_.soldiers());
 		for (uint32_t i = 0; i < stage_.soldiers(); ++i) {
 			in[i].flags = anim::crowd_flags::kHidden;
@@ -863,8 +858,7 @@ bool Bf3Crowd::shot_frame() {
 		for (const uint32_t i : { 3u, 4u }) {
 			in[i].flags = 0;
 		}
-		// Run: RunFwd at phase 0.25; reload: 40 % into the soldier's own clip (s3.md §9). Both soldiers advance by the
-		// same dt, so the reload is posed per team (the RU clip is longer): this shot's team decides the dt.
+
 		double dt = 0.0;
 		if (shot.pose == 1) {
 			const anim::LocoClipInfo &fwd = assets_->clips.loco[size_t(anim::LocoClip::Fwd)];
@@ -877,7 +871,7 @@ bool Bf3Crowd::shot_frame() {
 		eval_->evaluate_all_here();
 		SkinUploadStats st;
 		uploader_->upload(*eval_, roots_, st);
-		// The camera: 0.9 m from the shoulder joint, front-left of the left shoulder or back-right of the right one.
+
 		const std::span<const anim::Xform> model = eval_->model(soldier);
 		const int32_t joint = assets_->clips.rig.find(shot.left_front ? "LeftArm" : "RightArm");
 		if (joint < 0 || model.size() <= size_t(joint)) {
@@ -887,7 +881,7 @@ bool Bf3Crowd::shot_frame() {
 		}
 		const Vector3 j = roots_[soldier].xform(gv(model[size_t(joint)].t));
 		const Vector3 fwd(std::sin(heading), 0.0f, std::cos(heading));
-		const Vector3 left(std::cos(heading), 0.0f, -std::sin(heading)); // +x of the soldier's frame (s3.md §5.8)
+		const Vector3 left(std::cos(heading), 0.0f, -std::sin(heading));
 		Vector3 dir = shot.left_front ? (fwd + left) : (-fwd - left);
 		dir = (dir.normalized() + Vector3(0, 0.25f, 0)).normalized();
 		const Vector3 cam = j + dir * float(kShotDistance);
@@ -899,7 +893,7 @@ bool Bf3Crowd::shot_frame() {
 	if (--shot_wait_ > 0) {
 		return false;
 	}
-	// Capture with the on-screen and occlusion checks.
+
 	const std::span<const anim::Xform> model = eval_->model(soldier);
 	const int32_t joint = assets_->clips.rig.find(shot.left_front ? "LeftArm" : "RightArm");
 	const Vector3 j = roots_[soldier].xform(gv(model[size_t(joint)].t));
@@ -1049,7 +1043,7 @@ void Bf3Crowd::report_and_finish() {
 		log(l);
 	}
 	if (all && valid && !timing_ok) {
-		log("S3 TIMING: FAIL"); // the wrapper's one repeat (s3.md §1 noise policy)
+		log("S3 TIMING: FAIL");
 	}
 	log(std::string("S3 CHECK: ") + (pass ? "PASS" : "FAIL"));
 	finish(pass ? 0 : 1);
@@ -1085,4 +1079,4 @@ void Bf3Crowd::shutdown() {
 	cache_.reset();
 }
 
-} // namespace bf3::godot_side
+}

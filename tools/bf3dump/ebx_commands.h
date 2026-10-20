@@ -1,6 +1,4 @@
 #pragma once
-// bf3dump EBX commands: find, types, dump, ebxload. Same semantics, output and JSON conventions as
-// the ebx-dump probe (research/probes/tools/ebx-dump/src/main.rs), ported to C++ on bf3_core.
 
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
@@ -23,4 +21,4 @@ int cmd_dump(const EbxContext &p_ctx, const std::string &p_spec, const std::stri
 		const std::vector<std::string> &p_roots);
 int cmd_ebxload(const EbxContext &p_ctx, const std::string &p_spec, bool p_walk, bool p_lookups = false);
 
-} // namespace bf3dump
+}

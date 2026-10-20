@@ -1,11 +1,3 @@
-// UI groundwork 1: the SwfMovie reader, display lists, the atlas cutter, layout trees and the census
-// (docs/design/ui-swf-fonts.md §5, §6, §8, §9, §14).
-//   suite "ui-swf-unit" (ctest core.ui.swf.unit): synthetic movies from tests/ui_swf_writer.h; no install.
-//   suite "ui-swf" (ctest core.ui.swf): the retail movies read from the install (read-only): gates G1, G2, G6, G7,
-//     T1 and install.unchanged; exit 77 without an install.
-//   suite "ui-swf-fuzz" (ctest core.ui.swf.fuzz): seeded in-memory mutants of four retail movies; nothing is
-//     written anywhere; exit 77 without an install.
-// Only numbers, names and rectangles are asserted; no install bytes are stored.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx_db.h"
@@ -46,7 +38,6 @@ double seconds_of(const std::function<void()> &p_fn) {
 	return std::chrono::duration<double>(Clock::now() - t0).count();
 }
 
-// A hostile case: run, print the time, and in dev require < 1 s (docs §9.1; under ASan the time is only printed).
 void hostile(const char *p_name, const std::function<void()> &p_fn) {
 	const double s = seconds_of(p_fn);
 	MESSAGE(std::string(p_name) << ": " << s << " s" << std::string(kAsan ? " (asan, reported)" : ""));
@@ -97,7 +88,6 @@ Font3 square_font() {
 	return f;
 }
 
-// Every tag the reader keeps, on the root and in two sprites.
 Bytes rich_tags() {
 	Place p2;
 	p2.depth = 2;
@@ -196,7 +186,6 @@ Bytes rich_movie(bool p_cfx) {
 	return movie(rich_tags(), 2, p_cfx);
 }
 
-// The atlas rule's synthetic movie (docs §6.1).
 Bytes atlas_movie() {
 	BitmapFill f10;
 	f10.bitmap = 10;
@@ -222,7 +211,6 @@ Bytes atlas_movie() {
 						 define_sprite(31, 4, states), export_assets({ { 31, "mc_states" }, { 30, "mc_child" } }), show_frame(), end_tag() }));
 }
 
-// A binary DAG: sprite 100 draws sub-image 10 once; sprite 100 + k places sprite 100 + k - 1 twice. p_levels sprites.
 Bytes dag_movie(int p_levels) {
 	BitmapFill f10;
 	f10.bitmap = 10;
@@ -263,7 +251,6 @@ const SwfLayoutNode *child_named(const SwfLayoutNode &p_node, std::string_view p
 	return nullptr;
 }
 
-// The layout's fake library: a screen that places one imported widget (docs §8.1 shape).
 SwfLibrary layout_library() {
 	auto place = [](uint16_t p_depth, uint16_t p_char, Mat p_m, std::string p_name) {
 		Place p;
@@ -295,7 +282,7 @@ SwfLibrary layout_library() {
 	return SwfLibrary::from_memory(std::move(payloads));
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-swf-unit") {
 	TEST_CASE("swf: every tag the reader keeps (GFX and CFX)") {
@@ -311,7 +298,7 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(m.trailing_bytes == 0);
 			CHECK(m.unknown_tags == 1);
 			CHECK(m.csm_text_settings == 1);
-			// ExporterInfo, external images (v2 and v1), sub-images.
+
 			CHECK(m.exporter.present);
 			CHECK(m.exporter.version == 0x36f);
 			CHECK(m.exporter.bitmap_format == 13);
@@ -333,7 +320,7 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(m.find_sub_image(11)->width() == 32);
 			CHECK(m.find_sub_image(11)->height() == 32);
 			CHECK(m.find_sub_image(12)->image_id == 2);
-			// Shapes 1-4 with bitmap fills in the initial arrays and through new styles.
+
 			REQUIRE(m.shapes.size() == 4);
 			const SwfShape *s20 = m.find_shape(20);
 			REQUIRE(s20 != nullptr);
@@ -357,7 +344,7 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(m.find_shape(22)->bitmap_fills.empty());
 			CHECK(m.find_shape(23)->version == 4);
 			CHECK(m.find_shape(23)->bitmap_fills.size() == 1);
-			// Edit texts with every flag.
+
 			REQUIRE(m.edit_texts.size() == 2);
 			const SwfEditText *t30 = m.find_edit_text(30);
 			REQUIRE(t30 != nullptr);
@@ -386,7 +373,7 @@ TEST_SUITE("ui-swf-unit") {
 				CHECK(t31->has(f));
 			}
 			CHECK(m.static_texts == std::vector<uint16_t>{ 60 });
-			// Fonts in all three forms, align zones, font names.
+
 			REQUIRE(m.fonts.size() == 3);
 			CHECK(m.find_font(40)->kind == SwfFontKind::Outlines);
 			CHECK(m.find_font(40)->name == "Synth Sans Medium");
@@ -404,7 +391,7 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(m.font_names[0].name == "Synth Sans Medium");
 			REQUIRE(m.scaling_grids.size() == 1);
 			CHECK((m.scaling_grids[0].splitter == SwfRect{ 1, 15, 2, 14 }));
-			// Sprites, labels, exports, both imports, actions.
+
 			REQUIRE(m.sprites.size() == 2);
 			const SwfSprite *s50 = m.find_sprite(50);
 			REQUIRE(s50 != nullptr);
@@ -450,7 +437,7 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(m.budget_used > 0);
 			CHECK(m.budget_used < swf_default_budget_units(m.file_length));
 			CHECK(m.retained_bytes >= m.body.size());
-			// Root display events: every PlaceObject field.
+
 			const std::vector<SwfDisplayEvent> &ev = m.root.events;
 			REQUIRE(ev.size() == 8);
 			CHECK(ev[0].tag_version == 1);
@@ -496,7 +483,7 @@ TEST_SUITE("ui-swf-unit") {
 		WorkBudget budget(1u << 20);
 		REQUIRE(display_lists_at(m.root, frames, budget, lists).ok());
 		REQUIRE(lists.size() == 4);
-		// Frame 0: depths 1 (PlaceObject), 2 (PlaceObject2), 3 (PlaceObject3).
+
 		const std::vector<SwfDisplayEntry> &f0 = lists[1];
 		REQUIRE(f0.size() == 3);
 		CHECK(f0[0].depth == 1);
@@ -506,8 +493,7 @@ TEST_SUITE("ui-swf-unit") {
 		CHECK(f0[1].matrix.a == 2.0f);
 		CHECK(f0[2].character == 21);
 		CHECK(lists[3].size() == 3);
-		// Frame 1 (= after every event, frame 2 == frames): modify keeps character, name and colour; replace swaps
-		// the character; remove drops depth 1; a Place on an occupied depth replaces what is there.
+
 		for (const size_t i : { size_t(0), size_t(2) }) {
 			const std::vector<SwfDisplayEntry> &f = lists[i];
 			REQUIRE(f.size() == 3);
@@ -527,12 +513,12 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(d4->character == 20);
 			CHECK(d4->clip_depth == 0);
 		}
-		// One pass: 1 + 4 requests, 8 events, 4 units per copied entry (3 + 3 + 3 + 3 entries).
+
 		CHECK(budget.spent() == 5 + 8 + 4 * 12);
-		// A frame past the timeline is an error; frame == frames is allowed.
+
 		const uint32_t past[] = { 3 };
 		CHECK_FALSE(display_lists_at(m.root, past, budget, lists).ok());
-		// A budget too small for the replay fails.
+
 		WorkBudget tiny(10);
 		CHECK_FALSE(display_lists_at(m.root, frames, tiny, lists).ok());
 	}
@@ -552,7 +538,7 @@ TEST_SUITE("ui-swf-unit") {
 		CHECK(one->pieces[0].sub_image == 10);
 		CHECK(one->pieces[0].x2 == 16);
 		CHECK((one->pieces[0].placement == SwfMatrix{ 1, 0, 0, 1, 0, 0 }));
-		const SwfAtlasRegion *two = map->find("Two"); // only one sprite has the label
+		const SwfAtlasRegion *two = map->find("Two");
 		REQUIRE(two != nullptr);
 		CHECK(two->name == "mc_states/Two");
 		REQUIRE(two->pieces.size() == 2);
@@ -562,15 +548,15 @@ TEST_SUITE("ui-swf-unit") {
 		const SwfAtlasRegion *nested = map->find("mc_states/Nested");
 		REQUIRE(nested != nullptr);
 		REQUIRE(nested->pieces.size() == 1);
-		// scale 2 at (100, 0) composed with the child's (5, 5): (110, 10), scale 2.
+
 		CHECK((nested->pieces[0].placement == SwfMatrix{ 2, 0, 0, 2, 110, 10 }));
 		CHECK(nested->frame == 3);
-		// Symbols, frames, bare sub-images.
+
 		REQUIRE(map->symbols.size() == 2);
 		CHECK(map->find("mc_child")->pieces.size() == 1);
 		CHECK(map->find("mc_child")->pieces[0].placement.tx == 5.0f);
 		CHECK(map->find("mc_states@1") != nullptr);
-		CHECK(map->find("mc_states@2") == nullptr); // draws nothing
+		CHECK(map->find("mc_states@2") == nullptr);
 		CHECK(map->find("mc_child@0") != nullptr);
 		CHECK(map->frames.size() == 4);
 		CHECK(map->bare.size() == 4);
@@ -585,9 +571,9 @@ TEST_SUITE("ui-swf-unit") {
 		CHECK(s.sub_images_from_labels == 2);
 		CHECK(s.sub_images_from_symbols == 2);
 		CHECK(s.sub_images_from_frames == 2);
-		CHECK(s.rects_outside_atlas == 1); // #13 ends at x 260 on a 256-wide atlas
+		CHECK(s.rects_outside_atlas == 1);
 		CHECK(s.pieces_without_image == 0);
-		// The fill matrix: 40 twips per bitmap pixel = scale 2 (shape 21 is only reachable as a bare id here).
+
 		CHECK(map->find("nothing") == nullptr);
 	}
 
@@ -609,13 +595,13 @@ TEST_SUITE("ui-swf-unit") {
 		REQUIRE(a.ok());
 		Result<std::shared_ptr<const SwfMovie>> b = lib.load("ui/assets/widget");
 		REQUIRE(b.ok());
-		CHECK(a->get() == b->get()); // parsed once
+		CHECK(a->get() == b->get());
 		CHECK_FALSE(lib.load("ui/assets/none").ok());
 		SwfExternalImage im;
 		im.file_name = "x_i1.tga";
 		CHECK_FALSE(lib.load_atlas_texture("ui/assets/widget", im).ok());
 		CHECK_FALSE(lib.read_atlas_texture_header("ui/assets/widget", im).ok());
-		// A movie that does not parse: the failure is memoised as well.
+
 		std::vector<std::pair<std::string, std::vector<uint8_t>>> bad;
 		bad.emplace_back("ui/assets/bad", Bytes{ 'X', 'Y', 'Z' });
 		const SwfLibrary broken = SwfLibrary::from_memory(std::move(bad));
@@ -636,7 +622,7 @@ TEST_SUITE("ui-swf-unit") {
 		CHECK(screen.symbol == "ScreenSym");
 		const SwfLayoutNode *w = child_named(screen, "Widget_01");
 		REQUIRE(w != nullptr);
-		CHECK(w->kind == SwfLayoutKind::Sprite); // the import followed into widget
+		CHECK(w->kind == SwfLayoutKind::Sprite);
 		CHECK(w->movie == "ui/assets/widget");
 		CHECK(w->symbol == "Widget");
 		CHECK(w->stage.tx == 1194.0f);
@@ -659,9 +645,9 @@ TEST_SUITE("ui-swf-unit") {
 		CHECK(child_named(screen, "bg")->kind == SwfLayoutKind::Shape);
 		const SwfLayoutNode *missing = child_named(screen, "Missing_01");
 		REQUIRE(missing != nullptr);
-		CHECK(missing->kind == SwfLayoutKind::Import); // no such movie
+		CHECK(missing->kind == SwfLayoutKind::Import);
 		CHECK(missing->symbol == "Nothing");
-		// Without following imports / with a depth cap.
+
 		SwfLayoutOptions no_follow;
 		no_follow.follow_imports = false;
 		Result<SwfLayoutNode> flat = read_layout(lib, "ui/assets/screen", no_follow, budget);
@@ -674,7 +660,7 @@ TEST_SUITE("ui-swf-unit") {
 		REQUIRE(top->children.size() == 1);
 		CHECK(top->children[0].children.empty());
 		CHECK_FALSE(read_layout(lib, "nothing", {}, budget).ok());
-		// The HUD table: the children of instance1, anchored by thirds.
+
 		WorkBudget hud_budget(kSwfLayoutBudgetUnits);
 		Result<std::vector<HudPlacement>> rows = read_hud_placements(lib, "screen", hud_budget);
 		REQUIRE(rows.ok());
@@ -703,13 +689,13 @@ TEST_SUITE("ui-swf-unit") {
 	TEST_CASE("swf: every truncation of each synthetic movie fails cleanly") {
 		hostile("truncations", [] {
 			for (const Bytes &full : { rich_movie(false), rich_movie(true), atlas_movie() }) {
-				// A cut payload: the declared length no longer matches.
+
 				for (size_t n = 0; n < full.size(); ++n) {
 					const Bytes cut(full.begin(), full.begin() + ptrdiff_t(n));
 					CHECK_FALSE(SwfMovie::parse(cut).ok());
 				}
 			}
-			// A cut body under a consistent header: either result, never a crash; most cuts fail.
+
 			const Bytes rich = rich_movie(false);
 			const Bytes body(rich.begin() + 8, rich.end());
 			size_t failed = 0;
@@ -775,10 +761,10 @@ TEST_SUITE("ui-swf-unit") {
 
 	TEST_CASE("swf: hostile headers (zlib bomb, 2^32 and 16 MiB + 1 declared lengths, GFX length, signature)") {
 		hostile("zlib bomb", [] {
-			// Inflates to ~8 MB but declares 1,000 bytes: libdeflate stops at the declared size.
+
 			const std::string e = error_of(cfx_with_stream(1000, zlib_bomb(8u << 20)));
 			CHECK(e.find("inflates past") != std::string::npos);
-			// Declares the cap and inflates past it.
+
 			const std::string e2 = error_of(cfx_with_stream(8 + kSwfMaxBodyBytes, zlib_bomb(kSwfMaxBodyBytes + (1u << 20))));
 			CHECK(e2.find("inflates past") != std::string::npos);
 		});
@@ -786,12 +772,12 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(error_of(cfx_with_stream(0xFFFFFFFFu, zlib_stored(Bytes(16, 0)))).find("cap") != std::string::npos);
 			CHECK(error_of(cfx_with_stream(8 + kSwfMaxBodyBytes + 1, zlib_stored(Bytes(16, 0)))).find("cap") != std::string::npos);
 			Bytes g = gfx_from_body(Bytes(16, 0));
-			g[4] = uint8_t(g[4] + 1); // GFX declares one byte more than it stores
+			g[4] = uint8_t(g[4] + 1);
 			CHECK(error_of(g).find("GFX body") != std::string::npos);
 			CHECK(error_of(cfx_with_stream(4, {})).find("shorter than the header") != std::string::npos);
 			CHECK(error_of(Bytes{ 'F', 'W', 'S', 8, 20, 0, 0, 0 }).find("signature") != std::string::npos);
 			CHECK(error_of(Bytes{ 'G', 'F', 'X' }).find("8-byte header") != std::string::npos);
-			// A stream that inflates short of the declared length.
+
 			CHECK(error_of(cfx_with_stream(8 + 100, zlib_stored(Bytes(50, 0)))).find("inflates to 50") != std::string::npos);
 			CHECK_FALSE(SwfMovie::parse(cfx_with_stream(8 + 100, Bytes(20, 0x55))).ok());
 		});
@@ -815,12 +801,12 @@ TEST_SUITE("ui-swf-unit") {
 			many.reserve(2 * (kSwfMaxTags + 2));
 			for (uint32_t i = 0; i < kSwfMaxTags; ++i) {
 				many.push_back(0x00);
-				many.push_back(uint8_t((900 << 6) >> 8)); // code 900, length 0
+				many.push_back(uint8_t((900 << 6) >> 8));
 			}
 			Bytes at_cap = many;
 			at_cap.resize(at_cap.size() - 2);
 			const Bytes end = end_tag();
-			at_cap.insert(at_cap.end(), end.begin(), end.end()); // 2^22 tags with the End
+			at_cap.insert(at_cap.end(), end.begin(), end.end());
 			Result<SwfMovie> ok = SwfMovie::parse(movie(at_cap));
 			CHECK_MESSAGE(ok.ok(), (ok.ok() ? std::string() : ok.error().message));
 			many.insert(many.end(), end.begin(), end.end());
@@ -868,12 +854,12 @@ TEST_SUITE("ui-swf-unit") {
 			REQUIRE(map.ok());
 			const SwfAtlasRegion *tail = map->find("mc_tail/tail");
 			REQUIRE(tail != nullptr);
-			CHECK(tail->pieces.size() == 1); // the state after every event
+			CHECK(tail->pieces.size() == 1);
 		});
 		hostile("reversed sub-image rectangle", [] {
 			CHECK(error_of(movie(cat({ sub_image(10, 1, 16, 0, 8, 8), end_tag() }))).find("reversed rectangle") != std::string::npos);
 			CHECK(error_of(movie(cat({ sub_image(10, 1, 0, 9, 8, 8), end_tag() }))).find("reversed rectangle") != std::string::npos);
-			CHECK(SwfMovie::parse(movie(cat({ sub_image(10, 1, 8, 8, 8, 8), end_tag() }))).ok()); // empty is allowed
+			CHECK(SwfMovie::parse(movie(cat({ sub_image(10, 1, 8, 8, 8, 8), end_tag() }))).ok());
 		});
 		hostile("short records", [] {
 			Bytes t;
@@ -886,7 +872,7 @@ TEST_SUITE("ui-swf-unit") {
 			tag(x, swf_tag::kGfxDefineSubImage, Bytes(11, 0));
 			CHECK(error_of(movie(cat({ x, end_tag() }))).find("truncated") != std::string::npos);
 			Bytes shape = define_shape(3, 20, 8, 8, {});
-			shape.push_back(0); // one byte after the end record, inside a re-made tag
+			shape.push_back(0);
 			Bytes body(shape.begin() + 2, shape.end());
 			Bytes padded;
 			tag(padded, swf_tag::kDefineShape3, body);
@@ -905,7 +891,7 @@ TEST_SUITE("ui-swf-unit") {
 			Result<SwfAtlasMap> map = build_atlas_map(m, "ui/assets/loop", b);
 			REQUIRE_FALSE(map.ok());
 			CHECK(map.error().message.find("cycle") != std::string::npos);
-			// The layout tree of the same movie stops at its depth cap.
+
 			std::vector<std::pair<std::string, std::vector<uint8_t>>> payloads;
 			Place root;
 			root.depth = 1;
@@ -961,8 +947,6 @@ TEST_SUITE("ui-swf-unit") {
 		});
 	}
 }
-
-// ---- install ------------------------------------------------------------------------------------------------
 
 namespace {
 
@@ -1025,7 +1009,7 @@ void collect(const SwfLayoutNode &p_node, std::vector<const SwfLayoutNode *> &r_
 	}
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-swf") {
 	TEST_CASE("swf: the retail movies (G1 census, G2 iconsingame, G6 font names, G7 HUD table, T1, install unchanged)") {
@@ -1059,7 +1043,6 @@ TEST_SUITE("ui-swf") {
 			}
 		}
 
-		// G1.
 		CHECK(t.movies == 434);
 		CHECK(t.parsed == 434);
 		CHECK(t.errors == 0);
@@ -1114,7 +1097,7 @@ TEST_SUITE("ui-swf") {
 		for (const SwfTagCount &c : t.tags) {
 			all_tags += c.count;
 		}
-		CHECK(all_tags == golden_sum); // no other code occurs
+		CHECK(all_tags == golden_sum);
 		CHECK(t.action_bytes == 1638265);
 		CHECK(t.abc_bytes == 0);
 		CHECK(t.labels == 2441);
@@ -1141,10 +1124,9 @@ TEST_SUITE("ui-swf") {
 		MESSAGE("budgets: parse max " << t.max_budget_used << ", atlas max " << t.max_atlas_budget_used << "; retained max " << t.max_retained_bytes
 									  << ", sum " << t.sum_retained_bytes);
 
-		// G6: distinct names after one trailing '*'.
 		const auto &rule = t.font_names_by_rule;
 		MESSAGE("G6: Exact " << rule[0] << ", CaseFolded " << rule[1] << ", Family " << rule[2] << ", Device " << rule[3] << ", Unresolved " << rule[4]);
-		CHECK(rule[size_t(FontResolution::Exact)] == 5); // design rev 2 said 4; Venice-SemiBold is the fifth (README, docs §7.4)
+		CHECK(rule[size_t(FontResolution::Exact)] == 5);
 		CHECK(rule[size_t(FontResolution::CaseFolded)] == 2);
 		CHECK(rule[size_t(FontResolution::Family)] == 4);
 		CHECK(rule[size_t(FontResolution::Device)] == 5);
@@ -1165,7 +1147,6 @@ TEST_SUITE("ui-swf") {
 		CHECK(t.library_font_names_exact == t.library_font_names);
 		CHECK(t.library_font_names_not_exact.empty());
 
-		// T1.
 		const double t1 = lib->open_seconds() + census->seconds;
 		MESSAGE("T1: library open " << lib->open_seconds() << " s + census " << census->seconds << " s = " << t1 << " s"
 									<< std::string(kAsan ? " (asan, reported)" : " (limit 15 s; shared machine, noisy)"));
@@ -1173,7 +1154,6 @@ TEST_SUITE("ui-swf") {
 			CHECK(t1 <= 15.0);
 		}
 
-		// G2: iconsingame.
 		Result<std::shared_ptr<const SwfMovie>> icons = lib->load("ui/assets/iconsingame");
 		REQUIRE(icons.ok());
 		WorkBudget ab(kSwfAtlasBudgetUnits);
@@ -1208,7 +1188,7 @@ TEST_SUITE("ui-swf") {
 		CHECK(label_sprites.count(0) == 0);
 		struct Spot {
 			const char *region;
-			std::vector<std::array<uint16_t, 5>> pieces; // id, x1, y1, x2, y2
+			std::vector<std::array<uint16_t, 5>> pieces;
 		};
 		const Spot spots[] = {
 			{ "mc_iconsIngameBig/LocalPlayer", { { 123, 576, 58, 599, 83 } } },
@@ -1234,7 +1214,6 @@ TEST_SUITE("ui-swf") {
 			}
 		}
 
-		// G7: the HUD table.
 		const uint32_t expected_rows[14] = { 14, 8, 9, 7, 8, 9, 10, 7, 0, 1, 4, 8, 1, 0 };
 		std::map<std::string, std::vector<HudPlacement>> hud;
 		size_t total = 0;
@@ -1269,8 +1248,8 @@ TEST_SUITE("ui-swf") {
 		CHECK(placement(mp, "Ammo_01")->widget_movie == "ui/assets/ammo");
 		CHECK(placement(mp, "Ammo_01")->anchor == HudAnchor::BottomRight);
 		const std::vector<HudPlacement> &tdm = hud["hudtdmscreen"];
-		check_at(tdm, "HudBackgroundWidget_01", -3, 486.95f, 1.288f, 3.689f); // docs §8.2 rounded to 486.9
-		check_at(tdm, "Compass_01", 85.05f, 696, 0.99985f); // docs §8.2 rounded to 85
+		check_at(tdm, "HudBackgroundWidget_01", -3, 486.95f, 1.288f, 3.689f);
+		check_at(tdm, "Compass_01", 85.05f, 696, 0.99985f);
 		check_at(tdm, "Minimap_01", -3, 527);
 		check_at(tdm, "TicketCounter_01", -4, 530);
 		check_at(tdm, "SquadList_00", 179, 619);
@@ -1292,13 +1271,12 @@ TEST_SUITE("ui-swf") {
 		check_at(ks, "HudMessage_02", 640, 604);
 		check_at(ks, "ScoreAggregator_01", 773, 494);
 
-		// Inside a widget: the ammo movie's tree (docs §8.2).
 		WorkBudget lb(kSwfLayoutBudgetUnits);
 		Result<SwfLayoutNode> ammo = read_layout(*lib, "ammo", {}, lb);
 		REQUIRE_MESSAGE(ammo.ok(), (ammo.ok() ? std::string() : ammo.error().message));
 		std::vector<const SwfLayoutNode *> nodes;
 		collect(*ammo, nodes);
-		// The root's "ammo" instance of the exported Ammo sprite holds an "Ammo" sprite whose children are the widget's parts.
+
 		const SwfLayoutNode *ammo_sprite = nullptr;
 		for (const SwfLayoutNode *n : nodes) {
 			if (n->kind == SwfLayoutKind::Sprite && child_named(*n, "bgAmmo") != nullptr) {
@@ -1352,7 +1330,7 @@ TEST_SUITE("ui-swf-fuzz") {
 			Result<std::shared_ptr<const SwfMovie>> original = lib->load(name);
 			REQUIRE(original.ok());
 			const Bytes body = (*original)->body;
-			// The movies a mutant's imports resolve to, as the original library has them.
+
 			std::vector<std::pair<std::string, std::vector<uint8_t>>> imported;
 			for (const SwfImport &im : (*original)->imports) {
 				const std::string target = swf_movie_name_for_url(im.url);
@@ -1398,7 +1376,7 @@ TEST_SUITE("ui-swf-fuzz") {
 						(void)write_truetype(*o, {}, fb);
 					}
 				}
-				if (i % 10 == 1) { // the layout tree over the original library (one in ten: the copies dominate)
+				if (i % 10 == 1) {
 					std::vector<std::pair<std::string, std::vector<uint8_t>>> payloads = imported;
 					payloads.emplace_back(name, std::move(b));
 					const SwfLibrary mem = SwfLibrary::from_memory(std::move(payloads));

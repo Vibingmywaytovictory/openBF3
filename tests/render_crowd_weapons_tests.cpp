@@ -1,17 +1,3 @@
-// M2a tp: the crowd's per-item 3p weapons (docs/design/m2a.md §9, R5; docs/design/m2a-w3.md §3 "tp's 3p weapon route";
-// as built: docs/design/m2a-tp.md). ctest render.crowd_weapons loads S3's soldier assets, the match's kits (Metro TDM,
-// load_gunplay_level) and every kit item's 3p weapon through load_crowd_weapons (no cache), from the retail install
-// (read-only), and checks:
-//   * the item lists (game_crowd_items.h): item 0 = the team's SoldierSpec weapon and its match def, the kit items once;
-//   * every item: a prepared skinned mesh, binds within the cap, the weapon layout, the reload clip and rate (reported);
-//   * item 0 binds exactly as S3's team weapon part (every bind's bone and inverse bind is one of the team's);
-//   * the 3p muzzle: on Wep_Root, its effect frame's +Y runs along the mesh's +Z (the barrel); for the long guns the
-//     farthest vertex along it lies at most 15 cm past the muzzle and not 5 cm short, within 5 cm of the axis (reported
-//     per item; the handguns' data offset is the weapon origin, reported only);
-//   * strip_team_weapon_parts, crowd_weapons_of, crowd_weapon_index on the loaded set; a CrowdEvaluator with the items
-//     (weapon_palette per item);
-//   * the install is unchanged.
-// Exits 77 (skipped) without an install. Asserts numbers only; nothing from BF3 is stored in the repo.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/crowd_eval.h"
@@ -47,7 +33,7 @@ anim::Vec3 rotate(const anim::Quat &p_q, const anim::Vec3 &p_v) {
 	return anim::xform_mul(anim::Xform{ p_q, anim::Vec3{} }, anim::Xform{ anim::Quat{}, p_v }).t;
 }
 
-} // namespace
+}
 
 TEST_SUITE("render-crowd-weapons") {
 	TEST_CASE("crowd weapons: kit items, binds, reload, muzzle, strip, views, evaluator") {
@@ -75,7 +61,7 @@ TEST_SUITE("render-crowd-weapons") {
 		for (size_t t = 0; t < 2; ++t) {
 			REQUIRE(!lists.teams[t].empty());
 			CHECK(lists.teams[t][0].weapon_def == spec.teams[t].weapon_def);
-			CHECK(lists.teams[t][0].def != sim::weapons::kNoWeapon); // u_m16a4 / u_ak74m are match defs
+			CHECK(lists.teams[t][0].def != sim::weapons::kNoWeapon);
 			CHECK(lists.teams[t].size() <= anim::kMaxCrowdWeapons);
 			std::string line;
 			for (const render::CrowdWeaponSpec &s : lists.teams[t]) {
@@ -100,7 +86,7 @@ TEST_SUITE("render-crowd-weapons") {
 			const std::vector<render::CrowdWeaponPart> &items = (*set)->teams[t];
 			REQUIRE(!items.empty());
 			CHECK(items[0].spec.def == lists.teams[t][0].def);
-			CHECK(items.size() >= 4); // the primaries at least (dropped items are notes)
+			CHECK(items.size() >= 4);
 			for (const render::CrowdWeaponPart &p : items) {
 				CHECK(p.prepared.skinned);
 				CHECK(p.prepared.vertices > 0);
@@ -120,7 +106,7 @@ TEST_SUITE("render-crowd-weapons") {
 				}
 				++muzzles;
 				CHECK(p.muzzle_joint == wep_root);
-				// The muzzle in the mesh's bind space: bind(Wep_Root) x offset.
+
 				const int32_t w_root = a.weapon_skeleton.find("Wep_Root");
 				REQUIRE(w_root >= 0);
 				const anim::Xform in_mesh = anim::xform_mul(xform_of(a.weapon_skeleton.model_pose[size_t(w_root)]), p.muzzle_offset);
@@ -141,17 +127,15 @@ TEST_SUITE("render-crowd-weapons") {
 							"past, %.1f cm off axis; %zu binds, %llu vertices, reload %s rate %.3f\n",
 						t, p.spec.weapon_def.c_str(), double(in_mesh.t.x), double(in_mesh.t.y), double(in_mesh.t.z), double(dir.x), double(dir.y), double(dir.z), past * 100.0,
 						tip_lateral * 100.0, p.binds.size(), (unsigned long long)p.vertices, p.have_reload ? "yes" : "no", double(p.reload_rate));
-				CHECK(dir.z > 0.99f); // the barrel is the mesh's +Z
-				// Long guns: the data's muzzle sits at the barrel's end (measured 0.5 to 12.7 cm short of the farthest vertex:
-				// flash hiders and sights). The handguns' FireEffects3p offset is z = 0 (the weapon origin) [verified: M9,
-				// MP443] while their 3p mesh reaches 0.5 m along +Z: reported only (m2a-tp.md open issue).
+				CHECK(dir.z > 0.99f);
+
 				if (firearm && in_mesh.t.z > 0.3f) {
 					CHECK(past < 0.15);
 					CHECK(past > -0.05);
 					CHECK(tip_lateral < 0.05);
 				}
 			}
-			// Item 0 binds as S3's team weapon part: each bind's bone and inverse bind is one of the team's.
+
 			uint32_t matched = 0;
 			for (const anim::SkinBind &b : items[0].binds.binds()) {
 				for (const anim::SkinBind &tb : a.teams[t].binds.binds()) {
@@ -165,7 +149,7 @@ TEST_SUITE("render-crowd-weapons") {
 			std::printf("render.crowd_weapons team %zu item 0: %u of %zu binds are S3's team weapon binds\n", t, matched, items[0].binds.size());
 		}
 		CHECK(muzzles >= firearms);
-		// Strip, views and the def -> index table.
+
 		std::array<uint64_t, 2> before_vertices{ a.teams[0].vertices, a.teams[1].vertices };
 		CHECK(render::strip_team_weapon_parts(**assets) == 2);
 		for (size_t t = 0; t < 2; ++t) {
@@ -189,7 +173,7 @@ TEST_SUITE("render-crowd-weapons") {
 			teams[t].weapons = views[t];
 		}
 		CHECK(render::crowd_weapon_index(**set, 0, 0xFFFE) == -1);
-		// The evaluator with every item: one soldier per (team, item), the weapon palette per item's binds.
+
 		const uint32_t n = uint32_t(views[0].size() + views[1].size());
 		anim::CrowdConfig config;
 		config.temporal_lod = false;

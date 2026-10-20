@@ -1,14 +1,3 @@
-# Shared head of the tests/godot_*.cmake scripts (docs/testing.md "Godot rows"); include() it after
-# cmake_minimum_required. Sets `godot` to the Godot console executable: $ENV{OPENBF3_GODOT} when set, else GODOT_EXE
-# (-D, the configure-time OPENBF3_GODOT_EXE that openbf3_godot_row passes), else the script exits 77 (skipped).
-# A windowed script sets GODOT_WINDOWED to TRUE before the include: it also needs $ENV{OPENBF3_GODOT_WINDOWED} equal
-# to 1 (only the merge pass's window phase sets it) and exits 77 while $ENV{OPENBF3_USER_ACTIVE_FLAG} names a file
-# that exists, so no ctest call opens a window unless asked to.
-# In a headless script, with -DBUILD_DIR and -DROW (openbf3_godot_row passes both), it also sets godot_cache_root to a per-build cache root
-# (${BUILD_DIR}/godot-cache/<row>, kept across runs, never the shared user://bf3cache) and godot_log_args to
-# "--log-file ${BUILD_DIR}/godot-logs/<row>.log", so worktrees never share a cache or a log file.
-# The godot.project_setup fixture writes .godot/extension_list.cfg before any godot.* row; the fallback write below
-# is for a direct `cmake -P` run.
 set(godot "$ENV{OPENBF3_GODOT}")
 if(godot STREQUAL "" AND DEFINED GODOT_EXE AND NOT GODOT_EXE STREQUAL "" AND NOT GODOT_EXE MATCHES "-NOTFOUND$")
 	set(godot "${GODOT_EXE}")

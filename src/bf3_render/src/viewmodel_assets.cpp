@@ -52,7 +52,6 @@ const char *texture_format_name(core::res::TextureFormat p_format) {
 	}
 }
 
-// The 1P arms pair of an appearance unlock: (mesh partition, variation partition).
 bool arms_of_appearance(const core::EbxLibrary &p_library, const std::string &p_appearance, std::string &r_mesh, std::string &r_variation) {
 	const core::EbxPartition *part = p_library.partition_by_name(p_appearance);
 	if (part == nullptr) {
@@ -99,7 +98,7 @@ core::Result<anim::EbxSkeleton> load_skeleton(const core::EbxLibrary &p_library,
 	return anim::read_ebx_skeleton(*part, p_name);
 }
 
-} // namespace
+}
 
 void LoadProgress::set(std::string p_stage, int p_step) {
 	std::lock_guard<std::mutex> lock(mutex_);
@@ -136,7 +135,6 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 		return core::error_at("install", install.error());
 	}
 
-	// Animation: Ant banks, the static library, the clip and the rig skeleton.
 	progress("reading the Ant animation banks", 2);
 	Clock::time_point t0 = Clock::now();
 	core::Result<std::unique_ptr<core::ant::AntInstallSource>> source = core::ant::AntInstallSource::open(*install);
@@ -165,7 +163,6 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 	a->tracks = std::move(*tracks);
 	a->seconds_ant = since(t0);
 
-	// EBX: the level superbundle (meshes, skeletons, variation databases).
 	progress("mounting the level superbundle", 3);
 	t0 = Clock::now();
 	core::Result<std::unique_ptr<core::EbxLibrary>> ebx = core::EbxLibrary::open(*install, { p_spec.superbundle });
@@ -221,12 +218,10 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 	}
 	a->seconds_ebx = since(t0);
 
-	// Meshes: decode LOD 0 (drawn subsets) and bind their bone slots to the rig by name.
 	progress("decoding meshes", 5);
 	t0 = Clock::now();
 	const core::LevelMount &mount = lib.mount(0);
-	// The res alone (a few KB) gives the LOD's bone slots and the cache key; the geometry chunk is read only
-	// when the cache has no entry.
+
 	for (auto [part, skeleton] : { std::pair{ &a->arms, &a->arms_skeleton }, std::pair{ &a->weapon, &a->weapon_skeleton } }) {
 		const Clock::time_point tm = Clock::now();
 		core::Result<MeshHead> head = read_mesh_head(mount, part->mesh);
@@ -263,7 +258,6 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 	}
 	a->seconds_meshes = since(t0);
 
-	// Textures: Diffuse and Normal of every material a drawn surface uses, decoded on all cores.
 	progress("decoding textures", 6);
 	t0 = Clock::now();
 	std::vector<std::pair<std::string, TextureRole>> wanted;
@@ -299,7 +293,7 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 	});
 	for (size_t i = 0; i < wanted.size(); ++i) {
 		if (!errors[i].empty()) {
-			a->notes.push_back("texture skipped: " + errors[i]); // drawn untextured rather than failing the load
+			a->notes.push_back("texture skipped: " + errors[i]);
 			continue;
 		}
 		const PreparedTexture &t = textures[i];
@@ -315,4 +309,4 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 	return a;
 }
 
-} // namespace bf3::render
+}

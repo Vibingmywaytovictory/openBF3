@@ -1,7 +1,3 @@
-// M1 interface contract (docs/design/m1.md §14): every cross-track header of milestone M1 compiles on its own
-// set of includes, the plain types keep the properties the tracks rely on (trivially copyable states, the wire
-// constants), and the inline helpers both sides share (command quantisation, ticks, quantisers) behave as the
-// design says. No data, no Godot; nothing here calls a function a track has yet to implement.
 #include <doctest/doctest.h>
 
 #include "bf3/core/level/collision_soup.h"
@@ -32,15 +28,13 @@
 namespace sim = bf3::sim;
 namespace net = bf3::net;
 
-// ---- compile-time contract ---------------------------------------------------------------------------------
-
 static_assert(sim::kSimHz == 60);
 static_assert(sim::seconds_to_ticks(0.3f) == 18);
 static_assert(sim::seconds_to_ticks(0.5f) == 30);
 static_assert(sim::seconds_to_ticks(0.7f) == 42);
 static_assert(sim::seconds_to_ticks(1.05f) == 63);
-static_assert(sim::seconds_to_ticks(1.0f) == 60); // JumpPenaltyTime
-static_assert(sim::seconds_to_ticks(2.0f) == 120); // ImmortalTimeAfterSpawn
+static_assert(sim::seconds_to_ticks(1.0f) == 60);
+static_assert(sim::seconds_to_ticks(2.0f) == 120);
 static_assert(sim::seconds_to_ticks(0.0f) == 0);
 static_assert(std::is_trivially_copyable_v<sim::Command>);
 static_assert(std::is_trivially_copyable_v<sim::SoldierState>);
@@ -53,12 +47,12 @@ static_assert(sim::query_mask::kMovement == (sim::query_mask::kCollision | sim::
 static_assert(sim::query_mask::kProjectile == (sim::query_mask::kCollision | sim::query_mask::kRaycast));
 static_assert((sim::buttons::kEdgeMask & ~sim::buttons::kWireMask) == 0);
 static_assert(net::kChannelCount == 3);
-static_assert(net::kMaxDatagramBytes <= 1392 - 64); // ENet MTU minus its headers
+static_assert(net::kMaxDatagramBytes <= 1392 - 64);
 static_assert(net::kCommandsPerPacket == 4);
 static_assert(net::quant::kPositionXZ.bits + net::quant::kPositionY.bits + net::quant::kPositionXZ.bits == 60);
 static_assert(net::quant::kPositionXZ.encode(-5000.0f) == 0);
 static_assert(net::quant::kPositionXZ.encode(5000.0f) == net::quant::kPositionXZ.max_code());
-// Plan §7.5: the largest infantry distance (2,252 m, XP5_002) is inside the XZ range.
+
 static_assert(net::quant::kPositionXZ.encode(2252.0f) < net::quant::kPositionXZ.max_code());
 static_assert(net::quant::kPositionXZ.encode(-2252.0f) > 0);
 static_assert(std::is_trivially_copyable_v<net::OtherSoldier>);
@@ -67,13 +61,13 @@ static_assert(std::is_trivially_copyable_v<bf3::host::PresentationFrame>);
 static_assert(std::is_trivially_copyable_v<bf3::host::RestSample>);
 static_assert(std::is_trivially_copyable_v<sim::PredictionEntry>);
 static_assert(net::seq_newer(1, 0) && !net::seq_newer(0, 1) && !net::seq_newer(5, 5));
-static_assert(net::seq_newer(2, 65530) && !net::seq_newer(65530, 2)); // wrap-around
+static_assert(net::seq_newer(2, 65530) && !net::seq_newer(65530, 2));
 static_assert(bf3::core::level::kCollisionSoupVersion >= 1);
 static_assert(sim::idle_command(5, 7, -3, sim::Pose::Prone).tick == 5);
 static_assert(sim::idle_command(5, 7, -3, sim::Pose::Prone).buttons == 0);
 static_assert(uint8_t(bf3::host::LoadStage::Failed) + 1 == bf3::host::kLoadStageCount);
 static_assert(uint8_t(net::DebugKind::Trace) == 5);
-static_assert(net::kMaxTraceTicks >= 20 * sim::kSimHz); // E1's longest course (the 46 m drop and the transitions)
+static_assert(net::kMaxTraceTicks >= 20 * sim::kSimHz);
 static_assert(std::is_same_v<decltype(bf3::host::ServerConfig{}.game), std::shared_ptr<const bf3::host::GameServerConfig>>);
 
 TEST_CASE("m1 contract: yaw quantisation wraps and round-trips within half a step") {
@@ -125,8 +119,7 @@ TEST_CASE("m1 contract: a repeated command keeps held buttons, clears edges and 
 }
 
 TEST_CASE("m1 contract: the hold command is the idle command of the state's tick, view and target pose") {
-	// The server repeats it from the spawn tick until the first real command arrives; the client's catch-up runs
-	// the same commands (docs §9.2), so they are pinned here.
+
 	sim::SoldierState st;
 	st.tick = 4000;
 	st.yaw = 777;
@@ -144,7 +137,7 @@ TEST_CASE("m1 contract: the hold command is the idle command of the state's tick
 	const sim::Command r = sim::repeated_command(h, 4001);
 	CHECK(r.tick == 4001);
 	CHECK((r.flags & sim::command_flags::kRepeated) != 0);
-	// Two repeats of the same hold are equal: the server and the client step identical inputs.
+
 	CHECK(sim::repeated_command(r, 4002) == sim::repeated_command(h, 4002));
 }
 
@@ -157,13 +150,13 @@ TEST_CASE("m1 contract: snapshot quantisers stay within half a step in range") {
 			CHECK(std::fabs(q.decode(q.encode(v)) - v) <= q.step * 0.5f + std::fabs(v) * 1e-6f);
 		}
 	}
-	// Metro's soldier area (y 59.8-73.4 at the spawns) is inside the Y range at 7.8 mm.
+
 	CHECK(net::quant::kPositionY.decode(net::quant::kPositionY.encode(66.6f)) == doctest::Approx(66.6f).epsilon(0.001));
 }
 
 TEST_CASE("m1 contract: default configs match the design numbers") {
 	const bf3::host::ClientSessionConfig c;
-	CHECK(c.interp_min_ms == 75.0f); // plan §2.4's 75-100 ms band (docs §9.4)
+	CHECK(c.interp_min_ms == 75.0f);
 	CHECK(c.interp_max_ms == 150.0f);
 	CHECK(c.error_decay_ms == 100.0f);
 	CHECK(c.target_buffer_ticks == 2);
@@ -171,7 +164,7 @@ TEST_CASE("m1 contract: default configs match the design numbers") {
 	CHECK(c.clock_time_constant_s >= 1.0f);
 	CHECK(c.extrapolate_max_ms == 250.0f);
 	CHECK(c.max_clock_adjust == doctest::Approx(0.05f));
-	// E2's input-edge allowance is the redundancy plus the largest command buffer (docs §1 E2, rest_check.h).
+
 	const bf3::host::RestCheckOptions rest;
 	CHECK(rest.edge_ticks == net::kCommandsPerPacket + c.max_buffer_ticks);
 	CHECK(rest.window_s == 10.0);

@@ -1,8 +1,4 @@
 #pragma once
-// Bounds-checked little-endian reads over one span (port of IW4L bytes.rs). The first failed read
-// is kept (sticky) and every later read returns 0, so a decoder may read a group of fields and test
-// ok() once, as long as it does not act on the values of a failed group. Offsets are 64-bit and
-// overflow-checked, so a hostile pointer cannot wrap around into the span.
 
 #include "bf3/core/res/res_types.h"
 
@@ -15,13 +11,11 @@ inline uint64_t align16(uint64_t p_value) {
 	return (p_value + 15) / 16 * 16;
 }
 
-// Adds offsets; on overflow returns UINT64_MAX, which no span reaches.
 inline uint64_t off(uint64_t p_a, uint64_t p_b) {
 	const uint64_t s = p_a + p_b;
 	return s < p_a ? UINT64_MAX : s;
 }
 
-// Multiplies a count by an element size; on overflow returns UINT64_MAX.
 inline uint64_t mul(uint64_t p_a, uint64_t p_b) {
 	if (p_a != 0 && p_b > UINT64_MAX / p_a) {
 		return UINT64_MAX;
@@ -29,7 +23,6 @@ inline uint64_t mul(uint64_t p_a, uint64_t p_b) {
 	return p_a * p_b;
 }
 
-// Strict UTF-8 check (what Rust's str::from_utf8 accepts).
 bool valid_utf8(const uint8_t *p_data, size_t p_len);
 
 class Reader {
@@ -41,7 +34,7 @@ public:
 	uint64_t size() const { return data_.size(); }
 	bool ok() const { return error_.ok(); }
 	const ResError &error() const { return error_; }
-	// Records p_error unless an earlier one is kept. Returns false for `return r.fail(...)` chains.
+
 	bool fail(const ResError &p_error) {
 		if (error_.ok()) {
 			error_ = p_error;
@@ -49,7 +42,6 @@ public:
 		return false;
 	}
 
-	// IW4L bytes::slice: [at, at + len) must lie inside the span.
 	bool has(uint64_t p_at, uint64_t p_len) {
 		if (!ok()) {
 			return false;
@@ -88,7 +80,7 @@ public:
 	float f32(uint64_t p_at) {
 		return std::bit_cast<float>(u32(p_at));
 	}
-	// Component by component, so a short read reports the same offset as IW4L.
+
 	Vec3 vec3(uint64_t p_at) { return { f32(p_at), f32(off(p_at, 4)), f32(off(p_at, 8)) }; }
 	Vec4 vec4(uint64_t p_at) { return { f32(p_at), f32(off(p_at, 4)), f32(off(p_at, 8)), f32(off(p_at, 12)) }; }
 	ChunkId chunk_id(uint64_t p_at) {
@@ -102,7 +94,6 @@ public:
 		return id;
 	}
 
-	// IW4L cstr_at: NUL-terminated UTF-8 starting at p_at.
 	bool cstr(uint64_t p_at, std::string &r_out) {
 		if (!ok()) {
 			return false;
@@ -125,7 +116,7 @@ public:
 		r_out.assign(reinterpret_cast<const char *>(begin), end);
 		return true;
 	}
-	// IW4L optional_cstr: pointer 0 = empty string.
+
 	std::string optional_cstr(uint64_t p_pointer) {
 		std::string out;
 		if (p_pointer != 0) {
@@ -139,4 +130,4 @@ private:
 	ResError error_;
 };
 
-} // namespace bf3::core::res::detail
+}

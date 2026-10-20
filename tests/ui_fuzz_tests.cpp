@@ -1,13 +1,3 @@
-// UI ui2 readers under seeded in-memory mutations of real install bytes (docs/design/ui-minimap-icons.md §9, §13):
-//   suite "ui-minimap-fuzz" (ctest ui.minimap.fuzz): levels/mp_subway/mp_subway through read_minimap_data, the combat-area
-//     asset levels/mp_subway/ui/minimap/cacs1 through read_combat_area, and three DxTexture headers (the satellite, a
-//     mask, the detail field) through decode_l8_texture;
-//   suite "ui-hud-fuzz" (ctest ui.hud.fuzz): ui/static/hud3dicons through read_hud_icon_atlas, ui/uiweaponmetadata and
-//     ui/uikititemmetadata through ItemIconIndex::read, ui/flow/state/ingamestatemp and ui/uicomponents/uiweaponcomp
-//     through read_hud_source_table, the atlas and M16A4 _small headers through decode_rgba8_texture / decode_item_icon.
-// A mutated partition replaces the real one in an overlay resolver over the real library, so its references still
-// resolve. Every mutant must fail with an error or read to the end; nothing crashes, hangs or allocates past the caps
-// (meant for the asan preset). Mutants per input: 250, or OPENBF3_FUZZ_ITERS. Nothing is written anywhere.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx_db.h"
@@ -44,8 +34,7 @@ void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng) {
 	}
 	const unsigned count = 1 + unsigned(r_rng() % 8);
 	for (unsigned i = 0; i < count; ++i) {
-		// A third of the hits land in the first 512 bytes (headers, tables); the rest anywhere, so payload values
-		// (floats, indices, references) change in partitions that still parse.
+
 		const size_t at = (r_rng() % 3 == 0) ? size_t(r_rng() % std::min<size_t>(r_bytes.size(), 0x200)) : size_t(r_rng() % r_bytes.size());
 		if (mode == 1) {
 			r_bytes[at] ^= uint8_t(1u << (r_rng() % 8));
@@ -63,7 +52,6 @@ void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng) {
 	}
 }
 
-// One partition replaced by a mutant; everything else from the base resolver.
 class OverlayResolver final : public EbxResolver {
 public:
 	OverlayResolver(const EbxResolver &p_base, std::string p_name, const EbxPartition &p_partition) :
@@ -86,18 +74,17 @@ private:
 
 struct Tally {
 	size_t mutants = 0;
-	size_t parsed = 0; // partitions / headers that still parsed
-	size_t read_ok = 0; // readers that returned a value
+	size_t parsed = 0;
+	size_t read_ok = 0;
 };
 
-// Mutants of partition p_name of p_lib through p_read (which gets a resolver holding the mutant).
 Tally fuzz_partition(const EbxLibrary &p_lib, const LevelMount &p_mount, const std::string &p_name, uint64_t p_seed,
 		const std::function<bool(const EbxResolver &, const EbxPartition &)> &p_read) {
 	Tally t;
 	Result<std::vector<uint8_t>> bytes = p_mount.read_ebx(p_name);
 	REQUIRE_MESSAGE(bytes.ok(), p_name);
 	{
-		// The unmutated partition reads through the overlay (so the mutants exercise the readers, not a broken setup).
+
 		Result<EbxPartition> original = EbxPartition::parse(*bytes);
 		REQUIRE(original.ok());
 		const OverlayResolver overlay(p_lib, p_name, *original);
@@ -120,13 +107,12 @@ Tally fuzz_partition(const EbxLibrary &p_lib, const LevelMount &p_mount, const s
 	return t;
 }
 
-// Mutants of a DxTexture res header, decoded against the real chunk.
 Tally fuzz_header(const LevelMount &p_mount, const std::string &p_res, uint64_t p_seed,
 		const std::function<bool(const res::DxTexture &, std::span<const uint8_t>)> &p_decode) {
 	Tally t;
 	Result<res::LoadedTexture> real = res::load_texture(p_mount, p_res);
 	REQUIRE_MESSAGE(real.ok(), p_res);
-	REQUIRE(p_decode(real->texture, real->chunk.bytes)); // the unmutated header decodes
+	REQUIRE(p_decode(real->texture, real->chunk.bytes));
 	std::mt19937_64 rng(p_seed);
 	const size_t iters = t2::fuzz_iters(250);
 	for (size_t i = 0; i < iters; ++i) {
@@ -147,7 +133,7 @@ std::string tally_text(const char *p_what, const Tally &p_t) {
 	return std::string(p_what) + " " + std::to_string(p_t.mutants) + " mutants, " + std::to_string(p_t.parsed) + " parsed, " + std::to_string(p_t.read_ok) + " read";
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-minimap-fuzz") {
 	TEST_CASE("minimap readers under mutation") {

@@ -1,4 +1,3 @@
-// UI ui2: Bf3WorldIcons (world_icons.h; docs/design/ui-minimap-icons.md §10.3).
 #include "world_icons.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -57,8 +56,7 @@ void Bf3WorldIcons::_draw() {
 		}
 		const Vector2 c = camera_->unproject_position(p) + Vector2(0.0f, style_.pixel_offset_y);
 		const float d = eye.distance_to(p);
-		// Scale: 1 at the camera, 1 - MaxScaleMod from ScaleDistance on; fade: 1 until FadeDistance, MaxFarFade from
-		// FadeEndDistance on [semantics inferred from the field names].
+
 		const float ts = std::clamp(d / std::max(1.0f, style_.scale_distance), 0.0f, 1.0f);
 		const float scale = 1.0f - style_.max_scale_mod * ts;
 		const float span = std::max(1.0f, style_.fade_end_distance - style_.fade_distance);
@@ -68,7 +66,7 @@ void Bf3WorldIcons::_draw() {
 		if (r.width <= 0 || r.height <= 0) {
 			continue;
 		}
-		// IconSize is the larger side in canvas units.
+
 		const float k = style_.icon_size * scale / float(std::max(r.width, r.height));
 		const float w = float(r.width) * k;
 		const float h = float(r.height) * k;
@@ -89,4 +87,4 @@ void Bf3WorldIcons::_draw() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

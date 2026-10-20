@@ -1,18 +1,4 @@
 #pragma once
-// Bf3TpCrowdCheck: tp's check of Bf3GameCrowd in the level (M2a tp; docs/design/m2a-tp.md). Scene
-// res://scenes/m2a_tp_crowd.tscn = Node3D root > Session (Bf3LevelSession, Metro TDM) + TpCrowd (this node). Until gx
-// wires Bf3GameCrowd into the level session's wave-3 hooks, this node is the crowd's runtime proof: it loads the crowd
-// as the session would (M2aLoadInputs: the install, the SharedLevel with its GunplayLevel, the cache), builds it under
-// itself and drives it with a scripted M2aFrame (twelve presented soldiers on S3's validated Metro stage: both teams,
-// each kit item, the three stances, a transition, a moving crouch, fire, a reload, a death and a respawn, a weapon
-// switch; PresentEvents on the render clock), one fixed 1/60 s step per display frame.
-//   --tp-check        headless or windowed: the functional rows (drawn soldiers, weapon instances, muzzles and their
-//                     effect frames, unknown weapons, the death hide and the respawn, the weapon rebase, no frozen
-//                     frame); prints "M2A TP CROWD CHECK: PASS|FAIL" and exits 0 / 1 (77: no usable install)
-//   --tp-shots=<dir>  windowed: screenshots of the scripted moments into <dir> (default <repo>/b/shots/tp; refused
-//                     inside the install)
-//   --walkers=0 --no-hud --bf3-cache=<root>  the session's (read here too: the crowd opens the same cache root)
-// The node only uses the session's public accessors (done, failed, install, shared_level, save_screenshot, finish).
 
 #include "game_crowd.h"
 
@@ -36,7 +22,7 @@ class Cache;
 namespace bf3::host {
 struct LevelDatabase;
 struct SharedLevel;
-} // namespace bf3::host
+}
 
 namespace bf3::godot_side {
 
@@ -92,4 +78,4 @@ private:
 	std::vector<std::string> rows_;
 };
 
-} // namespace bf3::godot_side
+}

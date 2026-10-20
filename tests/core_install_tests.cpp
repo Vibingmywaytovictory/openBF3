@@ -1,5 +1,3 @@
-// Read-only checks against the retail install (OPENBF3_INSTALL or the default path). Every case
-// skips when no install is found. Asserts numbers only; nothing from the install is stored.
 #include <doctest/doctest.h>
 
 #include "bf3/core/install_reader.h"
@@ -22,7 +20,7 @@ bool mount_or_skip(InstallReader &r_reader) {
 	return true;
 }
 
-} // namespace
+}
 
 TEST_SUITE("install") {
 	TEST_CASE("install: layout, patch and xpacks") {
@@ -48,13 +46,13 @@ TEST_SUITE("install") {
 			return;
 		}
 		bf3::core::ReadOnlyFile a = reader.open("Data/layout.toc");
-		bf3::core::ReadOnlyFile b = reader.open("Data\\layout.toc"); // a second reader at the same time
+		bf3::core::ReadOnlyFile b = reader.open("Data\\layout.toc");
 		REQUIRE(a.is_open());
 		REQUIRE(b.is_open());
 		CHECK(a.size() > 16);
 		uint8_t magic[4] = {};
 		REQUIRE(a.read_at(0, magic, 4) == 4);
-		// Obfuscated/plain toc header 00 D1 CE 0x.
+
 		CHECK(magic[0] == 0x00);
 		CHECK(magic[1] == 0xD1);
 		CHECK(magic[2] == 0xCE);
@@ -93,7 +91,7 @@ TEST_SUITE("install") {
 			return;
 		}
 		const bf3::core::InstallSnapshot before = reader.snapshot();
-		// Read every byte of layout.toc and a few headers, as a session would.
+
 		std::vector<uint8_t> bytes;
 		REQUIRE(reader.open("Data/layout.toc").read_all(bytes));
 		const bf3::core::InstallSnapshot after = reader.snapshot();

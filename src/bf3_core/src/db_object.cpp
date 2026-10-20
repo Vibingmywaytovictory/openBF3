@@ -1,4 +1,3 @@
-// Ported from IW4L superbundle_bf3 (dbobject.rs), Apache-2.0.
 #include "bf3/core/db_object.h"
 
 #include "format_errors.h"
@@ -16,7 +15,7 @@ constexpr uint8_t kTagAnonymous = 0x80;
 template <class T>
 T load_le(const uint8_t *p) {
 	T v;
-	std::memcpy(&v, p, sizeof(T)); // x64 is little-endian
+	std::memcpy(&v, p, sizeof(T));
 	return v;
 }
 
@@ -24,14 +23,13 @@ int64_t zigzag(uint64_t p_value) {
 	return static_cast<int64_t>(p_value >> 1) ^ -static_cast<int64_t>(p_value & 1);
 }
 
-} // namespace
+}
 
 class DbParser {
 public:
 	DbParser(std::span<const uint8_t> p_bytes, size_t p_at, DbDocument &r_doc) :
 			bytes_(p_bytes), at_(p_at), doc_(r_doc) {}
 
-	// Returns the node index, kDbNoNode for an end marker; sets failed_ on error.
 	Status element(size_t p_depth, uint32_t &r_index) {
 		r_index = kDbNoNode;
 		const size_t tag_at = at_;
@@ -264,8 +262,6 @@ Result<DbDocument> DbDocument::parse(std::span<const uint8_t> p_bytes) {
 	return doc;
 }
 
-// ---------------------------------------------------------------------------------------------
-
 DbType DbRef::type() const {
 	return doc_->node(index_).type;
 }
@@ -363,4 +359,4 @@ std::optional<std::span<const uint8_t>> DbRef::as_blob() const {
 	return doc_->source().subspan(n.data_at, n.data_len);
 }
 
-} // namespace bf3::core
+}

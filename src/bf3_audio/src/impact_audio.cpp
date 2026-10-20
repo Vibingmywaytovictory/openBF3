@@ -1,6 +1,3 @@
-// Impact and effect sounds in the game's mixer (impact_audio.h; as built: docs/design/m2a-au3.md "Impacts").
-// Game thread only; every start goes through the OneShotPool the weapon router shares.
-
 #include "bf3/audio/impact_audio.h"
 
 #include "bf3/audio/audio_load.h"
@@ -14,11 +11,10 @@ namespace ca = core::audio;
 
 namespace {
 
-// A level names a few dozen impact patches; a hostile list is cut here (counted as failures).
 constexpr size_t kMaxImpactPatches = 4096;
-// Effect sounds tracked for their SoundStop; one past the pool's limit can never be live at once.
+
 constexpr size_t kMaxEffectSounds = kMaxOneShotVoices * 2;
-// Impacts beyond this distance from the listener are not started (the patches' own distance gates are far shorter).
+
 constexpr float kMaxImpactDistanceM = 400.0f;
 
 bool finite(const Vec3 &p_v) {
@@ -30,9 +26,7 @@ float distance(const Vec3 &p_a, const Vec3 &p_b) {
 	return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-} // namespace
-
-// ---- ImpactSoundCache ---------------------------------------------------------------------------------------------
+}
 
 core::Result<std::shared_ptr<const ImpactSoundCache>> ImpactSoundCache::build(const core::EbxResolver &p_db, std::span<const std::string> p_patches) {
 	auto cache = std::make_shared<ImpactSoundCache>();
@@ -55,8 +49,7 @@ core::Result<std::shared_ptr<const ImpactSoundCache>> ImpactSoundCache::build(co
 			cache->errors_.push_back(name + ": more than " + std::to_string(kMaxImpactPatches) + " impact patches");
 			continue;
 		}
-		// Strict first (the evaluated node set); a patch with a node A2 does not evaluate still plays with that node
-		// writing 0 (its error is kept, it counts as compiled).
+
 		core::Result<std::shared_ptr<const ca::SoundProgram>> prog = compile_patch(p_db, name);
 		if (!prog) {
 			ca::CompileOptions lenient;
@@ -120,8 +113,6 @@ std::span<const std::string> ImpactSoundCache::errors() const {
 	return errors_;
 }
 
-// ---- ImpactAudio --------------------------------------------------------------------------------------------------
-
 struct ImpactAudio::Impl {
 	MixerCore &mixer;
 	std::shared_ptr<const ImpactSoundCache> cache;
@@ -135,7 +126,7 @@ struct ImpactAudio::Impl {
 		uint32_t component = 0;
 		InstanceHandle handle = kNoInstance;
 	};
-	std::vector<EffectSound> effect_sounds; // <= kMaxEffectSounds, oldest first
+	std::vector<EffectSound> effect_sounds;
 
 	Impl(MixerCore &r_mixer, std::shared_ptr<const ImpactSoundCache> p_cache, std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning,
 			OneShotPool &r_pool) :
@@ -166,7 +157,7 @@ ImpactAudio::ImpactAudio(MixerCore &r_mixer, std::shared_ptr<const ImpactSoundCa
 ImpactAudio::~ImpactAudio() = default;
 
 void ImpactAudio::set_listener(const ListenerState &p_listener) {
-	impl_->listener = p_listener; // the router's set_listener re-sends the shared pool's emitters
+	impl_->listener = p_listener;
 }
 
 void ImpactAudio::play_impact(const ImpactSoundRequest &p_request, SimMixerClock &r_clock) {
@@ -177,7 +168,7 @@ void ImpactAudio::play_impact(const ImpactSoundRequest &p_request, SimMixerClock
 		return;
 	}
 	if (!finite(p_request.position) || distance(p_request.position, m.listener.position) > kMaxImpactDistanceM) {
-		return; // out of earshot: not a refusal
+		return;
 	}
 	if (m.start(program, p_request.seed, p_request.position, r_clock.frame_of(p_request.time, p_request.timeline))) {
 		++m.stats.impacts;
@@ -222,4 +213,4 @@ const ImpactAudioStats &ImpactAudio::stats() const {
 	return impl_->stats;
 }
 
-} // namespace bf3::audio
+}

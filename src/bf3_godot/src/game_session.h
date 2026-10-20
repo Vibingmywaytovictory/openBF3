@@ -1,12 +1,4 @@
 #pragma once
-// GameSession: the node a scene places to run a listen session (plan §2.6). S0: starts the
-// ServerHost (own thread, own Jolt) and a loopback client, mounts the install read-only, draws
-// the server's bodies and a debug overlay. User args (after "--"):
-//   --s0-selftest [--selftest-seconds=N]   run the S0 checks, print a PASS/FAIL table, quit 0/1
-//   --screenshot=<png> --quit-after=<s>    save the viewport to <png> just before quitting (and to
-//                                          <png stem>_mid.png halfway)
-//   --bf3-install=<dir>                    install override (else OPENBF3_INSTALL, the project
-//                                          setting openbf3/install/path, the default path)
 
 #include "bf3/core/install_reader.h"
 #include "bf3/host/loopback_client.h"
@@ -23,7 +15,7 @@ namespace godot {
 class CanvasLayer;
 class Label;
 class MeshInstance3D;
-} // namespace godot
+}
 
 namespace bf3::godot_side {
 
@@ -53,7 +45,6 @@ public:
 	void set_server_bodies_offset(const godot::Vector3 &p_value) { server_bodies_offset_ = p_value; }
 	godot::Vector3 get_server_bodies_offset() const { return server_bodies_offset_; }
 
-	// Used by the self-test.
 	const bf3::core::InstallReader &install() const { return install_; }
 	const bf3::core::InstallSnapshot &install_snapshot_at_start() const { return install_before_; }
 	bf3::host::ServerStats server_stats() const;
@@ -97,4 +88,4 @@ private:
 	bool mid_screenshot_done_ = false;
 };
 
-} // namespace bf3::godot_side
+}

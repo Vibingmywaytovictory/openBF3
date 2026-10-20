@@ -1,4 +1,3 @@
-// The vm demo's scripted weapon timeline (docs/design/m2a-vm.md). See vm_script.h.
 #include "vm_script.h"
 
 #include "bf3/sim/command.h"
@@ -17,13 +16,11 @@ namespace vm_script {
 
 namespace {
 
-constexpr uint64_t kMatchSeed = 0x766d2d64656d6full; // "vm-demo"
+constexpr uint64_t kMatchSeed = 0x766d2d64656d6full;
 constexpr sim::Tick kSpawnTick = 600;
 constexpr double kTick = 1.0 / double(sim::kSimHz);
-constexpr uint32_t kGuardTicks = 60 * 12; // no scripted step waits longer than 12 s (a stuck phase ends the step)
+constexpr uint32_t kGuardTicks = 60 * 12;
 
-// A display time on the sim clock in units, rounded to the nearest unit: a display frame that lands on a tick
-// boundary (t0 + n / fps in double) sees that tick's events and state, not the previous ones.
 int64_t display_units(double p_seconds) {
 	return int64_t(std::llround(p_seconds * double(sw::kTimeUnitsPerSecond)));
 }
@@ -71,7 +68,7 @@ struct Driver {
 			run.shots.push_back(out.shots[k]);
 		}
 	}
-	// A tap pattern: 2 ticks down, 4 up (10 Hz edges; single-fire weapons need the edge).
+
 	bool tap() {
 		const bool down = (tap_counter % 6) < 2;
 		++tap_counter;
@@ -85,7 +82,7 @@ struct Driver {
 		}
 	}
 	void mark(const char *p_label) { run.marks.push_back({ now(), st.active, p_label }); }
-	// Waits for the slot's deploy to end (zoom held: the refusal rows).
+
 	void wait_deployed(uint8_t p_slot, bool p_zoom) {
 		for (uint32_t i = 0; i < kGuardTicks; ++i) {
 			if (st.active == p_slot && st.pending == 0xFF && cur().phase != sw::WeaponPhase::Deploying && cur().phase != sw::WeaponPhase::None) {
@@ -101,8 +98,7 @@ struct Driver {
 		in.select_slot = p_slot;
 		step(in);
 	}
-	// Presses reload and, while it runs, the trigger from the tick the reload ends in on (fire again at once).
-	// An automatic reload (an emptied magazine) that already runs is not pressed again.
+
 	void reload_then_fire(const char *p_label) {
 		if (cur().phase != sw::WeaponPhase::Reloading && cur().phase != sw::WeaponPhase::ReloadShell) {
 			sw::WeaponInput press;
@@ -124,7 +120,7 @@ struct Driver {
 		bool pressed = false;
 		for (uint32_t i = 0; i < kGuardTicks; ++i) {
 			const bool reloading = cur().phase == sw::WeaponPhase::Reloading || cur().phase == sw::WeaponPhase::ReloadShell;
-			// The trigger goes down in the tick whose step covers the reload's end (tick_end > phase_end).
+
 			const double end = sw::units_to_seconds(cur().phase_end);
 			const bool in_end_tick = reloading && cur().phase_end > 0 && sw::units_to_seconds(sw::tick_end(tick + 1)) > end;
 			sw::WeaponInput in;
@@ -135,7 +131,7 @@ struct Driver {
 				break;
 			}
 		}
-		// Hold for 0.2 s after the finish (the shot that cuts the clip), then let go.
+
 		for (uint32_t i = 0; i < uint32_t(0.2 * sim::kSimHz); ++i) {
 			sw::WeaponInput in;
 			in.fire = true;
@@ -144,7 +140,7 @@ struct Driver {
 	}
 };
 
-} // namespace
+}
 
 double KitRun::start_s() const {
 	return sw::units_to_seconds(sw::tick_end(spawn));
@@ -184,17 +180,16 @@ KitRun run_kit(const sw::WeaponTable &p_table, size_t p_kit, const std::array<ui
 	run.yaw.push_back(0.0);
 	run.pitch.push_back(0.0);
 
-	// Primary: zoom held through the spawn deploy (refused), hip idle.
 	d.wait_deployed(0, true);
 	d.idle(0.3);
 	d.mark("hip");
-	// Look and move, then stillness (the springs come to rest).
+
 	for (uint32_t i = 0; i < uint32_t(0.6 * sim::kSimHz); ++i) {
 		d.step(sw::WeaponInput{}, false, 4.0f, 1.2f * float(std::sin(double(i) * 0.15)), 0.4f);
 	}
 	d.mark("settle");
 	d.idle(1.3);
-	// Iron sights with aimed shots.
+
 	d.mark("zoom_press");
 	for (uint32_t i = 0; i < uint32_t(1.0 * sim::kSimHz); ++i) {
 		sw::WeaponInput in;
@@ -207,17 +202,17 @@ KitRun run_kit(const sw::WeaponTable &p_table, size_t p_kit, const std::array<ui
 	}
 	d.mark("zoom_release");
 	d.idle(0.6);
-	// Hip fire.
+
 	for (uint32_t i = 0; i < uint32_t(0.3 * sim::kSimHz); ++i) {
 		sw::WeaponInput in;
 		in.fire = d.tap();
 		d.step(in);
 	}
 	d.idle(0.3);
-	// Tactical reload, the trigger down in the tick it ends in.
+
 	d.reload_then_fire("reload_start");
 	d.idle(0.4);
-	// Sprint with zoom held (refused), then the sprint recovery.
+
 	d.mark("sprint");
 	for (uint32_t i = 0; i < uint32_t(0.8 * sim::kSimHz); ++i) {
 		sw::WeaponInput in;
@@ -225,7 +220,7 @@ KitRun run_kit(const sw::WeaponTable &p_table, size_t p_kit, const std::array<ui
 		d.step(in, true, 6.5f);
 	}
 	d.idle(0.4);
-	// Empty the magazine, then the empty reload.
+
 	for (uint32_t i = 0; i < kGuardTicks && d.cur().magazine > 0; ++i) {
 		sw::WeaponInput in;
 		in.fire = d.tap();
@@ -235,7 +230,6 @@ KitRun run_kit(const sw::WeaponTable &p_table, size_t p_kit, const std::array<ui
 	d.reload_then_fire("reload_empty_start");
 	d.idle(0.4);
 
-	// Sidearm: deploy (zoom held: refused), ADS with shots, reload.
 	d.select(1);
 	d.wait_deployed(1, true);
 	d.idle(0.3);
@@ -256,7 +250,6 @@ KitRun run_kit(const sw::WeaponTable &p_table, size_t p_kit, const std::array<ui
 	d.reload_then_fire("reload_start");
 	d.idle(0.4);
 
-	// M67: hold and release.
 	d.select(2);
 	d.wait_deployed(2, false);
 	d.idle(0.3);
@@ -270,7 +263,6 @@ KitRun run_kit(const sw::WeaponTable &p_table, size_t p_kit, const std::array<ui
 	d.mark("throw");
 	d.idle(1.6);
 
-	// Knife: one stab.
 	d.select(3);
 	d.wait_deployed(3, false);
 	d.idle(0.3);
@@ -337,7 +329,7 @@ void events_between(const KitRun &p_run, double p_from, double p_to, std::vector
 	std::stable_sort(r_events.begin(), r_events.end(), [](const bf3::host::PresentEvent &p_a, const bf3::host::PresentEvent &p_b) { return p_a.time < p_b.time; });
 }
 
-} // namespace vm_script
+}
 
 namespace m2a_fake {
 
@@ -362,7 +354,7 @@ bf3::host::PresentedWeapon present_weapon(const sw::SoldierWeaponsState &p_prev,
 	p.phase_end_s = sw::units_to_seconds(b.phase_end);
 	const double len = p.phase_end_s - p.phase_start_s;
 	p.phase_progress = b.phase_end > 0 && len > 0 ? float(std::clamp((p_time_s - p.phase_start_s) / len, 0.0, 1.0)) : 0.0f;
-	// A slot change between the two ticks: no lerp across items.
+
 	const bool same = p_prev.active == p_curr.active && a.def == b.def;
 	p.spread_deg = same ? a.spread + (b.spread - a.spread) * f : b.spread;
 	p.recoil.pitch = same ? a.recoil.pitch + (b.recoil.pitch - a.recoil.pitch) * f : b.recoil.pitch;
@@ -372,6 +364,6 @@ bf3::host::PresentedWeapon present_weapon(const sw::SoldierWeaponsState &p_prev,
 	return p;
 }
 
-} // namespace m2a_fake
+}
 
-} // namespace bf3::godot_side
+}

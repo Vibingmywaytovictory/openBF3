@@ -1,27 +1,5 @@
-// m2a.contract3 (docs/design/m2a-w3.md; written in W3.0 by the integrator): compiles every Godot-free wave-3 interface
-// header together and pins
-//   * the POD shapes and enum values the tracks share (PresentedOtherWeapon, PresentClock, MuzzleSample, the stats
-//     structs, FirefightMode, WeaponAudioForm, TriggerPurpose, M2aCase / M2aTrack, CrowdSoldierInput's new fields);
-//   * the defaults of FirefightConfig (m2a.md §10.2, §16), the voice limits (§12.3, Q9), the decal pool (§12.2), the
-//     E7 listener distances and the crowd lane rule (§3, Q11) with the wire-to-crowd team map;
-//   * the seed formulas as hashes (§4.4: sound_seed, trigger_seed, firefight_seed, cl's effect_seed);
-//   * G1 (the others' team, 2 bits: 52 others fit a snapshot without the own state), G2 (present_other_weapon draws the
-//     fields of the sample present_others draws: the generations agree at every render time), the presentation
-//     clocks, G3 (GameServer::init with and without GameServerConfig::firefight), G4 (send_kit_select on a session
-//     that never started), G5 (make_client_gunplay_inputs refuses a level without gunplay tables) and the M2a check's
-//     case parser.
-// The Godot-side headers (game_audio.h, game_fx.h, game_crowd.h, viewmodel_muzzle.h, level_session_m2a.h) compile
-// together in the GDExtension (src/bf3_godot/src/m2a_w3_headers.cpp); m2a_game.h and m2a_check.h are Godot-free and
-// compile here too.
-//
-// Pending rows (the wave-2 pattern, m2a_contract_tests.cpp): a row whose subject is a track's body runs only when its
-// owner sets the switch below in the commit that lands the body; until then it prints "PENDING (<key>)" and checks
-// what the contract alone defines. Calls of declared-only functions sit in `if constexpr` branches, so the test links
-// before their bodies exist. No install, no session thread, no wall-clock row.
-
 #include <doctest/doctest.h>
 
-// Every Godot-free wave-3 interface header, compiled together.
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/audio/game_audio_check.h"
 #include "bf3/audio/impact_audio.h"
@@ -59,19 +37,16 @@ namespace gs = bf3::godot_side;
 
 namespace {
 
-// ---- the tracks' switches (each set to true by its owner, in the commit that lands the body) ------------------
-constexpr bool kBtLanded = true; // bt: firefight_brain.cpp (add_firefight_bots, firefight_layout, FirefightBrain)
-constexpr bool kTpLanded = true; // tp: CrowdEvaluator::muzzle_model and R5
-constexpr bool kAu3Landed = true; // au3: weapon_audio.cpp, impact_audio.cpp, game_audio_check.cpp
-constexpr bool kFx3Landed = true; // fx3: triggers.cpp
+constexpr bool kBtLanded = true;
+constexpr bool kTpLanded = true;
+constexpr bool kAu3Landed = true;
+constexpr bool kFx3Landed = true;
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2a.contract3: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);
 	const std::string text = std::string("PENDING (") + p_key + "): " + p_row;
 	MESSAGE(text);
 }
-
-// ---- shapes ----------------------------------------------------------------------------------------------------
 
 static_assert(sizeof(host::PresentEvent) == 64);
 static_assert(std::is_trivially_copyable_v<host::PresentedOtherWeapon>);
@@ -88,7 +63,6 @@ static_assert(std::is_base_of_v<host::CommandSource, host::FirefightBrain>);
 static_assert(std::is_base_of_v<audio::MixTap, audio::GameAudioCheck>);
 static_assert(std::is_base_of_v<audio::WeaponAudioObserver, audio::GameAudioCheck>);
 
-// Enum values the tracks and the reports share.
 static_assert(uint8_t(host::FirefightMode::Pairs) == 0 && uint8_t(host::FirefightMode::Free) == 1);
 static_assert(uint8_t(audio::WeaponAudioForm::None) == 0 && uint8_t(audio::WeaponAudioForm::Driver) == 1 &&
 		uint8_t(audio::WeaponAudioForm::OneShot) == 2);
@@ -104,29 +78,25 @@ static_assert(gs::m2a_case_track(gs::M2aCase::Audio) == gs::M2aTrack::Au3 && gs:
 static_assert(uint8_t(host::PresentTimeline::Predicted) == 0 && uint8_t(host::PresentTimeline::Render) == 1 &&
 		uint8_t(host::PresentTimeline::Immediate) == 2);
 
-// Limits (§12.2, §12.3, §16 Q9, E7) and the crowd's weapon bound.
-static_assert(audio::kMaxWeaponVoices == 128 && audio::kMaxOneShotVoices == 128 && audio::kGameMixerInstances == 256); // M2b au R6 (A2: 32 / 64 / 96)
+static_assert(audio::kMaxWeaponVoices == 128 && audio::kMaxOneShotVoices == 128 && audio::kGameMixerInstances == 256);
 static_assert(fx::kMaxDecals == 256 && fx::kDecalFadeSeconds == 30.0f && fx::kTracerConvergeM == 30.0f);
 static_assert(audio::kGameCheckDistances == std::array<float, 6>{ 5.0f, 20.0f, 100.0f, 150.0f, 280.0f, 320.0f });
 static_assert(anim::kMaxCrowdWeapons == 8 && anim::kCrowdLanesListenMax == 4);
-// tp's 3p weapon route (m2a-w3.md §3): the evaluator's weapon outputs, by type (unevaluated: no body needed yet).
+
 static_assert(anim::kNoCrowdWeapon == 0xFF);
 static_assert(std::is_same_v<decltype(&anim::CrowdEvaluator::weapon_of), uint8_t (anim::CrowdEvaluator::*)(uint32_t) const>);
 static_assert(std::is_same_v<decltype(&anim::CrowdEvaluator::weapon_palette),
 		std::span<const anim::Mat34> (anim::CrowdEvaluator::*)(uint32_t) const>);
 static_assert(std::is_same_v<decltype(&anim::CrowdEvaluator::muzzle_model), bool (anim::CrowdEvaluator::*)(uint32_t, anim::Xform &) const>);
 
-// The crowd lane rule (§3, §16 Q11): S3 alone clamp(hc - 4, 2, 6); with a listen server clamp(hc - 8, 2, 4); 0
-// reported cores count as 2 lanes.
 static_assert(anim::crowd_lanes(0, false) == 2 && anim::crowd_lanes(0, true) == 2);
 static_assert(anim::crowd_lanes(16, false) == 6 && anim::crowd_lanes(8, false) == 4 && anim::crowd_lanes(4, false) == 2);
 static_assert(anim::crowd_lanes(16, true) == 4 && anim::crowd_lanes(12, true) == 4 && anim::crowd_lanes(11, true) == 3);
 static_assert(anim::crowd_lanes(10, true) == 2 && anim::crowd_lanes(8, true) == 2 && anim::crowd_lanes(2, true) == 2);
-// The wire's team (1 US, 2 RU, 0 unknown) to the crowd's (0 US, 1 RU).
+
 static_assert(anim::crowd_team_of_wire(0) == 0 && anim::crowd_team_of_wire(1) == 0 && anim::crowd_team_of_wire(2) == 1 &&
 		anim::crowd_team_of_wire(3) == 0);
 
-// ---- seeds as hashes (§4.4; the values are splitmix64 written out once in Python for this file) ------------------
 static_assert(audio::sound_seed(7, 5) == 0xf90639b22b02a930ull);
 static_assert(audio::sound_seed(0, 0) == 0xe220a8397b1dcdafull);
 static_assert(audio::sound_seed(7, 5) == sw::splitmix64((uint64_t(7) << 32) | 5));
@@ -148,8 +118,6 @@ net::OtherSoldier other_with(uint8_t p_slot, uint8_t p_generation, uint8_t p_wea
 	return o;
 }
 
-// A frame with two others: slot 4 with samples at ticks 10 (gen 1, weapon 2) and 12 (gen 2, weapon 5); slot 9 with
-// one sample at tick 11; and an empty track between them (present_others skips it).
 host::PresentationFrame two_others_frame() {
 	host::PresentationFrame f;
 	f.valid = true;
@@ -167,7 +135,7 @@ host::PresentationFrame two_others_frame() {
 	return f;
 }
 
-} // namespace
+}
 
 TEST_SUITE("m2a-contract3") {
 	TEST_CASE("m2a.contract3: defaults of the W3.0 structs (FirefightConfig §10.2, crowd inputs, audio and FX configs)") {
@@ -209,7 +177,7 @@ TEST_SUITE("m2a-contract3") {
 		CHECK(cw.muzzle_joint == -1);
 		CHECK(cw.weapon_local.empty());
 		const anim::CrowdTeam team;
-		CHECK(team.weapons.empty()); // S3's teams: index 0 = the team's own data
+		CHECK(team.weapons.empty());
 
 		const audio::WeaponAudioConfig wc;
 		CHECK(wc.max_weapon_voices == audio::kMaxWeaponVoices);
@@ -238,7 +206,7 @@ TEST_SUITE("m2a-contract3") {
 	TEST_CASE("m2a.contract3: seeds of §4.4 (cl's effect seed pinned as a hash)") {
 		CHECK(host::effect_seed(0x5EED5EED12345678ull, 3, 42) == 0xb5be2a90e372ab24ull);
 		CHECK(host::effect_seed(0x5EED5EED12345678ull, 3, 42) == sw::splitmix64(0x5EED5EED12345678ull ^ ((uint64_t(3) << 32) | 42u)));
-		// The per-start seeds inside one event differ by purpose and by index.
+
 		CHECK(fx::trigger_seed(kEventSeed, fx::TriggerPurpose::Muzzle, 0) != fx::trigger_seed(kEventSeed, fx::TriggerPurpose::Shell, 0));
 		CHECK(fx::trigger_seed(kEventSeed, fx::TriggerPurpose::Muzzle, 0) != fx::trigger_seed(kEventSeed, fx::TriggerPurpose::Muzzle, 1));
 	}
@@ -258,7 +226,7 @@ TEST_SUITE("m2a-contract3") {
 		size_t dropped = 0;
 		const std::vector<uint8_t> bytes = net::encode_snapshot(s, &dropped);
 		CHECK(bytes.size() <= net::kMaxDatagramBytes);
-		CHECK(dropped == 127 - 52); // 180 bits per other (G1: +2)
+		CHECK(dropped == 127 - 52);
 		const auto d = net::decode_snapshot(bytes);
 		REQUIRE(d);
 		if (!d) {
@@ -272,7 +240,7 @@ TEST_SUITE("m2a-contract3") {
 
 	TEST_CASE("m2a.contract3: G2: present_other_weapon draws the fields of the sample present_others draws") {
 		host::PresentationFrame f = two_others_frame();
-		// Render times around slot 4's samples (10, 12) and slot 9's single sample (11).
+
 		for (const double rt : { 9.0, 10.0, 10.5, 11.0, 11.999, 12.0, 12.5, 30.0 }) {
 			f.render_ticks_at_publish = rt;
 			const uint64_t now = f.publish_ns;
@@ -293,7 +261,7 @@ TEST_SUITE("m2a-contract3") {
 				CHECK(one.generation == weapons[i].generation);
 				CHECK(one.sample_tick == weapons[i].sample_tick);
 			}
-			// Slot 4: the older sample's fields until u reaches 1 (render tick 12), then the newer's.
+
 			const host::PresentedOtherWeapon w4 = host::present_other_weapon(f, 4, rt);
 			const bool newer = rt >= 12.0;
 			CHECK(w4.generation == (newer ? 2 : 1));
@@ -301,10 +269,10 @@ TEST_SUITE("m2a-contract3") {
 			CHECK(w4.team == (newer ? 2 : 1));
 			CHECK(w4.burst_seq == (newer ? 4 : 3));
 			CHECK(w4.sample_tick == (newer ? 12u : 10u));
-			// Slot 9 has no weapon (255 on the wire).
+
 			CHECK(host::present_other_weapon(f, 9, rt).def == sw::kNoWeapon);
 		}
-		// No track: valid false; the empty track is skipped as present_others skips it.
+
 		CHECK_FALSE(host::present_other_weapon(f, 6, 11.0).valid);
 		CHECK_FALSE(host::present_other_weapon(f, 77, 11.0).valid);
 	}
@@ -325,7 +293,7 @@ TEST_SUITE("m2a-contract3") {
 		CHECK(c.render == 90 * sw::kTimeUnitsPerTick + sw::kTimeUnitsPerTick / 4);
 		CHECK(c.now(host::PresentTimeline::Predicted) == c.predicted);
 		CHECK(c.now(host::PresentTimeline::Render) == c.render);
-		// A later display frame moves both clocks forward.
+
 		const host::PresentClock later = host::present_clock(f, f.publish_ns + 4'000'000ull);
 		CHECK(later.render > c.render);
 		CHECK(later.predicted >= c.predicted);
@@ -352,7 +320,7 @@ TEST_SUITE("m2a-contract3") {
 			auto ff = std::make_shared<host::FirefightConfig>();
 			ff->count = 0;
 			cfg.firefight = ff;
-			CHECK(server.init(cfg).ok()); // count 0 adds nothing
+			CHECK(server.init(cfg).ok());
 		}
 		host::GameServer server;
 		host::GameServerConfig cfg;
@@ -368,7 +336,7 @@ TEST_SUITE("m2a-contract3") {
 			CHECK_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 			CHECK(server.stats().soldiers >= 4);
 		} else {
-			// The W3.0 stub refuses loudly instead of running without the bots.
+
 			CHECK_FALSE(st.ok());
 			if (!st.ok()) {
 				CHECK(st.error().message.find("W3.0 stub") != std::string::npos);
@@ -384,7 +352,7 @@ TEST_SUITE("m2a-contract3") {
 			k.kit = 2;
 			k.team = 1;
 			for (int i = 0; i < 40; ++i) {
-				session.send_kit_select(k); // queued (newest 16 kept), sent once the client thread runs
+				session.send_kit_select(k);
 			}
 			session.stop();
 		}
@@ -439,7 +407,7 @@ TEST_SUITE("m2a-contract3") {
 			team.triangles = 70;
 		}
 		CHECK(render::strip_team_weapon_parts(assets) == 2);
-		CHECK(render::strip_team_weapon_parts(assets) == 0); // idempotent
+		CHECK(render::strip_team_weapon_parts(assets) == 0);
 		for (const render::SoldierTeam &team : assets.teams) {
 			REQUIRE(team.parts.size() == 1);
 			CHECK_FALSE(team.parts[0].weapon);
@@ -448,7 +416,7 @@ TEST_SUITE("m2a-contract3") {
 		}
 
 		render::CrowdWeaponSet set;
-		for (uint16_t d = 0; d < 10; ++d) { // more than kMaxCrowdWeapons: the views stop at 8
+		for (uint16_t d = 0; d < 10; ++d) {
 			render::CrowdWeaponPart part;
 			part.spec.def = uint16_t(100 + d);
 			part.have_reload = (d % 2) == 0;
@@ -474,7 +442,7 @@ TEST_SUITE("m2a-contract3") {
 		CHECK(render::crowd_weapons_of(set, 2).empty());
 		CHECK(render::crowd_weapon_index(set, 0, 100) == 0);
 		CHECK(render::crowd_weapon_index(set, 0, 107) == 7);
-		CHECK(render::crowd_weapon_index(set, 0, 108) == -1); // past kMaxCrowdWeapons
+		CHECK(render::crowd_weapon_index(set, 0, 108) == -1);
 		CHECK(render::crowd_weapon_index(set, 1, 100) == -1);
 		CHECK(render::crowd_weapon_index(set, 5, 100) == -1);
 		CHECK(set.texture("none") == nullptr);
@@ -482,8 +450,7 @@ TEST_SUITE("m2a-contract3") {
 
 	TEST_CASE("m2a.contract3: the tracks' bodies (pending until each lands)") {
 		if constexpr (kAu3Landed) {
-			// SimMixerClock: an Immediate event and a Predicted event in the past map to earliest_frame(), the latter
-			// counted late; a Render event 0.5 s ahead maps half a second of frames past the heard frame.
+
 			audio::MixerCore mixer(audio::MixerConfig{});
 			audio::SimMixerClock clock(mixer);
 			host::PresentClock now;

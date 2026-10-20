@@ -1,9 +1,3 @@
-// The per-soldier weapon state machine (docs/design/m2a-weapons.md §5.2-§5.5; weapon_sim.h).
-//
-// One tick is an event loop over exact sub-tick times: starting at tick_start(T), the active slot's next event
-// (a phase end, a reload commit, a shot, a hold start or throw, a reload start) is taken in time order until none
-// falls before tick_end(T). Every loop is bounded (kMaxLoopEvents per tick, at most kMaxShotsPerTick shots), so a
-// hostile def cannot make a tick long, and every time is an integer, so the result is the same on every machine.
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include "bf3/sim/soldier_motor.h"
@@ -18,7 +12,6 @@ namespace bf3::sim::weapons {
 
 namespace {
 
-// Events the loop may process in one tick: 8 shots plus every phase change a tick can hold, with room.
 constexpr int kMaxLoopEvents = 64;
 constexpr SimTime kNever = std::numeric_limits<SimTime>::max();
 
@@ -81,11 +74,10 @@ void start_reload(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Weapo
 	timed(r_io, p_time, weapon_events::kReloadStarted, p_slot);
 }
 
-// The rounds go in (ReloadThreshold passed, [unmeasured] rule, §5.5).
 void commit_reload(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSimDef &p_d, SimTime p_time) {
 	int32_t target = p_d.magazine_capacity;
 	if (r_io.mech.empty_reload_unchambered && p_d.reload_type == ReloadType::MagazineWithPossibleShorterReload && r_s.magazine == 0 && target > 1) {
-		target -= 1; // no round chambered after an empty reload (Symthic "30 + 1")
+		target -= 1;
 	}
 	const int32_t need = std::max(0, target - r_s.magazine);
 	const int32_t take = p_d.unlimited_ammo ? need : std::min(need, r_s.reserve);
@@ -104,8 +96,6 @@ void finish_phase(WeaponSlotState &r_s) {
 	r_s.flags = uint8_t(r_s.flags & ~(slot_flags::kReloadCommitted | slot_flags::kBoltWaitsRelease));
 }
 
-// Fires one shot of the active slot at p_time: decays and draws the spread, aims with the recoil offset, emits
-// the ShotEvent, kicks spread and recoil and takes the round. False when the per-tick cap is reached.
 bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSimDef &p_d, SimTime p_time, float p_power) {
 	if (r_io.out.shot_count >= kMaxShotsPerTick) {
 		++r_io.out.refused_shots;
@@ -150,9 +140,7 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 	e.tracer = p_d.trace_frequency > 0 && (index % uint32_t(p_d.trace_frequency)) == 0;
 	e.power = p_power;
 	if (r_io.table.exact_aim) {
-		// M2a sv, R3 (docs/design/m2a.md §4.2): the match option does exactly what the range's RangeScenario::exact_aim
-		// post-process does (shooting_range.cpp): the direction is the view without recoil, the pellet cone 0; aim,
-		// origin and every other field keep the sim's values, and the spread and recoil state below still run.
+
 		e.direction = aim_direction(r_io.cmd.yaw, r_io.cmd.pitch, RecoilOffset{});
 		e.pellet_cone = 0;
 	}
@@ -181,9 +169,9 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 		r_s.flags = uint8_t(r_s.flags | slot_flags::kPressPending);
 	}
 	if (!r_io.in.fire) {
-		r_s.flags = uint8_t(r_s.flags & ~slot_flags::kPressPending); // a remembered press needs fire held
+		r_s.flags = uint8_t(r_s.flags & ~slot_flags::kPressPending);
 	}
-	// HoldBoltActionUntilFireRelease: the cycle starts at the start of the first tick whose command releases fire.
+
 	if (r_s.phase == WeaponPhase::Bolt && (r_s.flags & slot_flags::kBoltWaitsRelease) != 0 && !r_io.in.fire) {
 		r_s.flags = uint8_t(r_s.flags & ~slot_flags::kBoltWaitsRelease);
 		r_s.phase_start = r_io.t0;
@@ -225,9 +213,7 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 			case WeaponPhase::Reloading:
 			case WeaponPhase::ReloadShell:
 				if (p_d.reload_type == ReloadType::SingleBullet) {
-					// Fire between shells ends the reload with the shells loaded so far [inferred]. Not while the reload
-					// request is held: Ready would start the reload again at once and the two would alternate for the
-					// rest of the tick (found by the W8 random-command invariants: 48 dropped timed events).
+
 					if (pending && r_s.magazine > 0 && !p_blocked && !r_io.in.reload) {
 						offer(now, Action::InterruptReload);
 					}
@@ -269,7 +255,7 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 								offer(std::max(ready, press_ready), Action::HoldStart);
 							}
 							break;
-						default: // Single, SingleWithBoltAction, Detonated: one shot per press
+						default:
 							if (pending) {
 								offer(std::max(ready, press_ready), Action::Shot);
 							}
@@ -358,7 +344,7 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 			}
 			case Action::Shot: {
 				if (!fire_shot(r_io, p_slot, r_s, p_d, now, 1.0f)) {
-					iter = kMaxLoopEvents; // the per-tick cap: nothing else this tick
+					iter = kMaxLoopEvents;
 					break;
 				}
 				switch (mode.logic) {
@@ -405,14 +391,11 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 	}
 }
 
-// Leaves the active slot for a switch at p_time: an uncommitted reload is cancelled (rlWeaponSwitchCancels...),
-// a committed one keeps its rounds; a reload the switch does not affect commits at once [inferred]; holds, bursts
-// and bolt cycles end.
 void leave_slot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSimDef &p_d, SimTime p_time) {
 	if (r_s.phase == WeaponPhase::Reloading || r_s.phase == WeaponPhase::ReloadShell) {
 		const bool committed = (r_s.flags & slot_flags::kReloadCommitted) != 0;
 		if (p_d.reload_type == ReloadType::SingleBullet) {
-			timed(r_io, p_time, weapon_events::kReloadCancelled, p_slot); // shells loaded so far stay
+			timed(r_io, p_time, weapon_events::kReloadCancelled, p_slot);
 		} else if (!committed && p_d.switch_cancels_reload) {
 			timed(r_io, p_time, weapon_events::kReloadCancelled, p_slot);
 		} else if (!committed) {
@@ -425,7 +408,7 @@ void leave_slot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponS
 }
 
 void sort_timed(WeaponTickOutput &r_out) {
-	// Insertion sort, stable: time order, ties keep the order they happened in (16 entries at most).
+
 	for (uint8_t i = 1; i < r_out.timed_count; ++i) {
 		const TimedWeaponEvent e = r_out.timed[i];
 		uint8_t j = i;
@@ -448,7 +431,7 @@ float eye_height_of(const MotorParams &p_motor, const SoldierState &p_state) {
 	return a + (p_motor.poses[to].eye_height - a) * progress;
 }
 
-} // namespace
+}
 
 core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTable &p_table, std::span<const uint16_t> p_loadout, uint8_t p_active,
 		Tick p_spawn_tick) {
@@ -498,7 +481,7 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 	r_out.timed_count = 0;
 	r_out.timed_dropped = 0;
 	if (p_command.tick != r_state.tick + 1) {
-		return; // precondition: the caller counts it
+		return;
 	}
 	Tick_ io{ p_table, p_table.mechanics, r_state, p_command, p_context, p_match_seed, r_out, tick_start(p_command.tick), tick_end(p_command.tick),
 		weapon_input(p_command), p_context.sway };
@@ -519,7 +502,7 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 	auto valid = [&](const WeaponSlotState &p_s) { return p_s.def != kNoWeapon && p_s.def < defs; };
 
 	if (p_context.alive && r_state.active < kMaxWeaponSlots) {
-		// Weapon switch: a wanted slot other than the current one (a level: a repeat changes nothing).
+
 		if (io.in.select_slot < kMaxWeaponSlots && io.in.select_slot != r_state.active) {
 			WeaponSlotState &to = r_state.slots[io.in.select_slot];
 			if (valid(to)) {
@@ -554,7 +537,6 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 		io.events |= weapon_events::kFireBlocked;
 	}
 
-	// Every slot remembers the counter (a later switch must not see an old value as presses) and recovers recoil.
 	for (uint8_t i = 0; i < kMaxWeaponSlots; ++i) {
 		WeaponSlotState &s = r_state.slots[i];
 		s.mode_counter = io.in.fire_mode_counter;
@@ -637,4 +619,4 @@ WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState
 	return c;
 }
 
-} // namespace bf3::sim::weapons
+}

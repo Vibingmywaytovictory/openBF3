@@ -1,16 +1,4 @@
 #pragma once
-// Blueprint connections and the property resolver of a level traversal. Ported from IW4L level_bf3
-// (connections.rs), Apache-2.0.
-//
-// A scope is one instance of a blueprint in the placed level: the level itself, a sub-world, or a
-// prefab some reference instantiated. Connections are stored on the blueprint; world parts (layers)
-// are transparent, so objects of a layer belong to the scope holding the layer reference.
-// A PropertyConnection feeds a field of an object from an interface constant
-// ('LinearTransform ((r),(u),(f),(t))', 'Boolean True', ...) or from a data field of the source;
-// the resolver follows the scope's interface into the parent scopes and the output ports of child
-// prefabs (handoff sections/03 §2.1: Metro's TICKET_HALL flagpole moves 18.4 m this way).
-// Field ids are ebx_name_hash of the field name, as i32.
-// Every connection list scanned and every hop taken is charged to the traversal's WorkBudget first.
 
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -28,7 +16,6 @@ namespace bf3::core::level {
 
 int32_t field_id(std::string_view p_name);
 
-// Identity of an instance inside one database: its partition and index.
 struct InstanceKey {
 	const EbxPartition *partition = nullptr;
 	uint32_t index = 0;
@@ -43,8 +30,6 @@ struct InstanceKeyHash {
 	}
 };
 
-// One PropertyConnection, LinkConnection or EventConnection with both ends resolved. For events the
-// field ids are the event ids.
 struct Connection {
 	EbxInstance source;
 	int32_t source_field = 0;
@@ -56,13 +41,10 @@ struct Connections {
 	std::vector<Connection> property;
 	std::vector<Connection> link;
 	std::vector<Connection> event;
-	size_t unresolved = 0; // connections with an end that does not resolve in the loaded partitions
+	size_t unresolved = 0;
 
-	// The connections of p_blueprint; the three lists' raw lengths are charged to r_budget first.
 	static Result<Connections> of(const EbxResolver &p_db, const EbxInstance &p_blueprint, WorkBudget &r_budget);
 
-	// Indices into `property` of the connections into p_field of p_target, in list order; nullptr
-	// when there are none.
 	const std::vector<uint32_t> *property_into(const EbxInstance &p_target, int32_t p_field) const;
 
 private:
@@ -74,63 +56,51 @@ private:
 	struct FieldKeyHash {
 		size_t operator()(const FieldKey &p_key) const noexcept { return InstanceKeyHash()(p_key.target) ^ (size_t(uint32_t(p_key.field)) << 7); }
 	};
-	// A resolution looks connections up by target once per hop; a scan of the whole list per hop
-	// would let a blueprint with many connections multiply the cost of every step.
+
 	std::unordered_map<FieldKey, std::vector<uint32_t>, FieldKeyHash> property_index_;
 };
 
-// A value fed into a field through a PropertyConnection: an interface constant or the data field
-// of the connected source object.
 struct Property {
 	enum class Kind : uint8_t { Bool, Int, Float, Text, Team, Transform, Vec3, Constant, Field };
 	Kind kind = Kind::Constant;
 	bool b = false;
 	int64_t i = 0;
 	float f = 0.0f;
-	std::string_view text; // Text (a CString without its quotes) or Constant (as written)
-	uint32_t team = 0; // `TeamId TeamN` as N; TeamNeutral is 0
+	std::string_view text;
+	uint32_t team = 0;
 	LevelTransform transform;
 	level::Vec3 vec{};
 	EbxValue field;
 
-	// An interface DataField.Value; empty means "no constant".
 	static std::optional<Property> parse(std::string_view p_constant);
 
 	std::optional<bool> as_bool() const;
 	std::optional<int64_t> as_i64() const;
 	std::optional<float> as_f32() const;
-	// A view of the text (O(1)); its length is data-controlled, so a caller that copies, keys or
-	// compares it charges charge_text first. The walk itself never reads it.
+
 	std::optional<std::string_view> as_str() const;
 	std::optional<uint32_t> as_team() const;
 	std::optional<LevelTransform> as_transform() const;
 	std::optional<level::Vec3> as_vec3() const;
 };
 
-// The data field of p_object whose name hashes to p_field (base types first, first match).
 std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field);
 
 struct Scope {
 	EbxInstance blueprint;
-	std::optional<EbxInstance> reference; // the reference that instantiated it; none for the level
+	std::optional<EbxInstance> reference;
 	std::optional<uint32_t> parent;
-	LevelTransform transform; // where the blueprint's own frame sits in the world
+	LevelTransform transform;
 	uint32_t subworld = 0;
-	uint32_t variation = 0; // the ObjectVariation name hash the instance passes to its objects
+	uint32_t variation = 0;
 	uint32_t connections = 0;
 };
 
-// Every scope of a traversal, and the property resolver over them. The const resolvers keep
-// mutable state (the per-resolution cap, the child-prefab connection and descriptor caches), so a
-// Scopes must not be used from several threads at once. Every connection candidate a resolution
-// examines costs one hop of r_budget, charged before it is followed; once the budget is exhausted
-// every resolution returns its error at once.
 class Scopes {
 public:
 	Scopes(const EbxResolver &p_db, WorkBudget &r_budget) :
 			db_(&p_db), budget_(&r_budget) {}
 
-	// Fails when the budget cannot pay for the blueprint's connection lists.
 	Result<uint32_t> push(const EbxInstance &p_blueprint, std::optional<EbxInstance> p_reference, std::optional<uint32_t> p_parent,
 			const LevelTransform &p_transform, uint32_t p_subworld, uint32_t p_variation);
 
@@ -140,32 +110,26 @@ public:
 	const Scope &get(uint32_t p_scope) const { return scopes_[p_scope]; }
 	const std::vector<Scope> &all() const { return scopes_; }
 	const Connections &connections(uint32_t p_scope) const { return connections_[scopes_[p_scope].connections]; }
-	// The scope that p_reference, an object of p_scope, instantiated.
+
 	std::optional<uint32_t> child(uint32_t p_scope, const EbxInstance &p_reference) const;
-	// The prefab or sub-world blueprint a reference instantiates (a sub-world reference names its
-	// SubWorldData by bundle, not by pointer). A BundleName is charged to the budget before it is
-	// copied and looked up; fails only with the budget error.
+
 	Result<std::optional<EbxInstance>> referenced_blueprint(const EbxInstance &p_reference) const;
-	// The value a PropertyConnection of p_scope feeds into p_field of p_target, an object of that
-	// scope, resolved down to a constant or a data field; the budget error once it is exhausted.
+
 	Result<std::optional<Property>> property(uint32_t p_scope, const EbxInstance &p_target, int32_t p_field) const;
-	// Interface field p_field of the scope's blueprint for this instance: what the parent connects
-	// into the instantiating reference, else the descriptor's constant.
+
 	Result<std::optional<Property>> interface(uint32_t p_scope, int32_t p_field) const;
-	// Resolutions cut short by the per-resolution cap (hostile connection graphs; 0 on retail).
+
 	size_t capped_resolutions() const { return capped_; }
-	// Connection hops charged by every resolution so far.
+
 	size_t hops() const { return hops_; }
 
 private:
 	struct Frame;
 
-	// Charges one hop: false when the per-resolution cap or the total budget is spent.
 	bool hop() const;
-	// Null once the budget cannot pay for the blueprint's connection lists.
+
 	const Connections *connections_of(const EbxInstance &p_blueprint) const;
-	// The first entry of p_descriptor's Fields with Id p_field, through a per-descriptor index
-	// (built once per descriptor, its Fields' raw length charged first).
+
 	std::optional<EbxValue> descriptor_field(const EbxInstance &p_descriptor, int32_t p_field) const;
 	std::optional<Property> property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth) const;
 	std::optional<Property> source_value(const Frame &p_frame, const EbxInstance &p_source, int32_t p_field, uint32_t p_depth) const;
@@ -176,9 +140,9 @@ private:
 	std::vector<Scope> scopes_;
 	std::vector<Connections> connections_;
 	std::unordered_map<InstanceKey, uint32_t, InstanceKeyHash> by_blueprint_;
-	// Connections of blueprints no scope instantiates (child prefabs seen through output ports).
+
 	mutable std::unordered_map<InstanceKey, Connections, InstanceKeyHash> extra_;
-	// Interface descriptors' Fields: the first index of each Id.
+
 	mutable std::unordered_map<InstanceKey, std::unordered_map<int32_t, uint32_t>, InstanceKeyHash> descriptor_fields_;
 	struct ChildKey {
 		uint32_t scope;
@@ -189,11 +153,10 @@ private:
 		size_t operator()(const ChildKey &p_key) const noexcept { return InstanceKeyHash()(p_key.reference) ^ (size_t(p_key.scope) << 1); }
 	};
 	std::unordered_map<ChildKey, uint32_t, ChildKeyHash> children_;
-	// Hops left in the current resolution. The depth limit alone bounds the chain length, not the
-	// fan-out, which a hostile blueprint can make exponential; the total budget bounds the sum.
+
 	mutable uint32_t resolve_left_ = 0;
 	mutable size_t capped_ = 0;
 	mutable size_t hops_ = 0;
 };
 
-} // namespace bf3::core::level
+}

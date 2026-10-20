@@ -1,4 +1,3 @@
-// UI ui2: bf3dump minimap / hud-icons / item-icons / hud-sources (ui_commands.h; docs/design/ui-minimap-icons.md §15).
 #include "ui_commands.h"
 
 #include "bf3/core/ebx_db.h"
@@ -207,7 +206,7 @@ int cmd_item_icons(const EbxContext &p_ctx, const std::string &p_level) {
 		std::fprintf(stderr, "item-icons: %s\n", index.error().message.c_str());
 		return 1;
 	}
-	(*lvl)->load_all(); // the catalog: every SoldierWeaponUnlockAsset under weapons/ (gameplay::list_weapon_variants)
+	(*lvl)->load_all();
 	const std::vector<std::string> variants = gameplay::list_weapon_variants(**lvl);
 	size_t weapon = 0, kit = 0, missing = 0;
 	std::printf("# variant\tidentifier\tsource\tname_sid\ticon\tformat\tsize\n");
@@ -280,7 +279,7 @@ int cmd_hud_sources(const EbxContext &p_ctx, bool p_unbound) {
 	return r.ok() ? 0 : 1;
 }
 
-} // namespace
+}
 
 const char *ui2_usage() {
 	return "  minimap <LEVEL> [MODE] | minimap --census\n"
@@ -308,4 +307,4 @@ int dispatch_ui2(const EbxContext &p_ctx, const std::string &p_cmd, const std::v
 	return -1;
 }
 
-} // namespace bf3dump
+}

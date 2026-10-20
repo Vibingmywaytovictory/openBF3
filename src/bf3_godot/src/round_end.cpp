@@ -1,4 +1,3 @@
-// M2b ui: the round end (round_end.h).
 #include "round_end.h"
 
 #include <algorithm>
@@ -34,7 +33,7 @@ void Bf3TdmRoundEnd::draw_screen() {
 	const Ref<Font> num = c.font(TdmFont::Number);
 	const float cx = kRoundEndLeft + 0.5f * kRoundEndWidth;
 	const int own = m.local_team;
-	// The headline.
+
 	if (own == 1 || own == 2) {
 		const bool won = e.local_won;
 		tdm_draw_text(*this, title, at(cx, kRoundEndTop + 60.0f), c.text(won ? TdmText::TeamWon : TdmText::TeamLost), tdm_px(36.0f, s),
@@ -43,7 +42,7 @@ void Bf3TdmRoundEnd::draw_screen() {
 		const std::string line = c.text(TdmText::Winner) + "  " + c.text(e.winner == 1 ? TdmText::TeamUs : TdmText::TeamRu);
 		tdm_draw_text(*this, title, at(cx, kRoundEndTop + 60.0f), line, tdm_px(36.0f, s), kTdmTextColour, 2);
 	}
-	// The two counts: the friendly team on the left.
+
 	const int friendly = own == 2 ? 2 : 1;
 	const int enemy = 3 - friendly;
 	const auto side = [&](int p_team, float p_x, const Color &p_col) {
@@ -58,7 +57,7 @@ void Bf3TdmRoundEnd::draw_screen() {
 	if (e.kill_limit > 0) {
 		tdm_draw_text(*this, num, at(cx, kRoundEndTop + 158.0f), "/ " + std::to_string(e.kill_limit), tdm_px(18.0f, s), kTdmDimColour, 2);
 	}
-	// The top 3.
+
 	for (size_t i = 0; i < e.top_players.size(); ++i) {
 		const uint8_t slot = e.top_players[i];
 		if (slot >= ui::kHudMaxPlayers) {
@@ -75,4 +74,4 @@ void Bf3TdmRoundEnd::draw_screen() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

@@ -15,7 +15,7 @@ NavLinkResult nav_link_check() {
 	rcCalcGridSize(bmin, bmax, cs, &r.grid_w, &r.grid_h);
 	rcHeightfield *hf = rcAllocHeightfield();
 	if (hf != nullptr && rcCreateHeightfield(&ctx, *hf, r.grid_w, r.grid_h, bmin, bmax, cs, ch)) {
-		// Two triangles of a flat floor at y = 0, wound so the normal points up for Recast.
+
 		const float verts[] = { -5, 0, -5, -5, 0, 5, 5, 0, 5, 5, 0, -5 };
 		const int tris[] = { 0, 1, 2, 0, 2, 3 };
 		unsigned char areas[2] = { 0, 0 };
@@ -36,4 +36,4 @@ NavLinkResult nav_link_check() {
 	return r;
 }
 
-} // namespace bf3::sim
+}

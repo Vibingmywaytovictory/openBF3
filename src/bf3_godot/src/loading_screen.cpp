@@ -39,7 +39,7 @@ Label *make_label(int p_size, const Vector2 &p_position) {
 	return l;
 }
 
-} // namespace
+}
 
 void LoadingScreen::attach(Node *p_parent, const std::string &p_title) {
 	layer_ = memnew(CanvasLayer);
@@ -110,4 +110,4 @@ void LoadingScreen::remove() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

@@ -1,9 +1,3 @@
-// Cache with real BF3 payloads, exported outside the repo (see README "Derived-data cache"). The
-// directory named by OPENBF3_CACHE_TESTDATA holds index.tsv (kind, name, sha1, stored size, decoded
-// size, res type, res meta), stored/<sha1>.bin (bytes as stored in the CAS, which the manifest SHA1
-// covers) and payload/<sha1>.bin (decoded). Skips (exit 77) when the variable is unset.
-// Asserts: BCrypt SHA-1 of every stored payload equals its manifest SHA1 (the source digest), and
-// every decoded payload round-trips through the cache bit-exactly across a reopen. Prints numbers only.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/cache_key.h"
@@ -32,7 +26,7 @@ struct Row {
 	Sha1Digest sha1;
 	uint64_t stored_size = 0;
 	uint64_t decoded_size = 0;
-	std::string meta_hex; // res: 16 bytes as "xx xx ..."
+	std::string meta_hex;
 };
 
 bool read_file(const fs::path &p_path, std::vector<uint8_t> &r_out) {
@@ -69,7 +63,7 @@ bool load_index(const fs::path &p_dir, std::vector<Row> &r_rows) {
 		return false;
 	}
 	std::string text(bytes.begin(), bytes.end());
-	size_t at = text.find('\n'); // header line
+	size_t at = text.find('\n');
 	while (at != std::string::npos && at + 1 < text.size()) {
 		const size_t end = text.find('\n', at + 1);
 		std::string line = text.substr(at + 1, end == std::string::npos ? std::string::npos : end - at - 1);
@@ -118,7 +112,7 @@ double seconds_since(std::chrono::steady_clock::time_point p_t0) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_t0).count();
 }
 
-} // namespace
+}
 
 TEST_SUITE("cache_data") {
 	TEST_CASE("cache data: manifest SHA1s and a round trip of real payloads") {
@@ -133,7 +127,6 @@ TEST_SUITE("cache_data") {
 		REQUIRE(load_index(dir, rows));
 		REQUIRE(!rows.empty());
 
-		// 1. Source digests: SHA-1 of the stored bytes is the manifest's SHA1, for every entry.
 		auto t0 = std::chrono::steady_clock::now();
 		uint64_t stored_bytes = 0;
 		size_t sha1_ok = 0;
@@ -148,7 +141,6 @@ TEST_SUITE("cache_data") {
 		CHECK(sha1_ok == rows.size());
 		MESSAGE("entries ", rows.size(), ", stored ", stored_bytes, " B, SHA-1 matches ", sha1_ok, ", ", t_sha1, " s (with file reads)");
 
-		// 2. Put every decoded payload (res: meta + payload) from 8 threads, reopen, read back.
 		wchar_t tmp[MAX_PATH];
 		GetTempPathW(MAX_PATH, tmp);
 		const fs::path base = fs::path(tmp) / (L"openbf3-cache-data-" + std::to_wstring(GetCurrentProcessId()));
@@ -159,7 +151,7 @@ TEST_SUITE("cache_data") {
 		o.root = base / L"cache";
 		o.guard.add_protected_root(fake_install);
 		{
-			// The real install is protected too when present (it is only ever read).
+
 			wchar_t install[MAX_PATH];
 			const DWORD n = GetEnvironmentVariableW(L"OPENBF3_INSTALL", install, MAX_PATH);
 			o.guard.add_protected_root(n > 0 && n < MAX_PATH ? fs::path(install) : fs::path(L"C:\\Program Files\\EA Games\\Battlefield 3"));
@@ -213,7 +205,7 @@ TEST_SUITE("cache_data") {
 		for (int ti = 0; ti < 8; ++ti) {
 			threads.emplace_back([&] {
 				for (size_t i = next++; i < rows.size(); i = next++) {
-					GetResult g = cache.get(key_of(rows[i])); // first use: payload hash checked
+					GetResult g = cache.get(key_of(rows[i]));
 					if (g.status != CacheStatus::Ok || sha256_of(g.entry.payload()) != expect[i]) {
 						failures.fetch_add(1);
 					}

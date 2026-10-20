@@ -1,7 +1,3 @@
-// The M1 wire protocol (protocol.h; docs/design/m1.md §7.2-§7.3, §7.7). Every encoder writes through a capped
-// BitWriter; every decoder reads through a BitReader, bounds every count by both its limit and the bits left
-// before it allocates, checks every enum and float, and fails on a short body or on trailing bytes. Datagrams
-// come from the network, so a decoder never trusts a count, a length or an enum value.
 #include "bf3/net/protocol.h"
 
 #include "bf3/net/bit_stream.h"
@@ -17,32 +13,30 @@ namespace bf3::net {
 
 namespace {
 
-// Limits of the variable-length parts. They are internal: every encoder clamps to them, every decoder refuses more.
-constexpr size_t kMaxIdentBytes = 128; // MatchInfo level / mode names (MP_Subway, TeamDeathMatch0)
-constexpr size_t kMaxTextBytes = 2048; // Kick reason, DebugReport text
-constexpr size_t kMaxSweepRows = 1024; // DebugReport::sweep (Metro TDM has 102 points)
-// The reliable channel may fragment, so its messages are capped by the largest legal message instead of the
-// datagram: a DebugReport with kMaxTraceTicks states (77 B each), kMaxSweepRows rows and kMaxTextBytes of text.
+constexpr size_t kMaxIdentBytes = 128;
+constexpr size_t kMaxTextBytes = 2048;
+constexpr size_t kMaxSweepRows = 1024;
+
 constexpr size_t kMaxReliableBytes = 256 * 1024;
-constexpr float kMaxDebugCoordinate = 1.0e6f; // a teleport target beyond this is refused (hostile, or a bug)
+constexpr float kMaxDebugCoordinate = 1.0e6f;
 
 constexpr unsigned kOwnStateBits = 77 * 8;
-constexpr unsigned kCommandFieldBits = 24 + 8 + 8 + 16 + quant::kCommandPitchBits + 2; // 72
+constexpr unsigned kCommandFieldBits = 24 + 8 + 8 + 16 + quant::kCommandPitchBits + 2;
 constexpr unsigned kOtherBits = 8 + 8 + quant::kPositionXZ.bits + quant::kPositionY.bits + quant::kPositionXZ.bits +
 		3 * quant::kSoldierVelocity.bits + quant::kSoldierYawBits + quant::kSoldierPitchBits + 2 + 2 + 8 + 4 + 8;
-static_assert(kOtherBits == 159); // docs §7.3 table
-static_assert(kCommandFieldBits == 72); // + 1 "same" bit = the 73 bits of docs §7.3
-// M2a v2 (nt; docs/design/m2a.md §6.2, §7.2, §7.3).
-constexpr unsigned kViewSampleBits = 16 + 2 + 8; // view_back_q8, view_quality, view_seq8
-constexpr unsigned kOtherWeaponBits = 8 + 3 + 1 + 1 + 2 + 4; // weapon, phase, firing, ads, reload seq, burst seq
-constexpr unsigned kOtherTeamBits = 2; // M2a w3 (G1, docs/design/m2a-w3.md): OtherSoldier::team
+static_assert(kOtherBits == 159);
+static_assert(kCommandFieldBits == 72);
+
+constexpr unsigned kViewSampleBits = 16 + 2 + 8;
+constexpr unsigned kOtherWeaponBits = 8 + 3 + 1 + 1 + 2 + 4;
+constexpr unsigned kOtherTeamBits = 2;
 constexpr unsigned kOtherBitsV2 = kOtherBits + kOtherWeaponBits + kOtherTeamBits;
-static_assert(kOtherWeaponBits == 19 && kOtherBitsV2 == 180); // m2a.md §7.3: 19 more bits; W3.0 G1: + 2 team bits, 180 per other
+static_assert(kOtherWeaponBits == 19 && kOtherBitsV2 == 180);
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
-constexpr uint8_t kKnownRulesFlags = rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive; // M2b nt: v3
-constexpr unsigned kWireSlotBits = 7; // shot and combat slots < kMaxSlots
+constexpr uint8_t kKnownRulesFlags = rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive;
+constexpr unsigned kWireSlotBits = 7;
 static_assert((size_t(1) << kWireSlotBits) == kMaxSlots);
-constexpr int32_t kOtherPitchMaxCode = (1 << (quant::kSoldierPitchBits - 1)) - 1; // 2047: 8188 Command steps
+constexpr int32_t kOtherPitchMaxCode = (1 << (quant::kSoldierPitchBits - 1)) - 1;
 
 core::Error fail(const char *p_what, const char *p_why) {
 	return core::make_error(std::string(p_what) + ": " + p_why);
@@ -52,9 +46,6 @@ bool valid_pose(uint64_t p_value) {
 	return p_value < sim::kPoseCount;
 }
 
-// ---- strings ----------------------------------------------------------------------------------------------------
-
-// Strict UTF-8 (no overlong forms, no surrogates, nothing above U+10FFFF).
 bool valid_utf8(std::string_view p_text) {
 	size_t i = 0;
 	const size_t n = p_text.size();
@@ -100,7 +91,6 @@ bool valid_utf8(std::string_view p_text) {
 	return true;
 }
 
-// The longest prefix of p_text that has at most p_max bytes and does not end inside a multi-byte sequence.
 std::string_view clamp_utf8(std::string_view p_text, size_t p_max) {
 	if (p_text.size() <= p_max) {
 		return p_text;
@@ -131,8 +121,6 @@ bool read_string(BitReader &r_r, size_t p_max, std::string &r_text) {
 	}
 	return !r_r.failed() && valid_utf8(r_text);
 }
-
-// ---- small helpers ------------------------------------------------------------------------------------------------
 
 void write_digest(BitWriter &r_w, const std::optional<core::Sha256Digest> &p_digest) {
 	r_w.write_bool(p_digest.has_value());
@@ -178,12 +166,11 @@ BitWriter begin(MessageType p_type, size_t p_cap = kMaxReliableBytes) {
 
 std::vector<uint8_t> finish(BitWriter &r_w) {
 	if (r_w.overflowed()) {
-		return {}; // only reachable through a bug: every variable part is clamped to a limit the cap covers
+		return {};
 	}
 	return r_w.take();
 }
 
-// Checks the type byte; on success the reader stands after it.
 bool open(BitReader &r_r, MessageType p_type) {
 	return uint8_t(r_r.read_bits(8)) == uint8_t(p_type) && !r_r.failed();
 }
@@ -198,8 +185,6 @@ core::Result<T> close(BitReader &r_r, T p_value, const char *p_what) {
 	}
 	return p_value;
 }
-
-// ---- full-precision soldier state (the own-state block, Spawned, Trace) ----------------------------------------
 
 void write_state(BitWriter &r_w, const sim::SoldierState &p_s) {
 	r_w.write_bits(p_s.tick, 32);
@@ -224,7 +209,6 @@ void write_state(BitWriter &r_w, const sim::SoldierState &p_s) {
 	r_w.write_f32(p_s.damage);
 }
 
-// Fills r_s; false when a value is out of its range (the caller still checks failed()).
 bool read_state(BitReader &r_r, sim::SoldierState &r_s) {
 	r_s = sim::SoldierState{};
 	r_s.tick = sim::Tick(r_r.read_bits(32));
@@ -256,10 +240,6 @@ bool read_state(BitReader &r_r, sim::SoldierState &r_s) {
 	return ok;
 }
 
-// ---- commands ----------------------------------------------------------------------------------------------------
-
-// The command as it goes on the wire: the encoder clamps to the ranges command.h promises (pitch +-kPitchLimit,
-// axes -127..127, 24 button bits), so the decoder can refuse anything outside them.
 struct WireCommand {
 	uint32_t buttons = 0;
 	int8_t forward = 0;
@@ -267,9 +247,9 @@ struct WireCommand {
 	uint16_t yaw = 0;
 	int16_t pitch = 0;
 	uint8_t pose = 0;
-	// v2: the view sample (m2a.md §6.2).
+
 	uint16_t view_back_q8 = 0;
-	uint8_t view_quality = 0; // 2 bits
+	uint8_t view_quality = 0;
 	uint8_t view_seq8 = 0;
 	bool operator==(const WireCommand &) const = default;
 };
@@ -312,9 +292,9 @@ bool read_command_fields(BitReader &r_r, sim::Command &r_c) {
 	r_c.pitch = int16_t(r_r.read_signed(quant::kCommandPitchBits));
 	const uint64_t pose = r_r.read_bits(2);
 	r_c.view_back_q8 = uint16_t(r_r.read_bits(16));
-	r_c.view_quality = uint8_t(r_r.read_bits(2)); // ViewQuality: every 2-bit code is a value
+	r_c.view_quality = uint8_t(r_r.read_bits(2));
 	r_c.view_seq8 = uint8_t(r_r.read_bits(8));
-	r_c.flags = 0; // server-side only, never on the wire
+	r_c.flags = 0;
 	if (!valid_pose(pose) || r_c.move_forward < -sim::kAxisMax || r_c.move_right < -sim::kAxisMax ||
 			r_c.pitch < -sim::kPitchLimit || r_c.pitch > sim::kPitchLimit) {
 		return false;
@@ -323,14 +303,12 @@ bool read_command_fields(BitReader &r_r, sim::Command &r_c) {
 	return true;
 }
 
-// ---- others ------------------------------------------------------------------------------------------------------
-
 uint32_t other_yaw_code(uint16_t p_yaw) {
-	return ((uint32_t(p_yaw) + 2u) >> 2) & ((1u << quant::kSoldierYawBits) - 1u); // nearest, wraps at a turn
+	return ((uint32_t(p_yaw) + 2u) >> 2) & ((1u << quant::kSoldierYawBits) - 1u);
 }
 
 int32_t other_pitch_code(int16_t p_pitch) {
-	const int32_t code = (int32_t(p_pitch) + 2) >> 2; // nearest (arithmetic shift = floor)
+	const int32_t code = (int32_t(p_pitch) + 2) >> 2;
 	return std::clamp(code, -kOtherPitchMaxCode, kOtherPitchMaxCode);
 }
 
@@ -345,10 +323,6 @@ uint8_t transition_progress(const sim::SoldierState &p_s) {
 	return uint8_t((done * 255u + p_s.transition_total / 2u) / p_s.transition_total);
 }
 
-// ---- M2a v2 quantisers (nt) ------------------------------------------------------------------------------------
-
-// Octahedral unit vectors (x, y on the square, z folded): p_bits per axis. Encoded in double; the decoded vector is
-// normalised and re-encodes to a code with the same decoded vector (the fuzz idempotence check covers it).
 struct Octa {
 	uint32_t u = 0;
 	uint32_t v = 0;
@@ -396,7 +370,7 @@ sim::Vec3 octa_decode(Octa p_code, unsigned p_bits) {
 		x = fx;
 		y = fy;
 	}
-	const double len = std::sqrt(x * x + y * y + z * z); // >= 1/sqrt(3) on the octahedron
+	const double len = std::sqrt(x * x + y * y + z * z);
 	return { float(x / len), float(y / len), float(z / len) };
 }
 
@@ -413,12 +387,10 @@ sim::Vec3 read_octa(BitReader &r_r, unsigned p_bits) {
 	return octa_decode(o, p_bits);
 }
 
-// Shot origins and combat positions: 20 bits per axis, 1/256 m from the frame's minimum (a 4,096 m cube).
 constexpr unsigned kFramePositionBits = 20;
 constexpr double kFrameStep = 1.0 / 256.0;
 constexpr uint32_t kFrameMaxCode = (1u << kFramePositionBits) - 1u;
 
-// The codes of p_v in the frame; false when an axis lies outside it (r_codes then holds the clamped codes).
 bool frame_codes(const sim::Vec3 &p_v, const ShotQuantization &p_frame, std::array<uint32_t, 3> &r_codes) {
 	bool inside = true;
 	for (size_t i = 0; i < 3; ++i) {
@@ -453,16 +425,14 @@ sim::Vec3 read_frame(BitReader &r_r, const ShotQuantization &p_frame) {
 	return frame_decode(c, p_frame);
 }
 
-// Event times: whole ticks back from the message's server tick, and the place in that tick in 1/65,536.
 constexpr unsigned kTickFractionBits = 16;
 constexpr int64_t kTickFractionScale = int64_t(1) << kTickFractionBits;
 
 struct WireTime {
-	uint32_t back = 0; // ticks before the message's server tick (0 = that tick)
-	uint32_t fraction = 0; // 0 .. 65535
+	uint32_t back = 0;
+	uint32_t fraction = 0;
 };
 
-// False when p_time lies after the server tick's end or before tick 1's start (time 0); r_time is then clamped.
 bool wire_time(sim::weapons::SimTime p_time, sim::Tick p_server_tick, WireTime &r_time) {
 	using sim::weapons::kTimeUnitsPerTick;
 	r_time = {};
@@ -510,14 +480,14 @@ void write_other(BitWriter &r_w, const OtherSoldier &p_o) {
 	r_w.write_bits(p_o.transition, 8);
 	r_w.write_bits(uint8_t(p_o.mode) & 15, 4);
 	r_w.write_bits(p_o.flags, 8);
-	// v2: the 3p weapon (m2a.md §7.3).
+
 	r_w.write_bits(p_o.weapon, 8);
 	r_w.write_bits(p_o.weapon_phase, 3);
 	r_w.write_bool(p_o.firing);
 	r_w.write_bool(p_o.ads);
 	r_w.write_bits(p_o.reload_seq, 2);
 	r_w.write_bits(p_o.burst_seq, 4);
-	r_w.write_bits(p_o.team, 2); // M2a w3 (G1)
+	r_w.write_bits(p_o.team, 2);
 }
 
 bool read_other(BitReader &r_r, OtherSoldier &r_o) {
@@ -543,11 +513,11 @@ bool read_other(BitReader &r_r, OtherSoldier &r_o) {
 	r_o.ads = r_r.read_bool();
 	r_o.reload_seq = uint8_t(r_r.read_bits(2));
 	r_o.burst_seq = uint8_t(r_r.read_bits(4));
-	const uint64_t team = r_r.read_bits(2); // M2a w3 (G1)
+	const uint64_t team = r_r.read_bits(2);
 	if (team > kMaxTeam) {
-		return false; // M2a w3 (G1): team 3 does not exist
+		return false;
 	}
-	r_o.team = uint8_t(team); // M2a w3 (G1)
+	r_o.team = uint8_t(team);
 	if (slot >= kMaxSlots || pitch < -kOtherPitchMaxCode || pitch > kOtherPitchMaxCode || !valid_pose(pose) ||
 			!valid_pose(target) || mode >= sim::kMoveModeCount) {
 		return false;
@@ -559,8 +529,6 @@ bool read_other(BitReader &r_r, OtherSoldier &r_o) {
 	r_o.mode = sim::MoveMode(mode);
 	return true;
 }
-
-// ---- M2a v2 dev payloads at full precision (DebugReport: TargetInfo rows, the Trace's gunplay ticks) -------------
 
 bool finite3(const sim::Vec3 &p_v) {
 	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
@@ -604,7 +572,7 @@ bool read_hit_target(BitReader &r_r, sim::weapons::HitTarget &r_t) {
 		ok = read_vec3(r_r, c.a) && ok;
 		ok = read_vec3(r_r, c.b) && ok;
 		c.radius = r_r.read_f32();
-		c.zone = sim::weapons::HitZone(r_r.read_bits(2)); // 4 zones, every code valid
+		c.zone = sim::weapons::HitZone(r_r.read_bits(2));
 		c.capsule = uint8_t(r_r.read_bits(8));
 		c.property = uint8_t(r_r.read_bits(8));
 		c.flags = uint8_t(r_r.read_bits(8));
@@ -687,7 +655,7 @@ bool read_damage_full(BitReader &r_r, sim::weapons::DamageEvent &r_d) {
 	r_d.shot_index = uint32_t(r_r.read_bits(32));
 	r_d.def = uint16_t(r_r.read_bits(16));
 	r_d.pellet = uint8_t(r_r.read_bits(8));
-	r_d.kind = sim::weapons::DamageKind(r_r.read_bits(2)); // 4 kinds, every code valid
+	r_d.kind = sim::weapons::DamageKind(r_r.read_bits(2));
 	r_d.zone = sim::weapons::HitZone(r_r.read_bits(2));
 	r_d.capsule = uint8_t(r_r.read_bits(8));
 	r_d.distance = r_r.read_f32();
@@ -725,8 +693,6 @@ bool read_detonation_full(BitReader &r_r, sim::weapons::DetonationEvent &r_d) {
 	return ok;
 }
 
-// One traced tick's gunplay. Counts in 4 / 4 / 4 / 2 / 3 bits, each bounded by its kMaxTrace*; the encoder cuts a
-// longer list and adds what it cut to r_dropped (the per-tick bounds of m2a.md §1).
 constexpr size_t kGunplayTickMinBits = 32 + 4 + 4 + 4 + 2 + 3;
 static_assert(kMaxTraceShots < 16 && kMaxTraceProjectiles < 16 && kMaxTraceDamage < 16 && kMaxTraceDetonations < 4 && kMaxTraceDeaths < 8);
 
@@ -809,9 +775,7 @@ bool read_gunplay_tick(BitReader &r_r, TraceGunplayTick &r_t) {
 	return ok && !r_r.failed();
 }
 
-} // namespace
-
-// ---- type byte ---------------------------------------------------------------------------------------------------
+}
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 	if (p_datagram.empty()) {
@@ -829,19 +793,17 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::Bye:
 		case MessageType::Debug:
 		case MessageType::DebugReport:
-		case MessageType::SnapshotOthers: // v2
+		case MessageType::SnapshotOthers:
 		case MessageType::ShotEvents:
 		case MessageType::CombatEvents:
 		case MessageType::KitSelect:
-		case MessageType::MatchState: // M2b nt: v3
-		case MessageType::PlayerList: // M2b nt
-		case MessageType::SpawnRequest: // M2b nt
+		case MessageType::MatchState:
+		case MessageType::PlayerList:
+		case MessageType::SpawnRequest:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
 }
-
-// ---- control -----------------------------------------------------------------------------------------------------
 
 std::vector<uint8_t> encode_hello(const Hello &p_message) {
 	BitWriter w = begin(MessageType::Hello);
@@ -875,14 +837,14 @@ std::vector<uint8_t> encode_match_info(const MatchInfo &p_message) {
 	w.write_bits(uint8_t(p_message.phase), 8);
 	write_digest(w, p_message.source_digest);
 	w.write_bits(p_message.motor_hash, 64);
-	// v2 (m2a.md §7.1).
+
 	w.write_bits(p_message.match_seed, 64);
 	w.write_bits(p_message.weapon_hash, 64);
 	w.write_bits(p_message.weapon_flags, 8);
 	w.write_bits(p_message.kit_hash, 64);
 	w.write_bits(p_message.max_rewind_ticks, 8);
-	w.write_bits(p_message.logic_digest, 64); // M2b nt: v3 (m2b.md §3.7, §3.8)
-	w.write_bits(p_message.rules_flags, 8); // M2b nt
+	w.write_bits(p_message.logic_digest, 64);
+	w.write_bits(p_message.rules_flags, 8);
 	return finish(w);
 }
 
@@ -908,17 +870,17 @@ core::Result<MatchInfo> decode_match_info(std::span<const uint8_t> p_datagram) {
 	m.weapon_flags = uint8_t(r.read_bits(8));
 	m.kit_hash = r.read_bits(64);
 	m.max_rewind_ticks = uint8_t(r.read_bits(8));
-	m.logic_digest = r.read_bits(64); // M2b nt: v3
-	m.rules_flags = uint8_t(r.read_bits(8)); // M2b nt
+	m.logic_digest = r.read_bits(64);
+	m.rules_flags = uint8_t(r.read_bits(8));
 	if (r.failed()) {
 		return fail("MatchInfo", "truncated");
 	}
 	if ((m.weapon_flags & ~kKnownWeaponFlags) != 0) {
 		return fail("MatchInfo", "unknown weapon flags");
 	}
-	if ((m.rules_flags & ~kKnownRulesFlags) != 0) { // M2b nt
-		return fail("MatchInfo", "unknown rules flags"); // M2b nt
-	} // M2b nt
+	if ((m.rules_flags & ~kKnownRulesFlags) != 0) {
+		return fail("MatchInfo", "unknown rules flags");
+	}
 	if (m.sim_hz == 0 || m.snapshot_divisor == 0) {
 		return fail("MatchInfo", "zero tick rate or snapshot divisor");
 	}
@@ -954,9 +916,9 @@ std::vector<uint8_t> encode_spawned(const Spawned &p_message) {
 	w.write_bits(p_message.slot, 8);
 	w.write_bits(p_message.spawn_index, 32);
 	write_state(w, p_message.state);
-	w.write_bits(p_message.kit, 8); // v2 (m2a.md §7.4)
+	w.write_bits(p_message.kit, 8);
 	w.write_bits(p_message.team, 8);
-	w.write_bool(p_message.revived); // M2b nt: v3 (m2b.md §3.6)
+	w.write_bool(p_message.revived);
 	return finish(w);
 }
 
@@ -971,7 +933,7 @@ core::Result<Spawned> decode_spawned(std::span<const uint8_t> p_datagram) {
 	const bool state_ok = read_state(r, m.state);
 	const uint64_t kit = r.read_bits(8);
 	const uint64_t team = r.read_bits(8);
-	m.revived = r.read_bool(); // M2b nt: v3
+	m.revived = r.read_bool();
 	if (r.failed()) {
 		return fail("Spawned", "truncated");
 	}
@@ -1042,7 +1004,7 @@ std::vector<uint8_t> encode_debug(const DebugRequest &p_message) {
 	w.write_bits(p_message.yaw, 16);
 	w.write_bits(p_message.index, 32);
 	w.write_bits(p_message.ticks, 32);
-	w.write_bits(p_message.slot, 8); // v2: SpawnTarget / TargetInfo (m2a.md §7.4)
+	w.write_bits(p_message.slot, 8);
 	w.write_bits(uint8_t(p_message.pose), 8);
 	return finish(w);
 }
@@ -1107,7 +1069,7 @@ std::vector<uint8_t> encode_debug_report(const DebugReport &p_message) {
 	for (size_t i = 0; i < states; ++i) {
 		write_state(w, p_message.trace[i]);
 	}
-	// v2 (m2a.md §7.4): TargetInfo rows, then the Trace's gunplay ticks and the count of what was dropped.
+
 	const size_t targets = std::min(p_message.targets.size(), kMaxTargetRows);
 	w.write_varint(targets);
 	for (size_t i = 0; i < targets; ++i) {
@@ -1203,14 +1165,12 @@ core::Result<DebugReport> decode_debug_report(std::span<const uint8_t> p_datagra
 	return close(r, std::move(m), "DebugReport");
 }
 
-// ---- commands ----------------------------------------------------------------------------------------------------
-
 std::vector<uint8_t> encode_command_packet(const CommandPacket &p_packet) {
 	size_t count = std::min<size_t>(p_packet.count, kCommandsPerPacket);
 	if (count == 0) {
-		return {}; // a packet carries at least one command; the decoder refuses count 0
+		return {};
 	}
-	// The decoder implies tick and sequence of each older command (one less each), so cut at the first gap.
+
 	for (size_t i = 1; i < count; ++i) {
 		const sim::Command &newer = p_packet.commands[i - 1];
 		const sim::Command &older = p_packet.commands[i];
@@ -1222,7 +1182,7 @@ std::vector<uint8_t> encode_command_packet(const CommandPacket &p_packet) {
 	BitWriter w = begin(MessageType::CommandPacket, kMaxDatagramBytes);
 	w.write_bits(p_packet.newest_snapshot, 16);
 	w.write_bits(p_packet.snapshot_ack_bits, 32);
-	w.write_bits(p_packet.others_ack_bits, 32); // v2 (m2a.md §7.2)
+	w.write_bits(p_packet.others_ack_bits, 32);
 	w.write_bits(count, 8);
 	const sim::Command &newest = p_packet.commands[0];
 	w.write_bits(newest.tick, 32);
@@ -1282,8 +1242,6 @@ core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_dat
 	return close(r, std::move(p), "CommandPacket");
 }
 
-// ---- snapshots ---------------------------------------------------------------------------------------------------
-
 OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state) {
 	OtherSoldier o;
 	o.slot = p_slot;
@@ -1317,13 +1275,13 @@ std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropp
 	w.write_bool(p_snapshot.own.has_value());
 	if (p_snapshot.own) {
 		write_state(w, *p_snapshot.own);
-		// v2: the own weapons travel with the own state (m2a.md §7.3).
+
 		w.write_bool(p_snapshot.own_weapons.has_value());
 		if (p_snapshot.own_weapons) {
 			write_weapons_wire(w, *p_snapshot.own_weapons);
 		}
 	}
-	// As many others as fit beside the count byte, in the caller's (nearest-first) order.
+
 	const size_t used = w.bit_count() + 8;
 	const size_t room = used < kMaxDatagramBytes * 8 ? (kMaxDatagramBytes * 8 - used) / kOtherBitsV2 : 0;
 	const size_t count = std::min({ p_snapshot.others.size(), room, kMaxSlots });
@@ -1394,9 +1352,6 @@ core::Result<Snapshot> decode_snapshot(std::span<const uint8_t> p_datagram) {
 	return close(r, std::move(s), "Snapshot");
 }
 
-
-// ---- M2a protocol v2 (nt; docs/design/m2a.md §7) ------------------------------------------------------------------
-
 void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::WeaponPhase p_phase, bool p_firing, bool p_ads, uint32_t p_reload_count,
 		uint32_t p_burst_count) {
 	r_other.weapon = p_def < kMaxWireDefs ? uint8_t(p_def) : uint8_t(0xFF);
@@ -1407,12 +1362,9 @@ void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::Weapo
 	r_other.burst_seq = uint8_t(p_burst_count & 15u);
 }
 
-// M2a w3 (G1, docs/design/m2a-w3.md).
 void set_other_team(OtherSoldier &r_other, uint8_t p_team) {
 	r_other.team = p_team >= 1 && p_team <= kMaxTeam ? p_team : uint8_t(0);
 }
-
-// ---- acks (m2a.md §7.2) ------------------------------------------------------------------------------------------
 
 bool snapshot_acked(const CommandPacket &p_packet, uint16_t p_seq) {
 	if (p_seq == p_packet.newest_snapshot) {
@@ -1421,7 +1373,7 @@ bool snapshot_acked(const CommandPacket &p_packet, uint16_t p_seq) {
 	if (seq_newer(p_seq, p_packet.newest_snapshot)) {
 		return false;
 	}
-	const uint16_t back = uint16_t(p_packet.newest_snapshot - 1u - p_seq); // bit i = newest - 1 - i
+	const uint16_t back = uint16_t(p_packet.newest_snapshot - 1u - p_seq);
 	return back < 32 && ((p_packet.snapshot_ack_bits >> back) & 1u) != 0;
 }
 
@@ -1429,14 +1381,9 @@ bool others_acked(const CommandPacket &p_packet, uint16_t p_seq) {
 	if (seq_newer(p_seq, p_packet.newest_snapshot)) {
 		return false;
 	}
-	const uint16_t back = uint16_t(p_packet.newest_snapshot - p_seq); // bit i = newest - i (bit 0 = newest itself)
+	const uint16_t back = uint16_t(p_packet.newest_snapshot - p_seq);
 	return back < 32 && ((p_packet.others_ack_bits >> back) & 1u) != 0;
 }
-
-// ---- SnapshotOthers (ch0) ----------------------------------------------------------------------------------------
-// Body: u16 seq | u32 server tick | u8 count (<= kMaxSlots - 1) | others (178 bits each, as in the Snapshot). Up to 53
-// others fit one datagram, more than the Snapshot leaves out for 128 slots.
-// M2a w3 (G1): with the 2 team bits an other is 180 bits, and 52 fit.
 
 std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped) {
 	BitWriter w = begin(MessageType::SnapshotOthers, kMaxDatagramBytes);
@@ -1461,7 +1408,7 @@ core::Result<SnapshotOthers> decode_snapshot_others(std::span<const uint8_t> p_d
 		return fail("SnapshotOthers", "wrong type");
 	}
 	if (p_datagram.size() > kMaxDatagramBytes) {
-		return fail("SnapshotOthers", "larger than one datagram"); // unreliable ch0: one unfragmented datagram
+		return fail("SnapshotOthers", "larger than one datagram");
 	}
 	SnapshotOthers m;
 	m.seq = uint16_t(r.read_bits(16));
@@ -1487,18 +1434,11 @@ core::Result<SnapshotOthers> decode_snapshot_others(std::span<const uint8_t> p_d
 	return close(r, std::move(m), "SnapshotOthers");
 }
 
-// ---- ShotEvents (ch0) --------------------------------------------------------------------------------------------
-// Body: u32 server tick | u8 count (<= kMaxShotsPerDatagram) | per shot: u7 slot | shot index (u32 for a shooter's
-// first shot in the datagram, else u4 delta 1..15 from its previous one, 0 = escape followed by u32) | u8 def | u3
-// ticks back | u16 tick fraction | 3 x u20 origin | 2 x u16 octahedral direction | u6 pellets - 1 | u1 tracer
-// [tracer: 2 x u12 octahedral aim] [pellets > 1: u13 pellet cone, 1/64 degree] | u1 power present [u12 power, 0..
-// kMaxPower]. 138 bits without a tracer, 162 with one: ~17 / 20 B; 68 untraced shots fit one datagram.
-
 namespace {
 
 constexpr unsigned kShotDirBits = 16;
 constexpr unsigned kShotAimBits = 12;
-constexpr unsigned kConeBits = 13; // 1/64 degree: 0 .. 127.98, covers sim::weapons::kMaxAngle (90)
+constexpr unsigned kConeBits = 13;
 constexpr double kConeScale = 64.0;
 constexpr unsigned kPowerBits = 12;
 constexpr size_t kShotMinBits = 7 + 4 + 8 + 3 + kTickFractionBits + 3 * kFramePositionBits + 2 * kShotDirBits + 6 + 1 + 1;
@@ -1576,7 +1516,6 @@ RemoteShot shot_from_codes(const ShotCodes &p_c, const ShotQuantization &p_frame
 	return s;
 }
 
-// The bits of one shot after p_have_prev / p_prev (the shooter's previous shot in this datagram).
 size_t shot_bits(const ShotCodes &p_c, bool p_have_prev, uint32_t p_prev) {
 	size_t bits = kShotMinBits - 4;
 	if (!p_have_prev) {
@@ -1591,7 +1530,7 @@ size_t shot_bits(const ShotCodes &p_c, bool p_have_prev, uint32_t p_prev) {
 	return bits;
 }
 
-} // namespace
+}
 
 RemoteShot remote_shot_of(const sim::weapons::ShotEvent &p_shot) {
 	RemoteShot s;
@@ -1633,7 +1572,7 @@ std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQ
 			++dropped;
 			continue;
 		}
-		bool repeated = false; // a shot named twice would make the datagram malformed: the later copy is dropped
+		bool repeated = false;
 		for (const Item &it : items) {
 			repeated = repeated || (it.codes.slot == c->slot && it.codes.index == c->index);
 		}
@@ -1648,7 +1587,7 @@ std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQ
 		}
 		items.push_back({ *c, i, std::isfinite(d2) ? d2 : 1e300 });
 	}
-	// Shooters nearest first (a shooter's nearest shot), ties by slot; each shooter's shots in the caller's order.
+
 	std::array<double, kMaxSlots> shooter_d2;
 	shooter_d2.fill(1e301);
 	for (const Item &it : items) {
@@ -1661,7 +1600,7 @@ std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQ
 		}
 		return p_a.codes.slot < p_b.codes.slot;
 	});
-	// The prefix that fits.
+
 	std::array<bool, kMaxSlots> have{};
 	std::array<uint32_t, kMaxSlots> prev{};
 	size_t bits = 8 + 32 + 8;
@@ -1729,7 +1668,7 @@ core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram,
 		return fail("ShotEvents", "wrong type");
 	}
 	if (p_datagram.size() > kMaxDatagramBytes) {
-		return fail("ShotEvents", "larger than one datagram"); // unreliable ch0: one unfragmented datagram
+		return fail("ShotEvents", "larger than one datagram");
 	}
 	ShotEvents m;
 	m.server_tick = sim::Tick(r.read_bits(32));
@@ -1790,7 +1729,7 @@ core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram,
 		prev[c.slot] = c.index;
 		s = shot_from_codes(c, p_frame, m.server_tick);
 	}
-	// A shot named twice (the same shooter and index anywhere in the datagram) is malformed. n <= 128: pairwise.
+
 	for (size_t i = 0; i < m.shots.size(); ++i) {
 		for (size_t j = i + 1; j < m.shots.size(); ++j) {
 			if (m.shots[i].slot == m.shots[j].slot && m.shots[i].shot_index == m.shots[j].shot_index) {
@@ -1801,26 +1740,19 @@ core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram,
 	return close(r, std::move(m), "ShotEvents");
 }
 
-// ---- CombatEvents (ch1) ------------------------------------------------------------------------------------------
-// Body: u32 server tick | varint hits | varint deaths | varint detonations (<= kMaxCombatEventsPerMessage together)
-// | hits: u7 victim u7 shooter u32 shot u6 pellet u2 zone u24 damage u24 health after (1/100 hp) 3 x u20 position
-//   2 x u8 octahedral normal, time | deaths: u7 victim u7 killer u8 def (255 = not a weapon) u2 zone u32 shot u1 headshot,
-//   time | detonations: u7 shooter u32 shot u8 def 3 x u20 position 2 x u8 normal u1 dud, time
-// time = varint ticks back from server_tick | u16 tick fraction. ~26 B per hit, ~11 B per death, ~19 B per detonation.
-
 namespace {
 
 constexpr unsigned kHpBits = 24;
 constexpr double kHpScale = 100.0;
-// 100,000 hp: below 2^17 hp a float holds 1/100 hp exactly enough that decode -> encode gives the same code.
+
 constexpr uint32_t kHpMaxCode = 10'000'000;
 static_assert(kHpMaxCode < (1u << kHpBits));
 constexpr unsigned kNormalBits = 8;
 constexpr size_t kTimeMinBits = 8 + kTickFractionBits;
 constexpr size_t kHitMinBits = 7 + 7 + 32 + 6 + 2 + 2 * kHpBits + 3 * kFramePositionBits + 2 * kNormalBits + kTimeMinBits;
-constexpr size_t kDeathMinBits = 7 + 7 + 8 + 2 + 32 + 1 + kTimeMinBits + 1; // M2b nt: + the v3 stamped bit
+constexpr size_t kDeathMinBits = 7 + 7 + 8 + 2 + 32 + 1 + kTimeMinBits + 1;
 constexpr size_t kDetonationMinBits = 7 + 32 + 8 + 3 * kFramePositionBits + 2 * kNormalBits + 1 + kTimeMinBits;
-constexpr size_t kReviveMinBits = 7 + 7 + 8; // M2b nt: v3 (reviver, revived, a one-group varint)
+constexpr size_t kReviveMinBits = 7 + 7 + 8;
 
 uint32_t hp_code(float p_hp, size_t &r_clamped) {
 	const double t = double(p_hp) * kHpScale + 0.5;
@@ -1847,7 +1779,7 @@ bool read_event_time(BitReader &r_r, sim::Tick p_server_tick, sim::weapons::SimT
 	const uint64_t back = r_r.read_varint();
 	const uint32_t fraction = uint32_t(r_r.read_bits(kTickFractionBits));
 	if (r_r.failed() || back >= p_server_tick) {
-		return false; // also refuses every time for server tick 0
+		return false;
 	}
 	r_time = time_of({ uint32_t(back), fraction }, p_server_tick);
 	return true;
@@ -1861,11 +1793,11 @@ void write_position(BitWriter &r_w, const sim::Vec3 &p_v, const ShotQuantization
 	write_frame(r_w, c);
 }
 
-} // namespace
+}
 
 std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const ShotQuantization &p_frame, size_t *r_clamped) {
 	size_t clamped = 0;
-	// The events that can travel (slots in 7 bits, detonation defs in 8), in order, up to the message bound.
+
 	size_t budget = kMaxCombatEventsPerMessage;
 	std::vector<const HitEvent *> hits;
 	std::vector<const DeathEvent *> deaths;
@@ -1894,21 +1826,21 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 		detonations.push_back(&d);
 		--budget;
 	}
-	std::vector<const ReviveEvent *> revives; // M2b nt: v3
-	for (const ReviveEvent &v : p_message.revives) { // M2b nt
-		if (v.reviver >= kMaxSlots || v.revived >= kMaxSlots || budget == 0) { // M2b nt
-			++clamped; // M2b nt
-			continue; // M2b nt
-		} // M2b nt
-		revives.push_back(&v); // M2b nt
-		--budget; // M2b nt
-	} // M2b nt
+	std::vector<const ReviveEvent *> revives;
+	for (const ReviveEvent &v : p_message.revives) {
+		if (v.reviver >= kMaxSlots || v.revived >= kMaxSlots || budget == 0) {
+			++clamped;
+			continue;
+		}
+		revives.push_back(&v);
+		--budget;
+	}
 	BitWriter w = begin(MessageType::CombatEvents);
 	w.write_bits(p_message.server_tick, 32);
 	w.write_varint(hits.size());
 	w.write_varint(deaths.size());
 	w.write_varint(detonations.size());
-	w.write_varint(revives.size()); // M2b nt
+	w.write_varint(revives.size());
 	for (const HitEvent *h : hits) {
 		w.write_bits(h->victim, kWireSlotBits);
 		w.write_bits(h->shooter, kWireSlotBits);
@@ -1935,15 +1867,15 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 		w.write_bits(d->shot_index, 32);
 		w.write_bool(d->headshot);
 		write_event_time(w, d->time, p_message.server_tick, clamped);
-		// M2b nt: v3, the rules' stamp (m2b.md §3.4 R8); one 0 bit with rules off.
-		const uint32_t killer_hp = hp_code(d->killer_health, clamped); // M2b nt
-		const bool stamped = d->respawn_tick != 0 || d->revive_until != 0 || killer_hp != 0; // M2b nt
-		w.write_bool(stamped); // M2b nt
-		if (stamped) { // M2b nt
-			w.write_bits(d->respawn_tick, 32); // M2b nt
-			w.write_bits(d->revive_until, 32); // M2b nt
-			w.write_bits(killer_hp, kHpBits); // M2b nt
-		} // M2b nt
+
+		const uint32_t killer_hp = hp_code(d->killer_health, clamped);
+		const bool stamped = d->respawn_tick != 0 || d->revive_until != 0 || killer_hp != 0;
+		w.write_bool(stamped);
+		if (stamped) {
+			w.write_bits(d->respawn_tick, 32);
+			w.write_bits(d->revive_until, 32);
+			w.write_bits(killer_hp, kHpBits);
+		}
 	}
 	for (const DetonationWire *d : detonations) {
 		w.write_bits(d->shooter, kWireSlotBits);
@@ -1954,14 +1886,14 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 		w.write_bool(d->dud);
 		write_event_time(w, d->time, p_message.server_tick, clamped);
 	}
-	for (const ReviveEvent *v : revives) { // M2b nt: v3
-		w.write_bits(v->reviver, kWireSlotBits); // M2b nt
-		w.write_bits(v->revived, kWireSlotBits); // M2b nt
-		if (v->tick > p_message.server_tick) { // M2b nt
-			++clamped; // M2b nt: a revive after the message's tick goes out at it
-		} // M2b nt
-		w.write_varint(v->tick <= p_message.server_tick ? p_message.server_tick - v->tick : 0u); // M2b nt
-	} // M2b nt
+	for (const ReviveEvent *v : revives) {
+		w.write_bits(v->reviver, kWireSlotBits);
+		w.write_bits(v->revived, kWireSlotBits);
+		if (v->tick > p_message.server_tick) {
+			++clamped;
+		}
+		w.write_varint(v->tick <= p_message.server_tick ? p_message.server_tick - v->tick : 0u);
+	}
 	if (r_clamped) {
 		*r_clamped = clamped;
 	}
@@ -1978,14 +1910,14 @@ core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datag
 	const uint64_t nh = r.read_varint();
 	const uint64_t nd = r.read_varint();
 	const uint64_t nt = r.read_varint();
-	const uint64_t nr = r.read_varint(); // M2b nt: v3 revives
+	const uint64_t nr = r.read_varint();
 	if (r.failed()) {
 		return fail("CombatEvents", "truncated");
 	}
 	if (nh > kMaxCombatEventsPerMessage || nd > kMaxCombatEventsPerMessage || nt > kMaxCombatEventsPerMessage ||
-			nr > kMaxCombatEventsPerMessage || // M2b nt
-			nh + nd + nt + nr > kMaxCombatEventsPerMessage || // M2b nt: nr added to the M2a sum
-			nh * kHitMinBits + nd * kDeathMinBits + nt * kDetonationMinBits + nr * kReviveMinBits > r.bits_left()) { // M2b nt: nr added
+			nr > kMaxCombatEventsPerMessage ||
+			nh + nd + nt + nr > kMaxCombatEventsPerMessage ||
+			nh * kHitMinBits + nd * kDeathMinBits + nt * kDetonationMinBits + nr * kReviveMinBits > r.bits_left()) {
 		return fail("CombatEvents", "event count out of range");
 	}
 	m.hits.resize(size_t(nh));
@@ -2020,15 +1952,15 @@ core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datag
 		if (!read_event_time(r, m.server_tick, d.time)) {
 			return fail("CombatEvents", r.failed() ? "truncated" : "death time out of range");
 		}
-		if (r.read_bool()) { // M2b nt: v3, the rules' stamp
-			d.respawn_tick = sim::Tick(r.read_bits(32)); // M2b nt
-			d.revive_until = sim::Tick(r.read_bits(32)); // M2b nt
-			const uint32_t killer_hp = uint32_t(r.read_bits(kHpBits)); // M2b nt
-			if (killer_hp > kHpMaxCode) { // M2b nt
-				return fail("CombatEvents", "killer health out of range"); // M2b nt
-			} // M2b nt
-			d.killer_health = hp_value(killer_hp); // M2b nt
-		} // M2b nt
+		if (r.read_bool()) {
+			d.respawn_tick = sim::Tick(r.read_bits(32));
+			d.revive_until = sim::Tick(r.read_bits(32));
+			const uint32_t killer_hp = uint32_t(r.read_bits(kHpBits));
+			if (killer_hp > kHpMaxCode) {
+				return fail("CombatEvents", "killer health out of range");
+			}
+			d.killer_health = hp_value(killer_hp);
+		}
 	}
 	m.detonations.resize(size_t(nt));
 	for (DetonationWire &d : m.detonations) {
@@ -2046,21 +1978,18 @@ core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datag
 		}
 		d.def = uint16_t(def);
 	}
-	m.revives.resize(size_t(nr)); // M2b nt: v3
-	for (ReviveEvent &v : m.revives) { // M2b nt
-		v.reviver = uint8_t(r.read_bits(kWireSlotBits)); // M2b nt
-		v.revived = uint8_t(r.read_bits(kWireSlotBits)); // M2b nt
-		const uint64_t back = r.read_varint(); // M2b nt
-		if (r.failed() || back > m.server_tick) { // M2b nt
-			return fail("CombatEvents", r.failed() ? "truncated" : "revive tick out of range"); // M2b nt
-		} // M2b nt
-		v.tick = sim::Tick(m.server_tick - back); // M2b nt
-	} // M2b nt
+	m.revives.resize(size_t(nr));
+	for (ReviveEvent &v : m.revives) {
+		v.reviver = uint8_t(r.read_bits(kWireSlotBits));
+		v.revived = uint8_t(r.read_bits(kWireSlotBits));
+		const uint64_t back = r.read_varint();
+		if (r.failed() || back > m.server_tick) {
+			return fail("CombatEvents", r.failed() ? "truncated" : "revive tick out of range");
+		}
+		v.tick = sim::Tick(m.server_tick - back);
+	}
 	return close(r, std::move(m), "CombatEvents");
 }
-
-// ---- KitSelect (ch1, C->S) ---------------------------------------------------------------------------------------
-// Body: u8 kit (< kMaxKits) | u8 team (0 keep, 1, 2). 3 bytes with the type byte.
 
 std::vector<uint8_t> encode_kit_select(const KitSelect &p_message) {
 	BitWriter w = begin(MessageType::KitSelect);
@@ -2088,13 +2017,11 @@ core::Result<KitSelect> decode_kit_select(std::span<const uint8_t> p_datagram) {
 	return close(r, std::move(m), "KitSelect");
 }
 
-// ---- M2b nt: protocol v3 (docs/design/m2b.md §3.7, §9.3; R9 replaced the W1.0 stubs; the formats: protocol.h) ----
-
 namespace {
 
-constexpr unsigned kRowSlotBits = 6; // PlayerRow::slot < kMaxPlayerRows
-constexpr unsigned kRowCountBits = 7; // 0 .. kMaxPlayerRows
-constexpr unsigned kNameBytesBits = 5; // 0 .. kMaxPlayerNameBytes
+constexpr unsigned kRowSlotBits = 6;
+constexpr unsigned kRowCountBits = 7;
+constexpr unsigned kNameBytesBits = 5;
 constexpr unsigned kRestrictMaskBits = 13;
 constexpr size_t kRowMinBits = kRowSlotBits + 2 + 2 + 1 + 1 + kNameBytesBits + 16 + 16 + 16 + 32;
 static_assert((size_t(1) << kRowSlotBits) == kMaxPlayerRows && (size_t(1) << (kRowCountBits - 1)) == kMaxPlayerRows);
@@ -2102,7 +2029,6 @@ static_assert(kMaxPlayerNameBytes < (size_t(1) << kNameBytesBits));
 static_assert(restrict_bits::kAll == (1u << kRestrictMaskBits) - 1u);
 static_assert(kMaxKits == 4, "PlayerRow::kit travels in 2 bits");
 
-// The longest prefix of the row's name (at most kMaxPlayerNameBytes, at most name_bytes) that is valid UTF-8.
 size_t valid_name_bytes(const PlayerRow &p_row) {
 	size_t n = std::min<size_t>(p_row.name_bytes, kMaxPlayerNameBytes);
 	while (n > 0 && !valid_utf8(std::string_view(p_row.name.data(), n))) {
@@ -2111,7 +2037,7 @@ size_t valid_name_bytes(const PlayerRow &p_row) {
 	return n;
 }
 
-} // namespace
+}
 
 std::vector<uint8_t> encode_match_state(const MatchState &p_message) {
 	BitWriter w = begin(MessageType::MatchState);
@@ -2169,7 +2095,7 @@ core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram)
 
 std::vector<uint8_t> encode_player_list(const PlayerList &p_message, size_t *r_clamped) {
 	size_t clamped = 0;
-	// The canonical form: one row per slot (the first wins), ascending; removed slots once, never a row's slot.
+
 	std::array<const PlayerRow *, kMaxPlayerRows> by_slot{};
 	for (const PlayerRow &row : p_message.rows) {
 		if (row.slot >= kMaxPlayerRows || by_slot[row.slot] != nullptr) {
@@ -2312,7 +2238,7 @@ core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datag
 		return fail("SpawnRequest", "wrong type");
 	}
 	SpawnRequest m;
-	m.kit = uint8_t(r.read_bits(8)); // any value: the server validates and counts (protocol.h)
+	m.kit = uint8_t(r.read_bits(8));
 	m.spawn_choice = uint8_t(r.read_bits(8));
 	return close(r, m, "SpawnRequest");
 }
@@ -2332,4 +2258,4 @@ std::string_view player_name(const PlayerRow &p_row) {
 	return std::string_view(p_row.name.data(), std::min<size_t>(p_row.name_bytes, kMaxPlayerNameBytes));
 }
 
-} // namespace bf3::net
+}

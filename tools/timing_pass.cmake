@@ -1,21 +1,3 @@
-# The merge pass's timing phases (docs/testing.md; tools\build.cmd --timing / --phase runs this).
-#   cmake -DPRESET=dev -DBDIR=<build dir> -DPHASES=<realtime;timing;window> [-DSTRICT=1] [-DRERUN_LOG=<file>]
-#         -P tools/timing_pass.cmake
-# Each phase is one ctest call of its test preset (<PRESET>-realtime -j8, <PRESET>-timing serial, <PRESET>-window
-# serial) with --output-junit b/<preset>/ctest-<preset>-<phase>.xml, then tools/test_budget.cmake on it. Every phase
-# runs even when an earlier one failed; the script exits 1 if any failed.
-# The realtime phase's rerun rule (tests/realtime_retry.cmake): a failed lane row is rerun alone only when every
-# failing line of its output matches the row's real-time checks; a crash, a timeout, a missing summary or any other
-# failing line fails at once. Both results are printed. With RERUN_LOG every realtime phase appends one
-# <date> <commit> - lane line (so the log holds every lane run, clean or not) and every "lane fail, alone pass" a
-# <date> <commit> <row> <check> line (tab-separated); the pass fails when the same check needed a rerun on 2 of the
-# last 5 commits whose lane ran (the last 5 merges).
-# A phase that selects no row fails (a label or preset filter that went wrong must not pass silently). With
-# REQUIRE_RUN=1 (or the environment variable OPENBF3_TIMING_REQUIRE_RUN=1; the main-merge workflow sets it) a row
-# that skipped (exit 77: no Godot exe, no OPENBF3_GODOT_WINDOWED, the user-active flag) also fails its phase: on main
-# every merge-pass row has to run, while a branch's --all-tests may skip the windowed rows.
-# The quiet lock, the settle and the user-away wait belong to the caller (the main-merge workflow), never to this
-# script: it never creates, waits on or deletes the lock.
 cmake_minimum_required(VERSION 3.29)
 if(NOT DEFINED PRESET)
 	set(PRESET dev)
@@ -47,15 +29,11 @@ function(xml_unescape p_text r_out)
 	set(${r_out} "${t}" PARENT_SCOPE)
 endfunction()
 
-# Runs one phase; sets r_rc (0 when it passed), r_ran (1 when it selected at least one row) and r_hard (1 when it
-# failed in a way no rerun can clear: no row selected, a skipped row under REQUIRE_RUN, a budget violation).
 function(run_phase p_phase r_rc r_ran r_hard)
 	set(hard 0)
 	set(junit "${BDIR}/ctest-${PRESET}-${p_phase}.xml")
 	file(REMOVE "${junit}")
 	message("timing_pass: phase ${p_phase}: ctest --preset ${PRESET}-${p_phase}")
-	# integ/m2b-w2 [passed output]: keep a passed row's whole output (ctest cuts it to 1,024 bytes by default), so the
-	# junit file holds the gate numbers the merge pass measured.
 	execute_process(COMMAND "${_ctest}" --preset ${PRESET}-${p_phase} --output-junit "${junit}" --test-output-size-passed 1048576 ${ARGN}
 		WORKING_DIRECTORY "${_root}" RESULT_VARIABLE rc)
 	if(EXISTS "${junit}")
@@ -100,7 +78,6 @@ function(run_phase p_phase r_rc r_ran r_hard)
 	set(${r_hard} ${hard} PARENT_SCOPE)
 endfunction()
 
-# The failed rows of a junit file, each as "<row>|<failure message>".
 function(failed_rows p_junit r_rows)
 	file(READ "${p_junit}" xml)
 	string(REGEX MATCHALL "<testcase name=\"[^\"]*\"[^>]*status=\"fail\"[^>]*>[ \t\r\n]*<failure message=\"[^\"]*\"" hits "${xml}")
@@ -114,8 +91,6 @@ function(failed_rows p_junit r_rows)
 	set(${r_rows} "${rows}" PARENT_SCOPE)
 endfunction()
 
-# Decides whether a failed lane row may be rerun alone. r_ok: TRUE/FALSE; r_checks: the failing lines (';'-joined
-# names, for the log); r_why: the reason when not.
 function(rerun_allowed p_junit p_row p_message r_ok r_checks r_why)
 	set(${r_ok} FALSE PARENT_SCOPE)
 	set(${r_checks} "" PARENT_SCOPE)
@@ -176,7 +151,6 @@ function(rerun_allowed p_junit p_row p_message r_ok r_checks r_why)
 	set(${r_why} "" PARENT_SCOPE)
 endfunction()
 
-# Replay mode (-DREPLAY_JUNIT=<realtime junit>): print the rerun decision for every failed row of that file, run nothing.
 if(DEFINED REPLAY_JUNIT)
 	failed_rows("${REPLAY_JUNIT}" rows)
 	foreach(entry IN LISTS rows)
@@ -247,8 +221,6 @@ foreach(phase IN LISTS PHASES)
 	endforeach()
 endforeach()
 
-# A check that keeps needing reruns is a regression hiding behind them: 2 of the last 5 commits whose lane ran (every
-# lane run logs a "- lane" line, so these are the last 5 merges) fail.
 if(NOT logged STREQUAL "" AND EXISTS "${RERUN_LOG}")
 	file(STRINGS "${RERUN_LOG}" log_lines)
 	set(commits "")

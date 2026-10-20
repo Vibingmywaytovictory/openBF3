@@ -1,6 +1,3 @@
-// Projectiles as queries (docs/design/m2a-weapons.md §5.8; ballistics.h): double closed-form flight while
-// unpowered, stepped thrust, segment tests against the static world and the provider's targets, bounces, fuses,
-// detonations and blasts.
 #include "bf3/sim/weapons/ballistics.h"
 
 #include "bf3/core/level/collision_soup.h"
@@ -19,12 +16,10 @@ namespace {
 using core::gameplay::WorkBudget;
 using namespace detail;
 
-// Segments one projectile may fly in one step (a tick: one segment per tick for bullets, the missile's 4 sub-steps,
-// the bounces and engine boundaries; refly calls it once per tick).
 constexpr int kMaxSegmentsPerStep = 64;
-constexpr double kRecastSkip = 1e-3; // m past a passed surface
-constexpr double kBounceLift = 1e-2; // m off a surface after a bounce
-constexpr float kRaycastBehind = 0.1f; // m: the R-W2 diagnostic window
+constexpr double kRecastSkip = 1e-3;
+constexpr double kBounceLift = 1e-2;
+constexpr float kRaycastBehind = 0.1f;
 
 struct Env {
 	const WeaponTable &table;
@@ -77,8 +72,6 @@ struct SegmentEnd {
 	bool engine = false;
 };
 
-// The next piece of p's flight toward p_limit with no collision: closed form while unpowered (no re-base), one
-// stepped sub-step under thrust (re-based), and a re-base at the engine's phase changes.
 SegmentEnd next_segment(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_limit, uint8_t p_substeps) {
 	SegmentEnd e;
 	e.time = p_limit;
@@ -155,8 +148,6 @@ void describe_static(const Env &p_env, const StaticHit &p_h, ImpactEvent &r_e) {
 	}
 }
 
-// Whether the static surface lets this projectile through (penetrable pair, no NeverPenetrate in its cell), and
-// the cell's damage factor.
 bool passes_surface(const Env &p_env, const ProjectileSimDef &p_d, const StaticHit &p_h, float &r_factor) {
 	const SurfaceMaterialTable *m = p_env.materials();
 	if (m == nullptr || p_d.never_penetrate_any) {
@@ -174,8 +165,6 @@ bool passes_surface(const Env &p_env, const ProjectileSimDef &p_d, const StaticH
 	return true;
 }
 
-// The earliest target hit of the segment (the provider's answer to this projectile's query); leg capsules hidden
-// behind static geometry from the shot origin are skipped (DeactivateIfBehindWall).
 bool first_target(Env &r_env, const Projectile &p_p, const Vec3 &p_a, const Vec3 &p_b, SimTime p_t0, SimTime p_t1, TargetHit &r_hit) {
 	TargetQuery q;
 	q.time_start = p_t0;
@@ -185,7 +174,7 @@ bool first_target(Env &r_env, const Projectile &p_p, const Vec3 &p_a, const Vec3
 	q.def = p_p.def;
 	q.pellet = p_p.pellet;
 	q.kind = r_env.kind;
-	// M2a lc R4 (docs/design/m2a.md §6.4): the segment's geometry for a rewinding provider's broad phase.
+
 	q.from = p_a;
 	q.to = p_b;
 	q.radius = 0.0f;
@@ -206,7 +195,7 @@ bool first_target(Env &r_env, const Projectile &p_p, const Vec3 &p_a, const Vec3
 			const Vec3 d{ h.position[0] - o[0], h.position[1] - o[1], h.position[2] - o[2] };
 			StaticHit blocker;
 			if (r_env.charge(1) && r_env.world.ray(o, d, query_mask::kProjectile, &blocker) && blocker.fraction < 0.999f) {
-				// Test the target again without its behind-wall capsules.
+
 				HitTarget rest = t;
 				uint8_t n = 0;
 				for (uint8_t i = 0; i < t.capsule_count && i < kMaxZoneCapsules; ++i) {
@@ -229,8 +218,6 @@ bool first_target(Env &r_env, const Projectile &p_p, const Vec3 &p_a, const Vec3
 	return any;
 }
 
-// Tests one segment a -> b: the targets, then the static world in order along the segment, passing invisible
-// blockers and penetrable surfaces (at most limits.max_recasts per projectile per step, counted in r_recasts).
 SegResult test_segment(Env &r_env, Projectile &r_p, const ProjectileSimDef &p_d, const DVec3 &p_a, const DVec3 &p_b, SimTime p_t0, SimTime p_t1,
 		uint8_t &r_recasts) {
 	SegResult r;
@@ -318,14 +305,14 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 	q.def = p_p.def;
 	q.pellet = p_p.pellet;
 	q.kind = TargetQueryKind::Blast;
-	// M2a lc R4 (docs/design/m2a.md §6.4): the blast's centre and reach (BlastRadius; no damage beyond it).
+
 	q.from = to_f(p_pos);
 	q.to = q.from;
 	q.radius = std::max(p_x.inner_radius, p_x.radius);
 	q.has_segment = true;
 	const std::span<const HitTarget> list = r_env.targets.targets_for(q);
 	const Mechanics &mech = r_env.table.mechanics;
-	const DVec3 eye = add(p_pos, scale(to_d(p_normal), 0.05)); // occlusion rays start just off the surface
+	const DVec3 eye = add(p_pos, scale(to_d(p_normal), 0.05));
 	for (const HitTarget &t : list) {
 		const uint8_t n = std::min<uint8_t>(t.capsule_count, kMaxZoneCapsules);
 		if (!r_env.charge(1 + size_t(n))) {
@@ -432,7 +419,6 @@ bool outside(const Env &p_env, const DVec3 &p_pos) {
 	return false;
 }
 
-// Flies p to p_t_end (or its expiry). False when it is gone (hit, detonated, expired, outside the world).
 bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 	if (r_p.def >= r_env.table.defs.size()) {
 		return false;
@@ -443,7 +429,7 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 	}
 	const SimTime expiry = r_p.spawn_time + d.time_to_live;
 	if (d.instant_hit) {
-		// One segment of speed x TTL at the spawn time (knives).
+
 		if (!r_env.charge(1)) {
 			return true;
 		}
@@ -516,7 +502,7 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 		r_p.path_length += length(sub(pos, r_p.position));
 		const Vec3 normal = r.kind == SegResult::Kind::Static ? r.stat.normal : r.target.normal;
 		if (d.kind == ProjectileKind::Grenade) {
-			// Bounce [inferred]: v' = reflect(v) x CollisionSpeedMultiplier; rest below MinBounceSpeed.
+
 			const DVec3 n = normalize(to_d(normal), { 0, 1, 0 });
 			const DVec3 reflected = sub(vel, scale(n, 2.0 * dot(vel, n)));
 			const DVec3 v2 = scale(reflected, double(d.bounce_speed_multiplier));
@@ -575,7 +561,6 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 	return true;
 }
 
-// Projectile k of a shot (pellet k > 0 or a multi-pellet shot: a draw inside the pellet cone, from the seed).
 Projectile make_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, uint8_t p_pellet) {
 	const WeaponSimDef &wd = p_table.defs[p_shot.def];
 	Vec3 dir = p_shot.direction;
@@ -611,7 +596,7 @@ Env make_env(const WeaponTable &p_table, const BallisticsLimits &p_limits, const
 	return env;
 }
 
-} // namespace
+}
 
 ProjectileWorld::ProjectileWorld(std::shared_ptr<const WeaponTable> p_table, const BallisticsLimits &p_limits) :
 		table_(std::move(p_table)), limits_(p_limits) {}
@@ -668,7 +653,7 @@ Projectile fly_free(const WeaponSimDef &p_def, const Projectile &p_start, SimTim
 	Projectile p = p_start;
 	const ProjectileSimDef &d = p_def.projectile;
 	BallisticsLimits limits;
-	// Bounded: one piece per sub-step boundary (4 per tick under thrust) up to 60 s, else one closed-form piece.
+
 	for (int i = 0; i < 4 * 60 * int(kSimHz) + 8 && p.time < p_until; ++i) {
 		const SegmentEnd e = next_segment(p, d, p_until, limits.missile_substeps);
 		if (e.rebase) {
@@ -715,4 +700,4 @@ bool refly_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, uint8
 	return false;
 }
 
-} // namespace bf3::sim::weapons
+}

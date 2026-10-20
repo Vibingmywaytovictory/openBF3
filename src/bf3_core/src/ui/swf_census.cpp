@@ -1,4 +1,3 @@
-// The SwfMovie census (bf3/core/ui/swf_census.h; docs/design/ui-swf-fonts.md §5.3, gates G1 and G6).
 #include "bf3/core/ui/swf_census.h"
 
 #include "bf3/core/thread_pool.h"
@@ -19,7 +18,7 @@ namespace {
 struct Lane {
 	SwfMovieCensus row;
 	std::vector<std::string> exports;
-	std::vector<std::pair<std::string, std::vector<std::string>>> imports; // (url, symbols)
+	std::vector<std::pair<std::string, std::vector<std::string>>> imports;
 	std::set<std::string> font_names;
 	size_t atlas_budget = 0;
 };
@@ -106,7 +105,7 @@ Lane census_one(const SwfLibrary &p_lib, const SwfMovieSource &p_source, const S
 		}
 		lane.imports.push_back({ im.url, std::move(symbols) });
 	}
-	// Font names: glyphless DefineFont3 tags and the fonts edit texts name.
+
 	for (const SwfFontInfo &f : m.fonts) {
 		if (f.kind != SwfFontKind::Outlines) {
 			lane.font_names.insert(f.name);
@@ -124,7 +123,7 @@ Lane census_one(const SwfLibrary &p_lib, const SwfMovieSource &p_source, const S
 			}
 		}
 	}
-	// Atlas textures and sub-images.
+
 	for (const SwfExternalImage &im : m.external_images) {
 		if (!p_options.check_atlas_textures) {
 			break;
@@ -167,7 +166,7 @@ std::string tsv_escape(const std::string &p_text) {
 	return out;
 }
 
-} // namespace
+}
 
 Result<SwfCensus> run_swf_census(const SwfLibrary &p_movies, const SwfCensusOptions &p_options) {
 	const auto start = std::chrono::steady_clock::now();
@@ -177,7 +176,7 @@ Result<SwfCensus> run_swf_census(const SwfLibrary &p_movies, const SwfCensusOpti
 
 	SwfCensus census;
 	SwfCensusTotals &t = census.totals;
-	std::unordered_map<std::string, std::set<std::string>> exports; // movie -> export names (parsed movies only)
+	std::unordered_map<std::string, std::set<std::string>> exports;
 	for (size_t i = 0; i < lanes.size(); ++i) {
 		exports[sources[i].name].insert(lanes[i].exports.begin(), lanes[i].exports.end());
 	}
@@ -348,4 +347,4 @@ std::string format_census_totals(const SwfCensus &p_census) {
 	return out;
 }
 
-} // namespace bf3::core::ui
+}

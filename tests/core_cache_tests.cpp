@@ -1,5 +1,3 @@
-// Derived-data cache (bf3_core/cache) against scratch trees in %TEMP%. A temp directory plays the
-// protected install root; the real install is never involved.
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/cache_key.h"
@@ -80,7 +78,6 @@ bool write_file(const fs::path &p_path, std::span<const uint8_t> p_bytes) {
 	return ok;
 }
 
-// Creates a directory junction p_link -> p_target (no admin rights needed, unlike symlinks).
 bool make_junction(const fs::path &p_link, const fs::path &p_target) {
 	if (!CreateDirectoryW(p_link.c_str(), nullptr)) {
 		return false;
@@ -111,7 +108,6 @@ bool make_junction(const fs::path &p_link, const fs::path &p_target) {
 	return ok != 0;
 }
 
-// %TEMP%\openbf3-cache-<pid>-<n>\{install (protected, with one file), cache (the cache root)}.
 struct Scratch {
 	fs::path base;
 	fs::path install;
@@ -133,7 +129,6 @@ struct Scratch {
 	}
 	~Scratch() { remove_tree(base); }
 
-	// Removes junctions as links (never recursing into their targets), then the rest.
 	static void remove_tree(const fs::path &p_dir) {
 		WIN32_FIND_DATAW fd;
 		HANDLE h = FindFirstFileW((p_dir / L"*").c_str(), &fd);
@@ -171,7 +166,6 @@ struct Scratch {
 		return o;
 	}
 
-	// Every file under the protected root with its bytes; compared before and after attacks.
 	std::map<std::wstring, std::vector<uint8_t>> install_snapshot() const {
 		std::map<std::wstring, std::vector<uint8_t>> out;
 		std::error_code ec;
@@ -200,7 +194,7 @@ std::vector<fs::path> files_with_suffix(const fs::path &p_dir, std::wstring_view
 	return out;
 }
 
-} // namespace
+}
 
 TEST_CASE("cache: digests match published test vectors") {
 	CHECK(sha1_of(bytes_of("abc")).hex() == "a9993e364706816aba3e25717850c26c9cd0d89d");
@@ -208,7 +202,7 @@ TEST_CASE("cache: digests match published test vectors") {
 	CHECK(sha256_of(bytes_of("abc")).hex() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 	CHECK(sha256_of({}).hex() == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 	CHECK(crc32(bytes_of("123456789")) == 0xCBF43926u);
-	// Incremental equals one-shot.
+
 	const std::vector<uint8_t> data = payload(1 << 20, 7);
 	Hasher h(HashAlgorithm::Sha256);
 	h.update(std::span(data).first(12345));
@@ -230,8 +224,7 @@ TEST_CASE("cache: keys are stable and cover every input") {
 	in.format_version = 2;
 	const std::optional<CacheKey> k = make_cache_key(in);
 	REQUIRE(k);
-	// Pinned value: changing the encoding orphans every cache on every machine, so it must be a
-	// deliberate container-version bump, never an accident.
+
 	CHECK(k->hex() == "6cdf505b719a76e688ab417ef8089f321711a7091727fbaff429a89ce7f836b4");
 	MESSAGE("key: ", k->hex());
 	CHECK(make_cache_key(in)->digest == k->digest);
@@ -252,7 +245,7 @@ TEST_CASE("cache: keys are stable and cover every input") {
 	CHECK(differs([](CacheKeyInputs &c) { c.format_version = 3; }));
 	CHECK(differs([](CacheKeyInputs &c) { c.jolt_version = "5.6.0"; }));
 	CHECK(differs([](CacheKeyInputs &c) { c.params = "cs=0.3"; }));
-	// Field boundaries are length-prefixed: moving bytes between fields changes the key.
+
 	CHECK(differs([](CacheKeyInputs &c) {
 		c.engine = "4.8.dev7.c971f93e75.6.0";
 		c.jolt_version = "";
@@ -287,7 +280,7 @@ TEST_CASE("cache: round trip, dedup and reopen") {
 	CHECK(p.written);
 	CHECK(cache.put(kb, b).written);
 	CHECK(cache.put(kempty, {}).written);
-	p = cache.put(ka, b); // same key again: not rewritten
+	p = cache.put(ka, b);
 	CHECK(p.status == CacheStatus::Ok);
 	CHECK(p.reused);
 	CHECK(!p.written);
@@ -303,13 +296,12 @@ TEST_CASE("cache: round trip, dedup and reopen") {
 		GetResult e = cache.get(kempty);
 		REQUIRE(e.status == CacheStatus::Ok);
 		CHECK(e.entry.payload().empty());
-		// The same digest under another kind is a different key, never a hit.
+
 		CacheKey wrong = ka;
 		wrong.kind = "nav";
 		CHECK(cache.get(wrong).status == CacheStatus::Miss);
 	}
-	// Regression: a rename must stay relative to the target directory handle. (kernel32 resolves
-	// a bare rename target against the current directory; that put entries into the CWD once.)
+
 	{
 		wchar_t cwd[MAX_PATH];
 		GetCurrentDirectoryW(MAX_PATH, cwd);
@@ -338,15 +330,14 @@ TEST_CASE("cache: round trip, dedup and reopen") {
 	REQUIRE(g.status == CacheStatus::Ok);
 	CHECK(g.entry.payload().size() == 1);
 	CHECK(g.entry.payload()[0] == b[0]);
-	CHECK(cache.stats().verified == 1); // first use in this process hashes the payload
+	CHECK(cache.stats().verified == 1);
 	g.entry.reset();
 	CHECK(cache.get(kb).status == CacheStatus::Ok);
-	CHECK(cache.stats().verified == 1); // not again
+	CHECK(cache.stats().verified == 1);
 	CHECK(cache.remove(kb) == CacheStatus::Ok);
 	CHECK(!fs::exists(t.entry_path(kb)));
 	CHECK(cache.get(kb).status == CacheStatus::Miss);
 
-	// One process (one Cache) per root.
 	Cache second;
 	CHECK(second.open(t.options(), &why) == CacheStatus::Busy);
 }
@@ -365,41 +356,41 @@ TEST_CASE("cache: damaged and partial entries are detected, deleted and reported
 		for (const CacheKey &k : { kflip, ktrunc, khead, kgrow, klive }) {
 			REQUIRE(cache.put(k, data).written);
 		}
-		// In-session damage: the entry is verified (written by us), a forced verify still hashes.
+
 		std::vector<uint8_t> f = read_file(t.entry_path(klive));
 		f[kCacheEntryHeaderSize + 777] ^= 0x01;
 		REQUIRE(write_file(t.entry_path(klive), f));
-		CHECK(cache.get(klive).status == CacheStatus::Ok); // header-valid, already verified
+		CHECK(cache.get(klive).status == CacheStatus::Ok);
 		GetResult forced = cache.get(klive, true);
 		CHECK(forced.status == CacheStatus::Miss);
 		CHECK(forced.dropped_corrupt);
 		CHECK(!fs::exists(t.entry_path(klive)));
 		CHECK(cache.stats().corrupt_dropped == 1);
 	}
-	// Offline damage.
+
 	{
 		std::vector<uint8_t> f = read_file(t.entry_path(kflip));
-		f[kCacheEntryHeaderSize + 12345] ^= 0x80; // one payload bit
+		f[kCacheEntryHeaderSize + 12345] ^= 0x80;
 		REQUIRE(write_file(t.entry_path(kflip), f));
 		f = read_file(t.entry_path(ktrunc));
-		f.pop_back(); // torn write of the last byte
+		f.pop_back();
 		REQUIRE(write_file(t.entry_path(ktrunc), f));
 		f = read_file(t.entry_path(khead));
-		f[3] = 'X'; // magic
+		f[3] = 'X';
 		REQUIRE(write_file(t.entry_path(khead), f));
 		f = read_file(t.entry_path(kgrow));
-		f.push_back(0); // appended garbage
+		f.push_back(0);
 		REQUIRE(write_file(t.entry_path(kgrow), f));
 	}
 	Cache cache;
 	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
 	CacheStats s = cache.stats();
-	CHECK(s.corrupt_dropped == 2); // truncated and grown: size disagrees with the journal at open
+	CHECK(s.corrupt_dropped == 2);
 	CHECK(!fs::exists(t.entry_path(ktrunc)));
 	CHECK(!fs::exists(t.entry_path(kgrow)));
 	CHECK(cache.get(ktrunc).status == CacheStatus::Miss);
 
-	GetResult g = cache.get(kflip); // first use hashes: the flipped bit is found
+	GetResult g = cache.get(kflip);
 	CHECK(g.status == CacheStatus::Miss);
 	CHECK(g.dropped_corrupt);
 	CHECK(!fs::exists(t.entry_path(kflip)));
@@ -409,7 +400,7 @@ TEST_CASE("cache: damaged and partial entries are detected, deleted and reported
 	CHECK(!fs::exists(t.entry_path(khead)));
 	CHECK(cache.stats().entries == 0);
 	CHECK(cache.stats().corrupt_dropped == 4);
-	// A fresh put after a drop works.
+
 	CHECK(cache.put(kflip, data).written);
 	CHECK(cache.get(kflip).status == CacheStatus::Ok);
 }
@@ -418,8 +409,8 @@ TEST_CASE("cache: crash recovery (stray temp files, torn journal, unjournaled an
 	Scratch t;
 	const CacheKey k1 = key("shape", 1);
 	const CacheKey k2 = key("shape", 2);
-	const CacheKey k3 = key("shape", 3); // written but its journal record is lost
-	const CacheKey k4 = key("shape", 4); // journaled but its file is lost
+	const CacheKey k3 = key("shape", 3);
+	const CacheKey k4 = key("shape", 4);
 	const std::vector<uint8_t> data = payload(3000, 5);
 	const fs::path journal = t.root / L"v1" / L"index.log";
 	uintmax_t journal_size_before_k3 = 0;
@@ -434,16 +425,16 @@ TEST_CASE("cache: crash recovery (stray temp files, torn journal, unjournaled an
 		REQUIRE(cache.put(k3, data).written);
 		cache.close();
 	}
-	// Simulate the crash: drop k3's record and the close marker, then a half-written record.
+
 	{
 		std::vector<uint8_t> j = read_file(journal);
 		REQUIRE(j.size() > journal_size_before_k3);
 		j.resize(static_cast<size_t>(journal_size_before_k3));
-		const uint8_t torn[] = { 60, 0, 0, 0, 0x12, 0x34, 0x56, 0x78, 1, 2, 3 }; // length 60, only 3 body bytes
+		const uint8_t torn[] = { 60, 0, 0, 0, 0x12, 0x34, 0x56, 0x78, 1, 2, 3 };
 		j.insert(j.end(), std::begin(torn), std::end(torn));
 		REQUIRE(write_file(journal, j));
 		fs::remove(t.entry_path(k4));
-		// Temp files of interrupted writes (an entry and a journal compaction).
+
 		REQUIRE(write_file(t.entry_path(k1).parent_path() / (k1.hex() + ".4242-7.tmp"), data));
 		REQUIRE(write_file(t.root / L"v1" / L"index.log.4242-8.tmp", data));
 	}
@@ -459,11 +450,10 @@ TEST_CASE("cache: crash recovery (stray temp files, torn journal, unjournaled an
 	CHECK(s.entries == 3);
 	CHECK(files_with_suffix(t.root, L".tmp").empty());
 	CHECK(cache.get(k1).status == CacheStatus::Ok);
-	CHECK(cache.get(k3).status == CacheStatus::Ok); // adopted, verified on first use
+	CHECK(cache.get(k3).status == CacheStatus::Ok);
 	CHECK(cache.get(k4).status == CacheStatus::Miss);
 	cache.close();
 
-	// The rewritten journal is clean.
 	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
 	s = cache.stats();
 	CHECK(!s.recovered_unclean);
@@ -472,7 +462,6 @@ TEST_CASE("cache: crash recovery (stray temp files, torn journal, unjournaled an
 	CHECK(!s.journal_compacted);
 	CHECK(s.entries == 3);
 
-	// A journal with a damaged header is rebuilt from the files.
 	cache.close();
 	std::vector<uint8_t> j = read_file(journal);
 	j[0] = 'X';
@@ -509,12 +498,11 @@ TEST_CASE("cache: guard refuses a root under the protected root") {
 
 	CacheOptions none;
 	none.root = t.root;
-	CHECK(cache.open(none, &why) == CacheStatus::Refused); // a guard without roots
+	CHECK(cache.open(none, &why) == CacheStatus::Refused);
 	o = t.options();
 	o.root = L"relative\\cache";
 	CHECK(cache.open(o, &why) == CacheStatus::InvalidArgument);
 
-	// A target inside a protected subtree of the cache root is refused per write.
 	o = t.options();
 	o.guard.add_protected_root(t.root / L"v1" / L"mesh");
 	REQUIRE(cache.open(o, &why) == CacheStatus::Ok);
@@ -535,7 +523,7 @@ TEST_CASE("cache: junctions swapped in after the check cannot redirect writes") 
 		if (attack_at.empty()) {
 			return;
 		}
-		// Move the real directory aside (if any) and put a junction into the install in its place.
+
 		if (fs::exists(attack_at)) {
 			MoveFileW(attack_at.c_str(), (stash / std::to_wstring(GetTickCount64())).c_str());
 		}
@@ -545,7 +533,6 @@ TEST_CASE("cache: junctions swapped in after the check cannot redirect writes") 
 	Cache cache;
 	REQUIRE(cache.open(o) == CacheStatus::Ok);
 
-	// 1. The kind directory does not exist yet: a junction appears at v1/mesh.
 	attack_at = t.root / L"v1" / L"mesh";
 	PutResult p = cache.put(key("mesh", 1), payload(1000, 1));
 	if (!attacked) {
@@ -554,12 +541,11 @@ TEST_CASE("cache: junctions swapped in after the check cannot redirect writes") 
 	}
 	CHECK(p.status == CacheStatus::Refused);
 	CHECK(t.install_snapshot() == before);
-	REQUIRE(RemoveDirectoryW((t.root / L"v1" / L"mesh").c_str())); // the junction itself, never its target
+	REQUIRE(RemoveDirectoryW((t.root / L"v1" / L"mesh").c_str()));
 
-	// 2. The kind directory exists; the fan-out directory of the next key is swapped.
 	REQUIRE(cache.put(key("nav", 1), payload(1000, 2)).written);
 	const CacheKey k2 = key("nav", 2);
-	REQUIRE(cache.put(k2, payload(10, 3)).written); // creates its fan-out directory
+	REQUIRE(cache.put(k2, payload(10, 3)).written);
 	REQUIRE(cache.remove(k2) == CacheStatus::Ok);
 	attacked = false;
 	attack_at = t.entry_path(k2).parent_path();
@@ -568,7 +554,6 @@ TEST_CASE("cache: junctions swapped in after the check cannot redirect writes") 
 	CHECK(p.status == CacheStatus::Refused);
 	CHECK(t.install_snapshot() == before);
 
-	// 3. A hard link to an install file appears at the target name after the path check.
 	const CacheKey k3 = key("nav", 3);
 	o.test_hook_before_write = nullptr;
 	cache.close();
@@ -580,23 +565,20 @@ TEST_CASE("cache: junctions swapped in after the check cannot redirect writes") 
 	p = cache.put(k3, payload(1000, 5));
 	CHECK(p.status == CacheStatus::Refused);
 	CHECK(t.install_snapshot() == before);
-	// The planted hard link is never deleted through the cache either.
+
 	CHECK(cache.remove(k3) == CacheStatus::Miss);
 	DeleteFileW(t.entry_path(k3).c_str());
 
-	// 4. A hard link that exists before the write is refused by the path-level check.
 	const CacheKey k5 = key("nav", 5);
 	fs::create_directories(t.entry_path(k5).parent_path());
 	REQUIRE(CreateHardLinkW(t.entry_path(k5).c_str(), t.install_file.c_str(), nullptr));
 	o.test_hook_before_write = nullptr;
 	cache.close();
-	REQUIRE(cache.open(o) == CacheStatus::Ok); // the scan leaves (or refuses to delete) the link
+	REQUIRE(cache.open(o) == CacheStatus::Ok);
 	CHECK(cache.put(k5, payload(100, 6)).status != CacheStatus::Ok);
 	CHECK(t.install_snapshot() == before);
 	DeleteFileW(t.entry_path(k5).c_str());
 
-	// 5. The cache root itself is moved away and replaced by a junction after open: the held
-	//    handles keep pointing at the real directory; nothing reaches the install.
 	cache.close();
 	o.test_hook_before_write = nullptr;
 	REQUIRE(cache.open(o) == CacheStatus::Ok);
@@ -610,8 +592,7 @@ TEST_CASE("cache: junctions swapped in after the check cannot redirect writes") 
 		RemoveDirectoryW(t.root.c_str());
 		MoveFileW(moved.c_str(), t.root.c_str());
 	} else {
-		// Windows refuses to move a directory while files below it are open (the lock file), which
-		// already blocks this swap.
+
 		MESSAGE("the OS refuses to move the open cache root (error ", GetLastError(), "); swap blocked before it can happen");
 	}
 	CHECK(t.install_snapshot() == before);
@@ -642,7 +623,7 @@ TEST_CASE("cache: concurrent puts and gets, same-key puts deduplicated") {
 				if (cache.put(key("mesh", n), data).status != CacheStatus::Ok) {
 					failures.fetch_add(1);
 				}
-				// Every thread also hammers the shared keys.
+
 				const uint32_t shared = uint32_t(i % kShared);
 				PutResult p = cache.put(key("shared", shared), payload(20000, 500 + shared));
 				if (p.written) {
@@ -705,7 +686,7 @@ TEST_CASE("cache: concurrent puts and gets, same-key puts deduplicated") {
 
 TEST_CASE("cache: LRU eviction order, pins and in-use entries") {
 	Scratch t;
-	Scratch t2; // declared before the cache: its tree is removed only after the cache has closed
+	Scratch t2;
 	const std::vector<uint8_t> data = payload(1000, 1);
 	const uint64_t entry = data.size() + kCacheEntryHeaderSize;
 	const CacheKey a = key("mesh", 1), b = key("mesh", 2), c = key("mesh", 3), d = key("mesh", 4), e = key("mesh", 5);
@@ -716,9 +697,9 @@ TEST_CASE("cache: LRU eviction order, pins and in-use entries") {
 	for (const CacheKey &k : { a, b, c, d, e }) {
 		REQUIRE(cache.put(k, data).written);
 	}
-	CHECK(cache.get(a).status == CacheStatus::Ok); // a becomes the most recent
+	CHECK(cache.get(a).status == CacheStatus::Ok);
 	REQUIRE(cache.set_pinned(c, true) == CacheStatus::Ok);
-	GetResult held = cache.get(d); // d stays mapped: in use
+	GetResult held = cache.get(d);
 	REQUIRE(held.status == CacheStatus::Ok);
 
 	EvictResult r = cache.evict_to(2 * entry);
@@ -734,25 +715,23 @@ TEST_CASE("cache: LRU eviction order, pins and in-use entries") {
 	CHECK(cache.contains(d));
 	CHECK(!fs::exists(t.entry_path(a)));
 	CHECK(!fs::exists(t.entry_path(b)));
-	CHECK(held.entry.payload()[10] == data[10]); // the in-use view is untouched
+	CHECK(held.entry.payload()[10] == data[10]);
 	held.entry.reset();
 	CHECK(cache.stats().bytes == 2 * entry);
 
-	// enforce_budget: no-op under the budget; above it, down to 90 %.
 	CHECK(cache.enforce_budget().evicted.empty());
 	REQUIRE(cache.set_pinned(c, false) == CacheStatus::Ok);
 	for (uint32_t n = 10; n < 13; ++n) {
 		REQUIRE(cache.put(key("mesh", n), data).written);
 	}
 	CHECK(cache.stats().bytes == 5 * entry);
-	r = cache.enforce_budget(); // budget 4 entries, low watermark 3.6 → keep 3
+	r = cache.enforce_budget();
 	CHECK(r.evicted.size() == 2);
 	CHECK(r.evicted[0] == c.digest);
 	CHECK(r.evicted[1] == d.digest);
 	CHECK(cache.stats().bytes == 3 * entry);
 	cache.close();
 
-	// Recency and pins survive a reopen (touch and pin records).
 	o = t2.options();
 	REQUIRE(cache.open(o) == CacheStatus::Ok);
 	for (const CacheKey &k : { a, b, c, d }) {
@@ -855,7 +834,7 @@ TEST_CASE("cache: close and reopen while other threads put, get, evict and remov
 	for (int round = 0; round < 24; ++round) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(8));
 		if (round % 4 == 3) {
-			// Two closers at once: both return after the handles are closed, neither double-closes.
+
 			std::thread other([&] { cache.close(); });
 			cache.close();
 			other.join();
@@ -867,7 +846,7 @@ TEST_CASE("cache: close and reopen while other threads put, get, evict and remov
 		std::string why;
 		const CacheStatus st = cache.open(t.options(), &why);
 		CHECK_MESSAGE(st == CacheStatus::Ok, why);
-		CHECK(!cache.stats().recovered_unclean); // every close wrote its close record last
+		CHECK(!cache.stats().recovered_unclean);
 		CHECK(cache.stats().journal_torn_bytes == 0);
 	}
 	stop.store(true);
@@ -879,7 +858,6 @@ TEST_CASE("cache: close and reopen while other threads put, get, evict and remov
 	CHECK(ok_reads.load() > 0);
 	CHECK(ok_puts.load() > 0);
 
-	// Whatever survived is intact and fully accounted for.
 	cache.close();
 	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
 	const CacheStats s = cache.stats();
@@ -933,7 +911,7 @@ TEST_CASE("cache: a hard link planted at a journaled entry name is never served 
 	const auto before = t.install_snapshot();
 	Cache cache;
 	REQUIRE(cache.open(t.options()) == CacheStatus::Ok);
-	// Same file size as the install file, so the open-time scan's size check accepts the record.
+
 	const CacheKey k = key("mesh", 7);
 	REQUIRE(cache.put(k, payload(4096 - kCacheEntryHeaderSize, 7)).written);
 	cache.close();
@@ -943,9 +921,9 @@ TEST_CASE("cache: a hard link planted at a journaled entry name is never served 
 	const GetResult g = cache.get(k);
 	CHECK(g.status == CacheStatus::Miss);
 	CHECK(g.dropped_corrupt);
-	CHECK(cache.stats().refused >= 1); // the delete of the link was refused
+	CHECK(cache.stats().refused >= 1);
 	CHECK(!cache.contains(k));
-	CHECK(fs::exists(t.entry_path(k))); // left alone
+	CHECK(fs::exists(t.entry_path(k)));
 	CHECK(fs::exists(t.install_file));
 	CHECK(t.install_snapshot() == before);
 	cache.close();

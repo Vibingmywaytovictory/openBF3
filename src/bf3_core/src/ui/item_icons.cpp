@@ -1,10 +1,3 @@
-// UI ui2: the _small item icons of the kill feed, kill card and loadout screens (include/bf3/core/ui/hud_icons.h
-// "item icons"; docs/design/ui-minimap-icons.md §4.5, §6.2).
-//
-// ItemIds of ui/uiweaponmetadata, ui/uikititemmetadata and ui/uivehiclemetadata hold the unlock identifiers
-// (SoldierWeaponUnlockAsset.Identifier); the first description listing an id wins, in that partition order.
-// Cost model (gameplay::WorkBudget): each partition and description 1 (charge_type), each Items / ItemIds array its
-// raw length, each copied text its bytes. Caps: kMaxItemIcons ids in all, paths at most kMaxItemIconPath bytes.
 #include "bf3/core/ui/hud_icons.h"
 
 #include "bf3/core/res/res_loader.h"
@@ -38,7 +31,7 @@ std::string res_key(std::string_view p_path) {
 	return out;
 }
 
-} // namespace
+}
 
 Result<ItemIconIndex> ItemIconIndex::read(const EbxResolver &p_ui, gameplay::WorkBudget *p_budget) {
 	gameplay::WorkBudget local;
@@ -162,4 +155,4 @@ Result<ItemIconImage> load_item_icon(const LevelMount &p_mount, const ItemIcon &
 	return decode_item_icon(t->texture, std::span<const uint8_t>(t->chunk.bytes), p_icon.res_name);
 }
 
-} // namespace bf3::core::ui
+}

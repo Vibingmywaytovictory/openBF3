@@ -1,4 +1,3 @@
-// WeaponDef names and derived arithmetic (see weapon_def.h).
 #include "bf3/core/gameplay/weapon_def.h"
 
 #include <algorithm>
@@ -131,4 +130,4 @@ void apply_sway_modifier(std::array<std::array<SwayState, 2>, 3> &r_state, const
 	}
 }
 
-} // namespace bf3::core::gameplay
+}

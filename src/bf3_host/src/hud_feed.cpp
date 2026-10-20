@@ -1,6 +1,3 @@
-// The minimal HUD's feed and layout (bf3/host/hud_feed.h; docs/design/m2a.md §11.4, docs/design/m2a-hud.md).
-// Godot-free and pure: fill_hud writes ui2's HudModel from the presented own weapon and the drained events; the
-// layout half maps BF3's 1280 x 720 HUD stage into the window and finds the text slots of the hudmpscreen tree.
 #include "bf3/host/hud_feed.h"
 
 #include "bf3/core/ui/text_db.h"
@@ -42,7 +39,7 @@ HudCrosshairKind crosshair_kind(const gp::WeaponDef &p_def, const sw::WeaponSimD
 }
 
 void clear_weapon(ui::HudWeapon &r_w) {
-	// Everything fill_hud writes; the fields of later waves (secondary, heat, range, ...) are not touched.
+
 	r_w.active_weapon_data = {};
 	r_w.active_weapon_crosshair = 0;
 	r_w.active_weapon_ammo = 0;
@@ -67,7 +64,6 @@ void clear_weapon(ui::HudWeapon &r_w) {
 	r_w.can_fire = false;
 }
 
-// Child of p_node with instance name p_name (the first in display order), or null.
 const ui::SwfLayoutNode *child_named(const ui::SwfLayoutNode &p_node, std::string_view p_name, gp::WorkBudget &r_budget) {
 	for (const ui::SwfLayoutNode &c : p_node.children) {
 		if (!r_budget.charge(1)) {
@@ -91,10 +87,8 @@ const ui::SwfLayoutNode *find_path(const ui::SwfLayoutNode &p_node, std::span<co
 	return n;
 }
 
-// The first edit text under p_node (depth first, display order) whose initial text is p_text. Iterative: hostile
-// trees may nest deeply; the depth is capped.
 const ui::SwfLayoutNode *find_text(const ui::SwfLayoutNode &p_node, std::string_view p_text, gp::WorkBudget &r_budget, bool &r_too_deep) {
-	std::vector<std::pair<const ui::SwfLayoutNode *, size_t>> stack; // node, depth
+	std::vector<std::pair<const ui::SwfLayoutNode *, size_t>> stack;
 	stack.emplace_back(&p_node, 0);
 	while (!stack.empty()) {
 		if (!r_budget.charge(1)) {
@@ -157,7 +151,7 @@ HudWidgetSlot widget_slot(const ui::SwfLayoutNode *p_node, std::string_view p_in
 	return w;
 }
 
-} // namespace
+}
 
 HudFireMode hud_fire_mode(gp::FireLogic p_logic) {
 	switch (p_logic) {
@@ -296,8 +290,6 @@ void fill_hud(const HudFeedInput &p_input, std::span<const PresentEvent> p_drain
 	++r_model.serial;
 }
 
-// ---- layout ------------------------------------------------------------------------------------------------------------
-
 float hud_scale(float p_width, float p_height) {
 	if (!(p_width > 0.0f) || !(p_height > 0.0f)) {
 		return 0.0f;
@@ -385,8 +377,7 @@ core::Result<HudScreenLayout> make_hud_screen_layout(const ui::SwfLayoutNode &p_
 }
 
 HudTextAnchor hud_text_anchor(const HudTextSlot &p_slot, float p_ascent_per_px) {
-	// Flash draws an edit text's line inside its bounds with a 2 px gutter on every side; the baseline sits one
-	// ascent below the top gutter.
+
 	constexpr float kGutter = 2.0f;
 	HudTextAnchor a;
 	a.align = p_slot.align;
@@ -405,4 +396,4 @@ HudTextAnchor hud_text_anchor(const HudTextSlot &p_slot, float p_ascent_per_px) 
 	return a;
 }
 
-} // namespace bf3::host
+}

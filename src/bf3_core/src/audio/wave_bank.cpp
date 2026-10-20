@@ -1,7 +1,3 @@
-// The resident wave chunk store (wave_bank.h): chunks deduplicated by GUID, the total checked against the budget
-// before any read, then every chunk read in parallel (loader-thread rule, plan §2.3), sizes and stream headers
-// checked, and the bank published immutable.
-
 #include "bf3/core/audio/wave_bank.h"
 
 #include "bf3/core/audio/sound_stream.h"
@@ -19,7 +15,6 @@ namespace {
 
 constexpr uint32_t kNotResident = 0xffffffffu;
 
-// AudioLanguage.Name -> the Win32/Loc/<code> superbundle (only en is installed on the reference machine).
 std::string loc_superbundle(std::string_view p_language) {
 	static constexpr std::pair<std::string_view, std::string_view> kCodes[] = {
 		{ "English", "en" },
@@ -43,7 +38,7 @@ std::string loc_superbundle(std::string_view p_language) {
 	return "Win32/Loc/" + code;
 }
 
-} // namespace
+}
 
 Result<std::shared_ptr<const WaveBank>> WaveBank::load(const Install &p_install, const LevelMount &p_mount, std::vector<SoundWaveInfo> p_waves,
 		const WaveBankOptions &p_options) {
@@ -67,13 +62,13 @@ Result<std::shared_ptr<const WaveBank>> WaveBank::load(const Install &p_install,
 		const SoundWaveInfo &wave = bank->waves_[w];
 		bank->wave_chunks_[w].assign(wave.chunks.size(), kNotResident);
 		if (!bank->by_partition_.emplace(wave.partition, WaveId(w)).second) {
-			continue; // a duplicate wave entry: the first one wins, the copy stays without chunks
+			continue;
 		}
 		if (wave.localised() && !p_options.include_localised) {
 			++bank->stats_.skipped_localised;
 			continue;
 		}
-		// The chunks the playable variations use (a localised wave lists every language's).
+
 		const std::optional<std::pair<uint32_t, uint32_t>> range = playable_variations(wave, p_options.language);
 		if (!range) {
 			++bank->stats_.skipped_localised;
@@ -143,7 +138,7 @@ Result<std::shared_ptr<const WaveBank>> WaveBank::load(const Install &p_install,
 			return make_error("wave bank: " + e);
 		}
 	}
-	// Every playable segment's stream header must parse where the wave says it starts.
+
 	for (size_t w = 0; w < bank->waves_.size(); ++w) {
 		const SoundWaveInfo &wave = bank->waves_[w];
 		const std::optional<std::pair<uint32_t, uint32_t>> range = playable_variations(wave, p_options.language);
@@ -252,4 +247,4 @@ Result<std::shared_ptr<const WaveBank>> WaveBank::from_memory(std::vector<SoundW
 	return std::shared_ptr<const WaveBank>(std::move(bank));
 }
 
-} // namespace bf3::core::audio
+}

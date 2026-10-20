@@ -1,4 +1,3 @@
-// Bf3M2aViewmodelDemo (docs/design/m2a-vm.md). See m2a_viewmodel_demo.h.
 #include "m2a_viewmodel_demo.h"
 
 #include "godot_cache.h"
@@ -55,7 +54,7 @@ std::string item_short(const std::string &p_unlock) {
 	return u;
 }
 
-} // namespace
+}
 
 Bf3M2aViewmodelDemo::Bf3M2aViewmodelDemo() = default;
 
@@ -111,7 +110,7 @@ void Bf3M2aViewmodelDemo::_ready() {
 			}
 		}
 	}
-	// The tuning (res://config/viewmodel_tuning.cfg; FileAccess is main-thread work).
+
 	tuning_source_ = "res://config/viewmodel_tuning.cfg";
 	if (FileAccess::file_exists(to_godot(tuning_source_))) {
 		const std::string text = to_std(FileAccess::get_file_as_string(to_godot(tuning_source_)));
@@ -150,7 +149,7 @@ void Bf3M2aViewmodelDemo::_ready() {
 	} else {
 		cache_guard_ = install_.write_guard();
 		load_start_usec_ = Time::get_singleton()->get_ticks_usec();
-		// Heavy work off the main thread (plan §2.3): no Godot API on this thread.
+
 		loader_ = std::thread([this]() {
 			std::shared_ptr<bf3::core::Cache> cache;
 			if (!cache_root_.empty()) {
@@ -170,7 +169,7 @@ void Bf3M2aViewmodelDemo::_ready() {
 				return;
 			}
 			sources_ = std::move(*sources);
-			// The 8 loadouts from the data (E11's item set), cross-checked with the documented table.
+
 			bf3::core::Result<std::vector<bf3::render::ViewmodelKit>> kit_defs =
 					bf3::render::read_viewmodel_kits(*sources_->ebx, bf3::render::viewmodel_level_id(level));
 			if (!kit_defs) {
@@ -193,7 +192,7 @@ void Bf3M2aViewmodelDemo::_ready() {
 				(team == 1 ? set_us_ : set_ru_) = std::move(*set);
 			}
 			cache.reset();
-			// The weapon table of the kits' variants, and every kit's scripted run.
+
 			progress_.set("weapon table and scripted timelines", 7);
 			bf3::core::Result<sw::InstallWeapons> weapons = sw::open_install_weapons(sources_->install, level);
 			if (!weapons) {
@@ -252,7 +251,7 @@ void Bf3M2aViewmodelDemo::_ready() {
 }
 
 void Bf3M2aViewmodelDemo::build_props() {
-	// A floor and boxes ahead of the eye (sim +Z = Godot +Z here: the camera looks along the sim view).
+
 	Ref<StandardMaterial3D> floor_mat;
 	floor_mat.instantiate();
 	floor_mat->set_albedo(Color(0.36f, 0.37f, 0.34f));
@@ -278,7 +277,7 @@ void Bf3M2aViewmodelDemo::build_props() {
 		mi->set_name(to_godot("RefBox" + std::to_string(i)));
 		mi->set_mesh(box);
 		add_child(mi);
-		// Sim yaw 0 looks down +Z, + yaw = left (+X).
+
 		mi->set_global_position(Vector3(spots[i][1], spots[i][2] * 0.5f, spots[i][0]));
 	}
 }
@@ -296,7 +295,7 @@ void Bf3M2aViewmodelDemo::build_scene() {
 		}
 		for (const bf3::render::ViewmodelItem &it : set->items) {
 			if (has_user_arg("vm-verbose")) {
-				// Every drawn surface of the item's weapon mesh: material, shader, size, extent (look debugging).
+
 				for (const bf3::render::PreparedSurface &sf : it.weapon.prepared.surfaces) {
 					const std::string shader = sf.material_index < it.weapon.materials.slots.size() ? it.weapon.materials.slots[sf.material_index].shader : "?";
 					char b[512];
@@ -443,7 +442,7 @@ void Bf3M2aViewmodelDemo::begin_kit(size_t p_kit) {
 		const bf3::render::ViewmodelClip &c = it.clips[size_t(p_role)];
 		return 0.5 * double(c.seconds > 0 ? c.seconds : it.reload_time_bullets_left);
 	};
-	const bool full = kit.index == 0 || kit.index == 4; // assault kits: every item
+	const bool full = kit.index == 0 || kit.index == 4;
 	for (uint8_t slot = 0; slot < (full ? 4 : 1); ++slot) {
 		if (const vm_script::Mark *m = kit.run.mark(slot, "hip")) {
 			add(slot, "hip", m->time_s);
@@ -461,15 +460,15 @@ void Bf3M2aViewmodelDemo::begin_kit(size_t p_kit) {
 			add(slot, "knife", m->time_s);
 		}
 	}
-	if (has_user_arg("pt1-run-shots")) { // PT1 run [shots]: the first kit's primary while running (hip + 0.2 s) and sprinting
-		captures_.clear(); // PT1 run [shots]
-		for (const char *mark : { "hip", "sprint" }) { // PT1 run [shots]
-			const vm_script::Mark *m = p_kit == 0 ? kit.run.mark(0, mark) : nullptr; // PT1 run [shots]
-			for (int i = 0; m != nullptr && i < 8; ++i) { // PT1 run [shots]: every 0.05 s over 0.35 s
-				add(0, (std::string("pt1_") + mark + "_" + std::to_string(i)).c_str(), m->time_s + 0.2 + 0.05 * i); // PT1 run [shots]
-			} // PT1 run [shots]
-		} // PT1 run [shots]
-	} // PT1 run [shots]
+	if (has_user_arg("pt1-run-shots")) {
+		captures_.clear();
+		for (const char *mark : { "hip", "sprint" }) {
+			const vm_script::Mark *m = p_kit == 0 ? kit.run.mark(0, mark) : nullptr;
+			for (int i = 0; m != nullptr && i < 8; ++i) {
+				add(0, (std::string("pt1_") + mark + "_" + std::to_string(i)).c_str(), m->time_s + 0.2 + 0.05 * i);
+			}
+		}
+	}
 	std::sort(captures_.begin(), captures_.end(), [](const Capture &p_a, const Capture &p_b) { return p_a.time_s < p_b.time_s; });
 }
 
@@ -497,7 +496,7 @@ void Bf3M2aViewmodelDemo::shots_step() {
 	script_t_ = next_t;
 	update_label();
 	if (hold_frames_ == 0 && next_capture_ >= captures_.size()) {
-		// The rest of this kit is not captured: on to the next.
+
 		if (kit_cursor_ + 1 < kits_.size()) {
 			begin_kit(kit_cursor_ + 1);
 		} else {
@@ -522,7 +521,7 @@ void Bf3M2aViewmodelDemo::_process(double p_delta) {
 			if (!load_error_.empty() || kits_.empty()) {
 				UtilityFunctions::push_error(to_godot("[vm] load failed: " + (load_error_.empty() ? std::string("no kits") : load_error_)));
 				update_label();
-				finish(1); // "no usable install" is a skip for ctest (godot_m2a_viewmodel.cmake matches the text)
+				finish(1);
 				return;
 			}
 			if (check_mode_) {
@@ -538,7 +537,7 @@ void Bf3M2aViewmodelDemo::_process(double p_delta) {
 		shots_step();
 		return;
 	}
-	// Play: the kits in a loop at the display's frame time.
+
 	const float dt = float(std::min(p_delta, 0.1));
 	const Kit &kit = kits_[kit_cursor_];
 	double next_t = script_t_ + dt;
@@ -570,4 +569,4 @@ void Bf3M2aViewmodelDemo::finish(int p_code) {
 	get_tree()->quit(p_code);
 }
 
-} // namespace bf3::godot_side
+}

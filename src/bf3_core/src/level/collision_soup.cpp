@@ -1,9 +1,3 @@
-// The collision soup (collision_soup.h): placements -> Havok leaves -> world-space triangles with
-// material, surface, body and flags -> 64 m tiles. The leaf walk and the per-leaf material and
-// part rules are ported from IW4L level_bf3 collision/havok.rs (`leaves`, `decode`,
-// `subpart_mesh`) and the owner, body and health-state rules from collision/mod.rs (`group`,
-// `objects`, `intact`, `class`), Apache-2.0. Float operations keep the Rust order, so the triangles
-// are bit-identical to resource_bf3::triangles on the same leaves.
 #include "bf3/core/level/collision_soup.h"
 
 #include "soup_terrain_internal.h"
@@ -30,9 +24,9 @@ using res::ShapeType;
 using res::Transform;
 using res::TrianglesSubpart;
 
-constexpr uint32_t kMaxLeafDepth = 64; // havok.rs MAX_DEPTH
-constexpr double kMaxCoordinate = 1e7; // metres
-constexpr int64_t kTileMm3 = int64_t(64) * 1000 * 3; // a 64 m tile in summed millimetre centroids
+constexpr uint32_t kMaxLeafDepth = 64;
+constexpr double kMaxCoordinate = 1e7;
+constexpr int64_t kTileMm3 = int64_t(64) * 1000 * 3;
 
 double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
@@ -53,14 +47,13 @@ void tick(SoupProgress *p_progress) {
 }
 
 struct LeafRef {
-	const Shape *shape = nullptr; // a primitive or compressed mesh, or null for a triangle subpart
+	const Shape *shape = nullptr;
 	const TrianglesSubpart *triangles = nullptr;
 	Transform frame;
 	std::optional<uint32_t> subpart;
 	uint32_t first_part = 0;
 };
 
-// havok.rs `leaves`.
 void leaves(const Shape &p_shape, const Transform &p_frame, std::optional<std::pair<uint32_t, uint32_t>> p_subpart, uint32_t p_depth,
 		std::vector<LeafRef> &r_out) {
 	if (p_depth > kMaxLeafDepth) {
@@ -122,8 +115,6 @@ struct RawTri {
 	uint32_t part = 0;
 };
 
-// havok.rs `decode` without the welding: the raw triangles of one leaf with their material value
-// and physics part.
 void leaf_triangles(const LeafRef &p_leaf, const res::HavokPhysicsData &p_havok, std::vector<RawTri> &r_out) {
 	r_out.clear();
 	const std::vector<uint32_t> &flags = p_havok.material_flags_and_indices;
@@ -167,7 +158,7 @@ void leaf_triangles(const LeafRef &p_leaf, const res::HavokPhysicsData &p_havok,
 	const uint32_t local = (user_data >> 8) & 0xFF;
 	uint32_t index = local;
 	if (local >= flags.size()) {
-		const uint64_t slot = uint64_t(p_leaf.first_part) + part; // Rust adds in u32; retail never wraps
+		const uint64_t slot = uint64_t(p_leaf.first_part) + part;
 		index = slot < p_havok.material_indices.size() ? uint32_t(p_havok.material_indices[size_t(slot)]) : 0u;
 	}
 	const uint32_t value = material(index);
@@ -176,12 +167,10 @@ void leaf_triangles(const LeafRef &p_leaf, const res::HavokPhysicsData &p_havok,
 	}
 }
 
-// Who a leaf belongs to: its health states (null = every part intact) and the mesh name the
-// surface fallback and the invisible-blocker flag read.
 struct Owner {
 	const std::vector<bool> *intact = nullptr;
 	std::string_view name;
-	uint8_t flags = 0; // kSoupInvisible
+	uint8_t flags = 0;
 };
 
 bool intact(const Owner &p_owner, uint32_t p_part) {
@@ -220,18 +209,15 @@ uint8_t body_kind(std::string_view p_name) {
 	return uint8_t(CollisionBody::Collision);
 }
 
-// Everything one placement's parallel build needs, gathered on the calling thread.
 struct Job {
 	const res::HavokPhysicsData *havok = nullptr;
 	const std::vector<Shape> *shapes = nullptr;
 	Transform frame;
-	std::vector<uint8_t> bodies; // per root
-	Owner owner; // objects: every leaf
-	const std::unordered_map<uint32_t, Owner> *members = nullptr; // groups: owner by subpart
+	std::vector<uint8_t> bodies;
+	Owner owner;
+	const std::unordered_map<uint32_t, Owner> *members = nullptr;
 };
 
-// One placement's leaves cut into pieces of at most kLeavesPerPiece, so a single huge placement
-// (XP3_Alborz's static model group: 2.3 M triangles) spreads over every core.
 constexpr size_t kLeavesPerPiece = 64;
 
 struct LeafItem {
@@ -241,7 +227,7 @@ struct LeafItem {
 
 struct Piece {
 	uint32_t placement = 0;
-	size_t first = 0; // into the placement's items
+	size_t first = 0;
 	size_t count = 0;
 	std::vector<SoupTriangle> triangles;
 	size_t destroyed = 0;
@@ -305,15 +291,14 @@ void build_piece(const Job &p_job, const std::vector<LeafItem> &p_items, const S
 
 struct Built {
 	std::vector<SoupTriangle> triangles;
-	std::vector<std::array<int32_t, 2>> tiles; // per triangle
-	std::vector<uint64_t> hashes; // per triangle
+	std::vector<std::array<int32_t, 2>> tiles;
+	std::vector<uint64_t> hashes;
 	size_t destroyed = 0;
 	size_t degenerate = 0;
 	size_t nonfinite = 0;
 	uint64_t hash = kFnvOffset;
 };
 
-// The placement's pieces in order: its triangles, their tiles and hashes, its stream hash.
 void finish_placement(std::vector<Piece *> &p_pieces, Built &r_built) {
 	size_t count = 0;
 	for (const Piece *piece : p_pieces) {
@@ -328,7 +313,7 @@ void finish_placement(std::vector<Piece *> &p_pieces, Built &r_built) {
 		r_built.nonfinite += piece->nonfinite;
 		for (const SoupTriangle &t : piece->triangles) {
 			std::array<int64_t, 9> q{};
-			soup_quantise(t.v, q); // kept triangles quantise (checked when built)
+			soup_quantise(t.v, q);
 			uint64_t h = kFnvOffset;
 			soup_hash_bytes(h, q, t.material, t.surface, t.body, t.flags);
 			soup_hash_bytes(r_built.hash, q, t.material, t.surface, t.body, t.flags);
@@ -363,11 +348,8 @@ Status owner_states(const EbxInstance &p_entity, WorkBudget &r_budget, std::map<
 	return Status::success();
 }
 
-// --- Terrain (collision_soup.h SoupTerrain; the oracle's `terrain`).
+constexpr size_t kMaxTerrainSide = res::kMaxGridSide;
 
-constexpr size_t kMaxTerrainSide = res::kMaxGridSide; // IW4L collision/terrain.rs MAX_SIDE
-
-// The heightfield grid of a terrain asset at the depth whose spacing first reaches p_spacing.
 bool terrain_grid(const LevelMount &p_mount, const std::string &p_asset, float p_spacing, unsigned p_threads, uint8_t &r_depth, res::HeightGrid &r_grid,
 		std::string &r_error, std::vector<SoupSource> &r_sources) {
 	r_sources.push_back({ SoupSource::Kind::Res, asset_key(p_asset), {} });
@@ -411,7 +393,7 @@ bool terrain_grid(const LevelMount &p_mount, const std::string &p_asset, float p
 	while (depth < max_level && span / float(cells << depth) > p_spacing * 1.001f && (cells << (depth + 1)) < kMaxTerrainSide) {
 		++depth;
 	}
-	// The lod0 chunks height_grid may ask for (streaming nodes down to the depth), read on all cores.
+
 	std::vector<res::ChunkId> wanted;
 	for (const res::TerrainStreamingNode &node : tree.streaming_nodes) {
 		if (node.id.level <= depth) {
@@ -464,7 +446,7 @@ void include_point(CollisionSoup &r_soup, bool &r_any, const res::Vec3 &p_p) {
 	}
 }
 
-} // namespace
+}
 
 std::string_view soup_stage_name(int p_stage) {
 	switch (p_stage) {
@@ -575,7 +557,6 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 	CollisionSoup soup;
 	auto clock = std::chrono::steady_clock::now();
 
-	// --- Calling thread: placements, materials, owners, bodies (the World is not thread-safe).
 	set_stage(progress, SoupProgress::Placements, 0);
 	Result<std::vector<CollisionPlacement>> placements = collision_placements(p_level, p_world);
 	if (!placements) {
@@ -603,7 +584,6 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 		return Status::success();
 	};
 
-	// Group members by Havok subpart; a later member wins (IW4L's HashMap insert).
 	std::map<uint32_t, std::unordered_map<uint32_t, Owner>> members;
 	for (const CollisionPlacement &c : *placements) {
 		if (c.kind == CollisionPlacement::Kind::Group) {
@@ -624,7 +604,6 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 		it->second[*object.group->havok_subpart] = owner;
 	}
 
-	// M1 T1: the sources the build reads (CollisionSoup::sources), sorted and made unique at the end.
 	const auto add_partition_source = [&](const EbxInstance &p_instance) {
 		if (const std::optional<std::string_view> name = db.name_of(p_instance.partition().guid())) {
 			soup.sources.push_back({ SoupSource::Kind::Ebx, std::string(*name), {} });
@@ -648,7 +627,7 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 
 	soup.placements.resize(placements->size());
 	std::vector<Job> jobs(placements->size());
-	std::vector<std::string> object_res; // distinct res names of built objects
+	std::vector<std::string> object_res;
 	std::unordered_map<std::string, size_t> res_slot;
 	std::vector<size_t> job_res(placements->size(), SIZE_MAX);
 	std::vector<std::shared_ptr<const res::HavokPhysicsData>> group_havok(placements->size());
@@ -689,7 +668,7 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 		for (std::string_view body : c.bodies) {
 			job.bodies.push_back(body_kind(body));
 		}
-		BF3_TRY(charge_text(budget, c.res)); // keyed below
+		BF3_TRY(charge_text(budget, c.res));
 		const auto [it, fresh] = res_slot.emplace(c.res, object_res.size());
 		if (fresh) {
 			object_res.push_back(c.res);
@@ -698,7 +677,6 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 	}
 	soup.seconds_placements = seconds_since(clock);
 
-	// --- All cores: object res (once per name) and group shape trees.
 	clock = std::chrono::steady_clock::now();
 	std::vector<size_t> group_jobs;
 	for (size_t i = 0; i < jobs.size(); ++i) {
@@ -714,7 +692,7 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			object_res.size() + group_jobs.size(),
 			[&](size_t p_index) {
 				if (p_index < group_jobs.size()) {
-					// Groups first: they are the largest trees (XP3_Alborz's is 107 MB decoded).
+
 					group_errors[p_index] = group_havok[group_jobs[p_index]]->shapes(group_shapes[p_index]);
 				} else {
 					const size_t r = p_index - group_jobs.size();
@@ -752,7 +730,6 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 	}
 	soup.seconds_decode = seconds_since(clock);
 
-	// --- All cores: triangles, in pieces of leaves; then per placement, hashes in walk order.
 	clock = std::chrono::steady_clock::now();
 	std::vector<std::vector<LeafItem>> items(jobs.size());
 	std::vector<Piece> pieces;
@@ -801,7 +778,6 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 	pieces = std::vector<Piece>();
 	soup.seconds_triangles = seconds_since(clock);
 
-	// --- Totals and tiles (placement order, then walk order; Havok triangles only, TC).
 	clock = std::chrono::steady_clock::now();
 	std::map<std::pair<int32_t, int32_t>, size_t> tile_counts;
 	for (size_t i = 0; i < jobs.size(); ++i) {
@@ -838,9 +814,6 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 		}
 	}
 
-	// --- Terrain (TC, docs/design/terrain-collision.md §5.1): each terrain object's height grid as a record (grid +
-	// frame) and its cell counts over the whole grid; no terrain triangle goes into the tiles. Consumers make the cells
-	// on demand (soup_terrain_cell, append_soup_terrain_tile, hash_soup_terrain).
 	set_stage(progress, SoupProgress::Terrain, 0);
 	if (p_options.terrain) {
 		size_t terrain_objects = 0;
@@ -868,7 +841,7 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 				soup.terrains.push_back(std::move(terrain));
 				continue;
 			}
-			BF3_TRY(charge_text(budget, *name)); // kept below
+			BF3_TRY(charge_text(budget, *name));
 			terrain.asset = std::string(*name);
 			auto grid = std::make_shared<res::HeightGrid>();
 			add_partition_source(object.entity);
@@ -939,11 +912,11 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			soup.surfaces[tri.surface & 31]++;
 			soup.bodies[std::min<size_t>(tri.body, kCollisionBodyCount - 1)]++;
 		}
-		b = Built(); // release as we go
+		b = Built();
 		tick(progress);
 	}
 	soup.seconds_tiles = seconds_since(clock);
-	// A streaming node without data names the zero chunk id: nothing is read for it (no bundle or toc holds it).
+
 	std::erase_if(soup.sources, [](const SoupSource &p_s) { return p_s.kind == SoupSource::Kind::Chunk && p_s.id.is_zero(); });
 	std::sort(soup.sources.begin(), soup.sources.end());
 	soup.sources.erase(std::unique(soup.sources.begin(), soup.sources.end()), soup.sources.end());
@@ -988,4 +961,4 @@ Result<LevelCollision> load_level_collision(std::shared_ptr<const Install> p_ins
 	return out;
 }
 
-} // namespace bf3::core::level
+}

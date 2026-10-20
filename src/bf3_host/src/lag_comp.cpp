@@ -1,8 +1,3 @@
-// Lag compensation on the server (plan D7; docs/design/m2a.md §6.3, §6.4, §6.6; as built: docs/design/m2a-lc.md).
-// See lag_comp.h. Server thread only.
-//
-// IW4L's ShotSampleProvenance and history verdicts (C:\Users\olku\iw4L\crates, the user's own Apache-2.0 code) were
-// studied for the verdict set (Present / Rewound / Clamped / Refused); this file is written from m2a.md, not ported.
 #include "bf3/host/lag_comp.h"
 
 #include "bf3/sim/weapons/posed_target.h"
@@ -16,10 +11,10 @@ namespace bf3::host {
 
 namespace {
 
-constexpr uint32_t kMaxLagSlots = 64; // the masks are 64-bit
+constexpr uint32_t kMaxLagSlots = 64;
 constexpr uint32_t kNoRecord = 0xFFFFFFFFu;
 constexpr double kMsPerTick = 1000.0 / double(sim::kSimHz);
-constexpr size_t kTickTimes = 4096; // provider tick times kept for the p99
+constexpr size_t kTickTimes = 4096;
 constexpr size_t kCacheProbes = 16;
 
 bool bit(uint64_t p_mask, uint32_t p_i) {
@@ -39,9 +34,7 @@ double p99_of(std::vector<double> p_v) {
 	return p_v[k];
 }
 
-} // namespace
-
-// ---- LagHistory ---------------------------------------------------------------------------------------------------
+}
 
 struct LagHistory::Impl {
 	struct TickRecords {
@@ -63,10 +56,10 @@ struct LagHistory::Impl {
 
 	LagCompConfig config;
 	uint32_t slots = 0;
-	std::vector<TickRecords> ticks; // ring of config.history_snapshots snapshot ticks
+	std::vector<TickRecords> ticks;
 	size_t newest = 0;
 	bool any_tick = false;
-	std::vector<std::array<Sent, kSentRingEntries>> sent; // per client slot, by seq % 64
+	std::vector<std::array<Sent, kSentRingEntries>> sent;
 	std::array<SweptBounds, kMaxLagSlots> bounds{};
 	mutable LagCompStats stats;
 
@@ -152,7 +145,7 @@ void LagHistory::sent(uint8_t p_client_slot, uint16_t p_seq, uint32_t p_snapshot
 	e.tick = p_snapshot_tick;
 	e.main_mask = p_main_mask;
 	e.others_mask = p_others_mask;
-	// The shared store's entry of that tick (searched newest first; it was recorded in the same send_snapshots call).
+
 	for (size_t k = 0; k < m.ticks.size() && m.any_tick; ++k) {
 		const size_t i = (m.newest + m.ticks.size() - k) % m.ticks.size();
 		if (m.ticks[i].valid && m.ticks[i].tick == p_snapshot_tick) {
@@ -169,7 +162,7 @@ void LagHistory::ack(uint8_t p_client_slot, uint16_t p_newest, uint32_t p_snapsh
 		++m.stats.acks_ignored;
 		return;
 	}
-	// snapshot_ack_bits: newest itself, and bit i = newest - 1 - i (M1). others_ack_bits: bit i = newest - i (§7.2).
+
 	if (Impl::Sent *e = m.entry(p_client_slot, p_newest)) {
 		e->main_received = true;
 	} else {
@@ -231,11 +224,9 @@ bool LagHistory::shot_view(uint8_t p_client_slot, const AckState &p_at_arrival, 
 	r_view.view_back_q8 = p_view_back_q8;
 	r_view.quality = p_quality;
 	if (p_quality == uint8_t(sim::ViewQuality::None)) {
-		return true; // tested at the present (a bot, or a client without a drawn frame)
+		return true;
 	}
-	// Refused (m2a.md §6.3, §13.4): Held (past the 250 ms extrapolation) or an unknown quality, a negative lag, a
-	// view_seq8 more than 32 seqs behind the acked newest or not in the client's sent ring, a view seq the client never
-	// acked as a received Snapshot.
+
 	if (p_quality > uint8_t(sim::ViewQuality::Extrapolated) || net::view_lag_q8(p_view_back_q8) < 0 || p_at_arrival.main_bits == 0) {
 		return false;
 	}
@@ -342,17 +333,15 @@ bool LagHistory::sent_tick(uint8_t p_client_slot, uint16_t p_seq, uint32_t &r_ti
 	return true;
 }
 
-// ---- RewindProvider -----------------------------------------------------------------------------------------------
-
 struct RewindProvider::Impl {
 	struct Present {
 		bool alive = false;
 		uint8_t generation = 0;
 		uint8_t team = 0;
 		bool spawn_protected = false;
-		sim::weapons::HitTarget target; // posed at the present (bots, quality None, refused)
-		float lo[3]{}, hi[3]{}; // the swept bound (history + present), grown
-		float tlo[3]{}, thi[3]{}; // the present target's own bound
+		sim::weapons::HitTarget target;
+		float lo[3]{}, hi[3]{};
+		float tlo[3]{}, thi[3]{};
 	};
 	struct View {
 		bool valid = false;
@@ -379,12 +368,12 @@ struct RewindProvider::Impl {
 	mutable std::vector<sim::weapons::HitTarget> scratch;
 	mutable LagCompStats stats;
 	std::vector<RewindTraceRow> *trace = nullptr;
-	// Timing.
-	mutable double tick_seconds = 0; // this tick so far
+
+	mutable double tick_seconds = 0;
 	bool tick_open = false;
 	double last_ms = 0;
 	double sum_ms = 0;
-	std::vector<double> tick_ms; // ring
+	std::vector<double> tick_ms;
 	size_t tick_ms_next = 0;
 	mutable bool p99_dirty = true;
 
@@ -462,7 +451,7 @@ sim::weapons::TargetPose target_pose_of(const net::OtherPose &p_pose, uint32_t p
 	return t;
 }
 
-} // namespace
+}
 
 RewindProvider::RewindProvider(const LagHistory &p_history, const core::gameplay::CapsulePoseTable &p_capsules, const LagCompConfig &p_config) :
 		impl_(std::make_unique<Impl>()) {
@@ -509,7 +498,7 @@ void RewindProvider::begin_tick(uint32_t p_tick, std::span<const sim::SoldierSta
 		p.generation = uint8_t(st.life & 0xFF);
 		p.team = s < p_teams.size() ? p_teams[s] : uint8_t(0);
 		p.spawn_protected = st.protect_ticks > 0;
-		// The present pose through the quantised record, as a client at lag 0 would see it.
+
 		const net::OtherSoldier rec = net::quantize_other(uint8_t(s), st);
 		const net::TimedOther one{ st.tick, rec };
 		const net::OtherPose op = net::sample_other(std::span<const net::TimedOther>(&one, 1), double(st.tick), m.config.pose_eye_heights, 0.0);
@@ -518,9 +507,7 @@ void RewindProvider::begin_tick(uint32_t p_tick, std::span<const sim::SoldierSta
 			p.tlo[k] = p.target.bound_center[k] - p.target.bound_radius;
 			p.thi[k] = p.target.bound_center[k] + p.target.bound_radius;
 		}
-		// The swept bound: the recorded feet over the store and the present feet, grown by the capsules' bound, the
-		// extrapolation at the largest recorded speed and the Hermite overshoot between two samples (<= 8/27 of the
-		// span times the speed).
+
 		const SweptBounds hb = m.history->bounds(uint8_t(s));
 		float lo[3] = { rec.position[0], rec.position[1], rec.position[2] };
 		float hi[3] = { lo[0], lo[1], lo[2] };
@@ -533,7 +520,7 @@ void RewindProvider::begin_tick(uint32_t p_tick, std::span<const sim::SoldierSta
 			const double span_s = double(hb.newest_tick - hb.oldest_tick) / double(sim::kSimHz);
 			grow += double(hb.max_speed) * (extra_s + span_s * 8.0 / 27.0);
 		}
-		grow += 0.01; // float rounding of the positions
+		grow += 0.01;
 		for (size_t k = 0; k < 3; ++k) {
 			p.lo[k] = float(double(lo[k]) - grow);
 			p.hi[k] = float(double(hi[k]) + grow);
@@ -606,7 +593,7 @@ std::span<const sim::weapons::HitTarget> RewindProvider::targets_for(const sim::
 	ScopedTimer timer(m.config.time_provider, m.tick_seconds);
 	++m.stats.queries;
 	m.scratch.clear();
-	// The segment's box for the broad phase (a query without a segment culls nothing).
+
 	float slo[3] = { 0, 0, 0 }, shi[3] = { 0, 0, 0 };
 	const bool cull = p_query.has_segment && finite3(p_query.from) && finite3(p_query.to) && std::isfinite(p_query.radius);
 	if (cull) {
@@ -666,7 +653,7 @@ std::span<const sim::weapons::HitTarget> RewindProvider::targets_for(const sim::
 		}
 		const std::span<const net::TimedOther> l(list.data(), n);
 		if (l.back().soldier.generation != p.generation) {
-			++m.stats.generation_skips; // a respawned soldier is never hit at its old body
+			++m.stats.generation_skips;
 			continue;
 		}
 		const net::SampleSelection sel = net::select_sample(l, render, max_extra);
@@ -743,10 +730,10 @@ const LagCompStats &RewindProvider::stats() const {
 		m.stats.tick_ms_mean = m.stats.ticks > 0 && !m.tick_ms.empty() ? m.sum_ms / double(std::max<uint64_t>(1, m.stats.ticks)) : 0.0;
 		m.p99_dirty = false;
 	}
-	// The history's ack and miss counters ride along.
+
 	m.stats.acks_ignored = m.history->stats().acks_ignored;
 	m.stats.history_misses = m.history->stats().history_misses;
 	return m.stats;
 }
 
-} // namespace bf3::host
+}

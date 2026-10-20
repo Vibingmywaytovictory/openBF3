@@ -1,7 +1,4 @@
 #pragma once
-// Error results for bf3_core (exceptions are off project-wide). A Result<T> holds either a value
-// or an Error with a readable message; Status is the value-less form. Messages follow the wording
-// of the IW4L readers this code is ported from, prefixed with where the problem was found.
 
 #include <optional>
 #include <string>
@@ -56,14 +53,12 @@ inline Error make_error(std::string p_message) {
 	return Error{ std::move(p_message) };
 }
 
-// "<where>: <message>", the Rust `Bf3Error::Format { at, source }` shape.
 inline Error error_at(const std::string &p_where, const Error &p_error) {
 	return Error{ p_where + ": " + p_error.message };
 }
 
-} // namespace bf3::core
+}
 
-// Propagates a failed Status/Result from the enclosing function (which returns Status or Result<U>).
 #define BF3_TRY(expr) \
 	do { \
 		auto &&bf3_try_result_ = (expr); \

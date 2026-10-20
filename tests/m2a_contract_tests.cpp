@@ -1,33 +1,5 @@
-// m2a.contract (docs/design/m2a.md §15, §15.1 step 1; written in W2.0 by the integrator): compiles every wave-2
-// interface header together with tests/gunplay_fixture.h and pins
-//   * the sizes (and the field layout) of Command, ShotView, PresentEvent and OtherPose;
-//   * weapon_buttons::kAll inside the 24 wire bits, disjoint from the motor buttons;
-//   * the exact_aim table flag: it changes weapon_table_hash, and a range-style run with the table flag gives
-//     ShotEvents equal field for field to the same run with the range's post-process and the flag off (§4.2), and so
-//     the same impacts and damage;
-//   * the three step_weapons_m2a rows of §5.2 (zoom refused while deploying, zoom refused while sprinting, the
-//     fire-mode counter at spawn);
-//   * the two ack-bit conventions of §7.2 as a table of (newest, bits) -> acked seqs;
-//   * the defaults of every field W2.0 added to an M1 or wp struct, and the enum values the tracks share.
-//
-// Pending rows. A row whose subject is a track's body (sv: R3's exact_aim branch and hash line, weapon_rules.cpp;
-// nt: snapshot_acked / others_acked, others_ack_bits on the wire, the weapons wire codecs, kProtocolVersion 2) runs
-// its arms but checks nothing until that track sets its flag below in its own commit; it prints "PENDING (<key>)" and
-// the reason, and does not mark the case skipped (the ctest passes). The ack table itself is checked now against the
-// test-local reference predicates in namespace m2a_fake (the §7.2 rules written out), and M1's snapshot_ack_bits
-// round-trips through M1's codec now. Calls of declared-only functions sit in `if constexpr` branches, so the test
-// links before their bodies exist.
-//
-// The exact_aim row is not a W3 run through run_range: run_range needs the install's SoldierDef and material table
-// (its stand-in targets fail on an empty table). It is the same loop written out on the synthetic M16A3 table
-// (weapons_support.h): step_soldier_weapons, then ProjectileWorld over a wall world with StaticTargets capsules.
-//
-// No install. One short loopback session on the fixture's synthetic floor (spawn, Teleport) checks that the fixture
-// works; its timings are wall-clock and noisy on a shared machine.
-
 #include <doctest/doctest.h>
 
-// Every wave-2 interface header (§15 "interfaces" column), compiled together.
 #include "bf3/anim/server_pose.h"
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/gameplay/capsule_pose_table.h"
@@ -83,19 +55,15 @@ namespace tg = bf3::test::gunplay;
 
 namespace {
 
-// ---- the tracks' switches (each set to true by its owner, in the commit that lands the body) ------------------
-// sv: R3 (exact_aim applied in step_soldier_weapons and hashed in weapon_table_hash) and weapon_rules.cpp's two rules.
-constexpr bool kSvRulesLanded = true; // M2a sv: landed (R3, weapon_rules.cpp)
-// nt: protocol v2 (snapshot_acked / others_acked, others_ack_bits on the wire, weapons_wire.cpp, kProtocolVersion 2).
-constexpr bool kNtLanded = true; // M2a nt: landed (protocol v2 codecs, weapons_wire.cpp)
+constexpr bool kSvRulesLanded = true;
+
+constexpr bool kNtLanded = true;
 
 void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	std::printf("m2a.contract: PENDING (%s): %s -- %s\n", p_key, p_row, p_reason);
 	const std::string text = std::string("PENDING (") + p_key + "): " + p_row;
 	MESSAGE(text);
 }
-
-// ---- layout pins -----------------------------------------------------------------------------------------------
 
 static_assert(sizeof(sim::Command) == 24, "Command: 24 B with the view sample (m2a.md §6.2)");
 static_assert(offsetof(sim::Command, tick) == 0);
@@ -123,12 +91,8 @@ static_assert(std::is_trivially_copyable_v<net::OtherPose>);
 static_assert(std::is_trivially_copyable_v<net::TimedOther>);
 static_assert(std::is_trivially_copyable_v<host::PresentationFrame>);
 
-// ---- buttons ---------------------------------------------------------------------------------------------------
-
 static_assert((sw::weapon_buttons::kAll & ~sim::buttons::kWireMask) == 0);
 static_assert((sw::weapon_buttons::kAll & (sim::buttons::kJump | sim::buttons::kSprint | sim::buttons::kUse)) == 0);
-
-// ---- enum values the tracks share --------------------------------------------------------------------------------
 
 static_assert(uint8_t(sim::ViewQuality::None) == 0 && uint8_t(sim::ViewQuality::Interpolated) == 1 && uint8_t(sim::ViewQuality::Extrapolated) == 2 &&
 		uint8_t(sim::ViewQuality::Held) == 3);
@@ -138,21 +102,18 @@ static_assert(uint8_t(host::RewindVerdict::Present) == 0 && uint8_t(host::Rewind
 static_assert(uint8_t(host::KitRole::Assault) == 0 && uint8_t(host::KitRole::Recon) == 3);
 static_assert(host::kKitCount == 4 && host::kKitSlots[0] == 0 && host::kKitSlots[1] == 1 && host::kKitSlots[2] == 6 && host::kKitSlots[3] == 7);
 static_assert(core::gameplay::kCapsuleRows == 9 && core::gameplay::kMaxTableCapsules == sw::kMaxZoneCapsules);
-// §16 defaults taken on 2026-10-16 (Q1 max rewind 21 ticks = 350 ms, Q7 hit indicator 0.3 s at level 1).
+
 static_assert(host::kDefaultMaxRewindTicks == 21);
 static_assert(host::kHitIndicatorSeconds == 0.3 && host::kHitIndicatorLevel == 1.0f);
 
-// The new message types never collide with M1's.
 constexpr std::array<net::MessageType, 4> kNewTypes{ net::MessageType::SnapshotOthers, net::MessageType::ShotEvents, net::MessageType::CombatEvents,
 	net::MessageType::KitSelect };
 constexpr std::array<net::MessageType, 11> kM1Types{ net::MessageType::Snapshot, net::MessageType::CommandPacket, net::MessageType::Hello,
 	net::MessageType::MatchInfo, net::MessageType::Ready, net::MessageType::Spawned, net::MessageType::Loading, net::MessageType::Kick,
 	net::MessageType::Bye, net::MessageType::Debug, net::MessageType::DebugReport };
 
-// ---- the §7.2 ack conventions, written out (test-local reference; nt's net::snapshot_acked / others_acked must agree)
-
 namespace m2a_fake {
-// snapshot_ack_bits: bit i = the Snapshot of seq newest - 1 - i arrived; newest itself is implied.
+
 bool snapshot_acked(const net::CommandPacket &p_packet, uint16_t p_seq) {
 	if (p_seq == p_packet.newest_snapshot) {
 		return true;
@@ -163,7 +124,7 @@ bool snapshot_acked(const net::CommandPacket &p_packet, uint16_t p_seq) {
 	const uint16_t back = uint16_t(p_packet.newest_snapshot - 1u - p_seq);
 	return back < 32 && ((p_packet.snapshot_ack_bits >> back) & 1u) != 0;
 }
-// others_ack_bits: bit i = the SnapshotOthers of seq newest - i arrived; bit 0 is newest itself.
+
 bool others_acked(const net::CommandPacket &p_packet, uint16_t p_seq) {
 	if (net::seq_newer(p_seq, p_packet.newest_snapshot)) {
 		return false;
@@ -171,14 +132,14 @@ bool others_acked(const net::CommandPacket &p_packet, uint16_t p_seq) {
 	const uint16_t back = uint16_t(p_packet.newest_snapshot - p_seq);
 	return back < 32 && ((p_packet.others_ack_bits >> back) & 1u) != 0;
 }
-} // namespace m2a_fake
+}
 
 struct AckRow {
 	const char *name;
 	uint16_t newest;
 	uint32_t snapshot_bits;
 	uint32_t others_bits;
-	std::vector<uint16_t> snapshot_acked; // every acked seq in [newest - 40, newest + 8]
+	std::vector<uint16_t> snapshot_acked;
 	std::vector<uint16_t> others_acked;
 };
 
@@ -195,27 +156,23 @@ std::vector<uint16_t> seq_range(uint16_t p_first, uint16_t p_last) {
 
 std::vector<AckRow> ack_table() {
 	std::vector<AckRow> rows;
-	// bits 0 and 2 of snapshot_ack_bits are 99 and 97; bits 1 and 2 of others_ack_bits are 99 and 98 (100's own
-	// SnapshotOthers was lost: bit 0 clear, although Snapshot 100 arrived).
+
 	rows.push_back({ "plain", 100, 0b101u, 0b110u, { 97, 99, 100 }, { 98, 99 } });
-	// Across the wrap: snapshot bit 0 = seq 0, bit 1 = 65535; others bit 0 = seq 1, bit 2 = 65535.
+
 	rows.push_back({ "wrap", 1, 0b11u, 0b101u, { 65535, 0, 1 }, { 65535, 1 } });
-	// Every bit: the snapshot field reaches 32 seqs behind newest - 1 (468..499, plus 500), the others field 32 seqs
-	// from newest itself (469..500). 467 / 468 are the edges.
+
 	{
 		AckRow r{ "full", 500, 0xFFFFFFFFu, 0xFFFFFFFFu, seq_range(468, 500), seq_range(469, 500) };
 		rows.push_back(r);
 	}
-	// No bits: only the implied newest Snapshot.
+
 	rows.push_back({ "empty", 7, 0u, 0u, { 7 }, {} });
-	// The highest bits only: snapshot bit 31 = newest - 32, others bit 31 = newest - 31.
+
 	rows.push_back({ "edge bits", 40000, 1u << 31, 1u << 31, { 39968, 40000 }, { 39969 } });
 	return rows;
 }
 
-// ---- weapons helpers ---------------------------------------------------------------------------------------------
-
-constexpr uint64_t kMatchSeed = 0x6d32612d636f6e74ull; // "m2a-cont"
+constexpr uint64_t kMatchSeed = 0x6d32612d636f6e74ull;
 
 sw::WeaponContext standing_context() {
 	sw::WeaponContext ctx;
@@ -241,7 +198,6 @@ bool bits_equal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return bits_equal(p_a[0], p_b[0]) && bits_equal(p_a[1], p_b[1]) && bits_equal(p_a[2], p_b[2]);
 }
 
-// Field for field (floats by bit pattern); the first differing field's name, or empty when equal.
 std::string shot_difference(const sw::ShotEvent &p_a, const sw::ShotEvent &p_b) {
 	if (p_a.time != p_b.time) {
 		return "time";
@@ -292,9 +248,6 @@ struct AimRun {
 	std::vector<sw::DamageEvent> damage;
 };
 
-// The range loop on the synthetic M16A3: 300 ticks; after the deploy, bursts of auto fire and single taps with the
-// view moving a little each tick, zoom on in part of it; every shot into a ProjectileWorld over walls at 40 and 80 m
-// with three capsule targets at 20 m. p_post_process applies shooting_range.cpp's exact_aim post-process.
 AimRun aim_run(const std::shared_ptr<const sw::WeaponTable> &p_table, bool p_post_process) {
 	AimRun out;
 	const uint16_t def = tw::id_of(*p_table, "weapons/m16a4/u_m16a4");
@@ -340,7 +293,7 @@ AimRun aim_run(const std::shared_ptr<const sw::WeaponTable> &p_table, bool p_pos
 		out.impacts.insert(out.impacts.end(), pout.impacts.begin(), pout.impacts.end());
 		out.damage.insert(out.damage.end(), pout.damage.begin(), pout.damage.end());
 	}
-	for (sim::Tick t = 301; t <= 420; ++t) { // let the last projectiles land
+	for (sim::Tick t = 301; t <= 420; ++t) {
 		pout.clear();
 		pw.step(t, *world, targets, pout);
 		out.impacts.insert(out.impacts.end(), pout.impacts.begin(), pout.impacts.end());
@@ -356,11 +309,10 @@ std::shared_ptr<const sw::WeaponTable> with_exact_aim(const std::shared_ptr<cons
 	return t;
 }
 
-// One step_weapons_m2a run from a spawn at p_spawn_tick, p_ticks commands; p_input / p_sprinting per tick.
 struct RuleTick {
 	sim::Tick tick = 0;
 	uint32_t events = 0;
-	uint8_t flags = 0; // the active slot's slot_flags
+	uint8_t flags = 0;
 	uint8_t mode = 0;
 	float spread = 0;
 	sw::WeaponPhase phase = sw::WeaponPhase::None;
@@ -385,7 +337,7 @@ std::vector<RuleTick> rules_run(const sw::WeaponTable &p_table, sim::Tick p_spaw
 		sw::WeaponContext ctx = standing_context();
 		ctx.sprinting = p_sprinting(t);
 		ctx.sway.move = ctx.sprinting ? sw::SwayMove::Sprinting : sw::SwayMove::Base;
-		ctx.sway.zoom = in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom; // as make_weapon_context sets it
+		ctx.sway.zoom = in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
 		sw::step_weapons_m2a(p_table, st, c, ctx, kMatchSeed, p_spawn_tick, wout);
 		const sw::WeaponSlotState &s = st.current();
 		out.push_back({ t, wout.events, s.flags, s.mode, s.spread, s.phase });
@@ -402,11 +354,11 @@ size_t first_with(const std::vector<RuleTick> &p_run, uint32_t p_event) {
 	return p_run.size();
 }
 
-} // namespace
+}
 
 TEST_SUITE("m2a-contract") {
 	TEST_CASE("m2a.contract: sizes, layout, wire mask and enum values") {
-		// The static_asserts above are the pins; the runtime rows repeat them so the log shows the numbers.
+
 		std::printf("m2a.contract: sizeof Command %zu, ShotView %zu, PresentEvent %zu, OtherPose %zu, CapsuleLocal %zu, FxInstance %zu, "
 					"PresentationFrame %zu\n",
 				sizeof(sim::Command), sizeof(host::ShotView), sizeof(host::PresentEvent), sizeof(net::OtherPose), sizeof(core::gameplay::CapsuleLocal),
@@ -416,7 +368,7 @@ TEST_SUITE("m2a-contract") {
 		CHECK(sizeof(host::PresentEvent) == 64);
 		CHECK(sizeof(net::OtherPose) == 60);
 		CHECK((sw::weapon_buttons::kAll & ~sim::buttons::kWireMask) == 0);
-		// Every weapon input round-trips through the buttons and never touches a motor bit.
+
 		for (uint32_t bits = 0; bits < 8; ++bits) {
 			for (uint8_t counter = 0; counter < 4; ++counter) {
 				for (uint8_t slot = 0; slot <= sw::kMaxWeaponSlots; ++slot) {
@@ -500,7 +452,7 @@ TEST_SUITE("m2a-contract") {
 		CHECK(sv.main_bits == 0);
 		CHECK(sv.others_bits == 0);
 		if constexpr (kNtLanded) {
-			CHECK(net::kProtocolVersion == 3); // M2b nt: v2 -> v3 (docs/design/m2b.md §3.7)
+			CHECK(net::kProtocolVersion == 3);
 		} else {
 			CHECK(net::kProtocolVersion == 1);
 			pending("nt", "kProtocolVersion == 2", "nt bumps the version with the v2 codecs");
@@ -533,14 +485,13 @@ TEST_SUITE("m2a-contract") {
 			}
 			CHECK(got_snapshot == want_snapshot);
 			CHECK(got_others == want_others);
-			// The newest seq: always snapshot-acked (implied), others-acked only through bit 0.
+
 			CHECK(m2a_fake::snapshot_acked(p, row.newest));
 			CHECK(m2a_fake::others_acked(p, row.newest) == ((row.others_bits & 1u) != 0));
-			// A seq newer than newest_snapshot is never acked by either field.
+
 			CHECK_FALSE(m2a_fake::snapshot_acked(p, uint16_t(row.newest + 1)));
 			CHECK_FALSE(m2a_fake::others_acked(p, uint16_t(row.newest + 1)));
 
-			// Through the codec: M1's snapshot_ack_bits now; others_ack_bits once nt's v2 encoder carries it.
 			p.count = 1;
 			p.commands[0].tick = 1000;
 			p.commands[0].sequence = 77;
@@ -572,16 +523,16 @@ TEST_SUITE("m2a-contract") {
 	}
 
 	TEST_CASE("m2a.contract: exact_aim changes the hash and equals the range post-process field for field (§4.2)") {
-		// infinite_magazine (wp's oracle option, the same in both arms): no reload in the middle of the script.
+
 		const std::shared_ptr<const sw::WeaponTable> off = tw::synthetic_table(true);
 		const std::shared_ptr<const sw::WeaponTable> on = with_exact_aim(off);
 		const bool hash_differs = on->hash != off->hash;
 		std::printf("m2a.contract: weapon_table_hash flag off %016llx, on %016llx (%s)\n", (unsigned long long)off->hash, (unsigned long long)on->hash,
 				hash_differs ? "differ" : "equal");
 
-		const AimRun post = aim_run(off, true); // the range's post-process, table flag off
-		const AimRun flag = aim_run(on, false); // the table flag, no post-process
-		const AimRun plain = aim_run(off, false); // neither (the sim's own directions)
+		const AimRun post = aim_run(off, true);
+		const AimRun flag = aim_run(on, false);
+		const AimRun plain = aim_run(off, false);
 		size_t shot_mismatches = 0;
 		std::string first;
 		for (size_t i = 0; i < std::min(post.shots.size(), flag.shots.size()); ++i) {
@@ -610,16 +561,16 @@ TEST_SUITE("m2a-contract") {
 					"%zu damage mismatches%s%s; plain run %zu shots, %zu damage events\n",
 				post.shots.size(), flag.shots.size(), post.impacts.size(), flag.impacts.size(), post.damage.size(), flag.damage.size(), shot_mismatches,
 				impact_mismatches, damage_mismatches, first.empty() ? "" : ", first ", first.c_str(), plain.shots.size(), plain.damage.size());
-		// The run is a real test of the arms: it fires, hits and differs from the plain sim.
-		CHECK(post.shots.size() >= 25); // 31 with this script (auto bursts of 0.3 s and single taps after the deploy)
+
+		CHECK(post.shots.size() >= 25);
 		CHECK(!post.damage.empty());
-		CHECK(post.state_hashes == plain.state_hashes); // the post-process changes events only, never state
+		CHECK(post.state_hashes == plain.state_hashes);
 		size_t plain_diff = 0;
 		for (size_t i = 0; i < std::min(post.shots.size(), plain.shots.size()); ++i) {
 			plain_diff += bits_equal(post.shots[i].direction, plain.shots[i].direction) ? 0 : 1;
 		}
-		CHECK(plain_diff > 0); // spread and recoil move the sim's directions off the view
-		// The table option through make_weapon_table (runs now; the flag reaching the table is R3's).
+		CHECK(plain_diff > 0);
+
 		sw::WeaponTableOptions options;
 		options.exact_aim = true;
 		std::vector<core::gameplay::WeaponDef> defs;
@@ -636,7 +587,7 @@ TEST_SUITE("m2a-contract") {
 			CHECK(impact_mismatches == 0);
 			CHECK(post.damage.size() == flag.damage.size());
 			CHECK(damage_mismatches == 0);
-			CHECK(post.state_hashes == flag.state_hashes); // the spread and recoil state still run
+			CHECK(post.state_hashes == flag.state_hashes);
 			CHECK((built.ok() && (*built)->exact_aim));
 		} else {
 			pending("sv", "exact_aim hash change and field-for-field equality with the range post-process",
@@ -655,8 +606,6 @@ TEST_SUITE("m2a-contract") {
 		};
 		auto idle = [](sim::Tick) { return sw::WeaponInput{}; };
 
-		// Row 1: zoom held from spawn through the deploy (0.67 s): no kZoomWasDown and hip spread up to and including the
-		// DeployFinished tick; zoomed from the first tick after it.
 		const std::vector<RuleTick> z = rules_run(*table, spawn, 90, zoom, never);
 		const std::vector<RuleTick> h = rules_run(*table, spawn, 90, idle, never);
 		const size_t deployed = first_with(z, sw::weapon_events::kDeployFinished);
@@ -674,8 +623,6 @@ TEST_SUITE("m2a-contract") {
 				(z[deployed].flags & sw::slot_flags::kZoomWasDown) != 0 ? "set" : "clear",
 				(z[deployed + 1].flags & sw::slot_flags::kZoomWasDown) != 0 ? "set" : "clear");
 
-		// Row 2: zoom held while sprinting (the first 120 ticks, past the deploy): no kZoomWasDown and the non-zoom
-		// spread during the sprint; zoomed from the first tick after it.
 		const sim::Tick sprint_end = spawn + 120;
 		auto sprinting = [sprint_end](sim::Tick p_t) { return p_t <= sprint_end; };
 		const std::vector<RuleTick> zs = rules_run(*table, spawn, 150, zoom, sprinting);
@@ -695,8 +642,6 @@ TEST_SUITE("m2a-contract") {
 		}
 		row2 = row2 && (zs[after].flags & sw::slot_flags::kZoomWasDown) != 0;
 
-		// Row 3: a counter of 2 in the first command after spawn leaves the mode unchanged; a later change of 1 (2 -> 3,
-		// after the deploy) steps once (Automatic -> Single).
 		auto counter = [spawn](sim::Tick p_t) {
 			sw::WeaponInput in;
 			in.fire_mode_counter = p_t < spawn + 60 ? 2 : 3;
@@ -788,7 +733,7 @@ TEST_SUITE("m2a-contract") {
 	}
 
 	TEST_CASE("m2a.contract: the gunplay fixture's loopback session on the synthetic floor spawns and answers a Teleport") {
-		// doctest runs without exceptions here (a failed REQUIRE does not leave the case), so every step also returns.
+
 		const std::shared_ptr<const host::SharedLevel> level = tg::synthetic_floor();
 		REQUIRE(level != nullptr);
 		if (level == nullptr) {
@@ -823,6 +768,5 @@ TEST_SUITE("m2a-contract") {
 	}
 }
 
-// M2a nt: the wire's kit and team bounds are the host's (KitSelect / Spawned refuse beyond them).
 static_assert(net::kMaxKits == host::kKitCount, "KitSelect / Spawned kit bound");
 static_assert(net::kMaxTeam == host::kKitTeams, "KitSelect / Spawned team bound");

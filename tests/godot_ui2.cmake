@@ -1,16 +1,3 @@
-# UI ui2 ctest godot.ui2 (docs/design/ui-minimap-icons.md §1 G9-G11, G13, G14, §10.4): the windowed in-game minimap
-# check of the M1 game:
-#   <godot> --path bf3-opensource res://scenes/m1_metro.tscn -- --minimap-check --minimap-mode=ConquestSmall0
-#           [--minimap-shots=<OPENBF3_UI2_SHOTS>]
-# Rows (minimap_check.h): minimap.loaded (G14), readback.calibration, marker.spawn, map.uv.north_up, map.uv.rotating,
-# marker.pixels (G9), icons.minimap, icons.world (G10), shots (G11, only with OPENBF3_UI2_SHOTS), install.unchanged
-# (G13). Passes when the run prints "UI2 MINIMAP CHECK: PASS" and exits 0. The session uses its default cache root
-# (user://bf3cache), so a first run converts Metro cold (about 15 s, godot.m1_load E4).
-# OPENBF3_UI2_SHOTS: a directory for the six PNGs (the acceptance run uses
-# <build dir>\shots\ui2\, gitignored; never a path in the repo).
-# Skips (exit 77) like godot.m1_load: no Godot executable or no window opt-in (godot_common.cmake), no BF3 install, or a probe run without a window / rendering
-# device.
-# Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_ui2.cmake (cmake_language(EXIT) needs CMake 3.29).
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)

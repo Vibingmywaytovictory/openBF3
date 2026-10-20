@@ -1,7 +1,3 @@
-// PatchInstance (patch_instance.h): creation (every buffer sized here, on the game thread), the game inputs, the
-// sub-block split of a mix block, and the audio plan: voices in render order, each running its plugin chain into a
-// stereo buffer and sending to later voices or to buses (design §6.4).
-
 #include "bf3/audio/patch_instance.h"
 
 #include "bf3/core/audio/sound_wave.h"
@@ -9,7 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits> // M2b au [a3]
+#include <limits>
 
 namespace bf3::audio {
 
@@ -45,9 +41,9 @@ bool one_plugin_node(SoundNodeType t) {
 
 constexpr uint32_t kMaxDelaySeconds = 4;
 
-std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p); // PT1 rld [live outputs]: in the PT1 rld block at the end
+std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p);
 
-} // namespace
+}
 
 PatchInstance::~PatchInstance() = default;
 
@@ -86,7 +82,6 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 		}
 	}
 
-	// Waves: program wave -> bank wave and its playable (English) variation range.
 	st.wave_ids.assign(p.waves.size(), ca::kNoWave);
 	st.wave_variations.assign(p.waves.size(), { 0u, 0u });
 	if (st.bank) {
@@ -106,7 +101,6 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.mixer_values.assign(p.mixer_inputs.size(), 0.0f);
 	st.groups.assign(p.child_nodes.size(), GroupState{});
 
-	// Plugins: roles by FourCC, then the sampler slots and outputs that claim them.
 	st.plugins.assign(p.plugins.size(), PluginState{});
 	for (size_t g = 0; g < p.plugins.size(); ++g) {
 		PluginState &ps = st.plugins[g];
@@ -158,7 +152,6 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 		}
 	}
 
-	// Nodes: per-node state, samplers and their slots, attribute drives, delay lines.
 	st.nodes.assign(p.nodes.size(), NodeState{});
 	size_t slot_count = 0;
 	size_t delay_floats = 0;
@@ -252,8 +245,8 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.delay_pool.assign(delay_floats, 0.0f);
 	st.voice_buffers.assign(p.voices.size() * 2 * kMaxSubBlock, 0.0f);
 	st.voice_tapped.assign(p.voices.size(), 0);
-	st.voice_live.assign(p.voices.size(), 0); // integ/m2b-w1 [lazy zero]
-	if (p.outputs.size() <= 64) { // PT1 rld [live outputs]: the outputs each slot's voice feeds (more than 64: unknown, all)
+	st.voice_live.assign(p.voices.size(), 0);
+	if (p.outputs.size() <= 64) {
 		const std::vector<uint64_t> masks = voice_output_masks(p);
 		for (SlotState &sl : st.slots) {
 			if (sl.voice < masks.size()) {
@@ -264,8 +257,6 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	self->slot_views_.resize(st.slots.size());
 	return self;
 }
-
-// ---- game inputs --------------------------------------------------------------------------------------------------
 
 void PatchInstance::set_parameter(uint32_t p_name_hash, float p_value) {
 	State &st = *state_;
@@ -311,11 +302,11 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 	if (!finite(p_emitter.position) || !finite(p_listener.position) || !finite(p_emitter.velocity) || !finite(p_listener.velocity)) {
 		return;
 	}
-	st.emitter_position = p_emitter.position; // M2b au [a3]
+	st.emitter_position = p_emitter.position;
 	Geometry &g = st.geometry;
 	const Vec3 d = sub(p_emitter.position, p_listener.position);
 	g.distance = length(d);
-	const Vec3 right = cross(p_listener.up, p_listener.forward); // +X for +Y up, +Z forward
+	const Vec3 right = cross(p_listener.up, p_listener.forward);
 	if (g.distance > 1e-6f) {
 		const Vec3 n{ d.x / g.distance, d.y / g.distance, d.z / g.distance };
 		g.azimuth = std::atan2(dot(n, right), dot(n, p_listener.forward));
@@ -323,7 +314,7 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 		g.relative_velocity = dot(sub(p_emitter.velocity, p_listener.velocity), n);
 		const float fl = length(p_emitter.forward);
 		if (fl > 1e-6f) {
-			const float c = std::clamp(-dot(n, p_emitter.forward) / fl, -1.0f, 1.0f); // emitter -> listener is -n
+			const float c = std::clamp(-dot(n, p_emitter.forward) / fl, -1.0f, 1.0f);
 			g.cone_angle_deg = std::acos(c) * 180.0f / kPi;
 		} else {
 			g.cone_angle_deg = 0.0f;
@@ -333,8 +324,6 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 	}
 	g.velocity = length(p_emitter.velocity);
 }
-
-// ---- processing ---------------------------------------------------------------------------------------------------
 
 namespace {
 
@@ -350,72 +339,69 @@ void sort_events(std::array<PendingEvent, kMaxEventsPerBlock> &r_events, uint32_
 	}
 }
 
-// integ/m2b-w1 [biquad pair] (E11, docs/design/m2b.md "M2b integ-w1"): Biquad::process (dsp.cpp) over a voice's two
-// channels in one loop, the same arithmetic per channel, so the output is unchanged; the two channels' recurrences
-// overlap instead of running one after the other. Channels whose coefficients differ take Biquad::process each.
-bool same_coefficients(const BiquadCoefficients &p_a, const BiquadCoefficients &p_b) { // integ/m2b-w1 [biquad pair]
-	return p_a.b0 == p_b.b0 && p_a.b1 == p_b.b1 && p_a.b2 == p_b.b2 && p_a.a1 == p_b.a1 && p_a.a2 == p_b.a2; // integ/m2b-w1 [biquad pair]
-} // integ/m2b-w1 [biquad pair]
+bool same_coefficients(const BiquadCoefficients &p_a, const BiquadCoefficients &p_b) {
+	return p_a.b0 == p_b.b0 && p_a.b1 == p_b.b1 && p_a.b2 == p_b.b2 && p_a.a1 == p_b.a1 && p_a.a2 == p_b.a2;
+}
 
-void process_biquad_pair(Biquad (&r_bq)[2], float *r_left, float *r_right, uint32_t p_frames, const BiquadCoefficients &p_target) { // integ/m2b-w1 [biquad pair]
-	if (p_frames == 0 || !same_coefficients(r_bq[0].c, r_bq[1].c)) { // integ/m2b-w1 [biquad pair]
-		r_bq[0].process(r_left, p_frames, p_target); // integ/m2b-w1 [biquad pair]
-		r_bq[1].process(r_right, p_frames, p_target); // integ/m2b-w1 [biquad pair]
-		return; // integ/m2b-w1 [biquad pair]
-	} // integ/m2b-w1 [biquad pair]
-	const BiquadCoefficients identity; // integ/m2b-w1 [biquad pair]
-	if (same_coefficients(r_bq[0].c, identity) && same_coefficients(p_target, identity)) { // integ/m2b-w1 [biquad pair]
-		r_bq[0].z1 = r_bq[0].z2 = r_bq[1].z1 = r_bq[1].z2 = 0.0f; // integ/m2b-w1 [biquad pair]
-		return; // the bit exact pass-through // integ/m2b-w1 [biquad pair]
-	} // integ/m2b-w1 [biquad pair]
-	const BiquadCoefficients &c = r_bq[0].c; // integ/m2b-w1 [biquad pair]
-	const bool ramp = !same_coefficients(c, p_target); // integ/m2b-w1 [biquad pair]
-	float b0 = c.b0, b1 = c.b1, b2 = c.b2, a1 = c.a1, a2 = c.a2; // integ/m2b-w1 [biquad pair]
-	float l1 = r_bq[0].z1, l2 = r_bq[0].z2, q1 = r_bq[1].z1, q2 = r_bq[1].z2; // integ/m2b-w1 [biquad pair]
-	if (ramp) { // integ/m2b-w1 [biquad pair]
-		const float inv = 1.0f / float(p_frames); // integ/m2b-w1 [biquad pair]
-		const float db0 = (p_target.b0 - b0) * inv, db1 = (p_target.b1 - b1) * inv, db2 = (p_target.b2 - b2) * inv; // integ/m2b-w1 [biquad pair]
-		const float da1 = (p_target.a1 - a1) * inv, da2 = (p_target.a2 - a2) * inv; // integ/m2b-w1 [biquad pair]
-		for (uint32_t i = 0; i < p_frames; ++i) { // integ/m2b-w1 [biquad pair]
-			b0 += db0; // integ/m2b-w1 [biquad pair]
-			b1 += db1; // integ/m2b-w1 [biquad pair]
-			b2 += db2; // integ/m2b-w1 [biquad pair]
-			a1 += da1; // integ/m2b-w1 [biquad pair]
-			a2 += da2; // integ/m2b-w1 [biquad pair]
-			const float x = r_left[i], u = r_right[i]; // integ/m2b-w1 [biquad pair]
-			const float y = b0 * x + l1, w = b0 * u + q1; // integ/m2b-w1 [biquad pair]
-			l1 = b1 * x - a1 * y + l2; // integ/m2b-w1 [biquad pair]
-			q1 = b1 * u - a1 * w + q2; // integ/m2b-w1 [biquad pair]
-			l2 = b2 * x - a2 * y; // integ/m2b-w1 [biquad pair]
-			q2 = b2 * u - a2 * w; // integ/m2b-w1 [biquad pair]
-			r_left[i] = y; // integ/m2b-w1 [biquad pair]
-			r_right[i] = w; // integ/m2b-w1 [biquad pair]
-		} // integ/m2b-w1 [biquad pair]
-	} else { // integ/m2b-w1 [biquad pair]
-		for (uint32_t i = 0; i < p_frames; ++i) { // integ/m2b-w1 [biquad pair]
-			const float x = r_left[i], u = r_right[i]; // integ/m2b-w1 [biquad pair]
-			const float y = b0 * x + l1, w = b0 * u + q1; // integ/m2b-w1 [biquad pair]
-			l1 = b1 * x - a1 * y + l2; // integ/m2b-w1 [biquad pair]
-			q1 = b1 * u - a1 * w + q2; // integ/m2b-w1 [biquad pair]
-			l2 = b2 * x - a2 * y; // integ/m2b-w1 [biquad pair]
-			q2 = b2 * u - a2 * w; // integ/m2b-w1 [biquad pair]
-			r_left[i] = y; // integ/m2b-w1 [biquad pair]
-			r_right[i] = w; // integ/m2b-w1 [biquad pair]
-		} // integ/m2b-w1 [biquad pair]
-	} // integ/m2b-w1 [biquad pair]
-	if (!std::isfinite(l1) || !std::isfinite(l2)) { // integ/m2b-w1 [biquad pair]
-		l1 = l2 = 0.0f; // integ/m2b-w1 [biquad pair]
-	} // integ/m2b-w1 [biquad pair]
-	if (!std::isfinite(q1) || !std::isfinite(q2)) { // integ/m2b-w1 [biquad pair]
-		q1 = q2 = 0.0f; // integ/m2b-w1 [biquad pair]
-	} // integ/m2b-w1 [biquad pair]
-	r_bq[0].z1 = l1; // integ/m2b-w1 [biquad pair]
-	r_bq[0].z2 = l2; // integ/m2b-w1 [biquad pair]
-	r_bq[1].z1 = q1; // integ/m2b-w1 [biquad pair]
-	r_bq[1].z2 = q2; // integ/m2b-w1 [biquad pair]
-	r_bq[0].c = p_target; // integ/m2b-w1 [biquad pair]
-	r_bq[1].c = p_target; // integ/m2b-w1 [biquad pair]
-} // integ/m2b-w1 [biquad pair]
+void process_biquad_pair(Biquad (&r_bq)[2], float *r_left, float *r_right, uint32_t p_frames, const BiquadCoefficients &p_target) {
+	if (p_frames == 0 || !same_coefficients(r_bq[0].c, r_bq[1].c)) {
+		r_bq[0].process(r_left, p_frames, p_target);
+		r_bq[1].process(r_right, p_frames, p_target);
+		return;
+	}
+	const BiquadCoefficients identity;
+	if (same_coefficients(r_bq[0].c, identity) && same_coefficients(p_target, identity)) {
+		r_bq[0].z1 = r_bq[0].z2 = r_bq[1].z1 = r_bq[1].z2 = 0.0f;
+		return;
+	}
+	const BiquadCoefficients &c = r_bq[0].c;
+	const bool ramp = !same_coefficients(c, p_target);
+	float b0 = c.b0, b1 = c.b1, b2 = c.b2, a1 = c.a1, a2 = c.a2;
+	float l1 = r_bq[0].z1, l2 = r_bq[0].z2, q1 = r_bq[1].z1, q2 = r_bq[1].z2;
+	if (ramp) {
+		const float inv = 1.0f / float(p_frames);
+		const float db0 = (p_target.b0 - b0) * inv, db1 = (p_target.b1 - b1) * inv, db2 = (p_target.b2 - b2) * inv;
+		const float da1 = (p_target.a1 - a1) * inv, da2 = (p_target.a2 - a2) * inv;
+		for (uint32_t i = 0; i < p_frames; ++i) {
+			b0 += db0;
+			b1 += db1;
+			b2 += db2;
+			a1 += da1;
+			a2 += da2;
+			const float x = r_left[i], u = r_right[i];
+			const float y = b0 * x + l1, w = b0 * u + q1;
+			l1 = b1 * x - a1 * y + l2;
+			q1 = b1 * u - a1 * w + q2;
+			l2 = b2 * x - a2 * y;
+			q2 = b2 * u - a2 * w;
+			r_left[i] = y;
+			r_right[i] = w;
+		}
+	} else {
+		for (uint32_t i = 0; i < p_frames; ++i) {
+			const float x = r_left[i], u = r_right[i];
+			const float y = b0 * x + l1, w = b0 * u + q1;
+			l1 = b1 * x - a1 * y + l2;
+			q1 = b1 * u - a1 * w + q2;
+			l2 = b2 * x - a2 * y;
+			q2 = b2 * u - a2 * w;
+			r_left[i] = y;
+			r_right[i] = w;
+		}
+	}
+	if (!std::isfinite(l1) || !std::isfinite(l2)) {
+		l1 = l2 = 0.0f;
+	}
+	if (!std::isfinite(q1) || !std::isfinite(q2)) {
+		q1 = q2 = 0.0f;
+	}
+	r_bq[0].z1 = l1;
+	r_bq[0].z2 = l2;
+	r_bq[1].z1 = q1;
+	r_bq[1].z2 = q2;
+	r_bq[0].c = p_target;
+	r_bq[1].c = p_target;
+}
 
 void add_scaled(float *r_dst, const float *p_src, uint32_t p_frames, float p_from, float p_to) {
 	if (p_from == p_to) {
@@ -432,40 +418,37 @@ void add_scaled(float *r_dst, const float *p_src, uint32_t p_frames, float p_fro
 	}
 }
 
-} // namespace
+}
 
 void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frames, BusBuffers &r_buses) {
 	State &st = *state_;
 	const ca::SoundProgram &p = *st.program;
 	const float rate = float(st.mix_rate);
 	const bool tapping = st.tap_count > 0;
-	// integ/m2b-w1 [lazy zero] (E11, docs/design/m2b.md "M2b integ-w1"): a voice's sub-block range is zeroed when
-	// something first writes or reads it (a busy slot, a plugin that runs, a send into it), not up front; a voice
-	// nothing touched holds zeros by definition, so the [quiet] check needs no scan of it. Taps read every voice, so
-	// they zero all of them as before.
-	const auto touch = [&](uint16_t p_v) { // integ/m2b-w1 [lazy zero]
-		if (!st.voice_live[p_v]) { // integ/m2b-w1 [lazy zero]
-			std::fill_n(st.voice(p_v, 0) + p_offset, p_frames, 0.0f); // integ/m2b-w1 [lazy zero]
-			std::fill_n(st.voice(p_v, 1) + p_offset, p_frames, 0.0f); // integ/m2b-w1 [lazy zero]
-			st.voice_live[p_v] = 1; // integ/m2b-w1 [lazy zero]
-		} // integ/m2b-w1 [lazy zero]
-	}; // integ/m2b-w1 [lazy zero]
-	std::fill(st.voice_live.begin(), st.voice_live.end(), uint8_t(0)); // integ/m2b-w1 [lazy zero]
-	if (tapping) { // integ/m2b-w1 [lazy zero]
-		for (size_t v = 0; v < p.voices.size(); ++v) { // integ/m2b-w1 [lazy zero]
-			touch(uint16_t(v)); // integ/m2b-w1 [lazy zero]
-		} // integ/m2b-w1 [lazy zero]
-	} // integ/m2b-w1 [lazy zero]
+
+	const auto touch = [&](uint16_t p_v) {
+		if (!st.voice_live[p_v]) {
+			std::fill_n(st.voice(p_v, 0) + p_offset, p_frames, 0.0f);
+			std::fill_n(st.voice(p_v, 1) + p_offset, p_frames, 0.0f);
+			st.voice_live[p_v] = 1;
+		}
+	};
+	std::fill(st.voice_live.begin(), st.voice_live.end(), uint8_t(0));
+	if (tapping) {
+		for (size_t v = 0; v < p.voices.size(); ++v) {
+			touch(uint16_t(v));
+		}
+	}
 	for (uint32_t t = 0; t < st.tap_count; ++t) {
 		std::fill_n(st.tap_buffers[t].data(), p_frames, 0.0f);
 	}
-	st.pt1_edge[0] = st.pt1_edge[1] = 0.0f; // PT1 snd [edge]: the last sub-block's values stay
-	if (p_offset == 0) { // PT1 snd [edge]
-		st.pt1_head[0] = st.pt1_head[1] = 0.0f; // PT1 snd [edge]
-	} // PT1 snd [edge]
+	st.pt1_edge[0] = st.pt1_edge[1] = 0.0f;
+	if (p_offset == 0) {
+		st.pt1_head[0] = st.pt1_head[1] = 0.0f;
+	}
 	const float window_db = p.loudness_db - st.tuning.window_top_db - st.tuning.window_headroom_db + st.tuning.master_gain_db;
-	// M2b au R5 (docs/design/m2b.md §6.1): an EnableHdr output takes the HDR window's gain when the mixer runs one.
-	const float hdr_window_db = p.loudness_db - st.hdr.top_db - st.hdr.headroom_db + st.tuning.master_gain_db; // M2b au R5
+
+	const float hdr_window_db = p.loudness_db - st.hdr.top_db - st.hdr.headroom_db + st.tuning.master_gain_db;
 	const float pan_scale = db_to_gain(st.tuning.pan_law_db) / 0.70710678f;
 	for (uint16_t v : p.voice_order) {
 		const ca::SoundVoice &voice = p.voices[v];
@@ -484,25 +467,25 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 			}
 			tapped = true;
 		};
-		bool quiet = false, quiet_known = false; // M2b au [quiet]
+		bool quiet = false, quiet_known = false;
 		for (uint16_t k = 0; k < voice.plugins_count; ++k) {
 			const uint32_t g = voice.plugins_begin + k;
 			PluginState &ps = st.plugins[g];
-			if (ps.role == PluginRole::Slot) { // M2b au [quiet]: a slot renders, the plugins after it are checked again
-				quiet = quiet_known = false; // M2b au [quiet]
-			} else if (!quiet_known) { // M2b au [quiet]
-				quiet = !tapping && st.voice_quiet(voice, k, ch[0], ch[1], st.voice_live[v] ? p_frames : 0u); // M2b au [quiet]; integ/m2b-w1 [lazy zero]: no scan of an untouched voice
-				quiet_known = true; // M2b au [quiet]
-			} // M2b au [quiet]
-			if (quiet) { // M2b au [quiet]
-				st.quiet_plugin(ps, rate, window_db, hdr_window_db); // M2b au [quiet]
-				continue; // M2b au [quiet]
-			} // M2b au [quiet]
-			if (ps.role != PluginRole::Slot) { // integ/m2b-w1 [lazy zero]
-				touch(v); // integ/m2b-w1 [lazy zero]
-			} else if (const SlotState &sl = st.slots[ps.index]; sl.play.active || sl.pending.armed) { // integ/m2b-w1 [lazy zero]
-				touch(v); // integ/m2b-w1 [lazy zero]: an idle slot writes nothing
-			} // integ/m2b-w1 [lazy zero]
+			if (ps.role == PluginRole::Slot) {
+				quiet = quiet_known = false;
+			} else if (!quiet_known) {
+				quiet = !tapping && st.voice_quiet(voice, k, ch[0], ch[1], st.voice_live[v] ? p_frames : 0u);
+				quiet_known = true;
+			}
+			if (quiet) {
+				st.quiet_plugin(ps, rate, window_db, hdr_window_db);
+				continue;
+			}
+			if (ps.role != PluginRole::Slot) {
+				touch(v);
+			} else if (const SlotState &sl = st.slots[ps.index]; sl.play.active || sl.pending.armed) {
+				touch(v);
+			}
 			switch (ps.role) {
 				case PluginRole::Slot:
 					st.render_slot(st.samplers[ps.output], ps.index - st.samplers[ps.output].slots_begin, ch[0], ch[1], p_frame, p_frames);
@@ -524,20 +507,20 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 				case PluginRole::LowPass: {
 					const BiquadCoefficients c = BiquadCoefficients::design(ps.role == PluginRole::HighPass ? BiquadShape::HighPass : BiquadShape::LowPass, rate,
 							ps.attribute(0), st.tuning.iir2_q, 0.0f);
-					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c); // integ/m2b-w1 [biquad pair]
+					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c);
 					break;
 				}
 				case PluginRole::BandPass: {
 					const float f = ps.attribute(0), bw = ps.attribute(1);
-					const float q = bw > 0.0f ? f / bw : 0.70710678f; // Bandwidth in Hz [inferred]
+					const float q = bw > 0.0f ? f / bw : 0.70710678f;
 					const BiquadCoefficients c = BiquadCoefficients::design(BiquadShape::BandPass, rate, f, q, 0.0f);
-					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c); // integ/m2b-w1 [biquad pair]
+					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c);
 					break;
 				}
 				case PluginRole::Peaking: {
 					const BiquadCoefficients c =
 							BiquadCoefficients::design(BiquadShape::Peaking, rate, ps.attribute(0), ps.attribute(2), gain_to_db(std::max(0.0f, ps.attribute(1))));
-					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c); // integ/m2b-w1 [biquad pair]
+					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c);
 					break;
 				}
 				case PluginRole::Delay: {
@@ -561,7 +544,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					break;
 				}
 				case PluginRole::Damping:
-					break; // LPB0: open (no damping model until A3, tuning hf_damping_db_per_metre = 0)
+					break;
 				case PluginRole::Pan: {
 					const float spread = ps.output != UINT32_MAX ? p.outputs[ps.output].pan_size : 0.0f;
 					const StereoGains pan = equal_power_pan(st.geometry.azimuth, spread);
@@ -576,17 +559,17 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 				case PluginRole::Send: {
 					tap_now();
 					if (ps.reverb_send) {
-						break; // the Reverb bus is A4
+						break;
 					}
 					const ca::SoundConnection &c = p.connections[ps.index];
 					float target = 1.0f;
 					if (ps.output != UINT32_MAX) {
 						const OutputState &o = st.outputs[ps.output];
-						if (st.hdr.active && p.outputs[ps.output].enable_hdr) { // M2b au R5
-							target = st.hdr_send_gain(o, hdr_window_db); // PT1 rld [bypass headroom]: replaces the R5 over / target lines (moved into it)
-						} else { // M2b au R5
+						if (st.hdr.active && p.outputs[ps.output].enable_hdr) {
+							target = st.hdr_send_gain(o, hdr_window_db);
+						} else {
 							target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
-						} // M2b au R5
+						}
 					}
 					if (c.to_bus && c.bus == ca::MasterBus::Lfe) {
 						target *= db_to_gain(st.tuning.lfe_fold_db);
@@ -602,40 +585,40 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 								dst = r_buses.channels[size_t(c.bus)][chn] + p_offset;
 							}
 						} else if (c.voice != v) {
-							touch(c.voice); // integ/m2b-w1 [lazy zero]
+							touch(c.voice);
 							dst = st.voice(c.voice, uint32_t(chn)) + p_offset;
 						}
-						const bool pt1_faded = c.to_bus && (st.pt1_fade_left > 0 || st.pt1_fade != 1.0f); // PT1 snd [fade]
-						if (dst != nullptr && !pt1_faded) { // PT1 snd [fade]: `&& !pt1_faded` added
+						const bool pt1_faded = c.to_bus && (st.pt1_fade_left > 0 || st.pt1_fade != 1.0f);
+						if (dst != nullptr && !pt1_faded) {
 							add_scaled(dst, ch[chn], p_frames, ps.gain_prev, target);
 						}
-						if (dst != nullptr && pt1_faded) { // PT1 snd [fade]: add_scaled's ramp times the output fade
-							const float step = (target - ps.gain_prev) / float(p_frames); // PT1 snd [fade]
-							float g = ps.gain_prev; // PT1 snd [fade]
-							for (uint32_t i = 0; i < p_frames; ++i) { // PT1 snd [fade]
-								g += step; // PT1 snd [fade]
-								dst[i] += ch[chn][i] * g * st.pt1_fade_at(i); // PT1 snd [fade]
-							} // PT1 snd [fade]
-						} // PT1 snd [fade]
-						if (dst != nullptr && c.to_bus) { // PT1 snd [edge]
-							const float g0 = (ps.gain_prev + (target - ps.gain_prev) / float(p_frames)) * st.pt1_fade_at(0); // PT1 snd [edge]: the first gain; [fade] x fade
-							st.pt1_edge[chn] += ch[chn][p_frames - 1] * target * st.pt1_fade_at(p_frames - 1); // PT1 snd [edge]; [fade] x fade
-							if (p_offset == 0) { // PT1 snd [edge]
-								st.pt1_head[chn] += ch[chn][0] * g0; // PT1 snd [edge]
-							} // PT1 snd [edge]
-							const float hi = std::max(ps.gain_prev, target), lo = std::min(ps.gain_prev, target); // PT1 snd [edge]
-							if (p_frames < 64 && hi > 0.0f && lo < hi * 0.70794578f) { // PT1 snd [edge]: > 3 dB within < 64 frames
-								float peak = 0.0f; // PT1 snd [edge]
-								for (uint32_t i = 0; i < p_frames; ++i) { // PT1 snd [edge]
-									peak = std::max(peak, std::fabs(ch[chn][i])); // PT1 snd [edge]
-								} // PT1 snd [edge]
-								const float jump = peak * (hi - lo) / float(p_frames); // PT1 snd [edge]
-								if (jump > 1.0e-3f) { // PT1 snd [edge]
-									++st.pt1_abrupt; // PT1 snd [edge]
-									st.pt1_abrupt_max = std::max(st.pt1_abrupt_max, jump); // PT1 snd [edge]
-								} // PT1 snd [edge]
-							} // PT1 snd [edge]
-						} // PT1 snd [edge]
+						if (dst != nullptr && pt1_faded) {
+							const float step = (target - ps.gain_prev) / float(p_frames);
+							float g = ps.gain_prev;
+							for (uint32_t i = 0; i < p_frames; ++i) {
+								g += step;
+								dst[i] += ch[chn][i] * g * st.pt1_fade_at(i);
+							}
+						}
+						if (dst != nullptr && c.to_bus) {
+							const float g0 = (ps.gain_prev + (target - ps.gain_prev) / float(p_frames)) * st.pt1_fade_at(0);
+							st.pt1_edge[chn] += ch[chn][p_frames - 1] * target * st.pt1_fade_at(p_frames - 1);
+							if (p_offset == 0) {
+								st.pt1_head[chn] += ch[chn][0] * g0;
+							}
+							const float hi = std::max(ps.gain_prev, target), lo = std::min(ps.gain_prev, target);
+							if (p_frames < 64 && hi > 0.0f && lo < hi * 0.70794578f) {
+								float peak = 0.0f;
+								for (uint32_t i = 0; i < p_frames; ++i) {
+									peak = std::max(peak, std::fabs(ch[chn][i]));
+								}
+								const float jump = peak * (hi - lo) / float(p_frames);
+								if (jump > 1.0e-3f) {
+									++st.pt1_abrupt;
+									st.pt1_abrupt_max = std::max(st.pt1_abrupt_max, jump);
+								}
+							}
+						}
 					}
 					ps.gain_prev = target;
 					break;
@@ -649,16 +632,16 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 	for (uint32_t t = 0; t < st.tap_count; ++t) {
 		st.taps[t]->on_voices(st.tap_buffers[t].data(), p_frames, p_frame);
 	}
-	if (st.pt1_fade_left > 0) { // PT1 snd [fade]: the fade moves on by the sub-block
-		if (st.pt1_fade_left <= p_frames) { // PT1 snd [fade]
-			st.pt1_fade = st.pt1_fade_target; // PT1 snd [fade]
-			st.pt1_fade_left = 0; // PT1 snd [fade]
-			st.pt1_fade_step = 0.0f; // PT1 snd [fade]
-		} else { // PT1 snd [fade]
-			st.pt1_fade += st.pt1_fade_step * float(p_frames); // PT1 snd [fade]
-			st.pt1_fade_left -= p_frames; // PT1 snd [fade]
-		} // PT1 snd [fade]
-	} // PT1 snd [fade]
+	if (st.pt1_fade_left > 0) {
+		if (st.pt1_fade_left <= p_frames) {
+			st.pt1_fade = st.pt1_fade_target;
+			st.pt1_fade_left = 0;
+			st.pt1_fade_step = 0.0f;
+		} else {
+			st.pt1_fade += st.pt1_fade_step * float(p_frames);
+			st.pt1_fade_left -= p_frames;
+		}
+	}
 }
 
 void PatchInstance::process_block(BusBuffers &r_buses) {
@@ -741,8 +724,6 @@ bool PatchInstance::finished() const {
 	}
 	return true;
 }
-
-// ---- inspection and hooks ------------------------------------------------------------------------------------------
 
 float PatchInstance::value(uint16_t p_register) const {
 	return p_register < state_->registers.size() ? state_->registers[p_register] : 0.0f;
@@ -855,8 +836,6 @@ const PatchInstanceStats &PatchInstance::stats() const {
 	return state_->stats;
 }
 
-// M2b au [a3] (docs/design/m2b.md §6, docs/design/m2b-au.md): the HDR window and the cull's view of the instance.
-
 void PatchInstance::set_hdr_window(const HdrVoiceWindow &p_window) {
 	state_->hdr = p_window;
 }
@@ -871,11 +850,9 @@ VoiceCullInfo PatchInstance::cull_info() const {
 	for (const ca::SoundOutput &out : p.outputs) {
 		any_hdr = any_hdr || out.enable_hdr;
 	}
-	// The curve at the current distance (as State::evaluate_program computes it), so a voice that has not been
-	// evaluated yet (its first block) is measured where it is.
+
 	const float metres = st.geometry.distance;
-	// PT1 rld [live outputs] (docs/design/pt1-rld.md): only the outputs the busy slots feed (a reload instance's gunshot
-	// outputs play nothing and put the window top 21 dB over it); none busy yet: the starter's hint, else every output.
+
 	uint64_t live = 0;
 	for (const SlotState &sl : st.slots) {
 		const bool busy = sl.play.active || sl.pending.armed;
@@ -906,20 +883,12 @@ VoiceCullInfo PatchInstance::cull_info() const {
 	};
 	float loudest = loudest_of(live);
 	if (!std::isfinite(loudest) && live != ~uint64_t(0)) {
-		loudest = loudest_of(~uint64_t(0)); // the busy voices feed no (EnableHdr) output: as before
+		loudest = loudest_of(~uint64_t(0));
 	}
 	info.hdr = any_hdr;
 	info.loudness_db = p.loudness_db + (std::isfinite(loudest) ? loudest : 0.0f);
 	return info;
 }
-
-// M2b au [quiet] (docs/design/m2b-au.md "Quiet voices"): render() walks every voice of the patch every sub-block, and a
-// weapon patch has 25-32 voices of which a few play (the 64-shooter load: 3,420 voice chains for 396 busy slots). A
-// voice is quiet from plugin p_from on when its buffer holds only zeros there, no later plugin of it is a delay line,
-// and every later filter's state is zero: then each later plugin's output is zero whatever it does (a gain, filter
-// or pan of zeros with a zero state, a send adding zeros), so render() skips the per-sample work and quiet_plugin
-// moves the plugin's state exactly as the full path would (gain ramps to their targets, filter coefficients to their
-// designed values). The mix is unchanged; only the sign of a zero sample inside a voice buffer may differ.
 
 bool PatchInstance::State::voice_quiet(const ca::SoundVoice &p_voice, uint16_t p_from, const float *p_left, const float *p_right, uint32_t p_frames) const {
 	for (uint16_t k = p_from; k < p_voice.plugins_count; ++k) {
@@ -939,7 +908,7 @@ bool PatchInstance::State::voice_quiet(const ca::SoundVoice &p_voice, uint16_t p
 				}
 				break;
 			case PluginRole::Slot:
-				return true; // the slot itself renders (render() re-checks after it)
+				return true;
 			default:
 				break;
 		}
@@ -954,8 +923,7 @@ bool PatchInstance::State::voice_quiet(const ca::SoundVoice &p_voice, uint16_t p
 
 void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p_window_db, float p_hdr_window_db) {
 	const ca::SoundProgram &p = *program;
-	// Biquad::process on zeros from a zero state: the state stays zero and the coefficients become the target, except
-	// when both are the identity (the bit-exact pass-through leaves them).
+
 	const auto biquads = [&](const BiquadCoefficients &p_target) {
 		for (Biquad &b : r_ps.biquad) {
 			const bool id_now = b.c.b0 == 1.0f && b.c.b1 == 0.0f && b.c.b2 == 0.0f && b.c.a1 == 0.0f && b.c.a2 == 0.0f;
@@ -998,7 +966,7 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 			if (r_ps.output != UINT32_MAX) {
 				const OutputState &o = outputs[r_ps.output];
 				if (hdr.active && p.outputs[r_ps.output].enable_hdr) {
-					target = hdr_send_gain(o, p_hdr_window_db); // PT1 rld [bypass headroom]: replaces the over / target lines (moved into it)
+					target = hdr_send_gain(o, p_hdr_window_db);
 				} else {
 					target = db_to_gain(o.curve_gain_db + o.cone_db + p_window_db);
 				}
@@ -1011,11 +979,9 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 			break;
 		}
 		default:
-			break; // Slot never reaches here; Delay (a zero-length line), Damping, Pan and Pass keep no state
+			break;
 	}
 }
-
-// PT1 snd (docs/design/pt1-snd.md): the instance's output at the edges of its last block.
 
 InstanceEdge PatchInstance::pt1_edge() const {
 	const State &st = *state_;
@@ -1057,12 +1023,8 @@ float PatchInstance::pt1_fade_level() const {
 	return state_->pt1_fade;
 }
 
-// PT1 rld (docs/design/pt1-rld.md): the voice cull's live outputs.
-
 namespace {
 
-// PT1 rld [live outputs]: per voice, bit o = the voice reaches output o (the voice holding the
-// output's main send, or its low pass) through its voice sends. Bounded: at most one pass per voice.
 std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p) {
 	const size_t nv = p_p.voices.size();
 	std::vector<uint64_t> m(nv, 0);
@@ -1096,7 +1058,7 @@ std::vector<uint64_t> voice_output_masks(const ca::SoundProgram &p_p) {
 	return m;
 }
 
-} // namespace
+}
 
 void PatchInstance::set_loudness_outputs(std::span<const uint16_t> p_outputs) {
 	uint64_t m = 0;
@@ -1106,18 +1068,10 @@ void PatchInstance::set_loudness_outputs(std::span<const uint16_t> p_outputs) {
 	state_->loudness_hint = m;
 }
 
-void PatchInstance::skip_stop_event() { // PT1 rld [no stop]
+void PatchInstance::skip_stop_event() {
 	state_->stop_seen = true;
 }
 
-// PT1 rld [bypass headroom] (docs/design/pt1-rld.md "BypassHeadroom"): the send gain of an EnableHdr output under the
-// mixer's window (p_hdr_window_db = Loudness - top - Headroom + master). An output whose BypassHeadroom port is on
-// (on every output of the kit firearms, driven by IsFirstPerson: the own 1p sounds) is never lowered below the window
-// top its instance would set alone, max(WindowMinTop, the instance's cull loudness), which the mixer passes as
-// alone_top_db: louder sounds (the own burst's reflections tail, another soldier's shot) do not duck it, and it is
-// not suspended. The own gunshot sets the top itself, so it is unchanged; the own reload (79.5 dB) plays at the
-// 80 dB window it has alone. What BF3 does with the port is not known: a named default, measured = false. With the
-// port off this is M2b au R5's gain unchanged.
 float PatchInstance::State::hdr_send_gain(const detail::OutputState &p_o, float p_hdr_window_db) const {
 	const ca::SoundProgram &p = *program;
 	const float level = p.loudness_db + p_o.curve_gain_db + p_o.cone_db;
@@ -1132,4 +1086,4 @@ float PatchInstance::State::hdr_send_gain(const detail::OutputState &p_o, float 
 	return db_to_gain(p_o.curve_gain_db + p_o.cone_db + window_db - over);
 }
 
-} // namespace bf3::audio
+}

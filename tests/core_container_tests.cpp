@@ -1,6 +1,3 @@
-// Container layer against the retail install (read-only; skipped without an install). Asserts
-// counts and hashes only, nothing from the install is stored. Reference numbers: the IW4L Rust
-// readers (research/probes/tools/ebx-dump `list`) on the same install, patch v7 + Xpack1-5.
 #include <doctest/doctest.h>
 
 #include "bf3/core/install.h"
@@ -51,7 +48,7 @@ LevelMount mount_all(const Install &p_install, const char *p_name) {
 	return std::move(*m);
 }
 
-} // namespace
+}
 
 TEST_SUITE("install") {
 	TEST_CASE("containers: packages, patched layout, merged CAS catalog") {
@@ -162,7 +159,7 @@ TEST_SUITE("install") {
 		CHECK(ebx == 826908);
 		CHECK(res == 266655);
 		CHECK(chunks == 334072);
-		CHECK(ebx + res + jobs.size() + 1 == 1094723); // rows of the `list` TSV incl. header
+		CHECK(ebx + res + jobs.size() + 1 == 1094723);
 		CHECK(shaderdb == 1);
 		auto expect = [&](const char *p_sb, size_t p_bundles, size_t p_ebx, size_t p_res, size_t p_chunks) {
 			const auto it = std::find(names.begin(), names.end(), p_sb);
@@ -170,11 +167,11 @@ TEST_SUITE("install") {
 			const PerSb &p = per[static_cast<size_t>(it - names.begin())];
 			CHECK_MESSAGE((p.bundles == p_bundles && p.ebx == p_ebx && p.res == p_res && p.chunks == p_chunks), p_sb);
 		};
-		expect("Win32/Levels/MP_001/MP_001", 17, 21126, 6260, 7961); // patched CAS level
+		expect("Win32/Levels/MP_001/MP_001", 17, 21126, 6260, 7961);
 		expect("Win32/Levels/MP_Subway/MP_Subway", 20, 19523, 5811, 6684);
-		expect("Win32/Levels/XP1_001/XP1_001", 16, 22610, 6408, 8215); // binary, full replacement
-		expect("Win32/Levels/XP2_Factory/XP2_Factory", 14, 15151, 3901, 5314); // delta + base bundles
-		expect("Win32/Levels/XP5_001/XP5_001", 19, 25354, 6949, 9422); // binary, base only
+		expect("Win32/Levels/XP1_001/XP1_001", 16, 22610, 6408, 8215);
+		expect("Win32/Levels/XP2_Factory/XP2_Factory", 14, 15151, 3901, 5314);
+		expect("Win32/Levels/XP5_001/XP5_001", 19, 25354, 6949, 9422);
 		expect("Win32/Globals", 2, 824, 9, 7);
 		const SnapshotDiff diff = diff_snapshots(before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
@@ -204,7 +201,6 @@ TEST_SUITE("install") {
 		REQUIRE(stored.ok());
 		CHECK(sha1_of(*stored) == *level.entry_sha1(ref));
 
-		// A toc-only chunk (Chunks0-2/MpChunks/SpChunks), framed.
 		const Guid toc_chunk = *Guid::parse("54620b35-bdb6-a4f1-c73a-44712121a7a1");
 		CHECK(!level.chunk_info(toc_chunk).has_value());
 		CHECK(level.has_chunk(toc_chunk));
@@ -213,13 +209,11 @@ TEST_SUITE("install") {
 		CHECK(chunk->size() == 179792);
 		CHECK(!level.read_chunk(*Guid::parse("00000000-0000-0000-0000-000000000001")).ok());
 
-		// Every ebx is raw and names its own partition; the partition index has one entry each.
 		Result<std::unordered_map<Guid, std::string, GuidHash>> partitions = level.ebx_partition_index();
 		REQUIRE(partitions.ok());
 		MESSAGE("MP_Subway partitions: ", partitions->size());
-		CHECK(partitions->size() == 12524); // one partition per ebx name
+		CHECK(partitions->size() == 12524);
 
-		// The 32-byte cas_NN.cas header before a payload matches its catalog entry.
 		const std::vector<std::string> ebx = level.ebx_names();
 		size_t checked = 0, bad = 0;
 		for (size_t i = 0; i < ebx.size() && checked < 300; i += 37) {
@@ -240,7 +234,7 @@ TEST_SUITE("install") {
 		}
 		const LevelMount level = mount_all(*m.install, "Win32/Levels/XP2_Palace/XP2_Palace");
 		CHECK(level.bundle_count() == 14);
-		CHECK(level.chunk_superbundles().size() == 6); // + Win32/Xp2Chunks
+		CHECK(level.chunk_superbundles().size() == 6);
 		const std::vector<std::string> ebx = level.ebx_names();
 		CHECK(ebx.size() == 11120);
 		std::atomic<size_t> bad_sha1{ 0 }, bad_head{ 0 };
@@ -282,7 +276,7 @@ TEST_SUITE("install") {
 				++bad;
 				return;
 			}
-			// The tail decodes to the whole payload's decoded bytes from logicalOffset on.
+
 			Result<std::vector<uint8_t>> tail_stored = level.read_stored(EntryRef::chunk(tails[i]));
 			Result<std::vector<uint8_t>> tail = tail_stored ? decode_chunk(tails[i], *tail_stored) : tail_stored;
 			const uint64_t from = info.range ? info.range->logical_offset : 0;

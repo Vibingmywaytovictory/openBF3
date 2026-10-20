@@ -1,9 +1,3 @@
-# Runs the Godot project headless with user args and checks for a PASS line (ctest godot.*).
-#   cmake -DPROJECT_DIR=<bf3-opensource> -DUSER_ARGS=<;-list> -DPASS_LINE=<text> [-DTIMEOUT=<s>] -P godot_check.cmake
-# The Godot console executable comes from godot_common.cmake (OPENBF3_GODOT, else the configure-time
-# OPENBF3_GODOT_EXE); without one the test exits 77 (skipped). The godot.project_setup fixture has written the one-line
-# .godot/extension_list.cfg (README "Run": avoids the crash of a first --import).
-# Needs CMake >= 3.29 (cmake_language(EXIT)).
 cmake_minimum_required(VERSION 3.29)
 
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)

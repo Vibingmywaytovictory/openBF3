@@ -1,4 +1,3 @@
-// M2b ui: the spawn screen (spawn_screen.h).
 #include "spawn_screen.h"
 
 #include "godot_util.h"
@@ -33,7 +32,7 @@ const Color kDeployHover(0.16f, 0.45f, 0.58f, 0.95f);
 const Color kDeployDisabled(0.12f, 0.14f, 0.15f, 0.85f);
 const Color kReviveColour(0.45f, 0.95f, 0.55f, 1.0f);
 
-} // namespace
+}
 
 void Bf3TdmSpawnScreen::build_screen() {
 	for (size_t k = 0; k < kits_.size(); ++k) {
@@ -173,7 +172,7 @@ void Bf3TdmSpawnScreen::draw_screen() {
 	const Ref<Font> title = c.font(TdmFont::Title);
 	const Ref<Font> text = c.font(TdmFont::Text);
 	const Ref<Font> num = c.font(TdmFont::Number);
-	// The kit bar.
+
 	const Rect2 first = card_rect(0);
 	tdm_draw_text(*this, title, first.position + Vector2(0.0f, -12.0f * s), c.text(TdmText::DeployAs), tdm_px(18.0f, s), kTdmTextColour);
 	for (size_t k = 0; k < kits_.size(); ++k) {
@@ -201,7 +200,7 @@ void Bf3TdmSpawnScreen::draw_screen() {
 			++row;
 		}
 	}
-	// The team counts.
+
 	const TdmPlacement cp = c.placement(kTdmSpawnCounterPlacement);
 	const ui::HudKillCounter &kc = m.kill_counter;
 	if (kc.team1_max_kills > 0) {
@@ -213,7 +212,7 @@ void Bf3TdmSpawnScreen::draw_screen() {
 		tdm_draw_text(*this, num, at, "/ " + std::to_string(kc.team1_max_kills), tdm_px(14.0f, s), kTdmDimColour, 2);
 		tdm_draw_text(*this, num, at + Vector2(30.0f * s, 0.0f), line_e, tdm_px(22.0f, s), kTdmEnemyColour, 0);
 	}
-	// The revive line above Deploy.
+
 	if (sp.revive_possible && !sp.at_join) {
 		const Rect2 d = deploy_rect();
 		const std::string line = std::string(kTdmOwnTexts.revive_possible) + "  " + std::to_string(int(std::ceil(sp.seconds_revive_left)));
@@ -221,4 +220,4 @@ void Bf3TdmSpawnScreen::draw_screen() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

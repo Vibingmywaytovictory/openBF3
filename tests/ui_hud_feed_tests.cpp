@@ -1,14 +1,3 @@
-// M2a hud: the HUD feed and layout (bf3/host/hud_feed.h; docs/design/m2a.md §11.4, docs/design/m2a-hud.md §1).
-//   suite "ui-hud-feed-unit"    (ctest ui.hud.feed.unit, E10 Godot-free): make_hud_static on synthetic defs, fill_hud
-//                               over scripted display frames (ammo = magazine / reserve every frame, 0 mismatches;
-//                               the hit indicator 0.3 s per own server hit, level 1; ADS hides the crosshair), the
-//                               crosshair gap formula, the stage-to-window mapping at 16:9 and other aspects, the
-//                               screen layout on synthetic and hostile trees. No data.
-//   suite "ui-hud-feed-install" (ctest ui.hud.feed.install, 77 without an install): the 12 kit items of §5.6 resolved
-//                               from MP_Subway, their HudStatic rows, the names through the text database (12/12,
-//                               the M67 through its UI description), the _small icons (12/12 decode), the
-//                               hudmpscreen slots (Ammo_01 at 1194, 669), install.unchanged.
-// Rows print as "HUD ROW <name> <PASS|FAIL> <detail>".
 #include <doctest/doctest.h>
 
 #include "test_support.h"
@@ -51,7 +40,6 @@ std::string fmt(const char *p_format, double p_a, double p_b = 0, double p_c = 0
 	return buf;
 }
 
-// The synthetic defs the unit cases use, with the identities and classes the HUD reads filled in.
 struct SyntheticKit {
 	std::vector<gp::WeaponDef> defs;
 	std::shared_ptr<sw::WeaponTable> table;
@@ -128,7 +116,6 @@ host::PresentEvent hit_event(uint8_t p_flags, int64_t p_time) {
 	return e;
 }
 
-// A synthetic hudmpscreen tree: _root / instance1 / {Ammo_01, Health_01, Hitindicator_01} with the text slots.
 ui::SwfLayoutNode text_node(const char *p_instance, float p_x, float p_y, float p_size, uint8_t p_align, const char *p_initial,
 		ui::SwfRect p_bounds) {
 	ui::SwfLayoutNode n;
@@ -172,7 +159,7 @@ ui::SwfLayoutNode synthetic_screen() {
 	return root;
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-hud-feed-unit") {
 
@@ -183,7 +170,7 @@ TEST_CASE("static rows from the table and its defs") {
 	const host::HudStaticRow &m16 = st.rows[def_of(k, "weapons/m16a4/u_m16a4")];
 	CHECK(m16.item_id == 2580429694u);
 	CHECK(m16.name_sid_hash == ui::text_hash("ID_P_WNAME_M16A4"));
-	CHECK(m16.name_sid_hash == 0x0fd83dfau); // bf3dump weapon --name, 2026-10-16
+	CHECK(m16.name_sid_hash == 0x0fd83dfau);
 	CHECK(m16.clip_capacity == 31);
 	CHECK(m16.magazines == 5);
 	CHECK(m16.crosshair == host::HudCrosshairKind::Rifle);
@@ -196,13 +183,13 @@ TEST_CASE("static rows from the table and its defs") {
 	CHECK(m16.weapon_class == 1);
 	CHECK(st.rows[def_of(k, "weapons/an94/u_an94")].mode_kinds[0] == host::HudFireMode::Burst);
 	CHECK(st.rows[def_of(k, "weapons/remington870/u_870")].crosshair == host::HudCrosshairKind::Shotgun);
-	CHECK(st.rows[def_of(k, "weapons/remington870/u_870")].mode_kinds[0] == host::HudFireMode::Single); // pump = single
+	CHECK(st.rows[def_of(k, "weapons/remington870/u_870")].mode_kinds[0] == host::HudFireMode::Single);
 	CHECK(st.rows[def_of(k, "weapons/m9/u_m9")].crosshair == host::HudCrosshairKind::Pistol);
 	CHECK(st.rows[def_of(k, "weapons/rpg7/u_rpg7")].crosshair == host::HudCrosshairKind::Launcher);
 	const host::HudStaticRow &m67 = st.rows[def_of(k, "weapons/m67/u_m67")];
 	CHECK(m67.crosshair == host::HudCrosshairKind::Grenade);
-	CHECK(m67.fire_modes == 0); // hold and release has no fire-mode indicator
-	CHECK(m67.name_sid_hash == 0); // the weapon metadata has no name: apply_item_names fills it (install case)
+	CHECK(m67.fire_modes == 0);
+	CHECK(m67.name_sid_hash == 0);
 	const host::HudStaticRow &knife = st.rows[def_of(k, "weapons/knife/u_knife")];
 	CHECK(knife.crosshair == host::HudCrosshairKind::Knife);
 	CHECK_FALSE(knife.show_ammo);
@@ -211,7 +198,6 @@ TEST_CASE("static rows from the table and its defs") {
 	CHECK(st.row(uint16_t(st.rows.size())) == nullptr);
 	CHECK(st.row(sw::kNoWeapon) == nullptr);
 
-	// Refusals: a span of another length, a def that is not the table's.
 	std::vector<gp::WeaponDef> fewer(k.defs.begin(), k.defs.end() - 1);
 	CHECK_FALSE(host::make_hud_static(*k.table, fewer).ok());
 	std::vector<gp::WeaponDef> swapped = k.defs;
@@ -240,7 +226,7 @@ TEST_CASE("fill_hud over scripted frames: ammo every frame, reload, ADS, switch,
 	for (int f = 0; f < 600; ++f) {
 		host::HudFeedInput in;
 		in.now_s = f / 60.0;
-		in.alive = f < 560; // dies at frame 560
+		in.alive = f < 560;
 		in.health = 100.0f - float(f) * 0.1f;
 		in.pose = sim_pose_of(f);
 		host::PresentedWeapon &w = in.weapon;
@@ -248,7 +234,7 @@ TEST_CASE("fill_hud over scripted frames: ammo every frame, reload, ADS, switch,
 		w.def = (f >= 300 && f < 400) ? m9 : (f >= 400 && f < 450 ? knife : m16);
 		w.active_slot = w.def == m9 ? 1 : (w.def == knife ? 7 : 0);
 		w.magazine_capacity = w.def == m9 ? 16 : (w.def == knife ? 1 : 31);
-		// Fire every 4th frame from 20 to 200, a reload 200..260 (the commit at 240), ADS 100..150.
+
 		if (w.def == m16 && f >= 20 && f < 200 && f % 4 == 0 && magazine > 0) {
 			--magazine;
 		}
@@ -292,7 +278,7 @@ TEST_CASE("fill_hud over scripted frames: ammo every frame, reload, ADS, switch,
 	}
 	CHECK(mismatches == 0);
 	CHECK(state.frames == frames);
-	CHECK(magazine == 31); // the reload refilled the magazine
+	CHECK(magazine == 31);
 	CHECK(reserve < 124);
 	row("feed.ammo", mismatches == 0, std::to_string(frames) + " frames, " + std::to_string(mismatches) + " mismatches (magazine / reserve / name / ADS / reload)");
 }
@@ -302,7 +288,7 @@ TEST_CASE("hit indicator: 0.3 s per own server hit, level 1, others ignored") {
 	const host::HudStatic st = synthetic_static(k);
 	host::HudFeedState state;
 	ui::HudModel model;
-	// Own hits at frames 30, 40 (restart inside the window), 120; hits on / by others at 80 and 200; a Death at 90.
+
 	const auto events_at = [](int p_f) {
 		std::vector<host::PresentEvent> out;
 		if (p_f == 30 || p_f == 40 || p_f == 120) {
@@ -326,7 +312,7 @@ TEST_CASE("hit indicator: 0.3 s per own server hit, level 1, others ignored") {
 	size_t mismatches = 0;
 	size_t shown_frames = 0;
 	size_t raised_on_frame = 0;
-	// A 64 Hz clock: 0.3 s is 19.2 frames, so no frame lands exactly on the end of the window.
+
 	for (int f = 0; f < 300; ++f) {
 		host::HudFeedInput in;
 		in.now_s = f / 64.0;
@@ -354,8 +340,8 @@ TEST_CASE("hit indicator: 0.3 s per own server hit, level 1, others ignored") {
 	CHECK(mismatches == 0);
 	CHECK(state.hits_shown == 3);
 	CHECK(state.hits_ignored == 2);
-	CHECK(raised_on_frame == 3); // shown in the frame whose drain carried the hit
-	// 30 -> 40 restarts: visible from 30 to 40 + 19.2 (frames 30..59), then 120..139: 30 + 20 = 50 frames at 64 Hz.
+	CHECK(raised_on_frame == 3);
+
 	CHECK(shown_frames == 50);
 	row("feed.hit_indicator", mismatches == 0 && state.hits_shown == 3,
 			"3 own hits shown (" + std::to_string(shown_frames) + " frames at 64 Hz, 0.3 s each, restarted once), 2 others ignored, " +
@@ -374,7 +360,7 @@ TEST_CASE("hostile feed inputs are clamped") {
 	in.weapon.def = 0;
 	in.weapon.magazine = -5;
 	in.weapon.reserve = -1;
-	in.weapon.magazine_capacity = 0; // falls back to the row's capacity
+	in.weapon.magazine_capacity = 0;
 	in.weapon.spread_deg = std::nanf("");
 	in.weapon.phase = sw::WeaponPhase::Reloading;
 	in.weapon.phase_progress = 7.0f;
@@ -387,7 +373,7 @@ TEST_CASE("hostile feed inputs are clamped") {
 	CHECK(model.weapon.active_weapon_reload_percent == 100.0f);
 	CHECK(model.weapon.firing_mode == int32_t(host::HudFireMode::None));
 	CHECK(model.soldier.health == 0.0f);
-	in.weapon.def = 999; // not in the table
+	in.weapon.def = 999;
 	host::fill_hud(in, {}, st, state, model);
 	CHECK_FALSE(model.weapon.active_weapon_show_ammo);
 	CHECK_FALSE(model.weapon.show_crosshair);
@@ -400,14 +386,14 @@ TEST_CASE("crosshair gap = (h/2) tan(spread) / tan(vfov/2)") {
 	const double g = host::crosshair_gap_px(1080, 1.0, 55.0);
 	CHECK(g == doctest::Approx(540.0 * std::tan(kPi / 180.0) / std::tan(27.5 * kPi / 180.0)).epsilon(1e-12));
 	CHECK(g == doctest::Approx(18.1067).epsilon(1e-4));
-	// Scales with the height, shrinks with a wider view, grows with the spread.
+
 	CHECK(host::crosshair_gap_px(1440, 1.0, 55.0) == doctest::Approx(g * 1440.0 / 1080.0));
 	CHECK(host::crosshair_gap_px(1080, 1.0, 75.0) < g);
 	CHECK(host::crosshair_gap_px(1080, 2.0, 55.0) > g);
 	CHECK(host::crosshair_gap_px(720, 0.0, 55.0) == 0.0);
-	// The spread equal to half the view reaches the screen edge.
+
 	CHECK(host::crosshair_gap_px(720, 27.5, 55.0) == doctest::Approx(360.0));
-	// Unusable inputs give 0; a spread above 89 degrees is capped.
+
 	CHECK(host::crosshair_gap_px(0, 1, 55) == 0.0);
 	CHECK(host::crosshair_gap_px(720, -1, 55) == 0.0);
 	CHECK(host::crosshair_gap_px(720, std::nan(""), 55) == 0.0);
@@ -419,7 +405,7 @@ TEST_CASE("crosshair gap = (h/2) tan(spread) / tan(vfov/2)") {
 
 TEST_CASE("stage to window: min(w/1280, h/720) around the widget's anchor") {
 	using ui::HudAnchor;
-	// 16:9: every anchor gives the stage point times the scale (the E10 resolutions).
+
 	for (const auto &[w, h] : { std::pair{ 1280.0f, 720.0f }, std::pair{ 1920.0f, 1080.0f }, std::pair{ 2560.0f, 1440.0f } }) {
 		const float s = host::hud_scale(w, h);
 		CHECK(s == doctest::Approx(w / 1280.0f));
@@ -429,8 +415,7 @@ TEST_CASE("stage to window: min(w/1280, h/720) around the widget's anchor") {
 			CHECK(p.y == doctest::Approx(669.0f * s));
 		}
 	}
-	// 4:3 (1024 x 768, scale 0.8): the ammo (bottom right) keeps its offset from the window's corner, the hit
-	// indicator (centre) stays centred.
+
 	const float s43 = host::hud_scale(1024, 768);
 	CHECK(s43 == doctest::Approx(0.8f));
 	const host::HudPoint ammo = host::hud_stage_to_window(HudAnchor::BottomRight, 1194, 669, 1024, 768);
@@ -439,7 +424,7 @@ TEST_CASE("stage to window: min(w/1280, h/720) around the widget's anchor") {
 	const host::HudPoint centre = host::hud_stage_to_window(HudAnchor::Centre, 640, 360, 1024, 768);
 	CHECK(centre.x == doctest::Approx(512.0f));
 	CHECK(centre.y == doctest::Approx(384.0f));
-	// 21:9 (3440 x 1440, scale 2): the top-left latency indicator stays at the left edge.
+
 	const host::HudPoint tl = host::hud_stage_to_window(HudAnchor::TopLeft, 10, 3, 3440, 1440);
 	CHECK(tl.x == doctest::Approx(20.0f));
 	CHECK(tl.y == doctest::Approx(6.0f));
@@ -471,7 +456,7 @@ TEST_CASE("screen layout: the hudmpscreen slots of a synthetic tree") {
 	CHECK(l->health_value.found);
 	CHECK(l->health_percent.initial_text == "%");
 	CHECK(l->nodes > 0);
-	// Text anchors: right-aligned ends 2 px inside the bounds; the baseline one ascent below the top gutter.
+
 	const host::HudTextAnchor a = host::hud_text_anchor(l->ammo_clip, 0.8f);
 	CHECK(a.x == doctest::Approx(1094.0f + 100.0f));
 	CHECK(a.baseline == doctest::Approx(625.0f + 0.0f + 0.8f * 43.0f));
@@ -482,9 +467,8 @@ TEST_CASE("screen layout: the hudmpscreen slots of a synthetic tree") {
 	left.align = 2;
 	CHECK(host::hud_text_anchor(left, 1.0f).x == doctest::Approx(1194.0f + 5.0f));
 
-	// Missing pieces are listed, not errors; a tree without instance1 is an error.
 	ui::SwfLayoutNode partial = root;
-	partial.children[0].children.erase(partial.children[0].children.begin() + 3); // Health_01
+	partial.children[0].children.erase(partial.children[0].children.begin() + 3);
 	gp::WorkBudget b2;
 	bf3::core::Result<host::HudScreenLayout> p = host::make_hud_screen_layout(partial, b2);
 	REQUIRE(p.ok());
@@ -498,10 +482,10 @@ TEST_CASE("screen layout: the hudmpscreen slots of a synthetic tree") {
 }
 
 TEST_CASE("screen layout: hostile trees fail with an error") {
-	// A chain deeper than the cap under Ammo_01 (no "/" text anywhere): an error, no recursion.
+
 	ui::SwfLayoutNode root = synthetic_screen();
 	ui::SwfLayoutNode &ammo = root.children[0].children[2];
-	ammo.children[0].children.erase(ammo.children[0].children.begin()); // the "/" holder
+	ammo.children[0].children.erase(ammo.children[0].children.begin());
 	ui::SwfLayoutNode chain = sprite("deep", 0, 0);
 	for (int i = 0; i < 200; ++i) {
 		ui::SwfLayoutNode parent = sprite("deep", 0, 0);
@@ -512,7 +496,7 @@ TEST_CASE("screen layout: hostile trees fail with an error") {
 	gp::WorkBudget budget;
 	bf3::core::Result<host::HudScreenLayout> l = host::make_hud_screen_layout(root, budget);
 	CHECK_FALSE(l.ok());
-	// A wide tree against a small budget: the budget error.
+
 	ui::SwfLayoutNode wide = synthetic_screen();
 	for (int i = 0; i < 5000; ++i) {
 		wide.children[0].children.insert(wide.children[0].children.begin(), sprite("filler", 0, 0));
@@ -526,17 +510,15 @@ TEST_CASE("screen layout: hostile trees fail with an error") {
 			(w.ok() ? "accepted" : w.error().message));
 }
 
-} // TEST_SUITE
-
-// ---- install ----------------------------------------------------------------------------------------------------------
+}
 
 namespace {
 
 struct KitItem {
 	const char *variant;
-	const char *name; // English, bf3dump weapon --name / text (2026-10-16)
+	const char *name;
 };
-// The 12 kit items of m2a.md §5.6 (both teams' primaries, both sidearms, the M67, the knife).
+
 constexpr KitItem kKitItems[] = {
 	{ "weapons/m16a4/u_m16a4", "M16A3" },
 	{ "weapons/m4a1/u_m4a1", "M4A1" },
@@ -578,7 +560,7 @@ HudInstall *hud_install() {
 	return s;
 }
 
-} // namespace
+}
 
 TEST_SUITE("ui-hud-feed-install") {
 
@@ -604,7 +586,7 @@ TEST_CASE("the 12 kit items: names, icons, static rows") {
 	bf3::core::Result<ui::ItemIconIndex> items = ui::ItemIconIndex::read(**ebx);
 	REQUIRE_MESSAGE(items.ok(), (items.ok() ? std::string() : items.error().message));
 	const size_t filled = host::apply_item_names(*st, *items);
-	CHECK(filled == 1); // the M67
+	CHECK(filled == 1);
 	bf3::core::Result<ui::TextDatabase> text = ui::open_text_database(hi->install);
 	REQUIRE_MESSAGE(text.ok(), (text.ok() ? std::string() : text.error().message));
 	size_t names = 0;
@@ -629,7 +611,7 @@ TEST_CASE("the 12 kit items: names, icons, static rows") {
 		CHECK_MESSAGE(name_ok, kKitItems[i].variant);
 		CHECK_MESSAGE(icon_ok, kKitItems[i].variant);
 	}
-	CHECK(st->rows[11].name_sid_hash == 0x26436abdu); // ID_P_INAME_M67, "M67 GRENADE"
+	CHECK(st->rows[11].name_sid_hash == 0x26436abdu);
 	CHECK(st->rows[10].crosshair == host::HudCrosshairKind::Knife);
 	CHECK(st->rows[11].crosshair == host::HudCrosshairKind::Grenade);
 	CHECK(st->rows[8].crosshair == host::HudCrosshairKind::Pistol);
@@ -694,4 +676,4 @@ TEST_CASE("install.unchanged") {
 	CHECK(d.clean());
 }
 
-} // TEST_SUITE
+}

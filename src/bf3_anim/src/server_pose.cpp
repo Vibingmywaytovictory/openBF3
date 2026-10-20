@@ -1,11 +1,3 @@
-// The server pose of the hit capsules (plan R14; docs/design/m2a.md §6.5; as built: docs/design/m2a-lc.md). See
-// server_pose.h.
-//
-// Per stance row: the stance idle at frame 0, the root joint's translation back to rest (the sim owns the root, as
-// S3's evaluator does), the stance's AimUp / AimDown additive at the bucket's weight (LocalPost, S3's order), the
-// model pose, and the hi-LOD capsules placed from their bones' model transforms. Per transition row: the transition
-// clip at each fraction of its own length with the source stance's aim. A row whose clips are not usable comes from
-// the caller's stand-in layout and is tagged.
 #include "bf3/anim/server_pose.h"
 
 #include "bf3/anim/clip_asset.h"
@@ -33,9 +25,8 @@ using core::gameplay::kCapsuleTransitions;
 
 namespace {
 
-constexpr uint8_t kFlagBehindWall = 1u << 0; // = sim::weapons::zone_capsule_flags::kDeactivateIfBehindWall
+constexpr uint8_t kFlagBehindWall = 1u << 0;
 
-// The idle / aim up / aim down roles of a stance, and the transition rows' source and target stances.
 constexpr ServerPoseClip kIdle[kCapsuleStances] = { ServerPoseClip::StandIdle, ServerPoseClip::CrouchIdle, ServerPoseClip::ProneIdle };
 constexpr ServerPoseClip kAimUp[kCapsuleStances] = { ServerPoseClip::StandAimUp, ServerPoseClip::CrouchAimUp, ServerPoseClip::ProneAimUp };
 constexpr ServerPoseClip kAimDown[kCapsuleStances] = { ServerPoseClip::StandAimDown, ServerPoseClip::CrouchAimDown, ServerPoseClip::ProneAimDown };
@@ -103,13 +94,12 @@ private:
 	uint64_t h_ = 0xCBF29CE484222325ull;
 };
 
-// One placed capsule: its joint and the bone-local start and direction.
 struct Placement {
-	size_t list_index = 0; // index into CapsuleTableInputs::capsules (BoneCollisionData order)
+	size_t list_index = 0;
 	int32_t joint = -1;
-	Vec3 offset{}; // model space of the bind pose (see server_pose.h)
-	Quat bind_inverse{}; // the conjugate of the joint's bind (rest) model rotation
-	Vec3 dir{}; // unit, bone-local
+	Vec3 offset{};
+	Quat bind_inverse{};
+	Vec3 dir{};
 	float length = 0;
 	float radius = 0;
 	uint8_t zone = 0, property = 0, flags = 0;
@@ -125,7 +115,6 @@ bool usable_pose(const Skeleton &p_rig, const ServerPoseClips &p_clips, ServerPo
 	return p_clips.present[k] && !p_clips.clips[k].additive && p_clips.clips[k].mask.size() == p_rig.size();
 }
 
-// The additive delta of an aim clip: sampled onto identity at its last frame (crowd_eval.cpp's rule).
 bool aim_delta(const Skeleton &p_rig, const CrowdClipData &p_clip, LocalPose &r_delta, core::ant::ClipPose &r_scratch) {
 	r_delta = identity_pose(p_rig);
 	if (!core::ant::sample_clip(p_clip.clip, float(p_clip.tracks.end_frame), r_scratch)) {
@@ -135,7 +124,7 @@ bool aim_delta(const Skeleton &p_rig, const CrowdClipData &p_clip, LocalPose &r_
 	return true;
 }
 
-} // namespace
+}
 
 core::Result<ServerPoseClips> load_server_pose_clips(const core::ant::AntPackageSource &p_source, const AntLibrary &p_library,
 		const ServerPoseClipNames &p_names) {
@@ -181,7 +170,7 @@ core::Result<ServerPoseClips> load_server_pose_clips(const core::ant::AntPackage
 		set.clips[k] = std::move(*d);
 		set.present[k] = true;
 	}
-	// The rig: the stand idle's, or the first clip that has one.
+
 	const core::ant::AntRig *rig = nullptr;
 	if (set.present[size_t(ServerPoseClip::StandIdle)]) {
 		rig = set.clips[size_t(ServerPoseClip::StandIdle)].binding.rig;
@@ -257,7 +246,7 @@ std::array<StanceAim, kCapsuleStances> server_pose_stance_aim(const ServerPoseCl
 			}
 			continue;
 		}
-		// S3's measure_aim on a clip set made of this stance's idle and aims.
+
 		CrowdClipSet view;
 		view.rig = p_clips.rig;
 		view.root_joint = p_clips.root_joint;
@@ -329,11 +318,10 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 	if (p_rig.size() == 0 || p_rig.size() > kMaxCrowdRigJoints) {
 		return core::make_error(where + ": a rig of " + std::to_string(p_rig.size()) + " joints");
 	}
-	// The bind pose: the rig's rest in model space (= the EBX skeleton's ModelPose of the same rig, verified by
-	// bf3dump lagcomp's lagcomp.ebx rows).
+
 	std::vector<Xform> bind;
 	model_pose(p_rig, rest_pose(p_rig), bind);
-	// The hi-LOD capsules, in list order.
+
 	std::vector<Placement> placed;
 	size_t mapped = 0;
 	for (size_t i = 0; i < p_inputs.capsules.size(); ++i) {
@@ -402,7 +390,7 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 	core::ant::ClipPose scratch;
 	LocalPose pose;
 	std::vector<Xform> model;
-	// The capsules of one evaluated model pose into p_out (n entries); unmapped capsules take the stand-in of p_stance.
+
 	auto place = [&](const std::vector<Xform> &p_model, size_t p_stance, CapsuleLocal *r_out) {
 		for (size_t c = 0; c < n; ++c) {
 			const Placement &p = placed[c];
@@ -426,7 +414,7 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 			e.flags = p.flags;
 		}
 	};
-	// Pose = p_clip at p_frame, root reset, the stance's aim at p_pitch_deg; false when the clip does not sample.
+
 	auto evaluate = [&](const CrowdClipData &p_clip, float p_frame, const LocalPose *p_up, const LocalPose *p_down, size_t p_aim_stance, float p_pitch_deg,
 							std::vector<Xform> &r_model) {
 		if (!sample_pose(p_rig, p_clip.clip, p_clip.tracks, p_frame, pose, scratch)) {
@@ -446,7 +434,6 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 		return true;
 	};
 
-	// Stance rows.
 	std::array<LocalPose, kCapsuleStances> up_delta, down_delta;
 	std::array<bool, kCapsuleStances> stance_clip{};
 	static const char *kStance[kCapsuleStances] = { "stand", "crouch", "prone" };
@@ -469,7 +456,7 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 		}
 		t.row_source[s] = stance_clip[s] ? core::gameplay::capsule_row_source::kClipDerived : core::gameplay::capsule_row_source::kStandIn;
 	}
-	// Transition rows: the clip at fraction k / 7 of its length, with the source stance's aim.
+
 	for (size_t r = 0; r < kCapsuleTransitions; ++r) {
 		const ServerPoseClip role = ServerPoseClip(size_t(ServerPoseClip::StandToCrouch) + r);
 		const size_t from = kTransitionFrom[r];
@@ -507,7 +494,7 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 		}
 		t.row_source[kCapsuleStances + r] = ok ? core::gameplay::capsule_row_source::kClipDerived : core::gameplay::capsule_row_source::kStandIn;
 	}
-	// The bound sphere about the feet: every capsule of every entry.
+
 	double bound = 0;
 	for (const std::vector<CapsuleLocal> *v : { &t.steady, &t.transition }) {
 		for (const CapsuleLocal &e : *v) {
@@ -586,4 +573,4 @@ uint64_t capsule_table_source_hash(const Skeleton &p_rig, const ServerPoseClips 
 	return h.value();
 }
 
-} // namespace bf3::anim
+}

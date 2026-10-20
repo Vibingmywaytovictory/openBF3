@@ -1,16 +1,3 @@
-// ClientProjectiles: the client's cosmetic projectiles (client_projectiles.h; docs/design/m2a.md §8.4; owner cl; as
-// built: docs/design/m2a-cl.md). Client thread only.
-//
-// Own world (predicted timeline). Its provider is the server's RewindProvider rule written for the client's side of
-// the same data: per query, the shot's stored view sample (the received set of the command that fired it, §6.3),
-// the time rule net::rewind_time_q8(time_start, view_back_q8, max_rewind_ticks), and per other slot named in the
-// received window the list net::rebuild_track builds from the client's ReceivedRecords under the shot's masks,
-// sampled by net::sample_other and posed by posed_target. The server's LagHistory::track builds its list from the
-// same records under the same masks, so the two OtherPoses agree bit for bit (E12 (b)) up to the late_sample
-// residual. Each posed candidate goes into the E12 log (OwnTestSample).
-// Remote world (render timeline): remote ShotEvents spawn when the render time reaches their spawn time and fly
-// to the render time's tick each client tick against the others as drawn at that render time.
-// Neither world's grenade detonates cosmetically: the server's DetonationWire places every explosion (§4.3).
 #include "bf3/host/client_projectiles.h"
 
 #include "bf3/sim/weapons/posed_target.h"
@@ -28,8 +15,8 @@ namespace sw = sim::weapons;
 namespace {
 
 constexpr double kMsPerTick = 1000.0 / double(sim::kSimHz);
-constexpr uint32_t kMaxRemoteTicksPerStep = 8; // a render clock that jumped further skips ahead (a stall)
-constexpr size_t kImpactOrdinals = 256; // per-shot impact ordinals kept (ring by shot index)
+constexpr uint32_t kMaxRemoteTicksPerStep = 8;
+constexpr size_t kImpactOrdinals = 256;
 
 sw::TargetPose target_pose_of(const net::OtherPose &p_pose, uint32_t p_id) {
 	sw::TargetPose t;
@@ -47,7 +34,7 @@ bool bit(const std::array<uint64_t, 2> &p_mask, uint32_t p_slot) {
 	return p_slot < 128 && ((p_mask[p_slot >> 6] >> (p_slot & 63)) & 1u) != 0;
 }
 
-} // namespace
+}
 
 uint64_t effect_seed(uint64_t p_match_seed, uint8_t p_slot, uint32_t p_shot_index) {
 	return sw::splitmix64(p_match_seed ^ (uint64_t(p_slot) << 32 | uint64_t(p_shot_index)));
@@ -91,14 +78,13 @@ struct ClientProjectiles::Impl {
 		uint32_t next = 0;
 	};
 
-	// The own world's provider: the client's rewound targets (see the file comment).
 	class OwnProvider final : public sw::HitTargetProvider {
 	public:
 		Impl *m = nullptr;
 		const ReceivedRecordSource *records = nullptr;
 		std::span<const sw::HitTarget> targets_for(const sw::TargetQuery &p_query) const override { return m->own_targets(p_query, *records); }
 	};
-	// The remote world's provider: the others as drawn at the render time, posed once per step.
+
 	class RemoteProvider final : public sw::HitTargetProvider {
 	public:
 		Impl *m = nullptr;
@@ -121,8 +107,8 @@ struct ClientProjectiles::Impl {
 	std::unique_ptr<sw::ProjectileWorld> own;
 	std::unique_ptr<sw::ProjectileWorld> remote;
 	std::array<View, kShotViewRing> views{};
-	std::deque<sw::ShotEvent> pending; // remote shots by arrival; spawned when the render time reaches them
-	sim::Tick remote_tick = 0; // the last tick the remote world stepped to
+	std::deque<sw::ShotEvent> pending;
+	sim::Tick remote_tick = 0;
 	std::vector<sw::HitTarget> remote_targets;
 	mutable std::vector<sw::HitTarget> scratch;
 	mutable std::vector<OwnTestSample> samples;
@@ -154,8 +140,7 @@ struct ClientProjectiles::Impl {
 			++stats.own_no_view;
 			return scratch;
 		}
-		// Quality None (no drawn frame yet) and the samples the server refuses (Held or unknown quality, a negative lag)
-		// test at the present as the server does: lag 0 (the newest received records stand in for the server's present).
+
 		const bool present = sv.quality == uint8_t(sim::ViewQuality::None) || sv.quality > uint8_t(sim::ViewQuality::Extrapolated) ||
 				net::view_lag_q8(sv.view_back_q8) < 0;
 		const int32_t back = present ? 256 : sv.view_back_q8;
@@ -199,7 +184,6 @@ struct ClientProjectiles::Impl {
 		}
 	}
 
-	// Impacts of one step into events on p_timeline.
 	void emit_impacts(PresentationEvents &r_events, PresentTimeline p_timeline, bool p_own) {
 		for (const sw::ImpactEvent &i : out.impacts) {
 			PresentEvent e;
@@ -225,7 +209,7 @@ struct ClientProjectiles::Impl {
 				e.value = float(uint8_t(i.zone));
 				++(p_own ? stats.own_soldier_contacts : stats.remote_soldier_contacts);
 			} else {
-				continue; // expiry and grenade bounces have no cue in M2a
+				continue;
 			}
 			push(r_events, e);
 		}
@@ -307,7 +291,7 @@ void ClientProjectiles::step_remote(double p_render_ticks, const sim::CollisionW
 	}
 	const sim::Tick target = sim::Tick(std::min(std::floor(p_render_ticks), 4.0e9));
 	if (m.remote_tick == 0 || target > m.remote_tick + kMaxRemoteTicksPerStep || target + 600u < m.remote_tick) {
-		m.remote_tick = target > 0 ? target - 1u : 0u; // first step, or the render clock jumped: fly from here
+		m.remote_tick = target > 0 ? target - 1u : 0u;
 	}
 	if (target <= m.remote_tick) {
 		return;
@@ -320,7 +304,7 @@ void ClientProjectiles::step_remote(double p_render_ticks, const sim::CollisionW
 	provider.m = &m;
 	for (sim::Tick t = m.remote_tick + 1u; t <= target; ++t) {
 		const sw::SimTime end = sw::tick_end(t);
-		// Spawn what the render time has reached (arrival order; a shot is never held back behind a later one).
+
 		while (!m.pending.empty() && m.pending.front().spawn_time < end) {
 			const sw::ShotEvent &e = m.pending.front();
 			if (e.spawn_time < sw::tick_start(t)) {
@@ -353,4 +337,4 @@ const ClientProjectilesStats &ClientProjectiles::stats() const {
 	return impl_->stats;
 }
 
-} // namespace bf3::host
+}

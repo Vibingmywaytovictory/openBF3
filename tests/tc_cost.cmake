@@ -1,14 +1,3 @@
-# tools.tc_cost (track "Terrain collision everywhere", gate G3; docs/design/terrain-collision.md §2, §4.4, §4.5):
-# `bf3dump shapes <L> <M> --cache=<fresh scratch root>` cold, then twice warm (each run its own process) for
-# MP_Subway TeamDeathMatch0, XP3_Shield RushLarge0 and XP3_Alborz SquadRush0. Parses "shapes total", "peak working
-# set", "peak private bytes", "resident" and "cache" and checks the §4.5 limits:
-#   Shield RL, Alborz SR: cold <= 6.0 s, warm <= 0.5 s; cold peak working set and private bytes <= 1536 MiB, warm
-#                         <= 512 MiB; resident <= 150 MiB; cache (read or written by the cold run) <= 160 MiB
-#   Metro TDM:            cold <= 1.4 s, warm <= 0.1 s; cold peak <= 614.4 MiB, warm peak <= 307.2 MiB; resident
-#                         <= 30 MiB; cache <= 40 MiB
-# Every run must print install.unchanged yes. Prints the before / after table (§4.4 before). Timings are noisy on a
-# shared machine: take it under the quiet lock. Exits 77 (skipped) when bf3dump finds no install.
-# Usage: cmake -DBF3DUMP=<bf3dump.exe> [-DREPORT_ONLY=ON] -P tc_cost.cmake (report-only: the asan preset)
 cmake_minimum_required(VERSION 3.29)
 
 if(NOT BF3DUMP OR NOT EXISTS "${BF3DUMP}")
@@ -27,7 +16,6 @@ macro(report _ok _what)
     endif()
 endmacro()
 
-# parse(<output> <prefix>): <prefix>_TOTAL, _WS, _PRIV, _RES, _CACHE, _UNCHANGED.
 function(parse _out _p)
     string(REGEX MATCH "shapes total ([0-9.]+) s" _m "${_out}")
     set(${_p}_TOTAL "${CMAKE_MATCH_1}" PARENT_SCOPE)
@@ -59,7 +47,6 @@ endfunction()
 
 file(TO_CMAKE_PATH "$ENV{TEMP}" _temp)
 set(_table "")
-# level mode cold_s warm_s cold_peak_mib warm_peak_mib resident_mib cache_mib before
 set(_runs
     "MP_Subway|TeamDeathMatch0|1.4|0.1|614.4|307.2|30|40|0.681 s, 293.1 / 308.2 MiB, warm 0.036 s, 22.6 MiB"
     "XP3_Shield|RushLarge0|6.0|0.5|1536|512|150|160|2.876 s, 549.9 / 676.6 MiB, warm 0.092 s, 72.6 MiB"

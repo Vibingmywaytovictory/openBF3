@@ -1,6 +1,3 @@
-// The Godot-free rules of the M2b session (m2b_game.h's "M2b gx" block; docs/design/m2b-gx.md). No Godot API: the
-// m2b.gx.unit row compiles this file on its own.
-
 #include "m2b_game.h"
 
 #include "bf3/host/hud_feed.h"
@@ -15,7 +12,6 @@ namespace bf3::godot_side {
 
 namespace {
 
-// A whole decimal number, nothing else (" 5", "5x", "" and overflow fail).
 bool parse_int(const std::string &p_text, long long &r_value) {
 	if (p_text.empty() || p_text.size() > 18) {
 		return false;
@@ -25,7 +21,6 @@ bool parse_int(const std::string &p_text, long long &r_value) {
 	return r.ec == std::errc() && r.ptr == end;
 }
 
-// A finite decimal number ("10", "2.5"); from_chars for doubles is in MSVC's CRT.
 bool parse_seconds(const std::string &p_text, double &r_value) {
 	if (p_text.empty() || p_text.size() > 24) {
 		return false;
@@ -41,7 +36,7 @@ std::string fmt_row(const char *p_format, double p_a, double p_b = 0.0) {
 	return line;
 }
 
-} // namespace
+}
 
 core::Status parse_m2b_options(const M2bArgText &p_args, M2bOptions &r_options) {
 	std::string error;
@@ -94,7 +89,7 @@ bool m2b_spawn_screen_up(const M2bScreenInput &p_input) {
 		return false;
 	}
 	if (p_input.phase != net::MatchPhase::PreRound && p_input.phase != net::MatchPhase::InRound) {
-		return false; // Loading: nothing to deploy into yet; RoundOver: the round end shows
+		return false;
 	}
 	return !p_input.own_alive || p_input.own_unspawned;
 }
@@ -172,7 +167,7 @@ std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, b
 		r.state = !r.skip_reason.empty() ? M2bRowState::Skip : (p_pass ? M2bRowState::Pass : M2bRowState::Fail);
 		rows.push_back(std::move(r));
 	};
-	// gx: the match, the spawn screen at join and after each death, Deploy with the chosen kit, the round end.
+
 	add(M2bTrack::Gx, "match_state", p_t.in_round_seen ? 1.0 : 0.0, "MatchState received and InRound reached", p_t.match_seen && p_t.in_round_seen);
 	add(M2bTrack::Gx, "spawn_screen_join", p_t.join_screen_seen ? 1.0 : 0.0, "the spawn screen is up at join", p_t.join_screen_seen);
 	add(M2bTrack::Gx, "own_deaths", double(p_t.own_deaths), ">= 1 own death in the run", p_t.own_deaths >= 1);
@@ -182,7 +177,7 @@ std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, b
 	add(M2bTrack::Gx, "deploys", double(p_t.deploys), ">= 2 (at join and after a death)", p_t.deploys >= 2);
 	add(M2bTrack::Gx, "deploy_kit_mismatch", double(p_t.deploy_kit_mismatch), "== 0: each deploy spawns the chosen kit", p_t.deploys >= 1 && p_t.deploy_kit_mismatch == 0);
 	add(M2bTrack::Gx, "round_over", p_t.round_over_seen ? 1.0 : 0.0, "MatchState reached RoundOver (--kill-limit)", p_t.round_over_seen);
-	// ui: the feed, the scoreboard, the kill card, the spawn screen and the round end as fill_hud_tdm made them.
+
 	add(M2bTrack::Ui, "kill_feed_lines", double(p_t.feed_lines), fmt_row("== the %g deaths received", double(p_t.deaths_received)),
 			p_t.deaths_received >= 1 && p_t.feed_lines == p_t.deaths_received);
 	add(M2bTrack::Ui, "scoreboard_kills_mismatch", double(p_t.scoreboard_mismatch), fmt_row("== 0 of %g Tab samples against MatchState", double(p_t.scoreboard_samples)),
@@ -193,10 +188,10 @@ std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, b
 			p_t.spawn_screen_model_shown >= 1 + p_t.deaths_checked);
 	add(M2bTrack::Ui, "round_end_screen", p_t.round_end_shown ? 1.0 : 0.0, "the round-end screen on RoundOver", p_t.round_over_seen && p_t.round_end_shown);
 	add(M2bTrack::Ui, "missing_lookups", double(p_t.missing_lookups), "== 0 missing fonts, icons and strings", p_t.missing_lookups == 0, true);
-	// cam: the death view after each own death.
+
 	add(M2bTrack::Cam, "death_views", double(p_t.death_views), fmt_row(">= the %g own deaths, %g bad inputs", double(p_t.own_deaths), double(p_t.death_view_bad_inputs)),
 			p_t.own_deaths >= 1 && p_t.death_views >= p_t.own_deaths && p_t.death_view_bad_inputs == 0);
 	return rows;
 }
 
-} // namespace bf3::godot_side
+}

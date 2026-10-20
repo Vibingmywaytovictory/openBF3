@@ -1,10 +1,3 @@
-// UITextDatabase reader (bf3_core ui/text_db.h) and the EBX SID census (ui/text_census.h).
-//   suite "text-unit" (ctest core.ui.text.unit): synthetic databases built here; no install needed.
-//   suite "text" (ctest core.ui.text): the retail database read from the install (read-only), checked
-//     against research/PORTING-RESEARCH.md §7.8; skipped (exit 77) without an install.
-//   suite "text-fuzz" (ctest core.ui.text.fuzz): seeded in-memory mutations of the retail chunks fed back
-//     to the parser (nothing is written anywhere); skipped (exit 77) without an install.
-// Only numbers, hashes and short identifiers are asserted; no install bytes are stored.
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx.h"
@@ -42,7 +35,6 @@ uint32_t get32(const Bytes &p_bytes, size_t p_at) {
 	return v;
 }
 
-// A histogram of p_units code units (all zero) with the given overrides.
 Bytes make_histogram(size_t p_units, const std::vector<std::pair<size_t, uint16_t>> &p_set) {
 	Bytes h(12 + 2 * p_units, 0);
 	put32(h, 0, kTextHistogramMagic);
@@ -57,10 +49,9 @@ Bytes make_histogram(size_t p_units, const std::vector<std::pair<size_t, uint16_
 
 struct SynthEntry {
 	uint32_t hash;
-	Bytes encoded; // without the NUL
+	Bytes encoded;
 };
 
-// The binary chunk layout of text_db.h: header, tag padded to 16 bytes, entry table, strings.
 Bytes make_binary(const std::vector<SynthEntry> &p_entries, std::string_view p_tag = "Global") {
 	const size_t tag_len = 16;
 	const size_t table_at = 0x14 + tag_len;
@@ -87,9 +78,6 @@ Bytes ascii(std::string_view p_text) {
 	return Bytes(p_text.begin(), p_text.end());
 }
 
-// Histogram used by the decoding cases: 0x80 -> U+00E9 (direct), 0x81 -> page 2, page 2 slot 5 ->
-// U+20AC, 0x82 -> U+D83D (high surrogate), 0x83 -> U+DE00 (low surrogate), 0x84 -> page 127 (beyond
-// a 512-unit histogram).
 Bytes decode_histogram() {
 	return make_histogram(512, { { 0x80, 0x00E9 }, { 0x81, 2 }, { 256 + 5, 0x20AC }, { 0x82, 0xD83D }, { 0x83, 0xDE00 }, { 0x84, 127 } });
 }
@@ -120,8 +108,6 @@ size_t fuzz_iters(size_t p_default) {
 	return p_default;
 }
 
-// Same mutation mix as core_fuzz_tests.cpp: truncation, bit flips, random bytes, u32 words, zeroes;
-// a third of the hits land in the first 512 bytes (headers, tag, the start of the entry table).
 void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng) {
 	if (r_bytes.empty()) {
 		return;
@@ -147,7 +133,6 @@ void mutate(Bytes &r_bytes, std::mt19937_64 &r_rng) {
 	}
 }
 
-// Touches every entry of a parsed database (lookups and text views) and checks the hash order.
 size_t walk(const TextDatabase &p_db) {
 	size_t bytes = 0;
 	for (size_t i = 0; i < p_db.size(); ++i) {
@@ -175,18 +160,18 @@ struct InstallFixture {
 	}
 };
 
-} // namespace
+}
 
 TEST_SUITE("text-unit") {
 	TEST_CASE("text: SID hash") {
 		CHECK(text_hash("") == 0xFFFFFFFFu);
-		CHECK(text_hash("A") == 0x20u); // 0xFFFFFFFF * 33 + 65 mod 2^32
+		CHECK(text_hash("A") == 0x20u);
 		CHECK(text_hash("AB") == 0x20u * 33u + 66u);
-		// Additive last step: SIDs differing only in the last character hash one apart.
+
 		CHECK(text_hash("ID_H_US_B") == text_hash("ID_H_US_A") + 1);
 		CHECK(text_hash("ID_H_US_A") == 0x34a54e7au);
 		CHECK(text_hash("ID_P_WNAME_M16A4") == 0x0fd83dfau);
-		// Exactly as written: case matters, and the result differs from the xor variant.
+
 		CHECK(text_hash("id_h_us_a") != text_hash("ID_H_US_A"));
 		CHECK(text_hash("ID_H_US_A") != ebx_name_hash("ID_H_US_A"));
 	}
@@ -195,11 +180,11 @@ TEST_SUITE("text-unit") {
 		size_t errors = 99;
 		CHECK(decode_one(ascii("Hello, world"), &errors) == "Hello, world");
 		CHECK(errors == 0);
-		CHECK(decode_one({ 'M', 0x80, 'T' }, &errors) == "M\xC3\xA9T"); // direct unit U+00E9
+		CHECK(decode_one({ 'M', 0x80, 'T' }, &errors) == "M\xC3\xA9T");
 		CHECK(errors == 0);
-		CHECK(decode_one({ 0x81, 0x85 }, &errors) == "\xE2\x82\xAC"); // page 2, slot 5 -> U+20AC
+		CHECK(decode_one({ 0x81, 0x85 }, &errors) == "\xE2\x82\xAC");
 		CHECK(errors == 0);
-		CHECK(decode_one({ 0x82, 0x83 }, &errors) == "\xF0\x9F\x98\x80"); // surrogate pair -> U+1F600
+		CHECK(decode_one({ 0x82, 0x83 }, &errors) == "\xF0\x9F\x98\x80");
 		CHECK(errors == 0);
 		CHECK(decode_one(Bytes{}, &errors).empty());
 		CHECK(errors == 0);
@@ -207,17 +192,17 @@ TEST_SUITE("text-unit") {
 
 	TEST_CASE("text: malformed sequences are counted, never fatal") {
 		size_t errors = 0;
-		CHECK(decode_one({ 'a', 0x81 }, &errors) == "a"); // page byte at the end
+		CHECK(decode_one({ 'a', 0x81 }, &errors) == "a");
 		CHECK(errors == 1);
-		CHECK(decode_one({ 0x81, 'x', 'y' }, &errors) == "y"); // page then < 0x80: both bytes skipped
+		CHECK(decode_one({ 0x81, 'x', 'y' }, &errors) == "y");
 		CHECK(errors == 1);
-		CHECK(decode_one({ 0x84, 0x90, 'z' }, &errors) == "z"); // page 127 is past 512 units
+		CHECK(decode_one({ 0x84, 0x90, 'z' }, &errors) == "z");
 		CHECK(errors == 1);
-		CHECK(decode_one({ 0x82, 'q' }, &errors) == "\xEF\xBF\xBDq"); // lone high surrogate
+		CHECK(decode_one({ 0x82, 'q' }, &errors) == "\xEF\xBF\xBDq");
 		CHECK(errors == 1);
-		CHECK(decode_one({ 0x83 }, &errors) == "\xEF\xBF\xBD"); // lone low surrogate
+		CHECK(decode_one({ 0x83 }, &errors) == "\xEF\xBF\xBD");
 		CHECK(errors == 1);
-		CHECK(decode_one({ 0x82 }, &errors) == "\xEF\xBF\xBD"); // high surrogate at the end
+		CHECK(decode_one({ 0x82 }, &errors) == "\xEF\xBF\xBD");
 		CHECK(errors == 1);
 	}
 
@@ -227,7 +212,7 @@ TEST_SUITE("text-unit") {
 			{ text_hash("ID_B"), ascii("bee") },
 			{ text_hash("ID_A"), ascii("ay") },
 			{ text_hash("ID_M"), ascii("<MISSING>") },
-			{ text_hash("ID_A"), ascii("second ay") }, // repeated hash: the first in file order wins
+			{ text_hash("ID_A"), ascii("second ay") },
 			{ text_hash("ID_E"), ascii("") },
 		};
 		Result<TextDatabase> db = TextDatabase::parse(make_binary(entries, "Tag"), hist);
@@ -275,22 +260,22 @@ TEST_SUITE("text-unit") {
 		b = Bytes(good.begin(), good.begin() + 0x10);
 		CHECK(parse_error(b, hist).find("truncated") != std::string::npos);
 		b = good;
-		put32(b, 8, 0xFFFFFFFFu); // count far past the chunk
+		put32(b, 8, 0xFFFFFFFFu);
 		CHECK(parse_error(b, hist).find("entry table") != std::string::npos);
 		b = good;
-		put32(b, 12, 0); // entry table over the header
+		put32(b, 12, 0);
 		CHECK(parse_error(b, hist).find("entry table") != std::string::npos);
 		b = good;
 		put32(b, 16, get32(b, 16) + 8);
 		CHECK(parse_error(b, hist).find("string table offset") != std::string::npos);
 		b = good;
-		std::memset(b.data() + 0x14, 'x', 16); // tag without its NUL
+		std::memset(b.data() + 0x14, 'x', 16);
 		CHECK(parse_error(b, hist).find("tag") != std::string::npos);
 		b = good;
-		put32(b, 0x24 + 4, 0x7FFFFFF0u); // string offset outside
+		put32(b, 0x24 + 4, 0x7FFFFFF0u);
 		CHECK(parse_error(b, hist).find("outside the chunk") != std::string::npos);
 		b = good;
-		b.back() = 'X'; // last string loses its NUL
+		b.back() = 'X';
 		CHECK(parse_error(b, hist).find("NUL-terminated") != std::string::npos);
 		CHECK(parse_error(Bytes{}, hist).find("truncated") != std::string::npos);
 	}
@@ -313,7 +298,7 @@ TEST_SUITE("text-unit") {
 	}
 
 	TEST_CASE("text: overlapping strings cannot decode quadratically") {
-		// 4,000 entries all pointing at one 4,000-byte string: 16 MB of decoding from a 36 KB chunk.
+
 		std::vector<SynthEntry> entries;
 		entries.push_back({ 0, Bytes(4000, 'a') });
 		Bytes b = make_binary(entries);
@@ -383,7 +368,7 @@ TEST_SUITE("text") {
 		TextDatabaseSource source;
 		Result<TextDatabase> db = open_text_database(fx.install, {}, &source);
 		REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
-		// Located through localization/localization -> localization/us_loc -> Win32/Loc/en (patch toc).
+
 		CHECK(source.ref.partition == "localization/us_loc");
 		CHECK(source.ref.language == "LanguageFormat_English");
 		CHECK(iequals_ascii(source.superbundle, "Win32/Loc/en"));
@@ -392,7 +377,6 @@ TEST_SUITE("text") {
 		CHECK(source.ref.histogram_chunk.to_string() == "8ba57686-5a81-a229-726b-2d0f7ecb9b37");
 		CHECK(source.ref.histogram_size == 6156);
 
-		// Plan §7.8.
 		CHECK(db->size() == 15515);
 		CHECK(db->tag() == "Global");
 		CHECK(db->decode_errors() == 0);
@@ -404,11 +388,10 @@ TEST_SUITE("text") {
 		CHECK(db->translate("ID_H_US_A") == "A");
 		CHECK(db->translate("ID_H_US_B") == "B");
 		CHECK(db->translate("ID_P_WNAME_AK74M") == "AK-74M");
-		CHECK(db->translate("ID_M_LEVELNAME_MP_SUBWAY") == "OPERATION M\xC3\x89TRO"); // non-ASCII through the histogram
-		CHECK(db->translate("ID_P_VNAME_M1A2") == "ID_P_VNAME_M1A2"); // absent: shows the SID
+		CHECK(db->translate("ID_M_LEVELNAME_MP_SUBWAY") == "OPERATION M\xC3\x89TRO");
+		CHECK(db->translate("ID_P_VNAME_M1A2") == "ID_P_VNAME_M1A2");
 		CHECK(walk(*db) > 0);
 
-		// The same database by name, through an explicit Globals library.
 		Result<std::unique_ptr<EbxLibrary>> globals = EbxLibrary::open(fx.install, { "Win32/Globals" });
 		REQUIRE(globals.ok());
 		Result<std::vector<std::string>> listed = localized_text_partitions(**globals);
@@ -418,12 +401,10 @@ TEST_SUITE("text") {
 		Result<TextDatabase> by_name = load_text_database(*fx.install, **globals, "localization/us_loc");
 		REQUIRE(by_name.ok());
 		CHECK(by_name->size() == db->size());
-		// Other languages are listed but not installed on an English install.
+
 		Result<TextDatabase> german = load_text_database(*fx.install, **globals, "localization/ge_loc");
 		CHECK_FALSE(german.ok());
 
-		// Research census: 1,271 distinct SIDs in the 28 partitions, 1,247 resolve. The other 24 have no
-		// entry at all (the research table marked them "<MISSING>"; no entry holds that text).
 		std::vector<std::string> sbs;
 		for (const std::string_view sb : research_census_superbundles()) {
 			sbs.emplace_back(sb);

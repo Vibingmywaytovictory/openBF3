@@ -1,8 +1,3 @@
-// M2a fx2 fx.render.unit (docs/design/m2a-fx2.md): VFX2's render preparation on hand-built defs and a synthetic
-// emitter atlas (batch keys and order, back-to-front sort, the instance layout per shader class, the alpha-level
-// packing, default-texture fallbacks, the light merge and the 64-light pool) and the prepared atlas pixels
-// (NormalDXT5RGA -> BC5 on synthetic blocks, the image preparation from a synthetic LoadedTexture, the cache blob's
-// round trip, every truncation and seeded mutations; also in the asan preset). No install, no Godot.
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/work_budget.h"
@@ -34,7 +29,6 @@ uint64_t splitmix(uint64_t &r_state) {
 	return z ^ (z >> 31);
 }
 
-// The 128-byte DxTexture res header (dx_texture.cpp layout; the fx.fuzz fixture's): version 10, a 2D texture.
 std::vector<uint8_t> dx_header(uint32_t p_format, uint32_t p_flags, uint16_t p_width, uint16_t p_height, uint8_t p_mips) {
 	std::vector<uint8_t> b(128, 0);
 	const uint32_t version = 10;
@@ -69,7 +63,6 @@ fxt::Partition atlas_partition(uint32_t p_seed, uint32_t p_base_seed, uint32_t p
 	return p;
 }
 
-// A synthetic atlas: base entries "fx/t/smoke" and the default texture, a normal entry "fx/t/smoke_n".
 EmitterAtlas make_atlas() {
 	fxt::MemResolver db;
 	REQUIRE(db.set("fx/r/atlasbase", fxt::target(81)));
@@ -101,10 +94,9 @@ EffectStart at(float p_x, float p_y, float p_z, uint64_t p_seed = 1, bool p_firs
 	return s;
 }
 
-// A burst emitter: p_count particles at the first step, living long.
 EmitterDef burst(const std::string &p_name, uint32_t p_count, EmittableType p_type = EmittableType::ScreenAlignedQuad, uint32_t p_flags = 0,
 		const std::string &p_texture = "fx/t/smoke") {
-	// A burst spawns floor(1 + rate x window) at the window start: rate (count - 1) / 0.01 + 1 gives p_count.
+
 	EmitterDef e = fxt::emitter_def(p_name, p_count, float(p_count - 1) * 100.0f + 1.0f, 100.0f, 0.01f);
 	e.params.distribute_over_time = false;
 	e.tmpl.emittable = p_type;
@@ -123,12 +115,11 @@ FxView view_along_z() {
 	return v;
 }
 
-// The output row an instance belongs to.
 uint32_t row_of(const FxInstance &p_in) {
 	return uint32_t(p_in.custom[0]);
 }
 
-} // namespace
+}
 
 TEST_SUITE("fx-render-unit") {
 
@@ -177,14 +168,14 @@ TEST_CASE("alpha levels: packing exact on the 10-bit grid, clamped, finite") {
 	fx_unpack_alpha_levels(fx_pack_alpha_levels(std::nanf(""), std::nanf("")), mn, mx);
 	CHECK(mn == 0.0f);
 	CHECK(mx == 1.0f);
-	// The largest packed value is exact in a float.
+
 	CHECK(fx_pack_alpha_levels(1.0f, 1.0f) == float(kFxAlphaLevelSteps * (kFxAlphaLevelSteps + 1) + kFxAlphaLevelSteps));
 }
 
 TEST_CASE("prepare: instance count, batch order, back-to-front sort, rows and params") {
 	const EmitterAtlas atlas = make_atlas();
 	FxWorld w;
-	// Two alpha SAQ effects (near z 5, far z 20, started near first), one additive SAQ, one alpha DAQ, one 1p alpha SAQ.
+
 	const auto alpha = fxt::effect_def("alpha", { burst("a", 3) });
 	const auto add = fxt::effect_def("add", { burst("b", 2, EmittableType::ScreenAlignedQuad, kEmitterEmissive) });
 	const auto daq = fxt::effect_def("daq", { burst("c", 4, EmittableType::DirectionAlignedQuad) });
@@ -204,7 +195,6 @@ TEST_CASE("prepare: instance count, batch order, back-to-front sort, rows and pa
 	CHECK(prep.stats().unresolved_this_frame == 0);
 	CHECK(prep.stats().first_person_instances == 2);
 
-	// Draw order: World pass (alpha Saq, alpha Daq, additive Saq), then FirstPerson (alpha Saq).
 	const auto batches = prep.batches();
 	REQUIRE(batches.size() == 4);
 	CHECK(batches[0].key == FxBatchKey{ FxShaderClass::Saq, FxBlend::Alpha, FxPass::World });
@@ -220,7 +210,6 @@ TEST_CASE("prepare: instance count, batch order, back-to-front sort, rows and pa
 	CHECK(batches[0].instance_count == 6);
 	CHECK(batches[0].emitters == 2);
 
-	// Back-to-front: the far alpha emitter (z 20) draws before the near one (z 5), particles in simulation order.
 	const auto inst = prep.instances();
 	const auto outs = w.outputs();
 	const auto parts = w.particles();
@@ -231,7 +220,7 @@ TEST_CASE("prepare: instance count, batch order, back-to-front sort, rows and pa
 		const ParticleVertex &p = parts[first.first_particle + k];
 		const FxInstance &in = inst[k];
 		CHECK(row_of(in) == row_of(inst[0]));
-		// Saq: O = position, X = size.x (cos r, sin r, 0), Y = size.y (-sin r, cos r, 0).
+
 		CHECK(in.transform[3] == p.position.x);
 		CHECK(in.transform[7] == p.position.y);
 		CHECK(in.transform[11] == p.position.z);
@@ -246,7 +235,6 @@ TEST_CASE("prepare: instance count, batch order, back-to-front sort, rows and pa
 		CHECK(in.custom[3] == p.alpha_scale);
 	}
 
-	// Params rows: the base rect from the atlas (u, v, du, dv), the flipbook layout, the normal rect.
 	const FxEmitterParams &row = prep.emitter_params()[row_of(inst[0])];
 	CHECK(row.base_rect[0] == doctest::Approx(0.25f));
 	CHECK(row.base_rect[1] == doctest::Approx(0.5f));
@@ -260,14 +248,12 @@ TEST_CASE("prepare: instance count, batch order, back-to-front sort, rows and pa
 	const FxBatch &addb = batches[2];
 	CHECK(prep.emitter_params()[row_of(inst[addb.first_instance])].lighting[2] == 1.0f);
 
-	// Daq: X = (size.x, 0, 0), Y = (0, size.y, 0), Z = the unit velocity.
 	const FxInstance &d = inst[batches[1].first_instance];
 	const float zl = std::sqrt(d.transform[2] * d.transform[2] + d.transform[6] * d.transform[6] + d.transform[10] * d.transform[10]);
 	CHECK(zl == doctest::Approx(1.0f));
 	CHECK(d.transform[4] == 0.0f);
 	CHECK(d.transform[1] == 0.0f);
 
-	// AABBs hold every instance position.
 	for (const FxBatch &b : batches) {
 		for (uint32_t k = 0; k < b.instance_count; ++k) {
 			const FxInstance &in = inst[b.first_instance + k];
@@ -278,7 +264,6 @@ TEST_CASE("prepare: instance count, batch order, back-to-front sort, rows and pa
 		}
 	}
 
-	// The sort follows the camera: looking along -z, the near (z 5) emitter is now the far one.
 	FxView back;
 	back.camera_position = Vec3{ 0, 0, 40 };
 	back.camera_forward = Vec3{ 0, 0, -1 };
@@ -292,7 +277,7 @@ TEST_CASE("prepare: unresolved textures fall back to the default entry and are c
 	FxWorld w;
 	REQUIRE(w.start(fxt::effect_def("missing", { burst("m", 2, EmittableType::ScreenAlignedQuad, 0, "fx/t/nothere") }), at(0, 0, 4)).ok());
 	REQUIRE(w.start(fxt::effect_def("empty", { burst("e", 1, EmittableType::ScreenAlignedQuad, 0, "") }), at(0, 0, 6, 2)).ok());
-	// A normal-atlas name as the diffuse texture is not drawable from the base atlas: a fallback too.
+
 	REQUIRE(w.start(fxt::effect_def("normal", { burst("n", 1, EmittableType::ScreenAlignedQuad, 0, "fx/t/smoke_n") }), at(0, 0, 7, 3)).ok());
 	fx_step_frame(w, 1.0f / 60.0f);
 	RenderPrep prep;
@@ -319,7 +304,7 @@ TEST_CASE("prepare: Waq and mesh stand-in transforms") {
 	RenderPrep prep;
 	prep.prepare(w, view_along_z(), atlas);
 	CHECK(prep.stats().mesh_standins == 3);
-	// A mesh particle naming no texture is drawn white (kFxRectWhite), not counted as a fallback.
+
 	FxWorld w2;
 	REQUIRE(w2.start(fxt::effect_def("bare", { burst("b", 2, EmittableType::ParticleMesh, 0, "") }), at(0, 0, 4, 3)).ok());
 	fx_step_frame(w2, 1.0f / 60.0f);
@@ -332,13 +317,13 @@ TEST_CASE("prepare: Waq and mesh stand-in transforms") {
 	for (const FxBatch &b : prep.batches()) {
 		const FxInstance &in = prep.instances()[b.first_instance];
 		if (b.key.shader == FxShaderClass::Waq) {
-			// WorldAlignedQuad: the normal (Z column) is +Y.
+
 			CHECK(in.transform[2] == 0.0f);
 			CHECK(in.transform[6] == 1.0f);
 			CHECK(in.transform[10] == 0.0f);
 		}
 		if (b.key.shader == FxShaderClass::Mesh) {
-			// The stand-in box: each basis column is the size (1 without SpawnSize) times kFxMeshStandinMeters long.
+
 			for (uint32_t i = 0; i < b.instance_count; ++i) {
 				const float *t = prep.instances()[b.first_instance + i].transform;
 				for (int c = 0; c < 3; ++c) {
@@ -358,7 +343,7 @@ TEST_CASE("lights: merged per output, intensity-weighted, priority, the 64 pool"
 	e.tmpl.light.color = Vec3{ 1, 0.5f, 0.25f };
 	e.tmpl.light.pivot = Vec3{ 0, 2, 0 };
 	const auto def = fxt::effect_def("light", { e }, { 0 }, 100);
-	// 70 effects at z = 10 + i: the 64 nearest stay, 6 drop.
+
 	for (uint32_t i = 0; i < 70; ++i) {
 		REQUIRE(w.start(def, at(0, 0, 10.0f + float(i), 100 + i)).ok());
 	}
@@ -374,15 +359,15 @@ TEST_CASE("lights: merged per output, intensity-weighted, priority, the 64 pool"
 		CHECK(l.priority <= last);
 		last = l.priority;
 		CHECK(l.radius == 5.0f);
-		CHECK(l.intensity == doctest::Approx(4.0f)); // four particles of intensity 1
+		CHECK(l.intensity == doctest::Approx(4.0f));
 		CHECK(l.color.x == doctest::Approx(1.0f));
 		CHECK(l.color.y == doctest::Approx(0.5f));
 		CHECK(l.color.z == doctest::Approx(0.25f));
-		CHECK(l.position.y == doctest::Approx(2.0f)); // the pivot
+		CHECK(l.position.y == doctest::Approx(2.0f));
 		CHECK(l.position.z < 10.0f + 64.0f);
 		CHECK_FALSE(l.first_person);
 	}
-	// A light at the camera stays finite (kFxLightMinDistance2).
+
 	FxWorld w2;
 	REQUIRE(w2.start(def, at(0, -2, 0, 7, true)).ok());
 	fx_step_frame(w2, 1.0f / 60.0f);
@@ -394,22 +379,22 @@ TEST_CASE("lights: merged per output, intensity-weighted, priority, the 64 pool"
 }
 
 TEST_CASE("atlas pixels: NormalDXT5RGA -> BC5 on synthetic blocks") {
-	// One block: colour endpoints red 31 / red 0 (c0 > c1), indices 0,1,2,3 repeating; alpha block as stored.
+
 	std::vector<uint8_t> block(16, 0);
 	const uint8_t alpha[8] = { 200, 10, 0x24, 0x92, 0x49, 0x24, 0x92, 0x49 };
 	std::memcpy(block.data(), alpha, 8);
 	const uint16_t c0 = uint16_t(31 << 11), c1 = 0;
 	std::memcpy(block.data() + 8, &c0, 2);
 	std::memcpy(block.data() + 10, &c1, 2);
-	const uint32_t idx = 0xE4E4E4E4u; // 0,1,2,3 per row
+	const uint32_t idx = 0xE4E4E4E4u;
 	std::memcpy(block.data() + 12, &idx, 4);
 	std::vector<uint8_t> out;
 	WorkBudget budget;
 	REQUIRE(convert_normal_dxt5rga_to_bc5(block.data(), block.size(), 4, 4, out, budget).ok());
 	REQUIRE(out.size() == 16);
-	// Green (y) = the alpha block unchanged.
+
 	CHECK(std::memcmp(out.data() + 8, alpha, 8) == 0);
-	// Red (x): endpoints 255 / 0; decoding gives the four palette values 255, 0, 170, 85 within one BC4 step.
+
 	CHECK(out[0] == 255);
 	CHECK(out[1] == 0);
 	uint64_t bits = 0;
@@ -422,7 +407,7 @@ TEST_CASE("atlas pixels: NormalDXT5RGA -> BC5 on synthetic blocks") {
 		const int v = k == 0 ? 255 : (k == 1 ? 0 : ((7 - int(k - 1)) * 255 + int(k - 1) * 0 + 3) / 7);
 		CHECK(std::abs(v - expect[i % 4]) <= 19);
 	}
-	// A flat block: one endpoint pair, all indices 0.
+
 	std::vector<uint8_t> flat(16, 0);
 	const uint16_t mid = uint16_t(16 << 11);
 	std::memcpy(flat.data() + 8, &mid, 2);
@@ -430,7 +415,7 @@ TEST_CASE("atlas pixels: NormalDXT5RGA -> BC5 on synthetic blocks") {
 	out.clear();
 	REQUIRE(convert_normal_dxt5rga_to_bc5(flat.data(), flat.size(), 4, 4, out, budget).ok());
 	CHECK(out[0] == out[1]);
-	// Short data, zero sizes, an oversized mip: errors, nothing appended.
+
 	out.clear();
 	CHECK_FALSE(convert_normal_dxt5rga_to_bc5(block.data(), 15, 4, 4, out, budget).ok());
 	CHECK_FALSE(convert_normal_dxt5rga_to_bc5(block.data(), 16, 8, 4, out, budget).ok());
@@ -438,7 +423,7 @@ TEST_CASE("atlas pixels: NormalDXT5RGA -> BC5 on synthetic blocks") {
 	CHECK_FALSE(convert_normal_dxt5rga_to_bc5(nullptr, 16, 4, 4, out, budget).ok());
 	CHECK_FALSE(convert_normal_dxt5rga_to_bc5(block.data(), 16, 1u << 20, 4, out, budget).ok());
 	CHECK(out.empty());
-	// A spent budget stops the loop with its error.
+
 	std::vector<uint8_t> big(atlas_level_bytes(64, 64), 0);
 	WorkBudget tiny(3);
 	CHECK_FALSE(convert_normal_dxt5rga_to_bc5(big.data(), big.size(), 64, 64, out, tiny).ok());
@@ -449,7 +434,6 @@ TEST_CASE("atlas pixels: NormalDXT5RGA -> BC5 on synthetic blocks") {
 
 namespace {
 
-// A synthetic LoadedTexture: a 2D texture of p_format with a full mip chain of distinct bytes.
 bf3::core::res::LoadedTexture synthetic_texture(bf3::core::res::TextureFormat p_format, uint16_t p_w, uint16_t p_h, uint8_t p_mips) {
 	bf3::core::res::LoadedTexture t;
 	t.texture.kind = bf3::core::res::TextureKind::Texture2D;
@@ -496,7 +480,7 @@ AtlasPixels synthetic_pixels() {
 	return px;
 }
 
-} // namespace
+}
 
 TEST_CASE("atlas pixels: image preparation from a synthetic texture") {
 	WorkBudget budget;
@@ -506,7 +490,7 @@ TEST_CASE("atlas pixels: image preparation from a synthetic texture") {
 	CHECK(b->format == bf3::core::res::PixelFormat::Bc3);
 	CHECK(b->srgb);
 	CHECK(b->mips.size() == 7);
-	CHECK(b->bytes == base.chunk.bytes); // BC3 blocks as stored
+	CHECK(b->bytes == base.chunk.bytes);
 	CHECK(b->mips[6].width == 1);
 	CHECK(b->mips[6].size == 16);
 
@@ -514,14 +498,13 @@ TEST_CASE("atlas pixels: image preparation from a synthetic texture") {
 	auto n = prepare_atlas_image(normal, info_of(normal, "fx/r/atlasnormal_n", true), budget);
 	REQUIRE(n.ok());
 	CHECK(n->format == bf3::core::res::PixelFormat::Bc5);
-	CHECK_FALSE(n->srgb); // never sRGB
+	CHECK_FALSE(n->srgb);
 	CHECK(n->bytes.size() == normal.chunk.bytes.size());
-	// Every converted block keeps the source alpha block as its green block.
+
 	for (size_t at = 0; at < n->bytes.size(); at += 16) {
 		CHECK(std::memcmp(n->bytes.data() + at + 8, normal.chunk.bytes.data() + at, 8) == 0);
 	}
 
-	// A header that differs from the atlas header, a wrong format, a short chunk, too many mips: errors.
 	AtlasTextureInfo wrong = info_of(base, "x", true);
 	wrong.width = 128;
 	CHECK_FALSE(prepare_atlas_image(base, wrong, budget).ok());
@@ -549,7 +532,6 @@ TEST_CASE("atlas pixels: blob round trip, every truncation, seeded mutations") {
 	CHECK(back.normal.mips.size() == px.normal.mips.size());
 	CHECK(encode_atlas_pixels(back) == blob);
 
-	// Every truncation fails (nothing past the end is read).
 	size_t failures = 0;
 	for (size_t n = 0; n < blob.size(); n += (n < 512 ? 1 : 97)) {
 		std::vector<uint8_t> cut(blob.begin(), blob.begin() + ptrdiff_t(n));
@@ -561,12 +543,11 @@ TEST_CASE("atlas pixels: blob round trip, every truncation, seeded mutations") {
 		}
 	}
 	CHECK(failures > 0);
-	// Trailing bytes fail.
+
 	std::vector<uint8_t> longer = blob;
 	longer.push_back(0);
 	CHECK_FALSE(decode_atlas_pixels(longer, back).ok());
 
-	// Seeded mutations of the header region: never a crash; a mutation that decodes keeps a valid chain.
 	uint64_t rng = 0xF2;
 	size_t decoded = 0;
 	for (int round = 0; round < 4000; ++round) {
@@ -606,9 +587,9 @@ TEST_CASE("atlas pixels: blob round trip, every truncation, seeded mutations") {
 		}
 	}
 	MESSAGE("mutations that still decoded: " << decoded << " of 4000");
-	// A hostile pixel byte count past the cap fails before any allocation.
+
 	std::vector<uint8_t> empty;
 	CHECK_FALSE(decode_atlas_pixels(empty, back).ok());
 }
 
-} // TEST_SUITE
+}

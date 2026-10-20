@@ -1,7 +1,3 @@
-// read_mode_areas, combat_area_tiles and level_combat_tiles (include/bf3/core/level/mode_areas.h; spike S1,
-// docs/design/s1.md §4, §5.3). The combat area chain is followed generically through LinkConnections: from the
-// trigger's Geometry field, up through each prefab interface it is linked to (the field the interface side names is
-// the field the parent scope links from the instantiating reference), until a VolumeVectorShapeData is the target.
 #include "bf3/core/level/mode_areas.h"
 
 #include "bf3/core/install.h"
@@ -20,9 +16,8 @@ namespace bf3::core::level {
 
 namespace {
 
-constexpr uint32_t kMaxInterfaceHops = 16; // prefab levels a combat area link may climb (retail: 1)
+constexpr uint32_t kMaxInterfaceHops = 16;
 
-// Whether (x, z) of p_point lies inside any polygon of p_areas (even-odd rule). No areas: inside.
 bool inside_any(std::span<const CombatAreaDef> p_areas, const Vec3 &p_point) {
 	if (p_areas.empty()) {
 		return true;
@@ -48,7 +43,6 @@ double seconds_since(std::chrono::steady_clock::time_point p_start) {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
-// The fed value of a field (a PropertyConnection of the object's scope into it), as spawn_points.cpp reads it.
 Result<std::optional<Property>> fed(const World &p_world, const PlacedObject &p_object, std::string_view p_field) {
 	const EbxInstance &target = p_object.reference ? *p_object.reference : p_object.entity;
 	Result<std::optional<Property>> r = p_world.scopes.property(p_object.scope, target, field_id(p_field));
@@ -58,7 +52,6 @@ Result<std::optional<Property>> fed(const World &p_world, const PlacedObject &p_
 	return p_world.scopes.property(p_object.scope, p_object.entity, field_id(p_field));
 }
 
-// TeamId of a field: a fed `TeamId TeamN` constant or the object's own enum.
 Result<int> team_of(const World &p_world, const PlacedObject &p_object, std::string_view p_field) {
 	Result<std::optional<Property>> f = fed(p_world, p_object, p_field);
 	BF3_TRY(f);
@@ -79,7 +72,6 @@ Result<int> team_of(const World &p_world, const PlacedObject &p_object, std::str
 	return 0;
 }
 
-// An enum field's name (fed constant text first), charged.
 Result<std::string> enum_of(const World &p_world, const PlacedObject &p_object, std::string_view p_field) {
 	WorkBudget &budget = *p_world.budget;
 	Result<std::optional<Property>> f = fed(p_world, p_object, p_field);
@@ -101,10 +93,6 @@ Result<std::string> enum_of(const World &p_world, const PlacedObject &p_object, 
 	return *own ? std::string(**own) : std::string();
 }
 
-// Follows the link chain from (p_source, p_field) in p_scope to a VolumeVectorShapeData. Every link scanned is
-// charged. Returns the shape and the scope that places it, or nullopt; r_other is set when a link of the chain
-// reached a target that is neither a shape nor an interface the chain can climb (a wiring this reader does not know:
-// an error), and stays false when the chain only ran out of links (an unwired trigger, S1 open question 7).
 struct ShapeAt {
 	EbxInstance shape;
 	uint32_t scope = 0;
@@ -140,7 +128,7 @@ Result<std::optional<ShapeAt>> follow_area(const World &p_world, uint32_t p_scop
 	return std::optional<ShapeAt>();
 }
 
-} // namespace
+}
 
 Result<ModeAreas> read_mode_areas(const World &p_world) {
 	WorkBudget &budget = *p_world.budget;
@@ -164,8 +152,7 @@ Result<ModeAreas> read_mode_areas(const World &p_world) {
 			Result<std::optional<ShapeAt>> shape = follow_area(p_world, object.scope, source, geometry, 0, other);
 			BF3_TRY(shape);
 			if (!*shape && !other) {
-				// The chain ends at an interface field the instantiating scope links to nothing (retail: Metro RL's
-				// rush-stage prefab instances whose stage the mode does not use). The trigger watches no area.
+
 				out.unwired_triggers.push_back(i);
 				continue;
 			}
@@ -305,7 +292,7 @@ Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const Co
 	constexpr float kTile = 64.0f;
 	std::set<std::array<int32_t, 2>> tiles;
 	const float margin = std::isfinite(p_margin) ? std::clamp(p_margin, 0.0f, 1024.0f) : 0.0f;
-	// The work bound first: per area, candidate tiles x (edge samples + the point-in-polygon edges).
+
 	uint64_t work = 0;
 	for (const CombatAreaDef &a : p_areas) {
 		if (a.polygon.size() < 3) {
@@ -347,8 +334,7 @@ Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const Co
 		const int32_t tx1 = int32_t(std::floor((x1 + margin) / kTile));
 		const int32_t tz0 = int32_t(std::floor((z0 - margin) / kTile));
 		const int32_t tz1 = int32_t(std::floor((z1 + margin) / kTile));
-		// A tile is touched when the polygon grown by the margin overlaps its square: the square's distance to the
-		// polygon (0 inside) is at most the margin.
+
 		const auto inside = [&](float p_x, float p_z) {
 			bool in = false;
 			const size_t n = a.polygon.size();
@@ -362,8 +348,7 @@ Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const Co
 			return in;
 		};
 		const auto seg_box_distance2 = [](float ax, float az, float bx, float bz, float qx0, float qz0, float qx1, float qz1) {
-			// Distance between a segment and an axis-aligned box, sampled finely enough for a 64 m tile (exactness is
-			// not needed: the margin is 32 m).
+
 			float best = 1e30f;
 			const float len = std::sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
 			const int steps = std::max(1, int(len / 2.0f));
@@ -377,7 +362,7 @@ Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const Co
 			return best;
 		};
 		if (int64_t(tx1 - tx0 + 1) * int64_t(tz1 - tz0 + 1) > (int64_t(1) << 20)) {
-			continue; // a polygon over a million tiles: not a combat area (read_mode_areas caps the coordinates)
+			continue;
 		}
 		for (int32_t tz = tz0; tz <= tz1; ++tz) {
 			for (int32_t tx = tx0; tx <= tx1; ++tx) {
@@ -484,4 +469,4 @@ Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_ins
 	return out;
 }
 
-} // namespace bf3::core::level
+}

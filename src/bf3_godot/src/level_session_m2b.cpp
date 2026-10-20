@@ -1,13 +1,3 @@
-// The M2b session (docs/design/m2b.md §4, §11 gx row; as built: docs/design/m2b-gx.md; owner gx). See
-// level_session_m2b.h: the M2b session is the M2a session (level_session_m2a.cpp) with the TDM rules on. Its hooks are
-// called from one tagged line `// M2b gx [<tag>]` each in the M2a hooks, and every one returns at once outside an M2b
-// session (M2aGame::m2b null), so the M2a scene, M1, S1 and S3 run exactly as before.
-//
-// ui's and cam's parts (Bf3TdmHud, fill_hud_tdm, Bf3DeathCamera, the crowd's corpse time) are built only when their
-// body is in the tree (OPENBF3_M2B_HAVE_UI / _CAM, the "# M2b W2.0" block of bf3_godot's CMake): this branch links
-// before they land and picks them up after the merge without an edit. Without ui a plain status label stands in for
-// the spawn screen, so the scene stays playable (Enter deploys, 1-4 pick the kit).
-
 #include "level_session_m2b.h"
 
 #include "level_session_m2a.h"
@@ -85,14 +75,12 @@ const char *m2b_phase_text(net::MatchPhase p_phase) {
 	return "?";
 }
 
-// A config file next to the project (res://config/<name>) as an OS path, or "" when it is not there (main thread).
 std::string m2b_config_path(const char *p_res) {
 	const std::string path = to_std(ProjectSettings::get_singleton()->globalize_path(p_res));
 	std::error_code ec;
 	return std::filesystem::exists(m2b_utf8_path(path), ec) ? path : std::string();
 }
 
-// The presented position of a slot this frame (false when it is not drawn).
 bool m2b_presented_position(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_slot, sim::Vec3 &r_position) {
 	if (!p_frame.valid || p_slot == 0xFF) {
 		return false;
@@ -138,8 +126,6 @@ void m2b_free_label(Label *&r_label) {
 	}
 }
 
-// Godot's camera basis from a Frostbite-axes frame (right = up x forward, up, forward = the view direction; a Camera3D
-// looks down -Z): x = -right, y = up, z = -forward (m2b-cam.md §6; m2a_frame_of is the inverse).
 Transform3D m2b_camera_transform(const fx::Transform &p_t) {
 	Basis b;
 	b.set_column(0, -Vector3(p_t.right.x, p_t.right.y, p_t.right.z));
@@ -169,13 +155,10 @@ Transform3D m2b_kept_view(const M2bGame &p_m) {
 	return Transform3D(b, Vector3(p_m.view_origin[0], p_m.view_origin[1], p_m.view_origin[2]));
 }
 
-// The Godot side, once, on the first frame after Done.
 void m2b_build(M2aGame &r_game, M2bGame &r_m, bool p_headless) {
 	r_m.built = true;
 	r_m.windowed = !p_headless;
-	// The M2a labels count kills from the client's own events and say "K kit, T team": the M2b scene shows the server's
-	// MatchState instead (ui's screens, or the status label below). With the deploy screen off (M2a's automatic
-	// respawn) the death label's respawn countdown stays.
+
 	m2b_free_label(r_game.score_label);
 	m2b_free_label(r_game.kit_label);
 	if (r_m.options.deploy_screen) {
@@ -206,8 +189,7 @@ void m2b_build(M2aGame &r_game, M2bGame &r_m, bool p_headless) {
 #if OPENBF3_M2B_HAVE_CAM
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(new Bf3DeathCamera(), &delete_m2b_part<Bf3DeathCamera>);
 #if OPENBF3_M2A_HAVE_CROWD
-	// The 3p corpse stays for SoldierDef::time_for_corpse (15 s on Metro), set before the crowd's build (m2a_step_parts
-	// builds it later in this frame).
+
 	if (r_game.crowd != nullptr && !r_game.crowd->built()) {
 		r_game.crowd->set_corpse_seconds(r_m.corpse_seconds > 0.0f ? r_m.corpse_seconds : bf3::anim::kCrowdCorpseSeconds);
 	}
@@ -217,7 +199,6 @@ void m2b_build(M2aGame &r_game, M2bGame &r_m, bool p_headless) {
 #endif
 }
 
-// The status label (ui not landed): the round, the counts, and the spawn screen's choice.
 void m2b_status_text(const M2bGame &p_m, const host::PresentationFrame &p_frame, bool p_alive, Viewport *p_viewport) {
 	if (p_m.status_label == nullptr) {
 		return;
@@ -261,9 +242,7 @@ void m2b_status_text(const M2bGame &p_m, const host::PresentationFrame &p_frame,
 	p_m.status_label->set_size(Vector2(vp.x, vp.y * 0.5f));
 }
 
-} // namespace
-
-// ---- [args] ---------------------------------------------------------------------------------------------------------
+}
 
 void m2b_gx_args(M2aGame &r_game, bool p_scene_m2b, InputMapper &r_mapper, uint32_t &r_bots, double &r_quit_after, std::string &r_error) {
 	const bool check = has_user_arg("m2b-check");
@@ -295,7 +274,7 @@ void m2b_gx_args(M2aGame &r_game, bool p_scene_m2b, InputMapper &r_mapper, uint3
 	if (const bf3::core::Status s = parse_m2b_options(a, m.options); !s.ok() && error.empty()) {
 		error = s.error().message;
 	}
-	r_bots = m.options.bots; // M2a's default (24 Free bots) and its 32 cap do not apply: 31 TDM bots by default
+	r_bots = m.options.bots;
 	m.options.tdm_tuning_cfg = m2b_config_path("res://config/tdm_tuning.cfg");
 	m.options.bot_tuning_cfg = m2b_config_path("res://config/bot_tuning.cfg");
 	m.check_options.shots_dir = m2b_utf8_path(user_arg_value("m2b-shots"));
@@ -308,7 +287,7 @@ void m2b_gx_args(M2aGame &r_game, bool p_scene_m2b, InputMapper &r_mapper, uint3
 	}
 	m.check_options.case_timeout_s = std::max(m.check_options.case_timeout_s, m.check_options.play_seconds + 90.0);
 	if (m.checks() && r_quit_after <= 0.0) {
-		r_quit_after = 1.0e9; // a load failure quits a check run with 1; the check itself ends the run
+		r_quit_after = 1.0e9;
 	}
 	r_mapper.m2b_enable(true);
 	char line[512];
@@ -327,13 +306,11 @@ void m2b_gx_args(M2aGame &r_game, bool p_scene_m2b, InputMapper &r_mapper, uint3
 	}
 }
 
-// ---- [load] / [server] (loader thread: no Godot API) ------------------------------------------------------------------
-
 void m2b_gx_load(const M2aGame &p_game, host::SharedLoadOptions &r_options) {
 	if (!p_game.m2b) {
 		return;
 	}
-	r_options.tdm = true; // the logic graph, the TDM kits (the assault defibrillator), the motor's immunity abort (ru)
+	r_options.tdm = true;
 	r_options.tdm_tuning_cfg = p_game.m2b->options.tdm_tuning_cfg;
 }
 
@@ -348,7 +325,7 @@ void m2b_gx_server(M2aGame &r_game, host::GameServerConfig &r_config, uint32_t p
 	r_config.rules.kill_limit_override = m.options.kill_limit;
 	r_config.rules.preround_override_s = m.options.preround_s;
 	r_config.rules.max_players = 32;
-	r_config.firefight = nullptr; // the TDM bots replace bt's firefight bots
+	r_config.firefight = nullptr;
 	r_game.firefight_stats = nullptr;
 	r_game.firefight_bots = 0;
 	r_config.tdm_bots = nullptr;
@@ -358,7 +335,7 @@ void m2b_gx_server(M2aGame &r_game, host::GameServerConfig &r_config, uint32_t p
 		bots->tuning_cfg = m.options.bot_tuning_cfg;
 		r_config.tdm_bots = bots;
 	}
-	// The death view's pull-in (cam) needs the static world; the M2a checks make it only for themselves.
+
 	if (r_game.world == nullptr && r_config.level != nullptr && r_config.level->static_world != nullptr) {
 		bf3::core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(r_config.level->static_world);
 		if (world) {
@@ -375,8 +352,6 @@ void m2b_gx_server(M2aGame &r_game, host::GameServerConfig &r_config, uint32_t p
 	}
 }
 
-// ---- [presented] (main thread, every frame) -------------------------------------------------------------------------
-
 void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host::PresentationFrame &p_frame, InputMapper &r_mapper, uint64_t p_now_ns) {
 	if (!r_game.m2b) {
 		return;
@@ -384,7 +359,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 	M2bGame &m = *r_game.m2b;
 	const host::PresentationFrame &f = p_frame;
 	const double now_s = double(p_now_ns) * 1e-9;
-	// 1. The own slot (MatchInfo's, spawned or not) and team; the slots' teams from the server's player rows.
+
 	m.own_slot = f.stats.connected || f.match_valid ? f.stats.slot : uint8_t(0xFF);
 	const size_t rows = std::min<size_t>(f.player_count, f.players.size());
 	for (size_t i = 0; i < rows; ++i) {
@@ -396,9 +371,9 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 	const net::PlayerRow *own_row = m.own_slot != 0xFF ? m2b_row_of(f, m.own_slot) : nullptr;
 	m.own_team = f.own_team == 1 || f.own_team == 2 ? f.own_team : (own_row != nullptr && (own_row->team == 1 || own_row->team == 2) ? own_row->team : uint8_t(0));
 	if (!r_game.spawned && m.own_team != 0) {
-		r_game.own_team = m.own_team; // before the first Spawned (the join screen) the team is AutoTeam's row
+		r_game.own_team = m.own_team;
 	}
-	// 2. The drained events: the own death (the kill card's and the death view's start), revives of the own slot.
+
 	bool own_revive = false;
 	for (const host::PresentEvent &e : r_game.events) {
 		if (e.kind == host::PresentKind::Death) {
@@ -424,7 +399,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 	if (own_revive) {
 		m.revive_seen_s = now_s;
 	}
-	// 3. A new own life (a deploy, a revive, or M2a's automatic respawn without the deploy screen).
+
 	if (r_game.alive && (f.own_curr.life != m.own_life_seen || !m.was_alive)) {
 		m.own_life_seen = f.own_curr.life;
 		m.spawned_this_round = true;
@@ -432,7 +407,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 		if (m.deploy.armed && !m.life_revived) {
 			++m.deploys;
 			m.kit_check_kit = m.deploy.kit;
-			m.kit_check_until_s = now_s + 1.0; // Spawned's kit reaches the frame with the life; a frame of slack
+			m.kit_check_until_s = now_s + 1.0;
 		}
 		m2b_deploy_spawned(m.deploy);
 		m.own_death_s = -1.0;
@@ -451,7 +426,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 			m.kit_check_kit = 0xFF;
 		}
 	}
-	// 4. The round: a restart in place (RoundOver -> PreRound / InRound) brings the join screen back.
+
 	if (f.match_valid) {
 		if (m.last_phase == net::MatchPhase::RoundOver && f.match.phase != net::MatchPhase::RoundOver) {
 			m.spawned_this_round = false;
@@ -470,9 +445,9 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 		m.spawn_screen = false;
 		m.can_deploy = false;
 		r_mapper.m2b_set_spawn_screen(false);
-		return; // M2a's automatic respawn; K / T stay M2a's KitSelect
+		return;
 	}
-	// 5. The spawn screen and Deploy.
+
 	M2bScreenInput si;
 	si.match_valid = f.match_valid;
 	si.phase = f.match.phase;
@@ -486,7 +461,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 		m.spawn_kit = uint8_t(k);
 	}
 	if (const uint32_t k = r_mapper.m2a_take_kit_presses(); k > 0) {
-		m.spawn_kit = uint8_t((m.spawn_kit + k) % host::kKitCount); // K cycles the spawn kit (KitSelect is M2a's)
+		m.spawn_kit = uint8_t((m.spawn_kit + k) % host::kKitCount);
 	}
 	if (r_mapper.m2a_take_team_presses() > 0) {
 		UtilityFunctions::print("[m2b] T: the teams are AutoTeam's in TDM");
@@ -511,8 +486,6 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 	}
 }
 
-// ---- [frame] (main thread, after Done) ------------------------------------------------------------------------------
-
 bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::PresentationFrame &p_frame, uint64_t p_now_ns, double p_delta, Camera3D *p_camera,
 		bool p_free_camera, bool p_headless) {
 	if (!r_game.m2b) {
@@ -528,8 +501,8 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		m2b_build(r_game, m, p_headless);
 	}
 	InputMapper &mapper = r_session.mapper();
-	m.scoreboard_held = m2b_scoreboard_shown(mapper.m2b_scoreboard_held(), f.match_valid, f.match.phase); // RoundOver: the round end instead
-	// 1. ui: the M2b screens from the same input and drained events as fill_hud (m2b_game.h's frame order).
+	m.scoreboard_held = m2b_scoreboard_shown(mapper.m2b_scoreboard_held(), f.match_valid, f.match.phase);
+
 	auto t0 = std::chrono::steady_clock::now();
 #if OPENBF3_M2B_HAVE_UI
 	{
@@ -556,7 +529,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		in.kill_card_source = m.kill_card_source;
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
 		if (!m.options.deploy_screen) {
-			r_game.hud_model.spawn_screen.visible = false; // M2a's automatic respawn: nothing to deploy
+			r_game.hud_model.spawn_screen.visible = false;
 		}
 		if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
 			m.tdm_hud->set_model(r_game.hud_model);
@@ -564,14 +537,14 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 				m.spawn_kit = uint8_t(k);
 			}
 			if (m.tdm_hud->take_deploy_click()) {
-				m.deploy_click = true; // taken by the next frame's [presented] (the request goes out there)
+				m.deploy_click = true;
 			}
 		}
 	}
 #endif
-	m.kill_card_source = host::HudKillCardSource(); // only the frame that drained the own death
+	m.kill_card_source = host::HudKillCardSource();
 	m.ms_tdm_hud = ms_since(t0);
-	// 2. cam: the death view while the own soldier is dead; its last camera is kept until the next life.
+
 	t0 = std::chrono::steady_clock::now();
 	const bool dead = !r_game.alive && m.spawned_this_round;
 #if OPENBF3_M2B_HAVE_CAM
@@ -581,7 +554,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		}
 		if (m.death_view_pending) {
 			DeathCameraStart st;
-			// The own feet as drawn (m2b-cam.md §6: own_curr + visual_offset) and the death's view yaw.
+
 			const sim::Vec3 &p = f.own_curr.position;
 			st.corpse = fx::Vec3{ p[0] + f.visual_offset[0], p[1] + f.visual_offset[1], p[2] + f.visual_offset[2] };
 			st.yaw_rad = sim::yaw_radians(f.own_curr.yaw);
@@ -610,9 +583,9 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 	m.death_view_end = false;
 	if (p_camera != nullptr && !p_free_camera) {
 		if (dead && m.view_valid) {
-			p_camera->set_global_transform(m2b_kept_view(m)); // FpCamera put it on the corpse's eye: the death view's last frame
+			p_camera->set_global_transform(m2b_kept_view(m));
 		} else if (!m.spawned_this_round && !f.valid && !m.join_view_placed) {
-			// The join screen: no own soldier yet, so the camera looks over the first spawn point.
+
 			const std::shared_ptr<const host::SharedLevel> shared = r_session.shared_level();
 			if (shared != nullptr && !shared->spawns.empty()) {
 				const sim::SpawnPoint &sp = shared->spawns.front();
@@ -627,7 +600,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		m.join_view_placed = false;
 	}
 	m.ms_death_camera = ms_since(t0);
-	// 3. The mouse: free while the spawn screen or the round end is up (their buttons), captured again after.
+
 	bool wants_mouse = m.spawn_screen;
 #if OPENBF3_M2B_HAVE_UI
 	if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
@@ -646,7 +619,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		}
 	}
 	m2b_status_text(m, f, r_game.alive, r_session.get_viewport());
-	// 4. The per-frame view of the M2b parts (the check and ui's rows read it).
+
 	m.frame.m2a = nullptr;
 	m.frame.match_valid = f.match_valid;
 	m.frame.match = f.match_valid ? &f.match : nullptr;
@@ -657,7 +630,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 	m.frame.own_unspawned = f.own_unspawned;
 	m.frame.spawn_screen = m.spawn_screen;
 	m.frame.death_view = m.view_valid && dead;
-	// 5. The M2b check (once the HUD has loaded, or failed).
+
 	if (m.checks() && m.check == nullptr && !m.finished && (r_game.hud == nullptr || r_game.hud->is_loaded())) {
 		m.check = std::unique_ptr<M2bCheck, void (*)(M2bCheck *)>(new M2bCheck(r_session, r_game, m, m.cases, m.check_options), &delete_m2b_part<M2bCheck>);
 	}
@@ -671,8 +644,6 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 	}
 	return false;
 }
-
-// ---- [shutdown] -----------------------------------------------------------------------------------------------------
 
 void m2b_gx_shutdown(M2aGame &r_game) {
 	if (!r_game.m2b) {
@@ -688,16 +659,13 @@ void m2b_gx_shutdown(M2aGame &r_game) {
 	m.death_camera.reset();
 }
 
-// ---- [done] (level_session.cpp's try_done) --------------------------------------------------------------------------
-
 bool Bf3LevelSession::m2b_join_ready() const {
 	if (!m2a_ || !m2a_->m2b || !m2a_->m2b->enabled || !m2a_->m2b->options.deploy_screen || frame_ == nullptr) {
 		return false;
 	}
-	// The spawn screen at join (m2b.md §1.1 step 1): the load is done when the match is known, not at the first
-	// spawn (the deploy screen's human is not spawned by its Ready, R10).
+
 	const host::PresentationFrame &f = *frame_;
 	return f.match_valid && f.stats.connected && !f.stats.refused;
 }
 
-} // namespace bf3::godot_side
+}

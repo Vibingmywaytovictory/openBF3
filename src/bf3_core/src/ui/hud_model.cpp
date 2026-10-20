@@ -1,6 +1,3 @@
-// UI ui2: the HudModel binding rows against an install table (include/bf3/core/ui/hud_model.h; docs/design/
-// ui-minimap-icons.md §7.2, gate G8). Both directions: every row's (component, source) must be in the table, and every
-// source of the 11 bound types must have a row. The in-game components without rows are listed with their source count.
 #include "bf3/core/ui/hud_model.h"
 
 #include "bf3/core/ui/hud_sources.h"
@@ -28,7 +25,7 @@ HudBindingReport check_hud_bindings(const HudSourceTable &p_table) {
 	for (std::string_view component : kHudBoundComponents) {
 		const HudComponentType *t = p_table.find(component);
 		if (t == nullptr) {
-			continue; // every row of it is already in not_in_install
+			continue;
 		}
 		for (const std::string &s : t->sources) {
 			if (rows.find({ component, std::string_view(s) }) == rows.end()) {
@@ -51,4 +48,4 @@ HudBindingReport check_hud_bindings(const HudSourceTable &p_table) {
 	return r;
 }
 
-} // namespace bf3::core::ui
+}

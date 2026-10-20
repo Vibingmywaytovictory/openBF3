@@ -1,5 +1,3 @@
-// G6 (W3.0 contract, docs/design/m2a-w3.md): the own 1p muzzle from a presented Bf3Viewmodel. See viewmodel_muzzle.h.
-
 #include "viewmodel_muzzle.h"
 
 #include "render_bridge.h"
@@ -35,8 +33,7 @@ ViewmodelMuzzle viewmodel_muzzle_transform(const Bf3Viewmodel &p_viewmodel, cons
 		out.muzzle = out.weapon * p_offset;
 		return out;
 	}
-	// The stand-in: the camera frame is the rig's CameraJoint turned back by the 180 degrees viewmodel.cpp applies
-	// (rig = camera x offset x Ry(pi) x inverse(model[CameraJoint])).
+
 	const int32_t cj = p_viewmodel.camera_joint();
 	if (cj < 0 || size_t(cj) >= model.size()) {
 		return out;
@@ -54,7 +51,7 @@ godot::Transform3D to_godot_transform(const fx::Transform &p_t) {
 	const Vector3 x(p_t.right.x, p_t.right.y, p_t.right.z);
 	const Vector3 y(p_t.up.x, p_t.up.y, p_t.up.z);
 	const Vector3 z(p_t.forward.x, p_t.forward.y, p_t.forward.z);
-	return Transform3D(Basis(x, y, z), Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z)); // Basis(x, y, z) takes columns
+	return Transform3D(Basis(x, y, z), Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z));
 }
 
 fx::Transform to_fx_transform(const godot::Transform3D &p_t) {
@@ -79,7 +76,7 @@ fx::MuzzleSample muzzle_sample(const ViewmodelMuzzle &p_muzzle, uint8_t p_slot, 
 	}
 	Transform3D w = p_muzzle.muzzle;
 	if (p_muzzle.source == ViewmodelMuzzleSource::CameraStandIn) {
-		// The camera frame (x right, y up, -z view): the weapon frame's barrel is -z, its right then -x.
+
 		w.basis = Basis(-w.basis.get_column(0), w.basis.get_column(1), -w.basis.get_column(2));
 	}
 	w.orthonormalize();
@@ -88,4 +85,4 @@ fx::MuzzleSample muzzle_sample(const ViewmodelMuzzle &p_muzzle, uint8_t p_slot, 
 	return m;
 }
 
-} // namespace bf3::godot_side
+}

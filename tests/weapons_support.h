@@ -1,8 +1,4 @@
 #pragma once
-// Shared by the M2a weapons tests (weapons_tests.cpp, weapons_install_tests.cpp, weapons_range_tests.cpp): synthetic
-// WeaponDefs carrying the §7.1 numbers of the gate weapons (bf3dump weapon on MP_Subway, docs/design/m2a-weapons.md
-// §4.1), turned into a WeaponTable without data (an empty SurfaceMaterialTable plus the zone cells of §4.1 written
-// in), and a synthetic wall world.
 
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/sim/collision_world.h"
@@ -30,7 +26,7 @@ namespace sw = bf3::sim::weapons;
 
 struct Synthetic {
 	gp::WeaponDef def;
-	std::array<float, 4> zones{ 1, 1, 1, 1 }; // head, body, chest, legs (DamageProtectionMultiplier)
+	std::array<float, 4> zones{ 1, 1, 1, 1 };
 	std::array<float, 4> blast_zones{ 1, 1, 1, 1 };
 };
 
@@ -43,7 +39,7 @@ inline void fill_sway(gp::WeaponDef &r_w, float p_hip_min, float p_hip_max, floa
 			const float hi = z == 0 ? p_hip_max : p_ads_max;
 			for (size_t m = 0; m < size_t(gp::SwayMove::Count); ++m) {
 				st.move[m] = { m == 1 ? lo + 0.5f : lo, hi, p_inc, p_dec };
-				st.has_move[m] = s == 0 || m <= 1; // crouch and prone know Base and Moving only
+				st.has_move[m] = s == 0 || m <= 1;
 			}
 			st.recoil = { p_up, 10.0f, p_hmin, p_hmax, 10.0f, p_recoil_dec };
 		}
@@ -53,7 +49,7 @@ inline void fill_sway(gp::WeaponDef &r_w, float p_hip_min, float p_hip_max, floa
 	for (gp::SwayModifier &m : r_w.sway.suppression) {
 		m = gp::SwayModifier{};
 		m.min_angle = 1.5f;
-		m.max_angle = 0.0f; // unset
+		m.max_angle = 0.0f;
 		m.increase_per_shot = 0.1f;
 		m.recoil_angle = 1.5f;
 	}
@@ -70,7 +66,7 @@ inline gp::WeaponDef weapon(const std::string &p_variant, gp::FireLogic p_logic,
 	f.rate_of_fire = p_rof;
 	f.rate_of_fire_for_burst = p_rof;
 	f.bullets_per_burst = 3;
-	f.bolt_action_delay = 0.5f; // inert outside SingleWithBoltAction
+	f.bolt_action_delay = 0.5f;
 	f.bolt_action_time = 1.0f;
 	f.hold_bolt_action_until_fire_release = true;
 	f.reload_type = gp::ReloadType::MagazineWithPossibleShorterReload;
@@ -112,7 +108,6 @@ inline gp::Explosion explosion(float p_damage, float p_inner, float p_radius) {
 	return e;
 }
 
-// The §4.1 gate weapons with their MP_Subway numbers.
 inline std::vector<Synthetic> synthetic_gate_weapons() {
 	std::vector<Synthetic> out;
 	auto rifle = [](const std::string &p_v, gp::FireLogic p_l, float p_rof) {
@@ -195,7 +190,7 @@ inline std::vector<Synthetic> synthetic_gate_weapons() {
 		f.hold_bolt_action_until_fire_release = false;
 		f.reload_type = gp::ReloadType::SingleBullet;
 		f.reload_time = 0.67f;
-		f.reload_time_bullets_left = -1.0f; // unused by rtSingleBullet (as in data)
+		f.reload_time_bullets_left = -1.0f;
 		f.reload_delay = 1.15f;
 		f.reload_threshold = 1.0f;
 		f.magazine_capacity = 5;
@@ -293,7 +288,7 @@ inline std::vector<Synthetic> synthetic_gate_weapons() {
 		Synthetic s = rifle("weapons/m67/u_m67", gp::FireLogic::HoldAndRelease, 300);
 		gp::FireFunction &f = s.def.fire;
 		f.hold_delay = 0.5f;
-		f.hold_max_time = 9999.0f; // saturates at 60 s (no limit)
+		f.hold_max_time = 9999.0f;
 		f.hold_min_power = 1;
 		f.hold_max_power = 1;
 		f.hold_power_per_second = 0.1f;
@@ -329,8 +324,8 @@ inline std::vector<Synthetic> synthetic_gate_weapons() {
 		f.reload_time = 0;
 		f.reload_threshold = 0;
 		f.magazine_capacity = 1;
-		f.number_of_magazines = -1; // unlimited
-		f.trace_frequency = 0; // no tracers (as in data)
+		f.number_of_magazines = -1;
+		f.trace_frequency = 0;
 		f.initial_speed = { 0, 0, 1.8f };
 		f.spawn_delay = 0.3f;
 		s.def.deploy_time = 0.5f;
@@ -361,7 +356,6 @@ inline sw::WeaponSimDef sim_def(const Synthetic &p_s, const sw::SurfaceMaterialT
 	return out;
 }
 
-// A table of the synthetic gate weapons (ids in synthetic_gate_weapons() order).
 inline std::shared_ptr<const sw::WeaponTable> synthetic_table(bool p_infinite = false, const sw::Mechanics &p_mechanics = {}) {
 	auto materials = std::make_shared<const sw::SurfaceMaterialTable>();
 	auto t = std::make_shared<sw::WeaponTable>();
@@ -394,7 +388,6 @@ inline std::unique_ptr<bf3::sim::CollisionWorld> wall_world(std::vector<float> p
 	return std::move(*w);
 }
 
-// One upright capsule target (a == b: a sphere).
 inline sw::HitTarget capsule_target(uint32_t p_id, const bf3::sim::Vec3 &p_a, const bf3::sim::Vec3 &p_b, float p_radius, sw::HitZone p_zone) {
 	sw::HitTarget t;
 	t.id = p_id;
@@ -409,7 +402,6 @@ inline sw::HitTarget capsule_target(uint32_t p_id, const bf3::sim::Vec3 &p_a, co
 	return t;
 }
 
-// Six capsules spread over the first 35 m of the +Z line of fire (the random runs' targets).
 inline std::vector<sw::HitTarget> random_run_targets() {
 	std::vector<sw::HitTarget> targets;
 	for (int i = 0; i < 6; ++i) {
@@ -419,8 +411,6 @@ inline std::vector<sw::HitTarget> random_run_targets() {
 	return targets;
 }
 
-// W8's random-command run: p_ticks seeded random commands and contexts on the loadout {p_def, p_other, empty}, every
-// shot spawned into a bounded ProjectileWorld over p_world and p_targets, every invariant counted.
 struct RandomRun {
 	size_t shots = 0;
 	size_t violations = 0;
@@ -428,9 +418,9 @@ struct RandomRun {
 	uint32_t worst_shots = 0;
 	uint32_t worst_timed = 0;
 	size_t peak_live = 0;
-	size_t exhausted = 0; // steps that hit the budget (allowed: the rest waits for the next tick)
-	uint32_t refused = 0; // WeaponTickOutput::refused_shots (always 0 for a valid def)
-	uint32_t dropped = 0; // WeaponTickOutput::timed_dropped (always 0)
+	size_t exhausted = 0;
+	uint32_t refused = 0;
+	uint32_t dropped = 0;
 	uint32_t events = 0;
 
 	void add(const RandomRun &p_r) {
@@ -487,9 +477,7 @@ inline RandomRun random_run(const std::shared_ptr<const sw::WeaponTable> &p_tabl
 	for (uint32_t i = 0; i < p_ticks; ++i) {
 		sw::WeaponInput in;
 		const uint32_t r = rng();
-		// Fire is held in runs (presses and releases at random); the rest changes rarely, so the run fires and still
-		// crosses every phase: mode changes, reload requests, switches (mostly back to the def under test, sometimes
-		// to the other def or the empty slot 2), sprints, deaths.
+
 		held = (r % 5) == 0 ? !held : held;
 		in.fire = held;
 		in.zoom = (r & 4) != 0;
@@ -535,7 +523,7 @@ inline RandomRun random_run(const std::shared_ptr<const sw::WeaponTable> &p_tabl
 			violation(!std::isfinite(len) || std::fabs(len - 1.0) > 1e-5, "shot direction not a unit vector", c.tick);
 			violation(!std::isfinite(s.origin[0]) || !std::isfinite(s.origin[1]) || !std::isfinite(s.origin[2]), "shot origin not finite", c.tick);
 			violation(s.time < sw::tick_start(c.tick) || s.time >= sw::tick_end(c.tick), "shot outside its tick", c.tick);
-			(void)pw.spawn(s); // refused when full: counted by the world
+			(void)pw.spawn(s);
 		}
 		out.shots += wout.shot_count;
 		pout.clear();
@@ -554,4 +542,4 @@ inline RandomRun random_run(const std::shared_ptr<const sw::WeaponTable> &p_tabl
 	return out;
 }
 
-} // namespace bf3::test::weapons
+}

@@ -1,4 +1,3 @@
-// bf3dump M2a vm commands (docs/design/m2a-vm.md): `vm clips`, `vm skin`. See vm_commands.h.
 #include "vm_commands.h"
 
 #include "bf3/anim/viewmodel_anim.h"
@@ -68,8 +67,6 @@ void print_item(const ViewmodelItem &p_item) {
 	}
 }
 
-// vm skin: one item through a scripted run of the animator (deploy, idle, fire, idle, reload, idle at 30 fps), every
-// surface of the weapon and the arms skinned each frame; the worst frame per surface. Returns the stretched surfaces.
 uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const bf3::anim::ViewmodelTuning &p_tuning) {
 	using bf3::anim::VmCue;
 	const std::array<bf3::anim::VmClipRef, bf3::anim::kVmClips> refs = bf3::render::viewmodel_clip_refs(p_item);
@@ -81,7 +78,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 		bf3::render::ViewmodelSurfaceSkin s;
 		double at = 0;
 	};
-	std::map<std::pair<int, size_t>, Worst> worst; // (0 weapon / 1 arms, subset)
+	std::map<std::pair<int, size_t>, Worst> worst;
 	const double deploy = std::max(0.2, double(p_item.deploy_time));
 	const double reload = std::max(0.5, double(p_item.reload_time));
 	const double fire_at = deploy + 0.5, reload_at = fire_at + 1.5, end = reload_at + reload + 1.0;
@@ -106,7 +103,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 		in.time_s = t;
 		in.dt = dt;
 		const bool reloading = p_item.kind == bf3::render::ViewmodelItemKind::Gun && t >= reload_at && t < reload_at + reload;
-		in.phase = t < deploy ? 1 : reloading ? 4 : 2; // Deploying / Reloading / Ready (sim WeaponPhase)
+		in.phase = t < deploy ? 1 : reloading ? 4 : 2;
 		in.phase_start_s = t < deploy ? 0.0 : reloading ? reload_at : (t < reload_at ? deploy : reload_at + reload);
 		in.phase_end_s = t < deploy ? deploy : reloading ? reload_at + reload : 0.0;
 		size_t first = next;
@@ -126,8 +123,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 			}
 		}
 	}
-	// The idle pose at the end of the run: each surface's extent in camera space (CameraJoint, metres; the camera
-	// looks along -Z of the joint turned about Y: reported as the joint's axes) and the bones its weights use.
+
 	const int32_t cam = p_set.rig.find("CameraJoint");
 	bf3::anim::Xform cam_inv = bf3::anim::xform_identity();
 	if (cam >= 0 && size_t(cam) < model.size()) {
@@ -152,7 +148,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 				const bf3::anim::SkinBind &sb = p_item.binds.binds()[size_t(b)];
 				bones += " " + sb.name;
 				if (part == 0 && sb.bone >= 0 && size_t(sb.bone) < model.size()) {
-					// Driven by the idle clip? (a rotation or translation track on the bone)
+
 					const bf3::anim::ClipTracks &tk = p_item.clips[size_t(ViewmodelClipRole::Idle)].tracks;
 					const bool rot = std::find(tk.rotation_bone.begin(), tk.rotation_bone.end(), sb.bone) != tk.rotation_bone.end();
 					const bool tr = std::find(tk.translation_bone.begin(), tk.translation_bone.end(), sb.bone) != tk.translation_bone.end();
@@ -167,7 +163,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 					double(hi[2]), bones.c_str());
 		}
 	}
-	// The weapon's material slots (shader, textures, vectors) per drawn surface.
+
 	for (const bf3::render::PreparedSurface &sf : p_item.weapon.prepared.surfaces) {
 		if (sf.material_index >= p_item.weapon.materials.slots.size()) {
 			continue;
@@ -187,8 +183,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 				sf.material_name.c_str(), m.shader.c_str(), m.variation_shader.empty() ? "-" : m.variation_shader.c_str(), alpha ? "alpha-test" : "opaque",
 				l.c_str());
 	}
-	// The Scale DOFs of the role clips (bf3_anim applies rotations and translations only): joint and value at the
-	// first and last key, for the channels that are not 1.
+
 	for (size_t role = 0; role < bf3::render::kViewmodelClipRoles; ++role) {
 		const ViewmodelClip &c = p_item.clips[role];
 		if (c.source != ViewmodelClipSource::Clip || c.clip.binding.rig == nullptr) {
@@ -231,7 +226,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 	return stretched;
 }
 
-} // namespace
+}
 
 const char *vm_usage() {
 	return "  vm clips [<unlock>...] [--team us|ru|all] [--level <sb>]   1p viewmodel clip roles, E5 reload rows, E11 coverage\n"
@@ -276,7 +271,6 @@ int cmd_vm(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 	}
 	std::fprintf(stderr, "vm clips: Ant library in %.2f s, %s in %.2f s\n", (*sources)->seconds_ant, level.c_str(), (*sources)->seconds_ebx);
 
-	// The 8 loadouts from the data (the mode's kits, KitDef::default_unlock), cross-checked with the documented table.
 	bf3::core::Result<std::vector<bf3::render::ViewmodelKit>> read_kits =
 			bf3::render::read_viewmodel_kits(*(*sources)->ebx, bf3::render::viewmodel_level_id(level));
 	if (!read_kits) {
@@ -289,7 +283,7 @@ int cmd_vm(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 		std::printf("kit\t%s\t%s\t%s\t%s\t%s\t%s\n", k.team.c_str(), k.kit.c_str(), k.unlocks[0].c_str(), k.unlocks[1].c_str(), k.unlocks[2].c_str(),
 				k.unlocks[3].c_str());
 	}
-	// The documented table is Metro's (another --level only prints the difference).
+
 	const bool documented_level = bf3::render::viewmodel_level_id(level) == "MP_Subway";
 	const std::string kits_diff = bf3::render::viewmodel_kits_difference(kits, bf3::render::documented_viewmodel_kits());
 	std::printf("kits: %zu loadouts read from %s %s; %s\n", kits.size(), bf3::render::viewmodel_level_id(level).c_str(),
@@ -349,7 +343,6 @@ int cmd_vm(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 		return ok && stretched == 0 && clean ? 0 : 1;
 	}
 
-	// E5: the authored reload clip lengths next to ReloadTime (§16 Q4: the clip plays at its authored rate).
 	for (const auto &[unlock, item] : by_unlock) {
 		if (item->kind != bf3::render::ViewmodelItemKind::Gun) {
 			continue;
@@ -373,7 +366,6 @@ int cmd_vm(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 				len(item->clips[size_t(ViewmodelClipRole::Deploy)]).c_str());
 	}
 
-	// E11: deploy, fire and reload of every item of the 8 loadouts.
 	if (unlocks.empty() && team == "all") {
 		uint32_t covered = 0, total = 0, clips = 0, stand_ins = 0, na = 0;
 		for (const bf3::render::ViewmodelKit &kit : kits) {
@@ -410,4 +402,4 @@ int cmd_vm(const EbxContext &p_ctx, const std::vector<std::string> &p_args) {
 	return ok && (kits_diff.empty() || !documented_level) && clean ? 0 : 1;
 }
 
-} // namespace bf3dump
+}

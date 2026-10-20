@@ -1,35 +1,3 @@
-// The static world through the derived-data cache (docs/design/m1.md §5.5): the "jolt-tile" and "jolt-world" blobs,
-// their keys, and load_static_world_cached (warm: source digest -> world index -> tile restores; cold: soup ->
-// content-keyed tile cook -> world index).
-//
-// "OBF3JTIL" v1 (one tile), little endian:
-//   magic, version
-//   i32 x, i32 z; content digest (32 bytes); bounds min, max (6 x f32)
-//   u32 tag count; per tag: u32 material, u8 surface, body, flags, reserved
-//   u32 layer count; per present layer (strictly increasing ids):
-//     u8 layer, u32 input triangles, u32 Jolt triangles, u32 stream bytes, the MeshShape's
-//     Shape::SaveBinaryState stream (u8 sub type, u64 user data, u32 tree bytes, the tree)
-// The stream is written by SaveBinaryState rather than SaveWithChildren: a MeshShape has no children and the
-// static world gives it no materials, so the two differ only by Jolt's shape-map and material-list framing.
-// Restoring goes through Shape::sRestoreFromBinaryState only after validate_mesh_tree has walked the whole tree
-// (see there): Jolt itself trusts every offset in it, so a damaged or hostile tree would otherwise reach a query.
-//
-// "OBF3JWLD" v2 (one level x mode; kStaticWorldIndexVersion): u32 tile count; per tile: i32 x, i32 z, content digest,
-// 3 x u32 triangle counts, u32 tag count; then u64 soup sum, u64 soup triangles; then (TC) u32 terrain count and per
-// terrain u32 object, content digest.
-//
-// "OBF3JTER" v1 (TC: one terrain; kStaticTerrainFormatVersion), little endian:
-//   magic, version
-//   StaticTerrainInfo: u32 object, width, height, holes, holed, patch triangles; f32 max error; bounds min, max
-//     (6 x f32); content digest (32 bytes)
-//   the field body: position (3 x f32), rotation (4 x f32, x y z w)
-//   u32 field stream bytes (0 = no field), the HeightFieldShape's Shape::SaveBinaryState stream:
-//     u8 sub type, u64 user data, mOffset, mScale (3 x f32 each), u32 mSampleCount, u32 mBlockSize,
-//     u8 mBitsPerSample, u16 mMinSample, u16 mMaxSample, u32 material index bytes + bytes, u32 bits per material
-//     index, u8 has heights, then the range blocks (16 bytes each), height samples and active edges
-//   u32 patch Jolt triangles, u32 patch stream bytes (0 = no patch), the patch MeshShape's stream (as a tile layer's)
-// validate_field_stream parses the whole field header itself before Jolt's RestoreBinaryState sees it (Jolt checks
-// none of it, and its Read of the material array would resize to any length).
 #include "static_world_internal.h"
 
 #include "jolt_runtime.h"
@@ -81,8 +49,6 @@ constexpr size_t kTagBytes = 8;
 constexpr size_t kLayerHeaderBytes = 1 + 4 + 4 + 4;
 constexpr size_t kWorldTileBytes = 4 + 4 + 32 + 3 * 4 + 4;
 
-// ---- Jolt streams over our own bytes ------------------------------------------------------------------------
-
 class VectorStreamOut final : public JPH::StreamOut {
 public:
 	explicit VectorStreamOut(std::vector<uint8_t> &r_bytes) :
@@ -97,7 +63,6 @@ private:
 	std::vector<uint8_t> &bytes_;
 };
 
-// Never reads past its span; a short read zero-fills and sets EOF (Jolt then reports a failed restore).
 class SpanStreamIn final : public JPH::StreamIn {
 public:
 	explicit SpanStreamIn(std::span<const uint8_t> p_bytes) :
@@ -121,8 +86,6 @@ private:
 	bool eof_ = false;
 };
 
-// ---- MeshShape tree validation -------------------------------------------------------------------------------
-
 using NodeCodec = JPH::NodeCodecQuadTreeHalfFloat;
 using TriangleCodec = JPH::TriangleCodecIndexed8BitPackSOA4Flags;
 
@@ -137,27 +100,14 @@ bool finite_float3(const JPH::Float3 &p_v) {
 	return std::isfinite(p_v.x) && std::isfinite(p_v.y) && std::isfinite(p_v.z);
 }
 
-// Jolt's walks (NodeCodec::DecodingContext::WalkTree and the cast visitors' distance stacks) keep the pending
-// children of every level on a fixed stack of NodeCodec::StackSize entries: a node d levels below the root sits at
-// slot 3d and pushes 4, and only a debug assert guards the bound. 40 levels leave that stack 4 slots of headroom;
-// Jolt's builder makes trees of about log4(triangles / 8) levels (a 30 k-triangle tile: about 8).
 constexpr uint32_t kMaxTreeDepth = 40;
-constexpr uint32_t kPaddingCount = NodeCodec::TRIANGLE_COUNT_MASK; // a child slot without data
-// MeshShape's private layout constants in Jolt 5.6 (MeshShape.h: NumTriangleBits, MaxTrianglesPerLeaf,
-// FLAGS_MATERIAL_MASK). The cache keys carry jolt_build_id(), so a Jolt bump re-cooks every tile, and sim.world.unit's
-// blob round trip fails if the layout moves.
+constexpr uint32_t kPaddingCount = NodeCodec::TRIANGLE_COUNT_MASK;
+
 constexpr uint32_t kMeshTriangleBits = 3;
 constexpr uint32_t kMeshMaxTrianglesPerLeaf = 1u << kMeshTriangleBits;
 constexpr uint8_t kMeshMaterialMask = (1u << 5) - 1;
 constexpr uint32_t kSubShapeIdBits = JPH::SubShapeID::MaxBits;
 
-// Walks every node and triangle block of a MeshShape tree as MeshShape (Jolt 5.6) lays it out, before any Jolt
-// code reads it: the header and triangle header; every node and block inside the buffer, each visited once (no
-// cycles, no sharing) and no deeper than kMaxTreeDepth; leaf triangle counts 1..MaxTrianglesPerLeaf; block ids
-// that fit the header's block-id bits (sub-shape ids decode through them); every vertex index of every block slot
-// (padding slots included: the decoders gather all four) inside the buffer; per-triangle user data present, inside
-// the buffer and below p_tags; no material bits (the static world gives its meshes no materials). r_triangles is
-// the triangle count.
 core::Status validate_mesh_tree(std::span<const uint8_t> p_tree, uint32_t p_tags, uint32_t &r_triangles) {
 	r_triangles = 0;
 	const size_t size = p_tree.size();
@@ -178,7 +128,7 @@ core::Status validate_mesh_tree(std::span<const uint8_t> p_tree, uint32_t p_tags
 	if (block_bits > uint32_t(NodeCodec::OFFSET_BITS) || block_bits + kMeshTriangleBits > kSubShapeIdBits) {
 		return core::make_error("mesh tree: " + std::to_string(block_bits) + " block id bits");
 	}
-	std::vector<uint8_t> seen(size / 4 + 1, 0); // per 4-byte slot: a node or block starts there
+	std::vector<uint8_t> seen(size / 4 + 1, 0);
 	struct Pending {
 		uint32_t properties;
 		uint32_t depth;
@@ -195,7 +145,7 @@ core::Status validate_mesh_tree(std::span<const uint8_t> p_tree, uint32_t p_tags
 			if (p.depth == 0) {
 				return core::make_error("mesh tree: the root is a padding slot");
 			}
-			continue; // never visited by Jolt's walks
+			continue;
 		}
 		if (at < kHeaders || at >= size || seen[at / 4] != 0) {
 			return core::make_error("mesh tree: " + std::string(count == 0 ? "node" : "triangle block") + " at " + std::to_string(at) +
@@ -215,7 +165,7 @@ core::Status validate_mesh_tree(std::span<const uint8_t> p_tree, uint32_t p_tags
 			}
 			continue;
 		}
-		// A triangle leaf: header, ceil(count / 4) blocks, the user data words.
+
 		if (count > kMeshMaxTrianglesPerLeaf) {
 			return core::make_error("mesh tree: a leaf of " + std::to_string(count) + " triangles");
 		}
@@ -266,7 +216,6 @@ core::Status validate_mesh_tree(std::span<const uint8_t> p_tree, uint32_t p_tags
 	return core::Status::success();
 }
 
-// The MeshShape stream: u8 sub type, u64 user data, u32 tree bytes, the tree (Shape / MeshShape SaveBinaryState).
 core::Result<JPH::RefConst<JPH::Shape>> restore_mesh(std::span<const uint8_t> p_stream, uint32_t p_tags, uint32_t &r_triangles) {
 	constexpr size_t kHead = 1 + 8 + 4;
 	if (p_stream.size() < kHead) {
@@ -294,7 +243,6 @@ core::Result<JPH::RefConst<JPH::Shape>> restore_mesh(std::span<const uint8_t> p_
 	return JPH::RefConst<JPH::Shape>(result.Get());
 }
 
-// A u32 count of elements that take p_element_bytes each in the blob: fails (nothing sized) past the bytes left.
 size_t counted(core::BlobReader &r_reader, size_t p_element_bytes) {
 	const uint32_t n = r_reader.u32();
 	if (r_reader.ok() && n > r_reader.remaining() / p_element_bytes) {
@@ -320,11 +268,6 @@ std::string build_params(const StaticWorldBuildOptions &p_options) {
 	return "active_edge_degrees=" + float_bits_hex(p_options.active_edge_degrees) + ";raycast=" + (p_options.include_raycast ? "1" : "0");
 }
 
-// ---- TC: HeightFieldShape stream validation -----------------------------------------------------------------
-
-// HeightFieldShape's private layout in Jolt 5.6 (HeightFieldShape.h / .cpp): sizeof(RangeBlock) (4 x 2 x uint16),
-// sGridOffsets (the range blocks of the coarser levels: (4^level - 1) / 3), AllocateBuffers' size formulas. The keys
-// carry jolt_build_id(), so a Jolt bump re-cooks every terrain, and sim.terrain.unit's round trip fails if they move.
 constexpr size_t kRangeBlockBytes = 16;
 
 uint32_t bit_width(uint32_t p_v) {
@@ -336,8 +279,6 @@ uint32_t bit_width(uint32_t p_v) {
 	return bits;
 }
 
-// Parses the field stream's header (see the layout above) and checks every value Jolt's constructor would have
-// refused, the sizes AllocateBuffers derives and the bytes that follow. r_samples is mSampleCount.
 core::Status validate_field_stream(std::span<const uint8_t> p_stream, uint32_t &r_samples) {
 	constexpr size_t kHead = 1 + 8 + 12 + 12 + 4 + 4 + 1 + 2 + 2 + 4;
 	if (p_stream.size() < kHead + 4 + 1) {
@@ -426,9 +367,7 @@ core::Result<JPH::RefConst<JPH::Shape>> restore_field(std::span<const uint8_t> p
 	return JPH::RefConst<JPH::Shape>(result.Get());
 }
 
-} // namespace
-
-// ---- tile blobs ---------------------------------------------------------------------------------------------
+}
 
 std::vector<uint8_t> encode_static_tile(const StaticWorldShapes::Impl::Tile &p_tile) {
 	core::BlobWriter w;
@@ -593,8 +532,6 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_tile_blobs(
 	return StaticWorldBuilder::finish(std::move(impl));
 }
 
-// ---- world index ----------------------------------------------------------------------------------------------
-
 std::vector<uint8_t> encode_static_world_index(const StaticWorldIndex &p_index) {
 	core::BlobWriter w;
 	w.magic(kWorldMagic, kStaticWorldIndexVersion);
@@ -670,8 +607,6 @@ core::Result<StaticWorldIndex> decode_static_world_index(std::span<const uint8_t
 	}
 	return out;
 }
-
-// ---- TC: terrain blobs ------------------------------------------------------------------------------------------
 
 std::vector<uint8_t> encode_static_terrain(const StaticWorldShapes::Impl::Terrain &p_terrain) {
 	const StaticTerrainInfo &info = p_terrain.info;
@@ -761,7 +696,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> decode_static_terrain(std::span<c
 	if (info.holes > uint64_t(info.width) * info.height || info.holed > cells || info.patch_triangles > 8ull * info.holed) {
 		return core::make_error("jolt-terrain: counts past the grid");
 	}
-	// The field.
+
 	const uint32_t field_bytes = r.u32();
 	std::vector<uint8_t> stream;
 	if (!r.ok() || !r.array(field_bytes, stream)) {
@@ -782,7 +717,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> decode_static_terrain(std::span<c
 		}
 		terrain.field = std::move(*field);
 	}
-	// The patch.
+
 	const uint32_t patch_triangles = r.u32();
 	const uint32_t patch_bytes = r.u32();
 	stream.clear();
@@ -834,8 +769,6 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> decode_static_terrain_blo
 	return StaticWorldBuilder::finish(std::move(impl));
 }
 
-// ---- keys -------------------------------------------------------------------------------------------------------
-
 core::CacheKeyInputs static_terrain_key_inputs(const core::Sha256Digest &p_content, const StaticWorldBuildOptions &p_options) {
 	core::CacheKeyInputs in;
 	in.kind = kStaticTerrainCacheKind;
@@ -843,7 +776,7 @@ core::CacheKeyInputs static_terrain_key_inputs(const core::Sha256Digest &p_conte
 	in.engine = std::string(core::cache_engine_id());
 	in.format_version = kStaticTerrainFormatVersion;
 	in.jolt_version = jolt_build_id();
-	// The raycast switch does not change a terrain (it is in the Collision layer), so it is not a parameter.
+
 	in.params = "content=" + p_content.hex() + ";bits=" + std::to_string(kStaticTerrainBits) + ";block=" + std::to_string(kStaticTerrainBlock) +
 			";active_edge_degrees=" + float_bits_hex(p_options.active_edge_degrees);
 	return in;
@@ -866,22 +799,17 @@ core::CacheKeyInputs static_world_key_inputs(const core::Sha256Digest &p_source_
 	in.kind = kStaticWorldCacheKind;
 	in.converter_version = kStaticWorldConverterVersion;
 	in.engine = std::string(core::cache_engine_id());
-	in.format_version = kStaticWorldIndexVersion; // TC: 2
+	in.format_version = kStaticWorldIndexVersion;
 	in.jolt_version = jolt_build_id();
-	// TC: soup=2 (the terrain record) and the field's bits / block; S1's cover= / water= are gone.
+
 	in.params = "source=" + p_source_digest.hex() + ";level=" + core::to_lower_ascii(p_level) + ";mode=" + core::to_lower_ascii(p_mode) +
 			";soup=" + std::to_string(core::level::kCollisionSoupVersion) + ";terrain=" + std::to_string(kStaticTerrainBits) + "/" +
 			std::to_string(kStaticTerrainBlock) + ";terrain_spacing=" + float_bits_hex(p_options.terrain_spacing) + ";" + build_params(p_options.build);
 	return in;
 }
 
-// ---- load ---------------------------------------------------------------------------------------------------------
-
 namespace {
 
-// The warm path: every tile the index names, restored from its "jolt-tile" entry on the build lanes, and (TC) every
-// terrain from its "jolt-terrain" entry (the terrains first, so the big ones start early). nullopt when any is missing
-// or does not decode (a damaged one is removed); the caller then takes the cold path.
 std::optional<std::unique_ptr<StaticWorldShapes::Impl>> restore_world(core::Cache &r_cache, const StaticWorldIndex &p_index,
 		const StaticWorldBuildOptions &p_options, std::shared_ptr<void> p_runtime) {
 	const Clock::time_point start = Clock::now();
@@ -944,7 +872,7 @@ std::optional<std::unique_ptr<StaticWorldShapes::Impl>> restore_world(core::Cach
 				if (!same) {
 					got.entry.reset();
 					if (!tile.ok()) {
-						r_cache.remove(*key); // passed the cache's checks but not the decoder
+						r_cache.remove(*key);
 					}
 					failed = true;
 					return;
@@ -978,7 +906,7 @@ std::optional<std::unique_ptr<StaticWorldShapes::Impl>> restore_world(core::Cach
 	return impl;
 }
 
-} // namespace
+}
 
 core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(core::Cache *p_cache, const core::level::LoadedLevel &p_level,
 		const core::level::World &p_world, const StaticWorldLoadOptions &p_options) {
@@ -993,7 +921,6 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 	std::shared_ptr<void> runtime = jolt_runtime_acquire();
 	core::Cache *cache = (p_cache != nullptr && p_cache->is_open()) ? p_cache : nullptr;
 
-	// Warm: the source digest names the world index, which names every tile.
 	std::optional<core::CacheKey> world_key;
 	if (cache != nullptr) {
 		const core::Result<core::level::SourceDigest> digest = core::level::level_source_digest(p_level);
@@ -1016,12 +943,11 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 				return StaticWorldBuilder::finish(std::move(impl));
 			}
 			if (build.tiles_done != nullptr) {
-				build.tiles_done->store(0, std::memory_order_relaxed); // the cold path counts again
+				build.tiles_done->store(0, std::memory_order_relaxed);
 			}
 		}
 	}
 
-	// Cold: the soup, then every tile through its content-keyed entry, then the index.
 	Clock::time_point clock = Clock::now();
 	core::level::SoupOptions soup_options;
 	soup_options.threads = p_options.soup_threads;
@@ -1037,7 +963,7 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 	for (const core::level::SoupTile &tile : soup->tiles) {
 		keys.push_back({ tile.x, tile.z });
 	}
-	core::Result<std::vector<StaticTerrainView>> views = soup_terrain_views(*soup); // TC
+	core::Result<std::vector<StaticTerrainView>> views = soup_terrain_views(*soup);
 	if (!views) {
 		return views.error();
 	}
@@ -1075,12 +1001,10 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> load_static_world_cached(
 			w.stats.cache_bytes += blob.size();
 		}
 	}
-	*soup = core::level::CollisionSoup(); // free the triangles before the shapes are handed out
+	*soup = core::level::CollisionSoup();
 	w.stats.seconds_total = seconds_since(start);
 	return StaticWorldBuilder::finish(std::move(*impl));
 }
-
-// ---- key digests (S1's, renamed by TC) ----------------------------------------------------------------------
 
 core::Sha256Digest water_planes_digest(std::span<const core::level::WaterPlane> p_water) {
 	std::vector<uint8_t> bytes;
@@ -1129,4 +1053,4 @@ core::Sha256Digest tile_list_digest(std::span<const std::array<int32_t, 2>> p_ti
 	return out;
 }
 
-} // namespace bf3::sim
+}

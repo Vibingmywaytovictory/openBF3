@@ -1,9 +1,3 @@
-// bf3_render: Godot-free preparation for the Godot bridge (mesh arrays, texture mip chains, materials, the 1P
-// viewmodel asset set).
-//
-// Suite "render-unit": synthetic blocks and sizes, no data.
-// Suite "render": loads the M9 viewmodel (arms + M9 meshes, materials, textures, ReloadEmpty) from the install,
-// read-only; exits 77 (skipped) without one. Asserts numbers only.
 #include <doctest/doctest.h>
 
 #include "bf3/core/install.h"
@@ -23,9 +17,9 @@ using namespace bf3::render;
 
 TEST_SUITE("render-unit") {
 	TEST_CASE("render: Godot mip chain lengths and sizes") {
-		CHECK(godot_mip_levels(GpuFormat::Bc1, 2048, 2048) == 12); // 2048 .. 1 (Godot dev7: 2,796,216 bytes for DXT1)
-		CHECK(godot_mip_levels(GpuFormat::Bc3, 1024, 256) == 11); // 1024x256 .. 4x1, 2x1, 1x1
-		CHECK(godot_mip_levels(GpuFormat::Rgba8, 256, 256) == 9); // 256 .. 1
+		CHECK(godot_mip_levels(GpuFormat::Bc1, 2048, 2048) == 12);
+		CHECK(godot_mip_levels(GpuFormat::Bc3, 1024, 256) == 11);
+		CHECK(godot_mip_levels(GpuFormat::Rgba8, 256, 256) == 9);
 		CHECK(godot_mip_levels(GpuFormat::Bc1, 4, 4) == 3);
 		CHECK(level_bytes(GpuFormat::Bc1, 2, 2) == 8);
 		CHECK(level_bytes(GpuFormat::Bc5, 8, 4) == 32);
@@ -43,21 +37,20 @@ TEST_SUITE("render-unit") {
 		for (int i = 0; i < 16; ++i) {
 			worst = std::max(worst, std::abs(int(back[size_t(i)]) - int(values[size_t(i)])));
 		}
-		CHECK(worst <= (135 + 13) / 14); // half a step of the 8-value palette (range 135 / 7 / 2)
+		CHECK(worst <= (135 + 13) / 14);
 		std::array<uint8_t, 16> flat{};
 		flat.fill(77);
 		CHECK(bc4_values(bc4_encode(flat).data()) == flat);
 
-		// A BC3 block: alpha block = BC4 (X), colour block with green endpoints 63 and 0 (Y).
 		uint8_t bc3[16] = {};
 		const std::array<uint8_t, 8> x = bc4_encode(values);
 		std::memcpy(bc3, x.data(), 8);
-		const unsigned c0 = 63u << 5; // green 63, red and blue 0; c1 = 0
+		const unsigned c0 = 63u << 5;
 		bc3[8] = uint8_t(c0 & 0xFFu);
 		bc3[9] = uint8_t((c0 >> 8) & 0xFFu);
 		bc3[10] = 0;
 		bc3[11] = 0;
-		bc3[12] = 0b11100100; // selectors 0,1,2,3 repeated
+		bc3[12] = 0b11100100;
 		bc3[13] = 0b11100100;
 		bc3[14] = 0b11100100;
 		bc3[15] = 0b11100100;
@@ -67,10 +60,10 @@ TEST_SUITE("render-unit") {
 		CHECK(green[2] == 170);
 		CHECK(green[3] == 85);
 		const std::array<uint8_t, 16> bc5 = bc3_normal_to_bc5(bc3);
-		CHECK(std::memcmp(bc5.data(), bc3, 8) == 0); // X kept bit for bit
+		CHECK(std::memcmp(bc5.data(), bc3, 8) == 0);
 		const std::array<uint8_t, 16> y = bc4_values(bc5.data() + 8);
 		for (int i = 0; i < 16; ++i) {
-			CHECK(std::abs(int(y[size_t(i)]) - int(green[size_t(i)])) <= 19); // 255 / 14 rounded up
+			CHECK(std::abs(int(y[size_t(i)]) - int(green[size_t(i)])) <= 19);
 		}
 	}
 }
@@ -122,10 +115,6 @@ TEST_SUITE("render") {
 	}
 }
 
-// NormalDXT5RGA (format 20) is listed as "layout unresolved" in dx_texture.h. This case measures, on every texture of
-// that format in MP_Subway (and NormalDXT5 for comparison), which channel pair behaves like a tangent-space
-// normal's X/Y: |(2x-1, 2y-1)| <= 1 for nearly every texel, and the remaining channels' relation to the
-// reconstructed Z. Only statistics are printed (README "Viewmodel (M9 reload)" records the result).
 TEST_SUITE("render") {
 	TEST_CASE("render: NormalDXT5RGA channel layout census") {
 		using namespace bf3::core;
@@ -142,9 +131,9 @@ TEST_SUITE("render") {
 		REQUIRE(mount->load_all_bundles().ok());
 		struct Stats {
 			uint64_t texels = 0;
-			uint64_t in_disc[4][4] = {}; // channel pair (a, b): (2a-1)^2 + (2b-1)^2 <= 1.05
+			uint64_t in_disc[4][4] = {};
 			double sum[4] = {};
-			double z_err[4][4][4] = {}; // pair (a, b), channel c: mean |c - z(a, b)| with z mapped to [0, 1]
+			double z_err[4][4][4] = {};
 		};
 		auto run = [&](TextureFormat p_format, bool p_opaque_only, Stats &r_stats, std::vector<std::string> &r_names) {
 			for (const std::string &name : decodable_res_names(*mount)) {
@@ -178,7 +167,7 @@ TEST_SUITE("render") {
 				r_names.push_back(name + " " + std::to_string(header.width) + "x" + std::to_string(header.height));
 				for (const std::array<float, 4> &p : px) {
 					if (p_opaque_only && p[3] < 0.5f) {
-						continue; // particle textures: alpha is coverage; transparent texels carry no normal
+						continue;
 					}
 					++r_stats.texels;
 					for (int a = 0; a < 4; ++a) {

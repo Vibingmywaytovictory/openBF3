@@ -1,17 +1,3 @@
-// logic.unit (docs/design/s4.md §12): the S4 level-logic interpreter and graph builder on hand-made graphs, no data.
-//   * Builder graphs: FIFO and fan-out order, Delay ticks (0, 0.1 s, 10 s), RemoveDuplicateEvents, the per-tick
-//     delivery cap and carry-over (tick 0 included), queue overflow faults, native effects at t + 1, the init settle,
-//     BoolToEvent InitalEvent polarity, DelayTrigger Enable/Disable, MultipleTrigger with a Delay, watches, networked
-//     events, RandomDelay seeding, the ghost (round trip, delta, hostile bytes, the 4,096 cap) and a pinned trace hash;
-//   * synthetic EBX (tests/logic_test_support.h) through build_logic_graph: interface flattening (in, out,
-//     pass-through, nested two levels), an unbound reference, a Client-realm node, the TargetType filter, a diamond
-//     through two interfaces, an interface cycle, connected vs unconnected unknown types, connection ids equal on a
-//     server and a client build, and find_nodes by nested scope reference.
-//   * per primitive (§6.2), Builder graphs with exact deliveries, ticks and published values: Sequence /
-//     SyncedSequence (Time / Event.Id, OnFinished, Looping, Stop, Pause, Reset, AutoStart, ghost start ticks),
-//     EventSwitch, RandomMultiEvent, TeamFilter, PlayerFilter, Not / And / Or / Or4, Compare (the six operators, NaN),
-//     CompareInt / CompareFloat / CompareBool, MathOp, IntHub, Int / Float, PropertyGate, PropertyCast,
-//     SwitchPropertyString, Setting, Locator, PrintDebugText and the unhandled-port list.
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/logic_graph.h"
@@ -78,7 +64,6 @@ Guid guid_n(uint32_t p_n) {
 	return g;
 }
 
-// A Builder with one root scope; nodes get distinct GUIDs.
 struct G {
 	LogicGraph::Builder b;
 	uint32_t root = 0;
@@ -113,7 +98,6 @@ LogicTickStats step(LogicRuntime &r_rt) {
 	return *s;
 }
 
-// Event deliveries (trace records) into p_target, as (tick, port).
 std::vector<std::pair<Tick, int32_t>> events_into(const LogicRuntime &p_rt, uint32_t p_target) {
 	std::vector<std::pair<Tick, int32_t>> out;
 	for (const LogicTraceRecord &r : p_rt.trace().records) {
@@ -134,28 +118,24 @@ std::vector<Tick> ticks_into(const LogicRuntime &p_rt, uint32_t p_target, int32_
 	return out;
 }
 
-// --- synthetic EBX -------------------------------------------------------------------------------------------------
-
 constexpr const char *kRealms[] = { "Realm_Client", "Realm_Server", "Realm_ClientAndServer", "Realm_None", "Realm_Pipeline" };
 constexpr const char *kTargets[] = { "EventConnectionTargetType_Invalid", "EventConnectionTargetType_ClientAndServer",
 	"EventConnectionTargetType_Client", "EventConnectionTargetType_Server", "EventConnectionTargetType_NetworkedClient",
 	"EventConnectionTargetType_NetworkedClientAndServer" };
 
 uint32_t realm_word(LogicRealm p_realm) {
-	return static_cast<uint32_t>(p_realm) + 1; // enumerators are valued 1, 2, ... in SynPartition
+	return static_cast<uint32_t>(p_realm) + 1;
 }
 
 uint32_t target_word(LogicEventTarget p_target) {
 	return static_cast<uint32_t>(p_target) + 1;
 }
 
-// A partition of prefab blueprints (instance 0 is the root prefab) with entities, child references, interface
-// descriptors and the three connection arrays.
 struct LogicSyn {
 	SynPartition s;
 	struct Prefab {
 		uint32_t instance = 0;
-		std::vector<uint32_t> objects; // refs
+		std::vector<uint32_t> objects;
 		std::vector<SynValues> events, properties, links;
 		std::optional<uint32_t> descriptor;
 	};
@@ -191,7 +171,7 @@ struct LogicSyn {
 			{ "NotEntityData", { { "Realm", 'e', "Realm" }, { "In", 'b' } } },
 			{ "MysteryEntityData", { { "Realm", 'e', "Realm" } } },
 		};
-		add_prefab(); // the root
+		add_prefab();
 	}
 
 	uint32_t add_prefab() {
@@ -200,7 +180,7 @@ struct LogicSyn {
 		prefabs.push_back(p);
 		return static_cast<uint32_t>(prefabs.size() - 1);
 	}
-	// An interface descriptor for prefab p_prefab; returns its instance.
+
 	uint32_t descriptor(uint32_t p_prefab) {
 		if (!prefabs[p_prefab].descriptor) {
 			prefabs[p_prefab].descriptor = s.add({ "InterfaceDescriptorData", {} });
@@ -213,7 +193,7 @@ struct LogicSyn {
 		prefabs[p_prefab].objects.push_back(SynPartition::ref(i));
 		return i;
 	}
-	// A reference in p_prefab instantiating p_child (or nothing, when p_child is negative).
+
 	uint32_t reference(uint32_t p_prefab, int p_child) {
 		SynValues v;
 		if (p_child >= 0) {
@@ -234,7 +214,6 @@ struct LogicSyn {
 				{ "SourceFieldId", static_cast<uint32_t>(p_source_port) }, { "TargetFieldId", static_cast<uint32_t>(p_target_port) } });
 	}
 
-	// Builds and inserts the partition, then the graph of its root prefab.
 	Result<LogicGraph> build(EbxDb &r_db, LogicSide p_side = LogicSide::Server, LogicGraphOptions p_options = {}) {
 		for (const Prefab &p : prefabs) {
 			SynValues v{ { "Objects", s.add_array(SynArray{ {}, p.objects, {} }) } };
@@ -261,7 +240,6 @@ struct LogicSyn {
 	}
 };
 
-// Index of the node with that EBX instance (GUID from SynPartition::guid); kNoLogicIndex when absent.
 uint32_t node_of(const LogicGraph &p_graph, const SynPartition &p_syn, uint32_t p_instance) {
 	const std::span<const uint32_t> found = p_graph.nodes_with_guid(p_syn.guid(p_instance));
 	return found.empty() ? kNoLogicIndex : found[0];
@@ -278,7 +256,7 @@ bool has_event(const LogicGraph &p_graph, uint32_t p_source, int32_t p_source_po
 
 constexpr int32_t kX = 1001, kY = 1002, kX2 = 1003, kY2 = 1004;
 
-} // namespace
+}
 
 TEST_SUITE("logic-unit") {
 	TEST_CASE("logic: FIFO and fan-out order") {
@@ -301,7 +279,7 @@ TEST_SUITE("logic-unit") {
 				order.push_back(r.target);
 			}
 		}
-		CHECK(order == std::vector<uint32_t>{ b1, b2, c1, c2 }); // breadth-first: the queue is FIFO
+		CHECK(order == std::vector<uint32_t>{ b1, b2, c1, c2 });
 	}
 
 	TEST_CASE("logic: Delay ticks (0 same drain, 0.1 s -> 6, 10 s -> 600) and RemoveDuplicateEvents") {
@@ -316,7 +294,7 @@ TEST_SUITE("logic-unit") {
 			g.b.add_event(s, port::kSplitterOut, d, port::kIn);
 			g.b.add_event(d, port::kOut, sinks[k], port::kIn);
 		}
-		// RemoveDuplicateEvents: a second In while pending is dropped.
+
 		const uint32_t dup = g.node(LogicTypeId::Delay);
 		g.b.add_param(dup, port::kDelay, v_float(1.0));
 		g.b.add_param(dup, logic_port_id("RemoveDuplicateEvents"), v_bool(true));
@@ -346,7 +324,7 @@ TEST_SUITE("logic-unit") {
 		for (uint32_t k = 0; k < kFan; ++k) {
 			g.b.add_event(s, port::kSplitterOut, sink, port::kIn);
 		}
-		// Tick 0: a Bool publishes its initial value along kFan property edges.
+
 		const uint32_t b = g.node(LogicTypeId::Bool);
 		g.b.add_param(b, logic_port_id("DefaultValue"), v_bool(true));
 		const uint32_t n = g.node(LogicTypeId::Not);
@@ -391,7 +369,7 @@ TEST_SUITE("logic-unit") {
 		CHECK_FALSE(st.ok());
 		CHECK(rt.faulted());
 		REQUIRE(rt.fault() != nullptr);
-		CHECK_FALSE(rt.step().ok()); // stays faulted
+		CHECK_FALSE(rt.step().ok());
 	}
 
 	TEST_CASE("logic: effects on natives apply at the next tick") {
@@ -407,7 +385,7 @@ TEST_SUITE("logic-unit") {
 		Result<LogicNativeStubs> stubs = LogicNativeStubs::create(graph);
 		REQUIRE(stubs.ok());
 		start(rt);
-		// Tick 0: the Bool's initial false reaches the spawner as an effect for tick 1.
+
 		REQUIRE(rt.effects().size() == 1);
 		CHECK(rt.effects()[0].apply_tick == 1);
 		CHECK(rt.effects()[0].kind == LogicEffectKind::Property);
@@ -433,7 +411,7 @@ TEST_SUITE("logic-unit") {
 				enabled.emplace_back(e.tick, e.value);
 			}
 		}
-		// A native without an Enabled field starts enabled; the Bool's initial false applies at 1, the SetTrue at 4.
+
 		CHECK(enabled == std::vector<std::pair<Tick, int64_t>>{ { 1, 0 }, { 4, 1 } });
 	}
 
@@ -449,7 +427,7 @@ TEST_SUITE("logic-unit") {
 			const uint32_t on_true = g.node(LogicTypeId::EventGate), on_false = g.node(LogicTypeId::EventGate);
 			g.b.add_event(be, port::kOnTrue, on_true, port::kIn);
 			g.b.add_event(be, port::kOnFalse, on_false, port::kIn);
-			// A SyncedBool whose initial In differs from its param must not fire OnTrue/OnFalse while settling.
+
 			const uint32_t sb = g.node(LogicTypeId::SyncedBool);
 			g.b.add_input(sb, port::kIn, v_bool(true));
 			const uint32_t sb_sink = g.node(LogicTypeId::EventGate);
@@ -497,8 +475,8 @@ TEST_SUITE("logic-unit") {
 			}
 			step(rt);
 		}
-		CHECK(ticks_into(rt, dt_sink, port::kIn) == std::vector<Tick>{ 3 }); // disabled at 1 and 5
-		CHECK(ticks_into(rt, mt_sink, port::kIn) == std::vector<Tick>{ 3 + 30 }); // 2nd trigger at 3, 0.5 s, RunOnce
+		CHECK(ticks_into(rt, dt_sink, port::kIn) == std::vector<Tick>{ 3 });
+		CHECK(ticks_into(rt, mt_sink, port::kIn) == std::vector<Tick>{ 3 + 30 });
 	}
 
 	TEST_CASE("logic: watches - EventIn per delivery, EventOut once per firing") {
@@ -534,7 +512,7 @@ TEST_SUITE("logic-unit") {
 		start(rt);
 		REQUIRE(rt.force_event(s, port::kSplitterOut, LogicContext{ 3, 1 }).ok());
 		const LogicTickStats st = step(rt);
-		CHECK(st.deliveries == 1); // the networked-only edge is fired for clients, not delivered
+		CHECK(st.deliveries == 1);
 		REQUIRE(rt.networked().size() == 2);
 		std::vector<uint64_t> ids;
 		for (const LogicNetworkedEvent &e : rt.networked()) {
@@ -608,7 +586,7 @@ TEST_SUITE("logic-unit") {
 		REQUIRE(delta.size() == 1);
 		CHECK(delta[0].value);
 		CHECK(rt.ghost_layout().bools[delta[0].index] == bools[1]);
-		// Hostile bytes: short, long, counts that differ from the layout, padding bits set.
+
 		CHECK_FALSE(LogicGhost::decode(std::span<const uint8_t>(bytes.data(), 5), rt.ghost_layout()).ok());
 		std::vector<uint8_t> longer = bytes;
 		longer.push_back(0);
@@ -619,7 +597,7 @@ TEST_SUITE("logic-unit") {
 		std::vector<uint8_t> padding = bytes;
 		padding[11] |= 0x80;
 		CHECK_FALSE(LogicGhost::decode(padding, rt.ghost_layout()).ok());
-		// The cap: 4,097 SyncedBools fail create().
+
 		G big;
 		for (size_t k = 0; k <= kMaxGhostEntries; ++k) {
 			big.node(LogicTypeId::SyncedBool);
@@ -645,7 +623,7 @@ TEST_SUITE("logic-unit") {
 		}
 		MESSAGE("trace hash " << rt.trace().hash << " records " << rt.trace().records_total);
 		CHECK(rt.trace().records_total == 6);
-		CHECK(rt.trace().hash == 0x0449f6ed4956df24ull); // pinned; recompute only when the encoding changes on purpose
+		CHECK(rt.trace().hash == 0x0449f6ed4956df24ull);
 	}
 
 	TEST_CASE("logic: Builder rejects bad indices") {
@@ -659,12 +637,10 @@ TEST_SUITE("logic-unit") {
 		CHECK_FALSE(c.finish().ok());
 	}
 
-	// --- synthetic EBX through build_logic_graph -------------------------------------------------------------------
-
 	TEST_CASE("logic: interface flattening - in, out, pass-through, nested two levels") {
 		LogicSyn syn;
-		const uint32_t p = syn.add_prefab(); // prefab P with interface D
-		const uint32_t q = syn.add_prefab(); // prefab Q nested inside P
+		const uint32_t p = syn.add_prefab();
+		const uint32_t q = syn.add_prefab();
 		const uint32_t a = syn.entity(0, "EventSplitterEntityData", LogicRealm::Server);
 		const uint32_t sink = syn.entity(0, "EventGateEntityData", LogicRealm::Server);
 		const uint32_t sink2 = syn.entity(0, "EventGateEntityData", LogicRealm::Server);
@@ -674,17 +650,17 @@ TEST_SUITE("logic-unit") {
 		const uint32_t rq = syn.reference(p, static_cast<int>(q));
 		const uint32_t dq = syn.descriptor(q);
 		const uint32_t deepest = syn.entity(q, "EventGateEntityData", LogicRealm::Server);
-		// Root: A -> P.X, P.Y -> sink, A -> P.X2, P.Y2 -> sink2.
+
 		syn.event(0, a, port::kSplitterOut, r, kX);
 		syn.event(0, r, kY, sink, port::kIn);
 		syn.event(0, a, port::kSplitterOut, r, kX2);
 		syn.event(0, r, kY2, sink2, port::kIn);
-		// P: X -> inner.In, inner.Out -> Y; X2 -> Q.X; Q.Y -> Y2.
+
 		syn.event(p, d, kX, inner, port::kIn);
 		syn.event(p, inner, port::kOut, d, kY);
 		syn.event(p, d, kX2, rq, kX);
 		syn.event(p, rq, kY, d, kY2);
-		// Q: pass-through X -> Y, and X -> deepest.In.
+
 		syn.event(q, dq, kX, dq, kY);
 		syn.event(q, dq, kX, deepest, port::kIn);
 		EbxDb db;
@@ -695,15 +671,15 @@ TEST_SUITE("logic-unit") {
 		REQUIRE(na != kNoLogicIndex);
 		REQUIRE(ninner != kNoLogicIndex);
 		REQUIRE(ndeep != kNoLogicIndex);
-		CHECK(has_event(*g, na, port::kSplitterOut, ninner, port::kIn)); // in
-		CHECK(has_event(*g, ninner, port::kOut, nsink, port::kIn)); // out
-		CHECK(has_event(*g, na, port::kSplitterOut, nsink2, port::kIn)); // pass-through two levels deep
-		CHECK(has_event(*g, na, port::kSplitterOut, ndeep, port::kIn)); // nested in
+		CHECK(has_event(*g, na, port::kSplitterOut, ninner, port::kIn));
+		CHECK(has_event(*g, ninner, port::kOut, nsink, port::kIn));
+		CHECK(has_event(*g, na, port::kSplitterOut, nsink2, port::kIn));
+		CHECK(has_event(*g, na, port::kSplitterOut, ndeep, port::kIn));
 		CHECK(g->event_edges().size() == 4);
 		CHECK(g->stats().duplicate_paths == 0);
 		CHECK(g->stats().dropped_unbound == 0);
 		CHECK(g->scopes().size() == 3);
-		// find_nodes by nested scope reference: Q's gate is found by P's reference and by Q's.
+
 		CHECK(g->find_nodes(LogicNodeRef{ syn.s.guid(r), Guid{} }, LogicTypeId::EventGate).size() == 2);
 		CHECK(g->find_nodes(LogicNodeRef{ syn.s.guid(rq), Guid{} }, LogicTypeId::EventGate) == std::vector<uint32_t>{ ndeep });
 		CHECK(g->find_nodes(LogicNodeRef{ syn.s.guid(r), syn.s.guid(deepest) }) == std::vector<uint32_t>{ ndeep });
@@ -718,13 +694,13 @@ TEST_SUITE("logic-unit") {
 		const uint32_t both = syn.entity(0, "EventGateEntityData", LogicRealm::ClientAndServer);
 		const uint32_t unbound = syn.reference(0, -1);
 		const uint32_t mystery = syn.entity(0, "MysteryEntityData", LogicRealm::Server);
-		syn.entity(0, "MysteryEntityData", LogicRealm::Server); // unconnected
-		syn.event(0, a, port::kSplitterOut, unbound, kX); // dropped: unbound
-		syn.event(0, a, port::kSplitterOut, client, port::kIn); // dropped on the server: the target is client-only
-		syn.event(0, a, port::kSplitterOut, sink, port::kIn, LogicEventTarget::Client); // dropped: TargetType
-		syn.event(0, a, port::kSplitterOut, both, port::kIn, LogicEventTarget::NetworkedClient); // networked only
-		syn.event(0, a, port::kSplitterOut, both, port::kOpen, LogicEventTarget::NetworkedClientAndServer); // delivered + networked
-		syn.event(0, a, port::kSplitterOut, mystery, kX); // into an unknown type: kept, counted
+		syn.entity(0, "MysteryEntityData", LogicRealm::Server);
+		syn.event(0, a, port::kSplitterOut, unbound, kX);
+		syn.event(0, a, port::kSplitterOut, client, port::kIn);
+		syn.event(0, a, port::kSplitterOut, sink, port::kIn, LogicEventTarget::Client);
+		syn.event(0, a, port::kSplitterOut, both, port::kIn, LogicEventTarget::NetworkedClient);
+		syn.event(0, a, port::kSplitterOut, both, port::kOpen, LogicEventTarget::NetworkedClientAndServer);
+		syn.event(0, a, port::kSplitterOut, mystery, kX);
 		EbxDb db;
 		Result<LogicGraph> g = syn.build(db);
 		REQUIRE_MESSAGE(g.ok(), (g.ok() ? std::string() : g.error().message));
@@ -748,9 +724,9 @@ TEST_SUITE("logic-unit") {
 			}
 		}
 		CHECK(delivered_networked);
-		// The client build of the same data: the client-only gate exists, and the networked edges carry the same ids.
+
 		EbxDb client_db;
-		Result<LogicGraph> c = syn.build(client_db, LogicSide::Client); // the same partition content
+		Result<LogicGraph> c = syn.build(client_db, LogicSide::Client);
 		REQUIRE(c.ok());
 		CHECK(node_of(*c, syn.s, client) != kNoLogicIndex);
 		std::vector<uint64_t> client_ids;
@@ -769,7 +745,7 @@ TEST_SUITE("logic-unit") {
 		const uint32_t r1 = syn.reference(0, static_cast<int>(p));
 		const uint32_t r2 = syn.reference(0, static_cast<int>(p));
 		const uint32_t d = syn.descriptor(p);
-		syn.event(p, d, kX, d, kY); // pass-through
+		syn.event(p, d, kX, d, kY);
 		syn.event(0, a, port::kSplitterOut, r1, kX);
 		syn.event(0, a, port::kSplitterOut, r2, kX);
 		syn.event(0, r1, kY, sink, port::kIn);
@@ -784,7 +760,7 @@ TEST_SUITE("logic-unit") {
 			CHECK(e.target == nsink);
 		}
 		CHECK(g->stats().duplicate_paths == 1);
-		CHECK(g->event_edges()[0].connection != g->event_edges()[1].connection); // the last hops differ
+		CHECK(g->event_edges()[0].connection != g->event_edges()[1].connection);
 	}
 
 	TEST_CASE("logic: an interface cycle terminates (on-path marks)") {
@@ -794,9 +770,9 @@ TEST_SUITE("logic-unit") {
 		const uint32_t sink = syn.entity(0, "EventGateEntityData", LogicRealm::Server);
 		const uint32_t r = syn.reference(0, static_cast<int>(p));
 		const uint32_t d = syn.descriptor(p);
-		syn.event(p, d, kX, d, kY); // P: X -> Y
+		syn.event(p, d, kX, d, kY);
 		syn.event(0, a, port::kSplitterOut, r, kX);
-		syn.event(0, r, kY, r, kX); // root: P.Y -> P.X, a cycle through the interface
+		syn.event(0, r, kY, r, kX);
 		syn.event(0, r, kY, sink, port::kIn);
 		EbxDb db;
 		Result<LogicGraph> g = syn.build(db);
@@ -807,14 +783,6 @@ TEST_SUITE("logic-unit") {
 		CHECK(g->stats().work < 10000);
 	}
 }
-
-// --- per-primitive semantics (s4.md §6.2): Builder graphs with exact deliveries and ticks -----------------------------
-//
-// Each case drives one primitive (or a short chain) through forced events and properties and checks which events reach
-// which sinks at which ticks and in which order, and which property values are published when. Event sinks are
-// EventGates (open by default); property sinks are PrintDebugText nodes (they accept any property silently). Every case
-// also checks that no delivery reached a port its handler does not interpret (LogicRuntime::unhandled()), except the
-// case that pins that list.
 
 namespace {
 
@@ -843,28 +811,24 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 constexpr int64_t kI64Max = std::numeric_limits<int64_t>::max();
 constexpr int64_t kI64Min = std::numeric_limits<int64_t>::min();
 
-// An event sink: an EventGate (Default true) wired from (p_source, p_port).
 uint32_t event_sink(G &r_g, uint32_t p_source, int32_t p_port) {
 	const uint32_t sink = r_g.node(LogicTypeId::EventGate);
 	r_g.b.add_event(p_source, p_port, sink, port::kIn);
 	return sink;
 }
 
-// A property sink: a PrintDebugText wired from (p_source, p_port).
 uint32_t property_sink(G &r_g, uint32_t p_source, int32_t p_port) {
 	const uint32_t sink = r_g.node(LogicTypeId::PrintDebugText);
 	r_g.b.add_property(p_source, p_port, sink, logic_port_id("Text"));
 	return sink;
 }
 
-// A driver: an EventSplitter whose forced Out is wired into (p_target, p_port).
 uint32_t driver(G &r_g, uint32_t p_target, int32_t p_port) {
 	const uint32_t s = r_g.node(LogicTypeId::EventSplitter);
 	r_g.b.add_event(s, port::kSplitterOut, p_target, p_port);
 	return s;
 }
 
-// An Int counter (DefaultValue p_default, IncDecValue 1) with Increment and Decrement drivers.
 struct Counter {
 	uint32_t node = 0, inc = 0, dec = 0;
 };
@@ -882,12 +846,10 @@ void force(LogicRuntime &r_rt, uint32_t p_driver, LogicContext p_context = {}) {
 	REQUIRE(r_rt.force_event(p_driver, port::kSplitterOut, p_context).ok());
 }
 
-// Ticks of the event deliveries into an event sink.
 std::vector<Tick> hits(const LogicRuntime &p_rt, uint32_t p_sink) {
 	return ticks_into(p_rt, p_sink, port::kIn);
 }
 
-// Ticks of the property deliveries into p_target.
 std::vector<Tick> property_ticks(const LogicRuntime &p_rt, uint32_t p_target) {
 	std::vector<Tick> out;
 	for (const LogicTraceRecord &r : p_rt.trace().records) {
@@ -898,7 +860,6 @@ std::vector<Tick> property_ticks(const LogicRuntime &p_rt, uint32_t p_target) {
 	return out;
 }
 
-// Indices into p_sinks of the event deliveries at tick p_tick, in delivery order.
 std::vector<int> order_at(const LogicRuntime &p_rt, Tick p_tick, const std::vector<uint32_t> &p_sinks) {
 	std::vector<int> out;
 	for (const LogicTraceRecord &r : p_rt.trace().records) {
@@ -955,7 +916,7 @@ std::vector<uint32_t> outcome_sinks(G &r_g, uint32_t p_node) {
 	return out;
 }
 
-} // namespace
+}
 
 TEST_SUITE("logic-unit") {
 	TEST_CASE("logic: Sequence - Time / Event.Id events, OnFinished, Looping, Start while playing, Stop, Pause, Reset, AutoStart, ghost") {
@@ -985,37 +946,36 @@ TEST_SUITE("logic-unit") {
 			return Sinks{ event_sink(g, p_q, kE0), event_sink(g, p_q, kE1), event_sink(g, p_q, kOnStarted), event_sink(g, p_q, port::kOnFinished),
 				event_sink(g, p_q, port::kOnStopped) };
 		};
-		// A: 1,000 ms, events at 0 (E0), 100 (E1) and 500 ms (E0): 0, 6 and 30 ticks after Start; the end 60 after.
+
 		const uint32_t a = sequence(LogicTypeId::Sequence, LogicRealm::Server, 1000, { { 0, kE0 }, { 100, kE1 }, { 500, kE0 } }, false, false);
 		const Sinks sa = sinks(a);
 		const uint32_t a_start = driver(g, a, port::kStart);
-		// B: looping, 200 ms (12 ticks), one event at 50 ms (3 ticks); a second Start mid-cycle restarts the cycle.
+
 		const uint32_t b = sequence(LogicTypeId::Sequence, LogicRealm::Server, 200, { { 50, kE0 } }, true, false);
 		const Sinks sb = sinks(b);
 		const uint32_t b_start = driver(g, b, port::kStart);
-		// C: SyncedSequence, 1,000 ms, event at 300 ms (18 ticks): Stop, Start again, Pause, Stop while stopped.
+
 		const uint32_t c = sequence(LogicTypeId::SyncedSequence, LogicRealm::ClientAndServer, 1000, { { 300, kE0 } }, false, false);
 		const Sinks sc = sinks(c);
 		const uint32_t c_start = driver(g, c, port::kStart), c_stop = driver(g, c, port::kStop), c_pause = driver(g, c, kPause);
-		// D: ClientAndServer Sequence, AutoStart, 100 ms (6 ticks), event at 0 (E1): all in tick 0 but the end.
+
 		const uint32_t d = sequence(LogicTypeId::Sequence, LogicRealm::ClientAndServer, 100, { { 0, kE1 } }, false, true);
 		const Sinks sd = sinks(d);
-		// E: an event past SequenceLength (200 ms in a 100 ms sequence) still fires, after OnFinished [as built].
+
 		const uint32_t e = sequence(LogicTypeId::Sequence, LogicRealm::Server, 100, { { 200, kE0 } }, false, false);
 		const Sinks se = sinks(e);
 		const uint32_t e_start = driver(g, e, port::kStart);
-		// F: Reset cancels silently (no OnStopped, no events, no OnFinished).
+
 		const uint32_t f = sequence(LogicTypeId::Sequence, LogicRealm::Server, 1000, { { 100, kE0 } }, false, false);
 		const Sinks sf = sinks(f);
 		const uint32_t f_start = driver(g, f, port::kStart), f_reset = driver(g, f, port::kReset);
 
 		LogicRuntime rt = make_runtime(g.finish());
-		// The ghost lists the SyncedSequence and the ClientAndServer Sequence only (Server-realm Sequences are not
-		// replicated), in (scope, GUID) order.
+
 		REQUIRE(rt.ghost_layout().sequences == std::vector<uint32_t>{ c, d });
 		start(rt);
 		CHECK(rt.ghost().sequence_start == std::vector<Tick>{ LogicGhost::kNoStart, 0 });
-		std::vector<std::pair<Tick, Tick>> c_ghost; // (tick, C's start tick in the ghost)
+		std::vector<std::pair<Tick, Tick>> c_ghost;
 		for (Tick t = 1; t <= 80; ++t) {
 			if (t == 1) {
 				for (const uint32_t s : { a_start, b_start, c_start, e_start, f_start }) {
@@ -1033,7 +993,7 @@ TEST_SUITE("logic-unit") {
 				force(rt, c_pause);
 			}
 			if (t == 32) {
-				force(rt, c_stop); // not playing: no OnStopped
+				force(rt, c_stop);
 			}
 			if (t == 41) {
 				force(rt, b_start);
@@ -1043,7 +1003,7 @@ TEST_SUITE("logic-unit") {
 				c_ghost.emplace_back(t, rt.ghost().sequence_start[0]);
 			}
 			if (t == 6) {
-				CHECK(rt.ghost().sequence_start[1] == LogicGhost::kNoStart); // D ended at 6
+				CHECK(rt.ghost().sequence_start[1] == LogicGhost::kNoStart);
 			}
 		}
 		CHECK(c_ghost == std::vector<std::pair<Tick, Tick>>{ { 4, 1 }, { 5, LogicGhost::kNoStart }, { 20, 10 }, { 30, LogicGhost::kNoStart } });
@@ -1052,16 +1012,16 @@ TEST_SUITE("logic-unit") {
 		CHECK(hits(rt, sa.e1) == std::vector<Tick>{ 7 });
 		CHECK(hits(rt, sa.finished) == std::vector<Tick>{ 61 });
 		CHECK(hits(rt, sa.stopped).empty());
-		CHECK(order_at(rt, 1, { sa.started, sa.e0 }) == std::vector<int>{ 0, 1 }); // OnStarted before a Time-0 event
-		// B: ends at 13, 25, 37 and restarts each time; the Start at 41 cancels the cycle begun at 37 (its end, 49).
+		CHECK(order_at(rt, 1, { sa.started, sa.e0 }) == std::vector<int>{ 0, 1 });
+
 		CHECK(hits(rt, sb.started) == std::vector<Tick>{ 1, 13, 25, 37, 41, 53, 65, 77 });
 		CHECK(hits(rt, sb.e0) == std::vector<Tick>{ 4, 16, 28, 40, 44, 56, 68, 80 });
 		CHECK(hits(rt, sb.finished) == std::vector<Tick>{ 13, 25, 37, 53, 65, 77 });
-		CHECK(order_at(rt, 13, { sb.finished, sb.started }) == std::vector<int>{ 0, 1 }); // OnFinished, then the restart
+		CHECK(order_at(rt, 13, { sb.finished, sb.started }) == std::vector<int>{ 0, 1 });
 		CHECK(hits(rt, sc.started) == std::vector<Tick>{ 1, 10 });
 		CHECK(hits(rt, sc.stopped) == std::vector<Tick>{ 5 });
-		CHECK(hits(rt, sc.e0) == std::vector<Tick>{ 28 }); // 10 + 18; the first start's event (19) was cancelled
-		CHECK(hits(rt, sc.finished).empty()); // paused at 30, before 10 + 60; Pause does not resume (as Reset)
+		CHECK(hits(rt, sc.e0) == std::vector<Tick>{ 28 });
+		CHECK(hits(rt, sc.finished).empty());
 		CHECK(hits(rt, sd.started) == std::vector<Tick>{ 0 });
 		CHECK(hits(rt, sd.e1) == std::vector<Tick>{ 0 });
 		CHECK(hits(rt, sd.finished) == std::vector<Tick>{ 6 });
@@ -1091,8 +1051,8 @@ TEST_SUITE("logic-unit") {
 		};
 		const auto [a, a_sinks] = make(3, true);
 		const auto [b, b_sinks] = make(3, false);
-		const auto [c, c_sinks] = make(20, true); // clamped to 10
-		const auto [d, d_sinks] = make(0, true); // clamped to 1
+		const auto [c, c_sinks] = make(20, true);
+		const auto [d, d_sinks] = make(0, true);
 		const uint32_t a_in = driver(g, a, port::kIn), c_in = driver(g, c, port::kIn), d_in = driver(g, d, port::kIn);
 		const uint32_t b_in = driver(g, b, port::kIn), b_next = driver(g, b, logic_port_id("NextOut")), b_prev = driver(g, b, logic_port_id("PreviousOut"));
 		const uint32_t b_reset = driver(g, b, port::kReset);
@@ -1106,7 +1066,7 @@ TEST_SUITE("logic-unit") {
 			if (t <= 2) {
 				force(rt, d_in);
 			}
-			// B: In, Next, In, Prev, Prev (wraps to 2), In, Reset, In.
+
 			const uint32_t b_script[] = { b_in, b_next, b_in, b_prev, b_prev, b_in, b_reset, b_in };
 			if (t <= 8) {
 				force(rt, b_script[t - 1]);
@@ -1154,12 +1114,12 @@ TEST_SUITE("logic-unit") {
 				out.drivers.push_back(driver(g, r, port::kIn));
 				out.sinks.push_back(sinks);
 			};
-			make({ 1, 0, 3 }, false, false, false); // 0: weighted, output 1 never
-			make({ 0, 0, 0 }, true, true, false); // 1: uniform, each output once, then silent
-			make({ 0, 0, 0 }, true, true, true); // 2: uniform, each output once per round
-			make(std::vector<double>(12, 1.0), false, false, false); // 3: 12 weights, only Out0..Out9 exist
-			make({}, false, false, false); // 4: no weights: nothing
-			make({ 0, -1, kNaN }, false, false, false); // 5: no positive finite weight: nothing
+			make({ 1, 0, 3 }, false, false, false);
+			make({ 0, 0, 0 }, true, true, false);
+			make({ 0, 0, 0 }, true, true, true);
+			make(std::vector<double>(12, 1.0), false, false, false);
+			make({}, false, false, false);
+			make({ 0, -1, kNaN }, false, false, false);
 			out.graph = g.finish();
 			return out;
 		};
@@ -1189,15 +1149,15 @@ TEST_SUITE("logic-unit") {
 		};
 		Built built = build();
 		LogicRuntime rt = run(7, built);
-		// 0: 400 draws over weights 1 : 0 : 3.
+
 		const std::vector<int> picks = order_at(rt, 1, built.sinks[0]);
 		REQUIRE(picks.size() == 400);
 		const auto count = [&](int p_k) { return std::count(picks.begin(), picks.end(), p_k); };
 		CHECK(count(1) == 0);
 		CHECK(count(0) + count(2) == 400);
-		CHECK(count(2) >= 250); // expected 300
+		CHECK(count(2) >= 250);
 		CHECK(count(2) <= 350);
-		// 1: ticks 1..3 fire one output each, all distinct; tick 4 fires nothing.
+
 		std::vector<int> once;
 		for (Tick t = 1; t <= 3; ++t) {
 			const std::vector<int> at = order_at(rt, t, built.sinks[1]);
@@ -1208,7 +1168,7 @@ TEST_SUITE("logic-unit") {
 		std::sort(sorted.begin(), sorted.end());
 		CHECK(sorted == std::vector<int>{ 0, 1, 2 });
 		CHECK(order_at(rt, 4, built.sinks[1]).empty());
-		// 2: ticks 1..3 and 4..6 are each a permutation of the 3 outputs.
+
 		for (Tick round = 0; round < 2; ++round) {
 			std::vector<int> perm;
 			for (Tick t = 1 + 3 * round; t <= 3 + 3 * round; ++t) {
@@ -1219,7 +1179,7 @@ TEST_SUITE("logic-unit") {
 			std::sort(perm.begin(), perm.end());
 			CHECK(perm == std::vector<int>{ 0, 1, 2 });
 		}
-		// 3: 200 draws over the first 10 weights, every one of them drawn.
+
 		const std::vector<int> ten = order_at(rt, 1, built.sinks[3]);
 		CHECK(ten.size() == 200);
 		for (int k = 0; k < 10; ++k) {
@@ -1229,7 +1189,7 @@ TEST_SUITE("logic-unit") {
 		CHECK(order_at(rt, 1, built.sinks[4]).empty());
 		CHECK(order_at(rt, 1, built.sinks[5]).empty());
 		no_unhandled(rt);
-		// Seeds: the same root seed repeats the draws exactly; another one does not.
+
 		Built again = build();
 		CHECK(order_at(run(7, again), 1, again.sinks[0]) == picks);
 		Built other = build();
@@ -1259,7 +1219,7 @@ TEST_SUITE("logic-unit") {
 		REQUIRE(rt.watch(tf_match, port::kIn, LogicWatchKind::EventIn).ok());
 		start(rt);
 		const LogicContext contexts[] = { { 4, 1 }, { 5, 2 }, { -1, 0 } };
-		std::vector<std::tuple<Tick, uint32_t, int32_t, int>> seen; // (tick, sink, player, team)
+		std::vector<std::tuple<Tick, uint32_t, int32_t, int>> seen;
 		for (Tick t = 1; t <= 3; ++t) {
 			force(rt, s, contexts[t - 1]);
 			step(rt);
@@ -1273,7 +1233,7 @@ TEST_SUITE("logic-unit") {
 		CHECK(hits(rt, tfi_spec) == std::vector<Tick>{ 1, 2, 3 });
 		CHECK(hits(rt, pf_out) == std::vector<Tick>{ 1, 2 });
 		CHECK(hits(rt, pfi_out) == std::vector<Tick>{ 3 });
-		// The matching output keeps the cause's context; the specified-team output keeps the player, team := Team.
+
 		CHECK(seen == std::vector<std::tuple<Tick, uint32_t, int32_t, int>>{ { 1, tf_match, 4, 1 }, { 1, tf_spec, 4, 1 }, { 2, tf_spec, 5, 1 },
 								 { 3, tf_spec, -1, 1 } });
 		CHECK(order_at(rt, 1, { tf_match, tf_spec }) == std::vector<int>{ 0, 1 });
@@ -1301,10 +1261,10 @@ TEST_SUITE("logic-unit") {
 		}
 		gate(LogicTypeId::Not, { false }, true);
 		gate(LogicTypeId::Not, { true }, false);
-		gate(LogicTypeId::Not, {}, true); // unconnected: false
+		gate(LogicTypeId::Not, {}, true);
 		gate(LogicTypeId::And, {}, false);
 		gate(LogicTypeId::Or4, {}, false);
-		// Propagation: b1 (false), b2 (true) -> And, Or; b1 -> Not; And -> BoolToEvent.
+
 		const uint32_t b1 = g.node(LogicTypeId::Bool);
 		const uint32_t b2 = g.node(LogicTypeId::Bool);
 		g.b.add_param(b2, logic_port_id("DefaultValue"), v_bool(true));
@@ -1339,8 +1299,7 @@ TEST_SUITE("logic-unit") {
 		}
 		CHECK(hits(rt, on_true) == std::vector<Tick>{ 2 });
 		CHECK(hits(rt, on_false) == std::vector<Tick>{ 3 });
-		// Or publishes false in node order at tick 0, then true when b2's value arrives in the same settle; it stays
-		// true at 2 and 3 (no delivery) and falls at 4.
+
 		CHECK(property_ticks(rt, p_or) == std::vector<Tick>{ 0, 0, 4 });
 		CHECK(property_ticks(rt, p_not) == std::vector<Tick>{ 0, 2, 4 });
 		CHECK_FALSE(out_bool(rt, or1));
@@ -1352,7 +1311,7 @@ TEST_SUITE("logic-unit") {
 		G g;
 		const char *ops[] = { "CompareOp_Equal", "CompareOp_NotEqual", "CompareOp_Less", "CompareOp_LessOrEqual", "CompareOp_Greater",
 			"CompareOp_GreaterOrEqual" };
-		// Rows: operator; columns: 1 vs 2, 2 vs 2, 3 vs 2.
+
 		const bool table[6][3] = { { false, true, false }, { true, false, true }, { true, false, false }, { true, true, false }, { false, false, true },
 			{ false, true, true } };
 		std::vector<std::pair<uint32_t, bool>> expect;
@@ -1364,7 +1323,7 @@ TEST_SUITE("logic-unit") {
 				g.b.add_param(n, logic_port_id("Operator"), v_text(g, ops[op]));
 				expect.emplace_back(n, table[op][col]);
 			}
-			// Floats (delivered FloatIn0/FloatIn1 select the float comparison): 1.5 vs 2.5, and NaN (nothing holds).
+
 			const uint32_t f = g.node(LogicTypeId::Compare);
 			g.b.add_input(f, logic_port_id("FloatIn0"), v_float(1.5));
 			g.b.add_input(f, logic_port_id("FloatIn1"), v_float(2.5));
@@ -1377,11 +1336,11 @@ TEST_SUITE("logic-unit") {
 			expect.emplace_back(nan, false);
 		}
 		const uint32_t bogus = g.node(LogicTypeId::Compare);
-		g.b.add_param(bogus, logic_port_id("Operator"), v_text(g, "CompareOp_Bogus")); // 0 vs 0
+		g.b.add_param(bogus, logic_port_id("Operator"), v_text(g, "CompareOp_Bogus"));
 		expect.emplace_back(bogus, false);
 		const uint32_t none = g.node(LogicTypeId::Compare);
 		expect.emplace_back(none, false);
-		// Driven: counter >= 2 -> BoolToEvent; increments at 1, 2, 3, decrements at 4, 5.
+
 		const Counter cnt = counter(g);
 		const uint32_t ge = g.node(LogicTypeId::Compare);
 		g.b.add_param(ge, logic_port_id("IntIn1"), v_int(2));
@@ -1414,7 +1373,7 @@ TEST_SUITE("logic-unit") {
 			return n;
 		};
 		const uint32_t s = g.node(LogicTypeId::EventSplitter);
-		std::vector<std::vector<uint32_t>> at1; // nodes triggered at tick 1
+		std::vector<std::vector<uint32_t>> at1;
 		std::vector<std::vector<int>> want1;
 		const auto triggered = [&](uint32_t p_n, std::vector<int> p_want) {
 			g.b.add_event(s, port::kSplitterOut, p_n, port::kIn);
@@ -1424,24 +1383,24 @@ TEST_SUITE("logic-unit") {
 		triggered(cmp(LogicTypeId::CompareInt, v_int(1), v_int(2)), { kLt, kLe, kNe });
 		triggered(cmp(LogicTypeId::CompareInt, v_int(2), v_int(2)), { kLe, kEq, kGe });
 		triggered(cmp(LogicTypeId::CompareInt, v_int(3), v_int(2)), { kNe, kGe, kGt });
-		triggered(cmp(LogicTypeId::CompareInt, v_float(2.7), v_int(2)), { kLe, kEq, kGe }); // 2.7 truncates to 2
+		triggered(cmp(LogicTypeId::CompareInt, v_float(2.7), v_int(2)), { kLe, kEq, kGe });
 		triggered(cmp(LogicTypeId::CompareFloat, v_float(1.0), v_float(1.5)), { kLt, kLe, kNe });
 		triggered(cmp(LogicTypeId::CompareFloat, v_float(2.5), v_float(2.5)), { kLe, kEq, kGe });
-		triggered(cmp(LogicTypeId::CompareFloat, v_float(kNaN), v_float(1.0)), {}); // unordered: nothing holds
-		// TriggerOnPropertyChange: A <- a counter; B = 1. Silent in the settle; increments at 2 and 3.
+		triggered(cmp(LogicTypeId::CompareFloat, v_float(kNaN), v_float(1.0)), {});
+
 		const Counter cnt = counter(g);
 		const uint32_t on_change = cmp(LogicTypeId::CompareInt, v_int(0), v_int(1));
 		g.b.add_param(on_change, logic_port_id("TriggerOnPropertyChange"), v_bool(true));
 		g.b.add_property(cnt.node, port::kValue, on_change, logic_port_id("A"));
 		const std::vector<uint32_t> change_sinks = outcome_sinks(g, on_change);
-		const uint32_t quiet = cmp(LogicTypeId::CompareInt, v_int(0), v_int(1)); // same wiring, no TriggerOnPropertyChange
+		const uint32_t quiet = cmp(LogicTypeId::CompareInt, v_int(0), v_int(1));
 		g.b.add_property(cnt.node, port::kValue, quiet, logic_port_id("A"));
 		const std::vector<uint32_t> quiet_sinks = outcome_sinks(g, quiet);
-		// TriggerOnStart: fires in tick 0 after the settle.
+
 		const uint32_t on_start = cmp(LogicTypeId::CompareFloat, v_float(0.0), v_float(1.0));
 		g.b.add_param(on_start, logic_port_id("TriggerOnStart"), v_bool(true));
 		const std::vector<uint32_t> start_sinks = outcome_sinks(g, on_start);
-		// CompareBool: a constant true on In; a driven Bool with TriggerOnPropertyChange; the same without.
+
 		const uint32_t cb_const = g.node(LogicTypeId::CompareBool);
 		g.b.add_param(cb_const, logic_port_id("Bool"), v_bool(true));
 		g.b.add_event(s, port::kSplitterOut, cb_const, port::kIn);
@@ -1476,8 +1435,8 @@ TEST_SUITE("logic-unit") {
 		}
 		CHECK(order_at(rt, 0, change_sinks).empty());
 		CHECK(order_at(rt, 1, change_sinks).empty());
-		CHECK(order_at(rt, 2, change_sinks) == std::vector<int>{ kLe, kEq, kGe }); // 1 vs 1
-		CHECK(order_at(rt, 3, change_sinks) == std::vector<int>{ kNe, kGe, kGt }); // 2 vs 1
+		CHECK(order_at(rt, 2, change_sinks) == std::vector<int>{ kLe, kEq, kGe });
+		CHECK(order_at(rt, 3, change_sinks) == std::vector<int>{ kNe, kGe, kGt });
 		for (Tick t = 0; t <= 3; ++t) {
 			CHECK(order_at(rt, t, quiet_sinks).empty());
 		}
@@ -1486,7 +1445,7 @@ TEST_SUITE("logic-unit") {
 		CHECK(hits(rt, cbc_true) == std::vector<Tick>{ 1 });
 		CHECK(hits(rt, cbc_false).empty());
 		CHECK(hits(rt, cbx_true) == std::vector<Tick>{ 2 });
-		CHECK(hits(rt, cbx_false) == std::vector<Tick>{ 1, 3 }); // the In at 1 (value false), the change at 3
+		CHECK(hits(rt, cbx_false) == std::vector<Tick>{ 1, 3 });
 		CHECK(hits(rt, cbq_true).empty());
 		CHECK(hits(rt, cbq_false).empty());
 		no_unhandled(rt);
@@ -1505,21 +1464,21 @@ TEST_SUITE("logic-unit") {
 			}
 			expect.emplace_back(n, p_want);
 		};
-		const int64_t results[] = { 10, 4, 21, 2, 3, 7 }; // 7 op 3 for add, subtract, multiply, divide, min, max
+		const int64_t results[] = { 10, 4, 21, 2, 3, 7 };
 		for (int64_t op = 0; op < 6; ++op) {
 			math({ v_int(7), v_int(3) }, { op }, v_int(results[op]));
 		}
-		math({ v_int(7), v_int(3) }, { 9 }, v_int(10)); // an unknown code adds
-		math({ v_int(7), v_int(0) }, { 3 }, v_int(0)); // divide by zero: 0
-		math({ v_int(-7), v_int(2) }, { 3 }, v_int(-3)); // truncates toward zero
-		math({ v_int(kI64Min), v_int(-1) }, { 3 }, v_int(0)); // the one overflowing quotient: 0
-		math({ v_int(kI64Max), v_int(1) }, { 0 }, v_int(kI64Min)); // wraps
-		math({ v_int(2), v_int(3), v_int(4) }, { 0, 2 }, v_int(20)); // (2 + 3) * 4, left to right
-		math({ v_float(7.0), v_int(2) }, { 3 }, v_float(3.5)); // a float input makes the result float
+		math({ v_int(7), v_int(3) }, { 9 }, v_int(10));
+		math({ v_int(7), v_int(0) }, { 3 }, v_int(0));
+		math({ v_int(-7), v_int(2) }, { 3 }, v_int(-3));
+		math({ v_int(kI64Min), v_int(-1) }, { 3 }, v_int(0));
+		math({ v_int(kI64Max), v_int(1) }, { 0 }, v_int(kI64Min));
+		math({ v_int(2), v_int(3), v_int(4) }, { 0, 2 }, v_int(20));
+		math({ v_float(7.0), v_int(2) }, { 3 }, v_float(3.5));
 		math({ v_int(7), v_float(0.0) }, { 3 }, v_float(0.0));
 		math({ v_float(1.5), v_float(2.5) }, { 5 }, v_float(2.5));
-		math({ v_int(5) }, {}, v_int(5)); // no operators: In0
-		// Driven: counter * 10.
+		math({ v_int(5) }, {}, v_int(5));
+
 		const Counter cnt = counter(g);
 		const uint32_t m = g.node(LogicTypeId::MathOp);
 		g.b.add_param(m, kInPorts[1], v_int(10));
@@ -1568,7 +1527,7 @@ TEST_SUITE("logic-unit") {
 		CHECK(out_int(rt, driven) == 5);
 		std::vector<int64_t> seen;
 		for (Tick t = 1; t <= 5; ++t) {
-			force(rt, t <= 2 ? cnt.inc : cnt.dec); // select 1, 2, 1, 0, -1
+			force(rt, t <= 2 ? cnt.inc : cnt.dec);
 			step(rt);
 			seen.push_back(out_int(rt, driven));
 		}
@@ -1592,7 +1551,7 @@ TEST_SUITE("logic-unit") {
 		const uint32_t no_step = number(LogicTypeId::Int, v_int(0), std::nullopt);
 		const uint32_t wraps = number(LogicTypeId::Int, v_int(kI64Max), v_int(1));
 		const int32_t kInc = logic_port_id("Increment"), kDec = logic_port_id("Decrement");
-		// The script per tick, for i and f: Inc, Inc, Dec, Reset, Reset (no change).
+
 		const int32_t script[] = { kInc, kInc, kDec, port::kReset, port::kReset };
 		std::vector<uint32_t> i_drivers, f_drivers;
 		for (const int32_t p : script) {
@@ -1623,7 +1582,7 @@ TEST_SUITE("logic-unit") {
 		CHECK(fs == std::vector<double>{ 1.25, 1.5, 1.25, 1.0, 1.0 });
 		CHECK(property_ticks(rt, i_sink) == std::vector<Tick>{ 0, 1, 2, 3, 4 });
 		CHECK(property_ticks(rt, f_sink) == std::vector<Tick>{ 0, 1, 2, 3, 4 });
-		CHECK(property_ticks(rt, no_step_sink) == std::vector<Tick>{ 0 }); // IncDecValue missing: steps by 0
+		CHECK(property_ticks(rt, no_step_sink) == std::vector<Tick>{ 0 });
 		CHECK(out_int(rt, wraps, port::kValue) == kI64Min);
 		no_unhandled(rt);
 	}
@@ -1655,7 +1614,7 @@ TEST_SUITE("logic-unit") {
 			}
 			step(rt);
 			if (t == 4) {
-				CHECK(out_bool(rt, closed, logic_port_id("BoolOut"))); // held while closed
+				CHECK(out_bool(rt, closed, logic_port_id("BoolOut")));
 			}
 		}
 		CHECK_FALSE(out_bool(rt, closed, logic_port_id("BoolOut")));
@@ -1700,7 +1659,7 @@ TEST_SUITE("logic-unit") {
 			CHECK(out_int(rt, r.node, kToInt) == r.i);
 			CHECK(out_float(rt, r.node, kToFloat) == r.f);
 		}
-		CHECK(out_bool(rt, nan, kToBool)); // NaN is non-zero, as in C
+		CHECK(out_bool(rt, nan, kToBool));
 		CHECK(out_int(rt, nan, kToInt) == 0);
 		CHECK(std::isnan(out_float(rt, nan, kToFloat)));
 		CHECK_FALSE(out_bool(rt, driven, kToBool));
@@ -1710,7 +1669,7 @@ TEST_SUITE("logic-unit") {
 		step(rt);
 		CHECK(out_int(rt, driven, kToInt) == 2);
 		CHECK(property_ticks(rt, to_int_sink) == std::vector<Tick>{ 0, 1, 2 });
-		CHECK(property_ticks(rt, to_bool_sink) == std::vector<Tick>{ 0, 1 }); // true at 1, unchanged at 2
+		CHECK(property_ticks(rt, to_bool_sink) == std::vector<Tick>{ 0, 1 });
 		no_unhandled(rt);
 	}
 
@@ -1733,7 +1692,7 @@ TEST_SUITE("logic-unit") {
 		LogicRuntime rt = make_runtime(g.finish());
 		start(rt);
 		CHECK(out_text(rt, plain, kStringOut) == "alpha");
-		CHECK(out_text(rt, driven, kStringOut) == "alpha"); // StringIn1 arrived while 0 is selected: no publish
+		CHECK(out_text(rt, driven, kStringOut) == "alpha");
 		std::vector<std::string> seen;
 		for (Tick t = 1; t <= 3; ++t) {
 			force(rt, t == 1 ? sel1 : sel0);
@@ -1763,7 +1722,7 @@ TEST_SUITE("logic-unit") {
 		property_sink(g, int_setting, kBoolSetting);
 		const uint32_t unnamed = g.node(LogicTypeId::Setting);
 		property_sink(g, unnamed, kBoolSetting);
-		const uint32_t unbound = g.node(LogicTypeId::Setting); // no outputs: publishes nothing
+		const uint32_t unbound = g.node(LogicTypeId::Setting);
 		g.b.add_param(unbound, logic_port_id("BoolSettingName"), v_text(g, "Server.VehicleSpawnAllowed"));
 		LogicRuntime rt = make_runtime(g.finish());
 		start(rt);
@@ -1793,7 +1752,7 @@ TEST_SUITE("logic-unit") {
 		const uint32_t driven = g.node(LogicTypeId::Locator);
 		g.b.add_param(driven, kTransform, v_transform(1, 2, 3));
 		const uint32_t driven_sink = property_sink(g, driven, kLocA);
-		const uint32_t source = g.node(LogicTypeId::CapturePoint); // a native's property output, forced
+		const uint32_t source = g.node(LogicTypeId::CapturePoint);
 		g.b.add_property(source, kTx, driven, kTransform);
 		LogicRuntime rt = make_runtime(g.finish());
 		start(rt);
@@ -1819,7 +1778,7 @@ TEST_SUITE("logic-unit") {
 		const uint32_t print_drv = driver(g, print, logic_port_id("Print"));
 		const uint32_t print_bad = driver(g, print, port::kEnable);
 		const uint32_t i = g.node(LogicTypeId::Int);
-		const uint32_t int_set = driver(g, i, logic_port_id("Set")); // Int and Float have no Set event (as built)
+		const uint32_t int_set = driver(g, i, logic_port_id("Set"));
 		const uint32_t delay = g.node(LogicTypeId::Delay);
 		const uint32_t b = g.node(LogicTypeId::Bool);
 		g.b.add_property(b, port::kValue, delay, logic_port_id("Bogus"));
@@ -1833,14 +1792,14 @@ TEST_SUITE("logic-unit") {
 			}
 			step(rt);
 		}
-		CHECK(ticks_into(rt, print, logic_port_id("Print")) == std::vector<Tick>{ 1, 2 }); // the trace record is the print
-		CHECK(out_int(rt, i, port::kValue) == 0); // Set changed nothing
+		CHECK(ticks_into(rt, print, logic_port_id("Print")) == std::vector<Tick>{ 1, 2 });
+		CHECK(out_int(rt, i, port::kValue) == 0);
 		const std::span<const LogicUnhandledPort> u = rt.unhandled();
 		REQUIRE(u.size() == 3);
 		CHECK(u[0].type == LogicTypeId::Delay);
 		CHECK(u[0].port == logic_port_id("Bogus"));
 		CHECK_FALSE(u[0].event);
-		CHECK(u[0].count == 1); // the Bool's initial value at tick 0
+		CHECK(u[0].count == 1);
 		CHECK(u[1].type == LogicTypeId::Int);
 		CHECK(u[1].port == logic_port_id("Set"));
 		CHECK(u[1].event);
@@ -1861,7 +1820,7 @@ TEST_SUITE("logic-unit") {
 		const uint32_t gate_sink = event_sink(g, gate, port::kOut);
 		const auto delay = [&](bool p_run_once) {
 			const uint32_t d = g.node(LogicTypeId::Delay);
-			g.b.add_param(d, port::kDelay, v_float(0.5)); // 30 ticks
+			g.b.add_param(d, port::kDelay, v_float(0.5));
 			if (p_run_once) {
 				g.b.add_param(d, logic_port_id("RunOnce"), v_bool(true));
 			}
@@ -1913,8 +1872,7 @@ TEST_SUITE("logic-unit") {
 			if (t == 12) {
 				force(rt, stop_in);
 			}
-			// MultipleTrigger: Trigger 1, 2; SubtractCount 3, 4 (zero), 5 (already zero); Trigger 6, 7; ResetCount 8;
-			// Trigger 9, 10, 11 (fires); Disable 12; Trigger 13..15 (ignored); Enable 16; Trigger 17..19 (fires).
+
 			if (t == 1 || t == 2 || t == 6 || t == 7 || (t >= 9 && t <= 11) || (t >= 13 && t <= 15) || (t >= 17 && t <= 19)) {
 				force(rt, mt_trigger);
 			}

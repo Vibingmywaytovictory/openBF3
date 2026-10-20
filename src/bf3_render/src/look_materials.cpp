@@ -1,5 +1,3 @@
-// L1 look: material resolution through the level shader database (look_materials.h; port of the colour / normal
-// ranking of IW4L level_bf3 geometry/materials.rs, the user's Apache-2.0 code).
 #include "bf3/render/look_materials.h"
 
 #include "bf3/core/res/res_loader.h"
@@ -24,8 +22,6 @@ using Clock = std::chrono::steady_clock;
 
 constexpr uint8_t kColor = 0, kNormal = 1, kSpecular = 2, kEmissive = 3;
 
-// MeshVariationDatabase texture parameter names that carry the base colour / normal map, best first (IW4L
-// materials.rs COLOR_PARAMETERS / NORMAL_PARAMETERS). Detail, dirt, mask and camo layers come last or not at all.
 constexpr std::string_view kColorParameters[] = { "diffuse", "maindiffuse", "color", "difusealpha", "paintingdiffuse", "topdiffuse", "bottomdiffuse",
 	"maintexture", "mat1_d", "mat2_d", "diffuseleaves", "diffuseatlas", "frame_d", "awningtexture", "tilediffuse", "detaildiffuse", "background",
 	"diffuse2", "dirtdiffuse", "diffusebark", "texture2", "texture3", "camo", "decal", "decaltexture", "brandtexture", "logo", "detailtexture",
@@ -52,7 +48,7 @@ constexpr std::string_view kFoliageWords[] = { "vegetation", "foliage", "leaf", 
 constexpr std::string_view kBackdropWords[] = { "backdrop" };
 constexpr std::string_view kGlassWords[] = { "glass", "window" };
 constexpr std::string_view kUndrawnShaders[] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
-// M1's name rule for a shader the database does not hold (level_scene.cpp kAlphaTestWords / kDoubleSidedWords).
+
 constexpr std::string_view kNameAlphaWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
 	"tree", "bush", "ivy", "hair", "cutout", "masked" };
 
@@ -182,8 +178,6 @@ const Candidate *best(uint8_t p_role, const std::vector<Candidate> &p_candidates
 	return out;
 }
 
-// A candidate texture, or nullopt when it cannot be drawn (no mesh UV set, a placeholder, no 2D texture header).
-// p_header: name -> the cached header, or nullptr.
 template <class Header>
 std::optional<Candidate> make_candidate(Header &&p_header, std::string_view p_name, uint8_t p_role, Rank p_rank, Sampling p_sampling,
 		const std::string &p_parameter) {
@@ -231,8 +225,6 @@ size_t shared_prefix(std::string_view p_a, std::string_view p_b) {
 	return n;
 }
 
-// Neighbour classes: colour / normal x quality 0 / 1 x untiled / tiled (the rank keys a neighbour can differ in
-// besides its folder and shared prefix). Other roles are never drawn.
 constexpr size_t kNeighbourClasses = 8;
 std::optional<size_t> neighbour_class(const Candidate &p_c) {
 	if (p_c.role != kColor && p_c.role != kNormal) {
@@ -241,16 +233,16 @@ std::optional<size_t> neighbour_class(const Candidate &p_c) {
 	return size_t(p_c.role == kNormal ? 4 : 0) + size_t(std::min<uint8_t>(p_c.rank.quality, 1) * 2) + size_t(tiled(p_c.texture) ? 1 : 0);
 }
 
-} // namespace
+}
 
 struct LookResolver::GraphInfo {
-	std::vector<std::pair<std::string, size_t>> parameters; // lowercase name -> texture_parameters index, sorted (stable: first wins)
-	std::vector<Candidate> candidates; // Graph tier colour and normal candidates (rank.graph 0), at most kLookMaxGraphCandidates
+	std::vector<std::pair<std::string, size_t>> parameters;
+	std::vector<Candidate> candidates;
 	bool double_sided = false;
 };
 
 struct LookResolver::FolderIndex {
-	// Neighbour candidates (rank.graph 0, rank.order 0) per neighbour_class, sorted by file name (last path part).
+
 	std::array<std::vector<std::pair<std::string, Candidate>>, kNeighbourClasses> classes;
 };
 
@@ -294,7 +286,7 @@ std::optional<NameRole> graph_role(std::string_view p_name) {
 	if (std::optional<NameRole> r = suffix_role(p_name)) {
 		return r;
 	}
-	// A role part shortly before the end: `water_d_01`, `ivyleafs01_d_xp4`.
+
 	std::string_view rest = last_part(p_name);
 	for (size_t part = 0; part < kSuffixReach && !rest.empty(); ++part) {
 		const size_t at = rest.rfind('_');
@@ -367,7 +359,7 @@ std::unique_ptr<LookResolver> LookResolver::open(const core::LevelMount &p_mount
 		if (parsed->empty()) {
 			continue;
 		}
-		// The first render path, as IW4L reads it; a shader's first database wins.
+
 		paths.push_back(std::move(parsed->front().shaders));
 	}
 	ShaderDatabase merged = merge_first_wins(std::move(paths));
@@ -530,7 +522,6 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	const auto hdr = [this](const std::string &p_name) { return header(p_name); };
 	const GraphInfo *shader_info = shader != nullptr ? &graph_info(*shader) : nullptr;
 
-	// 1. The slot's parameters.
 	for (const auto &[parameter, texture] : p_slot.textures) {
 		const std::string name = lower(parameter);
 		const std::optional<std::pair<uint8_t, size_t>> role = parameter_role(name);
@@ -551,7 +542,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		}
 		++stats_.resolve_work;
 	}
-	// 2. The graphs' constants (built once per graph).
+
 	for (size_t g = 0; g < graphs.size(); ++g) {
 		if (graphs[g] == nullptr) {
 			continue;
@@ -562,7 +553,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 			++stats_.resolve_work;
 		}
 	}
-	// 3. Neighbours, for a shader the database lacks and no colour so far.
+
 	const bool missing_graph = graphs.empty() || std::any_of(graphs.begin(), graphs.end(), [](const SurfaceShader *g) { return g == nullptr; });
 	if (missing_graph && std::none_of(candidates.begin(), candidates.end(), [](const Candidate &c) { return c.role == kColor; })) {
 		std::vector<std::string> folders;
@@ -571,10 +562,9 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		}
 		folders.push_back(parent(lower(p_mesh)));
 		folders.erase(std::unique(folders.begin(), folders.end()), folders.end());
-		const std::string mesh = lower(p_mesh); // owns the bytes last_part views (a temporary here dangled)
+		const std::string mesh = lower(p_mesh);
 		const std::string_view stem = last_part(mesh);
-		// Per folder and class, the candidate sharing the longest prefix with the mesh's file name, first by name
-		// among equals: the one the full ranking would pick from that class (the class fixes every other rank key).
+
 		const auto before = [](const std::pair<std::string, Candidate> &p_e, std::string_view p_s) { return std::string_view(p_e.first) < p_s; };
 		for (size_t tier = 0; tier < folders.size(); ++tier) {
 			if (folders[tier].empty()) {
@@ -605,13 +595,12 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		out.color_candidates += c.role == kColor ? 1 : 0;
 		out.normal_candidates += c.role == kNormal ? 1 : 0;
 	}
-	// Colour: the best, unless it is an untiled graph trim with no normal map in a masked graph whose tiled colour
-	// layers have one (IW4L unmasked_color; its packed-mask colour statistics are not ported).
+
 	std::optional<LookTexture> color;
 	if (const Candidate *chosen = best(kColor, candidates)) {
 		color = chosen->texture;
 		if (chosen->rank.tier == LookTier::Graph && chosen->texture.scale == 1.0f) {
-			std::vector<std::pair<uint8_t, float>> normal_uvs; // sorted: a lookup per layer, not a scan of the candidates
+			std::vector<std::pair<uint8_t, float>> normal_uvs;
 			for (const Candidate &c : candidates) {
 				if (c.role == kNormal) {
 					normal_uvs.emplace_back(c.texture.channel, c.texture.scale);
@@ -643,9 +632,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 			uv_owner = n->texture;
 		}
 	}
-	// Normal: the best that shares the colour's UV set and tiling (IW4L's rule); failing that (L1, the shader samples
-	// each texture with its own UV), the best on a mesh UV set, which the mesh tangents frame, e.g. a uv0 tile normal
-	// under a uv1 main colour (facadepreset2uvs).
+
 	{
 		std::vector<Candidate> paired, meshed;
 		for (const Candidate &c : candidates) {
@@ -680,15 +667,13 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	if (out.blend == LookBlend::Blend && !color_alpha && color) {
 		for (const std::string &w : words(last_part(color->name))) {
 			if (w.find("mask") != std::string::npos) {
-				out.drawn = false; // a transparent overlay drawn by its mask alone (IW4L drops it)
+				out.drawn = false;
 				return out;
 			}
 		}
 	}
 	out.double_sided = shader_info != nullptr ? shader_info->double_sided : foliage;
-	// Glass: a glass / window shader with no colour, or a transparent one whose colour map has no alpha. BF3 computes
-	// its opacity in the compiled pixel shader (OpacityMul, Fresnel), which the database does not expose: L1 keeps the
-	// colour map as the tint and draws it at a fixed opacity (level_upload.cpp kGlassOpacity).
+
 	out.glass = has_word(shader_name, kGlassWords) && (!color || (out.blend == LookBlend::Blend && !color_alpha));
 	if (out.glass) {
 		out.blend = LookBlend::Blend;
@@ -698,4 +683,4 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	return out;
 }
 
-} // namespace bf3::render
+}

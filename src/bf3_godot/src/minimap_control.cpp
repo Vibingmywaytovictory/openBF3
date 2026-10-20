@@ -1,4 +1,3 @@
-// UI ui2: Bf3MinimapControl (minimap_control.h; docs/design/ui-minimap-icons.md §10.2).
 #include "minimap_control.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -20,18 +19,16 @@ namespace bf3::godot_side {
 
 namespace {
 
-// Icons are drawn at this many canvas units per atlas texel per 100 units of minimap side [inferred: tuned by eye on
-// the G11 shots; BF3's own minimap icon scale is a UIMinimapCompData source, a Client row].
 constexpr float kIconUnitsPerTexelPer100 = 0.45f;
-constexpr float kDiscMargin = 1.5f; // canvas units between the square's edge and the disc
-constexpr float kRimInsetPer100 = 7.0f; // objectives clamped this far inside the disc edge, per 100 units of side (about half an icon)
+constexpr float kDiscMargin = 1.5f;
+constexpr float kRimInsetPer100 = 7.0f;
 
 ui::ScreenPoint nan_point() {
 	const float n = std::numeric_limits<float>::quiet_NaN();
 	return { n, n };
 }
 
-} // namespace
+}
 
 Bf3MinimapControl::Bf3MinimapControl() {
 	last_marker_ = nan_point();
@@ -156,7 +153,7 @@ void Bf3MinimapControl::draw_icon(const MinimapIconDraw &p_icon, Vector2 p_at, f
 	const float h = float(r.height) * k;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->canvas_item_add_set_transform(icon_item_, Transform2D(p_angle, p_at));
-	// A negative size draws the frame mirrored (HudIconRect::flip_x / flip_y).
+
 	rs->canvas_item_add_texture_rect_region(icon_item_, Rect2(r.flip_x ? w * 0.5f : -w * 0.5f, r.flip_y ? h * 0.5f : -h * 0.5f, r.flip_x ? -w : w, r.flip_y ? -h : h),
 			atlas_->get_rid(), Rect2(float(r.x), float(r.y), float(r.width), float(r.height)));
 	if (r_rect != nullptr) {
@@ -180,10 +177,8 @@ void Bf3MinimapControl::_draw() {
 	const Vector2 centre = size * 0.5f;
 	const float radius = disc_radius();
 
-	// The control's own item: a dark disc behind the map (shows where the satellite does not reach).
 	draw_circle(centre, radius, Color(0.02f, 0.03f, 0.04f, 0.85f));
 
-	// 1. The map item.
 	if (material_.is_valid()) {
 		const Transform2D to_vp = canvas_to_viewport();
 		const Vector2 c_px = to_vp.xform(centre);
@@ -202,7 +197,7 @@ void Bf3MinimapControl::_draw() {
 	if (!icons_visible_) {
 		return;
 	}
-	// 2. The ring on top of the map's edge.
+
 	rs->canvas_item_add_set_transform(icon_item_, Transform2D());
 	{
 		constexpr int kSegments = 96;
@@ -216,7 +211,7 @@ void Bf3MinimapControl::_draw() {
 		colours.push_back(Color(0.75f, 0.85f, 0.9f, 0.8f));
 		rs->canvas_item_add_polyline(icon_item_, ring, colours, 1.5f, true);
 	}
-	// 3. Objectives and others.
+
 	if (!marker_only_) {
 		const float rim = rim_radius();
 		for (size_t i = 0; i < icons_.size(); ++i) {
@@ -231,7 +226,7 @@ void Bf3MinimapControl::_draw() {
 			bool clamped = false;
 			if (len > rim) {
 				if (!ic.objective) {
-					continue; // others off the disc are not shown
+					continue;
 				}
 				at = centre + d * (rim / len);
 				clamped = true;
@@ -239,7 +234,7 @@ void Bf3MinimapControl::_draw() {
 			float angle = 0.0f;
 			const ui::HudIconStateFrames *st = ic.icon != nullptr ? ic.icon->state(ic.state) : nullptr;
 			if (st != nullptr && st->should_rotate) {
-				// The object's heading on the map, as minimap_marker_angle turns the player's arrow.
+
 				angle = (view_.rotate ? view_.heading : 0.0f) - ic.yaw;
 			}
 			Rect2 rect;
@@ -249,7 +244,7 @@ void Bf3MinimapControl::_draw() {
 			last_clamped_[i] = clamped;
 		}
 	}
-	// 4. The player marker.
+
 	if (icon_atlas_ != nullptr) {
 		const ui::HudIconChoice me = ui::soldier_icon(true, 0, 0);
 		MinimapIconDraw marker;
@@ -260,4 +255,4 @@ void Bf3MinimapControl::_draw() {
 	}
 }
 
-} // namespace bf3::godot_side
+}

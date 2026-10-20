@@ -1,8 +1,3 @@
-// S3 crowd assets (docs/design/s3.md §4.3, §5.6, §9, §14): ctest render.s3 loads the US and RU 3p soldiers from the
-// retail install (read-only) through load_soldier_assets, cold and then warm on a scratch cache root under %TEMP%, and
-// checks the part census, the binds, the rest-pose skin matrices with and without the weapon layout, the materials,
-// the cache, the pinch metric at rest, and that the install is unchanged. Exits 77 (skipped) without an install.
-// Asserts numbers only; nothing from BF3 is stored in the repo.
 #include <doctest/doctest.h>
 
 #include "bf3/anim/crowd_eval.h"
@@ -58,7 +53,7 @@ struct Expected {
 	bool weapon;
 };
 
-} // namespace
+}
 
 TEST_SUITE("render-s3") {
 	TEST_CASE("s3 soldiers: census, binds, weapon layout, materials, cache cold then warm, pinch at rest") {
@@ -118,9 +113,9 @@ TEST_SUITE("render-s3") {
 			MESSAGE("team " << t << ": " << team.binds.size() << " binds, " << team.vertices << " vertices, " << team.triangles << " triangles, reload index "
 							<< team.reload_index << " (" << team.reload.tracks.end_frame << " frames), reload time " << team.reload_time << " s");
 		}
-		CHECK(a.teams[0].parts[1].variation.empty()); // the head has no variation
+		CHECK(a.teams[0].parts[1].variation.empty());
 		CHECK(a.teams[1].parts[1].variation == "characters/lowerbody/us_lowerbody03/ru_lb03_desert");
-		// LOD0 drawn subsets (SubsetFilter::Drawn) [measured 2026-10-15]: fewer than the MeshSet totals of s3.md §4.3.
+
 		CHECK(a.teams[0].vertices == 17724);
 		CHECK(a.teams[0].triangles == 20836);
 		CHECK(a.teams[1].vertices == 18517);
@@ -136,14 +131,13 @@ TEST_SUITE("render-s3") {
 		CHECK(a.lod.far_distance == 208.0f);
 		CHECK(a.body_skeleton.size() == 213);
 
-		// Rest skin matrices: identity except the weapon bones without the layout; all identity with it.
 		const anim::Skeleton &rig = a.clips.rig;
 		uint32_t layout_joints = 0;
 		for (float w : a.teams[0].weapon_joints.weight) {
 			layout_joints += w > 0.0f ? 1 : 0;
 		}
 		MESSAGE("weapon layout joints: " << layout_joints);
-		CHECK(layout_joints == 20); // the 21 undriven Wep_* joints minus the one whose weaponske01 parent differs (s3.md §5.6)
+		CHECK(layout_joints == 20);
 		const uint32_t expect_plain[2] = { 109, 103 };
 		for (size_t t = 0; t < 2; ++t) {
 			const render::SoldierTeam &team = a.teams[t];
@@ -164,7 +158,7 @@ TEST_SUITE("render-s3") {
 			MESSAGE("team " << t << " rest identity: " << plain << " / " << team.binds.size() << " plain, " << with_layout << " with the weapon layout");
 			CHECK(plain == expect_plain[t]);
 			CHECK(with_layout == team.binds.size());
-			// Pinch at rest: ratio 1.
+
 			const render::PinchReport p = render::measure_pinch(team, rig, model, skin);
 			MESSAGE("team " << t << " pinch at rest: left " << p.min_ratio_left << " (" << p.vertices_left << " vertices), right " << p.min_ratio_right << " ("
 							<< p.vertices_right << "), hand-IK " << p.hand_ik_m << " m");
@@ -174,7 +168,7 @@ TEST_SUITE("render-s3") {
 			CHECK(p.min_ratio_right == doctest::Approx(1.0f).epsilon(1e-4));
 			CHECK(p.below_left + p.below_right == 0);
 		}
-		// The evaluator accepts the assets: both teams, the layout, the reload clips.
+
 		std::vector<anim::CrowdTeam> teams(2);
 		for (size_t t = 0; t < 2; ++t) {
 			teams[t].binds = &a.teams[t].binds;
@@ -191,7 +185,7 @@ TEST_SUITE("render-s3") {
 		(*e)->set_inputs(in, 0.0);
 		(*e)->evaluate_all_here();
 		in[0].flags = in[1].flags = 0;
-		(*e)->set_inputs(in, 1.3); // 1.3 s into the reload
+		(*e)->set_inputs(in, 1.3);
 		(*e)->evaluate_all_here();
 		CHECK((*e)->stats().reloading == 2);
 		for (uint32_t t = 0; t < 2; ++t) {
@@ -201,9 +195,7 @@ TEST_SUITE("render-s3") {
 							<< p.below_right << " < 0.7), hand-IK " << p.hand_ik_m << " m");
 			CHECK(pal.size() == a.teams[t].binds.size());
 		}
-		// The weapon stays rigid in the idle / run / aim poses: every weapon bind's skin matrix equals Wep_Root's
-		// (all are identity at rest with the layout, so a rigid weapon moves as one). A joint that a locomotion or aim
-		// clip drives off the weapon's layout would draw a floating part.
+
 		{
 			std::vector<anim::CrowdSoldierInput> idle(2);
 			idle[0].team = 0;

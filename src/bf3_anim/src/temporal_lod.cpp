@@ -1,4 +1,3 @@
-// Temporal LOD table from GameAnimationSettings (S3; docs/design/s3.md §4.4, §5.7). See temporal_lod.h.
 #include "bf3/anim/temporal_lod.h"
 
 #include "bf3/core/ebx.h"
@@ -19,7 +18,7 @@ std::optional<float> read_f32(const core::EbxInstance &p_instance, const std::st
 	return v->as_f32();
 }
 
-} // namespace
+}
 
 core::Result<TemporalLodTable> read_game_animation_settings(const core::EbxPartition &p_partition) {
 	const std::vector<core::EbxInstance> found = p_partition.instances_of("GameAnimationSettings");
@@ -56,4 +55,4 @@ core::Result<TemporalLodTable> read_game_animation_settings(const core::EbxParti
 	return t;
 }
 
-} // namespace bf3::anim
+}

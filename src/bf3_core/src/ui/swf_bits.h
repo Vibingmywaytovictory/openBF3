@@ -1,9 +1,4 @@
 #pragma once
-// Bounds-checked byte and bit reader for the SWF readers (swf_movie.cpp, swf_font.cpp; docs/design/ui-swf-fonts.md
-// §9). Little-endian bytes, MSB-first bit fields as the SWF specification defines them (UB / SB / FB, byte-aligned
-// again by align()). A read past the end never touches memory outside the span: it returns zero and sets a sticky
-// failure flag that the caller checks after each record (every loop over data also charges a WorkBudget, so a loop
-// cannot spin on a failed reader).
 
 #include "bf3/core/ui/swf_movie.h"
 
@@ -24,14 +19,13 @@ public:
 	bool failed() const { return failed_; }
 	void fail() { failed_ = true; }
 	size_t pos() const { return pos_; }
-	// Offset of the cursor in the enclosing buffer (for error messages).
+
 	size_t abs_pos() const { return base_ + pos_; }
 	size_t size() const { return data_.size(); }
 	size_t left() const { return pos_ <= data_.size() ? data_.size() - pos_ : 0; }
 	bool at_end() const { return pos_ >= data_.size(); }
 	std::span<const uint8_t> data() const { return data_; }
 
-	// Byte reads align first (as the SWF types do after a bit field).
 	uint8_t u8() {
 		align();
 		if (!need(1)) {
@@ -82,7 +76,7 @@ public:
 		}
 		pos_ = p_pos;
 	}
-	// NUL-terminated string inside the span (the NUL is consumed); empty + failure when no NUL follows.
+
 	std::string_view cstr() {
 		align();
 		if (failed_) {
@@ -99,7 +93,7 @@ public:
 		pos_ += len + 1;
 		return std::string_view(reinterpret_cast<const char *>(begin), len);
 	}
-	// u8 length, then that many bytes (a trailing NUL inside the count is dropped).
+
 	std::string_view pstr8() {
 		const uint8_t len = u8();
 		if (!need(len)) {
@@ -113,7 +107,6 @@ public:
 		return s;
 	}
 
-	// Bit fields (MSB first).
 	uint32_t ub(unsigned p_bits) {
 		uint32_t v = 0;
 		for (unsigned i = 0; i < p_bits; ++i) {
@@ -139,7 +132,7 @@ public:
 		}
 		return int32_t(v);
 	}
-	// 16.16 fixed point in a bit field.
+
 	float fb(unsigned p_bits) { return float(double(sb(p_bits)) / 65536.0); }
 	void align() {
 		if (bit_ != 0) {
@@ -148,7 +141,6 @@ public:
 		}
 	}
 
-	// RECT (twips) -> pixels.
 	SwfRect rect() {
 		align();
 		const unsigned n = ub(5);
@@ -160,7 +152,7 @@ public:
 		align();
 		return r;
 	}
-	// MATRIX; translation in pixels.
+
 	SwfMatrix matrix() {
 		align();
 		SwfMatrix m;
@@ -180,7 +172,7 @@ public:
 		align();
 		return m;
 	}
-	// CXFORM (p_alpha false, PlaceObject) or CXFORMWITHALPHA.
+
 	SwfColorTransform cxform(bool p_alpha) {
 		align();
 		SwfColorTransform c;
@@ -218,4 +210,4 @@ private:
 	bool failed_ = false;
 };
 
-} // namespace bf3::core::ui::detail
+}

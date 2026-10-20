@@ -39,14 +39,12 @@ void put_key(std::vector<uint8_t> &r_out, const Sha256Digest &p_key) {
 	r_out.insert(r_out.end(), p_key.bytes.begin(), p_key.bytes.end());
 }
 
-// Frames a body: length, CRC, body.
 void frame(std::vector<uint8_t> &r_out, const std::vector<uint8_t> &p_body) {
 	put_u32(r_out, static_cast<uint32_t>(p_body.size()));
 	put_u32(r_out, crc32(p_body));
 	r_out.insert(r_out.end(), p_body.begin(), p_body.end());
 }
 
-// Bounds-checked little-endian reader over one record body.
 struct Reader {
 	std::span<const uint8_t> bytes;
 	size_t at = 0;
@@ -93,7 +91,7 @@ uint32_t load_u32(const uint8_t *p) {
 	return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
 
-} // namespace
+}
 
 void journal_header(std::vector<uint8_t> &r_out) {
 	r_out.insert(r_out.end(), kMagic, kMagic + 8);
@@ -224,7 +222,7 @@ JournalReplay replay_journal(std::span<const uint8_t> p_bytes) {
 				good = false;
 		}
 		if (!good) {
-			break; // a CRC-valid but malformed record: treat as the end
+			break;
 		}
 		r.clean_close = closing;
 		++r.records;
@@ -235,4 +233,4 @@ JournalReplay replay_journal(std::span<const uint8_t> p_bytes) {
 	return r;
 }
 
-} // namespace bf3::core::cache_detail
+}

@@ -1,6 +1,3 @@
-// The Godot-free load steps of a session (docs/design/m1.md §12; level_load.h): the level database, then the
-// SharedLevel (spawns, soldier, static world through the cache). Runs on the loader thread; the headless tests
-// call it directly.
 #include "bf3/host/level_load.h"
 
 #include "bf3/core/gameplay/soldier_def.h"
@@ -10,7 +7,7 @@
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/level/world.h"
 #include "bf3/sim/static_world.h"
-// M2b ru (#3): the TDM load.
+
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/gameplay/mode_def.h"
@@ -30,7 +27,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-// psapi after windows.h
+
 #include <psapi.h>
 
 namespace bf3::host {
@@ -59,23 +56,21 @@ void sample_working_set(LoadProgress *p_progress) {
 	}
 }
 
-// Each stage's share of the M1 load budget (docs §12.1: Phase B dominates; meshes and textures run on the lanes,
-// the upload behind the loading screen). Sums to 1000.
 constexpr std::array<uint32_t, kLoadStageCount> kStageWeight = {
-	20, // Mount
-	80, // Database
-	120, // Shapes
-	250, // Meshes
-	30, // Materials
-	300, // Textures
-	150, // Upload
-	30, // Connect
-	20, // Spawn
-	0, // Done
-	0, // Failed
+	20,
+	80,
+	120,
+	250,
+	30,
+	300,
+	150,
+	30,
+	20,
+	0,
+	0,
 };
 
-} // namespace
+}
 
 const char *load_stage_name(LoadStage p_stage) {
 	switch (p_stage) {
@@ -113,7 +108,7 @@ void LoadProgress::begin(LoadStage p_stage, uint32_t p_total) {
 	total[i].store(p_total, std::memory_order_relaxed);
 	uint64_t zero = 0;
 	start_us[i].compare_exchange_strong(zero, now_us(), std::memory_order_relaxed);
-	// The furthest stage started (Failed sticks: it is the highest value).
+
 	uint8_t seen = stage.load(std::memory_order_relaxed);
 	while (uint8_t(p_stage) > seen && !stage.compare_exchange_weak(seen, uint8_t(p_stage), std::memory_order_release)) {
 	}
@@ -164,7 +159,7 @@ uint32_t LoadProgress::permille() const {
 
 LevelDatabase::LevelDatabase() = default;
 LevelDatabase::~LevelDatabase() {
-	world.reset(); // the World points into the level
+	world.reset();
 	level.reset();
 }
 LevelDatabase::LevelDatabase(LevelDatabase &&) noexcept = default;
@@ -188,8 +183,7 @@ core::Result<LevelDatabase> open_level_database(std::shared_ptr<const core::Inst
 	}
 	LevelDatabase db;
 	db.install = p_install;
-	// bf3_core's load_level mounts the superbundle and parses the mode's partitions in one call: the Mount stage
-	// covers both, the Database stage the traversal (docs §12.1 lists their times together, 0.17 s on Metro).
+
 	if (p_progress != nullptr) {
 		p_progress->begin(LoadStage::Mount, 1);
 	}
@@ -229,7 +223,7 @@ core::Result<LevelDatabase> open_level_database(std::shared_ptr<const core::Inst
 	return db;
 }
 
-core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions &p_options, SharedLevel &r_level); // M2b ru (below)
+core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions &p_options, SharedLevel &r_level);
 
 core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDatabase &p_db, const SharedLoadOptions &p_options, LoadProgress *p_progress) {
 	if (p_db.level == nullptr || p_db.world == nullptr) {
@@ -242,7 +236,7 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	shared->mode = level.mode;
 
 	auto clock = std::chrono::steady_clock::now();
-	// Tables: the source digest (from the manifests the mount already read), the spawns, the soldier.
+
 	core::Result<core::level::SourceDigest> digest = core::level::level_source_digest(level);
 	if (!digest) {
 		return core::error_at("load_shared_level: source digest", digest.error());
@@ -258,7 +252,7 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	}
 	for (const core::level::CharacterSpawnerDef &s : spawns->spawners) {
 		if (s.enabled && std::isfinite(s.protection_radius) && s.protection_radius > 0.0f) {
-			shared->spawn_protection_radius = s.protection_radius; // TDM: both spawners say 10
+			shared->spawn_protection_radius = s.protection_radius;
 			break;
 		}
 	}
@@ -273,7 +267,6 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	shared->motor = *params;
 	shared->seconds_tables = seconds_since(clock);
 
-	// The static world through the cache (warm: restore; cold: soup + cook on the shape threads).
 	if (p_progress != nullptr) {
 		p_progress->begin(LoadStage::Shapes, 1);
 	}
@@ -302,18 +295,18 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		p_progress->advance(LoadStage::Shapes);
 		p_progress->end(LoadStage::Shapes);
 	}
-	if (p_options.gunplay) { // M2a sv (named insertion: the gunplay tables, SharedLoadOptions::gunplay)
-		const core::Status gunplay = load_shared_gunplay(p_db, *shared, p_options); // M2a sv; M2b ru (#3): the options (the TDM kits)
-		if (!gunplay.ok()) { // M2a sv
-			return core::error_at("load_shared_level: gunplay", gunplay.error()); // M2a sv
-		} // M2a sv
-	} // M2a sv
-	if (p_options.tdm) { // M2b ru (#3): the logic graph, the natives' fields, tdm_tuning.cfg, the immunity abort
-		const core::Status tdm = load_shared_tdm(p_db, p_options, *shared); // M2b ru
-		if (!tdm.ok()) { // M2b ru
-			return core::error_at("load_shared_level: tdm", tdm.error()); // M2b ru
-		} // M2b ru
-	} // M2b ru
+	if (p_options.gunplay) {
+		const core::Status gunplay = load_shared_gunplay(p_db, *shared, p_options);
+		if (!gunplay.ok()) {
+			return core::error_at("load_shared_level: gunplay", gunplay.error());
+		}
+	}
+	if (p_options.tdm) {
+		const core::Status tdm = load_shared_tdm(p_db, p_options, *shared);
+		if (!tdm.ok()) {
+			return core::error_at("load_shared_level: tdm", tdm.error());
+		}
+	}
 	sample_working_set(p_progress);
 	return std::shared_ptr<const SharedLevel>(std::move(shared));
 }
@@ -328,8 +321,6 @@ std::shared_ptr<const SharedLevel> synthetic_shared_level(std::shared_ptr<const 
 	shared->motor = p_motor;
 	return shared;
 }
-
-// ---- M2b ru (docs/design/m2b.md §2.6 #3, §3.2 "Load", §3.3; docs/design/m2b-ru.md §2) -----------------------------
 
 namespace {
 
@@ -357,7 +348,6 @@ std::optional<bool> ebx_bool(const core::EbxInstance &p_entity, std::string_view
 	return v->as_bool();
 }
 
-// TeamId / Team: an enum whose name is Team1 / Team2 (or its value 1 / 2); 0 otherwise.
 uint8_t ebx_team(const core::EbxInstance &p_entity, std::string_view p_field) {
 	const std::optional<core::EbxValue> v = p_entity.get(p_field);
 	if (!v) {
@@ -441,8 +431,6 @@ void read_native_params(const gp::LogicWorld &p_world, const gp::LogicGraph &p_g
 	}
 }
 
-// The immunity abort (§3.3): the data's raw EntryInputActionEnum values, by their names when the type info has them,
-// else by tdm_tuning.cfg's immunity_abort_map.
 void set_immunity_abort(const core::level::LoadedLevel &p_level, const TdmTuning &p_tuning, SharedLevel &r_level) {
 	core::Result<gp::SoldierDef> soldier = gp::read_soldier_def(p_level.db());
 	if (!soldier) {
@@ -481,7 +469,7 @@ void set_immunity_abort(const core::level::LoadedLevel &p_level, const TdmTuning
 		std::string label = std::to_string(value);
 		bool done = false;
 		if (any_name && name) {
-			// By name [inferred: only the name -> command-bit step]; an "EIA" prefix is dropped.
+
 			std::string_view n = *name;
 			if (n.rfind("EIA", 0) == 0) {
 				n.remove_prefix(3);
@@ -518,7 +506,7 @@ void set_immunity_abort(const core::level::LoadedLevel &p_level, const TdmTuning
 			"}, unmapped {" + unmapped + "} [inferred, measured = false]");
 }
 
-} // namespace
+}
 
 core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions &p_options, SharedLevel &r_level) {
 	if (p_db.level == nullptr) {
@@ -529,7 +517,7 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 	gp::LogicGraphOptions go;
 	go.mode = level.mode;
 	go.side = gp::LogicSide::Server;
-	gp::LogicWorldOptions wo; // as build_logic_graph(db, root, options) makes it, so the digest is bf3dump's
+	gp::LogicWorldOptions wo;
 	wo.mode = go.mode;
 	wo.expand_root_objects = true;
 	wo.max_depth = go.max_depth;
@@ -581,7 +569,6 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 	return core::Status::success();
 }
 
-// The 3-argument load_shared_gunplay (#3): the 2-argument one (gunplay.cpp, M2a) with SharedLoadOptions::tdm's kits.
 core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level, const SharedLoadOptions &p_options) {
 	if (p_db.install == nullptr || p_db.level == nullptr) {
 		return core::make_error("load_shared_gunplay: no level database");
@@ -599,4 +586,4 @@ core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level
 	return core::Status::success();
 }
 
-} // namespace bf3::host
+}

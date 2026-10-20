@@ -1,12 +1,3 @@
-// Suites sim-nav and sim-nav-bake (install; exit 77 without one; docs/design/s1.md §5, §10).
-//   sim-nav       G2 for every MP mode of MP_Subway and MP_007 (the rows' classes printed, the objectives gated, the
-//                 all-rows gate reported), §5.1's proofs 1-3 on both CQLs (the nav input is the motor's collision
-//                 set), Metro's §5.7 component report (movement / all layers, and the cs 0.25 variants the as-built
-//                 choice was made from), cold then warm on a scratch cache root, install unchanged.
-//   sim-nav-bake  G4: run_nav_bake_benches on MP_007 (<= 6 s) and MP_018 (<= 13 s) at 16 threads (the gate), Caspian at
-//                 1 and 4 threads (reported) from the same setup, and the 1-, 4- and 16-thread navs identical.
-//                 Timings are noisy on a shared machine; OPENBF3_TIMING_REPORT_ONLY prints without gating.
-// Derived data goes to a scratch directory under the system temp directory (removed at the end), never the install.
 #include <doctest/doctest.h>
 
 #include "nav_internal.h"
@@ -64,7 +55,7 @@ struct Install {
 	std::shared_ptr<core::Install> install;
 	core::InstallSnapshot before;
 	sim::MotorTuning tuning;
-	std::filesystem::path scratch; // cache roots of this run
+	std::filesystem::path scratch;
 	~Install() {
 		std::error_code ec;
 		if (!scratch.empty()) {
@@ -109,7 +100,6 @@ Install *install() {
 	return s_install.get();
 }
 
-// A cache on a fresh scratch sub-root (the guard refuses the install).
 bool open_cache(Install &r_m, const char *p_name, core::Cache &r_cache) {
 	core::CacheOptions o;
 	o.root = r_m.scratch / p_name;
@@ -137,9 +127,6 @@ const char *row_class(const host::BotPointRow &p_r) {
 	return p_r.in_main ? "main" : !p_r.on_mesh ? "off-mesh" : p_r.reaches_main ? "exit-only" : p_r.in_main_weak ? "entry-only" : "disconnected";
 }
 
-// The point lies inside (XZ, even-odd) a combat polygon of the mode: an objective outside every wired area is a
-// crate of a stage the mode does not play (Rush's prefab holds 10 crates; Metro RL plays 4 stages, Caspian RL 3), parked
-// off the map (h 0 v 0: no geometry under it), docs §5.7 as built.
 bool in_combat_area(const sim::Vec3 &p_point, const core::level::ModeAreas &p_areas) {
 	for (const core::level::CombatAreaDef &a : p_areas.combat_areas) {
 		bool inside = false;
@@ -162,10 +149,9 @@ struct ModeLoad {
 	std::shared_ptr<const host::SharedLevel> shared;
 	std::shared_ptr<const host::BotLevel> bots;
 	double seconds_db = 0, seconds_shared = 0, seconds_bots = 0;
-	std::string error; // when a step failed (shared or bots null)
+	std::string error;
 };
 
-// The database and the static world (TC: terrain everywhere) of one level x mode, kept for several bot loads.
 struct LevelBase {
 	std::optional<host::LevelDatabase> db;
 	std::shared_ptr<const host::SharedLevel> shared;
@@ -173,7 +159,6 @@ struct LevelBase {
 	std::string error;
 };
 
-// p_threads: the lanes of every pool the load uses (0 = all cores). No doctest assertions: runs on worker lanes.
 LevelBase load_base(Install &r_m, const std::string &p_level, const std::string &p_mode, core::Cache *p_cache, unsigned p_threads = 0) {
 	LevelBase out;
 	auto clock = std::chrono::steady_clock::now();
@@ -199,7 +184,6 @@ LevelBase load_base(Install &r_m, const std::string &p_level, const std::string 
 	return out;
 }
 
-// The bot level (nav with the water rule, components, rows) over p_base through p_cache.
 ModeLoad load_bots(const LevelBase &p_base, const core::level::LevelCombatTiles &p_combat, core::Cache *p_cache,
 		const host::BotLoadOptions &p_bot_options = {}, unsigned p_threads = 0) {
 	ModeLoad out;
@@ -227,14 +211,12 @@ ModeLoad load_bots(const LevelBase &p_base, const core::level::LevelCombatTiles 
 	return out;
 }
 
-// One level x mode as the bots load it (docs §8): load_base then load_bots. No assertions (worker lanes).
 ModeLoad load_mode_on(Install &r_m, const std::string &p_level, const std::string &p_mode, const core::level::LevelCombatTiles &p_combat,
 		core::Cache *p_cache, unsigned p_threads = 0) {
 	const LevelBase base = load_base(r_m, p_level, p_mode, p_cache, p_threads);
 	return load_bots(base, p_combat, p_cache, {}, p_threads);
 }
 
-// load_mode_on on this thread, the failure CHECKed.
 std::optional<ModeLoad> load_mode(Install &r_m, const std::string &p_level, const std::string &p_mode, const core::level::LevelCombatTiles &p_combat,
 		core::Cache *p_cache) {
 	ModeLoad l = load_mode_on(r_m, p_level, p_mode, p_combat, p_cache);
@@ -247,7 +229,7 @@ std::optional<ModeLoad> load_mode(Install &r_m, const std::string &p_level, cons
 
 struct RowCounts {
 	size_t objectives = 0, objectives_main = 0;
-	// objectives outside every combat area of their mode (unplayed stages' crates): counted, not judged
+
 	size_t objectives_unplayed = 0, objectives_unplayed_main = 0;
 	size_t spawns = 0, spawns_main = 0, exit_only = 0, entry_only = 0, disconnected = 0, off_mesh = 0;
 	void add(const host::BotPointRow &p_r, bool p_played = true) {
@@ -274,7 +256,6 @@ struct RowCounts {
 	}
 };
 
-// G2 over every MP mode of p_level; returns the level's counts.
 RowCounts g2_level(Install &r_m, const std::string &p_level) {
 	RowCounts level_counts;
 	auto clock = std::chrono::steady_clock::now();
@@ -290,9 +271,7 @@ RowCounts g2_level(Install &r_m, const std::string &p_level) {
 	if (!open_cache(r_m, (p_level + "_g2").c_str(), cache)) {
 		return level_counts;
 	}
-	// Mode 1 runs alone on every core first: it bakes and stores the tiles every mode shares, so the lanes of modes 2-7
-	// (run side by side, the pools of each sized hw / lanes) find them in the cache instead of baking them several times.
-	// The loads hold no assertions; the rows are printed and CHECKed below on this thread in mode order.
+
 	constexpr unsigned kModeLanes = 4;
 	const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
 	std::vector<ModeLoad> loads;
@@ -339,8 +318,7 @@ RowCounts g2_level(Install &r_m, const std::string &p_level) {
 						r.kind == host::BotPointRow::Kind::Spawn && !r.settled ? ", spawn did not settle" : "", played ? "" : ", outside every combat area");
 			}
 		}
-		// Every flag, HQ and MCOM inside a combat area of its mode should be in the main component (G2). Reported
-		// (WARN): Metro and Caspian Rush / Squad Rush have stage-gated geometry the static bake sees closed (docs §5.7).
+
 		WARN_MESSAGE(c.objectives_main == c.objectives, p_level, " ", mode, ": ", c.objectives - c.objectives_main,
 				" objectives outside the main component");
 		if (mode.starts_with("Conquest")) {
@@ -356,14 +334,11 @@ RowCounts g2_level(Install &r_m, const std::string &p_level) {
 			p_level.c_str(), in_main, rows, level_counts.objectives_main, level_counts.objectives, level_counts.spawns_main, level_counts.spawns,
 			level_counts.exit_only, level_counts.entry_only, level_counts.disconnected, level_counts.off_mesh, level_counts.objectives_unplayed, in_main == rows ? "PASS" : "FAIL");
 	std::fflush(stdout);
-	// The all-rows gate is reported (WARN): retail spawn points that our static world leaves off the main component
-	// are listed above with their class (docs §5.7 as built has the table).
+
 	WARN_MESSAGE(in_main == rows, "G2 ", p_level, ": ", rows - in_main, " rows outside the main component");
 	return level_counts;
 }
 
-// Möller-Trumbore in double: the ray parameter t in [0, 1] of the first hit, or -1. r_edge: the hit lies within
-// p_edge_eps (barycentric) of an edge (a grazing or edge hit Jolt may resolve either way).
 double ray_triangle(const double p_o[3], const double p_d[3], const float *p_v, double p_edge_eps, bool &r_edge) {
 	const double a[3] = { p_v[0], p_v[1], p_v[2] }, b[3] = { p_v[3], p_v[4], p_v[5] }, c[3] = { p_v[6], p_v[7], p_v[8] };
 	const double e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, e2[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
@@ -391,7 +366,6 @@ double ray_triangle(const double p_o[3], const double p_d[3], const float *p_v, 
 	return t;
 }
 
-// §5.1 on one level x mode: proofs 1 (per tile against the cooked shapes), 2 (no Raycast triangle) and 3 (rays).
 void input_proofs(Install &r_m, const std::string &p_level, const std::string &p_mode) {
 	auto clock = std::chrono::steady_clock::now();
 	core::Result<std::unique_ptr<core::level::LoadedLevel>> level = core::level::load_level(r_m.install, p_level, p_mode);
@@ -410,7 +384,7 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 	core::Result<std::vector<sim::NavTileInput>> inputs = sim::nav_tile_inputs(*soup, combat->tiles, params, sim::query_mask::kMovement, combat->water);
 	REQUIRE_MESSAGE(inputs.ok(), (inputs.ok() ? std::string() : inputs.error().message));
 	const double seconds_setup = seconds_since(clock);
-	// Proofs 1 and 2.
+
 	clock = std::chrono::steady_clock::now();
 	size_t matched = 0, world_only = 0, nav_only = 0, nav_only_degenerate = 0, raycast = 0, far = 0, triangles = 0;
 	float max_error = 0.0f;
@@ -441,8 +415,7 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 	CHECK(raycast == 0);
 	CHECK(max_error < 0.001f);
 	CHECK(bad_tiles.empty());
-	// Proof 3: 10,000 seeded rays, half straight down through a tile, half horizontal inside its input box, against
-	// CollisionWorld::ray(kMovement) and a brute-force double-precision test of the tile's input.
+
 	clock = std::chrono::steady_clock::now();
 	core::Result<std::unique_ptr<sim::CollisionWorld>> cw = sim::CollisionWorld::create(*shapes);
 	REQUIRE_MESSAGE(cw.ok(), (cw.ok() ? std::string() : cw.error().message));
@@ -509,7 +482,7 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 				continue;
 			}
 		}
-		// A miss on one side, or two hits apart: an edge or grazing hit is ambiguous (as sim.world counts them).
+
 		if (best_edge || any_edge) {
 			++ambiguous;
 			continue;
@@ -535,7 +508,7 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 	level->reset();
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-nav") {
 	TEST_CASE("sim.nav: G2 on every MP mode of MP_Subway (Metro)") {
@@ -544,7 +517,7 @@ TEST_SUITE("sim-nav") {
 			return;
 		}
 		const RowCounts c = g2_level(*m, "MP_Subway");
-		// Regression floor of the as-built nav (docs §5.7): 1 of 78 CQL rows was off the main component per 10 rows.
+
 		CHECK(c.objectives > 0);
 		CHECK(double(c.spawns_main) >= 0.85 * double(c.spawns));
 	}
@@ -588,8 +561,7 @@ TEST_SUITE("sim-nav") {
 			{ "cs 0.25, radius nearest 0.25 m", sim::query_mask::kMovement, 0.25f, false },
 		};
 		std::optional<size_t> plan_main, built_main;
-		// The variants differ only in BotLoadOptions: one database and static world (same level, mode and tuning, no
-		// cache) serve all four bot loads.
+
 		const LevelBase base = load_base(*m, "MP_Subway", "ConquestLarge0", nullptr);
 		REQUIRE_MESSAGE(base.shared != nullptr, base.error);
 		for (const Variant &v : variants) {
@@ -627,8 +599,8 @@ TEST_SUITE("sim-nav") {
 		std::fflush(stdout);
 		REQUIRE(built_main.has_value());
 		REQUIRE(plan_main.has_value());
-		CHECK(*built_main > *plan_main); // the as-built choice is the better one on the gate's rows
-		// Cold then warm on a scratch root: the warm load restores the nav world (no soup, no bake), the same tiles.
+		CHECK(*built_main > *plan_main);
+
 		core::Cache cache;
 		REQUIRE(open_cache(*m, "metro_cold_warm", cache));
 		const std::optional<ModeLoad> cold = load_mode(*m, "MP_Subway", "ConquestLarge0", *combat, &cache);
@@ -668,12 +640,11 @@ TEST_SUITE("sim-nav-bake") {
 		if (m == nullptr) {
 			return;
 		}
-		// Caspian's untimed setup (load, traverse, combat areas, soup, link world) is built once on 16 threads and baked at
-		// 16 (the gate), 4 and 1 threads (reported); Kharg at 16 (the gate). Each bake's timed span is the single bench's.
+
 		struct Level {
 			const char *level;
 			std::vector<unsigned> threads;
-			double gate; // on 16 threads
+			double gate;
 		};
 		const Level levels[] = {
 			{ "MP_007", { 16, 4, 1 }, host::kNavBakeGateCaspianSeconds },
@@ -702,7 +673,7 @@ TEST_SUITE("sim-nav-bake") {
 				CHECK(b.nav != nullptr);
 				CHECK(b.nav->stats().polys > 0);
 			}
-			// The bake is deterministic across thread counts: the navs of one setup are identical, tile by tile.
+
 			const host::NavBakeBench &a = benches->front();
 			for (const host::NavBakeBench &b : *benches) {
 				if (a.nav == nullptr || b.nav == nullptr) {

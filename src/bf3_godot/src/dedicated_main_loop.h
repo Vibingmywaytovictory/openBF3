@@ -1,9 +1,4 @@
 #pragma once
-// DedicatedMainLoop (plan §2.6): the entry of a dedicated server under `godot --headless`.
-//   godot --headless --path <project> --main-loop DedicatedMainLoop -- [--dedicated-seconds=N]
-//         [--port=N] [--bind=127.0.0.1] [--bf3-install=<dir>]
-// No scene tree, no rendering: it mounts the install read-only and runs ServerHost until
-// N seconds have passed (0 = until the process is stopped), printing stats once per second.
 
 #include "bf3/core/install_reader.h"
 #include "bf3/host/server_host.h"
@@ -40,4 +35,4 @@ private:
 	bool failed_ = false;
 };
 
-} // namespace bf3::godot_side
+}

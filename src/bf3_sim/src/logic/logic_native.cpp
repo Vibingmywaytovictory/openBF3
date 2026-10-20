@@ -1,9 +1,3 @@
-// S4 level logic: native port bindings and the native stubs (docs/design/s4.md §8). See logic_native.h.
-//
-// After interface collapse a capture point's links all leave its own CapturePoint port #-320184006 (the flag and HQ
-// prefabs forward their interface link #-275573010 to it), to CharacterSpawn and VehicleSpawn targets alike. The
-// stub's link rule therefore keys on the target type: linked CharacterSpawns follow the owner team; linked
-// VehicleSpawns are left to the graph's own Enabled wiring (s4.md §8, open question 6).
 #include "bf3/sim/logic/logic_native.h"
 
 #include <algorithm>
@@ -23,8 +17,6 @@ constexpr int32_t id(std::string_view p_name) {
 	return gp::logic_port_id(p_name);
 }
 
-// The bindings S4 interprets (verified port names and ids, s4.md §8 and the ports census); every other input of a
-// native type is Recorded. Sorted by (type, port) at first use.
 struct Row {
 	T type;
 	D dir;
@@ -73,24 +65,23 @@ std::vector<NativePortBinding> build_bindings() {
 	add(T::RoundOver, D::EventOut, id("OnRoundOver"), M::OnRoundOver, "OnRoundOver");
 	add(T::GameInteraction, D::EventIn, id("Enable"), M::Enable, "Enable");
 	add(T::GameInteraction, D::EventIn, id("Disable"), M::Disable, "Disable");
-	add(T::GameInteraction, D::EventIn, -686199110, M::Activate, ""); // unnamed; the Rush crate interaction's arm input
-	// M2b ru R4 (docs/design/m2b.md §2.6 #5, §3.1): the TDM natives' ports (RoundNatives, round_natives.h); the stubs'
-	// switch records every one of them (its default), so the S4 rows stay bit-equal.
-	add(T::KillCounter, D::PropertyOut, id("Kills"), M::Kills, "Kills"); // M2b ru R4
-	add(T::KillCounter, D::PropertyOut, id("KillLimit"), M::KillLimit, "KillLimit"); // M2b ru R4
-	add(T::RoundOver, D::EventIn, id("TeamWins"), M::TeamWins, "TeamWins"); // M2b ru R4
-	add(T::RoundOver, D::EventIn, id("StopTime"), M::StopTime, "StopTime"); // M2b ru R4
-	add(T::HumanPlayer, D::EventIn, id("UnSpawnAllSoldiers"), M::UnSpawnAllSoldiers, "UnSpawnAllSoldiers"); // M2b ru R4
-	add(T::HumanPlayer, D::EventOut, id("OnPlayerSpawned"), M::OnPlayerSpawned, "OnPlayerSpawned"); // M2b ru R4
-	add(T::HumanPlayer, D::EventOut, id("OnPlayerDied"), M::OnPlayerDied, "OnPlayerDied"); // M2b ru R4
-	add(T::HumanPlayer, D::EventOut, id("OnSpectatorEnter"), M::OnSpectatorEnter, "OnSpectatorEnter"); // M2b ru R4
-	add(T::AutoTeam, D::EventIn, id("PlayerEnter"), M::PlayerEnter, "PlayerEnter"); // M2b ru R4
-	add(T::AutoTeam, D::EventIn, id("DisableAllowedToSpawnOn"), M::DisableAllowedToSpawnOn, "DisableAllowedToSpawnOn"); // M2b ru R4
-	add(T::InputRestriction, D::EventIn, id("Activate"), M::Activate, "Activate"); // M2b ru R4
-	add(T::InputRestriction, D::EventIn, id("Deactivate"), M::Deactivate, "Deactivate"); // M2b ru R4
-	add(T::LevelControl, D::EventIn, id("RestartLevel"), M::RestartLevel, "RestartLevel"); // M2b ru R4
-	add(T::PreRound, D::EventOut, id("EnablePlayerMovement"), M::EnablePlayerMovement, "EnablePlayerMovement"); // M2b ru R4
-	// The remaining S4 natives: enable state only.
+	add(T::GameInteraction, D::EventIn, -686199110, M::Activate, "");
+
+	add(T::KillCounter, D::PropertyOut, id("Kills"), M::Kills, "Kills");
+	add(T::KillCounter, D::PropertyOut, id("KillLimit"), M::KillLimit, "KillLimit");
+	add(T::RoundOver, D::EventIn, id("TeamWins"), M::TeamWins, "TeamWins");
+	add(T::RoundOver, D::EventIn, id("StopTime"), M::StopTime, "StopTime");
+	add(T::HumanPlayer, D::EventIn, id("UnSpawnAllSoldiers"), M::UnSpawnAllSoldiers, "UnSpawnAllSoldiers");
+	add(T::HumanPlayer, D::EventOut, id("OnPlayerSpawned"), M::OnPlayerSpawned, "OnPlayerSpawned");
+	add(T::HumanPlayer, D::EventOut, id("OnPlayerDied"), M::OnPlayerDied, "OnPlayerDied");
+	add(T::HumanPlayer, D::EventOut, id("OnSpectatorEnter"), M::OnSpectatorEnter, "OnSpectatorEnter");
+	add(T::AutoTeam, D::EventIn, id("PlayerEnter"), M::PlayerEnter, "PlayerEnter");
+	add(T::AutoTeam, D::EventIn, id("DisableAllowedToSpawnOn"), M::DisableAllowedToSpawnOn, "DisableAllowedToSpawnOn");
+	add(T::InputRestriction, D::EventIn, id("Activate"), M::Activate, "Activate");
+	add(T::InputRestriction, D::EventIn, id("Deactivate"), M::Deactivate, "Deactivate");
+	add(T::LevelControl, D::EventIn, id("RestartLevel"), M::RestartLevel, "RestartLevel");
+	add(T::PreRound, D::EventOut, id("EnablePlayerMovement"), M::EnablePlayerMovement, "EnablePlayerMovement");
+
 	for (const T t : { T::CombatAreaTrigger, T::SurroundingGeometry, T::TicketCounter, T::LifeCounter, T::KillCounter, T::AutoTeam, T::Objective,
 				 T::DamageAreaTrigger, T::ClearAreaTrigger, T::GeometryTrigger, T::UnderFireTrigger, T::FriendZone, T::Predestruction, T::LevelControl,
 				 T::InputRestriction }) {
@@ -113,7 +104,7 @@ bool is_native(LogicTypeId p_type) {
 	return gp::logic_type_info(p_type).cls == LogicTypeClass::Native;
 }
 
-} // namespace
+}
 
 std::span<const NativePortBinding> native_ports(LogicTypeId p_type) {
 	const std::vector<NativePortBinding> &all = bindings();
@@ -136,16 +127,16 @@ std::optional<NativePortBinding> native_port(LogicTypeId p_type, NativePortDir p
 
 struct LogicNativeStubs::State {
 	std::shared_ptr<const gp::LogicGraph> graph;
-	std::vector<std::optional<NativeStubState>> stubs; // per node; set for Native nodes
+	std::vector<std::optional<NativeStubState>> stubs;
 	std::vector<NativeTimelineEntry> timeline;
-	bool timeline_full = false; // a note() was refused at kMaxNativeTimelineEntries; apply() then fails
-	Tick tick = 0; // the last tick applied
+	bool timeline_full = false;
+	Tick tick = 0;
 	struct Pending {
 		Tick tick = 0;
 		uint32_t node = 0;
 		bool enabled = false;
 	};
-	std::vector<Pending> pending; // native-side changes for a later apply (the capture point link rule)
+	std::vector<Pending> pending;
 
 	void note(uint32_t p_node, NativeTimelineEntry::What p_what, int64_t p_value) {
 		NativeTimelineEntry e;
@@ -213,7 +204,7 @@ core::Result<LogicNativeStubs> LogicNativeStubs::create(std::shared_ptr<const gp
 core::Status LogicNativeStubs::apply(Tick p_tick, std::span<const LogicEffect> p_effects, LogicRuntime &r_runtime) {
 	State &s = *state_;
 	s.tick = p_tick;
-	// Native-side changes scheduled for this tick first (in the order they were scheduled).
+
 	std::vector<State::Pending> later;
 	for (const State::Pending &p : s.pending) {
 		if (p.tick <= p_tick) {
@@ -315,7 +306,7 @@ core::Status LogicNativeStubs::capture(uint32_t p_capture_point, uint8_t p_team,
 	LogicContext captured;
 	captured.team = p_team;
 	BF3_TRY(r_runtime.force_event(p_capture_point, gp::logic_port::kOnCaptured, captured));
-	// The capture point's own character spawners follow the owner from the next tick [inferred, s4.md §8].
+
 	const int32_t team_field = id("Team");
 	for (const gp::LogicEdge &e : g.links_from(p_capture_point)) {
 		if (e.source_port != native_id::kCaptureCharacterSpawnLink || g.nodes()[e.target].type != T::CharacterSpawn || !s.stubs[e.target]) {
@@ -339,4 +330,4 @@ std::span<const NativeTimelineEntry> LogicNativeStubs::timeline() const {
 	return state_->timeline;
 }
 
-} // namespace bf3::sim::logic
+}

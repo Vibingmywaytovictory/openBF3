@@ -1,9 +1,3 @@
-// The static world's cache path (bf3_sim static_world.h blobs and keys, static_world_internal.h tile loop;
-// docs/design/m1.md §5.5, §14). Suite sim-world-unit, synthetic only (no install): tile and world-index blobs
-// round-trip bit for bit and refuse hostile bytes (every truncation, trailing bytes, counts, tags, layers, the stream
-// header and seeded tree mutations, which are refused or restore into a world whose queries stay in bounds); the
-// cache keys change with every input that changes the output; the content-keyed tile cache on scratch roots (cold
-// cooks and puts, warm restores identical shapes, damaged and decoder-refused entries are dropped and re-cooked).
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/cached_convert.h"
@@ -31,7 +25,6 @@ namespace fs = std::filesystem;
 
 std::atomic<int> g_scratch_counter{ 0 };
 
-// %TEMP%\openbf3-world-<pid>-<tick>-<n>\{install, cache}; the install folder plays the protected root.
 struct WorldScratch {
 	fs::path base;
 	fs::path root;
@@ -103,7 +96,6 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> decode_one(const std::vec
 	return decode_static_tile_blobs(std::span<const std::span<const uint8_t>>(&one, 1));
 }
 
-// Every query kind over a world (seeded) as comparable rows: a restored world must answer like its source.
 std::vector<StaticHit> query_rows(const CollisionWorld &p_world, uint32_t p_seed, float p_half) {
 	std::mt19937 rng(p_seed);
 	std::uniform_real_distribution<float> pos(-p_half, p_half);
@@ -139,13 +131,13 @@ bool same_rows(const std::vector<StaticHit> &p_a, const std::vector<StaticHit> &
 }
 
 std::vector<StaticTriangle> field_with_walls() {
-	std::vector<StaticTriangle> field = bumpy_field(100.0f); // 16 tiles
+	std::vector<StaticTriangle> field = bumpy_field(100.0f);
 	add_wall_x(field, 12.0f, -30.0f, 30.0f, -2.0f, 6.0f, tag_of(40, 4, 2), StaticLayer::Character);
 	add_wall_x(field, -12.0f, -30.0f, 30.0f, -2.0f, 6.0f, tag_of(41, 6, 1), StaticLayer::Raycast);
 	return field;
 }
 
-} // namespace
+}
 
 TEST_SUITE("sim-world-unit") {
 	TEST_CASE("sim.world: tile blobs round-trip bit for bit and the restored world answers like the cooked one") {
@@ -178,14 +170,14 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(r.stats().shape_bytes == cooked->stats().shape_bytes);
 		CHECK(encode_static_tile_blob(r, r.tile_count()).empty());
 		CHECK(same_rows(query_rows(*world_of(cooked), 99, 110.0f), query_rows(*world_of(*restored), 99, 110.0f)));
-		// Tiles must come in increasing (x, z) order, once each.
+
 		std::vector<std::vector<uint8_t>> swapped = blobs;
 		std::swap(swapped[0], swapped[1]);
 		CHECK_FALSE(decode_all(swapped).ok());
 		swapped = blobs;
 		swapped[1] = swapped[0];
 		CHECK_FALSE(decode_all(swapped).ok());
-		// A world without the Raycast layer round-trips too (that layer has no shape and counts 0).
+
 		StaticWorldBuildOptions no_ray;
 		no_ray.include_raycast = false;
 		const auto movement = build(field, no_ray);
@@ -196,11 +188,11 @@ TEST_SUITE("sim-world-unit") {
 	}
 
 	TEST_CASE("sim.world: hostile tile blobs fail cleanly (truncations, trailing bytes, tags, layers, seeded mutations)") {
-		const auto cooked = build(bumpy_field(30.0f)); // four tiles around the origin, 450 triangles each
+		const auto cooked = build(bumpy_field(30.0f));
 		const std::vector<uint8_t> blob = encode_static_tile_blob(*cooked, 0);
 		REQUIRE(blob.size() > 1000);
 		REQUIRE(decode_one(blob).ok());
-		// Proper prefixes: every one of the first 256 bytes, then every 7th.
+
 		size_t prefixes = 0;
 		size_t refused = 0;
 		for (size_t n = 0; n < blob.size(); n += (n < 256 ? 1 : 7)) {
@@ -218,13 +210,12 @@ TEST_SUITE("sim-world-unit") {
 		version[8] = 99;
 		CHECK_FALSE(decode_one(version).ok());
 
-		// OBF3JTIL v1 header: magic 8, version 4, x 4, z 4, content 32, bounds 24, tag count 4, tags 8 each.
 		constexpr size_t kTagCountAt = 8 + 4 + 4 + 4 + 32 + 24;
 		uint32_t tags;
 		std::memcpy(&tags, blob.data() + kTagCountAt, 4);
 		REQUIRE(tags >= 2);
 		{
-			// One tag fewer (cut out of the table): the tree's user data then names a tag past it.
+
 			std::vector<uint8_t> fewer = blob;
 			const uint32_t less = tags - 1;
 			std::memcpy(fewer.data() + kTagCountAt, &less, 4);
@@ -232,14 +223,14 @@ TEST_SUITE("sim-world-unit") {
 			const auto r = decode_one(fewer);
 			REQUIRE_FALSE(r.ok());
 			CHECK(r.error().message.find("tags") != std::string::npos);
-			// A hostile tag count cannot allocate: it is checked against the bytes left.
+
 			std::vector<uint8_t> huge = blob;
 			const uint32_t big = 0xFFFFFFFFu;
 			std::memcpy(huge.data() + kTagCountAt, &big, 4);
 			CHECK_FALSE(decode_one(huge).ok());
 		}
 		const size_t layers_at = kTagCountAt + 4 + size_t(tags) * 8;
-		const size_t record_at = layers_at + 4; // u8 layer, u32 input, u32 jolt triangles, u32 stream bytes
+		const size_t record_at = layers_at + 4;
 		{
 			std::vector<uint8_t> many = blob;
 			const uint32_t four = 4;
@@ -249,24 +240,24 @@ TEST_SUITE("sim-world-unit") {
 			bad_layer[record_at] = 3;
 			CHECK_FALSE(decode_one(bad_layer).ok());
 			std::vector<uint8_t> huge = blob;
-			const uint32_t big = 0xFFFFFFF0u; // a stream past the blob: refused before anything is allocated
+			const uint32_t big = 0xFFFFFFF0u;
 			std::memcpy(huge.data() + record_at + 9, &big, 4);
 			CHECK_FALSE(decode_one(huge).ok());
 			std::vector<uint8_t> count = blob;
 			uint32_t jolt;
 			std::memcpy(&jolt, count.data() + record_at + 5, 4);
-			++jolt; // no longer the tree's count
+			++jolt;
 			std::memcpy(count.data() + record_at + 5, &jolt, 4);
 			CHECK_FALSE(decode_one(count).ok());
 			std::vector<uint8_t> zero = blob;
 			std::memset(zero.data() + record_at + 5, 0, 4);
 			CHECK_FALSE(decode_one(zero).ok());
 		}
-		// The MeshShape stream: sub type, shape user data, tree size.
+
 		const size_t stream_at = record_at + 13;
 		{
 			std::vector<uint8_t> sub = blob;
-			sub[stream_at] = 0; // EShapeSubType::Sphere
+			sub[stream_at] = 0;
 			CHECK_FALSE(decode_one(sub).ok());
 			std::vector<uint8_t> user = blob;
 			user[stream_at + 1] = 1;
@@ -275,23 +266,22 @@ TEST_SUITE("sim-world-unit") {
 			tree[stream_at + 9] ^= 4;
 			CHECK_FALSE(decode_one(tree).ok());
 		}
-		// The tree's root properties: an offset into the headers, past the buffer, and a padding root.
+
 		const size_t tree_at = stream_at + 13;
-		constexpr size_t kRootPropertiesAt = 24; // NodeCodecQuadTreeHalfFloat::Header: root bounds min, max, then properties
+		constexpr size_t kRootPropertiesAt = 24;
 		{
 			std::vector<uint8_t> root = blob;
-			const uint32_t inside_header = 1; // offset 4: inside the headers
+			const uint32_t inside_header = 1;
 			std::memcpy(root.data() + tree_at + kRootPropertiesAt, &inside_header, 4);
 			CHECK_FALSE(decode_one(root).ok());
-			const uint32_t past = 0x0FFFFFFFu; // the largest node offset
+			const uint32_t past = 0x0FFFFFFFu;
 			std::memcpy(root.data() + tree_at + kRootPropertiesAt, &past, 4);
 			CHECK_FALSE(decode_one(root).ok());
 			const uint32_t padding = 0xF0000000u;
 			std::memcpy(root.data() + tree_at + kRootPropertiesAt, &padding, 4);
 			CHECK_FALSE(decode_one(root).ok());
 		}
-		// Seeded mutations of the tree bytes: each one is refused, or restores into a world whose queries stay inside
-		// the buffer (the asan preset turns an out-of-bounds read into a failure).
+
 		std::mt19937 rng(20261015);
 		size_t accepted = 0;
 		size_t rejected = 0;
@@ -382,7 +372,7 @@ TEST_SUITE("sim-world-unit") {
 		no_ray.include_raycast = false;
 		CHECK_FALSE(key(static_tile_key_inputs(content, no_ray)) == k0);
 		StaticWorldBuildOptions threads = base;
-		threads.threads = 3; // lanes do not change the output
+		threads.threads = 3;
 		CHECK(key(static_tile_key_inputs(content, threads)) == k0);
 		core::CacheKeyInputs jolt = tile;
 		jolt.jolt_version = "5.6.1;det=1;dp=0";
@@ -400,7 +390,7 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(world.params.find("soup=" + std::to_string(level::kCollisionSoupVersion)) != std::string::npos);
 		const core::CacheKey w0 = key(world);
 		CHECK_FALSE(w0 == k0);
-		CHECK(key(static_world_key_inputs(content, "mp_subway", "teamdeathmatch0", load)) == w0); // the ids are case-insensitive
+		CHECK(key(static_world_key_inputs(content, "mp_subway", "teamdeathmatch0", load)) == w0);
 		CHECK_FALSE(key(static_world_key_inputs(other, "MP_Subway", "TeamDeathMatch0", load)) == w0);
 		CHECK_FALSE(key(static_world_key_inputs(content, "MP_Subway", "ConquestLarge0", load)) == w0);
 		CHECK_FALSE(key(static_world_key_inputs(content, "MP_011", "TeamDeathMatch0", load)) == w0);
@@ -443,8 +433,6 @@ TEST_SUITE("sim-world-unit") {
 		CHECK(same_rows(query_rows(*world_of(cold), 5, 110.0f), query_rows(*world_of(warm), 5, 110.0f)));
 		CHECK(same_rows(query_rows(*world_of(uncached), 5, 110.0f), query_rows(*world_of(warm), 5, 110.0f)));
 
-		// A damaged entry on disk (the cache's SHA-256 catches it) and an entry that passes the cache but not the
-		// decoder are both dropped and re-cooked; the next run is all hits.
 		const StaticWorldBuildOptions options;
 		const std::optional<core::CacheKey> k0 = core::make_cache_key(static_tile_key_inputs(uncached->tile(0).content, options));
 		const std::optional<core::CacheKey> k1 = core::make_cache_key(static_tile_key_inputs(uncached->tile(1).content, options));
@@ -460,18 +448,18 @@ TEST_SUITE("sim-world-unit") {
 			REQUIRE(cache.open(t.options()) == core::CacheStatus::Ok);
 			REQUIRE(cache.remove(*k1) == core::CacheStatus::Ok);
 			std::vector<uint8_t> hostile = reference[1];
-			hostile.push_back(7); // a trailing byte: valid for the cache, refused by the decoder
+			hostile.push_back(7);
 			REQUIRE(cache.put(*k1, hostile).status == core::CacheStatus::Ok);
 			cache.close();
 		}
 		const auto repaired = run(field, 14, 2);
 		CHECK(tile_blobs(*repaired) == reference);
 		run(field, 16, 0);
-		// A tile whose content changes gets a new key; the others still hit.
+
 		std::vector<StaticTriangle> moved = field;
 		moved[0].v[0][1] += 0.001f;
 		run(moved, 15, 1);
-		// A closed cache: every tile is cooked and nothing is read or written.
+
 		core::Cache closed;
 		core::Result<std::shared_ptr<const StaticWorldShapes>> w = build_static_world_cached(&closed, std::span<const StaticTriangle>(field));
 		REQUIRE(w.ok());

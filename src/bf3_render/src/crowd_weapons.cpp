@@ -1,26 +1,3 @@
-// The crowd's per-item 3p weapons (M2a tp; docs/design/m2a.md §9, R5; docs/design/m2a-w3.md §3 "tp's 3p weapon route";
-// as built: docs/design/m2a-tp.md). See crowd_weapons.h.
-//
-// Per item, as load_soldier_assets prepares S3's weapon part (soldier_assets.cpp), on the same level superbundle:
-//   mesh      CrowdWeaponSpec::mesh, else SoldierWeaponData.WeaponStates[0].Mesh3p of the spec's weapon_unlock
-//             partition; materials through the MeshVariationDatabase; LOD SoldierSpec::lod bound by name into the rig
-//             with weaponske01 (the item's own SkinBinds); load_mesh_cached (kind "mesh", keyed with the item's lane
-//             binds)
-//   layout    the team's weapon_joints / weapon_local (every item skins to weaponske01, so the layout of its undriven
-//             joints is the same for every item)
-//   reload    WeaponStates[0].Weapon.AssetId -> weapon_choice_index -> load_chosen_clip(reload chooser); the rate plays
-//             the clip in the WeaponDef's (empty magazine) reload time, clamped to [0.5, 2] [inferred, s3.md §16 Q3:
-//             3.17 s x 0.75 = 2.37 s, the M16A4's]; rate 1 without a reload time
-//   muzzle    rig joint Wep_Root; offset = inverse bind of weaponske01's Wep_Root x the FireEffects3p muzzle entry's
-//             Offset and Rotation (in the weapon mesh's frame, Frostbite axes: the barrel is +Z) x Rx(+90 deg), so the
-//             effect frame's +Y runs along the barrel (fx2's convention, m2a-fx2.md). The entry: the first
-//             FireEffects3p whose Effect names a muzzle flash ("muzz"), else entry 0 [verified on the M16A4:
-//             fx_muzz_generic_rifle_3p at (0, 0.028, 0.99), rotation 0]; read from WeaponDef::firing_data's
-//             WeaponFiringData.PrimaryFire.
-// Failures: item 0 of a team (the team's SoldierSpec weapon) failing fails the load (crowd_weapons.h). Another item
-// whose mesh, materials or binds do not resolve is dropped with a note (a knife or grenade without a usable 3p mesh
-// must not take the crowd down; crowd_weapon_index then finds no item for its def, and Bf3GameCrowd draws item 0,
-// counted). A missing reload clip, reload time or muzzle is a note, as the header says.
 #include "bf3/render/crowd_weapons.h"
 
 #include "bf3/anim/crowd_clips.h"
@@ -74,7 +51,6 @@ uint32_t variation_hash_of(const core::EbxLibrary &p_library, const std::string 
 	return h ? h->as_u32().value_or(0) : 0;
 }
 
-// SoldierWeaponData of a weapon blueprint partition (S3's weapon_unlock), or an error.
 core::Result<core::EbxInstance> soldier_weapon_data(const core::EbxLibrary &p_library, const std::string &p_partition) {
 	const core::EbxPartition *part = p_library.partition_by_name(p_partition);
 	if (part == nullptr) {
@@ -87,7 +63,6 @@ core::Result<core::EbxInstance> soldier_weapon_data(const core::EbxLibrary &p_li
 	return data.front();
 }
 
-// WeaponStates[0].Weapon.AssetId (soldier_assets.cpp's weapon_ant_ref, on the instance).
 core::Result<uint32_t> weapon_ant_ref(const core::EbxInstance &p_data, const std::string &p_partition) {
 	const std::optional<core::EbxValue> id = p_data.get_path("WeaponStates[0].Weapon.AssetId");
 	if (!id) {
@@ -100,7 +75,6 @@ core::Result<uint32_t> weapon_ant_ref(const core::EbxInstance &p_data, const std
 	return uint32_t(*v);
 }
 
-// WeaponStates[0].Mesh3p's partition name ("" when absent).
 std::string mesh_3p(const core::EbxLibrary &p_library, const core::EbxInstance &p_data) {
 	const std::optional<core::EbxValue> state = p_data.get_path("WeaponStates[0]");
 	if (!state) {
@@ -126,8 +100,6 @@ std::optional<anim::Vec3> vec3_field(const core::EbxStruct &p_s, std::string_vie
 	return anim::Vec3{ (*a)[0], (*a)[1], (*a)[2] };
 }
 
-// The FireEffects3p muzzle entry of "<partition>#<guid>" (WeaponDef::firing_data): its Offset and Rotation (degrees)
-// in the weapon frame, and the effect's name.
 struct MuzzleEntry {
 	anim::Vec3 offset{};
 	anim::Vec3 rotation_deg{};
@@ -163,7 +135,7 @@ core::Result<MuzzleEntry> muzzle_entry(const core::EbxLibrary &p_library, const 
 	for (const core::EbxValue e : *list->as_array()) {
 		const size_t i = index++;
 		if (i >= 64) {
-			break; // retail lists hold a few entries
+			break;
 		}
 		const std::optional<core::EbxStruct> s = e.as_struct();
 		if (!s) {
@@ -194,7 +166,6 @@ core::Result<MuzzleEntry> muzzle_entry(const core::EbxLibrary &p_library, const 
 	return best;
 }
 
-// One item into r_part (r_part.spec set). Notes go to r_notes; an error drops the item (or fails item 0).
 core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_spec, const SoldierAssets &p_assets, const SoldierTeam &p_team,
 		const std::vector<std::string> &p_databases, core::Cache *p_cache, CrowdWeaponPart &r_part, std::vector<std::string> &r_notes) {
 	const anim::Skeleton &rig = p_assets.clips.rig;
@@ -216,13 +187,13 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 			return core::make_error("weapon " + spec.weapon_unlock + ": no WeaponStates[0].Mesh3p");
 		}
 	}
-	// Materials (the default variation: the weapons carry no appearance variation).
+
 	core::Result<MeshMaterials> materials = mesh_materials(p_lib, spec.mesh, variation_hash_of(p_lib, std::string()), p_databases);
 	if (!materials) {
 		return core::error_at(spec.mesh, materials.error());
 	}
 	r_part.materials = std::move(*materials);
-	// Mesh, bound into the rig with weaponske01 into the item's own binds.
+
 	const core::LevelMount &mount = p_lib.mount(0);
 	core::Result<MeshHead> head = read_mesh_head(mount, spec.mesh);
 	if (!head) {
@@ -253,10 +224,10 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 	r_part.cache = mesh->item;
 	r_part.vertices = r_part.prepared.vertices;
 	r_part.triangles = r_part.prepared.triangles;
-	// Layout: weaponske01's, as the team's.
+
 	r_part.weapon_joints = p_team.weapon_joints;
 	r_part.weapon_local = p_team.weapon_local;
-	// Reload clip by the item's chooser index, and the rate from the WeaponDef's reload time.
+
 	std::string reload_line = "no reload clip";
 	if (data) {
 		core::Result<uint32_t> ref = weapon_ant_ref(*data, spec.weapon_unlock);
@@ -274,7 +245,7 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 			reload_line = "no reload clip (" + (reload ? std::string("unusable clip") : reload.error().message) + ")";
 		}
 	}
-	// The WeaponDef: reload time and the firing data's FireEffects3p.
+
 	std::optional<core::gameplay::WeaponDef> def;
 	if (!spec.weapon_def.empty()) {
 		core::Result<core::gameplay::WeaponDef> w = core::gameplay::resolve_weapon(p_lib, spec.weapon_def);
@@ -291,7 +262,7 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 		std::snprintf(line, sizeof(line), ", reload time %.2f s -> rate %.3f", double(def->fire.reload_time), double(r_part.reload_rate));
 		reload_line += line;
 	}
-	// The 3p muzzle.
+
 	std::string muzzle_line = "no muzzle";
 	const int32_t rig_root = rig.find("Wep_Root");
 	const int32_t w_root = p_assets.weapon_skeleton.find("Wep_Root");
@@ -300,7 +271,7 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 		if (entry) {
 			const anim::Xform inv_bind = anim::xform_inverse(xform_of(p_assets.weapon_skeleton.model_pose[size_t(w_root)]));
 			const anim::Vec3 r = entry->rotation_deg;
-			// Rotation [inferred order: yaw (Y), pitch (X), roll (Z)]; zero on every retail muzzle seen.
+
 			const anim::Quat q = anim::quat_mul(anim::quat_mul(axis_quat(0, 1, 0, r.y * kDegToRad), axis_quat(1, 0, 0, r.x * kDegToRad)),
 					axis_quat(0, 0, 1, r.z * kDegToRad));
 			const anim::Xform in_mesh{ anim::quat_mul(q, axis_quat(1, 0, 0, 90.0f * kDegToRad)), entry->offset };
@@ -323,7 +294,7 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 	return core::Status::success();
 }
 
-} // namespace
+}
 
 core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install, const SoldierSpec &p_spec, const SoldierAssets &p_assets,
 		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache) {
@@ -364,7 +335,7 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ins
 			set->teams[t].push_back(std::move(part));
 		}
 	}
-	// Textures the weapon surfaces use that SoldierAssets::textures lacks (decoded on all cores, as S3's).
+
 	std::vector<std::pair<std::string, TextureRole>> wanted;
 	std::set<std::string> seen;
 	for (const std::vector<CrowdWeaponPart> &team : set->teams) {
@@ -416,4 +387,4 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ins
 	return set;
 }
 
-} // namespace bf3::render
+}
