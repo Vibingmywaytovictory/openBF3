@@ -4,9 +4,9 @@
 #include "godot_util.h"
 
 #include "bf3/audio/audio_load.h"
-#include "bf3/audio/game_audio_frame.h"
-#include "bf3/audio/kit_audio.h"
 #include "bf3/audio/voice_cull.h"
+#include "bf3/client_audio/game_audio_frame.h"
+#include "bf3/client_audio/kit_audio.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/level/level.h"
 #include "bf3/host/client_wiring.h"

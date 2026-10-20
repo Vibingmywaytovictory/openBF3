@@ -33,14 +33,18 @@ bf3_core                       install, containers, EBX, cache, res/ant/audio as
 bf3_sim      -> Jolt, Recast, Detour (hidden behind *_internal.h; no engine type in a public header)
   ^                            collision and physics worlds, soldier motor, prediction, weapons, vehicles,
   |                            navigation, bot perception and walking, level logic runtime
+  |  bf3_present               presentation PODs: PresentEvent and its ring, PresentClock, presented soldiers and
+  |    ^                       weapons, effect seeds
+  |    |
+  |  bf3_fx bf3_audio          effects compiler and particle simulator; mixer core, DSP, patches, routing
+  |                            (both link only bf3_present and bf3_core; bf3_host links bf3_present too)
 bf3_net      -> ENet           bit streams, protocol v3, network simulator, loopback ping
   ^
-bf3_host     -> anim           server: ServerHost thread, GameServer (socket-free), TDM rules, bots, lag comp, gunplay
-  ^    ^                       client: ClientSession, projectiles, presentation events, HUD feed
-  |    |
-bf3_fx bf3_audio               effects compiler and particle simulator; mixer core, DSP, patches, routing
-  ^      ^                     (both link bf3_host today only for the presentation event types; see "Known debts")
-  |      |
+bf3_host     -> anim, present  server: ServerHost thread, GameServer (socket-free), TDM rules, bots, lag comp, gunplay
+  ^                            client: ClientSession, projectiles, HUD feed; re-exports the bf3_present types
+  |
+bf3_client_audio -> audio      GameAudioDriver (presentation frame to router), kit audio sources, game audio loading
+  ^
 bf3_godot (shared library)     the GDExtension: sessions, bridges to RenderingServer and AudioStream, HUD controls,
                                viewmodel, plus the headless checks and demos
 ```
@@ -119,9 +123,6 @@ with ranges checked at load (`motor_tuning.cpp`, `vehicle_tuning.cpp`, `mechanic
 
 These are structural, known, and listed so nobody mistakes them for design intent.
 
-* `bf3_fx` and `bf3_audio` depend on `bf3_host` (and so on sim, net and anim) for `PresentEvent`, `PresentClock`,
-  `PresentedSoldier` and two seed hashes. Those are PODs that belong in a lower `bf3_present` library; the two audio
-  glue files that call real host logic (`game_audio_frame.cpp`, `kit_audio.cpp`) belong above the audio runtime.
 * `bf3_host` holds both the server and the client. A `bf3_client` split would make the dependency picture honest.
 * `bf3_godot` and `bf3_sim` compile their check, demo and harness code into the shipped extension; it should sit
   behind a build option.

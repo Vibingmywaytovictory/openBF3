@@ -12,6 +12,7 @@
 #include "bf3/host/kits.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/net/weapons_wire.h"
+#include "bf3/present/presented.h"
 
 #include <cstdint>
 #include <functional>
@@ -88,22 +89,7 @@ struct ClientSessionConfig {
 	net::KitSelect kit_select;
 };
 
-struct PresentedSoldier {
-	uint8_t slot = 0;
-	uint8_t generation = 0;
-	sim::Vec3 position{};
-	sim::Vec3 velocity{};
-	float yaw = 0.0f;
-	float pitch = 0.0f;
-	sim::Pose pose = sim::Pose::Stand;
-	float eye_height = 1.6f;
-	sim::MoveMode mode = sim::MoveMode::OnGround;
-	uint8_t flags = 0;
-	bool extrapolated = false;
-
-	sim::Pose target_pose = sim::Pose::Stand;
-	float transition = 0.0f;
-};
+using present::PresentedSoldier;
 
 struct ClientStats {
 	bool connected = false;

@@ -7,10 +7,9 @@
 #include "bf3/fx/fx_types.h"
 #include "bf3/fx/impact_table.h"
 #include "bf3/fx/simulator.h"
-#include "bf3/host/client_projectiles.h"
-#include "bf3/host/client_session.h"
-#include "bf3/host/client_wiring.h"
-#include "bf3/host/presentation_events.h"
+#include "bf3/present/effect_seed.h"
+#include "bf3/present/presentation_events.h"
+#include "bf3/present/presented.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
 #include <cstddef>
@@ -63,10 +62,10 @@ constexpr uint64_t trigger_seed(uint64_t p_event_seed, TriggerPurpose p_purpose,
 
 inline constexpr uint32_t kSoldierOrdinal = 0xFFFFFFFFu;
 inline uint64_t soldier_seed(uint64_t p_match_seed, uint8_t p_shooter, uint32_t p_shot, uint8_t p_pellet) {
-	return host::impact_seed(host::effect_seed(p_match_seed, p_shooter, p_shot), p_pellet, kSoldierOrdinal);
+	return present::impact_seed(present::effect_seed(p_match_seed, p_shooter, p_shot), p_pellet, kSoldierOrdinal);
 }
 inline uint64_t detonation_seed(uint64_t p_match_seed, uint8_t p_shooter, uint32_t p_shot) {
-	return trigger_seed(host::effect_seed(p_match_seed, p_shooter, p_shot), TriggerPurpose::Detonation, 0xFFFFFFFFu);
+	return trigger_seed(present::effect_seed(p_match_seed, p_shooter, p_shot), TriggerPurpose::Detonation, 0xFFFFFFFFu);
 }
 
 struct FireEffect {
@@ -117,7 +116,7 @@ struct MuzzleSample {
 };
 static_assert(std::is_trivially_copyable_v<MuzzleSample>);
 
-MuzzleSample fallback_muzzle(const host::PresentedSoldier &p_soldier);
+MuzzleSample fallback_muzzle(const present::PresentedSoldier &p_soldier);
 
 Transform effect_frame(const Vec3 &p_origin, const Vec3 &p_axis, const Vec3 &p_forward_hint);
 
@@ -202,7 +201,7 @@ struct ImpactSoundCue {
 	Vec3 normal{ 0, 1, 0 };
 	uint64_t seed = 0;
 	int64_t time = 0;
-	host::PresentTimeline timeline = host::PresentTimeline::Render;
+	present::PresentTimeline timeline = present::PresentTimeline::Render;
 };
 
 struct EffectSoundCue {
@@ -259,7 +258,7 @@ struct FxTriggerStats {
 static_assert(std::is_trivially_copyable_v<FxTriggerStats>);
 
 struct TriggerStart {
-	host::PresentKind kind = host::PresentKind::OwnShot;
+	present::PresentKind kind = present::PresentKind::OwnShot;
 	TriggerPurpose purpose = TriggerPurpose::Muzzle;
 	uint32_t index = 0;
 	uint8_t slot = 0;
@@ -285,7 +284,7 @@ public:
 
 	void on_muzzles(std::span<const MuzzleSample> p_muzzles);
 
-	void on_events(std::span<const host::PresentEvent> p_events, const host::PresentClock &p_now, const FxView &p_view);
+	void on_events(std::span<const present::PresentEvent> p_events, const present::PresentClock &p_now, const FxView &p_view);
 
 	std::span<const DecalCue> decals() const;
 	std::span<const ImpactSoundCue> sounds() const;

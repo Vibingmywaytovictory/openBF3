@@ -2,13 +2,13 @@
 
 #include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/audio_config.h"
-#include "bf3/audio/game_audio_frame.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/audio/voice_cull.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/audio/weapon_foley.h"
+#include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
@@ -145,6 +145,7 @@ struct Rig {
 	std::vector<float> top_db;
 	uint64_t frame_index = 0;
 	const host::PresentationFrame *own_frame = nullptr;
+	host::OwnWeaponsPresenter own_weapons;
 
 	explicit Rig(const FoleyFixture &p_f) {
 		ba::MixerConfig mc;
@@ -177,7 +178,7 @@ struct Rig {
 		clock->set_now(c);
 		router->set_own_trigger(p_trigger);
 		router->set_listener(listener);
-		router->set_own_weapons(own_frame);
+		router->set_own_weapons(own_weapons.present(own_frame));
 		router->on_events(p_events, *clock);
 		router->on_others(p_others, p_weapons, {}, *clock);
 		router->update(c.now_ns);

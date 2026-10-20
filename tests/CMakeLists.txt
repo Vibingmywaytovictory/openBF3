@@ -910,7 +910,7 @@ openbf3_cost(render.crowd_weapons 1 5)
 openbf3_cost(godot.m2a_tp_crowd 1 10)
 
 openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h)
-target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_host bf3_fx bf3_core)
+target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_client_audio bf3_host bf3_fx bf3_core)
 target_compile_definitions(test_audio_router PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg"
     OPENBF3_AU3_SHOTS="${CMAKE_BINARY_DIR}/shots")
 add_test(NAME audio.router.unit COMMAND test_audio_router --test-suite=audio-router)
@@ -1103,7 +1103,7 @@ if(OPENBF3_ASAN)
 endif()
 
 openbf3_test(test_audio_foley test_main.cpp audio_foley_tests.cpp test_support.h)
-target_link_libraries(test_audio_foley PRIVATE bf3_audio bf3_host bf3_core)
+target_link_libraries(test_audio_foley PRIVATE bf3_audio bf3_client_audio bf3_host bf3_core)
 target_compile_definitions(test_audio_foley PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg"
     OPENBF3_PT1_SHOTS="${CMAKE_BINARY_DIR}/shots")
 add_test(NAME audio.foley.install COMMAND test_audio_foley --test-suite=audio-foley)

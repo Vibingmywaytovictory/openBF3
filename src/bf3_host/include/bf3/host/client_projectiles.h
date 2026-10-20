@@ -6,6 +6,7 @@
 #include "bf3/host/presentation_events.h"
 #include "bf3/net/other_sample.h"
 #include "bf3/net/protocol.h"
+#include "bf3/present/effect_seed.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -63,8 +64,8 @@ struct ClientProjectilesConfig {
 	sim::weapons::BallisticsLimits limits;
 };
 
-uint64_t effect_seed(uint64_t p_match_seed, uint8_t p_slot, uint32_t p_shot_index);
-uint64_t impact_seed(uint64_t p_effect_seed, uint8_t p_pellet, uint32_t p_ordinal);
+using present::effect_seed;
+using present::impact_seed;
 
 bool shot_event_of(const net::RemoteShot &p_shot, const sim::weapons::WeaponTable &p_table, uint64_t p_match_seed, sim::weapons::ShotEvent &r_event);
 

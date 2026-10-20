@@ -36,14 +36,6 @@ bool bit(const std::array<uint64_t, 2> &p_mask, uint32_t p_slot) {
 
 }
 
-uint64_t effect_seed(uint64_t p_match_seed, uint8_t p_slot, uint32_t p_shot_index) {
-	return sw::splitmix64(p_match_seed ^ (uint64_t(p_slot) << 32 | uint64_t(p_shot_index)));
-}
-
-uint64_t impact_seed(uint64_t p_effect_seed, uint8_t p_pellet, uint32_t p_ordinal) {
-	return sw::splitmix64(p_effect_seed ^ (uint64_t(p_pellet) << 40 | uint64_t(p_ordinal)));
-}
-
 bool shot_event_of(const net::RemoteShot &p_shot, const sw::WeaponTable &p_table, uint64_t p_match_seed, sw::ShotEvent &r_event) {
 	if (p_shot.def >= p_table.defs.size()) {
 		return false;

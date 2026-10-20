@@ -7,7 +7,7 @@ add_library(bf3_host STATIC
     include/bf3/host/loopback_client.h
 )
 target_include_directories(bf3_host PUBLIC include)
-target_link_libraries(bf3_host PUBLIC bf3_sim bf3_net bf3_core)
+target_link_libraries(bf3_host PUBLIC bf3_present bf3_sim bf3_net bf3_core)
 openbf3_module(bf3_host)
 
 target_sources(bf3_host PRIVATE
@@ -51,7 +51,6 @@ target_sources(bf3_host PRIVATE
 )
 
 target_sources(bf3_host PRIVATE
-    src/presentation_events.cpp
     src/presentation_weapon.cpp
     src/client_projectiles.cpp
 )

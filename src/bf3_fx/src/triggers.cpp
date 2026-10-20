@@ -16,7 +16,6 @@ namespace bf3::fx {
 
 namespace {
 
-namespace hk = host;
 namespace gp = core::gameplay;
 
 constexpr float kPi = 3.14159265358979f;
@@ -267,7 +266,7 @@ MuzzleSample aim_muzzle(uint8_t p_slot, const Vec3 &p_eye, const Vec3 &p_directi
 	return m;
 }
 
-MuzzleSample fallback_muzzle(const host::PresentedSoldier &p_soldier) {
+MuzzleSample fallback_muzzle(const present::PresentedSoldier &p_soldier) {
 	const float cp = std::cos(p_soldier.pitch);
 	const Vec3 dir{ std::sin(p_soldier.yaw) * cp, std::sin(p_soldier.pitch), std::cos(p_soldier.yaw) * cp };
 	const Vec3 eye{ p_soldier.position[0], p_soldier.position[1] + p_soldier.eye_height, p_soldier.position[2] };
@@ -744,7 +743,7 @@ struct FxTriggers::Impl {
 	std::vector<ImpactSoundCue> sounds;
 	std::vector<TriggerStart> starts;
 
-	std::deque<hk::PresentEvent> pending;
+	std::deque<present::PresentEvent> pending;
 
 	std::unordered_set<uint64_t> seen;
 	std::deque<uint64_t> seen_order;
@@ -767,7 +766,7 @@ struct FxTriggers::Impl {
 
 	struct Tracer {
 		EffectHandle handle;
-		hk::PresentTimeline timeline = hk::PresentTimeline::Predicted;
+		present::PresentTimeline timeline = present::PresentTimeline::Predicted;
 		int64_t t0 = 0;
 		Vec3 muzzle;
 		Vec3 origin;
@@ -831,7 +830,7 @@ struct FxTriggers::Impl {
 		return *d;
 	}
 
-	EffectHandle start(const std::shared_ptr<const EffectDef> &p_def, const hk::PresentEvent &p_e, TriggerPurpose p_purpose, uint32_t p_index, uint64_t p_seed,
+	EffectHandle start(const std::shared_ptr<const EffectDef> &p_def, const present::PresentEvent &p_e, TriggerPurpose p_purpose, uint32_t p_index, uint64_t p_seed,
 			const Transform &p_frame, const Vec3 &p_velocity, float p_age, bool p_first_person, bool *r_culled = nullptr) {
 		TriggerStart s;
 		s.kind = p_e.kind;
@@ -880,8 +879,8 @@ struct FxTriggers::Impl {
 
 	FxView view;
 
-	bool age_of(const hk::PresentEvent &p_e, const hk::PresentClock &p_now, float &r_age) const {
-		if (p_e.timeline == hk::PresentTimeline::Immediate) {
+	bool age_of(const present::PresentEvent &p_e, const present::PresentClock &p_now, float &r_age) const {
+		if (p_e.timeline == present::PresentTimeline::Immediate) {
 			r_age = 0.0f;
 			return true;
 		}
@@ -910,8 +909,8 @@ struct FxTriggers::Impl {
 		return effect_frame_of_weapon(compose(w_root, p_list[p_i].offset));
 	}
 
-	void on_shot(const hk::PresentEvent &p_e, float p_age) {
-		const bool own = p_e.kind == hk::PresentKind::OwnShot;
+	void on_shot(const present::PresentEvent &p_e, float p_age) {
+		const bool own = p_e.kind == present::PresentKind::OwnShot;
 		++(own ? stats.own_shots : stats.remote_shots);
 		const WeaponFireEffects *w = def_of(p_e.def);
 		const Vec3 origin = from(p_e.pos);
@@ -962,7 +961,7 @@ struct FxTriggers::Impl {
 				attached.push_back(Attached{ h, p_e.slot, first_person, p_e.def, uint32_t(i) });
 			}
 		}
-		if ((p_e.flags & hk::present_flags::kTracer) != 0 && !w->tracer.empty()) {
+		if ((p_e.flags & present::flags::kTracer) != 0 && !w->tracer.empty()) {
 			++stats.tracer_shots;
 			if (config.tracers) {
 				start_tracer(*w, p_e, m.transform.trans, origin, dir, p_age);
@@ -970,7 +969,7 @@ struct FxTriggers::Impl {
 		}
 	}
 
-	void start_tracer(const WeaponFireEffects &p_w, const hk::PresentEvent &p_e, const Vec3 &p_muzzle, const Vec3 &p_origin, const Vec3 &p_dir, float p_age) {
+	void start_tracer(const WeaponFireEffects &p_w, const present::PresentEvent &p_e, const Vec3 &p_muzzle, const Vec3 &p_origin, const Vec3 &p_dir, float p_age) {
 		const std::shared_ptr<const EffectDef> def = get(p_w.tracer);
 		if (!def) {
 			return;
@@ -1019,13 +1018,13 @@ struct FxTriggers::Impl {
 		}
 	}
 
-	void step_tracers(const hk::PresentClock &p_now) {
+	void step_tracers(const present::PresentClock &p_now) {
 		size_t keep = 0;
 		for (size_t i = 0; i < tracers.size(); ++i) {
 			Tracer &t = tracers[i];
 			bool live = world.alive(t.handle);
-			if (live && (t.timeline == hk::PresentTimeline::Immediate || p_now.valid(t.timeline))) {
-				const int64_t now = t.timeline == hk::PresentTimeline::Immediate ? t.t0 : p_now.now(t.timeline);
+			if (live && (t.timeline == present::PresentTimeline::Immediate || p_now.valid(t.timeline))) {
+				const int64_t now = t.timeline == present::PresentTimeline::Immediate ? t.t0 : p_now.now(t.timeline);
 				const float s = std::max(0.0f, seconds_of(now - t.t0)) * t.speed;
 				if (s >= t.max_distance) {
 					world.stop(t.handle, StopMode::Stop);
@@ -1041,7 +1040,7 @@ struct FxTriggers::Impl {
 		tracers.resize(keep);
 	}
 
-	void play_cell(const ImpactCell &p_cell, const hk::PresentEvent &p_e, uint64_t p_seed, const Vec3 &p_pos, const Vec3 &p_normal, float p_age, bool p_decal,
+	void play_cell(const ImpactCell &p_cell, const present::PresentEvent &p_e, uint64_t p_seed, const Vec3 &p_pos, const Vec3 &p_normal, float p_age, bool p_decal,
 			bool p_sound) {
 		bool culled = false;
 		bool started = false;
@@ -1105,7 +1104,7 @@ struct FxTriggers::Impl {
 		return kDefaultBulletMaterial;
 	}
 
-	void on_impact(const hk::PresentEvent &p_e, float p_age) {
+	void on_impact(const present::PresentEvent &p_e, float p_age) {
 		const Vec3 pos = from(p_e.pos);
 		end_tracer_at(p_e.slot, p_e.id, pos);
 		if (!config.impacts) {
@@ -1126,9 +1125,9 @@ struct FxTriggers::Impl {
 		play_cell(*cell, p_e, p_e.seed, pos, normalize_or(from(p_e.dir), { 0, 1, 0 }), p_age, true, true);
 	}
 
-	void on_soldier(const hk::PresentEvent &p_e, float p_age) {
+	void on_soldier(const present::PresentEvent &p_e, float p_age) {
 		const Vec3 pos = from(p_e.pos);
-		const bool contact = p_e.kind == hk::PresentKind::SoldierContact;
+		const bool contact = p_e.kind == present::PresentKind::SoldierContact;
 		if (contact) {
 			end_tracer_at(p_e.slot, p_e.id, pos);
 		}
@@ -1137,7 +1136,7 @@ struct FxTriggers::Impl {
 		if (!first_time(own_key)) {
 			return;
 		}
-		if (!contact && (p_e.flags & hk::present_flags::kOwnVictim) != 0) {
+		if (!contact && (p_e.flags & present::flags::kOwnVictim) != 0) {
 			return;
 		}
 		if (contact && p_e.slot != config.own_slot) {
@@ -1163,11 +1162,11 @@ struct FxTriggers::Impl {
 		play_cell(*cell, p_e, soldier_seed(config.match_seed, p_e.slot, p_e.id, p_e.pellet), pos, n, p_age, true, true);
 	}
 
-	void on_detonation(const hk::PresentEvent &p_e, float p_age) {
+	void on_detonation(const present::PresentEvent &p_e, float p_age) {
 		if (!first_time(start_key(KeyKind::Detonation, p_e.slot, p_e.id, 0, 0))) {
 			return;
 		}
-		if ((p_e.flags & hk::present_flags::kDud) != 0) {
+		if ((p_e.flags & present::flags::kDud) != 0) {
 			++stats.duds;
 			return;
 		}
@@ -1202,29 +1201,29 @@ struct FxTriggers::Impl {
 		}
 	}
 
-	bool sane(const hk::PresentEvent &p_e) const {
+	bool sane(const present::PresentEvent &p_e) const {
 		for (size_t k = 0; k < 3; ++k) {
 			if (!std::isfinite(p_e.pos[k]) || !std::isfinite(p_e.dir[k]) || std::fabs(p_e.pos[k]) > 1.0e7f) {
 				return false;
 			}
 		}
-		return uint8_t(p_e.kind) <= uint8_t(hk::PresentKind::Revive) && uint8_t(p_e.timeline) <= uint8_t(hk::PresentTimeline::Immediate);
+		return uint8_t(p_e.kind) <= uint8_t(present::PresentKind::Revive) && uint8_t(p_e.timeline) <= uint8_t(present::PresentTimeline::Immediate);
 	}
 
-	void dispatch(const hk::PresentEvent &p_e, float p_age) {
+	void dispatch(const present::PresentEvent &p_e, float p_age) {
 		switch (p_e.kind) {
-			case hk::PresentKind::OwnShot:
-			case hk::PresentKind::RemoteShot:
+			case present::PresentKind::OwnShot:
+			case present::PresentKind::RemoteShot:
 				on_shot(p_e, p_age);
 				break;
-			case hk::PresentKind::Impact:
+			case present::PresentKind::Impact:
 				on_impact(p_e, p_age);
 				break;
-			case hk::PresentKind::SoldierContact:
-			case hk::PresentKind::Hit:
+			case present::PresentKind::SoldierContact:
+			case present::PresentKind::Hit:
 				on_soldier(p_e, p_age);
 				break;
-			case hk::PresentKind::Detonation:
+			case present::PresentKind::Detonation:
 				on_detonation(p_e, p_age);
 				break;
 			default:
@@ -1281,7 +1280,7 @@ void FxTriggers::on_muzzles(std::span<const MuzzleSample> p_muzzles) {
 	m.update_attached();
 }
 
-void FxTriggers::on_events(std::span<const host::PresentEvent> p_events, const host::PresentClock &p_now, const FxView &p_view) {
+void FxTriggers::on_events(std::span<const present::PresentEvent> p_events, const present::PresentClock &p_now, const FxView &p_view) {
 	Impl &m = *impl_;
 	m.decals.clear();
 	m.sounds.clear();
@@ -1293,7 +1292,7 @@ void FxTriggers::on_events(std::span<const host::PresentEvent> p_events, const h
 
 	const size_t held = m.pending.size();
 	for (size_t i = 0; i < held; ++i) {
-		const host::PresentEvent e = m.pending.front();
+		const present::PresentEvent e = m.pending.front();
 		m.pending.pop_front();
 		float age = 0;
 		if (m.age_of(e, p_now, age)) {
@@ -1302,7 +1301,7 @@ void FxTriggers::on_events(std::span<const host::PresentEvent> p_events, const h
 			m.pending.push_back(e);
 		}
 	}
-	for (const host::PresentEvent &e : p_events) {
+	for (const present::PresentEvent &e : p_events) {
 		++m.stats.events;
 		if (!m.sane(e)) {
 			++m.stats.rejected;

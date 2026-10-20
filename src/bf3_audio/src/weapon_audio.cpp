@@ -79,7 +79,7 @@ void SimMixerClock::set_output_latency_frames(uint64_t p_frames) {
 	latency_frames_ = p_frames;
 }
 
-void SimMixerClock::set_now(const host::PresentClock &p_now) {
+void SimMixerClock::set_now(const present::PresentClock &p_now) {
 	now_ = p_now;
 }
 
@@ -88,9 +88,9 @@ uint64_t SimMixerClock::heard_frame() const {
 	return c > latency_frames_ ? c - latency_frames_ : 0;
 }
 
-uint64_t SimMixerClock::frame_of(sw::SimTime p_time, host::PresentTimeline p_timeline) {
+uint64_t SimMixerClock::frame_of(sw::SimTime p_time, present::PresentTimeline p_timeline) {
 	const uint64_t earliest = mixer_->earliest_frame();
-	if (p_timeline == host::PresentTimeline::Immediate) {
+	if (p_timeline == present::PresentTimeline::Immediate) {
 		return earliest;
 	}
 	if (!now_.valid(p_timeline)) {
@@ -137,7 +137,7 @@ uint64_t SimMixerClock::output_latency_frames() const {
 	return latency_frames_;
 }
 
-const host::PresentClock &SimMixerClock::now() const {
+const present::PresentClock &SimMixerClock::now() const {
 	return now_;
 }
 
@@ -423,7 +423,7 @@ struct WeaponAudioRouter::Impl {
 		WeaponSoundDriver driver;
 		bool held = true;
 		bool single = false;
-		host::PresentTimeline timeline = host::PresentTimeline::Render;
+		present::PresentTimeline timeline = present::PresentTimeline::Render;
 		uint64_t first_frame = 0;
 		sw::SimTime first_time = 0;
 		bool have_id = false;
@@ -579,7 +579,7 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	Voice *start_burst(Track &r_track, bool p_own, uint8_t p_slot, uint16_t p_def, uint64_t p_seed, uint64_t p_frame, sw::SimTime p_time,
-			host::PresentTimeline p_timeline, const EmitterState &p_emitter, float p_distance, bool p_first_person) {
+			present::PresentTimeline p_timeline, const EmitterState &p_emitter, float p_distance, bool p_first_person) {
 		const WeaponAudioDef *d = def_of(p_def);
 		if (d == nullptr || d->form != WeaponAudioForm::Driver || !d->program) {
 			++stats.unbound_defs;
@@ -690,7 +690,7 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
-	EmitterState own_emitter(const host::PresentEvent &p_e) const {
+	EmitterState own_emitter(const present::PresentEvent &p_e) const {
 		EmitterState e;
 		if (own_first_person) {
 			e.position = listener.position;
@@ -704,7 +704,7 @@ struct WeaponAudioRouter::Impl {
 		return e;
 	}
 
-	EmitterState event_emitter(const host::PresentEvent &p_e) const {
+	EmitterState event_emitter(const present::PresentEvent &p_e) const {
 		EmitterState e;
 		if (finite3(p_e.pos)) {
 			e.position = { p_e.pos[0], p_e.pos[1], p_e.pos[2] };
@@ -732,14 +732,14 @@ struct WeaponAudioRouter::Impl {
 		return true;
 	}
 
-	void own_shot(const host::PresentEvent &p_e, SimMixerClock &r_clock) {
+	void own_shot(const present::PresentEvent &p_e, SimMixerClock &r_clock) {
 		const WeaponAudioDef *d = def_of(p_e.def);
 		if (d == nullptr || d->form == WeaponAudioForm::None) {
 			++stats.unbound_defs;
 			return;
 		}
 		const EmitterState em = own_emitter(p_e);
-		const uint64_t frame = r_clock.frame_of(p_e.time, host::PresentTimeline::Predicted);
+		const uint64_t frame = r_clock.frame_of(p_e.time, present::PresentTimeline::Predicted);
 		if (d->form == WeaponAudioForm::OneShot) {
 			end_track(own);
 			(void)one_shot(d->program, d->one_shot_event, sound_seed(own_slot, own_burst_counter++), em, frame, own_first_person);
@@ -756,7 +756,7 @@ struct WeaponAudioRouter::Impl {
 			}
 		}
 		if (v == nullptr) {
-			v = start_burst(own, true, own_slot, p_e.def, sound_seed(own_slot, own_burst_counter++), frame, p_e.time, host::PresentTimeline::Predicted, em,
+			v = start_burst(own, true, own_slot, p_e.def, sound_seed(own_slot, own_burst_counter++), frame, p_e.time, present::PresentTimeline::Predicted, em,
 					0.0f, own_first_person);
 			if (v == nullptr) {
 				return;
@@ -777,7 +777,7 @@ struct WeaponAudioRouter::Impl {
 		return interval_units(p_v) + sw::SimTime(std::llround(config.other_hold_ticks * double(sw::kTimeUnitsPerTick)));
 	}
 
-	void remote_shot(const host::PresentEvent &p_e, SimMixerClock &r_clock) {
+	void remote_shot(const present::PresentEvent &p_e, SimMixerClock &r_clock) {
 		if (p_e.slot == own_slot) {
 			return;
 		}
@@ -793,7 +793,7 @@ struct WeaponAudioRouter::Impl {
 		}
 		const float dist = distance(em.position, listener.position);
 		t.last_event_time = std::max(t.last_event_time, p_e.time);
-		const uint64_t frame = r_clock.frame_of(p_e.time, host::PresentTimeline::Render);
+		const uint64_t frame = r_clock.frame_of(p_e.time, present::PresentTimeline::Render);
 		if (d->form == WeaponAudioForm::OneShot) {
 			if (dist <= config.max_weapon_distance_m) {
 				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, frame, false);
@@ -828,7 +828,7 @@ struct WeaponAudioRouter::Impl {
 			t.held = kNoInstance;
 		}
 		const uint8_t seq = uint8_t((t.burst_seq + 1u + t.seq_ahead) & 0x0F);
-		v = start_burst(t, false, p_e.slot, p_e.def, sound_seed(p_e.slot, seq), frame, p_e.time, host::PresentTimeline::Render, em, dist, false);
+		v = start_burst(t, false, p_e.slot, p_e.def, sound_seed(p_e.slot, seq), frame, p_e.time, present::PresentTimeline::Render, em, dist, false);
 		if (v == nullptr) {
 			return;
 		}
@@ -845,21 +845,21 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
-	void on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock) {
+	void on_events(std::span<const present::PresentEvent> p_events, SimMixerClock &r_clock) {
 		clock = &r_clock;
-		for (const host::PresentEvent &e : p_events) {
+		for (const present::PresentEvent &e : p_events) {
 			switch (e.kind) {
-				case host::PresentKind::OwnShot:
+				case present::PresentKind::OwnShot:
 					own_shot(e, r_clock);
 					break;
-				case host::PresentKind::OwnTimed:
+				case present::PresentKind::OwnTimed:
 
 					foley_own_timed(e, r_clock);
 					break;
-				case host::PresentKind::RemoteShot:
+				case present::PresentKind::RemoteShot:
 					remote_shot(e, r_clock);
 					break;
-				case host::PresentKind::Detonation: {
+				case present::PresentKind::Detonation: {
 					const WeaponAudioDef *d = def_of(e.def);
 					if (d != nullptr && d->explosion) {
 						if (one_shot(d->explosion, 0, sound_seed(e.slot, 0x40000000u | (e.id & 0x3FFFFFFFu)), event_emitter(e),
@@ -869,7 +869,7 @@ struct WeaponAudioRouter::Impl {
 					}
 					break;
 				}
-				case host::PresentKind::Death:
+				case present::PresentKind::Death:
 					foley_death(e.aux, r_clock);
 					if (e.aux == own_slot) {
 						end_track(own);
@@ -877,7 +877,7 @@ struct WeaponAudioRouter::Impl {
 						end_track(tracks[e.aux]);
 					}
 					break;
-				case host::PresentKind::Spawn:
+				case present::PresentKind::Spawn:
 					if (e.slot == own_slot) {
 						end_track(own);
 					} else {
@@ -898,7 +898,7 @@ struct WeaponAudioRouter::Impl {
 				own.held = kNoInstance;
 			} else {
 				bool end = own_trigger_known && !own_trigger_down;
-				const host::PresentClock &now = r_clock.now();
+				const present::PresentClock &now = r_clock.now();
 				if (!end && now.predicted_valid) {
 					const double hold = config.own_hold_intervals * v->interval_s * double(sw::kTimeUnitsPerSecond);
 					end = double(now.predicted - v->last_round_time) > hold;
@@ -925,7 +925,7 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
-	EmitterState other_emitter(const host::PresentedSoldier &p_s, const MuzzlePoint *p_muzzle) const {
+	EmitterState other_emitter(const present::PresentedSoldier &p_s, const MuzzlePoint *p_muzzle) const {
 		EmitterState e;
 		if (p_muzzle != nullptr && p_muzzle->valid && std::isfinite(p_muzzle->position.x) && std::isfinite(p_muzzle->position.y) &&
 				std::isfinite(p_muzzle->position.z)) {
@@ -953,8 +953,8 @@ struct WeaponAudioRouter::Impl {
 			}
 			return;
 		}
-		Voice *v = start_burst(r_t, false, p_slot, p_def, sound_seed(p_slot, p_burst_seq), r_clock.frame_of(p_evidence, host::PresentTimeline::Render),
-				p_evidence, host::PresentTimeline::Render, r_t.emitter, r_t.distance, false);
+		Voice *v = start_burst(r_t, false, p_slot, p_def, sound_seed(p_slot, p_burst_seq), r_clock.frame_of(p_evidence, present::PresentTimeline::Render),
+				p_evidence, present::PresentTimeline::Render, r_t.emitter, r_t.distance, false);
 		if (v == nullptr) {
 			return;
 		}
@@ -966,13 +966,13 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
-	void on_others(std::span<const host::PresentedSoldier> p_soldiers, std::span<const host::PresentedOtherWeapon> p_weapons, std::span<const MuzzlePoint> p_muzzles,
+	void on_others(std::span<const present::PresentedSoldier> p_soldiers, std::span<const present::PresentedOtherWeapon> p_weapons, std::span<const MuzzlePoint> p_muzzles,
 			SimMixerClock &r_clock) {
 		clock = &r_clock;
 		++frame_counter;
-		const host::PresentClock &now = r_clock.now();
+		const present::PresentClock &now = r_clock.now();
 		for (size_t i = 0; i < p_soldiers.size(); ++i) {
-			const host::PresentedSoldier &s = p_soldiers[i];
+			const present::PresentedSoldier &s = p_soldiers[i];
 			if (s.slot == own_slot) {
 				continue;
 			}
@@ -1000,7 +1000,7 @@ struct WeaponAudioRouter::Impl {
 			if (i >= p_weapons.size() || !p_weapons[i].valid || p_weapons[i].slot != s.slot) {
 				continue;
 			}
-			const host::PresentedOtherWeapon &w = p_weapons[i];
+			const present::PresentedOtherWeapon &w = p_weapons[i];
 			if (v != nullptr && v->def != w.def) {
 				trigger_up(*v);
 				t.held = kNoInstance;
@@ -1078,10 +1078,10 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
-	void set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sw::SimTime p_horizon) {
+	void set_others_newest(std::span<const present::PresentedOtherWeapon> p_newest, sw::SimTime p_horizon) {
 		horizon = p_horizon;
 		horizon_valid = true;
-		for (const host::PresentedOtherWeapon &w : p_newest) {
+		for (const present::PresentedOtherWeapon &w : p_newest) {
 			if (!w.valid || w.slot == own_slot) {
 				continue;
 			}
@@ -1183,9 +1183,8 @@ struct WeaponAudioRouter::Impl {
 	uint16_t own_reload_def = sw::kNoWeapon;
 	std::vector<InstanceHandle> own_foley;
 	bool own_weapons_valid = false;
-	net::WeaponsWire own_weapons{};
+	present::PresentedOwnWeapons own_weapons{};
 	bool own_weapons_seen = false;
-	net::WeaponsWire own_weapons_last{};
 	bool own_zoom = false;
 	uint32_t foley_counter = 0;
 
@@ -1322,8 +1321,8 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
-	void foley_own_timed(const host::PresentEvent &p_e, SimMixerClock &r_clock) {
-		FoleyCue c = own_cue(p_e.def, p_e.time, r_clock.frame_of(p_e.time, host::PresentTimeline::Predicted));
+	void foley_own_timed(const present::PresentEvent &p_e, SimMixerClock &r_clock) {
+		FoleyCue c = own_cue(p_e.def, p_e.time, r_clock.frame_of(p_e.time, present::PresentTimeline::Predicted));
 		const EmitterState em = own_foley_emitter();
 		switch (p_e.id) {
 			case sw::weapon_events::kReloadStarted: {
@@ -1364,13 +1363,13 @@ struct WeaponAudioRouter::Impl {
 			own_weapons_seen = false;
 			return;
 		}
-		const net::WeaponsWire &w = own_weapons;
-		const bool zoom = w.active < sw::kMaxWeaponSlots && w.timers[0].slot == w.active && (w.timers[0].flags & sw::slot_flags::kZoomWasDown) != 0;
-		const bool fresh = !own_weapons_seen || !(w == own_weapons_last);
+		const present::PresentedOwnWeapons &w = own_weapons;
+		const bool zoom = w.active < sw::kMaxWeaponSlots && w.trigger_slot == w.active && (w.trigger_flags & sw::slot_flags::kZoomWasDown) != 0;
+		const bool fresh = !own_weapons_seen || w.changed;
 		const uint16_t def = w.active < sw::kMaxWeaponSlots ? w.slots[w.active].def : sw::kNoWeapon;
-		const host::PresentClock &now = r_clock.now();
+		const present::PresentClock &now = r_clock.now();
 		if (own_weapons_seen && def != sw::kNoWeapon && now.predicted_valid) {
-			const uint64_t frame = r_clock.frame_of(now.predicted, host::PresentTimeline::Predicted);
+			const uint64_t frame = r_clock.frame_of(now.predicted, present::PresentTimeline::Predicted);
 			if (zoom && !own_zoom) {
 				FoleyCue c = own_cue(def, now.predicted, frame);
 				foley_action(c, FoleyAction::Zoom, own_foley_emitter());
@@ -1381,11 +1380,10 @@ struct WeaponAudioRouter::Impl {
 			}
 		}
 		own_zoom = zoom;
-		own_weapons_last = w;
 		own_weapons_seen = true;
 	}
 
-	void foley_other(const host::PresentedSoldier &p_s, const host::PresentedOtherWeapon &p_w, const Track &p_t, SimMixerClock &r_clock) {
+	void foley_other(const present::PresentedSoldier &p_s, const present::PresentedOtherWeapon &p_w, const Track &p_t, SimMixerClock &r_clock) {
 		OtherFoley &o = other_foley[p_s.slot];
 
 		if (!same_emitter(o.at, p_t.emitter)) {
@@ -1404,7 +1402,7 @@ struct WeaponAudioRouter::Impl {
 		c.slot = p_s.slot;
 		c.def = p_w.def;
 		c.time = when;
-		c.frame = r_clock.frame_of(when, host::PresentTimeline::Render);
+		c.frame = r_clock.frame_of(when, present::PresentTimeline::Render);
 		c.distance_m = p_t.distance;
 		if (same_life) {
 			const bool reloading = o.phase == sw::WeaponPhase::Reloading || o.phase == sw::WeaponPhase::ReloadShell;
@@ -1436,13 +1434,13 @@ struct WeaponAudioRouter::Impl {
 	void foley_death(uint8_t p_slot, SimMixerClock &r_clock) {
 		FoleyCue c;
 		c.slot = p_slot;
-		const host::PresentClock &now = r_clock.now();
+		const present::PresentClock &now = r_clock.now();
 		if (p_slot == own_slot) {
 			c.own = true;
-			c.frame = r_clock.frame_of(now.predicted, host::PresentTimeline::Predicted);
+			c.frame = r_clock.frame_of(now.predicted, present::PresentTimeline::Predicted);
 			foley_release(own_reload, own_reload_def, c);
 		} else {
-			c.frame = r_clock.frame_of(now.render, host::PresentTimeline::Render);
+			c.frame = r_clock.frame_of(now.render, present::PresentTimeline::Render);
 			foley_release(other_foley[p_slot].reload, other_foley[p_slot].reload_def, c);
 		}
 	}
@@ -1498,15 +1496,15 @@ void WeaponAudioRouter::set_listener(const ListenerState &p_listener) {
 	impl_->set_listener(p_listener);
 }
 
-void WeaponAudioRouter::on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock) {
+void WeaponAudioRouter::on_events(std::span<const present::PresentEvent> p_events, SimMixerClock &r_clock) {
 	impl_->on_events(p_events, r_clock);
 }
 
-void WeaponAudioRouter::set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon) {
+void WeaponAudioRouter::set_others_newest(std::span<const present::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon) {
 	impl_->set_others_newest(p_newest, p_horizon);
 }
 
-void WeaponAudioRouter::on_others(std::span<const host::PresentedSoldier> p_soldiers, std::span<const host::PresentedOtherWeapon> p_weapons,
+void WeaponAudioRouter::on_others(std::span<const present::PresentedSoldier> p_soldiers, std::span<const present::PresentedOtherWeapon> p_weapons,
 		std::span<const MuzzlePoint> p_muzzles, SimMixerClock &r_clock) {
 	impl_->on_others(p_soldiers, p_weapons, p_muzzles, r_clock);
 }
@@ -1533,10 +1531,10 @@ bool OneShotPool::set_emitter(MixerCore &r_mixer, InstanceHandle p_handle, const
 	return false;
 }
 
-void WeaponAudioRouter::set_own_weapons(const host::PresentationFrame *p_frame) {
-	impl_->own_weapons_valid = p_frame != nullptr && p_frame->own_weapons_valid;
+void WeaponAudioRouter::set_own_weapons(const present::PresentedOwnWeapons *p_weapons) {
+	impl_->own_weapons_valid = p_weapons != nullptr;
 	if (impl_->own_weapons_valid) {
-		impl_->own_weapons = p_frame->own_weapons_curr;
+		impl_->own_weapons = *p_weapons;
 	}
 }
 

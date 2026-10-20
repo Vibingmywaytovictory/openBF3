@@ -102,6 +102,7 @@ add_subdirectory(src/bf3_core)
 add_subdirectory(src/bf3_anim) # skeletons, poses, skinning binds over bf3_core's Ant/EBX/res readers
 add_subdirectory(src/bf3_render) # Godot-free mesh/texture/material preparation for the Godot bridge
 add_subdirectory(src/bf3_sim)
+add_subdirectory(src/bf3_present)
 add_subdirectory(src/bf3_net)
 add_subdirectory(src/bf3_host)
 add_subdirectory(tools/bf3dump)
@@ -119,3 +120,4 @@ endif()
 add_subdirectory(src/bf3_fx)
 
 add_subdirectory(src/bf3_audio)
+add_subdirectory(src/bf3_client_audio)

@@ -30,16 +30,12 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/impact_audio.h
     include/bf3/audio/game_audio_check.h
 )
-target_link_libraries(bf3_audio PUBLIC bf3_host)
+target_link_libraries(bf3_audio PUBLIC bf3_present)
 
 target_sources(bf3_audio PRIVATE
     src/weapon_audio.cpp
     src/impact_audio.cpp
     src/game_audio_check.cpp
-    src/kit_audio.cpp
-    include/bf3/audio/kit_audio.h
-    src/game_audio_frame.cpp
-    include/bf3/audio/game_audio_frame.h
 )
 
 target_sources(bf3_audio PRIVATE

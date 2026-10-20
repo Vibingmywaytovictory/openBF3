@@ -1,4 +1,4 @@
-#include "bf3/audio/kit_audio.h"
+#include "bf3/client_audio/kit_audio.h"
 
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/host/kits.h"

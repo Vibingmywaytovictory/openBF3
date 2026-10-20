@@ -4,10 +4,10 @@
 
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/game_audio_check.h"
-#include "bf3/audio/game_audio_frame.h"
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/core/result.h"
 #include "bf3/fx/triggers.h"
 

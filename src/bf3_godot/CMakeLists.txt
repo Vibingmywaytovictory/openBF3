@@ -131,7 +131,7 @@ target_sources(bf3_godot PRIVATE
     src/audio_demo.cpp
     src/audio_demo.h
 )
-target_link_libraries(bf3_godot PRIVATE bf3_audio)
+target_link_libraries(bf3_godot PRIVATE bf3_audio bf3_client_audio)
 
 target_sources(bf3_godot PRIVATE
     src/m2a_game.h

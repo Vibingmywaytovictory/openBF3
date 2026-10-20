@@ -9,9 +9,8 @@
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/result.h"
-#include "bf3/host/client_session.h"
-#include "bf3/host/client_wiring.h"
-#include "bf3/host/presentation_events.h"
+#include "bf3/present/presentation_events.h"
+#include "bf3/present/presented.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
@@ -50,9 +49,9 @@ public:
 
 	void set_output_latency_frames(uint64_t p_frames);
 
-	void set_now(const host::PresentClock &p_now);
+	void set_now(const present::PresentClock &p_now);
 
-	uint64_t frame_of(sim::weapons::SimTime p_time, host::PresentTimeline p_timeline);
+	uint64_t frame_of(sim::weapons::SimTime p_time, present::PresentTimeline p_timeline);
 	uint64_t heard_frame() const;
 	uint64_t late() const;
 	uint64_t max_late_frames() const;
@@ -60,7 +59,7 @@ public:
 	void set_bias_frames(int64_t p_bias);
 	int64_t bias_frames() const;
 	uint64_t output_latency_frames() const;
-	const host::PresentClock &now() const;
+	const present::PresentClock &now() const;
 	uint64_t earliest_frame() const;
 	uint32_t rate() const;
 
@@ -68,7 +67,7 @@ private:
 	const MixerCore *mixer_ = nullptr;
 	SimMixerClockConfig config_;
 	uint64_t latency_frames_ = 0;
-	host::PresentClock now_;
+	present::PresentClock now_;
 	uint64_t late_ = 0;
 	uint64_t max_late_frames_ = 0;
 };
@@ -239,15 +238,15 @@ public:
 	void set_own_first_person(bool p_first_person);
 	void set_own_trigger(bool p_down);
 
-	void set_others_newest(std::span<const host::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon);
+	void set_others_newest(std::span<const present::PresentedOtherWeapon> p_newest, sim::weapons::SimTime p_horizon);
 
 	void set_listener(const ListenerState &p_listener);
 
-	void set_own_weapons(const host::PresentationFrame *p_frame);
+	void set_own_weapons(const present::PresentedOwnWeapons *p_weapons);
 
-	void on_events(std::span<const host::PresentEvent> p_events, SimMixerClock &r_clock);
+	void on_events(std::span<const present::PresentEvent> p_events, SimMixerClock &r_clock);
 
-	void on_others(std::span<const host::PresentedSoldier> p_soldiers, std::span<const host::PresentedOtherWeapon> p_weapons,
+	void on_others(std::span<const present::PresentedSoldier> p_soldiers, std::span<const present::PresentedOtherWeapon> p_weapons,
 			std::span<const MuzzlePoint> p_muzzles, SimMixerClock &r_clock);
 
 	void update(uint64_t p_now_ns);

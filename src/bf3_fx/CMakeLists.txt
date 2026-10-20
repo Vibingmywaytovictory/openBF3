@@ -36,7 +36,7 @@ target_sources(bf3_fx PRIVATE
 target_sources(bf3_fx PRIVATE
     include/bf3/fx/triggers.h
 )
-target_link_libraries(bf3_fx PUBLIC bf3_host)
+target_link_libraries(bf3_fx PUBLIC bf3_present)
 
 target_sources(bf3_fx PRIVATE
     src/triggers.cpp

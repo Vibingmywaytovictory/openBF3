@@ -2305,3 +2305,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 ## Review follow-up
 
 * Verify: the branch compiles as handed over; branch pass 159 rows green in 197 s; dev-timing host.gunplay.* 4/4 (701 s); asan host/core/net.proto 54 + 4 rows green; a 64-player snapshot (41 others + 22 in SnapshotOthers) is byte-identical to main's encode, split, encode (fnv1a pinned from a main build); the source-digest kick has a test.
+* Item 1, bf3_present: bf3_fx and bf3_audio link only bf3_present (on bf3_sim) and bf3_core, so test_fx and test_audio_unit no longer link bf3_host, bf3_net, bf3_anim or ENet; the audio glue is bf3_client_audio; branch pass 159 rows green in 195 s (198.5 s before); asan 69 + 4 rows green; audio.game.underruns and five window rows green.

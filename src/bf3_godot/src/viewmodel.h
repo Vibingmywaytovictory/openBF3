@@ -25,6 +25,9 @@ class ShaderMaterial;
 
 namespace bf3::host {
 struct PresentedWeapon;
+}
+
+namespace bf3::present {
 struct PresentEvent;
 }
 
@@ -49,7 +52,7 @@ struct ViewmodelFrame {
 ViewmodelFrame viewmodel_frame_from(const bf3::host::PresentedWeapon &p_weapon, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, float p_dt,
 		bool p_sprinting, float p_speed, float p_view_yaw_rate, float p_view_pitch_rate);
 
-void viewmodel_cues_from(std::span<const bf3::host::PresentEvent> p_events, int32_t p_magazine, std::vector<bf3::anim::VmCue> &r_cues);
+void viewmodel_cues_from(std::span<const bf3::present::PresentEvent> p_events, int32_t p_magazine, std::vector<bf3::anim::VmCue> &r_cues);
 
 class Bf3Viewmodel : public godot::Node3D {
 	GDCLASS(Bf3Viewmodel, godot::Node3D)

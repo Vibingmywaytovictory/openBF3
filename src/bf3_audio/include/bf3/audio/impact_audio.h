@@ -8,7 +8,7 @@
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/result.h"
-#include "bf3/host/presentation_events.h"
+#include "bf3/present/presentation_events.h"
 #include "bf3/sim/weapons/sim_time.h"
 
 #include <cstdint>
@@ -49,7 +49,7 @@ struct ImpactSoundRequest {
 	Vec3 normal{ 0.0f, 1.0f, 0.0f };
 	uint64_t seed = 0;
 	sim::weapons::SimTime time = 0;
-	host::PresentTimeline timeline = host::PresentTimeline::Render;
+	present::PresentTimeline timeline = present::PresentTimeline::Render;
 };
 
 struct EffectSoundRequest {

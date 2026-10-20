@@ -1,8 +1,8 @@
-#include "bf3/host/presentation_events.h"
+#include "bf3/present/presentation_events.h"
 
 #include <algorithm>
 
-namespace bf3::host {
+namespace bf3::present {
 
 bool PresentationEvents::push(const PresentEvent &p_event) {
 	const uint64_t head = head_.load(std::memory_order_relaxed);

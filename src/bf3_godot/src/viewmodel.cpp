@@ -70,10 +70,10 @@ ViewmodelFrame viewmodel_frame_from(const bf3::host::PresentedWeapon &p_weapon, 
 	return f;
 }
 
-void viewmodel_cues_from(std::span<const bf3::host::PresentEvent> p_events, int32_t p_magazine, std::vector<bf3::anim::VmCue> &r_cues) {
+void viewmodel_cues_from(std::span<const bf3::present::PresentEvent> p_events, int32_t p_magazine, std::vector<bf3::anim::VmCue> &r_cues) {
 	using Kind = bf3::anim::VmCue::Kind;
 	r_cues.clear();
-	for (const bf3::host::PresentEvent &e : p_events) {
+	for (const bf3::present::PresentEvent &e : p_events) {
 		bf3::anim::VmCue c;
 		c.time_s = sw::units_to_seconds(e.time);
 		if (e.kind == bf3::host::PresentKind::OwnShot) {

@@ -2,8 +2,8 @@
 
 #include "bf3/audio/game_audio_check.h"
 #include "bf3/audio/impact_audio.h"
-#include "bf3/audio/kit_audio.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/client_audio/kit_audio.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/install.h"
 #include "bf3/host/client_session.h"
@@ -49,6 +49,7 @@ public:
 
 private:
 	std::array<host::PresentedOtherWeapon, net::kMaxSlots> newest_{};
+	host::OwnWeaponsPresenter own_weapons_;
 };
 
 inline constexpr const char *kAuditionSuperbundles = "Win32/Levels/MP_001/MP_001";

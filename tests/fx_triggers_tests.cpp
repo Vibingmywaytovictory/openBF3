@@ -20,6 +20,8 @@
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
 #include "bf3/host/client_projectiles.h"
+#include "bf3/host/client_session.h"
+#include "bf3/host/client_wiring.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/render/texture_prep.h"

@@ -106,6 +106,26 @@ PresentClock present_clock(const PresentationFrame &p_frame, uint64_t p_now_ns) 
 	return c;
 }
 
+const PresentedOwnWeapons *OwnWeaponsPresenter::present(const PresentationFrame *p_frame) {
+	if (p_frame == nullptr || !p_frame->own_weapons_valid) {
+		seen_ = false;
+		return nullptr;
+	}
+	const net::WeaponsWire &w = p_frame->own_weapons_curr;
+	out_.changed = !seen_ || !(w == last_);
+	out_.active = w.active;
+	out_.events = w.events;
+	out_.trigger_slot = w.timers[0].slot;
+	out_.trigger_flags = w.timers[0].flags;
+	for (size_t i = 0; i < out_.slots.size(); ++i) {
+		out_.slots[i].def = w.slots[i].def;
+		out_.slots[i].magazine = w.slots[i].magazine;
+	}
+	last_ = w;
+	seen_ = true;
+	return &out_;
+}
+
 core::Result<std::shared_ptr<const ClientGunplayInputs>> make_client_gunplay_inputs(const SharedLevel &p_level) {
 	if (p_level.gunplay == nullptr) {
 		return core::make_error("client gunplay inputs: " + p_level.level + " was loaded without gunplay tables (set SharedLoadOptions::gunplay)");
