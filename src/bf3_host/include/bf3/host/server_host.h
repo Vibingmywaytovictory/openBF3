@@ -105,7 +105,7 @@ private:
 	std::atomic<uint64_t> pings_echoed_{ 0 };
 	std::atomic<uint64_t> step_errors_{ 0 };
 	std::atomic<int64_t> start_ns_{ 0 };
-	int dynamic_bodies_ = 0;
+	std::atomic<int> dynamic_bodies_{ 0 }; // read by stats() from any thread
 
 	mutable std::mutex transforms_mutex_;
 	std::vector<sim::BodyTransform> transforms_;

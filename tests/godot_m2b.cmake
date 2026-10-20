@@ -6,7 +6,7 @@
 # Rows: "PASS|FAIL|SKIP play.<row> <value> <rule>[ (<skip reason>)]"; passes when the run prints "M2B CHECK: PASS",
 # exits 0 and prints no ERROR line. A row whose track has not landed is skipped "(waiting for ui)" / "(waiting for
 # cam)"; with OPENBF3_TIMING_REQUIRE_RUN=1 (the merge pass) such a skip fails the row, since every track is merged by
-# then. Screenshots: $ENV{OPENBF3_GX_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/gx (gitignored,
+# then. Screenshots: $ENV{OPENBF3_GX_SHOTS}, default <build dir>/shots/gx (gitignored,
 # outside the worktree: the shots show BF3's art). The cache root is the row's own and warm after the first run (E9
 # does not measure a load: E12 is godot.m2b_load's).
 # Skips (exit 77) like godot.m2a: no Godot console executable or no window opt-in (godot_common.cmake), no BF3 install,
@@ -29,7 +29,7 @@ if(NOT probe_rc STREQUAL "0")
 endif()
 set(shots "$ENV{OPENBF3_GX_SHOTS}")
 if(shots STREQUAL "")
-    set(shots "C:/Users/olku/BF3 reimplementation/openBF3/b/shots/gx")
+    set(shots "${BUILD_DIR}/shots/gx")
 endif()
 set(cache_args "")
 if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")

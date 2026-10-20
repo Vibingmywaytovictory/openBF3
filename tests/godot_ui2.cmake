@@ -7,7 +7,7 @@
 # (G13). Passes when the run prints "UI2 MINIMAP CHECK: PASS" and exits 0. The session uses its default cache root
 # (user://bf3cache), so a first run converts Metro cold (about 15 s, godot.m1_load E4).
 # OPENBF3_UI2_SHOTS: a directory for the six PNGs (the acceptance run uses
-# C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui2\, gitignored; never a path in the repo).
+# <build dir>\shots\ui2\, gitignored; never a path in the repo).
 # Skips (exit 77) like godot.m1_load: no Godot executable or no window opt-in (godot_common.cmake), no BF3 install, or a probe run without a window / rendering
 # device.
 # Script mode: cmake -DPROJECT_DIR=<bf3-opensource> -P godot_ui2.cmake (cmake_language(EXIT) needs CMake 3.29).

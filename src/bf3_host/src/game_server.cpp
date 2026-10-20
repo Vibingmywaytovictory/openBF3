@@ -155,6 +155,9 @@ struct GameServer::Impl {
 	uint64_t snapshot_bytes = 0;
 	size_t max_snapshot_bytes = 0;
 	uint64_t bad_datagrams = 0;
+	uint64_t spawn_failures = 0;
+	uint64_t level_mismatch_kicks = 0;
+	uint64_t rules_step_failures = 0;
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
 	double last_encode_ms = 0;
@@ -230,6 +233,7 @@ struct GameServer::Impl {
 				s.bot && config.bots != nullptr && config.bots->spawn_in_main && config.bots->level != nullptr ? config.bots->level->spawns.points
 																												 : config.level->spawns;
 		if (points.empty()) {
+			++spawn_failures;
 			return false;
 		}
 		size_t index = p_point;
@@ -244,6 +248,7 @@ struct GameServer::Impl {
 			}
 		}
 		if (index >= points.size()) {
+			++spawn_failures;
 			return false;
 		}
 		const sim::SettleResult r = sim::settle_spawn(motor, *world, points[index], s.state.life + 1u, p_tick);
@@ -419,7 +424,10 @@ struct GameServer::Impl {
 						report(d.slot, q.id, false, "spawn at: no point " + std::to_string(q.index));
 						break;
 					}
-					spawn(d.slot, q.index, p_tick);
+					if (!spawn(d.slot, q.index, p_tick)) {
+						report(d.slot, q.id, false, "spawn at: the slot could not spawn at point " + std::to_string(q.index));
+						break;
+					}
 					report(d.slot, q.id, true, "spawned at point " + std::to_string(q.index) + " at tick " + std::to_string(p_tick));
 					break;
 				case net::DebugKind::SpawnSweep:
@@ -575,8 +583,12 @@ struct GameServer::Impl {
 			for (const auto &[d, j] : order) {
 				snap.others.push_back(net::quantize_other(uint8_t(j), slots[j].state));
 			}
-			sv_prepare_snapshot(i, snap); // M2a sv [snap]: own weapons, others' weapon fields, the SnapshotOthers split
-			std::vector<uint8_t> bytes = net::encode_snapshot(snap);
+			sv_prepare_snapshot(i, snap); // M2a sv [snap]: own weapons, others' weapon fields
+			// One encode per client: the encoder keeps as many others as fit, nearest first, and reports the tail it
+			// dropped; sv_split_overflow moves that tail to the SnapshotOthers of the same seq (§7.3).
+			size_t dropped = 0;
+			std::vector<uint8_t> bytes = net::encode_snapshot(snap, &dropped);
+			sv_split_overflow(snap, dropped);
 			if (bytes.empty()) {
 				continue;
 			}
@@ -767,6 +779,7 @@ struct GameServer::Impl {
 	void sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_tick); // M2a sv [impl]
 	void sv_record_tick(sim::Tick p_tick); // M2a sv [impl]
 	void sv_prepare_snapshot(size_t p_slot, net::Snapshot &r_snapshot); // M2a sv [impl]
+	void sv_split_overflow(net::Snapshot &r_snapshot, size_t p_dropped); // the others the encoder dropped -> Sv::overflow
 	void sv_after_snapshot(size_t p_slot, const net::Snapshot &p_snapshot); // M2a sv [impl]
 	void sv_end_snapshots(); // M2a sv [impl]
 	void sv_match_info(size_t p_slot, net::MatchInfo &r_message); // M2a sv [impl]
@@ -891,10 +904,18 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				++m.bad_datagrams;
 				return;
 			}
-			Impl::Slot &s = m.slots[size_t(at)];
-			if (r->source_digest != m.config.level->source_digest) {
-				std::fprintf(stderr, "GameServer: slot %d's source digest differs from the server's (M1: logged only)\n", at);
+			if (r->source_digest && m.config.level->source_digest && *r->source_digest != *m.config.level->source_digest) {
+				// The client built its level from other source data, so its collision, spawns and logic would not
+				// match the server's: refused like a protocol mismatch. A Ready without a digest (a tool or test
+				// client that loaded no level) is let in.
+				net::Kick k;
+				k.reason = "level data differs from the server's (source digest)";
+				m.send(p_peer, net::kChannelReliable, net::encode_kick(k));
+				++m.level_mismatch_kicks;
+				on_disconnect(p_peer); // frees the slot now; the client's own Disconnect may never come
+				return;
 			}
+			Impl::Slot &s = m.slots[size_t(at)];
 			if (!s.spawned && !m.sv_waits_for_deploy(size_t(at))) { // M2b ru R10: a deploy-screen slot spawns on its SpawnRequest
 				s.want_spawn = true;
 			}
@@ -961,6 +982,9 @@ GameServerStats GameServer::stats() const {
 	g.snapshot_bytes = m.snapshot_bytes;
 	g.max_snapshot_bytes = m.max_snapshot_bytes;
 	g.bad_datagrams = m.bad_datagrams;
+	g.spawn_failures = m.spawn_failures;
+	g.level_mismatch_kicks = m.level_mismatch_kicks;
+	g.rules_step_failures = m.rules_step_failures;
 	g.step_precondition_failures = m.step_precondition_failures;
 	g.last_step_ms = m.last_step_ms;
 	g.last_encode_ms = m.last_encode_ms;
@@ -1243,9 +1267,13 @@ void GameServer::Impl::sv_rules(sim::Tick p_tick) {
 		v.orders.clear(); // M2b ru [rules]
 		if (v.rules != nullptr) { // M2b ru [rules]: the logic, regen, man-down, the defib test, the round flow
 			const core::Status st = v.rules->step(p_tick, v.view, *v.gunplay, v.tick_states, v.orders); // M2b ru [rules]
-			if (!st.ok()) { // M2b ru [rules]
-				std::fprintf(stderr, "GameServer: tdm rules: %s\n", st.error().message.c_str()); // M2b ru [rules]
-			} // M2b ru [rules]
+			if (!st.ok()) {
+				// Counted in GameServerStats::rules_step_failures so the HUD and the tests see it; printed once, not
+				// once per tick (the rules fault latches and the round flow has stopped).
+				if (rules_step_failures++ == 0) {
+					std::fprintf(stderr, "GameServer: tdm rules: %s\n", st.error().message.c_str());
+				}
+			}
 		} // M2b ru [rules]
 		for (size_t i = 0; i < slots.size(); ++i) {
 			if (slots[i].used && slots[i].spawned && !slots[i].dummy) {
@@ -1408,13 +1436,18 @@ void GameServer::Impl::sv_prepare_snapshot(size_t p_slot, net::Snapshot &r_snaps
 			o = v.per_slot[o.slot].record;
 		}
 	}
-	// The others beyond the datagram go in the SnapshotOthers of the same seq (§7.3): the encoder keeps the first
+}
+
+void GameServer::Impl::sv_split_overflow(net::Snapshot &r_snapshot, size_t p_dropped) {
+	if (sv == nullptr || sv->gunplay == nullptr) {
+		return;
+	}
+	Sv &v = *sv;
+	// The others beyond the datagram go in the SnapshotOthers of the same seq (§7.3): the encoder kept the first
 	// ones in the caller's (nearest-first) order, so the tail is what did not fit.
 	v.overflow.clear();
-	size_t dropped = 0;
-	(void)net::encode_snapshot(r_snapshot, &dropped);
-	if (dropped > 0 && dropped <= r_snapshot.others.size()) {
-		const size_t keep = r_snapshot.others.size() - dropped;
+	if (p_dropped > 0 && p_dropped <= r_snapshot.others.size()) {
+		const size_t keep = r_snapshot.others.size() - p_dropped;
 		v.overflow.assign(r_snapshot.others.begin() + ptrdiff_t(keep), r_snapshot.others.end());
 		r_snapshot.others.resize(keep);
 	}

@@ -9,6 +9,8 @@
 // crates/resource_bf3 (Apache-2.0, the user's own code); error texts match it word for word.
 // Everything stays in Frostbite space: metres, Y up (handoff §13).
 
+#include "bf3/core/res_types.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -24,11 +26,12 @@ using Vec2 = std::array<float, 2>;
 using Vec3 = std::array<float, 3>;
 using Vec4 = std::array<float, 4>;
 
-// Bundle `resType` ids of the payloads decoded here.
-inline constexpr uint32_t kResTypeMeshSet = 0x49B156D4u;
-inline constexpr uint32_t kResTypeDxTexture = 0x5C4954A6u;
-inline constexpr uint32_t kResTypeHavokPhysicsData = 0x91043F65u;
-inline constexpr uint32_t kResTypeHavokDestructionPhysicsData = 0x4864737Bu;
+// Bundle `resType` ids of the payloads decoded here: the one table is bf3/core/res_types.h (res_type::k*); these
+// names are kept for the decoders and tools that use them.
+inline constexpr uint32_t kResTypeMeshSet = res_type::kMeshSet;
+inline constexpr uint32_t kResTypeDxTexture = res_type::kDxTexture;
+inline constexpr uint32_t kResTypeHavokPhysicsData = res_type::kHavokPhysicsData;
+inline constexpr uint32_t kResTypeHavokDestructionPhysicsData = res_type::kHavokDestructionPhysicsData;
 
 // A chunk GUID as its 16 raw bytes; compare these, never a formatted form.
 struct ChunkId {

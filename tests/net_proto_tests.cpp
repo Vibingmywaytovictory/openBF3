@@ -784,7 +784,7 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_debug_report(rows_beyond));
 	}
 
-	TEST_CASE("proto: command packet sizes are 26 and 53 bytes, with 4 commands of redundancy") {
+	TEST_CASE("proto: command packet sizes are 33 and 70 bytes (v2: 26 and 53 plus the others ack and view sample), with 4 commands of redundancy") {
 		Rng rng(9);
 		net::CommandPacket p;
 		p.newest_snapshot = 65535;

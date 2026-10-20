@@ -124,7 +124,9 @@ endif()
 # ---------------------------------------------------------------------------------------------
 # Our modules. Only bf3_godot sees Godot; the rest also link into tools and tests.
 function(openbf3_module target)
-    target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus)
+    # /fp:precise is MSVC's default; it is pinned because the server simulation's determinism (bf3_sim, Jolt built
+    # CROSS_PLATFORM_DETERMINISTIC) depends on it and a preset or toolset change must not switch it silently.
+    target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus /fp:precise)
     target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 endfunction()
 

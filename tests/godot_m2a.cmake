@@ -7,7 +7,7 @@
 # -DNO_ERRORS=1   also fail on any "ERROR" line in the output (the play gate: 0 errors in the log)
 # Rows: "PASS|FAIL <case>.<row> <value> <rule>" and "SKIP <case> <reason>" (a case whose track has not landed:
 # audio waits for au3, fx for fx3); passes when the run prints "M2A CHECK: PASS" and exits 0.
-# Screenshots: $ENV{OPENBF3_GX_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/gx (gitignored,
+# Screenshots: $ENV{OPENBF3_GX_SHOTS}, default <build dir>/shots/gx (gitignored,
 # outside the worktree: the shots show BF3's art). The cache root is shared by the godot.m2a* rows (warm after the
 # first run; none of them measures a load: E16 is godot.m2a_load's).
 # Skips (exit 77) like godot.m2a_hud: no Godot console executable or no window opt-in (godot_common.cmake), no BF3
@@ -33,7 +33,7 @@ if(NOT probe_rc STREQUAL "0")
 endif()
 set(shots "$ENV{OPENBF3_GX_SHOTS}")
 if(shots STREQUAL "")
-    set(shots "C:/Users/olku/BF3 reimplementation/openBF3/b/shots/gx")
+    set(shots "<build dir>/shots/gx")
 endif()
 set(cache_args "")
 if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")

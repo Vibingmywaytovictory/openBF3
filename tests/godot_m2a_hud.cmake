@@ -3,7 +3,7 @@
 # Rows (hud_check.h): load.hud, load.fonts, load.hit_art, load.static, then per resolution (1280x720, 1920x1080,
 # 2560x1440) e10.<size>.frames / .ammo / .crosshair / .hit / .name / .icon / .health / .pixels / .shots, and
 # install.unchanged. Passes when the run prints "M2A HUD CHECK: PASS" and exits 0.
-# OPENBF3_HUD_SHOTS: the directory for the PNGs (default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/hud,
+# OPENBF3_HUD_SHOTS: the directory for the PNGs (default <build dir>/shots/hud,
 # gitignored; never a path in the repo: the shots show BF3's fonts and icons).
 # Skips (exit 77) like godot.ui2: no Godot console executable or no window opt-in (godot_common.cmake), no BF3
 # install, or a probe run without a window / rendering device.
@@ -25,7 +25,7 @@ if(NOT probe_rc STREQUAL "0")
 endif()
 set(shots "$ENV{OPENBF3_HUD_SHOTS}")
 if(shots STREQUAL "")
-    set(shots "C:/Users/olku/BF3 reimplementation/openBF3/b/shots/hud")
+    set(shots "${BUILD_DIR}/shots/hud")
 endif()
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" res://scenes/m2a_hud.tscn -- --hud-check "--hud-shots=${shots}"

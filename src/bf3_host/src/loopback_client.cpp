@@ -37,6 +37,11 @@ bool LoopbackClient::start(uint16_t p_port, int p_ping_hz, std::string *r_error)
 	sent_ = received_ = rtt_sum_us_ = 0;
 	last_rtt_us_ = max_rtt_us_ = enet_rtt_ms_ = 0;
 	connected_ = false;
+	failed_ = false;
+	{
+		std::lock_guard error_lock(error_mutex_);
+		error_.clear();
+	}
 	stop_requested_ = false;
 	running_ = true;
 	thread_ = std::thread([this, p_port, p_ping_hz] { run(p_port, std::clamp(p_ping_hz, 1, 1000)); });
@@ -64,6 +69,11 @@ LoopbackClientStats LoopbackClient::stats() const {
 	LoopbackClientStats s;
 	s.running = running_.load();
 	s.connected = connected_.load();
+	s.failed = failed_.load(std::memory_order_acquire);
+	if (s.failed) {
+		std::lock_guard error_lock(error_mutex_);
+		s.error = error_;
+	}
 	s.pings_sent = sent_.load();
 	s.pongs_received = received_.load();
 	s.last_rtt_ms = last_rtt_us_.load() / 1000.0;
@@ -74,12 +84,24 @@ LoopbackClientStats LoopbackClient::stats() const {
 }
 
 void LoopbackClient::run(uint16_t p_port, int p_ping_hz) {
+	// The thread owns running_ from here: start() set it, and it is cleared on every exit path below, so stats()
+	// never reports a dead thread as running (stop() clears it again after the join, harmlessly).
+	const auto fail = [this](const char *p_what) {
+		{
+			std::lock_guard error_lock(error_mutex_);
+			error_ = p_what;
+		}
+		failed_.store(true, std::memory_order_release);
+		running_ = false;
+	};
 	std::unique_ptr<net::Host> host = net::Host::create_client(2);
 	if (!host) {
+		fail("could not create the ENet client host");
 		return;
 	}
 	const int peer = host->connect("127.0.0.1", p_port);
 	if (peer < 0) {
+		fail("could not start the connection to 127.0.0.1");
 		return;
 	}
 	const uint64_t interval_ns = 1'000'000'000ull / static_cast<uint64_t>(p_ping_hz);
@@ -117,6 +139,7 @@ void LoopbackClient::run(uint16_t p_port, int p_ping_hz) {
 		}
 	}
 	host->disconnect_all();
+	running_ = false; // stop() asked, or the loop ended: the thread is gone either way
 }
 
 } // namespace bf3::host

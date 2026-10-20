@@ -1,0 +1,27 @@
+# openBF3 code style, as the tree is written (Godot's conventions: tabs, 120 columns, p_/r_ parameter prefixes).
+# Not yet applied tree-wide: run it on the files you touch, and review the diff before committing a reformat.
+BasedOnStyle: LLVM
+Standard: c++20
+UseTab: Always
+TabWidth: 4
+IndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+AlignTrailingComments: false
+BreakConstructorInitializers: AfterColon
+ConstructorInitializerIndentWidth: 8
+ContinuationIndentWidth: 8
+Cpp11BracedListStyle: false
+IndentCaseLabels: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+PointerAlignment: Right
+SpaceAfterTemplateKeyword: true
+SpacesBeforeTrailingComments: 1
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive

@@ -1,7 +1,7 @@
 # ctest godot.ui_fonts_shots (docs/design/ui-swf-fonts.md §1 G5, §11.2): the ui1 check windowed with screenshots
 # ("<godot> --path bf3-opensource res://scenes/ui_fonts.tscn -- --ui-check --shot-dir=<dir>"): passes when the check
 # prints "UI1 CHECK: PASS", exits 0 and <dir>/ui1_fonts.png, ui1_coverage.png and ui1_icons.png exist. <dir> is
-# $ENV{OPENBF3_UI1_SHOTS}, default C:\Users\olku\BF3 reimplementation\openBF3\b\shots\ui1 (absolute, gitignored,
+# $ENV{OPENBF3_UI1_SHOTS}, default <build dir>\shots\ui1 (absolute, gitignored,
 # outside any worktree; the shots show BF3 data and are never committed). The implementer inspects them (README).
 # Skips (exit 77) when no Godot console executable is found or the windowed row is not opted in (godot_common.cmake), no BF3 install is found, or no window / rendering device can be created:
 # a probe run ("--path <project> --quit", windowed, killed after 60 s) decides first, as godot_m1_load.cmake does,
@@ -24,7 +24,7 @@ if(NOT probe_rc STREQUAL "0")
 endif()
 set(shots "$ENV{OPENBF3_UI1_SHOTS}")
 if(shots STREQUAL "")
-    set(shots "C:/Users/olku/BF3 reimplementation/openBF3/b/shots/ui1")
+    set(shots "${BUILD_DIR}/shots/ui1")
 endif()
 file(TO_CMAKE_PATH "${shots}" shots)
 file(MAKE_DIRECTORY "${shots}")

@@ -7,7 +7,7 @@ setlocal
 rem M2b bb [help]: --help prints the options, --tdm included (docs/design/m2b-bb.md).
 if /i "%~1"=="--help" goto help
 set "ROOT=%~dp0.."
-if "%OPENBF3_GODOT%"=="" set "OPENBF3_GODOT=C:\Users\olku\BF3 reimplementation\Godot_v4.8-dev7_win64_console.exe"
+if "%OPENBF3_GODOT%"=="" set "OPENBF3_GODOT=%ROOT%\..\Godot_v4.8-dev7_win64_console.exe"
 if not exist "%OPENBF3_GODOT%" (
     echo play.cmd: Godot not found at "%OPENBF3_GODOT%" ^(set OPENBF3_GODOT^)
     exit /b 2

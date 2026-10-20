@@ -68,22 +68,22 @@ libdeflate_decompressor *thread_decompressor() {
 
 } // namespace
 
-Result<std::vector<Block>> payload_blocks(std::span<const uint8_t> p_stored) {
+Result<std::vector<Block>> payload_blocks(std::span<const uint8_t> p_stored, uint64_t p_base) {
 	std::vector<Block> out;
 	size_t at = 0;
 	uint64_t decoded_at = 0;
 	while (at < p_stored.size()) {
 		if (p_stored.size() - at < kBlockHeaderLen) {
-			return block_error(at, BlockProblem::HeaderCut);
+			return block_error(p_base + at, BlockProblem::HeaderCut);
 		}
 		const uint32_t decoded = be32(p_stored.data() + at);
 		const uint32_t stored = be32(p_stored.data() + at + 4);
 		if (decoded > kMaxBlockLen) {
-			return block_error(at, BlockProblem::TooLarge);
+			return block_error(p_base + at, BlockProblem::TooLarge);
 		}
 		const size_t data_end = at + kBlockHeaderLen + stored;
 		if (data_end > p_stored.size()) {
-			return block_error(at, BlockProblem::DataCut);
+			return block_error(p_base + at, BlockProblem::DataCut);
 		}
 		out.push_back(Block{ at, stored, decoded_at, decoded });
 		decoded_at += decoded;
@@ -100,8 +100,8 @@ Result<uint64_t> decoded_len(std::span<const uint8_t> p_stored) {
 	return blocks->empty() ? 0 : blocks->back().decoded_at + blocks->back().decoded_len;
 }
 
-Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t> &r_out) {
-	Result<std::vector<Block>> layout = payload_blocks(p_stored);
+Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t> &r_out, uint64_t p_base) {
+	Result<std::vector<Block>> layout = payload_blocks(p_stored, p_base);
 	if (!layout) {
 		return layout.error();
 	}
@@ -129,7 +129,7 @@ Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t
 				libdeflate_zlib_decompress_ex(inflater, data, block.stored_len, dst, block.decoded_len, &in_used, &out_len);
 		if (r == LIBDEFLATE_SUCCESS) {
 			if (out_len != block.decoded_len) {
-				return block_error(block.stored_at, BlockProblem::InflatedLength);
+				return block_error(p_base + block.stored_at, BlockProblem::InflatedLength);
 			}
 			continue;
 		}
@@ -139,14 +139,14 @@ Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t
 			std::memcpy(dst, data, block.stored_len);
 			continue;
 		}
-		return block_error(block.stored_at, r == LIBDEFLATE_INSUFFICIENT_SPACE ? BlockProblem::InflatedLength : BlockProblem::Inflate);
+		return block_error(p_base + block.stored_at, r == LIBDEFLATE_INSUFFICIENT_SPACE ? BlockProblem::InflatedLength : BlockProblem::Inflate);
 	}
 	return {};
 }
 
-Result<std::vector<uint8_t>> decode_blocks(std::span<const uint8_t> p_stored) {
+Result<std::vector<uint8_t>> decode_blocks(std::span<const uint8_t> p_stored, uint64_t p_base) {
 	std::vector<uint8_t> out;
-	BF3_TRY(decode_blocks_into(p_stored, out));
+	BF3_TRY(decode_blocks_into(p_stored, out, p_base));
 	return out;
 }
 
@@ -180,18 +180,8 @@ Result<std::vector<uint8_t>> decode_chunk_range(const Guid &p_id, std::span<cons
 	if (decoded != p_range.logical_offset) {
 		return block_error(start, BlockProblem::RangeLogicalOffset);
 	}
-	Result<std::vector<uint8_t>> out = decode_blocks(p_stored.subspan(start, end - start));
-	if (!out) {
-		// Block offsets are relative to the range; report them in the whole payload.
-		const std::string &m = out.error().message;
-		static constexpr char kPrefix[] = "payload block at byte ";
-		if (m.rfind(kPrefix, 0) == 0) {
-			const size_t num_end = m.find(':');
-			const uint64_t rel = std::strtoull(m.c_str() + sizeof(kPrefix) - 1, nullptr, 10);
-			return make_error(kPrefix + std::to_string(rel + start) + m.substr(num_end));
-		}
-	}
-	return out;
+	// Block offsets are reported in the whole payload: the range's start is the decoder's base.
+	return decode_blocks(p_stored.subspan(start, end - start), start);
 }
 
 } // namespace bf3::core

@@ -35,7 +35,8 @@ set(attempt 0)
 set(result "")
 foreach(run first repeat)
     string(RANDOM LENGTH 8 ALPHABET 0123456789abcdef tag)
-    set(root "$ENV{TEMP}/openbf3-godot-s3-${tag}")
+    set(root "${BUILD_DIR}/scratch/godot-s3-${tag}")
+    file(MAKE_DIRECTORY "${BUILD_DIR}/scratch")
     file(REMOVE_RECURSE "${root}")
     execute_process(
         COMMAND "${godot}" --path "${PROJECT_DIR}" res://scenes/s3_crowd.tscn -- --s3-check --walkers=0 --no-hud "--bf3-cache=${root}"

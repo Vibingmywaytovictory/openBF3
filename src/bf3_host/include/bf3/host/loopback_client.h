@@ -12,8 +12,10 @@
 namespace bf3::host {
 
 struct LoopbackClientStats {
-	bool running = false;
+	bool running = false; // the network thread is alive (false again once it exits, on stop() or on failure)
 	bool connected = false;
+	bool failed = false; // the thread exited on its own: error says why
+	std::string error;
 	uint64_t pings_sent = 0;
 	uint64_t pongs_received = 0;
 	double last_rtt_ms = 0.0;
@@ -43,6 +45,9 @@ private:
 	std::atomic<bool> stop_requested_{ false };
 	std::atomic<bool> running_{ false };
 	std::atomic<bool> connected_{ false };
+	std::atomic<bool> failed_{ false };
+	mutable std::mutex error_mutex_;
+	std::string error_; // under error_mutex_; set by the thread before failed_ is published
 	std::atomic<uint64_t> sent_{ 0 };
 	std::atomic<uint64_t> received_{ 0 };
 	std::atomic<uint64_t> rtt_sum_us_{ 0 };

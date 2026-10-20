@@ -1008,7 +1008,7 @@ endif()
 # M2a hud godot (docs/design/m2a-hud.md §5): godot.m2a_hud runs the windowed --hud-check of
 # res://scenes/m2a_hud.tscn after a probe run (E10 at 1280 x 720, 1920 x 1080, 2560 x 1440 per frame of a scripted
 # model; exit 77 = skipped without OPENBF3_GODOT, an install, a window or a rendering device); the PNGs go to
-# $ENV{OPENBF3_HUD_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/hud (gitignored, outside the
+# $ENV{OPENBF3_HUD_SHOTS}, default <build dir>/shots/hud (gitignored, outside the
 # worktree). It shares the project and its DLL with the other godot.* tests and reads the viewport image (RUN_SERIAL).
 # WINDOW: label window, the merge pass's user-away phase.
 if(OPENBF3_BUILD_GODOT AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
@@ -1324,7 +1324,7 @@ endif()
 # M2a gx (docs/design/m2a-gx.md §5): the playable scene's in-game checks. godot.m2a runs --m2a-check on
 # res://scenes/m2a_metro.tscn (range, reload, hud, ads, audio, fx; a skipped case names its track), godot.m2a.kits
 # the 8 loadouts (E11), godot.m2a.play the scripted 5-minute play run (all three: 0 ERROR lines). Screenshots go to
-# $ENV{OPENBF3_GX_SHOTS}, default C:/Users/olku/BF3 reimplementation/openBF3/b/shots/gx (gitignored, outside the
+# $ENV{OPENBF3_GX_SHOTS}, default <build dir>/shots/gx (gitignored, outside the
 # worktree). Exit 77 = skipped without OPENBF3_GODOT, an install, a window or a rendering device, or while
 # OPENBF3_USER_ACTIVE_FLAG exists. godot.m2a_firefight (E13 / E14 with bt's bots) and godot.m2a_load (E16 on the M2a
 # scene: godot_m1_load.cmake with -DSCENE) are the integrator's merge-pass rows. All share the project and its DLL

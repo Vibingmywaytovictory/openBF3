@@ -140,6 +140,9 @@ struct GameServerStats {
 	uint64_t snapshot_bytes = 0;
 	size_t max_snapshot_bytes = 0;
 	uint64_t bad_datagrams = 0; // failed to decode (counted, ignored)
+	uint64_t spawn_failures = 0; // spawn() found no usable point: the spawn request, order or dev request was dropped
+	uint64_t level_mismatch_kicks = 0; // Ready carried a source digest that differs from the server's level: kicked
+	uint64_t rules_step_failures = 0; // TdmRules::step failed (printed once; the round flow has stopped, see RulesStats::runtime_faults)
 	// Motor steps whose command tick != state tick + 1 (a spawn, Teleport or SpawnAt not stamped at its rules tick
 	// would show here; must stay 0, host.session.unit). Added in T4 (docs §8.4).
 	uint64_t step_precondition_failures = 0;

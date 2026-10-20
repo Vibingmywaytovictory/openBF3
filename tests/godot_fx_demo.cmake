@@ -30,7 +30,8 @@ if(shots STREQUAL "")
     get_filename_component(shots "${PROJECT_DIR}/../b/shots/fx2" ABSOLUTE)
 endif()
 string(RANDOM LENGTH 8 ALPHABET 0123456789abcdef tag)
-set(root "$ENV{TEMP}/openbf3-godot-fx2-${tag}")
+set(root "${BUILD_DIR}/scratch/godot-fx2-${tag}")
+file(MAKE_DIRECTORY "${BUILD_DIR}/scratch")
 file(REMOVE_RECURSE "${root}")
 execute_process(
     COMMAND "${godot}" --path "${PROJECT_DIR}" res://scenes/fx_demo.tscn -- --fx-check --walkers=0 --no-hud "--bf3-cache=${root}"

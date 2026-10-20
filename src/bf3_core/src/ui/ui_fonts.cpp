@@ -269,7 +269,6 @@ Result<ConvertedFont> convert_library_font(const SwfLibrary &p_movies, std::stri
 	ConvertedFont out;
 	out.font_long_name = std::string(p_font_long_name);
 	out.source_glyphs = info->glyph_count;
-	bool converted = false;
 	auto accept = [&](std::span<const uint8_t> p_bytes) -> Status {
 		WorkBudget budget(kTrueTypeReadBudgetUnits);
 		Result<TrueTypeFont> font = read_truetype(p_bytes, budget);
@@ -311,14 +310,12 @@ Result<ConvertedFont> convert_library_font(const SwfLibrary &p_movies, std::stri
 		for (const auto &[code, glyph] : back->cmap) {
 			out.codes.push_back(code);
 		}
-		converted = true;
 		return ttf;
 	};
 	Result<CachedItem> item = cached_convert(p_cache, *key, accept, produce);
 	if (!item) {
 		return error_at(where, item.error());
 	}
-	(void)converted;
 	out.cache = *item;
 	out.distinct_codes = uint16_t(std::min<size_t>(out.codes.size(), 65535));
 	return out;

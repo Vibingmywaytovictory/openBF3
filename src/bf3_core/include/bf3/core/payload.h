@@ -32,11 +32,12 @@ inline bool chunk_is_framed(const Guid &p_id) {
 	return (p_id.bytes[15] & 1) != 0;
 }
 
-Result<std::vector<Block>> payload_blocks(std::span<const uint8_t> p_stored);
+// p_base is added to the byte positions in error messages when p_stored is a range of a larger payload.
+Result<std::vector<Block>> payload_blocks(std::span<const uint8_t> p_stored, uint64_t p_base = 0);
 Result<uint64_t> decoded_len(std::span<const uint8_t> p_stored);
-Result<std::vector<uint8_t>> decode_blocks(std::span<const uint8_t> p_stored);
+Result<std::vector<uint8_t>> decode_blocks(std::span<const uint8_t> p_stored, uint64_t p_base = 0);
 // Appends the decoded bytes to r_out.
-Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t> &r_out);
+Status decode_blocks_into(std::span<const uint8_t> p_stored, std::vector<uint8_t> &r_out, uint64_t p_base = 0);
 Result<std::vector<uint8_t>> decode_chunk(const Guid &p_id, std::span<const uint8_t> p_stored);
 // Decodes stored[range.start..range.end]; range.start must be a block boundary whose preceding
 // blocks decode to exactly range.logical_offset bytes.
