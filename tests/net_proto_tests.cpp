@@ -2333,6 +2333,52 @@ TEST_SUITE("net-proto") {
 		CHECK(dropped == 127 - 52);
 	}
 
+	TEST_CASE("proto v2: one encode of a 64-player snapshot is main's encode, split, encode: same bytes, same SnapshotOthers tail, pinned") {
+		const auto fnv1a = [](const std::vector<uint8_t> &p_bytes) {
+			uint64_t h = 0xcbf29ce484222325ull;
+			for (const uint8_t b : p_bytes) {
+				h = (h ^ b) * 0x100000001B3ull;
+			}
+			return h;
+		};
+		Rng rng(0x5A17);
+		net::Snapshot full = sample_snapshot(rng, 0);
+		full.own_weapons = sample_weapons_wire(rng);
+		for (size_t i = 1; i < 64; ++i) {
+			full.others.push_back(sample_other_v2(rng, uint8_t(i), full.server_tick));
+		}
+
+		size_t dropped = 0;
+		const std::vector<uint8_t> once = net::encode_snapshot(full, &dropped);
+		REQUIRE(dropped > 0);
+		REQUIRE(dropped < full.others.size());
+		const size_t keep = full.others.size() - dropped;
+
+		net::Snapshot split = full;
+		size_t split_dropped = 0;
+		(void)net::encode_snapshot(split, &split_dropped);
+		split.others.resize(split.others.size() - split_dropped);
+		const std::vector<uint8_t> twice = net::encode_snapshot(split);
+		CHECK(split_dropped == dropped);
+		CHECK(once == twice);
+
+		net::SnapshotOthers rest;
+		rest.seq = full.seq;
+		rest.server_tick = full.server_tick;
+		rest.others.assign(full.others.begin() + std::ptrdiff_t(keep), full.others.end());
+		size_t rest_dropped = 0;
+		const std::vector<uint8_t> tail = net::encode_snapshot_others(rest, &rest_dropped);
+		CHECK(rest_dropped == 0);
+
+		MESSAGE("64 players: Snapshot ", once.size(), " B with ", keep, " others, fnv1a ", fnv1a(once), "; SnapshotOthers ", tail.size(), " B with ",
+				rest.others.size(), " others, fnv1a ", fnv1a(tail));
+		CHECK(once.size() == 1182);
+		CHECK(keep == 41);
+		CHECK(fnv1a(once) == 0xc1857be9c1ddfa9aull);
+		CHECK(tail.size() == 503);
+		CHECK(fnv1a(tail) == 0x3b763f9c38937cabull);
+	}
+
 	TEST_CASE("proto v2: set_other_weapon masks to the wire widths; others' weapon fields round trip") {
 		net::OtherSoldier o;
 		net::set_other_weapon(o, 300, sw::WeaponPhase::Reloading, true, true, 7, 17);

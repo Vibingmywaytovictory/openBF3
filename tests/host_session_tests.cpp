@@ -949,6 +949,66 @@ TEST_SUITE("host-session-unit") {
 		CHECK(g.step_precondition_failures == 0);
 	}
 
+	TEST_CASE("host.session: GameServer without sockets: a Ready with another level's source digest is kicked and its slot freed, the same or no digest is admitted") {
+		auto digested = std::make_shared<SharedLevel>(*synthetic_level());
+		digested->source_digest = core::Sha256Digest{};
+		digested->source_digest->bytes[3] = 0x5D;
+		core::Sha256Digest other = *digested->source_digest;
+		other.bytes[3] = 0x5E;
+		GameServerConfig cfg;
+		cfg.level = digested;
+		cfg.max_slots = 8;
+		net::Hello hello;
+		hello.name = "test";
+
+		const auto run = [&](std::optional<core::Sha256Digest> p_digest, size_t &r_kicks, size_t &r_spawned) {
+			Direct d;
+			REQUIRE(d.server.init(cfg).ok());
+			d.server.on_connect(0);
+			d.receive(net::encode_hello(hello));
+			d.tick();
+			REQUIRE(d.server.stats().clients == 1);
+			d.receive(net::encode_ready({ p_digest }));
+			r_kicks = 0;
+			for (int i = 0; i < 4; ++i) {
+				d.tick();
+				for (const OutDatagram &o : d.out) {
+					if (net::peek_type(o.bytes) == net::MessageType::Kick) {
+						core::Result<net::Kick> k = net::decode_kick(o.bytes);
+						REQUIRE(k.ok());
+						CHECK(k->reason.find("source digest") != std::string::npos);
+						CHECK(o.peer == 0);
+						CHECK(o.reliable);
+						++r_kicks;
+					}
+				}
+			}
+			r_spawned = d.spawned.size();
+			return d.server.stats();
+		};
+
+		size_t kicks = 0, spawned = 0;
+		GameServerStats g = run(other, kicks, spawned);
+		CHECK(kicks == 1);
+		CHECK(spawned == 0);
+		CHECK(g.level_mismatch_kicks == 1);
+		CHECK(g.clients == 0);
+		CHECK(g.soldiers == 0);
+		CHECK(g.bad_datagrams == 0);
+
+		g = run(digested->source_digest, kicks, spawned);
+		CHECK(kicks == 0);
+		CHECK(spawned == 1);
+		CHECK(g.level_mismatch_kicks == 0);
+		CHECK(g.clients == 1);
+
+		g = run(std::nullopt, kicks, spawned);
+		CHECK(kicks == 0);
+		CHECK(spawned == 1);
+		CHECK(g.level_mismatch_kicks == 0);
+		CHECK(g.clients == 1);
+	}
+
 	TEST_CASE("host.session: GameServer SpawnSweep in batches of the free slots equals headless place_spawn + idle ticks + judge_settle") {
 		auto level = synthetic_level();
 		Direct d;
