@@ -1,5 +1,6 @@
 #include "swf_commands.h"
 
+#include "as2_commands.h"
 #include "prepare_commands.h"
 
 #include "bf3/core/cache/digest.h"
@@ -551,7 +552,9 @@ const char *swf_usage() {
 		   "  swf layout <name> [--depth=N]\n"
 		   "  swf scene <name> [--frames=N]\n"
 		   "  swf hud\n"
-		   "  swf fonts [--text-db=<partition>] [--cache=<dir> | --no-cache]\n";
+		   "  swf fonts [--text-db=<partition>] [--cache=<dir> | --no-cache]\n"
+		   "  swf as2 census [--threads=N]\n"
+		   "  swf as2 <movie> [--class <name>]\n";
 }
 
 int cmd_swf(const InstallReader &p_reader, const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
@@ -580,6 +583,9 @@ int cmd_swf(const InstallReader &p_reader, const std::shared_ptr<Install> &p_ins
 	}
 	if (sub == "fonts") {
 		return cmd_fonts(p_reader, p_install, rest);
+	}
+	if (sub == "as2") {
+		return cmd_swf_as2(p_install, rest);
 	}
 	return 2;
 }

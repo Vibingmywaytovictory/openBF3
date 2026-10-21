@@ -260,6 +260,12 @@ target_sources(bf3_core PRIVATE
     src/ui/ui_fonts.cpp
     src/ui/swf_layout.cpp
 )
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/avm1.h
+    src/ui/avm1.cpp
+    src/ui/avm1_movie.cpp
+    src/ui/avm1_format.cpp
+)
 
 target_sources(bf3_core PRIVATE
     include/bf3/core/ui/minimap.h

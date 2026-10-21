@@ -147,9 +147,11 @@ These are structural, known, and listed so nobody mistakes them for design inten
 * The HUD screens (`src/bf3_godot/src/hud_*.cpp`, `spawn_screen.cpp`, `round_end.cpp`, `kill_card.cpp`) are
   hand-built Godot controls that only borrow the retail fonts and atlas regions. The rule is the retail SWF movies
   rendered as they are (CLAUDE.md "Native Battlefield 3 UI only"); the SWF decoders in `bf3_core/ui/` give symbol
-  tables, atlases, fonts, triangulated shapes, a live display tree (`SwfScene`) and text layout, so the renderer and
-  the screen logic are open. The scene runs only the frame scripts' unconditional stop/play/goto; the movies' AS2
-  classes, `onClipEvent` handlers and conditional frame code are not executed.
+  tables, atlases, fonts, triangulated shapes, a live display tree (`SwfScene`), text layout and the AVM1 bytecode
+  (`avm1.h`: every DoAction, DoInitAction and clip-action body, and the classes and `Object.registerClass` calls found
+  in it; `bf3dump swf as2`), so the renderer and the screen logic are open. The scene runs only the frame scripts'
+  unconditional stop/play/goto; the movies' AS2 classes, `onClipEvent` handlers and conditional frame code are not
+  executed.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
   (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install
