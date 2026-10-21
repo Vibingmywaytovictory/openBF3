@@ -118,7 +118,7 @@ tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on eve
 | an EBX field | `src/bf3_core/src/ebx.cpp`, `gameplay/ebx_fields.cpp`, then the table in `gameplay/` |
 | the player's movement | `src/bf3_sim/src/soldier_motor.cpp`, `prediction.cpp` |
 | shooting, damage, hit registration | `src/bf3_sim/src/weapons/`, `src/bf3_host/src/gunplay.cpp`, `lag_comp.cpp` |
-| the wire format | `src/bf3_net/src/protocol.cpp` (read/write pairs are adjacent) |
+| the wire format | `src/bf3_net/src/protocol.cpp`: one `serialize` per message, run by the writer, the reader and the `BitCounter` that sizes the layout (`bit_archive.h`) |
 | the server tick order | "Data flow" step 4 above, then `game_server.cpp` `run_tick` |
 | TDM rules and the round flow | `src/bf3_host/src/tdm_rules.cpp`, the logic runtime in `src/bf3_sim/src/logic/` |
 | bots | `src/bf3_sim/src/bots/` (perception, walking), `src/bf3_host/src/tdm_brain.cpp`, `firefight_brain.cpp` |

@@ -3,10 +3,13 @@
 #include "bf3/core/util/finite.h"
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/weapons_wire.h"
+#include "bit_archive.h"
+#include "weapons_wire_layout.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -14,36 +17,31 @@ namespace bf3::net {
 
 namespace {
 
+using bf3::core::finite;
+namespace sw = sim::weapons;
+
+constexpr unsigned kTypeBits = 8;
 constexpr size_t kMaxIdentBytes = 128;
 constexpr size_t kMaxTextBytes = 2048;
 constexpr size_t kMaxSweepRows = 1024;
 
 constexpr size_t kMaxReliableBytes = 256 * 1024;
+constexpr size_t kDatagramBits = kMaxDatagramBytes * 8;
 constexpr float kMaxDebugCoordinate = 1.0e6f;
 
-constexpr unsigned kOwnStateBits = 77 * 8;
-constexpr unsigned kCommandFieldBits = 24 + 8 + 8 + 16 + quant::kCommandPitchBits + 2;
-constexpr unsigned kOtherBits = 8 + 8 + quant::kPositionXZ.bits + quant::kPositionY.bits + quant::kPositionXZ.bits +
-		3 * quant::kSoldierVelocity.bits + quant::kSoldierYawBits + quant::kSoldierPitchBits + 2 + 2 + 8 + 4 + 8;
-static_assert(kOtherBits == 159);
-static_assert(kCommandFieldBits == 72);
-
-constexpr unsigned kViewSampleBits = 16 + 2 + 8;
-constexpr unsigned kOtherWeaponBits = 8 + 3 + 1 + 1 + 2 + 4;
-constexpr unsigned kOtherTeamBits = 2;
-constexpr unsigned kOtherBitsV2 = kOtherBits + kOtherWeaponBits + kOtherTeamBits;
-static_assert(kOtherWeaponBits == 19 && kOtherBitsV2 == 180);
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
 constexpr uint8_t kKnownRulesFlags = rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive;
 constexpr unsigned kWireSlotBits = 7;
 static_assert((size_t(1) << kWireSlotBits) == kMaxSlots);
+constexpr unsigned kOthersCountBits = 8;
 constexpr int32_t kOtherPitchMaxCode = (1 << (quant::kSoldierPitchBits - 1)) - 1;
+constexpr WeaponsWireFaults kOwnWeaponsFaults{ "own weapons field out of range", "own weapons field out of range" };
 
 core::Error fail(const char *p_what, const char *p_why) {
 	return core::make_error(std::string(p_what) + ": " + p_why);
 }
 
-bool valid_pose(uint64_t p_value) {
+constexpr bool valid_pose(uint64_t p_value) {
 	return p_value < sim::kPoseCount;
 }
 
@@ -103,65 +101,37 @@ std::string_view clamp_utf8(std::string_view p_text, size_t p_max) {
 	return p_text.substr(0, cut);
 }
 
-void write_string(BitWriter &r_w, std::string_view p_text, size_t p_max) {
-	const std::string_view t = clamp_utf8(p_text, p_max);
-	r_w.write_varint(t.size());
-	for (const char c : t) {
-		r_w.write_bits(uint8_t(c), 8);
+template <class A, MaybeConst<sim::Vec3> V>
+constexpr void vec3(A &r_a, V &r_v) {
+	for (auto &f : r_v) {
+		r_a.f32(f);
 	}
 }
 
-bool read_string(BitReader &r_r, size_t p_max, std::string &r_text) {
-	const uint64_t len = r_r.read_varint();
-	if (r_r.failed() || len > p_max || len * 8 > r_r.bits_left()) {
-		return false;
+template <class A, MaybeConst<std::string> S>
+void text(A &r_a, S &r_text, size_t p_max, const char *p_why) {
+	uint64_t length = clamp_utf8(r_text, p_max).size();
+	r_a.varint(length);
+	r_a.require(p_why, [&] { return length <= p_max && r_a.fits(length * 8); });
+	length = r_a.resize(r_text, size_t(length));
+	for (size_t i = 0; i < length; ++i) {
+		r_a.bits(r_text[i], 8);
 	}
-	r_text.resize(size_t(len));
-	for (char &c : r_text) {
-		c = char(r_r.read_bits(8));
-	}
-	return !r_r.failed() && valid_utf8(r_text);
+	r_a.require(p_why, [&] { return valid_utf8(r_text); });
 }
 
-void write_digest(BitWriter &r_w, const std::optional<core::Sha256Digest> &p_digest) {
-	r_w.write_bool(p_digest.has_value());
-	if (p_digest) {
-		for (const uint8_t b : p_digest->bytes) {
-			r_w.write_bits(b, 8);
+template <class A, MaybeConst<std::optional<core::Sha256Digest>> D>
+void digest(A &r_a, D &r_digest) {
+	r_a.optional(r_digest, [&](auto &r_value) {
+		for (auto &b : r_value.bytes) {
+			r_a.bits(b, 8);
 		}
-	}
+	});
 }
 
-void read_digest(BitReader &r_r, std::optional<core::Sha256Digest> &r_digest) {
-	if (!r_r.read_bool()) {
-		r_digest.reset();
-		return;
-	}
-	core::Sha256Digest d;
-	for (uint8_t &b : d.bytes) {
-		b = uint8_t(r_r.read_bits(8));
-	}
-	r_digest = d;
-}
-
-void write_vec3(BitWriter &r_w, const sim::Vec3 &p_v) {
-	for (const float f : p_v) {
-		r_w.write_f32(f);
-	}
-}
-
-bool read_vec3(BitReader &r_r, sim::Vec3 &r_v) {
-	bool finite = true;
-	for (float &f : r_v) {
-		f = r_r.read_f32();
-		finite = finite && std::isfinite(f);
-	}
-	return finite;
-}
-
-BitWriter begin(MessageType p_type, size_t p_cap = kMaxReliableBytes) {
+BitWriter begin(MessageType p_type, size_t p_cap) {
 	BitWriter w(p_cap);
-	w.write_bits(uint8_t(p_type), 8);
+	w.write_bits(uint8_t(p_type), kTypeBits);
 	return w;
 }
 
@@ -173,73 +143,43 @@ std::vector<uint8_t> finish(BitWriter &r_w) {
 }
 
 bool open(BitReader &r_r, MessageType p_type) {
-	return uint8_t(r_r.read_bits(8)) == uint8_t(p_type) && !r_r.failed();
+	return uint8_t(r_r.read_bits(kTypeBits)) == uint8_t(p_type) && !r_r.failed();
 }
 
-template <class T>
-core::Result<T> close(BitReader &r_r, T p_value, const char *p_what) {
-	if (r_r.failed()) {
-		return fail(p_what, "truncated");
-	}
-	if (!r_r.at_end()) {
-		return fail(p_what, "trailing bytes");
-	}
-	return p_value;
+template <class A, MaybeConst<sim::SoldierState> S>
+constexpr bool serialize(A &r_a, S &r_s) {
+	r_a.bits(r_s.tick, 32);
+	r_a.bits(r_s.life, 32);
+	vec3(r_a, r_s.position);
+	vec3(r_a, r_s.velocity);
+	vec3(r_a, r_s.ground_normal);
+	r_a.bits(r_s.yaw, 16);
+	r_a.bits(r_s.pitch, 16);
+	r_a.bits(r_s.pose, 8);
+	r_a.bits(r_s.target_pose, 8);
+	r_a.bits(r_s.transition_ticks, 16);
+	r_a.bits(r_s.transition_total, 16);
+	r_a.bits(r_s.mode, 8);
+	r_a.bits(r_s.flags, 16);
+	r_a.bits(r_s.events, 16);
+	r_a.bits(r_s.jump_penalty_ticks, 16);
+	r_a.bits(r_s.air_ticks, 16);
+	r_a.bits(r_s.protect_ticks, 16);
+	r_a.f32(r_s.health);
+	r_a.f32(r_s.impact_speed);
+	r_a.f32(r_s.damage);
+	return r_a.valid([&] {
+		return finite(r_s.position) && finite(r_s.velocity) && finite(r_s.ground_normal) && valid_pose(uint8_t(r_s.pose)) &&
+				valid_pose(uint8_t(r_s.target_pose)) && uint8_t(r_s.mode) < sim::kMoveModeCount && r_s.pitch >= -sim::kPitchLimit &&
+				r_s.pitch <= sim::kPitchLimit && finite(r_s.health) && finite(r_s.impact_speed) && finite(r_s.damage);
+	});
 }
 
-void write_state(BitWriter &r_w, const sim::SoldierState &p_s) {
-	r_w.write_bits(p_s.tick, 32);
-	r_w.write_bits(p_s.life, 32);
-	write_vec3(r_w, p_s.position);
-	write_vec3(r_w, p_s.velocity);
-	write_vec3(r_w, p_s.ground_normal);
-	r_w.write_bits(p_s.yaw, 16);
-	r_w.write_signed(p_s.pitch, 16);
-	r_w.write_bits(uint8_t(p_s.pose), 8);
-	r_w.write_bits(uint8_t(p_s.target_pose), 8);
-	r_w.write_bits(p_s.transition_ticks, 16);
-	r_w.write_bits(p_s.transition_total, 16);
-	r_w.write_bits(uint8_t(p_s.mode), 8);
-	r_w.write_bits(p_s.flags, 16);
-	r_w.write_bits(p_s.events, 16);
-	r_w.write_bits(p_s.jump_penalty_ticks, 16);
-	r_w.write_bits(p_s.air_ticks, 16);
-	r_w.write_bits(p_s.protect_ticks, 16);
-	r_w.write_f32(p_s.health);
-	r_w.write_f32(p_s.impact_speed);
-	r_w.write_f32(p_s.damage);
-}
-
-bool read_state(BitReader &r_r, sim::SoldierState &r_s) {
-	r_s = sim::SoldierState{};
-	r_s.tick = sim::Tick(r_r.read_bits(32));
-	r_s.life = uint32_t(r_r.read_bits(32));
-	bool ok = read_vec3(r_r, r_s.position);
-	ok = read_vec3(r_r, r_s.velocity) && ok;
-	ok = read_vec3(r_r, r_s.ground_normal) && ok;
-	r_s.yaw = uint16_t(r_r.read_bits(16));
-	r_s.pitch = int16_t(r_r.read_signed(16));
-	const uint64_t pose = r_r.read_bits(8);
-	const uint64_t target = r_r.read_bits(8);
-	r_s.transition_ticks = uint16_t(r_r.read_bits(16));
-	r_s.transition_total = uint16_t(r_r.read_bits(16));
-	const uint64_t mode = r_r.read_bits(8);
-	r_s.flags = uint16_t(r_r.read_bits(16));
-	r_s.events = uint16_t(r_r.read_bits(16));
-	r_s.jump_penalty_ticks = uint16_t(r_r.read_bits(16));
-	r_s.air_ticks = uint16_t(r_r.read_bits(16));
-	r_s.protect_ticks = uint16_t(r_r.read_bits(16));
-	r_s.health = r_r.read_f32();
-	r_s.impact_speed = r_r.read_f32();
-	r_s.damage = r_r.read_f32();
-	ok = ok && valid_pose(pose) && valid_pose(target) && mode < sim::kMoveModeCount;
-	ok = ok && r_s.pitch >= -sim::kPitchLimit && r_s.pitch <= sim::kPitchLimit;
-	ok = ok && std::isfinite(r_s.health) && std::isfinite(r_s.impact_speed) && std::isfinite(r_s.damage);
-	r_s.pose = sim::Pose(ok ? pose : 0);
-	r_s.target_pose = sim::Pose(ok ? target : 0);
-	r_s.mode = sim::MoveMode(ok ? mode : 0);
-	return ok;
-}
+constexpr size_t kOwnStateBits = count_bits([](auto &r_a) {
+	sim::SoldierState s{};
+	serialize(r_a, s);
+});
+static_assert(kOwnStateBits == 77 * 8);
 
 struct WireCommand {
 	uint32_t buttons = 0;
@@ -273,42 +213,86 @@ WireCommand wire_of(const sim::Command &p_c) {
 	return w;
 }
 
-void write_command_fields(BitWriter &r_w, const WireCommand &p_c) {
-	r_w.write_bits(p_c.buttons, 24);
-	r_w.write_signed(p_c.forward, 8);
-	r_w.write_signed(p_c.right, 8);
-	r_w.write_bits(p_c.yaw, 16);
-	r_w.write_signed(p_c.pitch, quant::kCommandPitchBits);
-	r_w.write_bits(p_c.pose, 2);
-	r_w.write_bits(p_c.view_back_q8, 16);
-	r_w.write_bits(p_c.view_quality, 2);
-	r_w.write_bits(p_c.view_seq8, 8);
+sim::Command command_of(const WireCommand &p_w, sim::Tick p_tick, uint32_t p_sequence) {
+	sim::Command c;
+	c.tick = p_tick;
+	c.sequence = p_sequence;
+	c.buttons = p_w.buttons;
+	c.move_forward = p_w.forward;
+	c.move_right = p_w.right;
+	c.yaw = p_w.yaw;
+	c.pitch = p_w.pitch;
+	c.pose = sim::Pose(p_w.pose);
+	c.view_back_q8 = p_w.view_back_q8;
+	c.view_quality = p_w.view_quality;
+	c.view_seq8 = p_w.view_seq8;
+	return c;
 }
 
-bool read_command_fields(BitReader &r_r, sim::Command &r_c) {
-	r_c.buttons = uint32_t(r_r.read_bits(24));
-	r_c.move_forward = int8_t(r_r.read_signed(8));
-	r_c.move_right = int8_t(r_r.read_signed(8));
-	r_c.yaw = uint16_t(r_r.read_bits(16));
-	r_c.pitch = int16_t(r_r.read_signed(quant::kCommandPitchBits));
-	const uint64_t pose = r_r.read_bits(2);
-	r_c.view_back_q8 = uint16_t(r_r.read_bits(16));
-	r_c.view_quality = uint8_t(r_r.read_bits(2));
-	r_c.view_seq8 = uint8_t(r_r.read_bits(8));
-	r_c.flags = 0;
-	if (!valid_pose(pose) || r_c.move_forward < -sim::kAxisMax || r_c.move_right < -sim::kAxisMax ||
-			r_c.pitch < -sim::kPitchLimit || r_c.pitch > sim::kPitchLimit) {
-		return false;
+template <class A, MaybeConst<WireCommand> C>
+constexpr bool serialize(A &r_a, C &r_c) {
+	r_a.bits(r_c.buttons, 24);
+	r_a.bits(r_c.forward, 8);
+	r_a.bits(r_c.right, 8);
+	r_a.bits(r_c.yaw, 16);
+	r_a.bits(r_c.pitch, quant::kCommandPitchBits);
+	r_a.bits(r_c.pose, 2);
+	r_a.bits(r_c.view_back_q8, 16);
+	r_a.bits(r_c.view_quality, 2);
+	r_a.bits(r_c.view_seq8, 8);
+	return r_a.valid([&] {
+		return valid_pose(r_c.pose) && r_c.forward >= -sim::kAxisMax && r_c.right >= -sim::kAxisMax && r_c.pitch >= -sim::kPitchLimit &&
+				r_c.pitch <= sim::kPitchLimit;
+	});
+}
+
+static_assert(count_bits([](auto &r_a) {
+	WireCommand c{};
+	serialize(r_a, c);
+}) == 98);
+
+struct CommandPacketWire {
+	uint16_t newest_snapshot = 0;
+	uint32_t snapshot_ack_bits = 0;
+	uint32_t others_ack_bits = 0;
+	uint8_t count = 0;
+	sim::Tick tick = 0;
+	uint32_t sequence = 0;
+	std::array<WireCommand, kCommandsPerPacket> commands{};
+};
+
+template <class A, MaybeConst<CommandPacketWire> P>
+void serialize(A &r_a, P &r_p) {
+	r_a.bits(r_p.newest_snapshot, 16);
+	r_a.bits(r_p.snapshot_ack_bits, 32);
+	r_a.bits(r_p.others_ack_bits, 32);
+	r_a.bits(r_p.count, 8);
+	r_a.check("command count out of range", [&] { return r_p.count != 0 && r_p.count <= kCommandsPerPacket; });
+	if (!r_a.ok()) {
+		return;
 	}
-	r_c.pose = sim::Pose(pose);
-	return true;
+	r_a.bits(r_p.tick, 32);
+	r_a.bits(r_p.sequence, 32);
+	const bool newest = serialize(r_a, r_p.commands[0]);
+	r_a.check("command field out of range", [&] { return newest; });
+	for (size_t i = 1; i < r_p.count && r_a.ok(); ++i) {
+		r_a.check("implied tick or sequence below 0", [&] { return r_p.tick >= i && r_p.sequence >= i; });
+		bool same = r_p.commands[i] == r_p.commands[i - 1];
+		r_a.bits(same, 1);
+		if (same) {
+			r_a.store(r_p.commands[i], [&] { return r_p.commands[i - 1]; });
+			continue;
+		}
+		const bool valid = serialize(r_a, r_p.commands[i]);
+		r_a.check("command field out of range", [&] { return valid; });
+	}
 }
 
-uint32_t other_yaw_code(uint16_t p_yaw) {
+constexpr uint32_t other_yaw_code(uint16_t p_yaw) {
 	return ((uint32_t(p_yaw) + 2u) >> 2) & ((1u << quant::kSoldierYawBits) - 1u);
 }
 
-int32_t other_pitch_code(int16_t p_pitch) {
+constexpr int32_t other_pitch_code(int16_t p_pitch) {
 	const int32_t code = (int32_t(p_pitch) + 2) >> 2;
 	return std::clamp(code, -kOtherPitchMaxCode, kOtherPitchMaxCode);
 }
@@ -322,6 +306,79 @@ uint8_t transition_progress(const sim::SoldierState &p_s) {
 	}
 	const uint32_t done = uint32_t(p_s.transition_total - p_s.transition_ticks);
 	return uint8_t((done * 255u + p_s.transition_total / 2u) / p_s.transition_total);
+}
+
+template <class A, MaybeConst<float> F>
+constexpr void quantized(A &r_a, F &r_value, const Quantizer &p_q) {
+	r_a.coded(r_value, p_q.bits, [&](float p_v) { return p_q.encode(p_v); }, [&](uint32_t p_code) { return p_q.decode(p_code); });
+}
+
+template <class A, MaybeConst<OtherSoldier> O>
+constexpr bool serialize(A &r_a, O &r_o) {
+	r_a.bits(r_o.slot, 8);
+	r_a.bits(r_o.generation, 8);
+	quantized(r_a, r_o.position[0], quant::kPositionXZ);
+	quantized(r_a, r_o.position[1], quant::kPositionY);
+	quantized(r_a, r_o.position[2], quant::kPositionXZ);
+	for (auto &v : r_o.velocity) {
+		quantized(r_a, v, quant::kSoldierVelocity);
+	}
+	r_a.coded(r_o.yaw, quant::kSoldierYawBits, other_yaw_code, [](uint32_t p_code) { return uint16_t(p_code << 2); });
+	r_a.coded(r_o.pitch, quant::kSoldierPitchBits, other_pitch_code, [](int32_t p_code) { return int16_t(p_code * 4); });
+	r_a.bits(r_o.pose, 2);
+	r_a.bits(r_o.target_pose, 2);
+	r_a.bits(r_o.transition, 8);
+	r_a.bits(r_o.mode, 4);
+	r_a.bits(r_o.flags, 8);
+	r_a.bits(r_o.weapon, 8);
+	r_a.bits(r_o.weapon_phase, 3);
+	r_a.bits(r_o.firing, 1);
+	r_a.bits(r_o.ads, 1);
+	r_a.bits(r_o.reload_seq, 2);
+	r_a.bits(r_o.burst_seq, 4);
+	r_a.bits(r_o.team, 2);
+	return r_a.valid([&] {
+		return r_o.team <= kMaxTeam && r_o.slot < kMaxSlots && r_o.pitch >= -kOtherPitchMaxCode * 4 && r_o.pitch <= kOtherPitchMaxCode * 4 &&
+				valid_pose(uint8_t(r_o.pose)) && valid_pose(uint8_t(r_o.target_pose)) && uint8_t(r_o.mode) < sim::kMoveModeCount;
+	});
+}
+
+constexpr size_t kOtherBits = count_bits([](auto &r_a) {
+	OtherSoldier o{};
+	serialize(r_a, o);
+});
+static_assert(kOtherBits == 180);
+
+constexpr size_t others_room(size_t p_used_bits) {
+	const size_t used = p_used_bits + kOthersCountBits;
+	return used < kDatagramBits ? (kDatagramBits - used) / kOtherBits : 0;
+}
+
+class SlotSet {
+public:
+	bool insert(uint8_t p_slot) {
+		const bool fresh = !seen_[p_slot];
+		seen_[p_slot] = true;
+		return fresh;
+	}
+
+private:
+	std::array<bool, size_t(std::numeric_limits<uint8_t>::max()) + 1> seen_{};
+};
+
+template <class A, MaybeConst<std::vector<OtherSoldier>> V>
+size_t others(A &r_a, V &r_others, size_t p_cap) {
+	size_t count = std::min({ r_others.size(), others_room(r_a.bit_count()), p_cap });
+	r_a.bits(count, kOthersCountBits);
+	r_a.check("others count out of range", [&] { return count <= p_cap && r_a.fits(count * kOtherBits); });
+	count = r_a.resize(r_others, count);
+	SlotSet seen;
+	for (size_t i = 0; i < count && r_a.ok(); ++i) {
+		const bool valid = serialize(r_a, r_others[i]);
+		r_a.check("other soldier field out of range", [&] { return valid; });
+		r_a.check("slot named twice", [&] { return seen.insert(r_others[i].slot); });
+	}
+	return count;
 }
 
 struct Octa {
@@ -375,17 +432,17 @@ sim::Vec3 octa_decode(Octa p_code, unsigned p_bits) {
 	return { float(x / len), float(y / len), float(z / len) };
 }
 
-void write_octa(BitWriter &r_w, const sim::Vec3 &p_dir, unsigned p_bits) {
-	const Octa o = octa_encode(p_dir, p_bits);
-	r_w.write_bits(o.u, p_bits);
-	r_w.write_bits(o.v, p_bits);
+template <class A, MaybeConst<Octa> O>
+constexpr void serialize(A &r_a, O &r_o, unsigned p_bits) {
+	r_a.bits(r_o.u, p_bits);
+	r_a.bits(r_o.v, p_bits);
 }
 
-sim::Vec3 read_octa(BitReader &r_r, unsigned p_bits) {
-	Octa o;
-	o.u = uint32_t(r_r.read_bits(p_bits));
-	o.v = uint32_t(r_r.read_bits(p_bits));
-	return octa_decode(o, p_bits);
+template <class A, MaybeConst<sim::Vec3> V>
+void octa(A &r_a, V &r_dir, unsigned p_bits) {
+	Octa code = r_a.encode([&] { return octa_encode(r_dir, p_bits); });
+	serialize(r_a, code, p_bits);
+	r_a.store(r_dir, [&] { return octa_decode(code, p_bits); });
 }
 
 constexpr unsigned kFramePositionBits = 20;
@@ -412,18 +469,11 @@ sim::Vec3 frame_decode(const std::array<uint32_t, 3> &p_codes, const ShotQuantiz
 	return v;
 }
 
-void write_frame(BitWriter &r_w, const std::array<uint32_t, 3> &p_codes) {
-	for (const uint32_t c : p_codes) {
-		r_w.write_bits(c, kFramePositionBits);
+template <class A, MaybeConst<std::array<uint32_t, 3>> C>
+constexpr void frame(A &r_a, C &r_codes) {
+	for (auto &c : r_codes) {
+		r_a.bits(c, kFramePositionBits);
 	}
-}
-
-sim::Vec3 read_frame(BitReader &r_r, const ShotQuantization &p_frame) {
-	std::array<uint32_t, 3> c{};
-	for (uint32_t &x : c) {
-		x = uint32_t(r_r.read_bits(kFramePositionBits));
-	}
-	return frame_decode(c, p_frame);
 }
 
 constexpr unsigned kTickFractionBits = 16;
@@ -434,15 +484,15 @@ struct WireTime {
 	uint32_t fraction = 0;
 };
 
-bool wire_time(sim::weapons::SimTime p_time, sim::Tick p_server_tick, WireTime &r_time) {
-	using sim::weapons::kTimeUnitsPerTick;
+constexpr bool wire_time(sw::SimTime p_time, sim::Tick p_server_tick, WireTime &r_time) {
+	using sw::kTimeUnitsPerTick;
 	r_time = {};
 	if (p_server_tick == 0) {
 		return false;
 	}
-	const sim::weapons::SimTime end = sim::weapons::tick_end(p_server_tick);
+	const sw::SimTime end = sw::tick_end(p_server_tick);
 	bool inside = true;
-	sim::weapons::SimTime t = p_time;
+	sw::SimTime t = p_time;
 	if (t >= end) {
 		t = end - 1;
 		inside = false;
@@ -451,327 +501,941 @@ bool wire_time(sim::weapons::SimTime p_time, sim::Tick p_server_tick, WireTime &
 		t = 0;
 		inside = false;
 	}
-	const sim::Tick tick = sim::weapons::tick_containing(t);
+	const sim::Tick tick = sw::tick_containing(t);
 	r_time.back = uint32_t(p_server_tick - std::min(tick, p_server_tick));
-	const int64_t within = t - sim::weapons::tick_start(p_server_tick - r_time.back);
+	const int64_t within = t - sw::tick_start(p_server_tick - r_time.back);
 	const int64_t f = (within * kTickFractionScale + kTimeUnitsPerTick / 2) / kTimeUnitsPerTick;
 	r_time.fraction = uint32_t(std::clamp<int64_t>(f, 0, kTickFractionScale - 1));
 	return inside;
 }
 
-sim::weapons::SimTime time_of(const WireTime &p_time, sim::Tick p_server_tick) {
-	using sim::weapons::kTimeUnitsPerTick;
-	return sim::weapons::tick_start(p_server_tick - p_time.back) +
-			(int64_t(p_time.fraction) * kTimeUnitsPerTick + kTickFractionScale / 2) / kTickFractionScale;
+constexpr sw::SimTime time_of(const WireTime &p_time, sim::Tick p_server_tick) {
+	using sw::kTimeUnitsPerTick;
+	return sw::tick_start(p_server_tick - p_time.back) + (int64_t(p_time.fraction) * kTimeUnitsPerTick + kTickFractionScale / 2) / kTickFractionScale;
 }
 
-void write_other(BitWriter &r_w, const OtherSoldier &p_o) {
-	r_w.write_bits(p_o.slot, 8);
-	r_w.write_bits(p_o.generation, 8);
-	r_w.write_bits(quant::kPositionXZ.encode(p_o.position[0]), quant::kPositionXZ.bits);
-	r_w.write_bits(quant::kPositionY.encode(p_o.position[1]), quant::kPositionY.bits);
-	r_w.write_bits(quant::kPositionXZ.encode(p_o.position[2]), quant::kPositionXZ.bits);
-	for (const float v : p_o.velocity) {
-		r_w.write_bits(quant::kSoldierVelocity.encode(v), quant::kSoldierVelocity.bits);
+template <class A, MaybeConst<sw::HitTarget> T>
+constexpr bool serialize(A &r_a, T &r_t) {
+	r_a.bits(r_t.id, 32);
+	r_a.bits(r_t.team, 32);
+	vec3(r_a, r_t.bound_center);
+	r_a.f32(r_t.bound_radius);
+	r_a.bits(r_t.spawn_protected, 1);
+	uint8_t count = uint8_t(std::min<size_t>(r_t.capsule_count, sw::kMaxZoneCapsules));
+	r_a.bits(count, 5);
+	if (!r_a.valid([&] { return finite(r_t.bound_center) && finite(r_t.bound_radius) && count <= sw::kMaxZoneCapsules; })) {
+		return false;
 	}
-	r_w.write_bits(other_yaw_code(p_o.yaw), quant::kSoldierYawBits);
-	r_w.write_signed(other_pitch_code(p_o.pitch), quant::kSoldierPitchBits);
-	r_w.write_bits(uint8_t(p_o.pose) & 3, 2);
-	r_w.write_bits(uint8_t(p_o.target_pose) & 3, 2);
-	r_w.write_bits(p_o.transition, 8);
-	r_w.write_bits(uint8_t(p_o.mode) & 15, 4);
-	r_w.write_bits(p_o.flags, 8);
+	r_a.store(r_t.capsule_count, [&] { return count; });
+	bool ok = true;
+	for (uint8_t i = 0; i < count; ++i) {
+		auto &c = r_t.capsules[i];
+		vec3(r_a, c.a);
+		vec3(r_a, c.b);
+		r_a.f32(c.radius);
+		r_a.bits(c.zone, 2);
+		r_a.bits(c.capsule, 8);
+		r_a.bits(c.property, 8);
+		r_a.bits(c.flags, 8);
+		ok = r_a.valid([&] { return finite(c.a) && finite(c.b) && finite(c.radius); }) && ok;
+	}
+	return ok;
+}
+static_assert(sw::kHitZoneCount == 4 && sw::kMaxZoneCapsules < 32);
 
-	r_w.write_bits(p_o.weapon, 8);
-	r_w.write_bits(p_o.weapon_phase, 3);
-	r_w.write_bool(p_o.firing);
-	r_w.write_bool(p_o.ads);
-	r_w.write_bits(p_o.reload_seq, 2);
-	r_w.write_bits(p_o.burst_seq, 4);
-	r_w.write_bits(p_o.team, 2);
+template <class A, MaybeConst<TargetInfoRow> R>
+constexpr bool serialize(A &r_a, R &r_row) {
+	r_a.bits(r_row.slot, 8);
+	r_a.bits(r_row.pose, 8);
+	vec3(r_a, r_row.feet);
+	r_a.bits(r_row.yaw, 16);
+	const bool target = serialize(r_a, r_row.target);
+	return r_a.valid([&] { return target && finite(r_row.feet) && r_row.slot < kMaxSlots && valid_pose(uint8_t(r_row.pose)); });
 }
 
-bool read_other(BitReader &r_r, OtherSoldier &r_o) {
-	r_o = OtherSoldier{};
-	const uint64_t slot = r_r.read_bits(8);
-	r_o.generation = uint8_t(r_r.read_bits(8));
-	r_o.position[0] = quant::kPositionXZ.decode(uint32_t(r_r.read_bits(quant::kPositionXZ.bits)));
-	r_o.position[1] = quant::kPositionY.decode(uint32_t(r_r.read_bits(quant::kPositionY.bits)));
-	r_o.position[2] = quant::kPositionXZ.decode(uint32_t(r_r.read_bits(quant::kPositionXZ.bits)));
-	for (float &v : r_o.velocity) {
-		v = quant::kSoldierVelocity.decode(uint32_t(r_r.read_bits(quant::kSoldierVelocity.bits)));
-	}
-	r_o.yaw = uint16_t(r_r.read_bits(quant::kSoldierYawBits) << 2);
-	const int64_t pitch = r_r.read_signed(quant::kSoldierPitchBits);
-	const uint64_t pose = r_r.read_bits(2);
-	const uint64_t target = r_r.read_bits(2);
-	r_o.transition = uint8_t(r_r.read_bits(8));
-	const uint64_t mode = r_r.read_bits(4);
-	r_o.flags = uint8_t(r_r.read_bits(8));
-	r_o.weapon = uint8_t(r_r.read_bits(8));
-	r_o.weapon_phase = uint8_t(r_r.read_bits(3));
-	r_o.firing = r_r.read_bool();
-	r_o.ads = r_r.read_bool();
-	r_o.reload_seq = uint8_t(r_r.read_bits(2));
-	r_o.burst_seq = uint8_t(r_r.read_bits(4));
-	const uint64_t team = r_r.read_bits(2);
-	if (team > kMaxTeam) {
+constexpr size_t kTargetRowMinBits = count_bits([](auto &r_a) {
+	TargetInfoRow row{};
+	serialize(r_a, row);
+});
+
+template <class A, MaybeConst<SpawnSweepRow> R>
+constexpr bool serialize(A &r_a, R &r_row) {
+	r_a.bits(r_row.index, 32);
+	r_a.bits(r_row.ok, 1);
+	vec3(r_a, r_row.point);
+	vec3(r_a, r_row.settled);
+	r_a.f32(r_row.lift);
+	r_a.f32(r_row.shift);
+	r_a.f32(r_row.gap);
+	r_a.bits(r_row.grounded, 1);
+	r_a.bits(r_row.overlapping, 1);
+	return r_a.valid(
+			[&] { return finite(r_row.point) && finite(r_row.settled) && finite(r_row.lift) && finite(r_row.shift) && finite(r_row.gap); });
+}
+
+constexpr size_t kSweepRowBits = count_bits([](auto &r_a) {
+	SpawnSweepRow row{};
+	serialize(r_a, row);
+});
+
+template <class A, MaybeConst<sw::ShotEvent> S>
+constexpr bool serialize(A &r_a, S &r_s) {
+	r_a.bits(r_s.time, 64);
+	r_a.bits(r_s.spawn_time, 64);
+	r_a.bits(r_s.seed, 64);
+	r_a.bits(r_s.player_slot, 32);
+	r_a.bits(r_s.shot_index, 32);
+	r_a.bits(r_s.def, 16);
+	r_a.bits(r_s.weapon_slot, 8);
+	r_a.bits(r_s.pellets, 8);
+	vec3(r_a, r_s.origin);
+	vec3(r_a, r_s.aim);
+	vec3(r_a, r_s.direction);
+	r_a.f32(r_s.spread);
+	r_a.f32(r_s.pellet_cone);
+	r_a.f32(r_s.recoil.pitch);
+	r_a.f32(r_s.recoil.yaw);
+	r_a.bits(r_s.tracer, 1);
+	r_a.f32(r_s.power);
+	return r_a.valid([&] {
+		return finite(r_s.origin) && finite(r_s.aim) && finite(r_s.direction) && finite(r_s.spread) && finite(r_s.pellet_cone) &&
+				finite(r_s.recoil.pitch) && finite(r_s.recoil.yaw) && finite(r_s.power) && r_s.weapon_slot < sw::kMaxWeaponSlots && r_s.pellets >= 1 &&
+				r_s.pellets <= sw::kMaxPellets;
+	});
+}
+
+template <class A, MaybeConst<sw::DamageEvent> D>
+constexpr bool serialize(A &r_a, D &r_d) {
+	r_a.bits(r_d.time, 64);
+	r_a.bits(r_d.attacker_slot, 32);
+	r_a.bits(r_d.target, 32);
+	r_a.bits(r_d.shot_index, 32);
+	r_a.bits(r_d.def, 16);
+	r_a.bits(r_d.pellet, 8);
+	r_a.bits(r_d.kind, 2);
+	r_a.bits(r_d.zone, 2);
+	r_a.bits(r_d.capsule, 8);
+	r_a.f32(r_d.distance);
+	r_a.f32(r_d.base);
+	r_a.f32(r_d.multiplier);
+	r_a.f32(r_d.penetration);
+	r_a.f32(r_d.amount);
+	return r_a.valid([&] { return finite(r_d.distance) && finite(r_d.base) && finite(r_d.multiplier) && finite(r_d.penetration) && finite(r_d.amount); });
+}
+static_assert(uint8_t(sw::DamageKind::DudBlast) == 3);
+
+template <class A, MaybeConst<sw::DetonationEvent> D>
+constexpr bool serialize(A &r_a, D &r_d) {
+	r_a.bits(r_d.time, 64);
+	vec3(r_a, r_d.position);
+	vec3(r_a, r_d.normal);
+	r_a.bits(r_d.player_slot, 32);
+	r_a.bits(r_d.shot_index, 32);
+	r_a.bits(r_d.def, 16);
+	r_a.bits(r_d.dud, 1);
+	r_a.bits(r_d.timeout, 1);
+	return r_a.valid([&] { return finite(r_d.position) && finite(r_d.normal); });
+}
+
+template <class A, MaybeConst<sim::Vec3> V, MaybeConst<uint32_t> S>
+constexpr bool projectile(A &r_a, V &r_position, S &r_shot) {
+	vec3(r_a, r_position);
+	r_a.bits(r_shot, 32);
+	return r_a.valid([&] { return finite(r_position); });
+}
+
+template <class A, MaybeConst<TraceDeath> D>
+constexpr void serialize(A &r_a, D &r_d) {
+	r_a.bits(r_d.victim, 8);
+	r_a.bits(r_d.killer, 8);
+	r_a.bits(r_d.shot_index, 32);
+}
+
+template <class T>
+constexpr size_t fixed_bits() {
+	return count_bits([](auto &r_a) {
+		T value{};
+		serialize(r_a, value);
+	});
+}
+
+constexpr size_t kShotFullBits = fixed_bits<sw::ShotEvent>();
+constexpr size_t kDamageFullBits = fixed_bits<sw::DamageEvent>();
+constexpr size_t kDetonationFullBits = fixed_bits<sw::DetonationEvent>();
+constexpr size_t kTraceDeathBits = fixed_bits<TraceDeath>();
+constexpr size_t kProjectileBits = count_bits([](auto &r_a) {
+	sim::Vec3 position{};
+	uint32_t shot = 0;
+	projectile(r_a, position, shot);
+});
+
+static_assert(kMaxTraceShots < 16 && kMaxTraceProjectiles < 16 && kMaxTraceDamage < 16 && kMaxTraceDetonations < 4 && kMaxTraceDeaths < 8);
+
+template <class A, MaybeConst<TraceGunplayTick> T>
+constexpr bool serialize(A &r_a, T &r_t, uint64_t &r_dropped) {
+	r_a.bits(r_t.tick, 32);
+	size_t shots = std::min(r_t.shots.size(), kMaxTraceShots);
+	const size_t both = std::min(r_t.projectiles.size(), r_t.projectile_shots.size());
+	size_t projectiles = std::min(both, kMaxTraceProjectiles);
+	size_t damage = std::min(r_t.damage.size(), kMaxTraceDamage);
+	size_t detonations = std::min(r_t.detonations.size(), kMaxTraceDetonations);
+	size_t deaths = std::min(r_t.deaths.size(), kMaxTraceDeaths);
+	r_dropped += (r_t.shots.size() - shots) + (std::max(r_t.projectiles.size(), r_t.projectile_shots.size()) - projectiles) + (r_t.damage.size() - damage) +
+			(r_t.detonations.size() - detonations) + (r_t.deaths.size() - deaths);
+	r_a.bits(shots, 4);
+	r_a.bits(projectiles, 4);
+	r_a.bits(damage, 4);
+	r_a.bits(detonations, 2);
+	r_a.bits(deaths, 3);
+	if (!r_a.valid([&] {
+				return shots <= kMaxTraceShots && projectiles <= kMaxTraceProjectiles && damage <= kMaxTraceDamage && detonations <= kMaxTraceDetonations &&
+						deaths <= kMaxTraceDeaths &&
+						r_a.fits(shots * kShotFullBits + projectiles * kProjectileBits + damage * kDamageFullBits + detonations * kDetonationFullBits +
+								deaths * kTraceDeathBits);
+			})) {
 		return false;
 	}
-	r_o.team = uint8_t(team);
-	if (slot >= kMaxSlots || pitch < -kOtherPitchMaxCode || pitch > kOtherPitchMaxCode || !valid_pose(pose) ||
-			!valid_pose(target) || mode >= sim::kMoveModeCount) {
-		return false;
+	shots = r_a.resize(r_t.shots, shots);
+	projectiles = r_a.resize(r_t.projectiles, projectiles);
+	r_a.resize(r_t.projectile_shots, projectiles);
+	damage = r_a.resize(r_t.damage, damage);
+	detonations = r_a.resize(r_t.detonations, detonations);
+	deaths = r_a.resize(r_t.deaths, deaths);
+	bool ok = true;
+	for (size_t i = 0; i < shots; ++i) {
+		ok = serialize(r_a, r_t.shots[i]) && ok;
 	}
-	r_o.slot = uint8_t(slot);
-	r_o.pitch = int16_t(pitch * 4);
-	r_o.pose = sim::Pose(pose);
-	r_o.target_pose = sim::Pose(target);
-	r_o.mode = sim::MoveMode(mode);
+	for (size_t i = 0; i < projectiles; ++i) {
+		ok = projectile(r_a, r_t.projectiles[i], r_t.projectile_shots[i]) && ok;
+	}
+	for (size_t i = 0; i < damage; ++i) {
+		ok = serialize(r_a, r_t.damage[i]) && ok;
+	}
+	for (size_t i = 0; i < detonations; ++i) {
+		ok = serialize(r_a, r_t.detonations[i]) && ok;
+	}
+	for (size_t i = 0; i < deaths; ++i) {
+		serialize(r_a, r_t.deaths[i]);
+	}
+	return ok;
+}
+
+constexpr size_t kGunplayTickMinBits = count_bits([](auto &r_a) {
+	TraceGunplayTick tick{};
+	uint64_t dropped = 0;
+	serialize(r_a, tick, dropped);
+});
+
+template <class A, MaybeConst<Hello> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.protocol, 16);
+	text(r_a, r_m.name, kMaxNameBytes, "bad name");
+}
+
+template <class A, MaybeConst<MatchInfo> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.protocol, 16);
+	text(r_a, r_m.level, kMaxIdentBytes, "bad level or mode name");
+	text(r_a, r_m.mode, kMaxIdentBytes, "bad level or mode name");
+	r_a.bits(r_m.sim_hz, 16);
+	r_a.bits(r_m.snapshot_divisor, 8);
+	r_a.bits(r_m.slot, 8);
+	r_a.bits(r_m.server_tick, 32);
+	r_a.bits(r_m.phase, 8);
+	digest(r_a, r_m.source_digest);
+	r_a.bits(r_m.motor_hash, 64);
+	r_a.bits(r_m.match_seed, 64);
+	r_a.bits(r_m.weapon_hash, 64);
+	r_a.bits(r_m.weapon_flags, 8);
+	r_a.bits(r_m.kit_hash, 64);
+	r_a.bits(r_m.max_rewind_ticks, 8);
+	r_a.bits(r_m.logic_digest, 64);
+	r_a.bits(r_m.rules_flags, 8);
+	r_a.check("unknown weapon flags", [&] { return (r_m.weapon_flags & ~kKnownWeaponFlags) == 0; });
+	r_a.check("unknown rules flags", [&] { return (r_m.rules_flags & ~kKnownRulesFlags) == 0; });
+	r_a.check("zero tick rate or snapshot divisor", [&] { return r_m.sim_hz != 0 && r_m.snapshot_divisor != 0; });
+	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
+	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::RoundOver); });
+}
+
+template <class A, MaybeConst<Ready> M>
+void serialize(A &r_a, M &r_m) {
+	digest(r_a, r_m.source_digest);
+}
+
+template <class A, MaybeConst<Spawned> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.slot, 8);
+	r_a.bits(r_m.spawn_index, 32);
+	const bool state = serialize(r_a, r_m.state);
+	r_a.bits(r_m.kit, 8);
+	r_a.bits(r_m.team, 8);
+	r_a.bits(r_m.revived, 1);
+	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
+	r_a.check("state field out of range", [&] { return state; });
+	r_a.check("kit or team out of range", [&] { return r_m.kit < kMaxKits && r_m.team <= kMaxTeam; });
+}
+
+template <class A, MaybeConst<Loading> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.stage, 8);
+	r_a.bits(r_m.permille, 16);
+	r_a.check("progress above 1000 permille", [&] { return r_m.permille <= 1000; });
+}
+
+template <class A, MaybeConst<Kick> M>
+void serialize(A &r_a, M &r_m) {
+	text(r_a, r_m.reason, kMaxTextBytes, "bad reason text");
+}
+
+template <class A, MaybeConst<DebugRequest> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.kind, 8);
+	r_a.bits(r_m.id, 32);
+	vec3(r_a, r_m.position);
+	r_a.bits(r_m.yaw, 16);
+	r_a.bits(r_m.index, 32);
+	r_a.bits(r_m.ticks, 32);
+	r_a.bits(r_m.slot, 8);
+	r_a.bits(r_m.pose, 8);
+	r_a.check("unknown kind", [&] { return uint8_t(r_m.kind) >= uint8_t(DebugKind::Teleport) && uint8_t(r_m.kind) <= uint8_t(DebugKind::TargetInfo); });
+	r_a.check("slot or pose out of range", [&] { return r_m.slot < kMaxSlots && valid_pose(uint8_t(r_m.pose)); });
+	r_a.check("position out of range", [&] {
+		return finite(r_m.position) && std::fabs(r_m.position[0]) <= kMaxDebugCoordinate && std::fabs(r_m.position[1]) <= kMaxDebugCoordinate &&
+				std::fabs(r_m.position[2]) <= kMaxDebugCoordinate;
+	});
+	r_a.check("tick count above kMaxTraceTicks", [&] { return r_m.ticks <= kMaxTraceTicks; });
+}
+
+template <class A, MaybeConst<DebugReport> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.id, 32);
+	r_a.bits(r_m.ok, 1);
+	text(r_a, r_m.text, kMaxTextBytes, "bad text");
+
+	uint64_t rows = std::min(r_m.sweep.size(), kMaxSweepRows);
+	r_a.varint(rows);
+	r_a.require("bad sweep row count", [&] { return rows <= kMaxSweepRows && r_a.fits(rows * kSweepRowBits); });
+	rows = r_a.resize(r_m.sweep, size_t(rows));
+	for (size_t i = 0; i < rows && r_a.ok(); ++i) {
+		const bool valid = serialize(r_a, r_m.sweep[i]);
+		r_a.check("non-finite sweep value", [&] { return valid; });
+	}
+
+	uint64_t states = std::min<size_t>(r_m.trace.size(), kMaxTraceTicks);
+	r_a.varint(states);
+	r_a.require("bad trace count", [&] { return states <= kMaxTraceTicks && r_a.fits(states * kOwnStateBits); });
+	states = r_a.resize(r_m.trace, size_t(states));
+	for (size_t i = 0; i < states && r_a.ok(); ++i) {
+		const bool valid = serialize(r_a, r_m.trace[i]);
+		r_a.check("trace state field out of range", [&] { return valid; });
+	}
+
+	uint64_t targets = std::min(r_m.targets.size(), kMaxTargetRows);
+	r_a.varint(targets);
+	r_a.require("bad target row count", [&] { return targets <= kMaxTargetRows && r_a.fits(targets * kTargetRowMinBits); });
+	targets = r_a.resize(r_m.targets, size_t(targets));
+	for (size_t i = 0; i < targets && r_a.ok(); ++i) {
+		const bool valid = serialize(r_a, r_m.targets[i]);
+		r_a.check("target row field out of range", [&] { return valid; });
+	}
+
+	uint64_t dropped = r_m.trace_dropped;
+	uint64_t ticks = std::min<size_t>(r_m.trace_gunplay.size(), kMaxTraceTicks);
+	r_a.varint(ticks);
+	r_a.require("bad gunplay trace count", [&] { return ticks <= kMaxTraceTicks && r_a.fits(ticks * kGunplayTickMinBits); });
+	ticks = r_a.resize(r_m.trace_gunplay, size_t(ticks));
+	for (size_t i = 0; i < ticks && r_a.ok(); ++i) {
+		const bool valid = serialize(r_a, r_m.trace_gunplay[i], dropped);
+		r_a.check("gunplay trace field out of range", [&] { return valid; });
+	}
+	uint32_t sent_dropped = uint32_t(std::min<uint64_t>(dropped, 0xFFFFFFFFull));
+	r_a.bits(sent_dropped, 32);
+	r_a.store(r_m.trace_dropped, [&] { return sent_dropped; });
+}
+
+template <class A, MaybeConst<Snapshot> M>
+void serialize(A &r_a, M &r_m, size_t &r_others) {
+	r_a.bits(r_m.seq, 16);
+	r_a.bits(r_m.server_tick, 32);
+	r_a.bits(r_m.applied_sequence, 32);
+	r_a.bits(r_m.applied_repeated, 1);
+	r_a.bits(r_m.command_buffer_ticks, 8);
+	r_a.bits(r_m.sequence_echo, 16);
+	r_a.bits(r_m.echo_hold_100us, 16);
+	r_a.bits(r_m.own_events, 16);
+	r_a.optional(r_m.own, [&](auto &r_own) {
+		const bool valid = serialize(r_a, r_own);
+		r_a.check("own state field out of range", [&] { return valid; });
+		r_a.check("own state tick differs from the server tick", [&] { return r_own.tick == r_m.server_tick; });
+		r_a.optional(r_m.own_weapons, [&](auto &r_weapons) { serialize(r_a, r_weapons, kOwnWeaponsFaults); });
+	});
+	r_others = others(r_a, r_m.others, kMaxSlots);
+}
+
+template <class A, MaybeConst<SnapshotOthers> M>
+void serialize(A &r_a, M &r_m, size_t &r_others) {
+	r_a.bits(r_m.seq, 16);
+	r_a.bits(r_m.server_tick, 32);
+	r_others = others(r_a, r_m.others, kMaxSlots - 1);
+}
+
+constexpr unsigned kShotDirBits = 16;
+constexpr unsigned kShotAimBits = 12;
+constexpr unsigned kShotBackBits = 3;
+constexpr unsigned kShotDeltaBits = 4;
+constexpr unsigned kPelletBits = 6;
+constexpr unsigned kConeBits = 13;
+constexpr double kConeScale = 64.0;
+constexpr unsigned kPowerBits = 12;
+static_assert(sw::kMaxPellets == 64, "pellets travel as pellets - 1 in 6 bits");
+static_assert(sw::kMaxAngle < double(1u << kConeBits) / kConeScale);
+static_assert(kMaxShotTicksBack < (1u << kShotBackBits));
+
+struct ShotCodes {
+	uint8_t slot = 0;
+	uint32_t index = 0;
+	uint8_t def = 0;
+	WireTime time;
+	std::array<uint32_t, 3> origin{};
+	Octa direction;
+	uint8_t pellets = 1;
+	bool tracer = false;
+	Octa aim;
+	uint32_t cone = 0;
+	bool has_power = false;
+	uint32_t power = 0;
+};
+
+struct ShotIndexChain {
+	std::array<bool, kMaxSlots> have{};
+	std::array<uint32_t, kMaxSlots> prev{};
+};
+
+constexpr uint32_t short_delta(uint32_t p_index, uint32_t p_prev) {
+	const uint32_t delta = p_index - p_prev;
+	return delta >= 1 && delta < (1u << kShotDeltaBits) ? delta : 0;
+}
+
+template <class A, MaybeConst<ShotCodes> C>
+constexpr void serialize(A &r_a, C &r_c, ShotIndexChain &r_chain, sim::Tick p_server_tick) {
+	r_a.bits(r_c.slot, kWireSlotBits);
+	const bool have = r_chain.have[r_c.slot];
+	const uint32_t prev = r_chain.prev[r_c.slot];
+	if (!have) {
+		r_a.bits(r_c.index, 32);
+	} else {
+		uint32_t delta = short_delta(r_c.index, prev);
+		r_a.bits(delta, kShotDeltaBits);
+		if (delta == 0) {
+			r_a.bits(r_c.index, 32);
+		} else {
+			r_a.store(r_c.index, [&] { return prev + delta; });
+		}
+	}
+	r_a.bits(r_c.def, 8);
+	r_a.bits(r_c.time.back, kShotBackBits);
+	r_a.bits(r_c.time.fraction, kTickFractionBits);
+	frame(r_a, r_c.origin);
+	serialize(r_a, r_c.direction, kShotDirBits);
+	r_a.coded(r_c.pellets, kPelletBits, [](uint8_t p_pellets) { return uint32_t(p_pellets - 1); }, [](uint32_t p_code) { return uint8_t(p_code + 1); });
+	r_a.bits(r_c.tracer, 1);
+	if (r_c.tracer) {
+		serialize(r_a, r_c.aim, kShotAimBits);
+	}
+	if (r_c.pellets > 1) {
+		r_a.bits(r_c.cone, kConeBits);
+	}
+	r_a.bits(r_c.has_power, 1);
+	if (r_c.has_power) {
+		r_a.bits(r_c.power, kPowerBits);
+	}
+	r_a.check("def out of range", [&] { return r_c.def < kMaxWireDefs; });
+	r_a.check("shot time before tick 1", [&] { return r_c.time.back < p_server_tick; });
+	r_a.check("shot index repeated", [&] { return !have || r_c.index != prev; });
+	r_chain.have[r_c.slot] = true;
+	r_chain.prev[r_c.slot] = r_c.index;
+}
+
+constexpr size_t kShotMinBits = count_bits([](auto &r_a) {
+	ShotCodes codes{};
+	ShotIndexChain chain{};
+	chain.have[codes.slot] = true;
+	chain.prev[codes.slot] = codes.index - 1;
+	serialize(r_a, codes, chain, sim::Tick(0));
+});
+static_assert(kShotMinBits == 138);
+
+size_t shot_bits(const ShotCodes &p_codes, ShotIndexChain &r_chain) {
+	return count_bits([&](auto &r_a) { serialize(r_a, p_codes, r_chain, sim::Tick(0)); });
+}
+
+struct ShotEventsWire {
+	sim::Tick server_tick = 0;
+	std::vector<ShotCodes> shots;
+};
+
+bool distinct_shots(const std::vector<ShotCodes> &p_shots) {
+	for (size_t i = 0; i < p_shots.size(); ++i) {
+		for (size_t j = i + 1; j < p_shots.size(); ++j) {
+			if (p_shots[i].slot == p_shots[j].slot && p_shots[i].index == p_shots[j].index) {
+				return false;
+			}
+		}
+	}
 	return true;
 }
 
-using bf3::core::finite;
+template <class A, MaybeConst<ShotEventsWire> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.server_tick, 32);
+	size_t count = r_m.shots.size();
+	r_a.bits(count, 8);
+	r_a.check("shot count out of range", [&] { return count <= kMaxShotsPerDatagram && r_a.fits(count * kShotMinBits); });
+	count = r_a.resize(r_m.shots, count);
+	ShotIndexChain chain;
+	for (size_t i = 0; i < count && r_a.ok(); ++i) {
+		serialize(r_a, r_m.shots[i], chain, r_m.server_tick);
+	}
+	r_a.check("shot named twice", [&] { return distinct_shots(r_m.shots); });
+}
 
-void write_hit_target(BitWriter &r_w, const sim::weapons::HitTarget &p_t) {
-	r_w.write_bits(p_t.id, 32);
-	r_w.write_bits(p_t.team, 32);
-	write_vec3(r_w, p_t.bound_center);
-	r_w.write_f32(p_t.bound_radius);
-	r_w.write_bool(p_t.spawn_protected);
-	const uint8_t count = uint8_t(std::min<size_t>(p_t.capsule_count, sim::weapons::kMaxZoneCapsules));
-	r_w.write_bits(count, 5);
-	for (uint8_t i = 0; i < count; ++i) {
-		const sim::weapons::ZoneCapsule &c = p_t.capsules[i];
-		write_vec3(r_w, c.a);
-		write_vec3(r_w, c.b);
-		r_w.write_f32(c.radius);
-		r_w.write_bits(uint8_t(c.zone) & 3, 2);
-		r_w.write_bits(c.capsule, 8);
-		r_w.write_bits(c.property, 8);
-		r_w.write_bits(c.flags, 8);
+std::optional<ShotCodes> shot_codes(const RemoteShot &p_shot, const ShotQuantization &p_frame, sim::Tick p_server_tick) {
+	ShotCodes c;
+	if (p_shot.slot >= kMaxSlots || p_shot.def >= kMaxWireDefs || p_shot.pellets < 1 || p_shot.pellets > sw::kMaxPellets) {
+		return std::nullopt;
+	}
+	if (!wire_time(p_shot.time, p_server_tick, c.time) || c.time.back > kMaxShotTicksBack) {
+		return std::nullopt;
+	}
+	if (!frame_codes(p_shot.origin, p_frame, c.origin)) {
+		return std::nullopt;
+	}
+	c.slot = p_shot.slot;
+	c.index = p_shot.shot_index;
+	c.def = uint8_t(p_shot.def);
+	c.direction = octa_encode(p_shot.direction, kShotDirBits);
+	c.pellets = p_shot.pellets;
+	c.tracer = p_shot.tracer;
+	if (c.tracer) {
+		c.aim = octa_encode(p_shot.aim, kShotAimBits);
+	}
+	if (c.pellets > 1) {
+		const double cone = std::isfinite(p_shot.pellet_cone) ? std::clamp(double(p_shot.pellet_cone), 0.0, double(sw::kMaxAngle)) : 0.0;
+		c.cone = std::min(uint32_t(cone * kConeScale + 0.5), (1u << kConeBits) - 1u);
+	}
+	c.has_power = p_shot.power != 1.0f;
+	if (c.has_power) {
+		const double top = double((1u << kPowerBits) - 1u);
+		const double power = std::isfinite(p_shot.power) ? std::clamp(double(p_shot.power), 0.0, double(sw::kMaxPower)) : 0.0;
+		c.power = std::min(uint32_t(power / double(sw::kMaxPower) * top + 0.5), (1u << kPowerBits) - 1u);
+	}
+	return c;
+}
+
+RemoteShot shot_from_codes(const ShotCodes &p_c, const ShotQuantization &p_frame, sim::Tick p_server_tick) {
+	RemoteShot s;
+	s.slot = p_c.slot;
+	s.shot_index = p_c.index;
+	s.def = p_c.def;
+	s.time = time_of(p_c.time, p_server_tick);
+	s.origin = frame_decode(p_c.origin, p_frame);
+	s.direction = octa_decode(p_c.direction, kShotDirBits);
+	s.pellets = p_c.pellets;
+	s.tracer = p_c.tracer;
+	if (p_c.tracer) {
+		s.aim = octa_decode(p_c.aim, kShotAimBits);
+	}
+	if (p_c.pellets > 1) {
+		s.pellet_cone = float(double(p_c.cone) / kConeScale);
+	}
+	if (p_c.has_power) {
+		s.power = float(double(p_c.power) / double((1u << kPowerBits) - 1u) * double(sw::kMaxPower));
+	}
+	return s;
+}
+
+constexpr unsigned kHpBits = 24;
+constexpr double kHpScale = 100.0;
+
+constexpr uint32_t kHpMaxCode = 10'000'000;
+static_assert(kHpMaxCode < (1u << kHpBits));
+constexpr unsigned kNormalBits = 8;
+constexpr unsigned kWireDefBits = 8;
+constexpr uint32_t kNoWireDef = 0xFF;
+static_assert(kNoWireDef == kMaxWireDefs);
+
+constexpr uint32_t hp_code(float p_hp, size_t &r_clamped) {
+	const double t = double(p_hp) * kHpScale + 0.5;
+	if (!(t >= 0.0) || !(t < double(kHpMaxCode) + 1.0)) {
+		++r_clamped;
+	}
+	return !(t > 0.0) ? 0u : t >= double(kHpMaxCode) ? kHpMaxCode : uint32_t(t);
+}
+
+constexpr float hp_value(uint32_t p_code) {
+	return float(double(p_code) / kHpScale);
+}
+
+struct CombatFrame {
+	const ShotQuantization &frame;
+	sim::Tick server_tick = 0;
+	size_t clamped = 0;
+};
+
+template <class A, MaybeConst<float> F>
+constexpr bool hp(A &r_a, F &r_value, CombatFrame &r_f) {
+	uint32_t code = r_a.encode([&] { return hp_code(r_value, r_f.clamped); });
+	r_a.bits(code, kHpBits);
+	r_a.store(r_value, [&] { return hp_value(code); });
+	return code <= kHpMaxCode;
+}
+
+template <class A, MaybeConst<sim::Vec3> V>
+void frame_position(A &r_a, V &r_position, CombatFrame &r_f) {
+	std::array<uint32_t, 3> codes = r_a.encode([&] {
+		std::array<uint32_t, 3> c{};
+		if (!frame_codes(r_position, r_f.frame, c)) {
+			++r_f.clamped;
+		}
+		return c;
+	});
+	frame(r_a, codes);
+	r_a.store(r_position, [&] { return frame_decode(codes, r_f.frame); });
+}
+
+template <class A, MaybeConst<sw::SimTime> T>
+constexpr void event_time(A &r_a, T &r_time, CombatFrame &r_f, const char *p_why) {
+	const WireTime code = r_a.encode([&] {
+		WireTime t;
+		if (!wire_time(r_time, r_f.server_tick, t)) {
+			++r_f.clamped;
+		}
+		return t;
+	});
+	uint64_t back = code.back;
+	uint32_t fraction = code.fraction;
+	r_a.varint(back);
+	r_a.bits(fraction, kTickFractionBits);
+	r_a.check(p_why, [&] { return back < r_f.server_tick; });
+	r_a.store(r_time, [&] { return time_of({ uint32_t(back), fraction }, r_f.server_tick); });
+}
+
+template <class A, MaybeConst<HitEvent> H>
+void serialize(A &r_a, H &r_h, CombatFrame &r_f) {
+	r_a.bits(r_h.victim, kWireSlotBits);
+	r_a.bits(r_h.shooter, kWireSlotBits);
+	r_a.bits(r_h.shot_index, 32);
+	r_a.coded(
+			r_h.pellet, kPelletBits,
+			[&](uint8_t p_pellet) {
+				if (p_pellet >= sw::kMaxPellets) {
+					++r_f.clamped;
+				}
+				return std::min<uint32_t>(p_pellet, sw::kMaxPellets - 1);
+			},
+			[](uint32_t p_code) { return uint8_t(p_code); });
+	r_a.bits(r_h.zone, 2);
+	const bool damage = hp(r_a, r_h.damage, r_f);
+	const bool health = hp(r_a, r_h.health_after, r_f);
+	r_a.check("hit amount out of range", [&] { return damage && health; });
+	frame_position(r_a, r_h.position, r_f);
+	octa(r_a, r_h.normal, kNormalBits);
+	event_time(r_a, r_h.time, r_f, "hit time out of range");
+}
+
+template <class A, MaybeConst<DeathEvent> D>
+void serialize(A &r_a, D &r_d, CombatFrame &r_f) {
+	r_a.bits(r_d.victim, kWireSlotBits);
+	r_a.bits(r_d.killer, kWireSlotBits);
+	r_a.coded(
+			r_d.def, kWireDefBits,
+			[&](uint16_t p_def) {
+				if (p_def != sw::kNoWeapon && p_def >= kMaxWireDefs) {
+					++r_f.clamped;
+				}
+				return p_def < kMaxWireDefs ? uint32_t(p_def) : kNoWireDef;
+			},
+			[](uint32_t p_code) { return p_code == kNoWireDef ? sw::kNoWeapon : uint16_t(p_code); });
+	r_a.bits(r_d.zone, 2);
+	r_a.bits(r_d.shot_index, 32);
+	r_a.bits(r_d.headshot, 1);
+	event_time(r_a, r_d.time, r_f, "death time out of range");
+	uint32_t killer_hp = r_a.encode([&] { return hp_code(r_d.killer_health, r_f.clamped); });
+	bool stamped = r_d.respawn_tick != 0 || r_d.revive_until != 0 || killer_hp != 0;
+	r_a.bits(stamped, 1);
+	if (stamped) {
+		r_a.bits(r_d.respawn_tick, 32);
+		r_a.bits(r_d.revive_until, 32);
+		r_a.bits(killer_hp, kHpBits);
+		r_a.check("killer health out of range", [&] { return killer_hp <= kHpMaxCode; });
+		r_a.store(r_d.killer_health, [&] { return hp_value(killer_hp); });
 	}
 }
 
-bool read_hit_target(BitReader &r_r, sim::weapons::HitTarget &r_t) {
-	r_t = sim::weapons::HitTarget{};
-	r_t.id = uint32_t(r_r.read_bits(32));
-	r_t.team = uint32_t(r_r.read_bits(32));
-	bool ok = read_vec3(r_r, r_t.bound_center);
-	r_t.bound_radius = r_r.read_f32();
-	r_t.spawn_protected = r_r.read_bool();
-	const uint64_t count = r_r.read_bits(5);
-	ok = ok && std::isfinite(r_t.bound_radius) && count <= sim::weapons::kMaxZoneCapsules;
-	if (!ok || r_r.failed()) {
-		return false;
-	}
-	r_t.capsule_count = uint8_t(count);
-	for (uint8_t i = 0; i < r_t.capsule_count; ++i) {
-		sim::weapons::ZoneCapsule &c = r_t.capsules[i];
-		ok = read_vec3(r_r, c.a) && ok;
-		ok = read_vec3(r_r, c.b) && ok;
-		c.radius = r_r.read_f32();
-		c.zone = sim::weapons::HitZone(r_r.read_bits(2));
-		c.capsule = uint8_t(r_r.read_bits(8));
-		c.property = uint8_t(r_r.read_bits(8));
-		c.flags = uint8_t(r_r.read_bits(8));
-		ok = ok && std::isfinite(c.radius);
-	}
-	return ok;
-}
-static_assert(sim::weapons::kHitZoneCount == 4 && sim::weapons::kMaxZoneCapsules < 32);
-
-constexpr size_t kTargetRowMinBits = 8 + 8 + 96 + 16 + 32 + 32 + 96 + 32 + 1 + 5;
-
-void write_shot_full(BitWriter &r_w, const sim::weapons::ShotEvent &p_s) {
-	r_w.write_bits(uint64_t(p_s.time), 64);
-	r_w.write_bits(uint64_t(p_s.spawn_time), 64);
-	r_w.write_bits(p_s.seed, 64);
-	r_w.write_bits(p_s.player_slot, 32);
-	r_w.write_bits(p_s.shot_index, 32);
-	r_w.write_bits(p_s.def, 16);
-	r_w.write_bits(p_s.weapon_slot, 8);
-	r_w.write_bits(p_s.pellets, 8);
-	write_vec3(r_w, p_s.origin);
-	write_vec3(r_w, p_s.aim);
-	write_vec3(r_w, p_s.direction);
-	r_w.write_f32(p_s.spread);
-	r_w.write_f32(p_s.pellet_cone);
-	r_w.write_f32(p_s.recoil.pitch);
-	r_w.write_f32(p_s.recoil.yaw);
-	r_w.write_bool(p_s.tracer);
-	r_w.write_f32(p_s.power);
-}
-constexpr size_t kShotFullBits = 64 * 3 + 32 * 2 + 16 + 8 + 8 + 9 * 32 + 4 * 32 + 1 + 32;
-
-bool read_shot_full(BitReader &r_r, sim::weapons::ShotEvent &r_s) {
-	r_s = sim::weapons::ShotEvent{};
-	r_s.time = int64_t(r_r.read_bits(64));
-	r_s.spawn_time = int64_t(r_r.read_bits(64));
-	r_s.seed = r_r.read_bits(64);
-	r_s.player_slot = uint32_t(r_r.read_bits(32));
-	r_s.shot_index = uint32_t(r_r.read_bits(32));
-	r_s.def = uint16_t(r_r.read_bits(16));
-	r_s.weapon_slot = uint8_t(r_r.read_bits(8));
-	r_s.pellets = uint8_t(r_r.read_bits(8));
-	bool ok = read_vec3(r_r, r_s.origin);
-	ok = read_vec3(r_r, r_s.aim) && ok;
-	ok = read_vec3(r_r, r_s.direction) && ok;
-	r_s.spread = r_r.read_f32();
-	r_s.pellet_cone = r_r.read_f32();
-	r_s.recoil.pitch = r_r.read_f32();
-	r_s.recoil.yaw = r_r.read_f32();
-	r_s.tracer = r_r.read_bool();
-	r_s.power = r_r.read_f32();
-	return ok && std::isfinite(r_s.spread) && std::isfinite(r_s.pellet_cone) && std::isfinite(r_s.recoil.pitch) && std::isfinite(r_s.recoil.yaw) &&
-			std::isfinite(r_s.power) && r_s.weapon_slot < sim::weapons::kMaxWeaponSlots && r_s.pellets >= 1 &&
-			r_s.pellets <= sim::weapons::kMaxPellets;
+template <class A, MaybeConst<DetonationWire> D>
+void serialize(A &r_a, D &r_d, CombatFrame &r_f) {
+	r_a.bits(r_d.shooter, kWireSlotBits);
+	r_a.bits(r_d.shot_index, 32);
+	r_a.bits(r_d.def, kWireDefBits);
+	frame_position(r_a, r_d.position, r_f);
+	octa(r_a, r_d.normal, kNormalBits);
+	r_a.bits(r_d.dud, 1);
+	event_time(r_a, r_d.time, r_f, "detonation time out of range");
+	r_a.check("detonation without a weapon def", [&] { return r_d.def < kMaxWireDefs; });
 }
 
-void write_damage_full(BitWriter &r_w, const sim::weapons::DamageEvent &p_d) {
-	r_w.write_bits(uint64_t(p_d.time), 64);
-	r_w.write_bits(p_d.attacker_slot, 32);
-	r_w.write_bits(p_d.target, 32);
-	r_w.write_bits(p_d.shot_index, 32);
-	r_w.write_bits(p_d.def, 16);
-	r_w.write_bits(p_d.pellet, 8);
-	r_w.write_bits(uint8_t(p_d.kind) & 3, 2);
-	r_w.write_bits(uint8_t(p_d.zone) & 3, 2);
-	r_w.write_bits(p_d.capsule, 8);
-	r_w.write_f32(p_d.distance);
-	r_w.write_f32(p_d.base);
-	r_w.write_f32(p_d.multiplier);
-	r_w.write_f32(p_d.penetration);
-	r_w.write_f32(p_d.amount);
-}
-constexpr size_t kDamageFullBits = 64 + 32 * 3 + 16 + 8 + 2 + 2 + 8 + 5 * 32;
-
-bool read_damage_full(BitReader &r_r, sim::weapons::DamageEvent &r_d) {
-	r_d = sim::weapons::DamageEvent{};
-	r_d.time = int64_t(r_r.read_bits(64));
-	r_d.attacker_slot = uint32_t(r_r.read_bits(32));
-	r_d.target = uint32_t(r_r.read_bits(32));
-	r_d.shot_index = uint32_t(r_r.read_bits(32));
-	r_d.def = uint16_t(r_r.read_bits(16));
-	r_d.pellet = uint8_t(r_r.read_bits(8));
-	r_d.kind = sim::weapons::DamageKind(r_r.read_bits(2));
-	r_d.zone = sim::weapons::HitZone(r_r.read_bits(2));
-	r_d.capsule = uint8_t(r_r.read_bits(8));
-	r_d.distance = r_r.read_f32();
-	r_d.base = r_r.read_f32();
-	r_d.multiplier = r_r.read_f32();
-	r_d.penetration = r_r.read_f32();
-	r_d.amount = r_r.read_f32();
-	return std::isfinite(r_d.distance) && std::isfinite(r_d.base) && std::isfinite(r_d.multiplier) && std::isfinite(r_d.penetration) &&
-			std::isfinite(r_d.amount);
-}
-static_assert(uint8_t(sim::weapons::DamageKind::DudBlast) == 3);
-
-void write_detonation_full(BitWriter &r_w, const sim::weapons::DetonationEvent &p_d) {
-	r_w.write_bits(uint64_t(p_d.time), 64);
-	write_vec3(r_w, p_d.position);
-	write_vec3(r_w, p_d.normal);
-	r_w.write_bits(p_d.player_slot, 32);
-	r_w.write_bits(p_d.shot_index, 32);
-	r_w.write_bits(p_d.def, 16);
-	r_w.write_bool(p_d.dud);
-	r_w.write_bool(p_d.timeout);
-}
-constexpr size_t kDetonationFullBits = 64 + 6 * 32 + 32 + 32 + 16 + 2;
-
-bool read_detonation_full(BitReader &r_r, sim::weapons::DetonationEvent &r_d) {
-	r_d = sim::weapons::DetonationEvent{};
-	r_d.time = int64_t(r_r.read_bits(64));
-	bool ok = read_vec3(r_r, r_d.position);
-	ok = read_vec3(r_r, r_d.normal) && ok;
-	r_d.player_slot = uint32_t(r_r.read_bits(32));
-	r_d.shot_index = uint32_t(r_r.read_bits(32));
-	r_d.def = uint16_t(r_r.read_bits(16));
-	r_d.dud = r_r.read_bool();
-	r_d.timeout = r_r.read_bool();
-	return ok;
+template <class A, MaybeConst<ReviveEvent> V>
+constexpr void serialize(A &r_a, V &r_v, CombatFrame &r_f) {
+	r_a.bits(r_v.reviver, kWireSlotBits);
+	r_a.bits(r_v.revived, kWireSlotBits);
+	uint64_t back = r_a.encode([&] {
+		if (r_v.tick > r_f.server_tick) {
+			++r_f.clamped;
+		}
+		return uint64_t(r_v.tick <= r_f.server_tick ? r_f.server_tick - r_v.tick : 0u);
+	});
+	r_a.varint(back);
+	r_a.check("revive tick out of range", [&] { return back <= r_f.server_tick; });
+	r_a.store(r_v.tick, [&] { return sim::Tick(r_f.server_tick - back); });
 }
 
-constexpr size_t kGunplayTickMinBits = 32 + 4 + 4 + 4 + 2 + 3;
-static_assert(kMaxTraceShots < 16 && kMaxTraceProjectiles < 16 && kMaxTraceDamage < 16 && kMaxTraceDetonations < 4 && kMaxTraceDeaths < 8);
+constexpr ShotQuantization kNoFrame{};
 
-void write_gunplay_tick(BitWriter &r_w, const TraceGunplayTick &p_t, uint64_t &r_dropped) {
-	const size_t shots = std::min(p_t.shots.size(), kMaxTraceShots);
-	const size_t both = std::min(p_t.projectiles.size(), p_t.projectile_shots.size());
-	const size_t projectiles = std::min(both, kMaxTraceProjectiles);
-	const size_t damage = std::min(p_t.damage.size(), kMaxTraceDamage);
-	const size_t detonations = std::min(p_t.detonations.size(), kMaxTraceDetonations);
-	const size_t deaths = std::min(p_t.deaths.size(), kMaxTraceDeaths);
-	r_dropped += (p_t.shots.size() - shots) + (std::max(p_t.projectiles.size(), p_t.projectile_shots.size()) - projectiles) + (p_t.damage.size() - damage) +
-			(p_t.detonations.size() - detonations) + (p_t.deaths.size() - deaths);
-	r_w.write_bits(p_t.tick, 32);
-	r_w.write_bits(shots, 4);
-	r_w.write_bits(projectiles, 4);
-	r_w.write_bits(damage, 4);
-	r_w.write_bits(detonations, 2);
-	r_w.write_bits(deaths, 3);
-	for (size_t i = 0; i < shots; ++i) {
-		write_shot_full(r_w, p_t.shots[i]);
-	}
-	for (size_t i = 0; i < projectiles; ++i) {
-		write_vec3(r_w, p_t.projectiles[i]);
-		r_w.write_bits(p_t.projectile_shots[i], 32);
-	}
-	for (size_t i = 0; i < damage; ++i) {
-		write_damage_full(r_w, p_t.damage[i]);
-	}
-	for (size_t i = 0; i < detonations; ++i) {
-		write_detonation_full(r_w, p_t.detonations[i]);
-	}
-	for (size_t i = 0; i < deaths; ++i) {
-		r_w.write_bits(p_t.deaths[i].victim, 8);
-		r_w.write_bits(p_t.deaths[i].killer, 8);
-		r_w.write_bits(p_t.deaths[i].shot_index, 32);
+template <class T>
+size_t combat_min_bits() {
+	return count_bits([](auto &r_a) {
+		T event{};
+		CombatFrame f{ kNoFrame };
+		serialize(r_a, event, f);
+	});
+}
+
+const size_t kHitMinBits = combat_min_bits<HitEvent>();
+const size_t kDeathMinBits = combat_min_bits<DeathEvent>();
+const size_t kDetonationMinBits = combat_min_bits<DetonationWire>();
+const size_t kReviveMinBits = combat_min_bits<ReviveEvent>();
+
+template <class A, class V>
+void combat_list(A &r_a, V &r_events, uint64_t p_count, CombatFrame &r_f) {
+	const size_t count = r_a.resize(r_events, size_t(p_count));
+	for (size_t i = 0; i < count && r_a.ok(); ++i) {
+		serialize(r_a, r_events[i], r_f);
 	}
 }
 
-bool read_gunplay_tick(BitReader &r_r, TraceGunplayTick &r_t) {
-	r_t = TraceGunplayTick{};
-	r_t.tick = sim::Tick(r_r.read_bits(32));
-	const size_t shots = size_t(r_r.read_bits(4));
-	const size_t projectiles = size_t(r_r.read_bits(4));
-	const size_t damage = size_t(r_r.read_bits(4));
-	const size_t detonations = size_t(r_r.read_bits(2));
-	const size_t deaths = size_t(r_r.read_bits(3));
-	if (r_r.failed() || shots > kMaxTraceShots || projectiles > kMaxTraceProjectiles || damage > kMaxTraceDamage || detonations > kMaxTraceDetonations ||
-			deaths > kMaxTraceDeaths) {
-		return false;
+template <class A, MaybeConst<CombatEvents> M>
+void serialize(A &r_a, M &r_m, const ShotQuantization &p_frame, size_t &r_clamped) {
+	r_a.bits(r_m.server_tick, 32);
+	uint64_t hits = r_m.hits.size();
+	uint64_t deaths = r_m.deaths.size();
+	uint64_t detonations = r_m.detonations.size();
+	uint64_t revives = r_m.revives.size();
+	r_a.varint(hits);
+	r_a.varint(deaths);
+	r_a.varint(detonations);
+	r_a.varint(revives);
+	r_a.check("event count out of range", [&] {
+		return hits <= kMaxCombatEventsPerMessage && deaths <= kMaxCombatEventsPerMessage && detonations <= kMaxCombatEventsPerMessage &&
+				revives <= kMaxCombatEventsPerMessage && hits + deaths + detonations + revives <= kMaxCombatEventsPerMessage &&
+				r_a.fits(hits * kHitMinBits + deaths * kDeathMinBits + detonations * kDetonationMinBits + revives * kReviveMinBits);
+	});
+	CombatFrame f{ p_frame, r_m.server_tick };
+	combat_list(r_a, r_m.hits, hits, f);
+	combat_list(r_a, r_m.deaths, deaths, f);
+	combat_list(r_a, r_m.detonations, detonations, f);
+	combat_list(r_a, r_m.revives, revives, f);
+	r_clamped += f.clamped;
+}
+
+template <class A, MaybeConst<KitSelect> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.kit, 8);
+	r_a.bits(r_m.team, 8);
+	r_a.check("kit or team out of range", [&] { return r_m.kit < kMaxKits && r_m.team <= kMaxTeam; });
+}
+
+constexpr unsigned kRowSlotBits = 6;
+constexpr unsigned kRowCountBits = 7;
+constexpr unsigned kNameBytesBits = 5;
+constexpr unsigned kRestrictMaskBits = 13;
+static_assert((size_t(1) << kRowSlotBits) == kMaxPlayerRows && (size_t(1) << (kRowCountBits - 1)) == kMaxPlayerRows);
+static_assert(kMaxPlayerNameBytes < (size_t(1) << kNameBytesBits));
+static_assert(restrict_bits::kAll == (1u << kRestrictMaskBits) - 1u);
+static_assert(kMaxKits == 4, "PlayerRow::kit travels in 2 bits");
+
+template <class A, MaybeConst<MatchState> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.phase, 8);
+	r_a.bits(r_m.round_start_tick, 32);
+	r_a.bits(r_m.countdown_end_tick, 32);
+	r_a.bits(r_m.kills[0], 32);
+	r_a.bits(r_m.kills[1], 32);
+	r_a.bits(r_m.kill_limit, 32);
+	r_a.bits(r_m.winner, 2);
+	r_a.bits(r_m.killer_camera, 1);
+	r_a.bits(r_m.round_end_tick, 32);
+	r_a.bits(r_m.unspawn_tick, 32);
+	r_a.bits(r_m.restart_tick, 32);
+	r_a.bits(r_m.restrict_until_tick, 32);
+	r_a.bits(r_m.restrict_mask, kRestrictMaskBits);
+	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::RoundOver); });
+	r_a.check("winner out of range", [&] { return r_m.winner <= kMaxTeam; });
+	r_a.check("negative kill limit", [&] { return r_m.kill_limit >= 0; });
+}
+
+MatchState canonical_match_state(const MatchState &p_message) {
+	MatchState m = p_message;
+	m.phase = MatchPhase(std::min<uint8_t>(uint8_t(m.phase), uint8_t(MatchPhase::RoundOver)));
+	m.kill_limit = std::max<int32_t>(m.kill_limit, 0);
+	m.winner = std::min<uint8_t>(m.winner, kMaxTeam);
+	m.restrict_mask &= restrict_bits::kAll;
+	return m;
+}
+
+template <class A, MaybeConst<PlayerRow> R>
+constexpr void serialize(A &r_a, R &r_row, int p_previous_slot) {
+	r_a.bits(r_row.slot, kRowSlotBits);
+	r_a.bits(r_row.team, 2);
+	r_a.bits(r_row.kit, 2);
+	r_a.bits(r_row.bot, 1);
+	r_a.bits(r_row.alive, 1);
+	r_a.bits(r_row.name_bytes, kNameBytesBits);
+	r_a.bits(r_row.ping_ms, 16);
+	r_a.bits(r_row.kills, 16);
+	r_a.bits(r_row.deaths, 16);
+	r_a.bits(r_row.score, 32);
+	r_a.check("rows not in ascending slot order", [&] { return int(r_row.slot) > p_previous_slot; });
+	r_a.check("team out of range", [&] { return r_row.team <= kMaxTeam; });
+	r_a.check("bad name length", [&] { return r_row.name_bytes <= kMaxPlayerNameBytes && r_a.fits(size_t(r_row.name_bytes) * 8); });
+	for (size_t k = 0; k < r_row.name_bytes && r_a.ok(); ++k) {
+		r_a.bits(r_row.name[k], 8);
 	}
-	const size_t need = shots * kShotFullBits + projectiles * (96 + 32) + damage * kDamageFullBits + detonations * kDetonationFullBits + deaths * 48;
-	if (need > r_r.bits_left()) {
-		return false;
+	r_a.require("bad name", [&] { return valid_utf8(player_name(r_row)); });
+}
+
+constexpr size_t kRowMinBits = count_bits([](auto &r_a) {
+	PlayerRow row{};
+	serialize(r_a, row, -1);
+});
+
+template <class A, MaybeConst<PlayerList> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.server_tick, 32);
+	r_a.bits(r_m.full, 1);
+	size_t rows = r_m.rows.size();
+	size_t removed = r_m.removed.size();
+	r_a.bits(rows, kRowCountBits);
+	r_a.bits(removed, kRowCountBits);
+	r_a.check("row count out of range", [&] {
+		return rows <= kMaxPlayerRows && removed <= kMaxPlayerRows && !(r_m.full && removed != 0) && r_a.fits(rows * kRowMinBits + removed * kRowSlotBits);
+	});
+	rows = r_a.resize(r_m.rows, rows);
+	std::array<bool, kMaxPlayerRows> present{};
+	for (size_t i = 0; i < rows && r_a.ok(); ++i) {
+		serialize(r_a, r_m.rows[i], i == 0 ? -1 : int(r_m.rows[i - 1].slot));
+		present[r_m.rows[i].slot % kMaxPlayerRows] = true;
 	}
-	bool ok = true;
-	r_t.shots.resize(shots);
-	for (sim::weapons::ShotEvent &s : r_t.shots) {
-		ok = read_shot_full(r_r, s) && ok;
+	removed = r_a.resize(r_m.removed, removed);
+	for (size_t i = 0; i < removed && r_a.ok(); ++i) {
+		r_a.bits(r_m.removed[i], kRowSlotBits);
+		r_a.check("removed slots not ascending or also a row",
+				[&] { return (i == 0 || r_m.removed[i] > r_m.removed[i - 1]) && !present[r_m.removed[i] % kMaxPlayerRows]; });
 	}
-	r_t.projectiles.resize(projectiles);
-	r_t.projectile_shots.resize(projectiles);
-	for (size_t i = 0; i < projectiles; ++i) {
-		ok = read_vec3(r_r, r_t.projectiles[i]) && ok;
-		r_t.projectile_shots[i] = uint32_t(r_r.read_bits(32));
+}
+
+size_t valid_name_bytes(const PlayerRow &p_row) {
+	size_t n = std::min<size_t>(p_row.name_bytes, kMaxPlayerNameBytes);
+	while (n > 0 && !valid_utf8(std::string_view(p_row.name.data(), n))) {
+		--n;
 	}
-	r_t.damage.resize(damage);
-	for (sim::weapons::DamageEvent &d : r_t.damage) {
-		ok = read_damage_full(r_r, d) && ok;
+	return n;
+}
+
+PlayerList canonical_player_list(const PlayerList &p_message, size_t &r_clamped) {
+	std::array<const PlayerRow *, kMaxPlayerRows> by_slot{};
+	for (const PlayerRow &row : p_message.rows) {
+		if (row.slot >= kMaxPlayerRows || by_slot[row.slot] != nullptr) {
+			++r_clamped;
+			continue;
+		}
+		by_slot[row.slot] = &row;
 	}
-	r_t.detonations.resize(detonations);
-	for (sim::weapons::DetonationEvent &d : r_t.detonations) {
-		ok = read_detonation_full(r_r, d) && ok;
+	std::array<bool, kMaxPlayerRows> removed{};
+	for (const uint8_t slot : p_message.removed) {
+		if (p_message.full || slot >= kMaxPlayerRows || removed[slot] || by_slot[slot] != nullptr) {
+			++r_clamped;
+			continue;
+		}
+		removed[slot] = true;
 	}
-	r_t.deaths.resize(deaths);
-	for (TraceDeath &d : r_t.deaths) {
-		d.victim = uint8_t(r_r.read_bits(8));
-		d.killer = uint8_t(r_r.read_bits(8));
-		d.shot_index = uint32_t(r_r.read_bits(32));
+	PlayerList m;
+	m.server_tick = p_message.server_tick;
+	m.full = p_message.full;
+	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
+		if (by_slot[s] == nullptr) {
+			continue;
+		}
+		PlayerRow row = *by_slot[s];
+		const size_t name_bytes = valid_name_bytes(row);
+		if (name_bytes != row.name_bytes) {
+			++r_clamped;
+		}
+		if (row.team > kMaxTeam || row.kit >= kMaxKits) {
+			++r_clamped;
+		}
+		row.team = row.team <= kMaxTeam ? row.team : uint8_t(0);
+		row.kit = std::min<uint8_t>(row.kit, kMaxKits - 1);
+		row.name_bytes = uint8_t(name_bytes);
+		m.rows.push_back(row);
 	}
-	return ok && !r_r.failed();
+	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
+		if (removed[s]) {
+			m.removed.push_back(uint8_t(s));
+		}
+	}
+	return m;
+}
+
+template <class A, MaybeConst<SpawnRequest> M>
+void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.kit, 8);
+	r_a.bits(r_m.spawn_choice, 8);
+}
+
+struct Framing {
+	MessageType type;
+	const char *what;
+	size_t max_bytes = std::numeric_limits<size_t>::max();
+};
+
+template <class M, class... Context>
+std::vector<uint8_t> encode_as(MessageType p_type, size_t p_cap, const M &p_message, Context &&...p_context) {
+	BitWriter w = begin(p_type, p_cap);
+	BitWriteArchive archive(w);
+	serialize(archive, p_message, std::forward<Context>(p_context)...);
+	return finish(w);
+}
+
+template <class M, class... Context>
+core::Result<M> decode_as(std::span<const uint8_t> p_datagram, const Framing &p_framing, Context &&...p_context) {
+	BitReader r(p_datagram);
+	if (!open(r, p_framing.type)) {
+		return fail(p_framing.what, "wrong type");
+	}
+	if (p_datagram.size() > p_framing.max_bytes) {
+		return fail(p_framing.what, "larger than one datagram");
+	}
+	BitReadArchive archive(r);
+	M message;
+	serialize(archive, message, std::forward<Context>(p_context)...);
+	if (const char *why = archive.error()) {
+		return fail(p_framing.what, why);
+	}
+	if (!r.at_end()) {
+		return fail(p_framing.what, "trailing bytes");
+	}
+	return message;
 }
 
 }
@@ -805,363 +1469,74 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 }
 
 std::vector<uint8_t> encode_hello(const Hello &p_message) {
-	BitWriter w = begin(MessageType::Hello);
-	w.write_bits(p_message.protocol, 16);
-	write_string(w, p_message.name, kMaxNameBytes);
-	return finish(w);
+	return encode_as(MessageType::Hello, kMaxReliableBytes, p_message);
 }
 
 core::Result<Hello> decode_hello(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::Hello)) {
-		return fail("Hello", "wrong type");
-	}
-	Hello m;
-	m.protocol = uint16_t(r.read_bits(16));
-	if (!read_string(r, kMaxNameBytes, m.name)) {
-		return fail("Hello", "bad name");
-	}
-	return close(r, std::move(m), "Hello");
+	return decode_as<Hello>(p_datagram, { MessageType::Hello, "Hello" });
 }
 
 std::vector<uint8_t> encode_match_info(const MatchInfo &p_message) {
-	BitWriter w = begin(MessageType::MatchInfo);
-	w.write_bits(p_message.protocol, 16);
-	write_string(w, p_message.level, kMaxIdentBytes);
-	write_string(w, p_message.mode, kMaxIdentBytes);
-	w.write_bits(p_message.sim_hz, 16);
-	w.write_bits(p_message.snapshot_divisor, 8);
-	w.write_bits(p_message.slot, 8);
-	w.write_bits(p_message.server_tick, 32);
-	w.write_bits(uint8_t(p_message.phase), 8);
-	write_digest(w, p_message.source_digest);
-	w.write_bits(p_message.motor_hash, 64);
-
-	w.write_bits(p_message.match_seed, 64);
-	w.write_bits(p_message.weapon_hash, 64);
-	w.write_bits(p_message.weapon_flags, 8);
-	w.write_bits(p_message.kit_hash, 64);
-	w.write_bits(p_message.max_rewind_ticks, 8);
-	w.write_bits(p_message.logic_digest, 64);
-	w.write_bits(p_message.rules_flags, 8);
-	return finish(w);
+	return encode_as(MessageType::MatchInfo, kMaxReliableBytes, p_message);
 }
 
 core::Result<MatchInfo> decode_match_info(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::MatchInfo)) {
-		return fail("MatchInfo", "wrong type");
-	}
-	MatchInfo m;
-	m.protocol = uint16_t(r.read_bits(16));
-	if (!read_string(r, kMaxIdentBytes, m.level) || !read_string(r, kMaxIdentBytes, m.mode)) {
-		return fail("MatchInfo", "bad level or mode name");
-	}
-	m.sim_hz = uint16_t(r.read_bits(16));
-	m.snapshot_divisor = uint8_t(r.read_bits(8));
-	const uint64_t slot = r.read_bits(8);
-	m.server_tick = sim::Tick(r.read_bits(32));
-	const uint64_t phase = r.read_bits(8);
-	read_digest(r, m.source_digest);
-	m.motor_hash = r.read_bits(64);
-	m.match_seed = r.read_bits(64);
-	m.weapon_hash = r.read_bits(64);
-	m.weapon_flags = uint8_t(r.read_bits(8));
-	m.kit_hash = r.read_bits(64);
-	m.max_rewind_ticks = uint8_t(r.read_bits(8));
-	m.logic_digest = r.read_bits(64);
-	m.rules_flags = uint8_t(r.read_bits(8));
-	if (r.failed()) {
-		return fail("MatchInfo", "truncated");
-	}
-	if ((m.weapon_flags & ~kKnownWeaponFlags) != 0) {
-		return fail("MatchInfo", "unknown weapon flags");
-	}
-	if ((m.rules_flags & ~kKnownRulesFlags) != 0) {
-		return fail("MatchInfo", "unknown rules flags");
-	}
-	if (m.sim_hz == 0 || m.snapshot_divisor == 0) {
-		return fail("MatchInfo", "zero tick rate or snapshot divisor");
-	}
-	if (slot >= kMaxSlots) {
-		return fail("MatchInfo", "slot out of range");
-	}
-	if (phase > uint8_t(MatchPhase::RoundOver)) {
-		return fail("MatchInfo", "unknown phase");
-	}
-	m.slot = uint8_t(slot);
-	m.phase = MatchPhase(phase);
-	return close(r, std::move(m), "MatchInfo");
+	return decode_as<MatchInfo>(p_datagram, { MessageType::MatchInfo, "MatchInfo" });
 }
 
 std::vector<uint8_t> encode_ready(const Ready &p_message) {
-	BitWriter w = begin(MessageType::Ready);
-	write_digest(w, p_message.source_digest);
-	return finish(w);
+	return encode_as(MessageType::Ready, kMaxReliableBytes, p_message);
 }
 
 core::Result<Ready> decode_ready(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::Ready)) {
-		return fail("Ready", "wrong type");
-	}
-	Ready m;
-	read_digest(r, m.source_digest);
-	return close(r, std::move(m), "Ready");
+	return decode_as<Ready>(p_datagram, { MessageType::Ready, "Ready" });
 }
 
 std::vector<uint8_t> encode_spawned(const Spawned &p_message) {
-	BitWriter w = begin(MessageType::Spawned);
-	w.write_bits(p_message.slot, 8);
-	w.write_bits(p_message.spawn_index, 32);
-	write_state(w, p_message.state);
-	w.write_bits(p_message.kit, 8);
-	w.write_bits(p_message.team, 8);
-	w.write_bool(p_message.revived);
-	return finish(w);
+	return encode_as(MessageType::Spawned, kMaxReliableBytes, p_message);
 }
 
 core::Result<Spawned> decode_spawned(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::Spawned)) {
-		return fail("Spawned", "wrong type");
-	}
-	Spawned m;
-	const uint64_t slot = r.read_bits(8);
-	m.spawn_index = uint32_t(r.read_bits(32));
-	const bool state_ok = read_state(r, m.state);
-	const uint64_t kit = r.read_bits(8);
-	const uint64_t team = r.read_bits(8);
-	m.revived = r.read_bool();
-	if (r.failed()) {
-		return fail("Spawned", "truncated");
-	}
-	if (slot >= kMaxSlots) {
-		return fail("Spawned", "slot out of range");
-	}
-	if (!state_ok) {
-		return fail("Spawned", "state field out of range");
-	}
-	if (kit >= kMaxKits || team > kMaxTeam) {
-		return fail("Spawned", "kit or team out of range");
-	}
-	m.slot = uint8_t(slot);
-	m.kit = uint8_t(kit);
-	m.team = uint8_t(team);
-	return close(r, std::move(m), "Spawned");
+	return decode_as<Spawned>(p_datagram, { MessageType::Spawned, "Spawned" });
 }
 
 std::vector<uint8_t> encode_loading(const Loading &p_message) {
-	BitWriter w = begin(MessageType::Loading);
-	w.write_bits(p_message.stage, 8);
-	w.write_bits(std::min<uint16_t>(p_message.permille, 1000), 16);
-	return finish(w);
+	Loading m = p_message;
+	m.permille = std::min<uint16_t>(m.permille, 1000);
+	return encode_as(MessageType::Loading, kMaxReliableBytes, m);
 }
 
 core::Result<Loading> decode_loading(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::Loading)) {
-		return fail("Loading", "wrong type");
-	}
-	Loading m;
-	m.stage = uint8_t(r.read_bits(8));
-	m.permille = uint16_t(r.read_bits(16));
-	if (!r.failed() && m.permille > 1000) {
-		return fail("Loading", "progress above 1000 permille");
-	}
-	return close(r, std::move(m), "Loading");
+	return decode_as<Loading>(p_datagram, { MessageType::Loading, "Loading" });
 }
 
 std::vector<uint8_t> encode_kick(const Kick &p_message) {
-	BitWriter w = begin(MessageType::Kick);
-	write_string(w, p_message.reason, kMaxTextBytes);
-	return finish(w);
+	return encode_as(MessageType::Kick, kMaxReliableBytes, p_message);
 }
 
 core::Result<Kick> decode_kick(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::Kick)) {
-		return fail("Kick", "wrong type");
-	}
-	Kick m;
-	if (!read_string(r, kMaxTextBytes, m.reason)) {
-		return fail("Kick", "bad reason text");
-	}
-	return close(r, std::move(m), "Kick");
+	return decode_as<Kick>(p_datagram, { MessageType::Kick, "Kick" });
 }
 
 std::vector<uint8_t> encode_bye() {
-	BitWriter w = begin(MessageType::Bye);
+	BitWriter w = begin(MessageType::Bye, kMaxReliableBytes);
 	return finish(w);
 }
 
 std::vector<uint8_t> encode_debug(const DebugRequest &p_message) {
-	BitWriter w = begin(MessageType::Debug);
-	w.write_bits(uint8_t(p_message.kind), 8);
-	w.write_bits(p_message.id, 32);
-	write_vec3(w, p_message.position);
-	w.write_bits(p_message.yaw, 16);
-	w.write_bits(p_message.index, 32);
-	w.write_bits(p_message.ticks, 32);
-	w.write_bits(p_message.slot, 8);
-	w.write_bits(uint8_t(p_message.pose), 8);
-	return finish(w);
+	return encode_as(MessageType::Debug, kMaxReliableBytes, p_message);
 }
 
 core::Result<DebugRequest> decode_debug(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::Debug)) {
-		return fail("Debug", "wrong type");
-	}
-	DebugRequest m;
-	const uint64_t kind = r.read_bits(8);
-	m.id = uint32_t(r.read_bits(32));
-	const bool finite = read_vec3(r, m.position);
-	m.yaw = uint16_t(r.read_bits(16));
-	m.index = uint32_t(r.read_bits(32));
-	m.ticks = uint32_t(r.read_bits(32));
-	const uint64_t slot = r.read_bits(8);
-	const uint64_t pose = r.read_bits(8);
-	if (r.failed()) {
-		return fail("Debug", "truncated");
-	}
-	if (kind < uint8_t(DebugKind::Teleport) || kind > uint8_t(DebugKind::TargetInfo)) {
-		return fail("Debug", "unknown kind");
-	}
-	if (slot >= kMaxSlots || !valid_pose(pose)) {
-		return fail("Debug", "slot or pose out of range");
-	}
-	m.slot = uint8_t(slot);
-	m.pose = sim::Pose(pose);
-	if (!finite || std::fabs(m.position[0]) > kMaxDebugCoordinate || std::fabs(m.position[1]) > kMaxDebugCoordinate ||
-			std::fabs(m.position[2]) > kMaxDebugCoordinate) {
-		return fail("Debug", "position out of range");
-	}
-	if (m.ticks > kMaxTraceTicks) {
-		return fail("Debug", "tick count above kMaxTraceTicks");
-	}
-	m.kind = DebugKind(kind);
-	return close(r, std::move(m), "Debug");
+	return decode_as<DebugRequest>(p_datagram, { MessageType::Debug, "Debug" });
 }
 
 std::vector<uint8_t> encode_debug_report(const DebugReport &p_message) {
-	BitWriter w = begin(MessageType::DebugReport, kMaxDebugReportBytes);
-	w.write_bits(p_message.id, 32);
-	w.write_bool(p_message.ok);
-	write_string(w, p_message.text, kMaxTextBytes);
-	const size_t rows = std::min(p_message.sweep.size(), kMaxSweepRows);
-	w.write_varint(rows);
-	for (size_t i = 0; i < rows; ++i) {
-		const SpawnSweepRow &row = p_message.sweep[i];
-		w.write_bits(row.index, 32);
-		w.write_bool(row.ok);
-		write_vec3(w, row.point);
-		write_vec3(w, row.settled);
-		w.write_f32(row.lift);
-		w.write_f32(row.shift);
-		w.write_f32(row.gap);
-		w.write_bool(row.grounded);
-		w.write_bool(row.overlapping);
-	}
-	const size_t states = std::min<size_t>(p_message.trace.size(), kMaxTraceTicks);
-	w.write_varint(states);
-	for (size_t i = 0; i < states; ++i) {
-		write_state(w, p_message.trace[i]);
-	}
-
-	const size_t targets = std::min(p_message.targets.size(), kMaxTargetRows);
-	w.write_varint(targets);
-	for (size_t i = 0; i < targets; ++i) {
-		const TargetInfoRow &row = p_message.targets[i];
-		w.write_bits(row.slot, 8);
-		w.write_bits(uint8_t(row.pose), 8);
-		write_vec3(w, row.feet);
-		w.write_bits(row.yaw, 16);
-		write_hit_target(w, row.target);
-	}
-	const size_t ticks = std::min<size_t>(p_message.trace_gunplay.size(), kMaxTraceTicks);
-	uint64_t dropped = p_message.trace_dropped;
-	w.write_varint(ticks);
-	for (size_t i = 0; i < ticks; ++i) {
-		write_gunplay_tick(w, p_message.trace_gunplay[i], dropped);
-	}
-	w.write_bits(std::min<uint64_t>(dropped, 0xFFFFFFFFull), 32);
-	return finish(w);
+	return encode_as(MessageType::DebugReport, kMaxDebugReportBytes, p_message);
 }
 
 core::Result<DebugReport> decode_debug_report(std::span<const uint8_t> p_datagram) {
-	constexpr size_t kRowBits = 32 + 1 + 9 * 32 + 2;
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::DebugReport)) {
-		return fail("DebugReport", "wrong type");
-	}
-	DebugReport m;
-	m.id = uint32_t(r.read_bits(32));
-	m.ok = r.read_bool();
-	if (!read_string(r, kMaxTextBytes, m.text)) {
-		return fail("DebugReport", "bad text");
-	}
-	const uint64_t rows = r.read_varint();
-	if (r.failed() || rows > kMaxSweepRows || rows * kRowBits > r.bits_left()) {
-		return fail("DebugReport", "bad sweep row count");
-	}
-	m.sweep.resize(size_t(rows));
-	for (SpawnSweepRow &row : m.sweep) {
-		row.index = uint32_t(r.read_bits(32));
-		row.ok = r.read_bool();
-		bool finite = read_vec3(r, row.point);
-		finite = read_vec3(r, row.settled) && finite;
-		row.lift = r.read_f32();
-		row.shift = r.read_f32();
-		row.gap = r.read_f32();
-		row.grounded = r.read_bool();
-		row.overlapping = r.read_bool();
-		if (!finite || !std::isfinite(row.lift) || !std::isfinite(row.shift) || !std::isfinite(row.gap)) {
-			return fail("DebugReport", "non-finite sweep value");
-		}
-	}
-	const uint64_t states = r.read_varint();
-	if (r.failed() || states > kMaxTraceTicks || states * kOwnStateBits > r.bits_left()) {
-		return fail("DebugReport", "bad trace count");
-	}
-	m.trace.resize(size_t(states));
-	for (sim::SoldierState &s : m.trace) {
-		if (!read_state(r, s)) {
-			return fail("DebugReport", r.failed() ? "truncated" : "trace state field out of range");
-		}
-	}
-	const uint64_t targets = r.read_varint();
-	if (r.failed() || targets > kMaxTargetRows || targets * kTargetRowMinBits > r.bits_left()) {
-		return fail("DebugReport", "bad target row count");
-	}
-	m.targets.resize(size_t(targets));
-	for (TargetInfoRow &row : m.targets) {
-		const uint64_t slot = r.read_bits(8);
-		const uint64_t pose = r.read_bits(8);
-		bool ok = read_vec3(r, row.feet);
-		row.yaw = uint16_t(r.read_bits(16));
-		ok = read_hit_target(r, row.target) && ok;
-		if (r.failed()) {
-			return fail("DebugReport", "truncated");
-		}
-		if (!ok || slot >= kMaxSlots || !valid_pose(pose)) {
-			return fail("DebugReport", "target row field out of range");
-		}
-		row.slot = uint8_t(slot);
-		row.pose = sim::Pose(pose);
-	}
-	const uint64_t ticks = r.read_varint();
-	if (r.failed() || ticks > kMaxTraceTicks || ticks * kGunplayTickMinBits > r.bits_left()) {
-		return fail("DebugReport", "bad gunplay trace count");
-	}
-	m.trace_gunplay.resize(size_t(ticks));
-	for (TraceGunplayTick &t : m.trace_gunplay) {
-		if (!read_gunplay_tick(r, t)) {
-			return fail("DebugReport", r.failed() ? "truncated" : "gunplay trace field out of range");
-		}
-	}
-	m.trace_dropped = uint32_t(r.read_bits(32));
-	return close(r, std::move(m), "DebugReport");
+	return decode_as<DebugReport>(p_datagram, { MessageType::DebugReport, "DebugReport" });
 }
 
 std::vector<uint8_t> encode_command_packet(const CommandPacket &p_packet) {
@@ -1178,67 +1553,33 @@ std::vector<uint8_t> encode_command_packet(const CommandPacket &p_packet) {
 			break;
 		}
 	}
-	BitWriter w = begin(MessageType::CommandPacket, kMaxDatagramBytes);
-	w.write_bits(p_packet.newest_snapshot, 16);
-	w.write_bits(p_packet.snapshot_ack_bits, 32);
-	w.write_bits(p_packet.others_ack_bits, 32);
-	w.write_bits(count, 8);
-	const sim::Command &newest = p_packet.commands[0];
-	w.write_bits(newest.tick, 32);
-	w.write_bits(newest.sequence, 32);
-	WireCommand prev = wire_of(newest);
-	write_command_fields(w, prev);
-	for (size_t i = 1; i < count; ++i) {
-		const WireCommand c = wire_of(p_packet.commands[i]);
-		const bool same = c == prev;
-		w.write_bool(same);
-		if (!same) {
-			write_command_fields(w, c);
-		}
-		prev = c;
+	CommandPacketWire wire;
+	wire.newest_snapshot = p_packet.newest_snapshot;
+	wire.snapshot_ack_bits = p_packet.snapshot_ack_bits;
+	wire.others_ack_bits = p_packet.others_ack_bits;
+	wire.count = uint8_t(count);
+	wire.tick = p_packet.commands[0].tick;
+	wire.sequence = p_packet.commands[0].sequence;
+	for (size_t i = 0; i < count; ++i) {
+		wire.commands[i] = wire_of(p_packet.commands[i]);
 	}
-	return finish(w);
+	return encode_as(MessageType::CommandPacket, kMaxDatagramBytes, wire);
 }
 
 core::Result<CommandPacket> decode_command_packet(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::CommandPacket)) {
-		return fail("CommandPacket", "wrong type");
+	const core::Result<CommandPacketWire> wire = decode_as<CommandPacketWire>(p_datagram, { MessageType::CommandPacket, "CommandPacket" });
+	if (!wire) {
+		return wire.error();
 	}
 	CommandPacket p;
-	p.newest_snapshot = uint16_t(r.read_bits(16));
-	p.snapshot_ack_bits = uint32_t(r.read_bits(32));
-	p.others_ack_bits = uint32_t(r.read_bits(32));
-	const uint64_t count = r.read_bits(8);
-	if (r.failed()) {
-		return fail("CommandPacket", "truncated");
+	p.newest_snapshot = wire->newest_snapshot;
+	p.snapshot_ack_bits = wire->snapshot_ack_bits;
+	p.others_ack_bits = wire->others_ack_bits;
+	p.count = wire->count;
+	for (size_t i = 0; i < p.count; ++i) {
+		p.commands[i] = command_of(wire->commands[i], wire->tick - sim::Tick(i), wire->sequence - uint32_t(i));
 	}
-	if (count == 0 || count > kCommandsPerPacket) {
-		return fail("CommandPacket", "command count out of range");
-	}
-	p.count = uint8_t(count);
-	sim::Command &newest = p.commands[0];
-	newest.tick = sim::Tick(r.read_bits(32));
-	newest.sequence = uint32_t(r.read_bits(32));
-	if (!read_command_fields(r, newest)) {
-		return fail("CommandPacket", r.failed() ? "truncated" : "command field out of range");
-	}
-	for (size_t i = 1; i < count; ++i) {
-		const sim::Command &newer = p.commands[i - 1];
-		sim::Command &c = p.commands[i];
-		if (newer.tick == 0 || newer.sequence == 0) {
-			return fail("CommandPacket", "implied tick or sequence below 0");
-		}
-		if (r.read_bool()) {
-			c = newer;
-		} else if (!read_command_fields(r, c)) {
-			return fail("CommandPacket", r.failed() ? "truncated" : "command field out of range");
-		}
-		c.tick = newer.tick - 1;
-		c.sequence = newer.sequence - 1;
-		c.flags = 0;
-	}
-	return close(r, std::move(p), "CommandPacket");
+	return p;
 }
 
 OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state) {
@@ -1262,93 +1603,17 @@ OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state) {
 }
 
 std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropped) {
-	BitWriter w = begin(MessageType::Snapshot, kMaxDatagramBytes);
-	w.write_bits(p_snapshot.seq, 16);
-	w.write_bits(p_snapshot.server_tick, 32);
-	w.write_bits(p_snapshot.applied_sequence, 32);
-	w.write_bool(p_snapshot.applied_repeated);
-	w.write_signed(p_snapshot.command_buffer_ticks, 8);
-	w.write_bits(p_snapshot.sequence_echo, 16);
-	w.write_bits(p_snapshot.echo_hold_100us, 16);
-	w.write_bits(p_snapshot.own_events, 16);
-	w.write_bool(p_snapshot.own.has_value());
-	if (p_snapshot.own) {
-		write_state(w, *p_snapshot.own);
-
-		w.write_bool(p_snapshot.own_weapons.has_value());
-		if (p_snapshot.own_weapons) {
-			write_weapons_wire(w, *p_snapshot.own_weapons);
-		}
-	}
-
-	const size_t used = w.bit_count() + 8;
-	const size_t room = used < kMaxDatagramBytes * 8 ? (kMaxDatagramBytes * 8 - used) / kOtherBitsV2 : 0;
-	const size_t count = std::min({ p_snapshot.others.size(), room, kMaxSlots });
-	w.write_bits(count, 8);
-	for (size_t i = 0; i < count; ++i) {
-		write_other(w, p_snapshot.others[i]);
-	}
+	size_t carried = 0;
+	std::vector<uint8_t> bytes = encode_as(MessageType::Snapshot, kMaxDatagramBytes, p_snapshot, carried);
 	if (r_dropped) {
-		*r_dropped = p_snapshot.others.size() - count;
+		*r_dropped = p_snapshot.others.size() - carried;
 	}
-	return finish(w);
+	return bytes;
 }
 
 core::Result<Snapshot> decode_snapshot(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::Snapshot)) {
-		return fail("Snapshot", "wrong type");
-	}
-	Snapshot s;
-	s.seq = uint16_t(r.read_bits(16));
-	s.server_tick = sim::Tick(r.read_bits(32));
-	s.applied_sequence = uint32_t(r.read_bits(32));
-	s.applied_repeated = r.read_bool();
-	s.command_buffer_ticks = int8_t(r.read_signed(8));
-	s.sequence_echo = uint16_t(r.read_bits(16));
-	s.echo_hold_100us = uint16_t(r.read_bits(16));
-	s.own_events = uint16_t(r.read_bits(16));
-	if (r.read_bool()) {
-		sim::SoldierState own;
-		const bool ok = read_state(r, own);
-		if (r.failed()) {
-			return fail("Snapshot", "truncated");
-		}
-		if (!ok) {
-			return fail("Snapshot", "own state field out of range");
-		}
-		if (own.tick != s.server_tick) {
-			return fail("Snapshot", "own state tick differs from the server tick");
-		}
-		s.own = own;
-		if (r.read_bool()) {
-			WeaponsWire weapons;
-			const core::Status st = read_weapons_wire(r, weapons);
-			if (!st.ok()) {
-				return fail("Snapshot", r.failed() ? "truncated" : "own weapons field out of range");
-			}
-			s.own_weapons = weapons;
-		}
-	}
-	const uint64_t count = r.read_bits(8);
-	if (r.failed()) {
-		return fail("Snapshot", "truncated");
-	}
-	if (count > kMaxSlots || count * kOtherBitsV2 > r.bits_left()) {
-		return fail("Snapshot", "others count out of range");
-	}
-	std::array<bool, kMaxSlots> seen{};
-	s.others.resize(size_t(count));
-	for (OtherSoldier &o : s.others) {
-		if (!read_other(r, o)) {
-			return fail("Snapshot", r.failed() ? "truncated" : "other soldier field out of range");
-		}
-		if (seen[o.slot]) {
-			return fail("Snapshot", "slot named twice");
-		}
-		seen[o.slot] = true;
-	}
-	return close(r, std::move(s), "Snapshot");
+	size_t carried = 0;
+	return decode_as<Snapshot>(p_datagram, { MessageType::Snapshot, "Snapshot" }, carried);
 }
 
 void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::WeaponPhase p_phase, bool p_firing, bool p_ads, uint32_t p_reload_count,
@@ -1385,150 +1650,17 @@ bool others_acked(const CommandPacket &p_packet, uint16_t p_seq) {
 }
 
 std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped) {
-	BitWriter w = begin(MessageType::SnapshotOthers, kMaxDatagramBytes);
-	w.write_bits(p_message.seq, 16);
-	w.write_bits(p_message.server_tick, 32);
-	const size_t used = w.bit_count() + 8;
-	const size_t room = (kMaxDatagramBytes * 8 - used) / kOtherBitsV2;
-	const size_t count = std::min({ p_message.others.size(), room, kMaxSlots - 1 });
-	w.write_bits(count, 8);
-	for (size_t i = 0; i < count; ++i) {
-		write_other(w, p_message.others[i]);
-	}
+	size_t carried = 0;
+	std::vector<uint8_t> bytes = encode_as(MessageType::SnapshotOthers, kMaxDatagramBytes, p_message, carried);
 	if (r_dropped) {
-		*r_dropped = p_message.others.size() - count;
+		*r_dropped = p_message.others.size() - carried;
 	}
-	return finish(w);
+	return bytes;
 }
 
 core::Result<SnapshotOthers> decode_snapshot_others(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::SnapshotOthers)) {
-		return fail("SnapshotOthers", "wrong type");
-	}
-	if (p_datagram.size() > kMaxDatagramBytes) {
-		return fail("SnapshotOthers", "larger than one datagram");
-	}
-	SnapshotOthers m;
-	m.seq = uint16_t(r.read_bits(16));
-	m.server_tick = sim::Tick(r.read_bits(32));
-	const uint64_t count = r.read_bits(8);
-	if (r.failed()) {
-		return fail("SnapshotOthers", "truncated");
-	}
-	if (count > kMaxSlots - 1 || count * kOtherBitsV2 > r.bits_left()) {
-		return fail("SnapshotOthers", "others count out of range");
-	}
-	std::array<bool, kMaxSlots> seen{};
-	m.others.resize(size_t(count));
-	for (OtherSoldier &o : m.others) {
-		if (!read_other(r, o)) {
-			return fail("SnapshotOthers", r.failed() ? "truncated" : "other soldier field out of range");
-		}
-		if (seen[o.slot]) {
-			return fail("SnapshotOthers", "slot named twice");
-		}
-		seen[o.slot] = true;
-	}
-	return close(r, std::move(m), "SnapshotOthers");
-}
-
-namespace {
-
-constexpr unsigned kShotDirBits = 16;
-constexpr unsigned kShotAimBits = 12;
-constexpr unsigned kConeBits = 13;
-constexpr double kConeScale = 64.0;
-constexpr unsigned kPowerBits = 12;
-constexpr size_t kShotMinBits = 7 + 4 + 8 + 3 + kTickFractionBits + 3 * kFramePositionBits + 2 * kShotDirBits + 6 + 1 + 1;
-static_assert(kShotMinBits == 138);
-static_assert(sim::weapons::kMaxPellets == 64, "pellets travel as pellets - 1 in 6 bits");
-static_assert(sim::weapons::kMaxAngle < double(1u << kConeBits) / kConeScale);
-
-struct ShotCodes {
-	uint8_t slot = 0;
-	uint32_t index = 0;
-	uint8_t def = 0;
-	WireTime time;
-	std::array<uint32_t, 3> origin{};
-	Octa direction;
-	uint8_t pellets = 1;
-	bool tracer = false;
-	Octa aim;
-	uint32_t cone = 0;
-	bool has_power = false;
-	uint32_t power = 0;
-};
-
-std::optional<ShotCodes> shot_codes(const RemoteShot &p_shot, const ShotQuantization &p_frame, sim::Tick p_server_tick) {
-	ShotCodes c;
-	if (p_shot.slot >= kMaxSlots || p_shot.def >= kMaxWireDefs || p_shot.pellets < 1 || p_shot.pellets > sim::weapons::kMaxPellets) {
-		return std::nullopt;
-	}
-	if (!wire_time(p_shot.time, p_server_tick, c.time) || c.time.back > kMaxShotTicksBack) {
-		return std::nullopt;
-	}
-	if (!frame_codes(p_shot.origin, p_frame, c.origin)) {
-		return std::nullopt;
-	}
-	c.slot = p_shot.slot;
-	c.index = p_shot.shot_index;
-	c.def = uint8_t(p_shot.def);
-	c.direction = octa_encode(p_shot.direction, kShotDirBits);
-	c.pellets = p_shot.pellets;
-	c.tracer = p_shot.tracer;
-	if (c.tracer) {
-		c.aim = octa_encode(p_shot.aim, kShotAimBits);
-	}
-	if (c.pellets > 1) {
-		const double cone = std::isfinite(p_shot.pellet_cone) ? std::clamp(double(p_shot.pellet_cone), 0.0, double(sim::weapons::kMaxAngle)) : 0.0;
-		c.cone = std::min(uint32_t(cone * kConeScale + 0.5), (1u << kConeBits) - 1u);
-	}
-	c.has_power = p_shot.power != 1.0f;
-	if (c.has_power) {
-		const double top = double((1u << kPowerBits) - 1u);
-		const double power = std::isfinite(p_shot.power) ? std::clamp(double(p_shot.power), 0.0, double(sim::weapons::kMaxPower)) : 0.0;
-		c.power = std::min(uint32_t(power / double(sim::weapons::kMaxPower) * top + 0.5), (1u << kPowerBits) - 1u);
-	}
-	return c;
-}
-
-RemoteShot shot_from_codes(const ShotCodes &p_c, const ShotQuantization &p_frame, sim::Tick p_server_tick) {
-	RemoteShot s;
-	s.slot = p_c.slot;
-	s.shot_index = p_c.index;
-	s.def = p_c.def;
-	s.time = time_of(p_c.time, p_server_tick);
-	s.origin = frame_decode(p_c.origin, p_frame);
-	s.direction = octa_decode(p_c.direction, kShotDirBits);
-	s.pellets = p_c.pellets;
-	s.tracer = p_c.tracer;
-	if (p_c.tracer) {
-		s.aim = octa_decode(p_c.aim, kShotAimBits);
-	}
-	if (p_c.pellets > 1) {
-		s.pellet_cone = float(double(p_c.cone) / kConeScale);
-	}
-	if (p_c.has_power) {
-		s.power = float(double(p_c.power) / double((1u << kPowerBits) - 1u) * double(sim::weapons::kMaxPower));
-	}
-	return s;
-}
-
-size_t shot_bits(const ShotCodes &p_c, bool p_have_prev, uint32_t p_prev) {
-	size_t bits = kShotMinBits - 4;
-	if (!p_have_prev) {
-		bits += 32;
-	} else {
-		const uint32_t delta = p_c.index - p_prev;
-		bits += (delta >= 1 && delta <= 15) ? 4 : 4 + 32;
-	}
-	bits += p_c.tracer ? 2 * kShotAimBits : 0;
-	bits += p_c.pellets > 1 ? kConeBits : 0;
-	bits += p_c.has_power ? kPowerBits : 0;
-	return bits;
-}
-
+	size_t carried = 0;
+	return decode_as<SnapshotOthers>(p_datagram, { MessageType::SnapshotOthers, "SnapshotOthers", kMaxDatagramBytes }, carried);
 }
 
 RemoteShot remote_shot_of(const sim::weapons::ShotEvent &p_shot) {
@@ -1600,213 +1732,54 @@ std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQ
 		return p_a.codes.slot < p_b.codes.slot;
 	});
 
-	std::array<bool, kMaxSlots> have{};
-	std::array<uint32_t, kMaxSlots> prev{};
-	size_t bits = 8 + 32 + 8;
-	size_t count = 0;
-	for (; count < items.size() && count < kMaxShotsPerDatagram; ++count) {
-		const ShotCodes &c = items[count].codes;
-		const size_t b = shot_bits(c, have[c.slot], prev[c.slot]);
-		if (bits + b > kMaxDatagramBytes * 8) {
+	ShotEventsWire wire;
+	wire.server_tick = p_message.server_tick;
+	ShotIndexChain chain;
+	size_t bits = kTypeBits + count_bits([&](auto &r_a) { serialize(r_a, wire); });
+	for (const Item &it : items) {
+		if (wire.shots.size() >= kMaxShotsPerDatagram) {
+			break;
+		}
+		const size_t b = shot_bits(it.codes, chain);
+		if (bits + b > kDatagramBits) {
 			break;
 		}
 		bits += b;
-		have[c.slot] = true;
-		prev[c.slot] = c.index;
+		wire.shots.push_back(it.codes);
 	}
-	dropped += items.size() - count;
+	dropped += items.size() - wire.shots.size();
 	if (r_dropped) {
 		*r_dropped = dropped;
 	}
-	BitWriter w = begin(MessageType::ShotEvents, kMaxDatagramBytes);
-	w.write_bits(p_message.server_tick, 32);
-	w.write_bits(count, 8);
-	have.fill(false);
-	for (size_t i = 0; i < count; ++i) {
-		const ShotCodes &c = items[i].codes;
-		w.write_bits(c.slot, kWireSlotBits);
-		if (!have[c.slot]) {
-			w.write_bits(c.index, 32);
-		} else {
-			const uint32_t delta = c.index - prev[c.slot];
-			if (delta >= 1 && delta <= 15) {
-				w.write_bits(delta, 4);
-			} else {
-				w.write_bits(0, 4);
-				w.write_bits(c.index, 32);
-			}
-		}
-		have[c.slot] = true;
-		prev[c.slot] = c.index;
-		w.write_bits(c.def, 8);
-		w.write_bits(c.time.back, 3);
-		w.write_bits(c.time.fraction, kTickFractionBits);
-		write_frame(w, c.origin);
-		w.write_bits(c.direction.u, kShotDirBits);
-		w.write_bits(c.direction.v, kShotDirBits);
-		w.write_bits(uint32_t(c.pellets - 1), 6);
-		w.write_bool(c.tracer);
-		if (c.tracer) {
-			w.write_bits(c.aim.u, kShotAimBits);
-			w.write_bits(c.aim.v, kShotAimBits);
-		}
-		if (c.pellets > 1) {
-			w.write_bits(c.cone, kConeBits);
-		}
-		w.write_bool(c.has_power);
-		if (c.has_power) {
-			w.write_bits(c.power, kPowerBits);
-		}
-	}
-	return finish(w);
+	return encode_as(MessageType::ShotEvents, kMaxDatagramBytes, wire);
 }
 
 core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::ShotEvents)) {
-		return fail("ShotEvents", "wrong type");
-	}
-	if (p_datagram.size() > kMaxDatagramBytes) {
-		return fail("ShotEvents", "larger than one datagram");
+	const core::Result<ShotEventsWire> wire = decode_as<ShotEventsWire>(p_datagram, { MessageType::ShotEvents, "ShotEvents", kMaxDatagramBytes });
+	if (!wire) {
+		return wire.error();
 	}
 	ShotEvents m;
-	m.server_tick = sim::Tick(r.read_bits(32));
-	const uint64_t count = r.read_bits(8);
-	if (r.failed()) {
-		return fail("ShotEvents", "truncated");
+	m.server_tick = wire->server_tick;
+	m.shots.reserve(wire->shots.size());
+	for (const ShotCodes &c : wire->shots) {
+		m.shots.push_back(shot_from_codes(c, p_frame, m.server_tick));
 	}
-	if (count > kMaxShotsPerDatagram || count * kShotMinBits > r.bits_left()) {
-		return fail("ShotEvents", "shot count out of range");
-	}
-	std::array<bool, kMaxSlots> have{};
-	std::array<uint32_t, kMaxSlots> prev{};
-	m.shots.resize(size_t(count));
-	for (RemoteShot &s : m.shots) {
-		ShotCodes c;
-		c.slot = uint8_t(r.read_bits(kWireSlotBits));
-		if (!have[c.slot]) {
-			c.index = uint32_t(r.read_bits(32));
-		} else {
-			const uint32_t delta = uint32_t(r.read_bits(4));
-			c.index = delta != 0 ? prev[c.slot] + delta : uint32_t(r.read_bits(32));
-		}
-		const uint64_t def = r.read_bits(8);
-		c.time.back = uint32_t(r.read_bits(3));
-		c.time.fraction = uint32_t(r.read_bits(kTickFractionBits));
-		for (uint32_t &x : c.origin) {
-			x = uint32_t(r.read_bits(kFramePositionBits));
-		}
-		c.direction.u = uint32_t(r.read_bits(kShotDirBits));
-		c.direction.v = uint32_t(r.read_bits(kShotDirBits));
-		c.pellets = uint8_t(r.read_bits(6) + 1);
-		c.tracer = r.read_bool();
-		if (c.tracer) {
-			c.aim.u = uint32_t(r.read_bits(kShotAimBits));
-			c.aim.v = uint32_t(r.read_bits(kShotAimBits));
-		}
-		if (c.pellets > 1) {
-			c.cone = uint32_t(r.read_bits(kConeBits));
-		}
-		c.has_power = r.read_bool();
-		if (c.has_power) {
-			c.power = uint32_t(r.read_bits(kPowerBits));
-		}
-		if (r.failed()) {
-			return fail("ShotEvents", "truncated");
-		}
-		if (def >= kMaxWireDefs) {
-			return fail("ShotEvents", "def out of range");
-		}
-		if (c.time.back >= m.server_tick) {
-			return fail("ShotEvents", "shot time before tick 1");
-		}
-		if (have[c.slot] && c.index == prev[c.slot]) {
-			return fail("ShotEvents", "shot index repeated");
-		}
-		c.def = uint8_t(def);
-		have[c.slot] = true;
-		prev[c.slot] = c.index;
-		s = shot_from_codes(c, p_frame, m.server_tick);
-	}
-
-	for (size_t i = 0; i < m.shots.size(); ++i) {
-		for (size_t j = i + 1; j < m.shots.size(); ++j) {
-			if (m.shots[i].slot == m.shots[j].slot && m.shots[i].shot_index == m.shots[j].shot_index) {
-				return fail("ShotEvents", "shot named twice");
-			}
-		}
-	}
-	return close(r, std::move(m), "ShotEvents");
-}
-
-namespace {
-
-constexpr unsigned kHpBits = 24;
-constexpr double kHpScale = 100.0;
-
-constexpr uint32_t kHpMaxCode = 10'000'000;
-static_assert(kHpMaxCode < (1u << kHpBits));
-constexpr unsigned kNormalBits = 8;
-constexpr size_t kTimeMinBits = 8 + kTickFractionBits;
-constexpr size_t kHitMinBits = 7 + 7 + 32 + 6 + 2 + 2 * kHpBits + 3 * kFramePositionBits + 2 * kNormalBits + kTimeMinBits;
-constexpr size_t kDeathMinBits = 7 + 7 + 8 + 2 + 32 + 1 + kTimeMinBits + 1;
-constexpr size_t kDetonationMinBits = 7 + 32 + 8 + 3 * kFramePositionBits + 2 * kNormalBits + 1 + kTimeMinBits;
-constexpr size_t kReviveMinBits = 7 + 7 + 8;
-
-uint32_t hp_code(float p_hp, size_t &r_clamped) {
-	const double t = double(p_hp) * kHpScale + 0.5;
-	if (!(t >= 0.0) || !(t < double(kHpMaxCode) + 1.0)) {
-		++r_clamped;
-	}
-	return !(t > 0.0) ? 0u : t >= double(kHpMaxCode) ? kHpMaxCode : uint32_t(t);
-}
-
-float hp_value(uint32_t p_code) {
-	return float(double(p_code) / kHpScale);
-}
-
-void write_event_time(BitWriter &r_w, sim::weapons::SimTime p_time, sim::Tick p_server_tick, size_t &r_clamped) {
-	WireTime t;
-	if (!wire_time(p_time, p_server_tick, t)) {
-		++r_clamped;
-	}
-	r_w.write_varint(t.back);
-	r_w.write_bits(t.fraction, kTickFractionBits);
-}
-
-bool read_event_time(BitReader &r_r, sim::Tick p_server_tick, sim::weapons::SimTime &r_time) {
-	const uint64_t back = r_r.read_varint();
-	const uint32_t fraction = uint32_t(r_r.read_bits(kTickFractionBits));
-	if (r_r.failed() || back >= p_server_tick) {
-		return false;
-	}
-	r_time = time_of({ uint32_t(back), fraction }, p_server_tick);
-	return true;
-}
-
-void write_position(BitWriter &r_w, const sim::Vec3 &p_v, const ShotQuantization &p_frame, size_t &r_clamped) {
-	std::array<uint32_t, 3> c{};
-	if (!frame_codes(p_v, p_frame, c)) {
-		++r_clamped;
-	}
-	write_frame(r_w, c);
-}
-
+	return m;
 }
 
 std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const ShotQuantization &p_frame, size_t *r_clamped) {
 	size_t clamped = 0;
 
 	size_t budget = kMaxCombatEventsPerMessage;
-	std::vector<const HitEvent *> hits;
-	std::vector<const DeathEvent *> deaths;
-	std::vector<const DetonationWire *> detonations;
+	CombatEvents kept;
+	kept.server_tick = p_message.server_tick;
 	for (const HitEvent &h : p_message.hits) {
 		if (h.victim >= kMaxSlots || h.shooter >= kMaxSlots || budget == 0) {
 			++clamped;
 			continue;
 		}
-		hits.push_back(&h);
+		kept.hits.push_back(h);
 		--budget;
 	}
 	for (const DeathEvent &d : p_message.deaths) {
@@ -1814,7 +1787,7 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 			++clamped;
 			continue;
 		}
-		deaths.push_back(&d);
+		kept.deaths.push_back(d);
 		--budget;
 	}
 	for (const DetonationWire &d : p_message.detonations) {
@@ -1822,424 +1795,64 @@ std::vector<uint8_t> encode_combat_events(const CombatEvents &p_message, const S
 			++clamped;
 			continue;
 		}
-		detonations.push_back(&d);
+		kept.detonations.push_back(d);
 		--budget;
 	}
-	std::vector<const ReviveEvent *> revives;
 	for (const ReviveEvent &v : p_message.revives) {
 		if (v.reviver >= kMaxSlots || v.revived >= kMaxSlots || budget == 0) {
 			++clamped;
 			continue;
 		}
-		revives.push_back(&v);
+		kept.revives.push_back(v);
 		--budget;
 	}
-	BitWriter w = begin(MessageType::CombatEvents);
-	w.write_bits(p_message.server_tick, 32);
-	w.write_varint(hits.size());
-	w.write_varint(deaths.size());
-	w.write_varint(detonations.size());
-	w.write_varint(revives.size());
-	for (const HitEvent *h : hits) {
-		w.write_bits(h->victim, kWireSlotBits);
-		w.write_bits(h->shooter, kWireSlotBits);
-		w.write_bits(h->shot_index, 32);
-		if (h->pellet >= sim::weapons::kMaxPellets) {
-			++clamped;
-		}
-		w.write_bits(std::min<uint32_t>(h->pellet, sim::weapons::kMaxPellets - 1), 6);
-		w.write_bits(uint8_t(h->zone) & 3u, 2);
-		w.write_bits(hp_code(h->damage, clamped), kHpBits);
-		w.write_bits(hp_code(h->health_after, clamped), kHpBits);
-		write_position(w, h->position, p_frame, clamped);
-		write_octa(w, h->normal, kNormalBits);
-		write_event_time(w, h->time, p_message.server_tick, clamped);
-	}
-	for (const DeathEvent *d : deaths) {
-		w.write_bits(d->victim, kWireSlotBits);
-		w.write_bits(d->killer, kWireSlotBits);
-		if (d->def != sim::weapons::kNoWeapon && d->def >= kMaxWireDefs) {
-			++clamped;
-		}
-		w.write_bits(d->def < kMaxWireDefs ? d->def : 0xFFu, 8);
-		w.write_bits(uint8_t(d->zone) & 3u, 2);
-		w.write_bits(d->shot_index, 32);
-		w.write_bool(d->headshot);
-		write_event_time(w, d->time, p_message.server_tick, clamped);
-
-		const uint32_t killer_hp = hp_code(d->killer_health, clamped);
-		const bool stamped = d->respawn_tick != 0 || d->revive_until != 0 || killer_hp != 0;
-		w.write_bool(stamped);
-		if (stamped) {
-			w.write_bits(d->respawn_tick, 32);
-			w.write_bits(d->revive_until, 32);
-			w.write_bits(killer_hp, kHpBits);
-		}
-	}
-	for (const DetonationWire *d : detonations) {
-		w.write_bits(d->shooter, kWireSlotBits);
-		w.write_bits(d->shot_index, 32);
-		w.write_bits(d->def, 8);
-		write_position(w, d->position, p_frame, clamped);
-		write_octa(w, d->normal, kNormalBits);
-		w.write_bool(d->dud);
-		write_event_time(w, d->time, p_message.server_tick, clamped);
-	}
-	for (const ReviveEvent *v : revives) {
-		w.write_bits(v->reviver, kWireSlotBits);
-		w.write_bits(v->revived, kWireSlotBits);
-		if (v->tick > p_message.server_tick) {
-			++clamped;
-		}
-		w.write_varint(v->tick <= p_message.server_tick ? p_message.server_tick - v->tick : 0u);
-	}
+	std::vector<uint8_t> bytes = encode_as(MessageType::CombatEvents, kMaxReliableBytes, kept, p_frame, clamped);
 	if (r_clamped) {
 		*r_clamped = clamped;
 	}
-	return finish(w);
+	return bytes;
 }
 
 core::Result<CombatEvents> decode_combat_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::CombatEvents)) {
-		return fail("CombatEvents", "wrong type");
-	}
-	CombatEvents m;
-	m.server_tick = sim::Tick(r.read_bits(32));
-	const uint64_t nh = r.read_varint();
-	const uint64_t nd = r.read_varint();
-	const uint64_t nt = r.read_varint();
-	const uint64_t nr = r.read_varint();
-	if (r.failed()) {
-		return fail("CombatEvents", "truncated");
-	}
-	if (nh > kMaxCombatEventsPerMessage || nd > kMaxCombatEventsPerMessage || nt > kMaxCombatEventsPerMessage ||
-			nr > kMaxCombatEventsPerMessage ||
-			nh + nd + nt + nr > kMaxCombatEventsPerMessage ||
-			nh * kHitMinBits + nd * kDeathMinBits + nt * kDetonationMinBits + nr * kReviveMinBits > r.bits_left()) {
-		return fail("CombatEvents", "event count out of range");
-	}
-	m.hits.resize(size_t(nh));
-	for (HitEvent &h : m.hits) {
-		h.victim = uint8_t(r.read_bits(kWireSlotBits));
-		h.shooter = uint8_t(r.read_bits(kWireSlotBits));
-		h.shot_index = uint32_t(r.read_bits(32));
-		h.pellet = uint8_t(r.read_bits(6));
-		h.zone = sim::weapons::HitZone(r.read_bits(2));
-		const uint32_t damage = uint32_t(r.read_bits(kHpBits));
-		const uint32_t health = uint32_t(r.read_bits(kHpBits));
-		if (damage > kHpMaxCode || health > kHpMaxCode) {
-			return fail("CombatEvents", "hit amount out of range");
-		}
-		h.damage = hp_value(damage);
-		h.health_after = hp_value(health);
-		h.position = read_frame(r, p_frame);
-		h.normal = read_octa(r, kNormalBits);
-		if (!read_event_time(r, m.server_tick, h.time)) {
-			return fail("CombatEvents", r.failed() ? "truncated" : "hit time out of range");
-		}
-	}
-	m.deaths.resize(size_t(nd));
-	for (DeathEvent &d : m.deaths) {
-		d.victim = uint8_t(r.read_bits(kWireSlotBits));
-		d.killer = uint8_t(r.read_bits(kWireSlotBits));
-		const uint64_t def = r.read_bits(8);
-		d.def = def == 0xFF ? sim::weapons::kNoWeapon : uint16_t(def);
-		d.zone = sim::weapons::HitZone(r.read_bits(2));
-		d.shot_index = uint32_t(r.read_bits(32));
-		d.headshot = r.read_bool();
-		if (!read_event_time(r, m.server_tick, d.time)) {
-			return fail("CombatEvents", r.failed() ? "truncated" : "death time out of range");
-		}
-		if (r.read_bool()) {
-			d.respawn_tick = sim::Tick(r.read_bits(32));
-			d.revive_until = sim::Tick(r.read_bits(32));
-			const uint32_t killer_hp = uint32_t(r.read_bits(kHpBits));
-			if (killer_hp > kHpMaxCode) {
-				return fail("CombatEvents", "killer health out of range");
-			}
-			d.killer_health = hp_value(killer_hp);
-		}
-	}
-	m.detonations.resize(size_t(nt));
-	for (DetonationWire &d : m.detonations) {
-		d.shooter = uint8_t(r.read_bits(kWireSlotBits));
-		d.shot_index = uint32_t(r.read_bits(32));
-		const uint64_t def = r.read_bits(8);
-		d.position = read_frame(r, p_frame);
-		d.normal = read_octa(r, kNormalBits);
-		d.dud = r.read_bool();
-		if (!read_event_time(r, m.server_tick, d.time)) {
-			return fail("CombatEvents", r.failed() ? "truncated" : "detonation time out of range");
-		}
-		if (def >= kMaxWireDefs) {
-			return fail("CombatEvents", "detonation without a weapon def");
-		}
-		d.def = uint16_t(def);
-	}
-	m.revives.resize(size_t(nr));
-	for (ReviveEvent &v : m.revives) {
-		v.reviver = uint8_t(r.read_bits(kWireSlotBits));
-		v.revived = uint8_t(r.read_bits(kWireSlotBits));
-		const uint64_t back = r.read_varint();
-		if (r.failed() || back > m.server_tick) {
-			return fail("CombatEvents", r.failed() ? "truncated" : "revive tick out of range");
-		}
-		v.tick = sim::Tick(m.server_tick - back);
-	}
-	return close(r, std::move(m), "CombatEvents");
+	size_t clamped = 0;
+	return decode_as<CombatEvents>(p_datagram, { MessageType::CombatEvents, "CombatEvents" }, p_frame, clamped);
 }
 
 std::vector<uint8_t> encode_kit_select(const KitSelect &p_message) {
-	BitWriter w = begin(MessageType::KitSelect);
-	w.write_bits(p_message.kit, 8);
-	w.write_bits(p_message.team, 8);
-	return finish(w);
+	return encode_as(MessageType::KitSelect, kMaxReliableBytes, p_message);
 }
 
 core::Result<KitSelect> decode_kit_select(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::KitSelect)) {
-		return fail("KitSelect", "wrong type");
-	}
-	KitSelect m;
-	const uint64_t kit = r.read_bits(8);
-	const uint64_t team = r.read_bits(8);
-	if (r.failed()) {
-		return fail("KitSelect", "truncated");
-	}
-	if (kit >= kMaxKits || team > kMaxTeam) {
-		return fail("KitSelect", "kit or team out of range");
-	}
-	m.kit = uint8_t(kit);
-	m.team = uint8_t(team);
-	return close(r, std::move(m), "KitSelect");
-}
-
-namespace {
-
-constexpr unsigned kRowSlotBits = 6;
-constexpr unsigned kRowCountBits = 7;
-constexpr unsigned kNameBytesBits = 5;
-constexpr unsigned kRestrictMaskBits = 13;
-constexpr size_t kRowMinBits = kRowSlotBits + 2 + 2 + 1 + 1 + kNameBytesBits + 16 + 16 + 16 + 32;
-static_assert((size_t(1) << kRowSlotBits) == kMaxPlayerRows && (size_t(1) << (kRowCountBits - 1)) == kMaxPlayerRows);
-static_assert(kMaxPlayerNameBytes < (size_t(1) << kNameBytesBits));
-static_assert(restrict_bits::kAll == (1u << kRestrictMaskBits) - 1u);
-static_assert(kMaxKits == 4, "PlayerRow::kit travels in 2 bits");
-
-size_t valid_name_bytes(const PlayerRow &p_row) {
-	size_t n = std::min<size_t>(p_row.name_bytes, kMaxPlayerNameBytes);
-	while (n > 0 && !valid_utf8(std::string_view(p_row.name.data(), n))) {
-		--n;
-	}
-	return n;
-}
-
+	return decode_as<KitSelect>(p_datagram, { MessageType::KitSelect, "KitSelect" });
 }
 
 std::vector<uint8_t> encode_match_state(const MatchState &p_message) {
-	BitWriter w = begin(MessageType::MatchState);
-	w.write_bits(std::min<uint8_t>(uint8_t(p_message.phase), uint8_t(MatchPhase::RoundOver)), 8);
-	w.write_bits(p_message.round_start_tick, 32);
-	w.write_bits(p_message.countdown_end_tick, 32);
-	w.write_signed(p_message.kills[0], 32);
-	w.write_signed(p_message.kills[1], 32);
-	w.write_signed(std::max<int32_t>(p_message.kill_limit, 0), 32);
-	w.write_bits(std::min<uint8_t>(p_message.winner, kMaxTeam), 2);
-	w.write_bool(p_message.killer_camera);
-	w.write_bits(p_message.round_end_tick, 32);
-	w.write_bits(p_message.unspawn_tick, 32);
-	w.write_bits(p_message.restart_tick, 32);
-	w.write_bits(p_message.restrict_until_tick, 32);
-	w.write_bits(p_message.restrict_mask & restrict_bits::kAll, kRestrictMaskBits);
-	return finish(w);
+	return encode_as(MessageType::MatchState, kMaxReliableBytes, canonical_match_state(p_message));
 }
 
 core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::MatchState)) {
-		return fail("MatchState", "wrong type");
-	}
-	MatchState m;
-	const uint64_t phase = r.read_bits(8);
-	m.round_start_tick = sim::Tick(r.read_bits(32));
-	m.countdown_end_tick = sim::Tick(r.read_bits(32));
-	m.kills[0] = int32_t(r.read_signed(32));
-	m.kills[1] = int32_t(r.read_signed(32));
-	m.kill_limit = int32_t(r.read_signed(32));
-	const uint64_t winner = r.read_bits(2);
-	m.killer_camera = r.read_bool();
-	m.round_end_tick = sim::Tick(r.read_bits(32));
-	m.unspawn_tick = sim::Tick(r.read_bits(32));
-	m.restart_tick = sim::Tick(r.read_bits(32));
-	m.restrict_until_tick = sim::Tick(r.read_bits(32));
-	m.restrict_mask = uint32_t(r.read_bits(kRestrictMaskBits));
-	if (r.failed()) {
-		return fail("MatchState", "truncated");
-	}
-	if (phase > uint8_t(MatchPhase::RoundOver)) {
-		return fail("MatchState", "unknown phase");
-	}
-	if (winner > kMaxTeam) {
-		return fail("MatchState", "winner out of range");
-	}
-	if (m.kill_limit < 0) {
-		return fail("MatchState", "negative kill limit");
-	}
-	m.phase = MatchPhase(phase);
-	m.winner = uint8_t(winner);
-	return close(r, m, "MatchState");
+	return decode_as<MatchState>(p_datagram, { MessageType::MatchState, "MatchState" });
 }
 
 std::vector<uint8_t> encode_player_list(const PlayerList &p_message, size_t *r_clamped) {
 	size_t clamped = 0;
-
-	std::array<const PlayerRow *, kMaxPlayerRows> by_slot{};
-	for (const PlayerRow &row : p_message.rows) {
-		if (row.slot >= kMaxPlayerRows || by_slot[row.slot] != nullptr) {
-			++clamped;
-			continue;
-		}
-		by_slot[row.slot] = &row;
-	}
-	std::array<bool, kMaxPlayerRows> removed{};
-	for (const uint8_t slot : p_message.removed) {
-		if (p_message.full || slot >= kMaxPlayerRows || removed[slot] || by_slot[slot] != nullptr) {
-			++clamped;
-			continue;
-		}
-		removed[slot] = true;
-	}
-	size_t row_count = 0, removed_count = 0;
-	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
-		row_count += by_slot[s] != nullptr ? 1u : 0u;
-		removed_count += removed[s] ? 1u : 0u;
-	}
-	BitWriter w = begin(MessageType::PlayerList);
-	w.write_bits(p_message.server_tick, 32);
-	w.write_bool(p_message.full);
-	w.write_bits(row_count, kRowCountBits);
-	w.write_bits(removed_count, kRowCountBits);
-	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
-		const PlayerRow *row = by_slot[s];
-		if (row == nullptr) {
-			continue;
-		}
-		const size_t name_bytes = valid_name_bytes(*row);
-		if (name_bytes != row->name_bytes) {
-			++clamped;
-		}
-		if (row->team > kMaxTeam || row->kit >= kMaxKits) {
-			++clamped;
-		}
-		w.write_bits(s, kRowSlotBits);
-		w.write_bits(row->team <= kMaxTeam ? row->team : 0u, 2);
-		w.write_bits(std::min<uint8_t>(row->kit, kMaxKits - 1), 2);
-		w.write_bool(row->bot);
-		w.write_bool(row->alive);
-		w.write_bits(name_bytes, kNameBytesBits);
-		w.write_bits(row->ping_ms, 16);
-		w.write_bits(row->kills, 16);
-		w.write_bits(row->deaths, 16);
-		w.write_signed(row->score, 32);
-		for (size_t k = 0; k < name_bytes; ++k) {
-			w.write_bits(uint8_t(row->name[k]), 8);
-		}
-	}
-	for (size_t s = 0; s < kMaxPlayerRows; ++s) {
-		if (removed[s]) {
-			w.write_bits(s, kRowSlotBits);
-		}
-	}
+	const PlayerList canonical = canonical_player_list(p_message, clamped);
 	if (r_clamped) {
 		*r_clamped = clamped;
 	}
-	return finish(w);
+	return encode_as(MessageType::PlayerList, kMaxReliableBytes, canonical);
 }
 
 core::Result<PlayerList> decode_player_list(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::PlayerList)) {
-		return fail("PlayerList", "wrong type");
-	}
-	PlayerList m;
-	m.server_tick = sim::Tick(r.read_bits(32));
-	m.full = r.read_bool();
-	const uint64_t rows = r.read_bits(kRowCountBits);
-	const uint64_t removed = r.read_bits(kRowCountBits);
-	if (r.failed()) {
-		return fail("PlayerList", "truncated");
-	}
-	if (rows > kMaxPlayerRows || removed > kMaxPlayerRows || (m.full && removed != 0) ||
-			rows * kRowMinBits + removed * kRowSlotBits > r.bits_left()) {
-		return fail("PlayerList", "row count out of range");
-	}
-	std::array<bool, kMaxPlayerRows> present{};
-	m.rows.resize(size_t(rows));
-	for (size_t i = 0; i < m.rows.size(); ++i) {
-		PlayerRow &row = m.rows[i];
-		row.slot = uint8_t(r.read_bits(kRowSlotBits));
-		const uint64_t team = r.read_bits(2);
-		row.kit = uint8_t(r.read_bits(2));
-		row.bot = r.read_bool();
-		row.alive = r.read_bool();
-		const uint64_t name_bytes = r.read_bits(kNameBytesBits);
-		row.ping_ms = uint16_t(r.read_bits(16));
-		row.kills = uint16_t(r.read_bits(16));
-		row.deaths = uint16_t(r.read_bits(16));
-		row.score = int32_t(r.read_signed(32));
-		if (r.failed()) {
-			return fail("PlayerList", "truncated");
-		}
-		if (i > 0 && row.slot <= m.rows[i - 1].slot) {
-			return fail("PlayerList", "rows not in ascending slot order");
-		}
-		if (team > kMaxTeam) {
-			return fail("PlayerList", "team out of range");
-		}
-		if (name_bytes > kMaxPlayerNameBytes || name_bytes * 8 > r.bits_left()) {
-			return fail("PlayerList", "bad name length");
-		}
-		row.team = uint8_t(team);
-		row.name_bytes = uint8_t(name_bytes);
-		for (size_t k = 0; k < name_bytes; ++k) {
-			row.name[k] = char(r.read_bits(8));
-		}
-		if (r.failed() || !valid_utf8(std::string_view(row.name.data(), row.name_bytes))) {
-			return fail("PlayerList", "bad name");
-		}
-		present[row.slot] = true;
-	}
-	m.removed.resize(size_t(removed));
-	for (size_t i = 0; i < m.removed.size(); ++i) {
-		m.removed[i] = uint8_t(r.read_bits(kRowSlotBits));
-		if (r.failed()) {
-			return fail("PlayerList", "truncated");
-		}
-		if ((i > 0 && m.removed[i] <= m.removed[i - 1]) || present[m.removed[i]]) {
-			return fail("PlayerList", "removed slots not ascending or also a row");
-		}
-	}
-	return close(r, std::move(m), "PlayerList");
+	return decode_as<PlayerList>(p_datagram, { MessageType::PlayerList, "PlayerList" });
 }
 
 std::vector<uint8_t> encode_spawn_request(const SpawnRequest &p_message) {
-	BitWriter w = begin(MessageType::SpawnRequest);
-	w.write_bits(p_message.kit, 8);
-	w.write_bits(p_message.spawn_choice, 8);
-	return finish(w);
+	return encode_as(MessageType::SpawnRequest, kMaxReliableBytes, p_message);
 }
 
 core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datagram) {
-	BitReader r(p_datagram);
-	if (!open(r, MessageType::SpawnRequest)) {
-		return fail("SpawnRequest", "wrong type");
-	}
-	SpawnRequest m;
-	m.kit = uint8_t(r.read_bits(8));
-	m.spawn_choice = uint8_t(r.read_bits(8));
-	return close(r, m, "SpawnRequest");
+	return decode_as<SpawnRequest>(p_datagram, { MessageType::SpawnRequest, "SpawnRequest" });
 }
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name) {

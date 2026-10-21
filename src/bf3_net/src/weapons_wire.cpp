@@ -1,5 +1,7 @@
 #include "bf3/net/weapons_wire.h"
 
+#include "weapons_wire_layout.h"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -55,23 +57,6 @@ WeaponTimersWire timers_of(const sw::WeaponSlotState &p_s, uint8_t p_slot, sw::S
 	return t;
 }
 
-void write_time(BitWriter &r_w, int32_t p_offset) {
-	r_w.write_bool(p_offset == kWeaponsWireTimeZero);
-	if (p_offset != kWeaponsWireTimeZero) {
-		r_w.write_signed(std::clamp(p_offset, -kWeaponsWireMaxOffset, kWeaponsWireMaxOffset), 32);
-	}
-}
-
-bool read_time(BitReader &r_r, int32_t &r_offset) {
-	if (r_r.read_bool()) {
-		r_offset = kWeaponsWireTimeZero;
-		return true;
-	}
-	const int64_t v = r_r.read_signed(32);
-	r_offset = int32_t(v);
-	return v >= -kWeaponsWireMaxOffset && v <= kWeaponsWireMaxOffset;
-}
-
 uint64_t zigzag(int32_t p_v) {
 	return uint64_t((uint32_t(p_v) << 1) ^ uint32_t(p_v >> 31));
 }
@@ -108,6 +93,100 @@ WeaponTimersWire &timed_place(WeaponsWire &r_wire, uint8_t p_slot) {
 	return r_wire.idle[p_slot];
 }
 
+const WeaponTimersWire &timers_for(const WeaponsWire &p_wire, uint8_t p_slot) {
+	static const WeaponTimersWire kIdle{};
+	const WeaponTimersWire *found = timed_of(p_wire, p_slot);
+	return found != nullptr ? *found : kIdle;
+}
+
+WeaponTimersWire &timers_for(WeaponsWire &r_wire, uint8_t p_slot) {
+	WeaponTimersWire &t = timed_place(r_wire, p_slot);
+	t.slot = p_slot;
+	return t;
+}
+
+template <class A, MaybeConst<int32_t> T>
+bool wire_offset(A &r_a, T &r_offset) {
+	bool zero = r_offset == kWeaponsWireTimeZero;
+	r_a.bits(zero, 1);
+	if (zero) {
+		r_a.store(r_offset, [] { return kWeaponsWireTimeZero; });
+		return true;
+	}
+	int32_t offset = std::clamp(r_offset, -kWeaponsWireMaxOffset, kWeaponsWireMaxOffset);
+	r_a.bits(offset, 32);
+	r_a.store(r_offset, [&] { return offset; });
+	return offset >= -kWeaponsWireMaxOffset && offset <= kWeaponsWireMaxOffset;
+}
+
+template <class A, MaybeConst<int32_t> T>
+bool zigzag_varint(A &r_a, T &r_value) {
+	uint64_t code = zigzag(r_value);
+	r_a.varint(code);
+	bool fits = true;
+	r_a.store(r_value, [&] {
+		int32_t value = 0;
+		fits = unzigzag(code, value);
+		return value;
+	});
+	return fits;
+}
+
+template <class A, MaybeConst<WeaponsWire> W>
+void serialize_weapons(A &r_a, W &r_wire, const WeaponsWireFaults &p_faults) {
+	r_a.bits(r_wire.next_shot_index, 32);
+	r_a.bits(r_wire.active, 8);
+	r_a.bits(r_wire.pending, 8);
+	r_a.bits(r_wire.events, kEventBits);
+	const bool sprint_ok = wire_offset(r_a, r_wire.sprint_recover_until);
+	r_a.check(p_faults.slots, [&] {
+		return r_wire.active < sw::kMaxWeaponSlots && (r_wire.pending == 0xFF || r_wire.pending < sw::kMaxWeaponSlots);
+	});
+	r_a.check(p_faults.field, [&] { return sprint_ok; });
+	for (uint8_t i = 0; i < sw::kMaxWeaponSlots && r_a.ok(); ++i) {
+		auto &o = r_wire.slots[i];
+		bool present = o.def != sw::kNoWeapon;
+		r_a.bits(present, 1);
+		if (!present) {
+			r_a.bits(o.mode_counter, kCounterBits);
+			continue;
+		}
+		auto &t = timers_for(r_wire, i);
+		uint64_t def = o.def;
+		r_a.varint(def);
+		r_a.bits(o.mode, kModeBits);
+		r_a.bits(o.mode_counter, kCounterBits);
+		bool ok = zigzag_varint(r_a, o.magazine);
+		ok = zigzag_varint(r_a, o.reserve) && ok;
+		r_a.check(p_faults.field, [&] { return def < sw::kNoWeapon; });
+		r_a.store(o.def, [&] { return uint16_t(def); });
+		r_a.bits(t.phase, kPhaseBits);
+		r_a.bits(t.burst_left, kBurstBits);
+		r_a.bits(t.flags, kFlagBits);
+		ok = wire_offset(r_a, t.phase_start) && ok;
+		ok = wire_offset(r_a, t.phase_end) && ok;
+		ok = wire_offset(r_a, t.next_shot_time) && ok;
+		r_a.f32(t.spread);
+		ok = wire_offset(r_a, t.spread_time) && ok;
+		bool rest = positive_zero(t.recoil.pitch) && positive_zero(t.recoil.yaw);
+		r_a.bits(rest, 1);
+		if (!rest) {
+			r_a.f32(t.recoil.pitch);
+			r_a.f32(t.recoil.yaw);
+		}
+		ok = wire_offset(r_a, t.hold_start) && ok;
+		r_a.check(p_faults.field, [&] { return ok && std::isfinite(t.spread) && std::isfinite(t.recoil.pitch) && std::isfinite(t.recoil.yaw); });
+	}
+}
+
+}
+
+void serialize(BitWriteArchive &r_archive, const WeaponsWire &p_wire, const WeaponsWireFaults &p_faults) {
+	serialize_weapons(r_archive, p_wire, p_faults);
+}
+
+void serialize(BitReadArchive &r_archive, WeaponsWire &r_wire, const WeaponsWireFaults &p_faults) {
+	serialize_weapons(r_archive, r_wire, p_faults);
 }
 
 WeaponsWire weapons_wire_view(const sw::SoldierWeaponsState &p_state, sim::Tick p_server_tick) {
@@ -191,98 +270,16 @@ core::Result<sw::SoldierWeaponsState> weapons_from_wire(const WeaponsWire &p_wir
 }
 
 void write_weapons_wire(BitWriter &r_writer, const WeaponsWire &p_wire) {
-	r_writer.write_bits(p_wire.next_shot_index, 32);
-	r_writer.write_bits(p_wire.active, 8);
-	r_writer.write_bits(p_wire.pending, 8);
-	r_writer.write_bits(p_wire.events & mask(kEventBits), kEventBits);
-	write_time(r_writer, p_wire.sprint_recover_until);
-	static const WeaponTimersWire kIdle{};
-	for (uint8_t i = 0; i < sw::kMaxWeaponSlots; ++i) {
-		const WeaponSlotWire &o = p_wire.slots[i];
-		const bool present = o.def != sw::kNoWeapon;
-		r_writer.write_bool(present);
-		if (!present) {
-			r_writer.write_bits(o.mode_counter, kCounterBits);
-			continue;
-		}
-		const WeaponTimersWire *found = timed_of(p_wire, i);
-		const WeaponTimersWire &t = found != nullptr ? *found : kIdle;
-		r_writer.write_varint(o.def);
-		r_writer.write_bits(o.mode, kModeBits);
-		r_writer.write_bits(o.mode_counter, kCounterBits);
-		r_writer.write_varint(zigzag(o.magazine));
-		r_writer.write_varint(zigzag(o.reserve));
-		r_writer.write_bits(uint8_t(t.phase), kPhaseBits);
-		r_writer.write_bits(t.burst_left, kBurstBits);
-		r_writer.write_bits(t.flags, kFlagBits);
-		write_time(r_writer, t.phase_start);
-		write_time(r_writer, t.phase_end);
-		write_time(r_writer, t.next_shot_time);
-		r_writer.write_f32(t.spread);
-		write_time(r_writer, t.spread_time);
-		const bool rest = positive_zero(t.recoil.pitch) && positive_zero(t.recoil.yaw);
-		r_writer.write_bool(rest);
-		if (!rest) {
-			r_writer.write_f32(t.recoil.pitch);
-			r_writer.write_f32(t.recoil.yaw);
-		}
-		write_time(r_writer, t.hold_start);
-	}
+	BitWriteArchive archive(r_writer);
+	serialize(archive, p_wire, {});
 }
 
 core::Status read_weapons_wire(BitReader &r_reader, WeaponsWire &r_wire) {
 	r_wire = WeaponsWire{};
-	r_wire.next_shot_index = uint32_t(r_reader.read_bits(32));
-	const uint64_t active = r_reader.read_bits(8);
-	const uint64_t pending = r_reader.read_bits(8);
-	r_wire.events = uint32_t(r_reader.read_bits(kEventBits));
-	bool ok = read_time(r_reader, r_wire.sprint_recover_until);
-	if (r_reader.failed()) {
-		return core::make_error("weapons wire: truncated");
-	}
-	if (active >= sw::kMaxWeaponSlots || (pending != 0xFF && pending >= sw::kMaxWeaponSlots)) {
-		return core::make_error("weapons wire: active or pending slot out of range");
-	}
-	r_wire.active = uint8_t(active);
-	r_wire.pending = uint8_t(pending);
-	for (uint8_t i = 0; i < sw::kMaxWeaponSlots && ok && !r_reader.failed(); ++i) {
-		WeaponSlotWire &o = r_wire.slots[i];
-		if (!r_reader.read_bool()) {
-			o.mode_counter = uint8_t(r_reader.read_bits(kCounterBits));
-			continue;
-		}
-		const uint64_t def = r_reader.read_varint();
-		o.mode = uint8_t(r_reader.read_bits(kModeBits));
-		o.mode_counter = uint8_t(r_reader.read_bits(kCounterBits));
-		ok = unzigzag(r_reader.read_varint(), o.magazine) && ok;
-		ok = unzigzag(r_reader.read_varint(), o.reserve) && ok;
-		if (def >= sw::kNoWeapon) {
-			ok = false;
-			break;
-		}
-		o.def = uint16_t(def);
-		WeaponTimersWire &t = timed_place(r_wire, i);
-		t.slot = i;
-		t.phase = sw::WeaponPhase(r_reader.read_bits(kPhaseBits));
-		t.burst_left = uint8_t(r_reader.read_bits(kBurstBits));
-		t.flags = uint8_t(r_reader.read_bits(kFlagBits));
-		ok = read_time(r_reader, t.phase_start) && ok;
-		ok = read_time(r_reader, t.phase_end) && ok;
-		ok = read_time(r_reader, t.next_shot_time) && ok;
-		t.spread = r_reader.read_f32();
-		ok = read_time(r_reader, t.spread_time) && ok;
-		if (!r_reader.read_bool()) {
-			t.recoil.pitch = r_reader.read_f32();
-			t.recoil.yaw = r_reader.read_f32();
-		}
-		ok = read_time(r_reader, t.hold_start) && ok;
-		ok = ok && std::isfinite(t.spread) && std::isfinite(t.recoil.pitch) && std::isfinite(t.recoil.yaw);
-	}
-	if (r_reader.failed()) {
-		return core::make_error("weapons wire: truncated");
-	}
-	if (!ok) {
-		return core::make_error("weapons wire: field out of range");
+	BitReadArchive archive(r_reader);
+	serialize(archive, r_wire, { "active or pending slot out of range", "field out of range" });
+	if (const char *why = archive.error()) {
+		return core::make_error(std::string("weapons wire: ") + why);
 	}
 	return core::Status::success();
 }

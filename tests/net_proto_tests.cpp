@@ -10,10 +10,12 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -1795,7 +1797,11 @@ bool same_shot(const net::RemoteShot &p_a, const net::RemoteShot &p_b) {
 net::CombatEvents sample_combat(Rng &r_rng, sim::Tick p_tick, size_t p_hits, size_t p_deaths, size_t p_detonations) {
 	net::CombatEvents m;
 	m.server_tick = p_tick;
-	const auto time = [&] { return sw::tick_start(p_tick - r_rng.below(40)) + int64_t(r_rng.next() % uint64_t(sw::kTimeUnitsPerTick)); };
+	const auto time = [&] {
+		const int64_t within = int64_t(r_rng.next() % uint64_t(sw::kTimeUnitsPerTick));
+		const sim::Tick back = sim::Tick(r_rng.below(40));
+		return sw::tick_start(p_tick - back) + within;
+	};
 	for (size_t i = 0; i < p_hits; ++i) {
 		net::HitEvent h;
 		h.victim = uint8_t(r_rng.below(128));
@@ -3497,5 +3503,315 @@ TEST_SUITE("net-proto") {
 			counts(w, 1, 0);
 			death(w, 10'000'001);
 		}), kFrame));
+	}
+}
+
+namespace {
+
+uint64_t fnv1a64(std::span<const uint8_t> p_bytes) {
+	uint64_t h = 0xcbf29ce484222325ull;
+	for (const uint8_t b : p_bytes) {
+		h = (h ^ b) * 0x100000001b3ull;
+	}
+	return h;
+}
+
+struct GoldenDatagram {
+	std::string name;
+	std::vector<uint8_t> bytes;
+	size_t cut = 0;
+};
+
+struct GoldenPin {
+	const char *name;
+	size_t bytes;
+	uint64_t fnv1a;
+	size_t cut;
+};
+
+std::vector<GoldenDatagram> encoder_edge_datagrams() {
+	Rng rng(0x601D);
+	std::vector<GoldenDatagram> out;
+
+	out.push_back({ "Hello (name cut inside a code point)", net::encode_hello({ 7, std::string(31, 'n') + "\xC3\xA9" }) });
+	out.push_back({ "Kick (reason cut at 2048 bytes)", net::encode_kick({ std::string(2100, 'k') }) });
+	out.push_back({ "Loading (permille above 1000)", net::encode_loading({ 7, 4000 }) });
+	out.push_back({ "Bye", net::encode_bye() });
+
+	net::MatchInfo mi;
+	mi.protocol = 0xBEEF;
+	mi.level = std::string(140, 'L');
+	mi.mode = "";
+	mi.sim_hz = 0;
+	mi.snapshot_divisor = 0;
+	mi.slot = 200;
+	mi.server_tick = 0xFFFFFFFFu;
+	mi.phase = net::MatchPhase(9);
+	mi.weapon_flags = 0xFF;
+	mi.rules_flags = 0xFF;
+	mi.match_seed = ~0ull;
+	out.push_back({ "MatchInfo (out-of-range fields travel as given)", net::encode_match_info(mi) });
+
+	net::Spawned sp{ 250, 0xFFFFFFFFu, sample_state(rng, 5000) };
+	sp.state.pose = sim::Pose(7);
+	sp.kit = 9;
+	sp.team = 9;
+	out.push_back({ "Spawned (out-of-range fields travel as given)", net::encode_spawned(sp) });
+
+	net::DebugRequest dr;
+	dr.kind = net::DebugKind::TargetInfo;
+	dr.id = 0xFFFFFFFFu;
+	dr.position = { -1.0e7f, 0.0f, 3.5f };
+	dr.yaw = 0xFFFF;
+	dr.index = 0x12345678u;
+	dr.ticks = 5000;
+	dr.slot = 255;
+	dr.pose = sim::Pose(5);
+	out.push_back({ "Debug (out-of-range fields travel as given)", net::encode_debug(dr) });
+
+	net::MatchState ms;
+	ms.phase = net::MatchPhase(9);
+	ms.kills = { -3, 1000000 };
+	ms.kill_limit = -5;
+	ms.winner = 7;
+	ms.killer_camera = false;
+	ms.restrict_mask = 0xFFFFFFFFu;
+	ms.restrict_until_tick = 77;
+	out.push_back({ "MatchState (clamped)", net::encode_match_state(ms) });
+
+	net::PlayerList pl;
+	pl.server_tick = 4242;
+	pl.rows.push_back(sample_row(rng, 70));
+	pl.rows.push_back(sample_row(rng, 5));
+	pl.rows.push_back(sample_row(rng, 5));
+	net::PlayerRow odd = sample_row(rng, 9);
+	odd.team = 3;
+	odd.kit = 7;
+	odd.name_bytes = 16;
+	std::memcpy(odd.name.data(), "abcdefghijklm\xE2\x82", 15);
+	odd.name[15] = '\0';
+	pl.rows.push_back(odd);
+	pl.removed = { 5, 9, 12, 12, 64, 63 };
+	size_t clamped = 0;
+	std::vector<uint8_t> pl_bytes = net::encode_player_list(pl, &clamped);
+	out.push_back({ "PlayerList (canonicalised)", std::move(pl_bytes), clamped });
+	net::PlayerList full;
+	full.full = true;
+	full.server_tick = 1;
+	full.rows.push_back(sample_row(rng, 0));
+	full.removed = { 3 };
+	pl_bytes = net::encode_player_list(full, &clamped);
+	out.push_back({ "PlayerList (full drops removed)", std::move(pl_bytes), clamped });
+
+	net::CommandPacket cp;
+	cp.newest_snapshot = 0xFFFF;
+	cp.snapshot_ack_bits = 0x80000001u;
+	cp.others_ack_bits = 0x7FFFFFFEu;
+	cp.count = 9;
+	for (uint32_t i = 0; i < 4; ++i) {
+		cp.commands[i] = sample_command(rng, 900 - i, 50 - i);
+	}
+	cp.commands[0].move_forward = -128;
+	cp.commands[0].pitch = 30000;
+	cp.commands[0].buttons = 0xFFFFFFFFu;
+	cp.commands[0].pose = sim::Pose(3);
+	cp.commands[0].view_quality = 7;
+	cp.commands[1] = cp.commands[0];
+	cp.commands[1].tick = 899;
+	cp.commands[1].sequence = 49;
+	cp.commands[1].view_back_q8 = 513;
+	cp.commands[1].view_seq8 = 200;
+	cp.commands[3].tick = 800;
+	out.push_back({ "CommandPacket (clamped, chain cut at a gap)", net::encode_command_packet(cp) });
+	cp.count = 0;
+	out.push_back({ "CommandPacket (no commands)", net::encode_command_packet(cp) });
+
+	net::Snapshot big = sample_snapshot(rng, 0);
+	big.own_weapons = sample_weapons_wire(rng);
+	big.own_weapons->slots[0].def = 7;
+	big.own_weapons->timers[0].slot = 0xFF;
+	big.own_weapons->active = 0;
+	for (uint8_t i = 0; i < 60; ++i) {
+		big.others.push_back(sample_other_v2(rng, uint8_t(i + 2), big.server_tick));
+	}
+	size_t dropped = 0;
+	std::vector<uint8_t> snap = net::encode_snapshot(big, &dropped);
+	out.push_back({ "Snapshot (others over the datagram)", std::move(snap), dropped });
+	net::SnapshotOthers so;
+	so.seq = 9;
+	so.server_tick = big.server_tick;
+	for (uint32_t i = 0; i < 130; ++i) {
+		so.others.push_back(sample_other_v2(rng, uint8_t(i & 0x7F), so.server_tick));
+	}
+	snap = net::encode_snapshot_others(so, &dropped);
+	out.push_back({ "SnapshotOthers (others over the datagram)", std::move(snap), dropped });
+
+	net::ShotEvents se;
+	se.server_tick = 50000;
+	for (uint32_t i = 0; i < 140; ++i) {
+		se.shots.push_back(sample_shot(rng, uint8_t(i % 11), 1000 + i * (i % 7 == 3 ? 17 : 1), se.server_tick));
+	}
+	se.shots[0].slot = 200;
+	se.shots[1].def = 300;
+	se.shots[2].time = sw::tick_start(se.server_tick - 20);
+	se.shots[3].origin = { 9000.0f, 0.0f, 0.0f };
+	se.shots[4] = se.shots[5];
+	se.shots[6].pellets = 0;
+	se.shots[7].pellets = 64;
+	se.shots[7].pellet_cone = std::numeric_limits<float>::infinity();
+	se.shots[8].power = std::numeric_limits<float>::quiet_NaN();
+	se.shots[9].power = 1000.0f;
+	se.shots[10].direction = { 0.0f, 0.0f, 0.0f };
+	se.shots[12].tracer = true;
+	se.shots[12].aim = { 0.0f, -1.0f, 0.0f };
+	std::vector<uint8_t> shots = net::encode_shot_events(se, kFrame, { 10.0f, 60.0f, -40.0f }, &dropped);
+	out.push_back({ "ShotEvents (dropped, clamped, one datagram)", std::move(shots), dropped });
+
+	net::CombatEvents ce = sample_combat_v3(rng, 60000, 120, 90, 60, 40);
+	ce.hits[0].victim = 200;
+	ce.hits[1].pellet = 70;
+	ce.hits[2].damage = -1.0f;
+	ce.hits[3].health_after = 2.0e5f;
+	ce.hits[4].position = { 0.0f, 9000.0f, 0.0f };
+	ce.hits[5].time = sw::tick_start(60010);
+	ce.hits[6].normal = { 0.0f, 0.0f, 0.0f };
+	ce.deaths[0].def = 300;
+	ce.deaths[1].killer = 128;
+	ce.deaths[2].killer_health = std::numeric_limits<float>::quiet_NaN();
+	ce.detonations[0].def = 255;
+	ce.revives[0].tick = 60005;
+	clamped = 0;
+	std::vector<uint8_t> combat = net::encode_combat_events(ce, kFrame, &clamped);
+	out.push_back({ "CombatEvents (budget, clamps)", std::move(combat), clamped });
+
+	net::DebugReport rep;
+	rep.id = 77;
+	rep.ok = false;
+	rep.text = std::string(2047, 't') + "\xE2\x82\xAC";
+	for (uint32_t i = 0; i < 1030; ++i) {
+		rep.sweep.push_back({ i, (i & 1) != 0, { float(i), 2, 3 }, { float(i), 2.5f, 3 }, 0.5f, 0.25f, 0.125f, (i & 2) != 0, (i & 4) != 0 });
+	}
+	for (sim::Tick t = 0; t < 4; ++t) {
+		rep.trace.push_back(sample_state(rng, 300 + t));
+	}
+	for (uint32_t i = 0; i < 130; ++i) {
+		net::TargetInfoRow row;
+		row.slot = uint8_t(i & 0x7F);
+		row.pose = sim::Pose(i % 3);
+		row.feet = { float(i), 60.0f, -float(i) };
+		row.yaw = uint16_t(i * 500);
+		row.target.id = i;
+		row.target.team = i % 3;
+		row.target.bound_center = { 1.0f, 2.0f, 3.0f };
+		row.target.bound_radius = 1.5f;
+		row.target.spawn_protected = (i & 1) != 0;
+		row.target.capsule_count = uint8_t(i % 20);
+		for (uint8_t k = 0; k < sw::kMaxZoneCapsules; ++k) {
+			row.target.capsules[k] = { { 0.0f, float(k), 0.0f }, { 0.0f, float(k) + 0.5f, 0.0f }, 0.2f, sw::HitZone(k & 3), k, uint8_t(k * 3), uint8_t(k & 1) };
+		}
+		rep.targets.push_back(row);
+	}
+	net::DebugReport cut_ticks = sample_gunplay_report(rng);
+	for (net::TraceGunplayTick &g : cut_ticks.trace_gunplay) {
+		while (g.shots.size() < 10) {
+			g.shots.push_back(g.shots.front());
+		}
+		while (g.projectiles.size() < 9) {
+			g.projectiles.push_back({ 1, 2, 3 });
+		}
+		g.projectile_shots.resize(7, 5);
+		while (g.damage.size() < 9) {
+			g.damage.push_back(g.damage.front());
+		}
+		g.detonations.resize(3);
+		g.deaths.resize(5, { 1, 2, 3 });
+	}
+	rep.trace_gunplay = cut_ticks.trace_gunplay;
+	rep.trace_dropped = 0xFFFFFFF0u;
+	out.push_back({ "DebugReport (every list cut at its bound)", net::encode_debug_report(rep) });
+	return out;
+}
+
+void check_golden(const std::vector<GoldenDatagram> &p_datagrams, std::span<const GoldenPin> p_pins) {
+	REQUIRE(p_datagrams.size() == p_pins.size());
+	for (size_t i = 0; i < p_datagrams.size(); ++i) {
+		const GoldenDatagram &d = p_datagrams[i];
+		char hash[17];
+		std::snprintf(hash, sizeof(hash), "%016llx", static_cast<unsigned long long>(fnv1a64(d.bytes)));
+		INFO("{ \"", d.name, "\", ", d.bytes.size(), ", 0x", hash, "ull, ", d.cut, " }");
+		CHECK(d.name == p_pins[i].name);
+		CHECK(d.bytes.size() == p_pins[i].bytes);
+		CHECK(fnv1a64(d.bytes) == p_pins[i].fnv1a);
+		CHECK(d.cut == p_pins[i].cut);
+	}
+}
+
+}
+
+TEST_SUITE("net-proto") {
+	TEST_CASE("proto: golden bytes of the sample datagram of every message type") {
+		std::vector<GoldenDatagram> samples;
+		std::set<uint8_t> types;
+		for (auto &[name, bytes] : sample_datagrams()) {
+			const std::optional<net::MessageType> type = net::peek_type(bytes);
+			REQUIRE(type);
+			types.insert(uint8_t(*type));
+			samples.push_back({ name, std::move(bytes) });
+		}
+		CHECK(types.size() == 18);
+		static constexpr GoldenPin kPins[] = {
+			{ "Snapshot", 367, 0xa435d4ace31cf825ull, 0 },
+			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
+			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
+			{ "Hello", 12, 0xb36010aca7922bd5ull, 0 },
+			{ "MatchInfo", 114, 0x1e0a24458af5f0feull, 0 },
+			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
+			{ "Spawned", 86, 0x8986cc643035c128ull, 0 },
+			{ "Loading", 4, 0xee6df9e3bb005a46ull, 0 },
+			{ "Kick", 20, 0x24730a3e43ab6c1aull, 0 },
+			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
+			{ "Debug", 30, 0x3f09a8f270a73a7dull, 0 },
+			{ "DebugReport", 492, 0x74b3a36917721e73ull, 0 },
+			{ "Snapshot (v2 own weapons)", 522, 0xa817181e7f1b7bdcull, 0 },
+			{ "SnapshotOthers", 121, 0x49f12d8715464b47ull, 0 },
+			{ "ShotEvents", 190, 0x1ee136123af4ddfaull, 0 },
+			{ "CombatEvents", 124, 0x7f963139bc7ca784ull, 0 },
+			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
+			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
+			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
+			{ "MatchInfo (v2)", 82, 0x38ba6d216efb3d54ull, 0 },
+			{ "Spawned (v2)", 86, 0x57d89ea6073b2ad3ull, 0 },
+			{ "MatchState", 40, 0xb041faa8f480b7cbull, 0 },
+			{ "PlayerList (full)", 207, 0x68dd8ae5402d6955ull, 0 },
+			{ "PlayerList (delta)", 49, 0x4693a47620178101ull, 0 },
+			{ "SpawnRequest", 3, 0xb1d34918e6b14818ull, 0 },
+			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
+			{ "MatchInfo (v3)", 82, 0x9f7d6df8af0ee7e8ull, 0 },
+			{ "Spawned (v3 revived)", 86, 0x45a73c3868a4d948ull, 0 },
+		};
+		check_golden(samples, kPins);
+	}
+
+	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
+		static constexpr GoldenPin kPins[] = {
+			{ "Hello (name cut inside a code point)", 35, 0xa6c3b5c496ea8fd8ull, 0 },
+			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
+			{ "Loading (permille above 1000)", 4, 0xd50714e3acc7701dull, 0 },
+			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
+			{ "MatchInfo (out-of-range fields travel as given)", 187, 0xd223af85467b08d5ull, 0 },
+			{ "Spawned (out-of-range fields travel as given)", 86, 0x1fc913c7d126bfa0ull, 0 },
+			{ "Debug (out-of-range fields travel as given)", 30, 0x8236dbe05bdccf42ull, 0 },
+			{ "MatchState (clamped)", 40, 0x29d7cc3c932022cbull, 0 },
+			{ "PlayerList (canonicalised)", 48, 0x1f62d52eea86fb3cull, 8 },
+			{ "PlayerList (full drops removed)", 26, 0x8fda9f79ddcc06baull, 1 },
+			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },
+			{ "CommandPacket (no commands)", 0, 0xcbf29ce484222325ull, 0 },
+			{ "Snapshot (others over the datagram)", 1189, 0x25fef71d07948c6full, 24 },
+			{ "SnapshotOthers (others over the datagram)", 1178, 0x82aafe2e191acf87ull, 78 },
+			{ "ShotEvents (dropped, clamped, one datagram)", 1195, 0x3ed13adbc383dac9ull, 82 },
+			{ "CombatEvents (budget, clamps)", 5309, 0x83759aa16ad8fd11ull, 61 },
+			{ "DebugReport (every list cut at its bound)", 88266, 0xa8defafe577d38fdull, 0 },
+		};
+		check_golden(encoder_edge_datagrams(), kPins);
 	}
 }

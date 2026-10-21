@@ -16,6 +16,7 @@ target_sources(bf3_net PRIVATE
 )
 
 target_sources(bf3_net PRIVATE
+    src/bit_archive.h
     src/bit_stream.cpp
     src/protocol.cpp
     src/netsim.cpp
@@ -28,6 +29,7 @@ target_sources(bf3_net PRIVATE
 
 target_sources(bf3_net PRIVATE
     src/weapons_wire.cpp
+    src/weapons_wire_layout.h
 )
 
 target_sources(bf3_net PRIVATE
