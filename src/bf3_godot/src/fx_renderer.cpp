@@ -1,5 +1,7 @@
 #include "fx_renderer.h"
 
+#include "bf3/core/util/elapsed.h"
+
 #include "godot_util.h"
 
 #include <godot_cpp/classes/box_mesh.hpp>
@@ -27,9 +29,7 @@ namespace fx = bf3::fx;
 
 namespace {
 
-double ms_since(std::chrono::steady_clock::time_point p_t0) {
-	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
-}
+using bf3::core::ms_since;
 
 int draw_position(const fx::FxBatchKey &p_key) {
 	int blend = 0;

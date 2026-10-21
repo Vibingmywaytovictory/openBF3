@@ -133,10 +133,10 @@ ResError parse_lod(Reader &p_r, uint64_t p_at, MeshKind p_kind, uint64_t &r_inli
 				MeshPart p;
 				p.bounds_min = p_r.vec3(bounds_at);
 				p.bounds_max = p_r.vec3(off(bounds_at, 16));
-				p.transform.axis[0] = p_r.vec3(transform_at);
-				p.transform.axis[1] = p_r.vec3(off(transform_at, 16));
-				p.transform.axis[2] = p_r.vec3(off(transform_at, 32));
-				p.transform.origin = p_r.vec3(off(transform_at, 48));
+				p.transform.right = p_r.vec3(transform_at);
+				p.transform.up = p_r.vec3(off(transform_at, 16));
+				p.transform.forward = p_r.vec3(off(transform_at, 32));
+				p.transform.trans = p_r.vec3(off(transform_at, 48));
 				if (!p_r.ok()) {
 					return p_r.error();
 				}
@@ -214,8 +214,8 @@ struct VertexReader {
 	Bytes element(const VertexElement &p_e, uint64_t p_vertex, int p_size) const {
 		return region.subspan(size_t(base + p_vertex * stride + p_e.offset), size_t(p_size));
 	}
-	template <size_t N>
-	ResError collect(const VertexElement *p_e, std::optional<std::vector<std::array<float, N>>> &r_out) const {
+	template <size_t N, class Item>
+	ResError collect(const VertexElement *p_e, std::optional<std::vector<Item>> &r_out) const {
 		if (p_e == nullptr) {
 			return ResError();
 		}
@@ -227,12 +227,12 @@ struct VertexReader {
 			}
 		}
 
-		std::vector<std::array<float, N>> out;
+		std::vector<Item> out;
 		out.reserve(size_t(count));
 		for (uint64_t v = 0; v < count; v++) {
 			Vec4 lanes;
 			vertex_format_decode(p_e->format, element(*p_e, v, size), lanes);
-			std::array<float, N> item;
+			Item item{};
 			for (size_t k = 0; k < N; k++) {
 				item[k] = lanes[k];
 			}

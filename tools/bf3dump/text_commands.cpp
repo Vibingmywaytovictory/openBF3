@@ -4,6 +4,7 @@
 #include "bf3/core/path_guard.h"
 #include "bf3/core/ui/text_census.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <windows.h>
 
@@ -21,9 +22,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::wstring widen(std::string_view p_text) {
 	const int need = MultiByteToWideChar(CP_UTF8, 0, p_text.data(), static_cast<int>(p_text.size()), nullptr, 0);

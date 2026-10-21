@@ -250,8 +250,8 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 			const EbxStruct c = config->data();
 			out.body_mass = static_cast<float>(number_or(c, "BodyMass", 0));
 			out.gravity_modifier = static_cast<float>(number_or(c, "GravityModifier", 1));
-			out.center_of_mass = vec3(c, "CenterOfMass").value_or(std::array<float, 3>{});
-			out.inertia_modifier = vec3(c, "InertiaModifier").value_or(std::array<float, 3>{ 1, 1, 1 });
+			out.center_of_mass = vec3(c, "CenterOfMass").value_or(core::Vec3{});
+			out.inertia_modifier = vec3(c, "InertiaModifier").value_or(core::Vec3{ 1, 1, 1 });
 			break;
 		}
 	}

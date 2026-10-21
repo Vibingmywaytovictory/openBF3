@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -73,8 +74,8 @@ struct VehicleDef {
 
 	float body_mass = 0;
 	float gravity_modifier = 1;
-	std::array<float, 3> center_of_mass{};
-	std::array<float, 3> inertia_modifier{ 1, 1, 1 };
+	core::Vec3 center_of_mass{};
+	core::Vec3 inertia_modifier{ 1, 1, 1 };
 
 	VehicleHealthZoneDef front, rear, left, right;
 	bool health_zones_share_damage = false;

@@ -1,5 +1,8 @@
 #pragma once
 
+#include "bf3/core/math.h"
+#include "bf3/core/util/splitmix64.h"
+
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -13,22 +16,13 @@ struct Vec2 {
 	float x = 0, y = 0;
 	bool operator==(const Vec2 &) const = default;
 };
-struct Vec3 {
-	float x = 0, y = 0, z = 0;
-	bool operator==(const Vec3 &) const = default;
-};
+using Vec3 = core::Vec3;
 struct Vec4 {
 	float x = 0, y = 0, z = 0, w = 0;
 	bool operator==(const Vec4 &) const = default;
 };
 
-struct Transform {
-	Vec3 right{ 1, 0, 0 };
-	Vec3 up{ 0, 1, 0 };
-	Vec3 forward{ 0, 0, 1 };
-	Vec3 trans{ 0, 0, 0 };
-	bool operator==(const Transform &) const = default;
-};
+using Transform = core::Transform;
 
 enum class ProcessorStage : uint8_t {
 	Structural,
@@ -193,15 +187,10 @@ inline Vec3 evaluate_color_interp(const Vec4 &p_coefficients, const Vec3 &p_colo
 	return { p_color1.x + (p_color0.x - p_color1.x) * f, p_color1.y + (p_color0.y - p_color1.y) * f, p_color1.z + (p_color0.z - p_color1.z) * f };
 }
 
-inline uint64_t fx_mix64(uint64_t p_x) {
-	p_x += 0x9E3779B97F4A7C15ull;
-	p_x = (p_x ^ (p_x >> 30)) * 0xBF58476D1CE4E5B9ull;
-	p_x = (p_x ^ (p_x >> 27)) * 0x94D049BB133111EBull;
-	return p_x ^ (p_x >> 31);
-}
+using core::splitmix64;
 
 inline uint64_t fx_key(uint64_t p_seed, uint32_t p_a, uint32_t p_b, uint32_t p_c) {
-	return fx_mix64(fx_mix64(fx_mix64(p_seed ^ p_a) ^ (uint64_t(p_b) << 1)) ^ (uint64_t(p_c) << 2));
+	return splitmix64(splitmix64(splitmix64(p_seed ^ p_a) ^ (uint64_t(p_b) << 1)) ^ (uint64_t(p_c) << 2));
 }
 
 inline constexpr uint32_t kKeyComponentDraw = 0xFFFF0001u;
@@ -211,15 +200,16 @@ inline constexpr uint32_t kSlotLight = 32;
 inline constexpr uint32_t kSlotTurbulence = 33;
 
 inline uint64_t fx_emitter_seed(uint64_t p_start_seed, uint32_t p_component, uint32_t p_emitter) {
-	return fx_key(fx_mix64(p_start_seed ^ kKeyEmitterInstance), kKeyEmitterInstance, p_component, p_emitter);
+	return fx_key(splitmix64(p_start_seed ^ kKeyEmitterInstance), kKeyEmitterInstance, p_component, p_emitter);
 }
 
 inline uint64_t fx_child_seed(uint64_t p_parent_instance_seed, uint32_t p_child_emitter, uint32_t p_parent_serial) {
-	return fx_key(fx_mix64(p_parent_instance_seed ^ kKeyChildInstance), kKeyChildInstance, p_child_emitter, p_parent_serial);
+	return fx_key(splitmix64(p_parent_instance_seed ^ kKeyChildInstance), kKeyChildInstance, p_child_emitter,
+			p_parent_serial);
 }
 
 inline uint64_t fx_harness_seed(uint64_t p_seed, uint64_t p_start) {
-	return fx_mix64(p_seed + p_start);
+	return splitmix64(p_seed + p_start);
 }
 
 inline float fx_unit(uint64_t p_key) {

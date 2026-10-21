@@ -8,6 +8,7 @@
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_sources.h"
 #include "bf3/core/ui/minimap.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <algorithm>
 #include <array>
@@ -22,9 +23,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 Result<std::unique_ptr<EbxLibrary>> open_spec(const std::shared_ptr<Install> &p_install, std::string_view p_spec) {
 	return EbxLibrary::open(p_install, expand_superbundles(*p_install, p_spec));

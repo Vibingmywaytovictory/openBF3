@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_types.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/logic/logic_native.h"
 #include "bf3/sim/logic/logic_runtime.h"
 #include "logic_test_support.h"
@@ -26,9 +27,7 @@ namespace {
 namespace port = logic_port;
 using K = LogicValue::Kind;
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 constexpr double kFastSeconds = 30.0;
 

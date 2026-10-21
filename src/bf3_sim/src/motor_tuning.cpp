@@ -1,13 +1,11 @@
 #include "bf3/sim/soldier_motor.h"
 
 #include "bf3/core/gameplay/soldier_def.h"
+#include "bf3/core/util/key_values.h"
 
-#include <charconv>
 #include <cmath>
 #include <cstring>
-#include <limits>
 #include <string>
-#include <system_error>
 
 namespace bf3::sim {
 
@@ -18,83 +16,41 @@ static_assert(core::gameplay::kSoldierPoseCount == kPoseCount);
 
 namespace {
 
-enum class KeyType : uint8_t { Float, Bool, Model, U32 };
+constexpr std::string_view kGainModels[] = { "fraction_per_reference_tick", "linear", "instant" };
+static_assert(std::size(kGainModels) == size_t(GainModel::Instant) + 1 && sizeof(GainModel) == 1);
 
-struct KeyDef {
-	const char *name;
-	KeyType type;
-	float min;
-	float max;
-	void *(*field)(MotorTuning &);
-};
+using Key = core::KeyDef<MotorTuning>;
+using core::KeyKind;
 
 #define BF3_TUNING_FIELD(f) [](MotorTuning &t) -> void * { return &t.f; }
 
-const KeyDef kKeys[] = {
-	{ "gravity", KeyType::Float, 0.01f, 100.0f, BF3_TUNING_FIELD(gravity) },
-	{ "reference_hz", KeyType::Float, 1.0f, 1000.0f, BF3_TUNING_FIELD(reference_hz) },
-	{ "acceleration_model", KeyType::Model, 0, 0, BF3_TUNING_FIELD(acceleration_model) },
-	{ "deceleration_model", KeyType::Model, 0, 0, BF3_TUNING_FIELD(deceleration_model) },
-	{ "sprint_model", KeyType::Model, 0, 0, BF3_TUNING_FIELD(sprint_model) },
-	{ "air_control_scale", KeyType::Float, 0.0f, 100.0f, BF3_TUNING_FIELD(air_control_scale) },
-	{ "transition_uses_slower_pose", KeyType::Bool, 0, 0, BF3_TUNING_FIELD(transition_uses_slower_pose) },
-	{ "jump_penalty_scales_height", KeyType::Bool, 0, 0, BF3_TUNING_FIELD(jump_penalty_scales_height) },
-	{ "sprint_stands_up", KeyType::Bool, 0, 0, BF3_TUNING_FIELD(sprint_stands_up) },
-	{ "prone_footprint_check", KeyType::Bool, 0, 0, BF3_TUNING_FIELD(prone_footprint_check) },
-	{ "prone_footprint_height", KeyType::Float, 0.01f, 2.0f, BF3_TUNING_FIELD(prone_footprint_height) },
-	{ "character_padding", KeyType::Float, 0.001f, 0.2f, BF3_TUNING_FIELD(character_padding) },
-	{ "predictive_contact_distance", KeyType::Float, 0.001f, 1.0f, BF3_TUNING_FIELD(predictive_contact_distance) },
-	{ "penetration_recovery_speed", KeyType::Float, 0.0f, 1.0f, BF3_TUNING_FIELD(penetration_recovery_speed) },
-	{ "pose_change_max_penetration", KeyType::Float, 0.0f, 0.5f, BF3_TUNING_FIELD(pose_change_max_penetration) },
-	{ "max_collision_iterations", KeyType::U32, 1, 64, BF3_TUNING_FIELD(max_collision_iterations) },
-	{ "max_constraint_iterations", KeyType::U32, 1, 256, BF3_TUNING_FIELD(max_constraint_iterations) },
-	{ "enhanced_internal_edge_removal", KeyType::Bool, 0, 0, BF3_TUNING_FIELD(enhanced_internal_edge_removal) },
-	{ "min_landing_speed", KeyType::Float, 0.0f, 100.0f, BF3_TUNING_FIELD(min_landing_speed) },
+const Key kKeys[] = {
+	{ "gravity", KeyKind::Float, 0.01f, 100.0f, BF3_TUNING_FIELD(gravity) },
+	{ "reference_hz", KeyKind::Float, 1.0f, 1000.0f, BF3_TUNING_FIELD(reference_hz) },
+	{ "acceleration_model", KeyKind::Choice, 0, 0, BF3_TUNING_FIELD(acceleration_model), kGainModels },
+	{ "deceleration_model", KeyKind::Choice, 0, 0, BF3_TUNING_FIELD(deceleration_model), kGainModels },
+	{ "sprint_model", KeyKind::Choice, 0, 0, BF3_TUNING_FIELD(sprint_model), kGainModels },
+	{ "air_control_scale", KeyKind::Float, 0.0f, 100.0f, BF3_TUNING_FIELD(air_control_scale) },
+	{ "transition_uses_slower_pose", KeyKind::Bool, 0, 0, BF3_TUNING_FIELD(transition_uses_slower_pose) },
+	{ "jump_penalty_scales_height", KeyKind::Bool, 0, 0, BF3_TUNING_FIELD(jump_penalty_scales_height) },
+	{ "sprint_stands_up", KeyKind::Bool, 0, 0, BF3_TUNING_FIELD(sprint_stands_up) },
+	{ "prone_footprint_check", KeyKind::Bool, 0, 0, BF3_TUNING_FIELD(prone_footprint_check) },
+	{ "prone_footprint_height", KeyKind::Float, 0.01f, 2.0f, BF3_TUNING_FIELD(prone_footprint_height) },
+	{ "character_padding", KeyKind::Float, 0.001f, 0.2f, BF3_TUNING_FIELD(character_padding) },
+	{ "predictive_contact_distance", KeyKind::Float, 0.001f, 1.0f, BF3_TUNING_FIELD(predictive_contact_distance) },
+	{ "penetration_recovery_speed", KeyKind::Float, 0.0f, 1.0f, BF3_TUNING_FIELD(penetration_recovery_speed) },
+	{ "pose_change_max_penetration", KeyKind::Float, 0.0f, 0.5f, BF3_TUNING_FIELD(pose_change_max_penetration) },
+	{ "max_collision_iterations", KeyKind::U32, 1, 64, BF3_TUNING_FIELD(max_collision_iterations) },
+	{ "max_constraint_iterations", KeyKind::U32, 1, 256, BF3_TUNING_FIELD(max_constraint_iterations) },
+	{ "enhanced_internal_edge_removal", KeyKind::Bool, 0, 0, BF3_TUNING_FIELD(enhanced_internal_edge_removal) },
+	{ "min_landing_speed", KeyKind::Float, 0.0f, 100.0f, BF3_TUNING_FIELD(min_landing_speed) },
 };
-constexpr size_t kKeyCount = sizeof(kKeys) / sizeof(kKeys[0]);
 
 #undef BF3_TUNING_FIELD
 
-const char *model_name(GainModel p_model) {
-	switch (p_model) {
-		case GainModel::FractionPerReferenceTick:
-			return "fraction_per_reference_tick";
-		case GainModel::Linear:
-			return "linear";
-		case GainModel::Instant:
-			return "instant";
-	}
-	return "?";
-}
+const core::KeyValueGrammar<MotorTuning> kGrammar{ "motor tuning", kKeys, kMaxMotorTuningBytes, kMaxMotorTuningLines };
 
-std::string_view trim(std::string_view p_text) {
-	while (!p_text.empty() && (p_text.front() == ' ' || p_text.front() == '\t' || p_text.front() == '\r')) {
-		p_text.remove_prefix(1);
-	}
-	while (!p_text.empty() && (p_text.back() == ' ' || p_text.back() == '\t' || p_text.back() == '\r')) {
-		p_text.remove_suffix(1);
-	}
-	return p_text;
-}
-
-std::string shown(std::string_view p_text) {
-
-	std::string out;
-	for (size_t i = 0; i < p_text.size() && i < 40; ++i) {
-		const char c = p_text[i];
-		out += (c >= 0x20 && c < 0x7F) ? c : '?';
-	}
-	if (p_text.size() > 40) {
-		out += "...";
-	}
-	return out;
-}
-
-std::string number_text(float p_value) {
-	char buffer[64];
-	const std::to_chars_result r = std::to_chars(buffer, buffer + sizeof(buffer), p_value);
-	return std::string(buffer, r.ptr);
-}
+using core::float_text;
 
 void hash_bytes(uint64_t &r_hash, const void *p_data, size_t p_size) {
 	const unsigned char *b = static_cast<const unsigned char *>(p_data);
@@ -151,24 +107,24 @@ void hash_tuning(uint64_t &r_hash, const MotorTuning &p_t) {
 
 core::Status validate_tuning(const MotorTuning &p_tuning) {
 	MotorTuning t = p_tuning;
-	for (const KeyDef &k : kKeys) {
+	for (const Key &k : kKeys) {
 		void *field = k.field(t);
-		if (k.type == KeyType::Float) {
+		if (k.kind == KeyKind::Float) {
 			const float v = *static_cast<float *>(field);
-			if (!(v >= k.min && v <= k.max)) {
-				return core::make_error(std::string("motor tuning: ") + k.name + " = " + number_text(v) + " is outside " + number_text(k.min) + ".." +
-						number_text(k.max));
+			if (!(double(v) >= k.min && double(v) <= k.max)) {
+				return core::make_error("motor tuning: " + std::string(k.name) + " = " + float_text(v) +
+						" is outside " + float_text(float(k.min)) + ".." + float_text(float(k.max)));
 			}
-		} else if (k.type == KeyType::U32) {
+		} else if (k.kind == KeyKind::U32) {
 			const uint32_t v = *static_cast<uint32_t *>(field);
-			if (float(v) < k.min || float(v) > k.max) {
-				return core::make_error(std::string("motor tuning: ") + k.name + " = " + std::to_string(v) + " is outside " + number_text(k.min) + ".." +
-						number_text(k.max));
+			if (double(float(v)) < k.min || double(float(v)) > k.max) {
+				return core::make_error("motor tuning: " + std::string(k.name) + " = " + std::to_string(v) +
+						" is outside " + float_text(float(k.min)) + ".." + float_text(float(k.max)));
 			}
-		} else if (k.type == KeyType::Model) {
-			const uint8_t v = uint8_t(*static_cast<GainModel *>(field));
-			if (v > uint8_t(GainModel::Instant)) {
-				return core::make_error(std::string("motor tuning: ") + k.name + " has no model " + std::to_string(v));
+		} else if (k.kind == KeyKind::Choice) {
+			const uint8_t v = *static_cast<uint8_t *>(field);
+			if (v >= k.choices.size()) {
+				return core::make_error("motor tuning: " + std::string(k.name) + " has no model " + std::to_string(v));
 			}
 		}
 	}
@@ -247,132 +203,11 @@ std::optional<float> scalar_of(const core::gameplay::SoldierDef &p_def, std::str
 }
 
 core::Result<MotorTuning> parse_motor_tuning(std::string_view p_text) {
-	MotorTuning t;
-	bool seen[kKeyCount] = {};
-	size_t line_no = 0;
-	size_t at = 0;
-	while (at <= p_text.size()) {
-		const size_t end = std::min(p_text.find('\n', at), p_text.size());
-		std::string_view line = p_text.substr(at, end - at);
-		at = end + 1;
-		++line_no;
-		if (const size_t hash = line.find('#'); hash != std::string_view::npos) {
-			line = line.substr(0, hash);
-		}
-		line = trim(line);
-		if (line.empty()) {
-			if (end == p_text.size()) {
-				break;
-			}
-			continue;
-		}
-		const std::string where = "motor tuning line " + std::to_string(line_no);
-		const size_t eq = line.find('=');
-		if (eq == std::string_view::npos) {
-			return core::make_error(where + ": expected `key = value`, got `" + shown(line) + "`");
-		}
-		const std::string_view key = trim(line.substr(0, eq));
-		const std::string_view value = trim(line.substr(eq + 1));
-		size_t index = kKeyCount;
-		for (size_t k = 0; k < kKeyCount; ++k) {
-			if (key == kKeys[k].name) {
-				index = k;
-				break;
-			}
-		}
-		if (index == kKeyCount) {
-			return core::make_error(where + ": unknown key `" + shown(key) + "`");
-		}
-		if (seen[index]) {
-			return core::make_error(where + ": `" + std::string(key) + "` given twice");
-		}
-		seen[index] = true;
-		const KeyDef &k = kKeys[index];
-		void *field = k.field(t);
-		switch (k.type) {
-			case KeyType::Float: {
-				float v = 0;
-				const std::from_chars_result r = std::from_chars(value.data(), value.data() + value.size(), v);
-				if (value.empty() || r.ec != std::errc() || r.ptr != value.data() + value.size() || !std::isfinite(v)) {
-					return core::make_error(where + ": `" + std::string(key) + "` needs a number, got `" + shown(value) + "`");
-				}
-				if (!(v >= k.min && v <= k.max)) {
-					return core::make_error(where + ": `" + std::string(key) + "` = " + shown(value) + " is outside " + number_text(k.min) + ".." +
-							number_text(k.max));
-				}
-				*static_cast<float *>(field) = v;
-				break;
-			}
-			case KeyType::U32: {
-				uint32_t v = 0;
-				const std::from_chars_result r = std::from_chars(value.data(), value.data() + value.size(), v);
-				if (value.empty() || r.ec != std::errc() || r.ptr != value.data() + value.size()) {
-					return core::make_error(where + ": `" + std::string(key) + "` needs a whole number, got `" + shown(value) + "`");
-				}
-				if (float(v) < k.min || float(v) > k.max) {
-					return core::make_error(where + ": `" + std::string(key) + "` = " + shown(value) + " is outside " + number_text(k.min) + ".." +
-							number_text(k.max));
-				}
-				*static_cast<uint32_t *>(field) = v;
-				break;
-			}
-			case KeyType::Bool:
-				if (value == "true") {
-					*static_cast<bool *>(field) = true;
-				} else if (value == "false") {
-					*static_cast<bool *>(field) = false;
-				} else {
-					return core::make_error(where + ": `" + std::string(key) + "` needs true or false, got `" + shown(value) + "`");
-				}
-				break;
-			case KeyType::Model: {
-				GainModel m = GainModel::Instant;
-				bool found = false;
-				for (const GainModel candidate : { GainModel::FractionPerReferenceTick, GainModel::Linear, GainModel::Instant }) {
-					if (value == model_name(candidate)) {
-						m = candidate;
-						found = true;
-					}
-				}
-				if (!found) {
-					return core::make_error(where + ": `" + std::string(key) + "` needs fraction_per_reference_tick, linear or instant, got `" + shown(value) +
-							"`");
-				}
-				*static_cast<GainModel *>(field) = m;
-				break;
-			}
-		}
-		if (end == p_text.size()) {
-			break;
-		}
-	}
-	return t;
+	return core::parse_key_values(p_text, kGrammar);
 }
 
 std::string format_motor_tuning(const MotorTuning &p_tuning) {
-	MotorTuning t = p_tuning;
-	std::string out;
-	for (const KeyDef &k : kKeys) {
-		out += k.name;
-		out += " = ";
-		void *field = k.field(t);
-		switch (k.type) {
-			case KeyType::Float:
-				out += number_text(*static_cast<float *>(field));
-				break;
-			case KeyType::U32:
-				out += std::to_string(*static_cast<uint32_t *>(field));
-				break;
-			case KeyType::Bool:
-				out += *static_cast<bool *>(field) ? "true" : "false";
-				break;
-			case KeyType::Model:
-				out += model_name(*static_cast<GainModel *>(field));
-				break;
-		}
-		out += '\n';
-	}
-	return out;
+	return core::format_key_values(p_tuning, kKeys);
 }
 
 float eval(const Curve &p_curve, float p_x) {
@@ -404,12 +239,13 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 	p.tuning = p_tuning;
 	auto finite_positive = [](float p_v) { return std::isfinite(p_v) && p_v > 0.0f && p_v < 1000.0f; };
 	if (!finite_positive(p_def.radius)) {
-		return core::make_error("motor params: PhysicalRadius " + number_text(p_def.radius) + " is not a usable radius");
+		return core::make_error("motor params: PhysicalRadius " + float_text(p_def.radius) + " is not a usable radius");
 	}
 	p.radius = p_def.radius;
 	p.mass = finite_positive(p_def.mass) ? p_def.mass : 100.0f;
 	if (!(std::isfinite(p_def.max_ascend_angle) && p_def.max_ascend_angle > 0.0f && p_def.max_ascend_angle < 90.0f)) {
-		return core::make_error("motor params: MaxAscendAngle " + number_text(p_def.max_ascend_angle) + " is outside 0..90");
+		return core::make_error(
+				"motor params: MaxAscendAngle " + float_text(p_def.max_ascend_angle) + " is outside 0..90");
 	}
 	p.max_ascend_degrees = p_def.max_ascend_angle;
 	if (const std::optional<float> d = scalar_of(p_def, "OnGroundStateData", "AllowedDistanceFromGround"); d && *d >= 0.0f && *d <= 10.0f) {
@@ -467,8 +303,8 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 		}
 		PoseParams &pp = p.poses[i];
 		if (!(std::isfinite(def->height) && def->height > 0.0f && def->height < 10.0f)) {
-			return core::make_error(std::string("motor params: pose ") + core::gameplay::soldier_pose_name(pose) + " height " + number_text(def->height) +
-					" is unusable");
+			return core::make_error(std::string("motor params: pose ") + core::gameplay::soldier_pose_name(pose) +
+					" height " + float_text(def->height) + " is unusable");
 		}
 		pp.height = def->height;
 		pp.eye_height = std::isfinite(def->eye_height) ? def->eye_height : def->height;

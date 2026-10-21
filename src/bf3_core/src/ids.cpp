@@ -21,21 +21,6 @@ int hex_value(char p_digit) {
 	}
 	return -1;
 }
-
-std::string_view trim(std::string_view p_text) {
-	while (!p_text.empty() && (p_text.front() == ' ' || p_text.front() == '\t' || p_text.front() == '\r' || p_text.front() == '\n')) {
-		p_text.remove_prefix(1);
-	}
-	while (!p_text.empty() && (p_text.back() == ' ' || p_text.back() == '\t' || p_text.back() == '\r' || p_text.back() == '\n')) {
-		p_text.remove_suffix(1);
-	}
-	return p_text;
-}
-
-char lower(char p_c) {
-	return (p_c >= 'A' && p_c <= 'Z') ? static_cast<char>(p_c + ('a' - 'A')) : p_c;
-}
-
 }
 
 uint64_t hash_seed() {
@@ -141,29 +126,9 @@ std::string Sha1::to_string() const {
 uint32_t asset_name_hash(std::string_view p_name) {
 	uint32_t hash = 5381;
 	for (char c : p_name) {
-		hash = (hash * 33u) ^ static_cast<uint8_t>(lower(c));
+		hash = (hash * 33u) ^ static_cast<uint8_t>(to_lower_ascii(c));
 	}
 	return hash;
-}
-
-std::string to_lower_ascii(std::string_view p_text) {
-	std::string out(p_text);
-	for (char &c : out) {
-		c = lower(c);
-	}
-	return out;
-}
-
-bool iequals_ascii(std::string_view p_a, std::string_view p_b) {
-	if (p_a.size() != p_b.size()) {
-		return false;
-	}
-	for (size_t i = 0; i < p_a.size(); ++i) {
-		if (lower(p_a[i]) != lower(p_b[i])) {
-			return false;
-		}
-	}
-	return true;
 }
 
 std::string hex_lower(const uint8_t *p_bytes, size_t p_count) {

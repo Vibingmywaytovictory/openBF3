@@ -8,6 +8,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/scale_bench.h"
@@ -33,9 +34,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::filesystem::path utf8_path(std::string_view p_text) {
 	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));

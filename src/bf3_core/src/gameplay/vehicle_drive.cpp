@@ -24,17 +24,8 @@ bool active(const EbxInstance &p_component) {
 	return !p_component.is_a("UnlockComponentData") || boolean(p_component.data(), "InvertUnlockTest").value_or(false);
 }
 
-DriveVec3 v3(const level::Vec3 &p_v) {
-	return { p_v[0], p_v[1], p_v[2] };
-}
-
 DriveTransform drive_transform(const level::LevelTransform &p_t) {
-	DriveTransform out;
-	out.right = v3(p_t.right);
-	out.up = v3(p_t.up);
-	out.forward = v3(p_t.forward);
-	out.trans = v3(p_t.trans);
-	return out;
+	return { p_t.right, p_t.up, p_t.forward, p_t.trans };
 }
 
 class Numbers {
@@ -67,7 +58,7 @@ public:
 		return p_fallback;
 	}
 	DriveVec3 vec(const EbxStruct &p_object, std::string_view p_path, const DriveVec3 &p_fallback) {
-		const std::optional<std::array<float, 3>> v = vec3(p_object, p_path);
+		const std::optional<core::Vec3> v = vec3(p_object, p_path);
 		if (!v) {
 			return p_fallback;
 		}
@@ -154,8 +145,8 @@ public:
 			++components_;
 			level::LevelTransform local;
 			if (const std::optional<EbxValue> t = component.get("Transform")) {
-				if (const std::optional<std::array<std::array<float, 3>, 4>> rows = t->as_transform()) {
-					for (const std::array<float, 3> &row : *rows) {
+				if (const std::optional<std::array<core::Vec3, 4>> rows = t->as_transform()) {
+					for (const core::Vec3 &row : *rows) {
 						for (const float c : row) {
 							if (!std::isfinite(c) || std::fabs(c) > 1e30f) {
 								numbers_.fail("Transform");

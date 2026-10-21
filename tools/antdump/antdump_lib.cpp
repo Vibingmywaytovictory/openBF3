@@ -4,6 +4,7 @@
 
 #include "bf3/core/install_reader.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <algorithm>
 #include <atomic>
@@ -21,9 +22,7 @@ using Clock = std::chrono::steady_clock;
 
 constexpr double kQuatOffThreshold = 2e-3;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 void append_number(std::string &r_out, double p_value, int p_digits) {
 	char buf[64];

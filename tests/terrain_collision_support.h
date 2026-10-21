@@ -66,9 +66,9 @@ inline double dist(D3 a, D3 b) {
 
 inline void to_grid(const level::SoupTerrain &p_t, D3 p_w, double &r_u, double &r_v) {
 	const res::Transform &f = p_t.frame;
-	const D3 d{ p_w.x - f.origin[0], p_w.y - f.origin[1], p_w.z - f.origin[2] };
+	const D3 d{ p_w.x - f.trans[0], p_w.y - f.trans[1], p_w.z - f.trans[2] };
 	const auto local = [&](int p_axis) {
-		const res::Vec3 &a = f.axis[size_t(p_axis)];
+		const res::Vec3 &a = f.axis(size_t(p_axis));
 		const double n = double(a[0]) * a[0] + double(a[1]) * a[1] + double(a[2]) * a[2];
 		return (d.x * a[0] + d.y * a[1] + d.z * a[2]) / n;
 	};
@@ -209,8 +209,8 @@ inline FieldCheck exhaustive_check(const sim::StaticWorldShapes &p_world, size_t
 inline FieldCheck exhaustive_check_banded(const sim::StaticWorldShapes &p_world, size_t p_index, const level::SoupTerrain &p_record, uint32_t p_placement,
 		unsigned p_lanes, size_t p_band_rows = 64) {
 	const res::Transform &f = p_record.frame;
-	const bool aligned = f.axis[0][1] == 0 && f.axis[0][2] == 0 && f.axis[1][0] == 0 && f.axis[1][2] == 0 && f.axis[2][0] == 0 && f.axis[2][1] == 0 &&
-			f.axis[2][2] > 0;
+	const bool aligned = f.right[1] == 0 && f.right[2] == 0 && f.up[0] == 0 && f.up[2] == 0 && f.forward[0] == 0 &&
+			f.forward[1] == 0 && f.forward[2] > 0;
 	const res::HeightGrid &g = *p_record.grid;
 	if (!aligned || g.width < 2 || g.height < 2 || p_band_rows == 0) {
 		return exhaustive_check(p_world, p_index, p_record, p_placement);
@@ -220,7 +220,10 @@ inline FieldCheck exhaustive_check_banded(const sim::StaticWorldShapes &p_world,
 	const size_t bands = (ch + p_band_rows - 1) / p_band_rows;
 	std::vector<uint8_t> seen(cw * ch, 0);
 	std::vector<FieldCheck> parts(bands);
-	const auto row_z = [&](double p_row) { return double(f.origin[2]) + double(f.axis[2][2]) * (double(g.origin_xz[1]) + p_row * double(g.sample_spacing[1])); };
+	const auto row_z = [&](double p_row) {
+		return double(f.trans[2]) +
+				double(f.forward[2]) * (double(g.origin_xz[1]) + p_row * double(g.sample_spacing[1]));
+	};
 	const auto owner = [&](const std::array<D3, 3> &p_v) {
 		const D3 c{ (p_v[0].x + p_v[1].x + p_v[2].x) / 3.0, (p_v[0].y + p_v[1].y + p_v[2].y) / 3.0, (p_v[0].z + p_v[1].z + p_v[2].z) / 3.0 };
 		double u = 0, v = 0;

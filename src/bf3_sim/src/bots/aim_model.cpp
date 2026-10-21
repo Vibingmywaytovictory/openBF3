@@ -1,5 +1,7 @@
 #include "bf3/sim/bots/aim_model.h"
 
+#include "bf3/core/util/finite.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -15,10 +17,7 @@ float finite_or(float p_value, float p_fallback) {
 	return std::isfinite(p_value) ? p_value : p_fallback;
 }
 
-bool finite3(const Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
-
+using bf3::core::finite;
 }
 
 float aim_error(const AimParams &p_params, float p_skill, float p_seconds_on_target, bool p_moving, float p_crossing_speed_mps) {
@@ -37,10 +36,10 @@ float aim_error(const AimParams &p_params, float p_skill, float p_seconds_on_tar
 }
 
 Vec3 lead_point(const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity, float p_muzzle_speed, float p_gravity) {
-	if (!finite3(p_origin) || !finite3(p_target) || !(p_muzzle_speed > 0.0f) || !std::isfinite(p_muzzle_speed)) {
+	if (!finite(p_origin) || !finite(p_target) || !(p_muzzle_speed > 0.0f) || !std::isfinite(p_muzzle_speed)) {
 		return p_target;
 	}
-	const Vec3 v = finite3(p_target_velocity) ? p_target_velocity : Vec3{};
+	const Vec3 v = finite(p_target_velocity) ? p_target_velocity : Vec3{};
 	const float g = finite_or(p_gravity, 0.0f);
 	Vec3 aim = p_target;
 	float t = 0.0f;
@@ -50,7 +49,7 @@ Vec3 lead_point(const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target
 		aim = { p_target[0] + v[0] * t, p_target[1] + v[1] * t, p_target[2] + v[2] * t };
 	}
 	aim[1] += -0.5f * g * t * t;
-	return finite3(aim) ? aim : p_target;
+	return finite(aim) ? aim : p_target;
 }
 
 }

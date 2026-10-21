@@ -1,6 +1,7 @@
 #include "bf3/anim/viewmodel_anim.h"
 
 #include "bf3/anim/layers.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <charconv>
@@ -211,15 +212,7 @@ constexpr size_t kKeyCount = sizeof(kKeys) / sizeof(kKeys[0]);
 #undef BF3_VM_SPRING
 #undef BF3_VM_FIELD
 
-std::string_view trim(std::string_view p_text) {
-	while (!p_text.empty() && (p_text.front() == ' ' || p_text.front() == '\t' || p_text.front() == '\r')) {
-		p_text.remove_prefix(1);
-	}
-	while (!p_text.empty() && (p_text.back() == ' ' || p_text.back() == '\t' || p_text.back() == '\r')) {
-		p_text.remove_suffix(1);
-	}
-	return p_text;
-}
+using bf3::core::trim;
 
 std::string shown(std::string_view p_text) {
 

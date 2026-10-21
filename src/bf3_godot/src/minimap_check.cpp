@@ -9,6 +9,7 @@
 #include "world_icons.h"
 
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/format.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -59,14 +60,7 @@ enum Phase : int {
 	kFinish,
 };
 
-std::string fmt(const char *p_format, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 bool read_rgb(const Ref<Image> &p_image, int p_x, int p_y, std::array<uint8_t, 3> &r_rgb) {
 	if (p_image.is_null() || p_x < 0 || p_y < 0 || p_x >= p_image->get_width() || p_y >= p_image->get_height()) {

@@ -9,6 +9,9 @@
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/install.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/splitmix64.h"
+#include "bf3/core/util/text.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/posed_target.h"
@@ -32,20 +35,9 @@ namespace gp = core::gameplay;
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
-
-double ms_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_start).count();
-}
-
-uint64_t mix64(uint64_t p_value) {
-	uint64_t z = p_value + 0x9E3779B97F4A7C15ull;
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::ms_since;
+using bf3::core::seconds_since;
+using bf3::core::splitmix64;
 
 bool alive(const sim::SoldierState &p_state) {
 	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead && p_state.life != 0;
@@ -72,7 +64,7 @@ uint64_t gunplay_level_hash(std::string_view p_level, std::string_view p_mode) {
 }
 
 uint64_t derive_match_seed(uint64_t p_server_seed, uint64_t p_level_hash) {
-	return mix64(p_server_seed ^ p_level_hash);
+	return splitmix64(p_server_seed ^ p_level_hash);
 }
 
 core::Result<gp::CapsulePoseTable> standin_capsule_table(const gp::SoldierDef &p_soldier, std::span<const gp::HitCapsule> p_capsules,
@@ -241,8 +233,7 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 			}
 			for (const uint8_t s : kKitSlots) {
 				if (const gp::KitUnlock *u = kit->default_unlock(gp::WeaponSlot(s))) {
-					std::string v = u->unlock;
-					std::transform(v.begin(), v.end(), v.begin(), [](char c) { return char(std::tolower(static_cast<unsigned char>(c))); });
+					std::string v = core::to_lower_ascii(u->unlock);
 					variants.insert(v);
 				}
 			}

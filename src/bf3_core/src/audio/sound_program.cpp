@@ -353,7 +353,7 @@ struct Compiler {
 		out.angle = read_float(p_s, "Angle");
 		out.outside_gain_db = read_float(p_s, "OutsideGain");
 		if (std::optional<EbxValue> d = p_s.get("Direction")) {
-			if (std::optional<std::array<float, 3>> v = d->as_vec3()) {
+			if (std::optional<core::Vec3> v = d->as_vec3()) {
 				out.direction[0] = std::isfinite((*v)[0]) ? (*v)[0] : 0.0f;
 				out.direction[1] = std::isfinite((*v)[1]) ? (*v)[1] : 0.0f;
 				out.direction[2] = std::isfinite((*v)[2]) ? (*v)[2] : 1.0f;

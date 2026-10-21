@@ -1,5 +1,7 @@
 #include "bf3/host/lag_comp.h"
 
+#include "bf3/core/util/finite.h"
+#include "bf3/core/util/percentile.h"
 #include "bf3/sim/weapons/posed_target.h"
 
 #include <algorithm>
@@ -21,19 +23,8 @@ bool bit(uint64_t p_mask, uint32_t p_i) {
 	return p_i < 64 && ((p_mask >> p_i) & 1u) != 0;
 }
 
-bool finite3(const sim::Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
-
-double p99_of(std::vector<double> p_v) {
-	if (p_v.empty()) {
-		return 0;
-	}
-	const size_t k = std::min(p_v.size() - 1, size_t(std::ceil(0.99 * double(p_v.size()))) - 1);
-	std::nth_element(p_v.begin(), p_v.begin() + ptrdiff_t(k), p_v.end());
-	return p_v[k];
-}
-
+using bf3::core::finite;
+using bf3::core::nearest_rank;
 }
 
 struct LagHistory::Impl {
@@ -123,7 +114,7 @@ void LagHistory::record_tick(uint32_t p_snapshot_tick, std::span<const net::Othe
 	t.tick = p_snapshot_tick;
 	t.live = 0;
 	for (const net::OtherSoldier &o : p_records) {
-		if (o.slot >= m.slots || !finite3(o.position) || !finite3(o.velocity)) {
+		if (o.slot >= m.slots || !finite(o.position) || !finite(o.velocity)) {
 			continue;
 		}
 		t.records[o.slot] = o;
@@ -491,7 +482,7 @@ void RewindProvider::begin_tick(uint32_t p_tick, std::span<const sim::SoldierSta
 			continue;
 		}
 		const sim::SoldierState &st = p_present[s];
-		if (st.life == 0 || st.mode == sim::MoveMode::Dead || !finite3(st.position)) {
+		if (st.life == 0 || st.mode == sim::MoveMode::Dead || !finite(st.position)) {
 			continue;
 		}
 		p.alive = true;
@@ -595,7 +586,8 @@ std::span<const sim::weapons::HitTarget> RewindProvider::targets_for(const sim::
 	m.scratch.clear();
 
 	float slo[3] = { 0, 0, 0 }, shi[3] = { 0, 0, 0 };
-	const bool cull = p_query.has_segment && finite3(p_query.from) && finite3(p_query.to) && std::isfinite(p_query.radius);
+	const bool cull =
+			p_query.has_segment && finite(p_query.from) && finite(p_query.to) && std::isfinite(p_query.radius);
 	if (cull) {
 		const float r = std::max(0.0f, p_query.radius);
 		for (size_t k = 0; k < 3; ++k) {
@@ -726,7 +718,7 @@ std::span<const sim::weapons::HitTarget> RewindProvider::targets_for(const sim::
 const LagCompStats &RewindProvider::stats() const {
 	Impl &m = *impl_;
 	if (m.p99_dirty) {
-		m.stats.tick_ms_p99 = p99_of(m.tick_ms);
+		m.stats.tick_ms_p99 = nearest_rank(m.tick_ms, 0.99);
 		m.stats.tick_ms_mean = m.stats.ticks > 0 && !m.tick_ms.empty() ? m.sum_ms / double(std::max<uint64_t>(1, m.stats.ticks)) : 0.0;
 		m.p99_dirty = false;
 	}

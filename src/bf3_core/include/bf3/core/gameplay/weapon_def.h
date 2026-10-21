@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ids.h"
+#include "bf3/core/math.h"
 
 #include <array>
 #include <cstdint>
@@ -36,7 +37,7 @@ enum class StanceTransition : uint8_t { ProneToCrouch = 0, ProneToStand, CrouchT
 
 enum class ProjectileKind : uint8_t { None, Bullet, Missile, Grenade, Other };
 
-using Vec3 = std::array<float, 3>;
+using Vec3 = core::Vec3;
 
 struct Dispersion {
 	float min_angle = 0;

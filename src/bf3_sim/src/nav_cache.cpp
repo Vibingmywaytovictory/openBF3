@@ -10,6 +10,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/source_digest.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <algorithm>
 #include <chrono>
@@ -22,9 +23,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 constexpr const char *kTileMagic = "OBF3NTIL";
 constexpr const char *kWorldMagic = "OBF3NWLD";

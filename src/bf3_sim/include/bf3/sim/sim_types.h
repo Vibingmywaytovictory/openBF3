@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bf3/core/math.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +16,7 @@ constexpr uint32_t seconds_to_ticks(float p_seconds) {
 	return p_seconds <= 0.0f ? 0u : uint32_t(p_seconds * float(kSimHz) + 0.5f);
 }
 
-using Vec3 = std::array<float, 3>;
+using Vec3 = core::Vec3;
 
 enum class Pose : uint8_t { Stand = 0, Crouch = 1, Prone = 2 };
 inline constexpr size_t kPoseCount = 3;

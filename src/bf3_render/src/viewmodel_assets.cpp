@@ -6,6 +6,7 @@
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/render/mesh_cache.h"
 
 #include <chrono>
@@ -18,9 +19,7 @@ using Clock = std::chrono::steady_clock;
 
 namespace {
 
-double since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 const char *texture_format_name(core::res::TextureFormat p_format) {
 	using core::res::TextureFormat;
@@ -161,7 +160,7 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 		return tracks.error();
 	}
 	a->tracks = std::move(*tracks);
-	a->seconds_ant = since(t0);
+	a->seconds_ant = seconds_since(t0);
 
 	progress("mounting the level superbundle", 3);
 	t0 = Clock::now();
@@ -216,7 +215,7 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 			a->notes.push_back("weapon " + p_spec.weapon_unlock + " did not resolve: " + w.error().message);
 		}
 	}
-	a->seconds_ebx = since(t0);
+	a->seconds_ebx = seconds_since(t0);
 
 	progress("decoding meshes", 5);
 	t0 = Clock::now();
@@ -248,7 +247,7 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 		}
 		part->prepared = std::move(mesh->mesh.meshes[0]);
 		part->cache = mesh->item;
-		part->seconds_mesh = since(tm);
+		part->seconds_mesh = seconds_since(tm);
 		char line[320];
 		std::snprintf(line, sizeof(line), "mesh %s: %s (%.1f KiB blob%s%s%s) in %.2f ms", part->mesh.c_str(),
 				p_cache != nullptr && p_cache->is_open() ? core::cache_outcome_name(part->cache.outcome) : "no cache", double(part->cache.payload_bytes) / 1024.0,
@@ -256,7 +255,7 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 				part->seconds_mesh * 1000.0);
 		a->notes.push_back(line);
 	}
-	a->seconds_meshes = since(t0);
+	a->seconds_meshes = seconds_since(t0);
 
 	progress("decoding textures", 6);
 	t0 = Clock::now();
@@ -303,8 +302,8 @@ core::Result<std::unique_ptr<ViewmodelAssets>> load_viewmodel(const core::Instal
 		a->notes.push_back(line);
 		a->textures.push_back(std::move(textures[i]));
 	}
-	a->seconds_textures = since(t0);
-	a->seconds_total = since(start);
+	a->seconds_textures = seconds_since(t0);
+	a->seconds_total = seconds_since(start);
 	progress("uploading", 7);
 	return a;
 }

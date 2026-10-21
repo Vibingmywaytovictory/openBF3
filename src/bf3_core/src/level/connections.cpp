@@ -1,5 +1,7 @@
 #include "bf3/core/level/connections.h"
 
+#include "bf3/core/util/text.h"
+
 #include <array>
 #include <charconv>
 #include <string>
@@ -13,21 +15,6 @@ constexpr uint32_t kResolveDepth = 32;
 constexpr uint32_t kResolveCap = 1u << 16;
 
 constexpr size_t kMaxBundleName = 1024;
-
-std::string_view trim(std::string_view p_text) {
-	const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; };
-	while (!p_text.empty() && space(p_text.front())) {
-		p_text.remove_prefix(1);
-	}
-	while (!p_text.empty() && space(p_text.back())) {
-		p_text.remove_suffix(1);
-	}
-	return p_text;
-}
-
-bool iequals(std::string_view p_a, std::string_view p_b) {
-	return iequals_ascii(p_a, p_b);
-}
 
 std::string_view strip_plus(std::string_view p_text) {
 	if (p_text.size() > 1 && p_text[0] == '+' && p_text[1] != '-' && p_text[1] != '+') {
@@ -171,9 +158,9 @@ std::optional<Property> Property::parse(std::string_view p_constant) {
 	Property parsed;
 	bool ok = false;
 	if (kind == "Boolean") {
-		if (iequals(rest, "true") || iequals(rest, "false")) {
+		if (iequals_ascii(rest, "true") || iequals_ascii(rest, "false")) {
 			parsed.kind = Kind::Bool;
-			parsed.b = iequals(rest, "true");
+			parsed.b = iequals_ascii(rest, "true");
 			ok = true;
 		}
 	} else if (kind == "Int8" || kind == "Int16" || kind == "Int32" || kind == "Int64" || kind == "Uint8" || kind == "Uint16" || kind == "Uint32" ||
@@ -201,7 +188,7 @@ std::optional<Property> Property::parse(std::string_view p_constant) {
 		if (team.substr(0, 4) == "Team") {
 			team.remove_prefix(4);
 		}
-		if (iequals(team, "Neutral")) {
+		if (iequals_ascii(team, "Neutral")) {
 			parsed.kind = Kind::Team;
 			parsed.team = 0;
 			ok = true;

@@ -1,5 +1,7 @@
 #include "bf3/sim/bots/walker_brain.h"
 
+#include "bf3/core/util/elapsed.h"
+
 #include <algorithm>
 #include <chrono>
 #include <deque>
@@ -12,10 +14,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double ms_since(Clock::time_point p_start) {
-	return std::chrono::duration<double, std::milli>(Clock::now() - p_start).count();
-}
-
+using bf3::core::ms_since;
 }
 
 void WalkerStats::add(const WalkerStats &p_other) {

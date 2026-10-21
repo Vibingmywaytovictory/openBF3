@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -19,14 +20,9 @@ inline constexpr size_t kMaxDriveGears = 16;
 inline constexpr size_t kMaxDriveRigidBodies = 16;
 inline constexpr size_t kMaxDriveEngines = 4;
 
-using DriveVec3 = std::array<float, 3>;
+using DriveVec3 = core::Vec3;
 
-struct DriveTransform {
-	DriveVec3 right{ 1, 0, 0 };
-	DriveVec3 up{ 0, 1, 0 };
-	DriveVec3 forward{ 0, 0, 1 };
-	DriveVec3 trans{ 0, 0, 0 };
-};
+using DriveTransform = core::Transform;
 
 struct SteeringSensitivityPoint {
 	float velocity = 0;

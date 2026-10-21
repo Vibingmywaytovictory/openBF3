@@ -40,6 +40,20 @@ add_library(bf3_core STATIC
     include/bf3/core/superbundle_mount.h
     include/bf3/core/thread_pool.h
 )
+target_sources(bf3_core PRIVATE
+    src/math.cpp
+    src/util/format.cpp
+    src/util/key_values.cpp
+    src/util/text.cpp
+    include/bf3/core/math.h
+    include/bf3/core/util/elapsed.h
+    include/bf3/core/util/finite.h
+    include/bf3/core/util/format.h
+    include/bf3/core/util/key_values.h
+    include/bf3/core/util/percentile.h
+    include/bf3/core/util/splitmix64.h
+    include/bf3/core/util/text.h
+)
 target_include_directories(bf3_core PUBLIC include)
 target_link_libraries(bf3_core PRIVATE libdeflate::libdeflate_static)
 openbf3_module(bf3_core)

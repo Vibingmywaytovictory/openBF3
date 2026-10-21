@@ -1,6 +1,7 @@
 #include "bf3/core/sb_formats.h"
 
 #include "bf3/core/db_object.h"
+#include "bf3/core/util/text.h"
 #include "db_record.h"
 #include "format_errors.h"
 
@@ -236,16 +237,6 @@ namespace {
 
 bool is_space(char p_c) {
 	return p_c == ' ' || p_c == '\t' || p_c == '\r' || p_c == '\n' || p_c == '\v' || p_c == '\f';
-}
-
-std::string_view trim(std::string_view p_s) {
-	while (!p_s.empty() && is_space(p_s.front())) {
-		p_s.remove_prefix(1);
-	}
-	while (!p_s.empty() && is_space(p_s.back())) {
-		p_s.remove_suffix(1);
-	}
-	return p_s;
 }
 
 std::optional<int64_t> parse_i64(std::optional<std::string_view> p_value) {

@@ -24,10 +24,10 @@ LevelTransform LevelTransform::from_rows(const Rows &p_rows) {
 
 LevelTransform LevelTransform::from_res(const res::Transform &p_transform) {
 	LevelTransform t;
-	t.right = p_transform.axis[0];
-	t.up = p_transform.axis[1];
-	t.forward = p_transform.axis[2];
-	t.trans = p_transform.origin;
+	t.right = p_transform.right;
+	t.up = p_transform.up;
+	t.forward = p_transform.forward;
+	t.trans = p_transform.trans;
 	t.scale = 1.0f;
 	return t;
 }

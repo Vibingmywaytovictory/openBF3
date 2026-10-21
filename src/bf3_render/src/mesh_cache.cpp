@@ -404,11 +404,13 @@ bool same_prepared(const PreparedMesh &p_a, const PreparedMesh &p_b) {
 	}
 	for (size_t i = 0; i < p_a.surfaces.size(); ++i) {
 		const PreparedSurface &a = p_a.surfaces[i], &b = p_b.surfaces[i];
-		if (a.subset != b.subset || a.material_index != b.material_index || a.material_name != b.material_name || a.category != b.category ||
-				std::memcmp(a.aabb_min.data(), b.aabb_min.data(), 12) != 0 || std::memcmp(a.aabb_max.data(), b.aabb_max.data(), 12) != 0 ||
-				!same_bytes(a.positions, b.positions) || !same_bytes(a.normals, b.normals) || !same_bytes(a.tangents, b.tangents) ||
-				!same_bytes(a.uv0, b.uv0) || !same_bytes(a.uv1, b.uv1) || !same_bytes(a.colors, b.colors) || !same_bytes(a.bones, b.bones) ||
-				!same_bytes(a.weights, b.weights) || !same_bytes(a.parts, b.parts) || !same_bytes(a.indices, b.indices)) {
+		if (a.subset != b.subset || a.material_index != b.material_index || a.material_name != b.material_name ||
+				a.category != b.category || std::memcmp(&a.aabb_min, &b.aabb_min, 12) != 0 ||
+				std::memcmp(&a.aabb_max, &b.aabb_max, 12) != 0 || !same_bytes(a.positions, b.positions) ||
+				!same_bytes(a.normals, b.normals) || !same_bytes(a.tangents, b.tangents) || !same_bytes(a.uv0, b.uv0) ||
+				!same_bytes(a.uv1, b.uv1) || !same_bytes(a.colors, b.colors) || !same_bytes(a.bones, b.bones) ||
+				!same_bytes(a.weights, b.weights) || !same_bytes(a.parts, b.parts) ||
+				!same_bytes(a.indices, b.indices)) {
 			return false;
 		}
 	}

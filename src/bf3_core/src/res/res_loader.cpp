@@ -1,6 +1,7 @@
 #include "bf3/core/res/res_loader.h"
 
 #include "bf3/core/res_types.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <map>
@@ -13,16 +14,6 @@ namespace {
 bool decodable(uint32_t p_type) {
 	return p_type == kResTypeMeshSet || p_type == kResTypeDxTexture || p_type == kResTypeHavokPhysicsData ||
 			p_type == kResTypeHavokDestructionPhysicsData;
-}
-
-std::string ascii_lower(std::string_view p_text) {
-	std::string out(p_text);
-	for (char &c : out) {
-		if (c >= 'A' && c <= 'Z') {
-			c = char(c - 'A' + 'a');
-		}
-	}
-	return out;
 }
 
 Error res_error(const std::string &p_name, const ResError &p_error) {
@@ -47,7 +38,7 @@ std::vector<std::string> decodable_res_names(const LevelMount &p_mount) {
 	for (std::string &name : p_mount.res_names()) {
 		const std::optional<ResInfo> info = p_mount.res_info(name);
 		if (info && decodable(info->res_type)) {
-			names.try_emplace(ascii_lower(name), std::move(name));
+			names.try_emplace(to_lower_ascii(name), std::move(name));
 		}
 	}
 	std::vector<std::string> out;

@@ -22,7 +22,7 @@ constexpr size_t kMaxComponents = 4096;
 constexpr size_t kMaxResName = 1024;
 constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
 
-using Vec3f = std::array<float, 3>;
+using Vec3f = core::Vec3;
 using Mat3 = std::array<Vec3f, 3>;
 
 float dot(const Vec3f &p_a, const Vec3f &p_b) {
@@ -278,7 +278,7 @@ BakeSplit bake_split(const LevelTransform &p_transform) {
 	return out;
 }
 
-std::array<int32_t, 9> bake_key(const std::array<std::array<float, 3>, 3> &p_linear) {
+std::array<int32_t, 9> bake_key(const std::array<core::Vec3, 3> &p_linear) {
 	std::array<int32_t, 9> key{};
 	for (size_t i = 0; i < 9; ++i) {
 		const float v = std::round(p_linear[i / 3][i % 3] * 4096.0f);
@@ -590,8 +590,8 @@ Result<std::vector<CollisionPlacement>> collision_placements(const EbxResolver &
 		c.present = mount.res_info(c.res).has_value();
 		c.subparts = group.subparts;
 		const LevelTransform &t = group.transform;
-		c.frame.axis = { scaled(t.right, t.scale), scaled(t.up, t.scale), scaled(t.forward, t.scale) };
-		c.frame.origin = t.trans;
+		c.frame = res::Transform::from_axes(
+				{ scaled(t.right, t.scale), scaled(t.up, t.scale), scaled(t.forward, t.scale) }, t.trans);
 		out.push_back(std::move(c));
 	}
 	for (size_t at = 0; at < p_world.objects.size(); ++at) {
@@ -657,8 +657,10 @@ Result<std::vector<CollisionPlacement>> collision_placements(const EbxResolver &
 			c.present = mount.res_info(c.res).has_value();
 			c.asset_scale = chosen->second;
 			const float factor = object.transform.scale / chosen->second;
-			c.frame.axis = { scaled(object.transform.right, factor), scaled(object.transform.up, factor), scaled(object.transform.forward, factor) };
-			c.frame.origin = object.transform.trans;
+			c.frame = res::Transform::from_axes(
+					{ scaled(object.transform.right, factor), scaled(object.transform.up, factor),
+							scaled(object.transform.forward, factor) },
+					object.transform.trans);
 		}
 		out.push_back(std::move(c));
 	}

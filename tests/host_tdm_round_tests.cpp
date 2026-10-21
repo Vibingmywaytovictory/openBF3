@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/percentile.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_brain.h"
@@ -401,6 +402,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		}
 		host::TdmBotConfig big;
 		CHECK_FALSE(host::parse_bot_tuning(std::string(host::kMaxBotTuningBytes + 1, '#'), big).ok());
+		CHECK_FALSE(host::parse_bot_tuning(std::string(host::kMaxBotTuningLines, '\n'), big).ok());
+		CHECK(host::parse_bot_tuning(std::string(host::kMaxBotTuningLines - 1, '\n'), big).ok());
 		CHECK_FALSE(host::load_bot_tuning("no/such/bot_tuning.cfg", big).ok());
 	}
 
@@ -623,15 +626,7 @@ namespace {
 	}
 }
 
-[[maybe_unused]] double percentile(std::vector<double> p_values, double p_q) {
-	if (p_values.empty()) {
-		return 0.0;
-	}
-	std::sort(p_values.begin(), p_values.end());
-	const size_t i = std::min(p_values.size() - 1, size_t(std::ceil(p_q * double(p_values.size())) - 1.0));
-	return p_values[i];
-}
-
+using bf3::core::nearest_rank;
 }
 
 TEST_SUITE("host-tdm-round") {
@@ -923,9 +918,9 @@ TEST_SUITE("host-tdm-perf") {
 			const auto window = [](const std::vector<double> &p_v) {
 				return p_v.size() > 600 ? std::vector<double>(p_v.begin() + 600, p_v.end()) : p_v;
 			};
-			const double perception = percentile(window(r->perception_ms), 0.99);
-			const double brains = percentile(window(r->brains_ms), 0.99);
-			const double tick = percentile(window(r->tick_ms), 0.99);
+			const double perception = nearest_rank(window(r->perception_ms), 0.99);
+			const double brains = nearest_rank(window(r->brains_ms), 0.99);
+			const double tick = nearest_rank(window(r->tick_ms), 0.99);
 			std::printf("host.tdm.perf: 64 bots, %u ticks: p99 perception %.3f ms, brains %.3f ms, server tick %.3f ms; kills %d / %d\n", r->ticks, perception,
 					brains, tick, r->kills[1], r->kills[2]);
 #if !defined(OPENBF3_TIMING_REPORT_ONLY)

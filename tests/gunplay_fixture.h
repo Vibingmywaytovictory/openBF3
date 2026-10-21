@@ -7,6 +7,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
@@ -37,9 +38,7 @@
 
 namespace bf3::test::gunplay {
 
-inline double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 inline std::string read_text(const std::filesystem::path &p_path) {
 	std::ifstream in(p_path, std::ios::binary);

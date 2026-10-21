@@ -3,6 +3,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/spawn_points.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <algorithm>
 #include <chrono>
@@ -37,10 +38,6 @@ bool inside_any(std::span<const CombatAreaDef> p_areas, const Vec3 &p_point) {
 		}
 	}
 	return false;
-}
-
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 }
 
 Result<std::optional<Property>> fed(const World &p_world, const PlacedObject &p_object, std::string_view p_field) {
@@ -176,7 +173,7 @@ Result<ModeAreas> read_mode_areas(const World &p_world) {
 			BF3_TRY(budget.charge(list->size()));
 			for (const EbxValue &p : *list) {
 				const std::optional<EbxStruct> s = p.as_struct();
-				const std::optional<std::array<float, 3>> v = s ? s->vec3() : std::nullopt;
+				const std::optional<core::Vec3> v = s ? s->vec3() : std::nullopt;
 				if (!v || !std::isfinite((*v)[0]) || !std::isfinite((*v)[1]) || !std::isfinite((*v)[2])) {
 					return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has a bad point");
 				}
@@ -257,7 +254,7 @@ Result<std::vector<WaterPlane>> read_water_planes(const World &p_world) {
 			plane.y = -std::numeric_limits<float>::infinity();
 			for (const EbxValue &p : *list) {
 				const std::optional<EbxStruct> s = p.as_struct();
-				const std::optional<std::array<float, 3>> v = s ? s->vec3() : std::nullopt;
+				const std::optional<core::Vec3> v = s ? s->vec3() : std::nullopt;
 				if (!v || !std::isfinite((*v)[0]) || !std::isfinite((*v)[1]) || !std::isfinite((*v)[2])) {
 					return make_error("water: a lake has a bad point");
 				}

@@ -92,8 +92,10 @@ inline std::unique_ptr<CollisionWorld> world_of(std::shared_ptr<const StaticWorl
 }
 
 inline bool bits_equal(const StaticHit &p_a, const StaticHit &p_b) {
-	return std::memcmp(p_a.position.data(), p_b.position.data(), sizeof(Vec3)) == 0 && std::memcmp(p_a.normal.data(), p_b.normal.data(), sizeof(Vec3)) == 0 &&
-			std::memcmp(&p_a.fraction, &p_b.fraction, sizeof(float)) == 0 && p_a.layer == p_b.layer && p_a.tile == p_b.tile && p_a.tag == p_b.tag;
+	return std::memcmp(&p_a.position, &p_b.position, sizeof(Vec3)) == 0 &&
+			std::memcmp(&p_a.normal, &p_b.normal, sizeof(Vec3)) == 0 &&
+			std::memcmp(&p_a.fraction, &p_b.fraction, sizeof(float)) == 0 && p_a.layer == p_b.layer &&
+			p_a.tile == p_b.tile && p_a.tag == p_b.tag;
 }
 
 }

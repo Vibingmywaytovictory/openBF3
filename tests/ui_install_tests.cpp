@@ -9,6 +9,8 @@
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_sources.h"
 #include "bf3/core/ui/minimap.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/format.h"
 #include "ui2_test_support.h"
 
 #include <algorithm>
@@ -26,15 +28,8 @@ namespace t2 = bf3::test::ui2;
 
 namespace {
 
-std::string fmt(const char *p_format, double p_a, double p_b = 0.0, double p_c = 0.0, double p_d = 0.0) {
-	char buf[256];
-	std::snprintf(buf, sizeof(buf), p_format, p_a, p_b, p_c, p_d);
-	return buf;
-}
-
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::fmt;
+using bf3::core::seconds_since;
 
 struct LevelMinimap {
 	MinimapData data;

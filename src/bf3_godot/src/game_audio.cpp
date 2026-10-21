@@ -67,11 +67,6 @@ private:
 	std::atomic<ba::MixTap *> target_{ nullptr };
 	std::atomic<ba::MixTap *> pt1_capture_{ nullptr };
 };
-
-ba::Vec3 vec(const fx::Vec3 &p_v) {
-	return { p_v.x, p_v.y, p_v.z };
-}
-
 }
 
 template <class Impl>
@@ -249,10 +244,10 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 	in.events = p_frame.events;
 	in.others = p_frame.others;
 	in.other_weapons = p_frame.other_weapons;
-	in.listener.position = vec(p_frame.camera.trans);
-	in.listener.forward = vec(p_frame.camera.forward);
-	in.listener.up = vec(p_frame.camera.up);
-	in.listener.velocity = vec(p_frame.camera_velocity);
+	in.listener.position = p_frame.camera.trans;
+	in.listener.forward = p_frame.camera.forward;
+	in.listener.up = p_frame.camera.up;
+	in.listener.velocity = p_frame.camera_velocity;
 	in.own_slot = p_frame.own_slot;
 	in.own_first_person = p_frame.own_alive && !p_frame.free_camera;
 	m.listener = in.listener;
@@ -262,8 +257,8 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 		for (const fx::MuzzleSample &s : p_frame.muzzles) {
 			if (s.valid && !s.first_person && s.slot == p_frame.others[i].slot) {
 				m.muzzles[i].valid = true;
-				m.muzzles[i].position = vec(s.transform.trans);
-				m.muzzles[i].forward = vec(s.transform.up);
+				m.muzzles[i].position = s.transform.trans;
+				m.muzzles[i].forward = s.transform.up;
 				break;
 			}
 		}
@@ -273,8 +268,8 @@ void Bf3GameAudio::step(const M2aFrame &p_frame, std::span<const fx::ImpactSound
 	for (const fx::ImpactSoundCue &c : p_impact_cues) {
 		ba::ImpactSoundRequest r;
 		r.patch = c.patch;
-		r.position = vec(c.position);
-		r.normal = vec(c.normal);
+		r.position = c.position;
+		r.normal = c.normal;
 		r.seed = c.seed;
 		r.time = c.time;
 		r.timeline = c.timeline;
@@ -319,7 +314,8 @@ bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position
 		m.auditions.emplace(std::string(p_patch), ba::GameAuditionAsset{ program, m.bank, "level (lazy)" });
 	}
 	const uint64_t seed = ba::sound_seed(0xA0D1u, uint32_t(m.auditions_started));
-	if (!ba::start_audition(*m.pool, *m.mixer, program, bank, m.tuning, m.listener, vec(p_position), seed, m.clock->earliest_frame(), m.check)) {
+	if (!ba::start_audition(*m.pool, *m.mixer, program, bank, m.tuning, m.listener, p_position, seed,
+				m.clock->earliest_frame(), m.check)) {
 		return fail("Bf3GameAudio::audition: the one-shot pool refused");
 	}
 	++m.auditions_started;

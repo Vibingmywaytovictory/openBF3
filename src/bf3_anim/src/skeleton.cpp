@@ -63,7 +63,7 @@ bool read_transforms(const core::EbxInstance &p_instance, const char *p_field, s
 		return false;
 	}
 	for (core::EbxValue e : *v->as_array()) {
-		const std::optional<std::array<std::array<float, 3>, 4>> rows = e.as_transform();
+		const std::optional<std::array<core::Vec3, 4>> rows = e.as_transform();
 		if (!rows) {
 			return false;
 		}

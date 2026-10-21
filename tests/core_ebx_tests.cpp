@@ -262,7 +262,7 @@ TEST_SUITE("containers") {
 		CHECK(*t0.get("Value")->as_f32() == 0.1f);
 		CHECK(t0.get("Kind")->enum_name() == std::optional<std::string_view>("Green"));
 		CHECK(*t0.get("Flag")->as_bool());
-		CHECK(t0.get("Pos")->as_vec3() == std::optional<std::array<float, 3>>({ 1.0f, 2.0f, 3.0f }));
+		CHECK(t0.get("Pos")->as_vec3() == std::optional<bf3::core::Vec3>({ 1.0f, 2.0f, 3.0f }));
 		CHECK(f32_at(t0, "Pos.y") == 2.0f);
 		const EbxArray items = *t0.get("Items")->as_array();
 		REQUIRE(items.size() == 3);

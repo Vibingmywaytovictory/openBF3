@@ -1,5 +1,7 @@
 #include "bf3/host/kits.h"
 
+#include "bf3/core/util/text.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -8,16 +10,10 @@ namespace bf3::host {
 
 namespace {
 
-std::string lower(std::string_view p_text) {
-	std::string out(p_text);
-	for (char &c : out) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return out;
-}
+using bf3::core::to_lower_ascii;
 
 bool role_of(std::string_view p_asset, KitRole &r_role) {
-	const std::string a = lower(p_asset);
+	const std::string a = to_lower_ascii(p_asset);
 	const size_t slash = a.rfind('/');
 	const std::string name = slash == std::string::npos ? a : a.substr(slash + 1);
 	static const std::pair<const char *, KitRole> kRoles[] = { { "assault", KitRole::Assault }, { "engineer", KitRole::Engineer },
@@ -78,9 +74,9 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 	using core::gameplay::WeaponSlot;
 	size_t gadget = p_defs.size();
 	if (!p_options.assault_gadget.empty()) {
-		const std::string want = lower(p_options.assault_gadget);
+		const std::string want = to_lower_ascii(p_options.assault_gadget);
 		for (size_t d = 0; d < p_defs.size(); ++d) {
-			if (lower(p_defs[d].variant) == want) {
+			if (to_lower_ascii(p_defs[d].variant) == want) {
 				gadget = d;
 				break;
 			}
@@ -112,10 +108,10 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 			if (filled[size_t(role)]) {
 				return core::make_error("kits: team " + std::to_string(team_id) + " lists two " + kit_role_name(role) + " kits");
 			}
-			const std::string want = lower(asset);
+			const std::string want = to_lower_ascii(asset);
 			const core::gameplay::KitDef *kit = nullptr;
 			for (const core::gameplay::KitDef &k : p_kits) {
-				if (lower(k.asset) == want) {
+				if (to_lower_ascii(k.asset) == want) {
 					kit = &k;
 					break;
 				}
@@ -141,10 +137,10 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 					return core::make_error("kits: " + asset + " slot " + std::to_string(s) + " has no default unlock" +
 							(kit->progression_known ? "" : " (the progression tables were not found)"));
 				}
-				const std::string unlock = lower(u->unlock);
+				const std::string unlock = to_lower_ascii(u->unlock);
 				size_t id = p_defs.size();
 				for (size_t d = 0; d < p_defs.size(); ++d) {
-					if (lower(p_defs[d].variant) == unlock) {
+					if (to_lower_ascii(p_defs[d].variant) == unlock) {
 						id = d;
 						break;
 					}
@@ -162,7 +158,7 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 			}
 			if (gadget != p_defs.size() && role == KitRole::Assault) {
 				l.defs[kKitGadgetSlot] = uint16_t(gadget);
-				l.unlocks[kKitGadgetSlot] = lower(p_options.assault_gadget);
+				l.unlocks[kKitGadgetSlot] = to_lower_ascii(p_options.assault_gadget);
 				const std::string skipped = std::string(kit_role_name(role)) + "/" + std::to_string(team_id) + "/" + std::to_string(kKitGadgetSlot) + ": ";
 				std::erase_if(table.skipped, [&](const std::string &p_entry) { return p_entry.rfind(skipped, 0) == 0; });
 			}

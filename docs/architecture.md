@@ -52,8 +52,11 @@ bf3_godot (shared library)     the GDExtension: sessions, bridges to RenderingSe
 ```
 
 Tools: `tools/bf3dump` (install inspector, cache preparer, many `*_commands.cpp`), `tools/antdump`,
-`tools/resdump`. Tests: `tests/` builds one doctest executable per area; `tests/CMakeLists.txt` registers the ctest
-rows and `tests/godot_*.cmake` run the Godot project headless or windowed ([testing.md](testing.md)).
+`tools/resdump`. Shared helpers live once in `bf3_core`: `bf3/core/math.h` (`Vec3`, which every module's `Vec3` is,
+and `Transform`, which `res::Transform`, `fx::Transform` and `DriveTransform` are; `LevelTransform` adds a scale) and
+`bf3/core/util/` (`fmt`, `seconds_since`, `finite`, ASCII text, `splitmix64`, percentiles, the key=value grammar).
+Tests: `tests/` builds one doctest executable per area; `tests/CMakeLists.txt` registers the ctest rows and
+`tests/godot_*.cmake` run the Godot project headless or windowed ([testing.md](testing.md)).
 
 ## Threads
 
@@ -101,8 +104,8 @@ is bit-stable per toolchain, not across them.
 
 Runtime options are Godot user args (`-- --bf3-install=...`, `--quit-after=`, `--screenshot=`, the check switches),
 read through `godot_util.h`'s `user_arg_value`. Tuning lives in `bf3-opensource/config/*.cfg` as key=value files
-with ranges checked at load (`motor_tuning.cpp`, `vehicle_tuning.cpp`, `mechanics_tuning.cpp`, `tdm_rules.cpp`,
-`tdm_brain.cpp`, `netsim.cpp` each carry a parser today).
+with ranges checked at load: motor, vehicle, mechanics, TDM rules, bot tuning and the netsim profile are `KeyDef`
+tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on every file), each with its own messages.
 
 `OPENBF3_BUILD_CHECKS` (ON in the `dev` preset, OFF in `release`) compiles the `*_check`, `*_demo`, `s0_selftest` and
 `fx_ref` sources into `bf3_godot` and registers their classes; without it a check switch is reported and ignored.
@@ -133,8 +136,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   `bf3_client_audio` call), `bf3_fx` (`fx_harness`) and `bf3_host` (`rest_check`).
 * Milestone names (M1, M2a, M2b, S0, PT1) survive in file names, class names and thousands of comment tags; the
   dev log is where that history belongs.
-* The same small helpers (`fmt`, `seconds_since`, `finite3`, `trim`, `lower`, a key=value parser, a bounds-checked
-  reader) are defined in many translation units instead of once in `bf3_core`.
+* A bounds-checked byte reader and the small vector operators (`add`, `dot`, `cross`, `rotate`) are still defined
+  per translation unit instead of once in `bf3_core`.
 * `bf3_core` is several libraries in one directory (containers, assets, gameplay tables, level, UI).
 * The build is Windows and MSVC only by policy; Win32 use is confined to about twenty files.
 * The HUD screens (`src/bf3_godot/src/hud_*.cpp`, `spawn_screen.cpp`, `round_end.cpp`, `kill_card.cpp`) are

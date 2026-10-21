@@ -1,6 +1,8 @@
 #include "bf3/sim/spawn.h"
 
 #include "bf3/core/level/spawn_points.h"
+#include "bf3/core/util/finite.h"
+#include "bf3/core/util/splitmix64.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
 
@@ -20,9 +22,7 @@ constexpr float kLiftStep = 0.1f;
 
 const float kLevelCos = std::cos(2.0f * kPi / 180.0f);
 
-bool finite3(const Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 float horizontal_distance(const Vec3 &p_a, const Vec3 &p_b) {
 	const float dx = p_a[0] - p_b[0];
@@ -81,7 +81,7 @@ SettleResult place_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_wo
 	const Vec3 &at = p_point.position;
 	r.placed = at;
 	r.state = p_motor.spawn_state(at, p_point.yaw, p_life, p_tick);
-	if (!finite3(at)) {
+	if (!finite(at)) {
 		r.failure = "the point is not finite";
 		return r;
 	}
@@ -239,11 +239,7 @@ size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const s
 		return SIZE_MAX;
 	}
 
-	uint64_t z = p_seed + 0x9E3779B97F4A7C15ull;
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	z ^= z >> 31;
-	size_t pick = size_t(z % uint64_t(count));
+	size_t pick = size_t(core::splitmix64(p_seed) % uint64_t(count));
 	for (size_t i = 0; i < p_points.size(); ++i) {
 		if (p_points[i].priority == best && eligible(p_points[i])) {
 			if (pick == 0) {
@@ -257,7 +253,7 @@ size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const s
 
 std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const CollisionWorld &p_world, const Vec3 &p_feet, float p_length,
 		float p_max_rise, uint32_t p_headings, uint16_t p_first_yaw) {
-	if (!finite3(p_feet) || !std::isfinite(p_length) || p_length <= 0.0f || p_length > 1000.0f || p_headings == 0) {
+	if (!finite(p_feet) || !std::isfinite(p_length) || p_length <= 0.0f || p_length > 1000.0f || p_headings == 0) {
 		return std::nullopt;
 	}
 	const MotorParams &params = p_motor.params();
@@ -334,7 +330,7 @@ std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionW
 	}
 	const Vec3 lo = shapes->min();
 	const Vec3 hi = shapes->max();
-	if (!finite3(lo) || !finite3(hi)) {
+	if (!finite(lo) || !finite(hi)) {
 		return std::nullopt;
 	}
 	const MotorParams &params = p_motor.params();
@@ -384,12 +380,7 @@ std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionW
 
 namespace {
 
-uint64_t spawn_mix(uint64_t p_x) {
-	uint64_t z = p_x + 0x9E3779B97F4A7C15ull;
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::splitmix64;
 
 float spawn_dist2(const Vec3 &p_a, const Vec3 &p_b) {
 	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
@@ -450,7 +441,7 @@ size_t choose_spawn_scored(const SpawnQuery &p_query) {
 		Candidate c;
 		c.index = i;
 		c.score = std::min(std::sqrt(nearest2), safe);
-		c.draw = spawn_mix(p_query.seed ^ (uint64_t(i) * 0x9E3779B97F4A7C15ull));
+		c.draw = splitmix64(p_query.seed ^ (uint64_t(i) * 0x9E3779B97F4A7C15ull));
 		candidates.push_back(c);
 	}
 	if (candidates.empty()) {

@@ -2,6 +2,7 @@
 
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/level/level_transform.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 #include "bf3/render/look_environment.h"
 #include "bf3/render/look_materials.h"
@@ -89,7 +90,7 @@ struct SceneMeshPlan {
 	uint32_t request = 0;
 	uint32_t census_mesh = 0;
 	std::vector<uint16_t> hidden_parts;
-	std::optional<std::array<std::array<float, 3>, 3>> bake;
+	std::optional<std::array<core::Vec3, 3>> bake;
 	std::vector<uint32_t> surface_materials;
 	bool world_kind = false;
 	uint32_t instances = 0;
@@ -102,15 +103,15 @@ struct SceneInstancePlan {
 
 struct SceneEnvironment {
 	bool from_data = false;
-	std::array<float, 3> sun_direction{ -0.35f, -0.8f, 0.45f };
-	std::array<float, 3> sun_color{ 1.0f, 0.96f, 0.9f };
+	core::Vec3 sun_direction{ -0.35f, -0.8f, 0.45f };
+	core::Vec3 sun_color{ 1.0f, 0.96f, 0.9f };
 	float sun_energy = 1.0f;
-	std::array<float, 3> sky_color{ 0.45f, 0.55f, 0.7f };
-	std::array<float, 3> ground_color{ 0.25f, 0.24f, 0.22f };
+	core::Vec3 sky_color{ 0.45f, 0.55f, 0.7f };
+	core::Vec3 ground_color{ 0.25f, 0.24f, 0.22f };
 	float ambient_energy = 0.6f;
 	float fog_start = 0.0f;
 	float fog_end = 0.0f;
-	std::array<float, 3> fog_color{ 0.6f, 0.65f, 0.7f };
+	core::Vec3 fog_color{ 0.6f, 0.65f, 0.7f };
 };
 
 struct LevelScenePlan {

@@ -10,6 +10,8 @@
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/res/terrain.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <cctype>
@@ -38,7 +40,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 using scene_internal::Mat3;
-using Vec3 = std::array<float, 3>;
+using Vec3 = core::Vec3;
 
 constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
 
@@ -55,21 +57,9 @@ constexpr float kTerrainMargin = 256.0f;
 constexpr float kSunEnergyPerColor = 0.25f;
 constexpr size_t kMaxTerrainChunks = 1u << 16;
 
-double since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
-
-bool iequals(std::string_view p_a, std::string_view p_b) {
-	return p_a.size() == p_b.size() && std::equal(p_a.begin(), p_a.end(), p_b.begin(), [](char a, char b) {
-		return std::tolower(uint8_t(a)) == std::tolower(uint8_t(b));
-	});
-}
-
-std::string lower(std::string_view p_text) {
-	std::string out(p_text);
-	std::transform(out.begin(), out.end(), out.begin(), [](char c) { return char(std::tolower(uint8_t(c))); });
-	return out;
-}
+using bf3::core::iequals_ascii;
+using bf3::core::seconds_since;
+using bf3::core::to_lower_ascii;
 
 bool contains_any(std::string_view p_text, std::span<const std::string_view> p_words) {
 	for (std::string_view w : p_words) {
@@ -337,14 +327,14 @@ std::string material_key(const MaterialSlot &p_slot) {
 	key += p_slot.variation_shader;
 	key += '\x01';
 	for (const auto &[name, texture] : p_slot.textures) {
-		key += lower(name);
+		key += to_lower_ascii(name);
 		key += '=';
 		key += texture;
 		key += '\x02';
 	}
 	key += '\x01';
 	for (const auto &[name, value] : p_slot.vectors) {
-		key += lower(name);
+		key += to_lower_ascii(name);
 		key += '=';
 		char bits[16];
 		std::memcpy(bits, value.data(), 16);
@@ -397,7 +387,8 @@ struct PlanBuilder {
 		const auto bind = [&](const LookTexture &p_t, TextureRole p_role) {
 			const int32_t at = int32_t(texture(p_t.name, p_role));
 			for (size_t i = 0; i < p_slot.textures.size(); ++i) {
-				if (!p_t.parameter.empty() && p_slot.textures[i].first == p_t.parameter && lower(p_slot.textures[i].second) == p_t.name) {
+				if (!p_t.parameter.empty() && p_slot.textures[i].first == p_t.parameter &&
+						to_lower_ascii(p_slot.textures[i].second) == p_t.name) {
 					m.textures[i] = at;
 				}
 			}
@@ -470,16 +461,16 @@ namespace scene_internal {
 
 ParameterUse parameter_use(std::string_view p_parameter) {
 	for (size_t i = 0; i < std::size(kAlbedoParameters); ++i) {
-		if (iequals(p_parameter, kAlbedoParameters[i])) {
+		if (iequals_ascii(p_parameter, kAlbedoParameters[i])) {
 			return { TextureRole::Color, int(i) };
 		}
 	}
 	for (size_t i = 0; i < std::size(kNormalParameters); ++i) {
-		if (iequals(p_parameter, kNormalParameters[i])) {
+		if (iequals_ascii(p_parameter, kNormalParameters[i])) {
 			return { TextureRole::Normal, int(i) };
 		}
 	}
-	const std::string name = lower(p_parameter);
+	const std::string name = to_lower_ascii(p_parameter);
 	if (name.find("normal") != std::string::npos) {
 		return { TextureRole::Normal, -1 };
 	}
@@ -515,7 +506,7 @@ TextureRole merge_role(TextureRole p_a, TextureRole p_b) {
 
 ShaderFlags shader_flags(std::string_view p_shader) {
 	ShaderFlags out;
-	const std::string name = lower(p_shader);
+	const std::string name = to_lower_ascii(p_shader);
 	for (std::string_view w : kUndrawnShaders) {
 		if (name.find(w) != std::string::npos) {
 			out.drawn = false;
@@ -896,7 +887,7 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 			plan.failures.emplace_back("look environment", env.error().message);
 		}
 	}
-	plan.seconds = since(start);
+	plan.seconds = seconds_since(start);
 	return plan;
 }
 

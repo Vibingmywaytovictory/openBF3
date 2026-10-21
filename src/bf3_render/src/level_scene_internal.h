@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/level/level_transform.h"
+#include "bf3/core/math.h"
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/result.h"
 #include "bf3/render/level_scene.h"
@@ -16,7 +17,7 @@
 
 namespace bf3::render::scene_internal {
 
-using Mat3 = std::array<std::array<float, 3>, 3>;
+using Mat3 = std::array<core::Vec3, 3>;
 
 struct ParameterUse {
 	TextureRole role = TextureRole::Data;

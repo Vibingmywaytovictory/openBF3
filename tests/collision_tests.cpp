@@ -127,7 +127,7 @@ TEST_SUITE("collision_unit") {
 		}
 
 		res::Transform bad = translation(0.0f, 0.0f, 0.0f);
-		bad.origin[1] = std::numeric_limits<float>::quiet_NaN();
+		bad.trans[1] = std::numeric_limits<float>::quiet_NaN();
 		const SoupShapeResult n = soup_shape_triangles(havok, roots, bad, {}, no_grid, "");
 		CHECK(n.triangles.empty());
 		CHECK(n.nonfinite == 12);
@@ -184,13 +184,13 @@ TEST_SUITE("collision_unit") {
 		const SurfaceMaterials no_grid;
 		const std::vector<res::Shape> roots = one(box({ 1.0f, 1.0f, 1.0f }, 0));
 		res::Transform mirror = res::Transform::identity();
-		mirror.axis[0] = { -1.0f, 0.0f, 0.0f };
+		mirror.right = { -1.0f, 0.0f, 0.0f };
 		const SoupShapeResult r = soup_shape_triangles(havok, roots, mirror, {}, no_grid, "");
 		REQUIRE(r.triangles.size() == 12);
 		for (const SoupTriangle &t : r.triangles) {
-			const res::Vec3 n = res::vec::cross(res::vec::sub(t.v[1], t.v[0]), res::vec::sub(t.v[2], t.v[0]));
-			const res::Vec3 c = res::vec::scale(res::vec::add(res::vec::add(t.v[0], t.v[1]), t.v[2]), 1.0f / 3.0f);
-			CHECK(res::vec::dot(n, c) > 0.0f);
+			const res::Vec3 n = vec::cross(vec::sub(t.v[1], t.v[0]), vec::sub(t.v[2], t.v[0]));
+			const res::Vec3 c = vec::scale(vec::add(vec::add(t.v[0], t.v[1]), t.v[2]), 1.0f / 3.0f);
+			CHECK(vec::dot(n, c) > 0.0f);
 		}
 
 		res::Shape deep = box({ 1.0f, 1.0f, 1.0f }, 0);

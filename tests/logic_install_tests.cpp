@@ -8,6 +8,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/logic/logic_runtime.h"
 #include "bf3/sim_harness/logic_harness.h"
 #include "test_support.h"
@@ -28,9 +29,7 @@ using namespace bf3::sim::logic;
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 struct Mounted {
 	InstallReader reader;

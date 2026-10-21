@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -32,8 +33,8 @@ struct PoseDef {
 	float eye_height = 0;
 	float step_height = 0;
 	std::string collision_type;
-	std::array<float, 3> box_min_expand{};
-	std::array<float, 3> box_max_expand{};
+	core::Vec3 box_min_expand{};
+	core::Vec3 box_max_expand{};
 	float min_look_yaw = 0, max_look_yaw = 0, min_look_pitch = 0, max_look_pitch = 0;
 	std::vector<CurvePoint> throttle_curve;
 

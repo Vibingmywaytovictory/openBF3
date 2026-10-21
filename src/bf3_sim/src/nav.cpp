@@ -5,6 +5,7 @@
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/soldier_motor.h"
 
 #include <DetourAlloc.h>
@@ -24,9 +25,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::string bits_hex(float p_value) {
 	uint32_t bits;
@@ -459,7 +458,7 @@ core::Result<std::vector<GatherTerrain>> gather_terrains(const core::level::Coll
 		}
 		const core::res::HeightGrid &g = *t.grid;
 		const auto length = [](const Vec3 &p_v) { return std::sqrt(double(p_v[0]) * p_v[0] + double(p_v[1]) * p_v[1] + double(p_v[2]) * p_v[2]); };
-		const std::array<Vec3, 3> &a = t.frame.axis;
+		const std::array<Vec3, 3> a = t.frame.axes();
 
 		double reach = length(a[0]) * std::fabs(double(g.sample_spacing[0])) + length(a[2]) * std::fabs(double(g.sample_spacing[1]));
 		if (a[1][0] != 0.0f || a[1][2] != 0.0f || a[0][1] != 0.0f || a[2][1] != 0.0f) {
@@ -761,7 +760,9 @@ NavPointCheck nav_check_point(const NavWorld &p_world, const NavComponents &p_co
 	filter.setIncludeFlags(nav_flags::kAll);
 	dtPolyRef ref = 0;
 	float nearest[3] = { 0, 0, 0 };
-	if (dtStatusFailed(q->findNearestPoly(p_point.data(), p_half_extents.data(), &filter, &ref, nearest)) || ref == 0) {
+	if (dtStatusFailed(q->findNearestPoly(
+				core::to_array(p_point).data(), core::to_array(p_half_extents).data(), &filter, &ref, nearest)) ||
+			ref == 0) {
 		return out;
 	}
 	out.poly = NavPolyRef(ref);

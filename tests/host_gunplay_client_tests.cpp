@@ -3,6 +3,7 @@
 #include "weapons_support.h"
 
 #include "bf3/core/gameplay/capsule_pose_table.h"
+#include "bf3/core/util/text.h"
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
@@ -1689,12 +1690,7 @@ std::optional<Arena> metro_arena() {
 	return Arena{ "Metro", m->level };
 }
 
-std::string lower(std::string p_s) {
-	for (char &c : p_s) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return p_s;
-}
+using bf3::core::to_lower_ascii;
 
 void run_fire_reload(const Arena &p_arena) {
 	Server server;
@@ -1745,7 +1741,9 @@ void run_fire_reload(const Arena &p_arena) {
 	REQUIRE(server_shots.size() >= 31);
 	core::Result<std::shared_ptr<const host::ClientGunplayInputs>> in = host::client_gunplay_inputs(*p_arena.level);
 	REQUIRE(in.ok());
-	const std::string variant = shots[0].shot.def < (*in)->table->defs.size() ? lower((*in)->table->defs[shots[0].shot.def].variant) : std::string("?");
+	const std::string variant = shots[0].shot.def < (*in)->table->defs.size()
+			? to_lower_ascii((*in)->table->defs[shots[0].shot.def].variant)
+			: std::string("?");
 	const bool m16 = variant.size() >= 7 && variant.compare(variant.size() - 7, 7, "u_m16a4") == 0;
 	CHECK_MESSAGE(m16, variant);
 	size_t equal = 0;

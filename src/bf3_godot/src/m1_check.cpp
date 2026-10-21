@@ -6,6 +6,8 @@
 #include "level_upload.h"
 #include "loading_screen.h"
 
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
 #include "bf3/host/game_server.h"
 #include "bf3/net/loopback_ping.h"
 
@@ -53,14 +55,7 @@ namespace sim = bf3::sim;
 
 namespace {
 
-std::string fmt(const char *p_fmt, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_fmt);
-	vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 double mib(uint64_t p_bytes) {
 	return double(p_bytes) / (1024.0 * 1024.0);
@@ -90,13 +85,7 @@ uint64_t peak_working_set_bytes() {
 	return GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)) ? uint64_t(pmc.PeakWorkingSetSize) : 0;
 }
 
-float percentile(std::vector<float> p_values, double p_q) {
-	if (p_values.empty()) {
-		return 0.0f;
-	}
-	std::sort(p_values.begin(), p_values.end());
-	return p_values[std::min(p_values.size() - 1, size_t(double(p_values.size()) * p_q))];
-}
+using bf3::core::rank_above;
 
 const char *kSpeedNames[4] = { "walk", "sprint", "crouch", "prone" };
 constexpr float kSpeedExpected[4] = { 4.0f, 6.5f, 2.0f, 0.9f };
@@ -691,9 +680,9 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 					median_cpu_sum_ms_ / double(median_views_), median_gpu_sum_ms_ / double(median_views_), median_views_, int(size.x), int(size.y))));
 		}
 		if (!run_cpu_samples_.empty()) {
-
-			UtilityFunctions::print(to_godot(fmt("[look] frame time p99: %.3f ms per frame (interval), over %zu frames at %zu views",
-					double(percentile(run_cpu_samples_, 0.99)), run_cpu_samples_.size(), median_views_)));
+			UtilityFunctions::print(
+					to_godot(fmt("[look] frame time p99: %.3f ms per frame (interval), over %zu frames at %zu views",
+							double(rank_above(run_cpu_samples_, 0.99)), run_cpu_samples_.size(), median_views_)));
 		}
 	}
 	return next_ >= total;
@@ -1539,8 +1528,8 @@ void M1LoadCheck::report() {
 						list);
 	}
 	add("frames.after_done", 2,
-			fmt("%zu frames over 5 s after Done at the spawn (first person, vsync restored): p50 %.2f ms, p99 %.2f ms", frame_ms_.size(),
-					double(percentile(frame_ms_, 0.5)), double(percentile(frame_ms_, 0.99))));
+			fmt("%zu frames over 5 s after Done at the spawn (first person, vsync restored): p50 %.2f ms, p99 %.2f ms",
+					frame_ms_.size(), double(rank_above(frame_ms_, 0.5)), double(rank_above(frame_ms_, 0.99))));
 	add("memory.peak", 2,
 			fmt("game peak working set %.1f MiB (reported, not gated: E6 gates the converter, tools.m1_prepare; orchestrator decision on docs §16 question 4); "
 				"loader sample %.1f MiB",

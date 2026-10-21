@@ -3,6 +3,7 @@
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/collision_world.h"
 
 #include <DetourAlloc.h>
@@ -21,9 +22,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 struct HeightfieldDeleter {
 	void operator()(rcHeightfield *p) const { rcFreeHeightField(p); }

@@ -5,6 +5,8 @@
 #include "bf3/core/level/world.h"
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/res/res_loader.h"
+#include "bf3/core/util/finite.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <cctype>
@@ -31,21 +33,13 @@ constexpr uint32_t kFogFitSteps = 128;
 constexpr float kFogFitReach = 1500.0f;
 constexpr float kHorizonRows = 0.15f;
 
-std::string lower(std::string_view p_s) {
-	std::string out(p_s);
-	for (char &c : out) {
-		c = char(std::tolower(uint8_t(c)));
-	}
-	return out;
-}
+using bf3::core::to_lower_ascii;
 
 float max3(const LookVec3 &p_v) {
 	return std::fmax(std::fmax(p_v[0], p_v[1]), p_v[2]);
 }
 
-bool finite3(const LookVec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 LookVec3 scaled(const LookVec3 &p_v, float p_s) {
 	return { p_v[0] * p_s, p_v[1] * p_s, p_v[2] * p_s };
@@ -71,8 +65,8 @@ std::optional<float> number(const EbxInstance &p_c, std::string_view p_field) {
 
 std::optional<LookVec3> vec3(const EbxInstance &p_c, std::string_view p_field) {
 	const std::optional<EbxValue> v = p_c.get(p_field);
-	std::optional<std::array<float, 3>> out = v ? v->as_vec3() : std::nullopt;
-	return out && finite3(*out) ? out : std::nullopt;
+	std::optional<core::Vec3> out = v ? v->as_vec3() : std::nullopt;
+	return out && finite(*out) ? out : std::nullopt;
 }
 
 std::optional<LookCubic> cubic(const EbxInstance &p_c, std::string_view p_field) {
@@ -101,7 +95,7 @@ bool flag(const EbxInstance &p_c, std::string_view p_field, bool p_default) {
 
 std::string partition_name(const EbxResolver &p_db, const EbxInstance &p_instance) {
 	const std::optional<std::string_view> n = p_db.name_of(p_instance.partition().guid());
-	return n ? lower(*n) : std::string();
+	return n ? to_lower_ascii(*n) : std::string();
 }
 
 std::string texture_name(const EbxResolver &p_db, const EbxInstance &p_c, std::string_view p_field) {
@@ -233,8 +227,8 @@ std::optional<LookArea> area_shape(const World &p_world, uint32_t p_scope, const
 				if (++n > kMaxAreaPoints) {
 					break;
 				}
-				const std::optional<std::array<float, 3>> local = p.as_vec3();
-				if (!local || !finite3(*local)) {
+				const std::optional<core::Vec3> local = p.as_vec3();
+				if (!local || !finite(*local)) {
 					continue;
 				}
 				const LookVec3 world = t.transform_point(*local);
@@ -732,7 +726,7 @@ void decode_look_textures(const core::LevelMount &p_mount, LookEnvironment &r_en
 }
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position) {
-	if (!finite3(p_position)) {
+	if (!finite(p_position)) {
 		return 0.0f;
 	}
 	float distance = 0.0f;

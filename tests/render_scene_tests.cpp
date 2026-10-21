@@ -9,6 +9,7 @@
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/render/level_scene.h"
 #include "test_support.h"
 
@@ -535,7 +536,7 @@ TEST_SUITE("render-scene") {
 		Result<std::shared_ptr<Install>> install = Install::open(reader);
 		REQUIRE(install.ok());
 		using Clock = std::chrono::steady_clock;
-		const auto since = [](Clock::time_point p_t) { return std::chrono::duration<double>(Clock::now() - p_t).count(); };
+		using bf3::core::seconds_since;
 
 		Clock::time_point t0 = Clock::now();
 		Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(*install, "MP_Subway", "TeamDeathMatch0");
@@ -543,11 +544,11 @@ TEST_SUITE("render-scene") {
 		const level::LoadedLevel &lvl = **loaded;
 		Result<std::unique_ptr<level::World>> world = level::World::traverse(lvl);
 		REQUIRE(world.ok());
-		const double seconds_load = since(t0);
+		const double seconds_load = seconds_since(t0);
 		t0 = Clock::now();
 		Result<level::MeshCensus> census = level::mesh_census(lvl, **world);
 		REQUIRE(census.ok());
-		const double seconds_census = since(t0);
+		const double seconds_census = seconds_since(t0);
 		CHECK(census->placements == 10873);
 		CHECK(census->scene_meshes == 842);
 		CHECK(census->scene_instances == 10571);
@@ -721,7 +722,7 @@ TEST_SUITE("render-scene") {
 
 		t0 = Clock::now();
 		const uint64_t estimate = estimate_scene_bytes(p, lvl.mount());
-		std::printf("render.scene estimate_scene_bytes: %.1f MiB in %.3f s\n", mib(estimate), since(t0));
+		std::printf("render.scene estimate_scene_bytes: %.1f MiB in %.3f s\n", mib(estimate), seconds_since(t0));
 		CHECK(estimate > 0);
 
 		ScratchRoot scratch;
@@ -800,10 +801,11 @@ TEST_SUITE("render-scene") {
 			Result<SceneLaneStats> stats = lanes.wait();
 			sink.finish();
 			REQUIRE(stats.ok());
-			std::printf("render.scene held sink, 64 MiB cap: %llu items in %.3f s, %llu stalls at the cap, peak in flight %.1f MiB, largest item "
+			std::printf("render.scene held sink, 64 MiB cap: %llu items in %.3f s, %llu stalls at the cap, peak in "
+						"flight %.1f MiB, largest item "
 						"%.1f MiB\n",
-					(unsigned long long)sink.items.load(), since(t0), (unsigned long long)sink.stalls.load(), mib(stats->peak_inflight_bytes),
-					mib(sink.largest));
+					(unsigned long long)sink.items.load(), seconds_since(t0), (unsigned long long)sink.stalls.load(),
+					mib(stats->peak_inflight_bytes), mib(sink.largest));
 			CHECK(stats->peak_inflight_bytes <= std::max(small.max_inflight_bytes, sink.largest.load()));
 			CHECK(stats->peak_inflight_bytes > small.max_inflight_bytes / 2);
 			CHECK(sink.stalls >= 3);

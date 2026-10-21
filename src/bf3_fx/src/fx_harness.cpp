@@ -1,5 +1,7 @@
 #include "bf3/fx/fx_harness.h"
 
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/text.h"
 #include "bf3/fx/effect_compiler.h"
 #include "fx_internal.h"
 
@@ -17,11 +19,7 @@ namespace bf3::fx {
 
 namespace {
 
-std::string fmt(const char *p_fmt, double p_v) {
-	char buf[64];
-	std::snprintf(buf, sizeof(buf), p_fmt, p_v);
-	return buf;
-}
+using bf3::core::fmt;
 std::string num(double p_v) {
 	return fmt("%.9g", p_v);
 }
@@ -135,7 +133,8 @@ void for_lanes(size_t p_items, unsigned p_lanes, const std::function<void(unsign
 }
 
 float fx_variable_dt(uint64_t p_seed, uint64_t p_frame) {
-	const float u = fx_unit(fx_key(fx_mix64(p_seed ^ 0xD7D7D7D7ull), uint32_t(p_frame), uint32_t(p_frame >> 32), 0xD7u));
+	const float u =
+			fx_unit(fx_key(splitmix64(p_seed ^ 0xD7D7D7D7ull), uint32_t(p_frame), uint32_t(p_frame >> 32), 0xD7u));
 	return kVariableDtMin + (kVariableDtMax - kVariableDtMin) * u;
 }
 
@@ -649,16 +648,7 @@ std::string joined_leaves(const std::vector<std::string> &p_names) {
 	return out.empty() ? "-" : out;
 }
 
-std::string lower(std::string_view p_s) {
-	std::string out(p_s);
-	for (char &c : out) {
-		if (c >= 'A' && c <= 'Z') {
-			c = char(c - 'A' + 'a');
-		}
-	}
-	return out;
-}
-
+using bf3::core::to_lower_ascii;
 }
 
 ImpactCounts fx_impact_counts(const ImpactTable &p_table, uint8_t p_projectile) {
@@ -703,7 +693,7 @@ ImpactCounts fx_impact_counts(const ImpactTable &p_table, uint8_t p_projectile) 
 
 HarnessReport fx_golden_impacts(const ImpactTable &p_table, std::string_view p_level, uint8_t p_projectile) {
 	HarnessReport rep;
-	const std::string level = lower(p_level);
+	const std::string level = to_lower_ascii(p_level);
 	const ImpactCounts c = fx_impact_counts(p_table, p_projectile);
 	rep.lines.push_back("impacts\t" + level + "\tprojectile\t" + std::to_string(p_projectile));
 	rep.lines.push_back("rows\t" + std::to_string(c.rows));
@@ -792,7 +782,7 @@ HarnessReport fx_golden_impacts(const ImpactTable &p_table, std::string_view p_l
 
 HarnessReport fx_golden_atlas(const EmitterAtlas &p_atlas, std::string_view p_level, const std::set<std::string> &p_used_names, size_t p_documents) {
 	HarnessReport rep;
-	const std::string level = lower(p_level);
+	const std::string level = to_lower_ascii(p_level);
 	const auto tex_line = [&](const char *p_kind, const AtlasTextureInfo &p_t) {
 		rep.lines.push_back(std::string("texture\t") + p_kind + "\t" + p_t.partition + "\tformat\t" + std::to_string(int(p_t.format)) + "\tsrgb\t" +
 				std::to_string(int(p_t.srgb)) + "\tsize\t" + std::to_string(p_t.width) + "x" + std::to_string(p_t.height) + "\tmips\t" +
@@ -1025,8 +1015,8 @@ BenchReport fx_bench(const EffectDef &p_oilfire, const EffectDef &p_muzzle, cons
 				}
 			}
 			if (f % 2 == 0) {
-				const uint64_t k = fx_mix64(p_seed ^ (uint64_t(f) << 20));
-				start_at(impact, Vec3{ fx_unit(k) * 280.0f, 0.0f, fx_unit(fx_mix64(k)) * 220.0f });
+				const uint64_t k = splitmix64(p_seed ^ (uint64_t(f) << 20));
+				start_at(impact, Vec3{ fx_unit(k) * 280.0f, 0.0f, fx_unit(splitmix64(k)) * 220.0f });
 			}
 			const bool timed_frame = f >= p_warmup_frames;
 			const auto t0 = std::chrono::steady_clock::now();

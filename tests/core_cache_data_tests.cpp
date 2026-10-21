@@ -3,6 +3,7 @@
 #include "bf3/core/cache/cache_key.h"
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/cache/disk_cache.h"
+#include "bf3/core/util/elapsed.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -108,10 +109,7 @@ CacheKey key_of(const Row &p_row) {
 	return *make_cache_key(in);
 }
 
-double seconds_since(std::chrono::steady_clock::time_point p_t0) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_t0).count();
-}
-
+using bf3::core::seconds_since;
 }
 
 TEST_SUITE("cache_data") {

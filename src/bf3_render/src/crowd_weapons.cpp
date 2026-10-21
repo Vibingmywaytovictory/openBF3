@@ -93,7 +93,7 @@ std::optional<anim::Vec3> vec3_field(const core::EbxStruct &p_s, std::string_vie
 	if (!v) {
 		return std::nullopt;
 	}
-	const std::optional<std::array<float, 3>> a = v->as_vec3();
+	const std::optional<core::Vec3> a = v->as_vec3();
 	if (!a || !std::isfinite((*a)[0]) || !std::isfinite((*a)[1]) || !std::isfinite((*a)[2])) {
 		return std::nullopt;
 	}

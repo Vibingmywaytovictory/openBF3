@@ -1,9 +1,9 @@
 #include "bf3/render/shader_database.h"
 
 #include "bf3/core/ebx.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstring>
 #include <optional>
 #include <set>
@@ -30,10 +30,7 @@ constexpr size_t kValueCountAt = 0x36;
 
 constexpr size_t kMinShaderBytes = 4 + 4 + 1 + 35 + 4 + 4 + 4;
 
-bool iequals(std::string_view p_a, std::string_view p_b) {
-	return p_a.size() == p_b.size() &&
-			std::equal(p_a.begin(), p_a.end(), p_b.begin(), [](char a, char b) { return std::tolower(uint8_t(a)) == std::tolower(uint8_t(b)); });
-}
+using bf3::core::iequals_ascii;
 
 uint16_t rd16(const uint8_t *p) {
 	return uint16_t(p[0] | (p[1] << 8));
@@ -338,7 +335,7 @@ bool SurfaceShader::double_sided() const {
 
 const ShaderTextureParameter *SurfaceShader::parameter(std::string_view p_name) const {
 	for (const ShaderTextureParameter &p : texture_parameters) {
-		if (iequals(p.name, p_name)) {
+		if (iequals_ascii(p.name, p_name)) {
 			return &p;
 		}
 	}
@@ -347,7 +344,7 @@ const ShaderTextureParameter *SurfaceShader::parameter(std::string_view p_name) 
 
 const ShaderValue *SurfaceShader::value(std::string_view p_name) const {
 	for (const ShaderValue &v : values) {
-		if (iequals(v.name, p_name)) {
+		if (iequals_ascii(v.name, p_name)) {
 			return &v;
 		}
 	}
@@ -402,8 +399,7 @@ ShaderLookup::ShaderLookup(ShaderDatabase p_database) :
 }
 
 const SurfaceShader *ShaderLookup::by_name(std::string_view p_partition) const {
-	std::string lower(p_partition);
-	std::transform(lower.begin(), lower.end(), lower.begin(), [](char c) { return char(std::tolower(uint8_t(c))); });
+	const std::string lower = core::to_lower_ascii(p_partition);
 	const uint32_t hash = core::ebx_name_hash(lower);
 	const auto found = std::lower_bound(by_hash_.begin(), by_hash_.end(), std::pair<uint32_t, size_t>(hash, 0));
 	return found == by_hash_.end() || found->first != hash ? nullptr : &database_.shaders[found->second];

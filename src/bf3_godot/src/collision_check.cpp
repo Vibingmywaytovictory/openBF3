@@ -1,5 +1,7 @@
 #include "collision_check.h"
 
+#include "bf3/core/util/format.h"
+
 #include "collision_overlay.h"
 #include "godot_util.h"
 
@@ -25,14 +27,7 @@ namespace lvl = bf3::core::level;
 
 namespace {
 
-std::string fmt(const char *p_fmt, ...) {
-	char buf[768];
-	va_list args;
-	va_start(args, p_fmt);
-	vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::string hex64(uint64_t p_value) {
 	return fmt("%016llx", static_cast<unsigned long long>(p_value));

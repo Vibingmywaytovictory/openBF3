@@ -740,7 +740,7 @@ TEST_SUITE("level_unit") {
 		degenerate.forward = { 0.0f, 0.0f, 0.0f };
 		CHECK_FALSE(bake_split(degenerate).linear.has_value());
 
-		std::array<std::array<float, 3>, 3> huge{};
+		std::array<bf3::core::Vec3, 3> huge{};
 		huge[0][0] = 1e30f;
 		huge[0][1] = -1e30f;
 		huge[0][2] = std::numeric_limits<float>::quiet_NaN();

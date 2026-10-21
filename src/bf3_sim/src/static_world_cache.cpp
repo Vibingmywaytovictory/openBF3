@@ -11,6 +11,8 @@
 #include "bf3/core/level/source_digest.h"
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/finite.h"
 
 #include <Jolt/AABBTree/NodeCodec/NodeCodecQuadTreeHalfFloat.h>
 #include <Jolt/AABBTree/TriangleCodec/TriangleCodecIndexed8BitPackSOA4Flags.h>
@@ -37,9 +39,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 constexpr const char *kTileMagic = "OBF3JTIL";
 constexpr const char *kWorldMagic = "OBF3JWLD";
@@ -96,9 +96,7 @@ T load(std::span<const uint8_t> p_bytes, size_t p_at) {
 	return v;
 }
 
-bool finite_float3(const JPH::Float3 &p_v) {
-	return std::isfinite(p_v.x) && std::isfinite(p_v.y) && std::isfinite(p_v.z);
-}
+using bf3::core::finite;
 
 constexpr uint32_t kMaxTreeDepth = 40;
 constexpr uint32_t kPaddingCount = NodeCodec::TRIANGLE_COUNT_MASK;
@@ -120,8 +118,8 @@ core::Status validate_mesh_tree(std::span<const uint8_t> p_tree, uint32_t p_tags
 	}
 	const NodeCodec::Header header = load<NodeCodec::Header>(p_tree, 0);
 	const TriangleCodec::TriangleHeader triangle_header = load<TriangleCodec::TriangleHeader>(p_tree, NodeCodec::HeaderSize);
-	if (!finite_float3(header.mRootBoundsMin) || !finite_float3(header.mRootBoundsMax) || !finite_float3(triangle_header.mOffset) ||
-			!finite_float3(triangle_header.mScale)) {
+	if (!finite(header.mRootBoundsMin) || !finite(header.mRootBoundsMax) || !finite(triangle_header.mOffset) ||
+			!finite(triangle_header.mScale)) {
 		return core::make_error("mesh tree: non-finite header bounds");
 	}
 	const uint32_t block_bits = header.mBlockIDBits;
@@ -250,10 +248,6 @@ size_t counted(core::BlobReader &r_reader, size_t p_element_bytes) {
 		return 0;
 	}
 	return r_reader.ok() ? n : 0;
-}
-
-bool finite_vec(const Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
 }
 
 std::string float_bits_hex(float p_value) {
@@ -448,7 +442,7 @@ core::Result<StaticWorldShapes::Impl::Tile> decode_static_tile(std::span<const u
 	if (!r.ok()) {
 		return r.error("jolt-tile");
 	}
-	if (!finite_vec(info.min) || !finite_vec(info.max)) {
+	if (!finite(info.min) || !finite(info.max)) {
 		return core::make_error("jolt-tile: non-finite bounds");
 	}
 	if (layers > kStaticLayerCount) {
@@ -677,11 +671,8 @@ core::Result<StaticWorldShapes::Impl::Terrain> decode_static_terrain(std::span<c
 	if (!r.ok()) {
 		return r.error("jolt-terrain");
 	}
-	const auto finite_all = [](std::span<const float> p_v) {
-		return std::all_of(p_v.begin(), p_v.end(), [](float p_c) { return std::isfinite(p_c); });
-	};
-	if (!finite_vec(info.min) || !finite_vec(info.max) || !finite_vec(terrain.position) || !finite_all(terrain.rotation) || !std::isfinite(info.max_error) ||
-			info.max_error < 0.0f) {
+	if (!finite(info.min) || !finite(info.max) || !finite(terrain.position) || !finite(terrain.rotation) ||
+			!std::isfinite(info.max_error) || info.max_error < 0.0f) {
 		return core::make_error("jolt-terrain: non-finite info or transform");
 	}
 	const double q = double(terrain.rotation[0]) * terrain.rotation[0] + double(terrain.rotation[1]) * terrain.rotation[1] +

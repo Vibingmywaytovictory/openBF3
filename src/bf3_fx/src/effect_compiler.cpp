@@ -1,6 +1,7 @@
 #include "bf3/fx/effect_compiler.h"
 
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/format.h"
 #include "fx_ebx.h"
 #include "fx_internal.h"
 
@@ -8,7 +9,6 @@
 #include <chrono>
 #include <cinttypes>
 #include <cmath>
-#include <cstdarg>
 #include <cstdio>
 #include <functional>
 #include <map>
@@ -1193,17 +1193,6 @@ core::Result<CensusReport> run_census(const core::EbxLibrary &p_library, unsigne
 
 namespace {
 
-void appendf(std::string &r_out, const char *p_fmt, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_fmt);
-	const int n = std::vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	if (n > 0) {
-		r_out.append(buf, size_t(std::min(n, int(sizeof(buf) - 1))));
-	}
-}
-
 std::string g(float p_v) {
 	char buf[48];
 	std::snprintf(buf, sizeof(buf), "%.9g", double(p_v));
@@ -1263,8 +1252,8 @@ std::string evaluator_text(const EvaluatorDef &p_e) {
 std::string format_emitter_def(const EmitterDef &p_e) {
 	std::string o;
 	const EmitterTemplateDef &t = p_e.tmpl;
-	appendf(o, "emitter %s\n", p_e.name.c_str());
-	appendf(o, "  base %s flags 0x%08x\n", p_e.base.empty() ? "-" : p_e.base.c_str(), t.flags);
+	o += core::fmt("emitter %s\n", p_e.name.c_str());
+	o += core::fmt("  base %s flags 0x%08x\n", p_e.base.empty() ? "-" : p_e.base.c_str(), t.flags);
 	o += "  template " + std::string(emittable_type_name(t.emittable)) + " lifetime " + g(t.lifetime) + " frames " + std::to_string(t.lifetime_frame_count) +
 			" max_count " + std::to_string(t.max_count) + " time_scale " + g(t.time_scale) + " mesh " + (t.mesh.empty() ? "-" : t.mesh) + "\n";
 	o += "  light radius " + g(t.light.radius) + " color " + v3(t.light.color) + " intensity {" + poly(t.light.intensity) + "} random [" +
@@ -1321,7 +1310,7 @@ std::string format_emitter_def(const EmitterDef &p_e) {
 
 std::string format_effect_def(const EffectDef &p_def) {
 	std::string o;
-	appendf(o, "effect %s\n", p_def.name.c_str());
+	o += core::fmt("effect %s\n", p_def.name.c_str());
 	o += "transform " + xf(p_def.transform) + "\n";
 	o += "cull_distance " + g(p_def.cull_distance) + " start_delay " + g(p_def.start_delay) + " tiers " + std::to_string(p_def.tiers) +
 			" max_instance_count " + std::to_string(p_def.max_instance_count) + " reset " + std::to_string(int(p_def.reset_instance_when_started)) +

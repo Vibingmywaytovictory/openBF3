@@ -96,8 +96,7 @@ core::Result<Frame> check_view(const StaticTerrainView &p_view) {
 		return core::make_error(where + ": spacing must be positive");
 	}
 	Frame f;
-	f.transform.axis = p_view.axes;
-	f.transform.origin = p_view.translation;
+	f.transform = core::Transform::from_axes(p_view.axes, p_view.translation);
 	for (const Vec3 &a : p_view.axes) {
 		for (float c : a) {
 			if (!std::isfinite(c)) {
@@ -213,8 +212,8 @@ core::Result<StaticTerrainView> static_terrain_view(const core::level::SoupTerra
 	view.spacing = g.sample_spacing;
 	view.heights = g.heights;
 	view.holes = g.holes;
-	view.axes = p_terrain.frame.axis;
-	view.translation = p_terrain.frame.origin;
+	view.axes = p_terrain.frame.axes();
+	view.translation = p_terrain.frame.trans;
 	if (view.heights.size() != g.width * g.height || view.holes.size() != g.width * g.height) {
 		return core::make_error("static terrain (object " + std::to_string(p_terrain.object) + "): the record's arrays do not match its size");
 	}

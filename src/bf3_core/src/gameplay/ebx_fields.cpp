@@ -130,7 +130,7 @@ Vec3 Fields::vec3(const EbxStruct &p_s, std::string_view p_field) {
 	if (!v) {
 		return {};
 	}
-	const std::optional<std::array<float, 3>> xyz = v->as_vec3();
+	const std::optional<core::Vec3> xyz = v->as_vec3();
 	if (!xyz) {
 		fail(where(p_s, p_field) + ": not a Vec3");
 		return {};

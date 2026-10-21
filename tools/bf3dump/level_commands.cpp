@@ -4,6 +4,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/superbundle_mount.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <algorithm>
 #include <chrono>
@@ -21,9 +22,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::string hex(float p_value) {
 	uint32_t bits = 0;
@@ -240,12 +239,12 @@ Result<std::string> listing(const LoadedLevel &p_level, const World &p_world, co
 		}
 		++objects;
 		std::string frame;
-		for (const res::Vec3 &row : c.frame.axis) {
+		for (const res::Vec3 &row : c.frame.axes()) {
 			for (float v : row) {
 				frame += hex(v) + " ";
 			}
 		}
-		for (float v : c.frame.origin) {
+		for (float v : c.frame.trans) {
 			frame += hex(v) + " ";
 		}
 		frame.pop_back();

@@ -290,7 +290,7 @@ LogicValue make_float(double p_f) {
 	return v;
 }
 
-LogicValue make_rows(K p_kind, const std::array<std::array<float, 3>, 4> &p_rows) {
+LogicValue make_rows(K p_kind, const std::array<core::Vec3, 4> &p_rows) {
 	LogicValue v;
 	v.kind = p_kind;
 	for (size_t r = 0; r < 4; ++r) {
@@ -301,7 +301,7 @@ LogicValue make_rows(K p_kind, const std::array<std::array<float, 3>, 4> &p_rows
 	return v;
 }
 
-LogicValue make_vec3(const std::array<float, 3> &p_v) {
+LogicValue make_vec3(const core::Vec3 &p_v) {
 	LogicValue v;
 	v.kind = K::Vec3;
 	v.m[0] = p_v[0];
@@ -360,7 +360,7 @@ std::optional<LogicValue> logic_value_of(const PropertyValue &p_value, LogicValu
 			return make_int(K::Text, 0);
 		}
 		case K::Vec3:
-			if (const std::optional<std::array<float, 3>> v = p_value.as_vec3()) {
+			if (const std::optional<core::Vec3> v = p_value.as_vec3()) {
 				return make_vec3(*v);
 			}
 			return std::nullopt;
@@ -369,7 +369,7 @@ std::optional<LogicValue> logic_value_of(const PropertyValue &p_value, LogicValu
 				return make_rows(K::Transform, p_value.rows);
 			}
 			if (p_value.kind == PropertyValue::Kind::Field) {
-				if (const std::optional<std::array<std::array<float, 3>, 4>> t = p_value.field.as_transform()) {
+				if (const std::optional<std::array<core::Vec3, 4>> t = p_value.field.as_transform()) {
 					return make_rows(K::Transform, *t);
 				}
 			}

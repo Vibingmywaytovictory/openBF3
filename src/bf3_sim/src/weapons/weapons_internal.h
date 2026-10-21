@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/util/finite.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/weapons/ballistics.h"
 
@@ -76,13 +77,7 @@ inline DVec3 normalize(const DVec3 &p_a, const DVec3 &p_fallback = { 0, 0, 1 }) 
 	const double l = length(p_a);
 	return l > 1e-300 && std::isfinite(l) ? scale(p_a, 1.0 / l) : p_fallback;
 }
-inline bool finite3(const DVec3 &p_a) {
-	return std::isfinite(p_a[0]) && std::isfinite(p_a[1]) && std::isfinite(p_a[2]);
-}
-inline bool finite3f(const Vec3 &p_a) {
-	return std::isfinite(p_a[0]) && std::isfinite(p_a[1]) && std::isfinite(p_a[2]);
-}
-
+using core::finite;
 inline void poly_sincos(double p_x, double &r_sin, double &r_cos) {
 	if (!std::isfinite(p_x)) {
 		r_sin = 0;

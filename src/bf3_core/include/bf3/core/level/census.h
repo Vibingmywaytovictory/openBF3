@@ -2,6 +2,7 @@
 
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/math.h"
 #include "bf3/core/res/res_math.h"
 #include "bf3/core/result.h"
 
@@ -19,10 +20,10 @@ Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object);
 
 struct BakeSplit {
 	LevelTransform placed;
-	std::optional<std::array<std::array<float, 3>, 3>> linear;
+	std::optional<std::array<core::Vec3, 3>> linear;
 };
 BakeSplit bake_split(const LevelTransform &p_transform);
-std::array<int32_t, 9> bake_key(const std::array<std::array<float, 3>, 3> &p_linear);
+std::array<int32_t, 9> bake_key(const std::array<core::Vec3, 3> &p_linear);
 
 struct CensusOptions {
 	bool legacy_variations = false;
@@ -34,7 +35,7 @@ struct SceneMesh {
 	std::string name;
 	std::optional<EbxInstance> entry;
 	std::vector<uint16_t> hidden;
-	std::optional<std::array<std::array<float, 3>, 3>> bake;
+	std::optional<std::array<core::Vec3, 3>> bake;
 	std::array<int32_t, 9> bake_key{};
 	size_t placements = 0;
 	float radius = 0.0f;

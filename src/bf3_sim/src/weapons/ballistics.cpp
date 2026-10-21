@@ -466,7 +466,7 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 		if (!r_env.charge(1)) {
 			return true;
 		}
-		if (!finite3(e.position) || !finite3(e.velocity)) {
+		if (!finite(e.position) || !finite(e.velocity)) {
 			return false;
 		}
 		const SegResult r = test_segment(r_env, r_p, d, r_p.position, e.position, r_p.time, e.time, recasts);
@@ -611,7 +611,7 @@ core::Status ProjectileWorld::spawn(const ShotEvent &p_shot) {
 		++refused_;
 		return core::make_error("ProjectileWorld::spawn: " + table_->defs[p_shot.def].variant + " fires no simulated projectile");
 	}
-	if (!finite3f(p_shot.origin) || !finite3f(p_shot.direction) || !std::isfinite(p_shot.pellet_cone)) {
+	if (!finite(p_shot.origin) || !finite(p_shot.direction) || !std::isfinite(p_shot.pellet_cone)) {
 		++refused_;
 		return core::make_error("ProjectileWorld::spawn: a non-finite shot");
 	}

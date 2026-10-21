@@ -59,8 +59,8 @@ PoseDef read_pose(WorkBudget &r_budget, const EbxInstance &p_pose) {
 	out.eye_height = static_cast<float>(number_or(d, "EyePosition.y", 0));
 	out.step_height = static_cast<float>(number_or(d, "StepHeight", 0));
 	out.collision_type = text(r_budget, d, "CollisionType");
-	out.box_min_expand = vec3(d, "CollisionBoxMinExpand").value_or(std::array<float, 3>{});
-	out.box_max_expand = vec3(d, "CollisionBoxMaxExpand").value_or(std::array<float, 3>{});
+	out.box_min_expand = vec3(d, "CollisionBoxMinExpand").value_or(core::Vec3{});
+	out.box_max_expand = vec3(d, "CollisionBoxMaxExpand").value_or(core::Vec3{});
 	out.min_look_yaw = static_cast<float>(number_or(d, "LookConstraints.MinLookYaw", 0));
 	out.max_look_yaw = static_cast<float>(number_or(d, "LookConstraints.MaxLookYaw", 0));
 	out.min_look_pitch = static_cast<float>(number_or(d, "LookConstraints.MinLookPitch", 0));
@@ -165,8 +165,7 @@ std::vector<UnlockTarget> unlock_targets(WorkBudget &r_budget, const LogicConnec
 
 size_t common_prefix(std::string_view p_a, std::string_view p_b) {
 	size_t n = 0;
-	const auto lower = [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; };
-	while (n < p_a.size() && n < p_b.size() && lower(p_a[n]) == lower(p_b[n])) {
+	while (n < p_a.size() && n < p_b.size() && to_lower_ascii(p_a[n]) == to_lower_ascii(p_b[n])) {
 		++n;
 	}
 	return n;

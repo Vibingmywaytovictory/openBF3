@@ -1,10 +1,11 @@
 #include "bf3/sim_harness/logic_harness.h"
 
 #include "bf3/core/gameplay/logic_types.h"
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdarg>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -218,27 +219,12 @@ bool initial_enabled(const LogicGraph &p_graph, uint32_t p_node) {
 	return param_int(p_graph, p_node, "Enabled", 1) != 0;
 }
 
-uint64_t percentile(std::vector<uint64_t> p_values, double p_q) {
-	if (p_values.empty()) {
-		return 0;
-	}
-	std::sort(p_values.begin(), p_values.end());
+using bf3::core::nearest_rank;
 
-	size_t at = static_cast<size_t>(std::ceil(p_q * static_cast<double>(p_values.size())));
-	at = at > 0 ? at - 1 : 0;
-	return p_values[std::min(at, p_values.size() - 1)];
-}
-
-void line(std::string &r_out, const char *p_format, ...) {
-	char buffer[512];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buffer, sizeof(buffer), p_format, args);
-	va_end(args);
-	r_out += buffer;
+template <class... Args> void line(std::string &r_out, const char *p_format, Args... p_args) {
+	r_out += core::fmt(p_format, p_args...);
 	r_out += '\n';
 }
-
 }
 
 LogicScriptOptions rush_mcoms_script() {
@@ -422,9 +408,9 @@ core::Result<LogicRunReport> run_logic_script(std::shared_ptr<const LogicGraph> 
 	report.trace_records = rt.trace().records_total;
 	report.trace_truncated = rt.trace().truncated;
 	report.ghost = rt.ghost();
-	report.drain_ns_p50 = percentile(drains, 0.50);
-	report.drain_ns_p99 = percentile(drains, 0.99);
-	report.drain_ns_busy_p99 = percentile(busy, 0.99);
+	report.drain_ns_p50 = nearest_rank(drains, 0.50);
+	report.drain_ns_p99 = nearest_rank(drains, 0.99);
+	report.drain_ns_busy_p99 = nearest_rank(busy, 0.99);
 	report.busy_ticks = busy.size();
 	report.timeline.assign(stubs.timeline().begin(), stubs.timeline().end());
 	if (p_options.runtime.keep_trace_records) {

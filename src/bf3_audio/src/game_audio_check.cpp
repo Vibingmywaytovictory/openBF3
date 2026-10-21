@@ -3,6 +3,7 @@
 #include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/core/audio/sound_ports.h"
+#include "bf3/core/util/format.h"
 
 #include <algorithm>
 #include <atomic>
@@ -85,12 +86,7 @@ std::unique_ptr<PatchInstance> probe_at(const ca::SoundProgram &p_program, uint6
 	return std::move(*r);
 }
 
-std::string fmt(const char *p_format, double p_a, double p_b = 0.0, double p_c = 0.0) {
-	char buf[200];
-	std::snprintf(buf, sizeof(buf), p_format, p_a, p_b, p_c);
-	return buf;
-}
-
+using bf3::core::fmt;
 }
 
 std::vector<GameAuditionItem> game_audition_items() {

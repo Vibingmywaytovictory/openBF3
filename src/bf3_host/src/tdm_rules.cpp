@@ -2,13 +2,14 @@
 
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/soldier_def.h"
+#include "bf3/core/util/finite.h"
+#include "bf3/core/util/key_values.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -38,9 +39,7 @@ bool state_alive(const sim::SoldierState &p_state) {
 	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead;
 }
 
-bool finite3(const sim::Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 bool segment_hits_sphere(const sim::Vec3 &p_origin, const sim::Vec3 &p_dir, float p_length, const sim::Vec3 &p_centre, float p_radius, float &r_t) {
 	const float cx = p_centre[0] - p_origin[0], cy = p_centre[1] - p_origin[1], cz = p_centre[2] - p_origin[2];
@@ -106,190 +105,128 @@ bool same_row(const net::PlayerRow &p_a, const net::PlayerRow &p_b) {
 	return std::memcmp(&p_a, &p_b, sizeof(net::PlayerRow)) == 0;
 }
 
-std::string_view trim(std::string_view p_text) {
-	while (!p_text.empty() && (p_text.front() == ' ' || p_text.front() == '\t' || p_text.front() == '\r')) {
-		p_text.remove_prefix(1);
+using Key = core::KeyDef<TdmTuning>;
+using core::KeyFault;
+using core::KeyKind;
+using core::KeyOutcome;
+
+KeyOutcome parse_kit_weights(const Key &, std::string_view p_value, TdmTuning &r_tuning) {
+	std::array<uint32_t, 4> w{};
+	std::string_view rest = p_value;
+	size_t k = 0;
+	uint64_t sum = 0;
+	while (!rest.empty()) {
+		const size_t sp = rest.find_first_of(" \t");
+		const std::string_view tok = rest.substr(0, sp);
+		rest = sp == std::string_view::npos ? std::string_view() : core::trim(rest.substr(sp));
+		int32_t v = 0;
+		if (k >= w.size() || core::parse_i32_value(tok, 0, 1000000, v).fault != KeyFault::None) {
+			return { KeyFault::BadValue };
+		}
+		w[k++] = uint32_t(v);
+		sum += uint64_t(v);
 	}
-	while (!p_text.empty() && (p_text.back() == ' ' || p_text.back() == '\t' || p_text.back() == '\r')) {
-		p_text.remove_suffix(1);
+	if (k != w.size() || sum == 0) {
+		return { KeyFault::BadValue };
 	}
-	return p_text;
+	r_tuning.bot_kit_weights = w;
+	return {};
 }
 
-bool parse_float(std::string_view p_text, float p_min, float p_max, float &r_value) {
-	float v = 0;
-	const auto [end, ec] = std::from_chars(p_text.data(), p_text.data() + p_text.size(), v);
-	if (ec != std::errc() || end != p_text.data() + p_text.size() || !std::isfinite(v) || v < p_min || v > p_max) {
+bool abort_target(std::string_view p_target, ImmunityAbortEntry &r_entry) {
+	if (p_target == "move") {
+		r_entry.move = true;
+	} else if (p_target == "fire") {
+		r_entry.buttons = sim::buttons::kFire;
+	} else if (p_target == "jump") {
+		r_entry.buttons = sim::buttons::kJump;
+	} else if (p_target == "sprint") {
+		r_entry.buttons = sim::buttons::kSprint;
+	} else if (p_target == "zoom") {
+		r_entry.buttons = sim::buttons::kZoom;
+	} else if (p_target == "reload") {
+		r_entry.buttons = sim::buttons::kReload;
+	} else {
 		return false;
 	}
-	r_value = v;
 	return true;
 }
 
-bool parse_int(std::string_view p_text, int64_t p_min, int64_t p_max, int64_t &r_value) {
-	int64_t v = 0;
-	const auto [end, ec] = std::from_chars(p_text.data(), p_text.data() + p_text.size(), v);
-	if (ec != std::errc() || end != p_text.data() + p_text.size() || v < p_min || v > p_max) {
-		return false;
+KeyOutcome parse_immunity_abort_map(const Key &, std::string_view p_value, TdmTuning &r_tuning) {
+	std::vector<ImmunityAbortEntry> map;
+	std::string_view rest = p_value;
+	while (!rest.empty()) {
+		const size_t sp = rest.find_first_of(" \t");
+		const std::string_view tok = rest.substr(0, sp);
+		rest = sp == std::string_view::npos ? std::string_view() : core::trim(rest.substr(sp));
+		const size_t colon = tok.find(':');
+		ImmunityAbortEntry e;
+		if (colon == std::string_view::npos || map.size() >= kMaxImmunityAbortEntries ||
+				core::parse_i32_value(tok.substr(0, colon), -1000000, 1000000, e.value).fault != KeyFault::None ||
+				!abort_target(tok.substr(colon + 1), e)) {
+			return { KeyFault::BadValue };
+		}
+		map.push_back(e);
 	}
-	r_value = v;
-	return true;
+	r_tuning.immunity_abort_map = std::move(map);
+	return {};
 }
 
-bool parse_bool(std::string_view p_text, bool &r_value) {
-	if (p_text == "true") {
-		r_value = true;
-		return true;
+#define BF3_TDM_FIELD(f) [](TdmTuning &t) -> void * { return &t.f; }
+
+const Key kKeys[] = {
+	{ "revive_wait_radius_m", KeyKind::Float, 0.0f, 1000.0f, BF3_TDM_FIELD(revive_wait_radius_m) },
+	{ "revive_wait_s", KeyKind::Float, 0.0f, 3600.0f, BF3_TDM_FIELD(revive_wait_s) },
+	{ "restart_estimate_s", KeyKind::Float, 0.0f, 3600.0f, BF3_TDM_FIELD(restart_estimate_s) },
+	{ "revive_takes_kill", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(revive_takes_kill) },
+	{ "defib_range_m", KeyKind::Float, 0.0f, 100.0f, BF3_TDM_FIELD(defib_range_m) },
+	{ "corpse_up_m", KeyKind::Float, -10.0f, 10.0f, BF3_TDM_FIELD(corpse_up_m) },
+	{ "corpse_radius_m", KeyKind::Float, 0.0f, 10.0f, BF3_TDM_FIELD(corpse_radius_m) },
+	{ "living_radius_m", KeyKind::Float, 0.0f, 10.0f, BF3_TDM_FIELD(living_radius_m) },
+	{ "score_kill", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_kill) },
+	{ "score_headshot", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_headshot) },
+	{ "score_revive", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_revive) },
+	{ "bot_kit_weights", KeyKind::Custom, 0, 0, nullptr, {}, parse_kit_weights },
+	{ "spawn_safe_distance_m", KeyKind::Float, 0.0f, 10000.0f, BF3_TDM_FIELD(spawn_safe_distance_m) },
+	{ "friendly_block_radius_m", KeyKind::Float, 0.0f, 10000.0f, BF3_TDM_FIELD(friendly_block_radius_m) },
+	{ "friendly_block_count", KeyKind::I32, 0, 1000, BF3_TDM_FIELD(friendly_block_count) },
+	{ "friendly_block_s", KeyKind::Float, 0.0f, 3600.0f, BF3_TDM_FIELD(friendly_block_s) },
+	{ "spawn_los_rays", KeyKind::I32, 0, 64, BF3_TDM_FIELD(spawn_los_rays) },
+	{ "spawn_chest_height_m", KeyKind::Float, 0.0f, 10.0f, BF3_TDM_FIELD(spawn_chest_height_m) },
+	{ "team_kill_weight", KeyKind::Float, -100.0f, 100.0f, BF3_TDM_FIELD(team_kill_weight) },
+	{ "rotate_teams", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(rotate_teams) },
+	{ "suppression_resets_regen", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(suppression_resets_regen) },
+	{ "immunity_abort_map", KeyKind::Custom, 0, 0, nullptr, {}, parse_immunity_abort_map },
+	{ "measured", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(measured) },
+};
+
+#undef BF3_TDM_FIELD
+
+std::string tdm_fault(const core::KeyFaultInfo &p_info) {
+	const std::string where = core::key_fault_where(p_info);
+	switch (p_info.fault) {
+		case KeyFault::NoEquals:
+			return where + ": no '='";
+		case KeyFault::UnknownKey:
+			return where + ": unknown key `" + std::string(p_info.key) + "`";
+		case KeyFault::NotANumber:
+		case KeyFault::NotAWholeNumber:
+		case KeyFault::OutOfRange:
+		case KeyFault::NotABool:
+		case KeyFault::NotAChoice:
+		case KeyFault::BadValue:
+			return where + ": bad value for `" + std::string(p_info.key) + "`: `" + std::string(p_info.value) + "`";
+		default:
+			return core::key_fault_message(p_info);
 	}
-	if (p_text == "false") {
-		r_value = false;
-		return true;
-	}
-	return false;
 }
 
+const core::KeyValueGrammar<TdmTuning> kGrammar{ "tdm tuning", kKeys, kMaxTdmTuningBytes, kMaxTdmTuningLines, SIZE_MAX,
+	false, '\n', true, true, tdm_fault };
 }
 
 core::Result<TdmTuning> parse_tdm_tuning(std::string_view p_text) {
-	if (p_text.size() > kMaxTdmTuningBytes) {
-		return core::make_error("tdm tuning: " + std::to_string(p_text.size()) + " bytes (limit " + std::to_string(kMaxTdmTuningBytes) + ")");
-	}
-	TdmTuning t;
-	size_t line_no = 0;
-	while (!p_text.empty()) {
-		++line_no;
-		const size_t eol = p_text.find('\n');
-		std::string_view line = p_text.substr(0, eol);
-		p_text = eol == std::string_view::npos ? std::string_view() : p_text.substr(eol + 1);
-		if (const size_t hash = line.find('#'); hash != std::string_view::npos) {
-			line = line.substr(0, hash);
-		}
-		line = trim(line);
-		if (line.empty()) {
-			continue;
-		}
-		const size_t eq = line.find('=');
-		const std::string where = "tdm tuning line " + std::to_string(line_no);
-		if (eq == std::string_view::npos) {
-			return core::make_error(where + ": no '='");
-		}
-		const std::string_view key = trim(line.substr(0, eq));
-		const std::string_view value = trim(line.substr(eq + 1));
-		bool ok = true;
-		int64_t i = 0;
-		const auto f = [&](float &r_field, float p_min, float p_max) { ok = parse_float(value, p_min, p_max, r_field); };
-		const auto n = [&](int32_t &r_field, int64_t p_min, int64_t p_max) {
-			ok = parse_int(value, p_min, p_max, i);
-			if (ok) {
-				r_field = int32_t(i);
-			}
-		};
-		const auto b = [&](bool &r_field) { ok = parse_bool(value, r_field); };
-		if (key == "revive_wait_radius_m") {
-			f(t.revive_wait_radius_m, 0.0f, 1000.0f);
-		} else if (key == "revive_wait_s") {
-			f(t.revive_wait_s, 0.0f, 3600.0f);
-		} else if (key == "restart_estimate_s") {
-			f(t.restart_estimate_s, 0.0f, 3600.0f);
-		} else if (key == "revive_takes_kill") {
-			b(t.revive_takes_kill);
-		} else if (key == "defib_range_m") {
-			f(t.defib_range_m, 0.0f, 100.0f);
-		} else if (key == "corpse_up_m") {
-			f(t.corpse_up_m, -10.0f, 10.0f);
-		} else if (key == "corpse_radius_m") {
-			f(t.corpse_radius_m, 0.0f, 10.0f);
-		} else if (key == "living_radius_m") {
-			f(t.living_radius_m, 0.0f, 10.0f);
-		} else if (key == "score_kill") {
-			n(t.score_kill, -100000, 100000);
-		} else if (key == "score_headshot") {
-			n(t.score_headshot, -100000, 100000);
-		} else if (key == "score_revive") {
-			n(t.score_revive, -100000, 100000);
-		} else if (key == "bot_kit_weights") {
-			std::array<uint32_t, 4> w{};
-			std::string_view rest = value;
-			size_t k = 0;
-			uint64_t sum = 0;
-			while (ok && !rest.empty()) {
-				const size_t sp = rest.find_first_of(" \t");
-				const std::string_view tok = rest.substr(0, sp);
-				rest = sp == std::string_view::npos ? std::string_view() : trim(rest.substr(sp));
-				ok = k < w.size() && parse_int(tok, 0, 1000000, i);
-				if (ok) {
-					w[k++] = uint32_t(i);
-					sum += uint64_t(i);
-				}
-			}
-			ok = ok && k == w.size() && sum > 0;
-			if (ok) {
-				t.bot_kit_weights = w;
-			}
-		} else if (key == "spawn_safe_distance_m") {
-			f(t.spawn_safe_distance_m, 0.0f, 10000.0f);
-		} else if (key == "friendly_block_radius_m") {
-			f(t.friendly_block_radius_m, 0.0f, 10000.0f);
-		} else if (key == "friendly_block_count") {
-			n(t.friendly_block_count, 0, 1000);
-		} else if (key == "friendly_block_s") {
-			f(t.friendly_block_s, 0.0f, 3600.0f);
-		} else if (key == "spawn_los_rays") {
-			n(t.spawn_los_rays, 0, 64);
-		} else if (key == "spawn_chest_height_m") {
-			f(t.spawn_chest_height_m, 0.0f, 10.0f);
-		} else if (key == "team_kill_weight") {
-			f(t.team_kill_weight, -100.0f, 100.0f);
-		} else if (key == "rotate_teams") {
-			b(t.rotate_teams);
-		} else if (key == "suppression_resets_regen") {
-			b(t.suppression_resets_regen);
-		} else if (key == "immunity_abort_map") {
-			std::vector<ImmunityAbortEntry> map;
-			std::string_view rest = value;
-			while (ok && !rest.empty()) {
-				const size_t sp = rest.find_first_of(" \t");
-				const std::string_view tok = rest.substr(0, sp);
-				rest = sp == std::string_view::npos ? std::string_view() : trim(rest.substr(sp));
-				const size_t colon = tok.find(':');
-				ok = colon != std::string_view::npos && map.size() < kMaxImmunityAbortEntries && parse_int(tok.substr(0, colon), -1000000, 1000000, i);
-				if (!ok) {
-					break;
-				}
-				ImmunityAbortEntry e;
-				e.value = int32_t(i);
-				const std::string_view target = tok.substr(colon + 1);
-				if (target == "move") {
-					e.move = true;
-				} else if (target == "fire") {
-					e.buttons = sim::buttons::kFire;
-				} else if (target == "jump") {
-					e.buttons = sim::buttons::kJump;
-				} else if (target == "sprint") {
-					e.buttons = sim::buttons::kSprint;
-				} else if (target == "zoom") {
-					e.buttons = sim::buttons::kZoom;
-				} else if (target == "reload") {
-					e.buttons = sim::buttons::kReload;
-				} else {
-					ok = false;
-					break;
-				}
-				map.push_back(e);
-			}
-			if (ok) {
-				t.immunity_abort_map = std::move(map);
-			}
-		} else if (key == "measured") {
-			b(t.measured);
-		} else {
-			return core::make_error(where + ": unknown key `" + std::string(key) + "`");
-		}
-		if (!ok) {
-			return core::make_error(where + ": bad value for `" + std::string(key) + "`: `" + std::string(value) + "`");
-		}
-	}
-	return t;
+	return core::parse_key_values(p_text, kGrammar);
 }
 
 core::Result<TdmTuning> load_tdm_tuning(const std::string &p_path) {
@@ -666,7 +603,7 @@ void TdmRules::death(const net::DeathEvent &p_event) {
 		d.yaw = s.corpse_yaw;
 		m.downed.insert(std::upper_bound(m.downed.begin(), m.downed.end(), d, [](const DownedSoldier &a, const DownedSoldier &b) { return a.slot < b.slot; }), d);
 	}
-	if (vteam != 0 && finite3(s.corpse)) {
+	if (vteam != 0 && finite(s.corpse)) {
 		if (m.death_ring.size() >= kMaxDeathRing) {
 			m.death_ring.erase(m.death_ring.begin());
 		}
@@ -811,7 +748,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		Impl::Slot &s = m.slots[i];
 		if (s.corpse_fresh) {
 			s.corpse_fresh = false;
-			if (finite3(r_states[i].position)) {
+			if (finite(r_states[i].position)) {
 				s.corpse = r_states[i].position;
 				s.corpse_yaw = r_states[i].yaw;
 			}
@@ -914,7 +851,8 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 			shooter.shot_cursor = int64_t(e.shot_index);
 			++m.stats.defib_shots;
 			const uint8_t team = p_gunplay.team(uint8_t(e.player_slot));
-			if (!shooter.connected || !state_alive(r_states[e.player_slot]) || !finite3(e.origin) || !finite3(e.direction)) {
+			if (!shooter.connected || !state_alive(r_states[e.player_slot]) || !finite(e.origin) ||
+					!finite(e.direction)) {
 				++m.stats.defib_refused;
 				continue;
 			}

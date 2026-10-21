@@ -1,6 +1,7 @@
 #include "bf3/core/level/level.h"
 
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <chrono>
 #include <deque>
@@ -53,10 +54,6 @@ constexpr DisplayName kDisplayNames[29] = {
 	{ "XP5_003", "Kiasar Railroad" },
 	{ "XP5_004", "Sabalan Pipeline" },
 };
-
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
 
 Status search_layers(const EbxResolver &p_db, const EbxInstance &p_container, uint32_t p_depth, size_t &r_containers, WorkBudget &r_budget,
 		std::vector<EbxInstance> &r_out) {

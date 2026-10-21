@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/math.h"
 #include "bf3/core/res_types.h"
 
 #include <array>
@@ -14,7 +15,7 @@ namespace bf3::core::res {
 using Bytes = std::span<const uint8_t>;
 using ResMeta = std::array<uint8_t, 16>;
 using Vec2 = std::array<float, 2>;
-using Vec3 = std::array<float, 3>;
+using Vec3 = core::Vec3;
 using Vec4 = std::array<float, 4>;
 
 inline constexpr uint32_t kResTypeMeshSet = res_type::kMeshSet;

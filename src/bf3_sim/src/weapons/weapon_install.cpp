@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/grid_pairs.h"
 #include "bf3/core/install.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/weapons/damage.h"
 
 #include <chrono>
@@ -14,10 +15,7 @@ namespace bf3::sim::weapons {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
-
+using bf3::core::seconds_since;
 }
 
 core::Result<InstallWeapons> open_install_weapons(std::shared_ptr<const core::Install> p_install, std::string_view p_level) {

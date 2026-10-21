@@ -8,6 +8,7 @@
 #include "bf3/core/ui/font_ttf.h"
 #include "bf3/core/ui/swf_census.h"
 #include "bf3/core/ui/swf_font.h"
+#include "bf3/core/util/format.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -40,14 +41,7 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-std::string fmt(const char *p_fmt, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_fmt);
-	vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 constexpr const char *kMetro = "OPERATION M\xC3\x89TRO";
 constexpr int kSize = 64;

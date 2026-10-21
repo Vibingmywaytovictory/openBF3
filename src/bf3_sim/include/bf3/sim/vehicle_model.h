@@ -86,6 +86,9 @@ struct VehicleTuning {
 	bool operator==(const VehicleTuning &) const = default;
 };
 
+inline constexpr size_t kMaxVehicleTuningLines = 512;
+inline constexpr size_t kMaxVehicleTuningLineBytes = 256;
+
 core::Result<VehicleTuning> parse_vehicle_tuning(std::string_view p_text);
 
 std::string format_vehicle_tuning(const VehicleTuning &p_tuning);

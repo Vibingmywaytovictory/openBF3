@@ -1,6 +1,7 @@
 #include "bf3/fx/simulator.h"
 
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/finite.h"
 #include "fx_internal.h"
 
 #include <algorithm>
@@ -75,9 +76,7 @@ Transform frame_from_up(const Vec3 &p_up, const Vec3 &p_trans) {
 	return t;
 }
 
-inline bool finite3(float p_a, float p_b, float p_c) {
-	return std::isfinite(p_a) && std::isfinite(p_b) && std::isfinite(p_c);
-}
+using bf3::core::finite;
 
 inline float draw(uint64_t p_seed, uint32_t p_serial, uint32_t p_slot, uint32_t p_lane) {
 	return fx_unit(fx_key(p_seed, p_serial, p_slot, p_lane));
@@ -1127,8 +1126,7 @@ struct FxWorld::Impl {
 			light.radius = l.radius;
 			light.color = mul(l.color, intensity);
 			light.intensity = intensity;
-			if (!finite3(light.position.x, light.position.y, light.position.z) || !finite3(light.color.x, light.color.y, light.color.z) ||
-					!std::isfinite(light.intensity)) {
+			if (!finite(light.position) || !finite(light.color) || !std::isfinite(light.intensity)) {
 				return false;
 			}
 		}

@@ -7,6 +7,7 @@
 #include "hud_controls.h"
 #include "input_mapper.h"
 
+#include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/net/protocol.h"
 
@@ -14,8 +15,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdarg>
-#include <cstdio>
 
 #ifndef OPENBF3_M2B_HAVE_UI
 #define OPENBF3_M2B_HAVE_UI 0
@@ -33,14 +32,7 @@ namespace sim = bf3::sim;
 
 namespace {
 
-std::string m2b_fmt(const char *p_format, ...) {
-	char line[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(line, sizeof(line), p_format, args);
-	va_end(args);
-	return line;
-}
+using bf3::core::fmt;
 
 constexpr double kM2bJoinShotDelayS = 1.5;
 constexpr double kM2bChooseDelayS = 0.6;
@@ -141,7 +133,7 @@ struct M2bCheck::State {
 			++tally.screens_after_death;
 		} else if (!p_revived && had_time) {
 			++tally.deaths_checked;
-			note(m2b_fmt("own death at %.1f s: no spawn screen after it", death_t));
+			note(fmt("own death at %.1f s: no spawn screen after it", death_t));
 		}
 	}
 
@@ -156,7 +148,8 @@ struct M2bCheck::State {
 			if (fr.match.phase == net::MatchPhase::RoundOver && round_over_t < 0.0) {
 				round_over_t = p_t;
 				tally.round_over_seen = true;
-				note(m2b_fmt("round over at %.1f s: US %d - RU %d (winner %d)", p_t, fr.match.kills[0], fr.match.kills[1], int(fr.match.winner)));
+				note(fmt("round over at %.1f s: US %d - RU %d (winner %d)", p_t, fr.match.kills[0], fr.match.kills[1],
+						int(fr.match.winner)));
 			}
 		}
 
@@ -164,7 +157,7 @@ struct M2bCheck::State {
 			if (!join_counted) {
 				join_counted = true;
 				tally.join_screen_seen = true;
-				note(m2b_fmt("spawn screen at join (%.1f s)", p_t));
+				note(fmt("spawn screen at join (%.1f s)", p_t));
 			}
 			if (!join_shot && p_t >= kM2bJoinShotDelayS) {
 				join_shot = save_shot("gx_m2b_join") || !tally.windowed;
@@ -182,7 +175,8 @@ struct M2bCheck::State {
 			if (!revived) {
 				tally.kits_deployed_mask |= 1u << std::min<uint8_t>(fr.own_kit, 3);
 			}
-			note(m2b_fmt("life %u at %.1f s: %s, kit %u, team %u", lives_seen, p_t, revived ? "revived" : "deployed", unsigned(fr.own_kit), unsigned(m.own_team)));
+			note(fmt("life %u at %.1f s: %s, kit %u, team %u", lives_seen, p_t, revived ? "revived" : "deployed",
+					unsigned(fr.own_kit), unsigned(m.own_team)));
 			mp.release_all();
 			mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
 			next_tab = p_t + 2.0;
@@ -200,7 +194,8 @@ struct M2bCheck::State {
 			mp.release_all();
 			mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
 			tab_until = -1.0;
-			note(m2b_fmt("own death %u at %.1f s (killer %s)", deaths_seen, p_t, death_by_soldier ? std::to_string(m.own_killer).c_str() : "none"));
+			note(fmt("own death %u at %.1f s (killer %s)", deaths_seen, p_t,
+					death_by_soldier ? std::to_string(m.own_killer).c_str() : "none"));
 		}
 		if (death_pending && m.spawn_screen) {
 			death_screen_seen = true;
@@ -262,7 +257,7 @@ struct M2bCheck::State {
 				sim::Vec3 up = fr.own_curr.position;
 				up[1] += 60.0f;
 				send_teleport(up, mp.view().yaw);
-				note(m2b_fmt("still alive after %.0f s: a 60 m drop", p_t - life_t0));
+				note(fmt("still alive after %.0f s: a 60 m drop", p_t - life_t0));
 			}
 		}
 
@@ -301,7 +296,7 @@ struct M2bCheck::State {
 			best = best_other;
 		}
 		if (best < 0) {
-			note(m2b_fmt("%.1f s: no enemy in view to walk to", p_t));
+			note(fmt("%.1f s: no enemy in view to walk to", p_t));
 			return;
 		}
 
@@ -309,7 +304,8 @@ struct M2bCheck::State {
 		const M2bSeekSpot spot = m2b_seek_spot(e.position, e.yaw, kM2bSeekFrontMetres);
 		last_sought = e.slot;
 		send_teleport(spot.position, spot.yaw);
-		note(m2b_fmt("%.1f s, alive %.0f s without an own death: teleported in front of enemy slot %u", p_t, p_t - life_t0, unsigned(e.slot)));
+		note(fmt("%.1f s, alive %.0f s without an own death: teleported in front of enemy slot %u", p_t, p_t - life_t0,
+				unsigned(e.slot)));
 	}
 
 	void sample_scoreboard() {
@@ -331,7 +327,8 @@ struct M2bCheck::State {
 		const bool ok = shown && std::abs(k1 - fr.match.kills[0]) + std::abs(k2 - fr.match.kills[1]) <= 1;
 		if (!ok) {
 			++tally.scoreboard_mismatch;
-			note(m2b_fmt("scoreboard %s: %d : %d, MatchState %d : %d", shown ? "shown" : "NOT shown", k1, k2, fr.match.kills[0], fr.match.kills[1]));
+			note(fmt("scoreboard %s: %d : %d, MatchState %d : %d", shown ? "shown" : "NOT shown", k1, k2,
+					fr.match.kills[0], fr.match.kills[1]));
 		}
 #endif
 	}
@@ -352,7 +349,8 @@ struct M2bCheck::State {
 				++tally.kill_cards_checked;
 				if (!ok) {
 					++tally.kill_cards_bad;
-					note(m2b_fmt("kill card: visible %d, killer %u, item %u", int(kc.visible), unsigned(kc.killer), unsigned(kc.item_id)));
+					note(fmt("kill card: visible %d, killer %u, item %u", int(kc.visible), unsigned(kc.killer),
+							unsigned(kc.item_id)));
 				}
 			}
 #endif
@@ -427,8 +425,10 @@ struct M2bCheck::State {
 			r.reason = "skipped: " + skipped;
 		}
 		results.push_back(std::move(r));
-		note(m2b_fmt("play: %.1f s, %u own deaths, %u deploys (kits mask 0x%x, %llu requests, %llu resends), %llu deaths received, %u screenshots", p_t,
-				tally.own_deaths, tally.deploys, tally.kits_deployed_mask, (unsigned long long)tally.spawn_requests, (unsigned long long)tally.spawn_request_resends,
+		note(fmt("play: %.1f s, %u own deaths, %u deploys (kits mask 0x%x, %llu requests, %llu resends), %llu deaths "
+				 "received, %u screenshots",
+				p_t, tally.own_deaths, tally.deploys, tally.kits_deployed_mask,
+				(unsigned long long)tally.spawn_requests, (unsigned long long)tally.spawn_request_resends,
 				(unsigned long long)tally.deaths_received, shots_saved));
 	}
 };
@@ -440,8 +440,10 @@ M2bCheck::M2bCheck(Bf3LevelSession &r_session, M2aGame &r_game, M2bGame &r_m2b, 
 	state_->tally.windowed = r_m2b.windowed;
 	r_session.mapper().set_scripted(true);
 	r_session.mapper().release_all();
-	UtilityFunctions::print(to_godot(m2b_fmt("[m2b] check: %zu case(s), play %.0f s (timeout %.0f s), %s, ui %s, cam %s", state_->cases.size(), p_options.play_seconds,
-			p_options.case_timeout_s, r_m2b.windowed ? "windowed" : "headless", OPENBF3_M2B_HAVE_UI ? "built" : "waiting", OPENBF3_M2B_HAVE_CAM ? "built" : "waiting")));
+	UtilityFunctions::print(to_godot(
+			fmt("[m2b] check: %zu case(s), play %.0f s (timeout %.0f s), %s, ui %s, cam %s", state_->cases.size(),
+					p_options.play_seconds, p_options.case_timeout_s, r_m2b.windowed ? "windowed" : "headless",
+					OPENBF3_M2B_HAVE_UI ? "built" : "waiting", OPENBF3_M2B_HAVE_CAM ? "built" : "waiting")));
 }
 
 M2bCheck::~M2bCheck() = default;
@@ -499,12 +501,14 @@ std::string M2bCheck::report() const {
 		if (r.which == M2bCase::Play) {
 			for (const M2bPlayRow &row : state_->play_rows) {
 				const char *verdict = row.state == M2bRowState::Pass ? "PASS" : (row.state == M2bRowState::Fail ? "FAIL" : "SKIP");
-				out += m2b_fmt("%s %s.%s %.6g %s%s%s%s\n", verdict, c.c_str(), row.name.c_str(), row.value, row.rule.c_str(), row.skip_reason.empty() ? "" : " (",
-						row.skip_reason.c_str(), row.skip_reason.empty() ? "" : ")");
+				out += fmt("%s %s.%s %.6g %s%s%s%s\n", verdict, c.c_str(), row.name.c_str(), row.value,
+						row.rule.c_str(), row.skip_reason.empty() ? "" : " (", row.skip_reason.c_str(),
+						row.skip_reason.empty() ? "" : ")");
 			}
 		} else {
 			for (const M2aRow &row : r.rows) {
-				out += m2b_fmt("%s %s.%s %.6g %s\n", row.pass ? "PASS" : "FAIL", c.c_str(), row.name.c_str(), row.value, row.rule.c_str());
+				out += fmt("%s %s.%s %.6g %s\n", row.pass ? "PASS" : "FAIL", c.c_str(), row.name.c_str(), row.value,
+						row.rule.c_str());
 			}
 		}
 		if (r.outcome == M2aOutcome::Skip) {
@@ -513,8 +517,8 @@ std::string M2bCheck::report() const {
 			(r.outcome == M2aOutcome::Pass ? pass : fail) += 1;
 		}
 	}
-	out += m2b_fmt("M2B CHECK: %s (%u pass, %u fail, %u skip of %zu cases)", fail == 0 && pass + skip == state_->cases.size() ? "PASS" : "FAIL", pass, fail, skip,
-			state_->cases.size());
+	out += fmt("M2B CHECK: %s (%u pass, %u fail, %u skip of %zu cases)",
+			fail == 0 && pass + skip == state_->cases.size() ? "PASS" : "FAIL", pass, fail, skip, state_->cases.size());
 	return out;
 }
 

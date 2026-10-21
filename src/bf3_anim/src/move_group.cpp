@@ -1,6 +1,7 @@
 #include "bf3/anim/move_group.h"
 
 #include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/util/finite.h"
 
 #include <algorithm>
 #include <cmath>
@@ -32,9 +33,7 @@ std::string label(const GdStruct &p_s) {
 	return std::string(p_s.type_name()) + " '" + std::string(p_s.name()) + "'";
 }
 
-bool finite(float p_v) {
-	return std::isfinite(p_v);
-}
+using bf3::core::finite;
 
 core::Result<GdStruct> find_static(const AntLibrary &p_library, std::string_view p_type, std::string_view p_name, core::gameplay::WorkBudget &r_budget) {
 	const AntPackage *stat = p_library.static_package();

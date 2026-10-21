@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/math.h"
 #include "bf3/sim/nav.h"
 
 #include <godot_cpp/variant/rid.hpp>
@@ -11,9 +12,9 @@
 namespace bf3::godot_side {
 
 struct NavOverlayArrays {
-	std::vector<std::array<float, 3>> triangle_positions;
+	std::vector<core::Vec3> triangle_positions;
 	std::vector<std::array<float, 4>> triangle_colors;
-	std::vector<std::array<float, 3>> line_positions;
+	std::vector<core::Vec3> line_positions;
 	size_t triangles_main = 0;
 	size_t triangles_other = 0;
 	size_t links = 0;

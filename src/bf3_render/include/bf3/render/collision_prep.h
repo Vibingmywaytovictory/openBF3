@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/level/collision_soup.h"
+#include "bf3/core/math.h"
 
 #include <array>
 #include <cstdint>
@@ -29,8 +30,8 @@ struct PreparedCollisionMesh {
 	std::vector<float> positions;
 	std::vector<float> colors;
 	std::vector<float> uvs;
-	std::array<float, 3> min{};
-	std::array<float, 3> max{};
+	core::Vec3 min{};
+	core::Vec3 max{};
 };
 
 std::vector<PreparedCollisionMesh> prepare_collision_meshes(const core::level::CollisionSoup &p_soup, unsigned p_threads = 0);

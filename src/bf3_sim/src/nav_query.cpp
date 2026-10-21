@@ -1,5 +1,8 @@
 #include "nav_internal.h"
 
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/splitmix64.h"
+
 #include <DetourCommon.h>
 #include <DetourPathCorridor.h>
 
@@ -13,19 +16,11 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double ms_since(Clock::time_point p_start) {
-	return std::chrono::duration<double, std::milli>(Clock::now() - p_start).count();
-}
-
-uint64_t splitmix64(uint64_t &r_state) {
-	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::ms_since;
+using bf3::core::splitmix64_next;
 
 float unit(uint64_t &r_state) {
-	return float(splitmix64(r_state) >> 40) / float(1ull << 24);
+	return float(splitmix64_next(r_state) >> 40) / float(1ull << 24);
 }
 
 }
@@ -71,7 +66,9 @@ bool NavQuery::nearest(const Vec3 &p_point, const Vec3 &p_half_extents, NavPolyR
 	++m.stats.nearest;
 	dtPolyRef ref = 0;
 	float p[3] = { 0, 0, 0 };
-	const bool ok = dtStatusSucceed(m.query->findNearestPoly(p_point.data(), p_half_extents.data(), &m.filter, &ref, p)) && ref != 0;
+	const bool ok = dtStatusSucceed(m.query->findNearestPoly(core::to_array(p_point).data(),
+							core::to_array(p_half_extents).data(), &m.filter, &ref, p)) &&
+			ref != 0;
 	m.stats.ms_nearest += ms_since(start);
 	if (!ok) {
 		return false;
@@ -169,7 +166,8 @@ NavPathStatus NavQuery::begin_path(NavPolyRef p_start, const Vec3 &p_start_point
 	Impl &m = *impl_;
 	const Clock::time_point start = Clock::now();
 	++m.stats.paths_started;
-	const dtStatus st = m.query->initSlicedFindPath(dtPolyRef(p_start), dtPolyRef(p_goal), p_start_point.data(), p_goal_point.data(), &m.filter, 0);
+	const dtStatus st = m.query->initSlicedFindPath(dtPolyRef(p_start), dtPolyRef(p_goal),
+			core::to_array(p_start_point).data(), core::to_array(p_goal_point).data(), &m.filter, 0);
 	m.stats.ms_path += ms_since(start);
 	if (dtStatusFailed(st)) {
 		m.sliced_active = false;
@@ -243,7 +241,8 @@ void NavQuery::cancel_path() {
 bool nav_closest_point(NavQuery &p_query, NavPolyRef p_poly, const Vec3 &p_point, Vec3 *r_point) {
 	float out[3];
 	bool over = false;
-	if (dtStatusFailed(p_query.impl().query->closestPointOnPoly(dtPolyRef(p_poly), p_point.data(), out, &over))) {
+	if (dtStatusFailed(p_query.impl().query->closestPointOnPoly(
+				dtPolyRef(p_poly), core::to_array(p_point).data(), out, &over))) {
 		return false;
 	}
 	*r_point = { out[0], out[1], out[2] };
@@ -273,9 +272,9 @@ void NavCorridor::reset(std::span<const NavPolyRef> p_polys, const Vec3 &p_posit
 		return;
 	}
 	const size_t n = std::min<size_t>(p_polys.size(), kMaxNavPathPolys);
-	m.corridor.reset(dtPolyRef(p_polys[0]), p_position.data());
+	m.corridor.reset(dtPolyRef(p_polys[0]), core::to_array(p_position).data());
 	std::vector<dtPolyRef> path(p_polys.begin(), p_polys.begin() + ptrdiff_t(n));
-	m.corridor.setCorridor(p_goal.data(), path.data(), int(n));
+	m.corridor.setCorridor(core::to_array(p_goal).data(), path.data(), int(n));
 	m.empty = false;
 }
 
@@ -295,7 +294,7 @@ bool NavCorridor::move_position(NavQuery &p_query, const Vec3 &p_position) {
 	NavQuery::Impl &q = p_query.impl();
 	const Clock::time_point start = Clock::now();
 	++q.stats.corridor_moves;
-	const bool ok = m.corridor.movePosition(p_position.data(), q.query.get(), &q.filter);
+	const bool ok = m.corridor.movePosition(core::to_array(p_position).data(), q.query.get(), &q.filter);
 	q.stats.ms_corridor += ms_since(start);
 	if (!ok) {
 		return false;

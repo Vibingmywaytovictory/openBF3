@@ -116,9 +116,9 @@ void tile_cell_range(const res::HeightGrid &p_grid, const Transform &p_frame, co
 	r_x1 = cw;
 	r_z0 = 0;
 	r_z1 = ch;
-	const res::Vec3 &ax = p_frame.axis[0];
-	const res::Vec3 &ay = p_frame.axis[1];
-	const res::Vec3 &az = p_frame.axis[2];
+	const res::Vec3 &ax = p_frame.right;
+	const res::Vec3 &ay = p_frame.up;
+	const res::Vec3 &az = p_frame.forward;
 	if (ax[1] != 0.0f || az[1] != 0.0f || ay[0] != 0.0f || ay[2] != 0.0f) {
 		return;
 	}
@@ -127,14 +127,15 @@ void tile_cell_range(const res::HeightGrid &p_grid, const Transform &p_frame, co
 	const double det = a * d - b * c;
 	const double ox = p_grid.origin_xz[0], oz = p_grid.origin_xz[1];
 	const double sx = p_grid.sample_spacing[0], sz = p_grid.sample_spacing[1];
-	if (!std::isfinite(det) || std::fabs(det) < 1e-12 || !std::isfinite(ox) || !std::isfinite(oz) || !std::isfinite(sx) || !std::isfinite(sz) ||
-			std::fabs(sx) < 1e-9 || std::fabs(sz) < 1e-9 || !std::isfinite(p_frame.origin[0]) || !std::isfinite(p_frame.origin[2])) {
+	if (!std::isfinite(det) || std::fabs(det) < 1e-12 || !std::isfinite(ox) || !std::isfinite(oz) ||
+			!std::isfinite(sx) || !std::isfinite(sz) || std::fabs(sx) < 1e-9 || std::fabs(sz) < 1e-9 ||
+			!std::isfinite(p_frame.trans[0]) || !std::isfinite(p_frame.trans[2])) {
 		return;
 	}
 	double gx0 = std::numeric_limits<double>::infinity(), gx1 = -gx0, gz0 = gx0, gz1 = -gx0;
 	for (int k = 0; k < 4; ++k) {
-		const double wx = (double(p_tile[0]) + double(k & 1)) * 64.0 - double(p_frame.origin[0]);
-		const double wz = (double(p_tile[1]) + double(k >> 1)) * 64.0 - double(p_frame.origin[2]);
+		const double wx = (double(p_tile[0]) + double(k & 1)) * 64.0 - double(p_frame.trans[0]);
+		const double wz = (double(p_tile[1]) + double(k >> 1)) * 64.0 - double(p_frame.trans[2]);
 		const double lx = (d * wx - b * wz) / det;
 		const double lz = (-c * wx + a * wz) / det;
 		const double gx = (lx - ox) / sx;

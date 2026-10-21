@@ -9,6 +9,7 @@
 #include "bf3/core/gameplay/vehicle_def.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
+#include "bf3/core/util/elapsed.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -591,9 +592,7 @@ const EbxPartition *insert_syn(EbxDb &r_db, const char *p_name, const SynPartiti
 	return p;
 }
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 constexpr double kFastSeconds = 20.0;
 

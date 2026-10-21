@@ -14,6 +14,8 @@
 #include "viewmodel_muzzle.h"
 
 #include "bf3/core/install.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/kits.h"
 #include "bf3/net/protocol.h"
@@ -78,12 +80,7 @@ std::filesystem::path utf8_path(const std::string &p_text) {
 	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
 }
 
-std::string lower(std::string p_text) {
-	for (char &c : p_text) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return p_text;
-}
+using bf3::core::to_lower_ascii;
 
 const char *team_name(uint8_t p_team) {
 	return p_team == 1 ? "US" : (p_team == 2 ? "RU" : "?");
@@ -797,9 +794,9 @@ void m2a_map_items(M2aGame &r_game) {
 				if (l.defs[s] == sw::kNoWeapon || l.unlocks[s].empty()) {
 					continue;
 				}
-				const std::string want = lower(l.unlocks[s]);
+				const std::string want = to_lower_ascii(l.unlocks[s]);
 				for (size_t i = 0; i < set->items.size(); ++i) {
-					if (lower(set->items[i].unlock) == want) {
+					if (to_lower_ascii(set->items[i].unlock) == want) {
 						map[l.defs[s]] = int(i);
 						break;
 					}
@@ -881,9 +878,7 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 		r_game.camera_valid = true;
 	}
 
-	const auto ms_since = [](std::chrono::steady_clock::time_point p_t0) {
-		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
-	};
+	using bf3::core::ms_since;
 	auto t0 = std::chrono::steady_clock::now();
 	if (r_game.crowd_built) {
 		r_game.crowd->step(mf);
@@ -960,9 +955,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 	M2aSession &g = *m2a_;
 	++g.frames;
 	const auto frame_t0 = std::chrono::steady_clock::now();
-	const auto ms_since = [](std::chrono::steady_clock::time_point p_t0) {
-		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
-	};
+	using bf3::core::ms_since;
 	const host::PresentationFrame &f = *frame_;
 	m2b_bb_tdm_frame(f);
 	if (!g.built) {

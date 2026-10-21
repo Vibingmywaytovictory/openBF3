@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ids.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -90,9 +91,9 @@ public:
 	struct FieldRange;
 	FieldRange fields() const;
 
-	std::optional<std::array<float, 3>> vec3() const;
+	std::optional<core::Vec3> vec3() const;
 
-	std::optional<std::array<std::array<float, 3>, 4>> transform() const;
+	std::optional<std::array<core::Vec3, 4>> transform() const;
 
 	bool operator==(const EbxStruct &p_other) const {
 		return partition_ == p_other.partition_ && complex_ == p_other.complex_ && offset_ == p_other.offset_;
@@ -193,8 +194,8 @@ public:
 
 	std::optional<EbxValue> get(std::string_view p_field) const;
 	std::optional<EbxValue> get_path(std::string_view p_path) const;
-	std::optional<std::array<float, 3>> as_vec3() const;
-	std::optional<std::array<std::array<float, 3>, 4>> as_transform() const;
+	std::optional<core::Vec3> as_vec3() const;
+	std::optional<std::array<core::Vec3, 4>> as_transform() const;
 
 private:
 	Kind kind_ = Kind::Bool;

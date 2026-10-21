@@ -8,12 +8,13 @@
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 #include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_cache.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -34,9 +35,7 @@ namespace {
 
 constexpr const char *kRigName = "Venice1pAntSke01";
 
-double since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 const char *texture_format_name(core::res::TextureFormat p_format) {
 	using core::res::TextureFormat;
@@ -307,7 +306,7 @@ constexpr size_t kMaxAttachments = 16;
 void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInstance &p_swd, const anim::Skeleton &p_rig, const std::string &p_unlock,
 		std::vector<ViewmodelAttachment> &r_out, std::vector<std::string> &r_notes) {
 	auto mat = [](const std::optional<core::EbxValue> &p_v) {
-		const std::optional<std::array<std::array<float, 3>, 4>> rows = p_v ? p_v->as_transform() : std::nullopt;
+		const std::optional<std::array<core::Vec3, 4>> rows = p_v ? p_v->as_transform() : std::nullopt;
 		return rows ? anim::mat_from_linear_transform(*rows) : anim::Mat34{};
 	};
 	for (const core::EbxInstance &socket : p_lib.follow_all(p_swd.data(), "Sockets")) {
@@ -378,7 +377,7 @@ core::Status prepare_rigid_part(const core::LevelMount &p_mount, ViewmodelPart &
 	}
 	r_part.prepared = std::move(mesh->mesh.meshes[0]);
 	r_part.cache = mesh->item;
-	r_part.seconds_mesh = since(tm);
+	r_part.seconds_mesh = seconds_since(tm);
 	char line[320];
 	std::snprintf(line, sizeof(line), "mesh %s (rigid accessory): %s in %.2f ms", r_part.mesh.c_str(),
 			p_cache != nullptr && p_cache->is_open() ? core::cache_outcome_name(r_part.cache.outcome) : "no cache", r_part.seconds_mesh * 1000.0);
@@ -413,7 +412,7 @@ core::Status prepare_part(const core::LevelMount &p_mount, ViewmodelPart &r_part
 	}
 	r_part.prepared = std::move(mesh->mesh.meshes[0]);
 	r_part.cache = mesh->item;
-	r_part.seconds_mesh = since(tm);
+	r_part.seconds_mesh = seconds_since(tm);
 	char line[320];
 	std::snprintf(line, sizeof(line), "mesh %s: %s (%.1f KiB blob) in %.2f ms", r_part.mesh.c_str(),
 			p_cache != nullptr && p_cache->is_open() ? core::cache_outcome_name(r_part.cache.outcome) : "no cache", double(r_part.cache.payload_bytes) / 1024.0,
@@ -517,7 +516,7 @@ core::Result<std::unique_ptr<ViewmodelSources>> open_viewmodel_sources(const cor
 		return library.error();
 	}
 	s->library = std::shared_ptr<core::ant::AntLibrary>(std::move(*library));
-	s->seconds_ant = since(t0);
+	s->seconds_ant = seconds_since(t0);
 	progress("mounting the level superbundle", 3);
 	t0 = Clock::now();
 	core::Result<std::unique_ptr<core::EbxLibrary>> ebx = core::EbxLibrary::open(s->install, { p_superbundle });
@@ -525,7 +524,7 @@ core::Result<std::unique_ptr<ViewmodelSources>> open_viewmodel_sources(const cor
 		return core::error_at(p_superbundle, ebx.error());
 	}
 	s->ebx = std::move(*ebx);
-	s->seconds_ebx = since(t0);
+	s->seconds_ebx = seconds_since(t0);
 	return s;
 }
 
@@ -831,7 +830,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	(void)item_no;
 
 	if (p_spec.clips_only) {
-		set->seconds_total = since(start);
+		set->seconds_total = seconds_since(start);
 		progress("done", LoadProgress::kSteps);
 		return set;
 	}
@@ -879,8 +878,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				if (sf.material_index >= item.weapon.materials.slots.size()) {
 					continue;
 				}
-				std::string diffuse = item.weapon.materials.slots[sf.material_index].texture("Diffuse");
-				std::transform(diffuse.begin(), diffuse.end(), diffuse.begin(), [](unsigned char p_c) { return char(std::tolower(p_c)); });
+				const std::string diffuse =
+						core::to_lower_ascii(item.weapon.materials.slots[sf.material_index].texture("Diffuse"));
 				if (diffuse.find(kDogTagTexture) == std::string::npos) {
 					continue;
 				}
@@ -977,7 +976,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		set->notes.push_back(line);
 		set->textures.push_back(std::move(textures[i]));
 	}
-	set->seconds_total = since(start);
+	set->seconds_total = seconds_since(start);
 	progress("uploading", LoadProgress::kSteps - 1);
 	return set;
 }

@@ -1,5 +1,7 @@
 #include "bf3/core/level/collision_soup.h"
 
+#include "bf3/core/util/text.h"
+
 #include <algorithm>
 #include <cctype>
 #include <map>
@@ -150,12 +152,7 @@ std::string_view collision_body_name(uint8_t p_body) {
 }
 
 std::optional<uint8_t> classify_surface(std::string_view p_name) {
-	std::string lower(p_name);
-	for (char &c : lower) {
-		if (c >= 'A' && c <= 'Z') {
-			c = char(c - 'A' + 'a');
-		}
-	}
+	const std::string lower = to_lower_ascii(p_name);
 	std::vector<std::string_view> tokens;
 	size_t at = 0;
 	while (at < lower.size()) {

@@ -12,6 +12,9 @@
 
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/game_audio_check.h"
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
+#include "bf3/core/util/text.h"
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
 
@@ -118,31 +121,11 @@ bool env_is_one(const char *p_name) {
 	return one;
 }
 
-double percentile(std::vector<double> p_v, double p_q) {
-	if (p_v.empty()) {
-		return 0.0;
-	}
-	std::sort(p_v.begin(), p_v.end());
-	const size_t i = size_t(std::clamp(std::ceil(p_q * double(p_v.size())) - 1.0, 0.0, double(p_v.size() - 1)));
-	return p_v[i];
-}
+using bf3::core::nearest_rank;
 using Action = InputMapper::M2aAction;
 
-std::string fmt(const char *p_format, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
-
-std::string lower(std::string p_text) {
-	for (char &c : p_text) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return p_text;
-}
+using bf3::core::fmt;
+using bf3::core::to_lower_ascii;
 
 std::string short_unlock(const std::string &p_unlock) {
 	return p_unlock.substr(p_unlock.rfind('/') + 1);
@@ -1015,7 +998,8 @@ void M2aCheck::State::build_range() {
 	select_slot(0);
 	add("E4 MK11 in hand", 1.0, [](State &st, double, bool) {
 		const host::KitLoadout &l = st.loadout(1, uint8_t(host::KitRole::Recon));
-		const bool mk11 = st.g.weapon.def == l.defs[0] && lower(l.unlocks[0]).find("u_mk11") != std::string::npos;
+		const bool mk11 =
+				st.g.weapon.def == l.defs[0] && to_lower_ascii(l.unlocks[0]).find("u_mk11") != std::string::npos;
 		st.row("e4.mk11_in_hand", double(st.g.weapon.def), "the recon kit's primary in hand is the MK11 (" + short_unlock(l.unlocks[0]) + ")", mk11);
 		return true;
 	});
@@ -1485,7 +1469,8 @@ void M2aCheck::State::kit_deploy(const std::string &p_tag, uint8_t p_team, uint8
 		const host::KitLoadout &l = st.loadout(p_team, p_kit);
 		const Bf3Viewmodel *vm = st.g.own_viewmodel();
 		const bf3::render::ViewmodelItem *item = vm != nullptr ? vm->current_item() : nullptr;
-		const bool ok = item != nullptr && lower(item->unlock) == lower(l.unlocks[p_slot]) && st.g.vm_item == st.g.item_of(p_team, l.defs[p_slot]);
+		const bool ok = item != nullptr && to_lower_ascii(item->unlock) == to_lower_ascii(l.unlocks[p_slot]) &&
+				st.g.vm_item == st.g.item_of(p_team, l.defs[p_slot]);
 		const std::string leaf = short_unlock(l.unlocks[p_slot]);
 		st.row(fmt("%s.item_%u", p_tag.c_str(), unsigned(p_slot)), double(st.g.vm_item), fmt("the viewmodel holds %s (PresentedWeapon::def -> kit unlock)", leaf.c_str()), ok);
 		const bool deployed = (st.clips_seen & (1u << uint32_t(bf3::anim::VmClip::Deploy))) != 0;
@@ -2993,18 +2978,18 @@ void M2aCheck::State::build_firefight() {
 		st.row("ff.crowd_drawn_min", st.ff_min_drawn == 0xFFFFFFFFu ? 0.0 : double(st.ff_min_drawn), "3p soldiers drawn every frame (minimum; reported)", true);
 		st.row("e9.lights_max", double(st.ff_max_lights), fmt("effect lights <= %u in every frame (%u frames over)", fx::kMaxFxLights, st.ff_lights_over), st.ff_lights_over == 0);
 		st.row("e9.particles_max", double(st.ff_max_particles), "live particles (reported; <= 16k expected)", true);
-		const double fx_main_p99 = percentile(st.ff_fx_main, 0.99);
+		const double fx_main_p99 = nearest_rank(st.ff_fx_main, 0.99);
 		st.row("e9.fx_main_p99_ms", fx_main_p99, fmt("FX main thread (world step + RenderPrep + upload + lights) p99 <= 1.0 ms (%zu frames)", st.ff_fx_main.size()),
 				!st.ff_fx_main.empty() && fx_main_p99 <= 1.0);
-		const double gpu_on = percentile(st.ff_gpu_on, 0.5), gpu_off = percentile(st.ff_gpu_off, 0.5);
+		const double gpu_on = nearest_rank(st.ff_gpu_on, 0.5), gpu_off = nearest_rank(st.ff_gpu_off, 0.5);
 		st.row("e9.fx_gpu_ms", gpu_on - gpu_off, fmt("FX GPU time: p50 FX on %.3f - FX off %.3f ms <= 2.0 ms (alternating 5 s windows)", gpu_on, gpu_off),
 				!st.ff_gpu_on.empty() && !st.ff_gpu_off.empty() && gpu_on - gpu_off <= 2.0);
-		const double frame_p99 = percentile(st.ff_frame_on, 0.99);
+		const double frame_p99 = nearest_rank(st.ff_frame_on, 0.99);
 		st.row("e14.frame_p99_ms", frame_p99, fmt("frame p99 <= 16.7 ms at %dx%d, vsync off (FX-on frames, %zu)", kFfWidth, kFfHeight, st.ff_frame_on.size()),
 				!st.ff_frame_on.empty() && frame_p99 <= 16.7);
-		const double m2a_p99 = percentile(st.ff_m2a_on, 0.99);
+		const double m2a_p99 = nearest_rank(st.ff_m2a_on, 0.99);
 		st.row("e14.m2a_main_p99_ms", m2a_p99, "M2a main-thread additions (viewmodel, HUD, crowd, triggers + FX, audio router) p99 <= 3.0 ms", !st.ff_m2a_on.empty() && m2a_p99 <= 3.0);
-		const double crowd_p99 = percentile(st.ff_crowd, 0.99);
+		const double crowd_p99 = nearest_rank(st.ff_crowd, 0.99);
 		st.row("e14.crowd_step_p99_ms", crowd_p99, "Bf3GameCrowd::step p99 <= 2.0 ms (S3 G1a)", !st.ff_crowd.empty() && crowd_p99 <= 2.0);
 		const GameAudioStats as = st.g.audio != nullptr ? st.g.audio->stats() : GameAudioStats();
 		st.row("e14.audio_underruns", double(as.late_blocks - st.ff_late0 + as.short_blocks - st.ff_short0), "0 audio underruns (late + short blocks)",

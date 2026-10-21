@@ -11,13 +11,6 @@ using ca::SoundNodeType;
 
 namespace detail {
 
-uint64_t splitmix64(uint64_t p_x) {
-	uint64_t z = p_x + 0x9e3779b97f4a7c15ull;
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
-	z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
-	return z ^ (z >> 31);
-}
-
 double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw) {
 	const uint64_t h = splitmix64(splitmix64(p_seed ^ (uint64_t(p_node) << 32)) ^ uint64_t(p_draw));
 	return double(h >> 11) * (1.0 / 9007199254740992.0);

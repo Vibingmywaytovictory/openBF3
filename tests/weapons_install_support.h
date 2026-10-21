@@ -8,6 +8,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/spawn_points.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
@@ -30,9 +31,7 @@ struct WeaponsInstall {
 	sw::InstallWeapons weapons;
 };
 
-inline double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 inline WeaponsInstall *weapons_install() {
 	static std::unique_ptr<WeaponsInstall> s_install;

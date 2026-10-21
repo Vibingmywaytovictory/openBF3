@@ -3,6 +3,7 @@
 #include "game_session.h"
 #include "godot_util.h"
 
+#include "bf3/core/util/format.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/sim/nav_link.h"
@@ -30,14 +31,7 @@ using namespace godot;
 
 namespace {
 
-std::string fmt(const char *p_fmt, ...) {
-	char buf[512];
-	va_list args;
-	va_start(args, p_fmt);
-	vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 RigidBody3D *find_rigid_body(Node *p_node) {
 	if (RigidBody3D *rb = Object::cast_to<RigidBody3D>(p_node)) {

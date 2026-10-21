@@ -1,5 +1,7 @@
 #include "collision_world_internal.h"
 
+#include "bf3/core/util/finite.h"
+
 #include "jolt_runtime.h"
 #include "static_world_internal.h"
 
@@ -90,9 +92,7 @@ private:
 	bool hit_ = false;
 };
 
-bool finite3(const Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 JPH::Vec3 to_jolt(const Vec3 &p_v) {
 	return JPH::Vec3(p_v[0], p_v[1], p_v[2]);
@@ -255,7 +255,7 @@ const std::shared_ptr<const StaticWorldShapes> &CollisionWorld::shapes() const {
 
 bool CollisionWorld::ray(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_mask, StaticHit *r_hit) const {
 	const Impl &w = *impl_;
-	if (!finite3(p_origin) || !finite3(p_delta)) {
+	if (!finite(p_origin) || !finite(p_delta)) {
 		return false;
 	}
 	const JPH::Vec3 delta = to_jolt(p_delta);
@@ -284,7 +284,7 @@ bool CollisionWorld::ray(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_m
 
 bool CollisionWorld::ray_any(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_mask) const {
 	const Impl &w = *impl_;
-	if (!finite3(p_origin) || !finite3(p_delta)) {
+	if (!finite(p_origin) || !finite(p_delta)) {
 		return false;
 	}
 	const JPH::Vec3 delta = to_jolt(p_delta);
@@ -302,7 +302,7 @@ bool CollisionWorld::ray_any(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t
 
 bool CollisionWorld::sweep_capsule(const Vec3 &p_feet, float p_radius, float p_height, const Vec3 &p_delta, uint32_t p_mask, StaticHit *r_hit) const {
 	const Impl &w = *impl_;
-	if (!finite3(p_feet) || !finite3(p_delta)) {
+	if (!finite(p_feet) || !finite(p_delta)) {
 		return false;
 	}
 	const JPH::RefConst<JPH::Shape> shape = upright_capsule(p_radius, p_height);
@@ -364,7 +364,7 @@ bool CollisionWorld::sweep_capsule(const Vec3 &p_feet, float p_radius, float p_h
 
 bool CollisionWorld::overlap_capsule(const Vec3 &p_feet, float p_radius, float p_height, uint32_t p_mask, float p_tolerance) const {
 	const Impl &w = *impl_;
-	if (!finite3(p_feet) || !std::isfinite(p_tolerance)) {
+	if (!finite(p_feet) || !std::isfinite(p_tolerance)) {
 		return false;
 	}
 	const JPH::RefConst<JPH::Shape> shape = upright_capsule(p_radius, p_height);
@@ -382,7 +382,7 @@ bool CollisionWorld::overlap_capsule(const Vec3 &p_feet, float p_radius, float p
 
 bool CollisionWorld::overlap_box(const Vec3 &p_center, const Vec3 &p_half, float p_yaw, uint32_t p_mask, float p_tolerance) const {
 	const Impl &w = *impl_;
-	if (!finite3(p_center) || !finite3(p_half) || !std::isfinite(p_yaw) || !std::isfinite(p_tolerance)) {
+	if (!finite(p_center) || !finite(p_half) || !std::isfinite(p_yaw) || !std::isfinite(p_tolerance)) {
 		return false;
 	}
 	const JPH::Vec3 half = to_jolt(p_half);

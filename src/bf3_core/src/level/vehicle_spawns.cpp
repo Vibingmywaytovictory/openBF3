@@ -2,6 +2,7 @@
 
 #include "bf3/core/level/budget.h"
 #include "bf3/core/level/connections.h"
+#include "bf3/core/util/text.h"
 
 #include <cmath>
 #include <optional>
@@ -111,10 +112,7 @@ Result<std::vector<VehicleSpawnerDef>> read_vehicle_spawners(const World &p_worl
 			const std::optional<std::string_view> name = db.name_of(blueprint->partition().guid());
 			if (name) {
 				BF3_TRY(charge_text(budget, *name));
-				s.blueprint.reserve(name->size());
-				for (const char c : *name) {
-					s.blueprint.push_back(c >= 'A' && c <= 'Z' ? char(c - 'A' + 'a') : c);
-				}
+				s.blueprint = to_lower_ascii(*name);
 			}
 		}
 		Result<int> team = read.team("Team");

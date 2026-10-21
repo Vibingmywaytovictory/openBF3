@@ -1,5 +1,8 @@
 #include "bf3/sim_harness/vehicle_replay.h"
 
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/splitmix64.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -12,9 +15,7 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 Vec3 sub3(const Vec3 &p_a, const Vec3 &p_b) {
 	return { p_a[0] - p_b[0], p_a[1] - p_b[1], p_a[2] - p_b[2] };
@@ -29,12 +30,7 @@ Vec3 forward_of(const std::array<float, 4> &p_q) {
 	return { 2.0f * (x * z + w * y), 2.0f * (y * z - w * x), 1.0f - 2.0f * (x * x + y * y) };
 }
 
-uint64_t splitmix(uint64_t &r_state) {
-	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::splitmix64_next;
 
 float rotation_error_degrees(const std::array<float, 4> &p_a, const std::array<float, 4> &p_b) {
 	const double dot = double(p_a[0]) * p_b[0] + double(p_a[1]) * p_b[1] + double(p_a[2]) * p_b[2] + double(p_a[3]) * p_b[3];
@@ -210,7 +206,7 @@ struct Harness {
 		}
 		uint64_t seed = p_options.seed ^ (p_salt * 0x9E3779B97F4A7C15ull);
 		for (uint32_t i = 0; i < p_options.random_restores; ++i) {
-			restore_ticks.push_back(1u + uint32_t(splitmix(seed) % uint64_t(p_rec.ticks - 1)));
+			restore_ticks.push_back(1u + uint32_t(splitmix64_next(seed) % uint64_t(p_rec.ticks - 1)));
 		}
 		for (const uint32_t t : restore_ticks) {
 			const uint32_t end = std::min<uint32_t>(p_rec.ticks, t + p_options.replay_length);

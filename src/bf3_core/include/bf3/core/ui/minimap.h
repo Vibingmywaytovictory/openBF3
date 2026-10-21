@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/level/budget.h"
+#include "bf3/core/math.h"
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/result.h"
 
@@ -202,7 +203,7 @@ enum class ObjectiveKind : uint8_t {
 
 struct MinimapObjective {
 	ObjectiveKind kind = ObjectiveKind::Flag;
-	std::array<float, 3> position{};
+	core::Vec3 position{};
 	float yaw = 0.0f;
 	int32_t initial_owner = 0;
 	std::string label_sid;

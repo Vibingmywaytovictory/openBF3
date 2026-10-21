@@ -15,6 +15,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
 #include "bf3/core/superbundle_mount.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/net/loopback_ping.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -68,9 +69,7 @@ uint64_t current_ws() {
 	return GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)) ? uint64_t(pmc.WorkingSetSize) : 0;
 }
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 PackedByteArray to_bytes(const uint8_t *p_data, size_t p_size) {
 	PackedByteArray out;

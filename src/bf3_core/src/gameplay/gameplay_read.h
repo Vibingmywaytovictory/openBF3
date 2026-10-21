@@ -57,7 +57,7 @@ inline std::string_view text_view(const EbxStruct &p_object, std::string_view p_
 	return v ? text_view(*v) : std::string_view();
 }
 
-inline std::optional<std::array<float, 3>> vec3(const EbxStruct &p_object, std::string_view p_path) {
+inline std::optional<core::Vec3> vec3(const EbxStruct &p_object, std::string_view p_path) {
 	const std::optional<EbxValue> v = p_object.get_path(p_path);
 	return v ? v->as_vec3() : std::nullopt;
 }

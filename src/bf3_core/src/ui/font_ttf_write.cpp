@@ -1,4 +1,5 @@
 #include "bf3/core/ui/font_ttf.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <array>
@@ -89,10 +90,7 @@ bool fits16(int32_t p_v) {
 }
 
 uint16_t weight_class(const std::string &p_name, bool p_bold) {
-	std::string l;
-	for (const char c : p_name) {
-		l.push_back(char(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c));
-	}
+	const std::string l = to_lower_ascii(p_name);
 	if (l.find("semibold") != std::string::npos) {
 		return 600;
 	}

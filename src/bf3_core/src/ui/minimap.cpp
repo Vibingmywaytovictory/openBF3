@@ -502,7 +502,7 @@ Result<std::vector<std::array<float, 2>>> read_area_polygon(const level::LoadedL
 	std::vector<std::array<float, 2>> out;
 	out.reserve(list->size());
 	for (const EbxValue p : *list) {
-		const std::optional<std::array<float, 3>> v = p.as_vec3();
+		const std::optional<core::Vec3> v = p.as_vec3();
 		if (!v || !std::isfinite((*v)[0]) || !std::isfinite((*v)[1]) || !std::isfinite((*v)[2])) {
 			return make_error(std::string(p_partition) + ": a point is missing or not finite");
 		}

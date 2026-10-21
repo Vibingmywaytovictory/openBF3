@@ -1,5 +1,6 @@
 #include "bf3/sim_harness/weapon_checks.h"
 
+#include "bf3/core/util/format.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
@@ -39,14 +40,7 @@ constexpr std::string_view kM67 = "weapons/m67/u_m67";
 
 constexpr std::string_view kVariants[] = { kM16A3, kM16A4, kM98B, kJng90, kL96, kM40A5, kSv98, kAn94, k870, kM9, kM39, kSks, kM320, kRpg7, kSmaw, kM67 };
 
-std::string fmt(const char *p_format, ...) {
-	char buf[512];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::string units(SimTime p_t) {
 	return fmt("%" PRId64, int64_t(p_t));
@@ -362,7 +356,7 @@ void check_870(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	for (const ShotEvent &s : t->shots) {
 		ProjectileWorld pw(p_in.table);
 		pellets = pellets && s.pellets == 12 && pw.spawn(s).ok() && pw.live().size() == 12;
-		std::set<std::array<float, 3>> dirs;
+		std::set<Vec3> dirs;
 		for (const Projectile &p : pw.live()) {
 			const Vec3 v = to_f(normalize(p.velocity));
 			dirs.insert(v);

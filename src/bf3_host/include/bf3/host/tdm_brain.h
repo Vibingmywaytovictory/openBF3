@@ -108,6 +108,7 @@ struct TdmBotConfig {
 };
 
 inline constexpr size_t kMaxBotTuningBytes = 64 * 1024;
+inline constexpr size_t kMaxBotTuningLines = 1024;
 core::Status parse_bot_tuning(std::string_view p_text, TdmBotConfig &r_config);
 core::Status load_bot_tuning(const std::string &p_path, TdmBotConfig &r_config);
 

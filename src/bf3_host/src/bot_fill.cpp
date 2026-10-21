@@ -4,6 +4,7 @@
 
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/level_load.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
@@ -20,13 +21,8 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
-
-double ms_since(Clock::time_point p_start) {
-	return std::chrono::duration<double, std::milli>(Clock::now() - p_start).count();
-}
+using bf3::core::ms_since;
+using bf3::core::seconds_since;
 
 sim::bots::BotGoal::Kind goal_kind(BotPointRow::Kind p_kind) {
 	switch (p_kind) {

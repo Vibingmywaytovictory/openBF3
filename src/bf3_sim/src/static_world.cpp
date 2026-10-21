@@ -6,6 +6,7 @@
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 
 #include <Jolt/Geometry/IndexedTriangle.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
@@ -25,9 +26,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 uint32_t float_bits(float p_value) {
 	uint32_t bits;

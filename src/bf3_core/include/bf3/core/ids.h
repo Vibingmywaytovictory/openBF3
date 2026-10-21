@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bf3/core/util/text.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -73,8 +75,6 @@ struct Sha1Hash {
 
 uint32_t asset_name_hash(std::string_view p_name);
 
-std::string to_lower_ascii(std::string_view p_text);
-bool iequals_ascii(std::string_view p_a, std::string_view p_b);
 std::string hex_lower(const uint8_t *p_bytes, size_t p_count);
 
 }

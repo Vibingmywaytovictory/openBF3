@@ -6,16 +6,17 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/material_grid.h"
+#include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/core/gameplay/weapon_catalog.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/res/res_loader.h"
-#include "bf3/core/gameplay/weapon_blob.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/fx/effect_compiler.h"
-#include "bf3/fx/fx_harness.h"
 #include "bf3/fx/effect_library.h"
+#include "bf3/fx/fx_harness.h"
 #include "bf3/fx/impact_table.h"
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
@@ -409,7 +410,7 @@ TEST_CASE("decal textures and placements") {
 	d.random_rotation = 180.0f;
 	float lo = 1, hi = 0, rmin = 10, rmax = -10;
 	for (uint64_t s = 0; s < 500; ++s) {
-		const DecalPlacement p = decal_placement(d, fx_mix64(s));
+		const DecalPlacement p = decal_placement(d, splitmix64(s));
 		lo = std::min(lo, p.size);
 		hi = std::max(hi, p.size);
 		rmin = std::min(rmin, p.rotation);
@@ -1292,9 +1293,7 @@ std::string leaf(std::string_view p_name) {
 	return std::string(s == std::string_view::npos ? p_name : p_name.substr(s + 1));
 }
 
-double since(std::chrono::steady_clock::time_point p_t0) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_t0).count();
-}
+using bf3::core::seconds_since;
 
 struct LevelFx {
 	std::unique_ptr<core::gameplay::WeaponSources> sources;
@@ -1340,14 +1339,14 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 
 	core::Result<std::shared_ptr<const hk::GunplayLevel>> gl = hk::load_gunplay_level(r.install, "MP_Subway", "TeamDeathMatch0");
 	REQUIRE_MESSAGE(gl.ok(), (gl.ok() ? std::string() : gl.error().message));
-	const double s_gunplay = since(t0);
+	const double s_gunplay = seconds_since(t0);
 	const auto t1 = std::chrono::steady_clock::now();
 	std::unique_ptr<LevelFx> metro = level_fx(r.install, "MP_Subway", true);
-	const double s_fx = since(t1);
+	const double s_fx = seconds_since(t1);
 	const auto t2 = std::chrono::steady_clock::now();
 	core::Result<FireEffectTable> fire = load_fire_effects(*metro->sources->level, (*gl)->defs);
 	REQUIRE(fire.ok());
-	const double s_fire = since(t2);
+	const double s_fire = seconds_since(t2);
 	for (const std::string &n : fire->notes) {
 		MESSAGE("fire effects note: " << n);
 	}
@@ -1401,7 +1400,7 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 	std::sort(names.begin(), names.end());
 	names.erase(std::unique(names.begin(), names.end()), names.end());
 	const size_t failures = metro->library->preload(names, 0);
-	const double s_preload = since(t3);
+	const double s_preload = seconds_since(t3);
 	CHECK(failures == 0);
 	MESSAGE("Metro: " << (*gl)->defs.size() << " defs (" << firearms << " firearms, " << with_tracer << " with a tracer), " << fire->blueprints().size()
 					  << " fire blueprints + " << impact_names.size() << " impact effects = " << names.size() << " preloaded, " << failures << " failures");
@@ -1463,7 +1462,7 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 	const auto t4 = std::chrono::steady_clock::now();
 	core::Result<core::level::LevelCollision> col = core::level::load_level_collision(r.install, "MP_Subway", "TeamDeathMatch0");
 	REQUIRE_MESSAGE(col.ok(), (col.ok() ? std::string() : col.error().message));
-	const double s_collision = since(t4);
+	const double s_collision = seconds_since(t4);
 	const sw::SurfaceMaterialTable &materials = *(*gl)->materials;
 	struct Named {
 		const char *name;
@@ -1630,7 +1629,8 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 			CHECK_MESSAGE(kind_of.count(d) == 1, std::string(d));
 			CHECK_MESSAGE((kind_of.count(d) == 1 && (kind_of[d] == DecalTextureKind::Alpha || kind_of[d] == DecalTextureKind::MagentaKeyed)), std::string(d));
 		}
-		MESSAGE("decal textures: " << usable << " of " << texture_of.size() << " drawn (" << kind_of.size() << " decals), the rest refused, " << since(tt) << " s");
+		MESSAGE("decal textures: " << usable << " of " << texture_of.size() << " drawn (" << kind_of.size()
+								   << " decals), the rest refused, " << seconds_since(tt) << " s");
 	}
 	MESSAGE("Metro water: " << std::string(metro_water ? "a Water (18) triangle exists" : "no water") << " (" << triangles_of[18] << " triangles)");
 
@@ -1649,10 +1649,11 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 		MESSAGE("Caspian water (18): " << leaf(ct.starts()[0].def->name) << ", sound "
 									   << (ct.sounds().empty() ? std::string("-") : leaf(ct.sounds()[0].patch)));
 	}
-	const double s_caspian = since(t5);
+	const double s_caspian = seconds_since(t5);
 	CHECK(t.stats().double_starts == 0);
-	MESSAGE("seconds: gunplay level " << s_gunplay << ", Metro fx sources " << s_fx << ", fire effects " << s_fire << ", preload " << s_preload
-									  << ", collision " << s_collision << ", Caspian " << s_caspian << ", total " << since(t0));
+	MESSAGE("seconds: gunplay level " << s_gunplay << ", Metro fx sources " << s_fx << ", fire effects " << s_fire
+									  << ", preload " << s_preload << ", collision " << s_collision << ", Caspian "
+									  << s_caspian << ", total " << seconds_since(t0));
 }
 
 TEST_CASE("install unchanged") {

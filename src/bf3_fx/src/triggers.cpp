@@ -2,6 +2,7 @@
 
 #include "fx_ebx.h"
 
+#include "bf3/core/util/finite.h"
 #include "bf3/sim/weapons/sim_time.h"
 
 #include <algorithm>
@@ -29,7 +30,7 @@ Vec3 mul(const Vec3 &a, float s) { return { a.x * s, a.y * s, a.z * s }; }
 float dot(const Vec3 &a, const Vec3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 Vec3 cross(const Vec3 &a, const Vec3 &b) { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
 float length(const Vec3 &a) { return std::sqrt(dot(a, a)); }
-bool finite3(const Vec3 &a) { return std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z); }
+using bf3::core::finite;
 Vec3 normalize_or(const Vec3 &a, const Vec3 &p_fallback) {
 	const float l = length(a);
 	if (!(l > 1e-6f) || !std::isfinite(l)) {
@@ -121,7 +122,7 @@ void read_fire_list(detail::Reader &r, const core::EbxStruct &p_ffd, std::string
 		const Vec3 offset = r.vec3(*s, "Offset");
 		const std::optional<core::EbxValue> rot = r.maybe(*s, "Rotation");
 		const Vec3 rotation = rot ? r.vec3(*s, "Rotation") : Vec3{};
-		if (!finite3(offset) || !finite3(rotation)) {
+		if (!finite(offset) || !finite(rotation)) {
 			r.fail(std::string(p_field) + ": a non-finite Offset or Rotation");
 			return;
 		}
@@ -205,8 +206,9 @@ void read_def(const core::EbxResolver &p_db, const gp::WeaponDef &p_def, size_t 
 enum class KeyKind : uint8_t { Shot = 1, Impact = 2, Soldier = 3, SoldierHit = 4, Detonation = 5 };
 
 uint64_t start_key(KeyKind p_kind, uint8_t p_slot, uint32_t p_id, uint8_t p_pellet, uint32_t p_ordinal) {
-	uint64_t k = fx_mix64((uint64_t(uint8_t(p_kind)) << 56) ^ (uint64_t(p_slot) << 48) ^ (uint64_t(p_pellet) << 40) ^ uint64_t(p_id));
-	return fx_mix64(k ^ uint64_t(p_ordinal));
+	uint64_t k = splitmix64(
+			(uint64_t(uint8_t(p_kind)) << 56) ^ (uint64_t(p_slot) << 48) ^ (uint64_t(p_pellet) << 40) ^ uint64_t(p_id));
+	return splitmix64(k ^ uint64_t(p_ordinal));
 }
 
 uint64_t shot_key(uint8_t p_slot, uint32_t p_id) {
@@ -221,7 +223,7 @@ uint64_t pack(EffectHandle p_h) {
 
 Transform effect_frame(const Vec3 &p_origin, const Vec3 &p_axis, const Vec3 &p_forward_hint) {
 	const Vec3 u = normalize_or(p_axis, { 0, 1, 0 });
-	Vec3 f = finite3(p_forward_hint) ? sub(p_forward_hint, mul(u, dot(p_forward_hint, u))) : Vec3{};
+	Vec3 f = finite(p_forward_hint) ? sub(p_forward_hint, mul(u, dot(p_forward_hint, u))) : Vec3{};
 	if (length(f) < 1e-4f) {
 		f = sub(Vec3{ 0, 0, 1 }, mul(u, u.z));
 		if (length(f) < 1e-4f) {
@@ -253,7 +255,7 @@ Transform weapon_of_effect_frame(const Transform &p_effect) {
 MuzzleSample aim_muzzle(uint8_t p_slot, const Vec3 &p_eye, const Vec3 &p_direction, const Vec3 &p_velocity) {
 	MuzzleSample m;
 	m.slot = p_slot;
-	if (!finite3(p_eye)) {
+	if (!finite(p_eye)) {
 		return m;
 	}
 	const Vec3 d = normalize_or(p_direction, { 0, 0, 1 });
@@ -262,7 +264,7 @@ MuzzleSample aim_muzzle(uint8_t p_slot, const Vec3 &p_eye, const Vec3 &p_directi
 	const Vec3 pos = add(add(add(p_eye, mul(right, kFallbackMuzzleRight)), mul(up, kFallbackMuzzleUp)), mul(d, kFallbackMuzzleForward));
 	m.valid = true;
 	m.transform = effect_frame(pos, d, up);
-	m.velocity = finite3(p_velocity) ? p_velocity : Vec3{};
+	m.velocity = finite(p_velocity) ? p_velocity : Vec3{};
 	return m;
 }
 
@@ -275,8 +277,9 @@ MuzzleSample fallback_muzzle(const present::PresentedSoldier &p_soldier) {
 
 Transform fire_effect_offset(const Vec3 &p_offset, const Vec3 &p_rotation_degrees) {
 	Transform t;
-	t.trans = finite3(p_offset) ? p_offset : Vec3{};
-	if (!finite3(p_rotation_degrees) || (p_rotation_degrees.x == 0 && p_rotation_degrees.y == 0 && p_rotation_degrees.z == 0)) {
+	t.trans = finite(p_offset) ? p_offset : Vec3{};
+	if (!finite(p_rotation_degrees) ||
+			(p_rotation_degrees.x == 0 && p_rotation_degrees.y == 0 && p_rotation_degrees.z == 0)) {
 		return t;
 	}
 	const float d2r = kPi / 180.0f;
@@ -453,8 +456,9 @@ core::Result<DecalTemplate> load_decal_template(const core::EbxResolver &p_db, s
 
 DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed) {
 	DecalPlacement d;
-	d.size = p_template.size + fx_unit(fx_mix64(p_seed ^ 0x51ull)) * p_template.random_size;
-	const float deg = p_template.rotation + (2.0f * fx_unit(fx_mix64(p_seed ^ 0x52ull)) - 1.0f) * p_template.random_rotation;
+	d.size = p_template.size + fx_unit(splitmix64(p_seed ^ 0x51ull)) * p_template.random_size;
+	const float deg =
+			p_template.rotation + (2.0f * fx_unit(splitmix64(p_seed ^ 0x52ull)) - 1.0f) * p_template.random_rotation;
 	d.rotation = deg * (kPi / 180.0f);
 	return d;
 }
@@ -1269,10 +1273,11 @@ void FxTriggers::on_muzzles(std::span<const MuzzleSample> p_muzzles) {
 	m.third.fill(-1);
 	for (size_t i = 0; i < m.muzzles.size(); ++i) {
 		const MuzzleSample &s = m.muzzles[i];
-		if (!s.valid || !finite3(s.transform.trans) || !finite3(s.transform.up) || !finite3(s.transform.forward) || !finite3(s.transform.right)) {
+		if (!s.valid || !finite(s.transform.trans) || !finite(s.transform.up) || !finite(s.transform.forward) ||
+				!finite(s.transform.right)) {
 			continue;
 		}
-		if (!finite3(s.velocity)) {
+		if (!finite(s.velocity)) {
 			m.muzzles[i].velocity = {};
 		}
 		(s.first_person ? m.own_1p : m.third)[s.slot] = int32_t(i);
@@ -1286,7 +1291,7 @@ void FxTriggers::on_events(std::span<const present::PresentEvent> p_events, cons
 	m.sounds.clear();
 	m.starts.clear();
 	m.view = p_view;
-	if (!finite3(m.view.camera_position)) {
+	if (!finite(m.view.camera_position)) {
 		m.view.camera_position = {};
 	}
 

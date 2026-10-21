@@ -9,6 +9,8 @@
 #include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/core/gameplay/weapon_catalog.h"
 #include "bf3/core/install.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/format.h"
 #include "bf3/fx/atlas_pixels.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/emitter_atlas.h"
@@ -35,18 +37,8 @@ namespace {
 constexpr size_t kMaxStartEffectDefs = 256;
 constexpr size_t kMaxNotesErrors = 8;
 
-std::string fmt(const char *p_format, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
-
-double since(std::chrono::steady_clock::time_point p_t0) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_t0).count();
-}
+using bf3::core::fmt;
+using bf3::core::seconds_since;
 
 bool stopping(const M2aLoadInputs &p_in) {
 	return p_in.stop != nullptr && p_in.stop->load(std::memory_order_relaxed);
@@ -114,7 +106,8 @@ struct Bf3GameFx::Impl {
 				core::Result<std::unique_ptr<core::EbxLibrary>> w = core::EbxLibrary::open(install, core::expand_superbundles(*install, "@all-mp"));
 				if (w) {
 					wide = std::move(*w);
-					notes.push_back(fmt("start_effect: @all-mp opened in %.2f s for %.*s", since(t0), int(p_name.size()), p_name.data()));
+					notes.push_back(fmt("start_effect: @all-mp opened in %.2f s for %.*s", seconds_since(t0),
+							int(p_name.size()), p_name.data()));
 				} else {
 					notes.push_back("start_effect: @all-mp: " + w.error().message);
 				}
@@ -236,8 +229,8 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		}
 		m.pixels = std::move(*pixels);
 		m.notes.push_back(fmt("atlas: %zu entries, pixels %s in %.2f s (%.1f + %.1f MiB)", m.atlas->entries().size(),
-				m.pixels.from_cache ? "from the cache" : "converted", since(ta), double(m.pixels.base.bytes.size()) / 1048576.0,
-				double(m.pixels.normal.bytes.size()) / 1048576.0));
+				m.pixels.from_cache ? "from the cache" : "converted", seconds_since(ta),
+				double(m.pixels.base.bytes.size()) / 1048576.0, double(m.pixels.normal.bytes.size()) / 1048576.0));
 	}
 	if (stopping(p_in)) {
 		return core::Error{ "Bf3GameFx::load: stopped" };
@@ -286,8 +279,8 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		const size_t failed = m.library->preload(names, p_in.threads);
 		m.stats.preloaded = uint32_t(names.size());
 		m.stats.preload_failures = uint32_t(failed);
-		m.notes.push_back(fmt("preload: %zu blueprints (%zu fire, %zu impact), %zu failed, %.3f s", names.size(), m.fire->blueprints().size(),
-				fx::impact_effect_names(*m.impacts).size(), failed, since(tp)));
+		m.notes.push_back(fmt("preload: %zu blueprints (%zu fire, %zu impact), %zu failed, %.3f s", names.size(),
+				m.fire->blueprints().size(), fx::impact_effect_names(*m.impacts).size(), failed, seconds_since(tp)));
 	}
 	if (stopping(p_in)) {
 		return core::Error{ "Bf3GameFx::load: stopped" };
@@ -299,16 +292,17 @@ core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
 		m.decal_assets = FxDecalAssets::load(lib, lib.mount(0), names);
 		m.stats.decal_templates = uint32_t(m.decal_assets.templates.size());
 		m.stats.decal_templates_untextured = m.decal_assets.without_texture;
-		m.notes.push_back(fmt("decals: %zu templates of %zu names, %u without a texture, %zu textures (%u magenta-keyed un-keyed, %u refused; %.1f MiB), %.2f s",
-				m.decal_assets.templates.size(), names.size(), m.decal_assets.without_texture, m.decal_assets.textures.size(), m.decal_assets.unkeyed,
-				m.decal_assets.refused,
-				double(m.decal_assets.texture_bytes) / 1048576.0, since(td)));
+		m.notes.push_back(fmt("decals: %zu templates of %zu names, %u without a texture, %zu textures (%u "
+							  "magenta-keyed un-keyed, %u refused; %.1f MiB), %.2f s",
+				m.decal_assets.templates.size(), names.size(), m.decal_assets.without_texture,
+				m.decal_assets.textures.size(), m.decal_assets.unkeyed, m.decal_assets.refused,
+				double(m.decal_assets.texture_bytes) / 1048576.0, seconds_since(td)));
 		m.note_errors("decal", m.decal_assets.errors);
 	}
 	fx::FxWorldConfig wc;
 	m.world = std::make_unique<fx::FxWorld>(wc);
 	m.triggers = std::make_unique<fx::FxTriggers>(*m.world, *m.library, m.fire, m.config);
-	m.stats.load_seconds = since(t0);
+	m.stats.load_seconds = seconds_since(t0);
 	m.loaded = true;
 	return core::Status{};
 }

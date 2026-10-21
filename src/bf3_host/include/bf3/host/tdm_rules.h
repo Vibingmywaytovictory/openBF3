@@ -28,6 +28,7 @@ struct BotLevel;
 
 inline constexpr std::string_view kTdmTuningPath = "config/tdm_tuning.cfg";
 inline constexpr size_t kMaxTdmTuningBytes = 64 * 1024;
+inline constexpr size_t kMaxTdmTuningLines = 1024;
 inline constexpr size_t kMaxImmunityAbortEntries = 64;
 struct ImmunityAbortEntry {
 	int32_t value = 0;

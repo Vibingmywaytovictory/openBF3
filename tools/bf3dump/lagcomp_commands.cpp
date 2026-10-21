@@ -7,13 +7,14 @@
 #include "bf3/anim/pose_math.h"
 #include "bf3/anim/server_pose.h"
 #include "bf3/anim/server_pose_reference.h"
-#include "bf3/anim/skinning.h"
 #include "bf3/anim/skeleton.h"
+#include "bf3/anim/skinning.h"
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/capsule_pose_table.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/lag_comp.h"
 #include "bf3/net/other_sample.h"
 #include "bf3/net/protocol.h"
@@ -58,9 +59,7 @@ const char *kTransition[6] = { "stand->crouch", "stand->prone", "crouch->stand",
 constexpr uint8_t kFrom[6] = { 0, 0, 1, 1, 2, 2 };
 constexpr uint8_t kTo[6] = { 1, 2, 0, 2, 0, 1 };
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 bool install_unchanged(const EbxContext &p_ctx, const core::InstallSnapshot &p_before) {
 	if (p_ctx.reader == nullptr) {
@@ -79,16 +78,9 @@ bool parse_u32(const std::string &p_s, uint32_t &r_v) {
 	return r.ec == std::errc() && r.ptr == p_s.data() + p_s.size();
 }
 
-uint64_t mix64(uint64_t p_x) {
-	p_x ^= p_x >> 33;
-	p_x *= 0xFF51AFD7ED558CCDull;
-	p_x ^= p_x >> 33;
-	p_x *= 0xC4CEB9FE1A85EC53ull;
-	p_x ^= p_x >> 33;
-	return p_x;
-}
+using bf3::core::hash_mix;
 double unit_hash(uint64_t p_a, uint64_t p_b) {
-	return double(mix64(p_a * 0x9E3779B97F4A7C15ull + p_b) >> 11) / double(uint64_t(1) << 53);
+	return double(hash_mix(p_a * 0x9E3779B97F4A7C15ull + p_b) >> 11) / double(uint64_t(1) << 53);
 }
 
 struct TableSet {
@@ -573,7 +565,7 @@ core::Result<PerfResult> run_perf(bool p_long, const sw::WeaponTable &p_table, u
 				sw::ShotEvent e;
 				e.time = next_shot[c];
 				e.spawn_time = e.time + table->defs[p_def].spawn_delay;
-				e.seed = mix64(uint64_t(c) << 32 | shot_index[c]);
+				e.seed = hash_mix(uint64_t(c) << 32 | shot_index[c]);
 				e.player_slot = c;
 				e.shot_index = shot_index[c];
 				e.def = p_def;

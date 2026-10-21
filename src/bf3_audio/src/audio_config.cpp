@@ -1,5 +1,7 @@
 #include "bf3/audio/audio_config.h"
 
+#include "bf3/core/util/text.h"
+
 #include <charconv>
 #include <cmath>
 #include <string>
@@ -27,16 +29,7 @@ constexpr AudioTuningKey kKeys[] = {
 	{ "mixer", "schedule_lead_blocks", &AudioTuning::schedule_lead_blocks, 1.0f, 16.0f, "[inferred] lead of a new burst ahead of the mix clock" },
 };
 
-std::string_view trim(std::string_view p_text) {
-	while (!p_text.empty() && (p_text.front() == ' ' || p_text.front() == '\t' || p_text.front() == '\r')) {
-		p_text.remove_prefix(1);
-	}
-	while (!p_text.empty() && (p_text.back() == ' ' || p_text.back() == '\t' || p_text.back() == '\r')) {
-		p_text.remove_suffix(1);
-	}
-	return p_text;
-}
-
+using bf3::core::trim;
 }
 
 std::span<const AudioTuningKey> audio_tuning_keys() {

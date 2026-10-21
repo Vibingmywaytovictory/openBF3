@@ -6,6 +6,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/vehicle_spawns.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/vehicle_ghost.h"
@@ -32,9 +33,7 @@ namespace {
 
 constexpr const char *kDefaultBlueprint = "vehicles/humveearmored/humveearmored";
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 bool option(const std::string &p_arg, const char *p_name, std::string &r_value) {
 	const std::string prefix = std::string(p_name) + "=";

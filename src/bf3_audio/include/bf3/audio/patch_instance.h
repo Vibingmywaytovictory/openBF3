@@ -3,6 +3,7 @@
 #include "bf3/audio/audio_config.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
 #include <cstdint>
@@ -17,9 +18,7 @@ namespace bf3::audio {
 inline constexpr uint32_t kMaxEventsPerBlock = 32;
 inline constexpr uint32_t kMaxBusChannels = 2;
 
-struct Vec3 {
-	float x = 0.0f, y = 0.0f, z = 0.0f;
-};
+using Vec3 = core::Vec3;
 struct EmitterState {
 	Vec3 position;
 	Vec3 velocity;

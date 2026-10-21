@@ -7,6 +7,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/spawn_points.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/prediction.h"
@@ -879,6 +880,17 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(spaced->gravity == 9.5f);
 		CHECK(spaced->sprint_model == GainModel::Instant);
 		CHECK(parse_motor_tuning("").ok());
+		const core::Result<MotorTuning> large = parse_motor_tuning(std::string(kMaxMotorTuningBytes + 1, '#'));
+		REQUIRE_FALSE(large.ok());
+		CHECK(large.error().message ==
+				"motor tuning: " + std::to_string(kMaxMotorTuningBytes + 1) + " bytes (limit " +
+						std::to_string(kMaxMotorTuningBytes) + ")");
+		const core::Result<MotorTuning> tall = parse_motor_tuning(std::string(kMaxMotorTuningLines, '\n'));
+		REQUIRE_FALSE(tall.ok());
+		CHECK(tall.error().message ==
+				"motor tuning: " + std::to_string(kMaxMotorTuningLines + 1) + " lines (limit " +
+						std::to_string(kMaxMotorTuningLines) + ")");
+		CHECK(parse_motor_tuning(std::string(kMaxMotorTuningLines - 1, '\n')).ok());
 
 		const char *bad[] = { "gravity = 9.81\nnope = 1\n", "gravity = abc\n", "gravity = 9.81 m\n", "gravity = 1e30\n", "gravity = nan\n", "gravity\n",
 			"gravity = 9\ngravity = 9\n", "acceleration_model = quadratic\n", "sprint_stands_up = yes\n", "max_collision_iterations = -1\n",
@@ -936,7 +948,7 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(stand.on_ground.sprint_factor == doctest::Approx(1.0 - std::pow(0.75, 0.5)).epsilon(1e-6));
 		CHECK(stand.in_air.velocity == 6.0f);
 		CHECK(stand.in_air.deceleration_factor == 0.0f);
-		CHECK(prone.box_min_expand == std::array<float, 3>{ 0.3f, 0.0f, 1.3f });
+		CHECK(prone.box_min_expand == bf3::core::Vec3{ 0.3f, 0.0f, 1.3f });
 
 		const uint64_t base = motor_params_hash(p);
 		CHECK(base == motor_params_hash(params_with(MotorTuning())));
@@ -1175,7 +1187,7 @@ TEST_SUITE("sim-motor-unit") {
 			const SoldierState before = h;
 			r.motor->step(h, move_command(h.tick + 1, kAxisMax, 0, 0, Pose(9), 0xFFFFFFu));
 			CHECK(h.tick == before.tick + 1);
-			CHECK(std::memcmp(h.position.data(), before.position.data(), sizeof(Vec3)) == 0);
+			CHECK(std::memcmp(&h.position, &before.position, sizeof(Vec3)) == 0);
 		}
 
 		SoldierState q = s;
@@ -1483,8 +1495,8 @@ TEST_SUITE("sim-motor-unit") {
 			}
 			CHECK(parts.ok == full.ok);
 			CHECK(parts.failure == full.failure);
-			CHECK(std::memcmp(parts.placed.data(), full.placed.data(), sizeof(Vec3)) == 0);
-			CHECK(std::memcmp(parts.state.position.data(), full.state.position.data(), sizeof(Vec3)) == 0);
+			CHECK(std::memcmp(&parts.placed, &full.placed, sizeof(Vec3)) == 0);
+			CHECK(std::memcmp(&parts.state.position, &full.state.position, sizeof(Vec3)) == 0);
 			CHECK(parts.lift == full.lift);
 			CHECK(parts.shift == full.shift);
 			CHECK(parts.gap == full.gap);
@@ -1689,9 +1701,7 @@ struct Metro {
 	double seconds_soup = 0, seconds_shapes = 0;
 };
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 Metro *metro() {
 	static std::unique_ptr<Metro> s_metro;
@@ -2134,7 +2144,8 @@ TEST_SUITE("sim-motor") {
 				++t;
 			}
 			const std::optional<Vec3> d = find_drop_spot(other, *world);
-			const bool drop_same = d.has_value() == drop.has_value() && (!d || std::memcmp(d->data(), drop->data(), sizeof(Vec3)) == 0);
+			const bool drop_same =
+					d.has_value() == drop.has_value() && (!d || std::memcmp(&*d, &*drop, sizeof(Vec3)) == 0);
 			CHECK(drop_same);
 			std::printf("Metro motor on the %s cached world: settle %zu / %zu ok; differences from the direct build: %zu settles, %zu headings, "
 					"%zu of %zu sprint traces; drop spot %s\n",

@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/util/elapsed.h"
 #include "bf3/fx/effect_cache.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/emitter_atlas.h"
@@ -31,12 +32,10 @@ namespace {
 
 constexpr double kFastSeconds = 30.0;
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 uint64_t splitmix(uint64_t &r_state) {
-	return fx_mix64(r_state++);
+	return splitmix64(r_state++);
 }
 
 DocBuilder rich_doc(uint32_t p_seed) {

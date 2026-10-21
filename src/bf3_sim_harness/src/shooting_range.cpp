@@ -1,5 +1,6 @@
 #include "bf3/sim_harness/shooting_range.h"
 
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/weapons/surface_materials.h"
 #include "weapons/weapons_internal.h"
 
@@ -31,9 +32,7 @@ int16_t pitch_to(const Vec3 &p_from, const Vec3 &p_to) {
 	return quantize_pitch(std::atan2(dy, std::sqrt(dx * dx + dz * dz)));
 }
 
-double ms_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::ms_since;
 
 const core::gameplay::PoseDef *pose_def(const core::gameplay::SoldierDef &p_soldier, Pose p_pose) {
 	return p_soldier.pose(core::gameplay::SoldierPose(std::min<size_t>(size_t(p_pose), kPoseCount - 1)));

@@ -4,6 +4,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/ids.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -57,7 +58,7 @@ struct PropertyValue {
 	int64_t i = 0;
 	double f = 0;
 	std::string_view text;
-	std::array<std::array<float, 3>, 4> rows{};
+	std::array<core::Vec3, 4> rows{};
 	EbxValue field;
 	std::optional<EbxInstance> ref;
 
@@ -71,7 +72,7 @@ struct PropertyValue {
 	std::optional<std::string_view> as_str() const;
 
 	std::optional<int> as_team() const;
-	std::optional<std::array<float, 3>> as_vec3() const;
+	std::optional<core::Vec3> as_vec3() const;
 	std::optional<std::string_view> enum_name() const;
 
 	std::optional<EbxRef> as_ref() const;

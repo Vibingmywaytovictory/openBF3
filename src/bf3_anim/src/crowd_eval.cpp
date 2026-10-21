@@ -1,5 +1,6 @@
 #include "bf3/anim/crowd_eval.h"
 
+#include "bf3/core/util/finite.h"
 #include "bf3/core/worker_group.h"
 
 #include <algorithm>
@@ -19,9 +20,7 @@ using Clock = std::chrono::steady_clock;
 constexpr float kReloadRampSeconds = 0.15f;
 constexpr float kDegToRad = 0.0174532925f;
 
-bool finite3(const Vec3 &p_v) {
-	return std::isfinite(p_v.x) && std::isfinite(p_v.y) && std::isfinite(p_v.z);
-}
+using bf3::core::finite;
 
 float stagger_of(uint32_t p_i) {
 	const double v = double(p_i) * 0.6180339887498949;
@@ -298,11 +297,11 @@ void CrowdEvaluator::set_inputs(std::span<const CrowdSoldierInput> p_inputs, dou
 		Impl::Soldier &s = m.soldiers[i];
 		const CrowdSoldierInput &in = p_inputs[i];
 		CrowdSoldierInput next = in;
-		if (!finite3(in.position)) {
+		if (!finite(in.position)) {
 			next.position = s.input.position;
 			++m.bad_inputs;
 		}
-		if (!finite3(in.velocity)) {
+		if (!finite(in.velocity)) {
 			next.velocity = s.input.velocity;
 			++m.bad_inputs;
 		}
@@ -426,7 +425,8 @@ bool additive_delta(const Skeleton &p_rig, const CrowdClipData &p_clip, LocalPos
 }
 
 bool finite_xform(const Xform &p_x) {
-	return std::isfinite(p_x.q.x) && std::isfinite(p_x.q.y) && std::isfinite(p_x.q.z) && std::isfinite(p_x.q.w) && finite3(p_x.t);
+	return std::isfinite(p_x.q.x) && std::isfinite(p_x.q.y) && std::isfinite(p_x.q.z) && std::isfinite(p_x.q.w) &&
+			finite(p_x.t);
 }
 
 }

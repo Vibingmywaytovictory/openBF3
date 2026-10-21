@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/util/splitmix64.h"
 #include "bf3/fx/atlas_pixels.h"
 #include "bf3/fx/emitter_atlas.h"
 #include "bf3/fx/fx_harness.h"
@@ -22,12 +23,7 @@ using bf3::core::gameplay::WorkBudget;
 
 namespace {
 
-uint64_t splitmix(uint64_t &r_state) {
-	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::splitmix64_next;
 
 std::vector<uint8_t> dx_header(uint32_t p_format, uint32_t p_flags, uint16_t p_width, uint16_t p_height, uint8_t p_mips) {
 	std::vector<uint8_t> b(128, 0);
@@ -448,7 +444,7 @@ bf3::core::res::LoadedTexture synthetic_texture(bf3::core::res::TextureFormat p_
 		const uint64_t n = atlas_level_bytes(std::max(1u, uint32_t(p_w) >> m), std::max(1u, uint32_t(p_h) >> m));
 		t.texture.mip_sizes.push_back(uint32_t(n));
 		for (uint64_t i = 0; i < n; ++i) {
-			t.chunk.bytes.push_back(uint8_t(splitmix(rng)));
+			t.chunk.bytes.push_back(uint8_t(splitmix64_next(rng)));
 		}
 	}
 	t.texture.mip_chain_size = uint32_t(t.chunk.bytes.size());
@@ -552,9 +548,9 @@ TEST_CASE("atlas pixels: blob round trip, every truncation, seeded mutations") {
 	size_t decoded = 0;
 	for (int round = 0; round < 4000; ++round) {
 		std::vector<uint8_t> m = blob;
-		const size_t flips = 1 + splitmix(rng) % 4;
+		const size_t flips = 1 + splitmix64_next(rng) % 4;
 		for (size_t k = 0; k < flips; ++k) {
-			const uint64_t r = splitmix(rng);
+			const uint64_t r = splitmix64_next(rng);
 			const size_t limit = std::min<size_t>(m.size(), 400);
 			const size_t at = size_t(r % limit);
 			switch ((r >> 32) % 4) {

@@ -25,6 +25,9 @@ struct NetSimConfig {
 	bool enabled() const { return latency_max_ms > 0 || loss > 0 || spike_chance > 0 || reorder > 0 || duplicate > 0; }
 };
 
+inline constexpr size_t kMaxNetSimProfileBytes = 4096;
+inline constexpr size_t kMaxNetSimProfileItems = 64;
+
 core::Result<NetSimConfig> parse_netsim(std::string_view p_profile);
 std::string format_netsim(const NetSimConfig &p_config);
 

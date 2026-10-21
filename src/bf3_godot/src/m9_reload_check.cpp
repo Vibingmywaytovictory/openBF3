@@ -7,6 +7,7 @@
 #include "bf3/anim/pose.h"
 #include "bf3/anim/skinning.h"
 #include "bf3/core/install.h"
+#include "bf3/core/util/format.h"
 #include "bf3/render/mesh_cache.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
@@ -39,14 +40,7 @@ using bf3::anim::Xform;
 
 namespace {
 
-std::string fmt(const char *p_fmt, ...) {
-	char buf[640];
-	va_list args;
-	va_start(args, p_fmt);
-	vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::string env_var(const char *p_name) {
 	char *v = nullptr;

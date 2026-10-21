@@ -101,10 +101,9 @@ std::filesystem::path utf8_path(const std::string &p_text) {
 	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
 }
 
-Color to_color(const std::array<float, 3> &p_c) {
+Color to_color(const core::Vec3 &p_c) {
 	return Color(p_c[0], p_c[1], p_c[2]);
 }
-
 }
 
 Bf3LevelSession::Bf3LevelSession() :

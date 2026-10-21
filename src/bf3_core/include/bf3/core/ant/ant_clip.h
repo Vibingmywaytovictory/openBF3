@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ant/gd_archive.h"
+#include "bf3/core/math.h"
 
 #include <cstdint>
 #include <span>
@@ -44,9 +45,7 @@ bool is_clip(const GdStruct &p_clip);
 struct Quat {
 	float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f;
 };
-struct Vec3 {
-	float x = 0.0f, y = 0.0f, z = 0.0f;
-};
+using Vec3 = core::Vec3;
 
 bool clip_channel_counts(const GdStruct &p_clip, uint32_t &r_quats, uint32_t &r_vec3s, uint32_t &r_floats);
 

@@ -6,6 +6,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/mesh_cache.h"
 
@@ -20,9 +21,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 void copy_totals(const core::ConvertTotals &p_from, PrepareTotals &r_to) {
 	r_to.items = p_from.items;
@@ -71,7 +70,7 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 	if (!world) {
 		return world.error();
 	}
-	report.seconds_load = since(start);
+	report.seconds_load = seconds_since(start);
 
 	if (p_options.meshes) {
 		Clock::time_point t0 = Clock::now();
@@ -81,7 +80,7 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 		if (!census) {
 			return census.error();
 		}
-		report.seconds_census = since(t0);
+		report.seconds_census = seconds_since(t0);
 		report.placements = census->placements;
 		report.census_failures = census->failures.size();
 
@@ -123,7 +122,7 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 		copy_totals(totals, report.meshes);
 		report.meshes.vertices = vertices;
 		report.meshes.triangles = triangles;
-		report.meshes.seconds = since(t0);
+		report.meshes.seconds = seconds_since(t0);
 	}
 
 	if (p_options.weapons) {
@@ -156,10 +155,10 @@ core::Result<PrepareReport> prepare_level(std::shared_ptr<const core::Install> p
 				},
 				p_options.threads);
 		copy_totals(totals, report.weapons);
-		report.weapons.seconds = since(t0);
+		report.weapons.seconds = seconds_since(t0);
 	}
 	report.failures = std::move(failures.list);
-	report.seconds_total = since(start);
+	report.seconds_total = seconds_since(start);
 	return report;
 }
 

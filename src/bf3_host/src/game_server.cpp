@@ -1,8 +1,10 @@
 #include "bf3/host/game_server.h"
 
-#include "bot_director.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/splitmix64.h"
 #include "bf3/host/firefight_brain.h"
 #include "bf3/host/tdm_brain.h"
+#include "bot_director.h"
 
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
@@ -21,16 +23,8 @@ namespace bf3::host {
 
 namespace {
 
-uint64_t splitmix64(uint64_t &r_state) {
-	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
-
-double ms_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::ms_since;
+using bf3::core::splitmix64_next;
 
 float distance2(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
@@ -234,10 +228,10 @@ struct GameServer::Impl {
 			index = sv_choose_spawn(p_slot, points, p_tick);
 		}
 		if (index == SIZE_MAX) {
-			index = sim::choose_spawn(points, s.team, live_positions(p_slot), config.level->spawn_protection_radius, splitmix64(rng));
+			index = sim::choose_spawn(points, s.team, live_positions(p_slot), config.level->spawn_protection_radius,
+					splitmix64_next(rng));
 			if (index == SIZE_MAX) {
-
-				index = size_t(splitmix64(rng) % points.size());
+				index = size_t(splitmix64_next(rng) % points.size());
 			}
 		}
 		if (index >= points.size()) {

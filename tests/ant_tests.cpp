@@ -7,10 +7,10 @@
 #include "bf3/core/ant/ant_package.h"
 #include "bf3/core/ant/ant_source.h"
 #include "bf3/core/ant/gd_archive.h"
+#include "bf3/core/util/text.h"
 #include "test_support.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -294,8 +294,7 @@ PackageCache &package_cache() {
 }
 
 std::string package_key(const AntPackageInfo &p_info) {
-	std::string name = p_info.name;
-	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char p_c) { return char(std::tolower(p_c)); });
+	const std::string name = bf3::core::to_lower_ascii(p_info.name);
 	return std::to_string(int(p_info.packaging)) + "|" + name + "|" + p_info.streaming_guid;
 }
 

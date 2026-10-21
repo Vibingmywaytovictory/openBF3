@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/vehicle_drive.h"
 #include "bf3/core/res/res_loader.h"
+#include "bf3/core/util/finite.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,13 +16,7 @@ namespace {
 
 constexpr float kDegreesToRadians = 0.017453292519943295769f;
 
-bool finite(float p_v) {
-	return std::isfinite(p_v);
-}
-
-bool finite3(const Vec3 &p_v) {
-	return finite(p_v[0]) && finite(p_v[1]) && finite(p_v[2]);
-}
+using bf3::core::finite;
 
 class Digest {
 public:
@@ -191,7 +186,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	}
 	m->center_of_mass = { ch.center_of_mass[0], ch.center_of_mass[1], ch.center_of_mass[2] };
 	m->inertia_modifier = { ch.inertia_modifier[0], ch.inertia_modifier[1], ch.inertia_modifier[2] };
-	if (!finite3(m->center_of_mass) || !finite3(m->inertia_modifier)) {
+	if (!finite(m->center_of_mass) || !finite(m->inertia_modifier)) {
 		return fail("non-finite centre of mass or inertia modifier");
 	}
 	for (const float f : m->inertia_modifier) {
@@ -224,7 +219,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		ChassisPiece piece;
 		piece.convex_radius = src.radius;
 		for (const Vec3 &p : src.points) {
-			if (!finite3(p) || std::fabs(p[0]) > 100.0f || std::fabs(p[1]) > 100.0f || std::fabs(p[2]) > 100.0f) {
+			if (!finite(p) || std::fabs(p[0]) > 100.0f || std::fabs(p[1]) > 100.0f || std::fabs(p[2]) > 100.0f) {
 				return fail("chassis piece " + std::to_string(i) + " has a point outside 100 m");
 			}
 			piece.points.push_back(p);
@@ -256,7 +251,8 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[wd.config];
 		VehicleWheelModel &w = m->wheels[k];
 		w.data_centre = { wd.transform.trans[0], wd.transform.trans[1], wd.transform.trans[2] };
-		if (!finite3(w.data_centre) || std::fabs(w.data_centre[0]) > 50.0f || std::fabs(w.data_centre[1]) > 50.0f || std::fabs(w.data_centre[2]) > 50.0f) {
+		if (!finite(w.data_centre) || std::fabs(w.data_centre[0]) > 50.0f || std::fabs(w.data_centre[1]) > 50.0f ||
+				std::fabs(w.data_centre[2]) > 50.0f) {
 			return fail("wheel " + std::to_string(k) + " position out of range");
 		}
 		if (!(c.radius > 0.05f && c.radius < 5.0f) || !(c.width > 0.01f && c.width < 5.0f) || !(c.spring_length > 0.01f && c.spring_length < 5.0f)) {

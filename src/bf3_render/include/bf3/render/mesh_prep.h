@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/math.h"
 #include "bf3/core/res/mesh_set.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/result.h"
@@ -27,8 +28,8 @@ struct PreparedSurface {
 	std::vector<float> weights;
 	std::vector<uint16_t> parts;
 	std::vector<int32_t> indices;
-	std::array<float, 3> aabb_min{};
-	std::array<float, 3> aabb_max{};
+	core::Vec3 aabb_min{};
+	core::Vec3 aabb_max{};
 
 	size_t vertex_count() const { return positions.size() / 3; }
 };

@@ -6,6 +6,8 @@
 #include "render_bridge.h"
 
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
 #include "bf3/sim/collision_world.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -63,23 +65,10 @@ std::string path_text(const std::filesystem::path &p_path) {
 	return std::string(u.begin(), u.end());
 }
 
-double percentile(std::vector<double> p_values, double p_q) {
-	if (p_values.empty()) {
-		return 0.0;
-	}
-	std::sort(p_values.begin(), p_values.end());
-	const double at = p_q * double(p_values.size() - 1);
-	const size_t i = size_t(at);
-	const double f = at - double(i);
-	return i + 1 < p_values.size() ? p_values[i] * (1.0 - f) + p_values[i + 1] * f : p_values.back();
-}
+using bf3::core::interpolated_percentile;
 
 Vector3 gv(const anim::Vec3 &p_v) {
 	return Vector3(p_v.x, p_v.y, p_v.z);
-}
-
-bf3::sim::Vec3 sv(const anim::Vec3 &p_v) {
-	return bf3::sim::Vec3{ p_v.x, p_v.y, p_v.z };
 }
 
 const char *vsync_name(DisplayServer::VSyncMode p_mode) {
@@ -102,14 +91,7 @@ uint64_t thread_cycles() {
 	return uint64_t(c);
 }
 
-std::string fmt(const char *p_format, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 const char *pass_text(bool p_ok) {
 	return p_ok ? "PASS" : "FAIL";
@@ -237,7 +219,7 @@ bool Bf3Crowd::validate_stage(std::string *r_error) {
 	const bf3::sim::CollisionWorld &cw = *world_;
 	const uint32_t los = bf3::sim::query_mask::kCollision | bf3::sim::query_mask::kRaycast;
 	const anim::StageCamera cam = anim::stage_camera(stage_);
-	const bf3::sim::Vec3 c = sv(cam.position);
+	const bf3::sim::Vec3 c = cam.position;
 	if (cw.overlap_capsule(bf3::sim::Vec3{ c[0], c[1] - 0.3f, c[2] }, 0.25f, 0.6f, bf3::sim::query_mask::kCollision, 0.0f)) {
 		*r_error = "the camera point is inside geometry";
 		return false;
@@ -380,7 +362,7 @@ bool Bf3Crowd::build(std::string *r_error) {
 			eval_->evaluate_all_here();
 			ms.push_back(double(Time::get_singleton()->get_ticks_usec() - t0) / 1000.0);
 		}
-		single_thread_ms_ = percentile(ms, 0.5);
+		single_thread_ms_ = interpolated_percentile(ms, 0.5);
 		log(fmt("single-thread pose job (evaluate_all_here, 64 soldiers, LOD off): p50 %.3f ms over 30 frames", single_thread_ms_));
 	}
 	if (!make_uploader(check_ ? SkinBackend::Skeleton3D : backend_, r_error)) {
@@ -782,18 +764,18 @@ CrowdRunStats Bf3Crowd::summarize(const RunState &p_run, int p_class) const {
 	}
 	st.seconds = seconds;
 	st.fps = seconds > 0.0 ? double(st.frames) / seconds : 0.0;
-	st.step_p50_ms = percentile(step, 0.5);
-	st.step_p99_ms = percentile(step, 0.99);
-	st.step_cpu_p50_ms = percentile(step_cpu, 0.5);
-	st.other_cpu_p50_ms = percentile(other, 0.5);
-	st.frame_p50_ms = percentile(frame, 0.5);
-	st.frame_p99_ms = percentile(frame, 0.99);
-	st.render_cpu_p50_ms = percentile(rcpu, 0.5);
-	st.render_gpu_p50_ms = percentile(rgpu, 0.5);
-	st.job_p50_ms = percentile(job, 0.5);
-	st.job_p99_ms = percentile(job, 0.99);
-	st.blocked_p99_ms = percentile(blocked, 0.99);
-	st.calls_p50 = uint32_t(percentile(calls, 0.5));
+	st.step_p50_ms = interpolated_percentile(step, 0.5);
+	st.step_p99_ms = interpolated_percentile(step, 0.99);
+	st.step_cpu_p50_ms = interpolated_percentile(step_cpu, 0.5);
+	st.other_cpu_p50_ms = interpolated_percentile(other, 0.5);
+	st.frame_p50_ms = interpolated_percentile(frame, 0.5);
+	st.frame_p99_ms = interpolated_percentile(frame, 0.99);
+	st.render_cpu_p50_ms = interpolated_percentile(rcpu, 0.5);
+	st.render_gpu_p50_ms = interpolated_percentile(rgpu, 0.5);
+	st.job_p50_ms = interpolated_percentile(job, 0.5);
+	st.job_p99_ms = interpolated_percentile(job, 0.99);
+	st.blocked_p99_ms = interpolated_percentile(blocked, 0.99);
+	st.calls_p50 = uint32_t(interpolated_percentile(calls, 0.5));
 	st.evaluated_mean = step.empty() ? 0.0 : evaluated / double(step.size());
 	st.in_view_min = p_run.in_view_min == UINT32_MAX ? 0 : p_run.in_view_min;
 	if (p_run.blend_evaluated > 0) {

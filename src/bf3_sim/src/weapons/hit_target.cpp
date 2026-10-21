@@ -1,5 +1,6 @@
 #include "bf3/sim/weapons/hit_target.h"
 
+#include "bf3/core/util/text.h"
 #include "bf3/sim/weapons/surface_materials.h"
 #include "weapons_internal.h"
 
@@ -150,14 +151,7 @@ Placed layout(Pose p_pose, Role p_role, float p_side) {
 
 constexpr float kLayoutEye[kPoseCount] = { 1.6f, 1.0f, 0.3f };
 
-std::string lower(std::string_view p_s) {
-	std::string o(p_s);
-	for (char &c : o) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return o;
-}
-
+using bf3::core::to_lower_ascii;
 }
 
 bool segment_capsule(const Vec3 &p_from, const Vec3 &p_to, const ZoneCapsule &p_capsule, float &r_fraction, Vec3 &r_normal) {
@@ -167,7 +161,7 @@ bool segment_capsule(const Vec3 &p_from, const Vec3 &p_to, const ZoneCapsule &p_
 	const DVec3 c0 = to_d(p_capsule.a);
 	const DVec3 c1 = to_d(p_capsule.b);
 	const double r = double(p_capsule.radius);
-	if (!(r > 0) || !finite3(a) || !finite3(d) || !finite3(c0) || !finite3(c1)) {
+	if (!(r > 0) || !finite(a) || !finite(d) || !finite(c0) || !finite(c1)) {
 		return false;
 	}
 
@@ -292,7 +286,7 @@ core::Result<HitTarget> standin_target(const core::gameplay::SoldierDef &p_soldi
 		if (!zone) {
 			return core::make_error("standin_target: capsule " + cap.bone + " has no zone property");
 		}
-		const std::string name = lower(cap.bone);
+		const std::string name = to_lower_ascii(cap.bone);
 		Role role = Role::Arm;
 		size_t *counter = &arms;
 		switch (*zone) {

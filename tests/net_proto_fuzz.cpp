@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/util/splitmix64.h"
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/protocol.h"
 #include "bf3/net/weapons_wire.h"
@@ -23,12 +24,7 @@ struct Rng {
 	uint64_t s;
 	explicit Rng(uint64_t p_seed) :
 			s(p_seed) {}
-	uint64_t next() {
-		uint64_t z = (s += 0x9E3779B97F4A7C15ull);
-		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-		z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-		return z ^ (z >> 31);
-	}
+	uint64_t next() { return bf3::core::splitmix64_next(s); }
 	uint32_t below(uint32_t p_n) { return p_n == 0 ? 0 : uint32_t(next() % p_n); }
 	float uniform(float p_lo, float p_hi) { return p_lo + (p_hi - p_lo) * float(double(next() >> 11) / 9007199254740992.0); }
 };

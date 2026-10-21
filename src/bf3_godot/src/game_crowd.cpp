@@ -54,20 +54,16 @@ anim::Quat yaw_quat(float p_yaw) {
 	return anim::Quat{ 0.0f, std::sin(0.5f * p_yaw), 0.0f, std::cos(0.5f * p_yaw) };
 }
 
-fx::Vec3 fv(const anim::Vec3 &p_v) {
-	return fx::Vec3{ p_v.x, p_v.y, p_v.z };
-}
-
 anim::Vec3 rotate(const anim::Quat &p_q, const anim::Vec3 &p_v) {
 	return anim::xform_mul(anim::Xform{ p_q, anim::Vec3{} }, anim::Xform{ anim::Quat{}, p_v }).t;
 }
 
 fx::Transform fx_transform(const anim::Xform &p_x) {
 	fx::Transform t;
-	t.right = fv(rotate(p_x.q, anim::Vec3{ 1, 0, 0 }));
-	t.up = fv(rotate(p_x.q, anim::Vec3{ 0, 1, 0 }));
-	t.forward = fv(rotate(p_x.q, anim::Vec3{ 0, 0, 1 }));
-	t.trans = fv(p_x.t);
+	t.right = rotate(p_x.q, anim::Vec3{ 1, 0, 0 });
+	t.up = rotate(p_x.q, anim::Vec3{ 0, 1, 0 });
+	t.forward = rotate(p_x.q, anim::Vec3{ 0, 0, 1 });
+	t.trans = p_x.t;
 	return t;
 }
 
@@ -254,8 +250,8 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		s.generation = o.generation;
 		s.present = true;
 		anim::CrowdSoldierInput in;
-		in.position = anim::Vec3{ o.position[0], o.position[1], o.position[2] };
-		in.velocity = anim::Vec3{ o.velocity[0], o.velocity[1], o.velocity[2] };
+		in.position = o.position;
+		in.velocity = o.velocity;
 		in.yaw = o.yaw;
 		in.pitch = o.pitch;
 		in.camera_distance = std::sqrt((in.position.x - cam.x) * (in.position.x - cam.x) + (in.position.y - cam.y) * (in.position.y - cam.y) +
@@ -415,7 +411,7 @@ void Bf3GameCrowd::Impl::draw_weapons(const M2aFrame &p_frame) {
 			m.valid = true;
 			m.first_person = false;
 			m.transform = fx_transform(anim::xform_mul(root_x[i], mz));
-			m.velocity = fv(inputs[i].velocity);
+			m.velocity = inputs[i].velocity;
 			muzzles.push_back(m);
 		}
 	}

@@ -3,14 +3,15 @@
 #include "test_support.h"
 #include "weapons_support.h"
 
+#include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
-#include "bf3/core/ebx_db.h"
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/swf_layout.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/sim/weapons/weapon_install.h"
 
@@ -34,11 +35,7 @@ void row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
 	std::fflush(stdout);
 }
 
-std::string fmt(const char *p_format, double p_a, double p_b = 0, double p_c = 0) {
-	char buf[256];
-	std::snprintf(buf, sizeof(buf), p_format, p_a, p_b, p_c);
-	return buf;
-}
+using bf3::core::fmt;
 
 struct SyntheticKit {
 	std::vector<gp::WeaponDef> defs;

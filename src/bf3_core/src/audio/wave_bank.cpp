@@ -3,9 +3,9 @@
 #include "bf3/core/audio/sound_stream.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <string>
 
@@ -31,10 +31,7 @@ std::string loc_superbundle(std::string_view p_language) {
 			return "Win32/Loc/" + std::string(code);
 		}
 	}
-	std::string code;
-	for (char c : p_language.substr(0, 2)) {
-		code += char(std::tolower(static_cast<unsigned char>(c)));
-	}
+	const std::string code = to_lower_ascii(p_language.substr(0, 2));
 	return "Win32/Loc/" + code;
 }
 

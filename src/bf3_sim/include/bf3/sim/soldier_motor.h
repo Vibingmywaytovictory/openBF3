@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/sim_types.h"
@@ -58,6 +59,9 @@ struct MotorTuning {
 	bool operator==(const MotorTuning &) const = default;
 };
 
+inline constexpr size_t kMaxMotorTuningBytes = 64 * 1024;
+inline constexpr size_t kMaxMotorTuningLines = 1024;
+
 core::Result<MotorTuning> parse_motor_tuning(std::string_view p_text);
 std::string format_motor_tuning(const MotorTuning &p_tuning);
 
@@ -84,8 +88,8 @@ struct PoseParams {
 	float height = 0;
 	float eye_height = 0;
 	float step_height = 0;
-	std::array<float, 3> box_min_expand{};
-	std::array<float, 3> box_max_expand{};
+	core::Vec3 box_min_expand{};
+	core::Vec3 box_max_expand{};
 	float min_look_pitch = 0, max_look_pitch = 0;
 	Curve throttle;
 	std::array<uint16_t, kPoseCount> transition_ticks{};

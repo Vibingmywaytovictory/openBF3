@@ -10,6 +10,9 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
+#include "bf3/core/util/text.h"
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
@@ -62,14 +65,7 @@ void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[fx3] " + p_line));
 }
 
-std::string fmt(const char *p_format, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::filesystem::path utf8_path(const std::string &p_text) {
 	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
@@ -80,13 +76,7 @@ std::string path_text(const std::filesystem::path &p_path) {
 	return std::string(s.begin(), s.end());
 }
 
-std::string lower(std::string_view p_text) {
-	std::string s(p_text);
-	for (char &c : s) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return s;
-}
+using bf3::core::to_lower_ascii;
 
 std::string leaf(std::string_view p_name) {
 	const size_t s = p_name.rfind('/');
@@ -105,17 +95,10 @@ bf3::sim::Vec3 sv(const Vector3 &p_v) {
 	return bf3::sim::Vec3{ float(p_v.x), float(p_v.y), float(p_v.z) };
 }
 
-double percentile(std::vector<double> p_values, double p_q) {
-	if (p_values.empty()) {
-		return 0.0;
-	}
-	std::sort(p_values.begin(), p_values.end());
-	const size_t i = std::min(p_values.size() - 1, size_t(std::floor(p_q * double(p_values.size() - 1) + 0.5)));
-	return p_values[i];
-}
+using bf3::core::rounded_rank;
 
 int category_of(std::string_view p_material) {
-	const std::string n = lower(p_material);
+	const std::string n = to_lower_ascii(p_material);
 	if (n == "concrete") {
 		return 0;
 	}
@@ -389,7 +372,7 @@ void Bf3Fx3Demo::find_surfaces() {
 			hi = Vector3(std::max(hi.x, e.x), std::max(hi.y, e.y), std::max(hi.z, e.z));
 		}
 		auto rank = [](std::string_view p_name) {
-			const std::string n = lower(p_name);
+			const std::string n = to_lower_ascii(p_name);
 			return n.find("sand") != std::string::npos ? 3 : (n.find("grass") != std::string::npos ? 2 : 1);
 		};
 		int best_rank = dirt_.found ? (dirt_.name.find("(triangle)") != std::string::npos ? 9 : 0) : -1;
@@ -840,8 +823,9 @@ void Bf3Fx3Demo::report_and_finish() {
 					(unsigned long long)s.decals_untextured, s.decal_templates, s.decal_templates_untextured, s.decal_textures));
 	all &= row("hit", soldier_found_ && t.soldier_hits > 0, fmt("%llu soldier cells (Hit, chest)", (unsigned long long)t.soldier_hits));
 	row("FX time", true,
-			fmt("Bf3GameFx main thread (step + prepare + upload, wall) p50 %.3f ms, p99 %.3f ms over %zu frames (branch, unlocked, shared machine: indicative only)",
-					percentile(fx_ms_, 0.5), percentile(fx_ms_, 0.99), fx_ms_.size()));
+			fmt("Bf3GameFx main thread (step + prepare + upload, wall) p50 %.3f ms, p99 %.3f ms over %zu frames "
+				"(branch, unlocked, shared machine: indicative only)",
+					rounded_rank(fx_ms_, 0.5), rounded_rank(fx_ms_, 0.99), fx_ms_.size()));
 	all &= row("captures", shots_ok_ == shots_.size(), fmt("%u of %zu in %s (the look is the user's judgement)", shots_ok_, shots_.size(), shot_dir_.c_str()));
 	for (const std::string &l : shot_lines_) {
 		report.push_back("           " + l);

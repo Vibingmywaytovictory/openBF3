@@ -1,6 +1,7 @@
 #include "bf3/audio/patch_instance.h"
 
 #include "bf3/core/audio/sound_wave.h"
+#include "bf3/core/util/finite.h"
 #include "patch_state.h"
 
 #include <algorithm>
@@ -30,9 +31,7 @@ Vec3 cross(const Vec3 &a, const Vec3 &b) {
 float length(const Vec3 &a) {
 	return std::sqrt(dot(a, a));
 }
-bool finite(const Vec3 &a) {
-	return std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z);
-}
+using bf3::core::finite;
 
 bool one_plugin_node(SoundNodeType t) {
 	return t == SoundNodeType::Gain || t == SoundNodeType::HighPassIir2 || t == SoundNodeType::LowPassIir2 || t == SoundNodeType::BandPassIir2 ||

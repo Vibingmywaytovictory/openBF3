@@ -4,6 +4,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/result.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
@@ -141,9 +142,7 @@ namespace bf3::test::tdm {
 
 namespace detail {
 
-inline double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 inline net::ShotQuantization &frame() {
 	static net::ShotQuantization s_frame;

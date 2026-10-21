@@ -1,15 +1,12 @@
 #pragma once
 
+#include "bf3/core/util/splitmix64.h"
+
 #include <cstdint>
 
 namespace bf3::sim::weapons {
 
-constexpr uint64_t splitmix64(uint64_t p_x) {
-	uint64_t z = p_x + 0x9E3779B97F4A7C15ull;
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using core::splitmix64;
 
 constexpr uint64_t shot_seed(uint64_t p_match_seed, uint32_t p_player_slot, uint32_t p_shot_index) {
 	return splitmix64(splitmix64(p_match_seed ^ (uint64_t(p_player_slot) << 32)) ^ uint64_t(p_shot_index));

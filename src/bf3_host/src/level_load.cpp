@@ -11,6 +11,7 @@
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/gameplay/mode_def.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
@@ -38,9 +39,7 @@ uint64_t now_us() {
 	return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 void sample_working_set(LoadProgress *p_progress) {
 	if (p_progress == nullptr) {

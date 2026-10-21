@@ -1,5 +1,6 @@
 #include "bf3/net/protocol.h"
 
+#include "bf3/core/util/finite.h"
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/weapons_wire.h"
 
@@ -530,9 +531,7 @@ bool read_other(BitReader &r_r, OtherSoldier &r_o) {
 	return true;
 }
 
-bool finite3(const sim::Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 void write_hit_target(BitWriter &r_w, const sim::weapons::HitTarget &p_t) {
 	r_w.write_bits(p_t.id, 32);

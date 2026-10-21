@@ -6,15 +6,16 @@
 #include "bf3/core/sha1_digest.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
+#include "collision_commands.h"
 #include "ebx_commands.h"
-#include "weapon_commands.h"
-#include "text_commands.h"
 #include "gameplay_commands.h"
 #include "json_number.h"
 #include "level_commands.h"
-#include "collision_commands.h"
 #include "prepare_commands.h"
 #include "shapes_commands.h"
+#include "text_commands.h"
+#include "weapon_commands.h"
 
 #include "spawns_commands.h"
 #include "logic_commands.h"
@@ -74,9 +75,7 @@ std::wstring widen(std::string_view p_text) {
 	return out;
 }
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::string hex_spaced(const uint8_t *p_bytes, size_t p_count) {
 	std::string out;

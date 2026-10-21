@@ -10,6 +10,7 @@
 #include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/ui/nametags.h"
+#include "bf3/core/util/format.h"
 #include "bf3/host/client_session.h"
 #include "bf3/net/protocol.h"
 #include "bf3/render/soldier_assets.h"
@@ -49,11 +50,7 @@ void row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
 	std::fflush(stdout);
 }
 
-std::string fmt(const char *p_format, double p_a = 0, double p_b = 0, double p_c = 0, double p_d = 0) {
-	char b[256];
-	std::snprintf(b, sizeof(b), p_format, p_a, p_b, p_c, p_d);
-	return b;
-}
+using bf3::core::fmt;
 
 ui::NametagSubject subject(uint8_t p_team, float p_distance, float p_crosshair = 1e9f, bool p_los = false) {
 	ui::NametagSubject s;

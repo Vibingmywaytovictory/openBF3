@@ -6,6 +6,7 @@
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/sound_stream.h"
 #include "bf3/core/audio/wave_bank.h"
+#include "bf3/core/util/splitmix64.h"
 
 #include <array>
 #include <cmath>
@@ -23,7 +24,7 @@ inline constexpr uint32_t kSlotInputFrames = 64;
 inline constexpr uint32_t kMaxSubBlock = 512;
 inline constexpr uint16_t kNoSegment = 0xffff;
 
-uint64_t splitmix64(uint64_t p_x);
+using core::splitmix64;
 double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw);
 
 enum class AdsrPhase : uint8_t { Idle, Attack, Decay, Sustain, Release };

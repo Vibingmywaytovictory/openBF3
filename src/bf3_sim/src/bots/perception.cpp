@@ -1,5 +1,6 @@
 #include "bf3/sim/bots/perception.h"
 
+#include "bf3/core/util/finite.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/static_world.h"
@@ -17,9 +18,7 @@ constexpr float kDeg = kPi / 180.0f;
 constexpr float kMovingSpeed = 0.5f;
 constexpr size_t kMaxSlots = 256;
 
-bool finite3(const Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 float length3(float p_x, float p_y, float p_z) {
 	return std::sqrt(p_x * p_x + p_y * p_y + p_z * p_z);
@@ -143,13 +142,13 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 	};
 	std::array<Cand, kMaxSlots> cands{};
 	size_t nc = 0;
-	const bool eye_ok = finite3(p_in.eye);
+	const bool eye_ok = finite(p_in.eye);
 	const float view_yaw = yaw_radians(p_in.yaw);
 	const float view_pitch = pitch_radians(p_in.pitch);
 	const float half_h = std::clamp(params_.fov_h_deg, 0.0f, 360.0f) * 0.5f * kDeg;
 	const float half_v = std::clamp(params_.fov_v_deg, 0.0f, 180.0f) * 0.5f * kDeg;
 	for (size_t s = 0; s < n && eye_ok; ++s) {
-		if (!is_enemy(s) || !is_alive(s) || !finite3(p_in.states[s].position)) {
+		if (!is_enemy(s) || !is_alive(s) || !finite(p_in.states[s].position)) {
 			continue;
 		}
 		const Vec3 chest = perception_chest(params_, p_in.states[s], p_in.eye_heights);
@@ -221,12 +220,12 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 		e.last_visible = p_in.tick;
 		e.ever_visible = true;
 		e.last_position = st.position;
-		e.last_velocity = finite3(st.velocity) ? st.velocity : Vec3{};
+		e.last_velocity = finite(st.velocity) ? st.velocity : Vec3{};
 	}
 
 	uint64_t rng = weapons::splitmix64(p_in.seed ^ (uint64_t(p_in.tick) << 20) ^ 0x48454152ull);
 	for (const HeardShot &shot : p_in.shots) {
-		if (!is_enemy(shot.shooter) || !finite3(shot.origin) || !eye_ok) {
+		if (!is_enemy(shot.shooter) || !finite(shot.origin) || !eye_ok) {
 			continue;
 		}
 		if (shot.tick > p_in.tick || p_in.tick - shot.tick >= update_ticks) {

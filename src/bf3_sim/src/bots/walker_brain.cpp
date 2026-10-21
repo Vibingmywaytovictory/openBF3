@@ -1,5 +1,7 @@
 #include "bf3/sim/bots/walker_brain.h"
 
+#include "bf3/core/util/splitmix64.h"
+
 #include "../nav_internal.h"
 
 #include <algorithm>
@@ -10,15 +12,10 @@ namespace bf3::sim::bots {
 
 namespace {
 
-uint64_t splitmix64(uint64_t &r_state) {
-	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::splitmix64_next;
 
 float unit(uint64_t &r_state) {
-	return float(splitmix64(r_state) >> 40) / float(1ull << 24);
+	return float(splitmix64_next(r_state) >> 40) / float(1ull << 24);
 }
 
 float horizontal(const Vec3 &p_a, const Vec3 &p_b) {
@@ -131,7 +128,7 @@ struct WalkerBrain::Impl {
 		BotGoal g;
 		bool found = false;
 		if (want_objective) {
-			const size_t i = size_t(splitmix64(rng) % p_view.objectives.size());
+			const size_t i = size_t(splitmix64_next(rng) % p_view.objectives.size());
 			g = p_view.objectives[i];
 			found = horizontal(g.position, p_position) > g.arrive_radius;
 		}
@@ -150,7 +147,7 @@ struct WalkerBrain::Impl {
 			}
 		}
 		if (!found && in_main && !p_view.objectives.empty()) {
-			g = p_view.objectives[size_t(splitmix64(rng) % p_view.objectives.size())];
+			g = p_view.objectives[size_t(splitmix64_next(rng) % p_view.objectives.size())];
 			found = horizontal(g.position, p_position) > g.arrive_radius;
 		}
 		if (!found || g.poly == 0) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ant/ant_clip.h"
+#include "bf3/core/math.h"
 
 #include <array>
 
@@ -43,7 +44,7 @@ Vec3 xform_point(const Xform &p_x, const Vec3 &p_p);
 
 Mat34 mat_from_xform(const Xform &p_x);
 
-Mat34 mat_from_linear_transform(const std::array<std::array<float, 3>, 4> &p_rows);
+Mat34 mat_from_linear_transform(const std::array<core::Vec3, 4> &p_rows);
 Mat34 mat_mul(const Mat34 &p_a, const Mat34 &p_b);
 
 bool mat_inverse(const Mat34 &p_m, Mat34 &r_inverse);

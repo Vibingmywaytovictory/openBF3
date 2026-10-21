@@ -6,6 +6,7 @@
 #include "ui_assets.h"
 
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/sim/weapons/weapon_install.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -38,14 +39,7 @@ namespace sw = bf3::sim::weapons;
 
 namespace {
 
-std::string fmt(const char *p_fmt, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_fmt);
-	vsnprintf(buf, sizeof(buf), p_fmt, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 struct KitItem {
 	const char *variant;

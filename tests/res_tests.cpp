@@ -3,6 +3,8 @@
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/res/havok.h"
 #include "bf3/core/res/mesh_set.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 #include "test_support.h"
 
 #include <bit>
@@ -187,14 +189,7 @@ bool data_or_skip(std::string &r_data) {
 	return true;
 }
 
-std::string lower(std::string p_text) {
-	for (char &c : p_text) {
-		if (c >= 'A' && c <= 'Z') {
-			c = char(c - 'A' + 'a');
-		}
-	}
-	return p_text;
-}
+using bf3::core::to_lower_ascii;
 
 uint32_t xorshift(uint32_t &r_state) {
 	r_state ^= r_state << 13;
@@ -323,10 +318,7 @@ struct SyntheticHavok {
 	}
 };
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
-
+using bf3::core::seconds_since;
 }
 
 TEST_SUITE("res_unit") {
@@ -350,7 +342,7 @@ TEST_SUITE("res_unit") {
 		REQUIRE(MeshSet::parse(b, meta, mesh).ok());
 		CHECK(mesh.kind == MeshKind::Rigid);
 		CHECK(mesh.name == "test/Mesh");
-		CHECK(mesh.name_hash == hash_quick(lower(mesh.name)));
+		CHECK(mesh.name_hash == hash_quick(to_lower_ascii(mesh.name)));
 		REQUIRE(mesh.lods.size() == 1);
 		const MeshLod &lod = mesh.lods[0];
 		CHECK(lod.geometry.is_inline);
@@ -488,7 +480,7 @@ TEST_SUITE("res_unit") {
 		CHECK(tris.size() == 12);
 		double volume = 0.0;
 		for (const Tri &t : tris) {
-			volume += vec::dot(t.v[0], vec::cross(t.v[1], t.v[2])) / 6.0;
+			volume += bf3::core::vec::dot(t.v[0], bf3::core::vec::cross(t.v[1], t.v[2])) / 6.0;
 		}
 		CHECK(volume == doctest::Approx(48.0));
 		const std::vector<ConvexPiece> pieces = havok_convex_pieces(box, Transform::from_translation({ 10.0f, 0.0f, 0.0f }));
@@ -507,7 +499,7 @@ TEST_SUITE("res_unit") {
 		const std::vector<Tri> round = havok_triangles(capsule, Transform::identity());
 		CHECK(round.size() > 50);
 		for (const Tri &t : round) {
-			volume += vec::dot(t.v[0], vec::cross(t.v[1], t.v[2])) / 6.0;
+			volume += bf3::core::vec::dot(t.v[0], bf3::core::vec::cross(t.v[1], t.v[2])) / 6.0;
 		}
 		CHECK(volume > 0.9);
 		CHECK(volume < 1.309);
@@ -708,7 +700,7 @@ TEST_SUITE("res") {
 				if (s.res_type == kResTypeMeshSet) {
 					MeshSet mesh;
 					REQUIRE_MESSAGE(MeshSet::parse(s.payload, s.meta, mesh).ok(), name);
-					name_hash_ok += mesh.name_hash == hash_quick(lower(mesh.name)) ? 1 : 0;
+					name_hash_ok += mesh.name_hash == hash_quick(to_lower_ascii(mesh.name)) ? 1 : 0;
 					for (const MeshLod &lod : mesh.lods) {
 						Bytes g;
 						if (lod.geometry.is_inline) {

@@ -1,5 +1,8 @@
 #include "bf3/host/firefight_run.h"
 
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/finite.h"
+#include "bf3/core/util/percentile.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/nav.h"
@@ -23,17 +26,13 @@ namespace {
 namespace sw = sim::weapons;
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 bool is_alive(const sim::SoldierState &p_state) {
 	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead;
 }
 
-bool finite(const sim::Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float dx = p_b[0] - p_a[0], dz = p_b[2] - p_a[2];
@@ -167,20 +166,14 @@ FirefightPercentiles firefight_percentiles(std::vector<double> p_samples) {
 		return p;
 	}
 	std::sort(p_samples.begin(), p_samples.end());
-	const size_t n = p_samples.size();
-	const auto rank = [&](double p_q) {
-		size_t k = size_t(std::ceil(p_q * double(n)));
-		k = std::clamp<size_t>(k, 1, n);
-		return p_samples[k - 1];
-	};
-	p.p50 = rank(0.50);
-	p.p99 = rank(0.99);
+	p.p50 = core::nearest_rank(p_samples, 0.50);
+	p.p99 = core::nearest_rank(p_samples, 0.99);
 	p.max = p_samples.back();
 	double sum = 0.0;
 	for (double v : p_samples) {
 		sum += v;
 	}
-	p.mean = sum / double(n);
+	p.mean = sum / double(p_samples.size());
 	return p;
 }
 

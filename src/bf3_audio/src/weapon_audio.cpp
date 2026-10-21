@@ -1,6 +1,7 @@
 #include "bf3/audio/weapon_audio.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/core/util/finite.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <algorithm>
@@ -23,9 +24,7 @@ float distance(const Vec3 &p_a, const Vec3 &p_b) {
 	return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-bool finite3(const float *p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 
 bool has_event(const ca::SoundProgram &p_program, uint32_t p_hash) {
 	for (const ca::SoundInput &in : p_program.inputs) {
@@ -695,9 +694,9 @@ struct WeaponAudioRouter::Impl {
 		if (own_first_person) {
 			e.position = listener.position;
 			e.forward = listener.forward;
-		} else if (finite3(p_e.pos)) {
+		} else if (finite(p_e.pos)) {
 			e.position = { p_e.pos[0], p_e.pos[1], p_e.pos[2] };
-			if (finite3(p_e.dir)) {
+			if (finite(p_e.dir)) {
 				e.forward = { p_e.dir[0], p_e.dir[1], p_e.dir[2] };
 			}
 		}
@@ -706,10 +705,10 @@ struct WeaponAudioRouter::Impl {
 
 	EmitterState event_emitter(const present::PresentEvent &p_e) const {
 		EmitterState e;
-		if (finite3(p_e.pos)) {
+		if (finite(p_e.pos)) {
 			e.position = { p_e.pos[0], p_e.pos[1], p_e.pos[2] };
 		}
-		if (finite3(p_e.dir)) {
+		if (finite(p_e.dir)) {
 			e.forward = { p_e.dir[0], p_e.dir[1], p_e.dir[2] };
 		}
 		return e;

@@ -6,7 +6,7 @@
 
 namespace bf3::core::level {
 
-using Vec3 = std::array<float, 3>;
+using Vec3 = core::Vec3;
 using Rows = std::array<Vec3, 4>;
 
 struct LevelTransform {

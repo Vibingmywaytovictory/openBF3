@@ -89,6 +89,12 @@ void arr(IO &io, std::array<T, N> &p_a) {
 	}
 }
 
+template <class IO> void arr(IO &io, Vec3 &p_v) {
+	for (float &e : p_v) {
+		io.v(e);
+	}
+}
+
 template <class IO>
 void io_dispersion(IO &io, Dispersion &d) {
 	io.v(d.min_angle);

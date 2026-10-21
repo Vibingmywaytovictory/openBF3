@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -18,7 +19,7 @@ class World;
 
 namespace bf3::render {
 
-using LookVec3 = std::array<float, 3>;
+using LookVec3 = core::Vec3;
 using LookCubic = std::array<float, 4>;
 
 inline constexpr size_t kMaxVisualEnvironments = 64;

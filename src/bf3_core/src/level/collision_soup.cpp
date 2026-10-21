@@ -5,6 +5,8 @@
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <chrono>
@@ -27,10 +29,6 @@ using res::TrianglesSubpart;
 constexpr uint32_t kMaxLeafDepth = 64;
 constexpr double kMaxCoordinate = 1e7;
 constexpr int64_t kTileMm3 = int64_t(64) * 1000 * 3;
-
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
 
 void set_stage(SoupProgress *p_progress, int p_stage, size_t p_total) {
 	if (p_progress != nullptr) {
@@ -178,12 +176,7 @@ bool intact(const Owner &p_owner, uint32_t p_part) {
 }
 
 bool invisible_name(std::string_view p_name) {
-	std::string lower(p_name);
-	for (char &c : lower) {
-		if (c >= 'A' && c <= 'Z') {
-			c = char(c - 'A' + 'a');
-		}
-	}
+	const std::string lower = to_lower_ascii(p_name);
 	return lower.find("invisible") != std::string::npos || lower.find("collisionmesh") != std::string::npos;
 }
 
@@ -863,11 +856,11 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			const float factor = t.scale / 1.0f;
 			Transform frame;
 			for (int k = 0; k < 3; ++k) {
-				frame.axis[0][k] = t.right[k] * factor;
-				frame.axis[1][k] = t.up[k] * factor;
-				frame.axis[2][k] = t.forward[k] * factor;
+				frame.right[k] = t.right[k] * factor;
+				frame.up[k] = t.up[k] * factor;
+				frame.forward[k] = t.forward[k] * factor;
 			}
-			frame.origin = t.trans;
+			frame.trans = t.trans;
 			soup_terrain_census(*grid, p_options.threads, terrain.cells, terrain.open);
 			terrain.frame = frame;
 			terrain.grid = std::move(grid);

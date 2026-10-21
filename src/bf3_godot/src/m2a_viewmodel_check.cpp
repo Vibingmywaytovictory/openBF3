@@ -4,6 +4,7 @@
 #include "godot_util.h"
 #include "viewmodel.h"
 
+#include "bf3/core/util/format.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
@@ -42,14 +43,7 @@ void print(const std::string &p_line) {
 	UtilityFunctions::print(to_godot(p_line));
 }
 
-std::string fmt(const char *p_format, ...) {
-	char buf[512];
-	va_list ap;
-	va_start(ap, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, ap);
-	va_end(ap);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::string short_unlock(const std::string &p_unlock) {
 	std::string u = p_unlock.substr(p_unlock.rfind('/') + 1);

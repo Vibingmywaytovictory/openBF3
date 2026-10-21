@@ -10,6 +10,7 @@
 #include "input_mapper.h"
 #include "ui_assets.h"
 
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/tdm_brain.h"
@@ -494,9 +495,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 	M2bGame &m = *r_game.m2b;
 	const host::PresentationFrame &f = p_frame;
 	const double now_s = double(p_now_ns) * 1e-9;
-	const auto ms_since = [](std::chrono::steady_clock::time_point p_t0) {
-		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - p_t0).count();
-	};
+	using bf3::core::ms_since;
 	if (!m.built) {
 		m2b_build(r_game, m, p_headless);
 	}
@@ -569,7 +568,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 			fx::Vec3 killer{};
 			const bool seen = m2b_presented_position(f, p_now_ns, m.own_killer, k);
 			if (seen) {
-				killer = fx::Vec3{ k[0], k[1], k[2] };
+				killer = k;
 			}
 			const DeathCameraView v = m.death_camera->step(now_s, seen ? &killer : nullptr, r_game.world.get());
 			if (v.active && p_camera != nullptr) {

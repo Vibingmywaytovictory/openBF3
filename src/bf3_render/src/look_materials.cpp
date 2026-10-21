@@ -3,6 +3,7 @@
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/res/res_types.h"
 #include "bf3/core/superbundle_mount.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <array>
@@ -52,11 +53,7 @@ constexpr std::string_view kUndrawnShaders[] = { "invisible", "occluder", "shado
 constexpr std::string_view kNameAlphaWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
 	"tree", "bush", "ivy", "hair", "cutout", "masked" };
 
-std::string lower(std::string_view p_text) {
-	std::string out(p_text);
-	std::transform(out.begin(), out.end(), out.begin(), [](char c) { return char(std::tolower(uint8_t(c))); });
-	return out;
-}
+using bf3::core::to_lower_ascii;
 
 std::string_view last_part(std::string_view p_name) {
 	const size_t at = p_name.rfind('/');
@@ -195,7 +192,7 @@ std::optional<Candidate> make_candidate(Header &&p_header, std::string_view p_na
 	} else {
 		return std::nullopt;
 	}
-	t.name = lower(p_name);
+	t.name = to_lower_ascii(p_name);
 	if (t.name.empty() || placeholder_texture(t.name)) {
 		return std::nullopt;
 	}
@@ -330,9 +327,9 @@ std::unique_ptr<LookResolver> LookResolver::open(const core::LevelMount &p_mount
 			continue;
 		}
 		if (info->res_type == core::res::kResTypeDxTexture) {
-			out->texture_names_.push_back(lower(name));
+			out->texture_names_.push_back(to_lower_ascii(name));
 		} else if (info->res_type == kShaderDatabaseResType) {
-			const std::string l = lower(name);
+			const std::string l = to_lower_ascii(name);
 			if (l.size() >= 9 && l.compare(l.size() - 9, 9, "/shaderdb") == 0) {
 				databases.push_back(name);
 			}
@@ -375,7 +372,7 @@ LookResolver::~LookResolver() = default;
 LookResolver::LookResolver(ShaderLookup p_shaders, std::map<std::string, HeaderInfo> p_headers, std::vector<std::string> p_texture_names) :
 		shaders_(std::move(p_shaders)), texture_names_(std::move(p_texture_names)) {
 	for (auto &[name, info] : p_headers) {
-		headers_.emplace(lower(name), info);
+		headers_.emplace(to_lower_ascii(name), info);
 	}
 	std::sort(texture_names_.begin(), texture_names_.end());
 }
@@ -422,13 +419,13 @@ const LookResolver::GraphInfo &LookResolver::graph_info(const SurfaceShader &p_s
 	const auto hdr = [this](const std::string &p_name) { return header(p_name); };
 	info->parameters.reserve(s.texture_parameters.size());
 	for (size_t i = 0; i < s.texture_parameters.size(); ++i) {
-		info->parameters.emplace_back(lower(s.texture_parameters[i].name), i);
+		info->parameters.emplace_back(to_lower_ascii(s.texture_parameters[i].name), i);
 	}
 	std::stable_sort(info->parameters.begin(), info->parameters.end(), [](const auto &p_a, const auto &p_b) { return p_a.first < p_b.first; });
 	std::vector<std::string> streamed;
 	streamed.reserve(s.textures.size());
 	for (size_t order = 0; order < s.textures.size(); ++order) {
-		std::string name = lower(s.textures[order].name);
+		std::string name = to_lower_ascii(s.textures[order].name);
 		if (const std::optional<NameRole> role = graph_role(name)) {
 			std::optional<Candidate> c = make_candidate(hdr, name, role->role, Rank{ LookTier::Graph, role->quality, 0, false, order },
 					Sampling{ s.textures[order].coord_type, s.textures[order].vertex_usage, s.textures[order].factor }, std::string());
@@ -440,7 +437,7 @@ const LookResolver::GraphInfo &LookResolver::graph_info(const SurfaceShader &p_s
 	}
 	std::sort(streamed.begin(), streamed.end());
 	for (size_t order = 0; order < s.sampled_textures.size(); ++order) {
-		const std::string name = lower(s.sampled_textures[order]);
+		const std::string name = to_lower_ascii(s.sampled_textures[order]);
 		if (std::binary_search(streamed.begin(), streamed.end(), name)) {
 			continue;
 		}
@@ -494,8 +491,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	LookMaterial out;
 	std::vector<std::string> shader_names;
 	for (const std::string *name : { &p_slot.variation_shader, &p_slot.shader }) {
-		if (!name->empty() && (shader_names.empty() || shader_names.back() != lower(*name))) {
-			shader_names.push_back(lower(*name));
+		if (!name->empty() && (shader_names.empty() || shader_names.back() != to_lower_ascii(*name))) {
+			shader_names.push_back(to_lower_ascii(*name));
 		}
 	}
 	for (const std::string &name : shader_names) {
@@ -523,7 +520,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	const GraphInfo *shader_info = shader != nullptr ? &graph_info(*shader) : nullptr;
 
 	for (const auto &[parameter, texture] : p_slot.textures) {
-		const std::string name = lower(parameter);
+		const std::string name = to_lower_ascii(parameter);
 		const std::optional<std::pair<uint8_t, size_t>> role = parameter_role(name);
 		if (!role) {
 			continue;
@@ -560,9 +557,9 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		for (const std::string &name : shader_names) {
 			folders.push_back(parent(name));
 		}
-		folders.push_back(parent(lower(p_mesh)));
+		folders.push_back(parent(to_lower_ascii(p_mesh)));
 		folders.erase(std::unique(folders.begin(), folders.end()), folders.end());
-		const std::string mesh = lower(p_mesh);
+		const std::string mesh = to_lower_ascii(p_mesh);
 		const std::string_view stem = last_part(mesh);
 
 		const auto before = [](const std::pair<std::string, Candidate> &p_e, std::string_view p_s) { return std::string_view(p_e.first) < p_s; };

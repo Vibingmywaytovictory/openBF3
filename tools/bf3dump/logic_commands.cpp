@@ -5,6 +5,7 @@
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/path_guard.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim_harness/logic_harness.h"
 
 #include <algorithm>
@@ -24,9 +25,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::string guid8(const Guid &p_guid) {
 	std::string s = p_guid.to_string();

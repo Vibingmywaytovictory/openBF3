@@ -3,6 +3,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/spawn.h"
 
@@ -16,9 +17,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::string partition_of(const EbxResolver &p_db, const EbxInstance &p_entity) {
 	return std::string(p_db.name_of(p_entity.partition().guid()).value_or("?")) + "#" + std::to_string(p_entity.index());

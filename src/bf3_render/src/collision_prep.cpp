@@ -108,8 +108,8 @@ void emit_triangle(PreparedCollisionMesh &r_m, const lvl::SoupTriangle &p_tri, b
 			c = 0.55f * c + 0.45f;
 		}
 	}
-	const core::res::Vec3 n =
-			core::res::vec::normalize(core::res::vec::cross(core::res::vec::sub(p_tri.v[1], p_tri.v[0]), core::res::vec::sub(p_tri.v[2], p_tri.v[0])));
+	const core::res::Vec3 n = core::vec::normalize(
+			core::vec::cross(core::vec::sub(p_tri.v[1], p_tri.v[0]), core::vec::sub(p_tri.v[2], p_tri.v[0])));
 	const float facing = std::fabs(n[0] * kLight[0] + n[1] * kLight[1] + n[2] * kLight[2]);
 	const float shade = (0.45f + 0.55f * (std::isfinite(facing) ? facing : 0.0f)) * placement_jitter(p_tri.placement);
 	const float rgba[4] = { std::min(1.0f, base[0] * shade), std::min(1.0f, base[1] * shade), std::min(1.0f, base[2] * shade), 1.0f };

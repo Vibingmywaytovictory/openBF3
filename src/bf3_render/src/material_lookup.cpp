@@ -1,9 +1,9 @@
 #include "bf3/render/material_lookup.h"
 
 #include "bf3/core/ebx.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
-#include <cctype>
 #include <optional>
 
 namespace bf3::render {
@@ -16,10 +16,7 @@ using core::EbxValue;
 
 namespace {
 
-bool iequals(std::string_view p_a, std::string_view p_b) {
-	return p_a.size() == p_b.size() &&
-			std::equal(p_a.begin(), p_a.end(), p_b.begin(), [](char a, char b) { return std::tolower(uint8_t(a)) == std::tolower(uint8_t(b)); });
-}
+using bf3::core::iequals_ascii;
 
 std::string partition_name(const EbxResolver &p_db, const EbxInstance &p_instance) {
 	const std::optional<std::string_view> n = p_db.name_of(p_instance.partition().guid());
@@ -161,7 +158,7 @@ core::Result<MeshMaterials> materials_of(const EbxResolver &p_db, const EbxInsta
 
 std::string MaterialSlot::texture(std::string_view p_parameter) const {
 	for (const auto &[name, texture] : textures) {
-		if (iequals(name, p_parameter)) {
+		if (iequals_ascii(name, p_parameter)) {
 			return texture;
 		}
 	}
@@ -170,7 +167,7 @@ std::string MaterialSlot::texture(std::string_view p_parameter) const {
 
 const std::array<float, 4> *MaterialSlot::vector(std::string_view p_parameter) const {
 	for (const auto &[name, value] : vectors) {
-		if (iequals(name, p_parameter)) {
+		if (iequals_ascii(name, p_parameter)) {
 			return &value;
 		}
 	}
@@ -183,8 +180,7 @@ std::vector<std::string> variation_database_names(const EbxLibrary &p_library) {
 		return out;
 	}
 	for (const std::string &name : p_library.mount(0).ebx_names()) {
-		std::string lower = name;
-		std::transform(lower.begin(), lower.end(), lower.begin(), [](char c) { return char(std::tolower(uint8_t(c))); });
+		std::string lower = core::to_lower_ascii(name);
 		if (lower.find("meshvariationdb") != std::string::npos) {
 			out.push_back(std::move(lower));
 		}

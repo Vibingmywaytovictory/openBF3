@@ -163,10 +163,10 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 		e = child(p_at + 24, p_depth, s.children.back());
 	} else if (c == "hkpConvexTransformShape") {
 		s.type = ShapeType::ConvexTransform;
-		s.transform.axis[0] = r.vec3(uint32_t(p_at + 32));
-		s.transform.axis[1] = r.vec3(uint32_t(p_at + 48));
-		s.transform.axis[2] = r.vec3(uint32_t(p_at + 64));
-		s.transform.origin = r.vec3(uint32_t(p_at + 80));
+		s.transform.right = r.vec3(uint32_t(p_at + 32));
+		s.transform.up = r.vec3(uint32_t(p_at + 48));
+		s.transform.forward = r.vec3(uint32_t(p_at + 64));
+		s.transform.trans = r.vec3(uint32_t(p_at + 80));
 		if (!r.ok()) {
 			return r.error();
 		}

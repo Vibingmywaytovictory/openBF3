@@ -1,8 +1,8 @@
 #pragma once
 
 #include "bf3/anim/clip_asset.h"
-#include "bf3/anim/pose_math.h"
 #include "bf3/anim/pose.h"
+#include "bf3/anim/pose_math.h"
 #include "bf3/anim/skeleton.h"
 #include "bf3/anim/skinning.h"
 #include "bf3/anim/viewmodel_anim.h"
@@ -10,6 +10,7 @@
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install_reader.h"
+#include "bf3/core/math.h"
 #include "bf3/core/result.h"
 #include "bf3/render/viewmodel_assets.h"
 
@@ -215,7 +216,7 @@ struct ViewmodelSurfaceSkin {
 	float bind_edge = 0, posed_edge = 0;
 	std::string worst_bone;
 	std::vector<int32_t> binds;
-	std::array<float, 3> posed_min{}, posed_max{};
+	core::Vec3 posed_min{}, posed_max{};
 	bool stretched() const;
 };
 

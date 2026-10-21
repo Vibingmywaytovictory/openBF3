@@ -134,7 +134,7 @@ Mat34 mat_from_xform(const Xform &p_x) {
 	return r;
 }
 
-Mat34 mat_from_linear_transform(const std::array<std::array<float, 3>, 4> &p_rows) {
+Mat34 mat_from_linear_transform(const std::array<core::Vec3, 4> &p_rows) {
 	Mat34 r;
 	for (int row = 0; row < 3; ++row) {
 		r.m[row] = { p_rows[0][row], p_rows[1][row], p_rows[2][row], p_rows[3][row] };

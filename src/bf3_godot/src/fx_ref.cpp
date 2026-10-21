@@ -1,5 +1,9 @@
 #include "fx_ref.h"
 
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
+#include "bf3/core/util/splitmix64.h"
+
 #include "godot_util.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -46,33 +50,12 @@ void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[fx-ref] " + p_line));
 }
 
-std::string fmt(const char *p_format, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
-
-double percentile(std::vector<double> p_values, double p_q) {
-	if (p_values.empty()) {
-		return 0.0;
-	}
-	std::sort(p_values.begin(), p_values.end());
-	const size_t i = std::min(p_values.size() - 1, size_t(std::floor(p_q * double(p_values.size() - 1) + 0.5)));
-	return p_values[i];
-}
-
-uint64_t splitmix(uint64_t &r_state) {
-	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::fmt;
+using bf3::core::rounded_rank;
+using bf3::core::splitmix64_next;
 
 float unit(uint64_t &r_state) {
-	return float(splitmix(r_state) >> 40) / float(1ull << 24);
+	return float(splitmix64_next(r_state) >> 40) / float(1ull << 24);
 }
 
 std::vector<Vector3> positions() {
@@ -431,11 +414,11 @@ void Bf3FxRef::_process(double p_delta) {
 		++window_index_;
 		++r.windows;
 		if (window_index_ >= pairs_ * 2) {
-			r.on_p50 = percentile(r.on_gpu, 0.5);
-			r.off_p50 = percentile(r.off_gpu, 0.5);
+			r.on_p50 = rounded_rank(r.on_gpu, 0.5);
+			r.off_p50 = rounded_rank(r.off_gpu, 0.5);
 			r.cost_gpu = r.on_p50 - r.off_p50;
-			r.frame_on_p50 = percentile(r.on_frame, 0.5);
-			r.frame_off_p50 = percentile(r.off_frame, 0.5);
+			r.frame_on_p50 = rounded_rank(r.on_frame, 0.5);
+			r.frame_off_p50 = rounded_rank(r.off_frame, 0.5);
 			log(fmt("%-16s GPU on p50 %.3f ms, off p50 %.3f ms, cost %.3f ms; frame on p50 %.3f ms, off p50 %.3f ms (%zu / %zu samples)", r.name.c_str(), r.on_p50,
 					r.off_p50, r.cost_gpu, r.frame_on_p50, r.frame_off_p50, r.on_gpu.size(), r.off_gpu.size()));
 			set_row(Row(row_index_), false);
@@ -459,8 +442,10 @@ void Bf3FxRef::report_and_finish() {
 	for (const RowResult &r : results_) {
 		log(fmt("%-16s cost %.3f ms GPU (on %.3f, off %.3f); frame on %.3f ms", r.name.c_str(), r.cost_gpu, r.on_p50, r.off_p50, r.frame_on_p50));
 	}
-	log(fmt("vfx2 drawn %u instances (mismatching frames %llu); main thread p50: step %.3f ms, prepare %.3f ms, upload %.3f ms; params uploads %llu",
-			vfx.drawn_vfx2, (unsigned long long)vfx2_mismatch_, percentile(vfx.step_ms, 0.5), percentile(vfx.prepare_ms, 0.5), percentile(vfx.upload_ms, 0.5),
+	log(fmt("vfx2 drawn %u instances (mismatching frames %llu); main thread p50: step %.3f ms, prepare %.3f ms, upload "
+			"%.3f ms; params uploads %llu",
+			vfx.drawn_vfx2, (unsigned long long)vfx2_mismatch_, rounded_rank(vfx.step_ms, 0.5),
+			rounded_rank(vfx.prepare_ms, 0.5), rounded_rank(vfx.upload_ms, 0.5),
 			(unsigned long long)renderer_->stats().params_uploads));
 	const bool pass = ratio <= kFxRefRatioMax && vfx.drawn_vfx2 == kFxRefParticles && vfx2_mismatch_ == 0;
 	log(fmt("gate: vfx2 cost / ref-lit-soft cost = %.3f / %.3f = %.3f (<= %.2f): %s", vfx.cost_gpu, ref.cost_gpu, ratio, kFxRefRatioMax, pass ? "PASS" : "FAIL"));

@@ -5,6 +5,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
@@ -224,9 +225,7 @@ float dist(const Vec3 &p_a, const Vec3 &p_b) {
 	return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 RestSample rest_sample(const PresentationFrame &p_f) {
 	RestSample r;

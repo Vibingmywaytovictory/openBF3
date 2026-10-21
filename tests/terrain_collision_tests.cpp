@@ -10,6 +10,7 @@
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/static_world.h"
@@ -45,9 +46,7 @@ namespace {
 namespace fs = std::filesystem;
 namespace sim = bf3::sim;
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::shared_ptr<const StaticWorldShapes> terrain_world(const level::SoupTerrain &p_record, std::string *r_error = nullptr) {
 	bf3::core::Result<sim::StaticTerrainView> view = sim::static_terrain_view(p_record);
@@ -200,11 +199,12 @@ TEST_SUITE("sim-terrain-unit") {
 		std::vector<std::pair<const char *, res::Transform>> good;
 		good.emplace_back("identity", res::Transform::identity());
 		res::Transform yaw;
-		yaw.axis = { { { c, 0.0f, -s }, { 0.0f, 1.0f, 0.0f }, { s, 0.0f, c } } };
-		yaw.origin = { 120.0f, -4.0f, 33.0f };
+		yaw = res::Transform::from_axes(
+				{ { { c, 0.0f, -s }, { 0.0f, 1.0f, 0.0f }, { s, 0.0f, c } } }, { 120.0f, -4.0f, 33.0f });
 		good.emplace_back("yaw + translation", yaw);
 		res::Transform scaled;
-		scaled.axis = { { { 2.0f, 0.0f, 0.0f }, { 0.0f, 2.0f, 0.0f }, { 0.0f, 0.0f, 2.0f } } };
+		scaled =
+				res::Transform::from_axes({ { { 2.0f, 0.0f, 0.0f }, { 0.0f, 2.0f, 0.0f }, { 0.0f, 0.0f, 2.0f } } }, {});
 		good.emplace_back("uniform scale 2", scaled);
 		for (const auto &[name, frame] : good) {
 			const level::SoupTerrain record = make_record(grid(), frame);
@@ -221,13 +221,15 @@ TEST_SUITE("sim-terrain-unit") {
 		}
 		std::vector<std::pair<const char *, res::Transform>> bad;
 		res::Transform mirror;
-		mirror.axis = { { { -1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } };
+		mirror = res::Transform::from_axes(
+				{ { { -1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } }, {});
 		bad.emplace_back("mirror", mirror);
 		res::Transform shear;
-		shear.axis = { { { 1.0f, 0.0f, 0.0f }, { 0.3f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } };
+		shear = res::Transform::from_axes({ { { 1.0f, 0.0f, 0.0f }, { 0.3f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } }, {});
 		bad.emplace_back("shear", shear);
 		res::Transform stretch;
-		stretch.axis = { { { 1.0f, 0.0f, 0.0f }, { 0.0f, 3.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } };
+		stretch =
+				res::Transform::from_axes({ { { 1.0f, 0.0f, 0.0f }, { 0.0f, 3.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } }, {});
 		bad.emplace_back("non-uniform scale", stretch);
 		for (const auto &[name, frame] : bad) {
 			const level::SoupTerrain record = make_record(grid(), frame);

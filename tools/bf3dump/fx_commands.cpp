@@ -7,6 +7,7 @@
 #include "bf3/core/gameplay/weapon_catalog.h"
 #include "bf3/core/ids.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/fx/effect_cache.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/emitter_atlas.h"
@@ -36,9 +37,7 @@ constexpr const char *kMuzzle1p = "fx/weapons/muzzleflashes/generic/fx_muzz_gene
 constexpr const char *kOilfire = "fx/ambient/levelspecific/mp_12/emitters_oilfire/em_amb_mp12_oilfire_l_fire_01";
 constexpr const char *kImpactConcrete = "fx_impact_concrete_01_s_xp2";
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 struct Args {
 	std::vector<std::string> positional;

@@ -1,5 +1,6 @@
 #include "m2b_game.h"
 
+#include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
 
 #include <algorithm>
@@ -30,12 +31,7 @@ bool parse_seconds(const std::string &p_text, double &r_value) {
 	return r.ec == std::errc() && r.ptr == end && std::isfinite(r_value);
 }
 
-std::string fmt_row(const char *p_format, double p_a, double p_b = 0.0) {
-	char line[160];
-	std::snprintf(line, sizeof(line), p_format, p_a, p_b);
-	return line;
-}
-
+using bf3::core::fmt;
 }
 
 core::Status parse_m2b_options(const M2bArgText &p_args, M2bOptions &r_options) {
@@ -172,24 +168,30 @@ std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, b
 	add(M2bTrack::Gx, "spawn_screen_join", p_t.join_screen_seen ? 1.0 : 0.0, "the spawn screen is up at join", p_t.join_screen_seen);
 	add(M2bTrack::Gx, "own_deaths", double(p_t.own_deaths), ">= 1 own death in the run", p_t.own_deaths >= 1);
 	add(M2bTrack::Gx, "spawn_screen_after_death", double(p_t.screens_after_death),
-			fmt_row("== the %g own deaths with time to show it (of %g)", double(p_t.deaths_checked), double(p_t.own_deaths)),
+			fmt("== the %g own deaths with time to show it (of %g)", double(p_t.deaths_checked),
+					double(p_t.own_deaths)),
 			p_t.deaths_checked >= 1 && p_t.screens_after_death == p_t.deaths_checked);
 	add(M2bTrack::Gx, "deploys", double(p_t.deploys), ">= 2 (at join and after a death)", p_t.deploys >= 2);
 	add(M2bTrack::Gx, "deploy_kit_mismatch", double(p_t.deploy_kit_mismatch), "== 0: each deploy spawns the chosen kit", p_t.deploys >= 1 && p_t.deploy_kit_mismatch == 0);
 	add(M2bTrack::Gx, "round_over", p_t.round_over_seen ? 1.0 : 0.0, "MatchState reached RoundOver (--kill-limit)", p_t.round_over_seen);
 
-	add(M2bTrack::Ui, "kill_feed_lines", double(p_t.feed_lines), fmt_row("== the %g deaths received", double(p_t.deaths_received)),
+	add(M2bTrack::Ui, "kill_feed_lines", double(p_t.feed_lines),
+			fmt("== the %g deaths received", double(p_t.deaths_received)),
 			p_t.deaths_received >= 1 && p_t.feed_lines == p_t.deaths_received);
-	add(M2bTrack::Ui, "scoreboard_kills_mismatch", double(p_t.scoreboard_mismatch), fmt_row("== 0 of %g Tab samples against MatchState", double(p_t.scoreboard_samples)),
+	add(M2bTrack::Ui, "scoreboard_kills_mismatch", double(p_t.scoreboard_mismatch),
+			fmt("== 0 of %g Tab samples against MatchState", double(p_t.scoreboard_samples)),
 			p_t.scoreboard_samples >= 1 && p_t.scoreboard_mismatch == 0);
-	add(M2bTrack::Ui, "kill_card_bad", double(p_t.kill_cards_bad), fmt_row("== 0 of %g kill cards without the killer or the weapon", double(p_t.kill_cards_checked)),
+	add(M2bTrack::Ui, "kill_card_bad", double(p_t.kill_cards_bad),
+			fmt("== 0 of %g kill cards without the killer or the weapon", double(p_t.kill_cards_checked)),
 			p_t.kill_cards_checked >= 1 && p_t.kill_cards_bad == 0);
-	add(M2bTrack::Ui, "spawn_screen_shown", double(p_t.spawn_screen_model_shown), fmt_row(">= 1 + the %g checked deaths", double(p_t.deaths_checked)),
+	add(M2bTrack::Ui, "spawn_screen_shown", double(p_t.spawn_screen_model_shown),
+			fmt(">= 1 + the %g checked deaths", double(p_t.deaths_checked)),
 			p_t.spawn_screen_model_shown >= 1 + p_t.deaths_checked);
 	add(M2bTrack::Ui, "round_end_screen", p_t.round_end_shown ? 1.0 : 0.0, "the round-end screen on RoundOver", p_t.round_over_seen && p_t.round_end_shown);
 	add(M2bTrack::Ui, "missing_lookups", double(p_t.missing_lookups), "== 0 missing fonts, icons and strings", p_t.missing_lookups == 0, true);
 
-	add(M2bTrack::Cam, "death_views", double(p_t.death_views), fmt_row(">= the %g own deaths, %g bad inputs", double(p_t.own_deaths), double(p_t.death_view_bad_inputs)),
+	add(M2bTrack::Cam, "death_views", double(p_t.death_views),
+			fmt(">= the %g own deaths, %g bad inputs", double(p_t.own_deaths), double(p_t.death_view_bad_inputs)),
 			p_t.own_deaths >= 1 && p_t.death_views >= p_t.own_deaths && p_t.death_view_bad_inputs == 0);
 	return rows;
 }

@@ -3,6 +3,7 @@
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/mesh_cache.h"
 
@@ -20,9 +21,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 double percent(uint64_t p_part, uint64_t p_whole) {
 	return p_whole == 0 ? 100.0 : 100.0 * double(p_part) / double(p_whole);

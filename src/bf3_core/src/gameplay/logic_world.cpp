@@ -1,6 +1,7 @@
 #include "bf3/core/gameplay/logic_world.h"
 
 #include "bf3/core/ids.h"
+#include "bf3/core/util/text.h"
 #include "gameplay_read.h"
 
 #include <algorithm>
@@ -20,17 +21,6 @@ struct TargetOrder {
 
 TargetOrder target_order(const EbxInstance &p_target, int32_t p_field) {
 	return { reinterpret_cast<uintptr_t>(&p_target.partition()), p_target.index(), p_field };
-}
-
-std::string_view trim(std::string_view p_text) {
-	const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-	while (!p_text.empty() && space(p_text.front())) {
-		p_text.remove_prefix(1);
-	}
-	while (!p_text.empty() && space(p_text.back())) {
-		p_text.remove_suffix(1);
-	}
-	return p_text;
 }
 
 std::optional<int64_t> parse_int(std::string_view p_text) {
@@ -165,7 +155,7 @@ std::optional<PropertyValue> PropertyValue::parse(std::string_view p_constant) {
 	} else if (kind == "Vec3") {
 		if (const std::optional<std::array<float, 3>> f = parse_floats<3>(rest)) {
 			out.kind = Kind::Vec3;
-			out.rows[0] = *f;
+			out.rows[0] = core::to_vec3(*f);
 		}
 	}
 	return out;
@@ -256,7 +246,7 @@ std::optional<int> PropertyValue::as_team() const {
 	}
 }
 
-std::optional<std::array<float, 3>> PropertyValue::as_vec3() const {
+std::optional<core::Vec3> PropertyValue::as_vec3() const {
 	switch (kind) {
 		case Kind::Vec3:
 			return rows[0];

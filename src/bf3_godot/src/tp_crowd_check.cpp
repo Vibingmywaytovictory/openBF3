@@ -6,6 +6,7 @@
 
 #include "bf3/anim/crowd_stage.h"
 #include "bf3/core/install.h"
+#include "bf3/core/util/format.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
 #include "bf3/sim/weapons/sim_time.h"
@@ -39,14 +40,7 @@ void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[tp] " + p_line));
 }
 
-std::string fmt(const char *p_format, ...) {
-	char buf[512];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::filesystem::path utf8_path(const std::string &p_text) {
 	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));

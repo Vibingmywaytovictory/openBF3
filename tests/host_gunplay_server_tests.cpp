@@ -2,6 +2,9 @@
 
 #include "gunplay_fixture.h"
 
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
+#include "bf3/core/util/text.h"
 #include "bf3/sim/weapons/spread_recoil.h"
 #include "bf3/sim_harness/shooting_range.h"
 
@@ -22,12 +25,7 @@ namespace {
 
 constexpr sw::SimTime kUnit = sw::kTimeUnitsPerTick;
 
-std::string lower(std::string p_s) {
-	for (char &c : p_s) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return p_s;
-}
+using bf3::core::to_lower_ascii;
 
 std::string short_name(const std::string &p_variant) {
 	const size_t at = p_variant.rfind('/');
@@ -157,14 +155,7 @@ void row(const char *p_gate, const std::string &p_name, bool p_pass, const std::
 	CHECK_MESSAGE(p_pass, p_gate << " " << p_name << ": " << p_measured << " (" << p_threshold << ")");
 }
 
-std::string fmt(const char *p_format, ...) {
-	char buf[512];
-	va_list a;
-	va_start(a, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, a);
-	va_end(a);
-	return buf;
-}
+using bf3::core::fmt;
 
 void check_fire_timing(Run &r_run, const sw::WeaponTable &p_table, uint8_t p_weapon_slot) {
 	const std::optional<WeaponTickRecord> last = r_run.rec->last(r_run.slot);
@@ -329,14 +320,7 @@ struct DirectServer {
 	void receive(const std::vector<uint8_t> &p_bytes, uint8_t p_channel) { server.on_receive(1, p_channel, p_bytes); }
 };
 
-double percentile(std::vector<double> p_v, double p_q) {
-	if (p_v.empty()) {
-		return 0;
-	}
-	std::sort(p_v.begin(), p_v.end());
-	return p_v[std::min(p_v.size() - 1, size_t(p_q * double(p_v.size() - 1) + 0.5))];
-}
-
+using bf3::core::rounded_rank;
 }
 
 TEST_SUITE("host-gunplay-server") {
@@ -369,7 +353,9 @@ TEST_SUITE("host-gunplay-server") {
 					return;
 				}
 				const sw::WeaponSlotState &primary = last->after.slots[0];
-				const std::string variant = primary.def < table->defs.size() ? lower(table->defs[primary.def].variant) : std::string("?");
+				const std::string variant = primary.def < table->defs.size()
+						? to_lower_ascii(table->defs[primary.def].variant)
+						: std::string("?");
 				std::printf("E1 team %u kit %s: slot %u, primary %s\n", unsigned(team), host::kit_role_name(host::KitRole(kit)), unsigned(r.slot),
 						short_name(variant).c_str());
 				if (team == 1 && kit == 0) {
@@ -480,7 +466,7 @@ TEST_SUITE("host-gunplay-server") {
 		const std::optional<WeaponTickRecord> first = r.rec->last(r.slot);
 		REQUIRE(first.has_value());
 		const sw::WeaponSimDef &d = table->defs[first->after.slots[0].def];
-		CHECK(ends_with(lower(d.variant), "u_m16a4"));
+		CHECK(ends_with(to_lower_ascii(d.variant), "u_m16a4"));
 		const double flight = double(d.projectile.muzzle_speed) * sw::units_to_seconds(d.projectile.time_to_live);
 		core::Result<host::SkyLane> lane = host::find_sky_lane(**world, float(flight), sw::BallisticsLimits{}.world_margin);
 		REQUIRE_MESSAGE(lane.ok(), (lane.ok() ? std::string() : lane.error().message));
@@ -623,7 +609,7 @@ TEST_SUITE("host-gunplay-server") {
 			REQUIRE(table != nullptr);
 			const std::optional<WeaponTickRecord> l0 = r.rec->last(r.slot);
 			REQUIRE(l0.has_value());
-			const std::string variant = lower(table->defs[l0->after.slots[0].def].variant);
+			const std::string variant = to_lower_ascii(table->defs[l0->after.slots[0].def].variant);
 			CHECK_MESSAGE(ends_with(variant, w.tail), variant);
 			CHECK((r.s->server.game_stats().weapon_flags & net::weapon_flags::kExactAim) != 0);
 			REQUIRE(teleport(*r.s, lane->feet, lane->yaw).has_value());
@@ -1171,7 +1157,7 @@ TEST_SUITE("host-gunplay-server") {
 				fmt("%" PRIu64 " refused, %" PRIu64 " accepted, bad datagrams +%" PRIu64 " of %" PRIu64 " sent", hb.kit_select_refused, hb.kit_select,
 						b.bad_datagrams - a.bad_datagrams, kit_selects),
 				"all refused");
-		const double p99_a = percentile(control.tick_ms, 0.99), p99_b = percentile(hostile.tick_ms, 0.99);
+		const double p99_a = rounded_rank(control.tick_ms, 0.99), p99_b = rounded_rank(hostile.tick_ms, 0.99);
 		row("E17", "server tick unaffected (precondition failures, tick time)", b.step_precondition_failures == 0 && hb.weapon_precondition_failures == 0 &&
 						b.tick == a.tick && p99_b <= 16.7,
 				fmt("ticks %u / %u, precondition failures %" PRIu64 " / %" PRIu64 ", tick p99 %.3f ms (control %.3f ms; wall clock, noisy)", b.tick, a.tick,

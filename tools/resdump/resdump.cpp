@@ -5,15 +5,16 @@
 #include "bf3/core/res/mesh_set.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/superbundle_mount.h"
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/text.h"
 
 #include <fcntl.h>
 #include <io.h>
 
 #include <algorithm>
 #include <bit>
-#include <cctype>
-#include <cmath>
 #include <chrono>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -57,10 +58,10 @@ struct Fnv {
 		}
 	}
 	void xf(const Transform &t) {
-		for (const Vec3 &r : t.axis) {
+		for (const Vec3 &r : t.axes()) {
 			f3(r);
 		}
-		f3(t.origin);
+		f3(t.trans);
 	}
 	std::string hex() const {
 		char text[20];
@@ -69,25 +70,7 @@ struct Fnv {
 	}
 };
 
-std::string fmt(const char *p_format, ...) {
-	char text[4096];
-	va_list args;
-	va_start(args, p_format);
-	const int n = std::vsnprintf(text, sizeof(text), p_format, args);
-	va_end(args);
-	if (n < 0) {
-		return std::string();
-	}
-	if (size_t(n) < sizeof(text)) {
-		return std::string(text, size_t(n));
-	}
-	std::string big(size_t(n) + 1, '\0');
-	va_start(args, p_format);
-	std::vsnprintf(big.data(), big.size(), p_format, args);
-	va_end(args);
-	big.resize(size_t(n));
-	return big;
-}
+using bf3::core::fmt;
 
 std::string fb(float v) {
 	return fmt("%08x", std::bit_cast<uint32_t>(v));
@@ -848,10 +831,7 @@ void skin_report(std::string &o, const Res &r) {
 		std::string named;
 		for (const SkeletonBone &b : lod.bones) {
 			for (const char *n : kBoneNames) {
-				std::string lower(n);
-				for (char &c : lower) {
-					c = char(std::tolower(uint8_t(c)));
-				}
+				const std::string lower = bf3::core::to_lower_ascii(n);
 				if (hash_quick(n) == b.name_hash) {
 					named += fmt(" %u=%s", b.index, n);
 				} else if (hash_quick(lower) == b.name_hash) {

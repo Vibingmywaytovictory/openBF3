@@ -1,5 +1,8 @@
 #include "bf3/net/netsim.h"
 
+#include "bf3/core/util/key_values.h"
+#include "bf3/core/util/splitmix64.h"
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -15,30 +18,17 @@ constexpr double kMaxLatencyMs = 10'000.0;
 constexpr double kMaxSpikeMs = 60'000.0;
 constexpr double kMaxRttMs = 2 * kMaxLatencyMs;
 
-uint64_t splitmix64(uint64_t &r_state) {
-	uint64_t z = (r_state += 0x9E3779B97F4A7C15ull);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-	return z ^ (z >> 31);
-}
+using bf3::core::splitmix64_next;
 
 double uniform01(uint64_t &r_state) {
-	return double(splitmix64(r_state) >> 11) * (1.0 / 9007199254740992.0);
+	return double(splitmix64_next(r_state) >> 11) * (1.0 / 9007199254740992.0);
 }
 
 uint64_t ms_to_ns(double p_ms) {
 	return p_ms <= 0.0 ? 0 : uint64_t(p_ms * 1.0e6 + 0.5);
 }
 
-std::string_view trim(std::string_view p_s) {
-	while (!p_s.empty() && (p_s.front() == ' ' || p_s.front() == '\t')) {
-		p_s.remove_prefix(1);
-	}
-	while (!p_s.empty() && (p_s.back() == ' ' || p_s.back() == '\t')) {
-		p_s.remove_suffix(1);
-	}
-	return p_s;
-}
+using bf3::core::trim;
 
 bool parse_number(std::string_view p_s, double &r_value) {
 	p_s = trim(p_s);
@@ -62,104 +52,137 @@ bool parse_range(std::string_view p_s, double &r_min, double &r_max) {
 	return parse_number(p_s.substr(0, dash), r_min) && parse_number(p_s.substr(dash + 1), r_max) && r_min <= r_max;
 }
 
-core::Error bad(std::string_view p_profile, const char *p_why) {
-	return core::make_error("netsim profile \"" + std::string(p_profile) + "\": " + p_why);
+using Key = core::KeyDef<NetSimConfig>;
+using core::KeyFault;
+using core::KeyKind;
+using core::KeyOutcome;
+
+KeyOutcome bad(std::string_view p_why) {
+	return { KeyFault::BadValue, 0.0, p_why };
 }
+
+KeyOutcome parse_base(std::string_view p_item, size_t p_index, NetSimConfig &r_config) {
+	if (p_index != 0) {
+		return bad("a base profile (off, bf3, <rtt_ms>/<loss_percent>) must come first");
+	}
+	NetSimConfig &c = r_config;
+	if (p_item == "off") {
+		c = NetSimConfig{};
+	} else if (p_item == "bf3") {
+		c.latency_min_ms = 100;
+		c.latency_max_ms = 200;
+		c.loss = 0.01f;
+		c.spike_chance = 0.03f;
+		c.spike_min_ms = 300;
+		c.spike_max_ms = 1000;
+		c.reorder = 0.01f;
+		c.duplicate = 0.02f;
+	} else {
+		const size_t slash = p_item.find('/');
+		double rtt = 0, loss = 0;
+		if (slash == std::string_view::npos || !parse_number(p_item.substr(0, slash), rtt) ||
+				!parse_number(p_item.substr(slash + 1), loss)) {
+			return bad("expected off, bf3, <rtt_ms>/<loss_percent> or key=value items");
+		}
+		if (rtt > kMaxRttMs || loss > 100.0) {
+			return bad("round trip above 20,000 ms or loss above 100 %");
+		}
+		const double one_way = rtt * 0.5;
+		c.latency_min_ms = float(one_way * 0.9);
+		c.latency_max_ms = float(one_way * 1.1);
+		c.loss = float(loss / 100.0);
+	}
+	return {};
+}
+
+KeyOutcome parse_lat(const Key &, std::string_view p_value, NetSimConfig &r_config) {
+	double a = 0, b = 0;
+	if (!parse_range(p_value, a, b) || b > kMaxLatencyMs) {
+		return bad("lat wants <ms> or <min_ms>-<max_ms>, at most 10,000 ms");
+	}
+	r_config.latency_min_ms = float(a);
+	r_config.latency_max_ms = float(b);
+	return {};
+}
+
+KeyOutcome parse_spike_ms(const Key &, std::string_view p_value, NetSimConfig &r_config) {
+	double a = 0, b = 0;
+	if (!parse_range(p_value, a, b) || b > kMaxSpikeMs) {
+		return bad("spike_ms wants <ms> or <min_ms>-<max_ms>, at most 60,000 ms");
+	}
+	r_config.spike_min_ms = float(a);
+	r_config.spike_max_ms = float(b);
+	return {};
+}
+
+KeyOutcome parse_percent(const Key &p_key, std::string_view p_value, NetSimConfig &r_config) {
+	double a = 0;
+	if (!parse_number(p_value, a) || a > 100.0) {
+		return bad("percentages are 0..100");
+	}
+	*static_cast<float *>(p_key.field(r_config)) = float(a / 100.0);
+	return {};
+}
+
+KeyOutcome parse_seed(const Key &, std::string_view p_value, NetSimConfig &r_config) {
+	uint64_t seed = 0;
+	const char *end = p_value.data() + p_value.size();
+	const std::from_chars_result r = std::from_chars(p_value.data(), end, seed);
+	if (p_value.empty() || r.ec != std::errc() || r.ptr != end) {
+		return bad("seed wants an unsigned 64-bit integer");
+	}
+	r_config.seed = seed;
+	return {};
+}
+
+#define BF3_NETSIM_FIELD(f) [](NetSimConfig &c) -> void * { return &c.f; }
+
+const Key kKeys[] = {
+	{ "lat", KeyKind::Custom, 0, 0, nullptr, {}, parse_lat },
+	{ "spike_ms", KeyKind::Custom, 0, 0, nullptr, {}, parse_spike_ms },
+	{ "loss", KeyKind::Custom, 0, 0, BF3_NETSIM_FIELD(loss), {}, parse_percent },
+	{ "spike", KeyKind::Custom, 0, 0, BF3_NETSIM_FIELD(spike_chance), {}, parse_percent },
+	{ "reorder", KeyKind::Custom, 0, 0, BF3_NETSIM_FIELD(reorder), {}, parse_percent },
+	{ "dup", KeyKind::Custom, 0, 0, BF3_NETSIM_FIELD(duplicate), {}, parse_percent },
+	{ "seed", KeyKind::Custom, 0, 0, nullptr, {}, parse_seed },
+};
+
+#undef BF3_NETSIM_FIELD
+
+std::string netsim_fault(const core::KeyFaultInfo &p_info) {
+	switch (p_info.fault) {
+		case KeyFault::TooLarge:
+			return "netsim profile: " + std::to_string(p_info.count) + " bytes (limit " + std::to_string(p_info.limit) +
+					")";
+		case KeyFault::TooManyLines:
+			return "netsim profile: " + std::to_string(p_info.count) + " items (limit " + std::to_string(p_info.limit) +
+					")";
+		default:
+			break;
+	}
+	const std::string why = p_info.fault == KeyFault::EmptyItem ? std::string("empty item")
+			: p_info.fault == KeyFault::UnknownKey
+			? std::string("unknown key (lat, loss, spike, spike_ms, reorder, dup, seed)")
+			: std::string(p_info.detail);
+	return "netsim profile \"" + std::string(p_info.text) + "\": " + why;
+}
+
+const core::KeyValueGrammar<NetSimConfig> kGrammar{ "netsim profile", kKeys, kMaxNetSimProfileBytes,
+	kMaxNetSimProfileItems, SIZE_MAX, false, ',', false, false, netsim_fault, parse_base };
 
 void append_number(std::string &r_out, double p_value) {
 	char buf[64];
 	const std::to_chars_result r = std::to_chars(buf, buf + sizeof(buf), float(p_value));
 	r_out.append(buf, r.ptr);
 }
-
 }
 
 core::Result<NetSimConfig> parse_netsim(std::string_view p_profile) {
 	const std::string_view profile = trim(p_profile);
-	NetSimConfig c;
 	if (profile.empty() || profile == "off") {
-		return c;
+		return NetSimConfig{};
 	}
-	size_t start = 0;
-	bool first = true;
-	while (start <= profile.size()) {
-		const size_t comma = std::min(profile.find(',', start), profile.size());
-		const std::string_view token = trim(profile.substr(start, comma - start));
-		start = comma + 1;
-		if (token.empty()) {
-			return bad(p_profile, "empty item");
-		}
-		const size_t eq = token.find('=');
-		if (eq == std::string_view::npos) {
-			if (!first) {
-				return bad(p_profile, "a base profile (off, bf3, <rtt_ms>/<loss_percent>) must come first");
-			}
-			if (token == "off") {
-				c = NetSimConfig{};
-			} else if (token == "bf3") {
-
-				c.latency_min_ms = 100;
-				c.latency_max_ms = 200;
-				c.loss = 0.01f;
-				c.spike_chance = 0.03f;
-				c.spike_min_ms = 300;
-				c.spike_max_ms = 1000;
-				c.reorder = 0.01f;
-				c.duplicate = 0.02f;
-			} else {
-				const size_t slash = token.find('/');
-				double rtt = 0, loss = 0;
-				if (slash == std::string_view::npos || !parse_number(token.substr(0, slash), rtt) ||
-						!parse_number(token.substr(slash + 1), loss)) {
-					return bad(p_profile, "expected off, bf3, <rtt_ms>/<loss_percent> or key=value items");
-				}
-				if (rtt > kMaxRttMs || loss > 100.0) {
-					return bad(p_profile, "round trip above 20,000 ms or loss above 100 %");
-				}
-
-				const double one_way = rtt * 0.5;
-				c.latency_min_ms = float(one_way * 0.9);
-				c.latency_max_ms = float(one_way * 1.1);
-				c.loss = float(loss / 100.0);
-			}
-			first = false;
-			continue;
-		}
-		first = false;
-		const std::string_view key = trim(token.substr(0, eq));
-		const std::string_view value = trim(token.substr(eq + 1));
-		double a = 0, b = 0;
-		if (key == "lat") {
-			if (!parse_range(value, a, b) || b > kMaxLatencyMs) {
-				return bad(p_profile, "lat wants <ms> or <min_ms>-<max_ms>, at most 10,000 ms");
-			}
-			c.latency_min_ms = float(a);
-			c.latency_max_ms = float(b);
-		} else if (key == "spike_ms") {
-			if (!parse_range(value, a, b) || b > kMaxSpikeMs) {
-				return bad(p_profile, "spike_ms wants <ms> or <min_ms>-<max_ms>, at most 60,000 ms");
-			}
-			c.spike_min_ms = float(a);
-			c.spike_max_ms = float(b);
-		} else if (key == "loss" || key == "spike" || key == "reorder" || key == "dup") {
-			if (!parse_number(value, a) || a > 100.0) {
-				return bad(p_profile, "percentages are 0..100");
-			}
-			const float p = float(a / 100.0);
-			(key == "loss" ? c.loss : key == "spike" ? c.spike_chance : key == "reorder" ? c.reorder : c.duplicate) = p;
-		} else if (key == "seed") {
-			uint64_t seed = 0;
-			const char *end = value.data() + value.size();
-			const std::from_chars_result r = std::from_chars(value.data(), end, seed);
-			if (value.empty() || r.ec != std::errc() || r.ptr != end) {
-				return bad(p_profile, "seed wants an unsigned 64-bit integer");
-			}
-			c.seed = seed;
-		} else {
-			return bad(p_profile, "unknown key (lat, loss, spike, spike_ms, reorder, dup, seed)");
-		}
-	}
-	return c;
+	return core::parse_key_values(p_profile, kGrammar);
 }
 
 std::string format_netsim(const NetSimConfig &p_config) {

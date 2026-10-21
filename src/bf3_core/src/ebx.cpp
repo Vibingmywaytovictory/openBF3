@@ -1422,12 +1422,12 @@ std::optional<EbxValue> EbxValue::get_path(std::string_view p_path) const {
 	}
 }
 
-std::optional<std::array<float, 3>> EbxValue::as_vec3() const {
+std::optional<core::Vec3> EbxValue::as_vec3() const {
 	const std::optional<EbxStruct> s = as_struct();
 	return s ? s->vec3() : std::nullopt;
 }
 
-std::optional<std::array<std::array<float, 3>, 4>> EbxValue::as_transform() const {
+std::optional<std::array<core::Vec3, 4>> EbxValue::as_transform() const {
 	const std::optional<EbxStruct> s = as_struct();
 	return s ? s->transform() : std::nullopt;
 }
@@ -1471,7 +1471,7 @@ EbxStruct::FieldRange EbxStruct::fields() const {
 	return FieldRange{ EbxFieldIterator(partition_, complex_, offset_) };
 }
 
-std::optional<std::array<float, 3>> EbxStruct::vec3() const {
+std::optional<core::Vec3> EbxStruct::vec3() const {
 	const std::optional<EbxValue> x = get("x"), y = get("y"), z = get("z");
 	if (!x || !y || !z) {
 		return std::nullopt;
@@ -1480,18 +1480,18 @@ std::optional<std::array<float, 3>> EbxStruct::vec3() const {
 	if (!fx || !fy || !fz) {
 		return std::nullopt;
 	}
-	return std::array<float, 3>{ *fx, *fy, *fz };
+	return core::Vec3{ *fx, *fy, *fz };
 }
 
-std::optional<std::array<std::array<float, 3>, 4>> EbxStruct::transform() const {
-	std::array<std::array<float, 3>, 4> out{};
+std::optional<std::array<core::Vec3, 4>> EbxStruct::transform() const {
+	std::array<core::Vec3, 4> out{};
 	const char *rows[4] = { "right", "up", "forward", "trans" };
 	for (size_t i = 0; i < 4; ++i) {
 		const std::optional<EbxValue> row = get(rows[i]);
 		if (!row) {
 			return std::nullopt;
 		}
-		const std::optional<std::array<float, 3>> v = row->as_vec3();
+		const std::optional<core::Vec3> v = row->as_vec3();
 		if (!v) {
 			return std::nullopt;
 		}

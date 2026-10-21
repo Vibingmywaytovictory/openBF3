@@ -1,5 +1,7 @@
 #include "vehicle_world_internal.h"
 
+#include "bf3/core/util/finite.h"
+
 #include "jolt_runtime.h"
 #include "static_world_internal.h"
 
@@ -71,19 +73,7 @@ Vec3 from_jolt(JPH::Vec3Arg p_v) {
 	return { p_v.GetX(), p_v.GetY(), p_v.GetZ() };
 }
 
-bool finite_floats(const float *p_values, size_t p_count) {
-	for (size_t i = 0; i < p_count; ++i) {
-		if (!std::isfinite(p_values[i])) {
-			return false;
-		}
-	}
-	return true;
-}
-
-template <size_t N>
-bool finite_array(const std::array<float, N> &p_values) {
-	return finite_floats(p_values.data(), N);
-}
+using bf3::core::finite;
 
 namespace body_at {
 constexpr size_t kActive = 0, kPosition = 1, kRotation = 13, kLinear = 29, kAngular = 41, kForce = 53, kTorque = 65, kSpheres = 77, kTimer = 125,
@@ -453,7 +443,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		return core::make_error(where + ": the model was built with other world keys (gravity, ground friction, step counts) than the world");
 	}
 	const VehicleModel &m = *p_model;
-	if (!finite_array(p_placement.position) || !finite_array(p_placement.rotation)) {
+	if (!finite(p_placement.position) || !finite(p_placement.rotation)) {
 		return core::make_error(where + ": non-finite placement");
 	}
 	const JPH::Quat rotation = JPH::Quat(p_placement.rotation[0], p_placement.rotation[1], p_placement.rotation[2], p_placement.rotation[3]).Normalized();
@@ -705,12 +695,12 @@ VehicleState VehicleWorld::state(VehicleSlot p_slot) const {
 	}
 	VehicleBodyState &b = out.body;
 	b.active = get<uint8_t>(body, body_at::kActive) != 0 ? 1 : 0;
-	get_bytes(body, body_at::kPosition, b.com_position.data(), 12);
+	get_bytes(body, body_at::kPosition, &b.com_position, 12);
 	get_bytes(body, body_at::kRotation, b.rotation.data(), 16);
-	get_bytes(body, body_at::kLinear, b.linear_velocity.data(), 12);
-	get_bytes(body, body_at::kAngular, b.angular_velocity.data(), 12);
-	get_bytes(body, body_at::kForce, b.force.data(), 12);
-	get_bytes(body, body_at::kTorque, b.torque.data(), 12);
+	get_bytes(body, body_at::kLinear, &b.linear_velocity, 12);
+	get_bytes(body, body_at::kAngular, &b.angular_velocity, 12);
+	get_bytes(body, body_at::kForce, &b.force, 12);
+	get_bytes(body, body_at::kTorque, &b.torque, 12);
 	get_bytes(body, body_at::kSpheres, b.sleep_test_spheres.data(), 48);
 	b.sleep_test_timer = get<float>(body, body_at::kTimer);
 	b.allow_sleeping = get<uint8_t>(body, body_at::kAllowSleeping) != 0 ? 1 : 0;
@@ -741,9 +731,9 @@ VehicleState VehicleWorld::state(VehicleSlot p_slot) const {
 		ws.angular_velocity = get<float>(constraint, at + constraint_at::kSpin);
 		ws.angle = get<float>(constraint, at + constraint_at::kAngle);
 		ws.contact_body = get<uint32_t>(constraint, at + constraint_at::kContactBody);
-		get_bytes(constraint, at + constraint_at::kContactPosition, ws.contact_position.data(), 12);
-		get_bytes(constraint, at + constraint_at::kContactNormal, ws.contact_normal.data(), 12);
-		get_bytes(constraint, at + constraint_at::kContactLateral, ws.contact_lateral.data(), 12);
+		get_bytes(constraint, at + constraint_at::kContactPosition, &ws.contact_position, 12);
+		get_bytes(constraint, at + constraint_at::kContactNormal, &ws.contact_normal, 12);
+		get_bytes(constraint, at + constraint_at::kContactLateral, &ws.contact_lateral, 12);
 		ws.suspension_length = get<float>(constraint, at + constraint_at::kSuspension);
 		ws.lambda_suspension = get<float>(constraint, at + constraint_at::kLambdaSuspension);
 		ws.lambda_suspension_max_up = get<float>(constraint, at + constraint_at::kLambdaMaxUp);
@@ -754,7 +744,7 @@ VehicleState VehicleWorld::state(VehicleSlot p_slot) const {
 		ws.in_contact = wheel->HasContact() ? 1 : 0;
 	}
 	const size_t tail = constraint_at::kWheels + wheels * constraint_at::kWheelBytes;
-	get_bytes(constraint, tail, out.pitch_roll_axis.data(), 12);
+	get_bytes(constraint, tail, &out.pitch_roll_axis, 12);
 	out.pitch_roll_lambda = get<float>(constraint, tail + 12);
 	out.current_step = get<uint32_t>(constraint, tail + 16);
 	out.driver = v.driver;
@@ -853,7 +843,8 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 
 	const VehicleBodyState &b = p_state.body;
 	if ((p_groups & g::kBody) != 0) {
-		if (!finite_array(b.com_position) || !finite_array(b.rotation) || !finite_array(b.linear_velocity) || !finite_array(b.angular_velocity) || b.active > 1) {
+		if (!finite(b.com_position) || !finite(b.rotation) || !finite(b.linear_velocity) ||
+				!finite(b.angular_velocity) || b.active > 1) {
 			return core::make_error(where + ": non-finite body state");
 		}
 		for (const float c : b.com_position) {
@@ -868,9 +859,9 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 		}
 	}
 	if ((p_groups & g::kBodySleep) != 0) {
-		bool ok = finite_array(b.force) && finite_array(b.torque) && std::isfinite(b.sleep_test_timer) && b.allow_sleeping <= 1;
+		bool ok = finite(b.force) && finite(b.torque) && std::isfinite(b.sleep_test_timer) && b.allow_sleeping <= 1;
 		for (const VehicleSleepSphere &s : b.sleep_test_spheres) {
-			ok = ok && finite_array(s.center) && std::isfinite(s.radius);
+			ok = ok && finite(s.center) && std::isfinite(s.radius);
 		}
 		if (!ok) {
 			return core::make_error(where + ": non-finite sleep state");
@@ -879,7 +870,7 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 	const VehicleControllerState &c = p_state.controller;
 	if ((p_groups & g::kController) != 0) {
 		const float f[] = { c.previous_delta_time, c.engine_rpm, c.clutch, c.gear_switch_time_left, c.clutch_release_time_left, c.gear_switch_latency_time_left };
-		if (!finite_floats(f, sizeof(f) / sizeof(f[0]))) {
+		if (!finite(f)) {
 			return core::make_error(where + ": non-finite controller state");
 		}
 		if (c.gear < -int32_t(m.reverse_gears) || c.gear > int32_t(m.forward_gears)) {
@@ -888,7 +879,7 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 	}
 	if ((p_groups & g::kControllerInputs) != 0) {
 		const float f[] = { c.forward_input, c.right_input, c.brake_input, c.hand_brake_input };
-		if (!finite_floats(f, 4)) {
+		if (!finite(f)) {
 			return core::make_error(where + ": non-finite controller inputs");
 		}
 	}
@@ -896,12 +887,12 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 		const VehicleWheelState &ws = p_state.wheels[i];
 		if ((p_groups & g::kWheels) != 0) {
 			const float f[] = { ws.angular_velocity, ws.angle, ws.suspension_length };
-			if (!finite_floats(f, 3)) {
+			if (!finite(f)) {
 				return core::make_error(where + ": wheel " + std::to_string(i) + " non-finite");
 			}
 		}
 		if ((p_groups & g::kWheelContacts) != 0) {
-			if (!finite_array(ws.contact_position) || !finite_array(ws.contact_normal) || !finite_array(ws.contact_lateral)) {
+			if (!finite(ws.contact_position) || !finite(ws.contact_normal) || !finite(ws.contact_lateral)) {
 				return core::make_error(where + ": wheel " + std::to_string(i) + " contact non-finite");
 			}
 			if (ws.contact_body != kNoContactBody) {
@@ -914,12 +905,13 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 		}
 		if ((p_groups & g::kLambdas) != 0) {
 			const float f[] = { ws.lambda_suspension, ws.lambda_suspension_max_up, ws.lambda_longitudinal, ws.lambda_lateral };
-			if (!finite_floats(f, 4)) {
+			if (!finite(f)) {
 				return core::make_error(where + ": wheel " + std::to_string(i) + " lambdas non-finite");
 			}
 		}
 	}
-	if ((p_groups & g::kPitchRoll) != 0 && (!finite_array(p_state.pitch_roll_axis) || !std::isfinite(p_state.pitch_roll_lambda))) {
+	if ((p_groups & g::kPitchRoll) != 0 &&
+			(!finite(p_state.pitch_roll_axis) || !std::isfinite(p_state.pitch_roll_lambda))) {
 		return core::make_error(where + ": non-finite pitch-roll state");
 	}
 	if ((p_groups & g::kStep) != 0 && p_state.constraint_enabled > 1) {
@@ -942,14 +934,14 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 	}
 	if ((p_groups & g::kBody) != 0) {
 		put<uint8_t>(body, body_at::kActive, b.active);
-		put_bytes(body, body_at::kPosition, b.com_position.data(), 12);
+		put_bytes(body, body_at::kPosition, &b.com_position, 12);
 		put_bytes(body, body_at::kRotation, b.rotation.data(), 16);
-		put_bytes(body, body_at::kLinear, b.linear_velocity.data(), 12);
-		put_bytes(body, body_at::kAngular, b.angular_velocity.data(), 12);
+		put_bytes(body, body_at::kLinear, &b.linear_velocity, 12);
+		put_bytes(body, body_at::kAngular, &b.angular_velocity, 12);
 	}
 	if ((p_groups & g::kBodySleep) != 0) {
-		put_bytes(body, body_at::kForce, b.force.data(), 12);
-		put_bytes(body, body_at::kTorque, b.torque.data(), 12);
+		put_bytes(body, body_at::kForce, &b.force, 12);
+		put_bytes(body, body_at::kTorque, &b.torque, 12);
 		put_bytes(body, body_at::kSpheres, b.sleep_test_spheres.data(), 48);
 		put<float>(body, body_at::kTimer, b.sleep_test_timer);
 		put<uint8_t>(body, body_at::kAllowSleeping, b.allow_sleeping);
@@ -980,9 +972,9 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 		}
 		if ((p_groups & g::kWheelContacts) != 0) {
 			put<uint32_t>(constraint, at + constraint_at::kContactBody, ws.contact_body);
-			put_bytes(constraint, at + constraint_at::kContactPosition, ws.contact_position.data(), 12);
-			put_bytes(constraint, at + constraint_at::kContactNormal, ws.contact_normal.data(), 12);
-			put_bytes(constraint, at + constraint_at::kContactLateral, ws.contact_lateral.data(), 12);
+			put_bytes(constraint, at + constraint_at::kContactPosition, &ws.contact_position, 12);
+			put_bytes(constraint, at + constraint_at::kContactNormal, &ws.contact_normal, 12);
+			put_bytes(constraint, at + constraint_at::kContactLateral, &ws.contact_lateral, 12);
 		}
 		if ((p_groups & g::kLambdas) != 0) {
 			put<float>(constraint, at + constraint_at::kLambdaSuspension, ws.lambda_suspension);
@@ -993,7 +985,7 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 	}
 	const size_t tail = constraint_at::kWheels + wheels * constraint_at::kWheelBytes;
 	if ((p_groups & g::kPitchRoll) != 0) {
-		put_bytes(constraint, tail, p_state.pitch_roll_axis.data(), 12);
+		put_bytes(constraint, tail, &p_state.pitch_roll_axis, 12);
 		put<float>(constraint, tail + 12, p_state.pitch_roll_lambda);
 	}
 	if ((p_groups & g::kStep) != 0) {

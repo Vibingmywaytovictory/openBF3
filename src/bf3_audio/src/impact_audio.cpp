@@ -1,6 +1,7 @@
 #include "bf3/audio/impact_audio.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/core/util/finite.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,9 +18,7 @@ constexpr size_t kMaxEffectSounds = kMaxOneShotVoices * 2;
 
 constexpr float kMaxImpactDistanceM = 400.0f;
 
-bool finite(const Vec3 &p_v) {
-	return std::isfinite(p_v.x) && std::isfinite(p_v.y) && std::isfinite(p_v.z);
-}
+using bf3::core::finite;
 
 float distance(const Vec3 &p_a, const Vec3 &p_b) {
 	const float dx = p_a.x - p_b.x, dy = p_a.y - p_b.y, dz = p_a.z - p_b.z;

@@ -1,5 +1,6 @@
 #include "death_camera.h"
 
+#include "bf3/core/util/finite.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 
@@ -40,9 +41,7 @@ Vec3 normalized(const Vec3 &p_a, const Vec3 &p_fallback) {
 Vec3 lerp(const Vec3 &p_a, const Vec3 &p_b, float p_t) {
 	return add(p_a, mul(sub(p_b, p_a), p_t));
 }
-bool finite3(const Vec3 &p_a) {
-	return std::isfinite(p_a.x) && std::isfinite(p_a.y) && std::isfinite(p_a.z);
-}
+using bf3::core::finite;
 
 float ease(double p_t, float p_span) {
 	if (!(p_span > 0.0f)) {
@@ -93,7 +92,7 @@ void Bf3DeathCamera::begin(const DeathCameraStart &p_start, double p_now_s) {
 	killer_seen_ = false;
 	last_killer_ = fx::Vec3{};
 	turned_counted_ = false;
-	active_ = finite3(p_start.corpse) && finite3(p_start.eye) && std::isfinite(p_start.yaw_rad) && std::isfinite(p_now_s);
+	active_ = finite(p_start.corpse) && finite(p_start.eye) && std::isfinite(p_start.yaw_rad) && std::isfinite(p_now_s);
 	if (!active_) {
 		++stats_.bad_inputs;
 	}
@@ -125,7 +124,7 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 	const Vec3 orbit = add(sub(start_.corpse, mul(fwd, p.back_m)), mul(up, p.up_m));
 	const bool want_killer = start_.killer_camera && start_.killer_slot != 0xFF;
 	if (want_killer && p_killer != nullptr) {
-		if (finite3(*p_killer)) {
+		if (finite(*p_killer)) {
 			last_killer_ = *p_killer;
 			killer_seen_ = true;
 		} else {
@@ -167,7 +166,7 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 		}
 	}
 	const Vec3 forward = normalized(sub(target, pos), normalized(sub(pivot, pos), fwd));
-	if (!finite3(pos) || !finite3(forward)) {
+	if (!finite(pos) || !finite(forward)) {
 		++stats_.bad_inputs;
 		active_ = false;
 		return DeathCameraView{};

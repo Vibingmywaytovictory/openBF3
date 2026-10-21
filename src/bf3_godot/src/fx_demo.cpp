@@ -11,6 +11,9 @@
 #include "bf3/core/gameplay/weapon_catalog.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
+#include "bf3/core/util/text.h"
 #include "bf3/fx/atlas_pixels.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/sim/collision_world.h"
@@ -68,14 +71,7 @@ void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[fx] " + p_line));
 }
 
-std::string fmt(const char *p_format, ...) {
-	char buf[1024];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::filesystem::path utf8_path(const std::string &p_text) {
 	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
@@ -86,14 +82,7 @@ std::string path_text(const std::filesystem::path &p_path) {
 	return std::string(s.begin(), s.end());
 }
 
-double percentile(std::vector<double> p_values, double p_q) {
-	if (p_values.empty()) {
-		return 0.0;
-	}
-	std::sort(p_values.begin(), p_values.end());
-	const size_t i = std::min(p_values.size() - 1, size_t(std::floor(p_q * double(p_values.size() - 1) + 0.5)));
-	return p_values[i];
-}
+using bf3::core::rounded_rank;
 
 const char *pass_text(bool p_ok) {
 	return p_ok ? "PASS" : "FAIL";
@@ -107,13 +96,7 @@ Vector3 gv(const bf3::anim::Vec3 &p_v) {
 	return Vector3(p_v.x, p_v.y, p_v.z);
 }
 
-std::string lower(std::string_view p_text) {
-	std::string s(p_text);
-	for (char &c : s) {
-		c = char(std::tolower(static_cast<unsigned char>(c)));
-	}
-	return s;
-}
+using bf3::core::to_lower_ascii;
 
 fx::Transform frame_y(const Vector3 &p_origin, const Vector3 &p_axis, const Vector3 &p_forward_hint) {
 	const Vector3 u = p_axis.normalized();
@@ -513,7 +496,7 @@ void Bf3FxDemo::find_surfaces() {
 				if (!surface) {
 					continue;
 				}
-				const std::string name = lower(table.material_name(*surface));
+				const std::string name = to_lower_ascii(table.material_name(*surface));
 				++seen[name];
 				const float dist = hit.fraction * kSurfaceRay;
 				if (dist < kSurfaceMin || dist > kSurfaceMax) {
@@ -875,9 +858,12 @@ void Bf3FxDemo::report_and_finish() {
 			fmt("%llu muzzle starts (flash, fill-out, shell); %llu frames with 1p particles, all in FirstPerson batches (FOV override 55, z-clip 0.25); %llu mismatching frames",
 					(unsigned long long)muzzle_starts_, (unsigned long long)fp_frames_, (unsigned long long)fp_mismatch_frames_));
 	row("FX time", true,
-			fmt("main thread (step + prepare + upload, wall) p50 %.3f ms, p99 %.3f ms over %zu frames (step p50 %.3f / p99 %.3f, prepare p50 %.3f / p99 %.3f, upload p50 %.3f / p99 %.3f); E9's 1.0 ms p99 is wave 3's gate; shared machine: noisy",
-					percentile(fx_ms_, 0.5), percentile(fx_ms_, 0.99), fx_ms_.size(), percentile(step_ms_, 0.5), percentile(step_ms_, 0.99), percentile(prep_ms_, 0.5),
-					percentile(prep_ms_, 0.99), percentile(upload_ms_, 0.5), percentile(upload_ms_, 0.99)));
+			fmt("main thread (step + prepare + upload, wall) p50 %.3f ms, p99 %.3f ms over %zu frames (step p50 %.3f / "
+				"p99 %.3f, prepare p50 %.3f / p99 %.3f, upload p50 %.3f / p99 %.3f); E9's 1.0 ms p99 is wave 3's gate; "
+				"shared machine: noisy",
+					rounded_rank(fx_ms_, 0.5), rounded_rank(fx_ms_, 0.99), fx_ms_.size(), rounded_rank(step_ms_, 0.5),
+					rounded_rank(step_ms_, 0.99), rounded_rank(prep_ms_, 0.5), rounded_rank(prep_ms_, 0.99),
+					rounded_rank(upload_ms_, 0.5), rounded_rank(upload_ms_, 0.99)));
 	row("impacts", concrete_found_ && brick_found_, concrete_line_ + "; " + brick_line_ + fmt("; %llu impact starts", (unsigned long long)impact_starts_));
 	row("shots", shots_ok_ == shots_.size(), fmt("%u of %zu captures in %s (the look is the user's judgement)", shots_ok_, shots_.size(), shot_dir_.c_str()));
 	for (const std::string &l : shot_lines_) {

@@ -361,6 +361,8 @@ TEST_SUITE("host-tdm-server") {
 		}
 		CHECK_FALSE(host::parse_tdm_tuning(many).ok());
 		CHECK_FALSE(host::parse_tdm_tuning(std::string(host::kMaxTdmTuningBytes + 1, '#')).ok());
+		CHECK_FALSE(host::parse_tdm_tuning(std::string(host::kMaxTdmTuningLines, '\n')).ok());
+		CHECK(host::parse_tdm_tuning(std::string(host::kMaxTdmTuningLines - 1, '\n')).ok());
 
 		uint64_t rng = 20261019u;
 		size_t ok = 0;

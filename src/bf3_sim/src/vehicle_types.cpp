@@ -24,8 +24,8 @@ bool visit_fields(State &p_state, const Visit &p_visit) {
 	auto &b = p_state.body;
 	const char *body_names[] = { "body.com_position", "body.rotation", "body.linear_velocity", "body.angular_velocity", "body.force", "body.torque",
 		"body.sleep_test_spheres", "body.sleep_test_timer", "body.active", "body.allow_sleeping" };
-	const void *body_fields[] = { b.com_position.data(), b.rotation.data(), b.linear_velocity.data(), b.angular_velocity.data(), b.force.data(),
-		b.torque.data(), b.sleep_test_spheres.data(), &b.sleep_test_timer, &b.active, &b.allow_sleeping };
+	const void *body_fields[] = { &b.com_position, b.rotation.data(), &b.linear_velocity, &b.angular_velocity, &b.force,
+		&b.torque, b.sleep_test_spheres.data(), &b.sleep_test_timer, &b.active, &b.allow_sleeping };
 	const size_t body_sizes[] = { sizeof(b.com_position), sizeof(b.rotation), sizeof(b.linear_velocity), sizeof(b.angular_velocity), sizeof(b.force),
 		sizeof(b.torque), sizeof(b.sleep_test_spheres), sizeof(b.sleep_test_timer), sizeof(b.active), sizeof(b.allow_sleeping) };
 	for (size_t i = 0; i < sizeof(body_sizes) / sizeof(body_sizes[0]); ++i) {
@@ -58,8 +58,9 @@ bool visit_fields(State &p_state, const Visit &p_visit) {
 		const std::string prefix = "wheels[" + std::to_string(i) + "].";
 		const char *wheel_names[] = { "angular_velocity", "angle", "suspension_length", "contact_body", "contact_position", "contact_normal", "contact_lateral",
 			"lambda_suspension", "lambda_suspension_max_up", "lambda_longitudinal", "lambda_lateral" };
-		const void *wheel_fields[] = { &w.angular_velocity, &w.angle, &w.suspension_length, &w.contact_body, w.contact_position.data(), w.contact_normal.data(),
-			w.contact_lateral.data(), &w.lambda_suspension, &w.lambda_suspension_max_up, &w.lambda_longitudinal, &w.lambda_lateral };
+		const void *wheel_fields[] = { &w.angular_velocity, &w.angle, &w.suspension_length, &w.contact_body,
+			&w.contact_position, &w.contact_normal, &w.contact_lateral, &w.lambda_suspension,
+			&w.lambda_suspension_max_up, &w.lambda_longitudinal, &w.lambda_lateral };
 		const size_t wheel_sizes[] = { 4, 4, 4, 4, 12, 12, 12, 4, 4, 4, 4 };
 		for (size_t f = 0; f < sizeof(wheel_sizes) / sizeof(wheel_sizes[0]); ++f) {
 			if (!p_visit(prefix + wheel_names[f], wheel_fields[f], wheel_sizes[f])) {
@@ -68,8 +69,9 @@ bool visit_fields(State &p_state, const Visit &p_visit) {
 		}
 	}
 	return p_visit(std::string("wheel_count"), &p_state.wheel_count, sizeof(p_state.wheel_count)) &&
-			p_visit(std::string("constraint_enabled"), &p_state.constraint_enabled, sizeof(p_state.constraint_enabled)) &&
-			p_visit(std::string("pitch_roll_axis"), p_state.pitch_roll_axis.data(), sizeof(p_state.pitch_roll_axis)) &&
+			p_visit(std::string("constraint_enabled"), &p_state.constraint_enabled,
+					sizeof(p_state.constraint_enabled)) &&
+			p_visit(std::string("pitch_roll_axis"), &p_state.pitch_roll_axis, sizeof(p_state.pitch_roll_axis)) &&
 			p_visit(std::string("pitch_roll_lambda"), &p_state.pitch_roll_lambda, sizeof(p_state.pitch_roll_lambda)) &&
 			p_visit(std::string("current_step"), &p_state.current_step, sizeof(p_state.current_step));
 }

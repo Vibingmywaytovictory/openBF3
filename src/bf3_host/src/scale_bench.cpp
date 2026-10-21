@@ -6,8 +6,11 @@
 #include "bf3/core/install.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/level.h"
-#include "bf3/core/level/world.h"
 #include "bf3/core/level/mode_areas.h"
+#include "bf3/core/level/world.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/format.h"
+#include "bf3/core/util/percentile.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
@@ -33,9 +36,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 double ms_between(Clock::time_point p_a, Clock::time_point p_b) {
 	return std::chrono::duration<double, std::milli>(p_b - p_a).count();
@@ -71,18 +72,10 @@ Percentiles percentiles_impl(std::vector<double> p_values) {
 	if (p_values.empty()) {
 		return p;
 	}
-	std::sort(p_values.begin(), p_values.end());
-	const auto rank = [&](double p_q) {
-
-		const size_t n = p_values.size();
-		size_t k = size_t(std::ceil(p_q * double(n)));
-		k = std::clamp<size_t>(k, 1, n);
-		return p_values[k - 1];
-	};
-	p.p50 = rank(0.50);
-	p.p95 = rank(0.95);
-	p.p99 = rank(0.99);
-	p.max = p_values.back();
+	p.p50 = core::nearest_rank(p_values, 0.50);
+	p.p95 = core::nearest_rank(p_values, 0.95);
+	p.p99 = core::nearest_rank(p_values, 0.99);
+	p.max = *std::max_element(p_values.begin(), p_values.end());
 	double sum = 0.0;
 	for (double v : p_values) {
 		sum += v;
@@ -115,14 +108,7 @@ struct SweepSample {
 	sim::Vec3 velocity{};
 };
 
-std::string fmt(const char *p_format, ...) {
-	char buf[512];
-	va_list args;
-	va_start(args, p_format);
-	std::vsnprintf(buf, sizeof(buf), p_format, args);
-	va_end(args);
-	return buf;
-}
+using bf3::core::fmt;
 
 std::string percentile_text(const Percentiles &p_p) {
 	return fmt("p50 %.3f p95 %.3f p99 %.3f max %.3f mean %.3f", p_p.p50, p_p.p95, p_p.p99, p_p.max, p_p.mean);

@@ -1,5 +1,7 @@
 #include "bf3/host/tdm_brain.h"
 
+#include "bf3/core/util/finite.h"
+#include "bf3/core/util/key_values.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -151,9 +153,7 @@ sim::Vec3 add(const sim::Vec3 &p_a, float p_x, float p_y, float p_z) {
 sim::Vec3 sub(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return { p_a[0] - p_b[0], p_a[1] - p_b[1], p_a[2] - p_b[2] };
 }
-bool finite3(const sim::Vec3 &p_v) {
-	return std::isfinite(p_v[0]) && std::isfinite(p_v[1]) && std::isfinite(p_v[2]);
-}
+using bf3::core::finite;
 bool is_alive(const sim::SoldierState &p_state) {
 	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead;
 }
@@ -292,7 +292,7 @@ struct TdmShared {
 		for (size_t s = 0; s < n; ++s) {
 			teams[s] = view.team(uint8_t(s));
 			alive[s] = view.alive(uint8_t(s)) ? 1 : 0;
-			if (was_alive[s] != 0 && alive[s] == 0 && finite3(states[s].position)) {
+			if (was_alive[s] != 0 && alive[s] == 0 && finite(states[s].position)) {
 				add_heat(states[s].position, kHeatDeath, p_tick);
 			}
 			was_alive[s] = alive[s];
@@ -301,7 +301,7 @@ struct TdmShared {
 		if (host.gunplay != nullptr) {
 			for (const sw::ShotEvent &shot : host.gunplay->interval_shots()) {
 				const size_t s = shot.player_slot;
-				if (s >= n || shot.shot_index < shot_cursor[s] || !finite3(shot.origin) || !finite3(shot.direction)) {
+				if (s >= n || shot.shot_index < shot_cursor[s] || !finite(shot.origin) || !finite(shot.direction)) {
 					continue;
 				}
 				shot_cursor[s] = shot.shot_index + 1u;
@@ -473,7 +473,7 @@ struct TdmBrain::Impl {
 
 	bool set_goal(sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force) {
 		TdmShared &sh = *shared;
-		if (sh.nav == nullptr || !finite3(p_at)) {
+		if (sh.nav == nullptr || !finite(p_at)) {
 			return false;
 		}
 		BotNav &nav = *sh.nav;
@@ -552,7 +552,7 @@ struct TdmBrain::Impl {
 			const bool found = best < 1e30f;
 			for (const sim::SpawnPoint &sp : nav.level->spawns.points) {
 				const float d = horizontal(sp.position, p_state.position);
-				if (!found && finite3(sp.position) && d < best) {
+				if (!found && finite(sp.position) && d < best) {
 					best = d;
 					exit_at = sp.position;
 				}
@@ -917,7 +917,7 @@ struct TdmBrain::Impl {
 			float best = 1e30f;
 			const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
 			for (const DownedSoldier &d : view.downed()) {
-				if (d.team != team || d.slot == slot || d.until_tick <= p_tick || !finite3(d.corpse)) {
+				if (d.team != team || d.slot == slot || d.until_tick <= p_tick || !finite(d.corpse)) {
 					continue;
 				}
 				const float dist = distance(p_state.position, d.corpse);
@@ -1345,7 +1345,7 @@ struct TdmBrain::Impl {
 		const sim::Vec3 dir = view_dir(view_yaw, view_pitch);
 		const float length = std::max(p_length - 0.5f, 0.0f);
 		for (size_t s = 0; s < states.size() && s < sh.teams.size() && s < sh.alive.size(); ++s) {
-			if (s == slot || team == 0 || sh.teams[s] != team || sh.alive[s] == 0 || !finite3(states[s].position)) {
+			if (s == slot || team == 0 || sh.teams[s] != team || sh.alive[s] == 0 || !finite(states[s].position)) {
 				continue;
 			}
 			if (horizontal(states[s].position, p_self.position) > length + 1.0f) {
@@ -1363,7 +1363,7 @@ struct TdmBrain::Impl {
 		float best = 1e30f;
 		int pick = -1;
 		for (const sim::bots::PerceivedEnemy &e : perception.enemies()) {
-			if (!(e.detected || e.heard) || e.last_seen < searched_tick || !finite3(e.last_position)) {
+			if (!(e.detected || e.heard) || e.last_seen < searched_tick || !finite(e.last_position)) {
 				continue;
 			}
 			const float d = horizontal(p_self.position, e.last_position);
@@ -1376,7 +1376,7 @@ struct TdmBrain::Impl {
 	}
 
 	bool start_retreat(sim::Tick p_tick, const sim::SoldierState &p_self, const sim::Vec3 &p_threat) {
-		if (!finite3(p_threat)) {
+		if (!finite(p_threat)) {
 			return false;
 		}
 		float dx = p_self.position[0] - p_threat[0], dz = p_self.position[2] - p_threat[2];
@@ -1498,83 +1498,10 @@ void TdmBrain::set_slot(uint8_t p_slot) {
 
 namespace {
 
-struct FloatKey {
-	const char *name;
-	float TdmBotConfig::*field;
-	float lo, hi;
-};
-struct NestedFloatKey {
-	const char *name;
-	bool aim;
-	float sim::bots::PerceptionParams::*pfield;
-	float sim::bots::AimParams::*afield;
-	float lo, hi;
-};
-
-constexpr FloatKey kFloatKeys[] = {
-	{ "skill_min", &TdmBotConfig::skill_min, 0.0f, 1.0f },
-	{ "skill_max", &TdmBotConfig::skill_max, 0.0f, 1.0f },
-	{ "reaction_min_s", &TdmBotConfig::reaction_min_s, 0.0f, 10.0f },
-	{ "reaction_max_s", &TdmBotConfig::reaction_max_s, 0.0f, 10.0f },
-	{ "switch_margin", &TdmBotConfig::switch_margin, 0.0f, 10.0f },
-	{ "strafe_min_m", &TdmBotConfig::strafe_min_m, 0.0f, 50.0f },
-	{ "strafe_max_m", &TdmBotConfig::strafe_max_m, 0.0f, 50.0f },
-	{ "crouch_beyond_m", &TdmBotConfig::crouch_beyond_m, 0.0f, 1000.0f },
-	{ "retreat_below_hp", &TdmBotConfig::retreat_below_hp, 0.0f, 100.0f },
-	{ "grenade_min_m", &TdmBotConfig::grenade_min_m, 0.0f, 200.0f },
-	{ "grenade_max_m", &TdmBotConfig::grenade_max_m, 0.0f, 200.0f },
-	{ "grenade_every_s", &TdmBotConfig::grenade_every_s, 1.0f, 3600.0f },
-	{ "knife_within_m", &TdmBotConfig::knife_within_m, 0.0f, 10.0f },
-	{ "heat_cell_m", &TdmBotConfig::heat_cell_m, 1.0f, 1000.0f },
-	{ "heat_decay_s", &TdmBotConfig::heat_decay_s, 0.1f, 3600.0f },
-	{ "revive_radius_m", &TdmBotConfig::revive_radius_m, 0.0f, 500.0f },
-	{ "revive_idle_s", &TdmBotConfig::revive_idle_s, 0.0f, 60.0f },
-	{ "revive_margin_s", &TdmBotConfig::revive_margin_s, 0.0f, 60.0f },
-	{ "w_distance", &TdmBotConfig::w_distance, 0.0f, 1000.0f },
-	{ "w_aim", &TdmBotConfig::w_aim, 0.0f, 1000.0f },
-	{ "w_damage", &TdmBotConfig::w_damage, 0.0f, 1000.0f },
-	{ "w_current", &TdmBotConfig::w_current, 0.0f, 1000.0f },
-	{ "damage_memory_s", &TdmBotConfig::damage_memory_s, 0.0f, 60.0f },
-	{ "aims_at_me_deg", &TdmBotConfig::aims_at_me_deg, 0.0f, 90.0f },
-	{ "engage_strafe_m", &TdmBotConfig::engage_strafe_m, 0.0f, 1000.0f },
-	{ "hunt_share", &TdmBotConfig::hunt_share, 0.0f, 1.0f },
-	{ "blind_fire_share", &TdmBotConfig::blind_fire_share, 0.0f, 1.0f },
-	{ "regen_wait_s", &TdmBotConfig::regen_wait_s, 0.0f, 600.0f },
-	{ "regen_until_hp", &TdmBotConfig::regen_until_hp, 0.0f, 100.0f },
-};
-
-using PP = sim::bots::PerceptionParams;
-using AP = sim::bots::AimParams;
-constexpr NestedFloatKey kNestedKeys[] = {
-	{ "perception.fov_h_deg", false, &PP::fov_h_deg, nullptr, 1.0f, 360.0f },
-	{ "perception.fov_v_deg", false, &PP::fov_v_deg, nullptr, 1.0f, 180.0f },
-	{ "perception.max_range_m", false, &PP::max_range_m, nullptr, 0.0f, 2000.0f },
-	{ "perception.near_m", false, &PP::near_m, nullptr, 0.0f, 2000.0f },
-	{ "perception.detect_near_s", false, &PP::detect_near_s, nullptr, 0.0f, 60.0f },
-	{ "perception.far_m", false, &PP::far_m, nullptr, 0.0f, 2000.0f },
-	{ "perception.detect_far_s", false, &PP::detect_far_s, nullptr, 0.0f, 60.0f },
-	{ "perception.forget_s", false, &PP::forget_s, nullptr, 0.0f, 600.0f },
-	{ "perception.hearing_radius_m", false, &PP::hearing_radius_m, nullptr, 0.0f, 2000.0f },
-	{ "perception.hearing_error_m", false, &PP::hearing_error_m, nullptr, 0.0f, 200.0f },
-	{ "perception.head_height_m", false, &PP::head_height_m, nullptr, 0.0f, 3.0f },
-	{ "perception.chest_height_m", false, &PP::chest_height_m, nullptr, 0.0f, 3.0f },
-	{ "aim.e0_deg", true, nullptr, &AP::e0_deg, 0.0f, 45.0f },
-	{ "aim.e_inf_deg", true, nullptr, &AP::e_inf_deg, 0.0f, 45.0f },
-	{ "aim.tau_s", true, nullptr, &AP::tau_s, 0.001f, 60.0f },
-	{ "aim.moving_penalty_deg", true, nullptr, &AP::moving_penalty_deg, 0.0f, 45.0f },
-	{ "aim.crossing_deg_per_mps", true, nullptr, &AP::crossing_deg_per_mps, 0.0f, 45.0f },
-	{ "aim.skill_scale", true, nullptr, &AP::skill_scale, 0.0f, 10.0f },
-};
-
-std::string_view trim(std::string_view p_s) {
-	while (!p_s.empty() && (p_s.front() == ' ' || p_s.front() == '\t' || p_s.front() == '\r')) {
-		p_s.remove_prefix(1);
-	}
-	while (!p_s.empty() && (p_s.back() == ' ' || p_s.back() == '\t' || p_s.back() == '\r')) {
-		p_s.remove_suffix(1);
-	}
-	return p_s;
-}
+using Key = core::KeyDef<TdmBotConfig>;
+using core::KeyFault;
+using core::KeyKind;
+using core::KeyOutcome;
 
 bool parse_number(std::string_view p_text, double &r_value) {
 	if (p_text.empty() || p_text.size() > 32) {
@@ -1592,88 +1519,130 @@ bool parse_number(std::string_view p_text, double &r_value) {
 	return true;
 }
 
+KeyOutcome bot_number(const Key &p_key, std::string_view p_value, double &r_value) {
+	if (!parse_number(p_value, r_value)) {
+		return { KeyFault::NotANumber };
+	}
+	if (r_value < p_key.min || r_value > p_key.max) {
+		return { KeyFault::OutOfRange, r_value };
+	}
+	return {};
+}
+
+KeyOutcome bot_float(const Key &p_key, std::string_view p_value, TdmBotConfig &r_config) {
+	double v = 0.0;
+	const KeyOutcome outcome = bot_number(p_key, p_value, v);
+	if (outcome.fault == KeyFault::None) {
+		*static_cast<float *>(p_key.field(r_config)) = float(v);
+	}
+	return outcome;
+}
+
+KeyOutcome bot_count(const Key &p_key, std::string_view p_value, TdmBotConfig &r_config) {
+	double v = 0.0;
+	const KeyOutcome outcome = bot_number(p_key, p_value, v);
+	if (outcome.fault == KeyFault::None) {
+		*static_cast<uint32_t *>(p_key.field(r_config)) = uint32_t(v);
+	}
+	return outcome;
+}
+
+#define BF3_BOT_FIELD(f) [](TdmBotConfig &c) -> void * { return &c.f; }
+
+const Key kKeys[] = {
+	{ "skill_min", KeyKind::Custom, 0.0f, 1.0f, BF3_BOT_FIELD(skill_min), {}, bot_float },
+	{ "skill_max", KeyKind::Custom, 0.0f, 1.0f, BF3_BOT_FIELD(skill_max), {}, bot_float },
+	{ "reaction_min_s", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(reaction_min_s), {}, bot_float },
+	{ "reaction_max_s", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(reaction_max_s), {}, bot_float },
+	{ "switch_margin", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(switch_margin), {}, bot_float },
+	{ "strafe_min_m", KeyKind::Custom, 0.0f, 50.0f, BF3_BOT_FIELD(strafe_min_m), {}, bot_float },
+	{ "strafe_max_m", KeyKind::Custom, 0.0f, 50.0f, BF3_BOT_FIELD(strafe_max_m), {}, bot_float },
+	{ "crouch_beyond_m", KeyKind::Custom, 0.0f, 1000.0f, BF3_BOT_FIELD(crouch_beyond_m), {}, bot_float },
+	{ "retreat_below_hp", KeyKind::Custom, 0.0f, 100.0f, BF3_BOT_FIELD(retreat_below_hp), {}, bot_float },
+	{ "grenade_min_m", KeyKind::Custom, 0.0f, 200.0f, BF3_BOT_FIELD(grenade_min_m), {}, bot_float },
+	{ "grenade_max_m", KeyKind::Custom, 0.0f, 200.0f, BF3_BOT_FIELD(grenade_max_m), {}, bot_float },
+	{ "grenade_every_s", KeyKind::Custom, 1.0f, 3600.0f, BF3_BOT_FIELD(grenade_every_s), {}, bot_float },
+	{ "knife_within_m", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(knife_within_m), {}, bot_float },
+	{ "heat_cell_m", KeyKind::Custom, 1.0f, 1000.0f, BF3_BOT_FIELD(heat_cell_m), {}, bot_float },
+	{ "heat_decay_s", KeyKind::Custom, 0.1f, 3600.0f, BF3_BOT_FIELD(heat_decay_s), {}, bot_float },
+	{ "revive_radius_m", KeyKind::Custom, 0.0f, 500.0f, BF3_BOT_FIELD(revive_radius_m), {}, bot_float },
+	{ "revive_idle_s", KeyKind::Custom, 0.0f, 60.0f, BF3_BOT_FIELD(revive_idle_s), {}, bot_float },
+	{ "revive_margin_s", KeyKind::Custom, 0.0f, 60.0f, BF3_BOT_FIELD(revive_margin_s), {}, bot_float },
+	{ "w_distance", KeyKind::Custom, 0.0f, 1000.0f, BF3_BOT_FIELD(w_distance), {}, bot_float },
+	{ "w_aim", KeyKind::Custom, 0.0f, 1000.0f, BF3_BOT_FIELD(w_aim), {}, bot_float },
+	{ "w_damage", KeyKind::Custom, 0.0f, 1000.0f, BF3_BOT_FIELD(w_damage), {}, bot_float },
+	{ "w_current", KeyKind::Custom, 0.0f, 1000.0f, BF3_BOT_FIELD(w_current), {}, bot_float },
+	{ "damage_memory_s", KeyKind::Custom, 0.0f, 60.0f, BF3_BOT_FIELD(damage_memory_s), {}, bot_float },
+	{ "aims_at_me_deg", KeyKind::Custom, 0.0f, 90.0f, BF3_BOT_FIELD(aims_at_me_deg), {}, bot_float },
+	{ "engage_strafe_m", KeyKind::Custom, 0.0f, 1000.0f, BF3_BOT_FIELD(engage_strafe_m), {}, bot_float },
+	{ "hunt_share", KeyKind::Custom, 0.0f, 1.0f, BF3_BOT_FIELD(hunt_share), {}, bot_float },
+	{ "blind_fire_share", KeyKind::Custom, 0.0f, 1.0f, BF3_BOT_FIELD(blind_fire_share), {}, bot_float },
+	{ "regen_wait_s", KeyKind::Custom, 0.0f, 600.0f, BF3_BOT_FIELD(regen_wait_s), {}, bot_float },
+	{ "regen_until_hp", KeyKind::Custom, 0.0f, 100.0f, BF3_BOT_FIELD(regen_until_hp), {}, bot_float },
+	{ "perception.fov_h_deg", KeyKind::Custom, 1.0f, 360.0f, BF3_BOT_FIELD(perception.fov_h_deg), {}, bot_float },
+	{ "perception.fov_v_deg", KeyKind::Custom, 1.0f, 180.0f, BF3_BOT_FIELD(perception.fov_v_deg), {}, bot_float },
+	{ "perception.max_range_m", KeyKind::Custom, 0.0f, 2000.0f, BF3_BOT_FIELD(perception.max_range_m), {}, bot_float },
+	{ "perception.near_m", KeyKind::Custom, 0.0f, 2000.0f, BF3_BOT_FIELD(perception.near_m), {}, bot_float },
+	{ "perception.detect_near_s", KeyKind::Custom, 0.0f, 60.0f, BF3_BOT_FIELD(perception.detect_near_s), {},
+			bot_float },
+	{ "perception.far_m", KeyKind::Custom, 0.0f, 2000.0f, BF3_BOT_FIELD(perception.far_m), {}, bot_float },
+	{ "perception.detect_far_s", KeyKind::Custom, 0.0f, 60.0f, BF3_BOT_FIELD(perception.detect_far_s), {}, bot_float },
+	{ "perception.forget_s", KeyKind::Custom, 0.0f, 600.0f, BF3_BOT_FIELD(perception.forget_s), {}, bot_float },
+	{ "perception.hearing_radius_m", KeyKind::Custom, 0.0f, 2000.0f, BF3_BOT_FIELD(perception.hearing_radius_m), {},
+			bot_float },
+	{ "perception.hearing_error_m", KeyKind::Custom, 0.0f, 200.0f, BF3_BOT_FIELD(perception.hearing_error_m), {},
+			bot_float },
+	{ "perception.head_height_m", KeyKind::Custom, 0.0f, 3.0f, BF3_BOT_FIELD(perception.head_height_m), {}, bot_float },
+	{ "perception.chest_height_m", KeyKind::Custom, 0.0f, 3.0f, BF3_BOT_FIELD(perception.chest_height_m), {},
+			bot_float },
+	{ "aim.e0_deg", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.e0_deg), {}, bot_float },
+	{ "aim.e_inf_deg", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.e_inf_deg), {}, bot_float },
+	{ "aim.tau_s", KeyKind::Custom, 0.001f, 60.0f, BF3_BOT_FIELD(aim.tau_s), {}, bot_float },
+	{ "aim.moving_penalty_deg", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.moving_penalty_deg), {}, bot_float },
+	{ "aim.crossing_deg_per_mps", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.crossing_deg_per_mps), {},
+			bot_float },
+	{ "aim.skill_scale", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(aim.skill_scale), {}, bot_float },
+	{ "count", KeyKind::Custom, 0, 64, BF3_BOT_FIELD(count), {}, bot_count },
+	{ "burst_min_rounds", KeyKind::Custom, 1, 100, BF3_BOT_FIELD(burst_min_rounds), {}, bot_count },
+	{ "burst_max_rounds", KeyKind::Custom, 1, 100, BF3_BOT_FIELD(burst_max_rounds), {}, bot_count },
+	{ "perception.update_ticks", KeyKind::Custom, 1, 600, BF3_BOT_FIELD(perception.update_ticks), {}, bot_count },
+	{ "perception.max_candidates", KeyKind::Custom, 1, 64, BF3_BOT_FIELD(perception.max_candidates), {}, bot_count },
+};
+
+#undef BF3_BOT_FIELD
+
+std::string bot_fault(const core::KeyFaultInfo &p_info) {
+	const std::string where = core::key_fault_where(p_info);
+	const std::string key(p_info.key);
+	switch (p_info.fault) {
+		case KeyFault::TooLarge:
+			return std::string(p_info.what) + ": " + std::to_string(p_info.count) + " bytes, more than " +
+					std::to_string(p_info.limit);
+		case KeyFault::NoEquals:
+			return where + ": no '='";
+		case KeyFault::NotANumber:
+			return where + ": '" + key + "' needs a finite number";
+		case KeyFault::OutOfRange:
+			return where + ": '" + key + "' = " + std::to_string(p_info.number) + " is outside [" +
+					std::to_string(p_info.min) + ", " + std::to_string(p_info.max) + "]";
+		case KeyFault::UnknownKey:
+			return where + ": unknown key '" + key + "'";
+		default:
+			return core::key_fault_message(p_info);
+	}
+}
+
+const core::KeyValueGrammar<TdmBotConfig> kGrammar{ "bot_tuning", kKeys, kMaxBotTuningBytes, kMaxBotTuningLines,
+	SIZE_MAX, false, '\n', true, true, bot_fault };
+
 }
 
 core::Status parse_bot_tuning(std::string_view p_text, TdmBotConfig &r_config) {
-	if (p_text.size() > kMaxBotTuningBytes) {
-		return core::make_error("bot_tuning: " + std::to_string(p_text.size()) + " bytes, more than " + std::to_string(kMaxBotTuningBytes));
+	core::Result<TdmBotConfig> parsed = core::parse_key_values(p_text, kGrammar, r_config);
+	if (!parsed) {
+		return parsed.error();
 	}
-	TdmBotConfig cfg = r_config;
-	size_t line_no = 0;
-	while (!p_text.empty()) {
-		const size_t nl = p_text.find('\n');
-		std::string_view line = p_text.substr(0, nl);
-		p_text = nl == std::string_view::npos ? std::string_view() : p_text.substr(nl + 1);
-		++line_no;
-		if (const size_t hash = line.find('#'); hash != std::string_view::npos) {
-			line = line.substr(0, hash);
-		}
-		line = trim(line);
-		if (line.empty()) {
-			continue;
-		}
-		const size_t eq = line.find('=');
-		const std::string where = "bot_tuning line " + std::to_string(line_no);
-		if (eq == std::string_view::npos) {
-			return core::make_error(where + ": no '='");
-		}
-		const std::string_view key = trim(line.substr(0, eq));
-		double v = 0.0;
-		if (!parse_number(trim(line.substr(eq + 1)), v)) {
-			return core::make_error(where + ": '" + std::string(key) + "' needs a finite number");
-		}
-		bool done = false;
-		const auto range = [&](double p_lo, double p_hi) -> core::Status {
-			if (v < p_lo || v > p_hi) {
-				return core::make_error(where + ": '" + std::string(key) + "' = " + std::to_string(v) + " is outside [" + std::to_string(p_lo) + ", " +
-						std::to_string(p_hi) + "]");
-			}
-			return core::Status::success();
-		};
-		for (const FloatKey &k : kFloatKeys) {
-			if (key == k.name) {
-				BF3_TRY(range(k.lo, k.hi));
-				cfg.*(k.field) = float(v);
-				done = true;
-			}
-		}
-		for (const NestedFloatKey &k : kNestedKeys) {
-			if (key == k.name) {
-				BF3_TRY(range(k.lo, k.hi));
-				if (k.aim) {
-					cfg.aim.*(k.afield) = float(v);
-				} else {
-					cfg.perception.*(k.pfield) = float(v);
-				}
-				done = true;
-			}
-		}
-		if (key == "count") {
-			BF3_TRY(range(0, 64));
-			cfg.count = uint32_t(v);
-			done = true;
-		} else if (key == "burst_min_rounds") {
-			BF3_TRY(range(1, 100));
-			cfg.burst_min_rounds = uint32_t(v);
-			done = true;
-		} else if (key == "burst_max_rounds") {
-			BF3_TRY(range(1, 100));
-			cfg.burst_max_rounds = uint32_t(v);
-			done = true;
-		} else if (key == "perception.update_ticks") {
-			BF3_TRY(range(1, 600));
-			cfg.perception.update_ticks = uint32_t(v);
-			done = true;
-		} else if (key == "perception.max_candidates") {
-			BF3_TRY(range(1, 64));
-			cfg.perception.max_candidates = uint32_t(v);
-			done = true;
-		}
-		if (!done) {
-			return core::make_error(where + ": unknown key '" + std::string(key) + "'");
-		}
-	}
-	r_config = std::move(cfg);
+	r_config = std::move(*parsed);
 	return core::Status::success();
 }
 

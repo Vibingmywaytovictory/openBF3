@@ -8,6 +8,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/source_digest.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/sim/static_world.h"
 
 #include <windows.h>
@@ -25,9 +26,7 @@ namespace bf3dump {
 
 namespace {
 
-double seconds_since(std::chrono::steady_clock::time_point p_start) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 double mib(uint64_t p_bytes) {
 	return double(p_bytes) / (1024.0 * 1024.0);

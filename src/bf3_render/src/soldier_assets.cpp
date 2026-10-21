@@ -10,6 +10,7 @@
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/render/mesh_cache.h"
 
 #include <algorithm>
@@ -24,9 +25,7 @@ using Clock = std::chrono::steady_clock;
 
 namespace {
 
-double since(Clock::time_point p_start) {
-	return std::chrono::duration<double>(Clock::now() - p_start).count();
-}
+using bf3::core::seconds_since;
 
 std::string name_of_instance(const core::EbxLibrary &p_library, const core::EbxInstance &p_instance) {
 	const std::optional<std::string_view> n = p_library.name_of(p_instance.partition().guid());
@@ -170,7 +169,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 		return clips.error();
 	}
 	a->clips = std::move(*clips);
-	a->seconds_ant = since(t0);
+	a->seconds_ant = seconds_since(t0);
 
 	progress("mounting the level superbundle", 3);
 	t0 = Clock::now();
@@ -297,7 +296,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 			}
 		}
 	}
-	a->seconds_ebx = since(t0);
+	a->seconds_ebx = seconds_since(t0);
 
 	{
 		core::Result<std::unique_ptr<core::EbxLibrary>> settings = core::EbxLibrary::open(*install, { p_spec.settings_superbundle });
@@ -352,7 +351,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 			}
 			part.prepared = std::move(mesh->mesh.meshes[0]);
 			part.cache = mesh->item;
-			part.seconds_mesh = since(tm);
+			part.seconds_mesh = seconds_since(tm);
 			team.vertices += part.prepared.vertices;
 			team.triangles += part.prepared.triangles;
 			char line[320];
@@ -367,7 +366,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 				(unsigned long long)team.vertices, (unsigned long long)team.triangles);
 		a->notes.push_back(line);
 	}
-	a->seconds_meshes = since(t0);
+	a->seconds_meshes = seconds_since(t0);
 
 	progress("decoding textures", 6);
 	t0 = Clock::now();
@@ -414,8 +413,8 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 		a->textures.push_back(std::move(textures[i]));
 	}
 	a->notes.push_back("textures: " + std::to_string(a->textures.size()) + " decoded, " + std::to_string(skipped) + " skipped");
-	a->seconds_textures = since(t0);
-	a->seconds_total = since(start);
+	a->seconds_textures = seconds_since(t0);
+	a->seconds_total = seconds_since(start);
 	progress("uploading", 7);
 	return a;
 }

@@ -4,6 +4,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/render/crowd_weapons.h"
 #include "bf3/render/soldier_assets.h"
@@ -21,9 +22,7 @@ using namespace bf3;
 
 namespace {
 
-double since(std::chrono::steady_clock::time_point p_t0) {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now() - p_t0).count();
-}
+using bf3::core::seconds_since;
 
 anim::Xform xform_of(const anim::Mat34 &p_m) {
 	return anim::Xform{ anim::quat_from_mat(p_m), p_m.origin() };
@@ -47,13 +46,13 @@ TEST_SUITE("render-crowd-weapons") {
 		auto t0 = std::chrono::steady_clock::now();
 		core::Result<std::unique_ptr<render::SoldierAssets>> assets = render::load_soldier_assets(reader, spec, nullptr, nullptr);
 		REQUIRE_MESSAGE(assets.ok(), (assets.ok() ? "" : assets.error().message));
-		const double s_assets = since(t0);
+		const double s_assets = seconds_since(t0);
 		t0 = std::chrono::steady_clock::now();
 		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
 		REQUIRE(install.ok());
 		auto gunplay = host::load_gunplay_level(*install, "MP_Subway", "TeamDeathMatch0");
 		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
-		const double s_gunplay = since(t0);
+		const double s_gunplay = seconds_since(t0);
 		const godot_side::CrowdItemLists lists = godot_side::crowd_item_specs(gunplay->get(), spec);
 		for (const std::string &n : lists.notes) {
 			MESSAGE("items: " << n);
@@ -73,7 +72,7 @@ TEST_SUITE("render-crowd-weapons") {
 		core::Result<std::unique_ptr<render::CrowdWeaponSet>> set =
 				render::load_crowd_weapons(reader, spec, **assets, { std::span<const render::CrowdWeaponSpec>(lists.teams[0]), std::span<const render::CrowdWeaponSpec>(lists.teams[1]) });
 		REQUIRE_MESSAGE(set.ok(), (set.ok() ? "" : set.error().message));
-		const double s_weapons = since(t0);
+		const double s_weapons = seconds_since(t0);
 		for (const std::string &n : (*set)->notes) {
 			std::printf("render.crowd_weapons note: %s\n", n.c_str());
 		}
