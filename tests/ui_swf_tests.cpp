@@ -10,6 +10,7 @@
 #include "bf3/core/ui/swf_layout.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
+#include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/ui_fonts.h"
 #include "test_support.h"
 #include "ui_swf_writer.h"
@@ -1360,6 +1361,7 @@ TEST_SUITE("ui-swf-fuzz") {
 			}
 			size_t parsed = 0;
 			size_t refused = 0;
+			size_t scenes = 0;
 			const auto t0 = Clock::now();
 			for (size_t i = 0; i < iters; ++i) {
 				Bytes b;
@@ -1400,10 +1402,22 @@ TEST_SUITE("ui-swf-fuzz") {
 					const SwfLibrary mem = SwfLibrary::from_memory(std::move(payloads));
 					WorkBudget lb(kSwfLayoutBudgetUnits);
 					(void)read_layout(mem, name, {}, lb);
+					Result<SwfScene> scene = SwfScene::open(mem, name);
+					if (scene) {
+						++scenes;
+						(void)scene->advance(12);
+						const std::vector<SwfSceneChange> changes = scene->take_changes();
+						CHECK(changes.size() <= scene->stats().created);
+						for (const SwfNodeId id : scene->draw_order()) {
+							CHECK((id == 0 || scene->node(scene->node(id)->parent) != nullptr));
+						}
+					} else {
+						CHECK(!scene.error().message.empty());
+					}
 				}
 			}
 			const double s = std::chrono::duration<double>(Clock::now() - t0).count();
-			MESSAGE(std::string(name) << ": " << iters << " mutants, " << parsed << " parsed, " << refused << " refused, " << s << " s");
+			MESSAGE(std::string(name) << ": " << iters << " mutants, " << parsed << " parsed, " << refused << " refused, " << scenes << " scenes built, " << s << " s");
 			CHECK(parsed + refused == iters);
 		}
 		fx.check_unchanged();

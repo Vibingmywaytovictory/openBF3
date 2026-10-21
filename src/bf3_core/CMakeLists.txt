@@ -237,6 +237,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/ui_fonts.h
     include/bf3/core/ui/swf_layout.h
     include/bf3/core/ui/swf_geometry.h
+    include/bf3/core/ui/swf_scene.h
+    include/bf3/core/ui/swf_text.h
 )
 target_sources(bf3_core PRIVATE
     src/ui/swf_bits.h
@@ -245,7 +247,10 @@ target_sources(bf3_core PRIVATE
     src/ui/swf_shape_detail.h
     src/ui/swf_shape.cpp
     src/ui/swf_geometry.cpp
+    src/ui/swf_actions.cpp
     src/ui/swf_display.cpp
+    src/ui/swf_scene.cpp
+    src/ui/swf_text.cpp
     src/ui/swf_library.cpp
     src/ui/swf_font.cpp
     src/ui/font_ttf_write.cpp

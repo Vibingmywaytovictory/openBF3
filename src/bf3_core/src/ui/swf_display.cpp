@@ -58,7 +58,7 @@ Status display_lists_at(const SwfTimeline &p_timeline, std::span<const uint32_t>
 				if (e.has_color) {
 					entry.color = e.color;
 				}
-				if (e.clip_depth != 0) {
+				if (e.has_clip_depth) {
 					entry.clip_depth = e.clip_depth;
 				}
 				if (e.has_name) {

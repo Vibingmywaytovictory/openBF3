@@ -302,4 +302,29 @@ Result<SwfAtlasMap> build_atlas_map(const SwfMovie &p_movie, std::string_view p_
 	return map;
 }
 
+std::optional<SwfBitmapRef> SwfMovie::resolve_bitmap(std::string_view p_movie_name, uint16_t p_bitmap_id) const {
+	SwfBitmapRef ref;
+	ref.bitmap_id = p_bitmap_id;
+	const SwfExternalImage *image = nullptr;
+	if (const SwfSubImage *sub = find_sub_image(p_bitmap_id)) {
+		image = find_external_image(sub->image_id);
+		ref.x1 = sub->x1;
+		ref.y1 = sub->y1;
+		ref.x2 = sub->x2;
+		ref.y2 = sub->y2;
+	} else if ((image = find_external_image(p_bitmap_id)) != nullptr) {
+		ref.x2 = image->width;
+		ref.y2 = image->height;
+	}
+	if (image == nullptr) {
+		return std::nullopt;
+	}
+	ref.image_id = image->image_id;
+	ref.file_name = image->file_name;
+	ref.texture_res = swf_atlas_texture_name(p_movie_name, image->file_name);
+	ref.atlas_width = image->width;
+	ref.atlas_height = image->height;
+	return ref;
+}
+
 }

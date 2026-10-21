@@ -127,6 +127,8 @@ tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on eve
 | effects | `src/bf3_fx/src/effect_compiler.cpp`, `simulator.cpp`, `triggers.cpp`, `src/bf3_godot/src/fx_renderer.cpp` |
 | sound | `src/bf3_audio/src/mixer_core.cpp`, `patch_*.cpp`, `weapon_audio.cpp`, `src/bf3_godot/src/audio_stream.cpp` |
 | a SWF shape's triangles | `src/bf3_core/src/ui/swf_shape.cpp` (edges to fill0/fill1 contours, curves flattened to 1/40 px), `swf_geometry.cpp` (nonzero sweep) |
+| a HUD movie's live display tree | `src/bf3_core/src/ui/swf_scene.cpp` (placements across imports, frame stepping, frame-script stop/play/goto, attachMovie, change lists; script overrides outlive seeks; ids are slot plus generation), `swf_actions.cpp` |
+| SWF text layout | `src/bf3_core/src/ui/swf_text.cpp` (HTML subset, DefineFont3 advances and kerning, 2 px gutter, autoSize, GFx shrink/fit) |
 | a ctest row | `tests/CMakeLists.txt`, the matching `tests/*_tests.cpp` or `tests/godot_*.cmake` |
 
 ## Known debts
@@ -145,7 +147,9 @@ These are structural, known, and listed so nobody mistakes them for design inten
 * The HUD screens (`src/bf3_godot/src/hud_*.cpp`, `spawn_screen.cpp`, `round_end.cpp`, `kill_card.cpp`) are
   hand-built Godot controls that only borrow the retail fonts and atlas regions. The rule is the retail SWF movies
   rendered as they are (CLAUDE.md "Native Battlefield 3 UI only"); the SWF decoders in `bf3_core/ui/` give symbol
-  tables, atlases, fonts, layout positions and triangulated shapes, so the scene, the renderer and the screen logic are open.
+  tables, atlases, fonts, triangulated shapes, a live display tree (`SwfScene`) and text layout, so the renderer and
+  the screen logic are open. The scene runs only the frame scripts' unconditional stop/play/goto; the movies' AS2
+  classes, `onClipEvent` handlers and conditional frame code are not executed.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
   (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install

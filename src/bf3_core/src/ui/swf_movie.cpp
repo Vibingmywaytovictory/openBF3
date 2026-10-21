@@ -143,7 +143,7 @@ private:
 				r_tl.do_actions++;
 				r_tl.action_bytes += p_len;
 				m_.action_bytes += p_len;
-				return Status::success();
+				return frame_script(p_at, data, r_tl);
 			case swf_tag::kDoInitAction:
 				if (p_len < 2) {
 					return tag_fail(p_code, p_at, "shorter than its sprite id");
@@ -270,6 +270,31 @@ private:
 		return Status::success();
 	}
 
+	Status frame_script(size_t p_at, std::span<const uint8_t> p_code, SwfTimeline &r_tl) {
+		BF3_TRY(charge(1 + p_code.size() / 16, p_at));
+		Result<SwfFrameScript> scanned = scan_frame_actions(p_code, r_tl.frames);
+		if (!scanned) {
+			return tag_fail(swf_tag::kDoAction, p_at, scanned.error().message);
+		}
+		if (!r_tl.scripts.empty() && r_tl.scripts.back().frame == r_tl.frames) {
+			SwfFrameScript &into = r_tl.scripts.back();
+			into.bytes += scanned->bytes;
+			const uint32_t branches = into.branches;
+			for (SwfFrameOp &op : scanned->ops) {
+				op.after_branch = op.after_branch || branches != 0;
+				into.ops.push_back(std::move(op));
+			}
+			into.other_actions += scanned->other_actions;
+			into.branches += scanned->branches;
+			into.functions += scanned->functions;
+			into.set_target = into.set_target || scanned->set_target;
+			into.unresolved_goto = into.unresolved_goto || scanned->unresolved_goto;
+			return Status::success();
+		}
+		r_tl.scripts.push_back(std::move(*scanned));
+		return Status::success();
+	}
+
 	Status display_event(uint16_t p_code, SwfReader &r, SwfTimeline &r_tl) {
 		if (++events_ > kSwfMaxDisplayEvents) {
 			return tag_fail(p_code, r.abs_pos(), "more than " + std::to_string(kSwfMaxDisplayEvents) + " display events in the movie");
@@ -338,18 +363,37 @@ private:
 					e.name = std::string(name);
 				}
 				if ((f & 0x40) != 0) {
+					e.has_clip_depth = true;
 					e.clip_depth = r.u16();
 				}
+				e.has_class_name = v3 && ((f2 & 0x08) != 0 || ((f2 & 0x10) != 0 && has_char));
 				if (v3) {
 					e.has_filters = (f2 & 0x01) != 0;
 					if (e.has_filters) {
-						skip_filters(r);
+						BF3_TRY(filters(r, e.filters));
 					}
-					if ((f2 & 0x02) != 0 && !r.failed()) {
+					e.has_blend_mode = (f2 & 0x02) != 0;
+					if (e.has_blend_mode) {
 						e.blend_mode = r.u8();
 					}
+					e.has_cache_as_bitmap = (f2 & 0x04) != 0;
+					if (e.has_cache_as_bitmap) {
+						e.cache_as_bitmap = r.u8();
+					}
+					e.has_visible = (f2 & 0x20) != 0;
+					if (e.has_visible) {
+						e.visible = r.u8();
+					}
+					e.has_background = (f2 & 0x40) != 0;
+					if (e.has_background) {
+						e.background = rgba(r);
+					}
 				}
-
+				e.has_clip_actions = (f & 0x80) != 0;
+				if (!e.has_clip_actions && !r.failed() && !r.at_end()) {
+					return tag_fail(p_code, r.abs_pos(),
+							"depth " + std::to_string(e.depth) + " placement ends " + std::to_string(r.size() - r.pos()) + " bytes before its tag");
+				}
 				break;
 			}
 		}
@@ -360,31 +404,124 @@ private:
 		return Status::success();
 	}
 
-	void skip_filters(SwfReader &r) {
+	static SwfColor rgba(SwfReader &r) {
+		SwfColor c;
+		c.r = r.u8();
+		c.g = r.u8();
+		c.b = r.u8();
+		c.a = r.u8();
+		return c;
+	}
+	static float fixed16(SwfReader &r) { return float(double(int32_t(r.u32())) / 65536.0); }
+	static float fixed8(SwfReader &r) { return float(double(r.s16()) / 256.0); }
+
+	static void filter_flags(uint8_t p_bits, bool p_on_top, SwfFilter &r_f) {
+		r_f.inner = (p_bits & 0x80) != 0;
+		r_f.knockout = (p_bits & 0x40) != 0;
+		r_f.composite_source = (p_bits & 0x20) != 0;
+		if (p_on_top) {
+			r_f.on_top = (p_bits & 0x10) != 0;
+			r_f.passes = uint8_t(p_bits & 0x0f);
+		} else {
+			r_f.passes = uint8_t(p_bits & 0x1f);
+		}
+	}
+
+	Status filters(SwfReader &r, std::vector<SwfFilter> &r_out) {
 		const uint8_t n = r.u8();
 		for (unsigned i = 0; i < n && !r.failed(); ++i) {
+			const size_t at = r.abs_pos();
+			BF3_TRY(charge(4, at));
 			const uint8_t id = r.u8();
-			switch (id) {
-				case 0: r.skip(23); break;
-				case 1: r.skip(9); break;
-				case 2: r.skip(15); break;
-				case 3: r.skip(27); break;
-				case 4:
-				case 7: {
-					const uint8_t colours = r.u8();
-					r.skip(size_t(colours) * 5 + 19);
-					break;
-				}
-				case 5: {
-					const uint8_t mx = r.u8();
-					const uint8_t my = r.u8();
-					r.skip(8 + size_t(mx) * my * 4 + 5);
-					break;
-				}
-				case 6: r.skip(80); break;
-				default: r.fail(); break;
+			if (r.failed()) {
+				break;
 			}
+			if (id > uint8_t(SwfFilterKind::GradientBevel)) {
+				return tag_fail(swf_tag::kPlaceObject3, at, "filter id " + std::to_string(id) + " is not a SWF filter");
+			}
+			SwfFilter f;
+			f.kind = SwfFilterKind(id);
+			switch (f.kind) {
+				case SwfFilterKind::DropShadow:
+					f.color = rgba(r);
+					f.blur_x = fixed16(r);
+					f.blur_y = fixed16(r);
+					f.angle = fixed16(r);
+					f.distance = fixed16(r);
+					f.strength = fixed8(r);
+					filter_flags(r.u8(), false, f);
+					break;
+				case SwfFilterKind::Blur:
+					f.blur_x = fixed16(r);
+					f.blur_y = fixed16(r);
+					f.passes = uint8_t(r.u8() >> 3);
+					break;
+				case SwfFilterKind::Glow:
+					f.color = rgba(r);
+					f.blur_x = fixed16(r);
+					f.blur_y = fixed16(r);
+					f.strength = fixed8(r);
+					filter_flags(r.u8(), false, f);
+					break;
+				case SwfFilterKind::Bevel:
+					f.color = rgba(r);
+					f.highlight = rgba(r);
+					f.blur_x = fixed16(r);
+					f.blur_y = fixed16(r);
+					f.angle = fixed16(r);
+					f.distance = fixed16(r);
+					f.strength = fixed8(r);
+					filter_flags(r.u8(), true, f);
+					break;
+				case SwfFilterKind::GradientGlow:
+				case SwfFilterKind::GradientBevel: {
+					const uint8_t colours = r.u8();
+					BF3_TRY(charge(colours, at));
+					f.gradient.resize(colours);
+					for (SwfGradientStop &g : f.gradient) {
+						g.color = rgba(r);
+					}
+					for (SwfGradientStop &g : f.gradient) {
+						g.ratio = r.u8();
+					}
+					f.blur_x = fixed16(r);
+					f.blur_y = fixed16(r);
+					f.angle = fixed16(r);
+					f.distance = fixed16(r);
+					f.strength = fixed8(r);
+					filter_flags(r.u8(), true, f);
+					break;
+				}
+				case SwfFilterKind::Convolution: {
+					f.matrix_x = r.u8();
+					f.matrix_y = r.u8();
+					f.divisor = r.f32();
+					f.bias = r.f32();
+					const size_t cells = size_t(f.matrix_x) * f.matrix_y;
+					BF3_TRY(charge(1 + cells / 4, at));
+					if (r.failed() || cells * 4 > r.size() - r.pos()) {
+						r.fail();
+						break;
+					}
+					f.matrix.resize(cells);
+					for (float &v : f.matrix) {
+						v = r.f32();
+					}
+					f.default_color = rgba(r);
+					const uint8_t bits = r.u8();
+					f.clamp = (bits & 0x02) != 0;
+					f.preserve_alpha = (bits & 0x01) != 0;
+					break;
+				}
+				case SwfFilterKind::ColorMatrix:
+					for (float &v : f.color_matrix) {
+						v = r.f32();
+					}
+					break;
+			}
+			r_out.push_back(std::move(f));
 		}
+		return Status::success();
 	}
 
 	Status shape(SwfReader &r, int p_version) {
@@ -602,12 +739,21 @@ private:
 	}
 
 	size_t timeline_bytes(const SwfTimeline &p_tl) const {
-		size_t b = vec_bytes(p_tl.labels) + vec_bytes(p_tl.events);
+		size_t b = vec_bytes(p_tl.labels) + vec_bytes(p_tl.events) + vec_bytes(p_tl.scripts);
+		for (const SwfFrameScript &sc : p_tl.scripts) {
+			b += vec_bytes(sc.ops);
+			for (const SwfFrameOp &op : sc.ops) {
+				b += str_bytes(op.label);
+			}
+		}
 		for (const SwfFrameLabel &l : p_tl.labels) {
 			b += str_bytes(l.name);
 		}
 		for (const SwfDisplayEvent &e : p_tl.events) {
-			b += str_bytes(e.name) + str_bytes(e.class_name);
+			b += str_bytes(e.name) + str_bytes(e.class_name) + vec_bytes(e.filters);
+			for (const SwfFilter &f : e.filters) {
+				b += vec_bytes(f.gradient) + vec_bytes(f.matrix);
+			}
 		}
 		return b;
 	}
@@ -709,6 +855,20 @@ const char *swf_tag_name(uint16_t p_code) {
 		case swf_tag::kGfxDefineExternalImage2: return "GFX_DefineExternalImage2";
 		default: return nullptr;
 	}
+}
+
+const char *swf_filter_kind_name(SwfFilterKind p_kind) {
+	switch (p_kind) {
+		case SwfFilterKind::DropShadow: return "drop_shadow";
+		case SwfFilterKind::Blur: return "blur";
+		case SwfFilterKind::Glow: return "glow";
+		case SwfFilterKind::Bevel: return "bevel";
+		case SwfFilterKind::GradientGlow: return "gradient_glow";
+		case SwfFilterKind::Convolution: return "convolution";
+		case SwfFilterKind::ColorMatrix: return "color_matrix";
+		case SwfFilterKind::GradientBevel: return "gradient_bevel";
+	}
+	return "?";
 }
 
 const char *swf_character_kind_name(SwfCharacterKind p_kind) {
@@ -817,6 +977,9 @@ const SwfExternalImage *SwfMovie::find_external_image(uint16_t p_image_id) const
 		}
 	}
 	return nullptr;
+}
+const SwfScalingGrid *SwfMovie::find_scaling_grid(uint16_t p_id) const {
+	return find_by_id(scaling_grids, p_id);
 }
 const SwfImport *SwfMovie::find_import(uint16_t p_id, const SwfExport **r_symbol) const {
 	for (const SwfImport &im : imports) {

@@ -121,6 +121,12 @@ struct SwfColorTransform {
 	bool operator==(const SwfColorTransform &) const = default;
 };
 
+struct SwfGradientStop {
+	uint8_t ratio = 0;
+	SwfColor color;
+	bool operator==(const SwfGradientStop &) const = default;
+};
+
 struct SwfFrameLabel {
 	uint32_t frame = 0;
 
@@ -135,6 +141,54 @@ enum class SwfDisplayOp : uint8_t {
 	Remove,
 };
 
+enum class SwfFilterKind : uint8_t {
+	DropShadow = 0,
+	Blur = 1,
+	Glow = 2,
+	Bevel = 3,
+	GradientGlow = 4,
+	Convolution = 5,
+	ColorMatrix = 6,
+	GradientBevel = 7,
+};
+const char *swf_filter_kind_name(SwfFilterKind p_kind);
+
+struct SwfFilter {
+	SwfFilterKind kind = SwfFilterKind::DropShadow;
+	SwfColor color;
+	SwfColor highlight;
+	float blur_x = 0.0f;
+	float blur_y = 0.0f;
+	float angle = 0.0f;
+	float distance = 0.0f;
+	float strength = 0.0f;
+	bool inner = false;
+	bool knockout = false;
+	bool composite_source = false;
+	bool on_top = false;
+	uint8_t passes = 0;
+	std::vector<SwfGradientStop> gradient;
+	uint8_t matrix_x = 0;
+	uint8_t matrix_y = 0;
+	float divisor = 0.0f;
+	float bias = 0.0f;
+	std::vector<float> matrix;
+	SwfColor default_color;
+	bool clamp = false;
+	bool preserve_alpha = false;
+	std::array<float, 20> color_matrix{};
+};
+
+namespace swf_blend {
+constexpr uint8_t kNormal = 1;
+constexpr uint8_t kLayer = 2;
+constexpr uint8_t kMultiply = 3;
+constexpr uint8_t kScreen = 4;
+constexpr uint8_t kAdd = 8;
+constexpr uint8_t kAlpha = 11;
+constexpr uint8_t kErase = 12;
+}
+
 struct SwfDisplayEvent {
 	uint32_t frame = 0;
 	uint16_t depth = 0;
@@ -147,12 +201,54 @@ struct SwfDisplayEvent {
 	SwfColorTransform color;
 	bool has_ratio = false;
 	uint16_t ratio = 0;
+	bool has_clip_depth = false;
 	uint16_t clip_depth = 0;
 	bool has_name = false;
 	std::string name;
+	bool has_class_name = false;
 	std::string class_name;
+	bool has_blend_mode = false;
 	uint8_t blend_mode = 0;
 	bool has_filters = false;
+	std::vector<SwfFilter> filters;
+	bool has_cache_as_bitmap = false;
+	uint8_t cache_as_bitmap = 0;
+	bool has_visible = false;
+	uint8_t visible = 1;
+	bool has_background = false;
+	SwfColor background;
+	bool has_clip_actions = false;
+};
+
+enum class SwfFrameOpKind : uint8_t {
+	Stop,
+	Play,
+	GotoFrame,
+	GotoLabel,
+	NextFrame,
+	PrevFrame,
+};
+const char *swf_frame_op_name(SwfFrameOpKind p_kind);
+
+struct SwfFrameOp {
+	SwfFrameOpKind kind = SwfFrameOpKind::Stop;
+	uint32_t frame = 0;
+	std::string label;
+	bool and_play = false;
+	bool after_branch = false;
+};
+
+inline constexpr uint32_t kSwfMaxActionsPerScript = 1u << 16;
+
+struct SwfFrameScript {
+	uint32_t frame = 0;
+	uint32_t bytes = 0;
+	std::vector<SwfFrameOp> ops;
+	uint32_t other_actions = 0;
+	uint32_t branches = 0;
+	uint32_t functions = 0;
+	bool set_target = false;
+	bool unresolved_goto = false;
 };
 
 struct SwfTimeline {
@@ -160,9 +256,15 @@ struct SwfTimeline {
 	uint32_t frames = 0;
 	std::vector<SwfFrameLabel> labels;
 	std::vector<SwfDisplayEvent> events;
+	std::vector<SwfFrameScript> scripts;
 	uint32_t do_actions = 0;
 	uint64_t action_bytes = 0;
+
+	std::optional<uint32_t> label_frame(std::string_view p_label) const;
+	const SwfFrameScript *script_at(uint32_t p_frame) const;
 };
+
+Result<SwfFrameScript> scan_frame_actions(std::span<const uint8_t> p_actions, uint32_t p_frame);
 
 struct SwfSprite {
 	uint16_t id = 0;
@@ -226,6 +328,19 @@ struct SwfExternalImage {
 	uint32_t extra_bytes = 0;
 };
 
+struct SwfBitmapRef {
+	uint16_t bitmap_id = 0;
+	uint16_t image_id = 0;
+	std::string file_name;
+	std::string texture_res;
+	uint16_t atlas_width = 0;
+	uint16_t atlas_height = 0;
+	uint16_t x1 = 0;
+	uint16_t y1 = 0;
+	uint16_t x2 = 0;
+	uint16_t y2 = 0;
+};
+
 struct SwfSubImage {
 	uint16_t id = 0;
 	uint16_t image_id = 0;
@@ -251,12 +366,6 @@ enum class SwfFillKind : uint8_t {
 	Bitmap,
 };
 const char *swf_fill_kind_name(SwfFillKind p_kind);
-
-struct SwfGradientStop {
-	uint8_t ratio = 0;
-	SwfColor color;
-	bool operator==(const SwfGradientStop &) const = default;
-};
 
 struct SwfFillStyle {
 	static constexpr uint8_t kRepeatingBitmap = 0x40;
@@ -466,6 +575,8 @@ struct SwfMovie {
 	const SwfExternalImage *find_external_image(uint16_t p_image_id) const;
 
 	const SwfImport *find_import(uint16_t p_id, const SwfExport **r_symbol = nullptr) const;
+	const SwfScalingGrid *find_scaling_grid(uint16_t p_id) const;
+	std::optional<SwfBitmapRef> resolve_bitmap(std::string_view p_movie_name, uint16_t p_bitmap_id) const;
 	SwfCharacterKind character_kind(uint16_t p_id) const;
 
 	std::optional<uint16_t> export_id(std::string_view p_name) const;

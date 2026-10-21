@@ -11,6 +11,7 @@
 #include "bf3/core/ui/swf_census.h"
 #include "bf3/core/ui/swf_layout.h"
 #include "bf3/core/ui/swf_library.h"
+#include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/ui_fonts.h"
 
 #include <windows.h>
@@ -468,11 +469,87 @@ int cmd_fonts(const InstallReader &p_reader, const std::shared_ptr<Install> &p_i
 
 }
 
+void print_scene_node(const SwfScene &p_scene, SwfNodeId p_id, int p_indent) {
+	const SwfSceneNode *n = p_scene.node(p_id);
+	std::printf("%*s%s %s %s:%s world %s", p_indent * 2, "", n->path.empty() ? "_root" : n->path.c_str(), swf_node_kind_name(n->kind), n->movie_name.c_str(),
+			n->symbol.c_str(), mat(n->world).c_str());
+	if (n->timeline != nullptr) {
+		std::printf(" frame %u/%u %s", n->frame, n->timeline->frames, n->playing ? "playing" : "stopped");
+	}
+	if (!n->world_visible) {
+		std::printf(" hidden");
+	}
+	if (n->world_color.mul[3] != 1.0f || n->world_color.add[3] != 0.0f) {
+		std::printf(" alpha %g+%g", double(n->world_color.mul[3]), double(n->world_color.add[3]));
+	}
+	if (n->clip_depth != 0) {
+		std::printf(" mask to %u", n->clip_depth);
+	}
+	if (n->blend_mode > 1) {
+		std::printf(" blend %u", n->blend_mode);
+	}
+	for (const SwfFilter &f : n->filters) {
+		std::printf(" %s", swf_filter_kind_name(f.kind));
+	}
+	if (n->edit_text != nullptr) {
+		const SwfTextFormat f = swf_edit_text_format(*n->movie, *n->edit_text);
+		std::printf(" font '%s' %g px colour %02x%02x%02x align %u%s text '%s'", f.font.c_str(), double(f.size), f.color.r, f.color.g, f.color.b, f.align,
+				n->html ? " html" : "", n->text.substr(0, 60).c_str());
+	}
+	if (!n->unresolved.empty()) {
+		std::printf(" unresolved: %s", n->unresolved.c_str());
+	}
+	std::printf("\n");
+	for (const SwfNodeId c : n->children) {
+		print_scene_node(p_scene, c, p_indent + 1);
+	}
+}
+
+int cmd_scene(const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
+	if (p_args.empty()) {
+		return 2;
+	}
+	unsigned frames = 0;
+	for (size_t i = 1; i < p_args.size(); ++i) {
+		std::string v;
+		if (flag_value(p_args[i], "--frames", v)) {
+			frames = parse_threads(v);
+		} else {
+			return 2;
+		}
+	}
+	Result<SwfLibrary> lib = open_library(p_install, 0);
+	if (!lib) {
+		std::fprintf(stderr, "swf scene: %s\n", lib.error().message.c_str());
+		return 1;
+	}
+	Result<SwfScene> scene = SwfScene::open(*lib, movie_arg(p_args[0]));
+	if (!scene) {
+		std::fprintf(stderr, "swf scene: %s\n", scene.error().message.c_str());
+		return 1;
+	}
+	Status st = scene->advance(frames);
+	if (!st) {
+		std::fprintf(stderr, "swf scene: %s\n", st.error().message.c_str());
+		return 1;
+	}
+	const size_t changes = scene->take_changes().size();
+	print_scene_node(*scene, scene->root(), 0);
+	const SwfSceneStats &s = scene->stats();
+	std::fprintf(stderr,
+			"%u live nodes, %u node slots, %u created, %u removed, %u unresolved, %u ticks, %u scripts, %u ops, %u conditional ops skipped, %u scripts "
+			"with other actions, %u clip-action nodes, %u replays, %u missing labels, %zu changes\n",
+			s.live_nodes, s.node_slots, s.created, s.removed, s.unresolved, s.ticks, s.scripts_run, s.ops_run, s.ops_conditional_skipped,
+			s.scripts_with_other_actions, s.clip_action_nodes, s.replays, s.labels_missing, changes);
+	return 0;
+}
+
 const char *swf_usage() {
 	return "  swf census [--tsv <out.tsv>] [--threads=N]\n"
 		   "  swf movie <name>\n"
 		   "  swf labels <name>\n"
 		   "  swf layout <name> [--depth=N]\n"
+		   "  swf scene <name> [--frames=N]\n"
 		   "  swf hud\n"
 		   "  swf fonts [--text-db=<partition>] [--cache=<dir> | --no-cache]\n";
 }
@@ -494,6 +571,9 @@ int cmd_swf(const InstallReader &p_reader, const std::shared_ptr<Install> &p_ins
 	}
 	if (sub == "layout" && !rest.empty()) {
 		return cmd_layout(p_install, rest);
+	}
+	if (sub == "scene" && !rest.empty()) {
+		return cmd_scene(p_install, rest);
 	}
 	if (sub == "hud" && rest.empty()) {
 		return cmd_hud(p_install);
